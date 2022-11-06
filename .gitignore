@@ -1,0 +1,15 @@
+.DS_Store
+Thumbs.db
+
+.tools/
+.idea/
+.vscode/
+*.iml
+*.so
+coverage.*
+vendor
+gen.env
+.env
+gen/
+mocks
+/.fleet/settings.json

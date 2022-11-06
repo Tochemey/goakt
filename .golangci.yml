@@ -1,0 +1,37 @@
+# See https://golangci-lint.run/usage/configuration/
+run:
+  issues-exit-code: 1 #Default
+  tests: true #Default
+  timeout: 5m
+
+linters:
+  disable-all: true
+  enable:
+    - misspell
+    - goimports
+    - revive
+    - gofmt
+    - whitespace
+    - gosec
+    - gosimple
+    - gocyclo
+
+
+issues:
+  exclude-rules:
+    # helpers in tests often (rightfully) pass a *testing.T as their first argument
+    - path: _test\.go
+      text: "context.Context should be the first parameter of a function"
+      linters:
+        - revive
+    # Yes, they are, but it's okay in a test
+    - path: _test\.go
+      text: "exported func.*returns unexported type.*which can be annoying to use"
+      linters:
+        - revive
+
+linters-settings:
+  misspell:
+    locale: US
+    ignore-words:
+      - cancelled
