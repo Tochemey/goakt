@@ -9,16 +9,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tochemey/goakt/logging"
-
 	goset "github.com/deckarep/golang-set/v2"
-
-	"github.com/stretchr/testify/require"
-	"google.golang.org/protobuf/proto"
-
-	"google.golang.org/protobuf/types/known/emptypb"
-
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"github.com/tochemey/goakt/logging"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
