@@ -2,7 +2,6 @@ package actors
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -271,7 +270,7 @@ func (a *ActorRef) receive() {
 					defer func() {
 						if r := recover(); r != nil {
 							// set the error
-							w.SetError(errors.New(fmt.Sprintf("%s", r)))
+							w.SetError(fmt.Errorf("%s", r))
 							w.wg.Done()
 						}
 					}()
@@ -307,7 +306,7 @@ func (a *ActorRef) receive() {
 					defer func() {
 						if r := recover(); r != nil {
 							// set the error
-							w.SetError(errors.New(fmt.Sprintf("%s", r)))
+							w.SetError(fmt.Errorf("%s", r))
 							w.wg.Done()
 						}
 					}()

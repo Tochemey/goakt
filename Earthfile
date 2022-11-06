@@ -1,3 +1,5 @@
+VERSION 0.6
+
 FROM tochemey/docker-go:1.19.3-0.5.0
 
 
