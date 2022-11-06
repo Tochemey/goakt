@@ -11,7 +11,7 @@ code:
 
     # download deps
     COPY go.mod go.sum ./
-    RUN --ssh go mod download -x
+    RUN go mod download -x
 
     # copy in code
     COPY --dir actors ./
@@ -20,7 +20,7 @@ code:
 vendor:
     FROM +code
 
-    RUN --ssh go mod vendor
+    RUN go mod vendor
     SAVE ARTIFACT /app /files
 
 lint:
