@@ -6,10 +6,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tochemey/goakt/logging"
-
 	"github.com/cenkalti/backoff"
 	"github.com/google/uuid"
+	"github.com/tochemey/goakt/logging"
 	"google.golang.org/protobuf/proto"
 )
 
