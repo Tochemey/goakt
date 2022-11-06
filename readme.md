@@ -10,7 +10,7 @@ Minimal actor framework to build reactive and distributed system in golang using
 - [x] Send a message to an actor and expect a reply
 - [x] Init hook for an actor
 - [x] Shutdown hook for an actor
-- [] Actor to Actor communication
-- [] Metrics
-- [] Clustering
-- [] Sample examples
+- [ ] Actor to Actor communication
+- [ ] Metrics
+- [ ] Clustering
+- [ ] Sample examples
