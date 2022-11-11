@@ -145,10 +145,8 @@ func (a *ActorRef) SendReply(ctx context.Context, message proto.Message) (proto.
 	// push the message to the mailbox
 	a.mailbox <- msg
 	// await patiently for the reply or an error
-	select {
-	case r := <-msg.response:
-		return r.reply, r.err
-	}
+	r := <-msg.response
+	return r.reply, r.err
 }
 
 // Shutdown gracefully shuts down the given actor
