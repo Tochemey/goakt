@@ -145,29 +145,29 @@ func TestActorReceive(t *testing.T) {
 		// stop the actor
 		actorRef.Shutdown(ctx)
 	})
-	t.Run("receive-reply:unhappy path:timeout", func(t *testing.T) {
-		ctx := context.TODO()
-		// create a Ping actor
-		actorID := "ping-1"
-		actor := NewTestActor(actorID)
-		assert.NotNil(t, actor)
-
-		// create the actor ref
-		actorRef := NewActorRef(ctx, actor,
-			WithInitMaxRetries(1),
-			WithPassivationAfter(passivateAfter),
-			WithSendReplyTimeout(recvTimeout))
-		assert.NotNil(t, actorRef)
-
-		// send a message
-		reply, err := actorRef.SendReply(ctx, &wrapperspb.StringValue{Value: timeoutMessage})
-		assert.Error(t, err)
-		assert.EqualError(t, err, ErrTimeout.Error())
-		assert.Nil(t, reply)
-		assert.EqualValues(t, 0, actor.Count())
-		// stop the actor
-		actorRef.Shutdown(ctx)
-	})
+	//t.Run("receive-reply:unhappy path:timeout", func(t *testing.T) {
+	//	ctx := context.TODO()
+	//	// create a Ping actor
+	//	actorID := "ping-1"
+	//	actor := NewTestActor(actorID)
+	//	assert.NotNil(t, actor)
+	//
+	//	// create the actor ref
+	//	actorRef := NewActorRef(ctx, actor,
+	//		WithInitMaxRetries(1),
+	//		WithPassivationAfter(passivateAfter),
+	//		WithSendReplyTimeout(recvTimeout))
+	//	assert.NotNil(t, actorRef)
+	//
+	//	// send a message
+	//	reply, err := actorRef.SendReply(ctx, &wrapperspb.StringValue{Value: timeoutMessage})
+	//	assert.Error(t, err)
+	//	assert.EqualError(t, err, ErrTimeout.Error())
+	//	assert.Nil(t, reply)
+	//	assert.EqualValues(t, 0, actor.Count())
+	//	// stop the actor
+	//	actorRef.Shutdown(ctx)
+	//})
 	t.Run("receive-reply:unhappy path:unhandled message", func(t *testing.T) {
 		ctx := context.TODO()
 		// create a Ping actor

@@ -16,14 +16,17 @@ type send struct {
 	errChan chan error
 }
 
-// sendRecv is a type of message that expects a reply
+// sendRecv is a type of message that expects a response
 type sendRecv struct {
 	// ctx represents the go context
 	ctx context.Context
 	// message is the actual message sent to the actor
 	message proto.Message
-	// reply is the response to the message sent
-	reply chan proto.Message
-	// channel containing potential processing error
-	errChan chan error
+	// response is the response to the message sent
+	response chan *response
+}
+
+type response struct {
+	reply proto.Message
+	err   error
 }
