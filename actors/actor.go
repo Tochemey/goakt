@@ -279,29 +279,40 @@ func (a *ActorRef) receive() {
 				}()
 
 			case *sendRecv:
-				done := make(chan struct{})
+				// create a variable that will hold the processed message response
+				resp := make(chan *response, 1)
+				// create the cancellation context with the timeout setting
+				ctx, cancel := context.WithTimeout(msg.ctx, a.sendRecvTimeout)
+				// start processing the received message
 				go func() {
 					response := new(response)
-					// close the msg error channel
-					defer close(msg.response)
 					// recover from a panic attack
 					defer func() {
 						if r := recover(); r != nil {
 							// set the error
 							response.err = fmt.Errorf("%s", r)
 							// set the response
-							msg.response <- response
-							// signal the go routine we are done
-							close(done)
+							resp <- response
 						}
 					}()
 					// send the message to actor to receive
-					response.reply, response.err = a.Actor.ReceiveReply(msg.ctx, msg.message)
+					response.reply, response.err = a.Actor.ReceiveReply(ctx, msg.message)
 					// send the response the msg channel response
-					msg.response <- response
-					// signal the go routine we are done
-					close(done)
+					resp <- response
 				}()
+
+				select {
+				case r := <-resp:
+					msg.response <- r
+				case <-ctx.Done():
+					msg.response <- &response{
+						err: ErrTimeout,
+					}
+				}
+				// close the message response channel
+				close(msg.response)
+				// release resources when operation complete before timeout
+				cancel()
 			}
 		}
 	}
