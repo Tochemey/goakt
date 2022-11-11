@@ -138,20 +138,15 @@ func (a *ActorRef) SendReply(ctx context.Context, message proto.Message) (proto.
 	a.lastProcessingTime = time.Now()
 	// create the ask message
 	msg := &sendRecv{
-		ctx:     ctx,
-		message: message,
-		reply:   make(chan proto.Message),
-		errChan: make(chan error),
+		ctx:      ctx,
+		message:  message,
+		response: make(chan *response),
 	}
 	// push the message to the mailbox
 	a.mailbox <- msg
 	// await patiently for the reply or an error
-	select {
-	case reply := <-msg.reply:
-		return reply, nil
-	case err := <-msg.errChan:
-		return nil, err
-	}
+	r := <-msg.response
+	return r.reply, r.err
 }
 
 // Shutdown gracefully shuts down the given actor
@@ -261,87 +256,61 @@ func (a *ActorRef) receive() {
 			switch msg := received.(type) {
 			case *send:
 				done := make(chan struct{})
-				w := &Waiter[proto.Message]{}
-				w.wg.Add(1)
 
 				go func() {
+					// close the msg error channel
+					defer close(msg.errChan)
 					// recover from a panic attack
 					defer func() {
 						if r := recover(); r != nil {
-							// set the error
-							w.SetError(fmt.Errorf("%s", r))
-							w.wg.Done()
+							// send the error
+							msg.errChan <- fmt.Errorf("%s", r)
+							// signal the go routine we are done
+							close(done)
 						}
 					}()
 					// send the message to actor to receive
 					err := a.Actor.Receive(msg.ctx, msg.message)
-					// set the waiter error
-					w.SetError(err)
-					w.wg.Done()
+					msg.errChan <- err
+					// signal the go routine we are done
+					close(done)
 				}()
 
-				go func() {
-					// make sure to close the message error channel
-					// when we are done processing the message
-					defer close(msg.errChan)
-					// wait for processing is done
-					w.wg.Wait()
-					// set the message error channel to response received
-					msg.errChan <- w.err
-					// signal we are done processing the message
-					done <- struct{}{}
-				}()
-
-				// free go routines
-				<-done
 			case *sendRecv:
-				done := make(chan struct{})
-				// create an instance of promise
-				w := &Waiter[proto.Message]{}
-				w.wg.Add(1)
-
+				// create a variable that will hold the processed message response
+				resp := make(chan *response, 1)
+				// create the cancellation context with the timeout setting
+				ctx, cancel := context.WithTimeout(msg.ctx, a.sendRecvTimeout)
+				// start processing the received message
 				go func() {
+					response := new(response)
 					// recover from a panic attack
 					defer func() {
 						if r := recover(); r != nil {
 							// set the error
-							w.SetError(fmt.Errorf("%s", r))
-							w.wg.Done()
+							response.err = fmt.Errorf("%s", r)
+							// set the response
+							resp <- response
 						}
 					}()
 					// send the message to actor to receive
-					reply, err := a.Actor.ReceiveReply(msg.ctx, msg.message)
-					w.SetError(err)
-					w.SetResult(reply)
-					w.wg.Done()
+					response.reply, response.err = a.Actor.ReceiveReply(ctx, msg.message)
+					// send the response the msg channel response
+					resp <- response
 				}()
 
-				go func() {
-					// make sure to close the message channels
-					// when we are done processing the message
-					defer func() {
-						close(msg.errChan)
-						close(msg.reply)
-					}()
-
-					// wait for the processing to complete or timed out
-					if err := WaitGroupTimeout(&w.wg, a.sendRecvTimeout); err != nil {
-						w.SetError(err)
+				select {
+				case r := <-resp:
+					msg.response <- r
+				case <-ctx.Done():
+					msg.response <- &response{
+						err: ErrTimeout,
 					}
-					// handle the processing error
-					if w.err != nil {
-						msg.errChan <- w.err
-						// signal we are done processing the message
-						done <- struct{}{}
-						return
-					}
-					// set the result to the message reply channel
-					msg.reply <- w.res
-					// signal we are done processing the message
-					done <- struct{}{}
-				}()
-				// free go routines
-				<-done
+				}
+				// close the message response channel
+				close(msg.response)
+				// release resources when operation complete before timeout
+				cancel()
 			}
 		}
 	}
