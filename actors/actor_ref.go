@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/cenkalti/backoff"
-	"github.com/google/uuid"
 	"github.com/tochemey/goakt/logging"
+	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -16,14 +16,14 @@ import (
 // With the ActorRef one can send a message to the actor
 type ActorRef struct {
 	Actor
-	// ID is the actor identifier. This identifier is unique within a cluster of actors
-	// TODO need to rethink more about it
-	ID uuid.UUID
+
+	// addr represents the actor unique address
+	addr Address
 
 	// helps determine whether the actor should handle messages or not.
 	isReady bool
 	// is captured whenever a message is sent to the actor
-	lastProcessingTime time.Time
+	lastProcessingTime atomic.Time
 
 	// specifies at what point in time to passivate the actor.
 	// when the actor is passivated it is stopped which means it does not consume
@@ -48,29 +48,34 @@ type ActorRef struct {
 	logger logging.Logger
 
 	rwMutex sync.RWMutex
+
+	// definition of the various counters
+	panicCounter           *atomic.Uint64
+	receivedMessageCounter *atomic.Uint64
+	lastProcessingDuration *atomic.Duration
 }
 
 // enforce compilation error
 var _ actorRef = (*ActorRef)(nil)
 
 // NewActorRef creates an actor given its unique identifier and return its reference
-func NewActorRef(ctx context.Context, actor Actor, opts ...ActorOpt) *ActorRef {
-	// generate an internal ID for the actor
-	// TODO refactor the internal ID generation
-	id := uuid.New()
+func NewActorRef(ctx context.Context, actor Actor, opts ...Option) *ActorRef {
 	// create the actor ref
 	actorRef := &ActorRef{
-		ID:                 id,
-		isReady:            false,
-		lastProcessingTime: time.Time{},
-		passivateAfter:     5 * time.Second,
-		sendRecvTimeout:    5 * time.Second,
-		initMaxRetries:     5,
-		mailbox:            make(chan any),
-		shutdownSignal:     make(chan struct{}),
-		rwMutex:            sync.RWMutex{},
-		Actor:              actor,
-		logger:             logging.DefaultLogger,
+		Actor:                  actor,
+		addr:                   "",
+		isReady:                false,
+		lastProcessingTime:     atomic.Time{},
+		passivateAfter:         5 * time.Second,
+		sendRecvTimeout:        5 * time.Second,
+		initMaxRetries:         5,
+		mailbox:                make(chan any),
+		shutdownSignal:         make(chan struct{}),
+		logger:                 logging.DefaultLogger,
+		rwMutex:                sync.RWMutex{},
+		panicCounter:           atomic.NewUint64(0),
+		receivedMessageCounter: atomic.NewUint64(0),
+		lastProcessingDuration: atomic.NewDuration(0),
 	}
 	// set the custom options to override the default values
 	for _, opt := range opts {
@@ -87,12 +92,24 @@ func NewActorRef(ctx context.Context, actor Actor, opts ...ActorOpt) *ActorRef {
 	return actorRef
 }
 
-// Heartbeat returns true when the actor is alive ready to process messages and false
+// IsAlive returns true when the actor is alive ready to process messages and false
 // when the actor is stopped or not started at all
-func (a *ActorRef) Heartbeat() bool {
+func (a *ActorRef) IsAlive(ctx context.Context) bool {
 	a.rwMutex.Lock()
 	defer a.rwMutex.Unlock()
 	return a.isReady
+}
+
+// TotalProcessed returns the total number of messages processed by the actor
+// at a given time while the actor is still alive
+func (a *ActorRef) TotalProcessed(ctx context.Context) uint64 {
+	return a.receivedMessageCounter.Load()
+}
+
+// ErrorsCount returns the total number of panic attacks that occur while the actor is processing messages
+// at a given point in time while the actor heart is still beating
+func (a *ActorRef) ErrorsCount(ctx context.Context) uint64 {
+	return a.panicCounter.Load()
 }
 
 // Send sends a given message to the actor
@@ -105,7 +122,7 @@ func (a *ActorRef) Send(ctx context.Context, message proto.Message) error {
 		return ErrNotReady
 	}
 	// set the last processing time
-	a.lastProcessingTime = time.Now()
+	a.lastProcessingTime.Store(time.Now())
 	// push the message to the mailbox for the actor to receive
 	// create an error channel
 	errChan := make(chan error)
@@ -115,8 +132,18 @@ func (a *ActorRef) Send(ctx context.Context, message proto.Message) error {
 		message: message,
 		errChan: errChan,
 	}
+
+	// set the start processing time
+	startTime := time.Now()
+	defer func() {
+		duration := time.Since(startTime)
+		a.lastProcessingDuration.Store(duration)
+	}()
+
 	// push the message to the actor mailbox
 	a.mailbox <- msg
+	// increase the received message counter
+	a.receivedMessageCounter.Inc()
 	// await patiently for the error
 	for e := range msg.errChan {
 		return e
@@ -135,15 +162,24 @@ func (a *ActorRef) SendReply(ctx context.Context, message proto.Message) (proto.
 	}
 
 	// set the last processing time
-	a.lastProcessingTime = time.Now()
+	a.lastProcessingTime.Store(time.Now())
 	// create the ask message
 	msg := &sendRecv{
 		ctx:      ctx,
 		message:  message,
 		response: make(chan *response),
 	}
+	// set the start processing time
+	startTime := time.Now()
+	defer func() {
+		duration := time.Since(startTime)
+		a.lastProcessingDuration.Store(duration)
+	}()
+
 	// push the message to the mailbox
 	a.mailbox <- msg
+	// increase the received message counter
+	a.receivedMessageCounter.Inc()
 	// await patiently for the reply or an error
 	r := <-msg.response
 	return r.reply, r.err
@@ -226,7 +262,7 @@ func (a *ActorRef) passivationListener() {
 	go func() {
 		for range ticker.C {
 			// check whether the actor is idle or not
-			idleTime := time.Since(a.lastProcessingTime)
+			idleTime := time.Since(a.lastProcessingTime.Load())
 			// check whether the actor is idle
 			if idleTime >= a.passivateAfter {
 				// set the done channel to stop the ticker
@@ -265,6 +301,8 @@ func (a *ActorRef) receive() {
 						if r := recover(); r != nil {
 							// send the error
 							msg.errChan <- fmt.Errorf("%s", r)
+							// increase the panic counter
+							a.panicCounter.Inc()
 							// signal the go routine we are done
 							close(done)
 						}
@@ -289,6 +327,8 @@ func (a *ActorRef) receive() {
 						if r := recover(); r != nil {
 							// set the error
 							response.err = fmt.Errorf("%s", r)
+							// increase the panic counter
+							a.panicCounter.Inc()
 							// set the response
 							resp <- response
 						}
