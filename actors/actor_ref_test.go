@@ -465,6 +465,10 @@ type BenchActor struct {
 	Wg sync.WaitGroup
 }
 
+func (p *BenchActor) ID() string {
+	return "benchActor"
+}
+
 func (p *BenchActor) Init(ctx context.Context) error {
 	return nil
 }
@@ -483,7 +487,7 @@ func (p *BenchActor) Stop(ctx context.Context) {
 }
 
 type TestActor struct {
-	ID    string
+	id    string
 	cache goset.Set[string]
 }
 
@@ -492,8 +496,12 @@ var _ Actor = (*TestActor)(nil)
 // NewTestActor creates a TestActor
 func NewTestActor(id string) *TestActor {
 	return &TestActor{
-		ID: id,
+		id: id,
 	}
+}
+
+func (p *TestActor) ID() string {
+	return p.id
 }
 
 // Count utility function for test

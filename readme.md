@@ -1,6 +1,7 @@
 # Go-Akt
 [![GitHub Workflow Status](https://img.shields.io/github/workflow/status/tochemey/goakt/build)](https://github.com/Tochemey/goakt/actions/workflows/build.yml)
-[![codecov](https://codecov.io/gh/Tochemey/goakt/branch/main/graph/badge.svg?token=J0p9MzwSRH)](https://codecov.io/gh/Tochemey/goakt)
+
+[//]: # ([![codecov]&#40;https://codecov.io/gh/Tochemey/goakt/branch/main/graph/badge.svg?token=J0p9MzwSRH&#41;]&#40;https://codecov.io/gh/Tochemey/goakt&#41;)
 
 Minimal actor framework to build reactive and distributed system in golang using protocol buffers.
 
@@ -10,7 +11,8 @@ Minimal actor framework to build reactive and distributed system in golang using
 - [x] Send a message to an actor and expect a reply
 - [x] Init hook for an actor
 - [x] Shutdown hook for an actor
+- [x] ActorSystem (WIP)
 - [ ] Actor to Actor communication
-- [ ] Metrics
+- [x] Metrics (WIP)
 - [ ] Clustering
 - [ ] Sample examples
