@@ -17,7 +17,10 @@ code:
 
     # copy in code
     COPY --dir actors ./
-    COPY --dir logging ./
+    COPY --dir log ./
+    COPY --dir config ./
+    COPY --dir telemetry ./
+
 
 vendor:
     FROM +code
