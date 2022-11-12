@@ -7,10 +7,29 @@ import (
 	"time"
 
 	"github.com/cenkalti/backoff"
-	"github.com/tochemey/goakt/logging"
+	"github.com/tochemey/goakt/log"
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
 )
+
+// actorRef defines the various actions one can perform on a given actor
+type actorRef interface {
+	// Send sends a given message to the actor in a fire-and-forget pattern
+	Send(ctx context.Context, message proto.Message) error
+	// SendReply sends a given message to the actor and expect a reply in return
+	SendReply(ctx context.Context, message proto.Message) (proto.Message, error)
+	// Shutdown gracefully shuts down the given actor
+	Shutdown(ctx context.Context)
+	// IsReady returns true when the actor is alive ready to process messages and false
+	// when the actor is stopped or not started at all
+	IsReady(ctx context.Context) bool
+	// TotalProcessed returns the total number of messages processed by the actor
+	// at a given point in time while the actor heart is still beating
+	TotalProcessed(ctx context.Context) uint64
+	// ErrorsCount returns the total number of panic attacks that occur while the actor is processing messages
+	// at a given point in time while the actor heart is still beating
+	ErrorsCount(ctx context.Context) uint64
+}
 
 // ActorRef specifies an actor unique reference
 // With the ActorRef one can send a message to the actor
@@ -21,7 +40,7 @@ type ActorRef struct {
 	addr Address
 
 	// helps determine whether the actor should handle messages or not.
-	isReady bool
+	isReady *atomic.Bool
 	// is captured whenever a message is sent to the actor
 	lastProcessingTime atomic.Time
 
@@ -45,7 +64,7 @@ type ActorRef struct {
 	shutdownSignal chan struct{}
 
 	//  specifies the logger to use
-	logger logging.Logger
+	logger log.Logger
 
 	rwMutex sync.RWMutex
 
@@ -59,19 +78,19 @@ type ActorRef struct {
 var _ actorRef = (*ActorRef)(nil)
 
 // NewActorRef creates an actor given its unique identifier and return its reference
-func NewActorRef(ctx context.Context, actor Actor, opts ...Option) *ActorRef {
+func NewActorRef(ctx context.Context, actor Actor, opts ...ActorRefOption) *ActorRef {
 	// create the actor ref
 	actorRef := &ActorRef{
 		Actor:                  actor,
 		addr:                   "",
-		isReady:                false,
+		isReady:                atomic.NewBool(false),
 		lastProcessingTime:     atomic.Time{},
 		passivateAfter:         5 * time.Second,
 		sendRecvTimeout:        5 * time.Second,
 		initMaxRetries:         5,
-		mailbox:                make(chan any),
+		mailbox:                make(chan any, 1000),
 		shutdownSignal:         make(chan struct{}),
-		logger:                 logging.DefaultLogger,
+		logger:                 log.DefaultLogger,
 		rwMutex:                sync.RWMutex{},
 		panicCounter:           atomic.NewUint64(0),
 		receivedMessageCounter: atomic.NewUint64(0),
@@ -95,9 +114,7 @@ func NewActorRef(ctx context.Context, actor Actor, opts ...Option) *ActorRef {
 // IsReady returns true when the actor is alive ready to process messages and false
 // when the actor is stopped or not started at all
 func (a *ActorRef) IsReady(ctx context.Context) bool {
-	a.rwMutex.Lock()
-	defer a.rwMutex.Unlock()
-	return a.isReady
+	return a.isReady.Load()
 }
 
 // TotalProcessed returns the total number of messages processed by the actor
@@ -114,11 +131,8 @@ func (a *ActorRef) ErrorsCount(ctx context.Context) uint64 {
 
 // Send sends a given message to the actor
 func (a *ActorRef) Send(ctx context.Context, message proto.Message) error {
-	// let us make sure the actor is ready to receive messages before sending the given message
-	a.rwMutex.Lock()
-	defer a.rwMutex.Unlock()
 	// reject message when the actor is not ready to process messages
-	if !a.isReady {
+	if !a.IsReady(ctx) {
 		return ErrNotReady
 	}
 	// set the last processing time
@@ -154,10 +168,7 @@ func (a *ActorRef) Send(ctx context.Context, message proto.Message) error {
 
 // SendReply sends a given message to the actor and expect a reply in return
 func (a *ActorRef) SendReply(ctx context.Context, message proto.Message) (proto.Message, error) {
-	// let us make sure the actor is ready to receive messages before sending the given message
-	a.rwMutex.Lock()
-	defer a.rwMutex.Unlock()
-	if !a.isReady {
+	if !a.IsReady(ctx) {
 		return nil, ErrNotReady
 	}
 
@@ -189,12 +200,8 @@ func (a *ActorRef) SendReply(ctx context.Context, message proto.Message) (proto.
 // All current messages in the mailbox will be processed before the actor shutdown
 func (a *ActorRef) Shutdown(ctx context.Context) {
 	a.logger.Info("Shutdown process has started...")
-	// acquire a lock
-	a.rwMutex.Lock()
 	// stop future messages
-	a.isReady = false
-	// unlock
-	a.rwMutex.Unlock()
+	a.isReady.Store(false)
 	// wait for all messages in the mailbox to be processed
 	// init a ticker that run every 20 ms to make sure we process all messages in the
 	// mailbox.
@@ -245,7 +252,7 @@ func (a *ActorRef) init(ctx context.Context) {
 		return
 	}
 	// set the actor is ready
-	a.isReady = true
+	a.isReady.Store(true)
 	// add some logging info
 	a.logger.Info("Initialization process successfully completed.")
 }

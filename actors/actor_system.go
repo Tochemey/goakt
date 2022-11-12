@@ -5,12 +5,30 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tochemey/goakt/logging"
+	"github.com/tochemey/goakt/config"
+	"github.com/tochemey/goakt/log"
+	"go.uber.org/atomic"
 	"golang.org/x/sync/errgroup"
 )
 
 var cache *actorSystem
 var once sync.Once // 👈 defining a new `sync.Once
+
+// ActorSystem defines the contract of an actor system
+type ActorSystem interface {
+	// Name returns the actor system name
+	Name() string
+	// NodeAddr returns the node where the actor system is running
+	NodeAddr() string
+	// Actors returns the list of Actors that are alive in the actor system
+	Actors() []*ActorRef
+	// Start starts the actor system
+	Start(ctx context.Context) error
+	// Stop stops the actor system
+	Stop(ctx context.Context) error
+	// Spawn creates an actor in the system
+	Spawn(ctx context.Context, kind string, actor Actor) *ActorRef
+}
 
 // ActorSystem represent a collection of actors on a given node
 // Only a single instance of the ActorSystem can be created on a given node
@@ -22,11 +40,13 @@ type actorSystem struct {
 	// map of actors in the system
 	actorMap *actorMap
 	//  specifies the logger to use
-	logger logging.Logger
+	logger log.Logger
 
-	config *Config
+	// actor system configuration
+	config *config.Config
 
-	stopHouseKeeper chan struct{}
+	housekeepingStopSig chan struct{}
+	hasStarted          *atomic.Bool
 }
 
 // enforce compilation error when all methods of the ActorSystem interface are not implemented
@@ -34,16 +54,17 @@ type actorSystem struct {
 var _ ActorSystem = (*actorSystem)(nil)
 
 // NewActorSystem creates an instance of ActorSystem
-func NewActorSystem(config *Config) ActorSystem {
+func NewActorSystem(config *config.Config) ActorSystem {
 	// 👇 the function only gets called one
 	once.Do(func() {
 		cache = &actorSystem{
-			name:            config.Name,
-			nodeAddr:        config.NodeHostAndPort,
-			actorMap:        newActorMap(20),
-			logger:          config.Logger,
-			config:          config,
-			stopHouseKeeper: make(chan struct{}),
+			name:                config.Name,
+			nodeAddr:            config.NodeHostAndPort,
+			actorMap:            newActorMap(20),
+			logger:              config.Logger,
+			config:              config,
+			housekeepingStopSig: make(chan struct{}),
+			hasStarted:          atomic.NewBool(false),
 		}
 	})
 
@@ -52,6 +73,10 @@ func NewActorSystem(config *Config) ActorSystem {
 
 // Spawn creates or returns the instance of a given actor in the system
 func (a *actorSystem) Spawn(ctx context.Context, kind string, actor Actor) *ActorRef {
+	// first check whether the actor system has started
+	if !a.hasStarted.Load() {
+		return nil
+	}
 	// create the address of the given actor
 	addr := GetAddress(a, kind, actor.ID())
 	// check whether the given actor already exist in the system or not
@@ -67,9 +92,9 @@ func (a *actorSystem) Spawn(ctx context.Context, kind string, actor Actor) *Acto
 
 	// create an instance of the actor ref
 	actorRef = NewActorRef(ctx, actor,
-		WithInitMaxRetries(a.config.InitMaxRetries),
-		WithPassivationAfter(a.config.PassivateAfter),
-		WithSendReplyTimeout(a.config.SendRecvTimeout),
+		WithInitMaxRetries(a.config.ActorInitMaxRetries),
+		WithPassivationAfter(a.config.ExpireActorAfter),
+		WithSendReplyTimeout(a.config.ReplyTimeout),
 		WithAddress(addr))
 
 	// add the given actor to the actor map
@@ -96,6 +121,8 @@ func (a *actorSystem) Actors() []*ActorRef {
 
 // Start starts the actor system
 func (a *actorSystem) Start(ctx context.Context) error {
+	// set the has started to true
+	a.hasStarted.Store(true)
 	// start the housekeeper
 	go a.housekeeping()
 	a.logger.Infof("%s System started on Node=%s...", a.name, a.nodeAddr)
@@ -106,7 +133,7 @@ func (a *actorSystem) Start(ctx context.Context) error {
 func (a *actorSystem) Stop(ctx context.Context) error {
 	a.logger.Infof("%s System is shutting down on Node=%s...", a.name, a.nodeAddr)
 	// tell the housekeeper to stop
-	a.stopHouseKeeper <- struct{}{}
+	a.housekeepingStopSig <- struct{}{}
 	// stop all the actors
 	g, ctx := errgroup.WithContext(ctx)
 	for _, actorRef := range a.actorMap.GetAll() {
@@ -143,7 +170,7 @@ func (a *actorSystem) housekeeping() {
 		}
 	}()
 	// wait for the stop signal to stop the ticker
-	<-a.stopHouseKeeper
+	<-a.housekeepingStopSig
 	// stop the ticker
 	ticker.Stop()
 }

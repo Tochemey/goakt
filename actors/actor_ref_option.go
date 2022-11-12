@@ -3,43 +3,43 @@ package actors
 import (
 	"time"
 
-	"github.com/tochemey/goakt/logging"
+	"github.com/tochemey/goakt/log"
 )
 
-// Option represents the actor ref
-type Option func(ref *ActorRef)
+// ActorRefOption represents the actor ref
+type ActorRefOption func(ref *ActorRef)
 
 // WithPassivationAfter sets the actor passivation time
-func WithPassivationAfter(duration time.Duration) Option {
+func WithPassivationAfter(duration time.Duration) ActorRefOption {
 	return func(ref *ActorRef) {
 		ref.passivateAfter = duration
 	}
 }
 
-// WithSendReplyTimeout set how long in seconds an actor should reply a command
+// WithSendReplyTimeout sets how long in seconds an actor should reply a command
 // in a receive-reply pattern
-func WithSendReplyTimeout(timeout time.Duration) Option {
+func WithSendReplyTimeout(timeout time.Duration) ActorRefOption {
 	return func(ref *ActorRef) {
 		ref.sendRecvTimeout = timeout
 	}
 }
 
-// WithInitMaxRetries set the number of times to retry an actor init process
-func WithInitMaxRetries(max int) Option {
+// WithInitMaxRetries sets the number of times to retry an actor init process
+func WithInitMaxRetries(max int) ActorRefOption {
 	return func(ref *ActorRef) {
 		ref.initMaxRetries = max
 	}
 }
 
-// WithLogger set the logger
-func WithLogger(logger logging.Logger) Option {
+// WithLogger sess the logger
+func WithLogger(logger log.Logger) ActorRefOption {
 	return func(ref *ActorRef) {
 		ref.logger = logger
 	}
 }
 
 // WithAddress sets the address of the actor ref
-func WithAddress(addr Address) Option {
+func WithAddress(addr Address) ActorRefOption {
 	return func(ref *ActorRef) {
 		ref.addr = addr
 	}

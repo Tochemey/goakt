@@ -1,4 +1,4 @@
-// Package logging implements a simple logging package. It defines a type, Logger,
+// Package log implements a simple logging package. It defines a type, Logger,
 // with methods for formatting output. It also has a predefined 'standard'
 // Logger accessible through helper functions Info[f], Warning[f], Error[f], Fatal[f], and
 // Panic[f], which are easier to use than creating a Logger manually.
@@ -8,7 +8,7 @@
 // printed does not end in a newline, the logger will add one.
 // The Fatal functions call os.Exit(1) after writing the log message.
 // The Panic functions call panic after writing the log message.
-package logging
+package log
 
 import (
 	"fmt"

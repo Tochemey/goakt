@@ -12,7 +12,7 @@ import (
 	goset "github.com/deckarep/golang-set/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/tochemey/goakt/logging"
+	"github.com/tochemey/goakt/log"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/wrapperspb"
@@ -513,20 +513,20 @@ func (p *TestActor) Count() int {
 // or some sort of initialization before the actor init processing messages
 func (p *TestActor) Init(ctx context.Context) error {
 	p.cache = goset.NewSet[string]()
-	logging.Info("Test Actor init method called")
+	log.Info("Test Actor init method called")
 	return nil
 }
 
 // Stop gracefully shuts down the given actor
 func (p *TestActor) Stop(ctx context.Context) {
-	logging.Info("Test Actor stopped...")
+	log.Info("Test Actor stopped...")
 }
 
 // Receive processes any message dropped into the actor mailbox without a reply
 func (p *TestActor) Receive(ctx context.Context, message proto.Message) error {
 	switch msg := message.(type) {
 	case *wrapperspb.StringValue:
-		logging.Infof("Test Actor received msg=[%s]", msg.GetValue())
+		log.Infof("Test Actor received msg=[%s]", msg.GetValue())
 		if strings.Contains(msg.GetValue(), recvMessage) {
 			p.cache.Add(msg.GetValue())
 			return nil
@@ -544,7 +544,7 @@ func (p *TestActor) Receive(ctx context.Context, message proto.Message) error {
 func (p *TestActor) ReceiveReply(ctx context.Context, message proto.Message) (proto.Message, error) {
 	switch msg := message.(type) {
 	case *wrapperspb.StringValue:
-		logging.Infof("Test Actor received msg=[%s]", msg.GetValue())
+		log.Infof("Test Actor received msg=[%s]", msg.GetValue())
 		// receive reply test case
 		if msg.GetValue() == recvReplyMessage {
 			// persist to the cache
