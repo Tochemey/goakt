@@ -59,7 +59,7 @@ func (a *actorSystem) Spawn(ctx context.Context, kind string, actor Actor) *Acto
 	// actor already exist no need recreate it.
 	if exist {
 		// check whether the given actor heart beat
-		if actorRef.IsAlive(ctx) {
+		if actorRef.IsReady(ctx) {
 			// return the existing instance
 			return actorRef
 		}
@@ -97,7 +97,7 @@ func (a *actorSystem) Actors() []*ActorRef {
 // Start starts the actor system
 func (a *actorSystem) Start(ctx context.Context) error {
 	// start the housekeeper
-	go a.houseKeeper()
+	go a.housekeeping()
 	a.logger.Infof("%s System started on Node=%s...", a.name, a.nodeAddr)
 	return nil
 }
@@ -124,9 +124,9 @@ func (a *actorSystem) Stop(ctx context.Context) error {
 	return nil
 }
 
-// houseKeeper time to time remove dead actors from the system
+// housekeeping time to time removes dead actors from the system
 // that helps free non-utilized resources
-func (a *actorSystem) houseKeeper() {
+func (a *actorSystem) housekeeping() {
 	// create the ticker
 	ticker := time.NewTicker(time.Second)
 
@@ -135,7 +135,7 @@ func (a *actorSystem) houseKeeper() {
 		for range ticker.C {
 			// loop over the actors in the system and remove the dead one
 			for _, actorRef := range a.actorMap.GetAll() {
-				if !actorRef.IsAlive(context.Background()) {
+				if !actorRef.IsReady(context.Background()) {
 					// TODO add a logging info
 					a.actorMap.Delete(actorRef.addr)
 				}

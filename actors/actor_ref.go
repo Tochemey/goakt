@@ -92,9 +92,9 @@ func NewActorRef(ctx context.Context, actor Actor, opts ...Option) *ActorRef {
 	return actorRef
 }
 
-// IsAlive returns true when the actor is alive ready to process messages and false
+// IsReady returns true when the actor is alive ready to process messages and false
 // when the actor is stopped or not started at all
-func (a *ActorRef) IsAlive(ctx context.Context) bool {
+func (a *ActorRef) IsReady(ctx context.Context) bool {
 	a.rwMutex.Lock()
 	defer a.rwMutex.Unlock()
 	return a.isReady

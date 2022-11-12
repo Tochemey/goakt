@@ -30,9 +30,9 @@ type actorRef interface {
 	SendReply(ctx context.Context, message proto.Message) (proto.Message, error)
 	// Shutdown gracefully shuts down the given actor
 	Shutdown(ctx context.Context)
-	// IsAlive returns true when the actor is alive ready to process messages and false
+	// IsReady returns true when the actor is alive ready to process messages and false
 	// when the actor is stopped or not started at all
-	IsAlive(ctx context.Context) bool
+	IsReady(ctx context.Context) bool
 	// TotalProcessed returns the total number of messages processed by the actor
 	// at a given point in time while the actor heart is still beating
 	TotalProcessed(ctx context.Context) uint64
