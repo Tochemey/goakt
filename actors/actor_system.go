@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	cmp "github.com/orcaman/concurrent-map/v2"
 	"github.com/tochemey/goakt/config"
 	"github.com/tochemey/goakt/log"
 	"go.uber.org/atomic"
@@ -37,7 +38,7 @@ type actorSystem struct {
 	// Specifies the node where the actor system is located
 	nodeAddr string
 	// map of actors in the system
-	actorMap *actorMap
+	actors cmp.ConcurrentMap[string, *ActorRef]
 	//  specifies the logger to use
 	logger log.Logger
 
@@ -63,7 +64,7 @@ func NewActorSystem(config *config.Config) (ActorSystem, error) {
 		cache = &actorSystem{
 			name:                config.Name(),
 			nodeAddr:            config.NodeHostAndPort(),
-			actorMap:            newActorMap(20),
+			actors:              cmp.New[*ActorRef](),
 			logger:              config.Logger(),
 			config:              config,
 			housekeepingStopSig: make(chan struct{}),
@@ -83,7 +84,7 @@ func (a *actorSystem) Spawn(ctx context.Context, kind string, actor Actor) *Acto
 	// create the address of the given actor
 	addr := GetAddress(a, kind, actor.ID())
 	// check whether the given actor already exist in the system or not
-	actorRef, exist := a.actorMap.Get(addr)
+	actorRef, exist := a.actors.Get(string(addr))
 	// actor already exist no need recreate it.
 	if exist {
 		// check whether the given actor heart beat
@@ -101,7 +102,7 @@ func (a *actorSystem) Spawn(ctx context.Context, kind string, actor Actor) *Acto
 		WithAddress(addr))
 
 	// add the given actor to the actor map
-	a.actorMap.Set(addr, actorRef)
+	a.actors.Set(string(addr), actorRef)
 	// return the actor ref
 	return actorRef
 }
@@ -119,7 +120,13 @@ func (a *actorSystem) NodeAddr() string {
 // Actors returns the list of Actors that are alive in the actor system
 func (a *actorSystem) Actors() []*ActorRef {
 	// get the actors from the actor map
-	return a.actorMap.GetAll()
+	items := a.actors.Items()
+	var refs []*ActorRef
+	for _, actorRef := range items {
+		refs = append(refs, actorRef)
+	}
+
+	return refs
 }
 
 // Start starts the actor system
@@ -166,15 +173,17 @@ func (a *actorSystem) Stop(ctx context.Context) error {
 // that helps free non-utilized resources
 func (a *actorSystem) housekeeping() {
 	// create the ticker
-	ticker := time.NewTicker(time.Second)
-
+	ticker := time.NewTicker(30 * time.Millisecond)
+	// add some logging
+	a.logger.Info("Housekeeping has started...")
 	// init ticking
 	go func() {
 		for range ticker.C {
 			// loop over the actors in the system and remove the dead one
-			for _, actorRef := range a.actorMap.GetAll() {
-				if !actorRef.IsReady(context.Background()) {
-					a.actorMap.Delete(actorRef.addr)
+			for _, actor := range a.Actors() {
+				if !actor.IsReady(context.Background()) {
+					a.logger.Infof("Removing actor=%s from system", actor.addr)
+					a.actors.Remove(string(actor.addr))
 				}
 			}
 		}
@@ -183,4 +192,5 @@ func (a *actorSystem) housekeeping() {
 	<-a.housekeepingStopSig
 	// stop the ticker
 	ticker.Stop()
+	a.logger.Info("Housekeeping stopped...")
 }
