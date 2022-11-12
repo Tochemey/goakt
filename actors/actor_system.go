@@ -8,7 +8,6 @@ import (
 	"github.com/tochemey/goakt/config"
 	"github.com/tochemey/goakt/log"
 	"go.uber.org/atomic"
-	"golang.org/x/sync/errgroup"
 )
 
 var cache *actorSystem
@@ -54,21 +53,25 @@ type actorSystem struct {
 var _ ActorSystem = (*actorSystem)(nil)
 
 // NewActorSystem creates an instance of ActorSystem
-func NewActorSystem(config *config.Config) ActorSystem {
+func NewActorSystem(config *config.Config) (ActorSystem, error) {
+	// make sure the configuration is set
+	if config == nil {
+		return nil, ErrMissingConfig
+	}
 	// 👇 the function only gets called one
 	once.Do(func() {
 		cache = &actorSystem{
-			name:                config.Name,
-			nodeAddr:            config.NodeHostAndPort,
+			name:                config.Name(),
+			nodeAddr:            config.NodeHostAndPort(),
 			actorMap:            newActorMap(20),
-			logger:              config.Logger,
+			logger:              config.Logger(),
 			config:              config,
 			housekeepingStopSig: make(chan struct{}),
 			hasStarted:          atomic.NewBool(false),
 		}
 	})
 
-	return cache
+	return cache, nil
 }
 
 // Spawn creates or returns the instance of a given actor in the system
@@ -92,9 +95,9 @@ func (a *actorSystem) Spawn(ctx context.Context, kind string, actor Actor) *Acto
 
 	// create an instance of the actor ref
 	actorRef = NewActorRef(ctx, actor,
-		WithInitMaxRetries(a.config.ActorInitMaxRetries),
-		WithPassivationAfter(a.config.ExpireActorAfter),
-		WithSendReplyTimeout(a.config.ReplyTimeout),
+		WithInitMaxRetries(a.config.ActorInitMaxRetries()),
+		WithPassivationAfter(a.config.ExpireActorAfter()),
+		WithSendReplyTimeout(a.config.ReplyTimeout()),
 		WithAddress(addr))
 
 	// add the given actor to the actor map
@@ -134,20 +137,28 @@ func (a *actorSystem) Stop(ctx context.Context) error {
 	a.logger.Infof("%s System is shutting down on Node=%s...", a.name, a.nodeAddr)
 	// tell the housekeeper to stop
 	a.housekeepingStopSig <- struct{}{}
+
+	// short-circuit the shutdown process when there are no online actors
+	if len(a.Actors()) == 0 {
+		a.logger.Info("No online actors to shutdown. Shutting down successfully done")
+		return nil
+	}
+
 	// stop all the actors
-	g, ctx := errgroup.WithContext(ctx)
-	for _, actorRef := range a.actorMap.GetAll() {
-		actorRef := actorRef
-		g.Go(func() error {
-			actorRef.Shutdown(ctx)
-			return nil
-		})
+	var wg sync.WaitGroup
+	for _, actor := range a.Actors() {
+		// Increment the WaitGroup counter.
+		wg.Add(1)
+		// Launch a goroutine to shut down the actor
+		go func(ref *ActorRef) {
+			// Decrement the counter when the goroutine completes.
+			defer wg.Done()
+			// shut down the actor
+			ref.Shutdown(ctx)
+		}(actor)
 	}
 	// Wait for all the actors to gracefully shutdown
-	if err := g.Wait(); err == nil {
-		a.logger.Errorf("failed to shutdown the actors, %v", err)
-		return err
-	}
+	wg.Wait()
 	return nil
 }
 
@@ -163,7 +174,6 @@ func (a *actorSystem) housekeeping() {
 			// loop over the actors in the system and remove the dead one
 			for _, actorRef := range a.actorMap.GetAll() {
 				if !actorRef.IsReady(context.Background()) {
-					// TODO add a logging info
 					a.actorMap.Delete(actorRef.addr)
 				}
 			}

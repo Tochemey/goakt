@@ -17,22 +17,22 @@ func TestOptions(t *testing.T) {
 		{
 			name:           "WithExpireActorAfter",
 			option:         WithExpireActorAfter(2 * time.Second),
-			expectedConfig: Config{ExpireActorAfter: 2. * time.Second},
+			expectedConfig: Config{expireActorAfter: 2. * time.Second},
 		},
 		{
 			name:           "WithReplyTimeout",
 			option:         WithReplyTimeout(2 * time.Second),
-			expectedConfig: Config{ReplyTimeout: 2. * time.Second},
+			expectedConfig: Config{replyTimeout: 2. * time.Second},
 		},
 		{
 			name:           "WithActorInitMaxRetries",
 			option:         WithActorInitMaxRetries(2),
-			expectedConfig: Config{ActorInitMaxRetries: 2},
+			expectedConfig: Config{actorInitMaxRetries: 2},
 		},
 		{
 			name:           "WithLogger",
 			option:         WithLogger(log.DefaultLogger),
-			expectedConfig: Config{Logger: log.DefaultLogger},
+			expectedConfig: Config{logger: log.DefaultLogger},
 		},
 	}
 	for _, tc := range testCases {

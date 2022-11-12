@@ -25,14 +25,14 @@ func (f OptionFunc) Apply(c *Config) {
 // After such duration an idle actor will be expired and removed from the actor system
 func WithExpireActorAfter(duration time.Duration) Option {
 	return OptionFunc(func(config *Config) {
-		config.ExpireActorAfter = duration
+		config.expireActorAfter = duration
 	})
 }
 
 // WithLogger sets the actor system custom logger
 func WithLogger(logger log.Logger) Option {
 	return OptionFunc(func(config *Config) {
-		config.Logger = logger
+		config.logger = logger
 	})
 }
 
@@ -40,13 +40,13 @@ func WithLogger(logger log.Logger) Option {
 // in a receive-reply pattern
 func WithReplyTimeout(timeout time.Duration) Option {
 	return OptionFunc(func(config *Config) {
-		config.ReplyTimeout = timeout
+		config.replyTimeout = timeout
 	})
 }
 
 // WithActorInitMaxRetries sets the number of times to retry an actor init process
 func WithActorInitMaxRetries(max int) Option {
 	return OptionFunc(func(config *Config) {
-		config.ActorInitMaxRetries = max
+		config.actorInitMaxRetries = max
 	})
 }
