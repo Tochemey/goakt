@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+package cluster.v1;
+
+// ActorMeta represents an actor metadata in the cluster
+message ActorMeta {
+  // Specify the actor address
+  string address = 1;
+  // Specify the actor kind
+  string kind = 2;
+  // Specify the node where the actor has been created
+  string node_addr = 3;
+  // Specify which shard the actor resides
+  string shard_number = 4;
+}

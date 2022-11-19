@@ -3,7 +3,6 @@ package actors
 import (
 	"context"
 	"fmt"
-	"sync"
 	"time"
 
 	"github.com/cenkalti/backoff"
@@ -41,7 +40,7 @@ type ActorRef struct {
 
 	// helps determine whether the actor should handle messages or not.
 	isReady *atomic.Bool
-	// is captured whenever a message is sent to the actor
+	// is captured whenever a mail is sent to the actor
 	lastProcessingTime atomic.Time
 
 	// specifies at what point in time to passivate the actor.
@@ -49,7 +48,7 @@ type ActorRef struct {
 	// any further resources like memory and cpu. The default value is 5s
 	passivateAfter time.Duration
 
-	// specifies how long the sender of a message should wait to receive a reply
+	// specifies how long the sender of a mail should wait to receive a reply
 	// when using SendReply. The default value is 5s
 	sendRecvTimeout time.Duration
 
@@ -65,8 +64,6 @@ type ActorRef struct {
 
 	//  specifies the logger to use
 	logger log.Logger
-
-	rwMutex sync.RWMutex
 
 	// definition of the various counters
 	panicCounter           *atomic.Uint64
@@ -91,7 +88,6 @@ func NewActorRef(ctx context.Context, actor Actor, opts ...ActorRefOption) *Acto
 		mailbox:                make(chan any, 1000),
 		shutdownSignal:         make(chan struct{}),
 		logger:                 log.DefaultLogger,
-		rwMutex:                sync.RWMutex{},
 		panicCounter:           atomic.NewUint64(0),
 		receivedMessageCounter: atomic.NewUint64(0),
 		lastProcessingDuration: atomic.NewDuration(0),
@@ -141,7 +137,7 @@ func (a *ActorRef) Send(ctx context.Context, message proto.Message) error {
 	// create an error channel
 	errChan := make(chan error)
 	// create the message
-	msg := &send{
+	msg := &sendCommand{
 		ctx:     ctx,
 		message: message,
 		errChan: errChan,
@@ -159,11 +155,9 @@ func (a *ActorRef) Send(ctx context.Context, message proto.Message) error {
 	// increase the received message counter
 	a.receivedMessageCounter.Inc()
 	// await patiently for the error
-	for e := range msg.errChan {
-		return e
-	}
+	err := <-msg.errChan
 	// return
-	return nil
+	return err
 }
 
 // SendReply sends a given message to the actor and expect a reply in return
@@ -175,7 +169,7 @@ func (a *ActorRef) SendReply(ctx context.Context, message proto.Message) (proto.
 	// set the last processing time
 	a.lastProcessingTime.Store(time.Now())
 	// create the ask message
-	msg := &sendRecv{
+	msg := &sendReceive{
 		ctx:      ctx,
 		message:  message,
 		response: make(chan *response),
@@ -287,7 +281,7 @@ func (a *ActorRef) passivationListener() {
 	a.Shutdown(context.Background())
 }
 
-// receive handles every message in the actor mailbox
+// receive handles every mail in the actor mailbox
 func (a *ActorRef) receive() {
 	// run the processing loop
 	for {
@@ -297,7 +291,7 @@ func (a *ActorRef) receive() {
 		case received := <-a.mailbox:
 			// handle message per message type
 			switch msg := received.(type) {
-			case *send:
+			case *sendCommand:
 				done := make(chan struct{})
 
 				go func() {
@@ -321,7 +315,7 @@ func (a *ActorRef) receive() {
 					close(done)
 				}()
 
-			case *sendRecv:
+			case *sendReceive:
 				// create a variable that will hold the processed message response
 				resp := make(chan *response, 1)
 				// create the cancellation context with the timeout setting

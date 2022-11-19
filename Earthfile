@@ -43,3 +43,16 @@ local-test:
 
     SAVE ARTIFACT coverage.out AS LOCAL coverage.out
     SAVE IMAGE --push ghcr.io/tochemey/goakt-cache:test
+
+protogen:
+    # copy the proto files to generate
+    COPY --dir protos/ ./
+    COPY buf.work.yaml buf.gen.yaml ./
+
+    # generate the pbs
+    RUN buf generate \
+            --template buf.gen.yaml \
+            --path protos/internal/cluster
+
+    # save artifact to
+    SAVE ARTIFACT gen gen AS LOCAL gen
