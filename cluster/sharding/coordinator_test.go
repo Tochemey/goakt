@@ -178,7 +178,7 @@ func BenchmarkCoordinator_UnmarshalBinary(b *testing.B) {
 	}
 }
 
-func verifyDistribution(t *testing.T, coordinator Coordinator) {
+func verifyDistribution(t *testing.T, coordinator ShardsCoordinator) {
 	assert := require.New(t)
 
 	nodes := make(map[string]int)
@@ -205,7 +205,7 @@ func verifyDistribution(t *testing.T, coordinator Coordinator) {
 }
 
 // verifyShards ensures all shards are distributed to nodes
-func verifyShards(t *testing.T, coordinator Coordinator, maxShards int) {
+func verifyShards(t *testing.T, coordinator ShardsCoordinator, maxShards int) {
 	assert := require.New(t)
 	check := make(map[int]int)
 	shards := coordinator.Shards()
@@ -224,7 +224,7 @@ func verifyShards(t *testing.T, coordinator Coordinator, maxShards int) {
 	}
 }
 
-func verifyWorkerIDs(t *testing.T, coordinator Coordinator) {
+func verifyWorkerIDs(t *testing.T, coordinator ShardsCoordinator) {
 	assert := require.New(t)
 	workers := make([]int, 0)
 	for _, v := range coordinator.NodeList() {
@@ -234,7 +234,7 @@ func verifyWorkerIDs(t *testing.T, coordinator Coordinator) {
 	}
 }
 
-func testShardCoordinator(t *testing.T, coordinator Coordinator, maxShards int, weights []int) {
+func testShardCoordinator(t *testing.T, coordinator ShardsCoordinator, maxShards int, weights []int) {
 	assert := require.New(t)
 	assert.Error(coordinator.Init(0, nil), "Expected error when maxShards = 0")
 	assert.Error(coordinator.Init(len(weights), []int{}), "Expected error when weights != maxShards")

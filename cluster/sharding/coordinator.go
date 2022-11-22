@@ -20,7 +20,7 @@ type coordinator struct {
 }
 
 // NewShardsCoordinator creates an instance of the shard coordinator
-func NewShardsCoordinator() Coordinator {
+func NewShardsCoordinator() ShardsCoordinator {
 	return &coordinator{
 		shards:          make([]Shard, 0),
 		mu:              sync.RWMutex{},

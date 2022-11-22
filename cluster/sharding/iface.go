@@ -22,10 +22,10 @@ type Shard interface {
 	SetNodeID(nodeID string)
 }
 
-// Coordinator is a type that manages shards. The number of shards are immutable, ie
+// ShardsCoordinator is a type that manages shards. The number of shards are immutable, ie
 // no new shards will be added for the lifetime. (shards can be added or removed
 // between invocations of the leader)
-type Coordinator interface {
+type ShardsCoordinator interface {
 	// Init reinitializes the (shard) manager. This can be called one and only
 	// once. Performance critical since this is part of the node
 	// onboarding process. The weights parameter may be set to nil. In that
