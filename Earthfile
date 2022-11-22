@@ -16,10 +16,12 @@ code:
     RUN go mod download -x
 
     # copy in code
+    COPY --dir +protogen/gen ./
     COPY --dir actors ./
     COPY --dir log ./
     COPY --dir config ./
     COPY --dir telemetry ./
+    COPY --dir cluster ./
 
 
 vendor:
@@ -52,7 +54,8 @@ protogen:
     # generate the pbs
     RUN buf generate \
             --template buf.gen.yaml \
-            --path protos/internal/cluster
+            --path protos/internal/cluster \
+            --path protos/internal/sharding
 
     # save artifact to
     SAVE ARTIFACT gen gen AS LOCAL gen
