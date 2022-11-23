@@ -61,7 +61,7 @@ type ShardsCoordinator interface {
 	NodeList() []string
 
 	// ShardCountForNode returns the number of shards allocated to a particular node.
-	ShardCountForNode(nodeid string) int
+	ShardCountForNode(nodeID string) int
 
 	// WorkerID returns the worker ID for the node
 	WorkerID(nodeID string) int

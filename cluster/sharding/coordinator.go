@@ -31,10 +31,10 @@ func NewShardsCoordinator() ShardsCoordinator {
 	}
 }
 
-// Init reinitializes the (shard) manager. This can be called one and only
+// Init re-initializes the (shard) manager. This can be called one and only
 // once. Performance critical since this is part of the node
-// onboarding process. The weights parameter may be set to nil. In that
-// case the shards gets a weight of 1. If the weights parameter is specfied
+// on-boarding process. The weights parameter may be set to nil. In that
+// case the shards gets a weight of 1. If the weights parameter is specified
 // the length of the weights parameter must match the maxShards parameter.
 // Shard IDs are assigned from 0...maxShards-1
 func (c *coordinator) Init(maxShards int, weights []int) error {
@@ -113,6 +113,7 @@ func (c *coordinator) MapToNode(shardID int) Shard {
 		// the proxying to fix it but if the shard ID is invalid it is
 		// probably an error with the shard function itself and warrants
 		// a panic() from the library.
+		// TODO logging
 		panic(fmt.Sprintf("shard ID is outside range [0-%d]: %d", len(c.shards), shardID))
 	}
 	return c.shards[shardID]
@@ -157,10 +158,10 @@ func (c *coordinator) NodeList() []string {
 }
 
 // ShardCountForNode returns the number of shards allocated to a particular node.
-func (c *coordinator) ShardCountForNode(nodeid string) int {
+func (c *coordinator) ShardCountForNode(nodeID string) int {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	node, ok := c.nodes[nodeid]
+	node, ok := c.nodes[nodeID]
 	if !ok {
 		return 0
 	}
