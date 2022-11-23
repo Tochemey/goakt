@@ -13,7 +13,7 @@ func TestIntegerSharding(t *testing.T) {
 	calc := NewIntSharder(numShards)
 	distribution := make(map[int]int)
 	for i := 0; i < numTests; i++ {
-		shardNo := calc(rand.Int31())
+		shardNo := calc(rand.Int31()) // nolint
 		distribution[shardNo]++
 	}
 	if len(distribution) > numShards {
@@ -40,7 +40,7 @@ func TestStringSharding(t *testing.T) {
 	for i := 0; i < numTests; i++ {
 		randstr := make([]byte, 128)
 		for p := 0; p < len(randstr); p++ {
-			randstr[p] = byte(rand.Int31n(64) + '@')
+			randstr[p] = byte(rand.Int31n(64) + '@') // nolint
 		}
 		shardNo := sharder(randstr)
 		distribution[shardNo]++
@@ -59,7 +59,7 @@ func TestStringSharding(t *testing.T) {
 func BenchmarkStringSharding(b *testing.B) {
 	tests := make([]string, b.N)
 	for i := 0; i < b.N; i++ {
-		tests[i] = fmt.Sprintf("%08x", rand.Int63())
+		tests[i] = fmt.Sprintf("%08x", rand.Int63()) // nolint
 	}
 	b.ResetTimer()
 	sharder := NewStringSharder(numShards)

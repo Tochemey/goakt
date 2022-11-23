@@ -20,7 +20,7 @@ func TestCoordinator(t *testing.T) {
 	const maxShards = 1000
 	weights := make([]int, maxShards)
 	for i := range weights {
-		weights[i] = int(rand.Int31n(100)) + 1
+		weights[i] = int(rand.Int31n(100)) + 1 // nolint
 	}
 	testShardCoordinator(t, sc, maxShards, weights)
 }
@@ -29,7 +29,7 @@ func TestMarshalUnmarshalBinary(t *testing.T) {
 	assert := require.New(t)
 	weights := make([]int, benchmarkShardCount)
 	for i := range weights {
-		weights[i] = int(rand.Int31n(100)) + 1
+		weights[i] = int(rand.Int31n(100)) + 1 // nolint
 	}
 	sc := NewShardsCoordinator()
 
@@ -65,7 +65,7 @@ func BenchmarkCoordinator(b *testing.B) {
 	sc := NewShardsCoordinator()
 	weights := make([]int, benchmarkShardCount)
 	for i := range weights {
-		weights[i] = int(rand.Int31n(100)) + 1
+		weights[i] = int(rand.Int31n(100)) + 1 // nolint
 	}
 
 	// nolint - don't care about error returns here
@@ -91,7 +91,7 @@ func BenchmarkMapToNode(b *testing.B) {
 	sm := NewShardsCoordinator()
 	weights := make([]int, benchmarkShardCount)
 	for i := range weights {
-		weights[i] = int(rand.Int31n(100)) + 1
+		weights[i] = int(rand.Int31n(100)) + 1 // nolint
 	}
 	// nolint - won't check error return
 	_ = sm.Init(benchmarkShardCount, weights)
@@ -104,7 +104,7 @@ func BenchmarkMapToNode(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		sm.MapToNode(rand.Intn(benchmarkShardCount))
+		sm.MapToNode(rand.Intn(benchmarkShardCount)) // nolint
 	}
 }
 
@@ -112,7 +112,7 @@ func BenchmarkMapToNode(b *testing.B) {
 func BenchmarkCoordinator_Init(b *testing.B) {
 	weights := make([]int, benchmarkShardCount)
 	for i := range weights {
-		weights[i] = int(rand.Int31n(100)) + 1
+		weights[i] = int(rand.Int31n(100)) + 1 // nolint
 	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -126,7 +126,7 @@ func BenchmarkCoordinator_Init(b *testing.B) {
 func BenchmarkCoordinator_TotalWeight(b *testing.B) {
 	weights := make([]int, benchmarkShardCount)
 	for i := range weights {
-		weights[i] = int(rand.Int31n(100)) + 1
+		weights[i] = int(rand.Int31n(100)) + 1 // nolint
 	}
 	sc := NewShardsCoordinator()
 	b.ResetTimer()
@@ -138,7 +138,7 @@ func BenchmarkCoordinator_TotalWeight(b *testing.B) {
 func BenchmarkCoordinator_MarshalBinary(b *testing.B) {
 	weights := make([]int, benchmarkShardCount)
 	for i := range weights {
-		weights[i] = int(rand.Int31n(100)) + 1
+		weights[i] = int(rand.Int31n(100)) + 1 // nolint
 	}
 	sc := NewShardsCoordinator()
 	// nolint - wont't check error return
@@ -158,7 +158,7 @@ func BenchmarkCoordinator_MarshalBinary(b *testing.B) {
 func BenchmarkCoordinator_UnmarshalBinary(b *testing.B) {
 	weights := make([]int, benchmarkShardCount)
 	for i := range weights {
-		weights[i] = int(rand.Int31n(100)) + 1
+		weights[i] = int(rand.Int31n(100)) + 1 // nolint
 	}
 	sm := NewShardsCoordinator()
 	// nolint - won't check error returns

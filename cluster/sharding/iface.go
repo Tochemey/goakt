@@ -30,7 +30,7 @@ type ShardsCoordinator interface {
 	// once. Performance critical since this is part of the node
 	// onboarding process. The weights parameter may be set to nil. In that
 	// case the shards gets a weight of 1. If the weights parameter is specfied
-	// the lenght of the weights parameter must match the maxShards parameter.
+	// the length of the weights parameter must match the maxShards parameter.
 	// Shard IDs are assigned from 0...maxShards-1
 	Init(maxShards int, weights []int) error
 
