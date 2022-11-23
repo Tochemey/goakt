@@ -6,8 +6,8 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// send is a type of message that does not expect a reply
-type send struct {
+// sendCommand is a type of message that does not expect a reply
+type sendCommand struct {
 	// ctx represents the go context
 	ctx context.Context
 	// message is the actual message sent to the actor
@@ -16,8 +16,8 @@ type send struct {
 	errChan chan error
 }
 
-// sendRecv is a type of message that expects a response
-type sendRecv struct {
+// sendReceive is a type of message that expects a response
+type sendReceive struct {
 	// ctx represents the go context
 	ctx context.Context
 	// message is the actual message sent to the actor
