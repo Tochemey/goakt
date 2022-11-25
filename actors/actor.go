@@ -2,8 +2,6 @@ package actors
 
 import (
 	"context"
-
-	"google.golang.org/protobuf/proto"
 )
 
 // Actor represents the Actor interface
@@ -15,9 +13,7 @@ type Actor interface {
 	// or some sort of initialization before the actor init processing messages
 	Init(ctx context.Context) error
 	// Receive processes any message dropped into the actor mailbox without a reply
-	Receive(ctx context.Context, message proto.Message) error
-	// ReceiveReply processes any message dropped into the actor mailbox with a reply
-	ReceiveReply(ctx context.Context, message proto.Message) (proto.Message, error)
+	Receive(message Message) error
 	// Stop gracefully shuts down the given actor
 	Stop(ctx context.Context)
 }

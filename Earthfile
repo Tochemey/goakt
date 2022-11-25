@@ -55,6 +55,7 @@ protogen:
     RUN buf generate \
             --template buf.gen.yaml \
             --path protos/internal/cluster \
+            --path protos/internal/actors \
             --path protos/internal/sharding
 
     # save artifact to

@@ -3,20 +3,22 @@ package actors
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/cenkalti/backoff"
+	actorspb "github.com/tochemey/goakt/gen/actors/v1"
 	"github.com/tochemey/goakt/log"
 	"go.uber.org/atomic"
-	"google.golang.org/protobuf/proto"
 )
+
+// NoSender means that there is no sender
+var NoSender = new(ActorRef)
 
 // actorRef defines the various actions one can perform on a given actor
 type actorRef interface {
 	// Send sends a given message to the actor in a fire-and-forget pattern
-	Send(ctx context.Context, message proto.Message) error
-	// SendReply sends a given message to the actor and expect a reply in return
-	SendReply(ctx context.Context, message proto.Message) (proto.Message, error)
+	Send(message Message) error
 	// Shutdown gracefully shuts down the given actor
 	Shutdown(ctx context.Context)
 	// IsReady returns true when the actor is alive ready to process messages and false
@@ -39,7 +41,7 @@ type ActorRef struct {
 	addr Address
 
 	// helps determine whether the actor should handle messages or not.
-	isReady *atomic.Bool
+	isReady bool
 	// is captured whenever a mail is sent to the actor
 	lastProcessingTime atomic.Time
 
@@ -57,10 +59,11 @@ type ActorRef struct {
 	initMaxRetries int
 
 	// specifies the actor mailbox
-	mailbox chan any
+	mailbox chan Message
 	// receives a shutdown signal. Once the signal is received
 	// the actor is shut down gracefully.
 	shutdownSignal chan struct{}
+	errChan        chan error
 
 	//  specifies the logger to use
 	logger log.Logger
@@ -69,6 +72,8 @@ type ActorRef struct {
 	panicCounter           *atomic.Uint64
 	receivedMessageCounter *atomic.Uint64
 	lastProcessingDuration *atomic.Duration
+
+	mu sync.RWMutex
 }
 
 // enforce compilation error
@@ -80,12 +85,12 @@ func NewActorRef(ctx context.Context, actor Actor, opts ...ActorRefOption) *Acto
 	actorRef := &ActorRef{
 		Actor:                  actor,
 		addr:                   "",
-		isReady:                atomic.NewBool(false),
+		isReady:                false,
 		lastProcessingTime:     atomic.Time{},
 		passivateAfter:         5 * time.Second,
 		sendRecvTimeout:        5 * time.Second,
 		initMaxRetries:         5,
-		mailbox:                make(chan any, 1000),
+		mailbox:                make(chan Message, 1000),
 		shutdownSignal:         make(chan struct{}),
 		logger:                 log.DefaultLogger,
 		panicCounter:           atomic.NewUint64(0),
@@ -110,7 +115,10 @@ func NewActorRef(ctx context.Context, actor Actor, opts ...ActorRefOption) *Acto
 // IsReady returns true when the actor is alive ready to process messages and false
 // when the actor is stopped or not started at all
 func (a *ActorRef) IsReady(ctx context.Context) bool {
-	return a.isReady.Load()
+	a.mu.RLock()
+	ready := a.isReady
+	a.mu.RUnlock()
+	return ready
 }
 
 // TotalProcessed returns the total number of messages processed by the actor
@@ -126,22 +134,15 @@ func (a *ActorRef) ErrorsCount(ctx context.Context) uint64 {
 }
 
 // Send sends a given message to the actor
-func (a *ActorRef) Send(ctx context.Context, message proto.Message) error {
+func (a *ActorRef) Send(message Message) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	// reject message when the actor is not ready to process messages
-	if !a.IsReady(ctx) {
+	if !a.isReady {
 		return ErrNotReady
 	}
 	// set the last processing time
 	a.lastProcessingTime.Store(time.Now())
-	// push the message to the mailbox for the actor to receive
-	// create an error channel
-	errChan := make(chan error)
-	// create the message
-	msg := &sendCommand{
-		ctx:     ctx,
-		message: message,
-		errChan: errChan,
-	}
 
 	// set the start processing time
 	startTime := time.Now()
@@ -150,44 +151,21 @@ func (a *ActorRef) Send(ctx context.Context, message proto.Message) error {
 		a.lastProcessingDuration.Store(duration)
 	}()
 
+	// set the error channel
+	a.errChan = make(chan error, 1)
 	// push the message to the actor mailbox
-	a.mailbox <- msg
+	a.mailbox <- message
 	// increase the received message counter
 	a.receivedMessageCounter.Inc()
 	// await patiently for the error
-	err := <-msg.errChan
-	// return
-	return err
-}
-
-// SendReply sends a given message to the actor and expect a reply in return
-func (a *ActorRef) SendReply(ctx context.Context, message proto.Message) (proto.Message, error) {
-	if !a.IsReady(ctx) {
-		return nil, ErrNotReady
+	ctx, cancel := context.WithTimeout(message.Context(), a.sendRecvTimeout)
+	defer cancel()
+	select {
+	case err := <-a.errChan:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
 	}
-
-	// set the last processing time
-	a.lastProcessingTime.Store(time.Now())
-	// create the ask message
-	msg := &sendReceive{
-		ctx:      ctx,
-		message:  message,
-		response: make(chan *response),
-	}
-	// set the start processing time
-	startTime := time.Now()
-	defer func() {
-		duration := time.Since(startTime)
-		a.lastProcessingDuration.Store(duration)
-	}()
-
-	// push the message to the mailbox
-	a.mailbox <- msg
-	// increase the received message counter
-	a.receivedMessageCounter.Inc()
-	// await patiently for the reply or an error
-	r := <-msg.response
-	return r.reply, r.err
 }
 
 // Shutdown gracefully shuts down the given actor
@@ -195,7 +173,9 @@ func (a *ActorRef) SendReply(ctx context.Context, message proto.Message) (proto.
 func (a *ActorRef) Shutdown(ctx context.Context) {
 	a.logger.Info("Shutdown process has started...")
 	// stop future messages
-	a.isReady.Store(false)
+	a.mu.Lock()
+	a.isReady = false
+	a.mu.Unlock()
 	// wait for all messages in the mailbox to be processed
 	// init a ticker that run every 20 ms to make sure we process all messages in the
 	// mailbox.
@@ -246,7 +226,9 @@ func (a *ActorRef) init(ctx context.Context) {
 		return
 	}
 	// set the actor is ready
-	a.isReady.Store(true)
+	a.mu.Lock()
+	a.isReady = true
+	a.mu.Unlock()
 	// add some logging info
 	a.logger.Info("Initialization process successfully completed.")
 }
@@ -289,69 +271,29 @@ func (a *ActorRef) receive() {
 		case <-a.shutdownSignal:
 			return
 		case received := <-a.mailbox:
-			// handle message per message type
-			switch msg := received.(type) {
-			case *sendCommand:
+			msg := received.Payload()
+			switch msg.(type) {
+			case *actorspb.Terminate:
+				a.Shutdown(received.Context())
+			default:
 				done := make(chan struct{})
-
 				go func() {
 					// close the msg error channel
-					defer close(msg.errChan)
+					defer close(a.errChan)
+					defer close(done)
 					// recover from a panic attack
 					defer func() {
 						if r := recover(); r != nil {
 							// send the error
-							msg.errChan <- fmt.Errorf("%s", r)
+							a.errChan <- fmt.Errorf("%s", r)
 							// increase the panic counter
 							a.panicCounter.Inc()
-							// signal the go routine we are done
-							close(done)
 						}
 					}()
 					// send the message to actor to receive
-					err := a.Actor.Receive(msg.ctx, msg.message)
-					msg.errChan <- err
-					// signal the go routine we are done
-					close(done)
+					err := a.Receive(received)
+					a.errChan <- err
 				}()
-
-			case *sendReceive:
-				// create a variable that will hold the processed message response
-				resp := make(chan *response, 1)
-				// create the cancellation context with the timeout setting
-				ctx, cancel := context.WithTimeout(msg.ctx, a.sendRecvTimeout)
-				// start processing the received message
-				go func() {
-					response := new(response)
-					// recover from a panic attack
-					defer func() {
-						if r := recover(); r != nil {
-							// set the error
-							response.err = fmt.Errorf("%s", r)
-							// increase the panic counter
-							a.panicCounter.Inc()
-							// set the response
-							resp <- response
-						}
-					}()
-					// send the message to actor to receive
-					response.reply, response.err = a.Actor.ReceiveReply(ctx, msg.message)
-					// send the response the msg channel response
-					resp <- response
-				}()
-
-				select {
-				case r := <-resp:
-					msg.response <- r
-				case <-ctx.Done():
-					msg.response <- &response{
-						err: ErrTimeout,
-					}
-				}
-				// close the message response channel
-				close(msg.response)
-				// release resources when operation complete before timeout
-				cancel()
 			}
 		}
 	}

@@ -4,7 +4,6 @@ go 1.19
 
 require (
 	github.com/cenkalti/backoff v2.2.1+incompatible
-	github.com/deckarep/golang-set/v2 v2.1.0
 	github.com/orcaman/concurrent-map/v2 v2.0.1
 	github.com/stretchr/testify v1.8.1
 	go.opentelemetry.io/otel v1.11.1

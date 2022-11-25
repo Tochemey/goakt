@@ -9,20 +9,15 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	actorsv1 "github.com/tochemey/goakt/gen/actors/v1/tests"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/emptypb"
-	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
 const (
 	recvDelay      = 1 * time.Second
 	recvTimeout    = 100 * time.Millisecond
 	passivateAfter = 200 * time.Millisecond
-
-	timeoutMessage     = "timeout"
-	recvMessage        = "receive"
-	recvReplyMessage   = "receive reply"
-	panicAttackMessage = "panic"
 )
 
 func TestActorReceive(t *testing.T) {
@@ -36,19 +31,15 @@ func TestActorReceive(t *testing.T) {
 		// create the actor ref
 		actorRef := NewActorRef(ctx, actor,
 			WithInitMaxRetries(1),
-			WithPassivationAfter(passivateAfter),
+			WithPassivationAfter(2*time.Second),
 			WithSendReplyTimeout(recvTimeout))
 		assert.NotNil(t, actorRef)
 		// let us send 10 messages to the actor
 		count := 10
 		for i := 0; i < count; i++ {
-			// send a message to the actor
-			content := fmt.Sprintf("%s-%d", recvMessage, i)
-			msg := &wrapperspb.StringValue{Value: content}
-			err := actorRef.Send(ctx, msg)
-			assert.NoError(t, err)
+			actorRef.Send(NewMessage(ctx, &actorsv1.TestSend{}))
 		}
-		assert.EqualValues(t, count, actor.Count())
+		assert.EqualValues(t, count, actorRef.TotalProcessed(ctx))
 		// stop the actor
 		actorRef.Shutdown(ctx)
 	})
@@ -67,9 +58,10 @@ func TestActorReceive(t *testing.T) {
 		assert.NotNil(t, actorRef)
 		// stop the actor
 		actorRef.Shutdown(ctx)
+		// let us create the message
+		message := NewMessage(ctx, &actorsv1.TestSend{})
 		// let us send message
-		msg := &wrapperspb.StringValue{Value: recvMessage}
-		err := actorRef.Send(ctx, msg)
+		err := actorRef.Send(message)
 		assert.Error(t, err)
 		assert.EqualError(t, err, ErrNotReady.Error())
 	})
@@ -87,8 +79,10 @@ func TestActorReceive(t *testing.T) {
 			WithSendReplyTimeout(recvTimeout))
 		assert.NotNil(t, actorRef)
 
-		// create the message
-		err := actorRef.Send(ctx, &emptypb.Empty{})
+		// let us create the message
+		message := NewMessage(ctx, &emptypb.Empty{})
+		// let us send message
+		err := actorRef.Send(message)
 		assert.Error(t, err)
 		assert.EqualError(t, err, ErrUnhandled.Error())
 		// stop the actor
@@ -108,36 +102,14 @@ func TestActorReceive(t *testing.T) {
 			WithSendReplyTimeout(recvTimeout))
 		assert.NotNil(t, actorRef)
 
-		// send a message
-		reply, err := actorRef.SendReply(ctx, &wrapperspb.StringValue{Value: recvReplyMessage})
+		// let us create the message
+		message := NewMessage(ctx, &actorsv1.TestReply{})
+		// let us send message
+		err := actorRef.Send(message)
 		require.NoError(t, err)
-		require.NotNil(t, reply)
-		expectedMsg := &wrapperspb.StringValue{Value: fmt.Sprintf("received=%s", recvReplyMessage)}
-		assert.True(t, proto.Equal(expectedMsg, reply))
-		expectedCount := 1
-		assert.EqualValues(t, expectedCount, actor.Count())
-		// stop the actor
-		actorRef.Shutdown(ctx)
-	})
-	t.Run("receive-reply:happy path:error return", func(t *testing.T) {
-		ctx := context.TODO()
-		// create a Ping actor
-		actorID := "ping-1"
-		actor := NewTestActor(actorID)
-		assert.NotNil(t, actor)
-
-		// create the actor ref
-		actorRef := NewActorRef(ctx, actor,
-			WithInitMaxRetries(1),
-			WithPassivationAfter(passivateAfter),
-			WithSendReplyTimeout(recvTimeout))
-		assert.NotNil(t, actorRef)
-
-		// send a message
-		reply, err := actorRef.SendReply(ctx, &wrapperspb.StringValue{Value: ""})
-		require.Error(t, err)
-		require.Nil(t, reply)
-		assert.EqualError(t, err, "error simulated")
+		require.NotNil(t, message.Response())
+		expected := &actorsv1.Reply{Content: "received message"}
+		assert.True(t, proto.Equal(expected, message.Response()))
 		// stop the actor
 		actorRef.Shutdown(ctx)
 	})
@@ -155,32 +127,13 @@ func TestActorReceive(t *testing.T) {
 			WithSendReplyTimeout(recvTimeout))
 		assert.NotNil(t, actorRef)
 
-		// send a message
-		reply, err := actorRef.SendReply(ctx, &wrapperspb.StringValue{Value: timeoutMessage})
+		// let us create the message
+		message := NewMessage(ctx, &actorsv1.TestTimeout{})
+		// let us send message
+		err := actorRef.Send(message)
 		assert.Error(t, err)
-		assert.EqualError(t, err, ErrTimeout.Error())
-		assert.Nil(t, reply)
-		assert.EqualValues(t, 0, actor.Count())
-		// stop the actor
-		actorRef.Shutdown(ctx)
-	})
-	t.Run("receive-reply:unhappy path:unhandled message", func(t *testing.T) {
-		ctx := context.TODO()
-		// create a Ping actor
-		actorID := "ping-1"
-		actor := NewTestActor(actorID)
-		assert.NotNil(t, actor)
-		// create the actor ref
-		actorRef := NewActorRef(ctx, actor,
-			WithInitMaxRetries(1),
-			WithPassivationAfter(passivateAfter),
-			WithSendReplyTimeout(recvTimeout))
-		assert.NotNil(t, actorRef)
-
-		// send a message
-		reply, err := actorRef.SendReply(ctx, &emptypb.Empty{})
-		require.Error(t, err)
-		require.Nil(t, reply)
+		assert.EqualError(t, err, "context deadline exceeded")
+		assert.Nil(t, message.Response())
 		// stop the actor
 		actorRef.Shutdown(ctx)
 	})
@@ -208,8 +161,10 @@ func TestActorReceive(t *testing.T) {
 		// block until timer is up
 		wg.Wait()
 
-		// let us send any message
-		err := actorRef.Send(ctx, &emptypb.Empty{})
+		// let us create the message
+		message := NewMessage(ctx, &actorsv1.TestSend{})
+		// let us send message
+		err := actorRef.Send(message)
 		assert.Error(t, err)
 		assert.EqualError(t, err, ErrNotReady.Error())
 	})
@@ -228,31 +183,11 @@ func TestActorReceive(t *testing.T) {
 		assert.NotNil(t, actorRef)
 
 		// send a message
-		err := actorRef.Send(ctx, &wrapperspb.StringValue{Value: panicAttackMessage})
+		// let us create the message
+		message := NewMessage(ctx, &actorsv1.TestPanic{})
+		// let us send message
+		err := actorRef.Send(message)
 		require.Error(t, err)
-		assert.EqualError(t, err, "Boom")
-
-		// stop the actor
-		actorRef.Shutdown(ctx)
-	})
-	t.Run("receive-reply:recover from panic", func(t *testing.T) {
-		ctx := context.TODO()
-		// create a Ping actor
-		actorID := "ping-1"
-		actor := NewTestActor(actorID)
-		assert.NotNil(t, actor)
-
-		// create the actor ref
-		actorRef := NewActorRef(ctx, actor,
-			WithInitMaxRetries(1),
-			WithPassivationAfter(passivateAfter),
-			WithSendReplyTimeout(recvTimeout))
-		assert.NotNil(t, actorRef)
-
-		// send a message
-		reply, err := actorRef.SendReply(ctx, &wrapperspb.StringValue{Value: panicAttackMessage})
-		require.Error(t, err)
-		require.Nil(t, reply)
 		assert.EqualError(t, err, "Boom")
 
 		// stop the actor
@@ -275,7 +210,7 @@ func BenchmarkActor(b *testing.B) {
 		go func() {
 			for i := 0; i < b.N; i++ {
 				// send a message to the actor
-				if err := actorRef.Send(ctx, &emptypb.Empty{}); err != nil {
+				if err := actorRef.Send(NewMessage(ctx, &actorsv1.TestSend{})); err != nil {
 					fmt.Println("fail to send message")
 				}
 			}
@@ -296,7 +231,7 @@ func BenchmarkActor(b *testing.B) {
 		actor.Wg.Add(b.N)
 		for i := 0; i < b.N; i++ {
 			// send a message to the actor
-			if err := actorRef.Send(ctx, &emptypb.Empty{}); err != nil {
+			if err := actorRef.Send(NewMessage(ctx, &actorsv1.TestSend{})); err != nil {
 				fmt.Println("fail to send message")
 			}
 		}
@@ -321,7 +256,7 @@ func BenchmarkActor(b *testing.B) {
 					}
 				}()
 				// send a message to the actor
-				if err := actorRef.Send(ctx, &emptypb.Empty{}); err != nil {
+				if err := actorRef.Send(NewMessage(ctx, &actorsv1.TestSend{})); err != nil {
 					fmt.Println("fail to send message")
 				}
 			}()
@@ -349,7 +284,7 @@ func BenchmarkActor(b *testing.B) {
 				}()
 				for i := 0; i < 100; i++ {
 					// send a message to the actor
-					if err := actorRef.Send(ctx, &emptypb.Empty{}); err != nil {
+					if err := actorRef.Send(NewMessage(ctx, &actorsv1.TestSend{})); err != nil {
 						fmt.Println("fail to send message")
 					}
 				}
@@ -372,7 +307,7 @@ func BenchmarkActor(b *testing.B) {
 		go func() {
 			for i := 0; i < b.N; i++ {
 				// send a message to the actor
-				if _, err := actorRef.SendReply(ctx, &emptypb.Empty{}); err != nil {
+				if err := actorRef.Send(NewMessage(ctx, &actorsv1.TestReply{})); err != nil {
 					fmt.Println("fail to send message")
 				}
 			}
@@ -393,7 +328,7 @@ func BenchmarkActor(b *testing.B) {
 		actor.Wg.Add(b.N)
 		for i := 0; i < b.N; i++ {
 			// send a message to the actor
-			if _, err := actorRef.SendReply(ctx, &emptypb.Empty{}); err != nil {
+			if err := actorRef.Send(NewMessage(ctx, &actorsv1.TestReply{})); err != nil {
 				fmt.Println("fail to send message")
 			}
 		}
@@ -418,7 +353,7 @@ func BenchmarkActor(b *testing.B) {
 					}
 				}()
 				// send a message to the actor
-				if _, err := actorRef.SendReply(ctx, &emptypb.Empty{}); err != nil {
+				if err := actorRef.Send(NewMessage(ctx, &actorsv1.TestReply{})); err != nil {
 					fmt.Println("fail to send message")
 				}
 			}()
@@ -446,7 +381,7 @@ func BenchmarkActor(b *testing.B) {
 				}()
 				for i := 0; i < 100; i++ {
 					// send a message to the actor
-					if _, err := actorRef.SendReply(ctx, &emptypb.Empty{}); err != nil {
+					if err := actorRef.Send(NewMessage(ctx, &actorsv1.TestReply{})); err != nil {
 						fmt.Println("fail to send message")
 					}
 				}

@@ -15,7 +15,6 @@ message Node {
   int32 worker_id = 3;
 }
 
-
 message Shard {
   // Specifies the shard id
   int32 id = 1;
