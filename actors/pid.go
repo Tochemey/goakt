@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/cenkalti/backoff"
-	actorspb "github.com/tochemey/goakt/gen/actors/v1"
 	"github.com/tochemey/goakt/log"
 	"go.uber.org/atomic"
 )
@@ -273,8 +272,6 @@ func (a *PID) receive() {
 		case received := <-a.mailbox:
 			msg := received.Payload()
 			switch msg.(type) {
-			case *actorspb.Terminate:
-				a.Shutdown(received.Context())
 			default:
 				done := make(chan struct{})
 				go func() {
