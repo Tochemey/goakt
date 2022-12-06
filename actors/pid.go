@@ -13,10 +13,10 @@ import (
 )
 
 // NoSender means that there is no sender
-var NoSender = new(ActorRef)
+var NoSender = new(PID)
 
-// actorRef defines the various actions one can perform on a given actor
-type actorRef interface {
+// processor defines the various actions one can perform on a given actor
+type processor interface {
 	// Send sends a given message to the actor in a fire-and-forget pattern
 	Send(message Message) error
 	// Shutdown gracefully shuts down the given actor
@@ -32,9 +32,9 @@ type actorRef interface {
 	ErrorsCount(ctx context.Context) uint64
 }
 
-// ActorRef specifies an actor unique reference
-// With the ActorRef one can send a message to the actor
-type ActorRef struct {
+// PID specifies an actor unique process
+// With the PID one can send a message to the actor
+type PID struct {
 	Actor
 
 	// addr represents the actor unique address
@@ -77,12 +77,12 @@ type ActorRef struct {
 }
 
 // enforce compilation error
-var _ actorRef = (*ActorRef)(nil)
+var _ processor = (*PID)(nil)
 
-// NewActorRef creates an actor given its unique identifier and return its reference
-func NewActorRef(ctx context.Context, actor Actor, opts ...ActorRefOption) *ActorRef {
-	// create the actor ref
-	actorRef := &ActorRef{
+// NewPID creates a new PID
+func NewPID(ctx context.Context, actor Actor, opts ...pidOption) *PID {
+	// create the actor PID
+	pid := &PID{
 		Actor:                  actor,
 		addr:                   "",
 		isReady:                false,
@@ -99,22 +99,22 @@ func NewActorRef(ctx context.Context, actor Actor, opts ...ActorRefOption) *Acto
 	}
 	// set the custom options to override the default values
 	for _, opt := range opts {
-		opt(actorRef)
+		opt(pid)
 	}
 
 	// initialize the actor and init processing messages
-	actorRef.init(ctx)
+	pid.init(ctx)
 	// init processing messages
-	go actorRef.receive()
+	go pid.receive()
 	// init the idle checker loop
-	go actorRef.passivationListener()
+	go pid.passivationListener()
 	// return the actor reference
-	return actorRef
+	return pid
 }
 
 // IsReady returns true when the actor is alive ready to process messages and false
 // when the actor is stopped or not started at all
-func (a *ActorRef) IsReady(ctx context.Context) bool {
+func (a *PID) IsReady(ctx context.Context) bool {
 	a.mu.RLock()
 	ready := a.isReady
 	a.mu.RUnlock()
@@ -123,18 +123,18 @@ func (a *ActorRef) IsReady(ctx context.Context) bool {
 
 // TotalProcessed returns the total number of messages processed by the actor
 // at a given time while the actor is still alive
-func (a *ActorRef) TotalProcessed(ctx context.Context) uint64 {
+func (a *PID) TotalProcessed(ctx context.Context) uint64 {
 	return a.receivedMessageCounter.Load()
 }
 
 // ErrorsCount returns the total number of panic attacks that occur while the actor is processing messages
 // at a given point in time while the actor heart is still beating
-func (a *ActorRef) ErrorsCount(ctx context.Context) uint64 {
+func (a *PID) ErrorsCount(ctx context.Context) uint64 {
 	return a.panicCounter.Load()
 }
 
 // Send sends a given message to the actor
-func (a *ActorRef) Send(message Message) error {
+func (a *PID) Send(message Message) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	// reject message when the actor is not ready to process messages
@@ -170,7 +170,7 @@ func (a *ActorRef) Send(message Message) error {
 
 // Shutdown gracefully shuts down the given actor
 // All current messages in the mailbox will be processed before the actor shutdown
-func (a *ActorRef) Shutdown(ctx context.Context) {
+func (a *PID) Shutdown(ctx context.Context) {
 	a.logger.Info("Shutdown process has started...")
 	// stop future messages
 	a.mu.Lock()
@@ -203,19 +203,19 @@ func (a *ActorRef) Shutdown(ctx context.Context) {
 	// signal we are shutting down to stop processing messages
 	a.shutdownSignal <- struct{}{}
 	// perform some cleanup with the actor
-	a.Actor.Stop(ctx)
+	a.Actor.PostStop(ctx)
 }
 
 // init initializes the given actor and init processing messages
 // when the initialization failed the actor is automatically shutdown
-func (a *ActorRef) init(ctx context.Context) {
+func (a *PID) init(ctx context.Context) {
 	// add some logging info
 	a.logger.Info("Initialization process has started...")
 	// create the exponential backoff object
 	expoBackoff := backoff.WithMaxRetries(backoff.NewExponentialBackOff(), uint64(a.initMaxRetries))
 	// init the actor initialization receive
 	err := backoff.Retry(func() error {
-		return a.Actor.Init(ctx)
+		return a.Actor.PreStart(ctx)
 	}, expoBackoff)
 	// handle backoff error
 	if err != nil {
@@ -235,7 +235,7 @@ func (a *ActorRef) init(ctx context.Context) {
 
 // passivationListener checks whether the actor is processing messages or not.
 // when the actor is idle, it automatically shuts down to free resources
-func (a *ActorRef) passivationListener() {
+func (a *PID) passivationListener() {
 	// create the ticker
 	ticker := time.NewTicker(a.passivateAfter)
 	// create the stop ticker signal
@@ -264,7 +264,7 @@ func (a *ActorRef) passivationListener() {
 }
 
 // receive handles every mail in the actor mailbox
-func (a *ActorRef) receive() {
+func (a *PID) receive() {
 	// run the processing loop
 	for {
 		select {
@@ -296,5 +296,44 @@ func (a *ActorRef) receive() {
 				}()
 			}
 		}
+	}
+}
+
+// pidOption represents the actor ref
+type pidOption func(ref *PID)
+
+// withPassivationAfter sets the actor passivation time
+func withPassivationAfter(duration time.Duration) pidOption {
+	return func(ref *PID) {
+		ref.passivateAfter = duration
+	}
+}
+
+// withSendReplyTimeout sets how long in seconds an actor should reply a command
+// in a receive-reply pattern
+func withSendReplyTimeout(timeout time.Duration) pidOption {
+	return func(ref *PID) {
+		ref.sendRecvTimeout = timeout
+	}
+}
+
+// withInitMaxRetries sets the number of times to retry an actor init process
+func withInitMaxRetries(max int) pidOption {
+	return func(ref *PID) {
+		ref.initMaxRetries = max
+	}
+}
+
+// withCustomLogger sets the logger
+func withCustomLogger(logger log.Logger) pidOption {
+	return func(ref *PID) {
+		ref.logger = logger
+	}
+}
+
+// withAddress sets the address of the actor ref
+func withAddress(addr Address) pidOption {
+	return func(ref *PID) {
+		ref.addr = addr
 	}
 }

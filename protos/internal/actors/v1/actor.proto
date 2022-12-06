@@ -1,6 +1,0 @@
-syntax = "proto3";
-
-package actors.v1;
-
-// Terminate will stop the actor
-message Terminate {}

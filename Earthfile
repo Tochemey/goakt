@@ -54,9 +54,7 @@ protogen:
     # generate the pbs
     RUN buf generate \
             --template buf.gen.yaml \
-            --path protos/internal/cluster \
-            --path protos/internal/actors \
-            --path protos/internal/sharding
+            --path protos/internal/actors
 
     # save artifact to
     SAVE ARTIFACT gen gen AS LOCAL gen
