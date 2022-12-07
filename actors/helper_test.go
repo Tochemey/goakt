@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	actorsv1 "github.com/tochemey/goakt/gen/actors/v1/tests"
+	actorsv1 "github.com/tochemey/goakt/gen/actors/v1"
 	"github.com/tochemey/goakt/log"
 )
 
@@ -17,7 +17,7 @@ func (p *BenchActor) ID() string {
 	return "benchActor"
 }
 
-func (p *BenchActor) Init(ctx context.Context) error {
+func (p *BenchActor) PreStart(ctx context.Context) error {
 	return nil
 }
 
@@ -32,7 +32,7 @@ func (p *BenchActor) Receive(message Message) error {
 	return nil
 }
 
-func (p *BenchActor) Stop(ctx context.Context) {
+func (p *BenchActor) PostStop(ctx context.Context) {
 }
 
 type TestActor struct {
@@ -54,12 +54,12 @@ func (p *TestActor) ID() string {
 
 // Init initialize the actor. This function can be used to set up some database connections
 // or some sort of initialization before the actor init processing messages
-func (p *TestActor) Init(ctx context.Context) error {
+func (p *TestActor) PreStart(ctx context.Context) error {
 	return nil
 }
 
 // Stop gracefully shuts down the given actor
-func (p *TestActor) Stop(ctx context.Context) {
+func (p *TestActor) PostStop(ctx context.Context) {
 }
 
 // Receive processes any message dropped into the actor mailbox without a reply

@@ -4,14 +4,14 @@
 
 Minimal actor framework to build reactive and distributed system in golang using protocol buffers.
 
-## TODOs
+## Features
 
 - [x] Send a message to an actor in a fire-and-forget manner
 - [x] Send a message to an actor and expect a reply
-- [x] Init hook for an actor
-- [x] Shutdown hook for an actor
+- [x] PreStart hook for an actor
+- [x] PostStop hook for an actor
 - [x] ActorSystem (WIP)
-- [ ] Actor to Actor communication
-- [x] Metrics (WIP)
+- [x] Actor to Actor communication
+- [ ] Metrics
 - [ ] Clustering
 - [ ] Sample examples

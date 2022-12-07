@@ -6,13 +6,12 @@ import (
 	"time"
 
 	cmp "github.com/orcaman/concurrent-map/v2"
-	"github.com/tochemey/goakt/config"
 	"github.com/tochemey/goakt/log"
 	"go.uber.org/atomic"
 )
 
 var cache *actorSystem
-var once sync.Once // 👈 defining a new `sync.Once
+var once sync.Once
 
 // ActorSystem defines the contract of an actor system
 type ActorSystem interface {
@@ -21,13 +20,13 @@ type ActorSystem interface {
 	// NodeAddr returns the node where the actor system is running
 	NodeAddr() string
 	// Actors returns the list of Actors that are alive in the actor system
-	Actors() []*ActorRef
+	Actors() []*PID
 	// Start starts the actor system
 	Start(ctx context.Context) error
 	// Stop stops the actor system
 	Stop(ctx context.Context) error
 	// Spawn creates an actor in the system
-	Spawn(ctx context.Context, kind string, actor Actor) *ActorRef
+	Spawn(ctx context.Context, kind string, actor Actor) *PID
 }
 
 // ActorSystem represent a collection of actors on a given node
@@ -38,12 +37,12 @@ type actorSystem struct {
 	// Specifies the node where the actor system is located
 	nodeAddr string
 	// map of actors in the system
-	actors cmp.ConcurrentMap[string, *ActorRef]
+	actors cmp.ConcurrentMap[string, *PID]
 	//  specifies the logger to use
 	logger log.Logger
 
 	// actor system configuration
-	config *config.Config
+	config *Config
 
 	housekeepingStopSig chan struct{}
 	hasStarted          *atomic.Bool
@@ -54,17 +53,17 @@ type actorSystem struct {
 var _ ActorSystem = (*actorSystem)(nil)
 
 // NewActorSystem creates an instance of ActorSystem
-func NewActorSystem(config *config.Config) (ActorSystem, error) {
+func NewActorSystem(config *Config) (ActorSystem, error) {
 	// make sure the configuration is set
 	if config == nil {
 		return nil, ErrMissingConfig
 	}
-	// 👇 the function only gets called one
+	// the function only gets called one
 	once.Do(func() {
 		cache = &actorSystem{
 			name:                config.Name(),
 			nodeAddr:            config.NodeHostAndPort(),
-			actors:              cmp.New[*ActorRef](),
+			actors:              cmp.New[*PID](),
 			logger:              config.Logger(),
 			config:              config,
 			housekeepingStopSig: make(chan struct{}),
@@ -76,7 +75,7 @@ func NewActorSystem(config *config.Config) (ActorSystem, error) {
 }
 
 // Spawn creates or returns the instance of a given actor in the system
-func (a *actorSystem) Spawn(ctx context.Context, kind string, actor Actor) *ActorRef {
+func (a *actorSystem) Spawn(ctx context.Context, kind string, actor Actor) *PID {
 	// first check whether the actor system has started
 	if !a.hasStarted.Load() {
 		return nil
@@ -95,11 +94,12 @@ func (a *actorSystem) Spawn(ctx context.Context, kind string, actor Actor) *Acto
 	}
 
 	// create an instance of the actor ref
-	actorRef = NewActorRef(ctx, actor,
-		WithInitMaxRetries(a.config.ActorInitMaxRetries()),
-		WithPassivationAfter(a.config.ExpireActorAfter()),
-		WithSendReplyTimeout(a.config.ReplyTimeout()),
-		WithAddress(addr))
+	actorRef = NewPID(ctx, actor,
+		withInitMaxRetries(a.config.ActorInitMaxRetries()),
+		withPassivationAfter(a.config.ExpireActorAfter()),
+		withSendReplyTimeout(a.config.ReplyTimeout()),
+		withCustomLogger(a.config.logger),
+		withAddress(addr))
 
 	// add the given actor to the actor map
 	a.actors.Set(string(addr), actorRef)
@@ -118,10 +118,10 @@ func (a *actorSystem) NodeAddr() string {
 }
 
 // Actors returns the list of Actors that are alive in the actor system
-func (a *actorSystem) Actors() []*ActorRef {
+func (a *actorSystem) Actors() []*PID {
 	// get the actors from the actor map
 	items := a.actors.Items()
-	var refs []*ActorRef
+	var refs []*PID
 	for _, actorRef := range items {
 		refs = append(refs, actorRef)
 	}
@@ -157,7 +157,7 @@ func (a *actorSystem) Stop(ctx context.Context) error {
 		// Increment the WaitGroup counter.
 		wg.Add(1)
 		// Launch a goroutine to shut down the actor
-		go func(ref *ActorRef) {
+		go func(ref *PID) {
 			// Decrement the counter when the goroutine completes.
 			defer wg.Done()
 			// shut down the actor
