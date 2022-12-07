@@ -10,7 +10,7 @@ import (
 
 func TestNewActorSystem(t *testing.T) {
 	t.Run("With Defaults", func(t *testing.T) {
-		cfg, err := New("testSys", "localhost:0")
+		cfg, err := NewConfig("testSys", "localhost:0")
 		require.NoError(t, err)
 		assert.NotNil(t, cfg)
 
@@ -34,7 +34,7 @@ func TestNewActorSystem(t *testing.T) {
 
 	t.Run("With Spawn an actor when not started", func(t *testing.T) {
 		ctx := context.TODO()
-		cfg, _ := New("testSys", "localhost:0")
+		cfg, _ := NewConfig("testSys", "localhost:0")
 		sys, _ := NewActorSystem(cfg)
 		kind := "TestActor"
 		id := "test-1"
@@ -45,7 +45,7 @@ func TestNewActorSystem(t *testing.T) {
 
 	t.Run("With Spawn an actor when started", func(t *testing.T) {
 		ctx := context.TODO()
-		cfg, _ := New("testSys", "localhost:0")
+		cfg, _ := NewConfig("testSys", "localhost:0")
 		sys, _ := NewActorSystem(cfg)
 
 		// start the actor system
@@ -63,7 +63,7 @@ func TestNewActorSystem(t *testing.T) {
 
 	t.Run("With Spawn an actor already exist", func(t *testing.T) {
 		ctx := context.TODO()
-		cfg, _ := New("testSys", "localhost:0")
+		cfg, _ := NewConfig("testSys", "localhost:0")
 		sys, _ := NewActorSystem(cfg)
 
 		// start the actor system

@@ -35,8 +35,8 @@ type Config struct {
 	actorInitMaxRetries int
 }
 
-// New creates an instance of Config
-func New(name, nodeHostAndPort string, options ...Option) (*Config, error) {
+// NewConfig creates an instance of Config
+func NewConfig(name, nodeHostAndPort string, options ...Option) (*Config, error) {
 	// check whether the name is set or not
 	if name == "" {
 		return nil, ErrNameRequired
