@@ -42,7 +42,6 @@ local-test:
     RUN go test -mod=vendor ./... -race -v -coverprofile=coverage.out -covermode=atomic -coverpkg=./...
 
     SAVE ARTIFACT coverage.out AS LOCAL coverage.out
-    SAVE IMAGE --push ghcr.io/tochemey/goakt-cache:test
 
 protogen:
     # copy the proto files to generate
