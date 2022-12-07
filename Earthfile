@@ -19,9 +19,7 @@ code:
     COPY --dir +protogen/gen ./
     COPY --dir actors ./
     COPY --dir log ./
-    COPY --dir config ./
     COPY --dir telemetry ./
-    COPY --dir cluster ./
 
 
 vendor:
