@@ -34,7 +34,11 @@ type processor interface {
 	// SpawnChild creates a child actor of its own kind
 	SpawnChild(ctx context.Context, actor Actor) (*PID, error)
 	// Restart restarts the actor
-	Restart(ctx context.Context)
+	Restart(ctx context.Context) error
+	// Watch an actor
+	Watch(pid *PID) chan error
+	// UnWatch stops watching a given actor
+	UnWatch(pid *PID)
 }
 
 // PID specifies an actor unique process
@@ -75,6 +79,7 @@ type PID struct {
 	shutdownSignal chan Unit
 	errChan        chan error
 	watchChan      chan error
+	beingWatched   *atomic.Bool
 
 	// hold the list of the children
 	children *pidMap
@@ -124,6 +129,7 @@ func NewPID(ctx context.Context, actor Actor, opts ...pidOption) *PID {
 		childrenMu:             sync.RWMutex{},
 		children:               newPIDMap(10),
 		supervisorStrategy:     actorsv1.Strategy_STOP,
+		beingWatched:           atomic.NewBool(false),
 	}
 	// set the custom options to override the default values
 	for _, opt := range opts {
@@ -157,16 +163,16 @@ func (p *PID) IsReady(ctx context.Context) bool {
 
 // Restart restarts the actor. This call can panic which is the expected behaviour.
 // During restart all messages that are in the mailbox and not yet processed will be ignored
-func (p *PID) Restart(ctx context.Context) {
+func (p *PID) Restart(ctx context.Context) error {
 	// first check whether we have an empty PID
 	if p == nil || p.addr == "" {
-		panic(ErrUndefinedActor)
+		return ErrUndefinedActor
 	}
 	// check whether the actor is ready and stop it
 	if p.IsReady(ctx) {
 		// stop the actor
 		if err := p.Shutdown(ctx); err != nil {
-			panic(err)
+			return err
 		}
 	}
 
@@ -178,6 +184,8 @@ func (p *PID) Restart(ctx context.Context) {
 	go p.receive()
 	// init the idle checker loop
 	go p.passivationListener()
+	// successful restart
+	return nil
 }
 
 // SpawnChild creates a child actor and start watching it for error
@@ -195,8 +203,13 @@ func (p *PID) SpawnChild(ctx context.Context, actor Actor) (*PID, error) {
 	addr := GetAddress(p.system, p.kind, actor.ID())
 	// check whether the child actor already exist and just return the PID
 	if pid, ok := p.children.Get(addr); ok {
-		// TODO check whether the actor is passivated and restart it
-		// TODO implement a restart mechanism
+		// check whether the actor is stopped
+		if !pid.IsReady(ctx) {
+			// then reboot it
+			if err := pid.Restart(ctx); err != nil {
+				return nil, err
+			}
+		}
 		return pid, nil
 	}
 
@@ -216,8 +229,7 @@ func (p *PID) SpawnChild(ctx context.Context, actor Actor) (*PID, error) {
 	p.children.Set(pid)
 
 	// let us start watching it
-	watch := pid.watch()
-	// TODO make sure we don't leak memory with this go routine
+	watch := p.Watch(pid)
 	go func() {
 		err := <-watch
 		p.logger.Errorf("child actor=%s is panicing: Err=%v", pid.addr, err)
@@ -227,16 +239,22 @@ func (p *PID) SpawnChild(ctx context.Context, actor Actor) (*PID, error) {
 			if err := pid.Shutdown(context.Background()); err != nil {
 				panic(err)
 			}
+			// unwatch the given actor
+			p.UnWatch(pid)
 			// remove the actor from the children map
 			pid.children.Delete(pid.addr)
 		case actorsv1.Strategy_RESTART:
 			// restart the actor
-			pid.Restart(context.Background())
+			if err := pid.Restart(context.Background()); err != nil {
+				panic(err)
+			}
 		default:
 			// shutdown the actor and panic in case of error
 			if err := pid.Shutdown(context.Background()); err != nil {
 				panic(err)
 			}
+			// unwatch the given actor
+			p.UnWatch(pid)
 			// remove the actor from the children map
 			pid.children.Delete(pid.addr)
 		}
@@ -297,12 +315,13 @@ func (p *PID) Send(message Message) error {
 // that can be configured. All child actors will be gracefully shutdown.
 func (p *PID) Shutdown(ctx context.Context) error {
 	p.logger.Info("Shutdown process has started...")
-	// stop all the child actors
-	p.freeChildren(ctx)
 	// stop future messages
 	p.mu.Lock()
 	p.isReady = false
 	p.mu.Unlock()
+	p.beingWatched.Store(false)
+	// stop all the child actors
+	p.freeChildren(ctx)
 	// wait for all messages in the mailbox to be processed
 	// init a ticker that run every 10 ms to make sure we process all messages in the
 	// mailbox.
@@ -342,6 +361,26 @@ func (p *PID) Shutdown(ctx context.Context) error {
 	return p.Actor.PostStop(ctx)
 }
 
+// Watch a pid for errors, and send on the returned channel if an error occurred
+func (p *PID) Watch(pid *PID) chan error {
+	errChan := make(chan error)
+	// set beingWatched to true
+	pid.beingWatched.Store(true)
+	go func() {
+		err := <-pid.watchChan
+		errChan <- err
+	}()
+	return errChan
+}
+
+// UnWatch stops watching a given actor
+func (p *PID) UnWatch(pid *PID) {
+	// set beingWatched to false
+	pid.beingWatched.Store(false)
+	// close the watch channel
+	close(pid.watchChan)
+}
+
 // init initializes the given actor and init processing messages
 // when the initialization failed the actor is automatically shutdown
 func (p *PID) init(ctx context.Context) {
@@ -357,8 +396,8 @@ func (p *PID) init(ctx context.Context) {
 	if err != nil {
 		// log the error
 		p.logger.Error(err.Error())
-		// shutdown the actor
-		p.Shutdown(ctx)
+		// reset the actor
+		p.reset()
 		return
 	}
 	// set the actor is ready
@@ -426,30 +465,30 @@ func (p *PID) receive() {
 					// recover from a panic attack
 					defer func() {
 						if r := recover(); r != nil {
-							// send the error to the channel
-							p.errChan <- fmt.Errorf("%s", r)
+							// construct the error to return
+							err := fmt.Errorf("%s", r)
+							// send the error to the channels
+							p.errChan <- err
+							// only set the watch channel when the actor has been watched
+							if p.beingWatched.Load() {
+								p.watchChan <- err
+							}
 							// increase the panic counter
 							p.panicCounter.Inc()
 						}
 					}()
 					// send the message to actor to receive
 					err := p.Receive(received)
-					// set the error channel
+					// set the error channels
 					p.errChan <- err
+					// only set the watch channel when the actor has been watched
+					if p.beingWatched.Load() {
+						p.watchChan <- err
+					}
 				}()
 			}
 		}
 	}
-}
-
-// watch a pid for errors, and send on the returned channel if an error occurred
-func (p *PID) watch() chan error {
-	errChan := make(chan error)
-	go func() {
-		err := <-p.watchChan
-		errChan <- err
-	}()
-	return errChan
 }
 
 func (p *PID) reset() {

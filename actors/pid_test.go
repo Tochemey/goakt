@@ -235,7 +235,8 @@ func TestActorRestart(t *testing.T) {
 		assert.EqualError(t, err, ErrNotReady.Error())
 
 		// restart the actor
-		pid.Restart(ctx)
+		err = pid.Restart(ctx)
+		assert.NoError(t, err)
 		assert.True(t, pid.IsReady(ctx))
 		// let us send 10 messages to the actor
 		count := 10
@@ -247,7 +248,7 @@ func TestActorRestart(t *testing.T) {
 		err = pid.Shutdown(ctx)
 		assert.NoError(t, err)
 	})
-	t.Run("restart with panic", func(t *testing.T) {
+	t.Run("restart with error", func(t *testing.T) {
 		ctx := context.TODO()
 		// create a Ping actor
 		actorID := "ping-1"
@@ -270,10 +271,9 @@ func TestActorRestart(t *testing.T) {
 		assert.Error(t, err)
 		assert.EqualError(t, err, ErrNotReady.Error())
 
-		// restarting this actor will panic
-		assert.Panics(t, func() {
-			pid.Restart(ctx)
-		})
+		// restarting this actor
+		err = pid.Restart(ctx)
+		assert.EqualError(t, err, ErrUndefinedActor.Error())
 	})
 	t.Run("restart an actor", func(t *testing.T) {
 		ctx := context.TODO()
@@ -305,7 +305,8 @@ func TestActorRestart(t *testing.T) {
 		assert.EqualValues(t, count, pid.TotalProcessed(ctx))
 
 		// restart the actor
-		pid.Restart(ctx)
+		err = pid.Restart(ctx)
+		assert.NoError(t, err)
 		assert.True(t, pid.IsReady(ctx))
 		// let us send 10 messages to the actor
 		for i := 0; i < count; i++ {
