@@ -13,7 +13,7 @@ Minimal actor framework to build reactive and distributed system in golang using
 - [x] ActorSystem (WIP) ✅
 - [x] Actor to Actor communication ✅
 - [x] Restart an actor ✅
-- [x] Creata a child actor (WIP) ✅
+- [x] Create a child actor (WIP) ✅
 - [x] Supervisory Strategy (WIP) ✅
 - [ ] Metrics
 - [ ] Clustering
