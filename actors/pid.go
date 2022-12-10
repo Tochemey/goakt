@@ -330,8 +330,6 @@ func (p *PID) Shutdown(ctx context.Context) error {
 	p.logger.Info("Shutdown process is on going...")
 	// signal we are shutting down to stop processing messages
 	p.shutdownSignal <- Unit{}
-	// let us reset
-	p.reset()
 	// perform some cleanup with the actor
 	return p.Actor.PostStop(ctx)
 }
