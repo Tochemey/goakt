@@ -436,7 +436,7 @@ func (p *PID) receive() {
 	}
 }
 
-// watch a pid for errors, and send on the returned channel if an error occured
+// watch a pid for errors, and send on the returned channel if an error occurred
 func (p *PID) watch() chan error {
 	errChan := make(chan error)
 	go func() {
