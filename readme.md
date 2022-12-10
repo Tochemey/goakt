@@ -6,12 +6,15 @@ Minimal actor framework to build reactive and distributed system in golang using
 
 ## Features
 
-- [x] Send a message to an actor in a fire-and-forget manner
-- [x] Send a message to an actor and expect a reply
-- [x] PreStart hook for an actor
-- [x] PostStop hook for an actor
-- [x] ActorSystem (WIP)
-- [x] Actor to Actor communication
+- [x] Send a message to an actor in a fire-and-forget manner ✅
+- [x] Send a message to an actor and expect a reply ✅
+- [x] PreStart hook for an actor ✅
+- [x] PostStop hook for an actor ✅
+- [x] ActorSystem (WIP) ✅
+- [x] Actor to Actor communication ✅
+- [x] Restart an actor ✅
+- [x] Creata a child actor (WIP) ✅
+- [x] Supervisory Strategy (WIP) ✅
 - [ ] Metrics
 - [ ] Clustering
 - [ ] Sample examples
