@@ -201,6 +201,123 @@ func TestActorReceive(t *testing.T) {
 	})
 }
 
+func TestActorRestart(t *testing.T) {
+	t.Run("restart a stopped actor", func(t *testing.T) {
+		ctx := context.TODO()
+		cfg, err := NewConfig("testSys", "localhost:0")
+		require.NoError(t, err)
+		assert.NotNil(t, cfg)
+
+		actorSys, err := NewActorSystem(cfg)
+		require.NoError(t, err)
+
+		// create a Ping actor
+		actorID := "ping-1"
+		actor := NewTestActor(actorID)
+		assert.NotNil(t, actor)
+
+		// create the actor ref
+		pid := NewPID(ctx, actor,
+			withInitMaxRetries(1),
+			withPassivationAfter(passivateAfter),
+			withActorSystem(actorSys),
+			withKind("pinger"),
+			withSendReplyTimeout(recvTimeout))
+		assert.NotNil(t, pid)
+		// stop the actor
+		err = pid.Shutdown(ctx)
+		assert.NoError(t, err)
+		// let us create the message
+		message := NewMessage(ctx, &actorsv1.TestSend{})
+		// let us send message
+		err = pid.Send(message)
+		assert.Error(t, err)
+		assert.EqualError(t, err, ErrNotReady.Error())
+
+		// restart the actor
+		pid.Restart(ctx)
+		assert.True(t, pid.IsReady(ctx))
+		// let us send 10 messages to the actor
+		count := 10
+		for i := 0; i < count; i++ {
+			_ = pid.Send(NewMessage(ctx, &actorsv1.TestSend{}))
+		}
+		assert.EqualValues(t, count, pid.TotalProcessed(ctx))
+		// stop the actor
+		err = pid.Shutdown(ctx)
+		assert.NoError(t, err)
+	})
+	t.Run("restart with panic", func(t *testing.T) {
+		ctx := context.TODO()
+		// create a Ping actor
+		actorID := "ping-1"
+		actor := NewTestActor(actorID)
+		assert.NotNil(t, actor)
+
+		// create the actor ref
+		pid := NewPID(ctx, actor,
+			withInitMaxRetries(1),
+			withPassivationAfter(passivateAfter),
+			withSendReplyTimeout(recvTimeout))
+		assert.NotNil(t, pid)
+		// stop the actor
+		err := pid.Shutdown(ctx)
+		assert.NoError(t, err)
+		// let us create the message
+		message := NewMessage(ctx, &actorsv1.TestSend{})
+		// let us send message
+		err = pid.Send(message)
+		assert.Error(t, err)
+		assert.EqualError(t, err, ErrNotReady.Error())
+
+		// restarting this actor will panic
+		assert.Panics(t, func() {
+			pid.Restart(ctx)
+		})
+	})
+	t.Run("restart an actor", func(t *testing.T) {
+		ctx := context.TODO()
+		cfg, err := NewConfig("testSys", "localhost:0")
+		require.NoError(t, err)
+		assert.NotNil(t, cfg)
+
+		actorSys, err := NewActorSystem(cfg)
+		require.NoError(t, err)
+
+		// create a Ping actor
+		actorID := "ping-1"
+		actor := NewTestActor(actorID)
+		assert.NotNil(t, actor)
+
+		// create the actor ref
+		pid := NewPID(ctx, actor,
+			withInitMaxRetries(1),
+			withPassivationAfter(passivateAfter),
+			withActorSystem(actorSys),
+			withKind("pinger"),
+			withSendReplyTimeout(recvTimeout))
+		assert.NotNil(t, pid)
+		// let us send 10 messages to the actor
+		count := 10
+		for i := 0; i < count; i++ {
+			_ = pid.Send(NewMessage(ctx, &actorsv1.TestSend{}))
+		}
+		assert.EqualValues(t, count, pid.TotalProcessed(ctx))
+
+		// restart the actor
+		pid.Restart(ctx)
+		assert.True(t, pid.IsReady(ctx))
+		// let us send 10 messages to the actor
+		for i := 0; i < count; i++ {
+			_ = pid.Send(NewMessage(ctx, &actorsv1.TestSend{}))
+		}
+		assert.EqualValues(t, count, pid.TotalProcessed(ctx))
+		// stop the actor
+		err = pid.Shutdown(ctx)
+		assert.NoError(t, err)
+	})
+}
+
 func BenchmarkActor(b *testing.B) {
 	b.Run("receive:single sender", func(b *testing.B) {
 		ctx := context.TODO()

@@ -130,6 +130,12 @@ func NewPID(ctx context.Context, actor Actor, opts ...pidOption) *PID {
 		opt(pid)
 	}
 
+	// let us set the addr when the actor system and kind are set
+	if pid.system != nil && pid.kind != "" {
+		// create the address of the given actor and set it
+		pid.addr = GetAddress(pid.system, pid.kind, actor.ID())
+	}
+
 	// initialize the actor and init processing messages
 	pid.init(ctx)
 	// init processing messages
@@ -156,12 +162,14 @@ func (p *PID) Restart(ctx context.Context) {
 	if p == nil || p.addr == "" {
 		panic(ErrUndefinedActor)
 	}
-	// set the actor is ready
-	p.mu.Lock()
-	p.isReady = false
-	p.mu.Unlock()
-	// stop processing messages
-	p.shutdownSignal <- Unit{}
+	// check whether the actor is ready and stop it
+	if p.IsReady(ctx) {
+		// stop the actor
+		if err := p.Shutdown(ctx); err != nil {
+			panic(err)
+		}
+	}
+
 	// reset the actor
 	p.reset()
 	// initialize the actor
