@@ -6,6 +6,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tochemey/goakt/pkg/tools"
+
 	"github.com/cenkalti/backoff"
 	actorsv1 "github.com/tochemey/goakt/gen/actors/v1"
 	"github.com/tochemey/goakt/log"
@@ -78,8 +80,9 @@ type PID struct {
 	// the actor is shut down gracefully.
 	shutdownSignal chan Unit
 	errChan        chan error
-	watchChan      chan error
-	beingWatched   *atomic.Bool
+
+	// set of watchers watching the given actor
+	watchers *tools.ConcurrentSlice[*watcher]
 
 	// hold the list of the children
 	children *pidMap
@@ -129,7 +132,7 @@ func NewPID(ctx context.Context, actor Actor, opts ...pidOption) *PID {
 		childrenMu:             sync.RWMutex{},
 		children:               newPIDMap(10),
 		supervisorStrategy:     actorsv1.Strategy_STOP,
-		beingWatched:           atomic.NewBool(false),
+		watchers:               tools.NewConcurrentSlice[*watcher](),
 	}
 	// set the custom options to override the default values
 	for _, opt := range opts {
@@ -319,7 +322,6 @@ func (p *PID) Shutdown(ctx context.Context) error {
 	p.mu.Lock()
 	p.isReady = false
 	p.mu.Unlock()
-	p.beingWatched.Store(false)
 	// stop all the child actors
 	p.freeChildren(ctx)
 	// wait for all messages in the mailbox to be processed
@@ -363,11 +365,18 @@ func (p *PID) Shutdown(ctx context.Context) error {
 
 // Watch a pid for errors, and send on the returned channel if an error occurred
 func (p *PID) Watch(pid *PID) chan error {
-	errChan := make(chan error)
-	// set beingWatched to true
-	pid.beingWatched.Store(true)
+	// create an error channel
+	errChan := make(chan error, 1)
+	// create a watcher
+	w := &watcher{
+		pid:     p,
+		errChan: errChan,
+	}
+	// add the watcher to the list of watchers
+	pid.watchers.Append(w)
+	// start watching
 	go func() {
-		err := <-pid.watchChan
+		err := <-w.errChan
 		errChan <- err
 	}()
 	return errChan
@@ -375,10 +384,19 @@ func (p *PID) Watch(pid *PID) chan error {
 
 // UnWatch stops watching a given actor
 func (p *PID) UnWatch(pid *PID) {
-	// set beingWatched to false
-	pid.beingWatched.Store(false)
-	// close the watch channel
-	close(pid.watchChan)
+	// iterate the watchers list
+	for item := range pid.watchers.Iter() {
+		// grab the item value
+		w := item.Value
+		// locate the given watcher
+		if w.pid.addr == p.addr {
+			// close the watch channel
+			close(w.errChan)
+			// remove the watcher from the list
+			pid.watchers.Delete(item.Index)
+			break
+		}
+	}
 }
 
 // init initializes the given actor and init processing messages
@@ -469,9 +487,9 @@ func (p *PID) receive() {
 							err := fmt.Errorf("%s", r)
 							// send the error to the channels
 							p.errChan <- err
-							// only set the watch channel when the actor has been watched
-							if p.beingWatched.Load() {
-								p.watchChan <- err
+							// send the error to the watchers
+							for item := range p.watchers.Iter() {
+								item.Value.errChan <- err
 							}
 							// increase the panic counter
 							p.panicCounter.Inc()
@@ -481,9 +499,9 @@ func (p *PID) receive() {
 					err := p.Receive(received)
 					// set the error channels
 					p.errChan <- err
-					// only set the watch channel when the actor has been watched
-					if p.beingWatched.Load() {
-						p.watchChan <- err
+					// send the error to the watchers
+					for item := range p.watchers.Iter() {
+						item.Value.errChan <- err
 					}
 				}()
 			}
