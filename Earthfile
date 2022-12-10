@@ -55,3 +55,16 @@ protogen:
 
     # save artifact to
     SAVE ARTIFACT gen gen AS LOCAL gen
+
+testprotos:
+    # copy the proto files to generate
+    COPY --dir protos/ ./
+    COPY buf.work.yaml buf.gen.yaml ./
+
+    # generate the pbs
+    RUN buf generate \
+            --template buf.gen.yaml \
+            --path protos/testprotos/actors
+
+    # save artifact to
+    SAVE ARTIFACT gen gen AS LOCAL actors/testdata

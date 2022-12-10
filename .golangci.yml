@@ -35,3 +35,4 @@ linters-settings:
     locale: US
     ignore-words:
       - cancelled
+      - behaviour
