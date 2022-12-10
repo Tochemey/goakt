@@ -83,28 +83,30 @@ func (a *actorSystem) Spawn(ctx context.Context, kind string, actor Actor) *PID 
 	// create the address of the given actor
 	addr := GetAddress(a, kind, actor.ID())
 	// check whether the given actor already exist in the system or not
-	actorRef, exist := a.actors.Get(string(addr))
+	pid, exist := a.actors.Get(string(addr))
 	// actor already exist no need recreate it.
 	if exist {
 		// check whether the given actor heart beat
-		if actorRef.IsReady(ctx) {
+		if pid.IsReady(ctx) {
 			// return the existing instance
-			return actorRef
+			return pid
 		}
 	}
 
 	// create an instance of the actor ref
-	actorRef = NewPID(ctx, actor,
+	pid = NewPID(ctx, actor,
 		withInitMaxRetries(a.config.ActorInitMaxRetries()),
 		withPassivationAfter(a.config.ExpireActorAfter()),
 		withSendReplyTimeout(a.config.ReplyTimeout()),
 		withCustomLogger(a.config.logger),
+		withActorSystem(a),
+		withKind(kind),
 		withAddress(addr))
 
 	// add the given actor to the actor map
-	a.actors.Set(string(addr), actorRef)
+	a.actors.Set(string(addr), pid)
 	// return the actor ref
-	return actorRef
+	return pid
 }
 
 // Name returns the actor system name

@@ -7,8 +7,6 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-type Unit struct{}
-
 // Message represents the message sent
 // to an actor. The message is immutable
 type Message interface {

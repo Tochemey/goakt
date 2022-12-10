@@ -9,7 +9,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	actorsv1 "github.com/tochemey/goakt/gen/actors/v1"
+	actorsv1 "github.com/tochemey/goakt/actors/testdata/actors/v1"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
@@ -41,7 +41,8 @@ func TestActorReceive(t *testing.T) {
 		}
 		assert.EqualValues(t, count, pid.TotalProcessed(ctx))
 		// stop the actor
-		pid.Shutdown(ctx)
+		err := pid.Shutdown(ctx)
+		assert.NoError(t, err)
 	})
 	t.Run("receive: unhappy path: actor not ready", func(t *testing.T) {
 		ctx := context.TODO()
@@ -57,11 +58,12 @@ func TestActorReceive(t *testing.T) {
 			withSendReplyTimeout(recvTimeout))
 		assert.NotNil(t, pid)
 		// stop the actor
-		pid.Shutdown(ctx)
+		err := pid.Shutdown(ctx)
+		assert.NoError(t, err)
 		// let us create the message
 		message := NewMessage(ctx, &actorsv1.TestSend{})
 		// let us send message
-		err := pid.Send(message)
+		err = pid.Send(message)
 		assert.Error(t, err)
 		assert.EqualError(t, err, ErrNotReady.Error())
 	})
@@ -86,7 +88,8 @@ func TestActorReceive(t *testing.T) {
 		assert.Error(t, err)
 		assert.EqualError(t, err, ErrUnhandled.Error())
 		// stop the actor
-		pid.Shutdown(ctx)
+		err = pid.Shutdown(ctx)
+		assert.NoError(t, err)
 	})
 	t.Run("receive-reply:happy path", func(t *testing.T) {
 		ctx := context.TODO()
@@ -111,7 +114,8 @@ func TestActorReceive(t *testing.T) {
 		expected := &actorsv1.Reply{Content: "received message"}
 		assert.True(t, proto.Equal(expected, message.Response()))
 		// stop the actor
-		pid.Shutdown(ctx)
+		err = pid.Shutdown(ctx)
+		assert.NoError(t, err)
 	})
 	t.Run("receive-reply:unhappy path:timeout", func(t *testing.T) {
 		ctx := context.TODO()
@@ -135,7 +139,8 @@ func TestActorReceive(t *testing.T) {
 		assert.EqualError(t, err, "context deadline exceeded")
 		assert.Nil(t, message.Response())
 		// stop the actor
-		pid.Shutdown(ctx)
+		err = pid.Shutdown(ctx)
+		assert.NoError(t, err)
 	})
 	t.Run("passivation", func(t *testing.T) {
 		ctx := context.TODO()
@@ -191,7 +196,8 @@ func TestActorReceive(t *testing.T) {
 		assert.EqualError(t, err, "Boom")
 
 		// stop the actor
-		pid.Shutdown(ctx)
+		err = pid.Shutdown(ctx)
+		assert.NoError(t, err)
 	})
 }
 
@@ -216,7 +222,7 @@ func BenchmarkActor(b *testing.B) {
 			}
 		}()
 		actor.Wg.Wait()
-		pid.Shutdown(ctx)
+		_ = pid.Shutdown(ctx)
 	})
 	b.Run("receive:send only", func(b *testing.B) {
 		ctx := context.TODO()
@@ -235,7 +241,7 @@ func BenchmarkActor(b *testing.B) {
 				fmt.Println("fail to send message")
 			}
 		}
-		pid.Shutdown(ctx)
+		_ = pid.Shutdown(ctx)
 	})
 	b.Run("receive:multiple senders", func(b *testing.B) {
 		ctx := context.TODO()
@@ -262,7 +268,7 @@ func BenchmarkActor(b *testing.B) {
 			}()
 		}
 		actor.Wg.Wait()
-		pid.Shutdown(ctx)
+		_ = pid.Shutdown(ctx)
 	})
 	b.Run("receive:multiple senders times hundred", func(b *testing.B) {
 		ctx := context.TODO()
@@ -291,7 +297,7 @@ func BenchmarkActor(b *testing.B) {
 			}()
 		}
 		actor.Wg.Wait()
-		pid.Shutdown(ctx)
+		_ = pid.Shutdown(ctx)
 	})
 	b.Run("receive-reply: single sender", func(b *testing.B) {
 		ctx := context.TODO()
@@ -313,7 +319,7 @@ func BenchmarkActor(b *testing.B) {
 			}
 		}()
 		actor.Wg.Wait()
-		pid.Shutdown(ctx)
+		_ = pid.Shutdown(ctx)
 	})
 	b.Run("receive-reply: send only", func(b *testing.B) {
 		ctx := context.TODO()
@@ -332,7 +338,7 @@ func BenchmarkActor(b *testing.B) {
 				fmt.Println("fail to send message")
 			}
 		}
-		pid.Shutdown(ctx)
+		_ = pid.Shutdown(ctx)
 	})
 	b.Run("receive-reply:multiple senders", func(b *testing.B) {
 		ctx := context.TODO()
@@ -359,7 +365,7 @@ func BenchmarkActor(b *testing.B) {
 			}()
 		}
 		actor.Wg.Wait()
-		pid.Shutdown(ctx)
+		_ = pid.Shutdown(ctx)
 	})
 	b.Run("receive-reply:multiple senders times hundred", func(b *testing.B) {
 		ctx := context.TODO()
@@ -388,6 +394,6 @@ func BenchmarkActor(b *testing.B) {
 			}()
 		}
 		actor.Wg.Wait()
-		pid.Shutdown(ctx)
+		_ = pid.Shutdown(ctx)
 	})
 }

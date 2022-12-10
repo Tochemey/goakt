@@ -11,6 +11,7 @@ require (
 	go.opentelemetry.io/otel/sdk v1.11.1
 	go.opentelemetry.io/otel/trace v1.11.1
 	go.uber.org/atomic v1.10.0
+	golang.org/x/sync v0.1.0
 	google.golang.org/protobuf v1.28.1
 )
 

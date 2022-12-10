@@ -16,5 +16,5 @@ type Actor interface {
 	Receive(message Message) error
 	// PostStop is executed when the actor is shutting down.
 	// The execution happens when every messages that have not been processed yet will be processed before the actor shutdowns
-	PostStop(ctx context.Context)
+	PostStop(ctx context.Context) error
 }
