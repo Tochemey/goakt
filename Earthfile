@@ -20,6 +20,7 @@ code:
     COPY --dir actors ./
     COPY --dir log ./
     COPY --dir telemetry ./
+    COPY --dir pkg ./
 
 
 vendor:
