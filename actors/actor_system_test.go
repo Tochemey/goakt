@@ -43,45 +43,45 @@ func TestNewActorSystem(t *testing.T) {
 		assert.Nil(t, actorRef)
 	})
 
-	//t.Run("With Spawn an actor when started", func(t *testing.T) {
-	//	ctx := context.TODO()
-	//	cfg, _ := NewConfig("testSys", "localhost:0")
-	//	sys, _ := NewActorSystem(cfg)
-	//
-	//	// start the actor system
-	//	err := sys.Start(ctx)
-	//	assert.NoError(t, err)
-	//
-	//	kind := "TestActor"
-	//	id := "test-1"
-	//	actor := NewTestActor(id)
-	//	actorRef := sys.Spawn(ctx, kind, actor)
-	//	assert.NotNil(t, actorRef)
-	//
-	//	assert.NoError(t, sys.Stop(ctx))
-	//})
-	//
-	//t.Run("With Spawn an actor already exist", func(t *testing.T) {
-	//	ctx := context.TODO()
-	//	cfg, _ := NewConfig("testSys", "localhost:0")
-	//	sys, _ := NewActorSystem(cfg)
-	//
-	//	// start the actor system
-	//	err := sys.Start(ctx)
-	//	assert.NoError(t, err)
-	//
-	//	kind := "TestActor"
-	//	id := "test-1"
-	//	actor := NewTestActor(id)
-	//	ref1 := sys.Spawn(ctx, kind, actor)
-	//	assert.NotNil(t, ref1)
-	//
-	//	ref2 := sys.Spawn(ctx, kind, actor)
-	//	assert.NotNil(t, ref2)
-	//
-	//	// point to the same memory address
-	//	assert.True(t, ref1 == ref2)
-	//
-	//	assert.NoError(t, sys.Stop(ctx))
-	//})
+	t.Run("With Spawn an actor when started", func(t *testing.T) {
+		ctx := context.TODO()
+		cfg, _ := NewConfig("testSys", "localhost:0")
+		sys, _ := NewActorSystem(cfg)
+
+		// start the actor system
+		err := sys.Start(ctx)
+		assert.NoError(t, err)
+
+		kind := "TestActor"
+		id := "test-1"
+		actor := NewTestActor(id)
+		actorRef := sys.Spawn(ctx, kind, actor)
+		assert.NotNil(t, actorRef)
+
+		assert.NoError(t, sys.Stop(ctx))
+	})
+
+	t.Run("With Spawn an actor already exist", func(t *testing.T) {
+		ctx := context.TODO()
+		cfg, _ := NewConfig("testSys", "localhost:0")
+		sys, _ := NewActorSystem(cfg)
+
+		// start the actor system
+		err := sys.Start(ctx)
+		assert.NoError(t, err)
+
+		kind := "TestActor"
+		id := "test-1"
+		actor := NewTestActor(id)
+		ref1 := sys.Spawn(ctx, kind, actor)
+		assert.NotNil(t, ref1)
+
+		ref2 := sys.Spawn(ctx, kind, actor)
+		assert.NotNil(t, ref2)
+
+		// point to the same memory address
+		assert.True(t, ref1 == ref2)
+
+		assert.NoError(t, sys.Stop(ctx))
+	})
 }

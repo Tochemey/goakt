@@ -3,7 +3,6 @@ package actors
 import (
 	"context"
 	"sync"
-	"time"
 
 	cmp "github.com/orcaman/concurrent-map/v2"
 	"github.com/tochemey/goakt/log"
@@ -44,8 +43,7 @@ type actorSystem struct {
 	// actor system configuration
 	config *Config
 
-	housekeepingStopSig chan struct{}
-	hasStarted          *atomic.Bool
+	hasStarted *atomic.Bool
 }
 
 // enforce compilation error when all methods of the ActorSystem interface are not implemented
@@ -61,13 +59,12 @@ func NewActorSystem(config *Config) (ActorSystem, error) {
 	// the function only gets called one
 	once.Do(func() {
 		cache = &actorSystem{
-			name:                config.Name(),
-			nodeAddr:            config.NodeHostAndPort(),
-			actors:              cmp.New[*PID](),
-			logger:              config.Logger(),
-			config:              config,
-			housekeepingStopSig: make(chan struct{}),
-			hasStarted:          atomic.NewBool(false),
+			name:       config.Name(),
+			nodeAddr:   config.NodeHostAndPort(),
+			actors:     cmp.New[*PID](),
+			logger:     config.Logger(),
+			config:     config,
+			hasStarted: atomic.NewBool(false),
 		}
 	})
 
@@ -145,7 +142,7 @@ func (a *actorSystem) Start(ctx context.Context) error {
 func (a *actorSystem) Stop(ctx context.Context) error {
 	a.logger.Infof("%s System is shutting down on Node=%s...", a.name, a.nodeAddr)
 	// tell the housekeeper to stop
-	a.housekeepingStopSig <- struct{}{}
+	//a.housekeepingStopSig <- struct{}{}
 
 	// short-circuit the shutdown process when there are no online actors
 	if len(a.Actors()) == 0 {
@@ -154,46 +151,12 @@ func (a *actorSystem) Stop(ctx context.Context) error {
 	}
 
 	// stop all the actors
-	var wg sync.WaitGroup
 	for _, actor := range a.Actors() {
-		// Increment the WaitGroup counter.
-		wg.Add(1)
-		// Launch a goroutine to shut down the actor
-		go func(ref *PID) {
-			// Decrement the counter when the goroutine completes.
-			defer wg.Done()
-			// shut down the actor
-			ref.Shutdown(ctx)
-		}(actor)
-	}
-	// Wait for all the actors to gracefully shutdown
-	wg.Wait()
-	return nil
-}
-
-// housekeeping time to time removes dead actors from the system
-// that helps free non-utilized resources
-func (a *actorSystem) housekeeping() {
-	// create the ticker
-	ticker := time.NewTicker(30 * time.Millisecond)
-	// add some logging
-	a.logger.Info("Housekeeping has started...")
-	// init ticking
-	go func() {
-		for range ticker.C {
-			// loop over the actors in the system and remove the dead one
-			for _, actor := range a.Actors() {
-				if !actor.IsOnline() {
-					a.logger.Infof("Removing actor=%s from system", actor.addr)
-					a.actors.Remove(string(actor.addr))
-					return
-				}
-			}
+		if err := actor.Shutdown(ctx); err != nil {
+			return err
 		}
-	}()
-	// wait for the stop signal to stop the ticker
-	<-a.housekeepingStopSig
-	// stop the ticker
-	ticker.Stop()
-	a.logger.Info("Housekeeping stopped...")
+		a.actors.Remove(string(actor.addr))
+	}
+
+	return nil
 }
