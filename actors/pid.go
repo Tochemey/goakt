@@ -6,13 +6,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tochemey/goakt/pkg/tools"
-
 	"github.com/cenkalti/backoff"
 	actorsv1 "github.com/tochemey/goakt/gen/actors/v1"
 	"github.com/tochemey/goakt/log"
+	"github.com/tochemey/goakt/pkg/tools"
 	"go.uber.org/atomic"
-	"golang.org/x/sync/errgroup"
 )
 
 // NoSender means that there is no sender
@@ -24,21 +22,21 @@ type processor interface {
 	Send(message Message) error
 	// Shutdown gracefully shuts down the given actor
 	Shutdown(ctx context.Context) error
-	// IsReady returns true when the actor is alive ready to process messages and false
+	// IsOnline returns true when the actor is online ready to process messages and false
 	// when the actor is stopped or not started at all
-	IsReady(ctx context.Context) bool
+	IsOnline() bool
 	// TotalProcessed returns the total number of messages processed by the actor
 	// at a given point in time while the actor heart is still beating
 	TotalProcessed(ctx context.Context) uint64
 	// ErrorsCount returns the total number of panic attacks that occur while the actor is processing messages
 	// at a given point in time while the actor heart is still beating
 	ErrorsCount(ctx context.Context) uint64
-	// SpawnChild creates a child actor of its own kind
-	SpawnChild(ctx context.Context, actor Actor) (*PID, error)
+	// SpawnChild creates a child actor
+	SpawnChild(ctx context.Context, kind string, actor Actor) (*PID, error)
 	// Restart restarts the actor
 	Restart(ctx context.Context) error
 	// Watch an actor
-	Watch(pid *PID) chan error
+	Watch(pid *PID)
 	// UnWatch stops watching a given actor
 	UnWatch(pid *PID)
 }
@@ -52,7 +50,7 @@ type PID struct {
 	addr Address
 
 	// helps determine whether the actor should handle messages or not.
-	isReady bool
+	isOnline bool
 	// is captured whenever a mail is sent to the actor
 	lastProcessingTime atomic.Time
 
@@ -78,11 +76,12 @@ type PID struct {
 	mailbox chan Message
 	// receives a shutdown signal. Once the signal is received
 	// the actor is shut down gracefully.
-	shutdownSignal chan Unit
-	errChan        chan error
+	shutdownSignal     chan Unit
+	haltPassivationLnr chan Unit
+	errChan            chan error
 
 	// set of watchers watching the given actor
-	watchers *tools.ConcurrentSlice[*watcher]
+	watchers *tools.ConcurrentSlice[*Watcher]
 
 	// hold the list of the children
 	children *pidMap
@@ -100,8 +99,7 @@ type PID struct {
 	receivedMessageCounter *atomic.Uint64
 	lastProcessingDuration *atomic.Duration
 
-	mu         sync.RWMutex
-	childrenMu sync.RWMutex
+	mu sync.RWMutex
 
 	// supervisor strategy
 	supervisorStrategy actorsv1.Strategy
@@ -116,23 +114,23 @@ func NewPID(ctx context.Context, actor Actor, opts ...pidOption) *PID {
 	pid := &PID{
 		Actor:                  actor,
 		addr:                   "",
-		isReady:                false,
+		isOnline:               false,
 		lastProcessingTime:     atomic.Time{},
 		passivateAfter:         5 * time.Second,
 		sendRecvTimeout:        5 * time.Second,
 		shutdownTimeout:        5 * time.Second,
 		initMaxRetries:         5,
 		mailbox:                make(chan Message, 1000),
-		shutdownSignal:         make(chan Unit),
+		shutdownSignal:         make(chan Unit, 1),
+		haltPassivationLnr:     make(chan Unit, 1),
 		logger:                 log.DefaultLogger,
 		panicCounter:           atomic.NewUint64(0),
 		receivedMessageCounter: atomic.NewUint64(0),
 		lastProcessingDuration: atomic.NewDuration(0),
 		mu:                     sync.RWMutex{},
-		childrenMu:             sync.RWMutex{},
 		children:               newPIDMap(10),
 		supervisorStrategy:     actorsv1.Strategy_STOP,
-		watchers:               tools.NewConcurrentSlice[*watcher](),
+		watchers:               tools.NewConcurrentSlice[*Watcher](),
 	}
 	// set the custom options to override the default values
 	for _, opt := range opts {
@@ -155,13 +153,22 @@ func NewPID(ctx context.Context, actor Actor, opts ...pidOption) *PID {
 	return pid
 }
 
-// IsReady returns true when the actor is alive ready to process messages and false
+// IsOnline returns true when the actor is alive ready to process messages and false
 // when the actor is stopped or not started at all
-func (p *PID) IsReady(ctx context.Context) bool {
+func (p *PID) IsOnline() bool {
 	p.mu.RLock()
-	ready := p.isReady
+	ready := p.isOnline
 	p.mu.RUnlock()
 	return ready
+}
+
+// ActorSystem returns the actor system
+func (p *PID) ActorSystem() ActorSystem {
+	var sys ActorSystem
+	p.mu.Lock()
+	sys = p.system
+	p.mu.Unlock()
+	return sys
 }
 
 // Restart restarts the actor. This call can panic which is the expected behaviour.
@@ -172,7 +179,7 @@ func (p *PID) Restart(ctx context.Context) error {
 		return ErrUndefinedActor
 	}
 	// check whether the actor is ready and stop it
-	if p.IsReady(ctx) {
+	if p.IsOnline() {
 		// stop the actor
 		if err := p.Shutdown(ctx); err != nil {
 			return err
@@ -192,78 +199,45 @@ func (p *PID) Restart(ctx context.Context) error {
 }
 
 // SpawnChild creates a child actor and start watching it for error
-func (p *PID) SpawnChild(ctx context.Context, actor Actor) (*PID, error) {
+func (p *PID) SpawnChild(ctx context.Context, kind string, actor Actor) (*PID, error) {
 	// first check whether the actor is ready to start another actor
-	if !p.IsReady(ctx) {
+	if !p.IsOnline() {
 		return nil, ErrNotReady
 	}
 
-	// let us acquire the children lock
-	p.childrenMu.Lock()
-	defer p.childrenMu.Unlock()
-
 	// create the address of the given actor
-	addr := GetAddress(p.system, p.kind, actor.ID())
+	addr := GetAddress(p.ActorSystem(), kind, actor.ID())
 	// check whether the child actor already exist and just return the PID
-	if pid, ok := p.children.Get(addr); ok {
+	if cid, ok := p.children.Get(addr); ok {
 		// check whether the actor is stopped
-		if !pid.IsReady(ctx) {
+		if !cid.IsOnline() {
 			// then reboot it
-			if err := pid.Restart(ctx); err != nil {
+			if err := cid.Restart(ctx); err != nil {
 				return nil, err
 			}
 		}
-		return pid, nil
+		return cid, nil
 	}
 
 	// create the child pid
-	pid := NewPID(ctx, actor,
+	cid := NewPID(ctx, actor,
 		withInitMaxRetries(p.initMaxRetries),
 		withPassivationAfter(p.passivateAfter),
 		withSendReplyTimeout(p.sendRecvTimeout),
 		withCustomLogger(p.logger),
 		withActorSystem(p.system),
-		withKind(p.kind),
+		withKind(kind),
 		withSupervisorStrategy(p.supervisorStrategy),
 		withShutdownTimeout(p.shutdownTimeout),
 		withAddress(addr))
 
 	// add the pid to the map
-	p.children.Set(pid)
+	p.children.Set(cid)
 
 	// let us start watching it
-	watch := p.Watch(pid)
-	go func() {
-		err := <-watch
-		p.logger.Errorf("child actor=%s is panicing: Err=%v", pid.addr, err)
-		switch p.supervisorStrategy {
-		case actorsv1.Strategy_STOP:
-			// shutdown the actor and panic in case of error
-			if err := pid.Shutdown(context.Background()); err != nil {
-				panic(err)
-			}
-			// unwatch the given actor
-			p.UnWatch(pid)
-			// remove the actor from the children map
-			pid.children.Delete(pid.addr)
-		case actorsv1.Strategy_RESTART:
-			// restart the actor
-			if err := pid.Restart(context.Background()); err != nil {
-				panic(err)
-			}
-		default:
-			// shutdown the actor and panic in case of error
-			if err := pid.Shutdown(context.Background()); err != nil {
-				panic(err)
-			}
-			// unwatch the given actor
-			p.UnWatch(pid)
-			// remove the actor from the children map
-			pid.children.Delete(pid.addr)
-		}
-	}()
+	p.Watch(cid)
 
-	return pid, nil
+	return cid, nil
 }
 
 // TotalProcessed returns the total number of messages processed by the actor
@@ -283,7 +257,7 @@ func (p *PID) Send(message Message) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	// reject message when the actor is not ready to process messages
-	if !p.isReady {
+	if !p.isOnline {
 		return ErrNotReady
 	}
 	// set the last processing time
@@ -318,9 +292,120 @@ func (p *PID) Send(message Message) error {
 // that can be configured. All child actors will be gracefully shutdown.
 func (p *PID) Shutdown(ctx context.Context) error {
 	p.logger.Info("Shutdown process has started...")
-	// stop future messages
+	// stop the passivation listener
+	p.haltPassivationLnr <- Unit{}
+
+	// check whether the actor is still alive. Maybe it has been passivated already
+	if !p.IsOnline() {
+		p.logger.Infof("Actor=%s is offline. Maybe it has been passivated or stopped already", p.addr)
+		return nil
+	}
+
+	// stop the actor PID
+	p.stop(ctx)
+
+	// add some logging
+	p.logger.Info("Shutdown process is on going for actor=%s...", p.addr)
+	// signal we are shutting down to stop processing messages
+	p.shutdownSignal <- Unit{}
+	// perform some cleanup with the actor
+	if err := p.Actor.PostStop(ctx); err != nil {
+		p.logger.Error(fmt.Errorf("failed to stop the underlying receiver for actor=%s. Cause:%v", p.addr, err))
+		return err
+	}
+	p.logger.Infof("Actor=%s successfully shutdown", p.addr)
+	return nil
+}
+
+// Watch a pid for errors, and send on the returned channel if an error occurred
+func (p *PID) Watch(pid *PID) {
+	// create a watcher
+	w := &Watcher{
+		Parent:  p,
+		ErrChan: make(chan error, 1),
+		Done:    make(chan Unit, 1),
+	}
+	// add the watcher to the list of watchers
+	pid.watchers.Append(w)
+	// supervise the PID
+	go p.supervise(pid, w)
+}
+
+// UnWatch stops watching a given actor
+func (p *PID) UnWatch(pid *PID) {
+	// iterate the watchers list
+	for item := range pid.watchers.Iter() {
+		// grab the item value
+		w := item.Value
+		// locate the given watcher
+		if w.Parent.addr == p.addr {
+			// stop the watching go routine
+			w.Done <- Unit{}
+			// remove the watcher from the list
+			pid.watchers.Delete(item.Index)
+			break
+		}
+	}
+}
+
+// init initializes the given actor and init processing messages
+// when the initialization failed the actor is automatically shutdown
+func (p *PID) init(ctx context.Context) {
+	// add some logging info
+	p.logger.Info("Initialization process has started...")
+	// create the exponential backoff object
+	expoBackoff := backoff.WithMaxRetries(backoff.NewExponentialBackOff(), uint64(p.initMaxRetries))
+	// init the actor initialization receive
+	err := backoff.Retry(func() error {
+		return p.Actor.PreStart(ctx)
+	}, expoBackoff)
+	// handle backoff error
+	if err != nil {
+		// log the error
+		p.logger.Error(err.Error())
+		// reset the actor
+		p.reset()
+		return
+	}
+	// set the actor is ready
 	p.mu.Lock()
-	p.isReady = false
+	p.isOnline = true
+	p.mu.Unlock()
+	// add some logging info
+	p.logger.Info("Initialization process successfully completed.")
+}
+
+func (p *PID) reset() {
+	// reset the mailbox
+	p.mailbox = make(chan Message, 1000)
+	// reset the children map
+	p.children = newPIDMap(10)
+	// reset the various counters
+	p.panicCounter = atomic.NewUint64(0)
+	p.receivedMessageCounter = atomic.NewUint64(0)
+	p.lastProcessingDuration = atomic.NewDuration(0)
+	// reset the channels
+	p.shutdownSignal = make(chan Unit, 1)
+	p.haltPassivationLnr = make(chan Unit, 1)
+}
+
+func (p *PID) freeChildren(ctx context.Context) {
+	// iterate the pids and shutdown the child actors
+	for _, child := range p.children.All() {
+		// stop the child actor
+		if err := child.Shutdown(ctx); err != nil {
+			panic(err)
+		}
+		// unwatch the child
+		p.UnWatch(child)
+		p.children.Delete(child.addr)
+	}
+}
+
+func (p *PID) stop(ctx context.Context) {
+	// stop the actor to receive and send message
+	p.mu.Lock()
+	p.isOnline = false
 	p.mu.Unlock()
 	// stop all the child actors
 	p.freeChildren(ctx)
@@ -351,260 +436,10 @@ func (p *PID) Shutdown(ctx context.Context) error {
 	}()
 	// listen to ticker stop signal
 	<-tickerStopSig
-	// add some logging
-	p.logger.Info("Remaining messages in the mailbox have been processed!!!")
-	// stop the ticker
-	ticker.Stop()
-	// add some logging
-	p.logger.Info("Shutdown process is on going...")
 	// signal we are shutting down to stop processing messages
 	p.shutdownSignal <- Unit{}
-	// perform some cleanup with the actor
-	return p.Actor.PostStop(ctx)
-}
-
-// Watch a pid for errors, and send on the returned channel if an error occurred
-func (p *PID) Watch(pid *PID) chan error {
-	// create an error channel
-	errChan := make(chan error, 1)
-	// create a watcher
-	w := &watcher{
-		pid:     p,
-		errChan: errChan,
-	}
-	// add the watcher to the list of watchers
-	pid.watchers.Append(w)
-	// start watching
-	go func() {
-		err := <-w.errChan
-		errChan <- err
-	}()
-	return errChan
-}
-
-// UnWatch stops watching a given actor
-func (p *PID) UnWatch(pid *PID) {
-	// iterate the watchers list
-	for item := range pid.watchers.Iter() {
-		// grab the item value
-		w := item.Value
-		// locate the given watcher
-		if w.pid.addr == p.addr {
-			// close the watch channel
-			close(w.errChan)
-			// remove the watcher from the list
-			pid.watchers.Delete(item.Index)
-			break
-		}
-	}
-}
-
-// init initializes the given actor and init processing messages
-// when the initialization failed the actor is automatically shutdown
-func (p *PID) init(ctx context.Context) {
-	// add some logging info
-	p.logger.Info("Initialization process has started...")
-	// create the exponential backoff object
-	expoBackoff := backoff.WithMaxRetries(backoff.NewExponentialBackOff(), uint64(p.initMaxRetries))
-	// init the actor initialization receive
-	err := backoff.Retry(func() error {
-		return p.Actor.PreStart(ctx)
-	}, expoBackoff)
-	// handle backoff error
-	if err != nil {
-		// log the error
-		p.logger.Error(err.Error())
-		// reset the actor
-		p.reset()
-		return
-	}
-	// set the actor is ready
-	p.mu.Lock()
-	p.isReady = true
-	p.mu.Unlock()
-	// add some logging info
-	p.logger.Info("Initialization process successfully completed.")
-}
-
-// passivationListener checks whether the actor is processing messages or not.
-// when the actor is idle, it automatically shuts down to free resources
-func (p *PID) passivationListener() {
-	// create the ticker
-	ticker := time.NewTicker(p.passivateAfter)
-	// create the stop ticker signal
-	tickerStopSig := make(chan struct{})
-
-	// init ticking
-	go func() {
-		for range ticker.C {
-			// check whether the actor is idle or not
-			idleTime := time.Since(p.lastProcessingTime.Load())
-			// check whether the actor is idle
-			if idleTime >= p.passivateAfter {
-				// set the done channel to stop the ticker
-				tickerStopSig <- struct{}{}
-			}
-		}
-	}()
-	// wait for the stop signal to stop the ticker
-	<-tickerStopSig
+	// add some logging
+	p.logger.Infof("Remaining messages in the mailbox have been processed for actor=%s", p.addr)
 	// stop the ticker
 	ticker.Stop()
-	// add some logging info
-	p.logger.Info("Passivation mode has been triggered...")
-	// init the shutdown process
-	if err := p.Shutdown(context.Background()); err != nil {
-		// FIXME fix the panic
-		panic(err)
-	}
-}
-
-// receive handles every mail in the actor mailbox
-func (p *PID) receive() {
-	// run the processing loop
-	for {
-		select {
-		case <-p.shutdownSignal:
-			return
-		case received := <-p.mailbox:
-			msg := received.Payload()
-			switch msg.(type) {
-			case *actorsv1.PoisonPill:
-				if err := p.Shutdown(received.Context()); err != nil {
-					// FIXME fix the panic
-					panic(err)
-				}
-			default:
-				done := make(chan struct{})
-				go func() {
-					// close the msg error channel
-					defer close(p.errChan)
-					defer close(done)
-					// recover from a panic attack
-					defer func() {
-						if r := recover(); r != nil {
-							// construct the error to return
-							err := fmt.Errorf("%s", r)
-							// send the error to the channels
-							p.errChan <- err
-							// send the error to the watchers
-							for item := range p.watchers.Iter() {
-								item.Value.errChan <- err
-							}
-							// increase the panic counter
-							p.panicCounter.Inc()
-						}
-					}()
-					// send the message to actor to receive
-					err := p.Receive(received)
-					// set the error channels
-					p.errChan <- err
-					// send the error to the watchers
-					for item := range p.watchers.Iter() {
-						item.Value.errChan <- err
-					}
-				}()
-			}
-		}
-	}
-}
-
-func (p *PID) reset() {
-	// reset the mailbox
-	p.mailbox = make(chan Message, 1000)
-	// reset the children map
-	p.children = newPIDMap(10)
-	// reset the various counters
-	p.panicCounter = atomic.NewUint64(0)
-	p.receivedMessageCounter = atomic.NewUint64(0)
-	p.lastProcessingDuration = atomic.NewDuration(0)
-}
-
-func (p *PID) freeChildren(ctx context.Context) {
-	g, ctx := errgroup.WithContext(ctx)
-	// iterate the pids and shutdown the child actors
-	for _, child := range p.children.All() {
-		child := child // golang closure
-		g.Go(func() error {
-			return child.Shutdown(ctx)
-		})
-	}
-
-	// handle any eventual error
-	if err := g.Wait(); err != nil {
-		panic(err)
-	}
-
-	// remove all the child actors
-	for _, child := range p.children.All() {
-		p.children.Delete(child.addr)
-	}
-}
-
-// pidOption represents the PID
-type pidOption func(ref *PID)
-
-// withPassivationAfter sets the actor passivation time
-func withPassivationAfter(duration time.Duration) pidOption {
-	return func(ref *PID) {
-		ref.passivateAfter = duration
-	}
-}
-
-// withSendReplyTimeout sets how long in seconds an actor should reply a command
-// in a receive-reply pattern
-func withSendReplyTimeout(timeout time.Duration) pidOption {
-	return func(ref *PID) {
-		ref.sendRecvTimeout = timeout
-	}
-}
-
-// withInitMaxRetries sets the number of times to retry an actor init process
-func withInitMaxRetries(max int) pidOption {
-	return func(ref *PID) {
-		ref.initMaxRetries = max
-	}
-}
-
-// withCustomLogger sets the logger
-func withCustomLogger(logger log.Logger) pidOption {
-	return func(ref *PID) {
-		ref.logger = logger
-	}
-}
-
-// withAddress sets the address of the PID
-func withAddress(addr Address) pidOption {
-	return func(ref *PID) {
-		ref.addr = addr
-	}
-}
-
-// withActorSystem set the actor system of the PID
-func withActorSystem(sys ActorSystem) pidOption {
-	return func(ref *PID) {
-		ref.system = sys
-	}
-}
-
-// withKind set the kind of actor represented by the PID
-func withKind(kind string) pidOption {
-	return func(ref *PID) {
-		ref.kind = kind
-	}
-}
-
-// withSupervisorStrategy sets the supervisor strategy to used when dealing
-// with child actors
-func withSupervisorStrategy(strategy actorsv1.Strategy) pidOption {
-	return func(ref *PID) {
-		ref.supervisorStrategy = strategy
-	}
-}
-
-// withShutdownTimeout sets the shutdown timeout
-func withShutdownTimeout(duration time.Duration) pidOption {
-	return func(ref *PID) {
-		ref.shutdownTimeout = duration
-	}
 }

@@ -14,7 +14,7 @@ type BenchActor struct {
 }
 
 func (p *BenchActor) ID() string {
-	return "benchActor"
+	return "BenchActor"
 }
 
 func (p *BenchActor) PreStart(ctx context.Context) error {
@@ -86,5 +86,67 @@ func (p *TestActor) Receive(message Message) error {
 	default:
 		return ErrUnhandled
 	}
+	return nil
+}
+
+type ParentActor struct {
+	id string
+}
+
+var _ Actor = (*ParentActor)(nil)
+
+func NewParentActor(id string) *ParentActor {
+	return &ParentActor{id: id}
+}
+
+func (p *ParentActor) ID() string {
+	return p.id
+}
+
+func (p *ParentActor) PreStart(ctx context.Context) error {
+	return nil
+}
+
+func (p *ParentActor) Receive(message Message) error {
+	switch message.Payload().(type) {
+	case *actorsv1.TestSend:
+		return nil
+	default:
+		return ErrUnhandled
+	}
+}
+
+func (p *ParentActor) PostStop(ctx context.Context) error {
+	return nil
+}
+
+type ChildActor struct {
+	id string
+}
+
+var _ Actor = (*ChildActor)(nil)
+
+func NewChildActor(id string) *ChildActor {
+	return &ChildActor{id: id}
+}
+
+func (c *ChildActor) ID() string {
+	return c.id
+}
+
+func (c *ChildActor) PreStart(ctx context.Context) error {
+	return nil
+}
+
+func (c *ChildActor) Receive(message Message) error {
+	switch message.Payload().(type) {
+	case *actorsv1.TestSend:
+		return nil
+	default:
+		return ErrUnhandled
+	}
+}
+
+func (c *ChildActor) PostStop(ctx context.Context) error {
 	return nil
 }

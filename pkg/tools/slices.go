@@ -23,6 +23,11 @@ func NewConcurrentSlice[T any]() *ConcurrentSlice[T] {
 	return cs
 }
 
+// Len returns the number of items
+func (cs *ConcurrentSlice[T]) Len() int {
+	return len(cs.items)
+}
+
 // Append adds an item to the concurrent slice.
 func (cs *ConcurrentSlice[T]) Append(item T) {
 	cs.Lock()

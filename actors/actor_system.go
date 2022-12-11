@@ -87,7 +87,7 @@ func (a *actorSystem) Spawn(ctx context.Context, kind string, actor Actor) *PID 
 	// actor already exist no need recreate it.
 	if exist {
 		// check whether the given actor heart beat
-		if pid.IsReady(ctx) {
+		if pid.IsOnline() {
 			// return the existing instance
 			return pid
 		}
@@ -136,7 +136,7 @@ func (a *actorSystem) Start(ctx context.Context) error {
 	// set the has started to true
 	a.hasStarted.Store(true)
 	// start the housekeeper
-	go a.housekeeping()
+	//go a.housekeeping()
 	a.logger.Infof("%s System started on Node=%s...", a.name, a.nodeAddr)
 	return nil
 }
@@ -183,9 +183,10 @@ func (a *actorSystem) housekeeping() {
 		for range ticker.C {
 			// loop over the actors in the system and remove the dead one
 			for _, actor := range a.Actors() {
-				if !actor.IsReady(context.Background()) {
+				if !actor.IsOnline() {
 					a.logger.Infof("Removing actor=%s from system", actor.addr)
 					a.actors.Remove(string(actor.addr))
+					return
 				}
 			}
 		}

@@ -1,6 +1,7 @@
 package actors
 
-type watcher struct {
-	pid     *PID       // the pid of the actor watching
-	errChan chan error // the channel where to pass error message
+type Watcher struct {
+	Parent  *PID       // the Parent of the actor watching
+	ErrChan chan error // the channel where to pass error message
+	Done    chan Unit
 }
