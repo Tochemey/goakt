@@ -7,7 +7,7 @@ import (
 
 // passivationListener checks whether the actor is processing messages or not.
 // when the actor is idle, it automatically shuts down to free resources
-func (p *PID) passivationListener() {
+func (p *pid) passivationListener() {
 	// create the ticker
 	ticker := time.NewTicker(p.passivateAfter)
 	// create the stop ticker signal
@@ -50,7 +50,7 @@ func (p *PID) passivationListener() {
 	p.passivate()
 }
 
-func (p *PID) passivate() {
+func (p *pid) passivate() {
 	// create a context
 	ctx := context.Background()
 	// stop the actor PID

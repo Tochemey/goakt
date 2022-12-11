@@ -13,7 +13,7 @@ type Message interface {
 	// Context returns the context attached to the message
 	Context() context.Context
 	// Sender of the message
-	Sender() *PID
+	Sender() PID
 	// Payload is the actual message sent
 	Payload() proto.Message
 	// Response is the response to the message
@@ -29,7 +29,7 @@ type MessageOption = func(message *message)
 type message struct {
 	ctx      context.Context
 	content  proto.Message
-	sender   *PID
+	sender   *pid
 	response proto.Message
 	mu       sync.Mutex
 }
@@ -59,7 +59,7 @@ func (m *message) Context() context.Context {
 }
 
 // Sender of the message
-func (m *message) Sender() *PID {
+func (m *message) Sender() PID {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.sender
@@ -90,7 +90,7 @@ func NewMessage(ctx context.Context, content proto.Message, opts ...MessageOptio
 }
 
 // WithSender sets the message sender
-func WithSender(sender *PID) MessageOption {
+func WithSender(sender *pid) MessageOption {
 	return func(message *message) {
 		message.sender = sender
 	}

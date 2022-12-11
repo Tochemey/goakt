@@ -31,7 +31,7 @@ func TestActorReceive(t *testing.T) {
 		assert.NotNil(t, actor)
 
 		// create the actor ref
-		pid := NewPID(ctx, actor,
+		pid := newPID(ctx, actor,
 			withInitMaxRetries(1),
 			withPassivationAfter(2*time.Second),
 			withSendReplyTimeout(recvTimeout))
@@ -55,7 +55,7 @@ func TestActorReceive(t *testing.T) {
 		assert.NotNil(t, actor)
 
 		// create the actor ref
-		pid := NewPID(ctx, actor,
+		pid := newPID(ctx, actor,
 			withInitMaxRetries(1),
 			withPassivationAfter(passivateAfter),
 			withSendReplyTimeout(recvTimeout))
@@ -79,7 +79,7 @@ func TestActorReceive(t *testing.T) {
 		assert.NotNil(t, actor)
 
 		// create the actor ref
-		pid := NewPID(ctx, actor,
+		pid := newPID(ctx, actor,
 			withInitMaxRetries(1),
 			withPassivationAfter(passivateAfter),
 			withSendReplyTimeout(recvTimeout))
@@ -104,7 +104,7 @@ func TestActorReceive(t *testing.T) {
 		assert.NotNil(t, actor)
 
 		// create the actor ref
-		pid := NewPID(ctx, actor,
+		pid := newPID(ctx, actor,
 			withInitMaxRetries(1),
 			withPassivationAfter(passivateAfter),
 			withSendReplyTimeout(recvTimeout))
@@ -131,7 +131,7 @@ func TestActorReceive(t *testing.T) {
 	//	assert.NotNil(t, actor)
 	//
 	//	// create the actor ref
-	//	pid := NewPID(ctx, actor,
+	//	pid := newPID(ctx, actor,
 	//		withInitMaxRetries(1),
 	//		withPassivationAfter(passivateAfter),
 	//		withSendReplyTimeout(recvTimeout))
@@ -157,7 +157,7 @@ func TestActorReceive(t *testing.T) {
 		assert.NotNil(t, actor)
 
 		// create the actor ref
-		pid := NewPID(ctx, actor,
+		pid := newPID(ctx, actor,
 			withInitMaxRetries(1),
 			withPassivationAfter(passivateAfter),
 			withSendReplyTimeout(recvTimeout))
@@ -189,7 +189,7 @@ func TestActorReceive(t *testing.T) {
 		assert.NotNil(t, actor)
 
 		// create the actor ref
-		pid := NewPID(ctx, actor,
+		pid := newPID(ctx, actor,
 			withInitMaxRetries(1),
 			withPassivationAfter(passivateAfter),
 			withSendReplyTimeout(recvTimeout))
@@ -226,7 +226,7 @@ func TestActorRestart(t *testing.T) {
 		assert.NotNil(t, actor)
 
 		// create the actor ref
-		pid := NewPID(ctx, actor,
+		pid := newPID(ctx, actor,
 			withInitMaxRetries(1),
 			withPassivationAfter(passivateAfter),
 			withActorSystem(actorSys),
@@ -266,7 +266,7 @@ func TestActorRestart(t *testing.T) {
 		assert.NotNil(t, actor)
 
 		// create the actor ref
-		pid := NewPID(ctx, actor,
+		pid := newPID(ctx, actor,
 			withInitMaxRetries(1),
 			withPassivationAfter(passivateAfter),
 			withSendReplyTimeout(recvTimeout))
@@ -301,7 +301,7 @@ func TestActorRestart(t *testing.T) {
 		assert.NotNil(t, actor)
 
 		// create the actor ref
-		pid := NewPID(ctx, actor,
+		pid := newPID(ctx, actor,
 			withInitMaxRetries(1),
 			withPassivationAfter(passivateAfter),
 			withActorSystem(actorSys),
@@ -345,7 +345,7 @@ func TestChildActor(t *testing.T) {
 		require.NoError(t, err)
 
 		// create the parent actor
-		pid := NewPID(ctx, NewParentActor("p1"),
+		pid := newPID(ctx, NewParentActor("p1"),
 			withInitMaxRetries(1),
 			withPassivationAfter(2*time.Second),
 			withActorSystem(actorSys),
@@ -380,7 +380,7 @@ func BenchmarkActor(b *testing.B) {
 		actor := &BenchActor{}
 
 		// create the actor ref
-		pid := NewPID(ctx, actor,
+		pid := newPID(ctx, actor,
 			withInitMaxRetries(1),
 			withPassivationAfter(5*time.Second),
 			withSendReplyTimeout(recvTimeout))
@@ -402,7 +402,7 @@ func BenchmarkActor(b *testing.B) {
 		actor := &BenchActor{}
 
 		// create the actor ref
-		pid := NewPID(ctx, actor,
+		pid := newPID(ctx, actor,
 			withInitMaxRetries(1),
 			withPassivationAfter(5*time.Second),
 			withSendReplyTimeout(recvTimeout))
@@ -421,7 +421,7 @@ func BenchmarkActor(b *testing.B) {
 		actor := &BenchActor{}
 
 		// create the actor ref
-		pid := NewPID(ctx, actor,
+		pid := newPID(ctx, actor,
 			withInitMaxRetries(1),
 			withPassivationAfter(5*time.Second),
 			withSendReplyTimeout(recvTimeout))
@@ -448,7 +448,7 @@ func BenchmarkActor(b *testing.B) {
 		actor := &BenchActor{}
 
 		// create the actor ref
-		pid := NewPID(ctx, actor,
+		pid := newPID(ctx, actor,
 			withInitMaxRetries(1),
 			withPassivationAfter(5*time.Second),
 			withSendReplyTimeout(recvTimeout))
@@ -477,7 +477,7 @@ func BenchmarkActor(b *testing.B) {
 		actor := &BenchActor{}
 
 		// create the actor ref
-		pid := NewPID(ctx, actor,
+		pid := newPID(ctx, actor,
 			withInitMaxRetries(1),
 			withPassivationAfter(5*time.Second),
 			withSendReplyTimeout(recvTimeout))
@@ -499,7 +499,7 @@ func BenchmarkActor(b *testing.B) {
 		actor := &BenchActor{}
 
 		// create the actor ref
-		pid := NewPID(ctx, actor,
+		pid := newPID(ctx, actor,
 			withInitMaxRetries(1),
 			withPassivationAfter(5*time.Second),
 			withSendReplyTimeout(recvTimeout))
@@ -518,7 +518,7 @@ func BenchmarkActor(b *testing.B) {
 		actor := &BenchActor{}
 
 		// create the actor ref
-		pid := NewPID(ctx, actor,
+		pid := newPID(ctx, actor,
 			withInitMaxRetries(1),
 			withPassivationAfter(5*time.Second),
 			withSendReplyTimeout(recvTimeout))
@@ -545,7 +545,7 @@ func BenchmarkActor(b *testing.B) {
 		actor := &BenchActor{}
 
 		// create the actor ref
-		pid := NewPID(ctx, actor,
+		pid := newPID(ctx, actor,
 			withInitMaxRetries(1),
 			withPassivationAfter(5*time.Second),
 			withSendReplyTimeout(recvTimeout))

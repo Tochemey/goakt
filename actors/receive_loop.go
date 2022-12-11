@@ -7,7 +7,7 @@ import (
 )
 
 // receive handles every mail in the actor mailbox
-func (p *PID) receive() {
+func (p *pid) receive() {
 	// run the processing loop
 	for {
 		select {

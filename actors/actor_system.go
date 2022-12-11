@@ -19,13 +19,13 @@ type ActorSystem interface {
 	// NodeAddr returns the node where the actor system is running
 	NodeAddr() string
 	// Actors returns the list of Actors that are alive in the actor system
-	Actors() []*PID
+	Actors() []PID
 	// Start starts the actor system
 	Start(ctx context.Context) error
 	// Stop stops the actor system
 	Stop(ctx context.Context) error
 	// Spawn creates an actor in the system
-	Spawn(ctx context.Context, kind string, actor Actor) *PID
+	Spawn(ctx context.Context, kind string, actor Actor) PID
 }
 
 // ActorSystem represent a collection of actors on a given node
@@ -36,7 +36,7 @@ type actorSystem struct {
 	// Specifies the node where the actor system is located
 	nodeAddr string
 	// map of actors in the system
-	actors cmp.ConcurrentMap[string, *PID]
+	actors cmp.ConcurrentMap[string, PID]
 	//  specifies the logger to use
 	logger log.Logger
 
@@ -61,7 +61,7 @@ func NewActorSystem(config *Config) (ActorSystem, error) {
 		cache = &actorSystem{
 			name:       config.Name(),
 			nodeAddr:   config.NodeHostAndPort(),
-			actors:     cmp.New[*PID](),
+			actors:     cmp.New[PID](),
 			logger:     config.Logger(),
 			config:     config,
 			hasStarted: atomic.NewBool(false),
@@ -72,7 +72,7 @@ func NewActorSystem(config *Config) (ActorSystem, error) {
 }
 
 // Spawn creates or returns the instance of a given actor in the system
-func (a *actorSystem) Spawn(ctx context.Context, kind string, actor Actor) *PID {
+func (a *actorSystem) Spawn(ctx context.Context, kind string, actor Actor) PID {
 	// first check whether the actor system has started
 	if !a.hasStarted.Load() {
 		return nil
@@ -91,7 +91,7 @@ func (a *actorSystem) Spawn(ctx context.Context, kind string, actor Actor) *PID 
 	}
 
 	// create an instance of the actor ref
-	pid = NewPID(ctx, actor,
+	pid = newPID(ctx, actor,
 		withInitMaxRetries(a.config.ActorInitMaxRetries()),
 		withPassivationAfter(a.config.ExpireActorAfter()),
 		withSendReplyTimeout(a.config.ReplyTimeout()),
@@ -117,10 +117,10 @@ func (a *actorSystem) NodeAddr() string {
 }
 
 // Actors returns the list of Actors that are alive in the actor system
-func (a *actorSystem) Actors() []*PID {
+func (a *actorSystem) Actors() []PID {
 	// get the actors from the actor map
 	items := a.actors.Items()
-	var refs []*PID
+	var refs []PID
 	for _, actorRef := range items {
 		refs = append(refs, actorRef)
 	}
@@ -155,7 +155,7 @@ func (a *actorSystem) Stop(ctx context.Context) error {
 		if err := actor.Shutdown(ctx); err != nil {
 			return err
 		}
-		a.actors.Remove(string(actor.addr))
+		a.actors.Remove(string(actor.Address()))
 	}
 
 	return nil
