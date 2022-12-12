@@ -3,6 +3,9 @@
 
 Minimal actor framework to build reactive and distributed system in golang using protocol buffers.
 
+If you are not familiar with the actor model, the blog post from Brian Storti [here](https://www.brianstorti.com/the-actor-model/) is an excellent and short introduction to the actor model. 
+Also, check reference section at the end of the post for more material regarding actor model
+
 ## Features
 
 - [x] Send a message to an actor:
@@ -20,7 +23,7 @@ Minimal actor framework to build reactive and distributed system in golang using
 - [x] Sample example
 - [ ] Send message performance tweaking
 
-### Sample
+## Sample
 
 ```go
 package main
