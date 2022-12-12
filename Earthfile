@@ -78,7 +78,7 @@ sample-pb:
     # generate the pbs
     RUN buf generate \
             --template buf.gen.yaml \
-            --path protos/sample/pinger
+            --path protos/sample/pb
 
     # save artifact to
-    SAVE ARTIFACT gen gen AS LOCAL _examples/sample
+    SAVE ARTIFACT gen gen AS LOCAL _examples/protos

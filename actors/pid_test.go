@@ -39,7 +39,7 @@ func TestActorReceive(t *testing.T) {
 		// let us send 10 messages to the actor
 		count := 10
 		for i := 0; i < count; i++ {
-			_ = pid.Send(NewMessage(ctx, &actorsv1.TestSend{}))
+			pid.Send(NewMessageContext(ctx, &actorsv1.TestSend{}))
 		}
 		assert.EqualValues(t, count, pid.TotalProcessed(ctx))
 		// stop the actor
@@ -64,11 +64,11 @@ func TestActorReceive(t *testing.T) {
 		err := pid.Shutdown(ctx)
 		assert.NoError(t, err)
 		// let us create the message
-		message := NewMessage(ctx, &actorsv1.TestSend{})
+		message := NewMessageContext(ctx, &actorsv1.TestSend{})
 		// let us send message
-		err = pid.Send(message)
-		assert.Error(t, err)
-		assert.EqualError(t, err, ErrNotReady.Error())
+		pid.Send(message)
+		assert.Error(t, message.Err())
+		assert.EqualError(t, message.Err(), ErrNotReady.Error())
 	})
 	t.Run("receive: unhappy path:unhandled message", func(t *testing.T) {
 		defer goleak.VerifyNone(t)
@@ -81,18 +81,19 @@ func TestActorReceive(t *testing.T) {
 		// create the actor ref
 		pid := newPID(ctx, actor,
 			withInitMaxRetries(1),
-			withPassivationAfter(passivateAfter),
+			withPassivationAfter(10*time.Second),
 			withSendReplyTimeout(recvTimeout))
 		assert.NotNil(t, pid)
 
 		// let us create the message
-		message := NewMessage(ctx, &emptypb.Empty{})
+		message := NewMessageContext(ctx, &emptypb.Empty{})
 		// let us send message
-		err := pid.Send(message)
-		assert.Error(t, err)
-		assert.EqualError(t, err, ErrUnhandled.Error())
+		pid.Send(message)
+		time.Sleep(1 * time.Second)
+		assert.Error(t, message.Err())
+		assert.EqualError(t, message.Err(), ErrUnhandled.Error())
 		// stop the actor
-		err = pid.Shutdown(ctx)
+		err := pid.Shutdown(ctx)
 		assert.NoError(t, err)
 	})
 	t.Run("receive-reply:happy path", func(t *testing.T) {
@@ -106,20 +107,21 @@ func TestActorReceive(t *testing.T) {
 		// create the actor ref
 		pid := newPID(ctx, actor,
 			withInitMaxRetries(1),
-			withPassivationAfter(passivateAfter),
+			withPassivationAfter(10*time.Second),
 			withSendReplyTimeout(recvTimeout))
 		assert.NotNil(t, pid)
 
 		// let us create the message
-		message := NewMessage(ctx, &actorsv1.TestReply{})
+		message := NewMessageContext(ctx, &actorsv1.TestReply{})
 		// let us send message
-		err := pid.Send(message)
-		require.NoError(t, err)
+		pid.Send(message)
+		time.Sleep(1 * time.Second)
+		require.NoError(t, message.Err())
 		require.NotNil(t, message.Response())
 		expected := &actorsv1.Reply{Content: "received message"}
 		assert.True(t, proto.Equal(expected, message.Response()))
 		// stop the actor
-		err = pid.Shutdown(ctx)
+		err := pid.Shutdown(ctx)
 		assert.NoError(t, err)
 	})
 	//t.Run("receive-reply:unhappy path:timeout", func(t *testing.T) {
@@ -138,7 +140,7 @@ func TestActorReceive(t *testing.T) {
 	//	assert.NotNil(t, pid)
 	//
 	//	// let us create the message
-	//	message := NewMessage(ctx, &actorsv1.TestTimeout{})
+	//	message := NewMessageContext(ctx, &actorsv1.TestTimeout{})
 	//	// let us send message
 	//	err := pid.Send(message)
 	//	assert.Error(t, err)
@@ -174,11 +176,12 @@ func TestActorReceive(t *testing.T) {
 		wg.Wait()
 
 		// let us create the message
-		message := NewMessage(ctx, &actorsv1.TestSend{})
+		message := NewMessageContext(ctx, &actorsv1.TestSend{})
 		// let us send message
-		err := pid.Send(message)
-		assert.Error(t, err)
-		assert.EqualError(t, err, ErrNotReady.Error())
+		pid.Send(message)
+		time.Sleep(300 * time.Millisecond)
+		assert.Error(t, message.Err())
+		assert.EqualError(t, message.Err(), ErrNotReady.Error())
 	})
 	t.Run("receive:recover from panic", func(t *testing.T) {
 		defer goleak.VerifyNone(t)
@@ -191,20 +194,21 @@ func TestActorReceive(t *testing.T) {
 		// create the actor ref
 		pid := newPID(ctx, actor,
 			withInitMaxRetries(1),
-			withPassivationAfter(passivateAfter),
+			withPassivationAfter(10*time.Second),
 			withSendReplyTimeout(recvTimeout))
 		assert.NotNil(t, pid)
 
 		// send a message
 		// let us create the message
-		message := NewMessage(ctx, &actorsv1.TestPanic{})
+		message := NewMessageContext(ctx, &actorsv1.TestPanic{})
 		// let us send message
-		err := pid.Send(message)
-		require.Error(t, err)
-		assert.EqualError(t, err, "Boom")
+		pid.Send(message)
+		time.Sleep(1 * time.Second)
+		require.Error(t, message.Err())
+		assert.EqualError(t, message.Err(), "Boom")
 
 		// stop the actor
-		err = pid.Shutdown(ctx)
+		err := pid.Shutdown(ctx)
 		assert.NoError(t, err)
 	})
 }
@@ -228,7 +232,7 @@ func TestActorRestart(t *testing.T) {
 		// create the actor ref
 		pid := newPID(ctx, actor,
 			withInitMaxRetries(1),
-			withPassivationAfter(passivateAfter),
+			withPassivationAfter(10*time.Second),
 			withActorSystem(actorSys),
 			withKind("pinger"),
 			withSendReplyTimeout(recvTimeout))
@@ -237,11 +241,12 @@ func TestActorRestart(t *testing.T) {
 		err = pid.Shutdown(ctx)
 		assert.NoError(t, err)
 		// let us create the message
-		message := NewMessage(ctx, &actorsv1.TestSend{})
+		message := NewMessageContext(ctx, &actorsv1.TestSend{})
 		// let us send message
-		err = pid.Send(message)
-		assert.Error(t, err)
-		assert.EqualError(t, err, ErrNotReady.Error())
+		pid.Send(message)
+		time.Sleep(1 * time.Second)
+		assert.Error(t, message.Err())
+		assert.EqualError(t, message.Err(), ErrNotReady.Error())
 
 		// restart the actor
 		err = pid.Restart(ctx)
@@ -250,7 +255,7 @@ func TestActorRestart(t *testing.T) {
 		// let us send 10 messages to the actor
 		count := 10
 		for i := 0; i < count; i++ {
-			_ = pid.Send(NewMessage(ctx, &actorsv1.TestSend{}))
+			pid.Send(NewMessageContext(ctx, &actorsv1.TestSend{}))
 		}
 		assert.EqualValues(t, count, pid.TotalProcessed(ctx))
 		// stop the actor
@@ -268,18 +273,19 @@ func TestActorRestart(t *testing.T) {
 		// create the actor ref
 		pid := newPID(ctx, actor,
 			withInitMaxRetries(1),
-			withPassivationAfter(passivateAfter),
+			withPassivationAfter(10*time.Second),
 			withSendReplyTimeout(recvTimeout))
 		assert.NotNil(t, pid)
 		// stop the actor
 		err := pid.Shutdown(ctx)
 		assert.NoError(t, err)
 		// let us create the message
-		message := NewMessage(ctx, &actorsv1.TestSend{})
+		message := NewMessageContext(ctx, &actorsv1.TestSend{})
 		// let us send message
-		err = pid.Send(message)
-		assert.Error(t, err)
-		assert.EqualError(t, err, ErrNotReady.Error())
+		pid.Send(message)
+		time.Sleep(1 * time.Second)
+		assert.Error(t, message.Err())
+		assert.EqualError(t, message.Err(), ErrNotReady.Error())
 
 		// restarting this actor
 		err = pid.Restart(ctx)
@@ -311,7 +317,7 @@ func TestActorRestart(t *testing.T) {
 		// let us send 10 messages to the actor
 		count := 10
 		for i := 0; i < count; i++ {
-			_ = pid.Send(NewMessage(ctx, &actorsv1.TestSend{}))
+			pid.Send(NewMessageContext(ctx, &actorsv1.TestSend{}))
 		}
 		assert.EqualValues(t, count, pid.TotalProcessed(ctx))
 
@@ -321,7 +327,7 @@ func TestActorRestart(t *testing.T) {
 		assert.True(t, pid.IsOnline())
 		// let us send 10 messages to the actor
 		for i := 0; i < count; i++ {
-			_ = pid.Send(NewMessage(ctx, &actorsv1.TestSend{}))
+			pid.Send(NewMessageContext(ctx, &actorsv1.TestSend{}))
 		}
 		assert.EqualValues(t, count, pid.TotalProcessed(ctx))
 		// stop the actor
@@ -347,7 +353,7 @@ func TestChildActor(t *testing.T) {
 		// create the parent actor
 		pid := newPID(ctx, NewParentActor("p1"),
 			withInitMaxRetries(1),
-			withPassivationAfter(2*time.Second),
+			withPassivationAfter(10*time.Second),
 			withActorSystem(actorSys),
 			withKind("parent"),
 			withSendReplyTimeout(recvTimeout))
@@ -361,10 +367,8 @@ func TestChildActor(t *testing.T) {
 		// let us send 10 messages to the actors
 		count := 10
 		for i := 0; i < count; i++ {
-			err = pid.Send(NewMessage(ctx, &actorsv1.TestSend{}))
-			assert.NoError(t, err)
-			err = cid.Send(NewMessage(ctx, &actorsv1.TestSend{}))
-			assert.NoError(t, err)
+			pid.Send(NewMessageContext(ctx, &actorsv1.TestSend{}))
+			cid.Send(NewMessageContext(ctx, &actorsv1.TestSend{}))
 		}
 		assert.EqualValues(t, count, pid.TotalProcessed(ctx))
 		assert.EqualValues(t, count, cid.TotalProcessed(ctx))
@@ -389,9 +393,7 @@ func BenchmarkActor(b *testing.B) {
 		go func() {
 			for i := 0; i < b.N; i++ {
 				// send a message to the actor
-				if err := pid.Send(NewMessage(ctx, &actorsv1.TestSend{})); err != nil {
-					fmt.Println("fail to send message")
-				}
+				pid.Send(NewMessageContext(ctx, &actorsv1.TestSend{}))
 			}
 		}()
 		actor.Wg.Wait()
@@ -410,9 +412,7 @@ func BenchmarkActor(b *testing.B) {
 		actor.Wg.Add(b.N)
 		for i := 0; i < b.N; i++ {
 			// send a message to the actor
-			if err := pid.Send(NewMessage(ctx, &actorsv1.TestSend{})); err != nil {
-				fmt.Println("fail to send message")
-			}
+			pid.Send(NewMessageContext(ctx, &actorsv1.TestSend{}))
 		}
 		_ = pid.Shutdown(ctx)
 	})
@@ -435,9 +435,7 @@ func BenchmarkActor(b *testing.B) {
 					}
 				}()
 				// send a message to the actor
-				if err := pid.Send(NewMessage(ctx, &actorsv1.TestSend{})); err != nil {
-					fmt.Println("fail to send message")
-				}
+				pid.Send(NewMessageContext(ctx, &actorsv1.TestSend{}))
 			}()
 		}
 		actor.Wg.Wait()
@@ -463,9 +461,7 @@ func BenchmarkActor(b *testing.B) {
 				}()
 				for i := 0; i < 100; i++ {
 					// send a message to the actor
-					if err := pid.Send(NewMessage(ctx, &actorsv1.TestSend{})); err != nil {
-						fmt.Println("fail to send message")
-					}
+					pid.Send(NewMessageContext(ctx, &actorsv1.TestSend{}))
 				}
 			}()
 		}
@@ -486,9 +482,7 @@ func BenchmarkActor(b *testing.B) {
 		go func() {
 			for i := 0; i < b.N; i++ {
 				// send a message to the actor
-				if err := pid.Send(NewMessage(ctx, &actorsv1.TestReply{})); err != nil {
-					fmt.Println("fail to send message")
-				}
+				pid.Send(NewMessageContext(ctx, &actorsv1.TestReply{}))
 			}
 		}()
 		actor.Wg.Wait()
@@ -507,9 +501,7 @@ func BenchmarkActor(b *testing.B) {
 		actor.Wg.Add(b.N)
 		for i := 0; i < b.N; i++ {
 			// send a message to the actor
-			if err := pid.Send(NewMessage(ctx, &actorsv1.TestReply{})); err != nil {
-				fmt.Println("fail to send message")
-			}
+			pid.Send(NewMessageContext(ctx, &actorsv1.TestReply{}))
 		}
 		_ = pid.Shutdown(ctx)
 	})
@@ -532,9 +524,7 @@ func BenchmarkActor(b *testing.B) {
 					}
 				}()
 				// send a message to the actor
-				if err := pid.Send(NewMessage(ctx, &actorsv1.TestReply{})); err != nil {
-					fmt.Println("fail to send message")
-				}
+				pid.Send(NewMessageContext(ctx, &actorsv1.TestReply{}))
 			}()
 		}
 		actor.Wg.Wait()
@@ -560,9 +550,7 @@ func BenchmarkActor(b *testing.B) {
 				}()
 				for i := 0; i < 100; i++ {
 					// send a message to the actor
-					if err := pid.Send(NewMessage(ctx, &actorsv1.TestReply{})); err != nil {
-						fmt.Println("fail to send message")
-					}
+					pid.Send(NewMessageContext(ctx, &actorsv1.TestReply{}))
 				}
 			}()
 		}

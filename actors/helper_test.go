@@ -21,15 +21,14 @@ func (p *BenchActor) PreStart(ctx context.Context) error {
 	return nil
 }
 
-func (p *BenchActor) Receive(message Message) error {
-	switch message.Payload().(type) {
+func (p *BenchActor) Receive(message MessageContext) {
+	switch message.Message().(type) {
 	case *actorsv1.TestSend:
 		p.Wg.Done()
 	case *actorsv1.TestReply:
-		message.SetResponse(&actorsv1.Reply{Content: "received message"})
+		message.WithResponse(&actorsv1.Reply{Content: "received message"})
 		p.Wg.Done()
 	}
-	return nil
 }
 
 func (p *BenchActor) PostStop(ctx context.Context) error {
@@ -65,14 +64,14 @@ func (p *TestActor) PostStop(ctx context.Context) error {
 }
 
 // Receive processes any message dropped into the actor mailbox without a reply
-func (p *TestActor) Receive(message Message) error {
-	switch message.Payload().(type) {
+func (p *TestActor) Receive(message MessageContext) {
+	switch message.Message().(type) {
 	case *actorsv1.TestSend:
 		// pass
 	case *actorsv1.TestPanic:
 		log.Panic("Boom")
 	case *actorsv1.TestReply:
-		message.SetResponse(&actorsv1.Reply{Content: "received message"})
+		message.WithResponse(&actorsv1.Reply{Content: "received message"})
 	case *actorsv1.TestTimeout:
 		// delay for a while before sending the reply
 		wg := sync.WaitGroup{}
@@ -84,9 +83,8 @@ func (p *TestActor) Receive(message Message) error {
 		// block until timer is up
 		wg.Wait()
 	default:
-		return ErrUnhandled
+		message.WithErr(ErrUnhandled)
 	}
-	return nil
 }
 
 type ParentActor struct {
@@ -107,12 +105,11 @@ func (p *ParentActor) PreStart(ctx context.Context) error {
 	return nil
 }
 
-func (p *ParentActor) Receive(message Message) error {
-	switch message.Payload().(type) {
+func (p *ParentActor) Receive(message MessageContext) {
+	switch message.Message().(type) {
 	case *actorsv1.TestSend:
-		return nil
 	default:
-		return ErrUnhandled
+		message.WithErr(ErrUnhandled)
 	}
 }
 
@@ -138,12 +135,11 @@ func (c *ChildActor) PreStart(ctx context.Context) error {
 	return nil
 }
 
-func (c *ChildActor) Receive(message Message) error {
-	switch message.Payload().(type) {
+func (c *ChildActor) Receive(message MessageContext) {
+	switch message.Message().(type) {
 	case *actorsv1.TestSend:
-		return nil
 	default:
-		return ErrUnhandled
+		message.WithErr(ErrUnhandled)
 	}
 }
 

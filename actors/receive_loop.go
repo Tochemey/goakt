@@ -14,8 +14,7 @@ func (p *pid) receive() {
 		case <-p.shutdownSignal:
 			return
 		case received := <-p.mailbox:
-			msg := received.Payload()
-			switch msg.(type) {
+			switch received.Message().(type) {
 			case *actorsv1.PoisonPill:
 				if err := p.Shutdown(received.Context()); err != nil {
 					// FIXME fix the panic
@@ -24,16 +23,14 @@ func (p *pid) receive() {
 			default:
 				done := make(chan struct{})
 				go func() {
-					// close the msg error channel
-					defer close(p.errChan)
 					defer close(done)
 					// recover from a panic attack
 					defer func() {
 						if r := recover(); r != nil {
 							// construct the error to return
 							err := fmt.Errorf("%s", r)
-							// send the error to the channels
-							p.errChan <- err
+							// set the error property of the message
+							received.WithErr(err)
 							// send the error to the watchers
 							for item := range p.watchers.Iter() {
 								item.Value.ErrChan <- err
@@ -43,17 +40,7 @@ func (p *pid) receive() {
 						}
 					}()
 					// send the message to actor to receive
-					err := p.Receive(received)
-					// set the error channels
-					p.errChan <- err
-
-					// only send error messages to the watcher
-					if err != nil {
-						// send the error to the watchers
-						for item := range p.watchers.Iter() {
-							item.Value.ErrChan <- err
-						}
-					}
+					p.Receive(received)
 				}()
 			}
 		}

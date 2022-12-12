@@ -13,7 +13,7 @@ type Actor interface {
 	// or some sort of initialization before the actor start processing messages
 	PreStart(ctx context.Context) error
 	// Receive processes any message dropped into the actor mailbox without a reply
-	Receive(message Message) error
+	Receive(ctx MessageContext)
 	// PostStop is executed when the actor is shutting down.
 	// The execution happens when every messages that have not been processed yet will be processed before the actor shutdowns
 	PostStop(ctx context.Context) error

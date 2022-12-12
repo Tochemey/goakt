@@ -27,7 +27,7 @@ type Config struct {
 	// when the actor is passivated it is stopped which means it does not consume
 	// any further resources like memory and cpu. The default value is 5s
 	expireActorAfter time.Duration
-	// Specifies how long the sender of a message should wait to receive a reply
+	// Specifies how long the sender of a messageContext should wait to receive a reply
 	// when using SendReply. The default value is 5s
 	replyTimeout time.Duration
 	// Specifies the maximum of retries to attempt when the actor

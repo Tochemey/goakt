@@ -2,14 +2,13 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"os/signal"
 	"sync"
 	"syscall"
 	"time"
 
-	samplepb "github.com/tochemey/goakt/_examples/sample/pinger/v1"
+	samplepb "github.com/tochemey/goakt/_examples/protos/pb/v1"
 	goakt "github.com/tochemey/goakt/actors"
 	"github.com/tochemey/goakt/log"
 	"go.uber.org/atomic"
@@ -45,9 +44,10 @@ func main() {
 	for i := 0; i < count; i++ {
 		content := &samplepb.Ping{Id: id}
 		// construct a message with no sender
-		message := goakt.NewMessage(ctx, content, goakt.WithSender(goakt.NoSender))
+		messageContext := goakt.NewMessageContext(ctx, content)
+		messageContext.WithSender(goakt.NoSender)
 		// send the message. kindly in real-life application handle the error
-		_ = actor.Send(message)
+		actor.Send(messageContext)
 	}
 
 	// capture ctrl+c
@@ -95,21 +95,13 @@ func (p *Pinger) PreStart(ctx context.Context) error {
 	return nil
 }
 
-func (p *Pinger) Receive(message goakt.Message) error {
-	switch received := message.Payload().(type) {
+func (p *Pinger) Receive(ctx goakt.MessageContext) {
+	switch ctx.Message().(type) {
 	case *samplepb.Ping:
-		p.logger.Infof(fmt.Sprintf("received Ping from %s", received.GetId()))
-		// reply the sender in case there is a sender
-		if message.Sender() != nil && message.Sender() != goakt.NoSender {
-			return message.Sender().Send(
-				goakt.NewMessage(message.Context(),
-					&samplepb.Pong{Reply: fmt.Sprintf("received Ping from %s", received.GetId())}),
-			)
-		}
+		p.logger.Info("received Ping")
 		p.count.Add(1)
-		return nil
 	default:
-		return goakt.ErrUnhandled
+		ctx.WithErr(goakt.ErrUnhandled)
 	}
 }
 

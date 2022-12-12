@@ -18,10 +18,11 @@ var NoSender = new(pid)
 
 // PID defines the various actions one can perform on a given actor
 type PID interface {
-	// Send sends a given message to the actor within a time frame.
-	// One can reply to the sender of the message in case a sender is set or set the reply in case we are dealing
-	// with a request-response message format.
-	Send(message Message) error
+	// Send sends a given message to the actor asynchronously by passing a MessageContext. With the message context
+	// one can reply to the sender of the message in case a sender is set or set the reply in case we are dealing
+	// with a request-response message format. The receiver can also set an error message that occurs during the message
+	// processing as well send a message back to the sender.
+	Send(ctx MessageContext)
 	// Shutdown gracefully shuts down the given actor
 	Shutdown(ctx context.Context) error
 	// IsOnline returns true when the actor is online ready to process messages and false
@@ -50,7 +51,7 @@ type PID interface {
 }
 
 // pid specifies an actor unique process
-// With the pid one can send a message to the actor
+// With the pid one can send a messageContext to the actor
 type pid struct {
 	Actor
 
@@ -81,12 +82,11 @@ type pid struct {
 	shutdownTimeout time.Duration
 
 	// specifies the actor mailbox
-	mailbox chan Message
+	mailbox chan MessageContext
 	// receives a shutdown signal. Once the signal is received
 	// the actor is shut down gracefully.
 	shutdownSignal     chan Unit
 	haltPassivationLnr chan Unit
-	errChan            chan error
 
 	// set of watchers watching the given actor
 	watchers *tools.ConcurrentSlice[*Watcher]
@@ -128,7 +128,7 @@ func newPID(ctx context.Context, actor Actor, opts ...pidOption) *pid {
 		sendRecvTimeout:        100 * time.Millisecond,
 		shutdownTimeout:        2 * time.Second,
 		initMaxRetries:         5,
-		mailbox:                make(chan Message, 1000),
+		mailbox:                make(chan MessageContext, 1000),
 		shutdownSignal:         make(chan Unit, 1),
 		haltPassivationLnr:     make(chan Unit, 1),
 		logger:                 log.DefaultLogger,
@@ -268,13 +268,18 @@ func (p *pid) ErrorsCount(ctx context.Context) uint64 {
 }
 
 // Send sends a given message to the actor
-func (p *pid) Send(message Message) error {
+func (p *pid) Send(ctx MessageContext) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	// reject message when the actor is not ready to process messages
 	if !p.isOnline {
-		return ErrNotReady
+		ctx.WithErr(ErrNotReady)
+		return
 	}
+
+	// set the receiver of the messahe
+	ctx.WithSelf(p)
+
 	// set the last processing time
 	p.lastProcessingTime.Store(time.Now())
 
@@ -285,21 +290,10 @@ func (p *pid) Send(message Message) error {
 		p.lastProcessingDuration.Store(duration)
 	}()
 
-	// set the error channel
-	p.errChan = make(chan error, 1)
 	// push the message to the actor mailbox
-	p.mailbox <- message
+	p.mailbox <- ctx
 	// increase the received message counter
 	p.receivedMessageCounter.Inc()
-	// await patiently for the error
-	ctx, cancel := context.WithTimeout(message.Context(), p.sendRecvTimeout)
-	defer cancel()
-	select {
-	case err := <-p.errChan:
-		return err
-	case <-ctx.Done():
-		return ctx.Err()
-	}
 }
 
 // Shutdown gracefully shuts down the given actor
@@ -397,7 +391,7 @@ func (p *pid) init(ctx context.Context) {
 
 func (p *pid) reset() {
 	// reset the mailbox
-	p.mailbox = make(chan Message, 1000)
+	p.mailbox = make(chan MessageContext, 1000)
 	// reset the children map
 	p.children = newPIDMap(10)
 	// reset the various counters
