@@ -12,7 +12,7 @@ Also, check reference section at the end of the post for more material regarding
 - [x] PreStart hook for an actor 
 - [x] PostStop hook for an actor 
 - [x] ActorSystem (WIP) 
-- [x] Actor to Actor communication 
+- [x] Actor to Actor communication (WIP: need to fix a bug)
 - [x] Restart an actor 
 - [x] (Un)Watch an actor
 - [X] Stop and actor
