@@ -8,7 +8,7 @@ Also, check reference section at the end of the post for more material regarding
 
 ## Features
 
-- [x] Send a message to an actor:
+- [x] Send a message to an actor
 - [x] PreStart hook for an actor 
 - [x] PostStop hook for an actor 
 - [x] ActorSystem (WIP) 
