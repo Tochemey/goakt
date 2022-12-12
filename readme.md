@@ -18,4 +18,4 @@ Minimal actor framework to build reactive and distributed system in golang using
 - [x] Supervisory Strategy (WIP) 
 - [ ] Metrics
 - [ ] Clustering
-- [ ] Sample examples
+- [x] Sample example

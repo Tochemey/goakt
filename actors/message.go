@@ -34,6 +34,22 @@ type message struct {
 	mu       sync.Mutex
 }
 
+// NewMessage creates a new message to send
+func NewMessage(ctx context.Context, content proto.Message, opts ...MessageOption) Message {
+	// create an instance of message
+	m := &message{
+		ctx:      ctx,
+		content:  content,
+		sender:   NoSender,
+		response: nil,
+	}
+	// set the custom options to override the default values
+	for _, opt := range opts {
+		opt(m)
+	}
+	return m
+}
+
 // Response is the response to the message
 // This help handle request-response paradigm
 func (m *message) Response() proto.Message {
@@ -71,22 +87,6 @@ func (m *message) Payload() proto.Message {
 	content := m.content
 	m.mu.Unlock()
 	return content
-}
-
-// NewMessage creates a new message to send
-func NewMessage(ctx context.Context, content proto.Message, opts ...MessageOption) Message {
-	// create an instance of message
-	m := &message{
-		ctx:      ctx,
-		content:  content,
-		sender:   NoSender,
-		response: nil,
-	}
-	// set the custom options to override the default values
-	for _, opt := range opts {
-		opt(m)
-	}
-	return m
 }
 
 // WithSender sets the message sender

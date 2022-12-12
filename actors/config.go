@@ -50,8 +50,8 @@ func NewConfig(name, nodeHostAndPort string, options ...Option) (*Config, error)
 		name:                name,
 		nodeHostAndPort:     nodeHostAndPort,
 		logger:              log.DefaultLogger,
-		expireActorAfter:    5 * time.Second,
-		replyTimeout:        5 * time.Second,
+		expireActorAfter:    2 * time.Second,
+		replyTimeout:        100 * time.Millisecond,
 		actorInitMaxRetries: 5,
 	}
 	// apply the various options

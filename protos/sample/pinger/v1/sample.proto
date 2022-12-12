@@ -1,0 +1,11 @@
+syntax = "proto3";
+
+package sample.v1;
+
+message Ping {
+  string id = 1;
+}
+
+message Pong {
+  string reply = 2;
+}

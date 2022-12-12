@@ -141,8 +141,6 @@ func (a *actorSystem) Start(ctx context.Context) error {
 // Stop stops the actor system
 func (a *actorSystem) Stop(ctx context.Context) error {
 	a.logger.Infof("%s System is shutting down on Node=%s...", a.name, a.nodeAddr)
-	// tell the housekeeper to stop
-	//a.housekeepingStopSig <- struct{}{}
 
 	// short-circuit the shutdown process when there are no online actors
 	if len(a.Actors()) == 0 {

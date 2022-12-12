@@ -69,3 +69,16 @@ testprotos:
 
     # save artifact to
     SAVE ARTIFACT gen gen AS LOCAL actors/testdata
+
+sample-pb:
+    # copy the proto files to generate
+    COPY --dir protos/ ./
+    COPY buf.work.yaml buf.gen.yaml ./
+
+    # generate the pbs
+    RUN buf generate \
+            --template buf.gen.yaml \
+            --path protos/sample/pinger
+
+    # save artifact to
+    SAVE ARTIFACT gen gen AS LOCAL _examples/sample
