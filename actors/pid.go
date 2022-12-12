@@ -18,7 +18,9 @@ var NoSender = new(pid)
 
 // PID defines the various actions one can perform on a given actor
 type PID interface {
-	// Send sends a given message to the actor in a fire-and-forget pattern
+	// Send sends a given message to the actor within a time frame.
+	// One can reply to the sender of the message in case a sender is set or set the reply in case we are dealing
+	// with a request-response message format.
 	Send(message Message) error
 	// Shutdown gracefully shuts down the given actor
 	Shutdown(ctx context.Context) error
