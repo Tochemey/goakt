@@ -24,14 +24,15 @@ type MessageContext interface {
 	// Self represents the actor receiving the message.
 	// This is used to reply to the Sender
 	Self() PID
-	// WithSelf sets the actor receiving the message.
-	WithSelf(pid PID)
 	// WithResponse sets the message response
 	WithResponse(resp proto.Message)
 	// WithErr is used to set any error encountered during the message processing
 	WithErr(err error)
 	// WithSender set the sender of the message
 	WithSender(sender PID)
+
+	// with Recipient
+	withRecipient(pid PID)
 }
 
 type messageContext struct {
@@ -121,7 +122,7 @@ func (m *messageContext) Message() proto.Message {
 }
 
 // WithSelf set the self of the message context
-func (m *messageContext) WithSelf(pid PID) {
+func (m *messageContext) withRecipient(pid PID) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.self = pid

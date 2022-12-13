@@ -65,7 +65,7 @@ type pid struct {
 
 	// specifies at what point in time to passivate the actor.
 	// when the actor is passivated it is stopped which means it does not consume
-	// any further resources like memory and cpu. The default value is 5 seconds
+	// any further resources like memory and cpu. The default value is 120 seconds
 	passivateAfter time.Duration
 
 	// specifies how long the sender of a mail should wait to receive a reply
@@ -124,7 +124,7 @@ func newPID(ctx context.Context, actor Actor, opts ...pidOption) *pid {
 		addr:                   "",
 		isOnline:               false,
 		lastProcessingTime:     atomic.Time{},
-		passivateAfter:         2 * time.Second,
+		passivateAfter:         2 * time.Minute,
 		sendRecvTimeout:        100 * time.Millisecond,
 		shutdownTimeout:        2 * time.Second,
 		initMaxRetries:         5,
@@ -278,7 +278,7 @@ func (p *pid) Send(ctx MessageContext) {
 	}
 
 	// set the receiver of the messahe
-	ctx.WithSelf(p)
+	ctx.withRecipient(p)
 
 	// set the last processing time
 	p.lastProcessingTime.Store(time.Now())
