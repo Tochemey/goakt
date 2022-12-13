@@ -25,16 +25,17 @@ func TestActorReceive(t *testing.T) {
 	t.Run("receive:happy path", func(t *testing.T) {
 		defer goleak.VerifyNone(t)
 		ctx := context.TODO()
-		// create a Ping actor
-		actorID := "ping-1"
-		actor := NewTestActor(actorID)
-		assert.NotNil(t, actor)
 
 		// create the actor ref
-		pid := newPID(ctx, actor,
+		pid := newPID(
+			ctx,
+			NewTestActor(),
 			withInitMaxRetries(1),
-			withPassivationAfter(2*time.Second),
-			withSendReplyTimeout(recvTimeout))
+			withSendReplyTimeout(recvTimeout),
+			withID(&ID{
+				Kind:  "Test",
+				Value: "test-1",
+			}))
 		assert.NotNil(t, pid)
 		// let us send 10 messages to the actor
 		count := 10
@@ -49,16 +50,17 @@ func TestActorReceive(t *testing.T) {
 	t.Run("receive: unhappy path: actor not ready", func(t *testing.T) {
 		defer goleak.VerifyNone(t)
 		ctx := context.TODO()
-		// create a Ping actor
-		actorID := "ping-1"
-		actor := NewTestActor(actorID)
-		assert.NotNil(t, actor)
 
-		// create the actor ref
-		pid := newPID(ctx, actor,
+		pid := newPID(
+			ctx,
+			NewTestActor(),
 			withInitMaxRetries(1),
-			withPassivationAfter(passivateAfter),
-			withSendReplyTimeout(recvTimeout))
+			withSendReplyTimeout(recvTimeout),
+			withID(&ID{
+				Kind:  "Test",
+				Value: "test-1",
+			}))
+
 		assert.NotNil(t, pid)
 		// stop the actor
 		err := pid.Shutdown(ctx)
@@ -74,15 +76,16 @@ func TestActorReceive(t *testing.T) {
 		defer goleak.VerifyNone(t)
 		ctx := context.TODO()
 		// create a Ping actor
-		actorID := "ping-1"
-		actor := NewTestActor(actorID)
-		assert.NotNil(t, actor)
-
-		// create the actor ref
-		pid := newPID(ctx, actor,
+		pid := newPID(
+			ctx,
+			NewTestActor(),
 			withInitMaxRetries(1),
-			withPassivationAfter(10*time.Second),
-			withSendReplyTimeout(recvTimeout))
+			withSendReplyTimeout(recvTimeout),
+			withID(&ID{
+				Kind:  "Test",
+				Value: "test-1",
+			}))
+
 		assert.NotNil(t, pid)
 
 		// let us create the message
@@ -99,16 +102,15 @@ func TestActorReceive(t *testing.T) {
 	t.Run("receive-reply:happy path", func(t *testing.T) {
 		defer goleak.VerifyNone(t)
 		ctx := context.TODO()
-		// create a Ping actor
-		actorID := "ping-1"
-		actor := NewTestActor(actorID)
-		assert.NotNil(t, actor)
-
-		// create the actor ref
-		pid := newPID(ctx, actor,
+		pid := newPID(
+			ctx,
+			NewTestActor(),
 			withInitMaxRetries(1),
-			withPassivationAfter(10*time.Second),
-			withSendReplyTimeout(recvTimeout))
+			withSendReplyTimeout(recvTimeout),
+			withID(&ID{
+				Kind:  "Test",
+				Value: "test-1",
+			}))
 		assert.NotNil(t, pid)
 
 		// let us create the message
@@ -154,15 +156,16 @@ func TestActorReceive(t *testing.T) {
 		defer goleak.VerifyNone(t)
 		ctx := context.TODO()
 		// create a Ping actor
-		actorID := "ping-1"
-		actor := NewTestActor(actorID)
-		assert.NotNil(t, actor)
-
-		// create the actor ref
-		pid := newPID(ctx, actor,
+		pid := newPID(
+			ctx,
+			NewTestActor(),
 			withInitMaxRetries(1),
 			withPassivationAfter(passivateAfter),
-			withSendReplyTimeout(recvTimeout))
+			withSendReplyTimeout(recvTimeout),
+			withID(&ID{
+				Kind:  "Test",
+				Value: "test-1",
+			}))
 		assert.NotNil(t, pid)
 
 		// let us sleep for some time to make the actor idle
@@ -186,16 +189,17 @@ func TestActorReceive(t *testing.T) {
 	t.Run("receive:recover from panic", func(t *testing.T) {
 		defer goleak.VerifyNone(t)
 		ctx := context.TODO()
-		// create a Ping actor
-		actorID := "ping-1"
-		actor := NewTestActor(actorID)
-		assert.NotNil(t, actor)
 
-		// create the actor ref
-		pid := newPID(ctx, actor,
+		pid := newPID(
+			ctx,
+			NewTestActor(),
 			withInitMaxRetries(1),
-			withPassivationAfter(10*time.Second),
-			withSendReplyTimeout(recvTimeout))
+			withSendReplyTimeout(recvTimeout),
+			withID(&ID{
+				Kind:  "Test",
+				Value: "test-1",
+			}))
+
 		assert.NotNil(t, pid)
 
 		// send a message
@@ -225,8 +229,7 @@ func TestActorRestart(t *testing.T) {
 		require.NoError(t, err)
 
 		// create a Ping actor
-		actorID := "ping-1"
-		actor := NewTestActor(actorID)
+		actor := NewTestActor()
 		assert.NotNil(t, actor)
 
 		// create the actor ref
@@ -234,7 +237,10 @@ func TestActorRestart(t *testing.T) {
 			withInitMaxRetries(1),
 			withPassivationAfter(10*time.Second),
 			withActorSystem(actorSys),
-			withKind("pinger"),
+			withID(&ID{
+				Kind:  "Test",
+				Value: "test-1",
+			}),
 			withSendReplyTimeout(recvTimeout))
 		assert.NotNil(t, pid)
 		// stop the actor
@@ -266,15 +272,15 @@ func TestActorRestart(t *testing.T) {
 		defer goleak.VerifyNone(t)
 		ctx := context.TODO()
 		// create a Ping actor
-		actorID := "ping-1"
-		actor := NewTestActor(actorID)
-		assert.NotNil(t, actor)
-
-		// create the actor ref
-		pid := newPID(ctx, actor,
+		pid := newPID(
+			ctx,
+			NewTestActor(),
 			withInitMaxRetries(1),
-			withPassivationAfter(10*time.Second),
-			withSendReplyTimeout(recvTimeout))
+			withSendReplyTimeout(recvTimeout),
+			withID(&ID{
+				Kind:  "Test",
+				Value: "test-1",
+			}))
 		assert.NotNil(t, pid)
 		// stop the actor
 		err := pid.Shutdown(ctx)
@@ -302,8 +308,7 @@ func TestActorRestart(t *testing.T) {
 		require.NoError(t, err)
 
 		// create a Ping actor
-		actorID := "ping-1"
-		actor := NewTestActor(actorID)
+		actor := NewTestActor()
 		assert.NotNil(t, actor)
 
 		// create the actor ref
@@ -311,7 +316,10 @@ func TestActorRestart(t *testing.T) {
 			withInitMaxRetries(1),
 			withPassivationAfter(passivateAfter),
 			withActorSystem(actorSys),
-			withKind("pinger"),
+			withID(&ID{
+				Kind:  "Test",
+				Value: "test-1",
+			}),
 			withSendReplyTimeout(recvTimeout))
 		assert.NotNil(t, pid)
 		// let us send 10 messages to the actor
@@ -351,16 +359,23 @@ func TestChildActor(t *testing.T) {
 		require.NoError(t, err)
 
 		// create the parent actor
-		pid := newPID(ctx, NewParentActor("p1"),
+		pid := newPID(ctx,
+			NewParentActor(),
 			withInitMaxRetries(1),
 			withPassivationAfter(10*time.Second),
 			withActorSystem(actorSys),
-			withKind("parent"),
+			withID(&ID{
+				Kind:  "Parent",
+				Value: "p1",
+			}),
 			withSendReplyTimeout(recvTimeout))
 		assert.NotNil(t, pid)
 
 		// create the child actor
-		cid, err := pid.SpawnChild(ctx, "child", NewChildActor("c1"))
+		cid, err := pid.SpawnChild(ctx, &ID{
+			Kind:  "Child",
+			Value: "c1",
+		}, NewChildActor())
 		assert.NoError(t, err)
 		assert.NotNil(t, cid)
 

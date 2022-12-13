@@ -35,7 +35,7 @@ type PID interface {
 	// at a given point in time while the actor heart is still beating
 	ErrorsCount(ctx context.Context) uint64
 	// SpawnChild creates a child actor
-	SpawnChild(ctx context.Context, kind string, actor Actor) (PID, error)
+	SpawnChild(ctx context.Context, id *ID, actor Actor) (PID, error)
 	// Restart restarts the actor
 	Restart(ctx context.Context) error
 	// Watch an actor
@@ -48,6 +48,8 @@ type PID interface {
 	Address() Address
 	// Watchers returns the list of watchers
 	Watchers() *tools.ConcurrentSlice[*Watcher]
+	// ID returns the actor unique identifier
+	ID() *ID
 }
 
 // pid specifies an actor unique process
@@ -57,6 +59,9 @@ type pid struct {
 
 	// addr represents the actor unique address
 	addr Address
+
+	// actor unique identifier
+	id *ID
 
 	// helps determine whether the actor should handle messages or not.
 	isOnline bool
@@ -96,8 +101,6 @@ type pid struct {
 
 	// the actor system
 	system ActorSystem
-	// holds the kind of actor
-	kind string
 
 	//  specifies the logger to use
 	logger log.Logger
@@ -146,9 +149,9 @@ func newPID(ctx context.Context, actor Actor, opts ...pidOption) *pid {
 	}
 
 	// let us set the addr when the actor system and kind are set
-	if pid.system != nil && pid.kind != "" {
+	if pid.system != nil && pid.ID().Kind != "" {
 		// create the address of the given actor and set it
-		pid.addr = GetAddress(pid.system, pid.kind, actor.ID())
+		pid.addr = GetAddress(pid.system, pid.ID().Kind, pid.ID().Value)
 	}
 
 	// initialize the actor and init processing messages
@@ -159,6 +162,16 @@ func newPID(ctx context.Context, actor Actor, opts ...pidOption) *pid {
 	go pid.passivationListener()
 	// return the actor reference
 	return pid
+}
+
+// ID returns the unique actor identifier
+func (p *pid) ID() *ID {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.id == nil {
+		return &ID{}
+	}
+	return p.id
 }
 
 // IsOnline returns true when the actor is alive ready to process messages and false
@@ -214,14 +227,14 @@ func (p *pid) Restart(ctx context.Context) error {
 }
 
 // SpawnChild creates a child actor and start watching it for error
-func (p *pid) SpawnChild(ctx context.Context, kind string, actor Actor) (PID, error) {
+func (p *pid) SpawnChild(ctx context.Context, id *ID, actor Actor) (PID, error) {
 	// first check whether the actor is ready to start another actor
 	if !p.IsOnline() {
 		return nil, ErrNotReady
 	}
 
 	// create the address of the given actor
-	addr := GetAddress(p.ActorSystem(), kind, actor.ID())
+	addr := GetAddress(p.ActorSystem(), id.Kind, id.Value)
 	// check whether the child actor already exist and just return the PID
 	if cid, ok := p.children.Get(addr); ok {
 		// check whether the actor is stopped
@@ -241,7 +254,7 @@ func (p *pid) SpawnChild(ctx context.Context, kind string, actor Actor) (PID, er
 		withSendReplyTimeout(p.sendRecvTimeout),
 		withCustomLogger(p.logger),
 		withActorSystem(p.system),
-		withKind(kind),
+		withID(id),
 		withSupervisorStrategy(p.supervisorStrategy),
 		withShutdownTimeout(p.shutdownTimeout),
 		withAddress(addr))

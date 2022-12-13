@@ -36,20 +36,13 @@ func (p *BenchActor) PostStop(ctx context.Context) error {
 }
 
 type TestActor struct {
-	id string
 }
 
 var _ Actor = (*TestActor)(nil)
 
 // NewTestActor creates a TestActor
-func NewTestActor(id string) *TestActor {
-	return &TestActor{
-		id: id,
-	}
-}
-
-func (p *TestActor) ID() string {
-	return p.id
+func NewTestActor() *TestActor {
+	return &TestActor{}
 }
 
 // Init initialize the actor. This function can be used to set up some database connections
@@ -88,17 +81,12 @@ func (p *TestActor) Receive(message MessageContext) {
 }
 
 type ParentActor struct {
-	id string
 }
 
 var _ Actor = (*ParentActor)(nil)
 
-func NewParentActor(id string) *ParentActor {
-	return &ParentActor{id: id}
-}
-
-func (p *ParentActor) ID() string {
-	return p.id
+func NewParentActor() *ParentActor {
+	return &ParentActor{}
 }
 
 func (p *ParentActor) PreStart(ctx context.Context) error {
@@ -118,17 +106,12 @@ func (p *ParentActor) PostStop(ctx context.Context) error {
 }
 
 type ChildActor struct {
-	id string
 }
 
 var _ Actor = (*ChildActor)(nil)
 
-func NewChildActor(id string) *ChildActor {
-	return &ChildActor{id: id}
-}
-
-func (c *ChildActor) ID() string {
-	return c.id
+func NewChildActor() *ChildActor {
+	return &ChildActor{}
 }
 
 func (c *ChildActor) PreStart(ctx context.Context) error {

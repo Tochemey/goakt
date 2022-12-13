@@ -53,10 +53,10 @@ func withActorSystem(sys ActorSystem) pidOption {
 	}
 }
 
-// withKind set the kind of actor represented by the pid
-func withKind(kind string) pidOption {
+// withID set the kind of actor represented by the pid
+func withID(id *ID) pidOption {
 	return func(ref *pid) {
-		ref.kind = kind
+		ref.id = id
 	}
 }
 

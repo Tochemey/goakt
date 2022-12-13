@@ -62,16 +62,19 @@ func main() {
 	_ = actorSystem.Start(ctx)
 
 	// create an actor
-	kind := "Pinger"
-	id := "some-id"
-	actor := actorSystem.Spawn(ctx, kind, NewPinger(id))
+	actorID := &goakt.ID{
+		Kind:  "Pinger",
+		Value: "123",
+	}
+
+	actor := actorSystem.Spawn(ctx, actorID, NewPinger())
 
 	startTime := time.Now()
 
 	// send some messages to the actor
-	count := 1_000
+	count := 1_000_000
 	for i := 0; i < count; i++ {
-		content := &samplepb.Ping{Id: id}
+		content := &samplepb.Ping{}
 		// construct a message with no sender
 		messageContext := goakt.NewMessageContext(ctx, content)
 		messageContext.WithSender(goakt.NoSender)
@@ -93,7 +96,6 @@ func main() {
 }
 
 type Pinger struct {
-	id     string
 	mu     sync.Mutex
 	count  *atomic.Int32
 	logger log.Logger
@@ -101,17 +103,10 @@ type Pinger struct {
 
 var _ goakt.Actor = (*Pinger)(nil)
 
-func NewPinger(id string) *Pinger {
+func NewPinger() *Pinger {
 	return &Pinger{
-		id: id,
 		mu: sync.Mutex{},
 	}
-}
-
-func (p *Pinger) ID() string {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.id
 }
 
 func (p *Pinger) PreStart(ctx context.Context) error {

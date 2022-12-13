@@ -34,8 +34,14 @@ func main() {
 	_ = actorSystem.Start(ctx)
 
 	// create an actor
-	pingActor := actorSystem.Spawn(ctx, "Ping", NewPingActor("ping-1"))
-	pongActor := actorSystem.Spawn(ctx, "Pong", NewPongActor("pong-1"))
+	pingActor := actorSystem.Spawn(ctx, &goakt.ID{
+		Kind:  "Ping",
+		Value: "p-1",
+	}, NewPingActor())
+	pongActor := actorSystem.Spawn(ctx, &goakt.ID{
+		Kind:  "Pong",
+		Value: "p-1",
+	}, NewPongActor())
 
 	// start the conversation
 	messageContext := goakt.NewMessageContext(ctx, &samplepb.Ping{})
@@ -63,7 +69,6 @@ func main() {
 }
 
 type PingActor struct {
-	id     string
 	mu     sync.Mutex
 	count  *atomic.Int32
 	logger log.Logger
@@ -71,17 +76,10 @@ type PingActor struct {
 
 var _ goakt.Actor = (*PingActor)(nil)
 
-func NewPingActor(id string) *PingActor {
+func NewPingActor() *PingActor {
 	return &PingActor{
-		id: id,
 		mu: sync.Mutex{},
 	}
-}
-
-func (p *PingActor) ID() string {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.id
 }
 
 func (p *PingActor) PreStart(ctx context.Context) error {
@@ -118,7 +116,6 @@ func (p *PingActor) PostStop(ctx context.Context) error {
 }
 
 type PongActor struct {
-	id     string
 	mu     sync.Mutex
 	count  *atomic.Int32
 	logger log.Logger
@@ -126,17 +123,10 @@ type PongActor struct {
 
 var _ goakt.Actor = (*PongActor)(nil)
 
-func NewPongActor(id string) *PongActor {
+func NewPongActor() *PongActor {
 	return &PongActor{
-		id: id,
 		mu: sync.Mutex{},
 	}
-}
-
-func (p *PongActor) ID() string {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.id
 }
 
 func (p *PongActor) PreStart(ctx context.Context) error {

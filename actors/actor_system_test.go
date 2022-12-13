@@ -36,10 +36,13 @@ func TestNewActorSystem(t *testing.T) {
 		ctx := context.TODO()
 		cfg, _ := NewConfig("testSys", "localhost:0")
 		sys, _ := NewActorSystem(cfg)
-		kind := "TestActor"
-		id := "test-1"
-		actor := NewTestActor(id)
-		actorRef := sys.Spawn(ctx, kind, actor)
+
+		id := &ID{
+			Kind:  "Test",
+			Value: "test-1",
+		}
+		actor := NewTestActor()
+		actorRef := sys.Spawn(ctx, id, actor)
 		assert.Nil(t, actorRef)
 	})
 
@@ -52,10 +55,12 @@ func TestNewActorSystem(t *testing.T) {
 		err := sys.Start(ctx)
 		assert.NoError(t, err)
 
-		kind := "TestActor"
-		id := "test-1"
-		actor := NewTestActor(id)
-		actorRef := sys.Spawn(ctx, kind, actor)
+		id := &ID{
+			Kind:  "Test",
+			Value: "test-1",
+		}
+		actor := NewTestActor()
+		actorRef := sys.Spawn(ctx, id, actor)
 		assert.NotNil(t, actorRef)
 
 		assert.NoError(t, sys.Stop(ctx))
@@ -70,13 +75,15 @@ func TestNewActorSystem(t *testing.T) {
 		err := sys.Start(ctx)
 		assert.NoError(t, err)
 
-		kind := "TestActor"
-		id := "test-1"
-		actor := NewTestActor(id)
-		ref1 := sys.Spawn(ctx, kind, actor)
+		id := &ID{
+			Kind:  "Test",
+			Value: "test-1",
+		}
+		actor := NewTestActor()
+		ref1 := sys.Spawn(ctx, id, actor)
 		assert.NotNil(t, ref1)
 
-		ref2 := sys.Spawn(ctx, kind, actor)
+		ref2 := sys.Spawn(ctx, id, actor)
 		assert.NotNil(t, ref2)
 
 		// point to the same memory address
