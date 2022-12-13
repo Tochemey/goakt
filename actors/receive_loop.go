@@ -21,9 +21,7 @@ func (p *pid) receive() {
 					panic(err)
 				}
 			default:
-				done := make(chan struct{})
-				go func() {
-					defer close(done)
+				func() {
 					// recover from a panic attack
 					defer func() {
 						if r := recover(); r != nil {

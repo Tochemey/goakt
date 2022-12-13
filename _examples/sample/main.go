@@ -40,7 +40,7 @@ func main() {
 	startTime := time.Now()
 
 	// send some messages to the actor
-	count := 1_000
+	count := 1_000_000
 	for i := 0; i < count; i++ {
 		content := &samplepb.Ping{Id: id}
 		// construct a message with no sender
