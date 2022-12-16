@@ -1,5 +1,5 @@
 # Go-Akt
-[![GitHub Workflow Status](https://img.shields.io/github/workflow/status/tochemey/goakt/build)](https://github.com/Tochemey/goakt/actions/workflows/build.yml)
+[![build](https://github.com/Tochemey/goakt/actions/workflows/build.yml/badge.svg)](https://github.com/Tochemey/goakt/actions/workflows/build.yml)
 
 Minimal actor framework to build reactive and distributed system in golang using protocol buffers.
 
