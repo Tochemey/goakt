@@ -27,8 +27,6 @@ func (p *pid) receive() {
 						if r := recover(); r != nil {
 							// construct the error to return
 							err := fmt.Errorf("%s", r)
-							// set the error property of the message
-							received.WithErr(err)
 							// send the error to the watchers
 							for item := range p.watchers.Iter() {
 								item.Value.ErrChan <- err

@@ -25,7 +25,7 @@ type ActorSystem interface {
 	// Stop stops the actor system
 	Stop(ctx context.Context) error
 	// Spawn creates an actor in the system
-	Spawn(ctx context.Context, id *ID, actor Actor) PID
+	Spawn(ctx context.Context, kind, id string, actor Actor) PID
 }
 
 // ActorSystem represent a collection of actors on a given node
@@ -72,13 +72,13 @@ func NewActorSystem(config *Config) (ActorSystem, error) {
 }
 
 // Spawn creates or returns the instance of a given actor in the system
-func (a *actorSystem) Spawn(ctx context.Context, id *ID, actor Actor) PID {
+func (a *actorSystem) Spawn(ctx context.Context, kind, id string, actor Actor) PID {
 	// first check whether the actor system has started
 	if !a.hasStarted.Load() {
 		return nil
 	}
 	// create the address of the given actor
-	addr := GetAddress(a, id.Kind, id.Value)
+	addr := GetAddress(a, kind, id)
 	// check whether the given actor already exist in the system or not
 	pid, exist := a.actors.Get(string(addr))
 	// actor already exist no need recreate it.
@@ -97,7 +97,7 @@ func (a *actorSystem) Spawn(ctx context.Context, id *ID, actor Actor) PID {
 		withSendReplyTimeout(a.config.ReplyTimeout()),
 		withCustomLogger(a.config.logger),
 		withActorSystem(a),
-		withID(id),
+		withLocalID(kind, id),
 		withAddress(addr))
 
 	// add the given actor to the actor map

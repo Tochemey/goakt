@@ -34,20 +34,11 @@ func main() {
 	_ = actorSystem.Start(ctx)
 
 	// create an actor
-	pingActor := actorSystem.Spawn(ctx, &goakt.ID{
-		Kind:  "Ping",
-		Value: "p-1",
-	}, NewPingActor())
-	pongActor := actorSystem.Spawn(ctx, &goakt.ID{
-		Kind:  "Pong",
-		Value: "p-1",
-	}, NewPongActor())
+	pingActor := actorSystem.Spawn(ctx, "Pinger", "pinger-1", NewPingActor())
+	pongActor := actorSystem.Spawn(ctx, "Ponger", "ponger-1", NewPongActor())
 
 	// start the conversation
-	messageContext := goakt.NewMessageContext(ctx, &samplepb.Ping{})
-	messageContext.WithSender(pingActor)
-	// send the message to the pong actor
-	pongActor.Send(messageContext)
+	_ = pingActor.SendAsync(ctx, pongActor, new(samplepb.Ping))
 
 	// shutdown both actors after 3 seconds of conversation
 	timer := time.AfterFunc(3*time.Second, func() {
@@ -92,20 +83,18 @@ func (p *PingActor) PreStart(ctx context.Context) error {
 	return nil
 }
 
-func (p *PingActor) Receive(ctx goakt.MessageContext) {
+func (p *PingActor) Receive(ctx goakt.ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *samplepb.Pong:
 		p.logger.Infof(fmt.Sprintf("received Pong from %s", ctx.Sender().Address()))
 		// reply the sender in case there is a sender
-		if ctx.Sender() != nil && ctx.Sender() != goakt.NoSender {
+		if ctx.Sender() != goakt.NoSender {
 			// let us reply to the sender
-			newCtx := goakt.NewMessageContext(ctx.Context(), &samplepb.Ping{})
-			newCtx.WithSender(ctx.Self())
-			ctx.Sender().Send(newCtx)
+			_ = ctx.Self().SendAsync(ctx.Context(), ctx.Sender(), new(samplepb.Ping))
 		}
 		p.count.Add(1)
 	default:
-		ctx.WithErr(goakt.ErrUnhandled)
+		p.logger.Panic(goakt.ErrUnhandled)
 	}
 }
 
@@ -139,19 +128,17 @@ func (p *PongActor) PreStart(ctx context.Context) error {
 	return nil
 }
 
-func (p *PongActor) Receive(ctx goakt.MessageContext) {
+func (p *PongActor) Receive(ctx goakt.ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *samplepb.Ping:
 		p.logger.Infof(fmt.Sprintf("received Ping from %s", ctx.Sender().Address()))
 		// reply the sender in case there is a sender
 		if ctx.Sender() != nil && ctx.Sender() != goakt.NoSender {
-			newCtx := goakt.NewMessageContext(ctx.Context(), &samplepb.Pong{})
-			newCtx.WithSender(ctx.Self())
-			ctx.Sender().Send(newCtx)
+			_ = ctx.Self().SendAsync(ctx.Context(), ctx.Sender(), new(samplepb.Pong))
 		}
 		p.count.Add(1)
 	default:
-		ctx.WithErr(goakt.ErrUnhandled)
+		p.logger.Panic(goakt.ErrUnhandled)
 	}
 }
 

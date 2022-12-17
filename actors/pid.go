@@ -11,18 +11,14 @@ import (
 	"github.com/tochemey/goakt/log"
 	"github.com/tochemey/goakt/pkg/tools"
 	"go.uber.org/atomic"
+	"google.golang.org/protobuf/proto"
 )
 
 // NoSender means that there is no sender
-var NoSender = new(pid)
+var NoSender PID
 
 // PID defines the various actions one can perform on a given actor
 type PID interface {
-	// Send sends a given message to the actor asynchronously by passing a MessageContext. With the message context
-	// one can reply to the sender of the message in case a sender is set or set the reply in case we are dealing
-	// with a request-response message format. The receiver can also set an error message that occurs during the message
-	// processing as well send a message back to the sender.
-	Send(ctx MessageContext)
 	// Shutdown gracefully shuts down the given actor
 	Shutdown(ctx context.Context) error
 	// IsOnline returns true when the actor is online ready to process messages and false
@@ -35,7 +31,7 @@ type PID interface {
 	// at a given point in time while the actor heart is still beating
 	ErrorsCount(ctx context.Context) uint64
 	// SpawnChild creates a child actor
-	SpawnChild(ctx context.Context, id *ID, actor Actor) (PID, error)
+	SpawnChild(ctx context.Context, kind, id string, actor Actor) (PID, error)
 	// Restart restarts the actor
 	Restart(ctx context.Context) error
 	// Watch an actor
@@ -48,12 +44,19 @@ type PID interface {
 	Address() Address
 	// Watchers returns the list of watchers
 	Watchers() *tools.ConcurrentSlice[*Watcher]
-	// ID returns the actor unique identifier
-	ID() *ID
+	// LocalID returns the actor unique identifier
+	LocalID() *LocalID
+	// SendAsync sends an asynchronous message to another PID
+	SendAsync(ctx context.Context, to PID, message proto.Message) error
+	// SendSync sends a synchronous message to another actor and expect a response.
+	SendSync(ctx context.Context, to PID, message proto.Message) (response proto.Message, err error)
+
+	// doReceive is an internal method to push message to actor mailbox
+	doReceive(ctx ReceiveContext)
 }
 
 // pid specifies an actor unique process
-// With the pid one can send a messageContext to the actor
+// With the pid one can send a receiveContext to the actor
 type pid struct {
 	Actor
 
@@ -61,7 +64,7 @@ type pid struct {
 	addr Address
 
 	// actor unique identifier
-	id *ID
+	id *LocalID
 
 	// helps determine whether the actor should handle messages or not.
 	isOnline bool
@@ -87,7 +90,7 @@ type pid struct {
 	shutdownTimeout time.Duration
 
 	// specifies the actor mailbox
-	mailbox chan MessageContext
+	mailbox chan ReceiveContext
 	// receives a shutdown signal. Once the signal is received
 	// the actor is shut down gracefully.
 	shutdownSignal     chan Unit
@@ -131,7 +134,7 @@ func newPID(ctx context.Context, actor Actor, opts ...pidOption) *pid {
 		sendRecvTimeout:        100 * time.Millisecond,
 		shutdownTimeout:        2 * time.Second,
 		initMaxRetries:         5,
-		mailbox:                make(chan MessageContext, 1000),
+		mailbox:                make(chan ReceiveContext, 1000),
 		shutdownSignal:         make(chan Unit, 1),
 		haltPassivationLnr:     make(chan Unit, 1),
 		logger:                 log.DefaultLogger,
@@ -149,9 +152,9 @@ func newPID(ctx context.Context, actor Actor, opts ...pidOption) *pid {
 	}
 
 	// let us set the addr when the actor system and kind are set
-	if pid.system != nil && pid.ID().Kind != "" {
+	if pid.system != nil && pid.LocalID().Kind() != "" {
 		// create the address of the given actor and set it
-		pid.addr = GetAddress(pid.system, pid.ID().Kind, pid.ID().Value)
+		pid.addr = GetAddress(pid.system, pid.LocalID().Kind(), pid.LocalID().ID())
 	}
 
 	// initialize the actor and init processing messages
@@ -164,12 +167,12 @@ func newPID(ctx context.Context, actor Actor, opts ...pidOption) *pid {
 	return pid
 }
 
-// ID returns the unique actor identifier
-func (p *pid) ID() *ID {
+// LocalID returns the unique actor identifier
+func (p *pid) LocalID() *LocalID {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.id == nil {
-		return &ID{}
+		return &LocalID{}
 	}
 	return p.id
 }
@@ -227,14 +230,14 @@ func (p *pid) Restart(ctx context.Context) error {
 }
 
 // SpawnChild creates a child actor and start watching it for error
-func (p *pid) SpawnChild(ctx context.Context, id *ID, actor Actor) (PID, error) {
+func (p *pid) SpawnChild(ctx context.Context, kind, id string, actor Actor) (PID, error) {
 	// first check whether the actor is ready to start another actor
 	if !p.IsOnline() {
 		return nil, ErrNotReady
 	}
 
 	// create the address of the given actor
-	addr := GetAddress(p.ActorSystem(), id.Kind, id.Value)
+	addr := GetAddress(p.ActorSystem(), kind, id)
 	// check whether the child actor already exist and just return the PID
 	if cid, ok := p.children.Get(addr); ok {
 		// check whether the actor is stopped
@@ -254,7 +257,7 @@ func (p *pid) SpawnChild(ctx context.Context, id *ID, actor Actor) (PID, error) 
 		withSendReplyTimeout(p.sendRecvTimeout),
 		withCustomLogger(p.logger),
 		withActorSystem(p.system),
-		withID(id),
+		withLocalID(kind, id),
 		withSupervisorStrategy(p.supervisorStrategy),
 		withShutdownTimeout(p.shutdownTimeout),
 		withAddress(addr))
@@ -280,33 +283,75 @@ func (p *pid) ErrorsCount(ctx context.Context) uint64 {
 	return p.panicCounter.Load()
 }
 
-// Send sends a given message to the actor
-func (p *pid) Send(ctx MessageContext) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	// reject message when the actor is not ready to process messages
-	if !p.isOnline {
-		ctx.WithErr(ErrNotReady)
-		return
+// SendSync sends a synchronous message to another actor and expect a response.
+// This block until a response is received or timed out.
+func (p *pid) SendSync(ctx context.Context, to PID, message proto.Message) (response proto.Message, err error) {
+	// make sure the actor is live
+	if !to.IsOnline() {
+		return nil, ErrNotReady
 	}
 
-	// set the receiver of the messahe
-	ctx.withRecipient(p)
+	// acquire a lock to set the message context
+	p.mu.Lock()
 
-	// set the last processing time
-	p.lastProcessingTime.Store(time.Now())
+	// create a receiver context
+	context := new(receiveContext)
 
-	// set the start processing time
-	startTime := time.Now()
-	defer func() {
-		duration := time.Since(startTime)
-		p.lastProcessingDuration.Store(duration)
-	}()
+	// set the needed properties of the message context
+	context.ctx = ctx
+	context.sender = p
+	context.recipient = to
+	context.message = message
+	context.isAsyncMessage = false
+	context.mu = sync.Mutex{}
 
-	// push the message to the actor mailbox
-	p.mailbox <- ctx
-	// increase the received message counter
-	p.receivedMessageCounter.Inc()
+	// release the lock after setting the message context
+	p.mu.Unlock()
+
+	// put the message context in the mailbox of the recipient actor
+	to.doReceive(context)
+
+	// await patiently to receive the response from the actor
+	for await := time.After(p.sendRecvTimeout); ; {
+		select {
+		case response = <-context.response:
+			return
+		case <-await:
+			err = ErrRequestTimeout
+			return
+		}
+	}
+}
+
+// SendAsync sends an asynchronous message to another PID
+func (p *pid) SendAsync(ctx context.Context, to PID, message proto.Message) error {
+	// make sure the recipient actor is live
+	if !to.IsOnline() {
+		return ErrNotReady
+	}
+
+	// acquire a lock to set the message context
+	p.mu.Lock()
+
+	// create a message context
+	context := new(receiveContext)
+
+	// set the needed properties of the message context
+	context.ctx = ctx
+	context.sender = p
+	context.recipient = to
+	context.message = message
+	context.isAsyncMessage = true
+	context.mu = sync.Mutex{}
+	context.response = make(chan proto.Message, 1)
+
+	// release the lock after setting the message context
+	p.mu.Unlock()
+
+	// put the message context in the mailbox of the recipient actor
+	to.doReceive(context)
+
+	return nil
 }
 
 // Shutdown gracefully shuts down the given actor
@@ -375,6 +420,24 @@ func (p *pid) UnWatch(pid PID) {
 	}
 }
 
+// doReceive pushes a given message to the actor mailbox
+func (p *pid) doReceive(ctx ReceiveContext) {
+	// set the last processing time
+	p.lastProcessingTime.Store(time.Now())
+
+	// set the start processing time
+	startTime := time.Now()
+	defer func() {
+		duration := time.Since(startTime)
+		p.lastProcessingDuration.Store(duration)
+	}()
+
+	// push the message to the actor mailbox
+	p.mailbox <- ctx
+	// increase the received message counter
+	p.receivedMessageCounter.Inc()
+}
+
 // init initializes the given actor and init processing messages
 // when the initialization failed the actor is automatically shutdown
 func (p *pid) init(ctx context.Context) {
@@ -404,7 +467,7 @@ func (p *pid) init(ctx context.Context) {
 
 func (p *pid) reset() {
 	// reset the mailbox
-	p.mailbox = make(chan MessageContext, 1000)
+	p.mailbox = make(chan ReceiveContext, 1000)
 	// reset the children map
 	p.children = newPIDMap(10)
 	// reset the various counters

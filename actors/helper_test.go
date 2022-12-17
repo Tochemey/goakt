@@ -21,12 +21,12 @@ func (p *BenchActor) PreStart(ctx context.Context) error {
 	return nil
 }
 
-func (p *BenchActor) Receive(message MessageContext) {
+func (p *BenchActor) Receive(message ReceiveContext) {
 	switch message.Message().(type) {
 	case *actorsv1.TestSend:
 		p.Wg.Done()
 	case *actorsv1.TestReply:
-		message.WithResponse(&actorsv1.Reply{Content: "received message"})
+		message.Response(&actorsv1.Reply{Content: "received message"})
 		p.Wg.Done()
 	}
 }
@@ -57,14 +57,14 @@ func (p *TestActor) PostStop(ctx context.Context) error {
 }
 
 // Receive processes any message dropped into the actor mailbox without a reply
-func (p *TestActor) Receive(message MessageContext) {
-	switch message.Message().(type) {
+func (p *TestActor) Receive(ctx ReceiveContext) {
+	switch ctx.Message().(type) {
 	case *actorsv1.TestSend:
-		// pass
 	case *actorsv1.TestPanic:
 		log.Panic("Boom")
 	case *actorsv1.TestReply:
-		message.WithResponse(&actorsv1.Reply{Content: "received message"})
+		log.Info("received request/response")
+		ctx.Response(&actorsv1.Reply{Content: "received message"})
 	case *actorsv1.TestTimeout:
 		// delay for a while before sending the reply
 		wg := sync.WaitGroup{}
@@ -76,7 +76,7 @@ func (p *TestActor) Receive(message MessageContext) {
 		// block until timer is up
 		wg.Wait()
 	default:
-		message.WithErr(ErrUnhandled)
+		log.Panic(ErrUnhandled)
 	}
 }
 
@@ -93,11 +93,11 @@ func (p *ParentActor) PreStart(ctx context.Context) error {
 	return nil
 }
 
-func (p *ParentActor) Receive(message MessageContext) {
+func (p *ParentActor) Receive(message ReceiveContext) {
 	switch message.Message().(type) {
 	case *actorsv1.TestSend:
 	default:
-		message.WithErr(ErrUnhandled)
+		log.Panic(ErrUnhandled)
 	}
 }
 
@@ -118,11 +118,11 @@ func (c *ChildActor) PreStart(ctx context.Context) error {
 	return nil
 }
 
-func (c *ChildActor) Receive(message MessageContext) {
+func (c *ChildActor) Receive(message ReceiveContext) {
 	switch message.Message().(type) {
 	case *actorsv1.TestSend:
 	default:
-		message.WithErr(ErrUnhandled)
+		log.Panic(ErrUnhandled)
 	}
 }
 

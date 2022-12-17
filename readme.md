@@ -1,5 +1,6 @@
 # Go-Akt
 [![build](https://img.shields.io/github/actions/workflow/status/Tochemey/goakt/build.yml?branch=main)](https://github.com/Tochemey/goakt/actions/workflows/build.yml)
+[![codecov](https://codecov.io/gh/Tochemey/goakt/branch/main/graph/badge.svg?token=J0p9MzwSRH)](https://codecov.io/gh/Tochemey/goakt)
 
 Minimal actor framework to build reactive and distributed system in golang using protocol buffers.
 
@@ -8,7 +9,8 @@ Also, check reference section at the end of the post for more material regarding
 
 ## Features
 
-- [x] Send a message to an actor
+- [x] Send a synchronous message to an actor from a non actor system
+- [x] Send a fire-forget message to an actor from a non actor system
 - [x] Actor to Actor communication (check the [examples](./_examples/actor-to-actor) folder)
 - [x] PreStart hook for an actor 
 - [x] PostStop hook for an actor 
@@ -18,15 +20,22 @@ Also, check reference section at the end of the post for more material regarding
 - [x] (Un)Watch an actor
 - [X] Stop and actor
 - [x] Create a child actor
+- [x] Sample example
 - [x] Supervisory Strategy (WIP) 
 - [ ] Metrics
 - [ ] Clustering
-- [x] Sample example
-- [ ] Send message performance tweaking
 
-## Sample
+## Installation
+```bash
+go get github.com/Tochemey/goakt
+```
+
+## Example
+
+### Send a fire-forget message to an actor from a non actor system
 
 ```go
+
 package main
 
 import (
@@ -62,24 +71,14 @@ func main() {
 	_ = actorSystem.Start(ctx)
 
 	// create an actor
-	actorID := &goakt.ID{
-		Kind:  "Pinger",
-		Value: "123",
-	}
-
-	actor := actorSystem.Spawn(ctx, actorID, NewPinger())
+	actor := actorSystem.Spawn(ctx, "Pinger", "123", NewPinger())
 
 	startTime := time.Now()
 
 	// send some messages to the actor
 	count := 1_000_000
 	for i := 0; i < count; i++ {
-		content := &samplepb.Ping{}
-		// construct a message with no sender
-		messageContext := goakt.NewMessageContext(ctx, content)
-		messageContext.WithSender(goakt.NoSender)
-		// send the message. kindly in real-life application handle the error
-		actor.Send(messageContext)
+		_ = goakt.SendAsync(ctx, actor, new(samplepb.Ping))
 	}
 
 	// capture ctrl+c
@@ -119,13 +118,13 @@ func (p *Pinger) PreStart(ctx context.Context) error {
 	return nil
 }
 
-func (p *Pinger) Receive(ctx goakt.MessageContext) {
+func (p *Pinger) Receive(ctx goakt.ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *samplepb.Ping:
 		p.logger.Info("received Ping")
 		p.count.Add(1)
 	default:
-		ctx.WithErr(goakt.ErrUnhandled)
+		p.logger.Panic(goakt.ErrUnhandled)
 	}
 }
 
@@ -134,5 +133,20 @@ func (p *Pinger) PostStop(ctx context.Context) error {
 	p.logger.Infof("Processed=%d messages", p.count.Load())
 	return nil
 }
+```
 
+## Contribution
+Contributions are welcome!
+The project adheres to [Semantic Versioning](https://semver.org) and [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/).
+This repo uses [Earthly](https://earthly.dev/get-earthly).
+
+To contribute please:
+- Fork the repository
+- Create a feature branch
+- Submit a [pull request](https://help.github.com/articles/using-pull-requests)
+
+### Test & Linter
+Prior to submitting a [pull request](https://help.github.com/articles/using-pull-requests), please run:
+```bash
+earthly +test
 ```

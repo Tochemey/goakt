@@ -33,24 +33,14 @@ func main() {
 	_ = actorSystem.Start(ctx)
 
 	// create an actor
-	actorID := &goakt.ID{
-		Kind:  "Pinger",
-		Value: "123",
-	}
-
-	actor := actorSystem.Spawn(ctx, actorID, NewPinger())
+	actor := actorSystem.Spawn(ctx, "Pinger", "123", NewPinger())
 
 	startTime := time.Now()
 
 	// send some messages to the actor
 	count := 1_000_000
 	for i := 0; i < count; i++ {
-		content := &samplepb.Ping{}
-		// construct a message with no sender
-		messageContext := goakt.NewMessageContext(ctx, content)
-		messageContext.WithSender(goakt.NoSender)
-		// send the message. kindly in real-life application handle the error
-		actor.Send(messageContext)
+		_ = goakt.SendAsync(ctx, actor, new(samplepb.Ping))
 	}
 
 	// capture ctrl+c
@@ -90,13 +80,13 @@ func (p *Pinger) PreStart(ctx context.Context) error {
 	return nil
 }
 
-func (p *Pinger) Receive(ctx goakt.MessageContext) {
+func (p *Pinger) Receive(ctx goakt.ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *samplepb.Ping:
 		p.logger.Info("received Ping")
 		p.count.Add(1)
 	default:
-		ctx.WithErr(goakt.ErrUnhandled)
+		p.logger.Panic(goakt.ErrUnhandled)
 	}
 }
 
