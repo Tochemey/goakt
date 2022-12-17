@@ -24,6 +24,7 @@ Also, check reference section at the end of the post for more material regarding
 - [x] Supervisory Strategy (WIP) 
 - [ ] Metrics
 - [ ] Clustering
+- [ ] Rewrite the logger interface
 
 ## Installation
 ```bash
