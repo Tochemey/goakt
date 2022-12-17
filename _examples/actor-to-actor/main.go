@@ -42,8 +42,8 @@ func main() {
 
 	// shutdown both actors after 3 seconds of conversation
 	timer := time.AfterFunc(3*time.Second, func() {
-		log.DefaultLogger.Infof("PingActor=%s has processed %d messages", pingActor.Address(), pingActor.TotalProcessed(ctx))
-		log.DefaultLogger.Infof("PongActor=%s has processed %d messages", pongActor.Address(), pongActor.TotalProcessed(ctx))
+		log.DefaultLogger.Infof("PingActor=%s has processed %d messages", pingActor.Address(), pingActor.ReceivedCount(ctx))
+		log.DefaultLogger.Infof("PongActor=%s has processed %d messages", pongActor.Address(), pongActor.ReceivedCount(ctx))
 		_ = pingActor.Shutdown(ctx)
 		_ = pongActor.Shutdown(ctx)
 	})

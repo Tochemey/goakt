@@ -46,7 +46,7 @@ func TestActorReceive(t *testing.T) {
 
 		pid.doReceive(recvContext)
 	}
-	assert.EqualValues(t, count, pid.TotalProcessed(ctx))
+	assert.EqualValues(t, count, pid.ReceivedCount(ctx))
 	// stop the actor
 	err := pid.Shutdown(ctx)
 	assert.NoError(t, err)
@@ -170,7 +170,7 @@ func TestActorRestart(t *testing.T) {
 			err = SendAsync(ctx, pid, new(actorsv1.TestSend))
 			assert.NoError(t, err)
 		}
-		assert.EqualValues(t, count, pid.TotalProcessed(ctx))
+		assert.EqualValues(t, count, pid.ReceivedCount(ctx))
 		// stop the actor
 		err = pid.Shutdown(ctx)
 		assert.NoError(t, err)
@@ -223,7 +223,7 @@ func TestActorRestart(t *testing.T) {
 			err = SendAsync(ctx, pid, new(actorsv1.TestSend))
 			assert.NoError(t, err)
 		}
-		assert.EqualValues(t, count, pid.TotalProcessed(ctx))
+		assert.EqualValues(t, count, pid.ReceivedCount(ctx))
 
 		// restart the actor
 		err = pid.Restart(ctx)
@@ -234,7 +234,7 @@ func TestActorRestart(t *testing.T) {
 			err = SendAsync(ctx, pid, new(actorsv1.TestSend))
 			assert.NoError(t, err)
 		}
-		assert.EqualValues(t, count, pid.TotalProcessed(ctx))
+		assert.EqualValues(t, count, pid.ReceivedCount(ctx))
 		// stop the actor
 		err = pid.Shutdown(ctx)
 		assert.NoError(t, err)
@@ -275,8 +275,8 @@ func TestChildActor(t *testing.T) {
 			assert.NoError(t, SendAsync(ctx, parent, new(actorsv1.TestSend)))
 			assert.NoError(t, SendAsync(ctx, child, new(actorsv1.TestSend)))
 		}
-		assert.EqualValues(t, count, parent.TotalProcessed(ctx))
-		assert.EqualValues(t, count, child.TotalProcessed(ctx))
+		assert.EqualValues(t, count, parent.ReceivedCount(ctx))
+		assert.EqualValues(t, count, child.ReceivedCount(ctx))
 		//stop the actor
 		err = parent.Shutdown(ctx)
 		assert.NoError(t, err)

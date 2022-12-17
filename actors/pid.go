@@ -24,9 +24,9 @@ type PID interface {
 	// IsOnline returns true when the actor is online ready to process messages and false
 	// when the actor is stopped or not started at all
 	IsOnline() bool
-	// TotalProcessed returns the total number of messages processed by the actor
+	// ReceivedCount returns the total number of messages processed by the actor
 	// at a given point in time while the actor heart is still beating
-	TotalProcessed(ctx context.Context) uint64
+	ReceivedCount(ctx context.Context) uint64
 	// ErrorsCount returns the total number of panic attacks that occur while the actor is processing messages
 	// at a given point in time while the actor heart is still beating
 	ErrorsCount(ctx context.Context) uint64
@@ -50,6 +50,8 @@ type PID interface {
 	SendAsync(ctx context.Context, to PID, message proto.Message) error
 	// SendSync sends a synchronous message to another actor and expect a response.
 	SendSync(ctx context.Context, to PID, message proto.Message) (response proto.Message, err error)
+	// RestartCount returns the number of times the actor has restarted
+	RestartCount(ctx context.Context) uint64
 
 	// doReceive is an internal method to push message to actor mailbox
 	doReceive(ctx ReceiveContext)
@@ -111,6 +113,7 @@ type pid struct {
 	// definition of the various counters
 	panicCounter           *atomic.Uint64
 	receivedMessageCounter *atomic.Uint64
+	restartCounter         *atomic.Uint64
 	lastProcessingDuration *atomic.Duration
 
 	mu sync.RWMutex
@@ -141,6 +144,7 @@ func newPID(ctx context.Context, actor Actor, opts ...pidOption) *pid {
 		panicCounter:           atomic.NewUint64(0),
 		receivedMessageCounter: atomic.NewUint64(0),
 		lastProcessingDuration: atomic.NewDuration(0),
+		restartCounter:         atomic.NewUint64(0),
 		mu:                     sync.RWMutex{},
 		children:               newPIDMap(10),
 		supervisorStrategy:     actorsv1.Strategy_STOP,
@@ -225,6 +229,8 @@ func (p *pid) Restart(ctx context.Context) error {
 	go p.receive()
 	// init the idle checker loop
 	go p.passivationListener()
+	// increment the restart counter
+	p.restartCounter.Inc()
 	// successful restart
 	return nil
 }
@@ -271,9 +277,9 @@ func (p *pid) SpawnChild(ctx context.Context, kind, id string, actor Actor) (PID
 	return cid, nil
 }
 
-// TotalProcessed returns the total number of messages processed by the actor
+// ReceivedCount returns the total number of messages processed by the actor
 // at a given time while the actor is still alive
-func (p *pid) TotalProcessed(ctx context.Context) uint64 {
+func (p *pid) ReceivedCount(ctx context.Context) uint64 {
 	return p.receivedMessageCounter.Load()
 }
 
@@ -281,6 +287,11 @@ func (p *pid) TotalProcessed(ctx context.Context) uint64 {
 // at a given point in time while the actor heart is still beating
 func (p *pid) ErrorsCount(ctx context.Context) uint64 {
 	return p.panicCounter.Load()
+}
+
+// RestartCount returns the number of times the actor has restarted
+func (p *pid) RestartCount(ctx context.Context) uint64 {
+	return p.restartCounter.Load()
 }
 
 // SendSync sends a synchronous message to another actor and expect a response.
@@ -474,6 +485,7 @@ func (p *pid) reset() {
 	p.panicCounter = atomic.NewUint64(0)
 	p.receivedMessageCounter = atomic.NewUint64(0)
 	p.lastProcessingDuration = atomic.NewDuration(0)
+	p.restartCounter = atomic.NewUint64(0)
 	// reset the channels
 	p.shutdownSignal = make(chan Unit, 1)
 	p.haltPassivationLnr = make(chan Unit, 1)

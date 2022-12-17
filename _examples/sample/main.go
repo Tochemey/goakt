@@ -49,7 +49,7 @@ func main() {
 	<-interruptSignal
 
 	// log some stats
-	log.DefaultLogger.Infof("Actor=%s has processed %d messages in %s", actor.Address(), actor.TotalProcessed(ctx), time.Since(startTime))
+	log.DefaultLogger.Infof("Actor=%s has processed %d messages in %s", actor.Address(), actor.ReceivedCount(ctx), time.Since(startTime))
 
 	// stop the actor system
 	_ = actorSystem.Stop(ctx)
