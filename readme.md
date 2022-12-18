@@ -26,6 +26,7 @@ Also, check reference section at the end of the post for more material regarding
 - [ ] Metrics
 - [ ] Clustering
 - [ ] Rewrite the logger interface
+- [ ] Behaviors
 
 ## Installation
 ```bash
