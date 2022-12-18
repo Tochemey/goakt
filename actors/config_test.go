@@ -4,6 +4,8 @@ import (
 	"testing"
 	"time"
 
+	actorsv1 "github.com/tochemey/goakt/gen/actors/v1"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tochemey/goakt/log"
@@ -59,6 +61,16 @@ func TestOptions(t *testing.T) {
 			name:           "WithLogger",
 			option:         WithLogger(log.DefaultLogger),
 			expectedConfig: Config{logger: log.DefaultLogger},
+		},
+		{
+			name:           "WithPassivationDisabled",
+			option:         WithPassivationDisabled(),
+			expectedConfig: Config{expireActorAfter: -1},
+		},
+		{
+			name:           "WithSupervisorStrategy",
+			option:         WithSupervisorStrategy(actorsv1.Strategy_RESTART),
+			expectedConfig: Config{supervisorStrategy: actorsv1.Strategy_RESTART},
 		},
 	}
 	for _, tc := range testCases {
