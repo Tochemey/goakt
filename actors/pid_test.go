@@ -269,6 +269,7 @@ func TestChildActor(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, child)
 
+		assert.Len(t, parent.Children(ctx), 1)
 		// let us send 10 messages to the actors
 		count := 10
 		for i := 0; i < count; i++ {
@@ -277,6 +278,49 @@ func TestChildActor(t *testing.T) {
 		}
 		assert.EqualValues(t, count, parent.ReceivedCount(ctx))
 		assert.EqualValues(t, count, child.ReceivedCount(ctx))
+		//stop the actor
+		err = parent.Shutdown(ctx)
+		assert.NoError(t, err)
+	})
+	t.Run("test child panic with stop as default strategy", func(t *testing.T) {
+		defer goleak.VerifyNone(t)
+
+		// create a test context
+		ctx := context.TODO()
+		// create a basic actor system
+		cfg, err := NewConfig("testSys", "localhost:0")
+		require.NoError(t, err)
+		assert.NotNil(t, cfg)
+
+		actorSys, err := NewActorSystem(cfg)
+		require.NoError(t, err)
+
+		// create the parent actor
+		parent := newPID(ctx,
+			NewParentActor(),
+			withInitMaxRetries(1),
+			withPassivationDisabled(),
+			withActorSystem(actorSys),
+			withLocalID("Parent", "papa"),
+			withSendReplyTimeout(recvTimeout))
+		assert.NotNil(t, parent)
+
+		// create the child actor
+		child, err := parent.SpawnChild(ctx, "Child", "johnny", NewChildActor())
+		assert.NoError(t, err)
+		assert.NotNil(t, child)
+
+		assert.Len(t, parent.Children(ctx), 1)
+		// send a test panic message to the actor
+		assert.NoError(t, SendAsync(ctx, child, new(actorsv1.TestPanic)))
+
+		// wait for the child to properly shutdown
+		time.Sleep(time.Second)
+
+		// assert the actor state
+		assert.False(t, child.IsOnline())
+		assert.Len(t, parent.Children(ctx), 0)
+
 		//stop the actor
 		err = parent.Shutdown(ctx)
 		assert.NoError(t, err)

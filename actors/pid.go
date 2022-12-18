@@ -52,7 +52,8 @@ type PID interface {
 	SendSync(ctx context.Context, to PID, message proto.Message) (response proto.Message, err error)
 	// RestartCount returns the number of times the actor has restarted
 	RestartCount(ctx context.Context) uint64
-
+	// Children returns the list of all the children of the given actor
+	Children(ctx context.Context) []PID
 	// doReceive is an internal method to push message to actor mailbox
 	doReceive(ctx ReceiveContext)
 }
@@ -165,10 +166,20 @@ func newPID(ctx context.Context, actor Actor, opts ...pidOption) *pid {
 	pid.init(ctx)
 	// init processing messages
 	go pid.receive()
-	// init the idle checker loop
-	go pid.passivationListener()
+	// init the passivation listener loop iff passivation is set
+	if pid.passivateAfter > 0 {
+		go pid.passivationListener()
+	}
 	// return the actor reference
 	return pid
+}
+
+// Children returns the list of all the children of the given actor
+func (p *pid) Children(ctx context.Context) []PID {
+	p.mu.Lock()
+	kiddos := p.children.List()
+	p.mu.Unlock()
+	return kiddos
 }
 
 // LocalID returns the unique actor identifier
@@ -493,7 +504,7 @@ func (p *pid) reset() {
 
 func (p *pid) freeChildren(ctx context.Context) {
 	// iterate the pids and shutdown the child actors
-	for _, child := range p.children.All() {
+	for _, child := range p.children.List() {
 		// stop the child actor
 		if err := child.Shutdown(ctx); err != nil {
 			panic(err)

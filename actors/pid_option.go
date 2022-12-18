@@ -77,3 +77,10 @@ func withShutdownTimeout(duration time.Duration) pidOption {
 		ref.shutdownTimeout = duration
 	}
 }
+
+// withNoPassivation disable passivation
+func withPassivationDisabled() pidOption {
+	return func(ref *pid) {
+		ref.passivateAfter = -1
+	}
+}

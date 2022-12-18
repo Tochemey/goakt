@@ -6,13 +6,13 @@ type Unit struct{}
 
 type pidMap struct {
 	mu   sync.Mutex
-	pids map[Address]*pid
+	pids map[Address]PID
 }
 
 func newPIDMap(cap int) *pidMap {
 	return &pidMap{
 		mu:   sync.Mutex{},
-		pids: make(map[Address]*pid, cap),
+		pids: make(map[Address]PID, cap),
 	}
 }
 
@@ -22,7 +22,7 @@ func (m *pidMap) Len() int {
 }
 
 // Get retrieves a pid by its address
-func (m *pidMap) Get(addr Address) (pid *pid, ok bool) {
+func (m *pidMap) Get(addr Address) (pid PID, ok bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	pid, ok = m.pids[addr]
@@ -30,9 +30,9 @@ func (m *pidMap) Get(addr Address) (pid *pid, ok bool) {
 }
 
 // Set sets a pid in the map
-func (m *pidMap) Set(child *pid) {
+func (m *pidMap) Set(child PID) {
 	m.mu.Lock()
-	m.pids[child.addr] = child
+	m.pids[child.Address()] = child
 	m.mu.Unlock()
 }
 
@@ -43,9 +43,11 @@ func (m *pidMap) Delete(addr Address) {
 	delete(m.pids, addr)
 }
 
-// All returns all actors as a slice
-func (m *pidMap) All() []*pid {
-	out := make([]*pid, 0, len(m.pids))
+// List returns all actors as a slice
+func (m *pidMap) List() []PID {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]PID, 0, len(m.pids))
 	for _, actor := range m.pids {
 		out = append(out, actor)
 	}

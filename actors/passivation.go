@@ -8,6 +8,7 @@ import (
 // passivationListener checks whether the actor is processing messages or not.
 // when the actor is idle, it automatically shuts down to free resources
 func (p *pid) passivationListener() {
+	p.logger.Info("start the passivation listener...")
 	// create the ticker
 	ticker := time.NewTicker(p.passivateAfter)
 	// create the stop ticker signal

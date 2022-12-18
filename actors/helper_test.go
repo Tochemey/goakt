@@ -17,7 +17,7 @@ func (p *BenchActor) ID() string {
 	return "BenchActor"
 }
 
-func (p *BenchActor) PreStart(ctx context.Context) error {
+func (p *BenchActor) PreStart(context.Context) error {
 	return nil
 }
 
@@ -31,7 +31,7 @@ func (p *BenchActor) Receive(message ReceiveContext) {
 	}
 }
 
-func (p *BenchActor) PostStop(ctx context.Context) error {
+func (p *BenchActor) PostStop(context.Context) error {
 	return nil
 }
 
@@ -47,12 +47,12 @@ func NewTestActor() *TestActor {
 
 // Init initialize the actor. This function can be used to set up some database connections
 // or some sort of initialization before the actor init processing messages
-func (p *TestActor) PreStart(ctx context.Context) error {
+func (p *TestActor) PreStart(context.Context) error {
 	return nil
 }
 
 // Stop gracefully shuts down the given actor
-func (p *TestActor) PostStop(ctx context.Context) error {
+func (p *TestActor) PostStop(context.Context) error {
 	return nil
 }
 
@@ -89,7 +89,7 @@ func NewParentActor() *ParentActor {
 	return &ParentActor{}
 }
 
-func (p *ParentActor) PreStart(ctx context.Context) error {
+func (p *ParentActor) PreStart(context.Context) error {
 	return nil
 }
 
@@ -101,7 +101,7 @@ func (p *ParentActor) Receive(message ReceiveContext) {
 	}
 }
 
-func (p *ParentActor) PostStop(ctx context.Context) error {
+func (p *ParentActor) PostStop(context.Context) error {
 	return nil
 }
 
@@ -114,18 +114,20 @@ func NewChildActor() *ChildActor {
 	return &ChildActor{}
 }
 
-func (c *ChildActor) PreStart(ctx context.Context) error {
+func (c *ChildActor) PreStart(context.Context) error {
 	return nil
 }
 
 func (c *ChildActor) Receive(message ReceiveContext) {
 	switch message.Message().(type) {
 	case *actorsv1.TestSend:
+	case *actorsv1.TestPanic:
+		log.Panic("paniced")
 	default:
 		log.Panic(ErrUnhandled)
 	}
 }
 
-func (c *ChildActor) PostStop(ctx context.Context) error {
+func (c *ChildActor) PostStop(context.Context) error {
 	return nil
 }
