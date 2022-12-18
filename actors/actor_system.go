@@ -98,6 +98,7 @@ func (a *actorSystem) Spawn(ctx context.Context, kind, id string, actor Actor) P
 		withCustomLogger(a.config.logger),
 		withActorSystem(a),
 		withLocalID(kind, id),
+		withSupervisorStrategy(a.config.supervisorStrategy),
 		withAddress(addr))
 
 	// add the given actor to the actor map

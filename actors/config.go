@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"time"
 
+	actorsv1 "github.com/tochemey/goakt/gen/actors/v1"
+
 	"github.com/tochemey/goakt/log"
 )
 
@@ -33,6 +35,8 @@ type Config struct {
 	// Specifies the maximum of retries to attempt when the actor
 	// initialization fails. The default value is 5
 	actorInitMaxRetries int
+	// Specifies the supervisor strategy
+	supervisorStrategy actorsv1.Strategy
 }
 
 // NewConfig creates an instance of Config
@@ -53,6 +57,7 @@ func NewConfig(name, nodeHostAndPort string, options ...Option) (*Config, error)
 		expireActorAfter:    2 * time.Second,
 		replyTimeout:        100 * time.Millisecond,
 		actorInitMaxRetries: 5,
+		supervisorStrategy:  actorsv1.Strategy_STOP,
 	}
 	// apply the various options
 	for _, opt := range options {
@@ -152,5 +157,19 @@ func WithReplyTimeout(timeout time.Duration) Option {
 func WithActorInitMaxRetries(max int) Option {
 	return OptionFunc(func(config *Config) {
 		config.actorInitMaxRetries = max
+	})
+}
+
+// WithPassivationDisabled disable the passivation mode
+func WithPassivationDisabled() Option {
+	return OptionFunc(func(config *Config) {
+		config.expireActorAfter = -1
+	})
+}
+
+// WithSupervisorStrategy sets the supervisor strategy
+func WithSupervisorStrategy(strategy actorsv1.Strategy) Option {
+	return OptionFunc(func(config *Config) {
+		config.supervisorStrategy = strategy
 	})
 }
