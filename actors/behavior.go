@@ -25,10 +25,10 @@ func (b *BehaviorStack) Clear() {
 }
 
 // Peek helps view the top item on the stack
-func (b *BehaviorStack) Peek() (v Behavior, ok bool) {
+func (b *BehaviorStack) Peek() (behavior Behavior, ok bool) {
 	if length := b.Len(); length > 0 {
 		ok = true
-		v = (*b)[length-1]
+		behavior = (*b)[length-1]
 	}
 
 	return
