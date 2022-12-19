@@ -22,7 +22,7 @@ Also, check reference section at the end of the post for more material regarding
 - [X] Stop and actor
 - [x] Create a child actor
 - [x] Sample example
-- [x] Supervisory Strategy (WIP) 
+- [x] Supervisory Strategy (Restart and Stop directive) 
 - [x] Behaviors
 - [ ] Metrics
 - [ ] Clustering
