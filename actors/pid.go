@@ -55,8 +55,7 @@ type PID interface {
 	// Children returns the list of all the children of the given actor
 	Children(ctx context.Context) []PID
 	// Behaviors returns the behavior stack
-	Behaviors() BehaviorStack
-
+	behaviors() BehaviorStack
 	// push a message to the actor's mailbix
 	doReceive(ctx ReceiveContext)
 	// setBehavior is a utility function that helps set the actor behavior
@@ -135,7 +134,7 @@ type pid struct {
 	supervisorStrategy actorsv1.Strategy
 
 	// specifies the current actor behavior
-	behaviors BehaviorStack
+	behaviorStack BehaviorStack
 }
 
 // enforce compilation error
@@ -189,16 +188,16 @@ func newPID(ctx context.Context, actor Actor, opts ...pidOption) *pid {
 	// set the actor behavior stack
 	behaviorStack := NewBehaviorStack()
 	behaviorStack.Push(pid.Receive)
-	pid.behaviors = behaviorStack
+	pid.behaviorStack = behaviorStack
 
 	// return the actor reference
 	return pid
 }
 
 // Behaviors returns the behavior stack
-func (p *pid) Behaviors() BehaviorStack {
+func (p *pid) behaviors() BehaviorStack {
 	p.mu.Lock()
-	behaviors := p.behaviors
+	behaviors := p.behaviorStack
 	p.mu.Unlock()
 	return behaviors
 }
@@ -346,7 +345,7 @@ func (p *pid) SendSync(ctx context.Context, to PID, message proto.Message) (resp
 	p.mu.Lock()
 
 	// check whether we do have at least one behavior
-	if p.behaviors.IsEmpty() {
+	if p.behaviorStack.IsEmpty() {
 		// release the lock after setting the message context
 		p.mu.Unlock()
 		return nil, ErrEmptyBehavior
@@ -392,7 +391,7 @@ func (p *pid) SendAsync(ctx context.Context, to PID, message proto.Message) erro
 	p.mu.Lock()
 
 	// check whether we do have at least one behavior
-	if p.behaviors.IsEmpty() {
+	if p.behaviorStack.IsEmpty() {
 		// release the lock after setting the message context
 		p.mu.Unlock()
 		return ErrEmptyBehavior
@@ -551,7 +550,7 @@ func (p *pid) resetBehaviorStack() {
 	// reset the behavior
 	behaviorStack := NewBehaviorStack()
 	behaviorStack.Push(p.Receive)
-	p.behaviors = behaviorStack
+	p.behaviorStack = behaviorStack
 }
 
 func (p *pid) freeChildren(ctx context.Context) {
@@ -612,23 +611,23 @@ func (p *pid) stop(ctx context.Context) {
 // setBehavior is a utility function that helps set the actor behavior
 func (p *pid) setBehavior(behavior Behavior) {
 	p.mu.Lock()
-	p.behaviors.Clear()
-	p.behaviors.Push(behavior)
+	p.behaviorStack.Clear()
+	p.behaviorStack.Push(behavior)
 	p.mu.Unlock()
 }
 
 // resetBehavior is a utility function resets the actor behavior
 func (p *pid) resetBehavior() {
 	p.mu.Lock()
-	p.behaviors.Clear()
-	p.behaviors.Push(p.Receive)
+	p.behaviorStack.Clear()
+	p.behaviorStack.Push(p.Receive)
 	p.mu.Unlock()
 }
 
-// setBehaviorStacked adds a behavior to the actor's behaviors
+// setBehaviorStacked adds a behavior to the actor's behaviorStack
 func (p *pid) setBehaviorStacked(behavior Behavior) {
 	p.mu.Lock()
-	p.behaviors.Push(behavior)
+	p.behaviorStack.Push(behavior)
 	p.mu.Unlock()
 }
 
@@ -636,6 +635,6 @@ func (p *pid) setBehaviorStacked(behavior Behavior) {
 // prior to setBehaviorStacked is called
 func (p *pid) unsetBehaviorStacked() {
 	p.mu.Lock()
-	p.behaviors.Pop()
+	p.behaviorStack.Pop()
 	p.mu.Unlock()
 }

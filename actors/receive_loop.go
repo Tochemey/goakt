@@ -36,7 +36,7 @@ func (p *pid) receive() {
 						}
 					}()
 					// send the message to the current actor behavior
-					if behavior, ok := p.behaviors.Peek(); ok {
+					if behavior, ok := p.behaviorStack.Peek(); ok {
 						behavior(received)
 					}
 				}()

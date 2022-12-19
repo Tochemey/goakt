@@ -22,7 +22,7 @@ func SendSync(ctx context.Context, to PID, message proto.Message, timeout time.D
 	// acquire a lock to set the message context
 	mu.Lock()
 	// check whether we do have at least one behavior
-	behaviors := to.Behaviors()
+	behaviors := to.behaviors()
 	// check whether the recipient does have some behavior
 	if behaviors.IsEmpty() {
 		// release the lock after setting the message context
@@ -73,7 +73,7 @@ func SendAsync(ctx context.Context, to PID, message proto.Message) error {
 	// acquire a lock to set the message context
 	mu.Lock()
 	// check whether we do have at least one behavior
-	behaviors := to.Behaviors()
+	behaviors := to.behaviors()
 	// check whether the recipient does have some behavior
 	if behaviors.IsEmpty() {
 		// release the lock after setting the message context
