@@ -35,8 +35,10 @@ func (p *pid) receive() {
 							p.panicCounter.Inc()
 						}
 					}()
-					// send the message to actor to receive
-					p.Receive(received)
+					// send the message to the current actor behavior
+					if behavior, ok := p.behaviors.Peek(); ok {
+						behavior(received)
+					}
 				}()
 			}
 		}

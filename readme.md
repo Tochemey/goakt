@@ -23,10 +23,10 @@ Also, check reference section at the end of the post for more material regarding
 - [x] Create a child actor
 - [x] Sample example
 - [x] Supervisory Strategy (WIP) 
+- [x] Behaviors (WIP: need unit tests)
 - [ ] Metrics
 - [ ] Clustering
 - [ ] Rewrite the logger interface
-- [ ] Behaviors
 
 ## Installation
 ```bash

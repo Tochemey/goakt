@@ -54,8 +54,20 @@ type PID interface {
 	RestartCount(ctx context.Context) uint64
 	// Children returns the list of all the children of the given actor
 	Children(ctx context.Context) []PID
-	// doReceive is an internal method to push message to actor mailbox
+	// Behaviors returns the behavior stack
+	Behaviors() BehaviorStack
+
+	// push a message to the actor's mailbix
 	doReceive(ctx ReceiveContext)
+	// setBehavior is a utility function that helps set the actor behavior
+	setBehavior(behavior Behavior)
+	// setBehaviorStacked adds a behavior to the actor's behaviors
+	setBehaviorStacked(behavior Behavior)
+	// unsetBehaviorStacked sets the actor's behavior to the previous behavior
+	// prior to setBehaviorStacked is called
+	unsetBehaviorStacked()
+	// resetBehavior is a utility function resets the actor behavior
+	resetBehavior()
 }
 
 // pid specifies an actor unique process
@@ -108,7 +120,7 @@ type pid struct {
 	// the actor system
 	system ActorSystem
 
-	//  specifies the logger to use
+	// specifies the logger to use
 	logger log.Logger
 
 	// definition of the various counters
@@ -121,6 +133,9 @@ type pid struct {
 
 	// supervisor strategy
 	supervisorStrategy actorsv1.Strategy
+
+	// specifies the current actor behavior
+	behaviors BehaviorStack
 }
 
 // enforce compilation error
@@ -170,8 +185,22 @@ func newPID(ctx context.Context, actor Actor, opts ...pidOption) *pid {
 	if pid.passivateAfter > 0 {
 		go pid.passivationListener()
 	}
+
+	// set the actor behavior stack
+	behaviorStack := NewBehaviorStack()
+	behaviorStack.Push(pid.Receive)
+	pid.behaviors = behaviorStack
+
 	// return the actor reference
 	return pid
+}
+
+// Behaviors returns the behavior stack
+func (p *pid) Behaviors() BehaviorStack {
+	p.mu.Lock()
+	behaviors := p.behaviors
+	p.mu.Unlock()
+	return behaviors
 }
 
 // Children returns the list of all the children of the given actor
@@ -316,6 +345,13 @@ func (p *pid) SendSync(ctx context.Context, to PID, message proto.Message) (resp
 	// acquire a lock to set the message context
 	p.mu.Lock()
 
+	// check whether we do have at least one behavior
+	if p.behaviors.IsEmpty() {
+		// release the lock after setting the message context
+		p.mu.Unlock()
+		return nil, ErrEmptyBehavior
+	}
+
 	// create a receiver context
 	context := new(receiveContext)
 
@@ -354,6 +390,13 @@ func (p *pid) SendAsync(ctx context.Context, to PID, message proto.Message) erro
 
 	// acquire a lock to set the message context
 	p.mu.Lock()
+
+	// check whether we do have at least one behavior
+	if p.behaviors.IsEmpty() {
+		// release the lock after setting the message context
+		p.mu.Unlock()
+		return ErrEmptyBehavior
+	}
 
 	// create a message context
 	context := new(receiveContext)
@@ -500,6 +543,15 @@ func (p *pid) reset() {
 	// reset the channels
 	p.shutdownSignal = make(chan Unit, 1)
 	p.haltPassivationLnr = make(chan Unit, 1)
+	// reset the behavior stack
+	p.resetBehaviorStack()
+}
+
+func (p *pid) resetBehaviorStack() {
+	// reset the behavior
+	behaviorStack := NewBehaviorStack()
+	behaviorStack.Push(p.Receive)
+	p.behaviors = behaviorStack
 }
 
 func (p *pid) freeChildren(ctx context.Context) {
@@ -555,4 +607,35 @@ func (p *pid) stop(ctx context.Context) {
 	p.logger.Infof("Remaining messages in the mailbox have been processed for actor=%s", p.Address())
 	// stop the ticker
 	ticker.Stop()
+}
+
+// setBehavior is a utility function that helps set the actor behavior
+func (p *pid) setBehavior(behavior Behavior) {
+	p.mu.Lock()
+	p.behaviors.Clear()
+	p.behaviors.Push(behavior)
+	p.mu.Unlock()
+}
+
+// resetBehavior is a utility function resets the actor behavior
+func (p *pid) resetBehavior() {
+	p.mu.Lock()
+	p.behaviors.Clear()
+	p.behaviors.Push(p.Receive)
+	p.mu.Unlock()
+}
+
+// setBehaviorStacked adds a behavior to the actor's behaviors
+func (p *pid) setBehaviorStacked(behavior Behavior) {
+	p.mu.Lock()
+	p.behaviors.Push(behavior)
+	p.mu.Unlock()
+}
+
+// unsetBehaviorStacked sets the actor's behavior to the previous behavior
+// prior to setBehaviorStacked is called
+func (p *pid) unsetBehaviorStacked() {
+	p.mu.Lock()
+	p.behaviors.Pop()
+	p.mu.Unlock()
 }
