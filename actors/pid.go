@@ -258,6 +258,9 @@ func (p *pid) Restart(ctx context.Context) error {
 		if err := p.Shutdown(ctx); err != nil {
 			return err
 		}
+		// wait a while for the shutdown process to complete
+		// TODO enhance this
+		time.Sleep(100 * time.Millisecond)
 	}
 
 	// reset the actor
@@ -266,8 +269,10 @@ func (p *pid) Restart(ctx context.Context) error {
 	p.init(ctx)
 	// init processing messages
 	go p.receive()
-	// init the idle checker loop
-	go p.passivationListener()
+	// init the passivation listener loop iff passivation is set
+	if p.passivateAfter > 0 {
+		go p.passivationListener()
+	}
 	// increment the restart counter
 	p.restartCounter.Inc()
 	// successful restart
@@ -486,6 +491,9 @@ func (p *pid) UnWatch(pid PID) {
 
 // doReceive pushes a given message to the actor mailbox
 func (p *pid) doReceive(ctx ReceiveContext) {
+	// acquire the lock and release it once done
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	// set the last processing time
 	p.lastProcessingTime.Store(time.Now())
 

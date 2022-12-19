@@ -19,6 +19,7 @@ import (
 
 // DefaultLogger define the standard logger used by the package-level output functions.
 var DefaultLogger = New(infoLevel, "[GO-AKT]", os.Stderr, io.Discard)
+var DiscardLogger = New(infoLevel, "[GO-AKT]", io.Discard)
 
 const (
 	// infoLevel indicates Info log level.

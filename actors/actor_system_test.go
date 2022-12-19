@@ -6,11 +6,12 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/tochemey/goakt/log"
 )
 
 func TestNewActorSystem(t *testing.T) {
 	t.Run("With Defaults", func(t *testing.T) {
-		cfg, err := NewConfig("testSys", "localhost:0")
+		cfg, err := NewConfig("testSys", "localhost:0", WithLogger(log.DiscardLogger))
 		require.NoError(t, err)
 		assert.NotNil(t, cfg)
 
@@ -34,7 +35,7 @@ func TestNewActorSystem(t *testing.T) {
 
 	t.Run("With Spawn an actor when not started", func(t *testing.T) {
 		ctx := context.TODO()
-		cfg, _ := NewConfig("testSys", "localhost:0")
+		cfg, _ := NewConfig("testSys", "localhost:0", WithLogger(log.DiscardLogger))
 		sys, _ := NewActorSystem(cfg)
 		actor := NewTestActor()
 		actorRef := sys.Spawn(ctx, "Test", "test-1", actor)
@@ -43,7 +44,7 @@ func TestNewActorSystem(t *testing.T) {
 
 	t.Run("With Spawn an actor when started", func(t *testing.T) {
 		ctx := context.TODO()
-		cfg, _ := NewConfig("testSys", "localhost:0")
+		cfg, _ := NewConfig("testSys", "localhost:0", WithLogger(log.DiscardLogger))
 		sys, _ := NewActorSystem(cfg)
 
 		// start the actor system
@@ -59,7 +60,7 @@ func TestNewActorSystem(t *testing.T) {
 
 	t.Run("With Spawn an actor already exist", func(t *testing.T) {
 		ctx := context.TODO()
-		cfg, _ := NewConfig("testSys", "localhost:0")
+		cfg, _ := NewConfig("testSys", "localhost:0", WithLogger(log.DiscardLogger))
 		sys, _ := NewActorSystem(cfg)
 
 		// start the actor system
