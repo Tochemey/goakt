@@ -259,8 +259,20 @@ func (p *pid) Restart(ctx context.Context) error {
 			return err
 		}
 		// wait a while for the shutdown process to complete
-		// TODO enhance this
-		time.Sleep(100 * time.Millisecond)
+		ticker := time.NewTicker(10 * time.Millisecond)
+		// create the ticker stop signal
+		tickerStopSig := make(chan Unit, 1)
+		go func() {
+			for range ticker.C {
+				// stop ticking once the actor is offline
+				if !p.IsOnline() {
+					tickerStopSig <- Unit{}
+					return
+				}
+			}
+		}()
+		<-tickerStopSig
+		ticker.Stop()
 	}
 
 	// reset the actor
