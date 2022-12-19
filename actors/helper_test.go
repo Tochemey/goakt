@@ -13,20 +13,16 @@ type BenchActor struct {
 	Wg sync.WaitGroup
 }
 
-func (p *BenchActor) ID() string {
-	return "BenchActor"
-}
-
 func (p *BenchActor) PreStart(context.Context) error {
 	return nil
 }
 
-func (p *BenchActor) Receive(message ReceiveContext) {
-	switch message.Message().(type) {
+func (p *BenchActor) Receive(ctx ReceiveContext) {
+	switch ctx.Message().(type) {
 	case *actorsv1.TestSend:
 		p.Wg.Done()
 	case *actorsv1.TestReply:
-		message.Response(&actorsv1.Reply{Content: "received message"})
+		ctx.Response(&actorsv1.Reply{Content: "received message"})
 		p.Wg.Done()
 	}
 }
@@ -80,8 +76,7 @@ func (p *TestActor) Receive(ctx ReceiveContext) {
 	}
 }
 
-type ParentActor struct {
-}
+type ParentActor struct{}
 
 var _ Actor = (*ParentActor)(nil)
 
@@ -93,8 +88,8 @@ func (p *ParentActor) PreStart(context.Context) error {
 	return nil
 }
 
-func (p *ParentActor) Receive(message ReceiveContext) {
-	switch message.Message().(type) {
+func (p *ParentActor) Receive(ctx ReceiveContext) {
+	switch ctx.Message().(type) {
 	case *actorsv1.TestSend:
 	default:
 		log.Panic(ErrUnhandled)
@@ -105,8 +100,7 @@ func (p *ParentActor) PostStop(context.Context) error {
 	return nil
 }
 
-type ChildActor struct {
-}
+type ChildActor struct{}
 
 var _ Actor = (*ChildActor)(nil)
 
@@ -118,8 +112,8 @@ func (c *ChildActor) PreStart(context.Context) error {
 	return nil
 }
 
-func (c *ChildActor) Receive(message ReceiveContext) {
-	switch message.Message().(type) {
+func (c *ChildActor) Receive(ctx ReceiveContext) {
+	switch ctx.Message().(type) {
 	case *actorsv1.TestSend:
 	case *actorsv1.TestPanic:
 		log.Panic("paniced")

@@ -8,4 +8,5 @@ var (
 	ErrMissingConfig  = errors.New("config is missing")
 	ErrUndefinedActor = errors.New("actor is not defined")
 	ErrRequestTimeout = errors.New("request timed out")
+	ErrEmptyBehavior  = errors.New("no behavior defined")
 )
