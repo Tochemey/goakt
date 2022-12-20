@@ -12,4 +12,3 @@ enum Strategy {
 
 // PoisonPill is used to stop an actor
 message PoisonPill {}
-

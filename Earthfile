@@ -16,7 +16,7 @@ code:
     RUN go mod download -x
 
     # copy in code
-    COPY --dir +protogen/gen ./
+    COPY --dir actorpb ./
     COPY --dir actors ./
     COPY --dir log ./
     COPY --dir telemetry ./
@@ -55,7 +55,7 @@ protogen:
             --path protos/internal/actors
 
     # save artifact to
-    SAVE ARTIFACT gen gen AS LOCAL gen
+    SAVE ARTIFACT gen gen AS LOCAL actorpb
 
 testprotos:
     # copy the proto files to generate

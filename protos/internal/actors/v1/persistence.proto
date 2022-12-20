@@ -1,0 +1,49 @@
+syntax = "proto3";
+
+package actors.v1;
+
+import "google/protobuf/timestamp.proto";
+
+message Journal {
+  // Specifies the persistence unique identifier
+  string persistence_id = 1;
+  // Specifies the sequence number
+  uint64 sequence_number = 2;
+  // Specifies the deletion state
+  bool is_deleted = 3;
+  // Specifies the payload manifest
+  string payload_manifest = 4;
+  // Specifies the payload to persist
+  bytes payload = 5;
+  // Specifies the timestamp
+  google.protobuf.Timestamp timestamp = 6;
+  // Specifies the writer ID
+  // Often times persistence envelopes will be written to the data store asynchronously
+  // TODO need to confirm this feature
+  string writer_id = 7;
+}
+
+message Snapshot {
+  // Specifies the persistence unique identifier
+  string persistence_id = 1;
+  // Specifies the sequence number
+  uint64 sequence_number = 2;
+  // Specifies the payload manifest
+  string payload_manifest = 4;
+  // Specifies the payload to persist
+  bytes payload = 5;
+  // Specifies the timestamp
+  google.protobuf.Timestamp timestamp = 6;
+}
+
+// SnapshotCriteria helps load/delete snapshots
+message SnapshotCriteria {
+  // Specifies the upper bound for a selected snapshot's sequence number. Default is no upper bound, i.e the math.MaxUint64.
+  uint64 max_sequence_number = 1;
+  // Specifies the upper bound for a selected snapshot's timestamp. Default is no upper bound, i.e the math.MaxUint64.
+  uint64 max_timestamp = 2;
+  // Specifies the lower bound for a selected snapshot's sequence number. Default is no lower bound, i.e 0L
+  uint64 min_sequence_number = 3;
+  // Specifies the lower bound for a selected snapshot's timestamp. Default is no lower bound, i.e 0L
+  uint64 min_timestamp = 4;
+}

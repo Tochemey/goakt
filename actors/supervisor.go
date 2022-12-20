@@ -3,7 +3,7 @@ package actors
 import (
 	"context"
 
-	actorsv1 "github.com/tochemey/goakt/gen/actors/v1"
+	actorspb "github.com/tochemey/goakt/actorpb/actors/v1"
 )
 
 func (p *pid) supervise(cid PID, watcher *Watcher) {
@@ -14,7 +14,7 @@ func (p *pid) supervise(cid PID, watcher *Watcher) {
 		case err := <-watcher.ErrChan:
 			p.logger.Errorf("child actor=%s is panicing: Err=%v", cid.Address(), err)
 			switch p.supervisorStrategy {
-			case actorsv1.Strategy_STOP:
+			case actorspb.Strategy_STOP:
 				// shutdown the actor and panic in case of error
 				if err := cid.Shutdown(context.Background()); err != nil {
 					panic(err)
@@ -23,7 +23,7 @@ func (p *pid) supervise(cid PID, watcher *Watcher) {
 				p.UnWatch(cid)
 				// remove the actor from the children map
 				p.children.Delete(cid.Address())
-			case actorsv1.Strategy_RESTART:
+			case actorspb.Strategy_RESTART:
 				// restart the actor
 				if err := cid.Restart(context.Background()); err != nil {
 					panic(err)

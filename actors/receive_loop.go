@@ -3,7 +3,7 @@ package actors
 import (
 	"fmt"
 
-	actorsv1 "github.com/tochemey/goakt/gen/actors/v1"
+	actorspb "github.com/tochemey/goakt/actorpb/actors/v1"
 )
 
 // receive handles every mail in the actor mailbox
@@ -15,7 +15,7 @@ func (p *pid) receive() {
 			return
 		case received := <-p.mailbox:
 			switch received.Message().(type) {
-			case *actorsv1.PoisonPill:
+			case *actorspb.PoisonPill:
 				if err := p.Shutdown(received.Context()); err != nil {
 					// FIXME fix the panic
 					panic(err)
