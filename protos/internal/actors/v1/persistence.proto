@@ -2,6 +2,7 @@ syntax = "proto3";
 
 package actors.v1;
 
+import "google/protobuf/any.proto";
 import "google/protobuf/timestamp.proto";
 
 message Journal {
@@ -46,4 +47,51 @@ message SnapshotCriteria {
   uint64 min_sequence_number = 3;
   // Specifies the lower bound for a selected snapshot's timestamp. Default is no lower bound, i.e 0L
   uint64 min_timestamp = 4;
+}
+
+message ErrorReply {
+  // Specifies the error message
+  string message = 1;
+}
+
+message CommandReply {
+  // the actual command reply
+  oneof reply {
+    // actual state is wrapped with meta data
+    State state = 1;
+    // gRPC failure
+    ErrorReply error = 2;
+  }
+}
+
+// Wrap the aggregate state and the meta data.
+message State {
+  // the entity state
+  google.protobuf.Any state = 1;
+  // metadata from the event that made this state
+  MetaData meta = 3;
+}
+
+// Event is an event wrapper that holds both the
+// event and the corresponding aggregate root state.
+message Event {
+  // the event emitted
+  google.protobuf.Any event = 1;
+  // the state obtained from processing the event
+  google.protobuf.Any resulting_state = 2;
+  // meta data
+  MetaData meta = 3;
+}
+
+// MetaData are additional data the enrich the aggregate state.
+// This can help track information like the revision number, the last time the
+// aggregate state has been modified(a.k.a revision date), etc...
+message MetaData {
+  // Specifies the persistence id
+  string persitence_id = 1;
+  // the revision number for the entity, increases sequentially
+  // this is very useful to handle optimistic lock
+  uint32 revision_number = 2;
+  // the time the state has been modified
+  google.protobuf.Timestamp revision_date = 3;
 }
