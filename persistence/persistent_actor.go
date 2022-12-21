@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 
 	actorspb "github.com/tochemey/goakt/actorpb/actors/v1"
 	"github.com/tochemey/goakt/actors"
@@ -20,13 +21,17 @@ type PersistentActor[T State] struct {
 	snapshotStore SnapshotStore
 
 	isSnapshotEnabled bool
+	snapshotAfter     uint64
 
 	commandHandler CommandHandler
 	eventHandler   EventHandler
 	initHook       InitHook
 	shutdownHook   ShutdownHook
 
+	persistentID  string
 	eventsCounter *atomic.Uint64
+
+	mu sync.Mutex
 }
 
 var _ actors.Actor = &PersistentActor[State]{}
@@ -43,6 +48,9 @@ func NewPersistentActor[T State](config *PersistentConfig[T]) *PersistentActor[T
 		initHook:          config.InitHook,
 		shutdownHook:      config.ShutdownHook,
 		eventsCounter:     atomic.NewUint64(0),
+		persistentID:      config.PersistentID,
+		mu:                sync.Mutex{},
+		snapshotAfter:     config.SnapshotAfter,
 	}
 }
 
@@ -67,111 +75,167 @@ func (p *PersistentActor[T]) PreStart(ctx context.Context) error {
 		}
 	}
 
+	// check whether the snapshot after is greater than zero and set a default value of 50 events
+	if p.snapshotAfter == 0 {
+		p.snapshotAfter = 50
+	}
+
 	// run the init hook
 	return p.initHook(ctx)
 }
 
 // Receive processes any message dropped into the actor mailbox.
 func (p *PersistentActor[T]) Receive(ctx actors.ReceiveContext) {
-	// grab the command sent
-	command := ctx.Message()
+	// acquire the lock
+	p.mu.Lock()
+	defer p.mu.Unlock()
 
-	// pass the received command to the command handler
-	event, err := p.commandHandler(ctx.Context(), command)
-	// handle the command handler error
-	if err != nil {
-		// create a new error reply
+	switch command := ctx.Message().(type) {
+	case *actorspb.GetStateCommand:
+		// TODO we need to make use of the snapshot store
+	default:
+		// pass the received command to the command handler
+		event, err := p.commandHandler(ctx.Context(), command)
+		// handle the command handler error
+		if err != nil {
+			// create a new error reply
+			reply := &actorspb.CommandReply{
+				Reply: &actorspb.CommandReply_Error{
+					Error: &actorspb.ErrorReply{
+						Message: err.Error(),
+					},
+				},
+			}
+			// send the response
+			ctx.Response(reply)
+			return
+		}
+
+		// if the event is nil nothing is persisted, and we return no reply
+		if event == nil {
+			// create a new error reply
+			reply := &actorspb.CommandReply{
+				Reply: &actorspb.CommandReply_NoReply{
+					NoReply: &actorspb.NoReply{},
+				},
+			}
+			// send the response
+			ctx.Response(reply)
+			return
+		}
+
+		// process the event by calling the event handler
+		resultingState, err := p.eventHandler(ctx.Context(), event)
+		// handle the event handler error
+		if err != nil {
+			// create a new error reply
+			reply := &actorspb.CommandReply{
+				Reply: &actorspb.CommandReply_Error{
+					Error: &actorspb.ErrorReply{
+						Message: err.Error(),
+					},
+				},
+			}
+			// send the response
+			ctx.Response(reply)
+			return
+		}
+
+		// increment the event counter
+		p.eventsCounter.Inc()
+
+		// marshal the event and the resulting state
+		marshaledEvent, _ := anypb.New(event)
+		marshaledState, _ := anypb.New(resultingState)
+
+		sequenceNumber := p.eventsCounter.Load()
+		timestamp := timestamppb.Now()
+
+		// persist the event into the journal
+		eventWrapper := &actorspb.Event{
+			Event:          marshaledEvent,
+			ResultingState: marshaledState,
+			Meta: &actorspb.MetaData{
+				PersitenceId:   p.persistentID,
+				RevisionNumber: uint32(sequenceNumber),
+				RevisionDate:   timestamp,
+			},
+		}
+
+		// marshal the event wrapper
+		payload, _ := proto.Marshal(eventWrapper)
+		journals := []*actorspb.Journal{
+			{
+				PersistenceId:   p.persistentID,
+				SequenceNumber:  sequenceNumber,
+				IsDeleted:       false,
+				PayloadManifest: string(eventWrapper.ProtoReflect().Descriptor().FullName()),
+				Payload:         payload,
+				Timestamp:       timestamp,
+				WriterId:        "",
+			},
+		}
+
+		// TODO persist the event in batch using a child actor
+		if err := p.journalStore.WriteJournals(ctx.Context(), journals); err != nil {
+			// create a new error reply
+			reply := &actorspb.CommandReply{
+				Reply: &actorspb.CommandReply_Error{
+					Error: &actorspb.ErrorReply{
+						Message: err.Error(),
+					},
+				},
+			}
+			// send the response
+			ctx.Response(reply)
+			return
+		}
+
+		// persist snapshot iff snapshot is enabled
+		if p.isSnapshotEnabled {
+			// check whether we have reached the snapshot threshold or not
+			if p.snapshotAfter >= sequenceNumber {
+				// persist a snapshot
+				payload, _ := proto.Marshal(resultingState)
+				snapshot := &actorspb.Snapshot{
+					PersistenceId:   p.persistentID,
+					SequenceNumber:  sequenceNumber,
+					PayloadManifest: string(resultingState.ProtoReflect().Descriptor().FullName()),
+					Payload:         payload,
+					Timestamp:       timestamp,
+				}
+				if err := p.snapshotStore.SaveSnapshot(ctx.Context(), snapshot); err != nil {
+					// create a new error reply
+					reply := &actorspb.CommandReply{
+						Reply: &actorspb.CommandReply_Error{
+							Error: &actorspb.ErrorReply{
+								Message: err.Error(),
+							},
+						},
+					}
+					// send the response
+					ctx.Response(reply)
+					return
+				}
+			}
+		}
+
 		reply := &actorspb.CommandReply{
-			Reply: &actorspb.CommandReply_Error{
-				Error: &actorspb.ErrorReply{
-					Message: err.Error(),
+			Reply: &actorspb.CommandReply_State{
+				State: &actorspb.State{
+					State: marshaledState,
+					Meta: &actorspb.MetaData{
+						PersitenceId:   p.persistentID,
+						RevisionNumber: uint32(sequenceNumber),
+						RevisionDate:   timestamp,
+					},
 				},
 			},
 		}
+
 		// send the response
 		ctx.Response(reply)
-		return
 	}
-
-	// process the event by calling the event handler
-	resultingState, err := p.eventHandler(ctx.Context(), event)
-	// handle the event handler error
-	if err != nil {
-		// create a new error reply
-		reply := &actorspb.CommandReply{
-			Reply: &actorspb.CommandReply_Error{
-				Error: &actorspb.ErrorReply{
-					Message: err.Error(),
-				},
-			},
-		}
-		// send the response
-		ctx.Response(reply)
-		return
-	}
-
-	// increment the event counter
-	p.eventsCounter.Inc()
-
-	// marshal the event and the resulting state
-	marshaledEvent, _ := anypb.New(event)
-	marshaledState, _ := anypb.New(resultingState)
-
-	// persist the event into the journal
-	eventWrapper := &actorspb.Event{
-		Event:          marshaledEvent,
-		ResultingState: marshaledState,
-		Meta:           nil,
-	}
-
-	sequenceNumber := p.eventsCounter.Load()
-	timestamp := timestamppb.Now()
-
-	// marshal the event wrapper
-	payload, _ := proto.Marshal(eventWrapper)
-	journals := []*actorspb.Journal{
-		{
-			PersistenceId:   "",
-			SequenceNumber:  sequenceNumber,
-			IsDeleted:       false,
-			PayloadManifest: string(eventWrapper.ProtoReflect().Descriptor().FullName()),
-			Payload:         payload,
-			Timestamp:       timestamp,
-			WriterId:        "",
-		},
-	}
-
-	// TODO persist the event in batch using a child actor
-	if err := p.journalStore.WriteJournals(ctx.Context(), journals); err != nil {
-		// create a new error reply
-		reply := &actorspb.CommandReply{
-			Reply: &actorspb.CommandReply_Error{
-				Error: &actorspb.ErrorReply{
-					Message: err.Error(),
-				},
-			},
-		}
-		// send the response
-		ctx.Response(reply)
-		return
-	}
-
-	// TODO send a command reply with the resulting state
-	reply := &actorspb.CommandReply{
-		Reply: &actorspb.CommandReply_State{
-			State: &actorspb.State{
-				State: marshaledState,
-				Meta: &actorspb.MetaData{
-					PersitenceId:   "",
-					RevisionNumber: uint32(sequenceNumber),
-					RevisionDate:   timestamp,
-				},
-			},
-		},
-	}
-
-	// send the response
-	ctx.Response(reply)
 }
 
 // PostStop prepares the actor to gracefully shutdow  n

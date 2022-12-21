@@ -61,8 +61,16 @@ message CommandReply {
     State state = 1;
     // gRPC failure
     ErrorReply error = 2;
+    // NoReply
+    NoReply no_reply = 3;
   }
 }
+
+message NoReply {}
+
+// GetStateCommand tells the PersistentActor
+// to reply with its latest state
+message GetStateCommand{}
 
 // Wrap the aggregate state and the meta data.
 message State {

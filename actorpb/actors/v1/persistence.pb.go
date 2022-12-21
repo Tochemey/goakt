@@ -345,6 +345,7 @@ type CommandReply struct {
 	//
 	//	*CommandReply_State
 	//	*CommandReply_Error
+	//	*CommandReply_NoReply
 	Reply isCommandReply_Reply `protobuf_oneof:"reply"`
 }
 
@@ -401,6 +402,13 @@ func (x *CommandReply) GetError() *ErrorReply {
 	return nil
 }
 
+func (x *CommandReply) GetNoReply() *NoReply {
+	if x, ok := x.GetReply().(*CommandReply_NoReply); ok {
+		return x.NoReply
+	}
+	return nil
+}
+
 type isCommandReply_Reply interface {
 	isCommandReply_Reply()
 }
@@ -415,9 +423,94 @@ type CommandReply_Error struct {
 	Error *ErrorReply `protobuf:"bytes,2,opt,name=error,proto3,oneof"`
 }
 
+type CommandReply_NoReply struct {
+	// NoReply
+	NoReply *NoReply `protobuf:"bytes,3,opt,name=no_reply,json=noReply,proto3,oneof"`
+}
+
 func (*CommandReply_State) isCommandReply_Reply() {}
 
 func (*CommandReply_Error) isCommandReply_Reply() {}
+
+func (*CommandReply_NoReply) isCommandReply_Reply() {}
+
+type NoReply struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+}
+
+func (x *NoReply) Reset() {
+	*x = NoReply{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_actors_v1_persistence_proto_msgTypes[5]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *NoReply) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NoReply) ProtoMessage() {}
+
+func (x *NoReply) ProtoReflect() protoreflect.Message {
+	mi := &file_actors_v1_persistence_proto_msgTypes[5]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NoReply.ProtoReflect.Descriptor instead.
+func (*NoReply) Descriptor() ([]byte, []int) {
+	return file_actors_v1_persistence_proto_rawDescGZIP(), []int{5}
+}
+
+// GetStateCommand tells the PersistentActor
+// to reply with its latest state
+type GetStateCommand struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+}
+
+func (x *GetStateCommand) Reset() {
+	*x = GetStateCommand{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_actors_v1_persistence_proto_msgTypes[6]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *GetStateCommand) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetStateCommand) ProtoMessage() {}
+
+func (x *GetStateCommand) ProtoReflect() protoreflect.Message {
+	mi := &file_actors_v1_persistence_proto_msgTypes[6]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetStateCommand.ProtoReflect.Descriptor instead.
+func (*GetStateCommand) Descriptor() ([]byte, []int) {
+	return file_actors_v1_persistence_proto_rawDescGZIP(), []int{6}
+}
 
 // Wrap the aggregate state and the meta data.
 type State struct {
@@ -434,7 +527,7 @@ type State struct {
 func (x *State) Reset() {
 	*x = State{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_actors_v1_persistence_proto_msgTypes[5]
+		mi := &file_actors_v1_persistence_proto_msgTypes[7]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -447,7 +540,7 @@ func (x *State) String() string {
 func (*State) ProtoMessage() {}
 
 func (x *State) ProtoReflect() protoreflect.Message {
-	mi := &file_actors_v1_persistence_proto_msgTypes[5]
+	mi := &file_actors_v1_persistence_proto_msgTypes[7]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -460,7 +553,7 @@ func (x *State) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use State.ProtoReflect.Descriptor instead.
 func (*State) Descriptor() ([]byte, []int) {
-	return file_actors_v1_persistence_proto_rawDescGZIP(), []int{5}
+	return file_actors_v1_persistence_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *State) GetState() *anypb.Any {
@@ -495,7 +588,7 @@ type Event struct {
 func (x *Event) Reset() {
 	*x = Event{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_actors_v1_persistence_proto_msgTypes[6]
+		mi := &file_actors_v1_persistence_proto_msgTypes[8]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -508,7 +601,7 @@ func (x *Event) String() string {
 func (*Event) ProtoMessage() {}
 
 func (x *Event) ProtoReflect() protoreflect.Message {
-	mi := &file_actors_v1_persistence_proto_msgTypes[6]
+	mi := &file_actors_v1_persistence_proto_msgTypes[8]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -521,7 +614,7 @@ func (x *Event) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Event.ProtoReflect.Descriptor instead.
 func (*Event) Descriptor() ([]byte, []int) {
-	return file_actors_v1_persistence_proto_rawDescGZIP(), []int{6}
+	return file_actors_v1_persistence_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *Event) GetEvent() *anypb.Any {
@@ -565,7 +658,7 @@ type MetaData struct {
 func (x *MetaData) Reset() {
 	*x = MetaData{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_actors_v1_persistence_proto_msgTypes[7]
+		mi := &file_actors_v1_persistence_proto_msgTypes[9]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -578,7 +671,7 @@ func (x *MetaData) String() string {
 func (*MetaData) ProtoMessage() {}
 
 func (x *MetaData) ProtoReflect() protoreflect.Message {
-	mi := &file_actors_v1_persistence_proto_msgTypes[7]
+	mi := &file_actors_v1_persistence_proto_msgTypes[9]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -591,7 +684,7 @@ func (x *MetaData) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MetaData.ProtoReflect.Descriptor instead.
 func (*MetaData) Descriptor() ([]byte, []int) {
-	return file_actors_v1_persistence_proto_rawDescGZIP(), []int{7}
+	return file_actors_v1_persistence_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *MetaData) GetPersitenceId() string {
@@ -669,14 +762,19 @@ var file_actors_v1_persistence_proto_rawDesc = []byte{
 	0x6d, 0x70, 0x18, 0x04, 0x20, 0x01, 0x28, 0x04, 0x52, 0x0c, 0x6d, 0x69, 0x6e, 0x54, 0x69, 0x6d,
 	0x65, 0x73, 0x74, 0x61, 0x6d, 0x70, 0x22, 0x26, 0x0a, 0x0a, 0x45, 0x72, 0x72, 0x6f, 0x72, 0x52,
 	0x65, 0x70, 0x6c, 0x79, 0x12, 0x18, 0x0a, 0x07, 0x6d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x18,
-	0x01, 0x20, 0x01, 0x28, 0x09, 0x52, 0x07, 0x6d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x22, 0x70,
-	0x0a, 0x0c, 0x43, 0x6f, 0x6d, 0x6d, 0x61, 0x6e, 0x64, 0x52, 0x65, 0x70, 0x6c, 0x79, 0x12, 0x28,
-	0x0a, 0x05, 0x73, 0x74, 0x61, 0x74, 0x65, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x10, 0x2e,
-	0x61, 0x63, 0x74, 0x6f, 0x72, 0x73, 0x2e, 0x76, 0x31, 0x2e, 0x53, 0x74, 0x61, 0x74, 0x65, 0x48,
-	0x00, 0x52, 0x05, 0x73, 0x74, 0x61, 0x74, 0x65, 0x12, 0x2d, 0x0a, 0x05, 0x65, 0x72, 0x72, 0x6f,
-	0x72, 0x18, 0x02, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x15, 0x2e, 0x61, 0x63, 0x74, 0x6f, 0x72, 0x73,
-	0x2e, 0x76, 0x31, 0x2e, 0x45, 0x72, 0x72, 0x6f, 0x72, 0x52, 0x65, 0x70, 0x6c, 0x79, 0x48, 0x00,
-	0x52, 0x05, 0x65, 0x72, 0x72, 0x6f, 0x72, 0x42, 0x07, 0x0a, 0x05, 0x72, 0x65, 0x70, 0x6c, 0x79,
+	0x01, 0x20, 0x01, 0x28, 0x09, 0x52, 0x07, 0x6d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x22, 0xa1,
+	0x01, 0x0a, 0x0c, 0x43, 0x6f, 0x6d, 0x6d, 0x61, 0x6e, 0x64, 0x52, 0x65, 0x70, 0x6c, 0x79, 0x12,
+	0x28, 0x0a, 0x05, 0x73, 0x74, 0x61, 0x74, 0x65, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x10,
+	0x2e, 0x61, 0x63, 0x74, 0x6f, 0x72, 0x73, 0x2e, 0x76, 0x31, 0x2e, 0x53, 0x74, 0x61, 0x74, 0x65,
+	0x48, 0x00, 0x52, 0x05, 0x73, 0x74, 0x61, 0x74, 0x65, 0x12, 0x2d, 0x0a, 0x05, 0x65, 0x72, 0x72,
+	0x6f, 0x72, 0x18, 0x02, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x15, 0x2e, 0x61, 0x63, 0x74, 0x6f, 0x72,
+	0x73, 0x2e, 0x76, 0x31, 0x2e, 0x45, 0x72, 0x72, 0x6f, 0x72, 0x52, 0x65, 0x70, 0x6c, 0x79, 0x48,
+	0x00, 0x52, 0x05, 0x65, 0x72, 0x72, 0x6f, 0x72, 0x12, 0x2f, 0x0a, 0x08, 0x6e, 0x6f, 0x5f, 0x72,
+	0x65, 0x70, 0x6c, 0x79, 0x18, 0x03, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x12, 0x2e, 0x61, 0x63, 0x74,
+	0x6f, 0x72, 0x73, 0x2e, 0x76, 0x31, 0x2e, 0x4e, 0x6f, 0x52, 0x65, 0x70, 0x6c, 0x79, 0x48, 0x00,
+	0x52, 0x07, 0x6e, 0x6f, 0x52, 0x65, 0x70, 0x6c, 0x79, 0x42, 0x07, 0x0a, 0x05, 0x72, 0x65, 0x70,
+	0x6c, 0x79, 0x22, 0x09, 0x0a, 0x07, 0x4e, 0x6f, 0x52, 0x65, 0x70, 0x6c, 0x79, 0x22, 0x11, 0x0a,
+	0x0f, 0x47, 0x65, 0x74, 0x53, 0x74, 0x61, 0x74, 0x65, 0x43, 0x6f, 0x6d, 0x6d, 0x61, 0x6e, 0x64,
 	0x22, 0x5c, 0x0a, 0x05, 0x53, 0x74, 0x61, 0x74, 0x65, 0x12, 0x2a, 0x0a, 0x05, 0x73, 0x74, 0x61,
 	0x74, 0x65, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x14, 0x2e, 0x67, 0x6f, 0x6f, 0x67, 0x6c,
 	0x65, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x62, 0x75, 0x66, 0x2e, 0x41, 0x6e, 0x79, 0x52, 0x05,
@@ -727,35 +825,38 @@ func file_actors_v1_persistence_proto_rawDescGZIP() []byte {
 	return file_actors_v1_persistence_proto_rawDescData
 }
 
-var file_actors_v1_persistence_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_actors_v1_persistence_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
 var file_actors_v1_persistence_proto_goTypes = []interface{}{
 	(*Journal)(nil),               // 0: actors.v1.Journal
 	(*Snapshot)(nil),              // 1: actors.v1.Snapshot
 	(*SnapshotCriteria)(nil),      // 2: actors.v1.SnapshotCriteria
 	(*ErrorReply)(nil),            // 3: actors.v1.ErrorReply
 	(*CommandReply)(nil),          // 4: actors.v1.CommandReply
-	(*State)(nil),                 // 5: actors.v1.State
-	(*Event)(nil),                 // 6: actors.v1.Event
-	(*MetaData)(nil),              // 7: actors.v1.MetaData
-	(*timestamppb.Timestamp)(nil), // 8: google.protobuf.Timestamp
-	(*anypb.Any)(nil),             // 9: google.protobuf.Any
+	(*NoReply)(nil),               // 5: actors.v1.NoReply
+	(*GetStateCommand)(nil),       // 6: actors.v1.GetStateCommand
+	(*State)(nil),                 // 7: actors.v1.State
+	(*Event)(nil),                 // 8: actors.v1.Event
+	(*MetaData)(nil),              // 9: actors.v1.MetaData
+	(*timestamppb.Timestamp)(nil), // 10: google.protobuf.Timestamp
+	(*anypb.Any)(nil),             // 11: google.protobuf.Any
 }
 var file_actors_v1_persistence_proto_depIdxs = []int32{
-	8,  // 0: actors.v1.Journal.timestamp:type_name -> google.protobuf.Timestamp
-	8,  // 1: actors.v1.Snapshot.timestamp:type_name -> google.protobuf.Timestamp
-	5,  // 2: actors.v1.CommandReply.state:type_name -> actors.v1.State
+	10, // 0: actors.v1.Journal.timestamp:type_name -> google.protobuf.Timestamp
+	10, // 1: actors.v1.Snapshot.timestamp:type_name -> google.protobuf.Timestamp
+	7,  // 2: actors.v1.CommandReply.state:type_name -> actors.v1.State
 	3,  // 3: actors.v1.CommandReply.error:type_name -> actors.v1.ErrorReply
-	9,  // 4: actors.v1.State.state:type_name -> google.protobuf.Any
-	7,  // 5: actors.v1.State.meta:type_name -> actors.v1.MetaData
-	9,  // 6: actors.v1.Event.event:type_name -> google.protobuf.Any
-	9,  // 7: actors.v1.Event.resulting_state:type_name -> google.protobuf.Any
-	7,  // 8: actors.v1.Event.meta:type_name -> actors.v1.MetaData
-	8,  // 9: actors.v1.MetaData.revision_date:type_name -> google.protobuf.Timestamp
-	10, // [10:10] is the sub-list for method output_type
-	10, // [10:10] is the sub-list for method input_type
-	10, // [10:10] is the sub-list for extension type_name
-	10, // [10:10] is the sub-list for extension extendee
-	0,  // [0:10] is the sub-list for field type_name
+	5,  // 4: actors.v1.CommandReply.no_reply:type_name -> actors.v1.NoReply
+	11, // 5: actors.v1.State.state:type_name -> google.protobuf.Any
+	9,  // 6: actors.v1.State.meta:type_name -> actors.v1.MetaData
+	11, // 7: actors.v1.Event.event:type_name -> google.protobuf.Any
+	11, // 8: actors.v1.Event.resulting_state:type_name -> google.protobuf.Any
+	9,  // 9: actors.v1.Event.meta:type_name -> actors.v1.MetaData
+	10, // 10: actors.v1.MetaData.revision_date:type_name -> google.protobuf.Timestamp
+	11, // [11:11] is the sub-list for method output_type
+	11, // [11:11] is the sub-list for method input_type
+	11, // [11:11] is the sub-list for extension type_name
+	11, // [11:11] is the sub-list for extension extendee
+	0,  // [0:11] is the sub-list for field type_name
 }
 
 func init() { file_actors_v1_persistence_proto_init() }
@@ -825,7 +926,7 @@ func file_actors_v1_persistence_proto_init() {
 			}
 		}
 		file_actors_v1_persistence_proto_msgTypes[5].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*State); i {
+			switch v := v.(*NoReply); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -837,7 +938,7 @@ func file_actors_v1_persistence_proto_init() {
 			}
 		}
 		file_actors_v1_persistence_proto_msgTypes[6].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*Event); i {
+			switch v := v.(*GetStateCommand); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -849,6 +950,30 @@ func file_actors_v1_persistence_proto_init() {
 			}
 		}
 		file_actors_v1_persistence_proto_msgTypes[7].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*State); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_actors_v1_persistence_proto_msgTypes[8].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*Event); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_actors_v1_persistence_proto_msgTypes[9].Exporter = func(v interface{}, i int) interface{} {
 			switch v := v.(*MetaData); i {
 			case 0:
 				return &v.state
@@ -864,6 +989,7 @@ func file_actors_v1_persistence_proto_init() {
 	file_actors_v1_persistence_proto_msgTypes[4].OneofWrappers = []interface{}{
 		(*CommandReply_State)(nil),
 		(*CommandReply_Error)(nil),
+		(*CommandReply_NoReply)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -871,7 +997,7 @@ func file_actors_v1_persistence_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: file_actors_v1_persistence_proto_rawDesc,
 			NumEnums:      0,
-			NumMessages:   8,
+			NumMessages:   10,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
