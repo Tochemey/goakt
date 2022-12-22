@@ -24,6 +24,7 @@ Also, check reference section at the end of the post for more material regarding
 - [x] Sample example
 - [x] Supervisory Strategy (Restart and Stop directive) 
 - [x] Behaviors
+- [x] Persistence (WIP)
 - [ ] Metrics
 - [ ] Clustering
 - [ ] Rewrite the logger interface
