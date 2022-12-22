@@ -15,22 +15,24 @@ import (
 )
 
 // PersistentActor is an event sourced based actor
-type PersistentActor struct {
+type PersistentActor[T State] struct {
 	journalStore   JournalStore
-	commandHandler CommandHandler
-	eventHandler   EventHandler
+	commandHandler CommandHandler[T]
+	eventHandler   EventHandler[T]
 	initHook       InitHook
 	shutdownHook   ShutdownHook
 	persistentID   string
 	eventsCounter  *atomic.Uint64
 	mu             sync.Mutex
+
+	currentState T
 }
 
-var _ actors.Actor = &PersistentActor{}
+var _ actors.Actor = &PersistentActor[State]{}
 
 // NewPersistentActor returns an instance of PersistentActor
-func NewPersistentActor(config *PersistentConfig) *PersistentActor {
-	return &PersistentActor{
+func NewPersistentActor[T State](config *PersistentConfig[T]) *PersistentActor[T] {
+	return &PersistentActor[T]{
 		journalStore:   config.JournalStore,
 		commandHandler: config.CommandHandler,
 		eventHandler:   config.EventHandler,
@@ -39,12 +41,13 @@ func NewPersistentActor(config *PersistentConfig) *PersistentActor {
 		eventsCounter:  atomic.NewUint64(0),
 		persistentID:   config.PersistentID,
 		mu:             sync.Mutex{},
+		currentState:   config.InitialState,
 	}
 }
 
 // PreStart pre-starts the actor
 // At this stage we connect to the various stores
-func (p *PersistentActor) PreStart(ctx context.Context) error {
+func (p *PersistentActor[T]) PreStart(ctx context.Context) error {
 	// connect to the various stores
 	if p.journalStore == nil {
 		return errors.New("journal store is not defined")
@@ -60,7 +63,7 @@ func (p *PersistentActor) PreStart(ctx context.Context) error {
 }
 
 // Receive processes any message dropped into the actor mailbox.
-func (p *PersistentActor) Receive(ctx actors.ReceiveContext) {
+func (p *PersistentActor[T]) Receive(ctx actors.ReceiveContext) {
 	// acquire the lock
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -119,7 +122,7 @@ func (p *PersistentActor) Receive(ctx actors.ReceiveContext) {
 		ctx.Response(reply)
 	default:
 		// pass the received command to the command handler
-		event, err := p.commandHandler(ctx.Context(), command)
+		event, err := p.commandHandler(ctx.Context(), command, p.currentState)
 		// handle the command handler error
 		if err != nil {
 			// create a new error reply
@@ -149,7 +152,7 @@ func (p *PersistentActor) Receive(ctx actors.ReceiveContext) {
 		}
 
 		// process the event by calling the event handler
-		resultingState, err := p.eventHandler(ctx.Context(), event)
+		resultingState, err := p.eventHandler(ctx.Context(), event, p.currentState)
 		// handle the event handler error
 		if err != nil {
 			// create a new error reply
@@ -167,6 +170,9 @@ func (p *PersistentActor) Receive(ctx actors.ReceiveContext) {
 
 		// increment the event counter
 		p.eventsCounter.Inc()
+
+		// set the current state for the next command
+		p.currentState = resultingState
 
 		// marshal the event and the resulting state
 		marshaledEvent, _ := anypb.New(event)
@@ -219,12 +225,12 @@ func (p *PersistentActor) Receive(ctx actors.ReceiveContext) {
 }
 
 // PostStop prepares the actor to gracefully shutdown
-func (p *PersistentActor) PostStop(ctx context.Context) error {
+func (p *PersistentActor[T]) PostStop(ctx context.Context) error {
 	// disconnect the journal
 	if err := p.journalStore.Disconnect(ctx); err != nil {
 		return fmt.Errorf("failed to disconnect the journal store: %v", err)
 	}
 
-	// run the init hook
+	// run the shutdown hook
 	return p.shutdownHook(ctx)
 }

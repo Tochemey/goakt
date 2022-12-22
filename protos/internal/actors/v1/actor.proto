@@ -9,6 +9,3 @@ enum Strategy {
   // RESTART means restart the child actor in case of error
   RESTART = 1;
 }
-
-// PoisonPill is used to stop an actor
-message PoisonPill {}

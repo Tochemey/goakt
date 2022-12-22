@@ -17,8 +17,8 @@ type JournalStore interface {
 	WriteJournals(ctx context.Context, journals []*actorspb.Journal) error
 	// DeleteJournals deletes journals from the store upt to a given sequence number (inclusive)
 	DeleteJournals(ctx context.Context, persistenceID string, toSequenceNumber uint64) error
-	// ReplayJournals for a given persistence ID from a given sequence number(inclusive) to a given sequence number(inclusive) with a maximum of journals to be replayed.
-	ReplayJournals(ctx context.Context, persistenceID string, fromSequenceNumber, toSequenceNumber uint64, max uint64) ([]*actorspb.Journal, error)
+	// ReplayJournals fetches journals for a given persistence ID from a given sequence number(inclusive) to a given sequence number(inclusive)
+	ReplayJournals(ctx context.Context, persistenceID string, fromSequenceNumber, toSequenceNumber uint64) ([]*actorspb.Journal, error)
 	// GetLatestJournal fetches the latest journal
 	GetLatestJournal(ctx context.Context, persistenceID string) (*actorspb.Journal, error)
 }
