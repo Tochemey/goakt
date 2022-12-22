@@ -4,11 +4,10 @@ import (
 	"testing"
 	"time"
 
-	actorsv1 "github.com/tochemey/goakt/gen/actors/v1"
-
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tochemey/goakt/log"
+	pb "github.com/tochemey/goakt/pb/goakt/v1"
 )
 
 func TestConfig(t *testing.T) {
@@ -69,8 +68,8 @@ func TestOptions(t *testing.T) {
 		},
 		{
 			name:           "WithSupervisorStrategy",
-			option:         WithSupervisorStrategy(actorsv1.Strategy_RESTART),
-			expectedConfig: Config{supervisorStrategy: actorsv1.Strategy_RESTART},
+			option:         WithSupervisorStrategy(pb.StrategyDirective_RESTART_DIRECTIVE),
+			expectedConfig: Config{supervisorStrategy: pb.StrategyDirective_RESTART_DIRECTIVE},
 		},
 	}
 	for _, tc := range testCases {

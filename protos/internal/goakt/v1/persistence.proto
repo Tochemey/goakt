@@ -1,0 +1,56 @@
+syntax = "proto3";
+
+package goakt.v1;
+
+
+import "google/protobuf/any.proto";
+import "google/protobuf/timestamp.proto";
+
+message Journal {
+  // Specifies the persistence unique identifier
+  string persistence_id = 1;
+  // Specifies the sequence number
+  uint64 sequence_number = 2;
+  // Specifies the deletion state
+  bool is_deleted = 3;
+  // the event emitted
+  google.protobuf.Any event = 4;
+  // the state obtained from processing the event
+  google.protobuf.Any resulting_state = 5;
+  // Specifies the timestamp
+  google.protobuf.Timestamp timestamp = 6;
+}
+
+message ErrorReply {
+  // Specifies the error message
+  string message = 1;
+}
+
+message CommandReply {
+  // the actual command reply
+  oneof reply {
+    // actual state is wrapped with meta data
+    State state = 1;
+    // gRPC failure
+    ErrorReply error = 2;
+    // NoReply
+    NoReply no_reply = 3;
+  }
+}
+
+message State {
+  // Specifies the persistence unique identifier
+  string persistence_id = 1;
+  // the entity state
+  google.protobuf.Any state = 2;
+  // Specifies the sequence number
+  uint64 sequence_number = 3;
+  // Specifies the timestamp
+  google.protobuf.Timestamp timestamp = 4;
+}
+
+message NoReply {}
+
+// GetStateCommand tells the PersistentActor
+// to reply with its latest state
+message GetStateCommand{}

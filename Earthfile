@@ -16,7 +16,7 @@ code:
     RUN go mod download -x
 
     # copy in code
-    COPY --dir +protogen/gen ./
+    COPY --dir pb ./
     COPY --dir actors ./
     COPY --dir log ./
     COPY --dir telemetry ./
@@ -52,10 +52,10 @@ protogen:
     # generate the pbs
     RUN buf generate \
             --template buf.gen.yaml \
-            --path protos/internal/actors
+            --path protos/internal/goakt
 
     # save artifact to
-    SAVE ARTIFACT gen gen AS LOCAL gen
+    SAVE ARTIFACT gen gen AS LOCAL pb
 
 testprotos:
     # copy the proto files to generate
