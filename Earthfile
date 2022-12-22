@@ -16,7 +16,7 @@ code:
     RUN go mod download -x
 
     # copy in code
-    COPY --dir actorpb ./
+    COPY --dir pb ./
     COPY --dir actors ./
     COPY --dir log ./
     COPY --dir telemetry ./
