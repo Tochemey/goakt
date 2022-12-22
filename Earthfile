@@ -52,10 +52,10 @@ protogen:
     # generate the pbs
     RUN buf generate \
             --template buf.gen.yaml \
-            --path protos/internal/actors
+            --path protos/internal/goakt
 
     # save artifact to
-    SAVE ARTIFACT gen gen AS LOCAL actorpb
+    SAVE ARTIFACT gen gen AS LOCAL pb
 
 testprotos:
     # copy the proto files to generate

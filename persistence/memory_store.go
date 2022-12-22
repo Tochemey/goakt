@@ -5,7 +5,7 @@ import (
 	"sort"
 	"sync"
 
-	actorspb "github.com/tochemey/goakt/actorpb/actors/v1"
+	pb "github.com/tochemey/goakt/pb/goakt/v1"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -44,7 +44,7 @@ func (s *MemoryStore) Disconnect(ctx context.Context) error {
 }
 
 // WriteJournals persist journals in batches for a given persistenceID
-func (s *MemoryStore) WriteJournals(ctx context.Context, journals []*actorspb.Journal) error {
+func (s *MemoryStore) WriteJournals(ctx context.Context, journals []*pb.Journal) error {
 	s.mu.Lock()
 	for _, journal := range journals {
 		bytea, err := proto.Marshal(journal)
@@ -89,12 +89,12 @@ func (s *MemoryStore) DeleteJournals(ctx context.Context, persistenceID string, 
 	})
 
 	// iterate the items
-	for _, item := range items {
+	for i, item := range items {
 		if item.seqNr <= toSequenceNumber {
 			// Remove the element at index from the slice
-			items[item.seqNr] = items[len(items)-1] // Copy last element to index.
-			items[len(items)-1] = nil               // Erase last element (write zero value).
-			items = items[:len(items)-1]            // Truncate slice.
+			items[i] = items[len(items)-1] // Copy last element to index.
+			items[len(items)-1] = nil      // Erase last element (write zero value).
+			items = items[:len(items)-1]   // Truncate slice.
 		}
 	}
 
@@ -105,7 +105,7 @@ func (s *MemoryStore) DeleteJournals(ctx context.Context, persistenceID string, 
 }
 
 // ReplayJournals fetches journals for a given persistence ID from a given sequence number(inclusive) to a given sequence number(inclusive)
-func (s *MemoryStore) ReplayJournals(ctx context.Context, persistenceID string, fromSequenceNumber, toSequenceNumber uint64) ([]*actorspb.Journal, error) {
+func (s *MemoryStore) ReplayJournals(ctx context.Context, persistenceID string, fromSequenceNumber, toSequenceNumber uint64) ([]*pb.Journal, error) {
 	s.mu.Lock()
 	items := s.cache[persistenceID]
 
@@ -120,11 +120,11 @@ func (s *MemoryStore) ReplayJournals(ctx context.Context, persistenceID string, 
 		return items[i].seqNr < items[j].seqNr
 	})
 
-	subset := make([]*actorspb.Journal, 0, (toSequenceNumber-fromSequenceNumber)+1)
+	subset := make([]*pb.Journal, 0, (toSequenceNumber-fromSequenceNumber)+1)
 	for _, item := range items {
 		if item.seqNr >= fromSequenceNumber && item.seqNr <= toSequenceNumber {
 			// unmarshal it
-			journal := new(actorspb.Journal)
+			journal := new(pb.Journal)
 			// return the error during unmarshaling
 			if err := proto.Unmarshal(item.data, journal); err != nil {
 				s.mu.Unlock()
@@ -146,7 +146,7 @@ func (s *MemoryStore) ReplayJournals(ctx context.Context, persistenceID string, 
 }
 
 // GetLatestJournal fetches the latest journal
-func (s *MemoryStore) GetLatestJournal(ctx context.Context, persistenceID string) (*actorspb.Journal, error) {
+func (s *MemoryStore) GetLatestJournal(ctx context.Context, persistenceID string) (*pb.Journal, error) {
 	s.mu.Lock()
 	items := s.cache[persistenceID]
 
@@ -164,7 +164,7 @@ func (s *MemoryStore) GetLatestJournal(ctx context.Context, persistenceID string
 	// pick the last item in the array
 	item := items[len(items)-1]
 	// unmarshal it
-	journal := new(actorspb.Journal)
+	journal := new(pb.Journal)
 	// return the error during unmarshaling
 	if err := proto.Unmarshal(item.data, journal); err != nil {
 		s.mu.Unlock()

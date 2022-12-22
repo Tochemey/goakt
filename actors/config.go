@@ -6,8 +6,8 @@ import (
 	"strconv"
 	"time"
 
-	actorspb "github.com/tochemey/goakt/actorpb/actors/v1"
 	"github.com/tochemey/goakt/log"
+	pb "github.com/tochemey/goakt/pb/goakt/v1"
 )
 
 var (
@@ -35,7 +35,7 @@ type Config struct {
 	// initialization fails. The default value is 5
 	actorInitMaxRetries int
 	// Specifies the supervisor strategy
-	supervisorStrategy actorspb.Strategy
+	supervisorStrategy pb.StrategyDirective
 }
 
 // NewConfig creates an instance of Config
@@ -56,7 +56,7 @@ func NewConfig(name, nodeHostAndPort string, options ...Option) (*Config, error)
 		expireActorAfter:    2 * time.Second,
 		replyTimeout:        100 * time.Millisecond,
 		actorInitMaxRetries: 5,
-		supervisorStrategy:  actorspb.Strategy_STOP,
+		supervisorStrategy:  pb.StrategyDirective_STOP_DIRECTIVE,
 	}
 	// apply the various options
 	for _, opt := range options {
@@ -167,7 +167,7 @@ func WithPassivationDisabled() Option {
 }
 
 // WithSupervisorStrategy sets the supervisor strategy
-func WithSupervisorStrategy(strategy actorspb.Strategy) Option {
+func WithSupervisorStrategy(strategy pb.StrategyDirective) Option {
 	return OptionFunc(func(config *Config) {
 		config.supervisorStrategy = strategy
 	})

@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/cenkalti/backoff"
-	actorspb "github.com/tochemey/goakt/actorpb/actors/v1"
 	"github.com/tochemey/goakt/log"
+	pb "github.com/tochemey/goakt/pb/goakt/v1"
 	"github.com/tochemey/goakt/pkg/tools"
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
@@ -131,7 +131,7 @@ type pid struct {
 	mu sync.RWMutex
 
 	// supervisor strategy
-	supervisorStrategy actorspb.Strategy
+	supervisorStrategy pb.StrategyDirective
 
 	// specifies the current actor behavior
 	behaviorStack BehaviorStack
@@ -162,7 +162,7 @@ func newPID(ctx context.Context, actor Actor, opts ...pidOption) *pid {
 		restartCounter:         atomic.NewUint64(0),
 		mu:                     sync.RWMutex{},
 		children:               newPIDMap(10),
-		supervisorStrategy:     actorspb.Strategy_STOP,
+		supervisorStrategy:     pb.StrategyDirective_STOP_DIRECTIVE,
 		watchers:               tools.NewConcurrentSlice[*Watcher](),
 	}
 	// set the custom options to override the default values

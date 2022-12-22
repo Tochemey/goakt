@@ -3,8 +3,8 @@ package actors
 import (
 	"time"
 
-	actorspb "github.com/tochemey/goakt/actorpb/actors/v1"
 	"github.com/tochemey/goakt/log"
+	pb "github.com/tochemey/goakt/pb/goakt/v1"
 )
 
 // pidOption represents the pid
@@ -65,7 +65,7 @@ func withLocalID(kind, id string) pidOption {
 
 // withSupervisorStrategy sets the supervisor strategy to used when dealing
 // with child actors
-func withSupervisorStrategy(strategy actorspb.Strategy) pidOption {
+func withSupervisorStrategy(strategy pb.StrategyDirective) pidOption {
 	return func(ref *pid) {
 		ref.supervisorStrategy = strategy
 	}

@@ -2,12 +2,12 @@ package persistence
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sync"
 
-	actorspb "github.com/tochemey/goakt/actorpb/actors/v1"
+	"github.com/pkg/errors"
 	"github.com/tochemey/goakt/actors"
+	pb "github.com/tochemey/goakt/pb/goakt/v1"
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -58,6 +58,11 @@ func (p *PersistentActor[T]) PreStart(ctx context.Context) error {
 		return fmt.Errorf("failed to connect to the journal store: %v", err)
 	}
 
+	// check whether there is a snapshot to recover from
+	if err := p.recoverFromSnapshot(ctx); err != nil {
+		return errors.Wrap(err, "failed to recover from snapshot")
+	}
+
 	// run the init hook
 	return p.initHook(ctx)
 }
@@ -69,13 +74,13 @@ func (p *PersistentActor[T]) Receive(ctx actors.ReceiveContext) {
 	defer p.mu.Unlock()
 
 	switch command := ctx.Message().(type) {
-	case *actorspb.GetStateCommand:
+	case *pb.GetStateCommand:
 		// first make sure that we do have some events
 		if p.eventsCounter.Load() == 0 {
 			state, _ := anypb.New(new(emptypb.Empty))
-			reply := &actorspb.CommandReply{
-				Reply: &actorspb.CommandReply_State{
-					State: &actorspb.State{
+			reply := &pb.CommandReply{
+				Reply: &pb.CommandReply_State{
+					State: &pb.State{
 						PersistenceId:  p.persistentID,
 						State:          state,
 						SequenceNumber: 0,
@@ -93,9 +98,9 @@ func (p *PersistentActor[T]) Receive(ctx actors.ReceiveContext) {
 		// handle the error
 		if err != nil {
 			// create a new error reply
-			reply := &actorspb.CommandReply{
-				Reply: &actorspb.CommandReply_Error{
-					Error: &actorspb.ErrorReply{
+			reply := &pb.CommandReply{
+				Reply: &pb.CommandReply_Error{
+					Error: &pb.ErrorReply{
 						Message: err.Error(),
 					},
 				},
@@ -107,9 +112,9 @@ func (p *PersistentActor[T]) Receive(ctx actors.ReceiveContext) {
 
 		// reply with the state unmarshaled state
 		resultingState := latestJournal.GetResultingState()
-		reply := &actorspb.CommandReply{
-			Reply: &actorspb.CommandReply_State{
-				State: &actorspb.State{
+		reply := &pb.CommandReply{
+			Reply: &pb.CommandReply_State{
+				State: &pb.State{
 					PersistenceId:  p.persistentID,
 					State:          resultingState,
 					SequenceNumber: latestJournal.GetSequenceNumber(),
@@ -126,9 +131,9 @@ func (p *PersistentActor[T]) Receive(ctx actors.ReceiveContext) {
 		// handle the command handler error
 		if err != nil {
 			// create a new error reply
-			reply := &actorspb.CommandReply{
-				Reply: &actorspb.CommandReply_Error{
-					Error: &actorspb.ErrorReply{
+			reply := &pb.CommandReply{
+				Reply: &pb.CommandReply_Error{
+					Error: &pb.ErrorReply{
 						Message: err.Error(),
 					},
 				},
@@ -141,9 +146,9 @@ func (p *PersistentActor[T]) Receive(ctx actors.ReceiveContext) {
 		// if the event is nil nothing is persisted, and we return no reply
 		if event == nil {
 			// create a new error reply
-			reply := &actorspb.CommandReply{
-				Reply: &actorspb.CommandReply_NoReply{
-					NoReply: &actorspb.NoReply{},
+			reply := &pb.CommandReply{
+				Reply: &pb.CommandReply_NoReply{
+					NoReply: &pb.NoReply{},
 				},
 			}
 			// send the response
@@ -156,9 +161,9 @@ func (p *PersistentActor[T]) Receive(ctx actors.ReceiveContext) {
 		// handle the event handler error
 		if err != nil {
 			// create a new error reply
-			reply := &actorspb.CommandReply{
-				Reply: &actorspb.CommandReply_Error{
-					Error: &actorspb.ErrorReply{
+			reply := &pb.CommandReply{
+				Reply: &pb.CommandReply_Error{
+					Error: &pb.ErrorReply{
 						Message: err.Error(),
 					},
 				},
@@ -182,7 +187,7 @@ func (p *PersistentActor[T]) Receive(ctx actors.ReceiveContext) {
 		timestamp := timestamppb.Now()
 
 		// create a journal list
-		journals := []*actorspb.Journal{
+		journals := []*pb.Journal{
 			{
 				PersistenceId:  p.persistentID,
 				SequenceNumber: sequenceNumber,
@@ -196,9 +201,9 @@ func (p *PersistentActor[T]) Receive(ctx actors.ReceiveContext) {
 		// TODO persist the event in batch using a child actor
 		if err := p.journalStore.WriteJournals(ctx.Context(), journals); err != nil {
 			// create a new error reply
-			reply := &actorspb.CommandReply{
-				Reply: &actorspb.CommandReply_Error{
-					Error: &actorspb.ErrorReply{
+			reply := &pb.CommandReply{
+				Reply: &pb.CommandReply_Error{
+					Error: &pb.ErrorReply{
 						Message: err.Error(),
 					},
 				},
@@ -208,9 +213,9 @@ func (p *PersistentActor[T]) Receive(ctx actors.ReceiveContext) {
 			return
 		}
 
-		reply := &actorspb.CommandReply{
-			Reply: &actorspb.CommandReply_State{
-				State: &actorspb.State{
+		reply := &pb.CommandReply{
+			Reply: &pb.CommandReply_State{
+				State: &pb.State{
 					PersistenceId:  p.persistentID,
 					State:          marshaledState,
 					SequenceNumber: sequenceNumber,
@@ -233,4 +238,28 @@ func (p *PersistentActor[T]) PostStop(ctx context.Context) error {
 
 	// run the shutdown hook
 	return p.shutdownHook(ctx)
+}
+
+// recoverFromSnapshot reset the persistent actor to the latest snapshot in case there is one
+// this is vital when the persistent actor is restarting.
+func (p *PersistentActor[T]) recoverFromSnapshot(ctx context.Context) error {
+	// check whether there is a snapshot to recover from
+	journal, err := p.journalStore.GetLatestJournal(ctx, p.persistentID)
+	// handle the error
+	if err != nil {
+		return errors.Wrap(err, "failed to recover the latest journal")
+	}
+
+	// we do have the latest state just recover from it
+	if journal != nil {
+		// set the current state
+		if err := journal.GetResultingState().UnmarshalTo(p.currentState); err != nil {
+			return errors.Wrap(err, "failed unmarshal the latest state")
+		}
+
+		// set the event counter
+		p.eventsCounter.Store(journal.GetSequenceNumber())
+	}
+
+	return nil
 }

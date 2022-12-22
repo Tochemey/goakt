@@ -1,11 +1,11 @@
 syntax = "proto3";
 
-package actors.v1;
+package goakt.v1;
 
 // Strategy is used to handle a failed child actor
-enum Strategy {
+enum StrategyDirective {
   // STOP means stop the child actor in case of error
-  STOP = 0;
+  STOP_DIRECTIVE = 0;
   // RESTART means restart the child actor in case of error
-  RESTART = 1;
+  RESTART_DIRECTIVE = 1;
 }
