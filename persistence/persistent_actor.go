@@ -172,7 +172,6 @@ func (p *PersistentActor[T]) Receive(ctx actors.ReceiveContext) {
 				PayloadManifest: string(eventWrapper.ProtoReflect().Descriptor().FullName()),
 				Payload:         payload,
 				Timestamp:       timestamp,
-				WriterId:        "",
 			},
 		}
 
