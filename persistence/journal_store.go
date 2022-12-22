@@ -19,4 +19,6 @@ type JournalStore interface {
 	DeleteJournals(ctx context.Context, persistenceID string, toSequenceNumber uint64) error
 	// ReplayJournals for a given persistence ID from a given sequence number(inclusive) to a given sequence number(inclusive) with a maximum of journals to be replayed.
 	ReplayJournals(ctx context.Context, persistenceID string, fromSequenceNumber, toSequenceNumber uint64, max uint64)
+	// GetLatestJournal fetches the latest journal
+	GetLatestJournal(ctx context.Context, persistenceID string) (*actorspb.Journal, error)
 }
