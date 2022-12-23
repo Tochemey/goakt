@@ -1,0 +1,8 @@
+# https://docs.codecov.com/docs/codecov-yaml
+coverage:
+  status:
+    patch: off
+ignore:
+  - "pb"
+  - "test"
+  - "examples"

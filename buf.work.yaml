@@ -1,5 +1,5 @@
 version: v1
 directories:
   - protos/internal
-  - protos/testprotos
+  - protos/test
   - protos/sample

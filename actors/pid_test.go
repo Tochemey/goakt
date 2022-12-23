@@ -9,9 +9,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	testpb "github.com/tochemey/goakt/actors/testdata/actors/v1"
 	"github.com/tochemey/goakt/log"
 	pb "github.com/tochemey/goakt/pb/goakt/v1"
+	testpb "github.com/tochemey/goakt/test/data/pb/v1"
 	"go.uber.org/goleak"
 	"google.golang.org/protobuf/proto"
 )
