@@ -42,7 +42,9 @@ lint:
 local-test:
     FROM +vendor
 
-    RUN go test -mod=vendor ./... -race -v -coverprofile=coverage.out -covermode=atomic -coverpkg=./...
+    WITH DOCKER --pull postgres:11
+        RUN go test -mod=vendor ./... -race -v -coverprofile=coverage.out -covermode=atomic -coverpkg=./...
+    END
 
     SAVE ARTIFACT coverage.out AS LOCAL coverage.out
 
