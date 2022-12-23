@@ -22,8 +22,8 @@ type InMemoryEventStore struct {
 
 var _ EventStore = &InMemoryEventStore{}
 
-// NewMemoryStore creates a new instance of InMemoryEventStore
-func NewMemoryStore() *InMemoryEventStore {
+// NewInMemoryEventStore creates a new instance of InMemoryEventStore
+func NewInMemoryEventStore() *InMemoryEventStore {
 	return &InMemoryEventStore{
 		mu:    sync.Mutex{},
 		cache: map[string][]*item{},

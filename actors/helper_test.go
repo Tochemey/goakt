@@ -5,8 +5,8 @@ import (
 	"sync"
 	"time"
 
-	actorsv1 "github.com/tochemey/goakt/actors/testdata/actors/v1"
 	"github.com/tochemey/goakt/log"
+	testspb "github.com/tochemey/goakt/test/data/pb/v1"
 )
 
 type BenchActor struct {
@@ -19,10 +19,10 @@ func (p *BenchActor) PreStart(context.Context) error {
 
 func (p *BenchActor) Receive(ctx ReceiveContext) {
 	switch ctx.Message().(type) {
-	case *actorsv1.TestSend:
+	case *testspb.TestSend:
 		p.Wg.Done()
-	case *actorsv1.TestReply:
-		ctx.Response(&actorsv1.Reply{Content: "received message"})
+	case *testspb.TestReply:
+		ctx.Response(&testspb.Reply{Content: "received message"})
 		p.Wg.Done()
 	}
 }
@@ -55,13 +55,13 @@ func (p *TestActor) PostStop(context.Context) error {
 // Receive processes any message dropped into the actor mailbox without a reply
 func (p *TestActor) Receive(ctx ReceiveContext) {
 	switch ctx.Message().(type) {
-	case *actorsv1.TestSend:
-	case *actorsv1.TestPanic:
+	case *testspb.TestSend:
+	case *testspb.TestPanic:
 		log.Panic("Boom")
-	case *actorsv1.TestReply:
+	case *testspb.TestReply:
 		log.Info("received request/response")
-		ctx.Response(&actorsv1.Reply{Content: "received message"})
-	case *actorsv1.TestTimeout:
+		ctx.Response(&testspb.Reply{Content: "received message"})
+	case *testspb.TestTimeout:
 		// delay for a while before sending the reply
 		wg := sync.WaitGroup{}
 		wg.Add(1)
@@ -90,7 +90,7 @@ func (p *ParentActor) PreStart(context.Context) error {
 
 func (p *ParentActor) Receive(ctx ReceiveContext) {
 	switch ctx.Message().(type) {
-	case *actorsv1.TestSend:
+	case *testspb.TestSend:
 	default:
 		log.Panic(ErrUnhandled)
 	}
@@ -114,9 +114,9 @@ func (c *ChildActor) PreStart(context.Context) error {
 
 func (c *ChildActor) Receive(ctx ReceiveContext) {
 	switch ctx.Message().(type) {
-	case *actorsv1.TestSend:
-	case *actorsv1.TestPanic:
-		log.Panic("paniced")
+	case *testspb.TestSend:
+	case *testspb.TestPanic:
+		log.Panic("panicked")
 	default:
 		log.Panic(ErrUnhandled)
 	}

@@ -28,8 +28,8 @@ type persistentActor[T State] struct {
 // make sure persistentActor is a pure Actor
 var _ actors.Actor = &persistentActor[State]{}
 
-// NewActor returns an instance of persistentActor
-func NewActor[T State](behavior PersistentBehavior[T], eventsStore EventStore) actors.Actor {
+// NewPersistentActor returns an instance of persistentActor
+func NewPersistentActor[T State](behavior PersistentBehavior[T], eventsStore EventStore) actors.Actor {
 	return &persistentActor[T]{
 		PersistentBehavior: behavior,
 		eventsStore:        eventsStore,

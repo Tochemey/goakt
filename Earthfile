@@ -16,8 +16,9 @@ code:
     RUN go mod download -x
 
     # copy in code
-    COPY --dir pb ./
     COPY --dir actors ./
+    COPY --dir test ./
+    COPY --dir pb ./
     COPY --dir log ./
     COPY --dir telemetry ./
     COPY --dir pkg ./
@@ -58,7 +59,7 @@ protogen:
     # save artifact to
     SAVE ARTIFACT gen gen AS LOCAL pb
 
-testprotos:
+testprotogen:
     # copy the proto files to generate
     COPY --dir protos/ ./
     COPY buf.work.yaml buf.gen.yaml ./
@@ -66,10 +67,10 @@ testprotos:
     # generate the pbs
     RUN buf generate \
             --template buf.gen.yaml \
-            --path protos/testprotos/actors
+            --path protos/test/pb
 
     # save artifact to
-    SAVE ARTIFACT gen gen AS LOCAL actors/testdata
+    SAVE ARTIFACT gen gen AS LOCAL test/data
 
 sample-pb:
     # copy the proto files to generate
@@ -83,3 +84,5 @@ sample-pb:
 
     # save artifact to
     SAVE ARTIFACT gen gen AS LOCAL examples/protos
+
+

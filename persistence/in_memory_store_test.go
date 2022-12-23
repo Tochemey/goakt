@@ -13,7 +13,7 @@ import (
 )
 
 func TestNewMemoryStore(t *testing.T) {
-	store := NewMemoryStore()
+	store := NewInMemoryEventStore()
 	assert.NotNil(t, store)
 	var p interface{} = store
 	_, ok := p.(EventStore)
@@ -22,7 +22,7 @@ func TestNewMemoryStore(t *testing.T) {
 
 func TestMemoryStore_Connect(t *testing.T) {
 	ctx := context.TODO()
-	store := NewMemoryStore()
+	store := NewInMemoryEventStore()
 	assert.NotNil(t, store)
 	err := store.Connect(ctx)
 	assert.NoError(t, err)
@@ -48,7 +48,7 @@ func TestMemoryStore_WriteJournals(t *testing.T) {
 		Timestamp:      timestamp,
 	}
 
-	store := NewMemoryStore()
+	store := NewInMemoryEventStore()
 	assert.NotNil(t, store)
 
 	err = store.WriteEvents(ctx, []*pb.Event{journal})
@@ -84,7 +84,7 @@ func TestMemoryStore_DeleteJournals(t *testing.T) {
 		Timestamp:      timestamp,
 	}
 
-	store := NewMemoryStore()
+	store := NewInMemoryEventStore()
 	assert.NotNil(t, store)
 
 	err = store.WriteEvents(ctx, []*pb.Event{journal})
@@ -133,7 +133,7 @@ func TestMemoryStore_ReplayJournals(t *testing.T) {
 		}
 	}
 
-	store := NewMemoryStore()
+	store := NewInMemoryEventStore()
 	assert.NotNil(t, store)
 
 	err = store.WriteEvents(ctx, journals)
