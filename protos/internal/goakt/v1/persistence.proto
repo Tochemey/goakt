@@ -21,24 +21,19 @@ message Event {
   google.protobuf.Timestamp timestamp = 6;
 }
 
-message ErrorReply {
-  // Specifies the error message
-  string message = 1;
-}
-
 message CommandReply {
   // the actual command reply
   oneof reply {
     // actual state is wrapped with meta data
-    State state = 1;
+    StateReply state_reply = 1;
     // gRPC failure
-    ErrorReply error = 2;
+    ErrorReply error_reply = 2;
     // NoReply
     NoReply no_reply = 3;
   }
 }
 
-message State {
+message StateReply {
   // Specifies the persistence unique identifier
   string persistence_id = 1;
   // the entity state
@@ -48,6 +43,12 @@ message State {
   // Specifies the timestamp
   google.protobuf.Timestamp timestamp = 4;
 }
+
+message ErrorReply {
+  // Specifies the error message
+  string message = 1;
+}
+
 
 message NoReply {}
 

@@ -12,7 +12,7 @@ import (
 	goakt "github.com/tochemey/goakt/actors"
 	samplepb "github.com/tochemey/goakt/examples/protos/pb/v1"
 	"github.com/tochemey/goakt/log"
-	goaktv1 "github.com/tochemey/goakt/pb/goakt/v1"
+	pb "github.com/tochemey/goakt/pb/goakt/v1"
 	"github.com/tochemey/goakt/persistence"
 	"google.golang.org/protobuf/proto"
 )
@@ -59,12 +59,12 @@ func main() {
 	// send the command to the actor. Please don't ignore the error in production grid code
 	reply, _ := goakt.SendSync(ctx, pid, command, time.Second)
 	// cast the reply to a command reply because we know the persistence actor will always send a command reply
-	commandReply := reply.(*goaktv1.CommandReply)
-	state := commandReply.GetReply().(*goaktv1.CommandReply_State)
-	logger.Infof("resulting sequence number: %d", state.State.GetSequenceNumber())
+	commandReply := reply.(*pb.CommandReply)
+	state := commandReply.GetReply().(*pb.CommandReply_StateReply)
+	logger.Infof("resulting sequence number: %d", state.StateReply.GetSequenceNumber())
 
 	account := new(samplepb.Account)
-	_ = state.State.GetState().UnmarshalTo(account)
+	_ = state.StateReply.GetState().UnmarshalTo(account)
 
 	logger.Infof("current balance: %v", account.GetAccountBalance())
 
@@ -74,12 +74,12 @@ func main() {
 		Balance:   250,
 	}
 	reply, _ = goakt.SendSync(ctx, pid, command, time.Second)
-	commandReply = reply.(*goaktv1.CommandReply)
-	state = commandReply.GetReply().(*goaktv1.CommandReply_State)
-	logger.Infof("resulting sequence number: %d", state.State.GetSequenceNumber())
+	commandReply = reply.(*pb.CommandReply)
+	state = commandReply.GetReply().(*pb.CommandReply_StateReply)
+	logger.Infof("resulting sequence number: %d", state.StateReply.GetSequenceNumber())
 
 	account = new(samplepb.Account)
-	_ = state.State.GetState().UnmarshalTo(account)
+	_ = state.StateReply.GetState().UnmarshalTo(account)
 
 	logger.Infof("current balance: %v", account.GetAccountBalance())
 

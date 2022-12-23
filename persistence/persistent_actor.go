@@ -77,8 +77,8 @@ func (p *persistentActor[T]) Receive(ctx actors.ReceiveContext) {
 		if p.eventsCounter.Load() == 0 {
 			state, _ := anypb.New(new(emptypb.Empty))
 			reply := &pb.CommandReply{
-				Reply: &pb.CommandReply_State{
-					State: &pb.State{
+				Reply: &pb.CommandReply_StateReply{
+					StateReply: &pb.StateReply{
 						PersistenceId:  p.PersistenceID(),
 						State:          state,
 						SequenceNumber: 0,
@@ -98,8 +98,8 @@ func (p *persistentActor[T]) Receive(ctx actors.ReceiveContext) {
 		if err != nil {
 			// create a new error reply
 			reply := &pb.CommandReply{
-				Reply: &pb.CommandReply_Error{
-					Error: &pb.ErrorReply{
+				Reply: &pb.CommandReply_ErrorReply{
+					ErrorReply: &pb.ErrorReply{
 						Message: err.Error(),
 					},
 				},
@@ -109,11 +109,11 @@ func (p *persistentActor[T]) Receive(ctx actors.ReceiveContext) {
 			return
 		}
 
-		// reply with the state unmarshaled state
+		// reply with the state unmarshalled state
 		resultingState := latestEvent.GetResultingState()
 		reply := &pb.CommandReply{
-			Reply: &pb.CommandReply_State{
-				State: &pb.State{
+			Reply: &pb.CommandReply_StateReply{
+				StateReply: &pb.StateReply{
 					PersistenceId:  p.PersistenceID(),
 					State:          resultingState,
 					SequenceNumber: latestEvent.GetSequenceNumber(),
@@ -131,8 +131,8 @@ func (p *persistentActor[T]) Receive(ctx actors.ReceiveContext) {
 		if err != nil {
 			// create a new error reply
 			reply := &pb.CommandReply{
-				Reply: &pb.CommandReply_Error{
-					Error: &pb.ErrorReply{
+				Reply: &pb.CommandReply_ErrorReply{
+					ErrorReply: &pb.ErrorReply{
 						Message: err.Error(),
 					},
 				},
@@ -161,8 +161,8 @@ func (p *persistentActor[T]) Receive(ctx actors.ReceiveContext) {
 		if err != nil {
 			// create a new error reply
 			reply := &pb.CommandReply{
-				Reply: &pb.CommandReply_Error{
-					Error: &pb.ErrorReply{
+				Reply: &pb.CommandReply_ErrorReply{
+					ErrorReply: &pb.ErrorReply{
 						Message: err.Error(),
 					},
 				},
@@ -201,8 +201,8 @@ func (p *persistentActor[T]) Receive(ctx actors.ReceiveContext) {
 		if err := p.eventsStore.WriteEvents(ctx.Context(), journals); err != nil {
 			// create a new error reply
 			reply := &pb.CommandReply{
-				Reply: &pb.CommandReply_Error{
-					Error: &pb.ErrorReply{
+				Reply: &pb.CommandReply_ErrorReply{
+					ErrorReply: &pb.ErrorReply{
 						Message: err.Error(),
 					},
 				},
@@ -213,8 +213,8 @@ func (p *persistentActor[T]) Receive(ctx actors.ReceiveContext) {
 		}
 
 		reply := &pb.CommandReply{
-			Reply: &pb.CommandReply_State{
-				State: &pb.State{
+			Reply: &pb.CommandReply_StateReply{
+				StateReply: &pb.StateReply{
 					PersistenceId:  p.PersistenceID(),
 					State:          marshaledState,
 					SequenceNumber: sequenceNumber,
