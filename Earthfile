@@ -21,6 +21,7 @@ code:
     COPY --dir log ./
     COPY --dir telemetry ./
     COPY --dir pkg ./
+    COPY --dir persistence ./
 
 
 vendor:
