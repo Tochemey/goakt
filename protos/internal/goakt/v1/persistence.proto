@@ -6,7 +6,7 @@ package goakt.v1;
 import "google/protobuf/any.proto";
 import "google/protobuf/timestamp.proto";
 
-message Journal {
+message Event {
   // Specifies the persistence unique identifier
   string persistence_id = 1;
   // Specifies the sequence number

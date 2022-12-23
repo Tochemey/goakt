@@ -81,4 +81,4 @@ sample-pb:
             --path protos/sample/pb
 
     # save artifact to
-    SAVE ARTIFACT gen gen AS LOCAL _examples/protos
+    SAVE ARTIFACT gen gen AS LOCAL examples/protos

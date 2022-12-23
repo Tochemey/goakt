@@ -16,7 +16,7 @@ func TestNewMemoryStore(t *testing.T) {
 	store := NewMemoryStore()
 	assert.NotNil(t, store)
 	var p interface{} = store
-	_, ok := p.(JournalStore)
+	_, ok := p.(EventStore)
 	assert.True(t, ok)
 }
 
@@ -39,7 +39,7 @@ func TestMemoryStore_WriteJournals(t *testing.T) {
 
 	timestamp := timestamppb.Now()
 
-	journal := &pb.Journal{
+	journal := &pb.Event{
 		PersistenceId:  "persistence-1",
 		SequenceNumber: 1,
 		IsDeleted:      false,
@@ -51,11 +51,11 @@ func TestMemoryStore_WriteJournals(t *testing.T) {
 	store := NewMemoryStore()
 	assert.NotNil(t, store)
 
-	err = store.WriteJournals(ctx, []*pb.Journal{journal})
+	err = store.WriteEvents(ctx, []*pb.Event{journal})
 	assert.NoError(t, err)
 
 	// fetch the data we insert back
-	actual, err := store.GetLatestJournal(ctx, "persistence-1")
+	actual, err := store.GetLatestEvent(ctx, "persistence-1")
 	assert.NoError(t, err)
 	assert.NotNil(t, actual)
 	assert.True(t, proto.Equal(journal, actual))
@@ -75,7 +75,7 @@ func TestMemoryStore_DeleteJournals(t *testing.T) {
 
 	timestamp := timestamppb.Now()
 
-	journal := &pb.Journal{
+	journal := &pb.Event{
 		PersistenceId:  "persistence-1",
 		SequenceNumber: 1,
 		IsDeleted:      false,
@@ -87,20 +87,20 @@ func TestMemoryStore_DeleteJournals(t *testing.T) {
 	store := NewMemoryStore()
 	assert.NotNil(t, store)
 
-	err = store.WriteJournals(ctx, []*pb.Journal{journal})
+	err = store.WriteEvents(ctx, []*pb.Event{journal})
 	assert.NoError(t, err)
 
 	// fetch the data we insert back
-	actual, err := store.GetLatestJournal(ctx, "persistence-1")
+	actual, err := store.GetLatestEvent(ctx, "persistence-1")
 	assert.NoError(t, err)
 	assert.NotNil(t, actual)
 	assert.True(t, proto.Equal(journal, actual))
 
 	// delete the journal
-	err = store.DeleteJournals(ctx, "persistence-1", 2)
+	err = store.DeleteEvents(ctx, "persistence-1", 2)
 	assert.NoError(t, err)
 
-	actual, err = store.GetLatestJournal(ctx, "persistence-1")
+	actual, err = store.GetLatestEvent(ctx, "persistence-1")
 	assert.NoError(t, err)
 	assert.Nil(t, actual)
 
@@ -120,10 +120,10 @@ func TestMemoryStore_ReplayJournals(t *testing.T) {
 	timestamp := timestamppb.Now()
 
 	count := 10
-	journals := make([]*pb.Journal, count)
+	journals := make([]*pb.Event, count)
 	for i := 0; i < count; i++ {
 		seqNr := i + 1
-		journals[i] = &pb.Journal{
+		journals[i] = &pb.Event{
 			PersistenceId:  "persistence-1",
 			SequenceNumber: uint64(seqNr),
 			IsDeleted:      false,
@@ -136,13 +136,13 @@ func TestMemoryStore_ReplayJournals(t *testing.T) {
 	store := NewMemoryStore()
 	assert.NotNil(t, store)
 
-	err = store.WriteJournals(ctx, journals)
+	err = store.WriteEvents(ctx, journals)
 	assert.NoError(t, err)
 
 	from := uint64(3)
 	to := uint64(6)
 
-	actual, err := store.ReplayJournals(ctx, "persistence-1", from, to)
+	actual, err := store.ReplayEvents(ctx, "persistence-1", from, to)
 	assert.NoError(t, err)
 	assert.NotEmpty(t, actual)
 	assert.Len(t, actual, 4)

@@ -14,50 +14,50 @@ type item struct {
 	data  []byte
 }
 
-// MemoryStore keep in memory every journal
-type MemoryStore struct {
+// InMemoryEventStore keep in memory every journal
+type InMemoryEventStore struct {
 	mu    sync.Mutex
 	cache map[string][]*item
 }
 
-var _ JournalStore = &MemoryStore{}
+var _ EventStore = &InMemoryEventStore{}
 
-// NewMemoryStore creates a new instance of MemoryStore
-func NewMemoryStore() *MemoryStore {
-	return &MemoryStore{
+// NewMemoryStore creates a new instance of InMemoryEventStore
+func NewMemoryStore() *InMemoryEventStore {
+	return &InMemoryEventStore{
 		mu:    sync.Mutex{},
 		cache: map[string][]*item{},
 	}
 }
 
 // Connect connects to the journal store
-func (s *MemoryStore) Connect(ctx context.Context) error {
+func (s *InMemoryEventStore) Connect(ctx context.Context) error {
 	return nil
 }
 
 // Disconnect disconnect the journal store
-func (s *MemoryStore) Disconnect(ctx context.Context) error {
+func (s *InMemoryEventStore) Disconnect(ctx context.Context) error {
 	s.mu.Lock()
 	s.cache = map[string][]*item{}
 	s.mu.Unlock()
 	return nil
 }
 
-// WriteJournals persist journals in batches for a given persistenceID
-func (s *MemoryStore) WriteJournals(ctx context.Context, journals []*pb.Journal) error {
+// WriteEvents persist events in batches for a given persistenceID
+func (s *InMemoryEventStore) WriteEvents(ctx context.Context, events []*pb.Event) error {
 	s.mu.Lock()
-	for _, journal := range journals {
-		bytea, err := proto.Marshal(journal)
+	for _, event := range events {
+		bytea, err := proto.Marshal(event)
 		if err != nil {
 			s.mu.Unlock()
 			return err
 		}
 
 		// grab the existing items
-		items := s.cache[journal.GetPersistenceId()]
+		items := s.cache[event.GetPersistenceId()]
 		// add the new entry to the existing items
 		items = append(items, &item{
-			seqNr: journal.GetSequenceNumber(),
+			seqNr: event.GetSequenceNumber(),
 			data:  bytea,
 		})
 
@@ -66,14 +66,14 @@ func (s *MemoryStore) WriteJournals(ctx context.Context, journals []*pb.Journal)
 			return items[i].seqNr < items[j].seqNr
 		})
 
-		s.cache[journal.GetPersistenceId()] = items
+		s.cache[event.GetPersistenceId()] = items
 	}
 	s.mu.Unlock()
 	return nil
 }
 
-// DeleteJournals deletes journals from the store upt to a given sequence number (inclusive)
-func (s *MemoryStore) DeleteJournals(ctx context.Context, persistenceID string, toSequenceNumber uint64) error {
+// DeleteEvents deletes events from the store upt to a given sequence number (inclusive)
+func (s *InMemoryEventStore) DeleteEvents(ctx context.Context, persistenceID string, toSequenceNumber uint64) error {
 	s.mu.Lock()
 	items := s.cache[persistenceID]
 
@@ -104,8 +104,8 @@ func (s *MemoryStore) DeleteJournals(ctx context.Context, persistenceID string, 
 	return nil
 }
 
-// ReplayJournals fetches journals for a given persistence ID from a given sequence number(inclusive) to a given sequence number(inclusive)
-func (s *MemoryStore) ReplayJournals(ctx context.Context, persistenceID string, fromSequenceNumber, toSequenceNumber uint64) ([]*pb.Journal, error) {
+// ReplayEvents fetches events for a given persistence ID from a given sequence number(inclusive) to a given sequence number(inclusive)
+func (s *InMemoryEventStore) ReplayEvents(ctx context.Context, persistenceID string, fromSequenceNumber, toSequenceNumber uint64) ([]*pb.Event, error) {
 	s.mu.Lock()
 	items := s.cache[persistenceID]
 
@@ -120,19 +120,19 @@ func (s *MemoryStore) ReplayJournals(ctx context.Context, persistenceID string, 
 		return items[i].seqNr < items[j].seqNr
 	})
 
-	subset := make([]*pb.Journal, 0, (toSequenceNumber-fromSequenceNumber)+1)
+	subset := make([]*pb.Event, 0, (toSequenceNumber-fromSequenceNumber)+1)
 	for _, item := range items {
 		if item.seqNr >= fromSequenceNumber && item.seqNr <= toSequenceNumber {
 			// unmarshal it
-			journal := new(pb.Journal)
+			event := new(pb.Event)
 			// return the error during unmarshaling
-			if err := proto.Unmarshal(item.data, journal); err != nil {
+			if err := proto.Unmarshal(item.data, event); err != nil {
 				s.mu.Unlock()
 				return nil, err
 			}
 
 			// add the item to the subset
-			subset = append(subset, journal)
+			subset = append(subset, event)
 		}
 	}
 
@@ -145,8 +145,8 @@ func (s *MemoryStore) ReplayJournals(ctx context.Context, persistenceID string, 
 	return subset, nil
 }
 
-// GetLatestJournal fetches the latest journal
-func (s *MemoryStore) GetLatestJournal(ctx context.Context, persistenceID string) (*pb.Journal, error) {
+// GetLatestEvent fetches the latest event
+func (s *InMemoryEventStore) GetLatestEvent(ctx context.Context, persistenceID string) (*pb.Event, error) {
 	s.mu.Lock()
 	items := s.cache[persistenceID]
 
@@ -164,17 +164,17 @@ func (s *MemoryStore) GetLatestJournal(ctx context.Context, persistenceID string
 	// pick the last item in the array
 	item := items[len(items)-1]
 	// unmarshal it
-	journal := new(pb.Journal)
+	event := new(pb.Event)
 	// return the error during unmarshaling
-	if err := proto.Unmarshal(item.data, journal); err != nil {
+	if err := proto.Unmarshal(item.data, event); err != nil {
 		s.mu.Unlock()
 		return nil, err
 	}
 	s.mu.Unlock()
-	return journal, nil
+	return event, nil
 }
 
 // Len return the length of the cache
-func (s *MemoryStore) Len() int {
+func (s *InMemoryEventStore) Len() int {
 	return len(s.cache)
 }

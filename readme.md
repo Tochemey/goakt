@@ -11,7 +11,7 @@ Also, check reference section at the end of the post for more material regarding
 
 - [x] Send a synchronous message to an actor from a non actor system
 - [x] Send an asynchronous(fire-and-forget) message to an actor from a non actor system
-- [x] Actor to Actor communication (check the [examples](./_examples/actor-to-actor) folder)
+- [x] Actor to Actor communication (check the [examples](./examples/actor-to-actor) folder)
 - [x] Enable/Disable Passivation mode to remove/keep idle actors 
 - [x] PreStart hook for an actor. 
 - [x] PostStop hook for an actor for a graceful shutdown

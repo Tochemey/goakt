@@ -14,47 +14,45 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-// PersistentActor is an event sourced based actor
-type PersistentActor[T State] struct {
-	journalStore   JournalStore
-	commandHandler CommandHandler[T]
-	eventHandler   EventHandler[T]
-	initHook       InitHook
-	shutdownHook   ShutdownHook
-	persistentID   string
-	eventsCounter  *atomic.Uint64
-	mu             sync.Mutex
+// persistentActor is an event sourced based actor
+type persistentActor[T State] struct {
+	PersistentBehavior[T]
 
-	currentState T
+	eventsStore   EventStore
+	currentState  T
+	eventsCounter *atomic.Uint64
+
+	mu sync.RWMutex
 }
 
-var _ actors.Actor = &PersistentActor[State]{}
+// make sure persistentActor is a pure Actor
+var _ actors.Actor = &persistentActor[State]{}
 
-// NewPersistentActor returns an instance of PersistentActor
-func NewPersistentActor[T State](config *PersistentConfig[T]) *PersistentActor[T] {
-	return &PersistentActor[T]{
-		journalStore:   config.JournalStore,
-		commandHandler: config.CommandHandler,
-		eventHandler:   config.EventHandler,
-		initHook:       config.InitHook,
-		shutdownHook:   config.ShutdownHook,
-		eventsCounter:  atomic.NewUint64(0),
-		persistentID:   config.PersistentID,
-		mu:             sync.Mutex{},
-		currentState:   config.InitialState,
+// NewActor returns an instance of persistentActor
+func NewActor[T State](behavior PersistentBehavior[T], eventsStore EventStore) actors.Actor {
+	return &persistentActor[T]{
+		PersistentBehavior: behavior,
+		eventsStore:        eventsStore,
+		eventsCounter:      atomic.NewUint64(0),
+		mu:                 sync.RWMutex{},
 	}
 }
 
 // PreStart pre-starts the actor
 // At this stage we connect to the various stores
-func (p *PersistentActor[T]) PreStart(ctx context.Context) error {
+func (p *persistentActor[T]) PreStart(ctx context.Context) error {
+	// acquire the lock
+	p.mu.Lock()
+	// release lock when done
+	defer p.mu.Unlock()
+
 	// connect to the various stores
-	if p.journalStore == nil {
+	if p.eventsStore == nil {
 		return errors.New("journal store is not defined")
 	}
 
 	// call the connect method of the journal store
-	if err := p.journalStore.Connect(ctx); err != nil {
+	if err := p.eventsStore.Connect(ctx); err != nil {
 		return fmt.Errorf("failed to connect to the journal store: %v", err)
 	}
 
@@ -62,17 +60,17 @@ func (p *PersistentActor[T]) PreStart(ctx context.Context) error {
 	if err := p.recoverFromSnapshot(ctx); err != nil {
 		return errors.Wrap(err, "failed to recover from snapshot")
 	}
-
-	// run the init hook
-	return p.initHook(ctx)
+	return nil
 }
 
 // Receive processes any message dropped into the actor mailbox.
-func (p *PersistentActor[T]) Receive(ctx actors.ReceiveContext) {
+func (p *persistentActor[T]) Receive(ctx actors.ReceiveContext) {
 	// acquire the lock
 	p.mu.Lock()
+	// release lock when done
 	defer p.mu.Unlock()
 
+	// grab the command sent
 	switch command := ctx.Message().(type) {
 	case *pb.GetStateCommand:
 		// first make sure that we do have some events
@@ -81,7 +79,7 @@ func (p *PersistentActor[T]) Receive(ctx actors.ReceiveContext) {
 			reply := &pb.CommandReply{
 				Reply: &pb.CommandReply_State{
 					State: &pb.State{
-						PersistenceId:  p.persistentID,
+						PersistenceId:  p.PersistenceID(),
 						State:          state,
 						SequenceNumber: 0,
 						Timestamp:      nil,
@@ -91,10 +89,11 @@ func (p *PersistentActor[T]) Receive(ctx actors.ReceiveContext) {
 
 			// send the response
 			ctx.Response(reply)
+			return
 		}
 
 		// let us fetch the latest journal
-		latestJournal, err := p.journalStore.GetLatestJournal(ctx.Context(), p.persistentID)
+		latestEvent, err := p.eventsStore.GetLatestEvent(ctx.Context(), p.PersistenceID())
 		// handle the error
 		if err != nil {
 			// create a new error reply
@@ -111,14 +110,14 @@ func (p *PersistentActor[T]) Receive(ctx actors.ReceiveContext) {
 		}
 
 		// reply with the state unmarshaled state
-		resultingState := latestJournal.GetResultingState()
+		resultingState := latestEvent.GetResultingState()
 		reply := &pb.CommandReply{
 			Reply: &pb.CommandReply_State{
 				State: &pb.State{
-					PersistenceId:  p.persistentID,
+					PersistenceId:  p.PersistenceID(),
 					State:          resultingState,
-					SequenceNumber: latestJournal.GetSequenceNumber(),
-					Timestamp:      latestJournal.GetTimestamp(),
+					SequenceNumber: latestEvent.GetSequenceNumber(),
+					Timestamp:      latestEvent.GetTimestamp(),
 				},
 			},
 		}
@@ -127,7 +126,7 @@ func (p *PersistentActor[T]) Receive(ctx actors.ReceiveContext) {
 		ctx.Response(reply)
 	default:
 		// pass the received command to the command handler
-		event, err := p.commandHandler(ctx.Context(), command, p.currentState)
+		event, err := p.HandleCommand(ctx.Context(), command, p.currentState)
 		// handle the command handler error
 		if err != nil {
 			// create a new error reply
@@ -157,7 +156,7 @@ func (p *PersistentActor[T]) Receive(ctx actors.ReceiveContext) {
 		}
 
 		// process the event by calling the event handler
-		resultingState, err := p.eventHandler(ctx.Context(), event, p.currentState)
+		resultingState, err := p.HandleEvent(ctx.Context(), event, p.currentState)
 		// handle the event handler error
 		if err != nil {
 			// create a new error reply
@@ -187,9 +186,9 @@ func (p *PersistentActor[T]) Receive(ctx actors.ReceiveContext) {
 		timestamp := timestamppb.Now()
 
 		// create a journal list
-		journals := []*pb.Journal{
+		journals := []*pb.Event{
 			{
-				PersistenceId:  p.persistentID,
+				PersistenceId:  p.PersistenceID(),
 				SequenceNumber: sequenceNumber,
 				IsDeleted:      false,
 				Event:          marshaledEvent,
@@ -199,7 +198,7 @@ func (p *PersistentActor[T]) Receive(ctx actors.ReceiveContext) {
 		}
 
 		// TODO persist the event in batch using a child actor
-		if err := p.journalStore.WriteJournals(ctx.Context(), journals); err != nil {
+		if err := p.eventsStore.WriteEvents(ctx.Context(), journals); err != nil {
 			// create a new error reply
 			reply := &pb.CommandReply{
 				Reply: &pb.CommandReply_Error{
@@ -216,7 +215,7 @@ func (p *PersistentActor[T]) Receive(ctx actors.ReceiveContext) {
 		reply := &pb.CommandReply{
 			Reply: &pb.CommandReply_State{
 				State: &pb.State{
-					PersistenceId:  p.persistentID,
+					PersistenceId:  p.PersistenceID(),
 					State:          marshaledState,
 					SequenceNumber: sequenceNumber,
 					Timestamp:      timestamp,
@@ -230,36 +229,44 @@ func (p *PersistentActor[T]) Receive(ctx actors.ReceiveContext) {
 }
 
 // PostStop prepares the actor to gracefully shutdown
-func (p *PersistentActor[T]) PostStop(ctx context.Context) error {
+func (p *persistentActor[T]) PostStop(ctx context.Context) error {
+	// acquire the lock
+	p.mu.Lock()
+	// release lock when done
+	defer p.mu.Unlock()
+
 	// disconnect the journal
-	if err := p.journalStore.Disconnect(ctx); err != nil {
+	if err := p.eventsStore.Disconnect(ctx); err != nil {
 		return fmt.Errorf("failed to disconnect the journal store: %v", err)
 	}
 
-	// run the shutdown hook
-	return p.shutdownHook(ctx)
+	return nil
 }
 
 // recoverFromSnapshot reset the persistent actor to the latest snapshot in case there is one
 // this is vital when the persistent actor is restarting.
-func (p *PersistentActor[T]) recoverFromSnapshot(ctx context.Context) error {
+func (p *persistentActor[T]) recoverFromSnapshot(ctx context.Context) error {
 	// check whether there is a snapshot to recover from
-	journal, err := p.journalStore.GetLatestJournal(ctx, p.persistentID)
+	event, err := p.eventsStore.GetLatestEvent(ctx, p.PersistenceID())
 	// handle the error
 	if err != nil {
 		return errors.Wrap(err, "failed to recover the latest journal")
 	}
 
 	// we do have the latest state just recover from it
-	if journal != nil {
+	if event != nil {
 		// set the current state
-		if err := journal.GetResultingState().UnmarshalTo(p.currentState); err != nil {
+		if err := event.GetResultingState().UnmarshalTo(p.currentState); err != nil {
 			return errors.Wrap(err, "failed unmarshal the latest state")
 		}
 
 		// set the event counter
-		p.eventsCounter.Store(journal.GetSequenceNumber())
+		p.eventsCounter.Store(event.GetSequenceNumber())
+		return nil
 	}
+
+	// in case there is no snpashot
+	p.currentState = p.InitialState()
 
 	return nil
 }
