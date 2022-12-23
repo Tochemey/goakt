@@ -10,8 +10,8 @@ type Command proto.Message
 type Event proto.Message
 type State proto.Message
 
-// PersistentBehavior defines a persistence behavior
-type PersistentBehavior[T State] interface {
+// EventSourcedBehavior defines a event sourced behavior
+type EventSourcedBehavior[T State] interface {
 	Kind() string
 	PersistenceID() string
 	InitialState() T

@@ -14,29 +14,34 @@ type item struct {
 	data  []byte
 }
 
-// InMemoryEventStore keep in memory every journal
-type InMemoryEventStore struct {
+// MemoryEventStore keep in memory every journal
+// NOTE: NOT RECOMMENDED FOR PRODUCTION CODE
+type MemoryEventStore struct {
 	mu    sync.Mutex
 	cache map[string][]*item
+
+	// this is only useful for tests
+	keepRecordsAfterDisconnect bool
 }
 
-var _ EventStore = &InMemoryEventStore{}
+var _ EventStore = &MemoryEventStore{}
 
-// NewInMemoryEventStore creates a new instance of InMemoryEventStore
-func NewInMemoryEventStore() *InMemoryEventStore {
-	return &InMemoryEventStore{
-		mu:    sync.Mutex{},
-		cache: map[string][]*item{},
+// NewMemoryEventStore creates a new instance of MemoryEventStore
+func NewMemoryEventStore() *MemoryEventStore {
+	return &MemoryEventStore{
+		mu:                         sync.Mutex{},
+		cache:                      map[string][]*item{},
+		keepRecordsAfterDisconnect: false,
 	}
 }
 
 // Connect connects to the journal store
-func (s *InMemoryEventStore) Connect(ctx context.Context) error {
+func (s *MemoryEventStore) Connect(ctx context.Context) error {
 	return nil
 }
 
 // Disconnect disconnect the journal store
-func (s *InMemoryEventStore) Disconnect(ctx context.Context) error {
+func (s *MemoryEventStore) Disconnect(ctx context.Context) error {
 	s.mu.Lock()
 	s.cache = map[string][]*item{}
 	s.mu.Unlock()
@@ -44,7 +49,7 @@ func (s *InMemoryEventStore) Disconnect(ctx context.Context) error {
 }
 
 // WriteEvents persist events in batches for a given persistenceID
-func (s *InMemoryEventStore) WriteEvents(ctx context.Context, events []*pb.Event) error {
+func (s *MemoryEventStore) WriteEvents(ctx context.Context, events []*pb.Event) error {
 	s.mu.Lock()
 	for _, event := range events {
 		bytea, err := proto.Marshal(event)
@@ -73,7 +78,7 @@ func (s *InMemoryEventStore) WriteEvents(ctx context.Context, events []*pb.Event
 }
 
 // DeleteEvents deletes events from the store upt to a given sequence number (inclusive)
-func (s *InMemoryEventStore) DeleteEvents(ctx context.Context, persistenceID string, toSequenceNumber uint64) error {
+func (s *MemoryEventStore) DeleteEvents(ctx context.Context, persistenceID string, toSequenceNumber uint64) error {
 	s.mu.Lock()
 	items := s.cache[persistenceID]
 
@@ -105,7 +110,7 @@ func (s *InMemoryEventStore) DeleteEvents(ctx context.Context, persistenceID str
 }
 
 // ReplayEvents fetches events for a given persistence ID from a given sequence number(inclusive) to a given sequence number(inclusive)
-func (s *InMemoryEventStore) ReplayEvents(ctx context.Context, persistenceID string, fromSequenceNumber, toSequenceNumber uint64) ([]*pb.Event, error) {
+func (s *MemoryEventStore) ReplayEvents(ctx context.Context, persistenceID string, fromSequenceNumber, toSequenceNumber uint64) ([]*pb.Event, error) {
 	s.mu.Lock()
 	items := s.cache[persistenceID]
 
@@ -146,7 +151,7 @@ func (s *InMemoryEventStore) ReplayEvents(ctx context.Context, persistenceID str
 }
 
 // GetLatestEvent fetches the latest event
-func (s *InMemoryEventStore) GetLatestEvent(ctx context.Context, persistenceID string) (*pb.Event, error) {
+func (s *MemoryEventStore) GetLatestEvent(ctx context.Context, persistenceID string) (*pb.Event, error) {
 	s.mu.Lock()
 	items := s.cache[persistenceID]
 
@@ -165,7 +170,7 @@ func (s *InMemoryEventStore) GetLatestEvent(ctx context.Context, persistenceID s
 	item := items[len(items)-1]
 	// unmarshal it
 	event := new(pb.Event)
-	// return the error during unmarshaling
+	// return the error during unmarshalling
 	if err := proto.Unmarshal(item.data, event); err != nil {
 		s.mu.Unlock()
 		return nil, err
@@ -175,6 +180,6 @@ func (s *InMemoryEventStore) GetLatestEvent(ctx context.Context, persistenceID s
 }
 
 // Len return the length of the cache
-func (s *InMemoryEventStore) Len() int {
+func (s *MemoryEventStore) Len() int {
 	return len(s.cache)
 }

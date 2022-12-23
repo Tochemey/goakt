@@ -36,7 +36,7 @@ func main() {
 	_ = actorSystem.Start(ctx)
 
 	// create the event store
-	eventStore := persistence.NewInMemoryEventStore()
+	eventStore := persistence.NewMemoryEventStore()
 
 	// create a persistence id
 	persistenceID := uuid.NewString()
@@ -45,7 +45,7 @@ func main() {
 	behavior := NewAccountBehavior(persistenceID)
 
 	// create the persistence actor using the behavior previously created
-	persistentActor := persistence.NewPersistentActor[*samplepb.Account](behavior, eventStore)
+	persistentActor := persistence.NewEventSourcedActor[*samplepb.Account](behavior, eventStore)
 	// spawn the actor
 	pid := actorSystem.Spawn(ctx, behavior.Kind(), behavior.PersistenceID(), persistentActor)
 
@@ -99,7 +99,7 @@ type AccountBehavior struct {
 }
 
 // make sure that AccountBehavior is a true persistence behavior
-var _ persistence.PersistentBehavior[*samplepb.Account] = &AccountBehavior{}
+var _ persistence.EventSourcedBehavior[*samplepb.Account] = &AccountBehavior{}
 
 // NewAccountBehavior creates an instance of AccountBehavior
 func NewAccountBehavior(id string) *AccountBehavior {
