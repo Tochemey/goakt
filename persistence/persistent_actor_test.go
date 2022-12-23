@@ -223,9 +223,7 @@ func TestPersistentActor(t *testing.T) {
 		pid := actorSystem.Spawn(ctx, behavior.Kind(), behavior.PersistenceID(), persistentActor)
 		require.NotNil(t, pid)
 
-		var command proto.Message
-
-		command = &testpb.TestSend{}
+		command := &testpb.TestSend{}
 		// send the command to the actor
 		reply, err := actors.SendSync(ctx, pid, command, time.Second)
 		require.NoError(t, err)
