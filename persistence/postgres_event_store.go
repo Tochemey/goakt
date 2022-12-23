@@ -3,12 +3,17 @@ package persistence
 import (
 	"context"
 	"database/sql"
+	"time"
 
 	sq "github.com/Masterminds/squirrel"
 	"github.com/pkg/errors"
 	pb "github.com/tochemey/goakt/pb/goakt/v1"
 	"github.com/tochemey/goakt/pkg/postgres"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protoreflect"
+	"google.golang.org/protobuf/reflect/protoregistry"
+	"google.golang.org/protobuf/types/known/anypb"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 var (
@@ -143,18 +148,103 @@ func (p *PostgresEventStore) WriteEvents(ctx context.Context, events []*pb.Event
 
 // DeleteEvents deletes events from the postgres up to a given sequence number (inclusive)
 func (p *PostgresEventStore) DeleteEvents(ctx context.Context, persistenceID string, toSequenceNumber uint64) error {
-	//TODO implement me
-	panic("implement me")
+	// create the database delete statement
+	statement := p.sb.
+		Delete(tableName).
+		Where(sq.Eq{"persistence_id": persistenceID}).
+		Where(sq.LtOrEq{"sequence_number": toSequenceNumber})
+
+	// get the sql statement and the arguments
+	query, args, err := statement.ToSql()
+	if err != nil {
+		return errors.Wrap(err, "failed to build the delete events sql statement")
+	}
+
+	// execute the sql statement
+	if _, err := p.db.Exec(ctx, query, args...); err != nil {
+		return errors.Wrap(err, "failed to delete events from the database")
+	}
+
+	return nil
 }
 
 // ReplayEvents fetches events for a given persistence ID from a given sequence number(inclusive) to a given sequence number(inclusive)
-func (p *PostgresEventStore) ReplayEvents(ctx context.Context, persistenceID string, fromSequenceNumber, toSequenceNumber uint64) ([]*pb.Event, error) {
-	//TODO implement me
-	panic("implement me")
+func (p *PostgresEventStore) ReplayEvents(ctx context.Context, persistenceID string, fromSequenceNumber, toSequenceNumber uint64, max uint64) ([]*pb.Event, error) {
+	// create the database select statement
+	statement := p.sb.
+		Select(columns...).
+		From(tableName).
+		Where(sq.Eq{"persistence_id": persistenceID}).
+		Where(sq.GtOrEq{"sequence_number": fromSequenceNumber}).
+		Where(sq.LtOrEq{"sequence_number": toSequenceNumber}).
+		Limit(max)
+
+	// get the sql statement and the arguments
+	query, args, err := statement.ToSql()
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to build the select sql statement")
+	}
+
+	// create the ds to hold the database record
+	type row struct {
+		PersistenceID  string
+		SequenceNumber uint64
+		IsDeleted      bool
+		EventPayload   []byte
+		EventManifest  string
+		StatePayload   []byte
+		StateManifest  string
+		Timestamp      time.Time
+	}
+
+	// execute the query against the database
+	var rows []*row
+	err = p.db.SelectAll(ctx, &rows, query, args...)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to fetch the events from the database")
+	}
+
+	events := make([]*pb.Event, 0, max)
+	for _, row := range rows {
+		// unmarshal the event and the state
+		evt, err := p.toProto(row.EventManifest, row.EventPayload)
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to unmarshal the journal event")
+		}
+		state, err := p.toProto(row.StateManifest, row.StatePayload)
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to unmarshal the journal state")
+		}
+		// create the event and add it to the list of events
+		events = append(events, &pb.Event{
+			PersistenceId:  row.PersistenceID,
+			SequenceNumber: row.SequenceNumber,
+			IsDeleted:      row.IsDeleted,
+			Event:          evt,
+			ResultingState: state,
+			Timestamp:      timestamppb.New(row.Timestamp),
+		})
+	}
+
+	return events, nil
 }
 
 // GetLatestEvent fetches the latest event
 func (p *PostgresEventStore) GetLatestEvent(ctx context.Context, persistenceID string) (*pb.Event, error) {
 	//TODO implement me
 	panic("implement me")
+}
+
+// toProto converts a byte array given its manifest into a valid proto message
+func (p *PostgresEventStore) toProto(manifest string, bytea []byte) (*anypb.Any, error) {
+	mt, err := protoregistry.GlobalTypes.FindMessageByName(protoreflect.FullName(manifest))
+	if err != nil {
+		return nil, err
+	}
+	pm := mt.New().Interface()
+	err = proto.Unmarshal(bytea, pm)
+	if err != nil {
+		return nil, err
+	}
+	return anypb.New(pm)
 }

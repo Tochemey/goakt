@@ -110,7 +110,7 @@ func (s *MemoryEventStore) DeleteEvents(ctx context.Context, persistenceID strin
 }
 
 // ReplayEvents fetches events for a given persistence ID from a given sequence number(inclusive) to a given sequence number(inclusive)
-func (s *MemoryEventStore) ReplayEvents(ctx context.Context, persistenceID string, fromSequenceNumber, toSequenceNumber uint64) ([]*pb.Event, error) {
+func (s *MemoryEventStore) ReplayEvents(ctx context.Context, persistenceID string, fromSequenceNumber, toSequenceNumber uint64, max uint64) ([]*pb.Event, error) {
 	s.mu.Lock()
 	items := s.cache[persistenceID]
 
@@ -130,7 +130,7 @@ func (s *MemoryEventStore) ReplayEvents(ctx context.Context, persistenceID strin
 		if item.seqNr >= fromSequenceNumber && item.seqNr <= toSequenceNumber {
 			// unmarshal it
 			event := new(pb.Event)
-			// return the error during unmarshaling
+			// return the error during unmarshalling
 			if err := proto.Unmarshal(item.data, event); err != nil {
 				s.mu.Unlock()
 				return nil, err
@@ -147,7 +147,7 @@ func (s *MemoryEventStore) ReplayEvents(ctx context.Context, persistenceID strin
 	})
 
 	s.mu.Unlock()
-	return subset, nil
+	return subset[:max], nil
 }
 
 // GetLatestEvent fetches the latest event

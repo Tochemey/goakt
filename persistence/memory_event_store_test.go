@@ -142,7 +142,7 @@ func TestMemoryStore_ReplayJournals(t *testing.T) {
 	from := uint64(3)
 	to := uint64(6)
 
-	actual, err := store.ReplayEvents(ctx, "persistence-1", from, to)
+	actual, err := store.ReplayEvents(ctx, "persistence-1", from, to, 2)
 	assert.NoError(t, err)
 	assert.NotEmpty(t, actual)
 	assert.Len(t, actual, 4)
