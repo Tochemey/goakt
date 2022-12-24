@@ -10,10 +10,11 @@ import (
 	"github.com/google/uuid"
 	"github.com/pkg/errors"
 	goakt "github.com/tochemey/goakt/actors"
+	"github.com/tochemey/goakt/eventsourcing"
+	"github.com/tochemey/goakt/eventsourcing/storage/memory"
 	samplepb "github.com/tochemey/goakt/examples/protos/pb/v1"
 	"github.com/tochemey/goakt/log"
 	pb "github.com/tochemey/goakt/pb/goakt/v1"
-	"github.com/tochemey/goakt/persistence"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -36,7 +37,7 @@ func main() {
 	_ = actorSystem.Start(ctx)
 
 	// create the event store
-	eventStore := persistence.NewMemoryEventStore()
+	eventStore := memory.NewEventStore()
 
 	// create a persistence id
 	persistenceID := uuid.NewString()
@@ -45,7 +46,7 @@ func main() {
 	behavior := NewAccountBehavior(persistenceID)
 
 	// create the persistence actor using the behavior previously created
-	persistentActor := persistence.NewEventSourcedActor[*samplepb.Account](behavior, eventStore)
+	persistentActor := eventsourcing.NewEventSourcedActor[*samplepb.Account](behavior, eventStore)
 	// spawn the actor
 	pid := actorSystem.Spawn(ctx, behavior.Kind(), behavior.PersistenceID(), persistentActor)
 
@@ -99,7 +100,7 @@ type AccountBehavior struct {
 }
 
 // make sure that AccountBehavior is a true persistence behavior
-var _ persistence.EventSourcedBehavior[*samplepb.Account] = &AccountBehavior{}
+var _ eventsourcing.EventSourcedBehavior[*samplepb.Account] = &AccountBehavior{}
 
 // NewAccountBehavior creates an instance of AccountBehavior
 func NewAccountBehavior(id string) *AccountBehavior {
@@ -122,7 +123,7 @@ func (a *AccountBehavior) InitialState() *samplepb.Account {
 }
 
 // HandleCommand handles every command that is sent to the persistent behavior
-func (a *AccountBehavior) HandleCommand(ctx context.Context, command persistence.Command, priorState *samplepb.Account) (event persistence.Event, err error) {
+func (a *AccountBehavior) HandleCommand(ctx context.Context, command eventsourcing.Command, priorState *samplepb.Account) (event eventsourcing.Event, err error) {
 	switch cmd := command.(type) {
 	case *samplepb.CreateAccount:
 		// TODO in production grid app validate the command using the prior state
@@ -144,7 +145,7 @@ func (a *AccountBehavior) HandleCommand(ctx context.Context, command persistence
 }
 
 // HandleEvent handles every event emitted
-func (a *AccountBehavior) HandleEvent(ctx context.Context, event persistence.Event, priorState *samplepb.Account) (state *samplepb.Account, err error) {
+func (a *AccountBehavior) HandleEvent(ctx context.Context, event eventsourcing.Event, priorState *samplepb.Account) (state *samplepb.Account, err error) {
 	switch evt := event.(type) {
 	case *samplepb.AccountCreated:
 		return &samplepb.Account{

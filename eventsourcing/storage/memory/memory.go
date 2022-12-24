@@ -1,10 +1,11 @@
-package persistence
+package memory
 
 import (
 	"context"
 	"sort"
 	"sync"
 
+	"github.com/tochemey/goakt/eventsourcing/storage"
 	pb "github.com/tochemey/goakt/pb/goakt/v1"
 	"google.golang.org/protobuf/proto"
 )
@@ -14,9 +15,9 @@ type item struct {
 	data  []byte
 }
 
-// MemoryEventStore keep in memory every journal
+// EventStore keep in memory every journal
 // NOTE: NOT RECOMMENDED FOR PRODUCTION CODE
-type MemoryEventStore struct {
+type EventStore struct {
 	mu    sync.Mutex
 	cache map[string][]*item
 
@@ -24,11 +25,11 @@ type MemoryEventStore struct {
 	keepRecordsAfterDisconnect bool
 }
 
-var _ EventStore = &MemoryEventStore{}
+var _ storage.EventStore = &EventStore{}
 
-// NewMemoryEventStore creates a new instance of MemoryEventStore
-func NewMemoryEventStore() *MemoryEventStore {
-	return &MemoryEventStore{
+// NewEventStore creates a new instance of MemoryEventStore
+func NewEventStore() *EventStore {
+	return &EventStore{
 		mu:                         sync.Mutex{},
 		cache:                      map[string][]*item{},
 		keepRecordsAfterDisconnect: false,
@@ -36,12 +37,12 @@ func NewMemoryEventStore() *MemoryEventStore {
 }
 
 // Connect connects to the journal store
-func (s *MemoryEventStore) Connect(ctx context.Context) error {
+func (s *EventStore) Connect(ctx context.Context) error {
 	return nil
 }
 
 // Disconnect disconnect the journal store
-func (s *MemoryEventStore) Disconnect(ctx context.Context) error {
+func (s *EventStore) Disconnect(ctx context.Context) error {
 	s.mu.Lock()
 	s.cache = map[string][]*item{}
 	s.mu.Unlock()
@@ -49,7 +50,7 @@ func (s *MemoryEventStore) Disconnect(ctx context.Context) error {
 }
 
 // WriteEvents persist events in batches for a given persistenceID
-func (s *MemoryEventStore) WriteEvents(ctx context.Context, events []*pb.Event) error {
+func (s *EventStore) WriteEvents(ctx context.Context, events []*pb.Event) error {
 	s.mu.Lock()
 	for _, event := range events {
 		bytea, err := proto.Marshal(event)
@@ -78,7 +79,7 @@ func (s *MemoryEventStore) WriteEvents(ctx context.Context, events []*pb.Event) 
 }
 
 // DeleteEvents deletes events from the store upt to a given sequence number (inclusive)
-func (s *MemoryEventStore) DeleteEvents(ctx context.Context, persistenceID string, toSequenceNumber uint64) error {
+func (s *EventStore) DeleteEvents(ctx context.Context, persistenceID string, toSequenceNumber uint64) error {
 	s.mu.Lock()
 	items := s.cache[persistenceID]
 
@@ -87,11 +88,6 @@ func (s *MemoryEventStore) DeleteEvents(ctx context.Context, persistenceID strin
 		s.mu.Unlock()
 		return nil
 	}
-
-	// order the items per sequence number
-	sort.SliceStable(items, func(i, j int) bool {
-		return items[i].seqNr < items[j].seqNr
-	})
 
 	// iterate the items
 	for i, item := range items {
@@ -110,7 +106,7 @@ func (s *MemoryEventStore) DeleteEvents(ctx context.Context, persistenceID strin
 }
 
 // ReplayEvents fetches events for a given persistence ID from a given sequence number(inclusive) to a given sequence number(inclusive)
-func (s *MemoryEventStore) ReplayEvents(ctx context.Context, persistenceID string, fromSequenceNumber, toSequenceNumber uint64, max uint64) ([]*pb.Event, error) {
+func (s *EventStore) ReplayEvents(ctx context.Context, persistenceID string, fromSequenceNumber, toSequenceNumber uint64, max uint64) ([]*pb.Event, error) {
 	s.mu.Lock()
 	items := s.cache[persistenceID]
 
@@ -119,11 +115,6 @@ func (s *MemoryEventStore) ReplayEvents(ctx context.Context, persistenceID strin
 		s.mu.Unlock()
 		return nil, nil
 	}
-
-	// sort the items per sequence number
-	sort.SliceStable(items, func(i, j int) bool {
-		return items[i].seqNr < items[j].seqNr
-	})
 
 	subset := make([]*pb.Event, 0, (toSequenceNumber-fromSequenceNumber)+1)
 	for _, item := range items {
@@ -137,7 +128,9 @@ func (s *MemoryEventStore) ReplayEvents(ctx context.Context, persistenceID strin
 			}
 
 			// add the item to the subset
-			subset = append(subset, event)
+			if len(subset) <= int(max) {
+				subset = append(subset, event)
+			}
 		}
 	}
 
@@ -147,11 +140,11 @@ func (s *MemoryEventStore) ReplayEvents(ctx context.Context, persistenceID strin
 	})
 
 	s.mu.Unlock()
-	return subset[:max], nil
+	return subset, nil
 }
 
 // GetLatestEvent fetches the latest event
-func (s *MemoryEventStore) GetLatestEvent(ctx context.Context, persistenceID string) (*pb.Event, error) {
+func (s *EventStore) GetLatestEvent(ctx context.Context, persistenceID string) (*pb.Event, error) {
 	s.mu.Lock()
 	items := s.cache[persistenceID]
 
@@ -160,11 +153,6 @@ func (s *MemoryEventStore) GetLatestEvent(ctx context.Context, persistenceID str
 		s.mu.Unlock()
 		return nil, nil
 	}
-
-	// sort the items per sequence number
-	sort.SliceStable(items, func(i, j int) bool {
-		return items[i].seqNr < items[j].seqNr
-	})
 
 	// pick the last item in the array
 	item := items[len(items)-1]
@@ -180,6 +168,6 @@ func (s *MemoryEventStore) GetLatestEvent(ctx context.Context, persistenceID str
 }
 
 // Len return the length of the cache
-func (s *MemoryEventStore) Len() int {
+func (s *EventStore) Len() int {
 	return len(s.cache)
 }

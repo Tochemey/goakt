@@ -1,4 +1,4 @@
-package persistence
+package eventsourcing
 
 import (
 	"context"
@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tochemey/goakt/actors"
+	"github.com/tochemey/goakt/eventsourcing/storage/memory"
 	"github.com/tochemey/goakt/log"
 	pb "github.com/tochemey/goakt/pb/goakt/v1"
 	testpb "github.com/tochemey/goakt/test/data/pb/v1"
@@ -17,7 +18,7 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-func TestPersistentActor(t *testing.T) {
+func TestEventSourcedActor(t *testing.T) {
 	t.Run("with state reply", func(t *testing.T) {
 		defer goleak.VerifyNone(t)
 		ctx := context.TODO()
@@ -40,7 +41,7 @@ func TestPersistentActor(t *testing.T) {
 		require.NoError(t, err)
 
 		// create the event store
-		eventStore := NewMemoryEventStore()
+		eventStore := memory.NewEventStore()
 		// create a persistence id
 		persistenceID := uuid.NewString()
 		// create the persistence behavior
@@ -131,7 +132,7 @@ func TestPersistentActor(t *testing.T) {
 		require.NoError(t, err)
 
 		// create the event store
-		eventStore := NewMemoryEventStore()
+		eventStore := memory.NewEventStore()
 		// create a persistence id
 		persistenceID := uuid.NewString()
 		// create the persistence behavior
@@ -211,7 +212,7 @@ func TestPersistentActor(t *testing.T) {
 		require.NoError(t, err)
 
 		// create the event store
-		eventStore := NewMemoryEventStore()
+		eventStore := memory.NewEventStore()
 		// create a persistence id
 		persistenceID := uuid.NewString()
 		// create the persistence behavior
@@ -261,7 +262,7 @@ func TestPersistentActor(t *testing.T) {
 	//	require.NoError(t, err)
 	//
 	//	// create the event store
-	//	eventStore := NewMemoryEventStore()
+	//	eventStore := NewEventStore()
 	//	// create a persistence id
 	//	persistenceID := uuid.NewString()
 	//	// create the persistence behavior

@@ -23,7 +23,7 @@ Also, check reference section at the end of the post for more material regarding
 - [x] Create a child actor
 - [x] Supervisory Strategy (Restart and Stop directive) 
 - [x] Behaviors (Become/BecomeStacked/UnBecome/UnBecomeStacked)
-- [x] EventSourced Actor (event sourced/cqrs)
+- [x] EventSourcing (event sourced/cqrs)
 - [x] Examples (check the [examples](./examples) folder)
 - [ ] Metrics
 - [ ] Clustering

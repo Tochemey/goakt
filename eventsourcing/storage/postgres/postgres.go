@@ -1,19 +1,19 @@
-package persistence
+package postgres
 
 import (
 	"context"
 	"database/sql"
-	"time"
+	"fmt"
 
 	sq "github.com/Masterminds/squirrel"
 	"github.com/pkg/errors"
+	"github.com/tochemey/goakt/eventsourcing/storage"
 	pb "github.com/tochemey/goakt/pb/goakt/v1"
 	"github.com/tochemey/goakt/pkg/postgres"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/reflect/protoregistry"
 	"google.golang.org/protobuf/types/known/anypb"
-	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 var (
@@ -31,9 +31,9 @@ var (
 	tableName = "event_journal"
 )
 
-// PostgresEventStore implements the EventStore interface
+// EventStore implements the EventStore interface
 // and helps persist events in a Postgres database
-type PostgresEventStore struct {
+type EventStore struct {
 	db postgres.IDatabase
 	sb sq.StatementBuilderType
 	// insertBatchSize represents the chunk of data to bulk insert.
@@ -46,31 +46,31 @@ type PostgresEventStore struct {
 }
 
 // make sure the PostgresEventStore implements the EventStore interface
-var _ EventStore = &PostgresEventStore{}
+var _ storage.EventStore = &EventStore{}
 
-// NewPostgresEventStore creates a new instance of PostgresEventStore
-func NewPostgresEventStore(config *postgres.Config) *PostgresEventStore {
+// NewEventStore creates a new instance of PostgresEventStore
+func NewEventStore(config *postgres.Config) *EventStore {
 	// create the underlying db connection
 	db := postgres.New(config)
-	return &PostgresEventStore{
+	return &EventStore{
 		db:              db,
-		sb:              sq.StatementBuilderType{},
+		sb:              sq.StatementBuilder.PlaceholderFormat(sq.Dollar),
 		insertBatchSize: 500,
 	}
 }
 
 // Connect connects to the underlying postgres database
-func (p *PostgresEventStore) Connect(ctx context.Context) error {
+func (p *EventStore) Connect(ctx context.Context) error {
 	return p.db.Connect(ctx)
 }
 
 // Disconnect disconnects from the underlying postgres database
-func (p *PostgresEventStore) Disconnect(ctx context.Context) error {
+func (p *EventStore) Disconnect(ctx context.Context) error {
 	return p.db.Disconnect(ctx)
 }
 
 // WriteEvents writes a bunch of events into the underlying postgres database
-func (p *PostgresEventStore) WriteEvents(ctx context.Context, events []*pb.Event) error {
+func (p *EventStore) WriteEvents(ctx context.Context, events []*pb.Event) error {
 	// check whether the journals list is empty
 	if len(events) == 0 {
 		// do nothing
@@ -111,7 +111,7 @@ func (p *PostgresEventStore) WriteEvents(ctx context.Context, events []*pb.Event
 			eventManifest,
 			stateBytes,
 			stateManifest,
-			event.GetTimestamp().AsTime().UTC(),
+			event.GetTimestamp(),
 		)
 
 		if (index+1)%p.insertBatchSize == 0 || index == len(events)-1 {
@@ -147,7 +147,7 @@ func (p *PostgresEventStore) WriteEvents(ctx context.Context, events []*pb.Event
 }
 
 // DeleteEvents deletes events from the postgres up to a given sequence number (inclusive)
-func (p *PostgresEventStore) DeleteEvents(ctx context.Context, persistenceID string, toSequenceNumber uint64) error {
+func (p *EventStore) DeleteEvents(ctx context.Context, persistenceID string, toSequenceNumber uint64) error {
 	// create the database delete statement
 	statement := p.sb.
 		Delete(tableName).
@@ -169,7 +169,7 @@ func (p *PostgresEventStore) DeleteEvents(ctx context.Context, persistenceID str
 }
 
 // ReplayEvents fetches events for a given persistence ID from a given sequence number(inclusive) to a given sequence number(inclusive)
-func (p *PostgresEventStore) ReplayEvents(ctx context.Context, persistenceID string, fromSequenceNumber, toSequenceNumber uint64, max uint64) ([]*pb.Event, error) {
+func (p *EventStore) ReplayEvents(ctx context.Context, persistenceID string, fromSequenceNumber, toSequenceNumber uint64, max uint64) ([]*pb.Event, error) {
 	// create the database select statement
 	statement := p.sb.
 		Select(columns...).
@@ -177,6 +177,7 @@ func (p *PostgresEventStore) ReplayEvents(ctx context.Context, persistenceID str
 		Where(sq.Eq{"persistence_id": persistenceID}).
 		Where(sq.GtOrEq{"sequence_number": fromSequenceNumber}).
 		Where(sq.LtOrEq{"sequence_number": toSequenceNumber}).
+		OrderBy("sequence_number ASC").
 		Limit(max)
 
 	// get the sql statement and the arguments
@@ -194,7 +195,7 @@ func (p *PostgresEventStore) ReplayEvents(ctx context.Context, persistenceID str
 		EventManifest  string
 		StatePayload   []byte
 		StateManifest  string
-		Timestamp      time.Time
+		Timestamp      int64
 	}
 
 	// execute the query against the database
@@ -222,7 +223,7 @@ func (p *PostgresEventStore) ReplayEvents(ctx context.Context, persistenceID str
 			IsDeleted:      row.IsDeleted,
 			Event:          evt,
 			ResultingState: state,
-			Timestamp:      timestamppb.New(row.Timestamp),
+			Timestamp:      row.Timestamp,
 		})
 	}
 
@@ -230,21 +231,80 @@ func (p *PostgresEventStore) ReplayEvents(ctx context.Context, persistenceID str
 }
 
 // GetLatestEvent fetches the latest event
-func (p *PostgresEventStore) GetLatestEvent(ctx context.Context, persistenceID string) (*pb.Event, error) {
-	//TODO implement me
-	panic("implement me")
+func (p *EventStore) GetLatestEvent(ctx context.Context, persistenceID string) (*pb.Event, error) {
+	// create the database select statement
+	statement := p.sb.
+		Select(columns...).
+		From(tableName).
+		Where(sq.Eq{"persistence_id": persistenceID}).
+		OrderBy("sequence_number DESC").
+		Limit(1)
+
+	// get the sql statement and the arguments
+	query, args, err := statement.ToSql()
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to build the select sql statement")
+	}
+
+	// create the ds to hold the database record
+	type row struct {
+		PersistenceID  string
+		SequenceNumber uint64
+		IsDeleted      bool
+		EventPayload   []byte
+		EventManifest  string
+		StatePayload   []byte
+		StateManifest  string
+		Timestamp      int64
+	}
+
+	// execute the query against the database
+	data := new(row)
+	err = p.db.Select(ctx, data, query, args...)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to fetch the latest event from the database")
+	}
+
+	// check whether we do have data
+	if data.PersistenceID == "" {
+		return nil, nil
+	}
+
+	// unmarshal the event and the state
+	evt, err := p.toProto(data.EventManifest, data.EventPayload)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to unmarshal the journal event")
+	}
+	state, err := p.toProto(data.StateManifest, data.StatePayload)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to unmarshal the journal state")
+	}
+
+	return &pb.Event{
+		PersistenceId:  data.PersistenceID,
+		SequenceNumber: data.SequenceNumber,
+		IsDeleted:      data.IsDeleted,
+		Event:          evt,
+		ResultingState: state,
+		Timestamp:      data.Timestamp,
+	}, nil
 }
 
 // toProto converts a byte array given its manifest into a valid proto message
-func (p *PostgresEventStore) toProto(manifest string, bytea []byte) (*anypb.Any, error) {
+func (p *EventStore) toProto(manifest string, bytea []byte) (*anypb.Any, error) {
 	mt, err := protoregistry.GlobalTypes.FindMessageByName(protoreflect.FullName(manifest))
 	if err != nil {
 		return nil, err
 	}
+
 	pm := mt.New().Interface()
 	err = proto.Unmarshal(bytea, pm)
 	if err != nil {
 		return nil, err
 	}
-	return anypb.New(pm)
+
+	if cast, ok := pm.(*anypb.Any); ok {
+		return cast, nil
+	}
+	return nil, fmt.Errorf("failed to unpack message=%s", manifest)
 }

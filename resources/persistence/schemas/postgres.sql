@@ -9,7 +9,7 @@ CREATE TABLE IF NOT EXISTS event_journal
     event_manifest  VARCHAR(255)          NOT NULL,
     state_payload   BYTEA                 NOT NULL,
     state_manifest  VARCHAR(255)          NOT NULL,
-    timestamp       TIMESTAMP             NOT NULL,
+    timestamp       BIGINT             NOT NULL,
 
     PRIMARY KEY (persistence_id, sequence_number)
 );

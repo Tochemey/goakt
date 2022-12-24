@@ -16,14 +16,7 @@ code:
     RUN go mod download -x
 
     # copy in code
-    COPY --dir actors ./
-    COPY --dir test ./
-    COPY --dir pb ./
-    COPY --dir log ./
-    COPY --dir telemetry ./
-    COPY --dir pkg ./
-    COPY --dir persistence ./
-
+    COPY --dir . ./
 
 vendor:
     FROM +code

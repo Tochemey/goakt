@@ -1,16 +1,17 @@
-package persistence
+package eventsourcing
 
 import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/pkg/errors"
 	"github.com/tochemey/goakt/actors"
+	"github.com/tochemey/goakt/eventsourcing/storage"
 	pb "github.com/tochemey/goakt/pb/goakt/v1"
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/types/known/anypb"
-	"google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -18,9 +19,10 @@ import (
 type eventSourcedActor[T State] struct {
 	EventSourcedBehavior[T]
 
-	eventsStore   EventStore
-	currentState  T
-	eventsCounter *atomic.Uint64
+	eventsStore     storage.EventStore
+	currentState    T
+	eventsCounter   *atomic.Uint64
+	lastCommandTime time.Time
 
 	mu sync.RWMutex
 }
@@ -29,7 +31,7 @@ type eventSourcedActor[T State] struct {
 var _ actors.Actor = &eventSourcedActor[State]{}
 
 // NewEventSourcedActor returns an instance of persistentActor
-func NewEventSourcedActor[T State](behavior EventSourcedBehavior[T], eventsStore EventStore) actors.Actor {
+func NewEventSourcedActor[T State](behavior EventSourcedBehavior[T], eventsStore storage.EventStore) actors.Actor {
 	return &eventSourcedActor[T]{
 		EventSourcedBehavior: behavior,
 		eventsStore:          eventsStore,
@@ -73,25 +75,6 @@ func (p *eventSourcedActor[T]) Receive(ctx actors.ReceiveContext) {
 	// grab the command sent
 	switch command := ctx.Message().(type) {
 	case *pb.GetStateCommand:
-		// first make sure that we do have some events
-		if p.eventsCounter.Load() == 0 {
-			state, _ := anypb.New(new(emptypb.Empty))
-			reply := &pb.CommandReply{
-				Reply: &pb.CommandReply_StateReply{
-					StateReply: &pb.StateReply{
-						PersistenceId:  p.PersistenceID(),
-						State:          state,
-						SequenceNumber: 0,
-						Timestamp:      nil,
-					},
-				},
-			}
-
-			// send the response
-			ctx.Response(reply)
-			return
-		}
-
 		// let us fetch the latest journal
 		latestEvent, err := p.eventsStore.GetLatestEvent(ctx.Context(), p.PersistenceID())
 		// handle the error
@@ -184,6 +167,7 @@ func (p *eventSourcedActor[T]) Receive(ctx actors.ReceiveContext) {
 
 		sequenceNumber := p.eventsCounter.Load()
 		timestamp := timestamppb.Now()
+		p.lastCommandTime = timestamp.AsTime()
 
 		// create a journal list
 		journals := []*pb.Event{
@@ -193,7 +177,7 @@ func (p *eventSourcedActor[T]) Receive(ctx actors.ReceiveContext) {
 				IsDeleted:      false,
 				Event:          marshaledEvent,
 				ResultingState: marshaledState,
-				Timestamp:      timestamp,
+				Timestamp:      p.lastCommandTime.Unix(),
 			},
 		}
 
@@ -218,7 +202,7 @@ func (p *eventSourcedActor[T]) Receive(ctx actors.ReceiveContext) {
 					PersistenceId:  p.PersistenceID(),
 					State:          marshaledState,
 					SequenceNumber: sequenceNumber,
-					Timestamp:      timestamp,
+					Timestamp:      p.lastCommandTime.Unix(),
 				},
 			},
 		}
