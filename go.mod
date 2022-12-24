@@ -12,6 +12,7 @@ require (
 	github.com/orcaman/concurrent-map/v2 v2.0.1
 	github.com/ory/dockertest v3.3.5+incompatible
 	github.com/pkg/errors v0.9.1
+	github.com/rs/zerolog v1.15.0
 	github.com/stretchr/testify v1.8.1
 	go.opentelemetry.io/otel v1.11.2
 	go.opentelemetry.io/otel/metric v0.34.0

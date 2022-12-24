@@ -25,14 +25,12 @@ func TestNewActorSystem(t *testing.T) {
 		assert.Empty(t, actorSys.Actors())
 		assert.Equal(t, "localhost:0", actorSys.NodeAddr())
 	})
-
 	t.Run("With Missing Config", func(t *testing.T) {
 		sys, err := NewActorSystem(nil)
 		assert.Error(t, err)
 		assert.Nil(t, sys)
 		assert.EqualError(t, err, ErrMissingConfig.Error())
 	})
-
 	t.Run("With Spawn an actor when not started", func(t *testing.T) {
 		ctx := context.TODO()
 		cfg, _ := NewConfig("testSys", "localhost:0", WithLogger(log.DiscardLogger))
@@ -41,7 +39,6 @@ func TestNewActorSystem(t *testing.T) {
 		actorRef := sys.Spawn(ctx, "Test", "test-1", actor)
 		assert.Nil(t, actorRef)
 	})
-
 	t.Run("With Spawn an actor when started", func(t *testing.T) {
 		ctx := context.TODO()
 		cfg, _ := NewConfig("testSys", "localhost:0", WithLogger(log.DiscardLogger))
@@ -57,7 +54,6 @@ func TestNewActorSystem(t *testing.T) {
 
 		assert.NoError(t, sys.Stop(ctx))
 	})
-
 	t.Run("With Spawn an actor already exist", func(t *testing.T) {
 		ctx := context.TODO()
 		cfg, _ := NewConfig("testSys", "localhost:0", WithLogger(log.DiscardLogger))

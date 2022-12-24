@@ -24,10 +24,10 @@ Also, check reference section at the end of the post for more material regarding
 - [x] Supervisory Strategy (Restart and Stop directive) 
 - [x] Behaviors (Become/BecomeStacked/UnBecome/UnBecomeStacked)
 - [x] EventSourcing (event sourced/cqrs)
+- [x] Logger interface. The default logger use zerolog and log to console
 - [x] Examples (check the [examples](./examples) folder)
 - [ ] Metrics
 - [ ] Clustering
-- [ ] Rewrite the logger interface
 
 ## Installation
 ```bash
@@ -60,7 +60,7 @@ func main() {
 	ctx := context.Background()
 
 	// use the goakt default logger. real-life implement the logger interface`
-	logger := log.DefaultLogger
+	logger := log.New(log.DebugLevel, os.Stderr)
 
 	// create the actor system configuration. kindly in real-life application handle the error
 	config, _ := goakt.NewConfig("SampleActorSystem", "127.0.0.1:0",

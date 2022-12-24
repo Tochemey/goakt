@@ -18,8 +18,7 @@ func main() {
 	ctx := context.Background()
 
 	// use the goakt default logger. real-life implement the logger interface`
-	logger := log.DefaultLogger
-
+	logger := log.New(log.DebugLevel, os.Stderr)
 	// create the actor system configuration. kindly in real-life application handle the error
 	config, _ := goakt.NewConfig("SampleActorSystem", "127.0.0.1:0",
 		goakt.WithExpireActorAfter(10*time.Second),
@@ -38,7 +37,7 @@ func main() {
 	startTime := time.Now()
 
 	// send some messages to the actor
-	count := 1_000_000
+	count := 100
 	for i := 0; i < count; i++ {
 		_ = goakt.SendAsync(ctx, actor, new(samplepb.Ping))
 	}
@@ -49,7 +48,7 @@ func main() {
 	<-interruptSignal
 
 	// log some stats
-	log.DefaultLogger.Infof("Actor=%s has processed %d messages in %s", actor.Address(), actor.ReceivedCount(ctx), time.Since(startTime))
+	logger.Infof("Actor=%s has processed %d messages in %s", actor.Address(), actor.ReceivedCount(ctx), time.Since(startTime))
 
 	// stop the actor system
 	_ = actorSystem.Stop(ctx)

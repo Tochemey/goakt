@@ -2,6 +2,7 @@ package actors
 
 import (
 	"context"
+	"os"
 	"sync"
 	"time"
 
@@ -32,13 +33,16 @@ func (p *BenchActor) PostStop(context.Context) error {
 }
 
 type TestActor struct {
+	logger log.Logger
 }
 
 var _ Actor = (*TestActor)(nil)
 
 // NewTestActor creates a TestActor
 func NewTestActor() *TestActor {
-	return &TestActor{}
+	return &TestActor{
+		logger: log.New(log.DebugLevel, os.Stderr),
+	}
 }
 
 // Init initialize the actor. This function can be used to set up some database connections
@@ -57,9 +61,9 @@ func (p *TestActor) Receive(ctx ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *testspb.TestSend:
 	case *testspb.TestPanic:
-		log.Panic("Boom")
+		p.logger.Panic("Boom")
 	case *testspb.TestReply:
-		log.Info("received request/response")
+		p.logger.Info("received request/response")
 		ctx.Response(&testspb.Reply{Content: "received message"})
 	case *testspb.TestTimeout:
 		// delay for a while before sending the reply
@@ -72,16 +76,20 @@ func (p *TestActor) Receive(ctx ReceiveContext) {
 		// block until timer is up
 		wg.Wait()
 	default:
-		log.Panic(ErrUnhandled)
+		p.logger.Panic(ErrUnhandled)
 	}
 }
 
-type ParentActor struct{}
+type ParentActor struct {
+	logger log.Logger
+}
 
 var _ Actor = (*ParentActor)(nil)
 
 func NewParentActor() *ParentActor {
-	return &ParentActor{}
+	return &ParentActor{
+		logger: log.New(log.DebugLevel, os.Stderr),
+	}
 }
 
 func (p *ParentActor) PreStart(context.Context) error {
@@ -92,7 +100,7 @@ func (p *ParentActor) Receive(ctx ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *testspb.TestSend:
 	default:
-		log.Panic(ErrUnhandled)
+		p.logger.Panic(ErrUnhandled)
 	}
 }
 
@@ -100,12 +108,16 @@ func (p *ParentActor) PostStop(context.Context) error {
 	return nil
 }
 
-type ChildActor struct{}
+type ChildActor struct {
+	logger log.Logger
+}
 
 var _ Actor = (*ChildActor)(nil)
 
 func NewChildActor() *ChildActor {
-	return &ChildActor{}
+	return &ChildActor{
+		logger: log.New(log.DebugLevel, os.Stderr),
+	}
 }
 
 func (c *ChildActor) PreStart(context.Context) error {
@@ -116,9 +128,9 @@ func (c *ChildActor) Receive(ctx ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *testspb.TestSend:
 	case *testspb.TestPanic:
-		log.Panic("panicked")
+		c.logger.Panic("panicked")
 	default:
-		log.Panic(ErrUnhandled)
+		c.logger.Panic(ErrUnhandled)
 	}
 }
 
