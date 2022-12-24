@@ -2,9 +2,11 @@ package actors
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
 	cmp "github.com/orcaman/concurrent-map/v2"
+	"github.com/pkg/errors"
 	"github.com/tochemey/goakt/log"
 	"go.uber.org/atomic"
 )
@@ -26,6 +28,10 @@ type ActorSystem interface {
 	Stop(ctx context.Context) error
 	// Spawn creates an actor in the system
 	Spawn(ctx context.Context, kind, id string, actor Actor) PID
+	// StopActor stops a given actor in the system
+	StopActor(ctx context.Context, kind, id string) error
+	// RestartActor restarts a given actor in the system
+	RestartActor(ctx context.Context, kind, id string) (PID, error)
 }
 
 // ActorSystem represent a collection of actors on a given node
@@ -105,6 +111,46 @@ func (a *actorSystem) Spawn(ctx context.Context, kind, id string, actor Actor) P
 	a.actors.Set(string(addr), pid)
 	// return the actor ref
 	return pid
+}
+
+// StopActor stops a given actor in the system
+func (a *actorSystem) StopActor(ctx context.Context, kind, id string) error {
+	// first check whether the actor system has started
+	if !a.hasStarted.Load() {
+		return errors.New("actor system has not started yet")
+	}
+	// create the address of the given actor
+	addr := GetAddress(a, kind, id)
+	// check whether the given actor already exist in the system or not
+	pid, exist := a.actors.Get(string(addr))
+	// actor is found.
+	if exist {
+		// stop the given actor
+		return pid.Shutdown(ctx)
+	}
+	return fmt.Errorf("actor=%s not found in the system", addr)
+}
+
+// RestartActor restarts a given actor in the system
+func (a *actorSystem) RestartActor(ctx context.Context, kind, id string) (PID, error) {
+	// first check whether the actor system has started
+	if !a.hasStarted.Load() {
+		return nil, errors.New("actor system has not started yet")
+	}
+	// create the address of the given actor
+	addr := GetAddress(a, kind, id)
+	// check whether the given actor already exist in the system or not
+	pid, exist := a.actors.Get(string(addr))
+	// actor is found.
+	if exist {
+		// restart the given actor
+		if err := pid.Restart(ctx); err != nil {
+			// return the error in case the restart failed
+			return nil, errors.Wrapf(err, "failed to restart actor=%s", addr)
+		}
+		return pid, nil
+	}
+	return nil, fmt.Errorf("actor=%s not found in the system", addr)
 }
 
 // Name returns the actor system name

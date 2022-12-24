@@ -7,9 +7,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/tochemey/goakt/eventsourcing/storage"
 	pb "github.com/tochemey/goakt/pb/goakt/v1"
+	testpb "github.com/tochemey/goakt/test/data/pb/v1"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
-	"google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -30,11 +30,9 @@ func TestMemoryEventStore(t *testing.T) {
 	})
 	t.Run("testWriteEvents", func(t *testing.T) {
 		ctx := context.TODO()
-		state := &emptypb.Empty{}
-		marshaledState, err := anypb.New(state)
+		state, err := anypb.New(new(testpb.Account))
 		assert.NoError(t, err)
-		event := &emptypb.Empty{}
-		marshaledEvent, err := anypb.New(event)
+		event, err := anypb.New(&testpb.AccountCredited{})
 		assert.NoError(t, err)
 
 		timestamp := timestamppb.Now()
@@ -43,8 +41,8 @@ func TestMemoryEventStore(t *testing.T) {
 			PersistenceId:  "persistence-1",
 			SequenceNumber: 1,
 			IsDeleted:      false,
-			Event:          marshaledEvent,
-			ResultingState: marshaledState,
+			Event:          event,
+			ResultingState: state,
 			Timestamp:      timestamp.AsTime().Unix(),
 		}
 
@@ -65,11 +63,9 @@ func TestMemoryEventStore(t *testing.T) {
 	})
 	t.Run("testDeleteEvents", func(t *testing.T) {
 		ctx := context.TODO()
-		state := &emptypb.Empty{}
-		marshaledState, err := anypb.New(state)
+		state, err := anypb.New(new(testpb.Account))
 		assert.NoError(t, err)
-		event := &emptypb.Empty{}
-		marshaledEvent, err := anypb.New(event)
+		event, err := anypb.New(&testpb.AccountCredited{})
 		assert.NoError(t, err)
 
 		timestamp := timestamppb.Now()
@@ -78,8 +74,8 @@ func TestMemoryEventStore(t *testing.T) {
 			PersistenceId:  "persistence-1",
 			SequenceNumber: 1,
 			IsDeleted:      false,
-			Event:          marshaledEvent,
-			ResultingState: marshaledState,
+			Event:          event,
+			ResultingState: state,
 			Timestamp:      timestamp.AsTime().Unix(),
 		}
 
@@ -108,11 +104,9 @@ func TestMemoryEventStore(t *testing.T) {
 	})
 	t.Run("testReplayEvents", func(t *testing.T) {
 		ctx := context.TODO()
-		state := &emptypb.Empty{}
-		marshaledState, err := anypb.New(state)
+		state, err := anypb.New(new(testpb.Account))
 		assert.NoError(t, err)
-		event := &emptypb.Empty{}
-		marshaledEvent, err := anypb.New(event)
+		event, err := anypb.New(&testpb.AccountCredited{})
 		assert.NoError(t, err)
 
 		timestamp := timestamppb.Now()
@@ -125,8 +119,8 @@ func TestMemoryEventStore(t *testing.T) {
 				PersistenceId:  "persistence-1",
 				SequenceNumber: uint64(seqNr),
 				IsDeleted:      false,
-				Event:          marshaledEvent,
-				ResultingState: marshaledState,
+				Event:          event,
+				ResultingState: state,
 				Timestamp:      timestamp.AsTime().Unix(),
 			}
 		}
