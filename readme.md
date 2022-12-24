@@ -21,10 +21,10 @@ Also, check reference section at the end of the post for more material regarding
 - [x] (Un)Watch an actor
 - [X] Stop and actor
 - [x] Create a child actor
-- [x] Sample example
 - [x] Supervisory Strategy (Restart and Stop directive) 
-- [x] Behaviors
-- [x] Persistence (WIP)
+- [x] Behaviors (Become/BecomeStacked/UnBecome/UnBecomeStacked)
+- [x] EventSourcing (event sourced/cqrs)
+- [x] Examples (check the [examples](./examples) folder)
 - [ ] Metrics
 - [ ] Clustering
 - [ ] Rewrite the logger interface

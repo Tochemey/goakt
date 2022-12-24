@@ -16,14 +16,7 @@ code:
     RUN go mod download -x
 
     # copy in code
-    COPY --dir actors ./
-    COPY --dir test ./
-    COPY --dir pb ./
-    COPY --dir log ./
-    COPY --dir telemetry ./
-    COPY --dir pkg ./
-    COPY --dir persistence ./
-
+    COPY --dir . ./
 
 vendor:
     FROM +code
@@ -42,7 +35,9 @@ lint:
 local-test:
     FROM +vendor
 
-    RUN go test -mod=vendor ./... -race -v -coverprofile=coverage.out -covermode=atomic -coverpkg=./...
+    WITH DOCKER --pull postgres:11
+        RUN go test -mod=vendor ./... -race -v -coverprofile=coverage.out -covermode=atomic -coverpkg=./...
+    END
 
     SAVE ARTIFACT coverage.out AS LOCAL coverage.out
 

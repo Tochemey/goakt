@@ -1,46 +1,48 @@
-package persistence
+package eventsourcing
 
 import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/pkg/errors"
 	"github.com/tochemey/goakt/actors"
+	"github.com/tochemey/goakt/eventsourcing/storage"
 	pb "github.com/tochemey/goakt/pb/goakt/v1"
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/types/known/anypb"
-	"google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-// persistentActor is an event sourced based actor
-type persistentActor[T State] struct {
-	PersistentBehavior[T]
+// eventSourcedActor is an event sourced based actor
+type eventSourcedActor[T State] struct {
+	EventSourcedBehavior[T]
 
-	eventsStore   EventStore
-	currentState  T
-	eventsCounter *atomic.Uint64
+	eventsStore     storage.EventStore
+	currentState    T
+	eventsCounter   *atomic.Uint64
+	lastCommandTime time.Time
 
 	mu sync.RWMutex
 }
 
-// make sure persistentActor is a pure Actor
-var _ actors.Actor = &persistentActor[State]{}
+// make sure eventSourcedActor is a pure Actor
+var _ actors.Actor = &eventSourcedActor[State]{}
 
-// NewPersistentActor returns an instance of persistentActor
-func NewPersistentActor[T State](behavior PersistentBehavior[T], eventsStore EventStore) actors.Actor {
-	return &persistentActor[T]{
-		PersistentBehavior: behavior,
-		eventsStore:        eventsStore,
-		eventsCounter:      atomic.NewUint64(0),
-		mu:                 sync.RWMutex{},
+// NewEventSourcedActor returns an instance of persistentActor
+func NewEventSourcedActor[T State](behavior EventSourcedBehavior[T], eventsStore storage.EventStore) actors.Actor {
+	return &eventSourcedActor[T]{
+		EventSourcedBehavior: behavior,
+		eventsStore:          eventsStore,
+		eventsCounter:        atomic.NewUint64(0),
+		mu:                   sync.RWMutex{},
 	}
 }
 
 // PreStart pre-starts the actor
 // At this stage we connect to the various stores
-func (p *persistentActor[T]) PreStart(ctx context.Context) error {
+func (p *eventSourcedActor[T]) PreStart(ctx context.Context) error {
 	// acquire the lock
 	p.mu.Lock()
 	// release lock when done
@@ -64,7 +66,7 @@ func (p *persistentActor[T]) PreStart(ctx context.Context) error {
 }
 
 // Receive processes any message dropped into the actor mailbox.
-func (p *persistentActor[T]) Receive(ctx actors.ReceiveContext) {
+func (p *eventSourcedActor[T]) Receive(ctx actors.ReceiveContext) {
 	// acquire the lock
 	p.mu.Lock()
 	// release lock when done
@@ -73,25 +75,6 @@ func (p *persistentActor[T]) Receive(ctx actors.ReceiveContext) {
 	// grab the command sent
 	switch command := ctx.Message().(type) {
 	case *pb.GetStateCommand:
-		// first make sure that we do have some events
-		if p.eventsCounter.Load() == 0 {
-			state, _ := anypb.New(new(emptypb.Empty))
-			reply := &pb.CommandReply{
-				Reply: &pb.CommandReply_StateReply{
-					StateReply: &pb.StateReply{
-						PersistenceId:  p.PersistenceID(),
-						State:          state,
-						SequenceNumber: 0,
-						Timestamp:      nil,
-					},
-				},
-			}
-
-			// send the response
-			ctx.Response(reply)
-			return
-		}
-
 		// let us fetch the latest journal
 		latestEvent, err := p.eventsStore.GetLatestEvent(ctx.Context(), p.PersistenceID())
 		// handle the error
@@ -184,6 +167,7 @@ func (p *persistentActor[T]) Receive(ctx actors.ReceiveContext) {
 
 		sequenceNumber := p.eventsCounter.Load()
 		timestamp := timestamppb.Now()
+		p.lastCommandTime = timestamp.AsTime()
 
 		// create a journal list
 		journals := []*pb.Event{
@@ -193,7 +177,7 @@ func (p *persistentActor[T]) Receive(ctx actors.ReceiveContext) {
 				IsDeleted:      false,
 				Event:          marshaledEvent,
 				ResultingState: marshaledState,
-				Timestamp:      timestamp,
+				Timestamp:      p.lastCommandTime.Unix(),
 			},
 		}
 
@@ -218,7 +202,7 @@ func (p *persistentActor[T]) Receive(ctx actors.ReceiveContext) {
 					PersistenceId:  p.PersistenceID(),
 					State:          marshaledState,
 					SequenceNumber: sequenceNumber,
-					Timestamp:      timestamp,
+					Timestamp:      p.lastCommandTime.Unix(),
 				},
 			},
 		}
@@ -229,7 +213,7 @@ func (p *persistentActor[T]) Receive(ctx actors.ReceiveContext) {
 }
 
 // PostStop prepares the actor to gracefully shutdown
-func (p *persistentActor[T]) PostStop(ctx context.Context) error {
+func (p *eventSourcedActor[T]) PostStop(ctx context.Context) error {
 	// acquire the lock
 	p.mu.Lock()
 	// release lock when done
@@ -245,7 +229,7 @@ func (p *persistentActor[T]) PostStop(ctx context.Context) error {
 
 // recoverFromSnapshot reset the persistent actor to the latest snapshot in case there is one
 // this is vital when the persistent actor is restarting.
-func (p *persistentActor[T]) recoverFromSnapshot(ctx context.Context) error {
+func (p *eventSourcedActor[T]) recoverFromSnapshot(ctx context.Context) error {
 	// check whether there is a snapshot to recover from
 	event, err := p.eventsStore.GetLatestEvent(ctx, p.PersistenceID())
 	// handle the error

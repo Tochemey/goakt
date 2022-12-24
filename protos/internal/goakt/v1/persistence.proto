@@ -2,9 +2,7 @@ syntax = "proto3";
 
 package goakt.v1;
 
-
 import "google/protobuf/any.proto";
-import "google/protobuf/timestamp.proto";
 
 message Event {
   // Specifies the persistence unique identifier
@@ -18,7 +16,7 @@ message Event {
   // the state obtained from processing the event
   google.protobuf.Any resulting_state = 5;
   // Specifies the timestamp
-  google.protobuf.Timestamp timestamp = 6;
+  int64 timestamp = 6;
 }
 
 message CommandReply {
@@ -41,7 +39,7 @@ message StateReply {
   // Specifies the sequence number
   uint64 sequence_number = 3;
   // Specifies the timestamp
-  google.protobuf.Timestamp timestamp = 4;
+  int64 timestamp = 4;
 }
 
 message ErrorReply {
@@ -49,9 +47,8 @@ message ErrorReply {
   string message = 1;
 }
 
-
 message NoReply {}
 
 // GetStateCommand tells the PersistentActor
 // to reply with its latest state
-message GetStateCommand{}
+message GetStateCommand {}

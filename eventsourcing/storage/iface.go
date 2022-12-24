@@ -1,4 +1,4 @@
-package persistence
+package storage
 
 import (
 	"context"
@@ -13,12 +13,12 @@ type EventStore interface {
 	Connect(ctx context.Context) error
 	// Disconnect disconnect the journal store
 	Disconnect(ctx context.Context) error
-	// WriteEvents persist events in batches for a given persistenceID
-	WriteEvents(ctx context.Context, journals []*pb.Event) error
+	// WriteEvents persist events in batches for a given persistenceID.
+	WriteEvents(ctx context.Context, events []*pb.Event) error
 	// DeleteEvents deletes events from the store upt to a given sequence number (inclusive)
 	DeleteEvents(ctx context.Context, persistenceID string, toSequenceNumber uint64) error
-	// ReplayEvents fetches events for a given persistence ID from a given sequence number(inclusive) to a given sequence number(inclusive)
-	ReplayEvents(ctx context.Context, persistenceID string, fromSequenceNumber, toSequenceNumber uint64) ([]*pb.Event, error)
+	// ReplayEvents fetches events for a given persistence ID from a given sequence number(inclusive) to a given sequence number(inclusive) with a maximum of journals to be replayed.
+	ReplayEvents(ctx context.Context, persistenceID string, fromSequenceNumber, toSequenceNumber uint64, max uint64) ([]*pb.Event, error)
 	// GetLatestEvent fetches the latest event
 	GetLatestEvent(ctx context.Context, persistenceID string) (*pb.Event, error)
 }
