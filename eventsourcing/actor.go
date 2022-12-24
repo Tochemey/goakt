@@ -249,7 +249,7 @@ func (p *eventSourcedActor[T]) recoverFromSnapshot(ctx context.Context) error {
 		return nil
 	}
 
-	// in case there is no snpashot
+	// in case there is no snapshot
 	p.currentState = p.InitialState()
 
 	return nil
