@@ -3,6 +3,7 @@ package stream
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/tochemey/goakt/log"
 	"go.uber.org/atomic"
@@ -53,8 +54,8 @@ func (c *consumer) process(message *Message) {
 	// free the lock once done
 	defer c.processingLock.Unlock()
 
-	ctx, cancelCtx := context.WithCancel(c.consumerCtx)
-	defer cancelCtx()
+	ctx, cancel := context.WithCancel(c.consumerCtx)
+	defer cancel()
 
 loop:
 	for {
@@ -75,7 +76,7 @@ loop:
 			c.logger.Info("Stopping. Message discarded...")
 		}
 
-		// patiently listening for ack
+		// patiently waiting for ack
 		select {
 		case <-msg.Accepted():
 			return
@@ -83,6 +84,8 @@ loop:
 			continue loop
 		case <-c.stopChan:
 			c.logger.Info("Stopping. Message discarded...")
+			return
+		case <-time.After(time.Second):
 			return
 		}
 	}

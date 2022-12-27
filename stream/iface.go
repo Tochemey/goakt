@@ -11,6 +11,7 @@ type Topic struct {
 // Producer helps implement the producer
 type Producer interface {
 	// Produce produces messages to given topic and wait for all consumers to either Accept/Reject the message
+	// after a pre-defined timeout.
 	Produce(cxt context.Context, topic string, messages ...*Message) error
 	// Stop should flush unsent messages, if producer is async.
 	Stop(ctx context.Context) error
@@ -19,7 +20,7 @@ type Producer interface {
 // Consumer is the consuming part of the Producer/Consumer.
 type Consumer interface {
 	// Consume returns output channel with messages from provided topic.
-	// Channel is closed, when Close() was called on the subscriber.
+	// Channel is closed, when Stop() was called on the subscriber.
 	//
 	// To receive the next message, `Accept()` must be called on the received message.
 	// If message processing failed and message should be redelivered `Reject()` should be called.

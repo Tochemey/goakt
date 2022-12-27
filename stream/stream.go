@@ -11,6 +11,10 @@ import (
 	"go.uber.org/atomic"
 )
 
+// EventsStream is a Producer/Consumer implementation.
+//
+// We only need one instance of EventsStream in the whole actor system.
+// When EventsStream is persistent, messages order is not guaranteed.
 type EventsStream struct {
 	// holds the list of consumers
 	consumers cmp.ConcurrentMap[string, []*consumer]
@@ -18,13 +22,15 @@ type EventsStream struct {
 	consumerLock sync.RWMutex
 	// helps lock each topic when a message is sent to that topic
 	topicLocks sync.Map
-
+	// helps wait for all the consumers to complete the consumption
 	consumersWg sync.WaitGroup
+	// states that the events stream  is stopped
+	stopped *atomic.Bool
 
-	stopped  *atomic.Bool
 	stopLock sync.Mutex
 	stopChan chan struct{}
 
+	// retention log is for persistence
 	retentionLog  RetentionLog
 	retentionLock sync.Mutex
 
@@ -224,7 +230,7 @@ func (s *EventsStream) Stop(ctx context.Context) error {
 // sendToConsumers send the message to the topic's consumers to process
 func (s *EventsStream) sendToConsumers(topic string, message *Message) (<-chan struct{}, error) {
 	// create an accepted receipt channel
-	acceptedChan := make(chan struct{})
+	acceptedChan := make(chan struct{}, 1)
 	// get the list of consumers for the given topic
 	consumers, ok := s.consumers.Get(topic)
 	if !ok {

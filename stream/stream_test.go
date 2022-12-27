@@ -11,7 +11,7 @@ import (
 )
 
 func TestEventsStream(t *testing.T) {
-	t.Run("with Produce/Scan with no retention store", func(t *testing.T) {
+	t.Run("with Produce/Consume with no retention store", func(t *testing.T) {
 		ctx := context.TODO()
 		logger := log.DiscardLogger
 		es := NewEventsStream(logger, nil)
@@ -56,6 +56,44 @@ func TestEventsStream(t *testing.T) {
 			// ok
 		case <-time.After(time.Second):
 			t.Fatal("produce should be not blocked after accept")
+		}
+	})
+
+	t.Run("With Produce/Consume with others subscribers not blocked", func(t *testing.T) {
+		ctx := context.TODO()
+		logger := log.DiscardLogger
+		es := NewEventsStream(logger, nil)
+		topic := "test-topic"
+
+		// start consuming messages
+		msgsChan1, err := es.Consume(ctx, topic)
+		require.NoError(t, err, "cannot consume messages")
+
+		_, err = es.Consume(ctx, topic)
+		require.NoError(t, err)
+
+		msgsChan3, err := es.Consume(ctx, topic)
+		require.NoError(t, err)
+
+		err = es.Produce(ctx, topic, NewMessage(uuid.NewString(), nil))
+		require.NoError(t, err)
+
+		consumedChan := make(chan struct{})
+		go func() {
+			msg := <-msgsChan1
+			msg.Accept()
+
+			msg = <-msgsChan3
+			msg.Accept()
+
+			close(consumedChan)
+		}()
+
+		select {
+		case <-consumedChan:
+		// ok
+		case <-time.After(5 * time.Second):
+			t.Fatal("consumer which didn't accept a message blocked other subscribers from receiving it")
 		}
 	})
 }
