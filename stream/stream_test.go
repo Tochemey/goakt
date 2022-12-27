@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 	"github.com/tochemey/goakt/log"
@@ -57,8 +59,10 @@ func TestEventsStream(t *testing.T) {
 		case <-time.After(time.Second):
 			t.Fatal("produce should be not blocked after accept")
 		}
-	})
 
+		// stop the events stream
+		assert.NoError(t, es.Stop(ctx))
+	})
 	t.Run("With Produce/Consume with others subscribers not blocked", func(t *testing.T) {
 		ctx := context.TODO()
 		logger := log.DiscardLogger
@@ -95,5 +99,23 @@ func TestEventsStream(t *testing.T) {
 		case <-time.After(5 * time.Second):
 			t.Fatal("consumer which didn't accept a message blocked other subscribers from receiving it")
 		}
+
+	})
+	t.Run("fail to produce/consume when stopped", func(t *testing.T) {
+		ctx := context.TODO()
+		logger := log.DiscardLogger
+		es := NewEventsStream(logger, nil)
+		topic := "test-topic"
+
+		// stop the events stream
+		assert.NoError(t, es.Stop(ctx))
+
+		_, err := es.Consume(ctx, topic)
+		require.Error(t, err)
+		assert.EqualError(t, err, "events stream is already closed")
+
+		err = es.Produce(ctx, topic, NewMessage(uuid.NewString(), nil))
+		require.Error(t, err)
+		assert.EqualError(t, err, "events stream is already closed")
 	})
 }

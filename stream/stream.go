@@ -110,7 +110,7 @@ func (s *EventsStream) Consume(ctx context.Context, topic string) (<-chan *Messa
 	s.stopLock.Lock()
 	if s.stopped.Load() {
 		s.stopLock.Unlock()
-		return nil, errors.New("events stream is closed")
+		return nil, errors.New("events stream is already closed")
 	}
 
 	s.stopLock.Unlock()
@@ -224,7 +224,13 @@ func (s *EventsStream) Stop(ctx context.Context) error {
 	close(s.stopChan)
 
 	s.consumersWg.Wait()
-	return s.retentionLog.Disconnect(ctx)
+
+	// disconnect the retention log
+	if s.retentionLog != nil {
+		return s.retentionLog.Disconnect(ctx)
+	}
+
+	return nil
 }
 
 // sendToConsumers send the message to the topic's consumers to process

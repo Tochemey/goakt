@@ -85,7 +85,7 @@ loop:
 		case <-c.stopChan:
 			c.logger.Info("Stopping. Message discarded...")
 			return
-		case <-time.After(time.Second):
+		case <-time.After(time.Second): // TODO make it configurable
 			return
 		}
 	}
