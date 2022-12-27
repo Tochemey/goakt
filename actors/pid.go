@@ -56,7 +56,7 @@ type PID interface {
 	Children(ctx context.Context) []PID
 	// Behaviors returns the behavior stack
 	behaviors() BehaviorStack
-	// push a message to the actor's mailbix
+	// push a message to the actor's mailbox
 	doReceive(ctx ReceiveContext)
 	// setBehavior is a utility function that helps set the actor behavior
 	setBehavior(behavior Behavior)

@@ -21,9 +21,14 @@ var (
 		Disabled:     zerolog.Disabled,
 	}
 
-	DefaultLogger = New(DebugLevel, os.Stderr)
-	DiscardLogger = New(Disabled, io.Discard)
+	DefaultLogger Logger
+	DiscardLogger Logger
 )
+
+func init() {
+	DefaultLogger = New(DebugLevel, os.Stdout)
+	DiscardLogger = New(Disabled, io.Discard)
+}
 
 type logger struct {
 	log zerolog.Logger
