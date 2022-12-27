@@ -1,6 +1,8 @@
 package stream
 
-import "context"
+import (
+	"context"
+)
 
 // Topic is a type alias
 type Topic struct {
@@ -33,12 +35,13 @@ type Consumer interface {
 	Stop(ctx context.Context) error
 }
 
-// RetentionLog defines the interface that helps streamed
-// messages to be persisted.
+// RetentionLog defines the interface that helps streamed messages to be persisted.
+//
+// Every RetentionLog implementation should add a TTL mechanism to purge the log
 type RetentionLog interface {
 	// Connect helps connect to the retention log
 	Connect(ctx context.Context) error
-	// Persist persists topics onto t a durable store
+	// Persist persists topics onto a durable store
 	Persist(ctx context.Context, topic *Topic) error
 	// Disconnect shuts down the persistence storage
 	Disconnect(ctx context.Context) error
