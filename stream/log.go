@@ -4,6 +4,8 @@ import (
 	"context"
 	"sync"
 	"time"
+
+	"github.com/pkg/errors"
 )
 
 type logEntry struct {
@@ -53,29 +55,23 @@ func (m *MemoryLog) Persist(_ context.Context, topic *Topic) error {
 	m.lock.Lock()
 	defer m.lock.Unlock()
 
-	// get the list of entries
-	entries := m.topics[topic.Name]
-	// iterate the messages list of messages
-	for _, message := range topic.Messages {
-		var le *logEntry
-		for _, entry := range entries {
-			if entry.message.id == message.id {
-				le = entry
-				break
-			}
-		}
-
-		// there is no entry for the given message
-		if le == nil {
-			// create a new entry with the message and append it to the existing
-			// entry list
-			le = &logEntry{message: message}
-			entries = append(entries, le)
-		}
-		// set the lastAccess time
-		le.lastAccess = time.Now().UTC()
+	// always check whether the log is connected
+	if !m.connected {
+		return errors.New("the log is disconnected")
 	}
 
+	// iterate the messages list of messages
+	entries := make([]*logEntry, len(topic.Messages))
+	for index, message := range topic.Messages {
+		// add a log entry
+		entries[index] = &logEntry{
+			message:    message,
+			lastAccess: time.Now().UTC(),
+		}
+	}
+
+	// append the list of topics the new entries
+	m.topics[topic.Name] = append(m.topics[topic.Name], entries...)
 	return nil
 }
 
@@ -95,7 +91,7 @@ func (m *MemoryLog) GetMessages(_ context.Context, topic string) ([]*Message, er
 
 	// always check whether the log is connected
 	if !m.connected {
-
+		return nil, errors.New("the log is disconnected")
 	}
 
 	entries, ok := m.topics[topic]
@@ -103,9 +99,11 @@ func (m *MemoryLog) GetMessages(_ context.Context, topic string) ([]*Message, er
 		return nil, nil
 	}
 
-	messages := make([]*Message, len(entries))
-	for i, entry := range entries {
-		messages[i] = entry.message
+	messages := make([]*Message, 0, len(entries))
+	for _, entry := range entries {
+		if entry != nil {
+			messages = append(messages, entry.message)
+		}
 	}
 	return messages, nil
 }
@@ -121,11 +119,15 @@ func (m *MemoryLog) monitorExpiration() {
 				m.lock.Lock()
 				for topic, entries := range m.topics {
 					for i, entry := range entries {
-						// when an entry has expired remove it from the underlying map
-						idleTime := time.Since(entry.lastAccess)
-						if idleTime > m.expiry {
-							// remove the entry from the list
-							entries = append(entries[:i], entries[i+1:]...)
+						if entry != nil {
+							// when an entry has expired remove it from the underlying map
+							idleTime := time.Since(entry.lastAccess)
+							if idleTime > m.expiry {
+								// Remove the element at index i rom the list
+								entries[i] = entries[len(entries)-1] // Copy last element to index i.
+								entries[len(entries)-1] = nil        // Erase last element (write zero value).
+								entries = entries[:len(entries)-1]   // Truncate slice.
+							}
 						}
 					}
 					// remove the topic from the topics map
