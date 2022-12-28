@@ -39,7 +39,7 @@ func (cs *ConcurrentSlice[T]) Append(item T) {
 func (cs *ConcurrentSlice[T]) Get(index int) (item any) {
 	cs.RLock()
 	defer cs.RUnlock()
-	if isset(cs.items, index) {
+	if isSet(cs.items, index) {
 		return cs.items[index]
 	}
 	return nil
@@ -50,7 +50,7 @@ func (cs *ConcurrentSlice[T]) Delete(index int) {
 	cs.RLock()
 	defer cs.RUnlock()
 	var nilState T
-	if isset(cs.items, index) {
+	if isSet(cs.items, index) {
 		// Remove the element at index from the slice
 		cs.items[index] = cs.items[len(cs.items)-1] // Copy last element to index.
 		cs.items[len(cs.items)-1] = nilState        // Erase last element (write zero value).
@@ -58,13 +58,13 @@ func (cs *ConcurrentSlice[T]) Delete(index int) {
 	}
 }
 
-func isset[T any](arr []T, index int) bool {
+func isSet[T any](arr []T, index int) bool {
 	return len(arr) > index
 }
 
 // Iter iterates the items in the concurrent slice.
 // Each item is sent over a channel, so that
-// we can iterate over the slice using the builin range keyword.
+// we can iterate over the slice using the builtin range keyword.
 func (cs *ConcurrentSlice[T]) Iter() <-chan Item[T] {
 	c := make(chan Item[T])
 	f := func() {

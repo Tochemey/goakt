@@ -47,8 +47,8 @@ func (c *consumer) isActive() bool {
 	return c.stopped.Load()
 }
 
-// process handles the message given to a consumer
-func (c *consumer) process(message *Message) {
+// handleMessage handles the message given to a consumer
+func (c *consumer) handleMessage(message *Message) {
 	// acquire the processing lock
 	c.processingLock.Lock()
 	// free the lock once done
@@ -63,7 +63,7 @@ loop:
 		msg := message.Clone()
 		msg.SetContext(ctx)
 
-		// only process message when the consumer is not closed
+		// only handleMessage message when the consumer is not closed
 		if c.stopped.Load() {
 			c.logger.Warning("message discarded because consumer is closed")
 			return
