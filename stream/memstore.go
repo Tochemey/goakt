@@ -27,7 +27,7 @@ type MemStore struct {
 
 var _ storage = &MemStore{}
 
-// NewMemStore creates an instance of iLog
+// NewMemStore creates an instance of MemStore
 func NewMemStore(initialSize int, maxTTL time.Duration) *MemStore {
 	// create an instance of the log
 	memory := &MemStore{
@@ -56,7 +56,7 @@ func (m *MemStore) Persist(_ context.Context, topic *Topic) error {
 
 	// always check whether the log is connected
 	if !m.connected {
-		return errors.New("the log is disconnected")
+		return errors.New("the storage is disconnected")
 	}
 
 	// iterate the messages list of messages
@@ -90,7 +90,7 @@ func (m *MemStore) GetMessages(_ context.Context, topic string) ([]*Message, err
 
 	// always check whether the log is connected
 	if !m.connected {
-		return nil, errors.New("the log is disconnected")
+		return nil, errors.New("the storage is disconnected")
 	}
 
 	items, ok := m.topics[topic]

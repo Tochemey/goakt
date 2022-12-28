@@ -83,8 +83,8 @@ func (s *EventsStream) Produce(ctx context.Context, topic string, messages ...*M
 
 	// send messages to the various subscribers of the topic
 	for _, message := range messages {
-		// send the message to topic's consumers to process
-		accepted, err := s.sendToConsumers(topic, message)
+		// send the message to topic's consumers to handleMessage
+		accepted, err := s.sendMessage(topic, message)
 		// handle the processing error
 		if err != nil {
 			return err
@@ -121,7 +121,7 @@ func (s *EventsStream) Consume(ctx context.Context, topic string) (<-chan *Messa
 	topicLock.(*sync.Mutex).Lock()
 
 	// create a consumer
-	c := &consumer{
+	cons := &consumer{
 		id:              0,
 		stopped:         atomic.NewBool(false),
 		stopChan:        make(chan struct{}),
@@ -169,22 +169,15 @@ func (s *EventsStream) Consume(ctx context.Context, topic string) (<-chan *Messa
 		}
 
 		es.consumersWg.Done()
-	}(s, c)
+	}(s, cons)
 
 	// no persistence log is set
 	if s.storage == nil {
 		defer s.consumerLock.Unlock()
 		defer topicLock.(*sync.Mutex).Unlock()
 		// add the consumer to the consumers list for the given topic
-		if consumers, ok := s.consumers.Get(topic); ok {
-			consumers = append(consumers, c)
-			s.consumers.Set(topic, consumers)
-		} else {
-			consumers := []*consumer{c}
-			s.consumers.Set(topic, consumers)
-		}
-
-		return c.messagesChannel, nil
+		s.addConsumer(topic, cons)
+		return cons.messagesChannel, nil
 	}
 
 	// replay messages to the consumers
@@ -203,16 +196,19 @@ func (s *EventsStream) Consume(ctx context.Context, topic string) (<-chan *Messa
 		}
 		s.storageLock.Unlock()
 
-		// send the messages to the consumer to process
+		// send the messages to the consumer to handleMessage
 		for _, message := range messages {
-			go c.process(message)
+			message := message
+			go c.handleMessage(message)
 		}
-	}(c)
-	return c.messagesChannel, nil
+		// add the consumer to the topic
+		s.addConsumer(topic, cons)
+	}(cons)
+	return cons.messagesChannel, nil
 }
 
 // Stop the events stream
-func (s *EventsStream) Stop(ctx context.Context) error {
+func (s *EventsStream) Stop(context.Context) error {
 	s.stopLock.Lock()
 	defer s.stopLock.Unlock()
 	if s.stopped.Load() {
@@ -224,16 +220,11 @@ func (s *EventsStream) Stop(ctx context.Context) error {
 
 	s.consumersWg.Wait()
 
-	// disconnect the retention log
-	if s.storage != nil {
-		return s.storage.Disconnect(ctx)
-	}
-
 	return nil
 }
 
-// sendToConsumers send the message to the topic's consumers to process
-func (s *EventsStream) sendToConsumers(topic string, message *Message) (<-chan struct{}, error) {
+// sendMessage send the message to the topic's consumers to handleMessage
+func (s *EventsStream) sendMessage(topic string, message *Message) (<-chan struct{}, error) {
 	// create an accepted receipt channel
 	acceptedChan := make(chan struct{}, 1)
 	// get the list of consumers for the given topic
@@ -251,7 +242,7 @@ func (s *EventsStream) sendToConsumers(topic string, message *Message) (<-chan s
 			consumer := consumer
 			wg.Add(1)
 			go func() {
-				consumer.process(message)
+				consumer.handleMessage(message)
 				wg.Done()
 			}()
 		}
@@ -261,4 +252,16 @@ func (s *EventsStream) sendToConsumers(topic string, message *Message) (<-chan s
 	}(consumers)
 
 	return acceptedChan, nil
+}
+
+func (s *EventsStream) addConsumer(topic string, cons *consumer) {
+	// add the consumer to the consumers list for the given topic
+	if consumers, ok := s.consumers.Get(topic); ok {
+		consumers = append(consumers, cons)
+		s.consumers.Set(topic, consumers)
+		return
+	}
+
+	consumers := []*consumer{cons}
+	s.consumers.Set(topic, consumers)
 }
