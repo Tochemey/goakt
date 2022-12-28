@@ -30,7 +30,7 @@ type eventSourcedActor[T State] struct {
 // make sure eventSourcedActor is a pure Actor
 var _ actors.Actor = &eventSourcedActor[State]{}
 
-// NewEventSourcedActor returns an instance of persistentActor
+// NewEventSourcedActor returns an instance of event sourced actor
 func NewEventSourcedActor[T State](behavior EventSourcedBehavior[T], eventsStore storage.EventStore) actors.Actor {
 	return &eventSourcedActor[T]{
 		EventSourcedBehavior: behavior,

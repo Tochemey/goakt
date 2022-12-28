@@ -75,7 +75,7 @@ func (m *MemStore) Persist(_ context.Context, topic *Topic) error {
 }
 
 // Disconnect disconnects the retention log
-func (m *MemStore) Disconnect(ctx context.Context) error {
+func (m *MemStore) Disconnect(context.Context) error {
 	m.lock.Lock()
 	m.connected = false
 	m.lock.Unlock()

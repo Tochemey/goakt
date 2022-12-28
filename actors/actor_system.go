@@ -8,6 +8,7 @@ import (
 	cmp "github.com/orcaman/concurrent-map/v2"
 	"github.com/pkg/errors"
 	"github.com/tochemey/goakt/log"
+	"github.com/tochemey/goakt/stream"
 	"go.uber.org/atomic"
 )
 
@@ -32,6 +33,8 @@ type ActorSystem interface {
 	StopActor(ctx context.Context, kind, id string) error
 	// RestartActor restarts a given actor in the system
 	RestartActor(ctx context.Context, kind, id string) (PID, error)
+	// EventsStream returns the actor system event streams
+	EventsStream() *stream.EventsStream
 }
 
 // ActorSystem represent a collection of actors on a given node
@@ -50,6 +53,8 @@ type actorSystem struct {
 	config *Config
 
 	hasStarted *atomic.Bool
+
+	eventsStream *stream.EventsStream
 }
 
 // enforce compilation error when all methods of the ActorSystem interface are not implemented
@@ -62,19 +67,26 @@ func NewActorSystem(config *Config) (ActorSystem, error) {
 	if config == nil {
 		return nil, ErrMissingConfig
 	}
+
 	// the function only gets called one
 	once.Do(func() {
 		cache = &actorSystem{
-			name:       config.Name(),
-			nodeAddr:   config.NodeHostAndPort(),
-			actors:     cmp.New[PID](),
-			logger:     config.Logger(),
-			config:     config,
-			hasStarted: atomic.NewBool(false),
+			name:         config.Name(),
+			nodeAddr:     config.NodeHostAndPort(),
+			actors:       cmp.New[PID](),
+			logger:       config.Logger(),
+			config:       config,
+			hasStarted:   atomic.NewBool(false),
+			eventsStream: stream.NewEventsStream(config.logger, nil), // TODO decide whether to have a retention log
 		}
 	})
 
 	return cache, nil
+}
+
+// EventsStream returns the actor system event streams
+func (a *actorSystem) EventsStream() *stream.EventsStream {
+	return a.eventsStream
 }
 
 // Spawn creates or returns the instance of a given actor in the system
