@@ -30,25 +30,24 @@ type EventsStream struct {
 	stopLock sync.Mutex
 	stopChan chan struct{}
 
-	// retention log is for persistence
-	retentionLog  RetentionLog
-	retentionLock sync.Mutex
+	storage     storage
+	storageLock sync.Mutex
 
 	logger log.Logger
 }
 
 // NewEventsStream creates an instance of EventsStream
-func NewEventsStream(logger log.Logger, persistenceStorage RetentionLog) *EventsStream {
+func NewEventsStream(logger log.Logger, storage storage) *EventsStream {
 	return &EventsStream{
-		consumers:     cmp.New[[]*consumer](),
-		consumerLock:  sync.RWMutex{},
-		topicLocks:    sync.Map{},
-		stopped:       atomic.NewBool(false),
-		stopLock:      sync.Mutex{},
-		stopChan:      make(chan struct{}, 1),
-		retentionLog:  persistenceStorage,
-		retentionLock: sync.Mutex{},
-		logger:        logger,
+		consumers:    cmp.New[[]*consumer](),
+		consumerLock: sync.RWMutex{},
+		topicLocks:   sync.Map{},
+		stopped:      atomic.NewBool(false),
+		stopLock:     sync.Mutex{},
+		stopChan:     make(chan struct{}, 1),
+		storage:      storage,
+		storageLock:  sync.Mutex{},
+		logger:       logger,
 	}
 }
 
@@ -70,16 +69,16 @@ func (s *EventsStream) Produce(ctx context.Context, topic string, messages ...*M
 	defer topicLock.(*sync.Mutex).Unlock()
 
 	// persist the message when persistence storage is set
-	if s.retentionLog != nil {
-		s.retentionLock.Lock()
-		if err := s.retentionLog.Persist(ctx, &Topic{
+	if s.storage != nil {
+		s.storageLock.Lock()
+		if err := s.storage.Persist(ctx, &Topic{
 			Name:     topic,
 			Messages: messages,
 		}); err != nil {
-			s.retentionLock.Unlock()
+			s.storageLock.Unlock()
 			return errors.Wrapf(err, "failed to persist events to topic=%s", topic)
 		}
-		s.retentionLock.Unlock()
+		s.storageLock.Unlock()
 	}
 
 	// send messages to the various subscribers of the topic
@@ -173,7 +172,7 @@ func (s *EventsStream) Consume(ctx context.Context, topic string) (<-chan *Messa
 	}(s, c)
 
 	// no persistence log is set
-	if s.retentionLog == nil {
+	if s.storage == nil {
 		defer s.consumerLock.Unlock()
 		defer topicLock.(*sync.Mutex).Unlock()
 		// add the consumer to the consumers list for the given topic
@@ -194,15 +193,15 @@ func (s *EventsStream) Consume(ctx context.Context, topic string) (<-chan *Messa
 		defer topicLock.(*sync.Mutex).Unlock()
 
 		// acquire the persistence lock
-		s.retentionLock.Lock()
-		messages, err := s.retentionLog.GetMessages(ctx, topic)
+		s.storageLock.Lock()
+		messages, err := s.storage.GetMessages(ctx, topic)
 		// handle the error while fetching messages from the persistence store
 		if err != nil {
-			s.retentionLock.Unlock()
+			s.storageLock.Unlock()
 			wrapped := errors.Wrapf(err, "failed to replay")
 			panic(wrapped)
 		}
-		s.retentionLock.Unlock()
+		s.storageLock.Unlock()
 
 		// send the messages to the consumer to process
 		for _, message := range messages {
@@ -226,8 +225,8 @@ func (s *EventsStream) Stop(ctx context.Context) error {
 	s.consumersWg.Wait()
 
 	// disconnect the retention log
-	if s.retentionLog != nil {
-		return s.retentionLog.Disconnect(ctx)
+	if s.storage != nil {
+		return s.storage.Disconnect(ctx)
 	}
 
 	return nil

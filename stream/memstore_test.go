@@ -8,22 +8,25 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
 )
 
 func TestMemoryLog(t *testing.T) {
 	t.Run("with new instance", func(t *testing.T) {
+		defer goleak.VerifyNone(t)
 		TTL := time.Second
-		c := NewMemoryLog(10, TTL)
+		c := NewMemStore(10, TTL)
 		assert.NotNil(t, c)
-		assert.IsType(t, &MemoryLog{}, c)
+		assert.IsType(t, &MemStore{}, c)
 		var p interface{} = c
-		_, ok := p.(RetentionLog)
+		_, ok := p.(storage)
 		assert.True(t, ok)
 	})
 	t.Run("with Persist and Get", func(t *testing.T) {
+		defer goleak.VerifyNone(t)
 		ctx := context.TODO()
 		TTL := time.Minute
-		memoryLog := NewMemoryLog(10, TTL)
+		memoryLog := NewMemStore(10, TTL)
 		assert.NotNil(t, memoryLog)
 
 		// connect the memory log
@@ -58,9 +61,10 @@ func TestMemoryLog(t *testing.T) {
 		require.NoError(t, memoryLog.Disconnect(ctx))
 	})
 	t.Run("with expired entry", func(t *testing.T) {
+		defer goleak.VerifyNone(t)
 		ctx := context.TODO()
 		TTL := time.Second
-		memoryLog := NewMemoryLog(10, TTL)
+		memoryLog := NewMemStore(10, TTL)
 		assert.NotNil(t, memoryLog)
 
 		// connect the memory log
@@ -89,7 +93,7 @@ func TestMemoryLog(t *testing.T) {
 		// fetch the messages
 		actual, err := memoryLog.GetMessages(ctx, topicName)
 		require.NoError(t, err)
-		require.NotEmpty(t, actual)
+		require.Empty(t, actual)
 
 		// disconnect the memory log
 		require.NoError(t, memoryLog.Disconnect(ctx))

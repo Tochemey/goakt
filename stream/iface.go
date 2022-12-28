@@ -35,10 +35,10 @@ type Consumer interface {
 	Stop(ctx context.Context) error
 }
 
-// RetentionLog defines the interface that helps streamed messages to be persisted.
+// storage defines the interface that helps streamed messages to be persisted.
 //
-// Every RetentionLog implementation should add a TTL mechanism to purge the log
-type RetentionLog interface {
+// Every storage implementation should add a TTL mechanism to purge the log
+type storage interface {
 	// Connect helps connect to the retention log
 	Connect(ctx context.Context) error
 	// Persist persists topics onto a durable store
