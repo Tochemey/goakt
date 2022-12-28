@@ -99,7 +99,7 @@ func TestEventsStream(t *testing.T) {
 			t.Fatal("consumer which didn't accept a message blocked other subscribers from receiving it")
 		}
 	})
-	t.Run("fail to produce/consume when stopped", func(t *testing.T) {
+	t.Run("fail to Produce/Consume when stopped", func(t *testing.T) {
 		ctx := context.TODO()
 		logger := log.DiscardLogger
 		es := NewEventsStream(logger, nil)
@@ -115,5 +115,60 @@ func TestEventsStream(t *testing.T) {
 		err = es.Produce(ctx, topic, NewMessage(uuid.NewString(), nil))
 		require.Error(t, err)
 		assert.EqualError(t, err, "events stream is already closed")
+	})
+	t.Run("with Produce/Consume with retention store", func(t *testing.T) {
+		ctx := context.TODO()
+		logger := log.DiscardLogger
+
+		store := NewMemStore(10, time.Minute)
+		require.NoError(t, store.Connect(ctx))
+
+		es := NewEventsStream(logger, store)
+		topic := "test-topic"
+
+		// start consuming messages
+		msgs, err := es.Consume(ctx, topic)
+		require.NoError(t, err, "cannot consume messages")
+
+		// create the message ID
+		msgID := uuid.NewString()
+
+		producedChan := make(chan struct{})
+		go func() {
+			// build messages to produce
+			err = es.Produce(ctx, topic, NewMessage(msgID, nil))
+			require.NoError(t, err, "cannot produce messages")
+			close(producedChan)
+		}()
+
+		msg1 := <-msgs
+		select {
+		case <-producedChan:
+			t.Fatal("production should be blocked until accept")
+		default:
+			// ok
+		}
+
+		msg1.Reject()
+		select {
+		case <-producedChan:
+			t.Fatal("production should be blocked after reject")
+		default:
+			// ok
+		}
+
+		msg2 := <-msgs
+		msg2.Accept()
+
+		select {
+		case <-producedChan:
+			// ok
+		case <-time.After(time.Second):
+			t.Fatal("produce should be not blocked after accept")
+		}
+
+		// stop the events stream
+		assert.NoError(t, store.Disconnect(ctx))
+		assert.NoError(t, es.Stop(ctx))
 	})
 }
