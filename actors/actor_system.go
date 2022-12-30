@@ -77,7 +77,7 @@ func NewActorSystem(config *Config) (ActorSystem, error) {
 			logger:       config.Logger(),
 			config:       config,
 			hasStarted:   atomic.NewBool(false),
-			eventsStream: stream.NewEventsStream(config.logger, nil), // TODO decide whether to have a retention log
+			eventsStream: stream.NewEventsStream(stream.WithLogger(config.logger)), // TODO decide whether to have a retention log
 		}
 	})
 

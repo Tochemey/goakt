@@ -8,14 +8,12 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/tochemey/goakt/log"
 )
 
 func TestEventsStream(t *testing.T) {
 	t.Run("with Produce/Consume with no retention store", func(t *testing.T) {
 		ctx := context.TODO()
-		logger := log.DiscardLogger
-		es := NewEventsStream(logger, nil)
+		es := NewEventsStream()
 		topic := "test-topic"
 
 		// start consuming messages
@@ -64,8 +62,7 @@ func TestEventsStream(t *testing.T) {
 	})
 	t.Run("With Produce/Consume with others subscribers not blocked", func(t *testing.T) {
 		ctx := context.TODO()
-		logger := log.DiscardLogger
-		es := NewEventsStream(logger, nil)
+		es := NewEventsStream()
 		topic := "test-topic"
 
 		// start consuming messages
@@ -101,8 +98,7 @@ func TestEventsStream(t *testing.T) {
 	})
 	t.Run("fail to Produce/Consume when stopped", func(t *testing.T) {
 		ctx := context.TODO()
-		logger := log.DiscardLogger
-		es := NewEventsStream(logger, nil)
+		es := NewEventsStream()
 		topic := "test-topic"
 
 		// stop the events stream
@@ -118,12 +114,11 @@ func TestEventsStream(t *testing.T) {
 	})
 	t.Run("with Produce/Consume with retention store", func(t *testing.T) {
 		ctx := context.TODO()
-		logger := log.DiscardLogger
 
 		store := NewMemStore(10, time.Minute)
 		require.NoError(t, store.Connect(ctx))
 
-		es := NewEventsStream(logger, store)
+		es := NewEventsStream(WithStorage(store))
 		topic := "test-topic"
 
 		// start consuming messages

@@ -19,7 +19,7 @@ func TestMemoryLog(t *testing.T) {
 		assert.NotNil(t, c)
 		assert.IsType(t, &MemStore{}, c)
 		var p interface{} = c
-		_, ok := p.(storage)
+		_, ok := p.(Storage)
 		assert.True(t, ok)
 	})
 	t.Run("with Persist and Get", func(t *testing.T) {

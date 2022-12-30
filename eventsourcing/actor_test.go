@@ -42,6 +42,16 @@ func TestEventSourcedActor(t *testing.T) {
 		err = actorSystem.Start(ctx)
 		require.NoError(t, err)
 
+		//// start consuming messages
+		//msgs, err := actorSystem.EventsStream().Consume(ctx, Topic)
+		//require.NoError(t, err, "cannot consume messages")
+		//
+		//go func() {
+		//	for msg := range msgs {
+		//		msg.Accept()
+		//	}
+		//}()
+
 		// create the event store
 		eventStore := memory.NewEventStore()
 		// create a persistence id
@@ -59,7 +69,7 @@ func TestEventSourcedActor(t *testing.T) {
 
 		command = &testpb.CreateAccount{AccountBalance: 500.00}
 		// send the command to the actor
-		reply, err := actors.SendSync(ctx, pid, command, time.Second)
+		reply, err := actors.SendSync(ctx, pid, command, 5*time.Second)
 		require.NoError(t, err)
 		require.NotNil(t, reply)
 		require.IsType(t, new(pb.CommandReply), reply)
@@ -86,7 +96,7 @@ func TestEventSourcedActor(t *testing.T) {
 			AccountId: persistenceID,
 			Balance:   250,
 		}
-		reply, err = actors.SendSync(ctx, pid, command, time.Second)
+		reply, err = actors.SendSync(ctx, pid, command, 5*time.Second)
 		require.NoError(t, err)
 		require.NotNil(t, reply)
 		require.IsType(t, new(pb.CommandReply), reply)

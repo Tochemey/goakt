@@ -169,17 +169,18 @@ func (p *eventSourcedActor[T]) Receive(ctx actors.ReceiveContext) {
 		timestamp := timestamppb.Now()
 		p.lastCommandTime = timestamp.AsTime()
 
-		// create a journal list
-		journals := []*pb.Event{
-			{
-				PersistenceId:  p.PersistenceID(),
-				SequenceNumber: sequenceNumber,
-				IsDeleted:      false,
-				Event:          marshaledEvent,
-				ResultingState: marshaledState,
-				Timestamp:      p.lastCommandTime.Unix(),
-			},
+		// create the event
+		envelope := &pb.Event{
+			PersistenceId:  p.PersistenceID(),
+			SequenceNumber: sequenceNumber,
+			IsDeleted:      false,
+			Event:          marshaledEvent,
+			ResultingState: marshaledState,
+			Timestamp:      p.lastCommandTime.Unix(),
 		}
+
+		// create a journal list
+		journals := []*pb.Event{envelope}
 
 		// TODO persist the event in batch using a child actor
 		if err := p.eventsStore.WriteEvents(ctx.Context(), journals); err != nil {
@@ -195,6 +196,15 @@ func (p *eventSourcedActor[T]) Receive(ctx actors.ReceiveContext) {
 			ctx.Response(reply)
 			return
 		}
+
+		//// let us push the envelope to the event stream
+		//// TODO move into a separate processing to enable retries and failure handling
+		//payload, _ := proto.Marshal(envelope)
+		//message := stream.NewMessage(fmt.Sprintf("%s|%d", p.PersistenceID(), envelope.GetSequenceNumber()), payload)
+		//if err = ctx.Sender().ActorSystem().EventsStream().Produce(ctx.Context(), Topic, message); err != nil {
+		//	// FIXME for now we log the error
+		//
+		//}
 
 		reply := &pb.CommandReply{
 			Reply: &pb.CommandReply_StateReply{

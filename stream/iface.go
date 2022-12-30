@@ -35,10 +35,10 @@ type Consumer interface {
 	Stop(ctx context.Context) error
 }
 
-// storage defines the interface that helps streamed messages to be persisted.
+// Storage defines the interface that helps streamed messages to be persisted.
 //
-// Every storage implementation should add a TTL mechanism to purge the log
-type storage interface {
+// Every Storage implementation should add a TTL mechanism to purge the log
+type Storage interface {
 	// Connect helps connect to the retention log
 	Connect(ctx context.Context) error
 	// Persist persists topics onto a durable store

@@ -25,7 +25,7 @@ type MemStore struct {
 	lock sync.RWMutex
 }
 
-var _ storage = &MemStore{}
+var _ Storage = &MemStore{}
 
 // NewMemStore creates an instance of MemStore
 func NewMemStore(initialSize int, maxTTL time.Duration) *MemStore {

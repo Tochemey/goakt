@@ -3,6 +3,7 @@ package stream
 import (
 	"context"
 	"fmt"
+	"io"
 	"sync"
 
 	cmp "github.com/orcaman/concurrent-map/v2"
@@ -30,25 +31,32 @@ type EventsStream struct {
 	stopLock sync.Mutex
 	stopChan chan struct{}
 
-	storage     storage
+	storage     Storage
 	storageLock sync.Mutex
 
 	logger log.Logger
 }
 
 // NewEventsStream creates an instance of EventsStream
-func NewEventsStream(logger log.Logger, storage storage) *EventsStream {
-	return &EventsStream{
+func NewEventsStream(opts ...Option) *EventsStream {
+	// create an instance of EventsStream
+	es := &EventsStream{
 		consumers:    cmp.New[[]*consumer](),
 		consumerLock: sync.RWMutex{},
 		topicLocks:   sync.Map{},
 		stopped:      atomic.NewBool(false),
 		stopLock:     sync.Mutex{},
 		stopChan:     make(chan struct{}, 1),
-		storage:      storage,
 		storageLock:  sync.Mutex{},
-		logger:       logger,
+		logger:       log.New(log.Disabled, io.Discard),
 	}
+
+	// apply the various options
+	for _, opt := range opts {
+		opt.Apply(es)
+	}
+
+	return es
 }
 
 // Produce produces messages to given topic.
