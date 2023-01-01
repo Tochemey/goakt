@@ -43,7 +43,7 @@ func TestEventSourcedActor(t *testing.T) {
 		require.NoError(t, err)
 
 		//// start consuming messages
-		//msgs, err := actorSystem.EventsStream().Consume(ctx, Topic)
+		//msgs, err := actorSystem.EventsStream().Subscribe(ctx, Topic)
 		//require.NoError(t, err, "cannot consume messages")
 		//
 		//go func() {
