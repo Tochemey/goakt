@@ -1,6 +1,7 @@
 package eventbus
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 	"sync"
@@ -10,28 +11,28 @@ import (
 type Subscriber interface {
 	// Subscribe subscribes to a topic.
 	// Returns error if `fn` is not a function.
-	Subscribe(topic string, fn any) error
+	Subscribe(ctx context.Context, topic string, fn any) error
 	// SubscribeAsync subscribes to a topic with an asynchronous callback
 	// Transactional determines whether subsequent callbacks for a topic are
 	// run serially (true) or concurrently (false)
 	// Returns error if `fn` is not a function.
-	SubscribeAsync(topic string, fn any, transactional bool) error
+	SubscribeAsync(ctx context.Context, topic string, fn any, transactional bool) error
 	// SubscribeOnce subscribes to a topic once. Handler will be removed after executing.
 	// Returns error if `fn` is not a function.
-	SubscribeOnce(topic string, fn any) error
+	SubscribeOnce(ctx context.Context, topic string, fn any) error
 	// SubscribeOnceAsync subscribes to a topic once with an asynchronous callback
 	// Handler will be removed after executing.
 	// Returns error if `fn` is not a function.
-	SubscribeOnceAsync(topic string, fn any) error
+	SubscribeOnceAsync(ctx context.Context, topic string, fn any) error
 	// Unsubscribe removes callback defined for a topic.
 	// Returns error if there are no callbacks subscribed to the topic.
-	Unsubscribe(topic string, handler any) error
+	Unsubscribe(ctx context.Context, topic string, handler any) error
 }
 
 // Publisher defines publishing-related bus behavior
 type Publisher interface {
 	// Publish executes callback defined for a topic. Any additional argument will be transferred to the callback.
-	Publish(topic string, args ...any)
+	Publish(ctx context.Context, topic string, args ...any)
 }
 
 // Controller defines bus control behavior (checking handler's presence, synchronization)
@@ -76,7 +77,7 @@ func New() EventBus {
 
 // Subscribe subscribes to a topic.
 // Returns error if `fn` is not a function.
-func (bus *eventBus) Subscribe(topic string, fn any) error {
+func (bus *eventBus) Subscribe(ctx context.Context, topic string, fn any) error {
 	return bus.doSubscribe(topic, fn, &eventHandler{
 		reflect.ValueOf(fn), nil, false, false, sync.Mutex{},
 	})
@@ -86,7 +87,7 @@ func (bus *eventBus) Subscribe(topic string, fn any) error {
 // Transactional determines whether subsequent callbacks for a topic are
 // run serially (true) or concurrently (false)
 // Returns error if `fn` is not a function.
-func (bus *eventBus) SubscribeAsync(topic string, fn any, transactional bool) error {
+func (bus *eventBus) SubscribeAsync(ctx context.Context, topic string, fn any, transactional bool) error {
 	return bus.doSubscribe(topic, fn, &eventHandler{
 		reflect.ValueOf(fn), nil, true, transactional, sync.Mutex{},
 	})
@@ -94,7 +95,7 @@ func (bus *eventBus) SubscribeAsync(topic string, fn any, transactional bool) er
 
 // SubscribeOnce subscribes to a topic once. Handler will be removed after executing.
 // Returns error if `fn` is not a function.
-func (bus *eventBus) SubscribeOnce(topic string, fn any) error {
+func (bus *eventBus) SubscribeOnce(ctx context.Context, topic string, fn any) error {
 	return bus.doSubscribe(topic, fn, &eventHandler{
 		reflect.ValueOf(fn), new(sync.Once), false, false, sync.Mutex{},
 	})
@@ -103,7 +104,7 @@ func (bus *eventBus) SubscribeOnce(topic string, fn any) error {
 // SubscribeOnceAsync subscribes to a topic once with an asynchronous callback
 // Handler will be removed after executing.
 // Returns error if `fn` is not a function.
-func (bus *eventBus) SubscribeOnceAsync(topic string, fn any) error {
+func (bus *eventBus) SubscribeOnceAsync(ctx context.Context, topic string, fn any) error {
 	return bus.doSubscribe(topic, fn, &eventHandler{
 		reflect.ValueOf(fn), new(sync.Once), true, false, sync.Mutex{},
 	})
@@ -122,7 +123,7 @@ func (bus *eventBus) HasCallback(topic string) bool {
 
 // Unsubscribe removes callback defined for a topic.
 // Returns error if there are no callbacks subscribed to the topic.
-func (bus *eventBus) Unsubscribe(topic string, handler any) error {
+func (bus *eventBus) Unsubscribe(ctx context.Context, topic string, handler any) error {
 	bus.lock.Lock()
 	defer bus.lock.Unlock()
 	if _, ok := bus.handlers[topic]; ok && len(bus.handlers[topic]) > 0 {
@@ -133,7 +134,7 @@ func (bus *eventBus) Unsubscribe(topic string, handler any) error {
 }
 
 // Publish executes callback defined for a topic. Any additional argument will be transferred to the callback.
-func (bus *eventBus) Publish(topic string, args ...any) {
+func (bus *eventBus) Publish(ctx context.Context, topic string, args ...any) {
 	// Handlers slice may be changed by removeHandler and Unsubscribe during iteration,
 	// so make a copy and iterate the copied slice.
 	bus.lock.Lock()

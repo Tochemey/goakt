@@ -6,6 +6,8 @@ import (
 	"sync"
 	"time"
 
+	"google.golang.org/protobuf/proto"
+
 	"github.com/pkg/errors"
 	"github.com/tochemey/goakt/actors"
 	"github.com/tochemey/goakt/eventsourcing/storage"
@@ -197,14 +199,10 @@ func (p *eventSourcedActor[T]) Receive(ctx actors.ReceiveContext) {
 			return
 		}
 
-		//// let us push the envelope to the event stream
-		//// TODO move into a separate processing to enable retries and failure handling
-		//payload, _ := proto.Marshal(envelope)
-		//message := stream.NewMessage(fmt.Sprintf("%s|%d", p.PersistenceID(), envelope.GetSequenceNumber()), payload)
-		//if err = ctx.Sender().ActorSystem().EventBus().Publish(ctx.Context(), Topic, message); err != nil {
-		//	// FIXME for now we log the error
-		//
-		//}
+		// let us push the envelope to the event stream
+		// TODO in its own go-routine
+		payload, _ := proto.Marshal(envelope)
+		ctx.Self().ActorSystem().EventBus().Publish(ctx.Context(), Topic, payload)
 
 		reply := &pb.CommandReply{
 			Reply: &pb.CommandReply_StateReply{

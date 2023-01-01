@@ -1,6 +1,7 @@
 package eventbus
 
 import (
+	"context"
 	"testing"
 	"time"
 )
@@ -14,8 +15,9 @@ func TestNew(t *testing.T) {
 }
 
 func TestHasCallback(t *testing.T) {
+	ctx := context.TODO()
 	bus := New()
-	_ = bus.Subscribe("topic", func() {})
+	_ = bus.Subscribe(ctx, "topic", func() {})
 	if bus.HasCallback("topic_topic") {
 		t.Fail()
 	}
@@ -25,34 +27,37 @@ func TestHasCallback(t *testing.T) {
 }
 
 func TestSubscribe(t *testing.T) {
+	ctx := context.TODO()
 	bus := New()
-	if bus.Subscribe("topic", func() {}) != nil {
+	if bus.Subscribe(ctx, "topic", func() {}) != nil {
 		t.Fail()
 	}
-	if bus.Subscribe("topic", "String") == nil {
+	if bus.Subscribe(ctx, "topic", "String") == nil {
 		t.Fail()
 	}
 }
 
 func TestSubscribeOnce(t *testing.T) {
+	ctx := context.TODO()
 	bus := New()
-	if bus.SubscribeOnce("topic", func() {}) != nil {
+	if bus.SubscribeOnce(ctx, "topic", func() {}) != nil {
 		t.Fail()
 	}
-	if bus.SubscribeOnce("topic", "String") == nil {
+	if bus.SubscribeOnce(ctx, "topic", "String") == nil {
 		t.Fail()
 	}
 }
 
 func TestSubscribeOnceAndManySubscribe(t *testing.T) {
+	ctx := context.TODO()
 	bus := New()
 	event := "topic"
 	flag := 0
 	fn := func() { flag++ }
-	_ = bus.SubscribeOnce(event, fn)
-	_ = bus.Subscribe(event, fn)
-	_ = bus.Subscribe(event, fn)
-	bus.Publish(event)
+	_ = bus.SubscribeOnce(ctx, event, fn)
+	_ = bus.Subscribe(ctx, event, fn)
+	_ = bus.Subscribe(ctx, event, fn)
+	bus.Publish(ctx, event)
 
 	if flag != 3 {
 		t.Fail()
@@ -61,12 +66,13 @@ func TestSubscribeOnceAndManySubscribe(t *testing.T) {
 
 func TestUnsubscribe(t *testing.T) {
 	bus := New()
+	ctx := context.TODO()
 	handler := func() {}
-	_ = bus.Subscribe("topic", handler)
-	if bus.Unsubscribe("topic", handler) != nil {
+	_ = bus.Subscribe(ctx, "topic", handler)
+	if bus.Unsubscribe(ctx, "topic", handler) != nil {
 		t.Fail()
 	}
-	if bus.Unsubscribe("topic", handler) == nil {
+	if bus.Unsubscribe(ctx, "topic", handler) == nil {
 		t.Fail()
 	}
 }
@@ -82,16 +88,16 @@ func (h *handler) Handle() {
 func TestUnsubscribeMethod(t *testing.T) {
 	bus := New()
 	h := &handler{val: 0}
-
-	bus.Subscribe("topic", h.Handle)
-	bus.Publish("topic")
-	if bus.Unsubscribe("topic", h.Handle) != nil {
+	ctx := context.TODO()
+	_ = bus.Subscribe(ctx, "topic", h.Handle)
+	bus.Publish(ctx, "topic")
+	if bus.Unsubscribe(ctx, "topic", h.Handle) != nil {
 		t.Fail()
 	}
-	if bus.Unsubscribe("topic", h.Handle) == nil {
+	if bus.Unsubscribe(ctx, "topic", h.Handle) == nil {
 		t.Fail()
 	}
-	bus.Publish("topic")
+	bus.Publish(ctx, "topic")
 	bus.WaitAsync()
 
 	if h.val != 1 {
@@ -101,7 +107,8 @@ func TestUnsubscribeMethod(t *testing.T) {
 
 func TestPublish(t *testing.T) {
 	bus := New()
-	bus.Subscribe("topic", func(a int, err error) {
+	ctx := context.TODO()
+	_ = bus.Subscribe(ctx, "topic", func(a int, err error) {
 		if a != 10 {
 			t.Fail()
 		}
@@ -110,19 +117,19 @@ func TestPublish(t *testing.T) {
 			t.Fail()
 		}
 	})
-	bus.Publish("topic", 10, nil)
+	bus.Publish(ctx, "topic", 10, nil)
 }
 
 func TestSubscribeOnceAsync(t *testing.T) {
 	results := make([]int, 0)
-
+	ctx := context.TODO()
 	bus := New()
-	_ = bus.SubscribeOnceAsync("topic", func(a int, out *[]int) {
+	_ = bus.SubscribeOnceAsync(ctx, "topic", func(a int, out *[]int) {
 		*out = append(*out, a)
 	})
 
-	bus.Publish("topic", 10, &results)
-	bus.Publish("topic", 10, &results)
+	bus.Publish(ctx, "topic", 10, &results)
+	bus.Publish(ctx, "topic", 10, &results)
 
 	bus.WaitAsync()
 
@@ -137,16 +144,16 @@ func TestSubscribeOnceAsync(t *testing.T) {
 
 func TestSubscribeAsyncTransactional(t *testing.T) {
 	results := make([]int, 0)
-
+	ctx := context.TODO()
 	bus := New()
-	_ = bus.SubscribeAsync("topic", func(a int, out *[]int, dur string) {
+	_ = bus.SubscribeAsync(ctx, "topic", func(a int, out *[]int, dur string) {
 		sleep, _ := time.ParseDuration(dur)
 		time.Sleep(sleep)
 		*out = append(*out, a)
 	}, true)
 
-	bus.Publish("topic", 1, &results, "1s")
-	bus.Publish("topic", 2, &results, "0s")
+	bus.Publish(ctx, "topic", 1, &results, "1s")
+	bus.Publish(ctx, "topic", 2, &results, "0s")
 
 	bus.WaitAsync()
 
@@ -161,14 +168,14 @@ func TestSubscribeAsyncTransactional(t *testing.T) {
 
 func TestSubscribeAsync(t *testing.T) {
 	results := make(chan int)
-
+	ctx := context.TODO()
 	bus := New()
-	_ = bus.SubscribeAsync("topic", func(a int, out chan<- int) {
+	_ = bus.SubscribeAsync(ctx, "topic", func(a int, out chan<- int) {
 		out <- a
 	}, false)
 
-	bus.Publish("topic", 1, results)
-	bus.Publish("topic", 2, results)
+	bus.Publish(ctx, "topic", 1, results)
+	bus.Publish(ctx, "topic", 2, results)
 
 	numResults := 0
 
@@ -179,7 +186,6 @@ func TestSubscribeAsync(t *testing.T) {
 	}()
 
 	bus.WaitAsync()
-	println(2)
 
 	time.Sleep(10 * time.Millisecond)
 

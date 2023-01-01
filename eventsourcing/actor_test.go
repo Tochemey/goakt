@@ -42,16 +42,6 @@ func TestEventSourcedActor(t *testing.T) {
 		err = actorSystem.Start(ctx)
 		require.NoError(t, err)
 
-		//// start consuming messages
-		//msgs, err := actorSystem.EventBus().Subscribe(ctx, Topic)
-		//require.NoError(t, err, "cannot consume messages")
-		//
-		//go func() {
-		//	for msg := range msgs {
-		//		msg.Accept()
-		//	}
-		//}()
-
 		// create the event store
 		eventStore := memory.NewEventStore()
 		// create a persistence id
