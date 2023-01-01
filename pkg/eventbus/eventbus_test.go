@@ -48,7 +48,7 @@ func TestSubscribeOnceAndManySubscribe(t *testing.T) {
 	bus := New()
 	event := "topic"
 	flag := 0
-	fn := func() { flag += 1 }
+	fn := func() { flag++ }
 	_ = bus.SubscribeOnce(event, fn)
 	_ = bus.Subscribe(event, fn)
 	_ = bus.Subscribe(event, fn)
@@ -163,7 +163,7 @@ func TestSubscribeAsync(t *testing.T) {
 	results := make(chan int)
 
 	bus := New()
-	bus.SubscribeAsync("topic", func(a int, out chan<- int) {
+	_ = bus.SubscribeAsync("topic", func(a int, out chan<- int) {
 		out <- a
 	}, false)
 
@@ -173,7 +173,7 @@ func TestSubscribeAsync(t *testing.T) {
 	numResults := 0
 
 	go func() {
-		for _ = range results {
+		for range results {
 			numResults++
 		}
 	}()

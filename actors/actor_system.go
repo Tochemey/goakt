@@ -8,7 +8,7 @@ import (
 	cmp "github.com/orcaman/concurrent-map/v2"
 	"github.com/pkg/errors"
 	"github.com/tochemey/goakt/log"
-	"github.com/tochemey/goakt/stream"
+	"github.com/tochemey/goakt/pkg/eventbus"
 	"go.uber.org/atomic"
 )
 
@@ -33,8 +33,8 @@ type ActorSystem interface {
 	StopActor(ctx context.Context, kind, id string) error
 	// RestartActor restarts a given actor in the system
 	RestartActor(ctx context.Context, kind, id string) (PID, error)
-	// EventsStream returns the actor system event streams
-	EventsStream() *stream.EventsStream
+	// EventBus returns the actor system event bus
+	EventBus() eventbus.EventBus
 }
 
 // ActorSystem represent a collection of actors on a given node
@@ -54,7 +54,7 @@ type actorSystem struct {
 
 	hasStarted *atomic.Bool
 
-	eventsStream *stream.EventsStream
+	eventBus eventbus.EventBus
 }
 
 // enforce compilation error when all methods of the ActorSystem interface are not implemented
@@ -71,22 +71,22 @@ func NewActorSystem(config *Config) (ActorSystem, error) {
 	// the function only gets called one
 	once.Do(func() {
 		cache = &actorSystem{
-			name:         config.Name(),
-			nodeAddr:     config.NodeHostAndPort(),
-			actors:       cmp.New[PID](),
-			logger:       config.Logger(),
-			config:       config,
-			hasStarted:   atomic.NewBool(false),
-			eventsStream: stream.NewEventsStream(stream.WithLogger(config.logger)), // TODO decide whether to have a retention log
+			name:       config.Name(),
+			nodeAddr:   config.NodeHostAndPort(),
+			actors:     cmp.New[PID](),
+			logger:     config.Logger(),
+			config:     config,
+			hasStarted: atomic.NewBool(false),
+			eventBus:   eventbus.New(),
 		}
 	})
 
 	return cache, nil
 }
 
-// EventsStream returns the actor system event streams
-func (a *actorSystem) EventsStream() *stream.EventsStream {
-	return a.eventsStream
+// EventBus returns the actor system event streams
+func (a *actorSystem) EventBus() eventbus.EventBus {
+	return a.eventBus
 }
 
 // Spawn creates or returns the instance of a given actor in the system

@@ -201,7 +201,7 @@ func (p *eventSourcedActor[T]) Receive(ctx actors.ReceiveContext) {
 		//// TODO move into a separate processing to enable retries and failure handling
 		//payload, _ := proto.Marshal(envelope)
 		//message := stream.NewMessage(fmt.Sprintf("%s|%d", p.PersistenceID(), envelope.GetSequenceNumber()), payload)
-		//if err = ctx.Sender().ActorSystem().EventsStream().Publish(ctx.Context(), Topic, message); err != nil {
+		//if err = ctx.Sender().ActorSystem().EventBus().Publish(ctx.Context(), Topic, message); err != nil {
 		//	// FIXME for now we log the error
 		//
 		//}
