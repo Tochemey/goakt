@@ -615,11 +615,18 @@ func (p *pid) reset() {
 	p.receivedMessageCounter = atomic.NewUint64(0)
 	p.lastProcessingDuration = atomic.NewDuration(0)
 	p.restartCounter = atomic.NewUint64(0)
+	p.mailboxSizeCounter = atomic.NewUint64(0)
 	// reset the channels
 	p.shutdownSignal = make(chan Unit, 1)
 	p.haltPassivationLnr = make(chan Unit, 1)
 	// reset the behavior stack
 	p.resetBehaviorStack()
+	// register metrics. However, we don't panic when we fail to register
+	// we just log it for now
+	// TODO decide what to do when we fail to register the metrics or export the metrics registration as public
+	if err := p.registerMetrics(); err != nil {
+		p.logger.Error(errors.Wrapf(err, "failed to register actor=%s metrics", p.Address()))
+	}
 }
 
 func (p *pid) resetBehaviorStack() {
