@@ -7,9 +7,12 @@ import (
 	"time"
 
 	"github.com/cenkalti/backoff"
+	"github.com/pkg/errors"
 	"github.com/tochemey/goakt/log"
 	pb "github.com/tochemey/goakt/pb/goakt/v1"
 	"github.com/tochemey/goakt/pkg/tools"
+	"github.com/tochemey/goakt/telemetry"
+	"go.opentelemetry.io/otel/metric/instrument"
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
 )
@@ -52,6 +55,8 @@ type PID interface {
 	SendSync(ctx context.Context, to PID, message proto.Message) (response proto.Message, err error)
 	// RestartCount returns the number of times the actor has restarted
 	RestartCount(ctx context.Context) uint64
+	// MailboxSize returns the mailbox size a given time
+	MailboxSize(ctx context.Context) uint64
 	// Children returns the list of all the children of the given actor
 	Children(ctx context.Context) []PID
 	// Behaviors returns the behavior stack
@@ -92,7 +97,7 @@ type pid struct {
 
 	// specifies how long the sender of a mail should wait to receive a reply
 	// when using SendReply. The default value is 5s
-	sendRecvTimeout time.Duration
+	sendReplyTimeout time.Duration
 
 	// specifies the maximum of retries to attempt when the actor
 	// initialization fails. The default value is 5 seconds
@@ -127,6 +132,7 @@ type pid struct {
 	receivedMessageCounter *atomic.Uint64
 	restartCounter         *atomic.Uint64
 	lastProcessingDuration *atomic.Duration
+	mailboxSizeCounter     *atomic.Uint64
 
 	mu sync.RWMutex
 
@@ -135,6 +141,9 @@ type pid struct {
 
 	// specifies the current actor behavior
 	behaviorStack BehaviorStack
+
+	// observability settings
+	telemetry *telemetry.Telemetry
 }
 
 // enforce compilation error
@@ -142,6 +151,10 @@ var _ PID = (*pid)(nil)
 
 // newPID creates a new pid
 func newPID(ctx context.Context, actor Actor, opts ...pidOption) *pid {
+	// add a span context
+	ctx, span := telemetry.SpanContext(ctx, "NewPID")
+	defer span.End()
+
 	// create the actor PID
 	pid := &pid{
 		Actor:                  actor,
@@ -149,7 +162,7 @@ func newPID(ctx context.Context, actor Actor, opts ...pidOption) *pid {
 		isOnline:               false,
 		lastProcessingTime:     atomic.Time{},
 		passivateAfter:         2 * time.Minute,
-		sendRecvTimeout:        100 * time.Millisecond,
+		sendReplyTimeout:       100 * time.Millisecond,
 		shutdownTimeout:        2 * time.Second,
 		initMaxRetries:         5,
 		mailbox:                make(chan ReceiveContext, 1000),
@@ -160,10 +173,12 @@ func newPID(ctx context.Context, actor Actor, opts ...pidOption) *pid {
 		receivedMessageCounter: atomic.NewUint64(0),
 		lastProcessingDuration: atomic.NewDuration(0),
 		restartCounter:         atomic.NewUint64(0),
+		mailboxSizeCounter:     atomic.NewUint64(0),
 		mu:                     sync.RWMutex{},
 		children:               newPIDMap(10),
 		supervisorStrategy:     pb.StrategyDirective_STOP_DIRECTIVE,
 		watchers:               tools.NewConcurrentSlice[*Watcher](),
+		telemetry:              telemetry.New(),
 	}
 	// set the custom options to override the default values
 	for _, opt := range opts {
@@ -190,20 +205,22 @@ func newPID(ctx context.Context, actor Actor, opts ...pidOption) *pid {
 	behaviorStack.Push(pid.Receive)
 	pid.behaviorStack = behaviorStack
 
+	// register metrics. However, we don't panic when we fail to register
+	// we just log it for now
+	// TODO decide what to do when we fail to register the metrics or export the metrics registration as public
+	if err := pid.registerMetrics(); err != nil {
+		pid.logger.Error(errors.Wrapf(err, "failed to register actor=%s metrics", pid.Address()))
+	}
+
 	// return the actor reference
 	return pid
 }
 
-// Behaviors returns the behavior stack
-func (p *pid) behaviors() BehaviorStack {
-	p.mu.Lock()
-	behaviors := p.behaviorStack
-	p.mu.Unlock()
-	return behaviors
-}
-
 // Children returns the list of all the children of the given actor
 func (p *pid) Children(ctx context.Context) []PID {
+	// add a span context
+	ctx, span := telemetry.SpanContext(ctx, "Children")
+	defer span.End()
 	p.mu.Lock()
 	kiddos := p.children.List()
 	p.mu.Unlock()
@@ -248,6 +265,9 @@ func (p *pid) Address() Address {
 // Restart restarts the actor. This call can panic which is the expected behaviour.
 // During restart all messages that are in the mailbox and not yet processed will be ignored
 func (p *pid) Restart(ctx context.Context) error {
+	// add a span context
+	ctx, span := telemetry.SpanContext(ctx, "Restart")
+	defer span.End()
 	// first check whether we have an empty PID
 	if p == nil || p.addr == "" {
 		return ErrUndefinedActor
@@ -293,6 +313,9 @@ func (p *pid) Restart(ctx context.Context) error {
 
 // SpawnChild creates a child actor and start watching it for error
 func (p *pid) SpawnChild(ctx context.Context, kind, id string, actor Actor) (PID, error) {
+	// add a span context
+	ctx, span := telemetry.SpanContext(ctx, "SpawnChild")
+	defer span.End()
 	// first check whether the actor is ready to start another actor
 	if !p.IsOnline() {
 		return nil, ErrNotReady
@@ -316,7 +339,7 @@ func (p *pid) SpawnChild(ctx context.Context, kind, id string, actor Actor) (PID
 	cid := newPID(ctx, actor,
 		withInitMaxRetries(p.initMaxRetries),
 		withPassivationAfter(p.passivateAfter),
-		withSendReplyTimeout(p.sendRecvTimeout),
+		withSendReplyTimeout(p.sendReplyTimeout),
 		withCustomLogger(p.logger),
 		withActorSystem(p.system),
 		withLocalID(kind, id),
@@ -333,26 +356,46 @@ func (p *pid) SpawnChild(ctx context.Context, kind, id string, actor Actor) (PID
 	return cid, nil
 }
 
+// MailboxSize returns the mailbox size a given time
+func (p *pid) MailboxSize(ctx context.Context) uint64 {
+	// add a span context
+	ctx, span := telemetry.SpanContext(ctx, "MailboxSize")
+	defer span.End()
+	return p.mailboxSizeCounter.Load()
+}
+
 // ReceivedCount returns the total number of messages processed by the actor
 // at a given time while the actor is still alive
 func (p *pid) ReceivedCount(ctx context.Context) uint64 {
+	// add a span context
+	ctx, span := telemetry.SpanContext(ctx, "ReceivedCount")
+	defer span.End()
 	return p.receivedMessageCounter.Load()
 }
 
 // ErrorsCount returns the total number of panic attacks that occur while the actor is processing messages
 // at a given point in time while the actor heart is still beating
 func (p *pid) ErrorsCount(ctx context.Context) uint64 {
+	// add a span context
+	ctx, span := telemetry.SpanContext(ctx, "ErrorsCount")
+	defer span.End()
 	return p.panicCounter.Load()
 }
 
 // RestartCount returns the number of times the actor has restarted
 func (p *pid) RestartCount(ctx context.Context) uint64 {
+	// add a span context
+	ctx, span := telemetry.SpanContext(ctx, "RestartCount")
+	defer span.End()
 	return p.restartCounter.Load()
 }
 
 // SendSync sends a synchronous message to another actor and expect a response.
 // This block until a response is received or timed out.
 func (p *pid) SendSync(ctx context.Context, to PID, message proto.Message) (response proto.Message, err error) {
+	// add a span context
+	ctx, span := telemetry.SpanContext(ctx, "SendSync")
+	defer span.End()
 	// make sure the actor is live
 	if !to.IsOnline() {
 		return nil, ErrNotReady
@@ -386,7 +429,7 @@ func (p *pid) SendSync(ctx context.Context, to PID, message proto.Message) (resp
 	to.doReceive(context)
 
 	// await patiently to receive the response from the actor
-	for await := time.After(p.sendRecvTimeout); ; {
+	for await := time.After(p.sendReplyTimeout); ; {
 		select {
 		case response = <-context.response:
 			return
@@ -399,6 +442,10 @@ func (p *pid) SendSync(ctx context.Context, to PID, message proto.Message) (resp
 
 // SendAsync sends an asynchronous message to another PID
 func (p *pid) SendAsync(ctx context.Context, to PID, message proto.Message) error {
+	// add a span context
+	ctx, span := telemetry.SpanContext(ctx, "SendAsync")
+	defer span.End()
+
 	// make sure the recipient actor is live
 	if !to.IsOnline() {
 		return ErrNotReady
@@ -439,6 +486,10 @@ func (p *pid) SendAsync(ctx context.Context, to PID, message proto.Message) erro
 // All current messages in the mailbox will be processed before the actor shutdown after a period of time
 // that can be configured. All child actors will be gracefully shutdown.
 func (p *pid) Shutdown(ctx context.Context) error {
+	// add a span context
+	ctx, span := telemetry.SpanContext(ctx, "Shutdown")
+	defer span.End()
+
 	p.logger.Info("Shutdown process has started...")
 	// stop the passivation listener
 	p.haltPassivationLnr <- Unit{}
@@ -518,6 +569,8 @@ func (p *pid) doReceive(ctx ReceiveContext) {
 
 	// push the message to the actor mailbox
 	p.mailbox <- ctx
+	// increment the mailbox size counter
+	p.mailboxSizeCounter.Store(uint64(len(p.mailbox)))
 	// increase the received message counter
 	p.receivedMessageCounter.Inc()
 }
@@ -525,6 +578,9 @@ func (p *pid) doReceive(ctx ReceiveContext) {
 // init initializes the given actor and init processing messages
 // when the initialization failed the actor is automatically shutdown
 func (p *pid) init(ctx context.Context) {
+	// add a span context
+	ctx, span := telemetry.SpanContext(ctx, "Init")
+	defer span.End()
 	// add some logging info
 	p.logger.Info("Initialization process has started...")
 	// create the exponential backoff object
@@ -574,7 +630,10 @@ func (p *pid) resetBehaviorStack() {
 }
 
 func (p *pid) freeChildren(ctx context.Context) {
-	// iterate the pids and shutdown the child actors
+	// add a span context
+	ctx, span := telemetry.SpanContext(ctx, "FreeChildren")
+	defer span.End()
+	// iterate the child actors and shut them down
 	for _, child := range p.children.List() {
 		// stop the child actor
 		if err := child.Shutdown(ctx); err != nil {
@@ -587,6 +646,9 @@ func (p *pid) freeChildren(ctx context.Context) {
 }
 
 func (p *pid) stop(ctx context.Context) {
+	// add a span context
+	ctx, span := telemetry.SpanContext(ctx, "Stop")
+	defer span.End()
 	// stop the actor to receive and send message
 	p.mu.Lock()
 	p.isOnline = false
@@ -628,6 +690,14 @@ func (p *pid) stop(ctx context.Context) {
 	ticker.Stop()
 }
 
+// Behaviors returns the behavior stack
+func (p *pid) behaviors() BehaviorStack {
+	p.mu.Lock()
+	behaviors := p.behaviorStack
+	p.mu.Unlock()
+	return behaviors
+}
+
 // setBehavior is a utility function that helps set the actor behavior
 func (p *pid) setBehavior(behavior Behavior) {
 	p.mu.Lock()
@@ -657,4 +727,29 @@ func (p *pid) unsetBehaviorStacked() {
 	p.mu.Lock()
 	p.behaviorStack.Pop()
 	p.mu.Unlock()
+}
+
+// registerMetrics register the PID metrics with OTel instrumentation.
+func (p *pid) registerMetrics() error {
+	// grab the OTel meter
+	meter := p.telemetry.Meter
+	// create an instance of the ActorMetrics
+	metrics, err := telemetry.NewMetrics(meter)
+	// handle the error
+	if err != nil {
+		return err
+	}
+
+	// register the metrics
+	return meter.RegisterCallback([]instrument.Asynchronous{
+		metrics.ReceivedCount,
+		metrics.RestartedCount,
+		metrics.PanicCount,
+		metrics.MailboxSize,
+	}, func(ctx context.Context) {
+		metrics.ReceivedCount.Observe(ctx, int64(p.ReceivedCount(ctx)))
+		metrics.PanicCount.Observe(ctx, int64(p.ErrorsCount(ctx)))
+		metrics.RestartedCount.Observe(ctx, int64(p.RestartCount(ctx)))
+		metrics.MailboxSize.Observe(ctx, int64(p.MailboxSize(ctx)))
+	})
 }

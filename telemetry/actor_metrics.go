@@ -16,11 +16,12 @@ const (
 	mailboxGaugeName              = "actor_mailbox_gauge"
 	restartedCounterName          = "actor_restarted_count"
 	receivedDurationHistogramName = "actor_received_duration"
+	actorSystemActorsCounterName  = "actor_system_actors_count"
 )
 
-// Metrics define the type of metrics we are collecting
+// ActorMetrics define the type of metrics we are collecting
 // from an actor
-type Metrics struct {
+type ActorMetrics struct {
 	// captures the number of times a given actor has panic
 	PanicCount asyncint64.Counter
 	// captures the actor mailbox size
@@ -33,10 +34,10 @@ type Metrics struct {
 	ReceivedDurationHistogram syncfloat64.Histogram
 }
 
-// NewMetrics creates an instance of Metrics
-func NewMetrics(meter metric.Meter) (*Metrics, error) {
+// NewMetrics creates an instance of ActorMetrics
+func NewMetrics(meter metric.Meter) (*ActorMetrics, error) {
 	// create an instance of metrics
-	metrics := new(Metrics)
+	metrics := new(ActorMetrics)
 	var err error
 
 	// set the various counters

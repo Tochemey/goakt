@@ -25,8 +25,8 @@ Also, check reference section at the end of the post for more material regarding
 - [x] Behaviors (Become/BecomeStacked/UnBecome/UnBecomeStacked)
 - [x] EventSourcing (event sourced/cqrs)
 - [x] Logger interface. The default logger use zerolog and log to console
-- [x] Examples (check the [examples](./examples) folder)
-- [ ] Metrics
+- [x] Examples (check the [examples'](./examples) folder)
+- [x] Integration with [OpenTelemetry](https://github.com/open-telemetry/opentelemetry-go) for traces and metrics.
 - [ ] Clustering
 
 ## Installation

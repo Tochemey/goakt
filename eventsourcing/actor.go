@@ -6,13 +6,13 @@ import (
 	"sync"
 	"time"
 
-	"google.golang.org/protobuf/proto"
-
 	"github.com/pkg/errors"
 	"github.com/tochemey/goakt/actors"
 	"github.com/tochemey/goakt/eventsourcing/storage"
 	pb "github.com/tochemey/goakt/pb/goakt/v1"
+	"github.com/tochemey/goakt/telemetry"
 	"go.uber.org/atomic"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -73,6 +73,9 @@ func NewEventSourcedActor[T State](behavior EventSourcedBehavior[T], eventsStore
 // PreStart pre-starts the actor
 // At this stage we connect to the various stores
 func (p *eventSourcedActor[T]) PreStart(ctx context.Context) error {
+	// add a span context
+	ctx, span := telemetry.SpanContext(ctx, "PreStart")
+	defer span.End()
 	// acquire the lock
 	p.mu.Lock()
 	// release lock when done
@@ -97,6 +100,10 @@ func (p *eventSourcedActor[T]) PreStart(ctx context.Context) error {
 
 // Receive processes any message dropped into the actor mailbox.
 func (p *eventSourcedActor[T]) Receive(ctx actors.ReceiveContext) {
+	// add a span context
+	_, span := telemetry.SpanContext(ctx.Context(), "Receive")
+	defer span.End()
+
 	// acquire the lock
 	p.mu.Lock()
 	// release lock when done
@@ -250,6 +257,10 @@ func (p *eventSourcedActor[T]) Receive(ctx actors.ReceiveContext) {
 
 // PostStop prepares the actor to gracefully shutdown
 func (p *eventSourcedActor[T]) PostStop(ctx context.Context) error {
+	// add a span context
+	ctx, span := telemetry.SpanContext(ctx, "PostStop")
+	defer span.End()
+
 	// acquire the lock
 	p.mu.Lock()
 	// release lock when done
@@ -266,6 +277,10 @@ func (p *eventSourcedActor[T]) PostStop(ctx context.Context) error {
 // recoverFromSnapshot reset the persistent actor to the latest snapshot in case there is one
 // this is vital when the persistent actor is restarting.
 func (p *eventSourcedActor[T]) recoverFromSnapshot(ctx context.Context) error {
+	// add a span context
+	ctx, span := telemetry.SpanContext(ctx, "RecoverFromSnapshot")
+	defer span.End()
+
 	// check whether there is a snapshot to recover from
 	event, err := p.eventsStore.GetLatestEvent(ctx, p.PersistenceID())
 	// handle the error

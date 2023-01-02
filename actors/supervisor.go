@@ -12,7 +12,7 @@ func (p *pid) supervise(cid PID, watcher *Watcher) {
 		case <-watcher.Done:
 			return
 		case err := <-watcher.ErrChan:
-			p.logger.Errorf("child actor=%s is panicing: Err=%v", cid.Address(), err)
+			p.logger.Errorf("child actor=%s is panicking: Err=%v", cid.Address(), err)
 			switch p.supervisorStrategy {
 			case pb.StrategyDirective_STOP_DIRECTIVE:
 				// shutdown the actor and panic in case of error
