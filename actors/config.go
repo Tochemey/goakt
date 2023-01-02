@@ -8,6 +8,7 @@ import (
 
 	"github.com/tochemey/goakt/log"
 	pb "github.com/tochemey/goakt/pb/goakt/v1"
+	"github.com/tochemey/goakt/telemetry"
 )
 
 var (
@@ -36,6 +37,8 @@ type Config struct {
 	actorInitMaxRetries int
 	// Specifies the supervisor strategy
 	supervisorStrategy pb.StrategyDirective
+	// Specifies the telemetry setting
+	telemetry *telemetry.Telemetry
 }
 
 // NewConfig creates an instance of Config
@@ -57,6 +60,7 @@ func NewConfig(name, nodeHostAndPort string, options ...Option) (*Config, error)
 		replyTimeout:        100 * time.Millisecond,
 		actorInitMaxRetries: 5,
 		supervisorStrategy:  pb.StrategyDirective_STOP_DIRECTIVE,
+		telemetry:           telemetry.New(),
 	}
 	// apply the various options
 	for _, opt := range options {
@@ -170,5 +174,12 @@ func WithPassivationDisabled() Option {
 func WithSupervisorStrategy(strategy pb.StrategyDirective) Option {
 	return OptionFunc(func(config *Config) {
 		config.supervisorStrategy = strategy
+	})
+}
+
+// WithTelemetry sets the custom telemetry
+func WithTelemetry(telemetry *telemetry.Telemetry) Option {
+	return OptionFunc(func(config *Config) {
+		config.telemetry = telemetry
 	})
 }

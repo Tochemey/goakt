@@ -15,22 +15,22 @@ func TestOptions(t *testing.T) {
 	testCases := []struct {
 		name           string
 		option         Option
-		expectedConfig Config
+		expectedConfig Telemetry
 	}{
 		{
 			name:           "WithTracerProvider",
 			option:         WithTracerProvider(tracerProvider),
-			expectedConfig: Config{TracerProvider: tracerProvider},
+			expectedConfig: Telemetry{TracerProvider: tracerProvider},
 		},
 		{
 			name:           "WithMeterProvider",
 			option:         WithMeterProvider(meterProvider),
-			expectedConfig: Config{MeterProvider: meterProvider},
+			expectedConfig: Telemetry{MeterProvider: meterProvider},
 		},
 	}
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			var cfg Config
+			var cfg Telemetry
 			tc.option.Apply(&cfg)
 			assert.Equal(t, tc.expectedConfig, cfg)
 		})

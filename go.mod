@@ -6,7 +6,6 @@ require (
 	github.com/Masterminds/squirrel v1.5.3
 	github.com/XSAM/otelsql v0.17.1
 	github.com/cenkalti/backoff v2.2.1+incompatible
-	github.com/deckarep/golang-set/v2 v2.1.0
 	github.com/georgysavva/scany v1.2.1
 	github.com/google/uuid v1.3.0
 	github.com/lib/pq v1.10.7

@@ -11,46 +11,46 @@ const (
 	instrumentationName = "github.com/Tochemey/goakt"
 )
 
-// Config encapsulates some settings for an actor
-type Config struct {
+// Telemetry encapsulates some settings for an actor
+type Telemetry struct {
 	TracerProvider trace.TracerProvider
 	Tracer         trace.Tracer
 
 	MeterProvider metric.MeterProvider
 	Meter         metric.Meter
 
-	Metrics *Metrics
+	Metrics *ActorMetrics
 }
 
-// NewConfig creates an instance of Config
-func NewConfig(options ...Option) Config {
+// New creates an instance of Telemetry
+func New(options ...Option) *Telemetry {
 	// create a config instance
-	cfg := Config{
+	telemetry := &Telemetry{
 		TracerProvider: otel.GetTracerProvider(),
 		MeterProvider:  metricglobal.MeterProvider(),
 	}
 
 	// apply the various options
 	for _, opt := range options {
-		opt.Apply(&cfg)
+		opt.Apply(telemetry)
 	}
 
 	// set the tracer
-	cfg.Tracer = cfg.TracerProvider.Tracer(
+	telemetry.Tracer = telemetry.TracerProvider.Tracer(
 		instrumentationName,
 		trace.WithInstrumentationVersion(Version()),
 	)
 
 	// set the meter
-	cfg.Meter = cfg.MeterProvider.Meter(
+	telemetry.Meter = telemetry.MeterProvider.Meter(
 		instrumentationName,
 		metric.WithInstrumentationVersion(Version()),
 	)
 
 	// set the metrics
 	var err error
-	if cfg.Metrics, err = NewMetrics(cfg.Meter); err != nil {
+	if telemetry.Metrics, err = NewMetrics(telemetry.Meter); err != nil {
 		otel.Handle(err)
 	}
-	return cfg
+	return telemetry
 }

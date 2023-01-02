@@ -9,6 +9,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/tochemey/goakt/log"
 	"github.com/tochemey/goakt/pkg/eventbus"
+	"github.com/tochemey/goakt/telemetry"
 	"go.uber.org/atomic"
 )
 
@@ -91,6 +92,9 @@ func (a *actorSystem) EventBus() eventbus.EventBus {
 
 // Spawn creates or returns the instance of a given actor in the system
 func (a *actorSystem) Spawn(ctx context.Context, kind, id string, actor Actor) PID {
+	// add a span context
+	ctx, span := telemetry.SpanContext(ctx, "Spawn")
+	defer span.End()
 	// first check whether the actor system has started
 	if !a.hasStarted.Load() {
 		return nil
@@ -117,6 +121,7 @@ func (a *actorSystem) Spawn(ctx context.Context, kind, id string, actor Actor) P
 		withActorSystem(a),
 		withLocalID(kind, id),
 		withSupervisorStrategy(a.config.supervisorStrategy),
+		withTelemetry(a.config.telemetry),
 		withAddress(addr))
 
 	// add the given actor to the actor map
@@ -127,6 +132,9 @@ func (a *actorSystem) Spawn(ctx context.Context, kind, id string, actor Actor) P
 
 // StopActor stops a given actor in the system
 func (a *actorSystem) StopActor(ctx context.Context, kind, id string) error {
+	// add a span context
+	ctx, span := telemetry.SpanContext(ctx, "StopActor")
+	defer span.End()
 	// first check whether the actor system has started
 	if !a.hasStarted.Load() {
 		return errors.New("actor system has not started yet")
@@ -145,6 +153,9 @@ func (a *actorSystem) StopActor(ctx context.Context, kind, id string) error {
 
 // RestartActor restarts a given actor in the system
 func (a *actorSystem) RestartActor(ctx context.Context, kind, id string) (PID, error) {
+	// add a span context
+	ctx, span := telemetry.SpanContext(ctx, "RestartActor")
+	defer span.End()
 	// first check whether the actor system has started
 	if !a.hasStarted.Load() {
 		return nil, errors.New("actor system has not started yet")
@@ -189,6 +200,9 @@ func (a *actorSystem) Actors() []PID {
 
 // Start starts the actor system
 func (a *actorSystem) Start(ctx context.Context) error {
+	// add a span context
+	ctx, span := telemetry.SpanContext(ctx, "Start")
+	defer span.End()
 	// set the has started to true
 	a.hasStarted.Store(true)
 	// start the housekeeper
@@ -199,6 +213,9 @@ func (a *actorSystem) Start(ctx context.Context) error {
 
 // Stop stops the actor system
 func (a *actorSystem) Stop(ctx context.Context) error {
+	// add a span context
+	ctx, span := telemetry.SpanContext(ctx, "Stop")
+	defer span.End()
 	a.logger.Infof("%s System is shutting down on Node=%s...", a.name, a.nodeAddr)
 
 	// short-circuit the shutdown process when there are no online actors
