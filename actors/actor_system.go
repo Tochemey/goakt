@@ -10,6 +10,7 @@ import (
 	"github.com/tochemey/goakt/log"
 	"github.com/tochemey/goakt/pkg/eventbus"
 	"github.com/tochemey/goakt/telemetry"
+	"go.opentelemetry.io/otel/metric/instrument"
 	"go.uber.org/atomic"
 )
 
@@ -36,6 +37,8 @@ type ActorSystem interface {
 	RestartActor(ctx context.Context, kind, id string) (PID, error)
 	// EventBus returns the actor system event bus
 	EventBus() eventbus.EventBus
+	// NumActors returns the total number of active actors in the system
+	NumActors() uint64
 }
 
 // ActorSystem represent a collection of actors on a given node
@@ -56,6 +59,8 @@ type actorSystem struct {
 	hasStarted *atomic.Bool
 
 	eventBus eventbus.EventBus
+	// observability settings
+	telemetry *telemetry.Telemetry
 }
 
 // enforce compilation error when all methods of the ActorSystem interface are not implemented
@@ -79,6 +84,7 @@ func NewActorSystem(config *Config) (ActorSystem, error) {
 			config:     config,
 			hasStarted: atomic.NewBool(false),
 			eventBus:   eventbus.New(),
+			telemetry:  config.telemetry,
 		}
 	})
 
@@ -88,6 +94,11 @@ func NewActorSystem(config *Config) (ActorSystem, error) {
 // EventBus returns the actor system event streams
 func (a *actorSystem) EventBus() eventbus.EventBus {
 	return a.eventBus
+}
+
+// NumActors returns the total number of active actors in the system
+func (a *actorSystem) NumActors() uint64 {
+	return uint64(a.actors.Count())
 }
 
 // Spawn creates or returns the instance of a given actor in the system
@@ -205,8 +216,13 @@ func (a *actorSystem) Start(ctx context.Context) error {
 	defer span.End()
 	// set the has started to true
 	a.hasStarted.Store(true)
-	// start the housekeeper
-	//go a.housekeeping()
+	// start the metrics service
+	// register metrics. However, we don't panic when we fail to register
+	// we just log it for now
+	// TODO decide what to do when we fail to register the metrics or export the metrics registration as public
+	if err := a.registerMetrics(); err != nil {
+		a.logger.Error(errors.Wrapf(err, "failed to register actorSystem=%s metrics", a.name))
+	}
 	a.logger.Infof("%s System started on Node=%s...", a.name, a.nodeAddr)
 	return nil
 }
@@ -233,4 +249,23 @@ func (a *actorSystem) Stop(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// registerMetrics register the PID metrics with OTel instrumentation.
+func (a *actorSystem) registerMetrics() error {
+	// grab the OTel meter
+	meter := a.telemetry.Meter
+	// create an instance of the ActorMetrics
+	metrics, err := telemetry.NewSystemMetrics(meter)
+	// handle the error
+	if err != nil {
+		return err
+	}
+
+	// register the metrics
+	return meter.RegisterCallback([]instrument.Asynchronous{
+		metrics.ActorSystemActorsCount,
+	}, func(ctx context.Context) {
+		metrics.ActorSystemActorsCount.Observe(ctx, int64(a.NumActors()))
+	})
 }
