@@ -21,14 +21,9 @@ type Command proto.Message
 type Event proto.Message
 type State proto.Message
 
-// EventSourcedBehavior defines a event sourced behavior when modeling a CQRS Aggregate.
+// EventSourcedBehavior defines an event sourced behavior when modeling a CQRS Aggregate.
 type EventSourcedBehavior[T State] interface {
-	// Kind defines the kind of actor it is. This in combination with the PersistenceID uniquely identifies the
-	// event sourced actor. For instance Users, Accounts can all be used as kind.
-	Kind() string
-	// PersistenceID defines the id that will be used in the event journal.
-	// This helps track the event sourced actor in the events store.
-	PersistenceID() string
+	persistence.PersistentID
 	// InitialState returns the event sourced actor initial state
 	InitialState() T
 	// HandleCommand helps handle commands received by the event sourced actor. The command handlers define how to handle each incoming command,
@@ -113,7 +108,7 @@ func (p *eventSourcedActor[T]) Receive(ctx actors.ReceiveContext) {
 	switch command := ctx.Message().(type) {
 	case *pb.GetStateCommand:
 		// let us fetch the latest journal
-		latestEvent, err := p.eventsStore.GetLatestEvent(ctx.Context(), p.PersistenceID())
+		latestEvent, err := p.eventsStore.GetLatestEvent(ctx.Context(), p.ID())
 		// handle the error
 		if err != nil {
 			// create a new error reply
@@ -134,7 +129,7 @@ func (p *eventSourcedActor[T]) Receive(ctx actors.ReceiveContext) {
 		reply := &pb.CommandReply{
 			Reply: &pb.CommandReply_StateReply{
 				StateReply: &pb.StateReply{
-					PersistenceId:  p.PersistenceID(),
+					PersistenceId:  p.ID(),
 					State:          resultingState,
 					SequenceNumber: latestEvent.GetSequenceNumber(),
 					Timestamp:      latestEvent.GetTimestamp(),
@@ -208,7 +203,7 @@ func (p *eventSourcedActor[T]) Receive(ctx actors.ReceiveContext) {
 
 		// create the event
 		envelope := &pb.Event{
-			PersistenceId:  p.PersistenceID(),
+			PersistenceId:  p.ID(),
 			SequenceNumber: sequenceNumber,
 			IsDeleted:      false,
 			Event:          marshaledEvent,
@@ -242,7 +237,7 @@ func (p *eventSourcedActor[T]) Receive(ctx actors.ReceiveContext) {
 		reply := &pb.CommandReply{
 			Reply: &pb.CommandReply_StateReply{
 				StateReply: &pb.StateReply{
-					PersistenceId:  p.PersistenceID(),
+					PersistenceId:  p.ID(),
 					State:          marshaledState,
 					SequenceNumber: sequenceNumber,
 					Timestamp:      p.lastCommandTime.Unix(),
@@ -282,7 +277,7 @@ func (p *eventSourcedActor[T]) recoverFromSnapshot(ctx context.Context) error {
 	defer span.End()
 
 	// check whether there is a snapshot to recover from
-	event, err := p.eventsStore.GetLatestEvent(ctx, p.PersistenceID())
+	event, err := p.eventsStore.GetLatestEvent(ctx, p.ID())
 	// handle the error
 	if err != nil {
 		return errors.Wrap(err, "failed to recover the latest journal")
