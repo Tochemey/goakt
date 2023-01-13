@@ -8,8 +8,8 @@ import (
 
 	"github.com/pkg/errors"
 	"github.com/tochemey/goakt/actors"
-	"github.com/tochemey/goakt/eventsourcing/storage"
 	pb "github.com/tochemey/goakt/pb/goakt/v1"
+	"github.com/tochemey/goakt/persistence"
 	"github.com/tochemey/goakt/telemetry"
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
@@ -49,7 +49,7 @@ type EventSourcedBehavior[T State] interface {
 type eventSourcedActor[T State] struct {
 	EventSourcedBehavior[T]
 
-	eventsStore     storage.EventStore
+	eventsStore     persistence.EventStore
 	currentState    T
 	eventsCounter   *atomic.Uint64
 	lastCommandTime time.Time
@@ -61,7 +61,7 @@ type eventSourcedActor[T State] struct {
 var _ actors.Actor = &eventSourcedActor[State]{}
 
 // NewEventSourcedActor returns an instance of event sourced actor
-func NewEventSourcedActor[T State](behavior EventSourcedBehavior[T], eventsStore storage.EventStore) actors.Actor {
+func NewEventSourcedActor[T State](behavior EventSourcedBehavior[T], eventsStore persistence.EventStore) actors.Actor {
 	return &eventSourcedActor[T]{
 		EventSourcedBehavior: behavior,
 		eventsStore:          eventsStore,

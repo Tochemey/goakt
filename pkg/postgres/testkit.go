@@ -153,7 +153,7 @@ func (c TestDB) TableExists(ctx context.Context, tableName string) error {
 	_, err := c.Exec(ctx, stmt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil
+			return errors.New("table not found")
 		}
 		return err
 	}
