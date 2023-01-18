@@ -21,9 +21,6 @@ func TestSchemaUtils(t *testing.T) {
 	err = db.TableExists(ctx, "event_journal")
 	assert.NoError(t, err)
 
-	err = db.TableExists(ctx, "event_journal")
-	assert.NoError(t, err)
-
 	// clean up
 	assert.NoError(t, schemaUtils.DropTable(ctx))
 	assert.NoError(t, db.Disconnect(ctx))

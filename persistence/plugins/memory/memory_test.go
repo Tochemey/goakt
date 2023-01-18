@@ -5,8 +5,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/tochemey/goakt/eventsourcing/storage"
 	pb "github.com/tochemey/goakt/pb/goakt/v1"
+	"github.com/tochemey/goakt/persistence"
 	testpb "github.com/tochemey/goakt/test/data/pb/v1"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
@@ -18,7 +18,7 @@ func TestMemoryEventStore(t *testing.T) {
 		store := NewEventStore()
 		assert.NotNil(t, store)
 		var p interface{} = store
-		_, ok := p.(storage.EventStore)
+		_, ok := p.(persistence.EventStore)
 		assert.True(t, ok)
 	})
 	t.Run("testConnect", func(t *testing.T) {

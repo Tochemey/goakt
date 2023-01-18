@@ -7,8 +7,8 @@ import (
 
 	sq "github.com/Masterminds/squirrel"
 	"github.com/pkg/errors"
-	"github.com/tochemey/goakt/eventsourcing/storage"
 	pb "github.com/tochemey/goakt/pb/goakt/v1"
+	"github.com/tochemey/goakt/persistence"
 	"github.com/tochemey/goakt/pkg/postgres"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
@@ -46,7 +46,7 @@ type EventStore struct {
 }
 
 // make sure the PostgresEventStore implements the EventStore interface
-var _ storage.EventStore = &EventStore{}
+var _ persistence.EventStore = &EventStore{}
 
 // NewEventStore creates a new instance of PostgresEventStore
 func NewEventStore(config *postgres.Config) *EventStore {

@@ -7,8 +7,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/tochemey/goakt/eventsourcing/storage"
 	pb "github.com/tochemey/goakt/pb/goakt/v1"
+	"github.com/tochemey/goakt/persistence"
 	"github.com/tochemey/goakt/pkg/postgres"
 	testpb "github.com/tochemey/goakt/test/data/pb/v1"
 	"google.golang.org/protobuf/encoding/prototext"
@@ -30,7 +30,7 @@ func TestPostgresEventStore(t *testing.T) {
 		store := NewEventStore(config)
 		assert.NotNil(t, store)
 		var p interface{} = store
-		_, ok := p.(storage.EventStore)
+		_, ok := p.(persistence.EventStore)
 		assert.True(t, ok)
 	})
 	t.Run("testConnect:happy path", func(t *testing.T) {

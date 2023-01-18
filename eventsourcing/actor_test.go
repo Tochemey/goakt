@@ -10,10 +10,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tochemey/goakt/actors"
-	"github.com/tochemey/goakt/eventsourcing/storage/memory"
-	pgstore "github.com/tochemey/goakt/eventsourcing/storage/postgres"
 	"github.com/tochemey/goakt/log"
 	pb "github.com/tochemey/goakt/pb/goakt/v1"
+	"github.com/tochemey/goakt/persistence/plugins/memory"
+	persistencepg "github.com/tochemey/goakt/persistence/plugins/postgres"
 	"github.com/tochemey/goakt/pkg/postgres"
 	testpb "github.com/tochemey/goakt/test/data/pb/v1"
 	"go.uber.org/goleak"
@@ -52,7 +52,7 @@ func TestEventSourcedActor(t *testing.T) {
 		// create the persistence actor using the behavior previously created
 		persistentActor := NewEventSourcedActor[*testpb.Account](behavior, eventStore)
 		// spawn the actor
-		pid := actorSystem.Spawn(ctx, behavior.Kind(), behavior.PersistenceID(), persistentActor)
+		pid := actorSystem.Spawn(ctx, behavior.Kind(), behavior.ID(), persistentActor)
 		require.NotNil(t, pid)
 
 		var command proto.Message
@@ -143,7 +143,7 @@ func TestEventSourcedActor(t *testing.T) {
 		// create the persistence actor using the behavior previously created
 		persistentActor := NewEventSourcedActor[*testpb.Account](behavior, eventStore)
 		// spawn the actor
-		pid := actorSystem.Spawn(ctx, behavior.Kind(), behavior.PersistenceID(), persistentActor)
+		pid := actorSystem.Spawn(ctx, behavior.Kind(), behavior.ID(), persistentActor)
 		require.NotNil(t, pid)
 
 		var command proto.Message
@@ -223,7 +223,7 @@ func TestEventSourcedActor(t *testing.T) {
 		// create the persistence actor using the behavior previously created
 		persistentActor := NewEventSourcedActor[*testpb.Account](behavior, eventStore)
 		// spawn the actor
-		pid := actorSystem.Spawn(ctx, behavior.Kind(), behavior.PersistenceID(), persistentActor)
+		pid := actorSystem.Spawn(ctx, behavior.Kind(), behavior.ID(), persistentActor)
 		require.NotNil(t, pid)
 
 		command := &testpb.TestSend{}
@@ -273,7 +273,7 @@ func TestEventSourcedActor(t *testing.T) {
 		db := testContainer.GetTestDB()
 		// create the event store table
 		require.NoError(t, db.Connect(ctx))
-		schemaUtils := pgstore.NewSchemaUtils(db)
+		schemaUtils := persistencepg.NewSchemaUtils(db)
 		require.NoError(t, schemaUtils.CreateTable(ctx))
 
 		config := &postgres.Config{
@@ -284,7 +284,7 @@ func TestEventSourcedActor(t *testing.T) {
 			DBPassword: testDatabasePassword,
 			DBSchema:   testContainer.Schema(),
 		}
-		eventStore := pgstore.NewEventStore(config)
+		eventStore := persistencepg.NewEventStore(config)
 		require.NoError(t, eventStore.Connect(ctx))
 
 		// create a persistence id
@@ -295,7 +295,7 @@ func TestEventSourcedActor(t *testing.T) {
 		// create the persistence actor using the behavior previously created
 		persistentActor := NewEventSourcedActor[*testpb.Account](behavior, eventStore)
 		// spawn the actor
-		pid := actorSystem.Spawn(ctx, behavior.Kind(), behavior.PersistenceID(), persistentActor)
+		pid := actorSystem.Spawn(ctx, behavior.Kind(), behavior.ID(), persistentActor)
 		require.NotNil(t, pid)
 
 		var command proto.Message
@@ -352,12 +352,12 @@ func TestEventSourcedActor(t *testing.T) {
 		assert.True(t, proto.Equal(expected, resultingState))
 
 		// shutdown the persistent actor
-		assert.NoError(t, actorSystem.StopActor(ctx, behavior.Kind(), behavior.PersistenceID()))
+		assert.NoError(t, actorSystem.StopActor(ctx, behavior.Kind(), behavior.ID()))
 		// wait a while
 		time.Sleep(time.Second)
 
 		// restart the actor
-		pid, err = actorSystem.RestartActor(ctx, behavior.Kind(), behavior.PersistenceID())
+		pid, err = actorSystem.RestartActor(ctx, behavior.Kind(), behavior.ID())
 		assert.NoError(t, err)
 
 		// fetch the current state
@@ -405,8 +405,8 @@ func (a *testAccountBehavior) Kind() string {
 	return "Account"
 }
 
-// PersistenceID returns the persistence ID
-func (a *testAccountBehavior) PersistenceID() string {
+// ID returns the persistence ID
+func (a *testAccountBehavior) ID() string {
 	return a.id
 }
 

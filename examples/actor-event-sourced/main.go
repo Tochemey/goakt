@@ -11,10 +11,10 @@ import (
 	"github.com/pkg/errors"
 	goakt "github.com/tochemey/goakt/actors"
 	"github.com/tochemey/goakt/eventsourcing"
-	"github.com/tochemey/goakt/eventsourcing/storage/memory"
 	samplepb "github.com/tochemey/goakt/examples/protos/pb/v1"
 	"github.com/tochemey/goakt/log"
 	pb "github.com/tochemey/goakt/pb/goakt/v1"
+	"github.com/tochemey/goakt/persistence/plugins/memory"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -48,7 +48,7 @@ func main() {
 	// create the persistence actor using the behavior previously created
 	persistentActor := eventsourcing.NewEventSourcedActor[*samplepb.Account](behavior, eventStore)
 	// spawn the actor
-	pid := actorSystem.Spawn(ctx, behavior.Kind(), behavior.PersistenceID(), persistentActor)
+	pid := actorSystem.Spawn(ctx, behavior.Kind(), behavior.ID(), persistentActor)
 
 	// send some commands to the pid
 	var command proto.Message
@@ -112,8 +112,8 @@ func (a *AccountBehavior) Kind() string {
 	return "Account"
 }
 
-// PersistenceID returns the persistence ID
-func (a *AccountBehavior) PersistenceID() string {
+// ID returns the persistence ID
+func (a *AccountBehavior) ID() string {
 	return a.id
 }
 

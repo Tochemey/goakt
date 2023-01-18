@@ -5,8 +5,8 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/tochemey/goakt/eventsourcing/storage"
 	pb "github.com/tochemey/goakt/pb/goakt/v1"
+	"github.com/tochemey/goakt/persistence"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -25,7 +25,7 @@ type EventStore struct {
 	keepRecordsAfterDisconnect bool
 }
 
-var _ storage.EventStore = &EventStore{}
+var _ persistence.EventStore = &EventStore{}
 
 // NewEventStore creates a new instance of MemoryEventStore
 func NewEventStore() *EventStore {
