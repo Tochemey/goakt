@@ -96,7 +96,7 @@ func (p *eventSourcedActor[T]) PreStart(ctx context.Context) error {
 // Receive processes any message dropped into the actor mailbox.
 func (p *eventSourcedActor[T]) Receive(ctx actors.ReceiveContext) {
 	// add a span context
-	_, span := telemetry.SpanContext(ctx.Context(), "Receive")
+	goCtx, span := telemetry.SpanContext(ctx.Context(), "Receive")
 	defer span.End()
 
 	// acquire the lock
@@ -108,7 +108,7 @@ func (p *eventSourcedActor[T]) Receive(ctx actors.ReceiveContext) {
 	switch command := ctx.Message().(type) {
 	case *pb.GetStateCommand:
 		// let us fetch the latest journal
-		latestEvent, err := p.eventsStore.GetLatestEvent(ctx.Context(), p.ID())
+		latestEvent, err := p.eventsStore.GetLatestEvent(goCtx, p.ID())
 		// handle the error
 		if err != nil {
 			// create a new error reply
@@ -141,7 +141,7 @@ func (p *eventSourcedActor[T]) Receive(ctx actors.ReceiveContext) {
 		ctx.Response(reply)
 	default:
 		// pass the received command to the command handler
-		event, err := p.HandleCommand(ctx.Context(), command, p.currentState)
+		event, err := p.HandleCommand(goCtx, command, p.currentState)
 		// handle the command handler error
 		if err != nil {
 			// create a new error reply
@@ -171,7 +171,7 @@ func (p *eventSourcedActor[T]) Receive(ctx actors.ReceiveContext) {
 		}
 
 		// process the event by calling the event handler
-		resultingState, err := p.HandleEvent(ctx.Context(), event, p.currentState)
+		resultingState, err := p.HandleEvent(goCtx, event, p.currentState)
 		// handle the event handler error
 		if err != nil {
 			// create a new error reply
@@ -215,7 +215,7 @@ func (p *eventSourcedActor[T]) Receive(ctx actors.ReceiveContext) {
 		journals := []*pb.Event{envelope}
 
 		// TODO persist the event in batch using a child actor
-		if err := p.eventsStore.WriteEvents(ctx.Context(), journals); err != nil {
+		if err := p.eventsStore.WriteEvents(goCtx, journals); err != nil {
 			// create a new error reply
 			reply := &pb.CommandReply{
 				Reply: &pb.CommandReply_ErrorReply{
@@ -232,7 +232,7 @@ func (p *eventSourcedActor[T]) Receive(ctx actors.ReceiveContext) {
 		// let us push the envelope to the event stream
 		// TODO in its own go-routine
 		payload, _ := proto.Marshal(envelope)
-		ctx.Self().ActorSystem().EventBus().Publish(ctx.Context(), Topic, payload)
+		ctx.Self().ActorSystem().EventBus().Publish(goCtx, Topic, payload)
 
 		reply := &pb.CommandReply{
 			Reply: &pb.CommandReply_StateReply{

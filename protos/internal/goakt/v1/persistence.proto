@@ -19,6 +19,17 @@ message Event {
   int64 timestamp = 6;
 }
 
+message Offset {
+  // Specifies the persistence unique identifier
+  string persistence_id = 1;
+  // Specifies the current_offset
+  // The current offset should match the sequence number of the given event consumed by the
+  // projection
+  uint64 current_offset = 2;
+  // Specifies the timestamp
+  int64 timestamp = 3;
+}
+
 message CommandReply {
   // the actual command reply
   oneof reply {
