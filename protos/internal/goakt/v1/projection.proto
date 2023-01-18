@@ -1,0 +1,39 @@
+syntax = "proto3";
+
+package goakt.v1;
+
+import "google/protobuf/any.proto";
+
+message Offset {
+  // Specifies the persistence unique identifier
+  string persistence_id = 1;
+  // Specifies the projection name.
+  string projection_name = 2;
+  // Specifies the current_offset
+  // The current offset should match the sequence number of the given event consumed by the
+  // projection
+  uint64 current_offset = 3;
+  // Specifies the timestamp
+  int64 timestamp = 4;
+}
+
+message ProjectionID {
+  // Specifies the projection name
+  // The projection name can be shared for each instance of a Projection
+  string projection_name = 1;
+  // Specifies the persistence id
+  // The projection id should be unique per instance of a Projection
+  string persistence_id = 2;
+}
+
+message GetLatestOffset {
+  // Specifies the projection Id
+  ProjectionID projection_id = 1;
+}
+
+message GetCurrentOffset {
+  // Specifies the projection Id
+  ProjectionID projection_id = 1;
+}
+
+message StartProjection {}

@@ -114,83 +114,6 @@ func (x *Event) GetTimestamp() int64 {
 	return 0
 }
 
-type Offset struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
-	unknownFields protoimpl.UnknownFields
-
-	// Specifies the persistence unique identifier
-	PersistenceId string `protobuf:"bytes,1,opt,name=persistence_id,json=persistenceId,proto3" json:"persistence_id,omitempty"`
-	// Specifies the projection name.
-	ProjectionName string `protobuf:"bytes,2,opt,name=projection_name,json=projectionName,proto3" json:"projection_name,omitempty"`
-	// Specifies the current_offset
-	// The current offset should match the sequence number of the given event consumed by the
-	// projection
-	CurrentOffset uint64 `protobuf:"varint,3,opt,name=current_offset,json=currentOffset,proto3" json:"current_offset,omitempty"`
-	// Specifies the timestamp
-	Timestamp int64 `protobuf:"varint,4,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
-}
-
-func (x *Offset) Reset() {
-	*x = Offset{}
-	if protoimpl.UnsafeEnabled {
-		mi := &file_goakt_v1_persistence_proto_msgTypes[1]
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		ms.StoreMessageInfo(mi)
-	}
-}
-
-func (x *Offset) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*Offset) ProtoMessage() {}
-
-func (x *Offset) ProtoReflect() protoreflect.Message {
-	mi := &file_goakt_v1_persistence_proto_msgTypes[1]
-	if protoimpl.UnsafeEnabled && x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use Offset.ProtoReflect.Descriptor instead.
-func (*Offset) Descriptor() ([]byte, []int) {
-	return file_goakt_v1_persistence_proto_rawDescGZIP(), []int{1}
-}
-
-func (x *Offset) GetPersistenceId() string {
-	if x != nil {
-		return x.PersistenceId
-	}
-	return ""
-}
-
-func (x *Offset) GetProjectionName() string {
-	if x != nil {
-		return x.ProjectionName
-	}
-	return ""
-}
-
-func (x *Offset) GetCurrentOffset() uint64 {
-	if x != nil {
-		return x.CurrentOffset
-	}
-	return 0
-}
-
-func (x *Offset) GetTimestamp() int64 {
-	if x != nil {
-		return x.Timestamp
-	}
-	return 0
-}
-
 type CommandReply struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
@@ -209,7 +132,7 @@ type CommandReply struct {
 func (x *CommandReply) Reset() {
 	*x = CommandReply{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_goakt_v1_persistence_proto_msgTypes[2]
+		mi := &file_goakt_v1_persistence_proto_msgTypes[1]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -222,7 +145,7 @@ func (x *CommandReply) String() string {
 func (*CommandReply) ProtoMessage() {}
 
 func (x *CommandReply) ProtoReflect() protoreflect.Message {
-	mi := &file_goakt_v1_persistence_proto_msgTypes[2]
+	mi := &file_goakt_v1_persistence_proto_msgTypes[1]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -235,7 +158,7 @@ func (x *CommandReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CommandReply.ProtoReflect.Descriptor instead.
 func (*CommandReply) Descriptor() ([]byte, []int) {
-	return file_goakt_v1_persistence_proto_rawDescGZIP(), []int{2}
+	return file_goakt_v1_persistence_proto_rawDescGZIP(), []int{1}
 }
 
 func (m *CommandReply) GetReply() isCommandReply_Reply {
@@ -309,7 +232,7 @@ type StateReply struct {
 func (x *StateReply) Reset() {
 	*x = StateReply{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_goakt_v1_persistence_proto_msgTypes[3]
+		mi := &file_goakt_v1_persistence_proto_msgTypes[2]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -322,7 +245,7 @@ func (x *StateReply) String() string {
 func (*StateReply) ProtoMessage() {}
 
 func (x *StateReply) ProtoReflect() protoreflect.Message {
-	mi := &file_goakt_v1_persistence_proto_msgTypes[3]
+	mi := &file_goakt_v1_persistence_proto_msgTypes[2]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -335,7 +258,7 @@ func (x *StateReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StateReply.ProtoReflect.Descriptor instead.
 func (*StateReply) Descriptor() ([]byte, []int) {
-	return file_goakt_v1_persistence_proto_rawDescGZIP(), []int{3}
+	return file_goakt_v1_persistence_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *StateReply) GetPersistenceId() string {
@@ -378,7 +301,7 @@ type ErrorReply struct {
 func (x *ErrorReply) Reset() {
 	*x = ErrorReply{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_goakt_v1_persistence_proto_msgTypes[4]
+		mi := &file_goakt_v1_persistence_proto_msgTypes[3]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -391,7 +314,7 @@ func (x *ErrorReply) String() string {
 func (*ErrorReply) ProtoMessage() {}
 
 func (x *ErrorReply) ProtoReflect() protoreflect.Message {
-	mi := &file_goakt_v1_persistence_proto_msgTypes[4]
+	mi := &file_goakt_v1_persistence_proto_msgTypes[3]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -404,7 +327,7 @@ func (x *ErrorReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ErrorReply.ProtoReflect.Descriptor instead.
 func (*ErrorReply) Descriptor() ([]byte, []int) {
-	return file_goakt_v1_persistence_proto_rawDescGZIP(), []int{4}
+	return file_goakt_v1_persistence_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *ErrorReply) GetMessage() string {
@@ -423,7 +346,7 @@ type NoReply struct {
 func (x *NoReply) Reset() {
 	*x = NoReply{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_goakt_v1_persistence_proto_msgTypes[5]
+		mi := &file_goakt_v1_persistence_proto_msgTypes[4]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -436,7 +359,7 @@ func (x *NoReply) String() string {
 func (*NoReply) ProtoMessage() {}
 
 func (x *NoReply) ProtoReflect() protoreflect.Message {
-	mi := &file_goakt_v1_persistence_proto_msgTypes[5]
+	mi := &file_goakt_v1_persistence_proto_msgTypes[4]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -449,7 +372,7 @@ func (x *NoReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NoReply.ProtoReflect.Descriptor instead.
 func (*NoReply) Descriptor() ([]byte, []int) {
-	return file_goakt_v1_persistence_proto_rawDescGZIP(), []int{5}
+	return file_goakt_v1_persistence_proto_rawDescGZIP(), []int{4}
 }
 
 // GetStateCommand tells the PersistentActor
@@ -463,7 +386,7 @@ type GetStateCommand struct {
 func (x *GetStateCommand) Reset() {
 	*x = GetStateCommand{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_goakt_v1_persistence_proto_msgTypes[6]
+		mi := &file_goakt_v1_persistence_proto_msgTypes[5]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -476,7 +399,7 @@ func (x *GetStateCommand) String() string {
 func (*GetStateCommand) ProtoMessage() {}
 
 func (x *GetStateCommand) ProtoReflect() protoreflect.Message {
-	mi := &file_goakt_v1_persistence_proto_msgTypes[6]
+	mi := &file_goakt_v1_persistence_proto_msgTypes[5]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -489,7 +412,7 @@ func (x *GetStateCommand) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetStateCommand.ProtoReflect.Descriptor instead.
 func (*GetStateCommand) Descriptor() ([]byte, []int) {
-	return file_goakt_v1_persistence_proto_rawDescGZIP(), []int{6}
+	return file_goakt_v1_persistence_proto_rawDescGZIP(), []int{5}
 }
 
 var File_goakt_v1_persistence_proto protoreflect.FileDescriptor
@@ -515,16 +438,6 @@ var file_goakt_v1_persistence_proto_rawDesc = []byte{
 	0x66, 0x2e, 0x41, 0x6e, 0x79, 0x52, 0x0e, 0x72, 0x65, 0x73, 0x75, 0x6c, 0x74, 0x69, 0x6e, 0x67,
 	0x53, 0x74, 0x61, 0x74, 0x65, 0x12, 0x1c, 0x0a, 0x09, 0x74, 0x69, 0x6d, 0x65, 0x73, 0x74, 0x61,
 	0x6d, 0x70, 0x18, 0x06, 0x20, 0x01, 0x28, 0x03, 0x52, 0x09, 0x74, 0x69, 0x6d, 0x65, 0x73, 0x74,
-	0x61, 0x6d, 0x70, 0x22, 0x9d, 0x01, 0x0a, 0x06, 0x4f, 0x66, 0x66, 0x73, 0x65, 0x74, 0x12, 0x25,
-	0x0a, 0x0e, 0x70, 0x65, 0x72, 0x73, 0x69, 0x73, 0x74, 0x65, 0x6e, 0x63, 0x65, 0x5f, 0x69, 0x64,
-	0x18, 0x01, 0x20, 0x01, 0x28, 0x09, 0x52, 0x0d, 0x70, 0x65, 0x72, 0x73, 0x69, 0x73, 0x74, 0x65,
-	0x6e, 0x63, 0x65, 0x49, 0x64, 0x12, 0x27, 0x0a, 0x0f, 0x70, 0x72, 0x6f, 0x6a, 0x65, 0x63, 0x74,
-	0x69, 0x6f, 0x6e, 0x5f, 0x6e, 0x61, 0x6d, 0x65, 0x18, 0x02, 0x20, 0x01, 0x28, 0x09, 0x52, 0x0e,
-	0x70, 0x72, 0x6f, 0x6a, 0x65, 0x63, 0x74, 0x69, 0x6f, 0x6e, 0x4e, 0x61, 0x6d, 0x65, 0x12, 0x25,
-	0x0a, 0x0e, 0x63, 0x75, 0x72, 0x72, 0x65, 0x6e, 0x74, 0x5f, 0x6f, 0x66, 0x66, 0x73, 0x65, 0x74,
-	0x18, 0x03, 0x20, 0x01, 0x28, 0x04, 0x52, 0x0d, 0x63, 0x75, 0x72, 0x72, 0x65, 0x6e, 0x74, 0x4f,
-	0x66, 0x66, 0x73, 0x65, 0x74, 0x12, 0x1c, 0x0a, 0x09, 0x74, 0x69, 0x6d, 0x65, 0x73, 0x74, 0x61,
-	0x6d, 0x70, 0x18, 0x04, 0x20, 0x01, 0x28, 0x03, 0x52, 0x09, 0x74, 0x69, 0x6d, 0x65, 0x73, 0x74,
 	0x61, 0x6d, 0x70, 0x22, 0xb9, 0x01, 0x0a, 0x0c, 0x43, 0x6f, 0x6d, 0x6d, 0x61, 0x6e, 0x64, 0x52,
 	0x65, 0x70, 0x6c, 0x79, 0x12, 0x37, 0x0a, 0x0b, 0x73, 0x74, 0x61, 0x74, 0x65, 0x5f, 0x72, 0x65,
 	0x70, 0x6c, 0x79, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x14, 0x2e, 0x67, 0x6f, 0x61, 0x6b,
@@ -576,24 +489,23 @@ func file_goakt_v1_persistence_proto_rawDescGZIP() []byte {
 	return file_goakt_v1_persistence_proto_rawDescData
 }
 
-var file_goakt_v1_persistence_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
+var file_goakt_v1_persistence_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
 var file_goakt_v1_persistence_proto_goTypes = []interface{}{
 	(*Event)(nil),           // 0: goakt.v1.Event
-	(*Offset)(nil),          // 1: goakt.v1.Offset
-	(*CommandReply)(nil),    // 2: goakt.v1.CommandReply
-	(*StateReply)(nil),      // 3: goakt.v1.StateReply
-	(*ErrorReply)(nil),      // 4: goakt.v1.ErrorReply
-	(*NoReply)(nil),         // 5: goakt.v1.NoReply
-	(*GetStateCommand)(nil), // 6: goakt.v1.GetStateCommand
-	(*anypb.Any)(nil),       // 7: google.protobuf.Any
+	(*CommandReply)(nil),    // 1: goakt.v1.CommandReply
+	(*StateReply)(nil),      // 2: goakt.v1.StateReply
+	(*ErrorReply)(nil),      // 3: goakt.v1.ErrorReply
+	(*NoReply)(nil),         // 4: goakt.v1.NoReply
+	(*GetStateCommand)(nil), // 5: goakt.v1.GetStateCommand
+	(*anypb.Any)(nil),       // 6: google.protobuf.Any
 }
 var file_goakt_v1_persistence_proto_depIdxs = []int32{
-	7, // 0: goakt.v1.Event.event:type_name -> google.protobuf.Any
-	7, // 1: goakt.v1.Event.resulting_state:type_name -> google.protobuf.Any
-	3, // 2: goakt.v1.CommandReply.state_reply:type_name -> goakt.v1.StateReply
-	4, // 3: goakt.v1.CommandReply.error_reply:type_name -> goakt.v1.ErrorReply
-	5, // 4: goakt.v1.CommandReply.no_reply:type_name -> goakt.v1.NoReply
-	7, // 5: goakt.v1.StateReply.state:type_name -> google.protobuf.Any
+	6, // 0: goakt.v1.Event.event:type_name -> google.protobuf.Any
+	6, // 1: goakt.v1.Event.resulting_state:type_name -> google.protobuf.Any
+	2, // 2: goakt.v1.CommandReply.state_reply:type_name -> goakt.v1.StateReply
+	3, // 3: goakt.v1.CommandReply.error_reply:type_name -> goakt.v1.ErrorReply
+	4, // 4: goakt.v1.CommandReply.no_reply:type_name -> goakt.v1.NoReply
+	6, // 5: goakt.v1.StateReply.state:type_name -> google.protobuf.Any
 	6, // [6:6] is the sub-list for method output_type
 	6, // [6:6] is the sub-list for method input_type
 	6, // [6:6] is the sub-list for extension type_name
@@ -620,18 +532,6 @@ func file_goakt_v1_persistence_proto_init() {
 			}
 		}
 		file_goakt_v1_persistence_proto_msgTypes[1].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*Offset); i {
-			case 0:
-				return &v.state
-			case 1:
-				return &v.sizeCache
-			case 2:
-				return &v.unknownFields
-			default:
-				return nil
-			}
-		}
-		file_goakt_v1_persistence_proto_msgTypes[2].Exporter = func(v interface{}, i int) interface{} {
 			switch v := v.(*CommandReply); i {
 			case 0:
 				return &v.state
@@ -643,7 +543,7 @@ func file_goakt_v1_persistence_proto_init() {
 				return nil
 			}
 		}
-		file_goakt_v1_persistence_proto_msgTypes[3].Exporter = func(v interface{}, i int) interface{} {
+		file_goakt_v1_persistence_proto_msgTypes[2].Exporter = func(v interface{}, i int) interface{} {
 			switch v := v.(*StateReply); i {
 			case 0:
 				return &v.state
@@ -655,7 +555,7 @@ func file_goakt_v1_persistence_proto_init() {
 				return nil
 			}
 		}
-		file_goakt_v1_persistence_proto_msgTypes[4].Exporter = func(v interface{}, i int) interface{} {
+		file_goakt_v1_persistence_proto_msgTypes[3].Exporter = func(v interface{}, i int) interface{} {
 			switch v := v.(*ErrorReply); i {
 			case 0:
 				return &v.state
@@ -667,7 +567,7 @@ func file_goakt_v1_persistence_proto_init() {
 				return nil
 			}
 		}
-		file_goakt_v1_persistence_proto_msgTypes[5].Exporter = func(v interface{}, i int) interface{} {
+		file_goakt_v1_persistence_proto_msgTypes[4].Exporter = func(v interface{}, i int) interface{} {
 			switch v := v.(*NoReply); i {
 			case 0:
 				return &v.state
@@ -679,7 +579,7 @@ func file_goakt_v1_persistence_proto_init() {
 				return nil
 			}
 		}
-		file_goakt_v1_persistence_proto_msgTypes[6].Exporter = func(v interface{}, i int) interface{} {
+		file_goakt_v1_persistence_proto_msgTypes[5].Exporter = func(v interface{}, i int) interface{} {
 			switch v := v.(*GetStateCommand); i {
 			case 0:
 				return &v.state
@@ -692,7 +592,7 @@ func file_goakt_v1_persistence_proto_init() {
 			}
 		}
 	}
-	file_goakt_v1_persistence_proto_msgTypes[2].OneofWrappers = []interface{}{
+	file_goakt_v1_persistence_proto_msgTypes[1].OneofWrappers = []interface{}{
 		(*CommandReply_StateReply)(nil),
 		(*CommandReply_ErrorReply)(nil),
 		(*CommandReply_NoReply)(nil),
@@ -703,7 +603,7 @@ func file_goakt_v1_persistence_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: file_goakt_v1_persistence_proto_rawDesc,
 			NumEnums:      0,
-			NumMessages:   7,
+			NumMessages:   6,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
