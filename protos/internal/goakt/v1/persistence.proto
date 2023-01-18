@@ -22,12 +22,14 @@ message Event {
 message Offset {
   // Specifies the persistence unique identifier
   string persistence_id = 1;
+  // Specifies the projection name.
+  string projection_name = 2;
   // Specifies the current_offset
   // The current offset should match the sequence number of the given event consumed by the
   // projection
-  uint64 current_offset = 2;
+  uint64 current_offset = 3;
   // Specifies the timestamp
-  int64 timestamp = 3;
+  int64 timestamp = 4;
 }
 
 message CommandReply {
