@@ -43,7 +43,7 @@ func TestEventSourcedActor(t *testing.T) {
 		require.NoError(t, err)
 
 		// create the event store
-		eventStore := memory.NewEventStore()
+		eventStore := memory.NewJournalStore()
 		// create a persistence id
 		persistenceID := uuid.NewString()
 		// create the persistence behavior
@@ -134,7 +134,7 @@ func TestEventSourcedActor(t *testing.T) {
 		require.NoError(t, err)
 
 		// create the event store
-		eventStore := memory.NewEventStore()
+		eventStore := memory.NewJournalStore()
 		// create a persistence id
 		persistenceID := uuid.NewString()
 		// create the persistence behavior
@@ -214,7 +214,7 @@ func TestEventSourcedActor(t *testing.T) {
 		require.NoError(t, err)
 
 		// create the event store
-		eventStore := memory.NewEventStore()
+		eventStore := memory.NewJournalStore()
 		// create a persistence id
 		persistenceID := uuid.NewString()
 		// create the persistence behavior
@@ -284,7 +284,7 @@ func TestEventSourcedActor(t *testing.T) {
 			DBPassword: testDatabasePassword,
 			DBSchema:   testContainer.Schema(),
 		}
-		eventStore := persistencepg.NewEventStore(config)
+		eventStore := persistencepg.NewJournalStore(config)
 		require.NoError(t, eventStore.Connect(ctx))
 
 		// create a persistence id

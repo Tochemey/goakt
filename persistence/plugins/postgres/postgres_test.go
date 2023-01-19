@@ -16,8 +16,8 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-func TestPostgresEventStore(t *testing.T) {
-	t.Run("testNew", func(t *testing.T) {
+func TestPostgresJournalStore(t *testing.T) {
+	t.Run("testNewJournalStore", func(t *testing.T) {
 		config := &postgres.Config{
 			DBHost:     testContainer.Host(),
 			DBPort:     testContainer.Port(),
@@ -27,10 +27,10 @@ func TestPostgresEventStore(t *testing.T) {
 			DBSchema:   testContainer.Schema(),
 		}
 
-		store := NewEventStore(config)
+		store := NewJournalStore(config)
 		assert.NotNil(t, store)
 		var p interface{} = store
-		_, ok := p.(persistence.EventStore)
+		_, ok := p.(persistence.JournalStore)
 		assert.True(t, ok)
 	})
 	t.Run("testConnect:happy path", func(t *testing.T) {
@@ -44,7 +44,7 @@ func TestPostgresEventStore(t *testing.T) {
 			DBSchema:   testContainer.Schema(),
 		}
 
-		store := NewEventStore(config)
+		store := NewJournalStore(config)
 		assert.NotNil(t, store)
 		err := store.Connect(ctx)
 		assert.NoError(t, err)
@@ -62,7 +62,7 @@ func TestPostgresEventStore(t *testing.T) {
 			DBSchema:   testContainer.Schema(),
 		}
 
-		store := NewEventStore(config)
+		store := NewJournalStore(config)
 		assert.NotNil(t, store)
 		err := store.Connect(ctx)
 		assert.Error(t, err)
@@ -79,7 +79,7 @@ func TestPostgresEventStore(t *testing.T) {
 			DBSchema:   testContainer.Schema(),
 		}
 
-		store := NewEventStore(config)
+		store := NewJournalStore(config)
 		assert.NotNil(t, store)
 		err := store.Connect(ctx)
 		require.NoError(t, err)
@@ -153,7 +153,7 @@ func TestPostgresEventStore(t *testing.T) {
 			DBSchema:   testContainer.Schema(),
 		}
 
-		store := NewEventStore(config)
+		store := NewJournalStore(config)
 		assert.NotNil(t, store)
 		err := store.Connect(ctx)
 		require.NoError(t, err)
@@ -224,7 +224,7 @@ func TestPostgresEventStore(t *testing.T) {
 			DBSchema:   testContainer.Schema(),
 		}
 
-		store := NewEventStore(config)
+		store := NewJournalStore(config)
 		assert.NotNil(t, store)
 		err := store.Connect(ctx)
 		require.NoError(t, err)

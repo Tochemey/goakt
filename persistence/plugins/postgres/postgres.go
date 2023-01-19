@@ -10,6 +10,7 @@ import (
 	pb "github.com/tochemey/goakt/pb/goakt/v1"
 	"github.com/tochemey/goakt/persistence"
 	"github.com/tochemey/goakt/pkg/postgres"
+	"github.com/tochemey/goakt/telemetry"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/reflect/protoregistry"
@@ -31,9 +32,9 @@ var (
 	tableName = "event_journal"
 )
 
-// EventStore implements the EventStore interface
+// JournalStore implements the JournalStore interface
 // and helps persist events in a Postgres database
-type EventStore struct {
+type JournalStore struct {
 	db postgres.IDatabase
 	sb sq.StatementBuilderType
 	// insertBatchSize represents the chunk of data to bulk insert.
@@ -45,14 +46,14 @@ type EventStore struct {
 	insertBatchSize int
 }
 
-// make sure the PostgresEventStore implements the EventStore interface
-var _ persistence.EventStore = &EventStore{}
+// make sure the PostgresEventStore implements the JournalStore interface
+var _ persistence.JournalStore = &JournalStore{}
 
-// NewEventStore creates a new instance of PostgresEventStore
-func NewEventStore(config *postgres.Config) *EventStore {
+// NewJournalStore creates a new instance of PostgresEventStore
+func NewJournalStore(config *postgres.Config) *JournalStore {
 	// create the underlying db connection
 	db := postgres.New(config)
-	return &EventStore{
+	return &JournalStore{
 		db:              db,
 		sb:              sq.StatementBuilder.PlaceholderFormat(sq.Dollar),
 		insertBatchSize: 500,
@@ -60,17 +61,67 @@ func NewEventStore(config *postgres.Config) *EventStore {
 }
 
 // Connect connects to the underlying postgres database
-func (p *EventStore) Connect(ctx context.Context) error {
-	return p.db.Connect(ctx)
+func (s *JournalStore) Connect(ctx context.Context) error {
+	// add a span context
+	ctx, span := telemetry.SpanContext(ctx, "Journal.Connect")
+	defer span.End()
+	return s.db.Connect(ctx)
 }
 
 // Disconnect disconnects from the underlying postgres database
-func (p *EventStore) Disconnect(ctx context.Context) error {
-	return p.db.Disconnect(ctx)
+func (s *JournalStore) Disconnect(ctx context.Context) error {
+	// add a span context
+	ctx, span := telemetry.SpanContext(ctx, "Journal.Disconnect")
+	defer span.End()
+	return s.db.Disconnect(ctx)
+}
+
+// PersistenceIDs returns the distinct list of all the persistence ids in the journal store
+func (s *JournalStore) PersistenceIDs(ctx context.Context) (persistenceIDs []string, err error) {
+	// add a span context
+	ctx, span := telemetry.SpanContext(ctx, "Journal.PersistenceIDs")
+	defer span.End()
+
+	// create the database delete statement
+	statement := s.sb.
+		Select("persistence_id").
+		Distinct().
+		From(tableName)
+
+	// get the sql statement and the arguments
+	query, args, err := statement.ToSql()
+	// handle the error
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to build the sql statement")
+	}
+
+	// create the ds to hold the database record
+	type row struct {
+		PersistenceID string
+	}
+
+	// execute the query against the database
+	var rows []*row
+	err = s.db.SelectAll(ctx, &rows, query, args...)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to fetch the events from the database")
+	}
+
+	// grab the fetched records
+	persistenceIDs = make([]string, len(rows))
+	for index, row := range rows {
+		persistenceIDs[index] = row.PersistenceID
+	}
+
+	return
 }
 
 // WriteEvents writes a bunch of events into the underlying postgres database
-func (p *EventStore) WriteEvents(ctx context.Context, events []*pb.Event) error {
+func (s *JournalStore) WriteEvents(ctx context.Context, events []*pb.Event) error {
+	// add a span context
+	ctx, span := telemetry.SpanContext(ctx, "Journal.WriteEvents")
+	defer span.End()
+
 	// check whether the journals list is empty
 	if len(events) == 0 {
 		// do nothing
@@ -78,14 +129,14 @@ func (p *EventStore) WriteEvents(ctx context.Context, events []*pb.Event) error 
 	}
 
 	// let us begin a database transaction to make sure we atomically write those events into the database
-	tx, err := p.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 	// return the error in case we are unable to get a database transaction
 	if err != nil {
 		return errors.Wrap(err, "failed to obtain a database transaction")
 	}
 
 	// start creating the sql statement for insertion
-	statement := p.sb.Insert(tableName).Columns(columns...)
+	statement := s.sb.Insert(tableName).Columns(columns...)
 	for index, event := range events {
 		var (
 			eventManifest string
@@ -114,7 +165,7 @@ func (p *EventStore) WriteEvents(ctx context.Context, events []*pb.Event) error 
 			event.GetTimestamp(),
 		)
 
-		if (index+1)%p.insertBatchSize == 0 || index == len(events)-1 {
+		if (index+1)%s.insertBatchSize == 0 || index == len(events)-1 {
 			// get the SQL statement to run
 			query, args, err := statement.ToSql()
 			// handle the error while generating the SQL
@@ -133,7 +184,7 @@ func (p *EventStore) WriteEvents(ctx context.Context, events []*pb.Event) error 
 			}
 
 			// reset the statement for the next bulk
-			statement = p.sb.Insert(tableName).Columns(columns...)
+			statement = s.sb.Insert(tableName).Columns(columns...)
 		}
 	}
 
@@ -147,9 +198,13 @@ func (p *EventStore) WriteEvents(ctx context.Context, events []*pb.Event) error 
 }
 
 // DeleteEvents deletes events from the postgres up to a given sequence number (inclusive)
-func (p *EventStore) DeleteEvents(ctx context.Context, persistenceID string, toSequenceNumber uint64) error {
+func (s *JournalStore) DeleteEvents(ctx context.Context, persistenceID string, toSequenceNumber uint64) error {
+	// add a span context
+	ctx, span := telemetry.SpanContext(ctx, "Journal.DeleteEvents")
+	defer span.End()
+
 	// create the database delete statement
-	statement := p.sb.
+	statement := s.sb.
 		Delete(tableName).
 		Where(sq.Eq{"persistence_id": persistenceID}).
 		Where(sq.LtOrEq{"sequence_number": toSequenceNumber})
@@ -161,7 +216,7 @@ func (p *EventStore) DeleteEvents(ctx context.Context, persistenceID string, toS
 	}
 
 	// execute the sql statement
-	if _, err := p.db.Exec(ctx, query, args...); err != nil {
+	if _, err := s.db.Exec(ctx, query, args...); err != nil {
 		return errors.Wrap(err, "failed to delete events from the database")
 	}
 
@@ -169,9 +224,13 @@ func (p *EventStore) DeleteEvents(ctx context.Context, persistenceID string, toS
 }
 
 // ReplayEvents fetches events for a given persistence ID from a given sequence number(inclusive) to a given sequence number(inclusive)
-func (p *EventStore) ReplayEvents(ctx context.Context, persistenceID string, fromSequenceNumber, toSequenceNumber uint64, max uint64) ([]*pb.Event, error) {
+func (s *JournalStore) ReplayEvents(ctx context.Context, persistenceID string, fromSequenceNumber, toSequenceNumber uint64, max uint64) ([]*pb.Event, error) {
+	// add a span context
+	ctx, span := telemetry.SpanContext(ctx, "Journal.ReplayEvents")
+	defer span.End()
+
 	// create the database select statement
-	statement := p.sb.
+	statement := s.sb.
 		Select(columns...).
 		From(tableName).
 		Where(sq.Eq{"persistence_id": persistenceID}).
@@ -200,7 +259,7 @@ func (p *EventStore) ReplayEvents(ctx context.Context, persistenceID string, fro
 
 	// execute the query against the database
 	var rows []*row
-	err = p.db.SelectAll(ctx, &rows, query, args...)
+	err = s.db.SelectAll(ctx, &rows, query, args...)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to fetch the events from the database")
 	}
@@ -208,11 +267,11 @@ func (p *EventStore) ReplayEvents(ctx context.Context, persistenceID string, fro
 	events := make([]*pb.Event, 0, max)
 	for _, row := range rows {
 		// unmarshal the event and the state
-		evt, err := p.toProto(row.EventManifest, row.EventPayload)
+		evt, err := s.toProto(row.EventManifest, row.EventPayload)
 		if err != nil {
 			return nil, errors.Wrap(err, "failed to unmarshal the journal event")
 		}
-		state, err := p.toProto(row.StateManifest, row.StatePayload)
+		state, err := s.toProto(row.StateManifest, row.StatePayload)
 		if err != nil {
 			return nil, errors.Wrap(err, "failed to unmarshal the journal state")
 		}
@@ -231,9 +290,13 @@ func (p *EventStore) ReplayEvents(ctx context.Context, persistenceID string, fro
 }
 
 // GetLatestEvent fetches the latest event
-func (p *EventStore) GetLatestEvent(ctx context.Context, persistenceID string) (*pb.Event, error) {
+func (s *JournalStore) GetLatestEvent(ctx context.Context, persistenceID string) (*pb.Event, error) {
+	// add a span context
+	ctx, span := telemetry.SpanContext(ctx, "Journal.GetLatestEvent")
+	defer span.End()
+
 	// create the database select statement
-	statement := p.sb.
+	statement := s.sb.
 		Select(columns...).
 		From(tableName).
 		Where(sq.Eq{"persistence_id": persistenceID}).
@@ -260,7 +323,7 @@ func (p *EventStore) GetLatestEvent(ctx context.Context, persistenceID string) (
 
 	// execute the query against the database
 	data := new(row)
-	err = p.db.Select(ctx, data, query, args...)
+	err = s.db.Select(ctx, data, query, args...)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to fetch the latest event from the database")
 	}
@@ -271,11 +334,11 @@ func (p *EventStore) GetLatestEvent(ctx context.Context, persistenceID string) (
 	}
 
 	// unmarshal the event and the state
-	evt, err := p.toProto(data.EventManifest, data.EventPayload)
+	evt, err := s.toProto(data.EventManifest, data.EventPayload)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to unmarshal the journal event")
 	}
-	state, err := p.toProto(data.StateManifest, data.StatePayload)
+	state, err := s.toProto(data.StateManifest, data.StatePayload)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to unmarshal the journal state")
 	}
@@ -291,7 +354,7 @@ func (p *EventStore) GetLatestEvent(ctx context.Context, persistenceID string) (
 }
 
 // toProto converts a byte array given its manifest into a valid proto message
-func (p *EventStore) toProto(manifest string, bytea []byte) (*anypb.Any, error) {
+func (s *JournalStore) toProto(manifest string, bytea []byte) (*anypb.Any, error) {
 	mt, err := protoregistry.GlobalTypes.FindMessageByName(protoreflect.FullName(manifest))
 	if err != nil {
 		return nil, err

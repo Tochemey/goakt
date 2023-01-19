@@ -15,9 +15,9 @@ type item struct {
 	data  []byte
 }
 
-// EventStore keep in memory every journal
+// JournalStore keep in memory every journal
 // NOTE: NOT RECOMMENDED FOR PRODUCTION CODE
-type EventStore struct {
+type JournalStore struct {
 	mu    sync.Mutex
 	cache map[string][]*item
 
@@ -25,11 +25,11 @@ type EventStore struct {
 	keepRecordsAfterDisconnect bool
 }
 
-var _ persistence.EventStore = &EventStore{}
+var _ persistence.JournalStore = &JournalStore{}
 
-// NewEventStore creates a new instance of MemoryEventStore
-func NewEventStore() *EventStore {
-	return &EventStore{
+// NewJournalStore creates a new instance of MemoryEventStore
+func NewJournalStore() *JournalStore {
+	return &JournalStore{
 		mu:                         sync.Mutex{},
 		cache:                      map[string][]*item{},
 		keepRecordsAfterDisconnect: false,
@@ -37,20 +37,31 @@ func NewEventStore() *EventStore {
 }
 
 // Connect connects to the journal store
-func (s *EventStore) Connect(ctx context.Context) error {
+func (s *JournalStore) Connect(ctx context.Context) error {
 	return nil
 }
 
 // Disconnect disconnect the journal store
-func (s *EventStore) Disconnect(ctx context.Context) error {
+func (s *JournalStore) Disconnect(ctx context.Context) error {
 	s.mu.Lock()
 	s.cache = map[string][]*item{}
 	s.mu.Unlock()
 	return nil
 }
 
+// PersistenceIDs returns the distinct list of all the persistence ids in the journal store
+func (s *JournalStore) PersistenceIDs(ctx context.Context) (persistenceIDs []string, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	persistenceIDs = make([]string, 0, s.Len())
+	for k := range s.cache {
+		persistenceIDs = append(persistenceIDs, k)
+	}
+	return
+}
+
 // WriteEvents persist events in batches for a given persistenceID
-func (s *EventStore) WriteEvents(ctx context.Context, events []*pb.Event) error {
+func (s *JournalStore) WriteEvents(ctx context.Context, events []*pb.Event) error {
 	s.mu.Lock()
 	for _, event := range events {
 		bytea, err := proto.Marshal(event)
@@ -79,7 +90,7 @@ func (s *EventStore) WriteEvents(ctx context.Context, events []*pb.Event) error 
 }
 
 // DeleteEvents deletes events from the store upt to a given sequence number (inclusive)
-func (s *EventStore) DeleteEvents(ctx context.Context, persistenceID string, toSequenceNumber uint64) error {
+func (s *JournalStore) DeleteEvents(ctx context.Context, persistenceID string, toSequenceNumber uint64) error {
 	s.mu.Lock()
 	items := s.cache[persistenceID]
 
@@ -106,7 +117,7 @@ func (s *EventStore) DeleteEvents(ctx context.Context, persistenceID string, toS
 }
 
 // ReplayEvents fetches events for a given persistence ID from a given sequence number(inclusive) to a given sequence number(inclusive)
-func (s *EventStore) ReplayEvents(ctx context.Context, persistenceID string, fromSequenceNumber, toSequenceNumber uint64, max uint64) ([]*pb.Event, error) {
+func (s *JournalStore) ReplayEvents(ctx context.Context, persistenceID string, fromSequenceNumber, toSequenceNumber uint64, max uint64) ([]*pb.Event, error) {
 	s.mu.Lock()
 	items := s.cache[persistenceID]
 
@@ -144,7 +155,7 @@ func (s *EventStore) ReplayEvents(ctx context.Context, persistenceID string, fro
 }
 
 // GetLatestEvent fetches the latest event
-func (s *EventStore) GetLatestEvent(ctx context.Context, persistenceID string) (*pb.Event, error) {
+func (s *JournalStore) GetLatestEvent(ctx context.Context, persistenceID string) (*pb.Event, error) {
 	s.mu.Lock()
 	items := s.cache[persistenceID]
 
@@ -168,6 +179,6 @@ func (s *EventStore) GetLatestEvent(ctx context.Context, persistenceID string) (
 }
 
 // Len return the length of the cache
-func (s *EventStore) Len() int {
+func (s *JournalStore) Len() int {
 	return len(s.cache)
 }

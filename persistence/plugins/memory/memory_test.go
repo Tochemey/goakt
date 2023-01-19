@@ -13,17 +13,17 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-func TestMemoryEventStore(t *testing.T) {
+func TestMemoryJournalStore(t *testing.T) {
 	t.Run("testNew", func(t *testing.T) {
-		store := NewEventStore()
+		store := NewJournalStore()
 		assert.NotNil(t, store)
 		var p interface{} = store
-		_, ok := p.(persistence.EventStore)
+		_, ok := p.(persistence.JournalStore)
 		assert.True(t, ok)
 	})
 	t.Run("testConnect", func(t *testing.T) {
 		ctx := context.TODO()
-		store := NewEventStore()
+		store := NewJournalStore()
 		assert.NotNil(t, store)
 		err := store.Connect(ctx)
 		assert.NoError(t, err)
@@ -46,7 +46,7 @@ func TestMemoryEventStore(t *testing.T) {
 			Timestamp:      timestamp.AsTime().Unix(),
 		}
 
-		store := NewEventStore()
+		store := NewJournalStore()
 		assert.NotNil(t, store)
 
 		err = store.WriteEvents(ctx, []*pb.Event{journal})
@@ -79,7 +79,7 @@ func TestMemoryEventStore(t *testing.T) {
 			Timestamp:      timestamp.AsTime().Unix(),
 		}
 
-		store := NewEventStore()
+		store := NewJournalStore()
 		assert.NotNil(t, store)
 
 		err = store.WriteEvents(ctx, []*pb.Event{journal})
@@ -125,7 +125,7 @@ func TestMemoryEventStore(t *testing.T) {
 			}
 		}
 
-		store := NewEventStore()
+		store := NewJournalStore()
 		assert.NotNil(t, store)
 
 		err = store.WriteEvents(ctx, journals)

@@ -44,7 +44,7 @@ type EventSourcedBehavior[T State] interface {
 type eventSourcedActor[T State] struct {
 	EventSourcedBehavior[T]
 
-	eventsStore     persistence.EventStore
+	journalStore    persistence.JournalStore
 	currentState    T
 	eventsCounter   *atomic.Uint64
 	lastCommandTime time.Time
@@ -56,10 +56,10 @@ type eventSourcedActor[T State] struct {
 var _ actors.Actor = &eventSourcedActor[State]{}
 
 // NewEventSourcedActor returns an instance of event sourced actor
-func NewEventSourcedActor[T State](behavior EventSourcedBehavior[T], eventsStore persistence.EventStore) actors.Actor {
+func NewEventSourcedActor[T State](behavior EventSourcedBehavior[T], eventsStore persistence.JournalStore) actors.Actor {
 	return &eventSourcedActor[T]{
 		EventSourcedBehavior: behavior,
-		eventsStore:          eventsStore,
+		journalStore:         eventsStore,
 		eventsCounter:        atomic.NewUint64(0),
 		mu:                   sync.RWMutex{},
 	}
@@ -77,12 +77,12 @@ func (p *eventSourcedActor[T]) PreStart(ctx context.Context) error {
 	defer p.mu.Unlock()
 
 	// connect to the various stores
-	if p.eventsStore == nil {
+	if p.journalStore == nil {
 		return errors.New("journal store is not defined")
 	}
 
 	// call the connect method of the journal store
-	if err := p.eventsStore.Connect(ctx); err != nil {
+	if err := p.journalStore.Connect(ctx); err != nil {
 		return fmt.Errorf("failed to connect to the journal store: %v", err)
 	}
 
@@ -108,7 +108,7 @@ func (p *eventSourcedActor[T]) Receive(ctx actors.ReceiveContext) {
 	switch command := ctx.Message().(type) {
 	case *pb.GetStateCommand:
 		// let us fetch the latest journal
-		latestEvent, err := p.eventsStore.GetLatestEvent(goCtx, p.ID())
+		latestEvent, err := p.journalStore.GetLatestEvent(goCtx, p.ID())
 		// handle the error
 		if err != nil {
 			// create a new error reply
@@ -215,7 +215,7 @@ func (p *eventSourcedActor[T]) Receive(ctx actors.ReceiveContext) {
 		journals := []*pb.Event{envelope}
 
 		// TODO persist the event in batch using a child actor
-		if err := p.eventsStore.WriteEvents(goCtx, journals); err != nil {
+		if err := p.journalStore.WriteEvents(goCtx, journals); err != nil {
 			// create a new error reply
 			reply := &pb.CommandReply{
 				Reply: &pb.CommandReply_ErrorReply{
@@ -262,7 +262,7 @@ func (p *eventSourcedActor[T]) PostStop(ctx context.Context) error {
 	defer p.mu.Unlock()
 
 	// disconnect the journal
-	if err := p.eventsStore.Disconnect(ctx); err != nil {
+	if err := p.journalStore.Disconnect(ctx); err != nil {
 		return fmt.Errorf("failed to disconnect the journal store: %v", err)
 	}
 
@@ -277,7 +277,7 @@ func (p *eventSourcedActor[T]) recoverFromSnapshot(ctx context.Context) error {
 	defer span.End()
 
 	// check whether there is a snapshot to recover from
-	event, err := p.eventsStore.GetLatestEvent(ctx, p.ID())
+	event, err := p.journalStore.GetLatestEvent(ctx, p.ID())
 	// handle the error
 	if err != nil {
 		return errors.Wrap(err, "failed to recover the latest journal")
