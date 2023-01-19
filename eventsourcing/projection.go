@@ -3,11 +3,13 @@ package eventsourcing
 import (
 	"context"
 	"fmt"
+	"math"
 	"sync"
 
-	"github.com/pkg/errors"
-	"github.com/tochemey/goakt/actors"
 	pb "github.com/tochemey/goakt/pb/goakt/v1"
+	"google.golang.org/protobuf/types/known/timestamppb"
+
+	"github.com/pkg/errors"
 	"github.com/tochemey/goakt/persistence"
 	"github.com/tochemey/goakt/telemetry"
 	"google.golang.org/protobuf/types/known/anypb"
@@ -30,9 +32,6 @@ type Projection struct {
 	projectionName string
 }
 
-// make sure Projection is a pure Actor
-var _ actors.Actor = &Projection{}
-
 // NewProjection create an instance of Projection given the name of the projection, the handler and the offsets store
 func NewProjection(name string, handler ProjectionHandler, offsetsStore persistence.OffsetStore, eventsStore persistence.JournalStore) *Projection {
 	return &Projection{
@@ -44,8 +43,8 @@ func NewProjection(name string, handler ProjectionHandler, offsetsStore persiste
 	}
 }
 
-// PreStart pre-starts the actor. This hook is called during the actor initialization process
-func (p *Projection) PreStart(ctx context.Context) error {
+// Start starts the projection
+func (p *Projection) Start(ctx context.Context) error {
 	// add a span context
 	ctx, span := telemetry.SpanContext(ctx, "PreStart")
 	defer span.End()
@@ -77,34 +76,8 @@ func (p *Projection) PreStart(ctx context.Context) error {
 	return nil
 }
 
-// Receive  processes any message dropped into the actor mailbox.
-func (p *Projection) Receive(ctx actors.ReceiveContext) {
-	// add a span context
-	goCtx, span := telemetry.SpanContext(ctx.Context(), "Receive")
-	defer span.End()
-	// acquire the lock
-	p.mu.Lock()
-	// release lock when done
-	defer p.mu.Unlock()
-	// grab the command sent
-	switch ctx.Message().(type) {
-	case *pb.StartProjection:
-		// fetch the list of persistence IDs
-		_, err := p.journalStore.PersistenceIDs(goCtx)
-		// handle the error
-		if err != nil {
-			// TODO handle error
-		}
-		// pass
-	case *pb.GetCurrentOffset:
-	// pass
-	case *pb.GetLatestOffset:
-		// pass
-	}
-}
-
-// PostStop is executed during the actor shutdown process
-func (p *Projection) PostStop(ctx context.Context) error {
+// Stop stops the projection
+func (p *Projection) Stop(ctx context.Context) error {
 	// add a span context
 	ctx, span := telemetry.SpanContext(ctx, "PostStop")
 	defer span.End()
@@ -124,4 +97,55 @@ func (p *Projection) PostStop(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func (p *Projection) runLoop(ctx context.Context) error {
+	for {
+		// let us fetch all the persistence ids
+		ids, err := p.journalStore.PersistenceIDs(ctx)
+		if err != nil {
+			return err
+		}
+
+		// let us replay all the events for each persistence id
+		for _, id := range ids {
+			// get the latest offset persisted for the persistence id
+			offset, err := p.offsetsStore.GetLatestOffset(ctx, persistence.NewProjectionID(p.projectionName, id))
+			if err != nil {
+				return err
+			}
+
+			// fetch events
+			events, err := p.journalStore.ReplayEvents(ctx, id, offset.GetCurrentOffset()+1, math.MaxUint64, math.MaxUint64)
+			if err != nil {
+				return err
+			}
+
+			// grab the total number of events fetched
+			eventsLen := len(events)
+			for i := 0; i < eventsLen; i++ {
+				// get the event envelope
+				envelope := events[i]
+				// grab the data to pass to the projection handler
+				state := envelope.GetResultingState()
+				event := envelope.GetEvent()
+				seqNr := envelope.GetSequenceNumber()
+				// pass the data to the projection handler
+				if err := p.handler(ctx, id, event, state, seqNr); err != nil {
+					// TODO log the error and apply some replay mechanism here
+				}
+
+				// here we commit the offset to the offset store and continue the next event
+				offset = &pb.Offset{
+					PersistenceId:  id,
+					ProjectionName: p.projectionName,
+					CurrentOffset:  seqNr,
+					Timestamp:      timestamppb.Now().AsTime().UnixMilli(),
+				}
+				if err := p.offsetsStore.WriteOffset(ctx, offset); err != nil {
+					// TODO log the error and retry it because the event has been handled successfully
+				}
+			}
+		}
+	}
 }
