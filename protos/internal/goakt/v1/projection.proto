@@ -17,23 +17,22 @@ message Offset {
   int64 timestamp = 4;
 }
 
-message ProjectionID {
-  // Specifies the projection name
-  // The projection name can be shared for each instance of a Projection
-  string projection_name = 1;
-  // Specifies the persistence id
-  // The projection id should be unique per instance of a Projection
-  string persistence_id = 2;
+// ProjectionRecoveryStrategy  is used to recover from unhandled exceptions without causing the projection to fail
+enum ProjectionRecoveryStrategy {
+  // States that if the first attempt to invoke the handler fails it will immediately give up and fail the projection
+  FAIL = 0;
+  // States that if he first attempt to invoke the handler fails it will retry invoking the handler with the
+  // same envelope this number of `retries` with the `delay` between each attempt. It will give up
+  // and fail the projection if all attempts fail. For this to work as expected one need to define the `retries` and `delay`
+  // settings in the projection configuration.
+  RETRY_AND_FAIL = 1;
+  // States that if the first attempt to invoke the handler fails it will immediately give up, discard the envelope and
+  // continue with next. This will commit the offset assuming the event has been successfully processed.
+  // Use this strategy with care.
+  SKIP = 2;
+  // States that if he first attempt to invoke the handler fails it will retry invoking the handler with the
+  // same envelope this number of `retries` with the `delay` between each attempt. It will give up,
+  // discard the element and continue with next if all attempts fail.
+  // For this to work as expected one need to define the `retries` and `delay` settings in the projection configuration.
+  RETRY_AND_SKIP = 3;
 }
-
-message GetLatestOffset {
-  // Specifies the projection Id
-  ProjectionID projection_id = 1;
-}
-
-message GetCurrentOffset {
-  // Specifies the projection Id
-  ProjectionID projection_id = 1;
-}
-
-message StartProjection {}

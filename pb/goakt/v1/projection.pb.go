@@ -21,6 +21,71 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// ProjectionRecoveryStrategy  is used to recover from unhandled exceptions without causing the projection to fail
+type ProjectionRecoveryStrategy int32
+
+const (
+	// States that if the first attempt to invoke the handler fails it will immediately give up and fail the projection
+	ProjectionRecoveryStrategy_FAIL ProjectionRecoveryStrategy = 0
+	// States that if he first attempt to invoke the handler fails it will retry invoking the handler with the
+	// same envelope this number of `retries` with the `delay` between each attempt. It will give up
+	// and fail the projection if all attempts fail. For this to work as expected one need to define the `retries` and `delay`
+	// settings in the projection configuration.
+	ProjectionRecoveryStrategy_RETRY_AND_FAIL ProjectionRecoveryStrategy = 1
+	// States that if the first attempt to invoke the handler fails it will immediately give up, discard the envelope and
+	// continue with next. This will commit the offset assuming the event has been successfully processed.
+	// Use this strategy with care.
+	ProjectionRecoveryStrategy_SKIP ProjectionRecoveryStrategy = 2
+	// States that if he first attempt to invoke the handler fails it will retry invoking the handler with the
+	// same envelope this number of `retries` with the `delay` between each attempt. It will give up,
+	// discard the element and continue with next if all attempts fail.
+	// For this to work as expected one need to define the `retries` and `delay` settings in the projection configuration.
+	ProjectionRecoveryStrategy_RETRY_AND_SKIP ProjectionRecoveryStrategy = 3
+)
+
+// Enum value maps for ProjectionRecoveryStrategy.
+var (
+	ProjectionRecoveryStrategy_name = map[int32]string{
+		0: "FAIL",
+		1: "RETRY_AND_FAIL",
+		2: "SKIP",
+		3: "RETRY_AND_SKIP",
+	}
+	ProjectionRecoveryStrategy_value = map[string]int32{
+		"FAIL":           0,
+		"RETRY_AND_FAIL": 1,
+		"SKIP":           2,
+		"RETRY_AND_SKIP": 3,
+	}
+)
+
+func (x ProjectionRecoveryStrategy) Enum() *ProjectionRecoveryStrategy {
+	p := new(ProjectionRecoveryStrategy)
+	*p = x
+	return p
+}
+
+func (x ProjectionRecoveryStrategy) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (ProjectionRecoveryStrategy) Descriptor() protoreflect.EnumDescriptor {
+	return file_goakt_v1_projection_proto_enumTypes[0].Descriptor()
+}
+
+func (ProjectionRecoveryStrategy) Type() protoreflect.EnumType {
+	return &file_goakt_v1_projection_proto_enumTypes[0]
+}
+
+func (x ProjectionRecoveryStrategy) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use ProjectionRecoveryStrategy.Descriptor instead.
+func (ProjectionRecoveryStrategy) EnumDescriptor() ([]byte, []int) {
+	return file_goakt_v1_projection_proto_rawDescGZIP(), []int{0}
+}
+
 type Offset struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
@@ -98,199 +163,6 @@ func (x *Offset) GetTimestamp() int64 {
 	return 0
 }
 
-type ProjectionID struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
-	unknownFields protoimpl.UnknownFields
-
-	// Specifies the projection name
-	// The projection name can be shared for each instance of a Projection
-	ProjectionName string `protobuf:"bytes,1,opt,name=projection_name,json=projectionName,proto3" json:"projection_name,omitempty"`
-	// Specifies the persistence id
-	// The projection id should be unique per instance of a Projection
-	PersistenceId string `protobuf:"bytes,2,opt,name=persistence_id,json=persistenceId,proto3" json:"persistence_id,omitempty"`
-}
-
-func (x *ProjectionID) Reset() {
-	*x = ProjectionID{}
-	if protoimpl.UnsafeEnabled {
-		mi := &file_goakt_v1_projection_proto_msgTypes[1]
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		ms.StoreMessageInfo(mi)
-	}
-}
-
-func (x *ProjectionID) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*ProjectionID) ProtoMessage() {}
-
-func (x *ProjectionID) ProtoReflect() protoreflect.Message {
-	mi := &file_goakt_v1_projection_proto_msgTypes[1]
-	if protoimpl.UnsafeEnabled && x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use ProjectionID.ProtoReflect.Descriptor instead.
-func (*ProjectionID) Descriptor() ([]byte, []int) {
-	return file_goakt_v1_projection_proto_rawDescGZIP(), []int{1}
-}
-
-func (x *ProjectionID) GetProjectionName() string {
-	if x != nil {
-		return x.ProjectionName
-	}
-	return ""
-}
-
-func (x *ProjectionID) GetPersistenceId() string {
-	if x != nil {
-		return x.PersistenceId
-	}
-	return ""
-}
-
-type GetLatestOffset struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
-	unknownFields protoimpl.UnknownFields
-
-	// Specifies the projection Id
-	ProjectionId *ProjectionID `protobuf:"bytes,1,opt,name=projection_id,json=projectionId,proto3" json:"projection_id,omitempty"`
-}
-
-func (x *GetLatestOffset) Reset() {
-	*x = GetLatestOffset{}
-	if protoimpl.UnsafeEnabled {
-		mi := &file_goakt_v1_projection_proto_msgTypes[2]
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		ms.StoreMessageInfo(mi)
-	}
-}
-
-func (x *GetLatestOffset) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*GetLatestOffset) ProtoMessage() {}
-
-func (x *GetLatestOffset) ProtoReflect() protoreflect.Message {
-	mi := &file_goakt_v1_projection_proto_msgTypes[2]
-	if protoimpl.UnsafeEnabled && x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use GetLatestOffset.ProtoReflect.Descriptor instead.
-func (*GetLatestOffset) Descriptor() ([]byte, []int) {
-	return file_goakt_v1_projection_proto_rawDescGZIP(), []int{2}
-}
-
-func (x *GetLatestOffset) GetProjectionId() *ProjectionID {
-	if x != nil {
-		return x.ProjectionId
-	}
-	return nil
-}
-
-type GetCurrentOffset struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
-	unknownFields protoimpl.UnknownFields
-
-	// Specifies the projection Id
-	ProjectionId *ProjectionID `protobuf:"bytes,1,opt,name=projection_id,json=projectionId,proto3" json:"projection_id,omitempty"`
-}
-
-func (x *GetCurrentOffset) Reset() {
-	*x = GetCurrentOffset{}
-	if protoimpl.UnsafeEnabled {
-		mi := &file_goakt_v1_projection_proto_msgTypes[3]
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		ms.StoreMessageInfo(mi)
-	}
-}
-
-func (x *GetCurrentOffset) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*GetCurrentOffset) ProtoMessage() {}
-
-func (x *GetCurrentOffset) ProtoReflect() protoreflect.Message {
-	mi := &file_goakt_v1_projection_proto_msgTypes[3]
-	if protoimpl.UnsafeEnabled && x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use GetCurrentOffset.ProtoReflect.Descriptor instead.
-func (*GetCurrentOffset) Descriptor() ([]byte, []int) {
-	return file_goakt_v1_projection_proto_rawDescGZIP(), []int{3}
-}
-
-func (x *GetCurrentOffset) GetProjectionId() *ProjectionID {
-	if x != nil {
-		return x.ProjectionId
-	}
-	return nil
-}
-
-type StartProjection struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
-	unknownFields protoimpl.UnknownFields
-}
-
-func (x *StartProjection) Reset() {
-	*x = StartProjection{}
-	if protoimpl.UnsafeEnabled {
-		mi := &file_goakt_v1_projection_proto_msgTypes[4]
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		ms.StoreMessageInfo(mi)
-	}
-}
-
-func (x *StartProjection) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*StartProjection) ProtoMessage() {}
-
-func (x *StartProjection) ProtoReflect() protoreflect.Message {
-	mi := &file_goakt_v1_projection_proto_msgTypes[4]
-	if protoimpl.UnsafeEnabled && x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use StartProjection.ProtoReflect.Descriptor instead.
-func (*StartProjection) Descriptor() ([]byte, []int) {
-	return file_goakt_v1_projection_proto_rawDescGZIP(), []int{4}
-}
-
 var File_goakt_v1_projection_proto protoreflect.FileDescriptor
 
 var file_goakt_v1_projection_proto_rawDesc = []byte{
@@ -308,34 +180,22 @@ var file_goakt_v1_projection_proto_rawDesc = []byte{
 	0x01, 0x28, 0x04, 0x52, 0x0d, 0x63, 0x75, 0x72, 0x72, 0x65, 0x6e, 0x74, 0x4f, 0x66, 0x66, 0x73,
 	0x65, 0x74, 0x12, 0x1c, 0x0a, 0x09, 0x74, 0x69, 0x6d, 0x65, 0x73, 0x74, 0x61, 0x6d, 0x70, 0x18,
 	0x04, 0x20, 0x01, 0x28, 0x03, 0x52, 0x09, 0x74, 0x69, 0x6d, 0x65, 0x73, 0x74, 0x61, 0x6d, 0x70,
-	0x22, 0x5e, 0x0a, 0x0c, 0x50, 0x72, 0x6f, 0x6a, 0x65, 0x63, 0x74, 0x69, 0x6f, 0x6e, 0x49, 0x44,
-	0x12, 0x27, 0x0a, 0x0f, 0x70, 0x72, 0x6f, 0x6a, 0x65, 0x63, 0x74, 0x69, 0x6f, 0x6e, 0x5f, 0x6e,
-	0x61, 0x6d, 0x65, 0x18, 0x01, 0x20, 0x01, 0x28, 0x09, 0x52, 0x0e, 0x70, 0x72, 0x6f, 0x6a, 0x65,
-	0x63, 0x74, 0x69, 0x6f, 0x6e, 0x4e, 0x61, 0x6d, 0x65, 0x12, 0x25, 0x0a, 0x0e, 0x70, 0x65, 0x72,
-	0x73, 0x69, 0x73, 0x74, 0x65, 0x6e, 0x63, 0x65, 0x5f, 0x69, 0x64, 0x18, 0x02, 0x20, 0x01, 0x28,
-	0x09, 0x52, 0x0d, 0x70, 0x65, 0x72, 0x73, 0x69, 0x73, 0x74, 0x65, 0x6e, 0x63, 0x65, 0x49, 0x64,
-	0x22, 0x4e, 0x0a, 0x0f, 0x47, 0x65, 0x74, 0x4c, 0x61, 0x74, 0x65, 0x73, 0x74, 0x4f, 0x66, 0x66,
-	0x73, 0x65, 0x74, 0x12, 0x3b, 0x0a, 0x0d, 0x70, 0x72, 0x6f, 0x6a, 0x65, 0x63, 0x74, 0x69, 0x6f,
-	0x6e, 0x5f, 0x69, 0x64, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x16, 0x2e, 0x67, 0x6f, 0x61,
-	0x6b, 0x74, 0x2e, 0x76, 0x31, 0x2e, 0x50, 0x72, 0x6f, 0x6a, 0x65, 0x63, 0x74, 0x69, 0x6f, 0x6e,
-	0x49, 0x44, 0x52, 0x0c, 0x70, 0x72, 0x6f, 0x6a, 0x65, 0x63, 0x74, 0x69, 0x6f, 0x6e, 0x49, 0x64,
-	0x22, 0x4f, 0x0a, 0x10, 0x47, 0x65, 0x74, 0x43, 0x75, 0x72, 0x72, 0x65, 0x6e, 0x74, 0x4f, 0x66,
-	0x66, 0x73, 0x65, 0x74, 0x12, 0x3b, 0x0a, 0x0d, 0x70, 0x72, 0x6f, 0x6a, 0x65, 0x63, 0x74, 0x69,
-	0x6f, 0x6e, 0x5f, 0x69, 0x64, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x16, 0x2e, 0x67, 0x6f,
-	0x61, 0x6b, 0x74, 0x2e, 0x76, 0x31, 0x2e, 0x50, 0x72, 0x6f, 0x6a, 0x65, 0x63, 0x74, 0x69, 0x6f,
-	0x6e, 0x49, 0x44, 0x52, 0x0c, 0x70, 0x72, 0x6f, 0x6a, 0x65, 0x63, 0x74, 0x69, 0x6f, 0x6e, 0x49,
-	0x64, 0x22, 0x11, 0x0a, 0x0f, 0x53, 0x74, 0x61, 0x72, 0x74, 0x50, 0x72, 0x6f, 0x6a, 0x65, 0x63,
-	0x74, 0x69, 0x6f, 0x6e, 0x42, 0x92, 0x01, 0x0a, 0x0c, 0x63, 0x6f, 0x6d, 0x2e, 0x67, 0x6f, 0x61,
-	0x6b, 0x74, 0x2e, 0x76, 0x31, 0x42, 0x0f, 0x50, 0x72, 0x6f, 0x6a, 0x65, 0x63, 0x74, 0x69, 0x6f,
-	0x6e, 0x50, 0x72, 0x6f, 0x74, 0x6f, 0x48, 0x02, 0x50, 0x01, 0x5a, 0x2e, 0x67, 0x69, 0x74, 0x68,
-	0x75, 0x62, 0x2e, 0x63, 0x6f, 0x6d, 0x2f, 0x74, 0x6f, 0x63, 0x68, 0x65, 0x6d, 0x65, 0x79, 0x2f,
-	0x67, 0x6f, 0x61, 0x6b, 0x74, 0x2f, 0x67, 0x65, 0x6e, 0x2f, 0x67, 0x6f, 0x61, 0x6b, 0x74, 0x2f,
-	0x76, 0x31, 0x3b, 0x67, 0x6f, 0x61, 0x6b, 0x74, 0x76, 0x31, 0xa2, 0x02, 0x03, 0x47, 0x58, 0x58,
-	0xaa, 0x02, 0x08, 0x47, 0x6f, 0x61, 0x6b, 0x74, 0x2e, 0x56, 0x31, 0xca, 0x02, 0x08, 0x47, 0x6f,
-	0x61, 0x6b, 0x74, 0x5c, 0x56, 0x31, 0xe2, 0x02, 0x14, 0x47, 0x6f, 0x61, 0x6b, 0x74, 0x5c, 0x56,
-	0x31, 0x5c, 0x47, 0x50, 0x42, 0x4d, 0x65, 0x74, 0x61, 0x64, 0x61, 0x74, 0x61, 0xea, 0x02, 0x09,
-	0x47, 0x6f, 0x61, 0x6b, 0x74, 0x3a, 0x3a, 0x56, 0x31, 0x62, 0x06, 0x70, 0x72, 0x6f, 0x74, 0x6f,
-	0x33,
+	0x2a, 0x58, 0x0a, 0x1a, 0x50, 0x72, 0x6f, 0x6a, 0x65, 0x63, 0x74, 0x69, 0x6f, 0x6e, 0x52, 0x65,
+	0x63, 0x6f, 0x76, 0x65, 0x72, 0x79, 0x53, 0x74, 0x72, 0x61, 0x74, 0x65, 0x67, 0x79, 0x12, 0x08,
+	0x0a, 0x04, 0x46, 0x41, 0x49, 0x4c, 0x10, 0x00, 0x12, 0x12, 0x0a, 0x0e, 0x52, 0x45, 0x54, 0x52,
+	0x59, 0x5f, 0x41, 0x4e, 0x44, 0x5f, 0x46, 0x41, 0x49, 0x4c, 0x10, 0x01, 0x12, 0x08, 0x0a, 0x04,
+	0x53, 0x4b, 0x49, 0x50, 0x10, 0x02, 0x12, 0x12, 0x0a, 0x0e, 0x52, 0x45, 0x54, 0x52, 0x59, 0x5f,
+	0x41, 0x4e, 0x44, 0x5f, 0x53, 0x4b, 0x49, 0x50, 0x10, 0x03, 0x42, 0x92, 0x01, 0x0a, 0x0c, 0x63,
+	0x6f, 0x6d, 0x2e, 0x67, 0x6f, 0x61, 0x6b, 0x74, 0x2e, 0x76, 0x31, 0x42, 0x0f, 0x50, 0x72, 0x6f,
+	0x6a, 0x65, 0x63, 0x74, 0x69, 0x6f, 0x6e, 0x50, 0x72, 0x6f, 0x74, 0x6f, 0x48, 0x02, 0x50, 0x01,
+	0x5a, 0x2e, 0x67, 0x69, 0x74, 0x68, 0x75, 0x62, 0x2e, 0x63, 0x6f, 0x6d, 0x2f, 0x74, 0x6f, 0x63,
+	0x68, 0x65, 0x6d, 0x65, 0x79, 0x2f, 0x67, 0x6f, 0x61, 0x6b, 0x74, 0x2f, 0x67, 0x65, 0x6e, 0x2f,
+	0x67, 0x6f, 0x61, 0x6b, 0x74, 0x2f, 0x76, 0x31, 0x3b, 0x67, 0x6f, 0x61, 0x6b, 0x74, 0x76, 0x31,
+	0xa2, 0x02, 0x03, 0x47, 0x58, 0x58, 0xaa, 0x02, 0x08, 0x47, 0x6f, 0x61, 0x6b, 0x74, 0x2e, 0x56,
+	0x31, 0xca, 0x02, 0x08, 0x47, 0x6f, 0x61, 0x6b, 0x74, 0x5c, 0x56, 0x31, 0xe2, 0x02, 0x14, 0x47,
+	0x6f, 0x61, 0x6b, 0x74, 0x5c, 0x56, 0x31, 0x5c, 0x47, 0x50, 0x42, 0x4d, 0x65, 0x74, 0x61, 0x64,
+	0x61, 0x74, 0x61, 0xea, 0x02, 0x09, 0x47, 0x6f, 0x61, 0x6b, 0x74, 0x3a, 0x3a, 0x56, 0x31, 0x62,
+	0x06, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x33,
 }
 
 var (
@@ -350,22 +210,18 @@ func file_goakt_v1_projection_proto_rawDescGZIP() []byte {
 	return file_goakt_v1_projection_proto_rawDescData
 }
 
-var file_goakt_v1_projection_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
+var file_goakt_v1_projection_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+var file_goakt_v1_projection_proto_msgTypes = make([]protoimpl.MessageInfo, 1)
 var file_goakt_v1_projection_proto_goTypes = []interface{}{
-	(*Offset)(nil),           // 0: goakt.v1.Offset
-	(*ProjectionID)(nil),     // 1: goakt.v1.ProjectionID
-	(*GetLatestOffset)(nil),  // 2: goakt.v1.GetLatestOffset
-	(*GetCurrentOffset)(nil), // 3: goakt.v1.GetCurrentOffset
-	(*StartProjection)(nil),  // 4: goakt.v1.StartProjection
+	(ProjectionRecoveryStrategy)(0), // 0: goakt.v1.ProjectionRecoveryStrategy
+	(*Offset)(nil),                  // 1: goakt.v1.Offset
 }
 var file_goakt_v1_projection_proto_depIdxs = []int32{
-	1, // 0: goakt.v1.GetLatestOffset.projection_id:type_name -> goakt.v1.ProjectionID
-	1, // 1: goakt.v1.GetCurrentOffset.projection_id:type_name -> goakt.v1.ProjectionID
-	2, // [2:2] is the sub-list for method output_type
-	2, // [2:2] is the sub-list for method input_type
-	2, // [2:2] is the sub-list for extension type_name
-	2, // [2:2] is the sub-list for extension extendee
-	0, // [0:2] is the sub-list for field type_name
+	0, // [0:0] is the sub-list for method output_type
+	0, // [0:0] is the sub-list for method input_type
+	0, // [0:0] is the sub-list for extension type_name
+	0, // [0:0] is the sub-list for extension extendee
+	0, // [0:0] is the sub-list for field type_name
 }
 
 func init() { file_goakt_v1_projection_proto_init() }
@@ -386,67 +242,20 @@ func file_goakt_v1_projection_proto_init() {
 				return nil
 			}
 		}
-		file_goakt_v1_projection_proto_msgTypes[1].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*ProjectionID); i {
-			case 0:
-				return &v.state
-			case 1:
-				return &v.sizeCache
-			case 2:
-				return &v.unknownFields
-			default:
-				return nil
-			}
-		}
-		file_goakt_v1_projection_proto_msgTypes[2].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*GetLatestOffset); i {
-			case 0:
-				return &v.state
-			case 1:
-				return &v.sizeCache
-			case 2:
-				return &v.unknownFields
-			default:
-				return nil
-			}
-		}
-		file_goakt_v1_projection_proto_msgTypes[3].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*GetCurrentOffset); i {
-			case 0:
-				return &v.state
-			case 1:
-				return &v.sizeCache
-			case 2:
-				return &v.unknownFields
-			default:
-				return nil
-			}
-		}
-		file_goakt_v1_projection_proto_msgTypes[4].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*StartProjection); i {
-			case 0:
-				return &v.state
-			case 1:
-				return &v.sizeCache
-			case 2:
-				return &v.unknownFields
-			default:
-				return nil
-			}
-		}
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: file_goakt_v1_projection_proto_rawDesc,
-			NumEnums:      0,
-			NumMessages:   5,
+			NumEnums:      1,
+			NumMessages:   1,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
 		GoTypes:           file_goakt_v1_projection_proto_goTypes,
 		DependencyIndexes: file_goakt_v1_projection_proto_depIdxs,
+		EnumInfos:         file_goakt_v1_projection_proto_enumTypes,
 		MessageInfos:      file_goakt_v1_projection_proto_msgTypes,
 	}.Build()
 	File_goakt_v1_projection_proto = out.File
