@@ -24,6 +24,8 @@ Also, check reference section at the end of the post for more material regarding
 - [x] Supervisory Strategy (Restart and Stop directive) 
 - [x] Behaviors (Become/BecomeStacked/UnBecome/UnBecomeStacked)
 - [x] EventSourcing (event sourced/cqrs)
+    - [x] Event sourced Actor (write model)
+    - [ ] Projection (read model) (WIP)
 - [x] Logger interface. The default logger use zerolog and log to console
 - [x] Examples (check the [examples'](./examples) folder)
 - [x] Integration with [OpenTelemetry](https://github.com/open-telemetry/opentelemetry-go) for traces and metrics.

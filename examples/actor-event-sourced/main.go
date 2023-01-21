@@ -37,7 +37,7 @@ func main() {
 	_ = actorSystem.Start(ctx)
 
 	// create the event store
-	eventStore := memory.NewEventStore()
+	eventStore := memory.NewJournalStore()
 
 	// create a persistence id
 	persistenceID := uuid.NewString()
