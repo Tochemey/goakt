@@ -180,7 +180,7 @@ func (p *Projection) doProcess(ctx context.Context, persistenceID string) error 
 	ctx, span := telemetry.SpanContext(ctx, "HandlePersistenceID")
 	defer span.End()
 	// get the latest offset persisted for the persistence id
-	offset, err := p.offsetsStore.GetLatestOffset(ctx, persistence.NewProjectionID(p.projectionName, persistenceID))
+	offset, err := p.offsetsStore.GetCurrentOffset(ctx, persistence.NewProjectionID(p.projectionName, persistenceID))
 	if err != nil {
 		return err
 	}

@@ -14,9 +14,9 @@ type OffsetStore interface {
 	// Disconnect disconnects the offset store
 	Disconnect(ctx context.Context) error
 	// WriteOffset writes the current offset of the event consumed for a given projection ID
+	// Note: persistence id and the projection name make a record in the journal store unique. Failure to ensure that
+	// can lead to some un-wanted behaviors and data inconsistency
 	WriteOffset(ctx context.Context, offset *pb.Offset) error
 	// GetCurrentOffset returns the current offset of a given projection ID
 	GetCurrentOffset(ctx context.Context, projectionID *ProjectionID) (current *pb.Offset, err error)
-	// GetLatestOffset returns the latest offset a given projection ID
-	GetLatestOffset(ctx context.Context, projectionID *ProjectionID) (latest *pb.Offset, err error)
 }

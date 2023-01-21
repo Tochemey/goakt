@@ -4,9 +4,11 @@ import (
 	"github.com/hashicorp/go-memdb"
 )
 
-// Journal helps create the journal schema
+// journal represents the journal entry
 // This matches the RDBMS counter-part.
-type Journal struct {
+type journal struct {
+	// Ordering basically used as PK
+	Ordering string
 	// PersistenceID is the persistence ID
 	PersistenceID string
 	// SequenceNumber
@@ -26,39 +28,31 @@ type Journal struct {
 }
 
 const (
-	tableName              = "event_journal"
-	primaryKey             = "pk"
-	isDeletedIndexName     = "deletion"
-	persistenceIdIndexName = "persistenceId"
+	journalTableName    = "event_journal"
+	journalPK           = "id"
+	isDeletedIndex      = "deletion"
+	persistenceIDIndex  = "persistenceId"
+	sequenceNumberIndex = "sequenceNumber"
 )
 
 var (
 	// journalSchema defines the journal schema
 	journalSchema = &memdb.DBSchema{
 		Tables: map[string]*memdb.TableSchema{
-			"event_journal": {
-				Name: tableName,
+			journalTableName: {
+				Name: journalTableName,
 				Indexes: map[string]*memdb.IndexSchema{
-					primaryKey: {
-						Name:         primaryKey,
+					journalPK: {
+						Name:         journalPK,
 						AllowMissing: false,
 						Unique:       true,
-						Indexer: &memdb.CompoundIndex{
-							Indexes: []memdb.Indexer{
-								&memdb.StringFieldIndex{
-									Field:     "PersistenceID",
-									Lowercase: false,
-								},
-								&memdb.StringFieldIndex{
-									Field:     "SequenceNumber",
-									Lowercase: false,
-								},
-							},
-							AllowMissing: false,
+						Indexer: &memdb.StringFieldIndex{
+							Field:     "Ordering",
+							Lowercase: false,
 						},
 					},
-					isDeletedIndexName: {
-						Name:         isDeletedIndexName,
+					isDeletedIndex: {
+						Name:         isDeletedIndex,
 						AllowMissing: false,
 						Unique:       false,
 						Indexer: &memdb.StringFieldIndex{
@@ -66,13 +60,21 @@ var (
 							Lowercase: false,
 						},
 					},
-					persistenceIdIndexName: {
-						Name:         persistenceIdIndexName,
+					persistenceIDIndex: {
+						Name:         persistenceIDIndex,
 						AllowMissing: false,
 						Unique:       false,
 						Indexer: &memdb.StringFieldIndex{
 							Field:     "PersistenceID",
 							Lowercase: false,
+						},
+					},
+					sequenceNumberIndex: {
+						Name:         sequenceNumberIndex,
+						AllowMissing: false,
+						Unique:       false,
+						Indexer: &memdb.UintFieldIndex{
+							Field: "SequenceNumber",
 						},
 					},
 				},

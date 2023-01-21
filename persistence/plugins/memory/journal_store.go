@@ -2,28 +2,21 @@ package memory
 
 import (
 	"context"
+	"fmt"
 	"sort"
-	"sync"
 
-	"github.com/pkg/errors"
-
+	"github.com/google/uuid"
 	"github.com/hashicorp/go-memdb"
+	"github.com/pkg/errors"
 	pb "github.com/tochemey/goakt/pb/goakt/v1"
 	"github.com/tochemey/goakt/persistence"
 	"github.com/tochemey/goakt/telemetry"
 	"google.golang.org/protobuf/proto"
 )
 
-type item struct {
-	seqNr uint64
-	data  []byte
-}
-
 // JournalStore keep in memory every journal
-// NOTE: NOT RECOMMENDED FOR PRODUCTION CODE because all records are in memory and does not provide durability.
+// NOTE: NOT RECOMMENDED FOR PRODUCTION CODE because all records are in memory and there is no durability.
 type JournalStore struct {
-	// specifies the semaphore to ensure synchronized operations
-	mu sync.Mutex
 	// specifies the underlying database
 	db *memdb.MemDB
 	// this is only useful for tests
@@ -35,7 +28,6 @@ var _ persistence.JournalStore = &JournalStore{}
 // NewJournalStore creates a new instance of MemoryEventStore
 func NewJournalStore() *JournalStore {
 	return &JournalStore{
-		mu:                         sync.Mutex{},
 		keepRecordsAfterDisconnect: false,
 	}
 }
@@ -43,7 +35,7 @@ func NewJournalStore() *JournalStore {
 // Connect connects to the journal store
 func (s *JournalStore) Connect(ctx context.Context) error {
 	// add a span context
-	ctx, span := telemetry.SpanContext(ctx, "Journal.Connect")
+	ctx, span := telemetry.SpanContext(ctx, "JournalStore.Connect")
 	defer span.End()
 
 	// create an instance of the database
@@ -60,26 +52,62 @@ func (s *JournalStore) Connect(ctx context.Context) error {
 
 // Disconnect disconnect the journal store
 func (s *JournalStore) Disconnect(ctx context.Context) error {
+	// add a span context
+	ctx, span := telemetry.SpanContext(ctx, "JournalStore.Disconnect")
+	defer span.End()
+
+	// clear all records
+	if !s.keepRecordsAfterDisconnect {
+		// spawn a db transaction for read-only
+		txn := s.db.Txn(true)
+
+		// free memory resource
+		if _, err := txn.DeleteAll(journalTableName, journalPK); err != nil {
+			txn.Abort()
+			return errors.Wrap(err, "failed to free memory resource")
+		}
+		txn.Commit()
+	}
 	return nil
 }
 
 // PersistenceIDs returns the distinct list of all the persistence ids in the journal store
 func (s *JournalStore) PersistenceIDs(ctx context.Context) (persistenceIDs []string, err error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	persistenceIDs = make([]string, 0, s.Len())
-	for k := range s.cache {
-		persistenceIDs = append(persistenceIDs, k)
+	// add a span context
+	ctx, span := telemetry.SpanContext(ctx, "JournalStore.PersistenceIDs")
+	defer span.End()
+
+	// spawn a db transaction for read-only
+	txn := s.db.Txn(false)
+	defer txn.Abort()
+
+	// fetch all the records
+	it, err := txn.Get(journalTableName, persistenceIDIndex)
+	// handle the error
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to get the persistence Ids")
 	}
+
+	var journals []*journal
+	for row := it.Next(); row != nil; row = it.Next() {
+		if journal, ok := row.(*journal); ok {
+			journals = append(journals, journal)
+		}
+	}
+
+	persistenceIDs = make([]string, len(journals))
+	for i, journal := range journals {
+		persistenceIDs[i] = journal.PersistenceID
+	}
+
 	return
 }
 
 // WriteEvents persist events in batches for a given persistenceID
 func (s *JournalStore) WriteEvents(ctx context.Context, events []*pb.Event) error {
 	// add a span context
-	ctx, span := telemetry.SpanContext(ctx, "Journal.WriteEvents")
+	ctx, span := telemetry.SpanContext(ctx, "JournalStore.WriteEvents")
 	defer span.End()
-	s.mu.Lock()
 
 	// spawn a db transaction
 	txn := s.db.Txn(true)
@@ -94,7 +122,8 @@ func (s *JournalStore) WriteEvents(ctx context.Context, events []*pb.Event) erro
 		stateManifest := string(event.GetResultingState().ProtoReflect().Descriptor().FullName())
 
 		// create an instance of Journal
-		journal := &Journal{
+		journal := &journal{
+			Ordering:       uuid.NewString(),
 			PersistenceID:  event.GetPersistenceId(),
 			SequenceNumber: event.GetSequenceNumber(),
 			IsDeleted:      event.GetIsDeleted(),
@@ -106,7 +135,7 @@ func (s *JournalStore) WriteEvents(ctx context.Context, events []*pb.Event) erro
 		}
 
 		// persist the record
-		if err := txn.Insert(tableName, journal); err != nil {
+		if err := txn.Insert(journalTableName, journal); err != nil {
 			// abort the transaction
 			txn.Abort()
 			// return the error
@@ -116,22 +145,20 @@ func (s *JournalStore) WriteEvents(ctx context.Context, events []*pb.Event) erro
 	// commit the transaction
 	txn.Commit()
 
-	// release the lock
-	s.mu.Unlock()
 	return nil
 }
 
 // DeleteEvents deletes events from the store upt to a given sequence number (inclusive)
+// FIXME: enhance the implementation. As it stands it may be a bit slow
 func (s *JournalStore) DeleteEvents(ctx context.Context, persistenceID string, toSequenceNumber uint64) error {
 	// add a span context
-	ctx, span := telemetry.SpanContext(ctx, "Journal.DeleteEvents")
+	ctx, span := telemetry.SpanContext(ctx, "JournalStore.DeleteEvents")
 	defer span.End()
 
-	s.mu.Lock()
 	// spawn a db transaction for read-only
 	txn := s.db.Txn(false)
 	// fetch all the records that are not deleted and filter them out
-	it, err := txn.Get(tableName, persistenceIdIndexName, persistenceID)
+	it, err := txn.Get(journalTableName, persistenceIDIndex, persistenceID)
 	// handle the error
 	if err != nil {
 		// abort the transaction
@@ -139,93 +166,149 @@ func (s *JournalStore) DeleteEvents(ctx context.Context, persistenceID string, t
 		return errors.Wrapf(err, "failed to delete %d persistenceId=%s events", toSequenceNumber, persistenceID)
 	}
 
-	// loop over
-
-	// short circuit when there are no items
-	if len(items) == 0 {
-		s.mu.Unlock()
-		return nil
-	}
-
-	// iterate the items
-	for i, item := range items {
-		if item.seqNr <= toSequenceNumber {
-			// Remove the element at index from the slice
-			items[i] = items[len(items)-1] // Copy last element to index.
-			items[len(items)-1] = nil      // Erase last element (write zero value).
-			items = items[:len(items)-1]   // Truncate slice.
+	// loop over the records and delete them
+	var journals []*journal
+	for row := it.Next(); row != nil; row = it.Next() {
+		if journal, ok := row.(*journal); ok {
+			journals = append(journals, journal)
 		}
 	}
+	//  let us abort the transaction after fetching the matching records
+	txn.Abort()
 
-	// set the remaining items after the removal
-	s.cache[persistenceID] = items
-	s.mu.Unlock()
+	// now let us delete the records whose sequence number are less or equal to the given sequence number
+	// spawn a db transaction for write-only
+	txn = s.db.Txn(true)
+
+	// iterate over the records and delete them
+	// TODO enhance this operation using the DeleteAll feature
+	for _, journal := range journals {
+		if journal.SequenceNumber <= toSequenceNumber {
+			// delete that record
+			if err := txn.Delete(journalTableName, journal); err != nil {
+				// abort the transaction
+				txn.Abort()
+				return errors.Wrapf(err, "failed to delete %d persistenceId=%s events", toSequenceNumber, persistenceID)
+			}
+		}
+	}
+	// commit the transaction
+	txn.Commit()
 	return nil
 }
 
 // ReplayEvents fetches events for a given persistence ID from a given sequence number(inclusive) to a given sequence number(inclusive)
 func (s *JournalStore) ReplayEvents(ctx context.Context, persistenceID string, fromSequenceNumber, toSequenceNumber uint64, max uint64) ([]*pb.Event, error) {
-	s.mu.Lock()
-	items := s.cache[persistenceID]
+	// add a span context
+	ctx, span := telemetry.SpanContext(ctx, "JournalStore.ReplayEvents")
+	defer span.End()
 
-	// short circuit when there are no items
-	if len(items) == 0 {
-		s.mu.Unlock()
+	// spawn a db transaction for read-only
+	txn := s.db.Txn(false)
+	// fetch all the records for the given persistence ID
+	it, err := txn.Get(journalTableName, persistenceIDIndex, persistenceID)
+	// handle the error
+	if err != nil {
+		// abort the transaction
+		txn.Abort()
+		return nil, errors.Wrapf(err, "failed to replay events %d for persistenceId=%s events", (toSequenceNumber-fromSequenceNumber)+1, persistenceID)
+	}
+
+	// loop over the records and delete them
+	var journals []*journal
+	for row := it.Next(); row != nil; row = it.Next() {
+		if journal, ok := row.(*journal); ok {
+			journals = append(journals, journal)
+		}
+	}
+	//  let us abort the transaction after fetching the matching records
+	txn.Abort()
+
+	// short circuit the operation when there are no records
+	if len(journals) == 0 {
 		return nil, nil
 	}
 
-	subset := make([]*pb.Event, 0, (toSequenceNumber-fromSequenceNumber)+1)
-	for _, item := range items {
-		if item.seqNr >= fromSequenceNumber && item.seqNr <= toSequenceNumber {
-			// unmarshal it
-			event := new(pb.Event)
-			// return the error during unmarshalling
-			if err := proto.Unmarshal(item.data, event); err != nil {
-				s.mu.Unlock()
-				return nil, err
+	events := make([]*pb.Event, 0, max)
+	for _, journal := range journals {
+		if journal.SequenceNumber >= fromSequenceNumber && journal.SequenceNumber <= toSequenceNumber {
+			// unmarshal the event and the state
+			evt, err := toProto(journal.EventManifest, journal.EventPayload)
+			if err != nil {
+				return nil, errors.Wrap(err, "failed to unmarshal the journal event")
+			}
+			state, err := toProto(journal.StateManifest, journal.StatePayload)
+			if err != nil {
+				return nil, errors.Wrap(err, "failed to unmarshal the journal state")
 			}
 
-			// add the item to the subset
-			if len(subset) <= int(max) {
-				subset = append(subset, event)
+			if len(events) <= int(max) {
+				// create the event and add it to the list of events
+				events = append(events, &pb.Event{
+					PersistenceId:  journal.PersistenceID,
+					SequenceNumber: journal.SequenceNumber,
+					IsDeleted:      journal.IsDeleted,
+					Event:          evt,
+					ResultingState: state,
+					Timestamp:      journal.Timestamp,
+				})
 			}
 		}
 	}
 
 	// sort the subset by sequence number
-	sort.SliceStable(subset, func(i, j int) bool {
-		return subset[i].GetSequenceNumber() < subset[j].GetSequenceNumber()
+	sort.SliceStable(events, func(i, j int) bool {
+		return events[i].GetSequenceNumber() < events[j].GetSequenceNumber()
 	})
 
-	s.mu.Unlock()
-	return subset, nil
+	return events, nil
 }
 
 // GetLatestEvent fetches the latest event
 func (s *JournalStore) GetLatestEvent(ctx context.Context, persistenceID string) (*pb.Event, error) {
-	s.mu.Lock()
-	items := s.cache[persistenceID]
+	// add a span context
+	ctx, span := telemetry.SpanContext(ctx, "JournalStore.GetLatestEvent")
+	defer span.End()
 
-	// short circuit when there are no items
-	if len(items) == 0 {
-		s.mu.Unlock()
+	// spawn a db transaction for read-only
+	txn := s.db.Txn(false)
+	defer txn.Abort()
+	// let us fetch the last record
+	raw, err := txn.Last(journalTableName, persistenceIDIndex, persistenceID)
+	if err != nil {
+		// if the error is not found then return nil
+		if err == memdb.ErrNotFound {
+			return nil, nil
+		}
+		return nil, errors.Wrapf(err, "failed to fetch the latest event from the database for persistenceId=%s", persistenceID)
+	}
+
+	// no record found
+	if raw == nil {
 		return nil, nil
 	}
 
-	// pick the last item in the array
-	item := items[len(items)-1]
-	// unmarshal it
-	event := new(pb.Event)
-	// return the error during unmarshalling
-	if err := proto.Unmarshal(item.data, event); err != nil {
-		s.mu.Unlock()
-		return nil, err
-	}
-	s.mu.Unlock()
-	return event, nil
-}
+	// let us cast the raw data
+	if journal, ok := raw.(*journal); ok {
+		// unmarshal the event and the state
+		evt, err := toProto(journal.EventManifest, journal.EventPayload)
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to unmarshal the journal event")
+		}
+		state, err := toProto(journal.StateManifest, journal.StatePayload)
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to unmarshal the journal state")
+		}
 
-// Len return the length of the cache
-func (s *JournalStore) Len() int {
-	return len(s.cache)
+		return &pb.Event{
+			PersistenceId:  journal.PersistenceID,
+			SequenceNumber: journal.SequenceNumber,
+			IsDeleted:      journal.IsDeleted,
+			Event:          evt,
+			ResultingState: state,
+			Timestamp:      journal.Timestamp,
+		}, nil
+	}
+
+	return nil, fmt.Errorf("failed to fetch the latest event from the database for persistenceId=%s", persistenceID)
 }

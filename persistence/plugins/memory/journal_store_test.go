@@ -2,9 +2,11 @@ package memory
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	pb "github.com/tochemey/goakt/pb/goakt/v1"
 	"github.com/tochemey/goakt/persistence"
 	testpb "github.com/tochemey/goakt/test/data/pb/v1"
@@ -48,6 +50,7 @@ func TestMemoryJournalStore(t *testing.T) {
 
 		store := NewJournalStore()
 		assert.NotNil(t, store)
+		require.NoError(t, store.Connect(ctx))
 
 		err = store.WriteEvents(ctx, []*pb.Event{journal})
 		assert.NoError(t, err)
@@ -81,6 +84,7 @@ func TestMemoryJournalStore(t *testing.T) {
 
 		store := NewJournalStore()
 		assert.NotNil(t, store)
+		require.NoError(t, store.Connect(ctx))
 
 		err = store.WriteEvents(ctx, []*pb.Event{journal})
 		assert.NoError(t, err)
@@ -127,6 +131,7 @@ func TestMemoryJournalStore(t *testing.T) {
 
 		store := NewJournalStore()
 		assert.NotNil(t, store)
+		require.NoError(t, store.Connect(ctx))
 
 		err = store.WriteEvents(ctx, journals)
 		assert.NoError(t, err)
@@ -138,6 +143,66 @@ func TestMemoryJournalStore(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotEmpty(t, actual)
 		assert.Len(t, actual, 4)
+
+		err = store.Disconnect(ctx)
+		assert.NoError(t, err)
+	})
+	t.Run("testPersistenceIDs", func(t *testing.T) {
+		ctx := context.TODO()
+		state, err := anypb.New(new(testpb.Account))
+		assert.NoError(t, err)
+		event, err := anypb.New(&testpb.AccountCredited{})
+		assert.NoError(t, err)
+
+		timestamp := timestamppb.Now()
+
+		count := 5
+		journals := make([]*pb.Event, count)
+		for i := 0; i < count; i++ {
+			seqNr := i + 1
+			journals[i] = &pb.Event{
+				PersistenceId:  fmt.Sprintf("persistence-%d", i),
+				SequenceNumber: uint64(seqNr),
+				IsDeleted:      false,
+				Event:          event,
+				ResultingState: state,
+				Timestamp:      timestamp.AsTime().Unix(),
+			}
+		}
+
+		store := NewJournalStore()
+		assert.NotNil(t, store)
+		require.NoError(t, store.Connect(ctx))
+
+		err = store.WriteEvents(ctx, journals)
+		assert.NoError(t, err)
+
+		expected := []string{
+			"persistence-0",
+			"persistence-1",
+			"persistence-2",
+			"persistence-3",
+			"persistence-4",
+		}
+
+		actual, err := store.PersistenceIDs(ctx)
+		assert.NoError(t, err)
+		assert.ElementsMatch(t, expected, actual)
+
+		err = store.Disconnect(ctx)
+		assert.NoError(t, err)
+	})
+	t.Run("testGetLatestEvent: not found", func(t *testing.T) {
+		ctx := context.TODO()
+
+		store := NewJournalStore()
+		assert.NotNil(t, store)
+		require.NoError(t, store.Connect(ctx))
+
+		// fetch the data we insert back
+		actual, err := store.GetLatestEvent(ctx, "persistence-1")
+		assert.NoError(t, err)
+		assert.Nil(t, actual)
 
 		err = store.Disconnect(ctx)
 		assert.NoError(t, err)

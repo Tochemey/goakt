@@ -63,7 +63,7 @@ func NewJournalStore(config *postgres.Config) *JournalStore {
 // Connect connects to the underlying postgres database
 func (s *JournalStore) Connect(ctx context.Context) error {
 	// add a span context
-	ctx, span := telemetry.SpanContext(ctx, "Journal.Connect")
+	ctx, span := telemetry.SpanContext(ctx, "JournalStore.Connect")
 	defer span.End()
 	return s.db.Connect(ctx)
 }
@@ -71,7 +71,7 @@ func (s *JournalStore) Connect(ctx context.Context) error {
 // Disconnect disconnects from the underlying postgres database
 func (s *JournalStore) Disconnect(ctx context.Context) error {
 	// add a span context
-	ctx, span := telemetry.SpanContext(ctx, "Journal.Disconnect")
+	ctx, span := telemetry.SpanContext(ctx, "JournalStore.Disconnect")
 	defer span.End()
 	return s.db.Disconnect(ctx)
 }
@@ -79,7 +79,7 @@ func (s *JournalStore) Disconnect(ctx context.Context) error {
 // PersistenceIDs returns the distinct list of all the persistence ids in the journal store
 func (s *JournalStore) PersistenceIDs(ctx context.Context) (persistenceIDs []string, err error) {
 	// add a span context
-	ctx, span := telemetry.SpanContext(ctx, "Journal.PersistenceIDs")
+	ctx, span := telemetry.SpanContext(ctx, "JournalStore.PersistenceIDs")
 	defer span.End()
 
 	// create the database delete statement
@@ -119,7 +119,7 @@ func (s *JournalStore) PersistenceIDs(ctx context.Context) (persistenceIDs []str
 // WriteEvents writes a bunch of events into the underlying postgres database
 func (s *JournalStore) WriteEvents(ctx context.Context, events []*pb.Event) error {
 	// add a span context
-	ctx, span := telemetry.SpanContext(ctx, "Journal.WriteEvents")
+	ctx, span := telemetry.SpanContext(ctx, "JournalStore.WriteEvents")
 	defer span.End()
 
 	// check whether the journals list is empty
@@ -200,7 +200,7 @@ func (s *JournalStore) WriteEvents(ctx context.Context, events []*pb.Event) erro
 // DeleteEvents deletes events from the postgres up to a given sequence number (inclusive)
 func (s *JournalStore) DeleteEvents(ctx context.Context, persistenceID string, toSequenceNumber uint64) error {
 	// add a span context
-	ctx, span := telemetry.SpanContext(ctx, "Journal.DeleteEvents")
+	ctx, span := telemetry.SpanContext(ctx, "JournalStore.DeleteEvents")
 	defer span.End()
 
 	// create the database delete statement
@@ -226,7 +226,7 @@ func (s *JournalStore) DeleteEvents(ctx context.Context, persistenceID string, t
 // ReplayEvents fetches events for a given persistence ID from a given sequence number(inclusive) to a given sequence number(inclusive)
 func (s *JournalStore) ReplayEvents(ctx context.Context, persistenceID string, fromSequenceNumber, toSequenceNumber uint64, max uint64) ([]*pb.Event, error) {
 	// add a span context
-	ctx, span := telemetry.SpanContext(ctx, "Journal.ReplayEvents")
+	ctx, span := telemetry.SpanContext(ctx, "JournalStore.ReplayEvents")
 	defer span.End()
 
 	// create the database select statement
@@ -292,7 +292,7 @@ func (s *JournalStore) ReplayEvents(ctx context.Context, persistenceID string, f
 // GetLatestEvent fetches the latest event
 func (s *JournalStore) GetLatestEvent(ctx context.Context, persistenceID string) (*pb.Event, error) {
 	// add a span context
-	ctx, span := telemetry.SpanContext(ctx, "Journal.GetLatestEvent")
+	ctx, span := telemetry.SpanContext(ctx, "JournalStore.GetLatestEvent")
 	defer span.End()
 
 	// create the database select statement
