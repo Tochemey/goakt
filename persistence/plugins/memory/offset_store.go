@@ -14,6 +14,7 @@ import (
 
 // OffsetStore implements the offset store interface
 // NOTE: NOT RECOMMENDED FOR PRODUCTION CODE because all records are in memory and there is no durability.
+// This is recommended for tests or PoC
 type OffsetStore struct {
 	// specifies the underlying database
 	db *memdb.MemDB

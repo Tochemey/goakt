@@ -16,6 +16,7 @@ import (
 
 // JournalStore keep in memory every journal
 // NOTE: NOT RECOMMENDED FOR PRODUCTION CODE because all records are in memory and there is no durability.
+// This is recommended for tests or PoC
 type JournalStore struct {
 	// specifies the underlying database
 	db *memdb.MemDB
