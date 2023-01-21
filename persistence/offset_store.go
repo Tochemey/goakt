@@ -6,8 +6,7 @@ import (
 	pb "github.com/tochemey/goakt/pb/goakt/v1"
 )
 
-// OffsetStore defines the contract needed to persist persistence entities
-// events offsets
+// OffsetStore defines the contract needed to persist offsets
 type OffsetStore interface {
 	// Connect connects to the offset store
 	Connect(ctx context.Context) error
