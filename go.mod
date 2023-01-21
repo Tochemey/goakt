@@ -9,6 +9,7 @@ require (
 	github.com/flowchartsman/retry v1.2.0
 	github.com/georgysavva/scany v1.2.1
 	github.com/google/uuid v1.3.0
+	github.com/hashicorp/go-memdb v1.3.4
 	github.com/lib/pq v1.10.7
 	github.com/orcaman/concurrent-map/v2 v2.0.1
 	github.com/ory/dockertest v3.3.5+incompatible
@@ -36,6 +37,8 @@ require (
 	github.com/go-logr/logr v1.2.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/gotestyourself/gotestyourself v2.2.0+incompatible // indirect
+	github.com/hashicorp/go-immutable-radix v1.3.0 // indirect
+	github.com/hashicorp/golang-lru v0.5.4 // indirect
 	github.com/lann/builder v0.0.0-20180802200727-47ae307949d0 // indirect
 	github.com/lann/ps v0.0.0-20150810152359-62de8c46ede0 // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect

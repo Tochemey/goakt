@@ -5,8 +5,12 @@ import (
 	"sort"
 	"sync"
 
+	"github.com/pkg/errors"
+
+	"github.com/hashicorp/go-memdb"
 	pb "github.com/tochemey/goakt/pb/goakt/v1"
 	"github.com/tochemey/goakt/persistence"
+	"github.com/tochemey/goakt/telemetry"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -16,11 +20,12 @@ type item struct {
 }
 
 // JournalStore keep in memory every journal
-// NOTE: NOT RECOMMENDED FOR PRODUCTION CODE
+// NOTE: NOT RECOMMENDED FOR PRODUCTION CODE because all records are in memory and does not provide durability.
 type JournalStore struct {
-	mu    sync.Mutex
-	cache map[string][]*item
-
+	// specifies the semaphore to ensure synchronized operations
+	mu sync.Mutex
+	// specifies the underlying database
+	db *memdb.MemDB
 	// this is only useful for tests
 	keepRecordsAfterDisconnect bool
 }
@@ -31,21 +36,30 @@ var _ persistence.JournalStore = &JournalStore{}
 func NewJournalStore() *JournalStore {
 	return &JournalStore{
 		mu:                         sync.Mutex{},
-		cache:                      map[string][]*item{},
 		keepRecordsAfterDisconnect: false,
 	}
 }
 
 // Connect connects to the journal store
 func (s *JournalStore) Connect(ctx context.Context) error {
+	// add a span context
+	ctx, span := telemetry.SpanContext(ctx, "Journal.Connect")
+	defer span.End()
+
+	// create an instance of the database
+	db, err := memdb.NewMemDB(journalSchema)
+	// handle the eventual error
+	if err != nil {
+		return err
+	}
+	// set the journal store underlying database
+	s.db = db
+
 	return nil
 }
 
 // Disconnect disconnect the journal store
 func (s *JournalStore) Disconnect(ctx context.Context) error {
-	s.mu.Lock()
-	s.cache = map[string][]*item{}
-	s.mu.Unlock()
 	return nil
 }
 
@@ -62,37 +76,70 @@ func (s *JournalStore) PersistenceIDs(ctx context.Context) (persistenceIDs []str
 
 // WriteEvents persist events in batches for a given persistenceID
 func (s *JournalStore) WriteEvents(ctx context.Context, events []*pb.Event) error {
+	// add a span context
+	ctx, span := telemetry.SpanContext(ctx, "Journal.WriteEvents")
+	defer span.End()
 	s.mu.Lock()
+
+	// spawn a db transaction
+	txn := s.db.Txn(true)
+	// iterate the event and persist the record
 	for _, event := range events {
-		bytea, err := proto.Marshal(event)
-		if err != nil {
-			s.mu.Unlock()
-			return err
+		// serialize the event and resulting state
+		eventBytes, _ := proto.Marshal(event.GetEvent())
+		stateBytes, _ := proto.Marshal(event.GetResultingState())
+
+		// grab the manifest
+		eventManifest := string(event.GetEvent().ProtoReflect().Descriptor().FullName())
+		stateManifest := string(event.GetResultingState().ProtoReflect().Descriptor().FullName())
+
+		// create an instance of Journal
+		journal := &Journal{
+			PersistenceID:  event.GetPersistenceId(),
+			SequenceNumber: event.GetSequenceNumber(),
+			IsDeleted:      event.GetIsDeleted(),
+			EventPayload:   eventBytes,
+			EventManifest:  eventManifest,
+			StatePayload:   stateBytes,
+			StateManifest:  stateManifest,
+			Timestamp:      event.GetTimestamp(),
 		}
 
-		// grab the existing items
-		items := s.cache[event.GetPersistenceId()]
-		// add the new entry to the existing items
-		items = append(items, &item{
-			seqNr: event.GetSequenceNumber(),
-			data:  bytea,
-		})
-
-		// order the items per sequence number
-		sort.SliceStable(items, func(i, j int) bool {
-			return items[i].seqNr < items[j].seqNr
-		})
-
-		s.cache[event.GetPersistenceId()] = items
+		// persist the record
+		if err := txn.Insert(tableName, journal); err != nil {
+			// abort the transaction
+			txn.Abort()
+			// return the error
+			return errors.Wrap(err, "failed to persist event on to the journal store")
+		}
 	}
+	// commit the transaction
+	txn.Commit()
+
+	// release the lock
 	s.mu.Unlock()
 	return nil
 }
 
 // DeleteEvents deletes events from the store upt to a given sequence number (inclusive)
 func (s *JournalStore) DeleteEvents(ctx context.Context, persistenceID string, toSequenceNumber uint64) error {
+	// add a span context
+	ctx, span := telemetry.SpanContext(ctx, "Journal.DeleteEvents")
+	defer span.End()
+
 	s.mu.Lock()
-	items := s.cache[persistenceID]
+	// spawn a db transaction for read-only
+	txn := s.db.Txn(false)
+	// fetch all the records that are not deleted and filter them out
+	it, err := txn.Get(tableName, persistenceIdIndexName, persistenceID)
+	// handle the error
+	if err != nil {
+		// abort the transaction
+		txn.Abort()
+		return errors.Wrapf(err, "failed to delete %d persistenceId=%s events", toSequenceNumber, persistenceID)
+	}
+
+	// loop over
 
 	// short circuit when there are no items
 	if len(items) == 0 {
