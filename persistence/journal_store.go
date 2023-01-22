@@ -25,4 +25,6 @@ type JournalStore interface {
 	GetLatestEvent(ctx context.Context, persistenceID string) (*pb.Event, error)
 	// PersistenceIDs returns the distinct list of all the persistence ids in the journal store
 	PersistenceIDs(ctx context.Context) (persistenceIDs []string, err error)
+	// Ping verifies a connection to the database is still alive, establishing a connection if necessary.
+	Ping(ctx context.Context) error
 }

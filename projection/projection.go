@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"sync"
 	"time"
 
 	"github.com/flowchartsman/retry"
@@ -13,6 +12,7 @@ import (
 	pb "github.com/tochemey/goakt/pb/goakt/v1"
 	"github.com/tochemey/goakt/persistence"
 	"github.com/tochemey/goakt/telemetry"
+	"go.uber.org/atomic"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -23,7 +23,6 @@ type Handler func(ctx context.Context, persistenceID string, event *anypb.Any, s
 
 // Projection defines the projection
 type Projection struct {
-	mu sync.RWMutex
 	// specifies the projection handler
 	handler Handler
 	// specifies the offset store
@@ -38,19 +37,21 @@ type Projection struct {
 	// stop signal
 	stopSignal chan struct{}
 	// specifies the recovery setting
-	recovery *RecoverySetting
+	recovery  *RecoverySetting
+	isStarted *atomic.Bool
 }
 
 // New create an instance of Projection given the name of the projection, the handler and the offsets store
 func New(config *Config) *Projection {
 	return &Projection{
-		mu:             sync.RWMutex{},
 		handler:        config.Handler,
 		offsetsStore:   config.OffsetStore,
 		projectionName: config.Name,
 		journalStore:   config.JournalStore,
 		logger:         config.Logger,
 		recovery:       config.RecoverySetting,
+		stopSignal:     make(chan struct{}, 1),
+		isStarted:      atomic.NewBool(false),
 	}
 }
 
@@ -59,6 +60,10 @@ func (p *Projection) Start(ctx context.Context) error {
 	// add a span context
 	ctx, span := telemetry.SpanContext(ctx, "PreStart")
 	defer span.End()
+
+	if p.isStarted.Load() {
+		return nil
+	}
 
 	// connect to the offset store
 	if p.offsetsStore == nil {
@@ -80,6 +85,39 @@ func (p *Projection) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to connect to the journal store: %v", err)
 	}
 
+	// we will ping the stores 5 times to see whether there have started successfully or not.
+	// The operation will be done in an exponential backoff mechanism with an initial delay of a second and a maximum delay of a second.
+	// Once the retries have completed and still not connected we fail the start process of the projection.
+	const (
+		maxRetries   = 5
+		initialDelay = time.Second
+		maxDelay     = time.Second
+	)
+	// create a new instance of retrier that will try a maximum of five times, with
+	// an initial delay of 100 ms and a maximum delay of 1 second
+	retrier := retry.NewRetrier(maxRetries, initialDelay, maxDelay)
+	err := retrier.RunContext(ctx, func(ctx context.Context) error {
+		// we ping both stores in parallel
+		g, ctx := errgroup.WithContext(ctx)
+		// ping the journal store
+		g.Go(func() error {
+			return p.journalStore.Ping(ctx)
+		})
+		// ping the offset store
+		g.Go(func() error {
+			return p.offsetsStore.Ping(ctx)
+		})
+		// return the result of operations
+		return g.Wait()
+	})
+
+	if err != nil {
+		return errors.Wrap(err, "failed to start the projection")
+	}
+
+	// set the started status
+	p.isStarted.Store(true)
+
 	// start processing
 	go p.processingLoop(ctx)
 
@@ -91,6 +129,11 @@ func (p *Projection) Stop(ctx context.Context) error {
 	// add a span context
 	ctx, span := telemetry.SpanContext(ctx, "PostStop")
 	defer span.End()
+
+	// check whether it is stopped or not
+	if !p.isStarted.Load() {
+		return nil
+	}
 
 	// send the stop
 	close(p.stopSignal)
@@ -105,6 +148,8 @@ func (p *Projection) Stop(ctx context.Context) error {
 		return fmt.Errorf("failed to disconnect the offsets store: %v", err)
 	}
 
+	// set the started status to false
+	p.isStarted.Store(false)
 	return nil
 }
 
@@ -115,39 +160,30 @@ func (p *Projection) processingLoop(ctx context.Context) {
 		case <-p.stopSignal:
 			return
 		default:
-			g, ctx := errgroup.WithContext(ctx)
-			// define the channel holding the persistence id
-			idsChan := make(chan string, 100)
-
-			// fetch the persistence IDs
-			g.Go(func() error {
-				// close the channel when done
-				defer close(idsChan)
-				// let us fetch all the persistence ids
-				ids, err := p.journalStore.PersistenceIDs(ctx)
+			// let us fetch all the persistence ids
+			ids, err := p.journalStore.PersistenceIDs(ctx)
+			// handle the error
+			if err != nil {
+				// log the error
+				p.logger.Error(errors.Wrap(err, "failed to fetch the list of persistence IDs"))
+				// here we stop the projection
+				err := p.Stop(ctx)
 				// handle the error
 				if err != nil {
-					return errors.Wrap(err, "failed to fetch the list of persistence IDs")
+					// log the error
+					p.logger.Error(err)
+					return
 				}
+				return
+			}
 
-				// push the fetched IDs onto the channel
-				for _, id := range ids {
-					idsChan <- id
-				}
-				return nil
-			})
-
-			// now let us process the fetched persistence IDs
-			// start a fixed number of workers to process the persistence IDs read
-			const workerCount = 20
-			for i := 0; i < workerCount; i++ {
+			// with a simple parallelism we process all persistence IDs
+			// TODO: break the work with workers that can fail without failing the entire projection
+			g, ctx := errgroup.WithContext(ctx)
+			for _, persistenceID := range ids {
+				persistenceID := persistenceID
 				g.Go(func() error {
-					for persistenceID := range idsChan {
-						if err := p.doProcess(ctx, persistenceID); err != nil {
-							return err
-						}
-					}
-					return nil
+					return p.doProcess(ctx, persistenceID)
 				})
 			}
 
@@ -179,6 +215,11 @@ func (p *Projection) doProcess(ctx context.Context, persistenceID string) error 
 	// add a span context
 	ctx, span := telemetry.SpanContext(ctx, "HandlePersistenceID")
 	defer span.End()
+
+	if !p.isStarted.Load() {
+		return nil
+	}
+
 	// get the latest offset persisted for the persistence id
 	offset, err := p.offsetsStore.GetCurrentOffset(ctx, persistence.NewProjectionID(p.projectionName, persistenceID))
 	if err != nil {
@@ -191,10 +232,7 @@ func (p *Projection) doProcess(ctx context.Context, persistenceID string) error 
 		return err
 	}
 	// grab the total number of events fetched
-	eventsLen := len(events)
-	for i := 0; i < eventsLen; i++ {
-		// get the event envelope
-		envelope := events[i]
+	for _, envelope := range events {
 		// grab the data to pass to the projection handler
 		state := envelope.GetResultingState()
 		event := envelope.GetEvent()
@@ -218,6 +256,7 @@ func (p *Projection) doProcess(ctx context.Context, persistenceID string) error 
 			backoff := retry.NewRetrier(int(retries), 100*time.Millisecond, delay)
 			// pass the data to the projection handler
 			if err := backoff.Run(func() error {
+				// handle the projection handler error
 				if err := p.handler(ctx, persistenceID, event, state, seqNr); err != nil {
 					p.logger.Error(errors.Wrapf(err, "failed to process event for persistence id=%s, sequence=%d", persistenceID, seqNr))
 					return err
@@ -246,35 +285,23 @@ func (p *Projection) doProcess(ctx context.Context, persistenceID string) error 
 				p.logger.Error(errors.Wrapf(err, "failed to process event for persistence id=%s, sequence=%d", persistenceID, seqNr))
 			}
 
-			// here we commit the offset to the offset store and continue the next event
-			offset = &pb.Offset{
-				PersistenceId:  persistenceID,
-				ProjectionName: p.projectionName,
-				CurrentOffset:  seqNr,
-				Timestamp:      timestamppb.Now().AsTime().UnixMilli(),
-			}
-			// write the given offset and return any possible error
-			if err := p.offsetsStore.WriteOffset(ctx, offset); err != nil {
-				return errors.Wrapf(err, "failed to persist offset for persistence id=%s, sequence=%d", persistenceID, seqNr)
-			}
-
 		case pb.ProjectionRecoveryStrategy_SKIP:
 			// send the data to the handler. In case of error we just log the error and skip the event by committing the offset
 			if err := p.handler(ctx, persistenceID, event, state, seqNr); err != nil {
 				p.logger.Error(errors.Wrapf(err, "failed to process event for persistence id=%s, sequence=%d", persistenceID, seqNr))
 			}
+		}
 
-			// here we commit the offset to the offset store and continue the next event
-			offset = &pb.Offset{
-				PersistenceId:  persistenceID,
-				ProjectionName: p.projectionName,
-				CurrentOffset:  seqNr,
-				Timestamp:      timestamppb.Now().AsTime().UnixMilli(),
-			}
-			// write the given offset and return any possible error
-			if err := p.offsetsStore.WriteOffset(ctx, offset); err != nil {
-				return errors.Wrapf(err, "failed to persist offset for persistence id=%s, sequence=%d", persistenceID, seqNr)
-			}
+		// here we commit the offset to the offset store and continue the next event
+		offset = &pb.Offset{
+			PersistenceId:  persistenceID,
+			ProjectionName: p.projectionName,
+			CurrentOffset:  seqNr,
+			Timestamp:      timestamppb.Now().AsTime().UnixMilli(),
+		}
+		// write the given offset and return any possible error
+		if err := p.offsetsStore.WriteOffset(ctx, offset); err != nil {
+			return errors.Wrapf(err, "failed to persist offset for persistence id=%s, sequence=%d", persistenceID, seqNr)
 		}
 	}
 

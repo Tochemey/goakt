@@ -11,6 +11,7 @@ import (
 	"github.com/tochemey/goakt/persistence"
 	"github.com/tochemey/goakt/pkg/postgres"
 	"github.com/tochemey/goakt/telemetry"
+	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/reflect/protoregistry"
@@ -44,6 +45,8 @@ type JournalStore struct {
 	// Note: Change this value when you know the size of data to bulk insert at once. Otherwise, you
 	// might encounter the postgres 65535 parameter limit error.
 	insertBatchSize int
+	// hold the connection state to avoid multiple connection of the same instance
+	connected *atomic.Bool
 }
 
 // make sure the PostgresEventStore implements the JournalStore interface
@@ -57,6 +60,7 @@ func NewJournalStore(config *postgres.Config) *JournalStore {
 		db:              db,
 		sb:              sq.StatementBuilder.PlaceholderFormat(sq.Dollar),
 		insertBatchSize: 500,
+		connected:       atomic.NewBool(false),
 	}
 }
 
@@ -65,7 +69,20 @@ func (s *JournalStore) Connect(ctx context.Context) error {
 	// add a span context
 	ctx, span := telemetry.SpanContext(ctx, "JournalStore.Connect")
 	defer span.End()
-	return s.db.Connect(ctx)
+	// check whether this instance of the journal is connected or not
+	if s.connected.Load() {
+		return nil
+	}
+
+	// connect to the underlying db
+	if err := s.db.Connect(ctx); err != nil {
+		return err
+	}
+
+	// set the connection status
+	s.connected.Store(true)
+
+	return nil
 }
 
 // Disconnect disconnects from the underlying postgres database
@@ -73,7 +90,34 @@ func (s *JournalStore) Disconnect(ctx context.Context) error {
 	// add a span context
 	ctx, span := telemetry.SpanContext(ctx, "JournalStore.Disconnect")
 	defer span.End()
-	return s.db.Disconnect(ctx)
+
+	// check whether this instance of the journal is connected or not
+	if !s.connected.Load() {
+		return nil
+	}
+
+	// disconnect the underlying database
+	if err := s.db.Disconnect(ctx); err != nil {
+		return err
+	}
+	// set the connection status
+	s.connected.Store(false)
+
+	return nil
+}
+
+// Ping verifies a connection to the database is still alive, establishing a connection if necessary.
+func (s *JournalStore) Ping(ctx context.Context) error {
+	// add a span context
+	ctx, span := telemetry.SpanContext(ctx, "JournalStore.Ping")
+	defer span.End()
+
+	// check whether we are connected or not
+	if !s.connected.Load() {
+		return s.Connect(ctx)
+	}
+
+	return nil
 }
 
 // PersistenceIDs returns the distinct list of all the persistence ids in the journal store
@@ -81,6 +125,11 @@ func (s *JournalStore) PersistenceIDs(ctx context.Context) (persistenceIDs []str
 	// add a span context
 	ctx, span := telemetry.SpanContext(ctx, "JournalStore.PersistenceIDs")
 	defer span.End()
+
+	// check whether this instance of the journal is connected or not
+	if !s.connected.Load() {
+		return nil, errors.New("journal store is not connected")
+	}
 
 	// create the database delete statement
 	statement := s.sb.
@@ -121,6 +170,11 @@ func (s *JournalStore) WriteEvents(ctx context.Context, events []*pb.Event) erro
 	// add a span context
 	ctx, span := telemetry.SpanContext(ctx, "JournalStore.WriteEvents")
 	defer span.End()
+
+	// check whether this instance of the journal is connected or not
+	if !s.connected.Load() {
+		return errors.New("journal store is not connected")
+	}
 
 	// check whether the journals list is empty
 	if len(events) == 0 {
@@ -203,6 +257,11 @@ func (s *JournalStore) DeleteEvents(ctx context.Context, persistenceID string, t
 	ctx, span := telemetry.SpanContext(ctx, "JournalStore.DeleteEvents")
 	defer span.End()
 
+	// check whether this instance of the journal is connected or not
+	if !s.connected.Load() {
+		return errors.New("journal store is not connected")
+	}
+
 	// create the database delete statement
 	statement := s.sb.
 		Delete(tableName).
@@ -228,6 +287,11 @@ func (s *JournalStore) ReplayEvents(ctx context.Context, persistenceID string, f
 	// add a span context
 	ctx, span := telemetry.SpanContext(ctx, "JournalStore.ReplayEvents")
 	defer span.End()
+
+	// check whether this instance of the journal is connected or not
+	if !s.connected.Load() {
+		return nil, errors.New("journal store is not connected")
+	}
 
 	// create the database select statement
 	statement := s.sb.
@@ -294,6 +358,11 @@ func (s *JournalStore) GetLatestEvent(ctx context.Context, persistenceID string)
 	// add a span context
 	ctx, span := telemetry.SpanContext(ctx, "JournalStore.GetLatestEvent")
 	defer span.End()
+
+	// check whether this instance of the journal is connected or not
+	if !s.connected.Load() {
+		return nil, errors.New("journal store is not connected")
+	}
 
 	// create the database select statement
 	statement := s.sb.

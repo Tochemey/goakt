@@ -10,6 +10,7 @@ import (
 	pb "github.com/tochemey/goakt/pb/goakt/v1"
 	"github.com/tochemey/goakt/persistence"
 	"github.com/tochemey/goakt/telemetry"
+	"go.uber.org/atomic"
 )
 
 // OffsetStore implements the offset store interface
@@ -19,7 +20,9 @@ type OffsetStore struct {
 	// specifies the underlying database
 	db *memdb.MemDB
 	// this is only useful for tests
-	keepRecordsAfterDisconnect bool
+	KeepRecordsAfterDisconnect bool
+	// hold the connection state to avoid multiple connection of the same instance
+	connected *atomic.Bool
 }
 
 var _ persistence.OffsetStore = &OffsetStore{}
@@ -27,7 +30,8 @@ var _ persistence.OffsetStore = &OffsetStore{}
 // NewOffsetStore creates an instance of OffsetStore
 func NewOffsetStore() *OffsetStore {
 	return &OffsetStore{
-		keepRecordsAfterDisconnect: false,
+		KeepRecordsAfterDisconnect: false,
+		connected:                  atomic.NewBool(false),
 	}
 }
 
@@ -36,6 +40,11 @@ func (s *OffsetStore) Connect(ctx context.Context) error {
 	// add a span context
 	ctx, span := telemetry.SpanContext(ctx, "OffsetStore.Connect")
 	defer span.End()
+
+	// check whether this instance of the journal is connected or not
+	if s.connected.Load() {
+		return nil
+	}
 
 	// create an instance of the database
 	db, err := memdb.NewMemDB(offsetSchema)
@@ -46,6 +55,9 @@ func (s *OffsetStore) Connect(ctx context.Context) error {
 	// set the journal store underlying database
 	s.db = db
 
+	// set the connection status
+	s.connected.Store(true)
+
 	return nil
 }
 
@@ -55,8 +67,13 @@ func (s *OffsetStore) Disconnect(ctx context.Context) error {
 	ctx, span := telemetry.SpanContext(ctx, "OffsetStore.Disconnect")
 	defer span.End()
 
+	// check whether this instance of the journal is connected or not
+	if !s.connected.Load() {
+		return nil
+	}
+
 	// clear all records
-	if !s.keepRecordsAfterDisconnect {
+	if !s.KeepRecordsAfterDisconnect {
 		// spawn a db transaction for read-only
 		txn := s.db.Txn(true)
 
@@ -67,6 +84,23 @@ func (s *OffsetStore) Disconnect(ctx context.Context) error {
 		}
 		txn.Commit()
 	}
+	// set the connection status
+	s.connected.Store(false)
+
+	return nil
+}
+
+// Ping verifies a connection to the database is still alive, establishing a connection if necessary.
+func (s *OffsetStore) Ping(ctx context.Context) error {
+	// add a span context
+	ctx, span := telemetry.SpanContext(ctx, "OffsetStore.Ping")
+	defer span.End()
+
+	// check whether we are connected or not
+	if !s.connected.Load() {
+		return s.Connect(ctx)
+	}
+
 	return nil
 }
 
@@ -75,6 +109,11 @@ func (s *OffsetStore) WriteOffset(ctx context.Context, offset *pb.Offset) error 
 	// add a span context
 	ctx, span := telemetry.SpanContext(ctx, "OffsetStore.WriteOffset")
 	defer span.End()
+
+	// check whether this instance of the journal is connected or not
+	if !s.connected.Load() {
+		return errors.New("offset store is not connected")
+	}
 
 	// spawn a db transaction
 	txn := s.db.Txn(true)
@@ -105,6 +144,11 @@ func (s *OffsetStore) GetCurrentOffset(ctx context.Context, projectionID *persis
 	// add a span context
 	ctx, span := telemetry.SpanContext(ctx, "OffsetStore.GetCurrentOffset")
 	defer span.End()
+
+	// check whether this instance of the journal is connected or not
+	if !s.connected.Load() {
+		return nil, errors.New("offset store is not connected")
+	}
 
 	// spawn a db transaction for read-only
 	txn := s.db.Txn(false)

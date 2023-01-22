@@ -18,4 +18,6 @@ type OffsetStore interface {
 	WriteOffset(ctx context.Context, offset *pb.Offset) error
 	// GetCurrentOffset returns the current offset of a given projection ID
 	GetCurrentOffset(ctx context.Context, projectionID *ProjectionID) (current *pb.Offset, err error)
+	// Ping verifies a connection to the database is still alive, establishing a connection if necessary.
+	Ping(ctx context.Context) error
 }
