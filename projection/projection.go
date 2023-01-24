@@ -192,7 +192,8 @@ func (p *Projection) processingLoop(ctx context.Context) {
 				// log the error
 				p.logger.Error(err)
 				switch p.recovery.RecoveryStrategy() {
-				case pb.ProjectionRecoveryStrategy_FAIL, pb.ProjectionRecoveryStrategy_RETRY_AND_FAIL:
+				case pb.ProjectionRecoveryStrategy_FAIL,
+					pb.ProjectionRecoveryStrategy_RETRY_AND_FAIL:
 					// here we stop the projection
 					err := p.Stop(ctx)
 					// handle the error
@@ -226,13 +227,28 @@ func (p *Projection) doProcess(ctx context.Context, persistenceID string) error 
 		return err
 	}
 
+	// define the fromSequenceNumber
+	fromSequenceNumber := offset.GetCurrentOffset() + 1
+
 	// fetch events
-	events, err := p.journalStore.ReplayEvents(ctx, persistenceID, offset.GetCurrentOffset()+1, math.MaxUint64, math.MaxUint64)
+	events, err := p.journalStore.ReplayEvents(ctx, persistenceID, fromSequenceNumber, math.MaxUint64, math.MaxUint64)
 	if err != nil {
 		return err
 	}
-	// grab the total number of events fetched
-	for _, envelope := range events {
+
+	// grab the length of events
+	length := len(events)
+
+	// there is nothing to process
+	if length == 0 {
+		return nil
+	}
+
+	// define a variable that hold the number of events successfully processed
+	// iterate the events
+	for i := 0; i < length; i++ {
+		// grab the envelope
+		envelope := events[i]
 		// grab the data to pass to the projection handler
 		state := envelope.GetResultingState()
 		event := envelope.GetEvent()
@@ -291,7 +307,7 @@ func (p *Projection) doProcess(ctx context.Context, persistenceID string) error 
 				p.logger.Error(errors.Wrapf(err, "failed to process event for persistence id=%s, sequence=%d", persistenceID, seqNr))
 			}
 		}
-
+		// the envelope has been successfully processed
 		// here we commit the offset to the offset store and continue the next event
 		offset = &pb.Offset{
 			PersistenceId:  persistenceID,
@@ -301,7 +317,7 @@ func (p *Projection) doProcess(ctx context.Context, persistenceID string) error 
 		}
 		// write the given offset and return any possible error
 		if err := p.offsetsStore.WriteOffset(ctx, offset); err != nil {
-			return errors.Wrapf(err, "failed to persist offset for persistence id=%s, sequence=%d", persistenceID, seqNr)
+			return errors.Wrapf(err, "failed to persist offset for persistence id=%s", persistenceID)
 		}
 	}
 
