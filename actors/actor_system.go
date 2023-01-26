@@ -29,8 +29,8 @@ type ActorSystem interface {
 	Start(ctx context.Context) error
 	// Stop stops the actor system
 	Stop(ctx context.Context) error
-	// Spawn creates an actor in the system
-	Spawn(ctx context.Context, kind, id string, actor Actor) PID
+	// StartActor creates an actor in the system and starts it
+	StartActor(ctx context.Context, kind, id string, actor Actor) PID
 	// StopActor stops a given actor in the system
 	StopActor(ctx context.Context, kind, id string) error
 	// RestartActor restarts a given actor in the system
@@ -101,10 +101,10 @@ func (a *actorSystem) NumActors() uint64 {
 	return uint64(a.actors.Count())
 }
 
-// Spawn creates or returns the instance of a given actor in the system
-func (a *actorSystem) Spawn(ctx context.Context, kind, id string, actor Actor) PID {
+// StartActor creates or returns the instance of a given actor in the system
+func (a *actorSystem) StartActor(ctx context.Context, kind, id string, actor Actor) PID {
 	// add a span context
-	ctx, span := telemetry.SpanContext(ctx, "Spawn")
+	ctx, span := telemetry.SpanContext(ctx, "StartActor")
 	defer span.End()
 	// first check whether the actor system has started
 	if !a.hasStarted.Load() {

@@ -52,7 +52,7 @@ func TestEventSourcedActor(t *testing.T) {
 		// create the persistence actor using the behavior previously created
 		persistentActor := NewEventSourcedActor[*testpb.Account](behavior, eventStore)
 		// spawn the actor
-		pid := actorSystem.Spawn(ctx, behavior.Kind(), behavior.ID(), persistentActor)
+		pid := actorSystem.StartActor(ctx, behavior.Kind(), behavior.ID(), persistentActor)
 		require.NotNil(t, pid)
 
 		var command proto.Message
@@ -143,7 +143,7 @@ func TestEventSourcedActor(t *testing.T) {
 		// create the persistence actor using the behavior previously created
 		persistentActor := NewEventSourcedActor[*testpb.Account](behavior, eventStore)
 		// spawn the actor
-		pid := actorSystem.Spawn(ctx, behavior.Kind(), behavior.ID(), persistentActor)
+		pid := actorSystem.StartActor(ctx, behavior.Kind(), behavior.ID(), persistentActor)
 		require.NotNil(t, pid)
 
 		var command proto.Message
@@ -223,7 +223,7 @@ func TestEventSourcedActor(t *testing.T) {
 		// create the persistence actor using the behavior previously created
 		persistentActor := NewEventSourcedActor[*testpb.Account](behavior, eventStore)
 		// spawn the actor
-		pid := actorSystem.Spawn(ctx, behavior.Kind(), behavior.ID(), persistentActor)
+		pid := actorSystem.StartActor(ctx, behavior.Kind(), behavior.ID(), persistentActor)
 		require.NotNil(t, pid)
 
 		command := &testpb.TestSend{}
@@ -295,7 +295,7 @@ func TestEventSourcedActor(t *testing.T) {
 		// create the persistence actor using the behavior previously created
 		persistentActor := NewEventSourcedActor[*testpb.Account](behavior, eventStore)
 		// spawn the actor
-		pid := actorSystem.Spawn(ctx, behavior.Kind(), behavior.ID(), persistentActor)
+		pid := actorSystem.StartActor(ctx, behavior.Kind(), behavior.ID(), persistentActor)
 		require.NotNil(t, pid)
 
 		var command proto.Message
