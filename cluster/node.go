@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/gob"
 	"fmt"
-	"net"
 	"strconv"
 	"sync"
 	"time"
@@ -14,7 +13,8 @@ import (
 	"github.com/pkg/errors"
 	"github.com/tochemey/goakt/log"
 	pb "github.com/tochemey/goakt/pb/goakt/v1"
-	"google.golang.org/grpc"
+	"github.com/tochemey/goakt/pkg/grpc"
+	ggrpc "google.golang.org/grpc"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -38,7 +38,7 @@ type Node struct {
 	// useful to share node details with other nodes
 	metadata map[string]string
 
-	grpcServer *grpc.Server
+	grpcServer grpc.Server
 	logger     log.Logger
 }
 
@@ -78,19 +78,24 @@ func NewNode(name string, bindAddr string, bindPort, gossipPort int, joinNodeAdd
 }
 
 // Start async runs gRPC server and joins cluster
-func (s *Node) Start() chan error {
+func (s *Node) Start(ctx context.Context) chan error {
 	errChan := make(chan error)
-	go s.serve(errChan)
+	go s.serve(ctx, errChan)
 	go s.joinCluster(errChan)
 	return errChan
 }
 
 // Shutdown stops gRPC server and leaves cluster
-func (s *Node) Shutdown() {
-	s.grpcServer.GracefulStop()
+func (s *Node) Shutdown(ctx context.Context) {
+	s.grpcServer.Stop(ctx)
 	// TODO handle the errors
 	_ = s.memberlist.Leave(15 * time.Second)
 	_ = s.memberlist.Shutdown()
+}
+
+// RegisterService register the node as a grpc service
+func (s *Node) RegisterService(server *ggrpc.Server) {
+	pb.RegisterNodeStateReplicationServiceServer(server, s)
 }
 
 // PutActorMeta adds actor meta to the local store
@@ -197,25 +202,34 @@ func (s *Node) MergeRemoteState(buf []byte, join bool) {
 }
 
 // serve starts the grpc serve
-func (s *Node) serve(errChan chan error) {
-	// create the grpc listener
-	lis, err := net.Listen("tcp", fmt.Sprintf("%s:%d", s.bindAddr, s.bindPort))
+func (s *Node) serve(ctx context.Context, errChan chan error) {
+	// build the grpc server
+	config := &grpc.Config{
+		ServiceName:      "",
+		GrpcPort:         s.bindPort,
+		GrpcHost:         s.bindAddr,
+		TraceEnabled:     false, // TODO set tracer later
+		TraceURL:         "",
+		EnableReflection: false,
+	}
+
+	// build the grpc service
+	svr, err := grpc.
+		GetServerBuilder(config).
+		WithService(s).
+		Build()
+
 	// handle the error
 	if err != nil {
 		s.logger.Error("failed to listen on %s: %v", s.bindAddr, err)
 		errChan <- err
 		return
 	}
-	// add a logging information
-	s.logger.Infof("grpc api serving on %s:%d", s.bindAddr, s.bindPort)
 
-	// TODO add grpc interceptors later
-	s.grpcServer = grpc.NewServer()
-	pb.RegisterNodeStateReplicationServiceServer(s.grpcServer, s)
-	if err := s.grpcServer.Serve(lis); err != nil {
-		s.logger.Error("failed to serve", err)
-		errChan <- err
-	}
+	// set the server
+	s.grpcServer = svr
+	// start the server
+	s.grpcServer.Start(ctx)
 }
 
 // joinCluster help join the memberlist
