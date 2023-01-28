@@ -25,7 +25,7 @@ func TestEventSourcedActor(t *testing.T) {
 		defer goleak.VerifyNone(t)
 		ctx := context.TODO()
 		// create an actor config
-		actorConfig, err := actors.NewConfig("TestActorSystem", "127.0.0.1:0",
+		actorConfig, err := actors.NewSetting("TestActorSystem", "127.0.0.1:0",
 			actors.WithPassivationDisabled(),
 			actors.WithLogger(log.DiscardLogger),
 			actors.WithActorInitMaxRetries(3))
@@ -116,7 +116,7 @@ func TestEventSourcedActor(t *testing.T) {
 		defer goleak.VerifyNone(t)
 		ctx := context.TODO()
 		// create an actor config
-		actorConfig, err := actors.NewConfig("TestActorSystem", "127.0.0.1:0",
+		actorConfig, err := actors.NewSetting("TestActorSystem", "127.0.0.1:0",
 			actors.WithPassivationDisabled(),
 			actors.WithLogger(log.DiscardLogger),
 			actors.WithActorInitMaxRetries(3))
@@ -196,7 +196,7 @@ func TestEventSourcedActor(t *testing.T) {
 		defer goleak.VerifyNone(t)
 		ctx := context.TODO()
 		// create an actor config
-		actorConfig, err := actors.NewConfig("TestActorSystem", "127.0.0.1:0",
+		actorConfig, err := actors.NewSetting("TestActorSystem", "127.0.0.1:0",
 			actors.WithPassivationDisabled(),
 			actors.WithLogger(log.DiscardLogger),
 			actors.WithActorInitMaxRetries(3))
@@ -245,7 +245,7 @@ func TestEventSourcedActor(t *testing.T) {
 	t.Run("with state recovery from event store", func(t *testing.T) {
 		ctx := context.TODO()
 		// create an actor config
-		actorConfig, err := actors.NewConfig("TestActorSystem", "127.0.0.1:0",
+		actorConfig, err := actors.NewSetting("TestActorSystem", "127.0.0.1:0",
 			actors.WithPassivationDisabled(),
 			actors.WithLogger(log.DiscardLogger),
 			actors.WithActorInitMaxRetries(3))

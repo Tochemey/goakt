@@ -136,7 +136,7 @@ func TestActorRestart(t *testing.T) {
 	t.Run("restart a stopped actor", func(t *testing.T) {
 		defer goleak.VerifyNone(t)
 		ctx := context.TODO()
-		cfg, err := NewConfig("testSys", "localhost:0")
+		cfg, err := NewSetting("testSys", "localhost:0")
 		require.NoError(t, err)
 		assert.NotNil(t, cfg)
 
@@ -207,7 +207,7 @@ func TestActorRestart(t *testing.T) {
 	t.Run("restart an actor", func(t *testing.T) {
 		defer goleak.VerifyNone(t)
 		ctx := context.TODO()
-		cfg, err := NewConfig("testSys", "localhost:0")
+		cfg, err := NewSetting("testSys", "localhost:0")
 		require.NoError(t, err)
 		assert.NotNil(t, cfg)
 
@@ -258,7 +258,7 @@ func TestChildActor(t *testing.T) {
 		// create a test context
 		ctx := context.TODO()
 		// create a basic actor system
-		cfg, err := NewConfig("testSys", "localhost:0")
+		cfg, err := NewSetting("testSys", "localhost:0")
 		require.NoError(t, err)
 		assert.NotNil(t, cfg)
 
@@ -299,7 +299,7 @@ func TestChildActor(t *testing.T) {
 		// create a test context
 		ctx := context.TODO()
 		// create a basic actor system
-		cfg, err := NewConfig("testSys", "localhost:0")
+		cfg, err := NewSetting("testSys", "localhost:0")
 		require.NoError(t, err)
 		assert.NotNil(t, cfg)
 
@@ -343,7 +343,7 @@ func TestChildActor(t *testing.T) {
 		// create a test context
 		ctx := context.TODO()
 		// create a basic actor system
-		cfg, err := NewConfig("testSys", "localhost:0")
+		cfg, err := NewSetting("testSys", "localhost:0")
 		require.NoError(t, err)
 		assert.NotNil(t, cfg)
 

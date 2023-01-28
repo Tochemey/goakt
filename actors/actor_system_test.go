@@ -11,7 +11,7 @@ import (
 
 func TestNewActorSystem(t *testing.T) {
 	t.Run("With Defaults", func(t *testing.T) {
-		cfg, err := NewConfig("testSys", "localhost:0", WithLogger(log.DiscardLogger))
+		cfg, err := NewSetting("testSys", "localhost:0", WithLogger(log.DiscardLogger))
 		require.NoError(t, err)
 		assert.NotNil(t, cfg)
 
@@ -33,7 +33,7 @@ func TestNewActorSystem(t *testing.T) {
 	})
 	t.Run("With StartActor an actor when not started", func(t *testing.T) {
 		ctx := context.TODO()
-		cfg, _ := NewConfig("testSys", "localhost:0", WithLogger(log.DiscardLogger))
+		cfg, _ := NewSetting("testSys", "localhost:0", WithLogger(log.DiscardLogger))
 		sys, _ := NewActorSystem(cfg)
 		actor := NewTestActor()
 		actorRef := sys.StartActor(ctx, "Test", "test-1", actor)
@@ -41,7 +41,7 @@ func TestNewActorSystem(t *testing.T) {
 	})
 	t.Run("With StartActor an actor when started", func(t *testing.T) {
 		ctx := context.TODO()
-		cfg, _ := NewConfig("testSys", "localhost:0", WithLogger(log.DiscardLogger))
+		cfg, _ := NewSetting("testSys", "localhost:0", WithLogger(log.DiscardLogger))
 		sys, _ := NewActorSystem(cfg)
 
 		// start the actor system
@@ -56,7 +56,7 @@ func TestNewActorSystem(t *testing.T) {
 	})
 	t.Run("With StartActor an actor already exist", func(t *testing.T) {
 		ctx := context.TODO()
-		cfg, _ := NewConfig("testSys", "localhost:0", WithLogger(log.DiscardLogger))
+		cfg, _ := NewSetting("testSys", "localhost:0", WithLogger(log.DiscardLogger))
 		sys, _ := NewActorSystem(cfg)
 
 		// start the actor system

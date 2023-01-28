@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/tochemey/goakt/cluster"
 	"github.com/tochemey/goakt/log"
 	pb "github.com/tochemey/goakt/pb/goakt/v1"
 	"github.com/tochemey/goakt/telemetry"
@@ -16,8 +17,8 @@ var (
 	ErrNodeAddrRequired = errors.New("actor system node address is required")
 )
 
-// Config represents the actor system configuration
-type Config struct {
+// Setting represents the actor system configuration
+type Setting struct {
 	// Specifies the actor system name
 	name string
 	// Specifies the Node Host and IP address
@@ -39,10 +40,13 @@ type Config struct {
 	supervisorStrategy pb.StrategyDirective
 	// Specifies the telemetry setting
 	telemetry *telemetry.Telemetry
+	// Specifies the cluster config
+	// Once this is set clustering will be enabled on the actor system
+	clusterConfig *cluster.NodeConfig
 }
 
-// NewConfig creates an instance of Config
-func NewConfig(name, nodeHostAndPort string, options ...Option) (*Config, error) {
+// NewSetting creates an instance of Setting
+func NewSetting(name, nodeHostAndPort string, options ...Option) (*Setting, error) {
 	// check whether the name is set or not
 	if name == "" {
 		return nil, ErrNameRequired
@@ -52,7 +56,7 @@ func NewConfig(name, nodeHostAndPort string, options ...Option) (*Config, error)
 		return nil, err
 	}
 	// create an instance of config
-	config := &Config{
+	setting := &Setting{
 		name:                name,
 		nodeHostAndPort:     nodeHostAndPort,
 		logger:              log.DefaultLogger,
@@ -64,39 +68,39 @@ func NewConfig(name, nodeHostAndPort string, options ...Option) (*Config, error)
 	}
 	// apply the various options
 	for _, opt := range options {
-		opt.Apply(config)
+		opt.Apply(setting)
 	}
 
-	return config, nil
+	return setting, nil
 }
 
 // Name returns the actor system name
-func (c Config) Name() string {
+func (c Setting) Name() string {
 	return c.name
 }
 
 // NodeHostAndPort returns the node host and port
-func (c Config) NodeHostAndPort() string {
+func (c Setting) NodeHostAndPort() string {
 	return c.nodeHostAndPort
 }
 
 // Logger returns the logger
-func (c Config) Logger() log.Logger {
+func (c Setting) Logger() log.Logger {
 	return c.logger
 }
 
 // ExpireActorAfter returns the expireActorAfter
-func (c Config) ExpireActorAfter() time.Duration {
+func (c Setting) ExpireActorAfter() time.Duration {
 	return c.expireActorAfter
 }
 
 // ReplyTimeout returns the reply timeout
-func (c Config) ReplyTimeout() time.Duration {
+func (c Setting) ReplyTimeout() time.Duration {
 	return c.replyTimeout
 }
 
 // ActorInitMaxRetries returns the actor init max retries
-func (c Config) ActorInitMaxRetries() int {
+func (c Setting) ActorInitMaxRetries() int {
 	return c.actorInitMaxRetries
 }
 
@@ -121,29 +125,29 @@ func validateHostAndPort(hostAndPort string) error {
 // Option is the interface that applies a configuration option.
 type Option interface {
 	// Apply sets the Option value of a config.
-	Apply(config *Config)
+	Apply(config *Setting)
 }
 
 var _ Option = OptionFunc(nil)
 
 // OptionFunc implements the Option interface.
-type OptionFunc func(*Config)
+type OptionFunc func(*Setting)
 
-func (f OptionFunc) Apply(c *Config) {
+func (f OptionFunc) Apply(c *Setting) {
 	f(c)
 }
 
 // WithExpireActorAfter sets the actor expiry duration.
 // After such duration an idle actor will be expired and removed from the actor system
 func WithExpireActorAfter(duration time.Duration) Option {
-	return OptionFunc(func(config *Config) {
+	return OptionFunc(func(config *Setting) {
 		config.expireActorAfter = duration
 	})
 }
 
 // WithLogger sets the actor system custom logger
 func WithLogger(logger log.Logger) Option {
-	return OptionFunc(func(config *Config) {
+	return OptionFunc(func(config *Setting) {
 		config.logger = logger
 	})
 }
@@ -151,35 +155,42 @@ func WithLogger(logger log.Logger) Option {
 // WithReplyTimeout sets how long in seconds an actor should reply a command
 // in a receive-reply pattern
 func WithReplyTimeout(timeout time.Duration) Option {
-	return OptionFunc(func(config *Config) {
+	return OptionFunc(func(config *Setting) {
 		config.replyTimeout = timeout
 	})
 }
 
 // WithActorInitMaxRetries sets the number of times to retry an actor init process
 func WithActorInitMaxRetries(max int) Option {
-	return OptionFunc(func(config *Config) {
+	return OptionFunc(func(config *Setting) {
 		config.actorInitMaxRetries = max
 	})
 }
 
 // WithPassivationDisabled disable the passivation mode
 func WithPassivationDisabled() Option {
-	return OptionFunc(func(config *Config) {
+	return OptionFunc(func(config *Setting) {
 		config.expireActorAfter = -1
 	})
 }
 
 // WithSupervisorStrategy sets the supervisor strategy
 func WithSupervisorStrategy(strategy pb.StrategyDirective) Option {
-	return OptionFunc(func(config *Config) {
+	return OptionFunc(func(config *Setting) {
 		config.supervisorStrategy = strategy
 	})
 }
 
 // WithTelemetry sets the custom telemetry
 func WithTelemetry(telemetry *telemetry.Telemetry) Option {
-	return OptionFunc(func(config *Config) {
+	return OptionFunc(func(config *Setting) {
 		config.telemetry = telemetry
+	})
+}
+
+// WithClusterConfig sets the cluster config and enables clustering.
+func WithClusterConfig(config *cluster.NodeConfig) Option {
+	return OptionFunc(func(setting *Setting) {
+		setting.clusterConfig = config
 	})
 }

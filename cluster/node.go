@@ -13,7 +13,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/hashicorp/memberlist"
 	"github.com/pkg/errors"
-	"github.com/tochemey/goakt/actors"
 	"github.com/tochemey/goakt/log"
 	pb "github.com/tochemey/goakt/pb/goakt/v1"
 	"github.com/tochemey/goakt/pkg/grpc"
@@ -44,9 +43,6 @@ type Node struct {
 
 	grpcServer grpc.Server
 	logger     log.Logger
-
-	// the node actor system
-	actorSystem actors.ActorSystem
 }
 
 // enforce compilation error
@@ -96,31 +92,11 @@ func NewNode(config *NodeConfig) (*Node, error) {
 
 	conf.Delegate = node
 
-	// create the actor system config
-	sysConfig, err := actors.NewConfig(nodeName, fmt.Sprintf("%s:%d", node.bindAddr, conf.BindPort))
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to create the node actor system config")
-	}
-
-	// initialize the actor system
-	actorSystem, err := actors.NewActorSystem(sysConfig)
-	// handle the error
-	if err != nil {
-		return nil, err
-	}
-
-	// set the node actor system
-	node.actorSystem = actorSystem
-
 	return node, nil
 }
 
 // Start async runs gRPC server and joins cluster
 func (n *Node) Start(ctx context.Context) error {
-	// start the actor system
-	if err := n.actorSystem.Start(ctx); err != nil {
-		return err
-	}
 	// start the service
 	if err := n.serve(ctx); err != nil {
 		return err
@@ -134,10 +110,6 @@ func (n *Node) Start(ctx context.Context) error {
 
 // Shutdown stops gRPC server and leaves cluster
 func (n *Node) Shutdown(ctx context.Context) error {
-	// stop the actor system
-	if err := n.actorSystem.Stop(ctx); err != nil {
-		return err
-	}
 	// stop gracefully the grpc service
 	n.grpcServer.Stop(ctx)
 	// leave the cluster
@@ -184,11 +156,6 @@ func (n *Node) GetActorMeta(ctx context.Context, request *pb.GetActorMetaRequest
 // Address returns the Node address
 func (n *Node) Address() string {
 	return n.memberlist.LocalNode().FullAddress().Addr
-}
-
-// ActorSystem returns the node actor system
-func (n *Node) ActorSystem() actors.ActorSystem {
-	return n.actorSystem
 }
 
 // NodeMeta is used to retrieve meta-data about the current node

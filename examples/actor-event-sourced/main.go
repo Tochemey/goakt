@@ -25,7 +25,7 @@ func main() {
 	logger := log.New(log.DebugLevel, os.Stderr)
 
 	// create the actor system configuration. kindly in real-life application handle the error
-	config, _ := goakt.NewConfig("SampleActorSystem", "127.0.0.1:0",
+	config, _ := goakt.NewSetting("SampleActorSystem", "127.0.0.1:0",
 		goakt.WithPassivationDisabled(),
 		goakt.WithLogger(logger),
 		goakt.WithActorInitMaxRetries(3))

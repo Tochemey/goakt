@@ -7,6 +7,7 @@ import (
 
 	cmp "github.com/orcaman/concurrent-map/v2"
 	"github.com/pkg/errors"
+	"github.com/tochemey/goakt/cluster"
 	"github.com/tochemey/goakt/log"
 	"github.com/tochemey/goakt/pkg/eventbus"
 	"github.com/tochemey/goakt/telemetry"
@@ -54,13 +55,15 @@ type actorSystem struct {
 	logger log.Logger
 
 	// actor system configuration
-	config *Config
-
+	setting *Setting
+	// states whether the actor system has started or not
 	hasStarted *atomic.Bool
-
+	// TODO: remove this. May not be needed
 	eventBus eventbus.EventBus
 	// observability settings
 	telemetry *telemetry.Telemetry
+	// cluster node
+	clusterNode *cluster.Node
 }
 
 // enforce compilation error when all methods of the ActorSystem interface are not implemented
@@ -68,27 +71,44 @@ type actorSystem struct {
 var _ ActorSystem = (*actorSystem)(nil)
 
 // NewActorSystem creates an instance of ActorSystem
-func NewActorSystem(config *Config) (ActorSystem, error) {
+func NewActorSystem(setting *Setting) (ActorSystem, error) {
 	// make sure the configuration is set
-	if config == nil {
+	if setting == nil {
 		return nil, ErrMissingConfig
+	}
+
+	var (
+		//  variable holding an instance of the cluster node
+		node *cluster.Node
+		// variable holding an instance of an error
+		err error
+	)
+	// create the cluster node when the cluster config is set
+	if setting.clusterConfig != nil {
+		// create the cluster node
+		node, err = cluster.NewNode(setting.clusterConfig)
+		// handle the error
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// the function only gets called one
 	once.Do(func() {
 		cache = &actorSystem{
-			name:       config.Name(),
-			nodeAddr:   config.NodeHostAndPort(),
-			actors:     cmp.New[PID](),
-			logger:     config.Logger(),
-			config:     config,
-			hasStarted: atomic.NewBool(false),
-			eventBus:   eventbus.New(),
-			telemetry:  config.telemetry,
+			name:        setting.Name(),
+			nodeAddr:    setting.NodeHostAndPort(),
+			actors:      cmp.New[PID](),
+			logger:      setting.Logger(),
+			setting:     setting,
+			hasStarted:  atomic.NewBool(false),
+			eventBus:    eventbus.New(),
+			telemetry:   setting.telemetry,
+			clusterNode: node,
 		}
 	})
 
-	return cache, nil
+	return cache, err
 }
 
 // EventBus returns the actor system event streams
@@ -125,14 +145,14 @@ func (a *actorSystem) StartActor(ctx context.Context, kind, id string, actor Act
 
 	// create an instance of the actor ref
 	pid = newPID(ctx, actor,
-		withInitMaxRetries(a.config.ActorInitMaxRetries()),
-		withPassivationAfter(a.config.ExpireActorAfter()),
-		withSendReplyTimeout(a.config.ReplyTimeout()),
-		withCustomLogger(a.config.logger),
+		withInitMaxRetries(a.setting.ActorInitMaxRetries()),
+		withPassivationAfter(a.setting.ExpireActorAfter()),
+		withSendReplyTimeout(a.setting.ReplyTimeout()),
+		withCustomLogger(a.setting.logger),
 		withActorSystem(a),
 		withLocalID(kind, id),
-		withSupervisorStrategy(a.config.supervisorStrategy),
-		withTelemetry(a.config.telemetry),
+		withSupervisorStrategy(a.setting.supervisorStrategy),
+		withTelemetry(a.setting.telemetry),
 		withAddress(addr))
 
 	// add the given actor to the actor map
@@ -216,6 +236,14 @@ func (a *actorSystem) Start(ctx context.Context) error {
 	defer span.End()
 	// set the has started to true
 	a.hasStarted.Store(true)
+	// start the cluster node when set
+	if a.clusterNode != nil {
+		// start the cluster node
+		if err := a.clusterNode.Start(ctx); err != nil {
+			return err
+		}
+	}
+
 	// start the metrics service
 	// register metrics. However, we don't panic when we fail to register
 	// we just log it for now
@@ -246,6 +274,14 @@ func (a *actorSystem) Stop(ctx context.Context) error {
 			return err
 		}
 		a.actors.Remove(string(actor.Address()))
+	}
+
+	// shutdown the cluster node when set
+	if a.clusterNode != nil {
+		// start the cluster node
+		if err := a.clusterNode.Shutdown(ctx); err != nil {
+			return err
+		}
 	}
 
 	return nil
