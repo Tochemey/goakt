@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/hashicorp/memberlist"
+	cmp "github.com/orcaman/concurrent-map/v2"
 	"github.com/pkg/errors"
 	"github.com/tochemey/goakt/log"
 	pb "github.com/tochemey/goakt/pb/goakt/v1"
@@ -26,9 +27,10 @@ type Node struct {
 	bindAddr string
 	// bind port
 	bindPort int
-
-	// addr:port of any node in the memberlist to join to; empty if it's the first node
-	joinNodeAddr string
+	// grpcPort
+	grpcPort int
+	// node id
+	id string
 
 	mu           sync.Mutex
 	memberlist   *memberlist.Memberlist
@@ -43,10 +45,11 @@ type Node struct {
 
 	grpcServer grpc.Server
 	logger     log.Logger
+	peers      cmp.ConcurrentMap[string, *pb.Peer]
 }
 
 // enforce compilation error
-var _ pb.NodeStateReplicationServiceServer = &Node{}
+var _ pb.GossipServiceServer = &Node{}
 
 // NewNode creates new gRPC serving node but does not start serving
 func NewNode(config *NodeConfig) (*Node, error) {
@@ -71,9 +74,9 @@ func NewNode(config *NodeConfig) (*Node, error) {
 	// append the configuration with the name, address and ports
 	conf.Name = nodeName
 	conf.BindAddr = config.BindHost
-	conf.BindPort = config.GossipPort
-	conf.AdvertisePort = conf.BindPort
-	conf.Events = nil // TODO may be useful
+	conf.BindPort = config.BindPort
+	conf.AdvertisePort = config.BindPort
+	conf.AdvertiseAddr = config.BindHost
 
 	// create the metadata to pass along to other node
 	md := make(map[string]string, 1)
@@ -83,13 +86,27 @@ func NewNode(config *NodeConfig) (*Node, error) {
 	node := &Node{
 		bindAddr:     config.BindHost,
 		bindPort:     config.BindPort,
-		joinNodeAddr: config.JoinAddr,
-		nodeState:    &pb.NodeState{},
-		memberConfig: conf,
+		grpcPort:     config.GRPCPort,
 		mu:           sync.Mutex{},
+		memberlist:   nil,
+		broadcasts:   nil,
+		memberConfig: conf,
+		leaveTimeout: 0,
+		nodeState:    &pb.NodeState{},
+		metadata:     nil,
+		grpcServer:   nil,
 		logger:       config.Logger,
+		peers:        cmp.New[*pb.Peer](),
+		id:           nodeName,
 	}
 
+	// let us add the Peers
+	for _, peer := range config.Peers {
+		node.peers.Set(peer.GetId(), peer)
+	}
+
+	// set the various delegates
+	conf.Events = node
 	conf.Delegate = node
 
 	return node, nil
@@ -125,29 +142,29 @@ func (n *Node) Shutdown(ctx context.Context) error {
 
 // RegisterService register the node as a grpc service
 func (n *Node) RegisterService(server *ggrpc.Server) {
-	pb.RegisterNodeStateReplicationServiceServer(server, n)
+	pb.RegisterGossipServiceServer(server, n)
 }
 
-// PutActorMeta adds actor meta to the local store
-func (n *Node) PutActorMeta(ctx context.Context, request *pb.PutActorMetaRequest) (*pb.PutActorMetaResponse, error) {
+// Put adds actor meta to the local store
+func (n *Node) Put(ctx context.Context, request *pb.PutRequest) (*pb.PutResponse, error) {
 	// make a copy of the incoming request
-	cloned := proto.Clone(request).(*pb.PutActorMetaRequest)
+	cloned := proto.Clone(request).(*pb.PutRequest)
 	// update the node state
 	n.putActorMeta(cloned.GetNodeId(), cloned.GetActorMeta())
 	// return the response
-	return &pb.PutActorMetaResponse{
+	return &pb.PutResponse{
 		NodeId:    cloned.GetNodeId(),
 		ActorMeta: cloned.GetActorMeta(),
 	}, nil
 }
 
-// GetActorMeta fetches actor meta from the local store
-func (n *Node) GetActorMeta(ctx context.Context, request *pb.GetActorMetaRequest) (*pb.GetActorMetaResponse, error) {
+// Get fetches actor meta from the local store
+func (n *Node) Get(ctx context.Context, request *pb.GetRequest) (*pb.GetResponse, error) {
 	// make a copy of the incoming request
-	cloned := proto.Clone(request).(*pb.GetActorMetaRequest)
+	cloned := proto.Clone(request).(*pb.GetRequest)
 	// query the node state
 	actorMeta := n.getActorMeta(cloned.GetNodeId())
-	return &pb.GetActorMetaResponse{
+	return &pb.GetResponse{
 		NodeId:    cloned.GetNodeId(),
 		ActorMeta: actorMeta,
 	}, nil
@@ -231,15 +248,39 @@ func (n *Node) MergeRemoteState(buf []byte, join bool) {
 	n.logger.Debug("successfully merged remote state.")
 }
 
+// NotifyJoin is invoked when a node is detected to have joined.
+// The Node argument must not be modified.
+func (n *Node) NotifyJoin(node *memberlist.Node) {
+	// add it to the peers map
+	n.peers.SetIfAbsent(node.Name, &pb.Peer{
+		Id:          node.Name,
+		HostAndPort: fmt.Sprintf("%s:%d", node.Addr.To4().String(), node.Port),
+	})
+}
+
+// NotifyLeave is invoked when a node is detected to have left.
+// The Node argument must not be modified.
+func (n *Node) NotifyLeave(node *memberlist.Node) {
+	// remove the node from the peers map
+	n.peers.Remove(node.Name)
+}
+
+// NotifyUpdate is invoked when a node is detected to have
+// updated, usually involving the metadata. The Node argument
+// must not be modified.
+func (n *Node) NotifyUpdate(node *memberlist.Node) {
+	// do nothing for now
+}
+
 // serve starts the grpc serve
 func (n *Node) serve(ctx context.Context) error {
 	// build the grpc server
 	config := &grpc.Config{
-		ServiceName:      "",
-		GrpcPort:         n.bindPort,
+		ServiceName:      n.id,
+		GrpcPort:         n.grpcPort,
 		GrpcHost:         n.bindAddr,
-		TraceEnabled:     false,
-		TraceURL:         "",
+		TraceEnabled:     false, // TODO
+		TraceURL:         "",    // TODO
 		EnableReflection: false,
 	}
 
@@ -275,21 +316,19 @@ func (n *Node) joinCluster(ctx context.Context) error {
 		return err
 	}
 
-	var nodeAddr string
-	if n.joinNodeAddr != "" {
-		n.logger.Debugf("not the first node, joining %s...", n.joinNodeAddr)
-		nodeAddr = n.joinNodeAddr
-	} else {
-		n.logger.Debug("first node of the cluster...")
-		nodeAddr = fmt.Sprintf("%s:%d", n.bindAddr, n.memberConfig.BindPort)
-	}
-
-	// join the cluster
-	_, err = n.memberlist.Join([]string{nodeAddr})
-	// handle the join error
-	if err != nil {
-		n.logger.Error(errors.Wrap(err, "failed to join cluster"))
-		return err
+	// add members to cluster
+	if n.peers.Count() > 0 {
+		addresses := make([]string, 0, n.peers.Count())
+		for _, peer := range n.peers.Items() {
+			addresses = append(addresses, peer.GetHostAndPort())
+		}
+		// join the cluster
+		_, err := n.memberlist.Join(addresses)
+		// handle the join error
+		if err != nil {
+			n.logger.Error(errors.Wrap(err, "failed to join cluster"))
+			return err
+		}
 	}
 
 	// create the broadcast list
@@ -302,8 +341,6 @@ func (n *Node) joinCluster(ctx context.Context) error {
 
 	// set the broadcasts
 	n.broadcasts = br
-
-	n.logger.Infof("successfully joined cluster via %s", nodeAddr)
 	return nil
 }
 

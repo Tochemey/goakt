@@ -6,7 +6,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/tochemey/goakt/cluster"
 	"github.com/tochemey/goakt/log"
 	pb "github.com/tochemey/goakt/pb/goakt/v1"
 	"github.com/tochemey/goakt/telemetry"
@@ -40,9 +39,10 @@ type Setting struct {
 	supervisorStrategy pb.StrategyDirective
 	// Specifies the telemetry setting
 	telemetry *telemetry.Telemetry
-	// Specifies the cluster config
-	// Once this is set clustering will be enabled on the actor system
-	clusterConfig *cluster.NodeConfig
+	// Specifies cluster Peers
+	peers []*pb.Peer
+	// Specifies whether cluster is enabled or not
+	clusterEnabled bool
 }
 
 // NewSetting creates an instance of Setting
@@ -65,6 +65,8 @@ func NewSetting(name, nodeHostAndPort string, options ...Option) (*Setting, erro
 		actorInitMaxRetries: 5,
 		supervisorStrategy:  pb.StrategyDirective_STOP_DIRECTIVE,
 		telemetry:           telemetry.New(),
+		clusterEnabled:      false,
+		peers:               nil,
 	}
 	// apply the various options
 	for _, opt := range options {
@@ -102,6 +104,11 @@ func (c Setting) ReplyTimeout() time.Duration {
 // ActorInitMaxRetries returns the actor init max retries
 func (c Setting) ActorInitMaxRetries() int {
 	return c.actorInitMaxRetries
+}
+
+// Peers returns the list of Peers
+func (c Setting) Peers() []*pb.Peer {
+	return c.peers
 }
 
 // validateHostAndPort helps validate the host address and port of and address
@@ -188,9 +195,17 @@ func WithTelemetry(telemetry *telemetry.Telemetry) Option {
 	})
 }
 
-// WithClusterConfig sets the cluster config and enables clustering.
-func WithClusterConfig(config *cluster.NodeConfig) Option {
+// WithPeers sets the cluster peers
+func WithPeers(peers []*pb.Peer) Option {
 	return OptionFunc(func(setting *Setting) {
-		setting.clusterConfig = config
+		setting.peers = peers
+	})
+}
+
+// WithCluster enables clustering on the actor system
+// by making the actor system node a cluster aware node
+func WithCluster() Option {
+	return OptionFunc(func(setting *Setting) {
+		setting.clusterEnabled = true
 	})
 }

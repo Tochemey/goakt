@@ -18,120 +18,120 @@ import (
 // Requires gRPC-Go v1.32.0 or later.
 const _ = grpc.SupportPackageIsVersion7
 
-// NodeStateReplicationServiceClient is the client API for NodeStateReplicationService service.
+// GossipServiceClient is the client API for GossipService service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
-type NodeStateReplicationServiceClient interface {
-	PutActorMeta(ctx context.Context, in *PutActorMetaRequest, opts ...grpc.CallOption) (*PutActorMetaResponse, error)
-	GetActorMeta(ctx context.Context, in *GetActorMetaRequest, opts ...grpc.CallOption) (*GetActorMetaResponse, error)
+type GossipServiceClient interface {
+	Put(ctx context.Context, in *PutRequest, opts ...grpc.CallOption) (*PutResponse, error)
+	Get(ctx context.Context, in *GetRequest, opts ...grpc.CallOption) (*GetResponse, error)
 }
 
-type nodeStateReplicationServiceClient struct {
+type gossipServiceClient struct {
 	cc grpc.ClientConnInterface
 }
 
-func NewNodeStateReplicationServiceClient(cc grpc.ClientConnInterface) NodeStateReplicationServiceClient {
-	return &nodeStateReplicationServiceClient{cc}
+func NewGossipServiceClient(cc grpc.ClientConnInterface) GossipServiceClient {
+	return &gossipServiceClient{cc}
 }
 
-func (c *nodeStateReplicationServiceClient) PutActorMeta(ctx context.Context, in *PutActorMetaRequest, opts ...grpc.CallOption) (*PutActorMetaResponse, error) {
-	out := new(PutActorMetaResponse)
-	err := c.cc.Invoke(ctx, "/goakt.v1.NodeStateReplicationService/PutActorMeta", in, out, opts...)
+func (c *gossipServiceClient) Put(ctx context.Context, in *PutRequest, opts ...grpc.CallOption) (*PutResponse, error) {
+	out := new(PutResponse)
+	err := c.cc.Invoke(ctx, "/goakt.v1.GossipService/Put", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *nodeStateReplicationServiceClient) GetActorMeta(ctx context.Context, in *GetActorMetaRequest, opts ...grpc.CallOption) (*GetActorMetaResponse, error) {
-	out := new(GetActorMetaResponse)
-	err := c.cc.Invoke(ctx, "/goakt.v1.NodeStateReplicationService/GetActorMeta", in, out, opts...)
+func (c *gossipServiceClient) Get(ctx context.Context, in *GetRequest, opts ...grpc.CallOption) (*GetResponse, error) {
+	out := new(GetResponse)
+	err := c.cc.Invoke(ctx, "/goakt.v1.GossipService/Get", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-// NodeStateReplicationServiceServer is the server API for NodeStateReplicationService service.
-// All implementations should embed UnimplementedNodeStateReplicationServiceServer
+// GossipServiceServer is the server API for GossipService service.
+// All implementations should embed UnimplementedGossipServiceServer
 // for forward compatibility
-type NodeStateReplicationServiceServer interface {
-	PutActorMeta(context.Context, *PutActorMetaRequest) (*PutActorMetaResponse, error)
-	GetActorMeta(context.Context, *GetActorMetaRequest) (*GetActorMetaResponse, error)
+type GossipServiceServer interface {
+	Put(context.Context, *PutRequest) (*PutResponse, error)
+	Get(context.Context, *GetRequest) (*GetResponse, error)
 }
 
-// UnimplementedNodeStateReplicationServiceServer should be embedded to have forward compatible implementations.
-type UnimplementedNodeStateReplicationServiceServer struct {
+// UnimplementedGossipServiceServer should be embedded to have forward compatible implementations.
+type UnimplementedGossipServiceServer struct {
 }
 
-func (UnimplementedNodeStateReplicationServiceServer) PutActorMeta(context.Context, *PutActorMetaRequest) (*PutActorMetaResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method PutActorMeta not implemented")
+func (UnimplementedGossipServiceServer) Put(context.Context, *PutRequest) (*PutResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Put not implemented")
 }
-func (UnimplementedNodeStateReplicationServiceServer) GetActorMeta(context.Context, *GetActorMetaRequest) (*GetActorMetaResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method GetActorMeta not implemented")
+func (UnimplementedGossipServiceServer) Get(context.Context, *GetRequest) (*GetResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Get not implemented")
 }
 
-// UnsafeNodeStateReplicationServiceServer may be embedded to opt out of forward compatibility for this service.
-// Use of this interface is not recommended, as added methods to NodeStateReplicationServiceServer will
+// UnsafeGossipServiceServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to GossipServiceServer will
 // result in compilation errors.
-type UnsafeNodeStateReplicationServiceServer interface {
-	mustEmbedUnimplementedNodeStateReplicationServiceServer()
+type UnsafeGossipServiceServer interface {
+	mustEmbedUnimplementedGossipServiceServer()
 }
 
-func RegisterNodeStateReplicationServiceServer(s grpc.ServiceRegistrar, srv NodeStateReplicationServiceServer) {
-	s.RegisterService(&NodeStateReplicationService_ServiceDesc, srv)
+func RegisterGossipServiceServer(s grpc.ServiceRegistrar, srv GossipServiceServer) {
+	s.RegisterService(&GossipService_ServiceDesc, srv)
 }
 
-func _NodeStateReplicationService_PutActorMeta_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(PutActorMetaRequest)
+func _GossipService_Put_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PutRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(NodeStateReplicationServiceServer).PutActorMeta(ctx, in)
+		return srv.(GossipServiceServer).Put(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/goakt.v1.NodeStateReplicationService/PutActorMeta",
+		FullMethod: "/goakt.v1.GossipService/Put",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(NodeStateReplicationServiceServer).PutActorMeta(ctx, req.(*PutActorMetaRequest))
+		return srv.(GossipServiceServer).Put(ctx, req.(*PutRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _NodeStateReplicationService_GetActorMeta_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(GetActorMetaRequest)
+func _GossipService_Get_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(NodeStateReplicationServiceServer).GetActorMeta(ctx, in)
+		return srv.(GossipServiceServer).Get(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/goakt.v1.NodeStateReplicationService/GetActorMeta",
+		FullMethod: "/goakt.v1.GossipService/Get",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(NodeStateReplicationServiceServer).GetActorMeta(ctx, req.(*GetActorMetaRequest))
+		return srv.(GossipServiceServer).Get(ctx, req.(*GetRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-// NodeStateReplicationService_ServiceDesc is the grpc.ServiceDesc for NodeStateReplicationService service.
+// GossipService_ServiceDesc is the grpc.ServiceDesc for GossipService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
-var NodeStateReplicationService_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "goakt.v1.NodeStateReplicationService",
-	HandlerType: (*NodeStateReplicationServiceServer)(nil),
+var GossipService_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "goakt.v1.GossipService",
+	HandlerType: (*GossipServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
-			MethodName: "PutActorMeta",
-			Handler:    _NodeStateReplicationService_PutActorMeta_Handler,
+			MethodName: "Put",
+			Handler:    _GossipService_Put_Handler,
 		},
 		{
-			MethodName: "GetActorMeta",
-			Handler:    _NodeStateReplicationService_GetActorMeta_Handler,
+			MethodName: "Get",
+			Handler:    _GossipService_Get_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

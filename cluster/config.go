@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/tochemey/goakt/log"
+	pb "github.com/tochemey/goakt/pb/goakt/v1"
 )
 
 // NodeConfig specifies a cluster node configuration
@@ -16,13 +17,13 @@ type NodeConfig struct {
 	BindHost string
 	// BindPort is the port to bind to
 	BindPort int
-	// GossipPort is used for both UDP and TCP gossip
-	GossipPort int
-	// JoinAddr is used by the node to join the cluster
-	JoinAddr string
+	// GRPCPort is the port where clients can reach out to the cluster
+	GRPCPort int
 	// LeaveTimeout specifies the timeout for the given to leave the cluster
 	// when shutting down
 	LeaveTimeout time.Duration
 	// Logger specifies the logger to use
 	Logger log.Logger
+	// Specifies the list of Peers
+	Peers []*pb.Peer
 }

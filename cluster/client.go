@@ -16,7 +16,7 @@ type Client struct {
 	// node port
 	nodePort int
 	// specifies the underlying grpc service client
-	stateReplicationService pb.NodeStateReplicationServiceClient
+	stateReplicationService pb.GossipServiceClient
 }
 
 // NewClient creates an instance of Client
@@ -31,6 +31,6 @@ func NewClient(ctx context.Context, nodeAddr string, nodePort int) (*Client, err
 	return &Client{
 		nodeAddr:                nodeAddr,
 		nodePort:                nodePort,
-		stateReplicationService: pb.NewNodeStateReplicationServiceClient(clientConn),
+		stateReplicationService: pb.NewGossipServiceClient(clientConn),
 	}, nil
 }

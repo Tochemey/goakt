@@ -3,7 +3,10 @@ package actors
 import (
 	"context"
 	"fmt"
+	"net"
+	"strconv"
 	"sync"
+	"time"
 
 	cmp "github.com/orcaman/concurrent-map/v2"
 	"github.com/pkg/errors"
@@ -84,9 +87,19 @@ func NewActorSystem(setting *Setting) (ActorSystem, error) {
 		err error
 	)
 	// create the cluster node when the cluster config is set
-	if setting.clusterConfig != nil {
+	if setting.clusterEnabled {
+		// first parse the host and port
+		bindHost, port, _ := net.SplitHostPort(setting.NodeHostAndPort())
+		bindPort, _ := strconv.Atoi(port)
 		// create the cluster node
-		node, err = cluster.NewNode(setting.clusterConfig)
+		node, err = cluster.NewNode(&cluster.NodeConfig{
+			ID:           setting.Name(),
+			BindHost:     bindHost,
+			BindPort:     bindPort,
+			LeaveTimeout: 5 * time.Second,
+			Logger:       setting.Logger(),
+			Peers:        setting.Peers(),
+		})
 		// handle the error
 		if err != nil {
 			return nil, err
