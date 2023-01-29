@@ -8,7 +8,6 @@ service NodeStateReplicationService {
   rpc GetActorMeta(GetActorMetaRequest) returns (GetActorMetaResponse);
 }
 
-
 message ActorMeta {
   // Specifies the kind. This is basically the type of actor
   string actor_kind = 1;
