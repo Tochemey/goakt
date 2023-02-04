@@ -8,6 +8,8 @@ import (
 	"sync"
 	"time"
 
+	pb "github.com/tochemey/goakt/pb/goakt/v1"
+
 	cmp "github.com/orcaman/concurrent-map/v2"
 	"github.com/pkg/errors"
 	"github.com/tochemey/goakt/cluster"
@@ -170,6 +172,24 @@ func (a *actorSystem) StartActor(ctx context.Context, kind, id string, actor Act
 
 	// add the given actor to the actor map
 	a.actors.Set(string(addr), pid)
+
+	// put the actor meta
+	// TODO what to serialize for ActorType: Actor or PID so that we can easily recreate the actor on another node
+	// TODO when the host node goes downs
+
+	// let us grab the type of the
+	// t := reflect.TypeOf(actor)
+
+	if a.clusterNode != nil {
+		actorMeta := &pb.ActorMeta{
+			ActorKind: kind,
+			ActorId:   id,
+			ActorType: nil,
+		}
+		nodeID := a.clusterNode.ID()
+		a.clusterNode.PutActorMeta(nodeID, actorMeta)
+	}
+
 	// return the actor ref
 	return pid
 }

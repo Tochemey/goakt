@@ -150,7 +150,7 @@ func (n *Node) Put(ctx context.Context, request *pb.PutRequest) (*pb.PutResponse
 	// make a copy of the incoming request
 	cloned := proto.Clone(request).(*pb.PutRequest)
 	// update the node state
-	n.putActorMeta(cloned.GetNodeId(), cloned.GetActorMeta())
+	n.PutActorMeta(cloned.GetNodeId(), cloned.GetActorMeta())
 	// return the response
 	return &pb.PutResponse{
 		NodeId:    cloned.GetNodeId(),
@@ -163,7 +163,7 @@ func (n *Node) Get(ctx context.Context, request *pb.GetRequest) (*pb.GetResponse
 	// make a copy of the incoming request
 	cloned := proto.Clone(request).(*pb.GetRequest)
 	// query the node state
-	actorMeta := n.getActorMeta(cloned.GetNodeId())
+	actorMeta := n.GetActorMeta(cloned.GetNodeId())
 	return &pb.GetResponse{
 		NodeId:    cloned.GetNodeId(),
 		ActorMeta: actorMeta,
@@ -173,6 +173,11 @@ func (n *Node) Get(ctx context.Context, request *pb.GetRequest) (*pb.GetResponse
 // Address returns the Node address
 func (n *Node) Address() string {
 	return n.memberlist.LocalNode().FullAddress().Addr
+}
+
+// ID returns the Node id
+func (n *Node) ID() string {
+	return n.memberlist.LocalNode().Name
 }
 
 // NodeMeta is used to retrieve meta-data about the current node
@@ -344,15 +349,15 @@ func (n *Node) joinCluster(ctx context.Context) error {
 	return nil
 }
 
-// putActorMeta adds config property to config store
-func (n *Node) putActorMeta(key string, value *pb.ActorMeta) {
+// PutActorMeta adds config property to config store
+func (n *Node) PutActorMeta(key string, value *pb.ActorMeta) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	n.nodeState.States[key] = value
 }
 
-// getActorMeta returns a property value
-func (n *Node) getActorMeta(key string) *pb.ActorMeta {
+// GetActorMeta returns a property value
+func (n *Node) GetActorMeta(key string) *pb.ActorMeta {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	return n.nodeState.GetStates()[key]
