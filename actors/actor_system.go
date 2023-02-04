@@ -1,19 +1,21 @@
 package actors
 
 import (
+	"bytes"
 	"context"
+	"encoding/gob"
 	"fmt"
 	"net"
+	"reflect"
 	"strconv"
 	"sync"
 	"time"
-
-	pb "github.com/tochemey/goakt/pb/goakt/v1"
 
 	cmp "github.com/orcaman/concurrent-map/v2"
 	"github.com/pkg/errors"
 	"github.com/tochemey/goakt/cluster"
 	"github.com/tochemey/goakt/log"
+	pb "github.com/tochemey/goakt/pb/goakt/v1"
 	"github.com/tochemey/goakt/pkg/eventbus"
 	"github.com/tochemey/goakt/telemetry"
 	"go.opentelemetry.io/otel/metric/instrument"
@@ -174,17 +176,20 @@ func (a *actorSystem) StartActor(ctx context.Context, kind, id string, actor Act
 	a.actors.Set(string(addr), pid)
 
 	// put the actor meta
-	// TODO what to serialize for ActorType: Actor or PID so that we can easily recreate the actor on another node
-	// TODO when the host node goes downs
-
-	// let us grab the type of the
-	// t := reflect.TypeOf(actor)
-
 	if a.clusterNode != nil {
+		// let us grab the actor type and register it
+		gob.Register(reflect.TypeOf(actor))
+		// preparation for encoding
+		bytesBuff := new(bytes.Buffer)
+		encoder := gob.NewEncoder(bytesBuff)
+		// encode by ignoring the error for now. TODO: handle the error
+		_ = encoder.Encode(actor)
+
+		// create an actor meta that will be replicated in the cluster
 		actorMeta := &pb.ActorMeta{
 			ActorKind: kind,
 			ActorId:   id,
-			ActorType: nil,
+			ActorType: bytesBuff.Bytes(),
 		}
 		nodeID := a.clusterNode.ID()
 		a.clusterNode.PutActorMeta(nodeID, actorMeta)
