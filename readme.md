@@ -26,7 +26,7 @@ Also, check reference section at the end of the post for more material regarding
 - [x] EventSourcing (event sourced/cqrs)
     - [x] Event sourced Actor (write model)
     - [ ] Projection (read model) (WIP)
-- [x] Logger interface. The default logger use zerolog and log to console
+- [x] Logger interface with a default logger
 - [x] Examples (check the [examples'](./examples) folder)
 - [x] Integration with [OpenTelemetry](https://github.com/open-telemetry/opentelemetry-go) for traces and metrics.
 - [ ] Clustering
