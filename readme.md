@@ -7,6 +7,9 @@ Minimal actor framework to build reactive and distributed system in golang using
 If you are not familiar with the actor model, the blog post from Brian Storti [here](https://www.brianstorti.com/the-actor-model/) is an excellent and short introduction to the actor model. 
 Also, check reference section at the end of the post for more material regarding actor model
 
+## Note
+The project ownership has been transferred to https://github.com/super-flat/actors. Which means subsequent updates will be done there. 
+
 ## Features
 
 - [x] Send a synchronous message to an actor from a non actor system
