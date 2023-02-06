@@ -2,7 +2,7 @@
 [![build](https://img.shields.io/github/actions/workflow/status/Tochemey/goakt/build.yml?branch=main)](https://github.com/Tochemey/goakt/actions/workflows/build.yml)
 [![codecov](https://codecov.io/gh/Tochemey/goakt/branch/main/graph/badge.svg?token=J0p9MzwSRH)](https://codecov.io/gh/Tochemey/goakt)
 
-Minimal actor framework to build reactive and distributed system in golang using protocol buffers.
+Minimal actor framework with goodies to build reactive and distributed system in golang using protocol buffers.
 
 If you are not familiar with the actor model, the blog post from Brian Storti [here](https://www.brianstorti.com/the-actor-model/) is an excellent and short introduction to the actor model. 
 Also, check reference section at the end of the post for more material regarding actor model
