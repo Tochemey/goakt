@@ -1,6 +1,7 @@
 package log
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log"
@@ -156,6 +157,10 @@ func (l logger) Panicf(s string, i ...interface{}) {
 	sf := fmt.Sprintf(s, i...)
 	l.output(PanicLevel, sf)
 	panic(sf)
+}
+
+func (l logger) WithContext(ctx context.Context) Logger {
+	return l
 }
 
 func (l logger) output(level Level, s string) {

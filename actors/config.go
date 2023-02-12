@@ -16,8 +16,8 @@ var (
 	ErrNodeAddrRequired = errors.New("actor system node address is required")
 )
 
-// Setting represents the actor system configuration
-type Setting struct {
+// Config represents the actor system configuration
+type Config struct {
 	// Specifies the actor system name
 	name string
 	// Specifies the Node Host and IP address
@@ -37,16 +37,15 @@ type Setting struct {
 	actorInitMaxRetries int
 	// Specifies the supervisor strategy
 	supervisorStrategy pb.StrategyDirective
-	// Specifies the telemetry setting
+	// Specifies the telemetry config
 	telemetry *telemetry.Telemetry
-	// Specifies cluster Peers
-	peers []*pb.Peer
-	// Specifies whether cluster is enabled or not
-	clusterEnabled bool
+	// Specifies whether remoting is enabled.
+	// This allows to handle remote messaging
+	remotingEnabled bool
 }
 
-// NewSetting creates an instance of Setting
-func NewSetting(name, nodeHostAndPort string, options ...Option) (*Setting, error) {
+// NewConfig creates an instance of Config
+func NewConfig(name, nodeHostAndPort string, options ...Option) (*Config, error) {
 	// check whether the name is set or not
 	if name == "" {
 		return nil, ErrNameRequired
@@ -56,7 +55,7 @@ func NewSetting(name, nodeHostAndPort string, options ...Option) (*Setting, erro
 		return nil, err
 	}
 	// create an instance of config
-	setting := &Setting{
+	config := &Config{
 		name:                name,
 		nodeHostAndPort:     nodeHostAndPort,
 		logger:              log.DefaultLogger,
@@ -65,50 +64,52 @@ func NewSetting(name, nodeHostAndPort string, options ...Option) (*Setting, erro
 		actorInitMaxRetries: 5,
 		supervisorStrategy:  pb.StrategyDirective_STOP_DIRECTIVE,
 		telemetry:           telemetry.New(),
-		clusterEnabled:      false,
-		peers:               nil,
+		remotingEnabled:     false,
 	}
 	// apply the various options
 	for _, opt := range options {
-		opt.Apply(setting)
+		opt.Apply(config)
 	}
 
-	return setting, nil
+	return config, nil
 }
 
 // Name returns the actor system name
-func (c Setting) Name() string {
+func (c Config) Name() string {
 	return c.name
 }
 
 // NodeHostAndPort returns the node host and port
-func (c Setting) NodeHostAndPort() string {
+func (c Config) NodeHostAndPort() string {
 	return c.nodeHostAndPort
 }
 
 // Logger returns the logger
-func (c Setting) Logger() log.Logger {
+func (c Config) Logger() log.Logger {
 	return c.logger
 }
 
 // ExpireActorAfter returns the expireActorAfter
-func (c Setting) ExpireActorAfter() time.Duration {
+func (c Config) ExpireActorAfter() time.Duration {
 	return c.expireActorAfter
 }
 
 // ReplyTimeout returns the reply timeout
-func (c Setting) ReplyTimeout() time.Duration {
+func (c Config) ReplyTimeout() time.Duration {
 	return c.replyTimeout
 }
 
 // ActorInitMaxRetries returns the actor init max retries
-func (c Setting) ActorInitMaxRetries() int {
+func (c Config) ActorInitMaxRetries() int {
 	return c.actorInitMaxRetries
 }
 
-// Peers returns the list of Peers
-func (c Setting) Peers() []*pb.Peer {
-	return c.peers
+// HostAndPort returns the host and the port
+func (c Config) HostAndPort() (host string, port int) {
+	// no need to check for the error because of the previous validation
+	host, portStr, _ := net.SplitHostPort(c.nodeHostAndPort)
+	port, _ = strconv.Atoi(portStr)
+	return
 }
 
 // validateHostAndPort helps validate the host address and port of and address
@@ -132,29 +133,29 @@ func validateHostAndPort(hostAndPort string) error {
 // Option is the interface that applies a configuration option.
 type Option interface {
 	// Apply sets the Option value of a config.
-	Apply(config *Setting)
+	Apply(config *Config)
 }
 
 var _ Option = OptionFunc(nil)
 
 // OptionFunc implements the Option interface.
-type OptionFunc func(*Setting)
+type OptionFunc func(*Config)
 
-func (f OptionFunc) Apply(c *Setting) {
+func (f OptionFunc) Apply(c *Config) {
 	f(c)
 }
 
 // WithExpireActorAfter sets the actor expiry duration.
 // After such duration an idle actor will be expired and removed from the actor system
 func WithExpireActorAfter(duration time.Duration) Option {
-	return OptionFunc(func(config *Setting) {
+	return OptionFunc(func(config *Config) {
 		config.expireActorAfter = duration
 	})
 }
 
 // WithLogger sets the actor system custom logger
 func WithLogger(logger log.Logger) Option {
-	return OptionFunc(func(config *Setting) {
+	return OptionFunc(func(config *Config) {
 		config.logger = logger
 	})
 }
@@ -162,50 +163,42 @@ func WithLogger(logger log.Logger) Option {
 // WithReplyTimeout sets how long in seconds an actor should reply a command
 // in a receive-reply pattern
 func WithReplyTimeout(timeout time.Duration) Option {
-	return OptionFunc(func(config *Setting) {
+	return OptionFunc(func(config *Config) {
 		config.replyTimeout = timeout
 	})
 }
 
 // WithActorInitMaxRetries sets the number of times to retry an actor init process
 func WithActorInitMaxRetries(max int) Option {
-	return OptionFunc(func(config *Setting) {
+	return OptionFunc(func(config *Config) {
 		config.actorInitMaxRetries = max
 	})
 }
 
 // WithPassivationDisabled disable the passivation mode
 func WithPassivationDisabled() Option {
-	return OptionFunc(func(config *Setting) {
+	return OptionFunc(func(config *Config) {
 		config.expireActorAfter = -1
 	})
 }
 
 // WithSupervisorStrategy sets the supervisor strategy
 func WithSupervisorStrategy(strategy pb.StrategyDirective) Option {
-	return OptionFunc(func(config *Setting) {
+	return OptionFunc(func(config *Config) {
 		config.supervisorStrategy = strategy
 	})
 }
 
 // WithTelemetry sets the custom telemetry
 func WithTelemetry(telemetry *telemetry.Telemetry) Option {
-	return OptionFunc(func(config *Setting) {
+	return OptionFunc(func(config *Config) {
 		config.telemetry = telemetry
 	})
 }
 
-// WithPeers sets the cluster peers
-func WithPeers(peers []*pb.Peer) Option {
-	return OptionFunc(func(setting *Setting) {
-		setting.peers = peers
-	})
-}
-
-// WithCluster enables clustering on the actor system
-// by making the actor system node a cluster aware node
-func WithCluster() Option {
-	return OptionFunc(func(setting *Setting) {
-		setting.clusterEnabled = true
+// WithRemoting enables remoting on the actor system
+func WithRemoting() Option {
+	return OptionFunc(func(config *Config) {
+		config.remotingEnabled = true
 	})
 }

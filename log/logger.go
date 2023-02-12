@@ -1,5 +1,7 @@
 package log
 
+import "context"
+
 // Logger represents an active logging object that generates lines of
 // output to an io.Writer.
 type Logger interface {
@@ -27,4 +29,6 @@ type Logger interface {
 	Panic(...any)
 	// Panicf logs to the PANIC level followed by a call to panic().
 	Panicf(string, ...any)
+	// WithContext returns a context logger
+	WithContext(ctx context.Context) Logger
 }

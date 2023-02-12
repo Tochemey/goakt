@@ -7,14 +7,13 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/tochemey/goakt/modules/eventsourcing"
-	"github.com/tochemey/goakt/modules/persistence/plugins/memory"
-
 	"github.com/google/uuid"
 	"github.com/pkg/errors"
 	goakt "github.com/tochemey/goakt/actors"
 	samplepb "github.com/tochemey/goakt/examples/protos/pb/v1"
 	"github.com/tochemey/goakt/log"
+	"github.com/tochemey/goakt/modules/eventsourcing"
+	"github.com/tochemey/goakt/modules/persistence/plugins/memory"
 	pb "github.com/tochemey/goakt/pb/goakt/v1"
 	"google.golang.org/protobuf/proto"
 )
@@ -26,7 +25,7 @@ func main() {
 	logger := log.DefaultLogger
 
 	// create the actor system configuration. kindly in real-life application handle the error
-	config, _ := goakt.NewSetting("SampleActorSystem", "127.0.0.1:0",
+	config, _ := goakt.NewConfig("SampleActorSystem", "127.0.0.1:0",
 		goakt.WithPassivationDisabled(),
 		goakt.WithLogger(logger),
 		goakt.WithActorInitMaxRetries(3))

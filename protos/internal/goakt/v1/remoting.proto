@@ -1,0 +1,65 @@
+syntax = "proto3";
+
+package goakt.v1;
+
+import "google/protobuf/any.proto";
+
+service RemotingService {
+  // Sends a message to an actor remotely with a reply expected from the receiving actor
+  rpc RemoteSendSync(RemoteSendSyncRequest) returns (RemoteSendSyncResponse);
+  // Sends a message to an actor remotely without expecting any reply
+  rpc RemoteSendAsync(RemoteSendAsyncRequest) returns (RemoteSendAsyncResponse);
+  // Lookup for an actor on a remote host.
+  rpc RemoteLookup(RemoteLookupRequest) returns (RemoteLookupResponse);
+}
+
+// RemoteSendAsync is used to send a message to an actor remotely
+// This type of message expects a reply to be sent back the sender
+message RemoteSendSyncRequest {
+  // Specifies the sender' address
+  Address sender = 1;
+  // Specifies the receiver' address
+  Address receiver = 2;
+  // Specifies the message to send to the actor
+  // Any proto message is allowed to be sent
+  google.protobuf.Any message = 3;
+}
+
+message RemoteSendSyncResponse {
+  // Specifies the message to send to the actor
+  // Any proto message is allowed to be sent
+  google.protobuf.Any message = 1;
+}
+
+// RemoteSendSync is used to send a message to an actor remotely without expecting any reply
+message RemoteSendAsyncRequest {
+  // Specifies the actor address
+  Address address = 1;
+  // Specifies the message to send to the actor
+  // Any proto message is allowed to be sent
+  google.protobuf.Any message = 2;
+}
+
+message RemoteSendAsyncResponse {}
+
+// Address represents an actor address
+message Address {
+  // Specifies the actor system.
+  string actor_system = 1;
+  // Specifies the remote host address
+  string host = 2;
+  // Specifies the remote port
+  int32 port = 3;
+  // Specifies the actor kind(a.k.a actor type)
+  string kind = 4;
+  // Specifies the actor unique id on the remote host
+  string id = 5;
+}
+
+// RemoteLookupRequest checks whether a given actor exists on a remote host
+message RemoteLookupRequest {
+  // Specifies the actor address
+  Address address = 1;
+}
+
+message RemoteLookupResponse {}
