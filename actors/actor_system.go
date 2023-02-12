@@ -19,7 +19,7 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 )
 
-var cache *actorSystem
+var system *actorSystem
 var once resync.Once
 
 // ActorSystem defines the contract of an actor system
@@ -97,7 +97,7 @@ func NewActorSystem(config *Config) (ActorSystem, error) {
 
 	// the function only gets called one
 	once.Do(func() {
-		cache = &actorSystem{
+		system = &actorSystem{
 			name:            config.Name(),
 			nodeAddr:        config.NodeHostAndPort(),
 			actors:          cmp.New[PID](),
@@ -112,11 +112,11 @@ func NewActorSystem(config *Config) (ActorSystem, error) {
 		}
 		// set host and port
 		host, port := config.HostAndPort()
-		cache.host = host
-		cache.port = port
+		system.host = host
+		system.port = port
 	})
 
-	return cache, nil
+	return system, nil
 }
 
 // EventBus returns the actor system event streams
