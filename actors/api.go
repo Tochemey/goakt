@@ -25,7 +25,7 @@ func SendSync(ctx context.Context, to PID, message proto.Message, timeout time.D
 	behaviors := to.behaviors()
 	// check whether the recipient does have some behavior
 	if behaviors.IsEmpty() {
-		// release the lock after setting the message context
+		// release the lock after config the message context
 		mu.Unlock()
 		return nil, ErrEmptyBehavior
 	}
@@ -42,7 +42,7 @@ func SendSync(ctx context.Context, to PID, message proto.Message, timeout time.D
 	context.mu = sync.Mutex{}
 	context.response = make(chan proto.Message, 1)
 
-	// release the lock after setting the message context
+	// release the lock after config the message context
 	mu.Unlock()
 
 	// put the message context in the mailbox of the recipient actor
@@ -76,7 +76,7 @@ func SendAsync(ctx context.Context, to PID, message proto.Message) error {
 	behaviors := to.behaviors()
 	// check whether the recipient does have some behavior
 	if behaviors.IsEmpty() {
-		// release the lock after setting the message context
+		// release the lock after config the message context
 		mu.Unlock()
 		return ErrEmptyBehavior
 	}
@@ -91,7 +91,7 @@ func SendAsync(ctx context.Context, to PID, message proto.Message) error {
 	context.isAsyncMessage = true
 	context.mu = sync.Mutex{}
 
-	// release the lock after setting the message context
+	// release the lock after config the message context
 	mu.Unlock()
 
 	// put the message context in the mailbox of the recipient actor

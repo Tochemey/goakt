@@ -56,7 +56,7 @@ func TestNewActorSystem(t *testing.T) {
 	})
 	t.Run("With StartActor an actor already exist", func(t *testing.T) {
 		ctx := context.TODO()
-		cfg, _ := NewConfig("testSys", "localhost:0", WithLogger(log.DiscardLogger))
+		cfg, _ := NewConfig("test", "localhost:0", WithLogger(log.DiscardLogger))
 		sys, _ := NewActorSystem(cfg)
 
 		// start the actor system

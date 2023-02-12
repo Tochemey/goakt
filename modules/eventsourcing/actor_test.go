@@ -5,6 +5,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tochemey/goakt/modules/persistence/plugins/memory"
+	postgres2 "github.com/tochemey/goakt/modules/persistence/plugins/postgres"
+
 	"github.com/google/uuid"
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
@@ -12,8 +15,6 @@ import (
 	"github.com/tochemey/goakt/actors"
 	"github.com/tochemey/goakt/log"
 	pb "github.com/tochemey/goakt/pb/goakt/v1"
-	"github.com/tochemey/goakt/persistence/plugins/memory"
-	persistencepg "github.com/tochemey/goakt/persistence/plugins/postgres"
 	"github.com/tochemey/goakt/pkg/postgres"
 	testpb "github.com/tochemey/goakt/test/data/pb/v1"
 	"go.uber.org/goleak"
@@ -273,7 +274,7 @@ func TestEventSourcedActor(t *testing.T) {
 		db := testContainer.GetTestDB()
 		// create the event store table
 		require.NoError(t, db.Connect(ctx))
-		schemaUtils := persistencepg.NewSchemaUtils(db)
+		schemaUtils := postgres2.NewSchemaUtils(db)
 		require.NoError(t, schemaUtils.CreateTable(ctx))
 
 		config := &postgres.Config{
@@ -284,7 +285,7 @@ func TestEventSourcedActor(t *testing.T) {
 			DBPassword: testDatabasePassword,
 			DBSchema:   testContainer.Schema(),
 		}
-		eventStore := persistencepg.NewJournalStore(config)
+		eventStore := postgres2.NewJournalStore(config)
 		require.NoError(t, eventStore.Connect(ctx))
 
 		// create a persistence id

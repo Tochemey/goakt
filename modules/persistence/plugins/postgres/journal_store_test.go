@@ -5,10 +5,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tochemey/goakt/modules/persistence"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	pb "github.com/tochemey/goakt/pb/goakt/v1"
-	"github.com/tochemey/goakt/persistence"
 	"github.com/tochemey/goakt/pkg/postgres"
 	testpb "github.com/tochemey/goakt/test/data/pb/v1"
 	"google.golang.org/protobuf/encoding/prototext"

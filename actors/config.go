@@ -37,8 +37,11 @@ type Config struct {
 	actorInitMaxRetries int
 	// Specifies the supervisor strategy
 	supervisorStrategy pb.StrategyDirective
-	// Specifies the telemetry setting
+	// Specifies the telemetry config
 	telemetry *telemetry.Telemetry
+	// Specifies whether remoting is enabled.
+	// This allows to handle remote messaging
+	remotingEnabled bool
 }
 
 // NewConfig creates an instance of Config
@@ -61,6 +64,7 @@ func NewConfig(name, nodeHostAndPort string, options ...Option) (*Config, error)
 		actorInitMaxRetries: 5,
 		supervisorStrategy:  pb.StrategyDirective_STOP_DIRECTIVE,
 		telemetry:           telemetry.New(),
+		remotingEnabled:     false,
 	}
 	// apply the various options
 	for _, opt := range options {
@@ -98,6 +102,14 @@ func (c Config) ReplyTimeout() time.Duration {
 // ActorInitMaxRetries returns the actor init max retries
 func (c Config) ActorInitMaxRetries() int {
 	return c.actorInitMaxRetries
+}
+
+// HostAndPort returns the host and the port
+func (c Config) HostAndPort() (host string, port int) {
+	// no need to check for the error because of the previous validation
+	host, portStr, _ := net.SplitHostPort(c.nodeHostAndPort)
+	port, _ = strconv.Atoi(portStr)
+	return
 }
 
 // validateHostAndPort helps validate the host address and port of and address
@@ -181,5 +193,12 @@ func WithSupervisorStrategy(strategy pb.StrategyDirective) Option {
 func WithTelemetry(telemetry *telemetry.Telemetry) Option {
 	return OptionFunc(func(config *Config) {
 		config.telemetry = telemetry
+	})
+}
+
+// WithRemoting enables remoting on the actor system
+func WithRemoting() Option {
+	return OptionFunc(func(config *Config) {
+		config.remotingEnabled = true
 	})
 }

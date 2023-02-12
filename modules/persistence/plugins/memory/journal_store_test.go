@@ -5,10 +5,11 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/tochemey/goakt/modules/persistence"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	pb "github.com/tochemey/goakt/pb/goakt/v1"
-	"github.com/tochemey/goakt/persistence"
 	testpb "github.com/tochemey/goakt/test/data/pb/v1"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
