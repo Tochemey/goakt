@@ -30,6 +30,8 @@ Also, check reference section at the end of the post for more material regarding
 - [x] Examples (check the [examples'](./examples) folder)
 - [x] Integration with [OpenTelemetry](https://github.com/open-telemetry/opentelemetry-go) for traces and metrics.
 - [x] Remoting: Allow actors to send messages to other actors on a remote system
+- [ ] Clustering
+- [ ] More tests
 
 ## Installation
 ```bash
