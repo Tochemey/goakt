@@ -501,7 +501,7 @@ func (p *pid) RemoteSendAsync(ctx context.Context, to *pb.Address, message proto
 	defer span.End()
 
 	// marshal the message
-	marshalled, err := anypb.New(message)
+	marshaled, err := anypb.New(message)
 	if err != nil {
 		return err
 	}
@@ -512,7 +512,7 @@ func (p *pid) RemoteSendAsync(ctx context.Context, to *pb.Address, message proto
 	// prepare the rpcRequest to send
 	request := &pb.RemoteSendAsyncRequest{
 		Address: to,
-		Message: marshalled,
+		Message: marshaled,
 	}
 	// send the message and handle the error in case there is any
 	if _, err := remoteClient.RemoteSendAsync(ctx, request); err != nil {
@@ -528,7 +528,7 @@ func (p *pid) RemoteSendSync(ctx context.Context, to *pb.Address, message proto.
 	defer span.End()
 
 	// marshal the message
-	marshalled, err := anypb.New(message)
+	marshaled, err := anypb.New(message)
 	if err != nil {
 		return nil, err
 	}
@@ -549,7 +549,7 @@ func (p *pid) RemoteSendSync(ctx context.Context, to *pb.Address, message proto.
 	rpcRequest := &pb.RemoteSendSyncRequest{
 		Sender:   from,
 		Receiver: to,
-		Message:  marshalled,
+		Message:  marshaled,
 	}
 	// send the request
 	rpcResponse, rpcErr := remoteClient.RemoteSendSync(ctx, rpcRequest)
