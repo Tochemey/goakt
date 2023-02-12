@@ -1,21 +1,13 @@
 package actors
 
 import (
-	"bytes"
 	"context"
-	"encoding/gob"
 	"fmt"
-	"net"
-	"reflect"
-	"strconv"
 	"sync"
-	"time"
 
 	cmp "github.com/orcaman/concurrent-map/v2"
 	"github.com/pkg/errors"
-	"github.com/tochemey/goakt/cluster"
 	"github.com/tochemey/goakt/log"
-	pb "github.com/tochemey/goakt/pb/goakt/v1"
 	"github.com/tochemey/goakt/pkg/eventbus"
 	"github.com/tochemey/goakt/telemetry"
 	"go.opentelemetry.io/otel/metric/instrument"
@@ -69,8 +61,6 @@ type actorSystem struct {
 	eventBus eventbus.EventBus
 	// observability settings
 	telemetry *telemetry.Telemetry
-	// cluster node
-	clusterNode *cluster.Node
 }
 
 // enforce compilation error when all methods of the ActorSystem interface are not implemented
@@ -85,43 +75,21 @@ func NewActorSystem(setting *Setting) (ActorSystem, error) {
 	}
 
 	var (
-		//  variable holding an instance of the cluster node
-		node *cluster.Node
 		// variable holding an instance of an error
 		err error
 	)
-	// create the cluster node when the cluster config is set
-	if setting.clusterEnabled {
-		// first parse the host and port
-		bindHost, port, _ := net.SplitHostPort(setting.NodeHostAndPort())
-		bindPort, _ := strconv.Atoi(port)
-		// create the cluster node
-		node, err = cluster.NewNode(&cluster.NodeConfig{
-			ID:           setting.Name(),
-			BindHost:     bindHost,
-			BindPort:     bindPort,
-			LeaveTimeout: 5 * time.Second,
-			Logger:       setting.Logger(),
-			Peers:        setting.Peers(),
-		})
-		// handle the error
-		if err != nil {
-			return nil, err
-		}
-	}
 
 	// the function only gets called one
 	once.Do(func() {
 		cache = &actorSystem{
-			name:        setting.Name(),
-			nodeAddr:    setting.NodeHostAndPort(),
-			actors:      cmp.New[PID](),
-			logger:      setting.Logger(),
-			setting:     setting,
-			hasStarted:  atomic.NewBool(false),
-			eventBus:    eventbus.New(),
-			telemetry:   setting.telemetry,
-			clusterNode: node,
+			name:       setting.Name(),
+			nodeAddr:   setting.NodeHostAndPort(),
+			actors:     cmp.New[PID](),
+			logger:     setting.Logger(),
+			setting:    setting,
+			hasStarted: atomic.NewBool(false),
+			eventBus:   eventbus.New(),
+			telemetry:  setting.telemetry,
 		}
 	})
 
@@ -174,26 +142,6 @@ func (a *actorSystem) StartActor(ctx context.Context, kind, id string, actor Act
 
 	// add the given actor to the actor map
 	a.actors.Set(string(addr), pid)
-
-	// put the actor meta
-	if a.clusterNode != nil {
-		// let us grab the actor type and register it
-		gob.Register(reflect.TypeOf(actor))
-		// preparation for encoding
-		bytesBuff := new(bytes.Buffer)
-		encoder := gob.NewEncoder(bytesBuff)
-		// encode by ignoring the error for now. TODO: handle the error
-		_ = encoder.Encode(actor)
-
-		// create an actor meta that will be replicated in the cluster
-		actorMeta := &pb.ActorMeta{
-			ActorKind: kind,
-			ActorId:   id,
-			ActorType: bytesBuff.Bytes(),
-		}
-		nodeID := a.clusterNode.ID()
-		a.clusterNode.PutActorMeta(nodeID, actorMeta)
-	}
 
 	// return the actor ref
 	return pid
@@ -274,13 +222,6 @@ func (a *actorSystem) Start(ctx context.Context) error {
 	defer span.End()
 	// set the has started to true
 	a.hasStarted.Store(true)
-	// start the cluster node when set
-	if a.clusterNode != nil {
-		// start the cluster node
-		if err := a.clusterNode.Start(ctx); err != nil {
-			return err
-		}
-	}
 
 	// start the metrics service
 	// register metrics. However, we don't panic when we fail to register
@@ -312,14 +253,6 @@ func (a *actorSystem) Stop(ctx context.Context) error {
 			return err
 		}
 		a.actors.Remove(string(actor.Address()))
-	}
-
-	// shutdown the cluster node when set
-	if a.clusterNode != nil {
-		// start the cluster node
-		if err := a.clusterNode.Shutdown(ctx); err != nil {
-			return err
-		}
 	}
 
 	return nil

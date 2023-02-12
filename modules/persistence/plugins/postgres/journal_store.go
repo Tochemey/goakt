@@ -5,10 +5,11 @@ import (
 	"database/sql"
 	"fmt"
 
+	"github.com/tochemey/goakt/modules/persistence"
+
 	sq "github.com/Masterminds/squirrel"
 	"github.com/pkg/errors"
 	pb "github.com/tochemey/goakt/pb/goakt/v1"
-	"github.com/tochemey/goakt/persistence"
 	"github.com/tochemey/goakt/pkg/postgres"
 	"github.com/tochemey/goakt/telemetry"
 	"go.uber.org/atomic"

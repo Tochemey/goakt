@@ -7,14 +7,15 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/tochemey/goakt/modules/eventsourcing"
+	"github.com/tochemey/goakt/modules/persistence/plugins/memory"
+
 	"github.com/google/uuid"
 	"github.com/pkg/errors"
 	goakt "github.com/tochemey/goakt/actors"
-	"github.com/tochemey/goakt/eventsourcing"
 	samplepb "github.com/tochemey/goakt/examples/protos/pb/v1"
 	"github.com/tochemey/goakt/log"
 	pb "github.com/tochemey/goakt/pb/goakt/v1"
-	"github.com/tochemey/goakt/persistence/plugins/memory"
 	"google.golang.org/protobuf/proto"
 )
 

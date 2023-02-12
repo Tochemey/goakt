@@ -5,11 +5,12 @@ import (
 	"testing"
 	"time"
 
+	persistence2 "github.com/tochemey/goakt/modules/persistence"
+
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	pb "github.com/tochemey/goakt/pb/goakt/v1"
-	"github.com/tochemey/goakt/persistence"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -18,7 +19,7 @@ func TestMemoryOffsetStore(t *testing.T) {
 		store := NewOffsetStore()
 		assert.NotNil(t, store)
 		var p interface{} = store
-		_, ok := p.(persistence.OffsetStore)
+		_, ok := p.(persistence2.OffsetStore)
 		assert.True(t, ok)
 	})
 	t.Run("testConnect", func(t *testing.T) {
@@ -81,7 +82,7 @@ func TestMemoryOffsetStore(t *testing.T) {
 
 		require.NoError(t, store.WriteOffset(ctx, offset))
 
-		actual, err := store.GetCurrentOffset(ctx, persistence.NewProjectionID(projectionName, persistenceID))
+		actual, err := store.GetCurrentOffset(ctx, persistence2.NewProjectionID(projectionName, persistenceID))
 		assert.NoError(t, err)
 		assert.NotNil(t, actual)
 		assert.True(t, proto.Equal(offset, actual))
@@ -98,7 +99,7 @@ func TestMemoryOffsetStore(t *testing.T) {
 		persistenceID := uuid.NewString()
 		projectionName := "DB_WRITER"
 
-		actual, err := store.GetCurrentOffset(ctx, persistence.NewProjectionID(projectionName, persistenceID))
+		actual, err := store.GetCurrentOffset(ctx, persistence2.NewProjectionID(projectionName, persistenceID))
 		assert.NoError(t, err)
 		assert.Nil(t, actual)
 

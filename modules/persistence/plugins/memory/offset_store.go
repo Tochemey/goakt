@@ -4,11 +4,12 @@ import (
 	"context"
 	"fmt"
 
+	persistence2 "github.com/tochemey/goakt/modules/persistence"
+
 	"github.com/google/uuid"
 	"github.com/hashicorp/go-memdb"
 	"github.com/pkg/errors"
 	pb "github.com/tochemey/goakt/pb/goakt/v1"
-	"github.com/tochemey/goakt/persistence"
 	"github.com/tochemey/goakt/telemetry"
 	"go.uber.org/atomic"
 )
@@ -25,7 +26,7 @@ type OffsetStore struct {
 	connected *atomic.Bool
 }
 
-var _ persistence.OffsetStore = &OffsetStore{}
+var _ persistence2.OffsetStore = &OffsetStore{}
 
 // NewOffsetStore creates an instance of OffsetStore
 func NewOffsetStore() *OffsetStore {
@@ -140,7 +141,7 @@ func (s *OffsetStore) WriteOffset(ctx context.Context, offset *pb.Offset) error 
 }
 
 // GetCurrentOffset return the offset of a projection
-func (s *OffsetStore) GetCurrentOffset(ctx context.Context, projectionID *persistence.ProjectionID) (current *pb.Offset, err error) {
+func (s *OffsetStore) GetCurrentOffset(ctx context.Context, projectionID *persistence2.ProjectionID) (current *pb.Offset, err error) {
 	// add a span context
 	ctx, span := telemetry.SpanContext(ctx, "OffsetStore.GetCurrentOffset")
 	defer span.End()
