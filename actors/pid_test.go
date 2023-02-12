@@ -3,7 +3,6 @@ package actors
 import (
 	"context"
 	"fmt"
-	"io"
 	"sync"
 	"testing"
 	"time"
@@ -32,7 +31,7 @@ func TestActorReceive(t *testing.T) {
 		ctx,
 		NewTestActor(),
 		withInitMaxRetries(1),
-		withCustomLogger(log.New(log.Disabled, io.Discard)),
+		withCustomLogger(log.DefaultLogger),
 		withSendReplyTimeout(recvTimeout),
 		withLocalID("Test", "test-1"))
 	assert.NotNil(t, pid)
@@ -63,7 +62,6 @@ func TestActorWithPassivation(t *testing.T) {
 	opts := []pidOption{
 		withInitMaxRetries(1),
 		withPassivationAfter(passivateAfter),
-		withCustomLogger(log.New(log.Disabled, io.Discard)),
 		withSendReplyTimeout(recvTimeout),
 		withLocalID("Test", "test-1"),
 	}
@@ -93,7 +91,7 @@ func TestActorWithReply(t *testing.T) {
 		// create a Ping actor
 		opts := []pidOption{
 			withInitMaxRetries(1),
-			withCustomLogger(log.New(log.Disabled, io.Discard)),
+			withCustomLogger(log.DiscardLogger),
 			withLocalID("Test", "test-1"),
 		}
 
@@ -115,7 +113,7 @@ func TestActorWithReply(t *testing.T) {
 		// create a Ping actor
 		opts := []pidOption{
 			withInitMaxRetries(1),
-			withCustomLogger(log.New(log.Disabled, io.Discard)),
+			withCustomLogger(log.DiscardLogger),
 			withLocalID("Test", "test-1"),
 		}
 
@@ -151,7 +149,7 @@ func TestActorRestart(t *testing.T) {
 		pid := newPID(ctx, actor,
 			withInitMaxRetries(1),
 			withPassivationAfter(10*time.Second),
-			withCustomLogger(log.New(log.Disabled, io.Discard)),
+			withCustomLogger(log.DiscardLogger),
 			withActorSystem(actorSys),
 			withLocalID("Test", "test-1"),
 			withSendReplyTimeout(recvTimeout))
@@ -192,7 +190,7 @@ func TestActorRestart(t *testing.T) {
 			NewTestActor(),
 			withInitMaxRetries(1),
 			withSendReplyTimeout(recvTimeout),
-			withCustomLogger(log.New(log.Disabled, io.Discard)),
+			withCustomLogger(log.DiscardLogger),
 			withLocalID("Test", "test-1"))
 		assert.NotNil(t, pid)
 
@@ -222,7 +220,7 @@ func TestActorRestart(t *testing.T) {
 		pid := newPID(ctx, actor,
 			withInitMaxRetries(1),
 			withPassivationAfter(passivateAfter),
-			withCustomLogger(log.New(log.Disabled, io.Discard)),
+			withCustomLogger(log.DiscardLogger),
 			withActorSystem(actorSys),
 			withLocalID("Test", "test-1"),
 			withSendReplyTimeout(recvTimeout))
@@ -269,7 +267,7 @@ func TestChildActor(t *testing.T) {
 		parent := newPID(ctx,
 			NewParentActor(),
 			withInitMaxRetries(1),
-			withCustomLogger(log.New(log.Disabled, io.Discard)),
+			withCustomLogger(log.DiscardLogger),
 			withActorSystem(actorSys),
 			withLocalID("Parent", "papa"),
 			withSendReplyTimeout(recvTimeout))
@@ -310,7 +308,7 @@ func TestChildActor(t *testing.T) {
 		parent := newPID(ctx,
 			NewParentActor(),
 			withInitMaxRetries(1),
-			withCustomLogger(log.New(log.Disabled, io.Discard)),
+			withCustomLogger(log.DiscardLogger),
 			withPassivationDisabled(),
 			withActorSystem(actorSys),
 			withLocalID("Parent", "papa"),
@@ -350,7 +348,7 @@ func TestChildActor(t *testing.T) {
 		actorSys, err := NewActorSystem(cfg)
 		require.NoError(t, err)
 
-		logger := log.New(log.Disabled, io.Discard)
+		logger := log.DiscardLogger
 		// create the parent actor
 		parent := newPID(ctx,
 			NewParentActor(),
@@ -393,7 +391,7 @@ func BenchmarkActor(b *testing.B) {
 		// create the actor ref
 		pid := newPID(ctx, actor,
 			withInitMaxRetries(1),
-			withCustomLogger(log.New(log.Disabled, io.Discard)),
+			withCustomLogger(log.DiscardLogger),
 			withSendReplyTimeout(recvTimeout))
 
 		actor.Wg.Add(b.N)
@@ -413,7 +411,7 @@ func BenchmarkActor(b *testing.B) {
 		// create the actor ref
 		pid := newPID(ctx, actor,
 			withInitMaxRetries(1),
-			withCustomLogger(log.New(log.Disabled, io.Discard)),
+			withCustomLogger(log.DiscardLogger),
 			withSendReplyTimeout(recvTimeout))
 
 		actor.Wg.Add(b.N)
@@ -430,7 +428,7 @@ func BenchmarkActor(b *testing.B) {
 		// create the actor ref
 		pid := newPID(ctx, actor,
 			withInitMaxRetries(1),
-			withCustomLogger(log.New(log.Disabled, io.Discard)),
+			withCustomLogger(log.DiscardLogger),
 			withSendReplyTimeout(recvTimeout))
 
 		actor.Wg.Add(b.N)
@@ -455,7 +453,7 @@ func BenchmarkActor(b *testing.B) {
 		// create the actor ref
 		pid := newPID(ctx, actor,
 			withInitMaxRetries(1),
-			withCustomLogger(log.New(log.Disabled, io.Discard)),
+			withCustomLogger(log.DiscardLogger),
 			withSendReplyTimeout(recvTimeout))
 
 		actor.Wg.Add(b.N * 100)
@@ -482,7 +480,7 @@ func BenchmarkActor(b *testing.B) {
 		// create the actor ref
 		pid := newPID(ctx, actor,
 			withInitMaxRetries(1),
-			withCustomLogger(log.New(log.Disabled, io.Discard)),
+			withCustomLogger(log.DiscardLogger),
 			withPassivationAfter(5*time.Second),
 			withSendReplyTimeout(recvTimeout))
 
@@ -503,7 +501,7 @@ func BenchmarkActor(b *testing.B) {
 		// create the actor ref
 		pid := newPID(ctx, actor,
 			withInitMaxRetries(1),
-			withCustomLogger(log.New(log.Disabled, io.Discard)),
+			withCustomLogger(log.DiscardLogger),
 			withPassivationAfter(5*time.Second),
 			withSendReplyTimeout(recvTimeout))
 
@@ -521,7 +519,7 @@ func BenchmarkActor(b *testing.B) {
 		// create the actor ref
 		pid := newPID(ctx, actor,
 			withInitMaxRetries(1),
-			withCustomLogger(log.New(log.Disabled, io.Discard)),
+			withCustomLogger(log.DiscardLogger),
 			withPassivationAfter(5*time.Second),
 			withSendReplyTimeout(recvTimeout))
 
@@ -547,7 +545,7 @@ func BenchmarkActor(b *testing.B) {
 		// create the actor ref
 		pid := newPID(ctx, actor,
 			withInitMaxRetries(1),
-			withCustomLogger(log.New(log.Disabled, io.Discard)),
+			withCustomLogger(log.DiscardLogger),
 			withPassivationAfter(5*time.Second),
 			withSendReplyTimeout(recvTimeout))
 

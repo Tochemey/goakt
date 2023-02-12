@@ -2,7 +2,7 @@
 [![build](https://img.shields.io/github/actions/workflow/status/Tochemey/goakt/build.yml?branch=main)](https://github.com/Tochemey/goakt/actions/workflows/build.yml)
 [![codecov](https://codecov.io/gh/Tochemey/goakt/branch/main/graph/badge.svg?token=J0p9MzwSRH)](https://codecov.io/gh/Tochemey/goakt)
 
-Minimal actor framework to build reactive and distributed system in golang using protocol buffers.
+Minimal actor framework with goodies to build reactive and distributed system in golang using protocol buffers.
 
 If you are not familiar with the actor model, the blog post from Brian Storti [here](https://www.brianstorti.com/the-actor-model/) is an excellent and short introduction to the actor model. 
 Also, check reference section at the end of the post for more material regarding actor model
@@ -26,7 +26,7 @@ Also, check reference section at the end of the post for more material regarding
 - [x] EventSourcing (event sourced/cqrs)
     - [x] Event sourced Actor (write model)
     - [ ] Projection (read model) (WIP)
-- [x] Logger interface. The default logger use zerolog and log to console
+- [x] Logger interface with a default logger
 - [x] Examples (check the [examples'](./examples) folder)
 - [x] Integration with [OpenTelemetry](https://github.com/open-telemetry/opentelemetry-go) for traces and metrics.
 - [ ] Clustering
@@ -62,7 +62,7 @@ func main() {
 	ctx := context.Background()
 
 	// use the goakt default logger. real-life implement the logger interface`
-	logger := log.New(log.DebugLevel, os.Stderr)
+	logger := log.DefaultLogger
 
 	// create the actor system configuration. kindly in real-life application handle the error
 	config, _ := goakt.NewConfig("SampleActorSystem", "127.0.0.1:0",
@@ -77,7 +77,7 @@ func main() {
 	_ = actorSystem.Start(ctx)
 
 	// create an actor
-	actor := actorSystem.Spawn(ctx, "Pinger", "123", NewPinger())
+	actor := actorSystem.StartActor(ctx, "Pinger", "123", NewPinger())
 
 	startTime := time.Now()
 

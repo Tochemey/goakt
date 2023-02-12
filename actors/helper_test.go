@@ -2,7 +2,6 @@ package actors
 
 import (
 	"context"
-	"os"
 	"sync"
 	"time"
 
@@ -41,7 +40,7 @@ var _ Actor = (*TestActor)(nil)
 // NewTestActor creates a TestActor
 func NewTestActor() *TestActor {
 	return &TestActor{
-		logger: log.New(log.DebugLevel, os.Stderr),
+		logger: log.DefaultLogger,
 	}
 }
 
@@ -88,7 +87,7 @@ var _ Actor = (*ParentActor)(nil)
 
 func NewParentActor() *ParentActor {
 	return &ParentActor{
-		logger: log.New(log.DebugLevel, os.Stderr),
+		logger: log.DefaultLogger,
 	}
 }
 
@@ -116,7 +115,7 @@ var _ Actor = (*ChildActor)(nil)
 
 func NewChildActor() *ChildActor {
 	return &ChildActor{
-		logger: log.New(log.DebugLevel, os.Stderr),
+		logger: log.DefaultLogger,
 	}
 }
 
