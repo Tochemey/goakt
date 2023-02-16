@@ -15,6 +15,8 @@ import (
 	"github.com/tochemey/goakt/telemetry"
 	"go.opentelemetry.io/otel/metric"
 	"go.uber.org/atomic"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 )
@@ -61,6 +63,9 @@ type PID interface {
 	RemoteSendAsync(ctx context.Context, to *pb.Address, message proto.Message) error
 	// RemoteSendSync sends a synchronous message to another actor remotely and expect a response.
 	RemoteSendSync(ctx context.Context, to *pb.Address, message proto.Message) (response proto.Message, err error)
+	// RemoteLookup look for an actor address on a remote node. If the actorSystem is nil then the lookup will be done
+	// using the same actor system as the PID actor system
+	RemoteLookup(ctx context.Context, host string, port int, name string, actorSystem *string) (addr *pb.Address, err error)
 	// RestartCount returns the number of times the actor has restarted
 	RestartCount(ctx context.Context) uint64
 	// MailboxSize returns the mailbox size a given time
@@ -246,7 +251,7 @@ func (p *pid) ActorSystem() ActorSystem {
 	return sys
 }
 
-// Path return the path of the actor
+// ActorPath returns the path of the actor
 func (p *pid) ActorPath() *Path {
 	p.mu.Lock()
 	path := p.actorPath
@@ -473,6 +478,46 @@ func (p *pid) SendAsync(ctx context.Context, to PID, message proto.Message) erro
 	to.doReceive(context)
 
 	return nil
+}
+
+// RemoteLookup look for an actor address on a remote node. If the actorSystem is nil then the lookup will be done
+// using the same actor system as the PID actor system
+func (p *pid) RemoteLookup(ctx context.Context, host string, port int, name string, actorSystem *string) (addr *pb.Address, err error) {
+	// add a span context
+	ctx, span := telemetry.SpanContext(ctx, "RemoteLookup")
+	defer span.End()
+
+	// create an instance of remote client service
+	rpcConn, _ := grpc.GetClientConn(ctx, fmt.Sprintf("%s:%d", host, port))
+	remoteClient := pb.NewRemotingServiceClient(rpcConn)
+
+	// set the actor system to the PID
+	sys := p.ActorSystem().Name()
+	if actorSystem != nil {
+		sys = *actorSystem
+	}
+
+	// prepare the request to send
+	request := &pb.RemoteLookupRequest{
+		ActorSystem: sys,
+		Host:        host,
+		Port:        int32(port),
+		Name:        name,
+	}
+	// send the message and handle the error in case there is any
+	response, err := remoteClient.RemoteLookup(ctx, request)
+	// we know the error will always be a grpc error
+	if err != nil {
+		// get the status error
+		s := status.Convert(err)
+		if s.Code() == codes.NotFound {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	// return the response
+	return response.GetAddress(), nil
 }
 
 // RemoteSendAsync sends a message to an actor remotely without expecting any reply

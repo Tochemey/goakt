@@ -323,7 +323,7 @@ func (a *actorSystem) RemoteLookup(ctx context.Context, request *pb.RemoteLookup
 
 	// check whether the actor system is set and validate it
 	// if the actor system is not set we just use the current actor system name to perform the lookup
-	sys := reqCopy.GetAddress().GetActorSystem()
+	sys := reqCopy.GetActorSystem()
 	if sys != a.name {
 		// log the error
 		logger.Error(ErrRemoteSendInvalidActorSystem)
@@ -332,7 +332,7 @@ func (a *actorSystem) RemoteLookup(ctx context.Context, request *pb.RemoteLookup
 	}
 
 	// let us validate the host and port
-	hostAndPort := fmt.Sprintf("%s:%d", reqCopy.GetAddress().GetHost(), reqCopy.GetAddress().GetPort())
+	hostAndPort := fmt.Sprintf("%s:%d", reqCopy.GetHost(), reqCopy.GetPort())
 	if hostAndPort != a.nodeAddr {
 		// log the error
 		logger.Error(ErrRemoteSendInvalidNode)
@@ -341,11 +341,11 @@ func (a *actorSystem) RemoteLookup(ctx context.Context, request *pb.RemoteLookup
 	}
 
 	// construct the actor address
-	name := reqCopy.GetAddress().GetName()
-	actorPath := NewPath(name, NewAddress(protocol, a.name, a.host, a.port))
+	name := reqCopy.GetName()
+	actorPath := NewPath(name, NewAddress(protocol, sys, reqCopy.GetHost(), int(reqCopy.GetPort())))
 	// start or get the PID of the actor
 	// check whether the given actor already exist in the system or not
-	_, exist := a.actors.Get(actorPath.String())
+	pid, exist := a.actors.Get(actorPath.String())
 	// return an error when the remote address is not found
 	if !exist {
 		// log the error
@@ -353,7 +353,16 @@ func (a *actorSystem) RemoteLookup(ctx context.Context, request *pb.RemoteLookup
 		return nil, ErrRemoteActorNotFound(actorPath.String())
 	}
 
-	return &pb.RemoteLookupResponse{}, nil
+	// let us construct the address
+	addr := &pb.Address{
+		ActorSystem: pid.ActorPath().Address().System(),
+		Host:        pid.ActorPath().Address().Host(),
+		Port:        int32(pid.ActorPath().Address().Port()),
+		Name:        pid.ActorPath().Name(),
+		Id:          pid.ActorPath().ID().String(),
+	}
+
+	return &pb.RemoteLookupResponse{Address: addr}, nil
 }
 
 // RemoteSendSync handles a message to an actor remotely with a reply expected from the receiving actor
