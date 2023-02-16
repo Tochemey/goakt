@@ -8,6 +8,7 @@ import (
 )
 
 var (
+	ErrInvalidActorSystemName       = errors.New("invalid ActorSystem name, must contain only word characters (i.e. [a-zA-Z0-9] plus non-leading '-' or '_')")
 	ErrNotReady                     = errors.New("actor is not ready")
 	ErrUnhandled                    = errors.New("unhandled message")
 	ErrMissingConfig                = errors.New("config is missing")
