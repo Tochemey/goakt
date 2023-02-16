@@ -34,16 +34,16 @@ func main() {
 	_ = actorSystem.Start(ctx)
 
 	// create an actor
-	pingActor := actorSystem.StartActor(ctx, "Pinger", "pinger-1", NewPingActor())
-	pongActor := actorSystem.StartActor(ctx, "Ponger", "ponger-1", NewPongActor())
+	pingActor := actorSystem.StartActor(ctx, "Ping", NewPingActor())
+	pongActor := actorSystem.StartActor(ctx, "Pong", NewPongActor())
 
 	// start the conversation
 	_ = pingActor.SendAsync(ctx, pongActor, new(samplepb.Ping))
 
 	// shutdown both actors after 3 seconds of conversation
 	timer := time.AfterFunc(3*time.Second, func() {
-		log.DefaultLogger.Infof("PingActor=%s has processed %d messages", pingActor.Address(), pingActor.ReceivedCount(ctx))
-		log.DefaultLogger.Infof("PongActor=%s has processed %d messages", pongActor.Address(), pongActor.ReceivedCount(ctx))
+		log.DefaultLogger.Infof("PingActor=%s has processed %d messages", pingActor.ActorPath().String(), pingActor.ReceivedCount(ctx))
+		log.DefaultLogger.Infof("PongActor=%s has processed %d messages", pongActor.ActorPath().String(), pongActor.ReceivedCount(ctx))
 		_ = pingActor.Shutdown(ctx)
 		_ = pongActor.Shutdown(ctx)
 	})
@@ -86,7 +86,7 @@ func (p *PingActor) PreStart(ctx context.Context) error {
 func (p *PingActor) Receive(ctx goakt.ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *samplepb.Pong:
-		p.logger.Infof(fmt.Sprintf("received Pong from %s", ctx.Sender().Address()))
+		p.logger.Infof(fmt.Sprintf("received Pong from %s", ctx.Sender().ActorPath().String()))
 		// reply the sender in case there is a sender
 		if ctx.Sender() != goakt.NoSender {
 			// let us reply to the sender
@@ -131,7 +131,7 @@ func (p *PongActor) PreStart(ctx context.Context) error {
 func (p *PongActor) Receive(ctx goakt.ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *samplepb.Ping:
-		p.logger.Infof(fmt.Sprintf("received Ping from %s", ctx.Sender().Address()))
+		p.logger.Infof(fmt.Sprintf("received Ping from %s", ctx.Sender().ActorPath().String()))
 		// reply the sender in case there is a sender
 		if ctx.Sender() != nil && ctx.Sender() != goakt.NoSender {
 			_ = ctx.Self().SendAsync(ctx.Context(), ctx.Sender(), new(samplepb.Pong))

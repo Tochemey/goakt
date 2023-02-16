@@ -6,15 +6,52 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestGetAddress(t *testing.T) {
-	actorSys := &actorSystem{
-		nodeAddr: "hostA:9000",
-		name:     "TestSystem",
-	}
-	kind := "User"
-	id := "john"
+func TestActorAddress(t *testing.T) {
+	t.Run("testCase1", func(t *testing.T) {
+		address := "goakt://sys@host:1234/abc/def/"
+		expected := "goakt://sys@host:1234"
+		addr := new(Address)
+		actual := addr.Parse(address)
+		assert.Equal(t, expected, actual.String())
+	})
 
-	addr := GetAddress(actorSys, kind, id)
-	expected := "goakt://TestSystem@hostA:9000/user/john"
-	assert.Equal(t, expected, string(addr))
+	t.Run("testCase2", func(t *testing.T) {
+		address := "goakt://sys/abc/def"
+		addr := new(Address)
+		assert.Panics(t, func() {
+			addr.Parse(address)
+		})
+	})
+
+	t.Run("testCase3", func(t *testing.T) {
+		address := "goakt://host:1234/abc/def/"
+		expected := "goakt://host:1234"
+		addr := new(Address)
+		actual := addr.Parse(address)
+		assert.Equal(t, expected, actual.String())
+	})
+
+	t.Run("testCase4", func(t *testing.T) {
+		address := "goakt://sys@host:1234"
+		expected := "goakt://sys@host:1234"
+		addr := new(Address)
+		actual := addr.Parse(address)
+		assert.Equal(t, expected, actual.String())
+	})
+
+	t.Run("testCase5", func(t *testing.T) {
+		address := "goakt://sys@host:1234/"
+		expected := "goakt://sys@host:1234"
+		addr := new(Address)
+		actual := addr.Parse(address)
+		assert.Equal(t, expected, actual.String())
+	})
+
+	t.Run("testCase6", func(t *testing.T) {
+		address := "goakt://sys@host/abc/def/"
+		addr := new(Address)
+		assert.Panics(t, func() {
+			addr.Parse(address)
+		})
+	})
 }

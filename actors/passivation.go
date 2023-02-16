@@ -41,12 +41,12 @@ func (p *pid) passivationListener() {
 	// only passivate when actor is alive
 	if !p.IsOnline() {
 		// add some logging info
-		p.logger.Infof("Actor=%s is offline. No need to passivate", p.addr)
+		p.logger.Infof("Actor=%s is offline. No need to passivate", p.ActorPath().String())
 		return
 	}
 
 	// add some logging info
-	p.logger.Infof("Passivation mode has been triggered for actor=%s...", p.addr)
+	p.logger.Infof("Passivation mode has been triggered for actor=%s...", p.ActorPath().String())
 	// passivate the actor
 	p.passivate()
 }

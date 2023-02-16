@@ -50,8 +50,8 @@ message Address {
   string host = 2;
   // Specifies the remote port
   int32 port = 3;
-  // Specifies the actor kind(a.k.a actor type)
-  string kind = 4;
+  // Specifies the actor name
+  string name = 4;
   // Specifies the actor unique id on the remote host
   string id = 5;
 }

@@ -32,7 +32,7 @@ func main() {
 	_ = actorSystem.Start(ctx)
 
 	// create an actor
-	actor := actorSystem.StartActor(ctx, "Pinger", "123", NewPinger())
+	actor := actorSystem.StartActor(ctx, "Ping", NewPinger())
 
 	startTime := time.Now()
 
@@ -48,7 +48,7 @@ func main() {
 	<-interruptSignal
 
 	// log some stats
-	logger.Infof("Actor=%s has processed %d messages in %s", actor.Address(), actor.ReceivedCount(ctx), time.Since(startTime))
+	logger.Infof("Actor=%s has processed %d messages in %s", actor.ActorPath().String(), actor.ReceivedCount(ctx), time.Since(startTime))
 
 	// stop the actor system
 	_ = actorSystem.Stop(ctx)

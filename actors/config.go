@@ -3,6 +3,7 @@ package actors
 import (
 	"errors"
 	"net"
+	"regexp"
 	"strconv"
 	"time"
 
@@ -50,6 +51,10 @@ func NewConfig(name, nodeHostAndPort string, options ...Option) (*Config, error)
 	if name == "" {
 		return nil, ErrNameRequired
 	}
+	if match, _ := regexp.MatchString("^[a-zA-Z0-9][a-zA-Z0-9-_]*$", name); !match {
+		return nil, ErrInvalidActorSystemName
+	}
+
 	// check whether the node host and port is set and valid
 	if err := validateHostAndPort(nodeHostAndPort); err != nil {
 		return nil, err
