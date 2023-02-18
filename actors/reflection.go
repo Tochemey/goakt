@@ -20,15 +20,17 @@ type reflection struct {
 // enforce compilation error
 var _ Reflection = &reflection{}
 
-// New creates an instance of Reflection
-func New(loader TypesLoader) Reflection {
+// NewReflection creates an instance of Reflection
+func NewReflection(loader TypesLoader) Reflection {
 	return &reflection{typesLoader: loader}
 }
 
 // ActorOf creates a new instance of an Actor
 func (r *reflection) ActorOf(rtype reflect.Type) (actor Actor, err error) {
+	// grab the Actor interface type
+	iface := reflect.TypeOf((*Actor)(nil)).Elem()
 	// make sure the type implements Actor interface
-	isActor := rtype.Implements(reflect.TypeOf((*Actor)(nil)).Elem())
+	isActor := rtype.Implements(iface) || reflect.PtrTo(rtype).Implements(iface)
 	// reject the creation of the instance
 	if !isActor {
 		return nil, ErrInstanceNotAnActor

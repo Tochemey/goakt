@@ -1,10 +1,12 @@
 package actors
 
 import (
-	pb "github.com/tochemey/goakt/pb/goakt/v1"
 	"sync"
+
+	pb "github.com/tochemey/goakt/pb/goakt/v1"
 )
 
+// Unit type
 type Unit struct{}
 
 // NoSender means that there is no sender

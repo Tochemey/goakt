@@ -6,7 +6,8 @@ import (
 	"sync"
 )
 
-// TypesLoader represents reflection typesLoader for dynamic loading and creation
+// TypesLoader represents reflection typesLoader for dynamic loading and creation of
+// actors at run-time
 type TypesLoader interface {
 	// Register an object with its fully qualified name
 	Register(name string, v any)
@@ -43,11 +44,6 @@ func NewTypesLoader(parent TypesLoader) TypesLoader {
 
 // Register an object with its fully qualified path
 func (l *typesLoader) Register(name string, v any) {
-	// acquire the lock
-	l.mu.Lock()
-	// release the lock
-	defer l.mu.Unlock()
-
 	// define a variable to hold the object type
 	var vType reflect.Type
 	// pattern match on the object type
@@ -66,12 +62,16 @@ func (l *typesLoader) Register(name string, v any) {
 	}
 	// only register the type when it is not set registered
 	if _, exist := l.Type(v); !exist {
+		// acquire the lock
+		l.mu.Lock()
 		l.types[path] = vType
+		l.mu.Unlock()
 	}
 	if _, exist := l.TypeByName(name); !exist {
+		l.mu.Lock()
 		l.names[name] = vType
+		l.mu.Unlock()
 	}
-	return
 }
 
 // Type returns the type of object
@@ -140,7 +140,4 @@ func (l *typesLoader) SetParent(parent TypesLoader) {
 		l.parent = parent
 		return
 	}
-
-	// return when there is already a parent
-	return
 }
