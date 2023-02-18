@@ -21,9 +21,6 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 )
 
-// NoSender means that there is no sender
-var NoSender PID
-
 type watchMan struct {
 	Parent  PID        // the Parent of the actor watching
 	ErrChan chan error // the channel where to pass error message
