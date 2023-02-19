@@ -62,7 +62,7 @@ type PID interface {
 	RemoteSendSync(ctx context.Context, to *pb.Address, message proto.Message) (response proto.Message, err error)
 	// RemoteLookup look for an actor address on a remote node. If the actorSystem is nil then the lookup will be done
 	// using the same actor system as the PID actor system
-	RemoteLookup(ctx context.Context, host string, port int, name string, actorSystem *string) (addr *pb.Address, err error)
+	RemoteLookup(ctx context.Context, host string, port int, name string) (addr *pb.Address, err error)
 	// RestartCount returns the number of times the actor has restarted
 	RestartCount(ctx context.Context) uint64
 	// MailboxSize returns the mailbox size a given time
@@ -479,7 +479,7 @@ func (p *pid) SendAsync(ctx context.Context, to PID, message proto.Message) erro
 
 // RemoteLookup look for an actor address on a remote node. If the actorSystem is nil then the lookup will be done
 // using the same actor system as the PID actor system
-func (p *pid) RemoteLookup(ctx context.Context, host string, port int, name string, actorSystem *string) (addr *pb.Address, err error) {
+func (p *pid) RemoteLookup(ctx context.Context, host string, port int, name string) (addr *pb.Address, err error) {
 	// add a span context
 	ctx, span := telemetry.SpanContext(ctx, "RemoteLookup")
 	defer span.End()
@@ -488,18 +488,11 @@ func (p *pid) RemoteLookup(ctx context.Context, host string, port int, name stri
 	rpcConn, _ := grpc.GetClientConn(ctx, fmt.Sprintf("%s:%d", host, port))
 	remoteClient := pb.NewRemotingServiceClient(rpcConn)
 
-	// set the actor system to the PID
-	sys := p.ActorSystem().Name()
-	if actorSystem != nil {
-		sys = *actorSystem
-	}
-
 	// prepare the request to send
 	request := &pb.RemoteLookupRequest{
-		ActorSystem: sys,
-		Host:        host,
-		Port:        int32(port),
-		Name:        name,
+		Host: host,
+		Port: int32(port),
+		Name: name,
 	}
 	// send the message and handle the error in case there is any
 	response, err := remoteClient.RemoteLookup(ctx, request)
@@ -558,11 +551,10 @@ func (p *pid) RemoteSendSync(ctx context.Context, to *pb.Address, message proto.
 
 	// construct the from address
 	from := &pb.Address{
-		ActorSystem: p.ActorPath().Address().System(),
-		Host:        p.ActorPath().Address().Host(),
-		Port:        int32(p.ActorPath().Address().Port()),
-		Name:        p.ActorPath().Name(),
-		Id:          p.ActorPath().ID().String(),
+		Host: p.ActorPath().Address().Host(),
+		Port: int32(p.ActorPath().Address().Port()),
+		Name: p.ActorPath().Name(),
+		Id:   p.ActorPath().ID().String(),
 	}
 
 	// create an instance of remote client service

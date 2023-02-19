@@ -169,7 +169,7 @@ func RemoteSendSync(ctx context.Context, to *pb.Address, message proto.Message) 
 }
 
 // RemoteLookup look for an actor address on a remote node.
-func RemoteLookup(ctx context.Context, host string, port int, name string, actorSystem string) (addr *pb.Address, err error) {
+func RemoteLookup(ctx context.Context, host string, port int, name string) (addr *pb.Address, err error) {
 	// add a span context
 	ctx, span := telemetry.SpanContext(ctx, "RemoteLookup")
 	defer span.End()
@@ -180,10 +180,9 @@ func RemoteLookup(ctx context.Context, host string, port int, name string, actor
 
 	// prepare the request to send
 	request := &pb.RemoteLookupRequest{
-		ActorSystem: actorSystem,
-		Host:        host,
-		Port:        int32(port),
-		Name:        name,
+		Host: host,
+		Port: int32(port),
+		Name: name,
 	}
 	// send the message and handle the error in case there is any
 	response, err := remoteClient.RemoteLookup(ctx, request)

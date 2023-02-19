@@ -44,28 +44,24 @@ message RemoteSendAsyncResponse {}
 
 // Address represents an actor address
 message Address {
-  // Specifies the actor system.
-  string actor_system = 1;
   // Specifies the remote host address
-  string host = 2;
+  string host = 1;
   // Specifies the remote port
-  int32 port = 3;
+  int32 port = 2;
   // Specifies the actor name
-  string name = 4;
+  string name = 3;
   // Specifies the actor unique id on the remote host
-  string id = 5;
+  string id = 4;
 }
 
 // RemoteLookupRequest checks whether a given actor exists on a remote host
 message RemoteLookupRequest {
-  // Specifies the actor system.
-  string actor_system = 1;
   // Specifies the remote host address
-  string host = 2;
+  string host = 1;
   // Specifies the remote port
-  int32 port = 3;
+  int32 port = 2;
   // Specifies the actor name
-  string name = 4;
+  string name = 3;
 }
 
 message RemoteLookupResponse {
