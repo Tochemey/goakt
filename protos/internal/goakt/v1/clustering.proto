@@ -2,12 +2,6 @@ syntax = "proto3";
 
 package goakt.v1;
 
-// GossipService helps replicate each node state across the cluster
-service GossipService {
-  rpc Put(PutRequest) returns (PutResponse);
-  rpc Get(GetRequest) returns (GetResponse);
-}
-
 message ActorMeta {
   // Specifies the kind. This is basically the type of actor
   string actor_kind = 1;
@@ -24,32 +18,6 @@ message ActorMeta {
 message NodeState {
   // Specifies the map between the node id and the various actor meta on that node
   map<string, ActorMeta> states = 1;
-}
-
-message PutRequest {
-  // Specifies the node key
-  string node_id = 1;
-  // Specifies the actor meta
-  ActorMeta actor_meta = 2;
-}
-
-message PutResponse {
-  // Specifies the node key
-  string node_id = 1;
-  // Specifies the actor meta
-  ActorMeta actor_meta = 2;
-}
-
-message GetRequest {
-  // Specifies the node key
-  string node_id = 1;
-}
-
-message GetResponse {
-  // Specifies the node key
-  string node_id = 1;
-  // Specifies the actor meta
-  ActorMeta actor_meta = 2;
 }
 
 message Peer {
