@@ -321,16 +321,6 @@ func (a *actorSystem) RemoteLookup(ctx context.Context, request *pb.RemoteLookup
 	// first let us make a copy of the incoming request
 	reqCopy := proto.Clone(request).(*pb.RemoteLookupRequest)
 
-	// check whether the actor system is set and validate it
-	// if the actor system is not set we just use the current actor system name to perform the lookup
-	sys := reqCopy.GetActorSystem()
-	if sys != a.name {
-		// log the error
-		logger.Error(ErrRemoteSendInvalidActorSystem)
-		// here message is sent to the wrong actor system
-		return nil, ErrRemoteSendInvalidActorSystem
-	}
-
 	// let us validate the host and port
 	hostAndPort := fmt.Sprintf("%s:%d", reqCopy.GetHost(), reqCopy.GetPort())
 	if hostAndPort != a.nodeAddr {
@@ -342,7 +332,7 @@ func (a *actorSystem) RemoteLookup(ctx context.Context, request *pb.RemoteLookup
 
 	// construct the actor address
 	name := reqCopy.GetName()
-	actorPath := NewPath(name, NewAddress(protocol, sys, reqCopy.GetHost(), int(reqCopy.GetPort())))
+	actorPath := NewPath(name, NewAddress(protocol, a.Name(), reqCopy.GetHost(), int(reqCopy.GetPort())))
 	// start or get the PID of the actor
 	// check whether the given actor already exist in the system or not
 	pid, exist := a.actors.Get(actorPath.String())
@@ -355,11 +345,10 @@ func (a *actorSystem) RemoteLookup(ctx context.Context, request *pb.RemoteLookup
 
 	// let us construct the address
 	addr := &pb.Address{
-		ActorSystem: pid.ActorPath().Address().System(),
-		Host:        pid.ActorPath().Address().Host(),
-		Port:        int32(pid.ActorPath().Address().Port()),
-		Name:        pid.ActorPath().Name(),
-		Id:          pid.ActorPath().ID().String(),
+		Host: pid.ActorPath().Address().Host(),
+		Port: int32(pid.ActorPath().Address().Port()),
+		Name: pid.ActorPath().Name(),
+		Id:   pid.ActorPath().ID().String(),
 	}
 
 	return &pb.RemoteLookupResponse{Address: addr}, nil
@@ -375,16 +364,6 @@ func (a *actorSystem) RemoteSendSync(ctx context.Context, request *pb.RemoteSend
 	logger := a.logger.WithContext(ctx)
 	// first let us make a copy of the incoming request
 	reqCopy := proto.Clone(request).(*pb.RemoteSendSyncRequest)
-
-	// check whether the actor system is set and validate it
-	// if the actor system is not set we just use the current actor system name to perform the lookup
-	sys := reqCopy.GetReceiver().GetActorSystem()
-	if sys != a.name {
-		// log the error
-		logger.Error(ErrRemoteSendInvalidActorSystem)
-		// here message is sent to the wrong actor system
-		return nil, ErrRemoteSendInvalidActorSystem
-	}
 
 	// let us validate the host and port
 	hostAndPort := fmt.Sprintf("%s:%d", reqCopy.GetReceiver().GetHost(), reqCopy.GetReceiver().GetPort())
@@ -437,16 +416,6 @@ func (a *actorSystem) RemoteSendAsync(ctx context.Context, request *pb.RemoteSen
 	// first let us make a copy of the incoming request
 	reqCopy := proto.Clone(request).(*pb.RemoteSendAsyncRequest)
 
-	// check whether the actor system is set and validate it
-	// if the actor system is not set we just use the current actor system name to perform the lookup
-	sys := reqCopy.GetAddress().GetActorSystem()
-	if sys != a.name {
-		// log the error
-		logger.Error(ErrRemoteSendInvalidActorSystem)
-		// here message is sent to the wrong actor system
-		return nil, ErrRemoteSendInvalidActorSystem
-	}
-
 	// let us validate the host and port
 	hostAndPort := fmt.Sprintf("%s:%d", reqCopy.GetAddress().GetHost(), reqCopy.GetAddress().GetPort())
 	if hostAndPort != a.nodeAddr {
@@ -461,7 +430,7 @@ func (a *actorSystem) RemoteSendAsync(ctx context.Context, request *pb.RemoteSen
 		reqCopy.GetAddress().GetName(),
 		NewAddress(
 			protocol,
-			reqCopy.GetAddress().GetActorSystem(),
+			a.Name(),
 			reqCopy.GetAddress().GetHost(),
 			int(reqCopy.GetAddress().GetPort())))
 	// start or get the PID of the actor

@@ -16,7 +16,7 @@ var (
 	ErrUndefinedActor               = errors.New("actor is not defined")
 	ErrRequestTimeout               = errors.New("request timed out")
 	ErrEmptyBehavior                = errors.New("no behavior defined")
-	ErrRemoteSendInvalidActorSystem = status.Error(codes.FailedPrecondition, "invalid actor system")
+	ErrRemoteSendInvalidActorSystem = status.Error(codes.FailedPrecondition, "invalid actor system") // nolint
 	ErrRemoteSendInvalidNode        = status.Error(codes.FailedPrecondition, "invalid actor system node")
 	ErrRemoteActorNotFound          = func(addr string) error { return status.Errorf(codes.NotFound, "remote actor=%s not found", addr) }
 	ErrRemoteSendFailure            = func(err error) error { return status.Error(codes.Internal, err.Error()) }
