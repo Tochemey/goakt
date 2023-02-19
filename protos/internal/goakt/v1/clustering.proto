@@ -2,27 +2,96 @@ syntax = "proto3";
 
 package goakt.v1;
 
+import "goakt/v1/address.proto";
+
+// ClusterService specifies the Go-Akt cluster service
+service ClusterService {
+  // AddActorMeta adds an actor meta to the cluster
+  rpc AddActorMeta(AddActorMetaRequest) returns (AddActorMetaResponse);
+  // GetActorMeta retrieves an actor meta from the cluster
+  rpc GetActorMeta(GetActorMetaRequest) returns (GetActorMetaResponse);
+}
+
+message AddActorMetaRequest {
+  // Specifies the group id
+  uint64 group_id = 1;
+  // Specifies the actor meta
+  ActorMeta actor_meta = 2;
+}
+
+message AddActorMetaResponse {}
+
+message GetActorMetaRequest {
+  // Specifies the group id
+  uint64 group_id = 1;
+  // Specifies the actor name
+  string actor_name = 2;
+}
+
+message GetActorMetaResponse {
+  // Specifies the group id
+  uint64 group_id = 1;
+  // Specifies the actor meta
+  ActorMeta actor_meta = 2;
+}
+
 message ActorMeta {
-  // Specifies the kind. This is basically the type of actor
-  string actor_kind = 1;
-  // Specifies the actor id
-  string actor_id = 2;
-  // Specifies the actor interface type
-  bytes actor_type = 3;
+  // Specifies the actor name.
+  // The actor name can be either the actor FQN or an alias
+  string actor_name = 1;
+  // Specifies the actor address
+  Address actor_address = 2;
+  // Specifies the actor payload. The payload is used
+  // to recreate this actor in case the node hosting the actor is dead and we want to recreate the given actor
+  // on another node of the cluster
+  bytes actor_payload = 3;
 }
 
-// NodeState holds the node internal state
-// Each Node hosting a single actor system has a state that depicts the actual state of the Actor system.
-// Having that state helps replicate it across the cluster. In case a node goes down we can easily replay that state on another
-// node to get the system going
-message NodeState {
-  // Specifies the map between the node id and the various actor meta on that node
-  map<string, ActorMeta> states = 1;
+// FSMState specifies the raft Finite State Machine entries
+message FSMState {
+  // Specifies raft FSM entries
+  map<string, ActorMeta> actor_metas = 1;
 }
 
+// Peer specifies the node peer settings
 message Peer {
   // Specifies the peer unique id
   string id = 1;
   // Specifies the peer host and port
   string host_and_port = 2;
+}
+
+// ReplicateCommand is used to replicate cluster
+// state
+message Replicate {
+  // Specifies the replicate command
+  // Either we create a raft group or we log an FSM entry
+  oneof command {
+    // Specifies the create raft group command
+    CreateRaftGroup create_raft_group = 1;
+    // Specifies the log FSM entry command
+    LogActorMeta log_fsm_entry = 2;
+  }
+}
+
+// LogFSMEntry specifies the cluster command to log an FSM entry
+message LogActorMeta {
+  // Specifies the FSM entry
+  ActorMeta entry = 1;
+}
+
+message CreateRaftGroup {
+  // Specifies the raft group
+  RaftGroup group = 1;
+}
+
+// RaftGroup represents a raft group
+message RaftGroup {
+  // Specifies the group unique id
+  uint64 group_id = 1;
+  // Specifies the group nodes existing ids
+  repeated string node_ids = 2;
+  // Specifies the multi-raft group address to join
+  // while creating the given group
+  string join_addr = 3;
 }
