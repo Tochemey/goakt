@@ -17,4 +17,15 @@ const (
 	// DebugLevel indicates Debug log level
 	DebugLevel
 	Disabled
+	numLogLevels = 6
 )
+
+// levels is internally used to provide the default logger
+var levels = [numLogLevels]string{
+	InfoLevel:    "INFO",
+	WarningLevel: "WARNING",
+	ErrorLevel:   "ERROR",
+	FatalLevel:   "FATAL",
+	PanicLevel:   "PANIC",
+	DebugLevel:   "DEBUG",
+}

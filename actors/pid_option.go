@@ -40,27 +40,10 @@ func withCustomLogger(logger log.Logger) pidOption {
 	}
 }
 
-// withAddress sets the address of the pid
-func withAddress(addr Address) pidOption {
-	return func(pid *pid) {
-		pid.addr = addr
-	}
-}
-
 // withActorSystem set the actor system of the pid
 func withActorSystem(sys ActorSystem) pidOption {
 	return func(pid *pid) {
 		pid.system = sys
-	}
-}
-
-// withLocalID set the kind of actor represented by the pid
-func withLocalID(kind, id string) pidOption {
-	return func(pid *pid) {
-		pid.id = &LocalID{
-			kind: kind,
-			id:   id,
-		}
 	}
 }
 

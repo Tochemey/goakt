@@ -10,11 +10,11 @@ import (
 	"github.com/google/uuid"
 	"github.com/pkg/errors"
 	goakt "github.com/tochemey/goakt/actors"
-	"github.com/tochemey/goakt/eventsourcing"
 	samplepb "github.com/tochemey/goakt/examples/protos/pb/v1"
 	"github.com/tochemey/goakt/log"
+	"github.com/tochemey/goakt/modules/eventsourcing"
+	"github.com/tochemey/goakt/modules/persistence/plugins/memory"
 	pb "github.com/tochemey/goakt/pb/goakt/v1"
-	"github.com/tochemey/goakt/persistence/plugins/memory"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -22,7 +22,7 @@ func main() {
 	ctx := context.Background()
 
 	// use the goakt default logger. real-life implement the logger interface`
-	logger := log.New(log.DebugLevel, os.Stderr)
+	logger := log.DefaultLogger
 
 	// create the actor system configuration. kindly in real-life application handle the error
 	config, _ := goakt.NewSetting("SampleActorSystem", "127.0.0.1:0",
@@ -48,7 +48,7 @@ func main() {
 	// create the persistence actor using the behavior previously created
 	persistentActor := eventsourcing.NewEventSourcedActor[*samplepb.Account](behavior, eventStore)
 	// spawn the actor
-	pid := actorSystem.StartActor(ctx, behavior.Kind(), behavior.ID(), persistentActor)
+	pid := actorSystem.StartActor(ctx, behavior.Kind(), persistentActor)
 
 	// send some commands to the pid
 	var command proto.Message

@@ -9,9 +9,9 @@ import (
 	"github.com/tochemey/goakt/log"
 )
 
-func TestNewActorSystem(t *testing.T) {
+func TestActorSystem(t *testing.T) {
 	t.Run("With Defaults", func(t *testing.T) {
-		cfg, err := NewSetting("testSys", "localhost:0", WithLogger(log.DiscardLogger))
+		cfg, err := NewConfig("testSys", "localhost:0", WithLogger(log.DiscardLogger))
 		require.NoError(t, err)
 		assert.NotNil(t, cfg)
 
@@ -33,15 +33,15 @@ func TestNewActorSystem(t *testing.T) {
 	})
 	t.Run("With StartActor an actor when not started", func(t *testing.T) {
 		ctx := context.TODO()
-		cfg, _ := NewSetting("testSys", "localhost:0", WithLogger(log.DiscardLogger))
+		cfg, _ := NewConfig("testSys", "localhost:0", WithLogger(log.DiscardLogger))
 		sys, _ := NewActorSystem(cfg)
 		actor := NewTestActor()
-		actorRef := sys.StartActor(ctx, "Test", "test-1", actor)
+		actorRef := sys.StartActor(ctx, "Test", actor)
 		assert.Nil(t, actorRef)
 	})
 	t.Run("With StartActor an actor when started", func(t *testing.T) {
 		ctx := context.TODO()
-		cfg, _ := NewSetting("testSys", "localhost:0", WithLogger(log.DiscardLogger))
+		cfg, _ := NewConfig("testSys", "localhost:0", WithLogger(log.DiscardLogger))
 		sys, _ := NewActorSystem(cfg)
 
 		// start the actor system
@@ -49,14 +49,14 @@ func TestNewActorSystem(t *testing.T) {
 		assert.NoError(t, err)
 
 		actor := NewTestActor()
-		actorRef := sys.StartActor(ctx, "Test", "test-1", actor)
+		actorRef := sys.StartActor(ctx, "Test", actor)
 		assert.NotNil(t, actorRef)
 
 		assert.NoError(t, sys.Stop(ctx))
 	})
 	t.Run("With StartActor an actor already exist", func(t *testing.T) {
 		ctx := context.TODO()
-		cfg, _ := NewSetting("testSys", "localhost:0", WithLogger(log.DiscardLogger))
+		cfg, _ := NewConfig("test", "localhost:0", WithLogger(log.DiscardLogger))
 		sys, _ := NewActorSystem(cfg)
 
 		// start the actor system
@@ -64,10 +64,10 @@ func TestNewActorSystem(t *testing.T) {
 		assert.NoError(t, err)
 
 		actor := NewTestActor()
-		ref1 := sys.StartActor(ctx, "Test", "test-1", actor)
+		ref1 := sys.StartActor(ctx, "Test", actor)
 		assert.NotNil(t, ref1)
 
-		ref2 := sys.StartActor(ctx, "Test", "test-1", actor)
+		ref2 := sys.StartActor(ctx, "Test", actor)
 		assert.NotNil(t, ref2)
 
 		// point to the same memory address

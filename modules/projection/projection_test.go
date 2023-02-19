@@ -6,13 +6,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tochemey/goakt/modules/persistence"
+	memory2 "github.com/tochemey/goakt/modules/persistence/plugins/memory"
+
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tochemey/goakt/log"
 	pb "github.com/tochemey/goakt/pb/goakt/v1"
-	"github.com/tochemey/goakt/persistence"
-	"github.com/tochemey/goakt/persistence/plugins/memory"
 	testpb "github.com/tochemey/goakt/test/data/pb/v1"
 	"go.uber.org/goleak"
 	"google.golang.org/protobuf/types/known/anypb"
@@ -28,11 +29,11 @@ func TestProjection(t *testing.T) {
 		logger := log.DefaultLogger
 
 		// set up the event store
-		journalStore := memory.NewJournalStore()
+		journalStore := memory2.NewJournalStore()
 		assert.NotNil(t, journalStore)
 
 		// set up the offset store
-		offsetStore := memory.NewOffsetStore()
+		offsetStore := memory2.NewOffsetStore()
 		assert.NotNil(t, offsetStore)
 
 		// set up the projection
@@ -99,11 +100,11 @@ func TestProjection(t *testing.T) {
 		logger := log.DefaultLogger
 
 		// set up the event store
-		journalStore := memory.NewJournalStore()
+		journalStore := memory2.NewJournalStore()
 		assert.NotNil(t, journalStore)
 
 		// set up the offset store
-		offsetStore := memory.NewOffsetStore()
+		offsetStore := memory2.NewOffsetStore()
 		assert.NotNil(t, offsetStore)
 
 		// set up the projection
@@ -166,11 +167,11 @@ func TestProjection(t *testing.T) {
 		logger := log.DefaultLogger
 
 		// set up the event store
-		journalStore := memory.NewJournalStore()
+		journalStore := memory2.NewJournalStore()
 		assert.NotNil(t, journalStore)
 
 		// set up the offset store
-		offsetStore := memory.NewOffsetStore()
+		offsetStore := memory2.NewOffsetStore()
 		assert.NotNil(t, offsetStore)
 
 		// set up the projection
@@ -238,11 +239,11 @@ func TestProjection(t *testing.T) {
 		logger := log.DefaultLogger
 
 		// set up the event store
-		journalStore := memory.NewJournalStore()
+		journalStore := memory2.NewJournalStore()
 		assert.NotNil(t, journalStore)
 
 		// set up the offset store
-		offsetStore := memory.NewOffsetStore()
+		offsetStore := memory2.NewOffsetStore()
 		assert.NotNil(t, offsetStore)
 
 		// set up the projection
@@ -316,11 +317,11 @@ func TestProjection(t *testing.T) {
 		logger := log.DefaultLogger
 
 		// set up the event store
-		journalStore := memory.NewJournalStore()
+		journalStore := memory2.NewJournalStore()
 		assert.NotNil(t, journalStore)
 
 		// set up the offset store
-		offsetStore := memory.NewOffsetStore()
+		offsetStore := memory2.NewOffsetStore()
 		assert.NotNil(t, offsetStore)
 
 		// set up the projection

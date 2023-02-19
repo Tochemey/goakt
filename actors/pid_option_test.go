@@ -36,19 +36,6 @@ func TestPIDOptions(t *testing.T) {
 			expectedConfig: &pid{logger: log.DefaultLogger},
 		},
 		{
-			name:           "WithAddress",
-			option:         withAddress(Address("some-address")),
-			expectedConfig: &pid{addr: Address("some-address")},
-		},
-		{
-			name:   "WithLocalID",
-			option: withLocalID("some-kind", "some-id"),
-			expectedConfig: &pid{id: &LocalID{
-				kind: "some-kind",
-				id:   "some-id",
-			}},
-		},
-		{
 			name:           "WithSupervisorStrategy",
 			option:         withSupervisorStrategy(pb.StrategyDirective_RESTART_DIRECTIVE),
 			expectedConfig: &pid{supervisorStrategy: pb.StrategyDirective_RESTART_DIRECTIVE},

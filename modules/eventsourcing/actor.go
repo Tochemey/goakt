@@ -6,10 +6,11 @@ import (
 	"sync"
 	"time"
 
+	persistence2 "github.com/tochemey/goakt/modules/persistence"
+
 	"github.com/pkg/errors"
 	"github.com/tochemey/goakt/actors"
 	pb "github.com/tochemey/goakt/pb/goakt/v1"
-	"github.com/tochemey/goakt/persistence"
 	"github.com/tochemey/goakt/telemetry"
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
@@ -23,7 +24,7 @@ type State proto.Message
 
 // EventSourcedBehavior defines an event sourced behavior when modeling a CQRS Aggregate.
 type EventSourcedBehavior[T State] interface {
-	persistence.PersistentID
+	persistence2.PersistentID
 	// InitialState returns the event sourced actor initial state
 	InitialState() T
 	// HandleCommand helps handle commands received by the event sourced actor. The command handlers define how to handle each incoming command,
@@ -44,7 +45,7 @@ type EventSourcedBehavior[T State] interface {
 type eventSourcedActor[T State] struct {
 	EventSourcedBehavior[T]
 
-	journalStore    persistence.JournalStore
+	journalStore    persistence2.JournalStore
 	currentState    T
 	eventsCounter   *atomic.Uint64
 	lastCommandTime time.Time
@@ -56,7 +57,7 @@ type eventSourcedActor[T State] struct {
 var _ actors.Actor = &eventSourcedActor[State]{}
 
 // NewEventSourcedActor returns an instance of event sourced actor
-func NewEventSourcedActor[T State](behavior EventSourcedBehavior[T], eventsStore persistence.JournalStore) actors.Actor {
+func NewEventSourcedActor[T State](behavior EventSourcedBehavior[T], eventsStore persistence2.JournalStore) actors.Actor {
 	return &eventSourcedActor[T]{
 		EventSourcedBehavior: behavior,
 		journalStore:         eventsStore,

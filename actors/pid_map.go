@@ -1,18 +1,29 @@
 package actors
 
-import "sync"
+import (
+	"sync"
 
+	pb "github.com/tochemey/goakt/pb/goakt/v1"
+)
+
+// Unit type
 type Unit struct{}
+
+// NoSender means that there is no sender
+var NoSender PID
+
+// RemoteNoSender means that there is no sender
+var RemoteNoSender = new(pb.Address)
 
 type pidMap struct {
 	mu   sync.Mutex
-	pids map[Address]PID
+	pids map[string]PID
 }
 
 func newPIDMap(cap int) *pidMap {
 	return &pidMap{
 		mu:   sync.Mutex{},
-		pids: make(map[Address]PID, cap),
+		pids: make(map[string]PID, cap),
 	}
 }
 
@@ -22,25 +33,25 @@ func (m *pidMap) Len() int {
 }
 
 // Get retrieves a pid by its address
-func (m *pidMap) Get(addr Address) (pid PID, ok bool) {
+func (m *pidMap) Get(path string) (pid PID, ok bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	pid, ok = m.pids[addr]
+	pid, ok = m.pids[path]
 	return
 }
 
 // Set sets a pid in the map
 func (m *pidMap) Set(child PID) {
 	m.mu.Lock()
-	m.pids[child.Address()] = child
+	m.pids[child.ActorPath().String()] = child
 	m.mu.Unlock()
 }
 
 // Delete removes a pid from the map
-func (m *pidMap) Delete(addr Address) {
+func (m *pidMap) Delete(addr *Path) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	delete(m.pids, addr)
+	delete(m.pids, addr.String())
 }
 
 // List returns all actors as a slice

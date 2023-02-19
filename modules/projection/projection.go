@@ -6,11 +6,12 @@ import (
 	"math"
 	"time"
 
+	persistence2 "github.com/tochemey/goakt/modules/persistence"
+
 	"github.com/flowchartsman/retry"
 	"github.com/pkg/errors"
 	"github.com/tochemey/goakt/log"
 	pb "github.com/tochemey/goakt/pb/goakt/v1"
-	"github.com/tochemey/goakt/persistence"
 	"github.com/tochemey/goakt/telemetry"
 	"go.uber.org/atomic"
 	"golang.org/x/sync/errgroup"
@@ -26,9 +27,9 @@ type Projection struct {
 	// specifies the projection handler
 	handler Handler
 	// specifies the offset store
-	offsetsStore persistence.OffsetStore
+	offsetsStore persistence2.OffsetStore
 	// specifies the events store
-	journalStore persistence.JournalStore
+	journalStore persistence2.JournalStore
 	// specifies the projection unique name
 	// TODO: check whether we need it
 	projectionName string
@@ -222,7 +223,7 @@ func (p *Projection) doProcess(ctx context.Context, persistenceID string) error 
 	}
 
 	// get the latest offset persisted for the persistence id
-	offset, err := p.offsetsStore.GetCurrentOffset(ctx, persistence.NewProjectionID(p.projectionName, persistenceID))
+	offset, err := p.offsetsStore.GetCurrentOffset(ctx, persistence2.NewProjectionID(p.projectionName, persistenceID))
 	if err != nil {
 		return err
 	}

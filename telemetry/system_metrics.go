@@ -5,7 +5,6 @@ import (
 
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/metric/instrument"
-	"go.opentelemetry.io/otel/metric/instrument/asyncint64"
 	"go.opentelemetry.io/otel/metric/unit"
 )
 
@@ -13,7 +12,7 @@ import (
 // from the actor system
 type SystemMetrics struct {
 	// captures the number of actors in the actor system
-	ActorSystemActorsCount asyncint64.Counter
+	ActorSystemActorsCount instrument.Int64ObservableCounter
 }
 
 // NewSystemMetrics creates an instance of ActorMetrics
@@ -22,7 +21,7 @@ func NewSystemMetrics(meter metric.Meter) (*SystemMetrics, error) {
 	metrics := new(SystemMetrics)
 	var err error
 
-	if metrics.ActorSystemActorsCount, err = meter.AsyncInt64().Counter(
+	if metrics.ActorSystemActorsCount, err = meter.Int64ObservableCounter(
 		actorSystemActorsCounterName, instrument.WithDescription("The total number of actors in the Actor System"),
 		instrument.WithUnit(unit.Dimensionless)); err != nil {
 		return nil, fmt.Errorf("failed to create received count instrument, %v", err)
