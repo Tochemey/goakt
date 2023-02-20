@@ -348,12 +348,7 @@ func (a *actorSystem) RemoteLookup(ctx context.Context, request *pb.RemoteLookup
 	}
 
 	// let us construct the address
-	addr := &pb.Address{
-		Host: pid.ActorPath().Address().Host(),
-		Port: int32(pid.ActorPath().Address().Port()),
-		Name: pid.ActorPath().Name(),
-		Id:   pid.ActorPath().ID().String(),
-	}
+	addr := pid.ActorPath().RemoteAddress()
 
 	return &pb.RemoteLookupResponse{Address: addr}, nil
 }

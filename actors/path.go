@@ -3,6 +3,8 @@ package actors
 import (
 	"fmt"
 
+	pb "github.com/tochemey/goakt/pb/goakt/v1"
+
 	"github.com/google/uuid"
 )
 
@@ -59,4 +61,14 @@ func (a *Path) ID() uuid.UUID {
 // String returns the string representation of an actorPath
 func (a *Path) String() string {
 	return fmt.Sprintf("%s/%s", a.address.String(), a.name)
+}
+
+// RemoteAddress returns the remote from path
+func (a *Path) RemoteAddress() *pb.Address {
+	return &pb.Address{
+		Host: a.Address().Host(),
+		Port: int32(a.Address().Port()),
+		Name: a.Name(),
+		Id:   a.ID().String(),
+	}
 }
