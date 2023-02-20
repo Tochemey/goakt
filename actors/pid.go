@@ -58,7 +58,9 @@ type PID interface {
 	SendSync(ctx context.Context, to PID, message proto.Message) (response proto.Message, err error)
 	// RemoteSendAsync sends a message to an actor remotely without expecting any reply
 	RemoteSendAsync(ctx context.Context, to *pb.Address, message proto.Message) error
-	// RemoteSendSync sends a synchronous message to another actor remotely and expect a response.
+	// RemoteSendSync is used to send a message to an actor remotely and expect a response
+	// immediately. With this type of message the receiver cannot communicate back to Sender
+	// except reply the message with a response. This one-way communication.
 	RemoteSendSync(ctx context.Context, to *pb.Address, message proto.Message) (response proto.Message, err error)
 	// RemoteLookup look for an actor address on a remote node. If the actorSystem is nil then the lookup will be done
 	// using the same actor system as the PID actor system
@@ -525,10 +527,22 @@ func (p *pid) RemoteSendAsync(ctx context.Context, to *pb.Address, message proto
 	// create an instance of remote client service
 	rpcConn, _ := grpc.GetClientConn(ctx, fmt.Sprintf("%s:%d", to.GetHost(), to.GetPort()))
 	remoteClient := pb.NewRemotingServiceClient(rpcConn)
+
+	// construct the from address
+	sender := &pb.Address{
+		Host: p.ActorPath().Address().Host(),
+		Port: int32(p.ActorPath().Address().Port()),
+		Name: p.ActorPath().Name(),
+		Id:   p.ActorPath().ID().String(),
+	}
+
 	// prepare the rpcRequest to send
 	request := &pb.RemoteSendAsyncRequest{
-		Address: to,
-		Message: marshaled,
+		RemoteMessage: &pb.RemoteMessage{
+			Sender:   sender,
+			Receiver: to,
+			Message:  marshaled,
+		},
 	}
 	// send the message and handle the error in case there is any
 	if _, err := remoteClient.RemoteSendAsync(ctx, request); err != nil {
@@ -549,20 +563,11 @@ func (p *pid) RemoteSendSync(ctx context.Context, to *pb.Address, message proto.
 		return nil, err
 	}
 
-	// construct the from address
-	from := &pb.Address{
-		Host: p.ActorPath().Address().Host(),
-		Port: int32(p.ActorPath().Address().Port()),
-		Name: p.ActorPath().Name(),
-		Id:   p.ActorPath().ID().String(),
-	}
-
 	// create an instance of remote client service
 	rpcConn, _ := grpc.GetClientConn(ctx, fmt.Sprintf("%s:%d", to.GetHost(), to.GetPort()))
 	remoteClient := pb.NewRemotingServiceClient(rpcConn)
 	// prepare the rpcRequest to send
 	rpcRequest := &pb.RemoteSendSyncRequest{
-		Sender:   from,
 		Receiver: to,
 		Message:  marshaled,
 	}
