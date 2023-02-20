@@ -6,6 +6,8 @@ import "google/protobuf/any.proto";
 
 service RemotingService {
   // Sends a message to an actor remotely with a reply expected from the receiving actor
+  // With this type of message the receiver cannot communicate back to Sender
+  // except reply the message with a response. This one-way communication
   rpc RemoteSendSync(RemoteSendSyncRequest) returns (RemoteSendSyncResponse);
   // Sends a message to an actor remotely without expecting any reply
   rpc RemoteSendAsync(RemoteSendAsyncRequest) returns (RemoteSendAsyncResponse);
@@ -13,16 +15,15 @@ service RemotingService {
   rpc RemoteLookup(RemoteLookupRequest) returns (RemoteLookupResponse);
 }
 
-// RemoteSendAsync is used to send a message to an actor remotely
-// This type of message expects a reply to be sent back the sender
+// RemoteSendSync is used to send a message to an actor remotely and expect a response
+// immediately. With this type of message the receiver cannot communicate back to Sender
+// except reply the message with a response. This one-way communication
 message RemoteSendSyncRequest {
-  // Specifies the sender' address
-  Address sender = 1;
   // Specifies the receiver' address
-  Address receiver = 2;
+  Address receiver = 1;
   // Specifies the message to send to the actor
   // Any proto message is allowed to be sent
-  google.protobuf.Any message = 3;
+  google.protobuf.Any message = 2;
 }
 
 message RemoteSendSyncResponse {
@@ -33,11 +34,7 @@ message RemoteSendSyncResponse {
 
 // RemoteSendSync is used to send a message to an actor remotely without expecting any reply
 message RemoteSendAsyncRequest {
-  // Specifies the actor address
-  Address address = 1;
-  // Specifies the message to send to the actor
-  // Any proto message is allowed to be sent
-  google.protobuf.Any message = 2;
+  RemoteMessage remote_message = 1;
 }
 
 message RemoteSendAsyncResponse {}
@@ -67,4 +64,15 @@ message RemoteLookupRequest {
 message RemoteLookupResponse {
   // Specifies the actor address
   Address address = 1;
+}
+
+// RemoteMessage will be used by Actors to communicate remotely
+message RemoteMessage {
+  // Specifies the sender' address
+  Address sender = 1;
+  // Specifies the actor address
+  Address receiver = 2;
+  // Specifies the message to send to the actor
+  // Any proto message is allowed to be sent
+  google.protobuf.Any message = 3;
 }

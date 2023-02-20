@@ -124,8 +124,11 @@ func RemoteSendAsync(ctx context.Context, to *pb.Address, message proto.Message)
 	remoteClient := pb.NewRemotingServiceClient(rpcConn)
 	// prepare the rpcRequest to send
 	request := &pb.RemoteSendAsyncRequest{
-		Address: to,
-		Message: marshaled,
+		RemoteMessage: &pb.RemoteMessage{
+			Sender:   RemoteNoSender,
+			Receiver: to,
+			Message:  marshaled,
+		},
 	}
 	// send the message and handle the error in case there is any
 	if _, err := remoteClient.RemoteSendAsync(ctx, request); err != nil {
@@ -146,15 +149,11 @@ func RemoteSendSync(ctx context.Context, to *pb.Address, message proto.Message) 
 		return nil, err
 	}
 
-	// construct the from address
-	from := RemoteNoSender
-
 	// create an instance of remote client service
 	rpcConn, _ := grpc.GetClientConn(ctx, fmt.Sprintf("%s:%d", to.GetHost(), to.GetPort()))
 	remoteClient := pb.NewRemotingServiceClient(rpcConn)
 	// prepare the rpcRequest to send
 	rpcRequest := &pb.RemoteSendSyncRequest{
-		Sender:   from,
 		Receiver: to,
 		Message:  marshaled,
 	}

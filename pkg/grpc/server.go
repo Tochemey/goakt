@@ -161,6 +161,7 @@ type ServerBuilder struct {
 	grpcPort          int
 	grpcHost          string
 	traceURL          string
+	logger            log.Logger
 
 	shutdownHook ShutdownHook
 	isBuilt      bool
@@ -175,6 +176,12 @@ func NewServerBuilder() *ServerBuilder {
 		isBuilt:  false,
 		rwMutex:  &sync.RWMutex{},
 	}
+}
+
+// WithLogger sets the logger
+func (sb *ServerBuilder) WithLogger(logger log.Logger) *ServerBuilder {
+	sb.logger = logger
+	return sb
 }
 
 // WithShutdownHook sets the shutdown hook
@@ -325,6 +332,7 @@ func (sb *ServerBuilder) Build() (Server, error) {
 		addr:         addr,
 		server:       srv,
 		shutdownHook: sb.shutdownHook,
+		logger:       sb.logger,
 	}
 
 	// register services
@@ -371,5 +379,6 @@ func GetServerBuilder(cfg *Config) *ServerBuilder {
 		WithTraceURL(cfg.TraceURL).
 		WithServiceName(cfg.ServiceName).
 		WithPort(cfg.GrpcPort).
-		WithHost(cfg.GrpcHost)
+		WithHost(cfg.GrpcHost).
+		WithLogger(cfg.Logger)
 }

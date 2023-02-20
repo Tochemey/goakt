@@ -23,6 +23,8 @@ const _ = grpc.SupportPackageIsVersion7
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type RemotingServiceClient interface {
 	// Sends a message to an actor remotely with a reply expected from the receiving actor
+	// With this type of message the receiver cannot communicate back to Sender
+	// except reply the message with a response. This one-way communication
 	RemoteSendSync(ctx context.Context, in *RemoteSendSyncRequest, opts ...grpc.CallOption) (*RemoteSendSyncResponse, error)
 	// Sends a message to an actor remotely without expecting any reply
 	RemoteSendAsync(ctx context.Context, in *RemoteSendAsyncRequest, opts ...grpc.CallOption) (*RemoteSendAsyncResponse, error)
@@ -70,6 +72,8 @@ func (c *remotingServiceClient) RemoteLookup(ctx context.Context, in *RemoteLook
 // for forward compatibility
 type RemotingServiceServer interface {
 	// Sends a message to an actor remotely with a reply expected from the receiving actor
+	// With this type of message the receiver cannot communicate back to Sender
+	// except reply the message with a response. This one-way communication
 	RemoteSendSync(context.Context, *RemoteSendSyncRequest) (*RemoteSendSyncResponse, error)
 	// Sends a message to an actor remotely without expecting any reply
 	RemoteSendAsync(context.Context, *RemoteSendAsyncRequest) (*RemoteSendAsyncResponse, error)

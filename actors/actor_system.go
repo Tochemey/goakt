@@ -292,10 +292,14 @@ func (a *actorSystem) Stop(ctx context.Context) error {
 
 	// stop all the actors
 	for _, actor := range a.Actors() {
-		if err := actor.Shutdown(ctx); err != nil {
-			return err
-		}
+		// remove the actor the map and shut it down
 		a.actors.Remove(actor.ActorPath().String())
+		// only shutdown live actors
+		if actor.IsOnline() {
+			if err := actor.Shutdown(ctx); err != nil {
+				return err
+			}
+		}
 	}
 
 	// reset the actor system
@@ -379,7 +383,7 @@ func (a *actorSystem) RemoteSendSync(ctx context.Context, request *pb.RemoteSend
 	actorPath := NewPath(name, NewAddress(protocol, a.name, a.host, a.port))
 	// start or get the PID of the actor
 	// check whether the given actor already exist in the system or not
-	pid, exist := a.actors.Get(string(actorPath.String()))
+	pid, exist := a.actors.Get(actorPath.String())
 	// return an error when the remote address is not found
 	if !exist {
 		// log the error
@@ -416,8 +420,9 @@ func (a *actorSystem) RemoteSendAsync(ctx context.Context, request *pb.RemoteSen
 	// first let us make a copy of the incoming request
 	reqCopy := proto.Clone(request).(*pb.RemoteSendAsyncRequest)
 
+	receiver := reqCopy.GetRemoteMessage().GetReceiver()
 	// let us validate the host and port
-	hostAndPort := fmt.Sprintf("%s:%d", reqCopy.GetAddress().GetHost(), reqCopy.GetAddress().GetPort())
+	hostAndPort := fmt.Sprintf("%s:%d", receiver.GetHost(), receiver.GetPort())
 	if hostAndPort != a.nodeAddr {
 		// log the error
 		logger.Error(ErrRemoteSendInvalidNode)
@@ -427,12 +432,12 @@ func (a *actorSystem) RemoteSendAsync(ctx context.Context, request *pb.RemoteSen
 
 	// construct the actor address
 	actorPath := NewPath(
-		reqCopy.GetAddress().GetName(),
+		receiver.GetName(),
 		NewAddress(
 			protocol,
 			a.Name(),
-			reqCopy.GetAddress().GetHost(),
-			int(reqCopy.GetAddress().GetPort())))
+			receiver.GetHost(),
+			int(receiver.GetPort())))
 	// start or get the PID of the actor
 	// check whether the given actor already exist in the system or not
 	pid, exist := a.actors.Get(actorPath.String())
@@ -450,7 +455,7 @@ func (a *actorSystem) RemoteSendAsync(ctx context.Context, request *pb.RemoteSen
 	}
 
 	// send the message to actor
-	if err := a.handleSendAsync(ctx, pid, reqCopy.GetMessage()); err != nil {
+	if err := a.handleSendAsync(ctx, pid, reqCopy.GetRemoteMessage()); err != nil {
 		logger.Error(ErrRemoteSendFailure(err))
 		return nil, ErrRemoteSendFailure(err)
 	}
@@ -506,6 +511,7 @@ func (a *actorSystem) startRemoting(ctx context.Context) error {
 			TraceEnabled:     false, // TODO
 			TraceURL:         "",    // TODO
 			EnableReflection: false,
+			Logger:           a.logger,
 		}
 
 		// build the grpc service
