@@ -10,7 +10,7 @@ import (
 type Unit struct{}
 
 // NoSender means that there is no sender
-var NoSender PID = nil
+var NoSender PID
 
 // RemoteNoSender means that there is no sender
 var RemoteNoSender = new(pb.Address)
