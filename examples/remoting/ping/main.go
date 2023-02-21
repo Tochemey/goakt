@@ -52,13 +52,6 @@ func main() {
 		Id:   "",
 	}, new(samplepb.Ping))
 
-	//// shutdown both actors after 3 seconds of conversation
-	//timer := time.AfterFunc(3*time.Second, func() {
-	//	log.DefaultLogger.Infof("PingActor=%s has processed %d messages", pingActor.ActorPath().String(), pingActor.ReceivedCount(ctx))
-	//	_ = pingActor.Shutdown(ctx)
-	//})
-	//defer timer.Stop()
-
 	// capture ctrl+c
 	interruptSignal := make(chan os.Signal, 1)
 	signal.Notify(interruptSignal, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
