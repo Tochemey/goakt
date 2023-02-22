@@ -45,7 +45,7 @@ func main() {
 	pingActor := actorSystem.StartActor(ctx, "Ping", NewPingActor())
 
 	// start the conversation
-	_ = pingActor.RemoteSendAsync(ctx, &pb.Address{
+	_ = pingActor.RemoteTell(ctx, &pb.Address{
 		Host: host,
 		Port: 9001,
 		Name: "Pong",
@@ -93,7 +93,7 @@ func (p *PingActor) Receive(ctx goakt.ReceiveContext) {
 		// reply the sender in case there is a sender
 		if ctx.Sender() != goakt.NoSender {
 			// let us reply to the sender
-			_ = ctx.Self().SendAsync(ctx.Context(), ctx.Sender(), new(samplepb.Ping))
+			_ = ctx.Self().Tell(ctx.Context(), ctx.Sender(), new(samplepb.Ping))
 		}
 		p.count.Add(1)
 	case *pb.RemoteMessage:
@@ -101,7 +101,7 @@ func (p *PingActor) Receive(ctx goakt.ReceiveContext) {
 		pong := new(samplepb.Pong)
 		_ = msg.GetMessage().UnmarshalTo(pong)
 		if !proto.Equal(msg.GetSender(), goakt.RemoteNoSender) {
-			_ = ctx.Self().RemoteSendAsync(context.Background(), msg.GetSender(), new(samplepb.Ping))
+			_ = ctx.Self().RemoteTell(context.Background(), msg.GetSender(), new(samplepb.Ping))
 			p.count.Add(1)
 		}
 	default:

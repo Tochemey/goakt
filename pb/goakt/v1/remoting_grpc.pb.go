@@ -22,12 +22,14 @@ const _ = grpc.SupportPackageIsVersion7
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type RemotingServiceClient interface {
-	// Sends a message to an actor remotely with a reply expected from the receiving actor
-	// With this type of message the receiver cannot communicate back to Sender
+	// RemoteAsk is used to send a message to an actor remotely and expect a response
+	// immediately. With this type of message the receiver cannot communicate back to Sender
 	// except reply the message with a response. This one-way communication
-	RemoteSendSync(ctx context.Context, in *RemoteSendSyncRequest, opts ...grpc.CallOption) (*RemoteSendSyncResponse, error)
-	// Sends a message to an actor remotely without expecting any reply
-	RemoteSendAsync(ctx context.Context, in *RemoteSendAsyncRequest, opts ...grpc.CallOption) (*RemoteSendAsyncResponse, error)
+	RemoteAsk(ctx context.Context, in *RemoteAskRequest, opts ...grpc.CallOption) (*RemoteAskResponse, error)
+	// RemoteTell is used to send a message to an actor remotely by another actor
+	// This is the only way remote actors can interact with each other. The actor on the
+	// other line can reply to the sender by using the Sender in the message
+	RemoteTell(ctx context.Context, in *RemoteTellRequest, opts ...grpc.CallOption) (*RemoteTellResponse, error)
 	// Lookup for an actor on a remote host.
 	RemoteLookup(ctx context.Context, in *RemoteLookupRequest, opts ...grpc.CallOption) (*RemoteLookupResponse, error)
 }
@@ -40,18 +42,18 @@ func NewRemotingServiceClient(cc grpc.ClientConnInterface) RemotingServiceClient
 	return &remotingServiceClient{cc}
 }
 
-func (c *remotingServiceClient) RemoteSendSync(ctx context.Context, in *RemoteSendSyncRequest, opts ...grpc.CallOption) (*RemoteSendSyncResponse, error) {
-	out := new(RemoteSendSyncResponse)
-	err := c.cc.Invoke(ctx, "/goakt.v1.RemotingService/RemoteSendSync", in, out, opts...)
+func (c *remotingServiceClient) RemoteAsk(ctx context.Context, in *RemoteAskRequest, opts ...grpc.CallOption) (*RemoteAskResponse, error) {
+	out := new(RemoteAskResponse)
+	err := c.cc.Invoke(ctx, "/goakt.v1.RemotingService/RemoteAsk", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *remotingServiceClient) RemoteSendAsync(ctx context.Context, in *RemoteSendAsyncRequest, opts ...grpc.CallOption) (*RemoteSendAsyncResponse, error) {
-	out := new(RemoteSendAsyncResponse)
-	err := c.cc.Invoke(ctx, "/goakt.v1.RemotingService/RemoteSendAsync", in, out, opts...)
+func (c *remotingServiceClient) RemoteTell(ctx context.Context, in *RemoteTellRequest, opts ...grpc.CallOption) (*RemoteTellResponse, error) {
+	out := new(RemoteTellResponse)
+	err := c.cc.Invoke(ctx, "/goakt.v1.RemotingService/RemoteTell", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -71,12 +73,14 @@ func (c *remotingServiceClient) RemoteLookup(ctx context.Context, in *RemoteLook
 // All implementations should embed UnimplementedRemotingServiceServer
 // for forward compatibility
 type RemotingServiceServer interface {
-	// Sends a message to an actor remotely with a reply expected from the receiving actor
-	// With this type of message the receiver cannot communicate back to Sender
+	// RemoteAsk is used to send a message to an actor remotely and expect a response
+	// immediately. With this type of message the receiver cannot communicate back to Sender
 	// except reply the message with a response. This one-way communication
-	RemoteSendSync(context.Context, *RemoteSendSyncRequest) (*RemoteSendSyncResponse, error)
-	// Sends a message to an actor remotely without expecting any reply
-	RemoteSendAsync(context.Context, *RemoteSendAsyncRequest) (*RemoteSendAsyncResponse, error)
+	RemoteAsk(context.Context, *RemoteAskRequest) (*RemoteAskResponse, error)
+	// RemoteTell is used to send a message to an actor remotely by another actor
+	// This is the only way remote actors can interact with each other. The actor on the
+	// other line can reply to the sender by using the Sender in the message
+	RemoteTell(context.Context, *RemoteTellRequest) (*RemoteTellResponse, error)
 	// Lookup for an actor on a remote host.
 	RemoteLookup(context.Context, *RemoteLookupRequest) (*RemoteLookupResponse, error)
 }
@@ -85,11 +89,11 @@ type RemotingServiceServer interface {
 type UnimplementedRemotingServiceServer struct {
 }
 
-func (UnimplementedRemotingServiceServer) RemoteSendSync(context.Context, *RemoteSendSyncRequest) (*RemoteSendSyncResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method RemoteSendSync not implemented")
+func (UnimplementedRemotingServiceServer) RemoteAsk(context.Context, *RemoteAskRequest) (*RemoteAskResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RemoteAsk not implemented")
 }
-func (UnimplementedRemotingServiceServer) RemoteSendAsync(context.Context, *RemoteSendAsyncRequest) (*RemoteSendAsyncResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method RemoteSendAsync not implemented")
+func (UnimplementedRemotingServiceServer) RemoteTell(context.Context, *RemoteTellRequest) (*RemoteTellResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RemoteTell not implemented")
 }
 func (UnimplementedRemotingServiceServer) RemoteLookup(context.Context, *RemoteLookupRequest) (*RemoteLookupResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RemoteLookup not implemented")
@@ -106,38 +110,38 @@ func RegisterRemotingServiceServer(s grpc.ServiceRegistrar, srv RemotingServiceS
 	s.RegisterService(&RemotingService_ServiceDesc, srv)
 }
 
-func _RemotingService_RemoteSendSync_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(RemoteSendSyncRequest)
+func _RemotingService_RemoteAsk_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RemoteAskRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(RemotingServiceServer).RemoteSendSync(ctx, in)
+		return srv.(RemotingServiceServer).RemoteAsk(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/goakt.v1.RemotingService/RemoteSendSync",
+		FullMethod: "/goakt.v1.RemotingService/RemoteAsk",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(RemotingServiceServer).RemoteSendSync(ctx, req.(*RemoteSendSyncRequest))
+		return srv.(RemotingServiceServer).RemoteAsk(ctx, req.(*RemoteAskRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _RemotingService_RemoteSendAsync_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(RemoteSendAsyncRequest)
+func _RemotingService_RemoteTell_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RemoteTellRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(RemotingServiceServer).RemoteSendAsync(ctx, in)
+		return srv.(RemotingServiceServer).RemoteTell(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/goakt.v1.RemotingService/RemoteSendAsync",
+		FullMethod: "/goakt.v1.RemotingService/RemoteTell",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(RemotingServiceServer).RemoteSendAsync(ctx, req.(*RemoteSendAsyncRequest))
+		return srv.(RemotingServiceServer).RemoteTell(ctx, req.(*RemoteTellRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -168,12 +172,12 @@ var RemotingService_ServiceDesc = grpc.ServiceDesc{
 	HandlerType: (*RemotingServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
-			MethodName: "RemoteSendSync",
-			Handler:    _RemotingService_RemoteSendSync_Handler,
+			MethodName: "RemoteAsk",
+			Handler:    _RemotingService_RemoteAsk_Handler,
 		},
 		{
-			MethodName: "RemoteSendAsync",
-			Handler:    _RemotingService_RemoteSendAsync_Handler,
+			MethodName: "RemoteTell",
+			Handler:    _RemotingService_RemoteTell_Handler,
 		},
 		{
 			MethodName: "RemoteLookup",

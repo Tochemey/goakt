@@ -52,16 +52,16 @@ type PID interface {
 	ActorSystem() ActorSystem
 	// ActorPath returns the path of the actor
 	ActorPath() *Path
-	// SendAsync sends an asynchronous message to another PID
-	SendAsync(ctx context.Context, to PID, message proto.Message) error
-	// SendSync sends a synchronous message to another actor and expect a response.
-	SendSync(ctx context.Context, to PID, message proto.Message) (response proto.Message, err error)
-	// RemoteSendAsync sends a message to an actor remotely without expecting any reply
-	RemoteSendAsync(ctx context.Context, to *pb.Address, message proto.Message) error
-	// RemoteSendSync is used to send a message to an actor remotely and expect a response
+	// Tell sends an asynchronous message to another PID
+	Tell(ctx context.Context, to PID, message proto.Message) error
+	// Ask sends a synchronous message to another actor and expect a response.
+	Ask(ctx context.Context, to PID, message proto.Message) (response proto.Message, err error)
+	// RemoteTell sends a message to an actor remotely without expecting any reply
+	RemoteTell(ctx context.Context, to *pb.Address, message proto.Message) error
+	// RemoteAsk is used to send a message to an actor remotely and expect a response
 	// immediately. With this type of message the receiver cannot communicate back to Sender
 	// except reply the message with a response. This one-way communication.
-	RemoteSendSync(ctx context.Context, to *pb.Address, message proto.Message) (response proto.Message, err error)
+	RemoteAsk(ctx context.Context, to *pb.Address, message proto.Message) (response proto.Message, err error)
 	// RemoteLookup look for an actor address on a remote node. If the actorSystem is nil then the lookup will be done
 	// using the same actor system as the PID actor system
 	RemoteLookup(ctx context.Context, host string, port int, name string) (addr *pb.Address, err error)
@@ -387,11 +387,11 @@ func (p *pid) RestartCount(ctx context.Context) uint64 {
 	return p.restartCounter.Load()
 }
 
-// SendSync sends a synchronous message to another actor and expect a response.
+// Ask sends a synchronous message to another actor and expect a response.
 // This block until a response is received or timed out.
-func (p *pid) SendSync(ctx context.Context, to PID, message proto.Message) (response proto.Message, err error) {
+func (p *pid) Ask(ctx context.Context, to PID, message proto.Message) (response proto.Message, err error) {
 	// add a span context
-	ctx, span := telemetry.SpanContext(ctx, "SendSync")
+	ctx, span := telemetry.SpanContext(ctx, "Ask")
 	defer span.End()
 	// make sure the actor is live
 	if !to.IsOnline() {
@@ -437,10 +437,10 @@ func (p *pid) SendSync(ctx context.Context, to PID, message proto.Message) (resp
 	}
 }
 
-// SendAsync sends an asynchronous message to another PID
-func (p *pid) SendAsync(ctx context.Context, to PID, message proto.Message) error {
+// Tell sends an asynchronous message to another PID
+func (p *pid) Tell(ctx context.Context, to PID, message proto.Message) error {
 	// add a span context
-	ctx, span := telemetry.SpanContext(ctx, "SendAsync")
+	ctx, span := telemetry.SpanContext(ctx, "Tell")
 	defer span.End()
 
 	// make sure the recipient actor is live
@@ -512,10 +512,10 @@ func (p *pid) RemoteLookup(ctx context.Context, host string, port int, name stri
 	return response.GetAddress(), nil
 }
 
-// RemoteSendAsync sends a message to an actor remotely without expecting any reply
-func (p *pid) RemoteSendAsync(ctx context.Context, to *pb.Address, message proto.Message) error {
+// RemoteTell sends a message to an actor remotely without expecting any reply
+func (p *pid) RemoteTell(ctx context.Context, to *pb.Address, message proto.Message) error {
 	// add a span context
-	ctx, span := telemetry.SpanContext(ctx, "RemoteSendAsync")
+	ctx, span := telemetry.SpanContext(ctx, "RemoteTell")
 	defer span.End()
 
 	// marshal the message
@@ -537,7 +537,7 @@ func (p *pid) RemoteSendAsync(ctx context.Context, to *pb.Address, message proto
 	}
 
 	// prepare the rpcRequest to send
-	request := &pb.RemoteSendAsyncRequest{
+	request := &pb.RemoteTellRequest{
 		RemoteMessage: &pb.RemoteMessage{
 			Sender:   sender,
 			Receiver: to,
@@ -545,16 +545,16 @@ func (p *pid) RemoteSendAsync(ctx context.Context, to *pb.Address, message proto
 		},
 	}
 	// send the message and handle the error in case there is any
-	if _, err := remoteClient.RemoteSendAsync(ctx, request); err != nil {
+	if _, err := remoteClient.RemoteTell(ctx, request); err != nil {
 		return err
 	}
 	return nil
 }
 
-// RemoteSendSync sends a synchronous message to another actor remotely and expect a response.
-func (p *pid) RemoteSendSync(ctx context.Context, to *pb.Address, message proto.Message) (response proto.Message, err error) {
+// RemoteAsk sends a synchronous message to another actor remotely and expect a response.
+func (p *pid) RemoteAsk(ctx context.Context, to *pb.Address, message proto.Message) (response proto.Message, err error) {
 	// add a span context
-	ctx, span := telemetry.SpanContext(ctx, "RemoteSendAsync")
+	ctx, span := telemetry.SpanContext(ctx, "RemoteTell")
 	defer span.End()
 
 	// marshal the message
@@ -567,12 +567,12 @@ func (p *pid) RemoteSendSync(ctx context.Context, to *pb.Address, message proto.
 	rpcConn, _ := grpc.GetClientConn(ctx, fmt.Sprintf("%s:%d", to.GetHost(), to.GetPort()))
 	remoteClient := pb.NewRemotingServiceClient(rpcConn)
 	// prepare the rpcRequest to send
-	rpcRequest := &pb.RemoteSendSyncRequest{
+	rpcRequest := &pb.RemoteAskRequest{
 		Receiver: to,
 		Message:  marshaled,
 	}
 	// send the request
-	rpcResponse, rpcErr := remoteClient.RemoteSendSync(ctx, rpcRequest)
+	rpcResponse, rpcErr := remoteClient.RemoteAsk(ctx, rpcRequest)
 	// handle the error
 	if rpcErr != nil {
 		return nil, rpcErr

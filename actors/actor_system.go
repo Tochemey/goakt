@@ -49,11 +49,11 @@ type ActorSystem interface {
 	// NumActors returns the total number of active actors in the system
 	NumActors() uint64
 
-	// handleSendSync handles a synchronous message to another actor and expect a response.
+	// handleRemoteAsk handles a synchronous message to another actor and expect a response.
 	// This block until a response is received or timed out.
-	handleSendSync(ctx context.Context, to PID, message proto.Message) (response proto.Message, err error)
-	// handleSendAsync handles an asynchronous message to an actor
-	handleSendAsync(ctx context.Context, to PID, message proto.Message) error
+	handleRemoteAsk(ctx context.Context, to PID, message proto.Message) (response proto.Message, err error)
+	// handleRemoteTell handles an asynchronous message to an actor
+	handleRemoteTell(ctx context.Context, to PID, message proto.Message) error
 }
 
 // ActorSystem represent a collection of actors on a given node
@@ -353,16 +353,18 @@ func (a *actorSystem) RemoteLookup(ctx context.Context, request *pb.RemoteLookup
 	return &pb.RemoteLookupResponse{Address: addr}, nil
 }
 
-// RemoteSendSync handles a message to an actor remotely with a reply expected from the receiving actor
-func (a *actorSystem) RemoteSendSync(ctx context.Context, request *pb.RemoteSendSyncRequest) (*pb.RemoteSendSyncResponse, error) {
+// RemoteAsk is used to send a message to an actor remotely and expect a response
+// immediately. With this type of message the receiver cannot communicate back to Sender
+// except reply the message with a response. This one-way communication
+func (a *actorSystem) RemoteAsk(ctx context.Context, request *pb.RemoteAskRequest) (*pb.RemoteAskResponse, error) {
 	// add a span context
-	ctx, span := telemetry.SpanContext(ctx, "RemoteSendSync")
+	ctx, span := telemetry.SpanContext(ctx, "RemoteAsk")
 	defer span.End()
 
 	// get a context logger
 	logger := a.logger.WithContext(ctx)
 	// first let us make a copy of the incoming request
-	reqCopy := proto.Clone(request).(*pb.RemoteSendSyncRequest)
+	reqCopy := proto.Clone(request).(*pb.RemoteAskRequest)
 
 	// let us validate the host and port
 	hostAndPort := fmt.Sprintf("%s:%d", reqCopy.GetReceiver().GetHost(), reqCopy.GetReceiver().GetPort())
@@ -393,7 +395,7 @@ func (a *actorSystem) RemoteSendSync(ctx context.Context, request *pb.RemoteSend
 	}
 
 	// send the message to actor
-	reply, err := a.handleSendSync(ctx, pid, reqCopy.GetMessage())
+	reply, err := a.handleRemoteAsk(ctx, pid, reqCopy.GetMessage())
 	// handle the error
 	if err != nil {
 		logger.Error(ErrRemoteSendFailure(err))
@@ -401,19 +403,21 @@ func (a *actorSystem) RemoteSendSync(ctx context.Context, request *pb.RemoteSend
 	}
 	// let us marshal the reply
 	marshaled, _ := anypb.New(reply)
-	return &pb.RemoteSendSyncResponse{Message: marshaled}, nil
+	return &pb.RemoteAskResponse{Message: marshaled}, nil
 }
 
-// RemoteSendAsync handles a message to an actor remotely without expecting any reply
-func (a *actorSystem) RemoteSendAsync(ctx context.Context, request *pb.RemoteSendAsyncRequest) (*pb.RemoteSendAsyncResponse, error) {
+// RemoteTell is used to send a message to an actor remotely by another actor
+// This is the only way remote actors can interact with each other. The actor on the
+// other line can reply to the sender by using the Sender in the message
+func (a *actorSystem) RemoteTell(ctx context.Context, request *pb.RemoteTellRequest) (*pb.RemoteTellResponse, error) {
 	// add a span context
-	ctx, span := telemetry.SpanContext(ctx, "RemoteSendAsync")
+	ctx, span := telemetry.SpanContext(ctx, "RemoteTell")
 	defer span.End()
 
 	// get a context logger
 	logger := a.logger.WithContext(ctx)
 	// first let us make a copy of the incoming request
-	reqCopy := proto.Clone(request).(*pb.RemoteSendAsyncRequest)
+	reqCopy := proto.Clone(request).(*pb.RemoteTellRequest)
 
 	receiver := reqCopy.GetRemoteMessage().GetReceiver()
 	// let us validate the host and port
@@ -450,11 +454,11 @@ func (a *actorSystem) RemoteSendAsync(ctx context.Context, request *pb.RemoteSen
 	}
 
 	// send the message to actor
-	if err := a.handleSendAsync(ctx, pid, reqCopy.GetRemoteMessage()); err != nil {
+	if err := a.handleRemoteTell(ctx, pid, reqCopy.GetRemoteMessage()); err != nil {
 		logger.Error(ErrRemoteSendFailure(err))
 		return nil, ErrRemoteSendFailure(err)
 	}
-	return &pb.RemoteSendAsyncResponse{}, nil
+	return &pb.RemoteTellResponse{}, nil
 }
 
 // registerMetrics register the PID metrics with OTel instrumentation.
@@ -477,19 +481,19 @@ func (a *actorSystem) registerMetrics() error {
 	return err
 }
 
-// handleSendSync handles a synchronous message to another actor and expect a response.
+// handleRemoteAsk handles a synchronous message to another actor and expect a response.
 // This block until a response is received or timed out.
-func (a *actorSystem) handleSendSync(ctx context.Context, to PID, message proto.Message) (response proto.Message, err error) {
+func (a *actorSystem) handleRemoteAsk(ctx context.Context, to PID, message proto.Message) (response proto.Message, err error) {
 	// add a span context
-	ctx, span := telemetry.SpanContext(ctx, "handleSendSync")
+	ctx, span := telemetry.SpanContext(ctx, "handleRemoteAsk")
 	defer span.End()
 	return SendSync(ctx, to, message, a.config.ReplyTimeout())
 }
 
-// handleSendAsync handles an asynchronous message to an actor
-func (a *actorSystem) handleSendAsync(ctx context.Context, to PID, message proto.Message) error {
+// handleRemoteTell handles an asynchronous message to an actor
+func (a *actorSystem) handleRemoteTell(ctx context.Context, to PID, message proto.Message) error {
 	// add a span context
-	ctx, span := telemetry.SpanContext(ctx, "handleSendSync")
+	ctx, span := telemetry.SpanContext(ctx, "handleRemoteTell")
 	defer span.End()
 	return SendAsync(ctx, to, message)
 }

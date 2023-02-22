@@ -110,7 +110,7 @@ func SendAsync(ctx context.Context, to PID, message proto.Message) error {
 // RemoteSendAsync sends a message to an actor remotely without expecting any reply
 func RemoteSendAsync(ctx context.Context, to *pb.Address, message proto.Message) error {
 	// add a span context
-	ctx, span := telemetry.SpanContext(ctx, "RemoteSendAsync")
+	ctx, span := telemetry.SpanContext(ctx, "RemoteTell")
 	defer span.End()
 
 	// marshal the message
@@ -123,7 +123,7 @@ func RemoteSendAsync(ctx context.Context, to *pb.Address, message proto.Message)
 	rpcConn, _ := grpc.GetClientConn(ctx, fmt.Sprintf("%s:%d", to.GetHost(), to.GetPort()))
 	remoteClient := pb.NewRemotingServiceClient(rpcConn)
 	// prepare the rpcRequest to send
-	request := &pb.RemoteSendAsyncRequest{
+	request := &pb.RemoteTellRequest{
 		RemoteMessage: &pb.RemoteMessage{
 			Sender:   RemoteNoSender,
 			Receiver: to,
@@ -131,7 +131,7 @@ func RemoteSendAsync(ctx context.Context, to *pb.Address, message proto.Message)
 		},
 	}
 	// send the message and handle the error in case there is any
-	if _, err := remoteClient.RemoteSendAsync(ctx, request); err != nil {
+	if _, err := remoteClient.RemoteTell(ctx, request); err != nil {
 		return err
 	}
 	return nil
@@ -140,7 +140,7 @@ func RemoteSendAsync(ctx context.Context, to *pb.Address, message proto.Message)
 // RemoteSendSync sends a synchronous message to another actor remotely and expect a response.
 func RemoteSendSync(ctx context.Context, to *pb.Address, message proto.Message) (response proto.Message, err error) {
 	// add a span context
-	ctx, span := telemetry.SpanContext(ctx, "RemoteSendAsync")
+	ctx, span := telemetry.SpanContext(ctx, "RemoteTell")
 	defer span.End()
 
 	// marshal the message
@@ -153,12 +153,12 @@ func RemoteSendSync(ctx context.Context, to *pb.Address, message proto.Message) 
 	rpcConn, _ := grpc.GetClientConn(ctx, fmt.Sprintf("%s:%d", to.GetHost(), to.GetPort()))
 	remoteClient := pb.NewRemotingServiceClient(rpcConn)
 	// prepare the rpcRequest to send
-	rpcRequest := &pb.RemoteSendSyncRequest{
+	rpcRequest := &pb.RemoteAskRequest{
 		Receiver: to,
 		Message:  marshaled,
 	}
 	// send the request
-	rpcResponse, rpcErr := remoteClient.RemoteSendSync(ctx, rpcRequest)
+	rpcResponse, rpcErr := remoteClient.RemoteAsk(ctx, rpcRequest)
 	// handle the error
 	if rpcErr != nil {
 		return nil, rpcErr

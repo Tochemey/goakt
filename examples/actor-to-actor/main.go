@@ -38,7 +38,7 @@ func main() {
 	pongActor := actorSystem.StartActor(ctx, "Pong", NewPongActor())
 
 	// start the conversation
-	_ = pingActor.SendAsync(ctx, pongActor, new(samplepb.Ping))
+	_ = pingActor.Tell(ctx, pongActor, new(samplepb.Ping))
 
 	// shutdown both actors after 3 seconds of conversation
 	timer := time.AfterFunc(3*time.Second, func() {
@@ -90,7 +90,7 @@ func (p *PingActor) Receive(ctx goakt.ReceiveContext) {
 		// reply the sender in case there is a sender
 		if ctx.Sender() != goakt.NoSender {
 			// let us reply to the sender
-			_ = ctx.Self().SendAsync(ctx.Context(), ctx.Sender(), new(samplepb.Ping))
+			_ = ctx.Self().Tell(ctx.Context(), ctx.Sender(), new(samplepb.Ping))
 		}
 		p.count.Add(1)
 	default:
@@ -134,7 +134,7 @@ func (p *PongActor) Receive(ctx goakt.ReceiveContext) {
 		p.logger.Infof(fmt.Sprintf("received Ping from %s", ctx.Sender().ActorPath().String()))
 		// reply the sender in case there is a sender
 		if ctx.Sender() != nil && ctx.Sender() != goakt.NoSender {
-			_ = ctx.Self().SendAsync(ctx.Context(), ctx.Sender(), new(samplepb.Pong))
+			_ = ctx.Self().Tell(ctx.Context(), ctx.Sender(), new(samplepb.Pong))
 		}
 		p.count.Add(1)
 	default:

@@ -85,7 +85,7 @@ func (p *PongActor) Receive(ctx goakt.ReceiveContext) {
 		p.logger.Infof("received Ping from %s", ctx.Sender().ActorPath().String())
 		// reply the sender in case there is a sender
 		if ctx.Sender() != nil && ctx.Sender() != goakt.NoSender {
-			_ = ctx.Self().SendAsync(ctx.Context(), ctx.Sender(), new(samplepb.Pong))
+			_ = ctx.Self().Tell(ctx.Context(), ctx.Sender(), new(samplepb.Pong))
 		}
 		p.count.Add(1)
 	case *pb.RemoteMessage:
@@ -93,7 +93,7 @@ func (p *PongActor) Receive(ctx goakt.ReceiveContext) {
 		ping := new(samplepb.Ping)
 		_ = msg.GetMessage().UnmarshalTo(ping)
 		if !proto.Equal(msg.GetSender(), goakt.RemoteNoSender) {
-			_ = ctx.Self().RemoteSendAsync(context.Background(), msg.GetSender(), new(samplepb.Pong))
+			_ = ctx.Self().RemoteTell(context.Background(), msg.GetSender(), new(samplepb.Pong))
 			p.count.Add(1)
 		}
 	default:
