@@ -321,7 +321,7 @@ func (p *pid) SpawnChild(ctx context.Context, name string, actor Actor) (PID, er
 	childActorPath := NewPath(name, p.ActorPath().Address()).WithParent(p.ActorPath())
 
 	// check whether the child actor already exist and just return the PID
-	if cid, ok := p.children.Get(name); ok {
+	if cid, ok := p.children.Get(childActorPath); ok {
 		// check whether the actor is stopped
 		if !cid.IsOnline() {
 			// then reboot it

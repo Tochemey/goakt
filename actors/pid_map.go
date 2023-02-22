@@ -33,17 +33,17 @@ func (m *pidMap) Len() int {
 }
 
 // Get retrieves a pid by its address
-func (m *pidMap) Get(path string) (pid PID, ok bool) {
+func (m *pidMap) Get(path *Path) (pid PID, ok bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	pid, ok = m.pids[path]
+	pid, ok = m.pids[path.String()]
 	return
 }
 
 // Set sets a pid in the map
-func (m *pidMap) Set(child PID) {
+func (m *pidMap) Set(pid PID) {
 	m.mu.Lock()
-	m.pids[child.ActorPath().String()] = child
+	m.pids[pid.ActorPath().String()] = pid
 	m.mu.Unlock()
 }
 
