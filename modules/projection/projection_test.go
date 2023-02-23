@@ -6,22 +6,22 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tochemey/goakt/modules/persistence"
-	memory2 "github.com/tochemey/goakt/modules/persistence/plugins/memory"
-
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tochemey/goakt/log"
+	"github.com/tochemey/goakt/modules/persistence"
+	memory2 "github.com/tochemey/goakt/modules/persistence/plugins/memory"
 	pb "github.com/tochemey/goakt/pb/goakt/v1"
 	testpb "github.com/tochemey/goakt/test/data/pb/v1"
+	"go.uber.org/goleak"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 func TestProjection(t *testing.T) {
 	t.Run("with happy path", func(t *testing.T) {
-		//defer goleak.VerifyNone(t)
+		defer goleak.VerifyNone(t, goleak.IgnoreTopFunction("github.com/golang/glog.(*loggingT).flushDaemon"))
 		ctx := context.TODO()
 		projectionName := "db-writer"
 		persistenceID := uuid.NewString()
@@ -92,7 +92,7 @@ func TestProjection(t *testing.T) {
 		assert.NoError(t, projection.Stop(ctx))
 	})
 	t.Run("with failed handler with fail strategy", func(t *testing.T) {
-		//defer goleak.VerifyNone(t)
+		defer goleak.VerifyNone(t, goleak.IgnoreTopFunction("github.com/golang/glog.(*loggingT).flushDaemon"))
 		ctx := context.TODO()
 		projectionName := "db-writer"
 		persistenceID := uuid.NewString()
@@ -159,7 +159,7 @@ func TestProjection(t *testing.T) {
 		assert.NoError(t, projection.Stop(ctx))
 	})
 	t.Run("with failed handler and retry_fail strategy", func(t *testing.T) {
-		//defer goleak.VerifyNone(t)
+		defer goleak.VerifyNone(t, goleak.IgnoreTopFunction("github.com/golang/glog.(*loggingT).flushDaemon"))
 		ctx := context.TODO()
 		projectionName := "db-writer"
 		persistenceID := uuid.NewString()
@@ -231,7 +231,7 @@ func TestProjection(t *testing.T) {
 		assert.NoError(t, projection.Stop(ctx))
 	})
 	t.Run("with failed handler and skip strategy", func(t *testing.T) {
-		//defer goleak.VerifyNone(t)
+		defer goleak.VerifyNone(t, goleak.IgnoreTopFunction("github.com/golang/glog.(*loggingT).flushDaemon"))
 		ctx := context.TODO()
 		projectionName := "db-writer"
 		persistenceID := uuid.NewString()
@@ -309,7 +309,7 @@ func TestProjection(t *testing.T) {
 		assert.NoError(t, projection.Stop(ctx))
 	})
 	t.Run("with failed handler and skip retry strategy", func(t *testing.T) {
-		//defer goleak.VerifyNone(t)
+		defer goleak.VerifyNone(t, goleak.IgnoreTopFunction("github.com/golang/glog.(*loggingT).flushDaemon"))
 		ctx := context.TODO()
 		projectionName := "db-writer"
 		persistenceID := uuid.NewString()
