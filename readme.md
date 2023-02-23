@@ -23,9 +23,6 @@ Also, check reference section at the end of the post for more material regarding
 - [x] Create a child actor
 - [x] Supervisory Strategy (Restart and Stop directive) 
 - [x] Behaviors (Become/BecomeStacked/UnBecome/UnBecomeStacked)
-- [x] EventSourcing (event sourced/cqrs)
-    - [x] [Event sourced Actor (write model)](modules/eventsourcing)
-    - [x] [Projection (read model)](modules/projection)
 - [x] Logger interface with a default logger
 - [x] Examples (check the [examples'](./examples) folder)
 - [x] Integration with [OpenTelemetry](https://github.com/open-telemetry/opentelemetry-go) for traces and metrics.

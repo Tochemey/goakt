@@ -8,7 +8,6 @@ import (
 	"github.com/pkg/errors"
 	"github.com/tochemey/goakt/log"
 	pb "github.com/tochemey/goakt/pb/goakt/v1"
-	"github.com/tochemey/goakt/pkg/eventbus"
 	"github.com/tochemey/goakt/pkg/grpc"
 	"github.com/tochemey/goakt/pkg/resync"
 	"github.com/tochemey/goakt/telemetry"
@@ -44,8 +43,6 @@ type ActorSystem interface {
 	StopActor(ctx context.Context, name string) error
 	// RestartActor restarts a given actor in the system
 	RestartActor(ctx context.Context, name string) (PID, error)
-	// EventBus returns the actor system event bus
-	EventBus() eventbus.EventBus
 	// NumActors returns the total number of active actors in the system
 	NumActors() uint64
 
@@ -76,8 +73,6 @@ type actorSystem struct {
 	// states whether the actor system has started or not
 	hasStarted *atomic.Bool
 
-	// TODO: remove this. May not be needed
-	eventBus eventbus.EventBus
 	// observability settings
 	telemetry *telemetry.Telemetry
 	// specifies the remoting service
@@ -106,7 +101,6 @@ func NewActorSystem(config *Config) (ActorSystem, error) {
 			port:            0,
 			config:          config,
 			hasStarted:      atomic.NewBool(false),
-			eventBus:        eventbus.New(),
 			telemetry:       config.telemetry,
 			remotingService: nil,
 		}
@@ -117,11 +111,6 @@ func NewActorSystem(config *Config) (ActorSystem, error) {
 	})
 
 	return system, nil
-}
-
-// EventBus returns the actor system event streams
-func (a *actorSystem) EventBus() eventbus.EventBus {
-	return a.eventBus
 }
 
 // NumActors returns the total number of active actors in the system
@@ -540,7 +529,6 @@ func (a *actorSystem) reset() {
 	a.hasStarted = atomic.NewBool(false)
 	a.remotingService = nil
 	a.telemetry = nil
-	a.eventBus = nil
 	a.actors = cmp.New[PID]()
 	a.nodeAddr = ""
 	a.name = ""
