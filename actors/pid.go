@@ -175,7 +175,7 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 		sendReplyTimeout:       100 * time.Millisecond,
 		shutdownTimeout:        2 * time.Second,
 		initMaxRetries:         5,
-		mailbox:                make(chan ReceiveContext, 1000),
+		mailbox:                make(chan ReceiveContext, 4096),
 		shutdownSignal:         make(chan Unit, 1),
 		haltPassivationLnr:     make(chan Unit, 1),
 		logger:                 log.DefaultLogger,
