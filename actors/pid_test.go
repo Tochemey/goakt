@@ -23,7 +23,9 @@ const (
 )
 
 func TestActorReceive(t *testing.T) {
-	defer goleak.VerifyNone(t, goleak.IgnoreTopFunction("github.com/golang/glog.(*loggingT).flushDaemon"))
+	defer goleak.VerifyNone(t,
+		goleak.IgnoreTopFunction("github.com/golang/glog.(*loggingT).flushDaemon"),
+		goleak.IgnoreTopFunction("github.com/alphadose/zenq/v2.(*ZenQ[...]).selectSender"))
 	ctx := context.TODO()
 
 	// create the actor path
@@ -60,7 +62,9 @@ func TestActorReceive(t *testing.T) {
 }
 
 func TestActorWithPassivation(t *testing.T) {
-	defer goleak.VerifyNone(t, goleak.IgnoreTopFunction("github.com/golang/glog.(*loggingT).flushDaemon"))
+	defer goleak.VerifyNone(t,
+		goleak.IgnoreTopFunction("github.com/golang/glog.(*loggingT).flushDaemon"),
+		goleak.IgnoreTopFunction("github.com/alphadose/zenq/v2.(*ZenQ[...]).selectSender"))
 	ctx := context.TODO()
 	// create a Ping actor
 	opts := []pidOption{
@@ -91,7 +95,9 @@ func TestActorWithPassivation(t *testing.T) {
 
 func TestActorWithReply(t *testing.T) {
 	t.Run("with happy path", func(t *testing.T) {
-		defer goleak.VerifyNone(t, goleak.IgnoreTopFunction("github.com/golang/glog.(*loggingT).flushDaemon"))
+		defer goleak.VerifyNone(t,
+			goleak.IgnoreTopFunction("github.com/golang/glog.(*loggingT).flushDaemon"),
+			goleak.IgnoreTopFunction("github.com/alphadose/zenq/v2.(*ZenQ[...]).selectSender"))
 		ctx := context.TODO()
 		// create a Ping actor
 		opts := []pidOption{
@@ -114,7 +120,9 @@ func TestActorWithReply(t *testing.T) {
 		assert.NoError(t, err)
 	})
 	t.Run("with timeout", func(t *testing.T) {
-		defer goleak.VerifyNone(t, goleak.IgnoreTopFunction("github.com/golang/glog.(*loggingT).flushDaemon"))
+		defer goleak.VerifyNone(t,
+			goleak.IgnoreTopFunction("github.com/golang/glog.(*loggingT).flushDaemon"),
+			goleak.IgnoreTopFunction("github.com/alphadose/zenq/v2.(*ZenQ[...]).selectSender"))
 		ctx := context.TODO()
 		// create a Ping actor
 		opts := []pidOption{
@@ -139,7 +147,9 @@ func TestActorWithReply(t *testing.T) {
 
 func TestActorRestart(t *testing.T) {
 	t.Run("restart a stopped actor", func(t *testing.T) {
-		defer goleak.VerifyNone(t, goleak.IgnoreTopFunction("github.com/golang/glog.(*loggingT).flushDaemon"))
+		defer goleak.VerifyNone(t,
+			goleak.IgnoreTopFunction("github.com/golang/glog.(*loggingT).flushDaemon"),
+			goleak.IgnoreTopFunction("github.com/alphadose/zenq/v2.(*ZenQ[...]).selectSender"))
 		ctx := context.TODO()
 		cfg, err := NewConfig("testSys", "localhost:0")
 		require.NoError(t, err)
@@ -210,7 +220,9 @@ func TestActorRestart(t *testing.T) {
 	//	assert.EqualError(t, err, ErrUndefinedActor.Error())
 	//})
 	t.Run("restart an actor", func(t *testing.T) {
-		defer goleak.VerifyNone(t, goleak.IgnoreTopFunction("github.com/golang/glog.(*loggingT).flushDaemon"))
+		defer goleak.VerifyNone(t,
+			goleak.IgnoreTopFunction("github.com/golang/glog.(*loggingT).flushDaemon"),
+			goleak.IgnoreTopFunction("github.com/alphadose/zenq/v2.(*ZenQ[...]).selectSender"))
 		ctx := context.TODO()
 
 		// create a Ping actor
@@ -252,7 +264,9 @@ func TestActorRestart(t *testing.T) {
 
 func TestChildActor(t *testing.T) {
 	t.Run("happy path", func(t *testing.T) {
-		defer goleak.VerifyNone(t, goleak.IgnoreTopFunction("github.com/golang/glog.(*loggingT).flushDaemon"))
+		defer goleak.VerifyNone(t,
+			goleak.IgnoreTopFunction("github.com/golang/glog.(*loggingT).flushDaemon"),
+			goleak.IgnoreTopFunction("github.com/alphadose/zenq/v2.(*ZenQ[...]).selectSender"))
 
 		// create a test context
 		ctx := context.TODO()
@@ -286,7 +300,9 @@ func TestChildActor(t *testing.T) {
 		assert.NoError(t, err)
 	})
 	t.Run("test child panic with stop as default strategy", func(t *testing.T) {
-		defer goleak.VerifyNone(t, goleak.IgnoreTopFunction("github.com/golang/glog.(*loggingT).flushDaemon"))
+		defer goleak.VerifyNone(t,
+			goleak.IgnoreTopFunction("github.com/golang/glog.(*loggingT).flushDaemon"),
+			goleak.IgnoreTopFunction("github.com/alphadose/zenq/v2.(*ZenQ[...]).selectSender"))
 
 		// create a test context
 		ctx := context.TODO()
@@ -324,7 +340,9 @@ func TestChildActor(t *testing.T) {
 		assert.NoError(t, err)
 	})
 	t.Run("test child panic with restart as default strategy", func(t *testing.T) {
-		defer goleak.VerifyNone(t, goleak.IgnoreTopFunction("github.com/golang/glog.(*loggingT).flushDaemon"))
+		defer goleak.VerifyNone(t,
+			goleak.IgnoreTopFunction("github.com/golang/glog.(*loggingT).flushDaemon"),
+			goleak.IgnoreTopFunction("github.com/alphadose/zenq/v2.(*ZenQ[...]).selectSender"))
 
 		// create a test context
 		ctx := context.TODO()
