@@ -55,7 +55,7 @@ func TestActorReceive(t *testing.T) {
 
 		pid.doReceive(recvContext)
 	}
-	assert.EqualValues(t, count, pid.ReceivedCount(ctx))
+	assert.EqualValues(t, count, pid.ReceivedCount())
 	// stop the actor
 	err := pid.Shutdown(ctx)
 	assert.NoError(t, err)
@@ -190,7 +190,7 @@ func TestActorRestart(t *testing.T) {
 			err = SendAsync(ctx, pid, new(testpb.TestSend))
 			assert.NoError(t, err)
 		}
-		assert.EqualValues(t, count, pid.ReceivedCount(ctx))
+		assert.EqualValues(t, count, pid.ReceivedCount())
 		// stop the actor
 		err = pid.Shutdown(ctx)
 		assert.NoError(t, err)
@@ -244,7 +244,7 @@ func TestActorRestart(t *testing.T) {
 			err := SendAsync(ctx, pid, new(testpb.TestSend))
 			assert.NoError(t, err)
 		}
-		assert.EqualValues(t, count, pid.ReceivedCount(ctx))
+		assert.EqualValues(t, count, pid.ReceivedCount())
 
 		// restart the actor
 		err := pid.Restart(ctx)
@@ -255,7 +255,7 @@ func TestActorRestart(t *testing.T) {
 			err = SendAsync(ctx, pid, new(testpb.TestSend))
 			assert.NoError(t, err)
 		}
-		assert.EqualValues(t, count, pid.ReceivedCount(ctx))
+		assert.EqualValues(t, count, pid.ReceivedCount())
 		// stop the actor
 		err = pid.Shutdown(ctx)
 		assert.NoError(t, err)
@@ -286,15 +286,15 @@ func TestChildActor(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, child)
 
-		assert.Len(t, parent.Children(ctx), 1)
+		assert.Len(t, parent.Children(), 1)
 		// let us send 10 messages to the actors
 		count := 10
 		for i := 0; i < count; i++ {
 			assert.NoError(t, SendAsync(ctx, parent, new(testpb.TestSend)))
 			assert.NoError(t, SendAsync(ctx, child, new(testpb.TestSend)))
 		}
-		assert.EqualValues(t, count, parent.ReceivedCount(ctx))
-		assert.EqualValues(t, count, child.ReceivedCount(ctx))
+		assert.EqualValues(t, count, parent.ReceivedCount())
+		assert.EqualValues(t, count, child.ReceivedCount())
 		//stop the actor
 		err = parent.Shutdown(ctx)
 		assert.NoError(t, err)
@@ -324,7 +324,7 @@ func TestChildActor(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, child)
 
-		assert.Len(t, parent.Children(ctx), 1)
+		assert.Len(t, parent.Children(), 1)
 		// send a test panic message to the actor
 		assert.NoError(t, SendAsync(ctx, child, new(testpb.TestPanic)))
 
@@ -333,7 +333,7 @@ func TestChildActor(t *testing.T) {
 
 		// assert the actor state
 		assert.False(t, child.IsOnline())
-		assert.Len(t, parent.Children(ctx), 0)
+		assert.Len(t, parent.Children(), 0)
 
 		//stop the actor
 		err = parent.Shutdown(ctx)
@@ -366,7 +366,7 @@ func TestChildActor(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, child)
 
-		assert.Len(t, parent.Children(ctx), 1)
+		assert.Len(t, parent.Children(), 1)
 		// send a test panic message to the actor
 		assert.NoError(t, SendAsync(ctx, child, new(testpb.TestPanic)))
 
@@ -375,7 +375,7 @@ func TestChildActor(t *testing.T) {
 
 		// assert the actor state
 		assert.True(t, child.IsOnline())
-		assert.Len(t, parent.Children(ctx), 1)
+		assert.Len(t, parent.Children(), 1)
 
 		//stop the actor
 		err = parent.Shutdown(ctx)
