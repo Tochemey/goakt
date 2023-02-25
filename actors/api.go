@@ -121,7 +121,7 @@ func RemoteSendAsync(ctx context.Context, to *pb.Address, message proto.Message)
 
 	// create an instance of remote client service
 	rpcConn, _ := grpc.GetClientConn(ctx, fmt.Sprintf("%s:%d", to.GetHost(), to.GetPort()))
-	remoteClient := pb.NewRemotingServiceClient(rpcConn)
+	remoteClient := pb.NewRemoteMessagingServiceClient(rpcConn)
 	// prepare the rpcRequest to send
 	request := &pb.RemoteTellRequest{
 		RemoteMessage: &pb.RemoteMessage{
@@ -151,7 +151,7 @@ func RemoteSendSync(ctx context.Context, to *pb.Address, message proto.Message) 
 
 	// create an instance of remote client service
 	rpcConn, _ := grpc.GetClientConn(ctx, fmt.Sprintf("%s:%d", to.GetHost(), to.GetPort()))
-	remoteClient := pb.NewRemotingServiceClient(rpcConn)
+	remoteClient := pb.NewRemoteMessagingServiceClient(rpcConn)
 	// prepare the rpcRequest to send
 	rpcRequest := &pb.RemoteAskRequest{
 		Receiver: to,
@@ -175,7 +175,7 @@ func RemoteLookup(ctx context.Context, host string, port int, name string) (addr
 
 	// create an instance of remote client service
 	rpcConn, _ := grpc.GetClientConn(ctx, fmt.Sprintf("%s:%d", host, port))
-	remoteClient := pb.NewRemotingServiceClient(rpcConn)
+	remoteClient := pb.NewRemoteMessagingServiceClient(rpcConn)
 
 	// prepare the request to send
 	request := &pb.RemoteLookupRequest{

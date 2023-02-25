@@ -299,7 +299,7 @@ func (a *actorSystem) Stop(ctx context.Context) error {
 
 // RegisterService register the remoting service
 func (a *actorSystem) RegisterService(srv *ggrpc.Server) {
-	pb.RegisterRemotingServiceServer(srv, a)
+	pb.RegisterRemoteMessagingServiceServer(srv, a)
 }
 
 // RemoteLookup for an actor on a remote host.

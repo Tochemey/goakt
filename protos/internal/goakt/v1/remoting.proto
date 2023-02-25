@@ -4,7 +4,7 @@ package goakt.v1;
 
 import "google/protobuf/any.proto";
 
-service RemotingService {
+service RemoteMessagingService {
   // RemoteAsk is used to send a message to an actor remotely and expect a response
   // immediately. With this type of message the receiver cannot communicate back to Sender
   // except reply the message with a response. This one-way communication

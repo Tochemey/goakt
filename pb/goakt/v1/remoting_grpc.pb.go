@@ -18,10 +18,10 @@ import (
 // Requires gRPC-Go v1.32.0 or later.
 const _ = grpc.SupportPackageIsVersion7
 
-// RemotingServiceClient is the client API for RemotingService service.
+// RemoteMessagingServiceClient is the client API for RemoteMessagingService service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
-type RemotingServiceClient interface {
+type RemoteMessagingServiceClient interface {
 	// RemoteAsk is used to send a message to an actor remotely and expect a response
 	// immediately. With this type of message the receiver cannot communicate back to Sender
 	// except reply the message with a response. This one-way communication
@@ -34,45 +34,45 @@ type RemotingServiceClient interface {
 	RemoteLookup(ctx context.Context, in *RemoteLookupRequest, opts ...grpc.CallOption) (*RemoteLookupResponse, error)
 }
 
-type remotingServiceClient struct {
+type remoteMessagingServiceClient struct {
 	cc grpc.ClientConnInterface
 }
 
-func NewRemotingServiceClient(cc grpc.ClientConnInterface) RemotingServiceClient {
-	return &remotingServiceClient{cc}
+func NewRemoteMessagingServiceClient(cc grpc.ClientConnInterface) RemoteMessagingServiceClient {
+	return &remoteMessagingServiceClient{cc}
 }
 
-func (c *remotingServiceClient) RemoteAsk(ctx context.Context, in *RemoteAskRequest, opts ...grpc.CallOption) (*RemoteAskResponse, error) {
+func (c *remoteMessagingServiceClient) RemoteAsk(ctx context.Context, in *RemoteAskRequest, opts ...grpc.CallOption) (*RemoteAskResponse, error) {
 	out := new(RemoteAskResponse)
-	err := c.cc.Invoke(ctx, "/goakt.v1.RemotingService/RemoteAsk", in, out, opts...)
+	err := c.cc.Invoke(ctx, "/goakt.v1.RemoteMessagingService/RemoteAsk", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *remotingServiceClient) RemoteTell(ctx context.Context, in *RemoteTellRequest, opts ...grpc.CallOption) (*RemoteTellResponse, error) {
+func (c *remoteMessagingServiceClient) RemoteTell(ctx context.Context, in *RemoteTellRequest, opts ...grpc.CallOption) (*RemoteTellResponse, error) {
 	out := new(RemoteTellResponse)
-	err := c.cc.Invoke(ctx, "/goakt.v1.RemotingService/RemoteTell", in, out, opts...)
+	err := c.cc.Invoke(ctx, "/goakt.v1.RemoteMessagingService/RemoteTell", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *remotingServiceClient) RemoteLookup(ctx context.Context, in *RemoteLookupRequest, opts ...grpc.CallOption) (*RemoteLookupResponse, error) {
+func (c *remoteMessagingServiceClient) RemoteLookup(ctx context.Context, in *RemoteLookupRequest, opts ...grpc.CallOption) (*RemoteLookupResponse, error) {
 	out := new(RemoteLookupResponse)
-	err := c.cc.Invoke(ctx, "/goakt.v1.RemotingService/RemoteLookup", in, out, opts...)
+	err := c.cc.Invoke(ctx, "/goakt.v1.RemoteMessagingService/RemoteLookup", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-// RemotingServiceServer is the server API for RemotingService service.
-// All implementations should embed UnimplementedRemotingServiceServer
+// RemoteMessagingServiceServer is the server API for RemoteMessagingService service.
+// All implementations should embed UnimplementedRemoteMessagingServiceServer
 // for forward compatibility
-type RemotingServiceServer interface {
+type RemoteMessagingServiceServer interface {
 	// RemoteAsk is used to send a message to an actor remotely and expect a response
 	// immediately. With this type of message the receiver cannot communicate back to Sender
 	// except reply the message with a response. This one-way communication
@@ -85,103 +85,103 @@ type RemotingServiceServer interface {
 	RemoteLookup(context.Context, *RemoteLookupRequest) (*RemoteLookupResponse, error)
 }
 
-// UnimplementedRemotingServiceServer should be embedded to have forward compatible implementations.
-type UnimplementedRemotingServiceServer struct {
+// UnimplementedRemoteMessagingServiceServer should be embedded to have forward compatible implementations.
+type UnimplementedRemoteMessagingServiceServer struct {
 }
 
-func (UnimplementedRemotingServiceServer) RemoteAsk(context.Context, *RemoteAskRequest) (*RemoteAskResponse, error) {
+func (UnimplementedRemoteMessagingServiceServer) RemoteAsk(context.Context, *RemoteAskRequest) (*RemoteAskResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RemoteAsk not implemented")
 }
-func (UnimplementedRemotingServiceServer) RemoteTell(context.Context, *RemoteTellRequest) (*RemoteTellResponse, error) {
+func (UnimplementedRemoteMessagingServiceServer) RemoteTell(context.Context, *RemoteTellRequest) (*RemoteTellResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RemoteTell not implemented")
 }
-func (UnimplementedRemotingServiceServer) RemoteLookup(context.Context, *RemoteLookupRequest) (*RemoteLookupResponse, error) {
+func (UnimplementedRemoteMessagingServiceServer) RemoteLookup(context.Context, *RemoteLookupRequest) (*RemoteLookupResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RemoteLookup not implemented")
 }
 
-// UnsafeRemotingServiceServer may be embedded to opt out of forward compatibility for this service.
-// Use of this interface is not recommended, as added methods to RemotingServiceServer will
+// UnsafeRemoteMessagingServiceServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to RemoteMessagingServiceServer will
 // result in compilation errors.
-type UnsafeRemotingServiceServer interface {
-	mustEmbedUnimplementedRemotingServiceServer()
+type UnsafeRemoteMessagingServiceServer interface {
+	mustEmbedUnimplementedRemoteMessagingServiceServer()
 }
 
-func RegisterRemotingServiceServer(s grpc.ServiceRegistrar, srv RemotingServiceServer) {
-	s.RegisterService(&RemotingService_ServiceDesc, srv)
+func RegisterRemoteMessagingServiceServer(s grpc.ServiceRegistrar, srv RemoteMessagingServiceServer) {
+	s.RegisterService(&RemoteMessagingService_ServiceDesc, srv)
 }
 
-func _RemotingService_RemoteAsk_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _RemoteMessagingService_RemoteAsk_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(RemoteAskRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(RemotingServiceServer).RemoteAsk(ctx, in)
+		return srv.(RemoteMessagingServiceServer).RemoteAsk(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/goakt.v1.RemotingService/RemoteAsk",
+		FullMethod: "/goakt.v1.RemoteMessagingService/RemoteAsk",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(RemotingServiceServer).RemoteAsk(ctx, req.(*RemoteAskRequest))
+		return srv.(RemoteMessagingServiceServer).RemoteAsk(ctx, req.(*RemoteAskRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _RemotingService_RemoteTell_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _RemoteMessagingService_RemoteTell_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(RemoteTellRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(RemotingServiceServer).RemoteTell(ctx, in)
+		return srv.(RemoteMessagingServiceServer).RemoteTell(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/goakt.v1.RemotingService/RemoteTell",
+		FullMethod: "/goakt.v1.RemoteMessagingService/RemoteTell",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(RemotingServiceServer).RemoteTell(ctx, req.(*RemoteTellRequest))
+		return srv.(RemoteMessagingServiceServer).RemoteTell(ctx, req.(*RemoteTellRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _RemotingService_RemoteLookup_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _RemoteMessagingService_RemoteLookup_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(RemoteLookupRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(RemotingServiceServer).RemoteLookup(ctx, in)
+		return srv.(RemoteMessagingServiceServer).RemoteLookup(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/goakt.v1.RemotingService/RemoteLookup",
+		FullMethod: "/goakt.v1.RemoteMessagingService/RemoteLookup",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(RemotingServiceServer).RemoteLookup(ctx, req.(*RemoteLookupRequest))
+		return srv.(RemoteMessagingServiceServer).RemoteLookup(ctx, req.(*RemoteLookupRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-// RemotingService_ServiceDesc is the grpc.ServiceDesc for RemotingService service.
+// RemoteMessagingService_ServiceDesc is the grpc.ServiceDesc for RemoteMessagingService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
-var RemotingService_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "goakt.v1.RemotingService",
-	HandlerType: (*RemotingServiceServer)(nil),
+var RemoteMessagingService_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "goakt.v1.RemoteMessagingService",
+	HandlerType: (*RemoteMessagingServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
 			MethodName: "RemoteAsk",
-			Handler:    _RemotingService_RemoteAsk_Handler,
+			Handler:    _RemoteMessagingService_RemoteAsk_Handler,
 		},
 		{
 			MethodName: "RemoteTell",
-			Handler:    _RemotingService_RemoteTell_Handler,
+			Handler:    _RemoteMessagingService_RemoteTell_Handler,
 		},
 		{
 			MethodName: "RemoteLookup",
-			Handler:    _RemotingService_RemoteLookup_Handler,
+			Handler:    _RemoteMessagingService_RemoteLookup_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
