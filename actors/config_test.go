@@ -7,7 +7,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tochemey/goakt/log"
-	pb "github.com/tochemey/goakt/pb/goakt/v1"
 )
 
 func TestConfig(t *testing.T) {
@@ -68,8 +67,8 @@ func TestOptions(t *testing.T) {
 		},
 		{
 			name:           "WithSupervisorStrategy",
-			option:         WithSupervisorStrategy(pb.StrategyDirective_RESTART_DIRECTIVE),
-			expectedConfig: Config{supervisorStrategy: pb.StrategyDirective_RESTART_DIRECTIVE},
+			option:         WithSupervisorStrategy(RestartDirective),
+			expectedConfig: Config{supervisorStrategy: RestartDirective},
 		},
 	}
 	for _, tc := range testCases {

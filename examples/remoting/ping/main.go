@@ -8,13 +8,12 @@ import (
 	"sync"
 	"syscall"
 
-	pb "github.com/tochemey/goakt/pb/goakt/v1"
-	"google.golang.org/protobuf/proto"
-
 	goakt "github.com/tochemey/goakt/actors"
 	samplepb "github.com/tochemey/goakt/examples/protos/pb/v1"
 	"github.com/tochemey/goakt/log"
+	pb "github.com/tochemey/goakt/messages/v1"
 	"go.uber.org/atomic"
+	"google.golang.org/protobuf/proto"
 )
 
 const (
@@ -25,7 +24,7 @@ const (
 func main() {
 	ctx := context.Background()
 
-	// use the goakt default logger. real-life implement the logger interface`
+	// use the messages default logger. real-life implement the logger interface`
 	logger := log.DefaultLogger
 
 	// create the actor system configuration. kindly in real-life application handle the error
@@ -111,6 +110,6 @@ func (p *PingActor) Receive(ctx goakt.ReceiveContext) {
 
 func (p *PingActor) PostStop(ctx context.Context) error {
 	p.logger.Info("About to stop")
-	p.logger.Infof("Processed=%d messages", p.count.Load())
+	p.logger.Infof("Processed=%d public", p.count.Load())
 	return nil
 }

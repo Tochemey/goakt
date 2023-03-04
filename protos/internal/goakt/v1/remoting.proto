@@ -3,6 +3,10 @@ syntax = "proto3";
 package goakt.v1;
 
 import "google/protobuf/any.proto";
+import "messages/v1/address.proto";
+import "messages/v1/messages.proto";
+
+option go_package = "github.com/tochemey/goakt/internal/goakt/v1;goaktv1";
 
 service RemoteMessagingService {
   // RemoteAsk is used to send a message to an actor remotely and expect a response
@@ -22,7 +26,7 @@ service RemoteMessagingService {
 // except reply the message with a response. This one-way communication
 message RemoteAskRequest {
   // Specifies the receiver' address
-  Address receiver = 1;
+  messages.v1.Address receiver = 1;
   // Specifies the message to send to the actor
   // Any proto message is allowed to be sent
   google.protobuf.Any message = 2;
@@ -38,22 +42,10 @@ message RemoteAskResponse {
 // This is the only way remote actors can interact with each other. The actor on the
 // other line can reply to the sender by using the Sender in the message
 message RemoteTellRequest {
-  RemoteMessage remote_message = 1;
+  messages.v1.RemoteMessage remote_message = 1;
 }
 
 message RemoteTellResponse {}
-
-// Address represents an actor address
-message Address {
-  // Specifies the remote host address
-  string host = 1;
-  // Specifies the remote port
-  int32 port = 2;
-  // Specifies the actor name
-  string name = 3;
-  // Specifies the actor unique id on the remote host
-  string id = 4;
-}
 
 // RemoteLookupRequest checks whether a given actor exists on a remote host
 message RemoteLookupRequest {
@@ -67,16 +59,5 @@ message RemoteLookupRequest {
 
 message RemoteLookupResponse {
   // Specifies the actor address
-  Address address = 1;
-}
-
-// RemoteMessage will be used by Actors to communicate remotely
-message RemoteMessage {
-  // Specifies the sender' address
-  Address sender = 1;
-  // Specifies the actor address
-  Address receiver = 2;
-  // Specifies the message to send to the actor
-  // Any proto message is allowed to be sent
-  google.protobuf.Any message = 3;
+  messages.v1.Address address = 1;
 }

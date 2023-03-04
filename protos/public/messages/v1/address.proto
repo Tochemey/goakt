@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+package messages.v1;
+
+option go_package = "github.com/tochemey/goakt/messages/v1;messagesv1";
+
+// Address represents an actor address
+message Address {
+  // Specifies the remote host address
+  string host = 1;
+  // Specifies the remote port
+  int32 port = 2;
+  // Specifies the actor name
+  string name = 3;
+  // Specifies the actor unique id on the remote host
+  string id = 4;
+}

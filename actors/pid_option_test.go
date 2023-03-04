@@ -6,7 +6,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/tochemey/goakt/log"
-	pb "github.com/tochemey/goakt/pb/goakt/v1"
 )
 
 func TestPIDOptions(t *testing.T) {
@@ -37,8 +36,8 @@ func TestPIDOptions(t *testing.T) {
 		},
 		{
 			name:           "WithSupervisorStrategy",
-			option:         withSupervisorStrategy(pb.StrategyDirective_RESTART_DIRECTIVE),
-			expectedConfig: &pid{supervisorStrategy: pb.StrategyDirective_RESTART_DIRECTIVE},
+			option:         withSupervisorStrategy(RestartDirective),
+			expectedConfig: &pid{supervisorStrategy: RestartDirective},
 		},
 		{
 			name:           "WithShutdownTimeout",

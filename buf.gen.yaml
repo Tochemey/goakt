@@ -2,10 +2,6 @@ version: v1
 managed:
   enabled: true
   optimize_for: CODE_SIZE
-  go_package_prefix:
-    default: github.com/tochemey/goakt/gen
-    except:
-      - buf.build/googleapis/googleapis
 plugins:
   - name: go
     out: gen

@@ -34,7 +34,7 @@ Also, check reference section at the end of the post for more material regarding
 
 ## Installation
 ```bash
-go get github.com/Tochemey/goakt
+go get github.com/Tochemey/messages
 ```
 
 ## Example
@@ -53,8 +53,8 @@ import (
   "syscall"
   "time"
 
-  goakt "github.com/tochemey/goakt/actors"
-  samplepb "github.com/tochemey/goakt/examples/protos/pb/v1"
+  goakt "github.com/tochemey/messages/actors"
+  samplepb "github.com/tochemey/messages/examples/protos/pb/v1"
   "github.com/tochemey/goakt/log"
   "go.uber.org/atomic"
 )
@@ -62,7 +62,7 @@ import (
 func main() {
   ctx := context.Background()
 
-  // use the goakt default logger. real-life implement the logger interface`
+  // use the messages default logger. real-life implement the logger interface`
   logger := log.DefaultLogger
   // create the actor system configuration. kindly in real-life application handle the error
   config, _ := goakt.NewConfig("SampleActorSystem", "127.0.0.1:0",
@@ -81,7 +81,7 @@ func main() {
 
   startTime := time.Now()
 
-  // send some messages to the actor
+  // send some public to the actor
   count := 100
   for i := 0; i < count; i++ {
     _ = goakt.SendAsync(ctx, actor, new(samplepb.Ping))
@@ -93,7 +93,7 @@ func main() {
   <-interruptSignal
 
   // log some stats
-  logger.Infof("Actor=%s has processed %d messages in %s", actor.ActorPath().String(), actor.ReceivedCount(ctx), time.Since(startTime))
+  logger.Infof("Actor=%s has processed %d public in %s", actor.ActorPath().String(), actor.ReceivedCount(ctx), time.Since(startTime))
 
   // stop the actor system
   _ = actorSystem.Stop(ctx)
@@ -136,7 +136,7 @@ func (p *Pinger) Receive(ctx goakt.ReceiveContext) {
 
 func (p *Pinger) PostStop(ctx context.Context) error {
   p.logger.Info("About to stop")
-  p.logger.Infof("Processed=%d messages", p.count.Load())
+  p.logger.Infof("Processed=%d public", p.count.Load())
   return nil
 }
 

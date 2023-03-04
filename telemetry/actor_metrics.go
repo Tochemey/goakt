@@ -33,7 +33,7 @@ func NewMetrics(meter metric.Meter) (*ActorMetrics, error) {
 	if metrics.PanicCount, err = meter.Int64ObservableCounter(
 		failureCounterName,
 		instrument.WithDescription("The total number of failures(panic) by the actor"),
-		instrument.WithUnit(unit.Dimensionless),
+		instrument.WithUnit(string(unit.Dimensionless)),
 	); err != nil {
 		return nil, fmt.Errorf("failed to create failure count instrument, %v", err)
 	}
@@ -47,21 +47,19 @@ func NewMetrics(meter metric.Meter) (*ActorMetrics, error) {
 
 	if metrics.RestartedCount, err = meter.Int64ObservableCounter(
 		restartedCounterName,
-		instrument.WithDescription("The total number of restart"),
-		instrument.WithUnit(unit.Dimensionless)); err != nil {
+		instrument.WithDescription("The total number of restart")); err != nil {
 		return nil, fmt.Errorf("failed to create restart count instrument, %v", err)
 	}
 
 	if metrics.ReceivedCount, err = meter.Int64ObservableCounter(
-		receivedCounterName, instrument.WithDescription("The total number of messages received"),
-		instrument.WithUnit(unit.Dimensionless)); err != nil {
+		receivedCounterName, instrument.WithDescription("The total number of messages received")); err != nil {
 		return nil, fmt.Errorf("failed to create received count instrument, %v", err)
 	}
 
 	if metrics.ReceivedDurationHistogram, err = meter.Float64Histogram(
 		receivedDurationHistogramName,
 		instrument.WithDescription("The latency of received message in milliseconds"),
-		instrument.WithUnit(unit.Milliseconds),
+		instrument.WithUnit("ms"),
 	); err != nil {
 		return nil, fmt.Errorf("failed to create latency instrument, %v", err)
 	}

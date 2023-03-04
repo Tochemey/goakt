@@ -3,15 +3,14 @@ package actors
 import (
 	"fmt"
 
-	pb "github.com/tochemey/goakt/pb/goakt/v1"
-
 	"github.com/google/uuid"
+	pb "github.com/tochemey/goakt/messages/v1"
 )
 
 // Path is a unique path to an actor
 type Path struct {
-	// specifies the Address under which this path can be reached
-	address *Address
+	// specifies the LocalAddress under which this path can be reached
+	address *LocalAddress
 	// specifies the name of the actor that this path refers to.
 	name string
 	// specifies the internal unique id of the actor that this path refer to.
@@ -21,7 +20,7 @@ type Path struct {
 }
 
 // NewPath creates an immutable Path
-func NewPath(name string, address *Address) *Path {
+func NewPath(name string, address *LocalAddress) *Path {
 	// create the instance and return it
 	return &Path{
 		address: address,
@@ -43,8 +42,8 @@ func (a *Path) WithParent(parent *Path) *Path {
 	return newPath
 }
 
-// Address return the actor path address
-func (a *Path) Address() *Address {
+// LocalAddress return the actor path local address
+func (a *Path) LocalAddress() *LocalAddress {
 	return a.address
 }
 
@@ -66,8 +65,8 @@ func (a *Path) String() string {
 // RemoteAddress returns the remote from path
 func (a *Path) RemoteAddress() *pb.Address {
 	return &pb.Address{
-		Host: a.Address().Host(),
-		Port: int32(a.Address().Port()),
+		Host: a.LocalAddress().Host(),
+		Port: int32(a.LocalAddress().Port()),
 		Name: a.Name(),
 		Id:   a.ID().String(),
 	}

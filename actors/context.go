@@ -7,7 +7,7 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// ReceiveContext is the context that is used by the actor to receive messages
+// ReceiveContext is the context that is used by the actor to receive public
 type ReceiveContext interface {
 	// Context returns the context attached to the message
 	Context() context.Context
@@ -24,7 +24,7 @@ type ReceiveContext interface {
 	Response(resp proto.Message)
 	// Become switch the current behavior of the actor to a new behavior
 	// The current message in process during the transition will still be processed with the current
-	// behavior before the transition. However, subsequent messages will be processed with the new behavior.
+	// behavior before the transition. However, subsequent public will be processed with the new behavior.
 	// One needs to call UnBecome to reset the actor behavior to the default one which is the Actor.Receive method
 	// which is the default behavior.
 	Become(behavior Behavior)
@@ -33,7 +33,7 @@ type ReceiveContext interface {
 	UnBecome()
 	// BecomeStacked sets a new behavior to the actor.
 	// The current message in process during the transition will still be processed with the current
-	// behavior before the transition. However, subsequent messages will be processed with the new behavior.
+	// behavior before the transition. However, subsequent public will be processed with the new behavior.
 	// One needs to call UnBecomeStacked to go the previous the actor's behavior.
 	// which is the default behavior.
 	BecomeStacked(behavior Behavior)
@@ -53,7 +53,7 @@ type receiveContext struct {
 
 // BecomeStacked sets a new behavior to the actor.
 // The current message in process during the transition will still be processed with the current
-// behavior before the transition. However, subsequent messages will be processed with the new behavior.
+// behavior before the transition. However, subsequent public will be processed with the new behavior.
 // One needs to call UnBecomeStacked to go the previous the actor's behavior.
 // which is the default behavior.
 func (m *receiveContext) BecomeStacked(behavior Behavior) {
