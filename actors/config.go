@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/tochemey/goakt/log"
-	pb "github.com/tochemey/goakt/pb/goakt/v1"
 	"github.com/tochemey/goakt/telemetry"
 )
 
@@ -37,7 +36,7 @@ type Config struct {
 	// initialization fails. The default value is 5
 	actorInitMaxRetries int
 	// Specifies the supervisor strategy
-	supervisorStrategy pb.StrategyDirective
+	supervisorStrategy StrategyDirective
 	// Specifies the telemetry config
 	telemetry *telemetry.Telemetry
 	// Specifies whether remoting is enabled.
@@ -67,7 +66,7 @@ func NewConfig(name, nodeHostAndPort string, options ...Option) (*Config, error)
 		expireActorAfter:    2 * time.Second,
 		replyTimeout:        100 * time.Millisecond,
 		actorInitMaxRetries: 5,
-		supervisorStrategy:  pb.StrategyDirective_STOP_DIRECTIVE,
+		supervisorStrategy:  StopDirective,
 		telemetry:           telemetry.New(),
 		remotingEnabled:     false,
 	}
@@ -188,7 +187,7 @@ func WithPassivationDisabled() Option {
 }
 
 // WithSupervisorStrategy sets the supervisor strategy
-func WithSupervisorStrategy(strategy pb.StrategyDirective) Option {
+func WithSupervisorStrategy(strategy StrategyDirective) Option {
 	return OptionFunc(func(config *Config) {
 		config.supervisorStrategy = strategy
 	})

@@ -3,3 +3,4 @@ directories:
   - protos/internal
   - protos/test
   - protos/sample
+  - protos/public

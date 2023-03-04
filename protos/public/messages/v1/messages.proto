@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+package messages.v1;
+
+option go_package = "github.com/tochemey/goakt/messages/v1;messagesv1";
+
+import "messages/v1/address.proto";
+import "google/protobuf/any.proto";
+
+// RemoteMessage will be used by Actors to communicate remotely
+message RemoteMessage {
+  // Specifies the sender' address
+  Address sender = 1;
+  // Specifies the actor address
+  Address receiver = 2;
+  // Specifies the message to send to the actor
+  // Any proto message is allowed to be sent
+  google.protobuf.Any message = 3;
+}

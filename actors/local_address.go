@@ -9,13 +9,13 @@ import (
 )
 
 const (
-	protocol = "goakt"
+	protocol = "messages"
 )
 
-// Address represents the physical location under which an Actor can be
+// LocalAddress represents the physical location under which an Actor can be
 // reached. Examples are local addresses, identified by the ActorSystem’s name,
 // and remote addresses, identified by protocol, host and port.
-type Address struct {
+type LocalAddress struct {
 	// host is the host address
 	host string
 	// port is the port number
@@ -26,9 +26,9 @@ type Address struct {
 	protocol string
 }
 
-// NewAddress creates an instance of Address
-func NewAddress(protocol string, system string, host string, port int) *Address {
-	return &Address{
+// NewLocalAddress creates an instance of LocalAddress
+func NewLocalAddress(protocol string, system string, host string, port int) *LocalAddress {
+	return &LocalAddress{
 		host:     host,
 		port:     port,
 		system:   system,
@@ -36,61 +36,49 @@ func NewAddress(protocol string, system string, host string, port int) *Address 
 	}
 }
 
-// WithHost sets the hosts of a given Address and returns a new instance of the address
-func (a *Address) WithHost(host string) *Address {
-	return NewAddress(a.Protocol(), a.System(), host, a.Port())
+// WithHost sets the hosts of a given LocalAddress and returns a new instance of the address
+func (a *LocalAddress) WithHost(host string) *LocalAddress {
+	return NewLocalAddress(a.Protocol(), a.System(), host, a.Port())
 }
 
-// WithPort sets the port of a given Address and returns a new instance of the address
-func (a *Address) WithPort(port int) *Address {
-	return NewAddress(a.Protocol(), a.System(), a.System(), port)
+// WithPort sets the port of a given LocalAddress and returns a new instance of the address
+func (a *LocalAddress) WithPort(port int) *LocalAddress {
+	return NewLocalAddress(a.Protocol(), a.System(), a.System(), port)
 }
 
-// WithSystem sets the actor system of a given Address and returns a new instance of the address
-func (a *Address) WithSystem(system string) *Address {
-	return NewAddress(a.Protocol(), system, a.Host(), a.Port())
+// WithSystem sets the actor system of a given LocalAddress and returns a new instance of the address
+func (a *LocalAddress) WithSystem(system string) *LocalAddress {
+	return NewLocalAddress(a.Protocol(), system, a.Host(), a.Port())
 }
 
-// WithProtocol sets the protocol of a given Address and returns a new instance of the address
-func (a *Address) WithProtocol(protocol string) *Address {
-	return NewAddress(protocol, a.System(), a.Host(), a.Port())
+// WithProtocol sets the protocol of a given LocalAddress and returns a new instance of the address
+func (a *LocalAddress) WithProtocol(protocol string) *LocalAddress {
+	return NewLocalAddress(protocol, a.System(), a.Host(), a.Port())
 }
 
 // Host returns the host
-func (a *Address) Host() string {
+func (a *LocalAddress) Host() string {
 	return a.host
 }
 
 // Port returns the port number
-func (a *Address) Port() int {
+func (a *LocalAddress) Port() int {
 	return a.port
 }
 
 // System returns the actor system name
-func (a *Address) System() string {
+func (a *LocalAddress) System() string {
 	return a.system
 }
 
 // Protocol returns the protocol
-func (a *Address) Protocol() string {
+func (a *LocalAddress) Protocol() string {
 	return a.protocol
-}
-
-// IsRemote true if this Address is usable globally.
-// Unlike locally defined addresses of global scope are safe to sent to other hosts, as they globally and uniquely identify an addressable entity.
-func (a *Address) IsRemote() bool {
-	return len(a.host) > 0
-}
-
-// IsLocal returns true if this Address is only defined locally.
-// It is not safe to send locally scoped addresses to remote
-func (a *Address) IsLocal() bool {
-	return len(a.host) == 0
 }
 
 // HostPort returns the host and port in the following string format
 // @host:port
-func (a *Address) HostPort() string {
+func (a *LocalAddress) HostPort() string {
 	// create a bytes buffer instance
 	buf := bytes.NewBuffer(nil)
 	// write the host value when it is set
@@ -109,10 +97,10 @@ func (a *Address) HostPort() string {
 	return buf.String()
 }
 
-// String returns the canonical String representation of this Address formatted as:
+// String returns the canonical String representation of this LocalAddress formatted as:
 // `protocol://system@host:port`
-func (a *Address) String() string {
-	// if the protocol is not goakt
+func (a *LocalAddress) String() string {
+	// if the protocol is not messages
 	// then panic
 	if a.protocol != protocol {
 		panic("invalid protocol")
@@ -140,8 +128,8 @@ func (a *Address) String() string {
 	return buf.String()
 }
 
-// Parse parses a new Address from a given string
-func (a *Address) Parse(address string) *Address {
+// Parse parses a new LocalAddress from a given string
+func (a *LocalAddress) Parse(address string) *LocalAddress {
 	// let us parse the address and panic in case of error
 	uri, err := url.Parse(address)
 	// panic when there is an error
@@ -158,8 +146,8 @@ func (a *Address) Parse(address string) *Address {
 	}
 
 	if uri.User == nil {
-		return NewAddress(uri.Scheme, uri.Hostname(), "", port)
+		return NewLocalAddress(uri.Scheme, uri.Hostname(), "", port)
 	}
 
-	return NewAddress(uri.Scheme, uri.User.String(), uri.Hostname(), port)
+	return NewLocalAddress(uri.Scheme, uri.User.String(), uri.Hostname(), port)
 }

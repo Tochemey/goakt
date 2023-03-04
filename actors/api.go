@@ -6,7 +6,8 @@ import (
 	"sync"
 	"time"
 
-	pb "github.com/tochemey/goakt/pb/goakt/v1"
+	internalpb "github.com/tochemey/goakt/internal/goakt/v1"
+	pb "github.com/tochemey/goakt/messages/v1"
 	"github.com/tochemey/goakt/pkg/grpc"
 	"github.com/tochemey/goakt/telemetry"
 	"google.golang.org/grpc/codes"
@@ -121,9 +122,9 @@ func RemoteSendAsync(ctx context.Context, to *pb.Address, message proto.Message)
 
 	// create an instance of remote client service
 	rpcConn, _ := grpc.GetClientConn(ctx, fmt.Sprintf("%s:%d", to.GetHost(), to.GetPort()))
-	remoteClient := pb.NewRemoteMessagingServiceClient(rpcConn)
+	remoteClient := internalpb.NewRemoteMessagingServiceClient(rpcConn)
 	// prepare the rpcRequest to send
-	request := &pb.RemoteTellRequest{
+	request := &internalpb.RemoteTellRequest{
 		RemoteMessage: &pb.RemoteMessage{
 			Sender:   RemoteNoSender,
 			Receiver: to,
@@ -151,9 +152,9 @@ func RemoteSendSync(ctx context.Context, to *pb.Address, message proto.Message) 
 
 	// create an instance of remote client service
 	rpcConn, _ := grpc.GetClientConn(ctx, fmt.Sprintf("%s:%d", to.GetHost(), to.GetPort()))
-	remoteClient := pb.NewRemoteMessagingServiceClient(rpcConn)
+	remoteClient := internalpb.NewRemoteMessagingServiceClient(rpcConn)
 	// prepare the rpcRequest to send
-	rpcRequest := &pb.RemoteAskRequest{
+	rpcRequest := &internalpb.RemoteAskRequest{
 		Receiver: to,
 		Message:  marshaled,
 	}
@@ -175,10 +176,10 @@ func RemoteLookup(ctx context.Context, host string, port int, name string) (addr
 
 	// create an instance of remote client service
 	rpcConn, _ := grpc.GetClientConn(ctx, fmt.Sprintf("%s:%d", host, port))
-	remoteClient := pb.NewRemoteMessagingServiceClient(rpcConn)
+	remoteClient := internalpb.NewRemoteMessagingServiceClient(rpcConn)
 
 	// prepare the request to send
-	request := &pb.RemoteLookupRequest{
+	request := &internalpb.RemoteLookupRequest{
 		Host: host,
 		Port: int32(port),
 		Name: name,

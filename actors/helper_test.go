@@ -45,7 +45,7 @@ func NewTestActor() *TestActor {
 }
 
 // Init initialize the actor. This function can be used to set up some database connections
-// or some sort of initialization before the actor init processing messages
+// or some sort of initialization before the actor init processing public
 func (p *TestActor) PreStart(context.Context) error {
 	return nil
 }

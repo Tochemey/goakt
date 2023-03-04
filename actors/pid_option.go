@@ -4,7 +4,6 @@ import (
 	"time"
 
 	"github.com/tochemey/goakt/log"
-	pb "github.com/tochemey/goakt/pb/goakt/v1"
 	"github.com/tochemey/goakt/telemetry"
 )
 
@@ -49,7 +48,7 @@ func withActorSystem(sys ActorSystem) pidOption {
 
 // withSupervisorStrategy sets the supervisor strategy to used when dealing
 // with child actors
-func withSupervisorStrategy(strategy pb.StrategyDirective) pidOption {
+func withSupervisorStrategy(strategy StrategyDirective) pidOption {
 	return func(pid *pid) {
 		pid.supervisorStrategy = strategy
 	}
