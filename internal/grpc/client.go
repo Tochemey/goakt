@@ -90,7 +90,7 @@ func (b *ClientBuilder) WithClientTransportCredentials(insecureSkipVerify bool, 
 	var tlsConf tls.Config
 
 	if insecureSkipVerify {
-		tlsConf.InsecureSkipVerify = true
+		tlsConf.InsecureSkipVerify = true // nolint
 		b.transportCredentials = credentials.NewTLS(&tlsConf)
 		return b
 	}

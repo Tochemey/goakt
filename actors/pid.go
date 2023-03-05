@@ -8,12 +8,12 @@ import (
 
 	"github.com/cenkalti/backoff"
 	"github.com/pkg/errors"
-	internalpb "github.com/tochemey/goakt/internal/goakt/v1"
+	goaktpb "github.com/tochemey/goakt/internal/goaktpb/v1"
+	"github.com/tochemey/goakt/internal/grpc"
+	"github.com/tochemey/goakt/internal/telemetry"
+	"github.com/tochemey/goakt/internal/tools"
 	"github.com/tochemey/goakt/log"
 	pb "github.com/tochemey/goakt/messages/v1"
-	"github.com/tochemey/goakt/pkg/grpc"
-	"github.com/tochemey/goakt/pkg/tools"
-	"github.com/tochemey/goakt/telemetry"
 	"go.opentelemetry.io/otel/metric"
 	"go.uber.org/atomic"
 	"google.golang.org/grpc/codes"
@@ -489,10 +489,10 @@ func (p *pid) RemoteLookup(ctx context.Context, host string, port int, name stri
 
 	// create an instance of remote client service
 	rpcConn, _ := grpc.GetClientConn(ctx, fmt.Sprintf("%s:%d", host, port))
-	remoteClient := internalpb.NewRemoteMessagingServiceClient(rpcConn)
+	remoteClient := goaktpb.NewRemoteMessagingServiceClient(rpcConn)
 
 	// prepare the request to send
-	request := &internalpb.RemoteLookupRequest{
+	request := &goaktpb.RemoteLookupRequest{
 		Host: host,
 		Port: int32(port),
 		Name: name,
@@ -526,7 +526,7 @@ func (p *pid) RemoteTell(ctx context.Context, to *pb.Address, message proto.Mess
 
 	// create an instance of remote client service
 	rpcConn, _ := grpc.GetClientConn(ctx, fmt.Sprintf("%s:%d", to.GetHost(), to.GetPort()))
-	remoteClient := internalpb.NewRemoteMessagingServiceClient(rpcConn)
+	remoteClient := goaktpb.NewRemoteMessagingServiceClient(rpcConn)
 
 	// construct the from address
 	sender := &pb.Address{
@@ -537,7 +537,7 @@ func (p *pid) RemoteTell(ctx context.Context, to *pb.Address, message proto.Mess
 	}
 
 	// prepare the rpcRequest to send
-	request := &internalpb.RemoteTellRequest{
+	request := &goaktpb.RemoteTellRequest{
 		RemoteMessage: &pb.RemoteMessage{
 			Sender:   sender,
 			Receiver: to,
@@ -565,9 +565,9 @@ func (p *pid) RemoteAsk(ctx context.Context, to *pb.Address, message proto.Messa
 
 	// create an instance of remote client service
 	rpcConn, _ := grpc.GetClientConn(ctx, fmt.Sprintf("%s:%d", to.GetHost(), to.GetPort()))
-	remoteClient := internalpb.NewRemoteMessagingServiceClient(rpcConn)
+	remoteClient := goaktpb.NewRemoteMessagingServiceClient(rpcConn)
 	// prepare the rpcRequest to send
-	rpcRequest := &internalpb.RemoteAskRequest{
+	rpcRequest := &goaktpb.RemoteAskRequest{
 		Receiver: to,
 		Message:  marshaled,
 	}

@@ -6,11 +6,11 @@ import (
 
 	cmp "github.com/orcaman/concurrent-map/v2"
 	"github.com/pkg/errors"
-	internalpb "github.com/tochemey/goakt/internal/goakt/v1"
+	goaktpb "github.com/tochemey/goakt/internal/goaktpb/v1"
+	"github.com/tochemey/goakt/internal/grpc"
+	"github.com/tochemey/goakt/internal/resync"
+	"github.com/tochemey/goakt/internal/telemetry"
 	"github.com/tochemey/goakt/log"
-	"github.com/tochemey/goakt/pkg/grpc"
-	"github.com/tochemey/goakt/pkg/resync"
-	"github.com/tochemey/goakt/telemetry"
 	"go.opentelemetry.io/otel/metric"
 	"go.uber.org/atomic"
 	ggrpc "google.golang.org/grpc"
@@ -299,11 +299,11 @@ func (a *actorSystem) Stop(ctx context.Context) error {
 
 // RegisterService register the remoting service
 func (a *actorSystem) RegisterService(srv *ggrpc.Server) {
-	internalpb.RegisterRemoteMessagingServiceServer(srv, a)
+	goaktpb.RegisterRemoteMessagingServiceServer(srv, a)
 }
 
 // RemoteLookup for an actor on a remote host.
-func (a *actorSystem) RemoteLookup(ctx context.Context, request *internalpb.RemoteLookupRequest) (*internalpb.RemoteLookupResponse, error) {
+func (a *actorSystem) RemoteLookup(ctx context.Context, request *goaktpb.RemoteLookupRequest) (*goaktpb.RemoteLookupResponse, error) {
 	// add a span context
 	ctx, span := telemetry.SpanContext(ctx, "RemoteLookup")
 	defer span.End()
@@ -312,7 +312,7 @@ func (a *actorSystem) RemoteLookup(ctx context.Context, request *internalpb.Remo
 	logger := a.logger.WithContext(ctx)
 
 	// first let us make a copy of the incoming request
-	reqCopy := proto.Clone(request).(*internalpb.RemoteLookupRequest)
+	reqCopy := proto.Clone(request).(*goaktpb.RemoteLookupRequest)
 
 	// let us validate the host and port
 	hostAndPort := fmt.Sprintf("%s:%d", reqCopy.GetHost(), reqCopy.GetPort())
@@ -339,13 +339,13 @@ func (a *actorSystem) RemoteLookup(ctx context.Context, request *internalpb.Remo
 	// let us construct the address
 	addr := pid.ActorPath().RemoteAddress()
 
-	return &internalpb.RemoteLookupResponse{Address: addr}, nil
+	return &goaktpb.RemoteLookupResponse{Address: addr}, nil
 }
 
 // RemoteAsk is used to send a message to an actor remotely and expect a response
 // immediately. With this type of message the receiver cannot communicate back to Sender
 // except reply the message with a response. This one-way communication
-func (a *actorSystem) RemoteAsk(ctx context.Context, request *internalpb.RemoteAskRequest) (*internalpb.RemoteAskResponse, error) {
+func (a *actorSystem) RemoteAsk(ctx context.Context, request *goaktpb.RemoteAskRequest) (*goaktpb.RemoteAskResponse, error) {
 	// add a span context
 	ctx, span := telemetry.SpanContext(ctx, "RemoteAsk")
 	defer span.End()
@@ -353,7 +353,7 @@ func (a *actorSystem) RemoteAsk(ctx context.Context, request *internalpb.RemoteA
 	// get a context logger
 	logger := a.logger.WithContext(ctx)
 	// first let us make a copy of the incoming request
-	reqCopy := proto.Clone(request).(*internalpb.RemoteAskRequest)
+	reqCopy := proto.Clone(request).(*goaktpb.RemoteAskRequest)
 
 	// let us validate the host and port
 	hostAndPort := fmt.Sprintf("%s:%d", reqCopy.GetReceiver().GetHost(), reqCopy.GetReceiver().GetPort())
@@ -392,13 +392,13 @@ func (a *actorSystem) RemoteAsk(ctx context.Context, request *internalpb.RemoteA
 	}
 	// let us marshal the reply
 	marshaled, _ := anypb.New(reply)
-	return &internalpb.RemoteAskResponse{Message: marshaled}, nil
+	return &goaktpb.RemoteAskResponse{Message: marshaled}, nil
 }
 
 // RemoteTell is used to send a message to an actor remotely by another actor
 // This is the only way remote actors can interact with each other. The actor on the
 // other line can reply to the sender by using the Sender in the message
-func (a *actorSystem) RemoteTell(ctx context.Context, request *internalpb.RemoteTellRequest) (*internalpb.RemoteTellResponse, error) {
+func (a *actorSystem) RemoteTell(ctx context.Context, request *goaktpb.RemoteTellRequest) (*goaktpb.RemoteTellResponse, error) {
 	// add a span context
 	ctx, span := telemetry.SpanContext(ctx, "RemoteTell")
 	defer span.End()
@@ -406,7 +406,7 @@ func (a *actorSystem) RemoteTell(ctx context.Context, request *internalpb.Remote
 	// get a context logger
 	logger := a.logger.WithContext(ctx)
 	// first let us make a copy of the incoming request
-	reqCopy := proto.Clone(request).(*internalpb.RemoteTellRequest)
+	reqCopy := proto.Clone(request).(*goaktpb.RemoteTellRequest)
 
 	receiver := reqCopy.GetRemoteMessage().GetReceiver()
 	// let us validate the host and port
@@ -447,7 +447,7 @@ func (a *actorSystem) RemoteTell(ctx context.Context, request *internalpb.Remote
 		logger.Error(ErrRemoteSendFailure(err))
 		return nil, ErrRemoteSendFailure(err)
 	}
-	return &internalpb.RemoteTellResponse{}, nil
+	return &goaktpb.RemoteTellResponse{}, nil
 }
 
 // registerMetrics register the PID metrics with OTel instrumentation.

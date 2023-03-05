@@ -6,10 +6,11 @@ import (
 	"sync"
 	"time"
 
-	internalpb "github.com/tochemey/goakt/internal/goakt/v1"
+	"github.com/tochemey/goakt/internal/telemetry"
+
+	goaktpb "github.com/tochemey/goakt/internal/goaktpb/v1"
+	"github.com/tochemey/goakt/internal/grpc"
 	pb "github.com/tochemey/goakt/messages/v1"
-	"github.com/tochemey/goakt/pkg/grpc"
-	"github.com/tochemey/goakt/telemetry"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
@@ -122,9 +123,9 @@ func RemoteSendAsync(ctx context.Context, to *pb.Address, message proto.Message)
 
 	// create an instance of remote client service
 	rpcConn, _ := grpc.GetClientConn(ctx, fmt.Sprintf("%s:%d", to.GetHost(), to.GetPort()))
-	remoteClient := internalpb.NewRemoteMessagingServiceClient(rpcConn)
+	remoteClient := goaktpb.NewRemoteMessagingServiceClient(rpcConn)
 	// prepare the rpcRequest to send
-	request := &internalpb.RemoteTellRequest{
+	request := &goaktpb.RemoteTellRequest{
 		RemoteMessage: &pb.RemoteMessage{
 			Sender:   RemoteNoSender,
 			Receiver: to,
@@ -152,9 +153,9 @@ func RemoteSendSync(ctx context.Context, to *pb.Address, message proto.Message) 
 
 	// create an instance of remote client service
 	rpcConn, _ := grpc.GetClientConn(ctx, fmt.Sprintf("%s:%d", to.GetHost(), to.GetPort()))
-	remoteClient := internalpb.NewRemoteMessagingServiceClient(rpcConn)
+	remoteClient := goaktpb.NewRemoteMessagingServiceClient(rpcConn)
 	// prepare the rpcRequest to send
-	rpcRequest := &internalpb.RemoteAskRequest{
+	rpcRequest := &goaktpb.RemoteAskRequest{
 		Receiver: to,
 		Message:  marshaled,
 	}
@@ -176,10 +177,10 @@ func RemoteLookup(ctx context.Context, host string, port int, name string) (addr
 
 	// create an instance of remote client service
 	rpcConn, _ := grpc.GetClientConn(ctx, fmt.Sprintf("%s:%d", host, port))
-	remoteClient := internalpb.NewRemoteMessagingServiceClient(rpcConn)
+	remoteClient := goaktpb.NewRemoteMessagingServiceClient(rpcConn)
 
 	// prepare the request to send
-	request := &internalpb.RemoteLookupRequest{
+	request := &goaktpb.RemoteLookupRequest{
 		Host: host,
 		Port: int32(port),
 		Name: name,

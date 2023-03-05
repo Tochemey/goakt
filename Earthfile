@@ -52,7 +52,7 @@ internal-pb:
             --path protos/internal/goakt
 
     # save artifact to
-    SAVE ARTIFACT gen gen AS LOCAL internal
+    SAVE ARTIFACT gen/goakt AS LOCAL internal/goaktpb
 
 protogen:
     # copy the proto files to generate
