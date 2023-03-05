@@ -59,7 +59,7 @@ func (s *FSM) Snapshot() (io.ReadCloser, error) {
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to marshal the FSM state")
 	}
-	// return the marshalled FSM state
+	// return the marshaled FSM state
 	return io.NopCloser(bytes.NewReader(bytea)), nil
 }
 
