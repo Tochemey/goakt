@@ -1,16 +1,17 @@
 package log
 
 import (
-	"context"
 	"fmt"
 	"io"
-	"log"
 	"os"
+
+	"github.com/rs/zerolog"
 )
 
-// DefaultLogger define the standard log used by the package-level output functions.
-var DefaultLogger = NewLogger(InfoLevel, "[Actors]", os.Stderr, io.Discard)
-var DiscardLogger = NewLogger(InfoLevel, "", io.Discard)
+// DefaultLogger represents the default logger to use
+// This logger wraps zerolog under the hood
+var DefaultLogger = NewLogger(os.Stderr)
+var DiscardLogger = NewLogger(io.Discard)
 
 // Info logs to INFO level.
 func Info(v ...interface{}) {
@@ -24,12 +25,12 @@ func Infof(format string, v ...interface{}) {
 
 // Warning logs to the WARNING level.
 func Warning(v ...interface{}) {
-	DefaultLogger.Warning(v...)
+	DefaultLogger.Warn(v...)
 }
 
 // Warningf logs to the WARNING level.
 func Warningf(format string, v ...interface{}) {
-	DefaultLogger.Warningf(format, v...)
+	DefaultLogger.Warnf(format, v...)
 }
 
 // Error logs to the ERROR level.
@@ -62,115 +63,93 @@ func Panicf(format string, v ...interface{}) {
 	DefaultLogger.Panicf(format, v...)
 }
 
-// logger implements Logger interface
+// logger implements Logger interface with the underlying zap as
+// the underlying logging library
 type logger struct {
-	// specifies the log level
-	logLevel Level
 	// specifies the prefix
 	prefix string
-	// the underlying golang loggers
-	loggers []*log.Logger
+	// specifies the underlying logger
+	underlying zerolog.Logger
 }
 
-// NewLogger creates an instance of Logger
-func NewLogger(level Level, prefix string, writers ...io.Writer) Logger {
-	// set a default writer when no writers are specified
-	if len(writers) == 0 {
-		writers = []io.Writer{os.Stderr}
-	}
-
-	// set the various writers based
-	if len(writers) < numLogLevels {
-		last := writers[len(writers)-1]
-		for i := len(writers); i < numLogLevels; i++ {
-			writers = append(writers, last)
-		}
-	}
-
-	loggers := make([]*log.Logger, numLogLevels)
-	for i := range writers {
-		mw := make([]io.Writer, i+1)
-		for j := 0; j <= i; j++ {
-			mw[j] = writers[j]
-		}
-
-		w := io.MultiWriter(mw...)
-		loggers[i] = log.New(w, prefix, log.LstdFlags)
-	}
-
-	return &logger{
-		logLevel: level,
-		prefix:   prefix,
-		loggers:  loggers,
-	}
+// NewLogger creates an instance of logger
+func NewLogger(w io.Writer) Logger {
+	// create an instance of zerolog logger
+	zlogger := zerolog.New(w).With().Timestamp().Logger()
+	// create the instance of logger and returns it
+	return &logger{underlying: zlogger}
 }
 
-func (l logger) Debug(i ...interface{}) {
-	l.output(DebugLevel, fmt.Sprint(i...))
+// Debug starts a message with debug level
+func (l *logger) Debug(v ...any) {
+	l.underlying.Debug().Msg(fmt.Sprint(v...))
 }
 
-func (l logger) Debugf(s string, i ...interface{}) {
-	l.output(DebugLevel, fmt.Sprintf(s, i...))
+// Debugf starts a message with debug level
+func (l *logger) Debugf(format string, v ...any) {
+	l.underlying.Debug().Msgf(format, v...)
 }
 
-func (l logger) Info(i ...interface{}) {
-	l.output(InfoLevel, fmt.Sprint(i...))
+// Panic starts a new message with panic level. The panic() function
+// is called which stops the ordinary flow of a goroutine.
+func (l *logger) Panic(v ...any) {
+	l.underlying.Panic().Msg(fmt.Sprint(v...))
 }
 
-func (l logger) Infof(s string, i ...interface{}) {
-	l.output(InfoLevel, fmt.Sprintf(s, i...))
+// Panicf starts a new message with panic level. The panic() function
+// is called which stops the ordinary flow of a goroutine.
+func (l *logger) Panicf(format string, v ...any) {
+	l.underlying.Panic().Msgf(format, v...)
 }
 
-func (l logger) Warning(i ...interface{}) {
-	l.output(WarningLevel, fmt.Sprint(i...))
+// Fatal starts a new message with fatal level. The os.Exit(1) function
+// is called which terminates the program immediately.
+func (l *logger) Fatal(v ...any) {
+	l.underlying.Fatal().Msg(fmt.Sprint(v...))
 }
 
-func (l logger) Warningf(s string, i ...interface{}) {
-	l.output(WarningLevel, fmt.Sprintf(s, i...))
+// Fatalf starts a new message with fatal level. The os.Exit(1) function
+// is called which terminates the program immediately.
+func (l *logger) Fatalf(format string, v ...any) {
+	l.underlying.Fatal().Msgf(format, v...)
 }
 
-func (l logger) Error(i ...interface{}) {
-	l.output(ErrorLevel, fmt.Sprint(i...))
+// Error starts a new message with error level.
+func (l *logger) Error(v ...any) {
+	l.underlying.Error().Msg(fmt.Sprint(v...))
 }
 
-func (l logger) Errorf(s string, i ...interface{}) {
-	l.output(ErrorLevel, fmt.Sprintf(s, i...))
+// Errorf starts a new message with error level.
+func (l *logger) Errorf(format string, v ...any) {
+	l.underlying.Error().Msgf(format, v...)
 }
 
-func (l logger) Fatal(i ...interface{}) {
-	l.output(FatalLevel, fmt.Sprint(i...))
-	os.Exit(1)
+// Warn starts a new message with warn level
+func (l *logger) Warn(v ...any) {
+	l.underlying.Warn().Msg(fmt.Sprint(v...))
 }
 
-func (l logger) Fatalf(s string, i ...interface{}) {
-	l.output(FatalLevel, fmt.Sprintf(s, i...))
-	os.Exit(1)
+// Warnf starts a new message with warn level
+func (l *logger) Warnf(format string, v ...any) {
+	l.underlying.Warn().Msgf(format, v...)
 }
 
-func (l logger) Panic(i ...interface{}) {
-	s := fmt.Sprint(i...)
-	l.output(PanicLevel, s)
-	panic(s)
+// Info starts a message with info level
+func (l *logger) Info(v ...any) {
+	l.underlying.Info().Msg(fmt.Sprint(v...))
 }
 
-func (l logger) Panicf(s string, i ...interface{}) {
-	sf := fmt.Sprintf(s, i...)
-	l.output(PanicLevel, sf)
-	panic(sf)
+// Infof starts a message with info level
+func (l *logger) Infof(format string, v ...any) {
+	l.underlying.Info().Msgf(format, v...)
 }
 
-func (l logger) WithContext(ctx context.Context) Logger {
-	return l
+// Trace starts a new message with trace level
+func (l *logger) Trace(v ...any) {
+	l.underlying.Trace().Msg(fmt.Sprint(v...))
 }
 
-func (l logger) output(level Level, s string) {
-	// write nothing when level is disabled
-	if level == Disabled {
-		return
-	}
-	sevStr := levels[level]
-	err := l.loggers[level].Output(2, fmt.Sprintf("%v: %v", sevStr, s))
-	if err != nil {
-		Panic(err)
-	}
+// Tracef starts a new message with trace level
+func (l *logger) Tracef(format string, v ...any) {
+	l.underlying.Trace().Msgf(format, v...)
 }

@@ -309,7 +309,7 @@ func (a *actorSystem) RemoteLookup(ctx context.Context, request *goaktpb.RemoteL
 	defer span.End()
 
 	// get a context logger
-	logger := a.logger.WithContext(ctx)
+	logger := a.logger
 
 	// first let us make a copy of the incoming request
 	reqCopy := proto.Clone(request).(*goaktpb.RemoteLookupRequest)
@@ -351,7 +351,7 @@ func (a *actorSystem) RemoteAsk(ctx context.Context, request *goaktpb.RemoteAskR
 	defer span.End()
 
 	// get a context logger
-	logger := a.logger.WithContext(ctx)
+	logger := a.logger
 	// first let us make a copy of the incoming request
 	reqCopy := proto.Clone(request).(*goaktpb.RemoteAskRequest)
 
@@ -404,7 +404,7 @@ func (a *actorSystem) RemoteTell(ctx context.Context, request *goaktpb.RemoteTel
 	defer span.End()
 
 	// get a context logger
-	logger := a.logger.WithContext(ctx)
+	logger := a.logger
 	// first let us make a copy of the incoming request
 	reqCopy := proto.Clone(request).(*goaktpb.RemoteTellRequest)
 

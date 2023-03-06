@@ -7,11 +7,10 @@
 package messagesv1
 
 import (
-	reflect "reflect"
-	sync "sync"
-
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	reflect "reflect"
+	sync "sync"
 )
 
 const (
@@ -64,7 +63,7 @@ func (x *Address) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use LocalAddress.ProtoReflect.Descriptor instead.
+// Deprecated: Use Address.ProtoReflect.Descriptor instead.
 func (*Address) Descriptor() ([]byte, []int) {
 	return file_messages_v1_address_proto_rawDescGZIP(), []int{0}
 }
@@ -135,7 +134,7 @@ func file_messages_v1_address_proto_rawDescGZIP() []byte {
 
 var file_messages_v1_address_proto_msgTypes = make([]protoimpl.MessageInfo, 1)
 var file_messages_v1_address_proto_goTypes = []interface{}{
-	(*Address)(nil), // 0: messages.v1.LocalAddress
+	(*Address)(nil), // 0: messages.v1.Address
 }
 var file_messages_v1_address_proto_depIdxs = []int32{
 	0, // [0:0] is the sub-list for method output_type
