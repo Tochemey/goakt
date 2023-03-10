@@ -4,12 +4,14 @@ PROJECT tochemey/goakt
 
 FROM tochemey/docker-go:1.19.3-0.5.0
 
+# run a PR branch is created
 pr-pipeline:
   PIPELINE
   TRIGGER pr main
   BUILD +lint
   BUILD +local-test
 
+# run on when a push to main is made
 main-pipeline:
   PIPELINE
   TRIGGER push main
