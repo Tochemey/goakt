@@ -1,11 +1,16 @@
-VERSION 0.6
+VERSION 0.7
+PROJECT tochemey/goakt
+
 
 FROM tochemey/docker-go:1.19.3-0.5.0
 
 
 test:
-    BUILD +lint
-    BUILD +local-test
+  PIPELINE
+  TRIGGER push main
+  TRIGGER pr main
+  BUILD +lint
+  BUILD +local-test
 
 code:
 
