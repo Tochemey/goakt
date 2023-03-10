@@ -4,6 +4,17 @@ PROJECT tochemey/goakt
 
 FROM tochemey/docker-go:1.19.3-0.5.0
 
+test-pr:
+  PIPELINE
+  TRIGGER pr main
+  BUILD +lint
+  BUILD +local-test
+
+test-main:
+  PIPELINE
+  TRIGGER push main
+  BUILD +lint
+  BUILD +local-test
 
 test:
   PIPELINE
