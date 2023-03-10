@@ -10,6 +10,7 @@ test-pr:
   BUILD +lint
   BUILD +local-test
 
+# etsts
 test-main:
   PIPELINE
   TRIGGER push main
