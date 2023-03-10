@@ -4,14 +4,13 @@ PROJECT tochemey/goakt
 
 FROM tochemey/docker-go:1.19.3-0.5.0
 
-test-pr:
+pr-pipeline:
   PIPELINE
   TRIGGER pr main
   BUILD +lint
   BUILD +local-test
 
-# etsts
-test-main:
+main-pipeline:
   PIPELINE
   TRIGGER push main
   BUILD +lint
