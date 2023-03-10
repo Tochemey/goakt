@@ -17,9 +17,6 @@ main-pipeline:
   BUILD +local-test
 
 test:
-  PIPELINE
-  TRIGGER push main
-  TRIGGER pr main
   BUILD +lint
   BUILD +local-test
 
