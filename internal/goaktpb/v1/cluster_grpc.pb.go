@@ -28,8 +28,10 @@ type ClusterServiceClient interface {
 	GetActor(ctx context.Context, in *GetActorRequest, opts ...grpc.CallOption) (*GetActorResponse, error)
 	// AddNode adds a new node to the cluster
 	AddNode(ctx context.Context, in *AddNodeRequest, opts ...grpc.CallOption) (*AddNodeResponse, error)
-	// RemoveNode removes a node from the cluster
-	RemoveNode(ctx context.Context, in *RemoveNodeRequest, opts ...grpc.CallOption) (*RemoveNodeResponse, error)
+	// RemovePeer removes a node's peer from the cluster
+	RemovePeer(ctx context.Context, in *RemovePeerRequest, opts ...grpc.CallOption) (*RemovePeerResponse, error)
+	// GetPeers fetches all the peers of a given node
+	GetPeers(ctx context.Context, in *GetPeersRequest, opts ...grpc.CallOption) (*GetPeersResponse, error)
 }
 
 type clusterServiceClient struct {
@@ -67,9 +69,18 @@ func (c *clusterServiceClient) AddNode(ctx context.Context, in *AddNodeRequest, 
 	return out, nil
 }
 
-func (c *clusterServiceClient) RemoveNode(ctx context.Context, in *RemoveNodeRequest, opts ...grpc.CallOption) (*RemoveNodeResponse, error) {
-	out := new(RemoveNodeResponse)
-	err := c.cc.Invoke(ctx, "/goakt.v1.ClusterService/RemoveNode", in, out, opts...)
+func (c *clusterServiceClient) RemovePeer(ctx context.Context, in *RemovePeerRequest, opts ...grpc.CallOption) (*RemovePeerResponse, error) {
+	out := new(RemovePeerResponse)
+	err := c.cc.Invoke(ctx, "/goakt.v1.ClusterService/RemovePeer", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *clusterServiceClient) GetPeers(ctx context.Context, in *GetPeersRequest, opts ...grpc.CallOption) (*GetPeersResponse, error) {
+	out := new(GetPeersResponse)
+	err := c.cc.Invoke(ctx, "/goakt.v1.ClusterService/GetPeers", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -86,8 +97,10 @@ type ClusterServiceServer interface {
 	GetActor(context.Context, *GetActorRequest) (*GetActorResponse, error)
 	// AddNode adds a new node to the cluster
 	AddNode(context.Context, *AddNodeRequest) (*AddNodeResponse, error)
-	// RemoveNode removes a node from the cluster
-	RemoveNode(context.Context, *RemoveNodeRequest) (*RemoveNodeResponse, error)
+	// RemovePeer removes a node's peer from the cluster
+	RemovePeer(context.Context, *RemovePeerRequest) (*RemovePeerResponse, error)
+	// GetPeers fetches all the peers of a given node
+	GetPeers(context.Context, *GetPeersRequest) (*GetPeersResponse, error)
 }
 
 // UnimplementedClusterServiceServer should be embedded to have forward compatible implementations.
@@ -103,8 +116,11 @@ func (UnimplementedClusterServiceServer) GetActor(context.Context, *GetActorRequ
 func (UnimplementedClusterServiceServer) AddNode(context.Context, *AddNodeRequest) (*AddNodeResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method AddNode not implemented")
 }
-func (UnimplementedClusterServiceServer) RemoveNode(context.Context, *RemoveNodeRequest) (*RemoveNodeResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method RemoveNode not implemented")
+func (UnimplementedClusterServiceServer) RemovePeer(context.Context, *RemovePeerRequest) (*RemovePeerResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RemovePeer not implemented")
+}
+func (UnimplementedClusterServiceServer) GetPeers(context.Context, *GetPeersRequest) (*GetPeersResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetPeers not implemented")
 }
 
 // UnsafeClusterServiceServer may be embedded to opt out of forward compatibility for this service.
@@ -172,20 +188,38 @@ func _ClusterService_AddNode_Handler(srv interface{}, ctx context.Context, dec f
 	return interceptor(ctx, in, info, handler)
 }
 
-func _ClusterService_RemoveNode_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(RemoveNodeRequest)
+func _ClusterService_RemovePeer_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RemovePeerRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(ClusterServiceServer).RemoveNode(ctx, in)
+		return srv.(ClusterServiceServer).RemovePeer(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/goakt.v1.ClusterService/RemoveNode",
+		FullMethod: "/goakt.v1.ClusterService/RemovePeer",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(ClusterServiceServer).RemoveNode(ctx, req.(*RemoveNodeRequest))
+		return srv.(ClusterServiceServer).RemovePeer(ctx, req.(*RemovePeerRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ClusterService_GetPeers_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetPeersRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ClusterServiceServer).GetPeers(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/goakt.v1.ClusterService/GetPeers",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ClusterServiceServer).GetPeers(ctx, req.(*GetPeersRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -210,8 +244,12 @@ var ClusterService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _ClusterService_AddNode_Handler,
 		},
 		{
-			MethodName: "RemoveNode",
-			Handler:    _ClusterService_RemoveNode_Handler,
+			MethodName: "RemovePeer",
+			Handler:    _ClusterService_RemovePeer_Handler,
+		},
+		{
+			MethodName: "GetPeers",
+			Handler:    _ClusterService_GetPeers_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

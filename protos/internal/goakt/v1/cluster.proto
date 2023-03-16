@@ -14,8 +14,18 @@ service ClusterService {
   rpc GetActor(GetActorRequest) returns (GetActorResponse);
   // AddNode adds a new node to the cluster
   rpc AddNode(AddNodeRequest) returns (AddNodeResponse);
-  // RemoveNode removes a node from the cluster
-  rpc RemoveNode(RemoveNodeRequest) returns (RemoveNodeResponse);
+  // RemovePeer removes a node's peer from the cluster
+  rpc RemovePeer(RemovePeerRequest) returns (RemovePeerResponse);
+  // GetPeers fetches all the peers of a given node
+  rpc GetPeers(GetPeersRequest) returns (GetPeersResponse);
+}
+
+// GetPeersRequest is used to fetch all the peers of a given node
+message GetPeersRequest {}
+
+message GetPeersResponse {
+  // Specifies the list of peers
+  repeated Peer peers = 1;
 }
 
 // PutActorRequest is used to put an actor
@@ -51,12 +61,12 @@ message AddNodeRequest {
 message AddNodeResponse {}
 
 // RemoveNodeRequest removes a node from the cluster
-message RemoveNodeRequest {
+message RemovePeerRequest {
   // Specifies the node ID
   uint64 node_id = 1;
 }
 
-message RemoveNodeResponse {}
+message RemovePeerResponse {}
 
 // FsmState specifies the raft Finite State Machine entries
 message FsmState {
@@ -97,8 +107,8 @@ message Group {
 }
 
 /*
-   * Definitions of the raft client commands to the cluster
-*/
+ * Definitions of the raft client commands to the cluster
+ */
 message AddGroup {
   // Specifies the group
   Group group = 1;

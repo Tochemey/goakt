@@ -2,7 +2,6 @@ package cluster
 
 import (
 	"context"
-	"net"
 	"time"
 
 	"github.com/pkg/errors"
@@ -15,8 +14,8 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 )
 
-// Node represents the raft node
-type Node struct {
+// node represents the raft node
+type node struct {
 	raftNode *raft.Node
 	fsm      *FSM
 
@@ -29,14 +28,12 @@ type Node struct {
 	// specifies the start options
 	startOpts []raft.StartOption
 	// specifies the options
-	opts []raft.Option
-
-	raftServer *grpc.Server
-	logger     log.Logger
+	opts   []raft.Option
+	logger log.Logger
 }
 
-// NewNode creates an instance of Node
-func NewNode(raftAddr string, stateDIR string, logger log.Logger) *Node {
+// newNode creates an instance of node
+func newNode(raftAddr string, stateDIR string, logger log.Logger) *node {
 	// create the options
 	opts := []raft.Option{
 		raft.WithStateDIR(stateDIR),
@@ -45,7 +42,7 @@ func NewNode(raftAddr string, stateDIR string, logger log.Logger) *Node {
 	// create an instance of FSM
 	fsm := NewFSM(logger)
 	// create an instance of the node
-	node := raft.NewNode(fsm, transport.GRPC, opts...)
+	raftNode := raft.NewNode(fsm, transport.GRPC, opts...)
 	// create the initial start options
 	startOpts := []raft.StartOption{
 		raft.WithAddress(raftAddr),
@@ -56,30 +53,29 @@ func NewNode(raftAddr string, stateDIR string, logger log.Logger) *Node {
 		raftgrpc.WithDialOptions(grpc.WithTransportCredentials(insecure.NewCredentials())),
 	)
 
-	// create an instance of Node
-	return &Node{
-		raftNode:   node,
-		fsm:        fsm,
-		raftAddr:   raftAddr,
-		joinAddr:   "",
-		stateDIR:   stateDIR,
-		startOpts:  startOpts,
-		opts:       opts,
-		logger:     logger,
-		raftServer: grpc.NewServer(),
+	// create an instance of node
+	return &node{
+		raftNode:  raftNode,
+		fsm:       fsm,
+		raftAddr:  raftAddr,
+		joinAddr:  "",
+		stateDIR:  stateDIR,
+		startOpts: startOpts,
+		opts:      opts,
+		logger:    logger,
 	}
 }
 
 // Start starts the node. When the join address is not set a brand-new cluster is started.
 // However, when the join address is set the given node joins an existing cluster at the joinAddr.
-func (n *Node) Start(joinAddr string) error {
+func (n *node) Start(joinAddr *string) error {
 	// when the join address is set, it means this node is joining an existing cluster
-	if joinAddr != "" {
+	if joinAddr != nil {
 		// set the join address
-		n.joinAddr = joinAddr
+		n.joinAddr = *joinAddr
 		// joining an existing cluster
 		n.startOpts = append(n.startOpts, raft.WithFallback(
-			raft.WithJoin(joinAddr, time.Second),
+			raft.WithJoin(*joinAddr, time.Second),
 			raft.WithRestart(),
 		))
 	} else {
@@ -89,8 +85,6 @@ func (n *Node) Start(joinAddr string) error {
 			raft.WithRestart(),
 		))
 	}
-	// start the raft server
-	go n.startRaftServer()
 	// start the underlying node
 	if err := n.raftNode.Start(n.startOpts...); err != nil && err != raft.ErrNodeStopped {
 		return err
@@ -99,9 +93,7 @@ func (n *Node) Start(joinAddr string) error {
 }
 
 // Stop stops the node gracefully
-func (n *Node) Stop() error {
-	// stop the raft server
-	n.raftServer.GracefulStop()
+func (n *node) Stop() error {
 	// stop the underlying raft node
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
 	defer cancel()
@@ -113,7 +105,7 @@ func (n *Node) Stop() error {
 }
 
 // Peers returns the list of node Peers
-func (n *Node) Peers() []*goaktpb.Peer {
+func (n *node) Peers() []*goaktpb.Peer {
 	// create an empty list of peers
 	var peers []*goaktpb.Peer
 	// get the members of this node
@@ -130,17 +122,7 @@ func (n *Node) Peers() []*goaktpb.Peer {
 	return peers
 }
 
-// startRaftServer start the raft server.
-// This facilitates the communication between raft nodes
-func (n *Node) startRaftServer() {
-	// create an instance of the TCP listener
-	listener, err := net.Listen("tcp", n.raftAddr)
-	// return the error when there is an error
-	if err != nil {
-		panic(errors.Wrap(err, "failed to create a TCP listener for the raft server"))
-	}
-	// start the server
-	if err := n.raftServer.Serve(listener); err != nil {
-		panic(errors.Wrap(err, "failed to start the raft server"))
-	}
+// RaftAddr returns the raft server address
+func (n *node) RaftAddr() string {
+	return n.raftAddr
 }
