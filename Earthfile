@@ -2,7 +2,7 @@ VERSION 0.7
 PROJECT tochemey/goakt
 
 
-FROM tochemey/docker-go:1.19.3-0.5.0
+FROM tochemey/docker-go:1.20.1-0.7.0
 
 # run a PR branch is created
 pr-pipeline:

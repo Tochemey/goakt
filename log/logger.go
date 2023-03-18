@@ -1,34 +1,38 @@
 package log
 
-import "context"
-
 // Logger represents an active logging object that generates lines of
 // output to an io.Writer.
 type Logger interface {
-	// Debug logs to DEBUG level
-	Debug(...any)
-	// Debugf logs to DEBUG level.
-	Debugf(string, ...any)
-	// Info logs to INFO level.
+	// Info starts a new message with info level.
 	Info(...any)
-	// Infof logs to INFO level
+	// Infof starts a new message with info level.
 	Infof(string, ...any)
-	// Warning logs to the WARNING level.
-	Warning(...any)
-	// Warningf logs to the WARNING level
-	Warningf(string, ...any)
-	// Error logs to the ERROR level.
+	// Warn starts a new message with warn level.
+	Warn(...any)
+	// Warnf starts a new message with warn level.
+	Warnf(string, ...any)
+	// Error starts a new message with error level.
 	Error(...any)
-	// Errorf logs to the ERROR level.
+	// Errorf starts a new message with error level.
 	Errorf(string, ...any)
-	// Fatal logs to the FATAL level followed by a call to os.Exit(1).
+	// Fatal starts a new message with fatal level. The os.Exit(1) function
+	// is called which terminates the program immediately.
 	Fatal(...any)
-	// Fatalf logs to the FATAL level followed by a call to os.Exit(1).
+	// Fatalf starts a new message with fatal level. The os.Exit(1) function
+	// is called which terminates the program immediately.
 	Fatalf(string, ...any)
-	// Panic logs to the PANIC level followed by a call to panic().
+	// Panic starts a new message with panic level. The panic() function
+	// is called which stops the ordinary flow of a goroutine.
 	Panic(...any)
-	// Panicf logs to the PANIC level followed by a call to panic().
+	// Panicf starts a new message with panic level. The panic() function
+	// is called which stops the ordinary flow of a goroutine.
 	Panicf(string, ...any)
-	// WithContext returns a context logger
-	WithContext(ctx context.Context) Logger
+	// Debug starts a new message with debug level.
+	Debug(...any)
+	// Debugf starts a new message with debug level.
+	Debugf(string, ...any)
+	// Trace starts a new message with trace level
+	Trace(...any)
+	// Tracef starts a new message with trace level
+	Tracef(string, ...any)
 }

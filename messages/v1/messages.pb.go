@@ -7,12 +7,11 @@
 package messagesv1
 
 import (
-	reflect "reflect"
-	sync "sync"
-
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	anypb "google.golang.org/protobuf/types/known/anypb"
+	reflect "reflect"
+	sync "sync"
 )
 
 const (
@@ -137,12 +136,12 @@ func file_messages_v1_messages_proto_rawDescGZIP() []byte {
 var file_messages_v1_messages_proto_msgTypes = make([]protoimpl.MessageInfo, 1)
 var file_messages_v1_messages_proto_goTypes = []interface{}{
 	(*RemoteMessage)(nil), // 0: messages.v1.RemoteMessage
-	(*Address)(nil),       // 1: messages.v1.LocalAddress
+	(*Address)(nil),       // 1: messages.v1.Address
 	(*anypb.Any)(nil),     // 2: google.protobuf.Any
 }
 var file_messages_v1_messages_proto_depIdxs = []int32{
-	1, // 0: messages.v1.RemoteMessage.sender:type_name -> messages.v1.LocalAddress
-	1, // 1: messages.v1.RemoteMessage.receiver:type_name -> messages.v1.LocalAddress
+	1, // 0: messages.v1.RemoteMessage.sender:type_name -> messages.v1.Address
+	1, // 1: messages.v1.RemoteMessage.receiver:type_name -> messages.v1.Address
 	2, // 2: messages.v1.RemoteMessage.message:type_name -> google.protobuf.Any
 	3, // [3:3] is the sub-list for method output_type
 	3, // [3:3] is the sub-list for method input_type
