@@ -16,6 +16,8 @@ type Discovery interface {
 	Nodes(ctx context.Context) ([]*goaktpb.Node, error)
 	// Watch returns event based upon node lifecycle
 	Watch(ctx context.Context) (chan *goaktpb.Event, error)
+	// EarliestNode returns the earliest node
+	EarliestNode(ctx context.Context) (*goaktpb.Node, error)
 	// Stop shutdown the discovery provider
 	Stop() error
 }

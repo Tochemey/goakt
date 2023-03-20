@@ -1,13 +1,13 @@
-package k8s
+package discovery
 
 import (
 	"context"
+	"sort"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/pkg/errors"
-	"github.com/tochemey/goakt/internal/discovery"
 	goaktpb "github.com/tochemey/goakt/internal/goaktpb/v1"
 	"github.com/tochemey/goakt/log"
 	"go.uber.org/atomic"
@@ -55,7 +55,7 @@ type Kubernetes struct {
 }
 
 // enforce compilation
-var _ discovery.Discovery = &Kubernetes{}
+var _ Discovery = &Kubernetes{}
 
 // New returns an instance of the kubernetes discovery provider
 func New() *Kubernetes {
@@ -70,8 +70,29 @@ func New() *Kubernetes {
 	return k8
 }
 
+// EarliestNode returns the earliest node
+func (k *Kubernetes) EarliestNode(ctx context.Context) (*goaktpb.Node, error) {
+	// fetch the list of Nodes
+	nodes, err := k.Nodes(ctx)
+	// handle the error
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to get the earliest node")
+	}
+	// let us sort the nodes by their timestamp
+	sort.SliceStable(nodes, func(i, j int) bool {
+		return nodes[i].GetTimestamp() < nodes[j].GetTimestamp()
+	})
+	// return the first element in the sorted list
+	return nodes[0], nil
+}
+
 // Nodes returns the list of Nodes at a given time
 func (k *Kubernetes) Nodes(ctx context.Context) ([]*goaktpb.Node, error) {
+	// acquire the lock
+	k.mu.Lock()
+	// release the lock once done
+	defer k.mu.Unlock()
+
 	// first check whether the actor system has started
 	if !k.isInitialized.Load() {
 		return nil, errors.New("kubernetes discovery engine not initialized")
@@ -151,7 +172,7 @@ func (k *Kubernetes) Watch(ctx context.Context) (chan *goaktpb.Event, error) {
 }
 
 // Start the discovery engine
-func (k *Kubernetes) Start(ctx context.Context, meta discovery.Meta) error {
+func (k *Kubernetes) Start(ctx context.Context, meta Meta) error {
 	// validate the meta
 	// let us make sure we have the required options set
 	// assert the present of the namespace
@@ -287,7 +308,7 @@ func (k *Kubernetes) handlePodDeleted(pod *v1.Pod) {
 }
 
 // setOptions sets the kubernetes option
-func (k *Kubernetes) setOptions(meta discovery.Meta) (err error) {
+func (k *Kubernetes) setOptions(meta Meta) (err error) {
 	// create an instance of Option
 	option := new(Option)
 	// extract the namespace
