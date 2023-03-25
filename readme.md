@@ -34,7 +34,7 @@ Also, check reference section at the end of the post for more material regarding
 
 ## Installation
 ```bash
-go get github.com/Tochemey/messages
+go get github.com/tochemey/goakt
 ```
 
 ## Example
