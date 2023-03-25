@@ -167,7 +167,7 @@ MainLoop:
 }
 
 // Watch returns event based upon nodes lifecycle
-func (k *Kubernetes) Watch(ctx context.Context) (chan *goaktpb.Event, error) {
+func (k *Kubernetes) Watch(ctx context.Context) (<-chan *goaktpb.Event, error) {
 	// first check whether the actor system has started
 	if !k.isInitialized.Load() {
 		return nil, errors.New("kubernetes discovery engine not initialized")

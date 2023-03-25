@@ -2,12 +2,14 @@ package cluster
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/pkg/errors"
 	"github.com/shaj13/raft"
 	"github.com/shaj13/raft/transport"
 	"github.com/shaj13/raft/transport/raftgrpc"
+	"github.com/tochemey/goakt/internal/discovery"
 	goaktpb "github.com/tochemey/goakt/internal/goaktpb/v1"
 	"github.com/tochemey/goakt/log"
 	"google.golang.org/grpc"
@@ -21,19 +23,21 @@ type node struct {
 
 	// specifies the raft server address
 	raftAddr string
-	// specifies the cluster join address
-	joinAddr string
 	// specifies the WAL state directory
 	stateDIR string
 	// specifies the start options
 	startOpts []raft.StartOption
 	// specifies the options
-	opts   []raft.Option
-	logger log.Logger
+	opts      []raft.Option
+	logger    log.Logger
+	discovery discovery.Discovery
+
+	// list of peers mapping their addr and node id
+	peersMap map[string]uint64
 }
 
 // newNode creates an instance of node
-func newNode(raftAddr string, stateDIR string, logger log.Logger) *node {
+func newNode(raftAddr string, stateDIR string, discovery discovery.Discovery, logger log.Logger) *node {
 	// create the options
 	opts := []raft.Option{
 		raft.WithStateDIR(stateDIR),
@@ -58,30 +62,39 @@ func newNode(raftAddr string, stateDIR string, logger log.Logger) *node {
 		raftNode:  raftNode,
 		fsm:       fsm,
 		raftAddr:  raftAddr,
-		joinAddr:  "",
 		stateDIR:  stateDIR,
 		startOpts: startOpts,
 		opts:      opts,
 		logger:    logger,
+		discovery: discovery,
 	}
 }
 
 // Start starts the node. When the join address is not set a brand-new cluster is started.
 // However, when the join address is set the given node joins an existing cluster at the joinAddr.
-func (n *node) Start(joinAddr *string) error {
-	// when the join address is set, it means this node is joining an existing cluster
-	if joinAddr != nil {
-		// set the join address
-		n.joinAddr = *joinAddr
-		// joining an existing cluster
+func (n *node) Start(ctx context.Context) error {
+	// get ready to start a brand-new cluster
+	// starting a brand-new cluster
+	n.startOpts = append(n.startOpts, raft.WithFallback(
+		raft.WithInitCluster(),
+		raft.WithRestart(),
+	))
+
+	// let us get the earliest node in the cluster using the discovery method
+	// grab the earliest node in the cluster
+	discoNode, err := n.discovery.EarliestNode(ctx)
+	// handle the error
+	if err != nil {
+		n.logger.Error(errors.Wrap(err, "failed to fetch the earliest node in the cluster"))
+		return err
+	}
+
+	var joinAddr string
+	addr := fmt.Sprintf("%s:%d", discoNode.GetHost(), discoNode.GetPort())
+	if addr != n.RaftAddr() {
+		// override the startOpt by jut joining an existing cluster
 		n.startOpts = append(n.startOpts, raft.WithFallback(
-			raft.WithJoin(*joinAddr, time.Second),
-			raft.WithRestart(),
-		))
-	} else {
-		// starting a brand-new cluster
-		n.startOpts = append(n.startOpts, raft.WithFallback(
-			raft.WithInitCluster(),
+			raft.WithJoin(joinAddr, time.Second),
 			raft.WithRestart(),
 		))
 	}

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
+	"github.com/shaj13/raft"
 	goaktpb "github.com/tochemey/goakt/internal/goaktpb/v1"
 	"github.com/tochemey/goakt/internal/grpc"
 	"github.com/tochemey/goakt/log"
@@ -21,6 +22,8 @@ type Service struct {
 	logger log.Logger
 	node   *node
 	config *Config
+
+	peersListenerChan chan struct{}
 }
 
 // enforces compilation error
@@ -29,11 +32,12 @@ var _ goaktpb.ClusterServiceServer = &Service{}
 // NewService creates an instance of cluster node service
 func NewService(config *Config) *Service {
 	// let us create an instance of the node
-	node := newNode(fmt.Sprintf("%s:%d", config.Host, config.Port), config.StateDir, config.Logger)
+	node := newNode(fmt.Sprintf("%s:%d", config.Host, config.Port), config.StateDir, config.Discovery, config.Logger)
 	return &Service{
-		logger: config.Logger,
-		node:   node,
-		config: config,
+		logger:            config.Logger,
+		node:              node,
+		config:            config,
+		peersListenerChan: make(chan struct{}, 1),
 	}
 }
 
@@ -67,23 +71,8 @@ func (s *Service) Start(ctx context.Context) error {
 	s.server = server
 	// start the server
 	s.server.Start(ctx)
-	// grab the earliest node in the cluster
-	discoNode, err := s.config.Discovery.EarliestNode(ctx)
-	// handle the error
-	if err != nil {
-		s.logger.Error(errors.Wrap(err, "failed to fetch the earliest node in the cluster"))
-		return err
-	}
-
-	var joinAddr *string
-	if discoNode.GetHost() != s.config.Host && discoNode.GetPort() != s.config.Port {
-		// here it means that there is a running cluster to join
-		addr := fmt.Sprintf("%s:%d", discoNode.GetHost(), discoNode.GetPort())
-		joinAddr = &addr
-	}
-
 	// start the underlying node
-	if err := s.node.Start(joinAddr); err != nil {
+	if err := s.node.Start(ctx); err != nil {
 		s.logger.Error(errors.Wrap(err, "failed to start cluster node"))
 		return err
 	}
@@ -96,8 +85,8 @@ func (s *Service) Start(ctx context.Context) error {
 		return err
 	}
 
-	// TODO handle the disco events
-	s.logger.Info(discoEvents)
+	// handle the discovery node events
+	go s.handleClusterEvents(discoEvents)
 
 	// Ahoy we are successful
 	return nil
@@ -108,7 +97,8 @@ func (s *Service) Stop(ctx context.Context) error {
 	// TODO add traces
 	// stop the underlying grpc server
 	s.server.Stop(ctx)
-
+	// close the events listener channel
+	close(s.peersListenerChan)
 	// stop the raft node
 	if err := s.node.Stop(); err != nil {
 		s.logger.Error(errors.Wrap(err, "failed to stop underlying raft node"))
@@ -197,44 +187,89 @@ func (s *Service) GetActor(ctx context.Context, request *goaktpb.GetActorRequest
 	return &goaktpb.GetActorResponse{Actor: actor}, nil
 }
 
-// AddNode adds a new node to the cluster
-func (s *Service) AddNode(ctx context.Context, request *goaktpb.AddNodeRequest) (*goaktpb.AddNodeResponse, error) {
-	//TODO implement me
-	panic("implement me")
-}
-
-// RemovePeer removes a node's peer from the cluster
-func (s *Service) RemovePeer(ctx context.Context, request *goaktpb.RemovePeerRequest) (*goaktpb.RemovePeerResponse, error) {
-	// TODO add traces
-	// TODO grab the context logger
-	// clone the incoming request
-	req := proto.Clone(request).(*goaktpb.RemovePeerRequest)
-	// check whether the request is nil
-	if req == nil {
-		return nil, status.Error(codes.InvalidArgument, "request is nil")
-	}
-	// add a debug logging
-	s.logger.Debugf("removing peer=%d", req.GetNodeId())
-	// TODO add the removal of timeout in an option or a config
-	ctx, cancelFn := context.WithTimeout(ctx, time.Second)
-	defer cancelFn()
-	// let us attempt removing the peer
-	if err := s.node.raftNode.RemoveMember(ctx, req.GetNodeId()); err != nil {
-		// add a logging to the stderr
-		s.logger.Error(errors.Wrapf(err, "failed to remove node's peer=%d", req.GetNodeId()))
-		// let us assert the error to make sure we return the right error message to the caller
-		if errors.Is(err, context.DeadlineExceeded) {
-			// here we return a deadline exceeded status code
-			return nil, status.Error(codes.DeadlineExceeded, err.Error())
-		}
-		// here we abort the request
-		return nil, status.Error(codes.Aborted, err.Error())
-	}
-	// Ahoy we are successful
-	return &goaktpb.RemovePeerResponse{}, nil
-}
-
 // RegisterService register the service
 func (s *Service) RegisterService(srv *ggrpc.Server) {
 	goaktpb.RegisterClusterServiceServer(srv, s)
+}
+
+// handleClusterEvents handles the cluster node events
+func (s *Service) handleClusterEvents(events <-chan *goaktpb.Event) {
+	for {
+		select {
+		case <-s.peersListenerChan:
+			return
+		case event := <-events:
+			switch x := event.GetType().(type) {
+			case *goaktpb.Event_Added:
+			// TBD
+			case *goaktpb.Event_Modified:
+				// let us grab the event
+				evt := x.Modified
+				func() {
+					// let us check whether the given node is a leader or not
+					if s.node.raftNode.Leader() == raft.None {
+						return
+					}
+					// create a context that can be canceled
+					ctx := context.Background()
+					s.logger.Debugf("updating peer=%d", evt.GetOldNode().GetName())
+					// TODO add the removal of timeout in an option or a config
+					ctx, cancelFn := context.WithTimeout(ctx, time.Second)
+					defer cancelFn()
+					// let us attempt removing the peer
+					peers := s.node.Peers()
+					nodeAddr := fmt.Sprintf("%s:%d", evt.GetOldNode().GetHost(), evt.GetOldNode().GetPort())
+					var peer *goaktpb.Peer
+					for _, p := range peers {
+						if p.HostAndPort == nodeAddr {
+							peer = p
+							break
+						}
+					}
+					// update the peer
+					member := &raft.RawMember{
+						ID:      peer.GetNodeId(),
+						Address: fmt.Sprintf("%s:%d", evt.GetNewNode().GetHost(), evt.GetNewNode().GetPort()),
+					}
+					// update the member
+					if err := s.node.raftNode.UpdateMember(ctx, member); err != nil {
+						// add a logging to the stderr
+						s.logger.Error(errors.Wrapf(err, "failed to update node's peer=%d", peer.GetNodeId()))
+					}
+				}()
+			case *goaktpb.Event_Removed:
+				// let us grab the removal event
+				evt := x.Removed
+				func() {
+					// let us check whether the given node is a leader or not
+					if s.node.raftNode.Leader() == raft.None {
+						return
+					}
+					// create a context that can be canceled
+					ctx := context.Background()
+					s.logger.Debugf("removing peer=%d", evt.GetNode().GetName())
+					// TODO add the removal of timeout in an option or a config
+					ctx, cancelFn := context.WithTimeout(ctx, time.Second)
+					defer cancelFn()
+					// let us attempt removing the peer
+					peers := s.node.Peers()
+					nodeAddr := fmt.Sprintf("%s:%d", evt.GetNode().GetHost(), evt.GetNode().GetPort())
+					var peer *goaktpb.Peer
+					for _, p := range peers {
+						if p.HostAndPort == nodeAddr {
+							peer = p
+							break
+						}
+					}
+					// remove the peer
+					if err := s.node.raftNode.RemoveMember(ctx, peer.GetNodeId()); err != nil {
+						// add a logging to the stderr
+						s.logger.Error(errors.Wrapf(err, "failed to remove node's peer=%d", peer.GetNodeId()))
+					}
+				}()
+			default:
+				// pass
+			}
+		}
+	}
 }

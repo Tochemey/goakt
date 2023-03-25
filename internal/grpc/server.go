@@ -378,7 +378,7 @@ func GetServerBuilder(cfg *Config) *ServerBuilder {
 		WithTracingEnabled(cfg.TraceEnabled).
 		WithTraceURL(cfg.TraceURL).
 		WithServiceName(cfg.ServiceName).
-		WithPort(cfg.GrpcPort).
+		WithPort(int(cfg.GrpcPort)).
 		WithHost(cfg.GrpcHost).
 		WithLogger(cfg.Logger)
 }
