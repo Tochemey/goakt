@@ -494,7 +494,7 @@ func (a *actorSystem) startRemoting(ctx context.Context) error {
 		// build the grpc server
 		config := &grpc.Config{
 			ServiceName:      a.Name(),
-			GrpcPort:         a.Port(),
+			GrpcPort:         int32(a.Port()),
 			GrpcHost:         a.Host(),
 			TraceEnabled:     false, // TODO
 			TraceURL:         "",    // TODO

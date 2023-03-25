@@ -67,12 +67,38 @@ func (s *Service) Start(ctx context.Context) error {
 	s.server = server
 	// start the server
 	s.server.Start(ctx)
+	// grab the earliest node in the cluster
+	discoNode, err := s.config.Discovery.EarliestNode(ctx)
+	// handle the error
+	if err != nil {
+		s.logger.Error(errors.Wrap(err, "failed to fetch the earliest node in the cluster"))
+		return err
+	}
+
+	var joinAddr *string
+	if discoNode.GetHost() != s.config.Host && discoNode.GetPort() != s.config.Port {
+		// here it means that there is a running cluster to join
+		addr := fmt.Sprintf("%s:%d", discoNode.GetHost(), discoNode.GetPort())
+		joinAddr = &addr
+	}
+
 	// start the underlying node
-	// TODO add the join address via a discovery mechanism
-	if err := s.node.Start(nil); err != nil {
+	if err := s.node.Start(joinAddr); err != nil {
 		s.logger.Error(errors.Wrap(err, "failed to start cluster node"))
 		return err
 	}
+
+	// let u start listening to the discovery event
+	discoEvents, err := s.config.Discovery.Watch(ctx)
+	// handle the error
+	if err != nil {
+		s.logger.Error(errors.Wrap(err, "failed to listen to discovery node lifecycle"))
+		return err
+	}
+
+	// TODO handle the disco events
+	s.logger.Info(discoEvents)
+
 	// Ahoy we are successful
 	return nil
 }
