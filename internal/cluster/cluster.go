@@ -8,17 +8,28 @@ import (
 	"github.com/pkg/errors"
 	"github.com/shaj13/raft"
 	goaktpb "github.com/tochemey/goakt/internal/goaktpb/v1"
-	"github.com/tochemey/goakt/internal/grpc"
 	"github.com/tochemey/goakt/log"
-	ggrpc "google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 )
 
-// Service implements the cluster service
-type Service struct {
-	server grpc.Server
+// Cluster defines the cluster contract
+type Cluster interface {
+	// Start starts the cluster node
+	Start(ctx context.Context) error
+	// Stop stops the cluster node
+	Stop(ctx context.Context) error
+	// GetPeers fetches all the peers of a given node
+	GetPeers(ctx context.Context) ([]*goaktpb.Peer, error)
+	// PutActor adds an actor meta to the cluster
+	PutActor(ctx context.Context, actor *goaktpb.WireActor) error
+	// GetActor reads an actor meta from the cluster
+	GetActor(ctx context.Context, actorName string) (*goaktpb.WireActor, error)
+}
+
+// cluster implements the cluster service
+type cluster struct {
 	logger log.Logger
 	node   *node
 	config *Config
@@ -26,14 +37,14 @@ type Service struct {
 	peersListenerChan chan struct{}
 }
 
-// enforces compilation error
-var _ goaktpb.ClusterServiceServer = &Service{}
+// enforce compilation error
+var _ Cluster = &cluster{}
 
-// NewService creates an instance of cluster node service
-func NewService(config *Config) *Service {
+// New creates an instance of cluster node service
+func New(config *Config) Cluster {
 	// let us create an instance of the node
 	node := newNode(fmt.Sprintf("%s:%d", config.Host, config.Port), config.StateDir, config.Discovery, config.Logger)
-	return &Service{
+	return &cluster{
 		logger:            config.Logger,
 		node:              node,
 		config:            config,
@@ -41,36 +52,10 @@ func NewService(config *Config) *Service {
 	}
 }
 
-// Start starts the cluster node service
-func (s *Service) Start(ctx context.Context) error {
+// Start starts the cluster node
+func (s *cluster) Start(ctx context.Context) error {
 	// TODO add traces
 	// TODO grab the context logger
-	// build the grpc server
-	config := &grpc.Config{
-		ServiceName:      s.config.Name,
-		GrpcHost:         s.config.Host,
-		GrpcPort:         s.config.Port,
-		TraceEnabled:     false,
-		TraceURL:         "",
-		EnableReflection: false,
-		Logger:           s.config.Logger,
-	}
-
-	// build the grpc service
-	server, err := grpc.
-		GetServerBuilder(config).
-		WithService(s).
-		Build()
-
-	// handle the error
-	if err != nil {
-		s.logger.Error(errors.Wrap(err, "failed to start cluster server"))
-		return err
-	}
-	// set the service server
-	s.server = server
-	// start the server
-	s.server.Start(ctx)
 	// start the underlying node
 	if err := s.node.Start(ctx); err != nil {
 		s.logger.Error(errors.Wrap(err, "failed to start cluster node"))
@@ -92,11 +77,9 @@ func (s *Service) Start(ctx context.Context) error {
 	return nil
 }
 
-// Stop stops the cluster node service
-func (s *Service) Stop(ctx context.Context) error {
+// Stop stops the cluster node
+func (s *cluster) Stop(ctx context.Context) error {
 	// TODO add traces
-	// stop the underlying grpc server
-	s.server.Stop(ctx)
 	// close the events listener channel
 	close(s.peersListenerChan)
 	// stop the raft node
@@ -108,32 +91,18 @@ func (s *Service) Stop(ctx context.Context) error {
 }
 
 // GetPeers fetches all the peers of a given node
-func (s *Service) GetPeers(ctx context.Context, request *goaktpb.GetPeersRequest) (*goaktpb.GetPeersResponse, error) {
+func (s *cluster) GetPeers(ctx context.Context) ([]*goaktpb.Peer, error) {
 	// TODO add traces
 	// TODO grab the context logger
-	// clone the incoming request
-	req := proto.Clone(request).(*goaktpb.GetPeersRequest)
-	// check whether the request is nil
-	if req == nil {
-		return nil, status.Error(codes.InvalidArgument, "request is nil")
-	}
 	// fetch the node peers
-	peers := s.node.Peers()
-	return &goaktpb.GetPeersResponse{Peers: peers}, nil
+	return s.node.Peers(), nil
 }
 
 // PutActor adds an actor meta to the cluster
-func (s *Service) PutActor(ctx context.Context, request *goaktpb.PutActorRequest) (*goaktpb.PutActorResponse, error) {
+func (s *cluster) PutActor(ctx context.Context, actor *goaktpb.WireActor) error {
 	// TODO add traces
 	// TODO grab the context logger
-	// clone the incoming request
-	req := proto.Clone(request).(*goaktpb.PutActorRequest)
-	// check whether the request is nil
-	if req == nil {
-		return nil, status.Error(codes.InvalidArgument, "request is nil")
-	}
-	// grab the actor meta
-	actor := req.GetActor()
+
 	// let us marshal it
 	bytea, err := proto.Marshal(actor)
 	// handle the marshaling error
@@ -141,7 +110,7 @@ func (s *Service) PutActor(ctx context.Context, request *goaktpb.PutActorRequest
 		// add a logging to the stderr
 		s.logger.Error(errors.Wrapf(err, "failed to persist actor=%s data in the cluster", actor.GetActorName()))
 		// here we cancel the request
-		return nil, status.Error(codes.Canceled, err.Error())
+		return errors.Wrapf(err, "failed to persist actor=%s data in the cluster", actor.GetActorName())
 	}
 	// TODO add the persisting timeout in an option or a config
 	ctx, cancelFn := context.WithTimeout(ctx, time.Second)
@@ -151,24 +120,16 @@ func (s *Service) PutActor(ctx context.Context, request *goaktpb.PutActorRequest
 		// add a logging to the stderr
 		s.logger.Error(errors.Wrapf(err, "failed to persist actor=%s data in the cluster", actor.GetActorName()))
 		// here we cancel the request
-		return nil, status.Error(codes.Canceled, err.Error())
+		return errors.Wrapf(err, "failed to persist actor=%s data in the cluster", actor.GetActorName())
 	}
 	// Ahoy we are successful
-	return &goaktpb.PutActorResponse{}, nil
+	return nil
 }
 
 // GetActor reads an actor meta from the cluster
-func (s *Service) GetActor(ctx context.Context, request *goaktpb.GetActorRequest) (*goaktpb.GetActorResponse, error) {
+func (s *cluster) GetActor(ctx context.Context, actorName string) (*goaktpb.WireActor, error) {
 	// TODO add traces
 	// TODO grab the context logger
-	// clone the incoming request
-	req := proto.Clone(request).(*goaktpb.GetActorRequest)
-	// check whether the request is nil
-	if req == nil {
-		return nil, status.Error(codes.InvalidArgument, "request is nil")
-	}
-	// let us grab the actor name
-	actorName := req.GetActorName()
 	// TODO add the fetching timeout in an option or a config
 	ctx, cancelFn := context.WithTimeout(ctx, time.Second)
 	defer cancelFn()
@@ -184,16 +145,11 @@ func (s *Service) GetActor(ctx context.Context, request *goaktpb.GetActorRequest
 	// fetch the data from the fsm
 	actor := s.node.fsm.Read(actorName)
 	// return the response
-	return &goaktpb.GetActorResponse{Actor: actor}, nil
-}
-
-// RegisterService register the service
-func (s *Service) RegisterService(srv *ggrpc.Server) {
-	goaktpb.RegisterClusterServiceServer(srv, s)
+	return actor, nil
 }
 
 // handleClusterEvents handles the cluster node events
-func (s *Service) handleClusterEvents(events <-chan *goaktpb.Event) {
+func (s *cluster) handleClusterEvents(events <-chan *goaktpb.Event) {
 	for {
 		select {
 		case <-s.peersListenerChan:
@@ -201,7 +157,7 @@ func (s *Service) handleClusterEvents(events <-chan *goaktpb.Event) {
 		case event := <-events:
 			switch x := event.GetType().(type) {
 			case *goaktpb.Event_Added:
-			// TBD
+			// pass. No need to handle this since every use the join method to join the cluster
 			case *goaktpb.Event_Modified:
 				// let us grab the event
 				evt := x.Modified

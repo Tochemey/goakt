@@ -44,7 +44,7 @@ lint:
 
     COPY .golangci.yml ./
     # Runs golangci-lint with settings:
-    RUN golangci-lint run
+    RUN golangci-lint run --timeout 10m
 
 
 local-test:
