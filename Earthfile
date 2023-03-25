@@ -5,18 +5,18 @@ PROJECT tochemey/goakt
 FROM tochemey/docker-go:1.20.1-0.7.0
 
 # run a PR branch is created
-pr-pipeline:
-  PIPELINE
-  TRIGGER pr main
-  BUILD +lint
-  BUILD +local-test
+#pr-pipeline:
+#  PIPELINE
+#  TRIGGER pr main
+#  BUILD +lint
+#  BUILD +local-test
 
 # run on when a push to main is made
-main-pipeline:
-  PIPELINE
-  TRIGGER push main
-  BUILD +lint
-  BUILD +local-test
+#main-pipeline:
+#  PIPELINE
+#  TRIGGER push main
+#  BUILD +lint
+#  BUILD +local-test
 
 test:
   BUILD +lint
@@ -44,7 +44,7 @@ lint:
 
     COPY .golangci.yml ./
     # Runs golangci-lint with settings:
-    RUN golangci-lint run
+    RUN golangci-lint run --timeout 10m
 
 
 local-test:

@@ -6,68 +6,6 @@ import "messages/v1/address.proto";
 
 option go_package = "github.com/tochemey/goakt/internal/goakt/v1;goaktv1";
 
-// ClusterService specifies the Go-Akt cluster service
-service ClusterService {
-  // PutActor adds an actor meta to the cluster
-  rpc PutActor(PutActorRequest) returns (PutActorResponse);
-  // GetActor reads an actor meta from the cluster
-  rpc GetActor(GetActorRequest) returns (GetActorResponse);
-  // AddNode adds a new node to the cluster
-  rpc AddNode(AddNodeRequest) returns (AddNodeResponse);
-  // RemovePeer removes a node's peer from the cluster
-  rpc RemovePeer(RemovePeerRequest) returns (RemovePeerResponse);
-  // GetPeers fetches all the peers of a given node
-  rpc GetPeers(GetPeersRequest) returns (GetPeersResponse);
-}
-
-// GetPeersRequest is used to fetch all the peers of a given node
-message GetPeersRequest {}
-
-message GetPeersResponse {
-  // Specifies the list of peers
-  repeated Peer peers = 1;
-}
-
-// PutActorRequest is used to put an actor
-// meta information onto the state store
-message PutActorRequest {
-  // Specifies the actor
-  WireActor actor = 1;
-}
-
-message PutActorResponse {}
-
-// GetActorRequest is used to fetch an actor from the cluster
-message GetActorRequest {
-  // Specifies the actor name
-  string actor_name = 1;
-}
-
-message GetActorResponse {
-  // Specifies the actor meta on the wire
-  WireActor actor = 1;
-}
-
-// AddNodeRequest is used to add a node to the cluster
-message AddNodeRequest {
-  // Specifies the node ID
-  uint64 node_id = 1;
-  // Specifies the node host address
-  string host = 2;
-  // Specifies the remote port
-  int32 port = 3;
-}
-
-message AddNodeResponse {}
-
-// RemoveNodeRequest removes a node from the cluster
-message RemovePeerRequest {
-  // Specifies the node ID
-  uint64 node_id = 1;
-}
-
-message RemovePeerResponse {}
-
 // FsmState specifies the raft Finite State Machine entries
 message FsmState {
   // Specifies raft FSM entries
@@ -94,24 +32,6 @@ message Peer {
   uint64 node_id = 1;
   // Specifies the peer host and port
   string host_and_port = 2;
-}
-
-// Group represents the multi-raft group
-message Group {
-  // Specifies the group unique id
-  uint64 group_id = 1;
-  // Specifies the join address
-  string join_addr = 2;
-  // Specifies the peer group ids
-  repeated uint64 peer_ids = 3;
-}
-
-/*
- * Definitions of the raft client commands to the cluster
- */
-message AddGroup {
-  // Specifies the group
-  Group group = 1;
 }
 
 message GetWireActor {

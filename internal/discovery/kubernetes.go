@@ -21,21 +21,27 @@ import (
 )
 
 const (
-	Namespace     string = "namespace"
-	PodLabels            = "pod_labels"
-	LabelSelector        = "label_selector"
-	PortName             = "port_name"
+	// K8Namespace specifies the kubernetes namespace meta key
+	K8Namespace string = "namespace"
+	// K8PodLabels specifies the kubernetes pod_labels meta key
+	K8PodLabels = "pod_labels"
+	// K8LabelSelector specifies the kubernetes label_selector meta key
+	K8LabelSelector = "label_selector"
+	// K8PortName specifies the kubernetes port_name meta key
+	K8PortName = "port_name"
 )
 
-// Option represents the kubernetes provider option
-type Option struct {
+// k8Option represents the kubernetes provider option
+type k8Option struct {
 	// KubeConfig represents the kubernetes configuration
+	// TODO may not be needed
 	KubeConfig string
 	// NameSpace specifies the namespace
 	NameSpace string
 	// PodLabels defines the pod labels
 	PodLabels map[string]string
 	// Label Selector
+	// TODO may not needed
 	LabelSelector string
 	// Specifies the port name
 	PortName string
@@ -43,7 +49,7 @@ type Option struct {
 
 // Kubernetes represents the kubernetes provider
 type Kubernetes struct {
-	option    *Option
+	option    *k8Option
 	k8sClient *kubernetes.Clientset
 	mu        sync.Mutex
 
@@ -57,8 +63,8 @@ type Kubernetes struct {
 // enforce compilation
 var _ Discovery = &Kubernetes{}
 
-// New returns an instance of the kubernetes discovery provider
-func New() *Kubernetes {
+// NewKubernetes returns an instance of the kubernetes discovery provider
+func NewKubernetes() *Kubernetes {
 	// create an instance of
 	k8 := &Kubernetes{
 		mu:            sync.Mutex{},
@@ -160,8 +166,8 @@ MainLoop:
 	return nodes, nil
 }
 
-// Watch returns event based upon node lifecycle
-func (k *Kubernetes) Watch(ctx context.Context) (chan *goaktpb.Event, error) {
+// Watch returns event based upon nodes lifecycle
+func (k *Kubernetes) Watch(ctx context.Context) (<-chan *goaktpb.Event, error) {
 	// first check whether the actor system has started
 	if !k.isInitialized.Load() {
 		return nil, errors.New("kubernetes discovery engine not initialized")
@@ -171,24 +177,24 @@ func (k *Kubernetes) Watch(ctx context.Context) (chan *goaktpb.Event, error) {
 	return k.publicChan, nil
 }
 
-// Start the discovery engine
+// Start the k8 discovery engine
 func (k *Kubernetes) Start(ctx context.Context, meta Meta) error {
 	// validate the meta
 	// let us make sure we have the required options set
 	// assert the present of the namespace
-	if _, ok := meta[Namespace]; !ok {
+	if _, ok := meta[K8Namespace]; !ok {
 		return errors.New("k8 namespace is not provided")
 	}
 	// assert the presence of the label selector
-	if _, ok := meta[LabelSelector]; !ok {
+	if _, ok := meta[K8LabelSelector]; !ok {
 		return errors.New("k8 label_selector is not provided")
 	}
 	// assert the port name
-	if _, ok := meta[PortName]; !ok {
+	if _, ok := meta[K8PortName]; !ok {
 		return errors.New("k8 port_name is not provided")
 	}
 	// assert the pod labels
-	if _, ok := meta[PodLabels]; !ok {
+	if _, ok := meta[K8PodLabels]; !ok {
 		return errors.New("k8 pod_labels is not provided")
 	}
 	// create the k8 config
@@ -215,7 +221,7 @@ func (k *Kubernetes) Start(ctx context.Context, meta Meta) error {
 	return nil
 }
 
-// Stop shutdown the discovery provider
+// Stop shutdown the k8 discovery provider
 func (k *Kubernetes) Stop() error {
 	// first check whether the actor system has started
 	if !k.isInitialized.Load() {
@@ -225,6 +231,8 @@ func (k *Kubernetes) Stop() error {
 	close(k.stopChan)
 	// close the public channel
 	close(k.publicChan)
+	// set the initialized to false
+	k.isInitialized = atomic.NewBool(false)
 	return nil
 }
 
@@ -310,27 +318,27 @@ func (k *Kubernetes) handlePodDeleted(pod *v1.Pod) {
 // setOptions sets the kubernetes option
 func (k *Kubernetes) setOptions(meta Meta) (err error) {
 	// create an instance of Option
-	option := new(Option)
+	option := new(k8Option)
 	// extract the namespace
-	option.NameSpace, err = meta.GetString(Namespace)
+	option.NameSpace, err = meta.GetString(K8Namespace)
 	// handle the error in case the namespace value is not properly set
 	if err != nil {
 		return err
 	}
 	// extract the label selector
-	option.LabelSelector, err = meta.GetString(LabelSelector)
+	option.LabelSelector, err = meta.GetString(K8LabelSelector)
 	// handle the error in case the label selector value is not properly set
 	if err != nil {
 		return err
 	}
 	// extract the port name
-	option.PortName, err = meta.GetString(PortName)
+	option.PortName, err = meta.GetString(K8PortName)
 	// handle the error in case the port name value is not properly set
 	if err != nil {
 		return err
 	}
 	// extract the pod labels
-	option.PodLabels, err = meta.GetMapString(PodLabels)
+	option.PodLabels, err = meta.GetMapString(K8PodLabels)
 	// handle the error in case the port labels value is not properly set
 	if err != nil {
 		return err
