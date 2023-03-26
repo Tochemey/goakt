@@ -10,8 +10,6 @@ import (
 	"github.com/tochemey/goakt/internal/discovery"
 	goaktpb "github.com/tochemey/goakt/internal/goaktpb/v1"
 	"github.com/tochemey/goakt/log"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -140,7 +138,7 @@ func (s *cluster) GetActor(ctx context.Context, actorName string) (*goaktpb.Wire
 		// add a logging to the stderr
 		s.logger.Error(errors.Wrapf(err, "failed to fetch actor=%s data", actorName))
 		// here we cancel the request
-		return nil, status.Error(codes.Canceled, err.Error())
+		return nil, err
 	}
 
 	// fetch the data from the fsm
