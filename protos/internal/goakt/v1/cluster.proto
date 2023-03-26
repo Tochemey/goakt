@@ -25,21 +25,3 @@ message WireActor {
   // on another node of the cluster
   bytes actor_payload = 3;
 }
-
-// Peer specifies the node peer settings
-message Peer {
-  // Specifies the peer unique id
-  uint64 node_id = 1;
-  // Specifies the peer host and port
-  string host_and_port = 2;
-}
-
-message GetWireActor {
-  // Specifies the actor name
-  string actor_name = 2;
-}
-
-message PutWireActor {
-  // Specifies the wire actor
-  WireActor wire_actor = 1;
-}

@@ -7,6 +7,7 @@ import (
 
 	"github.com/pkg/errors"
 	"github.com/shaj13/raft"
+	"github.com/tochemey/goakt/internal/discovery"
 	goaktpb "github.com/tochemey/goakt/internal/goaktpb/v1"
 	"github.com/tochemey/goakt/log"
 	"google.golang.org/grpc/codes"
@@ -21,7 +22,7 @@ type Cluster interface {
 	// Stop stops the cluster node
 	Stop(ctx context.Context) error
 	// GetPeers fetches all the peers of a given node
-	GetPeers(ctx context.Context) ([]*goaktpb.Peer, error)
+	GetPeers(ctx context.Context) ([]*Peer, error)
 	// PutActor adds an actor meta to the cluster
 	PutActor(ctx context.Context, actor *goaktpb.WireActor) error
 	// GetActor reads an actor meta from the cluster
@@ -91,7 +92,7 @@ func (s *cluster) Stop(ctx context.Context) error {
 }
 
 // GetPeers fetches all the peers of a given node
-func (s *cluster) GetPeers(ctx context.Context) ([]*goaktpb.Peer, error) {
+func (s *cluster) GetPeers(ctx context.Context) ([]*Peer, error) {
 	// TODO add traces
 	// TODO grab the context logger
 	// fetch the node peers
@@ -149,18 +150,16 @@ func (s *cluster) GetActor(ctx context.Context, actorName string) (*goaktpb.Wire
 }
 
 // handleClusterEvents handles the cluster node events
-func (s *cluster) handleClusterEvents(events <-chan *goaktpb.Event) {
+func (s *cluster) handleClusterEvents(events <-chan discovery.Event) {
 	for {
 		select {
 		case <-s.peersListenerChan:
 			return
 		case event := <-events:
-			switch x := event.GetType().(type) {
-			case *goaktpb.Event_Added:
+			switch evt := event.(type) {
+			case *discovery.NodeAdded:
 			// pass. No need to handle this since every use the join method to join the cluster
-			case *goaktpb.Event_Modified:
-				// let us grab the event
-				evt := x.Modified
+			case *discovery.NodeModified:
 				func() {
 					// let us check whether the given node is a leader or not
 					if s.node.raftNode.Leader() == raft.None {
@@ -168,34 +167,32 @@ func (s *cluster) handleClusterEvents(events <-chan *goaktpb.Event) {
 					}
 					// create a context that can be canceled
 					ctx := context.Background()
-					s.logger.Debugf("updating peer=%d", evt.GetOldNode().GetName())
+					s.logger.Debugf("updating peer=%d", evt.Current.Name())
 					// TODO add the removal of timeout in an option or a config
 					ctx, cancelFn := context.WithTimeout(ctx, time.Second)
 					defer cancelFn()
 					// let us attempt removing the peer
 					peers := s.node.Peers()
-					nodeAddr := fmt.Sprintf("%s:%d", evt.GetOldNode().GetHost(), evt.GetOldNode().GetPort())
-					var peer *goaktpb.Peer
+					nodeAddr := fmt.Sprintf("%s:%d", evt.Current.Host(), evt.Current.Port())
+					var peer *Peer
 					for _, p := range peers {
-						if p.HostAndPort == nodeAddr {
+						if p.Address == nodeAddr {
 							peer = p
 							break
 						}
 					}
 					// update the peer
 					member := &raft.RawMember{
-						ID:      peer.GetNodeId(),
-						Address: fmt.Sprintf("%s:%d", evt.GetNewNode().GetHost(), evt.GetNewNode().GetPort()),
+						ID:      peer.PeerID,
+						Address: fmt.Sprintf("%s:%d", evt.Node.Host(), evt.Node.Port()),
 					}
 					// update the member
 					if err := s.node.raftNode.UpdateMember(ctx, member); err != nil {
 						// add a logging to the stderr
-						s.logger.Error(errors.Wrapf(err, "failed to update node's peer=%d", peer.GetNodeId()))
+						s.logger.Error(errors.Wrapf(err, "failed to update node's peer=%d", peer.PeerID))
 					}
 				}()
-			case *goaktpb.Event_Removed:
-				// let us grab the removal event
-				evt := x.Removed
+			case *discovery.NodeRemoved:
 				func() {
 					// let us check whether the given node is a leader or not
 					if s.node.raftNode.Leader() == raft.None {
@@ -203,24 +200,24 @@ func (s *cluster) handleClusterEvents(events <-chan *goaktpb.Event) {
 					}
 					// create a context that can be canceled
 					ctx := context.Background()
-					s.logger.Debugf("removing peer=%d", evt.GetNode().GetName())
+					s.logger.Debugf("removing peer=%d", evt.Node.Name())
 					// TODO add the removal of timeout in an option or a config
 					ctx, cancelFn := context.WithTimeout(ctx, time.Second)
 					defer cancelFn()
 					// let us attempt removing the peer
 					peers := s.node.Peers()
-					nodeAddr := fmt.Sprintf("%s:%d", evt.GetNode().GetHost(), evt.GetNode().GetPort())
-					var peer *goaktpb.Peer
+					nodeAddr := fmt.Sprintf("%s:%d", evt.Node.Host(), evt.Node.Port())
+					var peer *Peer
 					for _, p := range peers {
-						if p.HostAndPort == nodeAddr {
+						if p.Address == nodeAddr {
 							peer = p
 							break
 						}
 					}
 					// remove the peer
-					if err := s.node.raftNode.RemoveMember(ctx, peer.GetNodeId()); err != nil {
+					if err := s.node.raftNode.RemoveMember(ctx, peer.PeerID); err != nil {
 						// add a logging to the stderr
-						s.logger.Error(errors.Wrapf(err, "failed to remove node's peer=%d", peer.GetNodeId()))
+						s.logger.Error(errors.Wrapf(err, "failed to remove node's peer=%d", peer.PeerID))
 					}
 				}()
 			default:
