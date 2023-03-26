@@ -57,7 +57,6 @@ func TestActorReceive(t *testing.T) {
 	err := pid.Shutdown(ctx)
 	assert.NoError(t, err)
 }
-
 func TestActorWithPassivation(t *testing.T) {
 	defer goleak.VerifyNone(t, goleak.IgnoreTopFunction("github.com/golang/glog.(*loggingT).flushDaemon"))
 	ctx := context.TODO()
@@ -87,7 +86,6 @@ func TestActorWithPassivation(t *testing.T) {
 	assert.Error(t, err)
 	assert.EqualError(t, err, ErrNotReady.Error())
 }
-
 func TestActorWithReply(t *testing.T) {
 	t.Run("with happy path", func(t *testing.T) {
 		defer goleak.VerifyNone(t, goleak.IgnoreTopFunction("github.com/golang/glog.(*loggingT).flushDaemon"))
@@ -135,7 +133,6 @@ func TestActorWithReply(t *testing.T) {
 		assert.NoError(t, err)
 	})
 }
-
 func TestActorRestart(t *testing.T) {
 	t.Run("restart a stopped actor", func(t *testing.T) {
 		defer goleak.VerifyNone(t, goleak.IgnoreTopFunction("github.com/golang/glog.(*loggingT).flushDaemon"))

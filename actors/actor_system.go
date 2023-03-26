@@ -1,11 +1,16 @@
 package actors
 
 import (
+	"bytes"
 	"context"
+	"encoding/gob"
 	"fmt"
+	"reflect"
+	"time"
 
 	cmp "github.com/orcaman/concurrent-map/v2"
 	"github.com/pkg/errors"
+	"github.com/tochemey/goakt/internal/cluster"
 	goaktpb "github.com/tochemey/goakt/internal/goaktpb/v1"
 	"github.com/tochemey/goakt/internal/grpc"
 	"github.com/tochemey/goakt/internal/resync"
@@ -77,6 +82,14 @@ type actorSystem struct {
 	telemetry *telemetry.Telemetry
 	// specifies the remoting service
 	remotingService grpc.Server
+	// specifies the cluster service
+	clusterService cluster.Cluster
+
+	// close this channel to stop broadcasting wire actor info
+	broadcastChan chan *goaktpb.WireActor
+
+	typesLoader TypesLoader
+	reflection  Reflection
 }
 
 // enforce compilation error when all methods of the ActorSystem interface are not implemented
@@ -103,11 +116,16 @@ func NewActorSystem(config *Config) (ActorSystem, error) {
 			hasStarted:      atomic.NewBool(false),
 			telemetry:       config.telemetry,
 			remotingService: nil,
+			clusterService:  nil,
+			broadcastChan:   make(chan *goaktpb.WireActor, 10),
+			typesLoader:     NewTypesLoader(nil),
 		}
 		// set host and port
 		host, port := config.HostAndPort()
 		system.host = host
 		system.port = port
+		// set the reflection
+		system.reflection = NewReflection(system.typesLoader)
 	})
 
 	return system, nil
@@ -154,6 +172,28 @@ func (a *actorSystem) StartActor(ctx context.Context, name string, actor Actor) 
 
 	// add the given actor to the actor map
 	a.actors.Set(actorPath.String(), pid)
+
+	// let us register the actor
+	a.typesLoader.Register(name, actor)
+	// inform the cluster of the existence of the given actor
+	if a.config.clusterEnabled {
+		// encode the actor
+		actorType := reflect.TypeOf(actor)
+		var buf bytes.Buffer
+		enc := gob.NewEncoder(&buf)
+		if err := enc.Encode(actorType); err != nil {
+			// TODO fatal log
+		}
+
+		// create a wire actor
+		wiredActor := &goaktpb.WireActor{
+			ActorName:    name,
+			ActorAddress: actorPath.RemoteAddress(),
+			ActorPayload: buf.Bytes(),
+		}
+		// send it to the broadcaster
+		a.broadcastChan <- wiredActor
+	}
 
 	// return the actor ref
 	return pid
@@ -246,7 +286,12 @@ func (a *actorSystem) Start(ctx context.Context) error {
 	a.hasStarted.Store(true)
 
 	// start remoting when remoting is enabled
-	if err := a.startRemoting(ctx); err != nil {
+	if err := a.enableRemoting(ctx); err != nil {
+		return err
+	}
+
+	// enable clustering when it is enabled
+	if err := a.enableClustering(ctx); err != nil {
 		return err
 	}
 
@@ -271,6 +316,13 @@ func (a *actorSystem) Stop(ctx context.Context) error {
 	// stop remoting service when set
 	if a.remotingService != nil {
 		a.remotingService.Stop(ctx)
+	}
+
+	// stop the cluster mode
+	if a.clusterService != nil {
+		if err := a.clusterService.Stop(ctx); err != nil {
+			a.logger.Fatal(errors.Wrap(err, "failed to stop the cluster service"))
+		}
 	}
 
 	// short-circuit the shutdown process when there are no online actors
@@ -487,8 +539,8 @@ func (a *actorSystem) handleRemoteTell(ctx context.Context, to PID, message prot
 	return SendAsync(ctx, to, message)
 }
 
-// startRemoting starts the remoting service to handle remote public
-func (a *actorSystem) startRemoting(ctx context.Context) error {
+// enableRemoting enables the remoting service to handle remote messaging
+func (a *actorSystem) enableRemoting(ctx context.Context) error {
 	// start remoting when remoting is enabled
 	if a.config.remotingEnabled {
 		// build the grpc server
@@ -522,6 +574,43 @@ func (a *actorSystem) startRemoting(ctx context.Context) error {
 	return nil
 }
 
+// enableClustering enables the clustering mode
+func (a *actorSystem) enableClustering(ctx context.Context) error {
+	// check whether cluster is enabled or not
+	if a.config.clusterEnabled {
+		// add some logging
+		a.logger.Info("bootstrapping clustering...")
+		// create an instance of the cluster configuration
+		config := &cluster.Config{
+			Logger:    a.logger,
+			Host:      a.Host(),
+			Port:      int32(a.Port()),
+			StateDir:  a.config.ClusterStateDir(),
+			Name:      a.config.ClusterName(),
+			Discovery: a.config.DiscoMethod(),
+		}
+		// create an instance of the cluster service
+		a.clusterService = cluster.New(config)
+		// let us start the cluster service
+		if err := a.clusterService.Start(ctx); err != nil {
+			a.logger.Error(errors.Wrap(err, "failed to start cluster service"))
+			return err
+		}
+
+		// create the bootstrap channel
+		bootstrapChan := make(chan struct{}, 1)
+		// let us wait for some time for the cluster to be properly started
+		timer := time.AfterFunc(time.Second, func() {
+			bootstrapChan <- struct{}{}
+		})
+
+		<-bootstrapChan
+		a.logger.Info("clustering successfully bootstrapped")
+		timer.Stop()
+	}
+	return nil
+}
+
 // reset the actor system
 func (a *actorSystem) reset() {
 	// void the settings
@@ -535,5 +624,6 @@ func (a *actorSystem) reset() {
 	a.host = ""
 	a.port = -1
 	a.logger = nil
+	a.clusterService = nil
 	once.Reset()
 }

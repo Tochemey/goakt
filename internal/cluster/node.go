@@ -18,7 +18,7 @@ import (
 // node represents the raft node
 type node struct {
 	raftNode *raft.Node
-	fsm      *FSM
+	fsm      *fsm
 
 	// specifies the raft server address
 	raftAddr string
@@ -40,7 +40,7 @@ func newNode(raftAddr string, stateDIR string, discovery discovery.Discovery, lo
 		raft.WithLinearizableReadSafe(),
 	}
 	// create an instance of FSM
-	fsm := NewFSM(logger)
+	fsm := newFSM(logger)
 	// create an instance of the node
 	raftNode := raft.NewNode(fsm, transport.GRPC, opts...)
 	// create the initial start options

@@ -4,7 +4,7 @@ package discovery
 type Node struct {
 	// name specifies the discovered node's name
 	name string
-	// host specifies teh discovered node's host
+	// host specifies the discovered node's host
 	host string
 	// port specifies the discovered node's port
 	port int32

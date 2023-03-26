@@ -11,16 +11,16 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// FSM represents the Finite State Machine of the multi-raft cluster
-type FSM struct {
+// fsm represents the Finite State Machine of the multi-raft cluster
+type fsm struct {
 	mu     sync.Mutex
 	state  *goaktpb.FsmState
 	logger log.Logger
 }
 
-// NewFSM creates a new instance of the FSM
-func NewFSM(logger log.Logger) *FSM {
-	return &FSM{
+// newFSM creates a new instance of the fsm
+func newFSM(logger log.Logger) *fsm {
+	return &fsm{
 		state: &goaktpb.FsmState{
 			Actors: make(map[string]*goaktpb.WireActor),
 		},
@@ -29,7 +29,7 @@ func NewFSM(logger log.Logger) *FSM {
 }
 
 // Apply committed raft log entry.
-func (s *FSM) Apply(data []byte) {
+func (s *fsm) Apply(data []byte) {
 	// create an instance of proto message
 	wireActor := new(goaktpb.WireActor)
 	// let us unpack the byte array
@@ -48,7 +48,7 @@ func (s *FSM) Apply(data []byte) {
 
 // Snapshot is used to write the current state to a snapshot file,
 // on stable storage and compacting the raft logs.
-func (s *FSM) Snapshot() (io.ReadCloser, error) {
+func (s *fsm) Snapshot() (io.ReadCloser, error) {
 	// acquire the lock
 	s.mu.Lock()
 	// release of the lock once done
@@ -64,7 +64,7 @@ func (s *FSM) Snapshot() (io.ReadCloser, error) {
 }
 
 // Restore is used to restore state machine from a snapshot.
-func (s *FSM) Restore(r io.ReadCloser) error {
+func (s *fsm) Restore(r io.ReadCloser) error {
 	// acquire the lock
 	s.mu.Lock()
 	// release of the lock once done
@@ -87,7 +87,7 @@ func (s *FSM) Restore(r io.ReadCloser) error {
 }
 
 // Read returns the state entry given the key which here is the actor  name
-func (s *FSM) Read(actorName string) *goaktpb.WireActor {
+func (s *fsm) Read(actorName string) *goaktpb.WireActor {
 	// acquire the lock
 	s.mu.Lock()
 	actors := s.state.GetActors()
