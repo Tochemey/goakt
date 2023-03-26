@@ -6,9 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/pkg/errors"
-	goaktpb "github.com/tochemey/goakt/internal/goaktpb/v1"
 	"github.com/tochemey/goakt/log"
 	"go.uber.org/atomic"
 	v1 "k8s.io/api/core/v1"
@@ -54,7 +52,7 @@ type Kubernetes struct {
 	mu        sync.Mutex
 
 	stopChan   chan struct{}
-	publicChan chan *goaktpb.Event
+	publicChan chan Event
 	// states whether the actor system has started or not
 	isInitialized *atomic.Bool
 	logger        log.Logger
@@ -68,7 +66,7 @@ func NewKubernetes() *Kubernetes {
 	// create an instance of
 	k8 := &Kubernetes{
 		mu:            sync.Mutex{},
-		publicChan:    make(chan *goaktpb.Event, 2),
+		publicChan:    make(chan Event, 2),
 		stopChan:      make(chan struct{}, 1),
 		isInitialized: atomic.NewBool(false),
 		logger:        log.DefaultLogger,
@@ -77,7 +75,7 @@ func NewKubernetes() *Kubernetes {
 }
 
 // EarliestNode returns the earliest node
-func (k *Kubernetes) EarliestNode(ctx context.Context) (*goaktpb.Node, error) {
+func (k *Kubernetes) EarliestNode(ctx context.Context) (*Node, error) {
 	// fetch the list of Nodes
 	nodes, err := k.Nodes(ctx)
 	// handle the error
@@ -86,14 +84,14 @@ func (k *Kubernetes) EarliestNode(ctx context.Context) (*goaktpb.Node, error) {
 	}
 	// let us sort the nodes by their timestamp
 	sort.SliceStable(nodes, func(i, j int) bool {
-		return nodes[i].GetTimestamp() < nodes[j].GetTimestamp()
+		return nodes[i].Timestamp() < nodes[j].Timestamp()
 	})
 	// return the first element in the sorted list
 	return nodes[0], nil
 }
 
 // Nodes returns the list of Nodes at a given time
-func (k *Kubernetes) Nodes(ctx context.Context) ([]*goaktpb.Node, error) {
+func (k *Kubernetes) Nodes(ctx context.Context) ([]*Node, error) {
 	// acquire the lock
 	k.mu.Lock()
 	// release the lock once done
@@ -115,7 +113,7 @@ func (k *Kubernetes) Nodes(ctx context.Context) ([]*goaktpb.Node, error) {
 		panic(errors.Wrap(err, "failed to fetch kubernetes pods"))
 	}
 
-	nodes := make([]*goaktpb.Node, 0, pods.Size())
+	nodes := make([]*Node, 0, pods.Size())
 
 	// iterate the pods list and only the one that are running
 MainLoop:
@@ -134,7 +132,7 @@ MainLoop:
 		}
 
 		// create a variable holding the node
-		var node *goaktpb.Node
+		var node *Node
 		// iterate the pod containers and find the named port
 		for i := 0; i < len(pod.Spec.Containers) && node == nil; i++ {
 			// let us get the container
@@ -144,14 +142,12 @@ MainLoop:
 				// find the mapping port
 				if port.Name == k.option.PortName {
 					// create the node object
-					node = &goaktpb.Node{
-						Uuid:      uuid.NewString(),
-						Name:      pod.GetName(),
-						Host:      pod.Status.PodIP,
-						Port:      port.ContainerPort,
-						Timestamp: pod.Status.StartTime.Time.UnixMilli(),
-						Meta:      nil, // TODO figure out what to add as meta information
-					}
+					NewNode(
+						pod.GetName(),
+						pod.Status.PodIP,
+						port.ContainerPort,
+						pod.Status.StartTime.Time.UnixMilli(),
+						map[string]string{})
 					break
 				}
 			}
@@ -167,7 +163,7 @@ MainLoop:
 }
 
 // Watch returns event based upon nodes lifecycle
-func (k *Kubernetes) Watch(ctx context.Context) (<-chan *goaktpb.Event, error) {
+func (k *Kubernetes) Watch(ctx context.Context) (<-chan Event, error) {
 	// first check whether the actor system has started
 	if !k.isInitialized.Load() {
 		return nil, errors.New("kubernetes discovery engine not initialized")
@@ -253,13 +249,7 @@ func (k *Kubernetes) handlePodAdded(pod *v1.Pod) {
 		return
 	}
 	// here we find a node let us raise the node registered event
-	event := &goaktpb.Event{
-		Type: &goaktpb.Event_Added{
-			Added: &goaktpb.NodeAdded{
-				Node: node,
-			},
-		},
-	}
+	event := &NodeAdded{Node: node}
 	// add to the channel
 	k.publicChan <- event
 }
@@ -275,7 +265,7 @@ func (k *Kubernetes) handlePodUpdated(old *v1.Pod, pod *v1.Pod) {
 	// release the lock
 	defer k.mu.Unlock()
 	// grab the old node
-	oldNode := k.toNode(old)
+	currentNode := k.toNode(old)
 	// get the new node
 	node := k.toNode(pod)
 	// continue the loop when we did not find any node
@@ -283,16 +273,11 @@ func (k *Kubernetes) handlePodUpdated(old *v1.Pod, pod *v1.Pod) {
 		return
 	}
 	// here we find a node let us raise the node modified event
-	event := &goaktpb.Event{
-		Type: &goaktpb.Event_Modified{
-			Modified: &goaktpb.NodeModified{
-				OldNode: oldNode,
-				NewNode: node,
-			},
-		},
-	}
 	// add to the channel
-	k.publicChan <- event
+	k.publicChan <- &NodeModified{
+		Node:    node,
+		Current: currentNode,
+	}
 }
 
 // handlePodDeleted is called when pod is deleted
@@ -304,13 +289,7 @@ func (k *Kubernetes) handlePodDeleted(pod *v1.Pod) {
 	// get the new node
 	node := k.toNode(pod)
 	// here we find a node let us raise the node removed event
-	event := &goaktpb.Event{
-		Type: &goaktpb.Event_Removed{
-			Removed: &goaktpb.NodeRemoved{
-				Node: node,
-			},
-		},
-	}
+	event := &NodeRemoved{Node: node}
 	// add to the channel
 	k.publicChan <- event
 }
@@ -349,7 +328,7 @@ func (k *Kubernetes) setOptions(meta Meta) (err error) {
 }
 
 // toNode takes a kubernetes pod and returns a Node
-func (k *Kubernetes) toNode(pod *v1.Pod) *goaktpb.Node {
+func (k *Kubernetes) toNode(pod *v1.Pod) *Node {
 	// If there is a Ready condition available, we need that to be true.
 	// If no ready condition is set, then we accept this pod regardless.
 	for _, condition := range pod.Status.Conditions {
@@ -360,7 +339,7 @@ func (k *Kubernetes) toNode(pod *v1.Pod) *goaktpb.Node {
 	}
 
 	// create a variable holding the node
-	var node *goaktpb.Node
+	var node *Node
 	// iterate the pod containers and find the named port
 	for i := 0; i < len(pod.Spec.Containers) && node == nil; i++ {
 		// let us get the container
@@ -370,14 +349,7 @@ func (k *Kubernetes) toNode(pod *v1.Pod) *goaktpb.Node {
 			// find the mapping port
 			if port.Name == k.option.PortName {
 				// create the node object
-				node = &goaktpb.Node{
-					Uuid:      uuid.NewString(),
-					Name:      pod.GetName(),
-					Host:      pod.Status.PodIP,
-					Port:      port.ContainerPort,
-					Timestamp: pod.Status.StartTime.Time.UnixMilli(),
-					Meta:      nil, // TODO figure out what to add as meta information
-				}
+				node = NewNode(pod.GetName(), pod.Status.PodIP, port.ContainerPort, pod.Status.StartTime.Time.UnixMilli(), map[string]string{})
 				break
 			}
 		}

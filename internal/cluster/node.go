@@ -10,7 +10,6 @@ import (
 	"github.com/shaj13/raft/transport"
 	"github.com/shaj13/raft/transport/raftgrpc"
 	"github.com/tochemey/goakt/internal/discovery"
-	goaktpb "github.com/tochemey/goakt/internal/goaktpb/v1"
 	"github.com/tochemey/goakt/log"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -19,7 +18,7 @@ import (
 // node represents the raft node
 type node struct {
 	raftNode *raft.Node
-	fsm      *FSM
+	fsm      *fsm
 
 	// specifies the raft server address
 	raftAddr string
@@ -31,9 +30,6 @@ type node struct {
 	opts      []raft.Option
 	logger    log.Logger
 	discovery discovery.Discovery
-
-	// list of peers mapping their addr and node id
-	peersMap map[string]uint64
 }
 
 // newNode creates an instance of node
@@ -44,7 +40,7 @@ func newNode(raftAddr string, stateDIR string, discovery discovery.Discovery, lo
 		raft.WithLinearizableReadSafe(),
 	}
 	// create an instance of FSM
-	fsm := NewFSM(logger)
+	fsm := newFSM(logger)
 	// create an instance of the node
 	raftNode := raft.NewNode(fsm, transport.GRPC, opts...)
 	// create the initial start options
@@ -90,7 +86,7 @@ func (n *node) Start(ctx context.Context) error {
 	}
 
 	var joinAddr string
-	addr := fmt.Sprintf("%s:%d", discoNode.GetHost(), discoNode.GetPort())
+	addr := fmt.Sprintf("%s:%d", discoNode.Host(), discoNode.Port())
 	if addr != n.RaftAddr() {
 		// override the startOpt by jut joining an existing cluster
 		n.startOpts = append(n.startOpts, raft.WithFallback(
@@ -118,17 +114,17 @@ func (n *node) Stop() error {
 }
 
 // Peers returns the list of node Peers
-func (n *node) Peers() []*goaktpb.Peer {
+func (n *node) Peers() []*Peer {
 	// create an empty list of peers
-	var peers []*goaktpb.Peer
+	var peers []*Peer
 	// get the members of this node
 	members := n.raftNode.Members()
 	// iterate the members list
 	// TODO augment the Peer data type to add Peer Type and more
 	for _, member := range members {
-		peers = append(peers, &goaktpb.Peer{
-			NodeId:      member.ID(),
-			HostAndPort: member.Address(),
+		peers = append(peers, &Peer{
+			PeerID:  member.ID(),
+			Address: member.Address(),
 		})
 	}
 

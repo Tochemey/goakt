@@ -19,7 +19,7 @@ type ReceiveContext interface {
 	Message() proto.Message
 	// Response sets the message response
 	// Use this method within the Actor.Receive method of the actor to sets a reply
-	// This can only be used when we are request-response pattern. When it is an async commnunication
+	// This can only be used when we are request-response pattern. When it is an async communication
 	// this operation will amount to nothing.
 	Response(resp proto.Message)
 	// Become switch the current behavior of the actor to a new behavior

@@ -70,6 +70,11 @@ func TestOptions(t *testing.T) {
 			option:         WithSupervisorStrategy(RestartDirective),
 			expectedConfig: Config{supervisorStrategy: RestartDirective},
 		},
+		{
+			name:           "WithRemoting",
+			option:         WithRemoting(),
+			expectedConfig: Config{remotingEnabled: true},
+		},
 	}
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
