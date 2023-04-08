@@ -1,22 +1,16 @@
 package actors
 
 import (
-	"bytes"
 	"context"
-	"encoding/gob"
 	"fmt"
-	"reflect"
-	"time"
 
 	cmp "github.com/orcaman/concurrent-map/v2"
 	"github.com/pkg/errors"
-	"github.com/tochemey/goakt/internal/cluster"
 	goaktpb "github.com/tochemey/goakt/internal/goaktpb/v1"
 	"github.com/tochemey/goakt/internal/grpc"
 	"github.com/tochemey/goakt/internal/resync"
 	"github.com/tochemey/goakt/internal/telemetry"
 	"github.com/tochemey/goakt/log"
-	pb "github.com/tochemey/goakt/messages/v1"
 	"go.opentelemetry.io/otel/metric"
 	"go.uber.org/atomic"
 	ggrpc "google.golang.org/grpc"
@@ -51,8 +45,6 @@ type ActorSystem interface {
 	RestartActor(ctx context.Context, name string) (PID, error)
 	// NumActors returns the total number of active actors in the system
 	NumActors() uint64
-	// GetRemoteActor returns the address of a remote actor when cluster is enabled
-	GetRemoteActor(ctx context.Context, actorName string) (addr *pb.Address, err error)
 	// GetLocalActor returns the reference of a local actor.
 	// A local actor is an actor that reside on the same node where the given actor system is running
 	GetLocalActor(ctx context.Context, actorName string) (PID, error)
@@ -88,11 +80,6 @@ type actorSystem struct {
 	telemetry *telemetry.Telemetry
 	// specifies the remoting service
 	remotingService grpc.Server
-	// specifies the cluster service
-	cluster cluster.Cluster
-
-	// close this channel to stop broadcasting wire actor info
-	broadcastChan chan *goaktpb.WireActor
 
 	typesLoader TypesLoader
 	reflection  Reflection
@@ -122,8 +109,6 @@ func NewActorSystem(config *Config) (ActorSystem, error) {
 			hasStarted:      atomic.NewBool(false),
 			telemetry:       config.telemetry,
 			remotingService: nil,
-			cluster:         nil,
-			broadcastChan:   make(chan *goaktpb.WireActor, 10),
 			typesLoader:     NewTypesLoader(nil),
 		}
 		// set host and port
@@ -181,25 +166,6 @@ func (a *actorSystem) StartActor(ctx context.Context, name string, actor Actor) 
 
 	// let us register the actor
 	a.typesLoader.Register(name, actor)
-	// inform the cluster of the existence of the given actor
-	if a.config.clusterEnabled {
-		// encode the actor
-		actorType := reflect.TypeOf(actor)
-		var buf bytes.Buffer
-		enc := gob.NewEncoder(&buf)
-		if err := enc.Encode(actorType); err != nil {
-			// TODO fatal log
-		}
-
-		// create a wire actor
-		wiredActor := &goaktpb.WireActor{
-			ActorName:    name,
-			ActorAddress: actorPath.RemoteAddress(),
-			ActorPayload: buf.Bytes(),
-		}
-		// send it to the broadcaster
-		a.broadcastChan <- wiredActor
-	}
 
 	// return the actor ref
 	return pid
@@ -283,27 +249,6 @@ func (a *actorSystem) Actors() []PID {
 	return refs
 }
 
-// GetRemoteActor returns the address of a remote actor when cluster is enabled
-func (a *actorSystem) GetRemoteActor(ctx context.Context, actorName string) (addr *pb.Address, err error) {
-	// add a span context
-	ctx, span := telemetry.SpanContext(ctx, "GetRemoteActor")
-	defer span.End()
-	// check whether cluster is enabled or not
-	if a.cluster == nil {
-		return nil, errors.New("cluster is not enabled")
-	}
-
-	// let us locate the actor in the cluster
-	wireActor, err := a.cluster.GetActor(ctx, actorName)
-	// handle the eventual error
-	if err != nil {
-		return nil, errors.Wrapf(err, "failed to fetch remote actor=%s", actorName)
-	}
-
-	// return the address of the remote actor
-	return wireActor.GetActorAddress(), nil
-}
-
 // GetLocalActor returns the reference of a local actor.
 // A local actor is an actor that reside on the same node where the given actor system is running
 func (a *actorSystem) GetLocalActor(ctx context.Context, actorName string) (PID, error) {
@@ -334,11 +279,6 @@ func (a *actorSystem) Start(ctx context.Context) error {
 		return err
 	}
 
-	// enable clustering when it is enabled
-	if err := a.enableClustering(ctx); err != nil {
-		return err
-	}
-
 	// start the metrics service
 	// register metrics. However, we don't panic when we fail to register
 	// we just log it for now
@@ -362,13 +302,6 @@ func (a *actorSystem) Stop(ctx context.Context) error {
 		a.remotingService.Stop(ctx)
 	}
 
-	// stop the cluster mode
-	if a.cluster != nil {
-		if err := a.cluster.Stop(ctx); err != nil {
-			a.logger.Fatal(errors.Wrap(err, "failed to stop the cluster service"))
-		}
-	}
-
 	// short-circuit the shutdown process when there are no online actors
 	if len(a.Actors()) == 0 {
 		a.logger.Info("No online actors to shutdown. Shutting down successfully done")
@@ -386,9 +319,6 @@ func (a *actorSystem) Stop(ctx context.Context) error {
 			}
 		}
 	}
-
-	// stop broadcasting cluster messages
-	close(a.broadcastChan)
 
 	// reset the actor system
 	a.reset()
@@ -621,45 +551,6 @@ func (a *actorSystem) enableRemoting(ctx context.Context) error {
 	return nil
 }
 
-// enableClustering enables the clustering mode
-func (a *actorSystem) enableClustering(ctx context.Context) error {
-	// check whether cluster is enabled or not
-	if a.config.clusterEnabled {
-		// add some logging
-		a.logger.Info("bootstrapping clustering...")
-		// create an instance of the cluster configuration
-		config := &cluster.Config{
-			Logger:    a.logger,
-			Host:      a.Host(),
-			Port:      int32(a.Port()),
-			StateDir:  a.config.ClusterStateDir(),
-			Name:      a.config.ClusterName(),
-			Discovery: a.config.DiscoMethod(),
-		}
-		// create an instance of the cluster service
-		a.cluster = cluster.New(config)
-		// let us start the cluster service
-		if err := a.cluster.Start(ctx); err != nil {
-			a.logger.Error(errors.Wrap(err, "failed to start cluster service"))
-			return err
-		}
-
-		// create the bootstrap channel
-		bootstrapChan := make(chan struct{}, 1)
-		// let us wait for some time for the cluster to be properly started
-		timer := time.AfterFunc(time.Second, func() {
-			bootstrapChan <- struct{}{}
-		})
-
-		<-bootstrapChan
-		timer.Stop()
-		a.logger.Info("clustering successfully bootstrapped")
-		// start broadcasting cluster message
-		go a.broadcast(ctx)
-	}
-	return nil
-}
-
 // reset the actor system
 func (a *actorSystem) reset() {
 	// void the settings
@@ -673,22 +564,5 @@ func (a *actorSystem) reset() {
 	a.host = ""
 	a.port = -1
 	a.logger = nil
-	a.cluster = nil
 	once.Reset()
-}
-
-// broadcast publishes newly created actor into the cluster when cluster is enabled
-func (a *actorSystem) broadcast(ctx context.Context) {
-	// iterate over the channel
-	for wireActor := range a.broadcastChan {
-		// making sure the cluster is still enabled
-		if a.cluster != nil {
-			// broadcast the message on the cluster
-			if err := a.cluster.PutActor(ctx, wireActor); err != nil {
-				a.logger.Error(err.Error())
-				// TODO: stop or continue
-				return
-			}
-		}
-	}
 }

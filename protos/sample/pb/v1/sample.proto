@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package sample.v1;
 
+option go_package = "github.com/tochemey/goakt/examples/protos/pb;samplepb";
+
 message Ping {
   string id = 1;
 }

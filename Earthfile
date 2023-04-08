@@ -18,6 +18,11 @@ FROM tochemey/docker-go:1.20.1-0.7.0
 #  BUILD +lint
 #  BUILD +local-test
 
+pbs:
+    BUILD +internal-pb
+    BUILD +protogen
+    BUILD +sample-pb
+
 test:
   BUILD +lint
   BUILD +local-test

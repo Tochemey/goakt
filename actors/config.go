@@ -2,14 +2,11 @@ package actors
 
 import (
 	"errors"
-	"fmt"
 	"net"
-	"os"
 	"regexp"
 	"strconv"
 	"time"
 
-	"github.com/tochemey/goakt/internal/discovery"
 	"github.com/tochemey/goakt/internal/telemetry"
 	"github.com/tochemey/goakt/log"
 )
@@ -45,16 +42,6 @@ type Config struct {
 	// Specifies whether remoting is enabled.
 	// This allows to handle remote messaging
 	remotingEnabled bool
-	// Specifies whether cluster is enabled or not
-	clusterEnabled bool
-	// Specifies the discoMethod method to use for nodes finding
-	discoMethod discovery.Discovery
-	// Specifies the cluster name.
-	// The default value is the actor system with Cluster word appended to it
-	// Example: SysCluster where Sys is the actor system name
-	clusterName string
-	// Specifies the cluster state directory
-	clusterStateDir string
 }
 
 // NewConfig creates an instance of Config
@@ -82,9 +69,6 @@ func NewConfig(name, nodeHostAndPort string, options ...Option) (*Config, error)
 		supervisorStrategy:  StopDirective,
 		telemetry:           telemetry.New(),
 		remotingEnabled:     false,
-		clusterEnabled:      false,
-		clusterName:         fmt.Sprintf("%sCluster", name),
-		clusterStateDir:     fmt.Sprintf("%s/%s", os.TempDir(), name),
 	}
 	// apply the various options
 	for _, opt := range options {
@@ -145,25 +129,6 @@ func (c Config) Telemetry() *telemetry.Telemetry {
 // RemotingEnabled returns the remoting enabled
 func (c Config) RemotingEnabled() bool {
 	return c.remotingEnabled
-}
-
-// ClusterEnabled returns the cluster enabled
-func (c Config) ClusterEnabled() bool {
-	return c.clusterEnabled
-}
-
-// DiscoMethod returns the discovery method
-func (c Config) DiscoMethod() discovery.Discovery {
-	return c.discoMethod
-}
-
-// ClusterName returns the cluster name
-func (c Config) ClusterName() string {
-	return c.clusterName
-}
-
-func (c Config) ClusterStateDir() string {
-	return c.clusterStateDir
 }
 
 // validateHostAndPort helps validate the host address and port of and address
@@ -254,27 +219,5 @@ func WithTelemetry(telemetry *telemetry.Telemetry) Option {
 func WithRemoting() Option {
 	return OptionFunc(func(config *Config) {
 		config.remotingEnabled = true
-	})
-}
-
-// WithCluster enables clustering on the actor system
-func WithCluster(disco discovery.Discovery) Option {
-	return OptionFunc(func(config *Config) {
-		config.clusterEnabled = true
-		config.discoMethod = disco
-	})
-}
-
-// WithClusterName sets the cluster name
-func WithClusterName(name string) Option {
-	return OptionFunc(func(config *Config) {
-		config.clusterName = name
-	})
-}
-
-// WithStateDir sets the cluster state directory
-func WithStateDir(stateDir string) Option {
-	return OptionFunc(func(config *Config) {
-		config.clusterStateDir = stateDir
 	})
 }
