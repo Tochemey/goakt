@@ -15,7 +15,7 @@ Also, check reference section at the end of the post for more material regarding
 - [x] Enable/Disable Passivation mode to remove/keep idle actors 
 - [x] PreStart hook for an actor. 
 - [x] PostStop hook for an actor for a graceful shutdown
-- [x] ActorSystem (WIP) 
+- [x] ActorSystem 
 - [x] Actor to Actor communication
 - [x] Restart an actor 
 - [x] (Un)Watch an actor
@@ -29,8 +29,6 @@ Also, check reference section at the end of the post for more material regarding
 - [x] Remoting
     - [x]  Actors can send messages to other actors on a remote system 
     - [x] Actors can look up other actors' address on a remote system
-- [ ] Clustering
-- [ ] More tests
 
 ## Installation
 ```bash
