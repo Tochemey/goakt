@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"sync"
 	"syscall"
 
 	goakt "github.com/tochemey/goakt/actors"
@@ -54,7 +53,6 @@ func main() {
 }
 
 type PongActor struct {
-	mu     sync.Mutex
 	count  *atomic.Int32
 	logger log.Logger
 }
@@ -62,15 +60,11 @@ type PongActor struct {
 var _ goakt.Actor = (*PongActor)(nil)
 
 func NewPongActor() *PongActor {
-	return &PongActor{
-		mu: sync.Mutex{},
-	}
+	return &PongActor{}
 }
 
 func (p *PongActor) PreStart(ctx context.Context) error {
 	// set the logger
-	p.mu.Lock()
-	defer p.mu.Unlock()
 	p.logger = log.DefaultLogger
 	p.count = atomic.NewInt32(0)
 	p.logger.Info("About to Start")

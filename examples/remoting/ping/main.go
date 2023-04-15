@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"sync"
 	"syscall"
 
 	goakt "github.com/tochemey/goakt/actors"
@@ -28,7 +27,8 @@ func main() {
 	logger := log.DefaultLogger
 
 	// create the actor system configuration. kindly in real-life application handle the error
-	config, _ := goakt.NewConfig("SampleActorSystem", fmt.Sprintf("%s:%d", host, port),
+	config, _ := goakt.NewConfig("SampleActorSystem",
+		fmt.Sprintf("%s:%d", host, port),
 		goakt.WithPassivationDisabled(), // set big passivation time
 		goakt.WithLogger(logger),
 		goakt.WithActorInitMaxRetries(3),
@@ -62,7 +62,6 @@ func main() {
 }
 
 type PingActor struct {
-	mu     sync.Mutex
 	count  *atomic.Int32
 	logger log.Logger
 }
@@ -70,15 +69,11 @@ type PingActor struct {
 var _ goakt.Actor = (*PingActor)(nil)
 
 func NewPingActor() *PingActor {
-	return &PingActor{
-		mu: sync.Mutex{},
-	}
+	return &PingActor{}
 }
 
 func (p *PingActor) PreStart(ctx context.Context) error {
 	// set the logger
-	p.mu.Lock()
-	defer p.mu.Unlock()
 	p.logger = log.DefaultLogger
 	p.count = atomic.NewInt32(0)
 	p.logger.Info("About to Start")
@@ -110,6 +105,6 @@ func (p *PingActor) Receive(ctx goakt.ReceiveContext) {
 
 func (p *PingActor) PostStop(ctx context.Context) error {
 	p.logger.Info("About to stop")
-	p.logger.Infof("Processed=%d public", p.count.Load())
+	p.logger.Infof("Processed=%d messages", p.count.Load())
 	return nil
 }
