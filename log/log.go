@@ -10,7 +10,7 @@ import (
 
 // DefaultLogger represents the default logger to use
 // This logger wraps zerolog under the hood
-var DefaultLogger = NewLogger(os.Stderr)
+var DefaultLogger = NewLogger(os.Stdout)
 var DiscardLogger = NewLogger(io.Discard)
 
 // Info logs to INFO level.

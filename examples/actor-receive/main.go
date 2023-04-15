@@ -37,7 +37,7 @@ func main() {
 	startTime := time.Now()
 
 	// send some public to the actor
-	count := 100
+	count := 10000
 	for i := 0; i < count; i++ {
 		_ = goakt.SendAsync(ctx, actor, new(samplepb.Ping))
 	}
@@ -48,7 +48,7 @@ func main() {
 	<-interruptSignal
 
 	// log some stats
-	logger.Infof("Actor=%s has processed %d public in %s", actor.ActorPath().String(), actor.ReceivedCount(ctx), time.Since(startTime))
+	logger.Infof("Actor=%s has processed %d messages in %d ms", actor.ActorPath().String(), actor.ReceivedCount(ctx), time.Since(startTime).Milliseconds())
 
 	// stop the actor system
 	_ = actorSystem.Stop(ctx)

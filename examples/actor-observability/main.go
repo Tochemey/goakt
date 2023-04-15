@@ -3,19 +3,73 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"os/signal"
-	"sync"
 	"syscall"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	goakt "github.com/tochemey/goakt/actors"
 	samplepb "github.com/tochemey/goakt/examples/protos/pb/v1"
 	"github.com/tochemey/goakt/log"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/exporters/prometheus"
+	"go.opentelemetry.io/otel/exporters/stdout/stdouttrace"
+	"go.opentelemetry.io/otel/metric/global"
+	"go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/resource"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	semconv "go.opentelemetry.io/otel/semconv/v1.18.0"
 	"go.uber.org/atomic"
 )
 
+var serviceName = semconv.ServiceNameKey.String("actor-observability")
+
+func initTracer() {
+	exporter, err := stdouttrace.New(stdouttrace.WithPrettyPrint())
+	if err != nil {
+		log.Fatal(err)
+	}
+	tp := sdktrace.NewTracerProvider(
+		sdktrace.WithSampler(sdktrace.AlwaysSample()),
+		sdktrace.WithSyncer(exporter),
+		sdktrace.WithResource(resource.NewWithAttributes(
+			semconv.SchemaURL,
+			serviceName,
+		)),
+	)
+
+	otel.SetTracerProvider(tp)
+}
+
+func initMeter() {
+	// The exporter embeds a default OpenTelemetry Reader and
+	// implements prometheus.Collector, allowing it to be used as
+	// both a Reader and Collector.
+	metricExporter, err := prometheus.New()
+	if err != nil {
+		log.Fatal(err)
+	}
+	meterProvider := metric.NewMeterProvider(
+		metric.WithReader(metricExporter),
+		metric.WithResource(resource.NewWithAttributes(
+			semconv.SchemaURL,
+			serviceName,
+		)),
+	)
+	global.SetMeterProvider(meterProvider)
+
+	http.Handle("/metrics", promhttp.Handler())
+	go func() {
+		_ = http.ListenAndServe(":2222", nil)
+	}()
+	fmt.Println("Prometheus server running on :2222")
+}
+
 func main() {
+	initTracer()
+	initMeter()
 	ctx := context.Background()
 
 	// use the messages default logger. real-life implement the logger interface`
@@ -60,7 +114,6 @@ func main() {
 }
 
 type PingActor struct {
-	mu     sync.Mutex
 	count  *atomic.Int32
 	logger log.Logger
 }
@@ -68,15 +121,11 @@ type PingActor struct {
 var _ goakt.Actor = (*PingActor)(nil)
 
 func NewPingActor() *PingActor {
-	return &PingActor{
-		mu: sync.Mutex{},
-	}
+	return &PingActor{}
 }
 
 func (p *PingActor) PreStart(ctx context.Context) error {
 	// set the logger
-	p.mu.Lock()
-	defer p.mu.Unlock()
 	p.logger = log.DefaultLogger
 	p.count = atomic.NewInt32(0)
 	p.logger.Info("About to Start")
@@ -105,7 +154,6 @@ func (p *PingActor) PostStop(ctx context.Context) error {
 }
 
 type PongActor struct {
-	mu     sync.Mutex
 	count  *atomic.Int32
 	logger log.Logger
 }
@@ -113,15 +161,11 @@ type PongActor struct {
 var _ goakt.Actor = (*PongActor)(nil)
 
 func NewPongActor() *PongActor {
-	return &PongActor{
-		mu: sync.Mutex{},
-	}
+	return &PongActor{}
 }
 
 func (p *PongActor) PreStart(ctx context.Context) error {
 	// set the logger
-	p.mu.Lock()
-	defer p.mu.Unlock()
 	p.logger = log.DefaultLogger
 	p.count = atomic.NewInt32(0)
 	p.logger.Info("About to Start")

@@ -4,6 +4,10 @@ PROJECT tochemey/goakt
 
 FROM tochemey/docker-go:1.20.1-0.7.0
 
+# install the various tools to generate connect-go
+RUN go install github.com/fullstorydev/grpcurl/cmd/grpcurl@latest
+RUN go install github.com/bufbuild/connect-go/cmd/protoc-gen-connect-go@latest
+
 # run a PR branch is created
 #pr-pipeline:
 #  PIPELINE
@@ -72,7 +76,7 @@ internal-pb:
             --path protos/internal/goakt
 
     # save artifact to
-    SAVE ARTIFACT gen/goakt AS LOCAL internal/goaktpb
+    SAVE ARTIFACT gen/goakt AS LOCAL internal/goakt
 
 protogen:
     # copy the proto files to generate
