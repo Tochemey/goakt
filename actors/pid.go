@@ -6,10 +6,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/bufbuild/connect-go"
+	otelconnect "github.com/bufbuild/connect-opentelemetry-go"
 	"github.com/cenkalti/backoff"
 	"github.com/pkg/errors"
-	goaktpb "github.com/tochemey/goakt/internal/goaktpb/v1"
-	"github.com/tochemey/goakt/internal/grpc"
+	goaktpb "github.com/tochemey/goakt/internal/goakt/v1"
+	"github.com/tochemey/goakt/internal/goakt/v1/goaktv1connect"
 	"github.com/tochemey/goakt/internal/telemetry"
 	"github.com/tochemey/goakt/internal/tools"
 	"github.com/tochemey/goakt/log"
@@ -488,15 +490,19 @@ func (p *pid) RemoteLookup(ctx context.Context, host string, port int, name stri
 	defer span.End()
 
 	// create an instance of remote client service
-	rpcConn, _ := grpc.GetClientConn(ctx, fmt.Sprintf("%s:%d", host, port))
-	remoteClient := goaktpb.NewRemoteMessagingServiceClient(rpcConn)
+	remoteClient := goaktv1connect.NewRemoteMessagingServiceClient(
+		h2Client(),
+		h2ConnectionAddr(host, port),
+		connect.WithInterceptors(p.interceptor()),
+		connect.WithGRPC(),
+	)
 
 	// prepare the request to send
-	request := &goaktpb.RemoteLookupRequest{
+	request := connect.NewRequest(&goaktpb.RemoteLookupRequest{
 		Host: host,
 		Port: int32(port),
 		Name: name,
-	}
+	})
 	// send the message and handle the error in case there is any
 	response, err := remoteClient.RemoteLookup(ctx, request)
 	// we know the error will always be a grpc error
@@ -509,7 +515,7 @@ func (p *pid) RemoteLookup(ctx context.Context, host string, port int, name stri
 		return nil, err
 	}
 	// return the response
-	return response.GetAddress(), nil
+	return response.Msg.GetAddress(), nil
 }
 
 // RemoteTell sends a message to an actor remotely without expecting any reply
@@ -525,8 +531,12 @@ func (p *pid) RemoteTell(ctx context.Context, to *pb.Address, message proto.Mess
 	}
 
 	// create an instance of remote client service
-	rpcConn, _ := grpc.GetClientConn(ctx, fmt.Sprintf("%s:%d", to.GetHost(), to.GetPort()))
-	remoteClient := goaktpb.NewRemoteMessagingServiceClient(rpcConn)
+	remoteClient := goaktv1connect.NewRemoteMessagingServiceClient(
+		h2Client(),
+		h2ConnectionAddr(to.GetHost(), int(to.GetPort())),
+		connect.WithInterceptors(p.interceptor()),
+		connect.WithGRPC(),
+	)
 
 	// construct the from address
 	sender := &pb.Address{
@@ -537,13 +547,13 @@ func (p *pid) RemoteTell(ctx context.Context, to *pb.Address, message proto.Mess
 	}
 
 	// prepare the rpcRequest to send
-	request := &goaktpb.RemoteTellRequest{
+	request := connect.NewRequest(&goaktpb.RemoteTellRequest{
 		RemoteMessage: &pb.RemoteMessage{
 			Sender:   sender,
 			Receiver: to,
 			Message:  marshaled,
 		},
-	}
+	})
 	// send the message and handle the error in case there is any
 	if _, err := remoteClient.RemoteTell(ctx, request); err != nil {
 		return err
@@ -564,13 +574,18 @@ func (p *pid) RemoteAsk(ctx context.Context, to *pb.Address, message proto.Messa
 	}
 
 	// create an instance of remote client service
-	rpcConn, _ := grpc.GetClientConn(ctx, fmt.Sprintf("%s:%d", to.GetHost(), to.GetPort()))
-	remoteClient := goaktpb.NewRemoteMessagingServiceClient(rpcConn)
+	remoteClient := goaktv1connect.NewRemoteMessagingServiceClient(
+		h2Client(),
+		h2ConnectionAddr(to.GetHost(), int(to.GetPort())),
+		connect.WithInterceptors(p.interceptor()),
+		connect.WithGRPC(),
+	)
+
 	// prepare the rpcRequest to send
-	rpcRequest := &goaktpb.RemoteAskRequest{
+	rpcRequest := connect.NewRequest(&goaktpb.RemoteAskRequest{
 		Receiver: to,
 		Message:  marshaled,
-	}
+	})
 	// send the request
 	rpcResponse, rpcErr := remoteClient.RemoteAsk(ctx, rpcRequest)
 	// handle the error
@@ -578,7 +593,7 @@ func (p *pid) RemoteAsk(ctx context.Context, to *pb.Address, message proto.Messa
 		return nil, rpcErr
 	}
 
-	return rpcResponse.GetMessage(), nil
+	return rpcResponse.Msg.GetMessage(), nil
 }
 
 // Shutdown gracefully shuts down the given actor
@@ -984,4 +999,12 @@ func (p *pid) passivate() {
 	if err := p.Actor.PostStop(ctx); err != nil {
 		panic(err)
 	}
+}
+
+// interceptor create an interceptor based upon the telemetry provided
+func (p *pid) interceptor() connect.Interceptor {
+	return otelconnect.NewInterceptor(
+		otelconnect.WithTracerProvider(p.telemetry.TracerProvider),
+		otelconnect.WithMeterProvider(p.telemetry.MeterProvider),
+	)
 }

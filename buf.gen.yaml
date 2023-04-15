@@ -6,8 +6,6 @@ plugins:
   - name: go
     out: gen
     opt: paths=source_relative
-  - name: go-grpc
+  - name: connect-go
     out: gen
-    opt:
-      - paths=source_relative
-      - require_unimplemented_servers=false
+    opt: paths=source_relative
