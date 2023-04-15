@@ -884,26 +884,28 @@ func (p *pid) receive() {
 		case <-p.shutdownSignal:
 			return
 		case received := <-p.mailbox:
-			func() {
-				// recover from a panic attack
-				defer func() {
-					if r := recover(); r != nil {
-						// construct the error to return
-						err := fmt.Errorf("%s", r)
-						// send the error to the watchMen
-						for item := range p.watchMen.Iter() {
-							item.Value.ErrChan <- err
-						}
-						// increase the panic counter
-						p.panicCounter.Inc()
-					}
-				}()
-				// send the message to the current actor behavior
-				if behavior, ok := p.behaviorStack.Peek(); ok {
-					behavior(received)
-				}
-			}()
+			p.handleReceived(received)
 		}
+	}
+}
+
+func (p *pid) handleReceived(received ReceiveContext) {
+	// recover from a panic attack
+	defer func() {
+		if r := recover(); r != nil {
+			// construct the error to return
+			err := fmt.Errorf("%s", r)
+			// send the error to the watchMen
+			for item := range p.watchMen.Iter() {
+				item.Value.ErrChan <- err
+			}
+			// increase the panic counter
+			p.panicCounter.Inc()
+		}
+	}()
+	// send the message to the current actor behavior
+	if behavior, ok := p.behaviorStack.Peek(); ok {
+		behavior(received)
 	}
 }
 
