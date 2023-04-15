@@ -3,6 +3,7 @@ package actors
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/tochemey/goakt/internal/tools"
 	"github.com/tochemey/goakt/log"
 	pb "github.com/tochemey/goakt/messages/v1"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 	"go.uber.org/atomic"
 	"google.golang.org/grpc/codes"
@@ -861,12 +863,19 @@ func (p *pid) registerMetrics() error {
 		return err
 	}
 
+	// define the common labels
+	labels := []attribute.KeyValue{
+		attribute.String("actor.name", p.ActorPath().Name()),
+		attribute.String("actor.address", p.ActorPath().String()),
+		attribute.String("actor.type", strings.Replace(fmt.Sprintf("%T", p.Actor), "*", "", 1)),
+	}
+
 	// register the metrics
 	_, err = meter.RegisterCallback(func(ctx context.Context, observer metric.Observer) error {
-		observer.ObserveInt64(metrics.ReceivedCount, int64(p.ReceivedCount(ctx)))
-		observer.ObserveInt64(metrics.PanicCount, int64(p.ErrorsCount(ctx)))
-		observer.ObserveInt64(metrics.RestartedCount, int64(p.RestartCount(ctx)))
-		observer.ObserveInt64(metrics.MailboxSize, int64(p.MailboxSize(ctx)))
+		observer.ObserveInt64(metrics.ReceivedCount, int64(p.ReceivedCount(ctx)), labels...)
+		observer.ObserveInt64(metrics.PanicCount, int64(p.ErrorsCount(ctx)), labels...)
+		observer.ObserveInt64(metrics.RestartedCount, int64(p.RestartCount(ctx)), labels...)
+		observer.ObserveInt64(metrics.MailboxSize, int64(p.MailboxSize(ctx)), labels...)
 		return nil
 	}, metrics.ReceivedCount,
 		metrics.RestartedCount,

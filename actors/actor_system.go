@@ -15,6 +15,7 @@ import (
 	"github.com/tochemey/goakt/internal/resync"
 	"github.com/tochemey/goakt/internal/telemetry"
 	"github.com/tochemey/goakt/log"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/atomic"
@@ -485,9 +486,14 @@ func (a *actorSystem) registerMetrics() error {
 		return err
 	}
 
+	// define the common labels
+	labels := []attribute.KeyValue{
+		attribute.String("actor.system", a.Name()),
+	}
+
 	// register the metrics
 	_, err = meter.RegisterCallback(func(ctx context.Context, observer metric.Observer) error {
-		observer.ObserveInt64(metrics.ActorSystemActorsCount, int64(a.NumActors()))
+		observer.ObserveInt64(metrics.ActorSystemActorsCount, int64(a.NumActors()), labels...)
 		return nil
 	}, metrics.ActorSystemActorsCount)
 
