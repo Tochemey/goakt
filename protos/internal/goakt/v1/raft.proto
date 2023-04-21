@@ -6,8 +6,8 @@ import "messages/v1/address.proto";
 
 option go_package = "github.com/tochemey/goakt/internal/goakt/v1;goaktv1";
 
-// APIService represents the http based key-value store backed by raft
-service APIService {
+// ActorsMetaService represents the http based key-value store backed by raft
+service ActorsMetaService {
   // PutActor persists an actor into the distributed storge
   rpc PutActor(PutActorRequest) returns (PutActorResponse);
   // GetActor reads the content of a given actor

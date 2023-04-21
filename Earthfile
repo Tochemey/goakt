@@ -117,4 +117,3 @@ sample-pb:
     # save artifact to
     SAVE ARTIFACT gen gen AS LOCAL examples/protos
 
-
