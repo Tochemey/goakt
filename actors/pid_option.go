@@ -33,7 +33,7 @@ func withInitMaxRetries(max int) pidOption {
 	}
 }
 
-// withCustomLogger sets the logger
+// withCustomLogger sets the log
 func withCustomLogger(logger log.Logger) pidOption {
 	return func(pid *pid) {
 		pid.logger = logger

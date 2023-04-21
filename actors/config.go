@@ -88,7 +88,7 @@ func (c Config) NodeHostAndPort() string {
 	return c.nodeHostAndPort
 }
 
-// Logger returns the logger
+// Logger returns the log
 func (c Config) Logger() log.Logger {
 	return c.logger
 }
@@ -172,7 +172,7 @@ func WithExpireActorAfter(duration time.Duration) Option {
 	})
 }
 
-// WithLogger sets the actor system custom logger
+// WithLogger sets the actor system custom log
 func WithLogger(logger log.Logger) Option {
 	return OptionFunc(func(config *Config) {
 		config.logger = logger

@@ -31,8 +31,4 @@ type Logger interface {
 	Debug(...any)
 	// Debugf starts a new message with debug level.
 	Debugf(string, ...any)
-	// Trace starts a new message with trace level
-	Trace(...any)
-	// Tracef starts a new message with trace level
-	Tracef(string, ...any)
 }

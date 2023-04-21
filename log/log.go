@@ -5,13 +5,15 @@ import (
 	"io"
 	"os"
 
-	"github.com/rs/zerolog"
+	"go.uber.org/zap/zapcore"
+
+	"go.uber.org/zap"
 )
 
-// DefaultLogger represents the default logger to use
-// This logger wraps zerolog under the hood
-var DefaultLogger = NewLogger(os.Stdout)
-var DiscardLogger = NewLogger(io.Discard)
+// DefaultLogger represents the default Log to use
+// This Log wraps zerolog under the hood
+var DefaultLogger = New(InfoLevel, os.Stdout)
+var DiscardLogger = New(InfoLevel, io.Discard)
 
 // Info logs to INFO level.
 func Info(v ...interface{}) {
@@ -63,93 +65,117 @@ func Panicf(format string, v ...interface{}) {
 	DefaultLogger.Panicf(format, v...)
 }
 
-// logger implements Logger interface with the underlying zap as
+// Log implements Logger interface with the underlying zap as
 // the underlying logging library
-type logger struct {
-	// specifies the prefix
-	prefix string
-	// specifies the underlying logger
-	underlying zerolog.Logger
+type Log struct {
+	*zap.Logger
 }
 
-// NewLogger creates an instance of logger
-func NewLogger(w io.Writer) Logger {
-	// create an instance of zerolog logger
-	zlogger := zerolog.New(w).With().Timestamp().Logger()
-	// create the instance of logger and returns it
-	return &logger{underlying: zlogger}
+// New creates an instance of Log
+func New(level Level, writer io.Writer) *Log {
+	// create the zap Log configuration
+	cfg := zap.NewProductionConfig()
+	// create the zap log core
+	core := zapcore.NewCore(
+		zapcore.NewJSONEncoder(cfg.EncoderConfig),
+		zapcore.AddSync(writer),
+		zapcore.InfoLevel,
+	)
+	// set the log level
+	switch level {
+	case InfoLevel:
+		core.Enabled(zapcore.InfoLevel)
+	case DebugLevel:
+		core.Enabled(zapcore.DebugLevel)
+	case WarningLevel:
+		core.Enabled(zapcore.WarnLevel)
+	case ErrorLevel:
+		core.Enabled(zapcore.ErrorLevel)
+	case PanicLevel:
+		core.Enabled(zapcore.PanicLevel)
+	case FatalLevel:
+		core.Enabled(zapcore.FatalLevel)
+	default:
+		core.Enabled(zapcore.DebugLevel)
+	}
+	// get the zap Log
+	zapLogger := zap.New(core)
+	// create the instance of Log and returns it
+	return &Log{zapLogger}
 }
 
 // Debug starts a message with debug level
-func (l *logger) Debug(v ...any) {
-	l.underlying.Debug().Msg(fmt.Sprint(v...))
+func (l *Log) Debug(v ...any) {
+	defer l.Logger.Sync()
+	l.Logger.Debug(fmt.Sprint(v...))
 }
 
 // Debugf starts a message with debug level
-func (l *logger) Debugf(format string, v ...any) {
-	l.underlying.Debug().Msgf(format, v...)
+func (l *Log) Debugf(format string, v ...any) {
+	defer l.Logger.Sync()
+	l.Logger.Debug(fmt.Sprintf(format, v...))
 }
 
 // Panic starts a new message with panic level. The panic() function
 // is called which stops the ordinary flow of a goroutine.
-func (l *logger) Panic(v ...any) {
-	l.underlying.Panic().Msg(fmt.Sprint(v...))
+func (l *Log) Panic(v ...any) {
+	defer l.Logger.Sync()
+	l.Logger.Panic(fmt.Sprint(v...))
 }
 
 // Panicf starts a new message with panic level. The panic() function
 // is called which stops the ordinary flow of a goroutine.
-func (l *logger) Panicf(format string, v ...any) {
-	l.underlying.Panic().Msgf(format, v...)
+func (l *Log) Panicf(format string, v ...any) {
+	defer l.Logger.Sync()
+	l.Logger.Panic(fmt.Sprintf(format, v...))
 }
 
 // Fatal starts a new message with fatal level. The os.Exit(1) function
 // is called which terminates the program immediately.
-func (l *logger) Fatal(v ...any) {
-	l.underlying.Fatal().Msg(fmt.Sprint(v...))
+func (l *Log) Fatal(v ...any) {
+	defer l.Logger.Sync()
+	l.Logger.Fatal(fmt.Sprint(v...))
 }
 
 // Fatalf starts a new message with fatal level. The os.Exit(1) function
 // is called which terminates the program immediately.
-func (l *logger) Fatalf(format string, v ...any) {
-	l.underlying.Fatal().Msgf(format, v...)
+func (l *Log) Fatalf(format string, v ...any) {
+	defer l.Logger.Sync()
+	l.Logger.Fatal(fmt.Sprintf(format, v...))
 }
 
 // Error starts a new message with error level.
-func (l *logger) Error(v ...any) {
-	l.underlying.Error().Msg(fmt.Sprint(v...))
+func (l *Log) Error(v ...any) {
+	defer l.Logger.Sync()
+	l.Logger.Error(fmt.Sprint(v...))
 }
 
 // Errorf starts a new message with error level.
-func (l *logger) Errorf(format string, v ...any) {
-	l.underlying.Error().Msgf(format, v...)
+func (l *Log) Errorf(format string, v ...any) {
+	defer l.Logger.Sync()
+	l.Logger.Error(fmt.Sprintf(format, v...))
 }
 
 // Warn starts a new message with warn level
-func (l *logger) Warn(v ...any) {
-	l.underlying.Warn().Msg(fmt.Sprint(v...))
+func (l *Log) Warn(v ...any) {
+	defer l.Logger.Sync()
+	l.Logger.Warn(fmt.Sprint(v...))
 }
 
 // Warnf starts a new message with warn level
-func (l *logger) Warnf(format string, v ...any) {
-	l.underlying.Warn().Msgf(format, v...)
+func (l *Log) Warnf(format string, v ...any) {
+	defer l.Logger.Sync()
+	l.Logger.Warn(fmt.Sprintf(format, v...))
 }
 
 // Info starts a message with info level
-func (l *logger) Info(v ...any) {
-	l.underlying.Info().Msg(fmt.Sprint(v...))
+func (l *Log) Info(v ...any) {
+	defer l.Logger.Sync()
+	l.Logger.Info(fmt.Sprint(v...))
 }
 
 // Infof starts a message with info level
-func (l *logger) Infof(format string, v ...any) {
-	l.underlying.Info().Msgf(format, v...)
-}
-
-// Trace starts a new message with trace level
-func (l *logger) Trace(v ...any) {
-	l.underlying.Trace().Msg(fmt.Sprint(v...))
-}
-
-// Tracef starts a new message with trace level
-func (l *logger) Tracef(format string, v ...any) {
-	l.underlying.Trace().Msgf(format, v...)
+func (l *Log) Infof(format string, v ...any) {
+	defer l.Logger.Sync()
+	l.Logger.Info(fmt.Sprintf(format, v...))
 }

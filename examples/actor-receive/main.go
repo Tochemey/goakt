@@ -17,7 +17,7 @@ import (
 func main() {
 	ctx := context.Background()
 
-	// use the messages default logger. real-life implement the logger interface`
+	// use the messages default log. real-life implement the log interface`
 	logger := log.DefaultLogger
 	// create the actor system configuration. kindly in real-life application handle the error
 	config, _ := goakt.NewConfig("SampleActorSystem", "127.0.0.1:0",
@@ -70,7 +70,7 @@ func NewPinger() *Pinger {
 }
 
 func (p *Pinger) PreStart(ctx context.Context) error {
-	// set the logger
+	// set the log
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.logger = log.DefaultLogger
