@@ -16,8 +16,8 @@ type commit struct {
 	applyDoneC chan<- struct{}
 }
 
-// Store backed by raft
-type Store struct {
+// WireActorsStore backed by raft
+type WireActorsStore struct {
 	proposeC    chan<- []byte // channel for proposing updates
 	mu          sync.RWMutex
 	kvStore     *goaktpb.WireActors // current committed key-value pairs
@@ -25,10 +25,10 @@ type Store struct {
 	log         *goaktlog.Log
 }
 
-// NewStore creates an instance of Store
-func NewStore(snapshotter *snap.Snapshotter, proposeC chan<- []byte, commitC <-chan *commit, errorC <-chan error, log *goaktlog.Log) *Store {
-	// create an instance of the store
-	s := &Store{
+// NewWireActorsStore creates an instance of WireActorsStore
+func NewWireActorsStore(snapshotter *snap.Snapshotter, proposeC chan<- []byte, commitC <-chan *commit, errorC <-chan error, log *goaktlog.Log) *WireActorsStore {
+	// create an instance of the WireActorsStore
+	s := &WireActorsStore{
 		proposeC:    proposeC,
 		kvStore:     new(goaktpb.WireActors),
 		snapshotter: snapshotter,
@@ -50,7 +50,7 @@ func NewStore(snapshotter *snap.Snapshotter, proposeC chan<- []byte, commitC <-c
 }
 
 // Lookup looks for a given actor in the cluster storage
-func (s *Store) Lookup(actorName string) (*goaktpb.WireActor, bool) {
+func (s *WireActorsStore) Lookup(actorName string) (*goaktpb.WireActor, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	v, ok := s.kvStore.GetActors()[actorName]
@@ -58,7 +58,7 @@ func (s *Store) Lookup(actorName string) (*goaktpb.WireActor, bool) {
 }
 
 // Propose persists a given actor on the storage
-func (s *Store) Propose(actor *goaktpb.WireActor) {
+func (s *WireActorsStore) Propose(actor *goaktpb.WireActor) {
 	// get the byte array
 	bytea, err := proto.Marshal(actor)
 	// handle the error
@@ -68,7 +68,7 @@ func (s *Store) Propose(actor *goaktpb.WireActor) {
 	s.proposeC <- bytea
 }
 
-func (s *Store) readCommits(commitC <-chan *commit, errorC <-chan error) {
+func (s *WireActorsStore) readCommits(commitC <-chan *commit, errorC <-chan error) {
 	for commit := range commitC {
 		if commit == nil {
 			// signaled to load snapshot
@@ -101,13 +101,13 @@ func (s *Store) readCommits(commitC <-chan *commit, errorC <-chan error) {
 	}
 }
 
-func (s *Store) getSnapshot() ([]byte, error) {
+func (s *WireActorsStore) getSnapshot() ([]byte, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return proto.Marshal(s.kvStore)
 }
 
-func (s *Store) loadSnapshot() (*raftpb.Snapshot, error) {
+func (s *WireActorsStore) loadSnapshot() (*raftpb.Snapshot, error) {
 	snapshot, err := s.snapshotter.Load()
 	if err == snap.ErrNoSnapshot {
 		return nil, nil
@@ -118,7 +118,7 @@ func (s *Store) loadSnapshot() (*raftpb.Snapshot, error) {
 	return snapshot, nil
 }
 
-func (s *Store) recoverFromSnapshot(snapshot []byte) error {
+func (s *WireActorsStore) recoverFromSnapshot(snapshot []byte) error {
 	store := new(goaktpb.WireActors)
 	if err := proto.Unmarshal(snapshot, store); err != nil {
 		return err

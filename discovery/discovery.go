@@ -6,6 +6,14 @@ import (
 	"fmt"
 )
 
+type Method int
+
+const (
+	KUBERNETES Method = iota
+	MDNS
+	LOCAL
+)
+
 // Discovery helps discover other running actor system in a cloud environment
 type Discovery interface {
 	// Start the discovery engine

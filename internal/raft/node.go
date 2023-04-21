@@ -22,8 +22,8 @@ import (
 	"go.etcd.io/etcd/server/v3/wal/walpb"
 )
 
-// A key-value stream backed by raft
-type raftNode struct {
+// Node is key-value stream backed by raft
+type Node struct {
 	proposeC    <-chan []byte            // proposed messages (k,v)
 	confChangeC <-chan raftpb.ConfChange // proposed cluster config changes
 	commitC     chan<- *commit           // entries committed to log (k,v)
@@ -59,18 +59,18 @@ type raftNode struct {
 
 var defaultSnapshotCount uint64 = 10000
 
-// NewRaftNode initiates a raft instance and returns a committed log entry
+// NewNode initiates a raft instance and returns a committed log entry
 // channel and error channel. Proposals for log updates are sent over the
 // provided the proposal channel. All log entries are replayed over the
 // commit channel, followed by a nil message (to indicate the channel is
 // current), then new log entries. To shut down, close proposeC and read errorC.
-func NewRaftNode(id int, peers []string, join bool, getSnapshot func() ([]byte, error), proposeC <-chan []byte,
-	confChangeC <-chan raftpb.ConfChange, log *goaktlog.Log) (<-chan *commit, <-chan error, <-chan *snap.Snapshotter) {
+func NewNode(id int, peers []string, join bool, getSnapshot func() ([]byte, error), proposeC <-chan []byte,
+	confChangeC <-chan raftpb.ConfChange, log *goaktlog.Log) (<-chan *commit, <-chan error, <-chan *snap.Snapshotter) { // nolint
 
 	commitC := make(chan *commit)
 	errorC := make(chan error)
 
-	rc := &raftNode{
+	rc := &Node{
 		proposeC:         proposeC,
 		confChangeC:      confChangeC,
 		commitC:          commitC,
@@ -100,7 +100,7 @@ func NewRaftNode(id int, peers []string, join bool, getSnapshot func() ([]byte, 
 	return commitC, errorC, rc.snapshotterReady
 }
 
-func (rc *raftNode) saveSnap(snap raftpb.Snapshot) error {
+func (rc *Node) saveSnap(snap raftpb.Snapshot) error {
 	walSnap := walpb.Snapshot{
 		Index:     snap.Metadata.Index,
 		Term:      snap.Metadata.Term,
@@ -118,7 +118,7 @@ func (rc *raftNode) saveSnap(snap raftpb.Snapshot) error {
 	return rc.wal.ReleaseLockTo(snap.Metadata.Index)
 }
 
-func (rc *raftNode) entriesToApply(ents []raftpb.Entry) (nents []raftpb.Entry) {
+func (rc *Node) entriesToApply(ents []raftpb.Entry) (nents []raftpb.Entry) {
 	if len(ents) == 0 {
 		return ents
 	}
@@ -134,7 +134,7 @@ func (rc *raftNode) entriesToApply(ents []raftpb.Entry) (nents []raftpb.Entry) {
 
 // publishEntries writes committed log entries to commit channel and returns
 // whether all entries could be published.
-func (rc *raftNode) publishEntries(entries []raftpb.Entry) (<-chan struct{}, bool) {
+func (rc *Node) publishEntries(entries []raftpb.Entry) (<-chan struct{}, bool) {
 	if len(entries) == 0 {
 		return nil, true
 	}
@@ -184,7 +184,7 @@ func (rc *raftNode) publishEntries(entries []raftpb.Entry) (<-chan struct{}, boo
 	return applyDoneC, true
 }
 
-func (rc *raftNode) loadSnapshot() *raftpb.Snapshot {
+func (rc *Node) loadSnapshot() *raftpb.Snapshot {
 	if wal.Exist(rc.waldir) {
 		walSnaps, err := wal.ValidSnapshotEntries(rc.log.Logger, rc.waldir)
 		if err != nil {
@@ -200,7 +200,7 @@ func (rc *raftNode) loadSnapshot() *raftpb.Snapshot {
 }
 
 // openWAL returns a WAL ready for reading.
-func (rc *raftNode) openWAL(snapshot *raftpb.Snapshot) *wal.WAL {
+func (rc *Node) openWAL(snapshot *raftpb.Snapshot) *wal.WAL {
 	if !wal.Exist(rc.waldir) {
 		if err := os.Mkdir(rc.waldir, 0750); err != nil {
 			rc.log.Fatalf("failed to create dir for wal (%v)", err)
@@ -227,7 +227,7 @@ func (rc *raftNode) openWAL(snapshot *raftpb.Snapshot) *wal.WAL {
 }
 
 // replayWAL replays WAL entries into the raft instance.
-func (rc *raftNode) replayWAL() *wal.WAL {
+func (rc *Node) replayWAL() *wal.WAL {
 	rc.log.Infof("replaying WAL of member %d", rc.id)
 	snapshot := rc.loadSnapshot()
 	w := rc.openWAL(snapshot)
@@ -247,7 +247,7 @@ func (rc *raftNode) replayWAL() *wal.WAL {
 	return w
 }
 
-func (rc *raftNode) writeError(err error) {
+func (rc *Node) writeError(err error) {
 	rc.stopHTTP()
 	close(rc.commitC)
 	rc.errorC <- err
@@ -255,7 +255,7 @@ func (rc *raftNode) writeError(err error) {
 	rc.node.Stop()
 }
 
-func (rc *raftNode) startRaft() {
+func (rc *Node) startRaft() {
 	if !fileutil.Exist(rc.snapdir) {
 		if err := os.Mkdir(rc.snapdir, 0750); err != nil {
 			rc.log.Fatalf("failed to create dir for snapshot (%v)", err)
@@ -314,20 +314,20 @@ func (rc *raftNode) startRaft() {
 }
 
 // stop closes http, closes all channels, and stops raft.
-func (rc *raftNode) stop() {
+func (rc *Node) stop() {
 	rc.stopHTTP()
 	close(rc.commitC)
 	close(rc.errorC)
 	rc.node.Stop()
 }
 
-func (rc *raftNode) stopHTTP() {
+func (rc *Node) stopHTTP() {
 	rc.transport.Stop()
 	close(rc.httpstopc)
 	<-rc.httpdonec
 }
 
-func (rc *raftNode) publishSnapshot(snapshotToSave raftpb.Snapshot) {
+func (rc *Node) publishSnapshot(snapshotToSave raftpb.Snapshot) {
 	if raft.IsEmptySnap(snapshotToSave) {
 		return
 	}
@@ -338,7 +338,7 @@ func (rc *raftNode) publishSnapshot(snapshotToSave raftpb.Snapshot) {
 	if snapshotToSave.Metadata.Index <= rc.appliedIndex {
 		rc.log.Fatalf("snapshot index [%d] should > progress.appliedIndex [%d]", snapshotToSave.Metadata.Index, rc.appliedIndex)
 	}
-	rc.commitC <- nil // trigger Store to load snapshot
+	rc.commitC <- nil // trigger WireActorsStore to load snapshot
 
 	rc.confState = snapshotToSave.Metadata.ConfState
 	rc.snapshotIndex = snapshotToSave.Metadata.Index
@@ -347,7 +347,7 @@ func (rc *raftNode) publishSnapshot(snapshotToSave raftpb.Snapshot) {
 
 var snapshotCatchUpEntriesN uint64 = 10000
 
-func (rc *raftNode) maybeTriggerSnapshot(applyDoneC <-chan struct{}) {
+func (rc *Node) maybeTriggerSnapshot(applyDoneC <-chan struct{}) {
 	if rc.appliedIndex-rc.snapshotIndex <= rc.snapCount {
 		return
 	}
@@ -386,7 +386,7 @@ func (rc *raftNode) maybeTriggerSnapshot(applyDoneC <-chan struct{}) {
 	rc.snapshotIndex = rc.appliedIndex
 }
 
-func (rc *raftNode) serveChannels() {
+func (rc *Node) serveChannels() {
 	snap, err := rc.raftStorage.Snapshot()
 	if err != nil {
 		panic(err)
@@ -434,7 +434,7 @@ func (rc *raftNode) serveChannels() {
 		case <-ticker.C:
 			rc.node.Tick()
 
-		// store raft entries to wal, then publish over commit channel
+		// WireActorsStore raft entries to wal, then publish over commit channel
 		case rd := <-rc.node.Ready():
 			// Must save the snapshot file and WAL snapshot entry before saving any other entries
 			// or hardstate to ensure that recovery after a snapshot restore is possible.
@@ -470,7 +470,7 @@ func (rc *raftNode) serveChannels() {
 // When there is a `raftpb.EntryConfChange` after creating the snapshot,
 // then the confState included in the snapshot is out of date. so We need
 // to update the confState before sending a snapshot to a follower.
-func (rc *raftNode) processMessages(ms []raftpb.Message) []raftpb.Message {
+func (rc *Node) processMessages(ms []raftpb.Message) []raftpb.Message {
 	for i := 0; i < len(ms); i++ {
 		if ms[i].Type == raftpb.MsgSnap {
 			ms[i].Snapshot.Metadata.ConfState = rc.confState
@@ -479,31 +479,46 @@ func (rc *raftNode) processMessages(ms []raftpb.Message) []raftpb.Message {
 	return ms
 }
 
-func (rc *raftNode) serveRaft() {
+func (rc *Node) serveRaft() {
 	url, err := url.Parse(rc.peers[rc.id-1])
 	if err != nil {
-		rc.log.Fatalf("raftexample: Failed parsing URL (%v)", err)
+		rc.log.Fatalf("failed parsing URL (%v)", err)
 	}
 
 	ln, err := newStoppableListener(url.Host, rc.httpstopc)
 	if err != nil {
-		rc.log.Fatalf("raftexample: Failed to listen rafthttp (%v)", err)
+		rc.log.Fatalf("failed to listen rafthttp (%v)", err)
 	}
 
-	err = (&http.Server{Handler: rc.transport.Handler()}).Serve(ln)
+	err = (&http.Server{
+		// The maximum duration for reading the entire request, including the body.
+		// It’s implemented in net/http by calling SetReadDeadline immediately after Accept
+		// ReadTimeout := handler_timeout + ReadHeaderTimeout + wiggle_room
+		ReadTimeout: 3 * time.Second,
+		// ReadHeaderTimeout is the amount of time allowed to read request headers
+		ReadHeaderTimeout: time.Second,
+		// WriteTimeout is the maximum duration before timing out writes of the response.
+		// It is reset whenever a new request’s header is read.
+		// This effectively covers the lifetime of the ServeHTTP handler stack
+		WriteTimeout: time.Second,
+		// IdleTimeout is the maximum amount of time to wait for the next request when keep-alive are enabled.
+		// If IdleTimeout is zero, the value of ReadTimeout is used. Not relevant to request timeouts
+		IdleTimeout: 1200 * time.Second,
+		Handler:     rc.transport.Handler()}).Serve(ln)
+
 	select {
 	case <-rc.httpstopc:
 	default:
-		rc.log.Fatalf("raftexample: Failed to serve rafthttp (%v)", err)
+		rc.log.Fatalf("failed to serve rafthttp (%v)", err)
 	}
 	close(rc.httpdonec)
 }
 
-func (rc *raftNode) Process(ctx context.Context, m raftpb.Message) error {
+func (rc *Node) Process(ctx context.Context, m raftpb.Message) error {
 	return rc.node.Step(ctx, m)
 }
-func (rc *raftNode) IsIDRemoved(id uint64) bool  { return false }
-func (rc *raftNode) ReportUnreachable(id uint64) { rc.node.ReportUnreachable(id) }
-func (rc *raftNode) ReportSnapshot(id uint64, status raft.SnapshotStatus) {
+func (rc *Node) IsIDRemoved(id uint64) bool  { return false }
+func (rc *Node) ReportUnreachable(id uint64) { rc.node.ReportUnreachable(id) }
+func (rc *Node) ReportSnapshot(id uint64, status raft.SnapshotStatus) {
 	rc.node.ReportSnapshot(id, status)
 }

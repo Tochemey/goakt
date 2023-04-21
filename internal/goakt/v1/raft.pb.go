@@ -7,12 +7,11 @@
 package goaktv1
 
 import (
-	reflect "reflect"
-	sync "sync"
-
 	v1 "github.com/tochemey/goakt/messages/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	reflect "reflect"
+	sync "sync"
 )
 
 const (
@@ -407,13 +406,13 @@ var file_goakt_v1_raft_proto_goTypes = []interface{}{
 	(*WireActors)(nil),       // 4: goakt.v1.WireActors
 	(*WireActor)(nil),        // 5: goakt.v1.WireActor
 	nil,                      // 6: goakt.v1.WireActors.ActorsEntry
-	(*v1.Address)(nil),       // 7: disco.v1.Address
+	(*v1.Address)(nil),       // 7: messages.v1.Address
 }
 var file_goakt_v1_raft_proto_depIdxs = []int32{
 	5, // 0: goakt.v1.PutActorRequest.actor:type_name -> goakt.v1.WireActor
 	5, // 1: goakt.v1.GetActorResponse.actor:type_name -> goakt.v1.WireActor
 	6, // 2: goakt.v1.WireActors.actors:type_name -> goakt.v1.WireActors.ActorsEntry
-	7, // 3: goakt.v1.WireActor.actor_address:type_name -> disco.v1.Address
+	7, // 3: goakt.v1.WireActor.actor_address:type_name -> messages.v1.Address
 	5, // 4: goakt.v1.WireActors.ActorsEntry.value:type_name -> goakt.v1.WireActor
 	0, // 5: goakt.v1.ActorsMetaService.PutActor:input_type -> goakt.v1.PutActorRequest
 	2, // 6: goakt.v1.ActorsMetaService.GetActor:input_type -> goakt.v1.GetActorRequest

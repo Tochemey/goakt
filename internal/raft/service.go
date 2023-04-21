@@ -17,20 +17,20 @@ import (
 	"golang.org/x/net/http2/h2c"
 )
 
-// StoreService implements the raft api service
-type StoreService struct {
-	store       *Store
+// ActorsMetaService implements the raft api service
+type ActorsMetaService struct {
+	store       *WireActorsStore
 	confChangeC chan<- raftpb.ConfChange
 	port        int
 	log         *goaktlog.Log
 }
 
 // enforce compiler errors
-var _ goaktv1connect.StoreServiceHandler = &StoreService{}
+var _ goaktv1connect.ActorsMetaServiceHandler = &ActorsMetaService{}
 
-// NewStoreService creates an instance of StoreService
-func NewStoreService(kv *Store, port int, confChangeC chan<- raftpb.ConfChange, log *goaktlog.Log) *StoreService {
-	return &StoreService{
+// NewActorsMetaService creates an instance of ActorsMetaService
+func NewActorsMetaService(kv *WireActorsStore, port int, confChangeC chan<- raftpb.ConfChange, log *goaktlog.Log) *ActorsMetaService {
+	return &ActorsMetaService{
 		store:       kv,
 		port:        port,
 		log:         log,
@@ -38,12 +38,12 @@ func NewStoreService(kv *Store, port int, confChangeC chan<- raftpb.ConfChange, 
 	}
 }
 
-// ListenAndServe starts the StoreService
-func (s *StoreService) ListenAndServe(errorC <-chan error) {
+// ListenAndServe starts the ActorsMetaService
+func (s *ActorsMetaService) ListenAndServe(errorC <-chan error) {
 	// create a http server mux
 	mux := http.NewServeMux()
 	// create the resource and handler
-	path, handler := goaktv1connect.NewStoreServiceHandler(
+	path, handler := goaktv1connect.NewActorsMetaServiceHandler(
 		s,
 		// TODO add interceptors
 	)
@@ -90,20 +90,20 @@ func (s *StoreService) ListenAndServe(errorC <-chan error) {
 }
 
 // PutActor persists an actor information in the cluster
-func (s *StoreService) PutActor(ctx context.Context, c *connect.Request[goaktpb.PutActorRequest]) (*connect.Response[goaktpb.PutActorResponse], error) {
+func (s *ActorsMetaService) PutActor(ctx context.Context, c *connect.Request[goaktpb.PutActorRequest]) (*connect.Response[goaktpb.PutActorResponse], error) {
 	// add a span context
 	ctx, span := telemetry.SpanContext(ctx, "PutActor")
 	defer span.End()
 
 	// grab the actor from the request
 	actor := c.Msg.GetActor()
-	// persist the actor onto the store
+	// persist the actor onto the WireActorsStore
 	s.store.Propose(actor)
 	return &connect.Response[goaktpb.PutActorResponse]{}, nil
 }
 
 // GetActor retrieves an actor information in the cluster
-func (s *StoreService) GetActor(ctx context.Context, c *connect.Request[goaktpb.GetActorRequest]) (*connect.Response[goaktpb.GetActorResponse], error) {
+func (s *ActorsMetaService) GetActor(ctx context.Context, c *connect.Request[goaktpb.GetActorRequest]) (*connect.Response[goaktpb.GetActorResponse], error) {
 	// add a span context
 	ctx, span := telemetry.SpanContext(ctx, "GetActor")
 	defer span.End()
@@ -111,7 +111,7 @@ func (s *StoreService) GetActor(ctx context.Context, c *connect.Request[goaktpb.
 	// grab the actor name from the request
 	actorName := c.Msg.GetActorName()
 
-	// perform a lookup in the store
+	// perform a lookup in the WireActorsStore
 	actor, ok := s.store.Lookup(actorName)
 	if !ok {
 		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("actor=%s not found", actorName))
