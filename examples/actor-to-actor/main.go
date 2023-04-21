@@ -18,7 +18,7 @@ import (
 func main() {
 	ctx := context.Background()
 
-	// use the messages default logger. real-life implement the logger interface`
+	// use the messages default log. real-life implement the log interface`
 	logger := log.DefaultLogger
 
 	// create the actor system configuration. kindly in real-life application handle the error
@@ -42,8 +42,8 @@ func main() {
 
 	// shutdown both actors after 3 seconds of conversation
 	timer := time.AfterFunc(3*time.Second, func() {
-		log.DefaultLogger.Infof("PingActor=%s has processed %d messages", pingActor.ActorPath().String(), pingActor.ReceivedCount(ctx))
-		log.DefaultLogger.Infof("PongActor=%s has processed %d messages", pongActor.ActorPath().String(), pongActor.ReceivedCount(ctx))
+		logger.DefaultLogger.Infof("PingActor=%s has processed %d messages", pingActor.ActorPath().String(), pingActor.ReceivedCount(ctx))
+		logger.DefaultLogger.Infof("PongActor=%s has processed %d messages", pongActor.ActorPath().String(), pongActor.ReceivedCount(ctx))
 		_ = pingActor.Shutdown(ctx)
 		_ = pongActor.Shutdown(ctx)
 	})
@@ -74,7 +74,7 @@ func NewPingActor() *PingActor {
 }
 
 func (p *PingActor) PreStart(ctx context.Context) error {
-	// set the logger
+	// set the log
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.logger = log.DefaultLogger
@@ -119,7 +119,7 @@ func NewPongActor() *PongActor {
 }
 
 func (p *PongActor) PreStart(ctx context.Context) error {
-	// set the logger
+	// set the log
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.logger = log.DefaultLogger

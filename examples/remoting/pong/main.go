@@ -23,7 +23,7 @@ const (
 func main() {
 	ctx := context.Background()
 
-	// use the messages default logger. real-life implement the logger interface`
+	// use the messages default log. real-life implement the log interface`
 	logger := log.DefaultLogger
 
 	// create the actor system configuration. kindly in real-life application handle the error
@@ -64,7 +64,7 @@ func NewPongActor() *PongActor {
 }
 
 func (p *PongActor) PreStart(ctx context.Context) error {
-	// set the logger
+	// set the log
 	p.logger = log.DefaultLogger
 	p.count = atomic.NewInt32(0)
 	p.logger.Info("About to Start")

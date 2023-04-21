@@ -6,8 +6,36 @@ import "messages/v1/address.proto";
 
 option go_package = "github.com/tochemey/goakt/internal/goakt/v1;goaktv1";
 
-// FsmState specifies the raft Finite State Machine entries
-message FsmState {
+// APIService represents the http based key-value store backed by raft
+service APIService {
+  // PutActor persists an actor into the distributed storge
+  rpc PutActor(PutActorRequest) returns (PutActorResponse);
+  // GetActor reads the content of a given actor
+  rpc GetActor(GetActorRequest) returns (GetActorResponse);
+}
+
+// PutActorRequest is the put actor request
+message PutActorRequest {
+  // Specifies the wire actor to put
+  WireActor actor = 1;
+}
+
+// PutActorResponse is the response to put actor request
+message PutActorResponse {}
+
+// GetActorRequest is used to fetch an actor from the cluster
+message GetActorRequest {
+  // Specifies the actor name
+  string actor_name = 1;
+}
+
+// GetActorResponse is the response of GetActorRequest
+message GetActorResponse {
+  // Specifies the actor
+  WireActor actor = 1;
+}
+
+message WireActors {
   // Specifies raft FSM entries
   map<string, WireActor> actors = 1;
 }

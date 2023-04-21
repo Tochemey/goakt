@@ -333,7 +333,7 @@ func (a *actorSystem) RemoteLookup(ctx context.Context, request *connect.Request
 	ctx, span := telemetry.SpanContext(ctx, "RemoteLookup")
 	defer span.End()
 
-	// get a context logger
+	// get a context log
 	logger := a.logger
 
 	// first let us make a copy of the incoming request
@@ -375,7 +375,7 @@ func (a *actorSystem) RemoteAsk(ctx context.Context, request *connect.Request[go
 	ctx, span := telemetry.SpanContext(ctx, "RemoteAsk")
 	defer span.End()
 
-	// get a context logger
+	// get a context log
 	logger := a.logger
 	// first let us make a copy of the incoming request
 	reqCopy := request.Msg
@@ -428,7 +428,7 @@ func (a *actorSystem) RemoteTell(ctx context.Context, request *connect.Request[g
 	ctx, span := telemetry.SpanContext(ctx, "RemoteTell")
 	defer span.End()
 
-	// get a context logger
+	// get a context log
 	logger := a.logger
 	// first let us make a copy of the incoming request
 	reqCopy := request.Msg
