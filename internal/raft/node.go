@@ -78,8 +78,8 @@ func NewNode(id int, peers []string, join bool, getSnapshot func() ([]byte, erro
 		id:               id,
 		peers:            peers,
 		join:             join,
-		waldir:           fmt.Sprintf("raftexample-%d", id),
-		snapdir:          fmt.Sprintf("raftexample-%d-snap", id),
+		waldir:           fmt.Sprintf("goakt-node-%d", id),
+		snapdir:          fmt.Sprintf("goakt-node-%d-snap", id),
 		getSnapshot:      getSnapshot,
 		snapCount:        defaultSnapshotCount,
 		stopc:            make(chan struct{}),
@@ -479,15 +479,20 @@ func (rc *Node) processMessages(ms []raftpb.Message) []raftpb.Message {
 	return ms
 }
 
+// serveRaft starts the raft server
 func (rc *Node) serveRaft() {
+	// parse the peers address
 	url, err := url.Parse(rc.peers[rc.id-1])
+	// handle the error
 	if err != nil {
 		rc.log.Fatalf("failed parsing URL (%v)", err)
 	}
 
+	// start the listener
 	ln, err := newStoppableListener(url.Host, rc.httpstopc)
+	// handle the error
 	if err != nil {
-		rc.log.Fatalf("failed to listen rafthttp (%v)", err)
+		rc.log.Fatalf("failed to listen raft http (%v)", err)
 	}
 
 	err = (&http.Server{
@@ -509,16 +514,23 @@ func (rc *Node) serveRaft() {
 	select {
 	case <-rc.httpstopc:
 	default:
-		rc.log.Fatalf("failed to serve rafthttp (%v)", err)
+		rc.log.Fatalf("failed to serve raft http (%v)", err)
 	}
 	close(rc.httpdonec)
 }
 
+// Process the raft message
 func (rc *Node) Process(ctx context.Context, m raftpb.Message) error {
 	return rc.node.Step(ctx, m)
 }
-func (rc *Node) IsIDRemoved(id uint64) bool  { return false }
+
+// IsIDRemoved check whether the node is removed or not
+func (rc *Node) IsIDRemoved(id uint64) bool { return false }
+
+// ReportUnreachable reports that the given node is unreachable
 func (rc *Node) ReportUnreachable(id uint64) { rc.node.ReportUnreachable(id) }
+
+// ReportSnapshot sends a snapshot report
 func (rc *Node) ReportSnapshot(id uint64, status raft.SnapshotStatus) {
 	rc.node.ReportSnapshot(id, status)
 }
