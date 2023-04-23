@@ -21,7 +21,7 @@ type Discovery interface {
 	// Nodes returns the list of Nodes at a given time
 	Nodes(ctx context.Context) ([]*Node, error)
 	// Watch returns event based upon node lifecycle
-	Watch(ctx context.Context) (<-chan *Event, error)
+	Watch(ctx context.Context) (<-chan Event, error)
 	// EarliestNode returns the earliest node. This is based upon the node timestamp
 	EarliestNode(ctx context.Context) (*Node, error)
 	// Stop shutdown the discovery provider
