@@ -2,7 +2,6 @@ package kubernetes
 
 import (
 	"context"
-	"sort"
 	"sync"
 	"time"
 
@@ -19,29 +18,8 @@ import (
 	"k8s.io/client-go/tools/cache"
 )
 
-const (
-	Namespace     string = "namespace"
-	PodLabels            = "pod_labels"
-	LabelSelector        = "label_selector"
-	PortName             = "port_name"
-)
-
-// Option represents the kubernetes provider option
-type Option struct {
-	// KubeConfig represents the kubernetes configuration
-	KubeConfig string
-	// NameSpace specifies the namespace
-	NameSpace string
-	// PodLabels defines the pod labels
-	PodLabels map[string]string
-	// Label Selector
-	LabelSelector string
-	// Specifies the port name
-	PortName string
-}
-
-// Kubernetes represents the kubernetes provider
-type Kubernetes struct {
+// Discovery represents the kubernetes discovery
+type Discovery struct {
 	option    *Option
 	k8sClient *kubernetes.Clientset
 	mu        sync.Mutex
@@ -54,12 +32,12 @@ type Kubernetes struct {
 }
 
 // enforce compilation error
-var _ discovery.Discovery = &Kubernetes{}
+var _ discovery.Discovery = &Discovery{}
 
 // New returns an instance of the kubernetes discovery provider
-func New(logger log.Logger) *Kubernetes {
+func New(logger log.Logger) *Discovery {
 	// create an instance of
-	k8 := &Kubernetes{
+	k8 := &Discovery{
 		mu:            sync.Mutex{},
 		publicChan:    make(chan discovery.Event, 2),
 		stopChan:      make(chan struct{}, 1),
@@ -69,38 +47,22 @@ func New(logger log.Logger) *Kubernetes {
 	return k8
 }
 
-// EarliestNode returns the earliest node. This is based upon the node timestamp
-func (k *Kubernetes) EarliestNode(ctx context.Context) (*discovery.Node, error) {
-	// fetch the list of Nodes
-	nodes, err := k.Nodes(ctx)
-	// handle the error
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to get the earliest node")
-	}
-	// let us sort the nodes by their timestamp
-	sort.SliceStable(nodes, func(i, j int) bool {
-		return nodes[i].Timestamp() < nodes[j].Timestamp()
-	})
-	// return the first element in the sorted list
-	return nodes[0], nil
-}
-
 // Nodes returns the list of Nodes at a given time
-func (k *Kubernetes) Nodes(ctx context.Context) ([]*discovery.Node, error) {
+func (d *Discovery) Nodes(ctx context.Context) ([]*discovery.Node, error) {
 	// first check whether the actor system has started
-	if !k.isInitialized.Load() {
+	if !d.isInitialized.Load() {
 		return nil, errors.New("kubernetes discovery engine not initialized")
 	}
 
 	// List all the pods based on the filters we requested
-	pods, err := k.k8sClient.CoreV1().Pods(k.option.NameSpace).List(ctx, k8meta.ListOptions{
-		LabelSelector: labels.SelectorFromSet(k.option.PodLabels).String(),
+	pods, err := d.k8sClient.CoreV1().Pods(d.option.NameSpace).List(ctx, k8meta.ListOptions{
+		LabelSelector: labels.SelectorFromSet(d.option.PodLabels).String(),
 	})
 	// panic when we cannot poll the pods
 	if err != nil {
 		// TODO maybe do not panic
 		// TODO figure out the best approach
-		k.logger.Panic(errors.Wrap(err, "failed to fetch kubernetes pods"))
+		d.logger.Panic(errors.Wrap(err, "failed to fetch kubernetes pods"))
 	}
 
 	nodes := make([]*discovery.Node, 0, pods.Size())
@@ -130,15 +92,14 @@ MainLoop:
 			// iterate the container ports
 			for _, port := range container.Ports {
 				// find the mapping port
-				if port.Name == k.option.PortName {
+				if port.Name == d.option.PortName {
 					// create the node object
-					node = discovery.NewNode(
-						pod.GetName(),
-						pod.Status.PodIP,
-						port.ContainerPort,
-						pod.Status.StartTime.Time.UnixMilli(),
-						nil,
-					)
+					node = &discovery.Node{
+						Name:      pod.GetName(),
+						Host:      pod.Status.PodIP,
+						Port:      port.ContainerPort,
+						StartTime: pod.Status.StartTime.Time.UnixMilli(),
+					}
 					break
 				}
 			}
@@ -154,18 +115,18 @@ MainLoop:
 }
 
 // Watch returns event based upon node lifecycle
-func (k *Kubernetes) Watch(ctx context.Context) (<-chan discovery.Event, error) {
+func (d *Discovery) Watch(ctx context.Context) (<-chan discovery.Event, error) {
 	// first check whether the actor system has started
-	if !k.isInitialized.Load() {
+	if !d.isInitialized.Load() {
 		return nil, errors.New("kubernetes discovery engine not initialized")
 	}
 	// run the watcher
-	go k.watchPods()
-	return k.publicChan, nil
+	go d.watchPods()
+	return d.publicChan, nil
 }
 
 // Start the discovery engine
-func (k *Kubernetes) Start(ctx context.Context, meta discovery.Meta) error {
+func (d *Discovery) Start(ctx context.Context, meta discovery.Meta) error {
 	// validate the meta
 	// let us make sure we have the required options set
 	// assert the present of the namespace
@@ -194,45 +155,45 @@ func (k *Kubernetes) Start(ctx context.Context, meta discovery.Meta) error {
 	k8sClient, err := kubernetes.NewForConfig(config)
 	// handle the error
 	if err != nil {
-		return errors.Wrap(err, "failed to create the k8s client api")
+		return errors.Wrap(err, "failed to create the kubernetes client api")
 	}
 
 	// set the k8 client
-	k.k8sClient = k8sClient
+	d.k8sClient = k8sClient
 	// set the options
-	if err := k.setOptions(meta); err != nil {
+	if err := d.setOptions(meta); err != nil {
 		return errors.Wrap(err, "failed to instantiate the kubernetes discovery provider")
 	}
 	// set initialized
-	k.isInitialized = atomic.NewBool(true)
+	d.isInitialized = atomic.NewBool(true)
 	return nil
 }
 
-// Stop shutdown the discovery provider
-func (k *Kubernetes) Stop() error {
+// Stop shutdown the discovery engine
+func (d *Discovery) Stop() error {
 	// first check whether the actor system has started
-	if !k.isInitialized.Load() {
+	if !d.isInitialized.Load() {
 		return errors.New("kubernetes discovery engine not initialized")
 	}
 	// stop the watchers
-	close(k.stopChan)
+	close(d.stopChan)
 	// close the public channel
-	close(k.publicChan)
+	close(d.publicChan)
 	return nil
 }
 
 // handlePodAdded is called when a new pod is added
-func (k *Kubernetes) handlePodAdded(pod *v1.Pod) {
+func (d *Discovery) handlePodAdded(pod *v1.Pod) {
 	// acquire the lock
-	k.mu.Lock()
+	d.mu.Lock()
 	// release the lock
-	defer k.mu.Unlock()
+	defer d.mu.Unlock()
 	// ignore the pod when it is not running
 	if pod.Status.Phase != v1.PodRunning {
 		return
 	}
 	// get node
-	node := k.toNode(pod)
+	node := d.podToNode(pod)
 	// continue the loop when we did not find any node
 	if node == nil {
 		return
@@ -240,23 +201,23 @@ func (k *Kubernetes) handlePodAdded(pod *v1.Pod) {
 	// here we find a node let us raise the node registered event
 	event := &discovery.NodeAdded{Node: node}
 	// add to the channel
-	k.publicChan <- event
+	d.publicChan <- event
 }
 
 // handlePodUpdated is called when a pod is updated
-func (k *Kubernetes) handlePodUpdated(old *v1.Pod, pod *v1.Pod) {
+func (d *Discovery) handlePodUpdated(old *v1.Pod, pod *v1.Pod) {
 	// ignore the pod when it is not running
 	if pod.Status.Phase != v1.PodRunning {
 		return
 	}
 	// acquire the lock
-	k.mu.Lock()
+	d.mu.Lock()
 	// release the lock
-	defer k.mu.Unlock()
+	defer d.mu.Unlock()
 	// grab the old node
-	oldNode := k.toNode(old)
+	oldNode := d.podToNode(old)
 	// get the new node
-	node := k.toNode(pod)
+	node := d.podToNode(pod)
 	// continue the loop when we did not find any node
 	if node == nil {
 		return
@@ -267,25 +228,25 @@ func (k *Kubernetes) handlePodUpdated(old *v1.Pod, pod *v1.Pod) {
 		Current: oldNode,
 	}
 	// add to the channel
-	k.publicChan <- event
+	d.publicChan <- event
 }
 
 // handlePodDeleted is called when pod is deleted
-func (k *Kubernetes) handlePodDeleted(pod *v1.Pod) {
+func (d *Discovery) handlePodDeleted(pod *v1.Pod) {
 	// acquire the lock
-	k.mu.Lock()
+	d.mu.Lock()
 	// release the lock
-	defer k.mu.Unlock()
+	defer d.mu.Unlock()
 	// get the new node
-	node := k.toNode(pod)
+	node := d.podToNode(pod)
 	// here we find a node let us raise the node removed event
 	event := &discovery.NodeRemoved{Node: node}
 	// add to the channel
-	k.publicChan <- event
+	d.publicChan <- event
 }
 
 // setOptions sets the kubernetes option
-func (k *Kubernetes) setOptions(meta discovery.Meta) (err error) {
+func (d *Discovery) setOptions(meta discovery.Meta) (err error) {
 	// create an instance of Option
 	option := new(Option)
 	// extract the namespace
@@ -313,12 +274,12 @@ func (k *Kubernetes) setOptions(meta discovery.Meta) (err error) {
 		return err
 	}
 	// in case none of the above extraction fails then set the option
-	k.option = option
+	d.option = option
 	return nil
 }
 
-// toNode takes a kubernetes pod and returns a Node
-func (k *Kubernetes) toNode(pod *v1.Pod) *discovery.Node {
+// podToNode takes a kubernetes pod and returns a Node
+func (d *Discovery) podToNode(pod *v1.Pod) *discovery.Node {
 	// If there is a Ready condition available, we need that to be true.
 	// If no ready condition is set, then we accept this pod regardless.
 	for _, condition := range pod.Status.Conditions {
@@ -337,15 +298,14 @@ func (k *Kubernetes) toNode(pod *v1.Pod) *discovery.Node {
 		// iterate the container ports
 		for _, port := range container.Ports {
 			// find the mapping port
-			if port.Name == k.option.PortName {
+			if port.Name == d.option.PortName {
 				// create the node object
-				node = discovery.NewNode(
-					pod.GetName(),
-					pod.Status.PodIP,
-					port.ContainerPort,
-					pod.Status.StartTime.Time.UnixMilli(),
-					nil,
-				)
+				node = &discovery.Node{
+					Name:      pod.GetName(),
+					Host:      pod.Status.PodIP,
+					Port:      port.ContainerPort,
+					StartTime: pod.Status.StartTime.Time.UnixMilli(),
+				}
 				break
 			}
 		}
@@ -356,14 +316,14 @@ func (k *Kubernetes) toNode(pod *v1.Pod) *discovery.Node {
 
 // watchPods keeps a watch on kubernetes pods activities and emit
 // respective event when needed
-func (k *Kubernetes) watchPods() {
+func (d *Discovery) watchPods() {
 	// create the k8 informer factory
 	factory := informers.NewSharedInformerFactoryWithOptions(
-		k.k8sClient,
+		d.k8sClient,
 		10*time.Minute, // TODO make it configurable
-		informers.WithNamespace(k.option.NameSpace),
+		informers.WithNamespace(d.option.NameSpace),
 		informers.WithTweakListOptions(func(options *k8meta.ListOptions) {
-			options.LabelSelector = labels.SelectorFromSet(k.option.PodLabels).String()
+			options.LabelSelector = labels.SelectorFromSet(d.option.PodLabels).String()
 		}))
 	// create the pods informer instance
 	informer := factory.Core().V1().Pods().Informer()
@@ -380,7 +340,7 @@ func (k *Kubernetes) watchPods() {
 			// Handler logic
 			pod := obj.(*v1.Pod)
 			// handle the newly added pod
-			k.handlePodAdded(pod)
+			d.handlePodAdded(pod)
 		},
 		UpdateFunc: func(current, node any) {
 			mux.RLock()
@@ -392,7 +352,7 @@ func (k *Kubernetes) watchPods() {
 			// Handler logic
 			old := current.(*v1.Pod)
 			pod := node.(*v1.Pod)
-			k.handlePodUpdated(old, pod)
+			d.handlePodUpdated(old, pod)
 		},
 		DeleteFunc: func(obj any) {
 			mux.RLock()
@@ -404,7 +364,7 @@ func (k *Kubernetes) watchPods() {
 			// Handler logic
 			pod := obj.(*v1.Pod)
 			// handle the newly added pod
-			k.handlePodDeleted(pod)
+			d.handlePodDeleted(pod)
 		},
 	})
 	if err != nil {
@@ -412,16 +372,16 @@ func (k *Kubernetes) watchPods() {
 	}
 
 	// run the informer
-	go informer.Run(k.stopChan)
+	go informer.Run(d.stopChan)
 
 	// wait for caches to sync
-	isSynced := cache.WaitForCacheSync(k.stopChan, informer.HasSynced)
+	isSynced := cache.WaitForCacheSync(d.stopChan, informer.HasSynced)
 	mux.Lock()
 	synced = isSynced
 	mux.Unlock()
 
 	// caches failed to sync
 	if !synced {
-		k.logger.Fatal("caches failed to sync")
+		d.logger.Fatal("caches failed to sync")
 	}
 }

@@ -2,10 +2,6 @@ package actors
 
 import (
 	"context"
-	"crypto/tls"
-	"fmt"
-	"net"
-	"net/http"
 	"sync"
 	"time"
 
@@ -13,9 +9,9 @@ import (
 	otelconnect "github.com/bufbuild/connect-opentelemetry-go"
 	goaktpb "github.com/tochemey/goakt/internal/goakt/v1"
 	"github.com/tochemey/goakt/internal/goakt/v1/goaktv1connect"
+	"github.com/tochemey/goakt/internal/http2"
 	"github.com/tochemey/goakt/internal/telemetry"
 	pb "github.com/tochemey/goakt/messages/v1"
-	"golang.org/x/net/http2"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
@@ -128,8 +124,8 @@ func RemoteSendAsync(ctx context.Context, to *pb.Address, message proto.Message)
 
 	// create an instance of remote client service
 	remoteClient := goaktv1connect.NewRemoteMessagingServiceClient(
-		h2Client(),
-		h2ConnectionAddr(to.GetHost(), int(to.GetPort())),
+		http2.GetClient(),
+		http2.GetURL(to.GetHost(), int(to.GetPort())),
 		connect.WithInterceptors(otelconnect.NewInterceptor()),
 		connect.WithGRPC(),
 	)
@@ -162,8 +158,8 @@ func RemoteSendSync(ctx context.Context, to *pb.Address, message proto.Message) 
 
 	// create an instance of remote client service
 	remoteClient := goaktv1connect.NewRemoteMessagingServiceClient(
-		h2Client(),
-		h2ConnectionAddr(to.GetHost(), int(to.GetPort())),
+		http2.GetClient(),
+		http2.GetURL(to.GetHost(), int(to.GetPort())),
 		connect.WithInterceptors(otelconnect.NewInterceptor()),
 		connect.WithGRPC(),
 	)
@@ -190,8 +186,8 @@ func RemoteLookup(ctx context.Context, host string, port int, name string) (addr
 
 	// create an instance of remote client service
 	remoteClient := goaktv1connect.NewRemoteMessagingServiceClient(
-		h2Client(),
-		h2ConnectionAddr(host, port),
+		http2.GetClient(),
+		http2.GetURL(host, port),
 		connect.WithInterceptors(otelconnect.NewInterceptor()),
 		connect.WithGRPC(),
 	)
@@ -216,26 +212,4 @@ func RemoteLookup(ctx context.Context, host string, port int, name string) (addr
 
 	// return the response
 	return response.Msg.GetAddress(), nil
-}
-
-// h2Client creates a http client use h2c
-func h2Client() *http.Client {
-	return &http.Client{
-		Transport: &http2.Transport{
-			AllowHTTP: true,
-			DialTLSContext: func(ctx context.Context, network, addr string, cfg *tls.Config) (net.Conn, error) {
-				// If you're also using this client for non-h2c traffic, you may want to
-				// delegate to tls.Dial if the network isn't TCP or the addr isn't in an
-				// allowlist.
-				return net.Dial(network, addr)
-			},
-			PingTimeout:     30 * time.Second,
-			ReadIdleTimeout: 30 * time.Second,
-		},
-	}
-}
-
-// connectionAddr create a http connection address
-func h2ConnectionAddr(host string, port int) string {
-	return fmt.Sprintf("https://%s:%d", host, port)
 }

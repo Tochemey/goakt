@@ -42,6 +42,8 @@ type Config struct {
 	// Specifies whether remoting is enabled.
 	// This allows to handle remote messaging
 	remotingEnabled bool
+	// Specifies whether the cluster is enabled
+	clusteringEnabled bool
 }
 
 // NewConfig creates an instance of Config
@@ -219,5 +221,12 @@ func WithTelemetry(telemetry *telemetry.Telemetry) Option {
 func WithRemoting() Option {
 	return OptionFunc(func(config *Config) {
 		config.remotingEnabled = true
+	})
+}
+
+// WithClustering enables clustering on the actor system
+func WithClustering() Option {
+	return OptionFunc(func(config *Config) {
+		config.clusteringEnabled = true
 	})
 }

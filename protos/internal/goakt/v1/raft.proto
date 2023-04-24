@@ -6,13 +6,41 @@ import "messages/v1/address.proto";
 
 option go_package = "github.com/tochemey/goakt/internal/goakt/v1;goaktv1";
 
-// ActorsMetaService represents the http based key-value store backed by raft
-service ActorsMetaService {
-  // PutActor persists an actor into the distributed storge
+// RaftService represents the http based key-value store backed by raft
+service RaftService {
+  // PutActor persists an actor into the distributed store
   rpc PutActor(PutActorRequest) returns (PutActorResponse);
   // GetActor reads the content of a given actor
   rpc GetActor(GetActorRequest) returns (GetActorResponse);
+  // AddNode adds a new node to the cluster.
+  rpc AddNode(AddNodeRequest) returns (AddNodeResponse);
+  // RemoveNode removes a node from the cluster
+  rpc RemoveNode(RemoveNodeRequest) returns (RemoveNodeResponse);
 }
+
+// AddNodeRequest is used to add a node to the cluster
+// through the cluster events
+message AddNodeRequest {
+  // Specifies the node id
+  uint64 node_id = 1;
+  // Specifies the node address
+  string address = 2;
+}
+
+// AddNodeResponse is the response to AddNodeRequest
+message AddNodeResponse {}
+
+// RemoveNodeRequest is used to remove a node from the cluster
+// through the cluster events
+message RemoveNodeRequest {
+  // Specifies the node id
+  uint64 node_id = 1;
+  // Specifies the node address
+  string address = 2;
+}
+
+// RemoveNodeResponse is the response to the RemoveNodeRequest
+message RemoveNodeResponse {}
 
 // PutActorRequest is the put actor request
 message PutActorRequest {

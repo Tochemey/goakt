@@ -21,8 +21,8 @@ import (
 const _ = connect_go.IsAtLeastVersion0_1_0
 
 const (
-	// ActorsMetaServiceName is the fully-qualified name of the ActorsMetaService service.
-	ActorsMetaServiceName = "goakt.v1.ActorsMetaService"
+	// RaftServiceName is the fully-qualified name of the RaftService service.
+	RaftServiceName = "goakt.v1.RaftService"
 )
 
 // These constants are the fully-qualified names of the RPCs defined in this package. They're
@@ -33,96 +33,146 @@ const (
 // reflection-formatted method names, remove the leading slash and convert the remaining slash to a
 // period.
 const (
-	// ActorsMetaServicePutActorProcedure is the fully-qualified name of the ActorsMetaService's
-	// PutActor RPC.
-	ActorsMetaServicePutActorProcedure = "/goakt.v1.ActorsMetaService/PutActor"
-	// ActorsMetaServiceGetActorProcedure is the fully-qualified name of the ActorsMetaService's
-	// GetActor RPC.
-	ActorsMetaServiceGetActorProcedure = "/goakt.v1.ActorsMetaService/GetActor"
+	// RaftServicePutActorProcedure is the fully-qualified name of the RaftService's PutActor RPC.
+	RaftServicePutActorProcedure = "/goakt.v1.RaftService/PutActor"
+	// RaftServiceGetActorProcedure is the fully-qualified name of the RaftService's GetActor RPC.
+	RaftServiceGetActorProcedure = "/goakt.v1.RaftService/GetActor"
+	// RaftServiceAddNodeProcedure is the fully-qualified name of the RaftService's AddNode RPC.
+	RaftServiceAddNodeProcedure = "/goakt.v1.RaftService/AddNode"
+	// RaftServiceRemoveNodeProcedure is the fully-qualified name of the RaftService's RemoveNode RPC.
+	RaftServiceRemoveNodeProcedure = "/goakt.v1.RaftService/RemoveNode"
 )
 
-// ActorsMetaServiceClient is a client for the goakt.v1.ActorsMetaService service.
-type ActorsMetaServiceClient interface {
-	// PutActor persists an actor into the distributed storge
+// RaftServiceClient is a client for the goakt.v1.RaftService service.
+type RaftServiceClient interface {
+	// PutActor persists an actor into the distributed store
 	PutActor(context.Context, *connect_go.Request[v1.PutActorRequest]) (*connect_go.Response[v1.PutActorResponse], error)
 	// GetActor reads the content of a given actor
 	GetActor(context.Context, *connect_go.Request[v1.GetActorRequest]) (*connect_go.Response[v1.GetActorResponse], error)
+	// AddNode adds a new node to the cluster.
+	AddNode(context.Context, *connect_go.Request[v1.AddNodeRequest]) (*connect_go.Response[v1.AddNodeResponse], error)
+	// RemoveNode removes a node from the cluster
+	RemoveNode(context.Context, *connect_go.Request[v1.RemoveNodeRequest]) (*connect_go.Response[v1.RemoveNodeResponse], error)
 }
 
-// NewActorsMetaServiceClient constructs a client for the goakt.v1.ActorsMetaService service. By
-// default, it uses the Connect protocol with the binary Protobuf Codec, asks for gzipped responses,
-// and sends uncompressed requests. To use the gRPC or gRPC-Web protocols, supply the
-// connect.WithGRPC() or connect.WithGRPCWeb() options.
+// NewRaftServiceClient constructs a client for the goakt.v1.RaftService service. By default, it
+// uses the Connect protocol with the binary Protobuf Codec, asks for gzipped responses, and sends
+// uncompressed requests. To use the gRPC or gRPC-Web protocols, supply the connect.WithGRPC() or
+// connect.WithGRPCWeb() options.
 //
 // The URL supplied here should be the base URL for the Connect or gRPC server (for example,
 // http://api.acme.com or https://acme.com/grpc).
-func NewActorsMetaServiceClient(httpClient connect_go.HTTPClient, baseURL string, opts ...connect_go.ClientOption) ActorsMetaServiceClient {
+func NewRaftServiceClient(httpClient connect_go.HTTPClient, baseURL string, opts ...connect_go.ClientOption) RaftServiceClient {
 	baseURL = strings.TrimRight(baseURL, "/")
-	return &actorsMetaServiceClient{
+	return &raftServiceClient{
 		putActor: connect_go.NewClient[v1.PutActorRequest, v1.PutActorResponse](
 			httpClient,
-			baseURL+ActorsMetaServicePutActorProcedure,
+			baseURL+RaftServicePutActorProcedure,
 			opts...,
 		),
 		getActor: connect_go.NewClient[v1.GetActorRequest, v1.GetActorResponse](
 			httpClient,
-			baseURL+ActorsMetaServiceGetActorProcedure,
+			baseURL+RaftServiceGetActorProcedure,
+			opts...,
+		),
+		addNode: connect_go.NewClient[v1.AddNodeRequest, v1.AddNodeResponse](
+			httpClient,
+			baseURL+RaftServiceAddNodeProcedure,
+			opts...,
+		),
+		removeNode: connect_go.NewClient[v1.RemoveNodeRequest, v1.RemoveNodeResponse](
+			httpClient,
+			baseURL+RaftServiceRemoveNodeProcedure,
 			opts...,
 		),
 	}
 }
 
-// actorsMetaServiceClient implements ActorsMetaServiceClient.
-type actorsMetaServiceClient struct {
-	putActor *connect_go.Client[v1.PutActorRequest, v1.PutActorResponse]
-	getActor *connect_go.Client[v1.GetActorRequest, v1.GetActorResponse]
+// raftServiceClient implements RaftServiceClient.
+type raftServiceClient struct {
+	putActor   *connect_go.Client[v1.PutActorRequest, v1.PutActorResponse]
+	getActor   *connect_go.Client[v1.GetActorRequest, v1.GetActorResponse]
+	addNode    *connect_go.Client[v1.AddNodeRequest, v1.AddNodeResponse]
+	removeNode *connect_go.Client[v1.RemoveNodeRequest, v1.RemoveNodeResponse]
 }
 
-// PutActor calls goakt.v1.ActorsMetaService.PutActor.
-func (c *actorsMetaServiceClient) PutActor(ctx context.Context, req *connect_go.Request[v1.PutActorRequest]) (*connect_go.Response[v1.PutActorResponse], error) {
+// PutActor calls goakt.v1.RaftService.PutActor.
+func (c *raftServiceClient) PutActor(ctx context.Context, req *connect_go.Request[v1.PutActorRequest]) (*connect_go.Response[v1.PutActorResponse], error) {
 	return c.putActor.CallUnary(ctx, req)
 }
 
-// GetActor calls goakt.v1.ActorsMetaService.GetActor.
-func (c *actorsMetaServiceClient) GetActor(ctx context.Context, req *connect_go.Request[v1.GetActorRequest]) (*connect_go.Response[v1.GetActorResponse], error) {
+// GetActor calls goakt.v1.RaftService.GetActor.
+func (c *raftServiceClient) GetActor(ctx context.Context, req *connect_go.Request[v1.GetActorRequest]) (*connect_go.Response[v1.GetActorResponse], error) {
 	return c.getActor.CallUnary(ctx, req)
 }
 
-// ActorsMetaServiceHandler is an implementation of the goakt.v1.ActorsMetaService service.
-type ActorsMetaServiceHandler interface {
-	// PutActor persists an actor into the distributed storge
+// AddNode calls goakt.v1.RaftService.AddNode.
+func (c *raftServiceClient) AddNode(ctx context.Context, req *connect_go.Request[v1.AddNodeRequest]) (*connect_go.Response[v1.AddNodeResponse], error) {
+	return c.addNode.CallUnary(ctx, req)
+}
+
+// RemoveNode calls goakt.v1.RaftService.RemoveNode.
+func (c *raftServiceClient) RemoveNode(ctx context.Context, req *connect_go.Request[v1.RemoveNodeRequest]) (*connect_go.Response[v1.RemoveNodeResponse], error) {
+	return c.removeNode.CallUnary(ctx, req)
+}
+
+// RaftServiceHandler is an implementation of the goakt.v1.RaftService service.
+type RaftServiceHandler interface {
+	// PutActor persists an actor into the distributed store
 	PutActor(context.Context, *connect_go.Request[v1.PutActorRequest]) (*connect_go.Response[v1.PutActorResponse], error)
 	// GetActor reads the content of a given actor
 	GetActor(context.Context, *connect_go.Request[v1.GetActorRequest]) (*connect_go.Response[v1.GetActorResponse], error)
+	// AddNode adds a new node to the cluster.
+	AddNode(context.Context, *connect_go.Request[v1.AddNodeRequest]) (*connect_go.Response[v1.AddNodeResponse], error)
+	// RemoveNode removes a node from the cluster
+	RemoveNode(context.Context, *connect_go.Request[v1.RemoveNodeRequest]) (*connect_go.Response[v1.RemoveNodeResponse], error)
 }
 
-// NewActorsMetaServiceHandler builds an HTTP handler from the service implementation. It returns
-// the path on which to mount the handler and the handler itself.
+// NewRaftServiceHandler builds an HTTP handler from the service implementation. It returns the path
+// on which to mount the handler and the handler itself.
 //
 // By default, handlers support the Connect, gRPC, and gRPC-Web protocols with the binary Protobuf
 // and JSON codecs. They also support gzip compression.
-func NewActorsMetaServiceHandler(svc ActorsMetaServiceHandler, opts ...connect_go.HandlerOption) (string, http.Handler) {
+func NewRaftServiceHandler(svc RaftServiceHandler, opts ...connect_go.HandlerOption) (string, http.Handler) {
 	mux := http.NewServeMux()
-	mux.Handle(ActorsMetaServicePutActorProcedure, connect_go.NewUnaryHandler(
-		ActorsMetaServicePutActorProcedure,
+	mux.Handle(RaftServicePutActorProcedure, connect_go.NewUnaryHandler(
+		RaftServicePutActorProcedure,
 		svc.PutActor,
 		opts...,
 	))
-	mux.Handle(ActorsMetaServiceGetActorProcedure, connect_go.NewUnaryHandler(
-		ActorsMetaServiceGetActorProcedure,
+	mux.Handle(RaftServiceGetActorProcedure, connect_go.NewUnaryHandler(
+		RaftServiceGetActorProcedure,
 		svc.GetActor,
 		opts...,
 	))
-	return "/goakt.v1.ActorsMetaService/", mux
+	mux.Handle(RaftServiceAddNodeProcedure, connect_go.NewUnaryHandler(
+		RaftServiceAddNodeProcedure,
+		svc.AddNode,
+		opts...,
+	))
+	mux.Handle(RaftServiceRemoveNodeProcedure, connect_go.NewUnaryHandler(
+		RaftServiceRemoveNodeProcedure,
+		svc.RemoveNode,
+		opts...,
+	))
+	return "/goakt.v1.RaftService/", mux
 }
 
-// UnimplementedActorsMetaServiceHandler returns CodeUnimplemented from all methods.
-type UnimplementedActorsMetaServiceHandler struct{}
+// UnimplementedRaftServiceHandler returns CodeUnimplemented from all methods.
+type UnimplementedRaftServiceHandler struct{}
 
-func (UnimplementedActorsMetaServiceHandler) PutActor(context.Context, *connect_go.Request[v1.PutActorRequest]) (*connect_go.Response[v1.PutActorResponse], error) {
-	return nil, connect_go.NewError(connect_go.CodeUnimplemented, errors.New("goakt.v1.ActorsMetaService.PutActor is not implemented"))
+func (UnimplementedRaftServiceHandler) PutActor(context.Context, *connect_go.Request[v1.PutActorRequest]) (*connect_go.Response[v1.PutActorResponse], error) {
+	return nil, connect_go.NewError(connect_go.CodeUnimplemented, errors.New("goakt.v1.RaftService.PutActor is not implemented"))
 }
 
-func (UnimplementedActorsMetaServiceHandler) GetActor(context.Context, *connect_go.Request[v1.GetActorRequest]) (*connect_go.Response[v1.GetActorResponse], error) {
-	return nil, connect_go.NewError(connect_go.CodeUnimplemented, errors.New("goakt.v1.ActorsMetaService.GetActor is not implemented"))
+func (UnimplementedRaftServiceHandler) GetActor(context.Context, *connect_go.Request[v1.GetActorRequest]) (*connect_go.Response[v1.GetActorResponse], error) {
+	return nil, connect_go.NewError(connect_go.CodeUnimplemented, errors.New("goakt.v1.RaftService.GetActor is not implemented"))
+}
+
+func (UnimplementedRaftServiceHandler) AddNode(context.Context, *connect_go.Request[v1.AddNodeRequest]) (*connect_go.Response[v1.AddNodeResponse], error) {
+	return nil, connect_go.NewError(connect_go.CodeUnimplemented, errors.New("goakt.v1.RaftService.AddNode is not implemented"))
+}
+
+func (UnimplementedRaftServiceHandler) RemoveNode(context.Context, *connect_go.Request[v1.RemoveNodeRequest]) (*connect_go.Response[v1.RemoveNodeResponse], error) {
+	return nil, connect_go.NewError(connect_go.CodeUnimplemented, errors.New("goakt.v1.RaftService.RemoveNode is not implemented"))
 }

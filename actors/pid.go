@@ -13,6 +13,7 @@ import (
 	"github.com/pkg/errors"
 	goaktpb "github.com/tochemey/goakt/internal/goakt/v1"
 	"github.com/tochemey/goakt/internal/goakt/v1/goaktv1connect"
+	"github.com/tochemey/goakt/internal/http2"
 	"github.com/tochemey/goakt/internal/telemetry"
 	"github.com/tochemey/goakt/internal/tools"
 	"github.com/tochemey/goakt/log"
@@ -493,8 +494,8 @@ func (p *pid) RemoteLookup(ctx context.Context, host string, port int, name stri
 
 	// create an instance of remote client service
 	remoteClient := goaktv1connect.NewRemoteMessagingServiceClient(
-		h2Client(),
-		h2ConnectionAddr(host, port),
+		http2.GetClient(),
+		http2.GetURL(host, port),
 		connect.WithInterceptors(p.interceptor()),
 		connect.WithGRPC(),
 	)
@@ -534,8 +535,8 @@ func (p *pid) RemoteTell(ctx context.Context, to *pb.Address, message proto.Mess
 
 	// create an instance of remote client service
 	remoteClient := goaktv1connect.NewRemoteMessagingServiceClient(
-		h2Client(),
-		h2ConnectionAddr(to.GetHost(), int(to.GetPort())),
+		http2.GetClient(),
+		http2.GetURL(to.GetHost(), int(to.GetPort())),
 		connect.WithInterceptors(p.interceptor()),
 		connect.WithGRPC(),
 	)
@@ -577,8 +578,8 @@ func (p *pid) RemoteAsk(ctx context.Context, to *pb.Address, message proto.Messa
 
 	// create an instance of remote client service
 	remoteClient := goaktv1connect.NewRemoteMessagingServiceClient(
-		h2Client(),
-		h2ConnectionAddr(to.GetHost(), int(to.GetPort())),
+		http2.GetClient(),
+		http2.GetURL(to.GetHost(), int(to.GetPort())),
 		connect.WithInterceptors(p.interceptor()),
 		connect.WithGRPC(),
 	)

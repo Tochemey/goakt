@@ -88,7 +88,7 @@ func (s *WireActorsStore) readCommits(commitC <-chan *commit, errorC <-chan erro
 		for _, data := range commit.data {
 			dataKv := new(goaktpb.WireActor)
 			if err := proto.Unmarshal(data, dataKv); err != nil {
-				s.log.Fatalf("raftexample: could not decode message (%v)", err)
+				s.log.Fatalf("failed to decode message (%v)", err)
 			}
 			s.mu.Lock()
 			s.kvStore.GetActors()[dataKv.GetActorName()] = dataKv
@@ -101,7 +101,7 @@ func (s *WireActorsStore) readCommits(commitC <-chan *commit, errorC <-chan erro
 	}
 }
 
-func (s *WireActorsStore) getSnapshot() ([]byte, error) {
+func (s *WireActorsStore) GetSnapshot() ([]byte, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return proto.Marshal(s.kvStore)
