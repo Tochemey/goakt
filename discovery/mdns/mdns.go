@@ -94,7 +94,7 @@ func (d *Discovery) Nodes(ctx context.Context) ([]*discovery.Node, error) {
 func (d *Discovery) Watch(ctx context.Context) (<-chan discovery.Event, error) {
 	// first check whether the actor system has started
 	if !d.isInitialized.Load() {
-		return nil, errors.New("kubernetes discovery engine not initialized")
+		return nil, errors.New("mDNS discovery engine not initialized")
 	}
 	// run the watcher
 	go d.watchPods(ctx)
@@ -105,7 +105,7 @@ func (d *Discovery) Watch(ctx context.Context) (<-chan discovery.Event, error) {
 func (d *Discovery) Stop() error {
 	// first check whether the actor system has started
 	if !d.isInitialized.Load() {
-		return errors.New("kubernetes discovery engine not initialized")
+		return errors.New("mDNS discovery engine not initialized")
 	}
 	// stop the watchers
 	close(d.stopChan)
