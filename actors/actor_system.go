@@ -669,7 +669,7 @@ func (a *actorSystem) enableRemoting(ctx context.Context) {
 		}),
 	}
 
-	// listen and serv er requests
+	// listen and server requests
 	if err := server.ListenAndServe(); err != nil {
 		a.logger.Panic(errors.Wrap(err, "failed to start remoting service"))
 	}
