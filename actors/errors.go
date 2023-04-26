@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"github.com/bufbuild/connect-go"
-
 	"github.com/pkg/errors"
 )
 

@@ -7,9 +7,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/tochemey/goakt/discovery"
-
 	"github.com/tochemey/goakt/cluster"
+	"github.com/tochemey/goakt/discovery"
 	"github.com/tochemey/goakt/internal/telemetry"
 	"github.com/tochemey/goakt/log"
 )
