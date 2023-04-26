@@ -15,7 +15,7 @@ import (
 
 // Cluster represents the cluster
 type Cluster struct {
-	config            *Config
+	config            *NodeConfig
 	logger            *log.Log
 	disco             discovery.Discovery
 	raftProposeC      chan []byte
@@ -24,7 +24,7 @@ type Cluster struct {
 }
 
 // New creates an instance of Cluster
-func New(config *Config, logger *log.Log, disco discovery.Discovery) *Cluster {
+func New(config *NodeConfig, logger *log.Log, disco discovery.Discovery) *Cluster {
 	// create the instance
 	return &Cluster{
 		logger: logger,
@@ -97,6 +97,30 @@ func (c *Cluster) Stop(ctx context.Context) error {
 		Address: c.config.GetURL(),
 		// handle the error
 	})); err != nil {
+		return err
+	}
+	return nil
+}
+
+// Get fetches an actor from the cluster
+func (c *Cluster) Get(ctx context.Context, actorName string) (*goaktpb.WireActor, error) {
+	// make a call the cluster service to fetch the actor
+	resp, err := c.raftServiceClient.GetActor(ctx, connect.NewRequest(&goaktpb.GetActorRequest{ActorName: actorName}))
+	// handle the error
+	if err != nil {
+		return nil, err
+	}
+	// grab the actual response and return it
+	actor := resp.Msg.GetActor()
+	return actor, nil
+}
+
+// Replicate replicates onto the cluster the metadata of an actor
+func (c *Cluster) Replicate(ctx context.Context, actor *goaktpb.WireActor) error {
+	// call the cluster service and push the metadata
+	_, err := c.raftServiceClient.PutActor(ctx, connect.NewRequest(&goaktpb.PutActorRequest{Actor: actor}))
+	// handle the error
+	if err != nil {
 		return err
 	}
 	return nil

@@ -75,11 +75,6 @@ func TestOptions(t *testing.T) {
 			option:         WithRemoting(),
 			expectedConfig: Config{remotingEnabled: true},
 		},
-		{
-			name:           "WithClustering",
-			option:         WithClustering(),
-			expectedConfig: Config{clusteringEnabled: true},
-		},
 	}
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {

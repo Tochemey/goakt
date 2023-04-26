@@ -1,20 +1,25 @@
 package actors
 
 import (
+	"bytes"
 	"context"
+	"encoding/gob"
 	"fmt"
 	"net/http"
+	"reflect"
 	"time"
 
 	"github.com/bufbuild/connect-go"
 	otelconnect "github.com/bufbuild/connect-opentelemetry-go"
 	cmp "github.com/orcaman/concurrent-map/v2"
 	"github.com/pkg/errors"
+	"github.com/tochemey/goakt/cluster"
 	goaktpb "github.com/tochemey/goakt/internal/goakt/v1"
 	"github.com/tochemey/goakt/internal/goakt/v1/goaktv1connect"
 	"github.com/tochemey/goakt/internal/resync"
 	"github.com/tochemey/goakt/internal/telemetry"
 	"github.com/tochemey/goakt/log"
+	pb "github.com/tochemey/goakt/messages/v1"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
@@ -55,7 +60,8 @@ type ActorSystem interface {
 	// GetLocalActor returns the reference of a local actor.
 	// A local actor is an actor that reside on the same node where the given actor system is running
 	GetLocalActor(ctx context.Context, actorName string) (PID, error)
-
+	// GetRemoteActor returns the address of a remote actor when cluster is enabled
+	GetRemoteActor(ctx context.Context, actorName string) (addr *pb.Address, err error)
 	// handleRemoteAsk handles a synchronous message to another actor and expect a response.
 	// This block until a response is received or timed out.
 	handleRemoteAsk(ctx context.Context, to PID, message proto.Message) (response proto.Message, err error)
@@ -90,6 +96,9 @@ type actorSystem struct {
 
 	typesLoader TypesLoader
 	reflection  Reflection
+
+	clusterService *cluster.Cluster
+	clusterChan    chan *goaktpb.WireActor
 }
 
 // enforce compilation error when all methods of the ActorSystem interface are not implemented
@@ -116,6 +125,7 @@ func NewActorSystem(config *Config) (ActorSystem, error) {
 			hasStarted:  atomic.NewBool(false),
 			telemetry:   config.telemetry,
 			typesLoader: NewTypesLoader(nil),
+			clusterChan: make(chan *goaktpb.WireActor, 10),
 		}
 		// set host and port
 		host, port := config.HostAndPort()
@@ -172,6 +182,26 @@ func (a *actorSystem) StartActor(ctx context.Context, name string, actor Actor) 
 
 	// let us register the actor
 	a.typesLoader.Register(name, actor)
+
+	// when cluster is enabled replicate the actor metadata across the cluster
+	if a.config.clusterEnabled {
+		// encode the actor
+		actorType := reflect.TypeOf(actor)
+		var buf bytes.Buffer
+		enc := gob.NewEncoder(&buf)
+		if err := enc.Encode(actorType); err != nil {
+			// TODO fatal log
+		}
+
+		// create a wire actor
+		wiredActor := &goaktpb.WireActor{
+			ActorName:    name,
+			ActorAddress: actorPath.RemoteAddress(),
+			ActorPayload: buf.Bytes(),
+		}
+		// send it to the cluster channel
+		a.clusterChan <- wiredActor
+	}
 
 	// return the actor ref
 	return pid
@@ -269,7 +299,37 @@ func (a *actorSystem) GetLocalActor(ctx context.Context, actorName string) (PID,
 			return actorRef, nil
 		}
 	}
-	return nil, fmt.Errorf("actor=%s not found", actorName)
+	// add a logger
+	a.logger.Infof("actor=%s not found", actorName)
+	return nil, ErrActorNotFound
+}
+
+// GetRemoteActor returns the address of a remote actor when cluster is enabled
+func (a *actorSystem) GetRemoteActor(ctx context.Context, actorName string) (addr *pb.Address, err error) {
+	// add a span context
+	ctx, span := telemetry.SpanContext(ctx, "GetRemoteActor")
+	defer span.End()
+	// check whether cluster is enabled or not
+	if a.clusterService == nil {
+		return nil, errors.New("cluster is not enabled")
+	}
+
+	// let us locate the actor in the cluster
+	wireActor, err := a.clusterService.Get(ctx, actorName)
+	// handle the eventual error
+	if err != nil {
+		// grab the error code
+		code := connect.CodeOf(err)
+		// in case we get a not found from the cluster service
+		if code == connect.CodeNotFound {
+			a.logger.Infof("actor=%s not found", actorName)
+			return nil, ErrActorNotFound
+		}
+		return nil, errors.Wrapf(err, "failed to fetch remote actor=%s", actorName)
+	}
+
+	// return the address of the remote actor
+	return wireActor.GetActorAddress(), nil
 }
 
 // Start starts the actor system
@@ -283,6 +343,11 @@ func (a *actorSystem) Start(ctx context.Context) error {
 	// start remoting when remoting is enabled
 	if a.config.remotingEnabled {
 		go a.enableRemoting(ctx)
+	}
+
+	// enable clustering when it is enabled
+	if a.config.clusterEnabled {
+		go a.enableClustering(ctx)
 	}
 
 	// start the metrics service
@@ -302,6 +367,16 @@ func (a *actorSystem) Stop(ctx context.Context) error {
 	ctx, span := telemetry.SpanContext(ctx, "Stop")
 	defer span.End()
 	a.logger.Infof("%s ActorSystem is shutting down on Node=%s...", a.name, a.nodeAddr)
+
+	// stop the cluster service
+	if a.config.clusterEnabled {
+		// stop the cluster service
+		if err := a.clusterService.Stop(ctx); err != nil {
+			return err
+		}
+		// stop broadcasting cluster messages
+		close(a.clusterChan)
+	}
 
 	// short-circuit the shutdown process when there are no online actors
 	if len(a.Actors()) == 0 {
@@ -517,6 +592,38 @@ func (a *actorSystem) handleRemoteTell(ctx context.Context, to PID, message prot
 	return SendAsync(ctx, to, message)
 }
 
+// enableClustering enables clustering. When clustering is enabled remoting is also enabled to facilitate remote
+// communication
+func (a *actorSystem) enableClustering(ctx context.Context) {
+	// grab the cluster config
+	clConfig := a.config.clusterConfig
+	// create an instance of the cluster service and start it
+	cluster := cluster.New(clConfig.NodeConfig, log.DefaultLogger, clConfig.Disco) // TODO fix the log
+	// set the cluster field of the actorSystem
+	a.clusterService = cluster
+	// start the cluster service
+	if err := a.clusterService.Start(ctx); err != nil {
+		a.logger.Panic(errors.Wrap(err, "failed to start remoting service"))
+	}
+
+	// create the bootstrap channel
+	bootstrapChan := make(chan struct{}, 1)
+	// let us wait for some time for the cluster to be properly started
+	timer := time.AfterFunc(time.Second, func() {
+		bootstrapChan <- struct{}{}
+	})
+
+	<-bootstrapChan
+	timer.Stop()
+
+	// let us enable remoting as well if not yet enabled
+	if !a.config.remotingEnabled {
+		a.enableRemoting(ctx)
+	}
+	// start broadcasting cluster message
+	go a.broadcast(ctx)
+}
+
 // enableRemoting enables the remoting service to handle remote messaging
 func (a *actorSystem) enableRemoting(ctx context.Context) {
 	// create a function to handle the observability
@@ -581,4 +688,20 @@ func (a *actorSystem) reset() {
 	a.port = -1
 	a.logger = nil
 	once.Reset()
+}
+
+// broadcast publishes newly created actor into the cluster when cluster is enabled
+func (a *actorSystem) broadcast(ctx context.Context) {
+	// iterate over the channel
+	for wireActor := range a.clusterChan {
+		// making sure the cluster is still enabled
+		if a.clusterService != nil {
+			// broadcast the message on the cluster
+			if err := a.clusterService.Replicate(ctx, wireActor); err != nil {
+				a.logger.Error(err.Error())
+				// TODO: stop or continue
+				return
+			}
+		}
+	}
 }
