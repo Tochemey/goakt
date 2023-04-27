@@ -19,9 +19,10 @@ import (
 const (
 	nodePort           = 9000
 	nodeHost           = "0.0.0.0"
-	portName           = "accounts"
+	portName           = "raftPort"
 	namespace          = "default"
 	accountServicePort = 50051
+	clusterPort        = 31000
 )
 
 var (
@@ -60,7 +61,7 @@ var runCmd = &cobra.Command{
 			goakt.WithLogger(logger),
 			goakt.WithActorInitMaxRetries(3),
 			goakt.WithRemoting(),
-			goakt.WithClustering(disco))
+			goakt.WithClustering(disco, clusterPort))
 		// handle the error
 		if err != nil {
 			logger.Panic(err)

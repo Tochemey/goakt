@@ -22,17 +22,19 @@ type Cluster struct {
 	node              *node
 	peersListenerChan chan struct{}
 	disco             discovery.Discovery
+	port              int
 }
 
 // New creates an instance of Cluster
-func New(logger *log.Log, disco discovery.Discovery) *Cluster {
+func New(port int, logger *log.Log, disco discovery.Discovery) *Cluster {
 	// create a node
-	node := newNode(disco, logger)
+	node := newNode(port, disco, logger)
 	// create the instance
 	return &Cluster{
 		logger: logger,
 		node:   node,
 		disco:  disco,
+		port:   port,
 	}
 }
 

@@ -54,9 +54,11 @@ spec:
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 50051
-              name: app
+              name: grpc
             - containerPort: 9000
-              name: accounts
+              name: remoting
+            - containerPort: 31000
+              name: raft-port
           env:
             - name: HOST_IP
               valueFrom:
@@ -83,11 +85,22 @@ spec:
  metadata:
    name: accounts
  spec:
-   type: ClusterIP
+   type: NodePort
    selector:
      app: accounts
    ports:
-     - port: 50051
-       targetPort: 50051
-       protocol: TCP
-       name: accounts
+     - protocol: TCP
+       nodePort: 31000
+       port: 31000
+       targetPort: raft-port
+       name: raft-port
+     - protocol: TCP
+       nodePort: 31001
+       port: 9000
+       targetPort: remoting
+       name: remoting
+     - protocol: TCP
+       nodePort: 31002
+       port: 50051
+       targetPort: grpc
+       name: grpc

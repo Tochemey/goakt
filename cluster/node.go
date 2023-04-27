@@ -34,21 +34,15 @@ type node struct {
 	logger log.Logger
 
 	// list of peers mapping their addr and node id
-	peersMap   map[string]uint64
-	disco      discovery.Discovery
-	nodeURL    string
-	raftServer *grpc.Server
+	peersMap       map[string]uint64
+	disco          discovery.Discovery
+	nodeURL        string
+	raftServerPort int
+	raftServer     *grpc.Server
 }
 
 // newNode creates an instance of node
-func newNode(disco discovery.Discovery, logger log.Logger) *node {
-	// let us get a port number for the node starting the cluster
-	port, err := availablePort()
-	// handle the error
-	if err != nil {
-		logger.Panic(errors.Wrap(err, "failed to create a cluster node instance"))
-	}
-
+func newNode(port int, disco discovery.Discovery, logger log.Logger) *node {
 	// let us set the node URL
 	nodeURL := fmt.Sprintf(":%d", port)
 	// create the wal dir

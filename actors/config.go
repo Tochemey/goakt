@@ -47,6 +47,8 @@ type Config struct {
 	clusterEnabled bool
 	// cluster discovery method
 	disco discovery.Discovery
+	// cluster port
+	clusterPort int
 }
 
 // NewConfig creates an instance of Config
@@ -228,9 +230,10 @@ func WithRemoting() Option {
 }
 
 // WithClustering enables clustering on the actor system
-func WithClustering(disco discovery.Discovery) Option {
+func WithClustering(disco discovery.Discovery, port int) Option {
 	return OptionFunc(func(config *Config) {
 		config.clusterEnabled = true
 		config.disco = disco
+		config.clusterPort = port
 	})
 }
