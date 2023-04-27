@@ -30,7 +30,7 @@ Also, check reference section at the end of the post for more material regarding
 - [x] Remoting
     - [x]  Actors can send messages to other actors on a remote system 
     - [x] Actors can look up other actors' address on a remote system
-- [x] Clustering (WIP): At the moment it is fully-tested.
+- [x] Clustering (WIP): At the moment it is not fully-tested.
 
 ## Installation
 ```bash
