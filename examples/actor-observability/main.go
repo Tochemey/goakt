@@ -64,7 +64,7 @@ func initMeter() {
 	go func() {
 		_ = http.ListenAndServe(":2222", nil)
 	}()
-	fmt.Println("Prometheus server running on :2222")
+	fmt.Println("Prometheus service running on :2222")
 }
 
 func main() {

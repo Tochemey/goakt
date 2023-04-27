@@ -18,9 +18,9 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 )
 
-// SendSync sends a synchronous message to another actor and expect a response.
+// Ask sends a synchronous message to another actor and expect a response.
 // This block until a response is received or timed out.
-func SendSync(ctx context.Context, to PID, message proto.Message, timeout time.Duration) (response proto.Message, err error) {
+func Ask(ctx context.Context, to PID, message proto.Message, timeout time.Duration) (response proto.Message, err error) {
 	// make sure the actor is live
 	if !to.IsOnline() {
 		return nil, ErrNotReady
@@ -70,8 +70,8 @@ func SendSync(ctx context.Context, to PID, message proto.Message, timeout time.D
 	}
 }
 
-// SendAsync sends an asynchronous message to an actor
-func SendAsync(ctx context.Context, to PID, message proto.Message) error {
+// Tell sends an asynchronous message to an actor
+func Tell(ctx context.Context, to PID, message proto.Message) error {
 	// make sure the recipient actor is live
 	if !to.IsOnline() {
 		return ErrNotReady
@@ -110,8 +110,8 @@ func SendAsync(ctx context.Context, to PID, message proto.Message) error {
 	return nil
 }
 
-// RemoteSendAsync sends a message to an actor remotely without expecting any reply
-func RemoteSendAsync(ctx context.Context, to *pb.Address, message proto.Message) error {
+// RemoteTell sends a message to an actor remotely without expecting any reply
+func RemoteTell(ctx context.Context, to *pb.Address, message proto.Message) error {
 	// add a span context
 	ctx, span := telemetry.SpanContext(ctx, "RemoteTell")
 	defer span.End()
@@ -144,8 +144,8 @@ func RemoteSendAsync(ctx context.Context, to *pb.Address, message proto.Message)
 	return nil
 }
 
-// RemoteSendSync sends a synchronous message to another actor remotely and expect a response.
-func RemoteSendSync(ctx context.Context, to *pb.Address, message proto.Message) (response proto.Message, err error) {
+// RemoteAsk sends a synchronous message to another actor remotely and expect a response.
+func RemoteAsk(ctx context.Context, to *pb.Address, message proto.Message) (response proto.Message, err error) {
 	// add a span context
 	ctx, span := telemetry.SpanContext(ctx, "RemoteTell")
 	defer span.End()

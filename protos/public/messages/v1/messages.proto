@@ -2,10 +2,10 @@ syntax = "proto3";
 
 package messages.v1;
 
-option go_package = "github.com/tochemey/goakt/messages/v1;messagesv1";
-
-import "messages/v1/address.proto";
 import "google/protobuf/any.proto";
+import "messages/v1/address.proto";
+
+option go_package = "github.com/tochemey/goakt/messages/v1;messagesv1";
 
 // RemoteMessage will be used by Actors to communicate remotely
 message RemoteMessage {

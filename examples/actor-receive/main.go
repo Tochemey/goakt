@@ -39,7 +39,7 @@ func main() {
 	// send some public to the actor
 	count := 10000
 	for i := 0; i < count; i++ {
-		_ = goakt.SendAsync(ctx, actor, new(samplepb.Ping))
+		_ = goakt.Tell(ctx, actor, new(samplepb.Ping))
 	}
 
 	// capture ctrl+c

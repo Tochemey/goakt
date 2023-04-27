@@ -2,101 +2,73 @@ package cluster
 
 import (
 	"context"
+	"fmt"
+	"net"
+	"time"
 
-	"github.com/bufbuild/connect-go"
+	"github.com/pkg/errors"
+	"github.com/shaj13/raft"
 	"github.com/tochemey/goakt/discovery"
 	goaktpb "github.com/tochemey/goakt/internal/goakt/v1"
-	"github.com/tochemey/goakt/internal/goakt/v1/goaktv1connect"
-	"github.com/tochemey/goakt/internal/http2"
-	"github.com/tochemey/goakt/internal/raft"
 	"github.com/tochemey/goakt/log"
-	"go.etcd.io/etcd/raft/v3/raftpb"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 )
 
 // Cluster represents the cluster
 type Cluster struct {
-	config            *NodeConfig
-	logger            *log.Log
+	logger            log.Logger
+	node              *node
+	peersListenerChan chan struct{}
 	disco             discovery.Discovery
-	raftProposeC      chan []byte
-	raftConfChangeC   chan raftpb.ConfChange
-	raftServiceClient goaktv1connect.RaftServiceClient
 }
 
 // New creates an instance of Cluster
-func New(config *NodeConfig, logger *log.Log, disco discovery.Discovery) *Cluster {
+func New(logger *log.Log, disco discovery.Discovery) *Cluster {
+	// create a node
+	node := newNode(disco, logger)
 	// create the instance
 	return &Cluster{
 		logger: logger,
+		node:   node,
 		disco:  disco,
-		config: config,
 	}
 }
 
 // Start the cluster given the node config
 func (c *Cluster) Start(ctx context.Context) error {
-	// check the existence of nodes
-	nodes, err := c.disco.Nodes(ctx)
-	// handle the error
-	if err != nil {
+	// TODO add traces
+	// TODO grab the context logger
+	// start the underlying node
+	if err := c.node.Start(ctx); err != nil {
+		c.logger.Error(errors.Wrap(err, "failed to start cluster node"))
 		return err
 	}
 
-	// join variables
-	var (
-		joinAddrs = []string{c.config.GetURL()}
-		join      bool
-	)
-
-	// there are no nodes available aside the given node
-	if len(nodes) > 1 {
-		// iterate the list of nodes and get their URLs
-		for _, peer := range nodes {
-			joinAddrs = append(joinAddrs, peer.GetURL())
-		}
-		// set join to true
-		join = true
+	// let u start listening to the discovery event
+	discoEvents, err := c.disco.Watch(ctx)
+	// handle the error
+	if err != nil {
+		c.logger.Error(errors.Wrap(err, "failed to listen to discovery node lifecycle"))
+		return err
 	}
 
-	// create a channel for cluster proposition
-	proposeChan := make(chan []byte)
-	// create a channel for cluster change
-	confChangeChan := make(chan raftpb.ConfChange)
-	// set the cluster fields
-	c.raftProposeC = proposeChan
-	c.raftConfChangeC = confChangeChan
-	// define a store
-	var store *raft.WireActorsStore
-	// create an anonymous function to grab snapshot
-	getSnapshot := func() ([]byte, error) { return store.GetSnapshot() }
-	// create an instance of raft node
-	commitC, errorC, snapshotterReady := raft.NewNode(int(c.config.NodeID), joinAddrs, join, getSnapshot, c.raftProposeC, c.raftConfChangeC, c.logger)
-	// set the store instance
-	store = raft.NewWireActorsStore(<-snapshotterReady, c.raftProposeC, commitC, errorC, c.logger)
-	// create an instance of the raft service
-	raftService := raft.NewService(store, c.config.NodePort, c.raftConfChangeC, c.logger)
-	// create the service client
-	c.raftServiceClient = goaktv1connect.NewRaftServiceClient(
-		http2.GetClient(),
-		http2.GetURL(c.config.NodeHost, c.config.NodePort),
-		connect.WithGRPC())
+	// handle the discovery node events
+	go c.handleClusterEvents(discoEvents)
 
-	// start the raft service
-	go raftService.ListenAndServe(errorC)
+	// Ahoy we are successful
 	return nil
 }
 
 // Stop stops the cluster
 func (c *Cluster) Stop(ctx context.Context) error {
-	// close the various channels
-	close(c.raftProposeC)
-	close(c.raftConfChangeC)
-	// notify the service to remove the node
-	if _, err := c.raftServiceClient.RemoveNode(ctx, connect.NewRequest(&goaktpb.RemoveNodeRequest{
-		NodeId:  c.config.NodeID,
-		Address: c.config.GetURL(),
-		// handle the error
-	})); err != nil {
+	// TODO add traces
+	// close the events listener channel
+	close(c.peersListenerChan)
+	// stop the raft node
+	if err := c.node.Stop(); err != nil {
+		c.logger.Error(errors.Wrap(err, "failed to stop underlying raft node"))
 		return err
 	}
 	return nil
@@ -104,24 +76,145 @@ func (c *Cluster) Stop(ctx context.Context) error {
 
 // Get fetches an actor from the cluster
 func (c *Cluster) Get(ctx context.Context, actorName string) (*goaktpb.WireActor, error) {
-	// make a call the cluster service to fetch the actor
-	resp, err := c.raftServiceClient.GetActor(ctx, connect.NewRequest(&goaktpb.GetActorRequest{ActorName: actorName}))
-	// handle the error
-	if err != nil {
-		return nil, err
+	// TODO add traces
+	// TODO grab the context logger
+	// TODO add the fetching timeout in an option or a config
+	ctx, cancelFn := context.WithTimeout(ctx, time.Second)
+	defer cancelFn()
+
+	// make sure we can read data from the cluster
+	if err := c.node.raftNode.LinearizableRead(ctx); err != nil {
+		// add a logging to the stderr
+		c.logger.Error(errors.Wrapf(err, "failed to fetch actor=%s data", actorName))
+		// here we cancel the request
+		return nil, status.Error(codes.Canceled, err.Error())
 	}
-	// grab the actual response and return it
-	actor := resp.Msg.GetActor()
+
+	// fetch the data from the fsm
+	actor := c.node.fsm.Read(actorName)
+	// return the response
 	return actor, nil
 }
 
 // Replicate replicates onto the cluster the metadata of an actor
 func (c *Cluster) Replicate(ctx context.Context, actor *goaktpb.WireActor) error {
-	// call the cluster service and push the metadata
-	_, err := c.raftServiceClient.PutActor(ctx, connect.NewRequest(&goaktpb.PutActorRequest{Actor: actor}))
+	// TODO add traces
+	// TODO grab the context logger
+
+	// let us marshal it
+	bytea, err := proto.Marshal(actor)
+	// handle the marshaling error
+	if err != nil {
+		// add a logging to the stderr
+		c.logger.Error(errors.Wrapf(err, "failed to persist actor=%s data in the cluster", actor.GetActorName()))
+		// here we cancel the request
+		return errors.Wrapf(err, "failed to persist actor=%s data in the cluster", actor.GetActorName())
+	}
+	// TODO add the persisting timeout in an option or a config
+	ctx, cancelFn := context.WithTimeout(ctx, time.Second)
+	defer cancelFn()
+	// let us replicate the data across the cluster
+	if err := c.node.raftNode.Replicate(ctx, bytea); err != nil {
+		// add a logging to the stderr
+		c.logger.Error(errors.Wrapf(err, "failed to persist actor=%s data in the cluster", actor.GetActorName()))
+		// here we cancel the request
+		return errors.Wrapf(err, "failed to persist actor=%s data in the cluster", actor.GetActorName())
+	}
+	// Ahoy we are successful
+	return nil
+}
+
+// handleClusterEvents handles the cluster node events
+func (c *Cluster) handleClusterEvents(events <-chan discovery.Event) {
+	for {
+		select {
+		case <-c.peersListenerChan:
+			return
+		case event := <-events:
+			switch x := event.(type) {
+			case *discovery.NodeAdded:
+			// pass. No need to handle this since every use the join method to join the cluster
+			case *discovery.NodeModified:
+				// let us grab the event
+				evt := x
+				func() {
+					// let us check whether the given node is a leader or not
+					if c.node.raftNode.Leader() == raft.None {
+						return
+					}
+					// create a context that can be canceled
+					ctx := context.Background()
+					c.logger.Debugf("updating peer=%d", evt.Current.Name)
+					// TODO add the removal of timeout in an option or a config
+					ctx, cancelFn := context.WithTimeout(ctx, time.Second)
+					defer cancelFn()
+					// let us attempt removing the peer
+					peers := c.node.Peers()
+					nodeAddr := fmt.Sprintf("%s:%d", evt.Current.Host, evt.Current.Port)
+					var peer *Peer
+					for _, p := range peers {
+						if p.Address == nodeAddr {
+							peer = p
+							break
+						}
+					}
+					// update the peer
+					member := &raft.RawMember{
+						ID:      peer.PeerID,
+						Address: fmt.Sprintf("%s:%d", evt.Node.Host, evt.Node.Port),
+					}
+					// update the member
+					if err := c.node.raftNode.UpdateMember(ctx, member); err != nil {
+						// add a logging to the stderr
+						c.logger.Error(errors.Wrapf(err, "failed to update node's peer=%d", peer.PeerID))
+					}
+				}()
+			case *discovery.NodeRemoved:
+				// let us grab the removal event
+				evt := x
+				func() {
+					// let us check whether the given node is a leader or not
+					if c.node.raftNode.Leader() == raft.None {
+						return
+					}
+					// create a context that can be canceled
+					ctx := context.Background()
+					c.logger.Debugf("removing peer=%d", evt.Node.Name)
+					// TODO add the removal of timeout in an option or a config
+					ctx, cancelFn := context.WithTimeout(ctx, time.Second)
+					defer cancelFn()
+					// let us attempt removing the peer
+					peers := c.node.Peers()
+					nodeAddr := fmt.Sprintf("%s:%d", evt.Node.Host, evt.Node.Port)
+					var peer *Peer
+					for _, p := range peers {
+						if p.Address == nodeAddr {
+							peer = p
+							break
+						}
+					}
+					// remove the peer
+					if err := c.node.raftNode.RemoveMember(ctx, peer.PeerID); err != nil {
+						// add a logging to the stderr
+						c.logger.Error(errors.Wrapf(err, "failed to remove node's peer=%d", peer.PeerID))
+					}
+				}()
+			default:
+				// pass
+			}
+		}
+	}
+}
+
+// availablePort returns any available port to use
+func availablePort() (int, error) {
+	// let us get a port number for the node starting the cluster
+	listener, err := net.Listen("tcp", ":0") // nolint
 	// handle the error
 	if err != nil {
-		return err
+		return 0, err
 	}
-	return nil
+	// grab the port
+	port := listener.Addr().(*net.TCPAddr).Port
+	return port, nil
 }

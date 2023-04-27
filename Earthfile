@@ -52,6 +52,7 @@ lint:
     FROM +vendor
 
     COPY .golangci.yml ./
+
     # Runs golangci-lint with settings:
     RUN golangci-lint run --timeout 10m
 
@@ -117,3 +118,21 @@ sample-pb:
     # save artifact to
     SAVE ARTIFACT gen gen AS LOCAL examples/protos
 
+compile-actor-cluster:
+    COPY +vendor/files ./
+
+    RUN go build -mod=vendor  -o bin/accounts ./examples/actor-cluster/k8s
+    SAVE ARTIFACT bin/accounts /accounts
+
+actor-cluster-image:
+    FROM alpine:3.16.2
+
+    WORKDIR /app
+    COPY +compile-actor-cluster/accounts ./accounts
+    RUN chmod +x ./accounts
+
+    EXPOSE 50051
+    EXPOSE 9000
+
+    ENTRYPOINT ["./accounts"]
+    SAVE IMAGE accounts:dev

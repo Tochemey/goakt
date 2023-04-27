@@ -82,7 +82,7 @@ func TestActorWithPassivation(t *testing.T) {
 	// block until timer is up
 	wg.Wait()
 	// let us send a message to the actor
-	err := SendAsync(ctx, pid, new(testpb.TestSend))
+	err := Tell(ctx, pid, new(testpb.TestSend))
 	assert.Error(t, err)
 	assert.EqualError(t, err, ErrNotReady.Error())
 }
@@ -101,7 +101,7 @@ func TestActorWithReply(t *testing.T) {
 		pid := newPID(ctx, actorPath, NewTestActor(), opts...)
 		assert.NotNil(t, pid)
 
-		actual, err := SendSync(ctx, pid, new(testpb.TestReply), recvTimeout)
+		actual, err := Ask(ctx, pid, new(testpb.TestReply), recvTimeout)
 		assert.NoError(t, err)
 		assert.NotNil(t, actual)
 		expected := &testpb.Reply{Content: "received message"}
@@ -124,7 +124,7 @@ func TestActorWithReply(t *testing.T) {
 		pid := newPID(ctx, actorPath, NewTestActor(), opts...)
 		assert.NotNil(t, pid)
 
-		actual, err := SendSync(ctx, pid, new(testpb.TestSend), recvTimeout)
+		actual, err := Ask(ctx, pid, new(testpb.TestSend), recvTimeout)
 		assert.Error(t, err)
 		assert.EqualError(t, err, ErrRequestTimeout.Error())
 		assert.Nil(t, actual)
@@ -162,7 +162,7 @@ func TestActorRestart(t *testing.T) {
 		time.Sleep(time.Second)
 
 		// let us send a message to the actor
-		err = SendAsync(ctx, pid, new(testpb.TestSend))
+		err = Tell(ctx, pid, new(testpb.TestSend))
 		assert.Error(t, err)
 		assert.EqualError(t, err, ErrNotReady.Error())
 
@@ -173,7 +173,7 @@ func TestActorRestart(t *testing.T) {
 		// let us send 10 public to the actor
 		count := 10
 		for i := 0; i < count; i++ {
-			err = SendAsync(ctx, pid, new(testpb.TestSend))
+			err = Tell(ctx, pid, new(testpb.TestSend))
 			assert.NoError(t, err)
 		}
 		assert.EqualValues(t, count, pid.ReceivedCount(ctx))
@@ -225,7 +225,7 @@ func TestActorRestart(t *testing.T) {
 		// let us send 10 public to the actor
 		count := 10
 		for i := 0; i < count; i++ {
-			err := SendAsync(ctx, pid, new(testpb.TestSend))
+			err := Tell(ctx, pid, new(testpb.TestSend))
 			assert.NoError(t, err)
 		}
 		assert.EqualValues(t, count, pid.ReceivedCount(ctx))
@@ -236,7 +236,7 @@ func TestActorRestart(t *testing.T) {
 		assert.True(t, pid.IsOnline())
 		// let us send 10 public to the actor
 		for i := 0; i < count; i++ {
-			err = SendAsync(ctx, pid, new(testpb.TestSend))
+			err = Tell(ctx, pid, new(testpb.TestSend))
 			assert.NoError(t, err)
 		}
 		assert.EqualValues(t, count, pid.ReceivedCount(ctx))
@@ -272,8 +272,8 @@ func TestChildActor(t *testing.T) {
 		// let us send 10 public to the actors
 		count := 10
 		for i := 0; i < count; i++ {
-			assert.NoError(t, SendAsync(ctx, parent, new(testpb.TestSend)))
-			assert.NoError(t, SendAsync(ctx, child, new(testpb.TestSend)))
+			assert.NoError(t, Tell(ctx, parent, new(testpb.TestSend)))
+			assert.NoError(t, Tell(ctx, child, new(testpb.TestSend)))
 		}
 		assert.EqualValues(t, count, parent.ReceivedCount(ctx))
 		assert.EqualValues(t, count, child.ReceivedCount(ctx))
@@ -306,7 +306,7 @@ func TestChildActor(t *testing.T) {
 
 		assert.Len(t, parent.Children(ctx), 1)
 		// send a test panic message to the actor
-		assert.NoError(t, SendAsync(ctx, child, new(testpb.TestPanic)))
+		assert.NoError(t, Tell(ctx, child, new(testpb.TestPanic)))
 
 		// wait for the child to properly shutdown
 		time.Sleep(time.Second)
@@ -346,7 +346,7 @@ func TestChildActor(t *testing.T) {
 
 		assert.Len(t, parent.Children(ctx), 1)
 		// send a test panic message to the actor
-		assert.NoError(t, SendAsync(ctx, child, new(testpb.TestPanic)))
+		assert.NoError(t, Tell(ctx, child, new(testpb.TestPanic)))
 
 		// wait for the child to properly shutdown
 		time.Sleep(time.Second)
@@ -378,7 +378,7 @@ func BenchmarkActor(b *testing.B) {
 		go func() {
 			for i := 0; i < b.N; i++ {
 				// send a message to the actor
-				_ = SendAsync(ctx, pid, new(testpb.TestSend))
+				_ = Tell(ctx, pid, new(testpb.TestSend))
 			}
 		}()
 		actor.Wg.Wait()
@@ -399,7 +399,7 @@ func BenchmarkActor(b *testing.B) {
 		actor.Wg.Add(b.N)
 		for i := 0; i < b.N; i++ {
 			// send a message to the actor
-			_ = SendAsync(ctx, pid, new(testpb.TestSend))
+			_ = Tell(ctx, pid, new(testpb.TestSend))
 		}
 		_ = pid.Shutdown(ctx)
 	})
@@ -424,7 +424,7 @@ func BenchmarkActor(b *testing.B) {
 					}
 				}()
 				// send a message to the actor
-				_ = SendAsync(ctx, pid, new(testpb.TestSend))
+				_ = Tell(ctx, pid, new(testpb.TestSend))
 			}()
 		}
 		actor.Wg.Wait()
@@ -452,7 +452,7 @@ func BenchmarkActor(b *testing.B) {
 				}()
 				for i := 0; i < 100; i++ {
 					// send a message to the actor
-					_ = SendAsync(ctx, pid, new(testpb.TestSend))
+					_ = Tell(ctx, pid, new(testpb.TestSend))
 				}
 			}()
 		}
@@ -476,7 +476,7 @@ func BenchmarkActor(b *testing.B) {
 		go func() {
 			for i := 0; i < b.N; i++ {
 				// send a message to the actor
-				_, _ = SendSync(ctx, pid, new(testpb.TestReply), recvTimeout)
+				_, _ = Ask(ctx, pid, new(testpb.TestReply), recvTimeout)
 			}
 		}()
 		actor.Wg.Wait()
@@ -498,7 +498,7 @@ func BenchmarkActor(b *testing.B) {
 		actor.Wg.Add(b.N)
 		for i := 0; i < b.N; i++ {
 			// send a message to the actor
-			_, _ = SendSync(ctx, pid, new(testpb.TestReply), recvTimeout)
+			_, _ = Ask(ctx, pid, new(testpb.TestReply), recvTimeout)
 		}
 		_ = pid.Shutdown(ctx)
 	})
@@ -523,7 +523,7 @@ func BenchmarkActor(b *testing.B) {
 					}
 				}()
 				// send a message to the actor
-				_, _ = SendSync(ctx, pid, new(testpb.TestReply), recvTimeout)
+				_, _ = Ask(ctx, pid, new(testpb.TestReply), recvTimeout)
 			}()
 		}
 		actor.Wg.Wait()
@@ -551,7 +551,7 @@ func BenchmarkActor(b *testing.B) {
 				}()
 				for i := 0; i < 100; i++ {
 					// send a message to the actor
-					_, _ = SendSync(ctx, pid, new(testpb.TestReply), recvTimeout)
+					_, _ = Ask(ctx, pid, new(testpb.TestReply), recvTimeout)
 				}
 			}()
 		}

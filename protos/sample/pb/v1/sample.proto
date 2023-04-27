@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package sample.v1;
 
-option go_package = "github.com/tochemey/goakt/examples/protos/pb;samplepb";
+option go_package = "github.com/tochemey/goakt/examples/protos/pb/v1;samplepb";
 
 message Ping {
   string id = 1;
@@ -12,22 +12,22 @@ message Pong {
   string reply = 2;
 }
 
-message Account{
+message Account {
   string account_id = 1;
   double account_balance = 2;
 }
 
-message CreateAccount{
+message CreateAccount {
   string account_id = 1;
   double account_balance = 2;
 }
 
-message CreditAccount{
+message CreditAccount {
   string account_id = 1;
   double balance = 2;
 }
 
-message AccountCreated{
+message AccountCreated {
   string account_id = 1;
   double account_balance = 2;
 }

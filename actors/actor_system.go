@@ -99,6 +99,8 @@ type actorSystem struct {
 
 	clusterService *cluster.Cluster
 	clusterChan    chan *goaktpb.WireActor
+
+	remotingServer *http.Server
 }
 
 // enforce compilation error when all methods of the ActorSystem interface are not implemented
@@ -357,7 +359,7 @@ func (a *actorSystem) Start(ctx context.Context) error {
 	if err := a.registerMetrics(); err != nil {
 		a.logger.Error(errors.Wrapf(err, "failed to register actorSystem=%s metrics", a.name))
 	}
-	a.logger.Infof("%s ActorSystem started on Node=%s...", a.name, a.nodeAddr)
+	a.logger.Infof("%s ActorSystem started on Node=%s..:)", a.name, a.nodeAddr)
 	return nil
 }
 
@@ -366,7 +368,15 @@ func (a *actorSystem) Stop(ctx context.Context) error {
 	// add a span context
 	ctx, span := telemetry.SpanContext(ctx, "Stop")
 	defer span.End()
-	a.logger.Infof("%s ActorSystem is shutting down on Node=%s...", a.name, a.nodeAddr)
+	a.logger.Infof("%s ActorSystem is shutting down on Node=%s..:)", a.name, a.nodeAddr)
+
+	// stop the remoting server
+	if a.config.remotingEnabled {
+		// stop the server
+		if err := a.remotingServer.Close(); err != nil {
+			return err
+		}
+	}
 
 	// stop the cluster service
 	if a.config.clusterEnabled {
@@ -581,7 +591,7 @@ func (a *actorSystem) handleRemoteAsk(ctx context.Context, to PID, message proto
 	// add a span context
 	ctx, span := telemetry.SpanContext(ctx, "handleRemoteAsk")
 	defer span.End()
-	return SendSync(ctx, to, message, a.config.ReplyTimeout())
+	return Ask(ctx, to, message, a.config.ReplyTimeout())
 }
 
 // handleRemoteTell handles an asynchronous message to an actor
@@ -589,16 +599,14 @@ func (a *actorSystem) handleRemoteTell(ctx context.Context, to PID, message prot
 	// add a span context
 	ctx, span := telemetry.SpanContext(ctx, "handleRemoteTell")
 	defer span.End()
-	return SendAsync(ctx, to, message)
+	return Tell(ctx, to, message)
 }
 
 // enableClustering enables clustering. When clustering is enabled remoting is also enabled to facilitate remote
 // communication
 func (a *actorSystem) enableClustering(ctx context.Context) {
-	// grab the cluster config
-	clConfig := a.config.clusterConfig
 	// create an instance of the cluster service and start it
-	cluster := cluster.New(clConfig.NodeConfig, log.DefaultLogger, clConfig.Disco) // TODO fix the log
+	cluster := cluster.New(log.DefaultLogger, a.config.disco) // TODO fix the log
 	// set the cluster field of the actorSystem
 	a.clusterService = cluster
 	// start the cluster service
@@ -634,7 +642,7 @@ func (a *actorSystem) enableRemoting(ctx context.Context) {
 		)
 	}
 
-	// create a http server mux
+	// create a http service mux
 	mux := http.NewServeMux()
 	// create the resource and handler
 	path, handler := goaktv1connect.NewRemoteMessagingServiceHandler(
@@ -644,7 +652,7 @@ func (a *actorSystem) enableRemoting(ctx context.Context) {
 	mux.Handle(path, handler)
 	// create the address
 	serverAddr := fmt.Sprintf(":%d", a.Port())
-	// create a http server instance
+	// create a http service instance
 	// TODO revisit the timeouts
 	// reference: https://adam-p.ca/blog/2022/01/golang-http-server-timeouts/
 	server := &http.Server{
@@ -669,8 +677,11 @@ func (a *actorSystem) enableRemoting(ctx context.Context) {
 		}),
 	}
 
-	// listen and server requests
-	if err := server.ListenAndServe(); err != nil {
+	// set the server
+	a.remotingServer = server
+
+	// listen and service requests
+	if err := a.remotingServer.ListenAndServe(); err != nil {
 		a.logger.Panic(errors.Wrap(err, "failed to start remoting service"))
 	}
 }

@@ -7,7 +7,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/tochemey/goakt/cluster"
 	"github.com/tochemey/goakt/discovery"
 	"github.com/tochemey/goakt/internal/telemetry"
 	"github.com/tochemey/goakt/log"
@@ -44,10 +43,10 @@ type Config struct {
 	// Specifies whether remoting is enabled.
 	// This allows to handle remote messaging
 	remotingEnabled bool
-	// Specifies whether the cluster is enabled
-	clusterConfig *cluster.Config
 	// convenient field to check cluster setup
 	clusterEnabled bool
+	// cluster discovery method
+	disco discovery.Discovery
 }
 
 // NewConfig creates an instance of Config
@@ -229,19 +228,9 @@ func WithRemoting() Option {
 }
 
 // WithClustering enables clustering on the actor system
-func WithClustering(discovery discovery.Discovery) Option {
+func WithClustering(disco discovery.Discovery) Option {
 	return OptionFunc(func(config *Config) {
-		host, port := config.HostAndPort()
-		// create the cluster config
-		c := &cluster.Config{
-			NodeConfig: &cluster.NodeConfig{
-				NodeID:   0, // TODO TDB
-				NodeHost: host,
-				NodePort: port,
-			},
-			Disco: discovery,
-		}
-		config.clusterConfig = c
 		config.clusterEnabled = true
+		config.disco = disco
 	})
 }
