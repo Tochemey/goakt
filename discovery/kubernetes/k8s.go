@@ -47,6 +47,11 @@ func New(logger log.Logger) *Discovery {
 	return k8
 }
 
+// ID returns the discovery id
+func (d *Discovery) ID() string {
+	return "kubernetes"
+}
+
 // Nodes returns the list of Nodes at a given time
 func (d *Discovery) Nodes(ctx context.Context) ([]*discovery.Node, error) {
 	// first check whether the actor system has started

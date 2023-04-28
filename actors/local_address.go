@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	protocol = "messages"
+	protocol = "goakt"
 )
 
 // LocalAddress represents the physical location under which an Actor can be

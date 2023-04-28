@@ -5,9 +5,8 @@ import (
 	"io"
 	"os"
 
-	"go.uber.org/zap/zapcore"
-
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
 // DefaultLogger represents the default Log to use
@@ -76,27 +75,52 @@ func New(level Level, writer io.Writer) *Log {
 	// create the zap Log configuration
 	cfg := zap.NewProductionConfig()
 	// create the zap log core
-	core := zapcore.NewCore(
-		zapcore.NewJSONEncoder(cfg.EncoderConfig),
-		zapcore.AddSync(writer),
-		zapcore.InfoLevel,
-	)
+	var core zapcore.Core
+
 	// set the log level
 	switch level {
 	case InfoLevel:
-		core.Enabled(zapcore.InfoLevel)
+		core = zapcore.NewCore(
+			zapcore.NewJSONEncoder(cfg.EncoderConfig),
+			zapcore.AddSync(writer),
+			zapcore.InfoLevel,
+		)
 	case DebugLevel:
-		core.Enabled(zapcore.DebugLevel)
+		core = zapcore.NewCore(
+			zapcore.NewJSONEncoder(cfg.EncoderConfig),
+			zapcore.AddSync(writer),
+			zapcore.DebugLevel,
+		)
 	case WarningLevel:
-		core.Enabled(zapcore.WarnLevel)
+		core = zapcore.NewCore(
+			zapcore.NewJSONEncoder(cfg.EncoderConfig),
+			zapcore.AddSync(writer),
+			zapcore.WarnLevel,
+		)
 	case ErrorLevel:
-		core.Enabled(zapcore.ErrorLevel)
+		core = zapcore.NewCore(
+			zapcore.NewJSONEncoder(cfg.EncoderConfig),
+			zapcore.AddSync(writer),
+			zapcore.ErrorLevel,
+		)
 	case PanicLevel:
-		core.Enabled(zapcore.PanicLevel)
+		core = zapcore.NewCore(
+			zapcore.NewJSONEncoder(cfg.EncoderConfig),
+			zapcore.AddSync(writer),
+			zapcore.PanicLevel,
+		)
 	case FatalLevel:
-		core.Enabled(zapcore.FatalLevel)
+		core = zapcore.NewCore(
+			zapcore.NewJSONEncoder(cfg.EncoderConfig),
+			zapcore.AddSync(writer),
+			zapcore.FatalLevel,
+		)
 	default:
-		core.Enabled(zapcore.DebugLevel)
+		core = zapcore.NewCore(
+			zapcore.NewJSONEncoder(cfg.EncoderConfig),
+			zapcore.AddSync(writer),
+			zapcore.DebugLevel,
+		)
 	}
 	// get the zap Log
 	zapLogger := zap.New(core)

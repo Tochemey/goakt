@@ -40,6 +40,11 @@ func New(logger log.Logger) *Discovery {
 	return d
 }
 
+// ID returns the discovery id
+func (d *Discovery) ID() string {
+	return "mdns"
+}
+
 // Start the discovery engine
 func (d *Discovery) Start(ctx context.Context, meta discovery.Meta) error {
 	var err error

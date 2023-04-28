@@ -19,7 +19,7 @@ import (
 const (
 	nodePort           = 9000
 	nodeHost           = "0.0.0.0"
-	portName           = "raftPort"
+	portName           = "raft-port"
 	namespace          = "default"
 	accountServicePort = 50051
 	clusterPort        = 31000
@@ -39,7 +39,7 @@ var runCmd = &cobra.Command{
 		// create a background context
 		ctx := context.Background()
 		// use the messages default log. real-life implement the log interface`
-		logger := log.DefaultLogger
+		logger := log.New(log.DebugLevel, os.Stdout)
 
 		// create the k8 configuration
 		disco := kubernetes.New(logger)

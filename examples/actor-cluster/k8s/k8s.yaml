@@ -40,13 +40,13 @@ spec:
       labels:
         app: accounts
     spec:
-      affinity:
-        # ⬇⬇⬇ This ensures pods will land on separate hosts
-        podAntiAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
-            - labelSelector:
-                matchExpressions: [{ key: app, operator: In, values: [accounts] }]
-              topologyKey: "kubernetes.io/hostname"
+#      affinity:
+#        # ⬇⬇⬇ This ensures pods will land on separate hosts
+#        podAntiAffinity:
+#          requiredDuringSchedulingIgnoredDuringExecution:
+#            - labelSelector:
+#                matchExpressions: [{ key: app, operator: In, values: [accounts] }]
+#              topologyKey: "kubernetes.io/hostname"
       containers:
         - name: accounts
           image: "accounts:dev"
@@ -85,22 +85,19 @@ spec:
  metadata:
    name: accounts
  spec:
-   type: NodePort
+   type: ClusterIP
    selector:
      app: accounts
    ports:
      - protocol: TCP
-       nodePort: 31000
        port: 31000
        targetPort: raft-port
        name: raft-port
      - protocol: TCP
-       nodePort: 31001
        port: 9000
        targetPort: remoting
        name: remoting
      - protocol: TCP
-       nodePort: 31002
        port: 50051
        targetPort: grpc
        name: grpc

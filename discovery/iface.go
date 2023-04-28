@@ -14,6 +14,8 @@ const (
 
 // Discovery helps discover other running actor system in a cloud environment
 type Discovery interface {
+	// ID returns the discovery name
+	ID() string
 	// Start the discovery engine
 	Start(ctx context.Context, meta Meta) error
 	// Nodes returns the list of Nodes at a given time

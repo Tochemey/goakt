@@ -43,8 +43,12 @@ type node struct {
 
 // newNode creates an instance of node
 func newNode(port int, disco discovery.Discovery, logger log.Logger) *node {
+	//// grab any available port to start the node
+	//port, _ = availablePort()
 	// let us set the node URL
 	nodeURL := fmt.Sprintf(":%d", port)
+	// add debug logging
+	logger.Debugf("raft node URL=%s", nodeURL)
 	// create the wal dir
 	stateDIR := fmt.Sprintf("node-%d-state", port)
 	// create the options
@@ -62,6 +66,7 @@ func newNode(port int, disco discovery.Discovery, logger log.Logger) *node {
 	raftgrpc.Register(
 		raftgrpc.WithDialOptions(grpc.WithTransportCredentials(insecure.NewCredentials())),
 	)
+	// raft register the raft server
 	raftgrpc.RegisterHandler(raftServer, raftNode.Handler())
 	// create an instance of node
 	return &node{
@@ -87,19 +92,22 @@ func (n *node) Start(ctx context.Context) error {
 		return err
 	}
 
+	// add some logging
+	n.logger.Debugf("%s has discovered %d nodes", n.disco.ID(), len(discoNodes))
 	// let us filter the discovered nodes by excluding the current node
-	filtered := make([]*discovery.Node, 0, len(discoNodes))
-	// iterate the discovered nodes
-	for _, discoNode := range discoNodes {
-		if discoNode.GetURL() == n.nodeURL {
-			continue
-		}
-		filtered = append(filtered, discoNode)
-	}
+	//filtered := make([]*discovery.Node, 0, len(discoNodes))
+	//// iterate the discovered nodes
+	//for _, discoNode := range discoNodes {
+	//	// exclude the given node from the list
+	//	if discoNode.GetURL() == n.nodeURL {
+	//		continue
+	//	}
+	//	filtered = append(filtered, discoNode)
+	//}
 
 	// let us define the raft members
 	var members []raft.RawMember
-	for _, discoNode := range filtered {
+	for _, discoNode := range discoNodes {
 		members = append(members, raft.RawMember{
 			Address: discoNode.GetURL(),
 		})

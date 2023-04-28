@@ -6,6 +6,7 @@ import (
 	"encoding/gob"
 	"fmt"
 	"net/http"
+	"os"
 	"reflect"
 	"time"
 
@@ -606,7 +607,7 @@ func (a *actorSystem) handleRemoteTell(ctx context.Context, to PID, message prot
 // communication
 func (a *actorSystem) enableClustering(ctx context.Context) {
 	// create an instance of the cluster service and start it
-	cluster := cluster.New(a.config.clusterPort, log.DefaultLogger, a.config.disco) // TODO fix the log
+	cluster := cluster.New(a.config.clusterPort, log.New(log.DebugLevel, os.Stdout), a.config.disco) // TODO fix the log
 	// set the cluster field of the actorSystem
 	a.clusterService = cluster
 	// start the cluster service

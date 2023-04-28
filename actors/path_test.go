@@ -25,7 +25,7 @@ func TestPath(t *testing.T) {
 	// these are just routine assertions
 	assert.True(t, comp.Equal(addr, path.LocalAddress(), comp.AllowUnexported(LocalAddress{})))
 	assert.Equal(t, name, path.Name())
-	assert.Equal(t, "messages://Sys@localhost:888/TestActor", path.String())
+	assert.Equal(t, "goakt://Sys@localhost:888/TestActor", path.String())
 	remoteAddr := &pb.Address{
 		Host: "localhost",
 		Port: 888,
