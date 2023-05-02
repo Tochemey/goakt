@@ -873,10 +873,10 @@ func (p *pid) registerMetrics() error {
 
 	// register the metrics
 	_, err = meter.RegisterCallback(func(ctx context.Context, observer metric.Observer) error {
-		observer.ObserveInt64(metrics.ReceivedCount, int64(p.ReceivedCount(ctx)), labels...)
-		observer.ObserveInt64(metrics.PanicCount, int64(p.ErrorsCount(ctx)), labels...)
-		observer.ObserveInt64(metrics.RestartedCount, int64(p.RestartCount(ctx)), labels...)
-		observer.ObserveInt64(metrics.MailboxSize, int64(p.MailboxSize(ctx)), labels...)
+		observer.ObserveInt64(metrics.ReceivedCount, int64(p.ReceivedCount(ctx)), metric.WithAttributes(labels...))
+		observer.ObserveInt64(metrics.PanicCount, int64(p.ErrorsCount(ctx)), metric.WithAttributes(labels...))
+		observer.ObserveInt64(metrics.RestartedCount, int64(p.RestartCount(ctx)), metric.WithAttributes(labels...))
+		observer.ObserveInt64(metrics.MailboxSize, int64(p.MailboxSize(ctx)), metric.WithAttributes(labels...))
 		return nil
 	}, metrics.ReceivedCount,
 		metrics.RestartedCount,

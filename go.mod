@@ -4,7 +4,7 @@ go 1.20
 
 require (
 	github.com/bufbuild/connect-go v1.7.0
-	github.com/bufbuild/connect-opentelemetry-go v0.1.0
+	github.com/bufbuild/connect-opentelemetry-go v0.2.0
 	github.com/cenkalti/backoff v2.2.1+incompatible
 	github.com/google/go-cmp v0.5.9
 	github.com/google/uuid v1.3.0
@@ -16,13 +16,13 @@ require (
 	github.com/shaj13/raft v0.0.0-20230207130729-18878c2751ed
 	github.com/spf13/cobra v1.7.0
 	github.com/stretchr/testify v1.8.2
-	go.opentelemetry.io/otel v1.14.0
-	go.opentelemetry.io/otel/exporters/prometheus v0.37.0
-	go.opentelemetry.io/otel/exporters/stdout/stdouttrace v1.14.0
-	go.opentelemetry.io/otel/metric v0.37.0
-	go.opentelemetry.io/otel/sdk v1.14.0
-	go.opentelemetry.io/otel/sdk/metric v0.37.0
-	go.opentelemetry.io/otel/trace v1.14.0
+	go.opentelemetry.io/otel v1.15.1
+	go.opentelemetry.io/otel/exporters/prometheus v0.38.1
+	go.opentelemetry.io/otel/exporters/stdout/stdouttrace v1.15.1
+	go.opentelemetry.io/otel/metric v0.38.1
+	go.opentelemetry.io/otel/sdk v1.15.1
+	go.opentelemetry.io/otel/sdk/metric v0.38.1
+	go.opentelemetry.io/otel/trace v1.15.1
 	go.uber.org/atomic v1.10.0
 	go.uber.org/goleak v1.2.1
 	go.uber.org/zap v1.24.0
@@ -53,7 +53,7 @@ require (
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/mailru/easyjson v0.7.7 // indirect
 	github.com/matttproud/golang_protobuf_extensions v1.0.4 // indirect
-	github.com/miekg/dns v1.1.53 // indirect
+	github.com/miekg/dns v1.1.54 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
@@ -80,8 +80,8 @@ require (
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
-	k8s.io/klog/v2 v2.90.1 // indirect
-	k8s.io/kube-openapi v0.0.0-20230426210814-b0c0aaee3cc0 // indirect
+	k8s.io/klog/v2 v2.100.1 // indirect
+	k8s.io/kube-openapi v0.0.0-20230501164219-8b0f38b5fd1f // indirect
 	k8s.io/utils v0.0.0-20230406110748-d93618cff8a2 // indirect
 	sigs.k8s.io/json v0.0.0-20221116044647-bc3834ca7abd // indirect
 	sigs.k8s.io/structured-merge-diff/v4 v4.2.3 // indirect

@@ -3,14 +3,15 @@ package telemetry
 import (
 	"testing"
 
+	"go.opentelemetry.io/otel/metric/noop"
+
 	"github.com/stretchr/testify/assert"
-	"go.opentelemetry.io/otel/metric"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
 
 func TestOptions(t *testing.T) {
 	tracerProvider := sdktrace.NewTracerProvider()
-	meterProvider := metric.NewNoopMeterProvider()
+	meterProvider := noop.NewMeterProvider()
 
 	testCases := []struct {
 		name           string

@@ -4,14 +4,13 @@ import (
 	"fmt"
 
 	"go.opentelemetry.io/otel/metric"
-	"go.opentelemetry.io/otel/metric/instrument"
 )
 
 // SystemMetrics define the type of metrics we are collecting
 // from the actor system
 type SystemMetrics struct {
 	// captures the number of actors in the actor system
-	ActorSystemActorsCount instrument.Int64ObservableCounter
+	ActorSystemActorsCount metric.Int64ObservableCounter
 }
 
 // NewSystemMetrics creates an instance of ActorMetrics
@@ -21,7 +20,7 @@ func NewSystemMetrics(meter metric.Meter) (*SystemMetrics, error) {
 	var err error
 
 	if metrics.ActorSystemActorsCount, err = meter.Int64ObservableCounter(
-		actorSystemActorsCounterName, instrument.WithDescription("The total number of actors in the Actor System")); err != nil {
+		actorSystemActorsCounterName, metric.WithDescription("The total number of actors in the Actor System")); err != nil {
 		return nil, fmt.Errorf("failed to create received count instrument, %v", err)
 	}
 

@@ -5,11 +5,11 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/metric/noop"
 )
 
 func TestNewMetrics(t *testing.T) {
-	metrics, err := NewMetrics(metric.NewNoopMeterProvider().Meter("test"))
+	metrics, err := NewMetrics(noop.NewMeterProvider().Meter("test"))
 	require.NoError(t, err)
 	assert.NotNil(t, metrics)
 	assert.NotNil(t, metrics.ReceivedDurationHistogram)

@@ -579,7 +579,7 @@ func (a *actorSystem) registerMetrics() error {
 
 	// register the metrics
 	_, err = meter.RegisterCallback(func(ctx context.Context, observer metric.Observer) error {
-		observer.ObserveInt64(metrics.ActorSystemActorsCount, int64(a.NumActors()), labels...)
+		observer.ObserveInt64(metrics.ActorSystemActorsCount, int64(a.NumActors()), metric.WithAttributes(labels...))
 		return nil
 	}, metrics.ActorSystemActorsCount)
 

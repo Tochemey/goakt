@@ -84,16 +84,26 @@ func newNode(port int, disco discovery.Discovery, logger log.Logger) *node {
 // Start starts the node. When the join address is not set a brand-new cluster is started.
 // However, when the join address is set the given node joins an existing cluster at the joinAddr.
 func (n *node) Start(ctx context.Context) error {
+	var (
+		// create a variable to hold the discovered nodes
+		discoNodes []*discovery.Node
+		// variable to hold error
+		err error
+	)
+	// let us delay for sometime to make sure we have discovered all nodes
+	// FIXME: this is an approximation
+	time.Sleep(time.Second)
+
 	// let us grab the existing nodes in the cluster
-	discoNodes, err := n.disco.Nodes(ctx)
+	discoNodes, err = n.disco.Nodes(ctx)
 	// handle the error
 	if err != nil {
 		n.logger.Error(errors.Wrap(err, "failed to fetch existing nodes in the cluster"))
 		return err
 	}
-
 	// add some logging
 	n.logger.Debugf("%s has discovered %d nodes", n.disco.ID(), len(discoNodes))
+
 	// let us filter the discovered nodes by excluding the current node
 	//filtered := make([]*discovery.Node, 0, len(discoNodes))
 	//// iterate the discovered nodes
