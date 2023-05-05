@@ -88,11 +88,14 @@ func (n *node) Start(ctx context.Context) error {
 		// create a variable to hold the discovered nodes
 		discoNodes []*discovery.Node
 		// variable to hold error
-		err error
+		err  error
+		opts []raft.StartOption
 	)
 	// let us delay for sometime to make sure we have discovered all nodes
 	// FIXME: this is an approximation
-	time.Sleep(time.Second)
+	duration := time.Second
+	delay := duration - time.Duration(duration.Nanoseconds())%time.Second
+	time.Sleep(delay)
 
 	// let us grab the existing nodes in the cluster
 	discoNodes, err = n.disco.Nodes(ctx)
@@ -104,31 +107,32 @@ func (n *node) Start(ctx context.Context) error {
 	// add some logging
 	n.logger.Debugf("%s has discovered %d nodes", n.disco.ID(), len(discoNodes))
 
-	// let us filter the discovered nodes by excluding the current node
-	//filtered := make([]*discovery.Node, 0, len(discoNodes))
-	//// iterate the discovered nodes
-	//for _, discoNode := range discoNodes {
-	//	// exclude the given node from the list
-	//	if discoNode.GetURL() == n.nodeURL {
-	//		continue
-	//	}
-	//	filtered = append(filtered, discoNode)
-	//}
+	// here the given node is the only node
+	if len(discoNodes) == 1 {
+		// let us set the start options
+		opts = []raft.StartOption{
+			raft.WithInitCluster(),
+			raft.WithAddress(n.nodeURL),
+		}
+	} else {
+		// grab the join addr from any node
+		joinAddr := discoNodes[0].JoinAddr()
+		// let us define the raft members
+		var members []raft.RawMember
+		// iterate the discovered nodes and add them as member of the current node
+		for _, discoNode := range discoNodes {
+			members = append(members, raft.RawMember{
+				Address: discoNode.RemotingAddr(),
+			})
+		}
 
-	// let us define the raft members
-	var members []raft.RawMember
-	for _, discoNode := range discoNodes {
-		members = append(members, raft.RawMember{
-			Address: discoNode.GetURL(),
-		})
-	}
-
-	// add to the members this current node
-	members = append(members, raft.RawMember{Address: n.nodeURL})
-	// let us define the start options
-	opts := []raft.StartOption{
-		raft.WithInitCluster(),
-		raft.WithMembers(members...),
+		// let us set the start options
+		opts = []raft.StartOption{
+			raft.WithInitCluster(),
+			raft.WithAddress(n.nodeURL),
+			raft.WithJoin(joinAddr, time.Second), // TODO: configure the join timeout
+			raft.WithMembers(members...),
+		}
 	}
 
 	// start the raft server

@@ -10,13 +10,21 @@ type Node struct {
 	Name string
 	// Host specifies the discovered node's Host
 	Host string
-	// Port specifies the discovered node's Port
-	Port int32
+	// JoinPort specifies the discovered node's JoinPort
+	JoinPort int32
 	// Specifies the start time
 	StartTime int64
+	// RemotingPort specifies the discovered node's remoting port
+	// This is necessary for remoting messages
+	RemotingPort int32
 }
 
-// GetURL returns the config address
-func (n Node) GetURL() string {
-	return fmt.Sprintf("https://%s:%d", n.Host, n.Port)
+// JoinAddr returns the join address
+func (n Node) JoinAddr() string {
+	return fmt.Sprintf("https://%s:%d", n.Host, n.JoinPort)
+}
+
+// RemotingAddr returns the remoting address
+func (n Node) RemotingAddr() string {
+	return fmt.Sprintf("https://%s:%d", n.Host, n.RemotingPort)
 }

@@ -89,26 +89,7 @@ MainLoop:
 		}
 
 		// create a variable holding the node
-		var node *discovery.Node
-		// iterate the pod containers and find the named port
-		for i := 0; i < len(pod.Spec.Containers) && node == nil; i++ {
-			// let us get the container
-			container := pod.Spec.Containers[i]
-			// iterate the container ports
-			for _, port := range container.Ports {
-				// find the mapping port
-				if port.Name == d.option.PortName {
-					// create the node object
-					node = &discovery.Node{
-						Name:      pod.GetName(),
-						Host:      pod.Status.PodIP,
-						Port:      port.ContainerPort,
-						StartTime: pod.Status.StartTime.Time.UnixMilli(),
-					}
-					break
-				}
-			}
-		}
+		node := d.podToNode(&pod)
 		// continue the loop when we did not find any node
 		if node == nil {
 			continue MainLoop
@@ -278,6 +259,13 @@ func (d *Discovery) setOptions(meta discovery.Meta) (err error) {
 	if err != nil {
 		return err
 	}
+	// extract the remoting port name
+	option.RemotingPortName, err = meta.GetString(RemotingPortName)
+	// handle the error in case the remoting port name value is not properly set
+	if err != nil {
+		return err
+	}
+
 	// in case none of the above extraction fails then set the option
 	d.option = option
 	return nil
@@ -300,19 +288,23 @@ func (d *Discovery) podToNode(pod *v1.Pod) *discovery.Node {
 	for i := 0; i < len(pod.Spec.Containers) && node == nil; i++ {
 		// let us get the container
 		container := pod.Spec.Containers[i]
-		// iterate the container ports
+
+		// create a map of port name and port number
+		portMap := make(map[string]int32)
+
+		// iterate the container ports to set the join port
 		for _, port := range container.Ports {
-			// find the mapping port
-			if port.Name == d.option.PortName {
-				// create the node object
-				node = &discovery.Node{
-					Name:      pod.GetName(),
-					Host:      pod.Status.PodIP,
-					Port:      port.ContainerPort,
-					StartTime: pod.Status.StartTime.Time.UnixMilli(),
-				}
-				break
-			}
+			// build the map
+			portMap[port.Name] = port.ContainerPort
+		}
+
+		// set the node
+		node = &discovery.Node{
+			Name:         pod.GetName(),
+			Host:         pod.Status.PodIP,
+			StartTime:    pod.Status.StartTime.Time.UnixMilli(),
+			JoinPort:     portMap[d.option.PortName],
+			RemotingPort: portMap[d.option.RemotingPortName],
 		}
 	}
 

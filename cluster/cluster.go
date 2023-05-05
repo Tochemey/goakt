@@ -152,7 +152,7 @@ func (c *Cluster) handleClusterEvents(events <-chan discovery.Event) {
 					defer cancelFn()
 					// let us attempt removing the peer
 					peers := c.node.Peers()
-					nodeAddr := fmt.Sprintf("%s:%d", evt.Current.Host, evt.Current.Port)
+					nodeAddr := fmt.Sprintf("%s:%d", evt.Current.Host, evt.Current.JoinPort)
 					var peer *Peer
 					for _, p := range peers {
 						if p.Address == nodeAddr {
@@ -163,7 +163,7 @@ func (c *Cluster) handleClusterEvents(events <-chan discovery.Event) {
 					// update the peer
 					member := &raft.RawMember{
 						ID:      peer.PeerID,
-						Address: fmt.Sprintf("%s:%d", evt.Node.Host, evt.Node.Port),
+						Address: fmt.Sprintf("%s:%d", evt.Node.Host, evt.Node.JoinPort),
 					}
 					// update the member
 					if err := c.node.raftNode.UpdateMember(ctx, member); err != nil {
@@ -187,7 +187,7 @@ func (c *Cluster) handleClusterEvents(events <-chan discovery.Event) {
 					defer cancelFn()
 					// let us attempt removing the peer
 					peers := c.node.Peers()
-					nodeAddr := fmt.Sprintf("%s:%d", evt.Node.Host, evt.Node.Port)
+					nodeAddr := fmt.Sprintf("%s:%d", evt.Node.Host, evt.Node.JoinPort)
 					var peer *Peer
 					for _, p := range peers {
 						if p.Address == nodeAddr {
