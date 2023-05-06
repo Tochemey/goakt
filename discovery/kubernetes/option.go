@@ -2,10 +2,10 @@ package kubernetes
 
 const (
 	Namespace        string = "namespace"
-	PodLabels               = "pod_labels"
-	LabelSelector           = "label_selector"
-	PortName                = "port_name"
-	RemotingPortName        = "remoting_port_name"
+	ActorSystemName         = "actor_system_name"
+	RemotingPortName        = "remoting"
+	ApplicationName         = "app_name"
+	RaftPortName            = "raft"
 )
 
 // Option represents the kubernetes provider option
@@ -14,13 +14,13 @@ type Option struct {
 	KubeConfig string
 	// NameSpace specifies the namespace
 	NameSpace string
-	// PodLabels defines the pod labels
-	PodLabels map[string]string
-	// Label Selector
-	LabelSelector string
-	// Specifies the port name
-	PortName string
+	// The actor system name
+	ActorSystemName string
 	// Specifies the remoting port name
 	// This port is necessary to send remote messages to node
 	RemotingPortName string
+	// ApplicationName specifies the running application
+	ApplicationName string
+	// RaftPortName specifies the raft port name
+	RaftPortName string
 }

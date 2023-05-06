@@ -21,10 +21,10 @@ type Node struct {
 
 // JoinAddr returns the join address
 func (n Node) JoinAddr() string {
-	return fmt.Sprintf("https://%s:%d", n.Host, n.JoinPort)
+	return fmt.Sprintf("%s:%d", n.Host, n.JoinPort)
 }
 
 // RemotingAddr returns the remoting address
 func (n Node) RemotingAddr() string {
-	return fmt.Sprintf("https://%s:%d", n.Host, n.RemotingPort)
+	return fmt.Sprintf("%s:%d", n.Host, n.RemotingPort)
 }

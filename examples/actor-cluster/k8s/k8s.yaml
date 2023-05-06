@@ -25,7 +25,9 @@ kind: Deployment
 metadata:
   name: accounts
   labels:
-    app: accounts
+    app.kubernetes.io/name: accounts
+    app.kubernetes.io/component: accounts
+    app.kubernetes.io/part-of: AccountsSystem
 spec:
   replicas: 2
   strategy:
@@ -34,11 +36,15 @@ spec:
       maxUnavailable: 100%
   selector:
     matchLabels:
-      app: accounts
+      app.kubernetes.io/name: accounts
+      app.kubernetes.io/component: accounts
+      app.kubernetes.io/part-of: AccountsSystem
   template:
     metadata:
       labels:
-        app: accounts
+        app.kubernetes.io/name: accounts
+        app.kubernetes.io/component: accounts
+        app.kubernetes.io/part-of: AccountsSystem
     spec:
 #      affinity:
 #        # ⬇⬇⬇ This ensures pods will land on separate hosts
@@ -57,8 +63,8 @@ spec:
               name: grpc
             - containerPort: 9000
               name: remoting
-            - containerPort: 31000
-              name: raft-port
+            - containerPort: 3100
+              name: raft
           env:
             - name: HOST_IP
               valueFrom:
@@ -90,10 +96,6 @@ spec:
      app: accounts
    ports:
      - protocol: TCP
-       port: 31000
-       targetPort: raft-port
-       name: raft-port
-     - protocol: TCP
        port: 9000
        targetPort: remoting
        name: remoting
@@ -101,3 +103,7 @@ spec:
        port: 50051
        targetPort: grpc
        name: grpc
+     - protocol: TCP
+       port: 3100
+       targetPort: raft
+       name: raft

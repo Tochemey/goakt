@@ -18,11 +18,14 @@ import (
 
 const (
 	nodePort           = 9000
-	nodeHost           = "0.0.0.0"
-	portName           = "raft-port"
-	namespace          = "default"
+	clusterPort        = 3100
 	accountServicePort = 50051
-	clusterPort        = 31000
+	nodeHost           = "0.0.0.0"
+	namespace          = "default"
+	remotingPortName   = "remoting"
+	applicationName    = "accounts"
+	actorSystemName    = "AccountsSystem"
+	clusterPortName    = "raft"
 )
 
 var (
@@ -45,17 +48,18 @@ var runCmd = &cobra.Command{
 		disco := kubernetes.New(logger)
 		// start the discovery engine and handle error
 		if err := disco.Start(ctx, discovery.Meta{
-			kubernetes.LabelSelector: labelsSelector,
-			kubernetes.PodLabels:     podLabels,
-			kubernetes.Namespace:     namespace,
-			kubernetes.PortName:      portName,
+			kubernetes.ApplicationName:  applicationName,
+			kubernetes.ActorSystemName:  actorSystemName,
+			kubernetes.Namespace:        namespace,
+			kubernetes.RemotingPortName: remotingPortName,
+			kubernetes.RaftPortName:     clusterPortName,
 		}); err != nil {
 			logger.Panic(err)
 		}
 
 		// create the actor system configuration
 		config, err := goakt.NewConfig(
-			"Accounts",
+			actorSystemName,
 			fmt.Sprintf("%s:%d", nodeHost, nodePort),
 			goakt.WithPassivationDisabled(), // set big passivation time
 			goakt.WithLogger(logger),

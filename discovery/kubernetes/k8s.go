@@ -59,9 +59,17 @@ func (d *Discovery) Nodes(ctx context.Context) ([]*discovery.Node, error) {
 		return nil, errors.New("kubernetes discovery engine not initialized")
 	}
 
+	// let us create the pod labels map
+	// TODO: make sure to document it on k8 discovery
+	podLabels := map[string]string{
+		"app.kubernetes.io/part-of":   d.option.ActorSystemName,
+		"app.kubernetes.io/component": d.option.ApplicationName, // TODO: redefine it
+		"app.kubernetes.io/name":      d.option.ApplicationName,
+	}
+
 	// List all the pods based on the filters we requested
 	pods, err := d.k8sClient.CoreV1().Pods(d.option.NameSpace).List(ctx, k8meta.ListOptions{
-		LabelSelector: labels.SelectorFromSet(d.option.PodLabels).String(),
+		LabelSelector: labels.SelectorFromSet(podLabels).String(),
 	})
 	// panic when we cannot poll the pods
 	if err != nil {
@@ -75,6 +83,8 @@ func (d *Discovery) Nodes(ctx context.Context) ([]*discovery.Node, error) {
 	// iterate the pods list and only the one that are running
 MainLoop:
 	for _, pod := range pods.Items {
+		// create a variable copy of pod
+		pod := pod
 		// only consider running pods
 		if pod.Status.Phase != v1.PodRunning {
 			continue MainLoop
@@ -120,16 +130,8 @@ func (d *Discovery) Start(ctx context.Context, meta discovery.Meta) error {
 		return errors.New("k8 namespace is not provided")
 	}
 	// assert the presence of the label selector
-	if _, ok := meta[LabelSelector]; !ok {
-		return errors.New("k8 label_selector is not provided")
-	}
-	// assert the port name
-	if _, ok := meta[PortName]; !ok {
-		return errors.New("k8 port_name is not provided")
-	}
-	// assert the pod labels
-	if _, ok := meta[PodLabels]; !ok {
-		return errors.New("k8 pod_labels is not provided")
+	if _, ok := meta[ActorSystemName]; !ok {
+		return errors.New("actor system name is not provided")
 	}
 	// create the k8 config
 	config, err := rest.InClusterConfig()
@@ -241,21 +243,21 @@ func (d *Discovery) setOptions(meta discovery.Meta) (err error) {
 	if err != nil {
 		return err
 	}
-	// extract the label selector
-	option.LabelSelector, err = meta.GetString(LabelSelector)
-	// handle the error in case the label selector value is not properly set
+	// extract the actor system name
+	option.ActorSystemName, err = meta.GetString(ActorSystemName)
+	// handle the error in case the actor system name value is not properly set
 	if err != nil {
 		return err
 	}
-	// extract the port name
-	option.PortName, err = meta.GetString(PortName)
+	// extract the application name
+	option.ApplicationName, err = meta.GetString(ApplicationName)
+	// handle the error in case the application name value is not properly set
+	if err != nil {
+		return err
+	}
+	// extract the raft port name
+	option.RaftPortName, err = meta.GetString(RaftPortName)
 	// handle the error in case the port name value is not properly set
-	if err != nil {
-		return err
-	}
-	// extract the pod labels
-	option.PodLabels, err = meta.GetMapString(PodLabels)
-	// handle the error in case the port labels value is not properly set
 	if err != nil {
 		return err
 	}
@@ -303,7 +305,7 @@ func (d *Discovery) podToNode(pod *v1.Pod) *discovery.Node {
 			Name:         pod.GetName(),
 			Host:         pod.Status.PodIP,
 			StartTime:    pod.Status.StartTime.Time.UnixMilli(),
-			JoinPort:     portMap[d.option.PortName],
+			JoinPort:     portMap[d.option.RaftPortName],
 			RemotingPort: portMap[d.option.RemotingPortName],
 		}
 	}
@@ -314,13 +316,19 @@ func (d *Discovery) podToNode(pod *v1.Pod) *discovery.Node {
 // watchPods keeps a watch on kubernetes pods activities and emit
 // respective event when needed
 func (d *Discovery) watchPods() {
+	// TODO: make sure to document it on k8 discovery
+	podLabels := map[string]string{
+		"app.kubernetes.io/part-of":   d.option.ActorSystemName,
+		"app.kubernetes.io/component": d.option.ApplicationName, // TODO: redefine it
+		"app.kubernetes.io/name":      d.option.ApplicationName,
+	}
 	// create the k8 informer factory
 	factory := informers.NewSharedInformerFactoryWithOptions(
 		d.k8sClient,
 		10*time.Minute, // TODO make it configurable
 		informers.WithNamespace(d.option.NameSpace),
 		informers.WithTweakListOptions(func(options *k8meta.ListOptions) {
-			options.LabelSelector = labels.SelectorFromSet(d.option.PodLabels).String()
+			options.LabelSelector = labels.SelectorFromSet(podLabels).String()
 		}))
 	// create the pods informer instance
 	informer := factory.Core().V1().Pods().Informer()

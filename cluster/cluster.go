@@ -22,7 +22,6 @@ type Cluster struct {
 	node              *node
 	peersListenerChan chan struct{}
 	disco             discovery.Discovery
-	port              int
 }
 
 // New creates an instance of Cluster
@@ -34,7 +33,6 @@ func New(port int, logger *log.Log, disco discovery.Discovery) *Cluster {
 		logger: logger,
 		node:   node,
 		disco:  disco,
-		port:   port,
 	}
 }
 

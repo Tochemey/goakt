@@ -41,10 +41,15 @@ type node struct {
 	raftServer     *grpc.Server
 }
 
+func init() {
+	// register the grpc service for the raft server
+	raftgrpc.Register(
+		raftgrpc.WithDialOptions(grpc.WithTransportCredentials(insecure.NewCredentials())),
+	)
+}
+
 // newNode creates an instance of node
 func newNode(port int, disco discovery.Discovery, logger log.Logger) *node {
-	//// grab any available port to start the node
-	//port, _ = availablePort()
 	// let us set the node URL
 	nodeURL := fmt.Sprintf(":%d", port)
 	// add debug logging
@@ -58,26 +63,24 @@ func newNode(port int, disco discovery.Discovery, logger log.Logger) *node {
 	}
 	// create an instance of FSM
 	fsm := NewFSM(logger)
+
 	// create an instance of the node
 	raftNode := raft.NewNode(fsm, transport.GRPC, opts...)
 	// create the raft server
 	raftServer := grpc.NewServer()
-	// register the grpc service for the raft server
-	raftgrpc.Register(
-		raftgrpc.WithDialOptions(grpc.WithTransportCredentials(insecure.NewCredentials())),
-	)
 	// raft register the raft server
 	raftgrpc.RegisterHandler(raftServer, raftNode.Handler())
 	// create an instance of node
 	return &node{
-		raftNode:   raftNode,
-		fsm:        fsm,
-		stateDIR:   stateDIR,
-		opts:       opts,
-		logger:     logger,
-		disco:      disco,
-		nodeURL:    nodeURL,
-		raftServer: raftServer,
+		raftNode:       raftNode,
+		fsm:            fsm,
+		stateDIR:       stateDIR,
+		opts:           opts,
+		logger:         logger,
+		disco:          disco,
+		nodeURL:        nodeURL,
+		raftServer:     raftServer,
+		raftServerPort: port,
 	}
 }
 
@@ -117,21 +120,10 @@ func (n *node) Start(ctx context.Context) error {
 	} else {
 		// grab the join addr from any node
 		joinAddr := discoNodes[0].JoinAddr()
-		// let us define the raft members
-		var members []raft.RawMember
-		// iterate the discovered nodes and add them as member of the current node
-		for _, discoNode := range discoNodes {
-			members = append(members, raft.RawMember{
-				Address: discoNode.RemotingAddr(),
-			})
-		}
-
 		// let us set the start options
 		opts = []raft.StartOption{
-			raft.WithInitCluster(),
 			raft.WithAddress(n.nodeURL),
 			raft.WithJoin(joinAddr, time.Second), // TODO: configure the join timeout
-			raft.WithMembers(members...),
 		}
 	}
 
