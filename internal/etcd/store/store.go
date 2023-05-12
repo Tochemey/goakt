@@ -24,6 +24,7 @@ const (
 	putTimeout               = 5 * time.Second
 	deleteTimeout            = 5 * time.Second
 	broadcastTimeout         = 5 * time.Second
+	shutdownTimeout          = 5 * time.Second
 	livenessBroadcastAttempt = 3
 )
 
@@ -98,6 +99,25 @@ func New(config *Config) (*Store, error) {
 	}, nil
 }
 
+// Shutdown closes the store connections
+func (s *Store) Shutdown() error {
+	if err := s.revokeLiveness(context.Background(), shutdownTimeout); err != nil {
+		return err
+	}
+
+	if s.embed != nil {
+		if err := s.embed.Shutdown(); err != nil {
+			return err
+		}
+	}
+
+	s.stopOnce.Do(func() {
+		close(s.stopChan)
+	})
+
+	return nil
+}
+
 // GetValue retrieves the value of a given key from the store
 func (s *Store) GetValue(ctx context.Context, key string, opts ...clientv3.OpOption) (*clientv3.GetResponse, error) {
 	// create a cancellation context
@@ -115,6 +135,44 @@ func (s *Store) GetValue(ctx context.Context, key string, opts ...clientv3.OpOpt
 	}
 
 	return s.Get(ctx, key, opts...)
+}
+
+// SetValue sets the value of a given key unto the store
+func (s *Store) SetValue(ctx context.Context, key, val string, opts ...clientv3.OpOption) (*clientv3.PutResponse, error) {
+	// create a cancellation context
+	var cancel context.CancelFunc
+
+	// make sure we have a valid context
+	if ctx == context.TODO() {
+		ctx, cancel = context.WithTimeout(context.Background(), putTimeout)
+		defer cancel()
+	} else {
+		// create a span context
+		var span trace.Span
+		ctx, span = telemetry.SpanContext(ctx, "SetValue")
+		defer span.End()
+	}
+
+	return s.Put(ctx, key, val, opts...)
+}
+
+// DeleteKey deletes a given key from the store
+func (s *Store) DeleteKey(ctx context.Context, key string, opts ...clientv3.OpOption) (*clientv3.DeleteResponse, error) {
+	// create a cancellation context
+	var cancel context.CancelFunc
+
+	// make sure we have a valid context
+	if ctx == context.TODO() {
+		ctx, cancel = context.WithTimeout(context.Background(), deleteTimeout)
+		defer cancel()
+	} else {
+		// create a span context
+		var span trace.Span
+		ctx, span = telemetry.SpanContext(ctx, "DeleteKey")
+		defer span.End()
+	}
+
+	return s.Delete(ctx, key, opts...)
 }
 
 // UpdateEndpoints updates the configured endpoints and saves them
@@ -181,7 +239,7 @@ func (s *Store) keepSessionAlive() {
 			s.logger.Debug("new etcd session created successfully")
 
 			// exponentially try to broadcast liveness
-			// create a new retrier that will try a maximum of five times, with
+			// create a new retrier that will try a maximum of `livenessBroadcastAttempt` times, with
 			// an initial delay of 100 ms and a maximum delay of 1 second
 			retrier := retry.NewRetrier(livenessBroadcastAttempt, 100*time.Millisecond, time.Second)
 
