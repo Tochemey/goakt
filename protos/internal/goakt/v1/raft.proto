@@ -81,3 +81,15 @@ message WireActor {
   // on another node of the cluster
   bytes actor_payload = 3;
 }
+
+message Peer {
+  // Specifies the peer unique id which a uuid
+  string peer_uuid = 1;
+  // Specifies the peer name
+  string name = 2;
+  // Specifies the addresses of the peer
+  repeated string addresses = 3;
+  // Specifies the client addresses
+  repeated string client_addresses = 4;
+
+}
