@@ -12,9 +12,8 @@ import (
 )
 
 var (
-	defaultClientURLs   types.URLs
-	defaultPeerURLs     types.URLs
-	defaultEndpointURLs types.URLs
+	defaultClientURLs types.URLs
+	defaultPeerURLs   types.URLs
 )
 
 // init helps set the default URLs
@@ -58,7 +57,6 @@ func init() {
 	// let us finally set the default URLs
 	defaultClientURLs = types.MustNewURLs(clientURLs)
 	defaultPeerURLs = types.MustNewURLs(peerURLs)
-	defaultEndpointURLs = defaultClientURLs
 }
 
 // Config defines distro configuration
@@ -84,7 +82,6 @@ func NewConfig(name string, opts ...Option) *Config {
 	cfg := &Config{
 		name:          name,
 		dataDir:       defaultDIR,
-		endPoints:     defaultEndpointURLs,
 		peerURLs:      defaultPeerURLs,
 		clientURLs:    defaultClientURLs,
 		enableLogging: false,
