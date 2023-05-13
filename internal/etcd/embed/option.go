@@ -70,3 +70,10 @@ func WithStartTimeout(timeout time.Duration) Option {
 		config.startTimeout = timeout
 	})
 }
+
+// WithDataDir sets the data dir
+func WithDataDir(datadir string) Option {
+	return OptionFunc(func(config *Config) {
+		config.dataDir = datadir
+	})
+}

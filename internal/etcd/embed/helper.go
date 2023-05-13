@@ -7,27 +7,20 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
-// isDefaultClientURL checks for the default client URL
-func isDefaultClientURL(urls types.URLs) bool {
-	return isDefaultURL(urls, defaultClientURL)
-}
-
 // isDefaultPeerURL checks for default peer URL
 func isDefaultPeerURL(urls types.URLs) bool {
-	return isDefaultURL(urls, defaultPeerURL)
+	if len(urls) > 1 {
+		return false
+	}
+	return urls[0].String() == defaultPeerURLs.String()
 }
 
 // isDefaultEndpoint checks for the default endpoint
 func isDefaultEndpoint(urls types.URLs) bool {
-	return isDefaultURL(urls, defaultEndpoint)
-}
-
-// isDefaultURL checks for default URLs
-func isDefaultURL(urls types.URLs, def string) bool {
 	if len(urls) > 1 {
 		return false
 	}
-	return urls[0].String() == def
+	return urls[0].String() == defaultEndpointURLs.String()
 }
 
 func urlsMapFromGetResp(resp *clientv3.GetResponse, prefix string) (types.URLsMap, error) {

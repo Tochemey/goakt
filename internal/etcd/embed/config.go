@@ -1,18 +1,65 @@
 package embed
 
 import (
+	"fmt"
+	"net"
 	"path"
 	"time"
 
 	"github.com/coreos/etcd/pkg/types"
+	"github.com/pkg/errors"
 	"github.com/tochemey/goakt/log"
 )
 
-const (
-	defaultEndpoint  = "http://0.0.0.0:2379"
-	defaultClientURL = "http://0.0.0.0:2379"
-	defaultPeerURL   = "http://0.0.0.0:2380"
+var (
+	defaultClientURLs   types.URLs
+	defaultPeerURLs     types.URLs
+	defaultEndpointURLs types.URLs
 )
+
+// init helps set the default URLs
+func init() {
+	// grab all the IP interfaces on the host machine
+	addresses, err := net.InterfaceAddrs()
+	// handle the error
+	if err != nil {
+		// panic because we need to set the default URLs
+		log.Panic(errors.Wrap(err, "failed to get the assigned ip addresses of the host"))
+	}
+
+	var (
+		clientURLs []string
+		peerURLs   []string
+	)
+
+	// iterate the assigned addresses
+	for _, address := range addresses {
+		// let us grab the CIDR
+		// no need to handle the error because the address is return by golang which
+		// automatically a valid address
+		ip, _, _ := net.ParseCIDR(address.String())
+		// let us ignore loopback ip address
+		if ip.IsLoopback() {
+			continue
+		}
+
+		// grab the ip string representation
+		repr := ip.String()
+		// check whether it is an IPv4 or IPv6
+		if ip.To4() == nil {
+			// Enclose IPv6 addresses with '[]' or the formed URLs will fail parsing
+			repr = fmt.Sprintf("[%s]", ip.String())
+		}
+		// set the various URLs
+		clientURLs = append(clientURLs, fmt.Sprintf("http://%s:2379", repr))
+		peerURLs = append(peerURLs, fmt.Sprintf("http://%s:2380", repr))
+	}
+
+	// let us finally set the default URLs
+	defaultClientURLs = types.MustNewURLs(clientURLs)
+	defaultPeerURLs = types.MustNewURLs(peerURLs)
+	defaultEndpointURLs = defaultClientURLs
+}
 
 // Config defines distro configuration
 type Config struct {
@@ -37,9 +84,9 @@ func NewConfig(name string, opts ...Option) *Config {
 	cfg := &Config{
 		name:          name,
 		dataDir:       defaultDIR,
-		endPoints:     types.MustNewURLs([]string{"http://0.0.0.0:2379"}),
-		peerURLs:      types.MustNewURLs([]string{"http://0.0.0.0:2380"}),
-		clientURLs:    types.MustNewURLs([]string{"http://0.0.0.0:2379"}),
+		endPoints:     defaultEndpointURLs,
+		peerURLs:      defaultPeerURLs,
+		clientURLs:    defaultClientURLs,
 		enableLogging: false,
 		size:          3,
 		logDir:        path.Join(defaultDIR, "logs"),

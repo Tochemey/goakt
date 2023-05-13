@@ -15,6 +15,12 @@ type Config struct {
 	Name       string
 }
 
+// NewDefaultConfig create a config that will use the default values
+// Refer to the embed.Config
+func NewDefaultConfig() *Config {
+	return new(Config)
+}
+
 // GetEmbedConfig returns an instance of embed config from the given config
 func (c Config) GetEmbedConfig() *embed.Config {
 	// let us define the various embed config options

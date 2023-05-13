@@ -242,7 +242,6 @@ func (s *Store) keepSessionAlive() {
 			// create a new retrier that will try a maximum of `livenessBroadcastAttempt` times, with
 			// an initial delay of 100 ms and a maximum delay of 1 second
 			retrier := retry.NewRetrier(livenessBroadcastAttempt, 100*time.Millisecond, time.Second)
-
 			// attempt to broadcast liveness
 			if err := retrier.RunContext(context.Background(), func(ctx context.Context) error {
 				return s.broadcastLiveness(ctx, broadcastTimeout)

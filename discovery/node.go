@@ -21,7 +21,7 @@ type Node struct {
 
 // JoinAddr returns the join address
 func (n Node) JoinAddr() string {
-	return fmt.Sprintf("%s:%d", n.Host, n.JoinPort)
+	return fmt.Sprintf("http://%s:%d", n.Host, n.JoinPort)
 }
 
 // RemotingAddr returns the remoting address

@@ -47,7 +47,7 @@ func NewEmbed(config *Config) (*Embed, error) {
 	// TODO add logging initialization
 
 	// if there are no endpoints given or if the default endpoint is set, assume that there is no existing server
-	if len(config.EndPoints()) == 0 || (len(config.EndPoints()) == 1 && config.EndPoints()[0].String() == defaultEndpoint) {
+	if len(config.EndPoints()) == 0 || (len(config.EndPoints()) == 1 && config.EndPoints()[0].String() == "http://localhost:2379") {
 		// add some logging
 		srv.logger.Info("No endpoints configured. Starting a new server...")
 		// start the server
@@ -152,10 +152,12 @@ func (es *Embed) startServer(initialCluster string) error {
 	es.embedConfig = embed.NewConfig()
 	es.embedConfig.Name = es.config.Name()
 	es.embedConfig.Dir = path.Join(es.config.DataDir(), "etcd.data")
+
 	es.embedConfig.ListenClientUrls = es.config.ClientURLs()
+	es.embedConfig.AdvertiseClientUrls = es.config.ClientURLs()
 	es.embedConfig.ListenPeerUrls = es.config.PeerURLs()
-	es.embedConfig.AdvertisePeerUrls = es.config.ClientURLs()
 	es.embedConfig.AdvertisePeerUrls = es.config.PeerURLs()
+
 	es.embedConfig.Logger = "zap"
 	es.embedConfig.LogLevel = "info"
 	es.embedConfig.InitialCluster = es.embedConfig.InitialClusterFromName(es.config.Name()) // default behavior

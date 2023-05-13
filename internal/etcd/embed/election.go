@@ -329,7 +329,7 @@ func (es *Embed) volunteerSelf() error {
 	var val string
 	// check for the default Peer URLs
 	if isDefaultPeerURL(es.config.PeerURLs()) {
-		val = types.MustNewURLs([]string{defaultPeerURL}).String()
+		val = defaultPeerURLs.String()
 	} else {
 		val = es.config.PeerURLs().String()
 	}
