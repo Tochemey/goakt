@@ -182,7 +182,7 @@ func (s *Store) UpdateEndpoints() error {
 		return err
 	}
 
-	s.config.Endpoints = s.Client.Endpoints()
+	s.config.endPoints = s.Client.Endpoints()
 	// TODO add the save feature
 	return nil
 }

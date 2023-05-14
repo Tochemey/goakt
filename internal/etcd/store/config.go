@@ -8,11 +8,12 @@ import (
 
 // Config defines the distributed store config
 type Config struct {
-	Endpoints  []string
 	ClientURLs []string
 	PeerURLs   []string
+	EndPoints  []string
 	Logger     log.Logger
 	Name       string
+	endPoints  []string
 }
 
 // NewDefaultConfig create a config that will use the default values
@@ -21,13 +22,24 @@ func NewDefaultConfig() *Config {
 	return new(Config)
 }
 
+// NewConfig creates an instance of Config
+func NewConfig(name string, logger log.Logger, endpoints, clientURLs, peerURLs []string) *Config {
+	return &Config{
+		ClientURLs: clientURLs,
+		PeerURLs:   peerURLs,
+		Logger:     logger,
+		Name:       name,
+		EndPoints:  endpoints,
+	}
+}
+
 // GetEmbedConfig returns an instance of embed config from the given config
-func (c Config) GetEmbedConfig() *embed.Config {
+func (c *Config) GetEmbedConfig() *embed.Config {
 	// let us define the various embed config options
 	var opts []embed.Option
 	// check whether the endpoints are set
-	if len(c.Endpoints) > 0 {
-		opts = append(opts, embed.WithEndPoints(types.MustNewURLs(c.Endpoints)))
+	if len(c.EndPoints) > 0 {
+		opts = append(opts, embed.WithEndPoints(types.MustNewURLs(c.EndPoints)))
 	}
 	// check whether the client URLs are set or not
 	if len(c.ClientURLs) > 0 {

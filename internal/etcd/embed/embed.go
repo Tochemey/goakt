@@ -1,6 +1,7 @@
 package embed
 
 import (
+	"os"
 	"path"
 	"sync"
 	"time"
@@ -43,19 +44,22 @@ func NewEmbed(config *Config) (*Embed, error) {
 	srv.stopWatchChan = make(chan struct{}, 1)
 	srv.logger = config.logger
 
-	// add some logging
-	srv.logger.Info("starting a server")
-	// start the server
-	if err := srv.startServer(); err != nil {
-		// log the error
-		srv.logger.Error(err)
-		return nil, err
-	}
+	// If no endpoints are given or if the default endpoint is set, assume that there is no existing server
+	if len(srv.config.EndPoints()) == 0 || isDefaultEndPointURL(srv.config.EndPoints()) {
+		// add some logging
+		srv.logger.Info("starting a server")
+		// start the server
+		if err := srv.startServer(""); err != nil {
+			// log the error
+			srv.logger.Error(err)
+			return nil, err
+		}
 
-	// update the endpoints to the advertised client URLs of the embedded server
-	srv.config.endPoints = srv.server.Config().AdvertiseClientUrls
-	// set the started
-	srv.hasStarted = true
+		// update the endpoints to the advertised client URLs of the embedded server
+		srv.config.endPoints = srv.server.Config().AdvertiseClientUrls
+		// set the started
+		srv.hasStarted = true
+	}
 
 	// let us connect to cluster as client
 	if err := srv.startClient(); err != nil {
@@ -131,7 +135,7 @@ func (es *Embed) Session() *concurrency.Session {
 }
 
 // startServer starts the underlying etcd server
-func (es *Embed) startServer() error {
+func (es *Embed) startServer(initialCluster string) error {
 	// acquire the lock
 	es.mu.Lock()
 	// release the lock once done
@@ -155,6 +159,23 @@ func (es *Embed) startServer() error {
 	es.embedConfig.Logger = "zap"
 	es.embedConfig.LogLevel = "info"
 	es.embedConfig.InitialCluster = es.embedConfig.InitialClusterFromName(es.config.Name())
+
+	// here we are joining an existing cluster
+	if initialCluster != "" {
+		// override the default behavior and set the cluster existing flag state
+		es.embedConfig.InitialCluster = initialCluster
+		es.embedConfig.ClusterState = embed.ClusterStateFlagExisting
+		// also let us make sure to clear the data dir
+		// If starting with non-empty initial cluster, delete the datadir if it
+		// exists. The etcd server will be brought up as a new server and old data
+		// being present will prevent it.
+		// Starting with an empty initial cluster implies that we are in a single
+		// node cluster, so we need to keep the etcd data.
+		if err := os.RemoveAll(es.config.DataDir()); err != nil {
+			es.logger.Panic(errors.Wrap(err, "failed to remove the data dir"))
+		}
+	}
+
 	// let us start the underlying server
 	etcd, err := embed.StartEtcd(es.embedConfig)
 	// handle the error

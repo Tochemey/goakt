@@ -255,18 +255,18 @@ func (d *Discovery) setOptions(meta discovery.Meta) (err error) {
 	if err != nil {
 		return err
 	}
-	// extract the raft port name
-	option.RaftPortName, err = meta.GetString(RaftPortName)
-	// handle the error in case the port name value is not properly set
-	if err != nil {
-		return err
-	}
-	// extract the remoting port name
-	option.RemotingPortName, err = meta.GetString(RemotingPortName)
-	// handle the error in case the remoting port name value is not properly set
-	if err != nil {
-		return err
-	}
+	//// extract the raft port name
+	//option.RaftPortName, err = meta.GetString(RaftPortName)
+	//// handle the error in case the port name value is not properly set
+	//if err != nil {
+	//	return err
+	//}
+	//// extract the remoting port name
+	//option.RemotingPortName, err = meta.GetString(RemotingPortName)
+	//// handle the error in case the remoting port name value is not properly set
+	//if err != nil {
+	//	return err
+	//}
 
 	// in case none of the above extraction fails then set the option
 	d.option = option
@@ -302,11 +302,10 @@ func (d *Discovery) podToNode(pod *v1.Pod) *discovery.Node {
 
 		// set the node
 		node = &discovery.Node{
-			Name:         pod.GetName(),
-			Host:         pod.Status.PodIP,
-			StartTime:    pod.Status.StartTime.Time.UnixMilli(),
-			JoinPort:     portMap[d.option.RaftPortName],
-			RemotingPort: portMap[d.option.RemotingPortName],
+			Name:      pod.GetName(),
+			Host:      pod.Status.PodIP,
+			StartTime: pod.Status.StartTime.Time.UnixMilli(),
+			Ports:     portMap,
 		}
 	}
 

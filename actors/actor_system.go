@@ -11,7 +11,6 @@ import (
 
 	"github.com/bufbuild/connect-go"
 	otelconnect "github.com/bufbuild/connect-opentelemetry-go"
-	"github.com/google/uuid"
 	cmp "github.com/orcaman/concurrent-map/v2"
 	"github.com/pkg/errors"
 	"github.com/tochemey/goakt/cluster"
@@ -606,10 +605,8 @@ func (a *actorSystem) handleRemoteTell(ctx context.Context, to PID, message prot
 // enableClustering enables clustering. When clustering is enabled remoting is also enabled to facilitate remote
 // communication
 func (a *actorSystem) enableClustering(ctx context.Context) {
-	// create the cluster name
-	clusterName := fmt.Sprintf("%s-%s-cluster", a.Name(), uuid.NewString())
 	// create an instance of the cluster service and start it
-	cluster := cluster.New(clusterName, a.config.disco, a.logger)
+	cluster := cluster.New(a.config.disco, a.logger)
 	// set the cluster field of the actorSystem
 	a.clusterService = cluster
 	// start the cluster service

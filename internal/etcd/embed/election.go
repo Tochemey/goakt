@@ -31,7 +31,7 @@ func (es *Embed) startCampaign() {
 			// Stop campaigning if the context is canceled
 			// else ignore errors and retry campaign
 			es.logger.Debug("campaigning to become leader")
-			err := election.Campaign(es.client.Ctx(), es.embedConfig.Name)
+			err := election.Campaign(es.client.Ctx(), es.config.Name())
 			if err != nil {
 				switch {
 				case err == context.Canceled:
@@ -324,7 +324,7 @@ func (es *Embed) removeFromNominees(host string) error {
 // The initial-cluster is formed by the urls of the nominees, which are in turn set to the urls set on volunteering.
 func (es *Embed) volunteerSelf() error {
 	// build the volunteer key
-	key := volunteerPrefix + es.embedConfig.Name
+	key := volunteerPrefix + es.config.Name()
 	// define the variable holding the associated value to the key
 	var val string
 	// check for the default Peer URLs
@@ -351,7 +351,7 @@ func (es *Embed) volunteerSelf() error {
 func (es *Embed) watchNomination() {
 	es.logger.Debug("watching for self nomination")
 	// build the nomination key
-	key := nomineePrefix + es.embedConfig.Name
+	key := nomineePrefix + es.config.Name()
 	f := func(_ clientv3.WatchResponse) {
 		es.handleNomination()
 	}
@@ -384,7 +384,7 @@ func (es *Embed) handleNomination() {
 
 	// check if you are in the nominees, and start/stop you embedded server as
 	// required
-	if _, ok := nominees[es.embedConfig.Name]; ok {
+	if _, ok := nominees[es.config.Name()]; ok {
 		es.logger.Debug("nominated, starting server")
 		// Sleeping to allow leader to add me as a etcd cluster member
 		// TODO: figure a better to wait

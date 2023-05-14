@@ -18,14 +18,12 @@ import (
 
 const (
 	nodePort           = 9000
-	clusterPort        = 3100
 	accountServicePort = 50051
 	nodeHost           = "0.0.0.0"
 	namespace          = "default"
 	remotingPortName   = "remoting"
 	applicationName    = "accounts"
 	actorSystemName    = "AccountsSystem"
-	clusterPortName    = "raft"
 )
 
 var (
@@ -48,11 +46,9 @@ var runCmd = &cobra.Command{
 		disco := kubernetes.New(logger)
 		// start the discovery engine and handle error
 		if err := disco.Start(ctx, discovery.Meta{
-			kubernetes.ApplicationName:  applicationName,
-			kubernetes.ActorSystemName:  actorSystemName,
-			kubernetes.Namespace:        namespace,
-			kubernetes.RemotingPortName: remotingPortName,
-			kubernetes.RaftPortName:     clusterPortName,
+			kubernetes.ApplicationName: applicationName,
+			kubernetes.ActorSystemName: actorSystemName,
+			kubernetes.Namespace:       namespace,
 		}); err != nil {
 			logger.Panic(err)
 		}

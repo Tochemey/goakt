@@ -5,12 +5,15 @@ import (
 	"encoding/base64"
 	"time"
 
+	goset "github.com/deckarep/golang-set/v2"
 	"github.com/pkg/errors"
 	"github.com/tochemey/goakt/discovery"
 	"github.com/tochemey/goakt/internal/etcd/store"
+	"github.com/tochemey/goakt/internal/etcd/urls"
 	goaktpb "github.com/tochemey/goakt/internal/goakt/v1"
 	"github.com/tochemey/goakt/internal/telemetry"
 	"github.com/tochemey/goakt/log"
+	"golang.org/x/exp/slices"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -23,11 +26,10 @@ type Cluster struct {
 }
 
 // New creates an instance of Cluster
-func New(name string, disco discovery.Discovery, logger log.Logger) *Cluster {
+func New(disco discovery.Discovery, logger log.Logger) *Cluster {
 	return &Cluster{
 		logger: logger,
 		disco:  disco,
-		name:   name,
 	}
 }
 
@@ -43,7 +45,17 @@ func (n *Cluster) Start(ctx context.Context) error {
 		count = 3 // TODO revisit this after QA
 		// variable holding
 		err error
+		// variable holding the store config
+		config *store.Config
 	)
+
+	// let us grab the advertised URLs for the running node
+	advertisePeerURLs, advertiseClientURLs, err := urls.GetNodeAdvertiseURLs()
+	// handle the error
+	if err != nil {
+		n.logger.Error(errors.Wrap(err, "failed to grab node advertise URLs"))
+		return err
+	}
 
 	// let us delay for sometime to make sure we have discovered all nodes
 	// FIXME: this is an approximation
@@ -82,33 +94,39 @@ func (n *Cluster) Start(ctx context.Context) error {
 	// add some logging
 	n.logger.Debugf("%s has discovered %d nodes", n.disco.ID(), len(discoNodes))
 
-	var (
-		peerURLs   = make([]string, len(discoNodes))
-		endpoints  = make([]string, len(discoNodes))
-		clientURLs = make([]string, len(discoNodes))
-	)
-
-	// let us build the various from the discovered nodes
-	for i, discoNode := range discoNodes {
-		peerURLs[i] = discoNode.JoinAddr()
-		endpoints[i] = ""  // FIXME: enhance discoNode to get this values
-		clientURLs[i] = "" // FIXME: enhance discoNode to get this values
-	}
-
 	// create an instance of the distributed store
-	config := &store.Config{
-		Logger: n.logger,
-		Name:   n.name,
-	}
-	// use the default config if the given Cluster is the only discovered
-	if len(discoNodes) > 1 {
+	if len(discoNodes) == 1 {
+		// set the node name
+		n.name = discoNodes[0].Name
+		// set the config
 		config = &store.Config{
-			Endpoints:  endpoints,
-			ClientURLs: clientURLs,
-			PeerURLs:   peerURLs,
-			Logger:     n.logger,
-			Name:       n.name,
+			Logger: n.logger,
+			Name:   n.name,
 		}
+	}
+
+	// we have some nodes discovered maybe one of them have started a cluster
+	if len(discoNodes) > 1 {
+		// create a variable that hold all the existing endpoints
+		endpoints := goset.NewSet[string]()
+		currentNodeNameFound := false
+		for _, node := range discoNodes {
+			// exclude the current node URL from the list of endpoint
+			if !slices.Contains(advertisePeerURLs, node.NodeURL()) {
+				endpoints.Add(node.NodeURL())
+			} else {
+				// let us find the node name
+				if currentNodeNameFound {
+					continue
+				}
+
+				// set the node name
+				n.name = node.Name
+				currentNodeNameFound = true
+			}
+		}
+		// let us override the already store config
+		config = store.NewConfig(n.name, n.logger, endpoints.ToSlice(), advertiseClientURLs, advertisePeerURLs)
 	}
 
 	// create the instance of the distributed store and set it

@@ -29,7 +29,7 @@ metadata:
     app.kubernetes.io/component: accounts
     app.kubernetes.io/part-of: AccountsSystem
 spec:
-  replicas: 2
+  replicas: 1
   strategy:
     type: RollingUpdate
     rollingUpdate:
@@ -63,8 +63,10 @@ spec:
               name: grpc
             - containerPort: 9000
               name: remoting
-            - containerPort: 3100
-              name: raft
+            - containerPort: 2379
+              name: client-port
+            - containerPort: 2380
+              name: node-port
           env:
             - name: HOST_IP
               valueFrom:
@@ -104,6 +106,10 @@ spec:
        targetPort: grpc
        name: grpc
      - protocol: TCP
-       port: 3100
-       targetPort: raft
-       name: raft
+       port: 2379
+       targetPort: client-port
+       name: client-port
+     - protocol: TCP
+       port: 2380
+       targetPort: node-port
+       name: node-port

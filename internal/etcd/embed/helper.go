@@ -15,12 +15,12 @@ func isDefaultPeerURL(urls types.URLs) bool {
 	return urls[0].String() == defaultPeerURLs.String()
 }
 
-// isDefaultEndpoint checks for the default endpoint
-func isDefaultEndpoint(urls types.URLs) bool {
+// isDefaultPeerURL checks for default peer URL
+func isDefaultEndPointURL(urls types.URLs) bool {
 	if len(urls) > 1 {
 		return false
 	}
-	return urls[0].String() == defaultEndpointURLs.String()
+	return urls[0].String() == defaultEndPointURLs.String()
 }
 
 func urlsMapFromGetResp(resp *clientv3.GetResponse, prefix string) (types.URLsMap, error) {
