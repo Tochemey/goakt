@@ -90,9 +90,9 @@ func (es *Embed) watchIdealSize() {
 				continue
 			}
 
-			if size != es.config.Size() {
+			if size != es.config.IdealSize() {
 				es.logger.Debugf("cluster ideal size has changed to=%d, doing nominations again", size)
-				es.config.size = size
+				es.config.idealClusterSize = size
 				es.startNominations()
 			}
 		}
@@ -168,7 +168,7 @@ func (es *Embed) startNominations() {
 
 	switch {
 	// If idealSize is not met, nominate more servers till the size is met
-	case nomineeCount < es.config.Size():
+	case nomineeCount < es.config.IdealSize():
 		// You cannot do nominations if all volunteers have been nominated
 		if compareStringSlices(nominees, volunteers) {
 			es.logger.Debug("all available volunteers have been nominated")
@@ -189,13 +189,13 @@ func (es *Embed) startNominations() {
 			es.logger.Debugf("nominated new host=%s", host)
 
 			nomineeCount++
-			if nomineeCount == es.config.Size() {
+			if nomineeCount == es.config.IdealSize() {
 				break
 			}
 		}
 
 		// If idealSize is exceeded, remove server nominations till idealSize is reached
-	case nomineeCount > es.config.Size():
+	case nomineeCount > es.config.IdealSize():
 		// Remove nominations in a round-robin fashion till the required nominations are removed
 		for _, host := range nominees {
 			if host == es.config.Name() {
@@ -207,7 +207,7 @@ func (es *Embed) startNominations() {
 				continue
 			}
 			nomineeCount--
-			if nomineeCount == es.config.Size() {
+			if nomineeCount == es.config.IdealSize() {
 				break
 			}
 		}

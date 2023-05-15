@@ -1,4 +1,4 @@
-package store
+package kvstore
 
 import (
 	"context"
@@ -18,7 +18,7 @@ const (
 )
 
 // IsPeerRunning checks whether the given peer is up running
-func (s *Store) IsPeerRunning(ctx context.Context, peerID string, timeout time.Duration) (int, bool) {
+func (s *KVStore) IsPeerRunning(ctx context.Context, peerID string, timeout time.Duration) (int, bool) {
 	// create a cancellation context
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -48,7 +48,7 @@ func (s *Store) IsPeerRunning(ctx context.Context, peerID string, timeout time.D
 }
 
 // broadcastLiveness inform the cluster about this node liveness
-func (s *Store) broadcastLiveness(ctx context.Context, timeout time.Duration) error {
+func (s *KVStore) broadcastLiveness(ctx context.Context, timeout time.Duration) error {
 	// publish liveness of this instance into the store
 	key := fmt.Sprintf("%s%s", livenessKeyPrefix, s.name)
 	ctx, cancel := context.WithTimeout(ctx, timeout)
@@ -59,7 +59,7 @@ func (s *Store) broadcastLiveness(ctx context.Context, timeout time.Duration) er
 
 // revokeLiveness informs the cluster that the given node is no longer running
 // this function is invoked during graceful shutdown
-func (s *Store) revokeLiveness(ctx context.Context, timeout time.Duration) error {
+func (s *KVStore) revokeLiveness(ctx context.Context, timeout time.Duration) error {
 	// publish liveness of this instance into the store
 	key := fmt.Sprintf("%s%s", livenessKeyPrefix, s.name)
 	ctx, cancel := context.WithTimeout(ctx, timeout)

@@ -1,9 +1,9 @@
-package store
+package kvstore
 
 import (
 	"github.com/coreos/etcd/pkg/types"
 	"github.com/tochemey/goakt/internal/etcd/embed"
-	"github.com/tochemey/goakt/internal/etcd/urls"
+	"github.com/tochemey/goakt/internal/etcd/host"
 	"github.com/tochemey/goakt/log"
 )
 
@@ -21,8 +21,8 @@ func NewDefaultConfig(name string, logger log.Logger) *Config {
 	return &Config{
 		logger:      logger,
 		name:        name,
-		clientsPort: urls.DefaultClientsPort,
-		peersPort:   urls.DefaultPeersPort,
+		clientsPort: host.DefaultClientsPort,
+		peersPort:   host.DefaultPeersPort,
 	}
 }
 

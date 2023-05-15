@@ -25,11 +25,6 @@ const (
 	actorSystemName    = "AccountsSystem"
 )
 
-var (
-	labelsSelector = "accounts"
-	podLabels      = map[string]string{"app": "accounts"}
-)
-
 // runCmd represents the run command
 var runCmd = &cobra.Command{
 	Use:   "run",

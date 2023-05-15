@@ -14,14 +14,14 @@ import (
 
 // Config defines distro configuration
 type Config struct {
-	name          string     // name defines the system name
-	dataDir       string     // dataDir defines the data directory
-	endPoints     types.URLs // endPoints defines the etcd server endpoint
-	peerURLs      types.URLs // peerURLs defines the peers URL
-	clientURLs    types.URLs // clientURLs defines the clients URL
-	enableLogging bool       // enableLogging states whether to enable logging
-	size          int        // size defines the size
-	logDir        string     // logDir specifies the log directory
+	name             string     // name defines the system name
+	dataDir          string     // dataDir defines the data directory
+	endPoints        types.URLs // endPoints defines the etcd server endpoint
+	peerURLs         types.URLs // peerURLs defines the peers URL
+	clientURLs       types.URLs // clientURLs defines the clients URL
+	enableLogging    bool       // enableLogging states whether to enable logging
+	idealClusterSize int        // idealClusterSize defines the idealClusterSize
+	logDir           string     // logDir specifies the log directory
 
 	logger       log.Logger
 	startTimeout time.Duration
@@ -36,15 +36,15 @@ func NewConfig(name string, clientsPort, peersPort int32, opts ...Option) *Confi
 	defaultDIR := "/var/goakt/"
 	// create a config instance
 	cfg := &Config{
-		name:          name,
-		dataDir:       defaultDIR,
-		enableLogging: false,
-		size:          3,
-		logDir:        path.Join(defaultDIR, "logs"),
-		logger:        log.DefaultLogger,
-		startTimeout:  time.Minute,
-		peersPort:     peersPort,
-		clientsPort:   clientsPort,
+		name:             name,
+		dataDir:          defaultDIR,
+		enableLogging:    false,
+		idealClusterSize: 3,
+		logDir:           path.Join(defaultDIR, "logs"),
+		logger:           log.DefaultLogger,
+		startTimeout:     time.Minute,
+		peersPort:        peersPort,
+		clientsPort:      clientsPort,
 	}
 
 	// apply the various options
@@ -90,9 +90,9 @@ func (c *Config) EnableLogging() bool {
 	return c.enableLogging
 }
 
-// Size returns the cluster size
-func (c *Config) Size() int {
-	return c.size
+// IdealSize returns the ideal cluster size
+func (c *Config) IdealSize() int {
+	return c.idealClusterSize
 }
 
 // LogDir returns the log directory

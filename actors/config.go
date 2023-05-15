@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/tochemey/goakt/discovery"
-	"github.com/tochemey/goakt/internal/etcd/urls"
+	"github.com/tochemey/goakt/internal/etcd/host"
 	"github.com/tochemey/goakt/internal/telemetry"
 	"github.com/tochemey/goakt/log"
 )
@@ -245,7 +245,7 @@ func WithDefaultClustering(disco discovery.Discovery) Option {
 	return OptionFunc(func(config *Config) {
 		config.clusterEnabled = true
 		config.disco = disco
-		config.clientsPort = urls.DefaultClientsPort
-		config.peersPort = urls.DefaultPeersPort
+		config.clientsPort = host.DefaultClientsPort
+		config.peersPort = host.DefaultPeersPort
 	})
 }

@@ -163,7 +163,7 @@ func (es *Embed) startServer(initialCluster string) error {
 
 	// set the logger
 	es.embedConfig.Logger = "zap"
-	es.embedConfig.LogLevel = "info"
+	es.embedConfig.LogLevel = es.logger.LogLevel().String()
 
 	// here we are joining an existing cluster
 	if initialCluster != "" {

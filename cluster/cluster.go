@@ -10,8 +10,8 @@ import (
 	goset "github.com/deckarep/golang-set/v2"
 	"github.com/pkg/errors"
 	"github.com/tochemey/goakt/discovery"
-	"github.com/tochemey/goakt/internal/etcd/store"
-	"github.com/tochemey/goakt/internal/etcd/urls"
+	"github.com/tochemey/goakt/internal/etcd/host"
+	"github.com/tochemey/goakt/internal/etcd/kvstore"
 	goaktpb "github.com/tochemey/goakt/internal/goakt/v1"
 	"github.com/tochemey/goakt/internal/telemetry"
 	"github.com/tochemey/goakt/log"
@@ -23,7 +23,7 @@ import (
 type Cluster struct {
 	logger      log.Logger
 	disco       discovery.Discovery
-	store       *store.Store
+	store       *kvstore.KVStore
 	name        string
 	clientsPort int32
 	peersPort   int32
@@ -52,11 +52,11 @@ func (n *Cluster) Start(ctx context.Context) error {
 		// variable holding
 		err error
 		// variable holding the store config
-		config *store.Config
+		config *kvstore.Config
 	)
 
 	// let us grab the advertised URLs for the running node
-	advertisePeerURLs, _, err := urls.GetAdvertiseURLs(n.peersPort, n.clientsPort)
+	advertisePeerURLs, _, err := host.BuildAdvertiseURLs(n.peersPort, n.clientsPort)
 
 	// handle the error
 	if err != nil {
@@ -118,7 +118,7 @@ func (n *Cluster) Start(ctx context.Context) error {
 		// set the node name
 		n.name = discoNodes[0].Name
 		// set the config to use the predefined urls and endpoints
-		config = store.NewDefaultConfig(n.name, n.logger)
+		config = kvstore.NewDefaultConfig(n.name, n.logger)
 	}
 
 	// we have some nodes discovered maybe one of them have started a cluster
@@ -143,16 +143,15 @@ func (n *Cluster) Start(ctx context.Context) error {
 			}
 		}
 
+		// add some debug logging
 		n.logger.Debugf("endpoints=[%s]", strings.Join(endpoints.ToSlice(), ","))
-		n.logger.Debugf("clients Port=%d", n.clientsPort)
-		n.logger.Debugf("peers Port=%d", n.peersPort)
 
 		// let us override the already store config
-		config = store.NewConfig(n.name, n.logger, endpoints.ToSlice(), n.clientsPort, n.peersPort)
+		config = kvstore.NewConfig(n.name, n.logger, endpoints.ToSlice(), n.clientsPort, n.peersPort)
 	}
 
 	// create the instance of the distributed store and set it
-	n.store, err = store.New(config)
+	n.store, err = kvstore.New(config)
 	// handle the error
 	if err != nil {
 		// log the error and return

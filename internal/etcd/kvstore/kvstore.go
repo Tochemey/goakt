@@ -1,4 +1,4 @@
-package store
+package kvstore
 
 import (
 	"context"
@@ -28,12 +28,12 @@ const (
 	livenessBroadcastAttempt = 3
 )
 
-// Store defines a distributed store engine
-type Store struct {
+// KVStore defines a clustered key value store
+type KVStore struct {
 	clientv3.KV
 	clientv3.Lease
 	clientv3.Watcher
-	// Namespaced Session for session and concurrency operations in the Store
+	// Namespaced Session for session and concurrency operations in the KVStore
 	*concurrency.Session
 	*clientv3.Client
 
@@ -47,8 +47,8 @@ type Store struct {
 	name            string
 }
 
-// New creates an instance of Store
-func New(config *Config) (*Store, error) {
+// New creates an instance of KVStore
+func New(config *Config) (*KVStore, error) {
 	// create an instance of embed config
 	embedConfig := config.GetEmbedConfig()
 	// create an instance of embed server
@@ -82,7 +82,7 @@ func New(config *Config) (*Store, error) {
 		return nil, errors.Wrap(err, "failed to create store session")
 	}
 
-	return &Store{
+	return &KVStore{
 		KV:              kv,
 		Lease:           lease,
 		Watcher:         watcher,
@@ -100,7 +100,7 @@ func New(config *Config) (*Store, error) {
 }
 
 // Shutdown closes the store connections
-func (s *Store) Shutdown() error {
+func (s *KVStore) Shutdown() error {
 	if err := s.revokeLiveness(context.Background(), shutdownTimeout); err != nil {
 		return err
 	}
@@ -119,7 +119,7 @@ func (s *Store) Shutdown() error {
 }
 
 // GetValue retrieves the value of a given key from the store
-func (s *Store) GetValue(ctx context.Context, key string, opts ...clientv3.OpOption) (*clientv3.GetResponse, error) {
+func (s *KVStore) GetValue(ctx context.Context, key string, opts ...clientv3.OpOption) (*clientv3.GetResponse, error) {
 	// create a cancellation context
 	var cancel context.CancelFunc
 
@@ -138,7 +138,7 @@ func (s *Store) GetValue(ctx context.Context, key string, opts ...clientv3.OpOpt
 }
 
 // SetValue sets the value of a given key unto the store
-func (s *Store) SetValue(ctx context.Context, key, val string, opts ...clientv3.OpOption) (*clientv3.PutResponse, error) {
+func (s *KVStore) SetValue(ctx context.Context, key, val string, opts ...clientv3.OpOption) (*clientv3.PutResponse, error) {
 	// create a cancellation context
 	var cancel context.CancelFunc
 
@@ -157,7 +157,7 @@ func (s *Store) SetValue(ctx context.Context, key, val string, opts ...clientv3.
 }
 
 // DeleteKey deletes a given key from the store
-func (s *Store) DeleteKey(ctx context.Context, key string, opts ...clientv3.OpOption) (*clientv3.DeleteResponse, error) {
+func (s *KVStore) DeleteKey(ctx context.Context, key string, opts ...clientv3.OpOption) (*clientv3.DeleteResponse, error) {
 	// create a cancellation context
 	var cancel context.CancelFunc
 
@@ -176,7 +176,7 @@ func (s *Store) DeleteKey(ctx context.Context, key string, opts ...clientv3.OpOp
 }
 
 // UpdateEndpoints updates the configured endpoints and saves them
-func (s *Store) UpdateEndpoints() error {
+func (s *KVStore) UpdateEndpoints() error {
 	// synchronize the endpoints and return the error in case there is any
 	if err := s.Sync(s.Ctx()); err != nil {
 		return err
@@ -190,8 +190,8 @@ func (s *Store) UpdateEndpoints() error {
 // isStoreHealthy checks if store is reachable from the node.
 // Get a random key.If we get the response without an error,
 // the endpoint is healthy.
-func (s *Store) isStoreHealthy() bool {
-	ctx, cancel := context.WithTimeout(context.Background(), getTimeout*time.Second)
+func (s *KVStore) isStoreHealthy() bool {
+	ctx, cancel := context.WithTimeout(context.Background(), getTimeout)
 	defer cancel()
 	_, err := s.Get(ctx, "health")
 	return err == nil
@@ -202,7 +202,7 @@ func (s *Store) isStoreHealthy() bool {
 // session lease information and store endpoint health on a regular interval.
 // A session lease will get expire in many situations like if there is a
 // reconnection with etcd server.
-func (s *Store) keepSessionAlive() {
+func (s *KVStore) keepSessionAlive() {
 	var (
 		ticker = time.NewTicker(time.Second * 5)
 	)

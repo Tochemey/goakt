@@ -25,7 +25,7 @@ func (f OptionFunc) Apply(c *Config) {
 // WithSize sets the etcd server size
 func WithSize(size int) Option {
 	return OptionFunc(func(config *Config) {
-		config.size = size
+		config.idealClusterSize = size
 	})
 }
 

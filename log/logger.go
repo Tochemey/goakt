@@ -31,4 +31,6 @@ type Logger interface {
 	Debug(...any)
 	// Debugf starts a new message with debug level.
 	Debugf(string, ...any)
+	// LogLevel returns the log level being used
+	LogLevel() Level
 }

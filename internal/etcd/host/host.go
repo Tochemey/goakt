@@ -1,4 +1,4 @@
-package urls
+package host
 
 import (
 	"fmt"
@@ -13,8 +13,8 @@ const (
 	DefaultClientsPort = 32379
 )
 
-// GetAdvertiseURLs returns the running node etcd advertise URLs
-func GetAdvertiseURLs(peersPort, clientsPort int32) (advertisePeerURLs []string, advertiseClientURLs []string, err error) {
+// BuildAdvertiseURLs returns the running node etcd advertise URLs
+func BuildAdvertiseURLs(peersPort, clientsPort int32) (advertisePeerURLs []string, advertiseClientURLs []string, err error) {
 	// grab all the IP interfaces on the host machine
 	addresses, err := net.InterfaceAddrs()
 	// handle the error
@@ -34,7 +34,7 @@ func GetAdvertiseURLs(peersPort, clientsPort int32) (advertisePeerURLs []string,
 		// no need to handle the error because the address is return by golang which
 		// automatically a valid address
 		ip, _, _ := net.ParseCIDR(address.String())
-		// let us ignore loopback ip address
+		// let us ignore loop-back ip address
 		if ip.IsLoopback() {
 			continue
 		}

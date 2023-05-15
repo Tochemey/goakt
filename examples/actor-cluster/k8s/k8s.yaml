@@ -64,9 +64,9 @@ spec:
             - containerPort: 9000
               name: remoting
             - containerPort: 32379
-              name: client-port
+              name: clients-port
             - containerPort: 32380
-              name: node-port
+              name: peers-port
           env:
             - name: HOST_IP
               valueFrom:
@@ -111,3 +111,23 @@ spec:
        port: 50051
        targetPort: grpc
        name: grpc
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: accounts-ingress
+  namespace: "default"
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/backend-protocol: "GRPC"
+spec:
+  rules:
+    - http:
+        paths:
+          - pathType: Prefix
+            path: /
+            backend:
+              service:
+                name: accounts
+                port:
+                  number: 50051
