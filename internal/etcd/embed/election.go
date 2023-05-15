@@ -327,14 +327,7 @@ func (es *Embed) volunteerSelf() error {
 	// build the volunteer key
 	key := volunteerPrefix + es.config.Name()
 	// define the variable holding the associated value to the key
-	var val string
-	// check for the default Peer URLs
-	if isDefaultPeerURL(es.config.PeerURLs()) {
-		val = defaultPeerURLs.String()
-	} else {
-		val = es.config.PeerURLs().String()
-	}
-
+	val := es.config.PeerURLs().String()
 	// set the volunteer key
 	_, err := es.client.Put(es.client.Ctx(), key, val, clientv3.WithLease(es.session.Lease()))
 	// handle the error
@@ -390,7 +383,7 @@ func (es *Embed) handleNomination() {
 		es.logger.Debugf("nominated, starting server with initial cluster=%s", nominees.String())
 		// Sleeping to allow leader to add me as a etcd cluster member
 		// TODO: figure a better to wait
-		time.Sleep(time.Second)
+		time.Sleep(3 * time.Second)
 		// start the server
 		if err := es.startServer(nominees.String()); err != nil {
 			es.logger.Error(errors.Wrap(err, "failed to start server after being nominated"))

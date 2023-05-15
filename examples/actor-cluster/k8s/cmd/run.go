@@ -21,7 +21,6 @@ const (
 	accountServicePort = 50051
 	nodeHost           = "0.0.0.0"
 	namespace          = "default"
-	remotingPortName   = "remoting"
 	applicationName    = "accounts"
 	actorSystemName    = "AccountsSystem"
 )
@@ -61,7 +60,7 @@ var runCmd = &cobra.Command{
 			goakt.WithLogger(logger),
 			goakt.WithActorInitMaxRetries(3),
 			goakt.WithRemoting(),
-			goakt.WithClustering(disco))
+			goakt.WithDefaultClustering(disco))
 		// handle the error
 		if err != nil {
 			logger.Panic(err)

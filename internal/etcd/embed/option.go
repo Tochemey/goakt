@@ -36,24 +36,10 @@ func WithLoggingEnable() Option {
 	})
 }
 
-// WithPeerURLs sets the peer URLs
-func WithPeerURLs(peerURLs types.URLs) Option {
-	return OptionFunc(func(config *Config) {
-		config.peerURLs = peerURLs
-	})
-}
-
 // WithEndPoints sets the endpoints
 func WithEndPoints(endpoints types.URLs) Option {
 	return OptionFunc(func(config *Config) {
 		config.endPoints = endpoints
-	})
-}
-
-// WithClientURLs sets the client URLs
-func WithClientURLs(clientURLs types.URLs) Option {
-	return OptionFunc(func(config *Config) {
-		config.clientURLs = clientURLs
 	})
 }
 

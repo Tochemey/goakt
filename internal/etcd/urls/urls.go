@@ -8,8 +8,13 @@ import (
 	"github.com/pkg/errors"
 )
 
-// GetNodeAdvertiseURLs returns the running node etcd advertise URLs
-func GetNodeAdvertiseURLs() (advertisePeerURLs []string, advertiseClientURLs []string, err error) {
+const (
+	DefaultPeersPort   = 32380
+	DefaultClientsPort = 32379
+)
+
+// GetAdvertiseURLs returns the running node etcd advertise URLs
+func GetAdvertiseURLs(peersPort, clientsPort int32) (advertisePeerURLs []string, advertiseClientURLs []string, err error) {
 	// grab all the IP interfaces on the host machine
 	addresses, err := net.InterfaceAddrs()
 	// handle the error
@@ -42,8 +47,8 @@ func GetNodeAdvertiseURLs() (advertisePeerURLs []string, advertiseClientURLs []s
 			repr = fmt.Sprintf("[%s]", ip.String())
 		}
 		// set the various URLs
-		clientURLs.Add(fmt.Sprintf("http://%s:32379", repr))
-		peerURLs.Add(fmt.Sprintf("http://%s:32380", repr))
+		clientURLs.Add(fmt.Sprintf("http://%s:%d", repr, clientsPort))
+		peerURLs.Add(fmt.Sprintf("http://%s:%d", repr, peersPort))
 	}
 
 	return peerURLs.ToSlice(), clientURLs.ToSlice(), nil

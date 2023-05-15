@@ -1,12 +1,5 @@
 package discovery
 
-import "fmt"
-
-const (
-	advertisePeerPortNumber   = 32380 // TODO: revisit this port
-	advertiseClientPortNumber = 32379 //  TODO: revisit this port
-)
-
 // Node represents a discovered node
 type Node struct {
 	// Name specifies the discovered node's Name
@@ -19,26 +12,26 @@ type Node struct {
 	Ports map[string]int32
 }
 
-// NodeURL return the node URL
-func (n *Node) NodeURL() string {
-	var url string
-	for _, portNumber := range n.Ports {
-		if portNumber == advertisePeerPortNumber {
-			url = fmt.Sprintf("http://%s:%d", n.Host, portNumber)
-			break
-		}
-	}
-	return url
-}
-
-// ClientURL return the node URL
-func (n *Node) ClientURL() string {
-	var url string
-	for _, portNumber := range n.Ports {
-		if portNumber == advertiseClientPortNumber {
-			url = fmt.Sprintf("http://%s:%d", n.Host, portNumber)
-			break
-		}
-	}
-	return url
-}
+//// NodeURL return the node URL
+//func (n *Node) NodeURL() string {
+//	var url string
+//	for _, portNumber := range n.Ports {
+//		if portNumber == urls.AdvertisePeerDefaultPortNumber {
+//			url = fmt.Sprintf("http://%s:%d", n.Host, portNumber)
+//			break
+//		}
+//	}
+//	return url
+//}
+//
+//// ClientURL return the node URL
+//func (n *Node) ClientURL() string {
+//	var url string
+//	for _, portNumber := range n.Ports {
+//		if portNumber == urls.AdvertiseClientDefaultPortNumber {
+//			url = fmt.Sprintf("http://%s:%d", n.Host, portNumber)
+//			break
+//		}
+//	}
+//	return url
+//}

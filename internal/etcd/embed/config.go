@@ -1,43 +1,23 @@
 package embed
 
 import (
+	"fmt"
+	"net"
 	"path"
 	"time"
 
 	"github.com/coreos/etcd/pkg/types"
+	goset "github.com/deckarep/golang-set/v2"
 	"github.com/pkg/errors"
-	"github.com/tochemey/goakt/internal/etcd/urls"
 	"github.com/tochemey/goakt/log"
 )
-
-var (
-	defaultClientURLs   types.URLs
-	defaultPeerURLs     types.URLs
-	defaultEndPointURLs types.URLs
-)
-
-// init helps set the default URLs
-func init() {
-	// grab all the IP interfaces on the host machine
-	peerURLs, clientURLs, err := urls.GetNodeAdvertiseURLs()
-	// handle the error
-	if err != nil {
-		// panic because we need to set the default URLs
-		log.Panic(errors.Wrap(err, "failed to get the assigned ip addresses of the host"))
-	}
-
-	// let us finally set the default URLs
-	defaultClientURLs = types.MustNewURLs(clientURLs)
-	defaultPeerURLs = types.MustNewURLs(peerURLs)
-	defaultEndPointURLs = defaultClientURLs
-}
 
 // Config defines distro configuration
 type Config struct {
 	name          string     // name defines the system name
 	dataDir       string     // dataDir defines the data directory
 	endPoints     types.URLs // endPoints defines the etcd server endpoint
-	peerURLs      types.URLs // peerURLS defines the peers URL
+	peerURLs      types.URLs // peerURLs defines the peers URL
 	clientURLs    types.URLs // clientURLs defines the clients URL
 	enableLogging bool       // enableLogging states whether to enable logging
 	size          int        // size defines the size
@@ -45,29 +25,37 @@ type Config struct {
 
 	logger       log.Logger
 	startTimeout time.Duration
+
+	peersPort   int32
+	clientsPort int32
 }
 
 // NewConfig creates an instance of Config
-func NewConfig(name string, opts ...Option) *Config {
+func NewConfig(name string, clientsPort, peersPort int32, opts ...Option) *Config {
 	// create the default dir
 	defaultDIR := "/var/goakt/"
 	// create a config instance
 	cfg := &Config{
 		name:          name,
 		dataDir:       defaultDIR,
-		peerURLs:      defaultPeerURLs,
-		clientURLs:    defaultClientURLs,
-		endPoints:     defaultEndPointURLs,
 		enableLogging: false,
 		size:          3,
 		logDir:        path.Join(defaultDIR, "logs"),
 		logger:        log.DefaultLogger,
 		startTimeout:  time.Minute,
+		peersPort:     peersPort,
+		clientsPort:   clientsPort,
 	}
 
 	// apply the various options
 	for _, opt := range opts {
 		opt.Apply(cfg)
+	}
+
+	// set the various URLs
+	if err := cfg.setAdvertiseURLs(); err != nil {
+		// panic because we need to set the default URLs
+		log.Panic(errors.Wrap(err, "failed to set the various URLs"))
 	}
 
 	return cfg
@@ -110,4 +98,48 @@ func (c *Config) Size() int {
 // LogDir returns the log directory
 func (c *Config) LogDir() string {
 	return c.logDir
+}
+
+// GetNodeAdvertiseURLs returns the running node etcd advertise URLs
+func (c *Config) setAdvertiseURLs() error {
+	// grab all the IP interfaces on the host machine
+	addresses, err := net.InterfaceAddrs()
+	// handle the error
+	if err != nil {
+		// panic because we need to set the default URLs
+		return errors.Wrap(err, "failed to get the assigned ip addresses of the host")
+	}
+
+	var (
+		clientURLs = goset.NewSet[string]()
+		peerURLs   = goset.NewSet[string]()
+	)
+
+	// iterate the assigned addresses
+	for _, address := range addresses {
+		// let us grab the CIDR
+		// no need to handle the error because the address is return by golang which
+		// automatically a valid address
+		ip, _, _ := net.ParseCIDR(address.String())
+		// let us ignore loopback ip address
+		if ip.IsLoopback() {
+			continue
+		}
+
+		// grab the ip string representation
+		repr := ip.String()
+		// check whether it is an IPv4 or IPv6
+		if ip.To4() == nil {
+			// Enclose IPv6 addresses with '[]' or the formed URLs will fail parsing
+			repr = fmt.Sprintf("[%s]", ip.String())
+		}
+		// set the various URLs
+		clientURLs.Add(fmt.Sprintf("http://%s:%d", repr, c.clientsPort))
+		peerURLs.Add(fmt.Sprintf("http://%s:%d", repr, c.peersPort))
+	}
+
+	// let us finally set the default URLs
+	c.clientURLs = types.MustNewURLs(clientURLs.ToSlice())
+	c.peerURLs = types.MustNewURLs(peerURLs.ToSlice())
+	return nil
 }

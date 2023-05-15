@@ -3,6 +3,8 @@ package cluster
 import (
 	"context"
 	"encoding/base64"
+	"fmt"
+	"strings"
 	"time"
 
 	goset "github.com/deckarep/golang-set/v2"
@@ -19,17 +21,21 @@ import (
 
 // Cluster represents the Cluster
 type Cluster struct {
-	logger log.Logger
-	disco  discovery.Discovery
-	store  *store.Store
-	name   string
+	logger      log.Logger
+	disco       discovery.Discovery
+	store       *store.Store
+	name        string
+	clientsPort int32
+	peersPort   int32
 }
 
 // New creates an instance of Cluster
-func New(disco discovery.Discovery, logger log.Logger) *Cluster {
+func New(clientsPort int32, peersPort int32, disco discovery.Discovery, logger log.Logger) *Cluster {
 	return &Cluster{
-		logger: logger,
-		disco:  disco,
+		logger:      logger,
+		disco:       disco,
+		clientsPort: clientsPort,
+		peersPort:   peersPort,
 	}
 }
 
@@ -50,7 +56,8 @@ func (n *Cluster) Start(ctx context.Context) error {
 	)
 
 	// let us grab the advertised URLs for the running node
-	advertisePeerURLs, advertiseClientURLs, err := urls.GetNodeAdvertiseURLs()
+	advertisePeerURLs, _, err := urls.GetAdvertiseURLs(n.peersPort, n.clientsPort)
+
 	// handle the error
 	if err != nil {
 		n.logger.Error(errors.Wrap(err, "failed to grab node advertise URLs"))
@@ -94,15 +101,24 @@ func (n *Cluster) Start(ctx context.Context) error {
 	// add some logging
 	n.logger.Debugf("%s has discovered %d nodes", n.disco.ID(), len(discoNodes))
 
+	// utility function to find the node URL
+	nodeURL := func(node *discovery.Node) string {
+		var url string
+		for _, portNumber := range node.Ports {
+			if portNumber == n.peersPort {
+				url = fmt.Sprintf("http://%s:%d", node.Host, portNumber)
+				break
+			}
+		}
+		return url
+	}
+
 	// create an instance of the distributed store
 	if len(discoNodes) == 1 {
 		// set the node name
 		n.name = discoNodes[0].Name
-		// set the config
-		config = &store.Config{
-			Logger: n.logger,
-			Name:   n.name,
-		}
+		// set the config to use the predefined urls and endpoints
+		config = store.NewDefaultConfig(n.name, n.logger)
 	}
 
 	// we have some nodes discovered maybe one of them have started a cluster
@@ -111,9 +127,10 @@ func (n *Cluster) Start(ctx context.Context) error {
 		endpoints := goset.NewSet[string]()
 		currentNodeNameFound := false
 		for _, node := range discoNodes {
+			url := nodeURL(node)
 			// exclude the current node URL from the list of endpoint
-			if !slices.Contains(advertisePeerURLs, node.NodeURL()) {
-				endpoints.Add(node.NodeURL())
+			if !slices.Contains(advertisePeerURLs, url) {
+				endpoints.Add(url)
 			} else {
 				// let us find the node name
 				if currentNodeNameFound {
@@ -125,8 +142,13 @@ func (n *Cluster) Start(ctx context.Context) error {
 				currentNodeNameFound = true
 			}
 		}
+
+		n.logger.Debugf("endpoints=[%s]", strings.Join(endpoints.ToSlice(), ","))
+		n.logger.Debugf("clients Port=%d", n.clientsPort)
+		n.logger.Debugf("peers Port=%d", n.peersPort)
+
 		// let us override the already store config
-		config = store.NewConfig(n.name, n.logger, endpoints.ToSlice(), advertiseClientURLs, advertisePeerURLs)
+		config = store.NewConfig(n.name, n.logger, endpoints.ToSlice(), n.clientsPort, n.peersPort)
 	}
 
 	// create the instance of the distributed store and set it

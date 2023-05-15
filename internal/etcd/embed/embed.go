@@ -47,7 +47,7 @@ func NewEmbed(config *Config) (*Embed, error) {
 	// utility variable to set node as nominee when there are no endpoints
 	var hasStarted = false
 	// If no endpoints are given or if the default endpoint is set, assume that there is no existing server
-	if len(srv.config.EndPoints()) == 0 || isDefaultEndPointURL(srv.config.EndPoints()) {
+	if len(srv.config.EndPoints()) == 0 {
 		// add some logging
 		srv.logger.Info("No configured endpoints, starting a server")
 		// start the server
@@ -165,10 +165,6 @@ func (es *Embed) startServer(initialCluster string) error {
 	es.embedConfig.Logger = "zap"
 	es.embedConfig.LogLevel = "info"
 
-	// set the cluster
-	es.embedConfig.InitialCluster = es.embedConfig.InitialClusterFromName(es.config.Name())
-	es.embedConfig.ClusterState = embed.ClusterStateFlagNew
-
 	// here we are joining an existing cluster
 	if initialCluster != "" {
 		// override the default behavior and set the cluster existing flag state
@@ -183,6 +179,10 @@ func (es *Embed) startServer(initialCluster string) error {
 		if err := os.RemoveAll(es.config.DataDir()); err != nil {
 			es.logger.Panic(errors.Wrap(err, "failed to remove the data dir"))
 		}
+	} else {
+		// set the cluster
+		es.embedConfig.InitialCluster = es.embedConfig.InitialClusterFromName(es.config.Name())
+		es.embedConfig.ClusterState = embed.ClusterStateFlagNew
 	}
 
 	// let us start the underlying server

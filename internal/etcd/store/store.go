@@ -93,7 +93,7 @@ func New(config *Config) (*Store, error) {
 		stopChan:        make(chan struct{}, 1),
 		stopOnce:        sync.Once{},
 		namespaceClient: nc,
-		logger:          config.Logger,
+		logger:          config.logger,
 		config:          config,
 		name:            embedConfig.Name(),
 	}, nil

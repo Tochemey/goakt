@@ -606,7 +606,7 @@ func (a *actorSystem) handleRemoteTell(ctx context.Context, to PID, message prot
 // communication
 func (a *actorSystem) enableClustering(ctx context.Context) {
 	// create an instance of the cluster service and start it
-	cluster := cluster.New(a.config.disco, a.logger)
+	cluster := cluster.New(a.config.clientsPort, a.config.peersPort, a.config.disco, a.logger)
 	// set the cluster field of the actorSystem
 	a.clusterService = cluster
 	// start the cluster service
