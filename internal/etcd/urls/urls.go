@@ -42,8 +42,8 @@ func GetNodeAdvertiseURLs() (advertisePeerURLs []string, advertiseClientURLs []s
 			repr = fmt.Sprintf("[%s]", ip.String())
 		}
 		// set the various URLs
-		clientURLs.Add(fmt.Sprintf("http://%s:2379", repr))
-		peerURLs.Add(fmt.Sprintf("http://%s:2380", repr))
+		clientURLs.Add(fmt.Sprintf("http://%s:32379", repr))
+		peerURLs.Add(fmt.Sprintf("http://%s:32380", repr))
 	}
 
 	return peerURLs.ToSlice(), clientURLs.ToSlice(), nil

@@ -3,8 +3,8 @@ package discovery
 import "fmt"
 
 const (
-	advertisePeerPortNumber   = 2380 // TODO: revisit this port
-	advertiseClientPortNumber = 2379 //  TODO: revisit this port
+	advertisePeerPortNumber   = 32380 // TODO: revisit this port
+	advertiseClientPortNumber = 32379 //  TODO: revisit this port
 )
 
 // Node represents a discovered node

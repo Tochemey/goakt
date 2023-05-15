@@ -50,7 +50,7 @@ type Config struct {
 // NewConfig creates an instance of Config
 func NewConfig(name string, opts ...Option) *Config {
 	// create the default dir
-	defaultDIR := "."
+	defaultDIR := "/var/goakt/"
 	// create a config instance
 	cfg := &Config{
 		name:          name,

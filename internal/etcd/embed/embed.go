@@ -27,7 +27,6 @@ type Embed struct {
 
 	config        *Config
 	isStopped     bool
-	hasStarted    bool
 	stopWatchChan chan struct{}
 	watchers      sync.WaitGroup
 
@@ -43,11 +42,14 @@ func NewEmbed(config *Config) (*Embed, error) {
 	srv.config = config
 	srv.stopWatchChan = make(chan struct{}, 1)
 	srv.logger = config.logger
+	srv.mu = sync.Mutex{}
 
+	// utility variable to set node as nominee when there are no endpoints
+	var hasStarted = false
 	// If no endpoints are given or if the default endpoint is set, assume that there is no existing server
 	if len(srv.config.EndPoints()) == 0 || isDefaultEndPointURL(srv.config.EndPoints()) {
 		// add some logging
-		srv.logger.Info("starting a server")
+		srv.logger.Info("No configured endpoints, starting a server")
 		// start the server
 		if err := srv.startServer(""); err != nil {
 			// log the error
@@ -58,7 +60,7 @@ func NewEmbed(config *Config) (*Embed, error) {
 		// update the endpoints to the advertised client URLs of the embedded server
 		srv.config.endPoints = srv.server.Config().AdvertiseClientUrls
 		// set the started
-		srv.hasStarted = true
+		hasStarted = true
 	}
 
 	// let us connect to cluster as client
@@ -73,7 +75,7 @@ func NewEmbed(config *Config) (*Embed, error) {
 		}
 	}
 
-	if srv.hasStarted {
+	if hasStarted {
 		// Add yourself to the nominee list, avoids nominating yourself again when you become the leader
 		if err := srv.addToNominees(srv.embedConfig.Name, srv.server.Config().AdvertisePeerUrls); err != nil {
 			return nil, err
@@ -136,14 +138,16 @@ func (es *Embed) Session() *concurrency.Session {
 
 // startServer starts the underlying etcd server
 func (es *Embed) startServer(initialCluster string) error {
-	// acquire the lock
-	es.mu.Lock()
-	// release the lock once done
-	defer es.mu.Unlock()
-
 	// check whether the server has started or not
-	if es.hasStarted {
+	if es.server != nil {
 		return nil
+	}
+
+	// add some debug logging
+	if initialCluster != "" {
+		es.logger.Debugf("starting etcd server with initial cluster=[%s]", initialCluster)
+	} else {
+		es.logger.Debug("starting etcd server without initial cluster")
 	}
 
 	// create the embed config
@@ -151,14 +155,19 @@ func (es *Embed) startServer(initialCluster string) error {
 	es.embedConfig.Name = es.config.Name()
 	es.embedConfig.Dir = path.Join(es.config.DataDir(), "etcd.data")
 
+	// set the various URLs
 	es.embedConfig.ListenClientUrls = es.config.ClientURLs()
 	es.embedConfig.AdvertiseClientUrls = es.config.ClientURLs()
 	es.embedConfig.ListenPeerUrls = es.config.PeerURLs()
 	es.embedConfig.AdvertisePeerUrls = es.config.PeerURLs()
 
+	// set the logger
 	es.embedConfig.Logger = "zap"
 	es.embedConfig.LogLevel = "info"
+
+	// set the cluster
 	es.embedConfig.InitialCluster = es.embedConfig.InitialClusterFromName(es.config.Name())
+	es.embedConfig.ClusterState = embed.ClusterStateFlagNew
 
 	// here we are joining an existing cluster
 	if initialCluster != "" {
@@ -209,7 +218,7 @@ func (es *Embed) startServer(initialCluster string) error {
 
 // stopServer stops the embedded etcd server.
 func (es *Embed) stopServer() error {
-	if !es.hasStarted || es.server == nil {
+	if es.server == nil {
 		return errors.New("etcd server not running")
 	}
 
@@ -217,7 +226,6 @@ func (es *Embed) stopServer() error {
 	es.server.Close()
 	// set to nil
 	es.server = nil
-	es.hasStarted = false
 	es.isStopped = true
 
 	return nil

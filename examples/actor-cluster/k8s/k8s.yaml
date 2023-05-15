@@ -63,9 +63,9 @@ spec:
               name: grpc
             - containerPort: 9000
               name: remoting
-            - containerPort: 2379
+            - containerPort: 32379
               name: client-port
-            - containerPort: 2380
+            - containerPort: 32380
               name: node-port
           env:
             - name: HOST_IP
@@ -111,11 +111,3 @@ spec:
        port: 50051
        targetPort: grpc
        name: grpc
-     - protocol: TCP
-       port: 2379
-       targetPort: client-port
-       name: client-port
-     - protocol: TCP
-       port: 2380
-       targetPort: node-port
-       name: node-port

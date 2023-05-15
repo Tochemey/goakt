@@ -239,6 +239,7 @@ func (es *Embed) nominate(host string, urls types.URLs) error {
 	}
 
 	// wait for the nomination to pick
+	// TODO add this to configuration
 	time.Sleep(2 * time.Second)
 
 	// get the client context
@@ -377,6 +378,7 @@ func (es *Embed) handleNomination() {
 
 	// prepare the nominees map
 	nominees, err := urlsMapFromGetResp(nomineesResp, nomineePrefix)
+	// handle the error
 	if err != nil {
 		es.logger.Error(errors.Wrap(err, "failed to prepare nominees map"))
 		return
@@ -385,15 +387,16 @@ func (es *Embed) handleNomination() {
 	// check if you are in the nominees, and start/stop you embedded server as
 	// required
 	if _, ok := nominees[es.config.Name()]; ok {
-		es.logger.Debug("nominated, starting server")
+		es.logger.Debugf("nominated, starting server with initial cluster=%s", nominees.String())
 		// Sleeping to allow leader to add me as a etcd cluster member
 		// TODO: figure a better to wait
 		time.Sleep(time.Second)
 		// start the server
 		if err := es.startServer(nominees.String()); err != nil {
 			es.logger.Error(errors.Wrap(err, "failed to start server after being nominated"))
-			return
 		}
+		// return here
+		return
 	}
 
 	es.logger.Debug("not nominated or nomination removed, stopping server")
