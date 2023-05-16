@@ -97,7 +97,7 @@ spec:
      app.kubernetes.io/component: accounts
      app.kubernetes.io/part-of: AccountsSystem
  spec:
-   type: ClusterIP
+   type: NodePort
    selector:
      app.kubernetes.io/name: accounts
      app.kubernetes.io/component: accounts
@@ -111,23 +111,3 @@ spec:
        port: 50051
        targetPort: grpc
        name: grpc
----
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: accounts-ingress
-  namespace: "default"
-  annotations:
-    nginx.ingress.kubernetes.io/ssl-redirect: "true"
-    nginx.ingress.kubernetes.io/backend-protocol: "GRPC"
-spec:
-  rules:
-    - http:
-        paths:
-          - pathType: Prefix
-            path: /
-            backend:
-              service:
-                name: accounts
-                port:
-                  number: 50051

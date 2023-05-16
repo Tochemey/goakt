@@ -118,7 +118,7 @@ func (es *Embed) Shutdown() error {
 	return nil
 }
 
-// Client returns the etcd client of ElasticEtcd
+// Client returns the etcd client of Embed
 func (es *Embed) Client() *clientv3.Client {
 	// acquire the lock
 	es.mu.Lock()
@@ -127,7 +127,7 @@ func (es *Embed) Client() *clientv3.Client {
 	return es.client
 }
 
-// Session returns the etcd session used by ElasticEtcd
+// Session returns the etcd session used by Embed
 func (es *Embed) Session() *concurrency.Session {
 	// acquire the lock
 	es.mu.Lock()
