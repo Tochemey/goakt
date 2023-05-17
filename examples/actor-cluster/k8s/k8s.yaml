@@ -97,7 +97,7 @@ spec:
      app.kubernetes.io/component: accounts
      app.kubernetes.io/part-of: AccountsSystem
  spec:
-   type: NodePort
+   type: ClusterIP
    selector:
      app.kubernetes.io/name: accounts
      app.kubernetes.io/component: accounts

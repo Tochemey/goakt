@@ -9,7 +9,7 @@ import (
 	"github.com/bufbuild/connect-go"
 	"github.com/pkg/errors"
 	"github.com/tochemey/goakt/actors"
-	"github.com/tochemey/goakt/examples/actor-cluster/k8s/entities"
+	kactors "github.com/tochemey/goakt/examples/actor-cluster/k8s/actors"
 	samplepb "github.com/tochemey/goakt/examples/protos/pb/v1"
 	"github.com/tochemey/goakt/examples/protos/pb/v1/samplepbconnect"
 	"github.com/tochemey/goakt/log"
@@ -42,7 +42,7 @@ func (s *AccountService) CreateAccount(ctx context.Context, c *connect.Request[s
 	// grab the account id
 	accountID := req.GetCreateAccount().GetAccountId()
 	// create the pid and send the command create account
-	accountEntity := entities.NewAccountEntity(req.GetCreateAccount().GetAccountId())
+	accountEntity := kactors.NewAccountEntity(req.GetCreateAccount().GetAccountId())
 	// create the given pid
 	pid := s.actorSystem.StartActor(ctx, accountID, accountEntity)
 	// send the create command to the pid
