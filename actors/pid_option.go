@@ -3,9 +3,8 @@ package actors
 import (
 	"time"
 
-	"github.com/tochemey/goakt/internal/telemetry"
-
 	"github.com/tochemey/goakt/log"
+	"github.com/tochemey/goakt/pkg/telemetry"
 )
 
 // pidOption represents the pid

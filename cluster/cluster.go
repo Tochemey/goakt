@@ -4,44 +4,52 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
-	"strings"
 	"time"
 
-	goset "github.com/deckarep/golang-set/v2"
 	"github.com/pkg/errors"
 	"github.com/tochemey/goakt/discovery"
-	"github.com/tochemey/goakt/internal/etcd/host"
-	"github.com/tochemey/goakt/internal/etcd/kvstore"
 	goaktpb "github.com/tochemey/goakt/internal/goakt/v1"
-	"github.com/tochemey/goakt/internal/telemetry"
 	"github.com/tochemey/goakt/log"
-	"golang.org/x/exp/slices"
+	"github.com/tochemey/goakt/pkg/etcd/kvstore"
+	"github.com/tochemey/goakt/pkg/telemetry"
 	"google.golang.org/protobuf/proto"
+)
+
+const (
+	clientPortName = "clients-port"
+	peersPortName  = "peers-port"
 )
 
 // Cluster represents the Cluster
 type Cluster struct {
-	logger      log.Logger
-	disco       discovery.Discovery
-	store       *kvstore.KVStore
-	name        string
-	clientsPort int32
-	peersPort   int32
+	logger  log.Logger
+	disco   discovery.Discovery
+	store   *kvstore.KVStore
+	eng     *engine
+	dataDir string
 }
 
 // New creates an instance of Cluster
-func New(clientsPort int32, peersPort int32, disco discovery.Discovery, logger log.Logger) *Cluster {
-	return &Cluster{
-		logger:      logger,
-		disco:       disco,
-		clientsPort: clientsPort,
-		peersPort:   peersPort,
+func New(disco discovery.Discovery, logger log.Logger, opts ...Option) *Cluster {
+	cl := &Cluster{
+		logger:  logger,
+		disco:   disco,
+		dataDir: "/var/goakt/",
 	}
+	// apply the various options
+	for _, opt := range opts {
+		opt.Apply(cl)
+	}
+
+	return cl
 }
 
 // Start starts the Cluster. When the join address is not set a brand-new cluster is started.
 // However, when the join address is set the given Cluster joins an existing cluster at the joinAddr.
 func (n *Cluster) Start(ctx context.Context) error {
+	// add some logging information
+	n.logger.Info("Starting GoAkt cluster....")
+
 	var (
 		// create a variable to hold the discovered nodes
 		discoNodes []*discovery.Node
@@ -51,12 +59,7 @@ func (n *Cluster) Start(ctx context.Context) error {
 		count = 3 // TODO revisit this after QA
 		// variable holding
 		err error
-		// variable holding the store config
-		config *kvstore.Config
 	)
-
-	// let us grab the advertised URLs for the running node
-	advertisePeerURLs, _, err := host.BuildAdvertiseURLs(n.peersPort, n.clientsPort)
 
 	// handle the error
 	if err != nil {
@@ -84,12 +87,14 @@ func (n *Cluster) Start(ctx context.Context) error {
 
 		// remove duplicate
 		for _, discoNode := range nodes {
+			// let us get the node URL
+			peersURL, _ := nodeURLs(discoNode)
 			// check whether the Cluster has been already discovered and ignore it
-			if _, ok := seen[discoNode.Host]; ok {
+			if _, ok := seen[peersURL]; ok {
 				continue
 			}
 			// mark the Cluster as seen
-			seen[discoNode.Host] = true
+			seen[peersURL] = true
 			// add it to the list of nodes
 			discoNodes = append(discoNodes, discoNode)
 		}
@@ -101,69 +106,62 @@ func (n *Cluster) Start(ctx context.Context) error {
 	// add some logging
 	n.logger.Debugf("%s has discovered %d nodes", n.disco.ID(), len(discoNodes))
 
-	// utility function to find the node URL
-	nodeURL := func(node *discovery.Node) string {
-		var url string
-		for _, portNumber := range node.Ports {
-			if portNumber == n.peersPort {
-				url = fmt.Sprintf("http://%s:%d", node.Host, portNumber)
-				break
-			}
+	// variables to hold endpoints, clientURLs and peerURLs
+	endpoints := make([]string, len(discoNodes))
+	urls := make([]listenURLs, len(discoNodes))
+	kvStoreEndpoints := make([]string, len(discoNodes))
+
+	// iterate the list of discovered nodes to build the endpoints and the various URLs
+	for i, discoNode := range discoNodes {
+		// build the peer URL
+		peersURL, clientsURL := nodeURLs(discoNode)
+		// build the endpoints
+		endpoints[i] = fmt.Sprintf("%s=%s", discoNode.Name, peersURL)
+		// set the advertised URLs
+		urls[i] = listenURLs{
+			nodeName:   discoNode.Name,
+			clientURLs: []string{clientsURL},
+			peerURLs:   []string{peersURL},
 		}
-		return url
+		// set the KV store
+		kvStoreEndpoints[i] = clientsURL
 	}
 
-	// create an instance of the distributed store
-	if len(discoNodes) == 1 {
-		// set the node name
-		n.name = discoNodes[0].Name
-		// set the config to use the predefined urls and endpoints
-		config = kvstore.NewDefaultConfig(n.name, n.logger)
+	// create an instance of the cluster engine
+	n.eng = newEngine(n.dataDir, n.logger, endpoints, urls)
+	// start the engine
+	if err := n.eng.start(ctx); err != nil {
+		return err
 	}
 
-	// we have some nodes discovered maybe one of them have started a cluster
-	if len(discoNodes) > 1 {
-		// create a variable that hold all the existing endpoints
-		endpoints := goset.NewSet[string]()
-		currentNodeNameFound := false
-		for _, node := range discoNodes {
-			url := nodeURL(node)
-			// exclude the current node URL from the list of endpoint
-			if !slices.Contains(advertisePeerURLs, url) {
-				endpoints.Add(url)
-			} else {
-				// let us find the node name
-				if currentNodeNameFound {
-					continue
-				}
-
-				// set the node name
-				n.name = node.Name
-				currentNodeNameFound = true
-			}
-		}
-
-		// add some debug logging
-		n.logger.Debugf("endpoints=[%s]", strings.Join(endpoints.ToSlice(), ","))
-
-		// let us override the already store config
-		config = kvstore.NewConfig(n.name, n.logger, endpoints.ToSlice(), n.clientsPort, n.peersPort)
-	}
-
+	// let us build the KV store connection endpoints
 	// create the instance of the distributed store and set it
-	n.store, err = kvstore.New(config)
+	n.store, err = kvstore.New(kvstore.NewConfig(n.logger, kvStoreEndpoints))
 	// handle the error
 	if err != nil {
 		// log the error and return
 		n.logger.Error(errors.Wrap(err, "failed to start the Cluster"))
 	}
 
+	// add some logging information
+	n.logger.Info("GoAkt cluster successfully started.🎉")
 	return nil
 }
 
 // Stop stops the Cluster gracefully
 func (n *Cluster) Stop() error {
-	return n.store.Shutdown()
+	// add some logging information
+	n.logger.Info("Stopping GoAkt cluster....")
+	// let us stop the store
+	if err := n.store.Shutdown(); err != nil {
+		return errors.Wrap(err, "failed to Stop  GoAkt cluster...😣")
+	}
+	// stop the engine
+	if err := n.eng.stop(); err != nil {
+		return errors.Wrap(err, "failed to Stop  GoAkt cluster...😣")
+	}
+	n.logger.Info("GoAkt cluster successfully stopped.🎉")
+	return nil
 }
 
 // PutActor replicates onto the cluster the metadata of an actor

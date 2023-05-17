@@ -13,11 +13,11 @@ import (
 	"github.com/pkg/errors"
 	goaktpb "github.com/tochemey/goakt/internal/goakt/v1"
 	"github.com/tochemey/goakt/internal/goakt/v1/goaktv1connect"
-	"github.com/tochemey/goakt/internal/http2"
-	"github.com/tochemey/goakt/internal/telemetry"
-	"github.com/tochemey/goakt/internal/tools"
 	"github.com/tochemey/goakt/log"
 	pb "github.com/tochemey/goakt/messages/v1"
+	"github.com/tochemey/goakt/pkg/http2"
+	"github.com/tochemey/goakt/pkg/slices"
+	"github.com/tochemey/goakt/pkg/telemetry"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 	"go.uber.org/atomic"
@@ -27,7 +27,7 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 )
 
-type watchMan struct {
+type WatchMan struct {
 	Parent  PID        // the Parent of the actor watching
 	ErrChan chan error // the channel where to pass error message
 	Done    chan Unit
@@ -91,7 +91,7 @@ type PID interface {
 	// resetBehavior is a utility function resets the actor behavior
 	resetBehavior()
 	// watchers returns the list of watchMen
-	watchers() *tools.ConcurrentSlice[*watchMan]
+	watchers() *slices.ConcurrentSlice[*WatchMan]
 }
 
 // pid specifies an actor unique process
@@ -133,7 +133,7 @@ type pid struct {
 	haltPassivationLnr chan Unit
 
 	// set of watchMen watching the given actor
-	watchMen *tools.ConcurrentSlice[*watchMan]
+	watchMen *slices.ConcurrentSlice[*WatchMan]
 
 	// hold the list of the children
 	children *pidMap
@@ -193,7 +193,7 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 		mu:                     sync.RWMutex{},
 		children:               newPIDMap(10),
 		supervisorStrategy:     StopDirective,
-		watchMen:               tools.NewConcurrentSlice[*watchMan](),
+		watchMen:               slices.NewConcurrentSlice[*WatchMan](),
 		telemetry:              telemetry.New(),
 		actorPath:              actorPath,
 	}
@@ -636,7 +636,7 @@ func (p *pid) Shutdown(ctx context.Context) error {
 // Watch a pid for errors, and send on the returned channel if an error occurred
 func (p *pid) Watch(pid PID) {
 	// create a watcher
-	w := &watchMan{
+	w := &WatchMan{
 		Parent:  p,
 		ErrChan: make(chan error, 1),
 		Done:    make(chan Unit, 1),
@@ -665,7 +665,7 @@ func (p *pid) UnWatch(pid PID) {
 }
 
 // Watchers return the list of watchMen
-func (p *pid) watchers() *tools.ConcurrentSlice[*watchMan] {
+func (p *pid) watchers() *slices.ConcurrentSlice[*WatchMan] {
 	return p.watchMen
 }
 
@@ -920,7 +920,7 @@ func (p *pid) handleReceived(received ReceiveContext) {
 }
 
 // supervise watches for child actor's failure and act based upon the supervisory strategy
-func (p *pid) supervise(cid PID, watcher *watchMan) {
+func (p *pid) supervise(cid PID, watcher *WatchMan) {
 	for {
 		select {
 		case <-watcher.Done:

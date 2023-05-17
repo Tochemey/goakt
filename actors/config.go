@@ -8,9 +8,8 @@ import (
 	"time"
 
 	"github.com/tochemey/goakt/discovery"
-	"github.com/tochemey/goakt/internal/etcd/host"
-	"github.com/tochemey/goakt/internal/telemetry"
 	"github.com/tochemey/goakt/log"
+	"github.com/tochemey/goakt/pkg/telemetry"
 )
 
 var (
@@ -47,9 +46,7 @@ type Config struct {
 	// convenient field to check cluster setup
 	clusterEnabled bool
 	// cluster discovery method
-	disco       discovery.Discovery
-	clientsPort int32
-	peersPort   int32
+	disco discovery.Discovery
 }
 
 // NewConfig creates an instance of Config
@@ -231,21 +228,9 @@ func WithRemoting() Option {
 }
 
 // WithClustering enables clustering on the actor system
-func WithClustering(disco discovery.Discovery, clientsPort, peersPort int32) Option {
+func WithClustering(disco discovery.Discovery) Option {
 	return OptionFunc(func(config *Config) {
 		config.clusterEnabled = true
 		config.disco = disco
-		config.clientsPort = clientsPort
-		config.peersPort = peersPort
-	})
-}
-
-// WithDefaultClustering enables clustering on the actor system
-func WithDefaultClustering(disco discovery.Discovery) Option {
-	return OptionFunc(func(config *Config) {
-		config.clusterEnabled = true
-		config.disco = disco
-		config.clientsPort = host.DefaultClientsPort
-		config.peersPort = host.DefaultPeersPort
 	})
 }

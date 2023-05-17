@@ -16,10 +16,10 @@ import (
 	"github.com/tochemey/goakt/cluster"
 	goaktpb "github.com/tochemey/goakt/internal/goakt/v1"
 	"github.com/tochemey/goakt/internal/goakt/v1/goaktv1connect"
-	"github.com/tochemey/goakt/internal/resync"
-	"github.com/tochemey/goakt/internal/telemetry"
 	"github.com/tochemey/goakt/log"
 	pb "github.com/tochemey/goakt/messages/v1"
+	"github.com/tochemey/goakt/pkg/resync"
+	"github.com/tochemey/goakt/pkg/telemetry"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
@@ -606,7 +606,7 @@ func (a *actorSystem) handleRemoteTell(ctx context.Context, to PID, message prot
 // communication
 func (a *actorSystem) enableClustering(ctx context.Context) {
 	// create an instance of the cluster service and start it
-	cluster := cluster.New(a.config.clientsPort, a.config.peersPort, a.config.disco, a.logger)
+	cluster := cluster.New(a.config.disco, a.logger)
 	// set the cluster field of the actorSystem
 	a.clusterService = cluster
 	// start the cluster service

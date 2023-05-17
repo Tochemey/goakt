@@ -55,7 +55,7 @@ var runCmd = &cobra.Command{
 			goakt.WithLogger(logger),
 			goakt.WithActorInitMaxRetries(3),
 			goakt.WithRemoting(),
-			goakt.WithDefaultClustering(disco))
+			goakt.WithClustering(disco))
 		// handle the error
 		if err != nil {
 			logger.Panic(err)

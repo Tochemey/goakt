@@ -3,7 +3,6 @@ package embed
 import (
 	"time"
 
-	"github.com/coreos/etcd/pkg/types"
 	"github.com/tochemey/goakt/log"
 )
 
@@ -22,13 +21,6 @@ func (f OptionFunc) Apply(c *Config) {
 	f(c)
 }
 
-// WithSize sets the etcd server size
-func WithSize(size int) Option {
-	return OptionFunc(func(config *Config) {
-		config.idealClusterSize = size
-	})
-}
-
 // WithLoggingEnable enables logging
 func WithLoggingEnable() Option {
 	return OptionFunc(func(config *Config) {
@@ -36,10 +28,10 @@ func WithLoggingEnable() Option {
 	})
 }
 
-// WithEndPoints sets the endpoints
-func WithEndPoints(endpoints types.URLs) Option {
+// WithInitialCluster sets the initial cluster
+func WithInitialCluster(initialCluster string) Option {
 	return OptionFunc(func(config *Config) {
-		config.endPoints = endpoints
+		config.initialCluster = initialCluster
 	})
 }
 
