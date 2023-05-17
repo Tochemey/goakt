@@ -56,9 +56,9 @@ mock:
     FROM +code
 
     # generate the mocks
-    RUN --ssh mockery  --all --dir pkg --recursive --keeptree --exported=true --with-expecter=true --output ./mocks/pkg --case snake
-    RUN --ssh mockery  --all --dir internal --recursive --keeptree --exported=true --with-expecter=true --output ./mocks/internal --case snake
-    RUN --ssh mockery  --all --dir discovery --recursive --keeptree --exported=true --with-expecter=true --output ./mocks/discovery --case snake
+    RUN mockery  --all --dir pkg --recursive --keeptree --exported=true --with-expecter=true --output ./mocks/pkg --case snake
+    RUN mockery  --all --dir internal --recursive --keeptree --exported=true --with-expecter=true --output ./mocks/internal --case snake
+    RUN mockery  --all --dir discovery --recursive --keeptree --exported=true --with-expecter=true --output ./mocks/discovery --case snake
 
     SAVE ARTIFACT ./mocks mocks AS LOCAL mocks
 
