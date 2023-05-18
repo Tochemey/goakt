@@ -29,7 +29,7 @@ metadata:
     app.kubernetes.io/component: accounts
     app.kubernetes.io/part-of: AccountsSystem
 spec:
-  replicas: 1
+  replicas: 3
   strategy:
     type: RollingUpdate
     rollingUpdate:
@@ -46,13 +46,6 @@ spec:
         app.kubernetes.io/component: accounts
         app.kubernetes.io/part-of: AccountsSystem
     spec:
-#      affinity:
-#        # ⬇⬇⬇ This ensures pods will land on separate hosts
-#        podAntiAffinity:
-#          requiredDuringSchedulingIgnoredDuringExecution:
-#            - labelSelector:
-#                matchExpressions: [{ key: app, operator: In, values: [accounts] }]
-#              topologyKey: "kubernetes.io/hostname"
       containers:
         - name: accounts
           image: "accounts:dev"

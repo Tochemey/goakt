@@ -62,6 +62,8 @@ type ActorSystem interface {
 	GetLocalActor(ctx context.Context, actorName string) (PID, error)
 	// GetRemoteActor returns the address of a remote actor when cluster is enabled
 	GetRemoteActor(ctx context.Context, actorName string) (addr *pb.Address, err error)
+	// InCluster states whether the actor system is running within a cluster of nodes
+	InCluster() bool
 	// handleRemoteAsk handles a synchronous message to another actor and expect a response.
 	// This block until a response is received or timed out.
 	handleRemoteAsk(ctx context.Context, to PID, message proto.Message) (response proto.Message, err error)
@@ -138,6 +140,11 @@ func NewActorSystem(config *Config) (ActorSystem, error) {
 	})
 
 	return system, nil
+}
+
+// InCluster states whether the actor system is running within a cluster of nodes
+func (a *actorSystem) InCluster() bool {
+	return a.config.clusterEnabled && a.clusterService != nil
 }
 
 // NumActors returns the total number of active actors in the system

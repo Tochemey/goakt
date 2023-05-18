@@ -9,6 +9,7 @@ import (
 	"github.com/coreos/etcd/pkg/types"
 	"github.com/pkg/errors"
 	"github.com/tochemey/goakt/log"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/server/v3/embed"
 )
 
@@ -16,11 +17,16 @@ import (
 type Embed struct {
 	// define the underlying etcd server
 	server *embed.Etcd
+	// define the etcd client
+	client *clientv3.Client
 
 	config    *Config
 	isStopped bool
+	isReady   bool
+	isLeader  bool
 
-	mu     sync.Mutex
+	mu sync.Mutex
+
 	logger log.Logger
 }
 
@@ -30,6 +36,8 @@ func NewEmbed(config *Config) *Embed {
 	return &Embed{
 		config:    config,
 		isStopped: false,
+		isReady:   false,
+		isLeader:  false,
 		mu:        sync.Mutex{},
 		logger:    config.Logger(),
 	}
@@ -70,6 +78,9 @@ func (es *Embed) Start() error {
 	embedConfig.LogLevel = es.config.logger.LogLevel().String()
 	embedConfig.InitialCluster = embedConfig.InitialClusterFromName(es.config.Name())
 
+	// generate a unique cluster token
+	embedConfig.InitialClusterToken = "goakt-cluster"
+
 	// override the initial cluster and the cluster state when
 	if es.config.InitialCluster() != "" {
 		embedConfig.InitialCluster = es.config.InitialCluster()
@@ -103,6 +114,7 @@ func (es *Embed) Start() error {
 		es.logger.Info("embed etcd server started..:)")
 		// set the server field
 		es.server = etcd
+		es.isReady = true
 		// return
 		return nil
 	case <-time.After(es.config.StartTimeout()):
@@ -133,6 +145,11 @@ func (es *Embed) Stop() error {
 	// set to nil
 	es.server = nil
 	es.isStopped = true
+	es.isReady = false
+	// let us remove the data dir
+	if err := os.RemoveAll(es.config.DataDir()); err != nil {
+		es.logger.Panic(errors.Wrap(err, "failed to remove the data dir"))
+	}
 	return nil
 }
 
@@ -143,4 +160,14 @@ func (es *Embed) ClientURLs() types.URLs {
 	// release the lock once done
 	defer es.mu.Unlock()
 	return es.config.ClientURLs()
+}
+
+// IsLeader states whether the given node is a leader or not
+func (es *Embed) IsLeader() bool {
+	return es.server.Server.Leader().String() == es.server.Server.ID().String() && es.isLeader
+}
+
+// LeaderID returns the leader id
+func (es *Embed) LeaderID() string {
+	return es.server.Server.Leader().String()
 }

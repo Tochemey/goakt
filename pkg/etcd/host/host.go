@@ -8,8 +8,8 @@ import (
 	"github.com/pkg/errors"
 )
 
-// HostAddresses returns the running node etcd addresses
-func HostAddresses() ([]string, error) {
+// Addresses returns the running node etcd addresses
+func Addresses() ([]string, error) {
 	// grab all the IP interfaces on the host machine
 	addresses, err := net.InterfaceAddrs()
 	// handle the error

@@ -113,7 +113,7 @@ func (n *Cluster) Start(ctx context.Context) error {
 	n.logger.Debugf("%s has discovered %d nodes", n.disco.ID(), len(discoNodes))
 
 	// get the host addresses
-	addresses, _ := host.HostAddresses()
+	addresses, _ := host.Addresses()
 
 	// let us get the host from the discovered nodes
 	var hostPeerURLs []string

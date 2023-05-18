@@ -74,24 +74,27 @@ func (s *AccountService) CreditAccount(ctx context.Context, c *connect.Request[s
 	req := c.Msg
 	// grab the account id
 	accountID := req.GetCreditAccount().GetAccountId()
-	// create a variable to continue the search
-	// TODO provide to the actor system a Lookup method that can find an actor both locally or in the cluster when cluster is enabled
-	islocal := true
 
-	// locate the given actor
-	pid, err := s.actorSystem.GetLocalActor(ctx, accountID)
-	// handle the error
-	if err != nil {
-		// check whether it is not found error
-		if errors.Is(err, actors.ErrActorNotFound) {
-			islocal = false
-		} else {
-			return nil, connect.NewError(connect.CodeInternal, err)
+	// check whether the actor system is running in a cluster
+	if !s.actorSystem.InCluster() {
+		// locate the given actor
+		pid, err := s.actorSystem.GetLocalActor(ctx, accountID)
+		// handle the error
+		if err != nil {
+			// check whether it is not found error
+			if !errors.Is(err, actors.ErrActorNotFound) {
+				return nil, connect.NewError(connect.CodeInternal, err)
+			}
+
+			// return not found
+			return nil, connect.NewError(connect.CodeNotFound, err)
 		}
-	}
 
-	// in case we find the actor locally we proceed
-	if islocal {
+		// defensive programming. making sure pid is defined
+		if pid == nil {
+			return nil, connect.NewError(connect.CodeNotFound, err)
+		}
+
 		// send the create command to the pid
 		reply, err := actors.Ask(ctx, pid, &samplepb.CreditAccount{
 			AccountId: accountID,
@@ -115,9 +118,7 @@ func (s *AccountService) CreditAccount(ctx context.Context, c *connect.Request[s
 		}
 	}
 
-	// here we could not find the actor locally then we need to lookup in the cluster
-	// NOTE: yeah we could have looked it up directly in the cluster. Just that this will be a bit expensive if the actor can be locally found
-	// TODO: check the traces and see the performance
+	// here the actor system is running in a cluster
 	addr, err := s.actorSystem.GetRemoteActor(ctx, accountID)
 	// handle the error
 	if err != nil {
