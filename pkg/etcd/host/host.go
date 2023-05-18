@@ -8,24 +8,18 @@ import (
 	"github.com/pkg/errors"
 )
 
-const (
-	DefaultPeersPort   = 32380
-	DefaultClientsPort = 32379
-)
-
-// BuildAdvertiseURLs returns the running node etcd advertise URLs
-func BuildAdvertiseURLs(peersPort, clientsPort int32) (advertisePeerURLs []string, advertiseClientURLs []string, err error) {
+// HostAddresses returns the running node etcd addresses
+func HostAddresses() ([]string, error) {
 	// grab all the IP interfaces on the host machine
 	addresses, err := net.InterfaceAddrs()
 	// handle the error
 	if err != nil {
 		// panic because we need to set the default URLs
-		return nil, nil, errors.Wrap(err, "failed to get the assigned ip addresses of the host")
+		return nil, errors.Wrap(err, "failed to get the assigned ip addresses of the host")
 	}
 
 	var (
-		clientURLs = goset.NewSet[string]()
-		peerURLs   = goset.NewSet[string]()
+		addrs = goset.NewSet[string]()
 	)
 
 	// iterate the assigned addresses
@@ -47,9 +41,8 @@ func BuildAdvertiseURLs(peersPort, clientsPort int32) (advertisePeerURLs []strin
 			repr = fmt.Sprintf("[%s]", ip.String())
 		}
 		// set the various URLs
-		clientURLs.Add(fmt.Sprintf("http://%s:%d", repr, clientsPort))
-		peerURLs.Add(fmt.Sprintf("http://%s:%d", repr, peersPort))
+		addrs.Add(repr)
 	}
 
-	return peerURLs.ToSlice(), clientURLs.ToSlice(), nil
+	return addrs.ToSlice(), nil
 }

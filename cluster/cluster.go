@@ -4,14 +4,20 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"strings"
 	"time"
+
+	"github.com/coreos/etcd/pkg/types"
+	"github.com/tochemey/goakt/pkg/etcd/embed"
 
 	"github.com/pkg/errors"
 	"github.com/tochemey/goakt/discovery"
 	goaktpb "github.com/tochemey/goakt/internal/goakt/v1"
 	"github.com/tochemey/goakt/log"
+	"github.com/tochemey/goakt/pkg/etcd/host"
 	"github.com/tochemey/goakt/pkg/etcd/kvstore"
 	"github.com/tochemey/goakt/pkg/telemetry"
+	"golang.org/x/exp/slices"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -25,7 +31,7 @@ type Cluster struct {
 	logger  log.Logger
 	disco   discovery.Discovery
 	store   *kvstore.KVStore
-	eng     *engine
+	eng     *embed.Embed
 	dataDir string
 }
 
@@ -106,31 +112,64 @@ func (n *Cluster) Start(ctx context.Context) error {
 	// add some logging
 	n.logger.Debugf("%s has discovered %d nodes", n.disco.ID(), len(discoNodes))
 
+	// get the host addresses
+	addresses, _ := host.HostAddresses()
+
+	// let us get the host from the discovered nodes
+	var hostPeerURLs []string
+	var hostClientURLs []string
+	var hostNodeName string
+	// iterate the discovered nodes to find the host node
+	for _, discoNode := range discoNodes {
+		// here the host node is found
+		if slices.Contains(addresses, discoNode.Host) {
+			// get the peer port
+			peersPort := discoNode.Ports[peersPortName]
+			// get the clients port
+			clientsPort := discoNode.Ports[clientPortName]
+			// let us build the host peer URLs and client URLs
+			for _, addr := range addresses {
+				hostPeerURLs = append(hostPeerURLs, fmt.Sprintf("http://%s:%d", addr, peersPort))
+				hostClientURLs = append(hostClientURLs, fmt.Sprintf("http://%s:%d", addr, clientsPort))
+			}
+			// set the host node name
+			hostNodeName = discoNode.Name
+			break
+		}
+	}
+
 	// variables to hold endpoints, clientURLs and peerURLs
 	endpoints := make([]string, len(discoNodes))
-	urls := make([]listenURLs, len(discoNodes))
 	kvStoreEndpoints := make([]string, len(discoNodes))
-
 	// iterate the list of discovered nodes to build the endpoints and the various URLs
 	for i, discoNode := range discoNodes {
 		// build the peer URL
 		peersURL, clientsURL := nodeURLs(discoNode)
 		// build the endpoints
 		endpoints[i] = fmt.Sprintf("%s=%s", discoNode.Name, peersURL)
-		// set the advertised URLs
-		urls[i] = listenURLs{
-			nodeName:   discoNode.Name,
-			clientURLs: []string{clientsURL},
-			peerURLs:   []string{peersURL},
-		}
 		// set the KV store
 		kvStoreEndpoints[i] = clientsURL
 	}
 
-	// create an instance of the cluster engine
-	n.eng = newEngine(n.dataDir, n.logger, endpoints, urls)
+	// make the urls
+	clientsURLs := types.MustNewURLs(hostClientURLs)
+	peerURLs := types.MustNewURLs(hostPeerURLs)
+	// let us build the initial cluster
+	initialCluster := strings.Join(endpoints, ",")
+	// create the embed config
+	config := embed.NewConfig(
+		hostNodeName,
+		clientsURLs,
+		peerURLs,
+		embed.WithLogger(n.logger),
+		embed.WithInitialCluster(initialCluster),
+		embed.WithDataDir(n.dataDir),
+	)
+	// create an instance of embed
+	n.eng = embed.NewEmbed(config)
+
 	// start the engine
-	if err := n.eng.start(ctx); err != nil {
+	if err := n.eng.Start(); err != nil {
 		return err
 	}
 
@@ -157,7 +196,7 @@ func (n *Cluster) Stop() error {
 		return errors.Wrap(err, "failed to Stop  GoAkt cluster...😣")
 	}
 	// stop the engine
-	if err := n.eng.stop(); err != nil {
+	if err := n.eng.Stop(); err != nil {
 		return errors.Wrap(err, "failed to Stop  GoAkt cluster...😣")
 	}
 	n.logger.Info("GoAkt cluster successfully stopped.🎉")

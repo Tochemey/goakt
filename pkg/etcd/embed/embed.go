@@ -1,6 +1,7 @@
 package embed
 
 import (
+	"os"
 	"path"
 	"sync"
 	"time"
@@ -72,6 +73,15 @@ func (es *Embed) Start() error {
 	// override the initial cluster and the cluster state when
 	if es.config.InitialCluster() != "" {
 		embedConfig.InitialCluster = es.config.InitialCluster()
+		// also let us make sure to clear the data dir
+		// If starting with non-empty initial cluster, delete the datadir if it
+		// exists. The etcd server will be brought up as a new server and old data
+		// being present will prevent it.
+		// Starting with an empty initial cluster implies that we are in a single
+		// node cluster, so we need to keep the etcd data.
+		if err := os.RemoveAll(es.config.DataDir()); err != nil {
+			es.logger.Panic(errors.Wrap(err, "failed to remove the data dir"))
+		}
 	}
 
 	es.logger.Debugf("Embed etcd server with initial cluster=[%s]", embedConfig.InitialCluster)
