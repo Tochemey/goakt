@@ -6,7 +6,6 @@ import (
 	"encoding/gob"
 	"fmt"
 	"net/http"
-	"os"
 	"reflect"
 	"time"
 
@@ -17,10 +16,10 @@ import (
 	"github.com/tochemey/goakt/cluster"
 	goaktpb "github.com/tochemey/goakt/internal/goakt/v1"
 	"github.com/tochemey/goakt/internal/goakt/v1/goaktv1connect"
-	"github.com/tochemey/goakt/internal/resync"
-	"github.com/tochemey/goakt/internal/telemetry"
 	"github.com/tochemey/goakt/log"
 	pb "github.com/tochemey/goakt/messages/v1"
+	"github.com/tochemey/goakt/pkg/resync"
+	"github.com/tochemey/goakt/pkg/telemetry"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
@@ -63,6 +62,8 @@ type ActorSystem interface {
 	GetLocalActor(ctx context.Context, actorName string) (PID, error)
 	// GetRemoteActor returns the address of a remote actor when cluster is enabled
 	GetRemoteActor(ctx context.Context, actorName string) (addr *pb.Address, err error)
+	// InCluster states whether the actor system is running within a cluster of nodes
+	InCluster() bool
 	// handleRemoteAsk handles a synchronous message to another actor and expect a response.
 	// This block until a response is received or timed out.
 	handleRemoteAsk(ctx context.Context, to PID, message proto.Message) (response proto.Message, err error)
@@ -139,6 +140,11 @@ func NewActorSystem(config *Config) (ActorSystem, error) {
 	})
 
 	return system, nil
+}
+
+// InCluster states whether the actor system is running within a cluster of nodes
+func (a *actorSystem) InCluster() bool {
+	return a.config.clusterEnabled && a.clusterService != nil
 }
 
 // NumActors returns the total number of active actors in the system
@@ -318,7 +324,7 @@ func (a *actorSystem) GetRemoteActor(ctx context.Context, actorName string) (add
 	}
 
 	// let us locate the actor in the cluster
-	wireActor, err := a.clusterService.Get(ctx, actorName)
+	wireActor, err := a.clusterService.GetActor(ctx, actorName)
 	// handle the eventual error
 	if err != nil {
 		// grab the error code
@@ -360,7 +366,7 @@ func (a *actorSystem) Start(ctx context.Context) error {
 	if err := a.registerMetrics(); err != nil {
 		a.logger.Error(errors.Wrapf(err, "failed to register actorSystem=%s metrics", a.name))
 	}
-	a.logger.Infof("%s ActorSystem started on Node=%s..:)", a.name, a.nodeAddr)
+	a.logger.Infof("%s ActorSystem started on Cluster=%s..:)", a.name, a.nodeAddr)
 	return nil
 }
 
@@ -369,7 +375,7 @@ func (a *actorSystem) Stop(ctx context.Context) error {
 	// add a span context
 	ctx, span := telemetry.SpanContext(ctx, "Stop")
 	defer span.End()
-	a.logger.Infof("%s ActorSystem is shutting down on Node=%s..:)", a.name, a.nodeAddr)
+	a.logger.Infof("%s ActorSystem is shutting down on Cluster=%s..:)", a.name, a.nodeAddr)
 
 	// stop the remoting server
 	if a.config.remotingEnabled {
@@ -382,7 +388,7 @@ func (a *actorSystem) Stop(ctx context.Context) error {
 	// stop the cluster service
 	if a.config.clusterEnabled {
 		// stop the cluster service
-		if err := a.clusterService.Stop(ctx); err != nil {
+		if err := a.clusterService.Stop(); err != nil {
 			return err
 		}
 		// stop broadcasting cluster messages
@@ -607,7 +613,7 @@ func (a *actorSystem) handleRemoteTell(ctx context.Context, to PID, message prot
 // communication
 func (a *actorSystem) enableClustering(ctx context.Context) {
 	// create an instance of the cluster service and start it
-	cluster := cluster.New(a.config.clusterPort, log.New(log.DebugLevel, os.Stdout), a.config.disco) // TODO fix the log
+	cluster := cluster.New(a.config.disco, a.logger)
 	// set the cluster field of the actorSystem
 	a.clusterService = cluster
 	// start the cluster service
@@ -709,7 +715,7 @@ func (a *actorSystem) broadcast(ctx context.Context) {
 		// making sure the cluster is still enabled
 		if a.clusterService != nil {
 			// broadcast the message on the cluster
-			if err := a.clusterService.Replicate(ctx, wireActor); err != nil {
+			if err := a.clusterService.PutActor(ctx, wireActor); err != nil {
 				a.logger.Error(err.Error())
 				// TODO: stop or continue
 				return

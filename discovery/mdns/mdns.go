@@ -86,9 +86,9 @@ func (d *Discovery) Nodes(ctx context.Context) ([]*discovery.Node, error) {
 	go func(results <-chan *zeroconf.ServiceEntry) {
 		for entry := range results {
 			nodes = append(nodes, &discovery.Node{
-				Name:     entry.ServiceInstanceName(),
-				Host:     entry.AddrIPv4[0].String(),
-				JoinPort: int32(entry.Port),
+				Name: entry.ServiceInstanceName(),
+				Host: entry.AddrIPv4[0].String(),
+				//JoinPort: int32(entry.Port),
 			})
 		}
 	}(entries)
@@ -155,9 +155,9 @@ func (d *Discovery) watchPods(ctx context.Context) {
 			case entry := <-entries:
 				// create a discovery node
 				node := &discovery.Node{
-					Name:     entry.ServiceInstanceName(),
-					Host:     entry.AddrIPv4[0].String(),
-					JoinPort: int32(entry.Port),
+					Name: entry.ServiceInstanceName(),
+					Host: entry.AddrIPv4[0].String(),
+					//JoinPort: int32(entry.Port),
 				}
 				event := &discovery.NodeAdded{Node: node}
 				// add to the channel

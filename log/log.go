@@ -203,3 +203,23 @@ func (l *Log) Infof(format string, v ...any) {
 	defer l.Logger.Sync()
 	l.Logger.Info(fmt.Sprintf(format, v...))
 }
+
+// LogLevel returns the log level that is used
+func (l *Log) LogLevel() Level {
+	switch l.Level() {
+	case zapcore.FatalLevel:
+		return FatalLevel
+	case zapcore.PanicLevel:
+		return PanicLevel
+	case zapcore.ErrorLevel:
+		return ErrorLevel
+	case zapcore.InfoLevel:
+		return InfoLevel
+	case zapcore.DebugLevel:
+		return DebugLevel
+	case zapcore.WarnLevel:
+		return WarningLevel
+	default:
+		return InvalidLevel
+	}
+}

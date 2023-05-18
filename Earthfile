@@ -45,8 +45,23 @@ code:
 vendor:
     FROM +code
 
+    COPY +mock/mocks ./mocks
+
     RUN go mod vendor
     SAVE ARTIFACT /app /files
+
+
+mock:
+    # copy in the necessary files that need mock generated code
+    FROM +code
+
+    # generate the mocks
+    RUN mockery  --all --dir pkg --recursive --keeptree --exported=true --with-expecter=true --output ./mocks/pkg --case snake
+    RUN mockery  --all --dir internal --recursive --keeptree --exported=true --with-expecter=true --output ./mocks/internal --case snake
+    RUN mockery  --all --dir discovery --recursive --keeptree --exported=true --with-expecter=true --output ./mocks/discovery --case snake
+
+    SAVE ARTIFACT ./mocks mocks AS LOCAL mocks
+
 
 lint:
     FROM +vendor
@@ -133,6 +148,8 @@ actor-cluster-image:
 
     EXPOSE 50051
     EXPOSE 9000
+    EXPOSE 2379
+    EXPOSE 2380
 
     ENTRYPOINT ["./accounts"]
     SAVE IMAGE accounts:dev

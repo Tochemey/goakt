@@ -11,6 +11,9 @@ run:
   # Include test files or not.
   # Default: true
   tests: true
+  skip-dirs-use-default: true
+  skip-dirs:
+    - mocks
 
 linters:
   disable-all: true

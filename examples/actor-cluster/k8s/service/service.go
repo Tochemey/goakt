@@ -9,7 +9,7 @@ import (
 	"github.com/bufbuild/connect-go"
 	"github.com/pkg/errors"
 	"github.com/tochemey/goakt/actors"
-	"github.com/tochemey/goakt/examples/actor-cluster/k8s/entities"
+	kactors "github.com/tochemey/goakt/examples/actor-cluster/k8s/actors"
 	samplepb "github.com/tochemey/goakt/examples/protos/pb/v1"
 	"github.com/tochemey/goakt/examples/protos/pb/v1/samplepbconnect"
 	"github.com/tochemey/goakt/log"
@@ -42,7 +42,7 @@ func (s *AccountService) CreateAccount(ctx context.Context, c *connect.Request[s
 	// grab the account id
 	accountID := req.GetCreateAccount().GetAccountId()
 	// create the pid and send the command create account
-	accountEntity := entities.NewAccountEntity(req.GetCreateAccount().GetAccountId())
+	accountEntity := kactors.NewAccountEntity(req.GetCreateAccount().GetAccountId())
 	// create the given pid
 	pid := s.actorSystem.StartActor(ctx, accountID, accountEntity)
 	// send the create command to the pid
@@ -74,24 +74,27 @@ func (s *AccountService) CreditAccount(ctx context.Context, c *connect.Request[s
 	req := c.Msg
 	// grab the account id
 	accountID := req.GetCreditAccount().GetAccountId()
-	// create a variable to continue the search
-	// TODO provide to the actor system a Lookup method that can find an actor both locally or in the cluster when cluster is enabled
-	islocal := true
 
-	// locate the given actor
-	pid, err := s.actorSystem.GetLocalActor(ctx, accountID)
-	// handle the error
-	if err != nil {
-		// check whether it is not found error
-		if errors.Is(err, actors.ErrActorNotFound) {
-			islocal = false
-		} else {
-			return nil, connect.NewError(connect.CodeInternal, err)
+	// check whether the actor system is running in a cluster
+	if !s.actorSystem.InCluster() {
+		// locate the given actor
+		pid, err := s.actorSystem.GetLocalActor(ctx, accountID)
+		// handle the error
+		if err != nil {
+			// check whether it is not found error
+			if !errors.Is(err, actors.ErrActorNotFound) {
+				return nil, connect.NewError(connect.CodeInternal, err)
+			}
+
+			// return not found
+			return nil, connect.NewError(connect.CodeNotFound, err)
 		}
-	}
 
-	// in case we find the actor locally we proceed
-	if islocal {
+		// defensive programming. making sure pid is defined
+		if pid == nil {
+			return nil, connect.NewError(connect.CodeNotFound, err)
+		}
+
 		// send the create command to the pid
 		reply, err := actors.Ask(ctx, pid, &samplepb.CreditAccount{
 			AccountId: accountID,
@@ -115,9 +118,7 @@ func (s *AccountService) CreditAccount(ctx context.Context, c *connect.Request[s
 		}
 	}
 
-	// here we could not find the actor locally then we need to lookup in the cluster
-	// NOTE: yeah we could have looked it up directly in the cluster. Just that this will be a bit expensive if the actor can be locally found
-	// TODO: check the traces and see the performance
+	// here the actor system is running in a cluster
 	addr, err := s.actorSystem.GetRemoteActor(ctx, accountID)
 	// handle the error
 	if err != nil {
