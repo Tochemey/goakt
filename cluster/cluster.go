@@ -2,7 +2,6 @@ package cluster
 
 import (
 	"context"
-	"encoding/base64"
 	"fmt"
 	"strings"
 	"time"
@@ -18,7 +17,6 @@ import (
 	"github.com/tochemey/goakt/pkg/etcd/kvstore"
 	"github.com/tochemey/goakt/pkg/telemetry"
 	"golang.org/x/exp/slices"
-	"google.golang.org/protobuf/proto"
 )
 
 const (
@@ -214,7 +212,7 @@ func (n *Cluster) PutActor(ctx context.Context, actor *goaktpb.WireActor) error 
 	defer span.End()
 
 	// let us marshal it
-	bytea, err := proto.Marshal(actor)
+	data, err := encode(actor)
 	// handle the marshaling error
 	if err != nil {
 		// add a logging to the stderr
@@ -223,12 +221,8 @@ func (n *Cluster) PutActor(ctx context.Context, actor *goaktpb.WireActor) error 
 		return errors.Wrapf(err, "failed to persist actor=%s data in the cluster", actor.GetActorName())
 	}
 
-	// let us base64 encode the bytea before sending it into the cluster
-	data := make([]byte, base64.StdEncoding.EncodedLen(len(bytea)))
-	base64.StdEncoding.Encode(data, bytea)
-
 	// send the record into the cluster
-	_, err = n.store.SetValue(ctx, actor.GetActorName(), string(data))
+	_, err = n.store.SetValue(ctx, actor.GetActorName(), data)
 	// handle the error
 	if err != nil {
 		// log the error
@@ -259,21 +253,12 @@ func (n *Cluster) GetActor(ctx context.Context, actorName string) (*goaktpb.Wire
 		return nil, err
 	}
 
-	// let us grab the actor response
-	bytea := make([]byte, base64.StdEncoding.DecodedLen(len(string(resp.Kvs[0].Value))))
-	// let base64 decode the data before parsing it
-	_, err = base64.StdEncoding.Decode(bytea, resp.Kvs[0].Value)
-	// handle the error
-	if err != nil {
-		// log the error
-		n.logger.Error(errors.Wrapf(err, "failed to decode actor=%s record", actorName))
-		return nil, err
-	}
-
-	// create an instance of proto message
-	actor := new(goaktpb.WireActor)
+	// grab the base64 representation of the wire actor
+	base64ActorStr := resp.Kvs[0].String()
+	// decode it
+	actor, err := decode(base64ActorStr)
 	// let us unpack the byte array
-	if err := proto.Unmarshal(bytea, actor); err != nil {
+	if err != nil {
 		// log the error and return
 		n.logger.Error(errors.Wrapf(err, "failed to decode actor=%s record", actorName))
 		return nil, err
