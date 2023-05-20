@@ -255,19 +255,6 @@ func (d *Discovery) setOptions(meta discovery.Meta) (err error) {
 	if err != nil {
 		return err
 	}
-	//// extract the raft port name
-	//option.RaftPortName, err = meta.GetString(RaftPortName)
-	//// handle the error in case the port name value is not properly set
-	//if err != nil {
-	//	return err
-	//}
-	//// extract the remoting port name
-	//option.RemotingPortName, err = meta.GetString(RemotingPortName)
-	//// handle the error in case the remoting port name value is not properly set
-	//if err != nil {
-	//	return err
-	//}
-
 	// in case none of the above extraction fails then set the option
 	d.option = option
 	return nil

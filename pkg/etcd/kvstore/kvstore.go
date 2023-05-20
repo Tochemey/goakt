@@ -31,13 +31,15 @@ const (
 type Config struct {
 	logger    log.Logger
 	endPoints []string
+	// define the etcd client
+	client *clientv3.Client
 }
 
 // NewConfig creates an instance of Config
-func NewConfig(logger log.Logger, endpoints []string) *Config {
+func NewConfig(logger log.Logger, client *clientv3.Client) *Config {
 	return &Config{
-		logger:    logger,
-		endPoints: endpoints,
+		logger: logger,
+		client: client,
 	}
 }
 
@@ -57,25 +59,18 @@ type KVStore struct {
 	logger          log.Logger
 	config          *Config
 
-	stopWatchChan chan struct{}
-	watchers      sync.WaitGroup
-	name          string
+	name string
 }
 
 // New creates an instance of KVStore
 func New(config *Config) (*KVStore, error) {
 	// create an instance of kv store
 	store := &KVStore{
-		stopChan:      make(chan struct{}, 1),
-		stopOnce:      sync.Once{},
-		logger:        config.logger,
-		config:        config,
-		stopWatchChan: make(chan struct{}, 1),
-	}
-	// start the etcd client
-	if err := store.startClient(); err != nil {
-		store.logger.Error(errors.Wrap(err, "failed to start as a client"))
-		return nil, err
+		stopChan: make(chan struct{}, 1),
+		stopOnce: sync.Once{},
+		logger:   config.logger,
+		config:   config,
+		Client:   config.client,
 	}
 
 	// create the namespaced store
@@ -119,11 +114,6 @@ func New(config *Config) (*KVStore, error) {
 func (s *KVStore) Shutdown() error {
 	// revoke liveness
 	if err := s.revokeLiveness(context.Background(), shutdownTimeout); err != nil {
-		return err
-	}
-
-	// stop the client
-	if err := s.stopClient(); err != nil {
 		return err
 	}
 
@@ -203,74 +193,6 @@ func (s *KVStore) UpdateEndpoints() error {
 	return nil
 }
 
-// startClient starts the etcd client and connects the Embed instance to the cluster.
-func (s *KVStore) startClient() error {
-	// check whether the client is set or not
-	if s.Client != nil {
-		return errors.New("client already exists")
-	}
-
-	// create the client config
-	clientConfig := clientv3.Config{
-		Endpoints:        s.config.endPoints,
-		AutoSyncInterval: 30 * time.Second, // Update list of endpoints ever 30s.
-		DialTimeout:      5 * time.Second,
-		RejectOldCluster: true,
-	}
-
-	// create an instance of the client
-	client, err := clientv3.New(clientConfig)
-	// return the eventual error
-	if err != nil {
-		return err
-	}
-
-	// set the client
-	s.Client = client
-	// Immediately sync and update your list of endpoints
-	if err := s.Client.Sync(s.Client.Ctx()); err != nil {
-		return err
-	}
-
-	// start a new session, which is needed for the watchers
-	session, err := concurrency.NewSession(s.Client)
-	if err != nil {
-		// try closing the client
-		if err := s.Client.Close(); err != nil {
-			return err
-		}
-		return err
-	}
-
-	// set the session
-	s.Session = session
-
-	return nil
-}
-
-func (s *KVStore) stopClient() error {
-	if s.Client == nil {
-		return errors.New("no client present")
-	}
-
-	// First stop all the watchers
-	close(s.stopWatchChan)
-	s.watchers.Wait()
-
-	// Then close the session
-	if err := s.Session.Close(); err != nil {
-		return err
-	}
-
-	// Then close the etcd client
-	if err := s.Client.Close(); err != nil {
-		return err
-	}
-
-	s.Client = nil
-	return nil
-}
-
 // isStoreHealthy checks if store is reachable from the node.
 // Get a random key.If we get the response without an error,
 // the endpoint is healthy.
@@ -334,27 +256,4 @@ func (s *KVStore) keepSessionAlive() {
 			}
 		}
 	}
-}
-
-// watch watches for changes the given key and runs the handler when changes happen.
-// watch also waits on the stop watch channel and stops watching when notified.
-// All watchers in Embed must use this instead of starting their own etcd watchers.
-func (s *KVStore) watch(key string, handler func(clientv3.WatchResponse), opts ...clientv3.OpOption) {
-	s.watchers.Add(1)
-	go func() {
-		defer s.watchers.Done()
-
-		wch := s.Client.Watch(s.Client.Ctx(), key, opts...)
-		for {
-			select {
-			case resp := <-wch:
-				if resp.Canceled {
-					return
-				}
-				handler(resp)
-			case <-s.stopWatchChan:
-				return
-			}
-		}
-	}()
 }

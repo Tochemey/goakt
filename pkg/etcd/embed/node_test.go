@@ -16,13 +16,14 @@ func TestEmbed(t *testing.T) {
 		// create the various URLs and cluster name
 		clientURLs := types.MustNewURLs([]string{"http://0.0.0.0:2379"})
 		peerURLs := types.MustNewURLs([]string{"http://0.0.0.0:2380"})
+		endpoints := clientURLs
 		clusterName := "test"
 		datadir := "test"
 
 		// create an instance of the config
-		config := NewConfig(clusterName, clientURLs, peerURLs, WithDataDir(datadir))
+		config := NewConfig(clusterName, clientURLs, peerURLs, endpoints, WithDataDir(datadir))
 		// create an instance of embed
-		embed := NewEmbed(config)
+		embed := NewNode(config)
 
 		// start the embed server
 		require.NoError(t, embed.Start())
@@ -36,6 +37,7 @@ func TestEmbed(t *testing.T) {
 		// create the various URLs and cluster name
 		clientURLs := types.MustNewURLs([]string{"http://0.0.0.0:2379"})
 		peerURLs := types.MustNewURLs([]string{"http://0.0.0.0:2380"})
+		endpoints := clientURLs
 		clusterName := "test"
 		datadir := "test"
 		// create a logger
@@ -45,11 +47,12 @@ func TestEmbed(t *testing.T) {
 		config := NewConfig(clusterName,
 			clientURLs,
 			peerURLs,
+			endpoints,
 			WithDataDir(datadir),
 			WithInitialCluster("test=http://0.0.0.0:2380"),
 			WithLogger(logger))
 		// create an instance of embed
-		embed := NewEmbed(config)
+		embed := NewNode(config)
 
 		// start the embed server
 		require.NoError(t, embed.Start())

@@ -15,15 +15,17 @@ type Config struct {
 	initialCluster string     // initialCluster defines the etcd server endpoint
 	peerURLs       types.URLs // peerURLs defines the peers URL
 	clientURLs     types.URLs // clientURLs defines the clients URL
+	endPoints      types.URLs // endPoints defines the etcd servers' endpoint
 	enableLogging  bool       // enableLogging states whether to enable logging
 	logDir         string     // logDir specifies the log directory
 
 	logger       log.Logger
 	startTimeout time.Duration
+	join         bool
 }
 
 // NewConfig creates an instance of Config
-func NewConfig(name string, clientURLs, peerURLs types.URLs, opts ...Option) *Config {
+func NewConfig(name string, clientURLs, peerURLs, endpoints types.URLs, opts ...Option) *Config {
 	// create the default dir
 	defaultDIR := "/var/goakt/"
 	// create a config instance
@@ -36,6 +38,7 @@ func NewConfig(name string, clientURLs, peerURLs types.URLs, opts ...Option) *Co
 		startTimeout:  time.Minute,
 		clientURLs:    clientURLs,
 		peerURLs:      peerURLs,
+		endPoints:     endpoints,
 	}
 
 	// apply the various options
@@ -88,4 +91,9 @@ func (c *Config) Logger() log.Logger {
 // StartTimeout returns the start timeout
 func (c *Config) StartTimeout() time.Duration {
 	return c.startTimeout
+}
+
+// EndPoints returns the endpoints
+func (c *Config) EndPoints() types.URLs {
+	return c.endPoints
 }
