@@ -2,6 +2,7 @@ package kubernetes
 
 import (
 	"context"
+	"sort"
 	"sync"
 	"time"
 
@@ -9,7 +10,7 @@ import (
 	"github.com/tochemey/goakt/discovery"
 	"github.com/tochemey/goakt/log"
 	"go.uber.org/atomic"
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	k8meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/informers"
@@ -48,34 +49,34 @@ func New(logger log.Logger) *Discovery {
 }
 
 // ID returns the discovery id
-func (d *Discovery) ID() string {
+func (k *Discovery) ID() string {
 	return "kubernetes"
 }
 
-// Nodes returns the list of Nodes at a given time
-func (d *Discovery) Nodes(ctx context.Context) ([]*discovery.Node, error) {
+// Nodes returns the list of up and running Nodes at a given time
+func (k *Discovery) Nodes(ctx context.Context) ([]*discovery.Node, error) {
 	// first check whether the actor system has started
-	if !d.isInitialized.Load() {
+	if !k.isInitialized.Load() {
 		return nil, errors.New("kubernetes discovery engine not initialized")
 	}
 
 	// let us create the pod labels map
 	// TODO: make sure to document it on k8 discovery
 	podLabels := map[string]string{
-		"app.kubernetes.io/part-of":   d.option.ActorSystemName,
-		"app.kubernetes.io/component": d.option.ApplicationName, // TODO: redefine it
-		"app.kubernetes.io/name":      d.option.ApplicationName,
+		"app.kubernetes.io/part-of":   k.option.ActorSystemName,
+		"app.kubernetes.io/component": k.option.ApplicationName, // TODO: redefine it
+		"app.kubernetes.io/name":      k.option.ApplicationName,
 	}
 
 	// List all the pods based on the filters we requested
-	pods, err := d.k8sClient.CoreV1().Pods(d.option.NameSpace).List(ctx, k8meta.ListOptions{
+	pods, err := k.k8sClient.CoreV1().Pods(k.option.NameSpace).List(ctx, k8meta.ListOptions{
 		LabelSelector: labels.SelectorFromSet(podLabels).String(),
 	})
 	// panic when we cannot poll the pods
 	if err != nil {
 		// TODO maybe do not panic
 		// TODO figure out the best approach
-		d.logger.Panic(errors.Wrap(err, "failed to fetch kubernetes pods"))
+		k.logger.Panic(errors.Wrap(err, "failed to fetch kubernetes pods"))
 	}
 
 	nodes := make([]*discovery.Node, 0, pods.Size())
@@ -86,20 +87,20 @@ MainLoop:
 		// create a variable copy of pod
 		pod := pod
 		// only consider running pods
-		if pod.Status.Phase != v1.PodRunning {
+		if pod.Status.Phase != corev1.PodRunning {
 			continue MainLoop
 		}
 		// If there is a Ready condition available, we need that to be true.
 		// If no ready condition is set, then we accept this pod regardless.
 		for _, condition := range pod.Status.Conditions {
 			// ignore pod that is not in ready state
-			if condition.Type == v1.PodReady && condition.Status != v1.ConditionTrue {
+			if condition.Type == corev1.PodReady && condition.Status != corev1.ConditionTrue {
 				continue MainLoop
 			}
 		}
 
 		// create a variable holding the node
-		node := d.podToNode(&pod)
+		node := k.podToNode(&pod)
 		// continue the loop when we did not find any node
 		if node == nil {
 			continue MainLoop
@@ -111,18 +112,18 @@ MainLoop:
 }
 
 // Watch returns event based upon node lifecycle
-func (d *Discovery) Watch(ctx context.Context) (<-chan discovery.Event, error) {
+func (k *Discovery) Watch(ctx context.Context) (<-chan discovery.Event, error) {
 	// first check whether the actor system has started
-	if !d.isInitialized.Load() {
+	if !k.isInitialized.Load() {
 		return nil, errors.New("kubernetes discovery engine not initialized")
 	}
 	// run the watcher
-	go d.watchPods()
-	return d.publicChan, nil
+	go k.watchPods()
+	return k.publicChan, nil
 }
 
 // Start the discovery engine
-func (d *Discovery) Start(ctx context.Context, meta discovery.Meta) error {
+func (k *Discovery) Start(ctx context.Context, meta discovery.Meta) error {
 	// validate the meta
 	// let us make sure we have the required options set
 	// assert the present of the namespace
@@ -147,41 +148,57 @@ func (d *Discovery) Start(ctx context.Context, meta discovery.Meta) error {
 	}
 
 	// set the k8 client
-	d.k8sClient = k8sClient
+	k.k8sClient = k8sClient
 	// set the options
-	if err := d.setOptions(meta); err != nil {
+	if err := k.setOptions(meta); err != nil {
 		return errors.Wrap(err, "failed to instantiate the kubernetes discovery provider")
 	}
 	// set initialized
-	d.isInitialized = atomic.NewBool(true)
+	k.isInitialized = atomic.NewBool(true)
 	return nil
 }
 
+// EarliestNode returns the earliest node. This is based upon the node timestamp
+func (k *Discovery) EarliestNode(ctx context.Context) (*discovery.Node, error) {
+	// fetch the list of Nodes
+	nodes, err := k.Nodes(ctx)
+	// handle the error
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to get the earliest node")
+	}
+	// let us sort the nodes by their timestamp
+	sort.SliceStable(nodes, func(i, j int) bool {
+		return nodes[i].StartTime < nodes[j].StartTime
+	})
+	// return the first element in the sorted list
+	return nodes[0], nil
+}
+
 // Stop shutdown the discovery engine
-func (d *Discovery) Stop() error {
+func (k *Discovery) Stop() error {
 	// first check whether the actor system has started
-	if !d.isInitialized.Load() {
+	if !k.isInitialized.Load() {
 		return errors.New("kubernetes discovery engine not initialized")
 	}
 	// stop the watchers
-	close(d.stopChan)
+	close(k.stopChan)
 	// close the public channel
-	close(d.publicChan)
+	close(k.publicChan)
 	return nil
 }
 
 // handlePodAdded is called when a new pod is added
-func (d *Discovery) handlePodAdded(pod *v1.Pod) {
+func (k *Discovery) handlePodAdded(pod *corev1.Pod) {
 	// acquire the lock
-	d.mu.Lock()
+	k.mu.Lock()
 	// release the lock
-	defer d.mu.Unlock()
+	defer k.mu.Unlock()
 	// ignore the pod when it is not running
-	if pod.Status.Phase != v1.PodRunning {
+	if pod.Status.Phase != corev1.PodRunning {
 		return
 	}
 	// get node
-	node := d.podToNode(pod)
+	node := k.podToNode(pod)
 	// continue the loop when we did not find any node
 	if node == nil {
 		return
@@ -189,23 +206,23 @@ func (d *Discovery) handlePodAdded(pod *v1.Pod) {
 	// here we find a node let us raise the node registered event
 	event := &discovery.NodeAdded{Node: node}
 	// add to the channel
-	d.publicChan <- event
+	k.publicChan <- event
 }
 
 // handlePodUpdated is called when a pod is updated
-func (d *Discovery) handlePodUpdated(old *v1.Pod, pod *v1.Pod) {
+func (k *Discovery) handlePodUpdated(old *corev1.Pod, pod *corev1.Pod) {
 	// ignore the pod when it is not running
-	if pod.Status.Phase != v1.PodRunning {
+	if pod.Status.Phase != corev1.PodRunning {
 		return
 	}
 	// acquire the lock
-	d.mu.Lock()
+	k.mu.Lock()
 	// release the lock
-	defer d.mu.Unlock()
+	defer k.mu.Unlock()
 	// grab the old node
-	oldNode := d.podToNode(old)
+	oldNode := k.podToNode(old)
 	// get the new node
-	node := d.podToNode(pod)
+	node := k.podToNode(pod)
 	// continue the loop when we did not find any node
 	if node == nil {
 		return
@@ -216,25 +233,25 @@ func (d *Discovery) handlePodUpdated(old *v1.Pod, pod *v1.Pod) {
 		Current: oldNode,
 	}
 	// add to the channel
-	d.publicChan <- event
+	k.publicChan <- event
 }
 
 // handlePodDeleted is called when pod is deleted
-func (d *Discovery) handlePodDeleted(pod *v1.Pod) {
+func (k *Discovery) handlePodDeleted(pod *corev1.Pod) {
 	// acquire the lock
-	d.mu.Lock()
+	k.mu.Lock()
 	// release the lock
-	defer d.mu.Unlock()
+	defer k.mu.Unlock()
 	// get the new node
-	node := d.podToNode(pod)
+	node := k.podToNode(pod)
 	// here we find a node let us raise the node removed event
 	event := &discovery.NodeRemoved{Node: node}
 	// add to the channel
-	d.publicChan <- event
+	k.publicChan <- event
 }
 
 // setOptions sets the kubernetes option
-func (d *Discovery) setOptions(meta discovery.Meta) (err error) {
+func (k *Discovery) setOptions(meta discovery.Meta) (err error) {
 	// create an instance of Option
 	option := new(Option)
 	// extract the namespace
@@ -256,21 +273,12 @@ func (d *Discovery) setOptions(meta discovery.Meta) (err error) {
 		return err
 	}
 	// in case none of the above extraction fails then set the option
-	d.option = option
+	k.option = option
 	return nil
 }
 
 // podToNode takes a kubernetes pod and returns a Node
-func (d *Discovery) podToNode(pod *v1.Pod) *discovery.Node {
-	// If there is a Ready condition available, we need that to be true.
-	// If no ready condition is set, then we accept this pod regardless.
-	for _, condition := range pod.Status.Conditions {
-		// ignore pod that is not in ready state
-		if condition.Type == v1.PodReady && condition.Status != v1.ConditionTrue {
-			return nil
-		}
-	}
-
+func (k *Discovery) podToNode(pod *corev1.Pod) *discovery.Node {
 	// create a variable holding the node
 	var node *discovery.Node
 	// iterate the pod containers and find the named port
@@ -293,6 +301,7 @@ func (d *Discovery) podToNode(pod *v1.Pod) *discovery.Node {
 			Host:      pod.Status.PodIP,
 			StartTime: pod.Status.StartTime.Time.UnixMilli(),
 			Ports:     portMap,
+			IsRunning: pod.Status.Phase == corev1.PodRunning,
 		}
 	}
 
@@ -301,18 +310,18 @@ func (d *Discovery) podToNode(pod *v1.Pod) *discovery.Node {
 
 // watchPods keeps a watch on kubernetes pods activities and emit
 // respective event when needed
-func (d *Discovery) watchPods() {
+func (k *Discovery) watchPods() {
 	// TODO: make sure to document it on k8 discovery
 	podLabels := map[string]string{
-		"app.kubernetes.io/part-of":   d.option.ActorSystemName,
-		"app.kubernetes.io/component": d.option.ApplicationName, // TODO: redefine it
-		"app.kubernetes.io/name":      d.option.ApplicationName,
+		"app.kubernetes.io/part-of":   k.option.ActorSystemName,
+		"app.kubernetes.io/component": k.option.ApplicationName, // TODO: redefine it
+		"app.kubernetes.io/name":      k.option.ApplicationName,
 	}
 	// create the k8 informer factory
 	factory := informers.NewSharedInformerFactoryWithOptions(
-		d.k8sClient,
+		k.k8sClient,
 		10*time.Minute, // TODO make it configurable
-		informers.WithNamespace(d.option.NameSpace),
+		informers.WithNamespace(k.option.NameSpace),
 		informers.WithTweakListOptions(func(options *k8meta.ListOptions) {
 			options.LabelSelector = labels.SelectorFromSet(podLabels).String()
 		}))
@@ -329,9 +338,9 @@ func (d *Discovery) watchPods() {
 			}
 
 			// Handler logic
-			pod := obj.(*v1.Pod)
+			pod := obj.(*corev1.Pod)
 			// handle the newly added pod
-			d.handlePodAdded(pod)
+			k.handlePodAdded(pod)
 		},
 		UpdateFunc: func(current, node any) {
 			mux.RLock()
@@ -341,9 +350,9 @@ func (d *Discovery) watchPods() {
 			}
 
 			// Handler logic
-			old := current.(*v1.Pod)
-			pod := node.(*v1.Pod)
-			d.handlePodUpdated(old, pod)
+			old := current.(*corev1.Pod)
+			pod := node.(*corev1.Pod)
+			k.handlePodUpdated(old, pod)
 		},
 		DeleteFunc: func(obj any) {
 			mux.RLock()
@@ -353,9 +362,9 @@ func (d *Discovery) watchPods() {
 			}
 
 			// Handler logic
-			pod := obj.(*v1.Pod)
+			pod := obj.(*corev1.Pod)
 			// handle the newly added pod
-			d.handlePodDeleted(pod)
+			k.handlePodDeleted(pod)
 		},
 	})
 	if err != nil {
@@ -363,16 +372,16 @@ func (d *Discovery) watchPods() {
 	}
 
 	// run the informer
-	go informer.Run(d.stopChan)
+	go informer.Run(k.stopChan)
 
 	// wait for caches to sync
-	isSynced := cache.WaitForCacheSync(d.stopChan, informer.HasSynced)
+	isSynced := cache.WaitForCacheSync(k.stopChan, informer.HasSynced)
 	mux.Lock()
 	synced = isSynced
 	mux.Unlock()
 
 	// caches failed to sync
 	if !synced {
-		d.logger.Fatal("caches failed to sync")
+		k.logger.Fatal("caches failed to sync")
 	}
 }

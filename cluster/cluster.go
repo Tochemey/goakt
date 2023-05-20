@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/coreos/etcd/pkg/types"
+	goset "github.com/deckarep/golang-set/v2"
+	"github.com/flowchartsman/retry"
 	"github.com/pkg/errors"
 	"github.com/tochemey/goakt/discovery"
 	goaktpb "github.com/tochemey/goakt/internal/goakt/v1"
@@ -15,6 +17,7 @@ import (
 	"github.com/tochemey/goakt/pkg/etcd/host"
 	"github.com/tochemey/goakt/pkg/etcd/kvstore"
 	"github.com/tochemey/goakt/pkg/telemetry"
+	"go.etcd.io/etcd/api/v3/etcdserverpb"
 	"golang.org/x/exp/slices"
 )
 
@@ -22,7 +25,16 @@ const (
 	clientPortName            = "clients-port"
 	peersPortName             = "peers-port"
 	minimumInitialMembersSize = 3
+	memberAddThreshold        = 5
 )
+
+// member represents a cluster node member
+type member struct {
+	name       string
+	host       string
+	peerURLs   []string
+	clientURLs []string
+}
 
 // Cluster represents the Cluster
 type Cluster struct {
@@ -59,16 +71,10 @@ func (c *Cluster) Start(ctx context.Context) error {
 	var (
 		// create a variable to hold the discovered nodes
 		discoNodes []*discovery.Node
-		// variable to help remove duplicate nodes discovered
-		seen = make(map[string]bool)
-		// variable holding the discovery loop count
-		count = 3 // TODO revisit this after QA
 		// variable holding
-		err            error
-		hostPeerURLs   []string
-		hostClientURLs []string
-		hostNodeName   string
-		isJoining      bool
+		err       error
+		hostNode  *member
+		isJoining bool
 	)
 
 	// handle the error
@@ -77,66 +83,19 @@ func (c *Cluster) Start(ctx context.Context) error {
 		return err
 	}
 
-	// let us delay for sometime to make sure we have discovered all nodes
-	// FIXME: this is an approximation
+	// let us delay the start for sometime to make sure we have discovered all nodes
 	duration := time.Second
 	delay := duration - time.Duration(duration.Nanoseconds())%time.Second
+	time.Sleep(delay)
 
-	// let us loop three times to attempt discovering all available nodes
-	// This a poor man mechanism to attempt discovering all possible Cluster on before starting the cluster
-	// This is an approximation
-	// TODO: revisit this flow 😉
-	for i := 0; i < count; i++ {
-		// let us grab the existing nodes in the cluster
-		nodes, err := c.disco.Nodes(ctx)
-		// handle the error
-		if err != nil {
-			c.logger.Error(errors.Wrap(err, "failed to fetch existing nodes in the cluster"))
-			return err
-		}
-
-		// remove duplicate
-		for _, discoNode := range nodes {
-			// let us get the node URL
-			peersURL, _ := nodeURLs(discoNode)
-			// check whether the Cluster has been already discovered and ignore it
-			if _, ok := seen[peersURL]; ok {
-				continue
-			}
-			// mark the Cluster as seen
-			seen[peersURL] = true
-			// add it to the list of nodes
-			discoNodes = append(discoNodes, discoNode)
-		}
-
-		// wait a bit for before proceeding to the next round
-		time.Sleep(delay)
-	}
+	// discover the nodes
+	discoNodes = c.discoverNodes(ctx)
 
 	// add some logging
 	c.logger.Debugf("%s has discovered %d nodes", c.disco.ID(), len(discoNodes))
 
-	// get the host addresses
-	addresses, _ := host.Addresses()
-
-	// iterate the discovered nodes to find the host node
-	for _, discoNode := range discoNodes {
-		// here the host node is found
-		if slices.Contains(addresses, discoNode.Host) {
-			// get the peer port
-			peersPort := discoNode.Ports[peersPortName]
-			// get the clients port
-			clientsPort := discoNode.Ports[clientPortName]
-			// let us build the host peer URLs and getClient URLs
-			for _, addr := range addresses {
-				hostPeerURLs = append(hostPeerURLs, fmt.Sprintf("http://%s:%d", addr, peersPort))
-				hostClientURLs = append(hostClientURLs, fmt.Sprintf("http://%s:%d", addr, clientsPort))
-			}
-			// set the host node name
-			hostNodeName = discoNode.Name
-			break
-		}
-	}
+	// get the host info
+	hostNode = c.whoami(discoNodes)
 
 	// we have more than one host.
 	if len(discoNodes) > 1 {
@@ -144,7 +103,7 @@ func (c *Cluster) Start(ctx context.Context) error {
 		var existingEndpoints []string
 		// exclude this node from the list of endpoints to build
 		for _, discoNode := range discoNodes {
-			if !slices.Contains(addresses, discoNode.Host) {
+			if !(hostNode.host == discoNode.Host) {
 				// build the peer URL
 				_, clientsURL := nodeURLs(discoNode)
 				// set the endpoints
@@ -172,16 +131,40 @@ func (c *Cluster) Start(ctx context.Context) error {
 			}
 
 			// adding the new member to the existing cluster
-			mresp, err := client.MemberAdd(ctx, hostPeerURLs)
+			// create a retrier that will try a maximum of times to add a member, with
+			// an initial delay of 100 ms and a maximum delay of 1 second
+			retrier := retry.NewRetrier(memberAddThreshold, 100*time.Millisecond, time.Second)
+			// run the retry
+			err = retrier.RunContext(ctx, func(ctx context.Context) error {
+				// adding the new member to the existing cluster
+				mresp, err := client.MemberAdd(ctx, hostNode.peerURLs)
+				// handle the error
+				if err != nil {
+					// retry again when the error message contain `re-configuration failed due to not enough started members`
+					if strings.Contains(err.Error(), "re-configuration failed due to not enough started members") {
+						// continue till the threshold is reached
+						return err
+					}
+
+					// re-configuration failed due to not enough started members
+					err = errors.Wrapf(err, "failed to add node=%s to existing cluster", hostNode.name)
+					c.logger.Error(err)
+					return retry.Stop(err)
+				}
+
+				// set the is joining the cluster
+				isJoining = true
+				// add some logging information
+				c.logger.Infof("Node=%s Host=%s is successfully added as a new member=%s to existing cluster", hostNode.name, mresp.Member.GetName())
+				return nil
+			})
+
 			// handle the error
 			if err != nil {
-				c.logger.Error(errors.Wrapf(err, "failed to add node=%s to existing cluster", hostNodeName))
+				// re-configuration failed due to not enough started members
+				c.logger.Error(err)
 				return err
 			}
-			// set the is joining the cluster
-			isJoining = true
-			// add some logging information
-			c.logger.Infof("Node=%s Host=%s is successfully added as a new member=%s to existing cluster", hostNodeName, mresp.Member.GetName())
 		}
 	}
 
@@ -199,9 +182,9 @@ func (c *Cluster) Start(ctx context.Context) error {
 
 	// create the embed config
 	config := embed.NewConfig(
-		hostNodeName,
-		types.MustNewURLs(hostClientURLs),
-		types.MustNewURLs(hostPeerURLs),
+		hostNode.name,
+		types.MustNewURLs(hostNode.clientURLs),
+		types.MustNewURLs(hostNode.peerURLs),
 		types.MustNewURLs(endpoints),
 		embed.WithLogger(c.logger),
 		embed.WithInitialCluster(strings.Join(initialPeerURLs, ",")),
@@ -343,20 +326,53 @@ func (c *Cluster) handleClusterEvents(events <-chan discovery.Event) {
 			case *discovery.NodeAdded:
 			// pass. No need to handle this since every use the join method to join the cluster
 			case *discovery.NodeModified:
-				// pass
+				// make sure the nodes are defined
+				current := x.Current
+				latest := x.Node
+				if current != nil && latest != nil {
+					// add some debug logging
+					c.logger.Debugf("updating peer=%s", current.Name)
+					// let us get the list of members for the given node
+					members, err := c.etcdNode.Members()
+					// handle the error
+					if err != nil {
+						c.logger.Error(errors.Wrapf(err, "failed to fetch the member list for etcd node=%s", c.etcdNode.ID()))
+					} else {
+						// let us get the member information
+						member := locateMember(members, current)
+						// when matching member is found
+						if member != nil {
+							// grab the latest URLs
+							peerURL, clientURL := nodeURLs(latest)
+							// create an instance of member and set the various URLs
+							m := &etcdserverpb.Member{
+								ID:         member.GetID(),
+								Name:       latest.Name,
+								PeerURLs:   []string{peerURL},
+								ClientURLs: []string{clientURL},
+							}
+							// send a member updated request
+							if err := c.etcdNode.UpdateMember(m); err != nil {
+								c.logger.Error(errors.Wrapf(err, "failed to update the member=%s list for etcd node=%s", member.GetName(), c.etcdNode.ID()))
+								break
+							}
+						}
+					}
+				}
 			case *discovery.NodeRemoved:
-				c.logger.Debugf("removing peer=%s", x.Node.Name)
-				// let us attempt removing the peer
-				members, err := c.etcdNode.Members()
-				// handle the error and return
-				if err != nil {
-					c.logger.Error(errors.Wrapf(err, "failed to fetch the member list for etcd node=%s", c.etcdNode.ID()))
-				} else {
-					// grab the given node URL
-					peerURL, _ := nodeURLs(x.Node)
-					// iterate the list of members
-					for _, member := range members {
-						if slices.Contains(member.GetPeerURLs(), peerURL) && member.GetName() == x.Node.Name {
+				// handle this when node is not nil
+				if x.Node != nil {
+					c.logger.Debugf("removing peer=%s", x.Node.Name)
+					// let us attempt removing the peer
+					members, err := c.etcdNode.Members()
+					// handle the error and return
+					if err != nil {
+						c.logger.Error(errors.Wrapf(err, "failed to fetch the member list for etcd node=%s", c.etcdNode.ID()))
+					} else {
+						// let us get the member information
+						member := locateMember(members, x.Node)
+						// when matching member is found
+						if member != nil {
 							// send a member removal request
 							if err := c.etcdNode.RemoveMember(member); err != nil {
 								c.logger.Error(errors.Wrapf(err, "failed to remove the member=%s list for etcd node=%s", member.GetName(), c.etcdNode.ID()))
@@ -370,4 +386,97 @@ func (c *Cluster) handleClusterEvents(events <-chan discovery.Event) {
 			}
 		}
 	}
+}
+
+// whoami returns the host node information
+func (c *Cluster) whoami(discoNodes []*discovery.Node) *member {
+	// get the host addresses
+	addresses, _ := host.Addresses()
+
+	// iterate the discovered nodes to find the host node
+	for _, discoNode := range discoNodes {
+		// here the host node is found
+		if slices.Contains(addresses, discoNode.Host) {
+			// get the peer port
+			peersPort := discoNode.Ports[peersPortName]
+			// get the clients port
+			clientsPort := discoNode.Ports[clientPortName]
+
+			// let us build the host peer URLs and getClient URLs
+			peerURLs := goset.NewSet[string]()
+			clientURLs := goset.NewSet[string]()
+
+			// iterate the host addresses and construct the advertised urls
+			for _, addr := range addresses {
+				peerURLs.Add(fmt.Sprintf("http://%s:%d", addr, peersPort))
+				clientURLs.Add(fmt.Sprintf("http://%s:%d", addr, clientsPort))
+			}
+
+			return &member{
+				name:       discoNode.Name,
+				host:       discoNode.Host,
+				peerURLs:   peerURLs.ToSlice(),
+				clientURLs: clientURLs.ToSlice(),
+			}
+		}
+	}
+	return nil
+}
+
+// discoverNodes uses the discovery provider to find nodes in the cluster
+// this function run with some delay mechanism to make sure the discovery provider finds enough nodes
+func (c *Cluster) discoverNodes(ctx context.Context) []*discovery.Node {
+	var (
+		// create a ticker to run every 10 milliseconds for a duration of a second
+		ticker = time.NewTicker(10 * time.Millisecond)
+		timer  = time.After(time.Second)
+		// create the ticker stop signal
+		tickerStopSig = make(chan struct{})
+		nodes         []*discovery.Node
+		// variable to help remove duplicate nodes discovered
+		seen = make(map[string]bool)
+	)
+
+	// start ticking
+	go func() {
+		for {
+			select {
+			case <-ticker.C:
+				// let us discover the nodes
+				// let us grab the existing nodes in the cluster
+				discoNodes, err := c.disco.Nodes(ctx)
+				// handle the error
+				if err != nil {
+					c.logger.Error(errors.Wrap(err, "failed to fetch existing nodes in the cluster"))
+					tickerStopSig <- struct{}{}
+					return
+				}
+
+				// remove duplicate
+				for _, discoNode := range discoNodes {
+					// let us get the node URL
+					peersURL, _ := nodeURLs(discoNode)
+					// check whether the Cluster has been already discovered and ignore it
+					if _, ok := seen[peersURL]; ok {
+						continue
+					}
+					// mark the Cluster as seen
+					seen[peersURL] = true
+					// add it to the list of nodes
+					nodes = append(nodes, discoNode)
+				}
+
+			case <-timer:
+				// tell the ticker to stop when timer is up
+				tickerStopSig <- struct{}{}
+				return
+			}
+		}
+	}()
+	// listen to ticker stop signal
+	<-tickerStopSig
+	// stop the ticker
+	ticker.Stop()
+	// return discovered nodes
+	return nodes
 }

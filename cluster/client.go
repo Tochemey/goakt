@@ -38,7 +38,7 @@ func canJoin(ctx context.Context, endpoints []string) (bool, error) {
 	// a fresh cancellation context
 	mainCtx := ctx
 	// iterate through the endpoints
-	for _, ep := range endpoints {
+	for index, ep := range endpoints {
 		// create a cancellation context
 		ctx, cancel := context.WithTimeout(mainCtx, 5*time.Second)
 		// defer cancel
@@ -63,8 +63,14 @@ func canJoin(ctx context.Context, endpoints []string) (bool, error) {
 		if err != nil {
 			switch err {
 			case context.DeadlineExceeded:
-				// this is a startup call which means that none of the nodes are not running yet
-				return false, nil
+				// return when we are still in deadline
+				// TODO: figure a better way to know when a cluster is up or not
+				if len(endpoints) == index {
+					// this is a startup call which means that none of the nodes are not running yet
+					return false, nil
+				}
+				// we continue scanning the endpoints till we exhaust the list
+				continue
 			default:
 				// pass
 			}

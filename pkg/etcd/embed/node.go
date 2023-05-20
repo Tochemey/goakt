@@ -6,11 +6,10 @@ import (
 	"sync"
 	"time"
 
-	"go.etcd.io/etcd/api/v3/etcdserverpb"
-
 	"github.com/coreos/etcd/pkg/types"
 	"github.com/pkg/errors"
 	"github.com/tochemey/goakt/log"
+	"go.etcd.io/etcd/api/v3/etcdserverpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/client/v3/concurrency"
 	"go.etcd.io/etcd/server/v3/embed"
@@ -243,6 +242,23 @@ func (n *Node) RemoveMember(member *etcdserverpb.Member) error {
 	ctx := n.client.Ctx()
 	// execute the request to remove the member
 	_, err := n.client.MemberRemove(ctx, member.GetID())
+	// handle the error
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+// UpdateMember updates a given member
+func (n *Node) UpdateMember(member *etcdserverpb.Member) error {
+	// acquire the lock
+	n.mu.Lock()
+	// release the lock once done
+	defer n.mu.Unlock()
+	// create a context
+	ctx := n.client.Ctx()
+	// execute the update request
+	_, err := n.client.MemberUpdate(ctx, member.GetID(), member.GetPeerURLs())
 	// handle the error
 	if err != nil {
 		return err

@@ -10,4 +10,6 @@ type Node struct {
 	StartTime int64
 	// Ports specifies the list of Ports
 	Ports map[string]int32
+	// IsRunning specifies whether the node is up and running
+	IsRunning bool
 }

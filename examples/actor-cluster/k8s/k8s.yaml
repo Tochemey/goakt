@@ -29,7 +29,7 @@ metadata:
     app.kubernetes.io/component: accounts
     app.kubernetes.io/part-of: AccountsSystem
 spec:
-  replicas: 1
+  replicas: 3
   strategy:
     type: RollingUpdate
     rollingUpdate:
