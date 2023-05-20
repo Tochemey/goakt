@@ -302,7 +302,7 @@ func (c *Cluster) GetActor(ctx context.Context, actorName string) (*goaktpb.Wire
 	}
 
 	// grab the base64 representation of the wire actor
-	base64ActorStr := resp.Kvs[0].String()
+	base64ActorStr := string(resp.Kvs[0].Value)
 	// decode it
 	actor, err := decode(base64ActorStr)
 	// let us unpack the byte array
@@ -479,4 +479,22 @@ func (c *Cluster) discoverNodes(ctx context.Context) []*discovery.Node {
 	ticker.Stop()
 	// return discovered nodes
 	return nodes
+}
+
+// nodeURLs returns the actual node URLs
+func nodeURLs(node *discovery.Node) (peersURL string, clientURL string) {
+	return fmt.Sprintf("http://%s:%d", node.Host, node.Ports[peersPortName]),
+		fmt.Sprintf("http://%s:%d", node.Host, node.Ports[clientPortName])
+}
+
+// locateMember helps find a given member using its peerURL
+func locateMember(members []*etcdserverpb.Member, node *discovery.Node) *etcdserverpb.Member {
+	// grab the given node URL
+	peerURL, _ := nodeURLs(node)
+	for _, member := range members {
+		if slices.Contains(member.GetPeerURLs(), peerURL) && member.GetName() == node.Name {
+			return member
+		}
+	}
+	return nil
 }

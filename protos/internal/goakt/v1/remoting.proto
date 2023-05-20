@@ -25,11 +25,7 @@ service RemoteMessagingService {
 // immediately. With this type of message the receiver cannot communicate back to Sender
 // except reply the message with a response. This one-way communication
 message RemoteAskRequest {
-  // Specifies the receiver' address
-  messages.v1.Address receiver = 1;
-  // Specifies the message to send to the actor
-  // Any proto message is allowed to be sent
-  google.protobuf.Any message = 2;
+  messages.v1.RemoteMessage remote_message = 1;
 }
 
 message RemoteAskResponse {

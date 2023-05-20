@@ -34,7 +34,7 @@ var runCmd = &cobra.Command{
 		// create a background context
 		ctx := context.Background()
 		// use the messages default log. real-life implement the log interface`
-		logger := log.New(log.DebugLevel, os.Stdout)
+		logger := log.New(log.InfoLevel, os.Stdout)
 
 		// create the k8 configuration
 		disco := kubernetes.New(logger)

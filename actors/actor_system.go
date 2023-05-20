@@ -473,7 +473,7 @@ func (a *actorSystem) RemoteAsk(ctx context.Context, request *connect.Request[go
 	reqCopy := request.Msg
 
 	// let us validate the host and port
-	hostAndPort := fmt.Sprintf("%s:%d", reqCopy.GetReceiver().GetHost(), reqCopy.GetReceiver().GetPort())
+	hostAndPort := fmt.Sprintf("%s:%d", reqCopy.GetRemoteMessage().GetReceiver().GetHost(), reqCopy.GetRemoteMessage().GetReceiver().GetPort())
 	if hostAndPort != a.nodeAddr {
 		// log the error
 		logger.Error(ErrRemoteSendInvalidNode.Message())
@@ -482,7 +482,7 @@ func (a *actorSystem) RemoteAsk(ctx context.Context, request *connect.Request[go
 	}
 
 	// construct the actor address
-	name := reqCopy.GetReceiver().GetName()
+	name := reqCopy.GetRemoteMessage().GetReceiver().GetName()
 	actorPath := NewPath(name, NewLocalAddress(protocol, a.name, a.host, a.port))
 	// start or get the PID of the actor
 	// check whether the given actor already exist in the system or not
@@ -501,7 +501,7 @@ func (a *actorSystem) RemoteAsk(ctx context.Context, request *connect.Request[go
 	}
 
 	// send the message to actor
-	reply, err := a.handleRemoteAsk(ctx, pid, reqCopy.GetMessage())
+	reply, err := a.handleRemoteAsk(ctx, pid, reqCopy.GetRemoteMessage())
 	// handle the error
 	if err != nil {
 		logger.Error(ErrRemoteSendFailure(err).Error())

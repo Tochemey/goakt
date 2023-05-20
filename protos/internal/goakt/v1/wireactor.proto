@@ -6,7 +6,6 @@ import "messages/v1/address.proto";
 
 option go_package = "github.com/tochemey/goakt/internal/goakt/v1;goaktv1";
 
-
 // WireActor represents the actor information on the wire.
 message WireActor {
   // Specifies the actor name.
