@@ -3,6 +3,7 @@ coverage:
   status:
     patch: off
 ignore:
-  - "pb"
+  - "messages"
   - "test"
   - "examples"
+  - "internal"
