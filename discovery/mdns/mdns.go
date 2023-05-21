@@ -88,7 +88,9 @@ func (d *Discovery) Nodes(ctx context.Context) ([]*discovery.Node, error) {
 			nodes = append(nodes, &discovery.Node{
 				Name: entry.ServiceInstanceName(),
 				Host: entry.AddrIPv4[0].String(),
-				//JoinPort: int32(entry.Port),
+				Ports: map[string]int32{
+					"peers-port": int32(entry.Port),
+				},
 			})
 		}
 	}(entries)
@@ -162,7 +164,9 @@ func (d *Discovery) watchPods(ctx context.Context) {
 				node := &discovery.Node{
 					Name: entry.ServiceInstanceName(),
 					Host: entry.AddrIPv4[0].String(),
-					//JoinPort: int32(entry.Port),
+					Ports: map[string]int32{
+						"peers-port": int32(entry.Port),
+					},
 				}
 				event := &discovery.NodeAdded{Node: node}
 				// add to the channel

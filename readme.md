@@ -10,30 +10,46 @@ Also, check reference section at the end of the post for more material regarding
 
 ## Features
 
-- [x] Send a synchronous message to an actor from a non actor system
-- [x] Send an asynchronous(fire-and-forget) message to an actor from a non actor system
-- [x] Actor to Actor communication (check the [examples'](./examples/actor-to-actor) folder)
-- [x] Enable/Disable Passivation mode to remove/keep idle actors 
-- [x] PreStart hook for an actor. 
-- [x] PostStop hook for an actor for a graceful shutdown
-- [x] ActorSystem 
-- [x] Actor to Actor communication
-- [x] Restart an actor 
-- [x] (Un)Watch an actor
-- [X] Stop and actor
-- [x] Create a child actor
-- [x] Supervisory Strategy (Restart and Stop directive) 
-- [x] Behaviors (Become/BecomeStacked/UnBecome/UnBecomeStacked)
-- [x] Logger interface with a default logger
-- [x] Examples (check the [examples'](./examples) folder)
-- [x] Integration with [OpenTelemetry](https://github.com/open-telemetry/opentelemetry-go) for traces and metrics.
-- [x] Remoting
-    - [x]  Actors can send messages to other actors on a remote system 
-    - [x] Actors can look up other actors' address on a remote system
-- [x] Clustering: The cluster engine is wholly running on the embed etcd server.
-    - Enable the cluster with any number of nodes at least three to start with is recommended
-    - Add node to an existing cluster one at a time
-    - Node removal is supported, however care should be taken when removing a node.
+- Send a synchronous message to an actor from a non actor system
+- Send an asynchronous(fire-and-forget) message to an actor from a non actor system
+- Actor to Actor communication (check the [examples'](./examples/actor-to-actor) folder)
+- Enable/Disable Passivation mode to remove/keep idle actors 
+- PreStart hook for an actor. 
+- PostStop hook for an actor for a graceful shutdown
+- ActorSystem 
+- Actor to Actor communication
+- Restart an actor 
+- (Un)Watch an actor
+- Stop and actor
+- Create a child actor
+- Supervisory Strategy (Restart and Stop directive are supported) 
+- Behaviors (Become/BecomeStacked/UnBecome/UnBecomeStacked)
+- Logger interface with a default logger
+- Examples (check the [examples'](./examples) folder)
+- Integration with [OpenTelemetry](https://github.com/open-telemetry/opentelemetry-go) for traces and metrics.
+- Remoting
+    - Actors can send messages to other actors on a remote system 
+    - Actors can look up other actors' address on a remote system
+- Clustering
+
+## Cluster Mode
+
+To run the system in a cluster mode, each node _is required to have two different ports open_ with the following name tags:
+* `clients-port`: help the cluster client to communicate with the rest of cluster.
+* `peers-port`: help the cluster engine to communicate with other nodes in the cluster
+The rationale behind those ports is that the cluster engine is wholly built on the [embed etcd server](https://pkg.go.dev/github.com/coreos/etcd/embed).
+
+The cluster engine depends upon the [discovery](./discovery/iface.go) mechanism to find other nodes in the cluster. At the moment only the [kubernetes](https://kubernetes.io/docs/home/) [api integration](./discovery/kubernetes) is provided and fully functional.
+
+### Kubernetes Discovery Provider setup
+
+To get the kubernetes discovery working as expected, the following pod labels need to be set:
+* `app.kubernetes.io/part-of`: set this label with the actor system name
+* `app.kubernetes.io/component`: set this label with the application name
+* `app.kubernetes.io/name`: set this label with the application name
+
+### Cluster Mode Example
+A working example can be found [here](./examples/actor-cluster/k8s) with a small [doc](./examples/actor-cluster/k8s/doc.md) showing how to run it.
 
 ## Installation
 ```bash

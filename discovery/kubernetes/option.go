@@ -1,11 +1,9 @@
 package kubernetes
 
 const (
-	Namespace        string = "namespace"
-	ActorSystemName         = "actor_system_name"
-	RemotingPortName        = "remoting"
-	ApplicationName         = "app_name"
-	RaftPortName            = "raft"
+	Namespace       string = "namespace"
+	ActorSystemName        = "actor_system_name"
+	ApplicationName        = "app_name"
 )
 
 // Option represents the kubernetes provider option

@@ -3,13 +3,13 @@ package cluster
 // Option is the interface that applies a configuration option.
 type Option interface {
 	// Apply sets the Option value of a config.
-	Apply(config *Cluster)
+	Apply(cluster *Cluster)
 }
 
 var _ Option = OptionFunc(nil)
 
 // OptionFunc implements the Option interface.
-type OptionFunc func(config *Cluster)
+type OptionFunc func(cluster *Cluster)
 
 func (f OptionFunc) Apply(c *Cluster) {
 	f(c)

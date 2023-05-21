@@ -366,7 +366,7 @@ func (a *actorSystem) Start(ctx context.Context) error {
 	if err := a.registerMetrics(); err != nil {
 		a.logger.Error(errors.Wrapf(err, "failed to register actorSystem=%s metrics", a.name))
 	}
-	a.logger.Infof("%s ActorSystem started on Cluster=%s..:)", a.name, a.nodeAddr)
+	a.logger.Infof("%s ActorSystem started..:)", a.name)
 	return nil
 }
 

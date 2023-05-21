@@ -27,10 +27,12 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 )
 
+// WatchMan is used to handle parent child relationship.
+// This helps handle error propagation from a child actor using any of supervisory strategies
 type WatchMan struct {
 	Parent  PID        // the Parent of the actor watching
-	ErrChan chan error // the channel where to pass error message
-	Done    chan Unit
+	ErrChan chan error // ErrChan the channel where to pass error message
+	Done    chan Unit  // Done when watching is completed
 }
 
 // PID defines the various actions one can perform on a given actor
@@ -151,6 +153,8 @@ type pid struct {
 	lastProcessingDuration *atomic.Duration
 	mailboxSizeCounter     *atomic.Uint64
 
+	// mutex that helps synchronize the pid in a concurrent environment
+	// this helps protect the pid fields accessibility
 	mu sync.RWMutex
 
 	// supervisor strategy

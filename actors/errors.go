@@ -8,16 +8,16 @@ import (
 )
 
 var (
-	ErrInvalidActorSystemName       = errors.New("invalid ActorSystem name, must contain only word characters (i.e. [a-zA-Z0-9] plus non-leading '-' or '_')")
-	ErrNotReady                     = errors.New("actor is not ready")
-	ErrUnhandled                    = errors.New("unhandled message")
-	ErrMissingConfig                = errors.New("config is missing")
-	ErrUndefinedActor               = errors.New("actor is not defined")
-	ErrRequestTimeout               = errors.New("request timed out")
-	ErrEmptyBehavior                = errors.New("no behavior defined")
-	ErrRemoteSendInvalidActorSystem = connect.NewError(connect.CodeFailedPrecondition, errors.New("invalid actor system")) // nolint
-	ErrRemoteSendInvalidNode        = connect.NewError(connect.CodeFailedPrecondition, errors.New("invalid actor system node"))
-	ErrRemoteActorNotFound          = func(addr string) error {
+	ErrInvalidActorSystemName = errors.New("invalid ActorSystem name, must contain only word characters (i.e. [a-zA-Z0-9] plus non-leading '-' or '_')")
+	ErrNotReady               = errors.New("actor is not ready")
+	ErrUnhandled              = errors.New("unhandled message")
+	ErrMissingConfig          = errors.New("config is missing")
+	ErrUndefinedActor         = errors.New("actor is not defined")
+	ErrRequestTimeout         = errors.New("request timed out")
+	ErrEmptyBehavior          = errors.New("no behavior defined")
+
+	ErrRemoteSendInvalidNode = connect.NewError(connect.CodeFailedPrecondition, errors.New("invalid actor system node"))
+	ErrRemoteActorNotFound   = func(addr string) error {
 		return connect.NewError(connect.CodeNotFound, fmt.Errorf("remote actor=%s not found", addr))
 	}
 	ErrRemoteSendFailure = func(err error) error {
