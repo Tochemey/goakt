@@ -93,7 +93,7 @@ func (p *AccountEntity) Receive(ctx goakt.ReceiveContext) {
 		}
 
 	case *messagespb.RemoteMessage:
-		p.logger.Info("crediting balance...")
+		p.logger.Info("message handling using remote messaging...")
 		message, _ := msg.GetMessage().UnmarshalNew()
 		// pattern-match the message
 		switch x := message.(type) {
@@ -111,11 +111,21 @@ func (p *AccountEntity) Receive(ctx goakt.ReceiveContext) {
 			if p.accountID == accountID {
 				p.balance.Store(balance)
 				p.created.Store(true)
-				// send the response back to the caller
-				_ = ctx.Self().RemoteTell(context.Background(), msg.GetSender(), &samplepb.Account{
-					AccountId:      accountID,
-					AccountBalance: p.balance.Load(),
-				})
+				// send the reply to the sender in case there is one
+				sender := ctx.Sender()
+				// here we handle an actor Tell/Ask reply
+				if sender != goakt.NoSender {
+					_ = ctx.Self().Tell(ctx.Context(), ctx.Sender(), &samplepb.Account{
+						AccountId:      accountID,
+						AccountBalance: p.balance.Load(),
+					})
+				} else {
+					// here we are handling just an ask
+					ctx.Response(&samplepb.Account{
+						AccountId:      accountID,
+						AccountBalance: p.balance.Load(),
+					})
+				}
 			}
 		case *samplepb.CreditAccount:
 			p.logger.Info("crediting balance...")
@@ -125,11 +135,20 @@ func (p *AccountEntity) Receive(ctx goakt.ReceiveContext) {
 			// first check whether the accountID is mine
 			if p.accountID == accountID {
 				p.balance.Add(balance)
-				// send the response back to the caller
-				_ = ctx.Self().RemoteTell(context.Background(), msg.GetSender(), &samplepb.Account{
-					AccountId:      accountID,
-					AccountBalance: p.balance.Load(),
-				})
+				// send the reply to the sender
+				sender := ctx.Sender()
+				// no sender
+				if sender != goakt.NoSender {
+					_ = ctx.Self().Tell(ctx.Context(), ctx.Sender(), &samplepb.Account{
+						AccountId:      accountID,
+						AccountBalance: p.balance.Load(),
+					})
+				} else {
+					ctx.Response(&samplepb.Account{
+						AccountId:      accountID,
+						AccountBalance: p.balance.Load(),
+					})
+				}
 			}
 		}
 

@@ -77,6 +77,7 @@ func (s *AccountService) CreditAccount(ctx context.Context, c *connect.Request[s
 
 	// check whether the actor system is running in a cluster
 	if !s.actorSystem.InCluster() {
+		s.logger.Info("cluster mode not is on....")
 		// locate the given actor
 		pid, err := s.actorSystem.GetLocalActor(ctx, accountID)
 		// handle the error
@@ -118,6 +119,7 @@ func (s *AccountService) CreditAccount(ctx context.Context, c *connect.Request[s
 		}
 	}
 
+	s.logger.Info("cluster mode is on....")
 	// here the actor system is running in a cluster
 	addr, err := s.actorSystem.GetRemoteActor(ctx, accountID)
 	// handle the error
@@ -132,14 +134,14 @@ func (s *AccountService) CreditAccount(ctx context.Context, c *connect.Request[s
 	}
 	// send a remote message to the actor
 	reply, err := actors.RemoteAsk(ctx, addr, command)
-
 	// handle the error
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 
+	message, _ := reply.UnmarshalNew()
 	// pattern match on the reply
-	switch x := reply.(type) {
+	switch x := message.(type) {
 	case *samplepb.Account:
 		// return the appropriate response
 		return connect.NewResponse(&samplepb.CreditAccountResponse{Account: x}), nil

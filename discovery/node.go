@@ -10,28 +10,6 @@ type Node struct {
 	StartTime int64
 	// Ports specifies the list of Ports
 	Ports map[string]int32
+	// IsRunning specifies whether the node is up and running
+	IsRunning bool
 }
-
-//// NodeURL return the node URL
-//func (n *Node) NodeURL() string {
-//	var url string
-//	for _, portNumber := range n.Ports {
-//		if portNumber == urls.AdvertisePeerDefaultPortNumber {
-//			url = fmt.Sprintf("http://%s:%d", n.Host, portNumber)
-//			break
-//		}
-//	}
-//	return url
-//}
-//
-//// ClientURL return the node URL
-//func (n *Node) ClientURL() string {
-//	var url string
-//	for _, portNumber := range n.Ports {
-//		if portNumber == urls.AdvertiseClientDefaultPortNumber {
-//			url = fmt.Sprintf("http://%s:%d", n.Host, portNumber)
-//			break
-//		}
-//	}
-//	return url
-//}

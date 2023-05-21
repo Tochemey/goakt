@@ -145,7 +145,7 @@ func RemoteTell(ctx context.Context, to *pb.Address, message proto.Message) erro
 }
 
 // RemoteAsk sends a synchronous message to another actor remotely and expect a response.
-func RemoteAsk(ctx context.Context, to *pb.Address, message proto.Message) (response proto.Message, err error) {
+func RemoteAsk(ctx context.Context, to *pb.Address, message proto.Message) (response *anypb.Any, err error) {
 	// add a span context
 	ctx, span := telemetry.SpanContext(ctx, "RemoteTell")
 	defer span.End()
@@ -165,8 +165,11 @@ func RemoteAsk(ctx context.Context, to *pb.Address, message proto.Message) (resp
 	)
 	// prepare the rpcRequest to send
 	rpcRequest := connect.NewRequest(&goaktpb.RemoteAskRequest{
-		Receiver: to,
-		Message:  marshaled,
+		RemoteMessage: &pb.RemoteMessage{
+			Sender:   RemoteNoSender,
+			Receiver: to,
+			Message:  marshaled,
+		},
 	})
 	// send the request
 	rpcResponse, rpcErr := remoteClient.RemoteAsk(ctx, rpcRequest)

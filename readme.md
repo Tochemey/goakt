@@ -30,7 +30,10 @@ Also, check reference section at the end of the post for more material regarding
 - [x] Remoting
     - [x]  Actors can send messages to other actors on a remote system 
     - [x] Actors can look up other actors' address on a remote system
-- [x] Clustering (WIP): At the moment it is not fully-tested.
+- [x] Clustering: The cluster engine is wholly running on the embed etcd server.
+    - Enable the cluster with any number of nodes at three recommended
+    - Add node to an existing cluster one at a time to
+    - Node removal is supported, however care should be taken when removing a node.
 
 ## Installation
 ```bash

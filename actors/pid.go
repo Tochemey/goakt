@@ -67,7 +67,7 @@ type PID interface {
 	// RemoteAsk is used to send a message to an actor remotely and expect a response
 	// immediately. With this type of message the receiver cannot communicate back to Sender
 	// except reply the message with a response. This one-way communication.
-	RemoteAsk(ctx context.Context, to *pb.Address, message proto.Message) (response proto.Message, err error)
+	RemoteAsk(ctx context.Context, to *pb.Address, message proto.Message) (response *anypb.Any, err error)
 	// RemoteLookup look for an actor address on a remote node. If the actorSystem is nil then the lookup will be done
 	// using the same actor system as the PID actor system
 	RemoteLookup(ctx context.Context, host string, port int, name string) (addr *pb.Address, err error)
@@ -565,7 +565,7 @@ func (p *pid) RemoteTell(ctx context.Context, to *pb.Address, message proto.Mess
 }
 
 // RemoteAsk sends a synchronous message to another actor remotely and expect a response.
-func (p *pid) RemoteAsk(ctx context.Context, to *pb.Address, message proto.Message) (response proto.Message, err error) {
+func (p *pid) RemoteAsk(ctx context.Context, to *pb.Address, message proto.Message) (response *anypb.Any, err error) {
 	// add a span context
 	ctx, span := telemetry.SpanContext(ctx, "RemoteTell")
 	defer span.End()
@@ -585,10 +585,14 @@ func (p *pid) RemoteAsk(ctx context.Context, to *pb.Address, message proto.Messa
 	)
 
 	// prepare the rpcRequest to send
-	rpcRequest := connect.NewRequest(&goaktpb.RemoteAskRequest{
-		Receiver: to,
-		Message:  marshaled,
-	})
+	rpcRequest := connect.NewRequest(
+		&goaktpb.RemoteAskRequest{
+			RemoteMessage: &pb.RemoteMessage{
+				Sender:   RemoteNoSender,
+				Receiver: to,
+				Message:  marshaled,
+			},
+		})
 	// send the request
 	rpcResponse, rpcErr := remoteClient.RemoteAsk(ctx, rpcRequest)
 	// handle the error

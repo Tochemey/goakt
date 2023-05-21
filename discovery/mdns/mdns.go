@@ -106,6 +106,11 @@ func (d *Discovery) Watch(ctx context.Context) (<-chan discovery.Event, error) {
 	return d.publicChan, nil
 }
 
+// EarliestNode returns the earliest node. This is based upon the node timestamp
+func (d *Discovery) EarliestNode(ctx context.Context) (*discovery.Node, error) {
+	return nil, errors.New("not yet implemented")
+}
+
 // Stop shutdown the discovery engine
 func (d *Discovery) Stop() error {
 	// first check whether the actor system has started

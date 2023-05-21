@@ -55,3 +55,10 @@ func WithDataDir(datadir string) Option {
 		config.dataDir = datadir
 	})
 }
+
+// WithJoin sets join field to true and tells the node to join an existing cluster
+func WithJoin(join bool) Option {
+	return OptionFunc(func(config *Config) {
+		config.join = join
+	})
+}
