@@ -3,7 +3,6 @@ package actors
 import (
 	"testing"
 
-	comp "github.com/google/go-cmp/cmp"
 	"github.com/stretchr/testify/assert"
 	pb "github.com/tochemey/goakt/messages/v1"
 	"google.golang.org/protobuf/encoding/prototext"
@@ -11,7 +10,7 @@ import (
 
 func TestPath(t *testing.T) {
 	name := "TestActor"
-	addr := &LocalAddress{
+	addr := &Address{
 		host:     "localhost",
 		port:     888,
 		system:   "Sys",
@@ -23,7 +22,7 @@ func TestPath(t *testing.T) {
 	assert.IsType(t, new(Path), path)
 
 	// these are just routine assertions
-	assert.True(t, comp.Equal(addr, path.LocalAddress(), comp.AllowUnexported(LocalAddress{})))
+	assert.Nil(t, path.LocalAddress())
 	assert.Equal(t, name, path.Name())
 	assert.Equal(t, "goakt://Sys@localhost:888/TestActor", path.String())
 	remoteAddr := &pb.Address{
@@ -34,8 +33,8 @@ func TestPath(t *testing.T) {
 	}
 
 	pathRemoteAddr := &pb.Address{
-		Host: path.LocalAddress().Host(),
-		Port: int32(path.LocalAddress().Port()),
+		Host: path.Address().Host(),
+		Port: int32(path.Address().Port()),
 		Name: path.Name(),
 		Id:   path.ID().String(),
 	}

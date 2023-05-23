@@ -20,7 +20,7 @@ func main() {
 	// use the messages default log. real-life implement the log interface`
 	logger := log.DefaultLogger
 	// create the actor system configuration. kindly in real-life application handle the error
-	config, _ := goakt.NewConfig("SampleActorSystem", "127.0.0.1:0",
+	config, _ := goakt.NewConfig("SampleActorSystem",
 		goakt.WithExpireActorAfter(10*time.Second),
 		goakt.WithLogger(logger),
 		goakt.WithActorInitMaxRetries(3))

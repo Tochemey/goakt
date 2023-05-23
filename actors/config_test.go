@@ -11,7 +11,7 @@ import (
 
 func TestConfig(t *testing.T) {
 	t.Run("WithValidConfig", func(t *testing.T) {
-		cfg, err := NewConfig("testSys", "localhost:0")
+		cfg, err := NewConfig("testSys")
 		require.NoError(t, err)
 		assert.NotNil(t, cfg)
 		assert.EqualValues(t, 100*time.Millisecond, cfg.ReplyTimeout())
@@ -19,17 +19,11 @@ func TestConfig(t *testing.T) {
 		assert.EqualValues(t, 5, cfg.ActorInitMaxRetries())
 		assert.Equal(t, log.DefaultLogger, cfg.Logger())
 		assert.Equal(t, "testSys", cfg.Name())
-		assert.Equal(t, "localhost:0", cfg.NodeHostAndPort())
 	})
 	t.Run("WithEmptyName", func(t *testing.T) {
-		cfg, err := NewConfig("", "localhost:0")
+		cfg, err := NewConfig("")
 		require.Error(t, err)
 		assert.EqualError(t, err, ErrNameRequired.Error())
-		assert.Nil(t, cfg)
-	})
-	t.Run("WithInvalidNodeAddr", func(t *testing.T) {
-		cfg, err := NewConfig("Sys", "localhost")
-		require.Error(t, err)
 		assert.Nil(t, cfg)
 	})
 }
@@ -72,8 +66,8 @@ func TestOptions(t *testing.T) {
 		},
 		{
 			name:           "WithRemoting",
-			option:         WithRemoting(),
-			expectedConfig: Config{remotingEnabled: true},
+			option:         WithRemoting("localhost", 3100),
+			expectedConfig: Config{remotingEnabled: true, remotingPort: 3100, remotingHost: "localhost"},
 		},
 	}
 	for _, tc := range testCases {

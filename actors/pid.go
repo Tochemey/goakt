@@ -328,7 +328,7 @@ func (p *pid) SpawnChild(ctx context.Context, name string, actor Actor) (PID, er
 	}
 
 	// create the child actor path
-	childActorPath := NewPath(name, p.ActorPath().LocalAddress()).WithParent(p.ActorPath())
+	childActorPath := NewPath(name, p.ActorPath().Address()).WithParent(p.ActorPath())
 
 	// check whether the child actor already exist and just return the PID
 	if cid, ok := p.children.Get(childActorPath); ok {
@@ -547,8 +547,8 @@ func (p *pid) RemoteTell(ctx context.Context, to *pb.Address, message proto.Mess
 
 	// construct the from address
 	sender := &pb.Address{
-		Host: p.ActorPath().LocalAddress().Host(),
-		Port: int32(p.ActorPath().LocalAddress().Port()),
+		Host: p.ActorPath().Address().Host(),
+		Port: int32(p.ActorPath().Address().Port()),
 		Name: p.ActorPath().Name(),
 		Id:   p.ActorPath().ID().String(),
 	}
@@ -817,7 +817,7 @@ func (p *pid) stop(ctx context.Context) {
 	// signal we are shutting down to stop processing public
 	p.shutdownSignal <- Unit{}
 	// add some logging
-	p.logger.Infof("Remaining public in the mailbox have been processed for actor=%s", p.ActorPath().String())
+	p.logger.Infof("Remaining messages in the mailbox have been processed for actor=%s", p.ActorPath().String())
 	// stop the ticker
 	ticker.Stop()
 }

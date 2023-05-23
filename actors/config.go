@@ -21,9 +21,6 @@ var (
 type Config struct {
 	// Specifies the actor system name
 	name string
-	// Specifies the Node Host and IP address
-	// example: 127.0.0.1:8888
-	nodeHostAndPort string
 	// Specifies the logger to use in the system
 	logger log.Logger
 	// Specifies at what point in time to passivate the actor.
@@ -43,6 +40,10 @@ type Config struct {
 	// Specifies whether remoting is enabled.
 	// This allows to handle remote messaging
 	remotingEnabled bool
+	// Specifies the remoting port
+	remotingPort int32
+	// Specifies the remoting host
+	remotingHost string
 	// convenient field to check cluster setup
 	clusterEnabled bool
 	// cluster discovery method
@@ -50,7 +51,7 @@ type Config struct {
 }
 
 // NewConfig creates an instance of Config
-func NewConfig(name, nodeHostAndPort string, options ...Option) (*Config, error) {
+func NewConfig(name string, options ...Option) (*Config, error) {
 	// check whether the name is set or not
 	if name == "" {
 		return nil, ErrNameRequired
@@ -59,14 +60,9 @@ func NewConfig(name, nodeHostAndPort string, options ...Option) (*Config, error)
 		return nil, ErrInvalidActorSystemName
 	}
 
-	// check whether the node host and port is set and valid
-	if err := validateHostAndPort(nodeHostAndPort); err != nil {
-		return nil, err
-	}
 	// create an instance of config
 	config := &Config{
 		name:                name,
-		nodeHostAndPort:     nodeHostAndPort,
 		logger:              log.DefaultLogger,
 		expireActorAfter:    2 * time.Second,
 		replyTimeout:        100 * time.Millisecond,
@@ -88,11 +84,6 @@ func (c Config) Name() string {
 	return c.name
 }
 
-// NodeHostAndPort returns the node host and port
-func (c Config) NodeHostAndPort() string {
-	return c.nodeHostAndPort
-}
-
 // Logger returns the log
 func (c Config) Logger() log.Logger {
 	return c.logger
@@ -111,14 +102,6 @@ func (c Config) ReplyTimeout() time.Duration {
 // ActorInitMaxRetries returns the actor init max retries
 func (c Config) ActorInitMaxRetries() int {
 	return c.actorInitMaxRetries
-}
-
-// HostAndPort returns the host and the port
-func (c Config) HostAndPort() (host string, port int) {
-	// no need to check for the error because of the previous validation
-	host, portStr, _ := net.SplitHostPort(c.nodeHostAndPort)
-	port, _ = strconv.Atoi(portStr)
-	return
 }
 
 // SupervisorStrategy specifies the supervisor strategy
@@ -221,16 +204,21 @@ func WithTelemetry(telemetry *telemetry.Telemetry) Option {
 }
 
 // WithRemoting enables remoting on the actor system
-func WithRemoting() Option {
+func WithRemoting(host string, port int32) Option {
 	return OptionFunc(func(config *Config) {
 		config.remotingEnabled = true
+		config.remotingPort = port
+		config.remotingHost = host
 	})
 }
 
-// WithClustering enables clustering on the actor system
-func WithClustering(disco discovery.Discovery) Option {
+// WithClustering enables clustering on the actor system. This enables remoting on the actor system as well
+// and set the remotingHost to the cluster node host when the cluster is fully enabled.
+func WithClustering(disco discovery.Discovery, remotingPort int32) Option {
 	return OptionFunc(func(config *Config) {
 		config.clusterEnabled = true
+		config.remotingEnabled = true
+		config.remotingPort = remotingPort
 		config.disco = disco
 	})
 }

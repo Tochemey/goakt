@@ -120,7 +120,7 @@ func main() {
   // use the messages default log. real-life implement the log interface`
   logger := log.DefaultLogger
   // create the actor system configuration. kindly in real-life application handle the error
-  config, _ := goakt.NewConfig("SampleActorSystem", "127.0.0.1:0",
+  config, _ := goakt.NewConfig("SampleActorSystem",
     goakt.WithExpireActorAfter(10*time.Second),
     goakt.WithLogger(logger),
     goakt.WithActorInitMaxRetries(3))
@@ -148,7 +148,7 @@ func main() {
   <-interruptSignal
 
   // log some stats
-  logger.Infof("Actor=%s has processed %d public in %s", actor.ActorPath().String(), actor.ReceivedCount(ctx), time.Since(startTime))
+  logger.Infof("Actor=%s has processed %d messages in %s", actor.ActorPath().String(), actor.ReceivedCount(ctx), time.Since(startTime))
 
   // stop the actor system
   _ = actorSystem.Stop(ctx)
@@ -175,14 +175,14 @@ func (p *Pinger) PreStart(ctx context.Context) error {
   defer p.mu.Unlock()
   p.logger = log.DefaultLogger
   p.count = atomic.NewInt32(0)
-  p.logger.Info("About to Start")
+  p.logger.Info("Pinger is about to Start")
   return nil
 }
 
 func (p *Pinger) Receive(ctx goakt.ReceiveContext) {
   switch ctx.Message().(type) {
   case *samplepb.Ping:
-    p.logger.Info("received Ping")
+    p.logger.Info("Pinger received Ping")
     p.count.Add(1)
   default:
     p.logger.Panic(goakt.ErrUnhandled)
@@ -190,8 +190,8 @@ func (p *Pinger) Receive(ctx goakt.ReceiveContext) {
 }
 
 func (p *Pinger) PostStop(ctx context.Context) error {
-  p.logger.Info("About to stop")
-  p.logger.Infof("Processed=%d public", p.count.Load())
+  p.logger.Info("Pinger is about to stop")
+  p.logger.Infof("Processed=%d messages", p.count.Load())
   return nil
 }
 ```

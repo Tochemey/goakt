@@ -9,8 +9,8 @@ import (
 
 // Path is a unique path to an actor
 type Path struct {
-	// specifies the LocalAddress under which this path can be reached
-	address *LocalAddress
+	// specifies the Address under which this path can be reached
+	address *Address
 	// specifies the name of the actor that this path refers to.
 	name string
 	// specifies the internal unique id of the actor that this path refer to.
@@ -20,7 +20,7 @@ type Path struct {
 }
 
 // NewPath creates an immutable Path
-func NewPath(name string, address *LocalAddress) *Path {
+func NewPath(name string, address *Address) *Path {
 	// create the instance and return it
 	return &Path{
 		address: address,
@@ -30,44 +30,58 @@ func NewPath(name string, address *LocalAddress) *Path {
 }
 
 // Parent returns the parent path
-func (a *Path) Parent() *Path {
-	return a.parent
+func (p *Path) Parent() *Path {
+	return p.parent
 }
 
 // WithParent sets the parent actor path and returns a new path
 // This function is immutable
-func (a *Path) WithParent(parent *Path) *Path {
-	newPath := NewPath(a.name, a.address)
+func (p *Path) WithParent(parent *Path) *Path {
+	newPath := NewPath(p.name, p.address)
 	newPath.parent = parent
 	return newPath
 }
 
 // LocalAddress return the actor path local address
-func (a *Path) LocalAddress() *LocalAddress {
-	return a.address
+func (p *Path) LocalAddress() *Address {
+	// only return the local address when the address is in local scope
+	// otherwise return nil
+	if p.address.IsLocal() {
+		return p.address
+	}
+	return nil
+}
+
+// Address returns the address of the path
+func (p *Path) Address() *Address {
+	return p.address
 }
 
 // Name returns the name of the actor that this path refers to.
-func (a *Path) Name() string {
-	return a.name
+func (p *Path) Name() string {
+	return p.name
 }
 
 // ID returns the internal unique id of the actor that this path refer to.
-func (a *Path) ID() uuid.UUID {
-	return a.id
+func (p *Path) ID() uuid.UUID {
+	return p.id
 }
 
 // String returns the string representation of an actorPath
-func (a *Path) String() string {
-	return fmt.Sprintf("%s/%s", a.address.String(), a.name)
+func (p *Path) String() string {
+	return fmt.Sprintf("%s/%s", p.address.String(), p.name)
 }
 
 // RemoteAddress returns the remote from path
-func (a *Path) RemoteAddress() *pb.Address {
+func (p *Path) RemoteAddress() *pb.Address {
+	// only returns a remote address when we are in a remote scope otherwise return nil
+	if !p.address.IsRemote() {
+		return nil
+	}
 	return &pb.Address{
-		Host: a.LocalAddress().Host(),
-		Port: int32(a.LocalAddress().Port()),
-		Name: a.Name(),
-		Id:   a.ID().String(),
+		Host: p.address.Host(),
+		Port: int32(p.address.Port()),
+		Name: p.Name(),
+		Id:   p.ID().String(),
 	}
 }

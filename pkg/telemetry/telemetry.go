@@ -3,7 +3,6 @@ package telemetry
 import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/metric"
-	metricglobal "go.opentelemetry.io/otel/metric/global"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -33,7 +32,7 @@ func New(options ...Option) *Telemetry {
 	// create a config instance
 	telemetry := &Telemetry{
 		TracerProvider: otel.GetTracerProvider(),
-		MeterProvider:  metricglobal.MeterProvider(),
+		MeterProvider:  otel.GetMeterProvider(),
 	}
 
 	// apply the various options
