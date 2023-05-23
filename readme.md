@@ -16,7 +16,7 @@ Also, check reference section at the end of the post for more material regarding
 - Enable/Disable Passivation mode to remove/keep idle actors 
 - PreStart hook for an actor. 
 - PostStop hook for an actor for a graceful shutdown
-- ActorSystem 
+- ActorSystem: Actors live and die withing a system.
 - Actor to Actor communication
 - Restart an actor 
 - (Un)Watch an actor
@@ -37,9 +37,17 @@ Also, check reference section at the end of the post for more material regarding
 To run the system in a cluster mode, each node _is required to have two different ports open_ with the following name tags:
 * `clients-port`: help the cluster client to communicate with the rest of cluster.
 * `peers-port`: help the cluster engine to communicate with other nodes in the cluster
+
 The rationale behind those ports is that the cluster engine is wholly built on the [embed etcd server](https://pkg.go.dev/github.com/coreos/etcd/embed).
 
-The cluster engine depends upon the [discovery](./discovery/iface.go) mechanism to find other nodes in the cluster. At the moment only the [kubernetes](https://kubernetes.io/docs/home/) [api integration](./discovery/kubernetes) is provided and fully functional.
+### Operations Guide
+The following outlines the cluster mode operations which can help have a healthy GoAkt cluster:
+* One can start a single node cluster or a multiple nodes cluster.
+* To add more nodes to the cluster, kindly add them one at a time.
+* To remove nodes, kindly remove them one at a time. Remember to have a healthy cluster you will need at least three nodes running.
+
+The cluster engine depends upon the [discovery](./discovery/iface.go) mechanism to find other nodes in the cluster. 
+At the moment only the [kubernetes](https://kubernetes.io/docs/home/) [api integration](./discovery/kubernetes) is provided and fully functional.
 
 ### Kubernetes Discovery Provider setup
 
@@ -48,7 +56,35 @@ To get the kubernetes discovery working as expected, the following pod labels ne
 * `app.kubernetes.io/component`: set this label with the application name
 * `app.kubernetes.io/name`: set this label with the application name
 
-### Cluster Mode Example
+#### Role Based Access
+You’ll also have to grant the Service Account that your pods run under access to list pods. The following configuration can be used as a starting point. 
+It creates a Role, pod-reader, which grants access to query pod information. It then binds the default Service Account to the Role by creating a RoleBinding. 
+Adjust as necessary:
+```
+kind: Role
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: pod-reader
+rules:
+  - apiGroups: [""] # "" indicates the core API group
+    resources: ["pods"]
+    verbs: ["get", "watch", "list"]
+---
+kind: RoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: read-pods
+subjects:
+  # Uses the default service account. Consider creating a new one.
+  - kind: ServiceAccount
+    name: default
+roleRef:
+  kind: Role
+  name: pod-reader
+  apiGroup: rbac.authorization.k8s.io
+```
+
+### Sample Project
 A working example can be found [here](./examples/actor-cluster/k8s) with a small [doc](./examples/actor-cluster/k8s/doc.md) showing how to run it.
 
 ## Installation
@@ -158,7 +194,6 @@ func (p *Pinger) PostStop(ctx context.Context) error {
   p.logger.Infof("Processed=%d public", p.count.Load())
   return nil
 }
-
 ```
 
 ## Contribution
