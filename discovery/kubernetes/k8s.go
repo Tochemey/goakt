@@ -9,6 +9,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/tochemey/goakt/discovery"
 	"github.com/tochemey/goakt/log"
+	"github.com/tochemey/goakt/pkg/telemetry"
 	"go.uber.org/atomic"
 	corev1 "k8s.io/api/core/v1"
 	k8meta "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -55,6 +56,10 @@ func (k *Discovery) ID() string {
 
 // Nodes returns the list of up and running Nodes at a given time
 func (k *Discovery) Nodes(ctx context.Context) ([]*discovery.Node, error) {
+	// add a span context
+	ctx, span := telemetry.SpanContext(ctx, "Nodes")
+	defer span.End()
+
 	// first check whether the actor system has started
 	if !k.isInitialized.Load() {
 		return nil, errors.New("kubernetes discovery engine not initialized")
@@ -113,6 +118,9 @@ MainLoop:
 
 // Watch returns event based upon node lifecycle
 func (k *Discovery) Watch(ctx context.Context) (<-chan discovery.Event, error) {
+	// add a span context
+	_, span := telemetry.SpanContext(ctx, "Watch")
+	defer span.End()
 	// first check whether the actor system has started
 	if !k.isInitialized.Load() {
 		return nil, errors.New("kubernetes discovery engine not initialized")
@@ -124,6 +132,9 @@ func (k *Discovery) Watch(ctx context.Context) (<-chan discovery.Event, error) {
 
 // Start the discovery engine
 func (k *Discovery) Start(ctx context.Context, meta discovery.Meta) error {
+	// add a span context
+	_, span := telemetry.SpanContext(ctx, "Start")
+	defer span.End()
 	// validate the meta
 	// let us make sure we have the required options set
 	// assert the present of the namespace
