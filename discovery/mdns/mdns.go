@@ -46,7 +46,7 @@ func (d *Discovery) ID() string {
 }
 
 // Start the discovery engine
-func (d *Discovery) Start(ctx context.Context, meta discovery.Meta) error {
+func (d *Discovery) Start(_ context.Context, meta discovery.Meta) error {
 	var err error
 	// validate the meta
 	// let us make sure we have the required options set
@@ -109,7 +109,7 @@ func (d *Discovery) Watch(ctx context.Context) (<-chan discovery.Event, error) {
 }
 
 // EarliestNode returns the earliest node. This is based upon the node timestamp
-func (d *Discovery) EarliestNode(ctx context.Context) (*discovery.Node, error) {
+func (d *Discovery) EarliestNode(context.Context) (*discovery.Node, error) {
 	return nil, errors.New("not yet implemented")
 }
 

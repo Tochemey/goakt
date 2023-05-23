@@ -11,7 +11,7 @@ import (
 )
 
 func TestEmbed(t *testing.T) {
-	t.Run("With successful start", func(t *testing.T) {
+	t.Run("With successful start and stop", func(t *testing.T) {
 		assert.NoError(t, os.RemoveAll("test"))
 		// create the various URLs and cluster name
 		clientURLs := types.MustNewURLs([]string{"http://0.0.0.0:2379"})
@@ -32,7 +32,7 @@ func TestEmbed(t *testing.T) {
 		assert.NoError(t, embed.Stop())
 		assert.NoError(t, os.RemoveAll("test"))
 	})
-	t.Run("With successful start with initial URL", func(t *testing.T) {
+	t.Run("With successful start and stop with initial URL", func(t *testing.T) {
 		assert.NoError(t, os.RemoveAll("test"))
 		// create the various URLs and cluster name
 		clientURLs := types.MustNewURLs([]string{"http://0.0.0.0:2379"})

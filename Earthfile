@@ -2,25 +2,25 @@ VERSION 0.7
 PROJECT tochemey/goakt
 
 
-FROM tochemey/docker-go:1.20.1-0.7.0
+FROM tochemey/docker-go:1.20.4-0.8.0
 
 # install the various tools to generate connect-go
 RUN go install github.com/fullstorydev/grpcurl/cmd/grpcurl@latest
 RUN go install github.com/bufbuild/connect-go/cmd/protoc-gen-connect-go@latest
 
 # run a PR branch is created
-#pr-pipeline:
-#  PIPELINE
-#  TRIGGER pr main
-#  BUILD +lint
-#  BUILD +local-test
+pr-pipeline:
+    PIPELINE
+    TRIGGER pr main
+    BUILD +lint
+    BUILD +local-test
 
 # run on when a push to main is made
-#main-pipeline:
-#  PIPELINE
-#  TRIGGER push main
-#  BUILD +lint
-#  BUILD +local-test
+main-pipeline:
+    PIPELINE
+    TRIGGER push main
+    BUILD +lint
+    BUILD +local-test
 
 pbs:
     BUILD +internal-pb
@@ -32,7 +32,6 @@ test:
   BUILD +local-test
 
 code:
-
     WORKDIR /app
 
     # download deps

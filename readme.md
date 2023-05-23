@@ -3,7 +3,7 @@
 [![codecov](https://codecov.io/gh/Tochemey/goakt/branch/main/graph/badge.svg?token=J0p9MzwSRH)](https://codecov.io/gh/Tochemey/goakt)
 [![Go Report Card](https://goreportcard.com/badge/github.com/tochemey/goakt)](https://goreportcard.com/report/github.com/tochemey/goakt)
 
-Minimal actor framework with goodies to build reactive and distributed system in golang using protocol buffers as actor messages.
+Minimal actor framework with goodies to build reactive and distributed system in golang using _**protocol buffers as actor messages**_.
 
 If you are not familiar with the actor model, the blog post from Brian Storti [here](https://www.brianstorti.com/the-actor-model/) is an excellent and short introduction to the actor model. 
 Also, check reference section at the end of the post for more material regarding actor model
@@ -17,7 +17,7 @@ Also, check reference section at the end of the post for more material regarding
 - PreStart hook for an actor. 
 - PostStop hook for an actor for a graceful shutdown
 - ActorSystem: Actors live and die withing a system.
-- Actor to Actor communication
+- Actor to Actor communication via Tell and Ask message patterns.
 - Restart an actor 
 - (Un)Watch an actor
 - Stop and actor
@@ -28,8 +28,8 @@ Also, check reference section at the end of the post for more material regarding
 - Examples (check the [examples'](./examples) folder)
 - Integration with [OpenTelemetry](https://github.com/open-telemetry/opentelemetry-go) for traces and metrics.
 - Remoting
-    - Actors can send messages to other actors on a remote system 
-    - Actors can look up other actors' address on a remote system
+    - Actors can send messages to other actors on a remote system via Tell and Ask message patterns.
+    - Actors can look up other actors' address on a remote system.
 - Clustering
 
 ## Cluster Mode
