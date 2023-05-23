@@ -199,7 +199,8 @@ func (a *actorSystem) StartActor(ctx context.Context, name string, actor Actor) 
 		var buf bytes.Buffer
 		enc := gob.NewEncoder(&buf)
 		if err := enc.Encode(actorType); err != nil {
-			// TODO fatal log
+			a.logger.Warnf("failed to encode the underlying actor=%s", name)
+			// TODO: at the moment the byte array of the underlying actor is not used but can become handy in the future
 		}
 
 		// create a wire actor
@@ -640,7 +641,7 @@ func (a *actorSystem) enableClustering(ctx context.Context) {
 }
 
 // enableRemoting enables the remoting service to handle remote messaging
-func (a *actorSystem) enableRemoting(ctx context.Context) {
+func (a *actorSystem) enableRemoting(context.Context) {
 	// create a function to handle the observability
 	interceptor := func(tp trace.TracerProvider, mp metric.MeterProvider) connect.Interceptor {
 		return otelconnect.NewInterceptor(
