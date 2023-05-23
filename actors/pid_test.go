@@ -26,7 +26,7 @@ func TestActorReceive(t *testing.T) {
 	ctx := context.TODO()
 
 	// create the actor path
-	actorPath := NewPath("Test", NewLocalAddress(protocol, "sys", "host", 1))
+	actorPath := NewPath("Test", NewAddress(protocol, "sys", "host", 1))
 
 	// create the actor ref
 	pid := newPID(
@@ -68,7 +68,7 @@ func TestActorWithPassivation(t *testing.T) {
 	}
 
 	// create the actor path
-	actorPath := NewPath("Test", NewLocalAddress(protocol, "sys", "host", 1))
+	actorPath := NewPath("Test", NewAddress(protocol, "sys", "host", 1))
 	pid := newPID(ctx, actorPath, NewTestActor(), opts...)
 	assert.NotNil(t, pid)
 
@@ -97,7 +97,7 @@ func TestActorWithReply(t *testing.T) {
 		}
 
 		// create the actor path
-		actorPath := NewPath("Test", NewLocalAddress(protocol, "sys", "host", 1))
+		actorPath := NewPath("Test", NewAddress(protocol, "sys", "host", 1))
 		pid := newPID(ctx, actorPath, NewTestActor(), opts...)
 		assert.NotNil(t, pid)
 
@@ -120,7 +120,7 @@ func TestActorWithReply(t *testing.T) {
 		}
 
 		// create the actor path
-		actorPath := NewPath("Test", NewLocalAddress(protocol, "sys", "host", 1))
+		actorPath := NewPath("Test", NewAddress(protocol, "sys", "host", 1))
 		pid := newPID(ctx, actorPath, NewTestActor(), opts...)
 		assert.NotNil(t, pid)
 
@@ -137,7 +137,7 @@ func TestActorRestart(t *testing.T) {
 	t.Run("restart a stopped actor", func(t *testing.T) {
 		defer goleak.VerifyNone(t, goleak.IgnoreTopFunction("github.com/golang/glog.(*loggingT).flushDaemon"))
 		ctx := context.TODO()
-		cfg, err := NewConfig("testSys", "localhost:0")
+		cfg, err := NewConfig("testSys")
 		require.NoError(t, err)
 		assert.NotNil(t, cfg)
 
@@ -146,7 +146,7 @@ func TestActorRestart(t *testing.T) {
 		assert.NotNil(t, actor)
 
 		// create the actor path
-		actorPath := NewPath("Test", NewLocalAddress(protocol, "sys", "host", 1))
+		actorPath := NewPath("Test", NewAddress(protocol, "sys", "host", 1))
 		// create the actor ref
 		pid := newPID(ctx, actorPath, actor,
 			withInitMaxRetries(1),
@@ -185,7 +185,7 @@ func TestActorRestart(t *testing.T) {
 	//	defer goleak.VerifyNone(t)
 	//	ctx := context.TODO()
 	//	// create the actor path
-	//	actorPath := NewPath("Test", NewLocalAddress(protocol, "sys", "host", 1))
+	//	actorPath := NewPath("Test", NewAddress(protocol, "sys", "host", 1))
 	//
 	//	// create a Ping actor
 	//	pid := newPID(
@@ -213,7 +213,7 @@ func TestActorRestart(t *testing.T) {
 		actor := NewTestActor()
 		assert.NotNil(t, actor)
 		// create the actor path
-		actorPath := NewPath("Test", NewLocalAddress(protocol, "sys", "host", 1))
+		actorPath := NewPath("Test", NewAddress(protocol, "sys", "host", 1))
 
 		// create the actor ref
 		pid := newPID(ctx, actorPath, actor,
@@ -253,7 +253,7 @@ func TestChildActor(t *testing.T) {
 		// create a test context
 		ctx := context.TODO()
 		// create the actor path
-		actorPath := NewPath("Parent", NewLocalAddress(protocol, "sys", "host", 1))
+		actorPath := NewPath("Parent", NewAddress(protocol, "sys", "host", 1))
 
 		// create the parent actor
 		parent := newPID(ctx, actorPath,
@@ -287,7 +287,7 @@ func TestChildActor(t *testing.T) {
 		// create a test context
 		ctx := context.TODO()
 		// create the actor path
-		actorPath := NewPath("Parent", NewLocalAddress(protocol, "sys", "host", 1))
+		actorPath := NewPath("Parent", NewAddress(protocol, "sys", "host", 1))
 
 		// create the parent actor
 		parent := newPID(ctx,
@@ -327,7 +327,7 @@ func TestChildActor(t *testing.T) {
 
 		logger := log.DiscardLogger
 		// create the actor path
-		actorPath := NewPath("Parent", NewLocalAddress(protocol, "sys", "host", 1))
+		actorPath := NewPath("Parent", NewAddress(protocol, "sys", "host", 1))
 		// create the parent actor
 		parent := newPID(ctx,
 			actorPath,
@@ -368,7 +368,7 @@ func BenchmarkActor(b *testing.B) {
 
 		// create the actor ref
 		// create the actor path
-		actorPath := NewPath("Test", NewLocalAddress(protocol, "sys", "host", 1))
+		actorPath := NewPath("Test", NewAddress(protocol, "sys", "host", 1))
 		pid := newPID(ctx, actorPath, actor,
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
@@ -390,7 +390,7 @@ func BenchmarkActor(b *testing.B) {
 
 		// create the actor ref
 		// create the actor path
-		actorPath := NewPath("Test", NewLocalAddress(protocol, "sys", "host", 1))
+		actorPath := NewPath("Test", NewAddress(protocol, "sys", "host", 1))
 		pid := newPID(ctx, actorPath, actor,
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
@@ -409,7 +409,7 @@ func BenchmarkActor(b *testing.B) {
 
 		// create the actor ref
 		// create the actor path
-		actorPath := NewPath("Test", NewLocalAddress(protocol, "sys", "host", 1))
+		actorPath := NewPath("Test", NewAddress(protocol, "sys", "host", 1))
 		pid := newPID(ctx, actorPath, actor,
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
@@ -436,7 +436,7 @@ func BenchmarkActor(b *testing.B) {
 
 		// create the actor ref
 		// create the actor path
-		actorPath := NewPath("Test", NewLocalAddress(protocol, "sys", "host", 1))
+		actorPath := NewPath("Test", NewAddress(protocol, "sys", "host", 1))
 		pid := newPID(ctx, actorPath, actor,
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
@@ -465,7 +465,7 @@ func BenchmarkActor(b *testing.B) {
 
 		// create the actor ref
 		// create the actor path
-		actorPath := NewPath("Test", NewLocalAddress(protocol, "sys", "host", 1))
+		actorPath := NewPath("Test", NewAddress(protocol, "sys", "host", 1))
 		pid := newPID(ctx, actorPath, actor,
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
@@ -487,7 +487,7 @@ func BenchmarkActor(b *testing.B) {
 		actor := &BenchActor{}
 
 		// create the actor path
-		actorPath := NewPath("Test", NewLocalAddress(protocol, "sys", "host", 1))
+		actorPath := NewPath("Test", NewAddress(protocol, "sys", "host", 1))
 		// create the actor ref
 		pid := newPID(ctx, actorPath, actor,
 			withInitMaxRetries(1),
@@ -506,7 +506,7 @@ func BenchmarkActor(b *testing.B) {
 		ctx := context.TODO()
 		actor := &BenchActor{}
 		// create the actor path
-		actorPath := NewPath("Test", NewLocalAddress(protocol, "sys", "host", 1))
+		actorPath := NewPath("Test", NewAddress(protocol, "sys", "host", 1))
 		// create the actor ref
 		pid := newPID(ctx, actorPath, actor,
 			withInitMaxRetries(1),
@@ -533,7 +533,7 @@ func BenchmarkActor(b *testing.B) {
 		ctx := context.TODO()
 		actor := &BenchActor{}
 		// create the actor path
-		actorPath := NewPath("Test", NewLocalAddress(protocol, "sys", "host", 1))
+		actorPath := NewPath("Test", NewAddress(protocol, "sys", "host", 1))
 		// create the actor ref
 		pid := newPID(ctx, actorPath, actor,
 			withInitMaxRetries(1),

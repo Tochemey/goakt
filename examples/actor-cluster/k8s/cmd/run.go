@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
@@ -17,7 +16,7 @@ import (
 )
 
 const (
-	nodePort           = 9000
+	remotingPort       = 9000
 	accountServicePort = 50051
 	nodeHost           = "0.0.0.0"
 	namespace          = "default"
@@ -50,12 +49,10 @@ var runCmd = &cobra.Command{
 		// create the actor system configuration
 		config, err := goakt.NewConfig(
 			actorSystemName,
-			fmt.Sprintf("%s:%d", nodeHost, nodePort),
 			goakt.WithPassivationDisabled(), // set big passivation time
 			goakt.WithLogger(logger),
 			goakt.WithActorInitMaxRetries(3),
-			goakt.WithRemoting(),
-			goakt.WithClustering(disco))
+			goakt.WithClustering(disco, remotingPort))
 		// handle the error
 		if err != nil {
 			logger.Panic(err)

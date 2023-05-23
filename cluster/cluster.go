@@ -45,6 +45,7 @@ type Cluster struct {
 	etcdNode          *embed.Node
 	dataDir           string
 	peersListenerChan chan struct{}
+	nodeHost          string
 }
 
 // New creates an instance of Cluster
@@ -201,8 +202,6 @@ func (c *Cluster) Start(ctx context.Context) error {
 		return err
 	}
 
-	// promote the node to a voter
-
 	// let us build the KV store connection endpoints
 	// create the instance of the distributed store and set it
 	c.store, err = kvstore.New(kvstore.NewConfig(c.logger, c.etcdNode.Client()))
@@ -224,6 +223,9 @@ func (c *Cluster) Start(ctx context.Context) error {
 		c.logger.Error(errors.Wrap(err, "failed to start the Cluster"))
 		return c.Stop()
 	}
+
+	// set the nodeHost
+	c.nodeHost = hostNode.host
 
 	// start listening to the discovery events
 	go c.handleClusterEvents(discoEvents)
@@ -248,6 +250,11 @@ func (c *Cluster) Stop() error {
 	}
 	c.logger.Info("GoAkt cluster successfully stopped.🎉")
 	return nil
+}
+
+// NodeHost returns the cluster node Host
+func (c *Cluster) NodeHost() string {
+	return c.nodeHost
 }
 
 // PutActor replicates onto the cluster the metadata of an actor

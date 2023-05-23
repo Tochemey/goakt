@@ -8,7 +8,7 @@ import (
 
 func TestPIDMap(t *testing.T) {
 	// create the actor path
-	actorPath := NewPath("Test", NewLocalAddress(protocol, "TestSys", "host", 444))
+	actorPath := NewPath("Test", NewAddress(protocol, "TestSys", "host", 444))
 	// create the PID
 	actorRef := &pid{actorPath: actorPath}
 	// create a new PID map

@@ -22,7 +22,7 @@ func main() {
 	logger := log.DefaultLogger
 
 	// create the actor system configuration. kindly in real-life application handle the error
-	config, _ := goakt.NewConfig("SampleActorSystem", "127.0.0.1:0",
+	config, _ := goakt.NewConfig("SampleActorSystem",
 		goakt.WithExpireActorAfter(10*time.Second), // set big passivation time
 		goakt.WithLogger(logger),
 		goakt.WithActorInitMaxRetries(3))
@@ -79,7 +79,7 @@ func (p *PingActor) PreStart(ctx context.Context) error {
 	defer p.mu.Unlock()
 	p.logger = log.DefaultLogger
 	p.count = atomic.NewInt32(0)
-	p.logger.Info("About to Start")
+	p.logger.Info("PingActor is about to Start")
 	return nil
 }
 
@@ -99,8 +99,8 @@ func (p *PingActor) Receive(ctx goakt.ReceiveContext) {
 }
 
 func (p *PingActor) PostStop(ctx context.Context) error {
-	p.logger.Info("About to stop")
-	p.logger.Infof("Processed=%d messages", p.count.Load())
+	p.logger.Info("PingActor is about to stop")
+	p.logger.Infof("PingActor has processed=%d messages", p.count.Load())
 	return nil
 }
 
@@ -124,7 +124,7 @@ func (p *PongActor) PreStart(ctx context.Context) error {
 	defer p.mu.Unlock()
 	p.logger = log.DefaultLogger
 	p.count = atomic.NewInt32(0)
-	p.logger.Info("About to Start")
+	p.logger.Info("PongActor is about to Start")
 	return nil
 }
 
@@ -143,7 +143,7 @@ func (p *PongActor) Receive(ctx goakt.ReceiveContext) {
 }
 
 func (p *PongActor) PostStop(ctx context.Context) error {
-	p.logger.Info("About to stop")
-	p.logger.Infof("Processed=%d messages", p.count.Load())
+	p.logger.Info("PongActor is about to stop")
+	p.logger.Infof("PongActor has processed=%d messages", p.count.Load())
 	return nil
 }

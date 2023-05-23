@@ -1,8 +1,8 @@
 .PHONY: cluster-down
-example-rm:
-	kubectl delete -f ./k8s.yml
+cluster-down:
+	kubectl delete -f ./k8s.yaml
 
 .PHONY: cluster-up
-example-up:
+cluster-up:
 	minikube image load --overwrite=true accounts:dev
-	kubectl apply -f ./k8s.yml
+	kubectl apply -f ./k8s.yaml

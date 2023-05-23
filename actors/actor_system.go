@@ -37,14 +37,8 @@ var once resync.Once
 type ActorSystem interface {
 	// Name returns the actor system name
 	Name() string
-	// NodeAddr returns the node where the actor system is running
-	NodeAddr() string
 	// Actors returns the list of Actors that are alive in the actor system
 	Actors() []PID
-	// Host returns the actor system host address
-	Host() string
-	// Port returns the actor system host port
-	Port() int
 	// Start starts the actor system
 	Start(ctx context.Context) error
 	// Stop stops the actor system
@@ -78,16 +72,10 @@ type actorSystem struct {
 
 	// Specifies the actor system name
 	name string
-	// Specifies the node where the actor system is located
-	nodeAddr string
 	// map of actors in the system
 	actors cmp.ConcurrentMap[string, PID]
 	//  specifies the logger to use
 	logger log.Logger
-	// specifies the host address
-	host string
-	// specifies the port
-	port int
 	// actor system configuration
 	config *Config
 	// states whether the actor system has started or not
@@ -120,21 +108,14 @@ func NewActorSystem(config *Config) (ActorSystem, error) {
 	once.Do(func() {
 		system = &actorSystem{
 			name:        config.Name(),
-			nodeAddr:    config.NodeHostAndPort(),
 			actors:      cmp.New[PID](),
 			logger:      config.Logger(),
-			host:        "",
-			port:        0,
 			config:      config,
 			hasStarted:  atomic.NewBool(false),
 			telemetry:   config.telemetry,
 			typesLoader: NewTypesLoader(nil),
 			clusterChan: make(chan *goaktpb.WireActor, 10),
 		}
-		// set host and port
-		host, port := config.HostAndPort()
-		system.host = host
-		system.port = port
 		// set the reflection
 		system.reflection = NewReflection(system.typesLoader)
 	})
@@ -161,8 +142,13 @@ func (a *actorSystem) StartActor(ctx context.Context, name string, actor Actor) 
 	if !a.hasStarted.Load() {
 		return nil
 	}
-	// get the path of the given actor
-	actorPath := NewPath(name, NewLocalAddress(protocol, a.name, a.host, a.port))
+	// set the default actor path assuming we are running locally
+	actorPath := NewPath(name, NewAddress(protocol, a.name, "", -1))
+	// set the actor path with the remoting is enabled
+	if a.config.remotingEnabled {
+		// get the path of the given actor
+		actorPath = NewPath(name, NewAddress(protocol, a.name, a.config.remotingHost, int(a.config.remotingPort)))
+	}
 	// check whether the given actor already exist in the system or not
 	pid, exist := a.actors.Get(actorPath.String())
 	// actor already exist no need recreate it.
@@ -226,8 +212,13 @@ func (a *actorSystem) StopActor(ctx context.Context, name string) error {
 	if !a.hasStarted.Load() {
 		return errors.New("actor system has not started yet")
 	}
-	// get the path of the given actor
-	actorPath := NewPath(name, NewLocalAddress(protocol, a.name, a.host, a.port))
+	// set the default actor path assuming we are running locally
+	actorPath := NewPath(name, NewAddress(protocol, a.name, "", -1))
+	// set the actor path with the remoting is enabled
+	if a.config.remotingEnabled {
+		// get the path of the given actor
+		actorPath = NewPath(name, NewAddress(protocol, a.name, a.config.remotingHost, int(a.config.remotingPort)))
+	}
 	// check whether the given actor already exist in the system or not
 	pid, exist := a.actors.Get(actorPath.String())
 	// actor is found.
@@ -247,8 +238,13 @@ func (a *actorSystem) RestartActor(ctx context.Context, name string) (PID, error
 	if !a.hasStarted.Load() {
 		return nil, errors.New("actor system has not started yet")
 	}
-	// get the path of the given actor
-	actorPath := NewPath(name, NewLocalAddress(protocol, a.name, a.host, a.port))
+	// set the default actor path assuming we are running locally
+	actorPath := NewPath(name, NewAddress(protocol, a.name, "", -1))
+	// set the actor path with the remoting is enabled
+	if a.config.remotingEnabled {
+		// get the path of the given actor
+		actorPath = NewPath(name, NewAddress(protocol, a.name, a.config.remotingHost, int(a.config.remotingPort)))
+	}
 	// check whether the given actor already exist in the system or not
 	pid, exist := a.actors.Get(actorPath.String())
 	// actor is found.
@@ -266,21 +262,6 @@ func (a *actorSystem) RestartActor(ctx context.Context, name string) (PID, error
 // Name returns the actor system name
 func (a *actorSystem) Name() string {
 	return a.name
-}
-
-// NodeAddr returns the node where the actor system is running
-func (a *actorSystem) NodeAddr() string {
-	return a.nodeAddr
-}
-
-// Host returns the actor system node host address
-func (a *actorSystem) Host() string {
-	return a.host
-}
-
-// Port returns the actor system node port
-func (a *actorSystem) Port() int {
-	return a.port
 }
 
 // Actors returns the list of Actors that are alive in the actor system
@@ -376,7 +357,7 @@ func (a *actorSystem) Stop(ctx context.Context) error {
 	// add a span context
 	ctx, span := telemetry.SpanContext(ctx, "Stop")
 	defer span.End()
-	a.logger.Infof("%s ActorSystem is shutting down on Cluster=%s..:)", a.name, a.nodeAddr)
+	a.logger.Infof("ActorSystem is shutting down on Cluster=%s..:)", a.name)
 
 	// stop the remoting server
 	if a.config.remotingEnabled {
@@ -432,9 +413,17 @@ func (a *actorSystem) RemoteLookup(ctx context.Context, request *connect.Request
 	// first let us make a copy of the incoming request
 	reqCopy := request.Msg
 
+	// set the actor path with the remoting is enabled
+	if !a.config.remotingEnabled {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrRemotingNotEnabled)
+	}
+
+	// get the remoting server address
+	nodeAddr := fmt.Sprintf("%s:%d", a.config.remotingHost, a.config.remotingPort)
+
 	// let us validate the host and port
 	hostAndPort := fmt.Sprintf("%s:%d", reqCopy.GetHost(), reqCopy.GetPort())
-	if hostAndPort != a.nodeAddr {
+	if hostAndPort != nodeAddr {
 		// log the error
 		logger.Error(ErrRemoteSendInvalidNode.Message())
 		// here message is sent to the wrong actor system node
@@ -443,7 +432,7 @@ func (a *actorSystem) RemoteLookup(ctx context.Context, request *connect.Request
 
 	// construct the actor address
 	name := reqCopy.GetName()
-	actorPath := NewPath(name, NewLocalAddress(protocol, a.Name(), reqCopy.GetHost(), int(reqCopy.GetPort())))
+	actorPath := NewPath(name, NewAddress(protocol, a.Name(), reqCopy.GetHost(), int(reqCopy.GetPort())))
 	// start or get the PID of the actor
 	// check whether the given actor already exist in the system or not
 	pid, exist := a.actors.Get(actorPath.String())
@@ -473,9 +462,17 @@ func (a *actorSystem) RemoteAsk(ctx context.Context, request *connect.Request[go
 	// first let us make a copy of the incoming request
 	reqCopy := request.Msg
 
+	// set the actor path with the remoting is enabled
+	if !a.config.remotingEnabled {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrRemotingNotEnabled)
+	}
+
+	// get the remoting server address
+	nodeAddr := fmt.Sprintf("%s:%d", a.config.remotingHost, a.config.remotingPort)
+
 	// let us validate the host and port
 	hostAndPort := fmt.Sprintf("%s:%d", reqCopy.GetRemoteMessage().GetReceiver().GetHost(), reqCopy.GetRemoteMessage().GetReceiver().GetPort())
-	if hostAndPort != a.nodeAddr {
+	if hostAndPort != nodeAddr {
 		// log the error
 		logger.Error(ErrRemoteSendInvalidNode.Message())
 		// here message is sent to the wrong actor system node
@@ -484,7 +481,8 @@ func (a *actorSystem) RemoteAsk(ctx context.Context, request *connect.Request[go
 
 	// construct the actor address
 	name := reqCopy.GetRemoteMessage().GetReceiver().GetName()
-	actorPath := NewPath(name, NewLocalAddress(protocol, a.name, a.host, a.port))
+	actorPath := NewPath(name, NewAddress(protocol, a.name, a.config.remotingHost, int(a.config.remotingPort)))
+
 	// start or get the PID of the actor
 	// check whether the given actor already exist in the system or not
 	pid, exist := a.actors.Get(actorPath.String())
@@ -527,9 +525,18 @@ func (a *actorSystem) RemoteTell(ctx context.Context, request *connect.Request[g
 	reqCopy := request.Msg
 
 	receiver := reqCopy.GetRemoteMessage().GetReceiver()
+
+	// set the actor path with the remoting is enabled
+	if !a.config.remotingEnabled {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrRemotingNotEnabled)
+	}
+
+	// get the remoting server address
+	nodeAddr := fmt.Sprintf("%s:%d", a.config.remotingHost, a.config.remotingPort)
+
 	// let us validate the host and port
 	hostAndPort := fmt.Sprintf("%s:%d", receiver.GetHost(), receiver.GetPort())
-	if hostAndPort != a.nodeAddr {
+	if hostAndPort != nodeAddr {
 		// log the error
 		logger.Error(ErrRemoteSendInvalidNode.Message())
 		// here message is sent to the wrong actor system node
@@ -539,7 +546,7 @@ func (a *actorSystem) RemoteTell(ctx context.Context, request *connect.Request[g
 	// construct the actor address
 	actorPath := NewPath(
 		receiver.GetName(),
-		NewLocalAddress(
+		NewAddress(
 			protocol,
 			a.Name(),
 			receiver.GetHost(),
@@ -632,6 +639,8 @@ func (a *actorSystem) enableClustering(ctx context.Context) {
 	<-bootstrapChan
 	timer.Stop()
 
+	// set the remoting host
+	a.config.remotingHost = cluster.NodeHost()
 	// let us enable remoting as well if not yet enabled
 	if !a.config.remotingEnabled {
 		a.enableRemoting(ctx)
@@ -659,7 +668,8 @@ func (a *actorSystem) enableRemoting(context.Context) {
 	)
 	mux.Handle(path, handler)
 	// create the address
-	serverAddr := fmt.Sprintf(":%d", a.Port())
+	serverAddr := fmt.Sprintf(":%d", a.config.remotingPort)
+
 	// create a http service instance
 	// TODO revisit the timeouts
 	// reference: https://adam-p.ca/blog/2022/01/golang-http-server-timeouts/
@@ -690,7 +700,10 @@ func (a *actorSystem) enableRemoting(context.Context) {
 
 	// listen and service requests
 	if err := a.remotingServer.ListenAndServe(); err != nil {
-		a.logger.Panic(errors.Wrap(err, "failed to start remoting service"))
+		// check the error type
+		if !errors.Is(err, http.ErrServerClosed) {
+			a.logger.Panic(errors.Wrap(err, "failed to start remoting service"))
+		}
 	}
 }
 
@@ -701,11 +714,9 @@ func (a *actorSystem) reset() {
 	a.hasStarted = atomic.NewBool(false)
 	a.telemetry = nil
 	a.actors = cmp.New[PID]()
-	a.nodeAddr = ""
 	a.name = ""
-	a.host = ""
-	a.port = -1
 	a.logger = nil
+	a.remotingServer = nil
 	once.Reset()
 }
 
