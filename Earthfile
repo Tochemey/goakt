@@ -8,20 +8,6 @@ FROM tochemey/docker-go:1.20.4-0.8.0
 RUN go install github.com/fullstorydev/grpcurl/cmd/grpcurl@latest
 RUN go install github.com/bufbuild/connect-go/cmd/protoc-gen-connect-go@latest
 
-# run a PR branch is created
-pr-pipeline:
-    PIPELINE
-    TRIGGER pr main
-    BUILD +lint
-    BUILD +local-test
-
-# run on when a push to main is made
-main-pipeline:
-    PIPELINE
-    TRIGGER push main
-    BUILD +lint
-    BUILD +local-test
-
 pbs:
     BUILD +internal-pb
     BUILD +protogen
