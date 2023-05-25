@@ -18,19 +18,20 @@ import (
 	"github.com/tochemey/goakt/pkg/etcd/kvstore"
 	"github.com/tochemey/goakt/pkg/telemetry"
 	"go.etcd.io/etcd/api/v3/etcdserverpb"
+	"go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.etcd.io/etcd/raft/v3"
 	"golang.org/x/exp/slices"
 )
 
 const (
-	clientPortName            = "clients-port"
-	peersPortName             = "peers-port"
-	minimumInitialMembersSize = 3
-	memberAddThreshold        = 5
+	clientPortName     = "clients-port"
+	peersPortName      = "peers-port"
+	memberAddThreshold = 5
 )
 
-// member represents a cluster node member
-type member struct {
+// hostNode represents a cluster node hostNode
+type hostNode struct {
 	name       string
 	host       string
 	peerURLs   []string
@@ -75,15 +76,9 @@ func (c *Cluster) Start(ctx context.Context) error {
 		discoNodes []*discovery.Node
 		// variable holding
 		err       error
-		hostNode  *member
+		hostNode  *hostNode
 		isJoining bool
 	)
-
-	// handle the error
-	if err != nil {
-		c.logger.Error(errors.Wrap(err, "failed to grab node advertise URLs"))
-		return err
-	}
 
 	// let us delay the start for sometime to make sure we have discovered all nodes
 	duration := time.Second
@@ -114,7 +109,7 @@ func (c *Cluster) Start(ctx context.Context) error {
 		}
 
 		// let us check whether the cluster is healthy
-		isJoining, err = canJoin(ctx, existingEndpoints)
+		isJoining, err = isHostNodeJoining(ctx, existingEndpoints)
 		// handle the error
 		if err != nil {
 			c.logger.Error(errors.Wrap(err, "failed check the status of the possible existing cluster"))
@@ -142,16 +137,16 @@ func (c *Cluster) Start(ctx context.Context) error {
 				mresp, err := client.MemberAdd(ctx, hostNode.peerURLs)
 				// handle the error
 				if err != nil {
-					// retry again when the error message contain `re-configuration failed due to not enough started members`
-					if strings.Contains(err.Error(), "re-configuration failed due to not enough started members") {
+					switch err {
+					case rpctypes.ErrGRPCMemberNotEnoughStarted, context.DeadlineExceeded, context.Canceled:
+						// retry again when the error message contain `re-configuration failed due to not enough started members`
 						// continue till the threshold is reached
 						return err
+					default:
+						err = errors.Wrapf(err, "failed to add node=%s to existing cluster", hostNode.name)
+						c.logger.Error(err)
+						return retry.Stop(err)
 					}
-
-					// re-configuration failed due to not enough started members
-					err = errors.Wrapf(err, "failed to add node=%s to existing cluster", hostNode.name)
-					c.logger.Error(err)
-					return retry.Stop(err)
 				}
 
 				// set the is joining the cluster
@@ -397,7 +392,7 @@ func (c *Cluster) handleClusterEvents(events <-chan discovery.Event) {
 }
 
 // whoami returns the host node information
-func (c *Cluster) whoami(discoNodes []*discovery.Node) *member {
+func (c *Cluster) whoami(discoNodes []*discovery.Node) *hostNode {
 	// get the host addresses
 	addresses, _ := host.Addresses()
 
@@ -420,7 +415,7 @@ func (c *Cluster) whoami(discoNodes []*discovery.Node) *member {
 				clientURLs.Add(fmt.Sprintf("http://%s:%d", addr, clientsPort))
 			}
 
-			return &member{
+			return &hostNode{
 				name:       discoNode.Name,
 				host:       discoNode.Host,
 				peerURLs:   peerURLs.ToSlice(),
@@ -531,8 +526,8 @@ func getClient(ctx context.Context, endpoints []string) (*clientv3.Client, error
 	return client, nil
 }
 
-// canJoin checks whether the existing cluster is healthy and that the given node can be added to it as a member
-func canJoin(ctx context.Context, endpoints []string) (bool, error) {
+// isHostNodeJoining checks whether the existing cluster is healthy and that the given node can be added to it as a member
+func isHostNodeJoining(ctx context.Context, endpoints []string) (bool, error) {
 	// keep the incoming ctx into a variable
 	// so that for each iteration we can get
 	// a fresh cancellation context
@@ -562,9 +557,8 @@ func canJoin(ctx context.Context, endpoints []string) (bool, error) {
 		// handle the error
 		if err != nil {
 			switch err {
-			case context.DeadlineExceeded:
-				// return when we are still in deadline
-				// TODO: figure a better way to know when a cluster is up or not
+			case context.DeadlineExceeded, rpctypes.ErrMemberNotFound:
+				// we have reached the number of endpoints to lookup
 				if len(endpoints) == index {
 					// this is a startup call which means that none of the nodes are not running yet
 					return false, nil
@@ -577,10 +571,11 @@ func canJoin(ctx context.Context, endpoints []string) (bool, error) {
 			return false, err
 		}
 
-		// we just locate the leader
-		if resp.Leader == resp.Header.GetMemberId() {
-			return true, nil
-		}
+		// we have found a peer
+		output := resp.Header.GetMemberId() != raft.None &&
+			(resp.Header.ClusterId != raft.None || resp.Leader == resp.Header.GetMemberId())
+		// return the output
+		return output, nil
 	}
 
 	return false, nil
