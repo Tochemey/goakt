@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"github.com/tochemey/goakt/log"
 	testpb "github.com/tochemey/goakt/test/data/pb/v1"
 	"go.uber.org/goleak"
@@ -137,9 +136,6 @@ func TestActorRestart(t *testing.T) {
 	t.Run("restart a stopped actor", func(t *testing.T) {
 		defer goleak.VerifyNone(t, goleak.IgnoreTopFunction("github.com/golang/glog.(*loggingT).flushDaemon"))
 		ctx := context.TODO()
-		cfg, err := NewConfig("testSys")
-		require.NoError(t, err)
-		assert.NotNil(t, cfg)
 
 		// create a Ping actor
 		actor := NewTestActor()
@@ -156,7 +152,7 @@ func TestActorRestart(t *testing.T) {
 		assert.NotNil(t, pid)
 
 		// stop the actor
-		err = pid.Shutdown(ctx)
+		err := pid.Shutdown(ctx)
 		assert.NoError(t, err)
 
 		time.Sleep(time.Second)

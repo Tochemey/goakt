@@ -7,7 +7,10 @@ import (
 	"fmt"
 	"net/http"
 	"reflect"
+	"regexp"
 	"time"
+
+	"github.com/tochemey/goakt/discovery"
 
 	"github.com/bufbuild/connect-go"
 	otelconnect "github.com/bufbuild/connect-opentelemetry-go"
@@ -70,27 +73,50 @@ type ActorSystem interface {
 type actorSystem struct {
 	goaktv1connect.UnimplementedRemoteMessagingServiceHandler
 
-	// Specifies the actor system name
-	name string
 	// map of actors in the system
 	actors cmp.ConcurrentMap[string, PID]
-	//  specifies the logger to use
-	logger log.Logger
-	// actor system configuration
-	config *Config
+
 	// states whether the actor system has started or not
 	hasStarted *atomic.Bool
-
-	// observability settings
-	telemetry *telemetry.Telemetry
 
 	typesLoader TypesLoader
 	reflection  Reflection
 
+	// Specifies the actor system name
+	name string
+	// Specifies the logger to use in the system
+	logger log.Logger
+	// Specifies at what point in time to passivate the actor.
+	// when the actor is passivated it is stopped which means it does not consume
+	// any further resources like memory and cpu. The default value is 5s
+	expireActorAfter time.Duration
+	// Specifies how long the sender of a receiveContext should wait to receive a reply
+	// when using SendReply. The default value is 5s
+	replyTimeout time.Duration
+	// Specifies the maximum of retries to attempt when the actor
+	// initialization fails. The default value is 5
+	actorInitMaxRetries int
+	// Specifies the supervisor strategy
+	supervisorStrategy StrategyDirective
+	// Specifies the telemetry config
+	telemetry *telemetry.Telemetry
+	// Specifies whether remoting is enabled.
+	// This allows to handle remote messaging
+	remotingEnabled bool
+	// Specifies the remoting port
+	remotingPort int32
+	// Specifies the remoting host
+	remotingHost string
+	// Specifies the remoting server
+	remotingServer *http.Server
+
+	// convenient field to check cluster setup
+	clusterEnabled bool
+	// cluster discovery method
+	disco discovery.Discovery
+	// cluster mode
 	clusterService *cluster.Cluster
 	clusterChan    chan *goaktpb.WireActor
-
-	remotingServer *http.Server
 }
 
 // enforce compilation error when all methods of the ActorSystem interface are not implemented
@@ -98,26 +124,37 @@ type actorSystem struct {
 var _ ActorSystem = (*actorSystem)(nil)
 
 // NewActorSystem creates an instance of ActorSystem
-func NewActorSystem(config *Config) (ActorSystem, error) {
-	// make sure the configuration is set
-	if config == nil {
-		return nil, ErrMissingConfig
+func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
+	// check whether the name is set or not
+	if name == "" {
+		return nil, ErrNameRequired
 	}
-
+	// make sure the actor system name is valid
+	if match, _ := regexp.MatchString("^[a-zA-Z0-9][a-zA-Z0-9-_]*$", name); !match {
+		return nil, ErrInvalidActorSystemName
+	}
 	// the function only gets called one
 	once.Do(func() {
 		system = &actorSystem{
-			name:        config.Name(),
-			actors:      cmp.New[PID](),
-			logger:      config.Logger(),
-			config:      config,
-			hasStarted:  atomic.NewBool(false),
-			telemetry:   config.telemetry,
-			typesLoader: NewTypesLoader(nil),
-			clusterChan: make(chan *goaktpb.WireActor, 10),
+			actors:              cmp.New[PID](),
+			hasStarted:          atomic.NewBool(false),
+			typesLoader:         NewTypesLoader(nil),
+			clusterChan:         make(chan *goaktpb.WireActor, 10),
+			name:                name,
+			logger:              log.DefaultLogger,
+			expireActorAfter:    2 * time.Second,
+			replyTimeout:        100 * time.Millisecond,
+			actorInitMaxRetries: 5,
+			supervisorStrategy:  StopDirective,
+			telemetry:           telemetry.New(),
+			remotingEnabled:     false,
 		}
 		// set the reflection
 		system.reflection = NewReflection(system.typesLoader)
+		// apply the various options
+		for _, opt := range opts {
+			opt.Apply(system)
+		}
 	})
 
 	return system, nil
@@ -125,7 +162,7 @@ func NewActorSystem(config *Config) (ActorSystem, error) {
 
 // InCluster states whether the actor system is running within a cluster of nodes
 func (a *actorSystem) InCluster() bool {
-	return a.config.clusterEnabled && a.clusterService != nil
+	return a.clusterEnabled && a.clusterService != nil
 }
 
 // NumActors returns the total number of active actors in the system
@@ -145,9 +182,9 @@ func (a *actorSystem) StartActor(ctx context.Context, name string, actor Actor) 
 	// set the default actor path assuming we are running locally
 	actorPath := NewPath(name, NewAddress(protocol, a.name, "", -1))
 	// set the actor path with the remoting is enabled
-	if a.config.remotingEnabled {
+	if a.remotingEnabled {
 		// get the path of the given actor
-		actorPath = NewPath(name, NewAddress(protocol, a.name, a.config.remotingHost, int(a.config.remotingPort)))
+		actorPath = NewPath(name, NewAddress(protocol, a.name, a.remotingHost, int(a.remotingPort)))
 	}
 	// check whether the given actor already exist in the system or not
 	pid, exist := a.actors.Get(actorPath.String())
@@ -164,13 +201,13 @@ func (a *actorSystem) StartActor(ctx context.Context, name string, actor Actor) 
 	pid = newPID(ctx,
 		actorPath,
 		actor,
-		withInitMaxRetries(a.config.ActorInitMaxRetries()),
-		withPassivationAfter(a.config.ExpireActorAfter()),
-		withSendReplyTimeout(a.config.ReplyTimeout()),
-		withCustomLogger(a.config.logger),
+		withInitMaxRetries(a.actorInitMaxRetries),
+		withPassivationAfter(a.expireActorAfter),
+		withSendReplyTimeout(a.replyTimeout),
+		withCustomLogger(a.logger),
 		withActorSystem(a),
-		withSupervisorStrategy(a.config.supervisorStrategy),
-		withTelemetry(a.config.telemetry))
+		withSupervisorStrategy(a.supervisorStrategy),
+		withTelemetry(a.telemetry))
 
 	// add the given actor to the actor map
 	a.actors.Set(actorPath.String(), pid)
@@ -179,7 +216,7 @@ func (a *actorSystem) StartActor(ctx context.Context, name string, actor Actor) 
 	a.typesLoader.Register(name, actor)
 
 	// when cluster is enabled replicate the actor metadata across the cluster
-	if a.config.clusterEnabled {
+	if a.clusterEnabled {
 		// encode the actor
 		actorType := reflect.TypeOf(actor)
 		var buf bytes.Buffer
@@ -215,9 +252,9 @@ func (a *actorSystem) StopActor(ctx context.Context, name string) error {
 	// set the default actor path assuming we are running locally
 	actorPath := NewPath(name, NewAddress(protocol, a.name, "", -1))
 	// set the actor path with the remoting is enabled
-	if a.config.remotingEnabled {
+	if a.remotingEnabled {
 		// get the path of the given actor
-		actorPath = NewPath(name, NewAddress(protocol, a.name, a.config.remotingHost, int(a.config.remotingPort)))
+		actorPath = NewPath(name, NewAddress(protocol, a.name, a.remotingHost, int(a.remotingPort)))
 	}
 	// check whether the given actor already exist in the system or not
 	pid, exist := a.actors.Get(actorPath.String())
@@ -241,9 +278,9 @@ func (a *actorSystem) RestartActor(ctx context.Context, name string) (PID, error
 	// set the default actor path assuming we are running locally
 	actorPath := NewPath(name, NewAddress(protocol, a.name, "", -1))
 	// set the actor path with the remoting is enabled
-	if a.config.remotingEnabled {
+	if a.remotingEnabled {
 		// get the path of the given actor
-		actorPath = NewPath(name, NewAddress(protocol, a.name, a.config.remotingHost, int(a.config.remotingPort)))
+		actorPath = NewPath(name, NewAddress(protocol, a.name, a.remotingHost, int(a.remotingPort)))
 	}
 	// check whether the given actor already exist in the system or not
 	pid, exist := a.actors.Get(actorPath.String())
@@ -332,12 +369,12 @@ func (a *actorSystem) Start(ctx context.Context) error {
 	a.hasStarted.Store(true)
 
 	// start remoting when remoting is enabled
-	if a.config.remotingEnabled {
+	if a.remotingEnabled {
 		go a.enableRemoting(ctx)
 	}
 
 	// enable clustering when it is enabled
-	if a.config.clusterEnabled {
+	if a.clusterEnabled {
 		go a.enableClustering(ctx)
 	}
 
@@ -360,7 +397,7 @@ func (a *actorSystem) Stop(ctx context.Context) error {
 	a.logger.Infof("ActorSystem is shutting down on Cluster=%s..:)", a.name)
 
 	// stop the remoting server
-	if a.config.remotingEnabled {
+	if a.remotingEnabled {
 		// stop the server
 		if err := a.remotingServer.Close(); err != nil {
 			return err
@@ -368,7 +405,7 @@ func (a *actorSystem) Stop(ctx context.Context) error {
 	}
 
 	// stop the cluster service
-	if a.config.clusterEnabled {
+	if a.clusterEnabled {
 		// stop the cluster service
 		if err := a.clusterService.Stop(); err != nil {
 			return err
@@ -414,12 +451,12 @@ func (a *actorSystem) RemoteLookup(ctx context.Context, request *connect.Request
 	reqCopy := request.Msg
 
 	// set the actor path with the remoting is enabled
-	if !a.config.remotingEnabled {
+	if !a.remotingEnabled {
 		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrRemotingNotEnabled)
 	}
 
 	// get the remoting server address
-	nodeAddr := fmt.Sprintf("%s:%d", a.config.remotingHost, a.config.remotingPort)
+	nodeAddr := fmt.Sprintf("%s:%d", a.remotingHost, a.remotingPort)
 
 	// let us validate the host and port
 	hostAndPort := fmt.Sprintf("%s:%d", reqCopy.GetHost(), reqCopy.GetPort())
@@ -463,12 +500,12 @@ func (a *actorSystem) RemoteAsk(ctx context.Context, request *connect.Request[go
 	reqCopy := request.Msg
 
 	// set the actor path with the remoting is enabled
-	if !a.config.remotingEnabled {
+	if !a.remotingEnabled {
 		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrRemotingNotEnabled)
 	}
 
 	// get the remoting server address
-	nodeAddr := fmt.Sprintf("%s:%d", a.config.remotingHost, a.config.remotingPort)
+	nodeAddr := fmt.Sprintf("%s:%d", a.remotingHost, a.remotingPort)
 
 	// let us validate the host and port
 	hostAndPort := fmt.Sprintf("%s:%d", reqCopy.GetRemoteMessage().GetReceiver().GetHost(), reqCopy.GetRemoteMessage().GetReceiver().GetPort())
@@ -481,7 +518,7 @@ func (a *actorSystem) RemoteAsk(ctx context.Context, request *connect.Request[go
 
 	// construct the actor address
 	name := reqCopy.GetRemoteMessage().GetReceiver().GetName()
-	actorPath := NewPath(name, NewAddress(protocol, a.name, a.config.remotingHost, int(a.config.remotingPort)))
+	actorPath := NewPath(name, NewAddress(protocol, a.name, a.remotingHost, int(a.remotingPort)))
 
 	// start or get the PID of the actor
 	// check whether the given actor already exist in the system or not
@@ -527,12 +564,12 @@ func (a *actorSystem) RemoteTell(ctx context.Context, request *connect.Request[g
 	receiver := reqCopy.GetRemoteMessage().GetReceiver()
 
 	// set the actor path with the remoting is enabled
-	if !a.config.remotingEnabled {
+	if !a.remotingEnabled {
 		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrRemotingNotEnabled)
 	}
 
 	// get the remoting server address
-	nodeAddr := fmt.Sprintf("%s:%d", a.config.remotingHost, a.config.remotingPort)
+	nodeAddr := fmt.Sprintf("%s:%d", a.remotingHost, a.remotingPort)
 
 	// let us validate the host and port
 	hostAndPort := fmt.Sprintf("%s:%d", receiver.GetHost(), receiver.GetPort())
@@ -606,7 +643,7 @@ func (a *actorSystem) handleRemoteAsk(ctx context.Context, to PID, message proto
 	// add a span context
 	ctx, span := telemetry.SpanContext(ctx, "handleRemoteAsk")
 	defer span.End()
-	return Ask(ctx, to, message, a.config.ReplyTimeout())
+	return Ask(ctx, to, message, a.replyTimeout)
 }
 
 // handleRemoteTell handles an asynchronous message to an actor
@@ -621,7 +658,7 @@ func (a *actorSystem) handleRemoteTell(ctx context.Context, to PID, message prot
 // communication
 func (a *actorSystem) enableClustering(ctx context.Context) {
 	// create an instance of the cluster service and start it
-	cluster := cluster.New(a.config.disco, a.logger)
+	cluster := cluster.New(a.disco, a.logger)
 	// set the cluster field of the actorSystem
 	a.clusterService = cluster
 	// start the cluster service
@@ -640,9 +677,9 @@ func (a *actorSystem) enableClustering(ctx context.Context) {
 	timer.Stop()
 
 	// set the remoting host
-	a.config.remotingHost = cluster.NodeHost()
+	a.remotingHost = cluster.NodeHost()
 	// let us enable remoting as well if not yet enabled
-	if !a.config.remotingEnabled {
+	if !a.remotingEnabled {
 		a.enableRemoting(ctx)
 	}
 	// start broadcasting cluster message
@@ -668,7 +705,7 @@ func (a *actorSystem) enableRemoting(context.Context) {
 	)
 	mux.Handle(path, handler)
 	// create the address
-	serverAddr := fmt.Sprintf(":%d", a.config.remotingPort)
+	serverAddr := fmt.Sprintf(":%d", a.remotingPort)
 
 	// create a http service instance
 	// TODO revisit the timeouts
@@ -710,7 +747,6 @@ func (a *actorSystem) enableRemoting(context.Context) {
 // reset the actor system
 func (a *actorSystem) reset() {
 	// void the settings
-	a.config = nil
 	a.hasStarted = atomic.NewBool(false)
 	a.telemetry = nil
 	a.actors = cmp.New[PID]()

@@ -30,7 +30,7 @@ Also, check reference section at the end of the post for more material regarding
 - Remoting
     - Actors can send messages to other actors on a remote system via Tell and Ask message patterns.
     - Actors can look up other actors' address on a remote system.
-- Clustering
+- Cluster Mode
 
 ## Cluster Mode
 
@@ -92,109 +92,10 @@ A working example can be found [here](./examples/actor-cluster/k8s) with a small
 go get github.com/tochemey/goakt
 ```
 
-## Example
+## Examples
 
-### Send a fire-forget message to an actor from a non actor system
+Kindly check out the [examples'](./examples)
 
-```go
-
-package main
-
-import (
-  "context"
-  "os"
-  "os/signal"
-  "sync"
-  "syscall"
-  "time"
-
-  goakt "github.com/tochemey/messages/actors"
-  samplepb "github.com/tochemey/messages/examples/protos/pb/v1"
-  "github.com/tochemey/goakt/log"
-  "go.uber.org/atomic"
-)
-
-func main() {
-  ctx := context.Background()
-
-  // use the messages default log. real-life implement the log interface`
-  logger := log.DefaultLogger
-  // create the actor system configuration. kindly in real-life application handle the error
-  config, _ := goakt.NewConfig("SampleActorSystem",
-    goakt.WithExpireActorAfter(10*time.Second),
-    goakt.WithLogger(logger),
-    goakt.WithActorInitMaxRetries(3))
-
-  // create the actor system. kindly in real-life application handle the error
-  actorSystem, _ := goakt.NewActorSystem(config)
-
-  // start the actor system
-  _ = actorSystem.Start(ctx)
-
-  // create an actor
-  actor := actorSystem.StartActor(ctx, "Ping", NewPinger())
-
-  startTime := time.Now()
-
-  // send some public to the actor
-  count := 100
-  for i := 0; i < count; i++ {
-    _ = goakt.SendAsync(ctx, actor, new(samplepb.Ping))
-  }
-
-  // capture ctrl+c
-  interruptSignal := make(chan os.Signal, 1)
-  signal.Notify(interruptSignal, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
-  <-interruptSignal
-
-  // log some stats
-  logger.Infof("Actor=%s has processed %d messages in %s", actor.ActorPath().String(), actor.ReceivedCount(ctx), time.Since(startTime))
-
-  // stop the actor system
-  _ = actorSystem.Stop(ctx)
-  os.Exit(0)
-}
-
-type Pinger struct {
-  mu     sync.Mutex
-  count  *atomic.Int32
-  logger log.Logger
-}
-
-var _ goakt.Actor = (*Pinger)(nil)
-
-func NewPinger() *Pinger {
-  return &Pinger{
-    mu: sync.Mutex{},
-  }
-}
-
-func (p *Pinger) PreStart(ctx context.Context) error {
-  // set the log
-  p.mu.Lock()
-  defer p.mu.Unlock()
-  p.logger = log.DefaultLogger
-  p.count = atomic.NewInt32(0)
-  p.logger.Info("Pinger is about to Start")
-  return nil
-}
-
-func (p *Pinger) Receive(ctx goakt.ReceiveContext) {
-  switch ctx.Message().(type) {
-  case *samplepb.Ping:
-    p.logger.Info("Pinger received Ping")
-    p.count.Add(1)
-  default:
-    p.logger.Panic(goakt.ErrUnhandled)
-  }
-}
-
-func (p *Pinger) PostStop(ctx context.Context) error {
-  p.logger.Info("Pinger is about to stop")
-  p.logger.Infof("Processed=%d messages", p.count.Load())
-  return nil
-}
-```
 
 ## Contribution
 Contributions are welcome!

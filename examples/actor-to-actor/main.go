@@ -21,14 +21,11 @@ func main() {
 	// use the messages default log. real-life implement the log interface`
 	logger := log.DefaultLogger
 
-	// create the actor system configuration. kindly in real-life application handle the error
-	config, _ := goakt.NewConfig("SampleActorSystem",
+	// create the actor system. kindly in real-life application handle the error
+	actorSystem, _ := goakt.NewActorSystem("SampleActorSystem",
 		goakt.WithExpireActorAfter(10*time.Second), // set big passivation time
 		goakt.WithLogger(logger),
 		goakt.WithActorInitMaxRetries(3))
-
-	// create the actor system. kindly in real-life application handle the error
-	actorSystem, _ := goakt.NewActorSystem(config)
 
 	// start the actor system
 	_ = actorSystem.Start(ctx)

@@ -18,10 +18,10 @@ import (
 const (
 	remotingPort       = 9000
 	accountServicePort = 50051
-	nodeHost           = "0.0.0.0"
-	namespace          = "default"
-	applicationName    = "accounts"
-	actorSystemName    = "AccountsSystem"
+
+	namespace       = "default"
+	applicationName = "accounts"
+	actorSystemName = "AccountsSystem"
 )
 
 // runCmd represents the run command
@@ -46,20 +46,13 @@ var runCmd = &cobra.Command{
 			logger.Panic(err)
 		}
 
-		// create the actor system configuration
-		config, err := goakt.NewConfig(
+		// create the actor system
+		actorSystem, err := goakt.NewActorSystem(
 			actorSystemName,
 			goakt.WithPassivationDisabled(), // set big passivation time
 			goakt.WithLogger(logger),
 			goakt.WithActorInitMaxRetries(3),
 			goakt.WithClustering(disco, remotingPort))
-		// handle the error
-		if err != nil {
-			logger.Panic(err)
-		}
-
-		// create the actor system
-		actorSystem, err := goakt.NewActorSystem(config)
 		// handle the error
 		if err != nil {
 			logger.Panic(err)
