@@ -629,7 +629,7 @@ func (p *pid) Shutdown(ctx context.Context) error {
 	p.stop(ctx)
 
 	// add some logging
-	p.logger.Info("Shutdown process is on going for actor=%s...", p.ActorPath().String())
+	p.logger.Infof("Shutdown process is on going for actor=%s...", p.ActorPath().String())
 	// signal we are shutting down to stop processing public
 	p.shutdownSignal <- Unit{}
 	// perform some cleanup with the actor
