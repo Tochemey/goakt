@@ -94,7 +94,7 @@ go get github.com/tochemey/goakt
 
 ## Examples
 
-Kindly check out the [examples'](./examples)
+Kindly check out the [examples'](./examples) folder.
 
 
 ## Contribution
