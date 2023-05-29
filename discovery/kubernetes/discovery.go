@@ -12,7 +12,7 @@ import (
 	"github.com/tochemey/goakt/pkg/telemetry"
 	"go.uber.org/atomic"
 	corev1 "k8s.io/api/core/v1"
-	k8meta "k8s.io/apimachinery/pkg/apis/meta/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
@@ -20,11 +20,29 @@ import (
 	"k8s.io/client-go/tools/cache"
 )
 
+const (
+	Namespace       string = "namespace"         // Namespace specifies the kubernetes namespace
+	ActorSystemName        = "actor_system_name" // ActorSystemName specifies the actor system name
+	ApplicationName        = "app_name"          // ApplicationName specifies the application name. This often matches the actor system name
+)
+
+// option represents the kubernetes provider option
+type option struct {
+	// KubeConfig represents the kubernetes configuration
+	KubeConfig string
+	// NameSpace specifies the namespace
+	NameSpace string
+	// The actor system name
+	ActorSystemName string
+	// ApplicationName specifies the running application
+	ApplicationName string
+}
+
 // Discovery represents the kubernetes discovery
 type Discovery struct {
-	option    *Option
-	k8sClient *kubernetes.Clientset
-	mu        sync.Mutex
+	option *option
+	client kubernetes.Interface
+	mu     sync.Mutex
 
 	stopChan   chan struct{}
 	publicChan chan discovery.Event
@@ -74,7 +92,7 @@ func (k *Discovery) Nodes(ctx context.Context) ([]*discovery.Node, error) {
 	}
 
 	// List all the pods based on the filters we requested
-	pods, err := k.k8sClient.CoreV1().Pods(k.option.NameSpace).List(ctx, k8meta.ListOptions{
+	pods, err := k.client.CoreV1().Pods(k.option.NameSpace).List(ctx, metav1.ListOptions{
 		LabelSelector: labels.SelectorFromSet(podLabels).String(),
 	})
 	// panic when we cannot poll the pods
@@ -152,14 +170,14 @@ func (k *Discovery) Start(ctx context.Context, meta discovery.Meta) error {
 		return errors.Wrap(err, "failed to get the in-cluster config of the kubernetes provider")
 	}
 	// create an instance of the k8 client set
-	k8sClient, err := kubernetes.NewForConfig(config)
+	client, err := kubernetes.NewForConfig(config)
 	// handle the error
 	if err != nil {
 		return errors.Wrap(err, "failed to create the kubernetes client api")
 	}
 
 	// set the k8 client
-	k.k8sClient = k8sClient
+	k.client = client
 	// set the options
 	if err := k.setOptions(meta); err != nil {
 		return errors.Wrap(err, "failed to instantiate the kubernetes discovery provider")
@@ -191,10 +209,14 @@ func (k *Discovery) Stop() error {
 	if !k.isInitialized.Load() {
 		return errors.New("kubernetes discovery engine not initialized")
 	}
-	// stop the watchers
-	close(k.stopChan)
+	// acquire the lock
+	k.mu.Lock()
+	// release the lock
+	defer k.mu.Unlock()
 	// close the public channel
 	close(k.publicChan)
+	// stop the watchers
+	close(k.stopChan)
 	return nil
 }
 
@@ -206,6 +228,8 @@ func (k *Discovery) handlePodAdded(pod *corev1.Pod) {
 	defer k.mu.Unlock()
 	// ignore the pod when it is not running
 	if pod.Status.Phase != corev1.PodRunning {
+		// add some debug logging
+		k.logger.Debugf("pod=%s added is not running. Status=%s", pod.GetName(), pod.Status.Phase)
 		return
 	}
 	// get node
@@ -223,9 +247,19 @@ func (k *Discovery) handlePodAdded(pod *corev1.Pod) {
 // handlePodUpdated is called when a pod is updated
 func (k *Discovery) handlePodUpdated(old *corev1.Pod, pod *corev1.Pod) {
 	// ignore the pod when it is not running
-	if pod.Status.Phase != corev1.PodRunning {
+	if old.Status.Phase != corev1.PodRunning {
+		// add some debug logging
+		k.logger.Debugf("pod=%s to be modified is not running. Status=%s", old.GetName(), old.Status.Phase)
 		return
 	}
+
+	// ignore the pod when it is not running
+	if pod.Status.Phase != corev1.PodRunning {
+		// add some debug logging
+		k.logger.Debugf("modified pod=%s is not running. Status=%s", pod.GetName(), pod.Status.Phase)
+		return
+	}
+
 	// acquire the lock
 	k.mu.Lock()
 	// release the lock
@@ -263,8 +297,8 @@ func (k *Discovery) handlePodDeleted(pod *corev1.Pod) {
 
 // setOptions sets the kubernetes option
 func (k *Discovery) setOptions(meta discovery.Meta) (err error) {
-	// create an instance of Option
-	option := new(Option)
+	// create an instance of option
+	option := new(option)
 	// extract the namespace
 	option.NameSpace, err = meta.GetString(Namespace)
 	// handle the error in case the namespace value is not properly set
@@ -322,6 +356,8 @@ func (k *Discovery) podToNode(pod *corev1.Pod) *discovery.Node {
 // watchPods keeps a watch on kubernetes pods activities and emit
 // respective event when needed
 func (k *Discovery) watchPods() {
+	// add some debug logging
+	k.logger.Debugf("%s start watching pods activities...", k.ID())
 	// TODO: make sure to document it on k8 discovery
 	podLabels := map[string]string{
 		"app.kubernetes.io/part-of":   k.option.ActorSystemName,
@@ -330,10 +366,10 @@ func (k *Discovery) watchPods() {
 	}
 	// create the k8 informer factory
 	factory := informers.NewSharedInformerFactoryWithOptions(
-		k.k8sClient,
-		10*time.Minute, // TODO make it configurable
+		k.client,
+		time.Second, // TODO make it configurable
 		informers.WithNamespace(k.option.NameSpace),
-		informers.WithTweakListOptions(func(options *k8meta.ListOptions) {
+		informers.WithTweakListOptions(func(options *metav1.ListOptions) {
 			options.LabelSelector = labels.SelectorFromSet(podLabels).String()
 		}))
 	// create the pods informer instance
@@ -345,11 +381,15 @@ func (k *Discovery) watchPods() {
 			mux.RLock()
 			defer mux.RUnlock()
 			if !synced {
+				// add some debug logging
+				k.logger.Debugf("%s pods watching synchronization not yet done", k.ID())
 				return
 			}
 
 			// Handler logic
 			pod := obj.(*corev1.Pod)
+			// add some debug logging
+			k.logger.Debugf("%s has been added", pod.Name)
 			// handle the newly added pod
 			k.handlePodAdded(pod)
 		},
@@ -357,24 +397,36 @@ func (k *Discovery) watchPods() {
 			mux.RLock()
 			defer mux.RUnlock()
 			if !synced {
+				// add some debug logging
+				k.logger.Debugf("%s pods watching synchronization not yet done", k.ID())
 				return
 			}
 
 			// Handler logic
 			old := current.(*corev1.Pod)
 			pod := node.(*corev1.Pod)
+
+			// add some debug logging
+			k.logger.Debugf("%s has been modified", old.Name)
+
 			k.handlePodUpdated(old, pod)
 		},
 		DeleteFunc: func(obj any) {
 			mux.RLock()
 			defer mux.RUnlock()
 			if !synced {
+				// add some debug logging
+				k.logger.Debugf("%s pods watching synchronization not yet done", k.ID())
 				return
 			}
 
 			// Handler logic
 			pod := obj.(*corev1.Pod)
-			// handle the newly added pod
+
+			// add some debug logging
+			k.logger.Debugf("%s has been deleted", pod.Name)
+
+			// handle the deleted pod
 			k.handlePodDeleted(pod)
 		},
 	})

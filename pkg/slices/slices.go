@@ -25,6 +25,8 @@ func NewConcurrentSlice[T any]() *ConcurrentSlice[T] {
 
 // Len returns the number of items
 func (cs *ConcurrentSlice[T]) Len() int {
+	cs.Lock()
+	defer cs.Unlock()
 	return len(cs.items)
 }
 
