@@ -19,7 +19,7 @@ func GetClient() *http.Client {
 			DialTLSContext: func(ctx context.Context, network, addr string, cfg *tls.Config) (net.Conn, error) {
 				// If you're also using this client for non-h2c traffic, you may want to
 				// delegate to tls.Dial if the network isn't TCP or the addr isn't in an
-				// allowlist.
+				// allow-list.
 				return net.Dial(network, addr)
 			},
 			PingTimeout:     30 * time.Second,

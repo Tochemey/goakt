@@ -11,6 +11,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/tochemey/goakt/log"
 	"github.com/tochemey/goakt/pkg/telemetry"
+	"go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/client/v3/concurrency"
 	"go.etcd.io/etcd/client/v3/namespace"
@@ -140,7 +141,21 @@ func (s *KVStore) GetValue(ctx context.Context, key string, opts ...clientv3.OpO
 		defer span.End()
 	}
 
-	return s.Get(ctx, key, opts...)
+	// send the request and handle the error
+	resp, err := s.Get(ctx, key, opts...)
+	// handle the error
+	if err != nil {
+		// let me check the error type
+		switch err {
+		case rpctypes.ErrKeyNotFound:
+			return nil, nil
+		default:
+			// pass
+		}
+		return nil, err
+	}
+
+	return resp, nil
 }
 
 // SetValue sets the value of a given key unto the store

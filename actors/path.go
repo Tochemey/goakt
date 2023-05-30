@@ -42,16 +42,6 @@ func (p *Path) WithParent(parent *Path) *Path {
 	return newPath
 }
 
-// LocalAddress return the actor path local address
-func (p *Path) LocalAddress() *Address {
-	// only return the local address when the address is in local scope
-	// otherwise return nil
-	if p.address.IsLocal() {
-		return p.address
-	}
-	return nil
-}
-
 // Address returns the address of the path
 func (p *Path) Address() *Address {
 	return p.address

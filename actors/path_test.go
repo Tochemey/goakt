@@ -22,7 +22,6 @@ func TestPath(t *testing.T) {
 	assert.IsType(t, new(Path), path)
 
 	// these are just routine assertions
-	assert.Nil(t, path.LocalAddress())
 	assert.Equal(t, name, path.Name())
 	assert.Equal(t, "goakt://Sys@localhost:888/TestActor", path.String())
 	remoteAddr := &pb.Address{
