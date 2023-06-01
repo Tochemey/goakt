@@ -98,3 +98,10 @@ func WithClustering(disco discovery.Discovery, remotingPort int32) Option {
 		sys.disco = disco
 	})
 }
+
+// WithClusterDataDir sets the cluster data dir.
+func WithClusterDataDir(dir string) Option {
+	return OptionFunc(func(a *actorSystem) {
+		a.clusterDataDir = dir
+	})
+}

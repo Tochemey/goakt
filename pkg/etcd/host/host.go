@@ -9,6 +9,7 @@ import (
 )
 
 // Addresses returns the running node etcd addresses
+// reference: https://go.dev/src/net/ip.go
 func Addresses() ([]string, error) {
 	// grab all the IP interfaces on the host machine
 	addresses, err := net.InterfaceAddrs()
@@ -29,7 +30,10 @@ func Addresses() ([]string, error) {
 		// automatically a valid address
 		ip, _, _ := net.ParseCIDR(address.String())
 		// let us ignore loop-back ip address
-		if ip.IsLoopback() {
+		if ip.IsLoopback() ||
+			ip.IsUnspecified() ||
+			ip.IsLinkLocalMulticast() ||
+			ip.IsLinkLocalUnicast() {
 			continue
 		}
 

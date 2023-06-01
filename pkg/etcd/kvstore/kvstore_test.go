@@ -19,8 +19,8 @@ func TestKVStore(t *testing.T) {
 	ctx := context.TODO()
 
 	// create the various URLs and cluster name
-	clientURLs := types.MustNewURLs([]string{"http://0.0.0.0:2379"})
-	peerURLs := types.MustNewURLs([]string{"http://0.0.0.0:2380"})
+	clientURLs := types.MustNewURLs([]string{"http://0.0.0.0:7379"})
+	peerURLs := types.MustNewURLs([]string{"http://0.0.0.0:7380"})
 	endpoints := clientURLs
 	clusterName := "test"
 	datadir := "test"

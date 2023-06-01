@@ -10,13 +10,12 @@ import (
 	"regexp"
 	"time"
 
-	"github.com/tochemey/goakt/discovery"
-
 	"github.com/bufbuild/connect-go"
 	otelconnect "github.com/bufbuild/connect-opentelemetry-go"
 	cmp "github.com/orcaman/concurrent-map/v2"
 	"github.com/pkg/errors"
 	"github.com/tochemey/goakt/cluster"
+	"github.com/tochemey/goakt/discovery"
 	goaktpb "github.com/tochemey/goakt/internal/goakt/v1"
 	"github.com/tochemey/goakt/internal/goakt/v1/goaktv1connect"
 	"github.com/tochemey/goakt/log"
@@ -117,6 +116,7 @@ type actorSystem struct {
 	// cluster mode
 	clusterService *cluster.Cluster
 	clusterChan    chan *goaktpb.WireActor
+	clusterDataDir string
 }
 
 // enforce compilation error when all methods of the ActorSystem interface are not implemented
@@ -370,12 +370,27 @@ func (a *actorSystem) Start(ctx context.Context) error {
 
 	// start remoting when remoting is enabled
 	if a.remotingEnabled {
-		go a.enableRemoting(ctx)
+		// set the remoting server
+		a.setRemotingServer(ctx)
+		// start the server
+		go a.startRemotingServer()
 	}
 
 	// enable clustering when it is enabled
 	if a.clusterEnabled {
-		go a.enableClustering(ctx)
+		// start the cluster service
+		a.startClusterService(ctx)
+		// set the remoting host
+		a.remotingHost = a.clusterService.NodeHost()
+		// only start remoting if not yet started
+		if !a.remotingEnabled {
+			// set the remoting server
+			a.setRemotingServer(ctx)
+			// start the server
+			go a.startRemotingServer()
+		}
+		// start broadcasting cluster message
+		go a.broadcast(ctx)
 	}
 
 	// start the metrics service
@@ -654,11 +669,17 @@ func (a *actorSystem) handleRemoteTell(ctx context.Context, to PID, message prot
 	return Tell(ctx, to, message)
 }
 
-// enableClustering enables clustering. When clustering is enabled remoting is also enabled to facilitate remote
+// startClusterService enables clustering. When clustering is enabled remoting is also enabled to facilitate remote
 // communication
-func (a *actorSystem) enableClustering(ctx context.Context) {
+func (a *actorSystem) startClusterService(ctx context.Context) {
 	// create an instance of the cluster service and start it
-	cluster := cluster.New(a.disco, a.logger)
+	var opts []cluster.Option
+	// only set the cluster data dir
+	if a.clusterDataDir != "" {
+		opts = append(opts, cluster.WithDataDir(a.clusterDataDir))
+	}
+	// create an instance of the cluster
+	cluster := cluster.New(a.disco, a.logger, opts...)
 	// set the cluster field of the actorSystem
 	a.clusterService = cluster
 	// start the cluster service
@@ -675,19 +696,10 @@ func (a *actorSystem) enableClustering(ctx context.Context) {
 
 	<-bootstrapChan
 	timer.Stop()
-
-	// set the remoting host
-	a.remotingHost = cluster.NodeHost()
-	// let us enable remoting as well if not yet enabled
-	if !a.remotingEnabled {
-		a.enableRemoting(ctx)
-	}
-	// start broadcasting cluster message
-	go a.broadcast(ctx)
 }
 
-// enableRemoting enables the remoting service to handle remote messaging
-func (a *actorSystem) enableRemoting(context.Context) {
+// setRemotingServer enables the remoting service to handle remote messaging
+func (a *actorSystem) setRemotingServer(context.Context) {
 	// create a function to handle the observability
 	interceptor := func(tp trace.TracerProvider, mp metric.MeterProvider) connect.Interceptor {
 		return otelconnect.NewInterceptor(
@@ -734,7 +746,10 @@ func (a *actorSystem) enableRemoting(context.Context) {
 
 	// set the server
 	a.remotingServer = server
+}
 
+// startRemotingServer starts the remoting server
+func (a *actorSystem) startRemotingServer() {
 	// listen and service requests
 	if err := a.remotingServer.ListenAndServe(); err != nil {
 		// check the error type

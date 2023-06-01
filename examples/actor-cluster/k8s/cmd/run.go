@@ -28,12 +28,11 @@ const (
 var runCmd = &cobra.Command{
 	Use:   "run",
 	Short: "A brief description of your command",
-	Long:  ``,
 	Run: func(cmd *cobra.Command, args []string) {
 		// create a background context
 		ctx := context.Background()
 		// use the messages default log. real-life implement the log interface`
-		logger := log.New(log.InfoLevel, os.Stdout)
+		logger := log.New(log.DebugLevel, os.Stdout)
 
 		// create the k8 configuration
 		disco := kubernetes.New(logger)

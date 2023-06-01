@@ -6,9 +6,11 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/tochemey/goakt/log"
+	mocks "github.com/tochemey/goakt/mocks/discovery"
 )
 
 func TestOptions(t *testing.T) {
+	disco := new(mocks.Discovery)
 	testCases := []struct {
 		name     string
 		option   Option
@@ -48,6 +50,21 @@ func TestOptions(t *testing.T) {
 			name:     "WithRemoting",
 			option:   WithRemoting("localhost", 3100),
 			expected: actorSystem{remotingEnabled: true, remotingPort: 3100, remotingHost: "localhost"},
+		},
+		{
+			name:     "WithClusterDir",
+			option:   WithClusterDataDir("test"),
+			expected: actorSystem{clusterDataDir: "test"},
+		},
+		{
+			name:   "WithClustering",
+			option: WithClustering(disco, 3100),
+			expected: actorSystem{
+				clusterEnabled:  true,
+				remotingEnabled: true,
+				remotingPort:    3100,
+				disco:           disco,
+			},
 		},
 	}
 	for _, tc := range testCases {
