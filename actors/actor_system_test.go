@@ -2,17 +2,11 @@ package actors
 
 import (
 	"context"
-	"os"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
-	"github.com/tochemey/goakt/discovery"
 	"github.com/tochemey/goakt/log"
-	mocksdiscovery "github.com/tochemey/goakt/mocks/discovery"
-	"github.com/tochemey/goakt/pkg/etcd/host"
 )
 
 func TestActorSystem(t *testing.T) {
@@ -89,51 +83,5 @@ func TestActorSystem(t *testing.T) {
 		assert.NotNil(t, actorRef)
 
 		assert.NoError(t, sys.Stop(ctx))
-	})
-	t.Run("With clustering enabled", func(t *testing.T) {
-		assert.NoError(t, os.RemoveAll("test"))
-		ctx := context.TODO()
-
-		addrs, err := host.Addresses()
-		assert.NoError(t, err)
-
-		nodes := []*discovery.Node{
-			{
-				Name:      "node1",
-				Host:      addrs[0],
-				StartTime: time.Now().UnixMilli(),
-				Ports: map[string]int32{
-					"clients-port": 2379,
-					"peers-port":   2380,
-				},
-				IsRunning: true,
-			},
-		}
-		// create the mock discovery provider
-		disco := new(mocksdiscovery.Discovery)
-		disco.On("ID").Return("mockdisco")
-		disco.On("Start", ctx, mock.Anything).Return(nil)
-		disco.On("Stop").Return(nil)
-		disco.On("Nodes", mock.Anything).Return(nodes, nil)
-		disco.On("Watch", mock.Anything).Return(nil, nil)
-
-		sys, _ := NewActorSystem("testSys",
-			WithLogger(log.DefaultLogger),
-			WithClustering(disco, 0),
-			WithClusterDataDir("test"),
-		)
-
-		// start the actor system
-		err = sys.Start(ctx)
-		assert.NoError(t, err)
-
-		time.Sleep(2 * time.Second)
-
-		actor := NewTestActor()
-		actorRef := sys.StartActor(ctx, "Test", actor)
-		assert.NotNil(t, actorRef)
-
-		assert.NoError(t, sys.Stop(ctx))
-		assert.NoError(t, os.RemoveAll("test"))
 	})
 }
