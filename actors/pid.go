@@ -428,6 +428,7 @@ func (p *pid) Ask(ctx context.Context, to PID, message proto.Message) (response 
 	context.message = message
 	context.isAsyncMessage = false
 	context.mu = sync.Mutex{}
+	context.response = make(chan proto.Message, 1)
 
 	// release the lock after setting the message context
 	p.mu.Unlock()
