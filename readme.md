@@ -47,7 +47,7 @@ In Go-Akt, actors have the following characteristics:
   - Watch/Unwatch (child) actors via their process id [`PID`](./actors/pid.go) `Watch` and `UnWatch` methods
   - Supervise the failure behavior of (child) actors. The supervisory strategy to adopt is set during the creation of the actor system. (Restart and Stop directive are supported) at the moment
   - Remotely lookup for an actor on another node via their process id [`PID`](./actors/pid.go) `RemoteLookup`. This allows them to send messages remotely via `RemoteAsk` or `RemoteTell` methods
-- They can change adopt various form using the [behavior](./actors/behavior.go) feature
+- They can adopt various form using the [behavior](./actors/behavior.go) feature
 - Few metrics are also accessible:
   - Mailbox size at a given time. That information can be accessed via the process id  [`PID`](./actors/pid.go) `MailboxSize` method
   - Total number of messages handled at a given time. That information can be accessed via the process id  [`PID`](./actors/pid.go) `ReceivedCount` method
