@@ -532,51 +532,62 @@ func isHostNodeJoining(ctx context.Context, endpoints []string) (bool, error) {
 	// so that for each iteration we can get
 	// a fresh cancellation context
 	mainCtx := ctx
+	// create a cancellation context
+	ctx, cancel := context.WithTimeout(mainCtx, 5*time.Second)
+	// defer cancel
+	defer cancel()
+
 	// iterate through the endpoints
-	for index, ep := range endpoints {
-		// create a cancellation context
-		ctx, cancel := context.WithTimeout(mainCtx, 5*time.Second)
-		// defer cancel
-		defer cancel()
-		// spawn a client connection
-		client, err := clientv3.New(clientv3.Config{
-			Endpoints:   endpoints,
-			DialTimeout: 5 * time.Second,
-			Context:     ctx,
-		})
-
+	for _, ep := range endpoints {
+		// call the various endpoint
+		res, err := callEndpoint(ctx, ep)
 		// handle the error
 		if err != nil {
 			return false, err
 		}
 
-		// close the client connection
-		defer client.Close()
-		// check the node status
-		resp, err := client.Status(client.Ctx(), ep)
-		// handle the error
-		if err != nil {
-			switch err {
-			case context.DeadlineExceeded, rpctypes.ErrMemberNotFound:
-				// we have reached the number of endpoints to lookup
-				if len(endpoints) == index {
-					// this is a startup call which means that none of the nodes are not running yet
-					return false, nil
-				}
-				// we continue scanning the endpoints till we exhaust the list
-				continue
-			default:
-				// pass
-			}
-			return false, err
+		// return when we find an existing cluster
+		if res {
+			return res, nil
 		}
-
-		// we have found a peer
-		output := resp.Header.GetMemberId() != raft.None &&
-			(resp.Header.ClusterId != raft.None || resp.Leader == resp.Header.GetMemberId())
-		// return the output
-		return output, nil
 	}
 
 	return false, nil
+}
+
+// callEndpoint make a call to the given endpoint
+func callEndpoint(ctx context.Context, endpoint string) (bool, error) {
+	// spawn a client connection
+	client, err := clientv3.New(clientv3.Config{
+		Endpoints:   []string{endpoint},
+		DialTimeout: 5 * time.Second,
+		Context:     ctx,
+	})
+
+	// handle the error
+	if err != nil {
+		return false, err
+	}
+	// close the client connection
+	defer client.Close()
+	// check the node status
+	resp, err := client.Status(client.Ctx(), endpoint)
+	// handle the error
+	if err != nil {
+		// handle the error
+		switch err {
+		// return false when deadline exceeded or member not found
+		case context.DeadlineExceeded, rpctypes.ErrMemberNotFound:
+			return false, nil
+		default:
+			// pass
+		}
+		return false, err
+	}
+
+	// we have found a peer
+	output := resp.Header.GetMemberId() != raft.None &&
+		(resp.Header.ClusterId != raft.None || resp.Leader == resp.Header.GetMemberId())
+	// return the output
+	return output, nil
 }
