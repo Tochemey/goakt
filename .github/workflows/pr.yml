@@ -18,7 +18,7 @@ jobs:
         with:
           submodules: false
           fetch-depth: 0
-#      - uses: wagoid/commitlint-github-action@v5.3.0
+      - uses: wagoid/commitlint-github-action@v5.3.0
       - name: Login to GitHub Docker
         env:
           DOCKER_REGISTRY: ghcr.io
@@ -41,9 +41,3 @@ jobs:
           FORCE_COLOR: 1
         run: |
           earthly -P -use-inline-cache --save-inline-cache --strict --push +test
-#      - uses: codecov/codecov-action@v3
-#        with:
-#          token: ${{ secrets.CODECOV_TOKEN }}
-#          files: ./coverage.out # optional
-#          fail_ci_if_error: false # optional (default = false)
-#          verbose: true # optional (default = false)
