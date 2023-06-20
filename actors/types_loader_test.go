@@ -8,15 +8,14 @@ import (
 
 func TestTypesLoader(t *testing.T) {
 	t.Run("With new instance", func(t *testing.T) {
-		tl := NewTypesLoader(nil)
+		tl := NewTypesLoader()
 		var p any = tl
 		_, ok := p.(TypesLoader)
 		assert.True(t, ok)
-		assert.Nil(t, tl.Parent())
 	})
 
 	t.Run("With registration with name", func(t *testing.T) {
-		tl := NewTypesLoader(nil)
+		tl := NewTypesLoader()
 		// create an instance of an object
 		actor := NewTestActor()
 		// register that actor
@@ -29,7 +28,7 @@ func TestTypesLoader(t *testing.T) {
 	})
 
 	t.Run("With registration without name", func(t *testing.T) {
-		tl := NewTypesLoader(nil)
+		tl := NewTypesLoader()
 		// create an instance of an object
 		actor := NewTestActor()
 		// register that actor

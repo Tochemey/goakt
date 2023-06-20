@@ -8,7 +8,7 @@ import (
 
 func TestReflection(t *testing.T) {
 	t.Run("With ActorFrom", func(t *testing.T) {
-		tl := NewTypesLoader(nil)
+		tl := NewTypesLoader()
 		// create an instance of an actor
 		actor := NewTestActor()
 		// register the actor into the types registry
@@ -25,7 +25,7 @@ func TestReflection(t *testing.T) {
 	})
 
 	t.Run("With ActorOf", func(t *testing.T) {
-		tl := NewTypesLoader(nil)
+		tl := NewTypesLoader()
 		// create an instance of an actor
 		actor := NewTestActor()
 		// register the actor into the types registry

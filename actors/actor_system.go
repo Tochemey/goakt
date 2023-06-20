@@ -138,7 +138,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		system = &actorSystem{
 			actors:              cmp.New[PID](),
 			hasStarted:          atomic.NewBool(false),
-			typesLoader:         NewTypesLoader(nil),
+			typesLoader:         NewTypesLoader(),
 			clusterChan:         make(chan *goaktpb.WireActor, 10),
 			name:                name,
 			logger:              log.DefaultLogger,
