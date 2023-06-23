@@ -30,8 +30,9 @@ jobs:
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN}}
-      - name: Download latest earthly
-        run: "sudo /bin/sh -c 'wget https://github.com/earthly/earthly/releases/download/v0.7.1/earthly-linux-amd64 -O /usr/local/bin/earthly && chmod +x /usr/local/bin/earthly'"
+      - uses: earthly/actions/setup-earthly@v1
+        with:
+          version: v0.7.9
       - name: Earthly version
         run: earthly --version
       - name: Run Linter and Tests
@@ -41,3 +42,9 @@ jobs:
           FORCE_COLOR: 1
         run: |
           earthly -P -use-inline-cache --save-inline-cache --strict --push +test
+      - uses: codecov/codecov-action@v3
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage.out # optional
+          fail_ci_if_error: false # optional (default = false)
+          verbose: true # optional (default = false)
