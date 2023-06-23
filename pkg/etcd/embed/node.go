@@ -27,7 +27,6 @@ type Node struct {
 	config    *Config
 	isStopped bool
 	isReady   bool
-	isLeader  bool
 
 	mu sync.Mutex
 
@@ -41,7 +40,6 @@ func NewNode(config *Config) *Node {
 		config:    config,
 		isStopped: false,
 		isReady:   false,
-		isLeader:  false,
 		mu:        sync.Mutex{},
 		logger:    config.Logger(),
 	}
@@ -193,7 +191,7 @@ func (n *Node) IsLeader() bool {
 	n.mu.Lock()
 	// release the lock once done
 	defer n.mu.Unlock()
-	return n.server.Server.Leader().String() == n.server.Server.ID().String() && n.isLeader
+	return n.server.Server.Leader().String() == n.server.Server.ID().String()
 }
 
 // LeaderID returns the leader id
