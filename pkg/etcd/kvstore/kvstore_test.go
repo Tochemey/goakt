@@ -2,6 +2,7 @@ package kvstore
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"testing"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tochemey/goakt/log"
 	"github.com/tochemey/goakt/pkg/etcd/embed"
+	"github.com/travisjeffery/go-dynaport"
 )
 
 func TestKVStore(t *testing.T) {
@@ -18,9 +20,14 @@ func TestKVStore(t *testing.T) {
 	// create a context
 	ctx := context.TODO()
 
+	// let us generate two ports
+	ports := dynaport.Get(2)
+	clientsPort := ports[0]
+	peersPort := ports[1]
+
 	// create the various URLs and cluster name
-	clientURLs := types.MustNewURLs([]string{"http://0.0.0.0:2379"})
-	peerURLs := types.MustNewURLs([]string{"http://0.0.0.0:2380"})
+	clientURLs := types.MustNewURLs([]string{fmt.Sprintf("http://0.0.0.0:%d", clientsPort)})
+	peerURLs := types.MustNewURLs([]string{fmt.Sprintf("http://0.0.0.0:%d", peersPort)})
 	endpoints := clientURLs
 	clusterName := "test"
 	datadir := "test"
