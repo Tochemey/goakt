@@ -12,8 +12,7 @@ const (
 )
 
 var (
-	ErrLocalAddress  = errors.New("address is a local address")
-	ErrRemoteAddress = errors.New("address is a remote address")
+	ErrLocalAddress = errors.New("address is a local address")
 )
 
 // Address represents the physical location under which an Actor can be
