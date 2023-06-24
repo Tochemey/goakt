@@ -38,7 +38,7 @@ require (
 	google.golang.org/protobuf v1.30.0
 	k8s.io/api v0.28.0-alpha.3
 	k8s.io/apimachinery v0.28.0-alpha.3
-	k8s.io/client-go v0.28.0-alpha.3
+	k8s.io/client-go v11.0.0+incompatible
 )
 
 require (
