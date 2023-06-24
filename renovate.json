@@ -2,5 +2,97 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
     "config:base"
+  ],
+  "constraints": {
+    "go": "1.20"
+  },
+  "enabledManagers": [
+    "regex",
+    "github-actions",
+    "gomod"
+  ],
+  "postUpdateOptions": [
+    "gomodTidy"
+  ],
+  "regexManagers": [
+    {
+      "fileMatch": [
+        ".github/renovate.json5$"
+      ],
+      "matchStrings": [
+        "constraints: {(\\s*\\n\\s*)\"go\":\\s*\"(?<currentValue>.*?)\""
+      ],
+      "depNameTemplate": "go",
+      "datasourceTemplate": "golang-version",
+      "versioningTemplate": "npm"
+    },
+    {
+      "fileMatch": [
+        "Earthfile$"
+      ],
+      "matchStrings": [
+        "FROM tochemey/docker-go:(?<currentValue>.*?)\\n"
+      ],
+      "depNameTemplate": "tochemey/docker-go",
+      "datasourceTemplate": "docker"
+    },
+    {
+      "fileMatch": [
+        ".github/workflows/build.yml$",
+        ".github/workflows/pr.yml$"
+      ],
+      "matchStrings": [
+        "version: (?<currentValue>.*?)\\n"
+      ],
+      "depNameTemplate": "earthly/earthly",
+      "datasourceTemplate": "github-releases"
+    }
+  ],
+  "packageRules": [
+    {
+      "matchPackageNames": [
+        "go",
+        "golang"
+      ],
+      "separateMinorPatch": "true"
+    },
+    {
+      "matchPackageNames": [
+        "go",
+        "golang"
+      ],
+      "groupName": "go patch version",
+      "matchUpdateTypes": [
+        "patch"
+      ]
+    },
+    {
+      "matchPackageNames": [
+        "go",
+        "golang"
+      ],
+      "groupName": "go minor version",
+      "matchUpdateTypes": [
+        "minor"
+      ]
+    },
+    {
+      "matchManagers": [
+        "gomod"
+      ],
+      "matchUpdateTypes": [
+        "minor"
+      ],
+      "groupName": "Minor Go modules"
+    },
+    {
+      "matchManagers": [
+        "gomod"
+      ],
+      "matchUpdateTypes": [
+        "patch"
+      ],
+      "groupName": "Patch Go modules"
+    }
   ]
 }
