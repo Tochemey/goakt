@@ -32,7 +32,7 @@ vendor:
 
     COPY +mock/mocks ./mocks
 
-    RUN go mod vendor
+    RUN go mod tidy && go mod vendor
     SAVE ARTIFACT /app /files
 
 
