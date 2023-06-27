@@ -3,7 +3,7 @@ module github.com/tochemey/goakt
 go 1.20
 
 require (
-	github.com/bufbuild/connect-go v1.8.0
+	github.com/bufbuild/connect-go v1.9.0
 	github.com/bufbuild/connect-opentelemetry-go v0.3.0
 	github.com/cenkalti/backoff v2.2.1+incompatible
 	github.com/coreos/etcd v3.3.27+incompatible
