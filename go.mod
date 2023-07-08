@@ -4,7 +4,7 @@ go 1.20
 
 require (
 	github.com/bufbuild/connect-go v1.9.0
-	github.com/bufbuild/connect-opentelemetry-go v0.3.0
+	github.com/bufbuild/connect-opentelemetry-go v0.4.0
 	github.com/cenkalti/backoff v2.2.1+incompatible
 	github.com/coreos/etcd v3.3.27+incompatible
 	github.com/deckarep/golang-set/v2 v2.3.0
