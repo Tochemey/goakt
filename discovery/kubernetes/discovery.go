@@ -211,16 +211,17 @@ func (d *Discovery) EarliestNode(ctx context.Context) (*discovery.Node, error) {
 
 // Stop shutdown the discovery engine
 func (d *Discovery) Stop() error {
+	// acquire the lock
+	d.mu.Lock()
+	// release the lock
+	defer d.mu.Unlock()
+
 	// first check whether the actor system has started
 	if !d.isInitialized.Load() {
 		return errors.New("kubernetes discovery engine not initialized")
 	}
 	// set the initialized to false
 	d.isInitialized = atomic.NewBool(false)
-	// acquire the lock
-	d.mu.Lock()
-	// release the lock
-	defer d.mu.Unlock()
 	// close the public channel
 	close(d.publicChan)
 	// stop the watchers
