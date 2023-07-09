@@ -261,6 +261,11 @@ func (d *Discovery) handlePodAdded(pod *corev1.Pod) {
 
 // handlePodUpdated is called when a pod is updated
 func (d *Discovery) handlePodUpdated(old *corev1.Pod, pod *corev1.Pod) {
+	// acquire the lock
+	d.mu.Lock()
+	// release the lock
+	defer d.mu.Unlock()
+
 	// first check whether the discovery provider is running
 	if !d.isInitialized.Load() {
 		return
@@ -280,10 +285,6 @@ func (d *Discovery) handlePodUpdated(old *corev1.Pod, pod *corev1.Pod) {
 		return
 	}
 
-	// acquire the lock
-	d.mu.Lock()
-	// release the lock
-	defer d.mu.Unlock()
 	// grab the old node
 	oldNode := d.podToNode(old)
 	// get the new node
