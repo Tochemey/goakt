@@ -8,6 +8,11 @@ import (
 // Meta represents the meta information to pass to the discovery engine
 type Meta map[string]any
 
+// NewMeta initializes meta
+func NewMeta() Meta {
+	return Meta{}
+}
+
 // GetString returns the string value of a given key which value is a string
 // If the key value is not a string then an error is return
 func (m Meta) GetString(key string) (string, error) {

@@ -36,7 +36,7 @@ var runCmd = &cobra.Command{
 		logger := log.New(log.InfoLevel, os.Stdout)
 
 		// create the k8 configuration
-		disco := kubernetes.New(logger)
+		disco := kubernetes.NewDiscovery(logger)
 		// start the discovery engine and handle error
 		if err := disco.Start(ctx, discovery.Meta{
 			kubernetes.ApplicationName: applicationName,
