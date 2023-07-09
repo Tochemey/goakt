@@ -60,6 +60,7 @@ func (d *Discovery) ID() string {
 }
 
 // Start the discovery engine
+// nolint
 func (d *Discovery) Start(ctx context.Context, meta discovery.Meta) error {
 	// add a span context
 	_, span := telemetry.SpanContext(ctx, "Start")
