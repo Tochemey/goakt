@@ -216,7 +216,7 @@ func (d *Discovery) Stop() error {
 	// release the lock
 	defer d.mu.Unlock()
 
-	// first check whether the actor system has started
+	// first check whether the discovery provider has started
 	if !d.isInitialized.Load() {
 		return errors.New("kubernetes discovery engine not initialized")
 	}

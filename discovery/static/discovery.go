@@ -128,14 +128,17 @@ func (d *Discovery) EarliestNode(ctx context.Context) (*discovery.Node, error) {
 
 // Stop shutdown the discovery engine
 func (d *Discovery) Stop() error {
-	// first check whether the actor system has started
-	if !d.isInitialized.Load() {
-		return errors.New("static discovery engine not initialized")
-	}
 	// acquire the lock
 	d.mu.Lock()
 	// release the lock
 	defer d.mu.Unlock()
+
+	// first check whether the discovery provider has started
+	if !d.isInitialized.Load() {
+		return errors.New("static discovery engine not initialized")
+	}
+	// set the initialized to false
+	d.isInitialized = atomic.NewBool(false)
 	// close the public channel
 	close(d.publicChan)
 	// stop the watchers
