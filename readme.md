@@ -75,7 +75,9 @@ The following outlines the cluster mode operations which can help have a healthy
 * To remove nodes, kindly remove them one at a time. Remember to have a healthy cluster you will need at least three nodes running.
 
 The cluster engine depends upon the [discovery](./discovery/iface.go) mechanism to find other nodes in the cluster. 
-At the moment only the [kubernetes](https://kubernetes.io/docs/home/) [api integration](./discovery/kubernetes) is provided and fully functional.
+At the moment the following providers are implemented:
+* the [kubernetes](https://kubernetes.io/docs/home/) [api integration](./discovery/kubernetes) is provided and fully functional. 
+* the static provider
 
 ### Kubernetes Discovery Provider setup
 

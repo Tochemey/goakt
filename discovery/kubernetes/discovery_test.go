@@ -27,7 +27,7 @@ func TestKubernetesProvider(t *testing.T) {
 		// create a logger
 		logger := log.DefaultLogger
 		// create the instance of provider
-		provider := New(logger)
+		provider := NewDiscovery(logger)
 		require.NotNil(t, provider)
 		// assert that provider implements the Discovery interface
 		// this is a cheap test
@@ -37,12 +37,12 @@ func TestKubernetesProvider(t *testing.T) {
 		_, ok := p.(discovery.Discovery)
 		assert.True(t, ok)
 	})
-	t.Run("With id assertion", func(t *testing.T) {
+	t.Run("With ID assertion", func(t *testing.T) {
 		// cheap test
 		// create a logger
 		logger := log.DefaultLogger
 		// create the instance of provider
-		provider := New(logger)
+		provider := NewDiscovery(logger)
 		require.NotNil(t, provider)
 		assert.Equal(t, "kubernetes", provider.ID())
 	})
