@@ -10,13 +10,12 @@ import (
 	"regexp"
 	"time"
 
-	"github.com/tochemey/goakt/discovery"
-
 	"github.com/bufbuild/connect-go"
 	otelconnect "github.com/bufbuild/connect-opentelemetry-go"
 	cmp "github.com/orcaman/concurrent-map/v2"
 	"github.com/pkg/errors"
 	"github.com/tochemey/goakt/cluster"
+	"github.com/tochemey/goakt/discovery"
 	goaktpb "github.com/tochemey/goakt/internal/goakt/v1"
 	"github.com/tochemey/goakt/internal/goakt/v1/goaktv1connect"
 	"github.com/tochemey/goakt/log"
