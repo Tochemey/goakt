@@ -36,9 +36,9 @@ require (
 	golang.org/x/net v0.12.0
 	google.golang.org/grpc v1.56.2
 	google.golang.org/protobuf v1.31.0
-	k8s.io/api v0.28.0-alpha.3
-	k8s.io/apimachinery v0.28.0-alpha.3
-	k8s.io/client-go v0.28.0-alpha.3
+	k8s.io/api v0.28.0-alpha.4
+	k8s.io/apimachinery v0.28.0-alpha.4
+	k8s.io/client-go v0.28.0-alpha.4
 )
 
 require (
@@ -83,7 +83,6 @@ require (
 	github.com/sirupsen/logrus v1.9.3 // indirect
 	github.com/soheilhy/cmux v0.1.5 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
-	github.com/stretchr/objx v0.5.0 // indirect
 	github.com/tmc/grpc-websocket-proxy v0.0.0-20220101234140-673ab2c3ae75 // indirect
 	github.com/xiang90/probing v0.0.0-20221125231312-a49e3df8f510 // indirect
 	go.etcd.io/bbolt v1.3.7 // indirect
