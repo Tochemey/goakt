@@ -18,7 +18,7 @@ jobs:
         with:
           submodules: false
           fetch-depth: 0
-      - uses: wagoid/commitlint-github-action@v5.4.1
+      - uses: wagoid/commitlint-github-action@v5.4.3
       - name: Login to GitHub Docker
         env:
           DOCKER_REGISTRY: ghcr.io
