@@ -3,7 +3,7 @@ module github.com/tochemey/goakt
 go 1.20
 
 require (
-	github.com/bufbuild/connect-go v1.9.0
+	github.com/bufbuild/connect-go v1.10.0
 	github.com/bufbuild/connect-opentelemetry-go v0.4.0
 	github.com/cenkalti/backoff v2.2.1+incompatible
 	github.com/coreos/etcd v3.3.27+incompatible
@@ -34,7 +34,7 @@ require (
 	go.uber.org/zap v1.24.0
 	golang.org/x/exp v0.0.0-20230725093048-515e97ebf090
 	golang.org/x/net v0.12.0
-	google.golang.org/grpc v1.56.2
+	google.golang.org/grpc v1.57.0
 	google.golang.org/protobuf v1.31.0
 	k8s.io/api v0.28.0-beta.0
 	k8s.io/apimachinery v0.28.0-beta.0
