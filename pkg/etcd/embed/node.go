@@ -70,6 +70,8 @@ func (n *Node) Start() error {
 	embedConfig := embed.NewConfig()
 	embedConfig.Name = n.config.Name()
 	embedConfig.Dir = path.Join(n.config.DataDir(), "etcd.data", n.config.Name())
+	embedConfig.TickMs = uint(n.config.heartbeatIntervalMs.Milliseconds())
+	embedConfig.ElectionMs = uint(n.config.electionTimeoutMs.Milliseconds())
 
 	// set the various URLs
 	embedConfig.ListenClientUrls = n.config.ClientURLs()

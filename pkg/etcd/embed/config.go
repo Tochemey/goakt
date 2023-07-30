@@ -19,9 +19,11 @@ type Config struct {
 	enableLogging  bool       // enableLogging states whether to enable logging
 	logDir         string     // logDir specifies the log directory
 
-	logger       log.Logger
-	startTimeout time.Duration
-	join         bool
+	logger              log.Logger
+	startTimeout        time.Duration
+	electionTimeoutMs   time.Duration // electionTimeoutMs is used to fine-tune the election timeout
+	heartbeatIntervalMs time.Duration // heartbeatIntervalMs is used to fine-tune the heartbeat interval
+	join                bool
 }
 
 // NewConfig creates an instance of Config
@@ -30,15 +32,17 @@ func NewConfig(name string, clientURLs, peerURLs, endpoints types.URLs, opts ...
 	defaultDIR := "/var/goakt/"
 	// create a config instance
 	cfg := &Config{
-		name:          name,
-		dataDir:       defaultDIR,
-		enableLogging: false,
-		logDir:        path.Join(defaultDIR, "logs"),
-		logger:        log.DefaultLogger,
-		startTimeout:  time.Minute,
-		clientURLs:    clientURLs,
-		peerURLs:      peerURLs,
-		endPoints:     endpoints,
+		name:                name,
+		dataDir:             defaultDIR,
+		enableLogging:       false,
+		logDir:              path.Join(defaultDIR, "logs"),
+		logger:              log.DefaultLogger,
+		startTimeout:        time.Minute,
+		clientURLs:          clientURLs,
+		peerURLs:            peerURLs,
+		endPoints:           endpoints,
+		electionTimeoutMs:   1000 * time.Millisecond,
+		heartbeatIntervalMs: 100 * time.Millisecond,
 	}
 
 	// apply the various options

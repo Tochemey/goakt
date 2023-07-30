@@ -62,3 +62,25 @@ func WithJoin(join bool) Option {
 		config.join = join
 	})
 }
+
+// WithElectionTimeout sets the election timeout in milliseconds.
+// reference: https://etcd.io/docs/v3.4/tuning/#time-parameters
+// This setting in combination with the heartbeat interval setting enhance latency
+// across multiple data centers or over networks with high latency,
+// the heartbeat interval and election timeout settings may need tuning
+func WithElectionTimeout(timeout time.Duration) Option {
+	return OptionFunc(func(config *Config) {
+		config.electionTimeoutMs = timeout
+	})
+}
+
+// WithHeartbeatInterval sets the heartbeat interval.
+// reference: https://etcd.io/docs/v3.4/tuning/#time-parameters
+// This setting in combination with the election timeout interval setting enhance latency
+// across multiple data centers or over networks with high latency,
+// the heartbeat interval and election timeout settings may need tuning
+func WithHeartbeatInterval(interval time.Duration) Option {
+	return OptionFunc(func(config *Config) {
+		config.heartbeatIntervalMs = interval
+	})
+}
