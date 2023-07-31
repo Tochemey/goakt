@@ -1,5 +1,7 @@
 package log
 
+import "io"
+
 // Logger represents an active logging object that generates lines of
 // output to an io.Writer.
 type Logger interface {
@@ -33,4 +35,6 @@ type Logger interface {
 	Debugf(string, ...any)
 	// LogLevel returns the log level being used
 	LogLevel() Level
+	// LogOutput returns the log output that is set
+	LogOutput() io.Writer
 }

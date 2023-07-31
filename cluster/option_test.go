@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/tochemey/goakt/log"
 )
 
 func TestOptions(t *testing.T) {
@@ -13,11 +14,17 @@ func TestOptions(t *testing.T) {
 		expected Cluster
 	}{
 		{
-			name:     "WithDataDir",
-			option:   WithDataDir("etcd/data"),
-			expected: Cluster{dataDir: "etcd/data"},
+			name:     "WithPartitionsCount",
+			option:   WithPartitionsCount(2),
+			expected: Cluster{partitionsCount: 2},
+		},
+		{
+			name:     "WithLogger",
+			option:   WithLogger(log.DefaultLogger),
+			expected: Cluster{logger: log.DefaultLogger},
 		},
 	}
+
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			var cl Cluster

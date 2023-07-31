@@ -112,7 +112,8 @@ type actorSystem struct {
 	// convenient field to check cluster setup
 	clusterEnabled bool
 	// cluster discovery method
-	disco discovery.Discovery
+	disco           discovery.Discovery
+	partitionsCount uint64
 	// cluster mode
 	clusterService *cluster.Cluster
 	clusterChan    chan *goaktpb.WireActor
@@ -406,7 +407,7 @@ func (a *actorSystem) Stop(ctx context.Context) error {
 	// stop the cluster service
 	if a.clusterEnabled {
 		// stop the cluster service
-		if err := a.clusterService.Stop(); err != nil {
+		if err := a.clusterService.Stop(ctx); err != nil {
 			return err
 		}
 		// stop broadcasting cluster messages
@@ -657,7 +658,10 @@ func (a *actorSystem) handleRemoteTell(ctx context.Context, to PID, message prot
 // communication
 func (a *actorSystem) enableClustering(ctx context.Context) {
 	// create an instance of the cluster service and start it
-	cluster := cluster.New(a.disco, a.logger)
+	cluster := cluster.New(a.Name(),
+		a.disco,
+		cluster.WithLogger(a.logger),
+		cluster.WithPartitionsCount(a.partitionsCount))
 	// set the cluster field of the actorSystem
 	a.clusterService = cluster
 	// start the cluster service

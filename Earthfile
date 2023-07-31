@@ -2,11 +2,12 @@ VERSION 0.7
 PROJECT tochemey/goakt
 
 
-FROM tochemey/docker-go:1.20.4-0.8.0
+FROM tochemey/docker-go:1.20.6-0.9.1
 
 # install the various tools to generate connect-go
 RUN go install github.com/fullstorydev/grpcurl/cmd/grpcurl@latest
 RUN go install github.com/bufbuild/connect-go/cmd/protoc-gen-connect-go@latest
+RUN apk --no-cache add git ca-certificates gcc musl-dev libc-dev binutils-gold
 
 pbs:
     BUILD +internal-pb
@@ -123,7 +124,7 @@ compile-actor-cluster:
     SAVE ARTIFACT bin/accounts /accounts
 
 actor-cluster-image:
-    FROM alpine:3.16.2
+    FROM alpine:3.17
 
     WORKDIR /app
     COPY +compile-actor-cluster/accounts ./accounts
@@ -131,8 +132,8 @@ actor-cluster-image:
 
     EXPOSE 50051
     EXPOSE 9000
-    EXPOSE 2379
-    EXPOSE 2380
+    EXPOSE 32379
+    EXPOSE 32380
 
     ENTRYPOINT ["./accounts"]
     SAVE IMAGE accounts:dev

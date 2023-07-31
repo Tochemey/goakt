@@ -68,7 +68,10 @@ func Panicf(format string, v ...interface{}) {
 // the underlying logging library
 type Log struct {
 	*zap.Logger
+	output io.Writer
 }
+
+var _ Logger = &Log{}
 
 // New creates an instance of Log
 func New(level Level, writer io.Writer) *Log {
@@ -125,7 +128,10 @@ func New(level Level, writer io.Writer) *Log {
 	// get the zap Log
 	zapLogger := zap.New(core)
 	// create the instance of Log and returns it
-	return &Log{zapLogger}
+	return &Log{
+		Logger: zapLogger,
+		output: writer,
+	}
 }
 
 // Debug starts a message with debug level
@@ -222,4 +228,9 @@ func (l *Log) LogLevel() Level {
 	default:
 		return InvalidLevel
 	}
+}
+
+// LogOutput returns the log output that is set
+func (l *Log) LogOutput() io.Writer {
+	return l.output
 }

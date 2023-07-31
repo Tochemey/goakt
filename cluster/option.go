@@ -1,5 +1,7 @@
 package cluster
 
+import "github.com/tochemey/goakt/log"
+
 // Option is the interface that applies a configuration option.
 type Option interface {
 	// Apply sets the Option value of a config.
@@ -15,9 +17,16 @@ func (f OptionFunc) Apply(c *Cluster) {
 	f(c)
 }
 
-// WithDataDir sets the data dir
-func WithDataDir(datadir string) Option {
-	return OptionFunc(func(cl *Cluster) {
-		cl.dataDir = datadir
+// WithPartitionsCount sets the total number of partitions
+func WithPartitionsCount(count uint64) Option {
+	return OptionFunc(func(cluster *Cluster) {
+		cluster.partitionsCount = count
+	})
+}
+
+// WithLogger sets the logger
+func WithLogger(logger log.Logger) Option {
+	return OptionFunc(func(cluster *Cluster) {
+		cluster.logger = logger
 	})
 }
