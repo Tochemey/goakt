@@ -112,7 +112,8 @@ type actorSystem struct {
 	// convenient field to check cluster setup
 	clusterEnabled bool
 	// cluster discovery method
-	disco           discovery.Discovery
+	disco           discovery.Provider
+	discoOptions    discovery.Meta
 	partitionsCount uint64
 	// cluster mode
 	clusterService *cluster.Cluster
@@ -659,13 +660,13 @@ func (a *actorSystem) handleRemoteTell(ctx context.Context, to PID, message prot
 func (a *actorSystem) enableClustering(ctx context.Context) {
 	// create an instance of the cluster service and start it
 	cluster := cluster.New(a.Name(),
-		a.disco,
 		cluster.WithLogger(a.logger),
-		cluster.WithPartitionsCount(a.partitionsCount))
+		cluster.WithPartitionsCount(a.partitionsCount),
+	)
 	// set the cluster field of the actorSystem
 	a.clusterService = cluster
 	// start the cluster service
-	if err := a.clusterService.Start(ctx); err != nil {
+	if err := a.clusterService.Start(ctx, a.disco, a.discoOptions); err != nil {
 		a.logger.Panic(errors.Wrap(err, "failed to start remoting service"))
 	}
 

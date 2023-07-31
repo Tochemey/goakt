@@ -107,10 +107,10 @@ spec:
        port: 50051
        targetPort: grpc
        name: grpc
-     - port: 32380
+     - port: 32379
        protocol: TCP
-       name: peers-port
-       targetPort: peers-port
+       name: discovery-port
+       targetPort: discovery-port
 ---
 apiVersion: v1
 kind: Service
@@ -127,6 +127,6 @@ spec:
     app.kubernetes.io/part-of: AccountsSystem
   clusterIP: None
   ports:
-    - port: 32379
+    - port: 32380
       protocol: TCP
-      targetPort: discovery-port
+      targetPort: peers-port

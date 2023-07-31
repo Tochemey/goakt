@@ -1,77 +1,94 @@
 package cluster
 
 import (
-	"context"
 	golog "log"
-
-	"github.com/tochemey/goakt/log"
+	"strings"
 
 	"github.com/buraksezer/olric/pkg/service_discovery"
 	"github.com/pkg/errors"
 	"github.com/tochemey/goakt/discovery"
 )
 
-// discoveryProvider implements the olric ServiceDiscovery interface
+// discoveryProvider wraps the cluster engine discovery and implements
+// service_discovery.ServiceDiscovery
 type discoveryProvider struct {
-	disco  discovery.Discovery
-	ctx    context.Context
-	logger log.Logger
+	provider discovery.Provider
+	log      *golog.Logger
 }
 
-// enforce compilation errors
+// enforce compilation error
 var _ service_discovery.ServiceDiscovery = &discoveryProvider{}
 
-func newDiscoveryProvider(ctx context.Context, disco discovery.Discovery, logger log.Logger) *discoveryProvider {
-	return &discoveryProvider{
-		disco:  disco,
-		ctx:    ctx,
-		logger: logger,
-	}
-}
-
-// Initialize initializes the plugin: registers some internal data structures, clients etc.
+// Initialize implementation
 func (d *discoveryProvider) Initialize() error {
-	return nil
+	// check whether the provider is set or not
+	if d.provider == nil {
+		return errors.New("discovery provider is not set")
+	}
+	// call the initialize method of the provider
+	return d.provider.Initialize()
 }
 
-// SetConfig registers the underlying discovery configuration
+// SetConfig implementation
 func (d *discoveryProvider) SetConfig(c map[string]any) error {
-	return nil
+	// check whether the id is provided or not
+	id, ok := c["id"]
+	if !ok {
+		return errors.New("discovery provider id is not set")
+	}
+	// validate the id
+	idVal := id.(string)
+	if !strings.EqualFold(idVal, d.provider.ID()) {
+		return errors.New("invalid discovery provider id")
+	}
+	// let us extract the options
+	options, ok := c["options"]
+	if !ok {
+		return errors.New("discovery provider options is not set")
+	}
+	// let us cast the options to disco Meta
+	meta := options.(discovery.Meta)
+	// call the underlying provider
+	return d.provider.SetConfig(meta)
 }
 
+// SetLogger implementation
 func (d *discoveryProvider) SetLogger(l *golog.Logger) {
-	// pass
+	d.log = l
 }
 
-// Register registers this node to a service discovery directory.
+// Register implementation
 func (d *discoveryProvider) Register() error {
-	return d.disco.Start(d.ctx)
+	// check whether the provider is set or not
+	if d.provider == nil {
+		return errors.New("discovery provider is not set")
+	}
+	// call the provider register
+	return d.provider.Register()
 }
 
-// Deregister removes this node from a service discovery directory.
+// Deregister implementation
 func (d *discoveryProvider) Deregister() error {
-	return d.disco.Stop()
+	// check whether the provider is set or not
+	if d.provider == nil {
+		return errors.New("discovery provider is not set")
+	}
+	// call the provider de-register
+	return d.provider.Deregister()
 }
 
-// DiscoverPeers returns a list of known nodes.
+// DiscoverPeers implementation
 func (d *discoveryProvider) DiscoverPeers() ([]string, error) {
-	var peers []string
-	nodes, err := d.disco.Nodes(d.ctx)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to discover nodes")
-	}
-	for _, node := range nodes {
-		if node != nil {
-			peers = append(peers, node.PeersAddress())
-		}
+	// check whether the provider is set or not
+	if d.provider == nil {
+		return nil, errors.New("discovery provider is not set")
 	}
 
-	// add some debug log
-	d.logger.Debugf("%d Nodes discovered", len(peers))
-	return peers, nil
+	// call the provider discover peers
+	return d.provider.DiscoverPeers()
 }
 
-// Close stops underlying goroutines, if there is any. It should be a blocking call.
+// Close implementation
 func (d *discoveryProvider) Close() error {
 	return nil
 }

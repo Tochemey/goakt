@@ -36,14 +36,12 @@ var runCmd = &cobra.Command{
 		logger := log.New(log.DebugLevel, os.Stdout)
 
 		// create the k8 configuration
-		disco, err := kubernetes.NewDiscovery(ctx, logger, discovery.Meta{
+		disco := kubernetes.NewDiscovery()
+		// define the discovery options
+		discoOptions := discovery.Meta{
 			kubernetes.ApplicationName: applicationName,
 			kubernetes.ActorSystemName: actorSystemName,
 			kubernetes.Namespace:       namespace,
-		})
-		// start the discovery engine and handle error
-		if err != nil {
-			logger.Panic(err)
 		}
 
 		// create the actor system
@@ -52,7 +50,7 @@ var runCmd = &cobra.Command{
 			goakt.WithPassivationDisabled(), // set big passivation time
 			goakt.WithLogger(logger),
 			goakt.WithActorInitMaxRetries(3),
-			goakt.WithClustering(disco, remotingPort, 20))
+			goakt.WithClustering(disco, remotingPort, 20, discoOptions))
 		// handle the error
 		if err != nil {
 			logger.Panic(err)

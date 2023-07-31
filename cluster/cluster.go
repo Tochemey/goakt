@@ -23,8 +23,7 @@ type Cluster struct {
 
 	// specifies the logger
 	logger log.Logger
-	// specifies the discovery mode
-	disco discovery.Discovery
+
 	// specifies the cluster name
 	name string
 
@@ -42,12 +41,11 @@ type Cluster struct {
 }
 
 // New creates an instance of Cluster
-func New(name string, disco discovery.Discovery, opts ...Option) *Cluster {
+func New(name string, opts ...Option) *Cluster {
 	// create an instance of the cluster
 	cl := &Cluster{
 		partitionsCount: 20,
 		logger:          log.DefaultLogger,
-		disco:           disco,
 		name:            name,
 	}
 	// apply the various options
@@ -60,7 +58,7 @@ func New(name string, disco discovery.Discovery, opts ...Option) *Cluster {
 
 // Start starts the Cluster. When the join address is not set a brand-new cluster is started.
 // However, when the join address is set the given Cluster joins an existing cluster at the joinAddr.
-func (c *Cluster) Start(ctx context.Context) error {
+func (c *Cluster) Start(ctx context.Context, provider discovery.Provider, providerOptions discovery.Meta) error {
 	// set the logger
 	logger := c.logger
 	// add some logging information
@@ -122,8 +120,15 @@ func (c *Cluster) Start(ctx context.Context) error {
 	conf.MemberlistConfig = m
 
 	// set the discovery
-	conf.ServiceDiscovery = map[string]interface{}{
-		"plugin": newDiscoveryProvider(ctx, c.disco, c.logger),
+	discoveryWrapper := &discoveryProvider{
+		provider: provider,
+		log:      golog.Default(),
+	}
+	// set the discovery service
+	conf.ServiceDiscovery = map[string]any{
+		"plugin":  discoveryWrapper,
+		"id":      provider.ID(),
+		"options": providerOptions,
 	}
 
 	// let us start the cluster
