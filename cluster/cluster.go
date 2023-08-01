@@ -61,8 +61,6 @@ func New(name string, opts ...Option) *Cluster {
 func (c *Cluster) Start(ctx context.Context, provider discovery.Provider, providerOptions discovery.Meta) error {
 	// set the logger
 	logger := c.logger
-	// add some logging information
-	logger.Info("Starting GoAkt cluster....🤔")
 
 	// get the host info
 	hostNode, err := discovery.GetHostNode()
@@ -75,6 +73,50 @@ func (c *Cluster) Start(ctx context.Context, provider discovery.Provider, provid
 	// set the host node
 	c.host = hostNode
 
+	// add some logging information
+	logger.Infof("Starting GoAkt cluster service on (%s)....🤔", hostNode.ClusterAddress())
+
+	//// set the provider config
+	//if err := provider.SetConfig(providerOptions); err != nil {
+	//	logger.Error(errors.Wrap(err, "failed to setup the provider.💥"))
+	//	return err
+	//}
+	//
+	//// initialize the provider
+	//if err := provider.Initialize(); err != nil {
+	//	if !errors.Is(err, discovery.ErrAlreadyInitialized) {
+	//		logger.Error(errors.Wrap(err, "failed to initialize the provider.💥"))
+	//		return err
+	//	}
+	//}
+	//
+	//// register the provider
+	//if err := provider.Register(); err != nil {
+	//	if !errors.Is(err, discovery.ErrAlreadyRegistered) {
+	//		logger.Error(errors.Wrap(err, "failed to initialize the provider.💥"))
+	//		return err
+	//	}
+	//}
+	//
+	//// let us delay the start for sometime to make sure we have discovered all nodes
+	//duration := time.Second
+	//delay := duration - time.Duration(duration.Nanoseconds())%time.Second
+	//time.Sleep(delay)
+	//
+	//// attempt to get some initial peers
+	//discoveredPeers := c.discoverPeers(ctx, provider)
+	//// let us exclude the host node
+	//peers := goset.NewSet[string]()
+	//// iterate the list of discovered peers
+	//for _, peer := range discoveredPeers {
+	//	if peer != c.host.ClusterAddress() {
+	//		peers.Add(peer)
+	//	}
+	//}
+	//
+	//// add some debug log
+	//logger.Debugf("discover (%d) nodes", len(discoveredPeers))
+
 	// define the log level
 	logLevel := "INFO"
 	if c.logger.LogLevel() == log.DebugLevel {
@@ -84,8 +126,8 @@ func (c *Cluster) Start(ctx context.Context, provider discovery.Provider, provid
 	// TODO: move this setup into a function
 	// let us create the cluster config
 	conf := &config.Config{
-		BindAddr:                   "0.0.0.0",
-		BindPort:                   int(c.host.PeersPort()),
+		BindAddr:                   c.host.Host,
+		BindPort:                   c.host.ClusterPort,
 		ReadRepair:                 false,
 		ReplicaCount:               3,
 		WriteQuorum:                1,
@@ -102,7 +144,7 @@ func (c *Cluster) Start(ctx context.Context, provider discovery.Provider, provid
 		MaxJoinAttempts:            5,
 		LogLevel:                   logLevel,
 		LogOutput:                  c.logger.LogOutput(),
-		Logger:                     golog.Default(),
+		LogVerbosity:               6,
 		EnableClusterEventsChannel: true,
 	}
 
@@ -115,8 +157,9 @@ func (c *Cluster) Start(ctx context.Context, provider discovery.Provider, provid
 	}
 
 	// sets the bindings
-	m.BindPort = int(c.host.DiscoveryPort())
-	m.AdvertisePort = int(c.host.DiscoveryPort())
+	m.BindAddr = c.host.Host
+	m.BindPort = c.host.GossipPort
+	m.AdvertisePort = c.host.GossipPort
 	conf.MemberlistConfig = m
 
 	// set the discovery
@@ -302,3 +345,59 @@ func (c *Cluster) GetActor(ctx context.Context, actorName string) (*goaktpb.Wire
 	// return the response
 	return actor, nil
 }
+
+// discoverPeers uses the discovery provider to find nodes in the cluster
+// this function run with some delay mechanism to make sure the discovery provider finds enough nodes
+//func (c *Cluster) discoverPeers(ctx context.Context, provider discovery.Provider) []string {
+//	var (
+//		// create a ticker to run every 10 milliseconds for a duration of a second
+//		ticker = time.NewTicker(10 * time.Millisecond)
+//		timer  = time.After(time.Second)
+//		// create the ticker stop signal
+//		tickerStopSig = make(chan struct{})
+//		nodes         []string
+//		// variable to help remove duplicate nodes discovered
+//		seen = make(map[string]bool)
+//	)
+//
+//	// start ticking
+//	go func() {
+//		for {
+//			select {
+//			case <-ticker.C:
+//				// let us discover the nodes
+//				// let us grab the existing nodes in the cluster
+//				addrs, err := provider.DiscoverPeers()
+//				// handle the error
+//				if err != nil {
+//					c.logger.Error(errors.Wrap(err, "failed to fetch existing nodes in the cluster"))
+//					tickerStopSig <- struct{}{}
+//					return
+//				}
+//
+//				// remove duplicate
+//				for _, addr := range addrs {
+//					// check whether the Cluster has been already discovered and ignore it
+//					if _, ok := seen[addr]; ok {
+//						continue
+//					}
+//					// mark the Cluster as seen
+//					seen[addr] = true
+//					// add it to the list of nodes
+//					nodes = append(nodes, addr)
+//				}
+//
+//			case <-timer:
+//				// tell the ticker to stop when timer is up
+//				tickerStopSig <- struct{}{}
+//				return
+//			}
+//		}
+//	}()
+//	// listen to ticker stop signal
+//	<-tickerStopSig
+//	// stop the ticker
+//	ticker.Stop()
+//	// return discovered nodes
+//	return nodes
+//}

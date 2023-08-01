@@ -26,7 +26,13 @@ func (d *discoveryProvider) Initialize() error {
 		return errors.New("discovery provider is not set")
 	}
 	// call the initialize method of the provider
-	return d.provider.Initialize()
+	if err := d.provider.Initialize(); err != nil {
+		if !errors.Is(err, discovery.ErrAlreadyInitialized) {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // SetConfig implementation
@@ -49,7 +55,12 @@ func (d *discoveryProvider) SetConfig(c map[string]any) error {
 	// let us cast the options to disco Meta
 	meta := options.(discovery.Meta)
 	// call the underlying provider
-	return d.provider.SetConfig(meta)
+	if err := d.provider.SetConfig(meta); err != nil {
+		if !errors.Is(err, discovery.ErrAlreadyInitialized) {
+			return err
+		}
+	}
+	return nil
 }
 
 // SetLogger implementation
@@ -64,7 +75,13 @@ func (d *discoveryProvider) Register() error {
 		return errors.New("discovery provider is not set")
 	}
 	// call the provider register
-	return d.provider.Register()
+	if err := d.provider.Register(); err != nil {
+		if !errors.Is(err, discovery.ErrAlreadyRegistered) {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // Deregister implementation

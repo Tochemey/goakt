@@ -72,7 +72,7 @@ func (d *Discovery) Initialize() error {
 	defer d.mu.Unlock()
 	// first check whether the discovery provider is running
 	if d.isInitialized.Load() {
-		return errors.New("kubernetes discovery engine already initialized")
+		return discovery.ErrAlreadyInitialized
 	}
 
 	// check the options
@@ -85,11 +85,32 @@ func (d *Discovery) Initialize() error {
 
 // SetConfig registers the underlying discovery configuration
 func (d *Discovery) SetConfig(meta discovery.Meta) error {
+	// acquire the lock
+	d.mu.Lock()
+	// release the lock
+	defer d.mu.Unlock()
+
+	// first check whether the discovery provider is running
+	if d.isInitialized.Load() {
+		return discovery.ErrAlreadyInitialized
+	}
+
 	return d.setOptions(meta)
 }
 
 // Register registers this node to a service discovery directory.
 func (d *Discovery) Register() error {
+	// acquire the lock
+	d.mu.Lock()
+	// release the lock
+	defer d.mu.Unlock()
+
+	// first check whether the discovery provider has started
+	// avoid to re-register the discovery
+	if d.isInitialized.Load() {
+		return discovery.ErrAlreadyRegistered
+	}
+
 	// create the k8 config
 	config, err := rest.InClusterConfig()
 	// handle the error
@@ -118,7 +139,7 @@ func (d *Discovery) Deregister() error {
 
 	// first check whether the discovery provider has started
 	if !d.isInitialized.Load() {
-		return errors.New("kubernetes discovery engine not initialized")
+		return discovery.ErrNotInitialized
 	}
 	// set the initialized to false
 	d.isInitialized = atomic.NewBool(false)
@@ -132,7 +153,7 @@ func (d *Discovery) Deregister() error {
 func (d *Discovery) DiscoverPeers() ([]string, error) {
 	// first check whether the discovery provider is running
 	if !d.isInitialized.Load() {
-		return nil, errors.New("kubernetes discovery engine not initialized")
+		return nil, discovery.ErrNotInitialized
 	}
 
 	// let us create the pod labels map
@@ -179,17 +200,13 @@ MainLoop:
 		for _, container := range pod.Spec.Containers {
 			// iterate the container ports to set the join port
 			for _, port := range container.Ports {
-				if port.Name == discovery.PeersPortName {
+				if port.Name == discovery.ClusterPortName {
 					addresses.Add(fmt.Sprintf("%s:%d", pod.Status.PodIP, port.ContainerPort))
 				}
 			}
 		}
 	}
 	return addresses.ToSlice(), nil
-}
-
-func (d *Discovery) Close() error {
-	return nil
 }
 
 // setOptions sets the kubernetes option
