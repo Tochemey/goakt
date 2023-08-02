@@ -1,6 +1,9 @@
 package log
 
-import "io"
+import (
+	"io"
+	golog "log"
+)
 
 // Logger represents an active logging object that generates lines of
 // output to an io.Writer.
@@ -37,4 +40,6 @@ type Logger interface {
 	LogLevel() Level
 	// LogOutput returns the log output that is set
 	LogOutput() io.Writer
+	// StdLogger returns the standard logger associated to the logger
+	StdLogger() *golog.Logger
 }

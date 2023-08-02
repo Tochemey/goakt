@@ -132,8 +132,8 @@ actor-cluster-image:
 
     EXPOSE 50051
     EXPOSE 9000
-    EXPOSE 32379
-    EXPOSE 32380
+    EXPOSE 3322
+    EXPOSE 3320
 
     ENTRYPOINT ["./accounts"]
     SAVE IMAGE accounts:dev

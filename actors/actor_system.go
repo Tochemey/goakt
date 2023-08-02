@@ -223,7 +223,7 @@ func (a *actorSystem) StartActor(ctx context.Context, name string, actor Actor) 
 		var buf bytes.Buffer
 		enc := gob.NewEncoder(&buf)
 		if err := enc.Encode(actorType); err != nil {
-			a.logger.Warnf("failed to encode the underlying actor=%s", name)
+			a.logger.Warn(errors.Wrapf(err, "failed to encode the underlying actor=%s", name).Error())
 			// TODO: at the moment the byte array of the underlying actor is not used but can become handy in the future
 		}
 

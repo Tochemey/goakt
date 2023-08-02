@@ -2,7 +2,6 @@ package cluster
 
 import (
 	"context"
-	golog "log"
 	"time"
 
 	"github.com/buraksezer/olric"
@@ -56,8 +55,7 @@ func New(name string, opts ...Option) *Cluster {
 	return cl
 }
 
-// Start starts the Cluster. When the join address is not set a brand-new cluster is started.
-// However, when the join address is set the given Cluster joins an existing cluster at the joinAddr.
+// Start starts the Cluster.
 func (c *Cluster) Start(ctx context.Context, provider discovery.Provider, providerOptions discovery.Meta) error {
 	// set the logger
 	logger := c.logger
@@ -76,47 +74,6 @@ func (c *Cluster) Start(ctx context.Context, provider discovery.Provider, provid
 	// add some logging information
 	logger.Infof("Starting GoAkt cluster service on (%s)....🤔", hostNode.ClusterAddress())
 
-	//// set the provider config
-	//if err := provider.SetConfig(providerOptions); err != nil {
-	//	logger.Error(errors.Wrap(err, "failed to setup the provider.💥"))
-	//	return err
-	//}
-	//
-	//// initialize the provider
-	//if err := provider.Initialize(); err != nil {
-	//	if !errors.Is(err, discovery.ErrAlreadyInitialized) {
-	//		logger.Error(errors.Wrap(err, "failed to initialize the provider.💥"))
-	//		return err
-	//	}
-	//}
-	//
-	//// register the provider
-	//if err := provider.Register(); err != nil {
-	//	if !errors.Is(err, discovery.ErrAlreadyRegistered) {
-	//		logger.Error(errors.Wrap(err, "failed to initialize the provider.💥"))
-	//		return err
-	//	}
-	//}
-	//
-	//// let us delay the start for sometime to make sure we have discovered all nodes
-	//duration := time.Second
-	//delay := duration - time.Duration(duration.Nanoseconds())%time.Second
-	//time.Sleep(delay)
-	//
-	//// attempt to get some initial peers
-	//discoveredPeers := c.discoverPeers(ctx, provider)
-	//// let us exclude the host node
-	//peers := goset.NewSet[string]()
-	//// iterate the list of discovered peers
-	//for _, peer := range discoveredPeers {
-	//	if peer != c.host.ClusterAddress() {
-	//		peers.Add(peer)
-	//	}
-	//}
-	//
-	//// add some debug log
-	//logger.Debugf("discover (%d) nodes", len(discoveredPeers))
-
 	// define the log level
 	logLevel := "INFO"
 	if c.logger.LogLevel() == log.DebugLevel {
@@ -129,22 +86,22 @@ func (c *Cluster) Start(ctx context.Context, provider discovery.Provider, provid
 		BindAddr:                   c.host.Host,
 		BindPort:                   c.host.ClusterPort,
 		ReadRepair:                 false,
-		ReplicaCount:               3,
-		WriteQuorum:                1,
-		ReadQuorum:                 1,
-		MemberCountQuorum:          1,
+		ReplicaCount:               config.MinimumReplicaCount,
+		WriteQuorum:                config.DefaultWriteQuorum,
+		ReadQuorum:                 config.DefaultReadQuorum,
+		MemberCountQuorum:          config.DefaultMemberCountQuorum,
 		Peers:                      []string{},
 		DMaps:                      &olriconfig.DMaps{},
-		KeepAlivePeriod:            300 * time.Second, // TODO make it configurable
+		KeepAlivePeriod:            config.DefaultKeepAlivePeriod,
 		PartitionCount:             c.partitionsCount,
-		BootstrapTimeout:           10 * time.Second, // TODO make it configurable
+		BootstrapTimeout:           config.DefaultBootstrapTimeout,
 		ReplicationMode:            olriconfig.SyncReplicationMode,
-		RoutingTablePushInterval:   time.Minute,
-		JoinRetryInterval:          1 * time.Second,
-		MaxJoinAttempts:            5,
+		RoutingTablePushInterval:   config.DefaultRoutingTablePushInterval,
+		JoinRetryInterval:          config.DefaultJoinRetryInterval,
+		MaxJoinAttempts:            config.DefaultMaxJoinAttempts,
 		LogLevel:                   logLevel,
-		LogOutput:                  c.logger.LogOutput(),
-		LogVerbosity:               6,
+		Logger:                     c.logger.StdLogger(),
+		LogVerbosity:               config.DefaultLogVerbosity,
 		EnableClusterEventsChannel: true,
 	}
 
@@ -165,7 +122,7 @@ func (c *Cluster) Start(ctx context.Context, provider discovery.Provider, provid
 	// set the discovery
 	discoveryWrapper := &discoveryProvider{
 		provider: provider,
-		log:      golog.Default(),
+		log:      c.logger.StdLogger(),
 	}
 	// set the discovery service
 	conf.ServiceDiscovery = map[string]any{

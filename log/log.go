@@ -3,6 +3,7 @@ package log
 import (
 	"fmt"
 	"io"
+	golog "log"
 	"os"
 
 	"go.uber.org/zap"
@@ -71,6 +72,7 @@ type Log struct {
 	output io.Writer
 }
 
+// enforce compilation and linter error
 var _ Logger = &Log{}
 
 // New creates an instance of Log
@@ -233,4 +235,9 @@ func (l *Log) LogLevel() Level {
 // LogOutput returns the log output that is set
 func (l *Log) LogOutput() io.Writer {
 	return l.output
+}
+
+// StdLogger returns the standard logger associated to the logger
+func (l *Log) StdLogger() *golog.Logger {
+	return zap.NewStdLog(l.Logger)
 }

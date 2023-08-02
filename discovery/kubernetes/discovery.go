@@ -14,6 +14,7 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+	"k8s.io/utils/strings/slices"
 )
 
 const (
@@ -176,6 +177,9 @@ func (d *Discovery) DiscoverPeers() ([]string, error) {
 		return nil, err
 	}
 
+	// define valid port names
+	validPortNames := []string{discovery.ClusterPortName, discovery.GossipPortName}
+
 	// define the addresses list
 	addresses := goset.NewSet[string]()
 	// iterate the pods list and only the one that are running
@@ -200,7 +204,13 @@ MainLoop:
 		for _, container := range pod.Spec.Containers {
 			// iterate the container ports to set the join port
 			for _, port := range container.Ports {
-				if port.Name == discovery.ClusterPortName {
+				// make sure we have the gossip and cluster port defined
+				if !slices.Contains(validPortNames, port.Name) {
+					// skip that port
+					continue
+				}
+
+				if port.Name == discovery.GossipPortName {
 					addresses.Add(fmt.Sprintf("%s:%d", pod.Status.PodIP, port.ContainerPort))
 				}
 			}

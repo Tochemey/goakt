@@ -31,10 +31,6 @@ metadata:
     app.kubernetes.io/part-of: AccountsSystem
 spec:
   replicas: 3
-  strategy:
-    type: RollingUpdate
-    rollingUpdate:
-      maxUnavailable: 100%
   selector:
     matchLabels:
       app.kubernetes.io/name: accounts
