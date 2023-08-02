@@ -74,36 +74,8 @@ func (c *Cluster) Start(ctx context.Context, provider discovery.Provider, provid
 	// add some logging information
 	logger.Infof("Starting GoAkt cluster service on (%s)....🤔", hostNode.ClusterAddress())
 
-	// define the log level
-	logLevel := "INFO"
-	if c.logger.LogLevel() == log.DebugLevel {
-		logLevel = "DEBUG"
-	}
-
-	// TODO: move this setup into a function
-	// let us create the cluster config
-	conf := &config.Config{
-		BindAddr:                   c.host.Host,
-		BindPort:                   c.host.ClusterPort,
-		ReadRepair:                 false,
-		ReplicaCount:               config.MinimumReplicaCount,
-		WriteQuorum:                config.DefaultWriteQuorum,
-		ReadQuorum:                 config.DefaultReadQuorum,
-		MemberCountQuorum:          config.DefaultMemberCountQuorum,
-		Peers:                      []string{},
-		DMaps:                      &olriconfig.DMaps{},
-		KeepAlivePeriod:            config.DefaultKeepAlivePeriod,
-		PartitionCount:             c.partitionsCount,
-		BootstrapTimeout:           config.DefaultBootstrapTimeout,
-		ReplicationMode:            olriconfig.SyncReplicationMode,
-		RoutingTablePushInterval:   config.DefaultRoutingTablePushInterval,
-		JoinRetryInterval:          config.DefaultJoinRetryInterval,
-		MaxJoinAttempts:            config.DefaultMaxJoinAttempts,
-		LogLevel:                   logLevel,
-		Logger:                     c.logger.StdLogger(),
-		LogVerbosity:               config.DefaultLogVerbosity,
-		EnableClusterEventsChannel: true,
-	}
+	// build the cluster engine config
+	conf := c.buildConfig()
 
 	// create the memberlist config
 	m, err := olriconfig.NewMemberlistConfig("lan")
@@ -303,58 +275,40 @@ func (c *Cluster) GetActor(ctx context.Context, actorName string) (*goaktpb.Wire
 	return actor, nil
 }
 
-// discoverPeers uses the discovery provider to find nodes in the cluster
-// this function run with some delay mechanism to make sure the discovery provider finds enough nodes
-//func (c *Cluster) discoverPeers(ctx context.Context, provider discovery.Provider) []string {
-//	var (
-//		// create a ticker to run every 10 milliseconds for a duration of a second
-//		ticker = time.NewTicker(10 * time.Millisecond)
-//		timer  = time.After(time.Second)
-//		// create the ticker stop signal
-//		tickerStopSig = make(chan struct{})
-//		nodes         []string
-//		// variable to help remove duplicate nodes discovered
-//		seen = make(map[string]bool)
-//	)
-//
-//	// start ticking
-//	go func() {
-//		for {
-//			select {
-//			case <-ticker.C:
-//				// let us discover the nodes
-//				// let us grab the existing nodes in the cluster
-//				addrs, err := provider.DiscoverPeers()
-//				// handle the error
-//				if err != nil {
-//					c.logger.Error(errors.Wrap(err, "failed to fetch existing nodes in the cluster"))
-//					tickerStopSig <- struct{}{}
-//					return
-//				}
-//
-//				// remove duplicate
-//				for _, addr := range addrs {
-//					// check whether the Cluster has been already discovered and ignore it
-//					if _, ok := seen[addr]; ok {
-//						continue
-//					}
-//					// mark the Cluster as seen
-//					seen[addr] = true
-//					// add it to the list of nodes
-//					nodes = append(nodes, addr)
-//				}
-//
-//			case <-timer:
-//				// tell the ticker to stop when timer is up
-//				tickerStopSig <- struct{}{}
-//				return
-//			}
-//		}
-//	}()
-//	// listen to ticker stop signal
-//	<-tickerStopSig
-//	// stop the ticker
-//	ticker.Stop()
-//	// return discovered nodes
-//	return nodes
-//}
+// buildConfig builds the cluster configuration
+func (c *Cluster) buildConfig() *config.Config {
+	// define the log level
+	logLevel := "INFO"
+	switch c.logger.LogLevel() {
+	case log.DebugLevel:
+		logLevel = "DEBUG"
+	case log.ErrorLevel, log.FatalLevel, log.PanicLevel:
+		logLevel = "ERROR"
+	case log.WarningLevel:
+		logLevel = "WARN"
+	}
+
+	// create the config and return it
+	return &config.Config{
+		BindAddr:                   c.host.Host,
+		BindPort:                   c.host.ClusterPort,
+		ReadRepair:                 false,
+		ReplicaCount:               config.MinimumReplicaCount,
+		WriteQuorum:                config.DefaultWriteQuorum,
+		ReadQuorum:                 config.DefaultReadQuorum,
+		MemberCountQuorum:          config.DefaultMemberCountQuorum,
+		Peers:                      []string{},
+		DMaps:                      &olriconfig.DMaps{},
+		KeepAlivePeriod:            config.DefaultKeepAlivePeriod,
+		PartitionCount:             c.partitionsCount,
+		BootstrapTimeout:           config.DefaultBootstrapTimeout,
+		ReplicationMode:            olriconfig.SyncReplicationMode,
+		RoutingTablePushInterval:   config.DefaultRoutingTablePushInterval,
+		JoinRetryInterval:          config.DefaultJoinRetryInterval,
+		MaxJoinAttempts:            config.DefaultMaxJoinAttempts,
+		LogLevel:                   logLevel,
+		Logger:                     c.logger.StdLogger(),
+		LogVerbosity:               config.DefaultLogVerbosity,
+		EnableClusterEventsChannel: true,
+	}
+}

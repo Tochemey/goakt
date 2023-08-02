@@ -116,23 +116,3 @@ spec:
        protocol: TCP
        name: gossip-port
        targetPort: gossip-port
-#---
-#apiVersion: v1
-#kind: Service
-#metadata:
-#  name: memberlist
-#  labels:
-#    app.kubernetes.io/name: accounts
-#    app.kubernetes.io/component: accounts
-#    app.kubernetes.io/part-of: AccountsSystem
-#spec:
-#  selector:
-#    app.kubernetes.io/name: accounts
-#    app.kubernetes.io/component: accounts
-#    app.kubernetes.io/part-of: AccountsSystem
-#  clusterIP: None
-#  ports:
-#    - port: 3322
-#      protocol: TCP
-#      name: gossip-port
-#      targetPort: gossip-port

@@ -386,7 +386,7 @@ func (a *actorSystem) Start(ctx context.Context) error {
 	if err := a.registerMetrics(); err != nil {
 		a.logger.Error(errors.Wrapf(err, "failed to register actorSystem=%s metrics", a.name))
 	}
-	a.logger.Infof("%s ActorSystem started..:)", a.name)
+	a.logger.Infof("%s started..:)", a.name)
 	return nil
 }
 
@@ -395,7 +395,7 @@ func (a *actorSystem) Stop(ctx context.Context) error {
 	// add a span context
 	ctx, span := telemetry.SpanContext(ctx, "Stop")
 	defer span.End()
-	a.logger.Infof("ActorSystem is shutting down on Cluster=%s..:)", a.name)
+	a.logger.Infof("%s is shutting down..:)", a.name)
 
 	// stop the remoting server
 	if a.remotingEnabled {
