@@ -7,6 +7,7 @@ import (
 	"github.com/buraksezer/olric"
 	"github.com/buraksezer/olric/config"
 	olriconfig "github.com/buraksezer/olric/config"
+	"github.com/buraksezer/olric/hasher"
 	"github.com/pkg/errors"
 	"github.com/tochemey/goakt/discovery"
 	goaktpb "github.com/tochemey/goakt/internal/goakt/v1"
@@ -37,6 +38,9 @@ type Cluster struct {
 
 	// specifies the cluster host
 	host *discovery.Node
+
+	// specifies the hasher
+	hasher hasher.Hasher
 }
 
 // New creates an instance of Cluster
@@ -77,7 +81,10 @@ func (c *Cluster) Start(ctx context.Context, provider discovery.Provider, provid
 	// build the cluster engine config
 	conf := c.buildConfig()
 
-	// create the memberlist config
+	// set the hasher
+	c.hasher = conf.Hasher
+
+	// create the member list config
 	m, err := olriconfig.NewMemberlistConfig("lan")
 	// panic when there is an error
 	if err != nil {
@@ -143,7 +150,6 @@ func (c *Cluster) Start(ctx context.Context, provider discovery.Provider, provid
 	c.client = c.server.NewEmbeddedClient()
 	// create the instance of the distributed map
 	dmp, err := c.client.NewDMap(c.name)
-	// handle the error
 	// handle the error
 	if err != nil {
 		logger.Error(errors.Wrap(err, "failed to start the cluster engine.💥"))
@@ -273,6 +279,16 @@ func (c *Cluster) GetActor(ctx context.Context, actorName string) (*goaktpb.Wire
 	logger.Infof("actor (%s) successfully retrieved from the cluster.🎉", actor.GetActorName())
 	// return the response
 	return actor, nil
+}
+
+// GetPartition returns the partition where a given actor is stored
+func (c *Cluster) GetPartition(actorName string) int {
+	// create the byte array of the actor name
+	key := []byte(actorName)
+	// compute the hash key
+	hkey := c.hasher.Sum64(key)
+	// compute the partition and return it
+	return int(hkey % c.partitionsCount)
 }
 
 // buildConfig builds the cluster configuration
