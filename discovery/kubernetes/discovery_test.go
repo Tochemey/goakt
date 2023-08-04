@@ -151,4 +151,39 @@ func TestDiscovery(t *testing.T) {
 
 		assert.ElementsMatch(t, expected, actual)
 	})
+	t.Run("With SetConfig", func(t *testing.T) {
+		// create the various config option
+		namespace := "default"
+		applicationName := "accounts"
+		actorSystemName := "AccountsSystem"
+		// create the instance of provider
+		provider := NewDiscovery()
+		// create the config
+		config := discovery.Config{
+			ApplicationName: applicationName,
+			ActorSystemName: actorSystemName,
+			Namespace:       namespace,
+		}
+
+		// set config
+		assert.NoError(t, provider.SetConfig(config))
+	})
+	t.Run("With Initialize", func(t *testing.T) {
+		// create the various config option
+		namespace := "default"
+		applicationName := "accounts"
+		actorSystemName := "AccountsSystem"
+		// create the instance of provider
+		provider := NewDiscovery()
+		// create the config
+		config := discovery.Config{
+			ApplicationName: applicationName,
+			ActorSystemName: actorSystemName,
+			Namespace:       namespace,
+		}
+
+		// set config
+		assert.NoError(t, provider.SetConfig(config))
+		assert.NoError(t, provider.Initialize())
+	})
 }

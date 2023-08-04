@@ -55,6 +55,7 @@ func NewDiscovery() *Discovery {
 		mu:            sync.Mutex{},
 		stopChan:      make(chan struct{}, 1),
 		isInitialized: atomic.NewBool(false),
+		option:        &option{},
 	}
 
 	return k8
@@ -96,7 +97,7 @@ func (d *Discovery) SetConfig(meta discovery.Config) error {
 		return discovery.ErrAlreadyInitialized
 	}
 
-	return d.setOptions(meta)
+	return d.setConfig(meta)
 }
 
 // Register registers this node to a service discovery directory.
@@ -219,24 +220,24 @@ MainLoop:
 	return addresses.ToSlice(), nil
 }
 
-// setOptions sets the kubernetes option
-func (d *Discovery) setOptions(meta discovery.Config) (err error) {
+// setConfig sets the kubernetes option
+func (d *Discovery) setConfig(config discovery.Config) (err error) {
 	// create an instance of option
 	option := new(option)
 	// extract the namespace
-	option.NameSpace, err = meta.GetString(Namespace)
+	option.NameSpace, err = config.GetString(Namespace)
 	// handle the error in case the namespace value is not properly set
 	if err != nil {
 		return err
 	}
 	// extract the actor system name
-	option.ActorSystemName, err = meta.GetString(ActorSystemName)
+	option.ActorSystemName, err = config.GetString(ActorSystemName)
 	// handle the error in case the actor system name value is not properly set
 	if err != nil {
 		return err
 	}
 	// extract the application name
-	option.ApplicationName, err = meta.GetString(ApplicationName)
+	option.ApplicationName, err = config.GetString(ApplicationName)
 	// handle the error in case the application name value is not properly set
 	if err != nil {
 		return err
