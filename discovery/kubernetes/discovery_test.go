@@ -59,11 +59,11 @@ func TestDiscovery(t *testing.T) {
 						{
 							Ports: []corev1.ContainerPort{
 								{
-									Name:          discovery.GossipPortName,
+									Name:          GossipPortName,
 									ContainerPort: 3379,
 								},
 								{
-									Name:          discovery.ClusterPortName,
+									Name:          ClusterPortName,
 									ContainerPort: 3380,
 								},
 							},
@@ -99,11 +99,11 @@ func TestDiscovery(t *testing.T) {
 						{
 							Ports: []corev1.ContainerPort{
 								{
-									Name:          discovery.GossipPortName,
+									Name:          GossipPortName,
 									ContainerPort: 3379,
 								},
 								{
-									Name:          discovery.ClusterPortName,
+									Name:          ClusterPortName,
 									ContainerPort: 3380,
 								},
 							},

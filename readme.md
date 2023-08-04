@@ -3,10 +3,13 @@
 [![codecov](https://codecov.io/gh/Tochemey/goakt/branch/main/graph/badge.svg?token=J0p9MzwSRH)](https://codecov.io/gh/Tochemey/goakt)
 [![Go Report Card](https://goreportcard.com/badge/github.com/tochemey/goakt)](https://goreportcard.com/report/github.com/tochemey/goakt)
 
-Minimal actor framework with goodies to build reactive and distributed system in golang using _**protocol buffers as actor messages**_.
+Minimal [Go](https://go.dev/) actor framework with goodies to build reactive and distributed system in golang using _**protocol buffers as actor messages**_.
 
-If you are not familiar with the actor model, the blog post from Brian Storti [here](https://www.brianstorti.com/the-actor-model/) is an excellent and short introduction to the actor model. 
-Also, check reference section at the end of the post for more material regarding actor model
+GoAkt is highly scalable and available when running in cluster mode. It comes with the necessary features require to build a distributed actor-based system without
+sacrificing performance and reliability.
+
+If you are not familiar with the actor model, the blog post from Brian Storti [here](https://www.brianstorti.com/the-actor-model/) is an excellent and short introduction to the actor model.
+Also, check reference section at the end of the post for more material regarding actor model.
 
 ## Features
 - Send a synchronous message to an actor from a non actor system
@@ -29,7 +32,12 @@ Also, check reference section at the end of the post for more material regarding
 - Remoting
   - Actors can send messages to other actors on a remote system via Tell and Ask message patterns.
   - Actors can look up other actors' address on a remote system.
-- Cluster Mode
+- Clustering that offers  simple scalability, partitioning (sharding), and re-balancing out-of-the-box.
+
+## Installation
+```bash
+go get github.com/tochemey/goakt
+```
 
 ## Actors
 Actors in Go-Akt live within an actor system. They can be _long-lived_ actors or be _passivated_ after some period of time
@@ -61,30 +69,34 @@ To create an actor system one just need to use the [`NewActorSystem`](./actors/a
 ## Observability
 The actor and actor-system metrics as well traces are accessible via the integration with [OpenTelemetry](https://github.com/open-telemetry/opentelemetry-go).
 
-## Cluster Mode
-To run the system in a cluster mode, each node _is required to have two different ports open_ with the following name tags:
-* `clients-port`: help the cluster client to communicate with the rest of cluster.
-* `peers-port`: help the cluster engine to communicate with other nodes in the cluster
+## Clustering
+The cluster engine depends upon the [discovery](./discovery/provider.go) mechanism to find other nodes in the cluster. Under the hood, it leverages [Olric](https://github.com/buraksezer/olric)
+to scale out and guarantee performant, reliable persistence, simple scalability, partitioning (sharding), and re-balancing out-of-the-box.
 
-The rationale behind those ports is that the cluster engine is wholly built on the [embed etcd server](https://pkg.go.dev/github.com/coreos/etcd/embed).
+At the moment the following providers are implemented:
+* the [kubernetes](https://kubernetes.io/docs/home/) [api integration](./discovery/kubernetes) is provided and fully functional.
+
+In addition, one needs to set the following environment variables irrespective of the discovery provider to help identify the host node on which the cluster service is running:
+* `POD_NAME`: the node name. For instance in kubernetes one can just get it from the `metadata.name`
+* `POD_IP`: the node host address. For instance in kubernetes one can just get it from the `status.podIP`
+* `GOSSIP_PORT`: the gossip protocol engine port.
+* `CLUSTER_PORT`: the cluster port to help communicate with other GoAkt nodes in the cluster
 
 ### Operations Guide
 The following outlines the cluster mode operations which can help have a healthy GoAkt cluster:
 * One can start a single node cluster or a multiple nodes cluster.
-* To add more nodes to the cluster, kindly add them one at a time.
-* To remove nodes, kindly remove them one at a time. Remember to have a healthy cluster you will need at least three nodes running.
-
-The cluster engine depends upon the [discovery](./discovery/iface.go) mechanism to find other nodes in the cluster. 
-At the moment the following providers are implemented:
-* the [kubernetes](https://kubernetes.io/docs/home/) [api integration](./discovery/kubernetes) is provided and fully functional. 
-* the static provider
+* One can add more nodes to the cluster which will automatically discover the cluster.
+* One can remove nodes. However, to avoid losing data, one need to scale down the cluster to the minimum number of nodes which started the cluster.
 
 ### Kubernetes Discovery Provider setup
-
 To get the kubernetes discovery working as expected, the following pod labels need to be set:
 * `app.kubernetes.io/part-of`: set this label with the actor system name
 * `app.kubernetes.io/component`: set this label with the application name
 * `app.kubernetes.io/name`: set this label with the application name
+
+In addition,  each node _is required to have two different ports open_ with the following ports name for the discovery engine to work as expected:
+* `gossip-port`: help the gossip protocol engine.
+* `cluster-port`: help the cluster engine to communicate with other GoAkt nodes in the cluster
 
 #### Role Based Access
 You’ll also have to grant the Service Account that your pods run under access to list pods. The following configuration can be used as a starting point. 
@@ -116,11 +128,6 @@ roleRef:
 
 ### Sample Project
 A working example can be found [here](./examples/actor-cluster/k8s) with a small [doc](./examples/actor-cluster/k8s/doc.md) showing how to run it.
-
-## Installation
-```bash
-go get github.com/tochemey/goakt
-```
 
 ## Examples
 Kindly check out the [examples'](./examples) folder.

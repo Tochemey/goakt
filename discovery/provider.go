@@ -1,10 +1,5 @@
 package discovery
 
-const (
-	GossipPortName  = "gossip-port"
-	ClusterPortName = "cluster-port"
-)
-
 // Provider helps discover other running actor system in a cloud environment
 type Provider interface {
 	// ID returns the discovery name

@@ -21,6 +21,8 @@ const (
 	Namespace       string = "namespace"         // Namespace specifies the kubernetes namespace
 	ActorSystemName        = "actor_system_name" // ActorSystemName specifies the actor system name
 	ApplicationName        = "app_name"          // ApplicationName specifies the application name. This often matches the actor system name
+	GossipPortName         = "gossip-port"
+	ClusterPortName        = "cluster-port"
 )
 
 // option represents the kubernetes provider option
@@ -179,7 +181,7 @@ func (d *Discovery) DiscoverPeers() ([]string, error) {
 	}
 
 	// define valid port names
-	validPortNames := []string{discovery.ClusterPortName, discovery.GossipPortName}
+	validPortNames := []string{ClusterPortName, GossipPortName}
 
 	// define the addresses list
 	addresses := goset.NewSet[string]()
@@ -211,7 +213,7 @@ MainLoop:
 					continue
 				}
 
-				if port.Name == discovery.GossipPortName {
+				if port.Name == GossipPortName {
 					addresses.Add(fmt.Sprintf("%s:%d", pod.Status.PodIP, port.ContainerPort))
 				}
 			}
