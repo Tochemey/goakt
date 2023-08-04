@@ -1,6 +1,10 @@
 package cluster
 
-import "github.com/tochemey/goakt/log"
+import (
+	"time"
+
+	"github.com/tochemey/goakt/log"
+)
 
 // Option is the interface that applies a configuration option.
 type Option interface {
@@ -28,5 +32,28 @@ func WithPartitionsCount(count uint64) Option {
 func WithLogger(logger log.Logger) Option {
 	return OptionFunc(func(cluster *Cluster) {
 		cluster.logger = logger
+	})
+}
+
+// WithWriteTimeout sets the cluster write timeout.
+// This timeout specifies the timeout of a data replication
+func WithWriteTimeout(timeout time.Duration) Option {
+	return OptionFunc(func(cluster *Cluster) {
+		cluster.writeTimeout = timeout
+	})
+}
+
+// WithReadTimeout sets the cluster read timeout.
+// This timeout specifies the timeout of a data retrieval
+func WithReadTimeout(timeout time.Duration) Option {
+	return OptionFunc(func(cluster *Cluster) {
+		cluster.readTimeout = timeout
+	})
+}
+
+// WithShutdownTimeout sets the cluster shutdown timeout.
+func WithShutdownTimeout(timeout time.Duration) Option {
+	return OptionFunc(func(cluster *Cluster) {
+		cluster.shutdownTimeout = timeout
 	})
 }

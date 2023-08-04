@@ -1,12 +1,9 @@
 package actors
 
 import (
-	"bytes"
 	"context"
-	"encoding/gob"
 	"fmt"
 	"net/http"
-	"reflect"
 	"regexp"
 	"time"
 
@@ -112,12 +109,12 @@ type actorSystem struct {
 	// convenient field to check cluster setup
 	clusterEnabled bool
 	// cluster discovery method
-	disco           discovery.Provider
-	discoOptions    discovery.Meta
+	serviceDiscovery *discovery.ServiceDiscovery
+	// define the number of partitions to shard the actors in the cluster
 	partitionsCount uint64
 	// cluster mode
-	clusterService *cluster.Cluster
-	clusterChan    chan *goaktpb.WireActor
+	cluster     *cluster.Cluster
+	clusterChan chan *goaktpb.WireActor
 }
 
 // enforce compilation error when all methods of the ActorSystem interface are not implemented
@@ -163,7 +160,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 
 // InCluster states whether the actor system is running within a cluster of nodes
 func (a *actorSystem) InCluster() bool {
-	return a.clusterEnabled && a.clusterService != nil
+	return a.clusterEnabled && a.cluster != nil
 }
 
 // NumActors returns the total number of active actors in the system
@@ -182,7 +179,7 @@ func (a *actorSystem) StartActor(ctx context.Context, name string, actor Actor) 
 	}
 	// set the default actor path assuming we are running locally
 	actorPath := NewPath(name, NewAddress(protocol, a.name, "", -1))
-	// set the actor path with the remoting is enabled
+	// set the actor path when the remoting is enabled
 	if a.remotingEnabled {
 		// get the path of the given actor
 		actorPath = NewPath(name, NewAddress(protocol, a.name, a.remotingHost, int(a.remotingPort)))
@@ -218,20 +215,21 @@ func (a *actorSystem) StartActor(ctx context.Context, name string, actor Actor) 
 
 	// when cluster is enabled replicate the actor metadata across the cluster
 	if a.clusterEnabled {
+		// TODO: revisit the encoding the actor
 		// encode the actor
-		actorType := reflect.TypeOf(actor)
-		var buf bytes.Buffer
-		enc := gob.NewEncoder(&buf)
-		if err := enc.Encode(actorType); err != nil {
-			a.logger.Warn(errors.Wrapf(err, "failed to encode the underlying actor=%s", name).Error())
-			// TODO: at the moment the byte array of the underlying actor is not used but can become handy in the future
-		}
+		//actorType := reflect.TypeOf(actor)
+		//var buf bytes.Buffer
+		//enc := gob.NewEncoder(&buf)
+		//if err := enc.Encode(actorType); err != nil {
+		//	a.logger.Warn(errors.Wrapf(err, "failed to encode the underlying actor=%s", name).Error())
+		//	// TODO: at the moment the byte array of the underlying actor is not used but can become handy in the future
+		//}
 
 		// create a wire actor
 		wiredActor := &goaktpb.WireActor{
 			ActorName:    name,
 			ActorAddress: actorPath.RemoteAddress(),
-			ActorPayload: buf.Bytes(),
+			ActorPath:    actorPath.String(),
 		}
 		// send it to the cluster channel
 		a.clusterChan <- wiredActor
@@ -339,18 +337,15 @@ func (a *actorSystem) GetRemoteActor(ctx context.Context, actorName string) (add
 	ctx, span := telemetry.SpanContext(ctx, "GetRemoteActor")
 	defer span.End()
 	// check whether cluster is enabled or not
-	if a.clusterService == nil {
+	if a.cluster == nil {
 		return nil, errors.New("cluster is not enabled")
 	}
 
 	// let us locate the actor in the cluster
-	wireActor, err := a.clusterService.GetActor(ctx, actorName)
+	wireActor, err := a.cluster.GetActor(ctx, actorName)
 	// handle the eventual error
 	if err != nil {
-		// grab the error code
-		code := connect.CodeOf(err)
-		// in case we get a not found from the cluster service
-		if code == connect.CodeNotFound {
+		if errors.Is(err, cluster.ErrActorNotFound) {
 			a.logger.Infof("actor=%s not found", actorName)
 			return nil, ErrActorNotFound
 		}
@@ -408,7 +403,7 @@ func (a *actorSystem) Stop(ctx context.Context) error {
 	// stop the cluster service
 	if a.clusterEnabled {
 		// stop the cluster service
-		if err := a.clusterService.Stop(ctx); err != nil {
+		if err := a.cluster.Stop(ctx); err != nil {
 			return err
 		}
 		// stop broadcasting cluster messages
@@ -659,15 +654,21 @@ func (a *actorSystem) handleRemoteTell(ctx context.Context, to PID, message prot
 // communication
 func (a *actorSystem) enableClustering(ctx context.Context) {
 	// create an instance of the cluster service and start it
-	cluster := cluster.New(a.Name(),
+	cluster, err := cluster.New(a.Name(),
+		a.serviceDiscovery,
 		cluster.WithLogger(a.logger),
 		cluster.WithPartitionsCount(a.partitionsCount),
 	)
+	// handle the error
+	if err != nil {
+		a.logger.Panic(errors.Wrap(err, "failed to initialize cluster engine"))
+	}
+
 	// set the cluster field of the actorSystem
-	a.clusterService = cluster
+	a.cluster = cluster
 	// start the cluster service
-	if err := a.clusterService.Start(ctx, a.disco, a.discoOptions); err != nil {
-		a.logger.Panic(errors.Wrap(err, "failed to start remoting service"))
+	if err := a.cluster.Start(ctx); err != nil {
+		a.logger.Panic(errors.Wrap(err, "failed to start cluster engine"))
 	}
 
 	// create the bootstrap channel
@@ -765,9 +766,9 @@ func (a *actorSystem) broadcast(ctx context.Context) {
 	// iterate over the channel
 	for wireActor := range a.clusterChan {
 		// making sure the cluster is still enabled
-		if a.clusterService != nil {
+		if a.cluster != nil {
 			// broadcast the message on the cluster
-			if err := a.clusterService.PutActor(ctx, wireActor); err != nil {
+			if err := a.cluster.PutActor(ctx, wireActor); err != nil {
 				a.logger.Error(err.Error())
 				// TODO: stop or continue
 				return

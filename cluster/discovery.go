@@ -53,7 +53,7 @@ func (d *discoveryProvider) SetConfig(c map[string]any) error {
 		return errors.New("discovery provider options is not set")
 	}
 	// let us cast the options to disco Meta
-	meta := options.(discovery.Meta)
+	meta := options.(discovery.Config)
 	// call the underlying provider
 	if err := d.provider.SetConfig(meta); err != nil {
 		if !errors.Is(err, discovery.ErrAlreadyInitialized) {

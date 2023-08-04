@@ -2,6 +2,7 @@ package cluster
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/tochemey/goakt/log"
@@ -22,6 +23,21 @@ func TestOptions(t *testing.T) {
 			name:     "WithLogger",
 			option:   WithLogger(log.DefaultLogger),
 			expected: Cluster{logger: log.DefaultLogger},
+		},
+		{
+			name:     "WithWriteTimeout",
+			option:   WithWriteTimeout(2 * time.Minute),
+			expected: Cluster{writeTimeout: 2 * time.Minute},
+		},
+		{
+			name:     "WithReadTimeout",
+			option:   WithReadTimeout(2 * time.Minute),
+			expected: Cluster{readTimeout: 2 * time.Minute},
+		},
+		{
+			name:     "WithShutdownTimeout",
+			option:   WithShutdownTimeout(2 * time.Minute),
+			expected: Cluster{shutdownTimeout: 2 * time.Minute},
 		},
 	}
 

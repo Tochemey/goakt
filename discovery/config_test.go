@@ -8,7 +8,7 @@ import (
 
 func TestGetString(t *testing.T) {
 	t.Run("happy path", func(t *testing.T) {
-		meta := Meta{
+		meta := Config{
 			"key-1": "value-1",
 			"key-2": "value-2",
 		}
@@ -20,7 +20,7 @@ func TestGetString(t *testing.T) {
 		assert.Equal(t, expected, actual)
 	})
 	t.Run("with key not found", func(t *testing.T) {
-		meta := Meta{
+		meta := Config{
 			"key-1": "value-1",
 			"key-2": "value-2",
 		}
@@ -31,7 +31,7 @@ func TestGetString(t *testing.T) {
 		assert.Empty(t, actual)
 	})
 	t.Run("with key value not of a type string", func(t *testing.T) {
-		meta := Meta{
+		meta := Config{
 			"key-1": "value-1",
 			"key-2": 13,
 		}
@@ -45,7 +45,7 @@ func TestGetString(t *testing.T) {
 
 func TestGetMapString(t *testing.T) {
 	t.Run("happy path", func(t *testing.T) {
-		meta := Meta{
+		meta := Config{
 			"key-1": map[string]string{
 				"key-11": "value-11",
 				"key-12": "value-12",
@@ -62,7 +62,7 @@ func TestGetMapString(t *testing.T) {
 		assert.Equal(t, expected, actual)
 	})
 	t.Run("with key not found", func(t *testing.T) {
-		meta := Meta{
+		meta := Config{
 			"key-1": map[string]string{
 				"key-11": "value-11",
 				"key-12": "value-12",
@@ -75,7 +75,7 @@ func TestGetMapString(t *testing.T) {
 		assert.Empty(t, actual)
 	})
 	t.Run("with key value not of a type map[string]string", func(t *testing.T) {
-		meta := Meta{
+		meta := Config{
 			"key-2": 13,
 		}
 		key := "key-2"

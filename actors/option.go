@@ -90,13 +90,12 @@ func WithRemoting(host string, port int32) Option {
 
 // WithClustering enables clustering on the actor system. This enables remoting on the actor system as well
 // and set the remotingHost to the cluster node host when the cluster is fully enabled.
-func WithClustering(disco discovery.Provider, remotingPort int32, partitionCount uint64, options discovery.Meta) Option {
+func WithClustering(serviceDiscovery *discovery.ServiceDiscovery, remotingPort int32, partitionCount uint64) Option {
 	return OptionFunc(func(sys *actorSystem) {
 		sys.clusterEnabled = true
 		sys.remotingEnabled = true
 		sys.remotingPort = remotingPort
-		sys.disco = disco
 		sys.partitionsCount = partitionCount
-		sys.discoOptions = options
+		sys.serviceDiscovery = serviceDiscovery
 	})
 }

@@ -1,5 +1,10 @@
 package discovery
 
+const (
+	GossipPortName  = "gossip-port"
+	ClusterPortName = "cluster-port"
+)
+
 // Provider helps discover other running actor system in a cloud environment
 type Provider interface {
 	// ID returns the discovery name
@@ -10,8 +15,8 @@ type Provider interface {
 	Register() error
 	// Deregister removes this node from a service discovery directory.
 	Deregister() error
-	// SetConfig registers the underlying discovery configuration
-	SetConfig(meta Meta) error
+	// SetConfig registers the underlying discovery options
+	SetConfig(config Config) error
 	// DiscoverPeers returns a list of known nodes.
 	DiscoverPeers() ([]string, error)
 }

@@ -5,17 +5,17 @@ import (
 	"fmt"
 )
 
-// Meta represents the meta information to pass to the discovery engine
-type Meta map[string]any
+// Config represents the meta information to pass to the discovery engine
+type Config map[string]any
 
-// NewMeta initializes meta
-func NewMeta() Meta {
-	return Meta{}
+// NewConfig initializes meta
+func NewConfig() Config {
+	return Config{}
 }
 
 // GetString returns the string value of a given key which value is a string
 // If the key value is not a string then an error is return
-func (m Meta) GetString(key string) (string, error) {
+func (m Config) GetString(key string) (string, error) {
 	// let us check whether the given key is in the map
 	val, ok := m[key]
 	if !ok {
@@ -32,7 +32,7 @@ func (m Meta) GetString(key string) (string, error) {
 
 // GetInt returns the int value of a given key which value is an integer
 // If the key value is not an integer then an error is return
-func (m Meta) GetInt(key string) (int, error) {
+func (m Config) GetInt(key string) (int, error) {
 	// let us check whether the given key is in the map
 	val, ok := m[key]
 	if !ok {
@@ -49,7 +49,7 @@ func (m Meta) GetInt(key string) (int, error) {
 
 // GetBool returns the int value of a given key which value is a boolean
 // If the key value is not a boolean then an error is return
-func (m Meta) GetBool(key string) (*bool, error) {
+func (m Config) GetBool(key string) (*bool, error) {
 	// let us check whether the given key is in the map
 	val, ok := m[key]
 	if !ok {
@@ -66,7 +66,7 @@ func (m Meta) GetBool(key string) (*bool, error) {
 
 // GetMapString returns the map of string value of a given key which value is a map of string
 // Map of string means that the map key value pair are both string
-func (m Meta) GetMapString(key string) (map[string]string, error) {
+func (m Config) GetMapString(key string) (map[string]string, error) {
 	// let us check whether the given key is in the map
 	val, ok := m[key]
 	if !ok {

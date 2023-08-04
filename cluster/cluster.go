@@ -37,46 +37,63 @@ type Cluster struct {
 	kvStore olric.DMap
 
 	// specifies the cluster host
-	host *discovery.Node
+	host *node
 
 	// specifies the hasher
 	hasher hasher.Hasher
+
+	// specifies the discovery provider
+	discoveryProvider discovery.Provider
+	// specifies the discovery options
+	discoveryOptions discovery.Config
+
+	writeTimeout    time.Duration
+	readTimeout     time.Duration
+	shutdownTimeout time.Duration
 }
 
 // New creates an instance of Cluster
-func New(name string, opts ...Option) *Cluster {
+func New(name string, serviceDiscovery *discovery.ServiceDiscovery, opts ...Option) (*Cluster, error) {
 	// create an instance of the cluster
 	cl := &Cluster{
-		partitionsCount: 20,
-		logger:          log.DefaultLogger,
-		name:            name,
+		partitionsCount:   20,
+		logger:            log.DefaultLogger,
+		name:              name,
+		discoveryProvider: serviceDiscovery.Provider(),
+		discoveryOptions:  serviceDiscovery.Config(),
+		writeTimeout:      time.Second,
+		readTimeout:       time.Second,
+		shutdownTimeout:   3 * time.Second,
 	}
 	// apply the various options
 	for _, opt := range opts {
 		opt.Apply(cl)
 	}
 
-	return cl
-}
-
-// Start starts the Cluster.
-func (c *Cluster) Start(ctx context.Context, provider discovery.Provider, providerOptions discovery.Meta) error {
-	// set the logger
-	logger := c.logger
-
 	// get the host info
-	hostNode, err := discovery.GetHostNode()
+	hostNode, err := getHostNode()
 	// handle the error
 	if err != nil {
-		logger.Error(errors.Wrap(err, "failed to grab the node info starting the cluster.💥"))
-		return err
+		cl.logger.Error(errors.Wrap(err, "failed get the host node.💥"))
+		return nil, err
 	}
 
 	// set the host node
-	c.host = hostNode
+	cl.host = hostNode
+
+	return cl, nil
+}
+
+// Start starts the Cluster.
+func (c *Cluster) Start(ctx context.Context) error {
+	// set the logger
+	logger := c.logger
 
 	// add some logging information
-	logger.Infof("Starting GoAkt cluster service on (%s)....🤔", hostNode.ClusterAddress())
+	logger.Infof("Starting GoAkt cluster service on (%s)....🤔", c.host.ClusterAddress())
+
+	// let us delay the start for sometime to make sure we have discovered enough nodes to form a cluster
+	time.Sleep(time.Second)
 
 	// build the cluster engine config
 	conf := c.buildConfig()
@@ -98,16 +115,16 @@ func (c *Cluster) Start(ctx context.Context, provider discovery.Provider, provid
 	m.AdvertisePort = c.host.GossipPort
 	conf.MemberlistConfig = m
 
-	// set the discovery
+	// set the discovery provider
 	discoveryWrapper := &discoveryProvider{
-		provider: provider,
+		provider: c.discoveryProvider,
 		log:      c.logger.StdLogger(),
 	}
 	// set the discovery service
 	conf.ServiceDiscovery = map[string]any{
 		"plugin":  discoveryWrapper,
-		"id":      provider.ID(),
-		"options": providerOptions,
+		"id":      c.discoveryProvider.ID(),
+		"options": c.discoveryOptions,
 	}
 
 	// let us start the cluster
@@ -131,7 +148,7 @@ func (c *Cluster) Start(ctx context.Context, provider discovery.Provider, provid
 	// set the server
 	c.server = eng
 	go func() {
-		// call Start at background. It's a blocker call.
+		// start the cluster engine
 		err = c.server.Start()
 		// handle the error in case there is an early error
 		if err != nil {
@@ -166,6 +183,10 @@ func (c *Cluster) Start(ctx context.Context, provider discovery.Provider, provid
 
 // Stop stops the Cluster gracefully
 func (c *Cluster) Stop(ctx context.Context) error {
+	// create a cancellation context of 1 second timeout
+	ctx, cancelFn := context.WithTimeout(ctx, c.shutdownTimeout)
+	defer cancelFn()
+
 	// set the logger
 	logger := c.logger
 
@@ -196,7 +217,7 @@ func (c *Cluster) NodeHost() string {
 // PutActor replicates onto the cluster the metadata of an actor
 func (c *Cluster) PutActor(ctx context.Context, actor *goaktpb.WireActor) error {
 	// create a cancellation context of 1 second timeout
-	ctx, cancelFn := context.WithTimeout(ctx, time.Second) // TODO make this configurable
+	ctx, cancelFn := context.WithTimeout(ctx, c.writeTimeout)
 	defer cancelFn()
 
 	// add a span to trace this call
@@ -236,7 +257,7 @@ func (c *Cluster) PutActor(ctx context.Context, actor *goaktpb.WireActor) error 
 // GetActor fetches an actor from the cluster
 func (c *Cluster) GetActor(ctx context.Context, actorName string) (*goaktpb.WireActor, error) {
 	// create a cancellation context of 1 second timeout
-	ctx, cancelFn := context.WithTimeout(ctx, time.Second) // TODO make this configurable
+	ctx, cancelFn := context.WithTimeout(ctx, c.readTimeout)
 	defer cancelFn()
 
 	// add a span to trace this call
@@ -253,6 +274,11 @@ func (c *Cluster) GetActor(ctx context.Context, actorName string) (*goaktpb.Wire
 	resp, err := c.kvStore.Get(ctx, actorName)
 	// handle the error
 	if err != nil {
+		// we could not find the given actor
+		if errors.Is(err, olric.ErrKeyNotFound) {
+			logger.Warnf("actor=%s is not found in the cluster", actorName)
+			return nil, ErrActorNotFound
+		}
 		// log the error
 		logger.Error(errors.Wrapf(err, "failed to get actor=%s record.💥", actorName))
 		return nil, err
