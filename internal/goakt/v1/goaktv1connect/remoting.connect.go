@@ -129,23 +129,33 @@ type RemoteMessagingServiceHandler interface {
 // By default, handlers support the Connect, gRPC, and gRPC-Web protocols with the binary Protobuf
 // and JSON codecs. They also support gzip compression.
 func NewRemoteMessagingServiceHandler(svc RemoteMessagingServiceHandler, opts ...connect_go.HandlerOption) (string, http.Handler) {
-	mux := http.NewServeMux()
-	mux.Handle(RemoteMessagingServiceRemoteAskProcedure, connect_go.NewUnaryHandler(
+	remoteMessagingServiceRemoteAskHandler := connect_go.NewUnaryHandler(
 		RemoteMessagingServiceRemoteAskProcedure,
 		svc.RemoteAsk,
 		opts...,
-	))
-	mux.Handle(RemoteMessagingServiceRemoteTellProcedure, connect_go.NewUnaryHandler(
+	)
+	remoteMessagingServiceRemoteTellHandler := connect_go.NewUnaryHandler(
 		RemoteMessagingServiceRemoteTellProcedure,
 		svc.RemoteTell,
 		opts...,
-	))
-	mux.Handle(RemoteMessagingServiceRemoteLookupProcedure, connect_go.NewUnaryHandler(
+	)
+	remoteMessagingServiceRemoteLookupHandler := connect_go.NewUnaryHandler(
 		RemoteMessagingServiceRemoteLookupProcedure,
 		svc.RemoteLookup,
 		opts...,
-	))
-	return "/goakt.v1.RemoteMessagingService/", mux
+	)
+	return "/goakt.v1.RemoteMessagingService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case RemoteMessagingServiceRemoteAskProcedure:
+			remoteMessagingServiceRemoteAskHandler.ServeHTTP(w, r)
+		case RemoteMessagingServiceRemoteTellProcedure:
+			remoteMessagingServiceRemoteTellHandler.ServeHTTP(w, r)
+		case RemoteMessagingServiceRemoteLookupProcedure:
+			remoteMessagingServiceRemoteLookupHandler.ServeHTTP(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	})
 }
 
 // UnimplementedRemoteMessagingServiceHandler returns CodeUnimplemented from all methods.

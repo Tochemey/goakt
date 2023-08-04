@@ -1,23 +1,24 @@
-kind: Role
+kind: ClusterRole
 apiVersion: rbac.authorization.k8s.io/v1
 metadata:
-  name: pod-reader
+  name: accounts
 rules:
   - apiGroups: [""] # "" indicates the core API group
     resources: ["pods"]
     verbs: ["get", "watch", "list"]
 ---
-kind: RoleBinding
+kind: ClusterRoleBinding
 apiVersion: rbac.authorization.k8s.io/v1
 metadata:
-  name: read-pods
+  name: accounts
 subjects:
   # Uses the default service account. Consider creating a new one.
   - kind: ServiceAccount
     name: default
+    namespace: default
 roleRef:
-  kind: Role
-  name: pod-reader
+  kind: ClusterRole
+  name: accounts
   apiGroup: rbac.authorization.k8s.io
 ---
 apiVersion: apps/v1
@@ -30,10 +31,6 @@ metadata:
     app.kubernetes.io/part-of: AccountsSystem
 spec:
   replicas: 3
-  strategy:
-    type: RollingUpdate
-    rollingUpdate:
-      maxUnavailable: 100%
   selector:
     matchLabels:
       app.kubernetes.io/name: accounts
@@ -56,10 +53,13 @@ spec:
               name: grpc
             - containerPort: 9000
               name: remoting
-            - containerPort: 32379
-              name: clients-port
-            - containerPort: 32380
-              name: peers-port
+              protocol: TCP
+            - containerPort: 3322
+              name: gossip-port
+              protocol: TCP
+            - containerPort: 3320
+              name: cluster-port
+              protocol: TCP
           env:
             - name: HOST_IP
               valueFrom:
@@ -73,6 +73,10 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: status.podIP
+            - name: GOSSIP_PORT
+              value: "3322"
+            - name: CLUSTER_PORT
+              value: "3320"
           resources:
             requests:
               memory: "64Mi"
@@ -90,11 +94,11 @@ spec:
      app.kubernetes.io/component: accounts
      app.kubernetes.io/part-of: AccountsSystem
  spec:
-   type: ClusterIP
    selector:
      app.kubernetes.io/name: accounts
      app.kubernetes.io/component: accounts
      app.kubernetes.io/part-of: AccountsSystem
+   clusterIP: None
    ports:
      - protocol: TCP
        port: 9000
@@ -104,3 +108,11 @@ spec:
        port: 50051
        targetPort: grpc
        name: grpc
+     - port: 3320
+       protocol: TCP
+       name: cluster-port
+       targetPort: cluster-port
+     - port: 3322
+       protocol: TCP
+       name: gossip-port
+       targetPort: gossip-port

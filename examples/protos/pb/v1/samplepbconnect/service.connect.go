@@ -114,23 +114,33 @@ type AccountServiceHandler interface {
 // By default, handlers support the Connect, gRPC, and gRPC-Web protocols with the binary Protobuf
 // and JSON codecs. They also support gzip compression.
 func NewAccountServiceHandler(svc AccountServiceHandler, opts ...connect_go.HandlerOption) (string, http.Handler) {
-	mux := http.NewServeMux()
-	mux.Handle(AccountServiceCreateAccountProcedure, connect_go.NewUnaryHandler(
+	accountServiceCreateAccountHandler := connect_go.NewUnaryHandler(
 		AccountServiceCreateAccountProcedure,
 		svc.CreateAccount,
 		opts...,
-	))
-	mux.Handle(AccountServiceCreditAccountProcedure, connect_go.NewUnaryHandler(
+	)
+	accountServiceCreditAccountHandler := connect_go.NewUnaryHandler(
 		AccountServiceCreditAccountProcedure,
 		svc.CreditAccount,
 		opts...,
-	))
-	mux.Handle(AccountServiceGetAccountProcedure, connect_go.NewUnaryHandler(
+	)
+	accountServiceGetAccountHandler := connect_go.NewUnaryHandler(
 		AccountServiceGetAccountProcedure,
 		svc.GetAccount,
 		opts...,
-	))
-	return "/sample.v1.AccountService/", mux
+	)
+	return "/sample.v1.AccountService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case AccountServiceCreateAccountProcedure:
+			accountServiceCreateAccountHandler.ServeHTTP(w, r)
+		case AccountServiceCreditAccountProcedure:
+			accountServiceCreditAccountHandler.ServeHTTP(w, r)
+		case AccountServiceGetAccountProcedure:
+			accountServiceGetAccountHandler.ServeHTTP(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	})
 }
 
 // UnimplementedAccountServiceHandler returns CodeUnimplemented from all methods.

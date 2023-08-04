@@ -33,26 +33,25 @@ var runCmd = &cobra.Command{
 		// create a background context
 		ctx := context.Background()
 		// use the messages default log. real-life implement the log interface`
-		logger := log.New(log.InfoLevel, os.Stdout)
+		logger := log.New(log.DebugLevel, os.Stdout)
 
 		// create the k8 configuration
-		disco := kubernetes.NewDiscovery(logger)
-		// start the discovery engine and handle error
-		if err := disco.Start(ctx, discovery.Meta{
+		disco := kubernetes.NewDiscovery()
+		// define the discovery options
+		discoOptions := discovery.Config{
 			kubernetes.ApplicationName: applicationName,
 			kubernetes.ActorSystemName: actorSystemName,
 			kubernetes.Namespace:       namespace,
-		}); err != nil {
-			logger.Panic(err)
 		}
-
+		// define the service discovery
+		serviceDiscovery := discovery.NewServiceDiscovery(disco, discoOptions)
 		// create the actor system
 		actorSystem, err := goakt.NewActorSystem(
 			actorSystemName,
 			goakt.WithPassivationDisabled(), // set big passivation time
 			goakt.WithLogger(logger),
 			goakt.WithActorInitMaxRetries(3),
-			goakt.WithClustering(disco, remotingPort))
+			goakt.WithClustering(serviceDiscovery, remotingPort, 20))
 		// handle the error
 		if err != nil {
 			logger.Panic(err)
@@ -75,10 +74,6 @@ var runCmd = &cobra.Command{
 		// wait for a shutdown signal, and then shutdown
 		go func() {
 			<-sigs
-			// stop the discovery engine
-			if err := disco.Stop(); err != nil {
-				logger.Panic(err)
-			}
 			// stop the actor system
 			if err := actorSystem.Stop(ctx); err != nil {
 				logger.Panic(err)

@@ -1,5 +1,11 @@
 package cluster
 
+import (
+	"time"
+
+	"github.com/tochemey/goakt/log"
+)
+
 // Option is the interface that applies a configuration option.
 type Option interface {
 	// Apply sets the Option value of a config.
@@ -15,9 +21,39 @@ func (f OptionFunc) Apply(c *Cluster) {
 	f(c)
 }
 
-// WithDataDir sets the data dir
-func WithDataDir(datadir string) Option {
-	return OptionFunc(func(cl *Cluster) {
-		cl.dataDir = datadir
+// WithPartitionsCount sets the total number of partitions
+func WithPartitionsCount(count uint64) Option {
+	return OptionFunc(func(cluster *Cluster) {
+		cluster.partitionsCount = count
+	})
+}
+
+// WithLogger sets the logger
+func WithLogger(logger log.Logger) Option {
+	return OptionFunc(func(cluster *Cluster) {
+		cluster.logger = logger
+	})
+}
+
+// WithWriteTimeout sets the cluster write timeout.
+// This timeout specifies the timeout of a data replication
+func WithWriteTimeout(timeout time.Duration) Option {
+	return OptionFunc(func(cluster *Cluster) {
+		cluster.writeTimeout = timeout
+	})
+}
+
+// WithReadTimeout sets the cluster read timeout.
+// This timeout specifies the timeout of a data retrieval
+func WithReadTimeout(timeout time.Duration) Option {
+	return OptionFunc(func(cluster *Cluster) {
+		cluster.readTimeout = timeout
+	})
+}
+
+// WithShutdownTimeout sets the cluster shutdown timeout.
+func WithShutdownTimeout(timeout time.Duration) Option {
+	return OptionFunc(func(cluster *Cluster) {
+		cluster.shutdownTimeout = timeout
 	})
 }

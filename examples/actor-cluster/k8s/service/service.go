@@ -154,8 +154,7 @@ func (s *AccountService) CreditAccount(ctx context.Context, c *connect.Request[s
 
 // GetAccount helps get an account
 func (s *AccountService) GetAccount(ctx context.Context, c *connect.Request[samplepb.GetAccountRequest]) (*connect.Response[samplepb.GetAccountResponse], error) {
-	//TODO implement me
-	panic("implement me")
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("not implemented"))
 }
 
 // Start starts the service
