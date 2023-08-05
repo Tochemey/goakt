@@ -135,7 +135,7 @@ engine to work as expected:
 
 * `gossip-port`: help the gossip protocol engine.
 * `cluster-port`: help the cluster engine to communicate with other GoAkt nodes in the cluster
-* `remoting`: help for remoting messaging between actors
+* `remoting-port`: help for remoting messaging between actors
 
 #### Role Based Access
 
