@@ -42,7 +42,7 @@ jobs:
           COMMIT_HASH: ${{ github.sha }}
           FORCE_COLOR: 1
         run: |
-          earthly -P --org tochemey26 --sat goakt --ci --push +test
+          earthly -P -use-inline-cache --save-inline-cache --strict --push +test
       - uses: codecov/codecov-action@v3
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
