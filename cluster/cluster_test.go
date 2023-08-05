@@ -11,8 +11,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tochemey/goakt/discovery"
+	mocksdiscovery "github.com/tochemey/goakt/goaktmocks/discovery"
 	goaktpb "github.com/tochemey/goakt/internal/goakt/v1"
-	mocksdiscovery "github.com/tochemey/goakt/mocks/discovery"
 	"github.com/travisjeffery/go-dynaport"
 	"google.golang.org/protobuf/proto"
 )

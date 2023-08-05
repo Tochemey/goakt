@@ -8,8 +8,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/tochemey/goakt/discovery"
 	"github.com/tochemey/goakt/discovery/kubernetes"
+	mocksdiscovery "github.com/tochemey/goakt/goaktmocks/discovery"
 	"github.com/tochemey/goakt/log"
-	mocksdiscovery "github.com/tochemey/goakt/mocks/discovery"
 	"github.com/travisjeffery/go-dynaport"
 )
 
