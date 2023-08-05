@@ -48,7 +48,8 @@ func TestCluster(t *testing.T) {
 		serviceDiscovery := discovery.NewServiceDiscovery(provider, config)
 
 		// create a cluster node
-		setEnvs("testNode", gossipPort, clusterPort)
+		host := "127.0.0.1"
+		setEnvs("testNode", host, gossipPort, clusterPort)
 		node, err := New("test", serviceDiscovery)
 		require.NotNil(t, node)
 		require.NoError(t, err)
@@ -60,7 +61,7 @@ func TestCluster(t *testing.T) {
 		require.NoError(t, err)
 
 		hostNodeAddr := node.NodeHost()
-		assert.Equal(t, "127.0.0.1", hostNodeAddr)
+		assert.Equal(t, host, hostNodeAddr)
 
 		//  shutdown the cluster node
 		ctx, cancel := context.WithTimeout(ctx, time.Second)
@@ -99,7 +100,8 @@ func TestCluster(t *testing.T) {
 		serviceDiscovery := discovery.NewServiceDiscovery(provider, config)
 
 		// create a cluster node
-		setEnvs("testNode", gossipPort, clusterPort)
+		host := "127.0.0.1"
+		setEnvs("testNode", host, gossipPort, clusterPort)
 		node, err := New("test", serviceDiscovery)
 		require.NotNil(t, node)
 		require.NoError(t, err)
@@ -140,11 +142,11 @@ func TestCluster(t *testing.T) {
 	})
 }
 
-func setEnvs(name string, gossipPort, clusterPort int) {
+func setEnvs(name, host string, gossipPort, clusterPort int) {
 	_ = os.Setenv("GOSSIP_PORT", strconv.Itoa(gossipPort))
 	_ = os.Setenv("CLUSTER_PORT", strconv.Itoa(clusterPort))
 	_ = os.Setenv("POD_NAME", name)
-	_ = os.Setenv("POD_IP", "127.0.0.1")
+	_ = os.Setenv("POD_IP", host)
 }
 
 func unsetEnvs() {

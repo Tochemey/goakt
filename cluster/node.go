@@ -1,7 +1,8 @@
 package cluster
 
 import (
-	"fmt"
+	"net"
+	"strconv"
 
 	"github.com/caarlos0/env/v9"
 )
@@ -28,12 +29,12 @@ type node struct {
 
 // ClusterAddress returns address the node's peers will use to connect to
 func (n node) ClusterAddress() string {
-	return fmt.Sprintf("%s:%d", n.Host, n.ClusterPort)
+	return net.JoinHostPort(n.Host, strconv.Itoa(n.ClusterPort))
 }
 
 // GossipAddress returns the node discovery address
 func (n node) GossipAddress() string {
-	return fmt.Sprintf("%s:%d", n.Host, n.GossipPort)
+	return net.JoinHostPort(n.Host, strconv.Itoa(n.GossipPort))
 }
 
 // getHostNode returns the node where the discovery provider is running

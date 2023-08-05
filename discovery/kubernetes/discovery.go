@@ -2,7 +2,8 @@ package kubernetes
 
 import (
 	"context"
-	"fmt"
+	"net"
+	"strconv"
 	"sync"
 
 	goset "github.com/deckarep/golang-set/v2"
@@ -214,7 +215,7 @@ MainLoop:
 				}
 
 				if port.Name == GossipPortName {
-					addresses.Add(fmt.Sprintf("%s:%d", pod.Status.PodIP, port.ContainerPort))
+					addresses.Add(net.JoinHostPort(pod.Status.PodIP, strconv.Itoa(int(port.ContainerPort))))
 				}
 			}
 		}
