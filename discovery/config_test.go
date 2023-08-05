@@ -7,7 +7,7 @@ import (
 )
 
 func TestGetString(t *testing.T) {
-	t.Run("happy path", func(t *testing.T) {
+	t.Run("With happy path", func(t *testing.T) {
 		meta := Config{
 			"key-1": "value-1",
 			"key-2": "value-2",
@@ -19,7 +19,7 @@ func TestGetString(t *testing.T) {
 		expected := "value-1"
 		assert.Equal(t, expected, actual)
 	})
-	t.Run("with key not found", func(t *testing.T) {
+	t.Run("With key not found", func(t *testing.T) {
 		meta := Config{
 			"key-1": "value-1",
 			"key-2": "value-2",
@@ -30,7 +30,7 @@ func TestGetString(t *testing.T) {
 		assert.EqualError(t, err, "key=key-3 not found")
 		assert.Empty(t, actual)
 	})
-	t.Run("with key value not of a type string", func(t *testing.T) {
+	t.Run("With key value not of a type string", func(t *testing.T) {
 		meta := Config{
 			"key-1": "value-1",
 			"key-2": 13,
@@ -44,7 +44,7 @@ func TestGetString(t *testing.T) {
 }
 
 func TestGetMapString(t *testing.T) {
-	t.Run("happy path", func(t *testing.T) {
+	t.Run("With happy path", func(t *testing.T) {
 		meta := Config{
 			"key-1": map[string]string{
 				"key-11": "value-11",
@@ -61,7 +61,7 @@ func TestGetMapString(t *testing.T) {
 		}
 		assert.Equal(t, expected, actual)
 	})
-	t.Run("with key not found", func(t *testing.T) {
+	t.Run("With key not found", func(t *testing.T) {
 		meta := Config{
 			"key-1": map[string]string{
 				"key-11": "value-11",
@@ -74,7 +74,7 @@ func TestGetMapString(t *testing.T) {
 		assert.EqualError(t, err, "key=key-3 not found")
 		assert.Empty(t, actual)
 	})
-	t.Run("with key value not of a type map[string]string", func(t *testing.T) {
+	t.Run("With key value not of a type map[string]string", func(t *testing.T) {
 		meta := Config{
 			"key-2": 13,
 		}
@@ -83,5 +83,98 @@ func TestGetMapString(t *testing.T) {
 		assert.Error(t, err)
 		assert.EqualError(t, err, "the key value is not a map[string]string")
 		assert.Empty(t, actual)
+	})
+}
+
+func TestGetInt(t *testing.T) {
+	t.Run("With happy path", func(t *testing.T) {
+		meta := Config{
+			"key-1": 20,
+			"key-2": 30,
+		}
+		key := "key-1"
+		actual, err := meta.GetInt(key)
+		assert.NoError(t, err)
+		assert.NotZero(t, actual)
+		expected := 20
+		assert.EqualValues(t, expected, actual)
+	})
+	t.Run("With key not found", func(t *testing.T) {
+		meta := Config{
+			"key-1": 20,
+			"key-2": 30,
+		}
+		key := "key-3"
+		actual, err := meta.GetInt(key)
+		assert.Error(t, err)
+		assert.EqualError(t, err, "key=key-3 not found")
+		assert.Zero(t, actual)
+	})
+	t.Run("With key value not an int", func(t *testing.T) {
+		meta := Config{
+			"key-1": "a",
+			"key-2": 30,
+		}
+		key := "key-1"
+		actual, err := meta.GetInt(key)
+		assert.Error(t, err)
+		assert.Zero(t, actual)
+	})
+	t.Run("With key value a string int", func(t *testing.T) {
+		meta := Config{
+			"key-1": "20",
+			"key-2": 30,
+		}
+		key := "key-1"
+		actual, err := meta.GetInt(key)
+		assert.NoError(t, err)
+		assert.NotZero(t, actual)
+		expected := 20
+		assert.EqualValues(t, expected, actual)
+	})
+}
+
+func TestGetBool(t *testing.T) {
+	t.Run("With happy path", func(t *testing.T) {
+		meta := Config{
+			"key-1": true,
+			"key-2": 30,
+		}
+		key := "key-1"
+		actual, err := meta.GetBool(key)
+		assert.NoError(t, err)
+		assert.NotNil(t, actual)
+		assert.True(t, *actual)
+	})
+	t.Run("With key not found", func(t *testing.T) {
+		meta := Config{
+			"key-1": 20,
+			"key-2": 30,
+		}
+		key := "key-3"
+		actual, err := meta.GetBool(key)
+		assert.Error(t, err)
+		assert.EqualError(t, err, "key=key-3 not found")
+		assert.Nil(t, actual)
+	})
+	t.Run("With key value not an boolean", func(t *testing.T) {
+		meta := Config{
+			"key-1": "a",
+			"key-2": 30,
+		}
+		key := "key-1"
+		actual, err := meta.GetBool(key)
+		assert.Error(t, err)
+		assert.Nil(t, actual)
+	})
+	t.Run("With key value a string boolean", func(t *testing.T) {
+		meta := Config{
+			"key-1": "TRUE",
+			"key-2": 30,
+		}
+		key := "key-1"
+		actual, err := meta.GetBool(key)
+		assert.NoError(t, err)
+		assert.True(t, *actual)
 	})
 }

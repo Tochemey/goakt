@@ -3,7 +3,6 @@ package cluster
 import (
 	"encoding/base64"
 
-	"github.com/pkg/errors"
 	goaktpb "github.com/tochemey/goakt/internal/goakt/v1"
 	"google.golang.org/protobuf/proto"
 )
@@ -12,13 +11,7 @@ import (
 // the output of this function can be persisted to the cluster
 func encode(actor *goaktpb.WireActor) (string, error) {
 	// let us marshal it
-	bytea, err := proto.Marshal(actor)
-	// handle the marshaling error
-	if err != nil {
-		// here we cancel the request
-		return "", errors.Wrapf(err, "failed to persist actor=%s data in the cluster", actor.GetActorName())
-	}
-
+	bytea, _ := proto.Marshal(actor)
 	// let us base64 encode the bytea before sending it into the cluster
 	return base64.StdEncoding.EncodeToString(bytea), nil
 }

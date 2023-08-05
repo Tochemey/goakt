@@ -3,6 +3,7 @@ package discovery
 import (
 	"errors"
 	"fmt"
+	"strconv"
 )
 
 // Config represents the meta information to pass to the discovery engine
@@ -36,14 +37,15 @@ func (m Config) GetInt(key string) (int, error) {
 	// let us check whether the given key is in the map
 	val, ok := m[key]
 	if !ok {
-		return -1, fmt.Errorf("key=%s not found", key)
+		return 0, fmt.Errorf("key=%s not found", key)
 	}
 	// let us check the type of val
 	switch x := val.(type) {
 	case int:
 		return x, nil
 	default:
-		return -1, errors.New("the key value is not an integer")
+		// maybe it is string integer
+		return strconv.Atoi(val.(string))
 	}
 }
 
@@ -60,7 +62,13 @@ func (m Config) GetBool(key string) (*bool, error) {
 	case bool:
 		return &x, nil
 	default:
-		return nil, errors.New("the key value is not an integer")
+		// parse the string value
+		res, err := strconv.ParseBool(val.(string))
+		// return the possible error
+		if err != nil {
+			return nil, err
+		}
+		return &res, nil
 	}
 }
 

@@ -176,6 +176,26 @@ func TestDiscovery(t *testing.T) {
 		// set config
 		assert.NoError(t, provider.SetConfig(config))
 	})
+	t.Run("With SetConfig: already initialized", func(t *testing.T) {
+		// create the various config option
+		namespace := "default"
+		applicationName := "accounts"
+		actorSystemName := "AccountsSystem"
+		// create the instance of provider
+		provider := NewDiscovery()
+		provider.isInitialized = atomic.NewBool(true)
+		// create the config
+		config := discovery.Config{
+			ApplicationName: applicationName,
+			ActorSystemName: actorSystemName,
+			Namespace:       namespace,
+		}
+
+		// set config
+		err := provider.SetConfig(config)
+		assert.Error(t, err)
+		assert.EqualError(t, err, discovery.ErrAlreadyInitialized.Error())
+	})
 	t.Run("With Initialize", func(t *testing.T) {
 		// create the various config option
 		namespace := "default"
@@ -193,5 +213,18 @@ func TestDiscovery(t *testing.T) {
 		// set config
 		assert.NoError(t, provider.SetConfig(config))
 		assert.NoError(t, provider.Initialize())
+	})
+	t.Run("With Initialize: already initialized", func(t *testing.T) {
+		// create the instance of provider
+		provider := NewDiscovery()
+		provider.isInitialized = atomic.NewBool(true)
+		assert.Error(t, provider.Initialize())
+	})
+	t.Run("With Deregister", func(t *testing.T) {
+		// create the instance of provider
+		provider := NewDiscovery()
+		// for the sake of the test
+		provider.isInitialized = atomic.NewBool(true)
+		assert.NoError(t, provider.Deregister())
 	})
 }
