@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tochemey/goakt/discovery"
 	"github.com/tochemey/goakt/log"
-	mocksdiscovery "github.com/tochemey/goakt/mocks/discovery"
+	mocks "github.com/tochemey/goakt/mocks/discovery"
 	"github.com/travisjeffery/go-dynaport"
 )
 
@@ -106,7 +106,7 @@ func TestActorSystem(t *testing.T) {
 		}
 
 		// mock the discovery provider
-		provider := new(mocksdiscovery.Provider)
+		provider := new(mocks.Provider)
 		config := discovery.NewConfig()
 		sd := discovery.NewServiceDiscovery(provider, config)
 		newActorSystem, err := NewActorSystem(
