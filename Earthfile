@@ -1,5 +1,5 @@
 VERSION 0.7
-PROJECT tochemey/goakt
+PROJECT tochemey26/goakt
 
 
 FROM tochemey/docker-go:1.20.6-0.9.1
