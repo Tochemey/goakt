@@ -11,5 +11,4 @@ vendor
 gen.env
 .env
 gen/
-mocks
 /.fleet/settings.json
