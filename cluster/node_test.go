@@ -2,6 +2,7 @@ package cluster
 
 import (
 	"fmt"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -12,11 +13,18 @@ import (
 func TestGetHostNode(t *testing.T) {
 	t.Run("With host node env vars set", func(t *testing.T) {
 		// generate the ports for the single node
-		nodePorts := dynaport.Get(2)
+		nodePorts := dynaport.Get(3)
 		gossipPort := nodePorts[0]
 		clusterPort := nodePorts[1]
+		remotingPort := nodePorts[2]
 		host := "127.0.0.1"
-		setEnvs("testNode", host, gossipPort, clusterPort)
+
+		t.Setenv("GOSSIP_PORT", strconv.Itoa(gossipPort))
+		t.Setenv("CLUSTER_PORT", strconv.Itoa(clusterPort))
+		t.Setenv("REMOTING_PORT", strconv.Itoa(remotingPort))
+		t.Setenv("POD_NAME", "testNode")
+		t.Setenv("POD_IP", host)
+
 		node, err := getHostNode()
 		require.NoError(t, err)
 		require.NotNil(t, node)
@@ -24,7 +32,6 @@ func TestGetHostNode(t *testing.T) {
 		gossipAddr := node.GossipAddress()
 		assert.Equal(t, fmt.Sprintf("%s:%d", host, clusterPort), clusterAddr)
 		assert.Equal(t, fmt.Sprintf("%s:%d", host, gossipPort), gossipAddr)
-		unsetEnvs()
 	})
 	t.Run("With host node env vars not set", func(t *testing.T) {
 		node, err := getHostNode()

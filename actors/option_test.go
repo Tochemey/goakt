@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/tochemey/goakt/log"
+	"go.uber.org/atomic"
 )
 
 func TestOptions(t *testing.T) {
@@ -47,7 +48,7 @@ func TestOptions(t *testing.T) {
 		{
 			name:     "WithRemoting",
 			option:   WithRemoting("localhost", 3100),
-			expected: actorSystem{remotingEnabled: true, remotingPort: 3100, remotingHost: "localhost"},
+			expected: actorSystem{remotingEnabled: atomic.NewBool(true), remotingPort: 3100, remotingHost: "localhost"},
 		},
 	}
 	for _, tc := range testCases {

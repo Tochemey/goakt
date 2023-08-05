@@ -3,7 +3,6 @@ package cluster
 import (
 	"context"
 	"fmt"
-	"os"
 	"strconv"
 	"testing"
 	"time"
@@ -24,9 +23,10 @@ func TestCluster(t *testing.T) {
 		ctx := context.TODO()
 
 		// generate the ports for the single node
-		nodePorts := dynaport.Get(2)
+		nodePorts := dynaport.Get(3)
 		gossipPort := nodePorts[0]
 		clusterPort := nodePorts[1]
+		remotingPort := nodePorts[2]
 
 		// define discovered addresses
 		addrs := []string{
@@ -36,25 +36,30 @@ func TestCluster(t *testing.T) {
 		// mock the discovery provider
 		provider := new(mocksdiscovery.Provider)
 		config := discovery.NewConfig()
-		provider.
-			On("ID").Return("testDisco").
-			On("Initialize").Return(nil).
-			On("Register").Return(nil).
-			On("Deregister").Return(nil).
-			On("SetConfig", config).Return(nil).
-			On("DiscoverPeers").Return(addrs, nil)
+
+		provider.EXPECT().ID().Return("testDisco")
+		provider.EXPECT().Initialize().Return(nil)
+		provider.EXPECT().Register().Return(nil)
+		provider.EXPECT().Deregister().Return(nil)
+		provider.EXPECT().SetConfig(config).Return(nil)
+		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
 
 		// create the service discovery
 		serviceDiscovery := discovery.NewServiceDiscovery(provider, config)
 
 		// create a cluster node
 		host := "127.0.0.1"
-		setEnvs("testNode", host, gossipPort, clusterPort)
+
+		// set the environments
+		t.Setenv("GOSSIP_PORT", strconv.Itoa(gossipPort))
+		t.Setenv("CLUSTER_PORT", strconv.Itoa(clusterPort))
+		t.Setenv("REMOTING_PORT", strconv.Itoa(remotingPort))
+		t.Setenv("POD_NAME", "testNode")
+		t.Setenv("POD_IP", host)
+
 		node, err := New("test", serviceDiscovery)
 		require.NotNil(t, node)
 		require.NoError(t, err)
-		// clear the env vars
-		unsetEnvs()
 
 		// start the cluster node
 		err = node.Start(ctx)
@@ -76,9 +81,10 @@ func TestCluster(t *testing.T) {
 		ctx := context.TODO()
 
 		// generate the ports for the single node
-		nodePorts := dynaport.Get(2)
+		nodePorts := dynaport.Get(3)
 		gossipPort := nodePorts[0]
 		clusterPort := nodePorts[1]
+		remotingPort := nodePorts[2]
 
 		// define discovered addresses
 		addrs := []string{
@@ -88,25 +94,29 @@ func TestCluster(t *testing.T) {
 		// mock the discovery provider
 		provider := new(mocksdiscovery.Provider)
 		config := discovery.NewConfig()
-		provider.
-			On("ID").Return("testDisco").
-			On("Initialize").Return(nil).
-			On("Register").Return(nil).
-			On("Deregister").Return(nil).
-			On("SetConfig", config).Return(nil).
-			On("DiscoverPeers").Return(addrs, nil)
+
+		provider.EXPECT().ID().Return("testDisco")
+		provider.EXPECT().Initialize().Return(nil)
+		provider.EXPECT().Register().Return(nil)
+		provider.EXPECT().Deregister().Return(nil)
+		provider.EXPECT().SetConfig(config).Return(nil)
+		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
 
 		// create the service discovery
 		serviceDiscovery := discovery.NewServiceDiscovery(provider, config)
 
 		// create a cluster node
 		host := "127.0.0.1"
-		setEnvs("testNode", host, gossipPort, clusterPort)
+		// set the environments
+		t.Setenv("GOSSIP_PORT", strconv.Itoa(gossipPort))
+		t.Setenv("CLUSTER_PORT", strconv.Itoa(clusterPort))
+		t.Setenv("REMOTING_PORT", strconv.Itoa(remotingPort))
+		t.Setenv("POD_NAME", "testNode")
+		t.Setenv("POD_IP", host)
+
 		node, err := New("test", serviceDiscovery)
 		require.NotNil(t, node)
 		require.NoError(t, err)
-		// clear the env vars
-		unsetEnvs()
 
 		// start the cluster node
 		err = node.Start(ctx)
@@ -140,18 +150,4 @@ func TestCluster(t *testing.T) {
 		require.NoError(t, node.Stop(ctx))
 		provider.AssertExpectations(t)
 	})
-}
-
-func setEnvs(name, host string, gossipPort, clusterPort int) {
-	_ = os.Setenv("GOSSIP_PORT", strconv.Itoa(gossipPort))
-	_ = os.Setenv("CLUSTER_PORT", strconv.Itoa(clusterPort))
-	_ = os.Setenv("POD_NAME", name)
-	_ = os.Setenv("POD_IP", host)
-}
-
-func unsetEnvs() {
-	_ = os.Unsetenv("GOSSIP_PORT")
-	_ = os.Unsetenv("CLUSTER_PORT")
-	_ = os.Unsetenv("POD_NAME")
-	_ = os.Unsetenv("POD_IP")
 }

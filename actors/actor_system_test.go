@@ -2,15 +2,21 @@ package actors
 
 import (
 	"context"
+	"fmt"
+	"strconv"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/tochemey/goakt/discovery"
 	"github.com/tochemey/goakt/log"
+	mocksdiscovery "github.com/tochemey/goakt/mocks/discovery"
+	"github.com/travisjeffery/go-dynaport"
 )
 
 func TestActorSystem(t *testing.T) {
-	t.Run("With Defaults", func(t *testing.T) {
+	t.Run("New instance with Defaults", func(t *testing.T) {
 		actorSys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
 		require.NoError(t, err)
 		require.NotNil(t, actorSys)
@@ -20,7 +26,7 @@ func TestActorSystem(t *testing.T) {
 		assert.Equal(t, "testSys", actorSys.Name())
 		assert.Empty(t, actorSys.Actors())
 	})
-	t.Run("With Missing Name", func(t *testing.T) {
+	t.Run("New instance with Missing Name", func(t *testing.T) {
 		sys, err := NewActorSystem("")
 		assert.Error(t, err)
 		assert.Nil(t, sys)
@@ -45,7 +51,12 @@ func TestActorSystem(t *testing.T) {
 		actorRef := sys.StartActor(ctx, "Test", actor)
 		assert.NotNil(t, actorRef)
 
-		assert.NoError(t, sys.Stop(ctx))
+		// stop the actor after some time
+		ctx, cancel := context.WithTimeout(ctx, time.Second)
+		defer cancel()
+
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
 	})
 	t.Run("With StartActor an actor already exist", func(t *testing.T) {
 		ctx := context.TODO()
@@ -65,6 +76,63 @@ func TestActorSystem(t *testing.T) {
 		// point to the same memory address
 		assert.True(t, ref1 == ref2)
 
-		assert.NoError(t, sys.Stop(ctx))
+		// stop the actor after some time
+		ctx, cancel := context.WithTimeout(ctx, time.Second)
+		defer cancel()
+
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
+	})
+	t.Run("Start and Stop with clustering enabled", func(t *testing.T) {
+		ctx := context.TODO()
+		nodePorts := dynaport.Get(3)
+		gossipPort := nodePorts[0]
+		clusterPort := nodePorts[1]
+		remotingPort := nodePorts[2]
+
+		podName := "pod"
+		host := "127.0.0.1"
+
+		// set the environments
+		t.Setenv("GOSSIP_PORT", strconv.Itoa(gossipPort))
+		t.Setenv("CLUSTER_PORT", strconv.Itoa(clusterPort))
+		t.Setenv("REMOTING_PORT", strconv.Itoa(remotingPort))
+		t.Setenv("POD_NAME", podName)
+		t.Setenv("POD_IP", host)
+
+		// define discovered addresses
+		addrs := []string{
+			fmt.Sprintf("%s:%d", host, gossipPort),
+		}
+
+		// mock the discovery provider
+		provider := new(mocksdiscovery.Provider)
+		config := discovery.NewConfig()
+		sd := discovery.NewServiceDiscovery(provider, config)
+		newActorSystem, err := NewActorSystem(
+			"test",
+			WithLogger(log.DefaultLogger),
+			WithClustering(sd, 20))
+		require.NoError(t, err)
+
+		provider.EXPECT().ID().Return("testDisco")
+		provider.EXPECT().Initialize().Return(nil)
+		provider.EXPECT().Register().Return(nil)
+		provider.EXPECT().Deregister().Return(nil)
+		provider.EXPECT().SetConfig(config).Return(nil)
+		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
+
+		// start the actor system
+		err = newActorSystem.Start(ctx)
+		require.NoError(t, err)
+
+		// stop the actor after some time
+		ctx, cancel := context.WithTimeout(ctx, time.Second)
+		defer cancel()
+
+		err = newActorSystem.Stop(ctx)
+		require.NoError(t, err)
+
+		provider.AssertExpectations(t)
 	})
 }

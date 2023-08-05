@@ -52,7 +52,7 @@ spec:
             - containerPort: 50051
               name: grpc
             - containerPort: 9000
-              name: remoting
+              name: remoting-port
               protocol: TCP
             - containerPort: 3322
               name: gossip-port
@@ -77,6 +77,8 @@ spec:
               value: "3322"
             - name: CLUSTER_PORT
               value: "3320"
+            - name: REMOTING_PORT
+              value: "9000"
           resources:
             requests:
               memory: "64Mi"

@@ -15,13 +15,16 @@ import (
 )
 
 const (
-	recvDelay      = 1 * time.Second
-	recvTimeout    = 100 * time.Millisecond
-	passivateAfter = 200 * time.Millisecond
+	receivingDelay   = 1 * time.Second
+	receivingTimeout = 100 * time.Millisecond
+	passivateAfter   = 200 * time.Millisecond
 )
 
 func TestActorReceive(t *testing.T) {
-	defer goleak.VerifyNone(t, goleak.IgnoreTopFunction("github.com/golang/glog.(*loggingT).flushDaemon"))
+	defer goleak.VerifyNone(t,
+		goleak.IgnoreTopFunction("github.com/golang/glog.(*loggingT).flushDaemon"),
+		goleak.IgnoreTopFunction("github.com/go-redis/redis/v8/internal/pool.(*ConnPool).reaper"),
+	)
 	ctx := context.TODO()
 
 	// create the actor path
@@ -34,7 +37,7 @@ func TestActorReceive(t *testing.T) {
 		NewTestActor(),
 		withInitMaxRetries(1),
 		withCustomLogger(log.DefaultLogger),
-		withSendReplyTimeout(recvTimeout))
+		withSendReplyTimeout(receivingTimeout))
 
 	assert.NotNil(t, pid)
 	// let us send 10 public to the actor
@@ -57,13 +60,16 @@ func TestActorReceive(t *testing.T) {
 	assert.NoError(t, err)
 }
 func TestActorWithPassivation(t *testing.T) {
-	defer goleak.VerifyNone(t, goleak.IgnoreTopFunction("github.com/golang/glog.(*loggingT).flushDaemon"))
+	defer goleak.VerifyNone(t,
+		goleak.IgnoreTopFunction("github.com/golang/glog.(*loggingT).flushDaemon"),
+		goleak.IgnoreTopFunction("github.com/go-redis/redis/v8/internal/pool.(*ConnPool).reaper"),
+	)
 	ctx := context.TODO()
 	// create a Ping actor
 	opts := []pidOption{
 		withInitMaxRetries(1),
 		withPassivationAfter(passivateAfter),
-		withSendReplyTimeout(recvTimeout),
+		withSendReplyTimeout(receivingTimeout),
 	}
 
 	// create the actor path
@@ -75,7 +81,7 @@ func TestActorWithPassivation(t *testing.T) {
 	wg := sync.WaitGroup{}
 	wg.Add(1)
 	go func() {
-		time.Sleep(recvDelay)
+		time.Sleep(receivingDelay)
 		wg.Done()
 	}()
 	// block until timer is up
@@ -87,7 +93,10 @@ func TestActorWithPassivation(t *testing.T) {
 }
 func TestActorWithReply(t *testing.T) {
 	t.Run("with happy path", func(t *testing.T) {
-		defer goleak.VerifyNone(t, goleak.IgnoreTopFunction("github.com/golang/glog.(*loggingT).flushDaemon"))
+		defer goleak.VerifyNone(t,
+			goleak.IgnoreTopFunction("github.com/golang/glog.(*loggingT).flushDaemon"),
+			goleak.IgnoreTopFunction("github.com/go-redis/redis/v8/internal/pool.(*ConnPool).reaper"),
+		)
 		ctx := context.TODO()
 		// create a Ping actor
 		opts := []pidOption{
@@ -100,7 +109,7 @@ func TestActorWithReply(t *testing.T) {
 		pid := newPID(ctx, actorPath, NewTestActor(), opts...)
 		assert.NotNil(t, pid)
 
-		actual, err := Ask(ctx, pid, new(testpb.TestReply), recvTimeout)
+		actual, err := Ask(ctx, pid, new(testpb.TestReply), receivingTimeout)
 		assert.NoError(t, err)
 		assert.NotNil(t, actual)
 		expected := &testpb.Reply{Content: "received message"}
@@ -110,7 +119,10 @@ func TestActorWithReply(t *testing.T) {
 		assert.NoError(t, err)
 	})
 	t.Run("with timeout", func(t *testing.T) {
-		defer goleak.VerifyNone(t, goleak.IgnoreTopFunction("github.com/golang/glog.(*loggingT).flushDaemon"))
+		defer goleak.VerifyNone(t,
+			goleak.IgnoreTopFunction("github.com/golang/glog.(*loggingT).flushDaemon"),
+			goleak.IgnoreTopFunction("github.com/go-redis/redis/v8/internal/pool.(*ConnPool).reaper"),
+		)
 		ctx := context.TODO()
 		// create a Ping actor
 		opts := []pidOption{
@@ -123,7 +135,7 @@ func TestActorWithReply(t *testing.T) {
 		pid := newPID(ctx, actorPath, NewTestActor(), opts...)
 		assert.NotNil(t, pid)
 
-		actual, err := Ask(ctx, pid, new(testpb.TestSend), recvTimeout)
+		actual, err := Ask(ctx, pid, new(testpb.TestSend), receivingTimeout)
 		assert.Error(t, err)
 		assert.EqualError(t, err, ErrRequestTimeout.Error())
 		assert.Nil(t, actual)
@@ -134,7 +146,10 @@ func TestActorWithReply(t *testing.T) {
 }
 func TestActorRestart(t *testing.T) {
 	t.Run("restart a stopped actor", func(t *testing.T) {
-		defer goleak.VerifyNone(t, goleak.IgnoreTopFunction("github.com/golang/glog.(*loggingT).flushDaemon"))
+		defer goleak.VerifyNone(t,
+			goleak.IgnoreTopFunction("github.com/golang/glog.(*loggingT).flushDaemon"),
+			goleak.IgnoreTopFunction("github.com/go-redis/redis/v8/internal/pool.(*ConnPool).reaper"),
+		)
 		ctx := context.TODO()
 
 		// create a Ping actor
@@ -148,7 +163,7 @@ func TestActorRestart(t *testing.T) {
 			withInitMaxRetries(1),
 			withPassivationAfter(10*time.Second),
 			withCustomLogger(log.DiscardLogger),
-			withSendReplyTimeout(recvTimeout))
+			withSendReplyTimeout(receivingTimeout))
 		assert.NotNil(t, pid)
 
 		// stop the actor
@@ -189,7 +204,7 @@ func TestActorRestart(t *testing.T) {
 	//		actorPath,
 	//		NewTestActor(),
 	//		withInitMaxRetries(1),
-	//		withSendReplyTimeout(recvTimeout),
+	//		withSendReplyTimeout(receivingTimeout),
 	//		withCustomLogger(log.DiscardLogger))
 	//	assert.NotNil(t, pid)
 	//
@@ -202,7 +217,10 @@ func TestActorRestart(t *testing.T) {
 	//	assert.EqualError(t, err, ErrUndefinedActor.Error())
 	//})
 	t.Run("restart an actor", func(t *testing.T) {
-		defer goleak.VerifyNone(t, goleak.IgnoreTopFunction("github.com/golang/glog.(*loggingT).flushDaemon"))
+		defer goleak.VerifyNone(t,
+			goleak.IgnoreTopFunction("github.com/golang/glog.(*loggingT).flushDaemon"),
+			goleak.IgnoreTopFunction("github.com/go-redis/redis/v8/internal/pool.(*ConnPool).reaper"),
+		)
 		ctx := context.TODO()
 
 		// create a Ping actor
@@ -216,7 +234,7 @@ func TestActorRestart(t *testing.T) {
 			withInitMaxRetries(1),
 			withPassivationAfter(passivateAfter),
 			withCustomLogger(log.DiscardLogger),
-			withSendReplyTimeout(recvTimeout))
+			withSendReplyTimeout(receivingTimeout))
 		assert.NotNil(t, pid)
 		// let us send 10 public to the actor
 		count := 10
@@ -244,7 +262,10 @@ func TestActorRestart(t *testing.T) {
 
 func TestChildActor(t *testing.T) {
 	t.Run("happy path", func(t *testing.T) {
-		defer goleak.VerifyNone(t, goleak.IgnoreTopFunction("github.com/golang/glog.(*loggingT).flushDaemon"))
+		defer goleak.VerifyNone(t,
+			goleak.IgnoreTopFunction("github.com/golang/glog.(*loggingT).flushDaemon"),
+			goleak.IgnoreTopFunction("github.com/go-redis/redis/v8/internal/pool.(*ConnPool).reaper"),
+		)
 
 		// create a test context
 		ctx := context.TODO()
@@ -256,7 +277,7 @@ func TestChildActor(t *testing.T) {
 			NewParentActor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
-			withSendReplyTimeout(recvTimeout))
+			withSendReplyTimeout(receivingTimeout))
 		assert.NotNil(t, parent)
 
 		// create the child actor
@@ -278,7 +299,10 @@ func TestChildActor(t *testing.T) {
 		assert.NoError(t, err)
 	})
 	t.Run("test child panic with stop as default strategy", func(t *testing.T) {
-		defer goleak.VerifyNone(t, goleak.IgnoreTopFunction("github.com/golang/glog.(*loggingT).flushDaemon"))
+		defer goleak.VerifyNone(t,
+			goleak.IgnoreTopFunction("github.com/golang/glog.(*loggingT).flushDaemon"),
+			goleak.IgnoreTopFunction("github.com/go-redis/redis/v8/internal/pool.(*ConnPool).reaper"),
+		)
 
 		// create a test context
 		ctx := context.TODO()
@@ -292,7 +316,7 @@ func TestChildActor(t *testing.T) {
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
 			withPassivationDisabled(),
-			withSendReplyTimeout(recvTimeout))
+			withSendReplyTimeout(receivingTimeout))
 		assert.NotNil(t, parent)
 
 		// create the child actor
@@ -316,7 +340,10 @@ func TestChildActor(t *testing.T) {
 		assert.NoError(t, err)
 	})
 	t.Run("test child panic with restart as default strategy", func(t *testing.T) {
-		defer goleak.VerifyNone(t, goleak.IgnoreTopFunction("github.com/golang/glog.(*loggingT).flushDaemon"))
+		defer goleak.VerifyNone(t,
+			goleak.IgnoreTopFunction("github.com/golang/glog.(*loggingT).flushDaemon"),
+			goleak.IgnoreTopFunction("github.com/go-redis/redis/v8/internal/pool.(*ConnPool).reaper"),
+		)
 
 		// create a test context
 		ctx := context.TODO()
@@ -332,7 +359,7 @@ func TestChildActor(t *testing.T) {
 			withCustomLogger(logger),
 			withPassivationDisabled(),
 			withSupervisorStrategy(RestartDirective),
-			withSendReplyTimeout(recvTimeout))
+			withSendReplyTimeout(receivingTimeout))
 		assert.NotNil(t, parent)
 
 		// create the child actor
@@ -368,7 +395,7 @@ func BenchmarkActor(b *testing.B) {
 		pid := newPID(ctx, actorPath, actor,
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
-			withSendReplyTimeout(recvTimeout))
+			withSendReplyTimeout(receivingTimeout))
 
 		actor.Wg.Add(b.N)
 		go func() {
@@ -390,7 +417,7 @@ func BenchmarkActor(b *testing.B) {
 		pid := newPID(ctx, actorPath, actor,
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
-			withSendReplyTimeout(recvTimeout))
+			withSendReplyTimeout(receivingTimeout))
 
 		actor.Wg.Add(b.N)
 		for i := 0; i < b.N; i++ {
@@ -409,7 +436,7 @@ func BenchmarkActor(b *testing.B) {
 		pid := newPID(ctx, actorPath, actor,
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
-			withSendReplyTimeout(recvTimeout))
+			withSendReplyTimeout(receivingTimeout))
 
 		actor.Wg.Add(b.N)
 		for i := 0; i < b.N; i++ {
@@ -436,7 +463,7 @@ func BenchmarkActor(b *testing.B) {
 		pid := newPID(ctx, actorPath, actor,
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
-			withSendReplyTimeout(recvTimeout))
+			withSendReplyTimeout(receivingTimeout))
 
 		actor.Wg.Add(b.N * 100)
 		for i := 0; i < b.N; i++ {
@@ -466,13 +493,13 @@ func BenchmarkActor(b *testing.B) {
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
 			withPassivationAfter(5*time.Second),
-			withSendReplyTimeout(recvTimeout))
+			withSendReplyTimeout(receivingTimeout))
 
 		actor.Wg.Add(b.N)
 		go func() {
 			for i := 0; i < b.N; i++ {
 				// send a message to the actor
-				_, _ = Ask(ctx, pid, new(testpb.TestReply), recvTimeout)
+				_, _ = Ask(ctx, pid, new(testpb.TestReply), receivingTimeout)
 			}
 		}()
 		actor.Wg.Wait()
@@ -489,12 +516,12 @@ func BenchmarkActor(b *testing.B) {
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
 			withPassivationAfter(5*time.Second),
-			withSendReplyTimeout(recvTimeout))
+			withSendReplyTimeout(receivingTimeout))
 
 		actor.Wg.Add(b.N)
 		for i := 0; i < b.N; i++ {
 			// send a message to the actor
-			_, _ = Ask(ctx, pid, new(testpb.TestReply), recvTimeout)
+			_, _ = Ask(ctx, pid, new(testpb.TestReply), receivingTimeout)
 		}
 		_ = pid.Shutdown(ctx)
 	})
@@ -508,7 +535,7 @@ func BenchmarkActor(b *testing.B) {
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
 			withPassivationAfter(5*time.Second),
-			withSendReplyTimeout(recvTimeout))
+			withSendReplyTimeout(receivingTimeout))
 
 		actor.Wg.Add(b.N)
 		for i := 0; i < b.N; i++ {
@@ -519,7 +546,7 @@ func BenchmarkActor(b *testing.B) {
 					}
 				}()
 				// send a message to the actor
-				_, _ = Ask(ctx, pid, new(testpb.TestReply), recvTimeout)
+				_, _ = Ask(ctx, pid, new(testpb.TestReply), receivingTimeout)
 			}()
 		}
 		actor.Wg.Wait()
@@ -535,7 +562,7 @@ func BenchmarkActor(b *testing.B) {
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
 			withPassivationAfter(5*time.Second),
-			withSendReplyTimeout(recvTimeout))
+			withSendReplyTimeout(receivingTimeout))
 
 		actor.Wg.Add(b.N * 100)
 		for i := 0; i < b.N; i++ {
@@ -547,7 +574,7 @@ func BenchmarkActor(b *testing.B) {
 				}()
 				for i := 0; i < 100; i++ {
 					// send a message to the actor
-					_, _ = Ask(ctx, pid, new(testpb.TestReply), recvTimeout)
+					_, _ = Ask(ctx, pid, new(testpb.TestReply), receivingTimeout)
 				}
 			}()
 		}

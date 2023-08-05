@@ -111,6 +111,7 @@ identify the host node on which the cluster service is running:
 * `POD_IP`: the node host address. For instance in kubernetes one can just get it from the `status.podIP`
 * `GOSSIP_PORT`: the gossip protocol engine port.
 * `CLUSTER_PORT`: the cluster port to help communicate with other GoAkt nodes in the cluster
+* `REMOTING_PORT`: help remoting communication between actors
 
 ### Operations Guide
 
@@ -134,6 +135,7 @@ engine to work as expected:
 
 * `gossip-port`: help the gossip protocol engine.
 * `cluster-port`: help the cluster engine to communicate with other GoAkt nodes in the cluster
+* `remoting`: help for remoting messaging between actors
 
 #### Role Based Access
 

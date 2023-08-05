@@ -66,6 +66,10 @@ func TestDiscovery(t *testing.T) {
 									Name:          ClusterPortName,
 									ContainerPort: 3380,
 								},
+								{
+									Name:          RemotingPortName,
+									ContainerPort: 9000,
+								},
 							},
 						},
 					},
@@ -105,6 +109,10 @@ func TestDiscovery(t *testing.T) {
 								{
 									Name:          ClusterPortName,
 									ContainerPort: 3380,
+								},
+								{
+									Name:          RemotingPortName,
+									ContainerPort: 9000,
 								},
 							},
 						},

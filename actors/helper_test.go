@@ -69,7 +69,7 @@ func (p *TestActor) Receive(ctx ReceiveContext) {
 		wg := sync.WaitGroup{}
 		wg.Add(1)
 		go func() {
-			time.Sleep(recvDelay)
+			time.Sleep(receivingDelay)
 			wg.Done()
 		}()
 		// block until timer is up

@@ -214,6 +214,11 @@ func (c *Cluster) NodeHost() string {
 	return c.host.Host
 }
 
+// NodeRemotingPort returns the cluster node remoting port
+func (c *Cluster) NodeRemotingPort() int {
+	return c.host.RemotingPort
+}
+
 // PutActor replicates onto the cluster the metadata of an actor
 func (c *Cluster) PutActor(ctx context.Context, actor *goaktpb.WireActor) error {
 	// create a cancellation context of 1 second timeout

@@ -34,10 +34,11 @@ jobs:
       - name: Run Linter and Tests
         env:
           EARTHLY_BUILD_ARGS: "COMMIT_HASH"
+          EARTHLY_TOKEN: ${{ secrets.EARTHLY_TOKEN }}
           COMMIT_HASH: ${{ github.sha }}
           FORCE_COLOR: 1
         run: |
-          earthly -P -use-inline-cache --save-inline-cache --strict --push +test
+          earthly -P --org tochemey26 --sat goakt --ci --push +test
       - uses: codecov/codecov-action@v3
         with:
           token: ${{ secrets.CODECOV_TOKEN }}

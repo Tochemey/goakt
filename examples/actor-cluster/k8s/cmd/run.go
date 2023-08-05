@@ -16,12 +16,10 @@ import (
 )
 
 const (
-	remotingPort       = 9000
 	accountServicePort = 50051
-
-	namespace       = "default"
-	applicationName = "accounts"
-	actorSystemName = "AccountsSystem"
+	namespace          = "default"
+	applicationName    = "accounts"
+	actorSystemName    = "AccountsSystem"
 )
 
 // runCmd represents the run command
@@ -51,7 +49,7 @@ var runCmd = &cobra.Command{
 			goakt.WithPassivationDisabled(), // set big passivation time
 			goakt.WithLogger(logger),
 			goakt.WithActorInitMaxRetries(3),
-			goakt.WithClustering(serviceDiscovery, remotingPort, 20))
+			goakt.WithClustering(serviceDiscovery, 20))
 		// handle the error
 		if err != nil {
 			logger.Panic(err)
