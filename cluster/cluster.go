@@ -319,7 +319,10 @@ func (c *Cluster) GetPartition(actorName string) int {
 	// compute the hash key
 	hkey := c.hasher.Sum64(key)
 	// compute the partition and return it
-	return int(hkey % c.partitionsCount)
+	partition := int(hkey % c.partitionsCount)
+	// add some debug log
+	c.logger.Debugf("partition of actor (%s) is (%d)", actorName, partition)
+	return partition
 }
 
 // buildConfig builds the cluster configuration
@@ -357,5 +360,6 @@ func (c *Cluster) buildConfig() *config.Config {
 		Logger:                     c.logger.StdLogger(),
 		LogVerbosity:               config.DefaultLogVerbosity,
 		EnableClusterEventsChannel: true,
+		Hasher:                     hasher.NewDefaultHasher(),
 	}
 }

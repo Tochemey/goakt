@@ -58,6 +58,8 @@ type ActorSystem interface {
 	GetRemoteActor(ctx context.Context, actorName string) (addr *pb.Address, err error)
 	// InCluster states whether the actor system is running within a cluster of nodes
 	InCluster() bool
+	// GetPartition returns the partition where a given actor is located
+	GetPartition(ctx context.Context, actorName string) uint64
 	// handleRemoteAsk handles a synchronous message to another actor and expect a response.
 	// This block until a response is received or timed out.
 	handleRemoteAsk(ctx context.Context, to PID, message proto.Message) (response proto.Message, err error)
@@ -163,6 +165,22 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 	})
 
 	return system, nil
+}
+
+// GetPartition returns the partition where a given actor is located
+func (a *actorSystem) GetPartition(ctx context.Context, actorName string) uint64 {
+	// add a span context
+	ctx, span := telemetry.SpanContext(ctx, "GetPartition")
+	defer span.End()
+
+	// return zero when the actor system is not in cluster mode
+	if !a.InCluster() {
+		// TODO: maybe add a partitioner function
+		return 0
+	}
+
+	// fetch the actor name partition from the cluster
+	return uint64(a.cluster.GetPartition(actorName))
 }
 
 // InCluster states whether the actor system is running within a cluster of nodes

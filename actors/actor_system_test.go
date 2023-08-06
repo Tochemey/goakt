@@ -2,11 +2,13 @@ package actors
 
 import (
 	"context"
-	"fmt"
+	"net"
+	"os"
 	"strconv"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tochemey/goakt/discovery"
@@ -83,12 +85,14 @@ func TestActorSystem(t *testing.T) {
 		err = sys.Stop(ctx)
 		assert.NoError(t, err)
 	})
-	t.Run("Start and Stop with clustering enabled", func(t *testing.T) {
+	t.Run("With clustering enabled", func(t *testing.T) {
 		ctx := context.TODO()
 		nodePorts := dynaport.Get(3)
 		gossipPort := nodePorts[0]
 		clusterPort := nodePorts[1]
 		remotingPort := nodePorts[2]
+
+		logger := log.New(log.DebugLevel, os.Stdout)
 
 		podName := "pod"
 		host := "127.0.0.1"
@@ -102,7 +106,7 @@ func TestActorSystem(t *testing.T) {
 
 		// define discovered addresses
 		addrs := []string{
-			fmt.Sprintf("%s:%d", host, gossipPort),
+			net.JoinHostPort(host, strconv.Itoa(gossipPort)),
 		}
 
 		// mock the discovery provider
@@ -111,7 +115,7 @@ func TestActorSystem(t *testing.T) {
 		sd := discovery.NewServiceDiscovery(provider, config)
 		newActorSystem, err := NewActorSystem(
 			"test",
-			WithLogger(log.DefaultLogger),
+			WithLogger(logger),
 			WithClustering(sd, 20))
 		require.NoError(t, err)
 
@@ -126,6 +130,19 @@ func TestActorSystem(t *testing.T) {
 		err = newActorSystem.Start(ctx)
 		require.NoError(t, err)
 
+		// wait for the cluster to fully start
+		ctx, cancelFn := context.WithTimeout(ctx, time.Second)
+		defer cancelFn()
+
+		// create an actor
+		actorName := uuid.NewString()
+		actor := NewTestActor()
+		actorRef := newActorSystem.StartActor(ctx, actorName, actor)
+		assert.NotNil(t, actorRef)
+
+		// get the actor partition
+		partition := newActorSystem.GetPartition(ctx, actorName)
+		assert.NotZero(t, partition)
 		// stop the actor after some time
 		ctx, cancel := context.WithTimeout(ctx, time.Second)
 		defer cancel()
