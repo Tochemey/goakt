@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/tochemey/goakt/log"
+	pb "github.com/tochemey/goakt/messages/v1"
 	testspb "github.com/tochemey/goakt/test/data/pb/v1"
 )
 
@@ -57,7 +58,7 @@ func (p *TestActor) PostStop(context.Context) error {
 
 // Receive processes any message dropped into the actor mailbox without a reply
 func (p *TestActor) Receive(ctx ReceiveContext) {
-	switch ctx.Message().(type) {
+	switch msg := ctx.Message().(type) {
 	case *testspb.TestSend:
 	case *testspb.TestPanic:
 		p.logger.Panic("Boom")
@@ -74,6 +75,20 @@ func (p *TestActor) Receive(ctx ReceiveContext) {
 		}()
 		// block until timer is up
 		wg.Wait()
+	case *pb.RemoteMessage:
+		p.logger.Info("received remote message")
+		// let us handle the actual message sent to the actor
+		remoteMsg, _ := msg.GetMessage().UnmarshalNew()
+		switch remoteMsg.(type) {
+		case *testspb.TestReply:
+			// define the message reply
+			reply := &testspb.Reply{Content: "received message"}
+			// send the message reply
+			ctx.Response(reply)
+		case *testspb.TestSend:
+			// pass
+		}
+
 	default:
 		p.logger.Panic(ErrUnhandled)
 	}

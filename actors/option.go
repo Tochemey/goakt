@@ -33,70 +33,77 @@ func (f OptionFunc) Apply(c *actorSystem) {
 // WithExpireActorAfter sets the actor expiry duration.
 // After such duration an idle actor will be expired and removed from the actor system
 func WithExpireActorAfter(duration time.Duration) Option {
-	return OptionFunc(func(sys *actorSystem) {
-		sys.expireActorAfter = duration
+	return OptionFunc(func(a *actorSystem) {
+		a.expireActorAfter = duration
 	})
 }
 
 // WithLogger sets the actor system custom log
 func WithLogger(logger log.Logger) Option {
-	return OptionFunc(func(sys *actorSystem) {
-		sys.logger = logger
+	return OptionFunc(func(a *actorSystem) {
+		a.logger = logger
 	})
 }
 
 // WithReplyTimeout sets how long in seconds an actor should reply a command
 // in a receive-reply pattern
 func WithReplyTimeout(timeout time.Duration) Option {
-	return OptionFunc(func(sys *actorSystem) {
-		sys.replyTimeout = timeout
+	return OptionFunc(func(a *actorSystem) {
+		a.replyTimeout = timeout
 	})
 }
 
 // WithActorInitMaxRetries sets the number of times to retry an actor init process
 func WithActorInitMaxRetries(max int) Option {
-	return OptionFunc(func(sys *actorSystem) {
-		sys.actorInitMaxRetries = max
+	return OptionFunc(func(a *actorSystem) {
+		a.actorInitMaxRetries = max
 	})
 }
 
 // WithPassivationDisabled disable the passivation mode
 func WithPassivationDisabled() Option {
-	return OptionFunc(func(sys *actorSystem) {
-		sys.expireActorAfter = -1
+	return OptionFunc(func(a *actorSystem) {
+		a.expireActorAfter = -1
 	})
 }
 
 // WithSupervisorStrategy sets the supervisor strategy
 func WithSupervisorStrategy(strategy StrategyDirective) Option {
-	return OptionFunc(func(sys *actorSystem) {
-		sys.supervisorStrategy = strategy
+	return OptionFunc(func(a *actorSystem) {
+		a.supervisorStrategy = strategy
 	})
 }
 
 // WithTelemetry sets the custom telemetry
 func WithTelemetry(telemetry *telemetry.Telemetry) Option {
-	return OptionFunc(func(sys *actorSystem) {
-		sys.telemetry = telemetry
+	return OptionFunc(func(a *actorSystem) {
+		a.telemetry = telemetry
 	})
 }
 
 // WithRemoting enables remoting on the actor system
 func WithRemoting(host string, port int32) Option {
-	return OptionFunc(func(sys *actorSystem) {
-		sys.remotingEnabled = atomic.NewBool(true)
-		sys.remotingPort = port
-		sys.remotingHost = host
+	return OptionFunc(func(a *actorSystem) {
+		a.remotingEnabled = atomic.NewBool(true)
+		a.remotingPort = port
+		a.remotingHost = host
 	})
 }
 
 // WithClustering enables clustering on the actor system. This enables remoting on the actor system as well
 // and set the remotingHost to the cluster node host when the cluster is fully enabled.
 func WithClustering(serviceDiscovery *discovery.ServiceDiscovery, partitionCount uint64) Option {
-	return OptionFunc(func(sys *actorSystem) {
-		sys.clusterEnabled = atomic.NewBool(true)
-		sys.remotingEnabled = atomic.NewBool(true)
-		sys.partitionsCount = partitionCount
-		sys.serviceDiscovery = serviceDiscovery
+	return OptionFunc(func(a *actorSystem) {
+		a.clusterEnabled = atomic.NewBool(true)
+		a.remotingEnabled = atomic.NewBool(true)
+		a.partitionsCount = partitionCount
+		a.serviceDiscovery = serviceDiscovery
+	})
+}
+
+// WithShutdownTimeout sets the shutdown timeout
+func WithShutdownTimeout(timeout time.Duration) Option {
+	return OptionFunc(func(a *actorSystem) {
+		a.shutdownTimeout = timeout
 	})
 }

@@ -3,6 +3,7 @@ package actors
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/http"
 	"regexp"
 	"sync"
@@ -92,6 +93,8 @@ type actorSystem struct {
 	// Specifies how long the sender of a receiveContext should wait to receive a reply
 	// when using SendReply. The default value is 5s
 	replyTimeout time.Duration
+	// Specifies the shutdown timeout. The default value is 30s
+	shutdownTimeout time.Duration
 	// Specifies the maximum of retries to attempt when the actor
 	// initialization fails. The default value is 5
 	actorInitMaxRetries int
@@ -138,79 +141,82 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		return nil, ErrInvalidActorSystemName
 	}
 
-	// the function only gets called one
-	once.Do(func() {
-		system = &actorSystem{
-			actors:              cmp.New[PID](),
-			hasStarted:          atomic.NewBool(false),
-			typesLoader:         NewTypesLoader(),
-			clusterChan:         make(chan *goaktpb.WireActor, 10),
-			name:                name,
-			logger:              log.DefaultLogger,
-			expireActorAfter:    2 * time.Second,
-			replyTimeout:        100 * time.Millisecond,
-			actorInitMaxRetries: 5,
-			supervisorStrategy:  StopDirective,
-			telemetry:           telemetry.New(),
-			remotingEnabled:     atomic.NewBool(false),
-			clusterEnabled:      atomic.NewBool(false),
-			mu:                  sync.Mutex{},
-		}
-		// set the reflection
-		system.reflection = NewReflection(system.typesLoader)
-		// apply the various options
-		for _, opt := range opts {
-			opt.Apply(system)
-		}
-	})
+	if system == nil {
+		// the function only gets called one
+		once.Do(func() {
+			system = &actorSystem{
+				actors:              cmp.New[PID](),
+				hasStarted:          atomic.NewBool(false),
+				typesLoader:         NewTypesLoader(),
+				clusterChan:         make(chan *goaktpb.WireActor, 10),
+				name:                name,
+				logger:              log.DefaultLogger,
+				expireActorAfter:    2 * time.Second,
+				replyTimeout:        100 * time.Millisecond,
+				actorInitMaxRetries: 5,
+				supervisorStrategy:  StopDirective,
+				telemetry:           telemetry.New(),
+				remotingEnabled:     atomic.NewBool(false),
+				clusterEnabled:      atomic.NewBool(false),
+				mu:                  sync.Mutex{},
+				shutdownTimeout:     30 * time.Second,
+			}
+			// set the reflection
+			system.reflection = NewReflection(system.typesLoader)
+			// apply the various options
+			for _, opt := range opts {
+				opt.Apply(system)
+			}
+		})
+	}
 
 	return system, nil
 }
 
 // GetPartition returns the partition where a given actor is located
-func (a *actorSystem) GetPartition(ctx context.Context, actorName string) uint64 {
+func (asys *actorSystem) GetPartition(ctx context.Context, actorName string) uint64 {
 	// add a span context
 	ctx, span := telemetry.SpanContext(ctx, "GetPartition")
 	defer span.End()
 
 	// return zero when the actor system is not in cluster mode
-	if !a.InCluster() {
+	if !asys.InCluster() {
 		// TODO: maybe add a partitioner function
 		return 0
 	}
 
 	// fetch the actor name partition from the cluster
-	return uint64(a.cluster.GetPartition(actorName))
+	return uint64(asys.cluster.GetPartition(actorName))
 }
 
 // InCluster states whether the actor system is running within a cluster of nodes
-func (a *actorSystem) InCluster() bool {
-	return a.clusterEnabled.Load() && a.cluster != nil
+func (asys *actorSystem) InCluster() bool {
+	return asys.clusterEnabled.Load() && asys.cluster != nil
 }
 
 // NumActors returns the total number of active actors in the system
-func (a *actorSystem) NumActors() uint64 {
-	return uint64(a.actors.Count())
+func (asys *actorSystem) NumActors() uint64 {
+	return uint64(asys.actors.Count())
 }
 
 // StartActor creates or returns the instance of a given actor in the system
-func (a *actorSystem) StartActor(ctx context.Context, name string, actor Actor) PID {
+func (asys *actorSystem) StartActor(ctx context.Context, name string, actor Actor) PID {
 	// add a span context
 	ctx, span := telemetry.SpanContext(ctx, "StartActor")
 	defer span.End()
 	// first check whether the actor system has started
-	if !a.hasStarted.Load() {
+	if !asys.hasStarted.Load() {
 		return nil
 	}
 	// set the default actor path assuming we are running locally
-	actorPath := NewPath(name, NewAddress(protocol, a.name, "", -1))
+	actorPath := NewPath(name, NewAddress(protocol, asys.name, "", -1))
 	// set the actor path when the remoting is enabled
-	if a.remotingEnabled.Load() {
+	if asys.remotingEnabled.Load() {
 		// get the path of the given actor
-		actorPath = NewPath(name, NewAddress(protocol, a.name, a.remotingHost, int(a.remotingPort)))
+		actorPath = NewPath(name, NewAddress(protocol, asys.name, asys.remotingHost, int(asys.remotingPort)))
 	}
 	// check whether the given actor already exist in the system or not
-	pid, exist := a.actors.Get(actorPath.String())
+	pid, exist := asys.actors.Get(actorPath.String())
 	// actor already exist no need recreate it.
 	if exist {
 		// check whether the given actor heart beat
@@ -224,22 +230,22 @@ func (a *actorSystem) StartActor(ctx context.Context, name string, actor Actor) 
 	pid = newPID(ctx,
 		actorPath,
 		actor,
-		withInitMaxRetries(a.actorInitMaxRetries),
-		withPassivationAfter(a.expireActorAfter),
-		withSendReplyTimeout(a.replyTimeout),
-		withCustomLogger(a.logger),
-		withActorSystem(a),
-		withSupervisorStrategy(a.supervisorStrategy),
-		withTelemetry(a.telemetry))
+		withInitMaxRetries(asys.actorInitMaxRetries),
+		withPassivationAfter(asys.expireActorAfter),
+		withSendReplyTimeout(asys.replyTimeout),
+		withCustomLogger(asys.logger),
+		withActorSystem(asys),
+		withSupervisorStrategy(asys.supervisorStrategy),
+		withTelemetry(asys.telemetry))
 
 	// add the given actor to the actor map
-	a.actors.Set(actorPath.String(), pid)
+	asys.actors.Set(actorPath.String(), pid)
 
 	// let us register the actor
-	a.typesLoader.Register(name, actor)
+	asys.typesLoader.Register(name, actor)
 
 	// when cluster is enabled replicate the actor metadata across the cluster
-	if a.clusterEnabled.Load() {
+	if asys.clusterEnabled.Load() {
 		// TODO: revisit the encoding the actor
 		// encode the actor
 		//actorType := reflect.TypeOf(actor)
@@ -257,7 +263,7 @@ func (a *actorSystem) StartActor(ctx context.Context, name string, actor Actor) 
 			ActorPath:    actorPath.String(),
 		}
 		// send it to the cluster channel
-		a.clusterChan <- wiredActor
+		asys.clusterChan <- wiredActor
 	}
 
 	// return the actor ref
@@ -265,23 +271,23 @@ func (a *actorSystem) StartActor(ctx context.Context, name string, actor Actor) 
 }
 
 // StopActor stops a given actor in the system
-func (a *actorSystem) StopActor(ctx context.Context, name string) error {
+func (asys *actorSystem) StopActor(ctx context.Context, name string) error {
 	// add a span context
 	ctx, span := telemetry.SpanContext(ctx, "StopActor")
 	defer span.End()
 	// first check whether the actor system has started
-	if !a.hasStarted.Load() {
+	if !asys.hasStarted.Load() {
 		return errors.New("actor system has not started yet")
 	}
 	// set the default actor path assuming we are running locally
-	actorPath := NewPath(name, NewAddress(protocol, a.name, "", -1))
+	actorPath := NewPath(name, NewAddress(protocol, asys.name, "", -1))
 	// set the actor path with the remoting is enabled
-	if a.remotingEnabled.Load() {
+	if asys.remotingEnabled.Load() {
 		// get the path of the given actor
-		actorPath = NewPath(name, NewAddress(protocol, a.name, a.remotingHost, int(a.remotingPort)))
+		actorPath = NewPath(name, NewAddress(protocol, asys.name, asys.remotingHost, int(asys.remotingPort)))
 	}
 	// check whether the given actor already exist in the system or not
-	pid, exist := a.actors.Get(actorPath.String())
+	pid, exist := asys.actors.Get(actorPath.String())
 	// actor is found.
 	if exist {
 		// stop the given actor
@@ -291,23 +297,23 @@ func (a *actorSystem) StopActor(ctx context.Context, name string) error {
 }
 
 // RestartActor restarts a given actor in the system
-func (a *actorSystem) RestartActor(ctx context.Context, name string) (PID, error) {
+func (asys *actorSystem) RestartActor(ctx context.Context, name string) (PID, error) {
 	// add a span context
 	ctx, span := telemetry.SpanContext(ctx, "RestartActor")
 	defer span.End()
 	// first check whether the actor system has started
-	if !a.hasStarted.Load() {
+	if !asys.hasStarted.Load() {
 		return nil, errors.New("actor system has not started yet")
 	}
 	// set the default actor path assuming we are running locally
-	actorPath := NewPath(name, NewAddress(protocol, a.name, "", -1))
+	actorPath := NewPath(name, NewAddress(protocol, asys.name, "", -1))
 	// set the actor path with the remoting is enabled
-	if a.remotingEnabled.Load() {
+	if asys.remotingEnabled.Load() {
 		// get the path of the given actor
-		actorPath = NewPath(name, NewAddress(protocol, a.name, a.remotingHost, int(a.remotingPort)))
+		actorPath = NewPath(name, NewAddress(protocol, asys.name, asys.remotingHost, int(asys.remotingPort)))
 	}
 	// check whether the given actor already exist in the system or not
-	pid, exist := a.actors.Get(actorPath.String())
+	pid, exist := asys.actors.Get(actorPath.String())
 	// actor is found.
 	if exist {
 		// restart the given actor
@@ -321,23 +327,23 @@ func (a *actorSystem) RestartActor(ctx context.Context, name string) (PID, error
 }
 
 // Name returns the actor system name
-func (a *actorSystem) Name() string {
+func (asys *actorSystem) Name() string {
 	// acquire the lock
-	a.mu.Lock()
+	asys.mu.Lock()
 	// release the lock
-	defer a.mu.Unlock()
-	return a.name
+	defer asys.mu.Unlock()
+	return asys.name
 }
 
 // Actors returns the list of Actors that are alive in the actor system
-func (a *actorSystem) Actors() []PID {
+func (asys *actorSystem) Actors() []PID {
 	// acquire the lock
-	a.mu.Lock()
+	asys.mu.Lock()
 	// release the lock
-	defer a.mu.Unlock()
+	defer asys.mu.Unlock()
 
 	// get the actors from the actor map
-	items := a.actors.Items()
+	items := asys.actors.Items()
 	var refs []PID
 	for _, actorRef := range items {
 		refs = append(refs, actorRef)
@@ -348,17 +354,17 @@ func (a *actorSystem) Actors() []PID {
 
 // GetLocalActor returns the reference of a local actor.
 // A local actor is an actor that reside on the same node where the given actor system is running
-func (a *actorSystem) GetLocalActor(ctx context.Context, actorName string) (PID, error) {
+func (asys *actorSystem) GetLocalActor(ctx context.Context, actorName string) (PID, error) {
 	// acquire the lock
-	a.mu.Lock()
+	asys.mu.Lock()
 	// release the lock
-	defer a.mu.Unlock()
+	defer asys.mu.Unlock()
 
 	// add a span context
 	ctx, span := telemetry.SpanContext(ctx, "GetLocalActor")
 	defer span.End()
 	// first let us do a local lookup
-	items := a.actors.Items()
+	items := asys.actors.Items()
 	// iterate the local actors storage
 	for _, actorRef := range items {
 		if actorRef.ActorPath().Name() == actorName {
@@ -366,31 +372,31 @@ func (a *actorSystem) GetLocalActor(ctx context.Context, actorName string) (PID,
 		}
 	}
 	// add a logger
-	a.logger.Infof("actor=%s not found", actorName)
+	asys.logger.Infof("actor=%s not found", actorName)
 	return nil, ErrActorNotFound
 }
 
 // GetRemoteActor returns the address of a remote actor when cluster is enabled
-func (a *actorSystem) GetRemoteActor(ctx context.Context, actorName string) (addr *pb.Address, err error) {
+func (asys *actorSystem) GetRemoteActor(ctx context.Context, actorName string) (addr *pb.Address, err error) {
 	// acquire the lock
-	a.mu.Lock()
+	asys.mu.Lock()
 	// release the lock
-	defer a.mu.Unlock()
+	defer asys.mu.Unlock()
 
 	// add a span context
 	ctx, span := telemetry.SpanContext(ctx, "GetRemoteActor")
 	defer span.End()
 	// check whether cluster is enabled or not
-	if a.cluster == nil {
+	if asys.cluster == nil {
 		return nil, errors.New("cluster is not enabled")
 	}
 
 	// let us locate the actor in the cluster
-	wireActor, err := a.cluster.GetActor(ctx, actorName)
+	wireActor, err := asys.cluster.GetActor(ctx, actorName)
 	// handle the eventual error
 	if err != nil {
 		if errors.Is(err, cluster.ErrActorNotFound) {
-			a.logger.Infof("actor=%s not found", actorName)
+			asys.logger.Infof("actor=%s not found", actorName)
 			return nil, ErrActorNotFound
 		}
 		return nil, errors.Wrapf(err, "failed to fetch remote actor=%s", actorName)
@@ -401,69 +407,73 @@ func (a *actorSystem) GetRemoteActor(ctx context.Context, actorName string) (add
 }
 
 // Start starts the actor system
-func (a *actorSystem) Start(ctx context.Context) error {
+func (asys *actorSystem) Start(ctx context.Context) error {
 	// add a span context
 	ctx, span := telemetry.SpanContext(ctx, "Start")
 	defer span.End()
 	// set the has started to true
-	a.hasStarted.Store(true)
+	asys.hasStarted.Store(true)
 
 	// start remoting when remoting is enabled
-	if a.remotingEnabled.Load() {
-		a.enableRemoting(ctx)
+	if asys.remotingEnabled.Load() {
+		asys.enableRemoting(ctx)
 	}
 
 	// enable clustering when it is enabled
-	if a.clusterEnabled.Load() {
-		a.enableClustering(ctx)
+	if asys.clusterEnabled.Load() {
+		asys.enableClustering(ctx)
 	}
 
 	// start the metrics service
 	// register metrics. However, we don't panic when we fail to register
 	// we just log it for now
 	// TODO decide what to do when we fail to register the metrics or export the metrics registration as public
-	if err := a.registerMetrics(); err != nil {
-		a.logger.Error(errors.Wrapf(err, "failed to register actorSystem=%s metrics", a.name))
+	if err := asys.registerMetrics(); err != nil {
+		asys.logger.Error(errors.Wrapf(err, "failed to register actorSystem=%s metrics", asys.name))
 	}
-	a.logger.Infof("%s started..:)", a.name)
+	asys.logger.Infof("%s started..:)", asys.name)
 	return nil
 }
 
 // Stop stops the actor system
-func (a *actorSystem) Stop(ctx context.Context) error {
+func (asys *actorSystem) Stop(ctx context.Context) error {
+	// create a cancellation context to gracefully shutdown
+	ctx, cancel := context.WithTimeout(ctx, asys.shutdownTimeout)
+	defer cancel()
+
 	// add a span context
 	ctx, span := telemetry.SpanContext(ctx, "Stop")
 	defer span.End()
-	a.logger.Infof("%s is shutting down..:)", a.name)
+	asys.logger.Infof("%s is shutting down..:)", asys.name)
 
 	// stop the remoting server
-	if a.remotingEnabled.Load() {
+	if asys.remotingEnabled.Load() {
 		// stop the server
-		if err := a.remotingServer.Close(); err != nil {
+		if err := asys.remotingServer.Shutdown(ctx); err != nil {
 			return err
 		}
 	}
 
 	// stop the cluster service
-	if a.clusterEnabled.Load() {
+	if asys.clusterEnabled.Load() {
 		// stop the cluster service
-		if err := a.cluster.Stop(ctx); err != nil {
+		if err := asys.cluster.Stop(ctx); err != nil {
 			return err
 		}
 		// stop broadcasting cluster messages
-		close(a.clusterChan)
+		close(asys.clusterChan)
 	}
 
 	// short-circuit the shutdown process when there are no online actors
-	if len(a.Actors()) == 0 {
-		a.logger.Info("No online actors to shutdown. Shutting down successfully done")
+	if len(asys.Actors()) == 0 {
+		asys.logger.Info("No online actors to shutdown. Shutting down successfully done")
 		return nil
 	}
 
 	// stop all the actors
-	for _, actor := range a.Actors() {
+	for _, actor := range asys.Actors() {
 		// remove the actor the map and shut it down
-		a.actors.Remove(actor.ActorPath().String())
+		asys.actors.Remove(actor.ActorPath().String())
 		// only shutdown live actors
 		if actor.IsOnline() {
 			if err := actor.Shutdown(ctx); err != nil {
@@ -473,30 +483,30 @@ func (a *actorSystem) Stop(ctx context.Context) error {
 	}
 
 	// reset the actor system
-	a.reset()
+	asys.reset()
 
 	return nil
 }
 
 // RemoteLookup for an actor on a remote host.
-func (a *actorSystem) RemoteLookup(ctx context.Context, request *connect.Request[goaktpb.RemoteLookupRequest]) (*connect.Response[goaktpb.RemoteLookupResponse], error) {
+func (asys *actorSystem) RemoteLookup(ctx context.Context, request *connect.Request[goaktpb.RemoteLookupRequest]) (*connect.Response[goaktpb.RemoteLookupResponse], error) {
 	// add a span context
 	ctx, span := telemetry.SpanContext(ctx, "RemoteLookup")
 	defer span.End()
 
 	// get a context log
-	logger := a.logger
+	logger := asys.logger
 
 	// first let us make a copy of the incoming request
 	reqCopy := request.Msg
 
 	// set the actor path with the remoting is enabled
-	if !a.remotingEnabled.Load() {
+	if !asys.remotingEnabled.Load() {
 		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrRemotingNotEnabled)
 	}
 
 	// get the remoting server address
-	nodeAddr := fmt.Sprintf("%s:%d", a.remotingHost, a.remotingPort)
+	nodeAddr := fmt.Sprintf("%s:%d", asys.remotingHost, asys.remotingPort)
 
 	// let us validate the host and port
 	hostAndPort := fmt.Sprintf("%s:%d", reqCopy.GetHost(), reqCopy.GetPort())
@@ -509,10 +519,10 @@ func (a *actorSystem) RemoteLookup(ctx context.Context, request *connect.Request
 
 	// construct the actor address
 	name := reqCopy.GetName()
-	actorPath := NewPath(name, NewAddress(protocol, a.Name(), reqCopy.GetHost(), int(reqCopy.GetPort())))
+	actorPath := NewPath(name, NewAddress(protocol, asys.Name(), reqCopy.GetHost(), int(reqCopy.GetPort())))
 	// start or get the PID of the actor
 	// check whether the given actor already exist in the system or not
-	pid, exist := a.actors.Get(actorPath.String())
+	pid, exist := asys.actors.Get(actorPath.String())
 	// return an error when the remote address is not found
 	if !exist {
 		// log the error
@@ -529,23 +539,23 @@ func (a *actorSystem) RemoteLookup(ctx context.Context, request *connect.Request
 // RemoteAsk is used to send a message to an actor remotely and expect a response
 // immediately. With this type of message the receiver cannot communicate back to Sender
 // except reply the message with a response. This one-way communication
-func (a *actorSystem) RemoteAsk(ctx context.Context, request *connect.Request[goaktpb.RemoteAskRequest]) (*connect.Response[goaktpb.RemoteAskResponse], error) {
+func (asys *actorSystem) RemoteAsk(ctx context.Context, request *connect.Request[goaktpb.RemoteAskRequest]) (*connect.Response[goaktpb.RemoteAskResponse], error) {
 	// add a span context
 	ctx, span := telemetry.SpanContext(ctx, "RemoteAsk")
 	defer span.End()
 
 	// get a context log
-	logger := a.logger
+	logger := asys.logger
 	// first let us make a copy of the incoming request
 	reqCopy := request.Msg
 
 	// set the actor path with the remoting is enabled
-	if !a.remotingEnabled.Load() {
+	if !asys.remotingEnabled.Load() {
 		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrRemotingNotEnabled)
 	}
 
 	// get the remoting server address
-	nodeAddr := fmt.Sprintf("%s:%d", a.remotingHost, a.remotingPort)
+	nodeAddr := fmt.Sprintf("%s:%d", asys.remotingHost, asys.remotingPort)
 
 	// let us validate the host and port
 	hostAndPort := fmt.Sprintf("%s:%d", reqCopy.GetRemoteMessage().GetReceiver().GetHost(), reqCopy.GetRemoteMessage().GetReceiver().GetPort())
@@ -558,11 +568,11 @@ func (a *actorSystem) RemoteAsk(ctx context.Context, request *connect.Request[go
 
 	// construct the actor address
 	name := reqCopy.GetRemoteMessage().GetReceiver().GetName()
-	actorPath := NewPath(name, NewAddress(protocol, a.name, a.remotingHost, int(a.remotingPort)))
+	actorPath := NewPath(name, NewAddress(protocol, asys.name, asys.remotingHost, int(asys.remotingPort)))
 
 	// start or get the PID of the actor
 	// check whether the given actor already exist in the system or not
-	pid, exist := a.actors.Get(actorPath.String())
+	pid, exist := asys.actors.Get(actorPath.String())
 	// return an error when the remote address is not found
 	if !exist {
 		// log the error
@@ -577,7 +587,7 @@ func (a *actorSystem) RemoteAsk(ctx context.Context, request *connect.Request[go
 	}
 
 	// send the message to actor
-	reply, err := a.handleRemoteAsk(ctx, pid, reqCopy.GetRemoteMessage())
+	reply, err := asys.handleRemoteAsk(ctx, pid, reqCopy.GetRemoteMessage())
 	// handle the error
 	if err != nil {
 		logger.Error(ErrRemoteSendFailure(err).Error())
@@ -591,25 +601,25 @@ func (a *actorSystem) RemoteAsk(ctx context.Context, request *connect.Request[go
 // RemoteTell is used to send a message to an actor remotely by another actor
 // This is the only way remote actors can interact with each other. The actor on the
 // other line can reply to the sender by using the Sender in the message
-func (a *actorSystem) RemoteTell(ctx context.Context, request *connect.Request[goaktpb.RemoteTellRequest]) (*connect.Response[goaktpb.RemoteTellResponse], error) {
+func (asys *actorSystem) RemoteTell(ctx context.Context, request *connect.Request[goaktpb.RemoteTellRequest]) (*connect.Response[goaktpb.RemoteTellResponse], error) {
 	// add a span context
 	ctx, span := telemetry.SpanContext(ctx, "RemoteTell")
 	defer span.End()
 
 	// get a context log
-	logger := a.logger
+	logger := asys.logger
 	// first let us make a copy of the incoming request
 	reqCopy := request.Msg
 
 	receiver := reqCopy.GetRemoteMessage().GetReceiver()
 
 	// set the actor path with the remoting is enabled
-	if !a.remotingEnabled.Load() {
+	if !asys.remotingEnabled.Load() {
 		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrRemotingNotEnabled)
 	}
 
 	// get the remoting server address
-	nodeAddr := fmt.Sprintf("%s:%d", a.remotingHost, a.remotingPort)
+	nodeAddr := fmt.Sprintf("%s:%d", asys.remotingHost, asys.remotingPort)
 
 	// let us validate the host and port
 	hostAndPort := fmt.Sprintf("%s:%d", receiver.GetHost(), receiver.GetPort())
@@ -625,12 +635,12 @@ func (a *actorSystem) RemoteTell(ctx context.Context, request *connect.Request[g
 		receiver.GetName(),
 		NewAddress(
 			protocol,
-			a.Name(),
+			asys.Name(),
 			receiver.GetHost(),
 			int(receiver.GetPort())))
 	// start or get the PID of the actor
 	// check whether the given actor already exist in the system or not
-	pid, exist := a.actors.Get(actorPath.String())
+	pid, exist := asys.actors.Get(actorPath.String())
 	// return an error when the remote address is not found
 	if !exist {
 		// log the error
@@ -645,7 +655,7 @@ func (a *actorSystem) RemoteTell(ctx context.Context, request *connect.Request[g
 	}
 
 	// send the message to actor
-	if err := a.handleRemoteTell(ctx, pid, reqCopy.GetRemoteMessage()); err != nil {
+	if err := asys.handleRemoteTell(ctx, pid, reqCopy.GetRemoteMessage()); err != nil {
 		logger.Error(ErrRemoteSendFailure(err))
 		return nil, ErrRemoteSendFailure(err)
 	}
@@ -653,9 +663,9 @@ func (a *actorSystem) RemoteTell(ctx context.Context, request *connect.Request[g
 }
 
 // registerMetrics register the PID metrics with OTel instrumentation.
-func (a *actorSystem) registerMetrics() error {
+func (asys *actorSystem) registerMetrics() error {
 	// grab the OTel meter
-	meter := a.telemetry.Meter
+	meter := asys.telemetry.Meter
 	// create an instance of the ActorMetrics
 	metrics, err := telemetry.NewSystemMetrics(meter)
 	// handle the error
@@ -665,12 +675,12 @@ func (a *actorSystem) registerMetrics() error {
 
 	// define the common labels
 	labels := []attribute.KeyValue{
-		attribute.String("actor.system", a.Name()),
+		attribute.String("actor.system", asys.Name()),
 	}
 
 	// register the metrics
 	_, err = meter.RegisterCallback(func(ctx context.Context, observer metric.Observer) error {
-		observer.ObserveInt64(metrics.ActorSystemActorsCount, int64(a.NumActors()), metric.WithAttributes(labels...))
+		observer.ObserveInt64(metrics.ActorSystemActorsCount, int64(asys.NumActors()), metric.WithAttributes(labels...))
 		return nil
 	}, metrics.ActorSystemActorsCount)
 
@@ -679,15 +689,15 @@ func (a *actorSystem) registerMetrics() error {
 
 // handleRemoteAsk handles a synchronous message to another actor and expect a response.
 // This block until a response is received or timed out.
-func (a *actorSystem) handleRemoteAsk(ctx context.Context, to PID, message proto.Message) (response proto.Message, err error) {
+func (asys *actorSystem) handleRemoteAsk(ctx context.Context, to PID, message proto.Message) (response proto.Message, err error) {
 	// add a span context
 	ctx, span := telemetry.SpanContext(ctx, "handleRemoteAsk")
 	defer span.End()
-	return Ask(ctx, to, message, a.replyTimeout)
+	return Ask(ctx, to, message, asys.replyTimeout)
 }
 
 // handleRemoteTell handles an asynchronous message to an actor
-func (a *actorSystem) handleRemoteTell(ctx context.Context, to PID, message proto.Message) error {
+func (asys *actorSystem) handleRemoteTell(ctx context.Context, to PID, message proto.Message) error {
 	// add a span context
 	ctx, span := telemetry.SpanContext(ctx, "handleRemoteTell")
 	defer span.End()
@@ -696,26 +706,26 @@ func (a *actorSystem) handleRemoteTell(ctx context.Context, to PID, message prot
 
 // enableClustering enables clustering. When clustering is enabled remoting is also enabled to facilitate remote
 // communication
-func (a *actorSystem) enableClustering(ctx context.Context) {
+func (asys *actorSystem) enableClustering(ctx context.Context) {
 	// add some logging information
-	a.logger.Info("enabling clustering...")
+	asys.logger.Info("enabling clustering...")
 
 	// create an instance of the cluster service and start it
-	cluster, err := cluster.New(a.Name(),
-		a.serviceDiscovery,
-		cluster.WithLogger(a.logger),
-		cluster.WithPartitionsCount(a.partitionsCount),
+	cluster, err := cluster.New(asys.Name(),
+		asys.serviceDiscovery,
+		cluster.WithLogger(asys.logger),
+		cluster.WithPartitionsCount(asys.partitionsCount),
 	)
 	// handle the error
 	if err != nil {
-		a.logger.Panic(errors.Wrap(err, "failed to initialize cluster engine"))
+		asys.logger.Panic(errors.Wrap(err, "failed to initialize cluster engine"))
 	}
 
 	// add some logging information
-	a.logger.Info("starting cluster engine...")
+	asys.logger.Info("starting cluster engine...")
 	// start the cluster service
 	if err := cluster.Start(ctx); err != nil {
-		a.logger.Panic(errors.Wrap(err, "failed to start cluster engine"))
+		asys.logger.Panic(errors.Wrap(err, "failed to start cluster engine"))
 	}
 
 	// create the bootstrap channel
@@ -728,33 +738,33 @@ func (a *actorSystem) enableClustering(ctx context.Context) {
 	<-bootstrapChan
 	timer.Stop()
 
-	a.logger.Info("cluster engine successfully started...")
+	asys.logger.Info("cluster engine successfully started...")
 
 	// acquire the lock
-	a.mu.Lock()
+	asys.mu.Lock()
 	// set the cluster field
-	a.cluster = cluster
+	asys.cluster = cluster
 	// release the lock
 	// set the remoting host and port
-	a.remotingHost = cluster.NodeHost()
-	a.remotingPort = int32(cluster.NodeRemotingPort())
+	asys.remotingHost = cluster.NodeHost()
+	asys.remotingPort = int32(cluster.NodeRemotingPort())
 	// release the lock
-	a.mu.Unlock()
+	asys.mu.Unlock()
 
 	// let us enable remoting as well if not yet enabled
-	if !a.remotingEnabled.Load() {
-		a.enableRemoting(ctx)
+	if !asys.remotingEnabled.Load() {
+		asys.enableRemoting(ctx)
 	}
 	// start broadcasting cluster message
-	go a.broadcast(ctx)
+	go asys.broadcast(ctx)
 	// add some logging
-	a.logger.Info("clustering enabled...:)")
+	asys.logger.Info("clustering enabled...:)")
 }
 
 // enableRemoting enables the remoting service to handle remote messaging
-func (a *actorSystem) enableRemoting(context.Context) {
+func (asys *actorSystem) enableRemoting(ctx context.Context) {
 	// add some logging information
-	a.logger.Info("enabling remoting...")
+	asys.logger.Info("enabling remoting...")
 	// create a function to handle the observability
 	interceptor := func(tp trace.TracerProvider, mp metric.MeterProvider) connect.Interceptor {
 		return otelconnect.NewInterceptor(
@@ -767,12 +777,12 @@ func (a *actorSystem) enableRemoting(context.Context) {
 	mux := http.NewServeMux()
 	// create the resource and handler
 	path, handler := goaktv1connect.NewRemoteMessagingServiceHandler(
-		a,
-		connect.WithInterceptors(interceptor(a.telemetry.TracerProvider, a.telemetry.MeterProvider)),
+		asys,
+		connect.WithInterceptors(interceptor(asys.telemetry.TracerProvider, asys.telemetry.MeterProvider)),
 	)
 	mux.Handle(path, handler)
 	// create the address
-	serverAddr := fmt.Sprintf("%s:%d", a.remotingHost, a.remotingPort)
+	serverAddr := fmt.Sprintf("%s:%d", asys.remotingHost, asys.remotingPort)
 
 	// create a http service instance
 	// TODO revisit the timeouts
@@ -797,6 +807,10 @@ func (a *actorSystem) enableRemoting(context.Context) {
 		Handler: h2c.NewHandler(mux, &http2.Server{
 			IdleTimeout: 1200 * time.Second,
 		}),
+		// Set the base context to incoming context of the system
+		BaseContext: func(listener net.Listener) context.Context {
+			return ctx
+		},
 	}
 
 	// listen and service requests
@@ -804,45 +818,46 @@ func (a *actorSystem) enableRemoting(context.Context) {
 		if err := server.ListenAndServe(); err != nil {
 			// check the error type
 			if !errors.Is(err, http.ErrServerClosed) {
-				a.logger.Panic(errors.Wrap(err, "failed to start remoting service"))
+				asys.logger.Panic(errors.Wrap(err, "failed to start remoting service"))
 			}
 		}
 	}()
 
 	// acquire the lock
-	a.mu.Lock()
+	asys.mu.Lock()
 	// set the server
-	a.remotingServer = server
+	asys.remotingServer = server
 	// release the lock
-	a.mu.Unlock()
+	asys.mu.Unlock()
 
 	// add some logging information
-	a.logger.Info("remoting enabled...:)")
+	asys.logger.Info("remoting enabled...:)")
 }
 
 // reset the actor system
-func (a *actorSystem) reset() {
-	// void the settings
-	a.hasStarted = atomic.NewBool(false)
-	a.remotingEnabled = atomic.NewBool(false)
-	a.clusterEnabled = atomic.NewBool(false)
-	a.telemetry = nil
-	a.actors = cmp.New[PID]()
-	a.name = ""
-	a.logger = nil
-	a.remotingServer = nil
+func (asys *actorSystem) reset() {
+	asys.hasStarted = atomic.NewBool(false)
+	asys.remotingEnabled = atomic.NewBool(false)
+	asys.clusterEnabled = atomic.NewBool(false)
+	asys.telemetry = nil
+	asys.actors = cmp.New[PID]()
+	asys.name = ""
+	asys.logger = nil
+	asys.remotingServer = nil
+	// set the global nil
+	system = nil
 	once.Reset()
 }
 
 // broadcast publishes newly created actor into the cluster when cluster is enabled
-func (a *actorSystem) broadcast(ctx context.Context) {
+func (asys *actorSystem) broadcast(ctx context.Context) {
 	// iterate over the channel
-	for wireActor := range a.clusterChan {
+	for wireActor := range asys.clusterChan {
 		// making sure the cluster is still enabled
-		if a.cluster != nil {
+		if asys.cluster != nil {
 			// broadcast the message on the cluster
-			if err := a.cluster.PutActor(ctx, wireActor); err != nil {
-				a.logger.Error(err.Error())
+			if err := asys.cluster.PutActor(ctx, wireActor); err != nil {
+				asys.logger.Error(err.Error())
 				// TODO: stop or continue
 				return
 			}

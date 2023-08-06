@@ -24,6 +24,8 @@ func TestActorReceive(t *testing.T) {
 	defer goleak.VerifyNone(t,
 		goleak.IgnoreTopFunction("github.com/golang/glog.(*loggingT).flushDaemon"),
 		goleak.IgnoreTopFunction("github.com/go-redis/redis/v8/internal/pool.(*ConnPool).reaper"),
+		goleak.IgnoreTopFunction("golang.org/x/net/http2.(*serverConn).serve"),
+		goleak.IgnoreTopFunction("internal/poll.runtime_pollWait"),
 	)
 	ctx := context.TODO()
 
@@ -63,6 +65,8 @@ func TestActorWithPassivation(t *testing.T) {
 	defer goleak.VerifyNone(t,
 		goleak.IgnoreTopFunction("github.com/golang/glog.(*loggingT).flushDaemon"),
 		goleak.IgnoreTopFunction("github.com/go-redis/redis/v8/internal/pool.(*ConnPool).reaper"),
+		goleak.IgnoreTopFunction("golang.org/x/net/http2.(*serverConn).serve"),
+		goleak.IgnoreTopFunction("internal/poll.runtime_pollWait"),
 	)
 	ctx := context.TODO()
 	// create a Ping actor
@@ -96,6 +100,8 @@ func TestActorWithReply(t *testing.T) {
 		defer goleak.VerifyNone(t,
 			goleak.IgnoreTopFunction("github.com/golang/glog.(*loggingT).flushDaemon"),
 			goleak.IgnoreTopFunction("github.com/go-redis/redis/v8/internal/pool.(*ConnPool).reaper"),
+			goleak.IgnoreTopFunction("golang.org/x/net/http2.(*serverConn).serve"),
+			goleak.IgnoreTopFunction("internal/poll.runtime_pollWait"),
 		)
 		ctx := context.TODO()
 		// create a Ping actor
@@ -122,6 +128,8 @@ func TestActorWithReply(t *testing.T) {
 		defer goleak.VerifyNone(t,
 			goleak.IgnoreTopFunction("github.com/golang/glog.(*loggingT).flushDaemon"),
 			goleak.IgnoreTopFunction("github.com/go-redis/redis/v8/internal/pool.(*ConnPool).reaper"),
+			goleak.IgnoreTopFunction("golang.org/x/net/http2.(*serverConn).serve"),
+			goleak.IgnoreTopFunction("internal/poll.runtime_pollWait"),
 		)
 		ctx := context.TODO()
 		// create a Ping actor
@@ -149,6 +157,8 @@ func TestActorRestart(t *testing.T) {
 		defer goleak.VerifyNone(t,
 			goleak.IgnoreTopFunction("github.com/golang/glog.(*loggingT).flushDaemon"),
 			goleak.IgnoreTopFunction("github.com/go-redis/redis/v8/internal/pool.(*ConnPool).reaper"),
+			goleak.IgnoreTopFunction("golang.org/x/net/http2.(*serverConn).serve"),
+			goleak.IgnoreTopFunction("internal/poll.runtime_pollWait"),
 		)
 		ctx := context.TODO()
 
@@ -220,6 +230,8 @@ func TestActorRestart(t *testing.T) {
 		defer goleak.VerifyNone(t,
 			goleak.IgnoreTopFunction("github.com/golang/glog.(*loggingT).flushDaemon"),
 			goleak.IgnoreTopFunction("github.com/go-redis/redis/v8/internal/pool.(*ConnPool).reaper"),
+			goleak.IgnoreTopFunction("golang.org/x/net/http2.(*serverConn).serve"),
+			goleak.IgnoreTopFunction("internal/poll.runtime_pollWait"),
 		)
 		ctx := context.TODO()
 
@@ -265,6 +277,8 @@ func TestChildActor(t *testing.T) {
 		defer goleak.VerifyNone(t,
 			goleak.IgnoreTopFunction("github.com/golang/glog.(*loggingT).flushDaemon"),
 			goleak.IgnoreTopFunction("github.com/go-redis/redis/v8/internal/pool.(*ConnPool).reaper"),
+			goleak.IgnoreTopFunction("golang.org/x/net/http2.(*serverConn).serve"),
+			goleak.IgnoreTopFunction("internal/poll.runtime_pollWait"),
 		)
 
 		// create a test context
@@ -302,6 +316,8 @@ func TestChildActor(t *testing.T) {
 		defer goleak.VerifyNone(t,
 			goleak.IgnoreTopFunction("github.com/golang/glog.(*loggingT).flushDaemon"),
 			goleak.IgnoreTopFunction("github.com/go-redis/redis/v8/internal/pool.(*ConnPool).reaper"),
+			goleak.IgnoreTopFunction("golang.org/x/net/http2.(*serverConn).serve"),
+			goleak.IgnoreTopFunction("internal/poll.runtime_pollWait"),
 		)
 
 		// create a test context
@@ -343,6 +359,8 @@ func TestChildActor(t *testing.T) {
 		defer goleak.VerifyNone(t,
 			goleak.IgnoreTopFunction("github.com/golang/glog.(*loggingT).flushDaemon"),
 			goleak.IgnoreTopFunction("github.com/go-redis/redis/v8/internal/pool.(*ConnPool).reaper"),
+			goleak.IgnoreTopFunction("golang.org/x/net/http2.(*serverConn).serve"),
+			goleak.IgnoreTopFunction("internal/poll.runtime_pollWait"),
 		)
 
 		// create a test context
