@@ -50,9 +50,10 @@ func getHostNode() (*node, error) {
 	}
 	// create the host node
 	return &node{
-		Name:        cfg.Name,
-		Host:        cfg.Host,
-		GossipPort:  cfg.GossipPort,
-		ClusterPort: cfg.ClusterPort,
+		Name:         cfg.Name,
+		Host:         cfg.Host,
+		GossipPort:   cfg.GossipPort,
+		ClusterPort:  cfg.ClusterPort,
+		RemotingPort: cfg.RemotingPort,
 	}, nil
 }
