@@ -50,11 +50,6 @@ func TestOptions(t *testing.T) {
 			option:   WithRemoting("localhost", 3100),
 			expected: actorSystem{remotingEnabled: atomic.NewBool(true), remotingPort: 3100, remotingHost: "localhost"},
 		},
-		{
-			name:     "WithShutdownTimeout",
-			option:   WithShutdownTimeout(2 * time.Second),
-			expected: actorSystem{shutdownTimeout: 2. * time.Second},
-		},
 	}
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
