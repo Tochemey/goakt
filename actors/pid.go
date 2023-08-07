@@ -35,13 +35,28 @@ type WatchMan struct {
 	Done    chan Unit  // Done when watching is completed
 }
 
+const (
+	// DefaultPassivationTimeout defines the default passivation timeout
+	DefaultPassivationTimeout = 2 * time.Minute
+	// DefaultReplyTimeout defines the default send/reply timeout
+	DefaultReplyTimeout = 100 * time.Millisecond
+	// DefaultInitMaxRetries defines the default value for retrying actor initialization
+	DefaultInitMaxRetries = 5
+	// DefaultSupervisoryStrategy defines the default supervisory strategy
+	DefaultSupervisoryStrategy = StopDirective
+	// DefaultShutdownTimeout defines the default shutdown timeout
+	DefaultShutdownTimeout = 2 * time.Second
+
+	defaultMailboxSize = 4096
+)
+
 // PID defines the various actions one can perform on a given actor
 type PID interface {
 	// Shutdown gracefully shuts down the given actor
 	Shutdown(ctx context.Context) error
-	// IsOnline returns true when the actor is online ready to process public and false
+	// IsRunning returns true when the actor is running ready to process public and false
 	// when the actor is stopped or not started at all
-	IsOnline() bool
+	IsRunning() bool
 	// ReceivedCount returns the total number of public processed by the actor
 	// at a given point in time while the actor heart is still beating
 	ReceivedCount(ctx context.Context) uint64
@@ -60,6 +75,8 @@ type PID interface {
 	ActorSystem() ActorSystem
 	// ActorPath returns the path of the actor
 	ActorPath() *Path
+	// ActorHandle returns the underlying actor
+	ActorHandle() Actor
 	// Tell sends an asynchronous message to another PID
 	Tell(ctx context.Context, to PID, message proto.Message) error
 	// Ask sends a synchronous message to another actor and expect a response.
@@ -105,7 +122,7 @@ type pid struct {
 	actorPath *Path
 
 	// helps determine whether the actor should handle public or not.
-	isOnline bool
+	isRunning *atomic.Bool
 	// is captured whenever a mail is sent to the actor
 	lastProcessingTime atomic.Time
 
@@ -122,7 +139,7 @@ type pid struct {
 	// initialization fails. The default value is 5 seconds
 	initMaxRetries int
 
-	// shutdownTimeout specifies how long to wait for the remaining public
+	// shutdownTimeout specifies how long to wait for the remaining messages
 	// in the actor mailbox to be processed before completing the shutdown process
 	// the default value is 5 seconds
 	shutdownTimeout time.Duration
@@ -179,13 +196,13 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 	// create the actor PID
 	pid := &pid{
 		Actor:                  actor,
-		isOnline:               false,
+		isRunning:              atomic.NewBool(false),
 		lastProcessingTime:     atomic.Time{},
-		passivateAfter:         2 * time.Minute,
-		sendReplyTimeout:       100 * time.Millisecond,
-		shutdownTimeout:        2 * time.Second,
-		initMaxRetries:         5,
-		mailbox:                make(chan ReceiveContext, 4096),
+		passivateAfter:         DefaultPassivationTimeout,
+		sendReplyTimeout:       DefaultReplyTimeout,
+		shutdownTimeout:        DefaultShutdownTimeout,
+		initMaxRetries:         DefaultInitMaxRetries,
+		mailbox:                make(chan ReceiveContext, defaultMailboxSize),
 		shutdownSignal:         make(chan Unit, 1),
 		haltPassivationLnr:     make(chan Unit, 1),
 		logger:                 log.DefaultLogger,
@@ -196,7 +213,7 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 		mailboxSizeCounter:     atomic.NewUint64(0),
 		mu:                     sync.RWMutex{},
 		children:               newPIDMap(10),
-		supervisorStrategy:     StopDirective,
+		supervisorStrategy:     DefaultSupervisoryStrategy,
 		watchMen:               slices.NewConcurrentSlice[*WatchMan](),
 		telemetry:              telemetry.New(),
 		actorPath:              actorPath,
@@ -232,55 +249,62 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 	return pid
 }
 
+// ActorHandle returns the underlying Actor
+func (p *pid) ActorHandle() Actor {
+	return p.Actor
+}
+
 // Children returns the list of all the children of the given actor
 func (p *pid) Children(ctx context.Context) []PID {
 	// add a span context
 	ctx, span := telemetry.SpanContext(ctx, "Children")
 	defer span.End()
-	p.mu.Lock()
+	p.mu.RLock()
 	kiddos := p.children.List()
-	p.mu.Unlock()
+	p.mu.RUnlock()
 	return kiddos
 }
 
-// IsOnline returns true when the actor is alive ready to process public and false
+// IsRunning returns true when the actor is alive ready to process messages and false
 // when the actor is stopped or not started at all
-func (p *pid) IsOnline() bool {
-	p.mu.RLock()
-	ready := p.isOnline
-	p.mu.RUnlock()
-	return ready
+func (p *pid) IsRunning() bool {
+	return p.isRunning.Load()
 }
 
 // ActorSystem returns the actor system
 func (p *pid) ActorSystem() ActorSystem {
-	p.mu.Lock()
+	p.mu.RLock()
 	sys := p.system
-	p.mu.Unlock()
+	p.mu.RUnlock()
 	return sys
 }
 
 // ActorPath returns the path of the actor
 func (p *pid) ActorPath() *Path {
-	p.mu.Lock()
+	p.mu.RLock()
 	path := p.actorPath
-	p.mu.Unlock()
+	p.mu.RUnlock()
 	return path
 }
 
 // Restart restarts the actor. This call can panic which is the expected behaviour.
-// During restart all public that are in the mailbox and not yet processed will be ignored
+// During restart all messages that are in the mailbox and not yet processed will be ignored
 func (p *pid) Restart(ctx context.Context) error {
 	// add a span context
 	ctx, span := telemetry.SpanContext(ctx, "Restart")
 	defer span.End()
+
+	// add some debug logging
+	p.logger.Debugf("restarting actor=(%s)", p.actorPath.String())
+
 	// first check whether we have an empty PID
-	if p == nil || p.actorPath == nil {
+	if p == nil || p.ActorPath() == nil {
 		return ErrUndefinedActor
 	}
-	// check whether the actor is ready and stop it
-	if p.IsOnline() {
-		// stop the actor
+
+	// only restart the actor when the actor is running
+	if p.IsRunning() {
+		// shutdown the actor
 		if err := p.Shutdown(ctx); err != nil {
 			return err
 		}
@@ -291,7 +315,7 @@ func (p *pid) Restart(ctx context.Context) error {
 		go func() {
 			for range ticker.C {
 				// stop ticking once the actor is offline
-				if !p.IsOnline() {
+				if !p.IsRunning() {
 					tickerStopSig <- Unit{}
 					return
 				}
@@ -301,8 +325,6 @@ func (p *pid) Restart(ctx context.Context) error {
 		ticker.Stop()
 	}
 
-	// reset the actor
-	p.reset()
 	// initialize the actor
 	p.init(ctx)
 	// init processing public
@@ -323,7 +345,7 @@ func (p *pid) SpawnChild(ctx context.Context, name string, actor Actor) (PID, er
 	ctx, span := telemetry.SpanContext(ctx, "SpawnChild")
 	defer span.End()
 	// first check whether the actor is ready to start another actor
-	if !p.IsOnline() {
+	if !p.IsRunning() {
 		return nil, ErrNotReady
 	}
 
@@ -333,7 +355,7 @@ func (p *pid) SpawnChild(ctx context.Context, name string, actor Actor) (PID, er
 	// check whether the child actor already exist and just return the PID
 	if cid, ok := p.children.Get(childActorPath); ok {
 		// check whether the actor is stopped
-		if !cid.IsOnline() {
+		if cid != nil && !cid.IsRunning() {
 			// then reboot it
 			if err := cid.Restart(ctx); err != nil {
 				return nil, err
@@ -341,6 +363,11 @@ func (p *pid) SpawnChild(ctx context.Context, name string, actor Actor) (PID, er
 		}
 		return cid, nil
 	}
+
+	// acquire the lock
+	p.mu.Lock()
+	// release the lock
+	defer p.mu.Unlock()
 
 	// create the child pid
 	cid := newPID(ctx,
@@ -404,7 +431,7 @@ func (p *pid) Ask(ctx context.Context, to PID, message proto.Message) (response 
 	ctx, span := telemetry.SpanContext(ctx, "Ask")
 	defer span.End()
 	// make sure the actor is live
-	if !to.IsOnline() {
+	if !to.IsRunning() {
 		return nil, ErrNotReady
 	}
 
@@ -455,7 +482,7 @@ func (p *pid) Tell(ctx context.Context, to PID, message proto.Message) error {
 	defer span.End()
 
 	// make sure the recipient actor is live
-	if !to.IsOnline() {
+	if !to.IsRunning() {
 		return ErrNotReady
 	}
 
@@ -617,27 +644,34 @@ func (p *pid) Shutdown(ctx context.Context) error {
 	defer span.End()
 
 	p.logger.Info("Shutdown process has started...")
-	// stop the passivation listener
-	p.haltPassivationLnr <- Unit{}
 
 	// check whether the actor is still alive. Maybe it has been passivated already
-	if !p.IsOnline() {
+	if !p.isRunning.Load() {
 		p.logger.Infof("Actor=%s is offline. Maybe it has been passivated or stopped already", p.ActorPath().String())
 		return nil
 	}
+
+	// stop the passivation listener
+	p.haltPassivationLnr <- Unit{}
+
+	// signal we are shutting down to stop processing messages
+	p.shutdownSignal <- Unit{}
 
 	// stop the actor PID
 	p.stop(ctx)
 
 	// add some logging
 	p.logger.Infof("Shutdown process is on going for actor=%s...", p.ActorPath().String())
-	// signal we are shutting down to stop processing public
-	p.shutdownSignal <- Unit{}
+
 	// perform some cleanup with the actor
 	if err := p.Actor.PostStop(ctx); err != nil {
 		p.logger.Error(fmt.Errorf("failed to stop the underlying receiver for actor=%s. Cause:%v", p.ActorPath().String(), err))
 		return err
 	}
+
+	// reset the actor
+	p.reset()
+
 	p.logger.Infof("Actor=%s successfully shutdown", p.ActorPath().String())
 	return nil
 }
@@ -719,32 +753,40 @@ func (p *pid) init(ctx context.Context) {
 	if err != nil {
 		// log the error
 		p.logger.Error(err.Error())
-		// reset the actor
-		p.reset()
 		return
 	}
 	// set the actor is ready
 	p.mu.Lock()
-	p.isOnline = true
+	p.isRunning.Store(true)
 	p.mu.Unlock()
 	// add some logging info
 	p.logger.Info("Initialization process successfully completed.")
 }
 
+// reset re-initializes the actor PID
 func (p *pid) reset() {
-	// reset the mailbox
-	p.mailbox = make(chan ReceiveContext, 1000)
-	// reset the children map
-	p.children = newPIDMap(10)
-	// reset the various counters
+	// acquire the lock
+	p.mu.Lock()
+	// release the lock when done
+	defer p.mu.Unlock()
+	// reset the various settings of the PID
+	p.lastProcessingTime = atomic.Time{}
+	p.passivateAfter = DefaultPassivationTimeout
+	p.sendReplyTimeout = DefaultReplyTimeout
+	p.shutdownTimeout = DefaultShutdownTimeout
+	p.initMaxRetries = DefaultInitMaxRetries
+	p.mailbox = make(chan ReceiveContext, defaultMailboxSize)
+	p.shutdownSignal = make(chan Unit, 1)
+	p.haltPassivationLnr = make(chan Unit, 1)
 	p.panicCounter = atomic.NewUint64(0)
 	p.receivedMessageCounter = atomic.NewUint64(0)
 	p.lastProcessingDuration = atomic.NewDuration(0)
 	p.restartCounter = atomic.NewUint64(0)
 	p.mailboxSizeCounter = atomic.NewUint64(0)
-	// reset the channels
-	p.shutdownSignal = make(chan Unit, 1)
-	p.haltPassivationLnr = make(chan Unit, 1)
+	p.children = newPIDMap(10)
+	p.watchMen = slices.NewConcurrentSlice[*WatchMan]()
+	p.telemetry = telemetry.New()
+
 	// reset the behavior stack
 	p.resetBehaviorStack()
 	// register metrics. However, we don't panic when we fail to register
@@ -763,64 +805,32 @@ func (p *pid) resetBehaviorStack() {
 }
 
 func (p *pid) freeChildren(ctx context.Context) {
+	p.logger.Debug("freeing all child actors...")
 	// add a span context
 	ctx, span := telemetry.SpanContext(ctx, "FreeChildren")
 	defer span.End()
+
 	// iterate the child actors and shut them down
-	for _, child := range p.children.List() {
-		// stop the child actor
-		if err := child.Shutdown(ctx); err != nil {
-			panic(err)
-		}
+	for _, child := range p.Children(ctx) {
 		// unwatch the child
 		p.UnWatch(child)
+		// remove the child from the list
 		p.children.Delete(child.ActorPath())
+		// stop the child actor
+		if err := child.Shutdown(ctx); err != nil {
+			p.logger.Panic(err)
+		}
 	}
 }
 
+// stop stops the PID
 func (p *pid) stop(ctx context.Context) {
 	// add a span context
 	ctx, span := telemetry.SpanContext(ctx, "Stop")
 	defer span.End()
-	// stop the actor to receive and send message
-	p.mu.Lock()
-	p.isOnline = false
-	p.mu.Unlock()
+	p.isRunning.Store(false)
 	// stop all the child actors
 	p.freeChildren(ctx)
-	// wait for all public in the mailbox to be processed
-	// init a ticker that run every 10 ms to make sure we process all public in the
-	// mailbox.
-	ticker := time.NewTicker(10 * time.Millisecond)
-	timer := time.After(p.shutdownTimeout)
-	// create the ticker stop signal
-	tickerStopSig := make(chan Unit)
-	// start ticking
-	go func() {
-		for {
-			select {
-			case <-ticker.C:
-				// no more message to process
-				if len(p.mailbox) == 0 {
-					// tell the ticker to stop
-					tickerStopSig <- Unit{}
-					return
-				}
-			case <-timer:
-				// tell the ticker to stop when timer is up
-				tickerStopSig <- Unit{}
-				return
-			}
-		}
-	}()
-	// listen to ticker stop signal
-	<-tickerStopSig
-	// signal we are shutting down to stop processing public
-	p.shutdownSignal <- Unit{}
-	// add some logging
-	p.logger.Infof("Remaining messages in the mailbox have been processed for actor=%s", p.ActorPath().String())
-	// stop the ticker
-	ticker.Stop()
 }
 
 // Behaviors returns the behavior stack
@@ -875,8 +885,8 @@ func (p *pid) registerMetrics() error {
 
 	// define the common labels
 	labels := []attribute.KeyValue{
-		attribute.String("actor.name", p.ActorPath().Name()),
-		attribute.String("actor.address", p.ActorPath().String()),
+		attribute.String("actor.name", p.actorPath.Name()),
+		attribute.String("actor.address", p.actorPath.String()),
 		attribute.String("actor.type", strings.Replace(fmt.Sprintf("%T", p.Actor), "*", "", 1)),
 	}
 
@@ -933,33 +943,38 @@ func (p *pid) supervise(cid PID, watcher *WatchMan) {
 	for {
 		select {
 		case <-watcher.Done:
+			p.logger.Debugf("stop watching cid=(%s)", cid.ActorPath().String())
 			return
 		case err := <-watcher.ErrChan:
-			p.logger.Errorf("child actor=%s is panicking: Err=%v", cid.ActorPath().String(), err)
+			p.logger.Errorf("child actor=(%s) is failing: Err=%v", cid.ActorPath().String(), err)
 			switch p.supervisorStrategy {
 			case StopDirective:
-				// shutdown the actor and panic in case of error
-				if err := cid.Shutdown(context.Background()); err != nil {
-					panic(err)
-				}
 				// unwatch the given actor
 				p.UnWatch(cid)
 				// remove the actor from the children map
 				p.children.Delete(cid.ActorPath())
+				// shutdown the actor and panic in case of error
+				if err := cid.Shutdown(context.Background()); err != nil {
+					p.logger.Panic(err)
+				}
 			case RestartDirective:
+				// unwatch the given actor
+				p.UnWatch(cid)
 				// restart the actor
 				if err := cid.Restart(context.Background()); err != nil {
-					panic(err)
+					p.logger.Panic(err)
 				}
+				// re-watch the actor
+				p.Watch(cid)
 			default:
-				// shutdown the actor and panic in case of error
-				if err := cid.Shutdown(context.Background()); err != nil {
-					panic(err)
-				}
 				// unwatch the given actor
 				p.UnWatch(cid)
 				// remove the actor from the children map
 				p.children.Delete(cid.ActorPath())
+				// shutdown the actor and panic in case of error
+				if err := cid.Shutdown(context.Background()); err != nil {
+					p.logger.Panic(err)
+				}
 			}
 		}
 	}
@@ -999,7 +1014,7 @@ func (p *pid) passivationListener() {
 	// stop the ticker
 	ticker.Stop()
 	// only passivate when actor is alive
-	if !p.IsOnline() {
+	if !p.IsRunning() {
 		// add some logging info
 		p.logger.Infof("Actor=%s is offline. No need to passivate", p.ActorPath().String())
 		return
@@ -1014,6 +1029,10 @@ func (p *pid) passivationListener() {
 func (p *pid) passivate() {
 	// create a context
 	ctx := context.Background()
+	// stop processing messages
+	p.shutdownSignal <- Unit{}
+	// stop the passivation
+	p.haltPassivationLnr <- Unit{}
 	// stop the actor PID
 	p.stop(ctx)
 	// perform some cleanup with the actor

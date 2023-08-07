@@ -220,7 +220,7 @@ func (asys *actorSystem) StartActor(ctx context.Context, name string, actor Acto
 	// actor already exist no need recreate it.
 	if exist {
 		// check whether the given actor heart beat
-		if pid.IsOnline() {
+		if pid.IsRunning() {
 			// return the existing instance
 			return pid
 		}
@@ -475,10 +475,9 @@ func (asys *actorSystem) Stop(ctx context.Context) error {
 		// remove the actor the map and shut it down
 		asys.actors.Remove(actor.ActorPath().String())
 		// only shutdown live actors
-		if actor.IsOnline() {
-			if err := actor.Shutdown(ctx); err != nil {
-				return err
-			}
+		if err := actor.Shutdown(ctx); err != nil {
+			// return the error
+			return err
 		}
 	}
 
@@ -580,7 +579,7 @@ func (asys *actorSystem) RemoteAsk(ctx context.Context, request *connect.Request
 		return nil, ErrRemoteActorNotFound(actorPath.String())
 	}
 	// restart the actor when it is not live
-	if !pid.IsOnline() {
+	if !pid.IsRunning() {
 		if err := pid.Restart(ctx); err != nil {
 			return nil, err
 		}
@@ -648,7 +647,7 @@ func (asys *actorSystem) RemoteTell(ctx context.Context, request *connect.Reques
 		return nil, ErrRemoteActorNotFound(actorPath.String())
 	}
 	// restart the actor when it is not live
-	if !pid.IsOnline() {
+	if !pid.IsRunning() {
 		if err := pid.Restart(ctx); err != nil {
 			return nil, err
 		}

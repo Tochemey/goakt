@@ -22,7 +22,7 @@ import (
 // This block until a response is received or timed out.
 func Ask(ctx context.Context, to PID, message proto.Message, timeout time.Duration) (response proto.Message, err error) {
 	// make sure the actor is live
-	if !to.IsOnline() {
+	if !to.IsRunning() {
 		return nil, ErrNotReady
 	}
 
@@ -73,7 +73,7 @@ func Ask(ctx context.Context, to PID, message proto.Message, timeout time.Durati
 // Tell sends an asynchronous message to an actor
 func Tell(ctx context.Context, to PID, message proto.Message) error {
 	// make sure the recipient actor is live
-	if !to.IsOnline() {
+	if !to.IsRunning() {
 		return ErrNotReady
 	}
 

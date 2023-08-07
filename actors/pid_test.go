@@ -3,11 +3,13 @@ package actors
 import (
 	"context"
 	"fmt"
+	"os"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/tochemey/goakt/log"
 	testpb "github.com/tochemey/goakt/test/data/pb/v1"
 	"go.uber.org/goleak"
@@ -152,6 +154,7 @@ func TestActorWithReply(t *testing.T) {
 		assert.NoError(t, err)
 	})
 }
+
 func TestActorRestart(t *testing.T) {
 	t.Run("restart a stopped actor", func(t *testing.T) {
 		defer goleak.VerifyNone(t,
@@ -190,7 +193,7 @@ func TestActorRestart(t *testing.T) {
 		// restart the actor
 		err = pid.Restart(ctx)
 		assert.NoError(t, err)
-		assert.True(t, pid.IsOnline())
+		assert.True(t, pid.IsRunning())
 		// let us send 10 public to the actor
 		count := 10
 		for i := 0; i < count; i++ {
@@ -202,30 +205,7 @@ func TestActorRestart(t *testing.T) {
 		err = pid.Shutdown(ctx)
 		assert.NoError(t, err)
 	})
-	//t.Run("restart with error: case where shutdown is not fully completed", func(t *testing.T) {
-	//	defer goleak.VerifyNone(t)
-	//	ctx := context.TODO()
-	//	// create the actor path
-	//	actorPath := NewPath("Test", NewAddress(protocol, "sys", "host", 1))
-	//
-	//	// create a Ping actor
-	//	pid := newPID(
-	//		ctx,
-	//		actorPath,
-	//		NewTestActor(),
-	//		withInitMaxRetries(1),
-	//		withSendReplyTimeout(receivingTimeout),
-	//		withCustomLogger(log.DiscardLogger))
-	//	assert.NotNil(t, pid)
-	//
-	//	// stop the actor
-	//	err := pid.Shutdown(ctx)
-	//	assert.NoError(t, err)
-	//
-	//	// restarting this actor
-	//	err = pid.Restart(ctx)
-	//	assert.EqualError(t, err, ErrUndefinedActor.Error())
-	//})
+
 	t.Run("restart an actor", func(t *testing.T) {
 		defer goleak.VerifyNone(t,
 			goleak.IgnoreTopFunction("github.com/golang/glog.(*loggingT).flushDaemon"),
@@ -259,7 +239,7 @@ func TestActorRestart(t *testing.T) {
 		// restart the actor
 		err := pid.Restart(ctx)
 		assert.NoError(t, err)
-		assert.True(t, pid.IsOnline())
+		assert.True(t, pid.IsRunning())
 		// let us send 10 public to the actor
 		for i := 0; i < count; i++ {
 			err = Tell(ctx, pid, new(testpb.TestSend))
@@ -348,7 +328,7 @@ func TestChildActor(t *testing.T) {
 		time.Sleep(time.Second)
 
 		// assert the actor state
-		assert.False(t, child.IsOnline())
+		assert.False(t, child.IsRunning())
 		assert.Len(t, parent.Children(ctx), 0)
 
 		//stop the actor
@@ -366,7 +346,7 @@ func TestChildActor(t *testing.T) {
 		// create a test context
 		ctx := context.TODO()
 
-		logger := log.DiscardLogger
+		logger := log.New(log.DebugLevel, os.Stdout)
 		// create the actor path
 		actorPath := NewPath("Parent", NewAddress(protocol, "sys", "host", 1))
 		// create the parent actor
@@ -393,8 +373,8 @@ func TestChildActor(t *testing.T) {
 		time.Sleep(time.Second)
 
 		// assert the actor state
-		assert.True(t, child.IsOnline())
-		assert.Len(t, parent.Children(ctx), 1)
+		assert.True(t, child.IsRunning())
+		require.Len(t, parent.Children(ctx), 1)
 
 		//stop the actor
 		err = parent.Shutdown(ctx)
