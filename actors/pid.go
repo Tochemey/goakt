@@ -129,20 +129,19 @@ type pid struct {
 	// specifies at what point in time to passivate the actor.
 	// when the actor is passivated it is stopped which means it does not consume
 	// any further resources like memory and cpu. The default value is 120 seconds
-	passivateAfter time.Duration
+	passivateAfter *atomic.Duration
 
 	// specifies how long the sender of a mail should wait to receive a reply
 	// when using SendReply. The default value is 5s
-	sendReplyTimeout time.Duration
+	sendReplyTimeout *atomic.Duration
 
 	// specifies the maximum of retries to attempt when the actor
 	// initialization fails. The default value is 5 seconds
-	initMaxRetries int
+	initMaxRetries *atomic.Int32
 
-	// shutdownTimeout specifies how long to wait for the remaining messages
-	// in the actor mailbox to be processed before completing the shutdown process
+	// shutdownTimeout specifies the graceful shutdown timeout
 	// the default value is 5 seconds
-	shutdownTimeout time.Duration
+	shutdownTimeout *atomic.Duration
 
 	// specifies the actor mailbox
 	mailbox chan ReceiveContext
@@ -198,10 +197,10 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 		Actor:                  actor,
 		isRunning:              atomic.NewBool(false),
 		lastProcessingTime:     atomic.Time{},
-		passivateAfter:         DefaultPassivationTimeout,
-		sendReplyTimeout:       DefaultReplyTimeout,
-		shutdownTimeout:        DefaultShutdownTimeout,
-		initMaxRetries:         DefaultInitMaxRetries,
+		passivateAfter:         atomic.NewDuration(DefaultPassivationTimeout),
+		sendReplyTimeout:       atomic.NewDuration(DefaultReplyTimeout),
+		shutdownTimeout:        atomic.NewDuration(DefaultShutdownTimeout),
+		initMaxRetries:         atomic.NewInt32(DefaultInitMaxRetries),
 		mailbox:                make(chan ReceiveContext, defaultMailboxSize),
 		shutdownSignal:         make(chan Unit, 1),
 		haltPassivationLnr:     make(chan Unit, 1),
@@ -229,7 +228,7 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 	// init processing public
 	go pid.receive()
 	// init the passivation listener loop iff passivation is set
-	if pid.passivateAfter > 0 {
+	if pid.passivateAfter.Load() > 0 {
 		go pid.passivationListener()
 	}
 
@@ -330,7 +329,7 @@ func (p *pid) Restart(ctx context.Context) error {
 	// init processing public
 	go p.receive()
 	// init the passivation listener loop iff passivation is set
-	if p.passivateAfter > 0 {
+	if p.passivateAfter.Load() > 0 {
 		go p.passivationListener()
 	}
 	// increment the restart counter
@@ -373,13 +372,13 @@ func (p *pid) SpawnChild(ctx context.Context, name string, actor Actor) (PID, er
 	cid := newPID(ctx,
 		childActorPath,
 		actor,
-		withInitMaxRetries(p.initMaxRetries),
-		withPassivationAfter(p.passivateAfter),
-		withSendReplyTimeout(p.sendReplyTimeout),
+		withInitMaxRetries(int(p.initMaxRetries.Load())),
+		withPassivationAfter(p.passivateAfter.Load()),
+		withSendReplyTimeout(p.sendReplyTimeout.Load()),
 		withCustomLogger(p.logger),
 		withActorSystem(p.system),
 		withSupervisorStrategy(p.supervisorStrategy),
-		withShutdownTimeout(p.shutdownTimeout))
+		withShutdownTimeout(p.shutdownTimeout.Load()))
 
 	// add the pid to the map
 	p.children.Set(cid)
@@ -464,7 +463,7 @@ func (p *pid) Ask(ctx context.Context, to PID, message proto.Message) (response 
 	to.doReceive(context)
 
 	// await patiently to receive the response from the actor
-	for await := time.After(p.sendReplyTimeout); ; {
+	for await := time.After(p.sendReplyTimeout.Load()); ; {
 		select {
 		case response = <-context.response:
 			return
@@ -652,13 +651,19 @@ func (p *pid) Shutdown(ctx context.Context) error {
 	}
 
 	// stop the passivation listener
-	p.haltPassivationLnr <- Unit{}
+	if p.passivateAfter.Load() > 0 {
+		// add some debug logging
+		p.logger.Debug("sending a signal to stop passivation listener....")
+		p.haltPassivationLnr <- Unit{}
+	}
 
 	// signal we are shutting down to stop processing messages
 	p.shutdownSignal <- Unit{}
 
-	// stop the actor PID
-	p.stop(ctx)
+	// stop receiving and sending messages
+	p.isRunning.Store(false)
+	// stop all the child actors
+	p.freeChildren(ctx)
 
 	// add some logging
 	p.logger.Infof("Shutdown process is on going for actor=%s...", p.ActorPath().String())
@@ -744,7 +749,7 @@ func (p *pid) init(ctx context.Context) {
 	// add some logging info
 	p.logger.Info("Initialization process has started...")
 	// create the exponential backoff object
-	expoBackoff := backoff.WithMaxRetries(backoff.NewExponentialBackOff(), uint64(p.initMaxRetries))
+	expoBackoff := backoff.WithMaxRetries(backoff.NewExponentialBackOff(), uint64(p.initMaxRetries.Load()))
 	// init the actor initialization receive
 	err := backoff.Retry(func() error {
 		return p.Actor.PreStart(ctx)
@@ -771,18 +776,15 @@ func (p *pid) reset() {
 	defer p.mu.Unlock()
 	// reset the various settings of the PID
 	p.lastProcessingTime = atomic.Time{}
-	p.passivateAfter = DefaultPassivationTimeout
-	p.sendReplyTimeout = DefaultReplyTimeout
-	p.shutdownTimeout = DefaultShutdownTimeout
-	p.initMaxRetries = DefaultInitMaxRetries
-	p.mailbox = make(chan ReceiveContext, defaultMailboxSize)
-	p.shutdownSignal = make(chan Unit, 1)
-	p.haltPassivationLnr = make(chan Unit, 1)
-	p.panicCounter = atomic.NewUint64(0)
-	p.receivedMessageCounter = atomic.NewUint64(0)
-	p.lastProcessingDuration = atomic.NewDuration(0)
-	p.restartCounter = atomic.NewUint64(0)
-	p.mailboxSizeCounter = atomic.NewUint64(0)
+	p.passivateAfter.Store(DefaultPassivationTimeout)
+	p.sendReplyTimeout.Store(DefaultReplyTimeout)
+	p.shutdownTimeout.Store(DefaultShutdownTimeout)
+	p.initMaxRetries.Store(DefaultInitMaxRetries)
+	p.panicCounter.Store(0)
+	p.receivedMessageCounter.Store(0)
+	p.lastProcessingDuration.Store(0)
+	p.restartCounter.Store(0)
+	p.mailboxSizeCounter.Store(0)
 	p.children = newPIDMap(10)
 	p.watchMen = slices.NewConcurrentSlice[*WatchMan]()
 	p.telemetry = telemetry.New()
@@ -799,9 +801,9 @@ func (p *pid) reset() {
 
 func (p *pid) resetBehaviorStack() {
 	// reset the behavior
-	behaviorStack := NewBehaviorStack()
-	behaviorStack.Push(p.Receive)
-	p.behaviorStack = behaviorStack
+	p.behaviorStack.Clear()
+	// set it to the receiver method
+	p.behaviorStack.Push(p.Receive)
 }
 
 func (p *pid) freeChildren(ctx context.Context) {
@@ -821,16 +823,6 @@ func (p *pid) freeChildren(ctx context.Context) {
 			p.logger.Panic(err)
 		}
 	}
-}
-
-// stop stops the PID
-func (p *pid) stop(ctx context.Context) {
-	// add a span context
-	ctx, span := telemetry.SpanContext(ctx, "Stop")
-	defer span.End()
-	p.isRunning.Store(false)
-	// stop all the child actors
-	p.freeChildren(ctx)
 }
 
 // Behaviors returns the behavior stack
@@ -932,6 +924,9 @@ func (p *pid) handleReceived(received ReceiveContext) {
 			p.panicCounter.Inc()
 		}
 	}()
+	// synchronize the receiving call
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	// send the message to the current actor behavior
 	if behavior, ok := p.behaviorStack.Peek(); ok {
 		behavior(received)
@@ -985,7 +980,7 @@ func (p *pid) supervise(cid PID, watcher *WatchMan) {
 func (p *pid) passivationListener() {
 	p.logger.Info("start the passivation listener...")
 	// create the ticker
-	ticker := time.NewTicker(p.passivateAfter)
+	ticker := time.NewTicker(p.passivateAfter.Load())
 	// create the stop ticker signal
 	tickerStopSig := make(chan Unit, 1)
 
@@ -997,7 +992,7 @@ func (p *pid) passivationListener() {
 				// check whether the actor is idle or not
 				idleTime := time.Since(p.lastProcessingTime.Load())
 				// check whether the actor is idle
-				if idleTime >= p.passivateAfter {
+				if idleTime >= p.passivateAfter.Load() {
 					// set the done channel to stop the ticker
 					tickerStopSig <- Unit{}
 					return
@@ -1011,8 +1006,10 @@ func (p *pid) passivationListener() {
 	}()
 	// wait for the stop signal to stop the ticker
 	<-tickerStopSig
+
 	// stop the ticker
 	ticker.Stop()
+
 	// only passivate when actor is alive
 	if !p.IsRunning() {
 		// add some logging info
@@ -1022,23 +1019,25 @@ func (p *pid) passivationListener() {
 
 	// add some logging info
 	p.logger.Infof("Passivation mode has been triggered for actor=%s...", p.ActorPath().String())
-	// passivate the actor
-	p.passivate()
-}
 
-func (p *pid) passivate() {
+	// signal we are shutting down to stop processing messages
+	p.shutdownSignal <- Unit{}
+
+	// stop receiving and sending messages
+	p.isRunning.Store(false)
+
 	// create a context
 	ctx := context.Background()
-	// stop processing messages
-	p.shutdownSignal <- Unit{}
-	// stop the passivation
-	p.haltPassivationLnr <- Unit{}
-	// stop the actor PID
-	p.stop(ctx)
+
+	// stop all the child actors
+	p.freeChildren(ctx)
 	// perform some cleanup with the actor
 	if err := p.Actor.PostStop(ctx); err != nil {
 		panic(err)
 	}
+
+	// reset
+	p.reset()
 }
 
 // interceptor create an interceptor based upon the telemetry provided

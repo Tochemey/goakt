@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/tochemey/goakt/log"
+	"go.uber.org/atomic"
 )
 
 func TestPIDOptions(t *testing.T) {
@@ -17,17 +18,17 @@ func TestPIDOptions(t *testing.T) {
 		{
 			name:           "WithPassivationAfter",
 			option:         withPassivationAfter(time.Second),
-			expectedConfig: &pid{passivateAfter: time.Second},
+			expectedConfig: &pid{passivateAfter: atomic.NewDuration(time.Second)},
 		},
 		{
 			name:           "WithSendReplyTimeout",
 			option:         withSendReplyTimeout(time.Second),
-			expectedConfig: &pid{sendReplyTimeout: time.Second},
+			expectedConfig: &pid{sendReplyTimeout: atomic.NewDuration(time.Second)},
 		},
 		{
 			name:           "WithInitMaxRetries",
 			option:         withInitMaxRetries(5),
-			expectedConfig: &pid{initMaxRetries: 5},
+			expectedConfig: &pid{initMaxRetries: atomic.NewInt32(5)},
 		},
 		{
 			name:           "WithLogger",
@@ -42,12 +43,12 @@ func TestPIDOptions(t *testing.T) {
 		{
 			name:           "WithShutdownTimeout",
 			option:         withShutdownTimeout(time.Second),
-			expectedConfig: &pid{shutdownTimeout: time.Second},
+			expectedConfig: &pid{shutdownTimeout: atomic.NewDuration(time.Second)},
 		},
 		{
 			name:           "WithPassivationDisabled",
 			option:         withPassivationDisabled(),
-			expectedConfig: &pid{passivateAfter: -1},
+			expectedConfig: &pid{passivateAfter: atomic.NewDuration(-1)},
 		},
 	}
 	for _, tc := range testCases {
