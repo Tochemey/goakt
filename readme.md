@@ -32,7 +32,6 @@ Also, check reference section at the end of the post for more material regarding
 - Stop and actor
 - Create a child actor
 - Supervisory Strategy (Restart and Stop directive are supported)
-- Behaviors (Become/BecomeStacked/UnBecome/UnBecomeStacked)
 - Logger interface with a default logger
 - Examples (check the [examples'](./examples) folder)
 - Integration with [OpenTelemetry](https://github.com/open-telemetry/opentelemetry-go) for traces and metrics.

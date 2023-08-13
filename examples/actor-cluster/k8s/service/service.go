@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/bufbuild/connect-go"
+	"connectrpc.com/connect"
 	"github.com/pkg/errors"
 	"github.com/tochemey/goakt/actors"
 	kactors "github.com/tochemey/goakt/examples/actor-cluster/k8s/actors"

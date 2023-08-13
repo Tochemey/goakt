@@ -129,7 +129,7 @@ actor-cluster-image:
     RUN chmod +x ./accounts
 
     EXPOSE 50051
-    EXPOSE 9000
+    EXPOSE 5052
     EXPOSE 3322
     EXPOSE 3320
 

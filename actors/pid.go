@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/bufbuild/connect-go"
-	otelconnect "github.com/bufbuild/connect-opentelemetry-go"
+	"connectrpc.com/connect"
+	otelconnect "connectrpc.com/otelconnect"
 	"github.com/cenkalti/backoff"
 	"github.com/pkg/errors"
 	goaktpb "github.com/tochemey/goakt/internal/goakt/v1"
@@ -96,19 +96,8 @@ type PID interface {
 	MailboxSize(ctx context.Context) uint64
 	// Children returns the list of all the children of the given actor
 	Children(ctx context.Context) []PID
-	// Behaviors returns the behavior stack
-	behaviors() BehaviorStack
 	// push a message to the actor's mailbox
 	doReceive(ctx ReceiveContext)
-	// setBehavior is a utility function that helps set the actor behavior
-	setBehavior(behavior Behavior)
-	// setBehaviorStacked adds a behavior to the actor's behaviors
-	setBehaviorStacked(behavior Behavior)
-	// unsetBehaviorStacked sets the actor's behavior to the previous behavior
-	// prior to setBehaviorStacked is called
-	unsetBehaviorStacked()
-	// resetBehavior is a utility function resets the actor behavior
-	resetBehavior()
 	// watchers returns the list of watchMen
 	watchers() *slices.ConcurrentSlice[*WatchMan]
 }
@@ -169,15 +158,13 @@ type pid struct {
 	lastProcessingDuration *atomic.Duration
 	mailboxSizeCounter     *atomic.Uint64
 
-	// mutex that helps synchronize the pid in a concurrent environment
+	// rwMutex that helps synchronize the pid in a concurrent environment
 	// this helps protect the pid fields accessibility
-	mu sync.RWMutex
+	rwMutex       sync.RWMutex
+	shutdownMutex sync.Mutex
 
 	// supervisor strategy
 	supervisorStrategy StrategyDirective
-
-	// specifies the current actor behavior
-	behaviorStack BehaviorStack
 
 	// observability settings
 	telemetry *telemetry.Telemetry
@@ -210,12 +197,14 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 		lastProcessingDuration: atomic.NewDuration(0),
 		restartCounter:         atomic.NewUint64(0),
 		mailboxSizeCounter:     atomic.NewUint64(0),
-		mu:                     sync.RWMutex{},
-		children:               newPIDMap(10),
-		supervisorStrategy:     DefaultSupervisoryStrategy,
-		watchMen:               slices.NewConcurrentSlice[*WatchMan](),
-		telemetry:              telemetry.New(),
-		actorPath:              actorPath,
+
+		children:           newPIDMap(10),
+		supervisorStrategy: DefaultSupervisoryStrategy,
+		watchMen:           slices.NewConcurrentSlice[*WatchMan](),
+		telemetry:          telemetry.New(),
+		actorPath:          actorPath,
+		rwMutex:            sync.RWMutex{},
+		shutdownMutex:      sync.Mutex{},
 	}
 
 	// set the custom options to override the default values
@@ -231,11 +220,6 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 	if pid.passivateAfter.Load() > 0 {
 		go pid.passivationListener()
 	}
-
-	// set the actor behavior stack
-	behaviorStack := NewBehaviorStack()
-	behaviorStack.Push(pid.Receive)
-	pid.behaviorStack = behaviorStack
 
 	// register metrics. However, we don't panic when we fail to register
 	// we just log it for now
@@ -258,9 +242,9 @@ func (p *pid) Children(ctx context.Context) []PID {
 	// add a span context
 	ctx, span := telemetry.SpanContext(ctx, "Children")
 	defer span.End()
-	p.mu.RLock()
+	p.rwMutex.RLock()
 	kiddos := p.children.List()
-	p.mu.RUnlock()
+	p.rwMutex.RUnlock()
 	return kiddos
 }
 
@@ -272,17 +256,17 @@ func (p *pid) IsRunning() bool {
 
 // ActorSystem returns the actor system
 func (p *pid) ActorSystem() ActorSystem {
-	p.mu.RLock()
+	p.rwMutex.RLock()
 	sys := p.system
-	p.mu.RUnlock()
+	p.rwMutex.RUnlock()
 	return sys
 }
 
 // ActorPath returns the path of the actor
 func (p *pid) ActorPath() *Path {
-	p.mu.RLock()
+	p.rwMutex.RLock()
 	path := p.actorPath
-	p.mu.RUnlock()
+	p.rwMutex.RUnlock()
 	return path
 }
 
@@ -364,9 +348,9 @@ func (p *pid) SpawnChild(ctx context.Context, name string, actor Actor) (PID, er
 	}
 
 	// acquire the lock
-	p.mu.Lock()
+	p.rwMutex.Lock()
 	// release the lock
-	defer p.mu.Unlock()
+	defer p.rwMutex.Unlock()
 
 	// create the child pid
 	cid := newPID(ctx,
@@ -435,15 +419,7 @@ func (p *pid) Ask(ctx context.Context, to PID, message proto.Message) (response 
 	}
 
 	// acquire a lock to set the message context
-	p.mu.Lock()
-
-	// check whether we do have at least one behavior
-	if p.behaviorStack.IsEmpty() {
-		// release the lock after setting the message context
-		p.mu.Unlock()
-		return nil, ErrEmptyBehavior
-	}
-
+	p.rwMutex.Lock()
 	// create a receiver context
 	context := new(receiveContext)
 
@@ -457,7 +433,7 @@ func (p *pid) Ask(ctx context.Context, to PID, message proto.Message) (response 
 	context.response = make(chan proto.Message, 1)
 
 	// release the lock after setting the message context
-	p.mu.Unlock()
+	p.rwMutex.Unlock()
 
 	// put the message context in the mailbox of the recipient actor
 	to.doReceive(context)
@@ -486,15 +462,9 @@ func (p *pid) Tell(ctx context.Context, to PID, message proto.Message) error {
 	}
 
 	// acquire a lock to set the message context
-	p.mu.Lock()
-
-	// check whether we do have at least one behavior
-	if p.behaviorStack.IsEmpty() {
-		// release the lock after setting the message context
-		p.mu.Unlock()
-		return ErrEmptyBehavior
-	}
-
+	p.rwMutex.Lock()
+	// release the lock after setting the message context
+	defer p.rwMutex.Unlock()
 	// create a message context
 	context := new(receiveContext)
 
@@ -506,9 +476,6 @@ func (p *pid) Tell(ctx context.Context, to PID, message proto.Message) error {
 	context.isAsyncMessage = true
 	context.mu = sync.Mutex{}
 	context.response = make(chan proto.Message, 1)
-
-	// release the lock after setting the message context
-	p.mu.Unlock()
 
 	// put the message context in the mailbox of the recipient actor
 	to.doReceive(context)
@@ -588,10 +555,18 @@ func (p *pid) RemoteTell(ctx context.Context, to *pb.Address, message proto.Mess
 			Message:  marshaled,
 		},
 	})
+
+	// add some debug logging
+	p.logger.Debugf("sending a message to remote=(%s:%d)", to.GetHost(), to.GetPort())
+
 	// send the message and handle the error in case there is any
 	if _, err := remoteClient.RemoteTell(ctx, request); err != nil {
+		p.logger.Error(errors.Wrapf(err, "failed to send message to remote=(%s:%d)", to.GetHost(), to.GetPort()))
 		return err
 	}
+
+	// add some debug logging
+	p.logger.Debugf("message successfully sent to remote=(%s:%d)", to.GetHost(), to.GetPort())
 	return nil
 }
 
@@ -641,6 +616,11 @@ func (p *pid) Shutdown(ctx context.Context) error {
 	// add a span context
 	ctx, span := telemetry.SpanContext(ctx, "Shutdown")
 	defer span.End()
+
+	// acquire the shutdown lock
+	p.shutdownMutex.Lock()
+	// release the lock
+	defer p.shutdownMutex.Unlock()
 
 	p.logger.Info("Shutdown process has started...")
 
@@ -720,8 +700,9 @@ func (p *pid) watchers() *slices.ConcurrentSlice[*WatchMan] {
 // doReceive pushes a given message to the actor mailbox
 func (p *pid) doReceive(ctx ReceiveContext) {
 	// acquire the lock and release it once done
-	p.mu.Lock()
-	defer p.mu.Unlock()
+	p.rwMutex.Lock()
+	defer p.rwMutex.Unlock()
+
 	// set the last processing time
 	p.lastProcessingTime.Store(time.Now())
 
@@ -761,19 +742,15 @@ func (p *pid) init(ctx context.Context) {
 		return
 	}
 	// set the actor is ready
-	p.mu.Lock()
+	p.rwMutex.Lock()
 	p.isRunning.Store(true)
-	p.mu.Unlock()
+	p.rwMutex.Unlock()
 	// add some logging info
 	p.logger.Info("Initialization process successfully completed.")
 }
 
 // reset re-initializes the actor PID
 func (p *pid) reset() {
-	// acquire the lock
-	p.mu.Lock()
-	// release the lock when done
-	defer p.mu.Unlock()
 	// reset the various settings of the PID
 	p.lastProcessingTime = atomic.Time{}
 	p.passivateAfter.Store(DefaultPassivationTimeout)
@@ -789,21 +766,12 @@ func (p *pid) reset() {
 	p.watchMen = slices.NewConcurrentSlice[*WatchMan]()
 	p.telemetry = telemetry.New()
 
-	// reset the behavior stack
-	p.resetBehaviorStack()
 	// register metrics. However, we don't panic when we fail to register
 	// we just log it for now
 	// TODO decide what to do when we fail to register the metrics or export the metrics registration as public
 	if err := p.registerMetrics(); err != nil {
 		p.logger.Error(errors.Wrapf(err, "failed to register actor=%s metrics", p.ActorPath().String()))
 	}
-}
-
-func (p *pid) resetBehaviorStack() {
-	// reset the behavior
-	p.behaviorStack.Clear()
-	// set it to the receiver method
-	p.behaviorStack.Push(p.Receive)
 }
 
 func (p *pid) freeChildren(ctx context.Context) {
@@ -823,45 +791,6 @@ func (p *pid) freeChildren(ctx context.Context) {
 			p.logger.Panic(err)
 		}
 	}
-}
-
-// Behaviors returns the behavior stack
-func (p *pid) behaviors() BehaviorStack {
-	p.mu.Lock()
-	behaviors := p.behaviorStack
-	p.mu.Unlock()
-	return behaviors
-}
-
-// setBehavior is a utility function that helps set the actor behavior
-func (p *pid) setBehavior(behavior Behavior) {
-	p.mu.Lock()
-	p.behaviorStack.Clear()
-	p.behaviorStack.Push(behavior)
-	p.mu.Unlock()
-}
-
-// resetBehavior is a utility function resets the actor behavior
-func (p *pid) resetBehavior() {
-	p.mu.Lock()
-	p.behaviorStack.Clear()
-	p.behaviorStack.Push(p.Receive)
-	p.mu.Unlock()
-}
-
-// setBehaviorStacked adds a behavior to the actor's behaviorStack
-func (p *pid) setBehaviorStacked(behavior Behavior) {
-	p.mu.Lock()
-	p.behaviorStack.Push(behavior)
-	p.mu.Unlock()
-}
-
-// unsetBehaviorStacked sets the actor's behavior to the previous behavior
-// prior to setBehaviorStacked is called
-func (p *pid) unsetBehaviorStacked() {
-	p.mu.Lock()
-	p.behaviorStack.Pop()
-	p.mu.Unlock()
 }
 
 // registerMetrics register the PID metrics with OTel instrumentation.
@@ -924,13 +853,8 @@ func (p *pid) handleReceived(received ReceiveContext) {
 			p.panicCounter.Inc()
 		}
 	}()
-	// synchronize the receiving call
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	// send the message to the current actor behavior
-	if behavior, ok := p.behaviorStack.Peek(); ok {
-		behavior(received)
-	}
+	// send the message to the current receiver
+	p.Receive(received)
 }
 
 // supervise watches for child actor's failure and act based upon the supervisory strategy
@@ -980,6 +904,7 @@ func (p *pid) supervise(cid PID, watcher *WatchMan) {
 func (p *pid) passivationListener() {
 	p.logger.Info("start the passivation listener...")
 	// create the ticker
+	p.logger.Infof("passivation timeout is (%s)", p.passivateAfter.Load().String())
 	ticker := time.NewTicker(p.passivateAfter.Load())
 	// create the stop ticker signal
 	tickerStopSig := make(chan Unit, 1)

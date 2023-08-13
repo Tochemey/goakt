@@ -5,7 +5,7 @@ package goaktv1connect
 import (
 	context "context"
 
-	connect "github.com/bufbuild/connect-go"
+	connect "connectrpc.com/connect"
 
 	goaktv1 "github.com/tochemey/goakt/internal/goakt/v1"
 

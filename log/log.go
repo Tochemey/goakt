@@ -12,8 +12,8 @@ import (
 
 // DefaultLogger represents the default Log to use
 // This Log wraps zerolog under the hood
-var DefaultLogger = New(InfoLevel, os.Stdout)
-var DiscardLogger = New(InfoLevel, io.Discard)
+var DefaultLogger = New(DebugLevel, os.Stdout)
+var DiscardLogger = New(DebugLevel, io.Discard)
 
 // Info logs to INFO level.
 func Info(v ...interface{}) {

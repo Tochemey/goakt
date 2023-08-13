@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"os/signal"
 	"sync"
@@ -23,7 +22,6 @@ func main() {
 
 	// create the actor system. kindly in real-life application handle the error
 	actorSystem, _ := goakt.NewActorSystem("SampleActorSystem",
-		goakt.WithExpireActorAfter(10*time.Second), // set big passivation time
 		goakt.WithLogger(logger),
 		goakt.WithActorInitMaxRetries(3))
 
@@ -83,12 +81,9 @@ func (p *PingActor) PreStart(ctx context.Context) error {
 func (p *PingActor) Receive(ctx goakt.ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *samplepb.Pong:
-		p.logger.Infof(fmt.Sprintf("received Pong from %s", ctx.Sender().ActorPath().String()))
-		// reply the sender in case there is a sender
-		if ctx.Sender() != goakt.NoSender {
-			// let us reply to the sender
-			_ = ctx.Self().Tell(ctx.Context(), ctx.Sender(), new(samplepb.Ping))
-		}
+		p.logger.Infof("%s received pong message from %s", ctx.Self().ActorPath().String(), ctx.Sender().ActorPath().String())
+		// let us reply to the sender
+		_ = ctx.Self().Tell(ctx.Context(), ctx.Sender(), new(samplepb.Ping))
 		p.count.Add(1)
 	default:
 		p.logger.Panic(goakt.ErrUnhandled)
@@ -128,11 +123,13 @@ func (p *PongActor) PreStart(ctx context.Context) error {
 func (p *PongActor) Receive(ctx goakt.ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *samplepb.Ping:
-		p.logger.Infof(fmt.Sprintf("received Ping from %s", ctx.Sender().ActorPath().String()))
+		self := ctx.Self()
+		sender := ctx.Sender()
+
+		selfPath := self.ActorPath()
+		p.logger.Infof("%s received ping message from %s", selfPath.String(), sender.ActorPath().String())
 		// reply the sender in case there is a sender
-		if ctx.Sender() != nil && ctx.Sender() != goakt.NoSender {
-			_ = ctx.Self().Tell(ctx.Context(), ctx.Sender(), new(samplepb.Pong))
-		}
+		_ = ctx.Self().Tell(ctx.Context(), ctx.Sender(), new(samplepb.Pong))
 		p.count.Add(1)
 	default:
 		p.logger.Panic(goakt.ErrUnhandled)

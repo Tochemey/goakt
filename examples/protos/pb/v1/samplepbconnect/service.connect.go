@@ -5,9 +5,9 @@
 package samplepbconnect
 
 import (
+	connect_go "connectrpc.com/connect"
 	context "context"
 	errors "errors"
-	connect_go "github.com/bufbuild/connect-go"
 	v1 "github.com/tochemey/goakt/examples/protos/pb/v1"
 	http "net/http"
 	strings "strings"

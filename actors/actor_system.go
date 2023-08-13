@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/bufbuild/connect-go"
-	otelconnect "github.com/bufbuild/connect-opentelemetry-go"
+	"connectrpc.com/connect"
+	otelconnect "connectrpc.com/otelconnect"
 	cmp "github.com/orcaman/concurrent-map/v2"
 	"github.com/pkg/errors"
 	"github.com/tochemey/goakt/cluster"
@@ -151,15 +151,15 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 				clusterChan:         make(chan *goaktpb.WireActor, 10),
 				name:                name,
 				logger:              log.DefaultLogger,
-				expireActorAfter:    2 * time.Second,
-				replyTimeout:        100 * time.Millisecond,
-				actorInitMaxRetries: 5,
-				supervisorStrategy:  StopDirective,
+				expireActorAfter:    DefaultPassivationTimeout,
+				replyTimeout:        DefaultReplyTimeout,
+				actorInitMaxRetries: DefaultInitMaxRetries,
+				supervisorStrategy:  DefaultSupervisoryStrategy,
 				telemetry:           telemetry.New(),
 				remotingEnabled:     atomic.NewBool(false),
 				clusterEnabled:      atomic.NewBool(false),
 				mu:                  sync.Mutex{},
-				shutdownTimeout:     30 * time.Second,
+				shutdownTimeout:     DefaultShutdownTimeout,
 			}
 			// set the reflection
 			system.reflection = NewReflection(system.typesLoader)
@@ -611,6 +611,9 @@ func (asys *actorSystem) RemoteTell(ctx context.Context, request *connect.Reques
 	reqCopy := request.Msg
 
 	receiver := reqCopy.GetRemoteMessage().GetReceiver()
+
+	// add some debug logger
+	logger.Debugf("received a remote tell call for=(%s)", receiver.String())
 
 	// set the actor path with the remoting is enabled
 	if !asys.remotingEnabled.Load() {

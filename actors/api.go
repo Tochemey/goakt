@@ -5,8 +5,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/bufbuild/connect-go"
-	otelconnect "github.com/bufbuild/connect-opentelemetry-go"
+	"connectrpc.com/connect"
+	otelconnect "connectrpc.com/otelconnect"
 	goaktpb "github.com/tochemey/goakt/internal/goakt/v1"
 	"github.com/tochemey/goakt/internal/goakt/v1/goaktv1connect"
 	pb "github.com/tochemey/goakt/messages/v1"
@@ -31,14 +31,6 @@ func Ask(ctx context.Context, to PID, message proto.Message, timeout time.Durati
 
 	// acquire a lock to set the message context
 	mu.Lock()
-	// check whether we do have at least one behavior
-	behaviors := to.behaviors()
-	// check whether the recipient does have some behavior
-	if behaviors.IsEmpty() {
-		// release the lock after config the message context
-		mu.Unlock()
-		return nil, ErrEmptyBehavior
-	}
 
 	// create a receiver context
 	context := new(receiveContext)
@@ -82,14 +74,6 @@ func Tell(ctx context.Context, to PID, message proto.Message) error {
 
 	// acquire a lock to set the message context
 	mu.Lock()
-	// check whether we do have at least one behavior
-	behaviors := to.behaviors()
-	// check whether the recipient does have some behavior
-	if behaviors.IsEmpty() {
-		// release the lock after config the message context
-		mu.Unlock()
-		return ErrEmptyBehavior
-	}
 	// create a message context
 	context := new(receiveContext)
 

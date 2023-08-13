@@ -30,5 +30,5 @@ func GetClient() *http.Client {
 
 // GetURL create a http connection address
 func GetURL(host string, port int) string {
-	return fmt.Sprintf("https://%s:%d", host, port)
+	return fmt.Sprintf("http://%s:%d", host, port)
 }

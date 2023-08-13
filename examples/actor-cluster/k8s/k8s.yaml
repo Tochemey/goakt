@@ -51,7 +51,7 @@ spec:
           ports:
             - containerPort: 50051
               name: grpc
-            - containerPort: 9000
+            - containerPort: 50052
               name: remoting-port
               protocol: TCP
             - containerPort: 3322
@@ -78,7 +78,7 @@ spec:
             - name: CLUSTER_PORT
               value: "3320"
             - name: REMOTING_PORT
-              value: "9000"
+              value: "50052"
           resources:
             requests:
               memory: "64Mi"
@@ -103,7 +103,7 @@ spec:
    clusterIP: None
    ports:
      - protocol: TCP
-       port: 9000
+       port: 50052
        targetPort: remoting
        name: remoting
      - protocol: TCP

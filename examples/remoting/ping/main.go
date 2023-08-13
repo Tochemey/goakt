@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
@@ -13,19 +12,18 @@ import (
 	"github.com/tochemey/goakt/log"
 	pb "github.com/tochemey/goakt/messages/v1"
 	"go.uber.org/atomic"
-	"google.golang.org/protobuf/proto"
 )
 
 const (
-	port = 9000
-	host = "0.0.0.0"
+	port = 50051
+	host = "localhost"
 )
 
 func main() {
 	ctx := context.Background()
 
 	// use the messages default log. real-life implement the log interface`
-	logger := log.DefaultLogger
+	logger := log.New(log.DebugLevel, os.Stdout)
 
 	// create the actor system. kindly in real-life application handle the error
 	actorSystem, _ := goakt.NewActorSystem("SampleActorSystem",
@@ -44,7 +42,7 @@ func main() {
 	timer := time.AfterFunc(time.Second, func() {
 		_ = pingActor.RemoteTell(ctx, &pb.Address{
 			Host: host,
-			Port: 9001,
+			Port: 50052,
 			Name: "Pong",
 			Id:   "",
 		}, new(samplepb.Ping))
@@ -83,21 +81,16 @@ func (p *PingActor) PreStart(ctx context.Context) error {
 func (p *PingActor) Receive(ctx goakt.ReceiveContext) {
 	switch msg := ctx.Message().(type) {
 	case *samplepb.Pong:
-		p.logger.Infof(fmt.Sprintf("received Pong from %s", ctx.Sender().ActorPath().String()))
+		p.logger.Infof("received Pong from %s", ctx.Sender().ActorPath().String())
 		// reply the sender in case there is a sender
-		if ctx.Sender() != goakt.NoSender {
-			// let us reply to the sender
-			_ = ctx.Self().Tell(ctx.Context(), ctx.Sender(), new(samplepb.Ping))
-		}
+		_ = ctx.Self().Tell(ctx.Context(), ctx.Sender(), new(samplepb.Ping))
 		p.count.Add(1)
 	case *pb.RemoteMessage:
 		p.logger.Infof("received remote Pong from %s", msg.GetSender().String())
 		pong := new(samplepb.Pong)
 		_ = msg.GetMessage().UnmarshalTo(pong)
-		if !proto.Equal(msg.GetSender(), goakt.RemoteNoSender) {
-			_ = ctx.Self().RemoteTell(context.Background(), msg.GetSender(), new(samplepb.Ping))
-			p.count.Add(1)
-		}
+		_ = ctx.Self().RemoteTell(context.Background(), msg.GetSender(), new(samplepb.Ping))
+		p.count.Add(1)
 	default:
 		p.logger.Panic(goakt.ErrUnhandled)
 	}

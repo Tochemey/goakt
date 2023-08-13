@@ -11,19 +11,18 @@ import (
 	"github.com/tochemey/goakt/log"
 	pb "github.com/tochemey/goakt/messages/v1"
 	"go.uber.org/atomic"
-	"google.golang.org/protobuf/proto"
 )
 
 const (
-	port = 9001
-	host = "0.0.0.0"
+	port = 50052
+	host = "localhost"
 )
 
 func main() {
 	ctx := context.Background()
 
 	// use the messages default log. real-life implement the log interface`
-	logger := log.DefaultLogger
+	logger := log.New(log.DebugLevel, os.Stdout)
 
 	// create the actor system. kindly in real-life application handle the error
 	actorSystem, _ := goakt.NewActorSystem("SampleActorSystem",
@@ -36,7 +35,7 @@ func main() {
 	_ = actorSystem.Start(ctx)
 
 	// create an actor
-	actorSystem.StartActor(ctx, "Pong", NewPongActor())
+	actorSystem.StartActor(ctx, "Pong", NewPongActor(logger))
 
 	// capture ctrl+c
 	interruptSignal := make(chan os.Signal, 1)
@@ -55,13 +54,13 @@ type PongActor struct {
 
 var _ goakt.Actor = (*PongActor)(nil)
 
-func NewPongActor() *PongActor {
-	return &PongActor{}
+func NewPongActor(logger log.Logger) *PongActor {
+	return &PongActor{
+		logger: logger,
+	}
 }
 
 func (p *PongActor) PreStart(ctx context.Context) error {
-	// set the log
-	p.logger = log.DefaultLogger
 	p.count = atomic.NewInt32(0)
 	p.logger.Info("About to Start")
 	return nil
@@ -77,13 +76,20 @@ func (p *PongActor) Receive(ctx goakt.ReceiveContext) {
 		}
 		p.count.Add(1)
 	case *pb.RemoteMessage:
-		p.logger.Infof("received remote Ping from %s", msg.GetSender().String())
+		// add info log
+		p.logger.Infof("received remote message=(%s) from %s", msg.GetMessage().GetTypeUrl(), msg.GetSender().String())
+		// parse the message received
 		ping := new(samplepb.Ping)
-		_ = msg.GetMessage().UnmarshalTo(ping)
-		if !proto.Equal(msg.GetSender(), goakt.RemoteNoSender) {
-			_ = ctx.Self().RemoteTell(context.Background(), msg.GetSender(), new(samplepb.Pong))
-			p.count.Add(1)
+		// panic when unable to parse the message
+		if err := msg.GetMessage().UnmarshalTo(ping); err != nil {
+			panic(err)
 		}
+		// add a debug log
+		p.logger.Debugf("replying to the message sender...")
+		// send a message to the sender
+		_ = ctx.Self().RemoteTell(context.Background(), msg.GetSender(), new(samplepb.Pong))
+		// increase the counter
+		p.count.Add(1)
 	default:
 		p.logger.Panic(goakt.ErrUnhandled)
 	}
