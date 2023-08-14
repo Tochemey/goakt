@@ -14,6 +14,10 @@ import (
 // GetClient creates a http client use h2c
 func GetClient() *http.Client {
 	return &http.Client{
+		// Most RPC servers don't use HTTP redirects
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
 		Transport: &http2.Transport{
 			AllowHTTP: true,
 			DialTLSContext: func(ctx context.Context, network, addr string, cfg *tls.Config) (net.Conn, error) {
