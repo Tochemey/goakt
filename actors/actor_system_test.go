@@ -142,7 +142,7 @@ func TestActorSystem(t *testing.T) {
 
 		// get the actor partition
 		partition := newActorSystem.GetPartition(ctx, actorName)
-		assert.GreaterOrEqual(t, partition, 0)
+		assert.GreaterOrEqual(t, partition, uint64(0))
 		// stop the actor after some time
 		ctx, cancel := context.WithTimeout(ctx, time.Second)
 		defer cancel()
