@@ -1,6 +1,6 @@
 VERSION 0.7
 
-FROM tochemey/docker-go:1.20.6-0.9.1
+FROM tochemey/docker-go:1.21.0-1.0.0
 
 # install the various tools to generate connect-go
 RUN go install github.com/fullstorydev/grpcurl/cmd/grpcurl@latest
@@ -129,7 +129,7 @@ actor-cluster-image:
     RUN chmod +x ./accounts
 
     EXPOSE 50051
-    EXPOSE 5052
+    EXPOSE 50052
     EXPOSE 3322
     EXPOSE 3320
 

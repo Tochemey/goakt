@@ -54,8 +54,8 @@ func TestCluster(t *testing.T) {
 		t.Setenv("GOSSIP_PORT", strconv.Itoa(gossipPort))
 		t.Setenv("CLUSTER_PORT", strconv.Itoa(clusterPort))
 		t.Setenv("REMOTING_PORT", strconv.Itoa(remotingPort))
-		t.Setenv("POD_NAME", "testNode")
-		t.Setenv("POD_IP", host)
+		t.Setenv("NODE_NAME", "testNode")
+		t.Setenv("NODE_IP", host)
 
 		node, err := New("test", serviceDiscovery)
 		require.NotNil(t, node)
@@ -111,8 +111,8 @@ func TestCluster(t *testing.T) {
 		t.Setenv("GOSSIP_PORT", strconv.Itoa(gossipPort))
 		t.Setenv("CLUSTER_PORT", strconv.Itoa(clusterPort))
 		t.Setenv("REMOTING_PORT", strconv.Itoa(remotingPort))
-		t.Setenv("POD_NAME", "testNode")
-		t.Setenv("POD_IP", host)
+		t.Setenv("NODE_NAME", "testNode")
+		t.Setenv("NODE_IP", host)
 
 		node, err := New("test", serviceDiscovery)
 		require.NotNil(t, node)

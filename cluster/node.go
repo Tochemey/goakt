@@ -12,8 +12,8 @@ type hostNodeConfig struct {
 	GossipPort   int    `env:"GOSSIP_PORT"`
 	ClusterPort  int    `env:"CLUSTER_PORT"`
 	RemotingPort int    `env:"REMOTING_PORT"`
-	Name         string `env:"POD_NAME"`
-	Host         string `env:"POD_IP"`
+	Name         string `env:"NODE_NAME"`
+	Host         string `env:"NODE_IP"`
 }
 
 // node represents a discovered node

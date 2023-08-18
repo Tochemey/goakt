@@ -108,8 +108,8 @@ At the moment the following providers are implemented:
 In addition, one needs to set the following environment variables irrespective of the discovery provider to help
 identify the host node on which the cluster service is running:
 
-* `POD_NAME`: the node name. For instance in kubernetes one can just get it from the `metadata.name`
-* `POD_IP`: the node host address. For instance in kubernetes one can just get it from the `status.podIP`
+* `NODE_NAME`: the node name. For instance in kubernetes one can just get it from the `metadata.name`
+* `NODE_IP`: the node host address. For instance in kubernetes one can just get it from the `status.podIP`
 * `GOSSIP_PORT`: the gossip protocol engine port.
 * `CLUSTER_PORT`: the cluster port to help communicate with other GoAkt nodes in the cluster
 * `REMOTING_PORT`: help remoting communication between actors

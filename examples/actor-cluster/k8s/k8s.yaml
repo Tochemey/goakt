@@ -51,6 +51,7 @@ spec:
           ports:
             - containerPort: 50051
               name: grpc
+              protocol: TCP
             - containerPort: 50052
               name: remoting-port
               protocol: TCP
@@ -61,15 +62,11 @@ spec:
               name: cluster-port
               protocol: TCP
           env:
-            - name: HOST_IP
-              valueFrom:
-                fieldRef:
-                  fieldPath: status.hostIP
-            - name: POD_NAME
+            - name: NODE_NAME
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.name
-            - name: POD_IP
+            - name: NODE_IP
               valueFrom:
                 fieldRef:
                   fieldPath: status.podIP
@@ -103,18 +100,7 @@ spec:
    clusterIP: None
    ports:
      - protocol: TCP
-       port: 50052
-       targetPort: remoting
-       name: remoting
-     - protocol: TCP
        port: 50051
        targetPort: grpc
        name: grpc
-     - port: 3320
-       protocol: TCP
-       name: cluster-port
-       targetPort: cluster-port
-     - port: 3322
-       protocol: TCP
-       name: gossip-port
-       targetPort: gossip-port
+

@@ -101,8 +101,8 @@ func TestActorSystem(t *testing.T) {
 		t.Setenv("GOSSIP_PORT", strconv.Itoa(gossipPort))
 		t.Setenv("CLUSTER_PORT", strconv.Itoa(clusterPort))
 		t.Setenv("REMOTING_PORT", strconv.Itoa(remotingPort))
-		t.Setenv("POD_NAME", podName)
-		t.Setenv("POD_IP", host)
+		t.Setenv("NODE_NAME", podName)
+		t.Setenv("NODE_IP", host)
 
 		// define discovered addresses
 		addrs := []string{
