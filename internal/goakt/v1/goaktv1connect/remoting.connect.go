@@ -5,7 +5,7 @@
 package goaktv1connect
 
 import (
-	connect_go "connectrpc.com/connect"
+	connect "connectrpc.com/connect"
 	context "context"
 	errors "errors"
 	v1 "github.com/tochemey/goakt/internal/goakt/v1"
@@ -18,7 +18,7 @@ import (
 // generated with a version of connect newer than the one compiled into your binary. You can fix the
 // problem by either regenerating this code with an older version of connect or updating the connect
 // version compiled into your binary.
-const _ = connect_go.IsAtLeastVersion0_1_0
+const _ = connect.IsAtLeastVersion0_1_0
 
 const (
 	// RemoteMessagingServiceName is the fully-qualified name of the RemoteMessagingService service.
@@ -49,13 +49,13 @@ type RemoteMessagingServiceClient interface {
 	// RemoteAsk is used to send a message to an actor remotely and expect a response
 	// immediately. With this type of message the receiver cannot communicate back to Sender
 	// except reply the message with a response. This one-way communication
-	RemoteAsk(context.Context, *connect_go.Request[v1.RemoteAskRequest]) (*connect_go.Response[v1.RemoteAskResponse], error)
+	RemoteAsk(context.Context, *connect.Request[v1.RemoteAskRequest]) (*connect.Response[v1.RemoteAskResponse], error)
 	// RemoteTell is used to send a message to an actor remotely by another actor
 	// This is the only way remote actors can interact with each other. The actor on the
 	// other line can reply to the sender by using the Sender in the message
-	RemoteTell(context.Context, *connect_go.Request[v1.RemoteTellRequest]) (*connect_go.Response[v1.RemoteTellResponse], error)
+	RemoteTell(context.Context, *connect.Request[v1.RemoteTellRequest]) (*connect.Response[v1.RemoteTellResponse], error)
 	// Lookup for an actor on a remote host.
-	RemoteLookup(context.Context, *connect_go.Request[v1.RemoteLookupRequest]) (*connect_go.Response[v1.RemoteLookupResponse], error)
+	RemoteLookup(context.Context, *connect.Request[v1.RemoteLookupRequest]) (*connect.Response[v1.RemoteLookupResponse], error)
 }
 
 // NewRemoteMessagingServiceClient constructs a client for the goakt.v1.RemoteMessagingService
@@ -65,20 +65,20 @@ type RemoteMessagingServiceClient interface {
 //
 // The URL supplied here should be the base URL for the Connect or gRPC server (for example,
 // http://api.acme.com or https://acme.com/grpc).
-func NewRemoteMessagingServiceClient(httpClient connect_go.HTTPClient, baseURL string, opts ...connect_go.ClientOption) RemoteMessagingServiceClient {
+func NewRemoteMessagingServiceClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) RemoteMessagingServiceClient {
 	baseURL = strings.TrimRight(baseURL, "/")
 	return &remoteMessagingServiceClient{
-		remoteAsk: connect_go.NewClient[v1.RemoteAskRequest, v1.RemoteAskResponse](
+		remoteAsk: connect.NewClient[v1.RemoteAskRequest, v1.RemoteAskResponse](
 			httpClient,
 			baseURL+RemoteMessagingServiceRemoteAskProcedure,
 			opts...,
 		),
-		remoteTell: connect_go.NewClient[v1.RemoteTellRequest, v1.RemoteTellResponse](
+		remoteTell: connect.NewClient[v1.RemoteTellRequest, v1.RemoteTellResponse](
 			httpClient,
 			baseURL+RemoteMessagingServiceRemoteTellProcedure,
 			opts...,
 		),
-		remoteLookup: connect_go.NewClient[v1.RemoteLookupRequest, v1.RemoteLookupResponse](
+		remoteLookup: connect.NewClient[v1.RemoteLookupRequest, v1.RemoteLookupResponse](
 			httpClient,
 			baseURL+RemoteMessagingServiceRemoteLookupProcedure,
 			opts...,
@@ -88,23 +88,23 @@ func NewRemoteMessagingServiceClient(httpClient connect_go.HTTPClient, baseURL s
 
 // remoteMessagingServiceClient implements RemoteMessagingServiceClient.
 type remoteMessagingServiceClient struct {
-	remoteAsk    *connect_go.Client[v1.RemoteAskRequest, v1.RemoteAskResponse]
-	remoteTell   *connect_go.Client[v1.RemoteTellRequest, v1.RemoteTellResponse]
-	remoteLookup *connect_go.Client[v1.RemoteLookupRequest, v1.RemoteLookupResponse]
+	remoteAsk    *connect.Client[v1.RemoteAskRequest, v1.RemoteAskResponse]
+	remoteTell   *connect.Client[v1.RemoteTellRequest, v1.RemoteTellResponse]
+	remoteLookup *connect.Client[v1.RemoteLookupRequest, v1.RemoteLookupResponse]
 }
 
 // RemoteAsk calls goakt.v1.RemoteMessagingService.RemoteAsk.
-func (c *remoteMessagingServiceClient) RemoteAsk(ctx context.Context, req *connect_go.Request[v1.RemoteAskRequest]) (*connect_go.Response[v1.RemoteAskResponse], error) {
+func (c *remoteMessagingServiceClient) RemoteAsk(ctx context.Context, req *connect.Request[v1.RemoteAskRequest]) (*connect.Response[v1.RemoteAskResponse], error) {
 	return c.remoteAsk.CallUnary(ctx, req)
 }
 
 // RemoteTell calls goakt.v1.RemoteMessagingService.RemoteTell.
-func (c *remoteMessagingServiceClient) RemoteTell(ctx context.Context, req *connect_go.Request[v1.RemoteTellRequest]) (*connect_go.Response[v1.RemoteTellResponse], error) {
+func (c *remoteMessagingServiceClient) RemoteTell(ctx context.Context, req *connect.Request[v1.RemoteTellRequest]) (*connect.Response[v1.RemoteTellResponse], error) {
 	return c.remoteTell.CallUnary(ctx, req)
 }
 
 // RemoteLookup calls goakt.v1.RemoteMessagingService.RemoteLookup.
-func (c *remoteMessagingServiceClient) RemoteLookup(ctx context.Context, req *connect_go.Request[v1.RemoteLookupRequest]) (*connect_go.Response[v1.RemoteLookupResponse], error) {
+func (c *remoteMessagingServiceClient) RemoteLookup(ctx context.Context, req *connect.Request[v1.RemoteLookupRequest]) (*connect.Response[v1.RemoteLookupResponse], error) {
 	return c.remoteLookup.CallUnary(ctx, req)
 }
 
@@ -114,13 +114,13 @@ type RemoteMessagingServiceHandler interface {
 	// RemoteAsk is used to send a message to an actor remotely and expect a response
 	// immediately. With this type of message the receiver cannot communicate back to Sender
 	// except reply the message with a response. This one-way communication
-	RemoteAsk(context.Context, *connect_go.Request[v1.RemoteAskRequest]) (*connect_go.Response[v1.RemoteAskResponse], error)
+	RemoteAsk(context.Context, *connect.Request[v1.RemoteAskRequest]) (*connect.Response[v1.RemoteAskResponse], error)
 	// RemoteTell is used to send a message to an actor remotely by another actor
 	// This is the only way remote actors can interact with each other. The actor on the
 	// other line can reply to the sender by using the Sender in the message
-	RemoteTell(context.Context, *connect_go.Request[v1.RemoteTellRequest]) (*connect_go.Response[v1.RemoteTellResponse], error)
+	RemoteTell(context.Context, *connect.Request[v1.RemoteTellRequest]) (*connect.Response[v1.RemoteTellResponse], error)
 	// Lookup for an actor on a remote host.
-	RemoteLookup(context.Context, *connect_go.Request[v1.RemoteLookupRequest]) (*connect_go.Response[v1.RemoteLookupResponse], error)
+	RemoteLookup(context.Context, *connect.Request[v1.RemoteLookupRequest]) (*connect.Response[v1.RemoteLookupResponse], error)
 }
 
 // NewRemoteMessagingServiceHandler builds an HTTP handler from the service implementation. It
@@ -128,18 +128,18 @@ type RemoteMessagingServiceHandler interface {
 //
 // By default, handlers support the Connect, gRPC, and gRPC-Web protocols with the binary Protobuf
 // and JSON codecs. They also support gzip compression.
-func NewRemoteMessagingServiceHandler(svc RemoteMessagingServiceHandler, opts ...connect_go.HandlerOption) (string, http.Handler) {
-	remoteMessagingServiceRemoteAskHandler := connect_go.NewUnaryHandler(
+func NewRemoteMessagingServiceHandler(svc RemoteMessagingServiceHandler, opts ...connect.HandlerOption) (string, http.Handler) {
+	remoteMessagingServiceRemoteAskHandler := connect.NewUnaryHandler(
 		RemoteMessagingServiceRemoteAskProcedure,
 		svc.RemoteAsk,
 		opts...,
 	)
-	remoteMessagingServiceRemoteTellHandler := connect_go.NewUnaryHandler(
+	remoteMessagingServiceRemoteTellHandler := connect.NewUnaryHandler(
 		RemoteMessagingServiceRemoteTellProcedure,
 		svc.RemoteTell,
 		opts...,
 	)
-	remoteMessagingServiceRemoteLookupHandler := connect_go.NewUnaryHandler(
+	remoteMessagingServiceRemoteLookupHandler := connect.NewUnaryHandler(
 		RemoteMessagingServiceRemoteLookupProcedure,
 		svc.RemoteLookup,
 		opts...,
@@ -161,14 +161,14 @@ func NewRemoteMessagingServiceHandler(svc RemoteMessagingServiceHandler, opts ..
 // UnimplementedRemoteMessagingServiceHandler returns CodeUnimplemented from all methods.
 type UnimplementedRemoteMessagingServiceHandler struct{}
 
-func (UnimplementedRemoteMessagingServiceHandler) RemoteAsk(context.Context, *connect_go.Request[v1.RemoteAskRequest]) (*connect_go.Response[v1.RemoteAskResponse], error) {
-	return nil, connect_go.NewError(connect_go.CodeUnimplemented, errors.New("goakt.v1.RemoteMessagingService.RemoteAsk is not implemented"))
+func (UnimplementedRemoteMessagingServiceHandler) RemoteAsk(context.Context, *connect.Request[v1.RemoteAskRequest]) (*connect.Response[v1.RemoteAskResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("goakt.v1.RemoteMessagingService.RemoteAsk is not implemented"))
 }
 
-func (UnimplementedRemoteMessagingServiceHandler) RemoteTell(context.Context, *connect_go.Request[v1.RemoteTellRequest]) (*connect_go.Response[v1.RemoteTellResponse], error) {
-	return nil, connect_go.NewError(connect_go.CodeUnimplemented, errors.New("goakt.v1.RemoteMessagingService.RemoteTell is not implemented"))
+func (UnimplementedRemoteMessagingServiceHandler) RemoteTell(context.Context, *connect.Request[v1.RemoteTellRequest]) (*connect.Response[v1.RemoteTellResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("goakt.v1.RemoteMessagingService.RemoteTell is not implemented"))
 }
 
-func (UnimplementedRemoteMessagingServiceHandler) RemoteLookup(context.Context, *connect_go.Request[v1.RemoteLookupRequest]) (*connect_go.Response[v1.RemoteLookupResponse], error) {
-	return nil, connect_go.NewError(connect_go.CodeUnimplemented, errors.New("goakt.v1.RemoteMessagingService.RemoteLookup is not implemented"))
+func (UnimplementedRemoteMessagingServiceHandler) RemoteLookup(context.Context, *connect.Request[v1.RemoteLookupRequest]) (*connect.Response[v1.RemoteLookupResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("goakt.v1.RemoteMessagingService.RemoteLookup is not implemented"))
 }

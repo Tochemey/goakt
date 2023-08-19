@@ -44,19 +44,24 @@ type ActorSystem interface {
 	Start(ctx context.Context) error
 	// Stop stops the actor system
 	Stop(ctx context.Context) error
-	// StartActor creates an actor in the system and starts it
-	StartActor(ctx context.Context, name string, actor Actor) PID
-	// StopActor stops a given actor in the system
-	StopActor(ctx context.Context, name string) error
-	// RestartActor restarts a given actor in the system
-	RestartActor(ctx context.Context, name string) (PID, error)
+	// Spawn creates an actor in the system and starts it
+	Spawn(ctx context.Context, name string, actor Actor) PID
+	// Kill stops a given actor in the system
+	Kill(ctx context.Context, name string) error
+	// ReSpawn recreates a given actor in the system
+	ReSpawn(ctx context.Context, name string) (PID, error)
 	// NumActors returns the total number of active actors in the system
 	NumActors() uint64
-	// GetLocalActor returns the reference of a local actor.
+	// LocalActor returns the reference of a local actor.
 	// A local actor is an actor that reside on the same node where the given actor system is running
-	GetLocalActor(ctx context.Context, actorName string) (PID, error)
-	// GetRemoteActor returns the address of a remote actor when cluster is enabled
-	GetRemoteActor(ctx context.Context, actorName string) (addr *pb.Address, err error)
+	LocalActor(ctx context.Context, actorName string) (PID, error)
+	// RemoteActor returns the address of a remote actor when cluster is enabled
+	// When the cluster mode is not enabled an actor not found error will be returned
+	// One can always check whether cluster is enabled before calling this method or just use the ActorOf method.
+	RemoteActor(ctx context.Context, actorName string) (addr *pb.Address, err error)
+	// ActorOf returns an existing actor in the system or in the cluster when clustering is enabled
+	// If cluster mode is activated, the PID will be nil. An actor not found error is return when the actor is not found.
+	ActorOf(ctx context.Context, actorName string) (addr *pb.Address, pid PID, err error)
 	// InCluster states whether the actor system is running within a cluster of nodes
 	InCluster() bool
 	// GetPartition returns the partition where a given actor is located
@@ -199,10 +204,10 @@ func (asys *actorSystem) NumActors() uint64 {
 	return uint64(asys.actors.Count())
 }
 
-// StartActor creates or returns the instance of a given actor in the system
-func (asys *actorSystem) StartActor(ctx context.Context, name string, actor Actor) PID {
+// Spawn creates or returns the instance of a given actor in the system
+func (asys *actorSystem) Spawn(ctx context.Context, name string, actor Actor) PID {
 	// add a span context
-	ctx, span := telemetry.SpanContext(ctx, "StartActor")
+	ctx, span := telemetry.SpanContext(ctx, "Spawn")
 	defer span.End()
 	// first check whether the actor system has started
 	if !asys.hasStarted.Load() {
@@ -270,10 +275,10 @@ func (asys *actorSystem) StartActor(ctx context.Context, name string, actor Acto
 	return pid
 }
 
-// StopActor stops a given actor in the system
-func (asys *actorSystem) StopActor(ctx context.Context, name string) error {
+// Kill stops a given actor in the system
+func (asys *actorSystem) Kill(ctx context.Context, name string) error {
 	// add a span context
-	ctx, span := telemetry.SpanContext(ctx, "StopActor")
+	ctx, span := telemetry.SpanContext(ctx, "Kill")
 	defer span.End()
 	// first check whether the actor system has started
 	if !asys.hasStarted.Load() {
@@ -296,10 +301,10 @@ func (asys *actorSystem) StopActor(ctx context.Context, name string) error {
 	return fmt.Errorf("actor=%s not found in the system", actorPath.String())
 }
 
-// RestartActor restarts a given actor in the system
-func (asys *actorSystem) RestartActor(ctx context.Context, name string) (PID, error) {
+// ReSpawn recreates a given actor in the system
+func (asys *actorSystem) ReSpawn(ctx context.Context, name string) (PID, error) {
 	// add a span context
-	ctx, span := telemetry.SpanContext(ctx, "RestartActor")
+	ctx, span := telemetry.SpanContext(ctx, "ReSpawn")
 	defer span.End()
 	// first check whether the actor system has started
 	if !asys.hasStarted.Load() {
@@ -352,16 +357,59 @@ func (asys *actorSystem) Actors() []PID {
 	return refs
 }
 
-// GetLocalActor returns the reference of a local actor.
-// A local actor is an actor that reside on the same node where the given actor system is running
-func (asys *actorSystem) GetLocalActor(ctx context.Context, actorName string) (PID, error) {
+// ActorOf returns an existing actor in the system or in the cluster when clustering is enabled
+// When cluster mode is activated, the PID will be nil. An actor not found error is return when the actor is not found.
+func (asys *actorSystem) ActorOf(ctx context.Context, actorName string) (addr *pb.Address, pid PID, err error) {
 	// acquire the lock
 	asys.mu.Lock()
 	// release the lock
 	defer asys.mu.Unlock()
 
 	// add a span context
-	ctx, span := telemetry.SpanContext(ctx, "GetLocalActor")
+	ctx, span := telemetry.SpanContext(ctx, "ActorOf")
+	defer span.End()
+
+	// try to locate the actor in the cluster when cluster is enabled
+	if asys.cluster != nil || asys.clusterEnabled.Load() {
+		// let us locate the actor in the cluster
+		wireActor, err := asys.cluster.GetActor(ctx, actorName)
+		// handle the eventual error
+		if err != nil {
+			if errors.Is(err, cluster.ErrActorNotFound) {
+				asys.logger.Infof("actor=%s not found", actorName)
+				return nil, nil, ErrActorNotFound
+			}
+			return nil, nil, errors.Wrapf(err, "failed to fetch remote actor=%s", actorName)
+		}
+
+		// return the address of the remote actor
+		return wireActor.GetActorAddress(), nil, nil
+	}
+
+	// try to locate the actor when cluster is not enabled
+	// first let us do a local lookup
+	items := asys.actors.Items()
+	// iterate the local actors storage
+	for _, actorRef := range items {
+		if actorRef.ActorPath().Name() == actorName {
+			return actorRef.ActorPath().RemoteAddress(), actorRef, nil
+		}
+	}
+	// add a logger
+	asys.logger.Infof("actor=%s not found", actorName)
+	return nil, nil, ErrActorNotFound
+}
+
+// LocalActor returns the reference of a local actor.
+// A local actor is an actor that reside on the same node where the given actor system is running
+func (asys *actorSystem) LocalActor(ctx context.Context, actorName string) (PID, error) {
+	// acquire the lock
+	asys.mu.Lock()
+	// release the lock
+	defer asys.mu.Unlock()
+
+	// add a span context
+	ctx, span := telemetry.SpanContext(ctx, "LocalActor")
 	defer span.End()
 	// first let us do a local lookup
 	items := asys.actors.Items()
@@ -376,15 +424,17 @@ func (asys *actorSystem) GetLocalActor(ctx context.Context, actorName string) (P
 	return nil, ErrActorNotFound
 }
 
-// GetRemoteActor returns the address of a remote actor when cluster is enabled
-func (asys *actorSystem) GetRemoteActor(ctx context.Context, actorName string) (addr *pb.Address, err error) {
+// RemoteActor returns the address of a remote actor when cluster is enabled
+// When the cluster mode is not enabled an actor not found error will be returned
+// One can always check whether cluster is enabled before calling this method or just use the ActorOf method.
+func (asys *actorSystem) RemoteActor(ctx context.Context, actorName string) (addr *pb.Address, err error) {
 	// acquire the lock
 	asys.mu.Lock()
 	// release the lock
 	defer asys.mu.Unlock()
 
 	// add a span context
-	ctx, span := telemetry.SpanContext(ctx, "GetRemoteActor")
+	ctx, span := telemetry.SpanContext(ctx, "RemoteActor")
 	defer span.End()
 	// check whether cluster is enabled or not
 	if asys.cluster == nil {

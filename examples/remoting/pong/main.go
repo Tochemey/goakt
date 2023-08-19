@@ -35,7 +35,7 @@ func main() {
 	_ = actorSystem.Start(ctx)
 
 	// create an actor
-	actorSystem.StartActor(ctx, "Pong", NewPongActor(logger))
+	actorSystem.Spawn(ctx, "Pong", NewPongActor(logger))
 
 	// capture ctrl+c
 	interruptSignal := make(chan os.Signal, 1)

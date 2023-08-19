@@ -91,7 +91,24 @@ func (p *AccountEntity) Receive(ctx goakt.ReceiveContext) {
 				})
 			}
 		}
-
+	case *samplepb.GetAccount:
+		p.logger.Info("get account...")
+		// get the data
+		accountID := msg.GetAccountId()
+		// send the reply to the sender
+		sender := ctx.Sender()
+		// no sender
+		if sender != goakt.NoSender {
+			_ = ctx.Self().Tell(ctx.Context(), ctx.Sender(), &samplepb.Account{
+				AccountId:      accountID,
+				AccountBalance: p.balance.Load(),
+			})
+		} else {
+			ctx.Response(&samplepb.Account{
+				AccountId:      accountID,
+				AccountBalance: p.balance.Load(),
+			})
+		}
 	case *messagespb.RemoteMessage:
 		p.logger.Info("message handling using remote messaging...")
 		message, _ := msg.GetMessage().UnmarshalNew()
@@ -149,6 +166,24 @@ func (p *AccountEntity) Receive(ctx goakt.ReceiveContext) {
 						AccountBalance: p.balance.Load(),
 					})
 				}
+			}
+		case *samplepb.GetAccount:
+			p.logger.Info("get account...")
+			// get the data
+			accountID := x.GetAccountId()
+			// send the reply to the sender
+			sender := ctx.Sender()
+			// no sender
+			if sender != goakt.NoSender {
+				_ = ctx.Self().Tell(ctx.Context(), ctx.Sender(), &samplepb.Account{
+					AccountId:      accountID,
+					AccountBalance: p.balance.Load(),
+				})
+			} else {
+				ctx.Response(&samplepb.Account{
+					AccountId:      accountID,
+					AccountBalance: p.balance.Load(),
+				})
 			}
 		}
 

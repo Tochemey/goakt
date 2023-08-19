@@ -36,14 +36,14 @@ func TestActorSystem(t *testing.T) {
 		assert.Nil(t, sys)
 		assert.EqualError(t, err, ErrNameRequired.Error())
 	})
-	t.Run("With StartActor an actor when not started", func(t *testing.T) {
+	t.Run("With Spawn an actor when not started", func(t *testing.T) {
 		ctx := context.TODO()
 		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
 		actor := NewTestActor()
-		actorRef := sys.StartActor(ctx, "Test", actor)
+		actorRef := sys.Spawn(ctx, "Test", actor)
 		assert.Nil(t, actorRef)
 	})
-	t.Run("With StartActor an actor when started", func(t *testing.T) {
+	t.Run("With Spawn an actor when started", func(t *testing.T) {
 		ctx := context.TODO()
 		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
 
@@ -52,7 +52,7 @@ func TestActorSystem(t *testing.T) {
 		assert.NoError(t, err)
 
 		actor := NewTestActor()
-		actorRef := sys.StartActor(ctx, "Test", actor)
+		actorRef := sys.Spawn(ctx, "Test", actor)
 		assert.NotNil(t, actorRef)
 
 		// stop the actor after some time
@@ -62,7 +62,7 @@ func TestActorSystem(t *testing.T) {
 		err = sys.Stop(ctx)
 		assert.NoError(t, err)
 	})
-	t.Run("With StartActor an actor already exist", func(t *testing.T) {
+	t.Run("With Spawn an actor already exist", func(t *testing.T) {
 		ctx := context.TODO()
 		sys, _ := NewActorSystem("test", WithLogger(log.DiscardLogger))
 
@@ -71,10 +71,10 @@ func TestActorSystem(t *testing.T) {
 		assert.NoError(t, err)
 
 		actor := NewTestActor()
-		ref1 := sys.StartActor(ctx, "Test", actor)
+		ref1 := sys.Spawn(ctx, "Test", actor)
 		assert.NotNil(t, ref1)
 
-		ref2 := sys.StartActor(ctx, "Test", actor)
+		ref2 := sys.Spawn(ctx, "Test", actor)
 		assert.NotNil(t, ref2)
 
 		// point to the same memory address
@@ -142,17 +142,18 @@ func TestActorSystem(t *testing.T) {
 		// create an actor
 		actorName := uuid.NewString()
 		actor := NewTestActor()
-		actorRef := newActorSystem.StartActor(ctx, actorName, actor)
+		actorRef := newActorSystem.Spawn(ctx, actorName, actor)
 		assert.NotNil(t, actorRef)
 
 		// wait for a while for replication to take effect
 		// otherwise the subsequent test will return actor not found
 		time.Sleep(time.Second)
 
-		// get the actor from the cluster
-		addr, err := newActorSystem.GetRemoteActor(ctx, actorName)
+		// get the actor
+		addr, pid, err := newActorSystem.ActorOf(ctx, actorName)
 		require.NoError(t, err)
 		require.NotNil(t, addr)
+		require.Nil(t, pid)
 
 		reply, err := RemoteAsk(ctx, addr, new(testpb.TestReply))
 		require.NoError(t, err)
@@ -196,7 +197,7 @@ func TestActorSystem(t *testing.T) {
 		// create an actor
 		actorName := uuid.NewString()
 		actor := NewTestActor()
-		actorRef := newActorSystem.StartActor(ctx, actorName, actor)
+		actorRef := newActorSystem.Spawn(ctx, actorName, actor)
 		assert.NotNil(t, actorRef)
 
 		path := NewPath(actorName, &Address{

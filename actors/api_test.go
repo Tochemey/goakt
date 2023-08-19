@@ -33,7 +33,7 @@ func TestAsk(t *testing.T) {
 	// create a test actor
 	actorName := "test"
 	actor := NewTestActor()
-	actorRef := sys.StartActor(ctx, actorName, actor)
+	actorRef := sys.Spawn(ctx, actorName, actor)
 	assert.NotNil(t, actorRef)
 
 	// create a message to send to the test actor
@@ -72,7 +72,7 @@ func TestTell(t *testing.T) {
 	// create a test actor
 	actorName := "test"
 	actor := NewTestActor()
-	actorRef := sys.StartActor(ctx, actorName, actor)
+	actorRef := sys.Spawn(ctx, actorName, actor)
 	assert.NotNil(t, actorRef)
 
 	// create a message to send to the test actor
@@ -117,7 +117,7 @@ func TestRemoteMessaging(t *testing.T) {
 	// create a test actor
 	actorName := "test"
 	actor := NewTestActor()
-	actorRef := sys.StartActor(ctx, actorName, actor)
+	actorRef := sys.Spawn(ctx, actorName, actor)
 	assert.NotNil(t, actorRef)
 
 	// get the address of the actor

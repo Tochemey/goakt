@@ -44,7 +44,7 @@ func (s *AccountService) CreateAccount(ctx context.Context, c *connect.Request[s
 	// create the pid and send the command create account
 	accountEntity := kactors.NewAccountEntity(req.GetCreateAccount().GetAccountId())
 	// create the given pid
-	pid := s.actorSystem.StartActor(ctx, accountID, accountEntity)
+	pid := s.actorSystem.Spawn(ctx, accountID, accountEntity)
 	// send the create command to the pid
 	reply, err := actors.Ask(ctx, pid, &samplepb.CreateAccount{
 		AccountId:      accountID,
@@ -79,7 +79,7 @@ func (s *AccountService) CreditAccount(ctx context.Context, c *connect.Request[s
 	if !s.actorSystem.InCluster() {
 		s.logger.Info("cluster mode not is on....")
 		// locate the given actor
-		pid, err := s.actorSystem.GetLocalActor(ctx, accountID)
+		pid, err := s.actorSystem.LocalActor(ctx, accountID)
 		// handle the error
 		if err != nil {
 			// check whether it is not found error
@@ -119,9 +119,8 @@ func (s *AccountService) CreditAccount(ctx context.Context, c *connect.Request[s
 		}
 	}
 
-	s.logger.Info("cluster mode is on....")
 	// here the actor system is running in a cluster
-	addr, err := s.actorSystem.GetRemoteActor(ctx, accountID)
+	addr, err := s.actorSystem.RemoteActor(ctx, accountID)
 	// handle the error
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
@@ -154,7 +153,40 @@ func (s *AccountService) CreditAccount(ctx context.Context, c *connect.Request[s
 
 // GetAccount helps get an account
 func (s *AccountService) GetAccount(ctx context.Context, c *connect.Request[samplepb.GetAccountRequest]) (*connect.Response[samplepb.GetAccountResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("not implemented"))
+	// grab the actual request
+	req := c.Msg
+	// grab the account id
+	accountID := req.GetAccountId()
+
+	// locate the given actor
+	addr, _, err := s.actorSystem.ActorOf(ctx, accountID)
+	// handle the error
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+
+	// send GetAccount message to the actor
+	command := &samplepb.GetAccount{
+		AccountId: accountID,
+	}
+	// send a remote message to the actor
+	reply, err := actors.RemoteAsk(ctx, addr, command)
+	// handle the error
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+
+	message, _ := reply.UnmarshalNew()
+	// pattern match on the reply
+	switch x := message.(type) {
+	case *samplepb.Account:
+		// return the appropriate response
+		return connect.NewResponse(&samplepb.GetAccountResponse{Account: x}), nil
+	default:
+		// create the error message to send
+		err := fmt.Errorf("invalid reply=%s", reply.ProtoReflect().Descriptor().FullName())
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
 }
 
 // Start starts the service

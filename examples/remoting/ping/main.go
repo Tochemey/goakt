@@ -36,7 +36,7 @@ func main() {
 	_ = actorSystem.Start(ctx)
 
 	// create an actor
-	pingActor := actorSystem.StartActor(ctx, "Ping", NewPingActor())
+	pingActor := actorSystem.Spawn(ctx, "Ping", NewPingActor())
 
 	// start the conversation
 	timer := time.AfterFunc(time.Second, func() {

@@ -4,7 +4,7 @@ FROM tochemey/docker-go:1.21.0-1.0.0
 
 # install the various tools to generate connect-go
 RUN go install github.com/fullstorydev/grpcurl/cmd/grpcurl@latest
-RUN go install github.com/bufbuild/connect-go/cmd/protoc-gen-connect-go@latest
+RUN go install connectrpc.com/connect/cmd/protoc-gen-connect-go@latest
 RUN apk --no-cache add git ca-certificates gcc musl-dev libc-dev binutils-gold
 
 pbs:

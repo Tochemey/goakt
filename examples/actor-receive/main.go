@@ -30,7 +30,7 @@ func main() {
 	_ = actorSystem.Start(ctx)
 
 	// create an actor
-	actor := actorSystem.StartActor(ctx, "Ping", NewPinger())
+	actor := actorSystem.Spawn(ctx, "Ping", NewPinger())
 
 	startTime := time.Now()
 
