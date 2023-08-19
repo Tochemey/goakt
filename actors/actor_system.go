@@ -414,14 +414,14 @@ func (asys *actorSystem) Start(ctx context.Context) error {
 	// set the has started to true
 	asys.hasStarted.Store(true)
 
-	// start remoting when remoting is enabled
-	if asys.remotingEnabled.Load() {
-		asys.enableRemoting(ctx)
-	}
-
 	// enable clustering when it is enabled
 	if asys.clusterEnabled.Load() {
 		asys.enableClustering(ctx)
+	}
+
+	// start remoting when remoting is enabled
+	if asys.remotingEnabled.Load() {
+		asys.enableRemoting(ctx)
 	}
 
 	// start the metrics service
@@ -736,27 +736,20 @@ func (asys *actorSystem) enableClustering(ctx context.Context) {
 	timer := time.AfterFunc(time.Second, func() {
 		bootstrapChan <- struct{}{}
 	})
-
 	<-bootstrapChan
 	timer.Stop()
 
+	// add some logging information
 	asys.logger.Info("cluster engine successfully started...")
-
 	// acquire the lock
 	asys.mu.Lock()
 	// set the cluster field
 	asys.cluster = cluster
-	// release the lock
 	// set the remoting host and port
 	asys.remotingHost = cluster.NodeHost()
 	asys.remotingPort = int32(cluster.NodeRemotingPort())
 	// release the lock
 	asys.mu.Unlock()
-
-	// let us enable remoting as well if not yet enabled
-	if !asys.remotingEnabled.Load() {
-		asys.enableRemoting(ctx)
-	}
 	// start broadcasting cluster message
 	go asys.broadcast(ctx)
 	// add some logging

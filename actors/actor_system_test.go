@@ -14,7 +14,9 @@ import (
 	"github.com/tochemey/goakt/discovery"
 	mocks "github.com/tochemey/goakt/goaktmocks/discovery"
 	"github.com/tochemey/goakt/log"
+	testpb "github.com/tochemey/goakt/test/data/pb/v1"
 	"github.com/travisjeffery/go-dynaport"
+	"google.golang.org/protobuf/proto"
 )
 
 func TestActorSystem(t *testing.T) {
@@ -85,7 +87,7 @@ func TestActorSystem(t *testing.T) {
 		err = sys.Stop(ctx)
 		assert.NoError(t, err)
 	})
-	t.Run("With clustering enabled", func(t *testing.T) {
+	t.Run("With clustering enabled:single node", func(t *testing.T) {
 		ctx := context.TODO()
 		nodePorts := dynaport.Get(3)
 		gossipPort := nodePorts[0]
@@ -103,6 +105,8 @@ func TestActorSystem(t *testing.T) {
 		t.Setenv("REMOTING_PORT", strconv.Itoa(remotingPort))
 		t.Setenv("NODE_NAME", podName)
 		t.Setenv("NODE_IP", host)
+		t.Setenv("GRPC_GO_LOG_VERBOSITY_LEVEL", "99")
+		t.Setenv("GRPC_GO_LOG_SEVERITY_LEVEL", "info")
 
 		// define discovered addresses
 		addrs := []string{
@@ -115,8 +119,10 @@ func TestActorSystem(t *testing.T) {
 		sd := discovery.NewServiceDiscovery(provider, config)
 		newActorSystem, err := NewActorSystem(
 			"test",
+			WithPassivationDisabled(),
 			WithLogger(logger),
-			WithClustering(sd, 20))
+			WithReplyTimeout(time.Minute),
+			WithClustering(sd, 9))
 		require.NoError(t, err)
 
 		provider.EXPECT().ID().Return("testDisco")
@@ -125,6 +131,59 @@ func TestActorSystem(t *testing.T) {
 		provider.EXPECT().Deregister().Return(nil)
 		provider.EXPECT().SetConfig(config).Return(nil)
 		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
+
+		// start the actor system
+		err = newActorSystem.Start(ctx)
+		require.NoError(t, err)
+
+		// wait for the cluster to start
+		time.Sleep(time.Second)
+
+		// create an actor
+		actorName := uuid.NewString()
+		actor := NewTestActor()
+		actorRef := newActorSystem.StartActor(ctx, actorName, actor)
+		assert.NotNil(t, actorRef)
+
+		// wait for a while for replication to take effect
+		// otherwise the subsequent test will return actor not found
+		time.Sleep(time.Second)
+
+		// get the actor from the cluster
+		addr, err := newActorSystem.GetRemoteActor(ctx, actorName)
+		require.NoError(t, err)
+		require.NotNil(t, addr)
+
+		reply, err := RemoteAsk(ctx, addr, new(testpb.TestReply))
+		require.NoError(t, err)
+		require.NotNil(t, reply)
+
+		// get the actor partition
+		partition := newActorSystem.GetPartition(ctx, actorName)
+		assert.GreaterOrEqual(t, partition, uint64(0))
+		// stop the actor after some time
+		ctx, cancel := context.WithTimeout(ctx, time.Second)
+		defer cancel()
+
+		err = newActorSystem.Stop(ctx)
+		require.NoError(t, err)
+
+		provider.AssertExpectations(t)
+	})
+	t.Run("With remoting enabled", func(t *testing.T) {
+		ctx := context.TODO()
+		remotingPort := dynaport.Get(1)[0]
+
+		logger := log.New(log.DebugLevel, os.Stdout)
+		host := "127.0.0.1"
+
+		newActorSystem, err := NewActorSystem(
+			"test",
+			WithPassivationDisabled(),
+			WithLogger(logger),
+			WithReplyTimeout(time.Minute),
+			WithRemoting(host, int32(remotingPort)))
+		require.NoError(t, err)
 
 		// start the actor system
 		err = newActorSystem.Start(ctx)
@@ -140,16 +199,29 @@ func TestActorSystem(t *testing.T) {
 		actorRef := newActorSystem.StartActor(ctx, actorName, actor)
 		assert.NotNil(t, actorRef)
 
-		// get the actor partition
-		partition := newActorSystem.GetPartition(ctx, actorName)
-		assert.GreaterOrEqual(t, partition, uint64(0))
+		path := NewPath(actorName, &Address{
+			host:     host,
+			port:     remotingPort,
+			system:   newActorSystem.Name(),
+			protocol: protocol,
+		})
+		addr := path.RemoteAddress()
+
+		reply, err := RemoteAsk(ctx, addr, new(testpb.TestReply))
+		require.NoError(t, err)
+		require.NotNil(t, reply)
+
+		actual := new(testpb.Reply)
+		require.NoError(t, reply.UnmarshalTo(actual))
+
+		expected := &testpb.Reply{Content: "received message"}
+		assert.True(t, proto.Equal(expected, actual))
+
 		// stop the actor after some time
 		ctx, cancel := context.WithTimeout(ctx, time.Second)
 		defer cancel()
 
 		err = newActorSystem.Stop(ctx)
 		require.NoError(t, err)
-
-		provider.AssertExpectations(t)
 	})
 }
