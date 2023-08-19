@@ -56,11 +56,12 @@ func TestActorSystem(t *testing.T) {
 		assert.NotNil(t, actorRef)
 
 		// stop the actor after some time
-		ctx, cancel := context.WithTimeout(ctx, time.Second)
-		defer cancel()
+		time.Sleep(time.Second)
 
-		err = sys.Stop(ctx)
-		assert.NoError(t, err)
+		t.Cleanup(func() {
+			err = sys.Stop(ctx)
+			assert.NoError(t, err)
+		})
 	})
 	t.Run("With Spawn an actor already exist", func(t *testing.T) {
 		ctx := context.TODO()
@@ -81,11 +82,12 @@ func TestActorSystem(t *testing.T) {
 		assert.True(t, ref1 == ref2)
 
 		// stop the actor after some time
-		ctx, cancel := context.WithTimeout(ctx, time.Second)
-		defer cancel()
+		time.Sleep(time.Second)
 
-		err = sys.Stop(ctx)
-		assert.NoError(t, err)
+		t.Cleanup(func() {
+			err = sys.Stop(ctx)
+			assert.NoError(t, err)
+		})
 	})
 	t.Run("With clustering enabled:single node", func(t *testing.T) {
 		ctx := context.TODO()
@@ -162,14 +164,15 @@ func TestActorSystem(t *testing.T) {
 		// get the actor partition
 		partition := newActorSystem.GetPartition(ctx, actorName)
 		assert.GreaterOrEqual(t, partition, uint64(0))
+
 		// stop the actor after some time
-		ctx, cancel := context.WithTimeout(ctx, time.Second)
-		defer cancel()
+		time.Sleep(time.Second)
 
-		err = newActorSystem.Stop(ctx)
-		require.NoError(t, err)
-
-		provider.AssertExpectations(t)
+		t.Cleanup(func() {
+			err = newActorSystem.Stop(ctx)
+			assert.NoError(t, err)
+			provider.AssertExpectations(t)
+		})
 	})
 	t.Run("With remoting enabled", func(t *testing.T) {
 		ctx := context.TODO()
@@ -191,8 +194,7 @@ func TestActorSystem(t *testing.T) {
 		require.NoError(t, err)
 
 		// wait for the cluster to fully start
-		ctx, cancelFn := context.WithTimeout(ctx, time.Second)
-		defer cancelFn()
+		time.Sleep(time.Second)
 
 		// create an actor
 		actorName := uuid.NewString()
@@ -218,11 +220,68 @@ func TestActorSystem(t *testing.T) {
 		expected := &testpb.Reply{Content: "received message"}
 		assert.True(t, proto.Equal(expected, actual))
 
-		// stop the actor after some time
-		ctx, cancel := context.WithTimeout(ctx, time.Second)
-		defer cancel()
+		addr, pid, err := newActorSystem.ActorOf(ctx, actorName)
+		require.Error(t, err)
+		require.EqualError(t, err, ErrMethodCallNotAllowed.Error())
+		require.Nil(t, addr)
+		require.Nil(t, pid)
 
-		err = newActorSystem.Stop(ctx)
+		// stop the actor after some time
+		// stop the actor after some time
+		time.Sleep(time.Second)
+
+		t.Cleanup(func() {
+			err = newActorSystem.Stop(ctx)
+			assert.NoError(t, err)
+		})
+	})
+	t.Run("With ActorOf:remoting not enabled", func(t *testing.T) {
+		ctx := context.TODO()
+		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+
+		// start the actor system
+		err := sys.Start(ctx)
+		assert.NoError(t, err)
+
+		actorName := "testActor"
+		actor := NewTestActor()
+		actorRef := sys.Spawn(ctx, actorName, actor)
+		assert.NotNil(t, actorRef)
+
+		addr, pid, err := sys.ActorOf(ctx, actorName)
 		require.NoError(t, err)
+		require.NotNil(t, pid)
+		require.Nil(t, addr)
+
+		// stop the actor after some time
+		time.Sleep(time.Second)
+
+		t.Cleanup(func() {
+			err = sys.Stop(ctx)
+			assert.NoError(t, err)
+		})
+	})
+	t.Run("With ActorOf: not found", func(t *testing.T) {
+		ctx := context.TODO()
+		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+
+		// start the actor system
+		err := sys.Start(ctx)
+		assert.NoError(t, err)
+
+		actorName := "notFound"
+		addr, pid, err := sys.ActorOf(ctx, actorName)
+		require.Error(t, err)
+		require.EqualError(t, err, ErrActorNotFound.Error())
+		require.Nil(t, pid)
+		require.Nil(t, addr)
+
+		// stop the actor after some time
+		time.Sleep(time.Second)
+
+		t.Cleanup(func() {
+			err = sys.Stop(ctx)
+			assert.NoError(t, err)
+		})
 	})
 }
