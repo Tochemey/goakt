@@ -10,6 +10,7 @@ import (
 	"github.com/buraksezer/olric/hasher"
 	"github.com/pkg/errors"
 	"github.com/tochemey/goakt/discovery"
+	"github.com/tochemey/goakt/hash"
 	goaktpb "github.com/tochemey/goakt/internal/goakt/v1"
 	"github.com/tochemey/goakt/log"
 	"github.com/tochemey/goakt/pkg/telemetry"
@@ -40,7 +41,7 @@ type Cluster struct {
 	host *node
 
 	// specifies the hasher
-	hasher hasher.Hasher
+	hasher hash.Hasher
 
 	// specifies the discovery provider
 	discoveryProvider discovery.Provider
@@ -64,6 +65,7 @@ func New(name string, serviceDiscovery *discovery.ServiceDiscovery, opts ...Opti
 		writeTimeout:      time.Second,
 		readTimeout:       time.Second,
 		shutdownTimeout:   3 * time.Second,
+		hasher:            hash.DefaultHasher(),
 	}
 	// apply the various options
 	for _, opt := range opts {
@@ -97,9 +99,8 @@ func (c *Cluster) Start(ctx context.Context) error {
 
 	// build the cluster engine config
 	conf := c.buildConfig()
-
-	// set the hasher
-	c.hasher = conf.Hasher
+	// set the hasher to the custom hasher
+	conf.Hasher = &hasherWrapper{c.hasher}
 
 	// create the member list config
 	m, err := olriconfig.NewMemberlistConfig("lan")
@@ -317,7 +318,7 @@ func (c *Cluster) GetPartition(actorName string) int {
 	// create the byte array of the actor name
 	key := []byte(actorName)
 	// compute the hash key
-	hkey := c.hasher.Sum64(key)
+	hkey := c.hasher.HashCode(key)
 	// compute the partition and return it
 	partition := int(hkey % c.partitionsCount)
 	// add some debug log

@@ -40,6 +40,7 @@ mock:
     FROM +code
 
     # generate the mocks
+    RUN mockery  --all --dir hash --recursive --keeptree --exported=true --with-expecter=true --inpackage=true --output ./mocks/hash --case snake
     RUN mockery  --all --dir pkg --recursive --keeptree --exported=true --with-expecter=true --inpackage=true --output ./mocks/pkg --case snake
     RUN mockery  --all --dir internal --recursive --keeptree --exported=true --with-expecter=true  --inpackage=true --output ./mocks/internal --case snake
     RUN mockery  --all --dir discovery --recursive --keeptree --exported=true --with-expecter=true --inpackage=true --output ./mocks/discovery --case snake
