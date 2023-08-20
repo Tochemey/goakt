@@ -3,6 +3,8 @@ package cluster
 import (
 	"time"
 
+	"github.com/tochemey/goakt/hash"
+
 	"github.com/tochemey/goakt/log"
 )
 
@@ -55,5 +57,12 @@ func WithReadTimeout(timeout time.Duration) Option {
 func WithShutdownTimeout(timeout time.Duration) Option {
 	return OptionFunc(func(cluster *Cluster) {
 		cluster.shutdownTimeout = timeout
+	})
+}
+
+// WithHasher sets the custom hasher
+func WithHasher(hasher hash.Hasher) Option {
+	return OptionFunc(func(cluster *Cluster) {
+		cluster.hasher = hasher
 	})
 }

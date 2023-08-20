@@ -5,10 +5,12 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	mockhasher "github.com/tochemey/goakt/goaktmocks/hash"
 	"github.com/tochemey/goakt/log"
 )
 
 func TestOptions(t *testing.T) {
+	mockHasher := new(mockhasher.Hasher)
 	testCases := []struct {
 		name     string
 		option   Option
@@ -38,6 +40,11 @@ func TestOptions(t *testing.T) {
 			name:     "WithShutdownTimeout",
 			option:   WithShutdownTimeout(2 * time.Minute),
 			expected: Cluster{shutdownTimeout: 2 * time.Minute},
+		},
+		{
+			name:     "WithHasher",
+			option:   WithHasher(mockHasher),
+			expected: Cluster{hasher: mockHasher},
 		},
 	}
 
