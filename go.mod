@@ -3,7 +3,7 @@ module github.com/tochemey/goakt
 go 1.20
 
 require (
-	connectrpc.com/connect v1.11.0
+	connectrpc.com/connect v1.11.1
 	connectrpc.com/otelconnect v0.5.0
 	github.com/buraksezer/olric v0.5.4
 	github.com/caarlos0/env/v9 v9.0.0
@@ -11,7 +11,7 @@ require (
 	github.com/cespare/xxhash/v2 v2.2.0
 	github.com/deckarep/golang-set/v2 v2.3.1
 	github.com/google/go-cmp v0.5.9
-	github.com/google/uuid v1.3.0
+	github.com/google/uuid v1.3.1
 	github.com/joho/godotenv v1.5.1
 	github.com/orcaman/concurrent-map/v2 v2.0.1
 	github.com/pkg/errors v0.9.1
