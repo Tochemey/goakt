@@ -52,10 +52,5 @@ func New(options ...Option) *Telemetry {
 		metric.WithInstrumentationVersion(Version()),
 	)
 
-	// set the metrics
-	var err error
-	if telemetry.Metrics, err = NewMetrics(telemetry.Meter); err != nil {
-		otel.Handle(err)
-	}
 	return telemetry
 }

@@ -253,24 +253,12 @@ func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor) PID {
 
 	// when cluster is enabled replicate the actor metadata across the cluster
 	if x.clusterEnabled.Load() {
-		// TODO: revisit the encoding the actor
-		// encode the actor
-		//actorType := reflect.TypeOf(actor)
-		//var buf bytes.Buffer
-		//enc := gob.NewEncoder(&buf)
-		//if err := enc.Encode(actorType); err != nil {
-		//	a.logger.Warn(errors.Wrapf(err, "failed to encode the underlying actor=%s", name).Error())
-		//	// TODO: at the moment the byte array of the underlying actor is not used but can become handy in the future
-		//}
-
-		// create a wire actor
-		wiredActor := &goaktpb.WireActor{
+		// send it to the cluster channel a wire actor
+		x.clusterChan <- &goaktpb.WireActor{
 			ActorName:    name,
 			ActorAddress: actorPath.RemoteAddress(),
 			ActorPath:    actorPath.String(),
 		}
-		// send it to the cluster channel
-		x.clusterChan <- wiredActor
 	}
 
 	// return the actor ref

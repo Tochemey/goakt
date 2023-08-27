@@ -40,8 +40,8 @@ func (n node) GossipAddress() string {
 	return net.JoinHostPort(n.Host, strconv.Itoa(n.GossipPort))
 }
 
-// getHostNode returns the node where the discovery provider is running
-func getHostNode() (*node, error) {
+// hostNode returns the node where the discovery provider is running
+func hostNode() (*node, error) {
 	// load the host node configuration
 	cfg := &hostNodeConfig{}
 	opts := env.Options{RequiredIfNoDef: true, UseFieldNameByDefault: false}

@@ -321,6 +321,15 @@ func (p *pid) Restart(ctx context.Context) error {
 	if p.passivateAfter.Load() > 0 {
 		go p.passivationListener()
 	}
+
+	// register metrics. However, we don't panic when we fail to register
+	// we just log it for now
+	// TODO decide what to do when we fail to register the metrics or export the metrics registration as public
+	if err := p.registerMetrics(); err != nil {
+		p.logger.Error(errors.Wrapf(err, "failed to register actor=%s metrics", p.ActorPath().String()))
+		return err
+	}
+
 	// increment the restart counter
 	p.restartCounter.Inc()
 	// successful restart
@@ -773,13 +782,6 @@ func (p *pid) reset() {
 	p.children = newPIDMap(10)
 	p.watchMen = slices.NewConcurrentSlice[*WatchMan]()
 	p.telemetry = telemetry.New()
-
-	// register metrics. However, we don't panic when we fail to register
-	// we just log it for now
-	// TODO decide what to do when we fail to register the metrics or export the metrics registration as public
-	if err := p.registerMetrics(); err != nil {
-		p.logger.Error(errors.Wrapf(err, "failed to register actor=%s metrics", p.ActorPath().String()))
-	}
 }
 
 func (p *pid) freeChildren(ctx context.Context) {
@@ -803,6 +805,11 @@ func (p *pid) freeChildren(ctx context.Context) {
 
 // registerMetrics register the PID metrics with OTel instrumentation.
 func (p *pid) registerMetrics() error {
+	// acquire lock
+	p.rwMutex.Lock()
+	// release the lock
+	defer p.rwMutex.Unlock()
+
 	// grab the OTel meter
 	meter := p.telemetry.Meter
 	// create an instance of the ActorMetrics

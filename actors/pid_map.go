@@ -29,6 +29,8 @@ func newPIDMap(cap int) *pidMap {
 
 // Len returns the number of PIDs
 func (m *pidMap) Len() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	return len(m.pids)
 }
 

@@ -73,7 +73,7 @@ func New(name string, serviceDiscovery *discovery.ServiceDiscovery, opts ...Opti
 	}
 
 	// get the host info
-	hostNode, err := getHostNode()
+	hostNode, err := hostNode()
 	// handle the error
 	if err != nil {
 		cl.logger.Error(errors.Wrap(err, "failed get the host node.💥"))
