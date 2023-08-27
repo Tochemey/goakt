@@ -201,7 +201,7 @@ func (s *AccountService) Stop(ctx context.Context) error {
 	return s.server.Shutdown(ctx)
 }
 
-// listenAndServe starts the http2 server
+// listenAndServe starts the http server
 func (s *AccountService) listenAndServe() {
 	// create a http service mux
 	mux := http.NewServeMux()

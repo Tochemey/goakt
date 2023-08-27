@@ -3,19 +3,20 @@ package actors
 import (
 	"context"
 	"fmt"
+	gothttp "net/http"
 	"strings"
 	"sync"
 	"time"
 
 	"connectrpc.com/connect"
-	otelconnect "connectrpc.com/otelconnect"
+	"connectrpc.com/otelconnect"
 	"github.com/cenkalti/backoff"
 	"github.com/pkg/errors"
 	goaktpb "github.com/tochemey/goakt/internal/goakt/v1"
 	"github.com/tochemey/goakt/internal/goakt/v1/goaktv1connect"
 	"github.com/tochemey/goakt/log"
 	pb "github.com/tochemey/goakt/messages/v1"
-	"github.com/tochemey/goakt/pkg/http2"
+	"github.com/tochemey/goakt/pkg/http"
 	"github.com/tochemey/goakt/pkg/slices"
 	"github.com/tochemey/goakt/pkg/telemetry"
 	"go.opentelemetry.io/otel/attribute"
@@ -168,6 +169,9 @@ type pid struct {
 
 	// observability settings
 	telemetry *telemetry.Telemetry
+
+	// http client
+	httpClient *gothttp.Client
 }
 
 // enforce compilation error
@@ -205,6 +209,7 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 		actorPath:          actorPath,
 		rwMutex:            sync.RWMutex{},
 		shutdownMutex:      sync.Mutex{},
+		httpClient:         http.Client(),
 	}
 
 	// set the custom options to override the default values
@@ -492,8 +497,8 @@ func (p *pid) RemoteLookup(ctx context.Context, host string, port int, name stri
 
 	// create an instance of remote client service
 	remoteClient := goaktv1connect.NewRemoteMessagingServiceClient(
-		http2.GetClient(),
-		http2.GetURL(host, port),
+		p.httpClient,
+		http.URL(host, port),
 		connect.WithInterceptors(p.interceptor()),
 		connect.WithGRPC(),
 	)
@@ -533,8 +538,8 @@ func (p *pid) RemoteTell(ctx context.Context, to *pb.Address, message proto.Mess
 
 	// create an instance of remote client service
 	remoteClient := goaktv1connect.NewRemoteMessagingServiceClient(
-		http2.GetClient(),
-		http2.GetURL(to.GetHost(), int(to.GetPort())),
+		p.httpClient,
+		http.URL(to.GetHost(), int(to.GetPort())),
 		connect.WithInterceptors(p.interceptor()),
 		connect.WithGRPC(),
 	)
@@ -584,8 +589,8 @@ func (p *pid) RemoteAsk(ctx context.Context, to *pb.Address, message proto.Messa
 
 	// create an instance of remote client service
 	remoteClient := goaktv1connect.NewRemoteMessagingServiceClient(
-		http2.GetClient(),
-		http2.GetURL(to.GetHost(), int(to.GetPort())),
+		p.httpClient,
+		http.URL(to.GetHost(), int(to.GetPort())),
 		connect.WithInterceptors(p.interceptor()),
 		connect.WithGRPC(),
 	)
@@ -644,6 +649,9 @@ func (p *pid) Shutdown(ctx context.Context) error {
 	p.isRunning.Store(false)
 	// stop all the child actors
 	p.freeChildren(ctx)
+
+	// close lingering http connections
+	p.httpClient.CloseIdleConnections()
 
 	// add some logging
 	p.logger.Infof("Shutdown process is on going for actor=%s...", p.ActorPath().String())
@@ -956,6 +964,10 @@ func (p *pid) passivationListener() {
 
 	// stop all the child actors
 	p.freeChildren(ctx)
+
+	// close lingering http connections
+	p.httpClient.CloseIdleConnections()
+
 	// perform some cleanup with the actor
 	if err := p.Actor.PostStop(ctx); err != nil {
 		panic(err)

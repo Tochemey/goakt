@@ -1,4 +1,4 @@
-package http2
+package http
 
 import (
 	"context"
@@ -6,13 +6,14 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"strconv"
 	"time"
 
 	"golang.org/x/net/http2"
 )
 
-// GetClient creates a http client use h2c
-func GetClient() *http.Client {
+// Client creates a http client use h2c
+func Client() *http.Client {
 	return &http.Client{
 		// Most RPC servers don't use HTTP redirects
 		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
@@ -32,7 +33,7 @@ func GetClient() *http.Client {
 	}
 }
 
-// GetURL create a http connection address
-func GetURL(host string, port int) string {
-	return fmt.Sprintf("http://%s:%d", host, port)
+// URL create a http connection address
+func URL(host string, port int) string {
+	return fmt.Sprintf("http://%s", net.JoinHostPort(host, strconv.Itoa(port)))
 }

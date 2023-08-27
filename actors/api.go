@@ -10,7 +10,7 @@ import (
 	goaktpb "github.com/tochemey/goakt/internal/goakt/v1"
 	"github.com/tochemey/goakt/internal/goakt/v1/goaktv1connect"
 	pb "github.com/tochemey/goakt/messages/v1"
-	"github.com/tochemey/goakt/pkg/http2"
+	"github.com/tochemey/goakt/pkg/http"
 	"github.com/tochemey/goakt/pkg/telemetry"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -108,8 +108,8 @@ func RemoteTell(ctx context.Context, to *pb.Address, message proto.Message) erro
 
 	// create an instance of remote client service
 	remoteClient := goaktv1connect.NewRemoteMessagingServiceClient(
-		http2.GetClient(),
-		http2.GetURL(to.GetHost(), int(to.GetPort())),
+		http.Client(),
+		http.URL(to.GetHost(), int(to.GetPort())),
 		connect.WithInterceptors(otelconnect.NewInterceptor()),
 		connect.WithGRPC(),
 	)
@@ -142,8 +142,8 @@ func RemoteAsk(ctx context.Context, to *pb.Address, message proto.Message) (resp
 
 	// create an instance of remote client service
 	remoteClient := goaktv1connect.NewRemoteMessagingServiceClient(
-		http2.GetClient(),
-		http2.GetURL(to.GetHost(), int(to.GetPort())),
+		http.Client(),
+		http.URL(to.GetHost(), int(to.GetPort())),
 		connect.WithInterceptors(otelconnect.NewInterceptor()),
 		connect.WithGRPC(),
 	)
@@ -173,8 +173,8 @@ func RemoteLookup(ctx context.Context, host string, port int, name string) (addr
 
 	// create an instance of remote client service
 	remoteClient := goaktv1connect.NewRemoteMessagingServiceClient(
-		http2.GetClient(),
-		http2.GetURL(host, port),
+		http.Client(),
+		http.URL(host, port),
 		connect.WithInterceptors(otelconnect.NewInterceptor()),
 		connect.WithGRPC(),
 	)
