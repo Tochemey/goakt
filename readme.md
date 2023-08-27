@@ -25,12 +25,12 @@ Also, check reference section at the end of the post for more material regarding
 - Enable/Disable Passivation mode to remove/keep idle actors
 - PreStart hook for an actor.
 - PostStop hook for an actor for a graceful shutdown
-- ActorSystem: Actors live and die withing a system.
+- ActorSystem: Actors live and die within a system.
 - Actor to Actor communication via Tell and Ask message patterns.
-- Restart an actor
+- Restart(a.k.a. ReSpawn) an actor
 - (Un)Watch an actor
-- Stop and actor
-- Create a child actor
+- Stop(a.k.a. Kill) and actor
+- Child actor (Spawn and Kill)
 - Supervisory Strategy (Restart and Stop directive are supported)
 - Logger interface with a default logger
 - Examples (check the [examples'](./examples) folder)
