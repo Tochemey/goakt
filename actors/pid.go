@@ -957,6 +957,11 @@ func (p *pid) passivationListener() {
 		return
 	}
 
+	// acquire the shutdown lock
+	p.shutdownMutex.Lock()
+	// release the lock
+	defer p.shutdownMutex.Unlock()
+
 	// add some logging info
 	p.logger.Infof("Passivation mode has been triggered for actor=%s...", p.ActorPath().String())
 
