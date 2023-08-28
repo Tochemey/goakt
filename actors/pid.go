@@ -101,6 +101,17 @@ type PID interface {
 	doReceive(ctx ReceiveContext)
 	// watchers returns the list of watchMen
 	watchers() *slices.ConcurrentSlice[*WatchMan]
+	// Behaviors returns the behavior stack
+	behaviors() *BehaviorStack
+	// setBehavior is a utility function that helps set the actor behavior
+	setBehavior(behavior Behavior)
+	// setBehaviorStacked adds a behavior to the actor's behaviors
+	setBehaviorStacked(behavior Behavior)
+	// unsetBehaviorStacked sets the actor's behavior to the previous behavior
+	// prior to setBehaviorStacked is called
+	unsetBehaviorStacked()
+	// resetBehavior is a utility function resets the actor behavior
+	resetBehavior()
 }
 
 // pid specifies an actor unique process
@@ -172,6 +183,9 @@ type pid struct {
 
 	// http client
 	httpClient *gothttp.Client
+
+	// specifies the current actor behavior
+	behaviorStack *BehaviorStack
 }
 
 // enforce compilation error
@@ -225,6 +239,11 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 	if pid.passivateAfter.Load() > 0 {
 		go pid.passivationListener()
 	}
+
+	// set the actor behavior stack
+	behaviorStack := NewBehaviorStack()
+	behaviorStack.Push(pid.Receive)
+	pid.behaviorStack = behaviorStack
 
 	// register metrics. However, we don't panic when we fail to register
 	// we just log it for now
@@ -782,6 +801,8 @@ func (p *pid) reset() {
 	p.children = newPIDMap(10)
 	p.watchMen = slices.NewConcurrentSlice[*WatchMan]()
 	p.telemetry = telemetry.New()
+	// reset the behavior stack
+	p.resetBehavior()
 }
 
 func (p *pid) freeChildren(ctx context.Context) {
@@ -868,8 +889,10 @@ func (p *pid) handleReceived(received ReceiveContext) {
 			p.panicCounter.Inc()
 		}
 	}()
-	// send the message to the current receiver
-	p.Receive(received)
+	// send the message to the current actor behavior
+	if behavior, ok := p.behaviorStack.Peek(); ok {
+		behavior(received)
+	}
 }
 
 // supervise watches for child actor's failure and act based upon the supervisory strategy
@@ -995,4 +1018,43 @@ func (p *pid) interceptor() connect.Interceptor {
 		otelconnect.WithTracerProvider(p.telemetry.TracerProvider),
 		otelconnect.WithMeterProvider(p.telemetry.MeterProvider),
 	)
+}
+
+// Behaviors returns the behavior stack
+func (p *pid) behaviors() *BehaviorStack {
+	p.rwMutex.Lock()
+	behaviors := p.behaviorStack
+	p.rwMutex.Unlock()
+	return behaviors
+}
+
+// setBehavior is a utility function that helps set the actor behavior
+func (p *pid) setBehavior(behavior Behavior) {
+	p.rwMutex.Lock()
+	p.behaviorStack.Clear()
+	p.behaviorStack.Push(behavior)
+	p.rwMutex.Unlock()
+}
+
+// resetBehavior is a utility function resets the actor behavior
+func (p *pid) resetBehavior() {
+	p.rwMutex.Lock()
+	p.behaviorStack.Clear()
+	p.behaviorStack.Push(p.Receive)
+	p.rwMutex.Unlock()
+}
+
+// setBehaviorStacked adds a behavior to the actor's behaviorStack
+func (p *pid) setBehaviorStacked(behavior Behavior) {
+	p.rwMutex.Lock()
+	p.behaviorStack.Push(behavior)
+	p.rwMutex.Unlock()
+}
+
+// unsetBehaviorStacked sets the actor's behavior to the previous behavior
+// prior to setBehaviorStacked is called
+func (p *pid) unsetBehaviorStacked() {
+	p.rwMutex.Lock()
+	p.behaviorStack.Pop()
+	p.rwMutex.Unlock()
 }

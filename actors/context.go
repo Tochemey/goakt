@@ -26,6 +26,23 @@ type ReceiveContext interface {
 	// RemoteSender defines the remote sender of the message if it is a remote message
 	// This is set to RemoteNoSender when the message is not a remote message
 	RemoteSender() *pb.Address
+	// Become switch the current behavior of the actor to a new behavior
+	// The current message in process during the transition will still be processed with the current
+	// behavior before the transition. However, subsequent public will be processed with the new behavior.
+	// One needs to call UnBecome to reset the actor behavior to the default one which is the Actor.Receive method
+	// which is the default behavior.
+	Become(behavior Behavior)
+	// UnBecome reset the actor behavior to the default one which is the
+	// Actor.Receive method
+	UnBecome()
+	// BecomeStacked sets a new behavior to the actor.
+	// The current message in process during the transition will still be processed with the current
+	// behavior before the transition. However, subsequent public will be processed with the new behavior.
+	// One needs to call UnBecomeStacked to go the previous the actor's behavior.
+	// which is the default behavior.
+	BecomeStacked(behavior Behavior)
+	// UnBecomeStacked sets the actor behavior to the previous behavior before BecomeStacked was called
+	UnBecomeStacked()
 }
 
 type receiveContext struct {
@@ -87,4 +104,36 @@ func (m *receiveContext) Message() proto.Message {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.message
+}
+
+// BecomeStacked sets a new behavior to the actor.
+// The current message in process during the transition will still be processed with the current
+// behavior before the transition. However, subsequent public will be processed with the new behavior.
+// One needs to call UnBecomeStacked to go the previous the actor's behavior.
+// which is the default behavior.
+func (m *receiveContext) BecomeStacked(behavior Behavior) {
+	m.mu.Lock()
+	m.recipient.setBehaviorStacked(behavior)
+	m.mu.Unlock()
+}
+
+// UnBecomeStacked sets the actor behavior to the previous behavior before BecomeStacked was called
+func (m *receiveContext) UnBecomeStacked() {
+	m.mu.Lock()
+	m.recipient.unsetBehaviorStacked()
+	m.mu.Unlock()
+}
+
+// UnBecome reset the actor behavior to the default one
+func (m *receiveContext) UnBecome() {
+	m.mu.Lock()
+	m.recipient.resetBehavior()
+	m.mu.Unlock()
+}
+
+// Become switch the current behavior of the actor to a new behavior
+func (m *receiveContext) Become(behavior Behavior) {
+	m.mu.Lock()
+	m.recipient.setBehavior(behavior)
+	m.mu.Unlock()
 }
