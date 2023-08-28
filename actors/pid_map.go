@@ -3,7 +3,7 @@ package actors
 import (
 	"sync"
 
-	pb "github.com/tochemey/goakt/messages/v1"
+	pb "github.com/tochemey/goakt/pb/v1"
 )
 
 // Unit type

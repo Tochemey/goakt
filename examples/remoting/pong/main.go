@@ -9,7 +9,6 @@ import (
 	goakt "github.com/tochemey/goakt/actors"
 	samplepb "github.com/tochemey/goakt/examples/protos/pb/v1"
 	"github.com/tochemey/goakt/log"
-	pb "github.com/tochemey/goakt/messages/v1"
 	"go.uber.org/atomic"
 )
 
@@ -21,7 +20,7 @@ const (
 func main() {
 	ctx := context.Background()
 
-	// use the messages default log. real-life implement the log interface`
+	// use the address default log. real-life implement the log interface`
 	logger := log.New(log.DebugLevel, os.Stdout)
 
 	// create the actor system. kindly in real-life application handle the error
@@ -67,28 +66,16 @@ func (p *PongActor) PreStart(ctx context.Context) error {
 }
 
 func (p *PongActor) Receive(ctx goakt.ReceiveContext) {
-	switch msg := ctx.Message().(type) {
+	switch ctx.Message().(type) {
 	case *samplepb.Ping:
-		p.logger.Infof("received Ping from %s", ctx.Sender().ActorPath().String())
 		// reply the sender in case there is a sender
-		if ctx.Sender() != nil && ctx.Sender() != goakt.NoSender {
+		if ctx.RemoteSender() != goakt.RemoteNoSender {
+			p.logger.Infof("received remote from %s", ctx.RemoteSender().String())
+			_ = ctx.Self().RemoteTell(context.Background(), ctx.RemoteSender(), new(samplepb.Pong))
+		} else if ctx.Sender() != goakt.NoSender {
+			p.logger.Infof("received Ping from %s", ctx.Sender().ActorPath().String())
 			_ = ctx.Self().Tell(ctx.Context(), ctx.Sender(), new(samplepb.Pong))
 		}
-		p.count.Add(1)
-	case *pb.RemoteMessage:
-		// add info log
-		p.logger.Infof("received remote message=(%s) from %s", msg.GetMessage().GetTypeUrl(), msg.GetSender().String())
-		// parse the message received
-		ping := new(samplepb.Ping)
-		// panic when unable to parse the message
-		if err := msg.GetMessage().UnmarshalTo(ping); err != nil {
-			panic(err)
-		}
-		// add a debug log
-		p.logger.Debugf("replying to the message sender...")
-		// send a message to the sender
-		_ = ctx.Self().RemoteTell(context.Background(), msg.GetSender(), new(samplepb.Pong))
-		// increase the counter
 		p.count.Add(1)
 	default:
 		p.logger.Panic(goakt.ErrUnhandled)

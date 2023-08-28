@@ -101,7 +101,7 @@ func (a *Address) HostPort() string {
 // String returns the canonical String representation of this Address formatted as:
 // `protocol://system@host:port`
 func (a *Address) String() string {
-	// if the protocol is not messages
+	// if the protocol is not goakt
 	// then panic
 	if a.protocol != protocol {
 		panic("invalid protocol")

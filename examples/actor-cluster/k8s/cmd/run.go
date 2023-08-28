@@ -30,7 +30,7 @@ var runCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		// create a background context
 		ctx := context.Background()
-		// use the messages default log. real-life implement the log interface`
+		// use the address default log. real-life implement the log interface`
 		logger := log.New(log.DebugLevel, os.Stdout)
 
 		// create the k8 configuration

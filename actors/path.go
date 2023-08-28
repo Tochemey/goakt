@@ -4,7 +4,7 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
-	pb "github.com/tochemey/goakt/messages/v1"
+	pb "github.com/tochemey/goakt/pb/v1"
 )
 
 // Path is a unique path to an actor

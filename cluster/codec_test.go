@@ -4,12 +4,11 @@ import (
 	"encoding/base64"
 	"testing"
 
-	messagespb "github.com/tochemey/goakt/messages/v1"
-
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	goaktpb "github.com/tochemey/goakt/internal/goakt/v1"
+	pb "github.com/tochemey/goakt/pb/v1"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -18,7 +17,7 @@ func TestCodec(t *testing.T) {
 		// create an instance of wire actor
 		actor := &goaktpb.WireActor{
 			ActorName: "account-1",
-			ActorAddress: &messagespb.Address{
+			ActorAddress: &pb.Address{
 				Host: "localhost",
 				Port: 2345,
 				Name: "account-1",

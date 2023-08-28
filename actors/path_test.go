@@ -6,7 +6,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/stretchr/testify/assert"
-	pb "github.com/tochemey/goakt/messages/v1"
+	pb "github.com/tochemey/goakt/pb/v1"
 	"google.golang.org/protobuf/encoding/prototext"
 )
 

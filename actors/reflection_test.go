@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	pb "github.com/tochemey/goakt/messages/v1"
+	pb "github.com/tochemey/goakt/pb/v1"
 )
 
 func TestReflection(t *testing.T) {

@@ -6,10 +6,10 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
-	otelconnect "connectrpc.com/otelconnect"
+	"connectrpc.com/otelconnect"
 	goaktpb "github.com/tochemey/goakt/internal/goakt/v1"
 	"github.com/tochemey/goakt/internal/goakt/v1/goaktv1connect"
-	pb "github.com/tochemey/goakt/messages/v1"
+	pb "github.com/tochemey/goakt/pb/v1"
 	"github.com/tochemey/goakt/pkg/http"
 	"github.com/tochemey/goakt/pkg/telemetry"
 	"google.golang.org/grpc/codes"
@@ -34,12 +34,30 @@ func Ask(ctx context.Context, to PID, message proto.Message, timeout time.Durati
 
 	// create a receiver context
 	context := new(receiveContext)
-
 	// set the needed properties of the message context
 	context.ctx = ctx
-	context.sender = NoSender
 	context.recipient = to
-	context.message = message
+
+	// set the actual message
+	switch msg := message.(type) {
+	case *goaktpb.RemoteMessage:
+		// define the actual message variable
+		var actual proto.Message
+		// unmarshal the message and handle the error
+		if actual, err = msg.GetMessage().UnmarshalNew(); err != nil {
+			return nil, err
+		}
+		// set the context message and the sender
+		context.message = actual
+		context.remoteSender = msg.GetSender()
+		context.sender = NoSender
+	default:
+		// set the context message and the sender
+		context.message = message
+		context.sender = NoSender
+		context.remoteSender = RemoteNoSender
+	}
+
 	context.isAsyncMessage = false
 	context.mu = sync.Mutex{}
 	context.response = make(chan proto.Message, 1)
@@ -79,9 +97,32 @@ func Tell(ctx context.Context, to PID, message proto.Message) error {
 
 	// set the needed properties of the message context
 	context.ctx = ctx
-	context.sender = NoSender
 	context.recipient = to
-	context.message = message
+
+	// set the actual message
+	switch msg := message.(type) {
+	case *goaktpb.RemoteMessage:
+		var (
+			// define the actual message variable
+			actual proto.Message
+			// define the error variable
+			err error
+		)
+		// unmarshal the message and handle the error
+		if actual, err = msg.GetMessage().UnmarshalNew(); err != nil {
+			return err
+		}
+
+		// set the context message and sender
+		context.message = actual
+		context.remoteSender = msg.GetSender()
+		context.sender = NoSender
+	default:
+		context.message = message
+		context.sender = NoSender
+		context.remoteSender = RemoteNoSender
+	}
+
 	context.isAsyncMessage = true
 	context.mu = sync.Mutex{}
 
@@ -115,7 +156,7 @@ func RemoteTell(ctx context.Context, to *pb.Address, message proto.Message) erro
 	)
 	// prepare the rpcRequest to send
 	request := connect.NewRequest(&goaktpb.RemoteTellRequest{
-		RemoteMessage: &pb.RemoteMessage{
+		RemoteMessage: &goaktpb.RemoteMessage{
 			Sender:   RemoteNoSender,
 			Receiver: to,
 			Message:  marshaled,
@@ -149,7 +190,7 @@ func RemoteAsk(ctx context.Context, to *pb.Address, message proto.Message) (resp
 	)
 	// prepare the rpcRequest to send
 	rpcRequest := connect.NewRequest(&goaktpb.RemoteAskRequest{
-		RemoteMessage: &pb.RemoteMessage{
+		RemoteMessage: &goaktpb.RemoteMessage{
 			Sender:   RemoteNoSender,
 			Receiver: to,
 			Message:  marshaled,

@@ -3,8 +3,7 @@ syntax = "proto3";
 package goakt.v1;
 
 import "google/protobuf/any.proto";
-import "messages/v1/address.proto";
-import "messages/v1/messages.proto";
+import "address/v1/address.proto";
 
 option go_package = "github.com/tochemey/goakt/internal/goakt/v1;goaktv1";
 
@@ -25,7 +24,7 @@ service RemoteMessagingService {
 // immediately. With this type of message the receiver cannot communicate back to Sender
 // except reply the message with a response. This one-way communication
 message RemoteAskRequest {
-  messages.v1.RemoteMessage remote_message = 1;
+  RemoteMessage remote_message = 1;
 }
 
 message RemoteAskResponse {
@@ -38,7 +37,7 @@ message RemoteAskResponse {
 // This is the only way remote actors can interact with each other. The actor on the
 // other line can reply to the sender by using the Sender in the message
 message RemoteTellRequest {
-  messages.v1.RemoteMessage remote_message = 1;
+  RemoteMessage remote_message = 1;
 }
 
 message RemoteTellResponse {}
@@ -55,5 +54,16 @@ message RemoteLookupRequest {
 
 message RemoteLookupResponse {
   // Specifies the actor address
-  messages.v1.Address address = 1;
+  address.v1.Address address = 1;
+}
+
+// RemoteMessage will be used by Actors to communicate remotely
+message RemoteMessage {
+  // Specifies the sender' address
+  address.v1.Address sender = 1;
+  // Specifies the actor address
+  address.v1.Address receiver = 2;
+  // Specifies the message to send to the actor
+  // Any proto message is allowed to be sent
+  google.protobuf.Any message = 3;
 }

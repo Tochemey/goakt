@@ -85,10 +85,10 @@ protogen:
     # generate the pbs
     RUN buf generate \
             --template buf.gen.yaml \
-            --path protos/public/messages
+            --path protos/public/address
 
     # save artifact to
-    SAVE ARTIFACT gen/messages AS LOCAL messages
+    SAVE ARTIFACT gen/address AS LOCAL pb
 
 testprotogen:
     # copy the proto files to generate

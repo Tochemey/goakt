@@ -15,7 +15,7 @@ import (
 	goaktpb "github.com/tochemey/goakt/internal/goakt/v1"
 	"github.com/tochemey/goakt/internal/goakt/v1/goaktv1connect"
 	"github.com/tochemey/goakt/log"
-	pb "github.com/tochemey/goakt/messages/v1"
+	pb "github.com/tochemey/goakt/pb/v1"
 	"github.com/tochemey/goakt/pkg/http"
 	"github.com/tochemey/goakt/pkg/slices"
 	"github.com/tochemey/goakt/pkg/telemetry"
@@ -563,7 +563,7 @@ func (p *pid) RemoteTell(ctx context.Context, to *pb.Address, message proto.Mess
 
 	// prepare the rpcRequest to send
 	request := connect.NewRequest(&goaktpb.RemoteTellRequest{
-		RemoteMessage: &pb.RemoteMessage{
+		RemoteMessage: &goaktpb.RemoteMessage{
 			Sender:   sender,
 			Receiver: to,
 			Message:  marshaled,
@@ -607,7 +607,7 @@ func (p *pid) RemoteAsk(ctx context.Context, to *pb.Address, message proto.Messa
 	// prepare the rpcRequest to send
 	rpcRequest := connect.NewRequest(
 		&goaktpb.RemoteAskRequest{
-			RemoteMessage: &pb.RemoteMessage{
+			RemoteMessage: &goaktpb.RemoteMessage{
 				Sender:   RemoteNoSender,
 				Receiver: to,
 				Message:  marshaled,

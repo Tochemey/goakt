@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package goakt.v1;
 
-import "messages/v1/address.proto";
+import "address/v1/address.proto";
 
 option go_package = "github.com/tochemey/goakt/internal/goakt/v1;goaktv1";
 
@@ -12,7 +12,7 @@ message WireActor {
   // The actor name can be either the actor FQN or an alias
   string actor_name = 1;
   // Specifies the actor address
-  messages.v1.Address actor_address = 2;
+  address.v1.Address actor_address = 2;
   // Specifies the actor full path
   string actor_path = 3;
 }

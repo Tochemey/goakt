@@ -18,7 +18,7 @@ import (
 	goaktpb "github.com/tochemey/goakt/internal/goakt/v1"
 	"github.com/tochemey/goakt/internal/goakt/v1/goaktv1connect"
 	"github.com/tochemey/goakt/log"
-	pb "github.com/tochemey/goakt/messages/v1"
+	pb "github.com/tochemey/goakt/pb/v1"
 	"github.com/tochemey/goakt/pkg/resync"
 	"github.com/tochemey/goakt/pkg/telemetry"
 	"go.opentelemetry.io/otel/attribute"
@@ -669,9 +669,6 @@ func (x *actorSystem) RemoteTell(ctx context.Context, request *connect.Request[g
 	reqCopy := request.Msg
 
 	receiver := reqCopy.GetRemoteMessage().GetReceiver()
-
-	// add some debug logger
-	logger.Debugf("received a remote tell call for=(%s)", receiver.String())
 
 	// set the actor path with the remoting is enabled
 	if !x.remotingEnabled.Load() {

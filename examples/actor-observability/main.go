@@ -72,7 +72,7 @@ func main() {
 	initMeter()
 	ctx := context.Background()
 
-	// use the messages default log. real-life implement the log interface`
+	// use the address default log. real-life implement the log interface`
 	logger := log.DefaultLogger
 
 	// create the actor system. kindly in real-life application handle the error
@@ -93,8 +93,8 @@ func main() {
 
 	// shutdown both actors after 3 seconds of conversation
 	timer := time.AfterFunc(3*time.Second, func() {
-		logger.Infof("PingActor=%s has processed %d messages", pingActor.ActorPath().String(), pingActor.ReceivedCount(ctx))
-		logger.Infof("PongActor=%s has processed %d messages", pongActor.ActorPath().String(), pongActor.ReceivedCount(ctx))
+		logger.Infof("PingActor=%s has processed %d address", pingActor.ActorPath().String(), pingActor.ReceivedCount(ctx))
+		logger.Infof("PongActor=%s has processed %d address", pongActor.ActorPath().String(), pongActor.ReceivedCount(ctx))
 		_ = pingActor.Shutdown(ctx)
 		_ = pongActor.Shutdown(ctx)
 	})
@@ -146,7 +146,7 @@ func (p *PingActor) Receive(ctx goakt.ReceiveContext) {
 
 func (p *PingActor) PostStop(ctx context.Context) error {
 	p.logger.Info("PingActor is about to stop")
-	p.logger.Infof("PingActor has processed=%d messages", p.count.Load())
+	p.logger.Infof("PingActor has processed=%d address", p.count.Load())
 	return nil
 }
 
@@ -185,6 +185,6 @@ func (p *PongActor) Receive(ctx goakt.ReceiveContext) {
 
 func (p *PongActor) PostStop(ctx context.Context) error {
 	p.logger.Info("PongActor is about to stop")
-	p.logger.Infof("PongActor has processed=%d messages", p.count.Load())
+	p.logger.Infof("PongActor has processed=%d address", p.count.Load())
 	return nil
 }

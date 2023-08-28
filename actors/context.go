@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync"
 
+	pb "github.com/tochemey/goakt/pb/v1"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -11,7 +12,7 @@ import (
 type ReceiveContext interface {
 	// Context returns the context attached to the message
 	Context() context.Context
-	// Sender of the message
+	// Sender of the message. In the case of remote message this will be set to NoSender
 	Sender() PID
 	// Self represents the actor receiving the message.
 	Self() PID
@@ -22,12 +23,16 @@ type ReceiveContext interface {
 	// This can only be used when we are request-response pattern. When it is an async communication
 	// this operation will amount to nothing.
 	Response(resp proto.Message)
+	// RemoteSender defines the remote sender of the message if it is a remote message
+	// This is set to RemoteNoSender when the message is not a remote message
+	RemoteSender() *pb.Address
 }
 
 type receiveContext struct {
 	ctx            context.Context
 	message        proto.Message
 	sender         PID
+	remoteSender   *pb.Address
 	response       chan proto.Message
 	recipient      PID
 	mu             sync.Mutex
@@ -67,6 +72,14 @@ func (m *receiveContext) Sender() PID {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.sender
+}
+
+// RemoteSender defines the remote sender of the message if it is a remote message
+// This is set to RemoteNoSender when the message is not a remote message
+func (m *receiveContext) RemoteSender() *pb.Address {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.remoteSender
 }
 
 // Message is the actual message sent

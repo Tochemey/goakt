@@ -17,7 +17,7 @@ import (
 func main() {
 	ctx := context.Background()
 
-	// use the messages default log. real-life implement the log interface`
+	// use the address default log. real-life implement the log interface`
 	logger := log.DefaultLogger
 
 	// create the actor system. kindly in real-life application handle the error
@@ -46,7 +46,7 @@ func main() {
 	<-interruptSignal
 
 	// log some stats
-	logger.Infof("Actor=%s has processed %d messages in %d ms", actor.ActorPath().String(), actor.ReceivedCount(ctx), time.Since(startTime).Milliseconds())
+	logger.Infof("Actor=%s has processed %d address in %d ms", actor.ActorPath().String(), actor.ReceivedCount(ctx), time.Since(startTime).Milliseconds())
 
 	// stop the actor system
 	_ = actorSystem.Stop(ctx)

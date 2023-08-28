@@ -1,8 +1,8 @@
 syntax = "proto3";
 
-package messages.v1;
+package address.v1;
 
-option go_package = "github.com/tochemey/goakt/messages/v1;messagesv1";
+option go_package = "github.com/tochemey/goakt/pb/v1;addresspb";
 
 // Address represents an actor address
 message Address {
