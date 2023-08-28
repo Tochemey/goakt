@@ -33,12 +33,12 @@ Also, check reference section at the end of the post for more material regarding
 - Child actor (Spawn and Kill)
 - Supervisory Strategy (Restart and Stop directive are supported)
 - Logger interface with a default logger
-- Examples (check the [examples'](./examples) folder)
 - Integration with [OpenTelemetry](https://github.com/open-telemetry/opentelemetry-go) for traces and metrics.
 - Remoting
     - Actors can send messages to other actors on a remote system via Tell and Ask message patterns.
     - Actors can look up other actors' address on a remote system.
 - Clustering that offers simple scalability, partitioning (sharding), and re-balancing out-of-the-box.
+- [Mock interfaces](./goaktmocks) to test GoAkt-based actors.
 
 ## Installation
 
