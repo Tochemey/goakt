@@ -2,7 +2,6 @@ package actors
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"sync"
 	"testing"
@@ -129,7 +128,6 @@ func TestActorWithReply(t *testing.T) {
 		assert.NoError(t, err)
 	})
 }
-
 func TestActorRestart(t *testing.T) {
 	t.Run("restart a stopped actor", func(t *testing.T) {
 		ctx := context.TODO()
@@ -214,7 +212,6 @@ func TestActorRestart(t *testing.T) {
 		assert.NoError(t, err)
 	})
 }
-
 func TestChildActor(t *testing.T) {
 	t.Run("happy path", func(t *testing.T) {
 		// create a test context
@@ -321,204 +318,5 @@ func TestChildActor(t *testing.T) {
 		//stop the actor
 		err = parent.Shutdown(ctx)
 		assert.NoError(t, err)
-	})
-}
-
-func BenchmarkActor(b *testing.B) {
-	b.Run("receive:single sender", func(b *testing.B) {
-		ctx := context.TODO()
-		actor := &Benchmarker{}
-
-		// create the actor ref
-		// create the actor path
-		actorPath := NewPath("Test", NewAddress(protocol, "sys", "host", 1))
-		pid := newPID(ctx, actorPath, actor,
-			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
-			withSendReplyTimeout(receivingTimeout))
-
-		actor.Wg.Add(b.N)
-		go func() {
-			for i := 0; i < b.N; i++ {
-				// send a message to the actor
-				_ = Tell(ctx, pid, new(testpb.TestSend))
-			}
-		}()
-		actor.Wg.Wait()
-		_ = pid.Shutdown(ctx)
-	})
-	b.Run("receive:send only", func(b *testing.B) {
-		ctx := context.TODO()
-		actor := &Benchmarker{}
-
-		// create the actor ref
-		// create the actor path
-		actorPath := NewPath("Test", NewAddress(protocol, "sys", "host", 1))
-		pid := newPID(ctx, actorPath, actor,
-			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
-			withSendReplyTimeout(receivingTimeout))
-
-		actor.Wg.Add(b.N)
-		for i := 0; i < b.N; i++ {
-			// send a message to the actor
-			_ = Tell(ctx, pid, new(testpb.TestSend))
-		}
-		_ = pid.Shutdown(ctx)
-	})
-	b.Run("receive:multiple senders", func(b *testing.B) {
-		ctx := context.TODO()
-		actor := &Benchmarker{}
-
-		// create the actor ref
-		// create the actor path
-		actorPath := NewPath("Test", NewAddress(protocol, "sys", "host", 1))
-		pid := newPID(ctx, actorPath, actor,
-			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
-			withSendReplyTimeout(receivingTimeout))
-
-		actor.Wg.Add(b.N)
-		for i := 0; i < b.N; i++ {
-			go func() {
-				defer func() {
-					if r := recover(); r != nil {
-						fmt.Println("Failed to send", r)
-					}
-				}()
-				// send a message to the actor
-				_ = Tell(ctx, pid, new(testpb.TestSend))
-			}()
-		}
-		actor.Wg.Wait()
-		_ = pid.Shutdown(ctx)
-	})
-	b.Run("receive:multiple senders times hundred", func(b *testing.B) {
-		ctx := context.TODO()
-		actor := &Benchmarker{}
-
-		// create the actor ref
-		// create the actor path
-		actorPath := NewPath("Test", NewAddress(protocol, "sys", "host", 1))
-		pid := newPID(ctx, actorPath, actor,
-			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
-			withSendReplyTimeout(receivingTimeout))
-
-		actor.Wg.Add(b.N * 100)
-		for i := 0; i < b.N; i++ {
-			go func() {
-				defer func() {
-					if r := recover(); r != nil {
-						fmt.Println("Failed to send", r)
-					}
-				}()
-				for i := 0; i < 100; i++ {
-					// send a message to the actor
-					_ = Tell(ctx, pid, new(testpb.TestSend))
-				}
-			}()
-		}
-		actor.Wg.Wait()
-		_ = pid.Shutdown(ctx)
-	})
-	b.Run("receive-reply: single sender", func(b *testing.B) {
-		ctx := context.TODO()
-		actor := &Benchmarker{}
-
-		// create the actor ref
-		// create the actor path
-		actorPath := NewPath("Test", NewAddress(protocol, "sys", "host", 1))
-		pid := newPID(ctx, actorPath, actor,
-			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
-			withPassivationAfter(5*time.Second),
-			withSendReplyTimeout(receivingTimeout))
-
-		actor.Wg.Add(b.N)
-		go func() {
-			for i := 0; i < b.N; i++ {
-				// send a message to the actor
-				_, _ = Ask(ctx, pid, new(testpb.TestReply), receivingTimeout)
-			}
-		}()
-		actor.Wg.Wait()
-		_ = pid.Shutdown(ctx)
-	})
-	b.Run("receive-reply: send only", func(b *testing.B) {
-		ctx := context.TODO()
-		actor := &Benchmarker{}
-
-		// create the actor path
-		actorPath := NewPath("Test", NewAddress(protocol, "sys", "host", 1))
-		// create the actor ref
-		pid := newPID(ctx, actorPath, actor,
-			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
-			withPassivationAfter(5*time.Second),
-			withSendReplyTimeout(receivingTimeout))
-
-		actor.Wg.Add(b.N)
-		for i := 0; i < b.N; i++ {
-			// send a message to the actor
-			_, _ = Ask(ctx, pid, new(testpb.TestReply), receivingTimeout)
-		}
-		_ = pid.Shutdown(ctx)
-	})
-	b.Run("receive-reply:multiple senders", func(b *testing.B) {
-		ctx := context.TODO()
-		actor := &Benchmarker{}
-		// create the actor path
-		actorPath := NewPath("Test", NewAddress(protocol, "sys", "host", 1))
-		// create the actor ref
-		pid := newPID(ctx, actorPath, actor,
-			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
-			withPassivationAfter(5*time.Second),
-			withSendReplyTimeout(receivingTimeout))
-
-		actor.Wg.Add(b.N)
-		for i := 0; i < b.N; i++ {
-			go func() {
-				defer func() {
-					if r := recover(); r != nil {
-						fmt.Println("Failed to send", r)
-					}
-				}()
-				// send a message to the actor
-				_, _ = Ask(ctx, pid, new(testpb.TestReply), receivingTimeout)
-			}()
-		}
-		actor.Wg.Wait()
-		_ = pid.Shutdown(ctx)
-	})
-	b.Run("receive-reply:multiple senders times hundred", func(b *testing.B) {
-		ctx := context.TODO()
-		actor := &Benchmarker{}
-		// create the actor path
-		actorPath := NewPath("Test", NewAddress(protocol, "sys", "host", 1))
-		// create the actor ref
-		pid := newPID(ctx, actorPath, actor,
-			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
-			withPassivationAfter(5*time.Second),
-			withSendReplyTimeout(receivingTimeout))
-
-		actor.Wg.Add(b.N * 100)
-		for i := 0; i < b.N; i++ {
-			go func() {
-				defer func() {
-					if r := recover(); r != nil {
-						fmt.Println("Failed to send", r)
-					}
-				}()
-				for i := 0; i < 100; i++ {
-					// send a message to the actor
-					_, _ = Ask(ctx, pid, new(testpb.TestReply), receivingTimeout)
-				}
-			}()
-		}
-		actor.Wg.Wait()
-		_ = pid.Shutdown(ctx)
 	})
 }

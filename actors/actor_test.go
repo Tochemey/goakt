@@ -18,29 +18,6 @@ func TestMain(m *testing.M) {
 		goleak.IgnoreTopFunction("internal/poll.runtime_pollWait"))
 }
 
-// Benchmarker is an actor that helps run benchmark tests
-type Benchmarker struct {
-	Wg sync.WaitGroup
-}
-
-func (p *Benchmarker) PreStart(context.Context) error {
-	return nil
-}
-
-func (p *Benchmarker) Receive(ctx ReceiveContext) {
-	switch ctx.Message().(type) {
-	case *testspb.TestSend:
-		p.Wg.Done()
-	case *testspb.TestReply:
-		ctx.Response(&testspb.Reply{Content: "received message"})
-		p.Wg.Done()
-	}
-}
-
-func (p *Benchmarker) PostStop(context.Context) error {
-	return nil
-}
-
 // Tester is an actor that helps run various test scenarios
 type Tester struct{}
 

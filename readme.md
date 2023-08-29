@@ -199,3 +199,31 @@ Prior to submitting a [pull request](https://help.github.com/articles/using-pull
 ```bash
 earthly +test
 ```
+
+## Benchmark Result
+One can run the benchmark test: `go test -bench=. -benchtime 2s -count 2 -benchmem -cpu 4 -run notest` from the [bench package](./bench)
+
+```bash
+goos: darwin
+goarch: amd64
+pkg: github.com/tochemey/goakt/bench
+cpu: Intel(R) Core(TM) i5-1038NG7 CPU @ 2.00GHz
+BenchmarkActor/receive:single_sender-4         	 4113325	       549.1 ns/op	     176 B/op	       4 allocs/op
+BenchmarkActor/receive:single_sender-4         	 4386228	       553.1 ns/op	     176 B/op	       4 allocs/op
+BenchmarkActor/receive:send_only-4             	 4311411	       551.6 ns/op	     176 B/op	       4 allocs/op
+BenchmarkActor/receive:send_only-4             	 4327274	       563.1 ns/op	     176 B/op	       4 allocs/op
+BenchmarkActor/receive:multiple_senders-4      	 1915783	      1255 ns/op	     265 B/op	       5 allocs/op
+BenchmarkActor/receive:multiple_senders-4      	 1694605	      1266 ns/op	     235 B/op	       5 allocs/op
+BenchmarkActor/receive:multiple_senders_times_hundred-4         	   34424	     71860 ns/op	   17744 B/op	     402 allocs/op
+BenchmarkActor/receive:multiple_senders_times_hundred-4         	   35589	     70236 ns/op	   17744 B/op	     402 allocs/op
+BenchmarkActor/receive-reply:_single_sender-4                   	 1254375	      1915 ns/op	     552 B/op	      10 allocs/op
+BenchmarkActor/receive-reply:_single_sender-4                   	 1235786	      1956 ns/op	     552 B/op	      10 allocs/op
+BenchmarkActor/receive-reply:_send_only-4                       	 1236798	      1945 ns/op	     552 B/op	      10 allocs/op
+BenchmarkActor/receive-reply:_send_only-4                       	 1248726	      1897 ns/op	     552 B/op	      10 allocs/op
+BenchmarkActor/receive-reply:multiple_senders-4                 	 1555826	      1654 ns/op	     615 B/op	      11 allocs/op
+BenchmarkActor/receive-reply:multiple_senders-4                 	 1533507	      1733 ns/op	     614 B/op	      11 allocs/op
+BenchmarkActor/receive-reply:multiple_senders_times_hundred-4   	   19311	    133615 ns/op	   55562 B/op	    1004 allocs/op
+BenchmarkActor/receive-reply:multiple_senders_times_hundred-4   	   19354	    133310 ns/op	   55591 B/op	    1004 allocs/op
+PASS
+ok  	github.com/tochemey/goakt/bench	62.953s
+```
