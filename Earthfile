@@ -129,6 +129,7 @@ actor-cluster-image:
     COPY +compile-actor-cluster/accounts ./accounts
     RUN chmod +x ./accounts
 
+    # expose the various ports in the container
     EXPOSE 50051
     EXPOSE 50052
     EXPOSE 3322
