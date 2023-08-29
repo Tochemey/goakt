@@ -12,7 +12,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tochemey/goakt/log"
 	testpb "github.com/tochemey/goakt/test/data/pb/v1"
-	"go.uber.org/goleak"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -23,12 +22,6 @@ const (
 )
 
 func TestActorReceive(t *testing.T) {
-	defer goleak.VerifyNone(t,
-		goleak.IgnoreTopFunction("github.com/golang/glog.(*loggingT).flushDaemon"),
-		goleak.IgnoreTopFunction("github.com/go-redis/redis/v8/internal/pool.(*ConnPool).reaper"),
-		goleak.IgnoreTopFunction("golang.org/x/net/http2.(*serverConn).serve"),
-		goleak.IgnoreTopFunction("internal/poll.runtime_pollWait"),
-	)
 	ctx := context.TODO()
 
 	// create the actor path
@@ -64,12 +57,6 @@ func TestActorReceive(t *testing.T) {
 	assert.NoError(t, err)
 }
 func TestActorWithPassivation(t *testing.T) {
-	defer goleak.VerifyNone(t,
-		goleak.IgnoreTopFunction("github.com/golang/glog.(*loggingT).flushDaemon"),
-		goleak.IgnoreTopFunction("github.com/go-redis/redis/v8/internal/pool.(*ConnPool).reaper"),
-		goleak.IgnoreTopFunction("golang.org/x/net/http2.(*serverConn).serve"),
-		goleak.IgnoreTopFunction("internal/poll.runtime_pollWait"),
-	)
 	ctx := context.TODO()
 	// create a Ping actor
 	opts := []pidOption{
@@ -99,12 +86,6 @@ func TestActorWithPassivation(t *testing.T) {
 }
 func TestActorWithReply(t *testing.T) {
 	t.Run("with happy path", func(t *testing.T) {
-		defer goleak.VerifyNone(t,
-			goleak.IgnoreTopFunction("github.com/golang/glog.(*loggingT).flushDaemon"),
-			goleak.IgnoreTopFunction("github.com/go-redis/redis/v8/internal/pool.(*ConnPool).reaper"),
-			goleak.IgnoreTopFunction("golang.org/x/net/http2.(*serverConn).serve"),
-			goleak.IgnoreTopFunction("internal/poll.runtime_pollWait"),
-		)
 		ctx := context.TODO()
 		// create a Ping actor
 		opts := []pidOption{
@@ -127,12 +108,6 @@ func TestActorWithReply(t *testing.T) {
 		assert.NoError(t, err)
 	})
 	t.Run("with timeout", func(t *testing.T) {
-		defer goleak.VerifyNone(t,
-			goleak.IgnoreTopFunction("github.com/golang/glog.(*loggingT).flushDaemon"),
-			goleak.IgnoreTopFunction("github.com/go-redis/redis/v8/internal/pool.(*ConnPool).reaper"),
-			goleak.IgnoreTopFunction("golang.org/x/net/http2.(*serverConn).serve"),
-			goleak.IgnoreTopFunction("internal/poll.runtime_pollWait"),
-		)
 		ctx := context.TODO()
 		// create a Ping actor
 		opts := []pidOption{
@@ -157,12 +132,6 @@ func TestActorWithReply(t *testing.T) {
 
 func TestActorRestart(t *testing.T) {
 	t.Run("restart a stopped actor", func(t *testing.T) {
-		defer goleak.VerifyNone(t,
-			goleak.IgnoreTopFunction("github.com/golang/glog.(*loggingT).flushDaemon"),
-			goleak.IgnoreTopFunction("github.com/go-redis/redis/v8/internal/pool.(*ConnPool).reaper"),
-			goleak.IgnoreTopFunction("golang.org/x/net/http2.(*serverConn).serve"),
-			goleak.IgnoreTopFunction("internal/poll.runtime_pollWait"),
-		)
 		ctx := context.TODO()
 
 		// create a Ping actor
@@ -207,12 +176,6 @@ func TestActorRestart(t *testing.T) {
 	})
 
 	t.Run("restart an actor", func(t *testing.T) {
-		defer goleak.VerifyNone(t,
-			goleak.IgnoreTopFunction("github.com/golang/glog.(*loggingT).flushDaemon"),
-			goleak.IgnoreTopFunction("github.com/go-redis/redis/v8/internal/pool.(*ConnPool).reaper"),
-			goleak.IgnoreTopFunction("golang.org/x/net/http2.(*serverConn).serve"),
-			goleak.IgnoreTopFunction("internal/poll.runtime_pollWait"),
-		)
 		ctx := context.TODO()
 
 		// create a Ping actor
@@ -254,13 +217,6 @@ func TestActorRestart(t *testing.T) {
 
 func TestChildActor(t *testing.T) {
 	t.Run("happy path", func(t *testing.T) {
-		defer goleak.VerifyNone(t,
-			goleak.IgnoreTopFunction("github.com/golang/glog.(*loggingT).flushDaemon"),
-			goleak.IgnoreTopFunction("github.com/go-redis/redis/v8/internal/pool.(*ConnPool).reaper"),
-			goleak.IgnoreTopFunction("golang.org/x/net/http2.(*serverConn).serve"),
-			goleak.IgnoreTopFunction("internal/poll.runtime_pollWait"),
-		)
-
 		// create a test context
 		ctx := context.TODO()
 		// create the actor path
@@ -293,13 +249,6 @@ func TestChildActor(t *testing.T) {
 		assert.NoError(t, err)
 	})
 	t.Run("test child panic with stop as default strategy", func(t *testing.T) {
-		defer goleak.VerifyNone(t,
-			goleak.IgnoreTopFunction("github.com/golang/glog.(*loggingT).flushDaemon"),
-			goleak.IgnoreTopFunction("github.com/go-redis/redis/v8/internal/pool.(*ConnPool).reaper"),
-			goleak.IgnoreTopFunction("golang.org/x/net/http2.(*serverConn).serve"),
-			goleak.IgnoreTopFunction("internal/poll.runtime_pollWait"),
-		)
-
 		// create a test context
 		ctx := context.TODO()
 		// create the actor path
@@ -336,13 +285,6 @@ func TestChildActor(t *testing.T) {
 		assert.NoError(t, err)
 	})
 	t.Run("test child panic with restart as default strategy", func(t *testing.T) {
-		defer goleak.VerifyNone(t,
-			goleak.IgnoreTopFunction("github.com/golang/glog.(*loggingT).flushDaemon"),
-			goleak.IgnoreTopFunction("github.com/go-redis/redis/v8/internal/pool.(*ConnPool).reaper"),
-			goleak.IgnoreTopFunction("golang.org/x/net/http2.(*serverConn).serve"),
-			goleak.IgnoreTopFunction("internal/poll.runtime_pollWait"),
-		)
-
 		// create a test context
 		ctx := context.TODO()
 

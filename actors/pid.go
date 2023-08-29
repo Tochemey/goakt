@@ -341,6 +341,9 @@ func (p *pid) Restart(ctx context.Context) error {
 		go p.passivationListener()
 	}
 
+	// reset the behavior
+	p.resetBehavior()
+
 	// register metrics. However, we don't panic when we fail to register
 	// we just log it for now
 	// TODO decide what to do when we fail to register the metrics or export the metrics registration as public

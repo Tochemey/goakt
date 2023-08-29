@@ -3,11 +3,20 @@ package actors
 import (
 	"context"
 	"sync"
+	"testing"
 	"time"
 
-	"github.com/tochemey/goakt/log"
+	"go.uber.org/goleak"
+
 	testspb "github.com/tochemey/goakt/test/data/pb/v1"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, goleak.IgnoreTopFunction("github.com/golang/glog.(*loggingT).flushDaemon"),
+		goleak.IgnoreTopFunction("github.com/go-redis/redis/v8/internal/pool.(*ConnPool).reaper"),
+		goleak.IgnoreTopFunction("golang.org/x/net/http2.(*serverConn).serve"),
+		goleak.IgnoreTopFunction("internal/poll.runtime_pollWait"))
+}
 
 type BenchActor struct {
 	Wg sync.WaitGroup
@@ -31,17 +40,13 @@ func (p *BenchActor) PostStop(context.Context) error {
 	return nil
 }
 
-type TestActor struct {
-	logger log.Logger
-}
+type TestActor struct{}
 
 var _ Actor = (*TestActor)(nil)
 
 // NewTestActor creates a TestActor
 func NewTestActor() *TestActor {
-	return &TestActor{
-		logger: log.DefaultLogger,
-	}
+	return &TestActor{}
 }
 
 // Init initialize the actor. This function can be used to set up some database connections
@@ -60,9 +65,8 @@ func (p *TestActor) Receive(ctx ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *testspb.TestSend:
 	case *testspb.TestPanic:
-		p.logger.Panic("Boom")
+		panic("Boom")
 	case *testspb.TestReply:
-		p.logger.Info("received request/response")
 		ctx.Response(&testspb.Reply{Content: "received message"})
 	case *testspb.TestTimeout:
 		// delay for a while before sending the reply
@@ -74,22 +78,17 @@ func (p *TestActor) Receive(ctx ReceiveContext) {
 		}()
 		// block until timer is up
 		wg.Wait()
-
 	default:
-		p.logger.Panic(ErrUnhandled)
+		panic(ErrUnhandled)
 	}
 }
 
-type ParentActor struct {
-	logger log.Logger
-}
+type ParentActor struct{}
 
 var _ Actor = (*ParentActor)(nil)
 
 func NewParentActor() *ParentActor {
-	return &ParentActor{
-		logger: log.DefaultLogger,
-	}
+	return &ParentActor{}
 }
 
 func (p *ParentActor) PreStart(context.Context) error {
@@ -100,7 +99,7 @@ func (p *ParentActor) Receive(ctx ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *testspb.TestSend:
 	default:
-		p.logger.Panic(ErrUnhandled)
+		panic(ErrUnhandled)
 	}
 }
 
@@ -108,16 +107,12 @@ func (p *ParentActor) PostStop(context.Context) error {
 	return nil
 }
 
-type ChildActor struct {
-	logger log.Logger
-}
+type ChildActor struct{}
 
 var _ Actor = (*ChildActor)(nil)
 
 func NewChildActor() *ChildActor {
-	return &ChildActor{
-		logger: log.DefaultLogger,
-	}
+	return &ChildActor{}
 }
 
 func (c *ChildActor) PreStart(context.Context) error {
@@ -128,9 +123,9 @@ func (c *ChildActor) Receive(ctx ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *testspb.TestSend:
 	case *testspb.TestPanic:
-		c.logger.Panic("panicked")
+		panic("panicked")
 	default:
-		c.logger.Panic(ErrUnhandled)
+		panic(ErrUnhandled)
 	}
 }
 
