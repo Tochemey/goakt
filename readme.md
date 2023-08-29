@@ -17,6 +17,21 @@ If you are not familiar with the actor model, the blog post from Brian
 Storti [here](https://www.brianstorti.com/the-actor-model/) is an excellent and short introduction to the actor model.
 Also, check reference section at the end of the post for more material regarding actor model.
 
+## Table of Content
+- [Features](#features)
+- [Installation](#installation)
+- [Actors](#actors)
+- [Actor System](#actorsystem)
+- [Observability](#observability)
+- [Cluster](#clustering)
+    - [Operation Guides](#operations-guide)
+    - [Kubernetes Service Discovery](#kubernetes-discovery-provider-setup)
+    - [Sample Project](#sample-project)
+- [Examples](#examples)
+- [Contribution](#contribution)
+    - [Local Test and Linter](#test--linter)
+- [Benchmark](#benchmark-result)
+
 ## Features
 
 - Send a synchronous message to an actor from a non actor system
