@@ -11,7 +11,7 @@ import (
 )
 
 func TestPath(t *testing.T) {
-	name := "TestActor"
+	name := "Tester"
 	addr := &Address{
 		host:     "localhost",
 		port:     888,
@@ -25,7 +25,7 @@ func TestPath(t *testing.T) {
 
 	// these are just routine assertions
 	assert.Equal(t, name, path.Name())
-	assert.Equal(t, "goakt://Sys@localhost:888/TestActor", path.String())
+	assert.Equal(t, "goakt://Sys@localhost:888/Tester", path.String())
 	remoteAddr := &pb.Address{
 		Host: "localhost",
 		Port: 888,

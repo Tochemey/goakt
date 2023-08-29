@@ -18,15 +18,16 @@ func TestMain(m *testing.M) {
 		goleak.IgnoreTopFunction("internal/poll.runtime_pollWait"))
 }
 
-type BenchActor struct {
+// Benchmarker is an actor that helps run benchmark tests
+type Benchmarker struct {
 	Wg sync.WaitGroup
 }
 
-func (p *BenchActor) PreStart(context.Context) error {
+func (p *Benchmarker) PreStart(context.Context) error {
 	return nil
 }
 
-func (p *BenchActor) Receive(ctx ReceiveContext) {
+func (p *Benchmarker) Receive(ctx ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *testspb.TestSend:
 		p.Wg.Done()
@@ -36,32 +37,34 @@ func (p *BenchActor) Receive(ctx ReceiveContext) {
 	}
 }
 
-func (p *BenchActor) PostStop(context.Context) error {
+func (p *Benchmarker) PostStop(context.Context) error {
 	return nil
 }
 
-type TestActor struct{}
+// Tester is an actor that helps run various test scenarios
+type Tester struct{}
 
-var _ Actor = (*TestActor)(nil)
+// enforce compilation error
+var _ Actor = (*Tester)(nil)
 
-// NewTestActor creates a TestActor
-func NewTestActor() *TestActor {
-	return &TestActor{}
+// NewTester creates a Tester
+func NewTester() *Tester {
+	return &Tester{}
 }
 
 // Init initialize the actor. This function can be used to set up some database connections
 // or some sort of initialization before the actor init processing public
-func (p *TestActor) PreStart(context.Context) error {
+func (p *Tester) PreStart(context.Context) error {
 	return nil
 }
 
 // Stop gracefully shuts down the given actor
-func (p *TestActor) PostStop(context.Context) error {
+func (p *Tester) PostStop(context.Context) error {
 	return nil
 }
 
 // Receive processes any message dropped into the actor mailbox without a reply
-func (p *TestActor) Receive(ctx ReceiveContext) {
+func (p *Tester) Receive(ctx ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *testspb.TestSend:
 	case *testspb.TestPanic:
@@ -83,19 +86,23 @@ func (p *TestActor) Receive(ctx ReceiveContext) {
 	}
 }
 
-type ParentActor struct{}
+// Monitor is an actor that monitors another actor
+// and reacts to its failure.
+type Monitor struct{}
 
-var _ Actor = (*ParentActor)(nil)
+// enforce compilation error
+var _ Actor = (*Monitor)(nil)
 
-func NewParentActor() *ParentActor {
-	return &ParentActor{}
+// NewMonitor creates an instance of Monitor
+func NewMonitor() *Monitor {
+	return &Monitor{}
 }
 
-func (p *ParentActor) PreStart(context.Context) error {
+func (p *Monitor) PreStart(context.Context) error {
 	return nil
 }
 
-func (p *ParentActor) Receive(ctx ReceiveContext) {
+func (p *Monitor) Receive(ctx ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *testspb.TestSend:
 	default:
@@ -103,23 +110,26 @@ func (p *ParentActor) Receive(ctx ReceiveContext) {
 	}
 }
 
-func (p *ParentActor) PostStop(context.Context) error {
+func (p *Monitor) PostStop(context.Context) error {
 	return nil
 }
 
-type ChildActor struct{}
+// Monitored is an actor that is monitored
+type Monitored struct{}
 
-var _ Actor = (*ChildActor)(nil)
+// enforce compilation error
+var _ Actor = (*Monitored)(nil)
 
-func NewChildActor() *ChildActor {
-	return &ChildActor{}
+// NewMonitored creates an instance of Monitored
+func NewMonitored() *Monitored {
+	return &Monitored{}
 }
 
-func (c *ChildActor) PreStart(context.Context) error {
+func (c *Monitored) PreStart(context.Context) error {
 	return nil
 }
 
-func (c *ChildActor) Receive(ctx ReceiveContext) {
+func (c *Monitored) Receive(ctx ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *testspb.TestSend:
 	case *testspb.TestPanic:
@@ -129,6 +139,6 @@ func (c *ChildActor) Receive(ctx ReceiveContext) {
 	}
 }
 
-func (c *ChildActor) PostStop(context.Context) error {
+func (c *Monitored) PostStop(context.Context) error {
 	return nil
 }

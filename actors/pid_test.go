@@ -31,7 +31,7 @@ func TestActorReceive(t *testing.T) {
 	pid := newPID(
 		ctx,
 		actorPath,
-		NewTestActor(),
+		NewTester(),
 		withInitMaxRetries(1),
 		withCustomLogger(log.DefaultLogger),
 		withSendReplyTimeout(receivingTimeout))
@@ -67,7 +67,7 @@ func TestActorWithPassivation(t *testing.T) {
 
 	// create the actor path
 	actorPath := NewPath("Test", NewAddress(protocol, "sys", "host", 1))
-	pid := newPID(ctx, actorPath, NewTestActor(), opts...)
+	pid := newPID(ctx, actorPath, NewTester(), opts...)
 	assert.NotNil(t, pid)
 
 	// let us sleep for some time to make the actor idle
@@ -95,7 +95,7 @@ func TestActorWithReply(t *testing.T) {
 
 		// create the actor path
 		actorPath := NewPath("Test", NewAddress(protocol, "sys", "host", 1))
-		pid := newPID(ctx, actorPath, NewTestActor(), opts...)
+		pid := newPID(ctx, actorPath, NewTester(), opts...)
 		assert.NotNil(t, pid)
 
 		actual, err := Ask(ctx, pid, new(testpb.TestReply), receivingTimeout)
@@ -117,7 +117,7 @@ func TestActorWithReply(t *testing.T) {
 
 		// create the actor path
 		actorPath := NewPath("Test", NewAddress(protocol, "sys", "host", 1))
-		pid := newPID(ctx, actorPath, NewTestActor(), opts...)
+		pid := newPID(ctx, actorPath, NewTester(), opts...)
 		assert.NotNil(t, pid)
 
 		actual, err := Ask(ctx, pid, new(testpb.TestSend), receivingTimeout)
@@ -135,7 +135,7 @@ func TestActorRestart(t *testing.T) {
 		ctx := context.TODO()
 
 		// create a Ping actor
-		actor := NewTestActor()
+		actor := NewTester()
 		assert.NotNil(t, actor)
 
 		// create the actor path
@@ -179,7 +179,7 @@ func TestActorRestart(t *testing.T) {
 		ctx := context.TODO()
 
 		// create a Ping actor
-		actor := NewTestActor()
+		actor := NewTester()
 		assert.NotNil(t, actor)
 		// create the actor path
 		actorPath := NewPath("Test", NewAddress(protocol, "sys", "host", 1))
@@ -224,14 +224,14 @@ func TestChildActor(t *testing.T) {
 
 		// create the parent actor
 		parent := newPID(ctx, actorPath,
-			NewParentActor(),
+			NewMonitor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
 			withSendReplyTimeout(receivingTimeout))
 		assert.NotNil(t, parent)
 
 		// create the child actor
-		child, err := parent.SpawnChild(ctx, "Child", NewChildActor())
+		child, err := parent.SpawnChild(ctx, "Child", NewMonitored())
 		assert.NoError(t, err)
 		assert.NotNil(t, child)
 
@@ -257,7 +257,7 @@ func TestChildActor(t *testing.T) {
 		// create the parent actor
 		parent := newPID(ctx,
 			actorPath,
-			NewParentActor(),
+			NewMonitor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
 			withPassivationDisabled(),
@@ -265,7 +265,7 @@ func TestChildActor(t *testing.T) {
 		assert.NotNil(t, parent)
 
 		// create the child actor
-		child, err := parent.SpawnChild(ctx, "Child", NewChildActor())
+		child, err := parent.SpawnChild(ctx, "Child", NewMonitored())
 		assert.NoError(t, err)
 		assert.NotNil(t, child)
 
@@ -294,7 +294,7 @@ func TestChildActor(t *testing.T) {
 		// create the parent actor
 		parent := newPID(ctx,
 			actorPath,
-			NewParentActor(),
+			NewMonitor(),
 			withInitMaxRetries(1),
 			withCustomLogger(logger),
 			withPassivationDisabled(),
@@ -303,7 +303,7 @@ func TestChildActor(t *testing.T) {
 		assert.NotNil(t, parent)
 
 		// create the child actor
-		child, err := parent.SpawnChild(ctx, "Child", NewChildActor())
+		child, err := parent.SpawnChild(ctx, "Child", NewMonitored())
 		assert.NoError(t, err)
 		assert.NotNil(t, child)
 
@@ -327,7 +327,7 @@ func TestChildActor(t *testing.T) {
 func BenchmarkActor(b *testing.B) {
 	b.Run("receive:single sender", func(b *testing.B) {
 		ctx := context.TODO()
-		actor := &BenchActor{}
+		actor := &Benchmarker{}
 
 		// create the actor ref
 		// create the actor path
@@ -349,7 +349,7 @@ func BenchmarkActor(b *testing.B) {
 	})
 	b.Run("receive:send only", func(b *testing.B) {
 		ctx := context.TODO()
-		actor := &BenchActor{}
+		actor := &Benchmarker{}
 
 		// create the actor ref
 		// create the actor path
@@ -368,7 +368,7 @@ func BenchmarkActor(b *testing.B) {
 	})
 	b.Run("receive:multiple senders", func(b *testing.B) {
 		ctx := context.TODO()
-		actor := &BenchActor{}
+		actor := &Benchmarker{}
 
 		// create the actor ref
 		// create the actor path
@@ -395,7 +395,7 @@ func BenchmarkActor(b *testing.B) {
 	})
 	b.Run("receive:multiple senders times hundred", func(b *testing.B) {
 		ctx := context.TODO()
-		actor := &BenchActor{}
+		actor := &Benchmarker{}
 
 		// create the actor ref
 		// create the actor path
@@ -424,7 +424,7 @@ func BenchmarkActor(b *testing.B) {
 	})
 	b.Run("receive-reply: single sender", func(b *testing.B) {
 		ctx := context.TODO()
-		actor := &BenchActor{}
+		actor := &Benchmarker{}
 
 		// create the actor ref
 		// create the actor path
@@ -447,7 +447,7 @@ func BenchmarkActor(b *testing.B) {
 	})
 	b.Run("receive-reply: send only", func(b *testing.B) {
 		ctx := context.TODO()
-		actor := &BenchActor{}
+		actor := &Benchmarker{}
 
 		// create the actor path
 		actorPath := NewPath("Test", NewAddress(protocol, "sys", "host", 1))
@@ -467,7 +467,7 @@ func BenchmarkActor(b *testing.B) {
 	})
 	b.Run("receive-reply:multiple senders", func(b *testing.B) {
 		ctx := context.TODO()
-		actor := &BenchActor{}
+		actor := &Benchmarker{}
 		// create the actor path
 		actorPath := NewPath("Test", NewAddress(protocol, "sys", "host", 1))
 		// create the actor ref
@@ -494,7 +494,7 @@ func BenchmarkActor(b *testing.B) {
 	})
 	b.Run("receive-reply:multiple senders times hundred", func(b *testing.B) {
 		ctx := context.TODO()
-		actor := &BenchActor{}
+		actor := &Benchmarker{}
 		// create the actor path
 		actorPath := NewPath("Test", NewAddress(protocol, "sys", "host", 1))
 		// create the actor ref

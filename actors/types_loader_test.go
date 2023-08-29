@@ -17,11 +17,11 @@ func TestTypesLoader(t *testing.T) {
 	t.Run("With registration with name", func(t *testing.T) {
 		tl := NewTypesLoader()
 		// create an instance of an object
-		actor := NewTestActor()
+		actor := NewTester()
 		// register that actor
-		tl.Register("TestActor", actor)
-		// assert the type of TestActor
-		_, ok := tl.TypeByName("TestActor")
+		tl.Register("Tester", actor)
+		// assert the type of Tester
+		_, ok := tl.TypeByName("Tester")
 		assert.True(t, ok)
 		_, ok = tl.Type(actor)
 		assert.True(t, ok)
@@ -30,11 +30,11 @@ func TestTypesLoader(t *testing.T) {
 	t.Run("With registration without name", func(t *testing.T) {
 		tl := NewTypesLoader()
 		// create an instance of an object
-		actor := NewTestActor()
+		actor := NewTester()
 		// register that actor
 		tl.Register("", actor)
-		// assert the type of TestActor
-		_, ok := tl.TypeByName("TestActor")
+		// assert the type of Tester
+		_, ok := tl.TypeByName("Tester")
 		assert.False(t, ok)
 		_, ok = tl.Type(actor)
 		assert.True(t, ok)
