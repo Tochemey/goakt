@@ -233,6 +233,10 @@ func (d *Discovery) DiscoverPeers() ([]string, error) {
 	// define the addresses list
 	addresses := goset.NewSet[string]()
 	for entry := range entries {
+		// validate the entry
+		if !d.validateEntry(entry) {
+			continue
+		}
 		// lookup for v6 address
 		if v6 {
 			// iterate the list of ports
@@ -288,4 +292,12 @@ func (d *Discovery) setOptions(config discovery.Config) (err error) {
 	// in case none of the above extraction fails then set the option
 	d.option = option
 	return nil
+}
+
+// validateEntry validates the mDNS discovered entry
+func (d *Discovery) validateEntry(entry *zeroconf.ServiceEntry) bool {
+	return entry.Port == d.option.Port &&
+		entry.Service == d.option.Service &&
+		entry.Domain == d.option.Domain &&
+		entry.Instance == d.option.ServiceName
 }

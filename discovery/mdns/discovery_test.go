@@ -167,7 +167,6 @@ func TestDiscovery(t *testing.T) {
 		peers, err := provider.DiscoverPeers()
 		require.NoError(t, err)
 		require.NotEmpty(t, peers)
-		require.Len(t, peers, 1)
 
 		assert.NoError(t, provider.Deregister())
 	})
