@@ -50,6 +50,7 @@ type Discovery struct {
 	isInitialized *atomic.Bool
 }
 
+// enforce compilation error
 var _ discovery.Provider = &Discovery{}
 
 // NewDiscovery returns an instance of the kubernetes discovery provider
