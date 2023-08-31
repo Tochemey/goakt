@@ -119,6 +119,7 @@ At the moment the following providers are implemented:
 
 * the [kubernetes](https://kubernetes.io/docs/home/) [api integration](./discovery/kubernetes) is provided and fully
   functional.
+* the [mDNS](https://datatracker.ietf.org/doc/html/rfc6762)
 
 In addition, one needs to set the following environment variables irrespective of the discovery provider to help
 identify the host node on which the cluster service is running:
