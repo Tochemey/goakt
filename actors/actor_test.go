@@ -119,3 +119,36 @@ func (c *Monitored) Receive(ctx ReceiveContext) {
 func (c *Monitored) PostStop(context.Context) error {
 	return nil
 }
+
+// UserActor is used to test the actor behavior
+type UserActor struct{}
+
+// enforce compilation error
+var _ Actor = &UserActor{}
+
+func (x *UserActor) PreStart(_ context.Context) error {
+	return nil
+}
+
+func (x *UserActor) PostStop(_ context.Context) error {
+	return nil
+}
+
+func (x *UserActor) Receive(ctx ReceiveContext) {
+	switch ctx.Message().(type) {
+	case *testspb.TestLogin:
+		ctx.Response(new(testspb.TestLoginSuccess))
+		ctx.Become(x.Authenticated)
+	case *testspb.TestReply:
+		ctx.Response(new(testspb.Reply))
+	}
+}
+
+// Authenticated behavior is executed when the actor receive the TestAuth message
+func (x *UserActor) Authenticated(ctx ReceiveContext) {
+	switch ctx.Message().(type) {
+	case *testspb.TestReadiness:
+		ctx.Response(new(testspb.TestReady))
+		ctx.UnBecome()
+	}
+}

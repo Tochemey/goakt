@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package tests.v1;
 
+option go_package = "github.com/tochemey/goakt/test/data/pb/v1;testpb";
+
 message TestReply {}
 message TestPanic {}
 message TestTimeout {}
@@ -11,21 +13,21 @@ message Reply {
 
 message TestSend {}
 
-message Account{
+message Account {
   string account_id = 1;
   double account_balance = 2;
 }
 
-message CreateAccount{
+message CreateAccount {
   double account_balance = 2;
 }
 
-message CreditAccount{
+message CreditAccount {
   string account_id = 1;
   double balance = 2;
 }
 
-message AccountCreated{
+message AccountCreated {
   string account_id = 1;
   double account_balance = 2;
 }
@@ -34,3 +36,9 @@ message AccountCredited {
   string account_id = 1;
   double account_balance = 2;
 }
+
+// Login -> Success -> Authed -> Ready
+message TestLogin {}
+message TestLoginSuccess {}
+message TestReadiness {}
+message TestReady {}

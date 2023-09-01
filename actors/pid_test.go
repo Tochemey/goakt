@@ -320,3 +320,44 @@ func TestChildActor(t *testing.T) {
 		assert.NoError(t, err)
 	})
 }
+func TestActorBehavior(t *testing.T) {
+	ctx := context.TODO()
+	// create a Ping actor
+	opts := []pidOption{
+		withInitMaxRetries(1),
+		withCustomLogger(log.DiscardLogger),
+	}
+
+	// create the actor path
+	actor := &UserActor{}
+	actorPath := NewPath("Test", NewAddress(protocol, "sys", "host", 1))
+	pid := newPID(ctx, actorPath, actor, opts...)
+	require.NotNil(t, pid)
+
+	// send Login
+	var expected proto.Message
+	success, err := Ask(ctx, pid, new(testpb.TestLogin), receivingTimeout)
+	require.NoError(t, err)
+	require.NotNil(t, success)
+	expected = &testpb.TestLoginSuccess{}
+	require.True(t, proto.Equal(expected, success))
+
+	// send a reply message
+	ready, err := Ask(ctx, pid, new(testpb.TestReadiness), receivingTimeout)
+	require.NoError(t, err)
+	require.NotNil(t, ready)
+	expected = &testpb.TestReady{}
+	require.True(t, proto.Equal(expected, ready))
+
+	// send a ready message
+	reply, err := Ask(ctx, pid, new(testpb.TestReply), receivingTimeout)
+	require.NoError(t, err)
+	require.NotNil(t, reply)
+
+	expected = &testpb.Reply{}
+	require.True(t, proto.Equal(expected, reply))
+
+	// stop the actor
+	err = pid.Shutdown(ctx)
+	assert.NoError(t, err)
+}
