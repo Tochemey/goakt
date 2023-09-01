@@ -25,7 +25,9 @@ Also, check reference section at the end of the post for more material regarding
 - [Observability](#observability)
 - [Cluster](#clustering)
     - [Operation Guides](#operations-guide)
-    - [Discovery Providers](#discovery-providers)
+    - [Discovery Providers](#built-in-discovery-providers)
+        - [Kubernetes](#kubernetes-discovery-provider-setup)
+        - [mDNS](#mdns-discovery-provider-setup)
 - [Examples](#examples)
 - [Contribution](#contribution)
     - [Local Test and Linter](#test--linter)
@@ -52,6 +54,7 @@ Also, check reference section at the end of the post for more material regarding
     - Actors can send messages to other actors on a remote system via Tell and Ask message patterns.
     - Actors can look up other actors' address on a remote system.
 - Clustering that offers simple scalability, partitioning (sharding), and re-balancing out-of-the-box.
+    - Extensible nodes discovery provider that help add additional cluster nodes discovery 
 - [Mock interfaces](./goaktmocks) to test GoAkt-based actors.
 
 ## Installation
@@ -116,15 +119,17 @@ re-balancing out-of-the-box.
 
 At the moment the following providers are implemented:
 
-* the [kubernetes](https://kubernetes.io/docs/home/) [api integration](./discovery/kubernetes) is fully functional.
+* the [kubernetes](https://kubernetes.io/docs/home/) [api integration](./discovery/kubernetes) is fully functional
 * the [mDNS](https://datatracker.ietf.org/doc/html/rfc6762) and [DNS-SD](https://tools.ietf.org/html/rfc6763)
+
+Note: One can add additional discovery providers using the following [interface](./discovery/provider.go)
 
 In addition, one needs to set the following environment variables irrespective of the discovery provider to help
 identify the host node on which the cluster service is running:
 
 * `NODE_NAME`: the node name. For instance in kubernetes one can just get it from the `metadata.name`
 * `NODE_IP`: the node host address. For instance in kubernetes one can just get it from the `status.podIP`
-* `GOSSIP_PORT`: the gossip protocol engine port.
+* `GOSSIP_PORT`: the gossip protocol engine port
 * `CLUSTER_PORT`: the cluster port to help communicate with other GoAkt nodes in the cluster
 * `REMOTING_PORT`: help remoting communication between actors
 
@@ -137,10 +142,66 @@ The following outlines the cluster mode operations which can help have a healthy
 * One can remove nodes. However, to avoid losing data, one need to scale down the cluster to the minimum number of nodes
   which started the cluster.
 
-### Discovery Providers
+### Built-in Discovery Providers
 
-* [Kubernetes](./docs/kubernetes.md)
-* [mDNS](./docs/mdns.md)
+####  Kubernetes Discovery Provider setup
+
+To get the kubernetes discovery working as expected, the following pod labels need to be set:
+
+* `app.kubernetes.io/part-of`: set this label with the actor system name
+* `app.kubernetes.io/component`: set this label with the application name
+* `app.kubernetes.io/name`: set this label with the application name
+
+In addition, each node _is required to have three different ports open_ with the following ports name for the cluster
+engine to work as expected:
+
+* `gossip-port`: help the gossip protocol engine. This is actually the kubernetes discovery port
+* `cluster-port`: help the cluster engine to communicate with other GoAkt nodes in the cluster
+* `remoting-port`: help for remoting messaging between actors
+
+##### Role Based Access
+
+You’ll also have to grant the Service Account that your pods run under access to list pods. The following configuration
+can be used as a starting point.
+It creates a Role, pod-reader, which grants access to query pod information. It then binds the default Service Account
+to the Role by creating a RoleBinding.
+Adjust as necessary:
+
+```
+kind: Role
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: pod-reader
+rules:
+  - apiGroups: [""] # "" indicates the core API group
+    resources: ["pods"]
+    verbs: ["get", "watch", "list"]
+---
+kind: RoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: read-pods
+subjects:
+  # Uses the default service account. Consider creating a new one.
+  - kind: ServiceAccount
+    name: default
+roleRef:
+  kind: Role
+  name: pod-reader
+  apiGroup: rbac.authorization.k8s.io
+```
+
+##### Sample Project
+
+A working example can be found [here](./examples/actor-cluster/k8s) with a
+small [doc](./examples/actor-cluster/k8s/doc.md) showing how to run it.
+
+####  mDNS Discovery Provider setup
+
+* `Service Name`: the service name
+* `Domain`: The mDNS discovery domain
+* `Port`: The mDNS discovery port
+* `IPv6`: States whether to lookup for IPv6 addresses.
 
 ## Examples
 
