@@ -4,6 +4,8 @@
 [![codecov](https://codecov.io/gh/Tochemey/goakt/branch/main/graph/badge.svg?token=J0p9MzwSRH)](https://codecov.io/gh/Tochemey/goakt)
 [![Go Report Card](https://goreportcard.com/badge/github.com/tochemey/goakt)](https://goreportcard.com/report/github.com/tochemey/goakt)
 [![GitHub release (with filter)](https://img.shields.io/github/v/release/tochemey/goakt)](https://github.com/Tochemey/goakt/releases)
+![GitHub tag (with filter)](https://img.shields.io/github/v/tag/tochemey/goakt)
+
 
 
 Distributed [Go](https://go.dev/) actor framework to build reactive and distributed system in golang using
