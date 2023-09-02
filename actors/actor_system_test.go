@@ -43,7 +43,7 @@ func TestActorSystem(t *testing.T) {
 		assert.Nil(t, sys)
 		assert.EqualError(t, err, ErrInvalidActorSystemName.Error())
 	})
-	t.Run("With Spawn an actor when not started", func(t *testing.T) {
+	t.Run("With Spawn an actor when not System started", func(t *testing.T) {
 		ctx := context.TODO()
 		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
 		actor := NewTester()
@@ -344,6 +344,13 @@ func TestActorSystem(t *testing.T) {
 			assert.NoError(t, err)
 		})
 	})
+	t.Run("With ReSpawn an actor when not System started", func(t *testing.T) {
+		ctx := context.TODO()
+		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		_, err := sys.ReSpawn(ctx, "some-actor")
+		assert.Error(t, err)
+		assert.EqualError(t, err, "actor system has not started yet")
+	})
 	t.Run("ReSpawn with remoting enabled", func(t *testing.T) {
 		ctx := context.TODO()
 		remotingPort := dynaport.Get(1)[0]
@@ -546,5 +553,23 @@ func TestActorSystem(t *testing.T) {
 			err = sys.Stop(ctx)
 			assert.NoError(t, err)
 		})
+	})
+	t.Run("With Kill an actor when not System started", func(t *testing.T) {
+		ctx := context.TODO()
+		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		err := sys.Kill(ctx, "Test")
+		assert.Error(t, err)
+		assert.EqualError(t, err, "actor system has not started yet")
+	})
+	t.Run("With Kill an actor when actor not found", func(t *testing.T) {
+		ctx := context.TODO()
+		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+
+		// start the actor system
+		err := sys.Start(ctx)
+		assert.NoError(t, err)
+		err = sys.Kill(ctx, "Test")
+		assert.Error(t, err)
+		assert.EqualError(t, err, "actor=goakt://testSys@/Test not found in the system")
 	})
 }
