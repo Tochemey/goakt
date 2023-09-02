@@ -417,7 +417,7 @@ func (p *pid) MailboxSize(ctx context.Context) uint64 {
 	return p.mailboxSizeCounter.Load()
 }
 
-// ReceivedCount returns the total number of public processed by the actor
+// ReceivedCount returns the total number of messages processed by the actor
 // at a given time while the actor is still alive
 func (p *pid) ReceivedCount(ctx context.Context) uint64 {
 	// add a span context

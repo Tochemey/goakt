@@ -320,7 +320,7 @@ func TestChildActor(t *testing.T) {
 		assert.NoError(t, err)
 	})
 }
-func TestActorBehavior(t *testing.T) {
+func TestActorToActor(t *testing.T) {
 	ctx := context.TODO()
 	// create a Ping actor
 	opts := []pidOption{
@@ -329,35 +329,33 @@ func TestActorBehavior(t *testing.T) {
 	}
 
 	// create the actor path
-	actor := &UserActor{}
-	actorPath := NewPath("Test", NewAddress(protocol, "sys", "host", 1))
-	pid := newPID(ctx, actorPath, actor, opts...)
-	require.NotNil(t, pid)
+	actor1 := &Exchanger{}
+	actorPath1 := NewPath("Exch1", NewAddress(protocol, "sys", "host", 1))
+	pid1 := newPID(ctx, actorPath1, actor1, opts...)
+	require.NotNil(t, pid1)
 
-	// send Login
-	var expected proto.Message
-	success, err := Ask(ctx, pid, new(testpb.TestLogin), receivingTimeout)
+	actor2 := &Exchanger{}
+	actorPath2 := NewPath("Exch2", NewAddress(protocol, "sys", "host", 1))
+	pid2 := newPID(ctx, actorPath2, actor2, opts...)
+	require.NotNil(t, pid2)
+
+	err := pid1.Tell(ctx, pid2, new(testpb.TestSend))
 	require.NoError(t, err)
-	require.NotNil(t, success)
-	expected = &testpb.TestLoginSuccess{}
-	require.True(t, proto.Equal(expected, success))
 
-	// send a reply message
-	ready, err := Ask(ctx, pid, new(testpb.TestReadiness), receivingTimeout)
+	// wait a while because exchange is ongoing
+	time.Sleep(time.Second)
+
+	assert.Greater(t, pid1.ReceivedCount(ctx), uint64(1))
+	assert.Greater(t, pid2.ReceivedCount(ctx), uint64(1))
+
+	err = Tell(ctx, pid1, new(testpb.TestBye))
 	require.NoError(t, err)
-	require.NotNil(t, ready)
-	expected = &testpb.TestReady{}
-	require.True(t, proto.Equal(expected, ready))
 
-	// send a ready message
-	reply, err := Ask(ctx, pid, new(testpb.TestReply), receivingTimeout)
-	require.NoError(t, err)
-	require.NotNil(t, reply)
+	time.Sleep(time.Second)
+	assert.False(t, pid1.IsRunning())
+	assert.True(t, pid2.IsRunning())
 
-	expected = &testpb.Reply{}
-	require.True(t, proto.Equal(expected, reply))
-
-	// stop the actor
-	err = pid.Shutdown(ctx)
-	assert.NoError(t, err)
+	err = Tell(ctx, pid2, new(testpb.TestBye))
+	time.Sleep(time.Second)
+	assert.False(t, pid2.IsRunning())
 }

@@ -139,8 +139,9 @@ func (x *UserActor) Receive(ctx ReceiveContext) {
 	case *testspb.TestLogin:
 		ctx.Response(new(testspb.TestLoginSuccess))
 		ctx.Become(x.Authenticated)
-	case *testspb.TestReply:
-		ctx.Response(new(testspb.Reply))
+	case *testspb.CreateAccount:
+		ctx.Response(new(testspb.AccountCreated))
+		ctx.BecomeStacked(x.CreditAccount)
 	}
 }
 
@@ -152,3 +153,43 @@ func (x *UserActor) Authenticated(ctx ReceiveContext) {
 		ctx.UnBecome()
 	}
 }
+
+func (x *UserActor) CreditAccount(ctx ReceiveContext) {
+	switch ctx.Message().(type) {
+	case *testspb.CreditAccount:
+		ctx.Response(new(testspb.AccountCredited))
+		ctx.BecomeStacked(x.DebitAccount)
+	case *testspb.TestBye:
+		_ = ctx.Self().Shutdown(ctx.Context())
+	}
+}
+
+func (x *UserActor) DebitAccount(ctx ReceiveContext) {
+	switch ctx.Message().(type) {
+	case *testspb.DebitAccount:
+		ctx.Response(new(testspb.AccountDebited))
+		ctx.UnBecomeStacked()
+	}
+}
+
+type Exchanger struct{}
+
+func (e *Exchanger) PreStart(ctx context.Context) error {
+	return nil
+}
+
+func (e *Exchanger) Receive(ctx ReceiveContext) {
+	message := ctx.Message()
+	switch message.(type) {
+	case *testspb.TestSend:
+		_ = ctx.Self().Tell(ctx.Context(), ctx.Sender(), new(testspb.TestSend))
+	case *testspb.TestBye:
+		_ = ctx.Self().Shutdown(ctx.Context())
+	}
+}
+
+func (e *Exchanger) PostStop(ctx context.Context) error {
+	return nil
+}
+
+var _ Actor = &Exchanger{}

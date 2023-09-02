@@ -37,8 +37,11 @@ message AccountCredited {
   double account_balance = 2;
 }
 
-// Login -> Success -> Authed -> Ready
+message DebitAccount {}
+message AccountDebited {}
+
 message TestLogin {}
 message TestLoginSuccess {}
 message TestReadiness {}
 message TestReady {}
+message TestBye {}
