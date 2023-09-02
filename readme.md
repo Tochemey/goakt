@@ -21,11 +21,9 @@ Also, check reference section at the end of the post for more material regarding
 
 ## Table of Content
 - [Features](#features)
+- [Use Cases](#use-cases)
 - [Installation](#installation)
-- [Actors](#actors)
-- [Actor System](#actorsystem)
-- [Observability](#observability)
-- [Cluster](#clustering)
+- [Clustering](#clustering)
     - [Operation Guides](#operations-guide)
     - [Discovery Providers](#built-in-discovery-providers)
         - [Kubernetes](#kubernetes-discovery-provider-setup)
@@ -37,80 +35,61 @@ Also, check reference section at the end of the post for more material regarding
 
 ## Features
 
-- Send a synchronous message to an actor from a non actor system
-- Send an asynchronous(fire-and-forget) message to an actor from a non actor system
-- Actor to Actor communication (check the [examples'](./examples/actor-to-actor) folder)
-- Enable/Disable Passivation mode to remove/keep idle actors
-- PreStart hook for an actor.
-- PostStop hook for an actor for a graceful shutdown
-- ActorSystem: Actors live and die within a system.
-- Actor to Actor communication via Tell and Ask message patterns.
-- Restart(a.k.a. ReSpawn) an actor
-- (Un)Watch an actor
-- Stop(a.k.a. Kill) and actor
-- Child actor (Spawn and Kill)
-- Supervisory Strategy (Restart and Stop directive are supported)
-- Logger interface with a default logger
-- Integration with [OpenTelemetry](https://github.com/open-telemetry/opentelemetry-go) for traces and metrics.
-- Remoting
-    - Actors can send messages to other actors on a remote system via Tell and Ask message patterns.
-    - Actors can look up other actors' address on a remote system.
-- Clustering that offers simple scalability, partitioning (sharding), and re-balancing out-of-the-box.
-    - Extensible nodes discovery provider that help add additional cluster nodes discovery 
-- [Mock interfaces](./goaktmocks) to test GoAkt-based actors.
+- **Actors** - The fundamental building blocks of Go-Akt are actors. 
+  - They are independent, isolated unit of computation with their own state. 
+  - They can be _long-lived_ actors or be _passivated_ after some period of time that is configured during their creation. 
+  - They are automatically thread-safe without having to use locks or any other shared-memory synchronization mechanisms. 
+  - They can be stateful and stateless depending upon the system to build. Every actor in  Go-Akt:
+    - has a process id [`PID`](./actors/pid.go). Via the process id any allowable action can be executed by the
+      actor.
+    - has a lifecycle via the following methods: [`PreStart`](./actors/actor.go), [`PostStop`](./actors/actor.go). It means it
+      can live and die like any other process.
+    - handles and responds to messages via the method [`Receive`](./actors/actor.go). While handling messages it can:
+        - create other (child) actors via their process id [`PID`](./actors/pid.go) `SpawnChild` method
+        - send messages to other actors locally or remotely via their process id [`PID`](./actors/pid.go) `Ask`, `RemoteAsk`(request/response
+          fashion) and `Tell`, `RemoteTell`(fire-and-forget fashion) methods
+        - stop (child) actors via their process id [`PID`](./actors/pid.go)
+        - watch/unwatch (child) actors via their process id [`PID`](./actors/pid.go) `Watch` and `UnWatch` methods
+        - supervise the failure behavior of (child) actors. The supervisory strategy to adopt is set during its creation: 
+          - Restart and Stop directive are supported at the moment.
+        - remotely lookup for an actor on another node via their process id [`PID`](./actors/pid.go) `RemoteLookup`. This
+          allows it to send messages remotely via `RemoteAsk` or `RemoteTell` methods
+    - can adopt various form using the [behavior](./actors/behavior.go) feature
+    - can be restarted (respawned)
+    - can be stopped (killed)
+    - has few metrics:
+        - Mailbox size at a given time. That information can be accessed via the process
+          id  [`PID`](./actors/pid.go) `MailboxSize` method
+        - Total number of messages handled at a given time. That information can be accessed via the process
+          id  [`PID`](./actors/pid.go) `ReceivedCount` method
+        - Total number of restart. This is accessible via the process id  [`PID`](./actors/pid.go) `RestartCount` method
+        - Total number of panic attacks. This is accessible via the process id [`PID`](./actors/pid.go) `ErrorsCount` method
+- **ActorSystem** - Without an actor system, it is not possible to create actors in Go-Akt. Only a single actor system is allowed to be
+  created per application when using Go-Akt. To create an actor system one just need to use the [`NewActorSystem`](./actors/actor_system.go) method with the various [options](./actors/option.go). Go-Akt ActorSystem has the following characteristics:
+    -  Actors lifecycle management (Spawn, Kill, ReSpawn)
+    - Concurrency and Parallelism - Multiple actors can be managed and execute their tasks independently and concurrently. This helps utilize multicore processors efficiently.
+    - Location Transparency - The physical location of actors is abstracted. Remote actors can be accessed via their address once _remoting_ is enabled.
+    - Fault Tolerance and Supervision - Set during the creation of the actor system.
+    - Actor Addressing - Every actor in the ActorSystem has an address.
+- **Message Passing** - Communication between actors is achieved exclusively through message passing. In Go-Akt _Google Protocol Buffers_ is used to define messages. 
+The choice of protobuf is due to easy serialization over wire and strong schema definition.
+- **Remoting** - This helps remote messaging
+- **Clustering** - This offers simple scalability, partitioning (sharding), and re-balancing out-of-the-box. Go-Akt nodes are automatically discovered. See [clustering](#clustering).
+- **[Mock interfaces](./goaktmocks)** - To help implement unit tests in GoAkt-based applications.
+- **Observability** - The actor and actor-system metrics as well traces are accessible via the integration with [OpenTelemetry](https://github.com/open-telemetry/opentelemetry-go).
+- **Logging Interface** - Custom logger can be implemented
+
+## Use Cases
+
+- Event-Driven programming
+- Event Sourcing and CQRS - [eGo](https://github.com/Tochemey/ego)
+- Highly Available, Fault-Tolerant Distributed Systems
 
 ## Installation
 
 ```bash
 go get github.com/tochemey/goakt
 ```
-
-## Actors
-
-Actors in Go-Akt live within an actor system. They can be _long-lived_ actors or be _passivated_ after some period of
-time
-depending upon the configuration set during their creation. To create an actor one need to implement
-the [`Actor`](./actors/actor.go) interface.
-Actors in Go-Akt use _Google Protocol Buffers_ message as a mean of communication. The choice of protobuf is due to easy
-serialization over wire
-and strong schema definition.
-
-In Go-Akt, actors have the following characteristics:
-
-- Each actor has a process id [`PID`](./actors/pid.go). Via the process id any allowable action can be executed by the
-  actor.
-- Lifecycle via the following methods: [`PreStart`](./actors/actor.go), [`PostStop`](./actors/actor.go). It means they
-  can live and die like any other process.
-- They handle and respond to messages via the method [`Receive`](./actors/actor.go). While handling messages they can:
-    - Create other (child) actors via their process id [`PID`](./actors/pid.go) `SpawnChild` method
-    - Send messages to other actors via their process id [`PID`](./actors/pid.go) `Ask`, `RemoteAsk`(request/response
-      fashion) and `Tell`, `RemoteTell`(fire-and-forget fashion) methods
-    - Stop (child) actors via their process id [`PID`](./actors/pid.go)
-    - Watch/Unwatch (child) actors via their process id [`PID`](./actors/pid.go) `Watch` and `UnWatch` methods
-    - Supervise the failure behavior of (child) actors. The supervisory strategy to adopt is set during the creation of
-      the actor system. (Restart and Stop directive are supported) at the moment
-    - Remotely lookup for an actor on another node via their process id [`PID`](./actors/pid.go) `RemoteLookup`. This
-      allows them to send messages remotely via `RemoteAsk` or `RemoteTell` methods
-- They can adopt various form using the [behavior](./actors/behavior.go) feature
-- Few metrics are also accessible:
-    - Mailbox size at a given time. That information can be accessed via the process
-      id  [`PID`](./actors/pid.go) `MailboxSize` method
-    - Total number of messages handled at a given time. That information can be accessed via the process
-      id  [`PID`](./actors/pid.go) `ReceivedCount` method
-    - Total number of restart. This is accessible via the process id  [`PID`](./actors/pid.go) `RestartCount` method
-    - Total number of panic attacks. This is accessible via the process id [`PID`](./actors/pid.go) `ErrorsCount` method
-
-## ActorSystem
-
-Without an actor system, it is not possible to create actors in Go-Akt. Only a single actor system is allowed to be
-created per node when using Go-Akt.
-To create an actor system one just need to use the [`NewActorSystem`](./actors/actor_system.go) method with the
-various [options](./actors/option.go).
-
-## Observability
-
-The actor and actor-system metrics as well traces are accessible via the integration
-with [OpenTelemetry](https://github.com/open-telemetry/opentelemetry-go).
 
 ## Clustering
 
