@@ -34,18 +34,17 @@ func TestActorBehavior(t *testing.T) {
 	expected = &testpb.TestLoginSuccess{}
 	require.True(t, proto.Equal(expected, success))
 
-	// send a reply message
+	// ask for readiness
 	ready, err := Ask(ctx, pid, new(testpb.TestReadiness), receivingTimeout)
 	require.NoError(t, err)
 	require.NotNil(t, ready)
 	expected = &testpb.TestReady{}
 	require.True(t, proto.Equal(expected, ready))
 
-	// send a ready message
+	// send a message to create account
 	created, err := Ask(ctx, pid, new(testpb.CreateAccount), receivingTimeout)
 	require.NoError(t, err)
 	require.NotNil(t, created)
-
 	expected = &testpb.AccountCreated{}
 	require.True(t, proto.Equal(expected, created))
 

@@ -174,7 +174,7 @@ func (x *UserActor) DebitAccount(ctx ReceiveContext) {
 
 type Exchanger struct{}
 
-func (e *Exchanger) PreStart(ctx context.Context) error {
+func (e *Exchanger) PreStart(context.Context) error {
 	return nil
 }
 
@@ -188,7 +188,7 @@ func (e *Exchanger) Receive(ctx ReceiveContext) {
 	}
 }
 
-func (e *Exchanger) PostStop(ctx context.Context) error {
+func (e *Exchanger) PostStop(context.Context) error {
 	return nil
 }
 
