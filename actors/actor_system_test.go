@@ -36,6 +36,12 @@ func TestActorSystem(t *testing.T) {
 		assert.Nil(t, sys)
 		assert.EqualError(t, err, ErrNameRequired.Error())
 	})
+	t.Run("With invalid actor system Name", func(t *testing.T) {
+		sys, err := NewActorSystem("$omeN@me")
+		assert.Error(t, err)
+		assert.Nil(t, sys)
+		assert.EqualError(t, err, ErrInvalidActorSystemName.Error())
+	})
 	t.Run("With Spawn an actor when not started", func(t *testing.T) {
 		ctx := context.TODO()
 		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
@@ -283,5 +289,69 @@ func TestActorSystem(t *testing.T) {
 			err = sys.Stop(ctx)
 			assert.NoError(t, err)
 		})
+	})
+	t.Run("With ReSpawn", func(t *testing.T) {
+		ctx := context.TODO()
+		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+
+		// start the actor system
+		err := sys.Start(ctx)
+		assert.NoError(t, err)
+
+		actorName := "Exchanger"
+		actorRef := sys.Spawn(ctx, actorName, &Exchanger{})
+		assert.NotNil(t, actorRef)
+
+		// send a message to the actor
+		reply, err := Ask(ctx, actorRef, new(testpb.TestReply), receivingTimeout)
+		require.NoError(t, err)
+		require.NotNil(t, reply)
+		expected := new(testpb.Reply)
+		require.True(t, proto.Equal(expected, reply))
+		require.True(t, actorRef.IsRunning())
+		// stop the actor after some time
+		time.Sleep(time.Second)
+
+		err = sys.Kill(ctx, actorName)
+		require.NoError(t, err)
+
+		// wait for a while for the system to stop
+		time.Sleep(time.Second)
+		// restart the actor
+		_, err = sys.ReSpawn(ctx, actorName)
+		require.NoError(t, err)
+
+		// wait for the actor to complete start
+		// TODO we can add a callback for complete start
+		time.Sleep(time.Second)
+		require.True(t, actorRef.IsRunning())
+
+		t.Cleanup(func() {
+			err = sys.Stop(ctx)
+			assert.NoError(t, err)
+		})
+	})
+	t.Run("With NumActors", func(t *testing.T) {
+		ctx := context.TODO()
+		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+
+		// start the actor system
+		err := sys.Start(ctx)
+		assert.NoError(t, err)
+
+		actorName := "Exchanger"
+		actorRef := sys.Spawn(ctx, actorName, &Exchanger{})
+		assert.NotNil(t, actorRef)
+
+		// wait for the start of the actor to be complete
+		time.Sleep(time.Second)
+
+		assert.EqualValues(t, 1, sys.NumActors())
+
+		t.Cleanup(func() {
+			err = sys.Stop(ctx)
+			assert.NoError(t, err)
+		})
+
 	})
 }
