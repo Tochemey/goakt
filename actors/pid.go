@@ -101,8 +101,6 @@ type PID interface {
 	doReceive(ctx ReceiveContext)
 	// watchers returns the list of watchMen
 	watchers() *slices.ConcurrentSlice[*WatchMan]
-	// Behaviors returns the behavior stack
-	behaviors() *BehaviorStack
 	// setBehavior is a utility function that helps set the actor behavior
 	setBehavior(behavior Behavior)
 	// setBehaviorStacked adds a behavior to the actor's behaviors
@@ -185,7 +183,7 @@ type pid struct {
 	httpClient *gothttp.Client
 
 	// specifies the current actor behavior
-	behaviorStack *BehaviorStack
+	behaviorStack *behaviorStack
 }
 
 // enforce compilation error
@@ -241,7 +239,7 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 	}
 
 	// set the actor behavior stack
-	behaviorStack := NewBehaviorStack()
+	behaviorStack := newBehaviorStack()
 	behaviorStack.Push(pid.Receive)
 	pid.behaviorStack = behaviorStack
 
@@ -1021,14 +1019,6 @@ func (p *pid) interceptor() connect.Interceptor {
 		otelconnect.WithTracerProvider(p.telemetry.TracerProvider),
 		otelconnect.WithMeterProvider(p.telemetry.MeterProvider),
 	)
-}
-
-// Behaviors returns the behavior stack
-func (p *pid) behaviors() *BehaviorStack {
-	p.rwMutex.Lock()
-	behaviors := p.behaviorStack
-	p.rwMutex.Unlock()
-	return behaviors
 }
 
 // setBehavior is a utility function that helps set the actor behavior

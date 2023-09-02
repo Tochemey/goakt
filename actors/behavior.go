@@ -5,14 +5,14 @@ import "github.com/tochemey/goakt/pkg/stack"
 // Behavior defines an actor behavior
 type Behavior func(ctx ReceiveContext)
 
-// BehaviorStack defines a stack of Behavior
-type BehaviorStack struct {
+// behaviorStack defines a stack of Behavior
+type behaviorStack struct {
 	*stack.Stack[Behavior]
 }
 
-// NewBehaviorStack creates an instance of BehaviorStack
-func NewBehaviorStack() *BehaviorStack {
-	return &BehaviorStack{
+// newBehaviorStack creates an instance of behaviorStack
+func newBehaviorStack() *behaviorStack {
+	return &behaviorStack{
 		stack.New[Behavior](),
 	}
 }

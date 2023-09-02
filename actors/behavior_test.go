@@ -7,7 +7,7 @@ import (
 )
 
 func TestBehaviorStack(t *testing.T) {
-	stack := NewBehaviorStack()
+	stack := newBehaviorStack()
 	assert.NotNil(t, stack)
 	assert.True(t, stack.IsEmpty())
 

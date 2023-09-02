@@ -6,9 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"go.uber.org/goleak"
-
 	testspb "github.com/tochemey/goakt/test/data/pb/v1"
+	"go.uber.org/goleak"
 )
 
 func TestMain(m *testing.M) {
@@ -183,6 +182,10 @@ func (e *Exchanger) Receive(ctx ReceiveContext) {
 	switch message.(type) {
 	case *testspb.TestSend:
 		_ = ctx.Self().Tell(ctx.Context(), ctx.Sender(), new(testspb.TestSend))
+	case *testspb.TestReply:
+		ctx.Response(new(testspb.Reply))
+	case *testspb.TestRemoteSend:
+		_ = ctx.Self().RemoteTell(context.Background(), ctx.RemoteSender(), new(testspb.TestBye))
 	case *testspb.TestBye:
 		_ = ctx.Self().Shutdown(ctx.Context())
 	}

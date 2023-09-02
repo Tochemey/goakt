@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tochemey/goakt/log"
 	testpb "github.com/tochemey/goakt/test/data/pb/v1"
+	"github.com/travisjeffery/go-dynaport"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -330,17 +331,24 @@ func TestActorToActor(t *testing.T) {
 
 	// create the actor path
 	actor1 := &Exchanger{}
-	actorPath1 := NewPath("Exch1", NewAddress(protocol, "sys", "host", 1))
+	actorPath1 := NewPath("Exchange1", NewAddress(protocol, "sys", "host", 1))
 	pid1 := newPID(ctx, actorPath1, actor1, opts...)
 	require.NotNil(t, pid1)
 
 	actor2 := &Exchanger{}
-	actorPath2 := NewPath("Exch2", NewAddress(protocol, "sys", "host", 1))
+	actorPath2 := NewPath("Exchange2", NewAddress(protocol, "sys", "host", 1))
 	pid2 := newPID(ctx, actorPath2, actor2, opts...)
 	require.NotNil(t, pid2)
 
 	err := pid1.Tell(ctx, pid2, new(testpb.TestSend))
 	require.NoError(t, err)
+
+	// send an ask
+	reply, err := pid1.Ask(ctx, pid2, new(testpb.TestReply))
+	require.NoError(t, err)
+	require.NotNil(t, reply)
+	expected := new(testpb.Reply)
+	assert.True(t, proto.Equal(expected, reply))
 
 	// wait a while because exchange is ongoing
 	time.Sleep(time.Second)
@@ -358,4 +366,64 @@ func TestActorToActor(t *testing.T) {
 	err = Tell(ctx, pid2, new(testpb.TestBye))
 	time.Sleep(time.Second)
 	assert.False(t, pid2.IsRunning())
+}
+func TestActorRemoting(t *testing.T) {
+	// create the context
+	ctx := context.TODO()
+	// define the logger to use
+	logger := log.New(log.DebugLevel, os.Stdout)
+	// generate the remoting port
+	nodePorts := dynaport.Get(1)
+	remotingPort := nodePorts[0]
+	host := "127.0.0.1"
+
+	// create the actor system
+	sys, err := NewActorSystem("test",
+		WithLogger(logger),
+		WithPassivationDisabled(),
+		WithRemoting(host, int32(remotingPort)),
+	)
+	// assert there are no error
+	require.NoError(t, err)
+
+	// start the actor system
+	err = sys.Start(ctx)
+	assert.NoError(t, err)
+
+	// create an exchanger one
+	actorName1 := "Exchange1"
+	actorRef1 := sys.Spawn(ctx, actorName1, &Exchanger{})
+	assert.NotNil(t, actorRef1)
+
+	// create an exchanger two
+	actorName2 := "Exchange1"
+	actorRef2 := sys.Spawn(ctx, actorName2, &Exchanger{})
+	assert.NotNil(t, actorRef2)
+
+	// get the address of the exchanger actor one
+	addr1, err := actorRef2.RemoteLookup(ctx, host, remotingPort, actorName1)
+	require.NoError(t, err)
+
+	// send the message to t exchanger actor one using remote messaging
+	reply, err := actorRef2.RemoteAsk(ctx, addr1, new(testpb.TestReply))
+	// perform some assertions
+	require.NoError(t, err)
+	require.NotNil(t, reply)
+	require.True(t, reply.MessageIs(new(testpb.Reply)))
+
+	actual := new(testpb.Reply)
+	err = reply.UnmarshalTo(actual)
+	require.NoError(t, err)
+
+	expected := new(testpb.Reply)
+	assert.True(t, proto.Equal(expected, actual))
+
+	// send a message to stop the first exchange actor
+	err = actorRef2.RemoteTell(ctx, addr1, new(testpb.TestRemoteSend))
+	require.NoError(t, err)
+
+	// stop the actor after some time
+	time.Sleep(time.Second)
+
+	err = sys.Stop(ctx)
 }
