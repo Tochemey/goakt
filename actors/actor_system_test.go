@@ -248,6 +248,8 @@ func TestActorSystem(t *testing.T) {
 
 		// stop the actor after some time
 		time.Sleep(time.Second)
+		err = newActorSystem.Kill(ctx, actorName)
+		require.NoError(t, err)
 
 		t.Cleanup(func() {
 			err = newActorSystem.Stop(ctx)
