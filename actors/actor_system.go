@@ -435,7 +435,7 @@ func (x *actorSystem) RemoteActor(ctx context.Context, actorName string) (addr *
 	defer span.End()
 	// check whether cluster is enabled or not
 	if x.cluster == nil {
-		return nil, errors.New("cluster is not enabled")
+		return nil, ErrClusterNotEnabled
 	}
 
 	// let us locate the actor in the cluster

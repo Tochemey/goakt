@@ -12,8 +12,6 @@ import (
 	pb "github.com/tochemey/goakt/pb/v1"
 	"github.com/tochemey/goakt/pkg/http"
 	"github.com/tochemey/goakt/pkg/telemetry"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 )
@@ -230,9 +228,8 @@ func RemoteLookup(ctx context.Context, host string, port int, name string) (addr
 	response, err := remoteClient.RemoteLookup(ctx, request)
 	// we know the error will always be a grpc error
 	if err != nil {
-		// get the status error
-		s := status.Convert(err)
-		if s.Code() == codes.NotFound {
+		code := connect.CodeOf(err)
+		if code == connect.CodeNotFound {
 			return nil, nil
 		}
 		return nil, err
