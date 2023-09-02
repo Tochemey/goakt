@@ -352,6 +352,5 @@ func TestActorSystem(t *testing.T) {
 			err = sys.Stop(ctx)
 			assert.NoError(t, err)
 		})
-
 	})
 }
