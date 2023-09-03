@@ -11,8 +11,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tochemey/goakt/discovery"
-	mocksdiscovery "github.com/tochemey/goakt/goaktmocks/discovery"
 	goaktpb "github.com/tochemey/goakt/internal/goakt/v1"
+	testkit "github.com/tochemey/goakt/testkit/discovery"
 	"github.com/travisjeffery/go-dynaport"
 	"google.golang.org/protobuf/proto"
 )
@@ -34,7 +34,7 @@ func TestCluster(t *testing.T) {
 		}
 
 		// mock the discovery provider
-		provider := new(mocksdiscovery.Provider)
+		provider := new(testkit.Provider)
 		config := discovery.NewConfig()
 
 		provider.EXPECT().ID().Return("testDisco")
@@ -92,7 +92,7 @@ func TestCluster(t *testing.T) {
 		}
 
 		// mock the discovery provider
-		provider := new(mocksdiscovery.Provider)
+		provider := new(testkit.Provider)
 		config := discovery.NewConfig()
 
 		provider.EXPECT().ID().Return("testDisco")

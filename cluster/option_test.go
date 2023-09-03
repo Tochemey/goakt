@@ -5,12 +5,12 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
-	mockhasher "github.com/tochemey/goakt/goaktmocks/hash"
 	"github.com/tochemey/goakt/log"
+	testkit "github.com/tochemey/goakt/testkit/hash"
 )
 
 func TestOptions(t *testing.T) {
-	mockHasher := new(mockhasher.Hasher)
+	mockHasher := new(testkit.Hasher)
 	testCases := []struct {
 		name     string
 		option   Option

@@ -8,15 +8,15 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/tochemey/goakt/discovery"
 	"github.com/tochemey/goakt/discovery/kubernetes"
-	mocksdiscovery "github.com/tochemey/goakt/goaktmocks/discovery"
 	"github.com/tochemey/goakt/log"
+	testkit "github.com/tochemey/goakt/testkit/discovery"
 	"github.com/travisjeffery/go-dynaport"
 )
 
 func TestDiscoveryProvider(t *testing.T) {
 	t.Run("With Initialize: happy path", func(t *testing.T) {
 		// mock the underlying discovery provider
-		provider := new(mocksdiscovery.Provider)
+		provider := new(testkit.Provider)
 		provider.
 			On("Initialize").Return(nil)
 		wrapper := &discoveryProvider{
@@ -30,7 +30,7 @@ func TestDiscoveryProvider(t *testing.T) {
 	})
 	t.Run("With Initialize: failure", func(t *testing.T) {
 		// mock the underlying discovery provider
-		provider := new(mocksdiscovery.Provider)
+		provider := new(testkit.Provider)
 		provider.
 			On("Initialize").Return(errors.New("failed"))
 		wrapper := &discoveryProvider{
@@ -44,7 +44,7 @@ func TestDiscoveryProvider(t *testing.T) {
 	})
 	t.Run("With Initialize: already done", func(t *testing.T) {
 		// mock the underlying discovery provider
-		provider := new(mocksdiscovery.Provider)
+		provider := new(testkit.Provider)
 		provider.
 			On("Initialize").Return(discovery.ErrAlreadyInitialized)
 		wrapper := &discoveryProvider{
@@ -68,7 +68,7 @@ func TestDiscoveryProvider(t *testing.T) {
 			kubernetes.Namespace:       namespace,
 		}
 		// mock the underlying discovery provider
-		provider := new(mocksdiscovery.Provider)
+		provider := new(testkit.Provider)
 		provider.
 			On("ID").Return("testDisco").
 			On("SetConfig", config).Return(nil)
@@ -89,7 +89,7 @@ func TestDiscoveryProvider(t *testing.T) {
 	})
 	t.Run("With SetConfig: id not set", func(t *testing.T) {
 		// mock the underlying discovery provider
-		provider := new(mocksdiscovery.Provider)
+		provider := new(testkit.Provider)
 
 		// create the config
 		options := map[string]any{}
@@ -105,7 +105,7 @@ func TestDiscoveryProvider(t *testing.T) {
 	})
 	t.Run("With SetConfig: invalid id set", func(t *testing.T) {
 		// mock the underlying discovery provider
-		provider := new(mocksdiscovery.Provider)
+		provider := new(testkit.Provider)
 		provider.
 			On("ID").Return("testDisco")
 		// create the config
@@ -125,7 +125,7 @@ func TestDiscoveryProvider(t *testing.T) {
 	})
 	t.Run("With SetConfig: options not set", func(t *testing.T) {
 		// mock the underlying discovery provider
-		provider := new(mocksdiscovery.Provider)
+		provider := new(testkit.Provider)
 		provider.
 			On("ID").Return("testDisco")
 		// create the config
@@ -155,7 +155,7 @@ func TestDiscoveryProvider(t *testing.T) {
 			kubernetes.Namespace:       namespace,
 		}
 		// mock the underlying discovery provider
-		provider := new(mocksdiscovery.Provider)
+		provider := new(testkit.Provider)
 		provider.
 			On("ID").Return("testDisco").
 			On("SetConfig", config).Return(errors.New("failed"))
@@ -186,7 +186,7 @@ func TestDiscoveryProvider(t *testing.T) {
 			kubernetes.Namespace:       namespace,
 		}
 		// mock the underlying discovery provider
-		provider := new(mocksdiscovery.Provider)
+		provider := new(testkit.Provider)
 		provider.
 			On("ID").Return("testDisco").
 			On("SetConfig", config).Return(discovery.ErrAlreadyInitialized)
@@ -207,7 +207,7 @@ func TestDiscoveryProvider(t *testing.T) {
 	})
 	t.Run("With Register: happy path", func(t *testing.T) {
 		// mock the underlying discovery provider
-		provider := new(mocksdiscovery.Provider)
+		provider := new(testkit.Provider)
 		provider.
 			On("Register").Return(nil)
 		wrapper := &discoveryProvider{
@@ -221,7 +221,7 @@ func TestDiscoveryProvider(t *testing.T) {
 	})
 	t.Run("With Register: provider not set", func(t *testing.T) {
 		// mock the underlying discovery provider
-		provider := new(mocksdiscovery.Provider)
+		provider := new(testkit.Provider)
 		wrapper := &discoveryProvider{
 			log: log.DefaultLogger.StdLogger(),
 		}
@@ -233,7 +233,7 @@ func TestDiscoveryProvider(t *testing.T) {
 	})
 	t.Run("With Register: failure", func(t *testing.T) {
 		// mock the underlying discovery provider
-		provider := new(mocksdiscovery.Provider)
+		provider := new(testkit.Provider)
 		provider.
 			On("Register").Return(errors.New("failed to register"))
 		wrapper := &discoveryProvider{
@@ -247,7 +247,7 @@ func TestDiscoveryProvider(t *testing.T) {
 	})
 	t.Run("With Deregister: happy path", func(t *testing.T) {
 		// mock the underlying discovery provider
-		provider := new(mocksdiscovery.Provider)
+		provider := new(testkit.Provider)
 		provider.
 			On("Deregister").Return(nil)
 		wrapper := &discoveryProvider{
@@ -261,7 +261,7 @@ func TestDiscoveryProvider(t *testing.T) {
 	})
 	t.Run("With Deregister: provider not set", func(t *testing.T) {
 		// mock the underlying discovery provider
-		provider := new(mocksdiscovery.Provider)
+		provider := new(testkit.Provider)
 		wrapper := &discoveryProvider{
 			log: log.DefaultLogger.StdLogger(),
 		}
@@ -273,7 +273,7 @@ func TestDiscoveryProvider(t *testing.T) {
 	})
 	t.Run("With Deregister: failure", func(t *testing.T) {
 		// mock the underlying discovery provider
-		provider := new(mocksdiscovery.Provider)
+		provider := new(testkit.Provider)
 		provider.
 			On("Deregister").Return(errors.New("failed to register"))
 		wrapper := &discoveryProvider{
@@ -293,7 +293,7 @@ func TestDiscoveryProvider(t *testing.T) {
 			fmt.Sprintf("127.0.0.1:%d", gossipPort),
 		}
 		// mock the underlying discovery provider
-		provider := new(mocksdiscovery.Provider)
+		provider := new(testkit.Provider)
 		provider.
 			On("DiscoverPeers").Return(addrs, nil)
 		wrapper := &discoveryProvider{
@@ -309,7 +309,7 @@ func TestDiscoveryProvider(t *testing.T) {
 	})
 	t.Run("With DiscoverPeers: provider not set", func(t *testing.T) {
 		// mock the underlying discovery provider
-		provider := new(mocksdiscovery.Provider)
+		provider := new(testkit.Provider)
 		wrapper := &discoveryProvider{
 			log: log.DefaultLogger.StdLogger(),
 		}
@@ -322,7 +322,7 @@ func TestDiscoveryProvider(t *testing.T) {
 	})
 	t.Run("With Close", func(t *testing.T) {
 		// mock the underlying discovery provider
-		provider := new(mocksdiscovery.Provider)
+		provider := new(testkit.Provider)
 		wrapper := &discoveryProvider{
 			provider: provider,
 			log:      log.DefaultLogger.StdLogger(),
