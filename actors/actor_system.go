@@ -126,7 +126,7 @@ type actorSystem struct {
 	// define the number of partitions to shard the actors in the cluster
 	partitionsCount uint64
 	// cluster mode
-	cluster     *cluster.Cluster
+	cluster     cluster.Interface
 	clusterChan chan *goaktpb.WireActor
 
 	// help protect some the fields to set

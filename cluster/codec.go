@@ -8,11 +8,11 @@ import (
 )
 
 // encode marshals a wire actor into a base64 string
-// the output of this function can be persisted to the cluster
+// the output of this function can be persisted to the Cluster
 func encode(actor *goaktpb.WireActor) (string, error) {
 	// let us marshal it
 	bytea, _ := proto.Marshal(actor)
-	// let us base64 encode the bytea before sending it into the cluster
+	// let us base64 encode the bytea before sending it into the Cluster
 	return base64.StdEncoding.EncodeToString(bytea), nil
 }
 

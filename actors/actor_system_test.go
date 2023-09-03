@@ -12,10 +12,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tochemey/goakt/discovery"
-	mocks "github.com/tochemey/goakt/goaktmocks/discovery"
 	"github.com/tochemey/goakt/log"
 	addresspb "github.com/tochemey/goakt/pb/v1"
 	testpb "github.com/tochemey/goakt/test/data/pb/v1"
+	testkit "github.com/tochemey/goakt/testkit/discovery"
 	"github.com/travisjeffery/go-dynaport"
 	"google.golang.org/protobuf/proto"
 )
@@ -123,7 +123,7 @@ func TestActorSystem(t *testing.T) {
 		}
 
 		// mock the discovery provider
-		provider := new(mocks.Provider)
+		provider := new(testkit.Provider)
 		config := discovery.NewConfig()
 		sd := discovery.NewServiceDiscovery(provider, config)
 		newActorSystem, err := NewActorSystem(

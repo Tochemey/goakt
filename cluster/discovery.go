@@ -9,7 +9,7 @@ import (
 	"github.com/tochemey/goakt/discovery"
 )
 
-// discoveryProvider wraps the cluster engine discovery and implements
+// discoveryProvider wraps the Cluster engine discovery and implements
 // service_discovery.ServiceDiscovery
 type discoveryProvider struct {
 	provider discovery.Provider

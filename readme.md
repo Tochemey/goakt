@@ -75,7 +75,7 @@ Also, check reference section at the end of the post for more material regarding
 The choice of protobuf is due to easy serialization over wire and strong schema definition.
 - **Remoting** - This helps remote messaging
 - **Clustering** - This offers simple scalability, partitioning (sharding), and re-balancing out-of-the-box. Go-Akt nodes are automatically discovered. See [clustering](#clustering).
-- **[Mock interfaces](./goaktmocks)** - To help implement unit tests in GoAkt-based applications.
+- **[Testkit](./testkit)** - To help implement unit tests in GoAkt-based applications.
 - **Observability** - The actor and actor-system metrics as well traces are accessible via the integration with [OpenTelemetry](https://github.com/open-telemetry/opentelemetry-go).
 - **Logging Interface** - Custom logger can be implemented
 

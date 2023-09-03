@@ -16,6 +16,24 @@ import (
 	"github.com/tochemey/goakt/pkg/telemetry"
 )
 
+// Interface defines the Cluster interface
+type Interface interface {
+	// Start starts the Cluster engine
+	Start(ctx context.Context) error
+	// Stop stops the Cluster engine
+	Stop(ctx context.Context) error
+	// NodeHost returns the Cluster node host address
+	NodeHost() string
+	// NodeRemotingPort returns the Cluster node remoting port
+	NodeRemotingPort() int
+	// PutActor replicates onto the Cluster the metadata of an actor
+	PutActor(ctx context.Context, actor *goaktpb.WireActor) error
+	// GetActor fetches an actor from the Cluster
+	GetActor(ctx context.Context, actorName string) (*goaktpb.WireActor, error)
+	// GetPartition returns the partition where a given actor is stored
+	GetPartition(actorName string) int
+}
+
 // Cluster represents the Cluster
 type Cluster struct {
 	// specifies the total number of partitions
@@ -25,19 +43,19 @@ type Cluster struct {
 	// specifies the logger
 	logger log.Logger
 
-	// specifies the cluster name
+	// specifies the Cluster name
 	name string
 
-	// specifies the cluster server
+	// specifies the Cluster server
 	server *olric.Olric
-	// specifies the cluster client
-	// this help set and fetch data from the cluster
+	// specifies the Cluster client
+	// this help set and fetch data from the Cluster
 	client olric.Client
 
 	// specifies the distributed key value store
 	kvStore olric.DMap
 
-	// specifies the cluster host
+	// specifies the Cluster host
 	host *node
 
 	// specifies the hasher
@@ -53,9 +71,12 @@ type Cluster struct {
 	shutdownTimeout time.Duration
 }
 
+// enforce compilation error
+var _ Interface = &Cluster{}
+
 // New creates an instance of Cluster
 func New(name string, serviceDiscovery *discovery.ServiceDiscovery, opts ...Option) (*Cluster, error) {
-	// create an instance of the cluster
+	// create an instance of the Cluster
 	cl := &Cluster{
 		partitionsCount:   20,
 		logger:            log.DefaultLogger,
@@ -92,12 +113,12 @@ func (c *Cluster) Start(ctx context.Context) error {
 	logger := c.logger
 
 	// add some logging information
-	logger.Infof("Starting GoAkt cluster service on (%s)....🤔", c.host.ClusterAddress())
+	logger.Infof("Starting GoAkt Cluster service on (%s)....🤔", c.host.ClusterAddress())
 
-	// let us delay the start for sometime to make sure we have discovered enough nodes to form a cluster
+	// let us delay the start for sometime to make sure we have discovered enough nodes to form a Cluster
 	time.Sleep(time.Second)
 
-	// build the cluster engine config
+	// build the Cluster engine config
 	conf := c.buildConfig()
 	// set the hasher to the custom hasher
 	conf.Hasher = &hasherWrapper{c.hasher}
@@ -106,7 +127,7 @@ func (c *Cluster) Start(ctx context.Context) error {
 	m, err := olriconfig.NewMemberlistConfig("lan")
 	// panic when there is an error
 	if err != nil {
-		logger.Error(errors.Wrap(err, "failed to configure the cluster memberlist.💥"))
+		logger.Error(errors.Wrap(err, "failed to configure the Cluster memberlist.💥"))
 		return err
 	}
 
@@ -128,32 +149,32 @@ func (c *Cluster) Start(ctx context.Context) error {
 		"options": c.discoveryOptions,
 	}
 
-	// let us start the cluster
+	// let us start the Cluster
 	startCtx, cancel := context.WithCancel(ctx)
 	// cancel the context the server has started
 	conf.Started = func() {
 		// cancel the start context
 		defer cancel()
 		// add some logging information
-		logger.Info("GoAkt cluster Server successfully started. 🤌")
+		logger.Info("GoAkt Cluster Server successfully started. 🤌")
 	}
 
-	// let us create an instance of the cluster engine
+	// let us create an instance of the Cluster engine
 	eng, err := olric.New(conf)
 	// handle the error
 	if err != nil {
-		logger.Error(errors.Wrap(err, "failed to start the cluster engine.💥"))
+		logger.Error(errors.Wrap(err, "failed to start the Cluster engine.💥"))
 		return err
 	}
 
 	// set the server
 	c.server = eng
 	go func() {
-		// start the cluster engine
+		// start the Cluster engine
 		err = c.server.Start()
 		// handle the error in case there is an early error
 		if err != nil {
-			logger.Error(errors.Wrap(err, "failed to start the cluster engine.💥"))
+			logger.Error(errors.Wrap(err, "failed to start the Cluster engine.💥"))
 			// let us stop the started engine
 			if e := c.server.Shutdown(ctx); e != nil {
 				logger.Panic(e)
@@ -170,15 +191,15 @@ func (c *Cluster) Start(ctx context.Context) error {
 	dmp, err := c.client.NewDMap(c.name)
 	// handle the error
 	if err != nil {
-		logger.Error(errors.Wrap(err, "failed to start the cluster engine.💥"))
+		logger.Error(errors.Wrap(err, "failed to start the Cluster engine.💥"))
 		// let us stop the started engine
 		return c.server.Shutdown(ctx)
 	}
 
 	// set the distributed map
 	c.kvStore = dmp
-	// we are done bootstrapping the cluster
-	logger.Info("GoAkt cluster successfully started. 🎉")
+	// we are done bootstrapping the Cluster
+	logger.Info("GoAkt Cluster successfully started. 🎉")
 	return nil
 }
 
@@ -192,35 +213,35 @@ func (c *Cluster) Stop(ctx context.Context) error {
 	logger := c.logger
 
 	// add some logging information
-	logger.Info("Stopping GoAkt cluster....🤔")
+	logger.Info("Stopping GoAkt Cluster....🤔")
 
-	// close the cluster client
+	// close the Cluster client
 	if err := c.client.Close(ctx); err != nil {
-		logger.Error(errors.Wrap(err, "failed to shutdown the cluster client.💥"))
+		logger.Error(errors.Wrap(err, "failed to shutdown the Cluster client.💥"))
 		return err
 	}
 
 	// let us stop the server
 	if err := c.server.Shutdown(ctx); err != nil {
-		logger.Error(errors.Wrap(err, "failed to Stop  GoAkt cluster....💥"))
+		logger.Error(errors.Wrap(err, "failed to Stop  GoAkt Cluster....💥"))
 		return err
 	}
 
-	logger.Info("GoAkt cluster successfully stopped.🎉")
+	logger.Info("GoAkt Cluster successfully stopped.🎉")
 	return nil
 }
 
-// NodeHost returns the cluster node Host
+// NodeHost returns the Cluster node Host
 func (c *Cluster) NodeHost() string {
 	return c.host.Host
 }
 
-// NodeRemotingPort returns the cluster node remoting port
+// NodeRemotingPort returns the Cluster node remoting port
 func (c *Cluster) NodeRemotingPort() int {
 	return c.host.RemotingPort
 }
 
-// PutActor replicates onto the cluster the metadata of an actor
+// PutActor replicates onto the Cluster the metadata of an actor
 func (c *Cluster) PutActor(ctx context.Context, actor *goaktpb.WireActor) error {
 	// create a cancellation context of 1 second timeout
 	ctx, cancelFn := context.WithTimeout(ctx, c.writeTimeout)
@@ -241,12 +262,12 @@ func (c *Cluster) PutActor(ctx context.Context, actor *goaktpb.WireActor) error 
 	// handle the marshaling error
 	if err != nil {
 		// add a logging to the stderr
-		logger.Error(errors.Wrapf(err, "failed to persist actor=%s data in the cluster.💥", actor.GetActorName()))
+		logger.Error(errors.Wrapf(err, "failed to persist actor=%s data in the Cluster.💥", actor.GetActorName()))
 		// here we cancel the request
-		return errors.Wrapf(err, "failed to persist actor=%s data in the cluster", actor.GetActorName())
+		return errors.Wrapf(err, "failed to persist actor=%s data in the Cluster", actor.GetActorName())
 	}
 
-	// send the record into the cluster
+	// send the record into the Cluster
 	err = c.kvStore.Put(ctx, actor.GetActorName(), data)
 	// handle the error
 	if err != nil {
@@ -260,7 +281,7 @@ func (c *Cluster) PutActor(ctx context.Context, actor *goaktpb.WireActor) error 
 	return nil
 }
 
-// GetActor fetches an actor from the cluster
+// GetActor fetches an actor from the Cluster
 func (c *Cluster) GetActor(ctx context.Context, actorName string) (*goaktpb.WireActor, error) {
 	// create a cancellation context of 1 second timeout
 	ctx, cancelFn := context.WithTimeout(ctx, c.readTimeout)
@@ -274,7 +295,7 @@ func (c *Cluster) GetActor(ctx context.Context, actorName string) (*goaktpb.Wire
 	logger := c.logger
 
 	// add some logging information
-	logger.Infof("retrieving actor (%s) from the cluster.🤔", actorName)
+	logger.Infof("retrieving actor (%s) from the Cluster.🤔", actorName)
 
 	// grab the record from the distributed store
 	resp, err := c.kvStore.Get(ctx, actorName)
@@ -282,7 +303,7 @@ func (c *Cluster) GetActor(ctx context.Context, actorName string) (*goaktpb.Wire
 	if err != nil {
 		// we could not find the given actor
 		if errors.Is(err, olric.ErrKeyNotFound) {
-			logger.Warnf("actor=%s is not found in the cluster", actorName)
+			logger.Warnf("actor=%s is not found in the Cluster", actorName)
 			return nil, ErrActorNotFound
 		}
 		// log the error
@@ -308,7 +329,7 @@ func (c *Cluster) GetActor(ctx context.Context, actorName string) (*goaktpb.Wire
 	}
 
 	// Ahoy we are successful
-	logger.Infof("actor (%s) successfully retrieved from the cluster.🎉", actor.GetActorName())
+	logger.Infof("actor (%s) successfully retrieved from the Cluster.🎉", actor.GetActorName())
 	// return the response
 	return actor, nil
 }
@@ -326,7 +347,7 @@ func (c *Cluster) GetPartition(actorName string) int {
 	return partition
 }
 
-// buildConfig builds the cluster configuration
+// buildConfig builds the Cluster configuration
 func (c *Cluster) buildConfig() *config.Config {
 	// define the log level
 	logLevel := "INFO"

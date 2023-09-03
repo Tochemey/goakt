@@ -47,7 +47,7 @@ func TestCluster(t *testing.T) {
 		// create the service discovery
 		serviceDiscovery := discovery.NewServiceDiscovery(provider, config)
 
-		// create a cluster node
+		// create a Cluster node
 		host := "127.0.0.1"
 
 		// set the environments
@@ -61,14 +61,14 @@ func TestCluster(t *testing.T) {
 		require.NotNil(t, node)
 		require.NoError(t, err)
 
-		// start the cluster node
+		// start the Cluster node
 		err = node.Start(ctx)
 		require.NoError(t, err)
 
 		hostNodeAddr := node.NodeHost()
 		assert.Equal(t, host, hostNodeAddr)
 
-		//  shutdown the cluster node
+		//  shutdown the Cluster node
 		ctx, cancel := context.WithTimeout(ctx, time.Second)
 		defer cancel()
 
@@ -105,7 +105,7 @@ func TestCluster(t *testing.T) {
 		// create the service discovery
 		serviceDiscovery := discovery.NewServiceDiscovery(provider, config)
 
-		// create a cluster node
+		// create a Cluster node
 		host := "127.0.0.1"
 		// set the environments
 		t.Setenv("GOSSIP_PORT", strconv.Itoa(gossipPort))
@@ -118,7 +118,7 @@ func TestCluster(t *testing.T) {
 		require.NotNil(t, node)
 		require.NoError(t, err)
 
-		// start the cluster node
+		// start the Cluster node
 		err = node.Start(ctx)
 		require.NoError(t, err)
 
@@ -126,7 +126,7 @@ func TestCluster(t *testing.T) {
 		actorName := uuid.NewString()
 		actor := &goaktpb.WireActor{ActorName: actorName}
 
-		// replicate the actor in the cluster
+		// replicate the actor in the Cluster
 		err = node.PutActor(ctx, actor)
 		require.NoError(t, err)
 
@@ -142,7 +142,7 @@ func TestCluster(t *testing.T) {
 		actual, err = node.GetActor(ctx, fakeActorName)
 		require.Nil(t, actual)
 		assert.EqualError(t, err, ErrActorNotFound.Error())
-		//  shutdown the cluster node
+		//  shutdown the Cluster node
 		ctx, cancel := context.WithTimeout(ctx, time.Second)
 		defer cancel()
 
