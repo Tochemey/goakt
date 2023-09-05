@@ -30,7 +30,7 @@ type Address struct {
 }
 
 // NewAddress creates an instance of Address
-func NewAddress(protocol string, system string, host string, port int) *Address {
+func NewAddress(system string, host string, port int) *Address {
 	return &Address{
 		host:     host,
 		port:     port,
@@ -45,7 +45,7 @@ func (a *Address) WithHost(host string) (*Address, error) {
 	if a.IsLocal() {
 		return nil, ErrLocalAddress
 	}
-	return NewAddress(a.Protocol(), a.System(), host, a.Port()), nil
+	return NewAddress(a.System(), host, a.Port()), nil
 }
 
 // WithPort sets the port of a given Address and returns a new instance of the address
@@ -54,12 +54,12 @@ func (a *Address) WithPort(port int) (*Address, error) {
 	if a.IsLocal() {
 		return nil, ErrLocalAddress
 	}
-	return NewAddress(a.Protocol(), a.System(), a.System(), port), nil
+	return NewAddress(a.System(), a.System(), port), nil
 }
 
 // WithSystem sets the actor system of a given Address and returns a new instance of the address
 func (a *Address) WithSystem(system string) *Address {
-	return NewAddress(a.Protocol(), system, a.Host(), a.Port())
+	return NewAddress(system, a.Host(), a.Port())
 }
 
 // Host returns the host
@@ -101,11 +101,6 @@ func (a *Address) HostPort() string {
 // String returns the canonical String representation of this Address formatted as:
 // `protocol://system@host:port`
 func (a *Address) String() string {
-	// if the protocol is not goakt
-	// then panic
-	if a.protocol != protocol {
-		panic("invalid protocol")
-	}
 	// create a bytes buffer instance
 	buf := bytes.NewBuffer(nil)
 	// write the protocol field to bytes buffer

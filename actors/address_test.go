@@ -11,7 +11,7 @@ import (
 func TestAddress(t *testing.T) {
 	t.Run("testCase1", func(t *testing.T) {
 		expected := "goakt://sys@host:1234"
-		addr := NewAddress(protocol, "sys", "host", 1234)
+		addr := NewAddress("sys", "host", 1234)
 		assert.False(t, addr.IsLocal())
 		assert.True(t, addr.IsRemote())
 		assert.Equal(t, "host:1234", addr.HostPort())
@@ -21,7 +21,7 @@ func TestAddress(t *testing.T) {
 	})
 	t.Run("testCase2", func(t *testing.T) {
 		expected := "goakt://sys@"
-		addr := NewAddress(protocol, "sys", "", -1)
+		addr := NewAddress("sys", "", -1)
 		assert.False(t, addr.IsRemote())
 		assert.True(t, addr.IsLocal())
 		assert.Equal(t, expected, addr.String())
@@ -32,7 +32,7 @@ func TestAddress(t *testing.T) {
 	})
 	t.Run("testCase3", func(t *testing.T) {
 		expected := "goakt://sys@host:1234"
-		addr := NewAddress(protocol, "sys", "host", 1234)
+		addr := NewAddress("sys", "host", 1234)
 		assert.False(t, addr.IsLocal())
 		assert.True(t, addr.IsRemote())
 		assert.Equal(t, "host:1234", addr.HostPort())

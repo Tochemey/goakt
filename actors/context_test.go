@@ -22,7 +22,7 @@ func TestActorBehavior(t *testing.T) {
 
 	// create the actor path
 	actor := &UserActor{}
-	actorPath := NewPath("User", NewAddress(protocol, "sys", "host", 1))
+	actorPath := NewPath("User", NewAddress("sys", "host", 1))
 	pid := newPID(ctx, actorPath, actor, opts...)
 	require.NotNil(t, pid)
 

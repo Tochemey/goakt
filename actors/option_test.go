@@ -6,10 +6,12 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/tochemey/goakt/log"
+	"github.com/tochemey/goakt/pkg/telemetry"
 	"go.uber.org/atomic"
 )
 
 func TestOptions(t *testing.T) {
+	tel := telemetry.New()
 	testCases := []struct {
 		name     string
 		option   Option
@@ -54,6 +56,11 @@ func TestOptions(t *testing.T) {
 			name:     "WithShutdownTimeout",
 			option:   WithShutdownTimeout(2 * time.Second),
 			expected: actorSystem{shutdownTimeout: 2. * time.Second},
+		},
+		{
+			name:     "WithTelemetry",
+			option:   WithTelemetry(tel),
+			expected: actorSystem{telemetry: tel},
 		},
 	}
 	for _, tc := range testCases {

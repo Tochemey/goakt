@@ -216,11 +216,11 @@ func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor) PID {
 		return nil
 	}
 	// set the default actor path assuming we are running locally
-	actorPath := NewPath(name, NewAddress(protocol, x.name, "", -1))
+	actorPath := NewPath(name, NewAddress(x.name, "", -1))
 	// set the actor path when the remoting is enabled
 	if x.remotingEnabled.Load() {
 		// get the path of the given actor
-		actorPath = NewPath(name, NewAddress(protocol, x.name, x.remotingHost, int(x.remotingPort)))
+		actorPath = NewPath(name, NewAddress(x.name, x.remotingHost, int(x.remotingPort)))
 	}
 	// check whether the given actor already exist in the system or not
 	pid, exist := x.actors.Get(actorPath.String())
@@ -275,11 +275,11 @@ func (x *actorSystem) Kill(ctx context.Context, name string) error {
 		return errors.New("actor system has not started yet")
 	}
 	// set the default actor path assuming we are running locally
-	actorPath := NewPath(name, NewAddress(protocol, x.name, "", -1))
+	actorPath := NewPath(name, NewAddress(x.name, "", -1))
 	// set the actor path with the remoting is enabled
 	if x.remotingEnabled.Load() {
 		// get the path of the given actor
-		actorPath = NewPath(name, NewAddress(protocol, x.name, x.remotingHost, int(x.remotingPort)))
+		actorPath = NewPath(name, NewAddress(x.name, x.remotingHost, int(x.remotingPort)))
 	}
 	// check whether the given actor already exist in the system or not
 	pid, exist := x.actors.Get(actorPath.String())
@@ -301,11 +301,11 @@ func (x *actorSystem) ReSpawn(ctx context.Context, name string) (PID, error) {
 		return nil, errors.New("actor system has not started yet")
 	}
 	// set the default actor path assuming we are running locally
-	actorPath := NewPath(name, NewAddress(protocol, x.name, "", -1))
+	actorPath := NewPath(name, NewAddress(x.name, "", -1))
 	// set the actor path with the remoting is enabled
 	if x.remotingEnabled.Load() {
 		// get the path of the given actor
-		actorPath = NewPath(name, NewAddress(protocol, x.name, x.remotingHost, int(x.remotingPort)))
+		actorPath = NewPath(name, NewAddress(x.name, x.remotingHost, int(x.remotingPort)))
 	}
 	// check whether the given actor already exist in the system or not
 	pid, exist := x.actors.Get(actorPath.String())
@@ -569,22 +569,22 @@ func (x *actorSystem) RemoteLookup(ctx context.Context, request *connect.Request
 	hostAndPort := fmt.Sprintf("%s:%d", reqCopy.GetHost(), reqCopy.GetPort())
 	if hostAndPort != nodeAddr {
 		// log the error
-		logger.Error(ErrRemoteSendInvalidNode.Message())
+		logger.Error(ErrInvalidActorSystemNode.Message())
 		// here message is sent to the wrong actor system node
-		return nil, ErrRemoteSendInvalidNode
+		return nil, ErrInvalidActorSystemNode
 	}
 
 	// construct the actor address
 	name := reqCopy.GetName()
-	actorPath := NewPath(name, NewAddress(protocol, x.Name(), reqCopy.GetHost(), int(reqCopy.GetPort())))
+	actorPath := NewPath(name, NewAddress(x.Name(), reqCopy.GetHost(), int(reqCopy.GetPort())))
 	// start or get the PID of the actor
 	// check whether the given actor already exist in the system or not
 	pid, exist := x.actors.Get(actorPath.String())
 	// return an error when the remote address is not found
 	if !exist {
 		// log the error
-		logger.Error(ErrRemoteActorNotFound(actorPath.String()).Error())
-		return nil, ErrRemoteActorNotFound(actorPath.String())
+		logger.Error(ErrAddressNotFound(actorPath.String()).Error())
+		return nil, ErrAddressNotFound(actorPath.String())
 	}
 
 	// let us construct the address
@@ -618,14 +618,14 @@ func (x *actorSystem) RemoteAsk(ctx context.Context, request *connect.Request[go
 	hostAndPort := fmt.Sprintf("%s:%d", reqCopy.GetRemoteMessage().GetReceiver().GetHost(), reqCopy.GetRemoteMessage().GetReceiver().GetPort())
 	if hostAndPort != nodeAddr {
 		// log the error
-		logger.Error(ErrRemoteSendInvalidNode.Message())
+		logger.Error(ErrInvalidActorSystemNode.Message())
 		// here message is sent to the wrong actor system node
-		return nil, ErrRemoteSendInvalidNode
+		return nil, ErrInvalidActorSystemNode
 	}
 
 	// construct the actor address
 	name := reqCopy.GetRemoteMessage().GetReceiver().GetName()
-	actorPath := NewPath(name, NewAddress(protocol, x.name, x.remotingHost, int(x.remotingPort)))
+	actorPath := NewPath(name, NewAddress(x.name, x.remotingHost, int(x.remotingPort)))
 
 	// start or get the PID of the actor
 	// check whether the given actor already exist in the system or not
@@ -633,8 +633,8 @@ func (x *actorSystem) RemoteAsk(ctx context.Context, request *connect.Request[go
 	// return an error when the remote address is not found
 	if !exist {
 		// log the error
-		logger.Error(ErrRemoteActorNotFound(actorPath.String()).Error())
-		return nil, ErrRemoteActorNotFound(actorPath.String())
+		logger.Error(ErrAddressNotFound(actorPath.String()).Error())
+		return nil, ErrAddressNotFound(actorPath.String())
 	}
 	// restart the actor when it is not live
 	if !pid.IsRunning() {
@@ -682,16 +682,15 @@ func (x *actorSystem) RemoteTell(ctx context.Context, request *connect.Request[g
 	hostAndPort := fmt.Sprintf("%s:%d", receiver.GetHost(), receiver.GetPort())
 	if hostAndPort != nodeAddr {
 		// log the error
-		logger.Error(ErrRemoteSendInvalidNode.Message())
+		logger.Error(ErrInvalidActorSystemNode.Message())
 		// here message is sent to the wrong actor system node
-		return nil, ErrRemoteSendInvalidNode
+		return nil, ErrInvalidActorSystemNode
 	}
 
 	// construct the actor address
 	actorPath := NewPath(
 		receiver.GetName(),
 		NewAddress(
-			protocol,
 			x.Name(),
 			receiver.GetHost(),
 			int(receiver.GetPort())))
@@ -701,8 +700,8 @@ func (x *actorSystem) RemoteTell(ctx context.Context, request *connect.Request[g
 	// return an error when the remote address is not found
 	if !exist {
 		// log the error
-		logger.Error(ErrRemoteActorNotFound(actorPath.String()).Error())
-		return nil, ErrRemoteActorNotFound(actorPath.String())
+		logger.Error(ErrAddressNotFound(actorPath.String()).Error())
+		return nil, ErrAddressNotFound(actorPath.String())
 	}
 	// restart the actor when it is not live
 	if !pid.IsRunning() {

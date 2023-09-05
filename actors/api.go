@@ -43,7 +43,7 @@ func Ask(ctx context.Context, to PID, message proto.Message, timeout time.Durati
 		var actual proto.Message
 		// unmarshal the message and handle the error
 		if actual, err = msg.GetMessage().UnmarshalNew(); err != nil {
-			return nil, err
+			return nil, ErrInvalidRemoteMessage(err)
 		}
 		// set the context message and the sender
 		context.message = actual
@@ -108,7 +108,7 @@ func Tell(ctx context.Context, to PID, message proto.Message) error {
 		)
 		// unmarshal the message and handle the error
 		if actual, err = msg.GetMessage().UnmarshalNew(); err != nil {
-			return err
+			return ErrInvalidRemoteMessage(err)
 		}
 
 		// set the context message and sender
@@ -142,7 +142,7 @@ func RemoteTell(ctx context.Context, to *pb.Address, message proto.Message) erro
 	// marshal the message
 	marshaled, err := anypb.New(message)
 	if err != nil {
-		return err
+		return ErrInvalidRemoteMessage(err)
 	}
 
 	// create an instance of remote client service
@@ -176,7 +176,7 @@ func RemoteAsk(ctx context.Context, to *pb.Address, message proto.Message) (resp
 	// marshal the message
 	marshaled, err := anypb.New(message)
 	if err != nil {
-		return nil, err
+		return nil, ErrInvalidRemoteMessage(err)
 	}
 
 	// create an instance of remote client service

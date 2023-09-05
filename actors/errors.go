@@ -14,19 +14,16 @@ var (
 	ErrClusterNotEnabled      = errors.New("cluster is not enabled")
 	ErrUndefinedActor         = errors.New("actor is not defined")
 	ErrRequestTimeout         = errors.New("request timed out")
-
-	ErrRemotingNotEnabled = errors.New("remoting is not enabled")
-
-	ErrRemoteSendInvalidNode = connect.NewError(connect.CodeFailedPrecondition, errors.New("invalid actor system node"))
-	ErrRemoteActorNotFound   = func(addr string) error {
-		return connect.NewError(connect.CodeNotFound, fmt.Errorf("remote actor=%s not found", addr))
+	ErrRemotingNotEnabled     = errors.New("remoting is not enabled")
+	ErrInvalidActorSystemNode = connect.NewError(connect.CodeFailedPrecondition, errors.New("invalid actor system node"))
+	ErrAddressNotFound        = func(addr string) error {
+		return connect.NewError(connect.CodeNotFound, fmt.Errorf("actor=%s not found", addr))
 	}
-	ErrRemoteSendFailure = func(err error) error {
-		return connect.NewError(connect.CodeInternal, err)
-	}
+	ErrRemoteSendFailure    = func(err error) error { return connect.NewError(connect.CodeInternal, err) }
 	ErrInstanceNotAnActor   = errors.New("failed to create instance. Reason: instance does not implement the Actor interface")
 	ErrInvalidInstance      = errors.New("failed to create instance. Reason: invalid instance")
 	ErrTypeNotFound         = func(typeName string) error { return fmt.Errorf("typeName=%s not found", typeName) }
 	ErrActorNotFound        = errors.New("actor not found")
 	ErrMethodCallNotAllowed = errors.New("method call not allowed")
+	ErrInvalidRemoteMessage = func(err error) error { return errors.Wrap(err, "imvalid remote message") }
 )

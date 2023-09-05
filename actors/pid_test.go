@@ -25,7 +25,7 @@ func TestActorReceive(t *testing.T) {
 	ctx := context.TODO()
 
 	// create the actor path
-	actorPath := NewPath("Test", NewAddress(protocol, "sys", "host", 1))
+	actorPath := NewPath("Test", NewAddress("sys", "host", 1))
 
 	// create the actor ref
 	pid := newPID(
@@ -66,7 +66,7 @@ func TestActorWithPassivation(t *testing.T) {
 	}
 
 	// create the actor path
-	actorPath := NewPath("Test", NewAddress(protocol, "sys", "host", 1))
+	actorPath := NewPath("Test", NewAddress("sys", "host", 1))
 	pid := newPID(ctx, actorPath, NewTester(), opts...)
 	assert.NotNil(t, pid)
 
@@ -94,7 +94,7 @@ func TestActorWithReply(t *testing.T) {
 		}
 
 		// create the actor path
-		actorPath := NewPath("Test", NewAddress(protocol, "sys", "host", 1))
+		actorPath := NewPath("Test", NewAddress("sys", "host", 1))
 		pid := newPID(ctx, actorPath, NewTester(), opts...)
 		assert.NotNil(t, pid)
 
@@ -116,7 +116,7 @@ func TestActorWithReply(t *testing.T) {
 		}
 
 		// create the actor path
-		actorPath := NewPath("Test", NewAddress(protocol, "sys", "host", 1))
+		actorPath := NewPath("Test", NewAddress("sys", "host", 1))
 		pid := newPID(ctx, actorPath, NewTester(), opts...)
 		assert.NotNil(t, pid)
 
@@ -138,7 +138,7 @@ func TestActorRestart(t *testing.T) {
 		assert.NotNil(t, actor)
 
 		// create the actor path
-		actorPath := NewPath("Test", NewAddress(protocol, "sys", "host", 1))
+		actorPath := NewPath("Test", NewAddress("sys", "host", 1))
 		// create the actor ref
 		pid := newPID(ctx, actorPath, actor,
 			withInitMaxRetries(1),
@@ -181,7 +181,7 @@ func TestActorRestart(t *testing.T) {
 		actor := NewTester()
 		assert.NotNil(t, actor)
 		// create the actor path
-		actorPath := NewPath("Test", NewAddress(protocol, "sys", "host", 1))
+		actorPath := NewPath("Test", NewAddress("sys", "host", 1))
 
 		// create the actor ref
 		pid := newPID(ctx, actorPath, actor,
@@ -213,12 +213,12 @@ func TestActorRestart(t *testing.T) {
 		assert.NoError(t, err)
 	})
 }
-func TestChildActor(t *testing.T) {
-	t.Run("happy path", func(t *testing.T) {
+func TestActorWithSupervisorStrategy(t *testing.T) {
+	t.Run("With happy path", func(t *testing.T) {
 		// create a test context
 		ctx := context.TODO()
 		// create the actor path
-		actorPath := NewPath("Parent", NewAddress(protocol, "sys", "host", 1))
+		actorPath := NewPath("Parent", NewAddress("sys", "host", 1))
 
 		// create the parent actor
 		parent := newPID(ctx, actorPath,
@@ -246,11 +246,11 @@ func TestChildActor(t *testing.T) {
 		err = parent.Shutdown(ctx)
 		assert.NoError(t, err)
 	})
-	t.Run("test child panic with stop as default strategy", func(t *testing.T) {
+	t.Run("With stop as default strategy", func(t *testing.T) {
 		// create a test context
 		ctx := context.TODO()
 		// create the actor path
-		actorPath := NewPath("Parent", NewAddress(protocol, "sys", "host", 1))
+		actorPath := NewPath("Parent", NewAddress("sys", "host", 1))
 
 		// create the parent actor
 		parent := newPID(ctx,
@@ -282,13 +282,13 @@ func TestChildActor(t *testing.T) {
 		err = parent.Shutdown(ctx)
 		assert.NoError(t, err)
 	})
-	t.Run("test child panic with restart as default strategy", func(t *testing.T) {
+	t.Run("With restart as default strategy", func(t *testing.T) {
 		// create a test context
 		ctx := context.TODO()
 
 		logger := log.New(log.DebugLevel, os.Stdout)
 		// create the actor path
-		actorPath := NewPath("Parent", NewAddress(protocol, "sys", "host", 1))
+		actorPath := NewPath("Parent", NewAddress("sys", "host", 1))
 		// create the parent actor
 		parent := newPID(ctx,
 			actorPath,
@@ -320,6 +320,45 @@ func TestChildActor(t *testing.T) {
 		err = parent.Shutdown(ctx)
 		assert.NoError(t, err)
 	})
+	t.Run("With no strategy set will default to a Stop", func(t *testing.T) {
+		// create a test context
+		ctx := context.TODO()
+		// create the actor path
+		actorPath := NewPath("Parent", NewAddress("sys", "host", 1))
+
+		// create the parent actor
+		parent := newPID(ctx,
+			actorPath,
+			NewMonitor(),
+			withInitMaxRetries(1),
+			withCustomLogger(log.DiscardLogger),
+			withPassivationDisabled(),
+			withSendReplyTimeout(receivingTimeout))
+		assert.NotNil(t, parent)
+
+		// this is for the sake of the test
+		parent.supervisorStrategy = StrategyDirective(-1)
+
+		// create the child actor
+		child, err := parent.SpawnChild(ctx, "Child", NewMonitored())
+		assert.NoError(t, err)
+		assert.NotNil(t, child)
+
+		assert.Len(t, parent.Children(ctx), 1)
+		// send a test panic message to the actor
+		assert.NoError(t, Tell(ctx, child, new(testpb.TestPanic)))
+
+		// wait for the child to properly shutdown
+		time.Sleep(time.Second)
+
+		// assert the actor state
+		assert.False(t, child.IsRunning())
+		assert.Len(t, parent.Children(ctx), 0)
+
+		//stop the actor
+		err = parent.Shutdown(ctx)
+		assert.NoError(t, err)
+	})
 }
 func TestActorToActor(t *testing.T) {
 	ctx := context.TODO()
@@ -331,12 +370,12 @@ func TestActorToActor(t *testing.T) {
 
 	// create the actor path
 	actor1 := &Exchanger{}
-	actorPath1 := NewPath("Exchange1", NewAddress(protocol, "sys", "host", 1))
+	actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
 	pid1 := newPID(ctx, actorPath1, actor1, opts...)
 	require.NotNil(t, pid1)
 
 	actor2 := &Exchanger{}
-	actorPath2 := NewPath("Exchange2", NewAddress(protocol, "sys", "host", 1))
+	actorPath2 := NewPath("Exchange2", NewAddress("sys", "host", 1))
 	pid2 := newPID(ctx, actorPath2, actor2, opts...)
 	require.NotNil(t, pid2)
 
