@@ -132,7 +132,9 @@ type actorSystem struct {
 	// help protect some the fields to set
 	mu sync.Mutex
 	// specifies actors mailbox size
-	mailboxSize int
+	mailboxSize uint64
+	// specifies the mailbox to use for the actors
+	mailbox Mailbox
 }
 
 // enforce compilation error when all methods of the ActorSystem interface are not implemented
@@ -247,6 +249,7 @@ func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor) PID {
 		withActorSystem(x),
 		withSupervisorStrategy(x.supervisorStrategy),
 		withMailboxSize(x.mailboxSize),
+		withMailbox(x.mailbox),
 		withTelemetry(x.telemetry))
 
 	// add the given actor to the actor map

@@ -76,9 +76,16 @@ func withTelemetry(telemetry *telemetry.Telemetry) pidOption {
 	}
 }
 
-// withMailboxSize sets the actor mailbox size
-func withMailboxSize(size int) pidOption {
+// withMailboxSize sets the actor defaultMailbox size
+func withMailboxSize(size uint64) pidOption {
 	return func(pid *pid) {
 		pid.mailboxSize = size
+	}
+}
+
+// withMailbox sets the custom actor defaultMailbox
+func withMailbox(box Mailbox) pidOption {
+	return func(pid *pid) {
+		pid.mailbox = box
 	}
 }

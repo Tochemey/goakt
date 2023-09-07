@@ -97,7 +97,7 @@ type PID interface {
 	MailboxSize(ctx context.Context) uint64
 	// Children returns the list of all the children of the given actor
 	Children(ctx context.Context) []PID
-	// push a message to the actor's mailbox
+	// push a message to the actor's defaultMailbox
 	doReceive(ctx ReceiveContext)
 	// watchers returns the list of watchMen
 	watchers() *slices.ConcurrentSlice[*WatchMan]
@@ -143,8 +143,8 @@ type pid struct {
 	shutdownTimeout *atomic.Duration
 
 	// specifies the actor mailbox
-	mailbox     *mailbox
-	mailboxSize int
+	mailbox     Mailbox
+	mailboxSize uint64
 
 	// receives a shutdown signal. Once the signal is received
 	// the actor is shut down gracefully.
@@ -221,14 +221,17 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 		rwMutex:                sync.RWMutex{},
 		shutdownMutex:          sync.Mutex{},
 		httpClient:             http.Client(),
+		mailbox:                nil,
 	}
 
 	// set the custom options to override the default values
 	for _, opt := range opts {
 		opt(pid)
 	}
-	// set the mailbox
-	pid.mailbox = newMailbox(pid.mailboxSize)
+	// set the default mailbox if mailbox is not set
+	if pid.mailbox == nil {
+		pid.mailbox = newDefaultMailbox(pid.mailboxSize)
+	}
 	// set the actor behavior stack
 	behaviorStack := newBehaviorStack()
 	behaviorStack.Push(pid.Receive)
@@ -329,6 +332,10 @@ func (p *pid) Restart(ctx context.Context) error {
 		ticker.Stop()
 	}
 
+	// set the default mailbox if mailbox is not set
+	p.mailbox.Reset()
+	// reset the behavior
+	p.resetBehavior()
 	// initialize the actor
 	p.init(ctx)
 	// init processing public
@@ -337,9 +344,6 @@ func (p *pid) Restart(ctx context.Context) error {
 	if p.passivateAfter.Load() > 0 {
 		go p.passivationListener()
 	}
-
-	// reset the behavior
-	p.resetBehavior()
 
 	// register metrics. However, we don't panic when we fail to register
 	// we just log it for now
@@ -395,6 +399,8 @@ func (p *pid) SpawnChild(ctx context.Context, name string, actor Actor) (PID, er
 		withCustomLogger(p.logger),
 		withActorSystem(p.system),
 		withSupervisorStrategy(p.supervisorStrategy),
+		withMailboxSize(p.mailboxSize),
+		withMailbox(p.mailbox.Clone()),
 		withShutdownTimeout(p.shutdownTimeout.Load()))
 
 	// add the pid to the map
@@ -733,7 +739,7 @@ func (p *pid) watchers() *slices.ConcurrentSlice[*WatchMan] {
 	return p.watchMen
 }
 
-// doReceive pushes a given message to the actor mailbox
+// doReceive pushes a given message to the actor defaultMailbox
 func (p *pid) doReceive(ctx ReceiveContext) {
 	// acquire the lock and release it once done
 	p.rwMutex.Lock()
@@ -803,6 +809,8 @@ func (p *pid) reset() {
 	p.children = newPIDMap(10)
 	p.watchMen = slices.NewConcurrentSlice[*WatchMan]()
 	p.telemetry = telemetry.New()
+	// reset the mailbox
+	p.mailbox.Reset()
 	// reset the behavior stack
 	p.resetBehavior()
 }
@@ -864,7 +872,7 @@ func (p *pid) registerMetrics() error {
 	return err
 }
 
-// receive handles every mail in the actor mailbox
+// receive handles every mail in the actor defaultMailbox
 func (p *pid) receive() {
 	// run the processing loop
 	for {

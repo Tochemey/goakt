@@ -267,6 +267,8 @@ func TestActorWithSupervisorStrategy(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, child)
 
+		time.Sleep(time.Second)
+
 		assert.Len(t, parent.Children(ctx), 1)
 		// send a test panic message to the actor
 		assert.NoError(t, Tell(ctx, child, new(testpb.TestPanic)))

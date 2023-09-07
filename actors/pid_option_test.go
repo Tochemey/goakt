@@ -10,6 +10,7 @@ import (
 )
 
 func TestPIDOptions(t *testing.T) {
+	mailbox := newDefaultMailbox(10)
 	testCases := []struct {
 		name           string
 		option         pidOption
@@ -54,6 +55,11 @@ func TestPIDOptions(t *testing.T) {
 			name:           "WithMailboxSize",
 			option:         withMailboxSize(10),
 			expectedConfig: &pid{mailboxSize: 10},
+		},
+		{
+			name:           "WithMailbox",
+			option:         withMailbox(mailbox),
+			expectedConfig: &pid{mailbox: mailbox},
 		},
 	}
 	for _, tc := range testCases {
