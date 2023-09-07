@@ -50,6 +50,11 @@ func TestPIDOptions(t *testing.T) {
 			option:         withPassivationDisabled(),
 			expectedConfig: &pid{passivateAfter: atomic.NewDuration(-1)},
 		},
+		{
+			name:           "WithMailboxSize",
+			option:         withMailboxSize(10),
+			expectedConfig: &pid{mailboxSize: 10},
+		},
 	}
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {

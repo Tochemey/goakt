@@ -143,7 +143,9 @@ type pid struct {
 	shutdownTimeout *atomic.Duration
 
 	// specifies the actor mailbox
-	mailbox chan ReceiveContext
+	mailbox     *mailbox
+	mailboxSize int
+
 	// receives a shutdown signal. Once the signal is received
 	// the actor is shut down gracefully.
 	shutdownSignal     chan Unit
@@ -166,7 +168,6 @@ type pid struct {
 	receivedMessageCounter *atomic.Uint64
 	restartCounter         *atomic.Uint64
 	lastProcessingDuration *atomic.Duration
-	mailboxSizeCounter     *atomic.Uint64
 
 	// rwMutex that helps synchronize the pid in a concurrent environment
 	// this helps protect the pid fields accessibility
@@ -204,7 +205,6 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 		sendReplyTimeout:       atomic.NewDuration(DefaultReplyTimeout),
 		shutdownTimeout:        atomic.NewDuration(DefaultShutdownTimeout),
 		initMaxRetries:         atomic.NewInt32(DefaultInitMaxRetries),
-		mailbox:                make(chan ReceiveContext, defaultMailboxSize),
 		shutdownSignal:         make(chan Unit, 1),
 		haltPassivationLnr:     make(chan Unit, 1),
 		logger:                 log.DefaultLogger,
@@ -212,22 +212,27 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 		receivedMessageCounter: atomic.NewUint64(0),
 		lastProcessingDuration: atomic.NewDuration(0),
 		restartCounter:         atomic.NewUint64(0),
-		mailboxSizeCounter:     atomic.NewUint64(0),
-
-		children:           newPIDMap(10),
-		supervisorStrategy: DefaultSupervisoryStrategy,
-		watchMen:           slices.NewConcurrentSlice[*WatchMan](),
-		telemetry:          telemetry.New(),
-		actorPath:          actorPath,
-		rwMutex:            sync.RWMutex{},
-		shutdownMutex:      sync.Mutex{},
-		httpClient:         http.Client(),
+		mailboxSize:            defaultMailboxSize,
+		children:               newPIDMap(10),
+		supervisorStrategy:     DefaultSupervisoryStrategy,
+		watchMen:               slices.NewConcurrentSlice[*WatchMan](),
+		telemetry:              telemetry.New(),
+		actorPath:              actorPath,
+		rwMutex:                sync.RWMutex{},
+		shutdownMutex:          sync.Mutex{},
+		httpClient:             http.Client(),
 	}
 
 	// set the custom options to override the default values
 	for _, opt := range opts {
 		opt(pid)
 	}
+	// set the mailbox
+	pid.mailbox = newMailbox(pid.mailboxSize)
+	// set the actor behavior stack
+	behaviorStack := newBehaviorStack()
+	behaviorStack.Push(pid.Receive)
+	pid.behaviorStack = behaviorStack
 
 	// initialize the actor and init processing public
 	pid.init(ctx)
@@ -237,12 +242,6 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 	if pid.passivateAfter.Load() > 0 {
 		go pid.passivationListener()
 	}
-
-	// set the actor behavior stack
-	behaviorStack := newBehaviorStack()
-	behaviorStack.Push(pid.Receive)
-	pid.behaviorStack = behaviorStack
-
 	// register metrics. However, we don't panic when we fail to register
 	// we just log it for now
 	// TODO decide what to do when we fail to register the metrics or export the metrics registration as public
@@ -412,7 +411,7 @@ func (p *pid) MailboxSize(ctx context.Context) uint64 {
 	// add a span context
 	ctx, span := telemetry.SpanContext(ctx, "MailboxSize")
 	defer span.End()
-	return p.mailboxSizeCounter.Load()
+	return p.mailbox.Size()
 }
 
 // ReceivedCount returns the total number of messages processed by the actor
@@ -751,9 +750,12 @@ func (p *pid) doReceive(ctx ReceiveContext) {
 	}()
 
 	// push the message to the actor mailbox
-	p.mailbox <- ctx
-	// increment the mailbox size counter
-	p.mailboxSizeCounter.Store(uint64(len(p.mailbox)))
+	if err := p.mailbox.Push(ctx); err != nil {
+		// add a warning log because the mailbox is full and do nothing
+		p.logger.Warn(err)
+		return
+	}
+
 	// increase the received message counter
 	p.receivedMessageCounter.Inc()
 }
@@ -798,7 +800,6 @@ func (p *pid) reset() {
 	p.receivedMessageCounter.Store(0)
 	p.lastProcessingDuration.Store(0)
 	p.restartCounter.Store(0)
-	p.mailboxSizeCounter.Store(0)
 	p.children = newPIDMap(10)
 	p.watchMen = slices.NewConcurrentSlice[*WatchMan]()
 	p.telemetry = telemetry.New()
@@ -870,8 +871,13 @@ func (p *pid) receive() {
 		select {
 		case <-p.shutdownSignal:
 			return
-		case received := <-p.mailbox:
-			p.handleReceived(received)
+		default:
+			// only grab the message when the mailbox is not empty
+			if !p.mailbox.IsEmpty() {
+				// grab the message from the mailbox. Ignore the error when the mailbox is empty
+				received, _ := p.mailbox.Pop()
+				p.handleReceived(received)
+			}
 		}
 	}
 }

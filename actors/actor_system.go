@@ -131,6 +131,8 @@ type actorSystem struct {
 
 	// help protect some the fields to set
 	mu sync.Mutex
+	// specifies actors mailbox size
+	mailboxSize int
 }
 
 // enforce compilation error when all methods of the ActorSystem interface are not implemented
@@ -167,6 +169,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 				clusterEnabled:      atomic.NewBool(false),
 				mu:                  sync.Mutex{},
 				shutdownTimeout:     DefaultShutdownTimeout,
+				mailboxSize:         defaultMailboxSize,
 			}
 			// set the reflection
 			system.reflection = NewReflection(system.typesLoader)
@@ -243,6 +246,7 @@ func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor) PID {
 		withCustomLogger(x.logger),
 		withActorSystem(x),
 		withSupervisorStrategy(x.supervisorStrategy),
+		withMailboxSize(x.mailboxSize),
 		withTelemetry(x.telemetry))
 
 	// add the given actor to the actor map
