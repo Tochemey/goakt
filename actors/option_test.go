@@ -62,6 +62,11 @@ func TestOptions(t *testing.T) {
 			option:   WithTelemetry(tel),
 			expected: actorSystem{telemetry: tel},
 		},
+		{
+			name:     "WithMailboxSize",
+			option:   WithMailboxSize(10),
+			expected: actorSystem{mailboxSize: 10},
+		},
 	}
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {

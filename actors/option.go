@@ -107,3 +107,10 @@ func WithShutdownTimeout(timeout time.Duration) Option {
 		a.shutdownTimeout = timeout
 	})
 }
+
+// WithMailboxSize sets the actors mailbox size
+func WithMailboxSize(size int) Option {
+	return OptionFunc(func(a *actorSystem) {
+		a.mailboxSize = size
+	})
+}
