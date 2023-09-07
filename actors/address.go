@@ -54,7 +54,7 @@ func (a *Address) WithPort(port int) (*Address, error) {
 	if a.IsLocal() {
 		return nil, ErrLocalAddress
 	}
-	return NewAddress(a.System(), a.System(), port), nil
+	return NewAddress(a.System(), a.Host(), port), nil
 }
 
 // WithSystem sets the actor system of a given Address and returns a new instance of the address

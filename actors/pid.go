@@ -31,7 +31,7 @@ import (
 // WatchMan is used to handle parent child relationship.
 // This helps handle error propagation from a child actor using any of supervisory strategies
 type WatchMan struct {
-	Parent  PID        // the Parent of the actor watching
+	ID      PID        // the ID of the actor watching
 	ErrChan chan error // ErrChan the channel where to pass error message
 	Done    chan Unit  // Done when watching is completed
 }
@@ -684,6 +684,9 @@ func (p *pid) Shutdown(ctx context.Context) error {
 	// stop all the child actors
 	p.freeChildren(ctx)
 
+	// free the watchers
+	p.freeWatchers(ctx)
+
 	// close lingering http connections
 	p.httpClient.CloseIdleConnections()
 
@@ -707,7 +710,7 @@ func (p *pid) Shutdown(ctx context.Context) error {
 func (p *pid) Watch(pid PID) {
 	// create a watcher
 	w := &WatchMan{
-		Parent:  p,
+		ID:      p,
 		ErrChan: make(chan error, 1),
 		Done:    make(chan Unit, 1),
 	}
@@ -724,7 +727,7 @@ func (p *pid) UnWatch(pid PID) {
 		// grab the item value
 		w := item.Value
 		// locate the given watcher
-		if w.Parent.ActorPath() == p.ActorPath() {
+		if w.ID.ActorPath() == p.ActorPath() {
 			// stop the watching go routine
 			w.Done <- Unit{}
 			// remove the watcher from the list
@@ -813,6 +816,20 @@ func (p *pid) reset() {
 	p.mailbox.Reset()
 	// reset the behavior stack
 	p.resetBehavior()
+}
+
+func (p *pid) freeWatchers(ctx context.Context) {
+	p.logger.Debug("freeing all watcher actors...")
+	// add a span context
+	ctx, span := telemetry.SpanContext(ctx, "FreeWatcher")
+	defer span.End()
+
+	watchers := p.watchers()
+	for item := range watchers.Iter() {
+		// grab the item value
+		watcher := item.Value
+		watcher.ID.UnWatch(p)
+	}
 }
 
 func (p *pid) freeChildren(ctx context.Context) {
@@ -1014,6 +1031,9 @@ func (p *pid) passivationListener() {
 
 	// stop all the child actors
 	p.freeChildren(ctx)
+
+	// free the watchers
+	p.freeWatchers(ctx)
 
 	// close lingering http connections
 	p.httpClient.CloseIdleConnections()
