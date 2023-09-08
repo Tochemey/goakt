@@ -17,7 +17,7 @@ func TestGetHostNode(t *testing.T) {
 		gossipPort := nodePorts[0]
 		clusterPort := nodePorts[1]
 		remotingPort := nodePorts[2]
-		host := "127.0.0.1"
+		host := "localhost"
 
 		t.Setenv("GOSSIP_PORT", strconv.Itoa(gossipPort))
 		t.Setenv("CLUSTER_PORT", strconv.Itoa(clusterPort))

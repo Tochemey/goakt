@@ -106,7 +106,7 @@ func TestActorSystem(t *testing.T) {
 		logger := log.New(log.DebugLevel, os.Stdout)
 
 		podName := "pod"
-		host := "127.0.0.1"
+		host := "localhost"
 
 		// set the environments
 		t.Setenv("GOSSIP_PORT", strconv.Itoa(gossipPort))
@@ -199,7 +199,7 @@ func TestActorSystem(t *testing.T) {
 		remotingPort := dynaport.Get(1)[0]
 
 		logger := log.New(log.DebugLevel, os.Stdout)
-		host := "127.0.0.1"
+		host := "localhost"
 
 		newActorSystem, err := NewActorSystem(
 			"test",
@@ -358,7 +358,7 @@ func TestActorSystem(t *testing.T) {
 		remotingPort := dynaport.Get(1)[0]
 
 		logger := log.New(log.DebugLevel, os.Stdout)
-		host := "127.0.0.1"
+		host := "localhost"
 
 		newActorSystem, err := NewActorSystem(
 			"test",
@@ -432,7 +432,7 @@ func TestActorSystem(t *testing.T) {
 		remotingPort := dynaport.Get(1)[0]
 
 		logger := log.New(log.DebugLevel, os.Stdout)
-		host := "127.0.0.1"
+		host := "localhost"
 
 		newActorSystem, err := NewActorSystem(
 			"test",
@@ -477,7 +477,7 @@ func TestActorSystem(t *testing.T) {
 		remotingPort := dynaport.Get(1)[0]
 
 		logger := log.New(log.DebugLevel, os.Stdout)
-		host := "127.0.0.1"
+		host := "localhost"
 
 		newActorSystem, err := NewActorSystem(
 			"test",

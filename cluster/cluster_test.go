@@ -30,7 +30,7 @@ func TestCluster(t *testing.T) {
 
 		// define discovered addresses
 		addrs := []string{
-			fmt.Sprintf("127.0.0.1:%d", gossipPort),
+			fmt.Sprintf("localhost:%d", gossipPort),
 		}
 
 		// mock the discovery provider
@@ -48,7 +48,7 @@ func TestCluster(t *testing.T) {
 		serviceDiscovery := discovery.NewServiceDiscovery(provider, config)
 
 		// create a Cluster node
-		host := "127.0.0.1"
+		host := "localhost"
 
 		// set the environments
 		t.Setenv("GOSSIP_PORT", strconv.Itoa(gossipPort))
@@ -88,7 +88,7 @@ func TestCluster(t *testing.T) {
 
 		// define discovered addresses
 		addrs := []string{
-			fmt.Sprintf("127.0.0.1:%d", gossipPort),
+			fmt.Sprintf("localhost:%d", gossipPort),
 		}
 
 		// mock the discovery provider
@@ -106,7 +106,7 @@ func TestCluster(t *testing.T) {
 		serviceDiscovery := discovery.NewServiceDiscovery(provider, config)
 
 		// create a Cluster node
-		host := "127.0.0.1"
+		host := "localhost"
 		// set the environments
 		t.Setenv("GOSSIP_PORT", strconv.Itoa(gossipPort))
 		t.Setenv("CLUSTER_PORT", strconv.Itoa(clusterPort))
