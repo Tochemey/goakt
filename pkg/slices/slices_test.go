@@ -23,4 +23,5 @@ func TestConcurrentSlice(t *testing.T) {
 	sl.Delete(1)
 	// assert the length
 	assert.EqualValues(t, 2, sl.Len())
+	assert.Nil(t, sl.Get(4))
 }

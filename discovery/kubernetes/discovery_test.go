@@ -227,4 +227,13 @@ func TestDiscovery(t *testing.T) {
 		provider.isInitialized = atomic.NewBool(true)
 		assert.NoError(t, provider.Deregister())
 	})
+	t.Run("With Deregister when not initialized", func(t *testing.T) {
+		// create the instance of provider
+		provider := NewDiscovery()
+		// for the sake of the test
+		provider.isInitialized = atomic.NewBool(false)
+		err := provider.Deregister()
+		assert.Error(t, err)
+		assert.EqualError(t, err, discovery.ErrNotInitialized.Error())
+	})
 }

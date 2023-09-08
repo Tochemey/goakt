@@ -53,6 +53,101 @@ func TestDiscovery(t *testing.T) {
 		// set config
 		assert.NoError(t, provider.SetConfig(config))
 	})
+	t.Run("With SetConfig with service name not set", func(t *testing.T) {
+		// create the various config option
+		ports := dynaport.Get(1)
+		port := strconv.Itoa(ports[0])
+		serviceType := "_workstation._tcp"
+		domain := "local."
+		// create the instance of provider
+		provider := NewDiscovery()
+		// create the config
+		config := discovery.Config{
+			Service: serviceType,
+			Domain:  domain,
+			Port:    port,
+			IPv6:    false,
+		}
+
+		// set config
+		assert.Error(t, provider.SetConfig(config))
+	})
+	t.Run("With SetConfig with service not set", func(t *testing.T) {
+		// create the various config option
+		ports := dynaport.Get(1)
+		port := strconv.Itoa(ports[0])
+		serviceName := "AccountsSystem"
+		domain := "local."
+		// create the instance of provider
+		provider := NewDiscovery()
+		// create the config
+		config := discovery.Config{
+			ServiceName: serviceName,
+			Domain:      domain,
+			Port:        port,
+			IPv6:        false,
+		}
+
+		// set config
+		assert.Error(t, provider.SetConfig(config))
+	})
+	t.Run("With SetConfig with port not set", func(t *testing.T) {
+		// create the various config option
+		serviceType := "_workstation._tcp"
+		serviceName := "AccountsSystem"
+		domain := "local."
+		// create the instance of provider
+		provider := NewDiscovery()
+		// create the config
+		config := discovery.Config{
+			Service:     serviceType,
+			ServiceName: serviceName,
+			Domain:      domain,
+			IPv6:        false,
+		}
+
+		// set config
+		assert.Error(t, provider.SetConfig(config))
+	})
+	t.Run("With SetConfig with domain not set", func(t *testing.T) {
+		// create the various config option
+		ports := dynaport.Get(1)
+		port := strconv.Itoa(ports[0])
+		serviceType := "_workstation._tcp"
+		serviceName := "AccountsSystem"
+		// create the instance of provider
+		provider := NewDiscovery()
+		// create the config
+		config := discovery.Config{
+			Service:     serviceType,
+			ServiceName: serviceName,
+			Port:        port,
+			IPv6:        false,
+		}
+
+		// set config
+		assert.Error(t, provider.SetConfig(config))
+	})
+	t.Run("With SetConfig with ipv6 not set", func(t *testing.T) {
+		// create the various config option
+		ports := dynaport.Get(1)
+		port := strconv.Itoa(ports[0])
+		serviceType := "_workstation._tcp"
+		serviceName := "AccountsSystem"
+		domain := "local."
+		// create the instance of provider
+		provider := NewDiscovery()
+		// create the config
+		config := discovery.Config{
+			Service:     serviceType,
+			ServiceName: serviceName,
+			Domain:      domain,
+			Port:        port,
+		}
+
+		// set config
+		assert.Error(t, provider.SetConfig(config))
+	})
 	t.Run("With SetConfig: already initialized", func(t *testing.T) {
 		// create the various config option
 		ports := dynaport.Get(1)
@@ -131,12 +226,51 @@ func TestDiscovery(t *testing.T) {
 		time.Sleep(time.Second)
 		assert.False(t, provider.isInitialized.Load())
 	})
+	t.Run("With Register when already registered", func(t *testing.T) {
+		// create the various config option
+		ports := dynaport.Get(1)
+		port := strconv.Itoa(ports[0])
+		serviceType := "_workstation._tcp"
+		serviceName := "AccountsSystem"
+		domain := "local"
+		// create the instance of provider
+		provider := NewDiscovery()
+		// create the config
+		config := discovery.Config{
+			Service:     serviceType,
+			ServiceName: serviceName,
+			Domain:      domain,
+			Port:        port,
+			IPv6:        false,
+		}
+		require.NoError(t, provider.SetConfig(config))
+		require.NoError(t, provider.Initialize())
+		require.NoError(t, provider.Register())
+
+		time.Sleep(time.Second)
+		require.True(t, provider.isInitialized.Load())
+		err := provider.Register()
+		require.Error(t, err)
+		require.EqualError(t, err, discovery.ErrAlreadyRegistered.Error())
+		require.NoError(t, provider.Deregister())
+		time.Sleep(time.Second)
+		assert.False(t, provider.isInitialized.Load())
+	})
 	t.Run("With Deregister", func(t *testing.T) {
 		// create the instance of provider
 		provider := NewDiscovery()
 		// for the sake of the test
 		provider.isInitialized = atomic.NewBool(true)
 		assert.NoError(t, provider.Deregister())
+	})
+	t.Run("With Deregister when not initialized", func(t *testing.T) {
+		// create the instance of provider
+		provider := NewDiscovery()
+		// for the sake of the test
+		provider.isInitialized = atomic.NewBool(false)
+		err := provider.Deregister()
+		assert.Error(t, err)
+		assert.EqualError(t, err, discovery.ErrNotInitialized.Error())
 	})
 	t.Run("With DiscoverPeers", func(t *testing.T) {
 		// create the various config option
