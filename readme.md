@@ -39,7 +39,8 @@ Also, check reference section at the end of the post for more material regarding
   - They are independent, isolated unit of computation with their own state. 
   - They can be _long-lived_ actors or be _passivated_ after some period of time that is configured during their creation. 
   - They are automatically thread-safe without having to use locks or any other shared-memory synchronization mechanisms. 
-  - They can be stateful and stateless depending upon the system to build. Every actor in  Go-Akt:
+  - They can be stateful and stateless depending upon the system to build. 
+  - Every actor in  Go-Akt:
     - has a process id [`PID`](./actors/pid.go). Via the process id any allowable action can be executed by the
       actor.
     - has a lifecycle via the following methods: [`PreStart`](./actors/actor.go), [`PostStop`](./actors/actor.go). It means it
@@ -56,7 +57,7 @@ Also, check reference section at the end of the post for more material regarding
           allows it to send messages remotely via `RemoteAsk` or `RemoteTell` methods
     - can adopt various form using the [behavior](./actors/behavior.go) feature
     - can be restarted (respawned)
-    - can be stopped (killed)
+    - can be gracefully stopped (killed). Every message in the mailbox prior to stoppage will be processed within a configurable time period.
     - has few metrics:
         - Mailbox size at a given time. That information can be accessed via the process
           id  [`PID`](./actors/pid.go) `MailboxSize` method
