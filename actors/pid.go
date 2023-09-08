@@ -683,7 +683,6 @@ func (p *pid) Shutdown(ctx context.Context) error {
 	p.isRunning.Store(false)
 	// stop all the child actors
 	p.freeChildren(ctx)
-
 	// free the watchers
 	p.freeWatchers(ctx)
 

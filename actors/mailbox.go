@@ -26,7 +26,7 @@ type Mailbox interface {
 	IsEmpty() bool
 	// IsFull returns true when the mailbox is full
 	IsFull() bool
-	// Size returns the size of the buffer
+	// Size returns the size of the buffer atomically
 	Size() uint64
 	// Reset resets the mailbox
 	Reset()
