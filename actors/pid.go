@@ -54,6 +54,8 @@ const (
 // PID defines the various actions one can perform on a given actor
 type PID interface {
 	// Shutdown gracefully shuts down the given actor
+	// All current messages in the mailbox will be processed before the actor shutdown after a period of time
+	// that can be configured. All child actors will be gracefully shutdown.
 	Shutdown(ctx context.Context) error
 	// IsRunning returns true when the actor is running ready to process public and false
 	// when the actor is stopped or not started at all
@@ -649,7 +651,7 @@ func (p *pid) RemoteAsk(ctx context.Context, to *pb.Address, message proto.Messa
 }
 
 // Shutdown gracefully shuts down the given actor
-// All current public in the mailbox will be processed before the actor shutdown after a period of time
+// All current messages in the mailbox will be processed before the actor shutdown after a period of time
 // that can be configured. All child actors will be gracefully shutdown.
 func (p *pid) Shutdown(ctx context.Context) error {
 	// add a span context
@@ -676,30 +678,10 @@ func (p *pid) Shutdown(ctx context.Context) error {
 		p.haltPassivationLnr <- Unit{}
 	}
 
-	// signal we are shutting down to stop processing messages
-	p.shutdownSignal <- Unit{}
-
-	// stop receiving and sending messages
-	p.isRunning.Store(false)
-	// stop all the child actors
-	p.freeChildren(ctx)
-	// free the watchers
-	p.freeWatchers(ctx)
-
-	// close lingering http connections
-	p.httpClient.CloseIdleConnections()
-
-	// add some logging
-	p.logger.Infof("Shutdown process is on going for actor=%s...", p.ActorPath().String())
-
-	// perform some cleanup with the actor
-	if err := p.Actor.PostStop(ctx); err != nil {
-		p.logger.Error(fmt.Errorf("failed to stop the underlying receiver for actor=%s. Cause:%v", p.ActorPath().String(), err))
-		return err
+	// stop the actor
+	if err := p.doStop(ctx); err != nil {
+		p.logger.Panicf("failed to stop actor=(%s)", p.ActorPath().String())
 	}
-
-	// reset the actor
-	p.reset()
 
 	p.logger.Infof("Actor=%s successfully shutdown", p.ActorPath().String())
 	return nil
@@ -1019,31 +1001,14 @@ func (p *pid) passivationListener() {
 	// add some logging info
 	p.logger.Infof("Passivation mode has been triggered for actor=%s...", p.ActorPath().String())
 
-	// signal we are shutting down to stop processing messages
-	p.shutdownSignal <- Unit{}
-
-	// stop receiving and sending messages
-	p.isRunning.Store(false)
-
 	// create a context
 	ctx := context.Background()
 
-	// stop all the child actors
-	p.freeChildren(ctx)
-
-	// free the watchers
-	p.freeWatchers(ctx)
-
-	// close lingering http connections
-	p.httpClient.CloseIdleConnections()
-
-	// perform some cleanup with the actor
-	if err := p.Actor.PostStop(ctx); err != nil {
-		panic(err)
+	// stop the actor
+	if err := p.doStop(ctx); err != nil {
+		p.logger.Panicf("failed to passivate actor=(%s)", p.ActorPath().String())
 	}
-
-	// reset
-	p.reset()
+	p.logger.Infof("Actor=%s successfully passivated", p.ActorPath().String())
 }
 
 // interceptor create an interceptor based upon the telemetry provided
@@ -1083,4 +1048,62 @@ func (p *pid) unsetBehaviorStacked() {
 	p.rwMutex.Lock()
 	p.behaviorStack.Pop()
 	p.rwMutex.Unlock()
+}
+
+// doStop stops the actor
+func (p *pid) doStop(ctx context.Context) error {
+	// stop receiving and sending messages
+	p.isRunning.Store(false)
+
+	// wait for all messages in the mailbox to be processed
+	// init a ticker that run every 10 ms to make sure we process all messages in the
+	// mailbox.
+	ticker := time.NewTicker(10 * time.Millisecond)
+	timer := time.After(p.shutdownTimeout.Load())
+	// create the ticker stop signal
+	tickerStopSig := make(chan Unit)
+	// start ticking
+	go func() {
+		for {
+			select {
+			case <-ticker.C:
+				// no more message to process
+				if p.mailbox.IsEmpty() {
+					// tell the ticker to stop
+					close(tickerStopSig)
+					return
+				}
+			case <-timer:
+				// tell the ticker to stop when timer is up
+				close(tickerStopSig)
+				return
+			}
+		}
+	}()
+	// listen to ticker stop signal
+	<-tickerStopSig
+
+	// signal we are shutting down to stop processing messages
+	p.shutdownSignal <- Unit{}
+
+	// stop all the child actors
+	p.freeChildren(ctx)
+	// free the watchers
+	p.freeWatchers(ctx)
+
+	// close lingering http connections
+	p.httpClient.CloseIdleConnections()
+
+	// add some logging
+	p.logger.Infof("Shutdown process is on going for actor=%s...", p.ActorPath().String())
+
+	// perform some cleanup with the actor
+	if err := p.Actor.PostStop(ctx); err != nil {
+		p.logger.Error(fmt.Errorf("failed to stop the underlying receiver for actor=%s. Cause:%v", p.ActorPath().String(), err))
+		return err
+	}
+
+	// reset the actor
+	p.reset()
+	return nil
 }
