@@ -18,7 +18,7 @@ import (
 	pb "github.com/tochemey/goakt/pb/v1"
 	"github.com/tochemey/goakt/pkg/http"
 	"github.com/tochemey/goakt/pkg/slices"
-	"github.com/tochemey/goakt/pkg/telemetry"
+	"github.com/tochemey/goakt/telemetry"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 	"go.uber.org/atomic"

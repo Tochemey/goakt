@@ -41,4 +41,5 @@ func TestStack(t *testing.T) {
 	// assert clear
 	stack.Clear()
 	assert.True(t, stack.IsEmpty())
+	stack.Clear()
 }

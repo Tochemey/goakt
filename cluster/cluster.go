@@ -13,7 +13,7 @@ import (
 	"github.com/tochemey/goakt/hash"
 	goaktpb "github.com/tochemey/goakt/internal/goakt/v1"
 	"github.com/tochemey/goakt/log"
-	"github.com/tochemey/goakt/pkg/telemetry"
+	"github.com/tochemey/goakt/telemetry"
 )
 
 // Interface defines the Cluster interface

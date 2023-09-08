@@ -4,11 +4,10 @@ import (
 	"errors"
 	"time"
 
-	"go.uber.org/atomic"
-
 	"github.com/tochemey/goakt/discovery"
 	"github.com/tochemey/goakt/log"
-	"github.com/tochemey/goakt/pkg/telemetry"
+	"github.com/tochemey/goakt/telemetry"
+	"go.uber.org/atomic"
 )
 
 var (

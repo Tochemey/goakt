@@ -20,7 +20,7 @@ import (
 	"github.com/tochemey/goakt/log"
 	pb "github.com/tochemey/goakt/pb/v1"
 	"github.com/tochemey/goakt/pkg/resync"
-	"github.com/tochemey/goakt/pkg/telemetry"
+	"github.com/tochemey/goakt/telemetry"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"

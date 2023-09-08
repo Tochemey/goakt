@@ -6,7 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/tochemey/goakt/log"
-	"github.com/tochemey/goakt/pkg/telemetry"
+	"github.com/tochemey/goakt/telemetry"
 	"go.uber.org/atomic"
 )
 

@@ -11,7 +11,7 @@ import (
 	"github.com/tochemey/goakt/internal/goakt/v1/goaktv1connect"
 	pb "github.com/tochemey/goakt/pb/v1"
 	"github.com/tochemey/goakt/pkg/http"
-	"github.com/tochemey/goakt/pkg/telemetry"
+	"github.com/tochemey/goakt/telemetry"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 )
