@@ -120,10 +120,10 @@ func TestStash(t *testing.T) {
 
 		err := pid.unstash()
 		assert.Error(t, err)
-		assert.EqualError(t, err, ErrUnstashNotPermitted.Error())
+		assert.EqualError(t, err, ErrStashBufferNotSet.Error())
 
 		err = pid.unstashAll()
 		assert.Error(t, err)
-		assert.EqualError(t, err, ErrUnstashNotPermitted.Error())
+		assert.EqualError(t, err, ErrStashBufferNotSet.Error())
 	})
 }

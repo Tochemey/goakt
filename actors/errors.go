@@ -27,5 +27,4 @@ var (
 	ErrMethodCallNotAllowed = errors.New("method call not allowed")
 	ErrInvalidRemoteMessage = func(err error) error { return errors.Wrap(err, "invalid remote message") }
 	ErrStashBufferNotSet    = errors.New("actor is not setup with a stash buffer")
-	ErrUnstashNotPermitted  = errors.New("actor is not setup with a stash buffer or stashing is not enabled")
 )
