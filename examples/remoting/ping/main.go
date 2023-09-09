@@ -10,7 +10,7 @@ import (
 	goakt "github.com/tochemey/goakt/actors"
 	samplepb "github.com/tochemey/goakt/examples/protos/pb/v1"
 	"github.com/tochemey/goakt/log"
-	pb "github.com/tochemey/goakt/pb/v1"
+	addresspb "github.com/tochemey/goakt/pb/address/v1"
 	"go.uber.org/atomic"
 )
 
@@ -40,7 +40,7 @@ func main() {
 
 	// start the conversation
 	timer := time.AfterFunc(time.Second, func() {
-		_ = pingActor.RemoteTell(ctx, &pb.Address{
+		_ = pingActor.RemoteTell(ctx, &addresspb.Address{
 			Host: host,
 			Port: 50052,
 			Name: "Pong",

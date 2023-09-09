@@ -15,10 +15,10 @@ import (
 	"github.com/pkg/errors"
 	"github.com/tochemey/goakt/cluster"
 	"github.com/tochemey/goakt/discovery"
-	goaktpb "github.com/tochemey/goakt/internal/goakt/v1"
-	"github.com/tochemey/goakt/internal/goakt/v1/goaktv1connect"
+	internalpb "github.com/tochemey/goakt/internal/v1"
+	"github.com/tochemey/goakt/internal/v1/internalpbconnect"
 	"github.com/tochemey/goakt/log"
-	pb "github.com/tochemey/goakt/pb/v1"
+	addresspb "github.com/tochemey/goakt/pb/address/v1"
 	"github.com/tochemey/goakt/pkg/resync"
 	"github.com/tochemey/goakt/telemetry"
 	"go.opentelemetry.io/otel/attribute"
@@ -58,12 +58,12 @@ type ActorSystem interface {
 	// RemoteActor returns the address of a remote actor when cluster is enabled
 	// When the cluster mode is not enabled an actor not found error will be returned
 	// One can always check whether cluster is enabled before calling this method or just use the ActorOf method.
-	RemoteActor(ctx context.Context, actorName string) (addr *pb.Address, err error)
+	RemoteActor(ctx context.Context, actorName string) (addr *addresspb.Address, err error)
 	// ActorOf returns an existing actor in the local system or in the cluster when clustering is enabled
 	// When cluster mode is activated, the PID will be nil.
 	// When remoting is enabled this method will return and error
 	// An actor not found error is return when the actor is not found.
-	ActorOf(ctx context.Context, actorName string) (addr *pb.Address, pid PID, err error)
+	ActorOf(ctx context.Context, actorName string) (addr *addresspb.Address, pid PID, err error)
 	// InCluster states whether the actor system is running within a cluster of nodes
 	InCluster() bool
 	// GetPartition returns the partition where a given actor is located
@@ -78,7 +78,7 @@ type ActorSystem interface {
 // ActorSystem represent a collection of actors on a given node
 // Only a single instance of the ActorSystem can be created on a given node
 type actorSystem struct {
-	goaktv1connect.UnimplementedRemoteMessagingServiceHandler
+	internalpbconnect.UnimplementedRemoteMessagingServiceHandler
 
 	// map of actors in the system
 	actors cmp.ConcurrentMap[string, PID]
@@ -127,7 +127,7 @@ type actorSystem struct {
 	partitionsCount uint64
 	// cluster mode
 	cluster     cluster.Interface
-	clusterChan chan *goaktpb.WireActor
+	clusterChan chan *internalpb.WireActor
 
 	// help protect some the fields to set
 	mu sync.Mutex
@@ -135,6 +135,8 @@ type actorSystem struct {
 	mailboxSize uint64
 	// specifies the mailbox to use for the actors
 	mailbox Mailbox
+	// specifies the stash buffer
+	stashBuffer uint64
 }
 
 // enforce compilation error when all methods of the ActorSystem interface are not implemented
@@ -159,7 +161,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 				actors:              cmp.New[PID](),
 				hasStarted:          atomic.NewBool(false),
 				typesLoader:         NewTypesLoader(),
-				clusterChan:         make(chan *goaktpb.WireActor, 10),
+				clusterChan:         make(chan *internalpb.WireActor, 10),
 				name:                name,
 				logger:              log.DefaultLogger,
 				expireActorAfter:    DefaultPassivationTimeout,
@@ -250,6 +252,7 @@ func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor) PID {
 		withSupervisorStrategy(x.supervisorStrategy),
 		withMailboxSize(x.mailboxSize),
 		withMailbox(x.mailbox),
+		withStash(x.stashBuffer),
 		withTelemetry(x.telemetry))
 
 	// add the given actor to the actor map
@@ -261,7 +264,7 @@ func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor) PID {
 	// when cluster is enabled replicate the actor metadata across the cluster
 	if x.clusterEnabled.Load() {
 		// send it to the cluster channel a wire actor
-		x.clusterChan <- &goaktpb.WireActor{
+		x.clusterChan <- &internalpb.WireActor{
 			ActorName:    name,
 			ActorAddress: actorPath.RemoteAddress(),
 			ActorPath:    actorPath.String(),
@@ -358,7 +361,7 @@ func (x *actorSystem) Actors() []PID {
 // When cluster mode is activated, the PID will be nil.
 // When remoting is enabled this method will return and error
 // An actor not found error is return when the actor is not found.
-func (x *actorSystem) ActorOf(ctx context.Context, actorName string) (addr *pb.Address, pid PID, err error) {
+func (x *actorSystem) ActorOf(ctx context.Context, actorName string) (addr *addresspb.Address, pid PID, err error) {
 	// acquire the lock
 	x.mu.Lock()
 	// release the lock
@@ -431,7 +434,7 @@ func (x *actorSystem) LocalActor(ctx context.Context, actorName string) (PID, er
 // RemoteActor returns the address of a remote actor when cluster is enabled
 // When the cluster mode is not enabled an actor not found error will be returned
 // One can always check whether cluster is enabled before calling this method or just use the ActorOf method.
-func (x *actorSystem) RemoteActor(ctx context.Context, actorName string) (addr *pb.Address, err error) {
+func (x *actorSystem) RemoteActor(ctx context.Context, actorName string) (addr *addresspb.Address, err error) {
 	// acquire the lock
 	x.mu.Lock()
 	// release the lock
@@ -553,7 +556,7 @@ func (x *actorSystem) Stop(ctx context.Context) error {
 }
 
 // RemoteLookup for an actor on a remote host.
-func (x *actorSystem) RemoteLookup(ctx context.Context, request *connect.Request[goaktpb.RemoteLookupRequest]) (*connect.Response[goaktpb.RemoteLookupResponse], error) {
+func (x *actorSystem) RemoteLookup(ctx context.Context, request *connect.Request[internalpb.RemoteLookupRequest]) (*connect.Response[internalpb.RemoteLookupResponse], error) {
 	// add a span context
 	ctx, span := telemetry.SpanContext(ctx, "RemoteLookup")
 	defer span.End()
@@ -597,13 +600,13 @@ func (x *actorSystem) RemoteLookup(ctx context.Context, request *connect.Request
 	// let us construct the address
 	addr := pid.ActorPath().RemoteAddress()
 
-	return connect.NewResponse(&goaktpb.RemoteLookupResponse{Address: addr}), nil
+	return connect.NewResponse(&internalpb.RemoteLookupResponse{Address: addr}), nil
 }
 
 // RemoteAsk is used to send a message to an actor remotely and expect a response
 // immediately. With this type of message the receiver cannot communicate back to Sender
 // except reply the message with a response. This one-way communication
-func (x *actorSystem) RemoteAsk(ctx context.Context, request *connect.Request[goaktpb.RemoteAskRequest]) (*connect.Response[goaktpb.RemoteAskResponse], error) {
+func (x *actorSystem) RemoteAsk(ctx context.Context, request *connect.Request[internalpb.RemoteAskRequest]) (*connect.Response[internalpb.RemoteAskResponse], error) {
 	// add a span context
 	ctx, span := telemetry.SpanContext(ctx, "RemoteAsk")
 	defer span.End()
@@ -659,13 +662,13 @@ func (x *actorSystem) RemoteAsk(ctx context.Context, request *connect.Request[go
 	}
 	// let us marshal the reply
 	marshaled, _ := anypb.New(reply)
-	return connect.NewResponse(&goaktpb.RemoteAskResponse{Message: marshaled}), nil
+	return connect.NewResponse(&internalpb.RemoteAskResponse{Message: marshaled}), nil
 }
 
 // RemoteTell is used to send a message to an actor remotely by another actor
 // This is the only way remote actors can interact with each other. The actor on the
 // other line can reply to the sender by using the Sender in the message
-func (x *actorSystem) RemoteTell(ctx context.Context, request *connect.Request[goaktpb.RemoteTellRequest]) (*connect.Response[goaktpb.RemoteTellResponse], error) {
+func (x *actorSystem) RemoteTell(ctx context.Context, request *connect.Request[internalpb.RemoteTellRequest]) (*connect.Response[internalpb.RemoteTellResponse], error) {
 	// add a span context
 	ctx, span := telemetry.SpanContext(ctx, "RemoteTell")
 	defer span.End()
@@ -722,7 +725,7 @@ func (x *actorSystem) RemoteTell(ctx context.Context, request *connect.Request[g
 		logger.Error(ErrRemoteSendFailure(err))
 		return nil, ErrRemoteSendFailure(err)
 	}
-	return connect.NewResponse(new(goaktpb.RemoteTellResponse)), nil
+	return connect.NewResponse(new(internalpb.RemoteTellResponse)), nil
 }
 
 // registerMetrics register the PID metrics with OTel instrumentation.
@@ -832,7 +835,7 @@ func (x *actorSystem) enableRemoting(ctx context.Context) {
 	// create a http service mux
 	mux := http.NewServeMux()
 	// create the resource and handler
-	path, handler := goaktv1connect.NewRemoteMessagingServiceHandler(
+	path, handler := internalpbconnect.NewRemoteMessagingServiceHandler(
 		x,
 		connect.WithInterceptors(interceptor(x.telemetry.TracerProvider, x.telemetry.MeterProvider)),
 	)

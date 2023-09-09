@@ -3,7 +3,7 @@ package actors
 import (
 	"sync"
 
-	pb "github.com/tochemey/goakt/pb/v1"
+	addresspb "github.com/tochemey/goakt/pb/address/v1"
 )
 
 // Unit type
@@ -13,7 +13,7 @@ type Unit struct{}
 var NoSender PID
 
 // RemoteNoSender means that there is no sender
-var RemoteNoSender = new(pb.Address)
+var RemoteNoSender = new(addresspb.Address)
 
 type pidMap struct {
 	mu   sync.Mutex

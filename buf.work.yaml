@@ -1,6 +1,5 @@
 version: v1
 directories:
-  - protos/internal
   - protos/test
   - protos/sample
-  - protos/public
+  - protos/goakt

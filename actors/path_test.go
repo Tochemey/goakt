@@ -6,7 +6,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/stretchr/testify/assert"
-	pb "github.com/tochemey/goakt/pb/v1"
+	addresspb "github.com/tochemey/goakt/pb/address/v1"
 	"google.golang.org/protobuf/encoding/prototext"
 )
 
@@ -26,7 +26,7 @@ func TestPath(t *testing.T) {
 	// these are just routine assertions
 	assert.Equal(t, name, path.Name())
 	assert.Equal(t, "goakt://Sys@localhost:888/Tester", path.String())
-	remoteAddr := &pb.Address{
+	remoteAddr := &addresspb.Address{
 		Host: "localhost",
 		Port: 888,
 		Name: name,

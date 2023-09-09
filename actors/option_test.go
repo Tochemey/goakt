@@ -12,7 +12,7 @@ import (
 
 func TestOptions(t *testing.T) {
 	tel := telemetry.New()
-	mailbox := newDefaultMailbox(10)
+	mailbox := newReceiveContextBuffer(10)
 	testCases := []struct {
 		name     string
 		option   Option
@@ -72,6 +72,11 @@ func TestOptions(t *testing.T) {
 			name:     "WithMailbox",
 			option:   WithMailbox(mailbox),
 			expected: actorSystem{mailbox: mailbox},
+		},
+		{
+			name:     "WithStash",
+			option:   WithStash(10),
+			expected: actorSystem{stashBuffer: 10},
 		},
 	}
 	for _, tc := range testCases {

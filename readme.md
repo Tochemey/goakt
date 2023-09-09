@@ -6,20 +6,20 @@
 [![GitHub release (with filter)](https://img.shields.io/github/v/release/tochemey/goakt)](https://github.com/Tochemey/goakt/releases)
 [![GitHub tag (with filter)](https://img.shields.io/github/v/tag/tochemey/goakt)](https://github.com/Tochemey/goakt/tags)
 
-
-
 Distributed [Go](https://go.dev/) actor framework to build reactive and distributed system in golang using
 _**protocol buffers as actor messages**_.
 
 GoAkt is highly scalable and available when running in cluster mode. It comes with the necessary features require to
 build a distributed actor-based system without
-sacrificing performance and reliability. With GoAkt, you can instantly create a fast, scalable, distributed system across a cluster of computers.
+sacrificing performance and reliability. With GoAkt, you can instantly create a fast, scalable, distributed system
+across a cluster of computers.
 
 If you are not familiar with the actor model, the blog post from Brian
 Storti [here](https://www.brianstorti.com/the-actor-model/) is an excellent and short introduction to the actor model.
 Also, check reference section at the end of the post for more material regarding actor model.
 
 ## Table of Content
+
 - [Features](#features)
 - [Use Cases](#use-cases)
 - [Installation](#installation)
@@ -35,51 +35,105 @@ Also, check reference section at the end of the post for more material regarding
 
 ## Features
 
-- **Actors** - The fundamental building blocks of Go-Akt are actors. 
-  - They are independent, isolated unit of computation with their own state. 
-  - They can be _long-lived_ actors or be _passivated_ after some period of time that is configured during their creation. 
-  - They are automatically thread-safe without having to use locks or any other shared-memory synchronization mechanisms. 
-  - They can be stateful and stateless depending upon the system to build. 
-  - Every actor in  Go-Akt:
-    - has a process id [`PID`](./actors/pid.go). Via the process id any allowable action can be executed by the
-      actor.
-    - has a lifecycle via the following methods: [`PreStart`](./actors/actor.go), [`PostStop`](./actors/actor.go). It means it
-      can live and die like any other process.
-    - handles and responds to messages via the method [`Receive`](./actors/actor.go). While handling messages it can:
-        - create other (child) actors via their process id [`PID`](./actors/pid.go) `SpawnChild` method
-        - send messages to other actors locally or remotely via their process id [`PID`](./actors/pid.go) `Ask`, `RemoteAsk`(request/response
-          fashion) and `Tell`, `RemoteTell`(fire-and-forget fashion) methods
-        - stop (child) actors via their process id [`PID`](./actors/pid.go)
-        - watch/unwatch (child) actors via their process id [`PID`](./actors/pid.go) `Watch` and `UnWatch` methods
-        - supervise the failure behavior of (child) actors. The supervisory strategy to adopt is set during its creation: 
-          - Restart and Stop directive are supported at the moment.
-        - remotely lookup for an actor on another node via their process id [`PID`](./actors/pid.go) `RemoteLookup`. This
-          allows it to send messages remotely via `RemoteAsk` or `RemoteTell` methods
-    - can adopt various form using the [behavior](./actors/behavior.go) feature
-    - can be restarted (respawned)
-    - can be gracefully stopped (killed). Every message in the mailbox prior to stoppage will be processed within a configurable time period.
-    - has few metrics:
-        - Mailbox size at a given time. That information can be accessed via the process
-          id  [`PID`](./actors/pid.go) `MailboxSize` method
-        - Total number of messages handled at a given time. That information can be accessed via the process
-          id  [`PID`](./actors/pid.go) `ReceivedCount` method
-        - Total number of restart. This is accessible via the process id  [`PID`](./actors/pid.go) `RestartCount` method
-        - Total number of panic attacks. This is accessible via the process id [`PID`](./actors/pid.go) `ErrorsCount` method
-- **ActorSystem** - Without an actor system, it is not possible to create actors in Go-Akt. Only a single actor system is allowed to be
-  created per application when using Go-Akt. To create an actor system one just need to use the [`NewActorSystem`](./actors/actor_system.go) method with the various [options](./actors/option.go). Go-Akt ActorSystem has the following characteristics:
-    -  Actors lifecycle management (Spawn, Kill, ReSpawn)
-    - Concurrency and Parallelism - Multiple actors can be managed and execute their tasks independently and concurrently. This helps utilize multicore processors efficiently.
-    - Location Transparency - The physical location of actors is abstracted. Remote actors can be accessed via their address once _remoting_ is enabled.
+- **Actors** - The fundamental building blocks of Go-Akt are actors.
+    - They are independent, isolated unit of computation with their own state.
+    - They can be _long-lived_ actors or be _passivated_ after some period of time that is configured during their
+      creation.
+    - They are automatically thread-safe without having to use locks or any other shared-memory synchronization
+      mechanisms.
+    - They can be stateful and stateless depending upon the system to build.
+    - Every actor in Go-Akt:
+        - has a process id [`PID`](./actors/pid.go). Via the process id any allowable action can be executed by the
+          actor.
+        - has a lifecycle via the following methods: [`PreStart`](./actors/actor.go), [`PostStop`](./actors/actor.go).
+          It means it
+          can live and die like any other process.
+        - handles and responds to messages via the method [`Receive`](./actors/actor.go). While handling messages it
+          can:
+            - create other (child) actors via their process id [`PID`](./actors/pid.go) `SpawnChild` method
+            - send messages to other actors locally or remotely via their process
+              id [`PID`](./actors/pid.go) `Ask`, `RemoteAsk`(request/response
+              fashion) and `Tell`, `RemoteTell`(fire-and-forget fashion) methods
+            - stop (child) actors via their process id [`PID`](./actors/pid.go)
+            - watch/unwatch (child) actors via their process id [`PID`](./actors/pid.go) `Watch` and `UnWatch` methods
+            - supervise the failure behavior of (child) actors. The supervisory strategy to adopt is set during its
+              creation:
+                - Restart and Stop directive are supported at the moment.
+            - remotely lookup for an actor on another node via their process id [`PID`](./actors/pid.go) `RemoteLookup`.
+              This
+              allows it to send messages remotely via `RemoteAsk` or `RemoteTell` methods
+            - stash/unstash messages. See [Stashing](#stashing)
+        - can adopt various form using the [Behavior](#behaviors) feature
+        - can be restarted (respawned)
+        - can be gracefully stopped (killed). Every message in the mailbox prior to stoppage will be processed within a
+          configurable time period.
+        - has few metrics:
+            - Mailbox size at a given time. That information can be accessed via the process
+              id  [`PID`](./actors/pid.go) `MailboxSize` method
+            - Total number of messages handled at a given time. That information can be accessed via the process
+              id  [`PID`](./actors/pid.go) `ReceivedCount` method
+            - Total number of restart. This is accessible via the process id  [`PID`](./actors/pid.go) `RestartCount`
+              method
+            - Total number of panic attacks. This is accessible via the process
+              id [`PID`](./actors/pid.go) `ErrorsCount` method
+- **ActorSystem** - Without an actor system, it is not possible to create actors in Go-Akt. Only a single actor system
+  is allowed to be
+  created per application when using Go-Akt. To create an actor system one just need to use
+  the [`NewActorSystem`](./actors/actor_system.go) method with the various [Options](./actors/option.go). Go-Akt
+  ActorSystem has the following characteristics:
+    - Actors lifecycle management (Spawn, Kill, ReSpawn)
+    - Concurrency and Parallelism - Multiple actors can be managed and execute their tasks independently and
+      concurrently. This helps utilize multicore processors efficiently.
+    - Location Transparency - The physical location of actors is abstracted. Remote actors can be accessed via their
+      address once _remoting_ is enabled.
     - Fault Tolerance and Supervision - Set during the creation of the actor system.
     - Actor Addressing - Every actor in the ActorSystem has an address.
-- **Message Passing** - Communication between actors is achieved exclusively through message passing. In Go-Akt _Google Protocol Buffers_ is used to define messages. 
-The choice of protobuf is due to easy serialization over wire and strong schema definition.
+- **Message Passing** - Communication between actors is achieved exclusively through message passing. In Go-Akt _Google
+  Protocol Buffers_ is used to define messages.
+  The choice of protobuf is due to easy serialization over wire and strong schema definition.
 - **Remoting** - This helps remote messaging
-- **Clustering** - This offers simple scalability, partitioning (sharding), and re-balancing out-of-the-box. Go-Akt nodes are automatically discovered. See [clustering](#clustering).
+- **Clustering** - This offers simple scalability, partitioning (sharding), and re-balancing out-of-the-box. Go-Akt
+  nodes are automatically discovered. See [Clustering](#clustering).
 - **Testkit** - To help implement unit tests in GoAkt-based applications. See [Testkit](./testkit)
-- **Observability** - The actor and actor-system metrics as well traces are accessible via the integration with [OpenTelemetry](https://github.com/open-telemetry/opentelemetry-go).
-- **Logger** - Custom logger can be implemented
-- **Mailbox** - Once can implement a custom mailbox. See [Mailbox](./actors/mailbox.go)
+- **Observability** - The actor and actor-system metrics as well traces are accessible via the integration
+  with [OpenTelemetry](https://github.com/open-telemetry/opentelemetry-go).
+- **Logger** - Custom logger can be implemented.
+- **Mailbox** - Once can implement a custom mailbox. See [Mailbox](./actors/mailbox.go).
+
+### Behaviors
+
+Actors have the power to switch their behaviors at any point in time. When you change the actor behavior, the new
+behavior will take effect for all subsequent messages until the behavior is changed again. The current message will
+continue processing with the existing behavior. You can use [Stashing](#stashing) to reprocess the current
+message with the new behavior.
+
+To change the behavior, call the following methods on the [ReceiveContext interface](./actors/context.go) when handling a message:
+
+- `Become` - switches the current behavior of the actor to a new behavior.
+- `UnBecome` - resets the actor behavior to the default one which is the Actor.Receive method.
+- `BecomeStacked` - sets a new behavior to the actor to the top of the behavior stack, while maintaining the previous ones.
+- `UnBecomeStacked()` - sets the actor behavior to the previous behavior before `BecomeStacked()` was called. This only works with `BecomeStacked()`.
+
+### Stashing
+
+Stashing is a mechanism you can enable in your actors so they can temporarily stash away messages they cannot or should
+not handle at the moment.
+Another way to see it is that stashing allows you to keep processing messages you can handle while saving for later
+messages you can't.
+Stashing are handled byGo-Akt out of the actor instance just like the mailbox, so if the actor dies while processing a
+message, all messages in the stash are processed.
+This feature is usually used together with [Become/UnBecome](#behaviors), as they fit together very well, but this is
+not a requirement.
+
+It’s recommended to avoid stashing too many messages to avoid too much memory usage. If you try to stash more
+messages than the capacity the actor will panic.
+To use the stashing feature, call the following methods on the [ReceiveContext interface](./actors/context.go)when handling a message:
+
+- `Stash()` - adds the current message to the stash buffer.
+- `Unstash()` - unstashes the oldest message in the stash and prepends to the stash buffer.
+- `UnstashAll()` - unstashes all messages from the stash buffer and prepends in the mailbox. Messages will be processed
+  in the same order they arrived. The stash buffer will be empty after processing all messages, unless an exception is
+  thrown or messages are stashed while unstashing.
 
 ## Use Cases
 
@@ -127,7 +181,7 @@ The following outlines the cluster mode operations which can help have a healthy
 
 ### Built-in Discovery Providers
 
-####  Kubernetes Discovery Provider setup
+#### Kubernetes Discovery Provider setup
 
 To get the kubernetes discovery working as expected, the following pod labels need to be set:
 
@@ -179,7 +233,7 @@ roleRef:
 A working example can be found [here](./examples/actor-cluster/k8s) with a
 small [doc](./examples/actor-cluster/k8s/doc.md) showing how to run it.
 
-####  mDNS Discovery Provider setup
+#### mDNS Discovery Provider setup
 
 * `Service Name`: the service name
 * `Domain`: The mDNS discovery domain
@@ -212,7 +266,9 @@ earthly +test
 ```
 
 ## Benchmark Result
-One can run the benchmark test: `go test -bench=. -benchtime 2s -count 5 -benchmem -cpu 8 -run notest` from the [bench package](./bench)
+
+One can run the benchmark test: `go test -bench=. -benchtime 2s -count 5 -benchmem -cpu 8 -run notest` from
+the [bench package](./bench)
 
 ```bash
 goos: darwin

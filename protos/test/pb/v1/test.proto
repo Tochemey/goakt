@@ -46,3 +46,7 @@ message TestLoginSuccess {}
 message TestReadiness {}
 message TestReady {}
 message TestBye {}
+
+message TestStash {}
+message TestUnstash {}
+message TestUnstashAll {}

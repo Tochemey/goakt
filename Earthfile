@@ -8,7 +8,6 @@ RUN go install connectrpc.com/connect/cmd/protoc-gen-connect-go@latest
 RUN apk --no-cache add git ca-certificates gcc musl-dev libc-dev binutils-gold
 
 pbs:
-    BUILD +internal-pb
     BUILD +protogen
     BUILD +sample-pb
 
@@ -65,19 +64,6 @@ local-test:
 
     SAVE ARTIFACT coverage.out AS LOCAL coverage.out
 
-internal-pb:
-    # copy the proto files to generate
-    COPY --dir protos/ ./
-    COPY buf.work.yaml buf.gen.yaml ./
-
-    # generate the pbs
-    RUN buf generate \
-            --template buf.gen.yaml \
-            --path protos/internal/goakt
-
-    # save artifact to
-    SAVE ARTIFACT gen/goakt AS LOCAL internal/goakt
-
 protogen:
     # copy the proto files to generate
     COPY --dir protos/ ./
@@ -86,10 +72,14 @@ protogen:
     # generate the pbs
     RUN buf generate \
             --template buf.gen.yaml \
-            --path protos/public/address
+            --path protos/goakt/address \
+            --path protos/goakt/messages \
+            --path protos/goakt/internal
 
     # save artifact to
-    SAVE ARTIFACT gen/address AS LOCAL pb
+    SAVE ARTIFACT gen/address AS LOCAL pb/address
+    SAVE ARTIFACT gen/messages AS LOCAL pb/messages
+    SAVE ARTIFACT gen/internal AS LOCAL internal
 
 testprotogen:
     # copy the proto files to generate

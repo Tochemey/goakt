@@ -13,7 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tochemey/goakt/discovery"
 	"github.com/tochemey/goakt/log"
-	addresspb "github.com/tochemey/goakt/pb/v1"
+	addresspb "github.com/tochemey/goakt/pb/address/v1"
 	testpb "github.com/tochemey/goakt/test/data/pb/v1"
 	testkit "github.com/tochemey/goakt/testkit/discovery"
 	"github.com/travisjeffery/go-dynaport"

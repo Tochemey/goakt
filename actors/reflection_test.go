@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	pb "github.com/tochemey/goakt/pb/v1"
+	addresspb "github.com/tochemey/goakt/pb/address/v1"
 )
 
 func TestReflection(t *testing.T) {
@@ -35,7 +35,7 @@ func TestReflection(t *testing.T) {
 		})
 		t.Run("With actor interface not implemented", func(t *testing.T) {
 			tl := NewTypesLoader()
-			nonActor := new(pb.Address)
+			nonActor := new(addresspb.Address)
 			// register the actor into the types registry
 			tl.Register("fakeActor", nonActor)
 			// create an instance of reflection
@@ -73,7 +73,7 @@ func TestReflection(t *testing.T) {
 			tl := NewTypesLoader()
 			// create an instance of reflection
 			reflection := NewReflection(tl)
-			nonActor := new(pb.Address)
+			nonActor := new(addresspb.Address)
 			// register the actor into the types registry
 			tl.Register("", nonActor)
 

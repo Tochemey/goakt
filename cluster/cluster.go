@@ -11,7 +11,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/tochemey/goakt/discovery"
 	"github.com/tochemey/goakt/hash"
-	goaktpb "github.com/tochemey/goakt/internal/goakt/v1"
+	internalpb "github.com/tochemey/goakt/internal/v1"
 	"github.com/tochemey/goakt/log"
 	"github.com/tochemey/goakt/telemetry"
 )
@@ -27,9 +27,9 @@ type Interface interface {
 	// NodeRemotingPort returns the Cluster node remoting port
 	NodeRemotingPort() int
 	// PutActor replicates onto the Cluster the metadata of an actor
-	PutActor(ctx context.Context, actor *goaktpb.WireActor) error
+	PutActor(ctx context.Context, actor *internalpb.WireActor) error
 	// GetActor fetches an actor from the Cluster
-	GetActor(ctx context.Context, actorName string) (*goaktpb.WireActor, error)
+	GetActor(ctx context.Context, actorName string) (*internalpb.WireActor, error)
 	// GetPartition returns the partition where a given actor is stored
 	GetPartition(actorName string) int
 }
@@ -242,7 +242,7 @@ func (c *Cluster) NodeRemotingPort() int {
 }
 
 // PutActor replicates onto the Cluster the metadata of an actor
-func (c *Cluster) PutActor(ctx context.Context, actor *goaktpb.WireActor) error {
+func (c *Cluster) PutActor(ctx context.Context, actor *internalpb.WireActor) error {
 	// create a cancellation context of 1 second timeout
 	ctx, cancelFn := context.WithTimeout(ctx, c.writeTimeout)
 	defer cancelFn()
@@ -282,7 +282,7 @@ func (c *Cluster) PutActor(ctx context.Context, actor *goaktpb.WireActor) error 
 }
 
 // GetActor fetches an actor from the Cluster
-func (c *Cluster) GetActor(ctx context.Context, actorName string) (*goaktpb.WireActor, error) {
+func (c *Cluster) GetActor(ctx context.Context, actorName string) (*internalpb.WireActor, error) {
 	// create a cancellation context of 1 second timeout
 	ctx, cancelFn := context.WithTimeout(ctx, c.readTimeout)
 	defer cancelFn()

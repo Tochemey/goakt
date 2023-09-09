@@ -1,0 +1,9 @@
+syntax = "proto3";
+
+package messages.v1;
+
+option go_package = "github.com/tochemey/goakt/messages/v1;messagespb";
+
+// Terminated is used to notify watching actors
+// of the shutdown of its child actor
+message Terminated {}
