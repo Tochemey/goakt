@@ -102,7 +102,7 @@ Also, check reference section at the end of the post for more material regarding
 
 ### Behaviors
 
-Actors have the power to switch their behaviors at any point in time. When you change the actor behavior, the new
+Actors in Go-Akt have the power to switch their behaviors at any point in time. When you change the actor behavior, the new
 behavior will take effect for all subsequent messages until the behavior is changed again. The current message will
 continue processing with the existing behavior. You can use [Stashing](#stashing) to reprocess the current
 message with the new behavior.
