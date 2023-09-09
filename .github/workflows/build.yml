@@ -7,8 +7,6 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    container:
-      image: ubuntu
     env:
       FORCE_COLOR: 1
     steps:
@@ -17,14 +15,6 @@ jobs:
           submodules: false
           fetch-depth: 0
       - uses: wagoid/commitlint-github-action@v5.4.3
-      - name: Install Latest Docker
-        run: |
-          curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add -
-          sudo add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu  $(lsb_release -cs)  stable"
-          sudo apt-get update
-          sudo apt-get install docker-ce
-      - name: Check Docker Version
-        run: docker --version
       - name: Login to GitHub Docker
         env:
           DOCKER_REGISTRY: ghcr.io

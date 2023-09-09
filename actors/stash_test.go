@@ -100,6 +100,9 @@ func TestStash(t *testing.T) {
 		err := pid.stash(new(receiveContext))
 		assert.Error(t, err)
 		assert.EqualError(t, err, ErrStashBufferNotSet.Error())
+
+		err = pid.Shutdown(ctx)
+		assert.NoError(t, err)
 	})
 	t.Run("With unstash failure", func(t *testing.T) {
 		ctx := context.TODO()
@@ -125,5 +128,8 @@ func TestStash(t *testing.T) {
 		err = pid.unstashAll()
 		assert.Error(t, err)
 		assert.EqualError(t, err, ErrStashBufferNotSet.Error())
+
+		err = pid.Shutdown(ctx)
+		assert.NoError(t, err)
 	})
 }
