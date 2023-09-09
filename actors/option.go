@@ -120,3 +120,10 @@ func WithMailbox(mailbox Mailbox) Option {
 		a.mailbox = mailbox
 	})
 }
+
+// WithStash sets the stash buffer size
+func WithStash(capacity uint64) Option {
+	return OptionFunc(func(a *actorSystem) {
+		a.stashBuffer = capacity
+	})
+}

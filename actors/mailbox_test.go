@@ -8,14 +8,15 @@ import (
 
 func TestMailbox(t *testing.T) {
 	t.Run("With happy path Push", func(t *testing.T) {
-		mailbox := newDefaultMailbox(10)
+		mailbox := newReceiveContextBuffer(10)
 		assert.True(t, mailbox.IsEmpty())
 		err := mailbox.Push(new(receiveContext))
 		assert.NoError(t, err)
 		assert.EqualValues(t, 1, mailbox.Size())
+		assert.EqualValues(t, 10, mailbox.Capacity())
 	})
 	t.Run("With Push when buffer is full", func(t *testing.T) {
-		mailbox := newDefaultMailbox(10)
+		mailbox := newReceiveContextBuffer(10)
 		assert.True(t, mailbox.IsEmpty())
 		for i := 0; i < 10; i++ {
 			err := mailbox.Push(new(receiveContext))
@@ -30,7 +31,7 @@ func TestMailbox(t *testing.T) {
 		assert.True(t, mailbox.IsFull())
 	})
 	t.Run("With happy path Pop", func(t *testing.T) {
-		mailbox := newDefaultMailbox(10)
+		mailbox := newReceiveContextBuffer(10)
 		assert.True(t, mailbox.IsEmpty())
 		assert.NoError(t, mailbox.Push(new(receiveContext)))
 		assert.NoError(t, mailbox.Push(new(receiveContext)))
@@ -44,7 +45,7 @@ func TestMailbox(t *testing.T) {
 	})
 
 	t.Run("With Clone", func(t *testing.T) {
-		mailbox := newDefaultMailbox(10)
+		mailbox := newReceiveContextBuffer(10)
 		assert.True(t, mailbox.IsEmpty())
 		assert.NoError(t, mailbox.Push(new(receiveContext)))
 		assert.NoError(t, mailbox.Push(new(receiveContext)))
@@ -61,7 +62,7 @@ func TestMailbox(t *testing.T) {
 		assert.False(t, cloned.IsFull())
 	})
 	t.Run("With Pop when buffer is empty", func(t *testing.T) {
-		mailbox := newDefaultMailbox(10)
+		mailbox := newReceiveContextBuffer(10)
 		assert.True(t, mailbox.IsEmpty())
 
 		popped, err := mailbox.Pop()
@@ -70,7 +71,7 @@ func TestMailbox(t *testing.T) {
 		assert.Nil(t, popped)
 	})
 	t.Run("With Reset", func(t *testing.T) {
-		mailbox := newDefaultMailbox(10)
+		mailbox := newReceiveContextBuffer(10)
 		assert.True(t, mailbox.IsEmpty())
 		assert.NoError(t, mailbox.Push(new(receiveContext)))
 		assert.NoError(t, mailbox.Push(new(receiveContext)))

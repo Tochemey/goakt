@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tochemey/goakt/discovery"
-	goaktpb "github.com/tochemey/goakt/internal/goakt/v1"
+	internalpb "github.com/tochemey/goakt/internal/v1"
 	testkit "github.com/tochemey/goakt/testkit/discovery"
 	"github.com/travisjeffery/go-dynaport"
 	"google.golang.org/protobuf/proto"
@@ -124,7 +124,7 @@ func TestCluster(t *testing.T) {
 
 		// create an actor
 		actorName := uuid.NewString()
-		actor := &goaktpb.WireActor{ActorName: actorName}
+		actor := &internalpb.WireActor{ActorName: actorName}
 
 		// replicate the actor in the Cluster
 		err = node.PutActor(ctx, actor)

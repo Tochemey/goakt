@@ -12,10 +12,10 @@ import (
 	"connectrpc.com/otelconnect"
 	"github.com/cenkalti/backoff"
 	"github.com/pkg/errors"
-	goaktpb "github.com/tochemey/goakt/internal/goakt/v1"
-	"github.com/tochemey/goakt/internal/goakt/v1/goaktv1connect"
+	internalpb "github.com/tochemey/goakt/internal/v1"
+	"github.com/tochemey/goakt/internal/v1/internalpbconnect"
 	"github.com/tochemey/goakt/log"
-	pb "github.com/tochemey/goakt/pb/v1"
+	addresspb "github.com/tochemey/goakt/pb/address/v1"
 	"github.com/tochemey/goakt/pkg/http"
 	"github.com/tochemey/goakt/pkg/slices"
 	"github.com/tochemey/goakt/telemetry"
@@ -85,21 +85,23 @@ type PID interface {
 	// Ask sends a synchronous message to another actor and expect a response.
 	Ask(ctx context.Context, to PID, message proto.Message) (response proto.Message, err error)
 	// RemoteTell sends a message to an actor remotely without expecting any reply
-	RemoteTell(ctx context.Context, to *pb.Address, message proto.Message) error
+	RemoteTell(ctx context.Context, to *addresspb.Address, message proto.Message) error
 	// RemoteAsk is used to send a message to an actor remotely and expect a response
 	// immediately. With this type of message the receiver cannot communicate back to Sender
 	// except reply the message with a response. This one-way communication.
-	RemoteAsk(ctx context.Context, to *pb.Address, message proto.Message) (response *anypb.Any, err error)
+	RemoteAsk(ctx context.Context, to *addresspb.Address, message proto.Message) (response *anypb.Any, err error)
 	// RemoteLookup look for an actor address on a remote node. If the actorSystem is nil then the lookup will be done
 	// using the same actor system as the PID actor system
-	RemoteLookup(ctx context.Context, host string, port int, name string) (addr *pb.Address, err error)
+	RemoteLookup(ctx context.Context, host string, port int, name string) (addr *addresspb.Address, err error)
 	// RestartCount returns the number of times the actor has restarted
 	RestartCount(ctx context.Context) uint64
 	// MailboxSize returns the mailbox size a given time
 	MailboxSize(ctx context.Context) uint64
 	// Children returns the list of all the children of the given actor
 	Children(ctx context.Context) []PID
-	// push a message to the actor's defaultMailbox
+	// StashSize returns the stash buffer size
+	StashSize(ctx context.Context) uint64
+	// push a message to the actor's receiveContextBuffer
 	doReceive(ctx ReceiveContext)
 	// watchers returns the list of watchMen
 	watchers() *slices.ConcurrentSlice[*WatchMan]
@@ -112,6 +114,13 @@ type PID interface {
 	unsetBehaviorStacked()
 	// resetBehavior is a utility function resets the actor behavior
 	resetBehavior()
+	// stash adds the current message to the stash buffer
+	stash(ctx ReceiveContext) error
+	// unstashAll unstashes all messages from the stash buffer and prepends in the mailbox
+	// (it keeps the messages in the same order as received, unstashing older messages before newer)
+	unstashAll() error
+	// unstash unstashes the oldest message in the stash and prepends to the mailbox
+	unstash() error
 }
 
 // pid specifies an actor unique process
@@ -171,10 +180,10 @@ type pid struct {
 	restartCounter         *atomic.Uint64
 	lastProcessingDuration *atomic.Duration
 
-	// rwMutex that helps synchronize the pid in a concurrent environment
+	// pidSemaphore that helps synchronize the pid in a concurrent environment
 	// this helps protect the pid fields accessibility
-	rwMutex       sync.RWMutex
-	shutdownMutex sync.Mutex
+	pidSemaphore      sync.RWMutex
+	shutdownSemaphore sync.Mutex
 
 	// supervisor strategy
 	supervisorStrategy StrategyDirective
@@ -187,6 +196,11 @@ type pid struct {
 
 	// specifies the current actor behavior
 	behaviorStack *behaviorStack
+
+	// stash settings
+	stashBuffer    Mailbox
+	stashCapacity  *atomic.Uint64
+	stashSemaphore sync.Mutex
 }
 
 // enforce compilation error
@@ -220,10 +234,13 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 		watchMen:               slices.NewConcurrentSlice[*WatchMan](),
 		telemetry:              telemetry.New(),
 		actorPath:              actorPath,
-		rwMutex:                sync.RWMutex{},
-		shutdownMutex:          sync.Mutex{},
+		pidSemaphore:           sync.RWMutex{},
+		shutdownSemaphore:      sync.Mutex{},
 		httpClient:             http.Client(),
 		mailbox:                nil,
+		stashBuffer:            nil,
+		stashSemaphore:         sync.Mutex{},
+		stashCapacity:          atomic.NewUint64(0),
 	}
 
 	// set the custom options to override the default values
@@ -232,8 +249,14 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 	}
 	// set the default mailbox if mailbox is not set
 	if pid.mailbox == nil {
-		pid.mailbox = newDefaultMailbox(pid.mailboxSize)
+		pid.mailbox = newReceiveContextBuffer(pid.mailboxSize)
 	}
+
+	// set the stash buffer when capacity is set
+	if pid.stashCapacity != nil && pid.stashCapacity.Load() > 0 {
+		pid.stashBuffer = newReceiveContextBuffer(pid.stashCapacity.Load())
+	}
+
 	// set the actor behavior stack
 	behaviorStack := newBehaviorStack()
 	behaviorStack.Push(pid.Receive)
@@ -268,9 +291,9 @@ func (p *pid) Children(ctx context.Context) []PID {
 	// add a span context
 	ctx, span := telemetry.SpanContext(ctx, "Children")
 	defer span.End()
-	p.rwMutex.RLock()
+	p.pidSemaphore.RLock()
 	kiddos := p.children.List()
-	p.rwMutex.RUnlock()
+	p.pidSemaphore.RUnlock()
 	return kiddos
 }
 
@@ -282,17 +305,17 @@ func (p *pid) IsRunning() bool {
 
 // ActorSystem returns the actor system
 func (p *pid) ActorSystem() ActorSystem {
-	p.rwMutex.RLock()
+	p.pidSemaphore.RLock()
 	sys := p.system
-	p.rwMutex.RUnlock()
+	p.pidSemaphore.RUnlock()
 	return sys
 }
 
 // ActorPath returns the path of the actor
 func (p *pid) ActorPath() *Path {
-	p.rwMutex.RLock()
+	p.pidSemaphore.RLock()
 	path := p.actorPath
-	p.rwMutex.RUnlock()
+	p.pidSemaphore.RUnlock()
 	return path
 }
 
@@ -387,9 +410,9 @@ func (p *pid) SpawnChild(ctx context.Context, name string, actor Actor) (PID, er
 	}
 
 	// acquire the lock
-	p.rwMutex.Lock()
+	p.pidSemaphore.Lock()
 	// release the lock
-	defer p.rwMutex.Unlock()
+	defer p.pidSemaphore.Unlock()
 
 	// create the child pid
 	cid := newPID(ctx,
@@ -402,6 +425,7 @@ func (p *pid) SpawnChild(ctx context.Context, name string, actor Actor) (PID, er
 		withActorSystem(p.system),
 		withSupervisorStrategy(p.supervisorStrategy),
 		withMailboxSize(p.mailboxSize),
+		withStash(p.stashCapacity.Load()),
 		withMailbox(p.mailbox.Clone()),
 		withShutdownTimeout(p.shutdownTimeout.Load()))
 
@@ -420,6 +444,14 @@ func (p *pid) MailboxSize(ctx context.Context) uint64 {
 	ctx, span := telemetry.SpanContext(ctx, "MailboxSize")
 	defer span.End()
 	return p.mailbox.Size()
+}
+
+// StashSize returns the stash buffer size
+func (p *pid) StashSize(ctx context.Context) uint64 {
+	// add a span context
+	ctx, span := telemetry.SpanContext(ctx, "StashSize")
+	defer span.End()
+	return p.stashBuffer.Size()
 }
 
 // ReceivedCount returns the total number of messages processed by the actor
@@ -460,7 +492,7 @@ func (p *pid) Ask(ctx context.Context, to PID, message proto.Message) (response 
 	}
 
 	// acquire a lock to set the message context
-	p.rwMutex.Lock()
+	p.pidSemaphore.Lock()
 	// create a receiver context
 	context := new(receiveContext)
 
@@ -474,7 +506,7 @@ func (p *pid) Ask(ctx context.Context, to PID, message proto.Message) (response 
 	context.response = make(chan proto.Message, 1)
 
 	// release the lock after setting the message context
-	p.rwMutex.Unlock()
+	p.pidSemaphore.Unlock()
 
 	// put the message context in the mailbox of the recipient actor
 	to.doReceive(context)
@@ -503,9 +535,9 @@ func (p *pid) Tell(ctx context.Context, to PID, message proto.Message) error {
 	}
 
 	// acquire a lock to set the message context
-	p.rwMutex.Lock()
+	p.pidSemaphore.Lock()
 	// release the lock after setting the message context
-	defer p.rwMutex.Unlock()
+	defer p.pidSemaphore.Unlock()
 	// create a message context
 	context := new(receiveContext)
 
@@ -526,13 +558,13 @@ func (p *pid) Tell(ctx context.Context, to PID, message proto.Message) error {
 
 // RemoteLookup look for an actor address on a remote node. If the actorSystem is nil then the lookup will be done
 // using the same actor system as the PID actor system
-func (p *pid) RemoteLookup(ctx context.Context, host string, port int, name string) (addr *pb.Address, err error) {
+func (p *pid) RemoteLookup(ctx context.Context, host string, port int, name string) (addr *addresspb.Address, err error) {
 	// add a span context
 	ctx, span := telemetry.SpanContext(ctx, "RemoteLookup")
 	defer span.End()
 
 	// create an instance of remote client service
-	remoteClient := goaktv1connect.NewRemoteMessagingServiceClient(
+	remoteClient := internalpbconnect.NewRemoteMessagingServiceClient(
 		p.httpClient,
 		http.URL(host, port),
 		connect.WithInterceptors(p.interceptor()),
@@ -540,7 +572,7 @@ func (p *pid) RemoteLookup(ctx context.Context, host string, port int, name stri
 	)
 
 	// prepare the request to send
-	request := connect.NewRequest(&goaktpb.RemoteLookupRequest{
+	request := connect.NewRequest(&internalpb.RemoteLookupRequest{
 		Host: host,
 		Port: int32(port),
 		Name: name,
@@ -561,7 +593,7 @@ func (p *pid) RemoteLookup(ctx context.Context, host string, port int, name stri
 }
 
 // RemoteTell sends a message to an actor remotely without expecting any reply
-func (p *pid) RemoteTell(ctx context.Context, to *pb.Address, message proto.Message) error {
+func (p *pid) RemoteTell(ctx context.Context, to *addresspb.Address, message proto.Message) error {
 	// add a span context
 	ctx, span := telemetry.SpanContext(ctx, "RemoteTell")
 	defer span.End()
@@ -573,7 +605,7 @@ func (p *pid) RemoteTell(ctx context.Context, to *pb.Address, message proto.Mess
 	}
 
 	// create an instance of remote client service
-	remoteClient := goaktv1connect.NewRemoteMessagingServiceClient(
+	remoteClient := internalpbconnect.NewRemoteMessagingServiceClient(
 		p.httpClient,
 		http.URL(to.GetHost(), int(to.GetPort())),
 		connect.WithInterceptors(p.interceptor()),
@@ -581,7 +613,7 @@ func (p *pid) RemoteTell(ctx context.Context, to *pb.Address, message proto.Mess
 	)
 
 	// construct the from address
-	sender := &pb.Address{
+	sender := &addresspb.Address{
 		Host: p.ActorPath().Address().Host(),
 		Port: int32(p.ActorPath().Address().Port()),
 		Name: p.ActorPath().Name(),
@@ -589,8 +621,8 @@ func (p *pid) RemoteTell(ctx context.Context, to *pb.Address, message proto.Mess
 	}
 
 	// prepare the rpcRequest to send
-	request := connect.NewRequest(&goaktpb.RemoteTellRequest{
-		RemoteMessage: &goaktpb.RemoteMessage{
+	request := connect.NewRequest(&internalpb.RemoteTellRequest{
+		RemoteMessage: &internalpb.RemoteMessage{
 			Sender:   sender,
 			Receiver: to,
 			Message:  marshaled,
@@ -612,7 +644,7 @@ func (p *pid) RemoteTell(ctx context.Context, to *pb.Address, message proto.Mess
 }
 
 // RemoteAsk sends a synchronous message to another actor remotely and expect a response.
-func (p *pid) RemoteAsk(ctx context.Context, to *pb.Address, message proto.Message) (response *anypb.Any, err error) {
+func (p *pid) RemoteAsk(ctx context.Context, to *addresspb.Address, message proto.Message) (response *anypb.Any, err error) {
 	// add a span context
 	ctx, span := telemetry.SpanContext(ctx, "RemoteTell")
 	defer span.End()
@@ -624,7 +656,7 @@ func (p *pid) RemoteAsk(ctx context.Context, to *pb.Address, message proto.Messa
 	}
 
 	// create an instance of remote client service
-	remoteClient := goaktv1connect.NewRemoteMessagingServiceClient(
+	remoteClient := internalpbconnect.NewRemoteMessagingServiceClient(
 		p.httpClient,
 		http.URL(to.GetHost(), int(to.GetPort())),
 		connect.WithInterceptors(p.interceptor()),
@@ -633,8 +665,8 @@ func (p *pid) RemoteAsk(ctx context.Context, to *pb.Address, message proto.Messa
 
 	// prepare the rpcRequest to send
 	rpcRequest := connect.NewRequest(
-		&goaktpb.RemoteAskRequest{
-			RemoteMessage: &goaktpb.RemoteMessage{
+		&internalpb.RemoteAskRequest{
+			RemoteMessage: &internalpb.RemoteMessage{
 				Sender:   RemoteNoSender,
 				Receiver: to,
 				Message:  marshaled,
@@ -659,9 +691,9 @@ func (p *pid) Shutdown(ctx context.Context) error {
 	defer span.End()
 
 	// acquire the shutdown lock
-	p.shutdownMutex.Lock()
+	p.shutdownSemaphore.Lock()
 	// release the lock
-	defer p.shutdownMutex.Unlock()
+	defer p.shutdownSemaphore.Unlock()
 
 	p.logger.Info("Shutdown process has started...")
 
@@ -723,11 +755,11 @@ func (p *pid) watchers() *slices.ConcurrentSlice[*WatchMan] {
 	return p.watchMen
 }
 
-// doReceive pushes a given message to the actor defaultMailbox
+// doReceive pushes a given message to the actor receiveContextBuffer
 func (p *pid) doReceive(ctx ReceiveContext) {
 	// acquire the lock and release it once done
-	p.rwMutex.Lock()
-	defer p.rwMutex.Unlock()
+	p.pidSemaphore.Lock()
+	defer p.pidSemaphore.Unlock()
 
 	// set the last processing time
 	p.lastProcessingTime.Store(time.Now())
@@ -771,9 +803,9 @@ func (p *pid) init(ctx context.Context) {
 		return
 	}
 	// set the actor is ready
-	p.rwMutex.Lock()
+	p.pidSemaphore.Lock()
 	p.isRunning.Store(true)
-	p.rwMutex.Unlock()
+	p.pidSemaphore.Unlock()
 	// add some logging info
 	p.logger.Info("Initialization process successfully completed.")
 }
@@ -835,9 +867,9 @@ func (p *pid) freeChildren(ctx context.Context) {
 // registerMetrics register the PID metrics with OTel instrumentation.
 func (p *pid) registerMetrics() error {
 	// acquire lock
-	p.rwMutex.Lock()
+	p.pidSemaphore.Lock()
 	// release the lock
-	defer p.rwMutex.Unlock()
+	defer p.pidSemaphore.Unlock()
 
 	// grab the OTel meter
 	meter := p.telemetry.Meter
@@ -870,7 +902,7 @@ func (p *pid) registerMetrics() error {
 	return err
 }
 
-// receive handles every mail in the actor defaultMailbox
+// receive handles every mail in the actor receiveContextBuffer
 func (p *pid) receive() {
 	// run the processing loop
 	for {
@@ -994,9 +1026,9 @@ func (p *pid) passivationListener() {
 	}
 
 	// acquire the shutdown lock
-	p.shutdownMutex.Lock()
+	p.shutdownSemaphore.Lock()
 	// release the lock
-	defer p.shutdownMutex.Unlock()
+	defer p.shutdownSemaphore.Unlock()
 
 	// add some logging info
 	p.logger.Infof("Passivation mode has been triggered for actor=%s...", p.ActorPath().String())
@@ -1021,39 +1053,47 @@ func (p *pid) interceptor() connect.Interceptor {
 
 // setBehavior is a utility function that helps set the actor behavior
 func (p *pid) setBehavior(behavior Behavior) {
-	p.rwMutex.Lock()
+	p.pidSemaphore.Lock()
 	p.behaviorStack.Clear()
 	p.behaviorStack.Push(behavior)
-	p.rwMutex.Unlock()
+	p.pidSemaphore.Unlock()
 }
 
 // resetBehavior is a utility function resets the actor behavior
 func (p *pid) resetBehavior() {
-	p.rwMutex.Lock()
+	p.pidSemaphore.Lock()
 	p.behaviorStack.Clear()
 	p.behaviorStack.Push(p.Receive)
-	p.rwMutex.Unlock()
+	p.pidSemaphore.Unlock()
 }
 
 // setBehaviorStacked adds a behavior to the actor's behaviorStack
 func (p *pid) setBehaviorStacked(behavior Behavior) {
-	p.rwMutex.Lock()
+	p.pidSemaphore.Lock()
 	p.behaviorStack.Push(behavior)
-	p.rwMutex.Unlock()
+	p.pidSemaphore.Unlock()
 }
 
 // unsetBehaviorStacked sets the actor's behavior to the previous behavior
 // prior to setBehaviorStacked is called
 func (p *pid) unsetBehaviorStacked() {
-	p.rwMutex.Lock()
+	p.pidSemaphore.Lock()
 	p.behaviorStack.Pop()
-	p.rwMutex.Unlock()
+	p.pidSemaphore.Unlock()
 }
 
 // doStop stops the actor
 func (p *pid) doStop(ctx context.Context) error {
 	// stop receiving and sending messages
 	p.isRunning.Store(false)
+
+	// let us unstash all messages in case there are some
+	// TODO: just signal stash processing done and ignore the messages or process them
+	for p.stashBuffer != nil && !p.stashBuffer.IsEmpty() {
+		if err := p.unstashAll(); err != nil {
+			return err
+		}
+	}
 
 	// wait for all messages in the mailbox to be processed
 	// init a ticker that run every 10 ms to make sure we process all messages in the

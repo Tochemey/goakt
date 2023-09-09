@@ -76,16 +76,23 @@ func withTelemetry(telemetry *telemetry.Telemetry) pidOption {
 	}
 }
 
-// withMailboxSize sets the actor defaultMailbox size
+// withMailboxSize sets the actor receiveContextBuffer size
 func withMailboxSize(size uint64) pidOption {
 	return func(pid *pid) {
 		pid.mailboxSize = size
 	}
 }
 
-// withMailbox sets the custom actor defaultMailbox
+// withMailbox sets the custom actor receiveContextBuffer
 func withMailbox(box Mailbox) pidOption {
 	return func(pid *pid) {
 		pid.mailbox = box
+	}
+}
+
+// withStash sets the actor's stash buffer
+func withStash(capacity uint64) pidOption {
+	return func(pid *pid) {
+		pid.stashCapacity = atomic.NewUint64(capacity)
 	}
 }

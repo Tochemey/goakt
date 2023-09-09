@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package address.v1;
 
-option go_package = "github.com/tochemey/goakt/pb/v1;addresspb";
+option go_package = "github.com/tochemey/goakt/pb/address/v1;addresspb";
 
 // Address represents an actor address
 message Address {

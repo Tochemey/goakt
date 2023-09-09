@@ -7,9 +7,9 @@ import (
 
 	"connectrpc.com/connect"
 	"connectrpc.com/otelconnect"
-	goaktpb "github.com/tochemey/goakt/internal/goakt/v1"
-	"github.com/tochemey/goakt/internal/goakt/v1/goaktv1connect"
-	pb "github.com/tochemey/goakt/pb/v1"
+	internalpb "github.com/tochemey/goakt/internal/v1"
+	"github.com/tochemey/goakt/internal/v1/internalpbconnect"
+	addresspb "github.com/tochemey/goakt/pb/address/v1"
 	"github.com/tochemey/goakt/pkg/http"
 	"github.com/tochemey/goakt/telemetry"
 	"google.golang.org/protobuf/proto"
@@ -38,7 +38,7 @@ func Ask(ctx context.Context, to PID, message proto.Message, timeout time.Durati
 
 	// set the actual message
 	switch msg := message.(type) {
-	case *goaktpb.RemoteMessage:
+	case *internalpb.RemoteMessage:
 		// define the actual message variable
 		var actual proto.Message
 		// unmarshal the message and handle the error
@@ -99,7 +99,7 @@ func Tell(ctx context.Context, to PID, message proto.Message) error {
 
 	// set the actual message
 	switch msg := message.(type) {
-	case *goaktpb.RemoteMessage:
+	case *internalpb.RemoteMessage:
 		var (
 			// define the actual message variable
 			actual proto.Message
@@ -134,7 +134,7 @@ func Tell(ctx context.Context, to PID, message proto.Message) error {
 }
 
 // RemoteTell sends a message to an actor remotely without expecting any reply
-func RemoteTell(ctx context.Context, to *pb.Address, message proto.Message) error {
+func RemoteTell(ctx context.Context, to *addresspb.Address, message proto.Message) error {
 	// add a span context
 	ctx, span := telemetry.SpanContext(ctx, "RemoteTell")
 	defer span.End()
@@ -146,15 +146,15 @@ func RemoteTell(ctx context.Context, to *pb.Address, message proto.Message) erro
 	}
 
 	// create an instance of remote client service
-	remoteClient := goaktv1connect.NewRemoteMessagingServiceClient(
+	remoteClient := internalpbconnect.NewRemoteMessagingServiceClient(
 		http.Client(),
 		http.URL(to.GetHost(), int(to.GetPort())),
 		connect.WithInterceptors(otelconnect.NewInterceptor()),
 		connect.WithGRPC(),
 	)
 	// prepare the rpcRequest to send
-	request := connect.NewRequest(&goaktpb.RemoteTellRequest{
-		RemoteMessage: &goaktpb.RemoteMessage{
+	request := connect.NewRequest(&internalpb.RemoteTellRequest{
+		RemoteMessage: &internalpb.RemoteMessage{
 			Sender:   RemoteNoSender,
 			Receiver: to,
 			Message:  marshaled,
@@ -168,7 +168,7 @@ func RemoteTell(ctx context.Context, to *pb.Address, message proto.Message) erro
 }
 
 // RemoteAsk sends a synchronous message to another actor remotely and expect a response.
-func RemoteAsk(ctx context.Context, to *pb.Address, message proto.Message) (response *anypb.Any, err error) {
+func RemoteAsk(ctx context.Context, to *addresspb.Address, message proto.Message) (response *anypb.Any, err error) {
 	// add a span context
 	ctx, span := telemetry.SpanContext(ctx, "RemoteAsk")
 	defer span.End()
@@ -180,15 +180,15 @@ func RemoteAsk(ctx context.Context, to *pb.Address, message proto.Message) (resp
 	}
 
 	// create an instance of remote client service
-	remoteClient := goaktv1connect.NewRemoteMessagingServiceClient(
+	remoteClient := internalpbconnect.NewRemoteMessagingServiceClient(
 		http.Client(),
 		http.URL(to.GetHost(), int(to.GetPort())),
 		connect.WithInterceptors(otelconnect.NewInterceptor()),
 		connect.WithGRPC(),
 	)
 	// prepare the rpcRequest to send
-	rpcRequest := connect.NewRequest(&goaktpb.RemoteAskRequest{
-		RemoteMessage: &goaktpb.RemoteMessage{
+	rpcRequest := connect.NewRequest(&internalpb.RemoteAskRequest{
+		RemoteMessage: &internalpb.RemoteMessage{
 			Sender:   RemoteNoSender,
 			Receiver: to,
 			Message:  marshaled,
@@ -205,13 +205,13 @@ func RemoteAsk(ctx context.Context, to *pb.Address, message proto.Message) (resp
 }
 
 // RemoteLookup look for an actor address on a remote node.
-func RemoteLookup(ctx context.Context, host string, port int, name string) (addr *pb.Address, err error) {
+func RemoteLookup(ctx context.Context, host string, port int, name string) (addr *addresspb.Address, err error) {
 	// add a span context
 	ctx, span := telemetry.SpanContext(ctx, "RemoteLookup")
 	defer span.End()
 
 	// create an instance of remote client service
-	remoteClient := goaktv1connect.NewRemoteMessagingServiceClient(
+	remoteClient := internalpbconnect.NewRemoteMessagingServiceClient(
 		http.Client(),
 		http.URL(host, port),
 		connect.WithInterceptors(otelconnect.NewInterceptor()),
@@ -219,7 +219,7 @@ func RemoteLookup(ctx context.Context, host string, port int, name string) (addr
 	)
 
 	// prepare the request to send
-	request := connect.NewRequest(&goaktpb.RemoteLookupRequest{
+	request := connect.NewRequest(&internalpb.RemoteLookupRequest{
 		Host: host,
 		Port: int32(port),
 		Name: name,

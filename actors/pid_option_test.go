@@ -10,7 +10,7 @@ import (
 )
 
 func TestPIDOptions(t *testing.T) {
-	mailbox := newDefaultMailbox(10)
+	mailbox := newReceiveContextBuffer(10)
 	testCases := []struct {
 		name           string
 		option         pidOption
@@ -60,6 +60,11 @@ func TestPIDOptions(t *testing.T) {
 			name:           "WithMailbox",
 			option:         withMailbox(mailbox),
 			expectedConfig: &pid{mailbox: mailbox},
+		},
+		{
+			name:           "WithStash",
+			option:         withStash(10),
+			expectedConfig: &pid{stashCapacity: atomic.NewUint64(10)},
 		},
 	}
 	for _, tc := range testCases {

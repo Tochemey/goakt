@@ -6,18 +6,15 @@ import (
 	"testing"
 	"time"
 
-	addresspb "github.com/tochemey/goakt/pb/v1"
-
-	"google.golang.org/protobuf/types/known/anypb"
-
-	goaktpb "github.com/tochemey/goakt/internal/goakt/v1"
-
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	internalpb "github.com/tochemey/goakt/internal/v1"
 	"github.com/tochemey/goakt/log"
+	addresspb "github.com/tochemey/goakt/pb/address/v1"
 	testpb "github.com/tochemey/goakt/test/data/pb/v1"
 	"github.com/travisjeffery/go-dynaport"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/anypb"
 )
 
 func TestAsk(t *testing.T) {
@@ -123,7 +120,7 @@ func TestAsk(t *testing.T) {
 		assert.NotNil(t, actorRef)
 
 		// create a message to send to the test actor
-		message := &goaktpb.RemoteMessage{
+		message := &internalpb.RemoteMessage{
 			Message: &anypb.Any{},
 		}
 		// send the message to the actor
@@ -241,7 +238,7 @@ func TestTell(t *testing.T) {
 		assert.NotNil(t, actorRef)
 
 		// create a message to send to the test actor
-		message := &goaktpb.RemoteMessage{
+		message := &internalpb.RemoteMessage{
 			Message: &anypb.Any{},
 		}
 		// send the message to the actor

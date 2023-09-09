@@ -196,3 +196,41 @@ func (e *Exchanger) PostStop(context.Context) error {
 }
 
 var _ Actor = &Exchanger{}
+
+type Stasher struct{}
+
+func (x *Stasher) PreStart(context.Context) error {
+	return nil
+}
+
+func (x *Stasher) Receive(ctx ReceiveContext) {
+	switch ctx.Message().(type) {
+	case *testspb.TestStash:
+		ctx.Become(x.Ready)
+		ctx.Stash()
+	case *testspb.TestLogin:
+	case *testspb.TestBye:
+		_ = ctx.Self().Shutdown(ctx.Context())
+	}
+}
+
+func (x *Stasher) Ready(ctx ReceiveContext) {
+	switch ctx.Message().(type) {
+	case *testspb.TestStash:
+	case *testspb.TestLogin:
+		ctx.Stash()
+	case *testspb.TestSend:
+		// do nothing
+	case *testspb.TestUnstashAll:
+		ctx.UnBecome()
+		ctx.UnstashAll()
+	case *testspb.TestUnstash:
+		ctx.Unstash()
+	}
+}
+
+func (x *Stasher) PostStop(context.Context) error {
+	return nil
+}
+
+var _ Actor = &Stasher{}

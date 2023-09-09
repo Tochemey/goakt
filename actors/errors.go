@@ -25,5 +25,7 @@ var (
 	ErrTypeNotFound         = func(typeName string) error { return fmt.Errorf("typeName=%s not found", typeName) }
 	ErrActorNotFound        = errors.New("actor not found")
 	ErrMethodCallNotAllowed = errors.New("method call not allowed")
-	ErrInvalidRemoteMessage = func(err error) error { return errors.Wrap(err, "imvalid remote message") }
+	ErrInvalidRemoteMessage = func(err error) error { return errors.Wrap(err, "invalid remote message") }
+	ErrStashBufferNotSet    = errors.New("actor is not setup with a stash buffer")
+	ErrUnstashNotPermitted  = errors.New("actor is not setup with a stash buffer or stashing is not enabled")
 )

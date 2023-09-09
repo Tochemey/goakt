@@ -7,17 +7,17 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	goaktpb "github.com/tochemey/goakt/internal/goakt/v1"
-	pb "github.com/tochemey/goakt/pb/v1"
+	internalpb "github.com/tochemey/goakt/internal/v1"
+	addresspb "github.com/tochemey/goakt/pb/address/v1"
 	"google.golang.org/protobuf/proto"
 )
 
 func TestCodec(t *testing.T) {
 	t.Run("With happy path", func(t *testing.T) {
 		// create an instance of wire actor
-		actor := &goaktpb.WireActor{
+		actor := &internalpb.WireActor{
 			ActorName: "account-1",
-			ActorAddress: &pb.Address{
+			ActorAddress: &addresspb.Address{
 				Host: "localhost",
 				Port: 2345,
 				Name: "account-1",

@@ -5,7 +5,7 @@ package cluster
 import (
 	context "context"
 
-	goaktv1 "github.com/tochemey/goakt/internal/goakt/v1"
+	internalpb "github.com/tochemey/goakt/internal/v1"
 
 	mock "github.com/stretchr/testify/mock"
 )
@@ -24,19 +24,19 @@ func (_m *Interface) EXPECT() *Interface_Expecter {
 }
 
 // GetActor provides a mock function with given fields: ctx, actorName
-func (_m *Interface) GetActor(ctx context.Context, actorName string) (*goaktv1.WireActor, error) {
+func (_m *Interface) GetActor(ctx context.Context, actorName string) (*internalpb.WireActor, error) {
 	ret := _m.Called(ctx, actorName)
 
-	var r0 *goaktv1.WireActor
+	var r0 *internalpb.WireActor
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, string) (*goaktv1.WireActor, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, string) (*internalpb.WireActor, error)); ok {
 		return rf(ctx, actorName)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, string) *goaktv1.WireActor); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, string) *internalpb.WireActor); ok {
 		r0 = rf(ctx, actorName)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*goaktv1.WireActor)
+			r0 = ret.Get(0).(*internalpb.WireActor)
 		}
 	}
 
@@ -68,12 +68,12 @@ func (_c *Interface_GetActor_Call) Run(run func(ctx context.Context, actorName s
 	return _c
 }
 
-func (_c *Interface_GetActor_Call) Return(_a0 *goaktv1.WireActor, _a1 error) *Interface_GetActor_Call {
+func (_c *Interface_GetActor_Call) Return(_a0 *internalpb.WireActor, _a1 error) *Interface_GetActor_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *Interface_GetActor_Call) RunAndReturn(run func(context.Context, string) (*goaktv1.WireActor, error)) *Interface_GetActor_Call {
+func (_c *Interface_GetActor_Call) RunAndReturn(run func(context.Context, string) (*internalpb.WireActor, error)) *Interface_GetActor_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -203,11 +203,11 @@ func (_c *Interface_NodeRemotingPort_Call) RunAndReturn(run func() int) *Interfa
 }
 
 // PutActor provides a mock function with given fields: ctx, actor
-func (_m *Interface) PutActor(ctx context.Context, actor *goaktv1.WireActor) error {
+func (_m *Interface) PutActor(ctx context.Context, actor *internalpb.WireActor) error {
 	ret := _m.Called(ctx, actor)
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, *goaktv1.WireActor) error); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.WireActor) error); ok {
 		r0 = rf(ctx, actor)
 	} else {
 		r0 = ret.Error(0)
@@ -223,14 +223,14 @@ type Interface_PutActor_Call struct {
 
 // PutActor is a helper method to define mock.On call
 //   - ctx context.Context
-//   - actor *goaktv1.WireActor
+//   - actor *internalpb.WireActor
 func (_e *Interface_Expecter) PutActor(ctx interface{}, actor interface{}) *Interface_PutActor_Call {
 	return &Interface_PutActor_Call{Call: _e.mock.On("PutActor", ctx, actor)}
 }
 
-func (_c *Interface_PutActor_Call) Run(run func(ctx context.Context, actor *goaktv1.WireActor)) *Interface_PutActor_Call {
+func (_c *Interface_PutActor_Call) Run(run func(ctx context.Context, actor *internalpb.WireActor)) *Interface_PutActor_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*goaktv1.WireActor))
+		run(args[0].(context.Context), args[1].(*internalpb.WireActor))
 	})
 	return _c
 }
@@ -240,7 +240,7 @@ func (_c *Interface_PutActor_Call) Return(_a0 error) *Interface_PutActor_Call {
 	return _c
 }
 
-func (_c *Interface_PutActor_Call) RunAndReturn(run func(context.Context, *goaktv1.WireActor) error) *Interface_PutActor_Call {
+func (_c *Interface_PutActor_Call) RunAndReturn(run func(context.Context, *internalpb.WireActor) error) *Interface_PutActor_Call {
 	_c.Call.Return(run)
 	return _c
 }

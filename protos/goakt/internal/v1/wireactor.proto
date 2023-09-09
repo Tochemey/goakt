@@ -1,10 +1,10 @@
 syntax = "proto3";
 
-package goakt.v1;
+package internal.v1;
 
 import "address/v1/address.proto";
 
-option go_package = "github.com/tochemey/goakt/internal/goakt/v1;goaktv1";
+option go_package = "github.com/tochemey/goakt/internal/v1;internalpb";
 
 // WireActor represents the actor information on the wire.
 message WireActor {
