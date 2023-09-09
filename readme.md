@@ -1,4 +1,4 @@
-# Go-Akt
+## Go-Akt
 
 [![build](https://img.shields.io/github/actions/workflow/status/Tochemey/goakt/build.yml?branch=main)](https://github.com/Tochemey/goakt/actions/workflows/build.yml)
 [![codecov](https://codecov.io/gh/Tochemey/goakt/branch/main/graph/badge.svg?token=J0p9MzwSRH)](https://codecov.io/gh/Tochemey/goakt)
@@ -18,7 +18,7 @@ If you are not familiar with the actor model, the blog post from Brian
 Storti [here](https://www.brianstorti.com/the-actor-model/) is an excellent and short introduction to the actor model.
 Also, check reference section at the end of the post for more material regarding actor model.
 
-## Table of Content
+### Table of Content
 
 - [Features](#features)
 - [Use Cases](#use-cases)
@@ -33,7 +33,7 @@ Also, check reference section at the end of the post for more material regarding
     - [Local Test and Linter](#test--linter)
 - [Benchmark](#benchmark-result)
 
-## Features
+### Features
 
 - **Actors** - The fundamental building blocks of Go-Akt are actors.
     - They are independent, isolated unit of computation with their own state.
@@ -100,7 +100,7 @@ Also, check reference section at the end of the post for more material regarding
 - **Logger** - Custom logger can be implemented.
 - **Mailbox** - Once can implement a custom mailbox. See [Mailbox](./actors/mailbox.go).
 
-### Behaviors
+#### Behaviors
 
 Actors in Go-Akt have the power to switch their behaviors at any point in time. When you change the actor behavior, the new
 behavior will take effect for all subsequent messages until the behavior is changed again. The current message will
@@ -114,7 +114,7 @@ To change the behavior, call the following methods on the [ReceiveContext interf
 - `BecomeStacked` - sets a new behavior to the actor to the top of the behavior stack, while maintaining the previous ones.
 - `UnBecomeStacked()` - sets the actor behavior to the previous behavior before `BecomeStacked()` was called. This only works with `BecomeStacked()`.
 
-### Stashing
+#### Stashing
 
 Stashing is a mechanism you can enable in your actors so they can temporarily stash away messages they cannot or should
 not handle at the moment.
@@ -135,19 +135,19 @@ To use the stashing feature, call the following methods on the [ReceiveContext i
   in the same order they arrived. The stash buffer will be empty after processing all messages, unless an exception is
   thrown or messages are stashed while unstashing.
 
-## Use Cases
+### Use Cases
 
 - Event-Driven programming
 - Event Sourcing and CQRS - [eGo](https://github.com/Tochemey/ego)
 - Highly Available, Fault-Tolerant Distributed Systems
 
-## Installation
+### Installation
 
 ```bash
 go get github.com/tochemey/goakt
 ```
 
-## Clustering
+### Clustering
 
 The cluster engine depends upon the [discovery](./discovery/provider.go) mechanism to find other nodes in the cluster.
 Under the hood, it leverages [Olric](https://github.com/buraksezer/olric)
@@ -170,7 +170,7 @@ identify the host node on which the cluster service is running:
 * `CLUSTER_PORT`: the cluster port to help communicate with other GoAkt nodes in the cluster
 * `REMOTING_PORT`: help remoting communication between actors
 
-### Operations Guide
+#### Operations Guide
 
 The following outlines the cluster mode operations which can help have a healthy GoAkt cluster:
 
@@ -179,9 +179,9 @@ The following outlines the cluster mode operations which can help have a healthy
 * One can remove nodes. However, to avoid losing data, one need to scale down the cluster to the minimum number of nodes
   which started the cluster.
 
-### Built-in Discovery Providers
+#### Built-in Discovery Providers
 
-#### Kubernetes Discovery Provider setup
+##### Kubernetes Discovery Provider setup
 
 To get the kubernetes discovery working as expected, the following pod labels need to be set:
 
@@ -196,7 +196,7 @@ engine to work as expected:
 * `cluster-port`: help the cluster engine to communicate with other GoAkt nodes in the cluster
 * `remoting-port`: help for remoting messaging between actors
 
-##### Role Based Access
+###### Role Based Access
 
 You’ll also have to grant the Service Account that your pods run under access to list pods. The following configuration
 can be used as a starting point.
@@ -228,7 +228,7 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
 ```
 
-##### Sample Project
+###### Sample Project
 
 A working example can be found [here](./examples/actor-cluster/k8s) with a
 small [doc](./examples/actor-cluster/k8s/doc.md) showing how to run it.
@@ -240,11 +240,11 @@ small [doc](./examples/actor-cluster/k8s/doc.md) showing how to run it.
 * `Port`: The mDNS discovery port
 * `IPv6`: States whether to lookup for IPv6 addresses.
 
-## Examples
+### Examples
 
 Kindly check out the [examples'](./examples) folder.
 
-## Contribution
+### Contribution
 
 Contributions are welcome!
 The project adheres to [Semantic Versioning](https://semver.org)
@@ -257,7 +257,7 @@ To contribute please:
 - Create a feature branch
 - Submit a [pull request](https://help.github.com/articles/using-pull-requests)
 
-### Test & Linter
+#### Test & Linter
 
 Prior to submitting a [pull request](https://help.github.com/articles/using-pull-requests), please run:
 
@@ -265,7 +265,7 @@ Prior to submitting a [pull request](https://help.github.com/articles/using-pull
 earthly +test
 ```
 
-## Benchmark Result
+### Benchmark Result
 
 One can run the benchmark test: `go test -bench=. -benchtime 2s -count 5 -benchmem -cpu 8 -run notest` from
 the [bench package](./bench)
