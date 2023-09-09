@@ -11,6 +11,7 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    container: ubuntu
     env:
       FORCE_COLOR: 1
     steps:
