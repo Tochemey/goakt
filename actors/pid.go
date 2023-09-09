@@ -36,7 +36,12 @@ type WatchMan struct {
 	Done    chan Unit  // Done when watching is completed
 }
 
+// StrategyDirective represents the supervisor strategy directive
+type StrategyDirective int
+
 const (
+	RestartDirective StrategyDirective = iota
+	StopDirective
 	// DefaultPassivationTimeout defines the default passivation timeout
 	DefaultPassivationTimeout = 2 * time.Minute
 	// DefaultReplyTimeout defines the default send/reply timeout
