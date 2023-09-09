@@ -40,8 +40,11 @@ type WatchMan struct {
 type StrategyDirective int
 
 const (
+	// RestartDirective defines the restart strategy when handling actors failure
 	RestartDirective StrategyDirective = iota
+	// StopDirective defines the stop strategy when handling actors failure
 	StopDirective
+
 	// DefaultPassivationTimeout defines the default passivation timeout
 	DefaultPassivationTimeout = 2 * time.Minute
 	// DefaultReplyTimeout defines the default send/reply timeout
