@@ -127,7 +127,7 @@ not a requirement.
 
 It’s recommended to avoid stashing too many messages to avoid too much memory usage. If you try to stash more
 messages than the capacity the actor will panic.
-To use the stashing feature, call the following methods on the [ReceiveContext interface](./actors/context.go)when handling a message:
+To use the stashing feature, call the following methods on the [ReceiveContext interface](./actors/context.go) when handling a message:
 
 - `Stash()` - adds the current message to the stash buffer.
 - `Unstash()` - unstashes the oldest message in the stash and prepends to the stash buffer.
