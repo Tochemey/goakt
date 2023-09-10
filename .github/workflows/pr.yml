@@ -11,6 +11,8 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    container:
+      image: ubuntu-22.04
     env:
       FORCE_COLOR: 1
     steps:
