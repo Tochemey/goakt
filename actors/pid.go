@@ -8,6 +8,8 @@ import (
 	"sync"
 	"time"
 
+	messagespb "github.com/tochemey/goakt/pb/messages/v1"
+
 	"connectrpc.com/connect"
 	"connectrpc.com/otelconnect"
 	"github.com/cenkalti/backoff"
@@ -842,14 +844,26 @@ func (p *pid) reset() {
 func (p *pid) freeWatchers(ctx context.Context) {
 	p.logger.Debug("freeing all watcher actors...")
 	// add a span context
-	ctx, span := telemetry.SpanContext(ctx, "FreeWatcher")
+	ctx, span := telemetry.SpanContext(ctx, "FreeWatchers")
 	defer span.End()
 
+	// grab the actor watchers
 	watchers := p.watchers()
-	for item := range watchers.Iter() {
-		// grab the item value
-		watcher := item.Value
-		watcher.ID.UnWatch(p)
+	if watchers.Len() > 0 {
+		// iterate the list of watchers
+		for item := range watchers.Iter() {
+			// grab the item value
+			watcher := item.Value
+			// notified the watcher with the Terminated message
+			terminated := &messagespb.Terminated{}
+			// only send the parent actor when it is running
+			if watcher.ID.IsRunning() {
+				// send the notification the watcher
+				_ = p.Tell(ctx, watcher.ID, terminated)
+				// unwatch the child actor
+				watcher.ID.UnWatch(p)
+			}
+		}
 	}
 }
 
@@ -922,7 +936,14 @@ func (p *pid) receive() {
 			if !p.mailbox.IsEmpty() {
 				// grab the message from the mailbox. Ignore the error when the mailbox is empty
 				received, _ := p.mailbox.Pop()
-				p.handleReceived(received)
+				// switch on the type of message
+				switch received.Message().(type) {
+				case *messagespb.PoisonPill:
+					// stop the actor
+					_ = p.Shutdown(received.Context())
+				default:
+					p.handleReceived(received)
+				}
 			}
 		}
 	}

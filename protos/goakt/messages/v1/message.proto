@@ -5,5 +5,10 @@ package messages.v1;
 option go_package = "github.com/tochemey/goakt/messages/v1;messagespb";
 
 // Terminated is used to notify watching actors
-// of the shutdown of its child actor
+// of the shutdown of its child actor.
 message Terminated {}
+
+// PoisonPill is sent the stop an actor.
+// It is enqueued as ordinary messages.
+// It will be handled after messages that were already queued in the mailbox.
+message PoisonPill {}

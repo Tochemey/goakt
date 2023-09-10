@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	messagespb "github.com/tochemey/goakt/pb/messages/v1"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tochemey/goakt/log"
@@ -668,4 +670,29 @@ func TestSpawnChild(t *testing.T) {
 		assert.EqualError(t, err, ErrNotReady.Error())
 		assert.Nil(t, child)
 	})
+}
+func TestPoisonPill(t *testing.T) {
+	ctx := context.TODO()
+
+	// create the actor path
+	actorPath := NewPath("Test", NewAddress("sys", "host", 1))
+
+	// create the actor ref
+	pid := newPID(
+		ctx,
+		actorPath,
+		NewTester(),
+		withInitMaxRetries(1),
+		withCustomLogger(log.DefaultLogger),
+		withSendReplyTimeout(receivingTimeout))
+	assert.NotNil(t, pid)
+
+	assert.True(t, pid.IsRunning())
+	// send a poison pill to the actor
+	err := Tell(ctx, pid, new(messagespb.PoisonPill))
+	assert.NoError(t, err)
+
+	// wait for the graceful shutdown
+	time.Sleep(time.Second)
+	assert.False(t, pid.IsRunning())
 }
