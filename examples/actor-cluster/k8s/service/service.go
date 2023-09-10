@@ -83,7 +83,7 @@ func (s *AccountService) CreditAccount(ctx context.Context, c *connect.Request[s
 		// handle the error
 		if err != nil {
 			// check whether it is not found error
-			if !errors.Is(err, actors.ErrActorNotFound) {
+			if !errors.Is(err, actors.ErrActorNotFound(accountID)) {
 				return nil, connect.NewError(connect.CodeInternal, err)
 			}
 

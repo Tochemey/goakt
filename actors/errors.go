@@ -23,7 +23,7 @@ var (
 	ErrInstanceNotAnActor   = errors.New("failed to create instance. Reason: instance does not implement the Actor interface")
 	ErrInvalidInstance      = errors.New("failed to create instance. Reason: invalid instance")
 	ErrTypeNotFound         = func(typeName string) error { return fmt.Errorf("typeName=%s not found", typeName) }
-	ErrActorNotFound        = errors.New("actor not found")
+	ErrActorNotFound        = func(actorPath string) error { return fmt.Errorf("actor=%s not found", actorPath) }
 	ErrMethodCallNotAllowed = errors.New("method call not allowed")
 	ErrInvalidRemoteMessage = func(err error) error { return errors.Wrap(err, "invalid remote message") }
 	ErrStashBufferNotSet    = errors.New("actor is not setup with a stash buffer")

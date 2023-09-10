@@ -10,12 +10,10 @@ Distributed [Go](https://go.dev/) actor framework to build reactive and distribu
 _**protocol buffers as actor messages**_.
 
 GoAkt is highly scalable and available when running in cluster mode. It comes with the necessary features require to
-build a distributed actor-based system without
-sacrificing performance and reliability. With GoAkt, you can instantly create a fast, scalable, distributed system
+build a distributed actor-based system without sacrificing performance and reliability. With GoAkt, you can instantly create a fast, scalable, distributed system
 across a cluster of computers.
 
-If you are not familiar with the actor model, the blog post from Brian
-Storti [here](https://www.brianstorti.com/the-actor-model/) is an excellent and short introduction to the actor model.
+If you are not familiar with the actor model, the blog post from Brian Storti [here](https://www.brianstorti.com/the-actor-model/) is an excellent and short introduction to the actor model.
 Also, check reference section at the end of the post for more material regarding actor model.
 
 ### Table of Content
@@ -69,16 +67,16 @@ Also, check reference section at the end of the post for more material regarding
           configurable time period.
         - has few metrics:
             - Mailbox size at a given time. That information can be accessed via the process
-              id  [`PID`](./actors/pid.go) `MailboxSize` method
+              id [`PID`](./actors/pid.go) `MailboxSize` method
             - Total number of messages handled at a given time. That information can be accessed via the process
-              id  [`PID`](./actors/pid.go) `ReceivedCount` method
-            - Total number of restart. This is accessible via the process id  [`PID`](./actors/pid.go) `RestartCount`
+              id [`PID`](./actors/pid.go) `ReceivedCount` method
+            - Total number of restart. This is accessible via the process id [`PID`](./actors/pid.go) `RestartCount`
               method
             - Total number of panic attacks. This is accessible via the process
               id [`PID`](./actors/pid.go) `ErrorsCount` method
 - **ActorSystem** - Without an actor system, it is not possible to create actors in Go-Akt. Only a single actor system
-  is allowed to be
-  created per application when using Go-Akt. To create an actor system one just need to use
+  is recommended to be created per application when using Go-Akt. At the moment the single instance is not enforced in Go-Akt, this simple implementation is left to the discretion of the developer. To
+  create an actor system one just need to use
   the [`NewActorSystem`](./actors/actor_system.go) method with the various [Options](./actors/option.go). Go-Akt
   ActorSystem has the following characteristics:
     - Actors lifecycle management (Spawn, Kill, ReSpawn)
@@ -156,27 +154,27 @@ re-balancing out-of-the-box.
 
 At the moment the following providers are implemented:
 
-* the [kubernetes](https://kubernetes.io/docs/home/) [api integration](./discovery/kubernetes) is fully functional
-* the [mDNS](https://datatracker.ietf.org/doc/html/rfc6762) and [DNS-SD](https://tools.ietf.org/html/rfc6763)
+- the [kubernetes](https://kubernetes.io/docs/home/) [api integration](./discovery/kubernetes) is fully functional
+- the [mDNS](https://datatracker.ietf.org/doc/html/rfc6762) and [DNS-SD](https://tools.ietf.org/html/rfc6763)
 
 Note: One can add additional discovery providers using the following [interface](./discovery/provider.go)
 
 In addition, one needs to set the following environment variables irrespective of the discovery provider to help
 identify the host node on which the cluster service is running:
 
-* `NODE_NAME`: the node name. For instance in kubernetes one can just get it from the `metadata.name`
-* `NODE_IP`: the node host address. For instance in kubernetes one can just get it from the `status.podIP`
-* `GOSSIP_PORT`: the gossip protocol engine port
-* `CLUSTER_PORT`: the cluster port to help communicate with other GoAkt nodes in the cluster
-* `REMOTING_PORT`: help remoting communication between actors
+- `NODE_NAME`: the node name. For instance in kubernetes one can just get it from the `metadata.name`
+- `NODE_IP`: the node host address. For instance in kubernetes one can just get it from the `status.podIP`
+- `GOSSIP_PORT`: the gossip protocol engine port
+- `CLUSTER_PORT`: the cluster port to help communicate with other GoAkt nodes in the cluster
+- `REMOTING_PORT`: help remoting communication between actors
 
 #### Operations Guide
 
 The following outlines the cluster mode operations which can help have a healthy GoAkt cluster:
 
-* One can start a single node cluster or a multiple nodes cluster.
-* One can add more nodes to the cluster which will automatically discover the cluster.
-* One can remove nodes. However, to avoid losing data, one need to scale down the cluster to the minimum number of nodes
+- One can start a single node cluster or a multiple nodes cluster.
+- One can add more nodes to the cluster which will automatically discover the cluster.
+- One can remove nodes. However, to avoid losing data, one need to scale down the cluster to the minimum number of nodes
   which started the cluster.
 
 #### Built-in Discovery Providers
@@ -185,16 +183,16 @@ The following outlines the cluster mode operations which can help have a healthy
 
 To get the kubernetes discovery working as expected, the following pod labels need to be set:
 
-* `app.kubernetes.io/part-of`: set this label with the actor system name
-* `app.kubernetes.io/component`: set this label with the application name
-* `app.kubernetes.io/name`: set this label with the application name
+- `app.kubernetes.io/part-of`: set this label with the actor system name
+- `app.kubernetes.io/component`: set this label with the application name
+- `app.kubernetes.io/name`: set this label with the application name
 
 In addition, each node _is required to have three different ports open_ with the following ports name for the cluster
 engine to work as expected:
 
-* `gossip-port`: help the gossip protocol engine. This is actually the kubernetes discovery port
-* `cluster-port`: help the cluster engine to communicate with other GoAkt nodes in the cluster
-* `remoting-port`: help for remoting messaging between actors
+- `gossip-port`: help the gossip protocol engine. This is actually the kubernetes discovery port
+- `cluster-port`: help the cluster engine to communicate with other GoAkt nodes in the cluster
+- `remoting-port`: help for remoting messaging between actors
 
 ###### Role Based Access
 
@@ -235,10 +233,10 @@ small [doc](./examples/actor-cluster/k8s/doc.md) showing how to run it.
 
 #### mDNS Discovery Provider setup
 
-* `Service Name`: the service name
-* `Domain`: The mDNS discovery domain
-* `Port`: The mDNS discovery port
-* `IPv6`: States whether to lookup for IPv6 addresses.
+- `Service Name`: the service name
+- `Domain`: The mDNS discovery domain
+- `Port`: The mDNS discovery port
+- `IPv6`: States whether to lookup for IPv6 addresses.
 
 ### Examples
 

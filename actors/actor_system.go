@@ -19,7 +19,6 @@ import (
 	"github.com/tochemey/goakt/internal/v1/internalpbconnect"
 	"github.com/tochemey/goakt/log"
 	addresspb "github.com/tochemey/goakt/pb/address/v1"
-	"github.com/tochemey/goakt/pkg/resync"
 	"github.com/tochemey/goakt/telemetry"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
@@ -30,9 +29,6 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 )
-
-var system *actorSystem
-var once resync.Once
 
 // ActorSystem defines the contract of an actor system
 type ActorSystem interface {
@@ -130,13 +126,14 @@ type actorSystem struct {
 	clusterChan chan *internalpb.WireActor
 
 	// help protect some the fields to set
-	mu sync.Mutex
+	sem sync.Mutex
 	// specifies actors mailbox size
 	mailboxSize uint64
 	// specifies the mailbox to use for the actors
 	mailbox Mailbox
 	// specifies the stash buffer
-	stashBuffer uint64
+	stashBuffer        uint64
+	housekeeperStopSig chan Unit
 }
 
 // enforce compilation error when all methods of the ActorSystem interface are not implemented
@@ -154,34 +151,31 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		return nil, ErrInvalidActorSystemName
 	}
 
-	if system == nil {
-		// the function only gets called one
-		once.Do(func() {
-			system = &actorSystem{
-				actors:              cmp.New[PID](),
-				hasStarted:          atomic.NewBool(false),
-				typesLoader:         NewTypesLoader(),
-				clusterChan:         make(chan *internalpb.WireActor, 10),
-				name:                name,
-				logger:              log.DefaultLogger,
-				expireActorAfter:    DefaultPassivationTimeout,
-				replyTimeout:        DefaultReplyTimeout,
-				actorInitMaxRetries: DefaultInitMaxRetries,
-				supervisorStrategy:  DefaultSupervisoryStrategy,
-				telemetry:           telemetry.New(),
-				remotingEnabled:     atomic.NewBool(false),
-				clusterEnabled:      atomic.NewBool(false),
-				mu:                  sync.Mutex{},
-				shutdownTimeout:     DefaultShutdownTimeout,
-				mailboxSize:         defaultMailboxSize,
-			}
-			// set the reflection
-			system.reflection = NewReflection(system.typesLoader)
-			// apply the various options
-			for _, opt := range opts {
-				opt.Apply(system)
-			}
-		})
+	// create the instance of the actor system with the default settings
+	system := &actorSystem{
+		actors:              cmp.New[PID](),
+		hasStarted:          atomic.NewBool(false),
+		typesLoader:         NewTypesLoader(),
+		clusterChan:         make(chan *internalpb.WireActor, 10),
+		name:                name,
+		logger:              log.DefaultLogger,
+		expireActorAfter:    DefaultPassivationTimeout,
+		replyTimeout:        DefaultReplyTimeout,
+		actorInitMaxRetries: DefaultInitMaxRetries,
+		supervisorStrategy:  DefaultSupervisoryStrategy,
+		telemetry:           telemetry.New(),
+		remotingEnabled:     atomic.NewBool(false),
+		clusterEnabled:      atomic.NewBool(false),
+		sem:                 sync.Mutex{},
+		shutdownTimeout:     DefaultShutdownTimeout,
+		mailboxSize:         defaultMailboxSize,
+		housekeeperStopSig:  make(chan Unit, 1),
+	}
+	// set the reflection
+	system.reflection = NewReflection(system.typesLoader)
+	// apply the various options
+	for _, opt := range opts {
+		opt.Apply(system)
 	}
 
 	return system, nil
@@ -298,7 +292,7 @@ func (x *actorSystem) Kill(ctx context.Context, name string) error {
 		// stop the given actor
 		return pid.Shutdown(ctx)
 	}
-	return fmt.Errorf("actor=%s not found in the system", actorPath.String())
+	return ErrActorNotFound(actorPath.String())
 }
 
 // ReSpawn recreates a given actor in the system
@@ -326,26 +320,29 @@ func (x *actorSystem) ReSpawn(ctx context.Context, name string) (PID, error) {
 			// return the error in case the restart failed
 			return nil, errors.Wrapf(err, "failed to restart actor=%s", actorPath.String())
 		}
+		// let us re-add the actor to the actor system list when it has successfully restarted
+		// add the given actor to the actor map
+		x.actors.Set(actorPath.String(), pid)
 		return pid, nil
 	}
-	return nil, fmt.Errorf("actor=%s not found in the system", actorPath.String())
+	return nil, ErrActorNotFound(actorPath.String())
 }
 
 // Name returns the actor system name
 func (x *actorSystem) Name() string {
 	// acquire the lock
-	x.mu.Lock()
+	x.sem.Lock()
 	// release the lock
-	defer x.mu.Unlock()
+	defer x.sem.Unlock()
 	return x.name
 }
 
 // Actors returns the list of Actors that are alive in the actor system
 func (x *actorSystem) Actors() []PID {
 	// acquire the lock
-	x.mu.Lock()
+	x.sem.Lock()
 	// release the lock
-	defer x.mu.Unlock()
+	defer x.sem.Unlock()
 
 	// get the actors from the actor map
 	items := x.actors.Items()
@@ -363,9 +360,9 @@ func (x *actorSystem) Actors() []PID {
 // An actor not found error is return when the actor is not found.
 func (x *actorSystem) ActorOf(ctx context.Context, actorName string) (addr *addresspb.Address, pid PID, err error) {
 	// acquire the lock
-	x.mu.Lock()
+	x.sem.Lock()
 	// release the lock
-	defer x.mu.Unlock()
+	defer x.sem.Unlock()
 
 	// add a span context
 	ctx, span := telemetry.SpanContext(ctx, "ActorOf")
@@ -379,7 +376,7 @@ func (x *actorSystem) ActorOf(ctx context.Context, actorName string) (addr *addr
 		if err != nil {
 			if errors.Is(err, cluster.ErrActorNotFound) {
 				x.logger.Infof("actor=%s not found", actorName)
-				return nil, nil, ErrActorNotFound
+				return nil, nil, ErrActorNotFound(actorName)
 			}
 			return nil, nil, errors.Wrapf(err, "failed to fetch remote actor=%s", actorName)
 		}
@@ -404,16 +401,16 @@ func (x *actorSystem) ActorOf(ctx context.Context, actorName string) (addr *addr
 	}
 	// add a logger
 	x.logger.Infof("actor=%s not found", actorName)
-	return nil, nil, ErrActorNotFound
+	return nil, nil, ErrActorNotFound(actorName)
 }
 
 // LocalActor returns the reference of a local actor.
 // A local actor is an actor that reside on the same node where the given actor system is running
 func (x *actorSystem) LocalActor(ctx context.Context, actorName string) (PID, error) {
 	// acquire the lock
-	x.mu.Lock()
+	x.sem.Lock()
 	// release the lock
-	defer x.mu.Unlock()
+	defer x.sem.Unlock()
 
 	// add a span context
 	ctx, span := telemetry.SpanContext(ctx, "LocalActor")
@@ -428,7 +425,7 @@ func (x *actorSystem) LocalActor(ctx context.Context, actorName string) (PID, er
 	}
 	// add a logger
 	x.logger.Infof("actor=%s not found", actorName)
-	return nil, ErrActorNotFound
+	return nil, ErrActorNotFound(actorName)
 }
 
 // RemoteActor returns the address of a remote actor when cluster is enabled
@@ -436,9 +433,9 @@ func (x *actorSystem) LocalActor(ctx context.Context, actorName string) (PID, er
 // One can always check whether cluster is enabled before calling this method or just use the ActorOf method.
 func (x *actorSystem) RemoteActor(ctx context.Context, actorName string) (addr *addresspb.Address, err error) {
 	// acquire the lock
-	x.mu.Lock()
+	x.sem.Lock()
 	// release the lock
-	defer x.mu.Unlock()
+	defer x.sem.Unlock()
 
 	// add a span context
 	ctx, span := telemetry.SpanContext(ctx, "RemoteActor")
@@ -454,7 +451,7 @@ func (x *actorSystem) RemoteActor(ctx context.Context, actorName string) (addr *
 	if err != nil {
 		if errors.Is(err, cluster.ErrActorNotFound) {
 			x.logger.Infof("actor=%s not found", actorName)
-			return nil, ErrActorNotFound
+			return nil, ErrActorNotFound(actorName)
 		}
 		return nil, errors.Wrapf(err, "failed to fetch remote actor=%s", actorName)
 	}
@@ -488,6 +485,9 @@ func (x *actorSystem) Start(ctx context.Context) error {
 	if err := x.registerMetrics(); err != nil {
 		x.logger.Error(errors.Wrapf(err, "failed to register actorSystem=%s metrics", x.name))
 	}
+	// start the housekeeper
+	go x.housekeeper()
+
 	x.logger.Infof("%s started..:)", x.name)
 	return nil
 }
@@ -497,6 +497,9 @@ func (x *actorSystem) Stop(ctx context.Context) error {
 	// create a cancellation context to gracefully shutdown
 	ctx, cancel := context.WithTimeout(ctx, x.shutdownTimeout)
 	defer cancel()
+
+	// stop the housekeeper
+	x.housekeeperStopSig <- Unit{}
 
 	// add a span context
 	ctx, span := telemetry.SpanContext(ctx, "Stop")
@@ -806,14 +809,14 @@ func (x *actorSystem) enableClustering(ctx context.Context) {
 	// add some logging information
 	x.logger.Info("cluster engine successfully started...")
 	// acquire the lock
-	x.mu.Lock()
+	x.sem.Lock()
 	// set the cluster field
 	x.cluster = cluster
 	// set the remoting host and port
 	x.remotingHost = cluster.NodeHost()
 	x.remotingPort = int32(cluster.NodeRemotingPort())
 	// release the lock
-	x.mu.Unlock()
+	x.sem.Unlock()
 	// start broadcasting cluster message
 	go x.broadcast(ctx)
 	// add some logging
@@ -883,11 +886,11 @@ func (x *actorSystem) enableRemoting(ctx context.Context) {
 	}()
 
 	// acquire the lock
-	x.mu.Lock()
+	x.sem.Lock()
 	// set the server
 	x.remotingServer = server
 	// release the lock
-	x.mu.Unlock()
+	x.sem.Unlock()
 
 	// add some logging information
 	x.logger.Info("remoting enabled...:)")
@@ -895,14 +898,9 @@ func (x *actorSystem) enableRemoting(ctx context.Context) {
 
 // reset the actor system
 func (x *actorSystem) reset() {
-	// set the global nil
-	system = nil
 	x.telemetry = nil
-	x.mu = sync.Mutex{}
-	x.actors = cmp.New[PID]()
+	x.actors.Clear()
 	x.name = ""
-	x.logger = nil
-	once.Reset()
 }
 
 // broadcast publishes newly created actor into the cluster when cluster is enabled
@@ -919,4 +917,39 @@ func (x *actorSystem) broadcast(ctx context.Context) {
 			}
 		}
 	}
+}
+
+// housekeeper time to time removes dead actors from the system
+// that helps free non-utilized resources
+func (x *actorSystem) housekeeper() {
+	// add some logging
+	x.logger.Info("Housekeeping has started...")
+	// create the ticker
+	ticker := time.NewTicker(30 * time.Millisecond)
+	// create the stop ticker signal
+	tickerStopSig := make(chan Unit, 1)
+	go func() {
+		for {
+			select {
+			case <-ticker.C:
+				// loop over the actors in the system and remove the dead one
+				for _, actor := range x.Actors() {
+					if !actor.IsRunning() {
+						x.logger.Infof("Removing actor=%s from system", actor.ActorPath().String())
+						x.actors.Remove(actor.ActorPath().String())
+					}
+				}
+			case <-x.housekeeperStopSig:
+				// set the done channel to stop the ticker
+				tickerStopSig <- Unit{}
+				return
+			}
+		}
+	}()
+	// wait for the stop signal to stop the ticker
+	<-tickerStopSig
+	// stop the ticker
+	ticker.Stop()
+	// add some logging
+	x.logger.Info("Housekeeping has stopped...")
 }

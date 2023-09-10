@@ -182,7 +182,7 @@ func TestActorSystem(t *testing.T) {
 		actorName = "some-actor"
 		addr, pid, err = newActorSystem.ActorOf(ctx, actorName)
 		require.Error(t, err)
-		require.EqualError(t, err, ErrActorNotFound.Error())
+		require.EqualError(t, err, ErrActorNotFound(actorName).Error())
 		require.Nil(t, addr)
 
 		// stop the actor after some time
@@ -293,7 +293,7 @@ func TestActorSystem(t *testing.T) {
 		actorName := "notFound"
 		addr, pid, err := sys.ActorOf(ctx, actorName)
 		require.Error(t, err)
-		require.EqualError(t, err, ErrActorNotFound.Error())
+		require.EqualError(t, err, ErrActorNotFound(actorName).Error())
 		require.Nil(t, pid)
 		require.Nil(t, addr)
 
@@ -324,11 +324,6 @@ func TestActorSystem(t *testing.T) {
 		expected := new(testpb.Reply)
 		require.True(t, proto.Equal(expected, reply))
 		require.True(t, actorRef.IsRunning())
-		// stop the actor after some time
-		time.Sleep(time.Second)
-
-		err = sys.Kill(ctx, actorName)
-		require.NoError(t, err)
 
 		// wait for a while for the system to stop
 		time.Sleep(time.Second)
@@ -340,6 +335,42 @@ func TestActorSystem(t *testing.T) {
 		// TODO we can add a callback for complete start
 		time.Sleep(time.Second)
 		require.True(t, actorRef.IsRunning())
+
+		t.Cleanup(func() {
+			err = sys.Stop(ctx)
+			assert.NoError(t, err)
+		})
+	})
+	t.Run("With ReSpawn: actor not found", func(t *testing.T) {
+		ctx := context.TODO()
+		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+
+		// start the actor system
+		err := sys.Start(ctx)
+		assert.NoError(t, err)
+
+		actorName := "Exchanger"
+		actorRef := sys.Spawn(ctx, actorName, &Exchanger{})
+		assert.NotNil(t, actorRef)
+
+		// send a message to the actor
+		reply, err := Ask(ctx, actorRef, new(testpb.TestReply), receivingTimeout)
+		require.NoError(t, err)
+		require.NotNil(t, reply)
+		expected := new(testpb.Reply)
+		require.True(t, proto.Equal(expected, reply))
+		require.True(t, actorRef.IsRunning())
+		// stop the actor after some time
+		time.Sleep(time.Second)
+
+		err = sys.Kill(ctx, actorName)
+		require.NoError(t, err)
+
+		// wait for a while for the system to stop
+		time.Sleep(time.Second)
+		// restart the actor
+		_, err = sys.ReSpawn(ctx, actorName)
+		require.Error(t, err)
 
 		t.Cleanup(func() {
 			err = sys.Stop(ctx)
@@ -386,11 +417,6 @@ func TestActorSystem(t *testing.T) {
 		// stop the actor after some time
 		time.Sleep(time.Second)
 
-		err = newActorSystem.Kill(ctx, actorName)
-		require.NoError(t, err)
-
-		// wait for a while for the system to stop
-		time.Sleep(time.Second)
 		// restart the actor
 		_, err = newActorSystem.ReSpawn(ctx, actorName)
 		require.NoError(t, err)
@@ -546,7 +572,7 @@ func TestActorSystem(t *testing.T) {
 		ref, err := sys.LocalActor(ctx, "some-name")
 		require.Error(t, err)
 		require.Nil(t, ref)
-		require.EqualError(t, err, ErrActorNotFound.Error())
+		require.EqualError(t, err, ErrActorNotFound("some-name").Error())
 
 		// stop the actor after some time
 		time.Sleep(time.Second)
@@ -572,6 +598,45 @@ func TestActorSystem(t *testing.T) {
 		assert.NoError(t, err)
 		err = sys.Kill(ctx, "Test")
 		assert.Error(t, err)
-		assert.EqualError(t, err, "actor=goakt://testSys@/Test not found in the system")
+		assert.EqualError(t, err, "actor=goakt://testSys@/Test not found")
+		t.Cleanup(func() {
+			err = sys.Stop(ctx)
+			assert.NoError(t, err)
+		})
+	})
+	t.Run("With housekeeping", func(t *testing.T) {
+		ctx := context.TODO()
+		sys, _ := NewActorSystem("housekeeperSys",
+			WithLogger(log.DefaultLogger),
+			WithExpireActorAfter(passivateAfter))
+
+		// start the actor system
+		err := sys.Start(ctx)
+		assert.NoError(t, err)
+
+		// wait for the system to properly start
+		time.Sleep(time.Second)
+
+		actorName := "HousekeeperActor"
+		actorHandler := NewTester()
+		actorRef := sys.Spawn(ctx, actorName, actorHandler)
+		require.NotNil(t, actorRef)
+
+		// wait for the actor to properly start
+		time.Sleep(time.Second)
+
+		// locate the actor
+		ref, err := sys.LocalActor(ctx, actorName)
+		require.Error(t, err)
+		require.Nil(t, ref)
+		require.EqualError(t, err, ErrActorNotFound(actorName).Error())
+
+		// stop the actor after some time
+		time.Sleep(time.Second)
+
+		t.Cleanup(func() {
+			err = sys.Stop(ctx)
+			assert.NoError(t, err)
+		})
 	})
 }

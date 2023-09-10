@@ -16,6 +16,6 @@ type Actor interface {
 	// One thing to know is that actor can communicate synchronously as well, just that will hinder the performance of the system.
 	Receive(ctx ReceiveContext)
 	// PostStop is executed when the actor is shutting down.
-	// The execution happens when every public that have not been processed yet will be processed before the actor shutdowns
+	// The execution happens when every message that have not been processed yet will be processed before the actor shutdowns
 	PostStop(ctx context.Context) error
 }
