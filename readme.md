@@ -266,7 +266,7 @@ earthly +test
 ### Benchmark Result
 
 One can run the benchmark test: `go test -bench=. -benchtime 2s -count 5 -benchmem -cpu 8 -run notest` from
-the [bench package](./bench)
+the [bench package](./bench) or just run the command `make bench`.
 
 ```bash
 goos: darwin
