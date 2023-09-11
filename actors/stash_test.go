@@ -57,7 +57,7 @@ func TestStash(t *testing.T) {
 		require.EqualValues(t, 2, pid.StashSize(ctx))
 
 		// add some pause here due to async calls
-		time.Sleep(5 * time.Millisecond)
+		time.Sleep(time.Second)
 		assert.NoError(t, Tell(ctx, pid, new(testpb.TestUnstash)))
 
 		// add some pause here due to async calls
@@ -65,11 +65,11 @@ func TestStash(t *testing.T) {
 		require.EqualValues(t, 1, pid.StashSize(ctx))
 
 		// add some pause here due to async calls
-		time.Sleep(5 * time.Millisecond)
+		time.Sleep(time.Second)
 		assert.NoError(t, Tell(ctx, pid, new(testpb.TestUnstashAll)))
 
 		// add some pause here due to async calls
-		time.Sleep(5 * time.Millisecond)
+		time.Sleep(time.Second)
 
 		require.Zero(t, pid.StashSize(ctx))
 
