@@ -639,4 +639,25 @@ func TestActorSystem(t *testing.T) {
 			assert.NoError(t, err)
 		})
 	})
+	t.Run("With GetPartition returning zero in non cluster env", func(t *testing.T) {
+		ctx := context.TODO()
+		sys, _ := NewActorSystem("housekeeperSys",
+			WithLogger(log.DefaultLogger),
+			WithExpireActorAfter(passivateAfter))
+
+		// start the actor system
+		err := sys.Start(ctx)
+		assert.NoError(t, err)
+
+		// wait for the system to properly start
+		time.Sleep(time.Second)
+
+		partition := sys.GetPartition(ctx, "some-actor")
+		assert.Zero(t, partition)
+
+		t.Cleanup(func() {
+			err = sys.Stop(ctx)
+			assert.NoError(t, err)
+		})
+	})
 }

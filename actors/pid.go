@@ -8,8 +8,6 @@ import (
 	"sync"
 	"time"
 
-	messagespb "github.com/tochemey/goakt/pb/messages/v1"
-
 	"connectrpc.com/connect"
 	"connectrpc.com/otelconnect"
 	"github.com/cenkalti/backoff"
@@ -18,6 +16,7 @@ import (
 	"github.com/tochemey/goakt/internal/v1/internalpbconnect"
 	"github.com/tochemey/goakt/log"
 	addresspb "github.com/tochemey/goakt/pb/address/v1"
+	messagespb "github.com/tochemey/goakt/pb/messages/v1"
 	"github.com/tochemey/goakt/pkg/http"
 	"github.com/tochemey/goakt/pkg/slices"
 	"github.com/tochemey/goakt/telemetry"
