@@ -34,6 +34,8 @@ func TestAsk(t *testing.T) {
 		err = sys.Start(ctx)
 		assert.NoError(t, err)
 
+		time.Sleep(time.Second)
+
 		// create a test actor
 		actorName := "test"
 		actor := NewTester()
@@ -72,6 +74,8 @@ func TestAsk(t *testing.T) {
 		err = sys.Start(ctx)
 		assert.NoError(t, err)
 
+		time.Sleep(time.Second)
+
 		// create a test actor
 		actorName := "test"
 		actor := NewTester()
@@ -113,11 +117,15 @@ func TestAsk(t *testing.T) {
 		err = sys.Start(ctx)
 		assert.NoError(t, err)
 
+		time.Sleep(time.Second)
+
 		// create a test actor
 		actorName := "test"
 		actor := NewTester()
 		actorRef := sys.Spawn(ctx, actorName, actor)
 		assert.NotNil(t, actorRef)
+
+		time.Sleep(time.Second)
 
 		// create a message to send to the test actor
 		message := &internalpb.RemoteMessage{
@@ -154,11 +162,15 @@ func TestTell(t *testing.T) {
 		err = sys.Start(ctx)
 		assert.NoError(t, err)
 
+		time.Sleep(time.Second)
+
 		// create a test actor
 		actorName := "test"
 		actor := NewTester()
 		actorRef := sys.Spawn(ctx, actorName, actor)
 		assert.NotNil(t, actorRef)
+
+		time.Sleep(time.Second)
 
 		// create a message to send to the test actor
 		message := new(testpb.TestSend)
@@ -190,6 +202,8 @@ func TestTell(t *testing.T) {
 		// start the actor system
 		err = sys.Start(ctx)
 		assert.NoError(t, err)
+
+		time.Sleep(time.Second)
 
 		// create a test actor
 		actorName := "test"
@@ -230,6 +244,8 @@ func TestTell(t *testing.T) {
 		// start the actor system
 		err = sys.Start(ctx)
 		assert.NoError(t, err)
+
+		time.Sleep(time.Second)
 
 		// create a test actor
 		actorName := "test"
@@ -276,6 +292,8 @@ func TestRemoteTell(t *testing.T) {
 		// start the actor system
 		err = sys.Start(ctx)
 		assert.NoError(t, err)
+
+		time.Sleep(time.Second)
 
 		// create a test actor
 		actorName := "test"
@@ -326,6 +344,8 @@ func TestRemoteTell(t *testing.T) {
 		err = sys.Start(ctx)
 		assert.NoError(t, err)
 
+		time.Sleep(time.Second)
+
 		// create a test actor
 		actorName := "test"
 		actor := NewTester()
@@ -366,6 +386,8 @@ func TestRemoteTell(t *testing.T) {
 		// start the actor system
 		err = sys.Start(ctx)
 		assert.NoError(t, err)
+
+		time.Sleep(time.Second)
 
 		// create a test actor
 		actorName := "test"
@@ -417,6 +439,8 @@ func TestRemoteAsk(t *testing.T) {
 		// start the actor system
 		err = sys.Start(ctx)
 		assert.NoError(t, err)
+
+		time.Sleep(time.Second)
 
 		// create a test actor
 		actorName := "test"
@@ -472,6 +496,8 @@ func TestRemoteAsk(t *testing.T) {
 		err = sys.Start(ctx)
 		assert.NoError(t, err)
 
+		time.Sleep(time.Second)
+
 		// create a test actor
 		actorName := "test"
 		actor := NewTester()
@@ -515,6 +541,8 @@ func TestRemoteAsk(t *testing.T) {
 		// start the actor system
 		err = sys.Start(ctx)
 		assert.NoError(t, err)
+
+		time.Sleep(time.Second)
 
 		// create a test actor
 		actorName := "test"
