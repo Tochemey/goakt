@@ -308,6 +308,12 @@ func (p *pid) Child(ctx context.Context, name string) (PID, error) {
 	// add a span context
 	ctx, span := telemetry.SpanContext(ctx, "Child")
 	defer span.End()
+
+	// first check whether the actor is ready to stop another actor
+	if !p.IsRunning() {
+		return nil, ErrDead
+	}
+
 	// create the child actor path
 	childActorPath := NewPath(name, p.ActorPath().Address()).WithParent(p.ActorPath())
 

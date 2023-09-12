@@ -639,7 +639,7 @@ func TestReceiveContext(t *testing.T) {
 			context.Spawn("SpawnChild", NewMonitored())
 		})
 	})
-	t.Run("With panic Child", func(t *testing.T) {
+	t.Run("With not found Child", func(t *testing.T) {
 		ctx := context.TODO()
 		actorPath := NewPath("Parent", NewAddress("sys", "host", 1))
 
@@ -676,6 +676,45 @@ func TestReceiveContext(t *testing.T) {
 
 		t.Cleanup(func() {
 			context.Shutdown()
+		})
+	})
+	t.Run("With dead parent Child", func(t *testing.T) {
+		ctx := context.TODO()
+		actorPath := NewPath("Parent", NewAddress("sys", "host", 1))
+
+		// create the parent actor
+		parent := newPID(ctx, actorPath,
+			NewMonitor(),
+			withInitMaxRetries(1),
+			withCustomLogger(log.DiscardLogger),
+			withSendReplyTimeout(receivingTimeout))
+		assert.NotNil(t, parent)
+
+		// create an instance of receive context
+		context := &receiveContext{
+			ctx:            ctx,
+			message:        new(testpb.TestSend),
+			sender:         NoSender,
+			recipient:      parent,
+			mu:             sync.Mutex{},
+			isAsyncMessage: true,
+		}
+
+		// create the child actor
+		name := "monitored"
+		child := context.Spawn(name, NewMonitored())
+		assert.NotNil(t, child)
+		assert.Len(t, context.Children(), 1)
+
+		// stop the parent
+		context.Shutdown()
+
+		assert.Panics(t, func() {
+			context.Child(name)
+		})
+
+		t.Cleanup(func() {
+			require.NoError(t, child.Shutdown(ctx))
 		})
 	})
 	t.Run("With happy path Stop", func(t *testing.T) {
