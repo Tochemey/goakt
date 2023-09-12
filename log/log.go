@@ -15,115 +15,72 @@ import (
 var DefaultLogger = New(DebugLevel, os.Stdout)
 var DiscardLogger = New(DebugLevel, io.Discard)
 
-// Info logs to INFO level.
-func Info(v ...interface{}) {
-	DefaultLogger.Info(v...)
-}
-
-// Infof logs to INFO level
-func Infof(format string, v ...interface{}) {
-	DefaultLogger.Infof(format, v...)
-}
-
-// Warning logs to the WARNING level.
-func Warning(v ...interface{}) {
-	DefaultLogger.Warn(v...)
-}
-
-// Warningf logs to the WARNING level.
-func Warningf(format string, v ...interface{}) {
-	DefaultLogger.Warnf(format, v...)
-}
-
-// Error logs to the ERROR level.
-func Error(v ...interface{}) {
-	DefaultLogger.Error(v...)
-}
-
-// Errorf logs to the ERROR level.
-func Errorf(format string, v ...interface{}) {
-	DefaultLogger.Errorf(format, v...)
-}
-
-// Fatal logs to the FATAL level followed by a call to os.Exit(1).
-func Fatal(v ...interface{}) {
-	DefaultLogger.Fatal(v...)
-}
-
-// Fatalf logs to the FATAL level followed by a call to os.Exit(1).
-func Fatalf(format string, v ...interface{}) {
-	DefaultLogger.Fatalf(format, v...)
-}
-
-// Panic logs to the PANIC level followed by a call to panic().
-func Panic(v ...interface{}) {
-	DefaultLogger.Panic(v...)
-}
-
-// Panicf logs to the PANIC level followed by a call to panic().
-func Panicf(format string, v ...interface{}) {
-	DefaultLogger.Panicf(format, v...)
-}
-
 // Log implements Logger interface with the underlying zap as
 // the underlying logging library
 type Log struct {
 	*zap.Logger
-	output io.Writer
+	outputs []io.Writer
 }
 
 // enforce compilation and linter error
 var _ Logger = &Log{}
 
 // New creates an instance of Log
-func New(level Level, writer io.Writer) *Log {
+// New creates an instance of Log
+func New(level Level, writers ...io.Writer) *Log {
 	// create the zap Log configuration
 	cfg := zap.NewProductionConfig()
 	// create the zap log core
 	var core zapcore.Core
+
+	// create the list of writers
+	syncWriters := make([]zapcore.WriteSyncer, len(writers))
+	for i, writer := range writers {
+		syncWriters[i] = zapcore.AddSync(writer)
+	}
 
 	// set the log level
 	switch level {
 	case InfoLevel:
 		core = zapcore.NewCore(
 			zapcore.NewJSONEncoder(cfg.EncoderConfig),
-			zapcore.AddSync(writer),
+			zap.CombineWriteSyncers(syncWriters...),
 			zapcore.InfoLevel,
 		)
 	case DebugLevel:
 		core = zapcore.NewCore(
 			zapcore.NewJSONEncoder(cfg.EncoderConfig),
-			zapcore.AddSync(writer),
+			zap.CombineWriteSyncers(syncWriters...),
 			zapcore.DebugLevel,
 		)
 	case WarningLevel:
 		core = zapcore.NewCore(
 			zapcore.NewJSONEncoder(cfg.EncoderConfig),
-			zapcore.AddSync(writer),
+			zap.CombineWriteSyncers(syncWriters...),
 			zapcore.WarnLevel,
 		)
 	case ErrorLevel:
 		core = zapcore.NewCore(
 			zapcore.NewJSONEncoder(cfg.EncoderConfig),
-			zapcore.AddSync(writer),
+			zap.CombineWriteSyncers(syncWriters...),
 			zapcore.ErrorLevel,
 		)
 	case PanicLevel:
 		core = zapcore.NewCore(
 			zapcore.NewJSONEncoder(cfg.EncoderConfig),
-			zapcore.AddSync(writer),
+			zap.CombineWriteSyncers(syncWriters...),
 			zapcore.PanicLevel,
 		)
 	case FatalLevel:
 		core = zapcore.NewCore(
 			zapcore.NewJSONEncoder(cfg.EncoderConfig),
-			zapcore.AddSync(writer),
+			zap.CombineWriteSyncers(syncWriters...),
 			zapcore.FatalLevel,
 		)
 	default:
 		core = zapcore.NewCore(
 			zapcore.NewJSONEncoder(cfg.EncoderConfig),
-			zapcore.AddSync(writer),
+			zap.CombineWriteSyncers(syncWriters...),
 			zapcore.DebugLevel,
 		)
 	}
@@ -131,8 +88,8 @@ func New(level Level, writer io.Writer) *Log {
 	zapLogger := zap.New(core)
 	// create the instance of Log and returns it
 	return &Log{
-		Logger: zapLogger,
-		output: writer,
+		Logger:  zapLogger,
+		outputs: writers,
 	}
 }
 
@@ -233,8 +190,8 @@ func (l *Log) LogLevel() Level {
 }
 
 // LogOutput returns the log output that is set
-func (l *Log) LogOutput() io.Writer {
-	return l.output
+func (l *Log) LogOutput() []io.Writer {
+	return l.outputs
 }
 
 // StdLogger returns the standard logger associated to the logger

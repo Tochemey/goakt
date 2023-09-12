@@ -39,7 +39,7 @@ type Logger interface {
 	// LogLevel returns the log level being used
 	LogLevel() Level
 	// LogOutput returns the log output that is set
-	LogOutput() io.Writer
+	LogOutput() []io.Writer
 	// StdLogger returns the standard logger associated to the logger
 	StdLogger() *golog.Logger
 }

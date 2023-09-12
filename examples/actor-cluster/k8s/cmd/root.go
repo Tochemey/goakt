@@ -4,8 +4,8 @@ import (
 	"os"
 
 	"github.com/joho/godotenv"
+	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
-	"github.com/tochemey/goakt/log"
 )
 
 // rootCmd represents the base command when called without any subcommands
@@ -26,6 +26,6 @@ func Execute() {
 func init() {
 	err := godotenv.Load()
 	if err != nil && !os.IsNotExist(err) {
-		log.Fatalf("Error loading .env file, %s", err.Error())
+		panic(errors.Wrap(err, "Error loading .env file,"))
 	}
 }
