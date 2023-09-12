@@ -533,7 +533,7 @@ func TestActorRemoting(t *testing.T) {
 	assert.NotNil(t, actorRef1)
 
 	// create an exchanger two
-	actorName2 := "Exchange1"
+	actorName2 := "Exchange2"
 	actorRef2 := sys.Spawn(ctx, actorName2, &Exchanger{})
 	assert.NotNil(t, actorRef2)
 
@@ -562,7 +562,10 @@ func TestActorRemoting(t *testing.T) {
 	// stop the actor after some time
 	time.Sleep(time.Second)
 
-	err = sys.Stop(ctx)
+	t.Cleanup(func() {
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
+	})
 }
 func TestActorHandle(t *testing.T) {
 	ctx := context.TODO()
