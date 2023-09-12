@@ -34,7 +34,7 @@ func (p *Tester) PreStart(context.Context) error {
 	return nil
 }
 
-// Stop gracefully shuts down the given actor
+// Shutdown gracefully shuts down the given actor
 func (p *Tester) PostStop(context.Context) error {
 	return nil
 }

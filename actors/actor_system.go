@@ -502,7 +502,7 @@ func (x *actorSystem) Stop(ctx context.Context) error {
 	x.housekeeperStopSig <- Unit{}
 
 	// add a span context
-	ctx, span := telemetry.SpanContext(ctx, "Stop")
+	ctx, span := telemetry.SpanContext(ctx, "Shutdown")
 	defer span.End()
 	x.logger.Infof("%s is shutting down..:)", x.name)
 

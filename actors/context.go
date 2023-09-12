@@ -53,7 +53,9 @@ type ReceiveContext interface {
 	UnstashAll()
 	// Tell sends an asynchronous message to another PID
 	Tell(to PID, message proto.Message)
-	// Ask sends a synchronous message to another actor and expect a response.
+	// Ask sends a synchronous message to another actor and expect a response. This method is good when interacting with a child actor.
+	// Ask has a timeout which can cause the sender to panic. When ask times out, the receiving actor does not know and may still process the message.
+	// It is recommended to set a good timeout to quickly receive response and try to avoid false positives
 	Ask(to PID, message proto.Message) (response proto.Message)
 	// RemoteTell sends a message to an actor remotely without expecting any reply
 	RemoteTell(to *addresspb.Address, message proto.Message)
@@ -63,6 +65,19 @@ type ReceiveContext interface {
 	// RemoteLookup look for an actor address on a remote node. If the actorSystem is nil then the lookup will be done
 	// using the same actor system as the PID actor system
 	RemoteLookup(host string, port int, name string) (addr *addresspb.Address)
+	// Shutdown gracefully shuts down the given actor
+	// All current messages in the mailbox will be processed before the actor shutdown after a period of time
+	// that can be configured. All child actors will be gracefully shutdown.
+	Shutdown()
+	// Spawn creates a child actor or panic
+	Spawn(name string, actor Actor) PID
+	// Children returns the list of all the children of the given actor
+	Children() []PID
+	// Child returns the named child actor if it is alive
+	Child(name string) PID
+	// Stop forces the child Actor under the given name to terminate after it finishes processing its current message.
+	// Nothing happens if child is already stopped.
+	Stop(child PID)
 }
 
 type receiveContext struct {
@@ -192,19 +207,21 @@ func (c *receiveContext) Tell(to PID, message proto.Message) {
 	defer c.mu.Unlock()
 	// create a new context from the parent context
 	ctx := context.WithoutCancel(c.ctx)
-	// send the message to the recipient and let it crash
+	// send the message to the recipient or let it crash
 	if err := c.recipient.Tell(ctx, to, message); err != nil {
 		panic(err)
 	}
 }
 
-// Ask sends a synchronous message to another actor and expect a response.
+// Ask sends a synchronous message to another actor and expect a response. This method is good when interacting with a child actor.
+// Ask has a timeout which can cause the sender to panic. When ask times out, the receiving actor does not know and may still process the message.
+// It is recommended to set a good timeout to quickly receive response and try to avoid false positives
 func (c *receiveContext) Ask(to PID, message proto.Message) (response proto.Message) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	// create a new context from the parent context
 	ctx := context.WithoutCancel(c.ctx)
-	// send the message to the recipient and let it crash
+	// send the message to the recipient or let it crash
 	reply, err := c.recipient.Ask(ctx, to, message)
 	if err != nil {
 		panic(err)
@@ -218,7 +235,7 @@ func (c *receiveContext) RemoteTell(to *addresspb.Address, message proto.Message
 	defer c.mu.Unlock()
 	// create a new context from the parent context
 	ctx := context.WithoutCancel(c.ctx)
-	// send the message to the recipient and let it crash
+	// send the message to the recipient or let it crash
 	if err := c.recipient.RemoteTell(ctx, to, message); err != nil {
 		panic(err)
 	}
@@ -231,7 +248,7 @@ func (c *receiveContext) RemoteAsk(to *addresspb.Address, message proto.Message)
 	defer c.mu.Unlock()
 	// create a new context from the parent context
 	ctx := context.WithoutCancel(c.ctx)
-	// send the message to the recipient and let it crash
+	// send the message to the recipient or let it crash
 	reply, err := c.recipient.RemoteAsk(ctx, to, message)
 	if err != nil {
 		panic(err)
@@ -246,10 +263,72 @@ func (c *receiveContext) RemoteLookup(host string, port int, name string) (addr 
 	defer c.mu.Unlock()
 	// create a new context from the parent context
 	ctx := context.WithoutCancel(c.ctx)
-	// perform the lookup and let it crash
+	// perform the lookup or let it crash
 	remoteAddr, err := c.recipient.RemoteLookup(ctx, host, port, name)
 	if err != nil {
 		panic(err)
 	}
 	return remoteAddr
+}
+
+// Shutdown gracefully shuts down the given actor
+// All current messages in the mailbox will be processed before the actor shutdown after a period of time
+// that can be configured. All child actors will be gracefully shutdown.
+func (c *receiveContext) Shutdown() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	// create a new context from the parent context
+	ctx := context.WithoutCancel(c.ctx)
+	if err := c.recipient.Shutdown(ctx); err != nil {
+		panic(err)
+	}
+}
+
+// Spawn creates a child actor or panic
+func (c *receiveContext) Spawn(name string, actor Actor) PID {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	// create a new context from the parent context
+	ctx := context.WithoutCancel(c.ctx)
+	// create the child actor or let it crash
+	pid, err := c.recipient.SpawnChild(ctx, name, actor)
+	if err != nil {
+		panic(err)
+	}
+	return pid
+}
+
+// Children returns the list of all the children of the given actor
+func (c *receiveContext) Children() []PID {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	// create a new context from the parent context
+	ctx := context.WithoutCancel(c.ctx)
+	return c.recipient.Children(ctx)
+}
+
+// Child returns the named child actor if it is alive
+func (c *receiveContext) Child(name string) PID {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	// create a new context from the parent context
+	ctx := context.WithoutCancel(c.ctx)
+	pid, err := c.recipient.Child(ctx, name)
+	if err != nil {
+		panic(err)
+	}
+	return pid
+}
+
+// Stop forces the child Actor under the given name to terminate after it finishes processing its current message.
+// Nothing happens if child is already stopped. However, it panics when the child cannot be stopped.
+func (c *receiveContext) Stop(child PID) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	// create a new context from the parent context
+	ctx := context.WithoutCancel(c.ctx)
+	err := c.recipient.Stop(ctx, child)
+	if err != nil {
+		panic(err)
+	}
 }

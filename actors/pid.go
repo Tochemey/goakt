@@ -29,9 +29,9 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 )
 
-// WatchMan is used to handle parent child relationship.
+// watchMan is used to handle parent child relationship.
 // This helps handle error propagation from a child actor using any of supervisory strategies
-type WatchMan struct {
+type watchMan struct {
 	ID      PID        // the ID of the actor watching
 	ErrChan chan error // ErrChan the channel where to pass error message
 	Done    chan Unit  // Done when watching is completed
@@ -102,18 +102,24 @@ type PID interface {
 	// RemoteLookup look for an actor address on a remote node. If the actorSystem is nil then the lookup will be done
 	// using the same actor system as the PID actor system
 	RemoteLookup(ctx context.Context, host string, port int, name string) (addr *addresspb.Address, err error)
-	// RestartCount returns the number of times the actor has restarted
-	RestartCount(ctx context.Context) uint64
+	// StartCount returns the number of times the actor has started
+	StartCount(ctx context.Context) uint64
 	// MailboxSize returns the mailbox size a given time
 	MailboxSize(ctx context.Context) uint64
-	// Children returns the list of all the children of the given actor
+	// Children returns the list of all the children of the given actor that are still alive
+	// or an empty list.
 	Children(ctx context.Context) []PID
+	// Child returns the named child actor if it is alive
+	Child(ctx context.Context, name string) (PID, error)
+	// Stop forces the child Actor under the given name to terminate after it finishes processing its current message.
+	// Nothing happens if child is already stopped.
+	Stop(ctx context.Context, pid PID) error
 	// StashSize returns the stash buffer size
 	StashSize(ctx context.Context) uint64
 	// push a message to the actor's receiveContextBuffer
 	doReceive(ctx ReceiveContext)
 	// watchers returns the list of watchMen
-	watchers() *slices.ConcurrentSlice[*WatchMan]
+	watchers() *slices.ConcurrentSlice[*watchMan]
 	// setBehavior is a utility function that helps set the actor behavior
 	setBehavior(behavior Behavior)
 	// setBehaviorStacked adds a behavior to the actor's behaviors
@@ -130,6 +136,8 @@ type PID interface {
 	unstashAll() error
 	// unstash unstashes the oldest message in the stash and prepends to the mailbox
 	unstash() error
+
+	removeChild(ctx context.Context, pid PID)
 }
 
 // pid specifies an actor unique process
@@ -172,7 +180,7 @@ type pid struct {
 	haltPassivationLnr chan Unit
 
 	// set of watchMen watching the given actor
-	watchMen *slices.ConcurrentSlice[*WatchMan]
+	watchMen *slices.ConcurrentSlice[*watchMan]
 
 	// hold the list of the children
 	children *pidMap
@@ -186,7 +194,7 @@ type pid struct {
 	// definition of the various counters
 	panicCounter           *atomic.Uint64
 	receivedMessageCounter *atomic.Uint64
-	restartCounter         *atomic.Uint64
+	startCounter           *atomic.Uint64
 	lastProcessingDuration *atomic.Duration
 
 	// pidSemaphore that helps synchronize the pid in a concurrent environment
@@ -236,11 +244,11 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 		panicCounter:           atomic.NewUint64(0),
 		receivedMessageCounter: atomic.NewUint64(0),
 		lastProcessingDuration: atomic.NewDuration(0),
-		restartCounter:         atomic.NewUint64(0),
+		startCounter:           atomic.NewUint64(0),
 		mailboxSize:            defaultMailboxSize,
 		children:               newPIDMap(10),
 		supervisorStrategy:     DefaultSupervisoryStrategy,
-		watchMen:               slices.NewConcurrentSlice[*WatchMan](),
+		watchMen:               slices.NewConcurrentSlice[*watchMan](),
 		telemetry:              telemetry.New(),
 		actorPath:              actorPath,
 		pidSemaphore:           sync.RWMutex{},
@@ -295,7 +303,26 @@ func (p *pid) ActorHandle() Actor {
 	return p.Actor
 }
 
-// Children returns the list of all the children of the given actor
+// Child returns the named child actor if it is alive
+func (p *pid) Child(ctx context.Context, name string) (PID, error) {
+	// add a span context
+	ctx, span := telemetry.SpanContext(ctx, "Child")
+	defer span.End()
+	// create the child actor path
+	childActorPath := NewPath(name, p.ActorPath().Address()).WithParent(p.ActorPath())
+
+	// check whether the child actor already exist and just return the PID
+	if cid, ok := p.children.Get(childActorPath); ok {
+		// check whether the actor is stopped
+		if cid != nil && !cid.IsRunning() {
+			return nil, ErrDead
+		}
+		return cid, nil
+	}
+	return nil, ErrActorNotFound(childActorPath.String())
+}
+
+// Children returns the list of all the children of the given actor that are still alive or an empty list
 func (p *pid) Children(ctx context.Context) []PID {
 	// add a span context
 	ctx, span := telemetry.SpanContext(ctx, "Children")
@@ -303,13 +330,51 @@ func (p *pid) Children(ctx context.Context) []PID {
 	p.pidSemaphore.RLock()
 	kiddos := p.children.List()
 	p.pidSemaphore.RUnlock()
-	return kiddos
+
+	// create the list of alive children
+	pids := make([]PID, 0, len(kiddos))
+	for _, child := range kiddos {
+		if child.IsRunning() {
+			pids = append(pids, child)
+		}
+	}
+
+	return pids
+}
+
+// Stop forces the child Actor under the given name to terminate after it finishes processing its current message.
+// Nothing happens if child is already stopped.
+func (p *pid) Stop(ctx context.Context, pid PID) error {
+	// add a span context
+	ctx, span := telemetry.SpanContext(ctx, "Stop")
+	defer span.End()
+
+	// first check whether the actor is ready to stop another actor
+	if !p.IsRunning() {
+		return ErrDead
+	}
+
+	// check the pid is not nil
+	if pid == nil || pid == NoSender {
+		return ErrUndefinedActor
+	}
+
+	// grab the actor path
+	path := pid.ActorPath()
+	if cid, ok := p.children.Get(path); ok {
+		if !cid.IsRunning() {
+			return nil
+		}
+		// stop the actor
+		return cid.Shutdown(ctx)
+	}
+	return ErrActorNotFound(path.String())
 }
 
 // IsRunning returns true when the actor is alive ready to process messages and false
 // when the actor is stopped or not started at all
 func (p *pid) IsRunning() bool {
-	return p.isRunning.Load()
+	return p != nil && p != NoSender && p.isRunning.Load()
 }
 
 // ActorSystem returns the actor system
@@ -387,8 +452,6 @@ func (p *pid) Restart(ctx context.Context) error {
 		return err
 	}
 
-	// increment the restart counter
-	p.restartCounter.Inc()
 	// successful restart
 	return nil
 }
@@ -400,7 +463,7 @@ func (p *pid) SpawnChild(ctx context.Context, name string, actor Actor) (PID, er
 	defer span.End()
 	// first check whether the actor is ready to start another actor
 	if !p.IsRunning() {
-		return nil, ErrNotReady
+		return nil, ErrDead
 	}
 
 	// create the child actor path
@@ -481,12 +544,12 @@ func (p *pid) ErrorsCount(ctx context.Context) uint64 {
 	return p.panicCounter.Load()
 }
 
-// RestartCount returns the number of times the actor has restarted
-func (p *pid) RestartCount(ctx context.Context) uint64 {
+// StartCount returns the number of times the actor has restarted
+func (p *pid) StartCount(ctx context.Context) uint64 {
 	// add a span context
-	ctx, span := telemetry.SpanContext(ctx, "RestartCount")
+	ctx, span := telemetry.SpanContext(ctx, "StartCount")
 	defer span.End()
-	return p.restartCounter.Load()
+	return p.startCounter.Load()
 }
 
 // Ask sends a synchronous message to another actor and expect a response.
@@ -497,7 +560,7 @@ func (p *pid) Ask(ctx context.Context, to PID, message proto.Message) (response 
 	defer span.End()
 	// make sure the actor is live
 	if !to.IsRunning() {
-		return nil, ErrNotReady
+		return nil, ErrDead
 	}
 
 	// acquire a lock to set the message context
@@ -540,7 +603,7 @@ func (p *pid) Tell(ctx context.Context, to PID, message proto.Message) error {
 
 	// make sure the recipient actor is live
 	if !to.IsRunning() {
-		return ErrNotReady
+		return ErrDead
 	}
 
 	// acquire a lock to set the message context
@@ -731,7 +794,7 @@ func (p *pid) Shutdown(ctx context.Context) error {
 // Watch a pid for errors, and send on the returned channel if an error occurred
 func (p *pid) Watch(pid PID) {
 	// create a watcher
-	w := &WatchMan{
+	w := &watchMan{
 		ID:      p,
 		ErrChan: make(chan error, 1),
 		Done:    make(chan Unit, 1),
@@ -760,7 +823,7 @@ func (p *pid) UnWatch(pid PID) {
 }
 
 // Watchers return the list of watchMen
-func (p *pid) watchers() *slices.ConcurrentSlice[*WatchMan] {
+func (p *pid) watchers() *slices.ConcurrentSlice[*watchMan] {
 	return p.watchMen
 }
 
@@ -814,6 +877,8 @@ func (p *pid) init(ctx context.Context) {
 	// set the actor is ready
 	p.pidSemaphore.Lock()
 	p.isRunning.Store(true)
+	// increment the start counter
+	p.startCounter.Inc()
 	p.pidSemaphore.Unlock()
 	// add some logging info
 	p.logger.Info("Initialization process successfully completed.")
@@ -830,9 +895,9 @@ func (p *pid) reset() {
 	p.panicCounter.Store(0)
 	p.receivedMessageCounter.Store(0)
 	p.lastProcessingDuration.Store(0)
-	p.restartCounter.Store(0)
+	p.startCounter.Store(0)
 	p.children = newPIDMap(10)
-	p.watchMen = slices.NewConcurrentSlice[*WatchMan]()
+	p.watchMen = slices.NewConcurrentSlice[*watchMan]()
 	p.telemetry = telemetry.New()
 	// reset the mailbox
 	p.mailbox.Reset()
@@ -861,6 +926,8 @@ func (p *pid) freeWatchers(ctx context.Context) {
 				_ = p.Tell(ctx, watcher.ID, terminated)
 				// unwatch the child actor
 				watcher.ID.UnWatch(p)
+				// remove the actor from the list of watcher's children
+				watcher.ID.removeChild(ctx, p)
 			}
 		}
 	}
@@ -912,11 +979,11 @@ func (p *pid) registerMetrics() error {
 	_, err = meter.RegisterCallback(func(ctx context.Context, observer metric.Observer) error {
 		observer.ObserveInt64(metrics.ReceivedCount, int64(p.ReceivedCount(ctx)), metric.WithAttributes(labels...))
 		observer.ObserveInt64(metrics.PanicCount, int64(p.ErrorsCount(ctx)), metric.WithAttributes(labels...))
-		observer.ObserveInt64(metrics.RestartedCount, int64(p.RestartCount(ctx)), metric.WithAttributes(labels...))
+		observer.ObserveInt64(metrics.StartCount, int64(p.StartCount(ctx)), metric.WithAttributes(labels...))
 		observer.ObserveInt64(metrics.MailboxSize, int64(p.MailboxSize(ctx)), metric.WithAttributes(labels...))
 		return nil
 	}, metrics.ReceivedCount,
-		metrics.RestartedCount,
+		metrics.StartCount,
 		metrics.PanicCount,
 		metrics.MailboxSize)
 
@@ -969,7 +1036,7 @@ func (p *pid) handleReceived(received ReceiveContext) {
 }
 
 // supervise watches for child actor's failure and act based upon the supervisory strategy
-func (p *pid) supervise(cid PID, watcher *WatchMan) {
+func (p *pid) supervise(cid PID, watcher *watchMan) {
 	for {
 		select {
 		case <-watcher.Done:
@@ -1174,4 +1241,29 @@ func (p *pid) doStop(ctx context.Context) error {
 	// reset the actor
 	p.reset()
 	return nil
+}
+
+func (p *pid) removeChild(ctx context.Context, pid PID) {
+	// add a span context
+	ctx, span := telemetry.SpanContext(ctx, "RemoveChild")
+	defer span.End()
+
+	// first check whether the actor is ready to stop another actor
+	if !p.IsRunning() {
+		return
+	}
+
+	// check the pid is not nil
+	if pid == nil || pid == NoSender {
+		return
+	}
+
+	// grab the actor path
+	path := pid.ActorPath()
+	if cid, ok := p.children.Get(path); ok {
+		if cid.IsRunning() {
+			return
+		}
+		p.children.Delete(path)
+	}
 }

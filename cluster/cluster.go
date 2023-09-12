@@ -223,7 +223,7 @@ func (c *Cluster) Stop(ctx context.Context) error {
 
 	// let us stop the server
 	if err := c.server.Shutdown(ctx); err != nil {
-		logger.Error(errors.Wrap(err, "failed to Stop  GoAkt Cluster....💥"))
+		logger.Error(errors.Wrap(err, "failed to Shutdown  GoAkt Cluster....💥"))
 		return err
 	}
 

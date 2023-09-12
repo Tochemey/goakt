@@ -82,7 +82,7 @@ func TestAsk(t *testing.T) {
 		actorRef := sys.Spawn(ctx, actorName, actor)
 		assert.NotNil(t, actorRef)
 
-		// Stop the actor after some time
+		// Shutdown the actor after some time
 		time.Sleep(time.Second)
 		require.NoError(t, actorRef.Shutdown(ctx))
 
@@ -92,7 +92,7 @@ func TestAsk(t *testing.T) {
 		reply, err := Ask(ctx, actorRef, message, receivingTimeout)
 		// perform some assertions
 		require.Error(t, err)
-		assert.EqualError(t, err, ErrNotReady.Error())
+		assert.EqualError(t, err, ErrDead.Error())
 		assert.Nil(t, reply)
 
 		// stop the actor after some time
@@ -211,7 +211,7 @@ func TestTell(t *testing.T) {
 		actorRef := sys.Spawn(ctx, actorName, actor)
 		assert.NotNil(t, actorRef)
 
-		// Stop the actor after some time
+		// Shutdown the actor after some time
 		time.Sleep(time.Second)
 		require.NoError(t, actorRef.Shutdown(ctx))
 
@@ -221,7 +221,7 @@ func TestTell(t *testing.T) {
 		err = Tell(ctx, actorRef, message)
 		// perform some assertions
 		require.Error(t, err)
-		assert.EqualError(t, err, ErrNotReady.Error())
+		assert.EqualError(t, err, ErrDead.Error())
 
 		// stop the actor after some time
 		ctx, cancel := context.WithTimeout(ctx, time.Second)

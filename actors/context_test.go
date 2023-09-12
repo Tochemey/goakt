@@ -113,7 +113,7 @@ func TestReceiveContext(t *testing.T) {
 		assert.NoError(t, pid1.Shutdown(ctx))
 		assert.NoError(t, pid2.Shutdown(ctx))
 	})
-	t.Run("With panic attack Tell", func(t *testing.T) {
+	t.Run("With panic Tell", func(t *testing.T) {
 		ctx := context.TODO()
 		// create a Ping actor
 		opts := []pidOption{
@@ -194,7 +194,7 @@ func TestReceiveContext(t *testing.T) {
 		assert.NoError(t, pid1.Shutdown(ctx))
 		assert.NoError(t, pid2.Shutdown(ctx))
 	})
-	t.Run("With panic attack Ask", func(t *testing.T) {
+	t.Run("With panic Ask", func(t *testing.T) {
 		ctx := context.TODO()
 		// create a Ping actor
 		opts := []pidOption{
@@ -299,7 +299,7 @@ func TestReceiveContext(t *testing.T) {
 			assert.NoError(t, sys.Stop(ctx))
 		})
 	})
-	t.Run("With panic attack RemoteAsk", func(t *testing.T) {
+	t.Run("With panic RemoteAsk", func(t *testing.T) {
 		// create the context
 		ctx := context.TODO()
 		// define the logger to use
@@ -424,7 +424,7 @@ func TestReceiveContext(t *testing.T) {
 			assert.NoError(t, sys.Stop(ctx))
 		})
 	})
-	t.Run("With panic attack RemoteTell", func(t *testing.T) {
+	t.Run("With panic RemoteTell", func(t *testing.T) {
 		// create the context
 		ctx := context.TODO()
 		// define the logger to use
@@ -487,7 +487,7 @@ func TestReceiveContext(t *testing.T) {
 			assert.NoError(t, sys.Stop(ctx))
 		})
 	})
-	t.Run("With panic attack RemoteLookup", func(t *testing.T) {
+	t.Run("With panic RemoteLookup", func(t *testing.T) {
 		// create the context
 		ctx := context.TODO()
 		// define the logger to use
@@ -543,6 +543,329 @@ func TestReceiveContext(t *testing.T) {
 		t.Cleanup(func() {
 			assert.NoError(t, pid1.Shutdown(ctx))
 			assert.NoError(t, sys.Stop(ctx))
+		})
+	})
+	t.Run("With happy path Shutdown", func(t *testing.T) {
+		ctx := context.TODO()
+		// create a Ping actor
+		opts := []pidOption{
+			withInitMaxRetries(1),
+			withCustomLogger(log.DiscardLogger),
+		}
+
+		// create actor1
+		actor1 := &Exchanger{}
+		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
+		pid1 := newPID(ctx, actorPath1, actor1, opts...)
+		require.NotNil(t, pid1)
+
+		// create an instance of receive context
+		context := &receiveContext{
+			ctx:            ctx,
+			message:        new(testpb.TestSend),
+			sender:         NoSender,
+			recipient:      pid1,
+			mu:             sync.Mutex{},
+			isAsyncMessage: true,
+		}
+
+		assert.NotPanics(t, func() {
+			context.Shutdown()
+		})
+	})
+	t.Run("With happy path SpawnChild", func(t *testing.T) {
+		ctx := context.TODO()
+		actorPath := NewPath("Parent", NewAddress("sys", "host", 1))
+
+		// create the parent actor
+		parent := newPID(ctx, actorPath,
+			NewMonitor(),
+			withInitMaxRetries(1),
+			withCustomLogger(log.DiscardLogger),
+			withSendReplyTimeout(receivingTimeout))
+		assert.NotNil(t, parent)
+
+		// create an instance of receive context
+		context := &receiveContext{
+			ctx:            ctx,
+			message:        new(testpb.TestSend),
+			sender:         NoSender,
+			recipient:      parent,
+			mu:             sync.Mutex{},
+			isAsyncMessage: true,
+		}
+
+		// create the child actor
+		name := "monitored"
+		child := context.Spawn(name, NewMonitored())
+		assert.NotNil(t, child)
+		assert.Len(t, context.Children(), 1)
+
+		actual := context.Child(name)
+		require.NotNil(t, actual)
+		assert.Equal(t, child.ActorPath().String(), actual.ActorPath().String())
+
+		t.Cleanup(func() {
+			context.Shutdown()
+		})
+	})
+	t.Run("With panic SpawnChild", func(t *testing.T) {
+		ctx := context.TODO()
+		actorPath := NewPath("Parent", NewAddress("sys", "host", 1))
+
+		// create the parent actor
+		parent := newPID(ctx, actorPath,
+			NewMonitor(),
+			withInitMaxRetries(1),
+			withCustomLogger(log.DiscardLogger),
+			withSendReplyTimeout(receivingTimeout))
+		assert.NotNil(t, parent)
+
+		// create an instance of receive context
+		context := &receiveContext{
+			ctx:            ctx,
+			message:        new(testpb.TestSend),
+			sender:         NoSender,
+			recipient:      parent,
+			mu:             sync.Mutex{},
+			isAsyncMessage: true,
+		}
+
+		// stop the actor
+		context.Shutdown()
+
+		// create the child actor
+		assert.Panics(t, func() {
+			context.Spawn("SpawnChild", NewMonitored())
+		})
+	})
+	t.Run("With panic Child", func(t *testing.T) {
+		ctx := context.TODO()
+		actorPath := NewPath("Parent", NewAddress("sys", "host", 1))
+
+		// create the parent actor
+		parent := newPID(ctx, actorPath,
+			NewMonitor(),
+			withInitMaxRetries(1),
+			withCustomLogger(log.DiscardLogger),
+			withSendReplyTimeout(receivingTimeout))
+		assert.NotNil(t, parent)
+
+		// create an instance of receive context
+		context := &receiveContext{
+			ctx:            ctx,
+			message:        new(testpb.TestSend),
+			sender:         NoSender,
+			recipient:      parent,
+			mu:             sync.Mutex{},
+			isAsyncMessage: true,
+		}
+
+		// create the child actor
+		name := "monitored"
+		child := context.Spawn(name, NewMonitored())
+		assert.NotNil(t, child)
+		assert.Len(t, context.Children(), 1)
+
+		// stop the child
+		require.NoError(t, child.Shutdown(ctx))
+
+		assert.Panics(t, func() {
+			context.Child(name)
+		})
+
+		t.Cleanup(func() {
+			context.Shutdown()
+		})
+	})
+	t.Run("With happy path Stop", func(t *testing.T) {
+		ctx := context.TODO()
+		actorPath := NewPath("Parent", NewAddress("sys", "host", 1))
+
+		// create the parent actor
+		parent := newPID(ctx, actorPath,
+			NewMonitor(),
+			withInitMaxRetries(1),
+			withCustomLogger(log.DiscardLogger),
+			withSendReplyTimeout(receivingTimeout))
+		assert.NotNil(t, parent)
+
+		// create an instance of receive context
+		context := &receiveContext{
+			ctx:            ctx,
+			message:        new(testpb.TestSend),
+			sender:         NoSender,
+			recipient:      parent,
+			mu:             sync.Mutex{},
+			isAsyncMessage: true,
+		}
+
+		// create the child actor
+		name := "monitored"
+		child := context.Spawn(name, NewMonitored())
+		assert.NotNil(t, child)
+		assert.Len(t, context.Children(), 1)
+
+		// stop the child actor
+		assert.NotPanics(t, func() {
+			context.Stop(child)
+		})
+
+		time.Sleep(time.Second)
+		assert.Empty(t, context.Children())
+		t.Cleanup(func() {
+			context.Shutdown()
+		})
+	})
+	t.Run("With child actor Stop freeing up parent link", func(t *testing.T) {
+		ctx := context.TODO()
+		actorPath := NewPath("Parent", NewAddress("sys", "host", 1))
+
+		// create the parent actor
+		parent := newPID(ctx, actorPath,
+			NewMonitor(),
+			withInitMaxRetries(1),
+			withCustomLogger(log.DiscardLogger),
+			withSendReplyTimeout(receivingTimeout))
+		assert.NotNil(t, parent)
+
+		// create an instance of receive context
+		context := &receiveContext{
+			ctx:            ctx,
+			message:        new(testpb.TestSend),
+			sender:         NoSender,
+			recipient:      parent,
+			mu:             sync.Mutex{},
+			isAsyncMessage: true,
+		}
+
+		// create the child actor
+		name := "monitored"
+		child := context.Spawn(name, NewMonitored())
+		assert.NotNil(t, child)
+		assert.Len(t, context.Children(), 1)
+
+		// let us stop the child actor
+		require.NoError(t, child.Shutdown(ctx))
+
+		time.Sleep(time.Second)
+
+		assert.Empty(t, context.Children())
+
+		time.Sleep(time.Second)
+		assert.Empty(t, context.Children())
+		t.Cleanup(func() {
+			context.Shutdown()
+		})
+	})
+	t.Run("With panic Stop: child not defined", func(t *testing.T) {
+		ctx := context.TODO()
+		actorPath := NewPath("Parent", NewAddress("sys", "host", 1))
+
+		// create the parent actor
+		parent := newPID(ctx, actorPath,
+			NewMonitor(),
+			withInitMaxRetries(1),
+			withCustomLogger(log.DiscardLogger),
+			withSendReplyTimeout(receivingTimeout))
+		assert.NotNil(t, parent)
+
+		// create an instance of receive context
+		context := &receiveContext{
+			ctx:            ctx,
+			message:        new(testpb.TestSend),
+			sender:         NoSender,
+			recipient:      parent,
+			mu:             sync.Mutex{},
+			isAsyncMessage: true,
+		}
+
+		time.Sleep(time.Second)
+		// stop the child actor
+		assert.Panics(t, func() {
+			context.Stop(NoSender)
+		})
+
+		t.Cleanup(func() {
+			context.Shutdown()
+		})
+	})
+	t.Run("With panic Stop: parent is dead", func(t *testing.T) {
+		ctx := context.TODO()
+		actorPath := NewPath("Parent", NewAddress("sys", "host", 1))
+
+		// create the parent actor
+		parent := newPID(ctx, actorPath,
+			NewMonitor(),
+			withInitMaxRetries(1),
+			withCustomLogger(log.DiscardLogger),
+			withSendReplyTimeout(receivingTimeout))
+		assert.NotNil(t, parent)
+
+		// create an instance of receive context
+		context := &receiveContext{
+			ctx:            ctx,
+			message:        new(testpb.TestSend),
+			sender:         NoSender,
+			recipient:      parent,
+			mu:             sync.Mutex{},
+			isAsyncMessage: true,
+		}
+
+		name := "monitored"
+		child := context.Spawn(name, NewMonitored())
+		assert.NotNil(t, child)
+		assert.Len(t, context.Children(), 1)
+
+		time.Sleep(time.Second)
+
+		context.Shutdown()
+
+		time.Sleep(time.Second)
+
+		// stop the child actor
+		assert.Panics(t, func() {
+			context.Stop(child)
+		})
+	})
+	t.Run("With panic Stop: actor not found", func(t *testing.T) {
+		ctx := context.TODO()
+		actorPath := NewPath("parent", NewAddress("sys", "host", 1))
+
+		// create the parent actor
+		parent := newPID(ctx, actorPath,
+			NewMonitor(),
+			withInitMaxRetries(1),
+			withCustomLogger(log.DiscardLogger),
+			withSendReplyTimeout(receivingTimeout))
+		assert.NotNil(t, parent)
+
+		// create an instance of receive context
+		context := &receiveContext{
+			ctx:            ctx,
+			message:        new(testpb.TestSend),
+			sender:         NoSender,
+			recipient:      parent,
+			mu:             sync.Mutex{},
+			isAsyncMessage: true,
+		}
+
+		// create the child actor
+		childPath := NewPath("child", NewAddress("sys", "host", 1))
+		child := newPID(ctx, childPath,
+			NewMonitor(),
+			withInitMaxRetries(1),
+			withCustomLogger(log.DiscardLogger),
+			withSendReplyTimeout(receivingTimeout))
+
+		// stop the child actor
+		assert.Panics(t, func() {
+			context.Stop(child)
+		})
+
+		t.Cleanup(func() {
+			context.Shutdown()
+			assert.NoError(t, child.Shutdown(ctx))
 		})
 	})
 }

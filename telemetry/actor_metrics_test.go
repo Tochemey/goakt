@@ -14,7 +14,7 @@ func TestNewMetrics(t *testing.T) {
 	assert.NotNil(t, metrics)
 	assert.NotNil(t, metrics.ReceivedDurationHistogram)
 	assert.NotNil(t, metrics.ReceivedCount)
-	assert.NotNil(t, metrics.RestartedCount)
+	assert.NotNil(t, metrics.StartCount)
 	assert.NotNil(t, metrics.MailboxSize)
 	assert.NotNil(t, metrics.PanicCount)
 }

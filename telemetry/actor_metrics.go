@@ -13,8 +13,8 @@ type ActorMetrics struct {
 	PanicCount metric.Int64ObservableCounter
 	// captures the actor mailbox size
 	MailboxSize metric.Int64ObservableGauge
-	// captures the number of time the actor has restarted
-	RestartedCount metric.Int64ObservableCounter
+	// captures the number of time the actor has started
+	StartCount metric.Int64ObservableCounter
 	// captures the count of messages received by the actor
 	ReceivedCount metric.Int64ObservableCounter
 	// captures the duration of message received and processed
@@ -42,10 +42,10 @@ func NewMetrics(meter metric.Meter) (*ActorMetrics, error) {
 		return nil, fmt.Errorf("failed to create mailbix count instrument, %v", err)
 	}
 
-	if metrics.RestartedCount, err = meter.Int64ObservableCounter(
-		restartedCounterName,
-		metric.WithDescription("The total number of restart")); err != nil {
-		return nil, fmt.Errorf("failed to create restart count instrument, %v", err)
+	if metrics.StartCount, err = meter.Int64ObservableCounter(
+		startedCounterName,
+		metric.WithDescription("The total number of start")); err != nil {
+		return nil, fmt.Errorf("failed to create start count instrument, %v", err)
 	}
 
 	if metrics.ReceivedCount, err = meter.Int64ObservableCounter(

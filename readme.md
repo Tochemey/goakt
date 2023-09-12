@@ -70,7 +70,7 @@ Also, check reference section at the end of the post for more material regarding
               id [`PID`](./actors/pid.go) `MailboxSize` method
             - Total number of messages handled at a given time. That information can be accessed via the process
               id [`PID`](./actors/pid.go) `ReceivedCount` method
-            - Total number of restart. This is accessible via the process id [`PID`](./actors/pid.go) `RestartCount`
+            - Total number of start. This is accessible via the process id [`PID`](./actors/pid.go) `StartCount`
               method
             - Total number of panic attacks. This is accessible via the process
               id [`PID`](./actors/pid.go) `ErrorsCount` method

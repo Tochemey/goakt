@@ -84,7 +84,7 @@ func TestActorWithPassivation(t *testing.T) {
 	// let us send a message to the actor
 	err := Tell(ctx, pid, new(testpb.TestSend))
 	assert.Error(t, err)
-	assert.EqualError(t, err, ErrNotReady.Error())
+	assert.EqualError(t, err, ErrDead.Error())
 }
 func TestActorWithReply(t *testing.T) {
 	t.Run("With happy path", func(t *testing.T) {
@@ -149,7 +149,7 @@ func TestActorWithReply(t *testing.T) {
 
 		actual, err := Ask(ctx, pid, new(testpb.TestReply), receivingTimeout)
 		assert.Error(t, err)
-		assert.EqualError(t, err, ErrNotReady.Error())
+		assert.EqualError(t, err, ErrDead.Error())
 		assert.Nil(t, actual)
 	})
 }
@@ -180,7 +180,7 @@ func TestActorRestart(t *testing.T) {
 		// let us send a message to the actor
 		err = Tell(ctx, pid, new(testpb.TestSend))
 		assert.Error(t, err)
-		assert.EqualError(t, err, ErrNotReady.Error())
+		assert.EqualError(t, err, ErrDead.Error())
 
 		// restart the actor
 		err = pid.Restart(ctx)
@@ -197,7 +197,6 @@ func TestActorRestart(t *testing.T) {
 		err = pid.Shutdown(ctx)
 		assert.NoError(t, err)
 	})
-
 	t.Run("restart an actor", func(t *testing.T) {
 		ctx := context.TODO()
 
@@ -253,7 +252,7 @@ func TestActorWithSupervisorStrategy(t *testing.T) {
 		assert.NotNil(t, parent)
 
 		// create the child actor
-		child, err := parent.SpawnChild(ctx, "Child", NewMonitored())
+		child, err := parent.SpawnChild(ctx, "SpawnChild", NewMonitored())
 		assert.NoError(t, err)
 		assert.NotNil(t, child)
 
@@ -288,7 +287,7 @@ func TestActorWithSupervisorStrategy(t *testing.T) {
 		assert.NotNil(t, parent)
 
 		// create the child actor
-		child, err := parent.SpawnChild(ctx, "Child", NewMonitored())
+		child, err := parent.SpawnChild(ctx, "SpawnChild", NewMonitored())
 		assert.NoError(t, err)
 		assert.NotNil(t, child)
 
@@ -328,7 +327,7 @@ func TestActorWithSupervisorStrategy(t *testing.T) {
 		assert.NotNil(t, parent)
 
 		// create the child actor
-		child, err := parent.SpawnChild(ctx, "Child", NewMonitored())
+		child, err := parent.SpawnChild(ctx, "SpawnChild", NewMonitored())
 		assert.NoError(t, err)
 		assert.NotNil(t, child)
 
@@ -347,7 +346,7 @@ func TestActorWithSupervisorStrategy(t *testing.T) {
 		err = parent.Shutdown(ctx)
 		assert.NoError(t, err)
 	})
-	t.Run("With no strategy set will default to a Stop", func(t *testing.T) {
+	t.Run("With no strategy set will default to a Shutdown", func(t *testing.T) {
 		// create a test context
 		ctx := context.TODO()
 		// create the actor path
@@ -367,7 +366,7 @@ func TestActorWithSupervisorStrategy(t *testing.T) {
 		parent.supervisorStrategy = StrategyDirective(-1)
 
 		// create the child actor
-		child, err := parent.SpawnChild(ctx, "Child", NewMonitored())
+		child, err := parent.SpawnChild(ctx, "SpawnChild", NewMonitored())
 		assert.NoError(t, err)
 		assert.NotNil(t, child)
 
@@ -460,7 +459,7 @@ func TestActorToActor(t *testing.T) {
 		// send an ask
 		reply, err := pid1.Ask(ctx, pid2, new(testpb.TestReply))
 		require.Error(t, err)
-		require.EqualError(t, err, ErrNotReady.Error())
+		require.EqualError(t, err, ErrDead.Error())
 		require.Nil(t, reply)
 
 		// wait a while because exchange is ongoing
@@ -495,7 +494,7 @@ func TestActorToActor(t *testing.T) {
 		// send an ask
 		err := pid1.Tell(ctx, pid2, new(testpb.TestReply))
 		require.Error(t, err)
-		require.EqualError(t, err, ErrNotReady.Error())
+		require.EqualError(t, err, ErrDead.Error())
 
 		// wait a while because exchange is ongoing
 		time.Sleep(time.Second)
@@ -628,7 +627,7 @@ func TestSpawnChild(t *testing.T) {
 		assert.NotNil(t, parent)
 
 		// create the child actor
-		child, err := parent.SpawnChild(ctx, "Child", NewMonitored())
+		child, err := parent.SpawnChild(ctx, "SpawnChild", NewMonitored())
 		assert.NoError(t, err)
 		assert.NotNil(t, child)
 
@@ -639,10 +638,48 @@ func TestSpawnChild(t *testing.T) {
 
 		time.Sleep(100 * time.Millisecond)
 		// create the child actor
-		child, err = parent.SpawnChild(ctx, "Child", NewMonitored())
+		child, err = parent.SpawnChild(ctx, "SpawnChild", NewMonitored())
 		assert.NoError(t, err)
 		assert.NotNil(t, child)
-		assert.EqualValues(t, 1, child.RestartCount(ctx))
+
+		time.Sleep(time.Second)
+
+		assert.EqualValues(t, 1, child.StartCount(ctx))
+		assert.Len(t, parent.Children(ctx), 1)
+		//stop the actor
+		err = parent.Shutdown(ctx)
+		assert.NoError(t, err)
+	})
+	t.Run("With restarting child actor when not shutdown", func(t *testing.T) {
+		// create a test context
+		ctx := context.TODO()
+		// create the actor path
+		actorPath := NewPath("Parent", NewAddress("sys", "host", 1))
+
+		// create the parent actor
+		parent := newPID(ctx, actorPath,
+			NewMonitor(),
+			withInitMaxRetries(1),
+			withCustomLogger(log.DiscardLogger),
+			withSendReplyTimeout(receivingTimeout))
+		assert.NotNil(t, parent)
+
+		// create the child actor
+		child, err := parent.SpawnChild(ctx, "SpawnChild", NewMonitored())
+		assert.NoError(t, err)
+		assert.NotNil(t, child)
+
+		assert.Len(t, parent.Children(ctx), 1)
+
+		time.Sleep(100 * time.Millisecond)
+		// create the child actor
+		child, err = parent.SpawnChild(ctx, "SpawnChild", NewMonitored())
+		assert.NoError(t, err)
+		assert.NotNil(t, child)
+
+		time.Sleep(time.Second)
+
+		assert.EqualValues(t, 1, child.StartCount(ctx))
 		assert.Len(t, parent.Children(ctx), 1)
 		//stop the actor
 		err = parent.Shutdown(ctx)
@@ -668,9 +705,9 @@ func TestSpawnChild(t *testing.T) {
 		assert.NoError(t, err)
 
 		// create the child actor
-		child, err := parent.SpawnChild(ctx, "Child", NewMonitored())
+		child, err := parent.SpawnChild(ctx, "SpawnChild", NewMonitored())
 		assert.Error(t, err)
-		assert.EqualError(t, err, ErrNotReady.Error())
+		assert.EqualError(t, err, ErrDead.Error())
 		assert.Nil(t, child)
 	})
 }

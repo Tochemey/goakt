@@ -11,7 +11,7 @@ const (
 	failureCounterName            = "actor_failure_count"
 	receivedCounterName           = "actor_received_count"
 	mailboxGaugeName              = "actor_mailbox_gauge"
-	restartedCounterName          = "actor_restarted_count"
+	startedCounterName            = "actor_start_count"
 	receivedDurationHistogramName = "actor_received_duration"
 	actorSystemActorsCounterName  = "actor_system_actors_count"
 )

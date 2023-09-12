@@ -18,7 +18,7 @@ import (
 )
 
 func TestCluster(t *testing.T) {
-	t.Run("With Start and Stop", func(t *testing.T) {
+	t.Run("With Start and Shutdown", func(t *testing.T) {
 		// create the context
 		ctx := context.TODO()
 
