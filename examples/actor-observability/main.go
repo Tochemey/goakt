@@ -28,7 +28,7 @@ var serviceName = semconv.ServiceNameKey.String("actor-observability")
 func initTracer() {
 	exporter, err := stdouttrace.New(stdouttrace.WithPrettyPrint())
 	if err != nil {
-		log.Fatal(err)
+		panic(err)
 	}
 	tp := sdktrace.NewTracerProvider(
 		sdktrace.WithSampler(sdktrace.AlwaysSample()),
@@ -48,7 +48,7 @@ func initMeter() {
 	// both a Reader and Collector.
 	metricExporter, err := prometheus.New()
 	if err != nil {
-		log.Fatal(err)
+		panic(err)
 	}
 	meterProvider := metric.NewMeterProvider(
 		metric.WithReader(metricExporter),
