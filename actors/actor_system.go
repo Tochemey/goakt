@@ -41,7 +41,7 @@ type ActorSystem interface {
 	// Stop stops the actor system
 	Stop(ctx context.Context) error
 	// Spawn creates an actor in the system and starts it
-	Spawn(ctx context.Context, name string, actor Actor) PID
+	Spawn(ctx context.Context, name string, actor Actor) (PID, error)
 	// Kill stops a given actor in the system
 	Kill(ctx context.Context, name string) error
 	// ReSpawn recreates a given actor in the system
@@ -208,13 +208,13 @@ func (x *actorSystem) NumActors() uint64 {
 }
 
 // Spawn creates or returns the instance of a given actor in the system
-func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor) PID {
+func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor) (PID, error) {
 	// add a span context
 	ctx, span := telemetry.SpanContext(ctx, "Spawn")
 	defer span.End()
 	// first check whether the actor system has started
 	if !x.hasStarted.Load() {
-		return nil
+		return nil, ErrActorSystemNotStarted
 	}
 	// set the default actor path assuming we are running locally
 	actorPath := NewPath(name, NewAddress(x.name, "", -1))
@@ -230,12 +230,12 @@ func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor) PID {
 		// check whether the given actor heart beat
 		if pid.IsRunning() {
 			// return the existing instance
-			return pid
+			return pid, nil
 		}
 	}
 
 	// create an instance of the actor ref
-	pid = newPID(ctx,
+	pid, err := newPID(ctx,
 		actorPath,
 		actor,
 		withInitMaxRetries(x.actorInitMaxRetries),
@@ -248,6 +248,11 @@ func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor) PID {
 		withMailbox(x.mailbox),
 		withStash(x.stashBuffer),
 		withTelemetry(x.telemetry))
+
+	// handle the error
+	if err != nil {
+		return nil, err
+	}
 
 	// add the given actor to the actor map
 	x.actors.Set(actorPath.String(), pid)
@@ -266,7 +271,7 @@ func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor) PID {
 	}
 
 	// return the actor ref
-	return pid
+	return pid, nil
 }
 
 // Kill stops a given actor in the system
@@ -276,7 +281,7 @@ func (x *actorSystem) Kill(ctx context.Context, name string) error {
 	defer span.End()
 	// first check whether the actor system has started
 	if !x.hasStarted.Load() {
-		return errors.New("actor system has not started yet")
+		return ErrActorSystemNotStarted
 	}
 	// set the default actor path assuming we are running locally
 	actorPath := NewPath(name, NewAddress(x.name, "", -1))
@@ -302,7 +307,7 @@ func (x *actorSystem) ReSpawn(ctx context.Context, name string) (PID, error) {
 	defer span.End()
 	// first check whether the actor system has started
 	if !x.hasStarted.Load() {
-		return nil, errors.New("actor system has not started yet")
+		return nil, ErrActorSystemNotStarted
 	}
 	// set the default actor path assuming we are running locally
 	actorPath := NewPath(name, NewAddress(x.name, "", -1))
@@ -368,6 +373,11 @@ func (x *actorSystem) ActorOf(ctx context.Context, actorName string) (addr *addr
 	ctx, span := telemetry.SpanContext(ctx, "ActorOf")
 	defer span.End()
 
+	// make sure the actor system has started
+	if !x.hasStarted.Load() {
+		return nil, nil, ErrActorSystemNotStarted
+	}
+
 	// try to locate the actor in the cluster when cluster is enabled
 	if x.cluster != nil || x.clusterEnabled.Load() {
 		// let us locate the actor in the cluster
@@ -415,6 +425,12 @@ func (x *actorSystem) LocalActor(ctx context.Context, actorName string) (PID, er
 	// add a span context
 	ctx, span := telemetry.SpanContext(ctx, "LocalActor")
 	defer span.End()
+
+	// make sure the actor system has started
+	if !x.hasStarted.Load() {
+		return nil, ErrActorSystemNotStarted
+	}
+
 	// first let us do a local lookup
 	items := x.actors.Items()
 	// iterate the local actors storage
@@ -440,9 +456,15 @@ func (x *actorSystem) RemoteActor(ctx context.Context, actorName string) (addr *
 	// add a span context
 	ctx, span := telemetry.SpanContext(ctx, "RemoteActor")
 	defer span.End()
+
+	// make sure the actor system has started
+	if !x.hasStarted.Load() {
+		return nil, ErrActorSystemNotStarted
+	}
+
 	// check whether cluster is enabled or not
 	if x.cluster == nil {
-		return nil, ErrClusterNotEnabled
+		return nil, ErrClusterDisabled
 	}
 
 	// let us locate the actor in the cluster
@@ -494,16 +516,21 @@ func (x *actorSystem) Start(ctx context.Context) error {
 
 // Stop stops the actor system
 func (x *actorSystem) Stop(ctx context.Context) error {
+	// add a span context
+	ctx, span := telemetry.SpanContext(ctx, "Stop")
+	defer span.End()
+
+	// make sure the actor system has started
+	if !x.hasStarted.Load() {
+		return ErrActorSystemNotStarted
+	}
+
 	// create a cancellation context to gracefully shutdown
 	ctx, cancel := context.WithTimeout(ctx, x.shutdownTimeout)
 	defer cancel()
 
 	// stop the housekeeper
 	x.housekeeperStopSig <- Unit{}
-
-	// add a span context
-	ctx, span := telemetry.SpanContext(ctx, "Shutdown")
-	defer span.End()
 	x.logger.Infof("%s is shutting down..:)", x.name)
 
 	// set started to false
@@ -572,7 +599,7 @@ func (x *actorSystem) RemoteLookup(ctx context.Context, request *connect.Request
 
 	// set the actor path with the remoting is enabled
 	if !x.remotingEnabled.Load() {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrRemotingNotEnabled)
+		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrRemotingDisabled)
 	}
 
 	// get the remoting server address
@@ -621,7 +648,7 @@ func (x *actorSystem) RemoteAsk(ctx context.Context, request *connect.Request[in
 
 	// set the actor path with the remoting is enabled
 	if !x.remotingEnabled.Load() {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrRemotingNotEnabled)
+		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrRemotingDisabled)
 	}
 
 	// get the remoting server address
@@ -648,12 +675,6 @@ func (x *actorSystem) RemoteAsk(ctx context.Context, request *connect.Request[in
 		// log the error
 		logger.Error(ErrAddressNotFound(actorPath.String()).Error())
 		return nil, ErrAddressNotFound(actorPath.String())
-	}
-	// restart the actor when it is not live
-	if !pid.IsRunning() {
-		if err := pid.Restart(ctx); err != nil {
-			return nil, err
-		}
 	}
 
 	// send the message to actor
@@ -685,7 +706,7 @@ func (x *actorSystem) RemoteTell(ctx context.Context, request *connect.Request[i
 
 	// set the actor path with the remoting is enabled
 	if !x.remotingEnabled.Load() {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrRemotingNotEnabled)
+		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrRemotingDisabled)
 	}
 
 	// get the remoting server address
@@ -715,12 +736,6 @@ func (x *actorSystem) RemoteTell(ctx context.Context, request *connect.Request[i
 		// log the error
 		logger.Error(ErrAddressNotFound(actorPath.String()).Error())
 		return nil, ErrAddressNotFound(actorPath.String())
-	}
-	// restart the actor when it is not live
-	if !pid.IsRunning() {
-		if err := pid.Restart(ctx); err != nil {
-			return nil, err
-		}
 	}
 
 	// send the message to actor

@@ -28,7 +28,8 @@ func TestReceiveContext(t *testing.T) {
 		// create the actor path
 		actor := &UserActor{}
 		actorPath := NewPath("User", NewAddress("sys", "host", 1))
-		pid := newPID(ctx, actorPath, actor, opts...)
+		pid, err := newPID(ctx, actorPath, actor, opts...)
+		require.NoError(t, err)
 		require.NotNil(t, pid)
 
 		// send Login
@@ -85,7 +86,8 @@ func TestReceiveContext(t *testing.T) {
 		// create actor1
 		actor1 := &Exchanger{}
 		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
-		pid1 := newPID(ctx, actorPath1, actor1, opts...)
+		pid1, err := newPID(ctx, actorPath1, actor1, opts...)
+		require.NoError(t, err)
 		require.NotNil(t, pid1)
 
 		// create an instance of receive context
@@ -101,7 +103,8 @@ func TestReceiveContext(t *testing.T) {
 		// create actor2
 		actor2 := &Exchanger{}
 		actorPath2 := NewPath("Exchange2", NewAddress("sys", "host", 1))
-		pid2 := newPID(ctx, actorPath2, actor2, opts...)
+		pid2, err := newPID(ctx, actorPath2, actor2, opts...)
+		require.NoError(t, err)
 		require.NotNil(t, pid2)
 
 		op := func() {
@@ -124,7 +127,8 @@ func TestReceiveContext(t *testing.T) {
 		// create actor1
 		actor1 := &Exchanger{}
 		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
-		pid1 := newPID(ctx, actorPath1, actor1, opts...)
+		pid1, err := newPID(ctx, actorPath1, actor1, opts...)
+		require.NoError(t, err)
 		require.NotNil(t, pid1)
 
 		// create an instance of receive context
@@ -140,7 +144,8 @@ func TestReceiveContext(t *testing.T) {
 		// create actor2
 		actor2 := &Exchanger{}
 		actorPath2 := NewPath("Exchange2", NewAddress("sys", "host", 1))
-		pid2 := newPID(ctx, actorPath2, actor2, opts...)
+		pid2, err := newPID(ctx, actorPath2, actor2, opts...)
+		require.NoError(t, err)
 		require.NotNil(t, pid2)
 
 		// wait a while and shutdown actor2
@@ -166,7 +171,8 @@ func TestReceiveContext(t *testing.T) {
 		// create actor1
 		actor1 := &Exchanger{}
 		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
-		pid1 := newPID(ctx, actorPath1, actor1, opts...)
+		pid1, err := newPID(ctx, actorPath1, actor1, opts...)
+		require.NoError(t, err)
 		require.NotNil(t, pid1)
 
 		// create an instance of receive context
@@ -182,7 +188,8 @@ func TestReceiveContext(t *testing.T) {
 		// create actor2
 		actor2 := &Exchanger{}
 		actorPath2 := NewPath("Exchange2", NewAddress("sys", "host", 1))
-		pid2 := newPID(ctx, actorPath2, actor2, opts...)
+		pid2, err := newPID(ctx, actorPath2, actor2, opts...)
+		require.NoError(t, err)
 		require.NotNil(t, pid2)
 
 		reply := context.Ask(pid2, new(testpb.TestReply))
@@ -205,7 +212,8 @@ func TestReceiveContext(t *testing.T) {
 		// create actor1
 		actor1 := &Exchanger{}
 		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
-		pid1 := newPID(ctx, actorPath1, actor1, opts...)
+		pid1, err := newPID(ctx, actorPath1, actor1, opts...)
+		require.NoError(t, err)
 		require.NotNil(t, pid1)
 
 		// create an instance of receive context
@@ -221,7 +229,8 @@ func TestReceiveContext(t *testing.T) {
 		// create actor2
 		actor2 := &Exchanger{}
 		actorPath2 := NewPath("Exchange2", NewAddress("sys", "host", 1))
-		pid2 := newPID(ctx, actorPath2, actor2, opts...)
+		pid2, err := newPID(ctx, actorPath2, actor2, opts...)
+		require.NoError(t, err)
 		require.NotNil(t, pid2)
 
 		// wait a while and shutdown actor2
@@ -261,17 +270,19 @@ func TestReceiveContext(t *testing.T) {
 
 		// create an exchanger two
 		actorName2 := "Exchange2"
-		actorRef2 := sys.Spawn(ctx, actorName2, &Exchanger{})
+		actorRef2, err := sys.Spawn(ctx, actorName2, &Exchanger{})
+		require.NoError(t, err)
 		assert.NotNil(t, actorRef2)
 
 		// create actor1
 		actor1 := &Exchanger{}
 		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
-		pid1 := newPID(ctx,
+		pid1, err := newPID(ctx,
 			actorPath1,
 			actor1,
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger))
+		require.NoError(t, err)
 		require.NotNil(t, pid1)
 
 		// create an instance of receive context
@@ -328,11 +339,13 @@ func TestReceiveContext(t *testing.T) {
 		// create actor1
 		actor1 := &Exchanger{}
 		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
-		pid1 := newPID(ctx,
+		pid1, err := newPID(ctx,
 			actorPath1,
 			actor1,
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
 		require.NotNil(t, pid1)
 
 		// create an instance of receive context
@@ -387,17 +400,21 @@ func TestReceiveContext(t *testing.T) {
 
 		// create an exchanger two
 		actorName2 := "Exchange2"
-		actorRef2 := sys.Spawn(ctx, actorName2, &Exchanger{})
+		actorRef2, err := sys.Spawn(ctx, actorName2, &Exchanger{})
+
+		require.NoError(t, err)
 		assert.NotNil(t, actorRef2)
 
 		// create actor1
 		actor1 := &Exchanger{}
 		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
-		pid1 := newPID(ctx,
+		pid1, err := newPID(ctx,
 			actorPath1,
 			actor1,
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
 		require.NotNil(t, pid1)
 
 		// create an instance of receive context
@@ -453,11 +470,13 @@ func TestReceiveContext(t *testing.T) {
 		// create actor1
 		actor1 := &Exchanger{}
 		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
-		pid1 := newPID(ctx,
+		pid1, err := newPID(ctx,
 			actorPath1,
 			actor1,
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
 		require.NotNil(t, pid1)
 
 		// create an instance of receive context
@@ -487,7 +506,7 @@ func TestReceiveContext(t *testing.T) {
 			assert.NoError(t, sys.Stop(ctx))
 		})
 	})
-	t.Run("With panic RemoteLookup", func(t *testing.T) {
+	t.Run("With address not found RemoteLookup", func(t *testing.T) {
 		// create the context
 		ctx := context.TODO()
 		// define the logger to use
@@ -516,11 +535,13 @@ func TestReceiveContext(t *testing.T) {
 		// create actor1
 		actor1 := &Exchanger{}
 		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
-		pid1 := newPID(ctx,
+		pid1, err := newPID(ctx,
 			actorPath1,
 			actor1,
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
 		require.NotNil(t, pid1)
 
 		// create an instance of receive context
@@ -533,10 +554,7 @@ func TestReceiveContext(t *testing.T) {
 			isAsyncMessage: true,
 		}
 
-		// send the message to t exchanger actor one using remote messaging
-		assert.Panics(t, func() {
-			context.RemoteLookup(host, remotingPort, actorName2)
-		})
+		require.Nil(t, context.RemoteLookup(host, remotingPort, actorName2))
 
 		time.Sleep(time.Second)
 
@@ -556,7 +574,9 @@ func TestReceiveContext(t *testing.T) {
 		// create actor1
 		actor1 := &Exchanger{}
 		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
-		pid1 := newPID(ctx, actorPath1, actor1, opts...)
+		pid1, err := newPID(ctx, actorPath1, actor1, opts...)
+
+		require.NoError(t, err)
 		require.NotNil(t, pid1)
 
 		// create an instance of receive context
@@ -578,11 +598,13 @@ func TestReceiveContext(t *testing.T) {
 		actorPath := NewPath("Parent", NewAddress("sys", "host", 1))
 
 		// create the parent actor
-		parent := newPID(ctx, actorPath,
+		parent, err := newPID(ctx, actorPath,
 			NewMonitor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
 			withSendReplyTimeout(receivingTimeout))
+
+		require.NoError(t, err)
 		assert.NotNil(t, parent)
 
 		// create an instance of receive context
@@ -614,11 +636,13 @@ func TestReceiveContext(t *testing.T) {
 		actorPath := NewPath("Parent", NewAddress("sys", "host", 1))
 
 		// create the parent actor
-		parent := newPID(ctx, actorPath,
+		parent, err := newPID(ctx, actorPath,
 			NewMonitor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
 			withSendReplyTimeout(receivingTimeout))
+
+		require.NoError(t, err)
 		assert.NotNil(t, parent)
 
 		// create an instance of receive context
@@ -644,11 +668,13 @@ func TestReceiveContext(t *testing.T) {
 		actorPath := NewPath("Parent", NewAddress("sys", "host", 1))
 
 		// create the parent actor
-		parent := newPID(ctx, actorPath,
+		parent, err := newPID(ctx, actorPath,
 			NewMonitor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
 			withSendReplyTimeout(receivingTimeout))
+
+		require.NoError(t, err)
 		assert.NotNil(t, parent)
 
 		// create an instance of receive context
@@ -683,11 +709,13 @@ func TestReceiveContext(t *testing.T) {
 		actorPath := NewPath("Parent", NewAddress("sys", "host", 1))
 
 		// create the parent actor
-		parent := newPID(ctx, actorPath,
+		parent, err := newPID(ctx, actorPath,
 			NewMonitor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
 			withSendReplyTimeout(receivingTimeout))
+
+		require.NoError(t, err)
 		assert.NotNil(t, parent)
 
 		// create an instance of receive context
@@ -722,11 +750,13 @@ func TestReceiveContext(t *testing.T) {
 		actorPath := NewPath("Parent", NewAddress("sys", "host", 1))
 
 		// create the parent actor
-		parent := newPID(ctx, actorPath,
+		parent, err := newPID(ctx, actorPath,
 			NewMonitor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
 			withSendReplyTimeout(receivingTimeout))
+
+		require.NoError(t, err)
 		assert.NotNil(t, parent)
 
 		// create an instance of receive context
@@ -761,11 +791,13 @@ func TestReceiveContext(t *testing.T) {
 		actorPath := NewPath("Parent", NewAddress("sys", "host", 1))
 
 		// create the parent actor
-		parent := newPID(ctx, actorPath,
+		parent, err := newPID(ctx, actorPath,
 			NewMonitor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
 			withSendReplyTimeout(receivingTimeout))
+
+		require.NoError(t, err)
 		assert.NotNil(t, parent)
 
 		// create an instance of receive context
@@ -802,11 +834,13 @@ func TestReceiveContext(t *testing.T) {
 		actorPath := NewPath("Parent", NewAddress("sys", "host", 1))
 
 		// create the parent actor
-		parent := newPID(ctx, actorPath,
+		parent, err := newPID(ctx, actorPath,
 			NewMonitor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
 			withSendReplyTimeout(receivingTimeout))
+
+		require.NoError(t, err)
 		assert.NotNil(t, parent)
 
 		// create an instance of receive context
@@ -834,11 +868,13 @@ func TestReceiveContext(t *testing.T) {
 		actorPath := NewPath("Parent", NewAddress("sys", "host", 1))
 
 		// create the parent actor
-		parent := newPID(ctx, actorPath,
+		parent, err := newPID(ctx, actorPath,
 			NewMonitor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
 			withSendReplyTimeout(receivingTimeout))
+
+		require.NoError(t, err)
 		assert.NotNil(t, parent)
 
 		// create an instance of receive context
@@ -872,11 +908,13 @@ func TestReceiveContext(t *testing.T) {
 		actorPath := NewPath("parent", NewAddress("sys", "host", 1))
 
 		// create the parent actor
-		parent := newPID(ctx, actorPath,
+		parent, err := newPID(ctx, actorPath,
 			NewMonitor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
 			withSendReplyTimeout(receivingTimeout))
+
+		require.NoError(t, err)
 		assert.NotNil(t, parent)
 
 		// create an instance of receive context
@@ -891,11 +929,13 @@ func TestReceiveContext(t *testing.T) {
 
 		// create the child actor
 		childPath := NewPath("child", NewAddress("sys", "host", 1))
-		child := newPID(ctx, childPath,
+		child, err := newPID(ctx, childPath,
 			NewMonitor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
 			withSendReplyTimeout(receivingTimeout))
+
+		require.NoError(t, err)
 
 		// stop the child actor
 		assert.Panics(t, func() {
@@ -905,6 +945,49 @@ func TestReceiveContext(t *testing.T) {
 		t.Cleanup(func() {
 			context.Shutdown()
 			assert.NoError(t, child.Shutdown(ctx))
+		})
+	})
+	t.Run("With Stop when child is already stopped", func(t *testing.T) {
+		ctx := context.TODO()
+		actorPath := NewPath("Parent", NewAddress("sys", "host", 1))
+
+		// create the parent actor
+		parent, err := newPID(ctx, actorPath,
+			NewMonitor(),
+			withInitMaxRetries(1),
+			withCustomLogger(log.DiscardLogger),
+			withSendReplyTimeout(receivingTimeout))
+
+		require.NoError(t, err)
+		assert.NotNil(t, parent)
+
+		// create an instance of receive context
+		context := &receiveContext{
+			ctx:            ctx,
+			message:        new(testpb.TestSend),
+			sender:         NoSender,
+			recipient:      parent,
+			mu:             sync.Mutex{},
+			isAsyncMessage: true,
+		}
+
+		// create the child actor
+		name := "monitored"
+		child := context.Spawn(name, NewMonitored())
+		assert.NotNil(t, child)
+		assert.Len(t, context.Children(), 1)
+
+		// stop the child
+		assert.NoError(t, child.Shutdown(ctx))
+		// stop the child actor
+		assert.Panics(t, func() {
+			context.Stop(child)
+		})
+
+		time.Sleep(time.Second)
+		assert.Empty(t, context.Children())
+		t.Cleanup(func() {
+			context.Shutdown()
 		})
 	})
 }
