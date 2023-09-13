@@ -751,4 +751,25 @@ func TestActorSystem(t *testing.T) {
 			assert.NoError(t, err)
 		})
 	})
+	t.Run("With error Stop", func(t *testing.T) {
+		ctx := context.TODO()
+		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+
+		// start the actor system
+		err := sys.Start(ctx)
+		assert.NoError(t, err)
+
+		actor := &StopTester{}
+		actorRef, err := sys.Spawn(ctx, "Test", actor)
+		assert.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		// stop the actor after some time
+		time.Sleep(time.Second)
+
+		t.Cleanup(func() {
+			err = sys.Stop(ctx)
+			assert.Error(t, err)
+		})
+	})
 }

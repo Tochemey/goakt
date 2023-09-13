@@ -574,6 +574,8 @@ func (x *actorSystem) Stop(ctx context.Context) error {
 		x.actors.Remove(actor.ActorPath().String())
 		// only shutdown live actors
 		if err := actor.Shutdown(ctx); err != nil {
+			// reset the actor system
+			x.reset()
 			// return the error
 			return err
 		}

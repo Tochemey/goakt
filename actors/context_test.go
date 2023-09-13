@@ -990,4 +990,33 @@ func TestReceiveContext(t *testing.T) {
 			context.Shutdown()
 		})
 	})
+	t.Run("With panic Shutdown", func(t *testing.T) {
+		ctx := context.TODO()
+		// create a Ping actor
+		opts := []pidOption{
+			withInitMaxRetries(1),
+			withCustomLogger(log.DiscardLogger),
+		}
+
+		// create actor1
+		actor1 := &StopTester{}
+		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
+		pid1, err := newPID(ctx, actorPath1, actor1, opts...)
+		require.NoError(t, err)
+		require.NotNil(t, pid1)
+
+		// create an instance of receive context
+		context := &receiveContext{
+			ctx:            ctx,
+			message:        new(testpb.TestSend),
+			sender:         NoSender,
+			recipient:      pid1,
+			mu:             sync.Mutex{},
+			isAsyncMessage: true,
+		}
+
+		assert.Panics(t, func() {
+			context.Shutdown()
+		})
+	})
 }

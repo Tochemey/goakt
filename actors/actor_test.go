@@ -250,3 +250,17 @@ func (x *InitTester) PostStop(context.Context) error {
 }
 
 var _ Actor = &InitTester{}
+
+type StopTester struct{}
+
+func (x *StopTester) PreStart(context.Context) error {
+	return nil
+}
+
+func (x *StopTester) Receive(ReceiveContext) {}
+
+func (x *StopTester) PostStop(context.Context) error {
+	return errors.New("failed")
+}
+
+var _ Actor = &StopTester{}

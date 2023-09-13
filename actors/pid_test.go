@@ -162,7 +162,7 @@ func TestActorWithReply(t *testing.T) {
 	})
 }
 func TestActorRestart(t *testing.T) {
-	t.Run("restart a stopped actor", func(t *testing.T) {
+	t.Run("With restart a stopped actor", func(t *testing.T) {
 		ctx := context.TODO()
 
 		// create a Ping actor
@@ -207,7 +207,7 @@ func TestActorRestart(t *testing.T) {
 		err = pid.Shutdown(ctx)
 		assert.NoError(t, err)
 	})
-	t.Run("restart an actor", func(t *testing.T) {
+	t.Run("With restart an actor", func(t *testing.T) {
 		ctx := context.TODO()
 
 		// create a Ping actor
@@ -252,6 +252,37 @@ func TestActorRestart(t *testing.T) {
 		err := pid.Restart(context.TODO())
 		assert.Error(t, err)
 		assert.EqualError(t, err, ErrUndefinedActor.Error())
+	})
+	t.Run("With restart failed due to PostStop failure", func(t *testing.T) {
+		ctx := context.TODO()
+
+		// create a Ping actor
+		actor := &StopTester{}
+		assert.NotNil(t, actor)
+		// create the actor path
+		actorPath := NewPath("Test", NewAddress("sys", "host", 1))
+
+		// create the actor ref
+		pid, err := newPID(ctx, actorPath, actor,
+			withInitMaxRetries(1),
+			withPassivationAfter(passivateAfter),
+			withCustomLogger(log.DiscardLogger),
+			withSendReplyTimeout(receivingTimeout))
+
+		require.NoError(t, err)
+		assert.NotNil(t, pid)
+		// let us send 10 public to the actor
+		count := 10
+		for i := 0; i < count; i++ {
+			err := Tell(ctx, pid, new(testpb.TestSend))
+			assert.NoError(t, err)
+		}
+		assert.EqualValues(t, count, pid.ReceivedCount(ctx))
+
+		// restart the actor
+		err = pid.Restart(ctx)
+		assert.Error(t, err)
+		assert.False(t, pid.IsRunning())
 	})
 }
 func TestActorWithSupervisorStrategy(t *testing.T) {
@@ -887,7 +918,7 @@ func TestRemoteLookup(t *testing.T) {
 		})
 	})
 }
-func TestFailedInit(t *testing.T) {
+func TestFailedPreStart(t *testing.T) {
 	// create the context
 	ctx := context.TODO()
 	// define the logger to use
@@ -914,5 +945,56 @@ func TestFailedInit(t *testing.T) {
 
 	t.Cleanup(func() {
 		assert.NoError(t, sys.Stop(ctx))
+	})
+}
+func TestFailedPostStop(t *testing.T) {
+	ctx := context.TODO()
+
+	// create the actor path
+	actorPath := NewPath("Test", NewAddress("sys", "host", 1))
+
+	// create the actor ref
+	pid, err := newPID(
+		ctx,
+		actorPath,
+		&StopTester{},
+		withInitMaxRetries(1),
+		withCustomLogger(log.DefaultLogger),
+		withSendReplyTimeout(receivingTimeout))
+
+	require.NoError(t, err)
+	assert.NotNil(t, pid)
+
+	assert.Error(t, pid.Shutdown(ctx))
+}
+func TestShutdown(t *testing.T) {
+	t.Run("With Shutdown panic to child stop failure", func(t *testing.T) {
+		// create a test context
+		ctx := context.TODO()
+		// create the actor path
+		actorPath := NewPath("Parent", NewAddress("sys", "host", 1))
+
+		// create the parent actor
+		parent, err := newPID(ctx, actorPath,
+			NewMonitor(),
+			withInitMaxRetries(1),
+			withCustomLogger(log.DiscardLogger),
+			withSendReplyTimeout(receivingTimeout))
+
+		require.NoError(t, err)
+		assert.NotNil(t, parent)
+
+		// create the child actor
+		child, err := parent.SpawnChild(ctx, "SpawnChild", &StopTester{})
+		assert.NoError(t, err)
+		assert.NotNil(t, child)
+
+		assert.Len(t, parent.Children(ctx), 1)
+
+		//stop the
+		assert.Panics(t, func() {
+			err = parent.Shutdown(ctx)
+			assert.Nil(t, err)
+		})
 	})
 }

@@ -796,7 +796,8 @@ func (p *pid) Shutdown(ctx context.Context) error {
 
 	// stop the actor
 	if err := p.doStop(ctx); err != nil {
-		p.logger.Panicf("failed to stop actor=(%s)", p.ActorPath().String())
+		p.logger.Errorf("failed to stop actor=(%s)", p.ActorPath().String())
+		return err
 	}
 
 	p.logger.Infof("Actor=%s successfully shutdown", p.ActorPath().String())
@@ -934,6 +935,7 @@ func (p *pid) freeWatchers(ctx context.Context) {
 			// only send the parent actor when it is running
 			if watcher.ID.IsRunning() {
 				// send the notification the watcher
+				// TODO: handle error and push to some system dead-letters queue
 				_ = p.Tell(ctx, watcher.ID, terminated)
 				// unwatch the child actor
 				watcher.ID.UnWatch(p)
@@ -1232,26 +1234,22 @@ func (p *pid) doStop(ctx context.Context) error {
 	// signal we are shutting down to stop processing messages
 	p.shutdownSignal <- Unit{}
 
+	// close lingering http connections
+	p.httpClient.CloseIdleConnections()
+
 	// stop all the child actors
 	p.freeChildren(ctx)
 	// free the watchers
 	p.freeWatchers(ctx)
 
-	// close lingering http connections
-	p.httpClient.CloseIdleConnections()
-
 	// add some logging
 	p.logger.Infof("Shutdown process is on going for actor=%s...", p.ActorPath().String())
 
-	// perform some cleanup with the actor
-	if err := p.Actor.PostStop(ctx); err != nil {
-		p.logger.Error(fmt.Errorf("failed to stop the underlying receiver for actor=%s. Cause:%v", p.ActorPath().String(), err))
-		return err
-	}
-
 	// reset the actor
 	p.reset()
-	return nil
+
+	// perform some cleanup with the actor
+	return p.Actor.PostStop(ctx)
 }
 
 func (p *pid) removeChild(ctx context.Context, pid PID) {
