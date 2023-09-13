@@ -23,8 +23,6 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 	"go.uber.org/atomic"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 )
@@ -76,6 +74,7 @@ type PID interface {
 	// at a given point in time while the actor heart is still beating
 	ErrorsCount(ctx context.Context) uint64
 	// SpawnChild creates a child actor
+	// When the given child actor already exists its PID will only be returned
 	SpawnChild(ctx context.Context, name string, actor Actor) (PID, error)
 	// Restart restarts the actor
 	Restart(ctx context.Context) error
@@ -224,7 +223,7 @@ type pid struct {
 var _ PID = (*pid)(nil)
 
 // newPID creates a new pid
-func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption) *pid {
+func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption) (*pid, error) {
 	// add a span context
 	ctx, span := telemetry.SpanContext(ctx, "NewPID")
 	defer span.End()
@@ -280,7 +279,9 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 	pid.behaviorStack = behaviorStack
 
 	// initialize the actor and init processing public
-	pid.init(ctx)
+	if err := pid.init(ctx); err != nil {
+		return nil, err
+	}
 	// init processing public
 	go pid.receive()
 	// init the passivation listener loop iff passivation is set
@@ -295,7 +296,7 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 	}
 
 	// return the actor reference
-	return pid
+	return pid, nil
 }
 
 // ActorHandle returns the underlying Actor
@@ -319,10 +320,6 @@ func (p *pid) Child(ctx context.Context, name string) (PID, error) {
 
 	// check whether the child actor already exist and just return the PID
 	if cid, ok := p.children.Get(childActorPath); ok {
-		// check whether the actor is stopped
-		if cid != nil && !cid.IsRunning() {
-			return nil, ErrDead
-		}
 		return cid, nil
 	}
 	return nil, ErrActorNotFound(childActorPath.String())
@@ -367,10 +364,13 @@ func (p *pid) Stop(ctx context.Context, pid PID) error {
 
 	// grab the actor path
 	path := pid.ActorPath()
-	if cid, ok := p.children.Get(path); ok {
-		if !cid.IsRunning() {
-			return nil
-		}
+
+	// grab the children thread-safely
+	p.pidSemaphore.RLock()
+	kiddos := p.children
+	p.pidSemaphore.RUnlock()
+
+	if cid, ok := kiddos.Get(path); ok {
 		// stop the actor
 		return cid.Shutdown(ctx)
 	}
@@ -399,20 +399,20 @@ func (p *pid) ActorPath() *Path {
 	return path
 }
 
-// Restart restarts the actor. This call can panic which is the expected behaviour.
+// Restart restarts the actor.
 // During restart all messages that are in the mailbox and not yet processed will be ignored
 func (p *pid) Restart(ctx context.Context) error {
 	// add a span context
 	ctx, span := telemetry.SpanContext(ctx, "Restart")
 	defer span.End()
 
-	// add some debug logging
-	p.logger.Debugf("restarting actor=(%s)", p.actorPath.String())
-
 	// first check whether we have an empty PID
 	if p == nil || p.ActorPath() == nil {
 		return ErrUndefinedActor
 	}
+
+	// add some debug logging
+	p.logger.Debugf("restarting actor=(%s)", p.actorPath.String())
 
 	// only restart the actor when the actor is running
 	if p.IsRunning() {
@@ -442,7 +442,9 @@ func (p *pid) Restart(ctx context.Context) error {
 	// reset the behavior
 	p.resetBehavior()
 	// initialize the actor
-	p.init(ctx)
+	if err := p.init(ctx); err != nil {
+		return err
+	}
 	// init processing public
 	go p.receive()
 	// init the passivation listener loop iff passivation is set
@@ -463,6 +465,7 @@ func (p *pid) Restart(ctx context.Context) error {
 }
 
 // SpawnChild creates a child actor and start watching it for error
+// When the given child actor already exists its PID will only be returned
 func (p *pid) SpawnChild(ctx context.Context, name string, actor Actor) (PID, error) {
 	// add a span context
 	ctx, span := telemetry.SpanContext(ctx, "SpawnChild")
@@ -475,15 +478,14 @@ func (p *pid) SpawnChild(ctx context.Context, name string, actor Actor) (PID, er
 	// create the child actor path
 	childActorPath := NewPath(name, p.ActorPath().Address()).WithParent(p.ActorPath())
 
+	// grab the children thread-safely
+	p.pidSemaphore.RLock()
+	kiddos := p.children
+	p.pidSemaphore.RUnlock()
+
 	// check whether the child actor already exist and just return the PID
-	if cid, ok := p.children.Get(childActorPath); ok {
-		// check whether the actor is stopped
-		if cid != nil && !cid.IsRunning() {
-			// then reboot it
-			if err := cid.Restart(ctx); err != nil {
-				return nil, err
-			}
-		}
+	// whenever a child actor exists it means it is live
+	if cid, ok := kiddos.Get(childActorPath); ok {
 		return cid, nil
 	}
 
@@ -493,7 +495,7 @@ func (p *pid) SpawnChild(ctx context.Context, name string, actor Actor) (PID, er
 	defer p.pidSemaphore.Unlock()
 
 	// create the child pid
-	cid := newPID(ctx,
+	cid, err := newPID(ctx,
 		childActorPath,
 		actor,
 		withInitMaxRetries(int(p.initMaxRetries.Load())),
@@ -506,6 +508,11 @@ func (p *pid) SpawnChild(ctx context.Context, name string, actor Actor) (PID, er
 		withStash(p.stashCapacity.Load()),
 		withMailbox(p.mailbox.Clone()),
 		withShutdownTimeout(p.shutdownTimeout.Load()))
+
+	// handle the error
+	if err != nil {
+		return nil, err
+	}
 
 	// add the pid to the map
 	p.children.Set(cid)
@@ -659,9 +666,8 @@ func (p *pid) RemoteLookup(ctx context.Context, host string, port int, name stri
 	response, err := remoteClient.RemoteLookup(ctx, request)
 	// we know the error will always be a grpc error
 	if err != nil {
-		// get the status error
-		s := status.Convert(err)
-		if s.Code() == codes.NotFound {
+		code := connect.CodeOf(err)
+		if code == connect.CodeNotFound {
 			return nil, nil
 		}
 		return nil, err
@@ -860,9 +866,9 @@ func (p *pid) doReceive(ctx ReceiveContext) {
 	p.receivedMessageCounter.Inc()
 }
 
-// init initializes the given actor and init processing public
-// when the initialization failed the actor is automatically shutdown
-func (p *pid) init(ctx context.Context) {
+// init initializes the given actor and init processing messages
+// when the initialization failed the actor will not be started
+func (p *pid) init(ctx context.Context) error {
 	// add a span context
 	ctx, span := telemetry.SpanContext(ctx, "Init")
 	defer span.End()
@@ -876,9 +882,7 @@ func (p *pid) init(ctx context.Context) {
 	}, expoBackoff)
 	// handle backoff error
 	if err != nil {
-		// log the error
-		p.logger.Error(err.Error())
-		return
+		return ErrInitFailure(err)
 	}
 	// set the actor is ready
 	p.pidSemaphore.Lock()
@@ -888,6 +892,7 @@ func (p *pid) init(ctx context.Context) {
 	p.pidSemaphore.Unlock()
 	// add some logging info
 	p.logger.Info("Initialization process successfully completed.")
+	return nil
 }
 
 // reset re-initializes the actor PID

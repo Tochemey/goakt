@@ -29,8 +29,8 @@ func main() {
 	_ = actorSystem.Start(ctx)
 
 	// create an actor
-	pingActor := actorSystem.Spawn(ctx, "Ping", NewPingActor())
-	pongActor := actorSystem.Spawn(ctx, "Pong", NewPongActor())
+	pingActor, _ := actorSystem.Spawn(ctx, "Ping", NewPingActor())
+	pongActor, _ := actorSystem.Spawn(ctx, "Pong", NewPongActor())
 
 	// start the conversation
 	_ = pingActor.Tell(ctx, pongActor, new(samplepb.Ping))

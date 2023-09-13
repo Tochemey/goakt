@@ -8,7 +8,8 @@ import (
 // This will be implemented by any user who wants to create an actor
 type Actor interface {
 	// PreStart pre-starts the actor. This function can be used to set up some database connections
-	// or some sort of initialization before the actor start processing public
+	// or some sort of initialization before the actor start processing messages
+	// when the initialization failed the actor will not be started
 	PreStart(ctx context.Context) error
 	// Receive processes any message dropped into the actor mailbox.
 	// The receiver of any message can either reply to the sender of the message with a new message or reply to the message synchronously

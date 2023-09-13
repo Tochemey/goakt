@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pkg/errors"
+
 	testspb "github.com/tochemey/goakt/test/data/pb/v1"
 	"go.uber.org/goleak"
 )
@@ -234,3 +236,17 @@ func (x *Stasher) PostStop(context.Context) error {
 }
 
 var _ Actor = &Stasher{}
+
+type InitTester struct{}
+
+func (x *InitTester) PreStart(context.Context) error {
+	return errors.New("failed")
+}
+
+func (x *InitTester) Receive(ReceiveContext) {}
+
+func (x *InitTester) PostStop(context.Context) error {
+	return nil
+}
+
+var _ Actor = &InitTester{}

@@ -33,7 +33,7 @@ func (r *reflection) ActorOf(rtype reflect.Type) (actor Actor, err error) {
 	isActor := rtype.Implements(iface) || reflect.PtrTo(rtype).Implements(iface)
 	// reject the creation of the instance
 	if !isActor {
-		return nil, ErrInstanceNotAnActor
+		return nil, ErrInvalidActorInterface
 	}
 	// get the type value of the object type
 	typVal := reflect.New(rtype)

@@ -52,7 +52,7 @@ func BenchmarkActor(b *testing.B) {
 		actor := &Benchmarker{}
 
 		// create the actor ref
-		pid := actorSystem.Spawn(ctx, "test", actor)
+		pid, _ := actorSystem.Spawn(ctx, "test", actor)
 
 		b.ResetTimer() // Reset the benchmark timer
 		b.RunParallel(func(pb *testing.PB) {
@@ -82,7 +82,7 @@ func BenchmarkActor(b *testing.B) {
 		actor := &Benchmarker{}
 
 		// create the actor ref
-		pid := actorSystem.Spawn(ctx, "test", actor)
+		pid, _ := actorSystem.Spawn(ctx, "test", actor)
 
 		b.ResetTimer() // Reset the benchmark timer
 		b.RunParallel(func(pb *testing.PB) {

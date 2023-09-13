@@ -24,14 +24,15 @@ func TestStash(t *testing.T) {
 		// create the actor path
 		actor := &Stasher{}
 		actorPath := NewPath("Stasher", NewAddress("sys", "host", 1))
-		pid := newPID(ctx, actorPath, actor, opts...)
+		pid, err := newPID(ctx, actorPath, actor, opts...)
+		require.NoError(t, err)
 		require.NotNil(t, pid)
 
 		// wait for the actor to properly start
 		time.Sleep(time.Second)
 
 		// send a stash message to the actor
-		err := Tell(ctx, pid, new(testpb.TestStash))
+		err = Tell(ctx, pid, new(testpb.TestStash))
 		require.NoError(t, err)
 
 		// add some pause here due to async calls
@@ -91,13 +92,14 @@ func TestStash(t *testing.T) {
 		// create the actor path
 		actor := &Stasher{}
 		actorPath := NewPath("Stasher", NewAddress("sys", "host", 1))
-		pid := newPID(ctx, actorPath, actor, opts...)
+		pid, err := newPID(ctx, actorPath, actor, opts...)
+		require.NoError(t, err)
 		require.NotNil(t, pid)
 
 		// wait for the actor to properly start
 		time.Sleep(5 * time.Millisecond)
 
-		err := pid.stash(new(receiveContext))
+		err = pid.stash(new(receiveContext))
 		assert.Error(t, err)
 		assert.EqualError(t, err, ErrStashBufferNotSet.Error())
 
@@ -115,13 +117,14 @@ func TestStash(t *testing.T) {
 		// create the actor path
 		actor := &Stasher{}
 		actorPath := NewPath("Stasher", NewAddress("sys", "host", 1))
-		pid := newPID(ctx, actorPath, actor, opts...)
+		pid, err := newPID(ctx, actorPath, actor, opts...)
+		require.NoError(t, err)
 		require.NotNil(t, pid)
 
 		// wait for the actor to properly start
 		time.Sleep(5 * time.Millisecond)
 
-		err := pid.unstash()
+		err = pid.unstash()
 		assert.Error(t, err)
 		assert.EqualError(t, err, ErrStashBufferNotSet.Error())
 

@@ -39,7 +39,8 @@ func TestAsk(t *testing.T) {
 		// create a test actor
 		actorName := "test"
 		actor := NewTester()
-		actorRef := sys.Spawn(ctx, actorName, actor)
+		actorRef, err := sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
 		// create a message to send to the test actor
@@ -79,7 +80,8 @@ func TestAsk(t *testing.T) {
 		// create a test actor
 		actorName := "test"
 		actor := NewTester()
-		actorRef := sys.Spawn(ctx, actorName, actor)
+		actorRef, err := sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
 		// Shutdown the actor after some time
@@ -122,7 +124,8 @@ func TestAsk(t *testing.T) {
 		// create a test actor
 		actorName := "test"
 		actor := NewTester()
-		actorRef := sys.Spawn(ctx, actorName, actor)
+		actorRef, err := sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
 		time.Sleep(time.Second)
@@ -167,7 +170,8 @@ func TestTell(t *testing.T) {
 		// create a test actor
 		actorName := "test"
 		actor := NewTester()
-		actorRef := sys.Spawn(ctx, actorName, actor)
+		actorRef, err := sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
 		time.Sleep(time.Second)
@@ -208,7 +212,8 @@ func TestTell(t *testing.T) {
 		// create a test actor
 		actorName := "test"
 		actor := NewTester()
-		actorRef := sys.Spawn(ctx, actorName, actor)
+		actorRef, err := sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
 		// Shutdown the actor after some time
@@ -250,7 +255,8 @@ func TestTell(t *testing.T) {
 		// create a test actor
 		actorName := "test"
 		actor := NewTester()
-		actorRef := sys.Spawn(ctx, actorName, actor)
+		actorRef, err := sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
 		// create a message to send to the test actor
@@ -298,7 +304,8 @@ func TestRemoteTell(t *testing.T) {
 		// create a test actor
 		actorName := "test"
 		actor := NewTester()
-		actorRef := sys.Spawn(ctx, actorName, actor)
+		actorRef, err := sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
 		// get the address of the actor
@@ -349,7 +356,8 @@ func TestRemoteTell(t *testing.T) {
 		// create a test actor
 		actorName := "test"
 		actor := NewTester()
-		actorRef := sys.Spawn(ctx, actorName, actor)
+		actorRef, err := sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
 		// get the address of the actor
@@ -392,7 +400,8 @@ func TestRemoteTell(t *testing.T) {
 		// create a test actor
 		actorName := "test"
 		actor := NewTester()
-		actorRef := sys.Spawn(ctx, actorName, actor)
+		actorRef, err := sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
 		// create a wrong address
@@ -445,7 +454,8 @@ func TestRemoteAsk(t *testing.T) {
 		// create a test actor
 		actorName := "test"
 		actor := NewTester()
-		actorRef := sys.Spawn(ctx, actorName, actor)
+		actorRef, err := sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
 		// get the address of the actor
@@ -501,7 +511,8 @@ func TestRemoteAsk(t *testing.T) {
 		// create a test actor
 		actorName := "test"
 		actor := NewTester()
-		actorRef := sys.Spawn(ctx, actorName, actor)
+		actorRef, err := sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
 		// get the address of the actor
@@ -547,7 +558,8 @@ func TestRemoteAsk(t *testing.T) {
 		// create a test actor
 		actorName := "test"
 		actor := NewTester()
-		actorRef := sys.Spawn(ctx, actorName, actor)
+		actorRef, err := sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
 		// get the address of the actor
@@ -568,7 +580,46 @@ func TestRemoteAsk(t *testing.T) {
 
 		// stop the actor after some time
 		time.Sleep(time.Second)
+		t.Cleanup(func() {
+			assert.NoError(t, sys.Stop(ctx))
+		})
+	})
+}
 
-		err = sys.Stop(ctx)
+func TestAPIRemoteLookup(t *testing.T) {
+	t.Run("When remoting is not enabled", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.New(log.DebugLevel, os.Stdout)
+		// generate the remoting port
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "0.0.0.0"
+
+		// create the actor system
+		sys, err := NewActorSystem("test",
+			WithLogger(logger),
+			WithPassivationDisabled(),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		time.Sleep(time.Second)
+
+		// create a test actor
+		actorName := "test"
+		// get the address of the actor
+		addr, err := RemoteLookup(ctx, host, remotingPort, actorName)
+		require.Error(t, err)
+		require.Nil(t, addr)
+
+		t.Cleanup(func() {
+			assert.NoError(t, sys.Stop(ctx))
+		})
 	})
 }
