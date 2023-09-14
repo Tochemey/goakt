@@ -257,7 +257,13 @@ func (x *StopTester) PreStart(context.Context) error {
 	return nil
 }
 
-func (x *StopTester) Receive(ReceiveContext) {}
+func (x *StopTester) Receive(ctx ReceiveContext) {
+	switch ctx.Message().(type) {
+	case *testspb.TestSend:
+	case *testspb.TestPanic:
+		panic("panicked")
+	}
+}
 
 func (x *StopTester) PostStop(context.Context) error {
 	return errors.New("failed")

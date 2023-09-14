@@ -563,6 +563,64 @@ func TestReceiveContext(t *testing.T) {
 			assert.NoError(t, sys.Stop(ctx))
 		})
 	})
+	t.Run("With panic RemoteLookup", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.New(log.DebugLevel, os.Stdout)
+		// generate the remoting port
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "localhost"
+
+		// create the actor system
+		sys, err := NewActorSystem("test",
+			WithLogger(logger),
+			WithPassivationDisabled(),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		// create an exchanger two
+		actorName2 := "Exchange2"
+
+		// create actor1
+		actor1 := &Exchanger{}
+		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
+		pid1, err := newPID(ctx,
+			actorPath1,
+			actor1,
+			withInitMaxRetries(1),
+			withCustomLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NotNil(t, pid1)
+
+		// create an instance of receive context
+		context := &receiveContext{
+			ctx:            ctx,
+			message:        new(testpb.TestSend),
+			sender:         NoSender,
+			recipient:      pid1,
+			mu:             sync.Mutex{},
+			isAsyncMessage: true,
+		}
+
+		assert.Panics(t, func() {
+			context.RemoteLookup(host, remotingPort, actorName2)
+		})
+
+		time.Sleep(time.Second)
+
+		t.Cleanup(func() {
+			assert.NoError(t, pid1.Shutdown(ctx))
+			assert.NoError(t, sys.Stop(ctx))
+		})
+	})
 	t.Run("With happy path Shutdown", func(t *testing.T) {
 		ctx := context.TODO()
 		// create a Ping actor

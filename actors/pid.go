@@ -1065,7 +1065,10 @@ func (p *pid) supervise(cid PID, watcher *watchMan) {
 				p.children.Delete(cid.ActorPath())
 				// shutdown the actor and panic in case of error
 				if err := cid.Shutdown(context.Background()); err != nil {
-					p.logger.Panic(err)
+					// this can enter into some infinite loop if we panic
+					// since we are just shutting down the actor we can just log the error
+					// TODO: rethink properly about PostStop error handling
+					p.logger.Error(err)
 				}
 			case RestartDirective:
 				// unwatch the given actor
@@ -1083,7 +1086,10 @@ func (p *pid) supervise(cid PID, watcher *watchMan) {
 				p.children.Delete(cid.ActorPath())
 				// shutdown the actor and panic in case of error
 				if err := cid.Shutdown(context.Background()); err != nil {
-					p.logger.Panic(err)
+					// this can enter into some infinite loop if we panic
+					// since we are just shutting down the actor we can just log the error
+					// TODO: rethink properly about PostStop error handling
+					p.logger.Error(err)
 				}
 			}
 		}
@@ -1146,7 +1152,9 @@ func (p *pid) passivationListener() {
 
 	// stop the actor
 	if err := p.doStop(ctx); err != nil {
-		p.logger.Panicf("failed to passivate actor=(%s)", p.ActorPath().String())
+		// TODO: rethink properly about PostStop error handling
+		p.logger.Errorf("failed to passivate actor=(%s): reason=(%v)", p.ActorPath().String(), err)
+		return
 	}
 	p.logger.Infof("Actor=%s successfully passivated", p.ActorPath().String())
 }

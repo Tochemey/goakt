@@ -60,33 +60,64 @@ func TestActorReceive(t *testing.T) {
 	assert.NoError(t, err)
 }
 func TestActorWithPassivation(t *testing.T) {
-	ctx := context.TODO()
-	// create a Ping actor
-	opts := []pidOption{
-		withInitMaxRetries(1),
-		withPassivationAfter(passivateAfter),
-		withSendReplyTimeout(receivingTimeout),
-	}
+	t.Run("With happy path", func(t *testing.T) {
+		ctx := context.TODO()
+		// create a Ping actor
+		opts := []pidOption{
+			withInitMaxRetries(1),
+			withPassivationAfter(passivateAfter),
+			withSendReplyTimeout(receivingTimeout),
+		}
 
-	// create the actor path
-	actorPath := NewPath("Test", NewAddress("sys", "host", 1))
-	pid, err := newPID(ctx, actorPath, NewTester(), opts...)
-	require.NoError(t, err)
-	assert.NotNil(t, pid)
+		// create the actor path
+		actorPath := NewPath("Test", NewAddress("sys", "host", 1))
+		pid, err := newPID(ctx, actorPath, NewTester(), opts...)
+		require.NoError(t, err)
+		assert.NotNil(t, pid)
 
-	// let us sleep for some time to make the actor idle
-	wg := sync.WaitGroup{}
-	wg.Add(1)
-	go func() {
-		time.Sleep(receivingDelay)
-		wg.Done()
-	}()
-	// block until timer is up
-	wg.Wait()
-	// let us send a message to the actor
-	err = Tell(ctx, pid, new(testpb.TestSend))
-	assert.Error(t, err)
-	assert.EqualError(t, err, ErrDead.Error())
+		// let us sleep for some time to make the actor idle
+		wg := sync.WaitGroup{}
+		wg.Add(1)
+		go func() {
+			time.Sleep(receivingDelay)
+			wg.Done()
+		}()
+		// block until timer is up
+		wg.Wait()
+		// let us send a message to the actor
+		err = Tell(ctx, pid, new(testpb.TestSend))
+		assert.Error(t, err)
+		assert.EqualError(t, err, ErrDead.Error())
+	})
+	t.Run("With actor shutdown failure", func(t *testing.T) {
+		ctx := context.TODO()
+		// create a Ping actor
+		opts := []pidOption{
+			withInitMaxRetries(1),
+			withPassivationAfter(passivateAfter),
+			withSendReplyTimeout(receivingTimeout),
+		}
+
+		// create the actor path
+		actorPath := NewPath("Test", NewAddress("sys", "host", 1))
+		pid, err := newPID(ctx, actorPath, &StopTester{}, opts...)
+		require.NoError(t, err)
+		assert.NotNil(t, pid)
+
+		// let us sleep for some time to make the actor idle
+		wg := sync.WaitGroup{}
+		wg.Add(1)
+		go func() {
+			time.Sleep(receivingDelay)
+			wg.Done()
+		}()
+		// block until timer is up
+		wg.Wait()
+		// let us send a message to the actor
+		err = Tell(ctx, pid, new(testpb.TestSend))
+		assert.Error(t, err)
+		assert.EqualError(t, err, ErrDead.Error())
+	})
 }
 func TestActorWithReply(t *testing.T) {
 	t.Run("With happy path", func(t *testing.T) {
@@ -341,6 +372,86 @@ func TestActorWithSupervisorStrategy(t *testing.T) {
 
 		// create the child actor
 		child, err := parent.SpawnChild(ctx, "SpawnChild", NewMonitored())
+		assert.NoError(t, err)
+		assert.NotNil(t, child)
+
+		time.Sleep(time.Second)
+
+		assert.Len(t, parent.Children(ctx), 1)
+		// send a test panic message to the actor
+		assert.NoError(t, Tell(ctx, child, new(testpb.TestPanic)))
+
+		// wait for the child to properly shutdown
+		time.Sleep(time.Second)
+
+		// assert the actor state
+		assert.False(t, child.IsRunning())
+		assert.Len(t, parent.Children(ctx), 0)
+
+		//stop the actor
+		err = parent.Shutdown(ctx)
+		assert.NoError(t, err)
+	})
+	t.Run("With stop as default strategy with child actor shutdown failure", func(t *testing.T) {
+		// create a test context
+		ctx := context.TODO()
+		// create the actor path
+		actorPath := NewPath("Parent", NewAddress("sys", "host", 1))
+
+		// create the parent actor
+		parent, err := newPID(ctx,
+			actorPath,
+			NewMonitor(),
+			withInitMaxRetries(1),
+			withCustomLogger(log.DiscardLogger),
+			withPassivationDisabled(),
+			withSendReplyTimeout(receivingTimeout))
+
+		require.NoError(t, err)
+		assert.NotNil(t, parent)
+
+		// create the child actor
+		child, err := parent.SpawnChild(ctx, "SpawnChild", &StopTester{})
+		assert.NoError(t, err)
+		assert.NotNil(t, child)
+
+		time.Sleep(time.Second)
+
+		assert.Len(t, parent.Children(ctx), 1)
+		// send a test panic message to the actor
+		assert.NoError(t, Tell(ctx, child, new(testpb.TestPanic)))
+
+		// wait for the child to properly shutdown
+		time.Sleep(time.Second)
+
+		// assert the actor state
+		assert.False(t, child.IsRunning())
+		assert.Len(t, parent.Children(ctx), 0)
+
+		//stop the actor
+		err = parent.Shutdown(ctx)
+		assert.NoError(t, err)
+	})
+	t.Run("With stop as default strategy with child actor shutdown failure", func(t *testing.T) {
+		// create a test context
+		ctx := context.TODO()
+		// create the actor path
+		actorPath := NewPath("Parent", NewAddress("sys", "host", 1))
+
+		// create the parent actor
+		parent, err := newPID(ctx,
+			actorPath,
+			NewMonitor(),
+			withInitMaxRetries(1),
+			withCustomLogger(log.DiscardLogger),
+			withPassivationDisabled(),
+			withSendReplyTimeout(receivingTimeout))
+
+		require.NoError(t, err)
+		assert.NotNil(t, parent)
+
+		// create the child actor
+		child, err := parent.SpawnChild(ctx, "SpawnChild", &StopTester{})
 		assert.NoError(t, err)
 		assert.NotNil(t, child)
 
