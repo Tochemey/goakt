@@ -39,7 +39,7 @@ jobs:
           FORCE_COLOR: 1
         run: |
           earthly -P -use-inline-cache --save-inline-cache --strict --push +test
-      - uses: codecov/codecov-action@v4
+      - uses: codecov/codecov-action@v3
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ./coverage.out # optional
