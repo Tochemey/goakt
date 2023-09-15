@@ -1057,7 +1057,7 @@ func TestReceiveContext(t *testing.T) {
 		}
 
 		// create actor1
-		actor1 := &StopTester{}
+		actor1 := &PostStopBreaker{}
 		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
 		pid1, err := newPID(ctx, actorPath1, actor1, opts...)
 		require.NoError(t, err)

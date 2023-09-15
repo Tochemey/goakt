@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"go.uber.org/atomic"
+
 	"github.com/pkg/errors"
 
 	testspb "github.com/tochemey/goakt/test/data/pb/v1"
@@ -237,27 +239,27 @@ func (x *Stasher) PostStop(context.Context) error {
 
 var _ Actor = &Stasher{}
 
-type InitTester struct{}
+type PreStartBreaker struct{}
 
-func (x *InitTester) PreStart(context.Context) error {
+func (x *PreStartBreaker) PreStart(context.Context) error {
 	return errors.New("failed")
 }
 
-func (x *InitTester) Receive(ReceiveContext) {}
+func (x *PreStartBreaker) Receive(ReceiveContext) {}
 
-func (x *InitTester) PostStop(context.Context) error {
+func (x *PreStartBreaker) PostStop(context.Context) error {
 	return nil
 }
 
-var _ Actor = &InitTester{}
+var _ Actor = &PreStartBreaker{}
 
-type StopTester struct{}
+type PostStopBreaker struct{}
 
-func (x *StopTester) PreStart(context.Context) error {
+func (x *PostStopBreaker) PreStart(context.Context) error {
 	return nil
 }
 
-func (x *StopTester) Receive(ctx ReceiveContext) {
+func (x *PostStopBreaker) Receive(ctx ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *testspb.TestSend:
 	case *testspb.TestPanic:
@@ -265,8 +267,35 @@ func (x *StopTester) Receive(ctx ReceiveContext) {
 	}
 }
 
-func (x *StopTester) PostStop(context.Context) error {
+func (x *PostStopBreaker) PostStop(context.Context) error {
 	return errors.New("failed")
 }
 
-var _ Actor = &StopTester{}
+var _ Actor = &PostStopBreaker{}
+
+type RestartBreaker struct {
+	counter *atomic.Int64
+}
+
+func NewRestartBreaker() *RestartBreaker {
+	return &RestartBreaker{counter: atomic.NewInt64(0)}
+}
+
+func (x *RestartBreaker) PreStart(context.Context) error {
+	// increment counter
+	x.counter.Inc()
+	// error when counter is greater than 1
+	if x.counter.Load() > 1 {
+		return errors.New("cannot restart")
+	}
+	return nil
+}
+
+func (x *RestartBreaker) Receive(ReceiveContext) {
+}
+
+func (x *RestartBreaker) PostStop(context.Context) error {
+	return nil
+}
+
+var _ Actor = &RestartBreaker{}

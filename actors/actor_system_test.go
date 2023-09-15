@@ -374,6 +374,37 @@ func TestActorSystem(t *testing.T) {
 			assert.NoError(t, err)
 		})
 	})
+	t.Run("With ReSpawn with PreStart failure", func(t *testing.T) {
+		ctx := context.TODO()
+		sys, _ := NewActorSystem("testSys",
+			WithLogger(log.DiscardLogger),
+			WithExpireActorAfter(time.Minute))
+
+		// start the actor system
+		err := sys.Start(ctx)
+		assert.NoError(t, err)
+
+		actorName := "actor"
+		actorRef, err := sys.Spawn(ctx, actorName, NewRestartBreaker())
+		assert.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		require.True(t, actorRef.IsRunning())
+
+		// wait for a while for the system to stop
+		time.Sleep(time.Second)
+		// restart the actor
+		pid, err := sys.ReSpawn(ctx, actorName)
+		require.Error(t, err)
+		require.Nil(t, pid)
+
+		require.False(t, actorRef.IsRunning())
+
+		t.Cleanup(func() {
+			err = sys.Stop(ctx)
+			assert.NoError(t, err)
+		})
+	})
 	t.Run("With ReSpawn: actor not found", func(t *testing.T) {
 		ctx := context.TODO()
 		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
@@ -759,7 +790,7 @@ func TestActorSystem(t *testing.T) {
 		err := sys.Start(ctx)
 		assert.NoError(t, err)
 
-		actor := &StopTester{}
+		actor := &PostStopBreaker{}
 		actorRef, err := sys.Spawn(ctx, "Test", actor)
 		assert.NoError(t, err)
 		assert.NotNil(t, actorRef)

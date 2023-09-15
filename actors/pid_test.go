@@ -100,7 +100,7 @@ func TestActorWithPassivation(t *testing.T) {
 
 		// create the actor path
 		actorPath := NewPath("Test", NewAddress("sys", "host", 1))
-		pid, err := newPID(ctx, actorPath, &StopTester{}, opts...)
+		pid, err := newPID(ctx, actorPath, &PostStopBreaker{}, opts...)
 		require.NoError(t, err)
 		assert.NotNil(t, pid)
 
@@ -250,7 +250,6 @@ func TestActorRestart(t *testing.T) {
 		// create the actor ref
 		pid, err := newPID(ctx, actorPath, actor,
 			withInitMaxRetries(1),
-			withPassivationAfter(passivateAfter),
 			withCustomLogger(log.DiscardLogger),
 			withSendReplyTimeout(receivingTimeout))
 
@@ -278,6 +277,38 @@ func TestActorRestart(t *testing.T) {
 		err = pid.Shutdown(ctx)
 		assert.NoError(t, err)
 	})
+	t.Run("With restart an actor with PreStart failure", func(t *testing.T) {
+		ctx := context.TODO()
+
+		// create a Ping actor
+		actor := NewRestartBreaker()
+		assert.NotNil(t, actor)
+		// create the actor path
+		actorPath := NewPath("Test", NewAddress("sys", "host", 1))
+
+		// create the actor ref
+		pid, err := newPID(ctx, actorPath, actor,
+			withInitMaxRetries(1),
+			withCustomLogger(log.DiscardLogger),
+			withPassivationAfter(time.Minute),
+			withSendReplyTimeout(receivingTimeout))
+
+		require.NoError(t, err)
+		assert.NotNil(t, pid)
+
+		// wait awhile for a proper start
+		assert.True(t, pid.IsRunning())
+		assert.Zero(t, pid.MailboxSize(ctx))
+
+		// restart the actor
+		err = pid.Restart(ctx)
+		assert.Error(t, err)
+		assert.False(t, pid.IsRunning())
+
+		// stop the actor
+		err = pid.Shutdown(ctx)
+		assert.NoError(t, err)
+	})
 	t.Run("noSender cannot be restarted", func(t *testing.T) {
 		pid := &pid{}
 		err := pid.Restart(context.TODO())
@@ -288,7 +319,7 @@ func TestActorRestart(t *testing.T) {
 		ctx := context.TODO()
 
 		// create a Ping actor
-		actor := &StopTester{}
+		actor := &PostStopBreaker{}
 		assert.NotNil(t, actor)
 		// create the actor path
 		actorPath := NewPath("Test", NewAddress("sys", "host", 1))
@@ -392,7 +423,7 @@ func TestActorWithSupervisorStrategy(t *testing.T) {
 		err = parent.Shutdown(ctx)
 		assert.NoError(t, err)
 	})
-	t.Run("With stop as default strategy with child actor shutdown failure", func(t *testing.T) {
+	t.Run("With default strategy with child actor shutdown failure", func(t *testing.T) {
 		// create a test context
 		ctx := context.TODO()
 		// create the actor path
@@ -405,13 +436,14 @@ func TestActorWithSupervisorStrategy(t *testing.T) {
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
 			withPassivationDisabled(),
+			withSupervisorStrategy(-1), // this is a rogue strategy which will default to a Stop
 			withSendReplyTimeout(receivingTimeout))
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
 
 		// create the child actor
-		child, err := parent.SpawnChild(ctx, "SpawnChild", &StopTester{})
+		child, err := parent.SpawnChild(ctx, "SpawnChild", &PostStopBreaker{})
 		assert.NoError(t, err)
 		assert.NotNil(t, child)
 
@@ -444,6 +476,7 @@ func TestActorWithSupervisorStrategy(t *testing.T) {
 			NewMonitor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
+			withSupervisorStrategy(DefaultSupervisoryStrategy),
 			withPassivationDisabled(),
 			withSendReplyTimeout(receivingTimeout))
 
@@ -451,7 +484,7 @@ func TestActorWithSupervisorStrategy(t *testing.T) {
 		assert.NotNil(t, parent)
 
 		// create the child actor
-		child, err := parent.SpawnChild(ctx, "SpawnChild", &StopTester{})
+		child, err := parent.SpawnChild(ctx, "SpawnChild", &PostStopBreaker{})
 		assert.NoError(t, err)
 		assert.NotNil(t, child)
 
@@ -912,7 +945,7 @@ func TestSpawnChild(t *testing.T) {
 		assert.NotNil(t, parent)
 
 		// create the child actor
-		child, err := parent.SpawnChild(ctx, "SpawnChild", &InitTester{})
+		child, err := parent.SpawnChild(ctx, "SpawnChild", &PreStartBreaker{})
 		assert.Error(t, err)
 		assert.Nil(t, child)
 
@@ -1049,7 +1082,7 @@ func TestFailedPreStart(t *testing.T) {
 
 	// create an exchanger 1
 	actorName1 := "Exchange1"
-	pid, err := sys.Spawn(ctx, actorName1, &InitTester{})
+	pid, err := sys.Spawn(ctx, actorName1, &PreStartBreaker{})
 	require.Error(t, err)
 	require.EqualError(t, err, "failed to initialize: failed")
 	require.Nil(t, pid)
@@ -1068,7 +1101,7 @@ func TestFailedPostStop(t *testing.T) {
 	pid, err := newPID(
 		ctx,
 		actorPath,
-		&StopTester{},
+		&PostStopBreaker{},
 		withInitMaxRetries(1),
 		withCustomLogger(log.DefaultLogger),
 		withSendReplyTimeout(receivingTimeout))
@@ -1096,7 +1129,7 @@ func TestShutdown(t *testing.T) {
 		assert.NotNil(t, parent)
 
 		// create the child actor
-		child, err := parent.SpawnChild(ctx, "SpawnChild", &StopTester{})
+		child, err := parent.SpawnChild(ctx, "SpawnChild", &PostStopBreaker{})
 		assert.NoError(t, err)
 		assert.NotNil(t, child)
 
