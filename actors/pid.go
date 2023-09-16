@@ -148,26 +148,26 @@ type pid struct {
 	actorPath *Path
 
 	// helps determine whether the actor should handle public or not.
-	isRunning *atomic.Bool
+	isRunning atomic.Bool
 	// is captured whenever a mail is sent to the actor
 	lastProcessingTime atomic.Time
 
 	// specifies at what point in time to passivate the actor.
 	// when the actor is passivated it is stopped which means it does not consume
 	// any further resources like memory and cpu. The default value is 120 seconds
-	passivateAfter *atomic.Duration
+	passivateAfter atomic.Duration
 
 	// specifies how long the sender of a mail should wait to receive a reply
 	// when using SendReply. The default value is 5s
-	sendReplyTimeout *atomic.Duration
+	sendReplyTimeout atomic.Duration
 
 	// specifies the maximum of retries to attempt when the actor
 	// initialization fails. The default value is 5 seconds
-	initMaxRetries *atomic.Int32
+	initMaxRetries atomic.Int32
 
 	// shutdownTimeout specifies the graceful shutdown timeout
 	// the default value is 5 seconds
-	shutdownTimeout *atomic.Duration
+	shutdownTimeout atomic.Duration
 
 	// specifies the actor mailbox
 	mailbox     Mailbox
@@ -191,10 +191,10 @@ type pid struct {
 	logger log.Logger
 
 	// definition of the various counters
-	panicCounter           *atomic.Uint64
-	receivedMessageCounter *atomic.Uint64
-	startCounter           *atomic.Uint64
-	lastProcessingDuration *atomic.Duration
+	panicCounter           atomic.Uint64
+	receivedMessageCounter atomic.Uint64
+	startCounter           atomic.Uint64
+	lastProcessingDuration atomic.Duration
 
 	// pidSemaphore that helps synchronize the pid in a concurrent environment
 	// this helps protect the pid fields accessibility
@@ -215,7 +215,7 @@ type pid struct {
 
 	// stash settings
 	stashBuffer    Mailbox
-	stashCapacity  *atomic.Uint64
+	stashCapacity  atomic.Uint64
 	stashSemaphore sync.Mutex
 }
 
@@ -230,34 +230,36 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 
 	// create the actor PID
 	pid := &pid{
-		Actor:                  actor,
-		isRunning:              atomic.NewBool(false),
-		lastProcessingTime:     atomic.Time{},
-		passivateAfter:         atomic.NewDuration(DefaultPassivationTimeout),
-		sendReplyTimeout:       atomic.NewDuration(DefaultReplyTimeout),
-		shutdownTimeout:        atomic.NewDuration(DefaultShutdownTimeout),
-		initMaxRetries:         atomic.NewInt32(DefaultInitMaxRetries),
-		shutdownSignal:         make(chan Unit, 1),
-		haltPassivationLnr:     make(chan Unit, 1),
-		logger:                 log.DefaultLogger,
-		panicCounter:           atomic.NewUint64(0),
-		receivedMessageCounter: atomic.NewUint64(0),
-		lastProcessingDuration: atomic.NewDuration(0),
-		startCounter:           atomic.NewUint64(0),
-		mailboxSize:            defaultMailboxSize,
-		children:               newPIDMap(10),
-		supervisorStrategy:     DefaultSupervisoryStrategy,
-		watchMen:               slices.NewConcurrentSlice[*watchMan](),
-		telemetry:              telemetry.New(),
-		actorPath:              actorPath,
-		pidSemaphore:           sync.RWMutex{},
-		shutdownSemaphore:      sync.Mutex{},
-		httpClient:             http.Client(),
-		mailbox:                nil,
-		stashBuffer:            nil,
-		stashSemaphore:         sync.Mutex{},
-		stashCapacity:          atomic.NewUint64(0),
+		Actor:              actor,
+		lastProcessingTime: atomic.Time{},
+		shutdownSignal:     make(chan Unit, 1),
+		haltPassivationLnr: make(chan Unit, 1),
+		logger:             log.DefaultLogger,
+		mailboxSize:        defaultMailboxSize,
+		children:           newPIDMap(10),
+		supervisorStrategy: DefaultSupervisoryStrategy,
+		watchMen:           slices.NewConcurrentSlice[*watchMan](),
+		telemetry:          telemetry.New(),
+		actorPath:          actorPath,
+		pidSemaphore:       sync.RWMutex{},
+		shutdownSemaphore:  sync.Mutex{},
+		httpClient:         http.Client(),
+		mailbox:            nil,
+		stashBuffer:        nil,
+		stashSemaphore:     sync.Mutex{},
 	}
+
+	// set some of the defaults values
+	pid.initMaxRetries.Store(DefaultInitMaxRetries)
+	pid.shutdownTimeout.Store(DefaultShutdownTimeout)
+	pid.panicCounter.Store(0)
+	pid.receivedMessageCounter.Store(0)
+	pid.lastProcessingDuration.Store(0)
+	pid.startCounter.Store(0)
+	pid.stashCapacity.Store(0)
+	pid.isRunning.Store(false)
+	pid.passivateAfter.Store(DefaultPassivationTimeout)
+	pid.sendReplyTimeout.Store(DefaultReplyTimeout)
 
 	// set the custom options to override the default values
 	for _, opt := range opts {
@@ -269,7 +271,7 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 	}
 
 	// set the stash buffer when capacity is set
-	if pid.stashCapacity != nil && pid.stashCapacity.Load() > 0 {
+	if pid.stashCapacity.Load() > 0 {
 		pid.stashBuffer = newReceiveContextBuffer(pid.stashCapacity.Load())
 	}
 

@@ -13,6 +13,8 @@ import (
 func TestOptions(t *testing.T) {
 	tel := telemetry.New()
 	mailbox := newReceiveContextBuffer(10)
+	var xtrue atomic.Bool
+	xtrue.Store(true)
 	testCases := []struct {
 		name     string
 		option   Option
@@ -51,7 +53,7 @@ func TestOptions(t *testing.T) {
 		{
 			name:     "WithRemoting",
 			option:   WithRemoting("localhost", 3100),
-			expected: actorSystem{remotingEnabled: atomic.NewBool(true), remotingPort: 3100, remotingHost: "localhost"},
+			expected: actorSystem{remotingEnabled: xtrue, remotingPort: 3100, remotingHost: "localhost"},
 		},
 		{
 			name:     "WithShutdownTimeout",

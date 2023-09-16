@@ -11,6 +11,16 @@ import (
 
 func TestPIDOptions(t *testing.T) {
 	mailbox := newReceiveContextBuffer(10)
+	var (
+		atomicDuration   atomic.Duration
+		atomicInt        atomic.Int32
+		negativeDuration atomic.Duration
+		atomicUint64     atomic.Uint64
+	)
+	negativeDuration.Store(-1)
+	atomicInt.Store(5)
+	atomicDuration.Store(time.Second)
+	atomicUint64.Store(10)
 	testCases := []struct {
 		name           string
 		option         pidOption
@@ -19,17 +29,17 @@ func TestPIDOptions(t *testing.T) {
 		{
 			name:           "WithPassivationAfter",
 			option:         withPassivationAfter(time.Second),
-			expectedConfig: &pid{passivateAfter: atomic.NewDuration(time.Second)},
+			expectedConfig: &pid{passivateAfter: atomicDuration},
 		},
 		{
 			name:           "WithSendReplyTimeout",
 			option:         withSendReplyTimeout(time.Second),
-			expectedConfig: &pid{sendReplyTimeout: atomic.NewDuration(time.Second)},
+			expectedConfig: &pid{sendReplyTimeout: atomicDuration},
 		},
 		{
 			name:           "WithInitMaxRetries",
 			option:         withInitMaxRetries(5),
-			expectedConfig: &pid{initMaxRetries: atomic.NewInt32(5)},
+			expectedConfig: &pid{initMaxRetries: atomicInt},
 		},
 		{
 			name:           "WithLogger",
@@ -44,12 +54,12 @@ func TestPIDOptions(t *testing.T) {
 		{
 			name:           "WithShutdownTimeout",
 			option:         withShutdownTimeout(time.Second),
-			expectedConfig: &pid{shutdownTimeout: atomic.NewDuration(time.Second)},
+			expectedConfig: &pid{shutdownTimeout: atomicDuration},
 		},
 		{
 			name:           "WithPassivationDisabled",
 			option:         withPassivationDisabled(),
-			expectedConfig: &pid{passivateAfter: atomic.NewDuration(-1)},
+			expectedConfig: &pid{passivateAfter: negativeDuration},
 		},
 		{
 			name:           "WithMailboxSize",
@@ -64,7 +74,7 @@ func TestPIDOptions(t *testing.T) {
 		{
 			name:           "WithStash",
 			option:         withStash(10),
-			expectedConfig: &pid{stashCapacity: atomic.NewUint64(10)},
+			expectedConfig: &pid{stashCapacity: atomicUint64},
 		},
 	}
 	for _, tc := range testCases {

@@ -80,7 +80,7 @@ type actorSystem struct {
 	actors cmp.ConcurrentMap[string, PID]
 
 	// states whether the actor system has started or not
-	hasStarted *atomic.Bool
+	hasStarted atomic.Bool
 
 	typesLoader TypesLoader
 	reflection  Reflection
@@ -107,7 +107,7 @@ type actorSystem struct {
 	telemetry *telemetry.Telemetry
 	// Specifies whether remoting is enabled.
 	// This allows to handle remote messaging
-	remotingEnabled *atomic.Bool
+	remotingEnabled atomic.Bool
 	// Specifies the remoting port
 	remotingPort int32
 	// Specifies the remoting host
@@ -116,7 +116,7 @@ type actorSystem struct {
 	remotingServer *http.Server
 
 	// convenient field to check cluster setup
-	clusterEnabled *atomic.Bool
+	clusterEnabled atomic.Bool
 	// cluster discovery method
 	serviceDiscovery *discovery.ServiceDiscovery
 	// define the number of partitions to shard the actors in the cluster
@@ -154,7 +154,6 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 	// create the instance of the actor system with the default settings
 	system := &actorSystem{
 		actors:              cmp.New[PID](),
-		hasStarted:          atomic.NewBool(false),
 		typesLoader:         NewTypesLoader(),
 		clusterChan:         make(chan *internalpb.WireActor, 10),
 		name:                name,
@@ -164,13 +163,16 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		actorInitMaxRetries: DefaultInitMaxRetries,
 		supervisorStrategy:  DefaultSupervisoryStrategy,
 		telemetry:           telemetry.New(),
-		remotingEnabled:     atomic.NewBool(false),
-		clusterEnabled:      atomic.NewBool(false),
 		sem:                 sync.Mutex{},
 		shutdownTimeout:     DefaultShutdownTimeout,
 		mailboxSize:         defaultMailboxSize,
 		housekeeperStopSig:  make(chan Unit, 1),
 	}
+	// set the atomic settings
+	system.hasStarted.Store(false)
+	system.remotingEnabled.Store(false)
+	system.clusterEnabled.Store(false)
+
 	// set the reflection
 	system.reflection = NewReflection(system.typesLoader)
 	// apply the various options

@@ -7,7 +7,6 @@ import (
 	"github.com/tochemey/goakt/discovery"
 	"github.com/tochemey/goakt/log"
 	"github.com/tochemey/goakt/telemetry"
-	"go.uber.org/atomic"
 )
 
 var (
@@ -83,7 +82,7 @@ func WithTelemetry(telemetry *telemetry.Telemetry) Option {
 // WithRemoting enables remoting on the actor system
 func WithRemoting(host string, port int32) Option {
 	return OptionFunc(func(a *actorSystem) {
-		a.remotingEnabled = atomic.NewBool(true)
+		a.remotingEnabled.Store(true)
 		a.remotingPort = port
 		a.remotingHost = host
 	})
@@ -93,8 +92,8 @@ func WithRemoting(host string, port int32) Option {
 // and set the remotingHost to the cluster node host when the cluster is fully enabled.
 func WithClustering(serviceDiscovery *discovery.ServiceDiscovery, partitionCount uint64) Option {
 	return OptionFunc(func(a *actorSystem) {
-		a.clusterEnabled = atomic.NewBool(true)
-		a.remotingEnabled = atomic.NewBool(true)
+		a.clusterEnabled.Store(true)
+		a.remotingEnabled.Store(true)
 		a.partitionsCount = partitionCount
 		a.serviceDiscovery = serviceDiscovery
 	})

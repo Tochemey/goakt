@@ -5,7 +5,6 @@ import (
 
 	"github.com/tochemey/goakt/log"
 	"github.com/tochemey/goakt/telemetry"
-	"go.uber.org/atomic"
 )
 
 // pidOption represents the pid
@@ -14,7 +13,7 @@ type pidOption func(pid *pid)
 // withPassivationAfter sets the actor passivation time
 func withPassivationAfter(duration time.Duration) pidOption {
 	return func(pid *pid) {
-		pid.passivateAfter = atomic.NewDuration(duration)
+		pid.passivateAfter.Store(duration)
 	}
 }
 
@@ -22,14 +21,14 @@ func withPassivationAfter(duration time.Duration) pidOption {
 // in a receive-reply pattern
 func withSendReplyTimeout(timeout time.Duration) pidOption {
 	return func(pid *pid) {
-		pid.sendReplyTimeout = atomic.NewDuration(timeout)
+		pid.sendReplyTimeout.Store(timeout)
 	}
 }
 
 // withInitMaxRetries sets the number of times to retry an actor init process
 func withInitMaxRetries(max int) pidOption {
 	return func(pid *pid) {
-		pid.initMaxRetries = atomic.NewInt32(int32(max))
+		pid.initMaxRetries.Store(int32(max))
 	}
 }
 
@@ -58,14 +57,14 @@ func withSupervisorStrategy(strategy StrategyDirective) pidOption {
 // withShutdownTimeout sets the shutdown timeout
 func withShutdownTimeout(duration time.Duration) pidOption {
 	return func(pid *pid) {
-		pid.shutdownTimeout = atomic.NewDuration(duration)
+		pid.shutdownTimeout.Store(duration)
 	}
 }
 
 // withNoPassivation disable passivation
 func withPassivationDisabled() pidOption {
 	return func(pid *pid) {
-		pid.passivateAfter = atomic.NewDuration(-1)
+		pid.passivateAfter.Store(-1)
 	}
 }
 
@@ -93,6 +92,6 @@ func withMailbox(box Mailbox) pidOption {
 // withStash sets the actor's stash buffer
 func withStash(capacity uint64) pidOption {
 	return func(pid *pid) {
-		pid.stashCapacity = atomic.NewUint64(capacity)
+		pid.stashCapacity.Store(capacity)
 	}
 }
