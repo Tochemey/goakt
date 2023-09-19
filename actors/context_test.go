@@ -1077,4 +1077,51 @@ func TestReceiveContext(t *testing.T) {
 			context.Shutdown()
 		})
 	})
+	t.Run("With happy Forward", func(t *testing.T) {
+		ctx := context.TODO()
+		// create a Ping actor
+		opts := []pidOption{
+			withInitMaxRetries(1),
+			withCustomLogger(log.DiscardLogger),
+		}
+
+		// create actorA
+		actorA := &Exchanger{}
+		actorPath1 := NewPath("actorA", NewAddress("sys", "host", 1))
+		pidA, err := newPID(ctx, actorPath1, actorA, opts...)
+		require.NoError(t, err)
+		require.NotNil(t, pidA)
+
+		// create actorC
+		actorC := &Exchanger{}
+		actorPath3 := NewPath("actorC", NewAddress("sys", "host", 1))
+		pidC, err := newPID(ctx, actorPath3, actorC, opts...)
+		require.NoError(t, err)
+		require.NotNil(t, pidC)
+
+		// create actorB
+		actorB := &Forwarder{
+			actorRef: pidC,
+		}
+		actorPath2 := NewPath("actorB", NewAddress("sys", "host", 1))
+		pidB, err := newPID(ctx, actorPath2, actorB, opts...)
+		require.NoError(t, err)
+		require.NotNil(t, pidB)
+
+		// actor A is killing actor C using a forward pattern
+		// actorA tell actorB forward actorC
+		die := new(testpb.TestBye)
+		err = pidA.Tell(ctx, pidB, die)
+		require.NoError(t, err)
+
+		// wait for the async call to properly complete
+		time.Sleep(time.Second)
+		require.True(t, pidA.IsRunning())
+		require.True(t, pidB.IsRunning())
+		require.False(t, pidC.IsRunning())
+
+		// let us shutdown the rest
+		require.NoError(t, pidA.Shutdown(ctx))
+		require.NoError(t, pidB.Shutdown(ctx))
+	})
 }

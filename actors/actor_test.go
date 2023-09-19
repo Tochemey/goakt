@@ -299,3 +299,24 @@ func (x *RestartBreaker) PostStop(context.Context) error {
 }
 
 var _ Actor = &RestartBreaker{}
+
+type Forwarder struct {
+	actorRef PID
+}
+
+func (x *Forwarder) PreStart(context.Context) error {
+	return nil
+}
+
+func (x *Forwarder) Receive(ctx ReceiveContext) {
+	switch ctx.Message().(type) {
+	case *testspb.TestBye:
+		ctx.Forward(x.actorRef)
+	}
+}
+
+func (x *Forwarder) PostStop(context.Context) error {
+	return nil
+}
+
+var _ Actor = &Forwarder{}
