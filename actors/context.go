@@ -57,6 +57,11 @@ type ReceiveContext interface {
 	// Ask has a timeout which can cause the sender to panic. When ask times out, the receiving actor does not know and may still process the message.
 	// It is recommended to set a good timeout to quickly receive response and try to avoid false positives
 	Ask(to PID, message proto.Message) (response proto.Message)
+	// Forward method works similarly to the Tell() method except that the sender of a forwarded message is kept as the original sender.
+	// As a result, the actor receiving the forwarded messages knows who the actual sender of the message is.
+	// The message that is forwarded is the current message received by the received context.
+	// This operation does nothing when the receiving actor is not running
+	Forward(to PID)
 	// RemoteTell sends a message to an actor remotely without expecting any reply
 	RemoteTell(to *addresspb.Address, message proto.Message)
 	// RemoteAsk is used to send a message to an actor remotely and expect a response
@@ -330,5 +335,35 @@ func (c *receiveContext) Stop(child PID) {
 	err := c.recipient.Stop(ctx, child)
 	if err != nil {
 		panic(err)
+	}
+}
+
+// Forward method works similarly to the Tell() method except that the sender of a forwarded message is kept as the original sender.
+// As a result, the actor receiving the forwarded messages knows who the actual sender of the message is.
+// The message that is forwarded is the current message received by the received context.
+// This operation does nothing when the receiving actor is not running
+func (c *receiveContext) Forward(to PID) {
+	// grab the actual message
+	message := c.Message()
+	// grab the sender of the message
+	sender := c.Sender()
+	// forward the actual message
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	// only forward when the receiving actor is running
+	if to.IsRunning() {
+		// create a new context from the parent context
+		ctx := context.WithoutCancel(c.ctx)
+		// create a receiveContext
+		receiveContext := &receiveContext{
+			ctx:            ctx,
+			message:        message,
+			sender:         sender,
+			recipient:      to,
+			mu:             sync.Mutex{},
+			isAsyncMessage: false,
+		}
+		// forward the actual message
+		to.doReceive(receiveContext)
 	}
 }
