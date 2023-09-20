@@ -28,3 +28,4 @@ go get github.com/tochemey/goakt
 - [Mailbox](./mailbox.md)
 - [Stashing](./stashing.md)
 - [Behaviors](./behaviors.md)
+- [Remoting](./remoting.md)
