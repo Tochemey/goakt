@@ -21,3 +21,10 @@ GoAkt is highly scalable and available when running in cluster mode. It comes wi
 ```bash
 go get github.com/tochemey/goakt
 ```
+
+## Links
+
+- [Actors](./actors.md)
+- [Mailbox](./mailbox.md)
+- [Stashing](./stashing.md)
+- [Behaviors](./behaviors.md)
