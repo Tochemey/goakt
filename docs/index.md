@@ -6,7 +6,7 @@
 [![GitHub release (with filter)](https://img.shields.io/github/v/release/tochemey/goakt)](https://github.com/Tochemey/goakt/releases)
 [![GitHub tag (with filter)](https://img.shields.io/github/v/tag/tochemey/goakt)](https://github.com/Tochemey/goakt/tags)
 
-Go-Akt is a distributed actor framework to build reactive and distributed systems in Golang using _**protocol buffers as actor messages**_.
+Go-Akt is a distributed actor framework to build reactive and distributed systems in Golang using protocol buffers as actor messages. 
 GoAkt is highly scalable and available when running in cluster mode. It has the necessary features to build a distributed actor-based system without sacrificing performance and reliability.
 
 ## Use Cases
@@ -21,3 +21,10 @@ GoAkt is highly scalable and available when running in cluster mode. It has the 
 ```bash
 go get github.com/tochemey/goakt
 ```
+
+## Links
+
+- [Actors](./actors.md)
+- [Mailbox](./mailbox.md)
+- [Stashing](./stashing.md)
+- [Behaviors](./behaviors.md)
