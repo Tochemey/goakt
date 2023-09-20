@@ -81,9 +81,10 @@ opts := []actors.Option{
 // create the actor system
 actorSystem := actors.NewActorSystem(actorSystemName, opts...)
 ```
-#### Create Actors
+### Actors
 
-1. Define the actor receiver
+#### Define the actor receiver
+
 
 ```go
 // UserActor is used to test the actor behavior
@@ -104,13 +105,19 @@ func (x *UserActor) PostStop(_ context.Context) error {
 
 // Receive handles messages received
 func (x *UserActor) Receive(ctx ReceiveContext) {
+	// handle messages based upon type
     switch ctx.Message().(type) {
     case *testspb.CreateAccount:
+		 // reply to an Ask message
         ctx.Response(new(testspb.AccountCreated))
+    case *testspb.TestSend:
+		 // here we do nothing with a Tell message
     }
 }
 ```
-2. Spawn and Stop the actor
+
+#### Spawn and Stop
+
    
 ```go
 // define the actor system name
@@ -126,12 +133,48 @@ actorSystem := actors.NewActorSystem(actorSystemName)
 _ := actorSystem.Start(ctx)
 
 // spawn the actor
-actorName := "account-1"
+actorName := "user-1"
 receiver := &UserActor{}
 actor, _ := actorSystem.Spawn(ctx, actorName, receiver)
 
 // stop the actor
 _ := actorSystem.Kill(ctx, actorName)
+
+// stop the actor system
+_ = actorSystem.Stop(ctx)
+```
+
+#### Tell and Ask
+
+```go
+// define the actor system name
+const actorSystemName = "accountingSystem"
+
+// create a go context
+ctx := context.Background()
+
+// create the actor system
+actorSystem := actors.NewActorSystem(actorSystemName)
+
+// start the actor system
+_ := actorSystem.Start(ctx)
+
+// create the actor
+actor := &UserActor{}
+
+// spawn the user actor 1
+user1 := "user-1"
+pid1, _ := actorSystem.Spawn(ctx, user1, receiver)
+
+// spawn the user actor 2
+user2 := "user-2"
+pid2, _ := actorSystem.Spawn(ctx, user2, receiver)
+
+// user1 sends a Tell message to user2
+_ = pid1.Tell(ctx, pid2, new(testpb.TestSend))
+
+// user1 sends an Ask message to user2
+reply, _ := pid1.Ask(ctx, pid2, new(testpb.CreateAccount))
 
 // stop the actor system
 _ = actorSystem.Stop(ctx)
