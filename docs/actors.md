@@ -84,6 +84,7 @@ actorSystem := actors.NewActorSystem(actorSystemName, opts...)
 #### Create Actors
 
 1. Define the actor receiver
+
 ```go
 // UserActor is used to test the actor behavior
 type UserActor struct{}
@@ -110,6 +111,7 @@ func (x *UserActor) Receive(ctx ReceiveContext) {
 }
 ```
 2. Spawn and Stop the actor
+   
 ```go
 // define the actor system name
 const actorSystemName = "accountingSystem"
