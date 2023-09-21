@@ -108,10 +108,12 @@ func (x *UserActor) Receive(ctx ReceiveContext) {
 	// handle messages based upon type
     switch ctx.Message().(type) {
     case *testspb.CreateAccount:
-		 // reply to an Ask message
+	// reply to an Ask message
         ctx.Response(new(testspb.AccountCreated))
     case *testspb.TestSend:
-		 // here we do nothing with a Tell message
+	 // here there is no reply for a Tell message.
+	// you can process the process or send another message
+	// back to the sender using the ctx.Sender()
     }
 }
 ```
@@ -177,5 +179,6 @@ _ = pid1.Tell(ctx, pid2, new(testpb.TestSend))
 reply, _ := pid1.Ask(ctx, pid2, new(testpb.CreateAccount))
 
 // stop the actor system
+// this will automatically stops all the actors created
 _ = actorSystem.Stop(ctx)
 ```
