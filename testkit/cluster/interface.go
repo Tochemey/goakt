@@ -301,7 +301,7 @@ func (_m *Interface) Stop(ctx context.Context) error {
 	return r0
 }
 
-// Interface_Stop_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Shutdown'
+// Interface_Stop_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Stop'
 type Interface_Stop_Call struct {
 	*mock.Call
 }
@@ -309,7 +309,7 @@ type Interface_Stop_Call struct {
 // Stop is a helper method to define mock.On call
 //   - ctx context.Context
 func (_e *Interface_Expecter) Stop(ctx interface{}) *Interface_Stop_Call {
-	return &Interface_Stop_Call{Call: _e.mock.On("Shutdown", ctx)}
+	return &Interface_Stop_Call{Call: _e.mock.On("Stop", ctx)}
 }
 
 func (_c *Interface_Stop_Call) Run(run func(ctx context.Context)) *Interface_Stop_Call {

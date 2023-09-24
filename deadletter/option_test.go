@@ -2,7 +2,6 @@ package deadletter
 
 import (
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/tochemey/goakt/log"
@@ -20,11 +19,6 @@ func TestOptions(t *testing.T) {
 			name:     "WithLogger",
 			option:   WithLogger(log.DefaultLogger),
 			expected: Stream{logger: log.DefaultLogger},
-		},
-		{
-			name:     "WithShutdownTimeout",
-			option:   WithStopTimeout(2 * time.Second),
-			expected: Stream{stopTimeout: 2. * time.Second},
 		},
 		{
 			name:     "WithTelemetry",

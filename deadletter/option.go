@@ -1,8 +1,6 @@
 package deadletter
 
 import (
-	"time"
-
 	"github.com/tochemey/goakt/log"
 	"github.com/tochemey/goakt/telemetry"
 )
@@ -33,13 +31,6 @@ func WithLogger(logger log.Logger) Option {
 func WithTelemetry(telemetry *telemetry.Telemetry) Option {
 	return OptionFunc(func(stream *Stream) {
 		stream.telemetry = telemetry
-	})
-}
-
-// WithStopTimeout sets the stop timeout
-func WithStopTimeout(timeout time.Duration) Option {
-	return OptionFunc(func(stream *Stream) {
-		stream.stopTimeout = timeout
 	})
 }
 
