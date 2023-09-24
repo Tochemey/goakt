@@ -38,26 +38,6 @@ type watchMan struct {
 // StrategyDirective represents the supervisor strategy directive
 type StrategyDirective int
 
-const (
-	// RestartDirective defines the restart strategy when handling actors failure
-	RestartDirective StrategyDirective = iota
-	// StopDirective defines the stop strategy when handling actors failure
-	StopDirective
-
-	// DefaultPassivationTimeout defines the default passivation timeout
-	DefaultPassivationTimeout = 2 * time.Minute
-	// DefaultReplyTimeout defines the default send/reply timeout
-	DefaultReplyTimeout = 100 * time.Millisecond
-	// DefaultInitMaxRetries defines the default value for retrying actor initialization
-	DefaultInitMaxRetries = 5
-	// DefaultSupervisoryStrategy defines the default supervisory strategy
-	DefaultSupervisoryStrategy = StopDirective
-	// DefaultShutdownTimeout defines the default shutdown timeout
-	DefaultShutdownTimeout = 2 * time.Second
-
-	defaultMailboxSize = 4096
-)
-
 // PID defines the various actions one can perform on a given actor
 type PID interface {
 	// Shutdown gracefully shuts down the given actor

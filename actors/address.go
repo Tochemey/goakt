@@ -3,16 +3,6 @@ package actors
 import (
 	"bytes"
 	"strconv"
-
-	"github.com/pkg/errors"
-)
-
-const (
-	protocol = "goakt"
-)
-
-var (
-	ErrLocalAddress = errors.New("address is a local address")
 )
 
 // Address represents the physical location under which an Actor can be

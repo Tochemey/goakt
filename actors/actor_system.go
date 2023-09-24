@@ -613,9 +613,9 @@ func (x *actorSystem) RemoteLookup(ctx context.Context, request *connect.Request
 	hostAndPort := fmt.Sprintf("%s:%d", reqCopy.GetHost(), reqCopy.GetPort())
 	if hostAndPort != nodeAddr {
 		// log the error
-		logger.Error(ErrInvalidActorSystemNode.Message())
+		logger.Error(ErrInvalidNode.Message())
 		// here message is sent to the wrong actor system node
-		return nil, ErrInvalidActorSystemNode
+		return nil, ErrInvalidNode
 	}
 
 	// construct the actor address
@@ -662,9 +662,9 @@ func (x *actorSystem) RemoteAsk(ctx context.Context, request *connect.Request[in
 	hostAndPort := fmt.Sprintf("%s:%d", reqCopy.GetRemoteMessage().GetReceiver().GetHost(), reqCopy.GetRemoteMessage().GetReceiver().GetPort())
 	if hostAndPort != nodeAddr {
 		// log the error
-		logger.Error(ErrInvalidActorSystemNode.Message())
+		logger.Error(ErrInvalidNode.Message())
 		// here message is sent to the wrong actor system node
-		return nil, ErrInvalidActorSystemNode
+		return nil, ErrInvalidNode
 	}
 
 	// construct the actor address
@@ -720,9 +720,9 @@ func (x *actorSystem) RemoteTell(ctx context.Context, request *connect.Request[i
 	hostAndPort := fmt.Sprintf("%s:%d", receiver.GetHost(), receiver.GetPort())
 	if hostAndPort != nodeAddr {
 		// log the error
-		logger.Error(ErrInvalidActorSystemNode.Message())
+		logger.Error(ErrInvalidNode.Message())
 		// here message is sent to the wrong actor system node
-		return nil, ErrInvalidActorSystemNode
+		return nil, ErrInvalidNode
 	}
 
 	// construct the actor address

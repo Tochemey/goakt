@@ -3,15 +3,7 @@ package actors
 import (
 	"sync"
 
-	"github.com/pkg/errors"
 	"go.uber.org/atomic"
-)
-
-var (
-	// ErrEmptyMailbox is returned when the mailbox is empty
-	ErrEmptyMailbox = errors.New("mailbox is empty")
-	// ErrFullMailbox is returned when the mailbox is full
-	ErrFullMailbox = errors.New("mailbox is full")
 )
 
 // Mailbox defines the actor mailbox.
