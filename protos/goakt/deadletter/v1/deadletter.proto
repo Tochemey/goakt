@@ -8,6 +8,12 @@ import "google/protobuf/timestamp.proto";
 
 option go_package = "github.com/tochemey/goakt/pb/deadletter/v1;deadletterpb";
 
+// DeadletterSubscriptionService defines the deadletter subscription service
+service DeadletterSubscriptionService {
+  // Subscribe helps any service to subscribe to the deadletter stream
+  rpc Subscribe(SubscribeRequest) returns (stream SubscribeResponse);
+}
+
 // Deadletter defines the deadletter entry
 message Deadletter {
   // Specifies the sender's address
@@ -21,4 +27,12 @@ message Deadletter {
   google.protobuf.Timestamp send_time = 4;
   // Specifies the reason why the deadletter
   string reason = 5;
+}
+
+// SubscribeRequest defines the deadletter subscription request
+message SubscribeRequest {}
+
+message SubscribeResponse {
+  // Specifies the deadletter
+  Deadletter deadletter = 1;
 }
