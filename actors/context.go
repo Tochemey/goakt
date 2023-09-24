@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	addresspb "github.com/tochemey/goakt/pb/address/v1"
+	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 )
@@ -94,6 +95,7 @@ type receiveContext struct {
 	recipient      PID
 	mu             sync.Mutex
 	isAsyncMessage bool
+	sendTime       atomic.Time
 }
 
 // force compilation error

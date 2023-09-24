@@ -74,7 +74,7 @@ type ActorSystem interface {
 // ActorSystem represent a collection of actors on a given node
 // Only a single instance of the ActorSystem can be created on a given node
 type actorSystem struct {
-	internalpbconnect.UnimplementedRemoteMessagingServiceHandler
+	internalpbconnect.UnimplementedRemotingServiceHandler
 
 	// map of actors in the system
 	actors cmp.ConcurrentMap[string, PID]
@@ -857,7 +857,7 @@ func (x *actorSystem) enableRemoting(ctx context.Context) {
 	// create a http service mux
 	mux := http.NewServeMux()
 	// create the resource and handler
-	path, handler := internalpbconnect.NewRemoteMessagingServiceHandler(
+	path, handler := internalpbconnect.NewRemotingServiceHandler(
 		x,
 		connect.WithInterceptors(interceptor(x.telemetry.TracerProvider, x.telemetry.MeterProvider)),
 	)

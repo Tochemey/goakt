@@ -8,6 +8,8 @@ import (
 	"sync"
 	"time"
 
+	"google.golang.org/protobuf/types/known/timestamppb"
+
 	"connectrpc.com/connect"
 	"connectrpc.com/otelconnect"
 	"github.com/cenkalti/backoff"
@@ -197,6 +199,10 @@ type pid struct {
 	stashBuffer    Mailbox
 	stashCapacity  atomic.Uint64
 	stashSemaphore sync.Mutex
+
+	// hold unhandled or unprocessed message
+	deadletterQueueSize int
+	//deadletterQueue     deadletter.Queue
 }
 
 // enforce compilation error
@@ -571,6 +577,7 @@ func (p *pid) Ask(ctx context.Context, to PID, message proto.Message) (response 
 	context.isAsyncMessage = false
 	context.mu = sync.Mutex{}
 	context.response = make(chan proto.Message, 1)
+	context.sendTime.Store(time.Now())
 
 	// release the lock after setting the message context
 	p.pidSemaphore.Unlock()
@@ -616,6 +623,7 @@ func (p *pid) Tell(ctx context.Context, to PID, message proto.Message) error {
 	context.isAsyncMessage = true
 	context.mu = sync.Mutex{}
 	context.response = make(chan proto.Message, 1)
+	context.sendTime.Store(time.Now())
 
 	// put the message context in the mailbox of the recipient actor
 	to.doReceive(context)
@@ -631,7 +639,7 @@ func (p *pid) RemoteLookup(ctx context.Context, host string, port int, name stri
 	defer span.End()
 
 	// create an instance of remote client service
-	remoteClient := internalpbconnect.NewRemoteMessagingServiceClient(
+	remoteClient := internalpbconnect.NewRemotingServiceClient(
 		p.httpClient,
 		http.URL(host, port),
 		connect.WithInterceptors(p.interceptor()),
@@ -671,7 +679,7 @@ func (p *pid) RemoteTell(ctx context.Context, to *addresspb.Address, message pro
 	}
 
 	// create an instance of remote client service
-	remoteClient := internalpbconnect.NewRemoteMessagingServiceClient(
+	remoteClient := internalpbconnect.NewRemotingServiceClient(
 		p.httpClient,
 		http.URL(to.GetHost(), int(to.GetPort())),
 		connect.WithInterceptors(p.interceptor()),
@@ -693,6 +701,7 @@ func (p *pid) RemoteTell(ctx context.Context, to *addresspb.Address, message pro
 			Receiver: to,
 			Message:  marshaled,
 		},
+		SendTime: timestamppb.Now(),
 	})
 
 	// add some debug logging
@@ -722,7 +731,7 @@ func (p *pid) RemoteAsk(ctx context.Context, to *addresspb.Address, message prot
 	}
 
 	// create an instance of remote client service
-	remoteClient := internalpbconnect.NewRemoteMessagingServiceClient(
+	remoteClient := internalpbconnect.NewRemotingServiceClient(
 		p.httpClient,
 		http.URL(to.GetHost(), int(to.GetPort())),
 		connect.WithInterceptors(p.interceptor()),
@@ -737,6 +746,7 @@ func (p *pid) RemoteAsk(ctx context.Context, to *addresspb.Address, message prot
 				Receiver: to,
 				Message:  marshaled,
 			},
+			SendTime: timestamppb.Now(),
 		})
 	// send the request
 	rpcResponse, rpcErr := remoteClient.RemoteAsk(ctx, rpcRequest)

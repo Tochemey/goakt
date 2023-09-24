@@ -74,11 +74,13 @@ protogen:
             --template buf.gen.yaml \
             --path protos/goakt/address \
             --path protos/goakt/messages \
+            --path protos/goakt/deadletter \
             --path protos/goakt/internal
 
     # save artifact to
     SAVE ARTIFACT gen/address AS LOCAL pb/address
     SAVE ARTIFACT gen/messages AS LOCAL pb/messages
+    SAVE ARTIFACT gen/deadletter AS LOCAL pb/deadletter
     SAVE ARTIFACT gen/internal AS LOCAL internal
 
 testprotogen:

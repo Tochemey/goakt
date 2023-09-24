@@ -1,0 +1,24 @@
+syntax = "proto3";
+
+package deadletter.v1;
+
+import "address/v1/address.proto";
+import "google/protobuf/any.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/tochemey/goakt/pb/deadletter/v1;deadletterpb";
+
+// Deadletter defines the deadletter entry
+message Deadletter {
+  // Specifies the sender's address
+  address.v1.Address sender = 1;
+  // Specifies the actor address
+  address.v1.Address receiver = 2;
+  // Specifies the message to send to the actor
+  // Any proto message is allowed to be sent
+  google.protobuf.Any message = 3;
+  // Specifies the message send time
+  google.protobuf.Timestamp send_time = 4;
+  // Specifies the reason why the deadletter
+  string reason = 5;
+}
