@@ -26,6 +26,8 @@ const (
 
 // Stream implements the DeadletterSubscriptionService
 type Stream struct {
+	// returns errors from all methods
+	deadletterpbconnect.UnimplementedDeadletterSubscriptionServiceHandler
 	// the underlying queue
 	queue *queue
 	// Specifies the streaming service port
