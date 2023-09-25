@@ -8,8 +8,6 @@ import (
 	"sync"
 	"time"
 
-	"google.golang.org/protobuf/types/known/timestamppb"
-
 	"connectrpc.com/connect"
 	"connectrpc.com/otelconnect"
 	"github.com/cenkalti/backoff"
@@ -27,6 +25,7 @@ import (
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // watchMan is used to handle parent child relationship.
@@ -199,10 +198,6 @@ type pid struct {
 	stashBuffer    Mailbox
 	stashCapacity  atomic.Uint64
 	stashSemaphore sync.Mutex
-
-	// hold unhandled or unprocessed message
-	deadletterQueueSize int
-	//deadletterQueue     deadletter.Queue
 }
 
 // enforce compilation error

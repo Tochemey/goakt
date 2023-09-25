@@ -1,4 +1,4 @@
-package deadletter
+package eventstream
 
 import (
 	"testing"
@@ -10,20 +10,21 @@ import (
 
 func TestStream(t *testing.T) {
 	t.Run("With Publication/Subscription", func(t *testing.T) {
+		topic := "deadletters"
 		// create an instance of stream
-		stream := NewStream()
+		stream := New[*deadletterpb.Deadletter](5)
 		require.NotNil(t, stream)
 
 		// create a subscriber
-		sub := stream.Subscribe()
+		sub := stream.Subscribe(topic)
 
 		// create two dead letters to publish
 		dl1 := new(deadletterpb.Deadletter)
 		dl2 := new(deadletterpb.Deadletter)
 
 		// publish the dead letters
-		stream.Publish(dl1)
-		stream.Publish(dl2)
+		stream.Publish(topic, dl1)
+		stream.Publish(topic, dl2)
 
 		// shutdown the stream
 		stream.Close()
@@ -38,22 +39,23 @@ func TestStream(t *testing.T) {
 		require.True(t, proto.Equal(items[0], dl1))
 	})
 	t.Run("With Publication/Unsubscription", func(t *testing.T) {
+		topic := "deadletters"
 		// create an instance of stream
-		stream := NewStream()
+		stream := New[*deadletterpb.Deadletter](5)
 		require.NotNil(t, stream)
 		defer stream.Close()
 
 		// create a subscriber
-		sub := stream.Subscribe()
+		sub := stream.Subscribe(topic)
 		// create two dead letters to publish
 		dl1 := new(deadletterpb.Deadletter)
 		dl2 := new(deadletterpb.Deadletter)
 
 		// publish the dead letters
-		stream.Publish(dl1)
-		stream.Publish(dl2)
+		stream.Publish(topic, dl1)
+		stream.Publish(topic, dl2)
 
-		stream.Unsubscribe(sub)
+		stream.Unsubscribe(sub, topic)
 
 		var items []*deadletterpb.Deadletter
 		for entry := range sub {
