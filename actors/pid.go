@@ -12,10 +12,12 @@ import (
 	"connectrpc.com/otelconnect"
 	"github.com/cenkalti/backoff"
 	"github.com/pkg/errors"
+	"github.com/tochemey/goakt/eventstream"
 	internalpb "github.com/tochemey/goakt/internal/v1"
 	"github.com/tochemey/goakt/internal/v1/internalpbconnect"
 	"github.com/tochemey/goakt/log"
 	addresspb "github.com/tochemey/goakt/pb/address/v1"
+	deadletterpb "github.com/tochemey/goakt/pb/deadletter/v1"
 	messagespb "github.com/tochemey/goakt/pb/messages/v1"
 	"github.com/tochemey/goakt/pkg/http"
 	"github.com/tochemey/goakt/pkg/slices"
@@ -35,9 +37,6 @@ type watchMan struct {
 	ErrChan chan error // ErrChan the channel where to pass error message
 	Done    chan Unit  // Done when watching is completed
 }
-
-// StrategyDirective represents the supervisor strategy directive
-type StrategyDirective int
 
 // PID defines the various actions one can perform on a given actor
 type PID interface {
@@ -116,7 +115,9 @@ type PID interface {
 	unstashAll() error
 	// unstash unstashes the oldest message in the stash and prepends to the mailbox
 	unstash() error
-
+	// toDeadletters add the given message to the deadletters queue
+	toDeadletters(recvCtx ReceiveContext, err error)
+	// removeChild is a utility function to remove child actor
 	removeChild(ctx context.Context, pid PID)
 }
 
@@ -198,6 +199,9 @@ type pid struct {
 	stashBuffer    Mailbox
 	stashCapacity  atomic.Uint64
 	stashSemaphore sync.Mutex
+
+	// defines the deadletters event stream
+	deadletterStream *eventstream.EventsStream[*deadletterpb.Deadletter]
 }
 
 // enforce compilation error
@@ -228,6 +232,7 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 		mailbox:            nil,
 		stashBuffer:        nil,
 		stashSemaphore:     sync.Mutex{},
+		deadletterStream:   nil,
 	}
 
 	// set some of the defaults values
@@ -587,6 +592,8 @@ func (p *pid) Ask(ctx context.Context, to PID, message proto.Message) (response 
 			return
 		case <-await:
 			err = ErrRequestTimeout
+			// push the message as a deadletter
+			p.toDeadletters(context, err)
 			return
 		}
 	}
@@ -847,6 +854,8 @@ func (p *pid) doReceive(ctx ReceiveContext) {
 	if err := p.mailbox.Push(ctx); err != nil {
 		// add a warning log because the mailbox is full and do nothing
 		p.logger.Warn(err)
+		// push the message as a deadletter
+		p.toDeadletters(ctx, err)
 		return
 	}
 
@@ -1198,6 +1207,11 @@ func (p *pid) doStop(ctx context.Context) error {
 		}
 	}
 
+	// close the deadletter event streams
+	if p.deadletterStream != nil {
+		p.deadletterStream.Close()
+	}
+
 	// wait for all messages in the mailbox to be processed
 	// init a ticker that run every 10 ms to make sure we process all messages in the
 	// mailbox.
@@ -1247,6 +1261,7 @@ func (p *pid) doStop(ctx context.Context) error {
 	return p.Actor.PostStop(ctx)
 }
 
+// removeChild helps remove child actor
 func (p *pid) removeChild(ctx context.Context, pid PID) {
 	// add a span context
 	ctx, span := telemetry.SpanContext(ctx, "RemoveChild")

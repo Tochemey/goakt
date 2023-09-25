@@ -3,6 +3,9 @@ package actors
 import (
 	"time"
 
+	"github.com/tochemey/goakt/eventstream"
+	deadletterpb "github.com/tochemey/goakt/pb/deadletter/v1"
+
 	"github.com/tochemey/goakt/log"
 	"github.com/tochemey/goakt/telemetry"
 )
@@ -93,5 +96,12 @@ func withMailbox(box Mailbox) pidOption {
 func withStash(capacity uint64) pidOption {
 	return func(pid *pid) {
 		pid.stashCapacity.Store(capacity)
+	}
+}
+
+// withDeadletterStream set the deadletter stream
+func withDeadletterStream(stream *eventstream.EventsStream[*deadletterpb.Deadletter]) pidOption {
+	return func(pid *pid) {
+		pid.deadletterStream = stream
 	}
 }

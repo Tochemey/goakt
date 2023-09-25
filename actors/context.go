@@ -84,6 +84,9 @@ type ReceiveContext interface {
 	// Stop forces the child Actor under the given name to terminate after it finishes processing its current message.
 	// Nothing happens if child is already stopped.
 	Stop(child PID)
+	// Unhandled is used to handle unhandled messages instead of throwing error
+	// This will push the given message into the deadletter queue
+	Unhandled()
 }
 
 type receiveContext struct {
@@ -368,4 +371,14 @@ func (c *receiveContext) Forward(to PID) {
 		// forward the actual message
 		to.doReceive(receiveContext)
 	}
+}
+
+// Unhandled is used to handle unhandled messages instead of throwing error
+func (c *receiveContext) Unhandled() {
+	// acquire the lock
+	c.mu.Lock()
+	// release the lock
+	defer c.mu.Unlock()
+	// send the current message to deadletters
+	c.recipient.toDeadletters(c, ErrUnhandled)
 }
