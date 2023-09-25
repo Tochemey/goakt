@@ -26,15 +26,20 @@ type Stream struct {
 }
 
 // NewStream creates an instance of Stream
-func NewStream() *Stream {
+func NewStream(opts ...Option) *Stream {
 	// create an instance of engine
-	eng := pubsub.New[*deadletterpb.Deadletter](BufferCapacity)
 	s := &Stream{
-		engine:    eng,
 		sem:       sync.Mutex{},
 		logger:    log.DefaultLogger,
 		telemetry: telemetry.New(),
+		capacity:  BufferCapacity,
 	}
+	// apply the options
+	for _, opt := range opts {
+		opt.Apply(s)
+	}
+	// set the engine
+	s.engine = pubsub.New[*deadletterpb.Deadletter](BufferCapacity)
 	return s
 }
 
