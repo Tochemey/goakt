@@ -66,8 +66,10 @@ type ActorSystem interface {
 	InCluster() bool
 	// GetPartition returns the partition where a given actor is located
 	GetPartition(ctx context.Context, actorName string) uint64
-	// SubscribeToEvent creates an event consumer
+	// SubscribeToEvent creates an event subscriber.
 	SubscribeToEvent(ctx context.Context, event eventspb.Event) (eventstream.Subscriber, error)
+	// UnsubscribeToEvent unsubscribes a subscriber.
+	UnsubscribeToEvent(ctx context.Context, event eventspb.Event, subscriber eventstream.Subscriber) error
 
 	// handleRemoteAsk handles a synchronous message to another actor and expect a response.
 	// This block until a response is received or timed out.
@@ -201,14 +203,33 @@ func (x *actorSystem) SubscribeToEvent(ctx context.Context, event eventspb.Event
 		return nil, ErrActorSystemNotStarted
 	}
 	// create the consumer
-	cons := x.eventsStream.AddSubscriber()
+	subscriber := x.eventsStream.AddSubscriber()
 	// based upon the event we will subscribe to the various topic
 	switch event {
 	case eventspb.Event_DEAD_LETTER:
 		// subscribe the consumer to the deadletter topic
-		x.eventsStream.Subscribe(cons, deadlettersTopic)
+		x.eventsStream.Subscribe(subscriber, deadlettersTopic)
 	}
-	return cons, nil
+	return subscriber, nil
+}
+
+// UnsubscribeToEvent unsubscribes a subscriber.
+func (x *actorSystem) UnsubscribeToEvent(ctx context.Context, event eventspb.Event, subscriber eventstream.Subscriber) error {
+	// add a span context
+	ctx, span := telemetry.SpanContext(ctx, "UnsubscribeToEvent")
+	defer span.End()
+	// first check whether the actor system has started
+	if !x.hasStarted.Load() {
+		return ErrActorSystemNotStarted
+	}
+
+	// based upon the event we will unsubscribe to the various topic
+	switch event {
+	case eventspb.Event_DEAD_LETTER:
+		// subscribe the consumer to the deadletter topic
+		x.eventsStream.Unsubscribe(subscriber, deadlettersTopic)
+	}
+	return nil
 }
 
 // GetPartition returns the partition where a given actor is located

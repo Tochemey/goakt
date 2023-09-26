@@ -1126,7 +1126,7 @@ func TestReceiveContext(t *testing.T) {
 		require.NoError(t, pidA.Shutdown(ctx))
 		require.NoError(t, pidB.Shutdown(ctx))
 	})
-	t.Run("With Unhandled", func(t *testing.T) {
+	t.Run("With Unhandled with no sender", func(t *testing.T) {
 		ctx := context.TODO()
 		// create the deadletter stream
 		eventsStream := eventstream.New()
@@ -1181,10 +1181,81 @@ func TestReceiveContext(t *testing.T) {
 		require.NoError(t, msg.UnmarshalTo(actual))
 		require.True(t, proto.Equal(send, actual))
 		require.Equal(t, deadletter.GetReason(), ErrUnhandled.Error())
+		assert.Nil(t, deadletter.GetSender())
 
 		assert.EqualValues(t, 1, len(consumer.Topics()))
 
 		t.Cleanup(func() {
+			// shutdown the consumer
+			consumer.Shutdown()
+			context.Shutdown()
+		})
+	})
+	t.Run("With Unhandled with a sender", func(t *testing.T) {
+		ctx := context.TODO()
+		// create the deadletter stream
+		eventsStream := eventstream.New()
+
+		// create a consumer
+		consumer := eventsStream.AddSubscriber()
+		eventsStream.Subscribe(consumer, deadlettersTopic)
+
+		// create a Ping actor
+		opts := []pidOption{
+			withInitMaxRetries(1),
+			withCustomLogger(log.DiscardLogger),
+			withEventsStream(eventsStream),
+		}
+
+		// create actor1
+		actor1 := &Exchanger{}
+		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
+		pid1, err := newPID(ctx, actorPath1, actor1, opts...)
+
+		require.NoError(t, err)
+		require.NotNil(t, pid1)
+
+		actor2 := &Exchanger{}
+		actorPath2 := NewPath("Exchange1", NewAddress("sys", "host", 1))
+		pid2, err := newPID(ctx, actorPath2, actor2, opts...)
+
+		send := new(testpb.TestSend)
+		// create an instance of receive context
+		context := &receiveContext{
+			ctx:            ctx,
+			message:        send,
+			sender:         pid2,
+			recipient:      pid1,
+			mu:             sync.Mutex{},
+			isAsyncMessage: true,
+		}
+
+		// calling unhandled will push the current message to deadletters
+		context.Unhandled()
+
+		// wait for messages to be published
+		time.Sleep(time.Second)
+
+		var items []*eventspb.DeadletterEvent
+		for message := range consumer.Iterator() {
+			payload := message.Payload()
+			deadletter := payload.(*eventspb.DeadletterEvent)
+			items = append(items, deadletter)
+		}
+
+		require.Len(t, items, 1)
+		deadletter := items[0]
+		msg := deadletter.GetMessage()
+		actual := new(testpb.TestSend)
+		require.NoError(t, msg.UnmarshalTo(actual))
+		require.True(t, proto.Equal(send, actual))
+		require.Equal(t, deadletter.GetReason(), ErrUnhandled.Error())
+		assert.True(t, proto.Equal(deadletter.GetSender(), actorPath2.RemoteAddress()))
+
+		assert.EqualValues(t, 1, len(consumer.Topics()))
+
+		t.Cleanup(func() {
+			require.NoError(t, pid2.Shutdown(ctx))
 			// shutdown the consumer
 			consumer.Shutdown()
 			context.Shutdown()

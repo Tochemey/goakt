@@ -805,7 +805,7 @@ func TestActorSystem(t *testing.T) {
 			assert.Error(t, err)
 		})
 	})
-	t.Run("With SubscribeToDeadletters subscription", func(t *testing.T) {
+	t.Run("With deadletters subscription ", func(t *testing.T) {
 		ctx := context.TODO()
 		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
 
@@ -846,11 +846,47 @@ func TestActorSystem(t *testing.T) {
 
 		require.Len(t, items, 5)
 
+		// unsubscribe the consumer
+		err = sys.UnsubscribeToEvent(ctx, eventspb.Event_DEAD_LETTER, consumer)
+		require.NoError(t, err)
+
 		t.Cleanup(func() {
 			// shutdown the consumer
 			consumer.Shutdown()
 			err = sys.Stop(ctx)
 			assert.NoError(t, err)
 		})
+	})
+	t.Run("With deadletters subscription when not started", func(t *testing.T) {
+		ctx := context.TODO()
+		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+
+		// create a deadletter subscriber
+		consumer, err := sys.SubscribeToEvent(ctx, eventspb.Event_DEAD_LETTER)
+		require.Error(t, err)
+		require.Nil(t, consumer)
+	})
+	t.Run("With deadletters unsubscription when not started", func(t *testing.T) {
+		ctx := context.TODO()
+		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+
+		// start the actor system
+		err := sys.Start(ctx)
+		assert.NoError(t, err)
+
+		consumer, err := sys.SubscribeToEvent(ctx, eventspb.Event_DEAD_LETTER)
+		require.NoError(t, err)
+		require.NotNil(t, consumer)
+
+		// stop the actor system
+		assert.NoError(t, sys.Stop(ctx))
+
+		time.Sleep(time.Second)
+
+		// create a deadletter subscriber
+		err = sys.UnsubscribeToEvent(ctx, eventspb.Event_DEAD_LETTER, consumer)
+		require.Error(t, err)
+
+		consumer.Shutdown()
 	})
 }
