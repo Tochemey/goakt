@@ -97,6 +97,7 @@ Also, check reference section at the end of the post for more material regarding
   with [OpenTelemetry](https://github.com/open-telemetry/opentelemetry-go).
 - **Logger** - Custom logger can be implemented.
 - **Mailbox** - Once can implement a custom mailbox. See [Mailbox](./actors/mailbox.go).
+- **Dead letters** - See [Deadletter](#dead-letters)
 
 #### Behaviors
 
@@ -132,6 +133,16 @@ To use the stashing feature, call the following methods on the [ReceiveContext i
 - `UnstashAll()` - unstashes all messages from the stash buffer and prepends in the mailbox. Messages will be processed
   in the same order they arrived. The stash buffer will be empty after processing all messages, unless an exception is
   thrown or messages are stashed while unstashing.
+
+#### Dead letters
+
+Dead letters are basically messages that cannot be delivered or that were not handled by a given actor.
+Those messages are encapsulated in an event called [DeadletterEvent](./protos/goakt/events/v1/events.proto).
+Dead letters are automatically emitted when a message cannot be delivered to actors' mailbox or when an Ask times out.
+Also, one can emit dead letters from the receiving actor by using the `ctx.Unhandled()` method. This is useful instead of panicking when
+the receiving actor does not know how to handle a particular message.
+Dead letters are not propagated over the network, there are tied to the local actor system.
+To receive the dead letter, you just need to call the actor system `SubscribeToEvent` and specify the `Event_DEAD_LETTER` event type.
 
 ### Use Cases
 
