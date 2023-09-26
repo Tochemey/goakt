@@ -1170,6 +1170,7 @@ func TestReceiveContext(t *testing.T) {
 		var items []*eventspb.DeadletterEvent
 		for message := range consumer.Iterator() {
 			payload := message.Payload()
+			assert.Equal(t, deadlettersTopic, message.Topic())
 			deadletter := payload.(*eventspb.DeadletterEvent)
 			items = append(items, deadletter)
 		}
