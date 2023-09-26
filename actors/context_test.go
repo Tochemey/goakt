@@ -12,7 +12,7 @@ import (
 	"github.com/tochemey/goakt/log"
 	addresspb "github.com/tochemey/goakt/pb/address/v1"
 	eventspb "github.com/tochemey/goakt/pb/events/v1"
-	"github.com/tochemey/goakt/pkg/stream"
+	"github.com/tochemey/goakt/pkg/eventstream"
 	testpb "github.com/tochemey/goakt/test/data/pb/v1"
 	"github.com/travisjeffery/go-dynaport"
 	"google.golang.org/protobuf/proto"
@@ -1129,10 +1129,10 @@ func TestReceiveContext(t *testing.T) {
 	t.Run("With Unhandled", func(t *testing.T) {
 		ctx := context.TODO()
 		// create the deadletter stream
-		eventsStream := stream.NewBroker()
+		eventsStream := eventstream.New()
 
 		// create a consumer
-		consumer := eventsStream.AddConsumer()
+		consumer := eventsStream.AddSubscriber()
 		eventsStream.Subscribe(consumer, deadlettersTopic)
 
 		// create a Ping actor
@@ -1164,6 +1164,7 @@ func TestReceiveContext(t *testing.T) {
 		// calling unhandled will push the current message to deadletters
 		context.Unhandled()
 
+		// wait for messages to be published
 		time.Sleep(time.Second)
 
 		var items []*eventspb.DeadletterEvent
@@ -1180,6 +1181,8 @@ func TestReceiveContext(t *testing.T) {
 		require.NoError(t, msg.UnmarshalTo(actual))
 		require.True(t, proto.Equal(send, actual))
 		require.Equal(t, deadletter.GetReason(), ErrUnhandled.Error())
+
+		assert.EqualValues(t, 1, len(consumer.Topics()))
 
 		t.Cleanup(func() {
 			// shutdown the consumer

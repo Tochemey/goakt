@@ -3,9 +3,8 @@ package actors
 import (
 	"time"
 
-	"github.com/tochemey/goakt/pkg/stream"
-
 	"github.com/tochemey/goakt/log"
+	"github.com/tochemey/goakt/pkg/eventstream"
 	"github.com/tochemey/goakt/telemetry"
 )
 
@@ -99,7 +98,7 @@ func withStash(capacity uint64) pidOption {
 }
 
 // withEventsStream set the events stream
-func withEventsStream(stream *stream.Broker) pidOption {
+func withEventsStream(stream *eventstream.EventsStream) pidOption {
 	return func(pid *pid) {
 		pid.eventsStream = stream
 	}

@@ -1,4 +1,4 @@
-package stream
+package eventstream
 
 // Message defines the stream message
 type Message struct {

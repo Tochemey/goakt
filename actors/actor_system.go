@@ -20,7 +20,7 @@ import (
 	"github.com/tochemey/goakt/log"
 	addresspb "github.com/tochemey/goakt/pb/address/v1"
 	eventspb "github.com/tochemey/goakt/pb/events/v1"
-	"github.com/tochemey/goakt/pkg/stream"
+	"github.com/tochemey/goakt/pkg/eventstream"
 	"github.com/tochemey/goakt/telemetry"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
@@ -67,7 +67,7 @@ type ActorSystem interface {
 	// GetPartition returns the partition where a given actor is located
 	GetPartition(ctx context.Context, actorName string) uint64
 	// SubscribeToEvent creates an event consumer
-	SubscribeToEvent(ctx context.Context, event eventspb.Event) (*stream.Consumer, error)
+	SubscribeToEvent(ctx context.Context, event eventspb.Event) (eventstream.Subscriber, error)
 
 	// handleRemoteAsk handles a synchronous message to another actor and expect a response.
 	// This block until a response is received or timed out.
@@ -140,7 +140,7 @@ type actorSystem struct {
 	stashBuffer        uint64
 	housekeeperStopSig chan Unit
 
-	eventsStream *stream.Broker
+	eventsStream *eventstream.EventsStream
 }
 
 // enforce compilation error when all methods of the ActorSystem interface are not implemented
@@ -174,7 +174,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		shutdownTimeout:     DefaultShutdownTimeout,
 		mailboxSize:         defaultMailboxSize,
 		housekeeperStopSig:  make(chan Unit, 1),
-		eventsStream:        stream.NewBroker(),
+		eventsStream:        eventstream.New(),
 	}
 	// set the atomic settings
 	system.hasStarted.Store(false)
@@ -192,7 +192,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 }
 
 // SubscribeToEvent help receive dead letters whenever there are available
-func (x *actorSystem) SubscribeToEvent(ctx context.Context, event eventspb.Event) (*stream.Consumer, error) {
+func (x *actorSystem) SubscribeToEvent(ctx context.Context, event eventspb.Event) (eventstream.Subscriber, error) {
 	// add a span context
 	ctx, span := telemetry.SpanContext(ctx, "SubscribeToEvent")
 	defer span.End()
@@ -201,7 +201,7 @@ func (x *actorSystem) SubscribeToEvent(ctx context.Context, event eventspb.Event
 		return nil, ErrActorSystemNotStarted
 	}
 	// create the consumer
-	cons := x.eventsStream.AddConsumer()
+	cons := x.eventsStream.AddSubscriber()
 	// based upon the event we will subscribe to the various topic
 	switch event {
 	case eventspb.Event_DEAD_LETTER:

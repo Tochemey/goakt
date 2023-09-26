@@ -4,10 +4,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tochemey/goakt/pkg/stream"
-
 	"github.com/stretchr/testify/assert"
 	"github.com/tochemey/goakt/log"
+	"github.com/tochemey/goakt/pkg/eventstream"
 	"go.uber.org/atomic"
 )
 
@@ -23,7 +22,7 @@ func TestPIDOptions(t *testing.T) {
 	atomicInt.Store(5)
 	atomicDuration.Store(time.Second)
 	atomicUint64.Store(10)
-	eventsStream := stream.NewBroker()
+	eventsStream := eventstream.New()
 
 	testCases := []struct {
 		name     string

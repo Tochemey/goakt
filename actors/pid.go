@@ -18,9 +18,9 @@ import (
 	addresspb "github.com/tochemey/goakt/pb/address/v1"
 	eventspb "github.com/tochemey/goakt/pb/events/v1"
 	messagespb "github.com/tochemey/goakt/pb/messages/v1"
+	"github.com/tochemey/goakt/pkg/eventstream"
 	"github.com/tochemey/goakt/pkg/http"
 	"github.com/tochemey/goakt/pkg/slices"
-	"github.com/tochemey/goakt/pkg/stream"
 	"github.com/tochemey/goakt/telemetry"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
@@ -201,7 +201,7 @@ type pid struct {
 	stashSemaphore sync.Mutex
 
 	// define an events stream
-	eventsStream *stream.Broker
+	eventsStream *eventstream.EventsStream
 }
 
 // enforce compilation error
