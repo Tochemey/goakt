@@ -11,6 +11,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tochemey/goakt/log"
 	addresspb "github.com/tochemey/goakt/pb/address/v1"
+	eventspb "github.com/tochemey/goakt/pb/events/v1"
+	"github.com/tochemey/goakt/pkg/stream"
 	testpb "github.com/tochemey/goakt/test/data/pb/v1"
 	"github.com/travisjeffery/go-dynaport"
 	"google.golang.org/protobuf/proto"
@@ -1123,5 +1125,66 @@ func TestReceiveContext(t *testing.T) {
 		// let us shutdown the rest
 		require.NoError(t, pidA.Shutdown(ctx))
 		require.NoError(t, pidB.Shutdown(ctx))
+	})
+	t.Run("With Unhandled", func(t *testing.T) {
+		ctx := context.TODO()
+		// create the deadletter stream
+		eventsStream := stream.NewBroker()
+
+		// create a consumer
+		consumer := eventsStream.AddConsumer()
+		eventsStream.Subscribe(consumer, deadlettersTopic)
+
+		// create a Ping actor
+		opts := []pidOption{
+			withInitMaxRetries(1),
+			withCustomLogger(log.DiscardLogger),
+			withEventsStream(eventsStream),
+		}
+
+		// create actor1
+		actor1 := &Exchanger{}
+		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
+		pid1, err := newPID(ctx, actorPath1, actor1, opts...)
+
+		require.NoError(t, err)
+		require.NotNil(t, pid1)
+
+		send := new(testpb.TestSend)
+		// create an instance of receive context
+		context := &receiveContext{
+			ctx:            ctx,
+			message:        send,
+			sender:         NoSender,
+			recipient:      pid1,
+			mu:             sync.Mutex{},
+			isAsyncMessage: true,
+		}
+
+		// calling unhandled will push the current message to deadletters
+		context.Unhandled()
+
+		time.Sleep(time.Second)
+
+		var items []*eventspb.DeadletterEvent
+		for message := range consumer.Iterator() {
+			payload := message.Payload()
+			deadletter := payload.(*eventspb.DeadletterEvent)
+			items = append(items, deadletter)
+		}
+
+		require.Len(t, items, 1)
+		deadletter := items[0]
+		msg := deadletter.GetMessage()
+		actual := new(testpb.TestSend)
+		require.NoError(t, msg.UnmarshalTo(actual))
+		require.True(t, proto.Equal(send, actual))
+		require.Equal(t, deadletter.GetReason(), ErrUnhandled.Error())
+
+		t.Cleanup(func() {
+			// shutdown the consumer
+			consumer.Shutdown()
+			context.Shutdown()
+		})
 	})
 }

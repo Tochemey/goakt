@@ -19,6 +19,8 @@ import (
 	"github.com/tochemey/goakt/internal/v1/internalpbconnect"
 	"github.com/tochemey/goakt/log"
 	addresspb "github.com/tochemey/goakt/pb/address/v1"
+	eventspb "github.com/tochemey/goakt/pb/events/v1"
+	"github.com/tochemey/goakt/pkg/stream"
 	"github.com/tochemey/goakt/telemetry"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
@@ -64,6 +66,9 @@ type ActorSystem interface {
 	InCluster() bool
 	// GetPartition returns the partition where a given actor is located
 	GetPartition(ctx context.Context, actorName string) uint64
+	// SubscribeToEvent creates an event consumer
+	SubscribeToEvent(ctx context.Context, event eventspb.Event) (*stream.Consumer, error)
+
 	// handleRemoteAsk handles a synchronous message to another actor and expect a response.
 	// This block until a response is received or timed out.
 	handleRemoteAsk(ctx context.Context, to PID, message proto.Message) (response proto.Message, err error)
@@ -134,6 +139,8 @@ type actorSystem struct {
 	// specifies the stash buffer
 	stashBuffer        uint64
 	housekeeperStopSig chan Unit
+
+	eventsStream *stream.Broker
 }
 
 // enforce compilation error when all methods of the ActorSystem interface are not implemented
@@ -167,6 +174,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		shutdownTimeout:     DefaultShutdownTimeout,
 		mailboxSize:         defaultMailboxSize,
 		housekeeperStopSig:  make(chan Unit, 1),
+		eventsStream:        stream.NewBroker(),
 	}
 	// set the atomic settings
 	system.hasStarted.Store(false)
@@ -181,6 +189,26 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 	}
 
 	return system, nil
+}
+
+// SubscribeToEvent help receive dead letters whenever there are available
+func (x *actorSystem) SubscribeToEvent(ctx context.Context, event eventspb.Event) (*stream.Consumer, error) {
+	// add a span context
+	ctx, span := telemetry.SpanContext(ctx, "SubscribeToEvent")
+	defer span.End()
+	// first check whether the actor system has started
+	if !x.hasStarted.Load() {
+		return nil, ErrActorSystemNotStarted
+	}
+	// create the consumer
+	cons := x.eventsStream.AddConsumer()
+	// based upon the event we will subscribe to the various topic
+	switch event {
+	case eventspb.Event_DEAD_LETTER:
+		// subscribe the consumer to the deadletter topic
+		x.eventsStream.Subscribe(cons, deadlettersTopic)
+	}
+	return cons, nil
 }
 
 // GetPartition returns the partition where a given actor is located
@@ -249,6 +277,7 @@ func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor) (PID,
 		withMailboxSize(x.mailboxSize),
 		withMailbox(x.mailbox),
 		withStash(x.stashBuffer),
+		withEventsStream(x.eventsStream),
 		withTelemetry(x.telemetry))
 
 	// handle the error
@@ -537,6 +566,11 @@ func (x *actorSystem) Stop(ctx context.Context) error {
 
 	// set started to false
 	x.hasStarted.Store(false)
+
+	// shutdown the events stream
+	if x.eventsStream != nil {
+		x.eventsStream.Shutdown()
+	}
 
 	// stop the remoting server
 	if x.remotingEnabled.Load() {

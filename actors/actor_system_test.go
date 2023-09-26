@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	eventspb "github.com/tochemey/goakt/pb/events/v1"
+
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -801,6 +803,54 @@ func TestActorSystem(t *testing.T) {
 		t.Cleanup(func() {
 			err = sys.Stop(ctx)
 			assert.Error(t, err)
+		})
+	})
+	t.Run("With SubscribeToDeadletters subscription", func(t *testing.T) {
+		ctx := context.TODO()
+		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+
+		// start the actor system
+		err := sys.Start(ctx)
+		assert.NoError(t, err)
+
+		// wait for complete start
+		time.Sleep(time.Second)
+
+		// create a deadletter subscriber
+		consumer, err := sys.SubscribeToEvent(ctx, eventspb.Event_DEAD_LETTER)
+		require.NoError(t, err)
+		require.NotNil(t, consumer)
+
+		// create the blackhole actor
+		actor := &BlackHole{}
+		actorRef, err := sys.Spawn(ctx, "BlackHole ", actor)
+		assert.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		// wait a while
+		time.Sleep(time.Second)
+
+		// every message sent to the actor will result in deadletters
+		for i := 0; i < 5; i++ {
+			require.NoError(t, Tell(ctx, actorRef, new(testpb.TestSend)))
+		}
+
+		time.Sleep(time.Second)
+
+		var items []*eventspb.DeadletterEvent
+		for message := range consumer.Iterator() {
+			payload := message.Payload()
+			deadletter := payload.(*eventspb.DeadletterEvent)
+			items = append(items, deadletter)
+		}
+
+		require.Len(t, items, 5)
+
+		t.Cleanup(func() {
+			// shutdown the consumer
+			consumer.Shutdown()
+			err = sys.Stop(ctx)
+			assert.NoError(t, err)
 		})
 	})
 }

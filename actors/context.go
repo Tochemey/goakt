@@ -377,8 +377,9 @@ func (c *receiveContext) Forward(to PID) {
 func (c *receiveContext) Unhandled() {
 	// acquire the lock
 	c.mu.Lock()
+	me := c.recipient
 	// release the lock
-	defer c.mu.Unlock()
+	c.mu.Unlock()
 	// send the current message to deadletters
-	c.recipient.toDeadletters(c, ErrUnhandled)
+	me.emitDeadletter(c, ErrUnhandled)
 }

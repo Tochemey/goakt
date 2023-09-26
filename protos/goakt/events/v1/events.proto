@@ -1,15 +1,15 @@
 syntax = "proto3";
 
-package deadletter.v1;
+package events.v1;
 
 import "address/v1/address.proto";
 import "google/protobuf/any.proto";
 import "google/protobuf/timestamp.proto";
 
-option go_package = "github.com/tochemey/goakt/pb/deadletter/v1;deadletterpb";
+option go_package = "github.com/tochemey/goakt/pb/events/v1;eventspb";
 
-// Deadletter defines the deadletter entry
-message Deadletter {
+// DeadletterEvent defines the deadletter entry
+message DeadletterEvent {
   // Specifies the sender's address
   address.v1.Address sender = 1;
   // Specifies the actor address
@@ -21,4 +21,9 @@ message Deadletter {
   google.protobuf.Timestamp send_time = 4;
   // Specifies the reason why the deadletter
   string reason = 5;
+}
+
+enum Event {
+  UNSPECIFIED = 0;
+  DEAD_LETTER = 1;
 }

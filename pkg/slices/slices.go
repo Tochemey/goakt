@@ -53,7 +53,7 @@ func (cs *ConcurrentSlice[T]) Delete(index int) {
 	defer cs.RUnlock()
 	var nilState T
 	if isSet(cs.items, index) {
-		// Remove the element at index from the slice
+		// Pop the element at index from the slice
 		cs.items[index] = cs.items[len(cs.items)-1] // Copy last element to index.
 		cs.items[len(cs.items)-1] = nilState        // Erase last element (write zero value).
 		cs.items = cs.items[:len(cs.items)-1]       // Truncate slice.

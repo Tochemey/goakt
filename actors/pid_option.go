@@ -3,8 +3,7 @@ package actors
 import (
 	"time"
 
-	"github.com/tochemey/goakt/eventstream"
-	deadletterpb "github.com/tochemey/goakt/pb/deadletter/v1"
+	"github.com/tochemey/goakt/pkg/stream"
 
 	"github.com/tochemey/goakt/log"
 	"github.com/tochemey/goakt/telemetry"
@@ -99,9 +98,9 @@ func withStash(capacity uint64) pidOption {
 	}
 }
 
-// withDeadletterStream set the deadletter stream
-func withDeadletterStream(stream *eventstream.EventsStream[*deadletterpb.Deadletter]) pidOption {
+// withEventsStream set the events stream
+func withEventsStream(stream *stream.Broker) pidOption {
 	return func(pid *pid) {
-		pid.deadletterStream = stream
+		pid.eventsStream = stream
 	}
 }
