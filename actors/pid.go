@@ -16,7 +16,9 @@ import (
 	"github.com/tochemey/goakt/internal/v1/internalpbconnect"
 	"github.com/tochemey/goakt/log"
 	addresspb "github.com/tochemey/goakt/pb/address/v1"
+	eventspb "github.com/tochemey/goakt/pb/events/v1"
 	messagespb "github.com/tochemey/goakt/pb/messages/v1"
+	"github.com/tochemey/goakt/pkg/eventstream"
 	"github.com/tochemey/goakt/pkg/http"
 	"github.com/tochemey/goakt/pkg/slices"
 	"github.com/tochemey/goakt/telemetry"
@@ -25,6 +27,7 @@ import (
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // watchMan is used to handle parent child relationship.
@@ -34,9 +37,6 @@ type watchMan struct {
 	ErrChan chan error // ErrChan the channel where to pass error message
 	Done    chan Unit  // Done when watching is completed
 }
-
-// StrategyDirective represents the supervisor strategy directive
-type StrategyDirective int
 
 // PID defines the various actions one can perform on a given actor
 type PID interface {
@@ -115,7 +115,9 @@ type PID interface {
 	unstashAll() error
 	// unstash unstashes the oldest message in the stash and prepends to the mailbox
 	unstash() error
-
+	// toDeadletters add the given message to the deadletters queue
+	emitDeadletter(recvCtx ReceiveContext, err error)
+	// removeChild is a utility function to remove child actor
 	removeChild(ctx context.Context, pid PID)
 }
 
@@ -197,6 +199,9 @@ type pid struct {
 	stashBuffer    Mailbox
 	stashCapacity  atomic.Uint64
 	stashSemaphore sync.Mutex
+
+	// define an events stream
+	eventsStream *eventstream.EventsStream
 }
 
 // enforce compilation error
@@ -227,6 +232,7 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 		mailbox:            nil,
 		stashBuffer:        nil,
 		stashSemaphore:     sync.Mutex{},
+		eventsStream:       nil,
 	}
 
 	// set some of the defaults values
@@ -489,6 +495,7 @@ func (p *pid) SpawnChild(ctx context.Context, name string, actor Actor) (PID, er
 		withMailboxSize(p.mailboxSize),
 		withStash(p.stashCapacity.Load()),
 		withMailbox(p.mailbox.Clone()),
+		withEventsStream(p.eventsStream),
 		withShutdownTimeout(p.shutdownTimeout.Load()))
 
 	// handle the error
@@ -571,6 +578,7 @@ func (p *pid) Ask(ctx context.Context, to PID, message proto.Message) (response 
 	context.isAsyncMessage = false
 	context.mu = sync.Mutex{}
 	context.response = make(chan proto.Message, 1)
+	context.sendTime.Store(time.Now())
 
 	// release the lock after setting the message context
 	p.pidSemaphore.Unlock()
@@ -585,6 +593,8 @@ func (p *pid) Ask(ctx context.Context, to PID, message proto.Message) (response 
 			return
 		case <-await:
 			err = ErrRequestTimeout
+			// push the message as a deadletter
+			p.emitDeadletter(context, err)
 			return
 		}
 	}
@@ -616,6 +626,7 @@ func (p *pid) Tell(ctx context.Context, to PID, message proto.Message) error {
 	context.isAsyncMessage = true
 	context.mu = sync.Mutex{}
 	context.response = make(chan proto.Message, 1)
+	context.sendTime.Store(time.Now())
 
 	// put the message context in the mailbox of the recipient actor
 	to.doReceive(context)
@@ -631,7 +642,7 @@ func (p *pid) RemoteLookup(ctx context.Context, host string, port int, name stri
 	defer span.End()
 
 	// create an instance of remote client service
-	remoteClient := internalpbconnect.NewRemoteMessagingServiceClient(
+	remoteClient := internalpbconnect.NewRemotingServiceClient(
 		p.httpClient,
 		http.URL(host, port),
 		connect.WithInterceptors(p.interceptor()),
@@ -671,7 +682,7 @@ func (p *pid) RemoteTell(ctx context.Context, to *addresspb.Address, message pro
 	}
 
 	// create an instance of remote client service
-	remoteClient := internalpbconnect.NewRemoteMessagingServiceClient(
+	remoteClient := internalpbconnect.NewRemotingServiceClient(
 		p.httpClient,
 		http.URL(to.GetHost(), int(to.GetPort())),
 		connect.WithInterceptors(p.interceptor()),
@@ -693,6 +704,7 @@ func (p *pid) RemoteTell(ctx context.Context, to *addresspb.Address, message pro
 			Receiver: to,
 			Message:  marshaled,
 		},
+		SendTime: timestamppb.Now(),
 	})
 
 	// add some debug logging
@@ -722,7 +734,7 @@ func (p *pid) RemoteAsk(ctx context.Context, to *addresspb.Address, message prot
 	}
 
 	// create an instance of remote client service
-	remoteClient := internalpbconnect.NewRemoteMessagingServiceClient(
+	remoteClient := internalpbconnect.NewRemotingServiceClient(
 		p.httpClient,
 		http.URL(to.GetHost(), int(to.GetPort())),
 		connect.WithInterceptors(p.interceptor()),
@@ -737,6 +749,7 @@ func (p *pid) RemoteAsk(ctx context.Context, to *addresspb.Address, message prot
 				Receiver: to,
 				Message:  marshaled,
 			},
+			SendTime: timestamppb.Now(),
 		})
 	// send the request
 	rpcResponse, rpcErr := remoteClient.RemoteAsk(ctx, rpcRequest)
@@ -842,6 +855,8 @@ func (p *pid) doReceive(ctx ReceiveContext) {
 	if err := p.mailbox.Push(ctx); err != nil {
 		// add a warning log because the mailbox is full and do nothing
 		p.logger.Warn(err)
+		// push the message as a deadletter
+		p.emitDeadletter(ctx, err)
 		return
 	}
 
@@ -1242,6 +1257,7 @@ func (p *pid) doStop(ctx context.Context) error {
 	return p.Actor.PostStop(ctx)
 }
 
+// removeChild helps remove child actor
 func (p *pid) removeChild(ctx context.Context, pid PID) {
 	// add a span context
 	ctx, span := telemetry.SpanContext(ctx, "RemoveChild")
@@ -1265,4 +1281,32 @@ func (p *pid) removeChild(ctx context.Context, pid PID) {
 		}
 		p.children.Delete(path)
 	}
+}
+
+// emitDeadletter emit the given message to the deadletters queue
+func (p *pid) emitDeadletter(recvCtx ReceiveContext, err error) {
+	// only send to the stream when defined
+	if p.eventsStream == nil {
+		return
+	}
+	// marshal the message
+	msg, _ := anypb.New(recvCtx.Message())
+	// grab the sender
+	var senderAddr *addresspb.Address
+	if recvCtx.Sender() != nil || recvCtx.Sender() != NoSender {
+		senderAddr = recvCtx.Sender().ActorPath().RemoteAddress()
+	}
+
+	// define the receiver
+	receiver := p.actorPath.RemoteAddress()
+	// create the deadletter
+	deadletter := &eventspb.DeadletterEvent{
+		Sender:   senderAddr,
+		Receiver: receiver,
+		Message:  msg,
+		SendTime: timestamppb.Now(),
+		Reason:   err.Error(),
+	}
+	// add to the events stream
+	p.eventsStream.Publish(deadlettersTopic, deadletter)
 }

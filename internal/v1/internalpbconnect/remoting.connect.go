@@ -21,8 +21,8 @@ import (
 const _ = connect.IsAtLeastVersion0_1_0
 
 const (
-	// RemoteMessagingServiceName is the fully-qualified name of the RemoteMessagingService service.
-	RemoteMessagingServiceName = "internal.v1.RemoteMessagingService"
+	// RemotingServiceName is the fully-qualified name of the RemotingService service.
+	RemotingServiceName = "internal.v1.RemotingService"
 )
 
 // These constants are the fully-qualified names of the RPCs defined in this package. They're
@@ -33,19 +33,19 @@ const (
 // reflection-formatted method names, remove the leading slash and convert the remaining slash to a
 // period.
 const (
-	// RemoteMessagingServiceRemoteAskProcedure is the fully-qualified name of the
-	// RemoteMessagingService's RemoteAsk RPC.
-	RemoteMessagingServiceRemoteAskProcedure = "/internal.v1.RemoteMessagingService/RemoteAsk"
-	// RemoteMessagingServiceRemoteTellProcedure is the fully-qualified name of the
-	// RemoteMessagingService's RemoteTell RPC.
-	RemoteMessagingServiceRemoteTellProcedure = "/internal.v1.RemoteMessagingService/RemoteTell"
-	// RemoteMessagingServiceRemoteLookupProcedure is the fully-qualified name of the
-	// RemoteMessagingService's RemoteLookup RPC.
-	RemoteMessagingServiceRemoteLookupProcedure = "/internal.v1.RemoteMessagingService/RemoteLookup"
+	// RemotingServiceRemoteAskProcedure is the fully-qualified name of the RemotingService's RemoteAsk
+	// RPC.
+	RemotingServiceRemoteAskProcedure = "/internal.v1.RemotingService/RemoteAsk"
+	// RemotingServiceRemoteTellProcedure is the fully-qualified name of the RemotingService's
+	// RemoteTell RPC.
+	RemotingServiceRemoteTellProcedure = "/internal.v1.RemotingService/RemoteTell"
+	// RemotingServiceRemoteLookupProcedure is the fully-qualified name of the RemotingService's
+	// RemoteLookup RPC.
+	RemotingServiceRemoteLookupProcedure = "/internal.v1.RemotingService/RemoteLookup"
 )
 
-// RemoteMessagingServiceClient is a client for the internal.v1.RemoteMessagingService service.
-type RemoteMessagingServiceClient interface {
+// RemotingServiceClient is a client for the internal.v1.RemotingService service.
+type RemotingServiceClient interface {
 	// RemoteAsk is used to send a message to an actor remotely and expect a response
 	// immediately. With this type of message the receiver cannot communicate back to Sender
 	// except reply the message with a response. This one-way communication
@@ -58,59 +58,58 @@ type RemoteMessagingServiceClient interface {
 	RemoteLookup(context.Context, *connect.Request[v1.RemoteLookupRequest]) (*connect.Response[v1.RemoteLookupResponse], error)
 }
 
-// NewRemoteMessagingServiceClient constructs a client for the internal.v1.RemoteMessagingService
-// service. By default, it uses the Connect protocol with the binary Protobuf Codec, asks for
-// gzipped responses, and sends uncompressed requests. To use the gRPC or gRPC-Web protocols, supply
-// the connect.WithGRPC() or connect.WithGRPCWeb() options.
+// NewRemotingServiceClient constructs a client for the internal.v1.RemotingService service. By
+// default, it uses the Connect protocol with the binary Protobuf Codec, asks for gzipped responses,
+// and sends uncompressed requests. To use the gRPC or gRPC-Web protocols, supply the
+// connect.WithGRPC() or connect.WithGRPCWeb() options.
 //
 // The URL supplied here should be the base URL for the Connect or gRPC server (for example,
 // http://api.acme.com or https://acme.com/grpc).
-func NewRemoteMessagingServiceClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) RemoteMessagingServiceClient {
+func NewRemotingServiceClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) RemotingServiceClient {
 	baseURL = strings.TrimRight(baseURL, "/")
-	return &remoteMessagingServiceClient{
+	return &remotingServiceClient{
 		remoteAsk: connect.NewClient[v1.RemoteAskRequest, v1.RemoteAskResponse](
 			httpClient,
-			baseURL+RemoteMessagingServiceRemoteAskProcedure,
+			baseURL+RemotingServiceRemoteAskProcedure,
 			opts...,
 		),
 		remoteTell: connect.NewClient[v1.RemoteTellRequest, v1.RemoteTellResponse](
 			httpClient,
-			baseURL+RemoteMessagingServiceRemoteTellProcedure,
+			baseURL+RemotingServiceRemoteTellProcedure,
 			opts...,
 		),
 		remoteLookup: connect.NewClient[v1.RemoteLookupRequest, v1.RemoteLookupResponse](
 			httpClient,
-			baseURL+RemoteMessagingServiceRemoteLookupProcedure,
+			baseURL+RemotingServiceRemoteLookupProcedure,
 			opts...,
 		),
 	}
 }
 
-// remoteMessagingServiceClient implements RemoteMessagingServiceClient.
-type remoteMessagingServiceClient struct {
+// remotingServiceClient implements RemotingServiceClient.
+type remotingServiceClient struct {
 	remoteAsk    *connect.Client[v1.RemoteAskRequest, v1.RemoteAskResponse]
 	remoteTell   *connect.Client[v1.RemoteTellRequest, v1.RemoteTellResponse]
 	remoteLookup *connect.Client[v1.RemoteLookupRequest, v1.RemoteLookupResponse]
 }
 
-// RemoteAsk calls internal.v1.RemoteMessagingService.RemoteAsk.
-func (c *remoteMessagingServiceClient) RemoteAsk(ctx context.Context, req *connect.Request[v1.RemoteAskRequest]) (*connect.Response[v1.RemoteAskResponse], error) {
+// RemoteAsk calls internal.v1.RemotingService.RemoteAsk.
+func (c *remotingServiceClient) RemoteAsk(ctx context.Context, req *connect.Request[v1.RemoteAskRequest]) (*connect.Response[v1.RemoteAskResponse], error) {
 	return c.remoteAsk.CallUnary(ctx, req)
 }
 
-// RemoteTell calls internal.v1.RemoteMessagingService.RemoteTell.
-func (c *remoteMessagingServiceClient) RemoteTell(ctx context.Context, req *connect.Request[v1.RemoteTellRequest]) (*connect.Response[v1.RemoteTellResponse], error) {
+// RemoteTell calls internal.v1.RemotingService.RemoteTell.
+func (c *remotingServiceClient) RemoteTell(ctx context.Context, req *connect.Request[v1.RemoteTellRequest]) (*connect.Response[v1.RemoteTellResponse], error) {
 	return c.remoteTell.CallUnary(ctx, req)
 }
 
-// RemoteLookup calls internal.v1.RemoteMessagingService.RemoteLookup.
-func (c *remoteMessagingServiceClient) RemoteLookup(ctx context.Context, req *connect.Request[v1.RemoteLookupRequest]) (*connect.Response[v1.RemoteLookupResponse], error) {
+// RemoteLookup calls internal.v1.RemotingService.RemoteLookup.
+func (c *remotingServiceClient) RemoteLookup(ctx context.Context, req *connect.Request[v1.RemoteLookupRequest]) (*connect.Response[v1.RemoteLookupResponse], error) {
 	return c.remoteLookup.CallUnary(ctx, req)
 }
 
-// RemoteMessagingServiceHandler is an implementation of the internal.v1.RemoteMessagingService
-// service.
-type RemoteMessagingServiceHandler interface {
+// RemotingServiceHandler is an implementation of the internal.v1.RemotingService service.
+type RemotingServiceHandler interface {
 	// RemoteAsk is used to send a message to an actor remotely and expect a response
 	// immediately. With this type of message the receiver cannot communicate back to Sender
 	// except reply the message with a response. This one-way communication
@@ -123,52 +122,52 @@ type RemoteMessagingServiceHandler interface {
 	RemoteLookup(context.Context, *connect.Request[v1.RemoteLookupRequest]) (*connect.Response[v1.RemoteLookupResponse], error)
 }
 
-// NewRemoteMessagingServiceHandler builds an HTTP handler from the service implementation. It
-// returns the path on which to mount the handler and the handler itself.
+// NewRemotingServiceHandler builds an HTTP handler from the service implementation. It returns the
+// path on which to mount the handler and the handler itself.
 //
 // By default, handlers support the Connect, gRPC, and gRPC-Web protocols with the binary Protobuf
 // and JSON codecs. They also support gzip compression.
-func NewRemoteMessagingServiceHandler(svc RemoteMessagingServiceHandler, opts ...connect.HandlerOption) (string, http.Handler) {
-	remoteMessagingServiceRemoteAskHandler := connect.NewUnaryHandler(
-		RemoteMessagingServiceRemoteAskProcedure,
+func NewRemotingServiceHandler(svc RemotingServiceHandler, opts ...connect.HandlerOption) (string, http.Handler) {
+	remotingServiceRemoteAskHandler := connect.NewUnaryHandler(
+		RemotingServiceRemoteAskProcedure,
 		svc.RemoteAsk,
 		opts...,
 	)
-	remoteMessagingServiceRemoteTellHandler := connect.NewUnaryHandler(
-		RemoteMessagingServiceRemoteTellProcedure,
+	remotingServiceRemoteTellHandler := connect.NewUnaryHandler(
+		RemotingServiceRemoteTellProcedure,
 		svc.RemoteTell,
 		opts...,
 	)
-	remoteMessagingServiceRemoteLookupHandler := connect.NewUnaryHandler(
-		RemoteMessagingServiceRemoteLookupProcedure,
+	remotingServiceRemoteLookupHandler := connect.NewUnaryHandler(
+		RemotingServiceRemoteLookupProcedure,
 		svc.RemoteLookup,
 		opts...,
 	)
-	return "/internal.v1.RemoteMessagingService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return "/internal.v1.RemotingService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case RemoteMessagingServiceRemoteAskProcedure:
-			remoteMessagingServiceRemoteAskHandler.ServeHTTP(w, r)
-		case RemoteMessagingServiceRemoteTellProcedure:
-			remoteMessagingServiceRemoteTellHandler.ServeHTTP(w, r)
-		case RemoteMessagingServiceRemoteLookupProcedure:
-			remoteMessagingServiceRemoteLookupHandler.ServeHTTP(w, r)
+		case RemotingServiceRemoteAskProcedure:
+			remotingServiceRemoteAskHandler.ServeHTTP(w, r)
+		case RemotingServiceRemoteTellProcedure:
+			remotingServiceRemoteTellHandler.ServeHTTP(w, r)
+		case RemotingServiceRemoteLookupProcedure:
+			remotingServiceRemoteLookupHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
 	})
 }
 
-// UnimplementedRemoteMessagingServiceHandler returns CodeUnimplemented from all methods.
-type UnimplementedRemoteMessagingServiceHandler struct{}
+// UnimplementedRemotingServiceHandler returns CodeUnimplemented from all methods.
+type UnimplementedRemotingServiceHandler struct{}
 
-func (UnimplementedRemoteMessagingServiceHandler) RemoteAsk(context.Context, *connect.Request[v1.RemoteAskRequest]) (*connect.Response[v1.RemoteAskResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("internal.v1.RemoteMessagingService.RemoteAsk is not implemented"))
+func (UnimplementedRemotingServiceHandler) RemoteAsk(context.Context, *connect.Request[v1.RemoteAskRequest]) (*connect.Response[v1.RemoteAskResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("internal.v1.RemotingService.RemoteAsk is not implemented"))
 }
 
-func (UnimplementedRemoteMessagingServiceHandler) RemoteTell(context.Context, *connect.Request[v1.RemoteTellRequest]) (*connect.Response[v1.RemoteTellResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("internal.v1.RemoteMessagingService.RemoteTell is not implemented"))
+func (UnimplementedRemotingServiceHandler) RemoteTell(context.Context, *connect.Request[v1.RemoteTellRequest]) (*connect.Response[v1.RemoteTellResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("internal.v1.RemotingService.RemoteTell is not implemented"))
 }
 
-func (UnimplementedRemoteMessagingServiceHandler) RemoteLookup(context.Context, *connect.Request[v1.RemoteLookupRequest]) (*connect.Response[v1.RemoteLookupResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("internal.v1.RemoteMessagingService.RemoteLookup is not implemented"))
+func (UnimplementedRemotingServiceHandler) RemoteLookup(context.Context, *connect.Request[v1.RemoteLookupRequest]) (*connect.Response[v1.RemoteLookupResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("internal.v1.RemotingService.RemoteLookup is not implemented"))
 }

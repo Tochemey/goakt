@@ -48,7 +48,7 @@ func (p *pid) unstashAll() error {
 	for !p.stashBuffer.IsEmpty() {
 		// grab the message from the stash buffer. Ignore the error when the mailbox is empty
 		received, _ := p.stashBuffer.Pop()
-		// send it to the mailbox processing
+		// send it to the mailbox for processing
 		p.doReceive(received)
 	}
 

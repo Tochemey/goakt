@@ -6,6 +6,9 @@ import (
 	addresspb "github.com/tochemey/goakt/pb/address/v1"
 )
 
+// StrategyDirective represents the supervisor strategy directive
+type StrategyDirective int
+
 const (
 	// protocol defines the Go-Akt addressing protocol
 	protocol = "goakt"
@@ -26,6 +29,7 @@ const (
 	DefaultShutdownTimeout = 2 * time.Second
 
 	defaultMailboxSize = 4096
+	deadlettersTopic   = "topic.deadletters"
 )
 
 // Unit type

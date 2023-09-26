@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	addresspb "github.com/tochemey/goakt/pb/address/v1"
+	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 )
@@ -83,6 +84,9 @@ type ReceiveContext interface {
 	// Stop forces the child Actor under the given name to terminate after it finishes processing its current message.
 	// Nothing happens if child is already stopped.
 	Stop(child PID)
+	// Unhandled is used to handle unhandled messages instead of throwing error
+	// This will push the given message into the deadletter queue
+	Unhandled()
 }
 
 type receiveContext struct {
@@ -94,6 +98,7 @@ type receiveContext struct {
 	recipient      PID
 	mu             sync.Mutex
 	isAsyncMessage bool
+	sendTime       atomic.Time
 }
 
 // force compilation error
@@ -366,4 +371,15 @@ func (c *receiveContext) Forward(to PID) {
 		// forward the actual message
 		to.doReceive(receiveContext)
 	}
+}
+
+// Unhandled is used to handle unhandled messages instead of throwing error
+func (c *receiveContext) Unhandled() {
+	// acquire the lock
+	c.mu.Lock()
+	me := c.recipient
+	// release the lock
+	c.mu.Unlock()
+	// send the current message to deadletters
+	me.emitDeadletter(c, ErrUnhandled)
 }

@@ -35,6 +35,7 @@ func Ask(ctx context.Context, to PID, message proto.Message, timeout time.Durati
 	// set the needed properties of the message context
 	context.ctx = ctx
 	context.recipient = to
+	context.sendTime.Store(time.Now())
 
 	// set the actual message
 	switch msg := message.(type) {
@@ -96,6 +97,7 @@ func Tell(ctx context.Context, to PID, message proto.Message) error {
 	// set the needed properties of the message context
 	context.ctx = ctx
 	context.recipient = to
+	context.sendTime.Store(time.Now())
 
 	// set the actual message
 	switch msg := message.(type) {
@@ -146,7 +148,7 @@ func RemoteTell(ctx context.Context, to *addresspb.Address, message proto.Messag
 	}
 
 	// create an instance of remote client service
-	remoteClient := internalpbconnect.NewRemoteMessagingServiceClient(
+	remoteClient := internalpbconnect.NewRemotingServiceClient(
 		http.Client(),
 		http.URL(to.GetHost(), int(to.GetPort())),
 		connect.WithInterceptors(otelconnect.NewInterceptor()),
@@ -180,7 +182,7 @@ func RemoteAsk(ctx context.Context, to *addresspb.Address, message proto.Message
 	}
 
 	// create an instance of remote client service
-	remoteClient := internalpbconnect.NewRemoteMessagingServiceClient(
+	remoteClient := internalpbconnect.NewRemotingServiceClient(
 		http.Client(),
 		http.URL(to.GetHost(), int(to.GetPort())),
 		connect.WithInterceptors(otelconnect.NewInterceptor()),
@@ -211,7 +213,7 @@ func RemoteLookup(ctx context.Context, host string, port int, name string) (addr
 	defer span.End()
 
 	// create an instance of remote client service
-	remoteClient := internalpbconnect.NewRemoteMessagingServiceClient(
+	remoteClient := internalpbconnect.NewRemotingServiceClient(
 		http.Client(),
 		http.URL(host, port),
 		connect.WithInterceptors(otelconnect.NewInterceptor()),

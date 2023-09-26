@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/tochemey/goakt/log"
+	"github.com/tochemey/goakt/pkg/eventstream"
 	"go.uber.org/atomic"
 )
 
@@ -21,67 +22,74 @@ func TestPIDOptions(t *testing.T) {
 	atomicInt.Store(5)
 	atomicDuration.Store(time.Second)
 	atomicUint64.Store(10)
+	eventsStream := eventstream.New()
+
 	testCases := []struct {
-		name           string
-		option         pidOption
-		expectedConfig *pid
+		name     string
+		option   pidOption
+		expected *pid
 	}{
 		{
-			name:           "WithPassivationAfter",
-			option:         withPassivationAfter(time.Second),
-			expectedConfig: &pid{passivateAfter: atomicDuration},
+			name:     "WithPassivationAfter",
+			option:   withPassivationAfter(time.Second),
+			expected: &pid{passivateAfter: atomicDuration},
 		},
 		{
-			name:           "WithSendReplyTimeout",
-			option:         withSendReplyTimeout(time.Second),
-			expectedConfig: &pid{sendReplyTimeout: atomicDuration},
+			name:     "WithSendReplyTimeout",
+			option:   withSendReplyTimeout(time.Second),
+			expected: &pid{sendReplyTimeout: atomicDuration},
 		},
 		{
-			name:           "WithInitMaxRetries",
-			option:         withInitMaxRetries(5),
-			expectedConfig: &pid{initMaxRetries: atomicInt},
+			name:     "WithInitMaxRetries",
+			option:   withInitMaxRetries(5),
+			expected: &pid{initMaxRetries: atomicInt},
 		},
 		{
-			name:           "WithLogger",
-			option:         withCustomLogger(log.DefaultLogger),
-			expectedConfig: &pid{logger: log.DefaultLogger},
+			name:     "WithLogger",
+			option:   withCustomLogger(log.DefaultLogger),
+			expected: &pid{logger: log.DefaultLogger},
 		},
 		{
-			name:           "WithSupervisorStrategy",
-			option:         withSupervisorStrategy(RestartDirective),
-			expectedConfig: &pid{supervisorStrategy: RestartDirective},
+			name:     "WithSupervisorStrategy",
+			option:   withSupervisorStrategy(RestartDirective),
+			expected: &pid{supervisorStrategy: RestartDirective},
 		},
 		{
-			name:           "WithShutdownTimeout",
-			option:         withShutdownTimeout(time.Second),
-			expectedConfig: &pid{shutdownTimeout: atomicDuration},
+			name:     "WithShutdownTimeout",
+			option:   withShutdownTimeout(time.Second),
+			expected: &pid{shutdownTimeout: atomicDuration},
 		},
 		{
-			name:           "WithPassivationDisabled",
-			option:         withPassivationDisabled(),
-			expectedConfig: &pid{passivateAfter: negativeDuration},
+			name:     "WithPassivationDisabled",
+			option:   withPassivationDisabled(),
+			expected: &pid{passivateAfter: negativeDuration},
 		},
 		{
-			name:           "WithMailboxSize",
-			option:         withMailboxSize(10),
-			expectedConfig: &pid{mailboxSize: 10},
+			name:     "WithMailboxSize",
+			option:   withMailboxSize(10),
+			expected: &pid{mailboxSize: 10},
 		},
 		{
-			name:           "WithMailbox",
-			option:         withMailbox(mailbox),
-			expectedConfig: &pid{mailbox: mailbox},
+			name:     "WithMailbox",
+			option:   withMailbox(mailbox),
+			expected: &pid{mailbox: mailbox},
 		},
 		{
-			name:           "WithStash",
-			option:         withStash(10),
-			expectedConfig: &pid{stashCapacity: atomicUint64},
+			name:     "WithStash",
+			option:   withStash(10),
+			expected: &pid{stashCapacity: atomicUint64},
+		},
+		{
+			name:     "withEventsStream",
+			option:   withEventsStream(eventsStream),
+			expected: &pid{eventsStream: eventsStream},
 		},
 	}
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			pid := &pid{}
 			tc.option(pid)
-			assert.Equal(t, tc.expectedConfig, pid)
+			assert.Equal(t, tc.expected, pid)
 		})
 	}
 }

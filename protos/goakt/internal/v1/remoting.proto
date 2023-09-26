@@ -4,10 +4,11 @@ package internal.v1;
 
 import "address/v1/address.proto";
 import "google/protobuf/any.proto";
+import "google/protobuf/timestamp.proto";
 
 option go_package = "github.com/tochemey/goakt/internal/v1;internalpb";
 
-service RemoteMessagingService {
+service RemotingService {
   // RemoteAsk is used to send a message to an actor remotely and expect a response
   // immediately. With this type of message the receiver cannot communicate back to Sender
   // except reply the message with a response. This one-way communication
@@ -24,7 +25,10 @@ service RemoteMessagingService {
 // immediately. With this type of message the receiver cannot communicate back to Sender
 // except reply the message with a response. This one-way communication
 message RemoteAskRequest {
+  // Specifies the remote message to send
   RemoteMessage remote_message = 1;
+  // Specifies the send time
+  google.protobuf.Timestamp send_time = 2;
 }
 
 message RemoteAskResponse {
@@ -37,7 +41,10 @@ message RemoteAskResponse {
 // This is the only way remote actors can interact with each other. The actor on the
 // other line can reply to the sender by using the Sender in the message
 message RemoteTellRequest {
+  // Specifies the remote message to send
   RemoteMessage remote_message = 1;
+  // Specifies the send time
+  google.protobuf.Timestamp send_time = 2;
 }
 
 message RemoteTellResponse {}

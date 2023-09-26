@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/tochemey/goakt/log"
+	"github.com/tochemey/goakt/pkg/eventstream"
 	"github.com/tochemey/goakt/telemetry"
 )
 
@@ -93,5 +94,12 @@ func withMailbox(box Mailbox) pidOption {
 func withStash(capacity uint64) pidOption {
 	return func(pid *pid) {
 		pid.stashCapacity.Store(capacity)
+	}
+}
+
+// withEventsStream set the events stream
+func withEventsStream(stream *eventstream.EventsStream) pidOption {
+	return func(pid *pid) {
+		pid.eventsStream = stream
 	}
 }

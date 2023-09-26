@@ -320,3 +320,22 @@ func (x *Forwarder) PostStop(context.Context) error {
 }
 
 var _ Actor = &Forwarder{}
+
+type BlackHole struct{}
+
+func (d *BlackHole) PreStart(context.Context) error {
+	return nil
+}
+
+func (d *BlackHole) Receive(ctx ReceiveContext) {
+	switch ctx.Message().(type) {
+	default:
+		ctx.Unhandled()
+	}
+}
+
+func (d *BlackHole) PostStop(context.Context) error {
+	return nil
+}
+
+var _ Actor = &BlackHole{}
