@@ -228,6 +228,8 @@ func (x *actorSystem) UnsubscribeToEvent(ctx context.Context, event eventspb.Eve
 	case eventspb.Event_DEAD_LETTER:
 		// subscribe the consumer to the deadletter topic
 		x.eventsStream.Unsubscribe(subscriber, deadlettersTopic)
+		// remove the subscriber from the events stream
+		x.eventsStream.RemoveSubscriber(subscriber)
 	}
 	return nil
 }

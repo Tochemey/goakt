@@ -851,8 +851,6 @@ func TestActorSystem(t *testing.T) {
 		require.NoError(t, err)
 
 		t.Cleanup(func() {
-			// shutdown the consumer
-			consumer.Shutdown()
 			err = sys.Stop(ctx)
 			assert.NoError(t, err)
 		})
@@ -886,7 +884,5 @@ func TestActorSystem(t *testing.T) {
 		// create a deadletter subscriber
 		err = sys.UnsubscribeToEvent(ctx, eventspb.Event_DEAD_LETTER, consumer)
 		require.Error(t, err)
-
-		consumer.Shutdown()
 	})
 }
