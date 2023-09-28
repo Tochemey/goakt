@@ -45,7 +45,7 @@ func newSubscriber() *subscriber {
 	return &subscriber{
 		id:       id,
 		sem:      sync.Mutex{},
-		messages: queue.NewUnbounded[*Message](2),
+		messages: queue.NewUnbounded[*Message](),
 		topics:   make(map[string]bool),
 		active:   true,
 	}

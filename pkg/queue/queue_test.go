@@ -4,11 +4,13 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestUnboundedQueue(t *testing.T) {
 	t.Run("With Push/Pop", func(t *testing.T) {
-		q := NewUnbounded[int](2)
+		q := NewUnbounded[int]()
+		require.True(t, q.IsEmpty())
 		for j := 0; j < 100; j++ {
 			if q.Len() != 0 {
 				t.Fatal("expected no elements")
@@ -57,11 +59,12 @@ func TestUnboundedQueue(t *testing.T) {
 		// close the queue
 		q.Close()
 		assert.True(t, q.IsClosed())
+		assert.True(t, q.IsEmpty())
 		assert.Zero(t, q.Len())
 		assert.Zero(t, q.Cap())
 	})
 	t.Run("With Wait", func(t *testing.T) {
-		q := NewUnbounded[int](2)
+		q := NewUnbounded[int]()
 		assert.True(t, q.Push(1))
 		assert.True(t, q.Push(2))
 		assert.True(t, q.Push(3))
@@ -77,4 +80,42 @@ func TestUnboundedQueue(t *testing.T) {
 		assert.Zero(t, q.Len())
 		assert.Zero(t, q.Cap())
 	})
+	t.Run("With Close remaining", func(t *testing.T) {
+		q := NewUnbounded[int]()
+		for j := 0; j < 100; j++ {
+			q.Push(j)
+		}
+		ret := q.CloseRemaining()
+		assert.NotEmpty(t, ret)
+		assert.Len(t, ret, 100)
+		assert.True(t, q.IsClosed())
+		assert.True(t, q.IsEmpty())
+		assert.Zero(t, q.Len())
+		assert.Zero(t, q.Cap())
+	})
+}
+
+func BenchmarkUnbounded_Push(b *testing.B) {
+	q := NewUnbounded[int]()
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		q.Push(i)
+	}
+}
+
+func BenchmarkUnbounded_Pop(b *testing.B) {
+	q := NewUnbounded[int]()
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		q.Push(i)
+		if q.Len() > 10 {
+			q.Pop()
+		}
+	}
+
+	//for i := 0; i < b.N; i++ {
+	//	q.Pop()
+	//}
 }

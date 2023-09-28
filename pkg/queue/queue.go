@@ -2,11 +2,17 @@ package queue
 
 import "sync"
 
-// Unbounded reference: https://blog.dubbelboer.com/2015/04/25/go-faster-queue.html
+// minQueueLen is the smallest capacity that queue may have.
+// Must be power of 2 for bitwise modulus: x % n == x & (n - 1).
+const minQueueLen = 16
+
+// Unbounded thread-safe Queue using ring-buffer
+// reference: https://blog.dubbelboer.com/2015/04/25/go-faster-queue.html
+// https://github.com/eapache/queue
 type Unbounded[T any] struct {
 	mu      sync.RWMutex
 	cond    *sync.Cond
-	nodes   []T
+	nodes   []*T
 	head    int
 	tail    int
 	count   int
@@ -15,26 +21,26 @@ type Unbounded[T any] struct {
 }
 
 // NewUnbounded creates an instance of Unbounded
-func NewUnbounded[T any](initialCapacity int) *Unbounded[T] {
+func NewUnbounded[T any]() *Unbounded[T] {
 	sq := &Unbounded[T]{
-		initCap: initialCapacity,
-		nodes:   make([]T, initialCapacity),
+		initCap: minQueueLen,
+		nodes:   make([]*T, minQueueLen),
 	}
 	sq.cond = sync.NewCond(&sq.mu)
 	return sq
 }
 
 // resize the queue
-func (q *Unbounded[T]) resize(n int) {
-	nodes := make([]T, n)
-	if q.head < q.tail {
+func (q *Unbounded[T]) resize() {
+	nodes := make([]*T, q.count<<1)
+	if q.tail > q.head {
 		copy(nodes, q.nodes[q.head:q.tail])
 	} else {
-		copy(nodes, q.nodes[q.head:])
-		copy(nodes[len(q.nodes)-q.head:], q.nodes[:q.tail])
+		n := copy(nodes, q.nodes[q.head:])
+		copy(nodes[n:], q.nodes[:q.tail])
 	}
 
-	q.tail = q.count % n
+	q.tail = q.count
 	q.head = 0
 	q.nodes = nodes
 }
@@ -50,12 +56,11 @@ func (q *Unbounded[T]) Push(i T) bool {
 		return false
 	}
 	if q.count == len(q.nodes) {
-		// Also tested a grow rate of 1.5, see: http://stackoverflow.com/questions/2269063/buffer-growth-strategy
-		// In Go this resulted in a higher memory usage.
-		q.resize(q.count * 2)
+		q.resize()
 	}
-	q.nodes[q.tail] = i
-	q.tail = (q.tail + 1) % len(q.nodes)
+	q.nodes[q.tail] = &i
+	// bitwise modulus
+	q.tail = (q.tail + 1) & (len(q.nodes) - 1)
 	q.count++
 	q.cond.Signal()
 	q.mu.Unlock()
@@ -84,9 +89,10 @@ func (q *Unbounded[T]) CloseRemaining() []T {
 	rem := make([]T, 0, q.count)
 	for q.count > 0 {
 		i := q.nodes[q.head]
-		q.head = (q.head + 1) % len(q.nodes)
+		// bitwise modulus
+		q.head = (q.head + 1) & (len(q.nodes) - 1)
 		q.count--
-		rem = append(rem, i)
+		rem = append(rem, *i)
 	}
 	q.closed = true
 	q.count = 0
@@ -137,14 +143,16 @@ func (q *Unbounded[T]) Pop() (T, bool) {
 		return nilElt, false
 	}
 	i := q.nodes[q.head]
-	q.head = (q.head + 1) % len(q.nodes)
+	q.nodes[q.head] = nil
+	// bitwise modulus
+	q.head = (q.head + 1) & (len(q.nodes) - 1)
 	q.count--
-
-	if n := len(q.nodes) / 2; n >= q.initCap && q.count <= n {
-		q.resize(n)
+	// Resize down if buffer 1/4 full.
+	if len(q.nodes) > minQueueLen && (q.count<<2) == len(q.nodes) {
+		q.resize()
 	}
 
-	return i, true
+	return *i, true
 }
 
 // Cap return the capacity (without allocations)
@@ -161,4 +169,12 @@ func (q *Unbounded[T]) Len() int {
 	l := q.count
 	q.mu.RUnlock()
 	return l
+}
+
+// IsEmpty returns true when the queue is empty
+func (q *Unbounded[T]) IsEmpty() bool {
+	q.mu.Lock()
+	cnt := q.count
+	q.mu.Unlock()
+	return cnt == 0
 }
