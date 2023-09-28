@@ -1,4 +1,4 @@
-package eventstream
+package queue
 
 import (
 	"testing"
@@ -8,7 +8,7 @@ import (
 
 func TestUnboundedQueue(t *testing.T) {
 	t.Run("With Push/Pop", func(t *testing.T) {
-		q := newUnboundedQueue[int](2)
+		q := NewUnbounded[int](2)
 		for j := 0; j < 100; j++ {
 			if q.Len() != 0 {
 				t.Fatal("expected no elements")
@@ -61,7 +61,7 @@ func TestUnboundedQueue(t *testing.T) {
 		assert.Zero(t, q.Cap())
 	})
 	t.Run("With Wait", func(t *testing.T) {
-		q := newUnboundedQueue[int](2)
+		q := NewUnbounded[int](2)
 		assert.True(t, q.Push(1))
 		assert.True(t, q.Push(2))
 		assert.True(t, q.Push(3))

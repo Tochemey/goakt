@@ -3,8 +3,8 @@ package actors
 import (
 	"time"
 
+	"github.com/tochemey/goakt/eventstream"
 	"github.com/tochemey/goakt/log"
-	"github.com/tochemey/goakt/pkg/eventstream"
 	"github.com/tochemey/goakt/telemetry"
 )
 

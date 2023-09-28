@@ -9,10 +9,10 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/tochemey/goakt/eventstream"
 	"github.com/tochemey/goakt/log"
 	addresspb "github.com/tochemey/goakt/pb/address/v1"
 	eventspb "github.com/tochemey/goakt/pb/events/v1"
-	"github.com/tochemey/goakt/pkg/eventstream"
 	testpb "github.com/tochemey/goakt/test/data/pb/v1"
 	"github.com/travisjeffery/go-dynaport"
 	"google.golang.org/protobuf/proto"

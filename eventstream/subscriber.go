@@ -4,6 +4,7 @@ import (
 	"sync"
 
 	"github.com/google/uuid"
+	"github.com/tochemey/goakt/pkg/queue"
 )
 
 // Subscriber defines the Subscriber Interface
@@ -25,7 +26,7 @@ type subscriber struct {
 	// sem represents a lock
 	sem sync.Mutex
 	// messages of the subscriber
-	messages *unboundedQueue[*Message]
+	messages *queue.Unbounded[*Message]
 	// topics define the topic the subscriber subscribed to
 	topics map[string]bool
 	// states whether the given subscriber is active or not
@@ -44,7 +45,7 @@ func newSubscriber() *subscriber {
 	return &subscriber{
 		id:       id,
 		sem:      sync.Mutex{},
-		messages: newUnboundedQueue[*Message](2),
+		messages: queue.NewUnbounded[*Message](2),
 		topics:   make(map[string]bool),
 		active:   true,
 	}

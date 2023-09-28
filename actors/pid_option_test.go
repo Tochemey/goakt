@@ -5,8 +5,8 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/tochemey/goakt/eventstream"
 	"github.com/tochemey/goakt/log"
-	"github.com/tochemey/goakt/pkg/eventstream"
 	"go.uber.org/atomic"
 )
 
