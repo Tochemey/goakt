@@ -103,7 +103,7 @@ func TestActorSystem(t *testing.T) {
 			assert.NoError(t, err)
 		})
 	})
-	t.Run("With clustering enabled", func(t *testing.T) {
+	t.Run("With RemoteActor/ActorOf with clustering enabled", func(t *testing.T) {
 		ctx := context.TODO()
 		nodePorts := dynaport.Get(3)
 		gossipPort := nodePorts[0]
@@ -192,6 +192,11 @@ func TestActorSystem(t *testing.T) {
 		require.Error(t, err)
 		require.EqualError(t, err, ErrActorNotFound(actorName).Error())
 		require.Nil(t, addr)
+
+		remoteAddr, err = newActorSystem.RemoteActor(ctx, actorName)
+		require.Error(t, err)
+		require.EqualError(t, err, ErrActorNotFound(actorName).Error())
+		require.Nil(t, remoteAddr)
 
 		// stop the actor after some time
 		time.Sleep(time.Second)
