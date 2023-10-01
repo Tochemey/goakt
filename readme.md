@@ -41,7 +41,7 @@ Also, check reference section at the end of the post for more material regarding
 - [Examples](#examples)
 - [Contribution](#contribution)
     - [Local Test and Linter](#test--linter)
-- [Benchmark](#benchmark-result)
+- [Benchmark](#benchmark)
 
 ### Design Principles
 
@@ -49,10 +49,9 @@ This framework has been designed:
 - to be very minimalistic - it caters for the core component of an actor framework as stated by the father of the actor framework [here](https://youtu.be/7erJ1DV_Tlo).
 - to be very easy to use.
 - to have a clear and defined contract for messages - no need to implement/hide any sort of serialization.
-- to lean on proven tech and standards - no need to reinvent solved problems
-- to be very fast
+- to lean on proven tech and standards - no need to reinvent solved problems.
+- to be very fast.
 - to expose interfaces for custom integrations rather than making it convoluted with unnecessary features.
-
 
 ### Features
 
@@ -308,25 +307,7 @@ Prior to submitting a [pull request](https://help.github.com/articles/using-pull
 earthly +test
 ```
 
-### Benchmark Result
+### Benchmark
 
 One can run the benchmark test: `go test -bench=. -benchtime 2s -count 5 -benchmem -cpu 8 -run notest` from
 the [bench package](./bench) or just run the command `make bench`.
-
-```bash
-goos: darwin
-goarch: arm64
-pkg: github.com/tochemey/goakt/bench
-BenchmarkActor/tell(send_only)-8         	 5521537	       421.7 ns/op	     176 B/op	       4 allocs/op
-BenchmarkActor/tell(send_only)-8         	 5954017	       400.6 ns/op	     176 B/op	       4 allocs/op
-BenchmarkActor/tell(send_only)-8         	 6015830	       425.8 ns/op	     176 B/op	       4 allocs/op
-BenchmarkActor/tell(send_only)-8         	 5857168	       424.2 ns/op	     176 B/op	       4 allocs/op
-BenchmarkActor/tell(send_only)-8         	 5609856	       426.0 ns/op	     176 B/op	       4 allocs/op
-BenchmarkActor/ask(send/reply)-8         	 2770830	       851.1 ns/op	     552 B/op	      10 allocs/op
-BenchmarkActor/ask(send/reply)-8         	 2818917	       851.3 ns/op	     552 B/op	      10 allocs/op
-BenchmarkActor/ask(send/reply)-8         	 2980618	       853.3 ns/op	     552 B/op	      10 allocs/op
-BenchmarkActor/ask(send/reply)-8         	 2830461	       859.2 ns/op	     552 B/op	      10 allocs/op
-BenchmarkActor/ask(send/reply)-8         	 2893876	       828.0 ns/op	     552 B/op	      10 allocs/op
-PASS
-ok  	github.com/tochemey/goakt/bench	32.245s
-```
