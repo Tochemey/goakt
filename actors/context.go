@@ -312,18 +312,14 @@ func (c *receiveContext) Spawn(name string, actor Actor) PID {
 func (c *receiveContext) Children() []PID {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	// create a new context from the parent context
-	ctx := context.WithoutCancel(c.ctx)
-	return c.recipient.Children(ctx)
+	return c.recipient.Children()
 }
 
 // Child returns the named child actor if it is alive
 func (c *receiveContext) Child(name string) PID {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	// create a new context from the parent context
-	ctx := context.WithoutCancel(c.ctx)
-	pid, err := c.recipient.Child(ctx, name)
+	pid, err := c.recipient.Child(name)
 	if err != nil {
 		panic(err)
 	}

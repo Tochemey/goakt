@@ -82,7 +82,7 @@ func (s *AccountService) CreditAccount(ctx context.Context, c *connect.Request[s
 	if !s.actorSystem.InCluster() {
 		s.logger.Info("cluster mode not is on....")
 		// locate the given actor
-		pid, err := s.actorSystem.LocalActor(ctx, accountID)
+		pid, err := s.actorSystem.LocalActor(accountID)
 		// handle the error
 		if err != nil {
 			// check whether it is not found error

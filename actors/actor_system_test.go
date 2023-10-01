@@ -183,7 +183,7 @@ func TestActorSystem(t *testing.T) {
 		require.NotNil(t, reply)
 
 		// get the actor partition
-		partition := newActorSystem.GetPartition(ctx, actorName)
+		partition := newActorSystem.GetPartition(actorName)
 		assert.GreaterOrEqual(t, partition, uint64(0))
 
 		// assert actor not found
@@ -656,7 +656,7 @@ func TestActorSystem(t *testing.T) {
 		require.NotNil(t, ref)
 
 		// locate the actor
-		local, err := sys.LocalActor(ctx, actorName)
+		local, err := sys.LocalActor(actorName)
 		require.NoError(t, err)
 		require.NotNil(t, local)
 
@@ -679,7 +679,7 @@ func TestActorSystem(t *testing.T) {
 		assert.NoError(t, err)
 
 		// locate the actor
-		ref, err := sys.LocalActor(ctx, "some-name")
+		ref, err := sys.LocalActor("some-name")
 		require.Error(t, err)
 		require.Nil(t, ref)
 		require.EqualError(t, err, ErrActorNotFound("some-name").Error())
@@ -693,14 +693,13 @@ func TestActorSystem(t *testing.T) {
 		})
 	})
 	t.Run("With LocalActor when system not started", func(t *testing.T) {
-		ctx := context.TODO()
 		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
 
 		// create an actor
 		actorName := "Exchanger"
 
 		// locate the actor
-		local, err := sys.LocalActor(ctx, actorName)
+		local, err := sys.LocalActor(actorName)
 		require.Error(t, err)
 		require.EqualError(t, err, ErrActorSystemNotStarted.Error())
 		require.Nil(t, local)
@@ -750,7 +749,7 @@ func TestActorSystem(t *testing.T) {
 		time.Sleep(time.Second)
 
 		// locate the actor
-		ref, err := sys.LocalActor(ctx, actorName)
+		ref, err := sys.LocalActor(actorName)
 		require.Error(t, err)
 		require.Nil(t, ref)
 		require.EqualError(t, err, ErrActorNotFound(actorName).Error())
@@ -776,7 +775,7 @@ func TestActorSystem(t *testing.T) {
 		// wait for the system to properly start
 		time.Sleep(time.Second)
 
-		partition := sys.GetPartition(ctx, "some-actor")
+		partition := sys.GetPartition("some-actor")
 		assert.Zero(t, partition)
 
 		t.Cleanup(func() {
@@ -817,7 +816,7 @@ func TestActorSystem(t *testing.T) {
 		time.Sleep(time.Second)
 
 		// create a deadletter subscriber
-		consumer, err := sys.SubscribeToEvent(ctx, eventspb.Event_DEAD_LETTER)
+		consumer, err := sys.Subscribe(eventspb.Event_DEAD_LETTER)
 		require.NoError(t, err)
 		require.NotNil(t, consumer)
 
@@ -847,7 +846,7 @@ func TestActorSystem(t *testing.T) {
 		require.Len(t, items, 5)
 
 		// unsubscribe the consumer
-		err = sys.UnsubscribeToEvent(ctx, eventspb.Event_DEAD_LETTER, consumer)
+		err = sys.Unsubscribe(eventspb.Event_DEAD_LETTER, consumer)
 		require.NoError(t, err)
 
 		t.Cleanup(func() {
@@ -856,11 +855,10 @@ func TestActorSystem(t *testing.T) {
 		})
 	})
 	t.Run("With deadletters subscription when not started", func(t *testing.T) {
-		ctx := context.TODO()
 		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
 
 		// create a deadletter subscriber
-		consumer, err := sys.SubscribeToEvent(ctx, eventspb.Event_DEAD_LETTER)
+		consumer, err := sys.Subscribe(eventspb.Event_DEAD_LETTER)
 		require.Error(t, err)
 		require.Nil(t, consumer)
 	})
@@ -872,7 +870,7 @@ func TestActorSystem(t *testing.T) {
 		err := sys.Start(ctx)
 		assert.NoError(t, err)
 
-		consumer, err := sys.SubscribeToEvent(ctx, eventspb.Event_DEAD_LETTER)
+		consumer, err := sys.Subscribe(eventspb.Event_DEAD_LETTER)
 		require.NoError(t, err)
 		require.NotNil(t, consumer)
 
@@ -882,7 +880,7 @@ func TestActorSystem(t *testing.T) {
 		time.Sleep(time.Second)
 
 		// create a deadletter subscriber
-		err = sys.UnsubscribeToEvent(ctx, eventspb.Event_DEAD_LETTER, consumer)
+		err = sys.Unsubscribe(eventspb.Event_DEAD_LETTER, consumer)
 		require.Error(t, err)
 	})
 }

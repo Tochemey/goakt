@@ -54,7 +54,7 @@ func TestActorReceive(t *testing.T) {
 
 		pid.doReceive(recvContext)
 	}
-	assert.EqualValues(t, count, pid.ReceivedCount(ctx))
+
 	// stop the actor
 	err = pid.Shutdown(ctx)
 	assert.NoError(t, err)
@@ -233,7 +233,7 @@ func TestActorRestart(t *testing.T) {
 			err = Tell(ctx, pid, new(testpb.TestSend))
 			assert.NoError(t, err)
 		}
-		assert.EqualValues(t, count, pid.ReceivedCount(ctx))
+
 		// stop the actor
 		err = pid.Shutdown(ctx)
 		assert.NoError(t, err)
@@ -261,7 +261,6 @@ func TestActorRestart(t *testing.T) {
 			err := Tell(ctx, pid, new(testpb.TestSend))
 			assert.NoError(t, err)
 		}
-		assert.EqualValues(t, count, pid.ReceivedCount(ctx))
 
 		// restart the actor
 		err = pid.Restart(ctx)
@@ -272,7 +271,7 @@ func TestActorRestart(t *testing.T) {
 			err = Tell(ctx, pid, new(testpb.TestSend))
 			assert.NoError(t, err)
 		}
-		assert.EqualValues(t, count, pid.ReceivedCount(ctx))
+
 		// stop the actor
 		err = pid.Shutdown(ctx)
 		assert.NoError(t, err)
@@ -298,7 +297,6 @@ func TestActorRestart(t *testing.T) {
 
 		// wait awhile for a proper start
 		assert.True(t, pid.IsRunning())
-		assert.Zero(t, pid.MailboxSize(ctx))
 
 		// restart the actor
 		err = pid.Restart(ctx)
@@ -339,7 +337,6 @@ func TestActorRestart(t *testing.T) {
 			err := Tell(ctx, pid, new(testpb.TestSend))
 			assert.NoError(t, err)
 		}
-		assert.EqualValues(t, count, pid.ReceivedCount(ctx))
 
 		// restart the actor
 		err = pid.Restart(ctx)
@@ -369,16 +366,14 @@ func TestActorWithSupervisorStrategy(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, child)
 
-		assert.Len(t, parent.Children(ctx), 1)
+		assert.Len(t, parent.Children(), 1)
 		// let us send 10 public to the actors
 		count := 10
 		for i := 0; i < count; i++ {
 			assert.NoError(t, Tell(ctx, parent, new(testpb.TestSend)))
 			assert.NoError(t, Tell(ctx, child, new(testpb.TestSend)))
 		}
-		assert.EqualValues(t, count, parent.ReceivedCount(ctx))
-		assert.EqualValues(t, count, child.ReceivedCount(ctx))
-		assert.Zero(t, child.ErrorsCount(ctx))
+
 		//stop the actor
 		err = parent.Shutdown(ctx)
 		assert.NoError(t, err)
@@ -408,7 +403,7 @@ func TestActorWithSupervisorStrategy(t *testing.T) {
 
 		time.Sleep(time.Second)
 
-		assert.Len(t, parent.Children(ctx), 1)
+		assert.Len(t, parent.Children(), 1)
 		// send a test panic message to the actor
 		assert.NoError(t, Tell(ctx, child, new(testpb.TestPanic)))
 
@@ -417,7 +412,7 @@ func TestActorWithSupervisorStrategy(t *testing.T) {
 
 		// assert the actor state
 		assert.False(t, child.IsRunning())
-		assert.Len(t, parent.Children(ctx), 0)
+		assert.Len(t, parent.Children(), 0)
 
 		//stop the actor
 		err = parent.Shutdown(ctx)
@@ -449,7 +444,7 @@ func TestActorWithSupervisorStrategy(t *testing.T) {
 
 		time.Sleep(time.Second)
 
-		assert.Len(t, parent.Children(ctx), 1)
+		assert.Len(t, parent.Children(), 1)
 		// send a test panic message to the actor
 		assert.NoError(t, Tell(ctx, child, new(testpb.TestPanic)))
 
@@ -458,7 +453,7 @@ func TestActorWithSupervisorStrategy(t *testing.T) {
 
 		// assert the actor state
 		assert.False(t, child.IsRunning())
-		assert.Len(t, parent.Children(ctx), 0)
+		assert.Len(t, parent.Children(), 0)
 
 		//stop the actor
 		err = parent.Shutdown(ctx)
@@ -490,7 +485,7 @@ func TestActorWithSupervisorStrategy(t *testing.T) {
 
 		time.Sleep(time.Second)
 
-		assert.Len(t, parent.Children(ctx), 1)
+		assert.Len(t, parent.Children(), 1)
 		// send a test panic message to the actor
 		assert.NoError(t, Tell(ctx, child, new(testpb.TestPanic)))
 
@@ -499,7 +494,7 @@ func TestActorWithSupervisorStrategy(t *testing.T) {
 
 		// assert the actor state
 		assert.False(t, child.IsRunning())
-		assert.Len(t, parent.Children(ctx), 0)
+		assert.Len(t, parent.Children(), 0)
 
 		//stop the actor
 		err = parent.Shutdown(ctx)
@@ -530,7 +525,7 @@ func TestActorWithSupervisorStrategy(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, child)
 
-		assert.Len(t, parent.Children(ctx), 1)
+		assert.Len(t, parent.Children(), 1)
 		// send a test panic message to the actor
 		assert.NoError(t, Tell(ctx, child, new(testpb.TestPanic)))
 
@@ -539,7 +534,7 @@ func TestActorWithSupervisorStrategy(t *testing.T) {
 
 		// assert the actor state
 		assert.True(t, child.IsRunning())
-		require.Len(t, parent.Children(ctx), 1)
+		require.Len(t, parent.Children(), 1)
 
 		//stop the actor
 		err = parent.Shutdown(ctx)
@@ -571,7 +566,7 @@ func TestActorWithSupervisorStrategy(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, child)
 
-		assert.Len(t, parent.Children(ctx), 1)
+		assert.Len(t, parent.Children(), 1)
 		// send a test panic message to the actor
 		assert.NoError(t, Tell(ctx, child, new(testpb.TestPanic)))
 
@@ -580,7 +575,7 @@ func TestActorWithSupervisorStrategy(t *testing.T) {
 
 		// assert the actor state
 		assert.False(t, child.IsRunning())
-		assert.Len(t, parent.Children(ctx), 0)
+		assert.Len(t, parent.Children(), 0)
 
 		//stop the actor
 		err = parent.Shutdown(ctx)
@@ -622,9 +617,6 @@ func TestActorToActor(t *testing.T) {
 
 		// wait a while because exchange is ongoing
 		time.Sleep(time.Second)
-
-		assert.Greater(t, pid1.ReceivedCount(ctx), uint64(1))
-		assert.Greater(t, pid2.ReceivedCount(ctx), uint64(1))
 
 		err = Tell(ctx, pid1, new(testpb.TestBye))
 		require.NoError(t, err)
@@ -845,7 +837,7 @@ func TestSpawnChild(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, child)
 
-		assert.Len(t, parent.Children(ctx), 1)
+		assert.Len(t, parent.Children(), 1)
 
 		// stop the child actor
 		assert.NoError(t, child.Shutdown(ctx))
@@ -858,8 +850,7 @@ func TestSpawnChild(t *testing.T) {
 
 		time.Sleep(time.Second)
 
-		assert.EqualValues(t, 1, child.StartCount(ctx))
-		assert.Len(t, parent.Children(ctx), 1)
+		assert.Len(t, parent.Children(), 1)
 		//stop the actor
 		err = parent.Shutdown(ctx)
 		assert.NoError(t, err)
@@ -885,7 +876,7 @@ func TestSpawnChild(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, child)
 
-		assert.Len(t, parent.Children(ctx), 1)
+		assert.Len(t, parent.Children(), 1)
 
 		time.Sleep(100 * time.Millisecond)
 		// create the child actor
@@ -895,8 +886,7 @@ func TestSpawnChild(t *testing.T) {
 
 		time.Sleep(time.Second)
 
-		assert.EqualValues(t, 1, child.StartCount(ctx))
-		assert.Len(t, parent.Children(ctx), 1)
+		assert.Len(t, parent.Children(), 1)
 		//stop the actor
 		err = parent.Shutdown(ctx)
 		assert.NoError(t, err)
@@ -949,7 +939,7 @@ func TestSpawnChild(t *testing.T) {
 		assert.Error(t, err)
 		assert.Nil(t, child)
 
-		assert.Len(t, parent.Children(ctx), 0)
+		assert.Len(t, parent.Children(), 0)
 		//stop the actor
 		err = parent.Shutdown(ctx)
 		assert.NoError(t, err)
@@ -1133,7 +1123,7 @@ func TestShutdown(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, child)
 
-		assert.Len(t, parent.Children(ctx), 1)
+		assert.Len(t, parent.Children(), 1)
 
 		//stop the
 		assert.Panics(t, func() {

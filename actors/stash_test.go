@@ -37,7 +37,7 @@ func TestStash(t *testing.T) {
 
 		// add some pause here due to async calls
 		time.Sleep(time.Second)
-		require.EqualValues(t, 1, pid.StashSize(ctx))
+		require.EqualValues(t, 1, pid.StashSize())
 
 		// at this stage any message sent to the actor is stashed
 		for i := 0; i < 5; i++ {
@@ -48,14 +48,13 @@ func TestStash(t *testing.T) {
 		time.Sleep(time.Second)
 
 		// when we assert the actor received count it will only show 1
-		assert.EqualValues(t, 6, pid.ReceivedCount(ctx))
-		require.EqualValues(t, 1, pid.StashSize(ctx))
+		require.EqualValues(t, 1, pid.StashSize())
 
 		// send another stash
 		require.NoError(t, Tell(ctx, pid, new(testpb.TestLogin)))
 		// add some pause here due to async calls
 		time.Sleep(time.Second)
-		require.EqualValues(t, 2, pid.StashSize(ctx))
+		require.EqualValues(t, 2, pid.StashSize())
 
 		// add some pause here due to async calls
 		time.Sleep(time.Second)
@@ -63,7 +62,7 @@ func TestStash(t *testing.T) {
 
 		// add some pause here due to async calls
 		time.Sleep(time.Second)
-		require.EqualValues(t, 1, pid.StashSize(ctx))
+		require.EqualValues(t, 1, pid.StashSize())
 
 		// add some pause here due to async calls
 		time.Sleep(time.Second)
@@ -72,7 +71,7 @@ func TestStash(t *testing.T) {
 		// add some pause here due to async calls
 		time.Sleep(time.Second)
 
-		require.Zero(t, pid.StashSize(ctx))
+		require.Zero(t, pid.StashSize())
 
 		// stop the actor
 		err = Tell(ctx, pid, new(testpb.TestBye))

@@ -13,7 +13,6 @@ import (
 	"github.com/tochemey/goakt/hash"
 	internalpb "github.com/tochemey/goakt/internal/v1"
 	"github.com/tochemey/goakt/log"
-	"github.com/tochemey/goakt/telemetry"
 )
 
 // Interface defines the Cluster interface
@@ -247,10 +246,6 @@ func (c *Cluster) PutActor(ctx context.Context, actor *internalpb.WireActor) err
 	ctx, cancelFn := context.WithTimeout(ctx, c.writeTimeout)
 	defer cancelFn()
 
-	// add a span to trace this call
-	ctx, span := telemetry.SpanContext(ctx, "PutActor")
-	defer span.End()
-
 	// set the logger
 	logger := c.logger
 
@@ -286,10 +281,6 @@ func (c *Cluster) GetActor(ctx context.Context, actorName string) (*internalpb.W
 	// create a cancellation context of 1 second timeout
 	ctx, cancelFn := context.WithTimeout(ctx, c.readTimeout)
 	defer cancelFn()
-
-	// add a span to trace this call
-	ctx, span := telemetry.SpanContext(ctx, "GetActor")
-	defer span.End()
 
 	// set the logger
 	logger := c.logger

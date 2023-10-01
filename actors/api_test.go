@@ -182,8 +182,6 @@ func TestTell(t *testing.T) {
 		err = Tell(ctx, actorRef, message)
 		// perform some assertions
 		require.NoError(t, err)
-		count := 1
-		assert.EqualValues(t, count, actorRef.ReceivedCount(ctx))
 
 		// stop the actor after some time
 		ctx, cancel := context.WithTimeout(ctx, time.Second)
@@ -319,9 +317,6 @@ func TestRemoteTell(t *testing.T) {
 			// perform some assertions
 			require.NoError(t, err)
 		}
-
-		count := 10
-		assert.EqualValues(t, count, actorRef.ReceivedCount(ctx))
 
 		// stop the actor after some time
 		time.Sleep(time.Second)

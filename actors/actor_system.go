@@ -22,7 +22,6 @@ import (
 	addresspb "github.com/tochemey/goakt/pb/address/v1"
 	eventspb "github.com/tochemey/goakt/pb/events/v1"
 	"github.com/tochemey/goakt/telemetry"
-	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/atomic"
@@ -52,7 +51,7 @@ type ActorSystem interface {
 	NumActors() uint64
 	// LocalActor returns the reference of a local actor.
 	// A local actor is an actor that reside on the same node where the given actor system is running
-	LocalActor(ctx context.Context, actorName string) (PID, error)
+	LocalActor(actorName string) (PID, error)
 	// RemoteActor returns the address of a remote actor when cluster is enabled
 	// When the cluster mode is not enabled an actor not found error will be returned
 	// One can always check whether cluster is enabled before calling this method or just use the ActorOf method.
@@ -65,11 +64,11 @@ type ActorSystem interface {
 	// InCluster states whether the actor system is running within a cluster of nodes
 	InCluster() bool
 	// GetPartition returns the partition where a given actor is located
-	GetPartition(ctx context.Context, actorName string) uint64
-	// SubscribeToEvent creates an event subscriber.
-	SubscribeToEvent(ctx context.Context, event eventspb.Event) (eventstream.Subscriber, error)
-	// UnsubscribeToEvent unsubscribes a subscriber.
-	UnsubscribeToEvent(ctx context.Context, event eventspb.Event, subscriber eventstream.Subscriber) error
+	GetPartition(actorName string) uint64
+	// Subscribe creates an event subscriber.
+	Subscribe(event eventspb.Event) (eventstream.Subscriber, error)
+	// Unsubscribe unsubscribes a subscriber.
+	Unsubscribe(event eventspb.Event, subscriber eventstream.Subscriber) error
 
 	// handleRemoteAsk handles a synchronous message to another actor and expect a response.
 	// This block until a response is received or timed out.
@@ -193,11 +192,8 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 	return system, nil
 }
 
-// SubscribeToEvent help receive dead letters whenever there are available
-func (x *actorSystem) SubscribeToEvent(ctx context.Context, event eventspb.Event) (eventstream.Subscriber, error) {
-	// add a span context
-	ctx, span := telemetry.SpanContext(ctx, "SubscribeToEvent")
-	defer span.End()
+// Subscribe help receive dead letters whenever there are available
+func (x *actorSystem) Subscribe(event eventspb.Event) (eventstream.Subscriber, error) {
 	// first check whether the actor system has started
 	if !x.hasStarted.Load() {
 		return nil, ErrActorSystemNotStarted
@@ -213,11 +209,8 @@ func (x *actorSystem) SubscribeToEvent(ctx context.Context, event eventspb.Event
 	return subscriber, nil
 }
 
-// UnsubscribeToEvent unsubscribes a subscriber.
-func (x *actorSystem) UnsubscribeToEvent(ctx context.Context, event eventspb.Event, subscriber eventstream.Subscriber) error {
-	// add a span context
-	ctx, span := telemetry.SpanContext(ctx, "UnsubscribeToEvent")
-	defer span.End()
+// Unsubscribe unsubscribes a subscriber.
+func (x *actorSystem) Unsubscribe(event eventspb.Event, subscriber eventstream.Subscriber) error {
 	// first check whether the actor system has started
 	if !x.hasStarted.Load() {
 		return ErrActorSystemNotStarted
@@ -235,11 +228,7 @@ func (x *actorSystem) UnsubscribeToEvent(ctx context.Context, event eventspb.Eve
 }
 
 // GetPartition returns the partition where a given actor is located
-func (x *actorSystem) GetPartition(ctx context.Context, actorName string) uint64 {
-	// add a span context
-	ctx, span := telemetry.SpanContext(ctx, "GetPartition")
-	defer span.End()
-
+func (x *actorSystem) GetPartition(actorName string) uint64 {
 	// return zero when the actor system is not in cluster mode
 	if !x.InCluster() {
 		// TODO: maybe add a partitioner function
@@ -262,9 +251,6 @@ func (x *actorSystem) NumActors() uint64 {
 
 // Spawn creates or returns the instance of a given actor in the system
 func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor) (PID, error) {
-	// add a span context
-	ctx, span := telemetry.SpanContext(ctx, "Spawn")
-	defer span.End()
 	// first check whether the actor system has started
 	if !x.hasStarted.Load() {
 		return nil, ErrActorSystemNotStarted
@@ -330,9 +316,6 @@ func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor) (PID,
 
 // Kill stops a given actor in the system
 func (x *actorSystem) Kill(ctx context.Context, name string) error {
-	// add a span context
-	ctx, span := telemetry.SpanContext(ctx, "Kill")
-	defer span.End()
 	// first check whether the actor system has started
 	if !x.hasStarted.Load() {
 		return ErrActorSystemNotStarted
@@ -356,9 +339,6 @@ func (x *actorSystem) Kill(ctx context.Context, name string) error {
 
 // ReSpawn recreates a given actor in the system
 func (x *actorSystem) ReSpawn(ctx context.Context, name string) (PID, error) {
-	// add a span context
-	ctx, span := telemetry.SpanContext(ctx, "ReSpawn")
-	defer span.End()
 	// first check whether the actor system has started
 	if !x.hasStarted.Load() {
 		return nil, ErrActorSystemNotStarted
@@ -423,10 +403,6 @@ func (x *actorSystem) ActorOf(ctx context.Context, actorName string) (addr *addr
 	// release the lock
 	defer x.sem.Unlock()
 
-	// add a span context
-	ctx, span := telemetry.SpanContext(ctx, "ActorOf")
-	defer span.End()
-
 	// make sure the actor system has started
 	if !x.hasStarted.Load() {
 		return nil, nil, ErrActorSystemNotStarted
@@ -470,15 +446,11 @@ func (x *actorSystem) ActorOf(ctx context.Context, actorName string) (addr *addr
 
 // LocalActor returns the reference of a local actor.
 // A local actor is an actor that reside on the same node where the given actor system is running
-func (x *actorSystem) LocalActor(ctx context.Context, actorName string) (PID, error) {
+func (x *actorSystem) LocalActor(actorName string) (PID, error) {
 	// acquire the lock
 	x.sem.Lock()
 	// release the lock
 	defer x.sem.Unlock()
-
-	// add a span context
-	ctx, span := telemetry.SpanContext(ctx, "LocalActor")
-	defer span.End()
 
 	// make sure the actor system has started
 	if !x.hasStarted.Load() {
@@ -507,10 +479,6 @@ func (x *actorSystem) RemoteActor(ctx context.Context, actorName string) (addr *
 	// release the lock
 	defer x.sem.Unlock()
 
-	// add a span context
-	ctx, span := telemetry.SpanContext(ctx, "RemoteActor")
-	defer span.End()
-
 	// make sure the actor system has started
 	if !x.hasStarted.Load() {
 		return nil, ErrActorSystemNotStarted
@@ -538,9 +506,6 @@ func (x *actorSystem) RemoteActor(ctx context.Context, actorName string) (addr *
 
 // Start starts the actor system
 func (x *actorSystem) Start(ctx context.Context) error {
-	// add a span context
-	ctx, span := telemetry.SpanContext(ctx, "Start")
-	defer span.End()
 	// set the has started to true
 	x.hasStarted.Store(true)
 
@@ -554,13 +519,6 @@ func (x *actorSystem) Start(ctx context.Context) error {
 		x.enableRemoting(ctx)
 	}
 
-	// start the metrics service
-	// register metrics. However, we don't panic when we fail to register
-	// we just log it for now
-	// TODO decide what to do when we fail to register the metrics or export the metrics registration as public
-	if err := x.registerMetrics(); err != nil {
-		x.logger.Error(errors.Wrapf(err, "failed to register actorSystem=%s metrics", x.name))
-	}
 	// start the housekeeper
 	go x.housekeeper()
 
@@ -570,10 +528,6 @@ func (x *actorSystem) Start(ctx context.Context) error {
 
 // Stop stops the actor system
 func (x *actorSystem) Stop(ctx context.Context) error {
-	// add a span context
-	ctx, span := telemetry.SpanContext(ctx, "Stop")
-	defer span.End()
-
 	// make sure the actor system has started
 	if !x.hasStarted.Load() {
 		return ErrActorSystemNotStarted
@@ -647,11 +601,7 @@ func (x *actorSystem) Stop(ctx context.Context) error {
 }
 
 // RemoteLookup for an actor on a remote host.
-func (x *actorSystem) RemoteLookup(ctx context.Context, request *connect.Request[internalpb.RemoteLookupRequest]) (*connect.Response[internalpb.RemoteLookupResponse], error) {
-	// add a span context
-	ctx, span := telemetry.SpanContext(ctx, "RemoteLookup")
-	defer span.End()
-
+func (x *actorSystem) RemoteLookup(_ context.Context, request *connect.Request[internalpb.RemoteLookupRequest]) (*connect.Response[internalpb.RemoteLookupResponse], error) {
 	// get a context log
 	logger := x.logger
 
@@ -698,10 +648,6 @@ func (x *actorSystem) RemoteLookup(ctx context.Context, request *connect.Request
 // immediately. With this type of message the receiver cannot communicate back to Sender
 // except reply the message with a response. This one-way communication
 func (x *actorSystem) RemoteAsk(ctx context.Context, request *connect.Request[internalpb.RemoteAskRequest]) (*connect.Response[internalpb.RemoteAskResponse], error) {
-	// add a span context
-	ctx, span := telemetry.SpanContext(ctx, "RemoteAsk")
-	defer span.End()
-
 	// get a context log
 	logger := x.logger
 	// first let us make a copy of the incoming request
@@ -754,10 +700,6 @@ func (x *actorSystem) RemoteAsk(ctx context.Context, request *connect.Request[in
 // This is the only way remote actors can interact with each other. The actor on the
 // other line can reply to the sender by using the Sender in the message
 func (x *actorSystem) RemoteTell(ctx context.Context, request *connect.Request[internalpb.RemoteTellRequest]) (*connect.Response[internalpb.RemoteTellResponse], error) {
-	// add a span context
-	ctx, span := telemetry.SpanContext(ctx, "RemoteTell")
-	defer span.End()
-
 	// get a context log
 	logger := x.logger
 	// first let us make a copy of the incoming request
@@ -807,45 +749,14 @@ func (x *actorSystem) RemoteTell(ctx context.Context, request *connect.Request[i
 	return connect.NewResponse(new(internalpb.RemoteTellResponse)), nil
 }
 
-// registerMetrics register the PID metrics with OTel instrumentation.
-func (x *actorSystem) registerMetrics() error {
-	// grab the OTel meter
-	meter := x.telemetry.Meter
-	// create an instance of the ActorMetrics
-	metrics, err := telemetry.NewSystemMetrics(meter)
-	// handle the error
-	if err != nil {
-		return err
-	}
-
-	// define the common labels
-	labels := []attribute.KeyValue{
-		attribute.String("actor.system", x.Name()),
-	}
-
-	// register the metrics
-	_, err = meter.RegisterCallback(func(ctx context.Context, observer metric.Observer) error {
-		observer.ObserveInt64(metrics.ActorSystemActorsCount, int64(x.NumActors()), metric.WithAttributes(labels...))
-		return nil
-	}, metrics.ActorSystemActorsCount)
-
-	return err
-}
-
 // handleRemoteAsk handles a synchronous message to another actor and expect a response.
 // This block until a response is received or timed out.
 func (x *actorSystem) handleRemoteAsk(ctx context.Context, to PID, message proto.Message) (response proto.Message, err error) {
-	// add a span context
-	ctx, span := telemetry.SpanContext(ctx, "handleRemoteAsk")
-	defer span.End()
 	return Ask(ctx, to, message, x.replyTimeout)
 }
 
 // handleRemoteTell handles an asynchronous message to an actor
 func (x *actorSystem) handleRemoteTell(ctx context.Context, to PID, message proto.Message) error {
-	// add a span context
-	ctx, span := telemetry.SpanContext(ctx, "handleRemoteTell")
-	defer span.End()
 	return Tell(ctx, to, message)
 }
 

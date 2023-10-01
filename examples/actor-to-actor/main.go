@@ -28,17 +28,19 @@ func main() {
 	// start the actor system
 	_ = actorSystem.Start(ctx)
 
-	// create an actor
-	pingActor, _ := actorSystem.Spawn(ctx, "Ping", NewPingActor())
-	pongActor, _ := actorSystem.Spawn(ctx, "Pong", NewPongActor())
+	// create teh actors
+	pinger := NewPingActor()
+	ponger := NewPongActor()
+	pingActor, _ := actorSystem.Spawn(ctx, "Ping", pinger)
+	pongActor, _ := actorSystem.Spawn(ctx, "Pong", ponger)
 
 	// start the conversation
 	_ = pingActor.Tell(ctx, pongActor, new(samplepb.Ping))
 
 	// shutdown both actors after 3 seconds of conversation
 	timer := time.AfterFunc(3*time.Second, func() {
-		logger.Infof("PingActor=%s has processed %d address", pingActor.ActorPath().String(), pingActor.ReceivedCount(ctx))
-		logger.Infof("PongActor=%s has processed %d address", pongActor.ActorPath().String(), pongActor.ReceivedCount(ctx))
+		logger.Infof("PingActor=%s has processed %d address", pingActor.ActorPath().String(), pinger.count.Load())
+		logger.Infof("PongActor=%s has processed %d address", pongActor.ActorPath().String(), ponger.count.Load())
 		_ = pingActor.Shutdown(ctx)
 		_ = pongActor.Shutdown(ctx)
 	})

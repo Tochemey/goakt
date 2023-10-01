@@ -11,7 +11,6 @@ import (
 	"github.com/tochemey/goakt/internal/v1/internalpbconnect"
 	addresspb "github.com/tochemey/goakt/pb/address/v1"
 	"github.com/tochemey/goakt/pkg/http"
-	"github.com/tochemey/goakt/telemetry"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 )
@@ -137,10 +136,6 @@ func Tell(ctx context.Context, to PID, message proto.Message) error {
 
 // RemoteTell sends a message to an actor remotely without expecting any reply
 func RemoteTell(ctx context.Context, to *addresspb.Address, message proto.Message) error {
-	// add a span context
-	ctx, span := telemetry.SpanContext(ctx, "RemoteTell")
-	defer span.End()
-
 	// marshal the message
 	marshaled, err := anypb.New(message)
 	if err != nil {
@@ -171,10 +166,6 @@ func RemoteTell(ctx context.Context, to *addresspb.Address, message proto.Messag
 
 // RemoteAsk sends a synchronous message to another actor remotely and expect a response.
 func RemoteAsk(ctx context.Context, to *addresspb.Address, message proto.Message) (response *anypb.Any, err error) {
-	// add a span context
-	ctx, span := telemetry.SpanContext(ctx, "RemoteAsk")
-	defer span.End()
-
 	// marshal the message
 	marshaled, err := anypb.New(message)
 	if err != nil {
@@ -208,10 +199,6 @@ func RemoteAsk(ctx context.Context, to *addresspb.Address, message proto.Message
 
 // RemoteLookup look for an actor address on a remote node.
 func RemoteLookup(ctx context.Context, host string, port int, name string) (addr *addresspb.Address, err error) {
-	// add a span context
-	ctx, span := telemetry.SpanContext(ctx, "RemoteLookup")
-	defer span.End()
-
 	// create an instance of remote client service
 	remoteClient := internalpbconnect.NewRemotingServiceClient(
 		http.Client(),

@@ -23,8 +23,6 @@ type Telemetry struct {
 
 	MeterProvider metric.MeterProvider
 	Meter         metric.Meter
-
-	Metrics *ActorMetrics
 }
 
 // New creates an instance of Telemetry
