@@ -161,10 +161,10 @@ type pid struct {
 
 	lastProcessingDuration atomic.Duration
 
-	// pidSemaphore that helps synchronize the pid in a concurrent environment
+	// semaphore that helps synchronize the pid in a concurrent environment
 	// this helps protect the pid fields accessibility
-	pidSemaphore      sync.RWMutex
-	shutdownSemaphore sync.Mutex
+	semaphore     sync.RWMutex
+	stopSemaphore sync.Mutex
 
 	// supervisor strategy
 	supervisorStrategy StrategyDirective
@@ -205,8 +205,8 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 		watchMen:           slices.NewConcurrentSlice[*watchMan](),
 		telemetry:          telemetry.New(),
 		actorPath:          actorPath,
-		pidSemaphore:       sync.RWMutex{},
-		shutdownSemaphore:  sync.Mutex{},
+		semaphore:          sync.RWMutex{},
+		stopSemaphore:      sync.Mutex{},
 		httpClient:         http.Client(),
 		mailbox:            nil,
 		stashBuffer:        nil,
@@ -281,9 +281,9 @@ func (p *pid) Child(name string) (PID, error) {
 
 // Children returns the list of all the children of the given actor that are still alive or an empty list
 func (p *pid) Children() []PID {
-	p.pidSemaphore.RLock()
+	p.semaphore.RLock()
 	kiddos := p.children.List()
-	p.pidSemaphore.RUnlock()
+	p.semaphore.RUnlock()
 
 	// create the list of alive children
 	pids := make([]PID, 0, len(kiddos))
@@ -313,9 +313,9 @@ func (p *pid) Stop(ctx context.Context, pid PID) error {
 	path := pid.ActorPath()
 
 	// grab the children thread-safely
-	p.pidSemaphore.RLock()
+	p.semaphore.RLock()
 	kiddos := p.children
-	p.pidSemaphore.RUnlock()
+	p.semaphore.RUnlock()
 
 	if cid, ok := kiddos.Get(path); ok {
 		// stop the actor
@@ -332,17 +332,17 @@ func (p *pid) IsRunning() bool {
 
 // ActorSystem returns the actor system
 func (p *pid) ActorSystem() ActorSystem {
-	p.pidSemaphore.RLock()
+	p.semaphore.RLock()
 	sys := p.system
-	p.pidSemaphore.RUnlock()
+	p.semaphore.RUnlock()
 	return sys
 }
 
 // ActorPath returns the path of the actor
 func (p *pid) ActorPath() *Path {
-	p.pidSemaphore.RLock()
+	p.semaphore.RLock()
 	path := p.actorPath
-	p.pidSemaphore.RUnlock()
+	p.semaphore.RUnlock()
 	return path
 }
 
@@ -411,9 +411,9 @@ func (p *pid) SpawnChild(ctx context.Context, name string, actor Actor) (PID, er
 	childActorPath := NewPath(name, p.ActorPath().Address()).WithParent(p.ActorPath())
 
 	// grab the children thread-safely
-	p.pidSemaphore.RLock()
+	p.semaphore.RLock()
 	kiddos := p.children
-	p.pidSemaphore.RUnlock()
+	p.semaphore.RUnlock()
 
 	// check whether the child actor already exist and just return the PID
 	// whenever a child actor exists it means it is live
@@ -422,9 +422,9 @@ func (p *pid) SpawnChild(ctx context.Context, name string, actor Actor) (PID, er
 	}
 
 	// acquire the lock
-	p.pidSemaphore.Lock()
+	p.semaphore.Lock()
 	// release the lock
-	defer p.pidSemaphore.Unlock()
+	defer p.semaphore.Unlock()
 
 	// create the child pid
 	cid, err := newPID(ctx,
@@ -470,7 +470,7 @@ func (p *pid) Ask(ctx context.Context, to PID, message proto.Message) (response 
 	}
 
 	// acquire a lock to set the message context
-	p.pidSemaphore.Lock()
+	p.semaphore.Lock()
 	// create a receiver context
 	context := new(receiveContext)
 
@@ -485,7 +485,7 @@ func (p *pid) Ask(ctx context.Context, to PID, message proto.Message) (response 
 	context.sendTime.Store(time.Now())
 
 	// release the lock after setting the message context
-	p.pidSemaphore.Unlock()
+	p.semaphore.Unlock()
 
 	// put the message context in the mailbox of the recipient actor
 	to.doReceive(context)
@@ -512,9 +512,9 @@ func (p *pid) Tell(ctx context.Context, to PID, message proto.Message) error {
 	}
 
 	// acquire a lock to set the message context
-	p.pidSemaphore.Lock()
+	p.semaphore.Lock()
 	// release the lock after setting the message context
-	defer p.pidSemaphore.Unlock()
+	defer p.semaphore.Unlock()
 	// create a message context
 	context := new(receiveContext)
 
@@ -654,9 +654,9 @@ func (p *pid) RemoteAsk(ctx context.Context, to *addresspb.Address, message prot
 // that can be configured. All child actors will be gracefully shutdown.
 func (p *pid) Shutdown(ctx context.Context) error {
 	// acquire the shutdown lock
-	p.shutdownSemaphore.Lock()
+	p.stopSemaphore.Lock()
 	// release the lock
-	defer p.shutdownSemaphore.Unlock()
+	defer p.stopSemaphore.Unlock()
 
 	p.logger.Info("Shutdown process has started...")
 
@@ -722,8 +722,8 @@ func (p *pid) watchers() *slices.ConcurrentSlice[*watchMan] {
 // doReceive pushes a given message to the actor receiveContextBuffer
 func (p *pid) doReceive(ctx ReceiveContext) {
 	// acquire the lock and release it once done
-	p.pidSemaphore.Lock()
-	defer p.pidSemaphore.Unlock()
+	p.semaphore.Lock()
+	defer p.semaphore.Unlock()
 
 	// set the last processing time
 	p.lastProcessingTime.Store(time.Now())
@@ -761,9 +761,9 @@ func (p *pid) init(ctx context.Context) error {
 		return ErrInitFailure(err)
 	}
 	// set the actor is ready
-	p.pidSemaphore.Lock()
+	p.semaphore.Lock()
 	p.isRunning.Store(true)
-	p.pidSemaphore.Unlock()
+	p.semaphore.Unlock()
 	// add some logging info
 	p.logger.Info("Initialization process successfully completed.")
 	return nil
@@ -964,9 +964,9 @@ func (p *pid) passivationListener() {
 	}
 
 	// acquire the shutdown lock
-	p.shutdownSemaphore.Lock()
+	p.stopSemaphore.Lock()
 	// release the lock
-	defer p.shutdownSemaphore.Unlock()
+	defer p.stopSemaphore.Unlock()
 
 	// add some logging info
 	p.logger.Infof("Passivation mode has been triggered for actor=%s...", p.ActorPath().String())
@@ -993,33 +993,33 @@ func (p *pid) interceptor() connect.Interceptor {
 
 // setBehavior is a utility function that helps set the actor behavior
 func (p *pid) setBehavior(behavior Behavior) {
-	p.pidSemaphore.Lock()
+	p.semaphore.Lock()
 	p.behaviorStack.Clear()
 	p.behaviorStack.Push(behavior)
-	p.pidSemaphore.Unlock()
+	p.semaphore.Unlock()
 }
 
 // resetBehavior is a utility function resets the actor behavior
 func (p *pid) resetBehavior() {
-	p.pidSemaphore.Lock()
+	p.semaphore.Lock()
 	p.behaviorStack.Clear()
 	p.behaviorStack.Push(p.Receive)
-	p.pidSemaphore.Unlock()
+	p.semaphore.Unlock()
 }
 
 // setBehaviorStacked adds a behavior to the actor's behaviorStack
 func (p *pid) setBehaviorStacked(behavior Behavior) {
-	p.pidSemaphore.Lock()
+	p.semaphore.Lock()
 	p.behaviorStack.Push(behavior)
-	p.pidSemaphore.Unlock()
+	p.semaphore.Unlock()
 }
 
 // unsetBehaviorStacked sets the actor's behavior to the previous behavior
 // prior to setBehaviorStacked is called
 func (p *pid) unsetBehaviorStacked() {
-	p.pidSemaphore.Lock()
+	p.semaphore.Lock()
 	p.behaviorStack.Pop()
-	p.pidSemaphore.Unlock()
+	p.semaphore.Unlock()
 }
 
 // doStop stops the actor

@@ -11,7 +11,6 @@ import (
 
 	"connectrpc.com/connect"
 	"connectrpc.com/otelconnect"
-	cmp "github.com/orcaman/concurrent-map/v2"
 	"github.com/pkg/errors"
 	"github.com/tochemey/goakt/cluster"
 	"github.com/tochemey/goakt/discovery"
@@ -83,13 +82,10 @@ type actorSystem struct {
 	internalpbconnect.UnimplementedRemotingServiceHandler
 
 	// map of actors in the system
-	actors cmp.ConcurrentMap[string, PID]
+	actors *pidMap
 
 	// states whether the actor system has started or not
 	hasStarted atomic.Bool
-
-	typesLoader TypesLoader
-	reflection  Reflection
 
 	// Specifies the actor system name
 	name string
@@ -161,8 +157,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 
 	// create the instance of the actor system with the default settings
 	system := &actorSystem{
-		actors:              cmp.New[PID](),
-		typesLoader:         NewTypesLoader(),
+		actors:              newPIDMap(10),
 		clusterChan:         make(chan *internalpb.WireActor, 10),
 		name:                name,
 		logger:              log.DefaultLogger,
@@ -182,8 +177,6 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 	system.remotingEnabled.Store(false)
 	system.clusterEnabled.Store(false)
 
-	// set the reflection
-	system.reflection = NewReflection(system.typesLoader)
 	// apply the various options
 	for _, opt := range opts {
 		opt.Apply(system)
@@ -246,7 +239,7 @@ func (x *actorSystem) InCluster() bool {
 
 // NumActors returns the total number of active actors in the system
 func (x *actorSystem) NumActors() uint64 {
-	return uint64(x.actors.Count())
+	return uint64(x.actors.Len())
 }
 
 // Spawn creates or returns the instance of a given actor in the system
@@ -263,7 +256,7 @@ func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor) (PID,
 		actorPath = NewPath(name, NewAddress(x.name, x.remotingHost, int(x.remotingPort)))
 	}
 	// check whether the given actor already exist in the system or not
-	pid, exist := x.actors.Get(actorPath.String())
+	pid, exist := x.actors.Get(actorPath)
 	// actor already exist no need recreate it.
 	if exist {
 		// check whether the given actor heart beat
@@ -295,10 +288,7 @@ func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor) (PID,
 	}
 
 	// add the given actor to the actor map
-	x.actors.Set(actorPath.String(), pid)
-
-	// let us register the actor
-	x.typesLoader.Register(name, actor)
+	x.actors.Set(pid)
 
 	// when cluster is enabled replicate the actor metadata across the cluster
 	if x.clusterEnabled.Load() {
@@ -328,7 +318,7 @@ func (x *actorSystem) Kill(ctx context.Context, name string) error {
 		actorPath = NewPath(name, NewAddress(x.name, x.remotingHost, int(x.remotingPort)))
 	}
 	// check whether the given actor already exist in the system or not
-	pid, exist := x.actors.Get(actorPath.String())
+	pid, exist := x.actors.Get(actorPath)
 	// actor is found.
 	if exist {
 		// stop the given actor
@@ -351,7 +341,7 @@ func (x *actorSystem) ReSpawn(ctx context.Context, name string) (PID, error) {
 		actorPath = NewPath(name, NewAddress(x.name, x.remotingHost, int(x.remotingPort)))
 	}
 	// check whether the given actor already exist in the system or not
-	pid, exist := x.actors.Get(actorPath.String())
+	pid, exist := x.actors.Get(actorPath)
 	// actor is found.
 	if exist {
 		// restart the given actor
@@ -361,7 +351,7 @@ func (x *actorSystem) ReSpawn(ctx context.Context, name string) (PID, error) {
 		}
 		// let us re-add the actor to the actor system list when it has successfully restarted
 		// add the given actor to the actor map
-		x.actors.Set(actorPath.String(), pid)
+		x.actors.Set(pid)
 		return pid, nil
 	}
 	return nil, ErrActorNotFound(actorPath.String())
@@ -384,7 +374,7 @@ func (x *actorSystem) Actors() []PID {
 	defer x.sem.Unlock()
 
 	// get the actors from the actor map
-	items := x.actors.Items()
+	items := x.actors.List()
 	var refs []PID
 	for _, actorRef := range items {
 		refs = append(refs, actorRef)
@@ -432,7 +422,7 @@ func (x *actorSystem) ActorOf(ctx context.Context, actorName string) (addr *addr
 
 	// try to locate the actor when cluster is not enabled
 	// first let us do a local lookup
-	items := x.actors.Items()
+	items := x.actors.List()
 	// iterate the local actors storage
 	for _, actorRef := range items {
 		if actorRef.ActorPath().Name() == actorName {
@@ -458,7 +448,7 @@ func (x *actorSystem) LocalActor(actorName string) (PID, error) {
 	}
 
 	// first let us do a local lookup
-	items := x.actors.Items()
+	items := x.actors.List()
 	// iterate the local actors storage
 	for _, actorRef := range items {
 		if actorRef.ActorPath().Name() == actorName {
@@ -584,7 +574,7 @@ func (x *actorSystem) Stop(ctx context.Context) error {
 	// stop all the actors
 	for _, actor := range x.Actors() {
 		// remove the actor the map and shut it down
-		x.actors.Remove(actor.ActorPath().String())
+		x.actors.Delete(actor.ActorPath())
 		// only shutdown live actors
 		if err := actor.Shutdown(ctx); err != nil {
 			// reset the actor system
@@ -630,7 +620,7 @@ func (x *actorSystem) RemoteLookup(_ context.Context, request *connect.Request[i
 	actorPath := NewPath(name, NewAddress(x.Name(), reqCopy.GetHost(), int(reqCopy.GetPort())))
 	// start or get the PID of the actor
 	// check whether the given actor already exist in the system or not
-	pid, exist := x.actors.Get(actorPath.String())
+	pid, exist := x.actors.Get(actorPath)
 	// return an error when the remote address is not found
 	if !exist {
 		// log the error
@@ -676,7 +666,7 @@ func (x *actorSystem) RemoteAsk(ctx context.Context, request *connect.Request[in
 
 	// start or get the PID of the actor
 	// check whether the given actor already exist in the system or not
-	pid, exist := x.actors.Get(actorPath.String())
+	pid, exist := x.actors.Get(actorPath)
 	// return an error when the remote address is not found
 	if !exist {
 		// log the error
@@ -733,7 +723,7 @@ func (x *actorSystem) RemoteTell(ctx context.Context, request *connect.Request[i
 			int(receiver.GetPort())))
 	// start or get the PID of the actor
 	// check whether the given actor already exist in the system or not
-	pid, exist := x.actors.Get(actorPath.String())
+	pid, exist := x.actors.Get(actorPath)
 	// return an error when the remote address is not found
 	if !exist {
 		// log the error
@@ -886,7 +876,7 @@ func (x *actorSystem) enableRemoting(ctx context.Context) {
 // reset the actor system
 func (x *actorSystem) reset() {
 	x.telemetry = nil
-	x.actors.Clear()
+	x.actors = newPIDMap(10)
 	x.name = ""
 }
 
@@ -923,7 +913,7 @@ func (x *actorSystem) housekeeper() {
 				for _, actor := range x.Actors() {
 					if !actor.IsRunning() {
 						x.logger.Infof("Removing actor=%s from system", actor.ActorPath().String())
-						x.actors.Remove(actor.ActorPath().String())
+						x.actors.Delete(actor.ActorPath())
 					}
 				}
 			case <-x.housekeeperStopSig:
