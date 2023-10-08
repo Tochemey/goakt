@@ -374,13 +374,7 @@ func (x *actorSystem) Actors() []PID {
 	defer x.sem.Unlock()
 
 	// get the actors from the actor map
-	items := x.actors.List()
-	var refs []PID
-	for _, actorRef := range items {
-		refs = append(refs, actorRef)
-	}
-
-	return refs
+	return x.actors.List()
 }
 
 // ActorOf returns an existing actor in the local system or in the cluster when clustering is enabled
