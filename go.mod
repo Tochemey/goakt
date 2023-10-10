@@ -4,7 +4,7 @@ go 1.20
 
 require (
 	connectrpc.com/connect v1.11.1
-	connectrpc.com/otelconnect v0.5.0
+	connectrpc.com/otelconnect v0.6.0
 	github.com/buraksezer/olric v0.5.4
 	github.com/caarlos0/env/v9 v9.0.0
 	github.com/cenkalti/backoff v2.2.1+incompatible
@@ -80,7 +80,6 @@ require (
 	github.com/tidwall/redcon v1.6.2 // indirect
 	github.com/vmihailenco/msgpack/v5 v5.3.5 // indirect
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
-	go.opentelemetry.io/otel/sdk/metric v0.41.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/mod v0.12.0 // indirect
 	golang.org/x/oauth2 v0.11.0 // indirect
