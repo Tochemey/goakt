@@ -10,7 +10,7 @@ require (
 	github.com/cenkalti/backoff v2.2.1+incompatible
 	github.com/cespare/xxhash/v2 v2.2.0
 	github.com/deckarep/golang-set/v2 v2.3.1
-	github.com/google/go-cmp v0.5.9
+	github.com/google/go-cmp v0.6.0
 	github.com/google/uuid v1.3.1
 	github.com/grandcat/zeroconf v1.0.0
 	github.com/joho/godotenv v1.5.1
@@ -25,7 +25,7 @@ require (
 	go.uber.org/atomic v1.11.0
 	go.uber.org/goleak v1.2.1
 	go.uber.org/zap v1.26.0
-	golang.org/x/net v0.16.0
+	golang.org/x/net v0.17.0
 	google.golang.org/protobuf v1.31.0
 	k8s.io/api v0.29.0-alpha.1
 	k8s.io/apimachinery v0.29.0-alpha.1
