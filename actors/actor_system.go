@@ -33,14 +33,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tochemey/goakt/hash"
-
 	"connectrpc.com/connect"
 	"connectrpc.com/otelconnect"
 	"github.com/pkg/errors"
 	"github.com/tochemey/goakt/cluster"
 	"github.com/tochemey/goakt/discovery"
 	"github.com/tochemey/goakt/eventstream"
+	"github.com/tochemey/goakt/hash"
 	internalpb "github.com/tochemey/goakt/internal/v1"
 	"github.com/tochemey/goakt/internal/v1/internalpbconnect"
 	"github.com/tochemey/goakt/log"

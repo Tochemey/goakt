@@ -28,9 +28,8 @@ import (
 	"errors"
 	"time"
 
-	"github.com/tochemey/goakt/hash"
-
 	"github.com/tochemey/goakt/discovery"
+	"github.com/tochemey/goakt/hash"
 	"github.com/tochemey/goakt/log"
 	"github.com/tochemey/goakt/telemetry"
 )

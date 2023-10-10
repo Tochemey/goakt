@@ -25,11 +25,11 @@
 package actors
 
 import (
-	"github.com/tochemey/goakt/hash"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/tochemey/goakt/hash"
 	"github.com/tochemey/goakt/log"
 	"github.com/tochemey/goakt/telemetry"
 	"go.uber.org/atomic"
