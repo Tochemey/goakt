@@ -28,6 +28,8 @@ import (
 	"errors"
 	"time"
 
+	"github.com/tochemey/goakt/hash"
+
 	"github.com/tochemey/goakt/discovery"
 	"github.com/tochemey/goakt/log"
 	"github.com/tochemey/goakt/telemetry"
@@ -148,5 +150,12 @@ func WithMailbox(mailbox Mailbox) Option {
 func WithStash(capacity uint64) Option {
 	return OptionFunc(func(a *actorSystem) {
 		a.stashBuffer = capacity
+	})
+}
+
+// WithPartitionHasher sets the partition hasher.
+func WithPartitionHasher(hasher hash.Hasher) Option {
+	return OptionFunc(func(a *actorSystem) {
+		a.partitionHasher = hasher
 	})
 }

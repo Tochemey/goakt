@@ -25,6 +25,7 @@
 package actors
 
 import (
+	"github.com/tochemey/goakt/hash"
 	"testing"
 	"time"
 
@@ -37,8 +38,9 @@ import (
 func TestOptions(t *testing.T) {
 	tel := telemetry.New()
 	mailbox := newReceiveContextBuffer(10)
-	var xtrue atomic.Bool
-	xtrue.Store(true)
+	var atomicTrue atomic.Bool
+	atomicTrue.Store(true)
+	hasher := hash.DefaultHasher()
 	testCases := []struct {
 		name     string
 		option   Option
@@ -77,7 +79,7 @@ func TestOptions(t *testing.T) {
 		{
 			name:     "WithRemoting",
 			option:   WithRemoting("localhost", 3100),
-			expected: actorSystem{remotingEnabled: xtrue, remotingPort: 3100, remotingHost: "localhost"},
+			expected: actorSystem{remotingEnabled: atomicTrue, remotingPort: 3100, remotingHost: "localhost"},
 		},
 		{
 			name:     "WithShutdownTimeout",
@@ -103,6 +105,11 @@ func TestOptions(t *testing.T) {
 			name:     "WithStash",
 			option:   WithStash(10),
 			expected: actorSystem{stashBuffer: 10},
+		},
+		{
+			name:     "WithPartitionHasher",
+			option:   WithPartitionHasher(hasher),
+			expected: actorSystem{partitionHasher: hasher},
 		},
 	}
 	for _, tc := range testCases {

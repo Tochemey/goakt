@@ -33,6 +33,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tochemey/goakt/hash"
+
 	"connectrpc.com/connect"
 	"connectrpc.com/otelconnect"
 	"github.com/pkg/errors"
@@ -148,8 +150,9 @@ type actorSystem struct {
 	// define the number of partitions to shard the actors in the cluster
 	partitionsCount uint64
 	// cluster mode
-	cluster     cluster.Interface
-	clusterChan chan *internalpb.WireActor
+	cluster         cluster.Interface
+	clusterChan     chan *internalpb.WireActor
+	partitionHasher hash.Hasher
 
 	// help protect some the fields to set
 	sem sync.Mutex
@@ -195,6 +198,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		mailboxSize:         defaultMailboxSize,
 		housekeeperStopSig:  make(chan Unit, 1),
 		eventsStream:        eventstream.New(),
+		partitionHasher:     hash.DefaultHasher(),
 	}
 	// set the atomic settings
 	system.hasStarted.Store(false)
@@ -779,6 +783,7 @@ func (x *actorSystem) enableClustering(ctx context.Context) {
 		x.serviceDiscovery,
 		cluster.WithLogger(x.logger),
 		cluster.WithPartitionsCount(x.partitionsCount),
+		cluster.WithHasher(x.partitionHasher),
 	)
 	// handle the error
 	if err != nil {
