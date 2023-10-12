@@ -27,9 +27,9 @@ require (
 	go.uber.org/zap v1.26.0
 	golang.org/x/net v0.17.0
 	google.golang.org/protobuf v1.31.0
-	k8s.io/api v0.29.0-alpha.1
-	k8s.io/apimachinery v0.29.0-alpha.1
-	k8s.io/client-go v0.29.0-alpha.1
+	k8s.io/api v0.29.0-alpha.2
+	k8s.io/apimachinery v0.29.0-alpha.2
+	k8s.io/client-go v0.29.0-alpha.2
 	k8s.io/utils v0.0.0-20230726121419-3b25d923346b
 )
 
