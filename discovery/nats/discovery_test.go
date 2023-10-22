@@ -25,6 +25,7 @@
 package nats
 
 import (
+	"os"
 	"strconv"
 	"testing"
 	"time"
@@ -58,6 +59,54 @@ func startNatsServer(t *testing.T) *natsserver.Server {
 	}
 
 	return serv
+}
+
+func newPeer(t *testing.T, serverAddr string) *Discovery {
+	// generate the ports for the single node
+	nodePorts := dynaport.Get(3)
+	gossipPort := nodePorts[0]
+	clusterPort := nodePorts[1]
+	remotingPort := nodePorts[2]
+
+	// create a Cluster node
+	host := "localhost"
+	// set the environments
+	require.NoError(t, os.Setenv("GOSSIP_PORT", strconv.Itoa(gossipPort)))
+	require.NoError(t, os.Setenv("CLUSTER_PORT", strconv.Itoa(clusterPort)))
+	require.NoError(t, os.Setenv("REMOTING_PORT", strconv.Itoa(remotingPort)))
+	require.NoError(t, os.Setenv("NODE_NAME", "testNode"))
+	require.NoError(t, os.Setenv("NODE_IP", host))
+
+	// create the various config option
+	applicationName := "accounts"
+	actorSystemName := "AccountsSystem"
+	natsSubject := "some-subject"
+	// create the instance of provider
+	provider := NewDiscovery()
+
+	// create the config
+	config := discovery.Config{
+		ApplicationName: applicationName,
+		ActorSystemName: actorSystemName,
+		NatsServer:      serverAddr,
+		NatsSubject:     natsSubject,
+	}
+
+	// set config
+	err := provider.SetConfig(config)
+	require.NoError(t, err)
+
+	// initialize
+	err = provider.Initialize()
+	require.NoError(t, err)
+	// clear the env var
+	require.NoError(t, os.Unsetenv("GOSSIP_PORT"))
+	require.NoError(t, os.Unsetenv("CLUSTER_PORT"))
+	require.NoError(t, os.Unsetenv("REMOTING_PORT"))
+	require.NoError(t, os.Unsetenv("NODE_NAME"))
+	require.NoError(t, os.Unsetenv("NODE_IP"))
+	// return the provider
+	return provider
 }
 
 func TestDiscovery(t *testing.T) {
@@ -176,5 +225,64 @@ func TestDiscovery(t *testing.T) {
 		provider := NewDiscovery()
 		provider.initialized = atomic.NewBool(true)
 		assert.Error(t, provider.Initialize())
+	})
+	t.Run("With DiscoverPeers", func(t *testing.T) {
+		// start the NATS server
+		srv := startNatsServer(t)
+		// create two peers
+		client1 := newPeer(t, srv.Addr().String())
+		client2 := newPeer(t, srv.Addr().String())
+
+		// no discovery is allowed unless registered
+		peers, err := client1.DiscoverPeers()
+		require.Error(t, err)
+		assert.EqualError(t, err, discovery.ErrNotRegistered.Error())
+		require.Empty(t, peers)
+
+		peers, err = client2.DiscoverPeers()
+		require.Error(t, err)
+		assert.EqualError(t, err, discovery.ErrNotRegistered.Error())
+		require.Empty(t, peers)
+
+		// register client 2
+		require.NoError(t, client2.Register())
+		peers, err = client2.DiscoverPeers()
+		require.NoError(t, err)
+		require.Empty(t, peers)
+
+		// register client 1
+		require.NoError(t, client1.Register())
+		peers, err = client1.DiscoverPeers()
+		require.NoError(t, err)
+		require.NotEmpty(t, peers)
+		require.Len(t, peers, 1)
+		discoveredNodeAddr := client2.hostNode.GossipAddress()
+		require.Equal(t, peers[0], discoveredNodeAddr)
+
+		// discover more peers from client 2
+		peers, err = client2.DiscoverPeers()
+		require.NoError(t, err)
+		require.NotEmpty(t, peers)
+		require.Len(t, peers, 1)
+		discoveredNodeAddr = client1.hostNode.GossipAddress()
+		require.Equal(t, peers[0], discoveredNodeAddr)
+
+		// de-register client 2
+		require.NoError(t, client2.Deregister())
+		peers, err = client2.DiscoverPeers()
+		require.Error(t, err)
+		assert.EqualError(t, err, discovery.ErrNotRegistered.Error())
+		require.Empty(t, peers)
+
+		// client-1 cannot see the deregistered client
+		peers, err = client1.DiscoverPeers()
+		require.NoError(t, err)
+		require.Empty(t, peers)
+
+		require.NoError(t, client1.Close())
+		require.NoError(t, client2.Close())
+
+		// stop the NATS server
+		t.Cleanup(srv.Shutdown)
 	})
 }

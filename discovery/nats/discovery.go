@@ -196,9 +196,13 @@ func (d *Discovery) Register() error {
 	subscriptionHandler := func(subj, reply string, msg *internalpb.NatsMessage) {
 		switch msg.GetMessageType() {
 		case internalpb.NatsMessageType_NATS_MESSAGE_TYPE_DEREGISTER:
-			// TODO: handle it
+			// add logging information
+			d.logger.Infof("received an de-registration request from peer[name=%s, host=%s, port=%d]",
+				msg.GetName(), msg.GetHost(), msg.GetPort())
 		case internalpb.NatsMessageType_NATS_MESSAGE_TYPE_REGISTER:
-			// TODO: handle it
+			// add logging information
+			d.logger.Infof("received an registration request from peer[name=%s, host=%s, port=%d]",
+				msg.GetName(), msg.GetHost(), msg.GetPort())
 		case internalpb.NatsMessageType_NATS_MESSAGE_TYPE_REQUEST:
 			// add logging information
 			d.logger.Infof("received an identification request from peer[name=%s, host=%s, port=%d]",
@@ -240,10 +244,12 @@ func (d *Discovery) Deregister() error {
 	defer d.mu.Unlock()
 
 	// unregister
-	defer d.registered.Store(false)
+	defer func() {
+		d.registered.Store(false)
+	}()
 
 	// first check whether the discovery provider has been registered or not
-	if d.registered.Load() {
+	if !d.registered.Load() {
 		return discovery.ErrNotRegistered
 	}
 
@@ -296,7 +302,7 @@ func (d *Discovery) DiscoverPeers() ([]string, error) {
 	}
 
 	// later check the provider is registered
-	if d.registered.Load() {
+	if !d.registered.Load() {
 		return nil, discovery.ErrNotRegistered
 	}
 
