@@ -22,7 +22,7 @@
  * SOFTWARE.
  */
 
-package cluster
+package discovery
 
 import (
 	"fmt"
@@ -49,7 +49,7 @@ func TestGetHostNode(t *testing.T) {
 		t.Setenv("NODE_NAME", "testNode")
 		t.Setenv("NODE_IP", host)
 
-		node, err := hostNode()
+		node, err := HostNode()
 		require.NoError(t, err)
 		require.NotNil(t, node)
 		clusterAddr := node.ClusterAddress()
@@ -58,7 +58,7 @@ func TestGetHostNode(t *testing.T) {
 		assert.Equal(t, fmt.Sprintf("%s:%d", host, gossipPort), gossipAddr)
 	})
 	t.Run("With host node env vars not set", func(t *testing.T) {
-		node, err := hostNode()
+		node, err := HostNode()
 		require.Error(t, err)
 		require.Nil(t, node)
 	})

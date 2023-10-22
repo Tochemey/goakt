@@ -249,6 +249,11 @@ MainLoop:
 	return addresses.ToSlice(), nil
 }
 
+// Close closes the provider
+func (d *Discovery) Close() error {
+	return nil
+}
+
 // setConfig sets the kubernetes option
 func (d *Discovery) setConfig(config discovery.Config) (err error) {
 	// create an instance of option

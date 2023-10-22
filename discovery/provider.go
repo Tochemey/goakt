@@ -38,4 +38,6 @@ type Provider interface {
 	SetConfig(config Config) error
 	// DiscoverPeers returns a list discovered nodes' addresses.
 	DiscoverPeers() ([]string, error)
+	// Close closes the provider
+	Close() error
 }

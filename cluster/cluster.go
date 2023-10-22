@@ -79,7 +79,7 @@ type Cluster struct {
 	kvStore olric.DMap
 
 	// specifies the Cluster host
-	host *node
+	host *discovery.Node
 
 	// specifies the hasher
 	hasher hash.Hasher
@@ -117,7 +117,7 @@ func New(name string, serviceDiscovery *discovery.ServiceDiscovery, opts ...Opti
 	}
 
 	// get the host info
-	hostNode, err := hostNode()
+	hostNode, err := discovery.HostNode()
 	// handle the error
 	if err != nil {
 		cl.logger.Error(errors.Wrap(err, "failed get the host node.💥"))

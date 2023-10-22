@@ -67,6 +67,7 @@ func TestCluster(t *testing.T) {
 		provider.EXPECT().Deregister().Return(nil)
 		provider.EXPECT().SetConfig(config).Return(nil)
 		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
+		provider.EXPECT().Close().Return(nil)
 
 		// create the service discovery
 		serviceDiscovery := discovery.NewServiceDiscovery(provider, config)
@@ -125,6 +126,7 @@ func TestCluster(t *testing.T) {
 		provider.EXPECT().Deregister().Return(nil)
 		provider.EXPECT().SetConfig(config).Return(nil)
 		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
+		provider.EXPECT().Close().Return(nil)
 
 		// create the service discovery
 		serviceDiscovery := discovery.NewServiceDiscovery(provider, config)

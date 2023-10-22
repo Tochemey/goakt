@@ -22,7 +22,7 @@
  * SOFTWARE.
  */
 
-package cluster
+package discovery
 
 import (
 	"net"
@@ -31,7 +31,7 @@ import (
 	"github.com/caarlos0/env/v9"
 )
 
-// hostNodeConfig helps read the host node settings
+// hostNodeConfig helps read the host Node settings
 type hostNodeConfig struct {
 	GossipPort   int    `env:"GOSSIP_PORT"`
 	ClusterPort  int    `env:"CLUSTER_PORT"`
@@ -40,8 +40,8 @@ type hostNodeConfig struct {
 	Host         string `env:"NODE_IP"`
 }
 
-// node represents a discovered node
-type node struct {
+// Node represents a discovered Node
+type Node struct {
 	// Name specifies the discovered node's Name
 	Name string
 	// Host specifies the discovered node's Host
@@ -55,17 +55,17 @@ type node struct {
 }
 
 // ClusterAddress returns address the node's peers will use to connect to
-func (n node) ClusterAddress() string {
+func (n Node) ClusterAddress() string {
 	return net.JoinHostPort(n.Host, strconv.Itoa(n.ClusterPort))
 }
 
 // GossipAddress returns the node discovery address
-func (n node) GossipAddress() string {
+func (n Node) GossipAddress() string {
 	return net.JoinHostPort(n.Host, strconv.Itoa(n.GossipPort))
 }
 
-// hostNode returns the node where the discovery provider is running
-func hostNode() (*node, error) {
+// HostNode returns the Node where the discovery provider is running
+func HostNode() (*Node, error) {
 	// load the host node configuration
 	cfg := &hostNodeConfig{}
 	opts := env.Options{RequiredIfNoDef: true, UseFieldNameByDefault: false}
@@ -73,7 +73,7 @@ func hostNode() (*node, error) {
 		return nil, err
 	}
 	// create the host node
-	return &node{
+	return &Node{
 		Name:         cfg.Name,
 		Host:         cfg.Host,
 		GossipPort:   cfg.GossipPort,

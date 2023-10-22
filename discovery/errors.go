@@ -33,4 +33,6 @@ var (
 	ErrNotInitialized = errors.New("provider not initialized")
 	// ErrAlreadyRegistered is used when attempting to re-register the provider
 	ErrAlreadyRegistered = errors.New("provider already registered")
+	// ErrNotRegistered is used when attempting to de-register the provider
+	ErrNotRegistered = errors.New("provider is not registered")
 )
