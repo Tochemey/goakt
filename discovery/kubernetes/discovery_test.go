@@ -161,8 +161,8 @@ func TestDiscovery(t *testing.T) {
 		client := testclient.NewSimpleClientset(pods...)
 		// create the kubernetes discovery provider
 		provider := Discovery{
-			client:        client,
-			isInitialized: atomic.NewBool(true),
+			client:      client,
+			initialized: atomic.NewBool(true),
 			option: &option{
 				NameSpace:       ns,
 				ActorSystemName: actorSystemName,
@@ -207,7 +207,7 @@ func TestDiscovery(t *testing.T) {
 		actorSystemName := "AccountsSystem"
 		// create the instance of provider
 		provider := NewDiscovery()
-		provider.isInitialized = atomic.NewBool(true)
+		provider.initialized = atomic.NewBool(true)
 		// create the config
 		config := discovery.Config{
 			ApplicationName: applicationName,
@@ -241,21 +241,21 @@ func TestDiscovery(t *testing.T) {
 	t.Run("With Initialize: already initialized", func(t *testing.T) {
 		// create the instance of provider
 		provider := NewDiscovery()
-		provider.isInitialized = atomic.NewBool(true)
+		provider.initialized = atomic.NewBool(true)
 		assert.Error(t, provider.Initialize())
 	})
 	t.Run("With Deregister", func(t *testing.T) {
 		// create the instance of provider
 		provider := NewDiscovery()
 		// for the sake of the test
-		provider.isInitialized = atomic.NewBool(true)
+		provider.initialized = atomic.NewBool(true)
 		assert.NoError(t, provider.Deregister())
 	})
 	t.Run("With Deregister when not initialized", func(t *testing.T) {
 		// create the instance of provider
 		provider := NewDiscovery()
 		// for the sake of the test
-		provider.isInitialized = atomic.NewBool(false)
+		provider.initialized = atomic.NewBool(false)
 		err := provider.Deregister()
 		assert.Error(t, err)
 		assert.EqualError(t, err, discovery.ErrNotInitialized.Error())

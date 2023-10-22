@@ -71,7 +71,7 @@ type Discovery struct {
 
 	stopChan chan struct{}
 	// states whether the actor system has started or not
-	isInitialized *atomic.Bool
+	initialized *atomic.Bool
 }
 
 // enforce compilation error
@@ -80,14 +80,14 @@ var _ discovery.Provider = &Discovery{}
 // NewDiscovery returns an instance of the kubernetes discovery provider
 func NewDiscovery() *Discovery {
 	// create an instance of
-	k8 := &Discovery{
-		mu:            sync.Mutex{},
-		stopChan:      make(chan struct{}, 1),
-		isInitialized: atomic.NewBool(false),
-		option:        &option{},
+	discovery := &Discovery{
+		mu:          sync.Mutex{},
+		stopChan:    make(chan struct{}, 1),
+		initialized: atomic.NewBool(false),
+		option:      &option{},
 	}
 
-	return k8
+	return discovery
 }
 
 // ID returns the discovery provider id
@@ -102,7 +102,7 @@ func (d *Discovery) Initialize() error {
 	// release the lock
 	defer d.mu.Unlock()
 	// first check whether the discovery provider is running
-	if d.isInitialized.Load() {
+	if d.initialized.Load() {
 		return discovery.ErrAlreadyInitialized
 	}
 
@@ -122,7 +122,7 @@ func (d *Discovery) SetConfig(meta discovery.Config) error {
 	defer d.mu.Unlock()
 
 	// first check whether the discovery provider is running
-	if d.isInitialized.Load() {
+	if d.initialized.Load() {
 		return discovery.ErrAlreadyInitialized
 	}
 
@@ -138,7 +138,7 @@ func (d *Discovery) Register() error {
 
 	// first check whether the discovery provider has started
 	// avoid to re-register the discovery
-	if d.isInitialized.Load() {
+	if d.initialized.Load() {
 		return discovery.ErrAlreadyRegistered
 	}
 
@@ -157,7 +157,7 @@ func (d *Discovery) Register() error {
 	// set the k8 client
 	d.client = client
 	// set initialized
-	d.isInitialized = atomic.NewBool(true)
+	d.initialized = atomic.NewBool(true)
 	return nil
 }
 
@@ -169,11 +169,11 @@ func (d *Discovery) Deregister() error {
 	defer d.mu.Unlock()
 
 	// first check whether the discovery provider has started
-	if !d.isInitialized.Load() {
+	if !d.initialized.Load() {
 		return discovery.ErrNotInitialized
 	}
 	// set the initialized to false
-	d.isInitialized = atomic.NewBool(false)
+	d.initialized = atomic.NewBool(false)
 	// stop the watchers
 	close(d.stopChan)
 	// return
@@ -183,7 +183,7 @@ func (d *Discovery) Deregister() error {
 // DiscoverPeers returns a list of known nodes.
 func (d *Discovery) DiscoverPeers() ([]string, error) {
 	// first check whether the discovery provider is running
-	if !d.isInitialized.Load() {
+	if !d.initialized.Load() {
 		return nil, discovery.ErrNotInitialized
 	}
 

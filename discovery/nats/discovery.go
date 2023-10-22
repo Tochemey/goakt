@@ -47,8 +47,8 @@ const (
 	Timeout                = "timeout"           // Timeout specifies the discovery timeout. The default value is 1 second
 )
 
-// option represents the nats provider option
-type option struct {
+// discoConfig represents the nats provider discoConfig
+type discoConfig struct {
 	// NatsServer defines the nats server
 	// nats://host:port of a nats server
 	NatsServer string
@@ -64,7 +64,7 @@ type option struct {
 
 // Discovery represents the kubernetes discovery
 type Discovery struct {
-	option *option
+	config *discoConfig
 	mu     sync.Mutex
 
 	initialized *atomic.Bool
@@ -86,16 +86,22 @@ type Discovery struct {
 var _ discovery.Provider = &Discovery{}
 
 // NewDiscovery returns an instance of the kubernetes discovery provider
-func NewDiscovery() *Discovery {
+func NewDiscovery(opts ...Option) *Discovery {
 	// create an instance of
-	k8 := &Discovery{
+	discovery := &Discovery{
 		mu:          sync.Mutex{},
 		initialized: atomic.NewBool(false),
 		registered:  atomic.NewBool(false),
-		option:      &option{},
+		config:      &discoConfig{},
+		logger:      log.DefaultLogger,
 	}
 
-	return k8
+	// apply the various options
+	for _, opt := range opts {
+		opt.Apply(discovery)
+	}
+
+	return discovery
 }
 
 // ID returns the discovery provider id
@@ -116,8 +122,8 @@ func (d *Discovery) Initialize() error {
 	}
 
 	// set the default discovery timeout
-	if d.option.Timeout <= 0 {
-		d.option.Timeout = time.Second
+	if d.config.Timeout <= 0 {
+		d.config.Timeout = time.Second
 	}
 
 	// grab the host node
@@ -129,7 +135,7 @@ func (d *Discovery) Initialize() error {
 
 	// create the nats connection option
 	opts := nats.GetDefaultOptions()
-	opts.Url = d.option.NatsServer
+	opts.Url = d.config.NatsServer
 	//opts.Servers = n.Config.Servers
 	opts.Name = hostNode.Name
 	opts.ReconnectWait = 2 * time.Second
@@ -196,31 +202,32 @@ func (d *Discovery) Register() error {
 		case internalpb.NatsMessageType_NATS_MESSAGE_TYPE_REQUEST:
 			// add logging information
 			d.logger.Infof("received an identification request from peer[name=%s, host=%s, port=%d]",
-				msg.GetClientName(), msg.GetHost(), msg.GetPort())
+				msg.GetName(), msg.GetHost(), msg.GetPort())
 			// send the reply
 			replyMessage := &internalpb.NatsMessage{
 				Host:        d.hostNode.Host,
 				Port:        int32(d.hostNode.GossipPort),
-				ClientName:  d.hostNode.Name,
+				Name:        d.hostNode.Name,
 				MessageType: internalpb.NatsMessageType_NATS_MESSAGE_TYPE_RESPONSE,
 			}
 
 			// send the reply and handle the error
 			if err := d.natsConnection.Publish(reply, replyMessage); err != nil {
 				d.logger.Errorf("failed to reply for identification request from peer[name=%s, host=%s, port=%d]",
-					msg.GetClientName(), msg.GetHost(), msg.GetPort())
+					msg.GetName(), msg.GetHost(), msg.GetPort())
 			}
 		}
 	}
 	// start listening to incoming messages
-	subscription, err := d.natsConnection.Subscribe(d.option.NatsSubject, subscriptionHandler)
+	subscription, err := d.natsConnection.Subscribe(d.config.NatsSubject, subscriptionHandler)
+	// return any eventual error
 	if err != nil {
 		return err
 	}
 
 	// add the subscription to the list of subscriptions
 	d.subscriptions = append(d.subscriptions, subscription)
-
+	// set the registration flag to true
 	d.registered = atomic.NewBool(true)
 	return nil
 }
@@ -251,10 +258,10 @@ func (d *Discovery) Deregister() error {
 	// send the de-registration message to notify peers
 	if d.natsConnection != nil {
 		// send a message to deregister stating we are out
-		return d.natsConnection.Publish(d.option.NatsSubject, &internalpb.NatsMessage{
+		return d.natsConnection.Publish(d.config.NatsSubject, &internalpb.NatsMessage{
 			Host:        d.hostNode.Host,
 			Port:        int32(d.hostNode.GossipPort),
-			ClientName:  d.hostNode.Name,
+			Name:        d.hostNode.Name,
 			MessageType: internalpb.NatsMessageType_NATS_MESSAGE_TYPE_DEREGISTER,
 		})
 	}
@@ -306,10 +313,10 @@ func (d *Discovery) DiscoverPeers() ([]string, error) {
 	}
 
 	// send registration request and return in case of error
-	if err = d.natsConnection.PublishRequest(d.option.NatsSubject, inbox, &internalpb.NatsMessage{
+	if err = d.natsConnection.PublishRequest(d.config.NatsSubject, inbox, &internalpb.NatsMessage{
 		Host:        d.hostNode.Host,
 		Port:        int32(d.hostNode.GossipPort),
-		ClientName:  d.hostNode.Name,
+		Name:        d.hostNode.Name,
 		MessageType: internalpb.NatsMessageType_NATS_MESSAGE_TYPE_REQUEST,
 	}); err != nil {
 		return nil, err
@@ -318,7 +325,7 @@ func (d *Discovery) DiscoverPeers() ([]string, error) {
 	// define the list of peers to lookup
 	var peers []string
 	// define the timeout
-	timeout := time.After(d.option.Timeout)
+	timeout := time.After(d.config.Timeout)
 	// get the host node gossip address
 	me := d.hostNode.GossipAddress()
 
@@ -374,10 +381,10 @@ func (d *Discovery) Close() error {
 	return nil
 }
 
-// setConfig sets the kubernetes option
+// setConfig sets the kubernetes discoConfig
 func (d *Discovery) setConfig(config discovery.Config) (err error) {
 	// create an instance of option
-	option := new(option)
+	option := new(discoConfig)
 	// extract the nats server address
 	option.NatsServer, err = config.GetString(NatsServer)
 	// handle the error in case the nats server value is not properly set
@@ -404,6 +411,6 @@ func (d *Discovery) setConfig(config discovery.Config) (err error) {
 		return err
 	}
 	// in case none of the above extraction fails then set the option
-	d.option = option
+	d.config = option
 	return nil
 }

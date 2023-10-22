@@ -24,7 +24,7 @@ message NatsMessage {
   // Specifies the port of the client node
   int32 port = 2;
   // Specifies the client name
-  string client_name = 3;
+  string name = 3;
   // Specifies the message type
   NatsMessageType message_type = 4;
 }
