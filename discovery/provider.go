@@ -26,16 +26,16 @@ package discovery
 
 // Provider helps discover other running actor system in a cloud environment
 type Provider interface {
-	// ID returns the discovery name
+	// ID returns the service discovery provider name
 	ID() string
-	// Initialize initializes the plugin: registers some internal data structures, clients etc.
+	// Initialize initializes the service discovery provider.
 	Initialize() error
-	// Register registers this node to a service discovery directory.
+	// Register registers the service discovery provider.
 	Register() error
-	// Deregister removes this node from a service discovery directory.
+	// Deregister de-registers the service discovery provider.
 	Deregister() error
 	// SetConfig registers the underlying discovery options
 	SetConfig(config Config) error
-	// DiscoverPeers returns a list of known nodes.
+	// DiscoverPeers returns a list discovered nodes' addresses.
 	DiscoverPeers() ([]string, error)
 }
