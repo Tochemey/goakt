@@ -28,7 +28,7 @@ Also, check reference section at the end of the post for more material regarding
     - [Messaging](#messaging)
     - [Stashing](#stashing)
     - [Remoting](#remoting)
-    - [Clustering](#clustering)
+    - [Clustering](#cluster)
     - [Logging](#logging)
     - [Testkit](#testkit)
 - [Use Cases](#use-cases)
@@ -164,7 +164,7 @@ To use the stashing feature, call the following methods on the [ReceiveContext i
 
 This allows remote actors to communicate. The underlying technology is gRPC.
 
-#### Clustering
+#### Cluster
 
 This offers simple scalability, partitioning (sharding), and re-balancing out-of-the-box. Go-Akt
 nodes are automatically discovered. See [Clustering](#clustering).
@@ -208,9 +208,12 @@ identify the host node on which the cluster service is running:
 
 - `NODE_NAME`: the node name. For instance in kubernetes one can just get it from the `metadata.name`
 - `NODE_IP`: the node host address. For instance in kubernetes one can just get it from the `status.podIP`
-- `GOSSIP_PORT`: the gossip protocol engine port
+- `GOSSIP_PORT`: the gossip protocol engine port.
 - `CLUSTER_PORT`: the cluster port to help communicate with other GoAkt nodes in the cluster
 - `REMOTING_PORT`: help remoting communication between actors
+
+_Note: Depending upon the discovery provider implementation, the `GOSSIP_PORT` and `CLUSTER_PORT` can be the same.
+The same applies to `NODE_NAME` and `NODE_IP`. This is up to the discretion of the implementation_
 
 #### Operations Guide
 
