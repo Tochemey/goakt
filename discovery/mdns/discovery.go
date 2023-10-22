@@ -46,8 +46,8 @@ const (
 	IPv6        = "ipv6"
 )
 
-// option represents the mDNS provider option
-type option struct {
+// discoConfig represents the mDNS provider discoConfig
+type discoConfig struct {
 	// Provider specifies the provider name
 	Provider string
 	// Service specifies the service name
@@ -64,7 +64,7 @@ type option struct {
 
 // Discovery defines the mDNS discovery provider
 type Discovery struct {
-	option *option
+	option *discoConfig
 	mu     sync.Mutex
 
 	stopChan chan struct{}
@@ -87,7 +87,7 @@ func NewDiscovery() *Discovery {
 		mu:          sync.Mutex{},
 		stopChan:    make(chan struct{}, 1),
 		initialized: atomic.NewBool(false),
-		option:      &option{},
+		option:      &discoConfig{},
 	}
 
 	return d
@@ -282,10 +282,10 @@ func (d *Discovery) DiscoverPeers() ([]string, error) {
 	return addresses.ToSlice(), nil
 }
 
-// setOptions sets the kubernetes option
+// setOptions sets the kubernetes discoConfig
 func (d *Discovery) setOptions(config discovery.Config) (err error) {
 	// create an instance of Option
-	option := new(option)
+	option := new(discoConfig)
 	// extract the service name
 	option.ServiceName, err = config.GetString(ServiceName)
 	// handle the error in case the service instance value is not properly set

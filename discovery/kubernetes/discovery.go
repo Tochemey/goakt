@@ -51,8 +51,8 @@ const (
 	RemotingPortName        = "remoting-port"
 )
 
-// option represents the kubernetes provider option
-type option struct {
+// discoConfig represents the kubernetes provider discoConfig
+type discoConfig struct {
 	// Provider specifies the provider name
 	Provider string
 	// NameSpace specifies the namespace
@@ -65,7 +65,7 @@ type option struct {
 
 // Discovery represents the kubernetes discovery
 type Discovery struct {
-	option *option
+	option *discoConfig
 	client kubernetes.Interface
 	mu     sync.Mutex
 
@@ -84,7 +84,7 @@ func NewDiscovery() *Discovery {
 		mu:          sync.Mutex{},
 		stopChan:    make(chan struct{}, 1),
 		initialized: atomic.NewBool(false),
-		option:      &option{},
+		option:      &discoConfig{},
 	}
 
 	return discovery
@@ -254,10 +254,10 @@ func (d *Discovery) Close() error {
 	return nil
 }
 
-// setConfig sets the kubernetes option
+// setConfig sets the kubernetes discoConfig
 func (d *Discovery) setConfig(config discovery.Config) (err error) {
 	// create an instance of option
-	option := new(option)
+	option := new(discoConfig)
 	// extract the namespace
 	option.NameSpace, err = config.GetString(Namespace)
 	// handle the error in case the namespace value is not properly set

@@ -38,6 +38,7 @@ Also, check reference section at the end of the post for more material regarding
     - [Discovery Providers](#built-in-discovery-providers)
         - [Kubernetes](#kubernetes-discovery-provider-setup)
         - [mDNS](#mdns-discovery-provider-setup)
+        - [NATS](#nats-discovery-provider-setup)
 - [Examples](#examples)
 - [Contribution](#contribution)
     - [Local Test and Linter](#test--linter)
@@ -226,7 +227,7 @@ The following outlines the cluster mode operations which can help have a healthy
 
 #### Built-in Discovery Providers
 
-##### Kubernetes Discovery Provider setup
+##### Kubernetes Discovery Provider Setup
 
 To get the kubernetes discovery working as expected, the following pod labels need to be set:
 
@@ -240,6 +241,27 @@ engine to work as expected:
 - `gossip-port`: help the gossip protocol engine. This is actually the kubernetes discovery port
 - `cluster-port`: help the cluster engine to communicate with other GoAkt nodes in the cluster
 - `remoting-port`: help for remoting messaging between actors
+
+###### Get Started
+
+```go
+const (
+namespace          = "default"
+applicationName    = "accounts"
+actorSystemName    = "AccountsSystem"
+)
+// instantiate the k8 discovery provider
+disco := kubernetes.NewDiscovery()
+// define the discovery options
+discoOptions := discovery.Config{
+    kubernetes.ApplicationName: applicationName,
+    kubernetes.ActorSystemName: actorSystemName,
+    kubernetes.Namespace:       namespace,
+}
+// define the service discovery
+serviceDiscovery := discovery.NewServiceDiscovery(disco, discoOptions)
+// pass the service discovery when enabling cluster mode in the actor system
+```
 
 ###### Role Based Access
 
@@ -278,12 +300,42 @@ roleRef:
 A working example can be found [here](./examples/actor-cluster/k8s) with a
 small [doc](./examples/actor-cluster/k8s/doc.md) showing how to run it.
 
-#### mDNS Discovery Provider setup
+##### mDNS Discovery Provider Setup
 
 - `Service Name`: the service name
 - `Domain`: The mDNS discovery domain
 - `Port`: The mDNS discovery port
 - `IPv6`: States whether to lookup for IPv6 addresses.
+
+##### NATS Discovery Provider Setup
+
+To use the NATS discovery provider one needs to provide the following:
+
+- `NATS Server Address`: the NATS Server address
+- `NATS Subject`: the NATS subject to use
+- `Actor System Name`: the actor system name
+- `Application Name`: the application name
+
+```go
+const (
+  natsServerAddr = "nats://localhost:4248"
+  natsSubject = "goakt-gossip"
+  applicationName        = "accounts"
+  actorSystemName = "AccountsSystem"
+)
+// instantiate the NATS discovery provider
+disco := nats.NewDiscovery()
+// define the discovery options
+discoOptions := discovery.Config{
+  ApplicationName: applicationName,
+  ActorSystemName: actorSystemName,
+  NatsServer:      natsServer,
+  NatsSubject:     natsSubject,
+}
+// define the service discovery
+serviceDiscovery := discovery.NewServiceDiscovery(disco, discoOptions)
+// pass the service discovery when enabling cluster mode in the actor system
+```
 
 ### Examples
 

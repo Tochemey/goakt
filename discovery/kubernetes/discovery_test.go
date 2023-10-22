@@ -163,7 +163,7 @@ func TestDiscovery(t *testing.T) {
 		provider := Discovery{
 			client:      client,
 			initialized: atomic.NewBool(true),
-			option: &option{
+			option: &discoConfig{
 				NameSpace:       ns,
 				ActorSystemName: actorSystemName,
 				ApplicationName: appName,

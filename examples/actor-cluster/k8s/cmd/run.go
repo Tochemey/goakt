@@ -57,7 +57,7 @@ var runCmd = &cobra.Command{
 		// use the address default log. real-life implement the log interface`
 		logger := log.New(log.DebugLevel, os.Stdout)
 
-		// create the k8 configuration
+		// instantiate the k8 discovery provider
 		disco := kubernetes.NewDiscovery()
 		// define the discovery options
 		discoOptions := discovery.Config{
