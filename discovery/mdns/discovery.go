@@ -46,8 +46,8 @@ const (
 	IPv6        = "ipv6"
 )
 
-// option represents the mDNS provider option
-type option struct {
+// discoConfig represents the mDNS provider discoConfig
+type discoConfig struct {
 	// Provider specifies the provider name
 	Provider string
 	// Service specifies the service name
@@ -64,12 +64,12 @@ type option struct {
 
 // Discovery defines the mDNS discovery provider
 type Discovery struct {
-	option *option
+	option *discoConfig
 	mu     sync.Mutex
 
 	stopChan chan struct{}
-	// states whether the actor system has started or not
-	isInitialized *atomic.Bool
+
+	initialized *atomic.Bool
 
 	// resolver is used to browse for service discovery
 	resolver *zeroconf.Resolver
@@ -84,10 +84,10 @@ var _ discovery.Provider = &Discovery{}
 func NewDiscovery() *Discovery {
 	// create an instance of
 	d := &Discovery{
-		mu:            sync.Mutex{},
-		stopChan:      make(chan struct{}, 1),
-		isInitialized: atomic.NewBool(false),
-		option:        &option{},
+		mu:          sync.Mutex{},
+		stopChan:    make(chan struct{}, 1),
+		initialized: atomic.NewBool(false),
+		option:      &discoConfig{},
 	}
 
 	return d
@@ -105,7 +105,7 @@ func (d *Discovery) Initialize() error {
 	// release the lock
 	defer d.mu.Unlock()
 	// first check whether the discovery provider is running
-	if d.isInitialized.Load() {
+	if d.initialized.Load() {
 		return discovery.ErrAlreadyInitialized
 	}
 
@@ -126,7 +126,7 @@ func (d *Discovery) Register() error {
 
 	// first check whether the discovery provider has started
 	// avoid to re-register the discovery
-	if d.isInitialized.Load() {
+	if d.initialized.Load() {
 		return discovery.ErrAlreadyRegistered
 	}
 
@@ -150,7 +150,7 @@ func (d *Discovery) Register() error {
 	d.server = srv
 
 	// set initialized
-	d.isInitialized = atomic.NewBool(true)
+	d.initialized = atomic.NewBool(true)
 	return nil
 }
 
@@ -162,12 +162,12 @@ func (d *Discovery) Deregister() error {
 	defer d.mu.Unlock()
 
 	// first check whether the discovery provider has started
-	if !d.isInitialized.Load() {
+	if !d.initialized.Load() {
 		return discovery.ErrNotInitialized
 	}
 
 	// set the initialized to false
-	d.isInitialized = atomic.NewBool(false)
+	d.initialized = atomic.NewBool(false)
 
 	// shutdown the registered service
 	if d.server != nil {
@@ -180,6 +180,11 @@ func (d *Discovery) Deregister() error {
 	return nil
 }
 
+// Close closes the provider
+func (d *Discovery) Close() error {
+	return nil
+}
+
 // SetConfig registers the underlying discovery configuration
 func (d *Discovery) SetConfig(config discovery.Config) error {
 	// acquire the lock
@@ -188,7 +193,7 @@ func (d *Discovery) SetConfig(config discovery.Config) error {
 	defer d.mu.Unlock()
 
 	// first check whether the discovery provider is running
-	if d.isInitialized.Load() {
+	if d.initialized.Load() {
 		return discovery.ErrAlreadyInitialized
 	}
 
@@ -231,7 +236,7 @@ func (d *Discovery) SetConfig(config discovery.Config) error {
 // DiscoverPeers returns a list of known nodes.
 func (d *Discovery) DiscoverPeers() ([]string, error) {
 	// first check whether the discovery provider is running
-	if !d.isInitialized.Load() {
+	if !d.initialized.Load() {
 		return nil, discovery.ErrNotInitialized
 	}
 	// init entries channel
@@ -277,10 +282,10 @@ func (d *Discovery) DiscoverPeers() ([]string, error) {
 	return addresses.ToSlice(), nil
 }
 
-// setOptions sets the kubernetes option
+// setOptions sets the kubernetes discoConfig
 func (d *Discovery) setOptions(config discovery.Config) (err error) {
 	// create an instance of Option
-	option := new(option)
+	option := new(discoConfig)
 	// extract the service name
 	option.ServiceName, err = config.GetString(ServiceName)
 	// handle the error in case the service instance value is not properly set

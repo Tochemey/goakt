@@ -161,9 +161,9 @@ func TestDiscovery(t *testing.T) {
 		client := testclient.NewSimpleClientset(pods...)
 		// create the kubernetes discovery provider
 		provider := Discovery{
-			client:        client,
-			isInitialized: atomic.NewBool(true),
-			option: &option{
+			client:      client,
+			initialized: atomic.NewBool(true),
+			option: &discoConfig{
 				NameSpace:       ns,
 				ActorSystemName: actorSystemName,
 				ApplicationName: appName,
@@ -182,6 +182,14 @@ func TestDiscovery(t *testing.T) {
 		}
 
 		assert.ElementsMatch(t, expected, actual)
+		assert.NoError(t, provider.Close())
+	})
+	t.Run("With DiscoverPeers: not initialized", func(t *testing.T) {
+		provider := NewDiscovery()
+		peers, err := provider.DiscoverPeers()
+		assert.Error(t, err)
+		assert.Empty(t, peers)
+		assert.EqualError(t, err, discovery.ErrNotInitialized.Error())
 	})
 	t.Run("With SetConfig", func(t *testing.T) {
 		// create the various config option
@@ -207,7 +215,7 @@ func TestDiscovery(t *testing.T) {
 		actorSystemName := "AccountsSystem"
 		// create the instance of provider
 		provider := NewDiscovery()
-		provider.isInitialized = atomic.NewBool(true)
+		provider.initialized = atomic.NewBool(true)
 		// create the config
 		config := discovery.Config{
 			ApplicationName: applicationName,
@@ -219,6 +227,50 @@ func TestDiscovery(t *testing.T) {
 		err := provider.SetConfig(config)
 		assert.Error(t, err)
 		assert.EqualError(t, err, discovery.ErrAlreadyInitialized.Error())
+	})
+	t.Run("With SetConfig: actor system not set", func(t *testing.T) {
+		// create the various config option
+		namespace := "default"
+		applicationName := "accounts"
+		// create the instance of provider
+		provider := NewDiscovery()
+		// create the config
+		config := discovery.Config{
+			ApplicationName: applicationName,
+			Namespace:       namespace,
+		}
+
+		// set config
+		assert.Error(t, provider.SetConfig(config))
+	})
+	t.Run("With SetConfig: application name not set", func(t *testing.T) {
+		// create the various config option
+		namespace := "default"
+		actorSystemName := "AccountsSystem"
+		// create the instance of provider
+		provider := NewDiscovery()
+		// create the config
+		config := discovery.Config{
+			ActorSystemName: actorSystemName,
+			Namespace:       namespace,
+		}
+
+		// set config
+		assert.Error(t, provider.SetConfig(config))
+	})
+	t.Run("With SetConfig: namespace not set", func(t *testing.T) {
+		applicationName := "accounts"
+		actorSystemName := "AccountsSystem"
+		// create the instance of provider
+		provider := NewDiscovery()
+		// create the config
+		config := discovery.Config{
+			ApplicationName: applicationName,
+			ActorSystemName: actorSystemName,
+		}
+
+		// set config
+		assert.Error(t, provider.SetConfig(config))
 	})
 	t.Run("With Initialize", func(t *testing.T) {
 		// create the various config option
@@ -241,21 +293,21 @@ func TestDiscovery(t *testing.T) {
 	t.Run("With Initialize: already initialized", func(t *testing.T) {
 		// create the instance of provider
 		provider := NewDiscovery()
-		provider.isInitialized = atomic.NewBool(true)
+		provider.initialized = atomic.NewBool(true)
 		assert.Error(t, provider.Initialize())
 	})
 	t.Run("With Deregister", func(t *testing.T) {
 		// create the instance of provider
 		provider := NewDiscovery()
 		// for the sake of the test
-		provider.isInitialized = atomic.NewBool(true)
+		provider.initialized = atomic.NewBool(true)
 		assert.NoError(t, provider.Deregister())
 	})
 	t.Run("With Deregister when not initialized", func(t *testing.T) {
 		// create the instance of provider
 		provider := NewDiscovery()
 		// for the sake of the test
-		provider.isInitialized = atomic.NewBool(false)
+		provider.initialized = atomic.NewBool(false)
 		err := provider.Deregister()
 		assert.Error(t, err)
 		assert.EqualError(t, err, discovery.ErrNotInitialized.Error())

@@ -347,6 +347,7 @@ func TestDiscoveryProvider(t *testing.T) {
 	t.Run("With Close", func(t *testing.T) {
 		// mock the underlying discovery provider
 		provider := new(testkit.Provider)
+		provider.EXPECT().Close().Return(nil)
 		wrapper := &discoveryProvider{
 			provider: provider,
 			log:      log.DefaultLogger.StdLogger(),

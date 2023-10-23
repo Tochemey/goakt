@@ -24,15 +24,42 @@
 
 package discovery
 
-import "github.com/pkg/errors"
+import (
+	"fmt"
+	"strconv"
+	"testing"
 
-var (
-	// ErrAlreadyInitialized is used when attempting to re-initialize the discovery provider
-	ErrAlreadyInitialized = errors.New("provider already initialized")
-	// ErrNotInitialized is used when the provider is not initialized
-	ErrNotInitialized = errors.New("provider not initialized")
-	// ErrAlreadyRegistered is used when attempting to re-register the provider
-	ErrAlreadyRegistered = errors.New("provider already registered")
-	// ErrNotRegistered is used when attempting to de-register the provider
-	ErrNotRegistered = errors.New("provider is not registered")
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"github.com/travisjeffery/go-dynaport"
 )
+
+func TestGetHostNode(t *testing.T) {
+	t.Run("With host node env vars set", func(t *testing.T) {
+		// generate the ports for the single node
+		nodePorts := dynaport.Get(3)
+		gossipPort := nodePorts[0]
+		clusterPort := nodePorts[1]
+		remotingPort := nodePorts[2]
+		host := "localhost"
+
+		t.Setenv("GOSSIP_PORT", strconv.Itoa(gossipPort))
+		t.Setenv("CLUSTER_PORT", strconv.Itoa(clusterPort))
+		t.Setenv("REMOTING_PORT", strconv.Itoa(remotingPort))
+		t.Setenv("NODE_NAME", "testNode")
+		t.Setenv("NODE_IP", host)
+
+		node, err := HostNode()
+		require.NoError(t, err)
+		require.NotNil(t, node)
+		clusterAddr := node.ClusterAddress()
+		gossipAddr := node.GossipAddress()
+		assert.Equal(t, fmt.Sprintf("%s:%d", host, clusterPort), clusterAddr)
+		assert.Equal(t, fmt.Sprintf("%s:%d", host, gossipPort), gossipAddr)
+	})
+	t.Run("With host node env vars not set", func(t *testing.T) {
+		node, err := HostNode()
+		require.Error(t, err)
+		require.Nil(t, node)
+	})
+}

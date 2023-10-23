@@ -20,6 +20,47 @@ func (_m *Provider) EXPECT() *Provider_Expecter {
 	return &Provider_Expecter{mock: &_m.Mock}
 }
 
+// Close provides a mock function with given fields:
+func (_m *Provider) Close() error {
+	ret := _m.Called()
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func() error); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// Provider_Close_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Close'
+type Provider_Close_Call struct {
+	*mock.Call
+}
+
+// Close is a helper method to define mock.On call
+func (_e *Provider_Expecter) Close() *Provider_Close_Call {
+	return &Provider_Close_Call{Call: _e.mock.On("Close")}
+}
+
+func (_c *Provider_Close_Call) Run(run func()) *Provider_Close_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *Provider_Close_Call) Return(_a0 error) *Provider_Close_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *Provider_Close_Call) RunAndReturn(run func() error) *Provider_Close_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Deregister provides a mock function with given fields:
 func (_m *Provider) Deregister() error {
 	ret := _m.Called()

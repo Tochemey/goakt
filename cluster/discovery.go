@@ -131,5 +131,5 @@ func (d *discoveryProvider) DiscoverPeers() ([]string, error) {
 
 // Close implementation
 func (d *discoveryProvider) Close() error {
-	return nil
+	return d.provider.Close()
 }

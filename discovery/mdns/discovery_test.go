@@ -181,7 +181,7 @@ func TestDiscovery(t *testing.T) {
 		domain := "local."
 		// create the instance of provider
 		provider := NewDiscovery()
-		provider.isInitialized = atomic.NewBool(true)
+		provider.initialized = atomic.NewBool(true)
 		// create the config
 		config := discovery.Config{
 			Service:     serviceType,
@@ -220,7 +220,7 @@ func TestDiscovery(t *testing.T) {
 	t.Run("With Initialize: already initialized", func(t *testing.T) {
 		// create the instance of provider
 		provider := NewDiscovery()
-		provider.isInitialized = atomic.NewBool(true)
+		provider.initialized = atomic.NewBool(true)
 		assert.Error(t, provider.Initialize())
 	})
 	t.Run("With Register", func(t *testing.T) {
@@ -245,10 +245,10 @@ func TestDiscovery(t *testing.T) {
 		require.NoError(t, provider.Register())
 
 		time.Sleep(time.Second)
-		require.True(t, provider.isInitialized.Load())
+		require.True(t, provider.initialized.Load())
 		require.NoError(t, provider.Deregister())
 		time.Sleep(time.Second)
-		assert.False(t, provider.isInitialized.Load())
+		assert.False(t, provider.initialized.Load())
 	})
 	t.Run("With Register when already registered", func(t *testing.T) {
 		// create the various config option
@@ -272,26 +272,26 @@ func TestDiscovery(t *testing.T) {
 		require.NoError(t, provider.Register())
 
 		time.Sleep(time.Second)
-		require.True(t, provider.isInitialized.Load())
+		require.True(t, provider.initialized.Load())
 		err := provider.Register()
 		require.Error(t, err)
 		require.EqualError(t, err, discovery.ErrAlreadyRegistered.Error())
 		require.NoError(t, provider.Deregister())
 		time.Sleep(time.Second)
-		assert.False(t, provider.isInitialized.Load())
+		assert.False(t, provider.initialized.Load())
 	})
 	t.Run("With Deregister", func(t *testing.T) {
 		// create the instance of provider
 		provider := NewDiscovery()
 		// for the sake of the test
-		provider.isInitialized = atomic.NewBool(true)
+		provider.initialized = atomic.NewBool(true)
 		assert.NoError(t, provider.Deregister())
 	})
 	t.Run("With Deregister when not initialized", func(t *testing.T) {
 		// create the instance of provider
 		provider := NewDiscovery()
 		// for the sake of the test
-		provider.isInitialized = atomic.NewBool(false)
+		provider.initialized = atomic.NewBool(false)
 		err := provider.Deregister()
 		assert.Error(t, err)
 		assert.EqualError(t, err, discovery.ErrNotInitialized.Error())
@@ -319,7 +319,7 @@ func TestDiscovery(t *testing.T) {
 
 		// wait for registration to be completed
 		time.Sleep(time.Second)
-		require.True(t, provider.isInitialized.Load())
+		require.True(t, provider.initialized.Load())
 
 		// discover peers
 		peers, err := provider.DiscoverPeers()
@@ -327,5 +327,12 @@ func TestDiscovery(t *testing.T) {
 		require.NotEmpty(t, peers)
 
 		assert.NoError(t, provider.Deregister())
+	})
+	t.Run("With DiscoverPeers: not initialized", func(t *testing.T) {
+		provider := NewDiscovery()
+		peers, err := provider.DiscoverPeers()
+		assert.Error(t, err)
+		assert.Empty(t, peers)
+		assert.EqualError(t, err, discovery.ErrNotInitialized.Error())
 	})
 }

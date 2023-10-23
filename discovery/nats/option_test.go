@@ -22,17 +22,33 @@
  * SOFTWARE.
  */
 
-package discovery
+package nats
 
-import "github.com/pkg/errors"
+import (
+	"testing"
 
-var (
-	// ErrAlreadyInitialized is used when attempting to re-initialize the discovery provider
-	ErrAlreadyInitialized = errors.New("provider already initialized")
-	// ErrNotInitialized is used when the provider is not initialized
-	ErrNotInitialized = errors.New("provider not initialized")
-	// ErrAlreadyRegistered is used when attempting to re-register the provider
-	ErrAlreadyRegistered = errors.New("provider already registered")
-	// ErrNotRegistered is used when attempting to de-register the provider
-	ErrNotRegistered = errors.New("provider is not registered")
+	"github.com/stretchr/testify/assert"
+	"github.com/tochemey/goakt/log"
 )
+
+func TestOptions(t *testing.T) {
+	testCases := []struct {
+		name     string
+		option   Option
+		expected Discovery
+	}{
+		{
+			name:     "WithLogger",
+			option:   WithLogger(log.DefaultLogger),
+			expected: Discovery{logger: log.DefaultLogger},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			var discovery Discovery
+			tc.option.Apply(&discovery)
+			assert.Equal(t, tc.expected, discovery)
+		})
+	}
+}
