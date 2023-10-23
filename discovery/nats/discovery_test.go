@@ -30,6 +30,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tochemey/goakt/log"
+
 	natsserver "github.com/nats-io/nats-server/v2/server"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -131,7 +133,7 @@ func TestDiscovery(t *testing.T) {
 	})
 	t.Run("With SetConfig", func(t *testing.T) {
 		// create the various config option
-		natsServer := "nats://127.0.0.1:"
+		natsServer := "nats://127.0.0.1:2322"
 		applicationName := "accounts"
 		actorSystemName := "AccountsSystem"
 		natsSubject := "some-subject"
@@ -174,6 +176,73 @@ func TestDiscovery(t *testing.T) {
 		// stop the NATS server
 		t.Cleanup(srv.Shutdown)
 	})
+	t.Run("With SetConfig: nats server not set", func(t *testing.T) {
+		applicationName := "accounts"
+		actorSystemName := "AccountsSystem"
+		natsSubject := "some-subject"
+		// create the instance of provider
+		provider := NewDiscovery()
+		// create the config
+		config := discovery.Config{
+			ApplicationName: applicationName,
+			ActorSystemName: actorSystemName,
+			NatsSubject:     natsSubject,
+		}
+
+		// set config
+		assert.Error(t, provider.SetConfig(config))
+	})
+	t.Run("With SetConfig: nats subject not set", func(t *testing.T) {
+		// create the various config option
+		natsServer := "nats://127.0.0.1:2322"
+		applicationName := "accounts"
+		actorSystemName := "AccountsSystem"
+		// create the instance of provider
+		provider := NewDiscovery()
+		// create the config
+		config := discovery.Config{
+			ApplicationName: applicationName,
+			ActorSystemName: actorSystemName,
+			NatsServer:      natsServer,
+		}
+
+		// set config
+		assert.Error(t, provider.SetConfig(config))
+	})
+	t.Run("With SetConfig: actor system not set", func(t *testing.T) {
+		// create the various config option
+		natsServer := "nats://127.0.0.1:2322"
+		applicationName := "accounts"
+		natsSubject := "some-subject"
+		// create the instance of provider
+		provider := NewDiscovery()
+		// create the config
+		config := discovery.Config{
+			ApplicationName: applicationName,
+			NatsServer:      natsServer,
+			NatsSubject:     natsSubject,
+		}
+
+		// set config
+		assert.Error(t, provider.SetConfig(config))
+	})
+	t.Run("With SetConfig: application name not set", func(t *testing.T) {
+		// create the various config option
+		natsServer := "nats://127.0.0.1:2322"
+		actorSystemName := "AccountsSystem"
+		natsSubject := "some-subject"
+		// create the instance of provider
+		provider := NewDiscovery()
+		// create the config
+		config := discovery.Config{
+			ActorSystemName: actorSystemName,
+			NatsServer:      natsServer,
+			NatsSubject:     natsSubject,
+		}
+
+		// set config
+		assert.Error(t, provider.SetConfig(config))
+	})
 	t.Run("With Initialize", func(t *testing.T) {
 		// start the NATS server
 		srv := startNatsServer(t)
@@ -199,7 +268,7 @@ func TestDiscovery(t *testing.T) {
 		actorSystemName := "AccountsSystem"
 		natsSubject := "some-subject"
 		// create the instance of provider
-		provider := NewDiscovery()
+		provider := NewDiscovery(WithLogger(log.DiscardLogger))
 
 		// create the config
 		config := discovery.Config{
@@ -225,6 +294,26 @@ func TestDiscovery(t *testing.T) {
 		provider := NewDiscovery()
 		provider.initialized = atomic.NewBool(true)
 		assert.Error(t, provider.Initialize())
+	})
+	t.Run("With Initialize: with host config not set", func(t *testing.T) {
+		// create the instance of provider
+		provider := NewDiscovery()
+		assert.Error(t, provider.Initialize())
+	})
+	t.Run("With Register: already registered", func(t *testing.T) {
+		// create the instance of provider
+		provider := NewDiscovery()
+		provider.registered = atomic.NewBool(true)
+		err := provider.Register()
+		assert.Error(t, err)
+		assert.EqualError(t, err, discovery.ErrAlreadyRegistered.Error())
+	})
+	t.Run("With Deregister: already not registered", func(t *testing.T) {
+		// create the instance of provider
+		provider := NewDiscovery()
+		err := provider.Deregister()
+		assert.Error(t, err)
+		assert.EqualError(t, err, discovery.ErrNotRegistered.Error())
 	})
 	t.Run("With DiscoverPeers", func(t *testing.T) {
 		// start the NATS server
@@ -284,5 +373,12 @@ func TestDiscovery(t *testing.T) {
 
 		// stop the NATS server
 		t.Cleanup(srv.Shutdown)
+	})
+	t.Run("With DiscoverPeers: not initialized", func(t *testing.T) {
+		provider := NewDiscovery()
+		peers, err := provider.DiscoverPeers()
+		assert.Error(t, err)
+		assert.Empty(t, peers)
+		assert.EqualError(t, err, discovery.ErrNotInitialized.Error())
 	})
 }

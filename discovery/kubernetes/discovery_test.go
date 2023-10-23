@@ -182,6 +182,14 @@ func TestDiscovery(t *testing.T) {
 		}
 
 		assert.ElementsMatch(t, expected, actual)
+		assert.NoError(t, provider.Close())
+	})
+	t.Run("With DiscoverPeers: not initialized", func(t *testing.T) {
+		provider := NewDiscovery()
+		peers, err := provider.DiscoverPeers()
+		assert.Error(t, err)
+		assert.Empty(t, peers)
+		assert.EqualError(t, err, discovery.ErrNotInitialized.Error())
 	})
 	t.Run("With SetConfig", func(t *testing.T) {
 		// create the various config option
@@ -219,6 +227,50 @@ func TestDiscovery(t *testing.T) {
 		err := provider.SetConfig(config)
 		assert.Error(t, err)
 		assert.EqualError(t, err, discovery.ErrAlreadyInitialized.Error())
+	})
+	t.Run("With SetConfig: actor system not set", func(t *testing.T) {
+		// create the various config option
+		namespace := "default"
+		applicationName := "accounts"
+		// create the instance of provider
+		provider := NewDiscovery()
+		// create the config
+		config := discovery.Config{
+			ApplicationName: applicationName,
+			Namespace:       namespace,
+		}
+
+		// set config
+		assert.Error(t, provider.SetConfig(config))
+	})
+	t.Run("With SetConfig: application name not set", func(t *testing.T) {
+		// create the various config option
+		namespace := "default"
+		actorSystemName := "AccountsSystem"
+		// create the instance of provider
+		provider := NewDiscovery()
+		// create the config
+		config := discovery.Config{
+			ActorSystemName: actorSystemName,
+			Namespace:       namespace,
+		}
+
+		// set config
+		assert.Error(t, provider.SetConfig(config))
+	})
+	t.Run("With SetConfig: namespace not set", func(t *testing.T) {
+		applicationName := "accounts"
+		actorSystemName := "AccountsSystem"
+		// create the instance of provider
+		provider := NewDiscovery()
+		// create the config
+		config := discovery.Config{
+			ApplicationName: applicationName,
+			ActorSystemName: actorSystemName,
+		}
+
+		// set config
+		assert.Error(t, provider.SetConfig(config))
 	})
 	t.Run("With Initialize", func(t *testing.T) {
 		// create the various config option

@@ -365,10 +365,6 @@ func (d *Discovery) DiscoverPeers() ([]string, error) {
 
 // Close closes the provider
 func (d *Discovery) Close() error {
-	// first check whether the discovery provider has started
-	if !d.initialized.Load() {
-		return discovery.ErrNotInitialized
-	}
 	// set the initialized to false
 	d.initialized.Store(false)
 	// set registered to false

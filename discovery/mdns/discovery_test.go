@@ -328,4 +328,11 @@ func TestDiscovery(t *testing.T) {
 
 		assert.NoError(t, provider.Deregister())
 	})
+	t.Run("With DiscoverPeers: not initialized", func(t *testing.T) {
+		provider := NewDiscovery()
+		peers, err := provider.DiscoverPeers()
+		assert.Error(t, err)
+		assert.Empty(t, peers)
+		assert.EqualError(t, err, discovery.ErrNotInitialized.Error())
+	})
 }
