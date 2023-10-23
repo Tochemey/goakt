@@ -246,9 +246,9 @@ engine to work as expected:
 
 ```go
 const (
-namespace          = "default"
-applicationName    = "accounts"
-actorSystemName    = "AccountsSystem"
+  namespace          = "default"
+  applicationName    = "accounts"
+  actorSystemName    = "AccountsSystem"
 )
 // instantiate the k8 discovery provider
 disco := kubernetes.NewDiscovery()
