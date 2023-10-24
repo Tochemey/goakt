@@ -146,7 +146,7 @@ Stashing is a mechanism you can enable in your actors, so they can temporarily s
 not handle at the moment.
 Another way to see it is that stashing allows you to keep processing messages you can handle while saving for later
 messages you can't.
-Stashing are handled byGo-Akt out of the actor instance just like the mailbox, so if the actor dies while processing a
+Stashing are handled by Go-Akt out of the actor instance just like the mailbox, so if the actor dies while processing a
 message, all messages in the stash are processed.
 This feature is usually used together with [Become/UnBecome](#behaviors), as they fit together very well, but this is
 not a requirement.
