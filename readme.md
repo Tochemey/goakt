@@ -201,6 +201,7 @@ At the moment the following providers are implemented:
 
 - the [kubernetes](https://kubernetes.io/docs/home/) [api integration](./discovery/kubernetes) is fully functional
 - the [mDNS](https://datatracker.ietf.org/doc/html/rfc6762) and [DNS-SD](https://tools.ietf.org/html/rfc6763)
+- the [NATS](https://nats.io/) [integration](./discovery/nats) is fully functional
 
 Note: One can add additional discovery providers using the following [interface](./discovery/provider.go)
 
