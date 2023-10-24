@@ -2,6 +2,10 @@ syntax = "proto3";
 
 package messages.v1;
 
+import "address/v1/address.proto";
+import "google/protobuf/any.proto";
+import "google/protobuf/timestamp.proto";
+
 option go_package = "github.com/tochemey/goakt/messages/v1;messagespb";
 
 // Terminated is used to notify watching actors
@@ -12,3 +16,38 @@ message Terminated {}
 // It is enqueued as ordinary messages.
 // It will be handled after messages that were already queued in the mailbox.
 message PoisonPill {}
+
+// Scheduled encapsulates a message that will be sent to an actor
+// in the future. The receiving actor can be a local or a remote actor
+// When it is a remote actor make sure that remoting is enabled in the
+// actor system
+message Scheduled {
+  // Specifies the actual message
+  google.protobuf.Any message = 1;
+  // Specifies the sender's address
+  address.v1.Address sender = 2;
+  // Specifies the actor address
+  address.v1.Address receiver = 3;
+  // Specifies the time when to send the message
+  google.protobuf.Timestamp when = 4;
+  // Specifies the frequency.
+  oneof frequency {
+    // Specifies to send the message once
+    ScheduledOnce once = 5;
+    // Specifies the send the message n times
+    ScheduledRepeatedly repeatedly = 6;
+  }
+}
+
+// ScheduledOnce states that the scheduled message
+// will only be sent once to the receiving actor
+message ScheduledOnce {}
+
+// ScheduledRepeatedly states that the scheduled message
+// will be sent to the receiving actor n times with a given delay interval
+message ScheduledRepeatedly {
+  // Specifies the number of times to send the message
+  int32 times = 1;
+  // Specifies the delay interval between messages sent
+  int64 delay = 2;
+}
