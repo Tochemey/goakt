@@ -56,9 +56,6 @@ const (
 	deadlettersTopic   = "topic.deadletters"
 )
 
-// Unit type
-type Unit struct{}
-
 // NoSender means that there is no sender
 var NoSender PID
 

@@ -24,8 +24,78 @@
 
 package scheduler
 
+import (
+	"sync"
+	"time"
+
+	"github.com/tochemey/goakt/log"
+	messagespb "github.com/tochemey/goakt/pb/messages/v1"
+	"github.com/tochemey/goakt/pkg/types"
+	"go.uber.org/atomic"
+)
+
 // Scheduler defines the Go-Akt scheduler.
 // Its job is to help stack messages that will be delivered in the future to actors.
 // It does not work as a normal cron scheduler
 type Scheduler struct {
+	// helps lock concurrent access
+	mu sync.Mutex
+
+	// list of scheduled messages
+	messages map[string]*messagespb.Scheduled
+	// states whether the scheduler has started or not
+	started *atomic.Bool
+	// signal stop
+	stopSignal chan types.Unit
+	// define the logger
+	logger log.Logger
+}
+
+// NewScheduler creates an instance of Scheduler
+func NewScheduler() *Scheduler {
+	// create an instance of scheduler
+	scheduler := &Scheduler{
+		mu:         sync.Mutex{},
+		messages:   make(map[string]*messagespb.Scheduled),
+		started:    atomic.NewBool(false),
+		stopSignal: make(chan types.Unit, 1),
+		logger:     log.DefaultLogger,
+	}
+
+	// return the instance of the scheduler
+	return scheduler
+}
+
+// Start starts the scheduler
+func (x *Scheduler) Start() {
+
+}
+
+// Stop stops the scheduler
+func (x *Scheduler) Stop() {
+
+}
+
+// timerLoop will be running until the scheduler is stopped.
+func (x *Scheduler) timerLoop() {
+	// create the ticker
+	ticker := time.NewTicker(30 * time.Millisecond)
+	// create the stop ticker signal
+	tickerStopSig := make(chan types.Unit, 1)
+	go func() {
+		for {
+			select {
+			case <-ticker.C:
+				// iterate the list of scheduled messages and process them
+			case <-x.stopSignal:
+				// set the done channel to stop the ticker
+				tickerStopSig <- types.Unit{}
+				return
+			}
+		}
+	}()
+	// wait for the stop signal to stop the ticker
+	<-tickerStopSig
+	// stop the ticker
+	ticker.Stop()
 }

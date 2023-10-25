@@ -44,6 +44,7 @@ import (
 	messagespb "github.com/tochemey/goakt/pb/messages/v1"
 	"github.com/tochemey/goakt/pkg/http"
 	"github.com/tochemey/goakt/pkg/slices"
+	"github.com/tochemey/goakt/pkg/types"
 	"github.com/tochemey/goakt/telemetry"
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
@@ -54,9 +55,9 @@ import (
 // watchMan is used to handle parent child relationship.
 // This helps handle error propagation from a child actor using any of supervisory strategies
 type watchMan struct {
-	ID      PID        // the ID of the actor watching
-	ErrChan chan error // ErrChan the channel where to pass error message
-	Done    chan Unit  // Done when watching is completed
+	ID      PID             // the ID of the actor watching
+	ErrChan chan error      // ErrChan the channel where to pass error message
+	Done    chan types.Unit // Done when watching is completed
 }
 
 // PID defines the various actions one can perform on a given actor
@@ -168,8 +169,8 @@ type pid struct {
 
 	// receives a shutdown signal. Once the signal is received
 	// the actor is shut down gracefully.
-	shutdownSignal     chan Unit
-	haltPassivationLnr chan Unit
+	shutdownSignal     chan types.Unit
+	haltPassivationLnr chan types.Unit
 
 	// set of watchMen watching the given actor
 	watchMen *slices.ConcurrentSlice[*watchMan]
@@ -220,8 +221,8 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 	pid := &pid{
 		Actor:              actor,
 		lastProcessingTime: atomic.Time{},
-		shutdownSignal:     make(chan Unit, 1),
-		haltPassivationLnr: make(chan Unit, 1),
+		shutdownSignal:     make(chan types.Unit, 1),
+		haltPassivationLnr: make(chan types.Unit, 1),
 		logger:             log.DefaultLogger,
 		mailboxSize:        defaultMailboxSize,
 		children:           newPIDMap(10),
@@ -390,12 +391,12 @@ func (p *pid) Restart(ctx context.Context) error {
 		// wait a while for the shutdown process to complete
 		ticker := time.NewTicker(10 * time.Millisecond)
 		// create the ticker stop signal
-		tickerStopSig := make(chan Unit, 1)
+		tickerStopSig := make(chan types.Unit, 1)
 		go func() {
 			for range ticker.C {
 				// stop ticking once the actor is offline
 				if !p.IsRunning() {
-					tickerStopSig <- Unit{}
+					tickerStopSig <- types.Unit{}
 					return
 				}
 			}
@@ -694,7 +695,7 @@ func (p *pid) Shutdown(ctx context.Context) error {
 	if p.passivateAfter.Load() > 0 {
 		// add some debug logging
 		p.logger.Debug("sending a signal to stop passivation listener....")
-		p.haltPassivationLnr <- Unit{}
+		p.haltPassivationLnr <- types.Unit{}
 	}
 
 	// stop the actor
@@ -713,7 +714,7 @@ func (p *pid) Watch(pid PID) {
 	w := &watchMan{
 		ID:      p,
 		ErrChan: make(chan error, 1),
-		Done:    make(chan Unit, 1),
+		Done:    make(chan types.Unit, 1),
 	}
 	// add the watcher to the list of watchMen
 	pid.watchers().Append(w)
@@ -730,7 +731,7 @@ func (p *pid) UnWatch(pid PID) {
 		// locate the given watcher
 		if w.ID.ActorPath() == p.ActorPath() {
 			// stop the watching go routine
-			w.Done <- Unit{}
+			w.Done <- types.Unit{}
 			// remove the watcher from the list
 			pid.watchers().Delete(item.Index)
 			break
@@ -952,7 +953,7 @@ func (p *pid) passivationListener() {
 	p.logger.Infof("passivation timeout is (%s)", p.passivateAfter.Load().String())
 	ticker := time.NewTicker(p.passivateAfter.Load())
 	// create the stop ticker signal
-	tickerStopSig := make(chan Unit, 1)
+	tickerStopSig := make(chan types.Unit, 1)
 
 	// start ticking
 	go func() {
@@ -964,12 +965,12 @@ func (p *pid) passivationListener() {
 				// check whether the actor is idle
 				if idleTime >= p.passivateAfter.Load() {
 					// set the done channel to stop the ticker
-					tickerStopSig <- Unit{}
+					tickerStopSig <- types.Unit{}
 					return
 				}
 			case <-p.haltPassivationLnr:
 				// set the done channel to stop the ticker
-				tickerStopSig <- Unit{}
+				tickerStopSig <- types.Unit{}
 				return
 			}
 		}
@@ -1065,7 +1066,7 @@ func (p *pid) doStop(ctx context.Context) error {
 	ticker := time.NewTicker(10 * time.Millisecond)
 	timer := time.After(p.shutdownTimeout.Load())
 	// create the ticker stop signal
-	tickerStopSig := make(chan Unit)
+	tickerStopSig := make(chan types.Unit)
 	// start ticking
 	go func() {
 		for {
@@ -1088,7 +1089,7 @@ func (p *pid) doStop(ctx context.Context) error {
 	<-tickerStopSig
 
 	// signal we are shutting down to stop processing messages
-	p.shutdownSignal <- Unit{}
+	p.shutdownSignal <- types.Unit{}
 
 	// close lingering http connections
 	p.httpClient.CloseIdleConnections()

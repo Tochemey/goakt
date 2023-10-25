@@ -45,6 +45,7 @@ import (
 	"github.com/tochemey/goakt/log"
 	addresspb "github.com/tochemey/goakt/pb/address/v1"
 	eventspb "github.com/tochemey/goakt/pb/events/v1"
+	"github.com/tochemey/goakt/pkg/types"
 	"github.com/tochemey/goakt/telemetry"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
@@ -161,7 +162,7 @@ type actorSystem struct {
 	mailbox Mailbox
 	// specifies the stash buffer
 	stashBuffer        uint64
-	housekeeperStopSig chan Unit
+	housekeeperStopSig chan types.Unit
 
 	eventsStream *eventstream.EventsStream
 }
@@ -195,7 +196,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		sem:                 sync.Mutex{},
 		shutdownTimeout:     DefaultShutdownTimeout,
 		mailboxSize:         defaultMailboxSize,
-		housekeeperStopSig:  make(chan Unit, 1),
+		housekeeperStopSig:  make(chan types.Unit, 1),
 		eventsStream:        eventstream.New(),
 		partitionHasher:     hash.DefaultHasher(),
 	}
@@ -549,7 +550,7 @@ func (x *actorSystem) Stop(ctx context.Context) error {
 	defer cancel()
 
 	// stop the housekeeper
-	x.housekeeperStopSig <- Unit{}
+	x.housekeeperStopSig <- types.Unit{}
 	x.logger.Infof("%s is shutting down..:)", x.name)
 
 	// set started to false
@@ -926,7 +927,7 @@ func (x *actorSystem) housekeeper() {
 	// create the ticker
 	ticker := time.NewTicker(30 * time.Millisecond)
 	// create the stop ticker signal
-	tickerStopSig := make(chan Unit, 1)
+	tickerStopSig := make(chan types.Unit, 1)
 	go func() {
 		for {
 			select {
@@ -940,7 +941,7 @@ func (x *actorSystem) housekeeper() {
 				}
 			case <-x.housekeeperStopSig:
 				// set the done channel to stop the ticker
-				tickerStopSig <- Unit{}
+				tickerStopSig <- types.Unit{}
 				return
 			}
 		}
