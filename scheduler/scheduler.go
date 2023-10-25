@@ -25,41 +25,41 @@
 package scheduler
 
 import (
+	"context"
+	"fmt"
+	"strconv"
 	"sync"
 	"time"
 
+	"github.com/pkg/errors"
+	"github.com/reugn/go-quartz/quartz"
 	"github.com/tochemey/goakt/log"
 	messagespb "github.com/tochemey/goakt/pb/messages/v1"
-	"github.com/tochemey/goakt/pkg/types"
 	"go.uber.org/atomic"
 )
 
-// Scheduler defines the Go-Akt scheduler.
+// MessagesScheduler defines the Go-Akt scheduler.
 // Its job is to help stack messages that will be delivered in the future to actors.
 // It does not work as a normal cron scheduler
-type Scheduler struct {
+type MessagesScheduler struct {
 	// helps lock concurrent access
 	mu sync.Mutex
 
-	// list of scheduled messages
-	messages map[string]*messagespb.Scheduled
+	scheduler quartz.Scheduler
 	// states whether the scheduler has started or not
 	started *atomic.Bool
-	// signal stop
-	stopSignal chan types.Unit
 	// define the logger
 	logger log.Logger
 }
 
-// NewScheduler creates an instance of Scheduler
-func NewScheduler() *Scheduler {
+// NewMessagesScheduler creates an instance of MessagesScheduler
+func NewMessagesScheduler() *MessagesScheduler {
 	// create an instance of scheduler
-	scheduler := &Scheduler{
-		mu:         sync.Mutex{},
-		messages:   make(map[string]*messagespb.Scheduled),
-		started:    atomic.NewBool(false),
-		stopSignal: make(chan types.Unit, 1),
-		logger:     log.DefaultLogger,
+	scheduler := &MessagesScheduler{
+		mu:        sync.Mutex{},
+		started:   atomic.NewBool(false),
+		scheduler: quartz.NewStdScheduler(),
+		logger:    log.DefaultLogger,
 	}
 
 	// return the instance of the scheduler
@@ -67,35 +67,90 @@ func NewScheduler() *Scheduler {
 }
 
 // Start starts the scheduler
-func (x *Scheduler) Start() {
-
+// nolint
+func (x *MessagesScheduler) Start(ctx context.Context) {
+	// acquire the lock
+	x.mu.Lock()
+	// release the lock once done
+	defer x.mu.Unlock()
+	// start the scheduler
+	x.scheduler.Start(ctx)
+	// set the started
+	x.started.Store(x.scheduler.IsStarted())
 }
 
 // Stop stops the scheduler
-func (x *Scheduler) Stop() {
+func (x *MessagesScheduler) Stop(ctx context.Context) {
+	// acquire the lock
+	x.mu.Lock()
+	// release the lock once done
+	defer x.mu.Unlock()
 
+	// stop the scheduler
+	x.scheduler.Stop()
+	// wait for all workers to exit
+	x.scheduler.Wait(ctx)
 }
 
-// timerLoop will be running until the scheduler is stopped.
-func (x *Scheduler) timerLoop() {
-	// create the ticker
-	ticker := time.NewTicker(30 * time.Millisecond)
-	// create the stop ticker signal
-	tickerStopSig := make(chan types.Unit, 1)
-	go func() {
-		for {
-			select {
-			case <-ticker.C:
-				// iterate the list of scheduled messages and process them
-			case <-x.stopSignal:
-				// set the done channel to stop the ticker
-				tickerStopSig <- types.Unit{}
-				return
-			}
-		}
-	}()
-	// wait for the stop signal to stop the ticker
-	<-tickerStopSig
-	// stop the ticker
-	ticker.Stop()
+// Schedule schedules a message to be sent to an actor in the future
+// nolint
+func (x *MessagesScheduler) Schedule(ctx context.Context, scheduled *messagespb.Scheduled) error {
+	// acquire the lock
+	x.mu.Lock()
+	// release the lock once done
+	defer x.mu.Unlock()
+
+	// check whether the scheduler has started or not
+	if !x.started.Load() {
+		// TODO: add a custom error
+		return errors.New("messages scheduler is not started")
+	}
+
+	// grab the frequency
+	frequency := scheduled.GetFrequency()
+
+	// let us construct the cron expression
+	var cronExpression string
+	var location *time.Location
+
+	switch v := frequency.GetValue().(type) {
+	case *messagespb.ScheduledFrequency_Once:
+		// grab the time the message is supposed to be delivered
+		timestamp := v.Once.GetWhen().AsTime()
+		// grab the various date part
+		second := timestamp.Second()
+		minute := timestamp.Minute()
+		hour := timestamp.Hour()
+		day := timestamp.Day()
+		month := timestamp.Month()
+		year := timestamp.Year()
+		location = timestamp.Location()
+		// build the cron expression
+		cronExpression = fmt.Sprintf("%s %s %s %s %s %s %s",
+			strconv.Itoa(second),
+			strconv.Itoa(minute),
+			strconv.Itoa(hour),
+			strconv.Itoa(day),
+			strconv.Itoa(int(month)),
+			"?",
+			strconv.Itoa(year))
+	case *messagespb.ScheduledFrequency_Repeatedly:
+	}
+
+	// create the cron trigger
+	trigger, err := quartz.NewCronTriggerWithLoc(cronExpression, location)
+	// handle the error
+	if err != nil {
+		x.logger.Error(errors.Wrap(err, "failed to schedule message"))
+		return err
+	}
+
+	// create the job
+	job := quartz.NewFunctionJob[bool](func(ctx context.Context) (bool, error) {
+		// TODO implement me
+		return true, nil
+	})
+
+	// schedule the job
+	return x.scheduler.ScheduleJob(ctx, job, trigger)
 }

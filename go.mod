@@ -18,6 +18,7 @@ require (
 	github.com/nats-io/nats-server/v2 v2.10.3
 	github.com/nats-io/nats.go v1.31.0
 	github.com/pkg/errors v0.9.1
+	github.com/reugn/go-quartz v0.8.0
 	github.com/spf13/cobra v1.7.0
 	github.com/stretchr/testify v1.8.4
 	github.com/travisjeffery/go-dynaport v1.0.0
