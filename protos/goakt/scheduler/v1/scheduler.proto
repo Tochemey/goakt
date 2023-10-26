@@ -1,0 +1,61 @@
+syntax = "proto3";
+
+package scheduler.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/tochemey/goakt/scheduler/v1;schedulerpb";
+
+// Once states that the scheduled message
+// will only be sent once to the receiving actor
+message Once {
+  // Specifies the time when the to send the message
+  // The timestamp must include the following:
+  // year, month, day of month, hour, minute and second
+  google.protobuf.Timestamp when = 1;
+}
+
+// Repeatedly states that the scheduled message
+// will be sent to the receiving actor n times with a given delay interval
+message Repeatedly {
+  // Specifies the number of times to send the message
+  int32 times = 1;
+  // Specifies the delay interval between messages sent
+  int64 delay = 2;
+  // Specifies the time when to send the message
+  Time when = 3;
+}
+
+// Frequency defines how often the scheduled message should be sent
+// to the receiving actor
+message Frequency {
+  // Specifies the frequency value.
+  oneof value {
+    // Specifies to send the message once
+    Once once = 1;
+    // Specifies the send the message n times
+    Repeatedly repeatedly = 2;
+  }
+}
+
+// Time defines the date time of a scheduled message
+message Time {
+  // Month of year. Must be from 1 to 12.
+  int32 month = 2;
+
+  // Day of month. Must be from 1 to 31 and valid for the year and
+  // month.
+  int32 day = 3;
+
+  // Hours of day in 24 hour format. Should be from 0 to 23. An API
+  // may choose to allow the value "24:00:00" for scenarios like business
+  // closing time.
+  int32 hours = 4;
+
+  // Minutes of hour of day. Must be from 0 to 59.
+  int32 minutes = 5;
+
+  // Required. Seconds of minutes of the time. Must normally be from 0 to 59. An
+  // API may allow the value 60 if it allows leap-seconds.
+  int32 seconds = 6;
+}

@@ -22,7 +22,7 @@
  * SOFTWARE.
  */
 
-package scheduler
+package actors
 
 import (
 	"fmt"

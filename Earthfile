@@ -74,6 +74,7 @@ protogen:
             --template buf.gen.yaml \
             --path protos/goakt/address \
             --path protos/goakt/messages \
+            --path protos/goakt/scheduler \
             --path protos/goakt/events \
             --path protos/goakt/internal
 
@@ -81,6 +82,7 @@ protogen:
     SAVE ARTIFACT gen/address AS LOCAL pb/address
     SAVE ARTIFACT gen/messages AS LOCAL pb/messages
     SAVE ARTIFACT gen/events AS LOCAL pb/events
+    SAVE ARTIFACT gen/scheduler AS LOCAL pb/scheduler
     SAVE ARTIFACT gen/internal AS LOCAL internal
 
 testprotogen:

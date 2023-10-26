@@ -2,11 +2,6 @@ syntax = "proto3";
 
 package messages.v1;
 
-import "address/v1/address.proto";
-import "google/protobuf/any.proto";
-import "google/protobuf/duration.proto";
-import "google/protobuf/timestamp.proto";
-
 option go_package = "github.com/tochemey/goakt/messages/v1;messagespb";
 
 // Terminated is used to notify watching actors
@@ -17,77 +12,3 @@ message Terminated {}
 // It is enqueued as ordinary messages.
 // It will be handled after messages that were already queued in the mailbox.
 message PoisonPill {}
-
-// Scheduled encapsulates a message that will be sent to an actor
-// in the future. The receiving actor can be a local or a remote actor
-// When it is a remote actor make sure that remoting is enabled in the
-// actor system
-message Scheduled {
-  // Specifies the actual message
-  google.protobuf.Any message = 1;
-  // Specifies the sender's address
-  address.v1.Address sender = 2;
-  // Specifies the actor address
-  address.v1.Address receiver = 3;
-  // Specifies the frequency
-  ScheduledFrequency frequency = 4;
-}
-
-// ScheduledOnce states that the scheduled message
-// will only be sent once to the receiving actor
-message ScheduledOnce {
-  // Specifies the time when the to send the message
-  // The timestamp must include the following:
-  // year, month, day of month, hour, minute and second
-  google.protobuf.Timestamp when = 1;
-}
-
-// ScheduledRepeatedly states that the scheduled message
-// will be sent to the receiving actor n times with a given delay interval
-message ScheduledRepeatedly {
-  // Specifies the number of times to send the message
-  int32 times = 1;
-  // Specifies the delay interval between messages sent
-  int64 delay = 2;
-  // Specifies the time when to send the message
-  ScheduledTime when = 3;
-}
-
-// ScheduledFrequency defines how often the scheduled message should be sent
-// to the receiving actor
-message ScheduledFrequency {
-  // Specifies the frequency value.
-  oneof value {
-    // Specifies to send the message once
-    ScheduledOnce once = 1;
-    // Specifies the send the message n times
-    ScheduledRepeatedly repeatedly = 2;
-  }
-}
-
-// ScheduledTime defines the date time of a scheduled message
-message ScheduledTime {
-  // Month of year. Must be from 1 to 12.
-  int32 month = 2;
-
-  // Day of month. Must be from 1 to 31 and valid for the year and
-  // month.
-  int32 day = 3;
-
-  // Hours of day in 24 hour format. Should be from 0 to 23. An API
-  // may choose to allow the value "24:00:00" for scenarios like business
-  // closing time.
-  int32 hours = 4;
-
-  // Minutes of hour of day. Must be from 0 to 59.
-  int32 minutes = 5;
-
-  // Required. Seconds of minutes of the time. Must normally be from 0 to 59. An
-  // API may allow the value 60 if it allows leap-seconds.
-  int32 seconds = 6;
-
-  // UTC offset. Must be whole seconds, between -18 hours and +18 hours.
-  // For example, a UTC offset of -4:00 would be represented as
-  // { seconds: -14400 }.
-  optional google.protobuf.Duration utc_offset = 8;
-}
