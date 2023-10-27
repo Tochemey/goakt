@@ -94,7 +94,19 @@ type ActorSystem interface {
 	Subscribe(event eventspb.Event) (eventstream.Subscriber, error)
 	// Unsubscribe unsubscribes a subscriber.
 	Unsubscribe(event eventspb.Event, subscriber eventstream.Subscriber) error
-
+	// ScheduleOnce schedules a message that will be delivered to the receiver actor
+	// This will send the given message to the actor after the given interval specified.
+	// The message will be sent once
+	ScheduleOnce(ctx context.Context, message proto.Message, pid PID, interval time.Duration) error
+	// RemoteScheduleOnce schedules a message to be sent to a remote actor in the future.
+	// This requires remoting to be enabled on the actor system.
+	// This will send the given message to the actor after the given interval specified
+	// The message will be sent once
+	RemoteScheduleOnce(ctx context.Context, message proto.Message, address *addresspb.Address, interval time.Duration) error
+	// ScheduleWithCron schedules a message to be sent to an actor in the future using a cron expression.
+	ScheduleWithCron(ctx context.Context, message proto.Message, pid PID, cronExpression string) error
+	// RemoteScheduleWithCron schedules a message to be sent to an actor in the future using a cron expression.
+	RemoteScheduleWithCron(ctx context.Context, message proto.Message, address *addresspb.Address, cronExpression string) error
 	// handleRemoteAsk handles a synchronous message to another actor and expect a response.
 	// This block until a response is received or timed out.
 	handleRemoteAsk(ctx context.Context, to PID, message proto.Message) (response proto.Message, err error)
@@ -164,7 +176,11 @@ type actorSystem struct {
 	stashBuffer        uint64
 	housekeeperStopSig chan types.Unit
 
+	// specifies the events stream
 	eventsStream *eventstream.EventsStream
+
+	// specifies the message scheduler
+	scheduler *scheduler
 }
 
 // enforce compilation error when all methods of the ActorSystem interface are not implemented
@@ -210,7 +226,54 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		opt.Apply(system)
 	}
 
+	// set the message scheduler
+	system.scheduler = newScheduler(system.logger, system.shutdownTimeout)
 	return system, nil
+}
+
+// ScheduleOnce schedules a message that will be delivered to the receiver actor
+// This will send the given message to the actor after the given interval specified.
+// The message will be sent once
+func (x *actorSystem) ScheduleOnce(ctx context.Context, message proto.Message, pid PID, interval time.Duration) error {
+	// first check whether the actor system has started
+	if !x.hasStarted.Load() {
+		return ErrActorSystemNotStarted
+	}
+	// schedule message
+	return x.scheduler.ScheduleOnce(ctx, message, pid, interval)
+}
+
+// RemoteScheduleOnce schedules a message to be sent to a remote actor in the future.
+// This requires remoting to be enabled on the actor system.
+// This will send the given message to the actor after the given interval specified
+// The message will be sent once
+func (x *actorSystem) RemoteScheduleOnce(ctx context.Context, message proto.Message, address *addresspb.Address, interval time.Duration) error {
+	// first check whether the actor system has started
+	if !x.hasStarted.Load() {
+		return ErrActorSystemNotStarted
+	}
+	// schedule message
+	return x.scheduler.RemoteScheduleOnce(ctx, message, address, interval)
+}
+
+// ScheduleWithCron schedules a message to be sent to an actor in the future using a cron expression.
+func (x *actorSystem) ScheduleWithCron(ctx context.Context, message proto.Message, pid PID, cronExpression string) error {
+	// first check whether the actor system has started
+	if !x.hasStarted.Load() {
+		return ErrActorSystemNotStarted
+	}
+	// schedule message
+	return x.scheduler.ScheduleWithCron(ctx, message, pid, cronExpression)
+}
+
+// RemoteScheduleWithCron schedules a message to be sent to an actor in the future using a cron expression.
+func (x *actorSystem) RemoteScheduleWithCron(ctx context.Context, message proto.Message, address *addresspb.Address, cronExpression string) error {
+	// first check whether the actor system has started
+	if !x.hasStarted.Load() {
+		return ErrActorSystemNotStarted
+	}
+	// schedule message
+	return x.scheduler.RemoteScheduleWithCron(ctx, message, address, cronExpression)
 }
 
 // Subscribe help receive dead letters whenever there are available
@@ -531,6 +594,9 @@ func (x *actorSystem) Start(ctx context.Context) error {
 		x.enableRemoting(ctx)
 	}
 
+	// start the message scheduler
+	x.scheduler.Start(ctx)
+
 	// start the housekeeper
 	go x.housekeeper()
 
@@ -545,10 +611,6 @@ func (x *actorSystem) Stop(ctx context.Context) error {
 		return ErrActorSystemNotStarted
 	}
 
-	// create a cancellation context to gracefully shutdown
-	ctx, cancel := context.WithTimeout(ctx, x.shutdownTimeout)
-	defer cancel()
-
 	// stop the housekeeper
 	x.housekeeperStopSig <- types.Unit{}
 	x.logger.Infof("%s is shutting down..:)", x.name)
@@ -556,10 +618,17 @@ func (x *actorSystem) Stop(ctx context.Context) error {
 	// set started to false
 	x.hasStarted.Store(false)
 
+	// stop the messages scheduler
+	x.scheduler.Stop(ctx)
+
 	// shutdown the events stream
 	if x.eventsStream != nil {
 		x.eventsStream.Shutdown()
 	}
+
+	// create a cancellation context to gracefully shutdown
+	ctx, cancel := context.WithTimeout(ctx, x.shutdownTimeout)
+	defer cancel()
 
 	// stop the remoting server
 	if x.remotingEnabled.Load() {

@@ -26,8 +26,6 @@ package actors
 
 import (
 	"context"
-	"fmt"
-	"strconv"
 	"sync"
 	"time"
 
@@ -35,40 +33,34 @@ import (
 	"github.com/reugn/go-quartz/quartz"
 	"github.com/tochemey/goakt/log"
 	addresspb "github.com/tochemey/goakt/pb/address/v1"
-	schedulerpb "github.com/tochemey/goakt/pb/scheduler/v1"
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
 )
 
-type scheduled struct {
-	frequency *schedulerpb.Frequency
-	job       quartz.Job
-}
-
-// Scheduler defines the Go-Akt scheduler.
+// scheduler defines the Go-Akt scheduler.
 // Its job is to help stack messages that will be delivered in the future to actors.
-type Scheduler struct {
+type scheduler struct {
 	// helps lock concurrent access
 	mu sync.Mutex
-	// list of scheduled
-	scheduledList []*scheduled
 	// underlying scheduler
 	scheduler quartz.Scheduler
 	// states whether the scheduler has started or not
 	started *atomic.Bool
 	// define the logger
 	logger log.Logger
+	// define the shutdown timeout
+	stopTimeout time.Duration
 }
 
-// NewScheduler creates an instance of Scheduler
-func NewScheduler() *Scheduler {
+// newScheduler creates an instance of scheduler
+func newScheduler(logger log.Logger, stopTimeout time.Duration) *scheduler {
 	// create an instance of scheduler
-	scheduler := &Scheduler{
-		mu:            sync.Mutex{},
-		started:       atomic.NewBool(false),
-		scheduler:     quartz.NewStdScheduler(),
-		logger:        log.DefaultLogger,
-		scheduledList: make([]*scheduled, 0),
+	scheduler := &scheduler{
+		mu:          sync.Mutex{},
+		started:     atomic.NewBool(false),
+		scheduler:   quartz.NewStdScheduler(),
+		logger:      logger,
+		stopTimeout: stopTimeout,
 	}
 
 	// return the instance of the scheduler
@@ -76,7 +68,7 @@ func NewScheduler() *Scheduler {
 }
 
 // Start starts the scheduler
-func (x *Scheduler) Start(ctx context.Context) {
+func (x *scheduler) Start(ctx context.Context) {
 	// acquire the lock
 	x.mu.Lock()
 	// release the lock once done
@@ -88,74 +80,35 @@ func (x *Scheduler) Start(ctx context.Context) {
 }
 
 // Stop stops the scheduler
-func (x *Scheduler) Stop(ctx context.Context) {
+func (x *scheduler) Stop(ctx context.Context) {
 	// acquire the lock
 	x.mu.Lock()
 	// release the lock once done
 	defer x.mu.Unlock()
-
 	// stop the scheduler
 	x.scheduler.Stop()
+	// set the started
+	x.started.Store(x.scheduler.IsStarted())
+	// create a cancellation context
+	ctx, cancel := context.WithTimeout(ctx, x.stopTimeout)
+	defer cancel()
 	// wait for all workers to exit
 	x.scheduler.Wait(ctx)
 }
 
-// RemoteSchedule schedules a message to be sent to a remote actor in the future. This requires remoting to be enabled on the actor system
-func (x *Scheduler) RemoteSchedule(ctx context.Context, message proto.Message, address *addresspb.Address, frequency *schedulerpb.Frequency) error {
+// ScheduleOnce schedules a message that will be delivered to the receiver actor
+// This will send the given message to the actor after the given interval specified.
+// The message will be sent once
+func (x *scheduler) ScheduleOnce(ctx context.Context, message proto.Message, pid PID, interval time.Duration) error {
 	// acquire the lock
 	x.mu.Lock()
 	// release the lock once done
 	defer x.mu.Unlock()
-
 	// check whether the scheduler has started or not
 	if !x.started.Load() {
 		// TODO: add a custom error
 		return errors.New("messages scheduler is not started")
 	}
-
-	// create the cron trigger
-	trigger, err := x.createCronTrigger(frequency)
-	// handle the error
-	if err != nil {
-		x.logger.Error(errors.Wrap(err, "failed to schedule message"))
-		return err
-	}
-
-	// create the job
-	job := quartz.NewFunctionJob[bool](func(ctx context.Context) (bool, error) {
-		// when the job run send the message to actor
-		if err := RemoteTell(ctx, address, message); err != nil {
-			return false, err
-		}
-		// return true when successful
-		return true, nil
-	})
-
-	// schedule the job
-	return x.doScheduleJob(ctx, job, frequency, trigger)
-}
-
-// Schedule schedules a message to be sent to an actor in the future
-func (x *Scheduler) Schedule(ctx context.Context, message proto.Message, pid PID, frequency *schedulerpb.Frequency) error {
-	// acquire the lock
-	x.mu.Lock()
-	// release the lock once done
-	defer x.mu.Unlock()
-
-	// check whether the scheduler has started or not
-	if !x.started.Load() {
-		// TODO: add a custom error
-		return errors.New("messages scheduler is not started")
-	}
-
-	// create the cron trigger
-	trigger, err := x.createCronTrigger(frequency)
-	// handle the error
-	if err != nil {
-		x.logger.Error(errors.Wrap(err, "failed to schedule message"))
-		return err
-	}
-
 	// create the job
 	job := quartz.NewFunctionJob[bool](func(ctx context.Context) (bool, error) {
 		// when the job run send the message to actor
@@ -165,68 +118,100 @@ func (x *Scheduler) Schedule(ctx context.Context, message proto.Message, pid PID
 		// return true when successful
 		return true, nil
 	})
-
 	// schedule the job
-	return x.doScheduleJob(ctx, job, frequency, trigger)
+	return x.scheduler.ScheduleJob(ctx, job, quartz.NewRunOnceTrigger(interval))
 }
 
-// createCronTrigger creates a cron trigger
-func (x *Scheduler) createCronTrigger(frequency *schedulerpb.Frequency) (quartz.Trigger, error) {
-	// let us construct the cron expression
-	var cronExpression string
+// RemoteScheduleOnce schedules a message to be sent to a remote actor in the future.
+// This requires remoting to be enabled on the actor system.
+// This will send the given message to the actor after the given interval specified
+// The message will be sent once
+func (x *scheduler) RemoteScheduleOnce(ctx context.Context, message proto.Message, address *addresspb.Address, interval time.Duration) error {
+	// acquire the lock
+	x.mu.Lock()
+	// release the lock once done
+	defer x.mu.Unlock()
+
+	// check whether the scheduler has started or not
+	if !x.started.Load() {
+		// TODO: add a custom error
+		return errors.New("messages scheduler is not started")
+	}
+	// create the job
+	job := quartz.NewFunctionJob[bool](func(ctx context.Context) (bool, error) {
+		// when the job run send the message to actor
+		if err := RemoteTell(ctx, address, message); err != nil {
+			return false, err
+		}
+		// return true when successful
+		return true, nil
+	})
+	// schedule the job
+	return x.scheduler.ScheduleJob(ctx, job, quartz.NewRunOnceTrigger(interval))
+}
+
+// ScheduleWithCron schedules a message to be sent to an actor in the future using a cron expression.
+func (x *scheduler) ScheduleWithCron(ctx context.Context, message proto.Message, pid PID, cronExpression string) error {
+	// acquire the lock
+	x.mu.Lock()
+	// release the lock once done
+	defer x.mu.Unlock()
+	// check whether the scheduler has started or not
+	if !x.started.Load() {
+		// TODO: add a custom error
+		return errors.New("messages scheduler is not started")
+	}
+	// create the job
+	job := quartz.NewFunctionJob[bool](func(ctx context.Context) (bool, error) {
+		// when the job run send the message to actor
+		if err := Tell(ctx, pid, message); err != nil {
+			return false, err
+		}
+		// return true when successful
+		return true, nil
+	})
 	// get the system time location
 	location := time.Now().Location()
-
-	switch v := frequency.GetValue().(type) {
-	case *schedulerpb.Frequency_Once:
-		// grab the time the message is supposed to be delivered
-		timestamp := v.Once.GetWhen().AsTime()
-		// grab the location
-		location = timestamp.Location()
-		// build the cron expression
-		cronExpression = fmt.Sprintf("%s %s %s %s %s %s %s",
-			strconv.Itoa(timestamp.Second()),
-			strconv.Itoa(timestamp.Minute()),
-			strconv.Itoa(timestamp.Hour()),
-			strconv.Itoa(timestamp.Day()),
-			strconv.Itoa(int(timestamp.Month())),
-			"?",
-			strconv.Itoa(timestamp.Year()))
-	case *schedulerpb.Frequency_Repeatedly:
-		// grab the time the message is supposed to be delivered
-		timestamp := v.Repeatedly.GetWhen()
-		// build the cron expression
-		cronExpression = fmt.Sprintf("%s %s %s %s %s %s",
-			strconv.Itoa(int(timestamp.GetSeconds())),
-			strconv.Itoa(int(timestamp.GetMinutes())),
-			strconv.Itoa(int(timestamp.GetHours())),
-			strconv.Itoa(int(timestamp.GetDay())),
-			strconv.Itoa(int(timestamp.GetMonth())),
-			"?")
-	}
-
 	// create the cron trigger
 	trigger, err := quartz.NewCronTriggerWithLoc(cronExpression, location)
 	// handle the error
 	if err != nil {
 		x.logger.Error(errors.Wrap(err, "failed to schedule message"))
-		return nil, err
+		return err
 	}
-	return trigger, nil
-}
-
-// doScheduleJob schedule the job to run
-func (x *Scheduler) doScheduleJob(ctx context.Context, job quartz.Job, frequency *schedulerpb.Frequency, trigger quartz.Trigger) error {
-	// wrap the job and add it the list
-	x.scheduledList = append(x.scheduledList, &scheduled{
-		frequency: frequency,
-		job:       job,
-	})
 	// schedule the job
 	return x.scheduler.ScheduleJob(ctx, job, trigger)
 }
 
-// scheduledWatcher is a loop that constantly run and check job status
-func (x *Scheduler) scheduledWatcher() {
-
+// RemoteScheduleWithCron schedules a message to be sent to an actor in the future using a cron expression.
+func (x *scheduler) RemoteScheduleWithCron(ctx context.Context, message proto.Message, address *addresspb.Address, cronExpression string) error {
+	// acquire the lock
+	x.mu.Lock()
+	// release the lock once done
+	defer x.mu.Unlock()
+	// check whether the scheduler has started or not
+	if !x.started.Load() {
+		// TODO: add a custom error
+		return errors.New("messages scheduler is not started")
+	}
+	// create the job
+	job := quartz.NewFunctionJob[bool](func(ctx context.Context) (bool, error) {
+		// when the job run send the message to actor
+		if err := RemoteTell(ctx, address, message); err != nil {
+			return false, err
+		}
+		// return true when successful
+		return true, nil
+	})
+	// get the system time location
+	location := time.Now().Location()
+	// create the cron trigger
+	trigger, err := quartz.NewCronTriggerWithLoc(cronExpression, location)
+	// handle the error
+	if err != nil {
+		x.logger.Error(errors.Wrap(err, "failed to schedule message"))
+		return err
+	}
+	// schedule the job
+	return x.scheduler.ScheduleJob(ctx, job, trigger)
 }
