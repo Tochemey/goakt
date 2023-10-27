@@ -26,6 +26,7 @@ Also, check reference section at the end of the post for more material regarding
     - [Mailbox](#mailbox)
     - [Dead Letters](#dead-letters)
     - [Messaging](#messaging)
+    - [Scheduler](#scheduler)
     - [Stashing](#stashing)
     - [Remoting](#remoting)
     - [Clustering](#cluster)
@@ -139,6 +140,31 @@ To receive the dead letter, you just need to call the actor system `Subscribe` a
 Communication between actors is achieved exclusively through message passing. In Go-Akt _Google
 Protocol Buffers_ is used to define messages.
 The choice of protobuf is due to easy serialization over wire and strong schema definition.
+
+#### Scheduler
+
+You can schedule sending messages to actor that will be acted upon in the future. To achieve that you can use the following methods on the [Actor System](./actors/actor_system.go):
+
+- `ScheduleOnce` - will send the given message to a local actor after a given interval
+- `RemoteScheduleOnce` - will send the given message to a remote actor after a given interval. This requires remoting to be enabled on the actor system.
+- `ScheduleWithCron` - will send the given message to a local actor using a [cron expression](#cron-expression-format).
+- `RemoteScheduleWithCron` - will send the given message to a remote actor using a [cron expression](#cron-expression-format). This requires remoting to be enabled on the actor system.
+
+##### Cron Expression Format
+
+| Field Name   | Mandatory | Allowed Values  | Allowed Special Characters |
+|--------------|-----------|-----------------|----------------------------|
+| Seconds      | YES       | 0-59            | , - * /                    |
+| Minutes      | YES       | 0-59            | , - * /                    |
+| Hours        | YES       | 0-23            | , - * /                    |
+| Day of month | YES       | 1-31            | , - * ? /                  |
+| Month        | YES       | 1-12 or JAN-DEC | , - * /                    |
+| Day of week  | YES       | 1-7 or SUN-SAT  | , - * ? /                  |
+| Year         | NO        | empty, 1970-    | , - * /                    |
+
+##### Note
+
+When running the actor system in a cluster only once instance of a given scheduled message will be running across the entire cluster.
 
 #### Stashing
 
