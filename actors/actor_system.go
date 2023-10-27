@@ -235,10 +235,6 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 // This will send the given message to the actor after the given interval specified.
 // The message will be sent once
 func (x *actorSystem) ScheduleOnce(ctx context.Context, message proto.Message, pid PID, interval time.Duration) error {
-	// first check whether the actor system has started
-	if !x.hasStarted.Load() {
-		return ErrActorSystemNotStarted
-	}
 	// schedule message
 	return x.scheduler.ScheduleOnce(ctx, message, pid, interval)
 }
@@ -248,30 +244,18 @@ func (x *actorSystem) ScheduleOnce(ctx context.Context, message proto.Message, p
 // This will send the given message to the actor after the given interval specified
 // The message will be sent once
 func (x *actorSystem) RemoteScheduleOnce(ctx context.Context, message proto.Message, address *addresspb.Address, interval time.Duration) error {
-	// first check whether the actor system has started
-	if !x.hasStarted.Load() {
-		return ErrActorSystemNotStarted
-	}
-	// schedule message
+	// schedule the message
 	return x.scheduler.RemoteScheduleOnce(ctx, message, address, interval)
 }
 
 // ScheduleWithCron schedules a message to be sent to an actor in the future using a cron expression.
 func (x *actorSystem) ScheduleWithCron(ctx context.Context, message proto.Message, pid PID, cronExpression string) error {
-	// first check whether the actor system has started
-	if !x.hasStarted.Load() {
-		return ErrActorSystemNotStarted
-	}
 	// schedule message
 	return x.scheduler.ScheduleWithCron(ctx, message, pid, cronExpression)
 }
 
 // RemoteScheduleWithCron schedules a message to be sent to an actor in the future using a cron expression.
 func (x *actorSystem) RemoteScheduleWithCron(ctx context.Context, message proto.Message, address *addresspb.Address, cronExpression string) error {
-	// first check whether the actor system has started
-	if !x.hasStarted.Load() {
-		return ErrActorSystemNotStarted
-	}
 	// schedule message
 	return x.scheduler.RemoteScheduleWithCron(ctx, message, address, cronExpression)
 }

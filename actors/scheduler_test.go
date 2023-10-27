@@ -81,7 +81,7 @@ func TestScheduler(t *testing.T) {
 		err = newActorSystem.Stop(ctx)
 		assert.NoError(t, err)
 	})
-	t.Run("With ScheduleOnce not started", func(t *testing.T) {
+	t.Run("With ScheduleOnce with scheduler not started", func(t *testing.T) {
 		ctx := context.TODO()
 		scheduler := newScheduler(log.DefaultLogger, time.Second)
 		// create the actor path
@@ -160,7 +160,7 @@ func TestScheduler(t *testing.T) {
 		err = newActorSystem.Stop(ctx)
 		assert.NoError(t, err)
 	})
-	t.Run("With RemoteScheduleOnce not started", func(t *testing.T) {
+	t.Run("With RemoteScheduleOnce with scheduler not started", func(t *testing.T) {
 		// create the context
 		ctx := context.TODO()
 		// define the logger to use
