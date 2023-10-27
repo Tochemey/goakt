@@ -82,15 +82,15 @@ func TestCluster(t *testing.T) {
 		t.Setenv("NODE_NAME", "testNode")
 		t.Setenv("NODE_IP", host)
 
-		node, err := New("test", serviceDiscovery)
-		require.NotNil(t, node)
+		cluster, err := New("test", serviceDiscovery)
+		require.NotNil(t, cluster)
 		require.NoError(t, err)
 
 		// start the Cluster node
-		err = node.Start(ctx)
+		err = cluster.Start(ctx)
 		require.NoError(t, err)
 
-		hostNodeAddr := node.NodeHost()
+		hostNodeAddr := cluster.NodeHost()
 		assert.Equal(t, host, hostNodeAddr)
 
 		//  shutdown the Cluster node
@@ -98,7 +98,7 @@ func TestCluster(t *testing.T) {
 		defer cancel()
 
 		// stop the node
-		require.NoError(t, node.Stop(ctx))
+		require.NoError(t, cluster.Stop(ctx))
 		provider.AssertExpectations(t)
 	})
 	t.Run("With PutActor and GetActor", func(t *testing.T) {
@@ -140,12 +140,12 @@ func TestCluster(t *testing.T) {
 		t.Setenv("NODE_NAME", "testNode")
 		t.Setenv("NODE_IP", host)
 
-		node, err := New("test", serviceDiscovery)
-		require.NotNil(t, node)
+		cluster, err := New("test", serviceDiscovery)
+		require.NotNil(t, cluster)
 		require.NoError(t, err)
 
 		// start the Cluster node
-		err = node.Start(ctx)
+		err = cluster.Start(ctx)
 		require.NoError(t, err)
 
 		// create an actor
@@ -153,11 +153,11 @@ func TestCluster(t *testing.T) {
 		actor := &internalpb.WireActor{ActorName: actorName}
 
 		// replicate the actor in the Cluster
-		err = node.PutActor(ctx, actor)
+		err = cluster.PutActor(ctx, actor)
 		require.NoError(t, err)
 
 		// fetch the actor
-		actual, err := node.GetActor(ctx, actorName)
+		actual, err := cluster.GetActor(ctx, actorName)
 		require.NoError(t, err)
 		require.NotNil(t, actual)
 
@@ -165,15 +165,81 @@ func TestCluster(t *testing.T) {
 
 		//  fetch non-existing actor
 		fakeActorName := "fake"
-		actual, err = node.GetActor(ctx, fakeActorName)
+		actual, err = cluster.GetActor(ctx, fakeActorName)
 		require.Nil(t, actual)
 		assert.EqualError(t, err, ErrActorNotFound.Error())
 		//  shutdown the Cluster node
-		ctx, cancel := context.WithTimeout(ctx, time.Second)
-		defer cancel()
+		time.Sleep(time.Second)
 
 		// stop the node
-		require.NoError(t, node.Stop(ctx))
+		require.NoError(t, cluster.Stop(ctx))
+		provider.AssertExpectations(t)
+	})
+	t.Run("With SetKey and KeyExists", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+
+		// generate the ports for the single node
+		nodePorts := dynaport.Get(3)
+		gossipPort := nodePorts[0]
+		clusterPort := nodePorts[1]
+		remotingPort := nodePorts[2]
+
+		// define discovered addresses
+		addrs := []string{
+			fmt.Sprintf("localhost:%d", gossipPort),
+		}
+
+		// mock the discovery provider
+		provider := new(testkit.Provider)
+		config := discovery.NewConfig()
+
+		provider.EXPECT().ID().Return("testDisco")
+		provider.EXPECT().Initialize().Return(nil)
+		provider.EXPECT().Register().Return(nil)
+		provider.EXPECT().Deregister().Return(nil)
+		provider.EXPECT().SetConfig(config).Return(nil)
+		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
+		provider.EXPECT().Close().Return(nil)
+
+		// create the service discovery
+		serviceDiscovery := discovery.NewServiceDiscovery(provider, config)
+
+		// create a Cluster node
+		host := "localhost"
+		// set the environments
+		t.Setenv("GOSSIP_PORT", strconv.Itoa(gossipPort))
+		t.Setenv("CLUSTER_PORT", strconv.Itoa(clusterPort))
+		t.Setenv("REMOTING_PORT", strconv.Itoa(remotingPort))
+		t.Setenv("NODE_NAME", "testNode")
+		t.Setenv("NODE_IP", host)
+
+		cluster, err := New("test", serviceDiscovery)
+		require.NotNil(t, cluster)
+		require.NoError(t, err)
+
+		// start the Cluster node
+		err = cluster.Start(ctx)
+		require.NoError(t, err)
+
+		// set key
+		key := "my-key"
+		require.NoError(t, cluster.SetKey(ctx, key))
+
+		isSet, err := cluster.KeyExists(ctx, key)
+		require.NoError(t, err)
+		assert.True(t, isSet)
+
+		// check the key existence
+		isSet, err = cluster.KeyExists(ctx, "fake")
+		require.NoError(t, err)
+		assert.False(t, isSet)
+
+		//  shutdown the Cluster node
+		time.Sleep(time.Second)
+
+		// stop the node
+		require.NoError(t, cluster.Stop(ctx))
 		provider.AssertExpectations(t)
 	})
 }

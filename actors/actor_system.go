@@ -227,7 +227,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 	}
 
 	// set the message scheduler
-	system.scheduler = newScheduler(system.logger, system.shutdownTimeout)
+	system.scheduler = newScheduler(system.logger, system.shutdownTimeout, withSchedulerCluster(system.cluster))
 	return system, nil
 }
 

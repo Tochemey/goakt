@@ -26,45 +26,67 @@ package actors
 
 import (
 	"context"
+	"strconv"
 	"sync"
 	"time"
 
 	"github.com/pkg/errors"
 	"github.com/reugn/go-quartz/quartz"
-	qlogger "github.com/reugn/go-quartz/quartz/logger"
+	quartzlogger "github.com/reugn/go-quartz/quartz/logger"
+	"github.com/tochemey/goakt/cluster"
 	"github.com/tochemey/goakt/log"
 	addresspb "github.com/tochemey/goakt/pb/address/v1"
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
 )
 
+var errSkipJobScheduling = errors.New("skip job scheduling")
+
+// schedulerOption represents the scheduler option
+// to set custom settings
+type schedulerOption func(scheduler *scheduler)
+
+// withCluster set the scheduler cluster
+func withSchedulerCluster(cluster cluster.Interface) schedulerOption {
+	return func(scheduler *scheduler) {
+		scheduler.cluster = cluster
+	}
+}
+
 // scheduler defines the Go-Akt scheduler.
 // Its job is to help stack messages that will be delivered in the future to actors.
 type scheduler struct {
 	// helps lock concurrent access
 	mu sync.Mutex
-	// underlying scheduler
-	scheduler quartz.Scheduler
-	// states whether the scheduler has started or not
+	// underlying Scheduler
+	quartzScheduler quartz.Scheduler
+	// states whether the quartzScheduler has started or not
 	started *atomic.Bool
 	// define the logger
 	logger log.Logger
 	// define the shutdown timeout
 	stopTimeout time.Duration
+	cluster     cluster.Interface
 }
 
 // newScheduler creates an instance of scheduler
-func newScheduler(logger log.Logger, stopTimeout time.Duration) *scheduler {
+func newScheduler(logger log.Logger, stopTimeout time.Duration, opts ...schedulerOption) *scheduler {
 	// create an instance of scheduler
 	scheduler := &scheduler{
-		mu:          sync.Mutex{},
-		started:     atomic.NewBool(false),
-		scheduler:   quartz.NewStdScheduler(),
-		logger:      logger,
-		stopTimeout: stopTimeout,
+		mu:              sync.Mutex{},
+		started:         atomic.NewBool(false),
+		quartzScheduler: quartz.NewStdScheduler(),
+		logger:          logger,
+		stopTimeout:     stopTimeout,
 	}
+
+	// set the custom options to override the default values
+	for _, opt := range opts {
+		opt(scheduler)
+	}
+
 	// disable the underlying scheduler logger
-	qlogger.SetDefault(qlogger.NewSimpleLogger(nil, qlogger.LevelOff))
+	quartzlogger.SetDefault(quartzlogger.NewSimpleLogger(nil, quartzlogger.LevelOff))
 	// return the instance of the scheduler
 	return scheduler
 }
@@ -78,9 +100,9 @@ func (x *scheduler) Start(ctx context.Context) {
 	// add logging information
 	x.logger.Info("starting messages scheduler...")
 	// start the scheduler
-	x.scheduler.Start(ctx)
+	x.quartzScheduler.Start(ctx)
 	// set the started
-	x.started.Store(x.scheduler.IsStarted())
+	x.started.Store(x.quartzScheduler.IsStarted())
 	// add logging information
 	x.logger.Info("messages scheduler started.:)")
 }
@@ -94,16 +116,16 @@ func (x *scheduler) Stop(ctx context.Context) {
 	// release the lock once done
 	defer x.mu.Unlock()
 	// clear all scheduled jobs
-	x.scheduler.Clear()
+	x.quartzScheduler.Clear()
 	// stop the scheduler
-	x.scheduler.Stop()
+	x.quartzScheduler.Stop()
 	// set the started
-	x.started.Store(x.scheduler.IsStarted())
+	x.started.Store(x.quartzScheduler.IsStarted())
 	// create a cancellation context
 	ctx, cancel := context.WithTimeout(ctx, x.stopTimeout)
 	defer cancel()
 	// wait for all workers to exit
-	x.scheduler.Wait(ctx)
+	x.quartzScheduler.Wait(ctx)
 	// add logging information
 	x.logger.Info("messages scheduler stopped...:)")
 }
@@ -130,8 +152,24 @@ func (x *scheduler) ScheduleOnce(ctx context.Context, message proto.Message, pid
 		// return true when successful
 		return true, nil
 	})
+
+	// get the job key
+	jobKey := strconv.Itoa(job.Key())
+
+	// check whether the cluster mode is enabled
+	if x.cluster != nil {
+		// check the job existence and ignore the error
+		if ok, _ := x.cluster.KeyExists(ctx, jobKey); ok {
+			return nil
+		}
+		// set the job key
+		if err := x.cluster.SetKey(ctx, jobKey); err != nil {
+			return err
+		}
+	}
+
 	// schedule the job
-	return x.scheduler.ScheduleJob(ctx, job, quartz.NewRunOnceTrigger(interval))
+	return x.quartzScheduler.ScheduleJob(ctx, job, quartz.NewRunOnceTrigger(interval))
 }
 
 // RemoteScheduleOnce schedules a message to be sent to a remote actor in the future.
@@ -158,8 +196,17 @@ func (x *scheduler) RemoteScheduleOnce(ctx context.Context, message proto.Messag
 		// return true when successful
 		return true, nil
 	})
+
+	// check whether the job is already scheduled
+	if err := x.distributeJobKeyOrNot(ctx, job); err != nil {
+		// skip the job scheduling when the key is already distributed
+		if errors.Is(err, errSkipJobScheduling) {
+			return nil
+		}
+		return err
+	}
 	// schedule the job
-	return x.scheduler.ScheduleJob(ctx, job, quartz.NewRunOnceTrigger(interval))
+	return x.quartzScheduler.ScheduleJob(ctx, job, quartz.NewRunOnceTrigger(interval))
 }
 
 // ScheduleWithCron schedules a message to be sent to an actor in the future using a cron expression.
@@ -170,7 +217,6 @@ func (x *scheduler) ScheduleWithCron(ctx context.Context, message proto.Message,
 	defer x.mu.Unlock()
 	// check whether the scheduler has started or not
 	if !x.started.Load() {
-		// TODO: add a custom error
 		return errors.New("messages scheduler is not started")
 	}
 	// create the job
@@ -182,6 +228,15 @@ func (x *scheduler) ScheduleWithCron(ctx context.Context, message proto.Message,
 		// return true when successful
 		return true, nil
 	})
+	// check whether the job is already scheduled
+	if err := x.distributeJobKeyOrNot(ctx, job); err != nil {
+		// skip the job scheduling when the key is already distributed
+		if errors.Is(err, errSkipJobScheduling) {
+			return nil
+		}
+		return err
+	}
+
 	// get the system time location
 	location := time.Now().Location()
 	// create the cron trigger
@@ -192,7 +247,7 @@ func (x *scheduler) ScheduleWithCron(ctx context.Context, message proto.Message,
 		return err
 	}
 	// schedule the job
-	return x.scheduler.ScheduleJob(ctx, job, trigger)
+	return x.quartzScheduler.ScheduleJob(ctx, job, trigger)
 }
 
 // RemoteScheduleWithCron schedules a message to be sent to an actor in the future using a cron expression.
@@ -203,7 +258,6 @@ func (x *scheduler) RemoteScheduleWithCron(ctx context.Context, message proto.Me
 	defer x.mu.Unlock()
 	// check whether the scheduler has started or not
 	if !x.started.Load() {
-		// TODO: add a custom error
 		return errors.New("messages scheduler is not started")
 	}
 	// create the job
@@ -215,6 +269,15 @@ func (x *scheduler) RemoteScheduleWithCron(ctx context.Context, message proto.Me
 		// return true when successful
 		return true, nil
 	})
+	// check whether the job is already scheduled
+	if err := x.distributeJobKeyOrNot(ctx, job); err != nil {
+		// skip the job scheduling when the key is already distributed
+		if errors.Is(err, errSkipJobScheduling) {
+			return nil
+		}
+		return err
+	}
+
 	// get the system time location
 	location := time.Now().Location()
 	// create the cron trigger
@@ -225,5 +288,29 @@ func (x *scheduler) RemoteScheduleWithCron(ctx context.Context, message proto.Me
 		return err
 	}
 	// schedule the job
-	return x.scheduler.ScheduleJob(ctx, job, trigger)
+	return x.quartzScheduler.ScheduleJob(ctx, job, trigger)
+}
+
+// distributeJobKeyOrNot distribute the job key when it does not exist or skip it
+func (x *scheduler) distributeJobKeyOrNot(ctx context.Context, job quartz.Job) error {
+	// get the job key
+	jobKey := strconv.Itoa(job.Key())
+	// check whether the cluster mode is enabled
+	if x.cluster != nil {
+		// check the job existence
+		ok, err := x.cluster.KeyExists(ctx, jobKey)
+		// handle the error
+		if err != nil {
+			return err
+		}
+		// job is already scheduled or running skip it
+		if ok {
+			return errSkipJobScheduling
+		}
+		// set the job key
+		if err := x.cluster.SetKey(ctx, jobKey); err != nil {
+			return err
+		}
+	}
+	return nil
 }

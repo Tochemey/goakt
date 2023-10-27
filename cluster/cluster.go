@@ -55,6 +55,10 @@ type Interface interface {
 	GetActor(ctx context.Context, actorName string) (*internalpb.WireActor, error)
 	// GetPartition returns the partition where a given actor is stored
 	GetPartition(actorName string) int
+	// SetKey sets a given key to the cluster
+	SetKey(ctx context.Context, key string) error
+	// KeyExists checks the existence of a given key
+	KeyExists(ctx context.Context, key string) (bool, error)
 }
 
 // Cluster represents the Cluster
@@ -344,9 +348,63 @@ func (c *Cluster) GetActor(ctx context.Context, actorName string) (*internalpb.W
 	}
 
 	// Ahoy we are successful
-	logger.Infof("actor (%s) successfully retrieved from the Cluster.🎉", actor.GetActorName())
+	logger.Infof("actor (%s) successfully retrieved from the cluster.🎉", actor.GetActorName())
 	// return the response
 	return actor, nil
+}
+
+// SetKey sets a given key to the cluster
+func (c *Cluster) SetKey(ctx context.Context, key string) error {
+	// create a cancellation context of 1 second timeout
+	ctx, cancelFn := context.WithTimeout(ctx, c.writeTimeout)
+	defer cancelFn()
+
+	// set the logger
+	logger := c.logger
+
+	// add some logging information
+	logger.Infof("replicating key (%s).🤔", key)
+
+	// send the record into the Cluster
+	err := c.kvStore.Put(ctx, key, true)
+	// handle the error
+	if err != nil {
+		// log the error
+		logger.Error(errors.Wrapf(err, "failed to replicate key=%s record.💥", key))
+		return err
+	}
+
+	// Ahoy we are successful
+	logger.Infof("key (%s) successfully replicated.🎉", key)
+	return nil
+}
+
+// KeyExists checks the existence of a given key
+func (c *Cluster) KeyExists(ctx context.Context, key string) (bool, error) {
+	// create a cancellation context of 1 second timeout
+	ctx, cancelFn := context.WithTimeout(ctx, c.readTimeout)
+	defer cancelFn()
+
+	// set the logger
+	logger := c.logger
+
+	// add some logging information
+	logger.Infof("checking key (%s) existence in the cluster.🤔", key)
+
+	// grab the record from the distributed store
+	resp, err := c.kvStore.Get(ctx, key)
+	// handle the error
+	if err != nil {
+		// we could not find the given actor
+		if errors.Is(err, olric.ErrKeyNotFound) {
+			logger.Warnf("key=%s is not found in the Cluster", key)
+			return false, nil
+		}
+		// log the error
+		logger.Error(errors.Wrapf(err, "failed to check key=%s existence.💥", key))
+		return false, err
+	}
+	return resp.Bool()
 }
 
 // GetPartition returns the partition where a given actor is stored
