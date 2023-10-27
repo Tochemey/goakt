@@ -3,7 +3,7 @@ module github.com/tochemey/goakt
 go 1.20
 
 require (
-	connectrpc.com/connect v1.11.1
+	connectrpc.com/connect v1.12.0
 	connectrpc.com/otelconnect v0.6.0
 	github.com/buraksezer/olric v0.5.4
 	github.com/caarlos0/env/v9 v9.0.0
@@ -12,7 +12,7 @@ require (
 	github.com/deckarep/golang-set/v2 v2.3.1
 	github.com/flowchartsman/retry v1.2.0
 	github.com/google/go-cmp v0.6.0
-	github.com/google/uuid v1.3.1
+	github.com/google/uuid v1.4.0
 	github.com/grandcat/zeroconf v1.0.0
 	github.com/joho/godotenv v1.5.1
 	github.com/nats-io/nats-server/v2 v2.10.3
@@ -27,7 +27,7 @@ require (
 	go.opentelemetry.io/otel/sdk v1.19.0
 	go.opentelemetry.io/otel/trace v1.19.0
 	go.uber.org/atomic v1.11.0
-	go.uber.org/goleak v1.2.1
+	go.uber.org/goleak v1.3.0
 	go.uber.org/zap v1.26.0
 	golang.org/x/net v0.17.0
 	google.golang.org/protobuf v1.31.0
