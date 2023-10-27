@@ -153,19 +153,13 @@ func (x *scheduler) ScheduleOnce(ctx context.Context, message proto.Message, pid
 		return true, nil
 	})
 
-	// get the job key
-	jobKey := strconv.Itoa(job.Key())
-
-	// check whether the cluster mode is enabled
-	if x.cluster != nil {
-		// check the job existence and ignore the error
-		if ok, _ := x.cluster.KeyExists(ctx, jobKey); ok {
+	// check whether the job is already scheduled
+	if err := x.distributeJobKeyOrNot(ctx, job); err != nil {
+		// skip the job scheduling when the key is already distributed
+		if errors.Is(err, errSkipJobScheduling) {
 			return nil
 		}
-		// set the job key
-		if err := x.cluster.SetKey(ctx, jobKey); err != nil {
-			return err
-		}
+		return err
 	}
 
 	// schedule the job
