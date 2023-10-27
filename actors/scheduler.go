@@ -31,6 +31,7 @@ import (
 
 	"github.com/pkg/errors"
 	"github.com/reugn/go-quartz/quartz"
+	qlogger "github.com/reugn/go-quartz/quartz/logger"
 	"github.com/tochemey/goakt/log"
 	addresspb "github.com/tochemey/goakt/pb/address/v1"
 	"go.uber.org/atomic"
@@ -62,7 +63,8 @@ func newScheduler(logger log.Logger, stopTimeout time.Duration) *scheduler {
 		logger:      logger,
 		stopTimeout: stopTimeout,
 	}
-
+	// disable the underlying scheduler logger
+	qlogger.SetDefault(qlogger.NewSimpleLogger(nil, qlogger.LevelOff))
 	// return the instance of the scheduler
 	return scheduler
 }
@@ -73,18 +75,26 @@ func (x *scheduler) Start(ctx context.Context) {
 	x.mu.Lock()
 	// release the lock once done
 	defer x.mu.Unlock()
+	// add logging information
+	x.logger.Info("starting messages scheduler...")
 	// start the scheduler
 	x.scheduler.Start(ctx)
 	// set the started
 	x.started.Store(x.scheduler.IsStarted())
+	// add logging information
+	x.logger.Info("messages scheduler started.:)")
 }
 
 // Stop stops the scheduler
 func (x *scheduler) Stop(ctx context.Context) {
+	// add logging information
+	x.logger.Info("stopping messages scheduler...")
 	// acquire the lock
 	x.mu.Lock()
 	// release the lock once done
 	defer x.mu.Unlock()
+	// clear all scheduled jobs
+	x.scheduler.Clear()
 	// stop the scheduler
 	x.scheduler.Stop()
 	// set the started
@@ -94,6 +104,8 @@ func (x *scheduler) Stop(ctx context.Context) {
 	defer cancel()
 	// wait for all workers to exit
 	x.scheduler.Wait(ctx)
+	// add logging information
+	x.logger.Info("messages scheduler stopped...:)")
 }
 
 // ScheduleOnce schedules a message that will be delivered to the receiver actor

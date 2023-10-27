@@ -212,6 +212,7 @@ func TestTell(t *testing.T) {
 		defer cancel()
 
 		err = sys.Stop(ctx)
+		assert.NoError(t, err)
 	})
 	t.Run("With stopped actor", func(t *testing.T) {
 		// create the context
@@ -346,6 +347,7 @@ func TestRemoteTell(t *testing.T) {
 		time.Sleep(time.Second)
 
 		err = sys.Stop(ctx)
+		assert.NoError(t, err)
 	})
 	t.Run("With invalid message", func(t *testing.T) {
 		// create the context
@@ -390,6 +392,7 @@ func TestRemoteTell(t *testing.T) {
 		time.Sleep(time.Second)
 
 		err = sys.Stop(ctx)
+		assert.NoError(t, err)
 	})
 	t.Run("With remote service failure", func(t *testing.T) {
 		// create the context
@@ -441,6 +444,7 @@ func TestRemoteTell(t *testing.T) {
 		time.Sleep(time.Second)
 
 		err = sys.Stop(ctx)
+		assert.NoError(t, err)
 	})
 }
 
@@ -501,6 +505,7 @@ func TestRemoteAsk(t *testing.T) {
 		time.Sleep(time.Second)
 
 		err = sys.Stop(ctx)
+		assert.NoError(t, err)
 	})
 	t.Run("With invalid message", func(t *testing.T) {
 		// create the context
@@ -548,6 +553,7 @@ func TestRemoteAsk(t *testing.T) {
 		time.Sleep(time.Second)
 
 		err = sys.Stop(ctx)
+		assert.NoError(t, err)
 	})
 	t.Run("With remote service failure", func(t *testing.T) {
 		// create the context

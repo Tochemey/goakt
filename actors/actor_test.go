@@ -30,11 +30,9 @@ import (
 	"testing"
 	"time"
 
-	"go.uber.org/atomic"
-
 	"github.com/pkg/errors"
-
 	testspb "github.com/tochemey/goakt/test/data/pb/v1"
+	"go.uber.org/atomic"
 	"go.uber.org/goleak"
 )
 
@@ -46,14 +44,18 @@ func TestMain(m *testing.M) {
 }
 
 // Tester is an actor that helps run various test scenarios
-type Tester struct{}
+type Tester struct {
+	counter *atomic.Int64
+}
 
 // enforce compilation error
 var _ Actor = (*Tester)(nil)
 
 // NewTester creates a Tester
 func NewTester() *Tester {
-	return &Tester{}
+	return &Tester{
+		counter: atomic.NewInt64(0),
+	}
 }
 
 // Init initialize the actor. This function can be used to set up some database connections
@@ -64,6 +66,7 @@ func (p *Tester) PreStart(context.Context) error {
 
 // Shutdown gracefully shuts down the given actor
 func (p *Tester) PostStop(context.Context) error {
+	p.counter.Store(0)
 	return nil
 }
 
@@ -71,6 +74,7 @@ func (p *Tester) PostStop(context.Context) error {
 func (p *Tester) Receive(ctx ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *testspb.TestSend:
+		p.counter.Inc()
 	case *testspb.TestPanic:
 		panic("Boom")
 	case *testspb.TestReply:
