@@ -1,4 +1,4 @@
-## Go-Akt
+# Go-Akt
 
 [![build](https://img.shields.io/github/actions/workflow/status/Tochemey/goakt/build.yml?branch=main)](https://github.com/Tochemey/goakt/actions/workflows/build.yml)
 [![codecov](https://codecov.io/gh/Tochemey/goakt/branch/main/graph/badge.svg?token=J0p9MzwSRH)](https://codecov.io/gh/Tochemey/goakt)
@@ -16,7 +16,7 @@ across a cluster of computers.
 If you are not familiar with the actor model, the blog post from Brian Storti [here](https://www.brianstorti.com/the-actor-model/) is an excellent and short introduction to the actor model.
 Also, check reference section at the end of the post for more material regarding actor model.
 
-### Table of Content
+## Table of Content
 
 - [Design Principles](#design-principles)
 - [Features](#features)
@@ -26,6 +26,7 @@ Also, check reference section at the end of the post for more material regarding
     - [Mailbox](#mailbox)
     - [Dead Letters](#dead-letters)
     - [Messaging](#messaging)
+    - [Scheduler](#scheduler)
     - [Stashing](#stashing)
     - [Remoting](#remoting)
     - [Clustering](#cluster)
@@ -44,7 +45,7 @@ Also, check reference section at the end of the post for more material regarding
     - [Local Test and Linter](#test--linter)
 - [Benchmark](#benchmark)
 
-### Design Principles
+## Design Principles
 
 This framework has been designed:
 - to be very minimalistic - it caters for the core component of an actor framework as stated by the father of the actor framework [here](https://youtu.be/7erJ1DV_Tlo).
@@ -54,9 +55,9 @@ This framework has been designed:
 - to be very fast.
 - to expose interfaces for custom integrations rather than making it convoluted with unnecessary features.
 
-### Features
+## Features
 
-#### Actors
+### Actors
 
 The fundamental building blocks of Go-Akt are actors.
 - They are independent, isolated unit of computation with their own state.
@@ -91,7 +92,7 @@ The fundamental building blocks of Go-Akt are actors.
 - can be gracefully stopped (killed). Every message in the mailbox prior to stoppage will be processed within a
   configurable time period.
 
-#### Actor System
+### Actor System
 
 Without an actor system, it is not possible to create actors in Go-Akt. Only a single actor system
 is recommended to be created per application when using Go-Akt. At the moment the single instance is not enforced in Go-Akt, this simple implementation is left to the discretion of the developer. To
@@ -106,7 +107,7 @@ ActorSystem has the following characteristics:
 - Fault Tolerance and Supervision - Set during the creation of the actor system.
 - Actor Addressing - Every actor in the ActorSystem has an address.
 
-#### Behaviors
+### Behaviors
 
 Actors in Go-Akt have the power to switch their behaviors at any point in time. When you change the actor behavior, the new
 behavior will take effect for all subsequent messages until the behavior is changed again. The current message will
@@ -120,11 +121,11 @@ To change the behavior, call the following methods on the [ReceiveContext interf
 - `BecomeStacked` - sets a new behavior to the actor to the top of the behavior stack, while maintaining the previous ones.
 - `UnBecomeStacked()` - sets the actor behavior to the previous behavior before `BecomeStacked()` was called. This only works with `BecomeStacked()`.
 
-#### Mailbox
+### Mailbox
 
 Once can implement a custom mailbox. See [Mailbox](./actors/mailbox.go). The default mailbox makes use of buffered channels.
 
-#### Dead Letters
+### Dead Letters
 
 Dead letters are basically messages that cannot be delivered or that were not handled by a given actor.
 Those messages are encapsulated in an event called [DeadletterEvent](./protos/goakt/events/v1/events.proto).
@@ -134,13 +135,38 @@ the receiving actor does not know how to handle a particular message.
 Dead letters are not propagated over the network, there are tied to the local actor system.
 To receive the dead letter, you just need to call the actor system `Subscribe` and specify the `Event_DEAD_LETTER` event type.
 
-#### Messaging
+### Messaging
 
 Communication between actors is achieved exclusively through message passing. In Go-Akt _Google
 Protocol Buffers_ is used to define messages.
 The choice of protobuf is due to easy serialization over wire and strong schema definition.
 
-#### Stashing
+### Scheduler
+
+You can schedule sending messages to actor that will be acted upon in the future. To achieve that you can use the following methods on the [Actor System](./actors/actor_system.go):
+
+- `ScheduleOnce` - will send the given message to a local actor after a given interval
+- `RemoteScheduleOnce` - will send the given message to a remote actor after a given interval. This requires remoting to be enabled on the actor system.
+- `ScheduleWithCron` - will send the given message to a local actor using a [cron expression](#cron-expression-format).
+- `RemoteScheduleWithCron` - will send the given message to a remote actor using a [cron expression](#cron-expression-format). This requires remoting to be enabled on the actor system.
+
+#### Cron Expression Format
+
+| Field Name   | Mandatory | Allowed Values  | Allowed Special Characters |
+|--------------|-----------|-----------------|----------------------------|
+| Seconds      | YES       | 0-59            | , - * /                    |
+| Minutes      | YES       | 0-59            | , - * /                    |
+| Hours        | YES       | 0-23            | , - * /                    |
+| Day of month | YES       | 1-31            | , - * ? /                  |
+| Month        | YES       | 1-12 or JAN-DEC | , - * /                    |
+| Day of week  | YES       | 1-7 or SUN-SAT  | , - * ? /                  |
+| Year         | NO        | empty, 1970-    | , - * /                    |
+
+#### Note
+
+When running the actor system in a cluster only once instance of a given scheduled message will be running across the entire cluster.
+
+### Stashing
 
 Stashing is a mechanism you can enable in your actors, so they can temporarily stash away messages they cannot or should
 not handle at the moment.
@@ -161,36 +187,36 @@ To use the stashing feature, call the following methods on the [ReceiveContext i
   in the same order they arrived. The stash buffer will be empty after processing all messages, unless an exception is
   thrown or messages are stashed while unstashing.
 
-#### Remoting
+### Remoting
 
 This allows remote actors to communicate. The underlying technology is gRPC.
 
-#### Cluster
+### Cluster
 
 This offers simple scalability, partitioning (sharding), and re-balancing out-of-the-box. Go-Akt
 nodes are automatically discovered. See [Clustering](#clustering).
 
-#### Logging
+### Logging
 
 A simple logging interface to allow custom logger to be implemented instead of using the default logger.
 
-#### Testkit
+### Testkit
 
 To help implement unit tests in GoAkt-based applications. See [Testkit](./testkit)
 
-### Use Cases
+## Use Cases
 
 - Event-Driven programming
 - Event Sourcing and CQRS - [eGo](https://github.com/Tochemey/ego)
 - Highly Available, Fault-Tolerant Distributed Systems
 
-### Installation
+## Installation
 
 ```bash
 go get github.com/tochemey/goakt
 ```
 
-### Clustering
+## Clustering
 
 The cluster engine depends upon the [discovery](./discovery/provider.go) mechanism to find other nodes in the cluster.
 Under the hood, it leverages [Olric](https://github.com/buraksezer/olric)
@@ -217,7 +243,7 @@ identify the host node on which the cluster service is running:
 _Note: Depending upon the discovery provider implementation, the `GOSSIP_PORT` and `CLUSTER_PORT` can be the same.
 The same applies to `NODE_NAME` and `NODE_IP`. This is up to the discretion of the implementation_
 
-#### Operations Guide
+### Operations Guide
 
 The following outlines the cluster mode operations which can help have a healthy GoAkt cluster:
 
@@ -226,9 +252,9 @@ The following outlines the cluster mode operations which can help have a healthy
 - One can remove nodes. However, to avoid losing data, one need to scale down the cluster to the minimum number of nodes
   which started the cluster.
 
-#### Built-in Discovery Providers
+### Built-in Discovery Providers
 
-##### Kubernetes Discovery Provider Setup
+#### Kubernetes Discovery Provider Setup
 
 To get the kubernetes discovery working as expected, the following pod labels need to be set:
 
@@ -243,7 +269,7 @@ engine to work as expected:
 - `cluster-port`: help the cluster engine to communicate with other GoAkt nodes in the cluster
 - `remoting-port`: help for remoting messaging between actors
 
-###### Get Started
+##### Get Started
 
 ```go
 const (
@@ -264,7 +290,7 @@ serviceDiscovery := discovery.NewServiceDiscovery(disco, discoOptions)
 // pass the service discovery when enabling cluster mode in the actor system
 ```
 
-###### Role Based Access
+##### Role Based Access
 
 You’ll also have to grant the Service Account that your pods run under access to list pods. The following configuration
 can be used as a starting point.
@@ -296,19 +322,19 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
 ```
 
-###### Sample Project
+##### Sample Project
 
 A working example can be found [here](./examples/actor-cluster/k8s) with a
 small [doc](./examples/actor-cluster/k8s/doc.md) showing how to run it.
 
-##### mDNS Discovery Provider Setup
+#### mDNS Discovery Provider Setup
 
 - `Service Name`: the service name
 - `Domain`: The mDNS discovery domain
 - `Port`: The mDNS discovery port
 - `IPv6`: States whether to lookup for IPv6 addresses.
 
-##### NATS Discovery Provider Setup
+#### NATS Discovery Provider Setup
 
 To use the NATS discovery provider one needs to provide the following:
 
@@ -338,11 +364,11 @@ serviceDiscovery := discovery.NewServiceDiscovery(disco, discoOptions)
 // pass the service discovery when enabling cluster mode in the actor system
 ```
 
-### Examples
+## Examples
 
 Kindly check out the [examples'](./examples) folder.
 
-### Contribution
+## Contribution
 
 Contributions are welcome!
 The project adheres to [Semantic Versioning](https://semver.org)
@@ -355,7 +381,7 @@ To contribute please:
 - Create a feature branch
 - Submit a [pull request](https://help.github.com/articles/using-pull-requests)
 
-#### Test & Linter
+### Test & Linter
 
 Prior to submitting a [pull request](https://help.github.com/articles/using-pull-requests), please run:
 
@@ -363,7 +389,7 @@ Prior to submitting a [pull request](https://help.github.com/articles/using-pull
 earthly +test
 ```
 
-### Benchmark
+## Benchmark
 
 One can run the benchmark test: `go test -bench=. -benchtime 2s -count 5 -benchmem -cpu 8 -run notest` from
 the [bench package](./bench) or just run the command `make bench`.
