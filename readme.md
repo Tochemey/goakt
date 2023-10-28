@@ -67,30 +67,30 @@ The fundamental building blocks of Go-Akt are actors.
   mechanisms.
 - They can be stateful and stateless depending upon the system to build.
 - Every actor in Go-Akt:
-- has a process id [`PID`](./actors/pid.go). Via the process id any allowable action can be executed by the
-  actor.
-- has a lifecycle via the following methods: [`PreStart`](./actors/actor.go), [`PostStop`](./actors/actor.go).
-  It means it
-  can live and die like any other process.
-- handles and responds to messages via the method [`Receive`](./actors/actor.go). While handling messages it
-  can:
-- create other (child) actors via their process id [`PID`](./actors/pid.go) `SpawnChild` method
-- send messages to other actors locally or remotely via their process
-  id [`PID`](./actors/pid.go) `Ask`, `RemoteAsk`(request/response
-  fashion) and `Tell`, `RemoteTell`(fire-and-forget fashion) methods
-- stop (child) actors via their process id [`PID`](./actors/pid.go)
-- watch/unwatch (child) actors via their process id [`PID`](./actors/pid.go) `Watch` and `UnWatch` methods
-- supervise the failure behavior of (child) actors. The supervisory strategy to adopt is set during its
-  creation:
-- Restart and Stop directive are supported at the moment.
-- remotely lookup for an actor on another node via their process id [`PID`](./actors/pid.go) `RemoteLookup`.
-  This
-  allows it to send messages remotely via `RemoteAsk` or `RemoteTell` methods
-- stash/unstash messages. See [Stashing](#stashing)
-- can adopt various form using the [Behavior](#behaviors) feature
-- can be restarted (respawned)
-- can be gracefully stopped (killed). Every message in the mailbox prior to stoppage will be processed within a
-  configurable time period.
+  - has a process id [`PID`](./actors/pid.go). Via the process id any allowable action can be executed by the
+    actor.
+  - has a lifecycle via the following methods: [`PreStart`](./actors/actor.go), [`PostStop`](./actors/actor.go).
+    It means it
+    can live and die like any other process.
+  - handles and responds to messages via the method [`Receive`](./actors/actor.go). While handling messages it
+    can:
+  - create other (child) actors via their process id [`PID`](./actors/pid.go) `SpawnChild` method
+  - send messages to other actors locally or remotely via their process
+    id [`PID`](./actors/pid.go) `Ask`, `RemoteAsk`(request/response
+    fashion) and `Tell`, `RemoteTell`(fire-and-forget fashion) methods
+  - stop (child) actors via their process id [`PID`](./actors/pid.go)
+  - watch/unwatch (child) actors via their process id [`PID`](./actors/pid.go) `Watch` and `UnWatch` methods
+  - supervise the failure behavior of (child) actors. The supervisory strategy to adopt is set during its
+    creation:
+  - Restart and Stop directive are supported at the moment.
+  - remotely lookup for an actor on another node via their process id [`PID`](./actors/pid.go) `RemoteLookup`.
+    This
+    allows it to send messages remotely via `RemoteAsk` or `RemoteTell` methods
+  - stash/unstash messages. See [Stashing](#stashing)
+  - can adopt various form using the [Behavior](#behaviors) feature
+  - can be restarted (respawned)
+  - can be gracefully stopped (killed). Every message in the mailbox prior to stoppage will be processed within a
+    configurable time period.
 
 ### Actor System
 
