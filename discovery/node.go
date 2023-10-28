@@ -28,7 +28,7 @@ import (
 	"net"
 	"strconv"
 
-	"github.com/caarlos0/env/v9"
+	"github.com/caarlos0/env/v10"
 )
 
 // hostNodeConfig helps read the host Node settings
