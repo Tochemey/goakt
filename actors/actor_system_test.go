@@ -32,14 +32,13 @@ import (
 	"testing"
 	"time"
 
-	eventspb "github.com/tochemey/goakt/pb/events/v1"
-
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tochemey/goakt/discovery"
 	"github.com/tochemey/goakt/log"
 	addresspb "github.com/tochemey/goakt/pb/address/v1"
+	eventspb "github.com/tochemey/goakt/pb/events/v1"
 	testpb "github.com/tochemey/goakt/test/data/pb/v1"
 	testkit "github.com/tochemey/goakt/testkit/discovery"
 	"github.com/travisjeffery/go-dynaport"
