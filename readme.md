@@ -167,7 +167,7 @@ You can schedule sending messages to actor that will be acted upon in the future
 
 #### Note
 
-When running the actor system in a cluster only once instance of a given scheduled message will be running across the entire cluster.
+When running the actor system in a cluster only one instance of a given scheduled message will be running across the entire cluster.
 
 ### Stashing
 
