@@ -142,7 +142,11 @@ To receive the dead letter, you just need to call the actor system `Subscribe` a
 
 Communication between actors is achieved exclusively through message passing. In Go-Akt _Google
 Protocol Buffers_ is used to define messages.
-The choice of protobuf is due to easy serialization over wire and strong schema definition.
+The choice of protobuf is due to easy serialization over wire and strong schema definition. As stated previously the following messaging patterns are supported:
+- `Tell/RemoteTell` - send a message to an actor and forget it
+- `Ask/RemoteAsk` - send a message to an actor and expect a reply within a time period
+- `Forward` - pass a message from one actor to the actor by preserving the initial sender of the message. 
+  At the moment you can only forward messages from the `ReceiveContext` when handling a message within an actor and this to a local actor.
 
 ### Scheduler
 
