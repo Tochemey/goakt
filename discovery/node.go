@@ -30,7 +30,6 @@ import (
 	"strconv"
 
 	"github.com/caarlos0/env/v10"
-	"github.com/pkg/errors"
 )
 
 // hostNodeConfig helps read the host Node settings
@@ -77,11 +76,7 @@ func HostNode() (*Node, error) {
 	// check for empty host and name
 	if cfg.Host == "" {
 		// let us perform a host lookup
-		host, err := os.Hostname()
-		// handle the error
-		if err != nil {
-			return nil, errors.Wrap(err, "failed to get the hostname")
-		}
+		host, _ := os.Hostname()
 		// set the host
 		cfg.Host = host
 	}
