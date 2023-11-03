@@ -26,9 +26,11 @@ package discovery
 
 import (
 	"net"
+	"os"
 	"strconv"
 
 	"github.com/caarlos0/env/v10"
+	"github.com/pkg/errors"
 )
 
 // hostNodeConfig helps read the host Node settings
@@ -36,8 +38,8 @@ type hostNodeConfig struct {
 	GossipPort   int    `env:"GOSSIP_PORT"`
 	ClusterPort  int    `env:"CLUSTER_PORT"`
 	RemotingPort int    `env:"REMOTING_PORT"`
-	Name         string `env:"NODE_NAME"`
-	Host         string `env:"NODE_IP"`
+	Name         string `env:"NODE_NAME" envDefault:""`
+	Host         string `env:"NODE_IP" envDefault:""`
 }
 
 // Node represents a discovered Node
@@ -72,6 +74,23 @@ func HostNode() (*Node, error) {
 	if err := env.ParseWithOptions(cfg, opts); err != nil {
 		return nil, err
 	}
+	// check for empty host and name
+	if cfg.Host == "" {
+		// let us perform a host lookup
+		host, err := os.Hostname()
+		// handle the error
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to get the hostname")
+		}
+		// set the host
+		cfg.Host = host
+	}
+
+	// set the name as host if it is empty
+	if cfg.Name == "" {
+		cfg.Name = cfg.Host
+	}
+
 	// create the host node
 	return &Node{
 		Name:         cfg.Name,

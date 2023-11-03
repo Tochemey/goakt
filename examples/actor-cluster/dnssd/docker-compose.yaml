@@ -1,0 +1,16 @@
+version: "3.9"
+
+services:
+  accounts:
+    image: "accounts:dev"
+    command:
+      - run
+    ports:
+      - "50051"
+    environment:
+      SERVICE_NAME: accounts
+      SYSTEM_NAME: AccountsSystem
+      PORT: 50051
+      GOSSIP_PORT: 3322
+      CLUSTER_PORT: 3320
+      REMOTING_PORT: 50052
