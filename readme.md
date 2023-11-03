@@ -43,6 +43,7 @@ Also, check reference section at the end of the post for more material regarding
         - [Kubernetes](#kubernetes-discovery-provider-setup)
         - [mDNS](#mdns-discovery-provider-setup)
         - [NATS](#nats-discovery-provider-setup)
+        - [Domain Name Discovery](#dns-provider-setup)
 - [Examples](#examples)
 - [Contribution](#contribution)
     - [Local Test and Linter](#test--linter)
@@ -235,6 +236,7 @@ At the moment the following providers are implemented:
 - the [kubernetes](https://kubernetes.io/docs/home/) [api integration](./discovery/kubernetes) is fully functional
 - the [mDNS](https://datatracker.ietf.org/doc/html/rfc6762) and [DNS-SD](https://tools.ietf.org/html/rfc6763)
 - the [NATS](https://nats.io/) [integration](./discovery/nats) is fully functional
+- the [DNS](./discovery/dnssd) is fully functional
 
 Note: One can add additional discovery providers using the following [interface](./discovery/provider.go)
 
@@ -370,6 +372,33 @@ discoOptions := discovery.Config{
 serviceDiscovery := discovery.NewServiceDiscovery(disco, discoOptions)
 // pass the service discovery when enabling cluster mode in the actor system
 ```
+
+#### DNS Provider Setup
+
+This provider performs nodes discovery based upon the domain name provided. This is very useful when doing local development
+using docker.
+
+To use the DNS discovery provider one needs to provide the following:
+
+- `Domain Name`: the NATS Server address
+- `IPv6`: States whether to lookup for IPv6 addresses.
+
+```go
+const domainName = "accounts"
+// instantiate the dnssd discovery provider
+disco := dnssd.NewDiscovery()
+// define the discovery options
+discoOptions := discovery.Config{
+    dnssd.DomainName: domainName,
+    dnssd.IPv6:       false,
+}
+// define the service discovery
+serviceDiscovery := discovery.NewServiceDiscovery(disco, discoOptions
+// pass the service discovery when enabling cluster mode in the actor system
+```
+##### Sample Project
+
+There is an example [here](./examples/actor-cluster/dnssd) that shows how to use it.
 
 ## Examples
 

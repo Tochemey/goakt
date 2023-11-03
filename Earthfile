@@ -109,17 +109,40 @@ sample-pb:
     # save artifact to
     SAVE ARTIFACT gen gen AS LOCAL examples/protos
 
-compile-actor-cluster:
+compile-k8s:
     COPY +vendor/files ./
 
     RUN go build -mod=vendor  -o bin/accounts ./examples/actor-cluster/k8s
     SAVE ARTIFACT bin/accounts /accounts
 
-actor-cluster-image:
+k8s-image:
     FROM alpine:3.17
 
     WORKDIR /app
-    COPY +compile-actor-cluster/accounts ./accounts
+    COPY +compile-k8s/accounts ./accounts
+    RUN chmod +x ./accounts
+
+    # expose the various ports in the container
+    EXPOSE 50051
+    EXPOSE 50052
+    EXPOSE 3322
+    EXPOSE 3320
+
+    ENTRYPOINT ["./accounts"]
+    SAVE IMAGE accounts:dev
+
+
+compile-dnssd:
+    COPY +vendor/files ./
+
+    RUN go build -mod=vendor  -o bin/accounts ./examples/actor-cluster/dnssd
+    SAVE ARTIFACT bin/accounts /accounts
+
+dnssd-image:
+    FROM alpine:3.17
+
+    WORKDIR /app
+    COPY +compile-dnssd/accounts ./accounts
     RUN chmod +x ./accounts
 
     # expose the various ports in the container

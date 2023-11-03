@@ -26,6 +26,7 @@ package discovery
 
 import (
 	"fmt"
+	"os"
 	"strconv"
 	"testing"
 
@@ -57,6 +58,33 @@ func TestGetHostNode(t *testing.T) {
 		assert.Equal(t, fmt.Sprintf("%s:%d", host, clusterPort), clusterAddr)
 		assert.Equal(t, fmt.Sprintf("%s:%d", host, gossipPort), gossipAddr)
 	})
+	t.Run("With empty host and name", func(t *testing.T) {
+		// generate the ports for the single node
+		nodePorts := dynaport.Get(3)
+		gossipPort := nodePorts[0]
+		clusterPort := nodePorts[1]
+		remotingPort := nodePorts[2]
+		host, err := os.Hostname()
+		require.NoError(t, err)
+		require.NotNil(t, host)
+
+		t.Setenv("GOSSIP_PORT", strconv.Itoa(gossipPort))
+		t.Setenv("CLUSTER_PORT", strconv.Itoa(clusterPort))
+		t.Setenv("REMOTING_PORT", strconv.Itoa(remotingPort))
+		t.Setenv("NODE_NAME", "")
+		t.Setenv("NODE_IP", "")
+
+		node, err := HostNode()
+		require.NoError(t, err)
+		require.NotNil(t, node)
+		clusterAddr := node.ClusterAddress()
+		gossipAddr := node.GossipAddress()
+		assert.Equal(t, fmt.Sprintf("%s:%d", host, clusterPort), clusterAddr)
+		assert.Equal(t, fmt.Sprintf("%s:%d", host, gossipPort), gossipAddr)
+		assert.Equal(t, host, node.Host)
+		assert.Equal(t, host, node.Name)
+	})
+
 	t.Run("With host node env vars not set", func(t *testing.T) {
 		node, err := HostNode()
 		require.Error(t, err)
