@@ -33,7 +33,7 @@ import (
 
 	"connectrpc.com/connect"
 	"connectrpc.com/otelconnect"
-	"github.com/cenkalti/backoff"
+	"github.com/flowchartsman/retry"
 	"github.com/pkg/errors"
 	"github.com/tochemey/goakt/eventstream"
 	internalpb "github.com/tochemey/goakt/internal/v1"
@@ -153,11 +153,15 @@ type pid struct {
 
 	// specifies how long the sender of a mail should wait to receive a reply
 	// when using SendReply. The default value is 5s
-	sendReplyTimeout atomic.Duration
+	replyTimeout atomic.Duration
 
 	// specifies the maximum of retries to attempt when the actor
-	// initialization fails. The default value is 5 seconds
+	// initialization fails. The default value is 5
 	initMaxRetries atomic.Int32
+
+	// specifies the init timeout. the default initialization timeout is
+	// 1s
+	initTimeout atomic.Duration
 
 	// shutdownTimeout specifies the graceful shutdown timeout
 	// the default value is 5 seconds
@@ -246,7 +250,8 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 	pid.stashCapacity.Store(0)
 	pid.isRunning.Store(false)
 	pid.passivateAfter.Store(DefaultPassivationTimeout)
-	pid.sendReplyTimeout.Store(DefaultReplyTimeout)
+	pid.replyTimeout.Store(DefaultReplyTimeout)
+	pid.initTimeout.Store(DefaultInitTimeout)
 
 	// set the custom options to override the default values
 	for _, opt := range opts {
@@ -457,7 +462,7 @@ func (p *pid) SpawnChild(ctx context.Context, name string, actor Actor) (PID, er
 		actor,
 		withInitMaxRetries(int(p.initMaxRetries.Load())),
 		withPassivationAfter(p.passivateAfter.Load()),
-		withSendReplyTimeout(p.sendReplyTimeout.Load()),
+		withSendReplyTimeout(p.replyTimeout.Load()),
 		withCustomLogger(p.logger),
 		withActorSystem(p.system),
 		withSupervisorStrategy(p.supervisorStrategy),
@@ -465,6 +470,7 @@ func (p *pid) SpawnChild(ctx context.Context, name string, actor Actor) (PID, er
 		withStash(p.stashCapacity.Load()),
 		withMailbox(p.mailbox.Clone()),
 		withEventsStream(p.eventsStream),
+		withInitTimeout(p.initTimeout.Load()),
 		withShutdownTimeout(p.shutdownTimeout.Load()))
 
 	// handle the error
@@ -516,7 +522,7 @@ func (p *pid) Ask(ctx context.Context, to PID, message proto.Message) (response 
 	to.doReceive(context)
 
 	// await patiently to receive the response from the actor
-	for await := time.After(p.sendReplyTimeout.Load()); ; {
+	for await := time.After(p.replyTimeout.Load()); ; {
 		select {
 		case response = <-context.response:
 			return
@@ -775,12 +781,15 @@ func (p *pid) doReceive(ctx ReceiveContext) {
 func (p *pid) init(ctx context.Context) error {
 	// add some logging info
 	p.logger.Info("Initialization process has started...")
-	// create the exponential backoff object
-	expoBackoff := backoff.WithMaxRetries(backoff.NewExponentialBackOff(), uint64(p.initMaxRetries.Load()))
+	// create a context to handle the start timeout
+	cancelCtx, cancel := context.WithTimeout(ctx, p.initTimeout.Load())
+	// cancel the context when done
+	defer cancel()
+	// create a new retrier that will try a maximum of `initMaxRetries` times, with
+	// an initial delay of 100 ms and a maximum delay of 1 second
+	retrier := retry.NewRetrier(int(p.initMaxRetries.Load()), 100*time.Millisecond, time.Second)
 	// init the actor initialization receive
-	err := backoff.Retry(func() error {
-		return p.Actor.PreStart(ctx)
-	}, expoBackoff)
+	err := retrier.RunContext(cancelCtx, p.Actor.PreStart)
 	// handle backoff error
 	if err != nil {
 		return ErrInitFailure(err)
@@ -799,10 +808,11 @@ func (p *pid) reset() {
 	// reset the various settings of the PID
 	p.lastProcessingTime = atomic.Time{}
 	p.passivateAfter.Store(DefaultPassivationTimeout)
-	p.sendReplyTimeout.Store(DefaultReplyTimeout)
+	p.replyTimeout.Store(DefaultReplyTimeout)
 	p.shutdownTimeout.Store(DefaultShutdownTimeout)
 	p.initMaxRetries.Store(DefaultInitMaxRetries)
 	p.lastProcessingDuration.Store(0)
+	p.initTimeout.Store(0)
 	p.children = newPIDMap(10)
 	p.watchMen = slices.NewConcurrentSlice[*watchMan]()
 	p.telemetry = telemetry.New()

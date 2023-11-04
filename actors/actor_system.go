@@ -141,6 +141,9 @@ type actorSystem struct {
 	// Specifies the maximum of retries to attempt when the actor
 	// initialization fails. The default value is 5
 	actorInitMaxRetries int
+	// Specifies the actors initialization timeout
+	// The default value is 1s
+	actorInitTimeout time.Duration
 	// Specifies the supervisor strategy
 	supervisorStrategy StrategyDirective
 	// Specifies the telemetry config
@@ -355,6 +358,7 @@ func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor) (PID,
 		withMailbox(x.mailbox),
 		withStash(x.stashBuffer),
 		withEventsStream(x.eventsStream),
+		withInitTimeout(x.actorInitTimeout),
 		withTelemetry(x.telemetry))
 
 	// handle the error
