@@ -46,7 +46,7 @@ func withPassivationAfter(duration time.Duration) pidOption {
 // in a receive-reply pattern
 func withSendReplyTimeout(timeout time.Duration) pidOption {
 	return func(pid *pid) {
-		pid.sendReplyTimeout.Store(timeout)
+		pid.replyTimeout.Store(timeout)
 	}
 }
 
@@ -125,5 +125,12 @@ func withStash(capacity uint64) pidOption {
 func withEventsStream(stream *eventstream.EventsStream) pidOption {
 	return func(pid *pid) {
 		pid.eventsStream = stream
+	}
+}
+
+// withInitTimeout sets the init timeout
+func withInitTimeout(duration time.Duration) pidOption {
+	return func(pid *pid) {
+		pid.initTimeout.Store(duration)
 	}
 }

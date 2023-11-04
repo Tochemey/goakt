@@ -51,6 +51,8 @@ const (
 	DefaultSupervisoryStrategy = StopDirective
 	// DefaultShutdownTimeout defines the default shutdown timeout
 	DefaultShutdownTimeout = 2 * time.Second
+	// DefaultInitTimeout defines the default init timeout
+	DefaultInitTimeout = time.Second
 
 	defaultMailboxSize = 4096
 	deadlettersTopic   = "topic.deadletters"

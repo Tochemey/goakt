@@ -158,3 +158,10 @@ func WithPartitionHasher(hasher hash.Hasher) Option {
 		a.partitionHasher = hasher
 	})
 }
+
+// WithActorInitTimeout sets how long in seconds an actor start timeout
+func WithActorInitTimeout(timeout time.Duration) Option {
+	return OptionFunc(func(a *actorSystem) {
+		a.actorInitTimeout = timeout
+	})
+}

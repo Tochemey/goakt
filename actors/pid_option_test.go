@@ -61,7 +61,7 @@ func TestPIDOptions(t *testing.T) {
 		{
 			name:     "WithSendReplyTimeout",
 			option:   withSendReplyTimeout(time.Second),
-			expected: &pid{sendReplyTimeout: atomicDuration},
+			expected: &pid{replyTimeout: atomicDuration},
 		},
 		{
 			name:     "WithInitMaxRetries",
@@ -107,6 +107,11 @@ func TestPIDOptions(t *testing.T) {
 			name:     "withEventsStream",
 			option:   withEventsStream(eventsStream),
 			expected: &pid{eventsStream: eventsStream},
+		},
+		{
+			name:     "withInitTimeout",
+			option:   withInitTimeout(time.Second),
+			expected: &pid{initTimeout: atomicDuration},
 		},
 	}
 	for _, tc := range testCases {

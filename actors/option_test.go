@@ -111,6 +111,11 @@ func TestOptions(t *testing.T) {
 			option:   WithPartitionHasher(hasher),
 			expected: actorSystem{partitionHasher: hasher},
 		},
+		{
+			name:     "WithActorInitTimeout",
+			option:   WithActorInitTimeout(2 * time.Second),
+			expected: actorSystem{actorInitTimeout: 2. * time.Second},
+		},
 	}
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {

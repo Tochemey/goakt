@@ -7,7 +7,6 @@ require (
 	connectrpc.com/otelconnect v0.6.0
 	github.com/buraksezer/olric v0.5.4
 	github.com/caarlos0/env/v10 v10.0.0
-	github.com/cenkalti/backoff v2.2.1+incompatible
 	github.com/cespare/xxhash/v2 v2.2.0
 	github.com/deckarep/golang-set/v2 v2.3.1
 	github.com/flowchartsman/retry v1.2.0
@@ -42,6 +41,7 @@ require (
 	github.com/armon/go-metrics v0.4.1 // indirect
 	github.com/bits-and-blooms/bitset v1.8.0 // indirect
 	github.com/buraksezer/consistent v0.10.0 // indirect
+	github.com/cenkalti/backoff v2.2.1+incompatible // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
 	github.com/emicklei/go-restful/v3 v3.11.0 // indirect
