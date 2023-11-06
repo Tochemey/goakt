@@ -183,7 +183,7 @@ func (c *Cluster) Start(ctx context.Context) error {
 		// cancel the start context
 		defer cancel()
 		// add some logging information
-		logger.Info("GoAkt Cluster Server successfully started. 🤌")
+		logger.Info("GoAkt Cluster successfully started. 🎉")
 	}
 
 	// let us create an instance of the Cluster engine
@@ -225,8 +225,6 @@ func (c *Cluster) Start(ctx context.Context) error {
 
 	// set the distributed map
 	c.kvStore = dmp
-	// we are done bootstrapping the Cluster
-	logger.Info("GoAkt Cluster successfully started. 🎉")
 	return nil
 }
 
