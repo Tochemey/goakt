@@ -450,7 +450,7 @@ func (c *Cluster) buildConfig() *config.Config {
 		JoinRetryInterval:          config.DefaultJoinRetryInterval,
 		MaxJoinAttempts:            config.DefaultMaxJoinAttempts,
 		LogLevel:                   logLevel,
-		Logger:                     c.logger.StdLogger(),
+		LogOutput:                  newLogWriter(c.logger),
 		EnableClusterEventsChannel: true,
 		Hasher:                     hasher.NewDefaultHasher(),
 	}
