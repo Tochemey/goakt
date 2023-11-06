@@ -52,10 +52,10 @@ Also, check reference section at the end of the post for more material regarding
 ## Design Principles
 
 This framework has been designed:
-- to be very minimalistic - it caters for the core component of an actor framework as stated by the father of the actor framework [here](https://youtu.be/7erJ1DV_Tlo).
+- to be very simple - it caters for the core component of an actor framework as stated by the father of the actor framework [here](https://youtu.be/7erJ1DV_Tlo).
 - to be very easy to use.
 - to have a clear and defined contract for messages - no need to implement/hide any sort of serialization.
-- to lean on proven tech and standards - no need to reinvent solved problems.
+- to make use existing battle-tested libraries in the go ecosystem - no need to reinvent solved problems.
 - to be very fast.
 - to expose interfaces for custom integrations rather than making it convoluted with unnecessary features.
 
@@ -66,7 +66,7 @@ This framework has been designed:
 The fundamental building blocks of Go-Akt are actors.
 - They are independent, isolated unit of computation with their own state.
 - They can be _long-lived_ actors or be _passivated_ after some period of time that is configured during their
-  creation.
+  creation. Use this feature with care when dealing with persistent actors (actors that require their state to be persisted).
 - They are automatically thread-safe without having to use locks or any other shared-memory synchronization
   mechanisms.
 - They can be stateful and stateless depending upon the system to build.
@@ -197,12 +197,12 @@ To use the stashing feature, call the following methods on the [ReceiveContext i
 
 ### Remoting
 
-This allows remote actors to communicate. The underlying technology is gRPC.
+This allows remote actors to communicate. The underlying technology is gRPC. To enable remoting just use the `WithRemoting` option when
+creating the actor system. See actor system [options](./actors/option.go).
 
 ### Cluster
 
-This offers simple scalability, partitioning (sharding), and re-balancing out-of-the-box. Go-Akt
-nodes are automatically discovered. See [Clustering](#clustering).
+This offers simple scalability, partitioning (sharding), and re-balancing out-of-the-box. Go-Akt nodes are automatically discovered. See [Clustering](#clustering).
 
 ### Logging
 
