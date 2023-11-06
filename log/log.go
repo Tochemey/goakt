@@ -42,7 +42,7 @@ var DiscardLogger = New(DebugLevel, io.Discard)
 // Log implements Logger interface with the underlying zap as
 // the underlying logging library
 type Log struct {
-	*zap.Logger
+	logger  *zap.Logger
 	outputs []io.Writer
 }
 
@@ -54,6 +54,7 @@ var _ Logger = &Log{}
 func New(level Level, writers ...io.Writer) *Log {
 	// create the zap Log configuration
 	cfg := zap.NewProductionConfig()
+	cfg.EncoderConfig.EncodeTime = zapcore.RFC3339TimeEncoder
 	// create the zap log core
 	var core zapcore.Core
 
@@ -110,92 +111,94 @@ func New(level Level, writers ...io.Writer) *Log {
 	}
 	// get the zap Log
 	zapLogger := zap.New(core)
+	// set the global logger
+	zap.ReplaceGlobals(zapLogger)
 	// create the instance of Log and returns it
 	return &Log{
-		Logger:  zapLogger,
+		logger:  zapLogger,
 		outputs: writers,
 	}
 }
 
 // Debug starts a message with debug level
 func (l *Log) Debug(v ...any) {
-	defer l.Logger.Sync()
-	l.Logger.Debug(fmt.Sprint(v...))
+	defer l.logger.Sync()
+	l.logger.Debug(fmt.Sprint(v...))
 }
 
 // Debugf starts a message with debug level
 func (l *Log) Debugf(format string, v ...any) {
-	defer l.Logger.Sync()
-	l.Logger.Debug(fmt.Sprintf(format, v...))
+	defer l.logger.Sync()
+	l.logger.Debug(fmt.Sprintf(format, v...))
 }
 
 // Panic starts a new message with panic level. The panic() function
 // is called which stops the ordinary flow of a goroutine.
 func (l *Log) Panic(v ...any) {
-	defer l.Logger.Sync()
-	l.Logger.Panic(fmt.Sprint(v...))
+	defer l.logger.Sync()
+	l.logger.Panic(fmt.Sprint(v...))
 }
 
 // Panicf starts a new message with panic level. The panic() function
 // is called which stops the ordinary flow of a goroutine.
 func (l *Log) Panicf(format string, v ...any) {
-	defer l.Logger.Sync()
-	l.Logger.Panic(fmt.Sprintf(format, v...))
+	defer l.logger.Sync()
+	l.logger.Panic(fmt.Sprintf(format, v...))
 }
 
 // Fatal starts a new message with fatal level. The os.Exit(1) function
 // is called which terminates the program immediately.
 func (l *Log) Fatal(v ...any) {
-	defer l.Logger.Sync()
-	l.Logger.Fatal(fmt.Sprint(v...))
+	defer l.logger.Sync()
+	l.logger.Fatal(fmt.Sprint(v...))
 }
 
 // Fatalf starts a new message with fatal level. The os.Exit(1) function
 // is called which terminates the program immediately.
 func (l *Log) Fatalf(format string, v ...any) {
-	defer l.Logger.Sync()
-	l.Logger.Fatal(fmt.Sprintf(format, v...))
+	defer l.logger.Sync()
+	l.logger.Fatal(fmt.Sprintf(format, v...))
 }
 
 // Error starts a new message with error level.
 func (l *Log) Error(v ...any) {
-	defer l.Logger.Sync()
-	l.Logger.Error(fmt.Sprint(v...))
+	defer l.logger.Sync()
+	l.logger.Error(fmt.Sprint(v...))
 }
 
 // Errorf starts a new message with error level.
 func (l *Log) Errorf(format string, v ...any) {
-	defer l.Logger.Sync()
-	l.Logger.Error(fmt.Sprintf(format, v...))
+	defer l.logger.Sync()
+	l.logger.Error(fmt.Sprintf(format, v...))
 }
 
 // Warn starts a new message with warn level
 func (l *Log) Warn(v ...any) {
-	defer l.Logger.Sync()
-	l.Logger.Warn(fmt.Sprint(v...))
+	defer l.logger.Sync()
+	l.logger.Warn(fmt.Sprint(v...))
 }
 
 // Warnf starts a new message with warn level
 func (l *Log) Warnf(format string, v ...any) {
-	defer l.Logger.Sync()
-	l.Logger.Warn(fmt.Sprintf(format, v...))
+	defer l.logger.Sync()
+	l.logger.Warn(fmt.Sprintf(format, v...))
 }
 
 // Info starts a message with info level
 func (l *Log) Info(v ...any) {
-	defer l.Logger.Sync()
-	l.Logger.Info(fmt.Sprint(v...))
+	defer l.logger.Sync()
+	l.logger.Info(fmt.Sprint(v...))
 }
 
 // Infof starts a message with info level
 func (l *Log) Infof(format string, v ...any) {
-	defer l.Logger.Sync()
-	l.Logger.Info(fmt.Sprintf(format, v...))
+	defer l.logger.Sync()
+	l.logger.Info(fmt.Sprintf(format, v...))
 }
 
 // LogLevel returns the log level that is used
 func (l *Log) LogLevel() Level {
-	switch l.Level() {
+	switch l.logger.Level() {
 	case zapcore.FatalLevel:
 		return FatalLevel
 	case zapcore.PanicLevel:
@@ -220,5 +223,8 @@ func (l *Log) LogOutput() []io.Writer {
 
 // StdLogger returns the standard logger associated to the logger
 func (l *Log) StdLogger() *golog.Logger {
-	return zap.NewStdLog(l.Logger)
+	stdlogger, _ := zap.NewStdLogAt(l.logger, l.logger.Level())
+	redirect, _ := zap.RedirectStdLogAt(l.logger, l.logger.Level())
+	defer redirect()
+	return stdlogger
 }

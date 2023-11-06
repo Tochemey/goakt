@@ -434,7 +434,7 @@ func (c *Cluster) buildConfig() *config.Config {
 	}
 
 	// create the config and return it
-	return &config.Config{
+	conf := &config.Config{
 		BindAddr:                   c.host.Host,
 		BindPort:                   c.host.ClusterPort,
 		ReadRepair:                 false,
@@ -453,8 +453,14 @@ func (c *Cluster) buildConfig() *config.Config {
 		MaxJoinAttempts:            config.DefaultMaxJoinAttempts,
 		LogLevel:                   logLevel,
 		Logger:                     c.logger.StdLogger(),
-		LogVerbosity:               config.DefaultLogVerbosity,
 		EnableClusterEventsChannel: true,
 		Hasher:                     hasher.NewDefaultHasher(),
 	}
+
+	// set verbosity when debug is enabled
+	if c.logger.LogLevel() == log.DebugLevel {
+		conf.LogVerbosity = config.DefaultLogVerbosity
+	}
+
+	return conf
 }
