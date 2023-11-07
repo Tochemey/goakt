@@ -218,6 +218,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		housekeeperStopSig:  make(chan types.Unit, 1),
 		eventsStream:        eventstream.New(),
 		partitionHasher:     hash.DefaultHasher(),
+		actorInitTimeout:    DefaultInitTimeout,
 	}
 	// set the atomic settings
 	system.hasStarted.Store(false)

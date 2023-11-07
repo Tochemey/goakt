@@ -812,7 +812,7 @@ func (p *pid) reset() {
 	p.shutdownTimeout.Store(DefaultShutdownTimeout)
 	p.initMaxRetries.Store(DefaultInitMaxRetries)
 	p.lastProcessingDuration.Store(0)
-	p.initTimeout.Store(0)
+	p.initTimeout.Store(DefaultInitTimeout)
 	p.children = newPIDMap(10)
 	p.watchMen = slices.NewConcurrentSlice[*watchMan]()
 	p.telemetry = telemetry.New()
