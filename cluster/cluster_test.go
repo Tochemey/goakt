@@ -242,4 +242,78 @@ func TestCluster(t *testing.T) {
 		require.NoError(t, cluster.Stop(ctx))
 		provider.AssertExpectations(t)
 	})
+	t.Run("With RemoveActor", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+
+		// generate the ports for the single node
+		nodePorts := dynaport.Get(3)
+		gossipPort := nodePorts[0]
+		clusterPort := nodePorts[1]
+		remotingPort := nodePorts[2]
+
+		// define discovered addresses
+		addrs := []string{
+			fmt.Sprintf("localhost:%d", gossipPort),
+		}
+
+		// mock the discovery provider
+		provider := new(testkit.Provider)
+		config := discovery.NewConfig()
+
+		provider.EXPECT().ID().Return("testDisco")
+		provider.EXPECT().Initialize().Return(nil)
+		provider.EXPECT().Register().Return(nil)
+		provider.EXPECT().Deregister().Return(nil)
+		provider.EXPECT().SetConfig(config).Return(nil)
+		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
+		provider.EXPECT().Close().Return(nil)
+
+		// create the service discovery
+		serviceDiscovery := discovery.NewServiceDiscovery(provider, config)
+
+		// create a Cluster node
+		host := "localhost"
+		// set the environments
+		t.Setenv("GOSSIP_PORT", strconv.Itoa(gossipPort))
+		t.Setenv("CLUSTER_PORT", strconv.Itoa(clusterPort))
+		t.Setenv("REMOTING_PORT", strconv.Itoa(remotingPort))
+		t.Setenv("NODE_NAME", "testNode")
+		t.Setenv("NODE_IP", host)
+
+		cluster, err := New("test", serviceDiscovery)
+		require.NotNil(t, cluster)
+		require.NoError(t, err)
+
+		// start the Cluster node
+		err = cluster.Start(ctx)
+		require.NoError(t, err)
+
+		// create an actor
+		actorName := uuid.NewString()
+		actor := &internalpb.WireActor{ActorName: actorName}
+
+		// replicate the actor in the Cluster
+		err = cluster.PutActor(ctx, actor)
+		require.NoError(t, err)
+
+		// fetch the actor
+		actual, err := cluster.GetActor(ctx, actorName)
+		require.NoError(t, err)
+		require.NotNil(t, actual)
+
+		assert.True(t, proto.Equal(actor, actual))
+
+		// let us remove the actor
+		err = cluster.RemoveActor(ctx, actorName)
+		require.NoError(t, err)
+
+		actual, err = cluster.GetActor(ctx, actorName)
+		require.Nil(t, actual)
+		assert.EqualError(t, err, ErrActorNotFound.Error())
+
+		// stop the node
+		require.NoError(t, cluster.Stop(ctx))
+		provider.AssertExpectations(t)
+	})
 }
