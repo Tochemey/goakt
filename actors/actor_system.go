@@ -992,8 +992,18 @@ func (x *actorSystem) housekeeper() {
 				// loop over the actors in the system and remove the dead one
 				for _, actor := range x.Actors() {
 					if !actor.IsRunning() {
-						x.logger.Infof("Removing actor=%s from system", actor.ActorPath().String())
+						x.logger.Infof("Removing actor=%s from system", actor.ActorPath().Name())
+						// delete the actor from the map
 						x.actors.Delete(actor.ActorPath())
+						// when cluster is enabled
+						if x.InCluster() {
+							// remove the actor
+							if err := x.cluster.RemoveActor(context.Background(), actor.ActorPath().Name()); err != nil {
+								// log the error
+								x.logger.Error(err.Error())
+								// TODO: stop or continue
+							}
+						}
 					}
 				}
 			case <-x.housekeeperStopSig:

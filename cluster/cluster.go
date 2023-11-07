@@ -59,6 +59,9 @@ type Interface interface {
 	SetKey(ctx context.Context, key string) error
 	// KeyExists checks the existence of a given key
 	KeyExists(ctx context.Context, key string) (bool, error)
+	// RemoveActor removes a given actor from the cluster.
+	// An actor is removed from the cluster when this actor has been passivated.
+	RemoveActor(ctx context.Context, actorName string) error
 }
 
 // Cluster represents the Cluster
@@ -349,6 +352,29 @@ func (c *Cluster) GetActor(ctx context.Context, actorName string) (*internalpb.W
 	logger.Infof("actor (%s) successfully retrieved from the cluster.🎉", actor.GetActorName())
 	// return the response
 	return actor, nil
+}
+
+// RemoveActor removes a given actor from the cluster.
+// An actor is removed from the cluster when this actor has been passivated.
+func (c *Cluster) RemoveActor(ctx context.Context, actorName string) error {
+	// set the logger
+	logger := c.logger
+
+	// add some logging information
+	logger.Infof("removing actor (%s).🤔", actorName)
+
+	// remove the actor from the cluster
+	_, err := c.kvStore.Delete(ctx, actorName)
+	// handle the error
+	if err != nil {
+		// log the error
+		logger.Error(errors.Wrapf(err, "failed to remove actor=%s record.💥", actorName))
+		return err
+	}
+
+	// add a logging information
+	logger.Infof("actor (%s) successfully removed from the cluster.🎉", actorName)
+	return nil
 }
 
 // SetKey sets a given key to the cluster
