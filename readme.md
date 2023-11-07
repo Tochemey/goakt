@@ -24,6 +24,7 @@ Also, check reference section at the end of the post for more material regarding
 - [Design Principles](#design-principles)
 - [Features](#features)
     - [Actors](#actors)
+    - [Passivation](#passivation)
     - [Actor System](#actor-system)
     - [Behaviors](#behaviors)
     - [Mailbox](#mailbox)
@@ -95,6 +96,14 @@ The fundamental building blocks of Go-Akt are actors.
   - can be restarted (respawned)
   - can be gracefully stopped (killed). Every message in the mailbox prior to stoppage will be processed within a
     configurable time period.
+
+### Passivation
+
+Actors can be passivated when they are idle after some period of time. Passivated actors are removed from the actor system to free-up resources.
+When cluster mode is enabled, passivated actors are removed from the entire cluster. To bring back such actors to live, one needs to
+`Spawn` them again. By default, all actors are passivated and the passivation time is `two minutes`.
+- To enable passivation use the actor system option `WithExpireActorAfter(duration time.Duration)` when creating the actor system. See actor system [options](./actors/option.go).
+- To disable passivation use the actor system option `WithPassivationDisabled` when creating the actor system. See actor system [options](./actors/option.go).
 
 ### Actor System
 
