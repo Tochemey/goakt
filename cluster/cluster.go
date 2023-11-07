@@ -145,9 +145,6 @@ func (c *Cluster) Start(ctx context.Context) error {
 	// add some logging information
 	logger.Infof("Starting GoAkt Cluster service on (%s)....🤔", c.host.ClusterAddress())
 
-	// let us delay the start for sometime to make sure we have discovered enough nodes to form a Cluster
-	time.Sleep(time.Second)
-
 	// build the Cluster engine config
 	conf := c.buildConfig()
 	// set the hasher to the custom hasher
