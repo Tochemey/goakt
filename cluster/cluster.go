@@ -26,7 +26,6 @@ package cluster
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/buraksezer/olric"
@@ -365,19 +364,14 @@ func (c *Cluster) RemoveActor(ctx context.Context, actorName string) error {
 	logger.Infof("removing actor (%s).🤔", actorName)
 
 	// remove the actor from the cluster
-	count, err := c.kvStore.Delete(ctx, actorName)
+	_, err := c.kvStore.Delete(ctx, actorName)
 	// handle the error
 	if err != nil {
 		// log the error
 		logger.Error(errors.Wrapf(err, "failed to remove actor=%s record.💥", actorName))
 		return err
 	}
-	// check whether the count is 1
-	if count != 1 {
-		err := fmt.Errorf("failed to remove actor=%s record.💥", actorName)
-		logger.Error(err)
-		return err
-	}
+
 	// add a logging information
 	logger.Infof("actor (%s) successfully removed from the cluster.🎉", actorName)
 	return nil
