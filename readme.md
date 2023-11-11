@@ -8,7 +8,6 @@
 [![GitHub tag (with filter)](https://img.shields.io/github/v/tag/tochemey/goakt)](https://github.com/Tochemey/goakt/tags)
 ![GitHub](https://img.shields.io/github/license/tochemey/goakt?link=https%3A%2F%2Fgithub.com%2FTochemey%2Fgoakt%2Fblob%2Fmain%2FLICENSE)
 
-
 Distributed [Go](https://go.dev/) actor framework to build reactive and distributed system in golang using
 _**protocol buffers as actor messages**_.
 
@@ -53,6 +52,7 @@ Also, check reference section at the end of the post for more material regarding
 ## Design Principles
 
 This framework has been designed:
+
 - to be very simple - it caters for the core component of an actor framework as stated by the father of the actor framework [here](https://youtu.be/7erJ1DV_Tlo).
 - to be very easy to use.
 - to have a clear and defined contract for messages - no need to implement/hide any sort of serialization.
@@ -65,6 +65,7 @@ This framework has been designed:
 ### Actors
 
 The fundamental building blocks of Go-Akt are actors.
+
 - They are independent, isolated unit of computation with their own state.
 - They can be _long-lived_ actors or be _passivated_ after some period of time that is configured during their
   creation. Use this feature with care when dealing with persistent actors (actors that require their state to be persisted).
@@ -72,36 +73,37 @@ The fundamental building blocks of Go-Akt are actors.
   mechanisms.
 - They can be stateful and stateless depending upon the system to build.
 - Every actor in Go-Akt:
-  - has a process id [`PID`](./actors/pid.go). Via the process id any allowable action can be executed by the
-    actor.
-  - has a lifecycle via the following methods: [`PreStart`](./actors/actor.go), [`PostStop`](./actors/actor.go).
-    It means it
-    can live and die like any other process.
-  - handles and responds to messages via the method [`Receive`](./actors/actor.go). While handling messages it
-    can:
-  - create other (child) actors via their process id [`PID`](./actors/pid.go) `SpawnChild` method
-  - send messages to other actors locally or remotely via their process
-    id [`PID`](./actors/pid.go) `Ask`, `RemoteAsk`(request/response
-    fashion) and `Tell`, `RemoteTell`(fire-and-forget fashion) methods
-  - stop (child) actors via their process id [`PID`](./actors/pid.go)
-  - watch/unwatch (child) actors via their process id [`PID`](./actors/pid.go) `Watch` and `UnWatch` methods
-  - supervise the failure behavior of (child) actors. The supervisory strategy to adopt is set during its
-    creation:
-  - Restart and Stop directive are supported at the moment.
-  - remotely lookup for an actor on another node via their process id [`PID`](./actors/pid.go) `RemoteLookup`.
-    This
-    allows it to send messages remotely via `RemoteAsk` or `RemoteTell` methods
-  - stash/unstash messages. See [Stashing](#stashing)
-  - can adopt various form using the [Behavior](#behaviors) feature
-  - can be restarted (respawned)
-  - can be gracefully stopped (killed). Every message in the mailbox prior to stoppage will be processed within a
-    configurable time period.
+    - has a process id [`PID`](./actors/pid.go). Via the process id any allowable action can be executed by the
+      actor.
+    - has a lifecycle via the following methods: [`PreStart`](./actors/actor.go), [`PostStop`](./actors/actor.go).
+      It means it
+      can live and die like any other process.
+    - handles and responds to messages via the method [`Receive`](./actors/actor.go). While handling messages it
+      can:
+    - create other (child) actors via their process id [`PID`](./actors/pid.go) `SpawnChild` method
+    - send messages to other actors locally or remotely via their process
+      id [`PID`](./actors/pid.go) `Ask`, `RemoteAsk`(request/response
+      fashion) and `Tell`, `RemoteTell`(fire-and-forget fashion) methods
+    - stop (child) actors via their process id [`PID`](./actors/pid.go)
+    - watch/unwatch (child) actors via their process id [`PID`](./actors/pid.go) `Watch` and `UnWatch` methods
+    - supervise the failure behavior of (child) actors. The supervisory strategy to adopt is set during its
+      creation:
+    - Restart and Stop directive are supported at the moment.
+    - remotely lookup for an actor on another node via their process id [`PID`](./actors/pid.go) `RemoteLookup`.
+      This
+      allows it to send messages remotely via `RemoteAsk` or `RemoteTell` methods
+    - stash/unstash messages. See [Stashing](#stashing)
+    - can adopt various form using the [Behavior](#behaviors) feature
+    - can be restarted (respawned)
+    - can be gracefully stopped (killed). Every message in the mailbox prior to stoppage will be processed within a
+      configurable time period.
 
 ### Passivation
 
 Actors can be passivated when they are idle after some period of time. Passivated actors are removed from the actor system to free-up resources.
 When cluster mode is enabled, passivated actors are removed from the entire cluster. To bring back such actors to live, one needs to
 `Spawn` them again. By default, all actors are passivated and the passivation time is `two minutes`.
+
 - To enable passivation use the actor system option `WithExpireActorAfter(duration time.Duration)` when creating the actor system. See actor system [options](./actors/option.go).
 - To disable passivation use the actor system option `WithPassivationDisabled` when creating the actor system. See actor system [options](./actors/option.go).
 
@@ -112,6 +114,7 @@ is recommended to be created per application when using Go-Akt. At the moment th
 create an actor system one just need to use
 the [`NewActorSystem`](./actors/actor_system.go) method with the various [Options](./actors/option.go). Go-Akt
 ActorSystem has the following characteristics:
+
 - Actors lifecycle management (Spawn, Kill, ReSpawn)
 - Concurrency and Parallelism - Multiple actors can be managed and execute their tasks independently and
   concurrently. This helps utilize multicore processors efficiently.
@@ -153,10 +156,15 @@ To receive the dead letter, you just need to call the actor system `Subscribe` a
 Communication between actors is achieved exclusively through message passing. In Go-Akt _Google
 Protocol Buffers_ is used to define messages.
 The choice of protobuf is due to easy serialization over wire and strong schema definition. As stated previously the following messaging patterns are supported:
+
 - `Tell/RemoteTell` - send a message to an actor and forget it
 - `Ask/RemoteAsk` - send a message to an actor and expect a reply within a time period
-- `Forward` - pass a message from one actor to the actor by preserving the initial sender of the message. 
+- `Forward` - pass a message from one actor to the actor by preserving the initial sender of the message.
   At the moment you can only forward messages from the `ReceiveContext` when handling a message within an actor and this to a local actor.
+- `BatchTell` - send a bulk of messages to actor in a fire-forget manner. Messages are processed one after the other in the other they have been sent.
+- `BatchAsk` - send a bulk of messages to an actor and expect responses for each message sent within a time period. Messages are processed one after the other in the other they were sent.
+  This help return the response of each message in the same order that message was sent. This method hinders performance drastically when the number of messages to sent is high.
+  Kindly use this method with caution.
 
 ### Scheduler
 
@@ -291,9 +299,9 @@ engine to work as expected:
 
 ```go
 const (
-  namespace          = "default"
-  applicationName    = "accounts"
-  actorSystemName    = "AccountsSystem"
+    namespace = "default"
+    applicationName = "accounts"
+    actorSystemName    = "AccountsSystem"
 )
 // instantiate the k8 discovery provider
 disco := kubernetes.NewDiscovery()
@@ -363,19 +371,19 @@ To use the NATS discovery provider one needs to provide the following:
 
 ```go
 const (
-  natsServerAddr = "nats://localhost:4248"
-  natsSubject = "goakt-gossip"
-  applicationName        = "accounts"
-  actorSystemName = "AccountsSystem"
+    natsServerAddr = "nats://localhost:4248"
+    natsSubject = "goakt-gossip"
+    applicationName = "accounts"
+    actorSystemName = "AccountsSystem"
 )
 // instantiate the NATS discovery provider
 disco := nats.NewDiscovery()
 // define the discovery options
 discoOptions := discovery.Config{
-  ApplicationName: applicationName,
-  ActorSystemName: actorSystemName,
-  NatsServer:      natsServer,
-  NatsSubject:     natsSubject,
+    ApplicationName: applicationName,
+    ActorSystemName: actorSystemName,
+    NatsServer:      natsServer,
+    NatsSubject:     natsSubject,
 }
 // define the service discovery
 serviceDiscovery := discovery.NewServiceDiscovery(disco, discoOptions)
@@ -405,6 +413,7 @@ discoOptions := discovery.Config{
 serviceDiscovery := discovery.NewServiceDiscovery(disco, discoOptions
 // pass the service discovery when enabling cluster mode in the actor system
 ```
+
 ##### Sample Project
 
 There is an example [here](./examples/actor-cluster/dnssd) that shows how to use it.
