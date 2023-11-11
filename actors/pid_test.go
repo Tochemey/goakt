@@ -31,11 +31,10 @@ import (
 	"testing"
 	"time"
 
-	messagespb "github.com/tochemey/goakt/pb/messages/v1"
-
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tochemey/goakt/log"
+	messagespb "github.com/tochemey/goakt/pb/messages/v1"
 	testpb "github.com/tochemey/goakt/test/data/pb/v1"
 	"github.com/travisjeffery/go-dynaport"
 	"google.golang.org/protobuf/proto"
@@ -1154,5 +1153,157 @@ func TestShutdown(t *testing.T) {
 			err = parent.Shutdown(ctx)
 			assert.Nil(t, err)
 		})
+	})
+}
+func TestBatchTell(t *testing.T) {
+	t.Run("With happy path", func(t *testing.T) {
+		ctx := context.TODO()
+		// create a Ping actor
+		opts := []pidOption{
+			withInitMaxRetries(1),
+			withCustomLogger(log.DiscardLogger),
+		}
+
+		// create the actor path
+		actor := NewTester()
+		actorPath := NewPath("Tester", NewAddress("sys", "host", 1))
+		pid, err := newPID(ctx, actorPath, actor, opts...)
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+
+		// batch tell
+		require.NoError(t, pid.BatchTell(ctx, pid, new(testpb.TestSend), new(testpb.TestSend)))
+		// wait for the asynchronous processing to complete
+		time.Sleep(100 * time.Millisecond)
+		assert.EqualValues(t, 2, actor.counter.Load())
+		// shutdown the actor when
+		// wait a while because exchange is ongoing
+		time.Sleep(time.Second)
+		assert.NoError(t, pid.Shutdown(ctx))
+	})
+	t.Run("With a Tell behavior", func(t *testing.T) {
+		ctx := context.TODO()
+		// create a Ping actor
+		opts := []pidOption{
+			withInitMaxRetries(1),
+			withCustomLogger(log.DiscardLogger),
+		}
+
+		// create the actor path
+		actor := NewTester()
+		actorPath := NewPath("Tester", NewAddress("sys", "host", 1))
+		pid, err := newPID(ctx, actorPath, actor, opts...)
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+
+		// batch tell
+		require.NoError(t, pid.BatchTell(ctx, pid, new(testpb.TestSend)))
+		// wait for the asynchronous processing to complete
+		time.Sleep(100 * time.Millisecond)
+		assert.EqualValues(t, 1, actor.counter.Load())
+		// shutdown the actor when
+		// wait a while because exchange is ongoing
+		time.Sleep(time.Second)
+		assert.NoError(t, pid.Shutdown(ctx))
+	})
+	t.Run("With a dead actor", func(t *testing.T) {
+		ctx := context.TODO()
+		// create a Ping actor
+		opts := []pidOption{
+			withInitMaxRetries(1),
+			withCustomLogger(log.DiscardLogger),
+		}
+
+		// create the actor path
+		actor := NewTester()
+		actorPath := NewPath("Tester", NewAddress("sys", "host", 1))
+		pid, err := newPID(ctx, actorPath, actor, opts...)
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+
+		time.Sleep(time.Second)
+		assert.NoError(t, pid.Shutdown(ctx))
+
+		// batch tell
+		require.Error(t, pid.BatchTell(ctx, pid, new(testpb.TestSend)))
+	})
+}
+func TestBatchAsk(t *testing.T) {
+	t.Run("With happy path", func(t *testing.T) {
+		ctx := context.TODO()
+		// create a Ping actor
+		opts := []pidOption{
+			withInitMaxRetries(1),
+			withCustomLogger(log.DiscardLogger),
+		}
+
+		// create the actor path
+		actor := &Exchanger{}
+		actorPath := NewPath("Tester", NewAddress("sys", "host", 1))
+		pid, err := newPID(ctx, actorPath, actor, opts...)
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+
+		// batch ask
+		responses, err := pid.BatchAsk(ctx, pid, new(testpb.TestReply), new(testpb.TestReply))
+		require.NoError(t, err)
+		for reply := range responses {
+			require.NoError(t, err)
+			require.NotNil(t, reply)
+			expected := new(testpb.Reply)
+			assert.True(t, proto.Equal(expected, reply))
+		}
+
+		// wait a while because exchange is ongoing
+		time.Sleep(time.Second)
+		assert.NoError(t, pid.Shutdown(ctx))
+	})
+	t.Run("With a dead actor", func(t *testing.T) {
+		ctx := context.TODO()
+		// create a Ping actor
+		opts := []pidOption{
+			withInitMaxRetries(1),
+			withCustomLogger(log.DiscardLogger),
+		}
+
+		// create the actor path
+		actor := &Exchanger{}
+		actorPath := NewPath("Tester", NewAddress("sys", "host", 1))
+		pid, err := newPID(ctx, actorPath, actor, opts...)
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+
+		time.Sleep(time.Second)
+		assert.NoError(t, pid.Shutdown(ctx))
+
+		// batch ask
+		responses, err := pid.BatchAsk(ctx, pid, new(testpb.TestReply), new(testpb.TestReply))
+		require.Error(t, err)
+		require.Nil(t, responses)
+	})
+	t.Run("With a timeout", func(t *testing.T) {
+		ctx := context.TODO()
+		// create a Ping actor
+		opts := []pidOption{
+			withInitMaxRetries(1),
+			withCustomLogger(log.DiscardLogger),
+			withSendReplyTimeout(receivingTimeout),
+		}
+
+		// create the actor path
+		actor := NewTester()
+		actorPath := NewPath("Tester", NewAddress("sys", "host", 1))
+		pid, err := newPID(ctx, actorPath, actor, opts...)
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+
+		// batch ask
+		responses, err := pid.BatchAsk(ctx, pid, new(testpb.TestTimeout), new(testpb.TestReply))
+		require.Error(t, err)
+		require.Empty(t, responses)
+
+		// wait a while because exchange is ongoing
+		time.Sleep(time.Second)
+		assert.NoError(t, pid.Shutdown(ctx))
 	})
 }
