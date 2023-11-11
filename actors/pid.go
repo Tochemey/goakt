@@ -86,8 +86,17 @@ type PID interface {
 	ActorHandle() Actor
 	// Tell sends an asynchronous message to another PID
 	Tell(ctx context.Context, to PID, message proto.Message) error
+	// BatchTell sends an asynchronous bunch of messages to the given PID
+	// The messages will be processed one after the other in the order they are sent
+	// This is a design choice to follow the simple principle of one message at a time processing by actors.
+	// When TellStream encounter a single message it will fall back to a Tell call.
+	BatchTell(ctx context.Context, to PID, messages ...proto.Message) error
 	// Ask sends a synchronous message to another actor and expect a response.
 	Ask(ctx context.Context, to PID, message proto.Message) (response proto.Message, err error)
+	// BatchAsk sends a synchronous bunch of messages to the given PID and expect responses in the same order as the messages.
+	// The messages will be processed one after the other in the order they are sent
+	// This is a design choice to follow the simple principle of one message at a time processing by actors.
+	BatchAsk(ctx context.Context, to PID, messages ...proto.Message) (responses chan proto.Message, err error)
 	// RemoteTell sends a message to an actor remotely without expecting any reply
 	RemoteTell(ctx context.Context, to *addresspb.Address, message proto.Message) error
 	// RemoteAsk is used to send a message to an actor remotely and expect a response
@@ -500,8 +509,6 @@ func (p *pid) Ask(ctx context.Context, to PID, message proto.Message) (response 
 		return nil, ErrDead
 	}
 
-	// acquire a lock to set the message context
-	p.semaphore.Lock()
 	// create a receiver context
 	context := new(receiveContext)
 
@@ -514,9 +521,6 @@ func (p *pid) Ask(ctx context.Context, to PID, message proto.Message) (response 
 	context.mu = sync.Mutex{}
 	context.response = make(chan proto.Message, 1)
 	context.sendTime.Store(time.Now())
-
-	// release the lock after setting the message context
-	p.semaphore.Unlock()
 
 	// put the message context in the mailbox of the recipient actor
 	to.doReceive(context)
@@ -542,10 +546,6 @@ func (p *pid) Tell(ctx context.Context, to PID, message proto.Message) error {
 		return ErrDead
 	}
 
-	// acquire a lock to set the message context
-	p.semaphore.Lock()
-	// release the lock after setting the message context
-	defer p.semaphore.Unlock()
 	// create a message context
 	context := new(receiveContext)
 
@@ -563,6 +563,101 @@ func (p *pid) Tell(ctx context.Context, to PID, message proto.Message) error {
 	to.doReceive(context)
 
 	return nil
+}
+
+// BatchTell sends an asynchronous bunch of messages to the given PID
+// The messages will be processed one after the other in the order they are sent.
+// This is a design choice to follow the simple principle of one message at a time processing by actors.
+// When TellStream encounter a single message it will fall back to a Tell call.
+func (p *pid) BatchTell(ctx context.Context, to PID, messages ...proto.Message) error {
+	// make sure the recipient actor is live
+	if !to.IsRunning() {
+		return ErrDead
+	}
+
+	// first check whether we need to fall back to a Tell
+	if len(messages) == 1 {
+		return p.Tell(ctx, to, messages[0])
+	}
+
+	// let us process the messages one after the other
+	for i := 0; i < len(messages); i++ {
+		// grab the message at index i
+		message := messages[i]
+		// create a message context
+		messageContext := new(receiveContext)
+
+		// set the needed properties of the message context
+		messageContext.ctx = ctx
+		messageContext.sender = p
+		messageContext.recipient = to
+		messageContext.message = message
+		messageContext.isAsyncMessage = true
+		messageContext.mu = sync.Mutex{}
+		messageContext.response = make(chan proto.Message, 1)
+		messageContext.sendTime.Store(time.Now())
+
+		// push the message to the actor mailbox
+		to.doReceive(messageContext)
+	}
+
+	return nil
+}
+
+// BatchAsk sends a synchronous bunch of messages to the given PID and expect responses in the same order as the messages.
+// The messages will be processed one after the other in the order they are sent.
+// This is a design choice to follow the simple principle of one message at a time processing by actors.
+func (p *pid) BatchAsk(ctx context.Context, to PID, messages ...proto.Message) (responses chan proto.Message, err error) {
+	// make sure the actor is live
+	if !to.IsRunning() {
+		return nil, ErrDead
+	}
+
+	// create a buffered channel to hold the responses
+	responses = make(chan proto.Message, len(messages))
+
+	// close the responses channel when done
+	defer close(responses)
+
+	// let us process the messages one after the other
+	for i := 0; i < len(messages); i++ {
+		// grab the message at index i
+		message := messages[i]
+		// create a message context
+		messageContext := new(receiveContext)
+
+		// set the needed properties of the message context
+		messageContext.ctx = ctx
+		messageContext.sender = p
+		messageContext.recipient = to
+		messageContext.message = message
+		messageContext.isAsyncMessage = false
+		messageContext.mu = sync.Mutex{}
+		messageContext.response = make(chan proto.Message, 1)
+		messageContext.sendTime.Store(time.Now())
+
+		// push the message to the actor mailbox
+		to.doReceive(messageContext)
+
+		// await patiently to receive the response from the actor
+	timerLoop:
+		for await := time.After(p.replyTimeout.Load()); ; {
+			select {
+			case resp := <-messageContext.response:
+				// send the response to the responses channel
+				responses <- resp
+				break timerLoop
+			case <-await:
+				// set the request timeout error
+				err = ErrRequestTimeout
+				// push the message as a deadletter
+				p.emitDeadletter(messageContext, err)
+				// stop the whole processing
+				return
+			}
+		}
+	}
+	return
 }
 
 // RemoteLookup look for an actor address on a remote node. If the actorSystem is nil then the lookup will be done

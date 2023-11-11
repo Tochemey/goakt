@@ -1286,4 +1286,218 @@ func TestReceiveContext(t *testing.T) {
 			context.Shutdown()
 		})
 	})
+	t.Run("With happy BatchTell", func(t *testing.T) {
+		ctx := context.TODO()
+		// create a Ping actor
+		opts := []pidOption{
+			withInitMaxRetries(1),
+			withCustomLogger(log.DiscardLogger),
+		}
+
+		// create actor1
+		actor1 := &Exchanger{}
+		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
+		pid1, err := newPID(ctx, actorPath1, actor1, opts...)
+		require.NoError(t, err)
+		require.NotNil(t, pid1)
+
+		// create an instance of receive context
+		context := &receiveContext{
+			ctx:            ctx,
+			message:        new(testpb.TestSend),
+			sender:         NoSender,
+			recipient:      pid1,
+			mu:             sync.Mutex{},
+			isAsyncMessage: true,
+		}
+
+		// create actor2
+		actor2 := &Exchanger{}
+		actorPath2 := NewPath("Exchange2", NewAddress("sys", "host", 1))
+		pid2, err := newPID(ctx, actorPath2, actor2, opts...)
+		require.NoError(t, err)
+		require.NotNil(t, pid2)
+
+		op := func() {
+			context.BatchTell(pid2, new(testpb.TestSend), new(testpb.TestSend))
+		}
+		assert.NotPanics(t, op)
+
+		time.Sleep(time.Second)
+		assert.NoError(t, pid1.Shutdown(ctx))
+		assert.NoError(t, pid2.Shutdown(ctx))
+	})
+	t.Run("With happy BatchTell as a Tell", func(t *testing.T) {
+		ctx := context.TODO()
+		// create a Ping actor
+		opts := []pidOption{
+			withInitMaxRetries(1),
+			withCustomLogger(log.DiscardLogger),
+		}
+
+		// create actor1
+		actor1 := &Exchanger{}
+		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
+		pid1, err := newPID(ctx, actorPath1, actor1, opts...)
+		require.NoError(t, err)
+		require.NotNil(t, pid1)
+
+		// create an instance of receive context
+		context := &receiveContext{
+			ctx:            ctx,
+			message:        new(testpb.TestSend),
+			sender:         NoSender,
+			recipient:      pid1,
+			mu:             sync.Mutex{},
+			isAsyncMessage: true,
+		}
+
+		// create actor2
+		actor2 := &Exchanger{}
+		actorPath2 := NewPath("Exchange2", NewAddress("sys", "host", 1))
+		pid2, err := newPID(ctx, actorPath2, actor2, opts...)
+		require.NoError(t, err)
+		require.NotNil(t, pid2)
+
+		op := func() {
+			context.BatchTell(pid2, new(testpb.TestSend))
+		}
+		assert.NotPanics(t, op)
+
+		time.Sleep(time.Second)
+		assert.NoError(t, pid1.Shutdown(ctx))
+		assert.NoError(t, pid2.Shutdown(ctx))
+	})
+	t.Run("With panic BatchTell", func(t *testing.T) {
+		ctx := context.TODO()
+		// create a Ping actor
+		opts := []pidOption{
+			withInitMaxRetries(1),
+			withCustomLogger(log.DiscardLogger),
+		}
+
+		// create actor1
+		actor1 := &Exchanger{}
+		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
+		pid1, err := newPID(ctx, actorPath1, actor1, opts...)
+		require.NoError(t, err)
+		require.NotNil(t, pid1)
+
+		// create an instance of receive context
+		context := &receiveContext{
+			ctx:            ctx,
+			message:        new(testpb.TestSend),
+			sender:         NoSender,
+			recipient:      pid1,
+			mu:             sync.Mutex{},
+			isAsyncMessage: true,
+		}
+
+		// create actor2
+		actor2 := &Exchanger{}
+		actorPath2 := NewPath("Exchange2", NewAddress("sys", "host", 1))
+		pid2, err := newPID(ctx, actorPath2, actor2, opts...)
+		require.NoError(t, err)
+		require.NotNil(t, pid2)
+
+		// wait a while and shutdown actor2
+		time.Sleep(time.Second)
+		assert.NoError(t, pid2.Shutdown(ctx))
+
+		op := func() {
+			context.BatchTell(pid2, new(testpb.TestSend), new(testpb.TestSend))
+		}
+		assert.Panics(t, op)
+
+		time.Sleep(time.Second)
+		assert.NoError(t, pid1.Shutdown(ctx))
+	})
+	t.Run("With happy BatchAsk", func(t *testing.T) {
+		ctx := context.TODO()
+		// create a Ping actor
+		opts := []pidOption{
+			withInitMaxRetries(1),
+			withCustomLogger(log.DiscardLogger),
+		}
+
+		// create actor1
+		actor1 := &Exchanger{}
+		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
+		pid1, err := newPID(ctx, actorPath1, actor1, opts...)
+		require.NoError(t, err)
+		require.NotNil(t, pid1)
+
+		// create an instance of receive context
+		context := &receiveContext{
+			ctx:            ctx,
+			message:        new(testpb.TestSend),
+			sender:         NoSender,
+			recipient:      pid1,
+			mu:             sync.Mutex{},
+			isAsyncMessage: true,
+		}
+
+		// create actor2
+		actor2 := &Exchanger{}
+		actorPath2 := NewPath("Exchange2", NewAddress("sys", "host", 1))
+		pid2, err := newPID(ctx, actorPath2, actor2, opts...)
+		require.NoError(t, err)
+		require.NotNil(t, pid2)
+
+		replies := context.BatchAsk(pid2, new(testpb.TestReply), new(testpb.TestReply))
+		require.NotNil(t, replies)
+		require.Len(t, replies, 2)
+		for reply := range replies {
+			expected := new(testpb.Reply)
+			assert.True(t, proto.Equal(expected, reply))
+		}
+
+		time.Sleep(time.Second)
+		assert.NoError(t, pid1.Shutdown(ctx))
+		assert.NoError(t, pid2.Shutdown(ctx))
+	})
+	t.Run("With panic BatchAsk", func(t *testing.T) {
+		ctx := context.TODO()
+		// create a Ping actor
+		opts := []pidOption{
+			withInitMaxRetries(1),
+			withCustomLogger(log.DiscardLogger),
+		}
+
+		// create actor1
+		actor1 := &Exchanger{}
+		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
+		pid1, err := newPID(ctx, actorPath1, actor1, opts...)
+		require.NoError(t, err)
+		require.NotNil(t, pid1)
+
+		// create an instance of receive context
+		context := &receiveContext{
+			ctx:            ctx,
+			message:        new(testpb.TestSend),
+			sender:         NoSender,
+			recipient:      pid1,
+			mu:             sync.Mutex{},
+			isAsyncMessage: true,
+		}
+
+		// create actor2
+		actor2 := &Exchanger{}
+		actorPath2 := NewPath("Exchange2", NewAddress("sys", "host", 1))
+		pid2, err := newPID(ctx, actorPath2, actor2, opts...)
+		require.NoError(t, err)
+		require.NotNil(t, pid2)
+
+		// wait a while and shutdown actor2
+		time.Sleep(time.Second)
+		assert.NoError(t, pid2.Shutdown(ctx))
+
+		op := func() {
+			context.BatchAsk(pid2, new(testpb.TestReply), new(testpb.TestReply))
+		}
+		assert.Panics(t, op)
+
+		time.Sleep(time.Second)
+		assert.NoError(t, pid1.Shutdown(ctx))
+	})
 }

@@ -78,10 +78,19 @@ type ReceiveContext interface {
 	UnstashAll()
 	// Tell sends an asynchronous message to another PID
 	Tell(to PID, message proto.Message)
+	// BatchTell sends an asynchronous bunch of messages to the given PID
+	// The messages will be processed one after the other in the order they are sent
+	// This is a design choice to follow the simple principle of one message at a time processing by actors.
+	// When TellStream encounter a single message it will fall back to a Tell call.
+	BatchTell(to PID, messages ...proto.Message)
 	// Ask sends a synchronous message to another actor and expect a response. This method is good when interacting with a child actor.
 	// Ask has a timeout which can cause the sender to panic. When ask times out, the receiving actor does not know and may still process the message.
 	// It is recommended to set a good timeout to quickly receive response and try to avoid false positives
 	Ask(to PID, message proto.Message) (response proto.Message)
+	// BatchAsk sends a synchronous bunch of messages to the given PID and expect responses in the same order as the messages.
+	// The messages will be processed one after the other in the order they are sent
+	// This is a design choice to follow the simple principle of one message at a time processing by actors.
+	BatchAsk(to PID, messages ...proto.Message) (responses chan proto.Message)
 	// Forward method works similarly to the Tell() method except that the sender of a forwarded message is kept as the original sender.
 	// As a result, the actor receiving the forwarded messages knows who the actual sender of the message is.
 	// The message that is forwarded is the current message received by the received context.
@@ -247,6 +256,21 @@ func (c *receiveContext) Tell(to PID, message proto.Message) {
 	}
 }
 
+// BatchTell sends an asynchronous bunch of messages to the given PID
+// The messages will be processed one after the other in the order they are sent
+// This is a design choice to follow the simple principle of one message at a time processing by actors.
+// When TellStream encounter a single message it will fall back to a Tell call.
+func (c *receiveContext) BatchTell(to PID, messages ...proto.Message) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	// create a new context from the parent context
+	ctx := context.WithoutCancel(c.ctx)
+	// send the message to the recipient or let it crash
+	if err := c.recipient.BatchTell(ctx, to, messages...); err != nil {
+		panic(err)
+	}
+}
+
 // Ask sends a synchronous message to another actor and expect a response. This method is good when interacting with a child actor.
 // Ask has a timeout which can cause the sender to panic. When ask times out, the receiving actor does not know and may still process the message.
 // It is recommended to set a good timeout to quickly receive response and try to avoid false positives
@@ -257,6 +281,22 @@ func (c *receiveContext) Ask(to PID, message proto.Message) (response proto.Mess
 	ctx := context.WithoutCancel(c.ctx)
 	// send the message to the recipient or let it crash
 	reply, err := c.recipient.Ask(ctx, to, message)
+	if err != nil {
+		panic(err)
+	}
+	return reply
+}
+
+// BatchAsk sends a synchronous bunch of messages to the given PID and expect responses in the same order as the messages.
+// The messages will be processed one after the other in the order they are sent
+// This is a design choice to follow the simple principle of one message at a time processing by actors.
+func (c *receiveContext) BatchAsk(to PID, messages ...proto.Message) (responses chan proto.Message) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	// create a new context from the parent context
+	ctx := context.WithoutCancel(c.ctx)
+	// send the message to the recipient or let it crash
+	reply, err := c.recipient.BatchAsk(ctx, to, messages...)
 	if err != nil {
 		panic(err)
 	}
