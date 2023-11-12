@@ -656,6 +656,113 @@ func TestRemoteTell(t *testing.T) {
 		err = sys.Stop(ctx)
 		assert.NoError(t, err)
 	})
+	t.Run("With Batch request", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.New(log.DebugLevel, os.Stdout)
+		// generate the remoting port
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "0.0.0.0"
+
+		// create the actor system
+		sys, err := NewActorSystem("test",
+			WithLogger(logger),
+			WithPassivationDisabled(),
+			WithRemoting(host, int32(remotingPort)),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		time.Sleep(time.Second)
+
+		// create a test actor
+		actorName := "test"
+		actor := NewTester()
+		actorRef, err := sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		// get the address of the actor
+		addr, err := RemoteLookup(ctx, host, remotingPort, actorName)
+		require.NoError(t, err)
+		// create a message to send to the test actor
+		messages := make([]proto.Message, 10)
+		// send the message to the actor
+		for i := 0; i < 10; i++ {
+			messages[i] = new(testpb.TestSend)
+		}
+
+		err = RemoteBatchTell(ctx, addr, messages...)
+		require.NoError(t, err)
+
+		// wait for processing to complete on the actor side
+		time.Sleep(500 * time.Millisecond)
+		require.EqualValues(t, 10, actor.counter.Load())
+
+		// stop the actor after some time
+		time.Sleep(time.Second)
+
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
+	})
+	t.Run("With Batch service failure", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.New(log.DebugLevel, os.Stdout)
+		// generate the remoting port
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "0.0.0.0"
+
+		// create the actor system
+		sys, err := NewActorSystem("test",
+			WithLogger(logger),
+			WithPassivationDisabled(),
+			WithRemoting(host, int32(remotingPort)),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		time.Sleep(time.Second)
+
+		// create a test actor
+		actorName := "test"
+		actor := NewTester()
+		actorRef, err := sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		// create a wrong address
+		addr := &addresspb.Address{
+			Host: host,
+			Port: 2222,
+			Name: "",
+			Id:   "",
+		}
+		// create a message to send to the test actor
+		message := new(testpb.TestSend)
+		// send the message to the actor
+		err = RemoteBatchTell(ctx, addr, message)
+		// perform some assertions
+		require.Error(t, err)
+
+		// stop the actor after some time
+		time.Sleep(time.Second)
+
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
+	})
 }
 
 func TestRemoteAsk(t *testing.T) {
@@ -809,6 +916,119 @@ func TestRemoteAsk(t *testing.T) {
 		message := new(testpb.TestReply)
 		// send the message to the actor
 		reply, err := RemoteAsk(ctx, addr, message)
+		// perform some assertions
+		require.Error(t, err)
+		require.Nil(t, reply)
+
+		// stop the actor after some time
+		time.Sleep(time.Second)
+		t.Cleanup(func() {
+			assert.NoError(t, sys.Stop(ctx))
+		})
+	})
+	t.Run("With Batch request", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.New(log.DebugLevel, os.Stdout)
+		// generate the remoting port
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "0.0.0.0"
+
+		// create the actor system
+		sys, err := NewActorSystem("test",
+			WithLogger(logger),
+			WithPassivationDisabled(),
+			WithRemoting(host, int32(remotingPort)),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		time.Sleep(time.Second)
+
+		// create a test actor
+		actorName := "test"
+		actor := NewTester()
+		actorRef, err := sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		// get the address of the actor
+		addr, err := RemoteLookup(ctx, host, remotingPort, actorName)
+		require.NoError(t, err)
+
+		// create a message to send to the test actor
+		message := new(testpb.TestReply)
+		// send the message to the actor
+		replies, err := RemoteBatchAsk(ctx, addr, message)
+		// perform some assertions
+		require.NoError(t, err)
+		require.Len(t, replies, 1)
+		require.NotNil(t, replies[0])
+		require.True(t, replies[0].MessageIs(new(testpb.Reply)))
+
+		actual := new(testpb.Reply)
+		err = replies[0].UnmarshalTo(actual)
+		require.NoError(t, err)
+
+		expected := &testpb.Reply{Content: "received message"}
+		assert.True(t, proto.Equal(expected, actual))
+
+		// stop the actor after some time
+		time.Sleep(time.Second)
+
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
+	})
+	t.Run("With Batch service failure", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.New(log.DebugLevel, os.Stdout)
+		// generate the remoting port
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "0.0.0.0"
+
+		// create the actor system
+		sys, err := NewActorSystem("test",
+			WithLogger(logger),
+			WithPassivationDisabled(),
+			WithRemoting(host, int32(remotingPort)),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		time.Sleep(time.Second)
+
+		// create a test actor
+		actorName := "test"
+		actor := NewTester()
+		actorRef, err := sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		// get the address of the actor
+		addr := &addresspb.Address{
+			Host: host,
+			Port: 2222,
+			Name: "",
+			Id:   "",
+		}
+
+		// create a message to send to the test actor
+		message := new(testpb.TestReply)
+		// send the message to the actor
+		reply, err := RemoteBatchAsk(ctx, addr, message)
 		// perform some assertions
 		require.Error(t, err)
 		require.Nil(t, reply)
