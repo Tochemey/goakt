@@ -658,6 +658,59 @@ func TestRemoteTell(t *testing.T) {
 		err = sys.Stop(ctx)
 		assert.NoError(t, err)
 	})
+	t.Run("With remoting disabled", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.New(log.DebugLevel, os.Stdout)
+		// generate the remoting port
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "0.0.0.0"
+
+		// create the actor system
+		sys, err := NewActorSystem("test",
+			WithLogger(logger),
+			WithPassivationDisabled(),
+			WithRemoting(host, int32(remotingPort)),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		time.Sleep(time.Second)
+
+		// create a test actor
+		actorName := "test"
+		actor := NewTester()
+		actorRef, err := sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		addr, err := RemoteLookup(ctx, host, remotingPort, actorName)
+		require.NoError(t, err)
+
+		// let us disable remoting
+		actorsSystem := sys.(*actorSystem)
+		actorsSystem.remotingEnabled.Store(false)
+
+		// create a message to send to the test actor
+		message := new(testpb.TestSend)
+		// send the message to the actor
+		err = RemoteTell(ctx, addr, message)
+		// perform some assertions
+		require.Error(t, err)
+		require.EqualError(t, err, "failed_precondition: remoting is not enabled")
+
+		// stop the actor after some time
+		time.Sleep(time.Second)
+
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
+	})
 	t.Run("With Batch request", func(t *testing.T) {
 		// create the context
 		ctx := context.TODO()
@@ -758,6 +811,59 @@ func TestRemoteTell(t *testing.T) {
 		err = RemoteBatchTell(ctx, addr, message)
 		// perform some assertions
 		require.Error(t, err)
+
+		// stop the actor after some time
+		time.Sleep(time.Second)
+
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
+	})
+	t.Run("With Batch when remoting is disabled", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.New(log.DebugLevel, os.Stdout)
+		// generate the remoting port
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "0.0.0.0"
+
+		// create the actor system
+		sys, err := NewActorSystem("test",
+			WithLogger(logger),
+			WithPassivationDisabled(),
+			WithRemoting(host, int32(remotingPort)),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		time.Sleep(time.Second)
+
+		// create a test actor
+		actorName := "test"
+		actor := NewTester()
+		actorRef, err := sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		addr, err := RemoteLookup(ctx, host, remotingPort, actorName)
+		require.NoError(t, err)
+
+		// let us disable remoting
+		actorsSystem := sys.(*actorSystem)
+		actorsSystem.remotingEnabled.Store(false)
+
+		// create a message to send to the test actor
+		message := new(testpb.TestSend)
+		// send the message to the actor
+		err = RemoteBatchTell(ctx, addr, message)
+		// perform some assertions
+		require.Error(t, err)
+		require.EqualError(t, err, "failed_precondition: remoting is not enabled")
 
 		// stop the actor after some time
 		time.Sleep(time.Second)
@@ -928,6 +1034,61 @@ func TestRemoteAsk(t *testing.T) {
 			assert.NoError(t, sys.Stop(ctx))
 		})
 	})
+	t.Run("With remoting disabled", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.New(log.DebugLevel, os.Stdout)
+		// generate the remoting port
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "0.0.0.0"
+
+		// create the actor system
+		sys, err := NewActorSystem("test",
+			WithLogger(logger),
+			WithPassivationDisabled(),
+			WithRemoting(host, int32(remotingPort)),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		time.Sleep(time.Second)
+
+		// create a test actor
+		actorName := "test"
+		actor := NewTester()
+		actorRef, err := sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		// get the address of the actor
+		addr, err := RemoteLookup(ctx, host, remotingPort, actorName)
+		require.NoError(t, err)
+
+		// let us disable remoting
+		actorsSystem := sys.(*actorSystem)
+		actorsSystem.remotingEnabled.Store(false)
+
+		// create a message to send to the test actor
+		message := new(testpb.TestReply)
+		// send the message to the actor
+		reply, err := RemoteAsk(ctx, addr, message)
+		// perform some assertions
+		require.Error(t, err)
+		require.EqualError(t, err, "failed_precondition: remoting is not enabled")
+		require.Nil(t, reply)
+
+		// stop the actor after some time
+		time.Sleep(time.Second)
+
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
+	})
 	t.Run("With Batch request", func(t *testing.T) {
 		// create the context
 		ctx := context.TODO()
@@ -1041,6 +1202,60 @@ func TestRemoteAsk(t *testing.T) {
 			assert.NoError(t, sys.Stop(ctx))
 		})
 	})
+	t.Run("With Batch when remoting is disabled", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.New(log.DebugLevel, os.Stdout)
+		// generate the remoting port
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "0.0.0.0"
+
+		// create the actor system
+		sys, err := NewActorSystem("test",
+			WithLogger(logger),
+			WithPassivationDisabled(),
+			WithRemoting(host, int32(remotingPort)),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		time.Sleep(time.Second)
+
+		// create a test actor
+		actorName := "test"
+		actor := NewTester()
+		actorRef, err := sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		addr, err := RemoteLookup(ctx, host, remotingPort, actorName)
+		require.NoError(t, err)
+
+		// let us disable remoting
+		actorsSystem := sys.(*actorSystem)
+		actorsSystem.remotingEnabled.Store(false)
+
+		// create a message to send to the test actor
+		message := new(testpb.TestReply)
+		// send the message to the actor
+		reply, err := RemoteBatchAsk(ctx, addr, message)
+		// perform some assertions
+		require.Error(t, err)
+		require.EqualError(t, err, "failed_precondition: remoting is not enabled")
+		require.Nil(t, reply)
+
+		// stop the actor after some time
+		time.Sleep(time.Second)
+		t.Cleanup(func() {
+			assert.NoError(t, sys.Stop(ctx))
+		})
+	})
 }
 
 func TestAPIRemoteLookup(t *testing.T) {
@@ -1058,6 +1273,7 @@ func TestAPIRemoteLookup(t *testing.T) {
 		sys, err := NewActorSystem("test",
 			WithLogger(logger),
 			WithPassivationDisabled(),
+			WithRemoting(host, int32(remotingPort)),
 		)
 		// assert there are no error
 		require.NoError(t, err)
@@ -1068,11 +1284,16 @@ func TestAPIRemoteLookup(t *testing.T) {
 
 		time.Sleep(time.Second)
 
+		// let us disable remoting
+		actorsSystem := sys.(*actorSystem)
+		actorsSystem.remotingEnabled.Store(false)
+
 		// create a test actor
 		actorName := "test"
 		// get the address of the actor
 		addr, err := RemoteLookup(ctx, host, remotingPort, actorName)
 		require.Error(t, err)
+		require.EqualError(t, err, "failed_precondition: remoting is not enabled")
 		require.Nil(t, addr)
 
 		t.Cleanup(func() {

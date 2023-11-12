@@ -683,18 +683,6 @@ func (x *actorSystem) RemoteLookup(_ context.Context, request *connect.Request[i
 		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrRemotingDisabled)
 	}
 
-	// get the remoting server address
-	nodeAddr := fmt.Sprintf("%s:%d", x.remotingHost, x.remotingPort)
-
-	// let us validate the host and port
-	hostAndPort := fmt.Sprintf("%s:%d", reqCopy.GetHost(), reqCopy.GetPort())
-	if hostAndPort != nodeAddr {
-		// log the error
-		logger.Error(ErrInvalidNode.Message())
-		// here message is sent to the wrong actor system node
-		return nil, ErrInvalidNode
-	}
-
 	// construct the actor address
 	name := reqCopy.GetName()
 	actorPath := NewPath(name, NewAddress(x.Name(), reqCopy.GetHost(), int(reqCopy.GetPort())))
