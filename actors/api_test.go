@@ -463,6 +463,8 @@ func TestTell(t *testing.T) {
 		err = BatchTell(ctx, actorRef, new(testpb.TestSend), new(testpb.TestSend))
 		// perform some assertions
 		require.NoError(t, err)
+		// wait for processing to be done
+		time.Sleep(500 * time.Millisecond)
 		require.EqualValues(t, 2, actor.counter.Load())
 
 		err = sys.Stop(ctx)
