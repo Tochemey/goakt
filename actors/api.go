@@ -47,12 +47,6 @@ func Ask(ctx context.Context, to PID, message proto.Message, timeout time.Durati
 		return nil, ErrDead
 	}
 
-	// create a mutex
-	mu := sync.Mutex{}
-
-	// acquire a lock to set the message context
-	mu.Lock()
-
 	// create a receiver context
 	context := new(receiveContext)
 	// set the needed properties of the message context
@@ -84,9 +78,6 @@ func Ask(ctx context.Context, to PID, message proto.Message, timeout time.Durati
 	context.mu = sync.Mutex{}
 	context.response = make(chan proto.Message, 1)
 
-	// release the lock after config the message context
-	mu.Unlock()
-
 	// put the message context in the mailbox of the recipient actor
 	to.doReceive(context)
 
@@ -97,6 +88,9 @@ func Ask(ctx context.Context, to PID, message proto.Message, timeout time.Durati
 			return
 		case <-await:
 			err = ErrRequestTimeout
+			// push the message as a deadletter
+			to.emitDeadletter(context, err)
+			// stop the whole processing
 			return
 		}
 	}
@@ -109,11 +103,6 @@ func Tell(ctx context.Context, to PID, message proto.Message) error {
 		return ErrDead
 	}
 
-	// create a mutex
-	mu := sync.Mutex{}
-
-	// acquire a lock to set the message context
-	mu.Lock()
 	// create a message context
 	context := new(receiveContext)
 
@@ -149,13 +138,92 @@ func Tell(ctx context.Context, to PID, message proto.Message) error {
 	context.isAsyncMessage = true
 	context.mu = sync.Mutex{}
 
-	// release the lock after config the message context
-	mu.Unlock()
-
 	// put the message context in the mailbox of the recipient actor
 	to.doReceive(context)
 
 	return nil
+}
+
+// BatchTell sends bulk asynchronous messages to an actor
+func BatchTell(ctx context.Context, to PID, messages ...proto.Message) error {
+	// make sure the recipient actor is live
+	if !to.IsRunning() {
+		return ErrDead
+	}
+
+	// iterate the list messages
+	for i := 0; i < len(messages); i++ {
+		// create a message context
+		context := new(receiveContext)
+		// get the message
+		message := messages[i]
+		// set the needed properties of the message context
+		context.ctx = ctx
+		context.recipient = to
+		context.sendTime.Store(time.Now())
+		context.message = message
+		context.sender = NoSender
+		context.remoteSender = RemoteNoSender
+		// put the message context in the mailbox of the recipient actor
+		to.doReceive(context)
+	}
+	return nil
+}
+
+// BatchAsk sends a synchronous bunch of messages to the given PID and expect responses in the same order as the messages.
+// The messages will be processed one after the other in the order they are sent
+// This is a design choice to follow the simple principle of one message at a time processing by actors.
+func BatchAsk(ctx context.Context, to PID, timeout time.Duration, messages ...proto.Message) (responses chan proto.Message, err error) {
+	// make sure the actor is live
+	if !to.IsRunning() {
+		return nil, ErrDead
+	}
+
+	// create a buffered channel to hold the responses
+	responses = make(chan proto.Message, len(messages))
+
+	// close the responses channel when done
+	defer close(responses)
+
+	// let us process the messages one after the other
+	for i := 0; i < len(messages); i++ {
+		// grab the message at index i
+		message := messages[i]
+		// create a message context
+		messageContext := new(receiveContext)
+
+		// set the needed properties of the message context
+		messageContext.ctx = ctx
+		messageContext.sender = NoSender
+		messageContext.recipient = to
+		messageContext.message = message
+		messageContext.isAsyncMessage = false
+		messageContext.mu = sync.Mutex{}
+		messageContext.response = make(chan proto.Message, 1)
+		messageContext.sendTime.Store(time.Now())
+
+		// push the message to the actor mailbox
+		to.doReceive(messageContext)
+
+		// await patiently to receive the response from the actor
+	timerLoop:
+		for await := time.After(timeout); ; {
+			select {
+			case resp := <-messageContext.response:
+				// send the response to the responses channel
+				responses <- resp
+				break timerLoop
+			case <-await:
+				// set the request timeout error
+				err = ErrRequestTimeout
+				// push the message as a deadletter
+				to.emitDeadletter(messageContext, err)
+				// stop the whole processing
+				return
+			}
+		}
+	}
+	return
 }
 
 // RemoteTell sends a message to an actor remotely without expecting any reply
@@ -250,4 +318,81 @@ func RemoteLookup(ctx context.Context, host string, port int, name string) (addr
 
 	// return the response
 	return response.Msg.GetAddress(), nil
+}
+
+// RemoteBatchTell sends bulk asynchronous messages to an actor
+func RemoteBatchTell(ctx context.Context, to *addresspb.Address, messages ...proto.Message) error {
+	// define a variable holding the remote messages
+	var remoteMessages []*anypb.Any
+	// iterate the list of messages and pack them
+	for _, message := range messages {
+		// let us pack it
+		packed, err := anypb.New(message)
+		// handle the error
+		if err != nil {
+			return ErrInvalidRemoteMessage(err)
+		}
+		// add it to the list of remote messages
+		remoteMessages = append(remoteMessages, packed)
+	}
+
+	// create an instance of remote client service
+	remoteClient := internalpbconnect.NewRemotingServiceClient(
+		http.Client(),
+		http.URL(to.GetHost(), int(to.GetPort())),
+		connect.WithInterceptors(otelconnect.NewInterceptor()),
+		connect.WithGRPC(),
+	)
+
+	// prepare the remote batch tell request
+	request := connect.NewRequest(&internalpb.RemoteBatchTellRequest{
+		Messages: remoteMessages,
+		Sender:   RemoteNoSender,
+		Receiver: to,
+	})
+	// send the message and handle the error in case there is any
+	if _, err := remoteClient.RemoteBatchTell(ctx, request); err != nil {
+		return err
+	}
+	return nil
+}
+
+// RemoteBatchAsk sends bulk messages to an actor with responses expected
+func RemoteBatchAsk(ctx context.Context, to *addresspb.Address, messages ...proto.Message) (responses []*anypb.Any, err error) {
+	// define a variable holding the remote messages
+	var remoteMessages []*anypb.Any
+	// iterate the list of messages and pack them
+	for _, message := range messages {
+		// let us pack it
+		packed, err := anypb.New(message)
+		// handle the error
+		if err != nil {
+			return nil, ErrInvalidRemoteMessage(err)
+		}
+		// add it to the list of remote messages
+		remoteMessages = append(remoteMessages, packed)
+	}
+
+	// create an instance of remote client service
+	remoteClient := internalpbconnect.NewRemotingServiceClient(
+		http.Client(),
+		http.URL(to.GetHost(), int(to.GetPort())),
+		connect.WithInterceptors(otelconnect.NewInterceptor()),
+		connect.WithGRPC(),
+	)
+
+	// prepare the remote batch tell request
+	request := connect.NewRequest(&internalpb.RemoteBatchAskRequest{
+		Messages: remoteMessages,
+		Sender:   RemoteNoSender,
+		Receiver: to,
+	})
+	// send the message and handle the error in case there is any
+	response, err := remoteClient.RemoteBatchAsk(ctx, request)
+	// handle the error
+	if err != nil {
+		return nil, err
+	}
+	// return the responses
+	return response.Msg.GetMessages(), nil
 }

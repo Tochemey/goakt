@@ -722,7 +722,6 @@ func (p *pid) RemoteTell(ctx context.Context, to *addresspb.Address, message pro
 			Receiver: to,
 			Message:  marshaled,
 		},
-		SendTime: timestamppb.Now(),
 	})
 
 	// add some debug logging
@@ -763,7 +762,6 @@ func (p *pid) RemoteAsk(ctx context.Context, to *addresspb.Address, message prot
 				Receiver: to,
 				Message:  marshaled,
 			},
-			SendTime: timestamppb.Now(),
 		})
 	// send the request
 	rpcResponse, rpcErr := remoteClient.RemoteAsk(ctx, rpcRequest)

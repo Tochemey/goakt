@@ -683,18 +683,6 @@ func (x *actorSystem) RemoteLookup(_ context.Context, request *connect.Request[i
 		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrRemotingDisabled)
 	}
 
-	// get the remoting server address
-	nodeAddr := fmt.Sprintf("%s:%d", x.remotingHost, x.remotingPort)
-
-	// let us validate the host and port
-	hostAndPort := fmt.Sprintf("%s:%d", reqCopy.GetHost(), reqCopy.GetPort())
-	if hostAndPort != nodeAddr {
-		// log the error
-		logger.Error(ErrInvalidNode.Message())
-		// here message is sent to the wrong actor system node
-		return nil, ErrInvalidNode
-	}
-
 	// construct the actor address
 	name := reqCopy.GetName()
 	actorPath := NewPath(name, NewAddress(x.Name(), reqCopy.GetHost(), int(reqCopy.GetPort())))
@@ -728,18 +716,6 @@ func (x *actorSystem) RemoteAsk(ctx context.Context, request *connect.Request[in
 		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrRemotingDisabled)
 	}
 
-	// get the remoting server address
-	nodeAddr := fmt.Sprintf("%s:%d", x.remotingHost, x.remotingPort)
-
-	// let us validate the host and port
-	hostAndPort := fmt.Sprintf("%s:%d", reqCopy.GetRemoteMessage().GetReceiver().GetHost(), reqCopy.GetRemoteMessage().GetReceiver().GetPort())
-	if hostAndPort != nodeAddr {
-		// log the error
-		logger.Error(ErrInvalidNode.Message())
-		// here message is sent to the wrong actor system node
-		return nil, ErrInvalidNode
-	}
-
 	// construct the actor address
 	name := reqCopy.GetRemoteMessage().GetReceiver().GetName()
 	actorPath := NewPath(name, NewAddress(x.name, x.remotingHost, int(x.remotingPort)))
@@ -767,8 +743,6 @@ func (x *actorSystem) RemoteAsk(ctx context.Context, request *connect.Request[in
 }
 
 // RemoteTell is used to send a message to an actor remotely by another actor
-// This is the only way remote actors can interact with each other. The actor on the
-// other line can reply to the sender by using the Sender in the message
 func (x *actorSystem) RemoteTell(ctx context.Context, request *connect.Request[internalpb.RemoteTellRequest]) (*connect.Response[internalpb.RemoteTellResponse], error) {
 	// get a context log
 	logger := x.logger
@@ -780,18 +754,6 @@ func (x *actorSystem) RemoteTell(ctx context.Context, request *connect.Request[i
 	// set the actor path with the remoting is enabled
 	if !x.remotingEnabled.Load() {
 		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrRemotingDisabled)
-	}
-
-	// get the remoting server address
-	nodeAddr := fmt.Sprintf("%s:%d", x.remotingHost, x.remotingPort)
-
-	// let us validate the host and port
-	hostAndPort := fmt.Sprintf("%s:%d", receiver.GetHost(), receiver.GetPort())
-	if hostAndPort != nodeAddr {
-		// log the error
-		logger.Error(ErrInvalidNode.Message())
-		// here message is sent to the wrong actor system node
-		return nil, ErrInvalidNode
 	}
 
 	// construct the actor address
@@ -817,6 +779,133 @@ func (x *actorSystem) RemoteTell(ctx context.Context, request *connect.Request[i
 		return nil, ErrRemoteSendFailure(err)
 	}
 	return connect.NewResponse(new(internalpb.RemoteTellResponse)), nil
+}
+
+// RemoteBatchTell is used to send a bulk of messages to an actor remotely by another actor.
+func (x *actorSystem) RemoteBatchTell(ctx context.Context, request *connect.Request[internalpb.RemoteBatchTellRequest]) (*connect.Response[internalpb.RemoteBatchTellResponse], error) {
+	// get a context log
+	logger := x.logger
+	// first let us make a copy of the incoming request
+	reqCopy := request.Msg
+
+	// get the receiver
+	receiver := reqCopy.GetReceiver()
+
+	// set the actor path with the remoting is enabled
+	if !x.remotingEnabled.Load() {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrRemotingDisabled)
+	}
+
+	// construct the actor address
+	actorPath := NewPath(
+		receiver.GetName(),
+		NewAddress(
+			x.Name(),
+			receiver.GetHost(),
+			int(receiver.GetPort())))
+	// start or get the PID of the actor
+	// check whether the given actor already exist in the system or not
+	pid, exist := x.actors.Get(actorPath)
+	// return an error when the remote address is not found
+	if !exist {
+		// log the error
+		logger.Error(ErrAddressNotFound(actorPath.String()).Error())
+		return nil, ErrAddressNotFound(actorPath.String())
+	}
+
+	// send the messages to the receiver mailbox
+	var messages []proto.Message
+	// let us unpack each message
+	for _, message := range reqCopy.GetMessages() {
+		// unmarshal the message
+		actual, err := message.UnmarshalNew()
+		// handle the error
+		if err != nil {
+			logger.Error(err)
+			return nil, connect.NewError(connect.CodeFailedPrecondition, err)
+		}
+		// add to the list of messages
+		messages = append(messages, actual)
+	}
+
+	// push the messages to the actor mailbox
+	if err := BatchTell(ctx, pid, messages...); err != nil {
+		// log the error
+		logger.Error(ErrRemoteSendFailure(err))
+		return nil, ErrRemoteSendFailure(err)
+	}
+
+	// return the rpc response
+	return connect.NewResponse(new(internalpb.RemoteBatchTellResponse)), nil
+}
+
+// RemoteBatchAsk is used to send a bulk messages to a remote actor with replies.
+// The replies are sent in the same order as the messages
+func (x *actorSystem) RemoteBatchAsk(ctx context.Context, request *connect.Request[internalpb.RemoteBatchAskRequest]) (*connect.Response[internalpb.RemoteBatchAskResponse], error) {
+	// get a context log
+	logger := x.logger
+	// first let us make a copy of the incoming request
+	reqCopy := request.Msg
+
+	// set the actor path with the remoting is enabled
+	if !x.remotingEnabled.Load() {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrRemotingDisabled)
+	}
+
+	// construct the actor address
+	name := reqCopy.GetReceiver().GetName()
+	actorPath := NewPath(name, NewAddress(x.name, x.remotingHost, int(x.remotingPort)))
+
+	// start or get the PID of the actor
+	// check whether the given actor already exist in the system or not
+	pid, exist := x.actors.Get(actorPath)
+	// return an error when the remote address is not found
+	if !exist {
+		// log the error
+		logger.Error(ErrAddressNotFound(actorPath.String()).Error())
+		return nil, ErrAddressNotFound(actorPath.String())
+	}
+
+	// send the messages to the receiver mailbox
+	var messages []proto.Message
+	// let us unpack each message
+	for _, message := range reqCopy.GetMessages() {
+		// unmarshal the message
+		actual, err := message.UnmarshalNew()
+		// handle the error
+		if err != nil {
+			logger.Error(err)
+			return nil, connect.NewError(connect.CodeFailedPrecondition, err)
+		}
+		// add to the list of messages
+		messages = append(messages, actual)
+	}
+
+	// push the messages to the actor mailbox and await replies
+	replies, err := BatchAsk(ctx, pid, x.replyTimeout, messages...)
+	// handle the error
+	if err != nil {
+		// log the error
+		logger.Error(ErrRemoteSendFailure(err))
+		return nil, ErrRemoteSendFailure(err)
+	}
+
+	// define a variable to hold responses as they trickle in
+	var responses []*anypb.Any
+	for reply := range replies {
+		// let us unpack the responses
+		actual, err := anypb.New(reply)
+		// handle the error
+		if err != nil {
+			// log the error
+			logger.Error(err)
+			return nil, connect.NewError(connect.CodeFailedPrecondition, err)
+		}
+		responses = append(responses, actual)
+	}
+
+	// return the rpc response
+	return connect.NewResponse(&internalpb.RemoteBatchAskResponse{Messages: responses}), nil
 }
 
 // handleRemoteAsk handles a synchronous message to another actor and expect a response.
