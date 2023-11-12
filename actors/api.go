@@ -151,11 +151,10 @@ func BatchTell(ctx context.Context, to PID, messages ...proto.Message) error {
 		return ErrDead
 	}
 
-	// create a message context
-	context := new(receiveContext)
-
 	// iterate the list messages
 	for i := 0; i < len(messages); i++ {
+		// create a message context
+		context := new(receiveContext)
 		// get the message
 		message := messages[i]
 		// set the needed properties of the message context
