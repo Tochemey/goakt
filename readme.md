@@ -4,9 +4,6 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/tochemey/goakt.svg)](https://pkg.go.dev/github.com/tochemey/goakt)
 [![codecov](https://codecov.io/gh/Tochemey/goakt/branch/main/graph/badge.svg?token=J0p9MzwSRH)](https://codecov.io/gh/Tochemey/goakt)
 [![Go Report Card](https://goreportcard.com/badge/github.com/tochemey/goakt)](https://goreportcard.com/report/github.com/tochemey/goakt)
-[![GitHub release (with filter)](https://img.shields.io/github/v/release/tochemey/goakt)](https://github.com/Tochemey/goakt/releases)
-[![GitHub tag (with filter)](https://img.shields.io/github/v/tag/tochemey/goakt)](https://github.com/Tochemey/goakt/tags)
-![GitHub](https://img.shields.io/github/license/tochemey/goakt?link=https%3A%2F%2Fgithub.com%2FTochemey%2Fgoakt%2Fblob%2Fmain%2FLICENSE)
 
 Distributed [Go](https://go.dev/) actor framework to build reactive and distributed system in golang using
 _**protocol buffers as actor messages**_.
