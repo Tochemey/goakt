@@ -10,6 +10,7 @@ RUN apk --no-cache add git ca-certificates gcc musl-dev libc-dev binutils-gold
 pbs:
     BUILD +protogen
     BUILD +sample-pb
+    BUILD +testprotogen
 
 test:
   BUILD +lint

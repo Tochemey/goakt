@@ -42,20 +42,28 @@ const (
 	// RemotingServiceRemoteLookupProcedure is the fully-qualified name of the RemotingService's
 	// RemoteLookup RPC.
 	RemotingServiceRemoteLookupProcedure = "/internal.v1.RemotingService/RemoteLookup"
+	// RemotingServiceRemoteBatchTellProcedure is the fully-qualified name of the RemotingService's
+	// RemoteBatchTell RPC.
+	RemotingServiceRemoteBatchTellProcedure = "/internal.v1.RemotingService/RemoteBatchTell"
+	// RemotingServiceRemoteBatchAskProcedure is the fully-qualified name of the RemotingService's
+	// RemoteBatchAsk RPC.
+	RemotingServiceRemoteBatchAskProcedure = "/internal.v1.RemotingService/RemoteBatchAsk"
 )
 
 // RemotingServiceClient is a client for the internal.v1.RemotingService service.
 type RemotingServiceClient interface {
-	// RemoteAsk is used to send a message to an actor remotely and expect a response
-	// immediately. With this type of message the receiver cannot communicate back to Sender
-	// except reply the message with a response. This one-way communication
+	// RemoteAsk is used to send a message to an actor remotely and expect a response immediately.
 	RemoteAsk(context.Context, *connect.Request[v1.RemoteAskRequest]) (*connect.Response[v1.RemoteAskResponse], error)
-	// RemoteTell is used to send a message to an actor remotely by another actor
-	// This is the only way remote actors can interact with each other. The actor on the
-	// other line can reply to the sender by using the Sender in the message
+	// RemoteTell is used to send a message to a remote actor
+	// The actor on the other line can reply to the sender by using the Sender in the message
 	RemoteTell(context.Context, *connect.Request[v1.RemoteTellRequest]) (*connect.Response[v1.RemoteTellResponse], error)
 	// Lookup for an actor on a remote host.
 	RemoteLookup(context.Context, *connect.Request[v1.RemoteLookupRequest]) (*connect.Response[v1.RemoteLookupResponse], error)
+	// RemoteBatchTell is used to send a bulk of messages to a remote actor
+	RemoteBatchTell(context.Context, *connect.Request[v1.RemoteBatchTellRequest]) (*connect.Response[v1.RemoteBatchTellResponse], error)
+	// RemoteBatchAsk is used to send a bulk messages to a remote actor with replies.
+	// The replies are sent in the same order as the messages
+	RemoteBatchAsk(context.Context, *connect.Request[v1.RemoteBatchAskRequest]) (*connect.Response[v1.RemoteBatchAskResponse], error)
 }
 
 // NewRemotingServiceClient constructs a client for the internal.v1.RemotingService service. By
@@ -83,14 +91,26 @@ func NewRemotingServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 			baseURL+RemotingServiceRemoteLookupProcedure,
 			opts...,
 		),
+		remoteBatchTell: connect.NewClient[v1.RemoteBatchTellRequest, v1.RemoteBatchTellResponse](
+			httpClient,
+			baseURL+RemotingServiceRemoteBatchTellProcedure,
+			opts...,
+		),
+		remoteBatchAsk: connect.NewClient[v1.RemoteBatchAskRequest, v1.RemoteBatchAskResponse](
+			httpClient,
+			baseURL+RemotingServiceRemoteBatchAskProcedure,
+			opts...,
+		),
 	}
 }
 
 // remotingServiceClient implements RemotingServiceClient.
 type remotingServiceClient struct {
-	remoteAsk    *connect.Client[v1.RemoteAskRequest, v1.RemoteAskResponse]
-	remoteTell   *connect.Client[v1.RemoteTellRequest, v1.RemoteTellResponse]
-	remoteLookup *connect.Client[v1.RemoteLookupRequest, v1.RemoteLookupResponse]
+	remoteAsk       *connect.Client[v1.RemoteAskRequest, v1.RemoteAskResponse]
+	remoteTell      *connect.Client[v1.RemoteTellRequest, v1.RemoteTellResponse]
+	remoteLookup    *connect.Client[v1.RemoteLookupRequest, v1.RemoteLookupResponse]
+	remoteBatchTell *connect.Client[v1.RemoteBatchTellRequest, v1.RemoteBatchTellResponse]
+	remoteBatchAsk  *connect.Client[v1.RemoteBatchAskRequest, v1.RemoteBatchAskResponse]
 }
 
 // RemoteAsk calls internal.v1.RemotingService.RemoteAsk.
@@ -108,18 +128,30 @@ func (c *remotingServiceClient) RemoteLookup(ctx context.Context, req *connect.R
 	return c.remoteLookup.CallUnary(ctx, req)
 }
 
+// RemoteBatchTell calls internal.v1.RemotingService.RemoteBatchTell.
+func (c *remotingServiceClient) RemoteBatchTell(ctx context.Context, req *connect.Request[v1.RemoteBatchTellRequest]) (*connect.Response[v1.RemoteBatchTellResponse], error) {
+	return c.remoteBatchTell.CallUnary(ctx, req)
+}
+
+// RemoteBatchAsk calls internal.v1.RemotingService.RemoteBatchAsk.
+func (c *remotingServiceClient) RemoteBatchAsk(ctx context.Context, req *connect.Request[v1.RemoteBatchAskRequest]) (*connect.Response[v1.RemoteBatchAskResponse], error) {
+	return c.remoteBatchAsk.CallUnary(ctx, req)
+}
+
 // RemotingServiceHandler is an implementation of the internal.v1.RemotingService service.
 type RemotingServiceHandler interface {
-	// RemoteAsk is used to send a message to an actor remotely and expect a response
-	// immediately. With this type of message the receiver cannot communicate back to Sender
-	// except reply the message with a response. This one-way communication
+	// RemoteAsk is used to send a message to an actor remotely and expect a response immediately.
 	RemoteAsk(context.Context, *connect.Request[v1.RemoteAskRequest]) (*connect.Response[v1.RemoteAskResponse], error)
-	// RemoteTell is used to send a message to an actor remotely by another actor
-	// This is the only way remote actors can interact with each other. The actor on the
-	// other line can reply to the sender by using the Sender in the message
+	// RemoteTell is used to send a message to a remote actor
+	// The actor on the other line can reply to the sender by using the Sender in the message
 	RemoteTell(context.Context, *connect.Request[v1.RemoteTellRequest]) (*connect.Response[v1.RemoteTellResponse], error)
 	// Lookup for an actor on a remote host.
 	RemoteLookup(context.Context, *connect.Request[v1.RemoteLookupRequest]) (*connect.Response[v1.RemoteLookupResponse], error)
+	// RemoteBatchTell is used to send a bulk of messages to a remote actor
+	RemoteBatchTell(context.Context, *connect.Request[v1.RemoteBatchTellRequest]) (*connect.Response[v1.RemoteBatchTellResponse], error)
+	// RemoteBatchAsk is used to send a bulk messages to a remote actor with replies.
+	// The replies are sent in the same order as the messages
+	RemoteBatchAsk(context.Context, *connect.Request[v1.RemoteBatchAskRequest]) (*connect.Response[v1.RemoteBatchAskResponse], error)
 }
 
 // NewRemotingServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -143,6 +175,16 @@ func NewRemotingServiceHandler(svc RemotingServiceHandler, opts ...connect.Handl
 		svc.RemoteLookup,
 		opts...,
 	)
+	remotingServiceRemoteBatchTellHandler := connect.NewUnaryHandler(
+		RemotingServiceRemoteBatchTellProcedure,
+		svc.RemoteBatchTell,
+		opts...,
+	)
+	remotingServiceRemoteBatchAskHandler := connect.NewUnaryHandler(
+		RemotingServiceRemoteBatchAskProcedure,
+		svc.RemoteBatchAsk,
+		opts...,
+	)
 	return "/internal.v1.RemotingService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case RemotingServiceRemoteAskProcedure:
@@ -151,6 +193,10 @@ func NewRemotingServiceHandler(svc RemotingServiceHandler, opts ...connect.Handl
 			remotingServiceRemoteTellHandler.ServeHTTP(w, r)
 		case RemotingServiceRemoteLookupProcedure:
 			remotingServiceRemoteLookupHandler.ServeHTTP(w, r)
+		case RemotingServiceRemoteBatchTellProcedure:
+			remotingServiceRemoteBatchTellHandler.ServeHTTP(w, r)
+		case RemotingServiceRemoteBatchAskProcedure:
+			remotingServiceRemoteBatchAskHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -170,4 +216,12 @@ func (UnimplementedRemotingServiceHandler) RemoteTell(context.Context, *connect.
 
 func (UnimplementedRemotingServiceHandler) RemoteLookup(context.Context, *connect.Request[v1.RemoteLookupRequest]) (*connect.Response[v1.RemoteLookupResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("internal.v1.RemotingService.RemoteLookup is not implemented"))
+}
+
+func (UnimplementedRemotingServiceHandler) RemoteBatchTell(context.Context, *connect.Request[v1.RemoteBatchTellRequest]) (*connect.Response[v1.RemoteBatchTellResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("internal.v1.RemotingService.RemoteBatchTell is not implemented"))
+}
+
+func (UnimplementedRemotingServiceHandler) RemoteBatchAsk(context.Context, *connect.Request[v1.RemoteBatchAskRequest]) (*connect.Response[v1.RemoteBatchAskResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("internal.v1.RemotingService.RemoteBatchAsk is not implemented"))
 }
