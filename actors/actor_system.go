@@ -728,18 +728,6 @@ func (x *actorSystem) RemoteAsk(ctx context.Context, request *connect.Request[in
 		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrRemotingDisabled)
 	}
 
-	// get the remoting server address
-	nodeAddr := fmt.Sprintf("%s:%d", x.remotingHost, x.remotingPort)
-
-	// let us validate the host and port
-	hostAndPort := fmt.Sprintf("%s:%d", reqCopy.GetRemoteMessage().GetReceiver().GetHost(), reqCopy.GetRemoteMessage().GetReceiver().GetPort())
-	if hostAndPort != nodeAddr {
-		// log the error
-		logger.Error(ErrInvalidNode.Message())
-		// here message is sent to the wrong actor system node
-		return nil, ErrInvalidNode
-	}
-
 	// construct the actor address
 	name := reqCopy.GetRemoteMessage().GetReceiver().GetName()
 	actorPath := NewPath(name, NewAddress(x.name, x.remotingHost, int(x.remotingPort)))
@@ -780,18 +768,6 @@ func (x *actorSystem) RemoteTell(ctx context.Context, request *connect.Request[i
 		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrRemotingDisabled)
 	}
 
-	// get the remoting server address
-	nodeAddr := fmt.Sprintf("%s:%d", x.remotingHost, x.remotingPort)
-
-	// let us validate the host and port
-	hostAndPort := fmt.Sprintf("%s:%d", receiver.GetHost(), receiver.GetPort())
-	if hostAndPort != nodeAddr {
-		// log the error
-		logger.Error(ErrInvalidNode.Message())
-		// here message is sent to the wrong actor system node
-		return nil, ErrInvalidNode
-	}
-
 	// construct the actor address
 	actorPath := NewPath(
 		receiver.GetName(),
@@ -830,17 +806,6 @@ func (x *actorSystem) RemoteBatchTell(ctx context.Context, request *connect.Requ
 	// set the actor path with the remoting is enabled
 	if !x.remotingEnabled.Load() {
 		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrRemotingDisabled)
-	}
-
-	// get the remoting server address
-	nodeAddr := fmt.Sprintf("%s:%d", x.remotingHost, x.remotingPort)
-	hostAndPort := fmt.Sprintf("%s:%d", receiver.GetHost(), receiver.GetPort())
-	// compare the nodeAddr and the hostAndPort
-	if hostAndPort != nodeAddr {
-		// log the error
-		logger.Error(ErrInvalidNode.Message())
-		// here message is sent to the wrong actor system node
-		return nil, ErrInvalidNode
 	}
 
 	// construct the actor address
@@ -897,18 +862,6 @@ func (x *actorSystem) RemoteBatchAsk(ctx context.Context, request *connect.Reque
 	// set the actor path with the remoting is enabled
 	if !x.remotingEnabled.Load() {
 		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrRemotingDisabled)
-	}
-
-	// get the remoting server address
-	nodeAddr := fmt.Sprintf("%s:%d", x.remotingHost, x.remotingPort)
-
-	// let us validate the host and port
-	hostAndPort := fmt.Sprintf("%s:%d", reqCopy.GetReceiver().GetHost(), reqCopy.GetReceiver().GetPort())
-	if hostAndPort != nodeAddr {
-		// log the error
-		logger.Error(ErrInvalidNode.Message())
-		// here message is sent to the wrong actor system node
-		return nil, ErrInvalidNode
 	}
 
 	// construct the actor address
