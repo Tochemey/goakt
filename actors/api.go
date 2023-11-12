@@ -88,6 +88,9 @@ func Ask(ctx context.Context, to PID, message proto.Message, timeout time.Durati
 			return
 		case <-await:
 			err = ErrRequestTimeout
+			// push the message as a deadletter
+			to.emitDeadletter(context, err)
+			// stop the whole processing
 			return
 		}
 	}
@@ -214,6 +217,8 @@ func BatchAsk(ctx context.Context, to PID, timeout time.Duration, messages ...pr
 			case <-await:
 				// set the request timeout error
 				err = ErrRequestTimeout
+				// push the message as a deadletter
+				to.emitDeadletter(messageContext, err)
 				// stop the whole processing
 				return
 			}

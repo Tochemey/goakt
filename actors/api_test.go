@@ -77,10 +77,6 @@ func TestAsk(t *testing.T) {
 		expected := &testpb.Reply{Content: "received message"}
 		assert.True(t, proto.Equal(expected, reply))
 
-		// stop the actor after some time
-		ctx, cancel := context.WithTimeout(ctx, time.Second)
-		defer cancel()
-
 		err = sys.Stop(ctx)
 	})
 	t.Run("With stopped actor", func(t *testing.T) {
@@ -121,9 +117,42 @@ func TestAsk(t *testing.T) {
 		assert.EqualError(t, err, ErrDead.Error())
 		assert.Nil(t, reply)
 
-		// stop the actor after some time
-		ctx, cancel := context.WithTimeout(ctx, time.Second)
-		defer cancel()
+		err = sys.Stop(ctx)
+	})
+	t.Run("With request timeout", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.New(log.DebugLevel, os.Stdout)
+		// create the actor system
+		sys, err := NewActorSystem("test",
+			WithLogger(logger),
+			WithReplyTimeout(receivingTimeout),
+			WithPassivationDisabled())
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		time.Sleep(time.Second)
+
+		// create a test actor
+		actorName := "test"
+		actor := NewTester()
+		actorRef, err := sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		// create a message to send to the test actor
+		message := new(testpb.TestTimeout)
+		// send the message to the actor
+		reply, err := Ask(ctx, actorRef, message, receivingTimeout)
+		// perform some assertions
+		require.Error(t, err)
+		assert.EqualError(t, err, ErrRequestTimeout.Error())
+		assert.Nil(t, reply)
 
 		err = sys.Stop(ctx)
 	})
@@ -164,9 +193,124 @@ func TestAsk(t *testing.T) {
 		require.Error(t, err)
 		assert.Nil(t, reply)
 
+		err = sys.Stop(ctx)
+	})
+	t.Run("With Batch request happy path", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.New(log.DebugLevel, os.Stdout)
+		// create the actor system
+		sys, err := NewActorSystem("test",
+			WithLogger(logger),
+			WithPassivationDisabled())
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		time.Sleep(time.Second)
+
+		// create a test actor
+		actorName := "test"
+		actor := NewTester()
+		actorRef, err := sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		// create a message to send to the test actor
+		// send the message to the actor
+		replies, err := BatchAsk(ctx, actorRef, receivingTimeout, new(testpb.TestReply), new(testpb.TestReply))
+		// perform some assertions
+		require.NoError(t, err)
+		assert.NotNil(t, replies)
+		assert.NotEmpty(t, replies)
+		assert.Len(t, replies, 2)
+
+		for reply := range replies {
+			expected := &testpb.Reply{Content: "received message"}
+			assert.True(t, proto.Equal(expected, reply))
+		}
+
+		err = sys.Stop(ctx)
+	})
+	t.Run("With Batch request with timeout", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.New(log.DebugLevel, os.Stdout)
+		// create the actor system
+		sys, err := NewActorSystem("test",
+			WithLogger(logger),
+			WithReplyTimeout(receivingTimeout),
+			WithPassivationDisabled())
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		time.Sleep(time.Second)
+
+		// create a test actor
+		actorName := "test"
+		actor := NewTester()
+		actorRef, err := sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		// create a message to send to the test actor
+		// send the message to the actor
+		replies, err := BatchAsk(ctx, actorRef, receivingTimeout, new(testpb.TestTimeout), new(testpb.TestReply))
+		// perform some assertions
+		require.Error(t, err)
+		require.EqualError(t, err, ErrRequestTimeout.Error())
+		assert.Empty(t, replies)
+
 		// stop the actor after some time
-		ctx, cancel := context.WithTimeout(ctx, time.Second)
-		defer cancel()
+		// this is due to the actor Waitgroup to gracefully close
+		time.Sleep(time.Second)
+
+		err = sys.Stop(ctx)
+	})
+	t.Run("With Batch request with dead actor", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.New(log.DebugLevel, os.Stdout)
+		// create the actor system
+		sys, err := NewActorSystem("test",
+			WithLogger(logger),
+			WithReplyTimeout(receivingTimeout),
+			WithPassivationDisabled())
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		time.Sleep(time.Second)
+
+		// create a test actor
+		actorName := "test"
+		actor := NewTester()
+		actorRef, err := sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		// stop the actor
+		require.NoError(t, actorRef.Shutdown(ctx))
+
+		// create a message to send to the test actor
+		// send the message to the actor
+		replies, err := BatchAsk(ctx, actorRef, receivingTimeout, new(testpb.TestTimeout), new(testpb.TestReply))
+		// perform some assertions
+		require.Error(t, err)
+		assert.Empty(t, replies)
 
 		err = sys.Stop(ctx)
 	})
@@ -208,8 +352,7 @@ func TestTell(t *testing.T) {
 		require.NoError(t, err)
 
 		// stop the actor after some time
-		ctx, cancel := context.WithTimeout(ctx, time.Second)
-		defer cancel()
+		time.Sleep(time.Second)
 
 		err = sys.Stop(ctx)
 		assert.NoError(t, err)
@@ -251,10 +394,6 @@ func TestTell(t *testing.T) {
 		require.Error(t, err)
 		assert.EqualError(t, err, ErrDead.Error())
 
-		// stop the actor after some time
-		ctx, cancel := context.WithTimeout(ctx, time.Second)
-		defer cancel()
-
 		err = sys.Stop(ctx)
 	})
 	t.Run("With invalid remote message", func(t *testing.T) {
@@ -290,11 +429,82 @@ func TestTell(t *testing.T) {
 		err = Tell(ctx, actorRef, message)
 		require.Error(t, err)
 
-		// stop the actor after some time
-		ctx, cancel := context.WithTimeout(ctx, time.Second)
-		defer cancel()
+		err = sys.Stop(ctx)
+	})
+	t.Run("With Batch request", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.New(log.DebugLevel, os.Stdout)
+		// create the actor system
+		sys, err := NewActorSystem("test",
+			WithLogger(logger),
+			WithPassivationDisabled())
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		time.Sleep(time.Second)
+
+		// create a test actor
+		actorName := "test"
+		actor := NewTester()
+		actorRef, err := sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		time.Sleep(time.Second)
+
+		// create a message to send to the test actor
+		// send the message to the actor
+		err = BatchTell(ctx, actorRef, new(testpb.TestSend), new(testpb.TestSend))
+		// perform some assertions
+		require.NoError(t, err)
+		require.EqualValues(t, 2, actor.counter.Load())
 
 		err = sys.Stop(ctx)
+		assert.NoError(t, err)
+	})
+	t.Run("With Batch request with a dead actor", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.New(log.DebugLevel, os.Stdout)
+		// create the actor system
+		sys, err := NewActorSystem("test",
+			WithLogger(logger),
+			WithPassivationDisabled())
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		time.Sleep(time.Second)
+
+		// create a test actor
+		actorName := "test"
+		actor := NewTester()
+		actorRef, err := sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		time.Sleep(time.Second)
+		require.NoError(t, actorRef.Shutdown(ctx))
+
+		// create a message to send to the test actor
+		// send the message to the actor
+		err = BatchTell(ctx, actorRef, new(testpb.TestSend), new(testpb.TestSend))
+		// perform some assertions
+		require.Error(t, err)
+		require.EqualError(t, err, ErrDead.Error())
+
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
 	})
 }
 

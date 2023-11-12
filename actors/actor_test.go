@@ -90,7 +90,7 @@ func (p *Tester) Receive(ctx ReceiveContext) {
 		// block until timer is up
 		wg.Wait()
 	default:
-		panic(ErrUnhandled)
+		ctx.Unhandled()
 	}
 }
 
