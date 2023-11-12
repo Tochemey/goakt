@@ -726,6 +726,52 @@ func TestActorToActor(t *testing.T) {
 		err = Tell(ctx, pid1, new(testpb.TestBye))
 		require.NoError(t, err)
 	})
+	t.Run("With Ask timeout", func(t *testing.T) {
+		ctx := context.TODO()
+		// create a Ping actor
+		opts := []pidOption{
+			withInitMaxRetries(1),
+			withCustomLogger(log.DiscardLogger),
+			withSendReplyTimeout(receivingTimeout),
+		}
+
+		// create the actor path
+		actor1 := &Exchanger{}
+		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
+		pid1, err := newPID(ctx, actorPath1, actor1, opts...)
+
+		require.NoError(t, err)
+		require.NotNil(t, pid1)
+
+		actor2 := NewTester()
+		actorPath2 := NewPath("Exchange2", NewAddress("sys", "host", 1))
+		pid2, err := newPID(ctx, actorPath2, actor2, opts...)
+		require.NoError(t, err)
+		require.NotNil(t, pid2)
+
+		err = pid1.Tell(ctx, pid2, new(testpb.TestSend))
+		require.NoError(t, err)
+
+		// send an ask
+		reply, err := pid1.Ask(ctx, pid2, new(testpb.TestTimeout))
+		require.Error(t, err)
+		require.EqualError(t, err, ErrRequestTimeout.Error())
+		require.Nil(t, reply)
+
+		// wait a while because exchange is ongoing
+		time.Sleep(time.Second)
+
+		err = Tell(ctx, pid1, new(testpb.TestBye))
+		require.NoError(t, err)
+
+		time.Sleep(time.Second)
+		assert.False(t, pid1.IsRunning())
+		assert.True(t, pid2.IsRunning())
+
+		time.Sleep(time.Second)
+		assert.NoError(t, pid2.Shutdown(ctx))
+		assert.False(t, pid2.IsRunning())
+	})
 }
 func TestActorRemoting(t *testing.T) {
 	// create the context
