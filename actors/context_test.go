@@ -1500,4 +1500,7 @@ func TestReceiveContext(t *testing.T) {
 		time.Sleep(time.Second)
 		assert.NoError(t, pid1.Shutdown(ctx))
 	})
+	t.Run("With happy RemoteBatchTell", func(t *testing.T) {
+
+	})
 }
