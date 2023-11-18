@@ -96,13 +96,21 @@ type PID interface {
 	// BatchAsk sends a synchronous bunch of messages to the given PID and expect responses in the same order as the messages.
 	// The messages will be processed one after the other in the order they are sent
 	// This is a design choice to follow the simple principle of one message at a time processing by actors.
+	// This can hinder performance if it is not properly used.
 	BatchAsk(ctx context.Context, to PID, messages ...proto.Message) (responses chan proto.Message, err error)
 	// RemoteTell sends a message to an actor remotely without expecting any reply
 	RemoteTell(ctx context.Context, to *addresspb.Address, message proto.Message) error
+	// RemoteBatchTell sends a batch of messages to a remote actor in a way fire-and-forget manner
+	// Messages are processed one after the other in the order they are sent.
+	RemoteBatchTell(ctx context.Context, to *addresspb.Address, messages ...proto.Message) error
 	// RemoteAsk is used to send a message to an actor remotely and expect a response
 	// immediately. With this type of message the receiver cannot communicate back to Sender
 	// except reply the message with a response. This one-way communication.
 	RemoteAsk(ctx context.Context, to *addresspb.Address, message proto.Message) (response *anypb.Any, err error)
+	// RemoteBatchAsk sends a synchronous bunch of messages to a remote actor and expect responses in the same order as the messages.
+	// Messages are processed one after the other in the order they are sent.
+	// This can hinder performance if it is not properly used.
+	RemoteBatchAsk(ctx context.Context, to *addresspb.Address, messages ...proto.Message) (responses []*anypb.Any, err error)
 	// RemoteLookup look for an actor address on a remote node. If the actorSystem is nil then the lookup will be done
 	// using the same actor system as the PID actor system
 	RemoteLookup(ctx context.Context, host string, port int, name string) (addr *addresspb.Address, err error)
@@ -754,11 +762,19 @@ func (p *pid) RemoteAsk(ctx context.Context, to *addresspb.Address, message prot
 		connect.WithGRPC(),
 	)
 
+	// construct the from address
+	sender := &addresspb.Address{
+		Host: p.ActorPath().Address().Host(),
+		Port: int32(p.ActorPath().Address().Port()),
+		Name: p.ActorPath().Name(),
+		Id:   p.ActorPath().ID().String(),
+	}
+
 	// prepare the rpcRequest to send
 	rpcRequest := connect.NewRequest(
 		&internalpb.RemoteAskRequest{
 			RemoteMessage: &internalpb.RemoteMessage{
-				Sender:   RemoteNoSender,
+				Sender:   sender,
 				Receiver: to,
 				Message:  marshaled,
 			},
@@ -771,6 +787,108 @@ func (p *pid) RemoteAsk(ctx context.Context, to *addresspb.Address, message prot
 	}
 
 	return rpcResponse.Msg.GetMessage(), nil
+}
+
+// RemoteBatchTell sends a batch of messages to a remote actor in a way fire-and-forget manner
+// Messages are processed one after the other in the order they are sent.
+func (p *pid) RemoteBatchTell(ctx context.Context, to *addresspb.Address, messages ...proto.Message) error {
+	// first check whether we need to fall back to a Tell
+	if len(messages) == 1 {
+		return p.RemoteTell(ctx, to, messages[0])
+	}
+
+	// define a variable holding the remote messages
+	var remoteMessages []*anypb.Any
+	// iterate the list of messages and pack them
+	for _, message := range messages {
+		// let us pack it
+		packed, err := anypb.New(message)
+		// handle the error
+		if err != nil {
+			return ErrInvalidRemoteMessage(err)
+		}
+		// add it to the list of remote messages
+		remoteMessages = append(remoteMessages, packed)
+	}
+
+	// construct the from address
+	sender := &addresspb.Address{
+		Host: p.ActorPath().Address().Host(),
+		Port: int32(p.ActorPath().Address().Port()),
+		Name: p.ActorPath().Name(),
+		Id:   p.ActorPath().ID().String(),
+	}
+
+	// create an instance of remote client service
+	remoteClient := internalpbconnect.NewRemotingServiceClient(
+		http.Client(),
+		http.URL(to.GetHost(), int(to.GetPort())),
+		connect.WithInterceptors(otelconnect.NewInterceptor()),
+		connect.WithGRPC(),
+	)
+
+	// prepare the remote batch tell request
+	request := connect.NewRequest(&internalpb.RemoteBatchTellRequest{
+		Messages: remoteMessages,
+		Sender:   sender,
+		Receiver: to,
+	})
+
+	// send the message and handle the error in case there is any
+	if _, err := remoteClient.RemoteBatchTell(ctx, request); err != nil {
+		return err
+	}
+	return nil
+}
+
+// RemoteBatchAsk sends a synchronous bunch of messages to a remote actor and expect responses in the same order as the messages.
+// Messages are processed one after the other in the order they are sent.
+// This can hinder performance if it is not properly used.
+func (p *pid) RemoteBatchAsk(ctx context.Context, to *addresspb.Address, messages ...proto.Message) (responses []*anypb.Any, err error) {
+	// define a variable holding the remote messages
+	var remoteMessages []*anypb.Any
+	// iterate the list of messages and pack them
+	for _, message := range messages {
+		// let us pack it
+		packed, err := anypb.New(message)
+		// handle the error
+		if err != nil {
+			return nil, ErrInvalidRemoteMessage(err)
+		}
+		// add it to the list of remote messages
+		remoteMessages = append(remoteMessages, packed)
+	}
+
+	// construct the from address
+	sender := &addresspb.Address{
+		Host: p.ActorPath().Address().Host(),
+		Port: int32(p.ActorPath().Address().Port()),
+		Name: p.ActorPath().Name(),
+		Id:   p.ActorPath().ID().String(),
+	}
+
+	// create an instance of remote client service
+	remoteClient := internalpbconnect.NewRemotingServiceClient(
+		http.Client(),
+		http.URL(to.GetHost(), int(to.GetPort())),
+		connect.WithInterceptors(otelconnect.NewInterceptor()),
+		connect.WithGRPC(),
+	)
+
+	// prepare the remote batch tell request
+	request := connect.NewRequest(&internalpb.RemoteBatchAskRequest{
+		Messages: remoteMessages,
+		Sender:   sender,
+		Receiver: to,
+	})
+	// send the message and handle the error in case there is any
+	response, err := remoteClient.RemoteBatchAsk(ctx, request)
+	// handle the error
+	if err != nil {
+		return nil, err
+	}
+	// return the responses
+	return response.Msg.GetMessages(), nil
 }
 
 // Shutdown gracefully shuts down the given actor

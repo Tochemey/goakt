@@ -98,9 +98,16 @@ type ReceiveContext interface {
 	Forward(to PID)
 	// RemoteTell sends a message to an actor remotely without expecting any reply
 	RemoteTell(to *addresspb.Address, message proto.Message)
+	// RemoteBatchTell sends a batch of messages to a remote actor in a way fire-and-forget manner
+	// Messages are processed one after the other in the order they are sent.
+	RemoteBatchTell(to *addresspb.Address, messages ...proto.Message)
 	// RemoteAsk is used to send a message to an actor remotely and expect a response
 	// immediately. This executed within an actor can hinder performance because this is a blocking call.
 	RemoteAsk(to *addresspb.Address, message proto.Message) (response *anypb.Any)
+	// RemoteBatchAsk sends a synchronous bunch of messages to a remote actor and expect responses in the same order as the messages.
+	// Messages are processed one after the other in the order they are sent.
+	// This can hinder performance if it is not properly used.
+	RemoteBatchAsk(to *addresspb.Address, messages ...proto.Message) (responses []*anypb.Any)
 	// RemoteLookup look for an actor address on a remote node. If the actorSystem is nil then the lookup will be done
 	// using the same actor system as the PID actor system
 	RemoteLookup(host string, port int, name string) (addr *addresspb.Address)
@@ -328,6 +335,35 @@ func (c *receiveContext) RemoteAsk(to *addresspb.Address, message proto.Message)
 		panic(err)
 	}
 	return reply
+}
+
+// RemoteBatchTell sends a batch of messages to a remote actor in a way fire-and-forget manner
+// Messages are processed one after the other in the order they are sent.
+func (c *receiveContext) RemoteBatchTell(to *addresspb.Address, messages ...proto.Message) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	// create a new context from the parent context
+	ctx := context.WithoutCancel(c.ctx)
+	// send the message to the recipient and let it crash
+	if err := c.recipient.RemoteBatchTell(ctx, to, messages...); err != nil {
+		panic(err)
+	}
+}
+
+// RemoteBatchAsk sends a synchronous bunch of messages to a remote actor and expect responses in the same order as the messages.
+// Messages are processed one after the other in the order they are sent.
+// This can hinder performance if it is not properly used.
+func (c *receiveContext) RemoteBatchAsk(to *addresspb.Address, messages ...proto.Message) (responses []*anypb.Any) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	// create a new context from the parent context
+	ctx := context.WithoutCancel(c.ctx)
+	// send the message to the recipient or let it crash
+	replies, err := c.recipient.RemoteBatchAsk(ctx, to, messages...)
+	if err != nil {
+		panic(err)
+	}
+	return replies
 }
 
 // RemoteLookup look for an actor address on a remote node. If the actorSystem is nil then the lookup will be done
