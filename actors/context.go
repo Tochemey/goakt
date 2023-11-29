@@ -259,7 +259,7 @@ func (c *receiveContext) Tell(to PID, message proto.Message) {
 // BatchTell sends an asynchronous bunch of messages to the given PID
 // The messages will be processed one after the other in the order they are sent
 // This is a design choice to follow the simple principle of one message at a time processing by actors.
-// When TellStream encounter a single message it will fall back to a Tell call.
+// When BatchTell encounter a single message it will fall back to a Tell call.
 func (c *receiveContext) BatchTell(to PID, messages ...proto.Message) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
