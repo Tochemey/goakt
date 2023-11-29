@@ -40,6 +40,7 @@ import (
 	testpb "github.com/tochemey/goakt/test/data/pb/v1"
 	"github.com/travisjeffery/go-dynaport"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/anypb"
 )
 
 func TestReceiveContext(t *testing.T) {
@@ -515,7 +516,7 @@ func TestReceiveContext(t *testing.T) {
 			isAsyncMessage: true,
 		}
 
-		// send the message to t exchanger actor one using remote messaging
+		// send the message to the exchanger actor one using remote messaging
 		assert.Panics(t, func() {
 			context.RemoteTell(&addresspb.Address{
 				Host: "localhost",
@@ -1499,5 +1500,246 @@ func TestReceiveContext(t *testing.T) {
 
 		time.Sleep(time.Second)
 		assert.NoError(t, pid1.Shutdown(ctx))
+	})
+	t.Run("With happy RemoteBatchTell", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.New(log.DebugLevel, os.Stdout)
+		// generate the remoting port
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "localhost"
+
+		// create the actor system
+		sys, err := NewActorSystem("test",
+			WithLogger(logger),
+			WithPassivationDisabled(),
+			WithRemoting(host, int32(remotingPort)),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		// create test actor
+		tester := "test"
+		testActor := NewTester()
+		testerRef, err := sys.Spawn(ctx, tester, testActor)
+		require.NoError(t, err)
+		require.NotNil(t, testerRef)
+
+		// create an instance of receive context
+		context := &receiveContext{
+			ctx:            ctx,
+			sender:         NoSender,
+			recipient:      testerRef,
+			mu:             sync.Mutex{},
+			isAsyncMessage: true,
+		}
+
+		// get the address of the exchanger actor one
+		testerAddr := context.RemoteLookup(host, remotingPort, tester)
+		// send the message to t exchanger actor one using remote messaging
+		assert.NotPanics(t, func() {
+			context.RemoteBatchTell(testerAddr, new(testpb.TestSend), new(testpb.TestSend), new(testpb.TestSend))
+		})
+
+		// wait for processing to complete on the actor side
+		time.Sleep(500 * time.Millisecond)
+		require.EqualValues(t, 3, testActor.counter.Load())
+
+		time.Sleep(time.Second)
+
+		t.Cleanup(func() {
+			assert.NoError(t, testerRef.Shutdown(ctx))
+			assert.NoError(t, sys.Stop(ctx))
+		})
+	})
+	t.Run("With happy RemoteBatchAsk", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.New(log.DebugLevel, os.Stdout)
+		// generate the remoting port
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "localhost"
+
+		// create the actor system
+		sys, err := NewActorSystem("test",
+			WithLogger(logger),
+			WithPassivationDisabled(),
+			WithRemoting(host, int32(remotingPort)),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		// create test actor
+		tester := "test"
+		testActor := NewTester()
+		testerRef, err := sys.Spawn(ctx, tester, testActor)
+		require.NoError(t, err)
+		require.NotNil(t, testerRef)
+
+		// create an instance of receive context
+		context := &receiveContext{
+			ctx:            ctx,
+			sender:         NoSender,
+			recipient:      testerRef,
+			mu:             sync.Mutex{},
+			isAsyncMessage: true,
+		}
+
+		// get the address of the exchanger actor one
+		testerAddr := context.RemoteLookup(host, remotingPort, tester)
+		// send the message to t exchanger actor one using remote messaging
+		var replies []*anypb.Any
+		assert.NotPanics(t, func() {
+			replies = context.RemoteBatchAsk(testerAddr, new(testpb.TestReply), new(testpb.TestReply), new(testpb.TestReply))
+		})
+		require.Len(t, replies, 3)
+		time.Sleep(time.Second)
+
+		t.Cleanup(func() {
+			assert.NoError(t, testerRef.Shutdown(ctx))
+			assert.NoError(t, sys.Stop(ctx))
+		})
+	})
+	t.Run("With panic RemoteBatchTell", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.New(log.DebugLevel, os.Stdout)
+		// generate the remoting port
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "localhost"
+
+		// create the actor system
+		sys, err := NewActorSystem("test",
+			WithLogger(logger),
+			WithPassivationDisabled(),
+			WithRemoting(host, int32(remotingPort)),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		// create an exchanger two
+		actorName2 := "Exchange2"
+
+		// create actor1
+		actor1 := &Exchanger{}
+		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
+		pid1, err := newPID(ctx,
+			actorPath1,
+			actor1,
+			withInitMaxRetries(1),
+			withCustomLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NotNil(t, pid1)
+
+		// create an instance of receive context
+		context := &receiveContext{
+			ctx:            ctx,
+			message:        new(testpb.TestSend),
+			sender:         NoSender,
+			recipient:      pid1,
+			mu:             sync.Mutex{},
+			isAsyncMessage: true,
+		}
+
+		// send the message to the exchanger actor one using remote messaging
+		assert.Panics(t, func() {
+			context.RemoteBatchTell(&addresspb.Address{
+				Host: "localhost",
+				Port: int32(remotingPort),
+				Name: actorName2,
+				Id:   "",
+			}, new(testpb.TestRemoteSend))
+		})
+
+		time.Sleep(time.Second)
+
+		t.Cleanup(func() {
+			assert.NoError(t, pid1.Shutdown(ctx))
+			assert.NoError(t, sys.Stop(ctx))
+		})
+	})
+	t.Run("With panic RemoteBatchAsk", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.New(log.DebugLevel, os.Stdout)
+		// generate the remoting port
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "localhost"
+
+		// create the actor system
+		sys, err := NewActorSystem("test",
+			WithLogger(logger),
+			WithPassivationDisabled(),
+			WithRemoting(host, int32(remotingPort)),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		// create an exchanger two
+		actorName2 := "Exchange2"
+
+		// create actor1
+		actor1 := &Exchanger{}
+		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
+		pid1, err := newPID(ctx,
+			actorPath1,
+			actor1,
+			withInitMaxRetries(1),
+			withCustomLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NotNil(t, pid1)
+
+		// create an instance of receive context
+		context := &receiveContext{
+			ctx:            ctx,
+			message:        new(testpb.TestSend),
+			sender:         NoSender,
+			recipient:      pid1,
+			mu:             sync.Mutex{},
+			isAsyncMessage: true,
+		}
+
+		op := func() {
+			context.RemoteBatchAsk(&addresspb.Address{
+				Host: "localhost",
+				Port: int32(remotingPort),
+				Name: actorName2,
+				Id:   "",
+			}, new(testpb.TestReply))
+		}
+
+		assert.Panics(t, op)
+		time.Sleep(time.Second)
+
+		t.Cleanup(func() {
+			assert.NoError(t, pid1.Shutdown(ctx))
+			assert.NoError(t, sys.Stop(ctx))
+		})
 	})
 }
