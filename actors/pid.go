@@ -393,16 +393,18 @@ func (p *pid) Stop(ctx context.Context, pid PID) error {
 
 	// lookup the child actor and shut it down
 	if cid, ok := kiddos.Get(path); ok {
+		// define the error description
+		desc := fmt.Sprintf("child.[%s] Shutdown", path)
 		// stop the actor and record the error in the span
 		if err := cid.Shutdown(spanCtx); err != nil {
-			// define the error description
-			desc := fmt.Sprintf("child.[%s] Shutdown", path)
 			// let us record the error in the span
 			span.SetStatus(codes.Error, desc)
 			span.RecordError(err)
 			// return the error
 			return err
 		}
+		// set the status to ok
+		span.SetStatus(codes.Ok, desc)
 		return nil
 	}
 	// create an instance of error
@@ -495,6 +497,7 @@ func (p *pid) Restart(ctx context.Context) error {
 	}
 
 	// successful restart
+	span.SetStatus(codes.Ok, "Restart")
 	return nil
 }
 
@@ -578,6 +581,8 @@ func (p *pid) SpawnChild(ctx context.Context, name string, actor Actor) (PID, er
 	// let us start watching it
 	p.Watch(cid)
 
+	// set the span status and return
+	span.SetStatus(codes.Ok, "SpawnChild")
 	return cid, nil
 }
 
@@ -611,6 +616,8 @@ func (p *pid) Ask(ctx context.Context, to PID, message proto.Message) (response 
 	for await := time.After(p.replyTimeout.Load()); ; {
 		select {
 		case response = <-context.response:
+			// set the span status to Ok
+			span.SetStatus(codes.Ok, "Ask")
 			return
 		case <-await:
 			err = ErrRequestTimeout
@@ -643,6 +650,9 @@ func (p *pid) Tell(ctx context.Context, to PID, message proto.Message) error {
 	context := newReceiveContext(spanCtx, p, to, message, true)
 	// put the message context in the mailbox of the recipient actor
 	to.doReceive(context)
+
+	// set the status to OK and return
+	span.SetStatus(codes.Ok, "Tell")
 	return nil
 }
 
@@ -681,6 +691,8 @@ func (p *pid) BatchTell(ctx context.Context, to PID, messages ...proto.Message) 
 		to.doReceive(messageContext)
 	}
 
+	// set the span status and return
+	span.SetStatus(codes.Ok, "BatchTell")
 	return nil
 }
 
@@ -724,6 +736,7 @@ func (p *pid) BatchAsk(ctx context.Context, to PID, messages ...proto.Message) (
 			case resp := <-messageContext.response:
 				// send the response to the responses channel
 				responses <- resp
+				span.SetStatus(codes.Ok, "BatchAsk")
 				break timerLoop
 			case <-await:
 				// set the request timeout error
@@ -983,6 +996,9 @@ func (p *pid) Shutdown(ctx context.Context) error {
 	// check whether the actor is still alive. Maybe it has been passivated already
 	if !p.isRunning.Load() {
 		p.logger.Infof("Actor=%s is offline. Maybe it has been passivated or stopped already", p.ActorPath().String())
+		// set the span status to Ok
+		span.SetStatus(codes.Ok, "Shutdown")
+		// return
 		return nil
 	}
 
@@ -1000,6 +1016,7 @@ func (p *pid) Shutdown(ctx context.Context) error {
 	}
 
 	p.logger.Infof("Actor=%s successfully shutdown", p.ActorPath().String())
+	span.SetStatus(codes.Ok, "Shutdown")
 	return nil
 }
 
@@ -1068,10 +1085,15 @@ func (p *pid) doReceive(ctx ReceiveContext) {
 // init initializes the given actor and init processing messages
 // when the initialization failed the actor will not be started
 func (p *pid) init(ctx context.Context) error {
+	// start a tracing span
+	spanCtx, span := p.tracer.Start(ctx, "Init")
+	// defer the closing of the span
+	defer span.End()
+
 	// add some logging info
 	p.logger.Info("Initialization process has started...")
 	// create a context to handle the start timeout
-	cancelCtx, cancel := context.WithTimeout(ctx, p.initTimeout.Load())
+	cancelCtx, cancel := context.WithTimeout(spanCtx, p.initTimeout.Load())
 	// cancel the context when done
 	defer cancel()
 	// create a new retrier that will try a maximum of `initMaxRetries` times, with
@@ -1081,7 +1103,13 @@ func (p *pid) init(ctx context.Context) error {
 	err := retrier.RunContext(cancelCtx, p.Actor.PreStart)
 	// handle backoff error
 	if err != nil {
-		return ErrInitFailure(err)
+		// create the error
+		e := ErrInitFailure(err)
+		// let us record the error in the span
+		span.SetStatus(codes.Error, "Init")
+		span.RecordError(e)
+		// return the error
+		return e
 	}
 	// set the actor is ready
 	p.semaphore.Lock()
@@ -1089,6 +1117,7 @@ func (p *pid) init(ctx context.Context) error {
 	p.semaphore.Unlock()
 	// add some logging info
 	p.logger.Info("Initialization process successfully completed.")
+	span.SetStatus(codes.Ok, "Init")
 	return nil
 }
 
