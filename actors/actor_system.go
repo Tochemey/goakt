@@ -47,6 +47,8 @@ import (
 	eventspb "github.com/tochemey/goakt/pb/events/v1"
 	"github.com/tochemey/goakt/pkg/types"
 	"github.com/tochemey/goakt/telemetry"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/atomic"
@@ -184,6 +186,9 @@ type actorSystem struct {
 
 	// specifies the message scheduler
 	scheduler *scheduler
+	// specifies whether tracing is enabled
+	traceEnabled atomic.Bool
+	tracer       trace.Tracer
 }
 
 // enforce compilation error when all methods of the ActorSystem interface are not implemented
@@ -219,15 +224,22 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		eventsStream:        eventstream.New(),
 		partitionHasher:     hash.DefaultHasher(),
 		actorInitTimeout:    DefaultInitTimeout,
+		tracer:              trace.NewNoopTracerProvider().Tracer(name),
 	}
 	// set the atomic settings
 	system.hasStarted.Store(false)
 	system.remotingEnabled.Store(false)
 	system.clusterEnabled.Store(false)
+	system.traceEnabled.Store(false)
 
 	// apply the various options
 	for _, opt := range opts {
 		opt.Apply(system)
+	}
+
+	// set the tracer when tracing is enabled
+	if system.traceEnabled.Load() {
+		system.tracer = otel.GetTracerProvider().Tracer(name)
 	}
 
 	// set the message scheduler
@@ -239,8 +251,12 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 // This will send the given message to the actor after the given interval specified.
 // The message will be sent once
 func (x *actorSystem) ScheduleOnce(ctx context.Context, message proto.Message, pid PID, interval time.Duration) error {
+	// start a tracing span
+	spanCtx, span := x.tracer.Start(ctx, "ScheduleOnce")
+	// defer the closing of the span
+	defer span.End()
 	// schedule message
-	return x.scheduler.ScheduleOnce(ctx, message, pid, interval)
+	return x.scheduler.ScheduleOnce(spanCtx, message, pid, interval)
 }
 
 // RemoteScheduleOnce schedules a message to be sent to a remote actor in the future.
@@ -248,20 +264,32 @@ func (x *actorSystem) ScheduleOnce(ctx context.Context, message proto.Message, p
 // This will send the given message to the actor after the given interval specified
 // The message will be sent once
 func (x *actorSystem) RemoteScheduleOnce(ctx context.Context, message proto.Message, address *addresspb.Address, interval time.Duration) error {
+	// start a tracing span
+	spanCtx, span := x.tracer.Start(ctx, "RemoteScheduleOnce")
+	// defer the closing of the span
+	defer span.End()
 	// schedule the message
-	return x.scheduler.RemoteScheduleOnce(ctx, message, address, interval)
+	return x.scheduler.RemoteScheduleOnce(spanCtx, message, address, interval)
 }
 
 // ScheduleWithCron schedules a message to be sent to an actor in the future using a cron expression.
 func (x *actorSystem) ScheduleWithCron(ctx context.Context, message proto.Message, pid PID, cronExpression string) error {
+	// start a tracing span
+	spanCtx, span := x.tracer.Start(ctx, "ScheduleWithCron")
+	// defer the closing of the span
+	defer span.End()
 	// schedule message
-	return x.scheduler.ScheduleWithCron(ctx, message, pid, cronExpression)
+	return x.scheduler.ScheduleWithCron(spanCtx, message, pid, cronExpression)
 }
 
 // RemoteScheduleWithCron schedules a message to be sent to an actor in the future using a cron expression.
 func (x *actorSystem) RemoteScheduleWithCron(ctx context.Context, message proto.Message, address *addresspb.Address, cronExpression string) error {
+	// start a tracing span
+	spanCtx, span := x.tracer.Start(ctx, "RemoteScheduleWithCron")
+	// defer the closing of the span
+	defer span.End()
 	// schedule message
-	return x.scheduler.RemoteScheduleWithCron(ctx, message, address, cronExpression)
+	return x.scheduler.RemoteScheduleWithCron(spanCtx, message, address, cronExpression)
 }
 
 // Subscribe help receive dead letters whenever there are available
@@ -323,8 +351,17 @@ func (x *actorSystem) NumActors() uint64 {
 
 // Spawn creates or returns the instance of a given actor in the system
 func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor) (PID, error) {
+	// start a tracing span
+	spanCtx, span := x.tracer.Start(ctx, "Spawn")
+	// defer the closing of the span
+	defer span.End()
+
 	// first check whether the actor system has started
 	if !x.hasStarted.Load() {
+		// let us record the error in the span
+		span.SetStatus(codes.Error, "Spawn")
+		span.RecordError(ErrDead)
+		// return the error
 		return nil, ErrActorSystemNotStarted
 	}
 	// set the default actor path assuming we are running locally
@@ -345,10 +382,9 @@ func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor) (PID,
 		}
 	}
 
-	// create an instance of the actor ref
-	pid, err := newPID(ctx,
-		actorPath,
-		actor,
+	// define the pid options
+	// pid inherit the actor system settings defined during instantiation
+	opts := []pidOption{
 		withInitMaxRetries(x.actorInitMaxRetries),
 		withPassivationAfter(x.expireActorAfter),
 		withSendReplyTimeout(x.replyTimeout),
@@ -360,10 +396,26 @@ func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor) (PID,
 		withStash(x.stashBuffer),
 		withEventsStream(x.eventsStream),
 		withInitTimeout(x.actorInitTimeout),
-		withTelemetry(x.telemetry))
+		withTelemetry(x.telemetry),
+	}
+
+	// set the pid tracing option
+	if x.traceEnabled.Load() {
+		opts = append(opts, withTracing())
+	}
+
+	// create an instance of the actor ref
+	pid, err := newPID(spanCtx,
+		actorPath,
+		actor,
+		opts...)
 
 	// handle the error
 	if err != nil {
+		// let us record the error in the span
+		span.SetStatus(codes.Error, "Spawn")
+		span.RecordError(err)
+		// return the error
 		return nil, err
 	}
 
@@ -386,8 +438,17 @@ func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor) (PID,
 
 // Kill stops a given actor in the system
 func (x *actorSystem) Kill(ctx context.Context, name string) error {
+	// start a tracing span
+	spanCtx, span := x.tracer.Start(ctx, "Kill")
+	// defer the closing of the span
+	defer span.End()
+
 	// first check whether the actor system has started
 	if !x.hasStarted.Load() {
+		// let us record the error in the span
+		span.SetStatus(codes.Error, "Kill")
+		span.RecordError(ErrActorSystemNotStarted)
+		// return the error
 		return ErrActorSystemNotStarted
 	}
 	// set the default actor path assuming we are running locally
@@ -401,16 +462,31 @@ func (x *actorSystem) Kill(ctx context.Context, name string) error {
 	pid, exist := x.actors.Get(actorPath)
 	// actor is found.
 	if exist {
-		// stop the given actor
-		return pid.Shutdown(ctx)
+		// stop the given actor. No need to record error in the span context
+		// because the shutdown method is taking care of that
+		return pid.Shutdown(spanCtx)
 	}
-	return ErrActorNotFound(actorPath.String())
+	// create the error
+	err := ErrActorNotFound(actorPath.String())
+	// let us record the error in the span
+	span.SetStatus(codes.Error, "Kill")
+	span.RecordError(err)
+	return err
 }
 
 // ReSpawn recreates a given actor in the system
 func (x *actorSystem) ReSpawn(ctx context.Context, name string) (PID, error) {
+	// start a tracing span
+	spanCtx, span := x.tracer.Start(ctx, "ReSpawn")
+	// defer the closing of the span
+	defer span.End()
+
 	// first check whether the actor system has started
 	if !x.hasStarted.Load() {
+		// let us record the error in the span
+		span.SetStatus(codes.Error, "ReSpawn")
+		span.RecordError(ErrActorSystemNotStarted)
+		// return the error
 		return nil, ErrActorSystemNotStarted
 	}
 	// set the default actor path assuming we are running locally
@@ -425,7 +501,8 @@ func (x *actorSystem) ReSpawn(ctx context.Context, name string) (PID, error) {
 	// actor is found.
 	if exist {
 		// restart the given actor
-		if err := pid.Restart(ctx); err != nil {
+		// pid.Restart handle error propagation in span
+		if err := pid.Restart(spanCtx); err != nil {
 			// return the error in case the restart failed
 			return nil, errors.Wrapf(err, "failed to restart actor=%s", actorPath.String())
 		}
@@ -434,7 +511,12 @@ func (x *actorSystem) ReSpawn(ctx context.Context, name string) (PID, error) {
 		x.actors.Set(pid)
 		return pid, nil
 	}
-	return nil, ErrActorNotFound(actorPath.String())
+	// create the error
+	err := ErrActorNotFound(actorPath.String())
+	// let us record the error in the span
+	span.SetStatus(codes.Error, "ReSpawn")
+	span.RecordError(err)
+	return nil, err
 }
 
 // Name returns the actor system name
@@ -462,6 +544,11 @@ func (x *actorSystem) Actors() []PID {
 // When remoting is enabled this method will return and error
 // An actor not found error is return when the actor is not found.
 func (x *actorSystem) ActorOf(ctx context.Context, actorName string) (addr *addresspb.Address, pid PID, err error) {
+	// start a tracing span
+	spanCtx, span := x.tracer.Start(ctx, "ActorOf")
+	// defer the closing of the span
+	defer span.End()
+
 	// acquire the lock
 	x.sem.Lock()
 	// release the lock
@@ -469,20 +556,35 @@ func (x *actorSystem) ActorOf(ctx context.Context, actorName string) (addr *addr
 
 	// make sure the actor system has started
 	if !x.hasStarted.Load() {
+		// let us record the error in the span
+		span.SetStatus(codes.Error, "ActorOf")
+		span.RecordError(ErrActorSystemNotStarted)
+		// return the error
 		return nil, nil, ErrActorSystemNotStarted
 	}
 
 	// try to locate the actor in the cluster when cluster is enabled
 	if x.cluster != nil || x.clusterEnabled.Load() {
 		// let us locate the actor in the cluster
-		wireActor, err := x.cluster.GetActor(ctx, actorName)
+		wireActor, err := x.cluster.GetActor(spanCtx, actorName)
 		// handle the eventual error
 		if err != nil {
 			if errors.Is(err, cluster.ErrActorNotFound) {
 				x.logger.Infof("actor=%s not found", actorName)
-				return nil, nil, ErrActorNotFound(actorName)
+				// create the error
+				e := ErrActorNotFound(actorName)
+				// let us record the error in the span
+				span.SetStatus(codes.Error, "ActorOf")
+				span.RecordError(e)
+				// return the error
+				return nil, nil, e
 			}
-			return nil, nil, errors.Wrapf(err, "failed to fetch remote actor=%s", actorName)
+			// create the error
+			e := errors.Wrapf(err, "failed to fetch remote actor=%s", actorName)
+			// let us record the error in the span
+			span.SetStatus(codes.Error, "ActorOf")
+			span.RecordError(e)
+			return nil, nil, e
 		}
 
 		// return the address of the remote actor
@@ -491,6 +593,10 @@ func (x *actorSystem) ActorOf(ctx context.Context, actorName string) (addr *addr
 
 	// method call is not allowed
 	if x.remotingEnabled.Load() {
+		// let us record the error in the span
+		span.SetStatus(codes.Error, "ActorOf")
+		span.RecordError(ErrMethodCallNotAllowed)
+		// return the error
 		return nil, nil, ErrMethodCallNotAllowed
 	}
 
@@ -505,7 +611,12 @@ func (x *actorSystem) ActorOf(ctx context.Context, actorName string) (addr *addr
 	}
 	// add a logger
 	x.logger.Infof("actor=%s not found", actorName)
-	return nil, nil, ErrActorNotFound(actorName)
+	// create the error
+	e := ErrActorNotFound(actorName)
+	// let us record the error in the span
+	span.SetStatus(codes.Error, "ActorOf")
+	span.RecordError(e)
+	return nil, nil, e
 }
 
 // LocalActor returns the reference of a local actor.
@@ -538,6 +649,11 @@ func (x *actorSystem) LocalActor(actorName string) (PID, error) {
 // When the cluster mode is not enabled an actor not found error will be returned
 // One can always check whether cluster is enabled before calling this method or just use the ActorOf method.
 func (x *actorSystem) RemoteActor(ctx context.Context, actorName string) (addr *addresspb.Address, err error) {
+	// start a tracing span
+	spanCtx, span := x.tracer.Start(ctx, "RemoteActor")
+	// defer the closing of the span
+	defer span.End()
+
 	// acquire the lock
 	x.sem.Lock()
 	// release the lock
@@ -545,23 +661,46 @@ func (x *actorSystem) RemoteActor(ctx context.Context, actorName string) (addr *
 
 	// make sure the actor system has started
 	if !x.hasStarted.Load() {
-		return nil, ErrActorSystemNotStarted
+		// set the error
+		e := ErrActorSystemNotStarted
+		// let us record the error in the span
+		span.SetStatus(codes.Error, "RemoteActor")
+		span.RecordError(e)
+		// return the error
+		return nil, e
 	}
 
 	// check whether cluster is enabled or not
 	if x.cluster == nil {
-		return nil, ErrClusterDisabled
+		// set the error
+		e := ErrClusterDisabled
+		// let us record the error in the span
+		span.SetStatus(codes.Error, "RemoteActor")
+		span.RecordError(e)
+		// return the error
+		return nil, e
 	}
 
 	// let us locate the actor in the cluster
-	wireActor, err := x.cluster.GetActor(ctx, actorName)
+	wireActor, err := x.cluster.GetActor(spanCtx, actorName)
 	// handle the eventual error
 	if err != nil {
 		if errors.Is(err, cluster.ErrActorNotFound) {
 			x.logger.Infof("actor=%s not found", actorName)
-			return nil, ErrActorNotFound(actorName)
+			// set the error
+			e := ErrActorNotFound(actorName)
+			// let us record the error in the span
+			span.SetStatus(codes.Error, "RemoteActor")
+			span.RecordError(e)
+			// return the error
+			return nil, e
 		}
-		return nil, errors.Wrapf(err, "failed to fetch remote actor=%s", actorName)
+		// set the error
+		e := errors.Wrapf(err, "failed to fetch remote actor=%s", actorName)
+		// let us record the error in the span
+		span.SetStatus(codes.Error, "RemoteActor")
+		span.RecordError(e)
+		return nil, e
 	}
 
 	// return the address of the remote actor
@@ -570,21 +709,26 @@ func (x *actorSystem) RemoteActor(ctx context.Context, actorName string) (addr *
 
 // Start starts the actor system
 func (x *actorSystem) Start(ctx context.Context) error {
+	// start a tracing span
+	spanCtx, span := x.tracer.Start(ctx, "Start")
+	// defer the closing of the span
+	defer span.End()
+
 	// set the has started to true
 	x.hasStarted.Store(true)
 
 	// enable clustering when it is enabled
 	if x.clusterEnabled.Load() {
-		x.enableClustering(ctx)
+		x.enableClustering(spanCtx)
 	}
 
 	// start remoting when remoting is enabled
 	if x.remotingEnabled.Load() {
-		x.enableRemoting(ctx)
+		x.enableRemoting(spanCtx)
 	}
 
 	// start the message scheduler
-	x.scheduler.Start(ctx)
+	x.scheduler.Start(spanCtx)
 
 	// start the housekeeper
 	go x.housekeeper()
@@ -595,9 +739,19 @@ func (x *actorSystem) Start(ctx context.Context) error {
 
 // Stop stops the actor system
 func (x *actorSystem) Stop(ctx context.Context) error {
+	// start a tracing span
+	spanCtx, span := x.tracer.Start(ctx, "Stop")
+	// defer the closing of the span
+	defer span.End()
+
 	// make sure the actor system has started
 	if !x.hasStarted.Load() {
-		return ErrActorSystemNotStarted
+		// set the error
+		e := ErrActorSystemNotStarted
+		// let us record the error in the span
+		span.SetStatus(codes.Error, "Stop")
+		span.RecordError(e)
+		return e
 	}
 
 	// stop the housekeeper
@@ -608,7 +762,7 @@ func (x *actorSystem) Stop(ctx context.Context) error {
 	x.hasStarted.Store(false)
 
 	// stop the messages scheduler
-	x.scheduler.Stop(ctx)
+	x.scheduler.Stop(spanCtx)
 
 	// shutdown the events stream
 	if x.eventsStream != nil {
@@ -616,13 +770,17 @@ func (x *actorSystem) Stop(ctx context.Context) error {
 	}
 
 	// create a cancellation context to gracefully shutdown
-	ctx, cancel := context.WithTimeout(ctx, x.shutdownTimeout)
+	ctx, cancel := context.WithTimeout(spanCtx, x.shutdownTimeout)
 	defer cancel()
 
 	// stop the remoting server
 	if x.remotingEnabled.Load() {
 		// stop the server
-		if err := x.remotingServer.Shutdown(ctx); err != nil {
+		if err := x.remotingServer.Shutdown(spanCtx); err != nil {
+			// let us record the error in the span
+			span.SetStatus(codes.Error, "Stop")
+			span.RecordError(err)
+			// return the error
 			return err
 		}
 
@@ -634,7 +792,11 @@ func (x *actorSystem) Stop(ctx context.Context) error {
 	// stop the cluster service
 	if x.clusterEnabled.Load() {
 		// stop the cluster service
-		if err := x.cluster.Stop(ctx); err != nil {
+		if err := x.cluster.Stop(spanCtx); err != nil {
+			// let us record the error in the span
+			span.SetStatus(codes.Error, "Stop")
+			span.RecordError(err)
+			// return the error
 			return err
 		}
 		// stop broadcasting cluster messages
@@ -656,6 +818,7 @@ func (x *actorSystem) Stop(ctx context.Context) error {
 		// remove the actor the map and shut it down
 		x.actors.Delete(actor.ActorPath())
 		// only shutdown live actors
+		// no need to record span error
 		if err := actor.Shutdown(ctx); err != nil {
 			// reset the actor system
 			x.reset()
@@ -911,12 +1074,20 @@ func (x *actorSystem) RemoteBatchAsk(ctx context.Context, request *connect.Reque
 // handleRemoteAsk handles a synchronous message to another actor and expect a response.
 // This block until a response is received or timed out.
 func (x *actorSystem) handleRemoteAsk(ctx context.Context, to PID, message proto.Message) (response proto.Message, err error) {
-	return Ask(ctx, to, message, x.replyTimeout)
+	// start a tracing span
+	spanCtx, span := x.tracer.Start(ctx, "HandleRemoteAsk")
+	// defer the closing of the span
+	defer span.End()
+	return Ask(spanCtx, to, message, x.replyTimeout)
 }
 
 // handleRemoteTell handles an asynchronous message to an actor
 func (x *actorSystem) handleRemoteTell(ctx context.Context, to PID, message proto.Message) error {
-	return Tell(ctx, to, message)
+	// start a tracing span
+	spanCtx, span := x.tracer.Start(ctx, "HandleRemoteTell")
+	// defer the closing of the span
+	defer span.End()
+	return Tell(spanCtx, to, message)
 }
 
 // enableClustering enables clustering. When clustering is enabled remoting is also enabled to facilitate remote

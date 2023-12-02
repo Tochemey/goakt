@@ -46,6 +46,9 @@ import (
 	"github.com/tochemey/goakt/pkg/slices"
 	"github.com/tochemey/goakt/pkg/types"
 	"github.com/tochemey/goakt/telemetry"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
@@ -231,6 +234,10 @@ type pid struct {
 
 	// define an events stream
 	eventsStream *eventstream.EventsStream
+
+	// define tracing
+	traceEnabled atomic.Bool
+	tracer       trace.Tracer
 }
 
 // enforce compilation error
@@ -258,6 +265,7 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 		stashBuffer:        nil,
 		stashSemaphore:     sync.Mutex{},
 		eventsStream:       nil,
+		tracer:             trace.NewNoopTracerProvider().Tracer("PID"),
 	}
 
 	// set some of the defaults values
@@ -269,6 +277,7 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 	pid.passivateAfter.Store(DefaultPassivationTimeout)
 	pid.replyTimeout.Store(DefaultReplyTimeout)
 	pid.initTimeout.Store(DefaultInitTimeout)
+	pid.traceEnabled.Store(false)
 
 	// set the custom options to override the default values
 	for _, opt := range opts {
@@ -288,6 +297,11 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 	behaviorStack := newBehaviorStack()
 	behaviorStack.Push(pid.Receive)
 	pid.behaviorStack = behaviorStack
+
+	// set the tracer when tracing is enabled
+	if pid.traceEnabled.Load() {
+		pid.tracer = otel.GetTracerProvider().Tracer("PID")
+	}
 
 	// initialize the actor and init processing public
 	if err := pid.init(ctx); err != nil {
@@ -346,13 +360,26 @@ func (p *pid) Children() []PID {
 // Stop forces the child Actor under the given name to terminate after it finishes processing its current message.
 // Nothing happens if child is already stopped.
 func (p *pid) Stop(ctx context.Context, pid PID) error {
+	// start a tracing span
+	spanCtx, span := p.tracer.Start(ctx, "Stop")
+	// defer the closing of the span
+	defer span.End()
+
 	// first check whether the actor is ready to stop another actor
 	if !p.IsRunning() {
+		// let us record the error in the span
+		span.SetStatus(codes.Error, "Stop")
+		span.RecordError(ErrDead)
+		// return the error
 		return ErrDead
 	}
 
 	// check the pid is not nil
 	if pid == nil || pid == NoSender {
+		// let us record the error in the span
+		span.SetStatus(codes.Error, "Stop")
+		span.RecordError(ErrUndefinedActor)
+		// return the error
 		return ErrUndefinedActor
 	}
 
@@ -364,11 +391,26 @@ func (p *pid) Stop(ctx context.Context, pid PID) error {
 	kiddos := p.children
 	p.semaphore.RUnlock()
 
+	// lookup the child actor and shut it down
 	if cid, ok := kiddos.Get(path); ok {
-		// stop the actor
-		return cid.Shutdown(ctx)
+		// stop the actor and record the error in the span
+		if err := cid.Shutdown(spanCtx); err != nil {
+			// define the error description
+			desc := fmt.Sprintf("child.[%s] Shutdown", path)
+			// let us record the error in the span
+			span.SetStatus(codes.Error, desc)
+			span.RecordError(err)
+			// return the error
+			return err
+		}
+		return nil
 	}
-	return ErrActorNotFound(path.String())
+	// create an instance of error
+	err := ErrActorNotFound(path.String())
+	// let us record the error in the span
+	span.SetStatus(codes.Error, "Stop")
+	span.RecordError(err)
+	return err
 }
 
 // IsRunning returns true when the actor is alive ready to process messages and false
@@ -396,8 +438,17 @@ func (p *pid) ActorPath() *Path {
 // Restart restarts the actor.
 // During restart all messages that are in the mailbox and not yet processed will be ignored
 func (p *pid) Restart(ctx context.Context) error {
+	// start a tracing span
+	spanCtx, span := p.tracer.Start(ctx, "Restart")
+	// defer the closing of the span
+	defer span.End()
+
 	// first check whether we have an empty PID
 	if p == nil || p.ActorPath() == nil {
+		// let us record the error in the span
+		span.SetStatus(codes.Error, "Restart")
+		span.RecordError(ErrUndefinedActor)
+		// return the error
 		return ErrUndefinedActor
 	}
 
@@ -406,8 +457,9 @@ func (p *pid) Restart(ctx context.Context) error {
 
 	// only restart the actor when the actor is running
 	if p.IsRunning() {
-		// shutdown the actor
-		if err := p.Shutdown(ctx); err != nil {
+		// shutdown the actor. no need to record the error
+		// because it is already recorded in the Shutdown
+		if err := p.Shutdown(spanCtx); err != nil {
 			return err
 		}
 		// wait a while for the shutdown process to complete
@@ -432,7 +484,7 @@ func (p *pid) Restart(ctx context.Context) error {
 	// reset the behavior
 	p.resetBehavior()
 	// initialize the actor
-	if err := p.init(ctx); err != nil {
+	if err := p.init(spanCtx); err != nil {
 		return err
 	}
 	// init processing public
@@ -449,8 +501,17 @@ func (p *pid) Restart(ctx context.Context) error {
 // SpawnChild creates a child actor and start watching it for error
 // When the given child actor already exists its PID will only be returned
 func (p *pid) SpawnChild(ctx context.Context, name string, actor Actor) (PID, error) {
+	// start a tracing span
+	spanCtx, span := p.tracer.Start(ctx, "SpawnChild")
+	// defer the closing of the span
+	defer span.End()
+
 	// first check whether the actor is ready to start another actor
 	if !p.IsRunning() {
+		// let us record the error in the span
+		span.SetStatus(codes.Error, "SpawnChild")
+		span.RecordError(ErrDead)
+		// return the error
 		return nil, ErrDead
 	}
 
@@ -473,10 +534,9 @@ func (p *pid) SpawnChild(ctx context.Context, name string, actor Actor) (PID, er
 	// release the lock
 	defer p.semaphore.Unlock()
 
-	// create the child pid
-	cid, err := newPID(ctx,
-		childActorPath,
-		actor,
+	// create the child actor options
+	// child inherit parent's options
+	opts := []pidOption{
 		withInitMaxRetries(int(p.initMaxRetries.Load())),
 		withPassivationAfter(p.passivateAfter.Load()),
 		withSendReplyTimeout(p.replyTimeout.Load()),
@@ -488,10 +548,27 @@ func (p *pid) SpawnChild(ctx context.Context, name string, actor Actor) (PID, er
 		withMailbox(p.mailbox.Clone()),
 		withEventsStream(p.eventsStream),
 		withInitTimeout(p.initTimeout.Load()),
-		withShutdownTimeout(p.shutdownTimeout.Load()))
+		withShutdownTimeout(p.shutdownTimeout.Load()),
+	}
+
+	// set the tracing option
+	if p.traceEnabled.Load() {
+		opts = append(opts, withTracing())
+	}
+
+	// create the child pid
+	cid, err := newPID(spanCtx,
+		childActorPath,
+		actor,
+		opts...,
+	)
 
 	// handle the error
 	if err != nil {
+		// let us record the error in the span
+		span.SetStatus(codes.Error, "SpawnChild")
+		span.RecordError(err)
+		// return the error
 		return nil, err
 	}
 
@@ -512,13 +589,22 @@ func (p *pid) StashSize() uint64 {
 // Ask sends a synchronous message to another actor and expect a response.
 // This block until a response is received or timed out.
 func (p *pid) Ask(ctx context.Context, to PID, message proto.Message) (response proto.Message, err error) {
+	// start a tracing span
+	spanCtx, span := p.tracer.Start(ctx, "Ask")
+	// defer the closing of the span
+	defer span.End()
+
 	// make sure the actor is live
 	if !to.IsRunning() {
+		// let us record the error in the span
+		span.SetStatus(codes.Error, "Ask")
+		span.RecordError(ErrDead)
+		// return the error
 		return nil, ErrDead
 	}
 
 	// create a receiver context
-	context := newReceiveContext(ctx, p, to, message, false)
+	context := newReceiveContext(spanCtx, p, to, message, false)
 	// put the message context in the mailbox of the recipient actor
 	to.doReceive(context)
 	// await patiently to receive the response from the actor
@@ -528,6 +614,9 @@ func (p *pid) Ask(ctx context.Context, to PID, message proto.Message) (response 
 			return
 		case <-await:
 			err = ErrRequestTimeout
+			// let us record the error in the span
+			span.SetStatus(codes.Error, "Ask")
+			span.RecordError(err)
 			// push the message as a deadletter
 			p.emitDeadletter(context, err)
 			return
@@ -537,12 +626,21 @@ func (p *pid) Ask(ctx context.Context, to PID, message proto.Message) (response 
 
 // Tell sends an asynchronous message to another PID
 func (p *pid) Tell(ctx context.Context, to PID, message proto.Message) error {
+	// start a tracing span
+	spanCtx, span := p.tracer.Start(ctx, "Tell")
+	// defer the closing of the span
+	defer span.End()
+
 	// make sure the recipient actor is live
 	if !to.IsRunning() {
+		// let us record the error in the span
+		span.SetStatus(codes.Error, "Tell")
+		span.RecordError(ErrDead)
+		// return the error
 		return ErrDead
 	}
 	// create a receiver context
-	context := newReceiveContext(ctx, p, to, message, true)
+	context := newReceiveContext(spanCtx, p, to, message, true)
 	// put the message context in the mailbox of the recipient actor
 	to.doReceive(context)
 	return nil
@@ -551,16 +649,26 @@ func (p *pid) Tell(ctx context.Context, to PID, message proto.Message) error {
 // BatchTell sends an asynchronous bunch of messages to the given PID
 // The messages will be processed one after the other in the order they are sent.
 // This is a design choice to follow the simple principle of one message at a time processing by actors.
-// When TellStream encounter a single message it will fall back to a Tell call.
+// When BatchTell encounter a single message it will fall back to a Tell call.
 func (p *pid) BatchTell(ctx context.Context, to PID, messages ...proto.Message) error {
+	// start a tracing span
+	spanCtx, span := p.tracer.Start(ctx, "BatchTell")
+	// defer the closing of the span
+	defer span.End()
+
 	// make sure the recipient actor is live
 	if !to.IsRunning() {
+		// let us record the error in the span
+		span.SetStatus(codes.Error, "BatchTell")
+		span.RecordError(ErrDead)
+		// return the error
 		return ErrDead
 	}
 
 	// first check whether we need to fall back to a Tell
 	if len(messages) == 1 {
-		return p.Tell(ctx, to, messages[0])
+		// no need to record span error here because Tell handles it
+		return p.Tell(spanCtx, to, messages[0])
 	}
 
 	// let us process the messages one after the other
@@ -580,8 +688,17 @@ func (p *pid) BatchTell(ctx context.Context, to PID, messages ...proto.Message) 
 // The messages will be processed one after the other in the order they are sent.
 // This is a design choice to follow the simple principle of one message at a time processing by actors.
 func (p *pid) BatchAsk(ctx context.Context, to PID, messages ...proto.Message) (responses chan proto.Message, err error) {
+	// start a tracing span
+	spanCtx, span := p.tracer.Start(ctx, "BatchAsk")
+	// defer the closing of the span
+	defer span.End()
+
 	// make sure the actor is live
 	if !to.IsRunning() {
+		// let us record the error in the span
+		span.SetStatus(codes.Error, "BatchAsk")
+		span.RecordError(ErrDead)
+		// return the error
 		return nil, ErrDead
 	}
 
@@ -596,7 +713,7 @@ func (p *pid) BatchAsk(ctx context.Context, to PID, messages ...proto.Message) (
 		// grab the message at index i
 		message := messages[i]
 		// create a message context
-		messageContext := newReceiveContext(ctx, p, to, message, false)
+		messageContext := newReceiveContext(spanCtx, p, to, message, false)
 		// push the message to the actor mailbox
 		to.doReceive(messageContext)
 
@@ -611,6 +728,9 @@ func (p *pid) BatchAsk(ctx context.Context, to PID, messages ...proto.Message) (
 			case <-await:
 				// set the request timeout error
 				err = ErrRequestTimeout
+				// let us record the error in the span
+				span.SetStatus(codes.Error, "BatchAsk")
+				span.RecordError(err)
 				// push the message as a deadletter
 				p.emitDeadletter(messageContext, err)
 				// stop the whole processing
@@ -848,6 +968,11 @@ func (p *pid) RemoteBatchAsk(ctx context.Context, to *addresspb.Address, message
 // All current messages in the mailbox will be processed before the actor shutdown after a period of time
 // that can be configured. All child actors will be gracefully shutdown.
 func (p *pid) Shutdown(ctx context.Context) error {
+	// start a tracing span
+	spanCtx, span := p.tracer.Start(ctx, "Shutdown")
+	// defer the closing of the span
+	defer span.End()
+
 	// acquire the shutdown lock
 	p.stopSemaphore.Lock()
 	// release the lock
@@ -868,8 +993,8 @@ func (p *pid) Shutdown(ctx context.Context) error {
 		p.haltPassivationLnr <- types.Unit{}
 	}
 
-	// stop the actor
-	if err := p.doStop(ctx); err != nil {
+	// stop the actor. No need to record span error here
+	if err := p.doStop(spanCtx); err != nil {
 		p.logger.Errorf("failed to stop actor=(%s)", p.ActorPath().String())
 		return err
 	}
@@ -1223,6 +1348,11 @@ func (p *pid) unsetBehaviorStacked() {
 
 // doStop stops the actor
 func (p *pid) doStop(ctx context.Context) error {
+	// start a tracing span
+	spanCtx, span := p.tracer.Start(ctx, "doStop")
+	// defer the closing of the span
+	defer span.End()
+
 	// stop receiving and sending messages
 	p.isRunning.Store(false)
 
@@ -1230,6 +1360,10 @@ func (p *pid) doStop(ctx context.Context) error {
 	// TODO: just signal stash processing done and ignore the messages or process them
 	for p.stashBuffer != nil && !p.stashBuffer.IsEmpty() {
 		if err := p.unstashAll(); err != nil {
+			// let us record the error in the span
+			span.SetStatus(codes.Error, "doStop")
+			span.RecordError(err)
+			// return the error
 			return err
 		}
 	}
@@ -1269,9 +1403,9 @@ func (p *pid) doStop(ctx context.Context) error {
 	p.httpClient.CloseIdleConnections()
 
 	// stop all the child actors
-	p.freeChildren(ctx)
+	p.freeChildren(spanCtx)
 	// free the watchers
-	p.freeWatchers(ctx)
+	p.freeWatchers(spanCtx)
 
 	// add some logging
 	p.logger.Infof("Shutdown process is on going for actor=%s...", p.ActorPath().String())
@@ -1280,7 +1414,7 @@ func (p *pid) doStop(ctx context.Context) error {
 	p.reset()
 
 	// perform some cleanup with the actor
-	return p.Actor.PostStop(ctx)
+	return p.Actor.PostStop(spanCtx)
 }
 
 // removeChild helps remove child actor

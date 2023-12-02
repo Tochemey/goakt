@@ -31,6 +31,8 @@ import (
 	"testing"
 	"time"
 
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tochemey/goakt/log"
@@ -331,7 +333,9 @@ func TestActorRestart(t *testing.T) {
 		assert.NoError(t, err)
 	})
 	t.Run("noSender cannot be restarted", func(t *testing.T) {
-		pid := &pid{}
+		pid := &pid{
+			tracer: trace.NewNoopTracerProvider().Tracer(""),
+		}
 		err := pid.Restart(context.TODO())
 		assert.Error(t, err)
 		assert.EqualError(t, err, ErrUndefinedActor.Error())
