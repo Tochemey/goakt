@@ -27,6 +27,7 @@ package actors
 import (
 	"context"
 	"sync"
+	"time"
 
 	addresspb "github.com/tochemey/goakt/pb/address/v1"
 	"go.uber.org/atomic"
@@ -143,6 +144,31 @@ type receiveContext struct {
 
 // force compilation error
 var _ ReceiveContext = &receiveContext{}
+
+// newReceiveContext creates an instance of ReceiveContext
+func newReceiveContext(ctx context.Context, from, to PID, message proto.Message, async bool) *receiveContext {
+	// create a message context
+	context := new(receiveContext)
+
+	// set the needed properties of the message context
+	context.ctx = ctx
+	context.sender = from
+	context.recipient = to
+	context.message = message
+	context.isAsyncMessage = async
+	context.mu = sync.Mutex{}
+	context.response = make(chan proto.Message, 1)
+	context.sendTime.Store(time.Now())
+
+	// return the created context
+	return context
+}
+
+// WithRemoteSender set the remote sender for a given context
+func (c *receiveContext) WithRemoteSender(remoteSender *addresspb.Address) *receiveContext {
+	c.remoteSender = RemoteNoSender
+	return c
+}
 
 // Self returns the receiver PID of the message
 func (c *receiveContext) Self() PID {
