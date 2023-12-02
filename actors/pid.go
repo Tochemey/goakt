@@ -169,7 +169,7 @@ type pid struct {
 	passivateAfter atomic.Duration
 
 	// specifies how long the sender of a mail should wait to receive a reply
-	// when using SendReply. The default value is 5s
+	// when using Ask. The default value is 5s
 	replyTimeout atomic.Duration
 
 	// specifies the maximum of retries to attempt when the actor
