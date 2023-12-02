@@ -101,7 +101,7 @@ func main() {
 	actorSystem, _ := goakt.NewActorSystem("SampleActorSystem",
 		goakt.WithExpireActorAfter(10*time.Second), // set big passivation time
 		goakt.WithLogger(logger),
-		//goakt.WithTracing(),
+		goakt.WithTracing(),
 		goakt.WithActorInitMaxRetries(3))
 
 	// start the actor system
