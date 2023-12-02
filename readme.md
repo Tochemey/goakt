@@ -30,7 +30,9 @@ Also, check reference section at the end of the post for more material regarding
     - [Stashing](#stashing)
     - [Remoting](#remoting)
     - [Clustering](#cluster)
-    - [Logging](#logging)
+    - [Observability](#observability)
+        -  [Logging](#logging)
+        - [Tracing](#tracing)
     - [Testkit](#testkit)
 - [Use Cases](#use-cases)
 - [Installation](#installation)
@@ -218,7 +220,19 @@ creating the actor system. See actor system [options](./actors/option.go).
 
 This offers simple scalability, partitioning (sharding), and re-balancing out-of-the-box. Go-Akt nodes are automatically discovered. See [Clustering](#clustering).
 
-### Logging
+### Observability
+
+Observability is key in distributed system. It helps to understand and track the performance of a system.
+Go-Akt offers out of the box features that can help track, monitor and measure the performance of a Go-Akt based system.
+
+#### Tracing
+
+One can enable/disable tracing on a Go-Akt actor system to instrument and measure the performance of some of the methods.
+Go-Akt uses under the hood [OpenTelemetry](https://opentelemetry.io/docs/instrumentation/go/) to instrument a system.
+One just need to use the `WithTracing` option when instantiating a Go-Akt actor system and use the default [Telemetry](./telemetry/telemetry.go)
+engine or set a custom one with `WithTelemetry` option of the actor system.
+
+#### Logging
 
 A simple logging interface to allow custom logger to be implemented instead of using the default logger.
 
