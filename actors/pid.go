@@ -27,7 +27,7 @@ package actors
 import (
 	"context"
 	"fmt"
-	gothttp "net/http"
+	stdhttp "net/http"
 	"sync"
 	"time"
 
@@ -219,7 +219,7 @@ type pid struct {
 	telemetry *telemetry.Telemetry
 
 	// http client
-	httpClient *gothttp.Client
+	httpClient *stdhttp.Client
 
 	// specifies the current actor behavior
 	behaviorStack *behaviorStack
