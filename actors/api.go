@@ -26,7 +26,6 @@ package actors
 
 import (
 	"context"
-	"sync"
 	"time"
 
 	"connectrpc.com/connect"
@@ -48,11 +47,7 @@ func Ask(ctx context.Context, to PID, message proto.Message, timeout time.Durati
 	}
 
 	// create a receiver context
-	context := new(receiveContext)
-	// set the needed properties of the message context
-	context.ctx = ctx
-	context.recipient = to
-	context.sendTime.Store(time.Now())
+	var context *receiveContext
 
 	// set the actual message
 	switch msg := message.(type) {
@@ -64,19 +59,13 @@ func Ask(ctx context.Context, to PID, message proto.Message, timeout time.Durati
 			return nil, ErrInvalidRemoteMessage(err)
 		}
 		// set the context message and the sender
-		context.message = actual
-		context.remoteSender = msg.GetSender()
-		context.sender = NoSender
+		context = newReceiveContext(ctx, NoSender, to, actual, false).
+			WithRemoteSender(msg.GetSender())
 	default:
 		// set the context message and the sender
-		context.message = message
-		context.sender = NoSender
-		context.remoteSender = RemoteNoSender
+		context = newReceiveContext(ctx, NoSender, to, message, false).
+			WithRemoteSender(RemoteNoSender)
 	}
-
-	context.isAsyncMessage = false
-	context.mu = sync.Mutex{}
-	context.response = make(chan proto.Message, 1)
 
 	// put the message context in the mailbox of the recipient actor
 	to.doReceive(context)
@@ -104,12 +93,7 @@ func Tell(ctx context.Context, to PID, message proto.Message) error {
 	}
 
 	// create a message context
-	context := new(receiveContext)
-
-	// set the needed properties of the message context
-	context.ctx = ctx
-	context.recipient = to
-	context.sendTime.Store(time.Now())
+	var context *receiveContext
 
 	// set the actual message
 	switch msg := message.(type) {
@@ -124,19 +108,14 @@ func Tell(ctx context.Context, to PID, message proto.Message) error {
 		if actual, err = msg.GetMessage().UnmarshalNew(); err != nil {
 			return ErrInvalidRemoteMessage(err)
 		}
-
-		// set the context message and sender
-		context.message = actual
-		context.remoteSender = msg.GetSender()
-		context.sender = NoSender
+		// set the context message and the sender
+		context = newReceiveContext(ctx, NoSender, to, actual, true).
+			WithRemoteSender(msg.GetSender())
 	default:
-		context.message = message
-		context.sender = NoSender
-		context.remoteSender = RemoteNoSender
+		// set the context message and the sender
+		context = newReceiveContext(ctx, NoSender, to, message, true).
+			WithRemoteSender(RemoteNoSender)
 	}
-
-	context.isAsyncMessage = true
-	context.mu = sync.Mutex{}
 
 	// put the message context in the mailbox of the recipient actor
 	to.doReceive(context)
@@ -153,17 +132,10 @@ func BatchTell(ctx context.Context, to PID, messages ...proto.Message) error {
 
 	// iterate the list messages
 	for i := 0; i < len(messages); i++ {
-		// create a message context
-		context := new(receiveContext)
 		// get the message
 		message := messages[i]
-		// set the needed properties of the message context
-		context.ctx = ctx
-		context.recipient = to
-		context.sendTime.Store(time.Now())
-		context.message = message
-		context.sender = NoSender
-		context.remoteSender = RemoteNoSender
+		// create a message context
+		context := newReceiveContext(ctx, NoSender, to, message, true).WithRemoteSender(RemoteNoSender)
 		// put the message context in the mailbox of the recipient actor
 		to.doReceive(context)
 	}
@@ -190,18 +162,7 @@ func BatchAsk(ctx context.Context, to PID, timeout time.Duration, messages ...pr
 		// grab the message at index i
 		message := messages[i]
 		// create a message context
-		messageContext := new(receiveContext)
-
-		// set the needed properties of the message context
-		messageContext.ctx = ctx
-		messageContext.sender = NoSender
-		messageContext.recipient = to
-		messageContext.message = message
-		messageContext.isAsyncMessage = false
-		messageContext.mu = sync.Mutex{}
-		messageContext.response = make(chan proto.Message, 1)
-		messageContext.sendTime.Store(time.Now())
-
+		messageContext := newReceiveContext(ctx, NoSender, to, message, false)
 		// push the message to the actor mailbox
 		to.doReceive(messageContext)
 

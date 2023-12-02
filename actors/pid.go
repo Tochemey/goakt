@@ -27,7 +27,7 @@ package actors
 import (
 	"context"
 	"fmt"
-	gothttp "net/http"
+	stdhttp "net/http"
 	"sync"
 	"time"
 
@@ -169,7 +169,7 @@ type pid struct {
 	passivateAfter atomic.Duration
 
 	// specifies how long the sender of a mail should wait to receive a reply
-	// when using SendReply. The default value is 5s
+	// when using Ask. The default value is 5s
 	replyTimeout atomic.Duration
 
 	// specifies the maximum of retries to attempt when the actor
@@ -219,7 +219,7 @@ type pid struct {
 	telemetry *telemetry.Telemetry
 
 	// http client
-	httpClient *gothttp.Client
+	httpClient *stdhttp.Client
 
 	// specifies the current actor behavior
 	behaviorStack *behaviorStack
@@ -518,21 +518,9 @@ func (p *pid) Ask(ctx context.Context, to PID, message proto.Message) (response 
 	}
 
 	// create a receiver context
-	context := new(receiveContext)
-
-	// set the needed properties of the message context
-	context.ctx = ctx
-	context.sender = p
-	context.recipient = to
-	context.message = message
-	context.isAsyncMessage = false
-	context.mu = sync.Mutex{}
-	context.response = make(chan proto.Message, 1)
-	context.sendTime.Store(time.Now())
-
+	context := newReceiveContext(ctx, p, to, message, false)
 	// put the message context in the mailbox of the recipient actor
 	to.doReceive(context)
-
 	// await patiently to receive the response from the actor
 	for await := time.After(p.replyTimeout.Load()); ; {
 		select {
@@ -553,23 +541,10 @@ func (p *pid) Tell(ctx context.Context, to PID, message proto.Message) error {
 	if !to.IsRunning() {
 		return ErrDead
 	}
-
-	// create a message context
-	context := new(receiveContext)
-
-	// set the needed properties of the message context
-	context.ctx = ctx
-	context.sender = p
-	context.recipient = to
-	context.message = message
-	context.isAsyncMessage = true
-	context.mu = sync.Mutex{}
-	context.response = make(chan proto.Message, 1)
-	context.sendTime.Store(time.Now())
-
+	// create a receiver context
+	context := newReceiveContext(ctx, p, to, message, true)
 	// put the message context in the mailbox of the recipient actor
 	to.doReceive(context)
-
 	return nil
 }
 
@@ -593,18 +568,7 @@ func (p *pid) BatchTell(ctx context.Context, to PID, messages ...proto.Message) 
 		// grab the message at index i
 		message := messages[i]
 		// create a message context
-		messageContext := new(receiveContext)
-
-		// set the needed properties of the message context
-		messageContext.ctx = ctx
-		messageContext.sender = p
-		messageContext.recipient = to
-		messageContext.message = message
-		messageContext.isAsyncMessage = true
-		messageContext.mu = sync.Mutex{}
-		messageContext.response = make(chan proto.Message, 1)
-		messageContext.sendTime.Store(time.Now())
-
+		messageContext := newReceiveContext(ctx, p, to, message, true)
 		// push the message to the actor mailbox
 		to.doReceive(messageContext)
 	}
@@ -632,18 +596,7 @@ func (p *pid) BatchAsk(ctx context.Context, to PID, messages ...proto.Message) (
 		// grab the message at index i
 		message := messages[i]
 		// create a message context
-		messageContext := new(receiveContext)
-
-		// set the needed properties of the message context
-		messageContext.ctx = ctx
-		messageContext.sender = p
-		messageContext.recipient = to
-		messageContext.message = message
-		messageContext.isAsyncMessage = false
-		messageContext.mu = sync.Mutex{}
-		messageContext.response = make(chan proto.Message, 1)
-		messageContext.sendTime.Store(time.Now())
-
+		messageContext := newReceiveContext(ctx, p, to, message, false)
 		// push the message to the actor mailbox
 		to.doReceive(messageContext)
 
