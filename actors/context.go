@@ -166,7 +166,7 @@ func newReceiveContext(ctx context.Context, from, to PID, message proto.Message,
 
 // WithRemoteSender set the remote sender for a given context
 func (c *receiveContext) WithRemoteSender(remoteSender *addresspb.Address) *receiveContext {
-	c.remoteSender = RemoteNoSender
+	c.remoteSender = remoteSender
 	return c
 }
 
