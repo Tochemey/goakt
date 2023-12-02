@@ -116,6 +116,11 @@ func TestOptions(t *testing.T) {
 			option:   WithActorInitTimeout(2 * time.Second),
 			expected: actorSystem{actorInitTimeout: 2. * time.Second},
 		},
+		{
+			name:     "WithTracing",
+			option:   WithTracing(),
+			expected: actorSystem{traceEnabled: atomicTrue},
+		},
 	}
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {

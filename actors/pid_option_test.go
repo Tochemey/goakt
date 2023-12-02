@@ -41,12 +41,14 @@ func TestPIDOptions(t *testing.T) {
 		atomicInt        atomic.Int32
 		negativeDuration atomic.Duration
 		atomicUint64     atomic.Uint64
+		atomicTrue       atomic.Bool
 	)
 	negativeDuration.Store(-1)
 	atomicInt.Store(5)
 	atomicDuration.Store(time.Second)
 	atomicUint64.Store(10)
 	eventsStream := eventstream.New()
+	atomicTrue.Store(true)
 
 	testCases := []struct {
 		name     string
@@ -112,6 +114,11 @@ func TestPIDOptions(t *testing.T) {
 			name:     "withInitTimeout",
 			option:   withInitTimeout(time.Second),
 			expected: &pid{initTimeout: atomicDuration},
+		},
+		{
+			name:     "withTracing",
+			option:   withTracing(),
+			expected: &pid{traceEnabled: atomicTrue},
 		},
 	}
 	for _, tc := range testCases {

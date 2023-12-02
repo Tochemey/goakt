@@ -105,7 +105,7 @@ func (p *Pinger) PreStart(ctx context.Context) error {
 func (p *Pinger) Receive(ctx goakt.ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *samplepb.Ping:
-		p.count.Add(1)
+		p.count.Inc()
 	default:
 		ctx.Unhandled()
 	}

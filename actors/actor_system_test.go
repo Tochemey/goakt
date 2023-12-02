@@ -98,6 +98,31 @@ func TestActorSystem(t *testing.T) {
 			assert.NoError(t, err)
 		})
 	})
+	t.Run("With Spawn an actor when started with tracing", func(t *testing.T) {
+		ctx := context.TODO()
+		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger), WithTracing())
+
+		// start the actor system
+		err := sys.Start(ctx)
+		assert.NoError(t, err)
+
+		actor := NewTester()
+		actorRef, err := sys.Spawn(ctx, "Test", actor)
+		assert.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		// stop the actor after some time
+		time.Sleep(time.Second)
+		actorSystem := sys.(*actorSystem)
+		assert.True(t, actorSystem.traceEnabled.Load())
+		pid := actorRef.(*pid)
+		assert.True(t, pid.traceEnabled.Load())
+
+		t.Cleanup(func() {
+			err = sys.Stop(ctx)
+			assert.NoError(t, err)
+		})
+	})
 	t.Run("With Spawn an actor already exist", func(t *testing.T) {
 		ctx := context.TODO()
 		sys, _ := NewActorSystem("test", WithLogger(log.DiscardLogger))
