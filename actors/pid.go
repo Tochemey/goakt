@@ -126,7 +126,7 @@ type PID interface {
 	// Nothing happens if child is already stopped.
 	Stop(ctx context.Context, pid PID) error
 	// StashSize returns the stash buffer size
-	StashSize() uint64
+	StashSize() int32
 	// push a message to the actor's receiveContextBuffer
 	doReceive(ctx ReceiveContext)
 	// watchers returns the list of watchMen
@@ -229,7 +229,8 @@ type pid struct {
 
 	// stash settings
 	stashBuffer    Mailbox
-	stashCapacity  atomic.Uint64
+	stashSize      atomic.Int32
+	stashCapacity  atomic.Int32
 	stashSemaphore sync.Mutex
 
 	// define an events stream
@@ -252,7 +253,6 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 		shutdownSignal:     make(chan types.Unit, 1),
 		haltPassivationLnr: make(chan types.Unit, 1),
 		logger:             log.DefaultLogger,
-		mailboxSize:        defaultMailboxSize,
 		children:           newPIDMap(10),
 		supervisorStrategy: DefaultSupervisoryStrategy,
 		watchMen:           slices.NewConcurrentSlice[*watchMan](),
@@ -283,15 +283,6 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 	for _, opt := range opts {
 		opt(pid)
 	}
-	// set the default mailbox if mailbox is not set
-	if pid.mailbox == nil {
-		pid.mailbox = newReceiveContextBuffer(pid.mailboxSize)
-	}
-
-	// set the stash buffer when capacity is set
-	if pid.stashCapacity.Load() > 0 {
-		pid.stashBuffer = newReceiveContextBuffer(pid.stashCapacity.Load())
-	}
 
 	// set the actor behavior stack
 	behaviorStack := newBehaviorStack()
@@ -307,8 +298,16 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 	if err := pid.init(ctx); err != nil {
 		return nil, err
 	}
+	// set the default mailbox if mailbox is not set
+	if pid.mailbox == nil {
+		pid.mailbox = newMailbox()
+	}
+	// set the stash buffer when capacity is set
+	if pid.stashCapacity.Load() > 0 {
+		pid.stashBuffer = newMailbox(withCapacity(pid.stashCapacity.Load()))
+	}
 	// init processing public
-	go pid.receive()
+	go pid.process()
 	// init the passivation listener loop iff passivation is set
 	if pid.passivateAfter.Load() > 0 {
 		go pid.passivationListener()
@@ -470,8 +469,8 @@ func (p *pid) Restart(ctx context.Context) error {
 		tickerStopSig := make(chan types.Unit, 1)
 		go func() {
 			for range ticker.C {
-				// stop ticking once the actor is offline
-				if !p.IsRunning() {
+				// stop ticking once the actor is offline and the mailbox is closed
+				if !p.IsRunning() && p.mailbox.IsClosed() {
 					tickerStopSig <- types.Unit{}
 					return
 				}
@@ -481,16 +480,20 @@ func (p *pid) Restart(ctx context.Context) error {
 		ticker.Stop()
 	}
 
-	// set the default mailbox if mailbox is not set
-	p.mailbox.Reset()
 	// reset the behavior
 	p.resetBehavior()
 	// initialize the actor
 	if err := p.init(spanCtx); err != nil {
 		return err
 	}
+	// set the default mailbox if mailbox is not set
+	p.mailbox = newMailbox()
+	// set the stash buffer when capacity is set
+	if p.stashCapacity.Load() > 0 {
+		p.stashBuffer = newMailbox(withCapacity(p.stashCapacity.Load()))
+	}
 	// init processing public
-	go p.receive()
+	go p.process()
 	// init the passivation listener loop iff passivation is set
 	if p.passivateAfter.Load() > 0 {
 		go p.passivationListener()
@@ -546,9 +549,7 @@ func (p *pid) SpawnChild(ctx context.Context, name string, actor Actor) (PID, er
 		withCustomLogger(p.logger),
 		withActorSystem(p.system),
 		withSupervisorStrategy(p.supervisorStrategy),
-		withMailboxSize(p.mailboxSize),
 		withStash(p.stashCapacity.Load()),
-		withMailbox(p.mailbox.Clone()),
 		withEventsStream(p.eventsStream),
 		withInitTimeout(p.initTimeout.Load()),
 		withShutdownTimeout(p.shutdownTimeout.Load()),
@@ -587,8 +588,8 @@ func (p *pid) SpawnChild(ctx context.Context, name string, actor Actor) (PID, er
 }
 
 // StashSize returns the stash buffer size
-func (p *pid) StashSize() uint64 {
-	return p.stashBuffer.Size()
+func (p *pid) StashSize() int32 {
+	return p.stashSize.Load()
 }
 
 // Ask sends a synchronous message to another actor and expect a response.
@@ -1073,7 +1074,7 @@ func (p *pid) doReceive(ctx ReceiveContext) {
 	}()
 
 	// push the message to the actor mailbox
-	if err := p.mailbox.Push(ctx); err != nil {
+	if err := p.mailbox.Send(ctx); err != nil {
 		// add a warning log because the mailbox is full and do nothing
 		p.logger.Warn(err)
 		// push the message as a deadletter
@@ -1134,8 +1135,6 @@ func (p *pid) reset() {
 	p.children = newPIDMap(10)
 	p.watchMen = slices.NewConcurrentSlice[*watchMan]()
 	p.telemetry = telemetry.New()
-	// reset the mailbox
-	p.mailbox.Reset()
 	// reset the behavior stack
 	p.resetBehavior()
 }
@@ -1182,28 +1181,29 @@ func (p *pid) freeChildren(ctx context.Context) {
 	}
 }
 
-// receive handles every mail in the actor receiveContextBuffer
-func (p *pid) receive() {
+// process handles every mail in the actor mailbox
+func (p *pid) process() {
 	// run the processing loop
 	for {
 		select {
 		case <-p.shutdownSignal:
 			return
-		default:
-			// only grab the message when the mailbox is not empty
-			if !p.mailbox.IsEmpty() {
-				// grab the message from the mailbox. Ignore the error when the mailbox is empty
-				received, _ := p.mailbox.Pop()
-				// switch on the type of message
-				switch received.Message().(type) {
-				case *messagespb.PoisonPill:
-					// stop the actor
-					_ = p.Shutdown(received.Context())
-				default:
-					p.handleReceived(received)
-				}
+		case received, ok := <-p.mailbox.Iterator():
+			if ok {
+				p.doProcess(received)
 			}
 		}
+	}
+}
+
+func (p *pid) doProcess(received ReceiveContext) {
+	// switch on the type of message
+	switch received.Message().(type) {
+	case *messagespb.PoisonPill:
+		// stop the actor
+		_ = p.Shutdown(received.Context())
+	default:
+		p.handleReceived(received)
 	}
 }
 
@@ -1387,7 +1387,7 @@ func (p *pid) doStop(ctx context.Context) error {
 
 	// let us unstash all messages in case there are some
 	// TODO: just signal stash processing done and ignore the messages or process them
-	for p.stashBuffer != nil && !p.stashBuffer.IsEmpty() {
+	if p.stashBuffer != nil {
 		if err := p.unstashAll(); err != nil {
 			// let us record the error in the span
 			span.SetStatus(codes.Error, "doStop")
@@ -1395,9 +1395,26 @@ func (p *pid) doStop(ctx context.Context) error {
 			// return the error
 			return err
 		}
+		// close the stash buffer
+		p.stashBuffer.Close()
 	}
 
-	// wait for all messages in the mailbox to be processed
+	// close the mailbox for receiving new messages
+	p.mailbox.Close()
+
+	// signal we are shutting down to stop processing messages
+	p.shutdownSignal <- types.Unit{}
+
+	// drain the mailbox
+	for {
+		if received, ok := <-p.mailbox.Iterator(); ok {
+			p.doProcess(received)
+		} else {
+			break
+		}
+	}
+
+	// wait for the mailbox to be terminated
 	// init a ticker that run every 10 ms to make sure we process all messages in the
 	// mailbox.
 	ticker := time.NewTicker(10 * time.Millisecond)
@@ -1409,8 +1426,8 @@ func (p *pid) doStop(ctx context.Context) error {
 		for {
 			select {
 			case <-ticker.C:
-				// no more message to process
-				if p.mailbox.IsEmpty() {
+				// mailbox is closed
+				if p.mailbox.IsClosed() {
 					// tell the ticker to stop
 					close(tickerStopSig)
 					return
@@ -1425,9 +1442,6 @@ func (p *pid) doStop(ctx context.Context) error {
 	// listen to ticker stop signal
 	<-tickerStopSig
 
-	// signal we are shutting down to stop processing messages
-	p.shutdownSignal <- types.Unit{}
-
 	// close lingering http connections
 	p.httpClient.CloseIdleConnections()
 
@@ -1437,7 +1451,7 @@ func (p *pid) doStop(ctx context.Context) error {
 	p.freeWatchers(spanCtx)
 
 	// add some logging
-	p.logger.Infof("Shutdown process is on going for actor=%s...", p.ActorPath().String())
+	p.logger.Infof("Shutdown process is ongoing for actor=%s...", p.ActorPath().String())
 
 	// reset the actor
 	p.reset()

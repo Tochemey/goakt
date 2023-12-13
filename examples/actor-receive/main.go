@@ -49,7 +49,6 @@ func main() {
 	actorSystem, _ := goakt.NewActorSystem("SampleActorSystem",
 		goakt.WithPassivationDisabled(),
 		goakt.WithLogger(logger),
-		goakt.WithMailboxSize(uint64(count)),
 		goakt.WithActorInitMaxRetries(3))
 
 	// start the actor system

@@ -39,12 +39,28 @@ type Item[T any] struct {
 }
 
 // NewConcurrentSlice creates a new synchronized slice.
-func NewConcurrentSlice[T any]() *ConcurrentSlice[T] {
+func NewConcurrentSlice[T any](size ...int) *ConcurrentSlice[T] {
+	sliceSize := 0
+	sliceCapacity := 0
+	if len(size) > 0 {
+		sliceSize = size[0]
+		sliceCapacity = sliceSize
+	}
+	if len(size) > 1 {
+		sliceCapacity = size[1]
+	}
 	cs := &ConcurrentSlice[T]{
-		items: make([]T, 0),
+		items: make([]T, sliceSize, sliceCapacity),
 	}
 
 	return cs
+}
+
+// Cap returns the capacity of the slice
+func (cs *ConcurrentSlice[T]) Cap() int {
+	cs.Lock()
+	defer cs.Unlock()
+	return cap(cs.items)
 }
 
 // Len returns the number of items

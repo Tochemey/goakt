@@ -78,4 +78,6 @@ var (
 	ErrEmptyMailbox = errors.New("mailbox is empty")
 	// ErrFullMailbox is returned when the mailbox is full
 	ErrFullMailbox = errors.New("mailbox is full")
+	// ErrClosedMailbox is returned when the mailbox is closed
+	ErrClosedMailbox = errors.New("mailbox is closed")
 )

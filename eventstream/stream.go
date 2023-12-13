@@ -131,8 +131,8 @@ func (b *EventsStream) Unsubscribe(sub Subscriber, topic string) {
 func (b *EventsStream) Publish(topic string, msg any) {
 	// publish the message to given topic.
 	b.mu.Lock()
+	defer b.mu.Unlock()
 	bTopics := b.topics[topic]
-	b.mu.Unlock()
 	for _, consumer := range bTopics {
 		m := NewMessage(topic, msg)
 		if !consumer.Active() {

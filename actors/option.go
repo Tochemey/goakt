@@ -131,27 +131,6 @@ func WithShutdownTimeout(timeout time.Duration) Option {
 	})
 }
 
-// WithMailboxSize sets the actors mailbox size
-func WithMailboxSize(size uint64) Option {
-	return OptionFunc(func(a *actorSystem) {
-		a.mailboxSize = size
-	})
-}
-
-// WithMailbox sets the custom mailbox used by the actors in the actor system
-func WithMailbox(mailbox Mailbox) Option {
-	return OptionFunc(func(a *actorSystem) {
-		a.mailbox = mailbox
-	})
-}
-
-// WithStash sets the stash buffer size
-func WithStash(capacity uint64) Option {
-	return OptionFunc(func(a *actorSystem) {
-		a.stashBuffer = capacity
-	})
-}
-
 // WithPartitionHasher sets the partition hasher.
 func WithPartitionHasher(hasher hash.Hasher) Option {
 	return OptionFunc(func(a *actorSystem) {

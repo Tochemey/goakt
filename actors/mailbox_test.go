@@ -26,90 +26,102 @@ package actors
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
 
 func TestMailbox(t *testing.T) {
-	t.Run("With happy path Push", func(t *testing.T) {
-		mailbox := newReceiveContextBuffer(10)
-		assert.True(t, mailbox.IsEmpty())
-		err := mailbox.Push(new(receiveContext))
-		assert.NoError(t, err)
-		assert.EqualValues(t, 1, mailbox.Size())
-		assert.EqualValues(t, 10, mailbox.Capacity())
-	})
-	t.Run("With Push when buffer is full", func(t *testing.T) {
-		mailbox := newReceiveContextBuffer(10)
-		assert.True(t, mailbox.IsEmpty())
-		for i := 0; i < 10; i++ {
-			err := mailbox.Push(new(receiveContext))
-			assert.NoError(t, err)
-		}
-		assert.EqualValues(t, 10, mailbox.Size())
-		// push another message to the buffer
-		err := mailbox.Push(new(receiveContext))
-		assert.Error(t, err)
-		assert.EqualError(t, err, ErrFullMailbox.Error())
-		assert.False(t, mailbox.IsEmpty())
-		assert.True(t, mailbox.IsFull())
-	})
-	t.Run("With happy path Pop", func(t *testing.T) {
-		mailbox := newReceiveContextBuffer(10)
-		assert.True(t, mailbox.IsEmpty())
-		assert.NoError(t, mailbox.Push(new(receiveContext)))
-		assert.NoError(t, mailbox.Push(new(receiveContext)))
-		assert.NoError(t, mailbox.Push(new(receiveContext)))
-		assert.NoError(t, mailbox.Push(new(receiveContext)))
+	t.Run("With happy path Send->Next", func(t *testing.T) {
+		mailbox := newMailbox()
+		defer mailbox.Close()
 
-		popped, err := mailbox.Pop()
+		assert.NoError(t, mailbox.Send(new(receiveContext)))
+		assert.NoError(t, mailbox.Send(new(receiveContext)))
+		assert.NoError(t, mailbox.Send(new(receiveContext)))
+
+		popped, err := mailbox.Next()
 		assert.NoError(t, err)
 		assert.NotNil(t, popped)
-		assert.EqualValues(t, 3, mailbox.Size())
-	})
 
-	t.Run("With Clone", func(t *testing.T) {
-		mailbox := newReceiveContextBuffer(10)
-		assert.True(t, mailbox.IsEmpty())
-		assert.NoError(t, mailbox.Push(new(receiveContext)))
-		assert.NoError(t, mailbox.Push(new(receiveContext)))
-		assert.NoError(t, mailbox.Push(new(receiveContext)))
-		assert.NoError(t, mailbox.Push(new(receiveContext)))
-
-		popped, err := mailbox.Pop()
+		popped, err = mailbox.Next()
 		assert.NoError(t, err)
 		assert.NotNil(t, popped)
-		assert.EqualValues(t, 3, mailbox.Size())
 
-		cloned := mailbox.Clone()
-		assert.True(t, cloned.IsEmpty())
-		assert.False(t, cloned.IsFull())
+		popped, err = mailbox.Next()
+		assert.NoError(t, err)
+		assert.NotNil(t, popped)
 	})
-	t.Run("With Pop when buffer is empty", func(t *testing.T) {
-		mailbox := newReceiveContextBuffer(10)
-		assert.True(t, mailbox.IsEmpty())
+	t.Run("With happy path Iterator", func(t *testing.T) {
+		mailbox := newMailbox()
+		defer mailbox.Close()
 
-		popped, err := mailbox.Pop()
+		assert.NoError(t, mailbox.Send(new(receiveContext)))
+		assert.NoError(t, mailbox.Send(new(receiveContext)))
+		assert.NoError(t, mailbox.Send(new(receiveContext)))
+
+		go func() {
+			counter := 0
+			for msg := range mailbox.Iterator() {
+				assert.NotNil(t, msg)
+				counter++
+			}
+			assert.EqualValues(t, 3, counter)
+		}()
+
+		// wait for the mailbox to be drained
+		time.Sleep(time.Second)
+	})
+	t.Run("With Send to closed mailbox", func(t *testing.T) {
+		mailbox := newMailbox()
+
+		assert.NoError(t, mailbox.Send(new(receiveContext)))
+
+		mailbox.Close()
+
+		assert.Eventually(t, func() bool {
+			return mailbox.IsClosed()
+		}, time.Second, 100*time.Millisecond)
+
+		assert.Error(t, mailbox.Send(new(receiveContext)))
+	})
+	t.Run("With Next from closed mailbox", func(t *testing.T) {
+		mailbox := newMailbox()
+
+		assert.NoError(t, mailbox.Send(new(receiveContext)))
+
+		mailbox.Close()
+
+		assert.Eventually(t, func() bool {
+			return mailbox.IsClosed()
+		}, time.Second, 100*time.Millisecond)
+
+		popped, err := mailbox.Next()
+		assert.NoError(t, err)
+		assert.NotNil(t, popped)
+
+		// mailbox is empty
+		popped, err = mailbox.Next()
 		assert.Error(t, err)
-		assert.EqualError(t, err, ErrEmptyMailbox.Error())
 		assert.Nil(t, popped)
 	})
-	t.Run("With Reset", func(t *testing.T) {
-		mailbox := newReceiveContextBuffer(10)
-		assert.True(t, mailbox.IsEmpty())
-		assert.NoError(t, mailbox.Push(new(receiveContext)))
-		assert.NoError(t, mailbox.Push(new(receiveContext)))
-		assert.NoError(t, mailbox.Push(new(receiveContext)))
-		assert.NoError(t, mailbox.Push(new(receiveContext)))
+	t.Run("With Next from empty closed mailbox", func(t *testing.T) {
+		mailbox := newMailbox()
 
-		popped, err := mailbox.Pop()
-		assert.NoError(t, err)
-		assert.NotNil(t, popped)
-		assert.EqualValues(t, 3, mailbox.Size())
-		assert.False(t, mailbox.IsEmpty())
+		mailbox.Close()
 
-		mailbox.Reset()
-		assert.True(t, mailbox.IsEmpty())
-		assert.False(t, mailbox.IsFull())
+		assert.Eventually(t, func() bool {
+			return mailbox.IsClosed()
+		}, time.Second, 100*time.Millisecond)
+
+		popped, err := mailbox.Next()
+		assert.Error(t, err)
+		assert.Nil(t, popped)
+	})
+	t.Run("With Send to full mailbox", func(t *testing.T) {
+		mailbox := newMailbox(withCapacity(1))
+
+		assert.NoError(t, mailbox.Send(new(receiveContext)))
+		assert.Error(t, mailbox.Send(new(receiveContext)))
 	})
 }

@@ -35,7 +35,9 @@ func (p *pid) stash(ctx ReceiveContext) error {
 	defer p.stashSemaphore.Unlock()
 
 	// add the message to stash buffer
-	return p.stashBuffer.Push(ctx)
+	p.stashBuffer.Send(ctx)
+	p.stashSize.Inc()
+	return nil
 }
 
 // unstash unstashes the oldest message in the stash and prepends to the mailbox
@@ -48,11 +50,15 @@ func (p *pid) unstash() error {
 	p.stashSemaphore.Lock()
 	defer p.stashSemaphore.Unlock()
 
-	if !p.stashBuffer.IsEmpty() {
-		// grab the message from the stash buffer. Ignore the error when the mailbox is empty
-		received, _ := p.stashBuffer.Pop()
-		// send it to the mailbox processing
-		p.doReceive(received)
+	// grab the message from the stash buffer. Ignore the error when the mailbox is empty
+	select {
+	case received, ok := <-p.stashBuffer.Iterator():
+		if ok {
+			// send it to the mailbox processing
+			p.doReceive(received)
+			p.stashSize.Dec()
+		}
+	default:
 	}
 	return nil
 }
@@ -68,13 +74,17 @@ func (p *pid) unstashAll() error {
 	p.stashSemaphore.Lock()
 	defer p.stashSemaphore.Unlock()
 
-	// send all the messages in the stash buffer to the mailbox
-	for !p.stashBuffer.IsEmpty() {
+	for {
 		// grab the message from the stash buffer. Ignore the error when the mailbox is empty
-		received, _ := p.stashBuffer.Pop()
-		// send it to the mailbox for processing
-		p.doReceive(received)
+		select {
+		case received, ok := <-p.stashBuffer.Iterator():
+			if ok {
+				// send it to the mailbox processing
+				p.doReceive(received)
+				p.stashSize.Dec()
+			}
+		default:
+			return nil
+		}
 	}
-
-	return nil
 }

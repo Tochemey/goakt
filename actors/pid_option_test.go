@@ -35,18 +35,15 @@ import (
 )
 
 func TestPIDOptions(t *testing.T) {
-	mailbox := newReceiveContextBuffer(10)
 	var (
 		atomicDuration   atomic.Duration
 		atomicInt        atomic.Int32
 		negativeDuration atomic.Duration
-		atomicUint64     atomic.Uint64
 		atomicTrue       atomic.Bool
 	)
 	negativeDuration.Store(-1)
 	atomicInt.Store(5)
 	atomicDuration.Store(time.Second)
-	atomicUint64.Store(10)
 	eventsStream := eventstream.New()
 	atomicTrue.Store(true)
 
@@ -91,19 +88,9 @@ func TestPIDOptions(t *testing.T) {
 			expected: &pid{passivateAfter: negativeDuration},
 		},
 		{
-			name:     "WithMailboxSize",
-			option:   withMailboxSize(10),
-			expected: &pid{mailboxSize: 10},
-		},
-		{
-			name:     "WithMailbox",
-			option:   withMailbox(mailbox),
-			expected: &pid{mailbox: mailbox},
-		},
-		{
 			name:     "WithStash",
-			option:   withStash(10),
-			expected: &pid{stashCapacity: atomicUint64},
+			option:   withStash(5),
+			expected: &pid{stashCapacity: atomicInt},
 		},
 		{
 			name:     "withEventsStream",

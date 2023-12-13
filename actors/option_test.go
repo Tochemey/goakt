@@ -37,7 +37,6 @@ import (
 
 func TestOptions(t *testing.T) {
 	tel := telemetry.New()
-	mailbox := newReceiveContextBuffer(10)
 	var atomicTrue atomic.Bool
 	atomicTrue.Store(true)
 	hasher := hash.DefaultHasher()
@@ -90,21 +89,6 @@ func TestOptions(t *testing.T) {
 			name:     "WithTelemetry",
 			option:   WithTelemetry(tel),
 			expected: actorSystem{telemetry: tel},
-		},
-		{
-			name:     "WithMailboxSize",
-			option:   WithMailboxSize(10),
-			expected: actorSystem{mailboxSize: 10},
-		},
-		{
-			name:     "WithMailbox",
-			option:   WithMailbox(mailbox),
-			expected: actorSystem{mailbox: mailbox},
-		},
-		{
-			name:     "WithStash",
-			option:   WithStash(10),
-			expected: actorSystem{stashBuffer: 10},
 		},
 		{
 			name:     "WithPartitionHasher",

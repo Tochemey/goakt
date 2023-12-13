@@ -324,7 +324,7 @@ func TestScheduler(t *testing.T) {
 		// send a message to the actor after 100 ms
 		message := new(testpb.TestSend)
 		// set cron expression to run every second
-		const expr = "* * * ? * *"
+		const expr = "* * * * * *"
 		err = newActorSystem.ScheduleWithCron(ctx, message, actorRef, expr)
 		require.Error(t, err)
 		assert.EqualError(t, err, "messages scheduler is not started")
@@ -372,7 +372,7 @@ func TestScheduler(t *testing.T) {
 		// send a message to the actor after 100 ms
 		message := new(testpb.TestSend)
 		// set cron expression to run every second
-		const expr = "* * * ? * *"
+		const expr = "* * * * * *"
 		err = newActorSystem.RemoteScheduleWithCron(ctx, message, addr, expr)
 		require.NoError(t, err)
 

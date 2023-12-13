@@ -173,12 +173,8 @@ type actorSystem struct {
 
 	// help protect some the fields to set
 	sem sync.Mutex
-	// specifies actors mailbox size
-	mailboxSize uint64
-	// specifies the mailbox to use for the actors
-	mailbox Mailbox
 	// specifies the stash buffer
-	stashBuffer        uint64
+	stashBuffer        int32
 	housekeeperStopSig chan types.Unit
 
 	// specifies the events stream
@@ -219,7 +215,6 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		telemetry:           telemetry.New(),
 		sem:                 sync.Mutex{},
 		shutdownTimeout:     DefaultShutdownTimeout,
-		mailboxSize:         defaultMailboxSize,
 		housekeeperStopSig:  make(chan types.Unit, 1),
 		eventsStream:        eventstream.New(),
 		partitionHasher:     hash.DefaultHasher(),
@@ -391,8 +386,6 @@ func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor) (PID,
 		withCustomLogger(x.logger),
 		withActorSystem(x),
 		withSupervisorStrategy(x.supervisorStrategy),
-		withMailboxSize(x.mailboxSize),
-		withMailbox(x.mailbox),
 		withStash(x.stashBuffer),
 		withEventsStream(x.eventsStream),
 		withInitTimeout(x.actorInitTimeout),

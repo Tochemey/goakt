@@ -66,7 +66,6 @@ func BenchmarkActor(b *testing.B) {
 		actorSystem, _ := actors.NewActorSystem("testSys",
 			actors.WithLogger(log.DiscardLogger),
 			actors.WithActorInitMaxRetries(1),
-			actors.WithMailboxSize(uint64(b.N)),
 			actors.WithReplyTimeout(receivingTimeout))
 
 		// start the actor system
@@ -95,7 +94,6 @@ func BenchmarkActor(b *testing.B) {
 		actorSystem, _ := actors.NewActorSystem("testSys",
 			actors.WithLogger(log.DiscardLogger),
 			actors.WithActorInitMaxRetries(1),
-			actors.WithMailboxSize(uint64(b.N)),
 			actors.WithExpireActorAfter(5*time.Second),
 			actors.WithReplyTimeout(receivingTimeout))
 
