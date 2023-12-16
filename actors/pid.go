@@ -1190,6 +1190,7 @@ func (p *pid) receive() {
 		case <-p.shutdownSignal:
 			return
 		case received, ok := <-p.mailbox.Iterator():
+			// break out of the loop when the channel is closed
 			if !ok {
 				return
 			}
