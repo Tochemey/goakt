@@ -38,6 +38,8 @@ type Mailbox interface {
 	Push(msg ReceiveContext) error
 	// Pop fetches a message from the mailbox
 	Pop() (msg ReceiveContext, err error)
+	// Iterator returns a channel that can be used to iterate over the mailbox
+	Iterator() <-chan ReceiveContext
 	// IsEmpty returns true when the mailbox is empty
 	IsEmpty() bool
 	// IsFull returns true when the mailbox is full
@@ -56,7 +58,6 @@ type Mailbox interface {
 type receiveContextBuffer struct {
 	// specifies the number of messages to stash
 	capacity *atomic.Uint64
-	counter  *atomic.Uint64
 	buffer   chan ReceiveContext
 	mu       sync.Mutex
 }
@@ -66,7 +67,6 @@ func newReceiveContextBuffer(capacity uint64) Mailbox {
 	return &receiveContextBuffer{
 		capacity: atomic.NewUint64(capacity),
 		buffer:   make(chan ReceiveContext, capacity),
-		counter:  atomic.NewUint64(0),
 		mu:       sync.Mutex{},
 	}
 }
@@ -77,46 +77,51 @@ var _ Mailbox = &receiveContextBuffer{}
 // Push pushes a message into the mailbox. This returns an error
 // when the box is full
 func (x *receiveContextBuffer) Push(msg ReceiveContext) error {
-	// check whether the buffer is full
-	if x.Size() < x.capacity.Load() {
-		x.mu.Lock()
-		x.buffer <- msg
-		x.mu.Unlock()
-		x.counter.Inc()
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	select {
+	case x.buffer <- msg:
 		return nil
+	default:
+		return ErrFullMailbox
 	}
-	return ErrFullMailbox
 }
 
 // Pop fetches a message from the mailbox
 func (x *receiveContextBuffer) Pop() (msg ReceiveContext, err error) {
-	// check whether the buffer is empty
-	if x.IsEmpty() {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	select {
+	case msg := <-x.buffer:
+		return msg, nil
+	default:
 		return nil, ErrEmptyMailbox
 	}
-	// grab the message
+}
+
+// Iterator returns a channel that can be used to iterate over the mailbox
+func (x *receiveContextBuffer) Iterator() <-chan ReceiveContext {
 	x.mu.Lock()
-	msg = <-x.buffer
-	x.mu.Unlock()
-	x.counter.Dec()
-	return
+	defer x.mu.Unlock()
+	return x.buffer
 }
 
 // IsEmpty returns true when the buffer is empty
 func (x *receiveContextBuffer) IsEmpty() bool {
-	return x.counter.Load() == 0
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	return len(x.buffer) == 0
 }
 
 // Size returns the size of the buffer
 func (x *receiveContextBuffer) Size() uint64 {
-	return x.counter.Load()
+	return uint64(len(x.buffer))
 }
 
 // Clone clones the current mailbox and returns a new Mailbox with reset settings
 func (x *receiveContextBuffer) Clone() Mailbox {
 	return &receiveContextBuffer{
 		capacity: x.capacity,
-		counter:  atomic.NewUint64(0),
 		buffer:   make(chan ReceiveContext, x.capacity.Load()),
 		mu:       sync.Mutex{},
 	}
@@ -124,10 +129,10 @@ func (x *receiveContextBuffer) Clone() Mailbox {
 
 // Reset resets the mailbox
 func (x *receiveContextBuffer) Reset() {
-	x.counter.Store(0)
 	x.mu.Lock()
+	defer x.mu.Unlock()
+	close(x.buffer)
 	x.buffer = make(chan ReceiveContext, x.capacity.Load())
-	x.mu.Unlock()
 }
 
 // IsFull returns true when the mailbox is full

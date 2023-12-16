@@ -1189,19 +1189,17 @@ func (p *pid) receive() {
 		select {
 		case <-p.shutdownSignal:
 			return
-		default:
-			// only grab the message when the mailbox is not empty
-			if !p.mailbox.IsEmpty() {
-				// grab the message from the mailbox. Ignore the error when the mailbox is empty
-				received, _ := p.mailbox.Pop()
-				// switch on the type of message
-				switch received.Message().(type) {
-				case *messagespb.PoisonPill:
-					// stop the actor
-					_ = p.Shutdown(received.Context())
-				default:
-					p.handleReceived(received)
-				}
+		case received, ok := <-p.mailbox.Iterator():
+			if !ok {
+				return
+			}
+			// switch on the type of message
+			switch received.Message().(type) {
+			case *messagespb.PoisonPill:
+				// stop the actor
+				_ = p.Shutdown(received.Context())
+			default:
+				p.handleReceived(received)
 			}
 		}
 	}
