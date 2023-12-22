@@ -3,7 +3,7 @@ module github.com/tochemey/goakt
 go 1.20
 
 require (
-	connectrpc.com/connect v1.13.0
+	connectrpc.com/connect v1.14.0
 	connectrpc.com/otelconnect v0.6.0
 	github.com/buraksezer/olric v0.5.4
 	github.com/caarlos0/env/v10 v10.0.0
@@ -33,7 +33,7 @@ require (
 	go.uber.org/goleak v1.3.0
 	go.uber.org/zap v1.26.0
 	golang.org/x/net v0.19.0
-	google.golang.org/protobuf v1.31.0
+	google.golang.org/protobuf v1.32.0
 	k8s.io/api v0.29.0
 	k8s.io/apimachinery v0.29.0
 	k8s.io/client-go v0.29.0
