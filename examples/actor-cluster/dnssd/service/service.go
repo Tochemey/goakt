@@ -30,6 +30,8 @@ import (
 	"net/http"
 	"time"
 
+	"connectrpc.com/otelconnect"
+
 	"connectrpc.com/connect"
 	"github.com/pkg/errors"
 	"github.com/tochemey/goakt/actors"
@@ -233,7 +235,8 @@ func (s *AccountService) listenAndServe() {
 	// create a http service mux
 	mux := http.NewServeMux()
 	// create the resource and handler
-	path, handler := samplepbconnect.NewAccountServiceHandler(s)
+	path, handler := samplepbconnect.NewAccountServiceHandler(s,
+		connect.WithInterceptors(otelconnect.NewInterceptor()))
 	mux.Handle(path, handler)
 	// create the address
 	serverAddr := fmt.Sprintf(":%d", s.port)

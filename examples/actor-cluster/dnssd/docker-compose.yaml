@@ -7,6 +7,7 @@ services:
       - run
     ports:
       - "50051"
+      - "9092"
     environment:
       SERVICE_NAME: accounts
       SYSTEM_NAME: AccountsSystem
@@ -14,3 +15,48 @@ services:
       GOSSIP_PORT: 3322
       CLUSTER_PORT: 3320
       REMOTING_PORT: 50052
+      TRACE_URL: "collector:4317"
+
+  tracer:
+    image: jaegertracing/all-in-one:1.25
+    profiles:
+      - observability
+    container_name: tracer
+    environment:
+      COLLECTOR_ZIPKIN_HTTP_PORT: 9411
+      LOG_LEVEL: INFO
+    ports:
+      - "16686:16686" # frontend
+      - "14268"
+      - "5775"
+
+  prometheus:
+    image: prom/prometheus
+    profiles:
+      - observability
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+    ports:
+      - "9090:9090"
+
+  collector:
+    image: otel/opentelemetry-collector-contrib:0.52.0
+    profiles:
+      - observability
+    command: ["--config=/etc/otel/config.yaml", ""]
+    depends_on:
+      - tracer
+    ports:
+      - "4317:4317" # OTLP gRPC receiver
+      - "13133:13133" # health_check extension
+      - "14250:14250"
+      - "14268:14268"
+      - "55681:55681" # Legacy OTLP/HTTP Port
+      - "55680:55679" # zpages extension
+      - "8888:8888" # Prometheus metrics exposed by the collector
+      - "8889:8889"   # Prometheus exporter metrics
+      - "9411"  # Zipkin receiver
+    volumes:
+      - ./otel-collector.yaml:/etc/otel/config.yaml

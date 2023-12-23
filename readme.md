@@ -219,6 +219,8 @@ creating the actor system. See actor system [options](./actors/option.go).
 ### Cluster
 
 This offers simple scalability, partitioning (sharding), and re-balancing out-of-the-box. Go-Akt nodes are automatically discovered. See [Clustering](#clustering).
+Beware that at the moment, within the cluster the existence of an actor is unique. When the node where a given actor has left the cluster, the given actor
+is no longer accessible. We can improve this behaviour by introducing the redeployment of actors on new nodes.
 
 ### Observability
 

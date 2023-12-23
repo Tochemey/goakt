@@ -151,6 +151,7 @@ dnssd-image:
     EXPOSE 50052
     EXPOSE 3322
     EXPOSE 3320
+    EXPOSE 9092
 
     ENTRYPOINT ["./accounts"]
     SAVE IMAGE accounts:dev

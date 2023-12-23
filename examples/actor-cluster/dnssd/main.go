@@ -24,7 +24,9 @@
 
 package main
 
-import "github.com/tochemey/goakt/examples/actor-cluster/dnssd/cmd"
+import (
+	"github.com/tochemey/goakt/examples/actor-cluster/dnssd/cmd"
+)
 
 func main() {
 	cmd.Execute()
