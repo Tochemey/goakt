@@ -2,15 +2,13 @@ module github.com/tochemey/goakt
 
 go 1.21
 
-toolchain go1.21.5
-
 require (
 	connectrpc.com/connect v1.14.0
 	connectrpc.com/otelconnect v0.6.0
 	github.com/buraksezer/olric v0.5.4
 	github.com/caarlos0/env/v10 v10.0.0
 	github.com/cespare/xxhash/v2 v2.2.0
-	github.com/deckarep/golang-set/v2 v2.5.0
+	github.com/deckarep/golang-set/v2 v2.6.0
 	github.com/flowchartsman/retry v1.2.0
 	github.com/google/go-cmp v0.6.0
 	github.com/google/uuid v1.5.0
