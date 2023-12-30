@@ -148,7 +148,7 @@ type PID interface {
 	// unstash unstashes the oldest message in the stash and prepends to the mailbox
 	unstash() error
 	// toDeadletters add the given message to the deadletters queue
-	emitDeadletter(recvCtx ReceiveContext, err error)
+	emitDeadletter(receiveCtx ReceiveContext, err error)
 	// removeChild is a utility function to remove child actor
 	removeChild(pid PID)
 }
