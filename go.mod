@@ -17,7 +17,7 @@ require (
 	github.com/nats-io/nats-server/v2 v2.10.7
 	github.com/nats-io/nats.go v1.31.0
 	github.com/pkg/errors v0.9.1
-	github.com/prometheus/client_golang v1.17.0
+	github.com/prometheus/client_golang v1.18.0
 	github.com/reugn/go-quartz v0.9.0
 	github.com/spf13/cobra v1.8.0
 	github.com/stretchr/testify v1.8.4
