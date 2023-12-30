@@ -452,6 +452,8 @@ func (c *Cluster) buildConfig() *config.Config {
 		logLevel = "ERROR"
 	case log.WarningLevel:
 		logLevel = "WARN"
+	default:
+		// pass
 	}
 
 	// create the config and return it
@@ -474,7 +476,7 @@ func (c *Cluster) buildConfig() *config.Config {
 		MaxJoinAttempts:            config.DefaultMaxJoinAttempts,
 		LogLevel:                   logLevel,
 		LogOutput:                  newLogWriter(c.logger),
-		EnableClusterEventsChannel: true,
+		EnableClusterEventsChannel: false,
 		Hasher:                     hasher.NewDefaultHasher(),
 	}
 
