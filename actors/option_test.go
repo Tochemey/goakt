@@ -121,6 +121,11 @@ func TestOptions(t *testing.T) {
 			option:   WithTracing(),
 			expected: actorSystem{traceEnabled: atomicTrue},
 		},
+		{
+			name:     "WithMetric",
+			option:   WithMetric(),
+			expected: actorSystem{metricEnabled: atomicTrue},
+		},
 	}
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {

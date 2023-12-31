@@ -22,51 +22,23 @@
  * SOFTWARE.
  */
 
-package telemetry
+package metric
 
 import (
-	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/metric"
-	"go.opentelemetry.io/otel/trace"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel/metric/noop"
 )
 
-const (
-	instrumentationName = "github.com/Tochemey/goakt"
-)
-
-// Telemetry encapsulates some settings for an actor
-type Telemetry struct {
-	TracerProvider trace.TracerProvider
-	Tracer         trace.Tracer
-
-	MeterProvider metric.MeterProvider
-	Meter         metric.Meter
-}
-
-// New creates an instance of Telemetry
-func New(options ...Option) *Telemetry {
-	// create a config instance
-	telemetry := &Telemetry{
-		TracerProvider: otel.GetTracerProvider(),
-		MeterProvider:  otel.GetMeterProvider(),
-	}
-
-	// apply the various options
-	for _, opt := range options {
-		opt.Apply(telemetry)
-	}
-
-	// set the tracer
-	telemetry.Tracer = telemetry.TracerProvider.Tracer(
-		instrumentationName,
-		trace.WithInstrumentationVersion(Version()),
-	)
-
-	// set the meter
-	telemetry.Meter = telemetry.MeterProvider.Meter(
-		instrumentationName,
-		metric.WithInstrumentationVersion(Version()),
-	)
-
-	return telemetry
+func TestNewActorSystemMetric(t *testing.T) {
+	// create the instance of a meter
+	meter := noop.NewMeterProvider().Meter("test")
+	// create an instance of Actor metric
+	systemMetric, err := NewActorSystemMetric(meter)
+	require.NoError(t, err)
+	assert.NotNil(t, systemMetric)
+	assert.NotNil(t, systemMetric.DeadletterCount())
+	assert.NotNil(t, systemMetric.ActorsCount())
 }

@@ -39,9 +39,12 @@ import (
 	"github.com/tochemey/goakt/log"
 	addresspb "github.com/tochemey/goakt/pb/address/v1"
 	eventspb "github.com/tochemey/goakt/pb/events/v1"
+	"github.com/tochemey/goakt/telemetry"
 	testpb "github.com/tochemey/goakt/test/data/pb/v1"
 	testkit "github.com/tochemey/goakt/testkit/discovery"
 	"github.com/travisjeffery/go-dynaport"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -874,7 +877,7 @@ func TestActorSystem(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, consumer)
 
-		// create the blackhole actor
+		// create the black hole actor
 		actor := &BlackHole{}
 		actorRef, err := sys.Spawn(ctx, "BlackHole ", actor)
 		assert.NoError(t, err)
@@ -1021,6 +1024,50 @@ func TestActorSystem(t *testing.T) {
 			err = newActorSystem.Stop(ctx)
 			assert.NoError(t, err)
 			provider.AssertExpectations(t)
+		})
+	})
+	t.Run("With Metric enabled", func(t *testing.T) {
+		r := sdkmetric.NewManualReader()
+		mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(r))
+		// create an instance of telemetry
+		tel := telemetry.New(telemetry.WithMeterProvider(mp))
+
+		ctx := context.TODO()
+		sys, _ := NewActorSystem("testSys",
+			WithMetric(),
+			WithTelemetry(tel),
+			WithStash(5),
+			WithLogger(log.DiscardLogger))
+
+		// start the actor system
+		err := sys.Start(ctx)
+		assert.NoError(t, err)
+
+		actor := NewTester()
+		actorRef, err := sys.Spawn(ctx, "Test", actor)
+		assert.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		// create a message to send to the test actor
+		message := new(testpb.TestSend)
+		// send the message to the actor
+		err = Tell(ctx, actorRef, message)
+		// perform some assertions
+		require.NoError(t, err)
+
+		// Should collect 4 metrics, 3 for the actor and 1 for the actor system
+		got := &metricdata.ResourceMetrics{}
+		err = r.Collect(ctx, got)
+		require.NoError(t, err)
+		assert.Len(t, got.ScopeMetrics, 1)
+		assert.Len(t, got.ScopeMetrics[0].Metrics, 4)
+
+		// stop the actor after some time
+		time.Sleep(time.Second)
+
+		t.Cleanup(func() {
+			err = sys.Stop(ctx)
+			assert.NoError(t, err)
 		})
 	})
 }

@@ -141,3 +141,9 @@ func withTracing() pidOption {
 		pid.traceEnabled.Store(true)
 	}
 }
+
+func withMetric() pidOption {
+	return func(pid *pid) {
+		pid.metricEnabled.Store(true)
+	}
+}
