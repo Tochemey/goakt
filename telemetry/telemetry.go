@@ -31,13 +31,7 @@ import (
 )
 
 const (
-	instrumentationName           = "github.com/Tochemey/goakt"
-	failureCounterName            = "actor_failure_count"
-	receivedCounterName           = "actor_received_count"
-	mailboxGaugeName              = "actor_mailbox_gauge"
-	startedCounterName            = "actor_start_count"
-	receivedDurationHistogramName = "actor_received_duration"
-	actorSystemActorsCounterName  = "actor_system_actors_count"
+	instrumentationName = "github.com/Tochemey/goakt"
 )
 
 // Telemetry encapsulates some settings for an actor

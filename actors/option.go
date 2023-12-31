@@ -172,3 +172,10 @@ func WithTracing() Option {
 		system.traceEnabled.Store(true)
 	})
 }
+
+// WithMetric enables metrics
+func WithMetric() Option {
+	return OptionFunc(func(system *actorSystem) {
+		system.metricEnabled.Store(true)
+	})
+}

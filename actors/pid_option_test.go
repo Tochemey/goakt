@@ -120,6 +120,11 @@ func TestPIDOptions(t *testing.T) {
 			option:   withTracing(),
 			expected: &pid{traceEnabled: atomicTrue},
 		},
+		{
+			name:     "withMetric",
+			option:   withMetric(),
+			expected: &pid{metricEnabled: atomicTrue},
+		},
 	}
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {

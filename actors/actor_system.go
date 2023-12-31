@@ -43,14 +43,15 @@ import (
 	internalpb "github.com/tochemey/goakt/internal/v1"
 	"github.com/tochemey/goakt/internal/v1/internalpbconnect"
 	"github.com/tochemey/goakt/log"
+	"github.com/tochemey/goakt/metric"
 	addresspb "github.com/tochemey/goakt/pb/address/v1"
 	eventspb "github.com/tochemey/goakt/pb/events/v1"
 	"github.com/tochemey/goakt/pkg/types"
 	"github.com/tochemey/goakt/telemetry"
-	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/codes"
-	"go.opentelemetry.io/otel/metric"
+	otelmetric "go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel/trace/noop"
 	"go.uber.org/atomic"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
@@ -189,6 +190,8 @@ type actorSystem struct {
 	// specifies whether tracing is enabled
 	traceEnabled atomic.Bool
 	tracer       trace.Tracer
+	// specifies whether metric is enabled
+	metricEnabled atomic.Bool
 }
 
 // enforce compilation error when all methods of the ActorSystem interface are not implemented
@@ -224,13 +227,14 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		eventsStream:        eventstream.New(),
 		partitionHasher:     hash.DefaultHasher(),
 		actorInitTimeout:    DefaultInitTimeout,
-		tracer:              trace.NewNoopTracerProvider().Tracer(name),
+		tracer:              noop.NewTracerProvider().Tracer(name),
 	}
 	// set the atomic settings
 	system.hasStarted.Store(false)
 	system.remotingEnabled.Store(false)
 	system.clusterEnabled.Store(false)
 	system.traceEnabled.Store(false)
+	system.metricEnabled.Store(false)
 
 	// apply the various options
 	for _, opt := range opts {
@@ -239,11 +243,21 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 
 	// set the tracer when tracing is enabled
 	if system.traceEnabled.Load() {
-		system.tracer = otel.GetTracerProvider().Tracer(name)
+		system.tracer = system.telemetry.Tracer
 	}
 
 	// set the message scheduler
 	system.scheduler = newScheduler(system.logger, system.shutdownTimeout, withSchedulerCluster(system.cluster))
+
+	// set metric and return the registration error in case there is one
+	// re-register metric when metric is enabled
+	if system.metricEnabled.Load() {
+		// log the error but don't panic
+		if err := system.registerMetrics(); err != nil {
+			return nil, err
+		}
+	}
+
 	return system, nil
 }
 
@@ -402,6 +416,11 @@ func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor) (PID,
 	// set the pid tracing option
 	if x.traceEnabled.Load() {
 		opts = append(opts, withTracing())
+	}
+
+	// set the pid metric option
+	if x.metricEnabled.Load() {
+		opts = append(opts, withMetric())
 	}
 
 	// create an instance of the actor ref
@@ -1146,7 +1165,7 @@ func (x *actorSystem) enableRemoting(ctx context.Context) {
 	// add some logging information
 	x.logger.Info("enabling remoting...")
 	// create a function to handle the observability
-	interceptor := func(tp trace.TracerProvider, mp metric.MeterProvider) connect.Interceptor {
+	interceptor := func(tp trace.TracerProvider, mp otelmetric.MeterProvider) connect.Interceptor {
 		return otelconnect.NewInterceptor(
 			otelconnect.WithTracerProvider(tp),
 			otelconnect.WithMeterProvider(mp),
@@ -1280,4 +1299,24 @@ func (x *actorSystem) housekeeper() {
 	ticker.Stop()
 	// add some logging
 	x.logger.Info("Housekeeping has stopped...")
+}
+
+// registerMetrics register the PID metrics with OTel instrumentation.
+func (x *actorSystem) registerMetrics() error {
+	// grab the OTel meter
+	meter := x.telemetry.Meter
+	// create an instance of the ActorMetrics
+	metrics, err := metric.NewActorSystemMetric(meter)
+	// handle the error
+	if err != nil {
+		return err
+	}
+
+	// register the metrics
+	_, err = meter.RegisterCallback(func(ctx context.Context, observer otelmetric.Observer) error {
+		observer.ObserveInt64(metrics.ActorsCount(), int64(x.NumActors()))
+		return nil
+	}, metrics.ActorsCount())
+
+	return err
 }

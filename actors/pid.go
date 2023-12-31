@@ -39,6 +39,7 @@ import (
 	internalpb "github.com/tochemey/goakt/internal/v1"
 	"github.com/tochemey/goakt/internal/v1/internalpbconnect"
 	"github.com/tochemey/goakt/log"
+	"github.com/tochemey/goakt/metric"
 	addresspb "github.com/tochemey/goakt/pb/address/v1"
 	eventspb "github.com/tochemey/goakt/pb/events/v1"
 	messagespb "github.com/tochemey/goakt/pb/messages/v1"
@@ -46,9 +47,10 @@ import (
 	"github.com/tochemey/goakt/pkg/slices"
 	"github.com/tochemey/goakt/pkg/types"
 	"github.com/tochemey/goakt/telemetry"
-	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/codes"
+	otelmetric "go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel/trace/noop"
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
@@ -238,6 +240,11 @@ type pid struct {
 	// define tracing
 	traceEnabled atomic.Bool
 	tracer       trace.Tracer
+
+	// set the metric settings
+	restartCount  *atomic.Int64
+	childrenCount *atomic.Int64
+	metricEnabled atomic.Bool
 }
 
 // enforce compilation error
@@ -265,7 +272,9 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 		stashBuffer:        nil,
 		stashSemaphore:     sync.Mutex{},
 		eventsStream:       nil,
-		tracer:             trace.NewNoopTracerProvider().Tracer("PID"),
+		tracer:             noop.NewTracerProvider().Tracer("PID"),
+		restartCount:       atomic.NewInt64(0),
+		childrenCount:      atomic.NewInt64(0),
 	}
 
 	// set some of the defaults values
@@ -278,6 +287,7 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 	pid.replyTimeout.Store(DefaultReplyTimeout)
 	pid.initTimeout.Store(DefaultInitTimeout)
 	pid.traceEnabled.Store(false)
+	pid.metricEnabled.Store(false)
 
 	// set the custom options to override the default values
 	for _, opt := range opts {
@@ -300,7 +310,7 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 
 	// set the tracer when tracing is enabled
 	if pid.traceEnabled.Load() {
-		pid.tracer = otel.GetTracerProvider().Tracer("PID")
+		pid.tracer = pid.telemetry.Tracer
 	}
 
 	// initialize the actor and init processing public
@@ -312,6 +322,14 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 	// init the passivation listener loop iff passivation is set
 	if pid.passivateAfter.Load() > 0 {
 		go pid.passivationListener()
+	}
+
+	// register metrics. However, we don't panic when we fail to register
+	if pid.metricEnabled.Load() {
+		if err := pid.registerMetrics(); err != nil {
+			// return the error
+			return nil, errors.Wrapf(err, "failed to register actor=%s metrics", pid.ActorPath().String())
+		}
 	}
 
 	// return the actor reference
@@ -335,6 +353,9 @@ func (p *pid) Child(name string) (PID, error) {
 
 	// check whether the child actor already exist and just return the PID
 	if cid, ok := p.children.Get(childActorPath); ok {
+		// increment the children count
+		p.childrenCount.Inc()
+		// return the child PID
 		return cid, nil
 	}
 	return nil, ErrActorNotFound(childActorPath.String())
@@ -498,6 +519,9 @@ func (p *pid) Restart(ctx context.Context) error {
 
 	// successful restart
 	span.SetStatus(codes.Ok, "Restart")
+	// increment the restart count
+	p.restartCount.Inc()
+	// return
 	return nil
 }
 
@@ -557,6 +581,11 @@ func (p *pid) SpawnChild(ctx context.Context, name string, actor Actor) (PID, er
 	// set the tracing option
 	if p.traceEnabled.Load() {
 		opts = append(opts, withTracing())
+	}
+
+	// set the pid metric option
+	if p.metricEnabled.Load() {
+		opts = append(opts, withMetric())
 	}
 
 	// create the child pid
@@ -1138,6 +1167,13 @@ func (p *pid) reset() {
 	p.mailbox.Reset()
 	// reset the behavior stack
 	p.resetBehavior()
+	// re-register metric when metric is enabled
+	if p.metricEnabled.Load() {
+		// log the error but don't panic
+		if err := p.registerMetrics(); err != nil {
+			p.logger.Error(errors.Wrapf(err, "failed to register actor=%s metrics", p.ActorPath().String()))
+		}
+	}
 }
 
 func (p *pid) freeWatchers(ctx context.Context) {
@@ -1468,17 +1504,17 @@ func (p *pid) removeChild(pid PID) {
 }
 
 // emitDeadletter emit the given message to the deadletters queue
-func (p *pid) emitDeadletter(recvCtx ReceiveContext, err error) {
+func (p *pid) emitDeadletter(receiveCtx ReceiveContext, err error) {
 	// only send to the stream when defined
 	if p.eventsStream == nil {
 		return
 	}
 	// marshal the message
-	msg, _ := anypb.New(recvCtx.Message())
+	msg, _ := anypb.New(receiveCtx.Message())
 	// grab the sender
 	var senderAddr *addresspb.Address
-	if recvCtx.Sender() != nil || recvCtx.Sender() != NoSender {
-		senderAddr = recvCtx.Sender().ActorPath().RemoteAddress()
+	if receiveCtx.Sender() != nil || receiveCtx.Sender() != NoSender {
+		senderAddr = receiveCtx.Sender().ActorPath().RemoteAddress()
 	}
 
 	// define the receiver
@@ -1493,4 +1529,28 @@ func (p *pid) emitDeadletter(recvCtx ReceiveContext, err error) {
 	}
 	// add to the events stream
 	p.eventsStream.Publish(deadlettersTopic, deadletter)
+}
+
+// registerMetrics register the PID metrics with OTel instrumentation.
+func (p *pid) registerMetrics() error {
+	// grab the OTel meter
+	meter := p.telemetry.Meter
+	// create an instance of the ActorMetrics
+	metrics, err := metric.NewActorMetric(meter)
+	// handle the error
+	if err != nil {
+		return err
+	}
+
+	// register the metrics
+	_, err = meter.RegisterCallback(func(ctx context.Context, observer otelmetric.Observer) error {
+		observer.ObserveInt64(metrics.ChildrenCount(), p.childrenCount.Load())
+		observer.ObserveInt64(metrics.StashCount(), int64(p.StashSize()))
+		observer.ObserveInt64(metrics.RestartCount(), p.restartCount.Load())
+		return nil
+	}, metrics.ChildrenCount(),
+		metrics.StashCount(),
+		metrics.RestartCount())
+
+	return err
 }
