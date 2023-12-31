@@ -33,6 +33,7 @@ Also, check reference section at the end of the post for more material regarding
     - [Observability](#observability)
         -  [Logging](#logging)
         - [Tracing](#tracing)
+        - [Metric](#metrics)
     - [Testkit](#testkit)
 - [Use Cases](#use-cases)
 - [Installation](#installation)
@@ -232,6 +233,21 @@ Go-Akt offers out of the box features that can help track, monitor and measure t
 One can enable/disable tracing on a Go-Akt actor system to instrument and measure the performance of some of the methods.
 Go-Akt uses under the hood [OpenTelemetry](https://opentelemetry.io/docs/instrumentation/go/) to instrument a system.
 One just need to use the `WithTracing` option when instantiating a Go-Akt actor system and use the default [Telemetry](./telemetry/telemetry.go)
+engine or set a custom one with `WithTelemetry` option of the actor system.
+
+#### Metrics
+
+One can enable/disable metrics on a Go-Akt actor system to collect the following metrics:
+- Actor Metrics:
+    - Number of children
+    - Number of messages stashed
+    - Number of Restarts
+    - Last message received processing latency in milliseconds
+- System Metrics:
+    - Total Number of Actors
+
+Go-Akt uses under the hood [OpenTelemetry](https://opentelemetry.io/docs/instrumentation/go/) to instrument a system.
+One just need to use the `WithMetric` option when instantiating a Go-Akt actor system and use the default [Telemetry](./telemetry/telemetry.go)
 engine or set a custom one with `WithTelemetry` option of the actor system.
 
 #### Logging
