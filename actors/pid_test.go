@@ -31,14 +31,16 @@ import (
 	"testing"
 	"time"
 
-	"go.opentelemetry.io/otel/trace"
-
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tochemey/goakt/log"
 	messagespb "github.com/tochemey/goakt/pb/messages/v1"
+	"github.com/tochemey/goakt/telemetry"
 	testpb "github.com/tochemey/goakt/test/data/pb/v1"
 	"github.com/travisjeffery/go-dynaport"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
+	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -68,7 +70,7 @@ func TestActorReceive(t *testing.T) {
 	// let us send 10 public to the actor
 	count := 10
 	for i := 0; i < count; i++ {
-		recvContext := &receiveContext{
+		receiveContext := &receiveContext{
 			ctx:            ctx,
 			message:        new(testpb.TestSend),
 			sender:         NoSender,
@@ -77,7 +79,7 @@ func TestActorReceive(t *testing.T) {
 			isAsyncMessage: true,
 		}
 
-		pid.doReceive(recvContext)
+		pid.doReceive(receiveContext)
 	}
 
 	// stop the actor
@@ -1356,4 +1358,57 @@ func TestBatchAsk(t *testing.T) {
 		time.Sleep(time.Second)
 		assert.NoError(t, pid.Shutdown(ctx))
 	})
+}
+func TestRegisterMetrics(t *testing.T) {
+	r := sdkmetric.NewManualReader()
+	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(r))
+	// create an instance of telemetry
+	tel := telemetry.New(telemetry.WithMeterProvider(mp))
+
+	ctx := context.TODO()
+
+	// create the actor path
+	actorPath := NewPath("Test", NewAddress("sys", "host", 1))
+
+	// create the actor ref
+	pid, err := newPID(
+		ctx,
+		actorPath,
+		NewTester(),
+		withInitMaxRetries(1),
+		withCustomLogger(log.DefaultLogger),
+		withTelemetry(tel),
+		withMetric(),
+		withSendReplyTimeout(receivingTimeout))
+
+	require.NoError(t, err)
+	assert.NotNil(t, pid)
+
+	// let us send 10 public to the actor
+	count := 10
+	for i := 0; i < count; i++ {
+		receiveContext := &receiveContext{
+			ctx:            ctx,
+			message:        new(testpb.TestSend),
+			sender:         NoSender,
+			recipient:      pid,
+			mu:             sync.Mutex{},
+			isAsyncMessage: true,
+		}
+
+		pid.doReceive(receiveContext)
+	}
+
+	// assert some metrics
+
+	// Should collect 3 metrics
+	got := &metricdata.ResourceMetrics{}
+	err = r.Collect(ctx, got)
+	require.NoError(t, err)
+	assert.Len(t, got.ScopeMetrics, 1)
+	assert.Len(t, got.ScopeMetrics[0].Metrics, 3)
+
+	// stop the actor
+	err = pid.Shutdown(ctx)
+	assert.NoError(t, err)
 }

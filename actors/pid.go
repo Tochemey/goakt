@@ -617,6 +617,11 @@ func (p *pid) SpawnChild(ctx context.Context, name string, actor Actor) (PID, er
 
 // StashSize returns the stash buffer size
 func (p *pid) StashSize() uint64 {
+	// avoid panic in case stash is not enabled
+	if p.stashBuffer == nil {
+		return 0
+	}
+	// return the stash buffer size
 	return p.stashBuffer.Size()
 }
 
