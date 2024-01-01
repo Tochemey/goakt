@@ -59,7 +59,7 @@ type receiveContextBuffer struct {
 	// specifies the number of messages to stash
 	capacity *atomic.Uint64
 	buffer   chan ReceiveContext
-	mu       sync.Mutex
+	mu       *sync.RWMutex
 }
 
 // newReceiveContextBuffer creates a Mailbox with a fixed capacity
@@ -67,7 +67,7 @@ func newReceiveContextBuffer(capacity uint64) Mailbox {
 	return &receiveContextBuffer{
 		capacity: atomic.NewUint64(capacity),
 		buffer:   make(chan ReceiveContext, capacity),
-		mu:       sync.Mutex{},
+		mu:       &sync.RWMutex{},
 	}
 }
 
@@ -89,8 +89,8 @@ func (x *receiveContextBuffer) Push(msg ReceiveContext) error {
 
 // Pop fetches a message from the mailbox
 func (x *receiveContextBuffer) Pop() (msg ReceiveContext, err error) {
-	x.mu.Lock()
-	defer x.mu.Unlock()
+	x.mu.RLock()
+	defer x.mu.RUnlock()
 	select {
 	case msg := <-x.buffer:
 		return msg, nil
@@ -101,15 +101,15 @@ func (x *receiveContextBuffer) Pop() (msg ReceiveContext, err error) {
 
 // Iterator returns a channel that can be used to iterate over the mailbox
 func (x *receiveContextBuffer) Iterator() <-chan ReceiveContext {
-	x.mu.Lock()
-	defer x.mu.Unlock()
+	x.mu.RLock()
+	defer x.mu.RUnlock()
 	return x.buffer
 }
 
 // IsEmpty returns true when the buffer is empty
 func (x *receiveContextBuffer) IsEmpty() bool {
-	x.mu.Lock()
-	defer x.mu.Unlock()
+	x.mu.RLock()
+	defer x.mu.RUnlock()
 	return len(x.buffer) == 0
 }
 
@@ -123,7 +123,7 @@ func (x *receiveContextBuffer) Clone() Mailbox {
 	return &receiveContextBuffer{
 		capacity: x.capacity,
 		buffer:   make(chan ReceiveContext, x.capacity.Load()),
-		mu:       sync.Mutex{},
+		mu:       &sync.RWMutex{},
 	}
 }
 
