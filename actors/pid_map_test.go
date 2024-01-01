@@ -54,4 +54,5 @@ func TestPIDMap(t *testing.T) {
 	// list the map
 	lst = pidMap.List()
 	assert.Len(t, lst, 0)
+	assert.EqualValues(t, 0, pidMap.Len())
 }

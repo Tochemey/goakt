@@ -26,31 +26,31 @@ package actors
 
 import (
 	"sync"
+	"sync/atomic"
 )
 
 type pidMap struct {
-	mu   sync.Mutex
+	mu   *sync.RWMutex
+	size atomic.Int64
 	pids map[string]PID
 }
 
 func newPIDMap(cap int) *pidMap {
 	return &pidMap{
-		mu:   sync.Mutex{},
+		mu:   &sync.RWMutex{},
 		pids: make(map[string]PID, cap),
 	}
 }
 
 // Len returns the number of PIDs
 func (m *pidMap) Len() int {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return len(m.pids)
+	return int(m.size.Load())
 }
 
 // Get retrieves a pid by its address
 func (m *pidMap) Get(path *Path) (pid PID, ok bool) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	pid, ok = m.pids[path.String()]
 	return
 }
@@ -59,23 +59,25 @@ func (m *pidMap) Get(path *Path) (pid PID, ok bool) {
 func (m *pidMap) Set(pid PID) {
 	m.mu.Lock()
 	m.pids[pid.ActorPath().String()] = pid
+	m.size.Add(1)
 	m.mu.Unlock()
 }
 
 // Delete removes a pid from the map
 func (m *pidMap) Delete(addr *Path) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	delete(m.pids, addr.String())
+	m.size.Add(-1)
+	m.mu.Unlock()
 }
 
 // List returns all actors as a slice
 func (m *pidMap) List() []PID {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-	out := make([]PID, 0, len(m.pids))
+	out := make([]PID, 0, m.size.Load())
 	for _, actor := range m.pids {
 		out = append(out, actor)
 	}
+	m.mu.Unlock()
 	return out
 }
