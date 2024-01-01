@@ -28,6 +28,7 @@ import (
 	"context"
 	"net"
 	"os"
+	"sort"
 	"strconv"
 	"testing"
 	"time"
@@ -1061,6 +1062,23 @@ func TestActorSystem(t *testing.T) {
 		require.NoError(t, err)
 		assert.Len(t, got.ScopeMetrics, 1)
 		assert.Len(t, got.ScopeMetrics[0].Metrics, 4)
+
+		expected := []string{
+			"actor_child_count",
+			"actor_stash_count",
+			"actor_restart_count",
+			"actors_count",
+		}
+		// sort the array
+		sort.Strings(expected)
+		// get the metric names
+		actual := make([]string, len(got.ScopeMetrics[0].Metrics))
+		for i, metric := range got.ScopeMetrics[0].Metrics {
+			actual[i] = metric.Name
+		}
+		sort.Strings(actual)
+
+		assert.ElementsMatch(t, expected, actual)
 
 		// stop the actor after some time
 		time.Sleep(time.Second)
