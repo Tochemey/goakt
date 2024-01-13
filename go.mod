@@ -15,7 +15,7 @@ require (
 	github.com/grandcat/zeroconf v1.0.0
 	github.com/joho/godotenv v1.5.1
 	github.com/nats-io/nats-server/v2 v2.10.9
-	github.com/nats-io/nats.go v1.31.0
+	github.com/nats-io/nats.go v1.32.0
 	github.com/pkg/errors v0.9.1
 	github.com/prometheus/client_golang v1.18.0
 	github.com/reugn/go-quartz v0.9.0
