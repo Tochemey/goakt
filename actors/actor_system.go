@@ -1164,21 +1164,34 @@ func (x *actorSystem) enableClustering(ctx context.Context) {
 func (x *actorSystem) enableRemoting(ctx context.Context) {
 	// add some logging information
 	x.logger.Info("enabling remoting...")
-	// create a function to handle the observability
-	interceptor := func(tp trace.TracerProvider, mp otelmetric.MeterProvider) connect.Interceptor {
-		return otelconnect.NewInterceptor(
-			otelconnect.WithTracerProvider(tp),
-			otelconnect.WithMeterProvider(mp),
+
+	// define a variable to hold the interceptor
+	var interceptor *otelconnect.Interceptor
+	var err error
+	// only set the observability when metric or trace is enabled
+	if x.metricEnabled.Load() || x.traceEnabled.Load() {
+		// create an interceptor and panic
+		interceptor, err = otelconnect.NewInterceptor(
+			otelconnect.WithTracerProvider(x.telemetry.TracerProvider),
+			otelconnect.WithMeterProvider(x.telemetry.MeterProvider),
 		)
+		// panic when there is an error
+		if err != nil {
+			x.logger.Panic(errors.Wrap(err, "failed to initialize observability feature"))
+		}
+	}
+
+	// create the handler option
+	var opts []connect.HandlerOption
+	// set handler options when interceptor is defined
+	if interceptor != nil {
+		opts = append(opts, connect.WithInterceptors(interceptor))
 	}
 
 	// create a http service mux
 	mux := http.NewServeMux()
 	// create the resource and handler
-	path, handler := internalpbconnect.NewRemotingServiceHandler(
-		x,
-		connect.WithInterceptors(interceptor(x.telemetry.TracerProvider, x.telemetry.MeterProvider)),
-	)
+	path, handler := internalpbconnect.NewRemotingServiceHandler(x, opts...)
 	mux.Handle(path, handler)
 	// create the address
 	serverAddr := fmt.Sprintf("%s:%d", x.remotingHost, x.remotingPort)
