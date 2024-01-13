@@ -791,12 +791,18 @@ func (p *pid) BatchAsk(ctx context.Context, to PID, messages ...proto.Message) (
 // RemoteLookup look for an actor address on a remote node. If the actorSystem is nil then the lookup will be done
 // using the same actor system as the PID actor system
 func (p *pid) RemoteLookup(ctx context.Context, host string, port int, name string) (addr *addresspb.Address, err error) {
+	// get the gRPC client connection options
+	clientConnectionOptions, err := p.gRPCClientConnectionOptions()
+	// handle the error
+	if err != nil {
+		return nil, err
+	}
+
 	// create an instance of remote client service
 	remoteClient := internalpbconnect.NewRemotingServiceClient(
 		p.httpClient,
 		http.URL(host, port),
-		connect.WithInterceptors(p.interceptor()),
-		connect.WithGRPC(),
+		clientConnectionOptions...,
 	)
 
 	// prepare the request to send
@@ -827,12 +833,18 @@ func (p *pid) RemoteTell(ctx context.Context, to *addresspb.Address, message pro
 		return err
 	}
 
+	// get the gRPC client connection options
+	clientConnectionOptions, err := p.gRPCClientConnectionOptions()
+	// handle the error
+	if err != nil {
+		return err
+	}
+
 	// create an instance of remote client service
 	remoteClient := internalpbconnect.NewRemotingServiceClient(
 		p.httpClient,
 		http.URL(to.GetHost(), int(to.GetPort())),
-		connect.WithInterceptors(p.interceptor()),
-		connect.WithGRPC(),
+		clientConnectionOptions...,
 	)
 
 	// construct the from address
@@ -874,12 +886,18 @@ func (p *pid) RemoteAsk(ctx context.Context, to *addresspb.Address, message prot
 		return nil, err
 	}
 
+	// get the gRPC client connection options
+	clientConnectionOptions, err := p.gRPCClientConnectionOptions()
+	// handle the error
+	if err != nil {
+		return nil, err
+	}
+
 	// create an instance of remote client service
 	remoteClient := internalpbconnect.NewRemotingServiceClient(
 		p.httpClient,
 		http.URL(to.GetHost(), int(to.GetPort())),
-		connect.WithInterceptors(p.interceptor()),
-		connect.WithGRPC(),
+		clientConnectionOptions...,
 	)
 
 	// construct the from address
@@ -939,12 +957,18 @@ func (p *pid) RemoteBatchTell(ctx context.Context, to *addresspb.Address, messag
 		Id:   p.ActorPath().ID().String(),
 	}
 
+	// get the gRPC client connection options
+	clientConnectionOptions, err := p.gRPCClientConnectionOptions()
+	// handle the error
+	if err != nil {
+		return err
+	}
+
 	// create an instance of remote client service
 	remoteClient := internalpbconnect.NewRemotingServiceClient(
 		http.Client(),
 		http.URL(to.GetHost(), int(to.GetPort())),
-		connect.WithInterceptors(otelconnect.NewInterceptor()),
-		connect.WithGRPC(),
+		clientConnectionOptions...,
 	)
 
 	// prepare the remote batch tell request
@@ -987,12 +1011,18 @@ func (p *pid) RemoteBatchAsk(ctx context.Context, to *addresspb.Address, message
 		Id:   p.ActorPath().ID().String(),
 	}
 
+	// get the gRPC client connection options
+	clientConnectionOptions, err := p.gRPCClientConnectionOptions()
+	// handle the error
+	if err != nil {
+		return nil, err
+	}
+
 	// create an instance of remote client service
 	remoteClient := internalpbconnect.NewRemotingServiceClient(
 		http.Client(),
 		http.URL(to.GetHost(), int(to.GetPort())),
-		connect.WithInterceptors(otelconnect.NewInterceptor()),
-		connect.WithGRPC(),
+		clientConnectionOptions...,
 	)
 
 	// prepare the remote batch tell request
@@ -1376,14 +1406,6 @@ func (p *pid) passivationListener() {
 	p.logger.Infof("Actor=%s successfully passivated", p.ActorPath().String())
 }
 
-// interceptor create an interceptor based upon the telemetry provided
-func (p *pid) interceptor() connect.Interceptor {
-	return otelconnect.NewInterceptor(
-		otelconnect.WithTracerProvider(p.telemetry.TracerProvider),
-		otelconnect.WithMeterProvider(p.telemetry.MeterProvider),
-	)
-}
-
 // setBehavior is a utility function that helps set the actor behavior
 func (p *pid) setBehavior(behavior Behavior) {
 	p.semaphore.Lock()
@@ -1558,4 +1580,33 @@ func (p *pid) registerMetrics() error {
 		metrics.RestartCount())
 
 	return err
+}
+
+// gRPCClientConnectionOptions returns the gRPC client connections options
+func (p *pid) gRPCClientConnectionOptions() ([]connect.ClientOption, error) {
+	// define a variable to hold the interceptor
+	var interceptor *otelconnect.Interceptor
+	var err error
+	// only set the observability when metric or trace is enabled
+	if p.metricEnabled.Load() || p.traceEnabled.Load() {
+		// create an interceptor and panic
+		interceptor, err = otelconnect.NewInterceptor(
+			otelconnect.WithTracerProvider(p.telemetry.TracerProvider),
+			otelconnect.WithMeterProvider(p.telemetry.MeterProvider))
+		// panic when there is an error
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to initialize observability feature")
+		}
+	}
+
+	// create the handler option
+	clientConnectionOptions := []connect.ClientOption{
+		connect.WithGRPC(),
+	}
+	// add the grpc connection
+	// set handler options when interceptor is defined
+	if interceptor != nil {
+		clientConnectionOptions = append(clientConnectionOptions, connect.WithInterceptors(interceptor))
+	}
+	return clientConnectionOptions, err
 }

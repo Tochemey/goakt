@@ -234,9 +234,14 @@ func (s *AccountService) Stop(ctx context.Context) error {
 func (s *AccountService) listenAndServe() {
 	// create a http service mux
 	mux := http.NewServeMux()
+	// create an interceptor
+	interceptor, err := otelconnect.NewInterceptor()
+	if err != nil {
+		s.logger.Panic(err)
+	}
 	// create the resource and handler
 	path, handler := samplepbconnect.NewAccountServiceHandler(s,
-		connect.WithInterceptors(otelconnect.NewInterceptor()))
+		connect.WithInterceptors(interceptor))
 	mux.Handle(path, handler)
 	// create the address
 	serverAddr := fmt.Sprintf(":%d", s.port)

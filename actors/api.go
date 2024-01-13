@@ -195,11 +195,18 @@ func RemoteTell(ctx context.Context, to *addresspb.Address, message proto.Messag
 		return ErrInvalidRemoteMessage(err)
 	}
 
+	// create an interceptor
+	interceptor, err := otelconnect.NewInterceptor()
+	// handle the error
+	if err != nil {
+		return err
+	}
+
 	// create an instance of remote client service
 	remoteClient := internalpbconnect.NewRemotingServiceClient(
 		http.Client(),
 		http.URL(to.GetHost(), int(to.GetPort())),
-		connect.WithInterceptors(otelconnect.NewInterceptor()),
+		connect.WithInterceptors(interceptor),
 		connect.WithGRPC(),
 	)
 	// prepare the rpcRequest to send
@@ -225,11 +232,18 @@ func RemoteAsk(ctx context.Context, to *addresspb.Address, message proto.Message
 		return nil, ErrInvalidRemoteMessage(err)
 	}
 
+	// create an interceptor
+	interceptor, err := otelconnect.NewInterceptor()
+	// handle the error
+	if err != nil {
+		return nil, err
+	}
+
 	// create an instance of remote client service
 	remoteClient := internalpbconnect.NewRemotingServiceClient(
 		http.Client(),
 		http.URL(to.GetHost(), int(to.GetPort())),
-		connect.WithInterceptors(otelconnect.NewInterceptor()),
+		connect.WithInterceptors(interceptor),
 		connect.WithGRPC(),
 	)
 	// prepare the rpcRequest to send
@@ -252,11 +266,18 @@ func RemoteAsk(ctx context.Context, to *addresspb.Address, message proto.Message
 
 // RemoteLookup look for an actor address on a remote node.
 func RemoteLookup(ctx context.Context, host string, port int, name string) (addr *addresspb.Address, err error) {
+	// create an interceptor
+	interceptor, err := otelconnect.NewInterceptor()
+	// handle the error
+	if err != nil {
+		return nil, err
+	}
+
 	// create an instance of remote client service
 	remoteClient := internalpbconnect.NewRemotingServiceClient(
 		http.Client(),
 		http.URL(host, port),
-		connect.WithInterceptors(otelconnect.NewInterceptor()),
+		connect.WithInterceptors(interceptor),
 		connect.WithGRPC(),
 	)
 
@@ -283,6 +304,13 @@ func RemoteLookup(ctx context.Context, host string, port int, name string) (addr
 
 // RemoteBatchTell sends bulk asynchronous messages to an actor
 func RemoteBatchTell(ctx context.Context, to *addresspb.Address, messages ...proto.Message) error {
+	// create an interceptor
+	interceptor, err := otelconnect.NewInterceptor()
+	// handle the error
+	if err != nil {
+		return err
+	}
+
 	// define a variable holding the remote messages
 	var remoteMessages []*anypb.Any
 	// iterate the list of messages and pack them
@@ -301,7 +329,7 @@ func RemoteBatchTell(ctx context.Context, to *addresspb.Address, messages ...pro
 	remoteClient := internalpbconnect.NewRemotingServiceClient(
 		http.Client(),
 		http.URL(to.GetHost(), int(to.GetPort())),
-		connect.WithInterceptors(otelconnect.NewInterceptor()),
+		connect.WithInterceptors(interceptor),
 		connect.WithGRPC(),
 	)
 
@@ -320,6 +348,13 @@ func RemoteBatchTell(ctx context.Context, to *addresspb.Address, messages ...pro
 
 // RemoteBatchAsk sends bulk messages to an actor with responses expected
 func RemoteBatchAsk(ctx context.Context, to *addresspb.Address, messages ...proto.Message) (responses []*anypb.Any, err error) {
+	// create an interceptor
+	interceptor, err := otelconnect.NewInterceptor()
+	// handle the error
+	if err != nil {
+		return nil, err
+	}
+
 	// define a variable holding the remote messages
 	var remoteMessages []*anypb.Any
 	// iterate the list of messages and pack them
@@ -338,7 +373,7 @@ func RemoteBatchAsk(ctx context.Context, to *addresspb.Address, messages ...prot
 	remoteClient := internalpbconnect.NewRemotingServiceClient(
 		http.Client(),
 		http.URL(to.GetHost(), int(to.GetPort())),
-		connect.WithInterceptors(otelconnect.NewInterceptor()),
+		connect.WithInterceptors(interceptor),
 		connect.WithGRPC(),
 	)
 
