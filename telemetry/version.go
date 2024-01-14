@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (c) 2022-2023 Tochemey
+ * Copyright (c) 2022-2024 Tochemey
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -26,5 +26,5 @@ package telemetry
 
 // Version is the current release version of goakt in use.
 func Version() string {
-	return "0.3.0"
+	return "1.3.7"
 }
