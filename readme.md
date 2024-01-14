@@ -25,7 +25,7 @@ Also, check reference section at the end of the post for more material regarding
     - [Actor System](#actor-system)
     - [Behaviors](#behaviors)
     - [Mailbox](#mailbox)
-    - [Dead Letters](#dead-letters)
+    - [Events Stream](#events-stream)
     - [Messaging](#messaging)
     - [Scheduler](#scheduler)
     - [Stashing](#stashing)
@@ -142,15 +142,22 @@ To change the behavior, call the following methods on the [ReceiveContext interf
 
 Once can implement a custom mailbox. See [Mailbox](./actors/mailbox.go). The default mailbox makes use of buffered channels.
 
-### Dead Letters
+### Events Stream
 
-Dead letters are basically messages that cannot be delivered or that were not handled by a given actor.
-Those messages are encapsulated in an event called [DeadletterEvent](./protos/goakt/events/v1/events.proto).
+To receive some system events and act on them for some particular business cases,  you just need to call the actor system `Subscribe`.
+The subscription methods can be found on the `ActorSystem` interface.
+
+#### Supported events
+
+- [`ActorStarted`](./protos/goakt/events/v1/events.proto): emitted when an actor has started
+- [`ActorStopped`](./protos/goakt/events/v1/events.proto): emitted when an actor has stopped
+- [`ActorPassivated`](./protos/goakt/events/v1/events.proto): emitted when an actor is passivated
+- [`ActorChildCreated`](./protos/goakt/events/v1/events.proto): emitted when a child actor is created
+- [`ActorRestarted`](./protos/goakt/events/v1/events.proto): emitted when an actor has restarted
+- [`Deadletter`](./protos/goakt/events/v1/events.proto): emitted when a message cannot be delivered or that were not handled by a given actor. Those messages are encapsulated in an event called [Deadletter](./protos/goakt/events/v1/events.proto).
 Dead letters are automatically emitted when a message cannot be delivered to actors' mailbox or when an Ask times out.
 Also, one can emit dead letters from the receiving actor by using the `ctx.Unhandled()` method. This is useful instead of panicking when
-the receiving actor does not know how to handle a particular message.
-Dead letters are not propagated over the network, there are tied to the local actor system.
-To receive the dead letter, you just need to call the actor system `Subscribe` and specify the `Event_DEAD_LETTER` event type.
+the receiving actor does not know how to handle a particular message. Dead letters are not propagated over the network, there are tied to the local actor system.
 
 ### Messaging
 
