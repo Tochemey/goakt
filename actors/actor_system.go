@@ -45,7 +45,6 @@ import (
 	"github.com/tochemey/goakt/log"
 	"github.com/tochemey/goakt/metric"
 	addresspb "github.com/tochemey/goakt/pb/address/v1"
-	eventspb "github.com/tochemey/goakt/pb/events/v1"
 	"github.com/tochemey/goakt/pkg/types"
 	"github.com/tochemey/goakt/telemetry"
 	"go.opentelemetry.io/otel/codes"
@@ -94,9 +93,9 @@ type ActorSystem interface {
 	// GetPartition returns the partition where a given actor is located
 	GetPartition(actorName string) uint64
 	// Subscribe creates an event subscriber.
-	Subscribe(event eventspb.Event) (eventstream.Subscriber, error)
+	Subscribe() (eventstream.Subscriber, error)
 	// Unsubscribe unsubscribes a subscriber.
-	Unsubscribe(event eventspb.Event, subscriber eventstream.Subscriber) error
+	Unsubscribe(subscriber eventstream.Subscriber) error
 	// ScheduleOnce schedules a message that will be delivered to the receiver actor
 	// This will send the given message to the actor after the given interval specified.
 	// The message will be sent once
@@ -307,37 +306,28 @@ func (x *actorSystem) RemoteScheduleWithCron(ctx context.Context, message proto.
 }
 
 // Subscribe help receive dead letters whenever there are available
-func (x *actorSystem) Subscribe(event eventspb.Event) (eventstream.Subscriber, error) {
+func (x *actorSystem) Subscribe() (eventstream.Subscriber, error) {
 	// first check whether the actor system has started
 	if !x.hasStarted.Load() {
 		return nil, ErrActorSystemNotStarted
 	}
 	// create the consumer
 	subscriber := x.eventsStream.AddSubscriber()
-	// based upon the event we will subscribe to the various topic
-	switch event {
-	case eventspb.Event_DEAD_LETTER:
-		// subscribe the consumer to the deadletter topic
-		x.eventsStream.Subscribe(subscriber, deadlettersTopic)
-	}
+	// subscribe the consumer to the deadletter topic
+	x.eventsStream.Subscribe(subscriber, eventsTopic)
 	return subscriber, nil
 }
 
 // Unsubscribe unsubscribes a subscriber.
-func (x *actorSystem) Unsubscribe(event eventspb.Event, subscriber eventstream.Subscriber) error {
+func (x *actorSystem) Unsubscribe(subscriber eventstream.Subscriber) error {
 	// first check whether the actor system has started
 	if !x.hasStarted.Load() {
 		return ErrActorSystemNotStarted
 	}
-
-	// based upon the event we will unsubscribe to the various topic
-	switch event {
-	case eventspb.Event_DEAD_LETTER:
-		// subscribe the consumer to the deadletter topic
-		x.eventsStream.Unsubscribe(subscriber, deadlettersTopic)
-		// remove the subscriber from the events stream
-		x.eventsStream.RemoveSubscriber(subscriber)
-	}
+	// subscribe the consumer to the deadletter topic
+	x.eventsStream.Unsubscribe(subscriber, eventsTopic)
+	// remove the subscriber from the events stream
+	x.eventsStream.RemoveSubscriber(subscriber)
 	return nil
 }
 

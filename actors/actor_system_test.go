@@ -874,7 +874,7 @@ func TestActorSystem(t *testing.T) {
 		time.Sleep(time.Second)
 
 		// create a deadletter subscriber
-		consumer, err := sys.Subscribe(eventspb.Event_DEAD_LETTER)
+		consumer, err := sys.Subscribe()
 		require.NoError(t, err)
 		require.NotNil(t, consumer)
 
@@ -894,17 +894,20 @@ func TestActorSystem(t *testing.T) {
 
 		time.Sleep(time.Second)
 
-		var items []*eventspb.DeadletterEvent
+		var items []*eventspb.Deadletter
 		for message := range consumer.Iterator() {
 			payload := message.Payload()
-			deadletter := payload.(*eventspb.DeadletterEvent)
-			items = append(items, deadletter)
+			// only listening to deadletters
+			deadletter, ok := payload.(*eventspb.Deadletter)
+			if ok {
+				items = append(items, deadletter)
+			}
 		}
 
 		require.Len(t, items, 5)
 
 		// unsubscribe the consumer
-		err = sys.Unsubscribe(eventspb.Event_DEAD_LETTER, consumer)
+		err = sys.Unsubscribe(consumer)
 		require.NoError(t, err)
 
 		t.Cleanup(func() {
@@ -916,7 +919,7 @@ func TestActorSystem(t *testing.T) {
 		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
 
 		// create a deadletter subscriber
-		consumer, err := sys.Subscribe(eventspb.Event_DEAD_LETTER)
+		consumer, err := sys.Subscribe()
 		require.Error(t, err)
 		require.Nil(t, consumer)
 	})
@@ -928,7 +931,7 @@ func TestActorSystem(t *testing.T) {
 		err := sys.Start(ctx)
 		assert.NoError(t, err)
 
-		consumer, err := sys.Subscribe(eventspb.Event_DEAD_LETTER)
+		consumer, err := sys.Subscribe()
 		require.NoError(t, err)
 		require.NotNil(t, consumer)
 
@@ -938,7 +941,7 @@ func TestActorSystem(t *testing.T) {
 		time.Sleep(time.Second)
 
 		// create a deadletter subscriber
-		err = sys.Unsubscribe(eventspb.Event_DEAD_LETTER, consumer)
+		err = sys.Unsubscribe(consumer)
 		require.Error(t, err)
 	})
 	t.Run("With Passivation with clustering enabled", func(t *testing.T) {

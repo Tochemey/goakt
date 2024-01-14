@@ -55,7 +55,7 @@ const (
 	DefaultInitTimeout = time.Second
 
 	defaultMailboxSize = 4096
-	deadlettersTopic   = "topic.deadletters"
+	eventsTopic        = "topic.events"
 )
 
 // NoSender means that there is no sender

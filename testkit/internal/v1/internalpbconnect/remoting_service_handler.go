@@ -80,6 +80,116 @@ func (_c *RemotingServiceHandler_RemoteAsk_Call) RunAndReturn(run func(context.C
 	return _c
 }
 
+// RemoteBatchAsk provides a mock function with given fields: _a0, _a1
+func (_m *RemotingServiceHandler) RemoteBatchAsk(_a0 context.Context, _a1 *connect.Request[internalpb.RemoteBatchAskRequest]) (*connect.Response[internalpb.RemoteBatchAskResponse], error) {
+	ret := _m.Called(_a0, _a1)
+
+	var r0 *connect.Response[internalpb.RemoteBatchAskResponse]
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *connect.Request[internalpb.RemoteBatchAskRequest]) (*connect.Response[internalpb.RemoteBatchAskResponse], error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *connect.Request[internalpb.RemoteBatchAskRequest]) *connect.Response[internalpb.RemoteBatchAskResponse]); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*connect.Response[internalpb.RemoteBatchAskResponse])
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *connect.Request[internalpb.RemoteBatchAskRequest]) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// RemotingServiceHandler_RemoteBatchAsk_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemoteBatchAsk'
+type RemotingServiceHandler_RemoteBatchAsk_Call struct {
+	*mock.Call
+}
+
+// RemoteBatchAsk is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *connect.Request[internalpb.RemoteBatchAskRequest]
+func (_e *RemotingServiceHandler_Expecter) RemoteBatchAsk(_a0 interface{}, _a1 interface{}) *RemotingServiceHandler_RemoteBatchAsk_Call {
+	return &RemotingServiceHandler_RemoteBatchAsk_Call{Call: _e.mock.On("RemoteBatchAsk", _a0, _a1)}
+}
+
+func (_c *RemotingServiceHandler_RemoteBatchAsk_Call) Run(run func(_a0 context.Context, _a1 *connect.Request[internalpb.RemoteBatchAskRequest])) *RemotingServiceHandler_RemoteBatchAsk_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*connect.Request[internalpb.RemoteBatchAskRequest]))
+	})
+	return _c
+}
+
+func (_c *RemotingServiceHandler_RemoteBatchAsk_Call) Return(_a0 *connect.Response[internalpb.RemoteBatchAskResponse], _a1 error) *RemotingServiceHandler_RemoteBatchAsk_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *RemotingServiceHandler_RemoteBatchAsk_Call) RunAndReturn(run func(context.Context, *connect.Request[internalpb.RemoteBatchAskRequest]) (*connect.Response[internalpb.RemoteBatchAskResponse], error)) *RemotingServiceHandler_RemoteBatchAsk_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// RemoteBatchTell provides a mock function with given fields: _a0, _a1
+func (_m *RemotingServiceHandler) RemoteBatchTell(_a0 context.Context, _a1 *connect.Request[internalpb.RemoteBatchTellRequest]) (*connect.Response[internalpb.RemoteBatchTellResponse], error) {
+	ret := _m.Called(_a0, _a1)
+
+	var r0 *connect.Response[internalpb.RemoteBatchTellResponse]
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *connect.Request[internalpb.RemoteBatchTellRequest]) (*connect.Response[internalpb.RemoteBatchTellResponse], error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *connect.Request[internalpb.RemoteBatchTellRequest]) *connect.Response[internalpb.RemoteBatchTellResponse]); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*connect.Response[internalpb.RemoteBatchTellResponse])
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *connect.Request[internalpb.RemoteBatchTellRequest]) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// RemotingServiceHandler_RemoteBatchTell_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemoteBatchTell'
+type RemotingServiceHandler_RemoteBatchTell_Call struct {
+	*mock.Call
+}
+
+// RemoteBatchTell is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *connect.Request[internalpb.RemoteBatchTellRequest]
+func (_e *RemotingServiceHandler_Expecter) RemoteBatchTell(_a0 interface{}, _a1 interface{}) *RemotingServiceHandler_RemoteBatchTell_Call {
+	return &RemotingServiceHandler_RemoteBatchTell_Call{Call: _e.mock.On("RemoteBatchTell", _a0, _a1)}
+}
+
+func (_c *RemotingServiceHandler_RemoteBatchTell_Call) Run(run func(_a0 context.Context, _a1 *connect.Request[internalpb.RemoteBatchTellRequest])) *RemotingServiceHandler_RemoteBatchTell_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*connect.Request[internalpb.RemoteBatchTellRequest]))
+	})
+	return _c
+}
+
+func (_c *RemotingServiceHandler_RemoteBatchTell_Call) Return(_a0 *connect.Response[internalpb.RemoteBatchTellResponse], _a1 error) *RemotingServiceHandler_RemoteBatchTell_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *RemotingServiceHandler_RemoteBatchTell_Call) RunAndReturn(run func(context.Context, *connect.Request[internalpb.RemoteBatchTellRequest]) (*connect.Response[internalpb.RemoteBatchTellResponse], error)) *RemotingServiceHandler_RemoteBatchTell_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // RemoteLookup provides a mock function with given fields: _a0, _a1
 func (_m *RemotingServiceHandler) RemoteLookup(_a0 context.Context, _a1 *connect.Request[internalpb.RemoteLookupRequest]) (*connect.Response[internalpb.RemoteLookupResponse], error) {
 	ret := _m.Called(_a0, _a1)
