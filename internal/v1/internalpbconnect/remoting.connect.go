@@ -18,7 +18,7 @@ import (
 // generated with a version of connect newer than the one compiled into your binary. You can fix the
 // problem by either regenerating this code with an older version of connect or updating the connect
 // version compiled into your binary.
-const _ = connect.IsAtLeastVersion0_1_0
+const _ = connect.IsAtLeastVersion1_13_0
 
 const (
 	// RemotingServiceName is the fully-qualified name of the RemotingService service.
@@ -50,6 +50,16 @@ const (
 	RemotingServiceRemoteBatchAskProcedure = "/internal.v1.RemotingService/RemoteBatchAsk"
 )
 
+// These variables are the protoreflect.Descriptor objects for the RPCs defined in this package.
+var (
+	remotingServiceServiceDescriptor               = v1.File_internal_v1_remoting_proto.Services().ByName("RemotingService")
+	remotingServiceRemoteAskMethodDescriptor       = remotingServiceServiceDescriptor.Methods().ByName("RemoteAsk")
+	remotingServiceRemoteTellMethodDescriptor      = remotingServiceServiceDescriptor.Methods().ByName("RemoteTell")
+	remotingServiceRemoteLookupMethodDescriptor    = remotingServiceServiceDescriptor.Methods().ByName("RemoteLookup")
+	remotingServiceRemoteBatchTellMethodDescriptor = remotingServiceServiceDescriptor.Methods().ByName("RemoteBatchTell")
+	remotingServiceRemoteBatchAskMethodDescriptor  = remotingServiceServiceDescriptor.Methods().ByName("RemoteBatchAsk")
+)
+
 // RemotingServiceClient is a client for the internal.v1.RemotingService service.
 type RemotingServiceClient interface {
 	// RemoteAsk is used to send a message to an actor remotely and expect a response immediately.
@@ -79,27 +89,32 @@ func NewRemotingServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 		remoteAsk: connect.NewClient[v1.RemoteAskRequest, v1.RemoteAskResponse](
 			httpClient,
 			baseURL+RemotingServiceRemoteAskProcedure,
-			opts...,
+			connect.WithSchema(remotingServiceRemoteAskMethodDescriptor),
+			connect.WithClientOptions(opts...),
 		),
 		remoteTell: connect.NewClient[v1.RemoteTellRequest, v1.RemoteTellResponse](
 			httpClient,
 			baseURL+RemotingServiceRemoteTellProcedure,
-			opts...,
+			connect.WithSchema(remotingServiceRemoteTellMethodDescriptor),
+			connect.WithClientOptions(opts...),
 		),
 		remoteLookup: connect.NewClient[v1.RemoteLookupRequest, v1.RemoteLookupResponse](
 			httpClient,
 			baseURL+RemotingServiceRemoteLookupProcedure,
-			opts...,
+			connect.WithSchema(remotingServiceRemoteLookupMethodDescriptor),
+			connect.WithClientOptions(opts...),
 		),
 		remoteBatchTell: connect.NewClient[v1.RemoteBatchTellRequest, v1.RemoteBatchTellResponse](
 			httpClient,
 			baseURL+RemotingServiceRemoteBatchTellProcedure,
-			opts...,
+			connect.WithSchema(remotingServiceRemoteBatchTellMethodDescriptor),
+			connect.WithClientOptions(opts...),
 		),
 		remoteBatchAsk: connect.NewClient[v1.RemoteBatchAskRequest, v1.RemoteBatchAskResponse](
 			httpClient,
 			baseURL+RemotingServiceRemoteBatchAskProcedure,
-			opts...,
+			connect.WithSchema(remotingServiceRemoteBatchAskMethodDescriptor),
+			connect.WithClientOptions(opts...),
 		),
 	}
 }
@@ -163,27 +178,32 @@ func NewRemotingServiceHandler(svc RemotingServiceHandler, opts ...connect.Handl
 	remotingServiceRemoteAskHandler := connect.NewUnaryHandler(
 		RemotingServiceRemoteAskProcedure,
 		svc.RemoteAsk,
-		opts...,
+		connect.WithSchema(remotingServiceRemoteAskMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
 	)
 	remotingServiceRemoteTellHandler := connect.NewUnaryHandler(
 		RemotingServiceRemoteTellProcedure,
 		svc.RemoteTell,
-		opts...,
+		connect.WithSchema(remotingServiceRemoteTellMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
 	)
 	remotingServiceRemoteLookupHandler := connect.NewUnaryHandler(
 		RemotingServiceRemoteLookupProcedure,
 		svc.RemoteLookup,
-		opts...,
+		connect.WithSchema(remotingServiceRemoteLookupMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
 	)
 	remotingServiceRemoteBatchTellHandler := connect.NewUnaryHandler(
 		RemotingServiceRemoteBatchTellProcedure,
 		svc.RemoteBatchTell,
-		opts...,
+		connect.WithSchema(remotingServiceRemoteBatchTellMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
 	)
 	remotingServiceRemoteBatchAskHandler := connect.NewUnaryHandler(
 		RemotingServiceRemoteBatchAskProcedure,
 		svc.RemoteBatchAsk,
-		opts...,
+		connect.WithSchema(remotingServiceRemoteBatchAskMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
 	)
 	return "/internal.v1.RemotingService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {

@@ -1158,7 +1158,7 @@ func TestReceiveContext(t *testing.T) {
 
 		// create a consumer
 		consumer := eventsStream.AddSubscriber()
-		eventsStream.Subscribe(consumer, deadlettersTopic)
+		eventsStream.Subscribe(consumer, eventsTopic)
 
 		// create a Ping actor
 		opts := []pidOption{
@@ -1192,12 +1192,14 @@ func TestReceiveContext(t *testing.T) {
 		// wait for messages to be published
 		time.Sleep(time.Second)
 
-		var items []*eventspb.DeadletterEvent
+		var items []*eventspb.Deadletter
 		for message := range consumer.Iterator() {
 			payload := message.Payload()
-			assert.Equal(t, deadlettersTopic, message.Topic())
-			deadletter := payload.(*eventspb.DeadletterEvent)
-			items = append(items, deadletter)
+			assert.Equal(t, eventsTopic, message.Topic())
+			deadletter, ok := payload.(*eventspb.Deadletter)
+			if ok {
+				items = append(items, deadletter)
+			}
 		}
 
 		require.Len(t, items, 1)
@@ -1224,7 +1226,7 @@ func TestReceiveContext(t *testing.T) {
 
 		// create a consumer
 		consumer := eventsStream.AddSubscriber()
-		eventsStream.Subscribe(consumer, deadlettersTopic)
+		eventsStream.Subscribe(consumer, eventsTopic)
 
 		// create a Ping actor
 		opts := []pidOption{
@@ -1262,11 +1264,13 @@ func TestReceiveContext(t *testing.T) {
 		// wait for messages to be published
 		time.Sleep(time.Second)
 
-		var items []*eventspb.DeadletterEvent
+		var items []*eventspb.Deadletter
 		for message := range consumer.Iterator() {
 			payload := message.Payload()
-			deadletter := payload.(*eventspb.DeadletterEvent)
-			items = append(items, deadletter)
+			deadletter, ok := payload.(*eventspb.Deadletter)
+			if ok {
+				items = append(items, deadletter)
+			}
 		}
 
 		require.Len(t, items, 1)

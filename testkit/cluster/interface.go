@@ -120,6 +120,59 @@ func (_c *Interface_GetPartition_Call) RunAndReturn(run func(string) int) *Inter
 	return _c
 }
 
+// KeyExists provides a mock function with given fields: ctx, key
+func (_m *Interface) KeyExists(ctx context.Context, key string) (bool, error) {
+	ret := _m.Called(ctx, key)
+
+	var r0 bool
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string) (bool, error)); ok {
+		return rf(ctx, key)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string) bool); ok {
+		r0 = rf(ctx, key)
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = rf(ctx, key)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// Interface_KeyExists_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'KeyExists'
+type Interface_KeyExists_Call struct {
+	*mock.Call
+}
+
+// KeyExists is a helper method to define mock.On call
+//   - ctx context.Context
+//   - key string
+func (_e *Interface_Expecter) KeyExists(ctx interface{}, key interface{}) *Interface_KeyExists_Call {
+	return &Interface_KeyExists_Call{Call: _e.mock.On("KeyExists", ctx, key)}
+}
+
+func (_c *Interface_KeyExists_Call) Run(run func(ctx context.Context, key string)) *Interface_KeyExists_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *Interface_KeyExists_Call) Return(_a0 bool, _a1 error) *Interface_KeyExists_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *Interface_KeyExists_Call) RunAndReturn(run func(context.Context, string) (bool, error)) *Interface_KeyExists_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // NodeHost provides a mock function with given fields:
 func (_m *Interface) NodeHost() string {
 	ret := _m.Called()
@@ -241,6 +294,92 @@ func (_c *Interface_PutActor_Call) Return(_a0 error) *Interface_PutActor_Call {
 }
 
 func (_c *Interface_PutActor_Call) RunAndReturn(run func(context.Context, *internalpb.WireActor) error) *Interface_PutActor_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// RemoveActor provides a mock function with given fields: ctx, actorName
+func (_m *Interface) RemoveActor(ctx context.Context, actorName string) error {
+	ret := _m.Called(ctx, actorName)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, string) error); ok {
+		r0 = rf(ctx, actorName)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// Interface_RemoveActor_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemoveActor'
+type Interface_RemoveActor_Call struct {
+	*mock.Call
+}
+
+// RemoveActor is a helper method to define mock.On call
+//   - ctx context.Context
+//   - actorName string
+func (_e *Interface_Expecter) RemoveActor(ctx interface{}, actorName interface{}) *Interface_RemoveActor_Call {
+	return &Interface_RemoveActor_Call{Call: _e.mock.On("RemoveActor", ctx, actorName)}
+}
+
+func (_c *Interface_RemoveActor_Call) Run(run func(ctx context.Context, actorName string)) *Interface_RemoveActor_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *Interface_RemoveActor_Call) Return(_a0 error) *Interface_RemoveActor_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *Interface_RemoveActor_Call) RunAndReturn(run func(context.Context, string) error) *Interface_RemoveActor_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// SetKey provides a mock function with given fields: ctx, key
+func (_m *Interface) SetKey(ctx context.Context, key string) error {
+	ret := _m.Called(ctx, key)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, string) error); ok {
+		r0 = rf(ctx, key)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// Interface_SetKey_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetKey'
+type Interface_SetKey_Call struct {
+	*mock.Call
+}
+
+// SetKey is a helper method to define mock.On call
+//   - ctx context.Context
+//   - key string
+func (_e *Interface_Expecter) SetKey(ctx interface{}, key interface{}) *Interface_SetKey_Call {
+	return &Interface_SetKey_Call{Call: _e.mock.On("SetKey", ctx, key)}
+}
+
+func (_c *Interface_SetKey_Call) Run(run func(ctx context.Context, key string)) *Interface_SetKey_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *Interface_SetKey_Call) Return(_a0 error) *Interface_SetKey_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *Interface_SetKey_Call) RunAndReturn(run func(context.Context, string) error) *Interface_SetKey_Call {
 	_c.Call.Return(run)
 	return _c
 }

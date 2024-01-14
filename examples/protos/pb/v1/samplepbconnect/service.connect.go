@@ -18,7 +18,7 @@ import (
 // generated with a version of connect newer than the one compiled into your binary. You can fix the
 // problem by either regenerating this code with an older version of connect or updating the connect
 // version compiled into your binary.
-const _ = connect.IsAtLeastVersion0_1_0
+const _ = connect.IsAtLeastVersion1_13_0
 
 const (
 	// AccountServiceName is the fully-qualified name of the AccountService service.
@@ -44,6 +44,14 @@ const (
 	AccountServiceGetAccountProcedure = "/sample.v1.AccountService/GetAccount"
 )
 
+// These variables are the protoreflect.Descriptor objects for the RPCs defined in this package.
+var (
+	accountServiceServiceDescriptor             = v1.File_pb_v1_service_proto.Services().ByName("AccountService")
+	accountServiceCreateAccountMethodDescriptor = accountServiceServiceDescriptor.Methods().ByName("CreateAccount")
+	accountServiceCreditAccountMethodDescriptor = accountServiceServiceDescriptor.Methods().ByName("CreditAccount")
+	accountServiceGetAccountMethodDescriptor    = accountServiceServiceDescriptor.Methods().ByName("GetAccount")
+)
+
 // AccountServiceClient is a client for the sample.v1.AccountService service.
 type AccountServiceClient interface {
 	CreateAccount(context.Context, *connect.Request[v1.CreateAccountRequest]) (*connect.Response[v1.CreateAccountResponse], error)
@@ -64,17 +72,20 @@ func NewAccountServiceClient(httpClient connect.HTTPClient, baseURL string, opts
 		createAccount: connect.NewClient[v1.CreateAccountRequest, v1.CreateAccountResponse](
 			httpClient,
 			baseURL+AccountServiceCreateAccountProcedure,
-			opts...,
+			connect.WithSchema(accountServiceCreateAccountMethodDescriptor),
+			connect.WithClientOptions(opts...),
 		),
 		creditAccount: connect.NewClient[v1.CreditAccountRequest, v1.CreditAccountResponse](
 			httpClient,
 			baseURL+AccountServiceCreditAccountProcedure,
-			opts...,
+			connect.WithSchema(accountServiceCreditAccountMethodDescriptor),
+			connect.WithClientOptions(opts...),
 		),
 		getAccount: connect.NewClient[v1.GetAccountRequest, v1.GetAccountResponse](
 			httpClient,
 			baseURL+AccountServiceGetAccountProcedure,
-			opts...,
+			connect.WithSchema(accountServiceGetAccountMethodDescriptor),
+			connect.WithClientOptions(opts...),
 		),
 	}
 }
@@ -117,17 +128,20 @@ func NewAccountServiceHandler(svc AccountServiceHandler, opts ...connect.Handler
 	accountServiceCreateAccountHandler := connect.NewUnaryHandler(
 		AccountServiceCreateAccountProcedure,
 		svc.CreateAccount,
-		opts...,
+		connect.WithSchema(accountServiceCreateAccountMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
 	)
 	accountServiceCreditAccountHandler := connect.NewUnaryHandler(
 		AccountServiceCreditAccountProcedure,
 		svc.CreditAccount,
-		opts...,
+		connect.WithSchema(accountServiceCreditAccountMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
 	)
 	accountServiceGetAccountHandler := connect.NewUnaryHandler(
 		AccountServiceGetAccountProcedure,
 		svc.GetAccount,
-		opts...,
+		connect.WithSchema(accountServiceGetAccountMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
 	)
 	return "/sample.v1.AccountService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {

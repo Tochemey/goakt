@@ -521,6 +521,14 @@ func (p *pid) Restart(ctx context.Context) error {
 	span.SetStatus(codes.Ok, "Restart")
 	// increment the restart count
 	p.restartCount.Inc()
+	// emit actor started event
+	if p.eventsStream != nil {
+		// send the event to the event streams
+		p.eventsStream.Publish(eventsTopic, &eventspb.ActorRestarted{
+			Address:     p.ActorPath().RemoteAddress(),
+			RestartedAt: timestamppb.Now(),
+		})
+	}
 	// return
 	return nil
 }
@@ -612,6 +620,16 @@ func (p *pid) SpawnChild(ctx context.Context, name string, actor Actor) (PID, er
 
 	// set the span status and return
 	span.SetStatus(codes.Ok, "SpawnChild")
+
+	// emit actor started event
+	if p.eventsStream != nil {
+		// send the event to the event streams
+		p.eventsStream.Publish(eventsTopic, &eventspb.ActorChildCreated{
+			Address:   cid.ActorPath().RemoteAddress(),
+			CreatedAt: timestamppb.Now(),
+			Parent:    p.ActorPath().RemoteAddress(),
+		})
+	}
 	return cid, nil
 }
 
@@ -1079,6 +1097,15 @@ func (p *pid) Shutdown(ctx context.Context) error {
 		return err
 	}
 
+	// emit actor stopped event
+	if p.eventsStream != nil {
+		// send the event to the event streams
+		p.eventsStream.Publish(eventsTopic, &eventspb.ActorStopped{
+			Address:   p.ActorPath().RemoteAddress(),
+			StoppedAt: timestamppb.Now(),
+		})
+	}
+
 	p.logger.Infof("Actor=%s successfully shutdown", p.ActorPath().String())
 	span.SetStatus(codes.Ok, "Shutdown")
 	return nil
@@ -1182,6 +1209,15 @@ func (p *pid) init(ctx context.Context) error {
 	// add some logging info
 	p.logger.Info("Initialization process successfully completed.")
 	span.SetStatus(codes.Ok, "Init")
+	// emit actor started event
+	if p.eventsStream != nil {
+		// send the event to the event streams
+		p.eventsStream.Publish(eventsTopic, &eventspb.ActorStarted{
+			Address:   p.ActorPath().RemoteAddress(),
+			StartedAt: timestamppb.Now(),
+		})
+	}
+	// return safely
 	return nil
 }
 
@@ -1403,6 +1439,17 @@ func (p *pid) passivationListener() {
 		p.logger.Errorf("failed to passivate actor=(%s): reason=(%v)", p.ActorPath().String(), err)
 		return
 	}
+
+	// emit actor passivated event
+	if p.eventsStream != nil {
+		event := &eventspb.ActorPassivated{
+			Address:      p.ActorPath().RemoteAddress(),
+			PassivatedAt: timestamppb.Now(),
+		}
+		// send the event to the event streams
+		p.eventsStream.Publish(eventsTopic, event)
+	}
+
 	p.logger.Infof("Actor=%s successfully passivated", p.ActorPath().String())
 }
 
@@ -1547,7 +1594,7 @@ func (p *pid) emitDeadletter(receiveCtx ReceiveContext, err error) {
 	// define the receiver
 	receiver := p.actorPath.RemoteAddress()
 	// create the deadletter
-	deadletter := &eventspb.DeadletterEvent{
+	deadletter := &eventspb.Deadletter{
 		Sender:   senderAddr,
 		Receiver: receiver,
 		Message:  msg,
@@ -1555,7 +1602,7 @@ func (p *pid) emitDeadletter(receiveCtx ReceiveContext, err error) {
 		Reason:   err.Error(),
 	}
 	// add to the events stream
-	p.eventsStream.Publish(deadlettersTopic, deadletter)
+	p.eventsStream.Publish(eventsTopic, deadletter)
 }
 
 // registerMetrics register the PID metrics with OTel instrumentation.
