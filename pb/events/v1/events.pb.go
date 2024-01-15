@@ -23,7 +23,57 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-// Deadletter defines the deadletter entry
+// NodeEventType defines the node event type
+type NodeEventType int32
+
+const (
+	NodeEventType_NODE_EVENT_TYPE_UNSPECIFIED NodeEventType = 0
+	NodeEventType_NODE_EVENT_TYPE_JOINED      NodeEventType = 1
+	NodeEventType_NODE_EVENT_TYPE_LEFT        NodeEventType = 2
+)
+
+// Enum value maps for NodeEventType.
+var (
+	NodeEventType_name = map[int32]string{
+		0: "NODE_EVENT_TYPE_UNSPECIFIED",
+		1: "NODE_EVENT_TYPE_JOINED",
+		2: "NODE_EVENT_TYPE_LEFT",
+	}
+	NodeEventType_value = map[string]int32{
+		"NODE_EVENT_TYPE_UNSPECIFIED": 0,
+		"NODE_EVENT_TYPE_JOINED":      1,
+		"NODE_EVENT_TYPE_LEFT":        2,
+	}
+)
+
+func (x NodeEventType) Enum() *NodeEventType {
+	p := new(NodeEventType)
+	*p = x
+	return p
+}
+
+func (x NodeEventType) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (NodeEventType) Descriptor() protoreflect.EnumDescriptor {
+	return file_events_v1_events_proto_enumTypes[0].Descriptor()
+}
+
+func (NodeEventType) Type() protoreflect.EnumType {
+	return &file_events_v1_events_proto_enumTypes[0]
+}
+
+func (x NodeEventType) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use NodeEventType.Descriptor instead.
+func (NodeEventType) EnumDescriptor() ([]byte, []int) {
+	return file_events_v1_events_proto_rawDescGZIP(), []int{0}
+}
+
+// Deadletter defines the deadletter event
 type Deadletter struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
@@ -167,7 +217,7 @@ func (x *ActorStarted) GetStartedAt() *timestamppb.Timestamp {
 	return nil
 }
 
-// ActorStopped defines the actor stopped events
+// ActorStopped defines the actor stopped event
 type ActorStopped struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
@@ -225,6 +275,7 @@ func (x *ActorStopped) GetStoppedAt() *timestamppb.Timestamp {
 	return nil
 }
 
+// ActorPassivated define the actor passivated event
 type ActorPassivated struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
@@ -282,6 +333,7 @@ func (x *ActorPassivated) GetPassivatedAt() *timestamppb.Timestamp {
 	return nil
 }
 
+// ActorChildCreated defines the child actor created event
 type ActorChildCreated struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
@@ -348,7 +400,7 @@ func (x *ActorChildCreated) GetCreatedAt() *timestamppb.Timestamp {
 	return nil
 }
 
-// ActorRestarted defines the actor restarted events
+// ActorRestarted defines the actor restarted event
 type ActorRestarted struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
@@ -404,6 +456,73 @@ func (x *ActorRestarted) GetRestartedAt() *timestamppb.Timestamp {
 		return x.RestartedAt
 	}
 	return nil
+}
+
+// NodeEvent defines the cluster node event
+type NodeEvent struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	// Specifies the node address
+	Address string `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
+	// Specifies the timestamp
+	Timestamp *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
+	// Specifies the node event type
+	Type NodeEventType `protobuf:"varint,3,opt,name=type,proto3,enum=events.v1.NodeEventType" json:"type,omitempty"`
+}
+
+func (x *NodeEvent) Reset() {
+	*x = NodeEvent{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_events_v1_events_proto_msgTypes[6]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *NodeEvent) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NodeEvent) ProtoMessage() {}
+
+func (x *NodeEvent) ProtoReflect() protoreflect.Message {
+	mi := &file_events_v1_events_proto_msgTypes[6]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NodeEvent.ProtoReflect.Descriptor instead.
+func (*NodeEvent) Descriptor() ([]byte, []int) {
+	return file_events_v1_events_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *NodeEvent) GetAddress() string {
+	if x != nil {
+		return x.Address
+	}
+	return ""
+}
+
+func (x *NodeEvent) GetTimestamp() *timestamppb.Timestamp {
+	if x != nil {
+		return x.Timestamp
+	}
+	return nil
+}
+
+func (x *NodeEvent) GetType() NodeEventType {
+	if x != nil {
+		return x.Type
+	}
+	return NodeEventType_NODE_EVENT_TYPE_UNSPECIFIED
 }
 
 var File_events_v1_events_proto protoreflect.FileDescriptor
@@ -473,17 +592,33 @@ var file_events_v1_events_proto_rawDesc = []byte{
 	0x0c, 0x72, 0x65, 0x73, 0x74, 0x61, 0x72, 0x74, 0x65, 0x64, 0x5f, 0x61, 0x74, 0x18, 0x02, 0x20,
 	0x01, 0x28, 0x0b, 0x32, 0x1a, 0x2e, 0x67, 0x6f, 0x6f, 0x67, 0x6c, 0x65, 0x2e, 0x70, 0x72, 0x6f,
 	0x74, 0x6f, 0x62, 0x75, 0x66, 0x2e, 0x54, 0x69, 0x6d, 0x65, 0x73, 0x74, 0x61, 0x6d, 0x70, 0x52,
-	0x0b, 0x72, 0x65, 0x73, 0x74, 0x61, 0x72, 0x74, 0x65, 0x64, 0x41, 0x74, 0x42, 0x94, 0x01, 0x0a,
-	0x0d, 0x63, 0x6f, 0x6d, 0x2e, 0x65, 0x76, 0x65, 0x6e, 0x74, 0x73, 0x2e, 0x76, 0x31, 0x42, 0x0b,
-	0x45, 0x76, 0x65, 0x6e, 0x74, 0x73, 0x50, 0x72, 0x6f, 0x74, 0x6f, 0x48, 0x02, 0x50, 0x01, 0x5a,
-	0x2f, 0x67, 0x69, 0x74, 0x68, 0x75, 0x62, 0x2e, 0x63, 0x6f, 0x6d, 0x2f, 0x74, 0x6f, 0x63, 0x68,
-	0x65, 0x6d, 0x65, 0x79, 0x2f, 0x67, 0x6f, 0x61, 0x6b, 0x74, 0x2f, 0x70, 0x62, 0x2f, 0x65, 0x76,
-	0x65, 0x6e, 0x74, 0x73, 0x2f, 0x76, 0x31, 0x3b, 0x65, 0x76, 0x65, 0x6e, 0x74, 0x73, 0x70, 0x62,
-	0xa2, 0x02, 0x03, 0x45, 0x58, 0x58, 0xaa, 0x02, 0x09, 0x45, 0x76, 0x65, 0x6e, 0x74, 0x73, 0x2e,
-	0x56, 0x31, 0xca, 0x02, 0x09, 0x45, 0x76, 0x65, 0x6e, 0x74, 0x73, 0x5c, 0x56, 0x31, 0xe2, 0x02,
-	0x15, 0x45, 0x76, 0x65, 0x6e, 0x74, 0x73, 0x5c, 0x56, 0x31, 0x5c, 0x47, 0x50, 0x42, 0x4d, 0x65,
-	0x74, 0x61, 0x64, 0x61, 0x74, 0x61, 0xea, 0x02, 0x0a, 0x45, 0x76, 0x65, 0x6e, 0x74, 0x73, 0x3a,
-	0x3a, 0x56, 0x31, 0x62, 0x06, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x33,
+	0x0b, 0x72, 0x65, 0x73, 0x74, 0x61, 0x72, 0x74, 0x65, 0x64, 0x41, 0x74, 0x22, 0x8d, 0x01, 0x0a,
+	0x09, 0x4e, 0x6f, 0x64, 0x65, 0x45, 0x76, 0x65, 0x6e, 0x74, 0x12, 0x18, 0x0a, 0x07, 0x61, 0x64,
+	0x64, 0x72, 0x65, 0x73, 0x73, 0x18, 0x01, 0x20, 0x01, 0x28, 0x09, 0x52, 0x07, 0x61, 0x64, 0x64,
+	0x72, 0x65, 0x73, 0x73, 0x12, 0x38, 0x0a, 0x09, 0x74, 0x69, 0x6d, 0x65, 0x73, 0x74, 0x61, 0x6d,
+	0x70, 0x18, 0x02, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x1a, 0x2e, 0x67, 0x6f, 0x6f, 0x67, 0x6c, 0x65,
+	0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x62, 0x75, 0x66, 0x2e, 0x54, 0x69, 0x6d, 0x65, 0x73, 0x74,
+	0x61, 0x6d, 0x70, 0x52, 0x09, 0x74, 0x69, 0x6d, 0x65, 0x73, 0x74, 0x61, 0x6d, 0x70, 0x12, 0x2c,
+	0x0a, 0x04, 0x74, 0x79, 0x70, 0x65, 0x18, 0x03, 0x20, 0x01, 0x28, 0x0e, 0x32, 0x18, 0x2e, 0x65,
+	0x76, 0x65, 0x6e, 0x74, 0x73, 0x2e, 0x76, 0x31, 0x2e, 0x4e, 0x6f, 0x64, 0x65, 0x45, 0x76, 0x65,
+	0x6e, 0x74, 0x54, 0x79, 0x70, 0x65, 0x52, 0x04, 0x74, 0x79, 0x70, 0x65, 0x2a, 0x66, 0x0a, 0x0d,
+	0x4e, 0x6f, 0x64, 0x65, 0x45, 0x76, 0x65, 0x6e, 0x74, 0x54, 0x79, 0x70, 0x65, 0x12, 0x1f, 0x0a,
+	0x1b, 0x4e, 0x4f, 0x44, 0x45, 0x5f, 0x45, 0x56, 0x45, 0x4e, 0x54, 0x5f, 0x54, 0x59, 0x50, 0x45,
+	0x5f, 0x55, 0x4e, 0x53, 0x50, 0x45, 0x43, 0x49, 0x46, 0x49, 0x45, 0x44, 0x10, 0x00, 0x12, 0x1a,
+	0x0a, 0x16, 0x4e, 0x4f, 0x44, 0x45, 0x5f, 0x45, 0x56, 0x45, 0x4e, 0x54, 0x5f, 0x54, 0x59, 0x50,
+	0x45, 0x5f, 0x4a, 0x4f, 0x49, 0x4e, 0x45, 0x44, 0x10, 0x01, 0x12, 0x18, 0x0a, 0x14, 0x4e, 0x4f,
+	0x44, 0x45, 0x5f, 0x45, 0x56, 0x45, 0x4e, 0x54, 0x5f, 0x54, 0x59, 0x50, 0x45, 0x5f, 0x4c, 0x45,
+	0x46, 0x54, 0x10, 0x02, 0x42, 0x94, 0x01, 0x0a, 0x0d, 0x63, 0x6f, 0x6d, 0x2e, 0x65, 0x76, 0x65,
+	0x6e, 0x74, 0x73, 0x2e, 0x76, 0x31, 0x42, 0x0b, 0x45, 0x76, 0x65, 0x6e, 0x74, 0x73, 0x50, 0x72,
+	0x6f, 0x74, 0x6f, 0x48, 0x02, 0x50, 0x01, 0x5a, 0x2f, 0x67, 0x69, 0x74, 0x68, 0x75, 0x62, 0x2e,
+	0x63, 0x6f, 0x6d, 0x2f, 0x74, 0x6f, 0x63, 0x68, 0x65, 0x6d, 0x65, 0x79, 0x2f, 0x67, 0x6f, 0x61,
+	0x6b, 0x74, 0x2f, 0x70, 0x62, 0x2f, 0x65, 0x76, 0x65, 0x6e, 0x74, 0x73, 0x2f, 0x76, 0x31, 0x3b,
+	0x65, 0x76, 0x65, 0x6e, 0x74, 0x73, 0x70, 0x62, 0xa2, 0x02, 0x03, 0x45, 0x58, 0x58, 0xaa, 0x02,
+	0x09, 0x45, 0x76, 0x65, 0x6e, 0x74, 0x73, 0x2e, 0x56, 0x31, 0xca, 0x02, 0x09, 0x45, 0x76, 0x65,
+	0x6e, 0x74, 0x73, 0x5c, 0x56, 0x31, 0xe2, 0x02, 0x15, 0x45, 0x76, 0x65, 0x6e, 0x74, 0x73, 0x5c,
+	0x56, 0x31, 0x5c, 0x47, 0x50, 0x42, 0x4d, 0x65, 0x74, 0x61, 0x64, 0x61, 0x74, 0x61, 0xea, 0x02,
+	0x0a, 0x45, 0x76, 0x65, 0x6e, 0x74, 0x73, 0x3a, 0x3a, 0x56, 0x31, 0x62, 0x06, 0x70, 0x72, 0x6f,
+	0x74, 0x6f, 0x33,
 }
 
 var (
@@ -498,39 +633,44 @@ func file_events_v1_events_proto_rawDescGZIP() []byte {
 	return file_events_v1_events_proto_rawDescData
 }
 
-var file_events_v1_events_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
+var file_events_v1_events_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+var file_events_v1_events_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
 var file_events_v1_events_proto_goTypes = []interface{}{
-	(*Deadletter)(nil),            // 0: events.v1.Deadletter
-	(*ActorStarted)(nil),          // 1: events.v1.ActorStarted
-	(*ActorStopped)(nil),          // 2: events.v1.ActorStopped
-	(*ActorPassivated)(nil),       // 3: events.v1.ActorPassivated
-	(*ActorChildCreated)(nil),     // 4: events.v1.ActorChildCreated
-	(*ActorRestarted)(nil),        // 5: events.v1.ActorRestarted
-	(*v1.Address)(nil),            // 6: address.v1.Address
-	(*anypb.Any)(nil),             // 7: google.protobuf.Any
-	(*timestamppb.Timestamp)(nil), // 8: google.protobuf.Timestamp
+	(NodeEventType)(0),            // 0: events.v1.NodeEventType
+	(*Deadletter)(nil),            // 1: events.v1.Deadletter
+	(*ActorStarted)(nil),          // 2: events.v1.ActorStarted
+	(*ActorStopped)(nil),          // 3: events.v1.ActorStopped
+	(*ActorPassivated)(nil),       // 4: events.v1.ActorPassivated
+	(*ActorChildCreated)(nil),     // 5: events.v1.ActorChildCreated
+	(*ActorRestarted)(nil),        // 6: events.v1.ActorRestarted
+	(*NodeEvent)(nil),             // 7: events.v1.NodeEvent
+	(*v1.Address)(nil),            // 8: address.v1.Address
+	(*anypb.Any)(nil),             // 9: google.protobuf.Any
+	(*timestamppb.Timestamp)(nil), // 10: google.protobuf.Timestamp
 }
 var file_events_v1_events_proto_depIdxs = []int32{
-	6,  // 0: events.v1.Deadletter.sender:type_name -> address.v1.Address
-	6,  // 1: events.v1.Deadletter.receiver:type_name -> address.v1.Address
-	7,  // 2: events.v1.Deadletter.message:type_name -> google.protobuf.Any
-	8,  // 3: events.v1.Deadletter.send_time:type_name -> google.protobuf.Timestamp
-	6,  // 4: events.v1.ActorStarted.address:type_name -> address.v1.Address
-	8,  // 5: events.v1.ActorStarted.started_at:type_name -> google.protobuf.Timestamp
-	6,  // 6: events.v1.ActorStopped.address:type_name -> address.v1.Address
-	8,  // 7: events.v1.ActorStopped.stopped_at:type_name -> google.protobuf.Timestamp
-	6,  // 8: events.v1.ActorPassivated.address:type_name -> address.v1.Address
-	8,  // 9: events.v1.ActorPassivated.passivated_at:type_name -> google.protobuf.Timestamp
-	6,  // 10: events.v1.ActorChildCreated.address:type_name -> address.v1.Address
-	6,  // 11: events.v1.ActorChildCreated.parent:type_name -> address.v1.Address
-	8,  // 12: events.v1.ActorChildCreated.created_at:type_name -> google.protobuf.Timestamp
-	6,  // 13: events.v1.ActorRestarted.address:type_name -> address.v1.Address
-	8,  // 14: events.v1.ActorRestarted.restarted_at:type_name -> google.protobuf.Timestamp
-	15, // [15:15] is the sub-list for method output_type
-	15, // [15:15] is the sub-list for method input_type
-	15, // [15:15] is the sub-list for extension type_name
-	15, // [15:15] is the sub-list for extension extendee
-	0,  // [0:15] is the sub-list for field type_name
+	8,  // 0: events.v1.Deadletter.sender:type_name -> address.v1.Address
+	8,  // 1: events.v1.Deadletter.receiver:type_name -> address.v1.Address
+	9,  // 2: events.v1.Deadletter.message:type_name -> google.protobuf.Any
+	10, // 3: events.v1.Deadletter.send_time:type_name -> google.protobuf.Timestamp
+	8,  // 4: events.v1.ActorStarted.address:type_name -> address.v1.Address
+	10, // 5: events.v1.ActorStarted.started_at:type_name -> google.protobuf.Timestamp
+	8,  // 6: events.v1.ActorStopped.address:type_name -> address.v1.Address
+	10, // 7: events.v1.ActorStopped.stopped_at:type_name -> google.protobuf.Timestamp
+	8,  // 8: events.v1.ActorPassivated.address:type_name -> address.v1.Address
+	10, // 9: events.v1.ActorPassivated.passivated_at:type_name -> google.protobuf.Timestamp
+	8,  // 10: events.v1.ActorChildCreated.address:type_name -> address.v1.Address
+	8,  // 11: events.v1.ActorChildCreated.parent:type_name -> address.v1.Address
+	10, // 12: events.v1.ActorChildCreated.created_at:type_name -> google.protobuf.Timestamp
+	8,  // 13: events.v1.ActorRestarted.address:type_name -> address.v1.Address
+	10, // 14: events.v1.ActorRestarted.restarted_at:type_name -> google.protobuf.Timestamp
+	10, // 15: events.v1.NodeEvent.timestamp:type_name -> google.protobuf.Timestamp
+	0,  // 16: events.v1.NodeEvent.type:type_name -> events.v1.NodeEventType
+	17, // [17:17] is the sub-list for method output_type
+	17, // [17:17] is the sub-list for method input_type
+	17, // [17:17] is the sub-list for extension type_name
+	17, // [17:17] is the sub-list for extension extendee
+	0,  // [0:17] is the sub-list for field type_name
 }
 
 func init() { file_events_v1_events_proto_init() }
@@ -611,19 +751,32 @@ func file_events_v1_events_proto_init() {
 				return nil
 			}
 		}
+		file_events_v1_events_proto_msgTypes[6].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*NodeEvent); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: file_events_v1_events_proto_rawDesc,
-			NumEnums:      0,
-			NumMessages:   6,
+			NumEnums:      1,
+			NumMessages:   7,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
 		GoTypes:           file_events_v1_events_proto_goTypes,
 		DependencyIndexes: file_events_v1_events_proto_depIdxs,
+		EnumInfos:         file_events_v1_events_proto_enumTypes,
 		MessageInfos:      file_events_v1_events_proto_msgTypes,
 	}.Build()
 	File_events_v1_events_proto = out.File

@@ -26,17 +26,22 @@ package cluster
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	"github.com/buraksezer/olric"
 	"github.com/buraksezer/olric/config"
 	olriconfig "github.com/buraksezer/olric/config"
+	"github.com/buraksezer/olric/events"
 	"github.com/buraksezer/olric/hasher"
+	"github.com/go-redis/redis/v8"
 	"github.com/pkg/errors"
 	"github.com/tochemey/goakt/discovery"
 	"github.com/tochemey/goakt/hash"
 	internalpb "github.com/tochemey/goakt/internal/v1"
 	"github.com/tochemey/goakt/log"
+	eventspb "github.com/tochemey/goakt/pb/events/v1"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // Interface defines the Cluster interface
@@ -62,6 +67,8 @@ type Interface interface {
 	// RemoveActor removes a given actor from the cluster.
 	// An actor is removed from the cluster when this actor has been passivated.
 	RemoveActor(ctx context.Context, actorName string) error
+	// Events returns a channel where cluster events are published
+	Events() <-chan *eventspb.NodeEvent
 }
 
 // Cluster represents the Cluster
@@ -99,6 +106,9 @@ type Cluster struct {
 	writeTimeout    time.Duration
 	readTimeout     time.Duration
 	shutdownTimeout time.Duration
+
+	eventsChan     chan *eventspb.NodeEvent
+	eventsListener *redis.PubSub
 }
 
 // enforce compilation error
@@ -117,6 +127,7 @@ func New(name string, serviceDiscovery *discovery.ServiceDiscovery, opts ...Opti
 		readTimeout:       time.Second,
 		shutdownTimeout:   3 * time.Second,
 		hasher:            hash.DefaultHasher(),
+		eventsListener:    nil,
 	}
 	// apply the various options
 	for _, opt := range opts {
@@ -222,9 +233,25 @@ func (c *Cluster) Start(ctx context.Context) error {
 		// let us stop the started engine
 		return c.server.Shutdown(ctx)
 	}
-
 	// set the distributed map
 	c.kvStore = dmp
+
+	// create a subscriber to listen to cluster events
+	ps, err := c.client.NewPubSub()
+	// handle the error
+	if err != nil {
+		logger.Error(errors.Wrap(err, "failed to start the Cluster engine.💥"))
+		// let us stop the started engine
+		return c.server.Shutdown(ctx)
+	}
+
+	// subscribe to the cluster events channel
+	c.eventsListener = ps.Subscribe(ctx, events.ClusterEventsChannel)
+	// create the events channel
+	c.eventsChan = make(chan *eventspb.NodeEvent, 5)
+	// start listening to cluster events
+	go c.listen()
+	// return successfully
 	return nil
 }
 
@@ -240,6 +267,12 @@ func (c *Cluster) Stop(ctx context.Context) error {
 	// add some logging information
 	logger.Info("Stopping GoAkt Cluster....🤔")
 
+	// close the events listener
+	if err := c.eventsListener.Close(); err != nil {
+		logger.Error(errors.Wrap(err, "failed to shutdown the Cluster events listener.💥"))
+		return err
+	}
+
 	// close the Cluster client
 	if err := c.client.Close(ctx); err != nil {
 		logger.Error(errors.Wrap(err, "failed to shutdown the Cluster client.💥"))
@@ -251,6 +284,9 @@ func (c *Cluster) Stop(ctx context.Context) error {
 		logger.Error(errors.Wrap(err, "failed to Shutdown  GoAkt Cluster....💥"))
 		return err
 	}
+
+	// close the events channel
+	close(c.eventsChan)
 
 	logger.Info("GoAkt Cluster successfully stopped.🎉")
 	return nil
@@ -441,6 +477,46 @@ func (c *Cluster) GetPartition(actorName string) int {
 	return partition
 }
 
+// Events returns a channel where cluster events are published
+func (c *Cluster) Events() <-chan *eventspb.NodeEvent {
+	return c.eventsChan
+}
+
+// listen listens to the underlying cluster events
+// and emit the wrapped node event
+func (c *Cluster) listen() {
+	// consume event till the channel is closed
+	for message := range c.eventsListener.Channel() {
+		// get the message payload
+		var event any
+		// let us unmarshal the event
+		if err := json.Unmarshal([]byte(message.Payload), &event); err != nil {
+			c.logger.Error(errors.Wrapf(err, "failed to decode cluster event"))
+			// TODO: should we continue or not
+			continue
+		}
+		// dispatch the appropriate event
+		switch x := event.(type) {
+		case *events.NodeJoinEvent:
+			// send the event to the channel
+			c.eventsChan <- &eventspb.NodeEvent{
+				Address:   x.NodeJoin,
+				Timestamp: timestamppb.New(time.Unix(x.Timestamp, 0)), // TODO: need some work here
+				Type:      eventspb.NodeEventType_NODE_EVENT_TYPE_JOINED,
+			}
+		case *events.NodeLeftEvent:
+			// send the event to the channel
+			c.eventsChan <- &eventspb.NodeEvent{
+				Address:   x.NodeLeft,
+				Timestamp: timestamppb.New(time.Unix(x.Timestamp, 0)), // TODO: need some work here
+				Type:      eventspb.NodeEventType_NODE_EVENT_TYPE_LEFT,
+			}
+		default:
+			// skip it
+		}
+	}
+}
+
 // buildConfig builds the Cluster configuration
 func (c *Cluster) buildConfig() *config.Config {
 	// define the log level
@@ -476,7 +552,7 @@ func (c *Cluster) buildConfig() *config.Config {
 		MaxJoinAttempts:            config.DefaultMaxJoinAttempts,
 		LogLevel:                   logLevel,
 		LogOutput:                  newLogWriter(c.logger),
-		EnableClusterEventsChannel: false,
+		EnableClusterEventsChannel: true,
 		Hasher:                     hasher.NewDefaultHasher(),
 	}
 

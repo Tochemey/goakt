@@ -8,7 +8,7 @@ import "google/protobuf/timestamp.proto";
 
 option go_package = "github.com/tochemey/goakt/pb/events/v1;eventspb";
 
-// Deadletter defines the deadletter entry
+// Deadletter defines the deadletter event
 message Deadletter {
   // Specifies the sender's address
   address.v1.Address sender = 1;
@@ -31,7 +31,7 @@ message ActorStarted {
   google.protobuf.Timestamp started_at = 2;
 }
 
-// ActorStopped defines the actor stopped events
+// ActorStopped defines the actor stopped event
 message ActorStopped {
   // Specifies the actor address
   address.v1.Address address = 1;
@@ -39,6 +39,7 @@ message ActorStopped {
   google.protobuf.Timestamp stopped_at = 2;
 }
 
+// ActorPassivated define the actor passivated event
 message ActorPassivated {
   // Specifies the actor address
   address.v1.Address address = 1;
@@ -46,6 +47,7 @@ message ActorPassivated {
   google.protobuf.Timestamp passivated_at = 2;
 }
 
+// ActorChildCreated defines the child actor created event
 message ActorChildCreated {
   // Specifies the actor address
   address.v1.Address address = 1;
@@ -55,10 +57,27 @@ message ActorChildCreated {
   google.protobuf.Timestamp created_at = 3;
 }
 
-// ActorRestarted defines the actor restarted events
+// ActorRestarted defines the actor restarted event
 message ActorRestarted {
   // Specifies the actor address
   address.v1.Address address = 1;
   // Specifies the stop time
   google.protobuf.Timestamp restarted_at = 2;
+}
+
+// NodeEvent defines the cluster node event
+message NodeEvent {
+  // Specifies the node address
+  string address = 1;
+  // Specifies the timestamp
+  google.protobuf.Timestamp timestamp = 2;
+  // Specifies the node event type
+  NodeEventType type = 3;
+}
+
+// NodeEventType defines the node event type
+enum NodeEventType {
+  NODE_EVENT_TYPE_UNSPECIFIED = 0;
+  NODE_EVENT_TYPE_JOINED = 1;
+  NODE_EVENT_TYPE_LEFT = 2;
 }
