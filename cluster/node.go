@@ -504,20 +504,26 @@ func (c *Node) listen() {
 		// dispatch the appropriate event
 		switch x := event.(type) {
 		case *events.NodeJoinEvent:
+			// TODO: need to cross check this calculation
+			// convert the timestamp to milliseconds
+			timeMilli := x.Timestamp / int64(1e6)
 			// create the node joined event
 			event := &eventspb.NodeJoined{
 				Address:   x.NodeJoin,
-				Timestamp: timestamppb.New(time.Unix(x.Timestamp, 0)), // TODO: need some work here
+				Timestamp: timestamppb.New(time.UnixMilli(timeMilli)),
 			}
 			// serialize as any pb
 			eventType, _ := anypb.New(event)
 			// send the event to the channel
 			c.eventsChan <- &Event{eventType}
 		case *events.NodeLeftEvent:
+			// TODO: need to cross check this calculation
+			// convert the timestamp to milliseconds
+			timeMilli := x.Timestamp / int64(1e6)
 			// create the node joined event
 			event := &eventspb.NodeLeft{
 				Address:   x.NodeLeft,
-				Timestamp: timestamppb.New(time.Unix(x.Timestamp, 0)), // TODO: need some work here
+				Timestamp: timestamppb.New(time.UnixMilli(timeMilli)),
 			}
 			// serialize as any pb
 			eventType, _ := anypb.New(event)
