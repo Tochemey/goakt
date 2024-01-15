@@ -72,7 +72,7 @@ func TestCluster(t *testing.T) {
 		// create the service discovery
 		serviceDiscovery := discovery.NewServiceDiscovery(provider, config)
 
-		// create a Cluster node
+		// create a Node node
 		host := "localhost"
 
 		// set the environments
@@ -82,18 +82,18 @@ func TestCluster(t *testing.T) {
 		t.Setenv("NODE_NAME", "testNode")
 		t.Setenv("NODE_IP", host)
 
-		cluster, err := New("test", serviceDiscovery)
+		cluster, err := NewNode("test", serviceDiscovery)
 		require.NotNil(t, cluster)
 		require.NoError(t, err)
 
-		// start the Cluster node
+		// start the Node node
 		err = cluster.Start(ctx)
 		require.NoError(t, err)
 
 		hostNodeAddr := cluster.NodeHost()
 		assert.Equal(t, host, hostNodeAddr)
 
-		//  shutdown the Cluster node
+		//  shutdown the Node node
 		ctx, cancel := context.WithTimeout(ctx, time.Second)
 		defer cancel()
 
@@ -131,7 +131,7 @@ func TestCluster(t *testing.T) {
 		// create the service discovery
 		serviceDiscovery := discovery.NewServiceDiscovery(provider, config)
 
-		// create a Cluster node
+		// create a Node node
 		host := "localhost"
 		// set the environments
 		t.Setenv("GOSSIP_PORT", strconv.Itoa(gossipPort))
@@ -140,11 +140,11 @@ func TestCluster(t *testing.T) {
 		t.Setenv("NODE_NAME", "testNode")
 		t.Setenv("NODE_IP", host)
 
-		cluster, err := New("test", serviceDiscovery)
+		cluster, err := NewNode("test", serviceDiscovery)
 		require.NotNil(t, cluster)
 		require.NoError(t, err)
 
-		// start the Cluster node
+		// start the Node node
 		err = cluster.Start(ctx)
 		require.NoError(t, err)
 
@@ -152,7 +152,7 @@ func TestCluster(t *testing.T) {
 		actorName := uuid.NewString()
 		actor := &internalpb.WireActor{ActorName: actorName}
 
-		// replicate the actor in the Cluster
+		// replicate the actor in the Node
 		err = cluster.PutActor(ctx, actor)
 		require.NoError(t, err)
 
@@ -168,7 +168,7 @@ func TestCluster(t *testing.T) {
 		actual, err = cluster.GetActor(ctx, fakeActorName)
 		require.Nil(t, actual)
 		assert.EqualError(t, err, ErrActorNotFound.Error())
-		//  shutdown the Cluster node
+		//  shutdown the Node node
 		time.Sleep(time.Second)
 
 		// stop the node
@@ -205,7 +205,7 @@ func TestCluster(t *testing.T) {
 		// create the service discovery
 		serviceDiscovery := discovery.NewServiceDiscovery(provider, config)
 
-		// create a Cluster node
+		// create a Node node
 		host := "localhost"
 		// set the environments
 		t.Setenv("GOSSIP_PORT", strconv.Itoa(gossipPort))
@@ -214,11 +214,11 @@ func TestCluster(t *testing.T) {
 		t.Setenv("NODE_NAME", "testNode")
 		t.Setenv("NODE_IP", host)
 
-		cluster, err := New("test", serviceDiscovery)
+		cluster, err := NewNode("test", serviceDiscovery)
 		require.NotNil(t, cluster)
 		require.NoError(t, err)
 
-		// start the Cluster node
+		// start the Node node
 		err = cluster.Start(ctx)
 		require.NoError(t, err)
 
@@ -235,7 +235,7 @@ func TestCluster(t *testing.T) {
 		require.NoError(t, err)
 		assert.False(t, isSet)
 
-		//  shutdown the Cluster node
+		//  shutdown the Node node
 		time.Sleep(time.Second)
 
 		// stop the node
@@ -272,7 +272,7 @@ func TestCluster(t *testing.T) {
 		// create the service discovery
 		serviceDiscovery := discovery.NewServiceDiscovery(provider, config)
 
-		// create a Cluster node
+		// create a Node node
 		host := "localhost"
 		// set the environments
 		t.Setenv("GOSSIP_PORT", strconv.Itoa(gossipPort))
@@ -281,11 +281,11 @@ func TestCluster(t *testing.T) {
 		t.Setenv("NODE_NAME", "testNode")
 		t.Setenv("NODE_IP", host)
 
-		cluster, err := New("test", serviceDiscovery)
+		cluster, err := NewNode("test", serviceDiscovery)
 		require.NotNil(t, cluster)
 		require.NoError(t, err)
 
-		// start the Cluster node
+		// start the Node node
 		err = cluster.Start(ctx)
 		require.NoError(t, err)
 
@@ -293,7 +293,7 @@ func TestCluster(t *testing.T) {
 		actorName := uuid.NewString()
 		actor := &internalpb.WireActor{ActorName: actorName}
 
-		// replicate the actor in the Cluster
+		// replicate the actor in the Node
 		err = cluster.PutActor(ctx, actor)
 		require.NoError(t, err)
 

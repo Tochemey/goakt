@@ -34,59 +34,59 @@ import (
 // Option is the interface that applies a configuration option.
 type Option interface {
 	// Apply sets the Option value of a config.
-	Apply(cl *Cluster)
+	Apply(cl *Node)
 }
 
 var _ Option = OptionFunc(nil)
 
 // OptionFunc implements the Option interface.
-type OptionFunc func(cl *Cluster)
+type OptionFunc func(cl *Node)
 
-// Apply applies the Cluster's option
-func (f OptionFunc) Apply(c *Cluster) {
+// Apply applies the Node's option
+func (f OptionFunc) Apply(c *Node) {
 	f(c)
 }
 
 // WithPartitionsCount sets the total number of partitions
 func WithPartitionsCount(count uint64) Option {
-	return OptionFunc(func(cl *Cluster) {
+	return OptionFunc(func(cl *Node) {
 		cl.partitionsCount = count
 	})
 }
 
 // WithLogger sets the logger
 func WithLogger(logger log.Logger) Option {
-	return OptionFunc(func(cl *Cluster) {
+	return OptionFunc(func(cl *Node) {
 		cl.logger = logger
 	})
 }
 
-// WithWriteTimeout sets the Cluster write timeout.
+// WithWriteTimeout sets the Node write timeout.
 // This timeout specifies the timeout of a data replication
 func WithWriteTimeout(timeout time.Duration) Option {
-	return OptionFunc(func(cl *Cluster) {
+	return OptionFunc(func(cl *Node) {
 		cl.writeTimeout = timeout
 	})
 }
 
-// WithReadTimeout sets the Cluster read timeout.
+// WithReadTimeout sets the Node read timeout.
 // This timeout specifies the timeout of a data retrieval
 func WithReadTimeout(timeout time.Duration) Option {
-	return OptionFunc(func(cl *Cluster) {
+	return OptionFunc(func(cl *Node) {
 		cl.readTimeout = timeout
 	})
 }
 
-// WithShutdownTimeout sets the Cluster shutdown timeout.
+// WithShutdownTimeout sets the Node shutdown timeout.
 func WithShutdownTimeout(timeout time.Duration) Option {
-	return OptionFunc(func(cl *Cluster) {
+	return OptionFunc(func(cl *Node) {
 		cl.shutdownTimeout = timeout
 	})
 }
 
 // WithHasher sets the custom hasher
 func WithHasher(hasher hash.Hasher) Option {
-	return OptionFunc(func(cl *Cluster) {
+	return OptionFunc(func(cl *Node) {
 		cl.hasher = hasher
 	})
 }

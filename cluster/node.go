@@ -41,22 +41,28 @@ import (
 	internalpb "github.com/tochemey/goakt/internal/v1"
 	"github.com/tochemey/goakt/log"
 	eventspb "github.com/tochemey/goakt/pb/events/v1"
+	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-// Interface defines the Cluster interface
+// Event defines the cluster event
+type Event struct {
+	Type *anypb.Any
+}
+
+// Interface defines the Node interface
 type Interface interface {
-	// Start starts the Cluster engine
+	// Start starts the Node engine
 	Start(ctx context.Context) error
-	// Stop stops the Cluster engine
+	// Stop stops the Node engine
 	Stop(ctx context.Context) error
-	// NodeHost returns the Cluster node host address
+	// NodeHost returns the cluster node host address
 	NodeHost() string
-	// NodeRemotingPort returns the Cluster node remoting port
+	// NodeRemotingPort returns the cluster node remoting port
 	NodeRemotingPort() int
-	// PutActor replicates onto the Cluster the metadata of an actor
+	// PutActor replicates onto the Node the metadata of an actor
 	PutActor(ctx context.Context, actor *internalpb.WireActor) error
-	// GetActor fetches an actor from the Cluster
+	// GetActor fetches an actor from the Node
 	GetActor(ctx context.Context, actorName string) (*internalpb.WireActor, error)
 	// GetPartition returns the partition where a given actor is stored
 	GetPartition(actorName string) int
@@ -68,11 +74,11 @@ type Interface interface {
 	// An actor is removed from the cluster when this actor has been passivated.
 	RemoveActor(ctx context.Context, actorName string) error
 	// Events returns a channel where cluster events are published
-	Events() <-chan *eventspb.NodeEvent
+	Events() <-chan *Event
 }
 
-// Cluster represents the Cluster
-type Cluster struct {
+// Node represents the Node
+type Node struct {
 	// specifies the total number of partitions
 	// the default values is 20
 	partitionsCount uint64
@@ -80,19 +86,19 @@ type Cluster struct {
 	// specifies the logger
 	logger log.Logger
 
-	// specifies the Cluster name
+	// specifies the Node name
 	name string
 
-	// specifies the Cluster server
+	// specifies the Node server
 	server *olric.Olric
-	// specifies the Cluster client
-	// this help set and fetch data from the Cluster
+	// specifies the Node client
+	// this help set and fetch data from the Node
 	client olric.Client
 
 	// specifies the distributed key value store
 	kvStore olric.DMap
 
-	// specifies the Cluster host
+	// specifies the Node host
 	host *discovery.Node
 
 	// specifies the hasher
@@ -107,17 +113,17 @@ type Cluster struct {
 	readTimeout     time.Duration
 	shutdownTimeout time.Duration
 
-	eventsChan     chan *eventspb.NodeEvent
+	eventsChan     chan *Event
 	eventsListener *redis.PubSub
 }
 
 // enforce compilation error
-var _ Interface = &Cluster{}
+var _ Interface = &Node{}
 
-// New creates an instance of Cluster
-func New(name string, serviceDiscovery *discovery.ServiceDiscovery, opts ...Option) (*Cluster, error) {
-	// create an instance of the Cluster
-	cl := &Cluster{
+// NewNode creates an instance of cluster Node
+func NewNode(name string, serviceDiscovery *discovery.ServiceDiscovery, opts ...Option) (*Node, error) {
+	// create an instance of the Node
+	node := &Node{
 		partitionsCount:   20,
 		logger:            log.DefaultLogger,
 		name:              name,
@@ -131,32 +137,32 @@ func New(name string, serviceDiscovery *discovery.ServiceDiscovery, opts ...Opti
 	}
 	// apply the various options
 	for _, opt := range opts {
-		opt.Apply(cl)
+		opt.Apply(node)
 	}
 
 	// get the host info
 	hostNode, err := discovery.HostNode()
 	// handle the error
 	if err != nil {
-		cl.logger.Error(errors.Wrap(err, "failed get the host node.💥"))
+		node.logger.Error(errors.Wrap(err, "failed get the host node.💥"))
 		return nil, err
 	}
 
 	// set the host node
-	cl.host = hostNode
+	node.host = hostNode
 
-	return cl, nil
+	return node, nil
 }
 
-// Start starts the Cluster.
-func (c *Cluster) Start(ctx context.Context) error {
+// Start starts the Node.
+func (c *Node) Start(ctx context.Context) error {
 	// set the logger
 	logger := c.logger
 
 	// add some logging information
-	logger.Infof("Starting GoAkt Cluster service on (%s)....🤔", c.host.ClusterAddress())
+	logger.Infof("Starting GoAkt cluster Node service on (%s)....🤔", c.host.ClusterAddress())
 
-	// build the Cluster engine config
+	// build the Node engine config
 	conf := c.buildConfig()
 	// set the hasher to the custom hasher
 	conf.Hasher = &hasherWrapper{c.hasher}
@@ -165,7 +171,7 @@ func (c *Cluster) Start(ctx context.Context) error {
 	m, err := olriconfig.NewMemberlistConfig("lan")
 	// panic when there is an error
 	if err != nil {
-		logger.Error(errors.Wrap(err, "failed to configure the Cluster memberlist.💥"))
+		logger.Error(errors.Wrap(err, "failed to configure the cluster Node memberlist.💥"))
 		return err
 	}
 
@@ -187,32 +193,32 @@ func (c *Cluster) Start(ctx context.Context) error {
 		"options": c.discoveryOptions,
 	}
 
-	// let us start the Cluster
+	// let us start the Node
 	startCtx, cancel := context.WithCancel(ctx)
 	// cancel the context the server has started
 	conf.Started = func() {
 		// cancel the start context
 		defer cancel()
 		// add some logging information
-		logger.Info("GoAkt Cluster successfully started. 🎉")
+		logger.Info("GoAkt cluster Node successfully started. 🎉")
 	}
 
-	// let us create an instance of the Cluster engine
+	// let us create an instance of the Node engine
 	eng, err := olric.New(conf)
 	// handle the error
 	if err != nil {
-		logger.Error(errors.Wrap(err, "failed to start the Cluster engine.💥"))
+		logger.Error(errors.Wrap(err, "failed to start the cluster Node.💥"))
 		return err
 	}
 
 	// set the server
 	c.server = eng
 	go func() {
-		// start the Cluster engine
+		// start the Node engine
 		err = c.server.Start()
 		// handle the error in case there is an early error
 		if err != nil {
-			logger.Error(errors.Wrap(err, "failed to start the Cluster engine.💥"))
+			logger.Error(errors.Wrap(err, "failed to start the cluster Node.💥"))
 			// let us stop the started engine
 			if e := c.server.Shutdown(ctx); e != nil {
 				logger.Panic(e)
@@ -229,7 +235,7 @@ func (c *Cluster) Start(ctx context.Context) error {
 	dmp, err := c.client.NewDMap(c.name)
 	// handle the error
 	if err != nil {
-		logger.Error(errors.Wrap(err, "failed to start the Cluster engine.💥"))
+		logger.Error(errors.Wrap(err, "failed to start the cluster Node.💥"))
 		// let us stop the started engine
 		return c.server.Shutdown(ctx)
 	}
@@ -240,7 +246,7 @@ func (c *Cluster) Start(ctx context.Context) error {
 	ps, err := c.client.NewPubSub()
 	// handle the error
 	if err != nil {
-		logger.Error(errors.Wrap(err, "failed to start the Cluster engine.💥"))
+		logger.Error(errors.Wrap(err, "failed to start the cluster Node.💥"))
 		// let us stop the started engine
 		return c.server.Shutdown(ctx)
 	}
@@ -248,15 +254,15 @@ func (c *Cluster) Start(ctx context.Context) error {
 	// subscribe to the cluster events channel
 	c.eventsListener = ps.Subscribe(ctx, events.ClusterEventsChannel)
 	// create the events channel
-	c.eventsChan = make(chan *eventspb.NodeEvent, 5)
+	c.eventsChan = make(chan *Event, 5)
 	// start listening to cluster events
 	go c.listen()
 	// return successfully
 	return nil
 }
 
-// Stop stops the Cluster gracefully
-func (c *Cluster) Stop(ctx context.Context) error {
+// Stop stops the Node gracefully
+func (c *Node) Stop(ctx context.Context) error {
 	// create a cancellation context of 1 second timeout
 	ctx, cancelFn := context.WithTimeout(ctx, c.shutdownTimeout)
 	defer cancelFn()
@@ -265,45 +271,45 @@ func (c *Cluster) Stop(ctx context.Context) error {
 	logger := c.logger
 
 	// add some logging information
-	logger.Info("Stopping GoAkt Cluster....🤔")
+	logger.Info("Stopping GoAkt cluster Node....🤔")
 
 	// close the events listener
 	if err := c.eventsListener.Close(); err != nil {
-		logger.Error(errors.Wrap(err, "failed to shutdown the Cluster events listener.💥"))
+		logger.Error(errors.Wrap(err, "failed to shutdown the cluster Node events listener.💥"))
 		return err
 	}
 
-	// close the Cluster client
+	// close the Node client
 	if err := c.client.Close(ctx); err != nil {
-		logger.Error(errors.Wrap(err, "failed to shutdown the Cluster client.💥"))
+		logger.Error(errors.Wrap(err, "failed to shutdown the cluster Node client.💥"))
 		return err
 	}
 
 	// let us stop the server
 	if err := c.server.Shutdown(ctx); err != nil {
-		logger.Error(errors.Wrap(err, "failed to Shutdown  GoAkt Cluster....💥"))
+		logger.Error(errors.Wrap(err, "failed to Shutdown GoAkt cluster Node....💥"))
 		return err
 	}
 
 	// close the events channel
 	close(c.eventsChan)
 
-	logger.Info("GoAkt Cluster successfully stopped.🎉")
+	logger.Info("GoAkt cluster Node successfully stopped.🎉")
 	return nil
 }
 
-// NodeHost returns the Cluster node Host
-func (c *Cluster) NodeHost() string {
+// NodeHost returns the Node Host
+func (c *Node) NodeHost() string {
 	return c.host.Host
 }
 
-// NodeRemotingPort returns the Cluster node remoting port
-func (c *Cluster) NodeRemotingPort() int {
+// NodeRemotingPort returns the Node remoting port
+func (c *Node) NodeRemotingPort() int {
 	return c.host.RemotingPort
 }
 
-// PutActor replicates onto the Cluster the metadata of an actor
-func (c *Cluster) PutActor(ctx context.Context, actor *internalpb.WireActor) error {
+// PutActor replicates onto the Node the metadata of an actor
+func (c *Node) PutActor(ctx context.Context, actor *internalpb.WireActor) error {
 	// create a cancellation context of 1 second timeout
 	ctx, cancelFn := context.WithTimeout(ctx, c.writeTimeout)
 	defer cancelFn()
@@ -319,12 +325,12 @@ func (c *Cluster) PutActor(ctx context.Context, actor *internalpb.WireActor) err
 	// handle the marshaling error
 	if err != nil {
 		// add a logging to the stderr
-		logger.Error(errors.Wrapf(err, "failed to persist actor=%s data in the Cluster.💥", actor.GetActorName()))
+		logger.Error(errors.Wrapf(err, "failed to persist actor=%s data in the Node.💥", actor.GetActorName()))
 		// here we cancel the request
-		return errors.Wrapf(err, "failed to persist actor=%s data in the Cluster", actor.GetActorName())
+		return errors.Wrapf(err, "failed to persist actor=%s data in the Node", actor.GetActorName())
 	}
 
-	// send the record into the Cluster
+	// send the record into the Node
 	err = c.kvStore.Put(ctx, actor.GetActorName(), data)
 	// handle the error
 	if err != nil {
@@ -338,8 +344,8 @@ func (c *Cluster) PutActor(ctx context.Context, actor *internalpb.WireActor) err
 	return nil
 }
 
-// GetActor fetches an actor from the Cluster
-func (c *Cluster) GetActor(ctx context.Context, actorName string) (*internalpb.WireActor, error) {
+// GetActor fetches an actor from the Node
+func (c *Node) GetActor(ctx context.Context, actorName string) (*internalpb.WireActor, error) {
 	// create a cancellation context of 1 second timeout
 	ctx, cancelFn := context.WithTimeout(ctx, c.readTimeout)
 	defer cancelFn()
@@ -348,7 +354,7 @@ func (c *Cluster) GetActor(ctx context.Context, actorName string) (*internalpb.W
 	logger := c.logger
 
 	// add some logging information
-	logger.Infof("retrieving actor (%s) from the Cluster.🤔", actorName)
+	logger.Infof("retrieving actor (%s) from the Node.🤔", actorName)
 
 	// grab the record from the distributed store
 	resp, err := c.kvStore.Get(ctx, actorName)
@@ -356,7 +362,7 @@ func (c *Cluster) GetActor(ctx context.Context, actorName string) (*internalpb.W
 	if err != nil {
 		// we could not find the given actor
 		if errors.Is(err, olric.ErrKeyNotFound) {
-			logger.Warnf("actor=%s is not found in the Cluster", actorName)
+			logger.Warnf("actor=%s is not found in the Node", actorName)
 			return nil, ErrActorNotFound
 		}
 		// log the error
@@ -389,7 +395,7 @@ func (c *Cluster) GetActor(ctx context.Context, actorName string) (*internalpb.W
 
 // RemoveActor removes a given actor from the cluster.
 // An actor is removed from the cluster when this actor has been passivated.
-func (c *Cluster) RemoveActor(ctx context.Context, actorName string) error {
+func (c *Node) RemoveActor(ctx context.Context, actorName string) error {
 	// set the logger
 	logger := c.logger
 
@@ -411,7 +417,7 @@ func (c *Cluster) RemoveActor(ctx context.Context, actorName string) error {
 }
 
 // SetKey sets a given key to the cluster
-func (c *Cluster) SetKey(ctx context.Context, key string) error {
+func (c *Node) SetKey(ctx context.Context, key string) error {
 	// create a cancellation context of 1 second timeout
 	ctx, cancelFn := context.WithTimeout(ctx, c.writeTimeout)
 	defer cancelFn()
@@ -422,7 +428,7 @@ func (c *Cluster) SetKey(ctx context.Context, key string) error {
 	// add some logging information
 	logger.Infof("replicating key (%s).🤔", key)
 
-	// send the record into the Cluster
+	// send the record into the Node
 	err := c.kvStore.Put(ctx, key, true)
 	// handle the error
 	if err != nil {
@@ -437,7 +443,7 @@ func (c *Cluster) SetKey(ctx context.Context, key string) error {
 }
 
 // KeyExists checks the existence of a given key
-func (c *Cluster) KeyExists(ctx context.Context, key string) (bool, error) {
+func (c *Node) KeyExists(ctx context.Context, key string) (bool, error) {
 	// create a cancellation context of 1 second timeout
 	ctx, cancelFn := context.WithTimeout(ctx, c.readTimeout)
 	defer cancelFn()
@@ -454,7 +460,7 @@ func (c *Cluster) KeyExists(ctx context.Context, key string) (bool, error) {
 	if err != nil {
 		// we could not find the given actor
 		if errors.Is(err, olric.ErrKeyNotFound) {
-			logger.Warnf("key=%s is not found in the Cluster", key)
+			logger.Warnf("key=%s is not found in the Node", key)
 			return false, nil
 		}
 		// log the error
@@ -465,7 +471,7 @@ func (c *Cluster) KeyExists(ctx context.Context, key string) (bool, error) {
 }
 
 // GetPartition returns the partition where a given actor is stored
-func (c *Cluster) GetPartition(actorName string) int {
+func (c *Node) GetPartition(actorName string) int {
 	// create the byte array of the actor name
 	key := []byte(actorName)
 	// compute the hash key
@@ -478,13 +484,13 @@ func (c *Cluster) GetPartition(actorName string) int {
 }
 
 // Events returns a channel where cluster events are published
-func (c *Cluster) Events() <-chan *eventspb.NodeEvent {
+func (c *Node) Events() <-chan *Event {
 	return c.eventsChan
 }
 
 // listen listens to the underlying cluster events
 // and emit the wrapped node event
-func (c *Cluster) listen() {
+func (c *Node) listen() {
 	// consume event till the channel is closed
 	for message := range c.eventsListener.Channel() {
 		// get the message payload
@@ -498,27 +504,33 @@ func (c *Cluster) listen() {
 		// dispatch the appropriate event
 		switch x := event.(type) {
 		case *events.NodeJoinEvent:
-			// send the event to the channel
-			c.eventsChan <- &eventspb.NodeEvent{
+			// create the node joined event
+			event := &eventspb.NodeJoined{
 				Address:   x.NodeJoin,
 				Timestamp: timestamppb.New(time.Unix(x.Timestamp, 0)), // TODO: need some work here
-				Type:      eventspb.NodeEventType_NODE_EVENT_TYPE_JOINED,
 			}
-		case *events.NodeLeftEvent:
+			// serialize as any pb
+			eventType, _ := anypb.New(event)
 			// send the event to the channel
-			c.eventsChan <- &eventspb.NodeEvent{
+			c.eventsChan <- &Event{eventType}
+		case *events.NodeLeftEvent:
+			// create the node joined event
+			event := &eventspb.NodeLeft{
 				Address:   x.NodeLeft,
 				Timestamp: timestamppb.New(time.Unix(x.Timestamp, 0)), // TODO: need some work here
-				Type:      eventspb.NodeEventType_NODE_EVENT_TYPE_LEFT,
 			}
+			// serialize as any pb
+			eventType, _ := anypb.New(event)
+			// send the event to the channel
+			c.eventsChan <- &Event{eventType}
 		default:
 			// skip it
 		}
 	}
 }
 
-// buildConfig builds the Cluster configuration
-func (c *Cluster) buildConfig() *config.Config {
+// buildConfig builds the Node configuration
+func (c *Node) buildConfig() *config.Config {
 	// define the log level
 	logLevel := "INFO"
 	switch c.logger.LogLevel() {

@@ -65,19 +65,18 @@ message ActorRestarted {
   google.protobuf.Timestamp restarted_at = 2;
 }
 
-// NodeEvent defines the cluster node event
-message NodeEvent {
+// NodeJoined defines the node joined event
+message NodeJoined {
   // Specifies the node address
   string address = 1;
   // Specifies the timestamp
   google.protobuf.Timestamp timestamp = 2;
-  // Specifies the node event type
-  NodeEventType type = 3;
 }
 
-// NodeEventType defines the node event type
-enum NodeEventType {
-  NODE_EVENT_TYPE_UNSPECIFIED = 0;
-  NODE_EVENT_TYPE_JOINED = 1;
-  NODE_EVENT_TYPE_LEFT = 2;
+// NodeLeft defines the node left event
+message NodeLeft {
+  // Specifies the node address
+  string address = 1;
+  // Specifies the timestamp
+  google.protobuf.Timestamp timestamp = 2;
 }

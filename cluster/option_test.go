@@ -38,43 +38,43 @@ func TestOptions(t *testing.T) {
 	testCases := []struct {
 		name     string
 		option   Option
-		expected Cluster
+		expected Node
 	}{
 		{
 			name:     "WithPartitionsCount",
 			option:   WithPartitionsCount(2),
-			expected: Cluster{partitionsCount: 2},
+			expected: Node{partitionsCount: 2},
 		},
 		{
 			name:     "WithLogger",
 			option:   WithLogger(log.DefaultLogger),
-			expected: Cluster{logger: log.DefaultLogger},
+			expected: Node{logger: log.DefaultLogger},
 		},
 		{
 			name:     "WithWriteTimeout",
 			option:   WithWriteTimeout(2 * time.Minute),
-			expected: Cluster{writeTimeout: 2 * time.Minute},
+			expected: Node{writeTimeout: 2 * time.Minute},
 		},
 		{
 			name:     "WithReadTimeout",
 			option:   WithReadTimeout(2 * time.Minute),
-			expected: Cluster{readTimeout: 2 * time.Minute},
+			expected: Node{readTimeout: 2 * time.Minute},
 		},
 		{
 			name:     "WithShutdownTimeout",
 			option:   WithShutdownTimeout(2 * time.Minute),
-			expected: Cluster{shutdownTimeout: 2 * time.Minute},
+			expected: Node{shutdownTimeout: 2 * time.Minute},
 		},
 		{
 			name:     "WithHasher",
 			option:   WithHasher(mockHasher),
-			expected: Cluster{hasher: mockHasher},
+			expected: Node{hasher: mockHasher},
 		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			var cl Cluster
+			var cl Node
 			tc.option.Apply(&cl)
 			assert.Equal(t, tc.expected, cl)
 		})

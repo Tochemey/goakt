@@ -1106,7 +1106,7 @@ func (x *actorSystem) enableClustering(ctx context.Context) {
 	x.logger.Info("enabling clustering...")
 
 	// create an instance of the cluster service and start it
-	cluster, err := cluster.New(x.Name(),
+	cluster, err := cluster.NewNode(x.Name(),
 		x.serviceDiscovery,
 		cluster.WithLogger(x.logger),
 		cluster.WithPartitionsCount(x.partitionsCount),

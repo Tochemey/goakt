@@ -21,7 +21,7 @@ func (_m *OptionFunc) EXPECT() *OptionFunc_Expecter {
 }
 
 // Execute provides a mock function with given fields: cl
-func (_m *OptionFunc) Execute(cl *goaktcluster.Cluster) {
+func (_m *OptionFunc) Execute(cl *goaktcluster.Node) {
 	_m.Called(cl)
 }
 
@@ -31,14 +31,14 @@ type OptionFunc_Execute_Call struct {
 }
 
 // Execute is a helper method to define mock.On call
-//   - cl *goaktcluster.Cluster
+//   - cl *goaktcluster.Node
 func (_e *OptionFunc_Expecter) Execute(cl interface{}) *OptionFunc_Execute_Call {
 	return &OptionFunc_Execute_Call{Call: _e.mock.On("Execute", cl)}
 }
 
-func (_c *OptionFunc_Execute_Call) Run(run func(cl *goaktcluster.Cluster)) *OptionFunc_Execute_Call {
+func (_c *OptionFunc_Execute_Call) Run(run func(cl *goaktcluster.Node)) *OptionFunc_Execute_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(*goaktcluster.Cluster))
+		run(args[0].(*goaktcluster.Node))
 	})
 	return _c
 }
@@ -48,7 +48,7 @@ func (_c *OptionFunc_Execute_Call) Return() *OptionFunc_Execute_Call {
 	return _c
 }
 
-func (_c *OptionFunc_Execute_Call) RunAndReturn(run func(*goaktcluster.Cluster)) *OptionFunc_Execute_Call {
+func (_c *OptionFunc_Execute_Call) RunAndReturn(run func(*goaktcluster.Node)) *OptionFunc_Execute_Call {
 	_c.Call.Return(run)
 	return _c
 }
