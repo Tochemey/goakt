@@ -41,6 +41,8 @@ import (
 	internalpb "github.com/tochemey/goakt/internal/v1"
 	"github.com/tochemey/goakt/log"
 	eventspb "github.com/tochemey/goakt/pb/events/v1"
+	"github.com/tochemey/goakt/pkg/queue"
+	"github.com/tochemey/goakt/pkg/types"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -56,9 +58,9 @@ type Interface interface {
 	Start(ctx context.Context) error
 	// Stop stops the Node engine
 	Stop(ctx context.Context) error
-	// NodeHost returns the cluster node host address
+	// NodeHost returns the cluster startNode host address
 	NodeHost() string
-	// NodeRemotingPort returns the cluster node remoting port
+	// NodeRemotingPort returns the cluster startNode remoting port
 	NodeRemotingPort() int
 	// PutActor replicates onto the Node the metadata of an actor
 	PutActor(ctx context.Context, actor *internalpb.WireActor) error
@@ -74,7 +76,10 @@ type Interface interface {
 	// An actor is removed from the cluster when this actor has been passivated.
 	RemoveActor(ctx context.Context, actorName string) error
 	// Events returns a channel where cluster events are published
-	Events() <-chan *Event
+	Events() chan *Event
+	// AdvertisedAddress returns the cluster node cluster address that is known by the
+	// peers in the cluster
+	AdvertisedAddress() string
 }
 
 // Node represents the Node
@@ -113,8 +118,9 @@ type Node struct {
 	readTimeout     time.Duration
 	shutdownTimeout time.Duration
 
-	eventsChan     chan *Event
-	eventsListener *redis.PubSub
+	events             *queue.Unbounded[*Event]
+	eventsListener     *redis.PubSub
+	listenerStopSignal chan types.Unit
 }
 
 // enforce compilation error
@@ -124,16 +130,18 @@ var _ Interface = &Node{}
 func NewNode(name string, serviceDiscovery *discovery.ServiceDiscovery, opts ...Option) (*Node, error) {
 	// create an instance of the Node
 	node := &Node{
-		partitionsCount:   20,
-		logger:            log.DefaultLogger,
-		name:              name,
-		discoveryProvider: serviceDiscovery.Provider(),
-		discoveryOptions:  serviceDiscovery.Config(),
-		writeTimeout:      time.Second,
-		readTimeout:       time.Second,
-		shutdownTimeout:   3 * time.Second,
-		hasher:            hash.DefaultHasher(),
-		eventsListener:    nil,
+		partitionsCount:    20,
+		logger:             log.DefaultLogger,
+		name:               name,
+		discoveryProvider:  serviceDiscovery.Provider(),
+		discoveryOptions:   serviceDiscovery.Config(),
+		writeTimeout:       time.Second,
+		readTimeout:        time.Second,
+		shutdownTimeout:    3 * time.Second,
+		hasher:             hash.DefaultHasher(),
+		eventsListener:     nil,
+		events:             queue.NewUnbounded[*Event](),
+		listenerStopSignal: make(chan types.Unit, 1),
 	}
 	// apply the various options
 	for _, opt := range opts {
@@ -144,11 +152,11 @@ func NewNode(name string, serviceDiscovery *discovery.ServiceDiscovery, opts ...
 	hostNode, err := discovery.HostNode()
 	// handle the error
 	if err != nil {
-		node.logger.Error(errors.Wrap(err, "failed get the host node.💥"))
+		node.logger.Error(errors.Wrap(err, "failed get the host startNode.💥"))
 		return nil, err
 	}
 
-	// set the host node
+	// set the host startNode
 	node.host = hostNode
 
 	return node, nil
@@ -200,14 +208,14 @@ func (c *Node) Start(ctx context.Context) error {
 		// cancel the start context
 		defer cancel()
 		// add some logging information
-		logger.Info("GoAkt cluster Node successfully started. 🎉")
+		logger.Infof("GoAkt cluster Node=(%s) successfully started. 🎉", c.name)
 	}
 
 	// let us create an instance of the Node engine
 	eng, err := olric.New(conf)
 	// handle the error
 	if err != nil {
-		logger.Error(errors.Wrap(err, "failed to start the cluster Node.💥"))
+		logger.Error(errors.Wrapf(err, "failed to start the cluster Node=(%s).💥", c.name))
 		return err
 	}
 
@@ -218,7 +226,7 @@ func (c *Node) Start(ctx context.Context) error {
 		err = c.server.Start()
 		// handle the error in case there is an early error
 		if err != nil {
-			logger.Error(errors.Wrap(err, "failed to start the cluster Node.💥"))
+			logger.Error(errors.Wrapf(err, "failed to start the cluster Node=(%s).💥", c.name))
 			// let us stop the started engine
 			if e := c.server.Shutdown(ctx); e != nil {
 				logger.Panic(e)
@@ -235,7 +243,7 @@ func (c *Node) Start(ctx context.Context) error {
 	dmp, err := c.client.NewDMap(c.name)
 	// handle the error
 	if err != nil {
-		logger.Error(errors.Wrap(err, "failed to start the cluster Node.💥"))
+		logger.Error(errors.Wrapf(err, "failed to start the cluster Node=(%s).💥", c.name))
 		// let us stop the started engine
 		return c.server.Shutdown(ctx)
 	}
@@ -246,15 +254,13 @@ func (c *Node) Start(ctx context.Context) error {
 	ps, err := c.client.NewPubSub()
 	// handle the error
 	if err != nil {
-		logger.Error(errors.Wrap(err, "failed to start the cluster Node.💥"))
+		logger.Error(errors.Wrapf(err, "failed to start the cluster Node=(%s).💥", c.name))
 		// let us stop the started engine
 		return c.server.Shutdown(ctx)
 	}
 
 	// subscribe to the cluster events channel
 	c.eventsListener = ps.Subscribe(ctx, events.ClusterEventsChannel)
-	// create the events channel
-	c.eventsChan = make(chan *Event, 5)
 	// start listening to cluster events
 	go c.listen()
 	// return successfully
@@ -271,30 +277,33 @@ func (c *Node) Stop(ctx context.Context) error {
 	logger := c.logger
 
 	// add some logging information
-	logger.Info("Stopping GoAkt cluster Node....🤔")
+	logger.Infof("Stopping GoAkt cluster Node=(%s)....🤔", c.name)
 
 	// close the events listener
 	if err := c.eventsListener.Close(); err != nil {
-		logger.Error(errors.Wrap(err, "failed to shutdown the cluster Node events listener.💥"))
+		logger.Error(errors.Wrap(err, "failed to shutdown the cluster events listener.💥"))
 		return err
 	}
 
 	// close the Node client
 	if err := c.client.Close(ctx); err != nil {
-		logger.Error(errors.Wrap(err, "failed to shutdown the cluster Node client.💥"))
+		logger.Error(errors.Wrapf(err, "failed to shutdown the cluster Node=(%s).💥", c.name))
 		return err
 	}
 
 	// let us stop the server
 	if err := c.server.Shutdown(ctx); err != nil {
-		logger.Error(errors.Wrap(err, "failed to Shutdown GoAkt cluster Node....💥"))
+		logger.Error(errors.Wrapf(err, "failed to Shutdown GoAkt cluster Node=(%s)....💥", c.name))
 		return err
 	}
 
-	// close the events channel
-	close(c.eventsChan)
+	// close the events queue
+	c.events.Close()
 
-	logger.Info("GoAkt cluster Node successfully stopped.🎉")
+	// signal we are stopping listening to events
+	c.listenerStopSignal <- types.Unit{}
+
+	logger.Infof("GoAkt cluster Node=(%s) successfully stopped.🎉", c.name)
 	return nil
 }
 
@@ -306,6 +315,12 @@ func (c *Node) NodeHost() string {
 // NodeRemotingPort returns the Node remoting port
 func (c *Node) NodeRemotingPort() int {
 	return c.host.RemotingPort
+}
+
+// AdvertisedAddress returns the cluster node cluster address that is known by the
+// peers in the cluster
+func (c *Node) AdvertisedAddress() string {
+	return c.host.ClusterAddress()
 }
 
 // PutActor replicates onto the Node the metadata of an actor
@@ -484,53 +499,110 @@ func (c *Node) GetPartition(actorName string) int {
 }
 
 // Events returns a channel where cluster events are published
-func (c *Node) Events() <-chan *Event {
-	return c.eventsChan
+func (c *Node) Events() chan *Event {
+	out := make(chan *Event, c.events.Len())
+	defer close(out)
+	for {
+		msg, ok := c.events.Pop()
+		if !ok {
+			break
+		}
+		out <- msg
+	}
+	return out
 }
 
 // listen listens to the underlying cluster events
-// and emit the wrapped node event
+// and emit the wrapped startNode event
 func (c *Node) listen() {
-	// consume event till the channel is closed
-	for message := range c.eventsListener.Channel() {
-		// get the message payload
-		var event any
-		// let us unmarshal the event
-		if err := json.Unmarshal([]byte(message.Payload), &event); err != nil {
-			c.logger.Error(errors.Wrapf(err, "failed to decode cluster event"))
-			// TODO: should we continue or not
-			continue
-		}
-		// dispatch the appropriate event
-		switch x := event.(type) {
-		case *events.NodeJoinEvent:
-			// TODO: need to cross check this calculation
-			// convert the timestamp to milliseconds
-			timeMilli := x.Timestamp / int64(1e6)
-			// create the node joined event
-			event := &eventspb.NodeJoined{
-				Address:   x.NodeJoin,
-				Timestamp: timestamppb.New(time.UnixMilli(timeMilli)),
+	for {
+		select {
+		case <-c.listenerStopSignal:
+			return
+		case message, ok := <-c.eventsListener.Channel():
+			// break out of the loop when the channel is closed
+			if !ok {
+				return
 			}
-			// serialize as any pb
-			eventType, _ := anypb.New(event)
-			// send the event to the channel
-			c.eventsChan <- &Event{eventType}
-		case *events.NodeLeftEvent:
-			// TODO: need to cross check this calculation
-			// convert the timestamp to milliseconds
-			timeMilli := x.Timestamp / int64(1e6)
-			// create the node joined event
-			event := &eventspb.NodeLeft{
-				Address:   x.NodeLeft,
-				Timestamp: timestamppb.New(time.UnixMilli(timeMilli)),
+			// grab the message payload
+			payload := message.Payload
+			// get the message payload
+			var event map[string]any
+			// let us unmarshal the event
+			if err := json.Unmarshal([]byte(payload), &event); err != nil {
+				c.logger.Error(errors.Wrap(err, "failed to decode cluster event"))
+				// TODO: should we continue or not
+				continue
 			}
-			// serialize as any pb
-			eventType, _ := anypb.New(event)
-			// send the event to the channel
-			c.eventsChan <- &Event{eventType}
-		default:
-			// skip it
+
+			// grab the kind
+			kind := event["kind"]
+			// add some debug log
+			c.logger.Debugf("received (%s) cluster event", kind)
+
+			switch kind {
+			case events.KindNodeJoinEvent:
+				// create the node joined to unmarshal the event
+				nodeJoined := new(events.NodeJoinEvent)
+				// let us unmarshal the event
+				if err := json.Unmarshal([]byte(payload), &nodeJoined); err != nil {
+					c.logger.Error(errors.Wrap(err, "failed to decode NodeJoined cluster event"))
+					// TODO: should we continue or not
+					continue
+				}
+
+				// make sure to skip self
+				if c.AdvertisedAddress() == nodeJoined.NodeJoin {
+					// add some debug log
+					c.logger.Debug("skipping self")
+					continue
+				}
+
+				// TODO: need to cross check this calculation
+				// convert the timestamp to milliseconds
+				timeMilli := nodeJoined.Timestamp / int64(1e6)
+				// create the startNode joined event
+				event := &eventspb.NodeJoined{
+					Address:   nodeJoined.NodeJoin,
+					Timestamp: timestamppb.New(time.UnixMilli(timeMilli)),
+				}
+				// serialize as any pb
+				eventType, _ := anypb.New(event)
+				// send the event to queue
+				c.events.Push(&Event{eventType})
+
+			case events.KindNodeLeftEvent:
+				// create the node left to unmarshal the event
+				nodeLeft := new(events.NodeLeftEvent)
+				// let us unmarshal the event
+				if err := json.Unmarshal([]byte(payload), &nodeLeft); err != nil {
+					c.logger.Error(errors.Wrap(err, "failed to decode NodeLeft cluster event"))
+					// TODO: should we continue or not
+					continue
+				}
+
+				// make sure to skip self
+				if c.AdvertisedAddress() == nodeLeft.NodeLeft {
+					// add some debug log
+					c.logger.Debug("skipping self")
+					continue
+				}
+
+				// TODO: need to cross check this calculation
+				// convert the timestamp to milliseconds
+				timeMilli := nodeLeft.Timestamp / int64(1e6)
+				// create the startNode joined event
+				event := &eventspb.NodeLeft{
+					Address:   nodeLeft.NodeLeft,
+					Timestamp: timestamppb.New(time.UnixMilli(timeMilli)),
+				}
+				// serialize as any pb
+				eventType, _ := anypb.New(event)
+				// send the event to queue
+				c.events.Push(&Event{eventType})
+			default:
+				// skip
+			}
 		}
 	}
 }
