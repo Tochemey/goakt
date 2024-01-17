@@ -152,7 +152,7 @@ func NewNode(name string, serviceDiscovery *discovery.ServiceDiscovery, opts ...
 	hostNode, err := discovery.HostNode()
 	// handle the error
 	if err != nil {
-		node.logger.Error(errors.Wrap(err, "failed get the host startNode.💥"))
+		node.logger.Error(errors.Wrap(err, "failed get the host node.💥"))
 		return nil, err
 	}
 
