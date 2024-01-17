@@ -191,6 +191,8 @@ type actorSystem struct {
 	tracer       trace.Tracer
 	// specifies whether metric is enabled
 	metricEnabled atomic.Bool
+
+	listenerStopSignal chan types.Unit
 }
 
 // enforce compilation error when all methods of the ActorSystem interface are not implemented
@@ -227,6 +229,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		partitionHasher:     hash.DefaultHasher(),
 		actorInitTimeout:    DefaultInitTimeout,
 		tracer:              noop.NewTracerProvider().Tracer(name),
+		listenerStopSignal:  make(chan types.Unit, 1),
 	}
 	// set the atomic settings
 	system.hasStarted.Store(false)
@@ -729,6 +732,8 @@ func (x *actorSystem) Start(ctx context.Context) error {
 	// enable clustering when it is enabled
 	if x.clusterEnabled.Load() {
 		x.enableClustering(spanCtx)
+		// start listening to cluster events
+		go x.listenToClusterEvents()
 	}
 
 	// start remoting when remoting is enabled
@@ -800,6 +805,8 @@ func (x *actorSystem) Stop(ctx context.Context) error {
 
 	// stop the cluster service
 	if x.clusterEnabled.Load() {
+		// signal we are stopping listening to events
+		x.listenerStopSignal <- types.Unit{}
 		// stop the cluster service
 		if err := x.cluster.Stop(spanCtx); err != nil {
 			// let us record the error in the span
@@ -1322,4 +1329,25 @@ func (x *actorSystem) registerMetrics() error {
 	}, metrics.ActorsCount())
 
 	return err
+}
+
+// listenToClusterEvents listens to cluster events
+func (x *actorSystem) listenToClusterEvents() {
+	for {
+		select {
+		case <-x.listenerStopSignal:
+			return
+		case event := <-x.cluster.Events():
+			// only push cluster event when defined
+			if event != nil && event.Type != nil {
+				// unpack the event
+				message, _ := event.Type.UnmarshalNew()
+				// push the cluster event when event stream is set
+				if x.eventsStream != nil {
+					// send the event to the event streams
+					x.eventsStream.Publish(eventsTopic, message)
+				}
+			}
+		}
+	}
 }
