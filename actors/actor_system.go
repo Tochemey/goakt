@@ -1333,7 +1333,7 @@ func (x *actorSystem) registerMetrics() error {
 
 // listenToClusterEvents listens to cluster events
 func (x *actorSystem) listenToClusterEvents() {
-	for {
+	for x.clusterEnabled.Load() {
 		select {
 		case <-x.listenerStopSignal:
 			return
