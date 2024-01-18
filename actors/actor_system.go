@@ -732,8 +732,6 @@ func (x *actorSystem) Start(ctx context.Context) error {
 	// enable clustering when it is enabled
 	if x.clusterEnabled.Load() {
 		x.enableClustering(spanCtx)
-		// start listening to cluster events
-		go x.listenToClusterEvents()
 	}
 
 	// start remoting when remoting is enabled
@@ -1153,6 +1151,8 @@ func (x *actorSystem) enableClustering(ctx context.Context) {
 	x.sem.Unlock()
 	// start broadcasting cluster message
 	go x.broadcast(ctx)
+	// start listening to cluster events
+	go x.listenToClusterEvents()
 	// add some logging
 	x.logger.Info("clustering enabled...:)")
 }
