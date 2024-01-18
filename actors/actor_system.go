@@ -818,7 +818,6 @@ func (x *actorSystem) Stop(ctx context.Context) error {
 
 		// unset the remoting settings
 		x.clusterEnabled.Store(false)
-		x.cluster = nil
 	}
 
 	// short-circuit the shutdown process when there are no online actors
@@ -1248,6 +1247,7 @@ func (x *actorSystem) reset() {
 	x.telemetry = nil
 	x.actors = newPIDMap(10)
 	x.name = ""
+	x.cluster = nil
 }
 
 // broadcast publishes newly created actor into the cluster when cluster is enabled
