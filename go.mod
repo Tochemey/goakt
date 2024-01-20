@@ -10,7 +10,7 @@ require (
 	github.com/cespare/xxhash/v2 v2.2.0
 	github.com/deckarep/golang-set/v2 v2.6.0
 	github.com/flowchartsman/retry v1.2.0
-	github.com/go-redis/redis/v8 v8.11.5
+	github.com/go-redis/redis/v9 v9.4.0
 	github.com/google/go-cmp v0.6.0
 	github.com/google/uuid v1.5.0
 	github.com/grandcat/zeroconf v1.0.0
