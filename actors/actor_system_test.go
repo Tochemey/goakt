@@ -405,6 +405,11 @@ func TestActorSystem(t *testing.T) {
 		err := sys.Start(ctx)
 		assert.NoError(t, err)
 
+		// create a deadletter subscriber
+		consumer, err := sys.Subscribe()
+		require.NoError(t, err)
+		require.NotNil(t, consumer)
+
 		actorName := "Exchanger"
 		actorRef, err := sys.Spawn(ctx, actorName, &Exchanger{})
 		assert.NoError(t, err)
@@ -428,6 +433,18 @@ func TestActorSystem(t *testing.T) {
 		// TODO we can add a callback for complete start
 		time.Sleep(time.Second)
 		require.True(t, actorRef.IsRunning())
+
+		var items []*eventspb.ActorRestarted
+		for message := range consumer.Iterator() {
+			payload := message.Payload()
+			// only listening to deadletters
+			restarted, ok := payload.(*eventspb.ActorRestarted)
+			if ok {
+				items = append(items, restarted)
+			}
+		}
+
+		require.Len(t, items, 1)
 
 		t.Cleanup(func() {
 			err = sys.Stop(ctx)
@@ -879,8 +896,8 @@ func TestActorSystem(t *testing.T) {
 		require.NotNil(t, consumer)
 
 		// create the black hole actor
-		actor := &BlackHole{}
-		actorRef, err := sys.Spawn(ctx, "BlackHole ", actor)
+		actor := &Discarder{}
+		actorRef, err := sys.Spawn(ctx, "Discarder ", actor)
 		assert.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
@@ -1089,6 +1106,86 @@ func TestActorSystem(t *testing.T) {
 		t.Cleanup(func() {
 			err = sys.Stop(ctx)
 			assert.NoError(t, err)
+		})
+	})
+	t.Run("With cluster events subscription", func(t *testing.T) {
+		// create a context
+		ctx := context.TODO()
+		// start the NATS server
+		srv := startNatsServer(t)
+
+		// create and start system cluster
+		cl1, sd1 := startClusterSystem(t, "Node1", srv.Addr().String())
+		peerAddress1 := cl1.PeerAddress()
+		require.NotEmpty(t, peerAddress1)
+
+		// create a subscriber to node 1
+		subscriber1, err := cl1.Subscribe()
+		require.NoError(t, err)
+		require.NotNil(t, subscriber1)
+
+		// create and start system cluster
+		cl2, sd2 := startClusterSystem(t, "Node2", srv.Addr().String())
+		peerAddress2 := cl2.PeerAddress()
+		require.NotEmpty(t, peerAddress2)
+
+		// create a subscriber to node 2
+		subscriber2, err := cl2.Subscribe()
+		require.NoError(t, err)
+		require.NotNil(t, subscriber2)
+
+		// wait for some time
+		time.Sleep(time.Second)
+
+		// capture the joins
+		var joins []*eventspb.NodeJoined
+		for event := range subscriber1.Iterator() {
+			// get the event payload
+			payload := event.Payload()
+			// only listening to cluster event
+			nodeJoined, ok := payload.(*eventspb.NodeJoined)
+			require.True(t, ok)
+			joins = append(joins, nodeJoined)
+		}
+
+		// assert the joins list
+		require.NotEmpty(t, joins)
+		require.Len(t, joins, 1)
+		require.Equal(t, peerAddress2, joins[0].GetAddress())
+
+		// wait for some time
+		time.Sleep(time.Second)
+
+		// stop the node
+		require.NoError(t, cl1.Unsubscribe(subscriber1))
+		assert.NoError(t, cl1.Stop(ctx))
+		assert.NoError(t, sd1.Close())
+
+		// wait for some time
+		time.Sleep(time.Second)
+
+		var lefts []*eventspb.NodeLeft
+		for event := range subscriber2.Iterator() {
+			payload := event.Payload()
+
+			// only listening to cluster event
+			nodeLeft, ok := payload.(*eventspb.NodeLeft)
+			require.True(t, ok)
+			lefts = append(lefts, nodeLeft)
+		}
+
+		require.NotEmpty(t, lefts)
+		require.Len(t, lefts, 1)
+		require.Equal(t, peerAddress1, lefts[0].GetAddress())
+
+		require.NoError(t, cl2.Unsubscribe(subscriber2))
+
+		t.Cleanup(func() {
+			assert.NoError(t, cl2.Stop(ctx))
+			// stop the discovery engines
+			assert.NoError(t, sd2.Close())
+			// shutdown the nats server gracefully
+			srv.Shutdown()
 		})
 	})
 }

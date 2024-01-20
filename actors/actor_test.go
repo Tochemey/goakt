@@ -26,12 +26,20 @@ package actors
 
 import (
 	"context"
+	"os"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
 
+	natsserver "github.com/nats-io/nats-server/v2/server"
 	"github.com/pkg/errors"
+	"github.com/stretchr/testify/require"
+	"github.com/tochemey/goakt/discovery"
+	"github.com/tochemey/goakt/discovery/nats"
+	"github.com/tochemey/goakt/log"
 	testspb "github.com/tochemey/goakt/test/data/pb/v1"
+	"github.com/travisjeffery/go-dynaport"
 	"go.uber.org/atomic"
 	"go.uber.org/goleak"
 )
@@ -40,6 +48,8 @@ func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(m, goleak.IgnoreTopFunction("github.com/golang/glog.(*loggingT).flushDaemon"),
 		goleak.IgnoreTopFunction("github.com/go-redis/redis/v8/internal/pool.(*ConnPool).reaper"),
 		goleak.IgnoreTopFunction("golang.org/x/net/http2.(*serverConn).serve"),
+		goleak.IgnoreTopFunction("github.com/nats-io/nats%2ego.(*Conn).doReconnect"),
+		goleak.IgnoreTopFunction("sync.runtime_notifyListWait"),
 		goleak.IgnoreTopFunction("internal/poll.runtime_pollWait"))
 }
 
@@ -349,21 +359,108 @@ func (x *Forwarder) PostStop(context.Context) error {
 
 var _ Actor = &Forwarder{}
 
-type BlackHole struct{}
+type Discarder struct{}
 
-func (d *BlackHole) PreStart(context.Context) error {
+var _ Actor = &Discarder{}
+
+func (d *Discarder) PreStart(context.Context) error {
 	return nil
 }
 
-func (d *BlackHole) Receive(ctx ReceiveContext) {
+func (d *Discarder) Receive(ctx ReceiveContext) {
 	switch ctx.Message().(type) {
 	default:
 		ctx.Unhandled()
 	}
 }
 
-func (d *BlackHole) PostStop(context.Context) error {
+func (d *Discarder) PostStop(context.Context) error {
 	return nil
 }
 
-var _ Actor = &BlackHole{}
+func startNatsServer(t *testing.T) *natsserver.Server {
+	t.Helper()
+	serv, err := natsserver.NewServer(&natsserver.Options{
+		Host: "127.0.0.1",
+		Port: -1,
+	})
+
+	require.NoError(t, err)
+
+	ready := make(chan bool)
+	go func() {
+		ready <- true
+		serv.Start()
+	}()
+	<-ready
+
+	if !serv.ReadyForConnections(2 * time.Second) {
+		t.Fatalf("nats-io server failed to start")
+	}
+
+	return serv
+}
+
+func startClusterSystem(t *testing.T, nodeName, serverAddr string) (ActorSystem, discovery.Provider) {
+	ctx := context.TODO()
+	logger := log.New(log.DebugLevel, os.Stdout)
+
+	// generate the ports for the single startNode
+	nodePorts := dynaport.Get(3)
+	gossipPort := nodePorts[0]
+	clusterPort := nodePorts[1]
+	remotingPort := nodePorts[2]
+
+	// create a Cluster startNode
+	host := "127.0.0.1"
+	// set the environments
+	require.NoError(t, os.Setenv("GOSSIP_PORT", strconv.Itoa(gossipPort)))
+	require.NoError(t, os.Setenv("CLUSTER_PORT", strconv.Itoa(clusterPort)))
+	require.NoError(t, os.Setenv("REMOTING_PORT", strconv.Itoa(remotingPort)))
+	require.NoError(t, os.Setenv("NODE_NAME", nodeName))
+	require.NoError(t, os.Setenv("NODE_IP", host))
+
+	// create the various config option
+	applicationName := "accounts"
+	actorSystemName := "testSystem"
+	natsSubject := "some-subject"
+	// create the instance of provider
+	provider := nats.NewDiscovery()
+
+	// create the config
+	config := discovery.Config{
+		nats.ApplicationName: applicationName,
+		nats.ActorSystemName: actorSystemName,
+		nats.NatsServer:      serverAddr,
+		nats.NatsSubject:     natsSubject,
+	}
+
+	// create the sd
+	sd := discovery.NewServiceDiscovery(provider, config)
+
+	// create the actor system
+	system, err := NewActorSystem(
+		nodeName,
+		WithPassivationDisabled(),
+		WithLogger(logger),
+		WithReplyTimeout(time.Minute),
+		WithClustering(sd, 10))
+
+	require.NotNil(t, system)
+	require.NoError(t, err)
+
+	// start the node
+	require.NoError(t, system.Start(ctx))
+
+	// clear the env var
+	require.NoError(t, os.Unsetenv("GOSSIP_PORT"))
+	require.NoError(t, os.Unsetenv("CLUSTER_PORT"))
+	require.NoError(t, os.Unsetenv("REMOTING_PORT"))
+	require.NoError(t, os.Unsetenv("NODE_NAME"))
+	require.NoError(t, os.Unsetenv("NODE_IP"))
+
+	time.Sleep(2 * time.Second)
+
+	// return the cluster startNode
+	return system, provider
+}
