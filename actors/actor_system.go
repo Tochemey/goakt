@@ -1151,7 +1151,7 @@ func (x *actorSystem) enableClustering(ctx context.Context) {
 	// start broadcasting cluster message
 	go x.broadcast(ctx)
 	// start listening to cluster events
-	go x.listenToClusterEvents()
+	//go x.listenToClusterEvents()
 	// add some logging
 	x.logger.Info("clustering enabled...:)")
 }
