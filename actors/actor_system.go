@@ -109,6 +109,9 @@ type ActorSystem interface {
 	ScheduleWithCron(ctx context.Context, message proto.Message, pid PID, cronExpression string) error
 	// RemoteScheduleWithCron schedules a message to be sent to an actor in the future using a cron expression.
 	RemoteScheduleWithCron(ctx context.Context, message proto.Message, address *addresspb.Address, cronExpression string) error
+	// PeerAddress returns the actor system address known in the cluster. That address is used by other nodes to communicate with the actor system.
+	// This address is empty when cluster mode is not activated
+	PeerAddress() string
 	// handleRemoteAsk handles a synchronous message to another actor and expect a response.
 	// This block until a response is received or timed out.
 	handleRemoteAsk(ctx context.Context, to PID, message proto.Message) (response proto.Message, err error)
@@ -191,8 +194,7 @@ type actorSystem struct {
 	tracer       trace.Tracer
 	// specifies whether metric is enabled
 	metricEnabled atomic.Bool
-
-	listenerStopSignal chan types.Unit
+	eventsChan    <-chan *cluster.Event
 }
 
 // enforce compilation error when all methods of the ActorSystem interface are not implemented
@@ -229,7 +231,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		partitionHasher:     hash.DefaultHasher(),
 		actorInitTimeout:    DefaultInitTimeout,
 		tracer:              noop.NewTracerProvider().Tracer(name),
-		listenerStopSignal:  make(chan types.Unit, 1),
+		eventsChan:          make(chan *cluster.Event, 1),
 	}
 	// set the atomic settings
 	system.hasStarted.Store(false)
@@ -551,6 +553,21 @@ func (x *actorSystem) Actors() []PID {
 	return x.actors.List()
 }
 
+// PeerAddress returns the actor system address known in the cluster. That address is used by other nodes to communicate with the actor system.
+// This address is empty when cluster mode is not activated
+func (x *actorSystem) PeerAddress() string {
+	// acquire the lock
+	x.sem.Lock()
+	// release the lock
+	defer x.sem.Unlock()
+	// check whether cluster mode is enabled
+	if x.clusterEnabled.Load() {
+		// return the cluster node advertised address
+		return x.cluster.AdvertisedAddress()
+	}
+	return ""
+}
+
 // ActorOf returns an existing actor in the local system or in the cluster when clustering is enabled
 // When cluster mode is activated, the PID will be nil.
 // When remoting is enabled this method will return and error
@@ -803,8 +820,6 @@ func (x *actorSystem) Stop(ctx context.Context) error {
 
 	// stop the cluster service
 	if x.clusterEnabled.Load() {
-		// signal we are stopping listening to events
-		x.listenerStopSignal <- types.Unit{}
 		// stop the cluster service
 		if err := x.cluster.Stop(spanCtx); err != nil {
 			// let us record the error in the span
@@ -815,7 +830,6 @@ func (x *actorSystem) Stop(ctx context.Context) error {
 		}
 		// stop broadcasting cluster messages
 		close(x.clusterChan)
-
 		// unset the remoting settings
 		x.clusterEnabled.Store(false)
 	}
@@ -1143,15 +1157,17 @@ func (x *actorSystem) enableClustering(ctx context.Context) {
 	x.sem.Lock()
 	// set the cluster field
 	x.cluster = cluster
+	// set the cluster events channel
+	x.eventsChan = cluster.Events()
 	// set the remoting host and port
 	x.remotingHost = cluster.NodeHost()
 	x.remotingPort = int32(cluster.NodeRemotingPort())
 	// release the lock
 	x.sem.Unlock()
+	// start listening to cluster events
+	go x.broadcastClusterEvents()
 	// start broadcasting cluster message
 	go x.broadcast(ctx)
-	// start listening to cluster events
-	//go x.listenToClusterEvents()
 	// add some logging
 	x.logger.Info("clustering enabled...:)")
 }
@@ -1331,21 +1347,24 @@ func (x *actorSystem) registerMetrics() error {
 	return err
 }
 
-// listenToClusterEvents listens to cluster events
-func (x *actorSystem) listenToClusterEvents() {
-	for x.clusterEnabled.Load() {
-		select {
-		case <-x.listenerStopSignal:
-			return
-		case event := <-x.cluster.Events():
+// broadcastClusterEvents listens to cluster events
+func (x *actorSystem) broadcastClusterEvents() {
+	// read from the channel
+	for event := range x.eventsChan {
+		// when cluster is enabled
+		if x.clusterEnabled.Load() {
 			// only push cluster event when defined
 			if event != nil && event.Type != nil {
 				// unpack the event
 				message, _ := event.Type.UnmarshalNew()
 				// push the cluster event when event stream is set
 				if x.eventsStream != nil {
+					// add some debug log
+					x.logger.Debugf("node=(%s) publishing cluster event=(%s)....", x.name, event.Type.GetTypeUrl())
 					// send the event to the event streams
 					x.eventsStream.Publish(eventsTopic, message)
+					// add some debug log
+					x.logger.Debugf("cluster event=(%s) successfully published by node=(%s)", event.Type.GetTypeUrl(), x.name)
 				}
 			}
 		}

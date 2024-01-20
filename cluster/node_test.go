@@ -327,14 +327,14 @@ func TestMultipleNodes(t *testing.T) {
 	srv := startNatsServer(t)
 
 	// create a cluster node1
-	node1 := startNode(t, "node1", srv.Addr().String())
+	node1, sd1 := startNode(t, "node1", srv.Addr().String())
 	require.NotNil(t, node1)
 
 	// wait for the node to start properly
 	time.Sleep(2 * time.Second)
 
 	// create a cluster node1
-	node2 := startNode(t, "node2", srv.Addr().String())
+	node2, sd2 := startNode(t, "node2", srv.Addr().String())
 	require.NotNil(t, node2)
 	node2Addr := node2.AdvertisedAddress()
 
@@ -343,8 +343,18 @@ func TestMultipleNodes(t *testing.T) {
 
 	// assert the node joined cluster event
 	var events []*Event
-	for event := range node1.Events() {
-		events = append(events, event)
+
+	// define an events reader loop and read events for some time
+L:
+	for {
+		select {
+		case event, ok := <-node1.Events():
+			if ok {
+				events = append(events, event)
+			}
+		case <-time.After(time.Second):
+			break L
+		}
 	}
 
 	require.NotEmpty(t, events)
@@ -367,8 +377,18 @@ func TestMultipleNodes(t *testing.T) {
 
 	// reset the slice
 	events = []*Event{}
-	for event := range node1.Events() {
-		events = append(events, event)
+
+	// define an events reader loop and read events for some time
+L2:
+	for {
+		select {
+		case event, ok := <-node1.Events():
+			if ok {
+				events = append(events, event)
+			}
+		case <-time.After(time.Second):
+			break L2
+		}
 	}
 
 	require.NotEmpty(t, events)
@@ -383,6 +403,9 @@ func TestMultipleNodes(t *testing.T) {
 
 	t.Cleanup(func() {
 		require.NoError(t, node1.Stop(context.TODO()))
+		require.NoError(t, sd1.Close())
+		require.NoError(t, sd2.Close())
+		srv.Shutdown()
 	})
 }
 
@@ -409,7 +432,7 @@ func startNatsServer(t *testing.T) *natsserver.Server {
 	return serv
 }
 
-func startNode(t *testing.T, nodeName, serverAddr string) *Node {
+func startNode(t *testing.T, nodeName, serverAddr string) (*Node, discovery.Provider) {
 	// create a context
 	ctx := context.TODO()
 
@@ -459,5 +482,5 @@ func startNode(t *testing.T, nodeName, serverAddr string) *Node {
 	require.NoError(t, os.Unsetenv("NODE_IP"))
 
 	// return the cluster startNode
-	return node
+	return node, provider
 }

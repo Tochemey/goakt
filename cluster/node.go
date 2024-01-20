@@ -41,7 +41,6 @@ import (
 	internalpb "github.com/tochemey/goakt/internal/v1"
 	"github.com/tochemey/goakt/log"
 	eventspb "github.com/tochemey/goakt/pb/events/v1"
-	"github.com/tochemey/goakt/pkg/queue"
 	"github.com/tochemey/goakt/pkg/types"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -76,7 +75,7 @@ type Interface interface {
 	// An actor is removed from the cluster when this actor has been passivated.
 	RemoveActor(ctx context.Context, actorName string) error
 	// Events returns a channel where cluster events are published
-	Events() chan *Event
+	Events() <-chan *Event
 	// AdvertisedAddress returns the cluster node cluster address that is known by the
 	// peers in the cluster
 	AdvertisedAddress() string
@@ -118,9 +117,10 @@ type Node struct {
 	readTimeout     time.Duration
 	shutdownTimeout time.Duration
 
-	events             *queue.Unbounded[*Event]
-	eventsListener     *redis.PubSub
-	listenerStopSignal chan types.Unit
+	events             chan *Event
+	pubSub             *redis.PubSub
+	messagesChan       <-chan *redis.Message
+	messagesReaderChan chan types.Unit
 }
 
 // enforce compilation error
@@ -139,9 +139,10 @@ func NewNode(name string, serviceDiscovery *discovery.ServiceDiscovery, opts ...
 		readTimeout:        time.Second,
 		shutdownTimeout:    3 * time.Second,
 		hasher:             hash.DefaultHasher(),
-		eventsListener:     nil,
-		events:             queue.NewUnbounded[*Event](),
-		listenerStopSignal: make(chan types.Unit, 1),
+		pubSub:             nil,
+		events:             make(chan *Event, 20),
+		messagesReaderChan: make(chan types.Unit, 1),
+		messagesChan:       make(chan *redis.Message, 1),
 	}
 	// apply the various options
 	for _, opt := range opts {
@@ -163,17 +164,17 @@ func NewNode(name string, serviceDiscovery *discovery.ServiceDiscovery, opts ...
 }
 
 // Start starts the Node.
-func (c *Node) Start(ctx context.Context) error {
+func (n *Node) Start(ctx context.Context) error {
 	// set the logger
-	logger := c.logger
+	logger := n.logger
 
 	// add some logging information
-	logger.Infof("Starting GoAkt cluster Node service on (%s)....🤔", c.host.ClusterAddress())
+	logger.Infof("Starting GoAkt cluster Node service on (%s)....🤔", n.host.ClusterAddress())
 
 	// build the Node engine config
-	conf := c.buildConfig()
+	conf := n.buildConfig()
 	// set the hasher to the custom hasher
-	conf.Hasher = &hasherWrapper{c.hasher}
+	conf.Hasher = &hasherWrapper{n.hasher}
 
 	// create the member list config
 	m, err := olriconfig.NewMemberlistConfig("lan")
@@ -184,21 +185,21 @@ func (c *Node) Start(ctx context.Context) error {
 	}
 
 	// sets the bindings
-	m.BindAddr = c.host.Host
-	m.BindPort = c.host.GossipPort
-	m.AdvertisePort = c.host.GossipPort
+	m.BindAddr = n.host.Host
+	m.BindPort = n.host.GossipPort
+	m.AdvertisePort = n.host.GossipPort
 	conf.MemberlistConfig = m
 
 	// set the discovery provider
 	discoveryWrapper := &discoveryProvider{
-		provider: c.discoveryProvider,
-		log:      c.logger.StdLogger(),
+		provider: n.discoveryProvider,
+		log:      n.logger.StdLogger(),
 	}
 	// set the discovery service
 	conf.ServiceDiscovery = map[string]any{
 		"plugin":  discoveryWrapper,
-		"id":      c.discoveryProvider.ID(),
-		"options": c.discoveryOptions,
+		"id":      n.discoveryProvider.ID(),
+		"options": n.discoveryOptions,
 	}
 
 	// let us start the Node
@@ -208,27 +209,27 @@ func (c *Node) Start(ctx context.Context) error {
 		// cancel the start context
 		defer cancel()
 		// add some logging information
-		logger.Infof("GoAkt cluster Node=(%s) successfully started. 🎉", c.name)
+		logger.Infof("GoAkt cluster Node=(%s) successfully started. 🎉", n.name)
 	}
 
 	// let us create an instance of the Node engine
 	eng, err := olric.New(conf)
 	// handle the error
 	if err != nil {
-		logger.Error(errors.Wrapf(err, "failed to start the cluster Node=(%s).💥", c.name))
+		logger.Error(errors.Wrapf(err, "failed to start the cluster Node=(%s).💥", n.name))
 		return err
 	}
 
 	// set the server
-	c.server = eng
+	n.server = eng
 	go func() {
 		// start the Node engine
-		err = c.server.Start()
+		err = n.server.Start()
 		// handle the error in case there is an early error
 		if err != nil {
-			logger.Error(errors.Wrapf(err, "failed to start the cluster Node=(%s).💥", c.name))
+			logger.Error(errors.Wrapf(err, "failed to start the cluster Node=(%s).💥", n.name))
 			// let us stop the started engine
-			if e := c.server.Shutdown(ctx); e != nil {
+			if e := n.server.Shutdown(ctx); e != nil {
 				logger.Panic(e)
 			}
 		}
@@ -238,99 +239,101 @@ func (c *Node) Start(ctx context.Context) error {
 	<-startCtx.Done()
 
 	// set the client
-	c.client = c.server.NewEmbeddedClient()
+	n.client = n.server.NewEmbeddedClient()
 	// create the instance of the distributed map
-	dmp, err := c.client.NewDMap(c.name)
+	dmp, err := n.client.NewDMap(n.name)
 	// handle the error
 	if err != nil {
-		logger.Error(errors.Wrapf(err, "failed to start the cluster Node=(%s).💥", c.name))
+		logger.Error(errors.Wrapf(err, "failed to start the cluster Node=(%s).💥", n.name))
 		// let us stop the started engine
-		return c.server.Shutdown(ctx)
+		return n.server.Shutdown(ctx)
 	}
 	// set the distributed map
-	c.kvStore = dmp
+	n.kvStore = dmp
 
-	// create a subscriber to listen to cluster events
-	ps, err := c.client.NewPubSub()
+	// create a subscriber to consume to cluster events
+	ps, err := n.client.NewPubSub()
 	// handle the error
 	if err != nil {
-		logger.Error(errors.Wrapf(err, "failed to start the cluster Node=(%s).💥", c.name))
+		logger.Error(errors.Wrapf(err, "failed to start the cluster Node=(%s).💥", n.name))
 		// let us stop the started engine
-		return c.server.Shutdown(ctx)
+		return n.server.Shutdown(ctx)
 	}
 
 	// subscribe to the cluster events channel
-	c.eventsListener = ps.Subscribe(ctx, events.ClusterEventsChannel)
-	// start listening to cluster events
-	go c.listen()
+	n.pubSub = ps.Subscribe(ctx, events.ClusterEventsChannel)
+	// set the events channel
+	n.messagesChan = n.pubSub.Channel()
+	// start consuming to cluster events
+	go n.consume()
 	// return successfully
 	return nil
 }
 
 // Stop stops the Node gracefully
-func (c *Node) Stop(ctx context.Context) error {
+func (n *Node) Stop(ctx context.Context) error {
 	// create a cancellation context of 1 second timeout
-	ctx, cancelFn := context.WithTimeout(ctx, c.shutdownTimeout)
+	ctx, cancelFn := context.WithTimeout(ctx, n.shutdownTimeout)
 	defer cancelFn()
 
 	// set the logger
-	logger := c.logger
+	logger := n.logger
 
 	// add some logging information
-	logger.Infof("Stopping GoAkt cluster Node=(%s)....🤔", c.name)
+	logger.Infof("Stopping GoAkt cluster Node=(%s)....🤔", n.name)
 
 	// close the events listener
-	if err := c.eventsListener.Close(); err != nil {
+	if err := n.pubSub.Close(); err != nil {
 		logger.Error(errors.Wrap(err, "failed to shutdown the cluster events listener.💥"))
 		return err
 	}
 
 	// close the Node client
-	if err := c.client.Close(ctx); err != nil {
-		logger.Error(errors.Wrapf(err, "failed to shutdown the cluster Node=(%s).💥", c.name))
+	if err := n.client.Close(ctx); err != nil {
+		logger.Error(errors.Wrapf(err, "failed to shutdown the cluster Node=(%s).💥", n.name))
 		return err
 	}
 
 	// let us stop the server
-	if err := c.server.Shutdown(ctx); err != nil {
-		logger.Error(errors.Wrapf(err, "failed to Shutdown GoAkt cluster Node=(%s)....💥", c.name))
+	if err := n.server.Shutdown(ctx); err != nil {
+		logger.Error(errors.Wrapf(err, "failed to Shutdown GoAkt cluster Node=(%s)....💥", n.name))
 		return err
 	}
 
 	// close the events queue
-	c.events.Close()
+	close(n.events)
 
 	// signal we are stopping listening to events
-	c.listenerStopSignal <- types.Unit{}
+	n.messagesReaderChan <- types.Unit{}
 
-	logger.Infof("GoAkt cluster Node=(%s) successfully stopped.🎉", c.name)
+	logger.Infof("GoAkt cluster Node=(%s) successfully stopped.🎉", n.name)
 	return nil
 }
 
 // NodeHost returns the Node Host
-func (c *Node) NodeHost() string {
-	return c.host.Host
+func (n *Node) NodeHost() string {
+	return n.host.Host
 }
 
 // NodeRemotingPort returns the Node remoting port
-func (c *Node) NodeRemotingPort() int {
-	return c.host.RemotingPort
+func (n *Node) NodeRemotingPort() int {
+	return n.host.RemotingPort
 }
 
 // AdvertisedAddress returns the cluster node cluster address that is known by the
 // peers in the cluster
-func (c *Node) AdvertisedAddress() string {
-	return c.host.ClusterAddress()
+func (n *Node) AdvertisedAddress() string {
+	return n.host.ClusterAddress()
 }
 
 // PutActor replicates onto the Node the metadata of an actor
-func (c *Node) PutActor(ctx context.Context, actor *internalpb.WireActor) error {
+func (n *Node) PutActor(ctx context.Context, actor *internalpb.WireActor) error {
 	// create a cancellation context of 1 second timeout
-	ctx, cancelFn := context.WithTimeout(ctx, c.writeTimeout)
+	ctx, cancelFn := context.WithTimeout(ctx, n.writeTimeout)
 	defer cancelFn()
 
 	// set the logger
-	logger := c.logger
+	logger := n.logger
 
 	// add some logging information
 	logger.Infof("replicating actor (%s).🤔", actor.GetActorName())
@@ -346,7 +349,7 @@ func (c *Node) PutActor(ctx context.Context, actor *internalpb.WireActor) error 
 	}
 
 	// send the record into the Node
-	err = c.kvStore.Put(ctx, actor.GetActorName(), data)
+	err = n.kvStore.Put(ctx, actor.GetActorName(), data)
 	// handle the error
 	if err != nil {
 		// log the error
@@ -360,19 +363,19 @@ func (c *Node) PutActor(ctx context.Context, actor *internalpb.WireActor) error 
 }
 
 // GetActor fetches an actor from the Node
-func (c *Node) GetActor(ctx context.Context, actorName string) (*internalpb.WireActor, error) {
+func (n *Node) GetActor(ctx context.Context, actorName string) (*internalpb.WireActor, error) {
 	// create a cancellation context of 1 second timeout
-	ctx, cancelFn := context.WithTimeout(ctx, c.readTimeout)
+	ctx, cancelFn := context.WithTimeout(ctx, n.readTimeout)
 	defer cancelFn()
 
 	// set the logger
-	logger := c.logger
+	logger := n.logger
 
 	// add some logging information
 	logger.Infof("retrieving actor (%s) from the Node.🤔", actorName)
 
 	// grab the record from the distributed store
-	resp, err := c.kvStore.Get(ctx, actorName)
+	resp, err := n.kvStore.Get(ctx, actorName)
 	// handle the error
 	if err != nil {
 		// we could not find the given actor
@@ -410,15 +413,15 @@ func (c *Node) GetActor(ctx context.Context, actorName string) (*internalpb.Wire
 
 // RemoveActor removes a given actor from the cluster.
 // An actor is removed from the cluster when this actor has been passivated.
-func (c *Node) RemoveActor(ctx context.Context, actorName string) error {
+func (n *Node) RemoveActor(ctx context.Context, actorName string) error {
 	// set the logger
-	logger := c.logger
+	logger := n.logger
 
 	// add some logging information
 	logger.Infof("removing actor (%s).🤔", actorName)
 
 	// remove the actor from the cluster
-	_, err := c.kvStore.Delete(ctx, actorName)
+	_, err := n.kvStore.Delete(ctx, actorName)
 	// handle the error
 	if err != nil {
 		// log the error
@@ -432,19 +435,19 @@ func (c *Node) RemoveActor(ctx context.Context, actorName string) error {
 }
 
 // SetKey sets a given key to the cluster
-func (c *Node) SetKey(ctx context.Context, key string) error {
+func (n *Node) SetKey(ctx context.Context, key string) error {
 	// create a cancellation context of 1 second timeout
-	ctx, cancelFn := context.WithTimeout(ctx, c.writeTimeout)
+	ctx, cancelFn := context.WithTimeout(ctx, n.writeTimeout)
 	defer cancelFn()
 
 	// set the logger
-	logger := c.logger
+	logger := n.logger
 
 	// add some logging information
 	logger.Infof("replicating key (%s).🤔", key)
 
 	// send the record into the Node
-	err := c.kvStore.Put(ctx, key, true)
+	err := n.kvStore.Put(ctx, key, true)
 	// handle the error
 	if err != nil {
 		// log the error
@@ -458,19 +461,19 @@ func (c *Node) SetKey(ctx context.Context, key string) error {
 }
 
 // KeyExists checks the existence of a given key
-func (c *Node) KeyExists(ctx context.Context, key string) (bool, error) {
+func (n *Node) KeyExists(ctx context.Context, key string) (bool, error) {
 	// create a cancellation context of 1 second timeout
-	ctx, cancelFn := context.WithTimeout(ctx, c.readTimeout)
+	ctx, cancelFn := context.WithTimeout(ctx, n.readTimeout)
 	defer cancelFn()
 
 	// set the logger
-	logger := c.logger
+	logger := n.logger
 
 	// add some logging information
 	logger.Infof("checking key (%s) existence in the cluster.🤔", key)
 
 	// grab the record from the distributed store
-	resp, err := c.kvStore.Get(ctx, key)
+	resp, err := n.kvStore.Get(ctx, key)
 	// handle the error
 	if err != nil {
 		// we could not find the given actor
@@ -486,40 +489,31 @@ func (c *Node) KeyExists(ctx context.Context, key string) (bool, error) {
 }
 
 // GetPartition returns the partition where a given actor is stored
-func (c *Node) GetPartition(actorName string) int {
+func (n *Node) GetPartition(actorName string) int {
 	// create the byte array of the actor name
 	key := []byte(actorName)
 	// compute the hash key
-	hkey := c.hasher.HashCode(key)
+	hkey := n.hasher.HashCode(key)
 	// compute the partition and return it
-	partition := int(hkey % c.partitionsCount)
+	partition := int(hkey % n.partitionsCount)
 	// add some debug log
-	c.logger.Debugf("partition of actor (%s) is (%d)", actorName, partition)
+	n.logger.Debugf("partition of actor (%s) is (%d)", actorName, partition)
 	return partition
 }
 
 // Events returns a channel where cluster events are published
-func (c *Node) Events() chan *Event {
-	out := make(chan *Event, c.events.Len())
-	defer close(out)
-	for {
-		msg, ok := c.events.Pop()
-		if !ok {
-			break
-		}
-		out <- msg
-	}
-	return out
+func (n *Node) Events() <-chan *Event {
+	return n.events
 }
 
-// listen listens to the underlying cluster events
-// and emit the wrapped startNode event
-func (c *Node) listen() {
+// consume reads to the underlying cluster events
+// and emit the event
+func (n *Node) consume() {
 	for {
 		select {
-		case <-c.listenerStopSignal:
+		case <-n.messagesReaderChan:
 			return
-		case message, ok := <-c.eventsListener.Channel():
+		case message, ok := <-n.messagesChan:
 			// break out of the loop when the channel is closed
 			if !ok {
 				return
@@ -530,7 +524,7 @@ func (c *Node) listen() {
 			var event map[string]any
 			// let us unmarshal the event
 			if err := json.Unmarshal([]byte(payload), &event); err != nil {
-				c.logger.Error(errors.Wrap(err, "failed to decode cluster event"))
+				n.logger.Error(errors.Wrap(err, "failed to decode cluster event"))
 				// TODO: should we continue or not
 				continue
 			}
@@ -538,7 +532,7 @@ func (c *Node) listen() {
 			// grab the kind
 			kind := event["kind"]
 			// add some debug log
-			c.logger.Debugf("received (%s) cluster event", kind)
+			n.logger.Debugf("%s received (%s) cluster event", n.name, kind)
 
 			switch kind {
 			case events.KindNodeJoinEvent:
@@ -546,15 +540,15 @@ func (c *Node) listen() {
 				nodeJoined := new(events.NodeJoinEvent)
 				// let us unmarshal the event
 				if err := json.Unmarshal([]byte(payload), &nodeJoined); err != nil {
-					c.logger.Error(errors.Wrap(err, "failed to decode NodeJoined cluster event"))
+					n.logger.Error(errors.Wrap(err, "failed to decode NodeJoined cluster event"))
 					// TODO: should we continue or not
 					continue
 				}
 
 				// make sure to skip self
-				if c.AdvertisedAddress() == nodeJoined.NodeJoin {
+				if n.AdvertisedAddress() == nodeJoined.NodeJoin {
 					// add some debug log
-					c.logger.Debug("skipping self")
+					n.logger.Debug("skipping self")
 					continue
 				}
 
@@ -569,22 +563,22 @@ func (c *Node) listen() {
 				// serialize as any pb
 				eventType, _ := anypb.New(event)
 				// send the event to queue
-				c.events.Push(&Event{eventType})
+				n.events <- &Event{eventType}
 
 			case events.KindNodeLeftEvent:
 				// create the node left to unmarshal the event
 				nodeLeft := new(events.NodeLeftEvent)
 				// let us unmarshal the event
 				if err := json.Unmarshal([]byte(payload), &nodeLeft); err != nil {
-					c.logger.Error(errors.Wrap(err, "failed to decode NodeLeft cluster event"))
+					n.logger.Error(errors.Wrap(err, "failed to decode NodeLeft cluster event"))
 					// TODO: should we continue or not
 					continue
 				}
 
 				// make sure to skip self
-				if c.AdvertisedAddress() == nodeLeft.NodeLeft {
+				if n.AdvertisedAddress() == nodeLeft.NodeLeft {
 					// add some debug log
-					c.logger.Debug("skipping self")
+					n.logger.Debug("skipping self")
 					continue
 				}
 
@@ -599,7 +593,7 @@ func (c *Node) listen() {
 				// serialize as any pb
 				eventType, _ := anypb.New(event)
 				// send the event to queue
-				c.events.Push(&Event{eventType})
+				n.events <- &Event{eventType}
 			default:
 				// skip
 			}
@@ -608,10 +602,10 @@ func (c *Node) listen() {
 }
 
 // buildConfig builds the Node configuration
-func (c *Node) buildConfig() *config.Config {
+func (n *Node) buildConfig() *config.Config {
 	// define the log level
 	logLevel := "INFO"
-	switch c.logger.LogLevel() {
+	switch n.logger.LogLevel() {
 	case log.DebugLevel:
 		logLevel = "DEBUG"
 	case log.ErrorLevel, log.FatalLevel, log.PanicLevel:
@@ -624,8 +618,8 @@ func (c *Node) buildConfig() *config.Config {
 
 	// create the config and return it
 	conf := &config.Config{
-		BindAddr:                   c.host.Host,
-		BindPort:                   c.host.ClusterPort,
+		BindAddr:                   n.host.Host,
+		BindPort:                   n.host.ClusterPort,
 		ReadRepair:                 false,
 		ReplicaCount:               config.MinimumReplicaCount,
 		WriteQuorum:                config.DefaultWriteQuorum,
@@ -634,20 +628,20 @@ func (c *Node) buildConfig() *config.Config {
 		Peers:                      []string{},
 		DMaps:                      &olriconfig.DMaps{},
 		KeepAlivePeriod:            config.DefaultKeepAlivePeriod,
-		PartitionCount:             c.partitionsCount,
+		PartitionCount:             n.partitionsCount,
 		BootstrapTimeout:           config.DefaultBootstrapTimeout,
 		ReplicationMode:            olriconfig.SyncReplicationMode,
 		RoutingTablePushInterval:   config.DefaultRoutingTablePushInterval,
 		JoinRetryInterval:          config.DefaultJoinRetryInterval,
 		MaxJoinAttempts:            config.DefaultMaxJoinAttempts,
 		LogLevel:                   logLevel,
-		LogOutput:                  newLogWriter(c.logger),
+		LogOutput:                  newLogWriter(n.logger),
 		EnableClusterEventsChannel: true,
 		Hasher:                     hasher.NewDefaultHasher(),
 	}
 
 	// set verbosity when debug is enabled
-	if c.logger.LogLevel() == log.DebugLevel {
+	if n.logger.LogLevel() == log.DebugLevel {
 		conf.LogVerbosity = config.DefaultLogVerbosity
 	}
 
