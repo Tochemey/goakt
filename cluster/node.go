@@ -575,13 +575,6 @@ func (n *Node) consume() {
 					continue
 				}
 
-				// make sure to skip self
-				if n.AdvertisedAddress() == nodeLeft.NodeLeft {
-					// add some debug log
-					n.logger.Debug("skipping self")
-					continue
-				}
-
 				// TODO: need to cross check this calculation
 				// convert the timestamp to milliseconds
 				timeMilli := nodeLeft.Timestamp / int64(1e6)

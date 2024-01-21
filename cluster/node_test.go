@@ -39,6 +39,7 @@ import (
 	"github.com/tochemey/goakt/discovery"
 	"github.com/tochemey/goakt/discovery/nats"
 	internalpb "github.com/tochemey/goakt/internal/v1"
+	"github.com/tochemey/goakt/log"
 	eventspb "github.com/tochemey/goakt/pb/events/v1"
 	testkit "github.com/tochemey/goakt/testkit/discovery"
 	"github.com/travisjeffery/go-dynaport"
@@ -86,7 +87,8 @@ func TestSingleNode(t *testing.T) {
 		t.Setenv("NODE_NAME", "testNode")
 		t.Setenv("NODE_IP", host)
 
-		cluster, err := NewNode("test", serviceDiscovery)
+		logger := log.New(log.ErrorLevel, os.Stdout)
+		cluster, err := NewNode("test", serviceDiscovery, WithLogger(logger))
 		require.NotNil(t, cluster)
 		require.NoError(t, err)
 
@@ -285,7 +287,8 @@ func TestSingleNode(t *testing.T) {
 		t.Setenv("NODE_NAME", "testNode")
 		t.Setenv("NODE_IP", host)
 
-		cluster, err := NewNode("test", serviceDiscovery)
+		logger := log.New(log.WarningLevel, os.Stdout)
+		cluster, err := NewNode("test", serviceDiscovery, WithLogger(logger))
 		require.NotNil(t, cluster)
 		require.NoError(t, err)
 
@@ -319,6 +322,40 @@ func TestSingleNode(t *testing.T) {
 		// stop the node
 		require.NoError(t, cluster.Stop(ctx))
 		provider.AssertExpectations(t)
+	})
+	t.Run("With host node env vars not set", func(t *testing.T) {
+		// generate the ports for the single startNode
+		nodePorts := dynaport.Get(3)
+		gossipPort := nodePorts[0]
+		remotingPort := nodePorts[2]
+
+		// define discovered addresses
+		addrs := []string{
+			fmt.Sprintf("localhost:%d", gossipPort),
+		}
+
+		// mock the discovery provider
+		provider := new(testkit.Provider)
+		config := discovery.NewConfig()
+
+		provider.EXPECT().ID().Return("testDisco")
+		provider.EXPECT().Initialize().Return(nil)
+		provider.EXPECT().Register().Return(nil)
+		provider.EXPECT().Deregister().Return(nil)
+		provider.EXPECT().SetConfig(config).Return(nil)
+		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
+		provider.EXPECT().Close().Return(nil)
+
+		// create the service discovery
+		serviceDiscovery := discovery.NewServiceDiscovery(provider, config)
+
+		// set the environments
+		t.Setenv("GOSSIP_PORT", strconv.Itoa(gossipPort))
+		t.Setenv("REMOTING_PORT", strconv.Itoa(remotingPort))
+
+		cluster, err := NewNode("test", serviceDiscovery)
+		require.Nil(t, cluster)
+		require.Error(t, err)
 	})
 }
 
