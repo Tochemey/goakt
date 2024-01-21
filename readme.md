@@ -145,6 +145,7 @@ Once can implement a custom mailbox. See [Mailbox](./actors/mailbox.go). The def
 ### Events Stream
 
 To receive some system events and act on them for some particular business cases,  you just need to call the actor system `Subscribe`.
+Make sure to `Unsubscribe` whenever the subscription is no longer needed to free allocated resources.
 The subscription methods can be found on the `ActorSystem` interface.
 
 #### Supported events
@@ -154,6 +155,8 @@ The subscription methods can be found on the `ActorSystem` interface.
 - [`ActorPassivated`](./protos/goakt/events/v1/events.proto): emitted when an actor is passivated
 - [`ActorChildCreated`](./protos/goakt/events/v1/events.proto): emitted when a child actor is created
 - [`ActorRestarted`](./protos/goakt/events/v1/events.proto): emitted when an actor has restarted
+- [`NodeJoined`](./protos/goakt/events/v1/events.proto): cluster event emitted when a node joins the cluster. This only happens when cluster mode is enabled
+- [`NodeLeft`](./protos/goakt/events/v1/events.proto): cluster event emitted when a node leaves the cluster. This only happens when cluster mode is enabled
 - [`Deadletter`](./protos/goakt/events/v1/events.proto): emitted when a message cannot be delivered or that were not handled by a given actor.
 Dead letters are automatically emitted when a message cannot be delivered to actors' mailbox or when an Ask times out.
 Also, one can emit dead letters from the receiving actor by using the `ctx.Unhandled()` method. This is useful instead of panicking when
