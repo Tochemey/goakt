@@ -1188,4 +1188,15 @@ func TestActorSystem(t *testing.T) {
 			srv.Shutdown()
 		})
 	})
+	t.Run("With PeerAddress empty when cluster not enabled", func(t *testing.T) {
+		ctx := context.TODO()
+		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+
+		// start the actor system
+		err := sys.Start(ctx)
+		assert.NoError(t, err)
+		require.Empty(t, sys.PeerAddress())
+
+		require.NoError(t, sys.Stop(ctx))
+	})
 }
