@@ -28,7 +28,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	testkit "github.com/tochemey/goakt/testkit/hash"
+	testkit "github.com/tochemey/goakt/mocks/hash"
 )
 
 func TestHasher(t *testing.T) {
