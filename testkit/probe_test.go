@@ -2,7 +2,9 @@ package testkit
 
 import (
 	"context"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"github.com/tochemey/goakt/actors"
@@ -109,6 +111,57 @@ func TestTestProbe(t *testing.T) {
 			testkit.Shutdown(ctx)
 		})
 	})
+	t.Run("Assert message received within a time period", func(t *testing.T) {
+		// create a test context
+		ctx := context.TODO()
+		// create a test kit
+		testkit := New(ctx, t)
+
+		// create the actor
+		pinger := testkit.Spawn(ctx, "pinger", &pinger{})
+		// create the test probe
+		probe := testkit.NewProbe(ctx)
+
+		// create the message to expect
+		msg := new(testpb.Pong)
+		// send a message to the actor to be tested
+		duration := time.Second
+		probe.Send(pinger, &testpb.Wait{Duration: uint64(duration)})
+
+		actual := probe.ExpectMessageWithin(2*time.Second, msg)
+		require.Equal(t, prototext.Format(msg), prototext.Format(actual))
+		probe.ExpectNoMessage()
+
+		t.Cleanup(func() {
+			probe.Stop()
+			testkit.Shutdown(ctx)
+		})
+	})
+	t.Run("Assert message type within a time period", func(t *testing.T) {
+		// create a test context
+		ctx := context.TODO()
+		// create a test kit
+		testkit := New(ctx, t)
+
+		// create the actor
+		pinger := testkit.Spawn(ctx, "pinger", &pinger{})
+		// create the test probe
+		probe := testkit.NewProbe(ctx)
+
+		// create the message to expect
+		msg := new(testpb.Pong)
+		// send a message to the actor to be tested
+		duration := time.Second
+		probe.Send(pinger, &testpb.Wait{Duration: uint64(duration)})
+
+		probe.ExpectMessageOfTypeWithin(2*time.Second, msg.ProtoReflect().Type())
+		probe.ExpectNoMessage()
+
+		t.Cleanup(func() {
+			probe.Stop()
+			testkit.Shutdown(ctx)
+		})
+	})
 }
 
 type pinger struct {
@@ -119,8 +172,20 @@ func (t pinger) PreStart(_ context.Context) error {
 }
 
 func (t pinger) Receive(ctx actors.ReceiveContext) {
-	switch ctx.Message().(type) {
+	switch x := ctx.Message().(type) {
 	case *testpb.Ping:
+		_ = ctx.Self().Tell(ctx.Context(), ctx.Sender(), new(testpb.Pong))
+	case *testpb.Wait:
+		// delay for a while before sending the reply
+		wg := sync.WaitGroup{}
+		wg.Add(1)
+		go func() {
+			time.Sleep(time.Duration(x.Duration))
+			wg.Done()
+		}()
+		// block until timer is up
+		wg.Wait()
+		// reply the sender
 		_ = ctx.Self().Tell(ctx.Context(), ctx.Sender(), new(testpb.Pong))
 	}
 }

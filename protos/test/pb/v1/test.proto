@@ -53,3 +53,7 @@ message TestUnstashAll {}
 
 message Ping {}
 message Pong {}
+
+message Wait {
+  uint64 duration = 1;
+}
