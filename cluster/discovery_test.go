@@ -33,7 +33,7 @@ import (
 	"github.com/tochemey/goakt/discovery"
 	"github.com/tochemey/goakt/discovery/kubernetes"
 	"github.com/tochemey/goakt/log"
-	testkit "github.com/tochemey/goakt/testkit/discovery"
+	testkit "github.com/tochemey/goakt/mocks/discovery"
 	"github.com/travisjeffery/go-dynaport"
 )
 

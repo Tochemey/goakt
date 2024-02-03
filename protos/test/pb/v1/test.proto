@@ -50,3 +50,6 @@ message TestBye {}
 message TestStash {}
 message TestUnstash {}
 message TestUnstashAll {}
+
+message Ping {}
+message Pong {}

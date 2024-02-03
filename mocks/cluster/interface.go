@@ -5,6 +5,7 @@ package cluster
 import (
 	context "context"
 
+	goaktcluster "github.com/tochemey/goakt/cluster"
 	internalpb "github.com/tochemey/goakt/internal/v1"
 
 	mock "github.com/stretchr/testify/mock"
@@ -21,6 +22,90 @@ type Interface_Expecter struct {
 
 func (_m *Interface) EXPECT() *Interface_Expecter {
 	return &Interface_Expecter{mock: &_m.Mock}
+}
+
+// AdvertisedAddress provides a mock function with given fields:
+func (_m *Interface) AdvertisedAddress() string {
+	ret := _m.Called()
+
+	var r0 string
+	if rf, ok := ret.Get(0).(func() string); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+
+	return r0
+}
+
+// Interface_AdvertisedAddress_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AdvertisedAddress'
+type Interface_AdvertisedAddress_Call struct {
+	*mock.Call
+}
+
+// AdvertisedAddress is a helper method to define mock.On call
+func (_e *Interface_Expecter) AdvertisedAddress() *Interface_AdvertisedAddress_Call {
+	return &Interface_AdvertisedAddress_Call{Call: _e.mock.On("AdvertisedAddress")}
+}
+
+func (_c *Interface_AdvertisedAddress_Call) Run(run func()) *Interface_AdvertisedAddress_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *Interface_AdvertisedAddress_Call) Return(_a0 string) *Interface_AdvertisedAddress_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *Interface_AdvertisedAddress_Call) RunAndReturn(run func() string) *Interface_AdvertisedAddress_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// Events provides a mock function with given fields:
+func (_m *Interface) Events() <-chan *goaktcluster.Event {
+	ret := _m.Called()
+
+	var r0 <-chan *goaktcluster.Event
+	if rf, ok := ret.Get(0).(func() <-chan *goaktcluster.Event); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(<-chan *goaktcluster.Event)
+		}
+	}
+
+	return r0
+}
+
+// Interface_Events_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Events'
+type Interface_Events_Call struct {
+	*mock.Call
+}
+
+// Events is a helper method to define mock.On call
+func (_e *Interface_Expecter) Events() *Interface_Events_Call {
+	return &Interface_Events_Call{Call: _e.mock.On("Events")}
+}
+
+func (_c *Interface_Events_Call) Run(run func()) *Interface_Events_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *Interface_Events_Call) Return(_a0 <-chan *goaktcluster.Event) *Interface_Events_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *Interface_Events_Call) RunAndReturn(run func() <-chan *goaktcluster.Event) *Interface_Events_Call {
+	_c.Call.Return(run)
+	return _c
 }
 
 // GetActor provides a mock function with given fields: ctx, actorName

@@ -13,4 +13,5 @@
     - "test"
     - "examples"
     - "internal"
+    - "mocks"
     - "testkit"

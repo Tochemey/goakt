@@ -40,8 +40,8 @@ import (
 	"github.com/tochemey/goakt/discovery/nats"
 	internalpb "github.com/tochemey/goakt/internal/v1"
 	"github.com/tochemey/goakt/log"
+	testkit "github.com/tochemey/goakt/mocks/discovery"
 	eventspb "github.com/tochemey/goakt/pb/events/v1"
-	testkit "github.com/tochemey/goakt/testkit/discovery"
 	"github.com/travisjeffery/go-dynaport"
 	"google.golang.org/protobuf/proto"
 )
