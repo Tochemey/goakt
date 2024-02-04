@@ -9,9 +9,9 @@
             target: 80%    # the required coverage value
             threshold: 1%  # the leniency in hitting the target
   ignore:
-    - "pb"
-    - "test"
-    - "examples"
-    - "internal"
-    - "mocks"
-    - "testkit"
+    - "pb/**/*"
+    - "test/**/*"
+    - "examples/**/*"
+    - "internal/**/*"
+    - "mocks/**/*"
+    - "testkit/**/*"
