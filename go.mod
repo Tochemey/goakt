@@ -5,7 +5,7 @@ go 1.21
 require (
 	connectrpc.com/connect v1.14.0
 	connectrpc.com/otelconnect v0.7.0
-	github.com/buraksezer/olric v0.5.5-0.20231219192155-8f7dde19dbd2
+	github.com/buraksezer/olric v0.5.5
 	github.com/caarlos0/env/v10 v10.0.0
 	github.com/cespare/xxhash/v2 v2.2.0
 	github.com/deckarep/golang-set/v2 v2.6.0
@@ -59,6 +59,7 @@ require (
 	github.com/go-openapi/jsonpointer v0.20.0 // indirect
 	github.com/go-openapi/jsonreference v0.20.2 // indirect
 	github.com/go-openapi/swag v0.22.4 // indirect
+	github.com/go-redis/redis/v8 v8.11.5 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang/protobuf v1.5.3 // indirect
 	github.com/google/btree v1.1.2 // indirect
