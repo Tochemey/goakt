@@ -5,7 +5,7 @@ go 1.21
 require (
 	connectrpc.com/connect v1.14.0
 	connectrpc.com/otelconnect v0.7.0
-	github.com/buraksezer/olric v0.5.5-0.20231219192155-8f7dde19dbd2
+	github.com/buraksezer/olric v0.5.6-0.20240205222928-c5efb0d4b5ea
 	github.com/caarlos0/env/v10 v10.0.0
 	github.com/cespare/xxhash/v2 v2.2.0
 	github.com/deckarep/golang-set/v2 v2.6.0
