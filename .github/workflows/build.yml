@@ -28,7 +28,7 @@ jobs:
           password: ${{ secrets.DOCKERHUB_TOKEN}}
       - uses: earthly/actions/setup-earthly@v1
         with:
-          version: v0.8.2
+          version: v0.8.3
       - name: Earthly version
         run: earthly --version
       - name: Run Linter and Tests
@@ -39,7 +39,7 @@ jobs:
           FORCE_COLOR: 1
         run: |
           earthly -P -use-inline-cache --save-inline-cache --strict --push +test
-      - uses: codecov/codecov-action@v3
+      - uses: codecov/codecov-action@v4
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ./coverage.out # optional
