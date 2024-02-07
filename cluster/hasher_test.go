@@ -27,8 +27,9 @@ package cluster
 import (
 	"testing"
 
+	testkit "github.com/tochemey/goakt/mocks/hash"
+
 	"github.com/stretchr/testify/assert"
-	testkit "github.com/tochemey/goakt/test/mocks/hash"
 )
 
 func TestHasher(t *testing.T) {

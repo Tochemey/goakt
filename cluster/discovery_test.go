@@ -28,12 +28,13 @@ import (
 	"fmt"
 	"testing"
 
+	testkit "github.com/tochemey/goakt/mocks/discovery"
+
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/tochemey/goakt/discovery"
 	"github.com/tochemey/goakt/discovery/kubernetes"
 	"github.com/tochemey/goakt/log"
-	testkit "github.com/tochemey/goakt/test/mocks/discovery"
 	"github.com/travisjeffery/go-dynaport"
 )
 

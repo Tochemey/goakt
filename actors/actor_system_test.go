@@ -33,6 +33,8 @@ import (
 	"testing"
 	"time"
 
+	testkit "github.com/tochemey/goakt/mocks/discovery"
+
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -42,7 +44,6 @@ import (
 	eventspb "github.com/tochemey/goakt/pb/events/v1"
 	"github.com/tochemey/goakt/telemetry"
 	testpb "github.com/tochemey/goakt/test/data/pb/v1"
-	testkit "github.com/tochemey/goakt/test/mocks/discovery"
 	"github.com/travisjeffery/go-dynaport"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"

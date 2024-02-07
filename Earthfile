@@ -46,7 +46,7 @@ mock:
     RUN mockery  --all --dir discovery --recursive --keeptree --exported=true --with-expecter=true --inpackage=true --output ./mocks/discovery --case snake
     RUN mockery  --all --dir cluster --recursive --keeptree --exported=true --with-expecter=true --inpackage=true --output ./mocks/cluster --case snake
 
-    SAVE ARTIFACT ./mocks mocks AS LOCAL test/mocks
+    SAVE ARTIFACT ./mocks mocks AS LOCAL mocks
 
 
 lint:

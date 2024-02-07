@@ -32,6 +32,8 @@ import (
 	"testing"
 	"time"
 
+	testkit "github.com/tochemey/goakt/mocks/discovery"
+
 	"github.com/google/uuid"
 	natsserver "github.com/nats-io/nats-server/v2/server"
 	"github.com/stretchr/testify/assert"
@@ -41,7 +43,6 @@ import (
 	internalpb "github.com/tochemey/goakt/internal/v1"
 	"github.com/tochemey/goakt/log"
 	eventspb "github.com/tochemey/goakt/pb/events/v1"
-	testkit "github.com/tochemey/goakt/test/mocks/discovery"
 	"github.com/travisjeffery/go-dynaport"
 	"google.golang.org/protobuf/proto"
 )
