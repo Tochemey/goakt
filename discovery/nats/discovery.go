@@ -243,11 +243,6 @@ func (d *Discovery) Deregister() error {
 	// release the lock
 	defer d.mu.Unlock()
 
-	// unregister
-	defer func() {
-		d.registered.Store(false)
-	}()
-
 	// first check whether the discovery provider has been registered or not
 	if !d.registered.Load() {
 		return discovery.ErrNotRegistered
@@ -255,9 +250,15 @@ func (d *Discovery) Deregister() error {
 
 	// shutdown all the subscriptions
 	for _, subscription := range d.subscriptions {
-		// unsubscribe and return when there is an error
-		if err := subscription.Unsubscribe(); err != nil {
-			return err
+		// when subscription is defined
+		if subscription != nil {
+			// check whether the subscription is active or not
+			if subscription.IsValid() {
+				// unsubscribe and return when there is an error
+				if err := subscription.Unsubscribe(); err != nil {
+					return err
+				}
+			}
 		}
 	}
 
@@ -271,6 +272,8 @@ func (d *Discovery) Deregister() error {
 			MessageType: internalpb.NatsMessageType_NATS_MESSAGE_TYPE_DEREGISTER,
 		})
 	}
+	// set registered to false
+	d.registered.Store(false)
 	return nil
 }
 
@@ -365,16 +368,33 @@ func (d *Discovery) DiscoverPeers() ([]string, error) {
 
 // Close closes the provider
 func (d *Discovery) Close() error {
+	// acquire the lock
+	d.mu.Lock()
+	// release the lock
+	defer d.mu.Unlock()
+
 	// set the initialized to false
 	d.initialized.Store(false)
-	// set registered to false
-	d.registered.Store(false)
 
 	if d.natsConnection != nil {
+		defer func() {
+			// close the underlying connection
+			d.natsConnection.Close()
+			d.natsConnection = nil
+		}()
+
 		// close all the subscriptions
 		for _, subscription := range d.subscriptions {
-			// unsubscribe and ignore the error
-			_ = subscription.Unsubscribe()
+			// when subscription is defined
+			if subscription != nil {
+				// check whether the subscription is active or not
+				if subscription.IsValid() {
+					// unsubscribe and return when there is an error
+					if err := subscription.Unsubscribe(); err != nil {
+						return err
+					}
+				}
+			}
 		}
 
 		// flush all messages
