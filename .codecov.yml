@@ -14,4 +14,4 @@
     - "examples/**/*"
     - "internal/**/*"
     - "testkit/**/*"
-    - "mocks"
+    - "**/mocks"
