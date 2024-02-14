@@ -78,4 +78,6 @@ var (
 	ErrEmptyMailbox = errors.New("mailbox is empty")
 	// ErrFullMailbox is returned when the mailbox is full
 	ErrFullMailbox = errors.New("mailbox is full")
+	// ErrInstanceNotAnActor is returned when we failed to create the instance of an actor
+	ErrInstanceNotAnActor = errors.New("failed to create instance. Reason: instance does not implement the Actor interface")
 )

@@ -48,6 +48,9 @@ const (
 	// RemotingServiceRemoteBatchAskProcedure is the fully-qualified name of the RemotingService's
 	// RemoteBatchAsk RPC.
 	RemotingServiceRemoteBatchAskProcedure = "/internal.v1.RemotingService/RemoteBatchAsk"
+	// RemotingServiceRemoteReSpawnProcedure is the fully-qualified name of the RemotingService's
+	// RemoteReSpawn RPC.
+	RemotingServiceRemoteReSpawnProcedure = "/internal.v1.RemotingService/RemoteReSpawn"
 )
 
 // These variables are the protoreflect.Descriptor objects for the RPCs defined in this package.
@@ -58,6 +61,7 @@ var (
 	remotingServiceRemoteLookupMethodDescriptor    = remotingServiceServiceDescriptor.Methods().ByName("RemoteLookup")
 	remotingServiceRemoteBatchTellMethodDescriptor = remotingServiceServiceDescriptor.Methods().ByName("RemoteBatchTell")
 	remotingServiceRemoteBatchAskMethodDescriptor  = remotingServiceServiceDescriptor.Methods().ByName("RemoteBatchAsk")
+	remotingServiceRemoteReSpawnMethodDescriptor   = remotingServiceServiceDescriptor.Methods().ByName("RemoteReSpawn")
 )
 
 // RemotingServiceClient is a client for the internal.v1.RemotingService service.
@@ -74,6 +78,8 @@ type RemotingServiceClient interface {
 	// RemoteBatchAsk is used to send a bulk messages to a remote actor with replies.
 	// The replies are sent in the same order as the messages
 	RemoteBatchAsk(context.Context, *connect.Request[v1.RemoteBatchAskRequest]) (*connect.Response[v1.RemoteBatchAskResponse], error)
+	// RemoteReSpawn restarts an actor on a remote machine
+	RemoteReSpawn(context.Context, *connect.Request[v1.RemoteReSpawnRequest]) (*connect.Response[v1.RemoteReSpawnResponse], error)
 }
 
 // NewRemotingServiceClient constructs a client for the internal.v1.RemotingService service. By
@@ -116,6 +122,12 @@ func NewRemotingServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 			connect.WithSchema(remotingServiceRemoteBatchAskMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
+		remoteReSpawn: connect.NewClient[v1.RemoteReSpawnRequest, v1.RemoteReSpawnResponse](
+			httpClient,
+			baseURL+RemotingServiceRemoteReSpawnProcedure,
+			connect.WithSchema(remotingServiceRemoteReSpawnMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -126,6 +138,7 @@ type remotingServiceClient struct {
 	remoteLookup    *connect.Client[v1.RemoteLookupRequest, v1.RemoteLookupResponse]
 	remoteBatchTell *connect.Client[v1.RemoteBatchTellRequest, v1.RemoteBatchTellResponse]
 	remoteBatchAsk  *connect.Client[v1.RemoteBatchAskRequest, v1.RemoteBatchAskResponse]
+	remoteReSpawn   *connect.Client[v1.RemoteReSpawnRequest, v1.RemoteReSpawnResponse]
 }
 
 // RemoteAsk calls internal.v1.RemotingService.RemoteAsk.
@@ -153,6 +166,11 @@ func (c *remotingServiceClient) RemoteBatchAsk(ctx context.Context, req *connect
 	return c.remoteBatchAsk.CallUnary(ctx, req)
 }
 
+// RemoteReSpawn calls internal.v1.RemotingService.RemoteReSpawn.
+func (c *remotingServiceClient) RemoteReSpawn(ctx context.Context, req *connect.Request[v1.RemoteReSpawnRequest]) (*connect.Response[v1.RemoteReSpawnResponse], error) {
+	return c.remoteReSpawn.CallUnary(ctx, req)
+}
+
 // RemotingServiceHandler is an implementation of the internal.v1.RemotingService service.
 type RemotingServiceHandler interface {
 	// RemoteAsk is used to send a message to an actor remotely and expect a response immediately.
@@ -167,6 +185,8 @@ type RemotingServiceHandler interface {
 	// RemoteBatchAsk is used to send a bulk messages to a remote actor with replies.
 	// The replies are sent in the same order as the messages
 	RemoteBatchAsk(context.Context, *connect.Request[v1.RemoteBatchAskRequest]) (*connect.Response[v1.RemoteBatchAskResponse], error)
+	// RemoteReSpawn restarts an actor on a remote machine
+	RemoteReSpawn(context.Context, *connect.Request[v1.RemoteReSpawnRequest]) (*connect.Response[v1.RemoteReSpawnResponse], error)
 }
 
 // NewRemotingServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -205,6 +225,12 @@ func NewRemotingServiceHandler(svc RemotingServiceHandler, opts ...connect.Handl
 		connect.WithSchema(remotingServiceRemoteBatchAskMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
+	remotingServiceRemoteReSpawnHandler := connect.NewUnaryHandler(
+		RemotingServiceRemoteReSpawnProcedure,
+		svc.RemoteReSpawn,
+		connect.WithSchema(remotingServiceRemoteReSpawnMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/internal.v1.RemotingService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case RemotingServiceRemoteAskProcedure:
@@ -217,6 +243,8 @@ func NewRemotingServiceHandler(svc RemotingServiceHandler, opts ...connect.Handl
 			remotingServiceRemoteBatchTellHandler.ServeHTTP(w, r)
 		case RemotingServiceRemoteBatchAskProcedure:
 			remotingServiceRemoteBatchAskHandler.ServeHTTP(w, r)
+		case RemotingServiceRemoteReSpawnProcedure:
+			remotingServiceRemoteReSpawnHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -244,4 +272,8 @@ func (UnimplementedRemotingServiceHandler) RemoteBatchTell(context.Context, *con
 
 func (UnimplementedRemotingServiceHandler) RemoteBatchAsk(context.Context, *connect.Request[v1.RemoteBatchAskRequest]) (*connect.Response[v1.RemoteBatchAskResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("internal.v1.RemotingService.RemoteBatchAsk is not implemented"))
+}
+
+func (UnimplementedRemotingServiceHandler) RemoteReSpawn(context.Context, *connect.Request[v1.RemoteReSpawnRequest]) (*connect.Response[v1.RemoteReSpawnResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("internal.v1.RemotingService.RemoteReSpawn is not implemented"))
 }

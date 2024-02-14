@@ -24,6 +24,8 @@ service RemotingService {
   // RemoteBatchAsk is used to send a bulk messages to a remote actor with replies.
   // The replies are sent in the same order as the messages
   rpc RemoteBatchAsk(RemoteBatchAskRequest) returns (RemoteBatchAskResponse);
+  // RemoteReSpawn restarts an actor on a remote machine
+  rpc RemoteReSpawn(RemoteReSpawnRequest) returns (RemoteReSpawnResponse);
 }
 
 // RemoteAsk is used to send a message to an actor remotely and expect a response
@@ -98,3 +100,14 @@ message RemoteBatchAskResponse {
   // Any proto message is allowed to be sent
   repeated google.protobuf.Any messages = 1;
 }
+
+message RemoteReSpawnRequest {
+  // Specifies the remote host address
+  string host = 1;
+  // Specifies the remote port
+  int32 port = 2;
+  // Specifies the actor name
+  string name = 3;
+}
+
+message RemoteReSpawnResponse {}

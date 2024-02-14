@@ -128,6 +128,8 @@ type ReceiveContext interface {
 	// Unhandled is used to handle unhandled messages instead of throwing error
 	// This will push the given message into the deadletter queue
 	Unhandled()
+	// RemoteReSpawn restarts an actor on a remote node.
+	RemoteReSpawn(host string, port int, name string)
 }
 
 type receiveContext struct {
@@ -504,4 +506,16 @@ func (c *receiveContext) Unhandled() {
 	c.mu.Unlock()
 	// send the current message to deadletters
 	me.emitDeadletter(c, ErrUnhandled)
+}
+
+// RemoteReSpawn restarts an actor on a remote node.
+func (c *receiveContext) RemoteReSpawn(host string, port int, name string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	// create a new context from the parent context
+	ctx := context.WithoutCancel(c.ctx)
+	err := c.recipient.RemoteReSpawn(ctx, host, port, name)
+	if err != nil {
+		panic(err)
+	}
 }
