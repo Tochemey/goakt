@@ -44,7 +44,7 @@ import (
 )
 
 func TestReceiveContext(t *testing.T) {
-	t.Run("With Actor behaviors", func(t *testing.T) {
+	t.Run("With behaviors handling", func(t *testing.T) {
 		ctx := context.TODO()
 		// create the actor options
 		opts := []pidOption{
@@ -102,7 +102,7 @@ func TestReceiveContext(t *testing.T) {
 		time.Sleep(time.Second)
 		assert.False(t, pid.IsRunning())
 	})
-	t.Run("With happy path Tell", func(t *testing.T) {
+	t.Run("With successful Tell command", func(t *testing.T) {
 		ctx := context.TODO()
 		// create a Ping actor
 		opts := []pidOption{
@@ -143,7 +143,7 @@ func TestReceiveContext(t *testing.T) {
 		assert.NoError(t, pid1.Shutdown(ctx))
 		assert.NoError(t, pid2.Shutdown(ctx))
 	})
-	t.Run("With panic Tell", func(t *testing.T) {
+	t.Run("With failed Tell", func(t *testing.T) {
 		ctx := context.TODO()
 		// create a Ping actor
 		opts := []pidOption{
@@ -187,7 +187,7 @@ func TestReceiveContext(t *testing.T) {
 		time.Sleep(time.Second)
 		assert.NoError(t, pid1.Shutdown(ctx))
 	})
-	t.Run("With happy path Ask", func(t *testing.T) {
+	t.Run("With successful Ask command", func(t *testing.T) {
 		ctx := context.TODO()
 		// create a Ping actor
 		opts := []pidOption{
@@ -228,7 +228,7 @@ func TestReceiveContext(t *testing.T) {
 		assert.NoError(t, pid1.Shutdown(ctx))
 		assert.NoError(t, pid2.Shutdown(ctx))
 	})
-	t.Run("With panic Ask", func(t *testing.T) {
+	t.Run("With failed Ask", func(t *testing.T) {
 		ctx := context.TODO()
 		// create a Ping actor
 		opts := []pidOption{
@@ -272,7 +272,7 @@ func TestReceiveContext(t *testing.T) {
 		time.Sleep(time.Second)
 		assert.NoError(t, pid1.Shutdown(ctx))
 	})
-	t.Run("With happy path RemoteAsk", func(t *testing.T) {
+	t.Run("With successful RemoteAsk", func(t *testing.T) {
 		// create the context
 		ctx := context.TODO()
 		// define the logger to use
@@ -337,7 +337,7 @@ func TestReceiveContext(t *testing.T) {
 			assert.NoError(t, sys.Stop(ctx))
 		})
 	})
-	t.Run("With panic RemoteAsk", func(t *testing.T) {
+	t.Run("With failed RemoteAsk", func(t *testing.T) {
 		// create the context
 		ctx := context.TODO()
 		// define the logger to use
@@ -402,7 +402,7 @@ func TestReceiveContext(t *testing.T) {
 			assert.NoError(t, sys.Stop(ctx))
 		})
 	})
-	t.Run("With happy path RemoteTell", func(t *testing.T) {
+	t.Run("With successful RemoteTell", func(t *testing.T) {
 		// create the context
 		ctx := context.TODO()
 		// define the logger to use
@@ -468,7 +468,7 @@ func TestReceiveContext(t *testing.T) {
 			assert.NoError(t, sys.Stop(ctx))
 		})
 	})
-	t.Run("With panic RemoteTell", func(t *testing.T) {
+	t.Run("With failed RemoteTell", func(t *testing.T) {
 		// create the context
 		ctx := context.TODO()
 		// define the logger to use
@@ -590,7 +590,7 @@ func TestReceiveContext(t *testing.T) {
 			assert.NoError(t, sys.Stop(ctx))
 		})
 	})
-	t.Run("With panic RemoteLookup", func(t *testing.T) {
+	t.Run("With failed RemoteLookup", func(t *testing.T) {
 		// create the context
 		ctx := context.TODO()
 		// define the logger to use
@@ -648,7 +648,7 @@ func TestReceiveContext(t *testing.T) {
 			assert.NoError(t, sys.Stop(ctx))
 		})
 	})
-	t.Run("With happy path Shutdown", func(t *testing.T) {
+	t.Run("With successful Shutdown", func(t *testing.T) {
 		ctx := context.TODO()
 		// create a Ping actor
 		opts := []pidOption{
@@ -678,7 +678,7 @@ func TestReceiveContext(t *testing.T) {
 			context.Shutdown()
 		})
 	})
-	t.Run("With happy path SpawnChild", func(t *testing.T) {
+	t.Run("With successful SpawnChild", func(t *testing.T) {
 		ctx := context.TODO()
 		actorPath := NewPath("Parent", NewAddress("sys", "host", 1))
 
@@ -716,7 +716,7 @@ func TestReceiveContext(t *testing.T) {
 			context.Shutdown()
 		})
 	})
-	t.Run("With panic SpawnChild", func(t *testing.T) {
+	t.Run("With failed SpawnChild", func(t *testing.T) {
 		ctx := context.TODO()
 		actorPath := NewPath("Parent", NewAddress("sys", "host", 1))
 
@@ -830,7 +830,7 @@ func TestReceiveContext(t *testing.T) {
 			require.NoError(t, child.Shutdown(ctx))
 		})
 	})
-	t.Run("With happy path Stop", func(t *testing.T) {
+	t.Run("With successful Stop", func(t *testing.T) {
 		ctx := context.TODO()
 		actorPath := NewPath("Parent", NewAddress("sys", "host", 1))
 
@@ -914,7 +914,7 @@ func TestReceiveContext(t *testing.T) {
 			context.Shutdown()
 		})
 	})
-	t.Run("With panic Stop: child not defined", func(t *testing.T) {
+	t.Run("With failed Stop: child not defined", func(t *testing.T) {
 		ctx := context.TODO()
 		actorPath := NewPath("Parent", NewAddress("sys", "host", 1))
 
@@ -948,7 +948,7 @@ func TestReceiveContext(t *testing.T) {
 			context.Shutdown()
 		})
 	})
-	t.Run("With panic Stop: parent is dead", func(t *testing.T) {
+	t.Run("With failed Stop: parent is dead", func(t *testing.T) {
 		ctx := context.TODO()
 		actorPath := NewPath("Parent", NewAddress("sys", "host", 1))
 
@@ -988,7 +988,7 @@ func TestReceiveContext(t *testing.T) {
 			context.Stop(child)
 		})
 	})
-	t.Run("With panic Stop: actor not found", func(t *testing.T) {
+	t.Run("With failed Stop: actor not found", func(t *testing.T) {
 		ctx := context.TODO()
 		actorPath := NewPath("parent", NewAddress("sys", "host", 1))
 
@@ -1075,7 +1075,7 @@ func TestReceiveContext(t *testing.T) {
 			context.Shutdown()
 		})
 	})
-	t.Run("With panic Shutdown", func(t *testing.T) {
+	t.Run("With failed Shutdown", func(t *testing.T) {
 		ctx := context.TODO()
 		// create a Ping actor
 		opts := []pidOption{
@@ -1104,7 +1104,7 @@ func TestReceiveContext(t *testing.T) {
 			context.Shutdown()
 		})
 	})
-	t.Run("With happy Forward", func(t *testing.T) {
+	t.Run("With successful Forward", func(t *testing.T) {
 		ctx := context.TODO()
 		// create a Ping actor
 		opts := []pidOption{
@@ -1291,7 +1291,7 @@ func TestReceiveContext(t *testing.T) {
 			context.Shutdown()
 		})
 	})
-	t.Run("With happy BatchTell", func(t *testing.T) {
+	t.Run("With successful BatchTell", func(t *testing.T) {
 		ctx := context.TODO()
 		// create a Ping actor
 		opts := []pidOption{
@@ -1332,7 +1332,7 @@ func TestReceiveContext(t *testing.T) {
 		assert.NoError(t, pid1.Shutdown(ctx))
 		assert.NoError(t, pid2.Shutdown(ctx))
 	})
-	t.Run("With happy BatchTell as a Tell", func(t *testing.T) {
+	t.Run("With successful BatchTell as a Tell", func(t *testing.T) {
 		ctx := context.TODO()
 		// create a Ping actor
 		opts := []pidOption{
@@ -1373,7 +1373,7 @@ func TestReceiveContext(t *testing.T) {
 		assert.NoError(t, pid1.Shutdown(ctx))
 		assert.NoError(t, pid2.Shutdown(ctx))
 	})
-	t.Run("With panic BatchTell", func(t *testing.T) {
+	t.Run("With failed BatchTell", func(t *testing.T) {
 		ctx := context.TODO()
 		// create a Ping actor
 		opts := []pidOption{
@@ -1417,7 +1417,7 @@ func TestReceiveContext(t *testing.T) {
 		time.Sleep(time.Second)
 		assert.NoError(t, pid1.Shutdown(ctx))
 	})
-	t.Run("With happy BatchAsk", func(t *testing.T) {
+	t.Run("With successful BatchAsk", func(t *testing.T) {
 		ctx := context.TODO()
 		// create a Ping actor
 		opts := []pidOption{
@@ -1461,7 +1461,7 @@ func TestReceiveContext(t *testing.T) {
 		assert.NoError(t, pid1.Shutdown(ctx))
 		assert.NoError(t, pid2.Shutdown(ctx))
 	})
-	t.Run("With panic BatchAsk", func(t *testing.T) {
+	t.Run("With failed BatchAsk", func(t *testing.T) {
 		ctx := context.TODO()
 		// create a Ping actor
 		opts := []pidOption{
@@ -1505,7 +1505,7 @@ func TestReceiveContext(t *testing.T) {
 		time.Sleep(time.Second)
 		assert.NoError(t, pid1.Shutdown(ctx))
 	})
-	t.Run("With happy RemoteBatchTell", func(t *testing.T) {
+	t.Run("With successful RemoteBatchTell", func(t *testing.T) {
 		// create the context
 		ctx := context.TODO()
 		// define the logger to use
@@ -1562,7 +1562,7 @@ func TestReceiveContext(t *testing.T) {
 			assert.NoError(t, sys.Stop(ctx))
 		})
 	})
-	t.Run("With happy RemoteBatchAsk", func(t *testing.T) {
+	t.Run("With successful RemoteBatchAsk", func(t *testing.T) {
 		// create the context
 		ctx := context.TODO()
 		// define the logger to use
@@ -1616,7 +1616,7 @@ func TestReceiveContext(t *testing.T) {
 			assert.NoError(t, sys.Stop(ctx))
 		})
 	})
-	t.Run("With panic RemoteBatchTell", func(t *testing.T) {
+	t.Run("With failed RemoteBatchTell", func(t *testing.T) {
 		// create the context
 		ctx := context.TODO()
 		// define the logger to use
@@ -1681,7 +1681,7 @@ func TestReceiveContext(t *testing.T) {
 			assert.NoError(t, sys.Stop(ctx))
 		})
 	})
-	t.Run("With panic RemoteBatchAsk", func(t *testing.T) {
+	t.Run("With successful RemoteBatchAsk", func(t *testing.T) {
 		// create the context
 		ctx := context.TODO()
 		// define the logger to use
@@ -1739,6 +1739,123 @@ func TestReceiveContext(t *testing.T) {
 		}
 
 		assert.Panics(t, op)
+		time.Sleep(time.Second)
+
+		t.Cleanup(func() {
+			assert.NoError(t, pid1.Shutdown(ctx))
+			assert.NoError(t, sys.Stop(ctx))
+		})
+	})
+	t.Run("With no panics RemoteReSpawn when actor not found", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.New(log.DebugLevel, os.Stdout)
+		// generate the remoting port
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "localhost"
+
+		// create the actor system
+		sys, err := NewActorSystem("test",
+			WithLogger(logger),
+			WithPassivationDisabled(),
+			WithRemoting(host, int32(remotingPort)),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		// create an exchanger two
+		actorName2 := "Exchange2"
+
+		// create actor1
+		actor1 := &Exchanger{}
+		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
+		pid1, err := newPID(ctx,
+			actorPath1,
+			actor1,
+			withInitMaxRetries(1),
+			withCustomLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NotNil(t, pid1)
+
+		// create an instance of receive context
+		context := &receiveContext{
+			ctx:            ctx,
+			message:        new(testpb.TestSend),
+			sender:         NoSender,
+			recipient:      pid1,
+			mu:             sync.Mutex{},
+			isAsyncMessage: true,
+		}
+
+		assert.NotPanics(t, func() {
+			context.RemoteReSpawn(host, remotingPort, actorName2)
+		})
+
+		time.Sleep(time.Second)
+
+		t.Cleanup(func() {
+			assert.NoError(t, pid1.Shutdown(ctx))
+			assert.NoError(t, sys.Stop(ctx))
+		})
+	})
+	t.Run("With failed RemoteReSpawn", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.New(log.DebugLevel, os.Stdout)
+		// generate the remoting port
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "localhost"
+
+		// create the actor system
+		sys, err := NewActorSystem("test",
+			WithLogger(logger),
+			WithPassivationDisabled(),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		// create an exchanger two
+		actorName2 := "Exchange2"
+
+		// create actor1
+		actor1 := &Exchanger{}
+		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
+		pid1, err := newPID(ctx,
+			actorPath1,
+			actor1,
+			withInitMaxRetries(1),
+			withCustomLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NotNil(t, pid1)
+
+		// create an instance of receive context
+		context := &receiveContext{
+			ctx:            ctx,
+			message:        new(testpb.TestSend),
+			sender:         NoSender,
+			recipient:      pid1,
+			mu:             sync.Mutex{},
+			isAsyncMessage: true,
+		}
+
+		assert.Panics(t, func() {
+			context.RemoteReSpawn(host, remotingPort, actorName2)
+		})
+
 		time.Sleep(time.Second)
 
 		t.Cleanup(func() {

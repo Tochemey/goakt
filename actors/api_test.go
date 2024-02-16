@@ -1519,3 +1519,94 @@ func TestAPIRemoteLookup(t *testing.T) {
 		})
 	})
 }
+
+func TestAPIRemoteReSpawn(t *testing.T) {
+	t.Run("When remoting is not enabled", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.New(log.DebugLevel, os.Stdout)
+		// generate the remoting port
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "0.0.0.0"
+
+		// create the actor system
+		sys, err := NewActorSystem("test",
+			WithLogger(logger),
+			WithPassivationDisabled(),
+			WithRemoting(host, int32(remotingPort)),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		time.Sleep(time.Second)
+
+		// let us disable remoting
+		actorsSystem := sys.(*actorSystem)
+		actorsSystem.remotingEnabled.Store(false)
+
+		// create a test actor
+		actorName := "test"
+		// get the address of the actor
+		err = RemoteReSpawn(ctx, host, remotingPort, actorName)
+		require.Error(t, err)
+		require.EqualError(t, err, "failed_precondition: remoting is not enabled")
+
+		t.Cleanup(func() {
+			assert.NoError(t, sys.Stop(ctx))
+		})
+	})
+	t.Run("When remoting is enabled", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.New(log.DebugLevel, os.Stdout)
+		// generate the remoting port
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "0.0.0.0"
+
+		// create the actor system
+		sys, err := NewActorSystem("test",
+			WithLogger(logger),
+			WithPassivationDisabled(),
+			WithRemoting(host, int32(remotingPort)),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		time.Sleep(time.Second)
+
+		// create a test actor
+		actorName := "test"
+		actor := NewTester()
+		actorRef, err := sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		// assert the actor restart count
+		pid := actorRef.(*pid)
+		assert.Zero(t, pid.restartCount.Load())
+
+		// get the address of the actor
+		err = RemoteReSpawn(ctx, host, remotingPort, actorName)
+		require.NoError(t, err)
+
+		assert.EqualValues(t, 1, pid.restartCount.Load())
+
+		// stop the actor after some time
+		time.Sleep(time.Second)
+
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
+	})
+}
