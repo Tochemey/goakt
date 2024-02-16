@@ -226,13 +226,20 @@ To use the stashing feature, call the following methods on the [ReceiveContext i
 ### Remoting
 
 This allows remote actors to communicate. The underlying technology is gRPC. To enable remoting just use the `WithRemoting` option when
-creating the actor system. See actor system [options](./actors/option.go).
+creating the actor system. See actor system [options](./actors/option.go). These are the following remoting features available:
+
+- `RemoteTell`: to send a fire-and-forget message to an actor remotely
+- `RemoteAsk`: to send a request/response type of message to a remote actor
+- `RemoteBatchTell`: to send a fire-and-forget bulk of messages to a remote actor
+- `RemoteBatchAsk`: to send a bulk messages to a remote actor with replies
+- `RemoteLookup`: to lookup for an actor on a remote host
+- `RemoteReSpawn`: to restarts an actor on a remote machine
 
 ### Cluster
 
 This offers simple scalability, partitioning (sharding), and re-balancing out-of-the-box. Go-Akt nodes are automatically discovered. See [Clustering](#clustering).
 Beware that at the moment, within the cluster the existence of an actor is unique. When the node where a given actor has left the cluster, the given actor
-is no longer accessible. We can improve this behaviour by introducing the redeployment of actors on new nodes.
+is no longer accessible. _We can improve this behaviour by introducing the redeployment of actors on new nodes_.
 
 ### Observability
 
