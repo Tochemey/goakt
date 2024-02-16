@@ -195,6 +195,9 @@ type actorSystem struct {
 	// specifies whether metric is enabled
 	metricEnabled atomic.Bool
 	eventsChan    <-chan *cluster.Event
+
+	typesRegistry Registry
+	reflection    Reflection
 }
 
 // enforce compilation error when all methods of the ActorSystem interface are not implemented
@@ -232,6 +235,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		actorInitTimeout:    DefaultInitTimeout,
 		tracer:              noop.NewTracerProvider().Tracer(name),
 		eventsChan:          make(chan *cluster.Event, 1),
+		typesRegistry:       NewRegistry(),
 	}
 	// set the atomic settings
 	system.hasStarted.Store(false)
@@ -239,6 +243,9 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 	system.clusterEnabled.Store(false)
 	system.traceEnabled.Store(false)
 	system.metricEnabled.Store(false)
+
+	// set the reflection
+	system.reflection = NewReflection(system.typesRegistry)
 
 	// apply the various options
 	for _, opt := range opts {
@@ -1096,6 +1103,46 @@ func (x *actorSystem) RemoteBatchAsk(ctx context.Context, request *connect.Reque
 
 	// return the rpc response
 	return connect.NewResponse(&internalpb.RemoteBatchAskResponse{Messages: responses}), nil
+}
+
+// RemoteReSpawn is used the handle the re-creation of an actor from a remote host or from an api call
+func (x *actorSystem) RemoteReSpawn(ctx context.Context, request *connect.Request[internalpb.RemoteReSpawnRequest]) (*connect.Response[internalpb.RemoteReSpawnResponse], error) {
+	// get a context log
+	logger := x.logger
+
+	// first let us make a copy of the incoming request
+	reqCopy := request.Msg
+
+	// set the actor path with the remoting is enabled
+	if !x.remotingEnabled.Load() {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrRemotingDisabled)
+	}
+
+	// construct the actor address
+	actorPath := NewPath(reqCopy.GetName(), NewAddress(x.Name(), reqCopy.GetHost(), int(reqCopy.GetPort())))
+	// start or get the PID of the actor
+	// check whether the given actor already exist in the system or not
+	pid, exist := x.actors.Get(actorPath)
+
+	// return an error when the remote address is not found
+	if !exist {
+		// log the error
+		logger.Error(ErrAddressNotFound(actorPath.String()).Error())
+		return nil, ErrAddressNotFound(actorPath.String())
+	}
+
+	// restart the given actor
+	if err := pid.Restart(ctx); err != nil {
+		// return the error in case the restart failed
+		return nil, errors.Wrapf(err, "failed to restart actor=%s", actorPath.String())
+	}
+
+	// let us re-add the actor to the actor system list when it has successfully restarted
+	// add the given actor to the actor map
+	x.actors.Set(pid)
+
+	// return the response
+	return connect.NewResponse(new(internalpb.RemoteReSpawnResponse)), nil
 }
 
 // handleRemoteAsk handles a synchronous message to another actor and expect a response.

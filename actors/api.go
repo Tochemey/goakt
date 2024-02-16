@@ -392,3 +392,39 @@ func RemoteBatchAsk(ctx context.Context, to *addresspb.Address, messages ...prot
 	// return the responses
 	return response.Msg.GetMessages(), nil
 }
+
+// RemoteReSpawn restarts actor address on a remote node.
+func RemoteReSpawn(ctx context.Context, host string, port int, name string) error {
+	// create an interceptor
+	interceptor, err := otelconnect.NewInterceptor()
+	// handle the error
+	if err != nil {
+		return err
+	}
+
+	// create an instance of remote client service
+	remoteClient := internalpbconnect.NewRemotingServiceClient(
+		http.Client(),
+		http.URL(host, port),
+		connect.WithInterceptors(interceptor),
+		connect.WithGRPC(),
+	)
+
+	// prepare the request to send
+	request := connect.NewRequest(&internalpb.RemoteReSpawnRequest{
+		Host: host,
+		Port: int32(port),
+		Name: name,
+	})
+	// send the message and handle the error in case there is any
+	if _, err = remoteClient.RemoteReSpawn(ctx, request); err != nil {
+		code := connect.CodeOf(err)
+		if code == connect.CodeNotFound {
+			return nil
+		}
+		return err
+	}
+
+	// return the response
+	return nil
+}

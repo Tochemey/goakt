@@ -116,9 +116,10 @@ type PID interface {
 	// Messages are processed one after the other in the order they are sent.
 	// This can hinder performance if it is not properly used.
 	RemoteBatchAsk(ctx context.Context, to *addresspb.Address, messages ...proto.Message) (responses []*anypb.Any, err error)
-	// RemoteLookup look for an actor address on a remote node. If the actorSystem is nil then the lookup will be done
-	// using the same actor system as the PID actor system
+	// RemoteLookup look for an actor address on a remote node.
 	RemoteLookup(ctx context.Context, host string, port int, name string) (addr *addresspb.Address, err error)
+	// RemoteReSpawn restarts an actor on a remote node.
+	RemoteReSpawn(ctx context.Context, host string, port int, name string) error
 	// Children returns the list of all the children of the given actor that are still alive
 	// or an empty list.
 	Children() []PID
@@ -806,8 +807,7 @@ func (p *pid) BatchAsk(ctx context.Context, to PID, messages ...proto.Message) (
 	return
 }
 
-// RemoteLookup look for an actor address on a remote node. If the actorSystem is nil then the lookup will be done
-// using the same actor system as the PID actor system
+// RemoteLookup look for an actor address on a remote node.
 func (p *pid) RemoteLookup(ctx context.Context, host string, port int, name string) (addr *addresspb.Address, err error) {
 	// get the gRPC client connection options
 	clientConnectionOptions, err := p.gRPCClientConnectionOptions()
@@ -1057,6 +1057,43 @@ func (p *pid) RemoteBatchAsk(ctx context.Context, to *addresspb.Address, message
 	}
 	// return the responses
 	return response.Msg.GetMessages(), nil
+}
+
+// RemoteReSpawn restarts an actor on a remote node.
+func (p *pid) RemoteReSpawn(ctx context.Context, host string, port int, name string) error {
+	// get the gRPC client connection options
+	clientConnectionOptions, err := p.gRPCClientConnectionOptions()
+	// handle the error
+	if err != nil {
+		return err
+	}
+
+	// create an instance of remote client service
+	remoteClient := internalpbconnect.NewRemotingServiceClient(
+		p.httpClient,
+		http.URL(host, port),
+		clientConnectionOptions...,
+	)
+
+	// prepare the request to send
+	request := connect.NewRequest(&internalpb.RemoteReSpawnRequest{
+		Host: host,
+		Port: int32(port),
+		Name: name,
+	})
+
+	// send the message and handle the error in case there is any
+	_, err = remoteClient.RemoteReSpawn(ctx, request)
+	// we know the error will always be a grpc error
+	if err != nil {
+		code := connect.CodeOf(err)
+		if code == connect.CodeNotFound {
+			return nil
+		}
+		return err
+	}
+	// return the response
+	return nil
 }
 
 // Shutdown gracefully shuts down the given actor
