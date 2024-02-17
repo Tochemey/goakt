@@ -3,7 +3,7 @@ module github.com/tochemey/goakt
 go 1.21
 
 require (
-	connectrpc.com/connect v1.14.0
+	connectrpc.com/connect v1.15.0
 	connectrpc.com/otelconnect v0.7.0
 	github.com/buraksezer/olric v0.5.6-0.20240205222928-c5efb0d4b5ea
 	github.com/caarlos0/env/v10 v10.0.0
