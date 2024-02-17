@@ -19,7 +19,7 @@ require (
 	github.com/pkg/errors v0.9.1
 	github.com/prometheus/client_golang v1.18.0
 	github.com/redis/go-redis/v9 v9.4.0
-	github.com/reugn/go-quartz v0.10.0
+	github.com/reugn/go-quartz v0.11.0
 	github.com/spf13/cobra v1.8.0
 	github.com/stretchr/testify v1.8.4
 	github.com/travisjeffery/go-dynaport v1.0.0
