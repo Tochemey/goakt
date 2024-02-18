@@ -8,6 +8,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/tochemey/goakt/actors"
+	messagespb "github.com/tochemey/goakt/pb/messages/v1"
 	"google.golang.org/protobuf/encoding/prototext"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
@@ -64,10 +65,18 @@ func (x *probeActor) PreStart(_ context.Context) error {
 
 // Receive handle message received
 func (x *probeActor) Receive(ctx actors.ReceiveContext) {
-	// any message received is pushed to the queue
-	x.messageQueue <- message{
-		sender:  ctx.Sender(),
-		payload: ctx.Message(),
+	switch ctx.Message().(type) {
+	// skip system message
+	case *messagespb.PoisonPill,
+		*messagespb.Terminated,
+		*messagespb.Initialized:
+	// pass
+	default:
+		// any message received is pushed to the queue
+		x.messageQueue <- message{
+			sender:  ctx.Sender(),
+			payload: ctx.Message(),
+		}
 	}
 }
 
