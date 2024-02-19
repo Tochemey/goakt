@@ -4,26 +4,23 @@ package sample.v1;
 
 option go_package = "github.com/tochemey/goakt/examples/protos/pb/v1;samplepb";
 
-// StartServer starts the websocket server
-message StartServer {}
-
-// Broadcast is used to broadcast a message
-message Broadcast {
+// WsMessage is the websocket message
+message WsMessage {
   // Specifies the broadcast content
-  string content = 1;
+  string content = 1 [json_name = "content"];
   // Specifies the session id
-  string session_id = 2;
+  string session_id = 2 [json_name = "sessionId"];
   // Specifies the message type
-  BroadCastType broad_cast_type = 3;
+  WSMessageType message_type =3 [json_name = "messageType"];
 }
 
-enum BroadCastType {
-  BROAD_CAST_TYPE_UNSPECIFIED = 0;
-  BROAD_CAST_TYPE_EXIT = 1;
+// This is just for the example purpose.
+enum WSMessageType {
+  WS_MESSAGE_TYPE_UNSPECIFIED = 0;
+  WS_MESSAGE_TYPE_EXIT =1;
 }
 
 // StopServer stops the websocket server
+// This is just for the example purpose.
 message StopServer {}
 
-// StartSession start a websocket session
-message StartSession{}

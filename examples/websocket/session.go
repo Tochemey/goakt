@@ -27,12 +27,14 @@ package main
 import (
 	"context"
 
-	"github.com/golang/protobuf/proto"
+	"google.golang.org/protobuf/encoding/protojson"
+
 	"github.com/gorilla/websocket"
 	"github.com/pkg/errors"
 	"github.com/tochemey/goakt/actors"
 	samplepb "github.com/tochemey/goakt/examples/protos/pb/v1"
 	"github.com/tochemey/goakt/log"
+	messagespb "github.com/tochemey/goakt/pb/messages/v1"
 )
 
 type Session struct {
@@ -63,14 +65,15 @@ func (s *Session) PreStart(ctx context.Context) error {
 // Receive handle messages sent to the server
 func (s *Session) Receive(ctx actors.ReceiveContext) {
 	switch m := ctx.Message().(type) {
-	case *samplepb.StartSession:
+	case *messagespb.Initialized:
 		// set the self
 		s.self = ctx.Self()
 		// start listening
 		go s.read()
-	case *samplepb.Broadcast:
+
+	case *samplepb.WsMessage:
 		// write the message to the underlying connection
-		bytea, err := proto.Marshal(m)
+		bytea, err := protojson.Marshal(m)
 		// handle the error
 		if err != nil {
 			s.logger.Error(errors.Wrap(err, "failed to write message to the underlying connection"))
@@ -98,6 +101,7 @@ func (s *Session) PostStop(ctx context.Context) error {
 	return s.wsConnection.Close()
 }
 
+// listen for new messages coming through the web socket connection
 func (s *Session) read() {
 	for {
 		// read the connection message
@@ -108,15 +112,15 @@ func (s *Session) read() {
 			return
 		}
 		// unmarshal the message
-		message := new(samplepb.Broadcast)
-		if err := proto.Unmarshal(bytea, message); err != nil {
+		message := new(samplepb.WsMessage)
+		if err := protojson.Unmarshal(bytea, message); err != nil {
 			s.logger.Error(errors.Wrap(err, "failed to read message"))
 			return
 		}
 
 		// hande the message given the type
-		switch message.BroadCastType {
-		case samplepb.BroadCastType_BROAD_CAST_TYPE_EXIT:
+		switch message.GetMessageType() {
+		case samplepb.WSMessageType_WS_MESSAGE_TYPE_EXIT:
 			_ = s.self.Shutdown(context.Background())
 		default:
 			// send a new message to broadcast

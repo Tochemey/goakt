@@ -31,7 +31,6 @@ import (
 	"syscall"
 
 	goakt "github.com/tochemey/goakt/actors"
-	samplepb "github.com/tochemey/goakt/examples/protos/pb/v1"
 )
 
 func main() {
@@ -50,9 +49,7 @@ func main() {
 	_ = actorSystem.Start(ctx)
 
 	// create the websocket server actor
-	serverPID, _ := actorSystem.Spawn(ctx, "WebsocketServer", NewServer())
-	// start it
-	_ = goakt.Tell(ctx, serverPID, new(samplepb.StartServer))
+	_, _ = actorSystem.Spawn(ctx, "WebsocketServer", NewServer())
 
 	// capture ctrl+c
 	interruptSignal := make(chan os.Signal, 1)

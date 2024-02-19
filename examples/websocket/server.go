@@ -36,6 +36,7 @@ import (
 	"github.com/tochemey/goakt/actors"
 	samplepb "github.com/tochemey/goakt/examples/protos/pb/v1"
 	"github.com/tochemey/goakt/log"
+	messagespb "github.com/tochemey/goakt/pb/messages/v1"
 )
 
 const (
@@ -104,12 +105,12 @@ func (x *Server) PreStart(ctx context.Context) error {
 // Receive handle messages sent to the server
 func (x *Server) Receive(ctx actors.ReceiveContext) {
 	switch m := ctx.Message().(type) {
-	case *samplepb.StartServer:
+	case *messagespb.Initialized:
 		x.pid = ctx.Self()
 		go x.serve()
 	case *samplepb.StopServer:
 		ctx.Shutdown()
-	case *samplepb.Broadcast:
+	case *samplepb.WsMessage:
 		// sender
 		sender := ctx.Sender()
 		// acquire the lock
@@ -152,10 +153,11 @@ func (x *Server) handleWebsocket(writer http.ResponseWriter, request *http.Reque
 	// add some debug logging
 	x.logger.Debug("new client connection")
 
-	// get a websocket websocket upgrader
+	// upgrade the connection to a websocket connection
 	upgrader := websocket.Upgrader{
 		ReadBufferSize:  1024,
 		WriteBufferSize: 1024,
+		CheckOrigin:     func(r *http.Request) bool { return true },
 	}
 	// get the connection
 	conn, err := upgrader.Upgrade(writer, request, nil)
@@ -173,11 +175,6 @@ func (x *Server) handleWebsocket(writer http.ResponseWriter, request *http.Reque
 	cid, err := x.pid.SpawnChild(request.Context(), sessionID, session)
 	if err != nil {
 		x.logger.Error(errors.Wrap(err, "failed to create a websocket client connection"))
-		return
-	}
-	// start the session
-	if err := x.pid.Tell(request.Context(), cid, new(samplepb.StartSession)); err != nil {
-		x.logger.Error(errors.Wrap(err, "failed to start the session"))
 		return
 	}
 	// add the session to the map
