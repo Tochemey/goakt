@@ -333,6 +333,13 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 		}
 	}
 
+	// push the started message into the actor mailbox
+	_ = Tell(ctx, pid, &messagespb.Initialized{
+		Id:        pid.ActorPath().String(),
+		Timestamp: timestamppb.Now(),
+		Address:   pid.ActorPath().RemoteAddress(),
+	})
+
 	// return the actor reference
 	return pid, nil
 }

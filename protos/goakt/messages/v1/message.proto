@@ -2,6 +2,9 @@ syntax = "proto3";
 
 package messages.v1;
 
+import "address/v1/address.proto";
+import "google/protobuf/timestamp.proto";
+
 option go_package = "github.com/tochemey/goakt/messages/v1;messagespb";
 
 // Terminated is used to notify watching actors
@@ -12,3 +15,13 @@ message Terminated {}
 // It is enqueued as ordinary messages.
 // It will be handled after messages that were already queued in the mailbox.
 message PoisonPill {}
+
+// Initialized is used when an actor has successfully initialized
+message Initialized {
+  // Specifies the actor id
+  string id = 1;
+  // Specifies the timestamp
+  google.protobuf.Timestamp timestamp = 2;
+  // Specifies the actor address
+  address.v1.Address address = 3;
+}
