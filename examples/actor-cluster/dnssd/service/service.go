@@ -30,14 +30,13 @@ import (
 	"net/http"
 	"time"
 
-	"connectrpc.com/otelconnect"
-
 	"connectrpc.com/connect"
+	"connectrpc.com/otelconnect"
 	"github.com/pkg/errors"
 	"github.com/tochemey/goakt/actors"
 	kactors "github.com/tochemey/goakt/examples/actor-cluster/dnssd/actors"
-	samplepb "github.com/tochemey/goakt/examples/protos/pb/v1"
-	"github.com/tochemey/goakt/examples/protos/pb/v1/samplepbconnect"
+	samplepb "github.com/tochemey/goakt/examples/protos/samplepb"
+	"github.com/tochemey/goakt/examples/protos/samplepb/samplepbconnect"
 	"github.com/tochemey/goakt/log"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"

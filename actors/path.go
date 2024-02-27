@@ -28,7 +28,7 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
-	addresspb "github.com/tochemey/goakt/pb/address/v1"
+	"github.com/tochemey/goakt/goaktpb"
 )
 
 // Path is a unique path to an actor
@@ -87,12 +87,12 @@ func (p *Path) String() string {
 }
 
 // RemoteAddress returns the remote from path
-func (p *Path) RemoteAddress() *addresspb.Address {
+func (p *Path) RemoteAddress() *goaktpb.Address {
 	// only returns a remote address when we are in a remote scope otherwise return nil
 	if !p.address.IsRemote() {
 		return nil
 	}
-	return &addresspb.Address{
+	return &goaktpb.Address{
 		Host: p.address.Host(),
 		Port: int32(p.address.Port()),
 		Name: p.Name(),

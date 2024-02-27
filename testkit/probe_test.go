@@ -8,7 +8,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/tochemey/goakt/actors"
-	testpb "github.com/tochemey/goakt/test/data/pb/v1"
+	testpb "github.com/tochemey/goakt/test/data/testpb"
 	"google.golang.org/protobuf/encoding/prototext"
 )
 

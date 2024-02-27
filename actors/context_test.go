@@ -33,11 +33,10 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/tochemey/goakt/eventstream"
+	"github.com/tochemey/goakt/goaktpb"
+	"github.com/tochemey/goakt/internal/eventstream"
 	"github.com/tochemey/goakt/log"
-	addresspb "github.com/tochemey/goakt/pb/address/v1"
-	eventspb "github.com/tochemey/goakt/pb/events/v1"
-	testpb "github.com/tochemey/goakt/test/data/pb/v1"
+	testpb "github.com/tochemey/goakt/test/data/testpb"
 	"github.com/travisjeffery/go-dynaport"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
@@ -386,7 +385,7 @@ func TestReceiveContext(t *testing.T) {
 		}
 
 		op := func() {
-			context.RemoteAsk(&addresspb.Address{
+			context.RemoteAsk(&goaktpb.Address{
 				Host: "localhost",
 				Port: int32(remotingPort),
 				Name: actorName2,
@@ -518,7 +517,7 @@ func TestReceiveContext(t *testing.T) {
 
 		// send the message to the exchanger actor one using remote messaging
 		assert.Panics(t, func() {
-			context.RemoteTell(&addresspb.Address{
+			context.RemoteTell(&goaktpb.Address{
 				Host: "localhost",
 				Port: int32(remotingPort),
 				Name: actorName2,
@@ -1192,11 +1191,11 @@ func TestReceiveContext(t *testing.T) {
 		// wait for messages to be published
 		time.Sleep(time.Second)
 
-		var items []*eventspb.Deadletter
+		var items []*goaktpb.Deadletter
 		for message := range consumer.Iterator() {
 			payload := message.Payload()
 			assert.Equal(t, eventsTopic, message.Topic())
-			deadletter, ok := payload.(*eventspb.Deadletter)
+			deadletter, ok := payload.(*goaktpb.Deadletter)
 			if ok {
 				items = append(items, deadletter)
 			}
@@ -1264,10 +1263,10 @@ func TestReceiveContext(t *testing.T) {
 		// wait for messages to be published
 		time.Sleep(time.Second)
 
-		var items []*eventspb.Deadletter
+		var items []*goaktpb.Deadletter
 		for message := range consumer.Iterator() {
 			payload := message.Payload()
-			deadletter, ok := payload.(*eventspb.Deadletter)
+			deadletter, ok := payload.(*goaktpb.Deadletter)
 			if ok {
 				items = append(items, deadletter)
 			}
@@ -1666,7 +1665,7 @@ func TestReceiveContext(t *testing.T) {
 
 		// send the message to the exchanger actor one using remote messaging
 		assert.Panics(t, func() {
-			context.RemoteBatchTell(&addresspb.Address{
+			context.RemoteBatchTell(&goaktpb.Address{
 				Host: "localhost",
 				Port: int32(remotingPort),
 				Name: actorName2,
@@ -1730,7 +1729,7 @@ func TestReceiveContext(t *testing.T) {
 		}
 
 		op := func() {
-			context.RemoteBatchAsk(&addresspb.Address{
+			context.RemoteBatchAsk(&goaktpb.Address{
 				Host: "localhost",
 				Port: int32(remotingPort),
 				Name: actorName2,

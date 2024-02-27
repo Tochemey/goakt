@@ -30,10 +30,10 @@ import (
 
 	"connectrpc.com/connect"
 	"connectrpc.com/otelconnect"
-	internalpb "github.com/tochemey/goakt/internal/v1"
-	"github.com/tochemey/goakt/internal/v1/internalpbconnect"
-	addresspb "github.com/tochemey/goakt/pb/address/v1"
-	"github.com/tochemey/goakt/pkg/http"
+	"github.com/tochemey/goakt/goaktpb"
+	"github.com/tochemey/goakt/internal/http"
+	"github.com/tochemey/goakt/internal/internalpb"
+	"github.com/tochemey/goakt/internal/internalpb/internalpbconnect"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 )
@@ -188,7 +188,7 @@ func BatchAsk(ctx context.Context, to PID, timeout time.Duration, messages ...pr
 }
 
 // RemoteTell sends a message to an actor remotely without expecting any reply
-func RemoteTell(ctx context.Context, to *addresspb.Address, message proto.Message) error {
+func RemoteTell(ctx context.Context, to *goaktpb.Address, message proto.Message) error {
 	// marshal the message
 	marshaled, err := anypb.New(message)
 	if err != nil {
@@ -225,7 +225,7 @@ func RemoteTell(ctx context.Context, to *addresspb.Address, message proto.Messag
 }
 
 // RemoteAsk sends a synchronous message to another actor remotely and expect a response.
-func RemoteAsk(ctx context.Context, to *addresspb.Address, message proto.Message) (response *anypb.Any, err error) {
+func RemoteAsk(ctx context.Context, to *goaktpb.Address, message proto.Message) (response *anypb.Any, err error) {
 	// marshal the message
 	marshaled, err := anypb.New(message)
 	if err != nil {
@@ -265,7 +265,7 @@ func RemoteAsk(ctx context.Context, to *addresspb.Address, message proto.Message
 }
 
 // RemoteLookup look for an actor address on a remote node.
-func RemoteLookup(ctx context.Context, host string, port int, name string) (addr *addresspb.Address, err error) {
+func RemoteLookup(ctx context.Context, host string, port int, name string) (addr *goaktpb.Address, err error) {
 	// create an interceptor
 	interceptor, err := otelconnect.NewInterceptor()
 	// handle the error
@@ -303,7 +303,7 @@ func RemoteLookup(ctx context.Context, host string, port int, name string) (addr
 }
 
 // RemoteBatchTell sends bulk asynchronous messages to an actor
-func RemoteBatchTell(ctx context.Context, to *addresspb.Address, messages ...proto.Message) error {
+func RemoteBatchTell(ctx context.Context, to *goaktpb.Address, messages ...proto.Message) error {
 	// create an interceptor
 	interceptor, err := otelconnect.NewInterceptor()
 	// handle the error
@@ -347,7 +347,7 @@ func RemoteBatchTell(ctx context.Context, to *addresspb.Address, messages ...pro
 }
 
 // RemoteBatchAsk sends bulk messages to an actor with responses expected
-func RemoteBatchAsk(ctx context.Context, to *addresspb.Address, messages ...proto.Message) (responses []*anypb.Any, err error) {
+func RemoteBatchAsk(ctx context.Context, to *goaktpb.Address, messages ...proto.Message) (responses []*anypb.Any, err error) {
 	// create an interceptor
 	interceptor, err := otelconnect.NewInterceptor()
 	// handle the error

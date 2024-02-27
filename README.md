@@ -152,14 +152,14 @@ The subscription methods can be found on the `ActorSystem` interface.
 
 #### Supported events
 
-- [`ActorStarted`](./protos/goakt/events/v1/events.proto): emitted when an actor has started
-- [`ActorStopped`](./protos/goakt/events/v1/events.proto): emitted when an actor has stopped
-- [`ActorPassivated`](./protos/goakt/events/v1/events.proto): emitted when an actor is passivated
-- [`ActorChildCreated`](./protos/goakt/events/v1/events.proto): emitted when a child actor is created
+- [`ActorStarted`](./protos/goakt/goakt.proto): emitted when an actor has started
+- [`ActorStopped`](./protos/goakt/goakt.proto): emitted when an actor has stopped
+- [`ActorPassivated`](./protos/goakt/goakt.proto): emitted when an actor is passivated
+- [`ActorChildCreated`](./protos/goakt/goakt.proto): emitted when a child actor is created
 - [`ActorRestarted`](./protos/goakt/events/v1/events.proto): emitted when an actor has restarted
-- [`NodeJoined`](./protos/goakt/events/v1/events.proto): cluster event emitted when a node joins the cluster. This only happens when cluster mode is enabled
-- [`NodeLeft`](./protos/goakt/events/v1/events.proto): cluster event emitted when a node leaves the cluster. This only happens when cluster mode is enabled
-- [`Deadletter`](./protos/goakt/events/v1/events.proto): emitted when a message cannot be delivered or that were not handled by a given actor.
+- [`NodeJoined`](./protos/goakt/goakt.proto): cluster event emitted when a node joins the cluster. This only happens when cluster mode is enabled
+- [`NodeLeft`](./protos/goakt/goakt.proto): cluster event emitted when a node leaves the cluster. This only happens when cluster mode is enabled
+- [`Deadletter`](./protos/goakt/goakt.proto): emitted when a message cannot be delivered or that were not handled by a given actor.
 Dead letters are automatically emitted when a message cannot be delivered to actors' mailbox or when an Ask times out.
 Also, one can emit dead letters from the receiving actor by using the `ctx.Unhandled()` method. This is useful instead of panicking when
 the receiving actor does not know how to handle a particular message. Dead letters are not propagated over the network, there are tied to the local actor system.
@@ -330,10 +330,10 @@ re-balancing out-of-the-box.
 
 At the moment the following providers are implemented:
 
-- the [kubernetes](https://kubernetes.io/docs/home/) [api integration](./discovery/kubernetes) is fully functional
+- the [kubernetes](https://kubernetes.io/docs/home/) [api integration](discovery/kubernetes) is fully functional
 - the [mDNS](https://datatracker.ietf.org/doc/html/rfc6762) and [DNS-SD](https://tools.ietf.org/html/rfc6763)
-- the [NATS](https://nats.io/) [integration](./discovery/nats) is fully functional
-- the [DNS](./discovery/dnssd) is fully functional
+- the [NATS](https://nats.io/) [integration](discovery/nats) is fully functional
+- the [DNS](discovery/dnssd) is fully functional
 
 Note: One can add additional discovery providers using the following [interface](./discovery/provider.go)
 

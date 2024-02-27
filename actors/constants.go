@@ -27,7 +27,7 @@ package actors
 import (
 	"time"
 
-	addresspb "github.com/tochemey/goakt/pb/address/v1"
+	"github.com/tochemey/goakt/goaktpb"
 )
 
 // StrategyDirective represents the supervisor strategy directive
@@ -62,4 +62,4 @@ const (
 var NoSender PID
 
 // RemoteNoSender means that there is no sender
-var RemoteNoSender = new(addresspb.Address)
+var RemoteNoSender = new(goaktpb.Address)

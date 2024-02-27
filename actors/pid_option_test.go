@@ -29,7 +29,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/tochemey/goakt/eventstream"
+	"github.com/tochemey/goakt/internal/eventstream"
 	"github.com/tochemey/goakt/log"
 	"go.uber.org/atomic"
 )

@@ -31,7 +31,7 @@ import (
 
 	"github.com/tochemey/goakt/actors"
 	"github.com/tochemey/goakt/log"
-	testspb "github.com/tochemey/goakt/test/data/pb/v1"
+	testspb "github.com/tochemey/goakt/test/data/testpb"
 )
 
 const (

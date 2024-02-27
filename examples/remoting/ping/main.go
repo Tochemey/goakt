@@ -32,9 +32,9 @@ import (
 	"time"
 
 	goakt "github.com/tochemey/goakt/actors"
-	samplepb "github.com/tochemey/goakt/examples/protos/pb/v1"
+	samplepb "github.com/tochemey/goakt/examples/protos/samplepb"
+	"github.com/tochemey/goakt/goaktpb"
 	"github.com/tochemey/goakt/log"
-	addresspb "github.com/tochemey/goakt/pb/address/v1"
 	"go.uber.org/atomic"
 )
 
@@ -64,7 +64,7 @@ func main() {
 
 	// start the conversation
 	timer := time.AfterFunc(time.Second, func() {
-		_ = pingActor.RemoteTell(ctx, &addresspb.Address{
+		_ = pingActor.RemoteTell(ctx, &goaktpb.Address{
 			Host: host,
 			Port: 50052,
 			Name: "Pong",

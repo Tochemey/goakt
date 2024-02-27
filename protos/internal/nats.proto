@@ -1,0 +1,26 @@
+syntax = "proto3";
+
+package internalpb;
+
+option go_package = "github.com/tochemey/goakt/internal/internalpb;internalpb";
+
+// NatsMessageType defines the NATs message type
+enum NatsMessageType {
+  NATS_MESSAGE_TYPE_REGISTER = 0;
+  NATS_MESSAGE_TYPE_DEREGISTER = 1;
+  NATS_MESSAGE_TYPE_REQUEST = 2;
+  NATS_MESSAGE_TYPE_RESPONSE = 3;
+}
+
+// NatsMessage defines the NATs message
+// used by the discovery provider
+message NatsMessage {
+  // Specifies the host name of the client node
+  string host = 1;
+  // Specifies the port of the client node
+  int32 port = 2;
+  // Specifies the client name
+  string name = 3;
+  // Specifies the message type
+  NatsMessageType message_type = 4;
+}

@@ -34,10 +34,10 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/tochemey/goakt/goaktpb"
 	"github.com/tochemey/goakt/log"
-	messagespb "github.com/tochemey/goakt/pb/messages/v1"
 	"github.com/tochemey/goakt/telemetry"
-	testpb "github.com/tochemey/goakt/test/data/pb/v1"
+	"github.com/tochemey/goakt/test/data/testpb"
 	"github.com/travisjeffery/go-dynaport"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
@@ -1041,7 +1041,7 @@ func TestPoisonPill(t *testing.T) {
 
 	assert.True(t, pid.IsRunning())
 	// send a poison pill to the actor
-	err = Tell(ctx, pid, new(messagespb.PoisonPill))
+	err = Tell(ctx, pid, new(goaktpb.PoisonPill))
 	assert.NoError(t, err)
 
 	// wait for the graceful shutdown

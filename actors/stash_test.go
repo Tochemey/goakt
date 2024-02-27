@@ -32,7 +32,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tochemey/goakt/log"
-	testpb "github.com/tochemey/goakt/test/data/pb/v1"
+	"github.com/tochemey/goakt/test/data/testpb"
 )
 
 func TestStash(t *testing.T) {

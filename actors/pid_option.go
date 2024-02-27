@@ -27,7 +27,7 @@ package actors
 import (
 	"time"
 
-	"github.com/tochemey/goakt/eventstream"
+	"github.com/tochemey/goakt/internal/eventstream"
 	"github.com/tochemey/goakt/log"
 	"github.com/tochemey/goakt/telemetry"
 )

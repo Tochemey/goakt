@@ -7,10 +7,6 @@ RUN go install github.com/fullstorydev/grpcurl/cmd/grpcurl@latest
 RUN go install connectrpc.com/connect/cmd/protoc-gen-connect-go@latest
 RUN apk --no-cache add git ca-certificates gcc musl-dev libc-dev binutils-gold
 
-pbs:
-    BUILD +protogen
-    BUILD +sample-pb
-    BUILD +testprotogen
 
 test:
   BUILD +lint
@@ -40,11 +36,8 @@ mock:
     FROM +code
 
     # generate the mocks
-    RUN mockery  --all --dir hash --recursive --keeptree --exported=true --with-expecter=true --inpackage=true --output ./mocks/hash --case snake
-    RUN mockery  --all --dir pkg --recursive --keeptree --exported=true --with-expecter=true --inpackage=true --output ./mocks/pkg --case snake
-    RUN mockery  --all --dir internal --recursive --keeptree --exported=true --with-expecter=true  --inpackage=true --output ./mocks/internal --case snake
-    RUN mockery  --all --dir discovery --recursive --keeptree --exported=true --with-expecter=true --inpackage=true --output ./mocks/discovery --case snake
-    RUN mockery  --all --dir cluster --recursive --keeptree --exported=true --with-expecter=true --inpackage=true --output ./mocks/cluster --case snake
+    RUN mockery  --all --dir hash --keeptree --exported=true --with-expecter=true --inpackage=true --output ./mocks/hash --case snake
+    RUN mockery  --all --dir discovery --keeptree --exported=true --with-expecter=true --inpackage=true --output ./mocks/discovery --case snake
 
     SAVE ARTIFACT ./mocks mocks AS LOCAL mocks
 
@@ -73,42 +66,17 @@ protogen:
     # generate the pbs
     RUN buf generate \
             --template buf.gen.yaml \
-            --path protos/goakt/address \
-            --path protos/goakt/messages \
-            --path protos/goakt/events \
-            --path protos/goakt/internal
+            --path protos/goakt \
+            --path protos/internal \
+            --path protos/sample \
+            --path protos/test
 
     # save artifact to
-    SAVE ARTIFACT gen/address AS LOCAL pb/address
-    SAVE ARTIFACT gen/messages AS LOCAL pb/messages
-    SAVE ARTIFACT gen/events AS LOCAL pb/events
-    SAVE ARTIFACT gen/internal AS LOCAL internal
+    SAVE ARTIFACT gen/goakt AS LOCAL goaktpb
+    SAVE ARTIFACT gen/test AS LOCAL  test/data/testpb
+    SAVE ARTIFACT gen/sample AS LOCAL examples/protos/samplepb
+    SAVE ARTIFACT gen/internal AS LOCAL internal/internalpb
 
-testprotogen:
-    # copy the proto files to generate
-    COPY --dir protos/ ./
-    COPY buf.work.yaml buf.gen.yaml ./
-
-    # generate the pbs
-    RUN buf generate \
-            --template buf.gen.yaml \
-            --path protos/test/pb
-
-    # save artifact to
-    SAVE ARTIFACT gen gen AS LOCAL test/data
-
-sample-pb:
-    # copy the proto files to generate
-    COPY --dir protos/ ./
-    COPY buf.work.yaml buf.gen.yaml ./
-
-    # generate the pbs
-    RUN buf generate \
-            --template buf.gen.yaml \
-            --path protos/sample/pb
-
-    # save artifact to
-    SAVE ARTIFACT gen gen AS LOCAL examples/protos
 
 compile-k8s:
     COPY +vendor/files ./

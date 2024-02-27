@@ -1,5 +1,3 @@
 version: v1
 directories:
-  - protos/test
-  - protos/sample
-  - protos/goakt
+  - protos

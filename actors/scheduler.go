@@ -36,9 +36,9 @@ import (
 	"github.com/reugn/go-quartz/job"
 	quartzlogger "github.com/reugn/go-quartz/logger"
 	"github.com/reugn/go-quartz/quartz"
-	"github.com/tochemey/goakt/cluster"
+	"github.com/tochemey/goakt/goaktpb"
+	"github.com/tochemey/goakt/internal/cluster"
 	"github.com/tochemey/goakt/log"
-	addresspb "github.com/tochemey/goakt/pb/address/v1"
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
 )
@@ -176,7 +176,7 @@ func (x *scheduler) ScheduleOnce(ctx context.Context, message proto.Message, pid
 // This requires remoting to be enabled on the actor system.
 // This will send the given message to the actor after the given interval specified
 // The message will be sent once
-func (x *scheduler) RemoteScheduleOnce(ctx context.Context, message proto.Message, address *addresspb.Address, interval time.Duration) error {
+func (x *scheduler) RemoteScheduleOnce(ctx context.Context, message proto.Message, address *goaktpb.Address, interval time.Duration) error {
 	// acquire the lock
 	x.mu.Lock()
 	// release the lock once done
@@ -256,7 +256,7 @@ func (x *scheduler) ScheduleWithCron(ctx context.Context, message proto.Message,
 }
 
 // RemoteScheduleWithCron schedules a message to be sent to an actor in the future using a cron expression.
-func (x *scheduler) RemoteScheduleWithCron(ctx context.Context, message proto.Message, address *addresspb.Address, cronExpression string) error {
+func (x *scheduler) RemoteScheduleWithCron(ctx context.Context, message proto.Message, address *goaktpb.Address, cronExpression string) error {
 	// acquire the lock
 	x.mu.Lock()
 	// release the lock once done

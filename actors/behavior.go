@@ -24,7 +24,9 @@
 
 package actors
 
-import "github.com/tochemey/goakt/pkg/stack"
+import (
+	"github.com/tochemey/goakt/internal/stack"
+)
 
 // Behavior defines an actor behavior
 type Behavior func(ctx ReceiveContext)

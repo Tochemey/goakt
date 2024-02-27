@@ -1,0 +1,59 @@
+syntax = "proto3";
+
+package testpb;
+
+option go_package = "github.com/tochemey/goakt/test/data;testpb";
+
+message TestReply {}
+message TestPanic {}
+message TestTimeout {}
+message Reply {
+  string content = 1;
+}
+
+message TestSend {}
+message TestRemoteSend {}
+
+message Account {
+  string account_id = 1;
+  double account_balance = 2;
+}
+
+message CreateAccount {
+  double account_balance = 2;
+}
+
+message CreditAccount {
+  string account_id = 1;
+  double balance = 2;
+}
+
+message AccountCreated {
+  string account_id = 1;
+  double account_balance = 2;
+}
+
+message AccountCredited {
+  string account_id = 1;
+  double account_balance = 2;
+}
+
+message DebitAccount {}
+message AccountDebited {}
+
+message TestLogin {}
+message TestLoginSuccess {}
+message TestReadiness {}
+message TestReady {}
+message TestBye {}
+
+message TestStash {}
+message TestUnstash {}
+message TestUnstashAll {}
+
+message Ping {}
+message Pong {}
+
+message Wait {
+  uint64 duration = 1;
+}

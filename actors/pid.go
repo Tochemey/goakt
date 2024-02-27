@@ -35,17 +35,15 @@ import (
 	"connectrpc.com/otelconnect"
 	"github.com/flowchartsman/retry"
 	"github.com/pkg/errors"
-	"github.com/tochemey/goakt/eventstream"
-	internalpb "github.com/tochemey/goakt/internal/v1"
-	"github.com/tochemey/goakt/internal/v1/internalpbconnect"
+	"github.com/tochemey/goakt/goaktpb"
+	"github.com/tochemey/goakt/internal/eventstream"
+	"github.com/tochemey/goakt/internal/http"
+	"github.com/tochemey/goakt/internal/internalpb"
+	"github.com/tochemey/goakt/internal/internalpb/internalpbconnect"
+	"github.com/tochemey/goakt/internal/metric"
+	"github.com/tochemey/goakt/internal/slices"
+	"github.com/tochemey/goakt/internal/types"
 	"github.com/tochemey/goakt/log"
-	"github.com/tochemey/goakt/metric"
-	addresspb "github.com/tochemey/goakt/pb/address/v1"
-	eventspb "github.com/tochemey/goakt/pb/events/v1"
-	messagespb "github.com/tochemey/goakt/pb/messages/v1"
-	"github.com/tochemey/goakt/pkg/http"
-	"github.com/tochemey/goakt/pkg/slices"
-	"github.com/tochemey/goakt/pkg/types"
 	"github.com/tochemey/goakt/telemetry"
 	"go.opentelemetry.io/otel/codes"
 	otelmetric "go.opentelemetry.io/otel/metric"
@@ -104,20 +102,20 @@ type PID interface {
 	// This can hinder performance if it is not properly used.
 	BatchAsk(ctx context.Context, to PID, messages ...proto.Message) (responses chan proto.Message, err error)
 	// RemoteTell sends a message to an actor remotely without expecting any reply
-	RemoteTell(ctx context.Context, to *addresspb.Address, message proto.Message) error
+	RemoteTell(ctx context.Context, to *goaktpb.Address, message proto.Message) error
 	// RemoteBatchTell sends a batch of messages to a remote actor in a way fire-and-forget manner
 	// Messages are processed one after the other in the order they are sent.
-	RemoteBatchTell(ctx context.Context, to *addresspb.Address, messages ...proto.Message) error
+	RemoteBatchTell(ctx context.Context, to *goaktpb.Address, messages ...proto.Message) error
 	// RemoteAsk is used to send a message to an actor remotely and expect a response
 	// immediately. With this type of message the receiver cannot communicate back to Sender
 	// except reply the message with a response. This one-way communication.
-	RemoteAsk(ctx context.Context, to *addresspb.Address, message proto.Message) (response *anypb.Any, err error)
+	RemoteAsk(ctx context.Context, to *goaktpb.Address, message proto.Message) (response *anypb.Any, err error)
 	// RemoteBatchAsk sends a synchronous bunch of messages to a remote actor and expect responses in the same order as the messages.
 	// Messages are processed one after the other in the order they are sent.
 	// This can hinder performance if it is not properly used.
-	RemoteBatchAsk(ctx context.Context, to *addresspb.Address, messages ...proto.Message) (responses []*anypb.Any, err error)
+	RemoteBatchAsk(ctx context.Context, to *goaktpb.Address, messages ...proto.Message) (responses []*anypb.Any, err error)
 	// RemoteLookup look for an actor address on a remote node.
-	RemoteLookup(ctx context.Context, host string, port int, name string) (addr *addresspb.Address, err error)
+	RemoteLookup(ctx context.Context, host string, port int, name string) (addr *goaktpb.Address, err error)
 	// RemoteReSpawn restarts an actor on a remote node.
 	RemoteReSpawn(ctx context.Context, host string, port int, name string) error
 	// Children returns the list of all the children of the given actor that are still alive
@@ -334,7 +332,7 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 	}
 
 	// push the started message into the actor mailbox
-	_ = Tell(ctx, pid, &messagespb.Initialized{
+	_ = Tell(ctx, pid, &goaktpb.Initialized{
 		Id:        pid.ActorPath().String(),
 		Timestamp: timestamppb.Now(),
 		Address:   pid.ActorPath().RemoteAddress(),
@@ -532,7 +530,7 @@ func (p *pid) Restart(ctx context.Context) error {
 	// emit actor started event
 	if p.eventsStream != nil {
 		// send the event to the event streams
-		p.eventsStream.Publish(eventsTopic, &eventspb.ActorRestarted{
+		p.eventsStream.Publish(eventsTopic, &goaktpb.ActorRestarted{
 			Address:     p.ActorPath().RemoteAddress(),
 			RestartedAt: timestamppb.Now(),
 		})
@@ -632,7 +630,7 @@ func (p *pid) SpawnChild(ctx context.Context, name string, actor Actor) (PID, er
 	// emit actor started event
 	if p.eventsStream != nil {
 		// send the event to the event streams
-		p.eventsStream.Publish(eventsTopic, &eventspb.ActorChildCreated{
+		p.eventsStream.Publish(eventsTopic, &goaktpb.ActorChildCreated{
 			Address:   cid.ActorPath().RemoteAddress(),
 			CreatedAt: timestamppb.Now(),
 			Parent:    p.ActorPath().RemoteAddress(),
@@ -815,7 +813,7 @@ func (p *pid) BatchAsk(ctx context.Context, to PID, messages ...proto.Message) (
 }
 
 // RemoteLookup look for an actor address on a remote node.
-func (p *pid) RemoteLookup(ctx context.Context, host string, port int, name string) (addr *addresspb.Address, err error) {
+func (p *pid) RemoteLookup(ctx context.Context, host string, port int, name string) (addr *goaktpb.Address, err error) {
 	// get the gRPC client connection options
 	clientConnectionOptions, err := p.gRPCClientConnectionOptions()
 	// handle the error
@@ -851,7 +849,7 @@ func (p *pid) RemoteLookup(ctx context.Context, host string, port int, name stri
 }
 
 // RemoteTell sends a message to an actor remotely without expecting any reply
-func (p *pid) RemoteTell(ctx context.Context, to *addresspb.Address, message proto.Message) error {
+func (p *pid) RemoteTell(ctx context.Context, to *goaktpb.Address, message proto.Message) error {
 	// marshal the message
 	marshaled, err := anypb.New(message)
 	if err != nil {
@@ -873,7 +871,7 @@ func (p *pid) RemoteTell(ctx context.Context, to *addresspb.Address, message pro
 	)
 
 	// construct the from address
-	sender := &addresspb.Address{
+	sender := &goaktpb.Address{
 		Host: p.ActorPath().Address().Host(),
 		Port: int32(p.ActorPath().Address().Port()),
 		Name: p.ActorPath().Name(),
@@ -904,7 +902,7 @@ func (p *pid) RemoteTell(ctx context.Context, to *addresspb.Address, message pro
 }
 
 // RemoteAsk sends a synchronous message to another actor remotely and expect a response.
-func (p *pid) RemoteAsk(ctx context.Context, to *addresspb.Address, message proto.Message) (response *anypb.Any, err error) {
+func (p *pid) RemoteAsk(ctx context.Context, to *goaktpb.Address, message proto.Message) (response *anypb.Any, err error) {
 	// marshal the message
 	marshaled, err := anypb.New(message)
 	if err != nil {
@@ -926,7 +924,7 @@ func (p *pid) RemoteAsk(ctx context.Context, to *addresspb.Address, message prot
 	)
 
 	// construct the from address
-	sender := &addresspb.Address{
+	sender := &goaktpb.Address{
 		Host: p.ActorPath().Address().Host(),
 		Port: int32(p.ActorPath().Address().Port()),
 		Name: p.ActorPath().Name(),
@@ -954,7 +952,7 @@ func (p *pid) RemoteAsk(ctx context.Context, to *addresspb.Address, message prot
 
 // RemoteBatchTell sends a batch of messages to a remote actor in a way fire-and-forget manner
 // Messages are processed one after the other in the order they are sent.
-func (p *pid) RemoteBatchTell(ctx context.Context, to *addresspb.Address, messages ...proto.Message) error {
+func (p *pid) RemoteBatchTell(ctx context.Context, to *goaktpb.Address, messages ...proto.Message) error {
 	// first check whether we need to fall back to a Tell
 	if len(messages) == 1 {
 		return p.RemoteTell(ctx, to, messages[0])
@@ -975,7 +973,7 @@ func (p *pid) RemoteBatchTell(ctx context.Context, to *addresspb.Address, messag
 	}
 
 	// construct the from address
-	sender := &addresspb.Address{
+	sender := &goaktpb.Address{
 		Host: p.ActorPath().Address().Host(),
 		Port: int32(p.ActorPath().Address().Port()),
 		Name: p.ActorPath().Name(),
@@ -1013,7 +1011,7 @@ func (p *pid) RemoteBatchTell(ctx context.Context, to *addresspb.Address, messag
 // RemoteBatchAsk sends a synchronous bunch of messages to a remote actor and expect responses in the same order as the messages.
 // Messages are processed one after the other in the order they are sent.
 // This can hinder performance if it is not properly used.
-func (p *pid) RemoteBatchAsk(ctx context.Context, to *addresspb.Address, messages ...proto.Message) (responses []*anypb.Any, err error) {
+func (p *pid) RemoteBatchAsk(ctx context.Context, to *goaktpb.Address, messages ...proto.Message) (responses []*anypb.Any, err error) {
 	// define a variable holding the remote messages
 	var remoteMessages []*anypb.Any
 	// iterate the list of messages and pack them
@@ -1029,7 +1027,7 @@ func (p *pid) RemoteBatchAsk(ctx context.Context, to *addresspb.Address, message
 	}
 
 	// construct the from address
-	sender := &addresspb.Address{
+	sender := &goaktpb.Address{
 		Host: p.ActorPath().Address().Host(),
 		Port: int32(p.ActorPath().Address().Port()),
 		Name: p.ActorPath().Name(),
@@ -1144,7 +1142,7 @@ func (p *pid) Shutdown(ctx context.Context) error {
 	// emit actor stopped event
 	if p.eventsStream != nil {
 		// send the event to the event streams
-		p.eventsStream.Publish(eventsTopic, &eventspb.ActorStopped{
+		p.eventsStream.Publish(eventsTopic, &goaktpb.ActorStopped{
 			Address:   p.ActorPath().RemoteAddress(),
 			StoppedAt: timestamppb.Now(),
 		})
@@ -1256,7 +1254,7 @@ func (p *pid) init(ctx context.Context) error {
 	// emit actor started event
 	if p.eventsStream != nil {
 		// send the event to the event streams
-		p.eventsStream.Publish(eventsTopic, &eventspb.ActorStarted{
+		p.eventsStream.Publish(eventsTopic, &goaktpb.ActorStarted{
 			Address:   p.ActorPath().RemoteAddress(),
 			StartedAt: timestamppb.Now(),
 		})
@@ -1302,7 +1300,7 @@ func (p *pid) freeWatchers(ctx context.Context) {
 			// grab the item value
 			watcher := item.Value
 			// notified the watcher with the Terminated message
-			terminated := &messagespb.Terminated{}
+			terminated := &goaktpb.Terminated{}
 			// only send the parent actor when it is running
 			if watcher.ID.IsRunning() {
 				// send the notification the watcher
@@ -1347,7 +1345,7 @@ func (p *pid) receive() {
 			}
 			// switch on the type of message
 			switch received.Message().(type) {
-			case *messagespb.PoisonPill:
+			case *goaktpb.PoisonPill:
 				// stop the actor
 				_ = p.Shutdown(received.Context())
 			default:
@@ -1486,7 +1484,7 @@ func (p *pid) passivationListener() {
 
 	// emit actor passivated event
 	if p.eventsStream != nil {
-		event := &eventspb.ActorPassivated{
+		event := &goaktpb.ActorPassivated{
 			Address:      p.ActorPath().RemoteAddress(),
 			PassivatedAt: timestamppb.Now(),
 		}
@@ -1630,7 +1628,7 @@ func (p *pid) emitDeadletter(receiveCtx ReceiveContext, err error) {
 	// marshal the message
 	msg, _ := anypb.New(receiveCtx.Message())
 	// grab the sender
-	var senderAddr *addresspb.Address
+	var senderAddr *goaktpb.Address
 	if receiveCtx.Sender() != nil || receiveCtx.Sender() != NoSender {
 		senderAddr = receiveCtx.Sender().ActorPath().RemoteAddress()
 	}
@@ -1638,7 +1636,7 @@ func (p *pid) emitDeadletter(receiveCtx ReceiveContext, err error) {
 	// define the receiver
 	receiver := p.actorPath.RemoteAddress()
 	// create the deadletter
-	deadletter := &eventspb.Deadletter{
+	deadletter := &goaktpb.Deadletter{
 		Sender:   senderAddr,
 		Receiver: receiver,
 		Message:  msg,

@@ -32,10 +32,10 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	internalpb "github.com/tochemey/goakt/internal/v1"
+	"github.com/tochemey/goakt/goaktpb"
+	internalpb "github.com/tochemey/goakt/internal/internalpb"
 	"github.com/tochemey/goakt/log"
-	addresspb "github.com/tochemey/goakt/pb/address/v1"
-	testpb "github.com/tochemey/goakt/test/data/pb/v1"
+	testpb "github.com/tochemey/goakt/test/data/testpb"
 	"github.com/travisjeffery/go-dynaport"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
@@ -639,7 +639,7 @@ func TestRemoteTell(t *testing.T) {
 		assert.NotNil(t, actorRef)
 
 		// create a wrong address
-		addr := &addresspb.Address{
+		addr := &goaktpb.Address{
 			Host: host,
 			Port: 2222,
 			Name: "",
@@ -799,7 +799,7 @@ func TestRemoteTell(t *testing.T) {
 		assert.NotNil(t, actorRef)
 
 		// create a wrong address
-		addr := &addresspb.Address{
+		addr := &goaktpb.Address{
 			Host: host,
 			Port: 2222,
 			Name: "",
@@ -1121,7 +1121,7 @@ func TestRemoteAsk(t *testing.T) {
 		assert.NotNil(t, actorRef)
 
 		// get the address of the actor
-		addr := &addresspb.Address{
+		addr := &goaktpb.Address{
 			Host: host,
 			Port: 2222,
 			Name: "",
@@ -1289,7 +1289,7 @@ func TestRemoteAsk(t *testing.T) {
 		assert.NotNil(t, actorRef)
 
 		// get the address of the actor
-		addr := &addresspb.Address{
+		addr := &goaktpb.Address{
 			Host: host,
 			Port: 2222,
 			Name: "",

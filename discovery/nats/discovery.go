@@ -34,7 +34,7 @@ import (
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/encoders/protobuf"
 	"github.com/tochemey/goakt/discovery"
-	internalpb "github.com/tochemey/goakt/internal/v1"
+	internalpb "github.com/tochemey/goakt/internal/internalpb"
 	"github.com/tochemey/goakt/log"
 	"go.uber.org/atomic"
 )

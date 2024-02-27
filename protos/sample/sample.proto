@@ -1,0 +1,42 @@
+syntax = "proto3";
+
+package samplepb;
+
+option go_package = "github.com/tochemey/goakt/examples/protos/samplepb;samplepb";
+
+message Ping {
+  string id = 1;
+}
+
+message Pong {
+  string reply = 2;
+}
+
+message Account {
+  string account_id = 1;
+  double account_balance = 2;
+}
+
+message CreateAccount {
+  string account_id = 1;
+  double account_balance = 2;
+}
+
+message CreditAccount {
+  string account_id = 1;
+  double balance = 2;
+}
+
+message AccountCreated {
+  string account_id = 1;
+  double account_balance = 2;
+}
+
+message AccountCredited {
+  string account_id = 1;
+  double account_balance = 2;
+}
+
+message GetAccount {
+  string account_id = 1;
+}

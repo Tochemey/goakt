@@ -37,9 +37,9 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tochemey/goakt/discovery"
 	"github.com/tochemey/goakt/discovery/nats"
+	"github.com/tochemey/goakt/goaktpb"
 	"github.com/tochemey/goakt/log"
-	messagespb "github.com/tochemey/goakt/pb/messages/v1"
-	testspb "github.com/tochemey/goakt/test/data/pb/v1"
+	testspb "github.com/tochemey/goakt/test/data/testpb"
 	"github.com/travisjeffery/go-dynaport"
 	"go.uber.org/atomic"
 	"go.uber.org/goleak"
@@ -84,7 +84,7 @@ func (p *Tester) PostStop(context.Context) error {
 // Receive processes any message dropped into the actor mailbox without a reply
 func (p *Tester) Receive(ctx ReceiveContext) {
 	switch ctx.Message().(type) {
-	case *messagespb.Initialized:
+	case *goaktpb.Initialized:
 	case *testspb.TestSend:
 		p.counter.Inc()
 	case *testspb.TestPanic:
@@ -124,7 +124,7 @@ func (p *Monitor) PreStart(context.Context) error {
 
 func (p *Monitor) Receive(ctx ReceiveContext) {
 	switch ctx.Message().(type) {
-	case *messagespb.Initialized:
+	case *goaktpb.Initialized:
 	case *testspb.TestSend:
 	default:
 		panic(ErrUnhandled)
@@ -152,7 +152,7 @@ func (c *Monitored) PreStart(context.Context) error {
 
 func (c *Monitored) Receive(ctx ReceiveContext) {
 	switch ctx.Message().(type) {
-	case *messagespb.Initialized:
+	case *goaktpb.Initialized:
 	case *testspb.TestSend:
 	case *testspb.TestPanic:
 		panic("panicked")
@@ -181,7 +181,7 @@ func (x *UserActor) PostStop(_ context.Context) error {
 
 func (x *UserActor) Receive(ctx ReceiveContext) {
 	switch ctx.Message().(type) {
-	case *messagespb.Initialized:
+	case *goaktpb.Initialized:
 	case *testspb.TestLogin:
 		ctx.Response(new(testspb.TestLoginSuccess))
 		ctx.Become(x.Authenticated)
@@ -194,7 +194,7 @@ func (x *UserActor) Receive(ctx ReceiveContext) {
 // Authenticated behavior is executed when the actor receive the TestAuth message
 func (x *UserActor) Authenticated(ctx ReceiveContext) {
 	switch ctx.Message().(type) {
-	case *messagespb.Initialized:
+	case *goaktpb.Initialized:
 	case *testspb.TestReadiness:
 		ctx.Response(new(testspb.TestReady))
 		ctx.UnBecome()
@@ -203,7 +203,7 @@ func (x *UserActor) Authenticated(ctx ReceiveContext) {
 
 func (x *UserActor) CreditAccount(ctx ReceiveContext) {
 	switch ctx.Message().(type) {
-	case *messagespb.Initialized:
+	case *goaktpb.Initialized:
 	case *testspb.CreditAccount:
 		ctx.Response(new(testspb.AccountCredited))
 		ctx.BecomeStacked(x.DebitAccount)
@@ -214,7 +214,7 @@ func (x *UserActor) CreditAccount(ctx ReceiveContext) {
 
 func (x *UserActor) DebitAccount(ctx ReceiveContext) {
 	switch ctx.Message().(type) {
-	case *messagespb.Initialized:
+	case *goaktpb.Initialized:
 	case *testspb.DebitAccount:
 		ctx.Response(new(testspb.AccountDebited))
 		ctx.UnBecomeStacked()
@@ -230,7 +230,7 @@ func (e *Exchanger) PreStart(context.Context) error {
 func (e *Exchanger) Receive(ctx ReceiveContext) {
 	message := ctx.Message()
 	switch message.(type) {
-	case *messagespb.Initialized:
+	case *goaktpb.Initialized:
 	case *testspb.TestSend:
 		_ = ctx.Self().Tell(ctx.Context(), ctx.Sender(), new(testspb.TestSend))
 	case *testspb.TestReply:
@@ -256,7 +256,7 @@ func (x *Stasher) PreStart(context.Context) error {
 
 func (x *Stasher) Receive(ctx ReceiveContext) {
 	switch ctx.Message().(type) {
-	case *messagespb.Initialized:
+	case *goaktpb.Initialized:
 	case *testspb.TestStash:
 		ctx.Become(x.Ready)
 		ctx.Stash()
@@ -268,7 +268,7 @@ func (x *Stasher) Receive(ctx ReceiveContext) {
 
 func (x *Stasher) Ready(ctx ReceiveContext) {
 	switch ctx.Message().(type) {
-	case *messagespb.Initialized:
+	case *goaktpb.Initialized:
 	case *testspb.TestStash:
 	case *testspb.TestLogin:
 		ctx.Stash()
@@ -310,7 +310,7 @@ func (x *PostStopBreaker) PreStart(context.Context) error {
 
 func (x *PostStopBreaker) Receive(ctx ReceiveContext) {
 	switch ctx.Message().(type) {
-	case *messagespb.Initialized:
+	case *goaktpb.Initialized:
 	case *testspb.TestSend:
 	case *testspb.TestPanic:
 		panic("panicked")
@@ -360,7 +360,7 @@ func (x *Forwarder) PreStart(context.Context) error {
 
 func (x *Forwarder) Receive(ctx ReceiveContext) {
 	switch ctx.Message().(type) {
-	case *messagespb.Initialized:
+	case *goaktpb.Initialized:
 	case *testspb.TestBye:
 		ctx.Forward(x.actorRef)
 	}
@@ -382,7 +382,7 @@ func (d *Discarder) PreStart(context.Context) error {
 
 func (d *Discarder) Receive(ctx ReceiveContext) {
 	switch ctx.Message().(type) {
-	case *messagespb.Initialized:
+	case *goaktpb.Initialized:
 		// pass
 	default:
 		ctx.Unhandled()

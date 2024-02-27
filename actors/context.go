@@ -29,7 +29,7 @@ import (
 	"sync"
 	"time"
 
-	addresspb "github.com/tochemey/goakt/pb/address/v1"
+	"github.com/tochemey/goakt/goaktpb"
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
@@ -52,7 +52,7 @@ type ReceiveContext interface {
 	Response(resp proto.Message)
 	// RemoteSender defines the remote sender of the message if it is a remote message
 	// This is set to RemoteNoSender when the message is not a remote message
-	RemoteSender() *addresspb.Address
+	RemoteSender() *goaktpb.Address
 	// Become switch the current behavior of the actor to a new behavior
 	// The current message in process during the transition will still be processed with the current
 	// behavior before the transition. However, subsequent messages will be processed with the new behavior.
@@ -98,20 +98,20 @@ type ReceiveContext interface {
 	// This operation does nothing when the receiving actor is not running
 	Forward(to PID)
 	// RemoteTell sends a message to an actor remotely without expecting any reply
-	RemoteTell(to *addresspb.Address, message proto.Message)
+	RemoteTell(to *goaktpb.Address, message proto.Message)
 	// RemoteBatchTell sends a batch of messages to a remote actor in a way fire-and-forget manner
 	// Messages are processed one after the other in the order they are sent.
-	RemoteBatchTell(to *addresspb.Address, messages ...proto.Message)
+	RemoteBatchTell(to *goaktpb.Address, messages ...proto.Message)
 	// RemoteAsk is used to send a message to an actor remotely and expect a response
 	// immediately. This executed within an actor can hinder performance because this is a blocking call.
-	RemoteAsk(to *addresspb.Address, message proto.Message) (response *anypb.Any)
+	RemoteAsk(to *goaktpb.Address, message proto.Message) (response *anypb.Any)
 	// RemoteBatchAsk sends a synchronous bunch of messages to a remote actor and expect responses in the same order as the messages.
 	// Messages are processed one after the other in the order they are sent.
 	// This can hinder performance if it is not properly used.
-	RemoteBatchAsk(to *addresspb.Address, messages ...proto.Message) (responses []*anypb.Any)
+	RemoteBatchAsk(to *goaktpb.Address, messages ...proto.Message) (responses []*anypb.Any)
 	// RemoteLookup look for an actor address on a remote node. If the actorSystem is nil then the lookup will be done
 	// using the same actor system as the PID actor system
-	RemoteLookup(host string, port int, name string) (addr *addresspb.Address)
+	RemoteLookup(host string, port int, name string) (addr *goaktpb.Address)
 	// Shutdown gracefully shuts down the given actor
 	// All current messages in the mailbox will be processed before the actor shutdown after a period of time
 	// that can be configured. All child actors will be gracefully shutdown.
@@ -136,7 +136,7 @@ type receiveContext struct {
 	ctx            context.Context
 	message        proto.Message
 	sender         PID
-	remoteSender   *addresspb.Address
+	remoteSender   *goaktpb.Address
 	response       chan proto.Message
 	recipient      PID
 	mu             sync.Mutex
@@ -167,7 +167,7 @@ func newReceiveContext(ctx context.Context, from, to PID, message proto.Message,
 }
 
 // WithRemoteSender set the remote sender for a given context
-func (c *receiveContext) WithRemoteSender(remoteSender *addresspb.Address) *receiveContext {
+func (c *receiveContext) WithRemoteSender(remoteSender *goaktpb.Address) *receiveContext {
 	c.remoteSender = remoteSender
 	return c
 }
@@ -206,7 +206,7 @@ func (c *receiveContext) Sender() PID {
 
 // RemoteSender defines the remote sender of the message if it is a remote message
 // This is set to RemoteNoSender when the message is not a remote message
-func (c *receiveContext) RemoteSender() *addresspb.Address {
+func (c *receiveContext) RemoteSender() *goaktpb.Address {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.remoteSender
@@ -339,7 +339,7 @@ func (c *receiveContext) BatchAsk(to PID, messages ...proto.Message) (responses 
 }
 
 // RemoteTell sends a message to an actor remotely without expecting any reply
-func (c *receiveContext) RemoteTell(to *addresspb.Address, message proto.Message) {
+func (c *receiveContext) RemoteTell(to *goaktpb.Address, message proto.Message) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	// create a new context from the parent context
@@ -352,7 +352,7 @@ func (c *receiveContext) RemoteTell(to *addresspb.Address, message proto.Message
 
 // RemoteAsk is used to send a message to an actor remotely and expect a response
 // immediately.
-func (c *receiveContext) RemoteAsk(to *addresspb.Address, message proto.Message) (response *anypb.Any) {
+func (c *receiveContext) RemoteAsk(to *goaktpb.Address, message proto.Message) (response *anypb.Any) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	// create a new context from the parent context
@@ -367,7 +367,7 @@ func (c *receiveContext) RemoteAsk(to *addresspb.Address, message proto.Message)
 
 // RemoteBatchTell sends a batch of messages to a remote actor in a way fire-and-forget manner
 // Messages are processed one after the other in the order they are sent.
-func (c *receiveContext) RemoteBatchTell(to *addresspb.Address, messages ...proto.Message) {
+func (c *receiveContext) RemoteBatchTell(to *goaktpb.Address, messages ...proto.Message) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	// create a new context from the parent context
@@ -381,7 +381,7 @@ func (c *receiveContext) RemoteBatchTell(to *addresspb.Address, messages ...prot
 // RemoteBatchAsk sends a synchronous bunch of messages to a remote actor and expect responses in the same order as the messages.
 // Messages are processed one after the other in the order they are sent.
 // This can hinder performance if it is not properly used.
-func (c *receiveContext) RemoteBatchAsk(to *addresspb.Address, messages ...proto.Message) (responses []*anypb.Any) {
+func (c *receiveContext) RemoteBatchAsk(to *goaktpb.Address, messages ...proto.Message) (responses []*anypb.Any) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	// create a new context from the parent context
@@ -396,7 +396,7 @@ func (c *receiveContext) RemoteBatchAsk(to *addresspb.Address, messages ...proto
 
 // RemoteLookup look for an actor address on a remote node. If the actorSystem is nil then the lookup will be done
 // using the same actor system as the PID actor system
-func (c *receiveContext) RemoteLookup(host string, port int, name string) (addr *addresspb.Address) {
+func (c *receiveContext) RemoteLookup(host string, port int, name string) (addr *goaktpb.Address) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	// create a new context from the parent context

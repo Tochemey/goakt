@@ -33,17 +33,15 @@ import (
 	"testing"
 	"time"
 
-	testkit "github.com/tochemey/goakt/mocks/discovery"
-
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tochemey/goakt/discovery"
+	"github.com/tochemey/goakt/goaktpb"
 	"github.com/tochemey/goakt/log"
-	addresspb "github.com/tochemey/goakt/pb/address/v1"
-	eventspb "github.com/tochemey/goakt/pb/events/v1"
+	testkit "github.com/tochemey/goakt/mocks/discovery"
 	"github.com/tochemey/goakt/telemetry"
-	testpb "github.com/tochemey/goakt/test/data/pb/v1"
+	testpb "github.com/tochemey/goakt/test/data/testpb"
 	"github.com/travisjeffery/go-dynaport"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
@@ -435,11 +433,11 @@ func TestActorSystem(t *testing.T) {
 		time.Sleep(time.Second)
 		require.True(t, actorRef.IsRunning())
 
-		var items []*eventspb.ActorRestarted
+		var items []*goaktpb.ActorRestarted
 		for message := range consumer.Iterator() {
 			payload := message.Payload()
 			// only listening to deadletters
-			restarted, ok := payload.(*eventspb.ActorRestarted)
+			restarted, ok := payload.(*goaktpb.ActorRestarted)
 			if ok {
 				items = append(items, restarted)
 			}
@@ -626,7 +624,7 @@ func TestActorSystem(t *testing.T) {
 		require.Nil(t, addr)
 
 		// attempt to send a message will fail
-		reply, err := RemoteAsk(ctx, &addresspb.Address{
+		reply, err := RemoteAsk(ctx, &goaktpb.Address{
 			Host: host,
 			Port: int32(remotingPort),
 			Name: actorName,
@@ -912,11 +910,11 @@ func TestActorSystem(t *testing.T) {
 
 		time.Sleep(time.Second)
 
-		var items []*eventspb.Deadletter
+		var items []*goaktpb.Deadletter
 		for message := range consumer.Iterator() {
 			payload := message.Payload()
 			// only listening to deadletters
-			deadletter, ok := payload.(*eventspb.Deadletter)
+			deadletter, ok := payload.(*goaktpb.Deadletter)
 			if ok {
 				items = append(items, deadletter)
 			}
@@ -1139,12 +1137,12 @@ func TestActorSystem(t *testing.T) {
 		time.Sleep(time.Second)
 
 		// capture the joins
-		var joins []*eventspb.NodeJoined
+		var joins []*goaktpb.NodeJoined
 		for event := range subscriber1.Iterator() {
 			// get the event payload
 			payload := event.Payload()
 			// only listening to cluster event
-			nodeJoined, ok := payload.(*eventspb.NodeJoined)
+			nodeJoined, ok := payload.(*goaktpb.NodeJoined)
 			require.True(t, ok)
 			joins = append(joins, nodeJoined)
 		}
@@ -1165,12 +1163,12 @@ func TestActorSystem(t *testing.T) {
 		// wait for some time
 		time.Sleep(time.Second)
 
-		var lefts []*eventspb.NodeLeft
+		var lefts []*goaktpb.NodeLeft
 		for event := range subscriber2.Iterator() {
 			payload := event.Payload()
 
 			// only listening to cluster event
-			nodeLeft, ok := payload.(*eventspb.NodeLeft)
+			nodeLeft, ok := payload.(*goaktpb.NodeLeft)
 			require.True(t, ok)
 			lefts = append(lefts, nodeLeft)
 		}

@@ -1,0 +1,18 @@
+syntax = "proto3";
+
+package internalpb;
+
+import "goakt/goakt.proto";
+
+option go_package = "github.com/tochemey/goakt/internal/internalpb;internalpb";
+
+// WireActor represents the actor information on the wire.
+message WireActor {
+  // Specifies the actor name.
+  // The actor name can be either the actor FQN or an alias
+  string actor_name = 1;
+  // Specifies the actor address
+  goaktpb.Address actor_address = 2;
+  // Specifies the actor full path
+  string actor_path = 3;
+}
