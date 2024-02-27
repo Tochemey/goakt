@@ -56,6 +56,7 @@ local-test:
 
     RUN go test -mod=vendor ./... -race -v -coverprofile=coverage.out -covermode=atomic -coverpkg=./...
 
+    RUN cat codecov.yml | curl --data-binary @- https://codecov.io/validate
     SAVE ARTIFACT coverage.out AS LOCAL coverage.out
 
 protogen:
