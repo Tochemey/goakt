@@ -34,16 +34,16 @@ type Hasher interface {
 	HashCode(key []byte) uint64
 }
 
-type xhasher struct{}
+type defaultHasher struct{}
 
-var _ Hasher = xhasher{}
+var _ Hasher = defaultHasher{}
 
 // HashCode implementation
-func (x xhasher) HashCode(key []byte) uint64 {
+func (x defaultHasher) HashCode(key []byte) uint64 {
 	return xxhash.Sum64(key)
 }
 
 // DefaultHasher returns the default hasher
 func DefaultHasher() Hasher {
-	return &xhasher{}
+	return &defaultHasher{}
 }
