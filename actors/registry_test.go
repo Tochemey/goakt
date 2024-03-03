@@ -42,11 +42,11 @@ func TestRegistry(t *testing.T) {
 	t.Run("With registration with name", func(t *testing.T) {
 		newRegistry := NewRegistry()
 		// create an instance of an object
-		actor := NewTester()
+		actor := newTestActor()
 		// register that actor
-		newRegistry.Register("Tester", actor)
-		// assert the type of Tester
-		_, ok := newRegistry.GetNamedType("Tester")
+		newRegistry.Register("testActor", actor)
+		// assert the type of testActor
+		_, ok := newRegistry.GetNamedType("testActor")
 		assert.True(t, ok)
 		_, ok = newRegistry.GetType(actor)
 		assert.True(t, ok)
@@ -55,11 +55,11 @@ func TestRegistry(t *testing.T) {
 	t.Run("With registration without name", func(t *testing.T) {
 		newRegistry := NewRegistry()
 		// create an instance of an object
-		actor := NewTester()
+		actor := newTestActor()
 		// register that actor
 		newRegistry.Register("", actor)
-		// assert the type of Tester
-		_, ok := newRegistry.GetNamedType("Tester")
+		// assert the type of testActor
+		_, ok := newRegistry.GetNamedType("testActor")
 		assert.False(t, ok)
 		_, ok = newRegistry.GetType(actor)
 		assert.True(t, ok)

@@ -52,7 +52,7 @@ func TestReceiveContext(t *testing.T) {
 		}
 
 		// create the actor path
-		actor := &UserActor{}
+		actor := &userActor{}
 		actorPath := NewPath("User", NewAddress("sys", "host", 1))
 		pid, err := newPID(ctx, actorPath, actor, opts...)
 		require.NoError(t, err)
@@ -110,7 +110,7 @@ func TestReceiveContext(t *testing.T) {
 		}
 
 		// create actor1
-		actor1 := &Exchanger{}
+		actor1 := &exchanger{}
 		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
 		pid1, err := newPID(ctx, actorPath1, actor1, opts...)
 		require.NoError(t, err)
@@ -127,7 +127,7 @@ func TestReceiveContext(t *testing.T) {
 		}
 
 		// create actor2
-		actor2 := &Exchanger{}
+		actor2 := &exchanger{}
 		actorPath2 := NewPath("Exchange2", NewAddress("sys", "host", 1))
 		pid2, err := newPID(ctx, actorPath2, actor2, opts...)
 		require.NoError(t, err)
@@ -151,7 +151,7 @@ func TestReceiveContext(t *testing.T) {
 		}
 
 		// create actor1
-		actor1 := &Exchanger{}
+		actor1 := &exchanger{}
 		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
 		pid1, err := newPID(ctx, actorPath1, actor1, opts...)
 		require.NoError(t, err)
@@ -168,7 +168,7 @@ func TestReceiveContext(t *testing.T) {
 		}
 
 		// create actor2
-		actor2 := &Exchanger{}
+		actor2 := &exchanger{}
 		actorPath2 := NewPath("Exchange2", NewAddress("sys", "host", 1))
 		pid2, err := newPID(ctx, actorPath2, actor2, opts...)
 		require.NoError(t, err)
@@ -195,7 +195,7 @@ func TestReceiveContext(t *testing.T) {
 		}
 
 		// create actor1
-		actor1 := &Exchanger{}
+		actor1 := &exchanger{}
 		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
 		pid1, err := newPID(ctx, actorPath1, actor1, opts...)
 		require.NoError(t, err)
@@ -212,7 +212,7 @@ func TestReceiveContext(t *testing.T) {
 		}
 
 		// create actor2
-		actor2 := &Exchanger{}
+		actor2 := &exchanger{}
 		actorPath2 := NewPath("Exchange2", NewAddress("sys", "host", 1))
 		pid2, err := newPID(ctx, actorPath2, actor2, opts...)
 		require.NoError(t, err)
@@ -236,7 +236,7 @@ func TestReceiveContext(t *testing.T) {
 		}
 
 		// create actor1
-		actor1 := &Exchanger{}
+		actor1 := &exchanger{}
 		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
 		pid1, err := newPID(ctx, actorPath1, actor1, opts...)
 		require.NoError(t, err)
@@ -253,7 +253,7 @@ func TestReceiveContext(t *testing.T) {
 		}
 
 		// create actor2
-		actor2 := &Exchanger{}
+		actor2 := &exchanger{}
 		actorPath2 := NewPath("Exchange2", NewAddress("sys", "host", 1))
 		pid2, err := newPID(ctx, actorPath2, actor2, opts...)
 		require.NoError(t, err)
@@ -296,12 +296,12 @@ func TestReceiveContext(t *testing.T) {
 
 		// create an exchanger two
 		actorName2 := "Exchange2"
-		actorRef2, err := sys.Spawn(ctx, actorName2, &Exchanger{})
+		actorRef2, err := sys.Spawn(ctx, actorName2, &exchanger{})
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef2)
 
 		// create actor1
-		actor1 := &Exchanger{}
+		actor1 := &exchanger{}
 		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
 		pid1, err := newPID(ctx,
 			actorPath1,
@@ -363,7 +363,7 @@ func TestReceiveContext(t *testing.T) {
 		actorName2 := "Exchange2"
 
 		// create actor1
-		actor1 := &Exchanger{}
+		actor1 := &exchanger{}
 		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
 		pid1, err := newPID(ctx,
 			actorPath1,
@@ -426,13 +426,13 @@ func TestReceiveContext(t *testing.T) {
 
 		// create an exchanger two
 		actorName2 := "Exchange2"
-		actorRef2, err := sys.Spawn(ctx, actorName2, &Exchanger{})
+		actorRef2, err := sys.Spawn(ctx, actorName2, &exchanger{})
 
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef2)
 
 		// create actor1
-		actor1 := &Exchanger{}
+		actor1 := &exchanger{}
 		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
 		pid1, err := newPID(ctx,
 			actorPath1,
@@ -494,7 +494,7 @@ func TestReceiveContext(t *testing.T) {
 		actorName2 := "Exchange2"
 
 		// create actor1
-		actor1 := &Exchanger{}
+		actor1 := &exchanger{}
 		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
 		pid1, err := newPID(ctx,
 			actorPath1,
@@ -559,7 +559,7 @@ func TestReceiveContext(t *testing.T) {
 		actorName2 := "Exchange2"
 
 		// create actor1
-		actor1 := &Exchanger{}
+		actor1 := &exchanger{}
 		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
 		pid1, err := newPID(ctx,
 			actorPath1,
@@ -615,7 +615,7 @@ func TestReceiveContext(t *testing.T) {
 		actorName2 := "Exchange2"
 
 		// create actor1
-		actor1 := &Exchanger{}
+		actor1 := &exchanger{}
 		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
 		pid1, err := newPID(ctx,
 			actorPath1,
@@ -656,7 +656,7 @@ func TestReceiveContext(t *testing.T) {
 		}
 
 		// create actor1
-		actor1 := &Exchanger{}
+		actor1 := &exchanger{}
 		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
 		pid1, err := newPID(ctx, actorPath1, actor1, opts...)
 
@@ -683,7 +683,7 @@ func TestReceiveContext(t *testing.T) {
 
 		// create the parent actor
 		parent, err := newPID(ctx, actorPath,
-			NewMonitor(),
+			newSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
 			withSendReplyTimeout(receivingTimeout))
@@ -703,7 +703,7 @@ func TestReceiveContext(t *testing.T) {
 
 		// create the child actor
 		name := "monitored"
-		child := context.Spawn(name, NewMonitored())
+		child := context.Spawn(name, newSupervised())
 		assert.NotNil(t, child)
 		assert.Len(t, context.Children(), 1)
 
@@ -721,7 +721,7 @@ func TestReceiveContext(t *testing.T) {
 
 		// create the parent actor
 		parent, err := newPID(ctx, actorPath,
-			NewMonitor(),
+			newSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
 			withSendReplyTimeout(receivingTimeout))
@@ -744,7 +744,7 @@ func TestReceiveContext(t *testing.T) {
 
 		// create the child actor
 		assert.Panics(t, func() {
-			context.Spawn("SpawnChild", NewMonitored())
+			context.Spawn("SpawnChild", newSupervised())
 		})
 	})
 	t.Run("With not found Child", func(t *testing.T) {
@@ -753,7 +753,7 @@ func TestReceiveContext(t *testing.T) {
 
 		// create the parent actor
 		parent, err := newPID(ctx, actorPath,
-			NewMonitor(),
+			newSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
 			withSendReplyTimeout(receivingTimeout))
@@ -773,7 +773,7 @@ func TestReceiveContext(t *testing.T) {
 
 		// create the child actor
 		name := "monitored"
-		child := context.Spawn(name, NewMonitored())
+		child := context.Spawn(name, newSupervised())
 		assert.NotNil(t, child)
 		assert.Len(t, context.Children(), 1)
 
@@ -794,7 +794,7 @@ func TestReceiveContext(t *testing.T) {
 
 		// create the parent actor
 		parent, err := newPID(ctx, actorPath,
-			NewMonitor(),
+			newSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
 			withSendReplyTimeout(receivingTimeout))
@@ -814,7 +814,7 @@ func TestReceiveContext(t *testing.T) {
 
 		// create the child actor
 		name := "monitored"
-		child := context.Spawn(name, NewMonitored())
+		child := context.Spawn(name, newSupervised())
 		assert.NotNil(t, child)
 		assert.Len(t, context.Children(), 1)
 
@@ -835,7 +835,7 @@ func TestReceiveContext(t *testing.T) {
 
 		// create the parent actor
 		parent, err := newPID(ctx, actorPath,
-			NewMonitor(),
+			newSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
 			withSendReplyTimeout(receivingTimeout))
@@ -855,7 +855,7 @@ func TestReceiveContext(t *testing.T) {
 
 		// create the child actor
 		name := "monitored"
-		child := context.Spawn(name, NewMonitored())
+		child := context.Spawn(name, newSupervised())
 		assert.NotNil(t, child)
 		assert.Len(t, context.Children(), 1)
 
@@ -876,7 +876,7 @@ func TestReceiveContext(t *testing.T) {
 
 		// create the parent actor
 		parent, err := newPID(ctx, actorPath,
-			NewMonitor(),
+			newSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
 			withSendReplyTimeout(receivingTimeout))
@@ -896,7 +896,7 @@ func TestReceiveContext(t *testing.T) {
 
 		// create the child actor
 		name := "monitored"
-		child := context.Spawn(name, NewMonitored())
+		child := context.Spawn(name, newSupervised())
 		assert.NotNil(t, child)
 		assert.Len(t, context.Children(), 1)
 
@@ -919,7 +919,7 @@ func TestReceiveContext(t *testing.T) {
 
 		// create the parent actor
 		parent, err := newPID(ctx, actorPath,
-			NewMonitor(),
+			newSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
 			withSendReplyTimeout(receivingTimeout))
@@ -953,7 +953,7 @@ func TestReceiveContext(t *testing.T) {
 
 		// create the parent actor
 		parent, err := newPID(ctx, actorPath,
-			NewMonitor(),
+			newSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
 			withSendReplyTimeout(receivingTimeout))
@@ -972,7 +972,7 @@ func TestReceiveContext(t *testing.T) {
 		}
 
 		name := "monitored"
-		child := context.Spawn(name, NewMonitored())
+		child := context.Spawn(name, newSupervised())
 		assert.NotNil(t, child)
 		assert.Len(t, context.Children(), 1)
 
@@ -993,7 +993,7 @@ func TestReceiveContext(t *testing.T) {
 
 		// create the parent actor
 		parent, err := newPID(ctx, actorPath,
-			NewMonitor(),
+			newSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
 			withSendReplyTimeout(receivingTimeout))
@@ -1014,7 +1014,7 @@ func TestReceiveContext(t *testing.T) {
 		// create the child actor
 		childPath := NewPath("child", NewAddress("sys", "host", 1))
 		child, err := newPID(ctx, childPath,
-			NewMonitor(),
+			newSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
 			withSendReplyTimeout(receivingTimeout))
@@ -1037,7 +1037,7 @@ func TestReceiveContext(t *testing.T) {
 
 		// create the parent actor
 		parent, err := newPID(ctx, actorPath,
-			NewMonitor(),
+			newSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
 			withSendReplyTimeout(receivingTimeout))
@@ -1057,7 +1057,7 @@ func TestReceiveContext(t *testing.T) {
 
 		// create the child actor
 		name := "monitored"
-		child := context.Spawn(name, NewMonitored())
+		child := context.Spawn(name, newSupervised())
 		assert.NotNil(t, child)
 		assert.Len(t, context.Children(), 1)
 
@@ -1083,7 +1083,7 @@ func TestReceiveContext(t *testing.T) {
 		}
 
 		// create actor1
-		actor1 := &PostStopBreaker{}
+		actor1 := &testPostStop{}
 		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
 		pid1, err := newPID(ctx, actorPath1, actor1, opts...)
 		require.NoError(t, err)
@@ -1112,21 +1112,21 @@ func TestReceiveContext(t *testing.T) {
 		}
 
 		// create actorA
-		actorA := &Exchanger{}
+		actorA := &exchanger{}
 		actorPath1 := NewPath("actorA", NewAddress("sys", "host", 1))
 		pidA, err := newPID(ctx, actorPath1, actorA, opts...)
 		require.NoError(t, err)
 		require.NotNil(t, pidA)
 
 		// create actorC
-		actorC := &Exchanger{}
+		actorC := &exchanger{}
 		actorPath3 := NewPath("actorC", NewAddress("sys", "host", 1))
 		pidC, err := newPID(ctx, actorPath3, actorC, opts...)
 		require.NoError(t, err)
 		require.NotNil(t, pidC)
 
 		// create actorB
-		actorB := &Forwarder{
+		actorB := &forwarder{
 			actorRef: pidC,
 		}
 		actorPath2 := NewPath("actorB", NewAddress("sys", "host", 1))
@@ -1167,7 +1167,7 @@ func TestReceiveContext(t *testing.T) {
 		}
 
 		// create actor1
-		actor1 := &Exchanger{}
+		actor1 := &exchanger{}
 		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
 		pid1, err := newPID(ctx, actorPath1, actor1, opts...)
 
@@ -1235,14 +1235,14 @@ func TestReceiveContext(t *testing.T) {
 		}
 
 		// create actor1
-		actor1 := &Exchanger{}
+		actor1 := &exchanger{}
 		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
 		pid1, err := newPID(ctx, actorPath1, actor1, opts...)
 
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
 
-		actor2 := &Exchanger{}
+		actor2 := &exchanger{}
 		actorPath2 := NewPath("Exchange1", NewAddress("sys", "host", 1))
 		pid2, err := newPID(ctx, actorPath2, actor2, opts...)
 
@@ -1299,7 +1299,7 @@ func TestReceiveContext(t *testing.T) {
 		}
 
 		// create actor1
-		actor1 := &Exchanger{}
+		actor1 := &exchanger{}
 		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
 		pid1, err := newPID(ctx, actorPath1, actor1, opts...)
 		require.NoError(t, err)
@@ -1316,7 +1316,7 @@ func TestReceiveContext(t *testing.T) {
 		}
 
 		// create actor2
-		actor2 := &Exchanger{}
+		actor2 := &exchanger{}
 		actorPath2 := NewPath("Exchange2", NewAddress("sys", "host", 1))
 		pid2, err := newPID(ctx, actorPath2, actor2, opts...)
 		require.NoError(t, err)
@@ -1340,7 +1340,7 @@ func TestReceiveContext(t *testing.T) {
 		}
 
 		// create actor1
-		actor1 := &Exchanger{}
+		actor1 := &exchanger{}
 		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
 		pid1, err := newPID(ctx, actorPath1, actor1, opts...)
 		require.NoError(t, err)
@@ -1357,7 +1357,7 @@ func TestReceiveContext(t *testing.T) {
 		}
 
 		// create actor2
-		actor2 := &Exchanger{}
+		actor2 := &exchanger{}
 		actorPath2 := NewPath("Exchange2", NewAddress("sys", "host", 1))
 		pid2, err := newPID(ctx, actorPath2, actor2, opts...)
 		require.NoError(t, err)
@@ -1381,7 +1381,7 @@ func TestReceiveContext(t *testing.T) {
 		}
 
 		// create actor1
-		actor1 := &Exchanger{}
+		actor1 := &exchanger{}
 		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
 		pid1, err := newPID(ctx, actorPath1, actor1, opts...)
 		require.NoError(t, err)
@@ -1398,7 +1398,7 @@ func TestReceiveContext(t *testing.T) {
 		}
 
 		// create actor2
-		actor2 := &Exchanger{}
+		actor2 := &exchanger{}
 		actorPath2 := NewPath("Exchange2", NewAddress("sys", "host", 1))
 		pid2, err := newPID(ctx, actorPath2, actor2, opts...)
 		require.NoError(t, err)
@@ -1425,7 +1425,7 @@ func TestReceiveContext(t *testing.T) {
 		}
 
 		// create actor1
-		actor1 := &Exchanger{}
+		actor1 := &exchanger{}
 		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
 		pid1, err := newPID(ctx, actorPath1, actor1, opts...)
 		require.NoError(t, err)
@@ -1442,7 +1442,7 @@ func TestReceiveContext(t *testing.T) {
 		}
 
 		// create actor2
-		actor2 := &Exchanger{}
+		actor2 := &exchanger{}
 		actorPath2 := NewPath("Exchange2", NewAddress("sys", "host", 1))
 		pid2, err := newPID(ctx, actorPath2, actor2, opts...)
 		require.NoError(t, err)
@@ -1469,7 +1469,7 @@ func TestReceiveContext(t *testing.T) {
 		}
 
 		// create actor1
-		actor1 := &Exchanger{}
+		actor1 := &exchanger{}
 		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
 		pid1, err := newPID(ctx, actorPath1, actor1, opts...)
 		require.NoError(t, err)
@@ -1486,7 +1486,7 @@ func TestReceiveContext(t *testing.T) {
 		}
 
 		// create actor2
-		actor2 := &Exchanger{}
+		actor2 := &exchanger{}
 		actorPath2 := NewPath("Exchange2", NewAddress("sys", "host", 1))
 		pid2, err := newPID(ctx, actorPath2, actor2, opts...)
 		require.NoError(t, err)
@@ -1529,7 +1529,7 @@ func TestReceiveContext(t *testing.T) {
 
 		// create test actor
 		tester := "test"
-		testActor := NewTester()
+		testActor := newTestActor()
 		testerRef, err := sys.Spawn(ctx, tester, testActor)
 		require.NoError(t, err)
 		require.NotNil(t, testerRef)
@@ -1586,7 +1586,7 @@ func TestReceiveContext(t *testing.T) {
 
 		// create test actor
 		tester := "test"
-		testActor := NewTester()
+		testActor := newTestActor()
 		testerRef, err := sys.Spawn(ctx, tester, testActor)
 		require.NoError(t, err)
 		require.NotNil(t, testerRef)
@@ -1642,7 +1642,7 @@ func TestReceiveContext(t *testing.T) {
 		actorName2 := "Exchange2"
 
 		// create actor1
-		actor1 := &Exchanger{}
+		actor1 := &exchanger{}
 		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
 		pid1, err := newPID(ctx,
 			actorPath1,
@@ -1707,7 +1707,7 @@ func TestReceiveContext(t *testing.T) {
 		actorName2 := "Exchange2"
 
 		// create actor1
-		actor1 := &Exchanger{}
+		actor1 := &exchanger{}
 		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
 		pid1, err := newPID(ctx,
 			actorPath1,
@@ -1772,7 +1772,7 @@ func TestReceiveContext(t *testing.T) {
 		actorName2 := "Exchange2"
 
 		// create actor1
-		actor1 := &Exchanger{}
+		actor1 := &exchanger{}
 		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
 		pid1, err := newPID(ctx,
 			actorPath1,
@@ -1830,7 +1830,7 @@ func TestReceiveContext(t *testing.T) {
 		actorName2 := "Exchange2"
 
 		// create actor1
-		actor1 := &Exchanger{}
+		actor1 := &exchanger{}
 		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
 		pid1, err := newPID(ctx,
 			actorPath1,

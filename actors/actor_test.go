@@ -54,35 +54,35 @@ func TestMain(m *testing.M) {
 		goleak.IgnoreTopFunction("internal/poll.runtime_pollWait"))
 }
 
-// Tester is an actor that helps run various test scenarios
-type Tester struct {
+// testActor is an actor that helps run various test scenarios
+type testActor struct {
 	counter *atomic.Int64
 }
 
 // enforce compilation error
-var _ Actor = (*Tester)(nil)
+var _ Actor = (*testActor)(nil)
 
-// NewTester creates a Tester
-func NewTester() *Tester {
-	return &Tester{
+// newTestActor creates a testActor
+func newTestActor() *testActor {
+	return &testActor{
 		counter: atomic.NewInt64(0),
 	}
 }
 
 // Init initialize the actor. This function can be used to set up some database connections
 // or some sort of initialization before the actor init processing public
-func (p *Tester) PreStart(context.Context) error {
+func (p *testActor) PreStart(context.Context) error {
 	return nil
 }
 
 // Shutdown gracefully shuts down the given actor
-func (p *Tester) PostStop(context.Context) error {
+func (p *testActor) PostStop(context.Context) error {
 	p.counter.Store(0)
 	return nil
 }
 
 // Receive processes any message dropped into the actor mailbox without a reply
-func (p *Tester) Receive(ctx ReceiveContext) {
+func (p *testActor) Receive(ctx ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *goaktpb.PostStart:
 	case *testspb.TestSend:
@@ -106,23 +106,23 @@ func (p *Tester) Receive(ctx ReceiveContext) {
 	}
 }
 
-// Monitor is an actor that monitors another actor
+// supervisor is an actor that monitors another actor
 // and reacts to its failure.
-type Monitor struct{}
+type supervisor struct{}
 
 // enforce compilation error
-var _ Actor = (*Monitor)(nil)
+var _ Actor = (*supervisor)(nil)
 
-// NewMonitor creates an instance of Monitor
-func NewMonitor() *Monitor {
-	return &Monitor{}
+// newSupervisor creates an instance of supervisor
+func newSupervisor() *supervisor {
+	return &supervisor{}
 }
 
-func (p *Monitor) PreStart(context.Context) error {
+func (p *supervisor) PreStart(context.Context) error {
 	return nil
 }
 
-func (p *Monitor) Receive(ctx ReceiveContext) {
+func (p *supervisor) Receive(ctx ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *goaktpb.PostStart:
 	case *testspb.TestSend:
@@ -131,26 +131,26 @@ func (p *Monitor) Receive(ctx ReceiveContext) {
 	}
 }
 
-func (p *Monitor) PostStop(context.Context) error {
+func (p *supervisor) PostStop(context.Context) error {
 	return nil
 }
 
-// Monitored is an actor that is monitored
-type Monitored struct{}
+// supervised is an actor that is monitored
+type supervised struct{}
 
 // enforce compilation error
-var _ Actor = (*Monitored)(nil)
+var _ Actor = (*supervised)(nil)
 
-// NewMonitored creates an instance of Monitored
-func NewMonitored() *Monitored {
-	return &Monitored{}
+// newSupervised creates an instance of supervised
+func newSupervised() *supervised {
+	return &supervised{}
 }
 
-func (c *Monitored) PreStart(context.Context) error {
+func (c *supervised) PreStart(context.Context) error {
 	return nil
 }
 
-func (c *Monitored) Receive(ctx ReceiveContext) {
+func (c *supervised) Receive(ctx ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *goaktpb.PostStart:
 	case *testspb.TestSend:
@@ -161,25 +161,25 @@ func (c *Monitored) Receive(ctx ReceiveContext) {
 	}
 }
 
-func (c *Monitored) PostStop(context.Context) error {
+func (c *supervised) PostStop(context.Context) error {
 	return nil
 }
 
-// UserActor is used to test the actor behavior
-type UserActor struct{}
+// userActor is used to test the actor behavior
+type userActor struct{}
 
 // enforce compilation error
-var _ Actor = &UserActor{}
+var _ Actor = &userActor{}
 
-func (x *UserActor) PreStart(_ context.Context) error {
+func (x *userActor) PreStart(_ context.Context) error {
 	return nil
 }
 
-func (x *UserActor) PostStop(_ context.Context) error {
+func (x *userActor) PostStop(_ context.Context) error {
 	return nil
 }
 
-func (x *UserActor) Receive(ctx ReceiveContext) {
+func (x *userActor) Receive(ctx ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *goaktpb.PostStart:
 	case *testspb.TestLogin:
@@ -192,7 +192,7 @@ func (x *UserActor) Receive(ctx ReceiveContext) {
 }
 
 // Authenticated behavior is executed when the actor receive the TestAuth message
-func (x *UserActor) Authenticated(ctx ReceiveContext) {
+func (x *userActor) Authenticated(ctx ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *goaktpb.PostStart:
 	case *testspb.TestReadiness:
@@ -201,7 +201,7 @@ func (x *UserActor) Authenticated(ctx ReceiveContext) {
 	}
 }
 
-func (x *UserActor) CreditAccount(ctx ReceiveContext) {
+func (x *userActor) CreditAccount(ctx ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *goaktpb.PostStart:
 	case *testspb.CreditAccount:
@@ -212,7 +212,7 @@ func (x *UserActor) CreditAccount(ctx ReceiveContext) {
 	}
 }
 
-func (x *UserActor) DebitAccount(ctx ReceiveContext) {
+func (x *userActor) DebitAccount(ctx ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *goaktpb.PostStart:
 	case *testspb.DebitAccount:
@@ -221,13 +221,13 @@ func (x *UserActor) DebitAccount(ctx ReceiveContext) {
 	}
 }
 
-type Exchanger struct{}
+type exchanger struct{}
 
-func (e *Exchanger) PreStart(context.Context) error {
+func (e *exchanger) PreStart(context.Context) error {
 	return nil
 }
 
-func (e *Exchanger) Receive(ctx ReceiveContext) {
+func (e *exchanger) Receive(ctx ReceiveContext) {
 	message := ctx.Message()
 	switch message.(type) {
 	case *goaktpb.PostStart:
@@ -242,19 +242,19 @@ func (e *Exchanger) Receive(ctx ReceiveContext) {
 	}
 }
 
-func (e *Exchanger) PostStop(context.Context) error {
+func (e *exchanger) PostStop(context.Context) error {
 	return nil
 }
 
-var _ Actor = &Exchanger{}
+var _ Actor = &exchanger{}
 
-type Stasher struct{}
+type stasher struct{}
 
-func (x *Stasher) PreStart(context.Context) error {
+func (x *stasher) PreStart(context.Context) error {
 	return nil
 }
 
-func (x *Stasher) Receive(ctx ReceiveContext) {
+func (x *stasher) Receive(ctx ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *goaktpb.PostStart:
 	case *testspb.TestStash:
@@ -266,7 +266,7 @@ func (x *Stasher) Receive(ctx ReceiveContext) {
 	}
 }
 
-func (x *Stasher) Ready(ctx ReceiveContext) {
+func (x *stasher) Ready(ctx ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *goaktpb.PostStart:
 	case *testspb.TestStash:
@@ -282,33 +282,33 @@ func (x *Stasher) Ready(ctx ReceiveContext) {
 	}
 }
 
-func (x *Stasher) PostStop(context.Context) error {
+func (x *stasher) PostStop(context.Context) error {
 	return nil
 }
 
-var _ Actor = &Stasher{}
+var _ Actor = &stasher{}
 
-type PreStartBreaker struct{}
+type testPreStart struct{}
 
-func (x *PreStartBreaker) PreStart(context.Context) error {
+func (x *testPreStart) PreStart(context.Context) error {
 	return errors.New("failed")
 }
 
-func (x *PreStartBreaker) Receive(ReceiveContext) {}
+func (x *testPreStart) Receive(ReceiveContext) {}
 
-func (x *PreStartBreaker) PostStop(context.Context) error {
+func (x *testPreStart) PostStop(context.Context) error {
 	return nil
 }
 
-var _ Actor = &PreStartBreaker{}
+var _ Actor = &testPreStart{}
 
-type PostStopBreaker struct{}
+type testPostStop struct{}
 
-func (x *PostStopBreaker) PreStart(context.Context) error {
+func (x *testPostStop) PreStart(context.Context) error {
 	return nil
 }
 
-func (x *PostStopBreaker) Receive(ctx ReceiveContext) {
+func (x *testPostStop) Receive(ctx ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *goaktpb.PostStart:
 	case *testspb.TestSend:
@@ -317,21 +317,21 @@ func (x *PostStopBreaker) Receive(ctx ReceiveContext) {
 	}
 }
 
-func (x *PostStopBreaker) PostStop(context.Context) error {
+func (x *testPostStop) PostStop(context.Context) error {
 	return errors.New("failed")
 }
 
-var _ Actor = &PostStopBreaker{}
+var _ Actor = &testPostStop{}
 
-type RestartBreaker struct {
+type testRestart struct {
 	counter *atomic.Int64
 }
 
-func NewRestartBreaker() *RestartBreaker {
-	return &RestartBreaker{counter: atomic.NewInt64(0)}
+func newTestRestart() *testRestart {
+	return &testRestart{counter: atomic.NewInt64(0)}
 }
 
-func (x *RestartBreaker) PreStart(context.Context) error {
+func (x *testRestart) PreStart(context.Context) error {
 	// increment counter
 	x.counter.Inc()
 	// error when counter is greater than 1
@@ -341,24 +341,24 @@ func (x *RestartBreaker) PreStart(context.Context) error {
 	return nil
 }
 
-func (x *RestartBreaker) Receive(ReceiveContext) {
+func (x *testRestart) Receive(ReceiveContext) {
 }
 
-func (x *RestartBreaker) PostStop(context.Context) error {
+func (x *testRestart) PostStop(context.Context) error {
 	return nil
 }
 
-var _ Actor = &RestartBreaker{}
+var _ Actor = &testRestart{}
 
-type Forwarder struct {
+type forwarder struct {
 	actorRef PID
 }
 
-func (x *Forwarder) PreStart(context.Context) error {
+func (x *forwarder) PreStart(context.Context) error {
 	return nil
 }
 
-func (x *Forwarder) Receive(ctx ReceiveContext) {
+func (x *forwarder) Receive(ctx ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *goaktpb.PostStart:
 	case *testspb.TestBye:
@@ -366,21 +366,21 @@ func (x *Forwarder) Receive(ctx ReceiveContext) {
 	}
 }
 
-func (x *Forwarder) PostStop(context.Context) error {
+func (x *forwarder) PostStop(context.Context) error {
 	return nil
 }
 
-var _ Actor = &Forwarder{}
+var _ Actor = &forwarder{}
 
-type Discarder struct{}
+type discarder struct{}
 
-var _ Actor = &Discarder{}
+var _ Actor = &discarder{}
 
-func (d *Discarder) PreStart(context.Context) error {
+func (d *discarder) PreStart(context.Context) error {
 	return nil
 }
 
-func (d *Discarder) Receive(ctx ReceiveContext) {
+func (d *discarder) Receive(ctx ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *goaktpb.PostStart:
 		// pass
@@ -389,7 +389,7 @@ func (d *Discarder) Receive(ctx ReceiveContext) {
 	}
 }
 
-func (d *Discarder) PostStop(context.Context) error {
+func (d *discarder) PostStop(context.Context) error {
 	return nil
 }
 

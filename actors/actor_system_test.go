@@ -74,7 +74,7 @@ func TestActorSystem(t *testing.T) {
 	t.Run("With Spawn an actor when not System started", func(t *testing.T) {
 		ctx := context.TODO()
 		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
-		actor := NewTester()
+		actor := newTestActor()
 		actorRef, err := sys.Spawn(ctx, "Test", actor)
 		assert.Error(t, err)
 		assert.EqualError(t, err, ErrActorSystemNotStarted.Error())
@@ -88,7 +88,7 @@ func TestActorSystem(t *testing.T) {
 		err := sys.Start(ctx)
 		assert.NoError(t, err)
 
-		actor := NewTester()
+		actor := newTestActor()
 		actorRef, err := sys.Spawn(ctx, "Test", actor)
 		assert.NoError(t, err)
 		assert.NotNil(t, actorRef)
@@ -109,7 +109,7 @@ func TestActorSystem(t *testing.T) {
 		err := sys.Start(ctx)
 		assert.NoError(t, err)
 
-		actor := NewTester()
+		actor := newTestActor()
 		actorRef, err := sys.Spawn(ctx, "Test", actor)
 		assert.NoError(t, err)
 		assert.NotNil(t, actorRef)
@@ -134,7 +134,7 @@ func TestActorSystem(t *testing.T) {
 		err := sys.Start(ctx)
 		assert.NoError(t, err)
 
-		actor := NewTester()
+		actor := newTestActor()
 		ref1, err := sys.Spawn(ctx, "Test", actor)
 		assert.NoError(t, err)
 		assert.NotNil(t, ref1)
@@ -209,7 +209,7 @@ func TestActorSystem(t *testing.T) {
 
 		// create an actor
 		actorName := uuid.NewString()
-		actor := NewTester()
+		actor := newTestActor()
 		actorRef, err := newActorSystem.Spawn(ctx, actorName, actor)
 		assert.NoError(t, err)
 		assert.NotNil(t, actorRef)
@@ -283,7 +283,7 @@ func TestActorSystem(t *testing.T) {
 
 		// create an actor
 		actorName := uuid.NewString()
-		actor := NewTester()
+		actor := newTestActor()
 		actorRef, err := newActorSystem.Spawn(ctx, actorName, actor)
 		assert.NoError(t, err)
 		assert.NotNil(t, actorRef)
@@ -331,7 +331,7 @@ func TestActorSystem(t *testing.T) {
 		assert.NoError(t, err)
 
 		actorName := "testActor"
-		actor := NewTester()
+		actor := newTestActor()
 		actorRef, err := sys.Spawn(ctx, actorName, actor)
 		assert.NoError(t, err)
 		assert.NotNil(t, actorRef)
@@ -409,8 +409,8 @@ func TestActorSystem(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, consumer)
 
-		actorName := "Exchanger"
-		actorRef, err := sys.Spawn(ctx, actorName, &Exchanger{})
+		actorName := "exchanger"
+		actorRef, err := sys.Spawn(ctx, actorName, &exchanger{})
 		assert.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
@@ -461,7 +461,7 @@ func TestActorSystem(t *testing.T) {
 		assert.NoError(t, err)
 
 		actorName := "actor"
-		actorRef, err := sys.Spawn(ctx, actorName, NewRestartBreaker())
+		actorRef, err := sys.Spawn(ctx, actorName, newTestRestart())
 		assert.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
@@ -489,8 +489,8 @@ func TestActorSystem(t *testing.T) {
 		err := sys.Start(ctx)
 		assert.NoError(t, err)
 
-		actorName := "Exchanger"
-		actorRef, err := sys.Spawn(ctx, actorName, &Exchanger{})
+		actorName := "exchanger"
+		actorRef, err := sys.Spawn(ctx, actorName, &exchanger{})
 		assert.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
@@ -544,8 +544,8 @@ func TestActorSystem(t *testing.T) {
 		err = newActorSystem.Start(ctx)
 		require.NoError(t, err)
 
-		actorName := "Exchanger"
-		actorRef, err := newActorSystem.Spawn(ctx, actorName, &Exchanger{})
+		actorName := "exchanger"
+		actorRef, err := newActorSystem.Spawn(ctx, actorName, &exchanger{})
 		assert.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
@@ -581,8 +581,8 @@ func TestActorSystem(t *testing.T) {
 		err := sys.Start(ctx)
 		assert.NoError(t, err)
 
-		actorName := "Exchanger"
-		actorRef, err := sys.Spawn(ctx, actorName, &Exchanger{})
+		actorName := "exchanger"
+		actorRef, err := sys.Spawn(ctx, actorName, &exchanger{})
 		assert.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
@@ -724,8 +724,8 @@ func TestActorSystem(t *testing.T) {
 		assert.NoError(t, err)
 
 		// create an actor
-		actorName := "Exchanger"
-		ref, err := sys.Spawn(ctx, actorName, &Exchanger{})
+		actorName := "exchanger"
+		ref, err := sys.Spawn(ctx, actorName, &exchanger{})
 		assert.NoError(t, err)
 		require.NotNil(t, ref)
 
@@ -770,7 +770,7 @@ func TestActorSystem(t *testing.T) {
 		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
 
 		// create an actor
-		actorName := "Exchanger"
+		actorName := "exchanger"
 
 		// locate the actor
 		local, err := sys.LocalActor(actorName)
@@ -814,7 +814,7 @@ func TestActorSystem(t *testing.T) {
 		time.Sleep(time.Second)
 
 		actorName := "HousekeeperActor"
-		actorHandler := NewTester()
+		actorHandler := newTestActor()
 		actorRef, err := sys.Spawn(ctx, actorName, actorHandler)
 		assert.NoError(t, err)
 		require.NotNil(t, actorRef)
@@ -865,7 +865,7 @@ func TestActorSystem(t *testing.T) {
 		err := sys.Start(ctx)
 		assert.NoError(t, err)
 
-		actor := &PostStopBreaker{}
+		actor := &testPostStop{}
 		actorRef, err := sys.Spawn(ctx, "Test", actor)
 		assert.NoError(t, err)
 		assert.NotNil(t, actorRef)
@@ -895,8 +895,8 @@ func TestActorSystem(t *testing.T) {
 		require.NotNil(t, consumer)
 
 		// create the black hole actor
-		actor := &Discarder{}
-		actorRef, err := sys.Spawn(ctx, "Discarder ", actor)
+		actor := &discarder{}
+		actorRef, err := sys.Spawn(ctx, "discarder ", actor)
 		assert.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
@@ -1015,7 +1015,7 @@ func TestActorSystem(t *testing.T) {
 
 		// create an actor
 		actorName := uuid.NewString()
-		actor := NewTester()
+		actor := newTestActor()
 		actorRef, err := newActorSystem.Spawn(ctx, actorName, actor)
 		assert.NoError(t, err)
 		assert.NotNil(t, actorRef)
@@ -1063,7 +1063,7 @@ func TestActorSystem(t *testing.T) {
 		err := sys.Start(ctx)
 		assert.NoError(t, err)
 
-		actor := NewTester()
+		actor := newTestActor()
 		actorRef, err := sys.Spawn(ctx, "Test", actor)
 		assert.NoError(t, err)
 		assert.NotNil(t, actorRef)

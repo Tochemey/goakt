@@ -51,7 +51,7 @@ const (
 	passivateAfter   = 200 * time.Millisecond
 )
 
-func TestActorReceive(t *testing.T) {
+func TestReceive(t *testing.T) {
 	ctx := context.TODO()
 
 	// create the actor path
@@ -61,7 +61,7 @@ func TestActorReceive(t *testing.T) {
 	pid, err := newPID(
 		ctx,
 		actorPath,
-		NewTester(),
+		newTestActor(),
 		withInitMaxRetries(1),
 		withCustomLogger(log.DefaultLogger),
 		withSendReplyTimeout(receivingTimeout))
@@ -87,7 +87,7 @@ func TestActorReceive(t *testing.T) {
 	err = pid.Shutdown(ctx)
 	assert.NoError(t, err)
 }
-func TestActorWithPassivation(t *testing.T) {
+func TestPassivation(t *testing.T) {
 	t.Run("With happy path", func(t *testing.T) {
 		ctx := context.TODO()
 		// create a Ping actor
@@ -99,7 +99,7 @@ func TestActorWithPassivation(t *testing.T) {
 
 		// create the actor path
 		actorPath := NewPath("Test", NewAddress("sys", "host", 1))
-		pid, err := newPID(ctx, actorPath, NewTester(), opts...)
+		pid, err := newPID(ctx, actorPath, newTestActor(), opts...)
 		require.NoError(t, err)
 		assert.NotNil(t, pid)
 
@@ -128,7 +128,7 @@ func TestActorWithPassivation(t *testing.T) {
 
 		// create the actor path
 		actorPath := NewPath("Test", NewAddress("sys", "host", 1))
-		pid, err := newPID(ctx, actorPath, &PostStopBreaker{}, opts...)
+		pid, err := newPID(ctx, actorPath, &testPostStop{}, opts...)
 		require.NoError(t, err)
 		assert.NotNil(t, pid)
 
@@ -147,7 +147,7 @@ func TestActorWithPassivation(t *testing.T) {
 		assert.EqualError(t, err, ErrDead.Error())
 	})
 }
-func TestActorWithReply(t *testing.T) {
+func TestReply(t *testing.T) {
 	t.Run("With happy path", func(t *testing.T) {
 		ctx := context.TODO()
 		// create a Ping actor
@@ -158,7 +158,7 @@ func TestActorWithReply(t *testing.T) {
 
 		// create the actor path
 		actorPath := NewPath("Test", NewAddress("sys", "host", 1))
-		pid, err := newPID(ctx, actorPath, NewTester(), opts...)
+		pid, err := newPID(ctx, actorPath, newTestActor(), opts...)
 
 		require.NoError(t, err)
 		assert.NotNil(t, pid)
@@ -182,7 +182,7 @@ func TestActorWithReply(t *testing.T) {
 
 		// create the actor path
 		actorPath := NewPath("Test", NewAddress("sys", "host", 1))
-		pid, err := newPID(ctx, actorPath, NewTester(), opts...)
+		pid, err := newPID(ctx, actorPath, newTestActor(), opts...)
 
 		require.NoError(t, err)
 		assert.NotNil(t, pid)
@@ -205,7 +205,7 @@ func TestActorWithReply(t *testing.T) {
 
 		// create the actor path
 		actorPath := NewPath("Test", NewAddress("sys", "host", 1))
-		pid, err := newPID(ctx, actorPath, NewTester(), opts...)
+		pid, err := newPID(ctx, actorPath, newTestActor(), opts...)
 
 		require.NoError(t, err)
 		assert.NotNil(t, pid)
@@ -220,12 +220,12 @@ func TestActorWithReply(t *testing.T) {
 		assert.Nil(t, actual)
 	})
 }
-func TestActorRestart(t *testing.T) {
+func TestRestart(t *testing.T) {
 	t.Run("With restart a stopped actor", func(t *testing.T) {
 		ctx := context.TODO()
 
 		// create a Ping actor
-		actor := NewTester()
+		actor := newTestActor()
 		assert.NotNil(t, actor)
 
 		// create the actor path
@@ -270,7 +270,7 @@ func TestActorRestart(t *testing.T) {
 		ctx := context.TODO()
 
 		// create a Ping actor
-		actor := NewTester()
+		actor := newTestActor()
 		assert.NotNil(t, actor)
 		// create the actor path
 		actorPath := NewPath("Test", NewAddress("sys", "host", 1))
@@ -308,7 +308,7 @@ func TestActorRestart(t *testing.T) {
 		ctx := context.TODO()
 
 		// create a Ping actor
-		actor := NewRestartBreaker()
+		actor := newTestRestart()
 		assert.NotNil(t, actor)
 		// create the actor path
 		actorPath := NewPath("Test", NewAddress("sys", "host", 1))
@@ -347,7 +347,7 @@ func TestActorRestart(t *testing.T) {
 		ctx := context.TODO()
 
 		// create a Ping actor
-		actor := &PostStopBreaker{}
+		actor := &testPostStop{}
 		assert.NotNil(t, actor)
 		// create the actor path
 		actorPath := NewPath("Test", NewAddress("sys", "host", 1))
@@ -374,7 +374,7 @@ func TestActorRestart(t *testing.T) {
 		assert.False(t, pid.IsRunning())
 	})
 }
-func TestActorWithSupervisorStrategy(t *testing.T) {
+func TestSupervisorStrategy(t *testing.T) {
 	t.Run("With happy path", func(t *testing.T) {
 		// create a test context
 		ctx := context.TODO()
@@ -383,7 +383,7 @@ func TestActorWithSupervisorStrategy(t *testing.T) {
 
 		// create the parent actor
 		parent, err := newPID(ctx, actorPath,
-			NewMonitor(),
+			newSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
 			withSendReplyTimeout(receivingTimeout))
@@ -392,7 +392,7 @@ func TestActorWithSupervisorStrategy(t *testing.T) {
 		assert.NotNil(t, parent)
 
 		// create the child actor
-		child, err := parent.SpawnChild(ctx, "SpawnChild", NewMonitored())
+		child, err := parent.SpawnChild(ctx, "SpawnChild", newSupervised())
 		assert.NoError(t, err)
 		assert.NotNil(t, child)
 
@@ -417,7 +417,7 @@ func TestActorWithSupervisorStrategy(t *testing.T) {
 		// create the parent actor
 		parent, err := newPID(ctx,
 			actorPath,
-			NewMonitor(),
+			newSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
 			withPassivationDisabled(),
@@ -427,7 +427,7 @@ func TestActorWithSupervisorStrategy(t *testing.T) {
 		assert.NotNil(t, parent)
 
 		// create the child actor
-		child, err := parent.SpawnChild(ctx, "SpawnChild", NewMonitored())
+		child, err := parent.SpawnChild(ctx, "SpawnChild", newSupervised())
 		assert.NoError(t, err)
 		assert.NotNil(t, child)
 
@@ -457,7 +457,7 @@ func TestActorWithSupervisorStrategy(t *testing.T) {
 		// create the parent actor
 		parent, err := newPID(ctx,
 			actorPath,
-			NewMonitor(),
+			newSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
 			withPassivationDisabled(),
@@ -468,7 +468,7 @@ func TestActorWithSupervisorStrategy(t *testing.T) {
 		assert.NotNil(t, parent)
 
 		// create the child actor
-		child, err := parent.SpawnChild(ctx, "SpawnChild", &PostStopBreaker{})
+		child, err := parent.SpawnChild(ctx, "SpawnChild", &testPostStop{})
 		assert.NoError(t, err)
 		assert.NotNil(t, child)
 
@@ -498,7 +498,7 @@ func TestActorWithSupervisorStrategy(t *testing.T) {
 		// create the parent actor
 		parent, err := newPID(ctx,
 			actorPath,
-			NewMonitor(),
+			newSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
 			withSupervisorStrategy(DefaultSupervisoryStrategy),
@@ -509,7 +509,7 @@ func TestActorWithSupervisorStrategy(t *testing.T) {
 		assert.NotNil(t, parent)
 
 		// create the child actor
-		child, err := parent.SpawnChild(ctx, "SpawnChild", &PostStopBreaker{})
+		child, err := parent.SpawnChild(ctx, "SpawnChild", &testPostStop{})
 		assert.NoError(t, err)
 		assert.NotNil(t, child)
 
@@ -540,7 +540,7 @@ func TestActorWithSupervisorStrategy(t *testing.T) {
 		// create the parent actor
 		parent, err := newPID(ctx,
 			actorPath,
-			NewMonitor(),
+			newSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(logger),
 			withPassivationDisabled(),
@@ -551,7 +551,7 @@ func TestActorWithSupervisorStrategy(t *testing.T) {
 		assert.NotNil(t, parent)
 
 		// create the child actor
-		child, err := parent.SpawnChild(ctx, "SpawnChild", NewMonitored())
+		child, err := parent.SpawnChild(ctx, "SpawnChild", newSupervised())
 		assert.NoError(t, err)
 		assert.NotNil(t, child)
 
@@ -579,7 +579,7 @@ func TestActorWithSupervisorStrategy(t *testing.T) {
 		// create the parent actor
 		parent, err := newPID(ctx,
 			actorPath,
-			NewMonitor(),
+			newSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
 			withPassivationDisabled(),
@@ -592,7 +592,7 @@ func TestActorWithSupervisorStrategy(t *testing.T) {
 		parent.supervisorStrategy = StrategyDirective(-1)
 
 		// create the child actor
-		child, err := parent.SpawnChild(ctx, "SpawnChild", NewMonitored())
+		child, err := parent.SpawnChild(ctx, "SpawnChild", newSupervised())
 		assert.NoError(t, err)
 		assert.NotNil(t, child)
 
@@ -612,7 +612,7 @@ func TestActorWithSupervisorStrategy(t *testing.T) {
 		assert.NoError(t, err)
 	})
 }
-func TestActorToActor(t *testing.T) {
+func TestMessaging(t *testing.T) {
 	t.Run("With happy", func(t *testing.T) {
 		ctx := context.TODO()
 		// create a Ping actor
@@ -622,14 +622,14 @@ func TestActorToActor(t *testing.T) {
 		}
 
 		// create the actor path
-		actor1 := &Exchanger{}
+		actor1 := &exchanger{}
 		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
 		pid1, err := newPID(ctx, actorPath1, actor1, opts...)
 
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
 
-		actor2 := &Exchanger{}
+		actor2 := &exchanger{}
 		actorPath2 := NewPath("Exchange2", NewAddress("sys", "host", 1))
 		pid2, err := newPID(ctx, actorPath2, actor2, opts...)
 		require.NoError(t, err)
@@ -668,14 +668,14 @@ func TestActorToActor(t *testing.T) {
 		}
 
 		// create the actor path
-		actor1 := &Exchanger{}
+		actor1 := &exchanger{}
 		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
 		pid1, err := newPID(ctx, actorPath1, actor1, opts...)
 
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
 
-		actor2 := &Exchanger{}
+		actor2 := &exchanger{}
 		actorPath2 := NewPath("Exchange2", NewAddress("sys", "host", 1))
 		pid2, err := newPID(ctx, actorPath2, actor2, opts...)
 		require.NoError(t, err)
@@ -706,13 +706,13 @@ func TestActorToActor(t *testing.T) {
 		}
 
 		// create the actor path
-		actor1 := &Exchanger{}
+		actor1 := &exchanger{}
 		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
 		pid1, err := newPID(ctx, actorPath1, actor1, opts...)
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
 
-		actor2 := &Exchanger{}
+		actor2 := &exchanger{}
 		actorPath2 := NewPath("Exchange2", NewAddress("sys", "host", 1))
 		pid2, err := newPID(ctx, actorPath2, actor2, opts...)
 		require.NoError(t, err)
@@ -743,14 +743,14 @@ func TestActorToActor(t *testing.T) {
 		}
 
 		// create the actor path
-		actor1 := &Exchanger{}
+		actor1 := &exchanger{}
 		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
 		pid1, err := newPID(ctx, actorPath1, actor1, opts...)
 
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
 
-		actor2 := NewTester()
+		actor2 := newTestActor()
 		actorPath2 := NewPath("Exchange2", NewAddress("sys", "host", 1))
 		pid2, err := newPID(ctx, actorPath2, actor2, opts...)
 		require.NoError(t, err)
@@ -780,7 +780,7 @@ func TestActorToActor(t *testing.T) {
 		assert.False(t, pid2.IsRunning())
 	})
 }
-func TestActorRemoting(t *testing.T) {
+func TestRemoting(t *testing.T) {
 	// create the context
 	ctx := context.TODO()
 	// define the logger to use
@@ -805,13 +805,13 @@ func TestActorRemoting(t *testing.T) {
 
 	// create an exchanger one
 	actorName1 := "Exchange1"
-	actorRef1, err := sys.Spawn(ctx, actorName1, &Exchanger{})
+	actorRef1, err := sys.Spawn(ctx, actorName1, &exchanger{})
 	require.NoError(t, err)
 	assert.NotNil(t, actorRef1)
 
 	// create an exchanger two
 	actorName2 := "Exchange2"
-	actorRef2, err := sys.Spawn(ctx, actorName2, &Exchanger{})
+	actorRef2, err := sys.Spawn(ctx, actorName2, &exchanger{})
 	require.NoError(t, err)
 	assert.NotNil(t, actorRef2)
 
@@ -854,7 +854,7 @@ func TestActorHandle(t *testing.T) {
 	pid, err := newPID(
 		ctx,
 		actorPath,
-		&Exchanger{},
+		&exchanger{},
 		withInitMaxRetries(1),
 		withCustomLogger(log.DefaultLogger),
 		withSendReplyTimeout(receivingTimeout))
@@ -862,7 +862,7 @@ func TestActorHandle(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotNil(t, pid)
 	actorHandle := pid.ActorHandle()
-	assert.IsType(t, &Exchanger{}, actorHandle)
+	assert.IsType(t, &exchanger{}, actorHandle)
 	var p interface{} = actorHandle
 	_, ok := p.(Actor)
 	assert.True(t, ok)
@@ -879,7 +879,7 @@ func TestPIDActorSystem(t *testing.T) {
 	pid, err := newPID(
 		ctx,
 		actorPath,
-		&Exchanger{},
+		&exchanger{},
 		withInitMaxRetries(1),
 		withCustomLogger(log.DefaultLogger),
 		withSendReplyTimeout(receivingTimeout))
@@ -900,7 +900,7 @@ func TestSpawnChild(t *testing.T) {
 
 		// create the parent actor
 		parent, err := newPID(ctx, actorPath,
-			NewMonitor(),
+			newSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
 			withSendReplyTimeout(receivingTimeout))
@@ -909,7 +909,7 @@ func TestSpawnChild(t *testing.T) {
 		assert.NotNil(t, parent)
 
 		// create the child actor
-		child, err := parent.SpawnChild(ctx, "SpawnChild", NewMonitored())
+		child, err := parent.SpawnChild(ctx, "SpawnChild", newSupervised())
 		assert.NoError(t, err)
 		assert.NotNil(t, child)
 
@@ -920,7 +920,7 @@ func TestSpawnChild(t *testing.T) {
 
 		time.Sleep(100 * time.Millisecond)
 		// create the child actor
-		child, err = parent.SpawnChild(ctx, "SpawnChild", NewMonitored())
+		child, err = parent.SpawnChild(ctx, "SpawnChild", newSupervised())
 		assert.NoError(t, err)
 		assert.NotNil(t, child)
 
@@ -939,7 +939,7 @@ func TestSpawnChild(t *testing.T) {
 
 		// create the parent actor
 		parent, err := newPID(ctx, actorPath,
-			NewMonitor(),
+			newSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
 			withSendReplyTimeout(receivingTimeout))
@@ -948,7 +948,7 @@ func TestSpawnChild(t *testing.T) {
 		assert.NotNil(t, parent)
 
 		// create the child actor
-		child, err := parent.SpawnChild(ctx, "SpawnChild", NewMonitored())
+		child, err := parent.SpawnChild(ctx, "SpawnChild", newSupervised())
 		assert.NoError(t, err)
 		assert.NotNil(t, child)
 
@@ -956,7 +956,7 @@ func TestSpawnChild(t *testing.T) {
 
 		time.Sleep(100 * time.Millisecond)
 		// create the child actor
-		child, err = parent.SpawnChild(ctx, "SpawnChild", NewMonitored())
+		child, err = parent.SpawnChild(ctx, "SpawnChild", newSupervised())
 		assert.NoError(t, err)
 		assert.NotNil(t, child)
 
@@ -975,7 +975,7 @@ func TestSpawnChild(t *testing.T) {
 
 		// create the parent actor
 		parent, err := newPID(ctx, actorPath,
-			NewMonitor(),
+			newSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
 			withSendReplyTimeout(receivingTimeout))
@@ -989,7 +989,7 @@ func TestSpawnChild(t *testing.T) {
 		assert.NoError(t, err)
 
 		// create the child actor
-		child, err := parent.SpawnChild(ctx, "SpawnChild", NewMonitored())
+		child, err := parent.SpawnChild(ctx, "SpawnChild", newSupervised())
 		assert.Error(t, err)
 		assert.EqualError(t, err, ErrDead.Error())
 		assert.Nil(t, child)
@@ -1002,7 +1002,7 @@ func TestSpawnChild(t *testing.T) {
 
 		// create the parent actor
 		parent, err := newPID(ctx, actorPath,
-			NewMonitor(),
+			newSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
 			withSendReplyTimeout(receivingTimeout))
@@ -1011,7 +1011,7 @@ func TestSpawnChild(t *testing.T) {
 		assert.NotNil(t, parent)
 
 		// create the child actor
-		child, err := parent.SpawnChild(ctx, "SpawnChild", &PreStartBreaker{})
+		child, err := parent.SpawnChild(ctx, "SpawnChild", &testPreStart{})
 		assert.Error(t, err)
 		assert.Nil(t, child)
 
@@ -1031,7 +1031,7 @@ func TestPoisonPill(t *testing.T) {
 	pid, err := newPID(
 		ctx,
 		actorPath,
-		NewTester(),
+		newTestActor(),
 		withInitMaxRetries(1),
 		withCustomLogger(log.DefaultLogger),
 		withSendReplyTimeout(receivingTimeout))
@@ -1074,7 +1074,7 @@ func TestRemoteLookup(t *testing.T) {
 
 		// create an exchanger 1
 		actorName1 := "Exchange1"
-		actorRef1, err := sys.Spawn(ctx, actorName1, &Exchanger{})
+		actorRef1, err := sys.Spawn(ctx, actorName1, &exchanger{})
 
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef1)
@@ -1112,7 +1112,7 @@ func TestRemoteLookup(t *testing.T) {
 
 		// create an exchanger 1
 		actorName1 := "Exchange1"
-		actorRef1, err := sys.Spawn(ctx, actorName1, &Exchanger{})
+		actorRef1, err := sys.Spawn(ctx, actorName1, &exchanger{})
 
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef1)
@@ -1148,7 +1148,7 @@ func TestFailedPreStart(t *testing.T) {
 
 	// create an exchanger 1
 	actorName1 := "Exchange1"
-	pid, err := sys.Spawn(ctx, actorName1, &PreStartBreaker{})
+	pid, err := sys.Spawn(ctx, actorName1, &testPreStart{})
 	require.Error(t, err)
 	require.EqualError(t, err, "failed to initialize: failed")
 	require.Nil(t, pid)
@@ -1167,7 +1167,7 @@ func TestFailedPostStop(t *testing.T) {
 	pid, err := newPID(
 		ctx,
 		actorPath,
-		&PostStopBreaker{},
+		&testPostStop{},
 		withInitMaxRetries(1),
 		withCustomLogger(log.DefaultLogger),
 		withSendReplyTimeout(receivingTimeout))
@@ -1186,7 +1186,7 @@ func TestShutdown(t *testing.T) {
 
 		// create the parent actor
 		parent, err := newPID(ctx, actorPath,
-			NewMonitor(),
+			newSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
 			withSendReplyTimeout(receivingTimeout))
@@ -1195,7 +1195,7 @@ func TestShutdown(t *testing.T) {
 		assert.NotNil(t, parent)
 
 		// create the child actor
-		child, err := parent.SpawnChild(ctx, "SpawnChild", &PostStopBreaker{})
+		child, err := parent.SpawnChild(ctx, "SpawnChild", &testPostStop{})
 		assert.NoError(t, err)
 		assert.NotNil(t, child)
 
@@ -1218,8 +1218,8 @@ func TestBatchTell(t *testing.T) {
 		}
 
 		// create the actor path
-		actor := NewTester()
-		actorPath := NewPath("Tester", NewAddress("sys", "host", 1))
+		actor := newTestActor()
+		actorPath := NewPath("testActor", NewAddress("sys", "host", 1))
 		pid, err := newPID(ctx, actorPath, actor, opts...)
 		require.NoError(t, err)
 		require.NotNil(t, pid)
@@ -1243,8 +1243,8 @@ func TestBatchTell(t *testing.T) {
 		}
 
 		// create the actor path
-		actor := NewTester()
-		actorPath := NewPath("Tester", NewAddress("sys", "host", 1))
+		actor := newTestActor()
+		actorPath := NewPath("testActor", NewAddress("sys", "host", 1))
 		pid, err := newPID(ctx, actorPath, actor, opts...)
 		require.NoError(t, err)
 		require.NotNil(t, pid)
@@ -1268,8 +1268,8 @@ func TestBatchTell(t *testing.T) {
 		}
 
 		// create the actor path
-		actor := NewTester()
-		actorPath := NewPath("Tester", NewAddress("sys", "host", 1))
+		actor := newTestActor()
+		actorPath := NewPath("testActor", NewAddress("sys", "host", 1))
 		pid, err := newPID(ctx, actorPath, actor, opts...)
 		require.NoError(t, err)
 		require.NotNil(t, pid)
@@ -1291,8 +1291,8 @@ func TestBatchAsk(t *testing.T) {
 		}
 
 		// create the actor path
-		actor := &Exchanger{}
-		actorPath := NewPath("Tester", NewAddress("sys", "host", 1))
+		actor := &exchanger{}
+		actorPath := NewPath("testActor", NewAddress("sys", "host", 1))
 		pid, err := newPID(ctx, actorPath, actor, opts...)
 		require.NoError(t, err)
 		require.NotNil(t, pid)
@@ -1320,8 +1320,8 @@ func TestBatchAsk(t *testing.T) {
 		}
 
 		// create the actor path
-		actor := &Exchanger{}
-		actorPath := NewPath("Tester", NewAddress("sys", "host", 1))
+		actor := &exchanger{}
+		actorPath := NewPath("testActor", NewAddress("sys", "host", 1))
 		pid, err := newPID(ctx, actorPath, actor, opts...)
 		require.NoError(t, err)
 		require.NotNil(t, pid)
@@ -1344,8 +1344,8 @@ func TestBatchAsk(t *testing.T) {
 		}
 
 		// create the actor path
-		actor := NewTester()
-		actorPath := NewPath("Tester", NewAddress("sys", "host", 1))
+		actor := newTestActor()
+		actorPath := NewPath("testActor", NewAddress("sys", "host", 1))
 		pid, err := newPID(ctx, actorPath, actor, opts...)
 		require.NoError(t, err)
 		require.NotNil(t, pid)
@@ -1375,7 +1375,7 @@ func TestRegisterMetrics(t *testing.T) {
 	pid, err := newPID(
 		ctx,
 		actorPath,
-		NewTester(),
+		newTestActor(),
 		withInitMaxRetries(1),
 		withCustomLogger(log.DefaultLogger),
 		withTelemetry(tel),
@@ -1455,7 +1455,7 @@ func TestRemoteReSpawn(t *testing.T) {
 
 		// create an exchanger 1
 		actorName1 := "Exchange1"
-		actorRef1, err := sys.Spawn(ctx, actorName1, &Exchanger{})
+		actorRef1, err := sys.Spawn(ctx, actorName1, &exchanger{})
 
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef1)
@@ -1492,7 +1492,7 @@ func TestRemoteReSpawn(t *testing.T) {
 
 		// create an exchanger 1
 		actorName1 := "Exchange1"
-		actorRef1, err := sys.Spawn(ctx, actorName1, &Exchanger{})
+		actorRef1, err := sys.Spawn(ctx, actorName1, &exchanger{})
 
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef1)

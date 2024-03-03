@@ -37,18 +37,18 @@ func TestReflection(t *testing.T) {
 		t.Run("With happy path", func(t *testing.T) {
 			newRegistry := NewRegistry()
 			// create an instance of an actor
-			actor := NewTester()
+			actor := newTestActor()
 			// register the actor into the types registry
-			newRegistry.Register("Tester", actor)
+			newRegistry.Register("testActor", actor)
 
 			// create an instance of reflection
 			reflection := NewReflection(newRegistry)
 
-			// create an instance of test actor from the string Tester
-			actual, err := reflection.ActorFrom("Tester")
+			// create an instance of test actor from the string testActor
+			actual, err := reflection.ActorFrom("testActor")
 			assert.NoError(t, err)
 			assert.NotNil(t, actual)
-			assert.IsType(t, new(Tester), actual)
+			assert.IsType(t, new(testActor), actual)
 		})
 		t.Run("With actor not found", func(t *testing.T) {
 			newRegistry := NewRegistry()
@@ -75,7 +75,7 @@ func TestReflection(t *testing.T) {
 		t.Run("With happy path", func(t *testing.T) {
 			newRegistry := NewRegistry()
 			// create an instance of an actor
-			actor := NewTester()
+			actor := newTestActor()
 			// register the actor into the types registry
 			newRegistry.Register("", actor)
 
@@ -86,15 +86,15 @@ func TestReflection(t *testing.T) {
 			assert.True(t, ok)
 			assert.NotNil(t, rtype)
 
-			// create an instance of test actor from the string Tester
+			// create an instance of test actor from the string testActor
 			actual, err := reflection.ActorOf(rtype)
 
 			// perform some assertions
 			assert.NoError(t, err)
 			assert.NotNil(t, actual)
-			_, ok = actual.(*Tester)
+			_, ok = actual.(*testActor)
 			assert.True(t, ok)
-			assert.IsType(t, new(Tester), actual)
+			assert.IsType(t, new(testActor), actual)
 		})
 		t.Run("With unhappy path", func(t *testing.T) {
 			newRegistry := NewRegistry()

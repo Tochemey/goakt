@@ -46,8 +46,8 @@ func TestStash(t *testing.T) {
 		}
 
 		// create the actor path
-		actor := &Stasher{}
-		actorPath := NewPath("Stasher", NewAddress("sys", "host", 1))
+		actor := &stasher{}
+		actorPath := NewPath("stasher", NewAddress("sys", "host", 1))
 		pid, err := newPID(ctx, actorPath, actor, opts...)
 		require.NoError(t, err)
 		require.NotNil(t, pid)
@@ -113,8 +113,8 @@ func TestStash(t *testing.T) {
 		}
 
 		// create the actor path
-		actor := &Stasher{}
-		actorPath := NewPath("Stasher", NewAddress("sys", "host", 1))
+		actor := &stasher{}
+		actorPath := NewPath("stasher", NewAddress("sys", "host", 1))
 		pid, err := newPID(ctx, actorPath, actor, opts...)
 		require.NoError(t, err)
 		require.NotNil(t, pid)
@@ -138,8 +138,8 @@ func TestStash(t *testing.T) {
 		}
 
 		// create the actor path
-		actor := &Stasher{}
-		actorPath := NewPath("Stasher", NewAddress("sys", "host", 1))
+		actor := &stasher{}
+		actorPath := NewPath("stasher", NewAddress("sys", "host", 1))
 		pid, err := newPID(ctx, actorPath, actor, opts...)
 		require.NoError(t, err)
 		require.NotNil(t, pid)
