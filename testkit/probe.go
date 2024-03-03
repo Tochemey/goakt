@@ -69,7 +69,7 @@ func (x *probeActor) Receive(ctx actors.ReceiveContext) {
 	// skip system message
 	case *goaktpb.PoisonPill,
 		*goaktpb.Terminated,
-		*goaktpb.Initialized:
+		*goaktpb.PostStart:
 	// pass
 	default:
 		// any message received is pushed to the queue

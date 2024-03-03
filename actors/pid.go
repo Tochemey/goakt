@@ -332,11 +332,9 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 	}
 
 	// push the started message into the actor mailbox
-	_ = Tell(ctx, pid, &goaktpb.Initialized{
-		Id:        pid.ActorPath().String(),
-		Timestamp: timestamppb.Now(),
-		Address:   pid.ActorPath().RemoteAddress(),
-	})
+	context := newReceiveContext(ctx, NoSender, pid, new(goaktpb.PostStart), true)
+	// put the message context in the mailbox of the recipient actor
+	pid.doReceive(context)
 
 	// return the actor reference
 	return pid, nil
@@ -370,18 +368,18 @@ func (p *pid) Child(name string) (PID, error) {
 // Children returns the list of all the children of the given actor that are still alive or an empty list
 func (p *pid) Children() []PID {
 	p.semaphore.RLock()
-	kiddos := p.children.List()
+	children := p.children.List()
 	p.semaphore.RUnlock()
 
 	// create the list of alive children
-	pids := make([]PID, 0, len(kiddos))
-	for _, child := range kiddos {
+	cids := make([]PID, 0, len(children))
+	for _, child := range children {
 		if child.IsRunning() {
-			pids = append(pids, child)
+			cids = append(cids, child)
 		}
 	}
 
-	return pids
+	return cids
 }
 
 // Stop forces the child Actor under the given name to terminate after it finishes processing its current message.
@@ -684,7 +682,7 @@ func (p *pid) Ask(ctx context.Context, to PID, message proto.Message) (response 
 			span.RecordError(err)
 			// push the message as a deadletter
 			p.emitDeadletter(context, err)
-			return
+			return nil, err
 		}
 	}
 }
@@ -805,7 +803,7 @@ func (p *pid) BatchAsk(ctx context.Context, to PID, messages ...proto.Message) (
 				// push the message as a deadletter
 				p.emitDeadletter(messageContext, err)
 				// stop the whole processing
-				return
+				return nil, err
 			}
 		}
 	}
