@@ -101,12 +101,5 @@ message Terminated {}
 // It will be handled after messages that were already queued in the mailbox.
 message PoisonPill {}
 
-// Initialized is used when an actor has successfully initialized
-message Initialized {
-  // Specifies the actor id
-  string id = 1;
-  // Specifies the timestamp
-  google.protobuf.Timestamp timestamp = 2;
-  // Specifies the actor address
-  Address address = 3;
-}
+// PostStart is used when an actor has successfully started
+message PostStart {}
