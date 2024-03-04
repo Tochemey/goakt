@@ -167,11 +167,21 @@ func TestTestProbe(t *testing.T) {
 type pinger struct {
 }
 
-func (t pinger) PreStart(_ context.Context) error {
+// nolint
+func (x pinger) MarshalBinary() (data []byte, err error) {
+	return nil, nil
+}
+
+// nolint
+func (x pinger) UnmarshalBinary(data []byte) error {
 	return nil
 }
 
-func (t pinger) Receive(ctx actors.ReceiveContext) {
+func (x pinger) PreStart(_ context.Context) error {
+	return nil
+}
+
+func (x pinger) Receive(ctx actors.ReceiveContext) {
 	switch x := ctx.Message().(type) {
 	case *testpb.Ping:
 		_ = ctx.Self().Tell(ctx.Context(), ctx.Sender(), new(testpb.Pong))
@@ -190,7 +200,7 @@ func (t pinger) Receive(ctx actors.ReceiveContext) {
 	}
 }
 
-func (t pinger) PostStop(_ context.Context) error {
+func (x pinger) PostStop(_ context.Context) error {
 	return nil
 }
 

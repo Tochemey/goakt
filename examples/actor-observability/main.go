@@ -145,15 +145,15 @@ func NewPingActor() *PingActor {
 	return &PingActor{}
 }
 
-func (p *PingActor) PreStart(ctx context.Context) error {
-	p.count = atomic.NewInt32(0)
+func (x *PingActor) PreStart(ctx context.Context) error {
+	x.count = atomic.NewInt32(0)
 	return nil
 }
 
-func (p *PingActor) Receive(ctx goakt.ReceiveContext) {
+func (x *PingActor) Receive(ctx goakt.ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *samplepb.Pong:
-		p.count.Inc()
+		x.count.Inc()
 		// reply the sender in case there is a sender
 		if ctx.Sender() != goakt.NoSender {
 			// let us reply to the sender
@@ -164,7 +164,15 @@ func (p *PingActor) Receive(ctx goakt.ReceiveContext) {
 	}
 }
 
-func (p *PingActor) PostStop(ctx context.Context) error {
+func (x *PingActor) PostStop(ctx context.Context) error {
+	return nil
+}
+
+func (x *PingActor) MarshalBinary() (data []byte, err error) {
+	return nil, nil
+}
+
+func (x *PingActor) UnmarshalBinary(data []byte) error {
 	return nil
 }
 
@@ -178,15 +186,15 @@ func NewPongActor() *PongActor {
 	return &PongActor{}
 }
 
-func (p *PongActor) PreStart(ctx context.Context) error {
-	p.count = atomic.NewInt32(0)
+func (x *PongActor) PreStart(ctx context.Context) error {
+	x.count = atomic.NewInt32(0)
 	return nil
 }
 
-func (p *PongActor) Receive(ctx goakt.ReceiveContext) {
+func (x *PongActor) Receive(ctx goakt.ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *samplepb.Ping:
-		p.count.Inc()
+		x.count.Inc()
 		// reply the sender in case there is a sender
 		if ctx.Sender() != nil && ctx.Sender() != goakt.NoSender {
 			_ = ctx.Self().Tell(ctx.Context(), ctx.Sender(), new(samplepb.Pong))
@@ -196,6 +204,14 @@ func (p *PongActor) Receive(ctx goakt.ReceiveContext) {
 	}
 }
 
-func (p *PongActor) PostStop(ctx context.Context) error {
+func (x *PongActor) PostStop(ctx context.Context) error {
+	return nil
+}
+
+func (x *PongActor) MarshalBinary() (data []byte, err error) {
+	return nil, nil
+}
+
+func (x *PongActor) UnmarshalBinary(data []byte) error {
 	return nil
 }

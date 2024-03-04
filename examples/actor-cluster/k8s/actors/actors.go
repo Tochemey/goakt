@@ -53,61 +53,69 @@ func NewAccountEntity(id string) *AccountEntity {
 	}
 }
 
-func (p *AccountEntity) PreStart(ctx context.Context) error {
+func (x *AccountEntity) PreStart(ctx context.Context) error {
 	// set the log
-	p.logger = log.DefaultLogger
+	x.logger = log.DefaultLogger
 	return nil
 }
 
-func (p *AccountEntity) Receive(ctx goakt.ReceiveContext) {
+func (x *AccountEntity) Receive(ctx goakt.ReceiveContext) {
 	switch msg := ctx.Message().(type) {
 	case *samplepb.CreateAccount:
-		p.logger.Info("creating account by setting the balance...")
+		x.logger.Info("creating account by setting the balance...")
 		// check whether the create operation has been done already
-		if p.created.Load() {
-			p.logger.Infof("account=%s has been created already", p.accountID)
+		if x.created.Load() {
+			x.logger.Infof("account=%s has been created already", x.accountID)
 			return
 		}
 		// get the data
 		accountID := msg.GetAccountId()
 		balance := msg.GetAccountBalance()
 		// first check whether the accountID is mine
-		if p.accountID == accountID {
-			p.balance.Store(balance)
-			p.created.Store(true)
+		if x.accountID == accountID {
+			x.balance.Store(balance)
+			x.created.Store(true)
 			// here we are handling just an ask
 			ctx.Response(&samplepb.Account{
 				AccountId:      accountID,
-				AccountBalance: p.balance.Load(),
+				AccountBalance: x.balance.Load(),
 			})
 		}
 	case *samplepb.CreditAccount:
-		p.logger.Info("crediting balance...")
+		x.logger.Info("crediting balance...")
 		// get the data
 		accountID := msg.GetAccountId()
 		balance := msg.GetBalance()
 		// first check whether the accountID is mine
-		if p.accountID == accountID {
-			p.balance.Add(balance)
+		if x.accountID == accountID {
+			x.balance.Add(balance)
 			ctx.Response(&samplepb.Account{
 				AccountId:      accountID,
-				AccountBalance: p.balance.Load(),
+				AccountBalance: x.balance.Load(),
 			})
 		}
 	case *samplepb.GetAccount:
-		p.logger.Info("get account...")
+		x.logger.Info("get account...")
 		// get the data
 		accountID := msg.GetAccountId()
 		ctx.Response(&samplepb.Account{
 			AccountId:      accountID,
-			AccountBalance: p.balance.Load(),
+			AccountBalance: x.balance.Load(),
 		})
 
 	default:
-		p.logger.Panic(goakt.ErrUnhandled)
+		x.logger.Panic(goakt.ErrUnhandled)
 	}
 }
 
-func (p *AccountEntity) PostStop(ctx context.Context) error {
+func (x *AccountEntity) PostStop(ctx context.Context) error {
+	return nil
+}
+
+func (x *AccountEntity) MarshalBinary() (data []byte, err error) {
+	return nil, nil
+}
+
+func (x *AccountEntity) UnmarshalBinary(data []byte) error {
 	return nil
 }

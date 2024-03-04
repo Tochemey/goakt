@@ -1198,4 +1198,70 @@ func TestActorSystem(t *testing.T) {
 
 		require.NoError(t, sys.Stop(ctx))
 	})
+	t.Run("With Actor encoding failure with clustering enabled", func(t *testing.T) {
+		ctx := context.TODO()
+		nodePorts := dynaport.Get(3)
+		gossipPort := nodePorts[0]
+		clusterPort := nodePorts[1]
+		remotingPort := nodePorts[2]
+
+		logger := log.DiscardLogger
+
+		podName := "pod"
+		host := "localhost"
+
+		// set the environments
+		t.Setenv("GOSSIP_PORT", strconv.Itoa(gossipPort))
+		t.Setenv("CLUSTER_PORT", strconv.Itoa(clusterPort))
+		t.Setenv("REMOTING_PORT", strconv.Itoa(remotingPort))
+		t.Setenv("NODE_NAME", podName)
+		t.Setenv("NODE_IP", host)
+		t.Setenv("GRPC_GO_LOG_VERBOSITY_LEVEL", "99")
+		t.Setenv("GRPC_GO_LOG_SEVERITY_LEVEL", "info")
+
+		// define discovered addresses
+		addrs := []string{
+			net.JoinHostPort(host, strconv.Itoa(gossipPort)),
+		}
+
+		// mock the discovery provider
+		provider := new(testkit.Provider)
+		config := discovery.NewConfig()
+		sd := discovery.NewServiceDiscovery(provider, config)
+		newActorSystem, err := NewActorSystem(
+			"test",
+			WithExpireActorAfter(passivateAfter),
+			WithLogger(logger),
+			WithReplyTimeout(time.Minute),
+			WithClustering(sd, 9))
+		require.NoError(t, err)
+
+		provider.EXPECT().ID().Return("testDisco")
+		provider.EXPECT().Initialize().Return(nil)
+		provider.EXPECT().Register().Return(nil)
+		provider.EXPECT().Deregister().Return(nil)
+		provider.EXPECT().SetConfig(config).Return(nil)
+		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
+		provider.EXPECT().Close().Return(nil)
+
+		// start the actor system
+		err = newActorSystem.Start(ctx)
+		require.NoError(t, err)
+
+		// wait for the cluster to start
+		time.Sleep(time.Second)
+
+		// create an actor
+		actorName := uuid.NewString()
+		actor := new(faultyActor)
+		actorRef, err := newActorSystem.Spawn(ctx, actorName, actor)
+		require.Error(t, err)
+		assert.Nil(t, actorRef)
+
+		t.Cleanup(func() {
+			err = newActorSystem.Stop(ctx)
+			assert.NoError(t, err)
+			provider.AssertExpectations(t)
+		})
+	})
 }

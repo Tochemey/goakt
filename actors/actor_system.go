@@ -445,11 +445,22 @@ func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor) (PID,
 
 	// when cluster is enabled replicate the actor metadata across the cluster
 	if x.clusterEnabled.Load() {
+		// get the binary version of the given actor
+		actorBinary, err := actor.MarshalBinary()
+		// handle the error
+		if err != nil {
+			// let us record the error in the span
+			span.SetStatus(codes.Error, "Spawn")
+			span.RecordError(err)
+			// return the error
+			return nil, err
+		}
 		// send it to the cluster channel a wire actor
 		x.clusterChan <- &internalpb.WireActor{
 			ActorName:    name,
 			ActorAddress: actorPath.RemoteAddress(),
 			ActorPath:    actorPath.String(),
+			ActorBinary:  actorBinary,
 		}
 	}
 

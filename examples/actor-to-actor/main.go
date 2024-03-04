@@ -86,6 +86,14 @@ type PingActor struct {
 	logger log.Logger
 }
 
+func (x *PingActor) MarshalBinary() (data []byte, err error) {
+	return nil, nil
+}
+
+func (x *PingActor) UnmarshalBinary(data []byte) error {
+	return nil
+}
+
 var _ goakt.Actor = (*PingActor)(nil)
 
 func NewPingActor() *PingActor {
@@ -94,31 +102,31 @@ func NewPingActor() *PingActor {
 	}
 }
 
-func (p *PingActor) PreStart(ctx context.Context) error {
+func (x *PingActor) PreStart(ctx context.Context) error {
 	// set the log
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.logger = log.DefaultLogger
-	p.count = atomic.NewInt32(0)
-	p.logger.Info("PingActor is about to Start")
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	x.logger = log.DefaultLogger
+	x.count = atomic.NewInt32(0)
+	x.logger.Info("PingActor is about to Start")
 	return nil
 }
 
-func (p *PingActor) Receive(ctx goakt.ReceiveContext) {
+func (x *PingActor) Receive(ctx goakt.ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *samplepb.Pong:
-		p.logger.Infof("%s received pong message from %s", ctx.Self().ActorPath().String(), ctx.Sender().ActorPath().String())
+		x.logger.Infof("%s received pong message from %s", ctx.Self().ActorPath().String(), ctx.Sender().ActorPath().String())
 		// let us reply to the sender
 		_ = ctx.Self().Tell(ctx.Context(), ctx.Sender(), new(samplepb.Ping))
-		p.count.Add(1)
+		x.count.Add(1)
 	default:
-		p.logger.Panic(goakt.ErrUnhandled)
+		x.logger.Panic(goakt.ErrUnhandled)
 	}
 }
 
-func (p *PingActor) PostStop(ctx context.Context) error {
-	p.logger.Info("PingActor is about to stop")
-	p.logger.Infof("PingActor has processed=%d address", p.count.Load())
+func (x *PingActor) PostStop(ctx context.Context) error {
+	x.logger.Info("PingActor is about to stop")
+	x.logger.Infof("PingActor has processed=%d address", x.count.Load())
 	return nil
 }
 
@@ -136,34 +144,42 @@ func NewPongActor() *PongActor {
 	}
 }
 
-func (p *PongActor) PreStart(ctx context.Context) error {
-	// set the log
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.logger = log.DefaultLogger
-	p.count = atomic.NewInt32(0)
-	p.logger.Info("PongActor is about to Start")
+func (x *PongActor) MarshalBinary() (data []byte, err error) {
+	return nil, nil
+}
+
+func (x *PongActor) UnmarshalBinary(data []byte) error {
 	return nil
 }
 
-func (p *PongActor) Receive(ctx goakt.ReceiveContext) {
+func (x *PongActor) PreStart(ctx context.Context) error {
+	// set the log
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	x.logger = log.DefaultLogger
+	x.count = atomic.NewInt32(0)
+	x.logger.Info("PongActor is about to Start")
+	return nil
+}
+
+func (x *PongActor) Receive(ctx goakt.ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *samplepb.Ping:
 		self := ctx.Self()
 		sender := ctx.Sender()
 
 		selfPath := self.ActorPath()
-		p.logger.Infof("%s received ping message from %s", selfPath.String(), sender.ActorPath().String())
+		x.logger.Infof("%s received ping message from %s", selfPath.String(), sender.ActorPath().String())
 		// reply the sender in case there is a sender
 		_ = ctx.Self().Tell(ctx.Context(), ctx.Sender(), new(samplepb.Pong))
-		p.count.Add(1)
+		x.count.Add(1)
 	default:
-		p.logger.Panic(goakt.ErrUnhandled)
+		x.logger.Panic(goakt.ErrUnhandled)
 	}
 }
 
-func (p *PongActor) PostStop(ctx context.Context) error {
-	p.logger.Info("PongActor is about to stop")
-	p.logger.Infof("PongActor has processed=%d address", p.count.Load())
+func (x *PongActor) PostStop(ctx context.Context) error {
+	x.logger.Info("PongActor is about to stop")
+	x.logger.Infof("PongActor has processed=%d address", x.count.Load())
 	return nil
 }

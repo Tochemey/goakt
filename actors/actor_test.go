@@ -59,6 +59,14 @@ type testActor struct {
 	counter *atomic.Int64
 }
 
+func (x *testActor) MarshalBinary() (data []byte, err error) {
+	return nil, nil
+}
+
+func (x *testActor) UnmarshalBinary([]byte) error {
+	return nil
+}
+
 // enforce compilation error
 var _ Actor = (*testActor)(nil)
 
@@ -71,22 +79,22 @@ func newTestActor() *testActor {
 
 // Init initialize the actor. This function can be used to set up some database connections
 // or some sort of initialization before the actor init processing public
-func (p *testActor) PreStart(context.Context) error {
+func (x *testActor) PreStart(context.Context) error {
 	return nil
 }
 
 // Shutdown gracefully shuts down the given actor
-func (p *testActor) PostStop(context.Context) error {
-	p.counter.Store(0)
+func (x *testActor) PostStop(context.Context) error {
+	x.counter.Store(0)
 	return nil
 }
 
 // Receive processes any message dropped into the actor mailbox without a reply
-func (p *testActor) Receive(ctx ReceiveContext) {
+func (x *testActor) Receive(ctx ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *goaktpb.PostStart:
 	case *testspb.TestSend:
-		p.counter.Inc()
+		x.counter.Inc()
 	case *testspb.TestPanic:
 		panic("Boom")
 	case *testspb.TestReply:
@@ -110,6 +118,14 @@ func (p *testActor) Receive(ctx ReceiveContext) {
 // and reacts to its failure.
 type supervisor struct{}
 
+func (x *supervisor) MarshalBinary() (data []byte, err error) {
+	return nil, nil
+}
+
+func (x *supervisor) UnmarshalBinary([]byte) error {
+	return nil
+}
+
 // enforce compilation error
 var _ Actor = (*supervisor)(nil)
 
@@ -118,11 +134,11 @@ func newSupervisor() *supervisor {
 	return &supervisor{}
 }
 
-func (p *supervisor) PreStart(context.Context) error {
+func (x *supervisor) PreStart(context.Context) error {
 	return nil
 }
 
-func (p *supervisor) Receive(ctx ReceiveContext) {
+func (x *supervisor) Receive(ctx ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *goaktpb.PostStart:
 	case *testspb.TestSend:
@@ -131,12 +147,20 @@ func (p *supervisor) Receive(ctx ReceiveContext) {
 	}
 }
 
-func (p *supervisor) PostStop(context.Context) error {
+func (x *supervisor) PostStop(context.Context) error {
 	return nil
 }
 
 // supervised is an actor that is monitored
 type supervised struct{}
+
+func (x *supervised) MarshalBinary() (data []byte, err error) {
+	return nil, nil
+}
+
+func (x *supervised) UnmarshalBinary([]byte) error {
+	return nil
+}
 
 // enforce compilation error
 var _ Actor = (*supervised)(nil)
@@ -146,11 +170,11 @@ func newSupervised() *supervised {
 	return &supervised{}
 }
 
-func (c *supervised) PreStart(context.Context) error {
+func (x *supervised) PreStart(context.Context) error {
 	return nil
 }
 
-func (c *supervised) Receive(ctx ReceiveContext) {
+func (x *supervised) Receive(ctx ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *goaktpb.PostStart:
 	case *testspb.TestSend:
@@ -161,12 +185,20 @@ func (c *supervised) Receive(ctx ReceiveContext) {
 	}
 }
 
-func (c *supervised) PostStop(context.Context) error {
+func (x *supervised) PostStop(context.Context) error {
 	return nil
 }
 
 // userActor is used to test the actor behavior
 type userActor struct{}
+
+func (x *userActor) MarshalBinary() (data []byte, err error) {
+	return nil, nil
+}
+
+func (x *userActor) UnmarshalBinary([]byte) error {
+	return nil
+}
 
 // enforce compilation error
 var _ Actor = &userActor{}
@@ -223,11 +255,19 @@ func (x *userActor) DebitAccount(ctx ReceiveContext) {
 
 type exchanger struct{}
 
-func (e *exchanger) PreStart(context.Context) error {
+func (x *exchanger) MarshalBinary() (data []byte, err error) {
+	return nil, nil
+}
+
+func (x *exchanger) UnmarshalBinary([]byte) error {
 	return nil
 }
 
-func (e *exchanger) Receive(ctx ReceiveContext) {
+func (x *exchanger) PreStart(context.Context) error {
+	return nil
+}
+
+func (x *exchanger) Receive(ctx ReceiveContext) {
 	message := ctx.Message()
 	switch message.(type) {
 	case *goaktpb.PostStart:
@@ -242,13 +282,21 @@ func (e *exchanger) Receive(ctx ReceiveContext) {
 	}
 }
 
-func (e *exchanger) PostStop(context.Context) error {
+func (x *exchanger) PostStop(context.Context) error {
 	return nil
 }
 
 var _ Actor = &exchanger{}
 
 type stasher struct{}
+
+func (x *stasher) MarshalBinary() (data []byte, err error) {
+	return nil, nil
+}
+
+func (x *stasher) UnmarshalBinary([]byte) error {
+	return nil
+}
 
 func (x *stasher) PreStart(context.Context) error {
 	return nil
@@ -290,6 +338,14 @@ var _ Actor = &stasher{}
 
 type testPreStart struct{}
 
+func (x *testPreStart) MarshalBinary() (data []byte, err error) {
+	return nil, nil
+}
+
+func (x *testPreStart) UnmarshalBinary([]byte) error {
+	return nil
+}
+
 func (x *testPreStart) PreStart(context.Context) error {
 	return errors.New("failed")
 }
@@ -303,6 +359,14 @@ func (x *testPreStart) PostStop(context.Context) error {
 var _ Actor = &testPreStart{}
 
 type testPostStop struct{}
+
+func (x *testPostStop) MarshalBinary() (data []byte, err error) {
+	return nil, nil
+}
+
+func (x *testPostStop) UnmarshalBinary([]byte) error {
+	return nil
+}
 
 func (x *testPostStop) PreStart(context.Context) error {
 	return nil
@@ -325,6 +389,14 @@ var _ Actor = &testPostStop{}
 
 type testRestart struct {
 	counter *atomic.Int64
+}
+
+func (x *testRestart) MarshalBinary() (data []byte, err error) {
+	return nil, nil
+}
+
+func (x *testRestart) UnmarshalBinary([]byte) error {
+	return nil
 }
 
 func newTestRestart() *testRestart {
@@ -354,6 +426,14 @@ type forwarder struct {
 	actorRef PID
 }
 
+func (x *forwarder) MarshalBinary() (data []byte, err error) {
+	return nil, nil
+}
+
+func (x *forwarder) UnmarshalBinary([]byte) error {
+	return nil
+}
+
 func (x *forwarder) PreStart(context.Context) error {
 	return nil
 }
@@ -374,13 +454,21 @@ var _ Actor = &forwarder{}
 
 type discarder struct{}
 
-var _ Actor = &discarder{}
+func (x *discarder) MarshalBinary() (data []byte, err error) {
+	return nil, nil
+}
 
-func (d *discarder) PreStart(context.Context) error {
+func (x *discarder) UnmarshalBinary([]byte) error {
 	return nil
 }
 
-func (d *discarder) Receive(ctx ReceiveContext) {
+var _ Actor = &discarder{}
+
+func (x *discarder) PreStart(context.Context) error {
+	return nil
+}
+
+func (x *discarder) Receive(ctx ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *goaktpb.PostStart:
 		// pass
@@ -389,9 +477,33 @@ func (d *discarder) Receive(ctx ReceiveContext) {
 	}
 }
 
-func (d *discarder) PostStop(context.Context) error {
+func (x *discarder) PostStop(context.Context) error {
 	return nil
 }
+
+type faultyActor struct {
+}
+
+func (x *faultyActor) PreStart(context.Context) error {
+	return nil
+}
+
+func (x *faultyActor) Receive(ReceiveContext) {
+}
+
+func (x *faultyActor) PostStop(context.Context) error {
+	return nil
+}
+
+func (x *faultyActor) MarshalBinary() (data []byte, err error) {
+	return nil, errors.New("failed to encode actor")
+}
+
+func (x *faultyActor) UnmarshalBinary([]byte) error {
+	return errors.New("failed to decode actor")
+}
+
+var _ Actor = (*faultyActor)(nil)
 
 func startNatsServer(t *testing.T) *natsserver.Server {
 	t.Helper()

@@ -42,11 +42,21 @@ const (
 type Benchmarker struct {
 }
 
-func (p *Benchmarker) PreStart(context.Context) error {
+// nolint
+func (x *Benchmarker) MarshalBinary() (data []byte, err error) {
+	return nil, nil
+}
+
+// nolint
+func (x *Benchmarker) UnmarshalBinary(data []byte) error {
 	return nil
 }
 
-func (p *Benchmarker) Receive(ctx actors.ReceiveContext) {
+func (x *Benchmarker) PreStart(context.Context) error {
+	return nil
+}
+
+func (x *Benchmarker) Receive(ctx actors.ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *testspb.TestSend:
 	case *testspb.TestReply:
@@ -54,7 +64,7 @@ func (p *Benchmarker) Receive(ctx actors.ReceiveContext) {
 	}
 }
 
-func (p *Benchmarker) PostStop(context.Context) error {
+func (x *Benchmarker) PostStop(context.Context) error {
 	return nil
 }
 

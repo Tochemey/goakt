@@ -94,33 +94,41 @@ func NewPingActor() *PingActor {
 	return &PingActor{}
 }
 
-func (p *PingActor) PreStart(ctx context.Context) error {
+func (x *PingActor) PreStart(ctx context.Context) error {
 	// set the log
-	p.logger = log.DefaultLogger
-	p.count = atomic.NewInt32(0)
-	p.logger.Info("About to Start")
+	x.logger = log.DefaultLogger
+	x.count = atomic.NewInt32(0)
+	x.logger.Info("About to Start")
 	return nil
 }
 
-func (p *PingActor) Receive(ctx goakt.ReceiveContext) {
+func (x *PingActor) Receive(ctx goakt.ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *samplepb.Pong:
 		// reply the sender in case there is a sender
 		if ctx.RemoteSender() != goakt.RemoteNoSender {
-			p.logger.Infof("received remote from %s", ctx.RemoteSender().String())
+			x.logger.Infof("received remote from %s", ctx.RemoteSender().String())
 			_ = ctx.Self().RemoteTell(context.Background(), ctx.RemoteSender(), new(samplepb.Ping))
 		} else if ctx.Sender() != goakt.NoSender {
-			p.logger.Infof("received Pong from %s", ctx.Sender().ActorPath().String())
+			x.logger.Infof("received Pong from %s", ctx.Sender().ActorPath().String())
 			_ = ctx.Self().Tell(ctx.Context(), ctx.Sender(), new(samplepb.Ping))
 		}
-		p.count.Add(1)
+		x.count.Add(1)
 	default:
-		p.logger.Panic(goakt.ErrUnhandled)
+		x.logger.Panic(goakt.ErrUnhandled)
 	}
 }
 
-func (p *PingActor) PostStop(ctx context.Context) error {
-	p.logger.Info("About to stop")
-	p.logger.Infof("Processed=%d address", p.count.Load())
+func (x *PingActor) PostStop(ctx context.Context) error {
+	x.logger.Info("About to stop")
+	x.logger.Infof("Processed=%d address", x.count.Load())
+	return nil
+}
+
+func (x *PingActor) MarshalBinary() (data []byte, err error) {
+	return nil, nil
+}
+
+func (x *PingActor) UnmarshalBinary(data []byte) error {
 	return nil
 }

@@ -55,6 +55,14 @@ type probeActor struct {
 	messageQueue chan message
 }
 
+func (x *probeActor) MarshalBinary() (data []byte, err error) {
+	return nil, nil
+}
+
+func (x *probeActor) UnmarshalBinary([]byte) error {
+	return nil
+}
+
 // ensure that probeActor implements the Actor interface
 var _ actors.Actor = &probeActor{}
 
