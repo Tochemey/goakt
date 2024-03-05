@@ -10,6 +10,7 @@ coverage:
       threshold: 1%  # the leniency in hitting the target
 ignore:
   - "goaktpb"
+  - "**/*.pb.go"
   - "test"
   - "examples"
   - "internal/internalpb"
