@@ -9,9 +9,9 @@ coverage:
       target: 80%    # the required coverage value
       threshold: 1%  # the leniency in hitting the target
 ignore:
-  - "goaktpb"
+  - "^goaktpb.*"
   - "test"
   - "examples"
   - "internal/internalpb"
   - "testkit"
-  - "mocks"
+  - "**/mocks"
