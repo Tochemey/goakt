@@ -31,8 +31,8 @@ func (p *pid) stash(ctx ReceiveContext) error {
 		return ErrStashBufferNotSet
 	}
 
-	p.stashSemaphore.Lock()
-	defer p.stashSemaphore.Unlock()
+	p.stashMutex.Lock()
+	defer p.stashMutex.Unlock()
 
 	// add the message to stash buffer
 	return p.stashBuffer.Push(ctx)
@@ -45,8 +45,8 @@ func (p *pid) unstash() error {
 		return ErrStashBufferNotSet
 	}
 
-	p.stashSemaphore.Lock()
-	defer p.stashSemaphore.Unlock()
+	p.stashMutex.Lock()
+	defer p.stashMutex.Unlock()
 
 	if !p.stashBuffer.IsEmpty() {
 		// grab the message from the stash buffer. Ignore the error when the mailbox is empty
@@ -65,8 +65,8 @@ func (p *pid) unstashAll() error {
 		return ErrStashBufferNotSet
 	}
 
-	p.stashSemaphore.Lock()
-	defer p.stashSemaphore.Unlock()
+	p.stashMutex.Lock()
+	defer p.stashMutex.Unlock()
 
 	// send all the messages in the stash buffer to the mailbox
 	for !p.stashBuffer.IsEmpty() {

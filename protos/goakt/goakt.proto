@@ -103,3 +103,9 @@ message PoisonPill {}
 
 // PostStart is used when an actor has successfully started
 message PostStart {}
+
+// PreStart is used when an actor is about to start
+message PreStart {}
+
+// PostStop is used when an actor and all its child actors have terminated
+message PostStop {}

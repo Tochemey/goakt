@@ -25,6 +25,7 @@
 package actors
 
 import (
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -34,7 +35,7 @@ func TestPIDMap(t *testing.T) {
 	// create the actor path
 	actorPath := NewPath("Test", NewAddress("TestSys", "host", 444))
 	// create the PID
-	actorRef := &pid{actorPath: actorPath}
+	actorRef := &pid{actorPath: actorPath, rwMutex: &sync.RWMutex{}, stopMutex: &sync.Mutex{}}
 	// create a new PID map
 	pidMap := newPIDMap(5)
 	// add to the map

@@ -58,9 +58,11 @@ func (m *pidMap) Get(path *Path) (pid PID, ok bool) {
 // Set sets a pid in the map
 func (m *pidMap) Set(pid PID) {
 	m.mu.Lock()
-	m.pids[pid.ActorPath().String()] = pid
-	m.size.Add(1)
-	m.mu.Unlock()
+	defer m.mu.Unlock()
+	if pid != nil {
+		m.pids[pid.ActorPath().String()] = pid
+		m.size.Add(1)
+	}
 }
 
 // Delete removes a pid from the map

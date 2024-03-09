@@ -531,7 +531,7 @@ func (c *receiveContext) Unhandled() {
 	// release the lock
 	c.mu.Unlock()
 	// send the current message to deadletters
-	me.emitDeadletter(c, ErrUnhandled)
+	me.handleError(c, ErrUnhandled)
 }
 
 // RemoteReSpawn restarts an actor on a remote node.

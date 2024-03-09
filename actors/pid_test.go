@@ -41,7 +41,7 @@ import (
 	"github.com/travisjeffery/go-dynaport"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
-	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel/trace/noop"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -337,7 +337,8 @@ func TestRestart(t *testing.T) {
 	})
 	t.Run("noSender cannot be restarted", func(t *testing.T) {
 		pid := &pid{
-			tracer: trace.NewNoopTracerProvider().Tracer(""),
+			tracer:  noop.NewTracerProvider().Tracer(""),
+			rwMutex: &sync.RWMutex{},
 		}
 		err := pid.Restart(context.TODO())
 		assert.Error(t, err)

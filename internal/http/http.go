@@ -36,8 +36,8 @@ import (
 	"golang.org/x/net/http2"
 )
 
-// Client creates a http client use h2c
-func Client() *http.Client {
+// NewClient creates a http client use h2c
+func NewClient() *http.Client {
 	return &http.Client{
 		// Most RPC servers don't use HTTP redirects
 		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {

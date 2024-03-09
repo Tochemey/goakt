@@ -34,7 +34,7 @@ import (
 )
 
 func TestClient(t *testing.T) {
-	cl := Client()
+	cl := NewClient()
 	assert.IsType(t, new(http.Client), cl)
 	assert.IsType(t, new(http2.Transport), cl.Transport)
 	tr := cl.Transport.(*http2.Transport)

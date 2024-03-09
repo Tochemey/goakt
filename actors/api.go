@@ -46,8 +46,8 @@ func Ask(ctx context.Context, to PID, message proto.Message, timeout time.Durati
 		return nil, ErrDead
 	}
 
-	// create a receiver context
-	var context *receiveContext
+	// create a message context
+	var messageContext *receiveContext
 
 	// set the actual message
 	switch msg := message.(type) {
@@ -59,26 +59,24 @@ func Ask(ctx context.Context, to PID, message proto.Message, timeout time.Durati
 			return nil, ErrInvalidRemoteMessage(err)
 		}
 		// set the context message and the sender
-		context = newReceiveContext(ctx, NoSender, to, actual, false).
-			WithRemoteSender(msg.GetSender())
+		messageContext = newReceiveContext(ctx, NoSender, to, actual, false).WithRemoteSender(msg.GetSender())
 	default:
 		// set the context message and the sender
-		context = newReceiveContext(ctx, NoSender, to, message, false).
-			WithRemoteSender(RemoteNoSender)
+		messageContext = newReceiveContext(ctx, NoSender, to, message, false).WithRemoteSender(RemoteNoSender)
 	}
 
 	// put the message context in the mailbox of the recipient actor
-	to.doReceive(context)
+	to.doReceive(messageContext)
 
 	// await patiently to receive the response from the actor
 	for await := time.After(timeout); ; {
 		select {
-		case response = <-context.response:
+		case response = <-messageContext.response:
 			return
 		case <-await:
 			err = ErrRequestTimeout
 			// push the message as a deadletter
-			to.emitDeadletter(context, err)
+			to.handleError(messageContext, err)
 			// stop the whole processing
 			return
 		}
@@ -93,7 +91,7 @@ func Tell(ctx context.Context, to PID, message proto.Message) error {
 	}
 
 	// create a message context
-	var context *receiveContext
+	var messageContext *receiveContext
 
 	// set the actual message
 	switch msg := message.(type) {
@@ -109,16 +107,14 @@ func Tell(ctx context.Context, to PID, message proto.Message) error {
 			return ErrInvalidRemoteMessage(err)
 		}
 		// set the context message and the sender
-		context = newReceiveContext(ctx, NoSender, to, actual, true).
-			WithRemoteSender(msg.GetSender())
+		messageContext = newReceiveContext(ctx, NoSender, to, actual, true).WithRemoteSender(msg.GetSender())
 	default:
 		// set the context message and the sender
-		context = newReceiveContext(ctx, NoSender, to, message, true).
-			WithRemoteSender(RemoteNoSender)
+		messageContext = newReceiveContext(ctx, NoSender, to, message, true).WithRemoteSender(RemoteNoSender)
 	}
 
 	// put the message context in the mailbox of the recipient actor
-	to.doReceive(context)
+	to.doReceive(messageContext)
 
 	return nil
 }
@@ -135,9 +131,9 @@ func BatchTell(ctx context.Context, to PID, messages ...proto.Message) error {
 		// get the message
 		message := messages[i]
 		// create a message context
-		context := newReceiveContext(ctx, NoSender, to, message, true).WithRemoteSender(RemoteNoSender)
+		messageContext := newReceiveContext(ctx, NoSender, to, message, true).WithRemoteSender(RemoteNoSender)
 		// put the message context in the mailbox of the recipient actor
-		to.doReceive(context)
+		to.doReceive(messageContext)
 	}
 	return nil
 }
@@ -178,7 +174,7 @@ func BatchAsk(ctx context.Context, to PID, timeout time.Duration, messages ...pr
 				// set the request timeout error
 				err = ErrRequestTimeout
 				// push the message as a deadletter
-				to.emitDeadletter(messageContext, err)
+				to.handleError(messageContext, err)
 				// stop the whole processing
 				return
 			}
@@ -204,7 +200,7 @@ func RemoteTell(ctx context.Context, to *goaktpb.Address, message proto.Message)
 
 	// create an instance of remote client service
 	remoteClient := internalpbconnect.NewRemotingServiceClient(
-		http.Client(),
+		http.NewClient(),
 		http.URL(to.GetHost(), int(to.GetPort())),
 		connect.WithInterceptors(interceptor),
 		connect.WithGRPC(),
@@ -241,7 +237,7 @@ func RemoteAsk(ctx context.Context, to *goaktpb.Address, message proto.Message) 
 
 	// create an instance of remote client service
 	remoteClient := internalpbconnect.NewRemotingServiceClient(
-		http.Client(),
+		http.NewClient(),
 		http.URL(to.GetHost(), int(to.GetPort())),
 		connect.WithInterceptors(interceptor),
 		connect.WithGRPC(),
@@ -275,7 +271,7 @@ func RemoteLookup(ctx context.Context, host string, port int, name string) (addr
 
 	// create an instance of remote client service
 	remoteClient := internalpbconnect.NewRemotingServiceClient(
-		http.Client(),
+		http.NewClient(),
 		http.URL(host, port),
 		connect.WithInterceptors(interceptor),
 		connect.WithGRPC(),
@@ -327,7 +323,7 @@ func RemoteBatchTell(ctx context.Context, to *goaktpb.Address, messages ...proto
 
 	// create an instance of remote client service
 	remoteClient := internalpbconnect.NewRemotingServiceClient(
-		http.Client(),
+		http.NewClient(),
 		http.URL(to.GetHost(), int(to.GetPort())),
 		connect.WithInterceptors(interceptor),
 		connect.WithGRPC(),
@@ -371,7 +367,7 @@ func RemoteBatchAsk(ctx context.Context, to *goaktpb.Address, messages ...proto.
 
 	// create an instance of remote client service
 	remoteClient := internalpbconnect.NewRemotingServiceClient(
-		http.Client(),
+		http.NewClient(),
 		http.URL(to.GetHost(), int(to.GetPort())),
 		connect.WithInterceptors(interceptor),
 		connect.WithGRPC(),
@@ -404,7 +400,7 @@ func RemoteReSpawn(ctx context.Context, host string, port int, name string) erro
 
 	// create an instance of remote client service
 	remoteClient := internalpbconnect.NewRemotingServiceClient(
-		http.Client(),
+		http.NewClient(),
 		http.URL(host, port),
 		connect.WithInterceptors(interceptor),
 		connect.WithGRPC(),

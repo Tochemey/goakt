@@ -86,6 +86,11 @@ func (p *Path) String() string {
 	return fmt.Sprintf("%s/%s", p.address.String(), p.name)
 }
 
+// Equal is used to compare two patsh
+func (p *Path) Equal(x *Path) bool {
+	return p.id.ID() == x.ID().ID() && p.String() == x.String()
+}
+
 // RemoteAddress returns the remote from path
 func (p *Path) RemoteAddress() *goaktpb.Address {
 	// only returns a remote address when we are in a remote scope otherwise return nil

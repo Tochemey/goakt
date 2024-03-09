@@ -55,12 +55,12 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-// watchMan is used to handle parent child relationship.
+// watcher is used to handle parent child relationship.
 // This helps handle error propagation from a child actor using any of supervisory strategies
-type watchMan struct {
-	ID      PID             // the ID of the actor watching
-	ErrChan chan error      // ErrChan the channel where to pass error message
-	Done    chan types.Unit // Done when watching is completed
+type watcher struct {
+	WatcherID PID             // the WatcherID of the actor watching
+	ErrChan   chan error      // ErrChan the channel where to pass error message
+	Done      chan types.Unit // Done when watching is completed
 }
 
 // PID defines the various actions one can perform on a given actor
@@ -131,7 +131,7 @@ type PID interface {
 	// push a message to the actor's receiveContextBuffer
 	doReceive(ctx ReceiveContext)
 	// watchers returns the list of watchMen
-	watchers() *slices.ConcurrentSlice[*watchMan]
+	watchers() *slices.ConcurrentSlice[*watcher]
 	// setBehavior is a utility function that helps set the actor behavior
 	setBehavior(behavior Behavior)
 	// setBehaviorStacked adds a behavior to the actor's behaviors
@@ -149,7 +149,7 @@ type PID interface {
 	// unstash unstashes the oldest message in the stash and prepends to the mailbox
 	unstash() error
 	// toDeadletters add the given message to the deadletters queue
-	emitDeadletter(receiveCtx ReceiveContext, err error)
+	handleError(receiveCtx ReceiveContext, err error)
 	// removeChild is a utility function to remove child actor
 	removeChild(pid PID)
 }
@@ -197,8 +197,8 @@ type pid struct {
 	shutdownSignal     chan types.Unit
 	haltPassivationLnr chan types.Unit
 
-	// set of watchMen watching the given actor
-	watchMen *slices.ConcurrentSlice[*watchMan]
+	// set of watchersList watching the given actor
+	watchersList *slices.ConcurrentSlice[*watcher]
 
 	// hold the list of the children
 	children *pidMap
@@ -209,12 +209,13 @@ type pid struct {
 	// specifies the logger to use
 	logger log.Logger
 
+	// specifies the last processing message duration
 	lastProcessingDuration atomic.Duration
 
-	// semaphore that helps synchronize the pid in a concurrent environment
+	// rwMutex that helps synchronize the pid in a concurrent environment
 	// this helps protect the pid fields accessibility
-	semaphore     sync.RWMutex
-	stopSemaphore sync.Mutex
+	rwMutex   *sync.RWMutex
+	stopMutex *sync.Mutex
 
 	// supervisor strategy
 	supervisorStrategy StrategyDirective
@@ -229,9 +230,9 @@ type pid struct {
 	behaviorStack *behaviorStack
 
 	// stash settings
-	stashBuffer    Mailbox
-	stashCapacity  atomic.Uint64
-	stashSemaphore sync.Mutex
+	stashBuffer   Mailbox
+	stashCapacity atomic.Uint64
+	stashMutex    *sync.Mutex
 
 	// define an events stream
 	eventsStream *eventstream.EventsStream
@@ -252,7 +253,7 @@ var _ PID = (*pid)(nil)
 // newPID creates a new pid
 func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption) (*pid, error) {
 	// create the actor PID
-	pid := &pid{
+	p := &pid{
 		Actor:              actor,
 		lastProcessingTime: atomic.Time{},
 		shutdownSignal:     make(chan types.Unit, 1),
@@ -261,15 +262,15 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 		mailboxSize:        defaultMailboxSize,
 		children:           newPIDMap(10),
 		supervisorStrategy: DefaultSupervisoryStrategy,
-		watchMen:           slices.NewConcurrentSlice[*watchMan](),
+		watchersList:       slices.NewConcurrentSlice[*watcher](),
 		telemetry:          telemetry.New(),
 		actorPath:          actorPath,
-		semaphore:          sync.RWMutex{},
-		stopSemaphore:      sync.Mutex{},
-		httpClient:         http.Client(),
+		rwMutex:            &sync.RWMutex{},
+		stopMutex:          &sync.Mutex{},
+		httpClient:         http.NewClient(),
 		mailbox:            nil,
 		stashBuffer:        nil,
-		stashSemaphore:     sync.Mutex{},
+		stashMutex:         &sync.Mutex{},
 		eventsStream:       nil,
 		tracer:             noop.NewTracerProvider().Tracer("PID"),
 		restartCount:       atomic.NewInt64(0),
@@ -277,67 +278,68 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 	}
 
 	// set some of the defaults values
-	pid.initMaxRetries.Store(DefaultInitMaxRetries)
-	pid.shutdownTimeout.Store(DefaultShutdownTimeout)
-	pid.lastProcessingDuration.Store(0)
-	pid.stashCapacity.Store(0)
-	pid.isRunning.Store(false)
-	pid.passivateAfter.Store(DefaultPassivationTimeout)
-	pid.replyTimeout.Store(DefaultReplyTimeout)
-	pid.initTimeout.Store(DefaultInitTimeout)
-	pid.traceEnabled.Store(false)
-	pid.metricEnabled.Store(false)
+	p.initMaxRetries.Store(DefaultInitMaxRetries)
+	p.shutdownTimeout.Store(DefaultShutdownTimeout)
+	p.lastProcessingDuration.Store(0)
+	p.stashCapacity.Store(0)
+	p.isRunning.Store(false)
+	p.passivateAfter.Store(DefaultPassivationTimeout)
+	p.replyTimeout.Store(DefaultReplyTimeout)
+	p.initTimeout.Store(DefaultInitTimeout)
+	p.traceEnabled.Store(false)
+	p.metricEnabled.Store(false)
 
 	// set the custom options to override the default values
 	for _, opt := range opts {
-		opt(pid)
+		opt(p)
 	}
+
 	// set the default mailbox if mailbox is not set
-	if pid.mailbox == nil {
-		pid.mailbox = newReceiveContextBuffer(pid.mailboxSize)
+	if p.mailbox == nil {
+		p.mailbox = newReceiveContextBuffer(p.mailboxSize)
 	}
 
 	// set the stash buffer when capacity is set
-	if pid.stashCapacity.Load() > 0 {
-		pid.stashBuffer = newReceiveContextBuffer(pid.stashCapacity.Load())
+	if p.stashCapacity.Load() > 0 {
+		p.stashBuffer = newReceiveContextBuffer(p.stashCapacity.Load())
 	}
 
 	// set the actor behavior stack
 	behaviorStack := newBehaviorStack()
-	behaviorStack.Push(pid.Receive)
-	pid.behaviorStack = behaviorStack
+	behaviorStack.Push(p.Receive)
+	p.behaviorStack = behaviorStack
 
 	// set the tracer when tracing is enabled
-	if pid.traceEnabled.Load() {
-		pid.tracer = pid.telemetry.Tracer
+	if p.traceEnabled.Load() {
+		p.tracer = p.telemetry.Tracer
 	}
 
 	// initialize the actor and init processing public
-	if err := pid.init(ctx); err != nil {
+	if err := p.init(ctx); err != nil {
 		return nil, err
 	}
-	// init processing public
-	go pid.receive()
+
+	// init processing messages
+	go p.receive()
+
 	// init the passivation listener loop iff passivation is set
-	if pid.passivateAfter.Load() > 0 {
-		go pid.passivationListener()
+	if p.passivateAfter.Load() > 0 {
+		go p.passivationListener()
 	}
 
 	// register metrics. However, we don't panic when we fail to register
-	if pid.metricEnabled.Load() {
-		if err := pid.registerMetrics(); err != nil {
+	if p.metricEnabled.Load() {
+		if err := p.registerMetrics(); err != nil {
 			// return the error
-			return nil, errors.Wrapf(err, "failed to register actor=%s metrics", pid.ActorPath().String())
+			return nil, errors.Wrapf(err, "failed to register actor=%s metrics", p.ActorPath().String())
 		}
 	}
 
-	// push the started message into the actor mailbox
-	context := newReceiveContext(ctx, NoSender, pid, new(goaktpb.PostStart), true)
-	// put the message context in the mailbox of the recipient actor
-	pid.doReceive(context)
+	// put the message context in the mailbox of the recipient actor that the actor has started
+	p.doReceive(newReceiveContext(ctx, NoSender, p, new(goaktpb.PostStart), true))
 
 	// return the actor reference
-	return pid, nil
+	return p, nil
 }
 
 // ActorHandle returns the underlying Actor
@@ -367,9 +369,9 @@ func (p *pid) Child(name string) (PID, error) {
 
 // Children returns the list of all the children of the given actor that are still alive or an empty list
 func (p *pid) Children() []PID {
-	p.semaphore.RLock()
+	p.rwMutex.RLock()
 	children := p.children.List()
-	p.semaphore.RUnlock()
+	p.rwMutex.RUnlock()
 
 	// create the list of alive children
 	cids := make([]PID, 0, len(children))
@@ -384,7 +386,7 @@ func (p *pid) Children() []PID {
 
 // Stop forces the child Actor under the given name to terminate after it finishes processing its current message.
 // Nothing happens if child is already stopped.
-func (p *pid) Stop(ctx context.Context, pid PID) error {
+func (p *pid) Stop(ctx context.Context, cid PID) error {
 	// start a tracing span
 	spanCtx, span := p.tracer.Start(ctx, "Stop")
 	// defer the closing of the span
@@ -400,7 +402,7 @@ func (p *pid) Stop(ctx context.Context, pid PID) error {
 	}
 
 	// check the pid is not nil
-	if pid == nil || pid == NoSender {
+	if cid == nil || cid == NoSender {
 		// let us record the error in the span
 		span.SetStatus(codes.Error, "Stop")
 		span.RecordError(ErrUndefinedActor)
@@ -408,18 +410,15 @@ func (p *pid) Stop(ctx context.Context, pid PID) error {
 		return ErrUndefinedActor
 	}
 
-	// grab the actor path
-	path := pid.ActorPath()
-
 	// grab the children thread-safely
-	p.semaphore.RLock()
-	kiddos := p.children
-	p.semaphore.RUnlock()
+	p.rwMutex.RLock()
+	children := p.children
+	p.rwMutex.RUnlock()
 
 	// lookup the child actor and shut it down
-	if cid, ok := kiddos.Get(path); ok {
+	if cid, ok := children.Get(cid.ActorPath()); ok {
 		// define the error description
-		desc := fmt.Sprintf("child.[%s] Shutdown", path)
+		desc := fmt.Sprintf("child.[%s] Shutdown", cid.ActorPath())
 		// stop the actor and record the error in the span
 		if err := cid.Shutdown(spanCtx); err != nil {
 			// let us record the error in the span
@@ -433,7 +432,7 @@ func (p *pid) Stop(ctx context.Context, pid PID) error {
 		return nil
 	}
 	// create an instance of error
-	err := ErrActorNotFound(path.String())
+	err := ErrActorNotFound(cid.ActorPath().String())
 	// let us record the error in the span
 	span.SetStatus(codes.Error, "Stop")
 	span.RecordError(err)
@@ -448,17 +447,17 @@ func (p *pid) IsRunning() bool {
 
 // ActorSystem returns the actor system
 func (p *pid) ActorSystem() ActorSystem {
-	p.semaphore.RLock()
+	p.rwMutex.RLock()
 	sys := p.system
-	p.semaphore.RUnlock()
+	p.rwMutex.RUnlock()
 	return sys
 }
 
 // ActorPath returns the path of the actor
 func (p *pid) ActorPath() *Path {
-	p.semaphore.RLock()
+	p.rwMutex.RLock()
 	path := p.actorPath
-	p.semaphore.RUnlock()
+	p.rwMutex.RUnlock()
 	return path
 }
 
@@ -558,20 +557,20 @@ func (p *pid) SpawnChild(ctx context.Context, name string, actor Actor) (PID, er
 	childActorPath := NewPath(name, p.ActorPath().Address()).WithParent(p.ActorPath())
 
 	// grab the children thread-safely
-	p.semaphore.RLock()
-	kiddos := p.children
-	p.semaphore.RUnlock()
+	p.rwMutex.RLock()
+	children := p.children
+	p.rwMutex.RUnlock()
 
 	// check whether the child actor already exist and just return the PID
 	// whenever a child actor exists it means it is live
-	if cid, ok := kiddos.Get(childActorPath); ok {
+	if cid, ok := children.Get(childActorPath); ok {
 		return cid, nil
 	}
 
 	// acquire the lock
-	p.semaphore.Lock()
+	p.rwMutex.Lock()
 	// release the lock
-	defer p.semaphore.Unlock()
+	defer p.rwMutex.Unlock()
 
 	// create the child actor options
 	// child inherit parent's options
@@ -664,14 +663,14 @@ func (p *pid) Ask(ctx context.Context, to PID, message proto.Message) (response 
 		return nil, ErrDead
 	}
 
-	// create a receiver context
-	context := newReceiveContext(spanCtx, p, to, message, false)
+	// create a message context
+	messageContext := newReceiveContext(spanCtx, p, to, message, false)
 	// put the message context in the mailbox of the recipient actor
-	to.doReceive(context)
+	to.doReceive(messageContext)
 	// await patiently to receive the response from the actor
 	for await := time.After(p.replyTimeout.Load()); ; {
 		select {
-		case response = <-context.response:
+		case response = <-messageContext.response:
 			// set the span status to Ok
 			span.SetStatus(codes.Ok, "Ask")
 			return
@@ -681,7 +680,7 @@ func (p *pid) Ask(ctx context.Context, to PID, message proto.Message) (response 
 			span.SetStatus(codes.Error, "Ask")
 			span.RecordError(err)
 			// push the message as a deadletter
-			p.emitDeadletter(context, err)
+			p.handleError(messageContext, err)
 			return nil, err
 		}
 	}
@@ -702,10 +701,10 @@ func (p *pid) Tell(ctx context.Context, to PID, message proto.Message) error {
 		// return the error
 		return ErrDead
 	}
-	// create a receiver context
-	context := newReceiveContext(spanCtx, p, to, message, true)
+	// create a message context
+	messageContext := newReceiveContext(spanCtx, p, to, message, true)
 	// put the message context in the mailbox of the recipient actor
-	to.doReceive(context)
+	to.doReceive(messageContext)
 
 	// set the status to OK and return
 	span.SetStatus(codes.Ok, "Tell")
@@ -801,7 +800,7 @@ func (p *pid) BatchAsk(ctx context.Context, to PID, messages ...proto.Message) (
 				span.SetStatus(codes.Error, "BatchAsk")
 				span.RecordError(err)
 				// push the message as a deadletter
-				p.emitDeadletter(messageContext, err)
+				p.handleError(messageContext, err)
 				// stop the whole processing
 				return nil, err
 			}
@@ -813,7 +812,7 @@ func (p *pid) BatchAsk(ctx context.Context, to PID, messages ...proto.Message) (
 // RemoteLookup look for an actor address on a remote node.
 func (p *pid) RemoteLookup(ctx context.Context, host string, port int, name string) (addr *goaktpb.Address, err error) {
 	// get the gRPC client connection options
-	clientConnectionOptions, err := p.gRPCClientConnectionOptions()
+	clientConnectionOptions, err := p.getConnectionOptions()
 	// handle the error
 	if err != nil {
 		return nil, err
@@ -855,7 +854,7 @@ func (p *pid) RemoteTell(ctx context.Context, to *goaktpb.Address, message proto
 	}
 
 	// get the gRPC client connection options
-	clientConnectionOptions, err := p.gRPCClientConnectionOptions()
+	clientConnectionOptions, err := p.getConnectionOptions()
 	// handle the error
 	if err != nil {
 		return err
@@ -908,7 +907,7 @@ func (p *pid) RemoteAsk(ctx context.Context, to *goaktpb.Address, message proto.
 	}
 
 	// get the gRPC client connection options
-	clientConnectionOptions, err := p.gRPCClientConnectionOptions()
+	clientConnectionOptions, err := p.getConnectionOptions()
 	// handle the error
 	if err != nil {
 		return nil, err
@@ -921,12 +920,16 @@ func (p *pid) RemoteAsk(ctx context.Context, to *goaktpb.Address, message proto.
 		clientConnectionOptions...,
 	)
 
+	// create the sender path
+	senderPath := p.ActorPath()
+	senderAddress := senderPath.Address()
+
 	// construct the from address
 	sender := &goaktpb.Address{
-		Host: p.ActorPath().Address().Host(),
-		Port: int32(p.ActorPath().Address().Port()),
-		Name: p.ActorPath().Name(),
-		Id:   p.ActorPath().ID().String(),
+		Host: senderAddress.Host(),
+		Port: int32(senderAddress.Port()),
+		Name: senderPath.Name(),
+		Id:   senderPath.ID().String(),
 	}
 
 	// prepare the rpcRequest to send
@@ -970,16 +973,20 @@ func (p *pid) RemoteBatchTell(ctx context.Context, to *goaktpb.Address, messages
 		remoteMessages = append(remoteMessages, packed)
 	}
 
+	// create the sender path
+	senderPath := p.ActorPath()
+	senderAddress := senderPath.Address()
+
 	// construct the from address
 	sender := &goaktpb.Address{
-		Host: p.ActorPath().Address().Host(),
-		Port: int32(p.ActorPath().Address().Port()),
-		Name: p.ActorPath().Name(),
-		Id:   p.ActorPath().ID().String(),
+		Host: senderAddress.Host(),
+		Port: int32(senderAddress.Port()),
+		Name: senderPath.Name(),
+		Id:   senderPath.ID().String(),
 	}
 
 	// get the gRPC client connection options
-	clientConnectionOptions, err := p.gRPCClientConnectionOptions()
+	clientConnectionOptions, err := p.getConnectionOptions()
 	// handle the error
 	if err != nil {
 		return err
@@ -987,7 +994,7 @@ func (p *pid) RemoteBatchTell(ctx context.Context, to *goaktpb.Address, messages
 
 	// create an instance of remote client service
 	remoteClient := internalpbconnect.NewRemotingServiceClient(
-		http.Client(),
+		http.NewClient(),
 		http.URL(to.GetHost(), int(to.GetPort())),
 		clientConnectionOptions...,
 	)
@@ -1024,16 +1031,20 @@ func (p *pid) RemoteBatchAsk(ctx context.Context, to *goaktpb.Address, messages 
 		remoteMessages = append(remoteMessages, packed)
 	}
 
+	// create the sender path
+	senderPath := p.ActorPath()
+	senderAddress := senderPath.Address()
+
 	// construct the from address
 	sender := &goaktpb.Address{
-		Host: p.ActorPath().Address().Host(),
-		Port: int32(p.ActorPath().Address().Port()),
-		Name: p.ActorPath().Name(),
-		Id:   p.ActorPath().ID().String(),
+		Host: senderAddress.Host(),
+		Port: int32(senderAddress.Port()),
+		Name: senderPath.Name(),
+		Id:   senderPath.ID().String(),
 	}
 
 	// get the gRPC client connection options
-	clientConnectionOptions, err := p.gRPCClientConnectionOptions()
+	clientConnectionOptions, err := p.getConnectionOptions()
 	// handle the error
 	if err != nil {
 		return nil, err
@@ -1041,7 +1052,7 @@ func (p *pid) RemoteBatchAsk(ctx context.Context, to *goaktpb.Address, messages 
 
 	// create an instance of remote client service
 	remoteClient := internalpbconnect.NewRemotingServiceClient(
-		http.Client(),
+		http.NewClient(),
 		http.URL(to.GetHost(), int(to.GetPort())),
 		clientConnectionOptions...,
 	)
@@ -1065,7 +1076,7 @@ func (p *pid) RemoteBatchAsk(ctx context.Context, to *goaktpb.Address, messages 
 // RemoteReSpawn restarts an actor on a remote node.
 func (p *pid) RemoteReSpawn(ctx context.Context, host string, port int, name string) error {
 	// get the gRPC client connection options
-	clientConnectionOptions, err := p.gRPCClientConnectionOptions()
+	clientConnectionOptions, err := p.getConnectionOptions()
 	// handle the error
 	if err != nil {
 		return err
@@ -1109,9 +1120,9 @@ func (p *pid) Shutdown(ctx context.Context) error {
 	defer span.End()
 
 	// acquire the shutdown lock
-	p.stopSemaphore.Lock()
+	p.stopMutex.Lock()
 	// release the lock
-	defer p.stopSemaphore.Unlock()
+	defer p.stopMutex.Unlock()
 
 	p.logger.Info("Shutdown process has started...")
 
@@ -1154,10 +1165,10 @@ func (p *pid) Shutdown(ctx context.Context) error {
 // Watch a pid for errors, and send on the returned channel if an error occurred
 func (p *pid) Watch(pid PID) {
 	// create a watcher
-	w := &watchMan{
-		ID:      p,
-		ErrChan: make(chan error, 1),
-		Done:    make(chan types.Unit, 1),
+	w := &watcher{
+		WatcherID: p,
+		ErrChan:   make(chan error, 1),
+		Done:      make(chan types.Unit, 1),
 	}
 	// add the watcher to the list of watchMen
 	pid.watchers().Append(w)
@@ -1172,7 +1183,7 @@ func (p *pid) UnWatch(pid PID) {
 		// grab the item value
 		w := item.Value
 		// locate the given watcher
-		if w.ID.ActorPath() == p.ActorPath() {
+		if w.WatcherID.ActorPath().Equal(p.ActorPath()) {
 			// stop the watching go routine
 			w.Done <- types.Unit{}
 			// remove the watcher from the list
@@ -1182,16 +1193,16 @@ func (p *pid) UnWatch(pid PID) {
 	}
 }
 
-// Watchers return the list of watchMen
-func (p *pid) watchers() *slices.ConcurrentSlice[*watchMan] {
-	return p.watchMen
+// Watchers return the list of watchersList
+func (p *pid) watchers() *slices.ConcurrentSlice[*watcher] {
+	return p.watchersList
 }
 
 // doReceive pushes a given message to the actor receiveContextBuffer
 func (p *pid) doReceive(ctx ReceiveContext) {
 	// acquire the lock and release it once done
-	p.semaphore.Lock()
-	defer p.semaphore.Unlock()
+	p.rwMutex.Lock()
+	defer p.rwMutex.Unlock()
 
 	// set the last processing time
 	p.lastProcessingTime.Store(time.Now())
@@ -1208,7 +1219,7 @@ func (p *pid) doReceive(ctx ReceiveContext) {
 		// add a warning log because the mailbox is full and do nothing
 		p.logger.Warn(err)
 		// push the message as a deadletter
-		p.emitDeadletter(ctx, err)
+		p.handleError(ctx, err)
 		return
 	}
 }
@@ -1243,9 +1254,9 @@ func (p *pid) init(ctx context.Context) error {
 		return e
 	}
 	// set the actor is ready
-	p.semaphore.Lock()
+	p.rwMutex.Lock()
 	p.isRunning.Store(true)
-	p.semaphore.Unlock()
+	p.rwMutex.Unlock()
 	// add some logging info
 	p.logger.Info("Initialization process successfully completed.")
 	span.SetStatus(codes.Ok, "Init")
@@ -1272,7 +1283,7 @@ func (p *pid) reset() {
 	p.lastProcessingDuration.Store(0)
 	p.initTimeout.Store(DefaultInitTimeout)
 	p.children = newPIDMap(10)
-	p.watchMen = slices.NewConcurrentSlice[*watchMan]()
+	p.watchersList = slices.NewConcurrentSlice[*watcher]()
 	p.telemetry = telemetry.New()
 	// reset the mailbox
 	p.mailbox.Reset()
@@ -1300,14 +1311,14 @@ func (p *pid) freeWatchers(ctx context.Context) {
 			// notified the watcher with the Terminated message
 			terminated := &goaktpb.Terminated{}
 			// only send the parent actor when it is running
-			if watcher.ID.IsRunning() {
+			if watcher.WatcherID.IsRunning() {
 				// send the notification the watcher
 				// TODO: handle error and push to some system dead-letters queue
-				_ = p.Tell(ctx, watcher.ID, terminated)
+				_ = p.Tell(ctx, watcher.WatcherID, terminated)
 				// unwatch the child actor
-				watcher.ID.UnWatch(p)
+				watcher.WatcherID.UnWatch(p)
 				// remove the actor from the list of watcher's children
-				watcher.ID.removeChild(p)
+				watcher.WatcherID.removeChild(p)
 			}
 		}
 	}
@@ -1360,7 +1371,7 @@ func (p *pid) handleReceived(received ReceiveContext) {
 			// construct the error to return
 			err := fmt.Errorf("%s", r)
 			// send the error to the watchMen
-			for item := range p.watchMen.Iter() {
+			for item := range p.watchersList.Iter() {
 				item.Value.ErrChan <- err
 			}
 		}
@@ -1372,7 +1383,7 @@ func (p *pid) handleReceived(received ReceiveContext) {
 }
 
 // supervise watches for child actor's failure and act based upon the supervisory strategy
-func (p *pid) supervise(cid PID, watcher *watchMan) {
+func (p *pid) supervise(cid PID, watcher *watcher) {
 	for {
 		select {
 		case <-watcher.Done:
@@ -1463,9 +1474,9 @@ func (p *pid) passivationListener() {
 	}
 
 	// acquire the shutdown lock
-	p.stopSemaphore.Lock()
+	p.stopMutex.Lock()
 	// release the lock
-	defer p.stopSemaphore.Unlock()
+	defer p.stopMutex.Unlock()
 
 	// add some logging info
 	p.logger.Infof("Passivation mode has been triggered for actor=%s...", p.ActorPath().String())
@@ -1495,33 +1506,33 @@ func (p *pid) passivationListener() {
 
 // setBehavior is a utility function that helps set the actor behavior
 func (p *pid) setBehavior(behavior Behavior) {
-	p.semaphore.Lock()
+	p.rwMutex.Lock()
 	p.behaviorStack.Clear()
 	p.behaviorStack.Push(behavior)
-	p.semaphore.Unlock()
+	p.rwMutex.Unlock()
 }
 
 // resetBehavior is a utility function resets the actor behavior
 func (p *pid) resetBehavior() {
-	p.semaphore.Lock()
+	p.rwMutex.Lock()
 	p.behaviorStack.Clear()
 	p.behaviorStack.Push(p.Receive)
-	p.semaphore.Unlock()
+	p.rwMutex.Unlock()
 }
 
 // setBehaviorStacked adds a behavior to the actor's behaviorStack
 func (p *pid) setBehaviorStacked(behavior Behavior) {
-	p.semaphore.Lock()
+	p.rwMutex.Lock()
 	p.behaviorStack.Push(behavior)
-	p.semaphore.Unlock()
+	p.rwMutex.Unlock()
 }
 
 // unsetBehaviorStacked sets the actor's behavior to the previous behavior
 // prior to setBehaviorStacked is called
 func (p *pid) unsetBehaviorStacked() {
-	p.semaphore.Lock()
+	p.rwMutex.Lock()
 	p.behaviorStack.Pop()
-	p.semaphore.Unlock()
+	p.rwMutex.Unlock()
 }
 
 // doStop stops the actor
@@ -1617,8 +1628,8 @@ func (p *pid) removeChild(pid PID) {
 	}
 }
 
-// emitDeadletter emit the given message to the deadletters queue
-func (p *pid) emitDeadletter(receiveCtx ReceiveContext, err error) {
+// handleError handles the error during a message handling
+func (p *pid) handleError(receiveCtx ReceiveContext, err error) {
 	// only send to the stream when defined
 	if p.eventsStream == nil {
 		return
@@ -1669,8 +1680,8 @@ func (p *pid) registerMetrics() error {
 	return err
 }
 
-// gRPCClientConnectionOptions returns the gRPC client connections options
-func (p *pid) gRPCClientConnectionOptions() ([]connect.ClientOption, error) {
+// getConnectionOptions returns the gRPC client connections options
+func (p *pid) getConnectionOptions() ([]connect.ClientOption, error) {
 	// define a variable to hold the interceptor
 	var interceptor *otelconnect.Interceptor
 	var err error
