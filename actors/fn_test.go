@@ -30,7 +30,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestSpawnOption(t *testing.T) {
+func TestFuncOption(t *testing.T) {
 	var preStart PreStartFunc
 	var postStop PreStartFunc
 	testCases := []struct {
