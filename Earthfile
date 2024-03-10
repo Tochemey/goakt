@@ -54,7 +54,7 @@ lint:
 local-test:
     FROM +vendor
 
-    RUN go test -mod=vendor ./... -race -v -coverprofile=coverage.out -covermode=atomic -coverpkg=./...
+    RUN go test -mod=vendor `go list ./... | grep -v ./goaktpb | grep -v ./examples | grep -v ./mocks` -race -v -coverprofile=coverage.out -covermode=atomic -coverpkg=./...
 
     SAVE ARTIFACT coverage.out AS LOCAL coverage.out
 

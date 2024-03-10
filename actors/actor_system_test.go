@@ -33,6 +33,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pkg/errors"
+
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -857,7 +859,7 @@ func TestActorSystem(t *testing.T) {
 			assert.NoError(t, err)
 		})
 	})
-	t.Run("With error Stop", func(t *testing.T) {
+	t.Run("With actor PostStop error", func(t *testing.T) {
 		ctx := context.TODO()
 		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
 
@@ -1197,5 +1199,94 @@ func TestActorSystem(t *testing.T) {
 		require.Empty(t, sys.PeerAddress())
 
 		require.NoError(t, sys.Stop(ctx))
+	})
+	t.Run("With SpawnFromFunc", func(t *testing.T) {
+		ctx := context.TODO()
+		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+
+		// start the actor system
+		err := sys.Start(ctx)
+		assert.NoError(t, err)
+
+		receiveFn := func(ctx context.Context, message proto.Message) error {
+			expected := &testpb.Reply{Content: "test spawn from func"}
+			assert.True(t, proto.Equal(expected, message))
+			return nil
+		}
+
+		actorRef, err := sys.SpawnFromFunc(ctx, receiveFn)
+		assert.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		// stop the actor after some time
+		time.Sleep(time.Second)
+
+		// send a message to the actor
+		require.NoError(t, Tell(ctx, actorRef, &testpb.Reply{Content: "test spawn from func"}))
+
+		t.Cleanup(func() {
+			err = sys.Stop(ctx)
+			assert.NoError(t, err)
+		})
+	})
+	t.Run("With SpawnFromFunc with PreStart error", func(t *testing.T) {
+		ctx := context.TODO()
+		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+
+		// start the actor system
+		err := sys.Start(ctx)
+		assert.NoError(t, err)
+
+		receiveFn := func(ctx context.Context, message proto.Message) error {
+			expected := &testpb.Reply{Content: "test spawn from func"}
+			assert.True(t, proto.Equal(expected, message))
+			return nil
+		}
+
+		preStart := func(ctx context.Context) error {
+			return errors.New("failed")
+		}
+
+		actorRef, err := sys.SpawnFromFunc(ctx, receiveFn, WithPreStart(preStart))
+		assert.Error(t, err)
+		assert.Nil(t, actorRef)
+
+		t.Cleanup(func() {
+			err = sys.Stop(ctx)
+			assert.NoError(t, err)
+		})
+	})
+	t.Run("With SpawnFromFunc with PreStop error", func(t *testing.T) {
+		ctx := context.TODO()
+		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+
+		// start the actor system
+		err := sys.Start(ctx)
+		assert.NoError(t, err)
+
+		receiveFn := func(ctx context.Context, message proto.Message) error {
+			expected := &testpb.Reply{Content: "test spawn from func"}
+			assert.True(t, proto.Equal(expected, message))
+			return nil
+		}
+
+		postStop := func(ctx context.Context) error {
+			return errors.New("failed")
+		}
+
+		actorRef, err := sys.SpawnFromFunc(ctx, receiveFn, WithPostStop(postStop))
+		assert.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		// stop the actor after some time
+		time.Sleep(time.Second)
+
+		// send a message to the actor
+		require.NoError(t, Tell(ctx, actorRef, &testpb.Reply{Content: "test spawn from func"}))
+
+		t.Cleanup(func() {
+			err = sys.Stop(ctx)
+			assert.Error(t, err)
+		})
 	})
 }
