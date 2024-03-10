@@ -38,9 +38,6 @@ type routee[M proto.Message] struct {
 	handler func(ctx context.Context, message M) error
 }
 
-// enforce compilation error
-var _ Actor = (*routee)(nil)
-
 // newRoutee creates an instance of routee
 func newRoutee[M proto.Message](handler func(ctx context.Context, message M) error) *routee[M] {
 	return &routee[M]{handler: handler}
@@ -84,9 +81,6 @@ type syncRoutee[T proto.Message, R proto.Message] struct {
 	router  PID
 	handler func(ctx context.Context, message T) (response R, err error)
 }
-
-// enforce compilation error
-var _ Actor = (*syncRoutee)(nil)
 
 // newSyncRoutee creates an instance of syncRoutee
 func newSyncRoutee[T proto.Message, R proto.Message](handler func(ctx context.Context, message T) (response R, err error)) *syncRoutee[T, R] {
