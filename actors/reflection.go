@@ -20,7 +20,6 @@
  * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
- *
  */
 
 package actors
@@ -53,7 +52,7 @@ func (r *reflection) ActorOf(rtype reflect.Type) (actor Actor, err error) {
 	// grab the Actor interface type
 	iface := reflect.TypeOf((*Actor)(nil)).Elem()
 	// make sure the type implements Actor interface
-	isActor := rtype.Implements(iface) || reflect.PtrTo(rtype).Implements(iface)
+	isActor := rtype.Implements(iface) || reflect.PointerTo(rtype).Implements(iface)
 	// reject the creation of the instance
 	if !isActor {
 		return nil, ErrInstanceNotAnActor

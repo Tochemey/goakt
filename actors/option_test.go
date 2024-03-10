@@ -35,7 +35,7 @@ import (
 	"go.uber.org/atomic"
 )
 
-func TestOptions(t *testing.T) {
+func TestOption(t *testing.T) {
 	tel := telemetry.New()
 	mailbox := newReceiveContextBuffer(10)
 	var atomicTrue atomic.Bool

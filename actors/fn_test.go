@@ -30,37 +30,31 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestRegistry(t *testing.T) {
-	t.Run("With new instance", func(t *testing.T) {
-		newRegistry := NewRegistry()
-		var p any = newRegistry
-		_, ok := p.(Registry)
-		assert.True(t, ok)
-	})
+func TestSpawnOption(t *testing.T) {
+	var preStart PreStartFunc
+	var postStop PreStartFunc
+	testCases := []struct {
+		name     string
+		option   FuncOption
+		expected fnActor
+	}{
 
-	t.Run("With registration with name", func(t *testing.T) {
-		newRegistry := NewRegistry()
-		// create an instance of an object
-		actor := newTestActor()
-		// register that actor
-		newRegistry.Register("testActor", actor)
-		// assert the type of testActor
-		_, ok := newRegistry.GetNamedType("testActor")
-		assert.True(t, ok)
-		_, ok = newRegistry.GetType(actor)
-		assert.True(t, ok)
-	})
-
-	t.Run("With registration without name", func(t *testing.T) {
-		newRegistry := NewRegistry()
-		// create an instance of an object
-		actor := newTestActor()
-		// register that actor
-		newRegistry.Register("", actor)
-		// assert the type of testActor
-		_, ok := newRegistry.GetNamedType("testActor")
-		assert.False(t, ok)
-		_, ok = newRegistry.GetType(actor)
-		assert.True(t, ok)
-	})
+		{
+			name:     "WithPreStart",
+			option:   WithPreStart(preStart),
+			expected: fnActor{preStart: preStart},
+		},
+		{
+			name:     "WithPostStop",
+			option:   WithPostStop(postStop),
+			expected: fnActor{postStop: postStop},
+		},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			var cfg fnActor
+			tc.option.Apply(&cfg)
+			assert.Equal(t, tc.expected, cfg)
+		})
+	}
 }

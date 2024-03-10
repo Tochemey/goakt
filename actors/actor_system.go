@@ -35,6 +35,7 @@ import (
 
 	"connectrpc.com/connect"
 	"connectrpc.com/otelconnect"
+	"github.com/google/uuid"
 	"github.com/pkg/errors"
 	"github.com/tochemey/goakt/discovery"
 	addresspb "github.com/tochemey/goakt/goaktpb"
@@ -70,6 +71,9 @@ type ActorSystem interface {
 	Stop(ctx context.Context) error
 	// Spawn creates an actor in the system and starts it
 	Spawn(ctx context.Context, name string, actor Actor) (PID, error)
+	// SpawnFromFunc creates an actor with the given receive function. One can set the PreStart and PostStop lifecycle hooks
+	// in the given optional options
+	SpawnFromFunc(ctx context.Context, receiveFunc ReceiveFunc, opts ...FuncOption) (PID, error)
 	// Kill stops a given actor in the system
 	Kill(ctx context.Context, name string) error
 	// ReSpawn recreates a given actor in the system
@@ -448,6 +452,95 @@ func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor) (PID,
 		// send it to the cluster channel a wire actor
 		x.clusterChan <- &internalpb.WireActor{
 			ActorName:    name,
+			ActorAddress: actorPath.RemoteAddress(),
+			ActorPath:    actorPath.String(),
+		}
+	}
+
+	// return the actor ref
+	return pid, nil
+}
+
+// SpawnFromFunc creates an actor with the given receive function.
+func (x *actorSystem) SpawnFromFunc(ctx context.Context, receiveFunc ReceiveFunc, opts ...FuncOption) (PID, error) {
+	// start a tracing span
+	spanCtx, span := x.tracer.Start(ctx, "SpawnFromFunc")
+	// defer the closing of the span
+	defer span.End()
+
+	// first check whether the actor system has started
+	if !x.hasStarted.Load() {
+		// let us record the error in the span
+		span.SetStatus(codes.Error, "SpawnFromFunc")
+		span.RecordError(ErrDead)
+		// return the error
+		return nil, ErrActorSystemNotStarted
+	}
+
+	// create the name of the actor
+	actorID := uuid.NewString()
+
+	// create an instance of the receiveActor
+	actor := newFnActor(actorID, receiveFunc, opts...)
+
+	// set the default actor path assuming we are running locally
+	actorPath := NewPath(actorID, NewAddress(x.name, "", -1))
+	// set the actor path when the remoting is enabled
+	if x.remotingEnabled.Load() {
+		// get the path of the given actor
+		actorPath = NewPath(actorID, NewAddress(x.name, x.remotingHost, int(x.remotingPort)))
+	}
+
+	// define the pid options
+	// pid inherit the actor system settings defined during instantiation
+	pidOpts := []pidOption{
+		withInitMaxRetries(x.actorInitMaxRetries),
+		withPassivationAfter(x.expireActorAfter),
+		withSendReplyTimeout(x.replyTimeout),
+		withCustomLogger(x.logger),
+		withActorSystem(x),
+		withSupervisorStrategy(x.supervisorStrategy),
+		withMailboxSize(x.mailboxSize),
+		withMailbox(x.mailbox),
+		withStash(x.stashBuffer),
+		withEventsStream(x.eventsStream),
+		withInitTimeout(x.actorInitTimeout),
+		withTelemetry(x.telemetry),
+	}
+
+	// set the pid tracing option
+	if x.traceEnabled.Load() {
+		pidOpts = append(pidOpts, withTracing())
+	}
+
+	// set the pid metric option
+	if x.metricEnabled.Load() {
+		pidOpts = append(pidOpts, withMetric())
+	}
+
+	// create an instance of the actor ref
+	pid, err := newPID(spanCtx,
+		actorPath,
+		actor,
+		pidOpts...)
+
+	// handle the error
+	if err != nil {
+		// let us record the error in the span
+		span.SetStatus(codes.Error, "Spawn")
+		span.RecordError(err)
+		// return the error
+		return nil, err
+	}
+
+	// add the given actor to the actor map
+	x.actors.Set(pid)
+
+	// when cluster is enabled replicate the actor metadata across the cluster
+	if x.clusterEnabled.Load() {
+		// send it to the cluster channel a wire actor
+		x.clusterChan <- &internalpb.WireActor{
+			ActorName:    actorID,
 			ActorAddress: actorPath.RemoteAddress(),
 			ActorPath:    actorPath.String(),
 		}
