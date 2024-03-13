@@ -572,8 +572,7 @@ func (p *pid) SpawnChild(ctx context.Context, name string, actor Actor) (PID, er
 	// release the lock
 	defer p.rwMutex.Unlock()
 
-	// create the child actor options
-	// child inherit parent's options
+	// create the child actor options child inherit parent's options
 	opts := []pidOption{
 		withInitMaxRetries(int(p.initMaxRetries.Load())),
 		withPassivationAfter(p.passivateAfter.Load()),
@@ -1163,7 +1162,7 @@ func (p *pid) Shutdown(ctx context.Context) error {
 }
 
 // Watch a pid for errors, and send on the returned channel if an error occurred
-func (p *pid) Watch(pid PID) {
+func (p *pid) Watch(cid PID) {
 	// create a watcher
 	w := &watcher{
 		WatcherID: p,
@@ -1171,9 +1170,9 @@ func (p *pid) Watch(pid PID) {
 		Done:      make(chan types.Unit, 1),
 	}
 	// add the watcher to the list of watchMen
-	pid.watchers().Append(w)
+	cid.watchers().Append(w)
 	// supervise the PID
-	go p.supervise(pid, w)
+	go p.supervise(cid, w)
 }
 
 // UnWatch stops watching a given actor
