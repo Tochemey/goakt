@@ -41,31 +41,23 @@ import (
 // Ask sends a synchronous message to another actor and expect a response.
 // This block until a response is received or timed out.
 func Ask(ctx context.Context, to PID, message proto.Message, timeout time.Duration) (response proto.Message, err error) {
-	// make sure the actor is live
 	if !to.IsRunning() {
 		return nil, ErrDead
 	}
 
-	// create a message context
 	var messageContext *receiveContext
 
-	// set the actual message
 	switch msg := message.(type) {
 	case *internalpb.RemoteMessage:
-		// define the actual message variable
 		var actual proto.Message
-		// unmarshal the message and handle the error
 		if actual, err = msg.GetMessage().UnmarshalNew(); err != nil {
 			return nil, ErrInvalidRemoteMessage(err)
 		}
-		// set the context message and the sender
 		messageContext = newReceiveContext(ctx, NoSender, to, actual, false).WithRemoteSender(msg.GetSender())
 	default:
-		// set the context message and the sender
 		messageContext = newReceiveContext(ctx, NoSender, to, message, false).WithRemoteSender(RemoteNoSender)
 	}
 
-	// put the message context in the mailbox of the recipient actor
 	to.doReceive(messageContext)
 
 	// await patiently to receive the response from the actor
@@ -75,9 +67,7 @@ func Ask(ctx context.Context, to PID, message proto.Message, timeout time.Durati
 			return
 		case <-await:
 			err = ErrRequestTimeout
-			// push the message as a deadletter
 			to.handleError(messageContext, err)
-			// stop the whole processing
 			return
 		}
 	}
@@ -85,35 +75,27 @@ func Ask(ctx context.Context, to PID, message proto.Message, timeout time.Durati
 
 // Tell sends an asynchronous message to an actor
 func Tell(ctx context.Context, to PID, message proto.Message) error {
-	// make sure the recipient actor is live
 	if !to.IsRunning() {
 		return ErrDead
 	}
 
-	// create a message context
 	var messageContext *receiveContext
 
-	// set the actual message
 	switch msg := message.(type) {
 	case *internalpb.RemoteMessage:
 		var (
-			// define the actual message variable
 			actual proto.Message
-			// define the error variable
-			err error
+			err    error
 		)
-		// unmarshal the message and handle the error
+
 		if actual, err = msg.GetMessage().UnmarshalNew(); err != nil {
 			return ErrInvalidRemoteMessage(err)
 		}
-		// set the context message and the sender
 		messageContext = newReceiveContext(ctx, NoSender, to, actual, true).WithRemoteSender(msg.GetSender())
 	default:
-		// set the context message and the sender
 		messageContext = newReceiveContext(ctx, NoSender, to, message, true).WithRemoteSender(RemoteNoSender)
 	}
 
-	// put the message context in the mailbox of the recipient actor
 	to.doReceive(messageContext)
 
 	return nil
@@ -121,18 +103,13 @@ func Tell(ctx context.Context, to PID, message proto.Message) error {
 
 // BatchTell sends bulk asynchronous messages to an actor
 func BatchTell(ctx context.Context, to PID, messages ...proto.Message) error {
-	// make sure the recipient actor is live
 	if !to.IsRunning() {
 		return ErrDead
 	}
 
-	// iterate the list messages
 	for i := 0; i < len(messages); i++ {
-		// get the message
 		message := messages[i]
-		// create a message context
 		messageContext := newReceiveContext(ctx, NoSender, to, message, true).WithRemoteSender(RemoteNoSender)
-		// put the message context in the mailbox of the recipient actor
 		to.doReceive(messageContext)
 	}
 	return nil
@@ -142,24 +119,16 @@ func BatchTell(ctx context.Context, to PID, messages ...proto.Message) error {
 // The messages will be processed one after the other in the order they are sent
 // This is a design choice to follow the simple principle of one message at a time processing by actors.
 func BatchAsk(ctx context.Context, to PID, timeout time.Duration, messages ...proto.Message) (responses chan proto.Message, err error) {
-	// make sure the actor is live
 	if !to.IsRunning() {
 		return nil, ErrDead
 	}
 
-	// create a buffered channel to hold the responses
 	responses = make(chan proto.Message, len(messages))
-
-	// close the responses channel when done
 	defer close(responses)
 
-	// let us process the messages one after the other
 	for i := 0; i < len(messages); i++ {
-		// grab the message at index i
 		message := messages[i]
-		// create a message context
 		messageContext := newReceiveContext(ctx, NoSender, to, message, false)
-		// push the message to the actor mailbox
 		to.doReceive(messageContext)
 
 		// await patiently to receive the response from the actor
@@ -167,15 +136,11 @@ func BatchAsk(ctx context.Context, to PID, timeout time.Duration, messages ...pr
 		for await := time.After(timeout); ; {
 			select {
 			case resp := <-messageContext.response:
-				// send the response to the responses channel
 				responses <- resp
 				break timerLoop
 			case <-await:
-				// set the request timeout error
 				err = ErrRequestTimeout
-				// push the message as a deadletter
 				to.handleError(messageContext, err)
-				// stop the whole processing
 				return
 			}
 		}
@@ -185,27 +150,23 @@ func BatchAsk(ctx context.Context, to PID, timeout time.Duration, messages ...pr
 
 // RemoteTell sends a message to an actor remotely without expecting any reply
 func RemoteTell(ctx context.Context, to *goaktpb.Address, message proto.Message) error {
-	// marshal the message
 	marshaled, err := anypb.New(message)
 	if err != nil {
 		return ErrInvalidRemoteMessage(err)
 	}
 
-	// create an interceptor
 	interceptor, err := otelconnect.NewInterceptor()
-	// handle the error
 	if err != nil {
 		return err
 	}
 
-	// create an instance of remote client service
 	remoteClient := internalpbconnect.NewRemotingServiceClient(
 		http.NewClient(),
 		http.URL(to.GetHost(), int(to.GetPort())),
 		connect.WithInterceptors(interceptor),
 		connect.WithGRPC(),
 	)
-	// prepare the rpcRequest to send
+
 	request := connect.NewRequest(&internalpb.RemoteTellRequest{
 		RemoteMessage: &internalpb.RemoteMessage{
 			Sender:   RemoteNoSender,
@@ -213,7 +174,7 @@ func RemoteTell(ctx context.Context, to *goaktpb.Address, message proto.Message)
 			Message:  marshaled,
 		},
 	})
-	// send the message and handle the error in case there is any
+
 	if _, err := remoteClient.RemoteTell(ctx, request); err != nil {
 		return err
 	}
@@ -222,27 +183,23 @@ func RemoteTell(ctx context.Context, to *goaktpb.Address, message proto.Message)
 
 // RemoteAsk sends a synchronous message to another actor remotely and expect a response.
 func RemoteAsk(ctx context.Context, to *goaktpb.Address, message proto.Message) (response *anypb.Any, err error) {
-	// marshal the message
 	marshaled, err := anypb.New(message)
 	if err != nil {
 		return nil, ErrInvalidRemoteMessage(err)
 	}
 
-	// create an interceptor
 	interceptor, err := otelconnect.NewInterceptor()
-	// handle the error
 	if err != nil {
 		return nil, err
 	}
 
-	// create an instance of remote client service
 	remoteClient := internalpbconnect.NewRemotingServiceClient(
 		http.NewClient(),
 		http.URL(to.GetHost(), int(to.GetPort())),
 		connect.WithInterceptors(interceptor),
 		connect.WithGRPC(),
 	)
-	// prepare the rpcRequest to send
+
 	rpcRequest := connect.NewRequest(&internalpb.RemoteAskRequest{
 		RemoteMessage: &internalpb.RemoteMessage{
 			Sender:   RemoteNoSender,
@@ -250,9 +207,8 @@ func RemoteAsk(ctx context.Context, to *goaktpb.Address, message proto.Message) 
 			Message:  marshaled,
 		},
 	})
-	// send the request
+
 	rpcResponse, rpcErr := remoteClient.RemoteAsk(ctx, rpcRequest)
-	// handle the error
 	if rpcErr != nil {
 		return nil, rpcErr
 	}
@@ -262,14 +218,11 @@ func RemoteAsk(ctx context.Context, to *goaktpb.Address, message proto.Message) 
 
 // RemoteLookup look for an actor address on a remote node.
 func RemoteLookup(ctx context.Context, host string, port int, name string) (addr *goaktpb.Address, err error) {
-	// create an interceptor
 	interceptor, err := otelconnect.NewInterceptor()
-	// handle the error
 	if err != nil {
 		return nil, err
 	}
 
-	// create an instance of remote client service
 	remoteClient := internalpbconnect.NewRemotingServiceClient(
 		http.NewClient(),
 		http.URL(host, port),
@@ -283,9 +236,8 @@ func RemoteLookup(ctx context.Context, host string, port int, name string) (addr
 		Port: int32(port),
 		Name: name,
 	})
-	// send the message and handle the error in case there is any
+
 	response, err := remoteClient.RemoteLookup(ctx, request)
-	// we know the error will always be a grpc error
 	if err != nil {
 		code := connect.CodeOf(err)
 		if code == connect.CodeNotFound {
@@ -294,34 +246,25 @@ func RemoteLookup(ctx context.Context, host string, port int, name string) (addr
 		return nil, err
 	}
 
-	// return the response
 	return response.Msg.GetAddress(), nil
 }
 
 // RemoteBatchTell sends bulk asynchronous messages to an actor
 func RemoteBatchTell(ctx context.Context, to *goaktpb.Address, messages ...proto.Message) error {
-	// create an interceptor
 	interceptor, err := otelconnect.NewInterceptor()
-	// handle the error
 	if err != nil {
 		return err
 	}
 
-	// define a variable holding the remote messages
 	var remoteMessages []*anypb.Any
-	// iterate the list of messages and pack them
 	for _, message := range messages {
-		// let us pack it
 		packed, err := anypb.New(message)
-		// handle the error
 		if err != nil {
 			return ErrInvalidRemoteMessage(err)
 		}
-		// add it to the list of remote messages
 		remoteMessages = append(remoteMessages, packed)
 	}
 
-	// create an instance of remote client service
 	remoteClient := internalpbconnect.NewRemotingServiceClient(
 		http.NewClient(),
 		http.URL(to.GetHost(), int(to.GetPort())),
@@ -329,13 +272,12 @@ func RemoteBatchTell(ctx context.Context, to *goaktpb.Address, messages ...proto
 		connect.WithGRPC(),
 	)
 
-	// prepare the remote batch tell request
 	request := connect.NewRequest(&internalpb.RemoteBatchTellRequest{
 		Messages: remoteMessages,
 		Sender:   RemoteNoSender,
 		Receiver: to,
 	})
-	// send the message and handle the error in case there is any
+
 	if _, err := remoteClient.RemoteBatchTell(ctx, request); err != nil {
 		return err
 	}
@@ -344,28 +286,20 @@ func RemoteBatchTell(ctx context.Context, to *goaktpb.Address, messages ...proto
 
 // RemoteBatchAsk sends bulk messages to an actor with responses expected
 func RemoteBatchAsk(ctx context.Context, to *goaktpb.Address, messages ...proto.Message) (responses []*anypb.Any, err error) {
-	// create an interceptor
 	interceptor, err := otelconnect.NewInterceptor()
-	// handle the error
 	if err != nil {
 		return nil, err
 	}
 
-	// define a variable holding the remote messages
 	var remoteMessages []*anypb.Any
-	// iterate the list of messages and pack them
 	for _, message := range messages {
-		// let us pack it
 		packed, err := anypb.New(message)
-		// handle the error
 		if err != nil {
 			return nil, ErrInvalidRemoteMessage(err)
 		}
-		// add it to the list of remote messages
 		remoteMessages = append(remoteMessages, packed)
 	}
 
-	// create an instance of remote client service
 	remoteClient := internalpbconnect.NewRemotingServiceClient(
 		http.NewClient(),
 		http.URL(to.GetHost(), int(to.GetPort())),
@@ -373,32 +307,26 @@ func RemoteBatchAsk(ctx context.Context, to *goaktpb.Address, messages ...proto.
 		connect.WithGRPC(),
 	)
 
-	// prepare the remote batch tell request
 	request := connect.NewRequest(&internalpb.RemoteBatchAskRequest{
 		Messages: remoteMessages,
 		Sender:   RemoteNoSender,
 		Receiver: to,
 	})
-	// send the message and handle the error in case there is any
+
 	response, err := remoteClient.RemoteBatchAsk(ctx, request)
-	// handle the error
 	if err != nil {
 		return nil, err
 	}
-	// return the responses
 	return response.Msg.GetMessages(), nil
 }
 
 // RemoteReSpawn restarts actor address on a remote node.
 func RemoteReSpawn(ctx context.Context, host string, port int, name string) error {
-	// create an interceptor
 	interceptor, err := otelconnect.NewInterceptor()
-	// handle the error
 	if err != nil {
 		return err
 	}
 
-	// create an instance of remote client service
 	remoteClient := internalpbconnect.NewRemotingServiceClient(
 		http.NewClient(),
 		http.URL(host, port),
@@ -406,13 +334,12 @@ func RemoteReSpawn(ctx context.Context, host string, port int, name string) erro
 		connect.WithGRPC(),
 	)
 
-	// prepare the request to send
 	request := connect.NewRequest(&internalpb.RemoteReSpawnRequest{
 		Host: host,
 		Port: int32(port),
 		Name: name,
 	})
-	// send the message and handle the error in case there is any
+
 	if _, err = remoteClient.RemoteReSpawn(ctx, request); err != nil {
 		code := connect.CodeOf(err)
 		if code == connect.CodeNotFound {
@@ -421,6 +348,5 @@ func RemoteReSpawn(ctx context.Context, host string, port int, name string) erro
 		return err
 	}
 
-	// return the response
 	return nil
 }

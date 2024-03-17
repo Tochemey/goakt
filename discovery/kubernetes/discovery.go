@@ -97,16 +97,13 @@ func (d *Discovery) ID() string {
 
 // Initialize initializes the plugin: registers some internal data structures, clients etc.
 func (d *Discovery) Initialize() error {
-	// acquire the lock
 	d.mu.Lock()
-	// release the lock
 	defer d.mu.Unlock()
-	// first check whether the discovery provider is running
+
 	if d.initialized.Load() {
 		return discovery.ErrAlreadyInitialized
 	}
 
-	// check the options
 	if d.option.Provider == "" {
 		d.option.Provider = d.ID()
 	}
@@ -116,12 +113,9 @@ func (d *Discovery) Initialize() error {
 
 // SetConfig registers the underlying discovery configuration
 func (d *Discovery) SetConfig(meta discovery.Config) error {
-	// acquire the lock
 	d.mu.Lock()
-	// release the lock
 	defer d.mu.Unlock()
 
-	// first check whether the discovery provider is running
 	if d.initialized.Load() {
 		return discovery.ErrAlreadyInitialized
 	}
@@ -131,58 +125,43 @@ func (d *Discovery) SetConfig(meta discovery.Config) error {
 
 // Register registers this node to a service discovery directory.
 func (d *Discovery) Register() error {
-	// acquire the lock
 	d.mu.Lock()
-	// release the lock
 	defer d.mu.Unlock()
 
-	// first check whether the discovery provider has started
-	// avoid to re-register the discovery
 	if d.initialized.Load() {
 		return discovery.ErrAlreadyRegistered
 	}
 
-	// create the k8 config
 	config, err := rest.InClusterConfig()
-	// handle the error
 	if err != nil {
 		return errors.Wrap(err, "failed to get the in-cluster config of the kubernetes provider")
 	}
-	// create an instance of the k8 client set
+
 	client, err := kubernetes.NewForConfig(config)
-	// handle the error
 	if err != nil {
 		return errors.Wrap(err, "failed to create the kubernetes client api")
 	}
-	// set the k8 client
+
 	d.client = client
-	// set initialized
 	d.initialized = atomic.NewBool(true)
 	return nil
 }
 
 // Deregister removes this node from a service discovery directory.
 func (d *Discovery) Deregister() error {
-	// acquire the lock
 	d.mu.Lock()
-	// release the lock
 	defer d.mu.Unlock()
 
-	// first check whether the discovery provider has started
 	if !d.initialized.Load() {
 		return discovery.ErrNotInitialized
 	}
-	// set the initialized to false
 	d.initialized = atomic.NewBool(false)
-	// stop the watchers
 	close(d.stopChan)
-	// return
 	return nil
 }
 
 // DiscoverPeers returns a list of known nodes.
 func (d *Discovery) DiscoverPeers() ([]string, error) {
-	// first check whether the discovery provider is running
 	if !d.initialized.Load() {
 		return nil, discovery.ErrNotInitialized
 	}
@@ -195,36 +174,31 @@ func (d *Discovery) DiscoverPeers() ([]string, error) {
 		"app.kubernetes.io/name":      d.option.ApplicationName,
 	}
 
-	// create a context
 	ctx := context.Background()
 
-	// List all the pods based on the filters we requested
 	pods, err := d.client.CoreV1().Pods(d.option.NameSpace).List(ctx, metav1.ListOptions{
 		LabelSelector: labels.SelectorFromSet(podLabels).String(),
 	})
-	// panic when we cannot poll the pods
+
 	if err != nil {
 		return nil, err
 	}
 
-	// define valid port names
 	validPortNames := []string{ClusterPortName, GossipPortName, RemotingPortName}
 
 	// define the addresses list
 	addresses := goset.NewSet[string]()
-	// iterate the pods list and only the one that are running
+
 MainLoop:
 	for _, pod := range pods.Items {
-		// create a variable copy of pod
 		pod := pod
-		// only consider running pods
+
 		if pod.Status.Phase != corev1.PodRunning {
 			continue MainLoop
 		}
 		// If there is a Ready condition available, we need that to be true.
 		// If no ready condition is set, then we accept this pod regardless.
 		for _, condition := range pod.Status.Conditions {
-			// ignore pod that is not in ready state
 			if condition.Type == corev1.PodReady && condition.Status != corev1.ConditionTrue {
 				continue MainLoop
 			}
@@ -232,11 +206,8 @@ MainLoop:
 
 		// iterate the pod containers and find the named port
 		for _, container := range pod.Spec.Containers {
-			// iterate the container ports to set the join port
 			for _, port := range container.Ports {
-				// make sure we have the gossip and cluster port defined
 				if !slices.Contains(validPortNames, port.Name) {
-					// skip that port
 					continue
 				}
 
@@ -256,27 +227,24 @@ func (d *Discovery) Close() error {
 
 // setConfig sets the kubernetes discoConfig
 func (d *Discovery) setConfig(config discovery.Config) (err error) {
-	// create an instance of option
 	option := new(discoConfig)
-	// extract the namespace
+
 	option.NameSpace, err = config.GetString(Namespace)
-	// handle the error in case the namespace value is not properly set
 	if err != nil {
 		return err
 	}
-	// extract the actor system name
+
 	option.ActorSystemName, err = config.GetString(ActorSystemName)
-	// handle the error in case the actor system name value is not properly set
 	if err != nil {
 		return err
 	}
-	// extract the application name
+
 	option.ApplicationName, err = config.GetString(ApplicationName)
-	// handle the error in case the application name value is not properly set
+
 	if err != nil {
 		return err
 	}
-	// in case none of the above extraction fails then set the option
+
 	d.option = option
 	return nil
 }

@@ -165,20 +165,14 @@ func NewNode(name string, serviceDiscovery *discovery.ServiceDiscovery, opts ...
 
 // Start starts the Node.
 func (n *Node) Start(ctx context.Context) error {
-	// set the logger
 	logger := n.logger
 
-	// add some logging information
 	logger.Infof("Starting GoAkt cluster Node service on (%s)....🤔", n.host.ClusterAddress())
 
-	// build the Node engine config
 	conf := n.buildConfig()
-	// set the hasher to the custom hasher
 	conf.Hasher = &hasherWrapper{n.hasher}
 
-	// create the member list config
 	m, err := olriconfig.NewMemberlistConfig("lan")
-	// panic when there is an error
 	if err != nil {
 		logger.Error(errors.Wrap(err, "failed to configure the cluster Node memberlist.💥"))
 		return err
@@ -195,7 +189,7 @@ func (n *Node) Start(ctx context.Context) error {
 		provider: n.discoveryProvider,
 		log:      n.logger.StdLogger(),
 	}
-	// set the discovery service
+
 	conf.ServiceDiscovery = map[string]any{
 		"plugin":  discoveryWrapper,
 		"id":      n.discoveryProvider.ID(),
@@ -206,15 +200,12 @@ func (n *Node) Start(ctx context.Context) error {
 	startCtx, cancel := context.WithCancel(ctx)
 	// cancel the context the server has started
 	conf.Started = func() {
-		// cancel the start context
 		defer cancel()
-		// add some logging information
 		logger.Infof("GoAkt cluster Node=(%s) successfully started. 🎉", n.name)
 	}
 
 	// let us create an instance of the Node engine
 	eng, err := olric.New(conf)
-	// handle the error
 	if err != nil {
 		logger.Error(errors.Wrapf(err, "failed to start the cluster Node=(%s).💥", n.name))
 		return err
@@ -223,50 +214,37 @@ func (n *Node) Start(ctx context.Context) error {
 	// set the server
 	n.server = eng
 	go func() {
-		// start the Node engine
-		err = n.server.Start()
-		// handle the error in case there is an early error
-		if err != nil {
+		if err = n.server.Start(); err != nil {
 			logger.Error(errors.Wrapf(err, "failed to start the cluster Node=(%s).💥", n.name))
-			// let us stop the started engine
 			if e := n.server.Shutdown(ctx); e != nil {
 				logger.Panic(e)
 			}
 		}
 	}()
 
-	// wait for start
 	<-startCtx.Done()
 
 	// set the client
 	n.client = n.server.NewEmbeddedClient()
-	// create the instance of the distributed map
 	dmp, err := n.client.NewDMap(n.name)
-	// handle the error
 	if err != nil {
 		logger.Error(errors.Wrapf(err, "failed to start the cluster Node=(%s).💥", n.name))
-		// let us stop the started engine
 		return n.server.Shutdown(ctx)
 	}
-	// set the distributed map
+
 	n.kvStore = dmp
 
 	// create a subscriber to consume to cluster events
 	ps, err := n.client.NewPubSub()
-	// handle the error
 	if err != nil {
 		logger.Error(errors.Wrapf(err, "failed to start the cluster Node=(%s).💥", n.name))
-		// let us stop the started engine
 		return n.server.Shutdown(ctx)
 	}
 
-	// subscribe to the cluster events channel
 	n.pubSub = ps.Subscribe(ctx, events.ClusterEventsChannel)
-	// set the events channel
 	n.messagesChan = n.pubSub.Channel()
-	// start consuming to cluster events
 	go n.consume()
-	// return successfully
+
 	return nil
 }
 
@@ -350,138 +328,101 @@ func (n *Node) PutActor(ctx context.Context, actor *internalpb.WireActor) error 
 
 	// send the record into the Node
 	err = n.kvStore.Put(ctx, actor.GetActorName(), data)
-	// handle the error
 	if err != nil {
-		// log the error
 		logger.Error(errors.Wrapf(err, "failed to replicate actor=%s record.💥", actor.GetActorName()))
 		return err
 	}
 
-	// Ahoy we are successful
 	logger.Infof("actor (%s) successfully replicated.🎉", actor.GetActorName())
 	return nil
 }
 
 // GetActor fetches an actor from the Node
 func (n *Node) GetActor(ctx context.Context, actorName string) (*internalpb.WireActor, error) {
-	// create a cancellation context of 1 second timeout
 	ctx, cancelFn := context.WithTimeout(ctx, n.readTimeout)
 	defer cancelFn()
 
-	// set the logger
 	logger := n.logger
 
-	// add some logging information
 	logger.Infof("retrieving actor (%s) from the Node.🤔", actorName)
 
-	// grab the record from the distributed store
 	resp, err := n.kvStore.Get(ctx, actorName)
-	// handle the error
 	if err != nil {
-		// we could not find the given actor
 		if errors.Is(err, olric.ErrKeyNotFound) {
 			logger.Warnf("actor=%s is not found in the Node", actorName)
 			return nil, ErrActorNotFound
 		}
-		// log the error
 		logger.Error(errors.Wrapf(err, "failed to get actor=%s record.💥", actorName))
 		return nil, err
 	}
 
-	// grab the base64 representation of the wire actor
 	base64ActorStr, err := resp.String()
-	// handle the error
 	if err != nil {
 		logger.Error(errors.Wrapf(err, "failed to read the record at:{%s}.💥", actorName))
 		return nil, err
 	}
 
-	// decode it
 	actor, err := decode(base64ActorStr)
-	// let us unpack the byte array
 	if err != nil {
-		// log the error and return
 		logger.Error(errors.Wrapf(err, "failed to decode actor=%s record.💥", actorName))
 		return nil, err
 	}
 
-	// Ahoy we are successful
 	logger.Infof("actor (%s) successfully retrieved from the cluster.🎉", actor.GetActorName())
-	// return the response
 	return actor, nil
 }
 
 // RemoveActor removes a given actor from the cluster.
 // An actor is removed from the cluster when this actor has been passivated.
 func (n *Node) RemoveActor(ctx context.Context, actorName string) error {
-	// set the logger
 	logger := n.logger
 
-	// add some logging information
 	logger.Infof("removing actor (%s).🤔", actorName)
 
-	// remove the actor from the cluster
 	_, err := n.kvStore.Delete(ctx, actorName)
-	// handle the error
 	if err != nil {
-		// log the error
 		logger.Error(errors.Wrapf(err, "failed to remove actor=%s record.💥", actorName))
 		return err
 	}
 
-	// add a logging information
 	logger.Infof("actor (%s) successfully removed from the cluster.🎉", actorName)
 	return nil
 }
 
 // SetKey sets a given key to the cluster
 func (n *Node) SetKey(ctx context.Context, key string) error {
-	// create a cancellation context of 1 second timeout
 	ctx, cancelFn := context.WithTimeout(ctx, n.writeTimeout)
 	defer cancelFn()
 
-	// set the logger
 	logger := n.logger
 
-	// add some logging information
 	logger.Infof("replicating key (%s).🤔", key)
 
-	// send the record into the Node
-	err := n.kvStore.Put(ctx, key, true)
-	// handle the error
-	if err != nil {
-		// log the error
+	if err := n.kvStore.Put(ctx, key, true); err != nil {
 		logger.Error(errors.Wrapf(err, "failed to replicate key=%s record.💥", key))
 		return err
 	}
 
-	// Ahoy we are successful
 	logger.Infof("key (%s) successfully replicated.🎉", key)
 	return nil
 }
 
 // KeyExists checks the existence of a given key
 func (n *Node) KeyExists(ctx context.Context, key string) (bool, error) {
-	// create a cancellation context of 1 second timeout
 	ctx, cancelFn := context.WithTimeout(ctx, n.readTimeout)
 	defer cancelFn()
 
-	// set the logger
 	logger := n.logger
 
-	// add some logging information
 	logger.Infof("checking key (%s) existence in the cluster.🤔", key)
 
-	// grab the record from the distributed store
 	resp, err := n.kvStore.Get(ctx, key)
-	// handle the error
 	if err != nil {
-		// we could not find the given actor
 		if errors.Is(err, olric.ErrKeyNotFound) {
 			logger.Warnf("key=%s is not found in the Node", key)
 			return false, nil
 		}
-		// log the error
+
 		logger.Error(errors.Wrapf(err, "failed to check key=%s existence.💥", key))
 		return false, err
 	}
@@ -490,13 +431,9 @@ func (n *Node) KeyExists(ctx context.Context, key string) (bool, error) {
 
 // GetPartition returns the partition where a given actor is stored
 func (n *Node) GetPartition(actorName string) int {
-	// create the byte array of the actor name
 	key := []byte(actorName)
-	// compute the hash key
 	hkey := n.hasher.HashCode(key)
-	// compute the partition and return it
 	partition := int(hkey % n.partitionsCount)
-	// add some debug log
 	n.logger.Debugf("partition of actor (%s) is (%d)", actorName, partition)
 	return partition
 }
@@ -514,61 +451,46 @@ func (n *Node) consume() {
 		case <-n.messagesReaderChan:
 			return
 		case message, ok := <-n.messagesChan:
-			// break out of the loop when the channel is closed
 			if !ok {
 				return
 			}
-			// grab the message payload
 			payload := message.Payload
-			// get the message payload
 			var event map[string]any
-			// let us unmarshal the event
 			if err := json.Unmarshal([]byte(payload), &event); err != nil {
 				n.logger.Error(errors.Wrap(err, "failed to decode cluster event"))
 				// TODO: should we continue or not
 				continue
 			}
 
-			// grab the kind
 			kind := event["kind"]
-			// add some debug log
 			n.logger.Debugf("%s received (%s) cluster event", n.name, kind)
 
 			switch kind {
 			case events.KindNodeJoinEvent:
-				// create the node joined to unmarshal the event
 				nodeJoined := new(events.NodeJoinEvent)
-				// let us unmarshal the event
 				if err := json.Unmarshal([]byte(payload), &nodeJoined); err != nil {
 					n.logger.Error(errors.Wrap(err, "failed to decode NodeJoined cluster event"))
 					// TODO: should we continue or not
 					continue
 				}
 
-				// make sure to skip self
 				if n.AdvertisedAddress() == nodeJoined.NodeJoin {
-					// add some debug log
 					n.logger.Debug("skipping self")
 					continue
 				}
 
 				// TODO: need to cross check this calculation
-				// convert the timestamp to milliseconds
 				timeMilli := nodeJoined.Timestamp / int64(1e6)
-				// create the startNode joined event
 				event := &goaktpb.NodeJoined{
 					Address:   nodeJoined.NodeJoin,
 					Timestamp: timestamppb.New(time.UnixMilli(timeMilli)),
 				}
-				// serialize as any pb
+
 				eventType, _ := anypb.New(event)
-				// send the event to queue
 				n.events <- &Event{eventType}
 
 			case events.KindNodeLeftEvent:
-				// create the node left to unmarshal the event
 				nodeLeft := new(events.NodeLeftEvent)
-				// let us unmarshal the event
 				if err := json.Unmarshal([]byte(payload), &nodeLeft); err != nil {
 					n.logger.Error(errors.Wrap(err, "failed to decode NodeLeft cluster event"))
 					// TODO: should we continue or not
@@ -576,16 +498,14 @@ func (n *Node) consume() {
 				}
 
 				// TODO: need to cross check this calculation
-				// convert the timestamp to milliseconds
 				timeMilli := nodeLeft.Timestamp / int64(1e6)
-				// create the startNode joined event
+
 				event := &goaktpb.NodeLeft{
 					Address:   nodeLeft.NodeLeft,
 					Timestamp: timestamppb.New(time.UnixMilli(timeMilli)),
 				}
-				// serialize as any pb
+
 				eventType, _ := anypb.New(event)
-				// send the event to queue
 				n.events <- &Event{eventType}
 			default:
 				// skip

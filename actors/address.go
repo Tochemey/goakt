@@ -55,7 +55,6 @@ func NewAddress(system string, host string, port int) *Address {
 
 // WithHost sets the hosts of a given Address and returns a new instance of the address
 func (a *Address) WithHost(host string) (*Address, error) {
-	// only allow this operation if the given address is a remote one
 	if a.IsLocal() {
 		return nil, ErrLocalAddress
 	}
@@ -64,7 +63,6 @@ func (a *Address) WithHost(host string) (*Address, error) {
 
 // WithPort sets the port of a given Address and returns a new instance of the address
 func (a *Address) WithPort(port int) (*Address, error) {
-	// only allow this operation if the given address is a remote one
 	if a.IsLocal() {
 		return nil, ErrLocalAddress
 	}
@@ -115,9 +113,7 @@ func (a *Address) HostPort() string {
 // String returns the canonical String representation of this Address formatted as:
 // `protocol://system@host:port`
 func (a *Address) String() string {
-	// create a bytes buffer instance
 	buf := bytes.NewBuffer(nil)
-	// write the protocol field to bytes buffer
 	buf.WriteString(a.protocol)
 	buf.WriteString("://")
 	buf.WriteString(a.system)

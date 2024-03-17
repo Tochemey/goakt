@@ -111,24 +111,18 @@ func (d *Discovery) ID() string {
 
 // Initialize initializes the plugin: registers some internal data structures, clients etc.
 func (d *Discovery) Initialize() error {
-	// acquire the lock
 	d.mu.Lock()
-	// release the lock
 	defer d.mu.Unlock()
 
-	// first check whether the discovery provider is running
 	if d.initialized.Load() {
 		return discovery.ErrAlreadyInitialized
 	}
 
-	// set the default discovery timeout
 	if d.config.Timeout <= 0 {
 		d.config.Timeout = time.Second
 	}
 
-	// grab the host node
 	hostNode, err := discovery.HostNode()
-	// handle the error
 	if err != nil {
 		return err
 	}
@@ -153,41 +147,30 @@ func (d *Discovery) Initialize() error {
 	// create a new instance of retrier that will try a maximum of five times, with
 	// an initial delay of 100 ms and a maximum delay of opts.ReconnectWait
 	retrier := retry.NewRetrier(maxRetries, 100*time.Millisecond, opts.ReconnectWait)
-	// handle the retry error
 	err = retrier.Run(func() error {
-		// connect to the NATs server
 		connection, err = opts.Connect()
 		if err != nil {
 			return err
 		}
-		// successful connection
 		return nil
 	})
 
 	// create the NATs connection encoder
 	encodedConn, err := nats.NewEncodedConn(connection, protobuf.PROTOBUF_ENCODER)
-	// handle the error
 	if err != nil {
 		return err
 	}
-	// set the connection
 	d.natsConnection = encodedConn
-	// set initialized
 	d.initialized = atomic.NewBool(true)
-	// set the host node
 	d.hostNode = hostNode
 	return nil
 }
 
 // Register registers this node to a service discovery directory.
 func (d *Discovery) Register() error {
-	// acquire the lock
 	d.mu.Lock()
-	// release the lock
 	defer d.mu.Unlock()
 
-	// first check whether the discovery provider has started
-	// avoid to re-register the discovery
 	if d.registered.Load() {
 		return discovery.ErrAlreadyRegistered
 	}
@@ -196,18 +179,15 @@ func (d *Discovery) Register() error {
 	subscriptionHandler := func(subj, reply string, msg *internalpb.NatsMessage) {
 		switch msg.GetMessageType() {
 		case internalpb.NatsMessageType_NATS_MESSAGE_TYPE_DEREGISTER:
-			// add logging information
 			d.logger.Infof("received an de-registration request from peer[name=%s, host=%s, port=%d]",
 				msg.GetName(), msg.GetHost(), msg.GetPort())
 		case internalpb.NatsMessageType_NATS_MESSAGE_TYPE_REGISTER:
-			// add logging information
 			d.logger.Infof("received an registration request from peer[name=%s, host=%s, port=%d]",
 				msg.GetName(), msg.GetHost(), msg.GetPort())
 		case internalpb.NatsMessageType_NATS_MESSAGE_TYPE_REQUEST:
-			// add logging information
 			d.logger.Infof("received an identification request from peer[name=%s, host=%s, port=%d]",
 				msg.GetName(), msg.GetHost(), msg.GetPort())
-			// send the reply
+
 			replyMessage := &internalpb.NatsMessage{
 				Host:        d.hostNode.Host,
 				Port:        int32(d.hostNode.GossipPort),
@@ -215,23 +195,19 @@ func (d *Discovery) Register() error {
 				MessageType: internalpb.NatsMessageType_NATS_MESSAGE_TYPE_RESPONSE,
 			}
 
-			// send the reply and handle the error
 			if err := d.natsConnection.Publish(reply, replyMessage); err != nil {
 				d.logger.Errorf("failed to reply for identification request from peer[name=%s, host=%s, port=%d]",
 					msg.GetName(), msg.GetHost(), msg.GetPort())
 			}
 		}
 	}
-	// start listening to incoming messages
+
 	subscription, err := d.natsConnection.Subscribe(d.config.NatsSubject, subscriptionHandler)
-	// return any eventual error
 	if err != nil {
 		return err
 	}
 
-	// add the subscription to the list of subscriptions
 	d.subscriptions = append(d.subscriptions, subscription)
-	// set the registration flag to true
 	d.registered = atomic.NewBool(true)
 	return nil
 }
@@ -272,19 +248,16 @@ func (d *Discovery) Deregister() error {
 			MessageType: internalpb.NatsMessageType_NATS_MESSAGE_TYPE_DEREGISTER,
 		})
 	}
-	// set registered to false
+
 	d.registered.Store(false)
 	return nil
 }
 
 // SetConfig registers the underlying discovery configuration
 func (d *Discovery) SetConfig(config discovery.Config) error {
-	// acquire the lock
 	d.mu.Lock()
-	// release the lock
 	defer d.mu.Unlock()
 
-	// first check whether the discovery provider is running
 	if d.initialized.Load() {
 		return discovery.ErrAlreadyInitialized
 	}
@@ -294,17 +267,13 @@ func (d *Discovery) SetConfig(config discovery.Config) error {
 
 // DiscoverPeers returns a list of known nodes.
 func (d *Discovery) DiscoverPeers() ([]string, error) {
-	// acquire the lock
 	d.mu.Lock()
-	// release the lock
 	defer d.mu.Unlock()
 
-	// first check whether the discovery provider is running
 	if !d.initialized.Load() {
 		return nil, discovery.ErrNotInitialized
 	}
 
-	// later check the provider is registered
 	if !d.registered.Load() {
 		return nil, discovery.ErrNotRegistered
 	}
@@ -321,7 +290,6 @@ func (d *Discovery) DiscoverPeers() ([]string, error) {
 		return nil, err
 	}
 
-	// send registration request and return in case of error
 	if err = d.natsConnection.PublishRequest(d.config.NatsSubject, inbox, &internalpb.NatsMessage{
 		Host:        d.hostNode.Host,
 		Port:        int32(d.hostNode.GossipPort),
@@ -331,14 +299,10 @@ func (d *Discovery) DiscoverPeers() ([]string, error) {
 		return nil, err
 	}
 
-	// define the list of peers to lookup
 	var peers []string
-	// define the timeout
 	timeout := time.After(d.config.Timeout)
-	// get the host node gossip address
 	me := d.hostNode.GossipAddress()
 
-	// loop till we have enough nodes
 	for {
 		select {
 		case m, ok := <-recv:
@@ -349,17 +313,13 @@ func (d *Discovery) DiscoverPeers() ([]string, error) {
 
 			// get the found peer address
 			addr := net.JoinHostPort(m.GetHost(), strconv.Itoa(int(m.GetPort())))
-			// ignore this node
 			if addr == me {
-				// Ignore a reply from self
 				continue
 			}
 
-			// add the peer to the list of discovered peers
 			peers = append(peers, addr)
 
 		case <-timeout:
-			// close the receiving channel
 			_ = sub.Unsubscribe()
 			close(recv)
 		}
@@ -368,28 +328,20 @@ func (d *Discovery) DiscoverPeers() ([]string, error) {
 
 // Close closes the provider
 func (d *Discovery) Close() error {
-	// acquire the lock
 	d.mu.Lock()
-	// release the lock
 	defer d.mu.Unlock()
 
-	// set the initialized to false
 	d.initialized.Store(false)
 
 	if d.natsConnection != nil {
 		defer func() {
-			// close the underlying connection
 			d.natsConnection.Close()
 			d.natsConnection = nil
 		}()
 
-		// close all the subscriptions
 		for _, subscription := range d.subscriptions {
-			// when subscription is defined
 			if subscription != nil {
-				// check whether the subscription is active or not
 				if subscription.IsValid() {
-					// unsubscribe and return when there is an error
 					if err := subscription.Unsubscribe(); err != nil {
 						return err
 					}
@@ -397,7 +349,6 @@ func (d *Discovery) Close() error {
 			}
 		}
 
-		// flush all messages
 		return d.natsConnection.Flush()
 	}
 	return nil
@@ -405,34 +356,29 @@ func (d *Discovery) Close() error {
 
 // setConfig sets the kubernetes discoConfig
 func (d *Discovery) setConfig(config discovery.Config) (err error) {
-	// create an instance of option
 	option := new(discoConfig)
-	// extract the nats server address
+
 	option.NatsServer, err = config.GetString(NatsServer)
-	// handle the error in case the nats server value is not properly set
 	if err != nil {
 		return err
 	}
-	// extract the nats subject address
+
 	option.NatsSubject, err = config.GetString(NatsSubject)
-	// handle the error in case the nats subject value is not properly set
 	if err != nil {
 		return err
 	}
 
 	// extract the actor system name
 	option.ActorSystemName, err = config.GetString(ActorSystemName)
-	// handle the error in case the actor system name value is not properly set
 	if err != nil {
 		return err
 	}
-	// extract the application name
+
 	option.ApplicationName, err = config.GetString(ApplicationName)
-	// handle the error in case the application name value is not properly set
 	if err != nil {
 		return err
 	}
-	// in case none of the above extraction fails then set the option
+
 	d.config = option
 	return nil
 }
