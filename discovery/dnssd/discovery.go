@@ -65,7 +65,6 @@ var _ discovery.Provider = &Discovery{}
 
 // NewDiscovery returns an instance of the DNS discovery provider
 func NewDiscovery() *Discovery {
-	// create an instance of Discovery and return it
 	return &Discovery{
 		mu:          sync.Mutex{},
 		config:      &discoConfig{},
@@ -80,11 +79,8 @@ func (d *Discovery) ID() string {
 
 // Initialize initializes the plugin: registers some internal data structures, clients etc.
 func (d *Discovery) Initialize() error {
-	// acquire the lock
 	d.mu.Lock()
-	// release the lock
 	defer d.mu.Unlock()
-	// first check whether the discovery provider is running
 	if d.initialized.Load() {
 		return discovery.ErrAlreadyInitialized
 	}
@@ -94,89 +90,66 @@ func (d *Discovery) Initialize() error {
 
 // Register registers this node to a service discovery directory.
 func (d *Discovery) Register() error {
-	// acquire the lock
 	d.mu.Lock()
-	// release the lock
 	defer d.mu.Unlock()
 
-	// first check whether the discovery provider has started
-	// avoid to re-register the discovery
 	if d.initialized.Load() {
 		return discovery.ErrAlreadyRegistered
 	}
 
-	// set initialized
 	d.initialized = atomic.NewBool(true)
 	return nil
 }
 
 // Deregister removes this node from a service discovery directory.
 func (d *Discovery) Deregister() error {
-	// acquire the lock
 	d.mu.Lock()
-	// release the lock
 	defer d.mu.Unlock()
 
-	// first check whether the discovery provider has started
 	if !d.initialized.Load() {
 		return discovery.ErrNotInitialized
 	}
-	// set the initialized to false
 	d.initialized = atomic.NewBool(false)
-	// return
 	return nil
 }
 
 // SetConfig registers the underlying discovery configuration
 func (d *Discovery) SetConfig(config discovery.Config) error {
-	// acquire the lock
 	d.mu.Lock()
-	// release the lock
 	defer d.mu.Unlock()
 
-	// first check whether the discovery provider is running
 	if d.initialized.Load() {
 		return discovery.ErrAlreadyInitialized
 	}
 
-	// create an instance of option
 	discoConfig := new(discoConfig)
 	var err error
-	// extract the dns name
 	discoConfig.Domain, err = config.GetString(DomainName)
-	// handle the error
 	if err != nil {
 		return err
 	}
-	// make sure it is not empty
 	if discoConfig.Domain == "" {
 		return errors.New("dns name not set")
 	}
 
-	// extract the ipv6 option
 	discoConfig.IPv6, err = config.GetBool(IPv6)
-	// handle the error
 	if err != nil {
 		return err
 	}
-	// set the config
+
 	d.config = discoConfig
 	return nil
 }
 
 // DiscoverPeers returns a list of known nodes.
 func (d *Discovery) DiscoverPeers() ([]string, error) {
-	// acquire the lock
 	d.mu.Lock()
-	// release the lock
 	defer d.mu.Unlock()
 
-	// first check whether the discovery provider is running
 	if !d.initialized.Load() {
 		return nil, discovery.ErrNotInitialized
 	}
 
-	// create a context
 	ctx := context.Background()
 
 	// set ipv6 filter
@@ -190,35 +163,28 @@ func (d *Discovery) DiscoverPeers() ([]string, error) {
 
 	// only extract ipv6
 	if v6 {
-		// lookup the addresses based upon the dns name
 		ips, err := net.DefaultResolver.LookupIP(ctx, "ip6", d.config.Domain)
-		// handle the error
 		if err != nil {
 			return nil, err
 		}
-		// iterate the list of ips and add them to the list
+
 		for _, ip := range ips {
-			// add the ip string the peers
 			if !peers.Add(ip.String()) {
 				// return an error when fail to add to the list
 				return nil, errors.New("failed to retrieve addresses")
 			}
 		}
 
-		// return the list of peers
 		return peers.ToSlice(), nil
 	}
 
 	// lookup the addresses based upon the dns name
 	addrs, err := net.DefaultResolver.LookupIPAddr(ctx, d.config.Domain)
-	// handle the error
 	if err != nil {
 		return nil, err
 	}
 
-	// iterate the list of addresses
 	for _, addr := range addrs {
-		// add the ip string the peers
 		if !peers.Add(addr.IP.String()) {
 			// return an error when fail to add to the list
 			return nil, errors.New("failed to retrieve addresses")

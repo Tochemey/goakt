@@ -252,7 +252,6 @@ var _ PID = (*pid)(nil)
 
 // newPID creates a new pid
 func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption) (*pid, error) {
-	// create the actor PID
 	p := &pid{
 		Actor:              actor,
 		lastProcessingTime: atomic.Time{},
@@ -277,7 +276,6 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 		childrenCount:      atomic.NewInt64(0),
 	}
 
-	// set some of the defaults values
 	p.initMaxRetries.Store(DefaultInitMaxRetries)
 	p.shutdownTimeout.Store(DefaultShutdownTimeout)
 	p.lastProcessingDuration.Store(0)
@@ -289,56 +287,44 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 	p.traceEnabled.Store(false)
 	p.metricEnabled.Store(false)
 
-	// set the custom options to override the default values
 	for _, opt := range opts {
 		opt(p)
 	}
 
-	// set the default mailbox if mailbox is not set
 	if p.mailbox == nil {
 		p.mailbox = newReceiveContextBuffer(p.mailboxSize)
 	}
 
-	// set the stash buffer when capacity is set
 	if p.stashCapacity.Load() > 0 {
 		p.stashBuffer = newReceiveContextBuffer(p.stashCapacity.Load())
 	}
 
-	// set the actor behavior stack
 	behaviorStack := newBehaviorStack()
 	behaviorStack.Push(p.Receive)
 	p.behaviorStack = behaviorStack
 
-	// set the tracer when tracing is enabled
 	if p.traceEnabled.Load() {
 		p.tracer = p.telemetry.Tracer
 	}
 
-	// initialize the actor and init processing public
 	if err := p.init(ctx); err != nil {
 		return nil, err
 	}
 
-	// init processing messages
 	go p.receive()
 
-	// init the passivation listener loop iff passivation is set
 	if p.passivateAfter.Load() > 0 {
 		go p.passivationListener()
 	}
 
-	// register metrics. However, we don't panic when we fail to register
 	if p.metricEnabled.Load() {
 		if err := p.registerMetrics(); err != nil {
-			// return the error
 			return nil, errors.Wrapf(err, "failed to register actor=%s metrics", p.ActorPath().String())
 		}
 	}
 
-	// put the message context in the mailbox of the recipient actor that the actor has started
 	p.doReceive(newReceiveContext(ctx, NoSender, p, new(goaktpb.PostStart), true))
 
-	// return the actor reference
 	return p, nil
 }
 
@@ -349,19 +335,12 @@ func (p *pid) ActorHandle() Actor {
 
 // Child returns the named child actor if it is alive
 func (p *pid) Child(name string) (PID, error) {
-	// first check whether the actor is ready to stop another actor
 	if !p.IsRunning() {
 		return nil, ErrDead
 	}
-
-	// create the child actor path
 	childActorPath := NewPath(name, p.ActorPath().Address()).WithParent(p.ActorPath())
-
-	// check whether the child actor already exist and just return the PID
 	if cid, ok := p.children.Get(childActorPath); ok {
-		// increment the children count
 		p.childrenCount.Inc()
-		// return the child PID
 		return cid, nil
 	}
 	return nil, ErrActorNotFound(childActorPath.String())
@@ -373,7 +352,6 @@ func (p *pid) Children() []PID {
 	children := p.children.List()
 	p.rwMutex.RUnlock()
 
-	// create the list of alive children
 	cids := make([]PID, 0, len(children))
 	for _, child := range children {
 		if child.IsRunning() {
@@ -387,53 +365,38 @@ func (p *pid) Children() []PID {
 // Stop forces the child Actor under the given name to terminate after it finishes processing its current message.
 // Nothing happens if child is already stopped.
 func (p *pid) Stop(ctx context.Context, cid PID) error {
-	// start a tracing span
 	spanCtx, span := p.tracer.Start(ctx, "Stop")
-	// defer the closing of the span
 	defer span.End()
 
-	// first check whether the actor is ready to stop another actor
 	if !p.IsRunning() {
-		// let us record the error in the span
 		span.SetStatus(codes.Error, "Stop")
 		span.RecordError(ErrDead)
-		// return the error
 		return ErrDead
 	}
 
-	// check the pid is not nil
 	if cid == nil || cid == NoSender {
-		// let us record the error in the span
 		span.SetStatus(codes.Error, "Stop")
 		span.RecordError(ErrUndefinedActor)
-		// return the error
 		return ErrUndefinedActor
 	}
 
-	// grab the children thread-safely
 	p.rwMutex.RLock()
 	children := p.children
 	p.rwMutex.RUnlock()
 
-	// lookup the child actor and shut it down
 	if cid, ok := children.Get(cid.ActorPath()); ok {
-		// define the error description
 		desc := fmt.Sprintf("child.[%s] Shutdown", cid.ActorPath())
-		// stop the actor and record the error in the span
 		if err := cid.Shutdown(spanCtx); err != nil {
-			// let us record the error in the span
 			span.SetStatus(codes.Error, desc)
 			span.RecordError(err)
-			// return the error
 			return err
 		}
-		// set the status to ok
+
 		span.SetStatus(codes.Ok, desc)
 		return nil
 	}
-	// create an instance of error
+
 	err := ErrActorNotFound(cid.ActorPath().String())
-	// let us record the error in the span
 	span.SetStatus(codes.Error, "Stop")
 	span.RecordError(err)
 	return err
@@ -464,37 +427,25 @@ func (p *pid) ActorPath() *Path {
 // Restart restarts the actor.
 // During restart all messages that are in the mailbox and not yet processed will be ignored
 func (p *pid) Restart(ctx context.Context) error {
-	// start a tracing span
 	spanCtx, span := p.tracer.Start(ctx, "Restart")
-	// defer the closing of the span
 	defer span.End()
 
-	// first check whether we have an empty PID
 	if p == nil || p.ActorPath() == nil {
-		// let us record the error in the span
 		span.SetStatus(codes.Error, "Restart")
 		span.RecordError(ErrUndefinedActor)
-		// return the error
 		return ErrUndefinedActor
 	}
 
-	// add some debug logging
 	p.logger.Debugf("restarting actor=(%s)", p.actorPath.String())
 
-	// only restart the actor when the actor is running
 	if p.IsRunning() {
-		// shutdown the actor. no need to record the error
-		// because it is already recorded in the Shutdown
 		if err := p.Shutdown(spanCtx); err != nil {
 			return err
 		}
-		// wait a while for the shutdown process to complete
 		ticker := time.NewTicker(10 * time.Millisecond)
-		// create the ticker stop signal
 		tickerStopSig := make(chan types.Unit, 1)
 		go func() {
 			for range ticker.C {
-				// stop ticking once the actor is offline
 				if !p.IsRunning() {
 					tickerStopSig <- types.Unit{}
 					return
@@ -505,71 +456,52 @@ func (p *pid) Restart(ctx context.Context) error {
 		ticker.Stop()
 	}
 
-	// set the default mailbox if mailbox is not set
 	p.mailbox.Reset()
-	// reset the behavior
 	p.resetBehavior()
-	// initialize the actor
 	if err := p.init(spanCtx); err != nil {
 		return err
 	}
-	// init processing public
 	go p.receive()
-	// init the passivation listener loop iff passivation is set
 	if p.passivateAfter.Load() > 0 {
 		go p.passivationListener()
 	}
 
-	// successful restart
 	span.SetStatus(codes.Ok, "Restart")
-	// increment the restart count
 	p.restartCount.Inc()
-	// emit actor started event
+
 	if p.eventsStream != nil {
-		// send the event to the event streams
 		p.eventsStream.Publish(eventsTopic, &goaktpb.ActorRestarted{
 			Address:     p.ActorPath().RemoteAddress(),
 			RestartedAt: timestamppb.Now(),
 		})
 	}
-	// return
+
 	return nil
 }
 
 // SpawnChild creates a child actor and start watching it for error
 // When the given child actor already exists its PID will only be returned
 func (p *pid) SpawnChild(ctx context.Context, name string, actor Actor) (PID, error) {
-	// start a tracing span
 	spanCtx, span := p.tracer.Start(ctx, "SpawnChild")
-	// defer the closing of the span
 	defer span.End()
 
-	// first check whether the actor is ready to start another actor
 	if !p.IsRunning() {
-		// let us record the error in the span
 		span.SetStatus(codes.Error, "SpawnChild")
 		span.RecordError(ErrDead)
-		// return the error
 		return nil, ErrDead
 	}
 
-	// create the child actor path
 	childActorPath := NewPath(name, p.ActorPath().Address()).WithParent(p.ActorPath())
 
-	// grab the children thread-safely
 	p.rwMutex.RLock()
 	children := p.children
 	p.rwMutex.RUnlock()
 
-	// check whether the child actor already exist and just return the PID
-	// whenever a child actor exists it means it is live
 	if cid, ok := children.Get(childActorPath); ok {
 		return cid, nil
 	}
 
-	// acquire the lock
 	p.rwMutex.Lock()
-	// release the lock
 	defer p.rwMutex.Unlock()
 
 	// create the child actor options child inherit parent's options
@@ -588,97 +520,74 @@ func (p *pid) SpawnChild(ctx context.Context, name string, actor Actor) (PID, er
 		withShutdownTimeout(p.shutdownTimeout.Load()),
 	}
 
-	// set the tracing option
 	if p.traceEnabled.Load() {
 		opts = append(opts, withTracing())
 	}
 
-	// set the pid metric option
 	if p.metricEnabled.Load() {
 		opts = append(opts, withMetric())
 	}
 
-	// create the child pid
 	cid, err := newPID(spanCtx,
 		childActorPath,
 		actor,
 		opts...,
 	)
 
-	// handle the error
 	if err != nil {
-		// let us record the error in the span
 		span.SetStatus(codes.Error, "SpawnChild")
 		span.RecordError(err)
-		// return the error
 		return nil, err
 	}
 
-	// add the pid to the map
 	p.children.Set(cid)
-
-	// let us start watching it
 	p.Watch(cid)
 
-	// set the span status and return
 	span.SetStatus(codes.Ok, "SpawnChild")
 
-	// emit actor started event
 	if p.eventsStream != nil {
-		// send the event to the event streams
 		p.eventsStream.Publish(eventsTopic, &goaktpb.ActorChildCreated{
 			Address:   cid.ActorPath().RemoteAddress(),
 			CreatedAt: timestamppb.Now(),
 			Parent:    p.ActorPath().RemoteAddress(),
 		})
 	}
+
 	return cid, nil
 }
 
 // StashSize returns the stash buffer size
 func (p *pid) StashSize() uint64 {
-	// avoid panic in case stash is not enabled
 	if p.stashBuffer == nil {
 		return 0
 	}
-	// return the stash buffer size
 	return p.stashBuffer.Size()
 }
 
 // Ask sends a synchronous message to another actor and expect a response.
 // This block until a response is received or timed out.
 func (p *pid) Ask(ctx context.Context, to PID, message proto.Message) (response proto.Message, err error) {
-	// start a tracing span
 	spanCtx, span := p.tracer.Start(ctx, "Ask")
-	// defer the closing of the span
 	defer span.End()
 
-	// make sure the actor is live
 	if !to.IsRunning() {
-		// let us record the error in the span
 		span.SetStatus(codes.Error, "Ask")
 		span.RecordError(ErrDead)
-		// return the error
 		return nil, ErrDead
 	}
 
-	// create a message context
 	messageContext := newReceiveContext(spanCtx, p, to, message, false)
-	// put the message context in the mailbox of the recipient actor
 	to.doReceive(messageContext)
-	// await patiently to receive the response from the actor
+
 	for await := time.After(p.replyTimeout.Load()); ; {
 		select {
 		case response = <-messageContext.response:
-			// set the span status to Ok
 			span.SetStatus(codes.Ok, "Ask")
 			return
 		case <-await:
 			err = ErrRequestTimeout
-			// let us record the error in the span
 			span.SetStatus(codes.Error, "Ask")
 			span.RecordError(err)
-			// push the message as a deadletter
 			p.handleError(messageContext, err)
 			return nil, err
 		}
@@ -687,25 +596,18 @@ func (p *pid) Ask(ctx context.Context, to PID, message proto.Message) (response 
 
 // Tell sends an asynchronous message to another PID
 func (p *pid) Tell(ctx context.Context, to PID, message proto.Message) error {
-	// start a tracing span
 	spanCtx, span := p.tracer.Start(ctx, "Tell")
-	// defer the closing of the span
 	defer span.End()
 
-	// make sure the recipient actor is live
 	if !to.IsRunning() {
-		// let us record the error in the span
 		span.SetStatus(codes.Error, "Tell")
 		span.RecordError(ErrDead)
-		// return the error
 		return ErrDead
 	}
-	// create a message context
+
 	messageContext := newReceiveContext(spanCtx, p, to, message, true)
-	// put the message context in the mailbox of the recipient actor
 	to.doReceive(messageContext)
 
-	// set the status to OK and return
 	span.SetStatus(codes.Ok, "Tell")
 	return nil
 }
@@ -715,37 +617,26 @@ func (p *pid) Tell(ctx context.Context, to PID, message proto.Message) error {
 // This is a design choice to follow the simple principle of one message at a time processing by actors.
 // When BatchTell encounter a single message it will fall back to a Tell call.
 func (p *pid) BatchTell(ctx context.Context, to PID, messages ...proto.Message) error {
-	// start a tracing span
 	spanCtx, span := p.tracer.Start(ctx, "BatchTell")
-	// defer the closing of the span
 	defer span.End()
 
-	// make sure the recipient actor is live
 	if !to.IsRunning() {
-		// let us record the error in the span
 		span.SetStatus(codes.Error, "BatchTell")
 		span.RecordError(ErrDead)
-		// return the error
 		return ErrDead
 	}
 
-	// first check whether we need to fall back to a Tell
 	if len(messages) == 1 {
 		// no need to record span error here because Tell handles it
 		return p.Tell(spanCtx, to, messages[0])
 	}
 
-	// let us process the messages one after the other
 	for i := 0; i < len(messages); i++ {
-		// grab the message at index i
 		message := messages[i]
-		// create a message context
 		messageContext := newReceiveContext(ctx, p, to, message, true)
-		// push the message to the actor mailbox
 		to.doReceive(messageContext)
 	}
 
-	// set the span status and return
 	span.SetStatus(codes.Ok, "BatchTell")
 	return nil
 }
@@ -754,33 +645,21 @@ func (p *pid) BatchTell(ctx context.Context, to PID, messages ...proto.Message) 
 // The messages will be processed one after the other in the order they are sent.
 // This is a design choice to follow the simple principle of one message at a time processing by actors.
 func (p *pid) BatchAsk(ctx context.Context, to PID, messages ...proto.Message) (responses chan proto.Message, err error) {
-	// start a tracing span
 	spanCtx, span := p.tracer.Start(ctx, "BatchAsk")
-	// defer the closing of the span
 	defer span.End()
 
-	// make sure the actor is live
 	if !to.IsRunning() {
-		// let us record the error in the span
 		span.SetStatus(codes.Error, "BatchAsk")
 		span.RecordError(ErrDead)
-		// return the error
 		return nil, ErrDead
 	}
 
-	// create a buffered channel to hold the responses
 	responses = make(chan proto.Message, len(messages))
-
-	// close the responses channel when done
 	defer close(responses)
 
-	// let us process the messages one after the other
 	for i := 0; i < len(messages); i++ {
-		// grab the message at index i
 		message := messages[i]
-		// create a message context
 		messageContext := newReceiveContext(spanCtx, p, to, message, false)
-		// push the message to the actor mailbox
 		to.doReceive(messageContext)
 
 		// await patiently to receive the response from the actor
@@ -788,19 +667,14 @@ func (p *pid) BatchAsk(ctx context.Context, to PID, messages ...proto.Message) (
 		for await := time.After(p.replyTimeout.Load()); ; {
 			select {
 			case resp := <-messageContext.response:
-				// send the response to the responses channel
 				responses <- resp
 				span.SetStatus(codes.Ok, "BatchAsk")
 				break timerLoop
 			case <-await:
-				// set the request timeout error
 				err = ErrRequestTimeout
-				// let us record the error in the span
 				span.SetStatus(codes.Error, "BatchAsk")
 				span.RecordError(err)
-				// push the message as a deadletter
 				p.handleError(messageContext, err)
-				// stop the whole processing
 				return nil, err
 			}
 		}
@@ -810,29 +684,24 @@ func (p *pid) BatchAsk(ctx context.Context, to PID, messages ...proto.Message) (
 
 // RemoteLookup look for an actor address on a remote node.
 func (p *pid) RemoteLookup(ctx context.Context, host string, port int, name string) (addr *goaktpb.Address, err error) {
-	// get the gRPC client connection options
 	clientConnectionOptions, err := p.getConnectionOptions()
-	// handle the error
 	if err != nil {
 		return nil, err
 	}
 
-	// create an instance of remote client service
 	remoteClient := internalpbconnect.NewRemotingServiceClient(
 		p.httpClient,
 		http.URL(host, port),
 		clientConnectionOptions...,
 	)
 
-	// prepare the request to send
 	request := connect.NewRequest(&internalpb.RemoteLookupRequest{
 		Host: host,
 		Port: int32(port),
 		Name: name,
 	})
-	// send the message and handle the error in case there is any
+
 	response, err := remoteClient.RemoteLookup(ctx, request)
-	// we know the error will always be a grpc error
 	if err != nil {
 		code := connect.CodeOf(err)
 		if code == connect.CodeNotFound {
@@ -840,33 +709,28 @@ func (p *pid) RemoteLookup(ctx context.Context, host string, port int, name stri
 		}
 		return nil, err
 	}
-	// return the response
+
 	return response.Msg.GetAddress(), nil
 }
 
 // RemoteTell sends a message to an actor remotely without expecting any reply
 func (p *pid) RemoteTell(ctx context.Context, to *goaktpb.Address, message proto.Message) error {
-	// marshal the message
 	marshaled, err := anypb.New(message)
 	if err != nil {
 		return err
 	}
 
-	// get the gRPC client connection options
 	clientConnectionOptions, err := p.getConnectionOptions()
-	// handle the error
 	if err != nil {
 		return err
 	}
 
-	// create an instance of remote client service
 	remoteClient := internalpbconnect.NewRemotingServiceClient(
 		p.httpClient,
 		http.URL(to.GetHost(), int(to.GetPort())),
 		clientConnectionOptions...,
 	)
 
-	// construct the from address
 	sender := &goaktpb.Address{
 		Host: p.ActorPath().Address().Host(),
 		Port: int32(p.ActorPath().Address().Port()),
@@ -874,7 +738,6 @@ func (p *pid) RemoteTell(ctx context.Context, to *goaktpb.Address, message proto
 		Id:   p.ActorPath().ID().String(),
 	}
 
-	// prepare the rpcRequest to send
 	request := connect.NewRequest(&internalpb.RemoteTellRequest{
 		RemoteMessage: &internalpb.RemoteMessage{
 			Sender:   sender,
@@ -883,47 +746,38 @@ func (p *pid) RemoteTell(ctx context.Context, to *goaktpb.Address, message proto
 		},
 	})
 
-	// add some debug logging
 	p.logger.Debugf("sending a message to remote=(%s:%d)", to.GetHost(), to.GetPort())
 
-	// send the message and handle the error in case there is any
 	if _, err := remoteClient.RemoteTell(ctx, request); err != nil {
 		p.logger.Error(errors.Wrapf(err, "failed to send message to remote=(%s:%d)", to.GetHost(), to.GetPort()))
 		return err
 	}
 
-	// add some debug logging
 	p.logger.Debugf("message successfully sent to remote=(%s:%d)", to.GetHost(), to.GetPort())
 	return nil
 }
 
 // RemoteAsk sends a synchronous message to another actor remotely and expect a response.
 func (p *pid) RemoteAsk(ctx context.Context, to *goaktpb.Address, message proto.Message) (response *anypb.Any, err error) {
-	// marshal the message
 	marshaled, err := anypb.New(message)
 	if err != nil {
 		return nil, err
 	}
 
-	// get the gRPC client connection options
 	clientConnectionOptions, err := p.getConnectionOptions()
-	// handle the error
 	if err != nil {
 		return nil, err
 	}
 
-	// create an instance of remote client service
 	remoteClient := internalpbconnect.NewRemotingServiceClient(
 		p.httpClient,
 		http.URL(to.GetHost(), int(to.GetPort())),
 		clientConnectionOptions...,
 	)
 
-	// create the sender path
 	senderPath := p.ActorPath()
 	senderAddress := senderPath.Address()
 
-	// construct the from address
 	sender := &goaktpb.Address{
 		Host: senderAddress.Host(),
 		Port: int32(senderAddress.Port()),
@@ -931,7 +785,6 @@ func (p *pid) RemoteAsk(ctx context.Context, to *goaktpb.Address, message proto.
 		Id:   senderPath.ID().String(),
 	}
 
-	// prepare the rpcRequest to send
 	rpcRequest := connect.NewRequest(
 		&internalpb.RemoteAskRequest{
 			RemoteMessage: &internalpb.RemoteMessage{
@@ -940,9 +793,8 @@ func (p *pid) RemoteAsk(ctx context.Context, to *goaktpb.Address, message proto.
 				Message:  marshaled,
 			},
 		})
-	// send the request
+
 	rpcResponse, rpcErr := remoteClient.RemoteAsk(ctx, rpcRequest)
-	// handle the error
 	if rpcErr != nil {
 		return nil, rpcErr
 	}
@@ -953,30 +805,22 @@ func (p *pid) RemoteAsk(ctx context.Context, to *goaktpb.Address, message proto.
 // RemoteBatchTell sends a batch of messages to a remote actor in a way fire-and-forget manner
 // Messages are processed one after the other in the order they are sent.
 func (p *pid) RemoteBatchTell(ctx context.Context, to *goaktpb.Address, messages ...proto.Message) error {
-	// first check whether we need to fall back to a Tell
 	if len(messages) == 1 {
 		return p.RemoteTell(ctx, to, messages[0])
 	}
 
-	// define a variable holding the remote messages
 	var remoteMessages []*anypb.Any
-	// iterate the list of messages and pack them
 	for _, message := range messages {
-		// let us pack it
 		packed, err := anypb.New(message)
-		// handle the error
 		if err != nil {
 			return ErrInvalidRemoteMessage(err)
 		}
-		// add it to the list of remote messages
 		remoteMessages = append(remoteMessages, packed)
 	}
 
-	// create the sender path
 	senderPath := p.ActorPath()
 	senderAddress := senderPath.Address()
 
-	// construct the from address
 	sender := &goaktpb.Address{
 		Host: senderAddress.Host(),
 		Port: int32(senderAddress.Port()),
@@ -984,28 +828,23 @@ func (p *pid) RemoteBatchTell(ctx context.Context, to *goaktpb.Address, messages
 		Id:   senderPath.ID().String(),
 	}
 
-	// get the gRPC client connection options
 	clientConnectionOptions, err := p.getConnectionOptions()
-	// handle the error
 	if err != nil {
 		return err
 	}
 
-	// create an instance of remote client service
 	remoteClient := internalpbconnect.NewRemotingServiceClient(
 		http.NewClient(),
 		http.URL(to.GetHost(), int(to.GetPort())),
 		clientConnectionOptions...,
 	)
 
-	// prepare the remote batch tell request
 	request := connect.NewRequest(&internalpb.RemoteBatchTellRequest{
 		Messages: remoteMessages,
 		Sender:   sender,
 		Receiver: to,
 	})
 
-	// send the message and handle the error in case there is any
 	if _, err := remoteClient.RemoteBatchTell(ctx, request); err != nil {
 		return err
 	}
@@ -1016,25 +855,18 @@ func (p *pid) RemoteBatchTell(ctx context.Context, to *goaktpb.Address, messages
 // Messages are processed one after the other in the order they are sent.
 // This can hinder performance if it is not properly used.
 func (p *pid) RemoteBatchAsk(ctx context.Context, to *goaktpb.Address, messages ...proto.Message) (responses []*anypb.Any, err error) {
-	// define a variable holding the remote messages
 	var remoteMessages []*anypb.Any
-	// iterate the list of messages and pack them
 	for _, message := range messages {
-		// let us pack it
 		packed, err := anypb.New(message)
-		// handle the error
 		if err != nil {
 			return nil, ErrInvalidRemoteMessage(err)
 		}
-		// add it to the list of remote messages
 		remoteMessages = append(remoteMessages, packed)
 	}
 
-	// create the sender path
 	senderPath := p.ActorPath()
 	senderAddress := senderPath.Address()
 
-	// construct the from address
 	sender := &goaktpb.Address{
 		Host: senderAddress.Host(),
 		Port: int32(senderAddress.Port()),
@@ -1042,70 +874,57 @@ func (p *pid) RemoteBatchAsk(ctx context.Context, to *goaktpb.Address, messages 
 		Id:   senderPath.ID().String(),
 	}
 
-	// get the gRPC client connection options
 	clientConnectionOptions, err := p.getConnectionOptions()
-	// handle the error
 	if err != nil {
 		return nil, err
 	}
 
-	// create an instance of remote client service
 	remoteClient := internalpbconnect.NewRemotingServiceClient(
 		http.NewClient(),
 		http.URL(to.GetHost(), int(to.GetPort())),
 		clientConnectionOptions...,
 	)
 
-	// prepare the remote batch tell request
 	request := connect.NewRequest(&internalpb.RemoteBatchAskRequest{
 		Messages: remoteMessages,
 		Sender:   sender,
 		Receiver: to,
 	})
-	// send the message and handle the error in case there is any
+
 	response, err := remoteClient.RemoteBatchAsk(ctx, request)
-	// handle the error
 	if err != nil {
 		return nil, err
 	}
-	// return the responses
 	return response.Msg.GetMessages(), nil
 }
 
 // RemoteReSpawn restarts an actor on a remote node.
 func (p *pid) RemoteReSpawn(ctx context.Context, host string, port int, name string) error {
-	// get the gRPC client connection options
 	clientConnectionOptions, err := p.getConnectionOptions()
-	// handle the error
 	if err != nil {
 		return err
 	}
 
-	// create an instance of remote client service
 	remoteClient := internalpbconnect.NewRemotingServiceClient(
 		p.httpClient,
 		http.URL(host, port),
 		clientConnectionOptions...,
 	)
 
-	// prepare the request to send
 	request := connect.NewRequest(&internalpb.RemoteReSpawnRequest{
 		Host: host,
 		Port: int32(port),
 		Name: name,
 	})
 
-	// send the message and handle the error in case there is any
-	_, err = remoteClient.RemoteReSpawn(ctx, request)
-	// we know the error will always be a grpc error
-	if err != nil {
+	if _, err = remoteClient.RemoteReSpawn(ctx, request); err != nil {
 		code := connect.CodeOf(err)
 		if code == connect.CodeNotFound {
 			return nil
 		}
 		return err
 	}
-	// return the response
+
 	return nil
 }
 
@@ -1113,43 +932,31 @@ func (p *pid) RemoteReSpawn(ctx context.Context, host string, port int, name str
 // All current messages in the mailbox will be processed before the actor shutdown after a period of time
 // that can be configured. All child actors will be gracefully shutdown.
 func (p *pid) Shutdown(ctx context.Context) error {
-	// start a tracing span
 	spanCtx, span := p.tracer.Start(ctx, "Shutdown")
-	// defer the closing of the span
 	defer span.End()
 
-	// acquire the shutdown lock
 	p.stopMutex.Lock()
-	// release the lock
 	defer p.stopMutex.Unlock()
 
 	p.logger.Info("Shutdown process has started...")
 
-	// check whether the actor is still alive. Maybe it has been passivated already
 	if !p.isRunning.Load() {
 		p.logger.Infof("Actor=%s is offline. Maybe it has been passivated or stopped already", p.ActorPath().String())
-		// set the span status to Ok
 		span.SetStatus(codes.Ok, "Shutdown")
-		// return
 		return nil
 	}
 
-	// stop the passivation listener
 	if p.passivateAfter.Load() > 0 {
-		// add some debug logging
 		p.logger.Debug("sending a signal to stop passivation listener....")
 		p.haltPassivationLnr <- types.Unit{}
 	}
 
-	// stop the actor. No need to record span error here
 	if err := p.doStop(spanCtx); err != nil {
 		p.logger.Errorf("failed to stop actor=(%s)", p.ActorPath().String())
 		return err
 	}
 
-	// emit actor stopped event
 	if p.eventsStream != nil {
-		// send the event to the event streams
 		p.eventsStream.Publish(eventsTopic, &goaktpb.ActorStopped{
 			Address:   p.ActorPath().RemoteAddress(),
 			StoppedAt: timestamppb.Now(),
@@ -1163,29 +970,21 @@ func (p *pid) Shutdown(ctx context.Context) error {
 
 // Watch a pid for errors, and send on the returned channel if an error occurred
 func (p *pid) Watch(cid PID) {
-	// create a watcher
 	w := &watcher{
 		WatcherID: p,
 		ErrChan:   make(chan error, 1),
 		Done:      make(chan types.Unit, 1),
 	}
-	// add the watcher to the list of watchMen
 	cid.watchers().Append(w)
-	// supervise the PID
 	go p.supervise(cid, w)
 }
 
 // UnWatch stops watching a given actor
 func (p *pid) UnWatch(pid PID) {
-	// iterate the watchMen list
 	for item := range pid.watchers().Iter() {
-		// grab the item value
 		w := item.Value
-		// locate the given watcher
 		if w.WatcherID.ActorPath().Equal(p.ActorPath()) {
-			// stop the watching go routine
 			w.Done <- types.Unit{}
-			// remove the watcher from the list
 			pid.watchers().Delete(item.Index)
 			break
 		}
@@ -1199,25 +998,19 @@ func (p *pid) watchers() *slices.ConcurrentSlice[*watcher] {
 
 // doReceive pushes a given message to the actor receiveContextBuffer
 func (p *pid) doReceive(ctx ReceiveContext) {
-	// acquire the lock and release it once done
 	p.rwMutex.Lock()
 	defer p.rwMutex.Unlock()
 
-	// set the last processing time
 	p.lastProcessingTime.Store(time.Now())
 
-	// set the start processing time
 	startTime := time.Now()
 	defer func() {
 		duration := time.Since(startTime)
 		p.lastProcessingDuration.Store(duration)
 	}()
 
-	// push the message to the actor mailbox
 	if err := p.mailbox.Push(ctx); err != nil {
-		// add a warning log because the mailbox is full and do nothing
 		p.logger.Warn(err)
-		// push the message as a deadletter
 		p.handleError(ctx, err)
 		return
 	}
@@ -1226,54 +1019,43 @@ func (p *pid) doReceive(ctx ReceiveContext) {
 // init initializes the given actor and init processing messages
 // when the initialization failed the actor will not be started
 func (p *pid) init(ctx context.Context) error {
-	// start a tracing span
 	spanCtx, span := p.tracer.Start(ctx, "Init")
-	// defer the closing of the span
 	defer span.End()
 
-	// add some logging info
 	p.logger.Info("Initialization process has started...")
-	// create a context to handle the start timeout
+
 	cancelCtx, cancel := context.WithTimeout(spanCtx, p.initTimeout.Load())
-	// cancel the context when done
 	defer cancel()
+
 	// create a new retrier that will try a maximum of `initMaxRetries` times, with
 	// an initial delay of 100 ms and a maximum delay of 1 second
 	retrier := retry.NewRetrier(int(p.initMaxRetries.Load()), 100*time.Millisecond, time.Second)
-	// init the actor initialization receive
-	err := retrier.RunContext(cancelCtx, p.Actor.PreStart)
-	// handle backoff error
-	if err != nil {
-		// create the error
+	if err := retrier.RunContext(cancelCtx, p.Actor.PreStart); err != nil {
 		e := ErrInitFailure(err)
-		// let us record the error in the span
 		span.SetStatus(codes.Error, "Init")
 		span.RecordError(e)
-		// return the error
 		return e
 	}
-	// set the actor is ready
+
 	p.rwMutex.Lock()
 	p.isRunning.Store(true)
 	p.rwMutex.Unlock()
-	// add some logging info
+
 	p.logger.Info("Initialization process successfully completed.")
 	span.SetStatus(codes.Ok, "Init")
-	// emit actor started event
+
 	if p.eventsStream != nil {
-		// send the event to the event streams
 		p.eventsStream.Publish(eventsTopic, &goaktpb.ActorStarted{
 			Address:   p.ActorPath().RemoteAddress(),
 			StartedAt: timestamppb.Now(),
 		})
 	}
-	// return safely
+
 	return nil
 }
 
 // reset re-initializes the actor PID
 func (p *pid) reset() {
-	// reset the various settings of the PID
 	p.lastProcessingTime = atomic.Time{}
 	p.passivateAfter.Store(DefaultPassivationTimeout)
 	p.replyTimeout.Store(DefaultReplyTimeout)
@@ -1284,13 +1066,9 @@ func (p *pid) reset() {
 	p.children = newPIDMap(10)
 	p.watchersList = slices.NewConcurrentSlice[*watcher]()
 	p.telemetry = telemetry.New()
-	// reset the mailbox
 	p.mailbox.Reset()
-	// reset the behavior stack
 	p.resetBehavior()
-	// re-register metric when metric is enabled
 	if p.metricEnabled.Load() {
-		// log the error but don't panic
 		if err := p.registerMetrics(); err != nil {
 			p.logger.Error(errors.Wrapf(err, "failed to register actor=%s metrics", p.ActorPath().String()))
 		}
@@ -1300,23 +1078,15 @@ func (p *pid) reset() {
 func (p *pid) freeWatchers(ctx context.Context) {
 	p.logger.Debug("freeing all watcher actors...")
 
-	// grab the actor watchers
 	watchers := p.watchers()
 	if watchers.Len() > 0 {
-		// iterate the list of watchers
 		for item := range watchers.Iter() {
-			// grab the item value
 			watcher := item.Value
-			// notified the watcher with the Terminated message
 			terminated := &goaktpb.Terminated{}
-			// only send the parent actor when it is running
 			if watcher.WatcherID.IsRunning() {
-				// send the notification the watcher
 				// TODO: handle error and push to some system dead-letters queue
 				_ = p.Tell(ctx, watcher.WatcherID, terminated)
-				// unwatch the child actor
 				watcher.WatcherID.UnWatch(p)
-				// remove the actor from the list of watcher's children
 				watcher.WatcherID.removeChild(p)
 			}
 		}
@@ -1326,13 +1096,9 @@ func (p *pid) freeWatchers(ctx context.Context) {
 func (p *pid) freeChildren(ctx context.Context) {
 	p.logger.Debug("freeing all child actors...")
 
-	// iterate the child actors and shut them down
 	for _, child := range p.Children() {
-		// unwatch the child
 		p.UnWatch(child)
-		// remove the child from the list
 		p.children.Delete(child.ActorPath())
-		// stop the child actor
 		if err := child.Shutdown(ctx); err != nil {
 			p.logger.Panic(err)
 		}
@@ -1341,7 +1107,6 @@ func (p *pid) freeChildren(ctx context.Context) {
 
 // receive handles every mail in the actor receiveContextBuffer
 func (p *pid) receive() {
-	// run the processing loop
 	for {
 		select {
 		case <-p.shutdownSignal:
@@ -1351,7 +1116,7 @@ func (p *pid) receive() {
 			if !ok {
 				return
 			}
-			// switch on the type of message
+
 			switch received.Message().(type) {
 			case *goaktpb.PoisonPill:
 				// stop the actor
@@ -1364,12 +1129,9 @@ func (p *pid) receive() {
 }
 
 func (p *pid) handleReceived(received ReceiveContext) {
-	// recover from a panic attack
 	defer func() {
 		if r := recover(); r != nil {
-			// construct the error to return
 			err := fmt.Errorf("%s", r)
-			// send the error to the watchMen
 			for item := range p.watchersList.Iter() {
 				item.Value.ErrChan <- err
 			}
@@ -1392,11 +1154,8 @@ func (p *pid) supervise(cid PID, watcher *watcher) {
 			p.logger.Errorf("child actor=(%s) is failing: Err=%v", cid.ActorPath().String(), err)
 			switch p.supervisorStrategy {
 			case StopDirective:
-				// unwatch the given actor
 				p.UnWatch(cid)
-				// remove the actor from the children map
 				p.children.Delete(cid.ActorPath())
-				// shutdown the actor and panic in case of error
 				if err := cid.Shutdown(context.Background()); err != nil {
 					// this can enter into some infinite loop if we panic
 					// since we are just shutting down the actor we can just log the error
@@ -1404,20 +1163,14 @@ func (p *pid) supervise(cid PID, watcher *watcher) {
 					p.logger.Error(err)
 				}
 			case RestartDirective:
-				// unwatch the given actor
 				p.UnWatch(cid)
-				// restart the actor
 				if err := cid.Restart(context.Background()); err != nil {
 					p.logger.Panic(err)
 				}
-				// re-watch the actor
 				p.Watch(cid)
 			default:
-				// unwatch the given actor
 				p.UnWatch(cid)
-				// remove the actor from the children map
 				p.children.Delete(cid.ActorPath())
-				// shutdown the actor and panic in case of error
 				if err := cid.Shutdown(context.Background()); err != nil {
 					// this can enter into some infinite loop if we panic
 					// since we are just shutting down the actor we can just log the error
@@ -1433,10 +1186,8 @@ func (p *pid) supervise(cid PID, watcher *watcher) {
 // when the actor is idle, it automatically shuts down to free resources
 func (p *pid) passivationListener() {
 	p.logger.Info("start the passivation listener...")
-	// create the ticker
 	p.logger.Infof("passivation timeout is (%s)", p.passivateAfter.Load().String())
 	ticker := time.NewTicker(p.passivateAfter.Load())
-	// create the stop ticker signal
 	tickerStopSig := make(chan types.Unit, 1)
 
 	// start ticking
@@ -1444,59 +1195,44 @@ func (p *pid) passivationListener() {
 		for {
 			select {
 			case <-ticker.C:
-				// check whether the actor is idle or not
 				idleTime := time.Since(p.lastProcessingTime.Load())
-				// check whether the actor is idle
 				if idleTime >= p.passivateAfter.Load() {
-					// set the done channel to stop the ticker
 					tickerStopSig <- types.Unit{}
 					return
 				}
 			case <-p.haltPassivationLnr:
-				// set the done channel to stop the ticker
 				tickerStopSig <- types.Unit{}
 				return
 			}
 		}
 	}()
-	// wait for the stop signal to stop the ticker
-	<-tickerStopSig
 
-	// stop the ticker
+	<-tickerStopSig
 	ticker.Stop()
 
-	// only passivate when actor is alive
 	if !p.IsRunning() {
-		// add some logging info
 		p.logger.Infof("Actor=%s is offline. No need to passivate", p.ActorPath().String())
 		return
 	}
 
-	// acquire the shutdown lock
 	p.stopMutex.Lock()
-	// release the lock
 	defer p.stopMutex.Unlock()
 
-	// add some logging info
 	p.logger.Infof("Passivation mode has been triggered for actor=%s...", p.ActorPath().String())
 
-	// create a context
 	ctx := context.Background()
 
-	// stop the actor
 	if err := p.doStop(ctx); err != nil {
 		// TODO: rethink properly about PostStop error handling
 		p.logger.Errorf("failed to passivate actor=(%s): reason=(%v)", p.ActorPath().String(), err)
 		return
 	}
 
-	// emit actor passivated event
 	if p.eventsStream != nil {
 		event := &goaktpb.ActorPassivated{
 			Address:      p.ActorPath().RemoteAddress(),
 			PassivatedAt: timestamppb.Now(),
 		}
-		// send the event to the event streams
 		p.eventsStream.Publish(eventsTopic, event)
 	}
 
@@ -1536,22 +1272,16 @@ func (p *pid) unsetBehaviorStacked() {
 
 // doStop stops the actor
 func (p *pid) doStop(ctx context.Context) error {
-	// start a tracing span
 	spanCtx, span := p.tracer.Start(ctx, "doStop")
-	// defer the closing of the span
 	defer span.End()
 
-	// stop receiving and sending messages
 	p.isRunning.Store(false)
 
-	// let us unstash all messages in case there are some
 	// TODO: just signal stash processing done and ignore the messages or process them
 	for p.stashBuffer != nil && !p.stashBuffer.IsEmpty() {
 		if err := p.unstashAll(); err != nil {
-			// let us record the error in the span
 			span.SetStatus(codes.Error, "doStop")
 			span.RecordError(err)
-			// return the error
 			return err
 		}
 	}
@@ -1561,63 +1291,44 @@ func (p *pid) doStop(ctx context.Context) error {
 	// mailbox.
 	ticker := time.NewTicker(10 * time.Millisecond)
 	timer := time.After(p.shutdownTimeout.Load())
-	// create the ticker stop signal
 	tickerStopSig := make(chan types.Unit)
 	// start ticking
 	go func() {
 		for {
 			select {
 			case <-ticker.C:
-				// no more message to process
 				if p.mailbox.IsEmpty() {
-					// tell the ticker to stop
 					close(tickerStopSig)
 					return
 				}
 			case <-timer:
-				// tell the ticker to stop when timer is up
 				close(tickerStopSig)
 				return
 			}
 		}
 	}()
-	// listen to ticker stop signal
+
 	<-tickerStopSig
-
-	// signal we are shutting down to stop processing messages
 	p.shutdownSignal <- types.Unit{}
-
-	// close lingering http connections
 	p.httpClient.CloseIdleConnections()
-
-	// stop all the child actors
 	p.freeChildren(spanCtx)
-	// free the watchers
 	p.freeWatchers(spanCtx)
 
-	// add some logging
 	p.logger.Infof("Shutdown process is on going for actor=%s...", p.ActorPath().String())
-
-	// reset the actor
 	p.reset()
-
-	// perform some cleanup with the actor
 	return p.Actor.PostStop(spanCtx)
 }
 
 // removeChild helps remove child actor
 func (p *pid) removeChild(pid PID) {
-	// first check whether the actor is ready to stop another actor
 	if !p.IsRunning() {
 		return
 	}
 
-	// check the pid is not nil
 	if pid == nil || pid == NoSender {
 		return
 	}
 
-	// grab the actor path
 	path := pid.ActorPath()
 	if cid, ok := p.children.Get(path); ok {
 		if cid.IsRunning() {
@@ -1629,21 +1340,16 @@ func (p *pid) removeChild(pid PID) {
 
 // handleError handles the error during a message handling
 func (p *pid) handleError(receiveCtx ReceiveContext, err error) {
-	// only send to the stream when defined
 	if p.eventsStream == nil {
 		return
 	}
-	// marshal the message
 	msg, _ := anypb.New(receiveCtx.Message())
-	// grab the sender
 	var senderAddr *goaktpb.Address
 	if receiveCtx.Sender() != nil || receiveCtx.Sender() != NoSender {
 		senderAddr = receiveCtx.Sender().ActorPath().RemoteAddress()
 	}
 
-	// define the receiver
 	receiver := p.actorPath.RemoteAddress()
-	// create the deadletter
 	deadletter := &goaktpb.Deadletter{
 		Sender:   senderAddr,
 		Receiver: receiver,
@@ -1651,22 +1357,18 @@ func (p *pid) handleError(receiveCtx ReceiveContext, err error) {
 		SendTime: timestamppb.Now(),
 		Reason:   err.Error(),
 	}
-	// add to the events stream
+
 	p.eventsStream.Publish(eventsTopic, deadletter)
 }
 
 // registerMetrics register the PID metrics with OTel instrumentation.
 func (p *pid) registerMetrics() error {
-	// grab the OTel meter
 	meter := p.telemetry.Meter
-	// create an instance of the ActorMetrics
 	metrics, err := metric.NewActorMetric(meter)
-	// handle the error
 	if err != nil {
 		return err
 	}
 
-	// register the metrics
 	_, err = meter.RegisterCallback(func(ctx context.Context, observer otelmetric.Observer) error {
 		observer.ObserveInt64(metrics.ChildrenCount(), p.childrenCount.Load())
 		observer.ObserveInt64(metrics.StashCount(), int64(p.StashSize()))
@@ -1681,27 +1383,21 @@ func (p *pid) registerMetrics() error {
 
 // getConnectionOptions returns the gRPC client connections options
 func (p *pid) getConnectionOptions() ([]connect.ClientOption, error) {
-	// define a variable to hold the interceptor
 	var interceptor *otelconnect.Interceptor
 	var err error
-	// only set the observability when metric or trace is enabled
 	if p.metricEnabled.Load() || p.traceEnabled.Load() {
-		// create an interceptor and panic
 		interceptor, err = otelconnect.NewInterceptor(
 			otelconnect.WithTracerProvider(p.telemetry.TracerProvider),
 			otelconnect.WithMeterProvider(p.telemetry.MeterProvider))
-		// panic when there is an error
 		if err != nil {
 			return nil, errors.Wrap(err, "failed to initialize observability feature")
 		}
 	}
 
-	// create the handler option
 	clientConnectionOptions := []connect.ClientOption{
 		connect.WithGRPC(),
 	}
-	// add the grpc connection
-	// set handler options when interceptor is defined
+
 	if interceptor != nil {
 		clientConnectionOptions = append(clientConnectionOptions, connect.WithInterceptors(interceptor))
 	}

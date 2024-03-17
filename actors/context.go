@@ -297,9 +297,7 @@ func (c *receiveContext) Tell(to PID, message proto.Message) {
 	c.mu.Lock()
 	recipient := c.recipient
 	defer c.mu.Unlock()
-	// create a new context from the parent context
 	ctx := context.WithoutCancel(c.ctx)
-	// send the message to the recipient or let it crash
 	if err := recipient.Tell(ctx, to, message); err != nil {
 		panic(err)
 	}
@@ -313,9 +311,7 @@ func (c *receiveContext) BatchTell(to PID, messages ...proto.Message) {
 	c.mu.Lock()
 	recipient := c.recipient
 	defer c.mu.Unlock()
-	// create a new context from the parent context
 	ctx := context.WithoutCancel(c.ctx)
-	// send the message to the recipient or let it crash
 	if err := recipient.BatchTell(ctx, to, messages...); err != nil {
 		c.Err(err)
 	}
@@ -328,9 +324,7 @@ func (c *receiveContext) Ask(to PID, message proto.Message) (response proto.Mess
 	c.mu.Lock()
 	recipient := c.recipient
 	defer c.mu.Unlock()
-	// create a new context from the parent context
 	ctx := context.WithoutCancel(c.ctx)
-	// send the message to the recipient or let it crash
 	reply, err := recipient.Ask(ctx, to, message)
 	if err != nil {
 		c.Err(err)
@@ -345,9 +339,7 @@ func (c *receiveContext) BatchAsk(to PID, messages ...proto.Message) (responses 
 	c.mu.Lock()
 	recipient := c.recipient
 	defer c.mu.Unlock()
-	// create a new context from the parent context
 	ctx := context.WithoutCancel(c.ctx)
-	// send the message to the recipient or let it crash
 	reply, err := recipient.BatchAsk(ctx, to, messages...)
 	if err != nil {
 		c.Err(err)
@@ -360,9 +352,7 @@ func (c *receiveContext) RemoteTell(to *goaktpb.Address, message proto.Message) 
 	c.mu.Lock()
 	recipient := c.recipient
 	defer c.mu.Unlock()
-	// create a new context from the parent context
 	ctx := context.WithoutCancel(c.ctx)
-	// send the message to the recipient or let it crash
 	if err := recipient.RemoteTell(ctx, to, message); err != nil {
 		c.Err(err)
 	}
@@ -374,9 +364,7 @@ func (c *receiveContext) RemoteAsk(to *goaktpb.Address, message proto.Message) (
 	c.mu.Lock()
 	recipient := c.recipient
 	defer c.mu.Unlock()
-	// create a new context from the parent context
 	ctx := context.WithoutCancel(c.ctx)
-	// send the message to the recipient or let it crash
 	reply, err := recipient.RemoteAsk(ctx, to, message)
 	if err != nil {
 		c.Err(err)
@@ -390,9 +378,7 @@ func (c *receiveContext) RemoteBatchTell(to *goaktpb.Address, messages ...proto.
 	c.mu.Lock()
 	recipient := c.recipient
 	defer c.mu.Unlock()
-	// create a new context from the parent context
 	ctx := context.WithoutCancel(c.ctx)
-	// send the message to the recipient and let it crash
 	if err := recipient.RemoteBatchTell(ctx, to, messages...); err != nil {
 		c.Err(err)
 	}
@@ -405,9 +391,7 @@ func (c *receiveContext) RemoteBatchAsk(to *goaktpb.Address, messages ...proto.M
 	c.mu.Lock()
 	recipient := c.recipient
 	defer c.mu.Unlock()
-	// create a new context from the parent context
 	ctx := context.WithoutCancel(c.ctx)
-	// send the message to the recipient or let it crash
 	replies, err := recipient.RemoteBatchAsk(ctx, to, messages...)
 	if err != nil {
 		c.Err(err)
@@ -421,9 +405,7 @@ func (c *receiveContext) RemoteLookup(host string, port int, name string) (addr 
 	c.mu.Lock()
 	recipient := c.recipient
 	defer c.mu.Unlock()
-	// create a new context from the parent context
 	ctx := context.WithoutCancel(c.ctx)
-	// perform the lookup or let it crash
 	remoteAddr, err := recipient.RemoteLookup(ctx, host, port, name)
 	if err != nil {
 		c.Err(err)
@@ -438,7 +420,6 @@ func (c *receiveContext) Shutdown() {
 	c.mu.Lock()
 	recipient := c.recipient
 	defer c.mu.Unlock()
-	// create a new context from the parent context
 	ctx := context.WithoutCancel(c.ctx)
 	if err := recipient.Shutdown(ctx); err != nil {
 		c.Err(err)
@@ -450,9 +431,7 @@ func (c *receiveContext) Spawn(name string, actor Actor) PID {
 	c.mu.Lock()
 	recipient := c.recipient
 	defer c.mu.Unlock()
-	// create a new context from the parent context
 	ctx := context.WithoutCancel(c.ctx)
-	// create the child actor or let it crash
 	pid, err := recipient.SpawnChild(ctx, name, actor)
 	if err != nil {
 		c.Err(err)
@@ -485,7 +464,7 @@ func (c *receiveContext) Stop(child PID) {
 	c.mu.Lock()
 	recipient := c.recipient
 	defer c.mu.Unlock()
-	// create a new context from the parent context
+
 	ctx := context.WithoutCancel(c.ctx)
 	err := recipient.Stop(ctx, child)
 	if err != nil {
@@ -498,18 +477,13 @@ func (c *receiveContext) Stop(child PID) {
 // The message that is forwarded is the current message received by the received context.
 // This operation does nothing when the receiving actor is not running
 func (c *receiveContext) Forward(to PID) {
-	// grab the actual message
 	message := c.Message()
-	// grab the sender of the message
 	sender := c.Sender()
-	// forward the actual message
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	// only forward when the receiving actor is running
+
 	if to.IsRunning() {
-		// create a new context from the parent context
 		ctx := context.WithoutCancel(c.ctx)
-		// create a receiveContext
 		receiveContext := &receiveContext{
 			ctx:            ctx,
 			message:        message,
@@ -518,19 +492,15 @@ func (c *receiveContext) Forward(to PID) {
 			mu:             sync.Mutex{},
 			isAsyncMessage: false,
 		}
-		// forward the actual message
 		to.doReceive(receiveContext)
 	}
 }
 
 // Unhandled is used to handle unhandled messages instead of throwing error
 func (c *receiveContext) Unhandled() {
-	// acquire the lock
 	c.mu.Lock()
 	me := c.recipient
-	// release the lock
 	c.mu.Unlock()
-	// send the current message to deadletters
 	me.handleError(c, ErrUnhandled)
 }
 
@@ -539,7 +509,6 @@ func (c *receiveContext) RemoteReSpawn(host string, port int, name string) {
 	c.mu.Lock()
 	recipient := c.recipient
 	defer c.mu.Unlock()
-	// create a new context from the parent context
 	ctx := context.WithoutCancel(c.ctx)
 	err := recipient.RemoteReSpawn(ctx, host, port, name)
 	if err != nil {

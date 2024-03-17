@@ -95,18 +95,12 @@ func (r *registry) Register(name string, v any) {
 
 // GetType returns the type of object
 func (r *registry) GetType(v any) (reflect.Type, bool) {
-	// acquire the lock
 	r.mu.Lock()
-	// release the lock
 	defer r.mu.Unlock()
 
-	// grab the object type
 	elem := reflect.TypeOf(v).Elem()
-	// construct the qualified name
 	path := fmt.Sprintf("%s.%s", elem.PkgPath(), elem.Name())
-	// lookup the type in the typesLoader registry
 	t, ok := r.types[path]
-	// if ok return it
 	return t, ok
 }
 
