@@ -3,7 +3,7 @@ module github.com/tochemey/goakt
 go 1.21
 
 require (
-	connectrpc.com/connect v1.15.0
+	connectrpc.com/connect v1.16.0
 	connectrpc.com/otelconnect v0.7.0
 	github.com/buraksezer/olric v0.5.6-0.20240205222928-c5efb0d4b5ea
 	github.com/caarlos0/env/v10 v10.0.0
@@ -15,11 +15,11 @@ require (
 	github.com/grandcat/zeroconf v1.0.0
 	github.com/joho/godotenv v1.5.1
 	github.com/nats-io/nats-server/v2 v2.10.12
-	github.com/nats-io/nats.go v1.33.1
+	github.com/nats-io/nats.go v1.34.0
 	github.com/pkg/errors v0.9.1
 	github.com/prometheus/client_golang v1.19.0
 	github.com/redis/go-redis/v9 v9.5.1
-	github.com/reugn/go-quartz v0.11.1
+	github.com/reugn/go-quartz v0.11.2
 	github.com/spf13/cobra v1.8.0
 	github.com/stretchr/testify v1.9.0
 	github.com/travisjeffery/go-dynaport v1.0.0
