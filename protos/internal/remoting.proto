@@ -26,6 +26,8 @@ service RemotingService {
   rpc RemoteBatchAsk(RemoteBatchAskRequest) returns (RemoteBatchAskResponse);
   // RemoteReSpawn restarts an actor on a remote machine
   rpc RemoteReSpawn(RemoteReSpawnRequest) returns (RemoteReSpawnResponse);
+  // RemoteStop stops an actor on a remote machine
+  rpc RemoteStop(RemoteStopRequest) returns (RemoteStopResponse);
 }
 
 // RemoteAsk is used to send a message to an actor remotely and expect a response
@@ -111,3 +113,14 @@ message RemoteReSpawnRequest {
 }
 
 message RemoteReSpawnResponse {}
+
+message RemoteStopRequest {
+  // Specifies the remote host address
+  string host = 1;
+  // Specifies the remote port
+  int32 port = 2;
+  // Specifies the actor name
+  string name = 3;
+}
+
+message RemoteStopResponse {}
