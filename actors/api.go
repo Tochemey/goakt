@@ -320,7 +320,7 @@ func RemoteBatchAsk(ctx context.Context, to *goaktpb.Address, messages ...proto.
 	return response.Msg.GetMessages(), nil
 }
 
-// RemoteReSpawn restarts actor address on a remote node.
+// RemoteReSpawn restarts actor on a remote node.
 func RemoteReSpawn(ctx context.Context, host string, port int, name string) error {
 	interceptor, err := otelconnect.NewInterceptor()
 	if err != nil {
@@ -341,6 +341,37 @@ func RemoteReSpawn(ctx context.Context, host string, port int, name string) erro
 	})
 
 	if _, err = remoteClient.RemoteReSpawn(ctx, request); err != nil {
+		code := connect.CodeOf(err)
+		if code == connect.CodeNotFound {
+			return nil
+		}
+		return err
+	}
+
+	return nil
+}
+
+// RemoteStop stops an actor on a remote node.
+func RemoteStop(ctx context.Context, host string, port int, name string) error {
+	interceptor, err := otelconnect.NewInterceptor()
+	if err != nil {
+		return err
+	}
+
+	remoteClient := internalpbconnect.NewRemotingServiceClient(
+		http.NewClient(),
+		http.URL(host, port),
+		connect.WithInterceptors(interceptor),
+		connect.WithGRPC(),
+	)
+
+	request := connect.NewRequest(&internalpb.RemoteStopRequest{
+		Host: host,
+		Port: int32(port),
+		Name: name,
+	})
+
+	if _, err = remoteClient.RemoteStop(ctx, request); err != nil {
 		code := connect.CodeOf(err)
 		if code == connect.CodeNotFound {
 			return nil

@@ -235,6 +235,9 @@ creating the actor system. See actor system [options](./actors/option.go). These
 - `RemoteBatchAsk`: to send a bulk messages to a remote actor with replies
 - `RemoteLookup`: to lookup for an actor on a remote host
 - `RemoteReSpawn`: to restarts an actor on a remote machine
+- `RemoteStop`: to stop an actor on a remote machine
+
+These methods can be used from the [API](./actors/api.go) as well as from the [PID](./actors/pid.go) which is the actor reference when an actor is created.
 
 ### Cluster
 

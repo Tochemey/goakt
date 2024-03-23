@@ -971,9 +971,7 @@ func (x *actorSystem) RemoteReSpawn(ctx context.Context, request *connect.Reques
 	}
 
 	actorPath := NewPath(reqCopy.GetName(), NewAddress(x.Name(), reqCopy.GetHost(), int(reqCopy.GetPort())))
-
 	pid, exist := x.actors.Get(actorPath)
-
 	if !exist {
 		logger.Error(ErrAddressNotFound(actorPath.String()).Error())
 		return nil, ErrAddressNotFound(actorPath.String())
@@ -984,8 +982,32 @@ func (x *actorSystem) RemoteReSpawn(ctx context.Context, request *connect.Reques
 	}
 
 	x.actors.Set(pid)
-
 	return connect.NewResponse(new(internalpb.RemoteReSpawnResponse)), nil
+}
+
+// RemoteStop stops an actor on a remote machine
+func (x *actorSystem) RemoteStop(ctx context.Context, request *connect.Request[internalpb.RemoteStopRequest]) (*connect.Response[internalpb.RemoteStopResponse], error) {
+	logger := x.logger
+
+	reqCopy := request.Msg
+
+	if !x.remotingEnabled.Load() {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrRemotingDisabled)
+	}
+
+	actorPath := NewPath(reqCopy.GetName(), NewAddress(x.Name(), reqCopy.GetHost(), int(reqCopy.GetPort())))
+	pid, exist := x.actors.Get(actorPath)
+	if !exist {
+		logger.Error(ErrAddressNotFound(actorPath.String()).Error())
+		return nil, ErrAddressNotFound(actorPath.String())
+	}
+
+	if err := pid.Shutdown(ctx); err != nil {
+		return nil, errors.Wrapf(err, "failed to stop actor=%s", actorPath.String())
+	}
+
+	x.actors.Delete(actorPath)
+	return connect.NewResponse(new(internalpb.RemoteStopResponse)), nil
 }
 
 // handleRemoteAsk handles a synchronous message to another actor and expect a response.

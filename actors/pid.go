@@ -118,6 +118,8 @@ type PID interface {
 	RemoteLookup(ctx context.Context, host string, port int, name string) (addr *goaktpb.Address, err error)
 	// RemoteReSpawn restarts an actor on a remote node.
 	RemoteReSpawn(ctx context.Context, host string, port int, name string) error
+	// RemoteStop stops an actor on a remote node
+	RemoteStop(ctx context.Context, host string, port int, name string) error
 	// Children returns the list of all the children of the given actor that are still alive
 	// or an empty list.
 	Children() []PID
@@ -896,6 +898,36 @@ func (p *pid) RemoteBatchAsk(ctx context.Context, to *goaktpb.Address, messages 
 		return nil, err
 	}
 	return response.Msg.GetMessages(), nil
+}
+
+// RemoteStop stops an actor on a remote node
+func (p *pid) RemoteStop(ctx context.Context, host string, port int, name string) error {
+	clientConnectionOptions, err := p.getConnectionOptions()
+	if err != nil {
+		return err
+	}
+
+	remoteClient := internalpbconnect.NewRemotingServiceClient(
+		p.httpClient,
+		http.URL(host, port),
+		clientConnectionOptions...,
+	)
+
+	request := connect.NewRequest(&internalpb.RemoteStopRequest{
+		Host: host,
+		Port: int32(port),
+		Name: name,
+	})
+
+	if _, err = remoteClient.RemoteStop(ctx, request); err != nil {
+		code := connect.CodeOf(err)
+		if code == connect.CodeNotFound {
+			return nil
+		}
+		return err
+	}
+
+	return nil
 }
 
 // RemoteReSpawn restarts an actor on a remote node.

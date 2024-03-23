@@ -46,16 +46,14 @@ var (
 	ErrRequestTimeout = errors.New("request timed out")
 	// ErrRemotingDisabled is returned when remoting is not enabled
 	ErrRemotingDisabled = errors.New("remoting is not enabled")
-	// ErrInvalidNode is returned when the given actor system node is not the one requested
-	ErrInvalidNode = connect.NewError(connect.CodeFailedPrecondition, errors.New("invalid actor system node"))
+
 	// ErrAddressNotFound is returned when an actor address is not found
 	ErrAddressNotFound = func(addr string) error {
 		return connect.NewError(connect.CodeNotFound, fmt.Errorf("actor=%s not found", addr))
 	}
 	// ErrRemoteSendFailure is returned when remote message fails
 	ErrRemoteSendFailure = func(err error) error { return connect.NewError(connect.CodeInternal, err) }
-	// ErrInvalidActorInterface is returned when an actor does not implement the Actor interface
-	ErrInvalidActorInterface = errors.New("failed to create instance. Reason: instance does not implement the Actor interface")
+
 	// ErrInvalidInstance is returned when the creation of an actor instance fails
 	ErrInvalidInstance = errors.New("failed to create instance. Reason: invalid instance")
 	// ErrTypeNotFound is returned when an actor type is not found
