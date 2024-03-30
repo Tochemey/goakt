@@ -9,7 +9,7 @@ receivers:
 processors:
   batch:
 extensions:
-  health_check: { }
+  health_check: {}
 exporters:
   jaeger:
     endpoint: "tracer:14250"
@@ -21,13 +21,13 @@ exporters:
 
   logging:
 service:
-  extensions: [ health_check ]
+  extensions: [health_check]
   pipelines:
     traces:
-      receivers: [ otlp ]
-      processors: [ batch ]
-      exporters: [ jaeger ]
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [jaeger]
     metrics:
-      receivers: [ otlp ]
-      processors: [ batch ]
-      exporters: [ logging, prometheus ]
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [logging, prometheus]

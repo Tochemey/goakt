@@ -35,11 +35,6 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/spf13/cobra"
-	goakt "github.com/tochemey/goakt/actors"
-	"github.com/tochemey/goakt/discovery"
-	"github.com/tochemey/goakt/discovery/dnssd"
-	"github.com/tochemey/goakt/examples/actor-cluster/dnssd/service"
-	"github.com/tochemey/goakt/log"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/exporters/prometheus"
@@ -47,6 +42,12 @@ import (
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.21.0"
+
+	goakt "github.com/tochemey/goakt/actors"
+	"github.com/tochemey/goakt/discovery"
+	"github.com/tochemey/goakt/discovery/dnssd"
+	"github.com/tochemey/goakt/examples/actor-cluster/dnssd/service"
+	"github.com/tochemey/goakt/log"
 )
 
 func initTracer(ctx context.Context, traceURL string) {

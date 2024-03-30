@@ -56,7 +56,7 @@ services:
       - "55681:55681" # Legacy OTLP/HTTP Port
       - "55680:55679" # zpages extension
       - "8888:8888" # Prometheus metrics exposed by the collector
-      - "8889:8889"   # Prometheus exporter metrics
-      - "9411"  # Zipkin receiver
+      - "8889:8889" # Prometheus exporter metrics
+      - "9411" # Zipkin receiver
     volumes:
       - ./otel-collector.yaml:/etc/otel/config.yaml

@@ -34,9 +34,6 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	goakt "github.com/tochemey/goakt/actors"
-	samplepb "github.com/tochemey/goakt/examples/protos/samplepb"
-	"github.com/tochemey/goakt/log"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/prometheus"
 	"go.opentelemetry.io/otel/exporters/stdout/stdouttrace"
@@ -45,6 +42,10 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.21.0"
 	"go.uber.org/atomic"
+
+	goakt "github.com/tochemey/goakt/actors"
+	samplepb "github.com/tochemey/goakt/examples/protos/samplepb"
+	"github.com/tochemey/goakt/log"
 )
 
 var serviceName = semconv.ServiceNameKey.String("actor-observability")

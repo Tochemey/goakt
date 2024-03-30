@@ -1,5 +1,5 @@
 global:
-  scrape_interval:     15s
+  scrape_interval: 15s
   evaluation_interval: 15s
 
 rule_files:
@@ -10,10 +10,9 @@ scrape_configs:
   - job_name: prometheus
     scrape_interval: 5s
     static_configs:
-      - targets: [ 'localhost:9090' ]
+      - targets: ["localhost:9090"]
 
   - job_name: accounts
     scrape_interval: 5s
     static_configs:
-      - targets: ['accounts:9092']
-
+      - targets: ["accounts:9092"]

@@ -31,11 +31,12 @@ import (
 	"syscall"
 	"time"
 
+	"go.uber.org/atomic"
+
 	goakt "github.com/tochemey/goakt/actors"
 	samplepb "github.com/tochemey/goakt/examples/protos/samplepb"
 	"github.com/tochemey/goakt/goaktpb"
 	"github.com/tochemey/goakt/log"
-	"go.uber.org/atomic"
 )
 
 const (

@@ -46,7 +46,7 @@ spec:
       containers:
         - name: accounts
           image: "accounts:dev"
-          command: [ "./accounts", "run" ]
+          command: ["./accounts", "run"]
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 50051
@@ -84,23 +84,22 @@ spec:
               memory: "64Mi"
               cpu: "100m"
 ---
- apiVersion: v1
- kind: Service
- metadata:
-   name: accounts
-   labels:
-     app.kubernetes.io/name: accounts
-     app.kubernetes.io/component: accounts
-     app.kubernetes.io/part-of: AccountsSystem
- spec:
-   selector:
-     app.kubernetes.io/name: accounts
-     app.kubernetes.io/component: accounts
-     app.kubernetes.io/part-of: AccountsSystem
-   clusterIP: None
-   ports:
-     - protocol: TCP
-       port: 50051
-       targetPort: grpc
-       name: grpc
-
+apiVersion: v1
+kind: Service
+metadata:
+  name: accounts
+  labels:
+    app.kubernetes.io/name: accounts
+    app.kubernetes.io/component: accounts
+    app.kubernetes.io/part-of: AccountsSystem
+spec:
+  selector:
+    app.kubernetes.io/name: accounts
+    app.kubernetes.io/component: accounts
+    app.kubernetes.io/part-of: AccountsSystem
+  clusterIP: None
+  ports:
+    - protocol: TCP
+      port: 50051
+      targetPort: grpc
+      name: grpc
