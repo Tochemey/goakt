@@ -1464,6 +1464,15 @@ func (p *pid) handleError(receiveCtx ReceiveContext, err error) {
 	if p.eventsStream == nil {
 		return
 	}
+
+	// skip system messages
+	switch receiveCtx.Message().(type) {
+	case *goaktpb.PreStart, *goaktpb.PostStart, *goaktpb.PostStop:
+		return
+	default:
+		// pass through
+	}
+
 	msg, _ := anypb.New(receiveCtx.Message())
 	var senderAddr *goaktpb.Address
 	if receiveCtx.Sender() != nil || receiveCtx.Sender() != NoSender {

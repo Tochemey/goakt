@@ -45,6 +45,7 @@ import (
 
 	goakt "github.com/tochemey/goakt/actors"
 	samplepb "github.com/tochemey/goakt/examples/protos/samplepb"
+	"github.com/tochemey/goakt/goaktpb"
 	"github.com/tochemey/goakt/log"
 )
 
@@ -153,6 +154,7 @@ func (p *PingActor) PreStart(ctx context.Context) error {
 
 func (p *PingActor) Receive(ctx goakt.ReceiveContext) {
 	switch ctx.Message().(type) {
+	case *goaktpb.PostStart:
 	case *samplepb.Pong:
 		p.count.Inc()
 		// reply the sender in case there is a sender
@@ -186,6 +188,7 @@ func (p *PongActor) PreStart(ctx context.Context) error {
 
 func (p *PongActor) Receive(ctx goakt.ReceiveContext) {
 	switch ctx.Message().(type) {
+	case *goaktpb.PostStart:
 	case *samplepb.Ping:
 		p.count.Inc()
 		// reply the sender in case there is a sender

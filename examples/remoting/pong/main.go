@@ -34,6 +34,7 @@ import (
 
 	goakt "github.com/tochemey/goakt/actors"
 	samplepb "github.com/tochemey/goakt/examples/protos/samplepb"
+	"github.com/tochemey/goakt/goaktpb"
 	"github.com/tochemey/goakt/log"
 )
 
@@ -92,6 +93,7 @@ func (p *PongActor) PreStart(ctx context.Context) error {
 
 func (p *PongActor) Receive(ctx goakt.ReceiveContext) {
 	switch ctx.Message().(type) {
+	case *goaktpb.PostStart:
 	case *samplepb.Ping:
 		// reply the sender in case there is a sender
 		if ctx.RemoteSender() != goakt.RemoteNoSender {
@@ -103,12 +105,12 @@ func (p *PongActor) Receive(ctx goakt.ReceiveContext) {
 		}
 		p.count.Add(1)
 	default:
-		p.logger.Panic(goakt.ErrUnhandled)
+		ctx.Unhandled()
 	}
 }
 
 func (p *PongActor) PostStop(ctx context.Context) error {
 	p.logger.Info("About to stop")
-	p.logger.Infof("Processed=%d public", p.count.Load())
+	p.logger.Infof("Processed=%d messages", p.count.Load())
 	return nil
 }

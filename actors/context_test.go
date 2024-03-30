@@ -1291,6 +1291,68 @@ func TestReceiveContext(t *testing.T) {
 			context.Shutdown()
 		})
 	})
+
+	t.Run("With Unhandled with system messages", func(t *testing.T) {
+		ctx := context.TODO()
+		// create the deadletter stream
+		eventsStream := eventstream.New()
+
+		// create a consumer
+		consumer := eventsStream.AddSubscriber()
+		eventsStream.Subscribe(consumer, eventsTopic)
+
+		// create a Ping actor
+		opts := []pidOption{
+			withInitMaxRetries(1),
+			withCustomLogger(log.DiscardLogger),
+			withEventsStream(eventsStream),
+		}
+
+		// create actor1
+		actor1 := &exchanger{}
+		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
+		pid1, err := newPID(ctx, actorPath1, actor1, opts...)
+
+		require.NoError(t, err)
+		require.NotNil(t, pid1)
+
+		// create an instance of receive context
+		context := &receiveContext{
+			ctx:            ctx,
+			message:        new(goaktpb.PostStart),
+			sender:         NoSender,
+			recipient:      pid1,
+			mu:             sync.Mutex{},
+			isAsyncMessage: true,
+		}
+
+		// calling unhandled will push the current message to deadletters
+		context.Unhandled()
+
+		// wait for messages to be published
+		time.Sleep(time.Second)
+
+		var items []*goaktpb.Deadletter
+		for message := range consumer.Iterator() {
+			payload := message.Payload()
+			assert.Equal(t, eventsTopic, message.Topic())
+			deadletter, ok := payload.(*goaktpb.Deadletter)
+			if ok {
+				items = append(items, deadletter)
+			}
+		}
+
+		require.Empty(t, items)
+
+		assert.EqualValues(t, 1, len(consumer.Topics()))
+
+		t.Cleanup(func() {
+			// shutdown the consumer
+			consumer.Shutdown()
+			context.Shutdown()
+		})
+	})
+
 	t.Run("With successful BatchTell", func(t *testing.T) {
 		ctx := context.TODO()
 		// create a Ping actor

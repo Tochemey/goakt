@@ -32,6 +32,7 @@ import (
 
 	goakt "github.com/tochemey/goakt/actors"
 	samplepb "github.com/tochemey/goakt/examples/protos/samplepb"
+	"github.com/tochemey/goakt/goaktpb"
 	"github.com/tochemey/goakt/log"
 )
 
@@ -62,6 +63,7 @@ func (p *AccountEntity) PreStart(ctx context.Context) error {
 
 func (p *AccountEntity) Receive(ctx goakt.ReceiveContext) {
 	switch msg := ctx.Message().(type) {
+	case *goaktpb.PostStart:
 	case *samplepb.CreateAccount:
 		p.logger.Info("creating account by setting the balance...")
 		// check whether the create operation has been done already
@@ -105,7 +107,7 @@ func (p *AccountEntity) Receive(ctx goakt.ReceiveContext) {
 		})
 
 	default:
-		p.logger.Panic(goakt.ErrUnhandled)
+		ctx.Unhandled()
 	}
 }
 
