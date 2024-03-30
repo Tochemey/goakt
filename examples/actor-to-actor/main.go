@@ -159,7 +159,7 @@ func (p *PongActor) Receive(ctx goakt.ReceiveContext) {
 		_ = ctx.Self().Tell(ctx.Context(), ctx.Sender(), new(samplepb.Pong))
 		p.count.Add(1)
 	default:
-		p.logger.Panic(goakt.ErrUnhandled)
+		ctx.Unhandled()
 	}
 }
 

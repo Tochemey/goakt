@@ -105,6 +105,7 @@ func (p *PingActor) PreStart(ctx context.Context) error {
 
 func (p *PingActor) Receive(ctx goakt.ReceiveContext) {
 	switch ctx.Message().(type) {
+	case *goaktpb.PostStart:
 	case *samplepb.Pong:
 		// reply the sender in case there is a sender
 		if ctx.RemoteSender() != goakt.RemoteNoSender {
@@ -116,12 +117,12 @@ func (p *PingActor) Receive(ctx goakt.ReceiveContext) {
 		}
 		p.count.Add(1)
 	default:
-		p.logger.Panic(goakt.ErrUnhandled)
+		ctx.Unhandled()
 	}
 }
 
 func (p *PingActor) PostStop(ctx context.Context) error {
 	p.logger.Info("About to stop")
-	p.logger.Infof("Processed=%d address", p.count.Load())
+	p.logger.Infof("Processed=%d messages", p.count.Load())
 	return nil
 }
