@@ -30,12 +30,13 @@ import (
 
 	"connectrpc.com/connect"
 	"connectrpc.com/otelconnect"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/anypb"
+
 	"github.com/tochemey/goakt/goaktpb"
 	"github.com/tochemey/goakt/internal/http"
 	"github.com/tochemey/goakt/internal/internalpb"
 	"github.com/tochemey/goakt/internal/internalpb/internalpbconnect"
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/anypb"
 )
 
 // Ask sends a synchronous message to another actor and expect a response.
@@ -167,17 +168,30 @@ func RemoteTell(ctx context.Context, to *goaktpb.Address, message proto.Message)
 		connect.WithGRPC(),
 	)
 
-	request := connect.NewRequest(&internalpb.RemoteTellRequest{
+	request := &internalpb.RemoteTellRequest{
 		RemoteMessage: &internalpb.RemoteMessage{
 			Sender:   RemoteNoSender,
 			Receiver: to,
 			Message:  marshaled,
 		},
-	})
+	}
 
-	if _, err := remoteClient.RemoteTell(ctx, request); err != nil {
+	stream := remoteClient.RemoteTell(ctx)
+	if err := stream.Send(request); err != nil {
+		if IsEOF(err) {
+			if _, err := stream.CloseAndReceive(); err != nil {
+				return err
+			}
+			return nil
+		}
 		return err
 	}
+
+	// close the connection
+	if _, err := stream.CloseAndReceive(); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -193,27 +207,55 @@ func RemoteAsk(ctx context.Context, to *goaktpb.Address, message proto.Message) 
 		return nil, err
 	}
 
-	remoteClient := internalpbconnect.NewRemotingServiceClient(
+	remotingService := internalpbconnect.NewRemotingServiceClient(
 		http.NewClient(),
 		http.URL(to.GetHost(), int(to.GetPort())),
 		connect.WithInterceptors(interceptor),
 		connect.WithGRPC(),
 	)
 
-	rpcRequest := connect.NewRequest(&internalpb.RemoteAskRequest{
+	request := &internalpb.RemoteAskRequest{
 		RemoteMessage: &internalpb.RemoteMessage{
 			Sender:   RemoteNoSender,
 			Receiver: to,
 			Message:  marshaled,
 		},
-	})
+	}
+	stream := remotingService.RemoteAsk(ctx)
+	errc := make(chan error, 1)
 
-	rpcResponse, rpcErr := remoteClient.RemoteAsk(ctx, rpcRequest)
-	if rpcErr != nil {
-		return nil, rpcErr
+	go func() {
+		defer close(errc)
+		for {
+			resp, err := stream.Receive()
+			if err != nil {
+				errc <- err
+				return
+			}
+
+			response = resp.GetMessage()
+		}
+	}()
+
+	err = stream.Send(request)
+	if err != nil {
+		return nil, err
 	}
 
-	return rpcResponse.Msg.GetMessage(), nil
+	if err := stream.CloseRequest(); err != nil {
+		return nil, err
+	}
+
+	err = <-errc
+	if IsEOF(err) {
+		return response, nil
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	return
 }
 
 // RemoteLookup look for an actor address on a remote node.
@@ -230,7 +272,6 @@ func RemoteLookup(ctx context.Context, host string, port int, name string) (addr
 		connect.WithGRPC(),
 	)
 
-	// prepare the request to send
 	request := connect.NewRequest(&internalpb.RemoteLookupRequest{
 		Host: host,
 		Port: int32(port),
@@ -256,13 +297,20 @@ func RemoteBatchTell(ctx context.Context, to *goaktpb.Address, messages ...proto
 		return err
 	}
 
-	var remoteMessages []*anypb.Any
+	var requests []*internalpb.RemoteTellRequest
 	for _, message := range messages {
 		packed, err := anypb.New(message)
 		if err != nil {
 			return ErrInvalidRemoteMessage(err)
 		}
-		remoteMessages = append(remoteMessages, packed)
+
+		requests = append(requests, &internalpb.RemoteTellRequest{
+			RemoteMessage: &internalpb.RemoteMessage{
+				Sender:   RemoteNoSender,
+				Receiver: to,
+				Message:  packed,
+			},
+		})
 	}
 
 	remoteClient := internalpbconnect.NewRemotingServiceClient(
@@ -272,15 +320,26 @@ func RemoteBatchTell(ctx context.Context, to *goaktpb.Address, messages ...proto
 		connect.WithGRPC(),
 	)
 
-	request := connect.NewRequest(&internalpb.RemoteBatchTellRequest{
-		Messages: remoteMessages,
-		Sender:   RemoteNoSender,
-		Receiver: to,
-	})
+	stream := remoteClient.RemoteTell(ctx)
+	for _, request := range requests {
+		err := stream.Send(request)
+		if IsEOF(err) {
+			if _, err := stream.CloseAndReceive(); err != nil {
+				return err
+			}
+			return nil
+		}
 
-	if _, err := remoteClient.RemoteBatchTell(ctx, request); err != nil {
+		if err != nil {
+			return err
+		}
+	}
+
+	// close the connection
+	if _, err := stream.CloseAndReceive(); err != nil {
 		return err
 	}
+
 	return nil
 }
 
@@ -291,13 +350,20 @@ func RemoteBatchAsk(ctx context.Context, to *goaktpb.Address, messages ...proto.
 		return nil, err
 	}
 
-	var remoteMessages []*anypb.Any
+	var requests []*internalpb.RemoteAskRequest
 	for _, message := range messages {
 		packed, err := anypb.New(message)
 		if err != nil {
 			return nil, ErrInvalidRemoteMessage(err)
 		}
-		remoteMessages = append(remoteMessages, packed)
+
+		requests = append(requests, &internalpb.RemoteAskRequest{
+			RemoteMessage: &internalpb.RemoteMessage{
+				Sender:   RemoteNoSender,
+				Receiver: to,
+				Message:  packed,
+			},
+		})
 	}
 
 	remoteClient := internalpbconnect.NewRemotingServiceClient(
@@ -307,17 +373,43 @@ func RemoteBatchAsk(ctx context.Context, to *goaktpb.Address, messages ...proto.
 		connect.WithGRPC(),
 	)
 
-	request := connect.NewRequest(&internalpb.RemoteBatchAskRequest{
-		Messages: remoteMessages,
-		Sender:   RemoteNoSender,
-		Receiver: to,
-	})
+	stream := remoteClient.RemoteAsk(ctx)
+	errc := make(chan error, 1)
 
-	response, err := remoteClient.RemoteBatchAsk(ctx, request)
+	go func() {
+		defer close(errc)
+		for {
+			resp, err := stream.Receive()
+			if err != nil {
+				errc <- err
+				return
+			}
+
+			responses = append(responses, resp.GetMessage())
+		}
+	}()
+
+	for _, request := range requests {
+		err := stream.Send(request)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	if err := stream.CloseRequest(); err != nil {
+		return nil, err
+	}
+
+	err = <-errc
+	if IsEOF(err) {
+		return responses, nil
+	}
+
 	if err != nil {
 		return nil, err
 	}
-	return response.Msg.GetMessages(), nil
+
+	return
 }
 
 // RemoteReSpawn restarts actor on a remote node.

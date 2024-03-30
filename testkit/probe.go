@@ -7,11 +7,12 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"github.com/tochemey/goakt/actors"
-	"github.com/tochemey/goakt/goaktpb"
 	"google.golang.org/protobuf/encoding/prototext"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
+
+	"github.com/tochemey/goakt/actors"
+	"github.com/tochemey/goakt/goaktpb"
 )
 
 const (

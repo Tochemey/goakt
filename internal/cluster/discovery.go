@@ -30,6 +30,7 @@ import (
 
 	"github.com/buraksezer/olric/pkg/service_discovery"
 	"github.com/pkg/errors"
+
 	"github.com/tochemey/goakt/discovery"
 )
 

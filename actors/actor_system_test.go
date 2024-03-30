@@ -33,21 +33,21 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pkg/errors"
-
 	"github.com/google/uuid"
+	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/travisjeffery/go-dynaport"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
+	"google.golang.org/protobuf/proto"
+
 	"github.com/tochemey/goakt/discovery"
 	"github.com/tochemey/goakt/goaktpb"
 	"github.com/tochemey/goakt/log"
 	testkit "github.com/tochemey/goakt/mocks/discovery"
 	"github.com/tochemey/goakt/telemetry"
 	testpb "github.com/tochemey/goakt/test/data/testpb"
-	"github.com/travisjeffery/go-dynaport"
-	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
-	"go.opentelemetry.io/otel/sdk/metric/metricdata"
-	"google.golang.org/protobuf/proto"
 )
 
 func TestActorSystem(t *testing.T) {

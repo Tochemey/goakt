@@ -27,8 +27,9 @@ package actors
 import (
 	"context"
 
-	"github.com/tochemey/goakt/goaktpb"
 	"google.golang.org/protobuf/proto"
+
+	"github.com/tochemey/goakt/goaktpb"
 )
 
 // ReceiveFunc is a message handling placeholder

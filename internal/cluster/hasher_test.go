@@ -28,6 +28,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+
 	testkit "github.com/tochemey/goakt/mocks/hash"
 )
 

@@ -29,10 +29,11 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"go.uber.org/atomic"
+
 	"github.com/tochemey/goakt/hash"
 	"github.com/tochemey/goakt/log"
 	"github.com/tochemey/goakt/telemetry"
-	"go.uber.org/atomic"
 )
 
 func TestOption(t *testing.T) {

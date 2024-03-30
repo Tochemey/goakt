@@ -30,14 +30,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tochemey/goakt/log"
-
 	natsserver "github.com/nats-io/nats-server/v2/server"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/tochemey/goakt/discovery"
 	"github.com/travisjeffery/go-dynaport"
 	"go.uber.org/atomic"
+
+	"github.com/tochemey/goakt/discovery"
+	"github.com/tochemey/goakt/log"
 )
 
 func startNatsServer(t *testing.T) *natsserver.Server {

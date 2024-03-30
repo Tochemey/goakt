@@ -30,8 +30,9 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/stretchr/testify/assert"
-	"github.com/tochemey/goakt/goaktpb"
 	"google.golang.org/protobuf/encoding/prototext"
+
+	"github.com/tochemey/goakt/goaktpb"
 )
 
 func TestPath(t *testing.T) {

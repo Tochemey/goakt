@@ -36,11 +36,12 @@ import (
 	"github.com/reugn/go-quartz/job"
 	quartzlogger "github.com/reugn/go-quartz/logger"
 	"github.com/reugn/go-quartz/quartz"
+	"go.uber.org/atomic"
+	"google.golang.org/protobuf/proto"
+
 	"github.com/tochemey/goakt/goaktpb"
 	"github.com/tochemey/goakt/internal/cluster"
 	"github.com/tochemey/goakt/log"
-	"go.uber.org/atomic"
-	"google.golang.org/protobuf/proto"
 )
 
 var errSkipJobScheduling = errors.New("skip job scheduling")

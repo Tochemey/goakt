@@ -27,9 +27,8 @@ package telemetry
 import (
 	"testing"
 
-	"go.opentelemetry.io/otel/metric/noop"
-
 	"github.com/stretchr/testify/assert"
+	"go.opentelemetry.io/otel/metric/noop"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
 

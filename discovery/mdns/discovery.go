@@ -34,8 +34,9 @@ import (
 	goset "github.com/deckarep/golang-set/v2"
 	"github.com/grandcat/zeroconf"
 	"github.com/pkg/errors"
-	"github.com/tochemey/goakt/discovery"
 	"go.uber.org/atomic"
+
+	"github.com/tochemey/goakt/discovery"
 )
 
 const (

@@ -36,14 +36,15 @@ import (
 	natsserver "github.com/nats-io/nats-server/v2/server"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/travisjeffery/go-dynaport"
+	"google.golang.org/protobuf/proto"
+
 	"github.com/tochemey/goakt/discovery"
 	"github.com/tochemey/goakt/discovery/nats"
 	"github.com/tochemey/goakt/goaktpb"
 	"github.com/tochemey/goakt/internal/internalpb"
 	"github.com/tochemey/goakt/log"
 	testkit "github.com/tochemey/goakt/mocks/discovery"
-	"github.com/travisjeffery/go-dynaport"
-	"google.golang.org/protobuf/proto"
 )
 
 func TestSingleNode(t *testing.T) {

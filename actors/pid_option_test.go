@@ -29,9 +29,10 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"go.uber.org/atomic"
+
 	"github.com/tochemey/goakt/internal/eventstream"
 	"github.com/tochemey/goakt/log"
-	"go.uber.org/atomic"
 )
 
 func TestPIDOptions(t *testing.T) {
