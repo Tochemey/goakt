@@ -31,6 +31,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
 	"github.com/tochemey/goakt/log"
 )
 

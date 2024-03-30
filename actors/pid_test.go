@@ -34,15 +34,16 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/tochemey/goakt/goaktpb"
-	"github.com/tochemey/goakt/log"
-	"github.com/tochemey/goakt/telemetry"
-	"github.com/tochemey/goakt/test/data/testpb"
 	"github.com/travisjeffery/go-dynaport"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	"go.opentelemetry.io/otel/trace/noop"
 	"google.golang.org/protobuf/proto"
+
+	"github.com/tochemey/goakt/goaktpb"
+	"github.com/tochemey/goakt/log"
+	"github.com/tochemey/goakt/telemetry"
+	"github.com/tochemey/goakt/test/data/testpb"
 )
 
 const (

@@ -32,7 +32,6 @@ import (
 
 	goset "github.com/deckarep/golang-set/v2"
 	"github.com/pkg/errors"
-	"github.com/tochemey/goakt/discovery"
 	"go.uber.org/atomic"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -40,6 +39,8 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/utils/strings/slices"
+
+	"github.com/tochemey/goakt/discovery"
 )
 
 const (

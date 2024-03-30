@@ -35,6 +35,15 @@ import (
 	"connectrpc.com/otelconnect"
 	"github.com/flowchartsman/retry"
 	"github.com/pkg/errors"
+	"go.opentelemetry.io/otel/codes"
+	otelmetric "go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel/trace/noop"
+	"go.uber.org/atomic"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/anypb"
+	"google.golang.org/protobuf/types/known/timestamppb"
+
 	"github.com/tochemey/goakt/goaktpb"
 	"github.com/tochemey/goakt/internal/eventstream"
 	"github.com/tochemey/goakt/internal/http"
@@ -45,14 +54,6 @@ import (
 	"github.com/tochemey/goakt/internal/types"
 	"github.com/tochemey/goakt/log"
 	"github.com/tochemey/goakt/telemetry"
-	"go.opentelemetry.io/otel/codes"
-	otelmetric "go.opentelemetry.io/otel/metric"
-	"go.opentelemetry.io/otel/trace"
-	"go.opentelemetry.io/otel/trace/noop"
-	"go.uber.org/atomic"
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/anypb"
-	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // watcher is used to handle parent child relationship.
@@ -740,17 +741,28 @@ func (p *pid) RemoteTell(ctx context.Context, to *goaktpb.Address, message proto
 		Id:   p.ActorPath().ID().String(),
 	}
 
-	request := connect.NewRequest(&internalpb.RemoteTellRequest{
+	request := &internalpb.RemoteTellRequest{
 		RemoteMessage: &internalpb.RemoteMessage{
 			Sender:   sender,
 			Receiver: to,
 			Message:  marshaled,
 		},
-	})
+	}
 
 	p.logger.Debugf("sending a message to remote=(%s:%d)", to.GetHost(), to.GetPort())
+	stream := remoteClient.RemoteTell(ctx)
+	if err := stream.Send(request); err != nil {
+		if IsEOF(err) {
+			if _, err := stream.CloseAndReceive(); err != nil {
+				return err
+			}
+			return nil
+		}
+		p.logger.Error(errors.Wrapf(err, "failed to send message to remote=(%s:%d)", to.GetHost(), to.GetPort()))
+		return err
+	}
 
-	if _, err := remoteClient.RemoteTell(ctx, request); err != nil {
+	if _, err := stream.CloseAndReceive(); err != nil {
 		p.logger.Error(errors.Wrapf(err, "failed to send message to remote=(%s:%d)", to.GetHost(), to.GetPort()))
 		return err
 	}
@@ -771,7 +783,7 @@ func (p *pid) RemoteAsk(ctx context.Context, to *goaktpb.Address, message proto.
 		return nil, err
 	}
 
-	remoteClient := internalpbconnect.NewRemotingServiceClient(
+	remoteService := internalpbconnect.NewRemotingServiceClient(
 		p.httpClient,
 		http.URL(to.GetHost(), int(to.GetPort())),
 		clientConnectionOptions...,
@@ -787,21 +799,49 @@ func (p *pid) RemoteAsk(ctx context.Context, to *goaktpb.Address, message proto.
 		Id:   senderPath.ID().String(),
 	}
 
-	rpcRequest := connect.NewRequest(
-		&internalpb.RemoteAskRequest{
-			RemoteMessage: &internalpb.RemoteMessage{
-				Sender:   sender,
-				Receiver: to,
-				Message:  marshaled,
-			},
-		})
-
-	rpcResponse, rpcErr := remoteClient.RemoteAsk(ctx, rpcRequest)
-	if rpcErr != nil {
-		return nil, rpcErr
+	request := &internalpb.RemoteAskRequest{
+		RemoteMessage: &internalpb.RemoteMessage{
+			Sender:   sender,
+			Receiver: to,
+			Message:  marshaled,
+		},
 	}
 
-	return rpcResponse.Msg.GetMessage(), nil
+	stream := remoteService.RemoteAsk(ctx)
+	errc := make(chan error, 1)
+
+	go func() {
+		defer close(errc)
+		for {
+			resp, err := stream.Receive()
+			if err != nil {
+				errc <- err
+				return
+			}
+
+			response = resp.GetMessage()
+		}
+	}()
+
+	err = stream.Send(request)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := stream.CloseRequest(); err != nil {
+		return nil, err
+	}
+
+	err = <-errc
+	if IsEOF(err) {
+		return response, nil
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	return
 }
 
 // RemoteBatchTell sends a batch of messages to a remote actor in a way fire-and-forget manner
@@ -811,15 +851,6 @@ func (p *pid) RemoteBatchTell(ctx context.Context, to *goaktpb.Address, messages
 		return p.RemoteTell(ctx, to, messages[0])
 	}
 
-	var remoteMessages []*anypb.Any
-	for _, message := range messages {
-		packed, err := anypb.New(message)
-		if err != nil {
-			return ErrInvalidRemoteMessage(err)
-		}
-		remoteMessages = append(remoteMessages, packed)
-	}
-
 	senderPath := p.ActorPath()
 	senderAddress := senderPath.Address()
 
@@ -828,6 +859,22 @@ func (p *pid) RemoteBatchTell(ctx context.Context, to *goaktpb.Address, messages
 		Port: int32(senderAddress.Port()),
 		Name: senderPath.Name(),
 		Id:   senderPath.ID().String(),
+	}
+
+	var requests []*internalpb.RemoteTellRequest
+	for _, message := range messages {
+		packed, err := anypb.New(message)
+		if err != nil {
+			return ErrInvalidRemoteMessage(err)
+		}
+
+		requests = append(requests, &internalpb.RemoteTellRequest{
+			RemoteMessage: &internalpb.RemoteMessage{
+				Sender:   sender,
+				Receiver: to,
+				Message:  packed,
+			},
+		})
 	}
 
 	clientConnectionOptions, err := p.getConnectionOptions()
@@ -841,15 +888,24 @@ func (p *pid) RemoteBatchTell(ctx context.Context, to *goaktpb.Address, messages
 		clientConnectionOptions...,
 	)
 
-	request := connect.NewRequest(&internalpb.RemoteBatchTellRequest{
-		Messages: remoteMessages,
-		Sender:   sender,
-		Receiver: to,
-	})
+	stream := remoteClient.RemoteTell(ctx)
+	for _, request := range requests {
+		if err := stream.Send(request); err != nil {
+			if IsEOF(err) {
+				if _, err := stream.CloseAndReceive(); err != nil {
+					return err
+				}
+				return nil
+			}
+			return err
+		}
+	}
 
-	if _, err := remoteClient.RemoteBatchTell(ctx, request); err != nil {
+	// close the connection
+	if _, err := stream.CloseAndReceive(); err != nil {
 		return err
 	}
+
 	return nil
 }
 
@@ -857,15 +913,6 @@ func (p *pid) RemoteBatchTell(ctx context.Context, to *goaktpb.Address, messages
 // Messages are processed one after the other in the order they are sent.
 // This can hinder performance if it is not properly used.
 func (p *pid) RemoteBatchAsk(ctx context.Context, to *goaktpb.Address, messages ...proto.Message) (responses []*anypb.Any, err error) {
-	var remoteMessages []*anypb.Any
-	for _, message := range messages {
-		packed, err := anypb.New(message)
-		if err != nil {
-			return nil, ErrInvalidRemoteMessage(err)
-		}
-		remoteMessages = append(remoteMessages, packed)
-	}
-
 	senderPath := p.ActorPath()
 	senderAddress := senderPath.Address()
 
@@ -874,6 +921,22 @@ func (p *pid) RemoteBatchAsk(ctx context.Context, to *goaktpb.Address, messages 
 		Port: int32(senderAddress.Port()),
 		Name: senderPath.Name(),
 		Id:   senderPath.ID().String(),
+	}
+
+	var requests []*internalpb.RemoteAskRequest
+	for _, message := range messages {
+		packed, err := anypb.New(message)
+		if err != nil {
+			return nil, ErrInvalidRemoteMessage(err)
+		}
+
+		requests = append(requests, &internalpb.RemoteAskRequest{
+			RemoteMessage: &internalpb.RemoteMessage{
+				Sender:   sender,
+				Receiver: to,
+				Message:  packed,
+			},
+		})
 	}
 
 	clientConnectionOptions, err := p.getConnectionOptions()
@@ -887,17 +950,43 @@ func (p *pid) RemoteBatchAsk(ctx context.Context, to *goaktpb.Address, messages 
 		clientConnectionOptions...,
 	)
 
-	request := connect.NewRequest(&internalpb.RemoteBatchAskRequest{
-		Messages: remoteMessages,
-		Sender:   sender,
-		Receiver: to,
-	})
+	stream := remoteClient.RemoteAsk(ctx)
+	errc := make(chan error, 1)
 
-	response, err := remoteClient.RemoteBatchAsk(ctx, request)
+	go func() {
+		defer close(errc)
+		for {
+			resp, err := stream.Receive()
+			if err != nil {
+				errc <- err
+				return
+			}
+
+			responses = append(responses, resp.GetMessage())
+		}
+	}()
+
+	for _, request := range requests {
+		err := stream.Send(request)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	if err := stream.CloseRequest(); err != nil {
+		return nil, err
+	}
+
+	err = <-errc
+	if IsEOF(err) {
+		return responses, nil
+	}
+
 	if err != nil {
 		return nil, err
 	}
-	return response.Msg.GetMessages(), nil
+
+	return
 }
 
 // RemoteStop stops an actor on a remote node

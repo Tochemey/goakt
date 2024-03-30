@@ -42,12 +42,6 @@ const (
 	// RemotingServiceRemoteLookupProcedure is the fully-qualified name of the RemotingService's
 	// RemoteLookup RPC.
 	RemotingServiceRemoteLookupProcedure = "/internalpb.RemotingService/RemoteLookup"
-	// RemotingServiceRemoteBatchTellProcedure is the fully-qualified name of the RemotingService's
-	// RemoteBatchTell RPC.
-	RemotingServiceRemoteBatchTellProcedure = "/internalpb.RemotingService/RemoteBatchTell"
-	// RemotingServiceRemoteBatchAskProcedure is the fully-qualified name of the RemotingService's
-	// RemoteBatchAsk RPC.
-	RemotingServiceRemoteBatchAskProcedure = "/internalpb.RemotingService/RemoteBatchAsk"
 	// RemotingServiceRemoteReSpawnProcedure is the fully-qualified name of the RemotingService's
 	// RemoteReSpawn RPC.
 	RemotingServiceRemoteReSpawnProcedure = "/internalpb.RemotingService/RemoteReSpawn"
@@ -58,30 +52,23 @@ const (
 
 // These variables are the protoreflect.Descriptor objects for the RPCs defined in this package.
 var (
-	remotingServiceServiceDescriptor               = internalpb.File_internal_remoting_proto.Services().ByName("RemotingService")
-	remotingServiceRemoteAskMethodDescriptor       = remotingServiceServiceDescriptor.Methods().ByName("RemoteAsk")
-	remotingServiceRemoteTellMethodDescriptor      = remotingServiceServiceDescriptor.Methods().ByName("RemoteTell")
-	remotingServiceRemoteLookupMethodDescriptor    = remotingServiceServiceDescriptor.Methods().ByName("RemoteLookup")
-	remotingServiceRemoteBatchTellMethodDescriptor = remotingServiceServiceDescriptor.Methods().ByName("RemoteBatchTell")
-	remotingServiceRemoteBatchAskMethodDescriptor  = remotingServiceServiceDescriptor.Methods().ByName("RemoteBatchAsk")
-	remotingServiceRemoteReSpawnMethodDescriptor   = remotingServiceServiceDescriptor.Methods().ByName("RemoteReSpawn")
-	remotingServiceRemoteStopMethodDescriptor      = remotingServiceServiceDescriptor.Methods().ByName("RemoteStop")
+	remotingServiceServiceDescriptor             = internalpb.File_internal_remoting_proto.Services().ByName("RemotingService")
+	remotingServiceRemoteAskMethodDescriptor     = remotingServiceServiceDescriptor.Methods().ByName("RemoteAsk")
+	remotingServiceRemoteTellMethodDescriptor    = remotingServiceServiceDescriptor.Methods().ByName("RemoteTell")
+	remotingServiceRemoteLookupMethodDescriptor  = remotingServiceServiceDescriptor.Methods().ByName("RemoteLookup")
+	remotingServiceRemoteReSpawnMethodDescriptor = remotingServiceServiceDescriptor.Methods().ByName("RemoteReSpawn")
+	remotingServiceRemoteStopMethodDescriptor    = remotingServiceServiceDescriptor.Methods().ByName("RemoteStop")
 )
 
 // RemotingServiceClient is a client for the internalpb.RemotingService service.
 type RemotingServiceClient interface {
 	// RemoteAsk is used to send a message to an actor remotely and expect a response immediately.
-	RemoteAsk(context.Context, *connect.Request[internalpb.RemoteAskRequest]) (*connect.Response[internalpb.RemoteAskResponse], error)
+	RemoteAsk(context.Context) *connect.BidiStreamForClient[internalpb.RemoteAskRequest, internalpb.RemoteAskResponse]
 	// RemoteTell is used to send a message to a remote actor
 	// The actor on the other line can reply to the sender by using the Sender in the message
-	RemoteTell(context.Context, *connect.Request[internalpb.RemoteTellRequest]) (*connect.Response[internalpb.RemoteTellResponse], error)
+	RemoteTell(context.Context) *connect.ClientStreamForClient[internalpb.RemoteTellRequest, internalpb.RemoteTellResponse]
 	// Lookup for an actor on a remote host.
 	RemoteLookup(context.Context, *connect.Request[internalpb.RemoteLookupRequest]) (*connect.Response[internalpb.RemoteLookupResponse], error)
-	// RemoteBatchTell is used to send a bulk of messages to a remote actor
-	RemoteBatchTell(context.Context, *connect.Request[internalpb.RemoteBatchTellRequest]) (*connect.Response[internalpb.RemoteBatchTellResponse], error)
-	// RemoteBatchAsk is used to send a bulk messages to a remote actor with replies.
-	// The replies are sent in the same order as the messages
-	RemoteBatchAsk(context.Context, *connect.Request[internalpb.RemoteBatchAskRequest]) (*connect.Response[internalpb.RemoteBatchAskResponse], error)
 	// RemoteReSpawn restarts an actor on a remote machine
 	RemoteReSpawn(context.Context, *connect.Request[internalpb.RemoteReSpawnRequest]) (*connect.Response[internalpb.RemoteReSpawnResponse], error)
 	// RemoteStop stops an actor on a remote machine
@@ -116,18 +103,6 @@ func NewRemotingServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 			connect.WithSchema(remotingServiceRemoteLookupMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
-		remoteBatchTell: connect.NewClient[internalpb.RemoteBatchTellRequest, internalpb.RemoteBatchTellResponse](
-			httpClient,
-			baseURL+RemotingServiceRemoteBatchTellProcedure,
-			connect.WithSchema(remotingServiceRemoteBatchTellMethodDescriptor),
-			connect.WithClientOptions(opts...),
-		),
-		remoteBatchAsk: connect.NewClient[internalpb.RemoteBatchAskRequest, internalpb.RemoteBatchAskResponse](
-			httpClient,
-			baseURL+RemotingServiceRemoteBatchAskProcedure,
-			connect.WithSchema(remotingServiceRemoteBatchAskMethodDescriptor),
-			connect.WithClientOptions(opts...),
-		),
 		remoteReSpawn: connect.NewClient[internalpb.RemoteReSpawnRequest, internalpb.RemoteReSpawnResponse](
 			httpClient,
 			baseURL+RemotingServiceRemoteReSpawnProcedure,
@@ -145,38 +120,26 @@ func NewRemotingServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 
 // remotingServiceClient implements RemotingServiceClient.
 type remotingServiceClient struct {
-	remoteAsk       *connect.Client[internalpb.RemoteAskRequest, internalpb.RemoteAskResponse]
-	remoteTell      *connect.Client[internalpb.RemoteTellRequest, internalpb.RemoteTellResponse]
-	remoteLookup    *connect.Client[internalpb.RemoteLookupRequest, internalpb.RemoteLookupResponse]
-	remoteBatchTell *connect.Client[internalpb.RemoteBatchTellRequest, internalpb.RemoteBatchTellResponse]
-	remoteBatchAsk  *connect.Client[internalpb.RemoteBatchAskRequest, internalpb.RemoteBatchAskResponse]
-	remoteReSpawn   *connect.Client[internalpb.RemoteReSpawnRequest, internalpb.RemoteReSpawnResponse]
-	remoteStop      *connect.Client[internalpb.RemoteStopRequest, internalpb.RemoteStopResponse]
+	remoteAsk     *connect.Client[internalpb.RemoteAskRequest, internalpb.RemoteAskResponse]
+	remoteTell    *connect.Client[internalpb.RemoteTellRequest, internalpb.RemoteTellResponse]
+	remoteLookup  *connect.Client[internalpb.RemoteLookupRequest, internalpb.RemoteLookupResponse]
+	remoteReSpawn *connect.Client[internalpb.RemoteReSpawnRequest, internalpb.RemoteReSpawnResponse]
+	remoteStop    *connect.Client[internalpb.RemoteStopRequest, internalpb.RemoteStopResponse]
 }
 
 // RemoteAsk calls internalpb.RemotingService.RemoteAsk.
-func (c *remotingServiceClient) RemoteAsk(ctx context.Context, req *connect.Request[internalpb.RemoteAskRequest]) (*connect.Response[internalpb.RemoteAskResponse], error) {
-	return c.remoteAsk.CallUnary(ctx, req)
+func (c *remotingServiceClient) RemoteAsk(ctx context.Context) *connect.BidiStreamForClient[internalpb.RemoteAskRequest, internalpb.RemoteAskResponse] {
+	return c.remoteAsk.CallBidiStream(ctx)
 }
 
 // RemoteTell calls internalpb.RemotingService.RemoteTell.
-func (c *remotingServiceClient) RemoteTell(ctx context.Context, req *connect.Request[internalpb.RemoteTellRequest]) (*connect.Response[internalpb.RemoteTellResponse], error) {
-	return c.remoteTell.CallUnary(ctx, req)
+func (c *remotingServiceClient) RemoteTell(ctx context.Context) *connect.ClientStreamForClient[internalpb.RemoteTellRequest, internalpb.RemoteTellResponse] {
+	return c.remoteTell.CallClientStream(ctx)
 }
 
 // RemoteLookup calls internalpb.RemotingService.RemoteLookup.
 func (c *remotingServiceClient) RemoteLookup(ctx context.Context, req *connect.Request[internalpb.RemoteLookupRequest]) (*connect.Response[internalpb.RemoteLookupResponse], error) {
 	return c.remoteLookup.CallUnary(ctx, req)
-}
-
-// RemoteBatchTell calls internalpb.RemotingService.RemoteBatchTell.
-func (c *remotingServiceClient) RemoteBatchTell(ctx context.Context, req *connect.Request[internalpb.RemoteBatchTellRequest]) (*connect.Response[internalpb.RemoteBatchTellResponse], error) {
-	return c.remoteBatchTell.CallUnary(ctx, req)
-}
-
-// RemoteBatchAsk calls internalpb.RemotingService.RemoteBatchAsk.
-func (c *remotingServiceClient) RemoteBatchAsk(ctx context.Context, req *connect.Request[internalpb.RemoteBatchAskRequest]) (*connect.Response[internalpb.RemoteBatchAskResponse], error) {
-	return c.remoteBatchAsk.CallUnary(ctx, req)
 }
 
 // RemoteReSpawn calls internalpb.RemotingService.RemoteReSpawn.
@@ -192,17 +155,12 @@ func (c *remotingServiceClient) RemoteStop(ctx context.Context, req *connect.Req
 // RemotingServiceHandler is an implementation of the internalpb.RemotingService service.
 type RemotingServiceHandler interface {
 	// RemoteAsk is used to send a message to an actor remotely and expect a response immediately.
-	RemoteAsk(context.Context, *connect.Request[internalpb.RemoteAskRequest]) (*connect.Response[internalpb.RemoteAskResponse], error)
+	RemoteAsk(context.Context, *connect.BidiStream[internalpb.RemoteAskRequest, internalpb.RemoteAskResponse]) error
 	// RemoteTell is used to send a message to a remote actor
 	// The actor on the other line can reply to the sender by using the Sender in the message
-	RemoteTell(context.Context, *connect.Request[internalpb.RemoteTellRequest]) (*connect.Response[internalpb.RemoteTellResponse], error)
+	RemoteTell(context.Context, *connect.ClientStream[internalpb.RemoteTellRequest]) (*connect.Response[internalpb.RemoteTellResponse], error)
 	// Lookup for an actor on a remote host.
 	RemoteLookup(context.Context, *connect.Request[internalpb.RemoteLookupRequest]) (*connect.Response[internalpb.RemoteLookupResponse], error)
-	// RemoteBatchTell is used to send a bulk of messages to a remote actor
-	RemoteBatchTell(context.Context, *connect.Request[internalpb.RemoteBatchTellRequest]) (*connect.Response[internalpb.RemoteBatchTellResponse], error)
-	// RemoteBatchAsk is used to send a bulk messages to a remote actor with replies.
-	// The replies are sent in the same order as the messages
-	RemoteBatchAsk(context.Context, *connect.Request[internalpb.RemoteBatchAskRequest]) (*connect.Response[internalpb.RemoteBatchAskResponse], error)
 	// RemoteReSpawn restarts an actor on a remote machine
 	RemoteReSpawn(context.Context, *connect.Request[internalpb.RemoteReSpawnRequest]) (*connect.Response[internalpb.RemoteReSpawnResponse], error)
 	// RemoteStop stops an actor on a remote machine
@@ -215,13 +173,13 @@ type RemotingServiceHandler interface {
 // By default, handlers support the Connect, gRPC, and gRPC-Web protocols with the binary Protobuf
 // and JSON codecs. They also support gzip compression.
 func NewRemotingServiceHandler(svc RemotingServiceHandler, opts ...connect.HandlerOption) (string, http.Handler) {
-	remotingServiceRemoteAskHandler := connect.NewUnaryHandler(
+	remotingServiceRemoteAskHandler := connect.NewBidiStreamHandler(
 		RemotingServiceRemoteAskProcedure,
 		svc.RemoteAsk,
 		connect.WithSchema(remotingServiceRemoteAskMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
-	remotingServiceRemoteTellHandler := connect.NewUnaryHandler(
+	remotingServiceRemoteTellHandler := connect.NewClientStreamHandler(
 		RemotingServiceRemoteTellProcedure,
 		svc.RemoteTell,
 		connect.WithSchema(remotingServiceRemoteTellMethodDescriptor),
@@ -231,18 +189,6 @@ func NewRemotingServiceHandler(svc RemotingServiceHandler, opts ...connect.Handl
 		RemotingServiceRemoteLookupProcedure,
 		svc.RemoteLookup,
 		connect.WithSchema(remotingServiceRemoteLookupMethodDescriptor),
-		connect.WithHandlerOptions(opts...),
-	)
-	remotingServiceRemoteBatchTellHandler := connect.NewUnaryHandler(
-		RemotingServiceRemoteBatchTellProcedure,
-		svc.RemoteBatchTell,
-		connect.WithSchema(remotingServiceRemoteBatchTellMethodDescriptor),
-		connect.WithHandlerOptions(opts...),
-	)
-	remotingServiceRemoteBatchAskHandler := connect.NewUnaryHandler(
-		RemotingServiceRemoteBatchAskProcedure,
-		svc.RemoteBatchAsk,
-		connect.WithSchema(remotingServiceRemoteBatchAskMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
 	remotingServiceRemoteReSpawnHandler := connect.NewUnaryHandler(
@@ -265,10 +211,6 @@ func NewRemotingServiceHandler(svc RemotingServiceHandler, opts ...connect.Handl
 			remotingServiceRemoteTellHandler.ServeHTTP(w, r)
 		case RemotingServiceRemoteLookupProcedure:
 			remotingServiceRemoteLookupHandler.ServeHTTP(w, r)
-		case RemotingServiceRemoteBatchTellProcedure:
-			remotingServiceRemoteBatchTellHandler.ServeHTTP(w, r)
-		case RemotingServiceRemoteBatchAskProcedure:
-			remotingServiceRemoteBatchAskHandler.ServeHTTP(w, r)
 		case RemotingServiceRemoteReSpawnProcedure:
 			remotingServiceRemoteReSpawnHandler.ServeHTTP(w, r)
 		case RemotingServiceRemoteStopProcedure:
@@ -282,24 +224,16 @@ func NewRemotingServiceHandler(svc RemotingServiceHandler, opts ...connect.Handl
 // UnimplementedRemotingServiceHandler returns CodeUnimplemented from all methods.
 type UnimplementedRemotingServiceHandler struct{}
 
-func (UnimplementedRemotingServiceHandler) RemoteAsk(context.Context, *connect.Request[internalpb.RemoteAskRequest]) (*connect.Response[internalpb.RemoteAskResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("internalpb.RemotingService.RemoteAsk is not implemented"))
+func (UnimplementedRemotingServiceHandler) RemoteAsk(context.Context, *connect.BidiStream[internalpb.RemoteAskRequest, internalpb.RemoteAskResponse]) error {
+	return connect.NewError(connect.CodeUnimplemented, errors.New("internalpb.RemotingService.RemoteAsk is not implemented"))
 }
 
-func (UnimplementedRemotingServiceHandler) RemoteTell(context.Context, *connect.Request[internalpb.RemoteTellRequest]) (*connect.Response[internalpb.RemoteTellResponse], error) {
+func (UnimplementedRemotingServiceHandler) RemoteTell(context.Context, *connect.ClientStream[internalpb.RemoteTellRequest]) (*connect.Response[internalpb.RemoteTellResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("internalpb.RemotingService.RemoteTell is not implemented"))
 }
 
 func (UnimplementedRemotingServiceHandler) RemoteLookup(context.Context, *connect.Request[internalpb.RemoteLookupRequest]) (*connect.Response[internalpb.RemoteLookupResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("internalpb.RemotingService.RemoteLookup is not implemented"))
-}
-
-func (UnimplementedRemotingServiceHandler) RemoteBatchTell(context.Context, *connect.Request[internalpb.RemoteBatchTellRequest]) (*connect.Response[internalpb.RemoteBatchTellResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("internalpb.RemotingService.RemoteBatchTell is not implemented"))
-}
-
-func (UnimplementedRemotingServiceHandler) RemoteBatchAsk(context.Context, *connect.Request[internalpb.RemoteBatchAskRequest]) (*connect.Response[internalpb.RemoteBatchAskResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("internalpb.RemotingService.RemoteBatchAsk is not implemented"))
 }
 
 func (UnimplementedRemotingServiceHandler) RemoteReSpawn(context.Context, *connect.Request[internalpb.RemoteReSpawnRequest]) (*connect.Response[internalpb.RemoteReSpawnResponse], error) {

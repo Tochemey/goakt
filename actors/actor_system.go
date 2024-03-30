@@ -37,6 +37,17 @@ import (
 	"connectrpc.com/otelconnect"
 	"github.com/google/uuid"
 	"github.com/pkg/errors"
+	"go.opentelemetry.io/otel/codes"
+	otelmetric "go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel/trace/noop"
+	"go.uber.org/atomic"
+	"golang.org/x/net/http2"
+	"golang.org/x/net/http2/h2c"
+	"golang.org/x/sync/errgroup"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/anypb"
+
 	"github.com/tochemey/goakt/discovery"
 	"github.com/tochemey/goakt/goaktpb"
 	"github.com/tochemey/goakt/hash"
@@ -48,15 +59,6 @@ import (
 	"github.com/tochemey/goakt/internal/types"
 	"github.com/tochemey/goakt/log"
 	"github.com/tochemey/goakt/telemetry"
-	"go.opentelemetry.io/otel/codes"
-	otelmetric "go.opentelemetry.io/otel/metric"
-	"go.opentelemetry.io/otel/trace"
-	"go.opentelemetry.io/otel/trace/noop"
-	"go.uber.org/atomic"
-	"golang.org/x/net/http2"
-	"golang.org/x/net/http2/h2c"
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/anypb"
 )
 
 // ActorSystem defines the contract of an actor system
@@ -430,7 +432,6 @@ func (x *actorSystem) SpawnFromFunc(ctx context.Context, receiveFunc ReceiveFunc
 	actor := newFnActor(actorID, receiveFunc, opts...)
 
 	actorPath := NewPath(actorID, NewAddress(x.name, "", -1))
-
 	if x.remotingEnabled.Load() {
 		actorPath = NewPath(actorID, NewAddress(x.name, x.remotingHost, int(x.remotingPort)))
 	}
@@ -502,7 +503,6 @@ func (x *actorSystem) Kill(ctx context.Context, name string) error {
 	}
 
 	pid, exist := x.actors.Get(actorPath)
-
 	if exist {
 		// stop the given actor. No need to record error in the span context
 		// because the shutdown method is taking care of that
@@ -525,7 +525,7 @@ func (x *actorSystem) ReSpawn(ctx context.Context, name string) (PID, error) {
 		span.RecordError(ErrActorSystemNotStarted)
 		return nil, ErrActorSystemNotStarted
 	}
-	// set the default actor path assuming we are running locally
+
 	actorPath := NewPath(name, NewAddress(x.name, "", -1))
 
 	if x.remotingEnabled.Load() {
@@ -568,7 +568,6 @@ func (x *actorSystem) PeerAddress() string {
 	x.mutex.Lock()
 	defer x.mutex.Unlock()
 	if x.clusterEnabled.Load() {
-		// return the cluster node advertised address
 		return x.cluster.AdvertisedAddress()
 	}
 	return ""
@@ -591,7 +590,6 @@ func (x *actorSystem) ActorOf(ctx context.Context, actorName string) (addr *goak
 		return nil, nil, ErrActorSystemNotStarted
 	}
 
-	// try to locate the actor in the cluster when cluster is enabled
 	if x.cluster != nil || x.clusterEnabled.Load() {
 		wireActor, err := x.cluster.GetActor(spanCtx, actorName)
 		if err != nil {
@@ -626,7 +624,6 @@ func (x *actorSystem) ActorOf(ctx context.Context, actorName string) (addr *goak
 	}
 
 	x.logger.Infof("actor=%s not found", actorName)
-
 	e := ErrActorNotFound(actorName)
 	span.SetStatus(codes.Error, "ActorOf")
 	span.RecordError(e)
@@ -743,7 +740,6 @@ func (x *actorSystem) Stop(ctx context.Context) error {
 		x.eventsStream.Shutdown()
 	}
 
-	// create a cancellation context to gracefully shutdown
 	ctx, cancel := context.WithTimeout(spanCtx, x.shutdownTimeout)
 	defer cancel()
 
@@ -764,7 +760,6 @@ func (x *actorSystem) Stop(ctx context.Context) error {
 			span.RecordError(err)
 			return err
 		}
-
 		close(x.clusterChan)
 		x.clusterEnabled.Store(false)
 	}
@@ -797,7 +792,6 @@ func (x *actorSystem) RemoteLookup(_ context.Context, request *connect.Request[i
 
 	name := reqCopy.GetName()
 	actorPath := NewPath(name, NewAddress(x.Name(), reqCopy.GetHost(), int(reqCopy.GetPort())))
-
 	pid, exist := x.actors.Get(actorPath)
 	if !exist {
 		logger.Error(ErrAddressNotFound(actorPath.String()).Error())
@@ -812,152 +806,115 @@ func (x *actorSystem) RemoteLookup(_ context.Context, request *connect.Request[i
 // RemoteAsk is used to send a message to an actor remotely and expect a response
 // immediately. With this type of message the receiver cannot communicate back to Sender
 // except reply the message with a response. This one-way communication
-func (x *actorSystem) RemoteAsk(ctx context.Context, request *connect.Request[internalpb.RemoteAskRequest]) (*connect.Response[internalpb.RemoteAskResponse], error) {
+func (x *actorSystem) RemoteAsk(ctx context.Context, stream *connect.BidiStream[internalpb.RemoteAskRequest, internalpb.RemoteAskResponse]) error {
 	logger := x.logger
-	reqCopy := request.Msg
 
 	if !x.remotingEnabled.Load() {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrRemotingDisabled)
+		return connect.NewError(connect.CodeFailedPrecondition, ErrRemotingDisabled)
 	}
 
-	name := reqCopy.GetRemoteMessage().GetReceiver().GetName()
-	actorPath := NewPath(name, NewAddress(x.name, x.remotingHost, int(x.remotingPort)))
+	for {
+		switch ctx.Err() {
+		case context.Canceled:
+			return connect.NewError(connect.CodeCanceled, ctx.Err())
+		case context.DeadlineExceeded:
+			return connect.NewError(connect.CodeDeadlineExceeded, ctx.Err())
+		}
 
-	pid, exist := x.actors.Get(actorPath)
-	if !exist {
-		logger.Error(ErrAddressNotFound(actorPath.String()).Error())
-		return nil, ErrAddressNotFound(actorPath.String())
+		request, err := stream.Receive()
+		if IsEOF(err) {
+			return nil
+		}
+
+		if err != nil {
+			logger.Error(err)
+			return connect.NewError(connect.CodeUnknown, err)
+		}
+
+		message := request.GetRemoteMessage()
+
+		name := message.GetReceiver().GetName()
+		actorPath := NewPath(name, NewAddress(x.name, x.remotingHost, int(x.remotingPort)))
+
+		pid, exist := x.actors.Get(actorPath)
+		if !exist {
+			logger.Error(ErrAddressNotFound(actorPath.String()).Error())
+			return ErrAddressNotFound(actorPath.String())
+		}
+
+		reply, err := x.handleRemoteAsk(ctx, pid, message)
+		if err != nil {
+			logger.Error(ErrRemoteSendFailure(err).Error())
+			return ErrRemoteSendFailure(err)
+		}
+
+		marshaled, _ := anypb.New(reply)
+		response := &internalpb.RemoteAskResponse{Message: marshaled}
+		if err := stream.Send(response); err != nil {
+			return connect.NewError(connect.CodeUnknown, err)
+		}
 	}
-
-	reply, err := x.handleRemoteAsk(ctx, pid, reqCopy.GetRemoteMessage())
-	if err != nil {
-		logger.Error(ErrRemoteSendFailure(err).Error())
-		return nil, ErrRemoteSendFailure(err)
-	}
-
-	marshaled, _ := anypb.New(reply)
-	return connect.NewResponse(&internalpb.RemoteAskResponse{Message: marshaled}), nil
 }
 
 // RemoteTell is used to send a message to an actor remotely by another actor
-func (x *actorSystem) RemoteTell(ctx context.Context, request *connect.Request[internalpb.RemoteTellRequest]) (*connect.Response[internalpb.RemoteTellResponse], error) {
+func (x *actorSystem) RemoteTell(ctx context.Context, stream *connect.ClientStream[internalpb.RemoteTellRequest]) (*connect.Response[internalpb.RemoteTellResponse], error) {
 	logger := x.logger
-	reqCopy := request.Msg
-
-	receiver := reqCopy.GetRemoteMessage().GetReceiver()
 
 	if !x.remotingEnabled.Load() {
 		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrRemotingDisabled)
 	}
 
-	actorPath := NewPath(
-		receiver.GetName(),
-		NewAddress(
-			x.Name(),
-			receiver.GetHost(),
-			int(receiver.GetPort())))
+	requestc := make(chan *internalpb.RemoteTellRequest, 1)
+	eg, ctx := errgroup.WithContext(ctx)
 
-	pid, exist := x.actors.Get(actorPath)
-	if !exist {
-		logger.Error(ErrAddressNotFound(actorPath.String()).Error())
-		return nil, ErrAddressNotFound(actorPath.String())
+	eg.Go(func() error {
+		defer close(requestc)
+		for stream.Receive() {
+			select {
+			case requestc <- stream.Msg():
+			case <-ctx.Done():
+				logger.Error(ctx.Err())
+				return connect.NewError(connect.CodeCanceled, ctx.Err())
+			}
+		}
+
+		if err := stream.Err(); err != nil {
+			logger.Error(err)
+			return connect.NewError(connect.CodeUnknown, err)
+		}
+
+		return nil
+	})
+
+	eg.Go(func() error {
+		for request := range requestc {
+			receiver := request.GetRemoteMessage().GetReceiver()
+			actorPath := NewPath(
+				receiver.GetName(),
+				NewAddress(
+					x.Name(),
+					receiver.GetHost(),
+					int(receiver.GetPort())))
+
+			pid, exist := x.actors.Get(actorPath)
+			if !exist {
+				logger.Error(ErrAddressNotFound(actorPath.String()).Error())
+				return ErrAddressNotFound(actorPath.String())
+			}
+
+			if err := x.handleRemoteTell(ctx, pid, request.GetRemoteMessage()); err != nil {
+				logger.Error(ErrRemoteSendFailure(err))
+				return ErrRemoteSendFailure(err)
+			}
+		}
+		return nil
+	})
+
+	if err := eg.Wait(); err != nil {
+		return nil, err
 	}
 
-	if err := x.handleRemoteTell(ctx, pid, reqCopy.GetRemoteMessage()); err != nil {
-		logger.Error(ErrRemoteSendFailure(err))
-		return nil, ErrRemoteSendFailure(err)
-	}
 	return connect.NewResponse(new(internalpb.RemoteTellResponse)), nil
-}
-
-// RemoteBatchTell is used to send a bulk of messages to an actor remotely by another actor.
-func (x *actorSystem) RemoteBatchTell(ctx context.Context, request *connect.Request[internalpb.RemoteBatchTellRequest]) (*connect.Response[internalpb.RemoteBatchTellResponse], error) {
-	logger := x.logger
-	reqCopy := request.Msg
-
-	receiver := reqCopy.GetReceiver()
-
-	if !x.remotingEnabled.Load() {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrRemotingDisabled)
-	}
-
-	actorPath := NewPath(
-		receiver.GetName(),
-		NewAddress(
-			x.Name(),
-			receiver.GetHost(),
-			int(receiver.GetPort())))
-
-	pid, exist := x.actors.Get(actorPath)
-	if !exist {
-		logger.Error(ErrAddressNotFound(actorPath.String()).Error())
-		return nil, ErrAddressNotFound(actorPath.String())
-	}
-
-	var messages []proto.Message
-	for _, message := range reqCopy.GetMessages() {
-		actual, err := message.UnmarshalNew()
-		if err != nil {
-			logger.Error(err)
-			return nil, connect.NewError(connect.CodeFailedPrecondition, err)
-		}
-		messages = append(messages, actual)
-	}
-
-	if err := BatchTell(ctx, pid, messages...); err != nil {
-		logger.Error(ErrRemoteSendFailure(err))
-		return nil, ErrRemoteSendFailure(err)
-	}
-
-	return connect.NewResponse(new(internalpb.RemoteBatchTellResponse)), nil
-}
-
-// RemoteBatchAsk is used to send a bulk messages to a remote actor with replies.
-// The replies are sent in the same order as the messages
-func (x *actorSystem) RemoteBatchAsk(ctx context.Context, request *connect.Request[internalpb.RemoteBatchAskRequest]) (*connect.Response[internalpb.RemoteBatchAskResponse], error) {
-	logger := x.logger
-	reqCopy := request.Msg
-
-	if !x.remotingEnabled.Load() {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrRemotingDisabled)
-	}
-
-	name := reqCopy.GetReceiver().GetName()
-	actorPath := NewPath(name, NewAddress(x.name, x.remotingHost, int(x.remotingPort)))
-
-	pid, exist := x.actors.Get(actorPath)
-	if !exist {
-		logger.Error(ErrAddressNotFound(actorPath.String()).Error())
-		return nil, ErrAddressNotFound(actorPath.String())
-	}
-
-	var messages []proto.Message
-	for _, message := range reqCopy.GetMessages() {
-		actual, err := message.UnmarshalNew()
-		if err != nil {
-			logger.Error(err)
-			return nil, connect.NewError(connect.CodeFailedPrecondition, err)
-		}
-		messages = append(messages, actual)
-	}
-
-	replies, err := BatchAsk(ctx, pid, x.replyTimeout, messages...)
-	if err != nil {
-		logger.Error(ErrRemoteSendFailure(err))
-		return nil, ErrRemoteSendFailure(err)
-	}
-
-	var responses []*anypb.Any
-	for reply := range replies {
-		actual, err := anypb.New(reply)
-		if err != nil {
-			logger.Error(err)
-			return nil, connect.NewError(connect.CodeFailedPrecondition, err)
-		}
-		responses = append(responses, actual)
-	}
-
-	return connect.NewResponse(&internalpb.RemoteBatchAskResponse{Messages: responses}), nil
 }
 
 // RemoteReSpawn is used the handle the re-creation of an actor from a remote host or from an api call
@@ -1093,7 +1050,6 @@ func (x *actorSystem) enableRemoting(ctx context.Context) {
 	mux.Handle(path, handler)
 	serverAddr := fmt.Sprintf("%s:%d", x.remotingHost, x.remotingPort)
 
-	// create a http service instance
 	// TODO revisit the timeouts
 	// reference: https://adam-p.ca/blog/2022/01/golang-http-server-timeouts/
 	server := &http.Server{

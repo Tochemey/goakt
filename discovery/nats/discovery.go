@@ -33,10 +33,11 @@ import (
 	"github.com/flowchartsman/retry"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/encoders/protobuf"
+	"go.uber.org/atomic"
+
 	"github.com/tochemey/goakt/discovery"
 	internalpb "github.com/tochemey/goakt/internal/internalpb"
 	"github.com/tochemey/goakt/log"
-	"go.uber.org/atomic"
 )
 
 const (

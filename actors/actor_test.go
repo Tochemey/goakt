@@ -35,14 +35,15 @@ import (
 	natsserver "github.com/nats-io/nats-server/v2/server"
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/require"
+	"github.com/travisjeffery/go-dynaport"
+	"go.uber.org/atomic"
+	"go.uber.org/goleak"
+
 	"github.com/tochemey/goakt/discovery"
 	"github.com/tochemey/goakt/discovery/nats"
 	"github.com/tochemey/goakt/goaktpb"
 	"github.com/tochemey/goakt/log"
 	testspb "github.com/tochemey/goakt/test/data/testpb"
-	"github.com/travisjeffery/go-dynaport"
-	"go.uber.org/atomic"
-	"go.uber.org/goleak"
 )
 
 func TestMain(m *testing.M) {

@@ -13,17 +13,12 @@ option go_package = "github.com/tochemey/goakt/internal/internalpb;internalpb";
 // - lookup actor remotely
 service RemotingService {
   // RemoteAsk is used to send a message to an actor remotely and expect a response immediately.
-  rpc RemoteAsk(RemoteAskRequest) returns (RemoteAskResponse);
+  rpc RemoteAsk(stream RemoteAskRequest) returns (stream RemoteAskResponse);
   // RemoteTell is used to send a message to a remote actor
   // The actor on the other line can reply to the sender by using the Sender in the message
-  rpc RemoteTell(RemoteTellRequest) returns (RemoteTellResponse);
+  rpc RemoteTell(stream RemoteTellRequest) returns (RemoteTellResponse);
   // Lookup for an actor on a remote host.
   rpc RemoteLookup(RemoteLookupRequest) returns (RemoteLookupResponse);
-  // RemoteBatchTell is used to send a bulk of messages to a remote actor
-  rpc RemoteBatchTell(RemoteBatchTellRequest) returns (RemoteBatchTellResponse);
-  // RemoteBatchAsk is used to send a bulk messages to a remote actor with replies.
-  // The replies are sent in the same order as the messages
-  rpc RemoteBatchAsk(RemoteBatchAskRequest) returns (RemoteBatchAskResponse);
   // RemoteReSpawn restarts an actor on a remote machine
   rpc RemoteReSpawn(RemoteReSpawnRequest) returns (RemoteReSpawnResponse);
   // RemoteStop stops an actor on a remote machine
@@ -75,32 +70,6 @@ message RemoteMessage {
   // Specifies the message to send to the actor
   // Any proto message is allowed to be sent
   google.protobuf.Any message = 3;
-}
-
-message RemoteBatchTellRequest {
-  // Specifies the remote message to send
-  repeated google.protobuf.Any messages = 1;
-  // Specifies the sender' address
-  goaktpb.Address sender = 2;
-  // Specifies the actor address
-  goaktpb.Address receiver = 3;
-}
-
-message RemoteBatchTellResponse {}
-
-message RemoteBatchAskRequest {
-  // Specifies the remote message to send
-  repeated google.protobuf.Any messages = 1;
-  // Specifies the sender' address
-  goaktpb.Address sender = 2;
-  // Specifies the actor address
-  goaktpb.Address receiver = 3;
-}
-
-message RemoteBatchAskResponse {
-  // Specifies the message to send to the actor
-  // Any proto message is allowed to be sent
-  repeated google.protobuf.Any messages = 1;
 }
 
 message RemoteReSpawnRequest {

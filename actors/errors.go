@@ -26,6 +26,7 @@ package actors
 
 import (
 	"fmt"
+	"io"
 
 	"connectrpc.com/connect"
 	"github.com/pkg/errors"
@@ -79,3 +80,8 @@ var (
 	// ErrInstanceNotAnActor is returned when we failed to create the instance of an actor
 	ErrInstanceNotAnActor = errors.New("failed to create instance. Reason: instance does not implement the Actor interface")
 )
+
+// IsEOF returns true if the given error is an EOF error
+func IsEOF(err error) bool {
+	return err != nil && (errors.Is(err, io.EOF) || errors.Unwrap(err) == io.EOF)
+}

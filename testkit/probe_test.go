@@ -7,9 +7,10 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/encoding/prototext"
+
 	"github.com/tochemey/goakt/actors"
 	"github.com/tochemey/goakt/test/data/testpb"
-	"google.golang.org/protobuf/encoding/prototext"
 )
 
 func TestTestProbe(t *testing.T) {

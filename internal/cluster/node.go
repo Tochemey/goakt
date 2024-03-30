@@ -36,14 +36,15 @@ import (
 	"github.com/buraksezer/olric/hasher"
 	"github.com/pkg/errors"
 	"github.com/redis/go-redis/v9"
+	"google.golang.org/protobuf/types/known/anypb"
+	"google.golang.org/protobuf/types/known/timestamppb"
+
 	"github.com/tochemey/goakt/discovery"
 	"github.com/tochemey/goakt/goaktpb"
 	"github.com/tochemey/goakt/hash"
 	"github.com/tochemey/goakt/internal/internalpb"
 	"github.com/tochemey/goakt/internal/types"
 	"github.com/tochemey/goakt/log"
-	"google.golang.org/protobuf/types/known/anypb"
-	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // Event defines the cluster event

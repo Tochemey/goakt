@@ -27,8 +27,9 @@ package cluster
 import (
 	"encoding/base64"
 
-	"github.com/tochemey/goakt/internal/internalpb"
 	"google.golang.org/protobuf/proto"
+
+	"github.com/tochemey/goakt/internal/internalpb"
 )
 
 // encode marshals a wire actor into a base64 string
