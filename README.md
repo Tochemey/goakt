@@ -20,35 +20,35 @@ Also, check reference section at the end of the post for more material regarding
 
 - [Design Principles](#design-principles)
 - [Features](#features)
-    - [Actors](#actors)
-    - [Passivation](#passivation)
-    - [Actor System](#actor-system)
-    - [Behaviors](#behaviors)
-    - [Mailbox](#mailbox)
-    - [Events Stream](#events-stream)
-    - [Messaging](#messaging)
-    - [Scheduler](#scheduler)
-    - [Stashing](#stashing)
-    - [Remoting](#remoting)
-    - [Clustering](#cluster)
-    - [Observability](#observability)
-        -  [Logging](#logging)
-        - [Tracing](#tracing)
-        - [Metric](#metrics)
-    - [Testkit](#testkit)
-    - [API](#api)
+  - [Actors](#actors)
+  - [Passivation](#passivation)
+  - [Actor System](#actor-system)
+  - [Behaviors](#behaviors)
+  - [Mailbox](#mailbox)
+  - [Events Stream](#events-stream)
+  - [Messaging](#messaging)
+  - [Scheduler](#scheduler)
+  - [Stashing](#stashing)
+  - [Remoting](#remoting)
+  - [Clustering](#cluster)
+  - [Observability](#observability)
+    - [Logging](#logging)
+    - [Tracing](#tracing)
+    - [Metric](#metrics)
+  - [Testkit](#testkit)
+  - [API](#api)
 - [Use Cases](#use-cases)
 - [Installation](#installation)
 - [Clustering](#clustering)
-    - [Operation Guides](#operations-guide)
-    - [Discovery Providers](#built-in-discovery-providers)
-        - [Kubernetes](#kubernetes-discovery-provider-setup)
-        - [mDNS](#mdns-discovery-provider-setup)
-        - [NATS](#nats-discovery-provider-setup)
-        - [Domain Name Discovery](#dns-provider-setup)
+  - [Operation Guides](#operations-guide)
+  - [Discovery Providers](#built-in-discovery-providers)
+    - [Kubernetes](#kubernetes-discovery-provider-setup)
+    - [mDNS](#mdns-discovery-provider-setup)
+    - [NATS](#nats-discovery-provider-setup)
+    - [Domain Name Discovery](#dns-provider-setup)
 - [Examples](#examples)
 - [Contribution](#contribution)
-    - [Local Test and Linter](#test--linter)
+  - [Local Test and Linter](#test--linter)
 - [Benchmark](#benchmark)
 
 ## Design Principles
@@ -75,29 +75,29 @@ The fundamental building blocks of Go-Akt are actors.
   mechanisms.
 - They can be stateful and stateless depending upon the system to build.
 - Every actor in Go-Akt:
-    - has a process id [`PID`](./actors/pid.go). Via the process id any allowable action can be executed by the
+  - has a process id [`PID`](./actors/pid.go). Via the process id any allowable action can be executed by the
       actor.
-    - has a lifecycle via the following methods: [`PreStart`](./actors/actor.go), [`PostStop`](./actors/actor.go).
+  - has a lifecycle via the following methods: [`PreStart`](./actors/actor.go), [`PostStop`](./actors/actor.go).
       It means it
       can live and die like any other process.
-    - handles and responds to messages via the method [`Receive`](./actors/actor.go). While handling messages it
+  - handles and responds to messages via the method [`Receive`](./actors/actor.go). While handling messages it
       can:
-    - create other (child) actors via their process id [`PID`](./actors/pid.go) `SpawnChild` method
-    - send messages to other actors locally or remotely via their process
+  - create other (child) actors via their process id [`PID`](./actors/pid.go) `SpawnChild` method
+  - send messages to other actors locally or remotely via their process
       id [`PID`](./actors/pid.go) `Ask`, `RemoteAsk`(request/response
       fashion) and `Tell`, `RemoteTell`(fire-and-forget fashion) methods
-    - stop (child) actors via their process id [`PID`](./actors/pid.go)
-    - watch/unwatch (child) actors via their process id [`PID`](./actors/pid.go) `Watch` and `UnWatch` methods
-    - supervise the failure behavior of (child) actors. The supervisory strategy to adopt is set during its
+  - stop (child) actors via their process id [`PID`](./actors/pid.go)
+  - watch/unwatch (child) actors via their process id [`PID`](./actors/pid.go) `Watch` and `UnWatch` methods
+  - supervise the failure behavior of (child) actors. The supervisory strategy to adopt is set during its
       creation:
-    - Restart and Stop directive are supported at the moment.
-    - remotely lookup for an actor on another node via their process id [`PID`](./actors/pid.go) `RemoteLookup`.
+  - Restart and Stop directive are supported at the moment.
+  - remotely lookup for an actor on another node via their process id [`PID`](./actors/pid.go) `RemoteLookup`.
       This
       allows it to send messages remotely via `RemoteAsk` or `RemoteTell` methods
-    - stash/unstash messages. See [Stashing](#stashing)
-    - can adopt various form using the [Behavior](#behaviors) feature
-    - can be restarted (respawned)
-    - can be gracefully stopped (killed). Every message in the mailbox prior to stoppage will be processed within a
+  - stash/unstash messages. See [Stashing](#stashing)
+  - can adopt various form using the [Behavior](#behaviors) feature
+  - can be restarted (respawned)
+  - can be gracefully stopped (killed). Every message in the mailbox prior to stoppage will be processed within a
       configurable time period.
 
 ### Passivation
@@ -260,13 +260,14 @@ engine or set a custom one with `WithTelemetry` option of the actor system.
 #### Metrics
 
 One can enable/disable metrics on a Go-Akt actor system to collect the following metrics:
+
 - Actor Metrics:
-    - Number of children
-    - Number of messages stashed
-    - Number of Restarts
-    - Last message received processing latency in milliseconds
+  - Number of children
+  - Number of messages stashed
+  - Number of Restarts
+  - Last message received processing latency in milliseconds
 - System Metrics:
-    - Total Number of Actors
+  - Total Number of Actors
 
 Go-Akt uses under the hood [OpenTelemetry](https://opentelemetry.io/docs/instrumentation/go/) to instrument a system.
 One just need to use the `WithMetric` option when instantiating a Go-Akt actor system and use the default [Telemetry](./telemetry/telemetry.go)
@@ -280,6 +281,7 @@ A simple logging interface to allow custom logger to be implemented instead of u
 
 Go-Akt comes packaged with a testkit that can help test that actors receive expected messages within _unit tests_.
 To test that an actor receive and respond to messages one will have to:
+
 1. Create an instance of the testkit: `testkit := New(ctx, t)` where `ctx` is a go context and `t` the instance of `*testing.T`. This can be done in setup before the run of each test.
 2. Create the instance of the actor under test. Example: `pinger := testkit.Spawn(ctx, "pinger", &pinger{})`
 3. Create an instance of test probe: `probe := testkit.NewProbe(ctx)` where `ctx` is a go context
@@ -300,16 +302,17 @@ To help implement unit tests in GoAkt-based applications. See [Testkit](./testki
 
 The API interface helps interact with a Go-Akt actor system as kind of client. The following features are available:
 
-- `Tell`
-- `Ask`
-- `BatchAsk`
-- `BatchTell`
-- `RemoteTell`
-- `RemoteAsk`
-- `RemoteBatchTell`
-- `RemoteBatchAsk`
-- `RemoteReSpawn`
-- `RemoteLookup`
+- `Tell`: to send a message to an actor in a fire-and-forget manner
+- `Ask`: to send a message to an actor and expect a response within a given timeout
+- `BatchAsk`: to send a batch of requests to an actore remotely and expect responses back for each request.
+- `BatchTell`: to send a batch of fire-and-forget messages to an actor remotely
+- `RemoteTell`: to send a fire-and-forget message to an actor remotely
+- `RemoteAsk`: to send a request/response type of message to a remote actor
+- `RemoteBatchTell`: to send a fire-and-forget bulk of messages to a remote actor
+- `RemoteBatchAsk`: to send a bulk messages to a remote actor with replies
+- `RemoteLookup`: to lookup for an actor on a remote host
+- `RemoteReSpawn`: to restarts an actor on a remote machine
+- `RemoteStop`: to stop an actor on a remote machine
 
 ## Use Cases
 
