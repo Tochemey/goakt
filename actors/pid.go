@@ -345,7 +345,7 @@ func (p *pid) ID() string {
 
 // Equals is a convenient method to compare two PIDs
 func (p *pid) Equals(to PID) bool {
-	return strings.ToLower(p.ID()) == strings.ToLower(to.ID())
+	return strings.EqualFold(p.ID(), to.ID())
 }
 
 // ActorHandle returns the underlying Actor
