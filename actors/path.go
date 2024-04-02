@@ -87,8 +87,8 @@ func (p *Path) String() string {
 	return fmt.Sprintf("%s/%s", p.address.String(), p.name)
 }
 
-// Equal is used to compare two patsh
-func (p *Path) Equal(x *Path) bool {
+// Equals is used to compare two paths
+func (p *Path) Equals(x *Path) bool {
 	return p.id.ID() == x.ID().ID() && p.String() == x.String()
 }
 

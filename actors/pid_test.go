@@ -1628,3 +1628,56 @@ func TestRemoteStop(t *testing.T) {
 		})
 	})
 }
+
+func TestID(t *testing.T) {
+	ctx := context.TODO()
+	// create the actor path
+	actorPath := NewPath("Test", NewAddress("sys", "host", 1))
+
+	// create the actor ref
+	pid, err := newPID(
+		ctx,
+		actorPath,
+		&exchanger{},
+		withInitMaxRetries(1),
+		withCustomLogger(log.DiscardLogger),
+		withSendReplyTimeout(receivingTimeout))
+	require.NoError(t, err)
+	assert.NotNil(t, pid)
+	sys := pid.ActorSystem()
+	assert.Nil(t, sys)
+
+	expected := actorPath.String()
+	actual := pid.ID()
+
+	require.Equal(t, expected, actual)
+
+	// stop the actor
+	err = pid.Shutdown(ctx)
+	assert.NoError(t, err)
+}
+
+func TestEquals(t *testing.T) {
+	ctx := context.TODO()
+	logger := log.DiscardLogger
+	sys, err := NewActorSystem("test",
+		WithLogger(logger),
+		WithPassivationDisabled())
+
+	require.NoError(t, err)
+	err = sys.Start(ctx)
+	assert.NoError(t, err)
+
+	pid1, err := sys.Spawn(ctx, "test", newTestActor())
+	require.NoError(t, err)
+	assert.NotNil(t, pid1)
+
+	pid2, err := sys.Spawn(ctx, "exchange", &exchanger{})
+	require.NoError(t, err)
+	assert.NotNil(t, pid2)
+
+	assert.False(t, pid1.Equals(pid2))
+
+	err = sys.Stop(ctx)
+	assert.NoError(t, err)
+}
