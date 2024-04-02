@@ -1628,3 +1628,31 @@ func TestRemoteStop(t *testing.T) {
 		})
 	})
 }
+
+func TestID(t *testing.T) {
+	ctx := context.TODO()
+	// create the actor path
+	actorPath := NewPath("Test", NewAddress("sys", "host", 1))
+
+	// create the actor ref
+	pid, err := newPID(
+		ctx,
+		actorPath,
+		&exchanger{},
+		withInitMaxRetries(1),
+		withCustomLogger(log.DiscardLogger),
+		withSendReplyTimeout(receivingTimeout))
+	require.NoError(t, err)
+	assert.NotNil(t, pid)
+	sys := pid.ActorSystem()
+	assert.Nil(t, sys)
+
+	expected := actorPath.String()
+	actual := pid.ID()
+
+	require.Equal(t, expected, actual)
+
+	// stop the actor
+	err = pid.Shutdown(ctx)
+	assert.NoError(t, err)
+}
