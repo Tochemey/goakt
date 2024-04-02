@@ -28,6 +28,7 @@ import (
 	"context"
 	"fmt"
 	stdhttp "net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -134,6 +135,8 @@ type PID interface {
 	Stop(ctx context.Context, pid PID) error
 	// StashSize returns the stash buffer size
 	StashSize() uint64
+	// Equals is a convenient method to compare two PIDs
+	Equals(to PID) bool
 	// push a message to the actor's receiveContextBuffer
 	doReceive(ctx ReceiveContext)
 	// watchers returns the list of watchMen
@@ -338,6 +341,11 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 // An actor unique identifier is its address in the actor system.
 func (p *pid) ID() string {
 	return p.ActorPath().String()
+}
+
+// Equals is a convenient method to compare two PIDs
+func (p *pid) Equals(to PID) bool {
+	return strings.ToLower(p.ID()) == strings.ToLower(to.ID())
 }
 
 // ActorHandle returns the underlying Actor
@@ -1113,7 +1121,7 @@ func (p *pid) Watch(cid PID) {
 func (p *pid) UnWatch(pid PID) {
 	for item := range pid.watchers().Iter() {
 		w := item.Value
-		if w.WatcherID.ActorPath().Equal(p.ActorPath()) {
+		if w.WatcherID.ActorPath().Equals(p.ActorPath()) {
 			w.Done <- types.Unit{}
 			pid.watchers().Delete(item.Index)
 			break

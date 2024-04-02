@@ -1656,3 +1656,28 @@ func TestID(t *testing.T) {
 	err = pid.Shutdown(ctx)
 	assert.NoError(t, err)
 }
+
+func TestEquals(t *testing.T) {
+	ctx := context.TODO()
+	logger := log.DiscardLogger
+	sys, err := NewActorSystem("test",
+		WithLogger(logger),
+		WithPassivationDisabled())
+
+	require.NoError(t, err)
+	err = sys.Start(ctx)
+	assert.NoError(t, err)
+
+	pid1, err := sys.Spawn(ctx, "test", newTestActor())
+	require.NoError(t, err)
+	assert.NotNil(t, pid1)
+
+	pid2, err := sys.Spawn(ctx, "exchange", &exchanger{})
+	require.NoError(t, err)
+	assert.NotNil(t, pid2)
+
+	assert.False(t, pid1.Equals(pid2))
+
+	err = sys.Stop(ctx)
+	assert.NoError(t, err)
+}
