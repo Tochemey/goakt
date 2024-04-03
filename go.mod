@@ -34,7 +34,7 @@ require (
 	go.uber.org/atomic v1.11.0
 	go.uber.org/goleak v1.3.0
 	go.uber.org/zap v1.27.0
-	golang.org/x/net v0.22.0
+	golang.org/x/net v0.23.0
 	golang.org/x/sync v0.6.0
 	google.golang.org/protobuf v1.33.0
 	k8s.io/api v0.29.3
