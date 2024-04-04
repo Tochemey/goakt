@@ -48,6 +48,9 @@ const (
 	// RemotingServiceRemoteStopProcedure is the fully-qualified name of the RemotingService's
 	// RemoteStop RPC.
 	RemotingServiceRemoteStopProcedure = "/internalpb.RemotingService/RemoteStop"
+	// RemotingServiceRemoteSpawnProcedure is the fully-qualified name of the RemotingService's
+	// RemoteSpawn RPC.
+	RemotingServiceRemoteSpawnProcedure = "/internalpb.RemotingService/RemoteSpawn"
 )
 
 // These variables are the protoreflect.Descriptor objects for the RPCs defined in this package.
@@ -58,6 +61,7 @@ var (
 	remotingServiceRemoteLookupMethodDescriptor  = remotingServiceServiceDescriptor.Methods().ByName("RemoteLookup")
 	remotingServiceRemoteReSpawnMethodDescriptor = remotingServiceServiceDescriptor.Methods().ByName("RemoteReSpawn")
 	remotingServiceRemoteStopMethodDescriptor    = remotingServiceServiceDescriptor.Methods().ByName("RemoteStop")
+	remotingServiceRemoteSpawnMethodDescriptor   = remotingServiceServiceDescriptor.Methods().ByName("RemoteSpawn")
 )
 
 // RemotingServiceClient is a client for the internalpb.RemotingService service.
@@ -73,6 +77,8 @@ type RemotingServiceClient interface {
 	RemoteReSpawn(context.Context, *connect.Request[internalpb.RemoteReSpawnRequest]) (*connect.Response[internalpb.RemoteReSpawnResponse], error)
 	// RemoteStop stops an actor on a remote machine
 	RemoteStop(context.Context, *connect.Request[internalpb.RemoteStopRequest]) (*connect.Response[internalpb.RemoteStopResponse], error)
+	// RemoteSpawn starts an actor on a remote machine
+	RemoteSpawn(context.Context, *connect.Request[internalpb.RemoteSpawnRequest]) (*connect.Response[internalpb.RemoteSpawnResponse], error)
 }
 
 // NewRemotingServiceClient constructs a client for the internalpb.RemotingService service. By
@@ -115,6 +121,12 @@ func NewRemotingServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 			connect.WithSchema(remotingServiceRemoteStopMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
+		remoteSpawn: connect.NewClient[internalpb.RemoteSpawnRequest, internalpb.RemoteSpawnResponse](
+			httpClient,
+			baseURL+RemotingServiceRemoteSpawnProcedure,
+			connect.WithSchema(remotingServiceRemoteSpawnMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -125,6 +137,7 @@ type remotingServiceClient struct {
 	remoteLookup  *connect.Client[internalpb.RemoteLookupRequest, internalpb.RemoteLookupResponse]
 	remoteReSpawn *connect.Client[internalpb.RemoteReSpawnRequest, internalpb.RemoteReSpawnResponse]
 	remoteStop    *connect.Client[internalpb.RemoteStopRequest, internalpb.RemoteStopResponse]
+	remoteSpawn   *connect.Client[internalpb.RemoteSpawnRequest, internalpb.RemoteSpawnResponse]
 }
 
 // RemoteAsk calls internalpb.RemotingService.RemoteAsk.
@@ -152,6 +165,11 @@ func (c *remotingServiceClient) RemoteStop(ctx context.Context, req *connect.Req
 	return c.remoteStop.CallUnary(ctx, req)
 }
 
+// RemoteSpawn calls internalpb.RemotingService.RemoteSpawn.
+func (c *remotingServiceClient) RemoteSpawn(ctx context.Context, req *connect.Request[internalpb.RemoteSpawnRequest]) (*connect.Response[internalpb.RemoteSpawnResponse], error) {
+	return c.remoteSpawn.CallUnary(ctx, req)
+}
+
 // RemotingServiceHandler is an implementation of the internalpb.RemotingService service.
 type RemotingServiceHandler interface {
 	// RemoteAsk is used to send a message to an actor remotely and expect a response immediately.
@@ -165,6 +183,8 @@ type RemotingServiceHandler interface {
 	RemoteReSpawn(context.Context, *connect.Request[internalpb.RemoteReSpawnRequest]) (*connect.Response[internalpb.RemoteReSpawnResponse], error)
 	// RemoteStop stops an actor on a remote machine
 	RemoteStop(context.Context, *connect.Request[internalpb.RemoteStopRequest]) (*connect.Response[internalpb.RemoteStopResponse], error)
+	// RemoteSpawn starts an actor on a remote machine
+	RemoteSpawn(context.Context, *connect.Request[internalpb.RemoteSpawnRequest]) (*connect.Response[internalpb.RemoteSpawnResponse], error)
 }
 
 // NewRemotingServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -203,6 +223,12 @@ func NewRemotingServiceHandler(svc RemotingServiceHandler, opts ...connect.Handl
 		connect.WithSchema(remotingServiceRemoteStopMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
+	remotingServiceRemoteSpawnHandler := connect.NewUnaryHandler(
+		RemotingServiceRemoteSpawnProcedure,
+		svc.RemoteSpawn,
+		connect.WithSchema(remotingServiceRemoteSpawnMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/internalpb.RemotingService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case RemotingServiceRemoteAskProcedure:
@@ -215,6 +241,8 @@ func NewRemotingServiceHandler(svc RemotingServiceHandler, opts ...connect.Handl
 			remotingServiceRemoteReSpawnHandler.ServeHTTP(w, r)
 		case RemotingServiceRemoteStopProcedure:
 			remotingServiceRemoteStopHandler.ServeHTTP(w, r)
+		case RemotingServiceRemoteSpawnProcedure:
+			remotingServiceRemoteSpawnHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -242,4 +270,8 @@ func (UnimplementedRemotingServiceHandler) RemoteReSpawn(context.Context, *conne
 
 func (UnimplementedRemotingServiceHandler) RemoteStop(context.Context, *connect.Request[internalpb.RemoteStopRequest]) (*connect.Response[internalpb.RemoteStopResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("internalpb.RemotingService.RemoteStop is not implemented"))
+}
+
+func (UnimplementedRemotingServiceHandler) RemoteSpawn(context.Context, *connect.Request[internalpb.RemoteSpawnRequest]) (*connect.Response[internalpb.RemoteSpawnResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("internalpb.RemotingService.RemoteSpawn is not implemented"))
 }

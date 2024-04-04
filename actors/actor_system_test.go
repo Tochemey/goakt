@@ -1351,4 +1351,100 @@ func TestActorSystem(t *testing.T) {
 		assert.EqualError(t, err, ErrActorSystemNotStarted.Error())
 		assert.Nil(t, actorRef)
 	})
+
+	t.Run("With happy path Register", func(t *testing.T) {
+		ctx := context.TODO()
+		logger := log.New(log.DebugLevel, os.Stdout)
+
+		// create the actor system
+		sys, err := NewActorSystem("test",
+			WithLogger(logger),
+			WithPassivationDisabled())
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		// register the actor
+		err = sys.Register(ctx, &exchanger{})
+		require.NoError(t, err)
+
+		t.Cleanup(func() {
+			err = sys.Stop(ctx)
+			assert.NoError(t, err)
+		})
+	})
+
+	t.Run("With Register when actor system not started", func(t *testing.T) {
+		ctx := context.TODO()
+		logger := log.New(log.DebugLevel, os.Stdout)
+
+		// create the actor system
+		sys, err := NewActorSystem("test",
+			WithLogger(logger),
+			WithPassivationDisabled())
+		// assert there are no error
+		require.NoError(t, err)
+
+		// register the actor
+		err = sys.Register(ctx, &exchanger{})
+		require.Error(t, err)
+		assert.EqualError(t, err, ErrActorSystemNotStarted.Error())
+
+		t.Cleanup(func() {
+			err = sys.Stop(ctx)
+			assert.Error(t, err)
+		})
+	})
+
+	t.Run("With happy path Deregister", func(t *testing.T) {
+		ctx := context.TODO()
+		logger := log.New(log.DebugLevel, os.Stdout)
+
+		// create the actor system
+		sys, err := NewActorSystem("test",
+			WithLogger(logger),
+			WithPassivationDisabled())
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		// register the actor
+		err = sys.Register(ctx, &exchanger{})
+		require.NoError(t, err)
+
+		err = sys.Deregister(ctx, &exchanger{})
+		require.NoError(t, err)
+
+		t.Cleanup(func() {
+			err = sys.Stop(ctx)
+			assert.NoError(t, err)
+		})
+	})
+
+	t.Run("With Deregister when actor system not started", func(t *testing.T) {
+		ctx := context.TODO()
+		logger := log.New(log.DebugLevel, os.Stdout)
+
+		// create the actor system
+		sys, err := NewActorSystem("test",
+			WithLogger(logger),
+			WithPassivationDisabled())
+		// assert there are no error
+		require.NoError(t, err)
+
+		err = sys.Deregister(ctx, &exchanger{})
+		require.Error(t, err)
+		assert.EqualError(t, err, ErrActorSystemNotStarted.Error())
+
+		t.Cleanup(func() {
+			err = sys.Stop(ctx)
+			assert.Error(t, err)
+		})
+	})
 }
