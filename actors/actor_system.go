@@ -118,6 +118,10 @@ type ActorSystem interface {
 	// PeerAddress returns the actor system address known in the cluster. That address is used by other nodes to communicate with the actor system.
 	// This address is empty when cluster mode is not activated
 	PeerAddress() string
+	// Register register an actor for future use. This is necessary when creating an actor remotely
+	Register(ctx context.Context, actor Actor) error
+	// Deregister removes a registered actor from the registry
+	Deregister(ctx context.Context, actor Actor) error
 	// handleRemoteAsk handles a synchronous message to another actor and expect a response.
 	// This block until a response is received or timed out.
 	handleRemoteAsk(ctx context.Context, to PID, message proto.Message) (response proto.Message, err error)
@@ -204,8 +208,8 @@ type actorSystem struct {
 	metricEnabled atomic.Bool
 	eventsChan    <-chan *cluster.Event
 
-	typesRegistry Registry
-	reflection    Reflection
+	registry   registry
+	reflection reflection
 }
 
 // enforce compilation error when all methods of the ActorSystem interface are not implemented
@@ -240,7 +244,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		actorInitTimeout:    DefaultInitTimeout,
 		tracer:              noop.NewTracerProvider().Tracer(name),
 		eventsChan:          make(chan *cluster.Event, 1),
-		typesRegistry:       NewRegistry(),
+		registry:            newRegistry(),
 	}
 
 	system.started.Store(false)
@@ -249,7 +253,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 	system.traceEnabled.Store(false)
 	system.metricEnabled.Store(false)
 
-	system.reflection = NewReflection(system.typesRegistry)
+	system.reflection = newReflection(system.registry)
 
 	// apply the various options
 	for _, opt := range opts {
@@ -269,6 +273,38 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 	}
 
 	return system, nil
+}
+
+// Deregister removes a registered actor from the registry
+func (x *actorSystem) Deregister(ctx context.Context, actor Actor) error {
+	_, span := x.tracer.Start(ctx, "Deregister")
+	defer span.End()
+
+	x.mutex.Lock()
+	defer x.mutex.Unlock()
+
+	if !x.started.Load() {
+		return ErrActorSystemNotStarted
+	}
+
+	x.registry.Deregister(actor)
+	return nil
+}
+
+// Register registers an actor for future use. This is necessary when creating an actor remotely
+func (x *actorSystem) Register(ctx context.Context, actor Actor) error {
+	_, span := x.tracer.Start(ctx, "Register")
+	defer span.End()
+
+	x.mutex.Lock()
+	defer x.mutex.Unlock()
+
+	if !x.started.Load() {
+		return ErrActorSystemNotStarted
+	}
+
+	x.registry.Register(actor)
+	return nil
 }
 
 // ScheduleOnce schedules a message that will be delivered to the receiver actor
@@ -790,8 +826,7 @@ func (x *actorSystem) RemoteLookup(_ context.Context, request *connect.Request[i
 		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrRemotingDisabled)
 	}
 
-	name := reqCopy.GetName()
-	actorPath := NewPath(name, NewAddress(x.Name(), reqCopy.GetHost(), int(reqCopy.GetPort())))
+	actorPath := NewPath(reqCopy.GetName(), NewAddress(x.Name(), reqCopy.GetHost(), int(reqCopy.GetPort())))
 	pid, exist := x.actors.Get(actorPath)
 	if !exist {
 		logger.Error(ErrAddressNotFound(actorPath.String()).Error())
@@ -965,6 +1000,34 @@ func (x *actorSystem) RemoteStop(ctx context.Context, request *connect.Request[i
 
 	x.actors.Delete(actorPath)
 	return connect.NewResponse(new(internalpb.RemoteStopResponse)), nil
+}
+
+// RemoteSpawn starts an actor on a remote machine. The given actor must be registered on the remote machine using the actor system Register method
+func (x *actorSystem) RemoteSpawn(ctx context.Context, request *connect.Request[internalpb.RemoteSpawnRequest]) (*connect.Response[internalpb.RemoteSpawnResponse], error) {
+	logger := x.logger
+
+	req := request.Msg
+
+	if !x.remotingEnabled.Load() {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrRemotingDisabled)
+	}
+
+	actor, err := x.reflection.ActorFrom(req.GetActorType())
+	if err != nil {
+		logger.Errorf("failed to create actor=(%s) on [host=%s, port=%d]: reason: (%v)", req.GetActorName(), req.GetHost(), req.GetPort(), err)
+		if errors.Is(err, ErrTypeNotRegistered) {
+			return nil, connect.NewError(connect.CodeFailedPrecondition, ErrTypeNotRegistered)
+		}
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+
+	_, err = x.Spawn(ctx, req.GetActorName(), actor)
+	if err != nil {
+		logger.Errorf("failed to create actor=(%s) on [host=%s, port=%d]: reason: (%v)", req.GetActorName(), req.GetHost(), req.GetPort(), err)
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+
+	return connect.NewResponse(new(internalpb.RemoteSpawnResponse)), nil
 }
 
 // handleRemoteAsk handles a synchronous message to another actor and expect a response.

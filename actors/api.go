@@ -26,6 +26,7 @@ package actors
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"connectrpc.com/connect"
@@ -471,5 +472,41 @@ func RemoteStop(ctx context.Context, host string, port int, name string) error {
 		return err
 	}
 
+	return nil
+}
+
+// RemoteSpawn creates an actor on a remote node. The given actor needs to be registered on the remote node using the Register method of ActorSystem
+func RemoteSpawn(ctx context.Context, host string, port int, name, actorType string) error {
+	interceptor, err := otelconnect.NewInterceptor()
+	if err != nil {
+		return err
+	}
+
+	remoteClient := internalpbconnect.NewRemotingServiceClient(
+		http.NewClient(),
+		http.URL(host, port),
+		connect.WithInterceptors(interceptor),
+		connect.WithGRPC(),
+	)
+
+	request := connect.NewRequest(&internalpb.RemoteSpawnRequest{
+		Host:      host,
+		Port:      int32(port),
+		ActorName: name,
+		ActorType: actorType,
+	})
+
+	if _, err := remoteClient.RemoteSpawn(ctx, request); err != nil {
+		code := connect.CodeOf(err)
+		if code == connect.CodeFailedPrecondition {
+			connectErr := err.(*connect.Error)
+			e := connectErr.Unwrap()
+			// TODO: find a better way to use errors.Is with connect.Error
+			if strings.Contains(e.Error(), ErrTypeNotRegistered.Error()) {
+				return ErrTypeNotRegistered
+			}
+		}
+		return err
+	}
 	return nil
 }

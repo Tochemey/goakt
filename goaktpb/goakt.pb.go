@@ -758,45 +758,6 @@ func (*PreStart) Descriptor() ([]byte, []int) {
 	return file_goakt_goakt_proto_rawDescGZIP(), []int{12}
 }
 
-// PostStop is used when an actor and all its child actors have terminated
-type PostStop struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
-	unknownFields protoimpl.UnknownFields
-}
-
-func (x *PostStop) Reset() {
-	*x = PostStop{}
-	if protoimpl.UnsafeEnabled {
-		mi := &file_goakt_goakt_proto_msgTypes[13]
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		ms.StoreMessageInfo(mi)
-	}
-}
-
-func (x *PostStop) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*PostStop) ProtoMessage() {}
-
-func (x *PostStop) ProtoReflect() protoreflect.Message {
-	mi := &file_goakt_goakt_proto_msgTypes[13]
-	if protoimpl.UnsafeEnabled && x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use PostStop.ProtoReflect.Descriptor instead.
-func (*PostStop) Descriptor() ([]byte, []int) {
-	return file_goakt_goakt_proto_rawDescGZIP(), []int{13}
-}
-
 var File_goakt_goakt_proto protoreflect.FileDescriptor
 
 var file_goakt_goakt_proto_rawDesc = []byte{
@@ -882,16 +843,15 @@ var file_goakt_goakt_proto_rawDesc = []byte{
 	0x65, 0x72, 0x6d, 0x69, 0x6e, 0x61, 0x74, 0x65, 0x64, 0x22, 0x0c, 0x0a, 0x0a, 0x50, 0x6f, 0x69,
 	0x73, 0x6f, 0x6e, 0x50, 0x69, 0x6c, 0x6c, 0x22, 0x0b, 0x0a, 0x09, 0x50, 0x6f, 0x73, 0x74, 0x53,
 	0x74, 0x61, 0x72, 0x74, 0x22, 0x0a, 0x0a, 0x08, 0x50, 0x72, 0x65, 0x53, 0x74, 0x61, 0x72, 0x74,
-	0x22, 0x0a, 0x0a, 0x08, 0x50, 0x6f, 0x73, 0x74, 0x53, 0x74, 0x6f, 0x70, 0x42, 0x82, 0x01, 0x0a,
-	0x0b, 0x63, 0x6f, 0x6d, 0x2e, 0x67, 0x6f, 0x61, 0x6b, 0x74, 0x70, 0x62, 0x42, 0x0a, 0x47, 0x6f,
-	0x61, 0x6b, 0x74, 0x50, 0x72, 0x6f, 0x74, 0x6f, 0x48, 0x02, 0x50, 0x01, 0x5a, 0x29, 0x67, 0x69,
-	0x74, 0x68, 0x75, 0x62, 0x2e, 0x63, 0x6f, 0x6d, 0x2f, 0x74, 0x6f, 0x63, 0x68, 0x65, 0x6d, 0x65,
-	0x79, 0x2f, 0x67, 0x6f, 0x61, 0x6b, 0x74, 0x2f, 0x67, 0x6f, 0x61, 0x6b, 0x74, 0x70, 0x62, 0x3b,
-	0x67, 0x6f, 0x61, 0x6b, 0x74, 0x70, 0x62, 0xa2, 0x02, 0x03, 0x47, 0x58, 0x58, 0xaa, 0x02, 0x07,
-	0x47, 0x6f, 0x61, 0x6b, 0x74, 0x70, 0x62, 0xca, 0x02, 0x07, 0x47, 0x6f, 0x61, 0x6b, 0x74, 0x70,
-	0x62, 0xe2, 0x02, 0x13, 0x47, 0x6f, 0x61, 0x6b, 0x74, 0x70, 0x62, 0x5c, 0x47, 0x50, 0x42, 0x4d,
-	0x65, 0x74, 0x61, 0x64, 0x61, 0x74, 0x61, 0xea, 0x02, 0x07, 0x47, 0x6f, 0x61, 0x6b, 0x74, 0x70,
-	0x62, 0x62, 0x06, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x33,
+	0x42, 0x82, 0x01, 0x0a, 0x0b, 0x63, 0x6f, 0x6d, 0x2e, 0x67, 0x6f, 0x61, 0x6b, 0x74, 0x70, 0x62,
+	0x42, 0x0a, 0x47, 0x6f, 0x61, 0x6b, 0x74, 0x50, 0x72, 0x6f, 0x74, 0x6f, 0x48, 0x02, 0x50, 0x01,
+	0x5a, 0x29, 0x67, 0x69, 0x74, 0x68, 0x75, 0x62, 0x2e, 0x63, 0x6f, 0x6d, 0x2f, 0x74, 0x6f, 0x63,
+	0x68, 0x65, 0x6d, 0x65, 0x79, 0x2f, 0x67, 0x6f, 0x61, 0x6b, 0x74, 0x2f, 0x67, 0x6f, 0x61, 0x6b,
+	0x74, 0x70, 0x62, 0x3b, 0x67, 0x6f, 0x61, 0x6b, 0x74, 0x70, 0x62, 0xa2, 0x02, 0x03, 0x47, 0x58,
+	0x58, 0xaa, 0x02, 0x07, 0x47, 0x6f, 0x61, 0x6b, 0x74, 0x70, 0x62, 0xca, 0x02, 0x07, 0x47, 0x6f,
+	0x61, 0x6b, 0x74, 0x70, 0x62, 0xe2, 0x02, 0x13, 0x47, 0x6f, 0x61, 0x6b, 0x74, 0x70, 0x62, 0x5c,
+	0x47, 0x50, 0x42, 0x4d, 0x65, 0x74, 0x61, 0x64, 0x61, 0x74, 0x61, 0xea, 0x02, 0x07, 0x47, 0x6f,
+	0x61, 0x6b, 0x74, 0x70, 0x62, 0x62, 0x06, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x33,
 }
 
 var (
@@ -906,7 +866,7 @@ func file_goakt_goakt_proto_rawDescGZIP() []byte {
 	return file_goakt_goakt_proto_rawDescData
 }
 
-var file_goakt_goakt_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
+var file_goakt_goakt_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
 var file_goakt_goakt_proto_goTypes = []interface{}{
 	(*Address)(nil),               // 0: goaktpb.Address
 	(*Deadletter)(nil),            // 1: goaktpb.Deadletter
@@ -921,28 +881,27 @@ var file_goakt_goakt_proto_goTypes = []interface{}{
 	(*PoisonPill)(nil),            // 10: goaktpb.PoisonPill
 	(*PostStart)(nil),             // 11: goaktpb.PostStart
 	(*PreStart)(nil),              // 12: goaktpb.PreStart
-	(*PostStop)(nil),              // 13: goaktpb.PostStop
-	(*anypb.Any)(nil),             // 14: google.protobuf.Any
-	(*timestamppb.Timestamp)(nil), // 15: google.protobuf.Timestamp
+	(*anypb.Any)(nil),             // 13: google.protobuf.Any
+	(*timestamppb.Timestamp)(nil), // 14: google.protobuf.Timestamp
 }
 var file_goakt_goakt_proto_depIdxs = []int32{
 	0,  // 0: goaktpb.Deadletter.sender:type_name -> goaktpb.Address
 	0,  // 1: goaktpb.Deadletter.receiver:type_name -> goaktpb.Address
-	14, // 2: goaktpb.Deadletter.message:type_name -> google.protobuf.Any
-	15, // 3: goaktpb.Deadletter.send_time:type_name -> google.protobuf.Timestamp
+	13, // 2: goaktpb.Deadletter.message:type_name -> google.protobuf.Any
+	14, // 3: goaktpb.Deadletter.send_time:type_name -> google.protobuf.Timestamp
 	0,  // 4: goaktpb.ActorStarted.address:type_name -> goaktpb.Address
-	15, // 5: goaktpb.ActorStarted.started_at:type_name -> google.protobuf.Timestamp
+	14, // 5: goaktpb.ActorStarted.started_at:type_name -> google.protobuf.Timestamp
 	0,  // 6: goaktpb.ActorStopped.address:type_name -> goaktpb.Address
-	15, // 7: goaktpb.ActorStopped.stopped_at:type_name -> google.protobuf.Timestamp
+	14, // 7: goaktpb.ActorStopped.stopped_at:type_name -> google.protobuf.Timestamp
 	0,  // 8: goaktpb.ActorPassivated.address:type_name -> goaktpb.Address
-	15, // 9: goaktpb.ActorPassivated.passivated_at:type_name -> google.protobuf.Timestamp
+	14, // 9: goaktpb.ActorPassivated.passivated_at:type_name -> google.protobuf.Timestamp
 	0,  // 10: goaktpb.ActorChildCreated.address:type_name -> goaktpb.Address
 	0,  // 11: goaktpb.ActorChildCreated.parent:type_name -> goaktpb.Address
-	15, // 12: goaktpb.ActorChildCreated.created_at:type_name -> google.protobuf.Timestamp
+	14, // 12: goaktpb.ActorChildCreated.created_at:type_name -> google.protobuf.Timestamp
 	0,  // 13: goaktpb.ActorRestarted.address:type_name -> goaktpb.Address
-	15, // 14: goaktpb.ActorRestarted.restarted_at:type_name -> google.protobuf.Timestamp
-	15, // 15: goaktpb.NodeJoined.timestamp:type_name -> google.protobuf.Timestamp
-	15, // 16: goaktpb.NodeLeft.timestamp:type_name -> google.protobuf.Timestamp
+	14, // 14: goaktpb.ActorRestarted.restarted_at:type_name -> google.protobuf.Timestamp
+	14, // 15: goaktpb.NodeJoined.timestamp:type_name -> google.protobuf.Timestamp
+	14, // 16: goaktpb.NodeLeft.timestamp:type_name -> google.protobuf.Timestamp
 	17, // [17:17] is the sub-list for method output_type
 	17, // [17:17] is the sub-list for method input_type
 	17, // [17:17] is the sub-list for extension type_name
@@ -1112,18 +1071,6 @@ func file_goakt_goakt_proto_init() {
 				return nil
 			}
 		}
-		file_goakt_goakt_proto_msgTypes[13].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*PostStop); i {
-			case 0:
-				return &v.state
-			case 1:
-				return &v.sizeCache
-			case 2:
-				return &v.unknownFields
-			default:
-				return nil
-			}
-		}
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -1131,7 +1078,7 @@ func file_goakt_goakt_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: file_goakt_goakt_proto_rawDesc,
 			NumEnums:      0,
-			NumMessages:   14,
+			NumMessages:   13,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

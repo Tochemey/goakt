@@ -125,6 +125,8 @@ type PID interface {
 	RemoteReSpawn(ctx context.Context, host string, port int, name string) error
 	// RemoteStop stops an actor on a remote node
 	RemoteStop(ctx context.Context, host string, port int, name string) error
+	// RemoteSpawn creates an actor on a remote node. The given actor needs to be registered on the remote node using the Register method of ActorSystem
+	RemoteSpawn(ctx context.Context, host string, port int, name, actorType string) error
 	// Children returns the list of all the children of the given actor that are still alive
 	// or an empty list.
 	Children() []PID
@@ -704,16 +706,10 @@ func (p *pid) BatchAsk(ctx context.Context, to PID, messages ...proto.Message) (
 
 // RemoteLookup look for an actor address on a remote node.
 func (p *pid) RemoteLookup(ctx context.Context, host string, port int, name string) (addr *goaktpb.Address, err error) {
-	clientConnectionOptions, err := p.getConnectionOptions()
+	remoteClient, err := p.getRemoteServiceClient(host, port)
 	if err != nil {
 		return nil, err
 	}
-
-	remoteClient := internalpbconnect.NewRemotingServiceClient(
-		p.httpClient,
-		http.URL(host, port),
-		clientConnectionOptions...,
-	)
 
 	request := connect.NewRequest(&internalpb.RemoteLookupRequest{
 		Host: host,
@@ -740,16 +736,10 @@ func (p *pid) RemoteTell(ctx context.Context, to *goaktpb.Address, message proto
 		return err
 	}
 
-	clientConnectionOptions, err := p.getConnectionOptions()
+	remoteService, err := p.getRemoteServiceClient(to.GetHost(), int(to.GetPort()))
 	if err != nil {
 		return err
 	}
-
-	remoteClient := internalpbconnect.NewRemotingServiceClient(
-		p.httpClient,
-		http.URL(to.GetHost(), int(to.GetPort())),
-		clientConnectionOptions...,
-	)
 
 	sender := &goaktpb.Address{
 		Host: p.ActorPath().Address().Host(),
@@ -767,7 +757,7 @@ func (p *pid) RemoteTell(ctx context.Context, to *goaktpb.Address, message proto
 	}
 
 	p.logger.Debugf("sending a message to remote=(%s:%d)", to.GetHost(), to.GetPort())
-	stream := remoteClient.RemoteTell(ctx)
+	stream := remoteService.RemoteTell(ctx)
 	if err := stream.Send(request); err != nil {
 		if IsEOF(err) {
 			if _, err := stream.CloseAndReceive(); err != nil {
@@ -795,16 +785,10 @@ func (p *pid) RemoteAsk(ctx context.Context, to *goaktpb.Address, message proto.
 		return nil, err
 	}
 
-	clientConnectionOptions, err := p.getConnectionOptions()
+	remoteService, err := p.getRemoteServiceClient(to.GetHost(), int(to.GetPort()))
 	if err != nil {
 		return nil, err
 	}
-
-	remoteService := internalpbconnect.NewRemotingServiceClient(
-		p.httpClient,
-		http.URL(to.GetHost(), int(to.GetPort())),
-		clientConnectionOptions...,
-	)
 
 	senderPath := p.ActorPath()
 	senderAddress := senderPath.Address()
@@ -894,18 +878,12 @@ func (p *pid) RemoteBatchTell(ctx context.Context, to *goaktpb.Address, messages
 		})
 	}
 
-	clientConnectionOptions, err := p.getConnectionOptions()
+	remoteService, err := p.getRemoteServiceClient(to.GetHost(), int(to.GetPort()))
 	if err != nil {
 		return err
 	}
 
-	remoteClient := internalpbconnect.NewRemotingServiceClient(
-		http.NewClient(),
-		http.URL(to.GetHost(), int(to.GetPort())),
-		clientConnectionOptions...,
-	)
-
-	stream := remoteClient.RemoteTell(ctx)
+	stream := remoteService.RemoteTell(ctx)
 	for _, request := range requests {
 		if err := stream.Send(request); err != nil {
 			if IsEOF(err) {
@@ -956,18 +934,12 @@ func (p *pid) RemoteBatchAsk(ctx context.Context, to *goaktpb.Address, messages 
 		})
 	}
 
-	clientConnectionOptions, err := p.getConnectionOptions()
+	remoteService, err := p.getRemoteServiceClient(to.GetHost(), int(to.GetPort()))
 	if err != nil {
 		return nil, err
 	}
 
-	remoteClient := internalpbconnect.NewRemotingServiceClient(
-		http.NewClient(),
-		http.URL(to.GetHost(), int(to.GetPort())),
-		clientConnectionOptions...,
-	)
-
-	stream := remoteClient.RemoteAsk(ctx)
+	stream := remoteService.RemoteAsk(ctx)
 	errc := make(chan error, 1)
 
 	go func() {
@@ -1008,16 +980,10 @@ func (p *pid) RemoteBatchAsk(ctx context.Context, to *goaktpb.Address, messages 
 
 // RemoteStop stops an actor on a remote node
 func (p *pid) RemoteStop(ctx context.Context, host string, port int, name string) error {
-	clientConnectionOptions, err := p.getConnectionOptions()
+	remoteService, err := p.getRemoteServiceClient(host, port)
 	if err != nil {
 		return err
 	}
-
-	remoteClient := internalpbconnect.NewRemotingServiceClient(
-		p.httpClient,
-		http.URL(host, port),
-		clientConnectionOptions...,
-	)
 
 	request := connect.NewRequest(&internalpb.RemoteStopRequest{
 		Host: host,
@@ -1025,7 +991,7 @@ func (p *pid) RemoteStop(ctx context.Context, host string, port int, name string
 		Name: name,
 	})
 
-	if _, err = remoteClient.RemoteStop(ctx, request); err != nil {
+	if _, err = remoteService.RemoteStop(ctx, request); err != nil {
 		code := connect.CodeOf(err)
 		if code == connect.CodeNotFound {
 			return nil
@@ -1036,18 +1002,42 @@ func (p *pid) RemoteStop(ctx context.Context, host string, port int, name string
 	return nil
 }
 
-// RemoteReSpawn restarts an actor on a remote node.
-func (p *pid) RemoteReSpawn(ctx context.Context, host string, port int, name string) error {
-	clientConnectionOptions, err := p.getConnectionOptions()
+// RemoteSpawn creates an actor on a remote node. The given actor needs to be registered on the remote node using the Register method of ActorSystem
+func (p *pid) RemoteSpawn(ctx context.Context, host string, port int, name, actorType string) error {
+	remoteService, err := p.getRemoteServiceClient(host, port)
 	if err != nil {
 		return err
 	}
 
-	remoteClient := internalpbconnect.NewRemotingServiceClient(
-		p.httpClient,
-		http.URL(host, port),
-		clientConnectionOptions...,
-	)
+	request := connect.NewRequest(&internalpb.RemoteSpawnRequest{
+		Host:      host,
+		Port:      int32(port),
+		ActorName: name,
+		ActorType: actorType,
+	})
+
+	if _, err := remoteService.RemoteSpawn(ctx, request); err != nil {
+		code := connect.CodeOf(err)
+		if code == connect.CodeFailedPrecondition {
+			connectErr := err.(*connect.Error)
+			e := connectErr.Unwrap()
+			// TODO: find a better way to use errors.Is with connect.Error
+			if strings.Contains(e.Error(), ErrTypeNotRegistered.Error()) {
+				return ErrTypeNotRegistered
+			}
+		}
+		return err
+	}
+
+	return nil
+}
+
+// RemoteReSpawn restarts an actor on a remote node.
+func (p *pid) RemoteReSpawn(ctx context.Context, host string, port int, name string) error {
+	remoteService, err := p.getRemoteServiceClient(host, port)
+	if err != nil {
+		return err
+	}
 
 	request := connect.NewRequest(&internalpb.RemoteReSpawnRequest{
 		Host: host,
@@ -1055,7 +1045,7 @@ func (p *pid) RemoteReSpawn(ctx context.Context, host string, port int, name str
 		Name: name,
 	})
 
-	if _, err = remoteClient.RemoteReSpawn(ctx, request); err != nil {
+	if _, err = remoteService.RemoteReSpawn(ctx, request); err != nil {
 		code := connect.CodeOf(err)
 		if code == connect.CodeNotFound {
 			return nil
@@ -1484,7 +1474,7 @@ func (p *pid) handleError(receiveCtx ReceiveContext, err error) {
 
 	// skip system messages
 	switch receiveCtx.Message().(type) {
-	case *goaktpb.PreStart, *goaktpb.PostStart, *goaktpb.PostStop:
+	case *goaktpb.PostStart:
 		return
 	default:
 		// pass through
@@ -1549,4 +1539,18 @@ func (p *pid) getConnectionOptions() ([]connect.ClientOption, error) {
 		clientConnectionOptions = append(clientConnectionOptions, connect.WithInterceptors(interceptor))
 	}
 	return clientConnectionOptions, err
+}
+
+// getRemoteServiceClient returns an instance of the Remote Service client
+func (p *pid) getRemoteServiceClient(host string, port int) (internalpbconnect.RemotingServiceClient, error) {
+	clientConnectionOptions, err := p.getConnectionOptions()
+	if err != nil {
+		return nil, err
+	}
+
+	return internalpbconnect.NewRemotingServiceClient(
+		p.httpClient,
+		http.URL(host, port),
+		clientConnectionOptions...,
+	), nil
 }

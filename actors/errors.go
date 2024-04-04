@@ -57,8 +57,6 @@ var (
 
 	// ErrInvalidInstance is returned when the creation of an actor instance fails
 	ErrInvalidInstance = errors.New("failed to create instance. Reason: invalid instance")
-	// ErrTypeNotFound is returned when an actor type is not found
-	ErrTypeNotFound = func(typeName string) error { return fmt.Errorf("typeName=%s not found", typeName) }
 	// ErrActorNotFound is returned when an actor is not found
 	ErrActorNotFound = func(actorPath string) error { return fmt.Errorf("actor=%s not found", actorPath) }
 	// ErrMethodCallNotAllowed is returned when rpc call is not allowed
@@ -79,6 +77,8 @@ var (
 	ErrFullMailbox = errors.New("mailbox is full")
 	// ErrInstanceNotAnActor is returned when we failed to create the instance of an actor
 	ErrInstanceNotAnActor = errors.New("failed to create instance. Reason: instance does not implement the Actor interface")
+	// ErrTypeNotRegistered is returned when a given actor is not registered
+	ErrTypeNotRegistered = errors.New("actor type is not registered")
 )
 
 // IsEOF returns true if the given error is an EOF error

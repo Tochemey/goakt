@@ -25,94 +25,101 @@
 package actors
 
 import (
-	"fmt"
 	"reflect"
+	"strings"
 	"sync"
 )
 
-// Registry represents reflection registry for dynamic loading and creation of
+// registry represents reflection registry for dynamic loading and creation of
 // actors at run-time
-type Registry interface {
-	// Register an object with its fully qualified name
-	Register(name string, v any)
+type registry interface {
+	// Register an object with an alias/key
+	Register(v any)
 	// GetType returns the type of object,
 	GetType(v any) (reflect.Type, bool)
-	// GetNamedType returns the type of object given its name
-	GetNamedType(name string) (reflect.Type, bool)
+	// GetTypeOf returns the type of an object name
+	GetTypeOf(name string) (reflect.Type, bool)
+	// Deregister removes the registered object from the registry
+	Deregister(v any)
+	// Exists return true when a given object is in the registry
+	Exists(v any) bool
 }
 
-// registry implements Registry
-type registry struct {
-	names map[string]reflect.Type
-	types map[string]reflect.Type
-	mu    sync.Mutex
+// registryImpl implements Registry
+type registryImpl struct {
+	names  map[string]reflect.Type
+	rtypes map[string]reflect.Type
+	mu     sync.Mutex
 }
 
 // enforce compilation error
-var _ Registry = &registry{}
+var _ registry = (*registryImpl)(nil)
 
-// NewRegistry creates an instance of Registry
-func NewRegistry() Registry {
-	l := &registry{
-		names: make(map[string]reflect.Type),
-		types: make(map[string]reflect.Type),
-		mu:    sync.Mutex{},
+// newRegistry creates an instance of Registry
+func newRegistry() registry {
+	l := &registryImpl{
+		rtypes: make(map[string]reflect.Type),
+		mu:     sync.Mutex{},
 	}
 	return l
 }
 
 // Register an object with its fully qualified path
-func (r *registry) Register(name string, v any) {
-	// define a variable to hold the object type
-	var vType reflect.Type
-	// pattern match on the object type
+func (r *registryImpl) Register(v any) {
+	var rtype reflect.Type
 	switch _type := v.(type) {
 	case reflect.Type:
-		vType = _type
+		rtype = _type
 	default:
-		vType = reflect.TypeOf(v).Elem()
+		rtype = reflect.TypeOf(v).Elem()
 	}
 
-	// construct the type package path
-	path := fmt.Sprintf("%s.%s", vType.PkgPath(), vType.Name())
-	// set name to path if name is not set
-	if len(name) == 0 {
-		name = path
-	}
-	// only register the type when it is not set registered
 	if _, exist := r.GetType(v); !exist {
-		// acquire the lock
 		r.mu.Lock()
-		r.types[path] = vType
+		r.rtypes[strings.ToLower(rtype.Name())] = rtype
 		r.mu.Unlock()
 	}
-	if _, exist := r.GetNamedType(name); !exist {
-		r.mu.Lock()
-		r.names[name] = vType
-		r.mu.Unlock()
-	}
+}
+
+// Deregister removes the registered object from the registry
+func (r *registryImpl) Deregister(v any) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.rtypes, nameOf(v))
 }
 
 // GetType returns the type of object
-func (r *registry) GetType(v any) (reflect.Type, bool) {
+func (r *registryImpl) GetType(v any) (reflect.Type, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-
-	elem := reflect.TypeOf(v).Elem()
-	path := fmt.Sprintf("%s.%s", elem.PkgPath(), elem.Name())
-	t, ok := r.types[path]
+	t, ok := r.rtypes[nameOf(v)]
 	return t, ok
 }
 
-// GetNamedType returns the type of object given the name
-func (r *registry) GetNamedType(name string) (reflect.Type, bool) {
-	// acquire the lock
+// GetTypeOf implements registry.
+func (r *registryImpl) GetTypeOf(name string) (reflect.Type, bool) {
 	r.mu.Lock()
-	// release the lock
 	defer r.mu.Unlock()
-
-	// grab the type from the existing names
-	t, ok := r.names[name]
-	// if ok return it
+	t, ok := r.rtypes[strings.ToLower(name)]
 	return t, ok
+}
+
+// Exists implements Registry.
+func (r *registryImpl) Exists(v any) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	_, ok := r.rtypes[nameOf(v)]
+	return ok
+}
+
+func nameOf(v any) string {
+	var rtype reflect.Type
+	switch _type := v.(type) {
+	case reflect.Type:
+		rtype = _type
+	default:
+		rtype = reflect.TypeOf(v).Elem()
+	}
+
+	return strings.ToLower(rtype.Name())
 }

@@ -26,29 +26,29 @@ package actors
 
 import "reflect"
 
-// Reflection helps create an instance dynamically
-type Reflection interface {
+// reflection helps create an instance dynamically
+type reflection interface {
 	// ActorOf creates a new instance of Actor from its concrete type
 	ActorOf(rtype reflect.Type) (actor Actor, err error)
 	// ActorFrom creates a new instance of Actor from its FQN
-	ActorFrom(name string) (actor Actor, err error)
+	ActorFrom(key string) (actor Actor, err error)
 }
 
-// reflection implements Reflection
-type reflection struct {
-	registry Registry
+// reflectionImpl implements Reflection
+type reflectionImpl struct {
+	registry registry
 }
 
 // enforce compilation error
-var _ Reflection = &reflection{}
+var _ reflection = &reflectionImpl{}
 
-// NewReflection creates an instance of Reflection
-func NewReflection(registry Registry) Reflection {
-	return &reflection{registry: registry}
+// newReflection creates an instance of Reflection
+func newReflection(registry registry) reflection {
+	return &reflectionImpl{registry: registry}
 }
 
 // ActorOf creates a new instance of an Actor
-func (r *reflection) ActorOf(rtype reflect.Type) (actor Actor, err error) {
+func (r *reflectionImpl) ActorOf(rtype reflect.Type) (actor Actor, err error) {
 	iface := reflect.TypeOf((*Actor)(nil)).Elem()
 	isActor := rtype.Implements(iface) || reflect.PointerTo(rtype).Implements(iface)
 
@@ -64,10 +64,10 @@ func (r *reflection) ActorOf(rtype reflect.Type) (actor Actor, err error) {
 }
 
 // ActorFrom creates a new instance of Actor from its FQN
-func (r *reflection) ActorFrom(name string) (actor Actor, err error) {
-	rtype, ok := r.registry.GetNamedType(name)
+func (r *reflectionImpl) ActorFrom(key string) (actor Actor, err error) {
+	rtype, ok := r.registry.GetTypeOf(key)
 	if !ok {
-		return nil, ErrTypeNotFound(name)
+		return nil, ErrTypeNotRegistered
 	}
 	return r.ActorOf(rtype)
 }

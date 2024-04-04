@@ -32,35 +32,22 @@ import (
 
 func TestRegistry(t *testing.T) {
 	t.Run("With new instance", func(t *testing.T) {
-		newRegistry := NewRegistry()
+		newRegistry := newRegistry()
 		var p any = newRegistry
-		_, ok := p.(Registry)
+		_, ok := p.(registry)
 		assert.True(t, ok)
 	})
 
-	t.Run("With registration with name", func(t *testing.T) {
-		newRegistry := NewRegistry()
+	t.Run("With registration", func(t *testing.T) {
+		newRegistry := newRegistry()
 		// create an instance of an object
 		actor := newTestActor()
 		// register that actor
-		newRegistry.Register("testActor", actor)
-		// assert the type of testActor
-		_, ok := newRegistry.GetNamedType("testActor")
+		newRegistry.Register(actor)
+		_, ok := newRegistry.GetType(actor)
 		assert.True(t, ok)
-		_, ok = newRegistry.GetType(actor)
-		assert.True(t, ok)
-	})
 
-	t.Run("With registration without name", func(t *testing.T) {
-		newRegistry := NewRegistry()
-		// create an instance of an object
-		actor := newTestActor()
-		// register that actor
-		newRegistry.Register("", actor)
-		// assert the type of testActor
-		_, ok := newRegistry.GetNamedType("testActor")
-		assert.False(t, ok)
-		_, ok = newRegistry.GetType(actor)
+		_, ok = newRegistry.GetTypeOf("testActor")
 		assert.True(t, ok)
 	})
 }

@@ -35,14 +35,14 @@ import (
 func TestReflection(t *testing.T) {
 	t.Run("With ActorFrom", func(t *testing.T) {
 		t.Run("With happy path", func(t *testing.T) {
-			newRegistry := NewRegistry()
+			newRegistry := newRegistry()
 			// create an instance of an actor
 			actor := newTestActor()
 			// register the actor into the types registry
-			newRegistry.Register("testActor", actor)
+			newRegistry.Register(actor)
 
 			// create an instance of reflection
-			reflection := NewReflection(newRegistry)
+			reflection := newReflection(newRegistry)
 
 			// create an instance of test actor from the string testActor
 			actual, err := reflection.ActorFrom("testActor")
@@ -51,20 +51,20 @@ func TestReflection(t *testing.T) {
 			assert.IsType(t, new(testActor), actual)
 		})
 		t.Run("With actor not found", func(t *testing.T) {
-			newRegistry := NewRegistry()
+			newRegistry := newRegistry()
 			// create an instance of reflection
-			reflection := NewReflection(newRegistry)
+			reflection := newReflection(newRegistry)
 			actual, err := reflection.ActorFrom("fakeActor")
 			assert.Error(t, err)
 			assert.Nil(t, actual)
 		})
 		t.Run("With actor interface not implemented", func(t *testing.T) {
-			tl := NewRegistry()
+			tl := newRegistry()
 			nonActor := new(goaktpb.Address)
 			// register the actor into the types registry
-			tl.Register("fakeActor", nonActor)
+			tl.Register(nonActor)
 			// create an instance of reflection
-			reflection := NewReflection(tl)
+			reflection := newReflection(tl)
 			actual, err := reflection.ActorFrom("fakeActor")
 			assert.Error(t, err)
 			assert.Nil(t, actual)
@@ -73,14 +73,14 @@ func TestReflection(t *testing.T) {
 
 	t.Run("With ActorOf", func(t *testing.T) {
 		t.Run("With happy path", func(t *testing.T) {
-			newRegistry := NewRegistry()
+			newRegistry := newRegistry()
 			// create an instance of an actor
 			actor := newTestActor()
 			// register the actor into the types registry
-			newRegistry.Register("", actor)
+			newRegistry.Register(actor)
 
 			// create an instance of reflection
-			reflection := NewReflection(newRegistry)
+			reflection := newReflection(newRegistry)
 
 			rtype, ok := newRegistry.GetType(actor)
 			assert.True(t, ok)
@@ -97,12 +97,12 @@ func TestReflection(t *testing.T) {
 			assert.IsType(t, new(testActor), actual)
 		})
 		t.Run("With unhappy path", func(t *testing.T) {
-			newRegistry := NewRegistry()
+			newRegistry := newRegistry()
 			// create an instance of reflection
-			reflection := NewReflection(newRegistry)
+			reflection := newReflection(newRegistry)
 			nonActor := new(goaktpb.Address)
 			// register the actor into the types registry
-			newRegistry.Register("", nonActor)
+			newRegistry.Register(nonActor)
 
 			rtype, ok := newRegistry.GetType(nonActor)
 			assert.True(t, ok)

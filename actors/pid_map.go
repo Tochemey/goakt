@@ -76,7 +76,7 @@ func (m *pidMap) Delete(addr *Path) {
 // List returns all actors as a slice
 func (m *pidMap) List() []PID {
 	m.mu.Lock()
-	out := make([]PID, 0, m.size.Load())
+	var out []PID
 	for _, actor := range m.pids {
 		out = append(out, actor)
 	}
