@@ -18,38 +18,47 @@ Also, check reference section at the end of the post for more material regarding
 
 ## Table of Content
 
-- [Design Principles](#design-principles)
-- [Features](#features)
-  - [Actors](#actors)
-  - [Passivation](#passivation)
-  - [Actor System](#actor-system)
-  - [Behaviors](#behaviors)
-  - [Mailbox](#mailbox)
-  - [Events Stream](#events-stream)
-  - [Messaging](#messaging)
-  - [Scheduler](#scheduler)
-  - [Stashing](#stashing)
-  - [Remoting](#remoting)
-  - [Clustering](#cluster)
-  - [Observability](#observability)
-    - [Logging](#logging)
-    - [Tracing](#tracing)
-    - [Metric](#metrics)
-  - [Testkit](#testkit)
+- [Go-Akt](#go-akt)
+  - [Table of Content](#table-of-content)
+  - [Design Principles](#design-principles)
+  - [Features](#features)
+    - [Actors](#actors)
+    - [Passivation](#passivation)
+    - [Actor System](#actor-system)
+    - [Behaviors](#behaviors)
+    - [Mailbox](#mailbox)
+    - [Events Stream](#events-stream)
+      - [Supported events](#supported-events)
+    - [Messaging](#messaging)
+    - [Scheduler](#scheduler)
+      - [Cron Expression Format](#cron-expression-format)
+      - [Note](#note)
+    - [Stashing](#stashing)
+    - [Remoting](#remoting)
+    - [Cluster](#cluster)
+    - [Observability](#observability)
+      - [Tracing](#tracing)
+      - [Metrics](#metrics)
+      - [Logging](#logging)
+    - [Testkit](#testkit)
   - [API](#api)
-- [Use Cases](#use-cases)
-- [Installation](#installation)
-- [Clustering](#clustering)
-  - [Operation Guides](#operations-guide)
-  - [Discovery Providers](#built-in-discovery-providers)
-    - [Kubernetes](#kubernetes-discovery-provider-setup)
-    - [mDNS](#mdns-discovery-provider-setup)
-    - [NATS](#nats-discovery-provider-setup)
-    - [Domain Name Discovery](#dns-provider-setup)
-- [Examples](#examples)
-- [Contribution](#contribution)
-  - [Local Test and Linter](#test--linter)
-- [Benchmark](#benchmark)
+  - [Use Cases](#use-cases)
+  - [Installation](#installation)
+  - [Clustering](#clustering)
+    - [Operations Guide](#operations-guide)
+    - [Built-in Discovery Providers](#built-in-discovery-providers)
+      - [Kubernetes Discovery Provider Setup](#kubernetes-discovery-provider-setup)
+        - [Get Started](#get-started)
+        - [Role Based Access](#role-based-access)
+        - [Sample Project](#sample-project)
+      - [mDNS Discovery Provider Setup](#mdns-discovery-provider-setup)
+      - [NATS Discovery Provider Setup](#nats-discovery-provider-setup)
+      - [DNS Provider Setup](#dns-provider-setup)
+        - [Sample Project](#sample-project-1)
+  - [Examples](#examples)
+  - [Contribution](#contribution)
+    - [Test \& Linter](#test--linter)
+  - [Benchmark](#benchmark)
 
 ## Design Principles
 
@@ -236,6 +245,7 @@ creating the actor system. See actor system [options](./actors/option.go). These
 - `RemoteLookup`: to lookup for an actor on a remote host
 - `RemoteReSpawn`: to restarts an actor on a remote machine
 - `RemoteStop`: to stop an actor on a remote machine
+- `RemoteSpawn`: to start an actor on a remote machine. The given actor implementation must be registered using the [`Register`](./actors/actor_system.go) method of the actor system on the remote machine for this call to succeed.
 
 These methods can be used from the [API](./actors/api.go) as well as from the [PID](./actors/pid.go) which is the actor reference when an actor is created.
 
@@ -313,6 +323,7 @@ The API interface helps interact with a Go-Akt actor system as kind of client. T
 - `RemoteLookup`: to lookup for an actor on a remote host
 - `RemoteReSpawn`: to restarts an actor on a remote machine
 - `RemoteStop`: to stop an actor on a remote machine
+- `RemoteSpawn`: to start an actor on a remote machine. The given actor implementation must be registered using the [`Register`](./actors/actor_system.go) method of the actor system on the remote machine for this call to succeed.
 
 ## Use Cases
 
