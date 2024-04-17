@@ -24,7 +24,7 @@
 
 package service
 
-import "github.com/caarlos0/env/v10"
+import "github.com/caarlos0/env/v11"
 
 // Config defines the service configuration
 type Config struct {

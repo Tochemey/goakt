@@ -29,7 +29,7 @@ import (
 	"os"
 	"strconv"
 
-	"github.com/caarlos0/env/v10"
+	"github.com/caarlos0/env/v11"
 )
 
 // hostNodeConfig helps read the host Node settings

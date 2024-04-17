@@ -6,7 +6,7 @@ require (
 	connectrpc.com/connect v1.16.1
 	connectrpc.com/otelconnect v0.7.0
 	github.com/buraksezer/olric v0.5.6-0.20240205222928-c5efb0d4b5ea
-	github.com/caarlos0/env/v10 v10.0.0
+	github.com/caarlos0/env/v11 v11.0.0
 	github.com/cespare/xxhash/v2 v2.3.0
 	github.com/deckarep/golang-set/v2 v2.6.0
 	github.com/flowchartsman/retry v1.2.0
