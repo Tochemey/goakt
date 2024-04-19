@@ -6,6 +6,7 @@ FROM tochemey/docker-go:1.21.0-1.0.0
 RUN go install github.com/fullstorydev/grpcurl/cmd/grpcurl@latest
 RUN go install connectrpc.com/connect/cmd/protoc-gen-connect-go@latest
 RUN apk --no-cache add git ca-certificates gcc musl-dev libc-dev binutils-gold
+RUN go install github.com/ory/go-acc@latest
 
 
 test:
@@ -55,7 +56,7 @@ lint:
 local-test:
     FROM +vendor
 
-    RUN go test -mod=vendor -race -v -coverprofile=coverage.out -covermode=atomic -coverpkg=$(go list ./... | grep -v ./goaktpb | grep -v ./examples | grep -v ./mocks) 
+    RUN go-acc ./... -o coverage.out --ignore goaktpb,examples,mocks,internal/internalpb -- -mod=vendor -race -v
 
     SAVE ARTIFACT coverage.out AS LOCAL coverage.out
 
