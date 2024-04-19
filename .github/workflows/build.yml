@@ -44,4 +44,4 @@ jobs:
           files: ./coverage.out
           fail_ci_if_error: false
           verbose: true
-          exclude: goaktpb/
+          exclude: goaktpb/,mocks/,internal/internalpb/,testkit/
