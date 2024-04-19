@@ -205,7 +205,6 @@ func (n *Node) Start(ctx context.Context) error {
 		logger.Infof("GoAkt cluster Node=(%s) successfully started. 🎉", n.name)
 	}
 
-	// let us create an instance of the Node engine
 	eng, err := olric.New(conf)
 	if err != nil {
 		logger.Error(errors.Wrapf(err, "failed to start the cluster Node=(%s).💥", n.name))
@@ -216,10 +215,11 @@ func (n *Node) Start(ctx context.Context) error {
 	n.server = eng
 	go func() {
 		if err = n.server.Start(); err != nil {
-			logger.Error(errors.Wrapf(err, "failed to start the cluster Node=(%s).💥", n.name))
 			if e := n.server.Shutdown(ctx); e != nil {
 				logger.Panic(e)
 			}
+			// the expectation is to exit the application
+			logger.Fatal(errors.Wrapf(err, "failed to start the cluster Node=(%s).💥", n.name))
 		}
 	}()
 

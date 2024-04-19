@@ -14,4 +14,4 @@ ignore:
   - "examples"
   - "internal/internalpb"
   - "testkit"
-  - "**/mocks"
+  - "mocks"

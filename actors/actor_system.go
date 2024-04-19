@@ -738,7 +738,9 @@ func (x *actorSystem) Start(ctx context.Context) error {
 	x.started.Store(true)
 
 	if x.clusterEnabled.Load() {
-		x.enableClustering(spanCtx)
+		if err := x.enableClustering(spanCtx); err != nil {
+			return err
+		}
 	}
 
 	if x.remotingEnabled.Load() {
@@ -1047,7 +1049,7 @@ func (x *actorSystem) handleRemoteTell(ctx context.Context, to PID, message prot
 
 // enableClustering enables clustering. When clustering is enabled remoting is also enabled to facilitate remote
 // communication
-func (x *actorSystem) enableClustering(ctx context.Context) {
+func (x *actorSystem) enableClustering(ctx context.Context) error {
 	x.logger.Info("enabling clustering...")
 
 	cluster, err := cluster.NewNode(x.Name(),
@@ -1057,12 +1059,14 @@ func (x *actorSystem) enableClustering(ctx context.Context) {
 		cluster.WithHasher(x.partitionHasher),
 	)
 	if err != nil {
-		x.logger.Panic(errors.Wrap(err, "failed to initialize cluster engine"))
+		x.logger.Error(errors.Wrap(err, "failed to initialize cluster engine"))
+		return err
 	}
 
 	x.logger.Info("starting cluster engine...")
 	if err := cluster.Start(ctx); err != nil {
-		x.logger.Panic(errors.Wrap(err, "failed to start cluster engine"))
+		x.logger.Error(errors.Wrap(err, "failed to start cluster engine"))
+		return err
 	}
 
 	bootstrapChan := make(chan struct{}, 1)
@@ -1085,6 +1089,7 @@ func (x *actorSystem) enableClustering(ctx context.Context) {
 	go x.broadcast(ctx)
 
 	x.logger.Info("clustering enabled...:)")
+	return nil
 }
 
 // enableRemoting enables the remoting service to handle remote messaging
