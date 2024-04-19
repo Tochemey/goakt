@@ -38,6 +38,7 @@ mock:
     # generate the mocks
     RUN mockery  --all --dir hash --keeptree --exported=true --with-expecter=true --inpackage=true --output ./mocks/hash --case snake
     RUN mockery  --all --dir discovery --keeptree --exported=true --with-expecter=true --inpackage=true --output ./mocks/discovery --case snake
+    RUN mockery  --all --dir internal/cluster --keeptree --exported=true --with-expecter=true --inpackage=true --output ./mocks/cluster --case snake
 
     SAVE ARTIFACT ./mocks mocks AS LOCAL mocks
 

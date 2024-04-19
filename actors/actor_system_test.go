@@ -30,6 +30,7 @@ import (
 	"os"
 	"sort"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -40,11 +41,14 @@ import (
 	"github.com/travisjeffery/go-dynaport"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
+	"go.opentelemetry.io/otel/trace/noop"
+	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/tochemey/goakt/discovery"
 	"github.com/tochemey/goakt/goaktpb"
 	"github.com/tochemey/goakt/log"
+	clustermocks "github.com/tochemey/goakt/mocks/cluster"
 	testkit "github.com/tochemey/goakt/mocks/discovery"
 	"github.com/tochemey/goakt/telemetry"
 	testpb "github.com/tochemey/goakt/test/data/testpb"
@@ -1351,7 +1355,6 @@ func TestActorSystem(t *testing.T) {
 		assert.EqualError(t, err, ErrActorSystemNotStarted.Error())
 		assert.Nil(t, actorRef)
 	})
-
 	t.Run("With happy path Register", func(t *testing.T) {
 		ctx := context.TODO()
 		logger := log.New(log.DebugLevel, os.Stdout)
@@ -1376,7 +1379,6 @@ func TestActorSystem(t *testing.T) {
 			assert.NoError(t, err)
 		})
 	})
-
 	t.Run("With Register when actor system not started", func(t *testing.T) {
 		ctx := context.TODO()
 		logger := log.New(log.DebugLevel, os.Stdout)
@@ -1398,7 +1400,6 @@ func TestActorSystem(t *testing.T) {
 			assert.Error(t, err)
 		})
 	})
-
 	t.Run("With happy path Deregister", func(t *testing.T) {
 		ctx := context.TODO()
 		logger := log.New(log.DebugLevel, os.Stdout)
@@ -1426,7 +1427,6 @@ func TestActorSystem(t *testing.T) {
 			assert.NoError(t, err)
 		})
 	})
-
 	t.Run("With Deregister when actor system not started", func(t *testing.T) {
 		ctx := context.TODO()
 		logger := log.New(log.DebugLevel, os.Stdout)
@@ -1446,5 +1446,33 @@ func TestActorSystem(t *testing.T) {
 			err = sys.Stop(ctx)
 			assert.Error(t, err)
 		})
+	})
+
+	t.Run("With cluster start failure", func(t *testing.T) {
+		ctx := context.TODO()
+		logger := log.DiscardLogger
+		mockedCluster := new(clustermocks.Interface)
+		mockedErr := errors.New("failed to start")
+		mockedCluster.EXPECT().Start(ctx).Return(mockedErr)
+
+		// mock the discovery provider
+		provider := new(testkit.Provider)
+		config := discovery.NewConfig()
+		sd := discovery.NewServiceDiscovery(provider, config)
+
+		system := &actorSystem{
+			name:             "testSystem",
+			logger:           logger,
+			cluster:          mockedCluster,
+			clusterEnabled:   *atomic.NewBool(true),
+			telemetry:        telemetry.New(),
+			mutex:            sync.Mutex{},
+			tracer:           noop.NewTracerProvider().Tracer("testSystem"),
+			scheduler:        newScheduler(logger, time.Second, withSchedulerCluster(mockedCluster)),
+			serviceDiscovery: sd,
+		}
+
+		err := system.Start(ctx)
+		require.Error(t, err)
 	})
 }
