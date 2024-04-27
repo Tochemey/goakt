@@ -202,7 +202,6 @@ func (n *Node) Start(ctx context.Context) error {
 	// cancel the context the server has started
 	conf.Started = func() {
 		defer cancel()
-		logger.Infof("GoAkt cluster Node=(%s) successfully started. 🎉", n.name)
 	}
 
 	eng, err := olric.New(conf)
@@ -224,6 +223,7 @@ func (n *Node) Start(ctx context.Context) error {
 	}()
 
 	<-startCtx.Done()
+	logger.Info("cluster engine successfully started. 🎉")
 
 	// set the client
 	n.client = n.server.NewEmbeddedClient()
@@ -246,6 +246,7 @@ func (n *Node) Start(ctx context.Context) error {
 	n.messagesChan = n.pubSub.Channel()
 	go n.consume()
 
+	logger.Infof("GoAkt cluster Node=(%s) successfully started. 🎉", n.name)
 	return nil
 }
 
@@ -528,7 +529,7 @@ func (n *Node) buildConfig() *config.Config {
 	conf := &config.Config{
 		BindAddr:                   n.host.Host,
 		BindPort:                   n.host.ClusterPort,
-		ReadRepair:                 false,
+		ReadRepair:                 true,
 		ReplicaCount:               config.MinimumReplicaCount,
 		WriteQuorum:                config.DefaultWriteQuorum,
 		ReadQuorum:                 config.DefaultReadQuorum,
