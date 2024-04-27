@@ -225,10 +225,9 @@ func TestActorSystem(t *testing.T) {
 		time.Sleep(time.Second)
 
 		// get the actor
-		addr, pid, err := newActorSystem.ActorOf(ctx, actorName)
+		addr, _, err := newActorSystem.ActorOf(ctx, actorName)
 		require.NoError(t, err)
 		require.NotNil(t, addr)
-		require.Nil(t, pid)
 
 		// use RemoteActor method and compare the results
 		remoteAddr, err := newActorSystem.RemoteActor(ctx, actorName)
@@ -246,10 +245,11 @@ func TestActorSystem(t *testing.T) {
 
 		// assert actor not found
 		actorName = "some-actor"
-		addr, pid, err = newActorSystem.ActorOf(ctx, actorName)
+		addr, pid, err := newActorSystem.ActorOf(ctx, actorName)
 		require.Error(t, err)
 		require.EqualError(t, err, ErrActorNotFound(actorName).Error())
 		require.Nil(t, addr)
+		require.Nil(t, pid)
 
 		remoteAddr, err = newActorSystem.RemoteActor(ctx, actorName)
 		require.Error(t, err)
@@ -289,39 +289,12 @@ func TestActorSystem(t *testing.T) {
 
 		// create an actor
 		actorName := uuid.NewString()
-		actor := newTestActor()
-		actorRef, err := newActorSystem.Spawn(ctx, actorName, actor)
-		assert.NoError(t, err)
-		assert.NotNil(t, actorRef)
-
-		path := NewPath(actorName, &Address{
-			host:     host,
-			port:     remotingPort,
-			system:   newActorSystem.Name(),
-			protocol: protocol,
-		})
-		addr := path.RemoteAddress()
-
-		reply, err := RemoteAsk(ctx, addr, new(testpb.TestReply))
-		require.NoError(t, err)
-		require.NotNil(t, reply)
-
-		actual := new(testpb.Reply)
-		require.NoError(t, reply.UnmarshalTo(actual))
-
-		expected := &testpb.Reply{Content: "received message"}
-		assert.True(t, proto.Equal(expected, actual))
 
 		addr, pid, err := newActorSystem.ActorOf(ctx, actorName)
 		require.Error(t, err)
 		require.EqualError(t, err, ErrMethodCallNotAllowed.Error())
 		require.Nil(t, addr)
 		require.Nil(t, pid)
-
-		// stop the actor after some time
-		time.Sleep(time.Second)
-		err = newActorSystem.Kill(ctx, actorName)
-		require.NoError(t, err)
 
 		t.Cleanup(func() {
 			err = newActorSystem.Stop(ctx)

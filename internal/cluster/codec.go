@@ -25,31 +25,21 @@
 package cluster
 
 import (
-	"encoding/base64"
-
 	"google.golang.org/protobuf/proto"
 
 	"github.com/tochemey/goakt/internal/internalpb"
 )
 
-// encode marshals a wire actor into a base64 string
+// encode marshals a wire actor into a byte array
 // the output of this function can be persisted to the Cluster
-func encode(actor *internalpb.WireActor) (string, error) {
+func encode(actor *internalpb.WireActor) ([]byte, error) {
 	// let us marshal it
 	bytea, _ := proto.Marshal(actor)
-	// let us base64 encode the bytea before sending it into the Cluster
-	return base64.StdEncoding.EncodeToString(bytea), nil
+	return bytea, nil
 }
 
 // decode decodes the encoded base64 representation of a wire actor
-func decode(base64Str string) (*internalpb.WireActor, error) {
-	// let base64 decode the data before parsing it
-	bytea, err := base64.StdEncoding.DecodeString(base64Str)
-	// handle the error
-	if err != nil {
-		return nil, err
-	}
-
+func decode(bytea []byte) (*internalpb.WireActor, error) {
 	// create an instance of proto message
 	actor := new(internalpb.WireActor)
 	// let us unpack the byte array

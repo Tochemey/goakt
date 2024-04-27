@@ -1782,13 +1782,14 @@ func TestRemoteSpawn(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, pid)
 
-		// create an actor implementation and register it
 		actorName := uuid.NewString()
-
 		// fetching the address of the that actor should return nil address
 		addr, err := pid.RemoteLookup(ctx, host, remotingPort, actorName)
 		require.NoError(t, err)
 		require.Nil(t, addr)
+
+		// for the sake of the test
+		require.NoError(t, sys.Deregister(ctx, &exchanger{}))
 
 		// spawn the remote actor
 		err = pid.RemoteSpawn(ctx, host, remotingPort, actorName, "exchanger")

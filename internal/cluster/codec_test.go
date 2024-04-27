@@ -25,7 +25,6 @@
 package cluster
 
 import (
-	"encoding/base64"
 	"testing"
 
 	"github.com/google/uuid"
@@ -61,8 +60,7 @@ func TestCodec(t *testing.T) {
 		assert.True(t, proto.Equal(actor, decoded))
 	})
 	t.Run("With invalid encoded actor", func(t *testing.T) {
-		encoded := base64.StdEncoding.EncodeToString([]byte("invalid proto message"))
-		decoded, err := decode(encoded)
+		decoded, err := decode([]byte("invalid proto message"))
 		require.Error(t, err)
 		assert.Nil(t, decoded)
 	})

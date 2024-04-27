@@ -29,6 +29,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"reflect"
 	"regexp"
 	"sync"
 	"time"
@@ -441,12 +442,15 @@ func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor) (PID,
 	}
 
 	x.actors.Set(pid)
+	x.registry.Register(actor)
 
 	if x.clusterEnabled.Load() {
+		actorType := reflect.TypeOf(actor).Elem().Name()
 		x.clusterChan <- &internalpb.WireActor{
 			ActorName:    name,
 			ActorAddress: actorPath.RemoteAddress(),
 			ActorPath:    actorPath.String(),
+			ActorType:    actorType,
 		}
 	}
 
@@ -509,12 +513,15 @@ func (x *actorSystem) SpawnFromFunc(ctx context.Context, receiveFunc ReceiveFunc
 	}
 
 	x.actors.Set(pid)
+	x.registry.Register(actor)
 
 	if x.clusterEnabled.Load() {
+		actorType := reflect.TypeOf(actor).Elem().Name()
 		x.clusterChan <- &internalpb.WireActor{
 			ActorName:    actorID,
 			ActorAddress: actorPath.RemoteAddress(),
 			ActorPath:    actorPath.String(),
+			ActorType:    actorType,
 		}
 	}
 
@@ -626,6 +633,15 @@ func (x *actorSystem) ActorOf(ctx context.Context, actorName string) (addr *goak
 		return nil, nil, ErrActorSystemNotStarted
 	}
 
+	// first check whether the actor exist locally
+	items := x.actors.List()
+	for _, actorRef := range items {
+		if actorRef.ActorPath().Name() == actorName {
+			return actorRef.ActorPath().RemoteAddress(), actorRef, nil
+		}
+	}
+
+	// check in the cluster
 	if x.cluster != nil || x.clusterEnabled.Load() {
 		wireActor, err := x.cluster.GetActor(spanCtx, actorName)
 		if err != nil {
@@ -650,13 +666,6 @@ func (x *actorSystem) ActorOf(ctx context.Context, actorName string) (addr *goak
 		span.SetStatus(codes.Error, "ActorOf")
 		span.RecordError(ErrMethodCallNotAllowed)
 		return nil, nil, ErrMethodCallNotAllowed
-	}
-
-	items := x.actors.List()
-	for _, actorRef := range items {
-		if actorRef.ActorPath().Name() == actorName {
-			return actorRef.ActorPath().RemoteAddress(), actorRef, nil
-		}
 	}
 
 	x.logger.Infof("actor=%s not found", actorName)
@@ -1004,7 +1013,7 @@ func (x *actorSystem) RemoteStop(ctx context.Context, request *connect.Request[i
 	return connect.NewResponse(new(internalpb.RemoteStopResponse)), nil
 }
 
-// RemoteSpawn starts an actor on a remote machine. The given actor must be registered on the remote machine using the actor system Register method
+// RemoteSpawn handles the remoteSpawn call
 func (x *actorSystem) RemoteSpawn(ctx context.Context, request *connect.Request[internalpb.RemoteSpawnRequest]) (*connect.Response[internalpb.RemoteSpawnResponse], error) {
 	logger := x.logger
 
