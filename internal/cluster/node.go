@@ -307,34 +307,26 @@ func (n *Node) AdvertisedAddress() string {
 
 // PutActor replicates onto the Node the metadata of an actor
 func (n *Node) PutActor(ctx context.Context, actor *internalpb.WireActor) error {
-	// create a cancellation context of 1 second timeout
 	ctx, cancelFn := context.WithTimeout(ctx, n.writeTimeout)
 	defer cancelFn()
 
-	// set the logger
 	logger := n.logger
 
-	// add some logging information
 	logger.Infof("replicating actor (%s).🤔", actor.GetActorName())
 
-	// let us marshal it
 	data, err := encode(actor)
-	// handle the marshaling error
 	if err != nil {
-		// add a logging to the stderr
-		logger.Error(errors.Wrapf(err, "failed to persist actor=%s data in the Node.💥", actor.GetActorName()))
-		// here we cancel the request
-		return errors.Wrapf(err, "failed to persist actor=%s data in the Node", actor.GetActorName())
+		logger.Error(errors.Wrapf(err, "failed to persist actor=%s data in the cluster.💥", actor.GetActorName()))
+		return errors.Wrapf(err, "failed to persist actor=%s data in the cluster", actor.GetActorName())
 	}
 
-	// send the record into the Node
 	err = n.kvStore.Put(ctx, actor.GetActorName(), data)
 	if err != nil {
 		logger.Error(errors.Wrapf(err, "failed to replicate actor=%s record.💥", actor.GetActorName()))
 		return err
 	}
 
-	logger.Infof("actor (%s) successfully replicated.🎉", actor.GetActorName())
+	logger.Infof("actor (%s) successfully replicated in the cluster.🎉", actor.GetActorName())
 	return nil
 }
 
@@ -345,25 +337,25 @@ func (n *Node) GetActor(ctx context.Context, actorName string) (*internalpb.Wire
 
 	logger := n.logger
 
-	logger.Infof("retrieving actor (%s) from the Node.🤔", actorName)
+	logger.Infof("retrieving actor (%s) from the cluster.🤔", actorName)
 
 	resp, err := n.kvStore.Get(ctx, actorName)
 	if err != nil {
 		if errors.Is(err, olric.ErrKeyNotFound) {
-			logger.Warnf("actor=%s is not found in the Node", actorName)
+			logger.Warnf("actor=%s is not found in the cluster", actorName)
 			return nil, ErrActorNotFound
 		}
 		logger.Error(errors.Wrapf(err, "failed to get actor=%s record.💥", actorName))
 		return nil, err
 	}
 
-	base64ActorStr, err := resp.String()
+	bytea, err := resp.Byte()
 	if err != nil {
 		logger.Error(errors.Wrapf(err, "failed to read the record at:{%s}.💥", actorName))
 		return nil, err
 	}
 
-	actor, err := decode(base64ActorStr)
+	actor, err := decode(bytea)
 	if err != nil {
 		logger.Error(errors.Wrapf(err, "failed to decode actor=%s record.💥", actorName))
 		return nil, err
@@ -464,8 +456,6 @@ func (n *Node) consume() {
 			}
 
 			kind := event["kind"]
-			n.logger.Debugf("%s received (%s) cluster event", n.name, kind)
-
 			switch kind {
 			case events.KindNodeJoinEvent:
 				nodeJoined := new(events.NodeJoinEvent)
@@ -487,6 +477,8 @@ func (n *Node) consume() {
 					Timestamp: timestamppb.New(time.UnixMilli(timeMilli)),
 				}
 
+				n.logger.Debugf("%s received (%s) cluster event:[addr=(%s)]", n.name, kind, event.GetAddress())
+
 				eventType, _ := anypb.New(event)
 				n.events <- &Event{eventType}
 
@@ -505,6 +497,8 @@ func (n *Node) consume() {
 					Address:   nodeLeft.NodeLeft,
 					Timestamp: timestamppb.New(time.UnixMilli(timeMilli)),
 				}
+
+				n.logger.Debugf("%s received (%s) cluster event:[addr=(%s)]", n.name, kind, event.GetAddress())
 
 				eventType, _ := anypb.New(event)
 				n.events <- &Event{eventType}

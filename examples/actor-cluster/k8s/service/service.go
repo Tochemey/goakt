@@ -34,6 +34,7 @@ import (
 	"github.com/pkg/errors"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/tochemey/goakt/actors"
 	kactors "github.com/tochemey/goakt/examples/actor-cluster/k8s/actors"
@@ -98,83 +99,49 @@ func (s *AccountService) CreateAccount(ctx context.Context, c *connect.Request[s
 
 // CreditAccount helps credit a given account
 func (s *AccountService) CreditAccount(ctx context.Context, c *connect.Request[samplepb.CreditAccountRequest]) (*connect.Response[samplepb.CreditAccountResponse], error) {
-	// grab the actual request
 	req := c.Msg
-	// grab the account id
 	accountID := req.GetCreditAccount().GetAccountId()
 
-	// check whether the actor system is running in a cluster
-	if !s.actorSystem.InCluster() {
-		s.logger.Info("cluster mode not is on....")
-		// locate the given actor
-		pid, err := s.actorSystem.LocalActor(accountID)
-		// handle the error
-		if err != nil {
-			// check whether it is not found error
-			if !errors.Is(err, actors.ErrActorNotFound(accountID)) {
-				return nil, connect.NewError(connect.CodeInternal, err)
-			}
-
-			// return not found
-			return nil, connect.NewError(connect.CodeNotFound, err)
-		}
-
-		// defensive programming. making sure pid is defined
-		if pid == nil {
-			return nil, connect.NewError(connect.CodeNotFound, err)
-		}
-
-		// send the create command to the pid
-		reply, err := actors.Ask(ctx, pid, &samplepb.CreditAccount{
-			AccountId: accountID,
-			Balance:   req.GetCreditAccount().GetBalance(),
-		}, time.Second)
-
-		// handle the error
-		if err != nil {
-			return nil, connect.NewError(connect.CodeInternal, err)
-		}
-
-		// pattern match on the reply
-		switch x := reply.(type) {
-		case *samplepb.Account:
-			// return the appropriate response
-			return connect.NewResponse(&samplepb.CreditAccountResponse{Account: x}), nil
-		default:
-			// create the error message to send
-			err := fmt.Errorf("invalid reply=%s", reply.ProtoReflect().Descriptor().FullName())
-			return nil, connect.NewError(connect.CodeInternal, err)
-		}
-	}
-
-	// here the actor system is running in a cluster
-	addr, err := s.actorSystem.RemoteActor(ctx, accountID)
-	// handle the error
+	addr, pid, err := s.actorSystem.ActorOf(ctx, accountID)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		// check whether it is not found error
+		if !errors.Is(err, actors.ErrActorNotFound(accountID)) {
+			return nil, connect.NewError(connect.CodeNotFound, err)
+		}
+
+		// return not found
+		return nil, connect.NewError(connect.CodeNotFound, err)
 	}
 
-	// create the command to send to the remote actor
+	var message proto.Message
 	command := &samplepb.CreditAccount{
 		AccountId: accountID,
 		Balance:   req.GetCreditAccount().GetBalance(),
 	}
-	// send a remote message to the actor
-	reply, err := actors.RemoteAsk(ctx, addr, command)
-	// handle the error
-	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+
+	if pid != nil {
+		s.logger.Info("actor is found locally...")
+		message, err = actors.Ask(ctx, pid, command, time.Second)
+		if err != nil {
+			return nil, connect.NewError(connect.CodeInternal, err)
+		}
 	}
 
-	message, _ := reply.UnmarshalNew()
-	// pattern match on the reply
+	if pid == nil {
+		s.logger.Info("actor is not found locally...")
+		reply, err := actors.RemoteAsk(ctx, addr, command)
+		if err != nil {
+			return nil, connect.NewError(connect.CodeInternal, err)
+		}
+
+		message, _ = reply.UnmarshalNew()
+	}
+
 	switch x := message.(type) {
 	case *samplepb.Account:
-		// return the appropriate response
 		return connect.NewResponse(&samplepb.CreditAccountResponse{Account: x}), nil
 	default:
-		// create the error message to send
-		err := fmt.Errorf("invalid reply=%s", reply.ProtoReflect().Descriptor().FullName())
+		err := fmt.Errorf("invalid reply=%s", message.ProtoReflect().Descriptor().FullName())
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 }
@@ -187,32 +154,41 @@ func (s *AccountService) GetAccount(ctx context.Context, c *connect.Request[samp
 	accountID := req.GetAccountId()
 
 	// locate the given actor
-	addr, _, err := s.actorSystem.ActorOf(ctx, accountID)
+	addr, pid, err := s.actorSystem.ActorOf(ctx, accountID)
 	// handle the error
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 
-	// send GetAccount message to the actor
+	var message proto.Message
 	command := &samplepb.GetAccount{
 		AccountId: accountID,
 	}
-	// send a remote message to the actor
-	reply, err := actors.RemoteAsk(ctx, addr, command)
-	// handle the error
-	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+
+	if pid != nil {
+		s.logger.Info("actor is found locally...")
+		message, err = actors.Ask(ctx, pid, command, time.Second)
+		if err != nil {
+			return nil, connect.NewError(connect.CodeInternal, err)
+		}
 	}
 
-	message, _ := reply.UnmarshalNew()
+	if pid == nil {
+		s.logger.Info("actor is not found locally...")
+		reply, err := actors.RemoteAsk(ctx, addr, command)
+		if err != nil {
+			return nil, connect.NewError(connect.CodeInternal, err)
+		}
+
+		message, _ = reply.UnmarshalNew()
+	}
+
 	// pattern match on the reply
 	switch x := message.(type) {
 	case *samplepb.Account:
-		// return the appropriate response
 		return connect.NewResponse(&samplepb.GetAccountResponse{Account: x}), nil
 	default:
-		// create the error message to send
-		err := fmt.Errorf("invalid reply=%s", reply.ProtoReflect().Descriptor().FullName())
+		err := fmt.Errorf("invalid reply=%s", message.ProtoReflect().Descriptor().FullName())
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 }
@@ -254,6 +230,9 @@ func (s *AccountService) listenAndServe() {
 	s.server = server
 	// listen and service requests
 	if err := s.server.ListenAndServe(); err != nil {
+		if errors.Is(err, http.ErrServerClosed) {
+			return
+		}
 		s.logger.Panic(errors.Wrap(err, "failed to start remoting service"))
 	}
 }

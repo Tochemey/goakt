@@ -15,4 +15,6 @@ message WireActor {
   goaktpb.Address actor_address = 2;
   // Specifies the actor full path
   string actor_path = 3;
+  // Specifies the actor type
+  string actor_type = 4;
 }
