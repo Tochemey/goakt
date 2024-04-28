@@ -195,6 +195,7 @@ type actorSystem struct {
 	stashCapacity uint64
 
 	housekeeperStopSig chan types.Unit
+	clusterSyncStopSig chan types.Unit
 
 	// specifies the events stream
 	eventsStream *eventstream.EventsStream
@@ -246,6 +247,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		tracer:              noop.NewTracerProvider().Tracer(name),
 		eventsChan:          make(chan *cluster.Event, 1),
 		registry:            newRegistry(),
+		clusterSyncStopSig:  make(chan types.Unit, 1),
 	}
 
 	system.started.Store(false)
@@ -442,7 +444,7 @@ func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor) (PID,
 	}
 
 	x.actors.Set(pid)
-	x.registry.Register(actor)
+	x.registry.RegisterWithKey(name, actor)
 
 	if x.clusterEnabled.Load() {
 		actorType := reflect.TypeOf(actor).Elem().Name()
@@ -513,7 +515,7 @@ func (x *actorSystem) SpawnFromFunc(ctx context.Context, receiveFunc ReceiveFunc
 	}
 
 	x.actors.Set(pid)
-	x.registry.Register(actor)
+	x.registry.RegisterWithKey(actorID, actor)
 
 	if x.clusterEnabled.Load() {
 		actorType := reflect.TypeOf(actor).Elem().Name()
@@ -750,6 +752,9 @@ func (x *actorSystem) Start(ctx context.Context) error {
 		if err := x.enableClustering(spanCtx); err != nil {
 			return err
 		}
+		// start cluster synchronization
+		// TODO: revisit this
+		// go x.runClusterSync()
 	}
 
 	if x.remotingEnabled.Load() {
@@ -808,6 +813,7 @@ func (x *actorSystem) Stop(ctx context.Context) error {
 			return err
 		}
 		close(x.clusterChan)
+		x.clusterSyncStopSig <- types.Unit{}
 		x.clusterEnabled.Store(false)
 	}
 
@@ -1240,18 +1246,70 @@ func (x *actorSystem) registerMetrics() error {
 	return err
 }
 
-// broadcastClusterEvents listens to cluster events
+// broadcastClusterEvents listens to cluster events and send them to the event streams
 func (x *actorSystem) broadcastClusterEvents() {
 	for event := range x.eventsChan {
 		if x.clusterEnabled.Load() {
-			if event != nil && event.Type != nil {
-				message, _ := event.Type.UnmarshalNew()
+			if event != nil && event.Payload != nil {
+				// first need to resync actors map back to the cluster
+				x.clusterSync()
+				// push the event to the event stream
+				message, _ := event.Payload.UnmarshalNew()
 				if x.eventsStream != nil {
-					x.logger.Debugf("node=(%s) publishing cluster event=(%s)....", x.name, event.Type.GetTypeUrl())
+					x.logger.Debugf("node=(%s) publishing cluster event=(%s)....", x.name, event.Type)
 					x.eventsStream.Publish(eventsTopic, message)
-					x.logger.Debugf("cluster event=(%s) successfully published by node=(%s)", event.Type.GetTypeUrl(), x.name)
+					x.logger.Debugf("cluster event=(%s) successfully published by node=(%s)", event.Type, x.name)
 				}
 			}
 		}
 	}
+}
+
+// clusterSync synchronizes the node' actors map to the cluster.
+func (x *actorSystem) clusterSync() {
+	typesMap := x.registry.List()
+	if len(typesMap) != 0 {
+		x.logger.Info("syncing node actors map to the cluster...")
+		for actorID, actorType := range typesMap {
+			actorPath := NewPath(actorID, NewAddress(x.name, "", -1))
+			if x.remotingEnabled.Load() {
+				actorPath = NewPath(actorID, NewAddress(x.name, x.remotingHost, int(x.remotingPort)))
+			}
+
+			if !x.clusterEnabled.Load() {
+				return
+			}
+
+			x.clusterChan <- &internalpb.WireActor{
+				ActorName:    actorID,
+				ActorAddress: actorPath.RemoteAddress(),
+				ActorPath:    actorPath.String(),
+				ActorType:    actorType.Name(),
+			}
+		}
+		x.logger.Info("node actors map successfully synced back to the cluster.")
+	}
+}
+
+// runClusterSync runs time to time cluster synchronization
+// by populating the given node actors map to the cluster for availability
+func (x *actorSystem) runClusterSync() {
+	x.logger.Info("cluster synchronization has started...")
+	ticker := time.NewTicker(5 * time.Minute)
+	tickerStopSig := make(chan types.Unit, 1)
+	go func() {
+		for {
+			select {
+			case <-ticker.C:
+				x.clusterSync()
+			case <-x.clusterSyncStopSig:
+				tickerStopSig <- types.Unit{}
+				return
+			}
+		}
+	}()
+
+	<-tickerStopSig
+	ticker.Stop()
+	x.logger.Info("cluster synchronization has stopped...")
 }

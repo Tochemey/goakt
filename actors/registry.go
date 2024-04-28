@@ -33,23 +33,30 @@ import (
 // registry represents reflection registry for dynamic loading and creation of
 // actors at run-time
 type registry interface {
-	// Register an object with an alias/key
+	// Register an object
 	Register(v any)
+	// RegisterWithKey registers with an alias/key
+	RegisterWithKey(key string, v any)
 	// GetType returns the type of object,
 	GetType(v any) (reflect.Type, bool)
 	// GetTypeOf returns the type of an object name
 	GetTypeOf(name string) (reflect.Type, bool)
+	// GetTypeByKey returns the type of an object by key
+	GetTypeByKey(key string) (reflect.Type, bool)
 	// Deregister removes the registered object from the registry
 	Deregister(v any)
+	// DeregisterWithKey removes the registered object from the registry
+	DeregisterWithKey(key string)
 	// Exists return true when a given object is in the registry
 	Exists(v any) bool
+	// List returns the list of registered at any point in time
+	List() map[string]reflect.Type
 }
 
 // registryImpl implements Registry
 type registryImpl struct {
-	names  map[string]reflect.Type
-	rtypes map[string]reflect.Type
-	mu     sync.Mutex
+	typesMap map[string]reflect.Type
+	mu       sync.Mutex
 }
 
 // enforce compilation error
@@ -58,8 +65,8 @@ var _ registry = (*registryImpl)(nil)
 // newRegistry creates an instance of Registry
 func newRegistry() registry {
 	l := &registryImpl{
-		rtypes: make(map[string]reflect.Type),
-		mu:     sync.Mutex{},
+		typesMap: make(map[string]reflect.Type),
+		mu:       sync.Mutex{},
 	}
 	return l
 }
@@ -76,7 +83,7 @@ func (r *registryImpl) Register(v any) {
 
 	if _, exist := r.GetType(v); !exist {
 		r.mu.Lock()
-		r.rtypes[strings.ToLower(rtype.Name())] = rtype
+		r.typesMap[strings.ToLower(rtype.Name())] = rtype
 		r.mu.Unlock()
 	}
 }
@@ -85,14 +92,14 @@ func (r *registryImpl) Register(v any) {
 func (r *registryImpl) Deregister(v any) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	delete(r.rtypes, nameOf(v))
+	delete(r.typesMap, nameOf(v))
 }
 
 // GetType returns the type of object
 func (r *registryImpl) GetType(v any) (reflect.Type, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	t, ok := r.rtypes[nameOf(v)]
+	t, ok := r.typesMap[nameOf(v)]
 	return t, ok
 }
 
@@ -100,7 +107,7 @@ func (r *registryImpl) GetType(v any) (reflect.Type, bool) {
 func (r *registryImpl) GetTypeOf(name string) (reflect.Type, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	t, ok := r.rtypes[strings.ToLower(name)]
+	t, ok := r.typesMap[strings.ToLower(name)]
 	return t, ok
 }
 
@@ -108,7 +115,7 @@ func (r *registryImpl) GetTypeOf(name string) (reflect.Type, bool) {
 func (r *registryImpl) Exists(v any) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	_, ok := r.rtypes[nameOf(v)]
+	_, ok := r.typesMap[nameOf(v)]
 	return ok
 }
 
@@ -122,4 +129,44 @@ func nameOf(v any) string {
 	}
 
 	return strings.ToLower(rtype.Name())
+}
+
+// List returns the list of registered at any point in time
+func (r *registryImpl) List() map[string]reflect.Type {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make(map[string]reflect.Type, len(r.typesMap))
+	for key, val := range r.typesMap {
+		out[key] = val
+	}
+	return out
+}
+
+// DeregisterWithKey implements registry.
+func (r *registryImpl) DeregisterWithKey(key string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.typesMap, strings.ToLower(key))
+}
+
+// RegisterWithKey implements registry.
+func (r *registryImpl) RegisterWithKey(key string, v any) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var rtype reflect.Type
+	switch _type := v.(type) {
+	case reflect.Type:
+		rtype = _type
+	default:
+		rtype = reflect.TypeOf(v).Elem()
+	}
+	r.typesMap[strings.ToLower(key)] = rtype
+}
+
+// GetTypeByKey returns the type of an object by key
+func (r *registryImpl) GetTypeByKey(key string) (reflect.Type, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	t, ok := r.typesMap[strings.ToLower(key)]
+	return t, ok
 }

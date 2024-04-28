@@ -39,15 +39,43 @@ func TestRegistry(t *testing.T) {
 	})
 
 	t.Run("With registration", func(t *testing.T) {
-		newRegistry := newRegistry()
+		registry := newRegistry()
 		// create an instance of an object
 		actor := newTestActor()
 		// register that actor
-		newRegistry.Register(actor)
-		_, ok := newRegistry.GetType(actor)
+		registry.Register(actor)
+		_, ok := registry.GetType(actor)
 		assert.True(t, ok)
 
-		_, ok = newRegistry.GetTypeOf("testActor")
+		_, ok = registry.GetTypeOf("testActor")
 		assert.True(t, ok)
+		assert.Len(t, registry.List(), 1)
+
+		registry.Deregister(actor)
+		assert.Len(t, registry.List(), 0)
+	})
+
+	t.Run("With registration/deregistration with key", func(t *testing.T) {
+		registry := newRegistry()
+
+		actor := newTestActor()
+		key := "key-1"
+		registry.RegisterWithKey(key, actor)
+		registry.Register(actor)
+
+		_, ok := registry.GetType(actor)
+		assert.True(t, ok)
+		_, ok = registry.GetTypeByKey(key)
+		assert.True(t, ok)
+
+		_, ok = registry.GetTypeOf("testActor")
+		assert.True(t, ok)
+		assert.Len(t, registry.List(), 2)
+
+		registry.Deregister(actor)
+		assert.Len(t, registry.List(), 1)
+
+		registry.DeregisterWithKey(key)
+		assert.Empty(t, registry.List())
 	})
 }

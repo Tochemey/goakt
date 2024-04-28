@@ -27,11 +27,11 @@ package cluster
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/buraksezer/olric"
 	"github.com/buraksezer/olric/config"
-	olriconfig "github.com/buraksezer/olric/config"
 	"github.com/buraksezer/olric/events"
 	"github.com/buraksezer/olric/hasher"
 	"github.com/pkg/errors"
@@ -47,9 +47,28 @@ import (
 	"github.com/tochemey/goakt/log"
 )
 
+type EventType int
+
+const (
+	NodeJoined EventType = iota
+	NodeLeft
+)
+
+func (x EventType) String() string {
+	switch x {
+	case NodeJoined:
+		return "NodJoined"
+	case NodeLeft:
+		return "NodeLeft"
+	default:
+		return fmt.Sprintf("%d", int(x))
+	}
+}
+
 // Event defines the cluster event
 type Event struct {
-	Type *anypb.Any
+	Payload *anypb.Any
+	Type    EventType
 }
 
 // Interface defines the Node interface
@@ -173,7 +192,7 @@ func (n *Node) Start(ctx context.Context) error {
 	conf := n.buildConfig()
 	conf.Hasher = &hasherWrapper{n.hasher}
 
-	m, err := olriconfig.NewMemberlistConfig("lan")
+	m, err := config.NewMemberlistConfig("lan")
 	if err != nil {
 		logger.Error(errors.Wrap(err, "failed to configure the cluster Node memberlist.💥"))
 		return err
@@ -202,7 +221,6 @@ func (n *Node) Start(ctx context.Context) error {
 	// cancel the context the server has started
 	conf.Started = func() {
 		defer cancel()
-		logger.Infof("GoAkt cluster Node=(%s) successfully started. 🎉", n.name)
 	}
 
 	eng, err := olric.New(conf)
@@ -224,6 +242,7 @@ func (n *Node) Start(ctx context.Context) error {
 	}()
 
 	<-startCtx.Done()
+	logger.Info("cluster engine successfully started. 🎉")
 
 	// set the client
 	n.client = n.server.NewEmbeddedClient()
@@ -246,6 +265,7 @@ func (n *Node) Start(ctx context.Context) error {
 	n.messagesChan = n.pubSub.Channel()
 	go n.consume()
 
+	logger.Infof("GoAkt cluster Node=(%s) successfully started. 🎉", n.name)
 	return nil
 }
 
@@ -479,8 +499,8 @@ func (n *Node) consume() {
 
 				n.logger.Debugf("%s received (%s) cluster event:[addr=(%s)]", n.name, kind, event.GetAddress())
 
-				eventType, _ := anypb.New(event)
-				n.events <- &Event{eventType}
+				payload, _ := anypb.New(event)
+				n.events <- &Event{payload, NodeJoined}
 
 			case events.KindNodeLeftEvent:
 				nodeLeft := new(events.NodeLeftEvent)
@@ -500,8 +520,8 @@ func (n *Node) consume() {
 
 				n.logger.Debugf("%s received (%s) cluster event:[addr=(%s)]", n.name, kind, event.GetAddress())
 
-				eventType, _ := anypb.New(event)
-				n.events <- &Event{eventType}
+				payload, _ := anypb.New(event)
+				n.events <- &Event{payload, NodeLeft}
 			default:
 				// skip
 			}
@@ -534,11 +554,11 @@ func (n *Node) buildConfig() *config.Config {
 		ReadQuorum:                 config.DefaultReadQuorum,
 		MemberCountQuorum:          config.DefaultMemberCountQuorum,
 		Peers:                      []string{},
-		DMaps:                      &olriconfig.DMaps{},
+		DMaps:                      &config.DMaps{},
 		KeepAlivePeriod:            config.DefaultKeepAlivePeriod,
 		PartitionCount:             n.partitionsCount,
 		BootstrapTimeout:           config.DefaultBootstrapTimeout,
-		ReplicationMode:            olriconfig.SyncReplicationMode,
+		ReplicationMode:            config.SyncReplicationMode,
 		RoutingTablePushInterval:   config.DefaultRoutingTablePushInterval,
 		JoinRetryInterval:          config.DefaultJoinRetryInterval,
 		MaxJoinAttempts:            config.DefaultMaxJoinAttempts,
