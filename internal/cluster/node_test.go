@@ -398,7 +398,7 @@ L:
 	require.NotEmpty(t, events)
 	require.Len(t, events, 1)
 	event := events[0]
-	msg, err := event.Type.UnmarshalNew()
+	msg, err := event.Payload.UnmarshalNew()
 	require.NoError(t, err)
 	nodeJoined, ok := msg.(*goaktpb.NodeJoined)
 	require.True(t, ok)
@@ -432,7 +432,7 @@ L2:
 	require.NotEmpty(t, events)
 	require.Len(t, events, 1)
 	event = events[0]
-	msg, err = event.Type.UnmarshalNew()
+	msg, err = event.Payload.UnmarshalNew()
 	require.NoError(t, err)
 	nodeLeft, ok := msg.(*goaktpb.NodeLeft)
 	require.True(t, ok)
