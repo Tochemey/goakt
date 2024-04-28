@@ -374,6 +374,8 @@ The following outlines the cluster mode operations which can help have a healthy
 - One can remove nodes. However, to avoid losing data, one need to scale down the cluster to the minimum number of nodes
   which started the cluster.
 
+Note: At the moment when a node is removed from the cluster, all actors on the given node are no longer accessible. The remaining members of the cluster will still function as expected. There is some work to address that issue. One can look at the following [discussion](https://github.com/Tochemey/goakt/discussions/304)
+
 ### Built-in Discovery Providers
 
 #### Kubernetes Discovery Provider Setup
