@@ -22,19 +22,31 @@
  * SOFTWARE.
  */
 
-package discovery
+package mdns
 
-import "github.com/pkg/errors"
+import (
+	"testing"
 
-var (
-	// ErrAlreadyInitialized is used when attempting to re-initialize the discovery provider
-	ErrAlreadyInitialized = errors.New("provider already initialized")
-	// ErrNotInitialized is used when the provider is not initialized
-	ErrNotInitialized = errors.New("provider not initialized")
-	// ErrAlreadyRegistered is used when attempting to re-register the provider
-	ErrAlreadyRegistered = errors.New("provider already registered")
-	// ErrNotRegistered is used when attempting to de-register the provider
-	ErrNotRegistered = errors.New("provider is not registered")
-	// ErrInvalidConfig is used when the discovery provider configuration is invalid
-	ErrInvalidConfig = errors.New("invalid discovery provider configuration")
+	"github.com/stretchr/testify/assert"
 )
+
+func TestConfig(t *testing.T) {
+	t.Run("With valid configuration", func(t *testing.T) {
+		config := &Config{
+			ServiceName: "serviceName",
+			Service:     "service",
+			Domain:      "domain",
+			Port:        1999,
+		}
+		assert.NoError(t, config.Validate())
+	})
+	t.Run("With invalid configuration", func(t *testing.T) {
+		config := &Config{
+			ServiceName: "serviceName",
+			Service:     "",
+			Domain:      "domain",
+			Port:        1999,
+		}
+		assert.Error(t, config.Validate())
+	})
+}

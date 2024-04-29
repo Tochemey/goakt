@@ -22,19 +22,38 @@
  * SOFTWARE.
  */
 
-package discovery
+package validation
 
-import "github.com/pkg/errors"
+import (
+	"testing"
 
-var (
-	// ErrAlreadyInitialized is used when attempting to re-initialize the discovery provider
-	ErrAlreadyInitialized = errors.New("provider already initialized")
-	// ErrNotInitialized is used when the provider is not initialized
-	ErrNotInitialized = errors.New("provider not initialized")
-	// ErrAlreadyRegistered is used when attempting to re-register the provider
-	ErrAlreadyRegistered = errors.New("provider already registered")
-	// ErrNotRegistered is used when attempting to de-register the provider
-	ErrNotRegistered = errors.New("provider is not registered")
-	// ErrInvalidConfig is used when the discovery provider configuration is invalid
-	ErrInvalidConfig = errors.New("invalid discovery provider configuration")
+	"github.com/stretchr/testify/suite"
 )
+
+type conditionalTestSuite struct {
+	suite.Suite
+}
+
+// In order for 'go test' to run this suite, we need to create
+// a normal test function and pass our suite to suite.Run
+func TestConditionalValidator(t *testing.T) {
+	suite.Run(t, new(conditionalTestSuite))
+}
+
+func (s *conditionalTestSuite) TestConditionalValidator() {
+	s.Run("with condition set to true", func() {
+		fieldName := "field"
+		fieldValue := ""
+		validator := NewConditionalValidator(true, NewEmptyStringValidator(fieldName, fieldValue))
+		err := validator.Validate()
+		s.Assert().Error(err)
+		s.Assert().EqualError(err, "the [field] is required")
+	})
+	s.Run("with condition set to false", func() {
+		fieldName := "field"
+		fieldValue := ""
+		validator := NewConditionalValidator(false, NewEmptyStringValidator(fieldName, fieldValue))
+		err := validator.Validate()
+		s.Assert().NoError(err)
+	})
+}

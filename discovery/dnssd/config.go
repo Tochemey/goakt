@@ -22,19 +22,22 @@
  * SOFTWARE.
  */
 
-package discovery
+package dnssd
 
-import "github.com/pkg/errors"
+import "github.com/tochemey/goakt/internal/validation"
 
-var (
-	// ErrAlreadyInitialized is used when attempting to re-initialize the discovery provider
-	ErrAlreadyInitialized = errors.New("provider already initialized")
-	// ErrNotInitialized is used when the provider is not initialized
-	ErrNotInitialized = errors.New("provider not initialized")
-	// ErrAlreadyRegistered is used when attempting to re-register the provider
-	ErrAlreadyRegistered = errors.New("provider already registered")
-	// ErrNotRegistered is used when attempting to de-register the provider
-	ErrNotRegistered = errors.New("provider is not registered")
-	// ErrInvalidConfig is used when the discovery provider configuration is invalid
-	ErrInvalidConfig = errors.New("invalid discovery provider configuration")
-)
+// Config defines the discovery configuration
+type Config struct {
+	// Domain specifies the dns name
+	DomainName string
+	// IPv6 states whether to fetch ipv6 address instead of ipv4
+	// if it is false then all addresses are extracted
+	IPv6 *bool
+}
+
+// Validate checks whether the given discovery configuration is valid
+func (x Config) Validate() error {
+	return validation.New(validation.FailFast()).
+		AddValidator(validation.NewEmptyStringValidator("Namespace", x.DomainName)).
+		Validate()
+}

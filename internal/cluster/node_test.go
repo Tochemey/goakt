@@ -65,18 +65,13 @@ func TestSingleNode(t *testing.T) {
 
 		// mock the discovery provider
 		provider := new(testkit.Provider)
-		config := discovery.NewConfig()
 
 		provider.EXPECT().ID().Return("testDisco")
 		provider.EXPECT().Initialize().Return(nil)
 		provider.EXPECT().Register().Return(nil)
 		provider.EXPECT().Deregister().Return(nil)
-		provider.EXPECT().SetConfig(config).Return(nil)
 		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
 		provider.EXPECT().Close().Return(nil)
-
-		// create the service discovery
-		serviceDiscovery := discovery.NewServiceDiscovery(provider, config)
 
 		// create a Node startNode
 		host := "localhost"
@@ -89,7 +84,7 @@ func TestSingleNode(t *testing.T) {
 		t.Setenv("NODE_IP", host)
 
 		logger := log.New(log.ErrorLevel, os.Stdout)
-		cluster, err := NewNode("test", serviceDiscovery, WithLogger(logger))
+		cluster, err := NewNode("test", provider, WithLogger(logger))
 		require.NotNil(t, cluster)
 		require.NoError(t, err)
 
@@ -125,18 +120,13 @@ func TestSingleNode(t *testing.T) {
 
 		// mock the discovery provider
 		provider := new(testkit.Provider)
-		config := discovery.NewConfig()
 
 		provider.EXPECT().ID().Return("testDisco")
 		provider.EXPECT().Initialize().Return(nil)
 		provider.EXPECT().Register().Return(nil)
 		provider.EXPECT().Deregister().Return(nil)
-		provider.EXPECT().SetConfig(config).Return(nil)
 		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
 		provider.EXPECT().Close().Return(nil)
-
-		// create the service discovery
-		serviceDiscovery := discovery.NewServiceDiscovery(provider, config)
 
 		// create a Node startNode
 		host := "localhost"
@@ -147,7 +137,7 @@ func TestSingleNode(t *testing.T) {
 		t.Setenv("NODE_NAME", "testNode")
 		t.Setenv("NODE_IP", host)
 
-		cluster, err := NewNode("test", serviceDiscovery)
+		cluster, err := NewNode("test", provider)
 		require.NotNil(t, cluster)
 		require.NoError(t, err)
 
@@ -199,18 +189,13 @@ func TestSingleNode(t *testing.T) {
 
 		// mock the discovery provider
 		provider := new(testkit.Provider)
-		config := discovery.NewConfig()
 
 		provider.EXPECT().ID().Return("testDisco")
 		provider.EXPECT().Initialize().Return(nil)
 		provider.EXPECT().Register().Return(nil)
 		provider.EXPECT().Deregister().Return(nil)
-		provider.EXPECT().SetConfig(config).Return(nil)
 		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
 		provider.EXPECT().Close().Return(nil)
-
-		// create the service discovery
-		serviceDiscovery := discovery.NewServiceDiscovery(provider, config)
 
 		// create a Node startNode
 		host := "localhost"
@@ -221,7 +206,7 @@ func TestSingleNode(t *testing.T) {
 		t.Setenv("NODE_NAME", "testNode")
 		t.Setenv("NODE_IP", host)
 
-		cluster, err := NewNode("test", serviceDiscovery)
+		cluster, err := NewNode("test", provider)
 		require.NotNil(t, cluster)
 		require.NoError(t, err)
 
@@ -266,18 +251,13 @@ func TestSingleNode(t *testing.T) {
 
 		// mock the discovery provider
 		provider := new(testkit.Provider)
-		config := discovery.NewConfig()
 
 		provider.EXPECT().ID().Return("testDisco")
 		provider.EXPECT().Initialize().Return(nil)
 		provider.EXPECT().Register().Return(nil)
 		provider.EXPECT().Deregister().Return(nil)
-		provider.EXPECT().SetConfig(config).Return(nil)
 		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
 		provider.EXPECT().Close().Return(nil)
-
-		// create the service discovery
-		serviceDiscovery := discovery.NewServiceDiscovery(provider, config)
 
 		// create a Node startNode
 		host := "localhost"
@@ -289,7 +269,7 @@ func TestSingleNode(t *testing.T) {
 		t.Setenv("NODE_IP", host)
 
 		logger := log.New(log.WarningLevel, os.Stdout)
-		cluster, err := NewNode("test", serviceDiscovery, WithLogger(logger))
+		cluster, err := NewNode("test", provider, WithLogger(logger))
 		require.NotNil(t, cluster)
 		require.NoError(t, err)
 
@@ -337,24 +317,19 @@ func TestSingleNode(t *testing.T) {
 
 		// mock the discovery provider
 		provider := new(testkit.Provider)
-		config := discovery.NewConfig()
 
 		provider.EXPECT().ID().Return("testDisco")
 		provider.EXPECT().Initialize().Return(nil)
 		provider.EXPECT().Register().Return(nil)
 		provider.EXPECT().Deregister().Return(nil)
-		provider.EXPECT().SetConfig(config).Return(nil)
 		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
 		provider.EXPECT().Close().Return(nil)
-
-		// create the service discovery
-		serviceDiscovery := discovery.NewServiceDiscovery(provider, config)
 
 		// set the environments
 		t.Setenv("GOSSIP_PORT", strconv.Itoa(gossipPort))
 		t.Setenv("REMOTING_PORT", strconv.Itoa(remotingPort))
 
-		cluster, err := NewNode("test", serviceDiscovery)
+		cluster, err := NewNode("test", provider)
 		require.Nil(t, cluster)
 		require.Error(t, err)
 	})
@@ -493,19 +468,20 @@ func startNode(t *testing.T, nodeName, serverAddr string) (*Node, discovery.Prov
 	applicationName := "accounts"
 	actorSystemName := "testSystem"
 	natsSubject := "some-subject"
-	// create the instance of provider
-	provider := nats.NewDiscovery()
 
 	// create the config
-	config := discovery.Config{
-		nats.ApplicationName: applicationName,
-		nats.ActorSystemName: actorSystemName,
-		nats.NatsServer:      serverAddr,
-		nats.NatsSubject:     natsSubject,
+	config := nats.Config{
+		ApplicationName: applicationName,
+		ActorSystemName: actorSystemName,
+		NatsServer:      serverAddr,
+		NatsSubject:     natsSubject,
 	}
 
+	// create the instance of provider
+	provider := nats.NewDiscovery(&config)
+
 	// create the startNode
-	node, err := NewNode(nodeName, discovery.NewServiceDiscovery(provider, config))
+	node, err := NewNode(nodeName, provider)
 	require.NoError(t, err)
 	require.NotNil(t, node)
 

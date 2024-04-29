@@ -34,7 +34,6 @@ import (
 	"github.com/spf13/cobra"
 
 	goakt "github.com/tochemey/goakt/actors"
-	"github.com/tochemey/goakt/discovery"
 	"github.com/tochemey/goakt/discovery/kubernetes"
 	"github.com/tochemey/goakt/examples/actor-cluster/k8s/service"
 	"github.com/tochemey/goakt/log"
@@ -45,6 +44,9 @@ const (
 	namespace          = "default"
 	applicationName    = "accounts"
 	actorSystemName    = "AccountsSystem"
+	gossipPortName     = "gossip-port"
+	clusterPortName    = "cluster-port"
+	remotingPortName   = "remoting-port"
 )
 
 // runCmd represents the run command
@@ -58,23 +60,26 @@ var runCmd = &cobra.Command{
 		// use the address default log. real-life implement the log interface`
 		logger := log.New(log.DebugLevel, os.Stdout)
 
-		// instantiate the k8 discovery provider
-		disco := kubernetes.NewDiscovery()
 		// define the discovery options
-		discoOptions := discovery.Config{
-			kubernetes.ApplicationName: applicationName,
-			kubernetes.ActorSystemName: actorSystemName,
-			kubernetes.Namespace:       namespace,
+		config := kubernetes.Config{
+			ApplicationName:  applicationName,
+			ActorSystemName:  actorSystemName,
+			Namespace:        namespace,
+			GossipPortName:   gossipPortName,
+			RemotingPortName: remotingPortName,
+			ClusterPortName:  clusterPortName,
 		}
-		// define the service discovery
-		serviceDiscovery := discovery.NewServiceDiscovery(disco, discoOptions)
+
+		// instantiate the k8 discovery provider
+		disco := kubernetes.NewDiscovery(&config)
+
 		// create the actor system
 		actorSystem, err := goakt.NewActorSystem(
 			actorSystemName,
 			goakt.WithPassivationDisabled(), // set big passivation time
 			goakt.WithLogger(logger),
 			goakt.WithActorInitMaxRetries(3),
-			goakt.WithClustering(serviceDiscovery, 20))
+			goakt.WithClustering(disco, 20))
 		// handle the error
 		if err != nil {
 			logger.Panic(err)

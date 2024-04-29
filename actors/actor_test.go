@@ -440,19 +440,15 @@ func startClusterSystem(t *testing.T, nodeName, serverAddr string) (ActorSystem,
 	applicationName := "accounts"
 	actorSystemName := "testSystem"
 	natsSubject := "some-subject"
-	// create the instance of provider
-	provider := nats.NewDiscovery()
-
 	// create the config
-	config := discovery.Config{
-		nats.ApplicationName: applicationName,
-		nats.ActorSystemName: actorSystemName,
-		nats.NatsServer:      serverAddr,
-		nats.NatsSubject:     natsSubject,
+	config := nats.Config{
+		ApplicationName: applicationName,
+		ActorSystemName: actorSystemName,
+		NatsServer:      serverAddr,
+		NatsSubject:     natsSubject,
 	}
-
-	// create the sd
-	sd := discovery.NewServiceDiscovery(provider, config)
+	// create the instance of provider
+	provider := nats.NewDiscovery(&config)
 
 	// create the actor system
 	system, err := NewActorSystem(
@@ -460,7 +456,7 @@ func startClusterSystem(t *testing.T, nodeName, serverAddr string) (ActorSystem,
 		WithPassivationDisabled(),
 		WithLogger(logger),
 		WithReplyTimeout(time.Minute),
-		WithClustering(sd, 10))
+		WithClustering(provider, 10))
 
 	require.NotNil(t, system)
 	require.NoError(t, err)

@@ -22,19 +22,24 @@
  * SOFTWARE.
  */
 
-package discovery
+package validation
 
-import "github.com/pkg/errors"
+// conditionalValidator runs a validator when a condition is met
+type conditionalValidator struct {
+	c bool
+	v Validator
+}
 
-var (
-	// ErrAlreadyInitialized is used when attempting to re-initialize the discovery provider
-	ErrAlreadyInitialized = errors.New("provider already initialized")
-	// ErrNotInitialized is used when the provider is not initialized
-	ErrNotInitialized = errors.New("provider not initialized")
-	// ErrAlreadyRegistered is used when attempting to re-register the provider
-	ErrAlreadyRegistered = errors.New("provider already registered")
-	// ErrNotRegistered is used when attempting to de-register the provider
-	ErrNotRegistered = errors.New("provider is not registered")
-	// ErrInvalidConfig is used when the discovery provider configuration is invalid
-	ErrInvalidConfig = errors.New("invalid discovery provider configuration")
-)
+// NewConditionalValidator creates a conditional validator, that runs the validator if the condition is true.
+// This validator will help when performing data update
+func NewConditionalValidator(condition bool, validator Validator) Validator {
+	return &conditionalValidator{c: condition, v: validator}
+}
+
+// Validate runs the provided conditional validator
+func (v conditionalValidator) Validate() error {
+	if v.c {
+		return v.v.Validate()
+	}
+	return nil
+}

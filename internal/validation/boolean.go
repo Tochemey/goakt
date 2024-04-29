@@ -22,19 +22,26 @@
  * SOFTWARE.
  */
 
-package discovery
+package validation
 
 import "github.com/pkg/errors"
 
-var (
-	// ErrAlreadyInitialized is used when attempting to re-initialize the discovery provider
-	ErrAlreadyInitialized = errors.New("provider already initialized")
-	// ErrNotInitialized is used when the provider is not initialized
-	ErrNotInitialized = errors.New("provider not initialized")
-	// ErrAlreadyRegistered is used when attempting to re-register the provider
-	ErrAlreadyRegistered = errors.New("provider already registered")
-	// ErrNotRegistered is used when attempting to de-register the provider
-	ErrNotRegistered = errors.New("provider is not registered")
-	// ErrInvalidConfig is used when the discovery provider configuration is invalid
-	ErrInvalidConfig = errors.New("invalid discovery provider configuration")
-)
+// booleanValidator implements Validator.
+type booleanValidator struct {
+	boolCheck  bool
+	errMessage string
+}
+
+// NewBooleanValidator creates a new boolean validator that returns an error message if condition is false
+// This validator will come handy when dealing with conditional validation
+func NewBooleanValidator(boolCheck bool, errMessage string) Validator {
+	return &booleanValidator{boolCheck: boolCheck, errMessage: errMessage}
+}
+
+// Validate returns an error if boolean check is false
+func (v booleanValidator) Validate() error {
+	if !v.boolCheck {
+		return errors.New(v.errMessage)
+	}
+	return nil
+}

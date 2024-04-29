@@ -45,7 +45,6 @@ import (
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/tochemey/goakt/discovery"
 	"github.com/tochemey/goakt/goaktpb"
 	"github.com/tochemey/goakt/log"
 	clustermocks "github.com/tochemey/goakt/mocks/cluster"
@@ -188,21 +187,18 @@ func TestActorSystem(t *testing.T) {
 
 		// mock the discovery provider
 		provider := new(testkit.Provider)
-		config := discovery.NewConfig()
-		sd := discovery.NewServiceDiscovery(provider, config)
 		newActorSystem, err := NewActorSystem(
 			"test",
 			WithPassivationDisabled(),
 			WithLogger(logger),
 			WithReplyTimeout(time.Minute),
-			WithClustering(sd, 9))
+			WithClustering(provider, 9))
 		require.NoError(t, err)
 
 		provider.EXPECT().ID().Return("testDisco")
 		provider.EXPECT().Initialize().Return(nil)
 		provider.EXPECT().Register().Return(nil)
 		provider.EXPECT().Deregister().Return(nil)
-		provider.EXPECT().SetConfig(config).Return(nil)
 		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
 		provider.EXPECT().Close().Return(nil)
 
@@ -967,21 +963,18 @@ func TestActorSystem(t *testing.T) {
 
 		// mock the discovery provider
 		provider := new(testkit.Provider)
-		config := discovery.NewConfig()
-		sd := discovery.NewServiceDiscovery(provider, config)
 		newActorSystem, err := NewActorSystem(
 			"test",
 			WithExpireActorAfter(passivateAfter),
 			WithLogger(logger),
 			WithReplyTimeout(time.Minute),
-			WithClustering(sd, 9))
+			WithClustering(provider, 9))
 		require.NoError(t, err)
 
 		provider.EXPECT().ID().Return("testDisco")
 		provider.EXPECT().Initialize().Return(nil)
 		provider.EXPECT().Register().Return(nil)
 		provider.EXPECT().Deregister().Return(nil)
-		provider.EXPECT().SetConfig(config).Return(nil)
 		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
 		provider.EXPECT().Close().Return(nil)
 
@@ -1205,21 +1198,18 @@ func TestActorSystem(t *testing.T) {
 
 		// mock the discovery provider
 		provider := new(testkit.Provider)
-		config := discovery.NewConfig()
-		sd := discovery.NewServiceDiscovery(provider, config)
 		newActorSystem, err := NewActorSystem(
 			"test",
 			WithPassivationDisabled(),
 			WithLogger(logger),
 			WithReplyTimeout(time.Minute),
-			WithClustering(sd, 9))
+			WithClustering(provider, 9))
 		require.NoError(t, err)
 
 		provider.EXPECT().ID().Return("testDisco")
 		provider.EXPECT().Initialize().Return(nil)
 		provider.EXPECT().Register().Return(nil)
 		provider.EXPECT().Deregister().Return(nil)
-		provider.EXPECT().SetConfig(config).Return(nil)
 		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
 		provider.EXPECT().Close().Return(nil)
 
@@ -1430,19 +1420,17 @@ func TestActorSystem(t *testing.T) {
 
 		// mock the discovery provider
 		provider := new(testkit.Provider)
-		config := discovery.NewConfig()
-		sd := discovery.NewServiceDiscovery(provider, config)
 
 		system := &actorSystem{
-			name:             "testSystem",
-			logger:           logger,
-			cluster:          mockedCluster,
-			clusterEnabled:   *atomic.NewBool(true),
-			telemetry:        telemetry.New(),
-			mutex:            sync.Mutex{},
-			tracer:           noop.NewTracerProvider().Tracer("testSystem"),
-			scheduler:        newScheduler(logger, time.Second, withSchedulerCluster(mockedCluster)),
-			serviceDiscovery: sd,
+			name:              "testSystem",
+			logger:            logger,
+			cluster:           mockedCluster,
+			clusterEnabled:    *atomic.NewBool(true),
+			telemetry:         telemetry.New(),
+			mutex:             sync.Mutex{},
+			tracer:            noop.NewTracerProvider().Tracer("testSystem"),
+			scheduler:         newScheduler(logger, time.Second, withSchedulerCluster(mockedCluster)),
+			discoveryProvider: provider,
 		}
 
 		err := system.Start(ctx)

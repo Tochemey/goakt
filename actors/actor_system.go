@@ -177,7 +177,7 @@ type actorSystem struct {
 	// convenient field to check cluster setup
 	clusterEnabled atomic.Bool
 	// cluster discovery method
-	serviceDiscovery *discovery.ServiceDiscovery
+	discoveryProvider discovery.Provider
 	// define the number of partitions to shard the actors in the cluster
 	partitionsCount uint64
 	// cluster mode
@@ -1068,7 +1068,7 @@ func (x *actorSystem) enableClustering(ctx context.Context) error {
 	x.logger.Info("enabling clustering...")
 
 	cluster, err := cluster.NewNode(x.Name(),
-		x.serviceDiscovery,
+		x.discoveryProvider,
 		cluster.WithLogger(x.logger),
 		cluster.WithPartitionsCount(x.partitionsCount),
 		cluster.WithHasher(x.partitionHasher),

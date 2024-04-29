@@ -25,7 +25,6 @@
 package mdns
 
 import (
-	"strconv"
 	"testing"
 	"time"
 
@@ -40,7 +39,7 @@ import (
 func TestDiscovery(t *testing.T) {
 	t.Run("With new instance", func(t *testing.T) {
 		// create the instance of provider
-		provider := NewDiscovery()
+		provider := NewDiscovery(nil)
 		require.NotNil(t, provider)
 		// assert that provider implements the Discovery interface
 		// this is a cheap test
@@ -53,195 +52,69 @@ func TestDiscovery(t *testing.T) {
 	t.Run("With ID assertion", func(t *testing.T) {
 		// cheap test
 		// create the instance of provider
-		provider := NewDiscovery()
+		provider := NewDiscovery(nil)
 		require.NotNil(t, provider)
 		assert.Equal(t, "mdns", provider.ID())
 	})
-	t.Run("With SetConfig", func(t *testing.T) {
-		// create the various config option
-		ports := dynaport.Get(1)
-		port := strconv.Itoa(ports[0])
-		serviceType := "_workstation._tcp"
-		serviceName := "AccountsSystem"
-		domain := "local."
-		// create the instance of provider
-		provider := NewDiscovery()
-		// create the config
-		config := discovery.Config{
-			Service:     serviceType,
-			ServiceName: serviceName,
-			Domain:      domain,
-			Port:        port,
-			IPv6:        false,
-		}
 
-		// set config
-		assert.NoError(t, provider.SetConfig(config))
-	})
-	t.Run("With SetConfig with service name not set", func(t *testing.T) {
-		// create the various config option
-		ports := dynaport.Get(1)
-		port := strconv.Itoa(ports[0])
-		serviceType := "_workstation._tcp"
-		domain := "local."
-		// create the instance of provider
-		provider := NewDiscovery()
-		// create the config
-		config := discovery.Config{
-			Service: serviceType,
-			Domain:  domain,
-			Port:    port,
-			IPv6:    false,
-		}
-
-		// set config
-		assert.Error(t, provider.SetConfig(config))
-	})
-	t.Run("With SetConfig with service not set", func(t *testing.T) {
-		// create the various config option
-		ports := dynaport.Get(1)
-		port := strconv.Itoa(ports[0])
-		serviceName := "AccountsSystem"
-		domain := "local."
-		// create the instance of provider
-		provider := NewDiscovery()
-		// create the config
-		config := discovery.Config{
-			ServiceName: serviceName,
-			Domain:      domain,
-			Port:        port,
-			IPv6:        false,
-		}
-
-		// set config
-		assert.Error(t, provider.SetConfig(config))
-	})
-	t.Run("With SetConfig with port not set", func(t *testing.T) {
-		// create the various config option
-		serviceType := "_workstation._tcp"
-		serviceName := "AccountsSystem"
-		domain := "local."
-		// create the instance of provider
-		provider := NewDiscovery()
-		// create the config
-		config := discovery.Config{
-			Service:     serviceType,
-			ServiceName: serviceName,
-			Domain:      domain,
-			IPv6:        false,
-		}
-
-		// set config
-		assert.Error(t, provider.SetConfig(config))
-	})
-	t.Run("With SetConfig with domain not set", func(t *testing.T) {
-		// create the various config option
-		ports := dynaport.Get(1)
-		port := strconv.Itoa(ports[0])
-		serviceType := "_workstation._tcp"
-		serviceName := "AccountsSystem"
-		// create the instance of provider
-		provider := NewDiscovery()
-		// create the config
-		config := discovery.Config{
-			Service:     serviceType,
-			ServiceName: serviceName,
-			Port:        port,
-			IPv6:        false,
-		}
-
-		// set config
-		assert.Error(t, provider.SetConfig(config))
-	})
-	t.Run("With SetConfig with ipv6 not set", func(t *testing.T) {
-		// create the various config option
-		ports := dynaport.Get(1)
-		port := strconv.Itoa(ports[0])
-		serviceType := "_workstation._tcp"
-		serviceName := "AccountsSystem"
-		domain := "local."
-		// create the instance of provider
-		provider := NewDiscovery()
-		// create the config
-		config := discovery.Config{
-			Service:     serviceType,
-			ServiceName: serviceName,
-			Domain:      domain,
-			Port:        port,
-		}
-
-		// set config
-		assert.Error(t, provider.SetConfig(config))
-	})
-	t.Run("With SetConfig: already initialized", func(t *testing.T) {
-		// create the various config option
-		ports := dynaport.Get(1)
-		port := strconv.Itoa(ports[0])
-		serviceType := "_workstation._tcp"
-		serviceName := "AccountsSystem"
-		domain := "local."
-		// create the instance of provider
-		provider := NewDiscovery()
-		provider.initialized = atomic.NewBool(true)
-		// create the config
-		config := discovery.Config{
-			Service:     serviceType,
-			ServiceName: serviceName,
-			Domain:      domain,
-			Port:        port,
-			IPv6:        false,
-		}
-
-		// set config
-		err := provider.SetConfig(config)
-		assert.Error(t, err)
-		assert.EqualError(t, err, discovery.ErrAlreadyInitialized.Error())
-	})
 	t.Run("With Initialize", func(t *testing.T) {
 		// create the various config option
 		ports := dynaport.Get(1)
-		port := strconv.Itoa(ports[0])
+		port := ports[0]
 		serviceType := "_workstation._tcp"
 		serviceName := "AccountsSystem"
 		domain := "local."
-		// create the instance of provider
-		provider := NewDiscovery()
+
 		// create the config
-		config := discovery.Config{
+		config := Config{
 			Service:     serviceType,
 			ServiceName: serviceName,
 			Domain:      domain,
 			Port:        port,
-			IPv6:        false,
 		}
+		// create the instance of provider
+		provider := NewDiscovery(&config)
+
 		// set config
-		assert.NoError(t, provider.SetConfig(config))
 		assert.NoError(t, provider.Initialize())
 	})
 	t.Run("With Initialize: already initialized", func(t *testing.T) {
+		// create the various config option
+		ports := dynaport.Get(1)
+		port := ports[0]
+		serviceType := "_workstation._tcp"
+		serviceName := "AccountsSystem"
+		domain := "local."
+
+		// create the config
+		config := Config{
+			Service:     serviceType,
+			ServiceName: serviceName,
+			Domain:      domain,
+			Port:        port,
+		}
 		// create the instance of provider
-		provider := NewDiscovery()
+		provider := NewDiscovery(&config)
 		provider.initialized = atomic.NewBool(true)
 		assert.Error(t, provider.Initialize())
 	})
 	t.Run("With Register", func(t *testing.T) {
 		// create the various config option
 		ports := dynaport.Get(1)
-		port := strconv.Itoa(ports[0])
+		port := ports[0]
 		serviceType := "_workstation._tcp"
 		serviceName := "AccountsSystem"
 		domain := "local"
-		// create the instance of provider
-		provider := NewDiscovery()
 		// create the config
-		config := discovery.Config{
+		config := Config{
 			Service:     serviceType,
 			ServiceName: serviceName,
 			Domain:      domain,
 			Port:        port,
-			IPv6:        false,
 		}
-		require.NoError(t, provider.SetConfig(config))
+		// create the instance of provider
+		provider := NewDiscovery(&config)
+
 		require.NoError(t, provider.Initialize())
 		require.NoError(t, provider.Register())
 
@@ -254,21 +127,19 @@ func TestDiscovery(t *testing.T) {
 	t.Run("With Register when already registered", func(t *testing.T) {
 		// create the various config option
 		ports := dynaport.Get(1)
-		port := strconv.Itoa(ports[0])
+		port := ports[0]
 		serviceType := "_workstation._tcp"
 		serviceName := "AccountsSystem"
 		domain := "local"
-		// create the instance of provider
-		provider := NewDiscovery()
 		// create the config
-		config := discovery.Config{
+		config := Config{
 			Service:     serviceType,
 			ServiceName: serviceName,
 			Domain:      domain,
 			Port:        port,
-			IPv6:        false,
 		}
-		require.NoError(t, provider.SetConfig(config))
+		// create the instance of provider
+		provider := NewDiscovery(&config)
 		require.NoError(t, provider.Initialize())
 		require.NoError(t, provider.Register())
 
@@ -282,15 +153,41 @@ func TestDiscovery(t *testing.T) {
 		assert.False(t, provider.initialized.Load())
 	})
 	t.Run("With Deregister", func(t *testing.T) {
+		// create the various config option
+		ports := dynaport.Get(1)
+		port := ports[0]
+		serviceType := "_workstation._tcp"
+		serviceName := "AccountsSystem"
+		domain := "local"
+		// create the config
+		config := Config{
+			Service:     serviceType,
+			ServiceName: serviceName,
+			Domain:      domain,
+			Port:        port,
+		}
 		// create the instance of provider
-		provider := NewDiscovery()
+		provider := NewDiscovery(&config)
 		// for the sake of the test
 		provider.initialized = atomic.NewBool(true)
 		assert.NoError(t, provider.Deregister())
 	})
 	t.Run("With Deregister when not initialized", func(t *testing.T) {
+		// create the various config option
+		ports := dynaport.Get(1)
+		port := ports[0]
+		serviceType := "_workstation._tcp"
+		serviceName := "AccountsSystem"
+		domain := "local"
+		// create the config
+		config := Config{
+			Service:     serviceType,
+			ServiceName: serviceName,
+			Domain:      domain,
+			Port:        port,
+		}
 		// create the instance of provider
-		provider := NewDiscovery()
+		provider := NewDiscovery(&config)
 		// for the sake of the test
 		provider.initialized = atomic.NewBool(false)
 		err := provider.Deregister()
@@ -304,17 +201,17 @@ func TestDiscovery(t *testing.T) {
 		service := "_workstation._tcp"
 		serviceName := "AccountsSystem"
 		domain := "local."
-		// create the instance of provider
-		provider := NewDiscovery()
+
 		// create the config
-		config := discovery.Config{
+		config := Config{
 			Service:     service,
 			ServiceName: serviceName,
 			Domain:      domain,
 			Port:        port,
-			IPv6:        false,
 		}
-		require.NoError(t, provider.SetConfig(config))
+
+		// create the instance of provider
+		provider := NewDiscovery(&config)
 		require.NoError(t, provider.Initialize())
 		require.NoError(t, provider.Register())
 
@@ -330,7 +227,23 @@ func TestDiscovery(t *testing.T) {
 		assert.NoError(t, provider.Deregister())
 	})
 	t.Run("With DiscoverPeers: not initialized", func(t *testing.T) {
-		provider := NewDiscovery()
+		// create the various config option
+		ports := dynaport.Get(1)
+		port := ports[0]
+		service := "_workstation._tcp"
+		serviceName := "AccountsSystem"
+		domain := "local."
+
+		// create the config
+		config := Config{
+			Service:     service,
+			ServiceName: serviceName,
+			Domain:      domain,
+			Port:        port,
+		}
+
+		// create the instance of provider
+		provider := NewDiscovery(&config)
 		peers, err := provider.DiscoverPeers()
 		assert.Error(t, err)
 		assert.Empty(t, peers)

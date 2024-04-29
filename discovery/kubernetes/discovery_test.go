@@ -39,10 +39,16 @@ import (
 	"github.com/tochemey/goakt/discovery"
 )
 
+const (
+	gossipPortName   = "gossip-port"
+	clusterPortName  = "cluster-port"
+	remotingPortName = "remoting-port"
+)
+
 func TestDiscovery(t *testing.T) {
 	t.Run("With new instance", func(t *testing.T) {
 		// create the instance of provider
-		provider := NewDiscovery()
+		provider := NewDiscovery(nil)
 		require.NotNil(t, provider)
 		// assert that provider implements the Discovery interface
 		// this is a cheap test
@@ -55,7 +61,7 @@ func TestDiscovery(t *testing.T) {
 	t.Run("With ID assertion", func(t *testing.T) {
 		// cheap test
 		// create the instance of provider
-		provider := NewDiscovery()
+		provider := NewDiscovery(nil)
 		require.NotNil(t, provider)
 		assert.Equal(t, "kubernetes", provider.ID())
 	})
@@ -66,6 +72,15 @@ func TestDiscovery(t *testing.T) {
 		appName := "test"
 		ts1 := time.Now()
 		ts2 := time.Now()
+
+		config := &Config{
+			Namespace:        "test",
+			ActorSystemName:  "test",
+			ApplicationName:  "test",
+			GossipPortName:   gossipPortName,
+			RemotingPortName: remotingPortName,
+			ClusterPortName:  clusterPortName,
+		}
 
 		// create some bunch of mock pods
 		pods := []runtime.Object{
@@ -84,15 +99,15 @@ func TestDiscovery(t *testing.T) {
 						{
 							Ports: []corev1.ContainerPort{
 								{
-									Name:          GossipPortName,
+									Name:          gossipPortName,
 									ContainerPort: 3379,
 								},
 								{
-									Name:          ClusterPortName,
+									Name:          clusterPortName,
 									ContainerPort: 3380,
 								},
 								{
-									Name:          RemotingPortName,
+									Name:          remotingPortName,
 									ContainerPort: 9000,
 								},
 							},
@@ -128,15 +143,15 @@ func TestDiscovery(t *testing.T) {
 						{
 							Ports: []corev1.ContainerPort{
 								{
-									Name:          GossipPortName,
+									Name:          gossipPortName,
 									ContainerPort: 3379,
 								},
 								{
-									Name:          ClusterPortName,
+									Name:          clusterPortName,
 									ContainerPort: 3380,
 								},
 								{
-									Name:          RemotingPortName,
+									Name:          remotingPortName,
 									ContainerPort: 9000,
 								},
 							},
@@ -164,11 +179,7 @@ func TestDiscovery(t *testing.T) {
 		provider := Discovery{
 			client:      client,
 			initialized: atomic.NewBool(true),
-			option: &discoConfig{
-				NameSpace:       ns,
-				ActorSystemName: actorSystemName,
-				ApplicationName: appName,
-			},
+			config:      config,
 		}
 		// discover some nodes
 		actual, err := provider.DiscoverPeers()
@@ -186,127 +197,47 @@ func TestDiscovery(t *testing.T) {
 		assert.NoError(t, provider.Close())
 	})
 	t.Run("With DiscoverPeers: not initialized", func(t *testing.T) {
-		provider := NewDiscovery()
+		provider := NewDiscovery(nil)
 		peers, err := provider.DiscoverPeers()
 		assert.Error(t, err)
 		assert.Empty(t, peers)
 		assert.EqualError(t, err, discovery.ErrNotInitialized.Error())
-	})
-	t.Run("With SetConfig", func(t *testing.T) {
-		// create the various config option
-		namespace := "default"
-		applicationName := "accounts"
-		actorSystemName := "AccountsSystem"
-		// create the instance of provider
-		provider := NewDiscovery()
-		// create the config
-		config := discovery.Config{
-			ApplicationName: applicationName,
-			ActorSystemName: actorSystemName,
-			Namespace:       namespace,
-		}
-
-		// set config
-		assert.NoError(t, provider.SetConfig(config))
-	})
-	t.Run("With SetConfig: already initialized", func(t *testing.T) {
-		// create the various config option
-		namespace := "default"
-		applicationName := "accounts"
-		actorSystemName := "AccountsSystem"
-		// create the instance of provider
-		provider := NewDiscovery()
-		provider.initialized = atomic.NewBool(true)
-		// create the config
-		config := discovery.Config{
-			ApplicationName: applicationName,
-			ActorSystemName: actorSystemName,
-			Namespace:       namespace,
-		}
-
-		// set config
-		err := provider.SetConfig(config)
-		assert.Error(t, err)
-		assert.EqualError(t, err, discovery.ErrAlreadyInitialized.Error())
-	})
-	t.Run("With SetConfig: actor system not set", func(t *testing.T) {
-		// create the various config option
-		namespace := "default"
-		applicationName := "accounts"
-		// create the instance of provider
-		provider := NewDiscovery()
-		// create the config
-		config := discovery.Config{
-			ApplicationName: applicationName,
-			Namespace:       namespace,
-		}
-
-		// set config
-		assert.Error(t, provider.SetConfig(config))
-	})
-	t.Run("With SetConfig: application name not set", func(t *testing.T) {
-		// create the various config option
-		namespace := "default"
-		actorSystemName := "AccountsSystem"
-		// create the instance of provider
-		provider := NewDiscovery()
-		// create the config
-		config := discovery.Config{
-			ActorSystemName: actorSystemName,
-			Namespace:       namespace,
-		}
-
-		// set config
-		assert.Error(t, provider.SetConfig(config))
-	})
-	t.Run("With SetConfig: namespace not set", func(t *testing.T) {
-		applicationName := "accounts"
-		actorSystemName := "AccountsSystem"
-		// create the instance of provider
-		provider := NewDiscovery()
-		// create the config
-		config := discovery.Config{
-			ApplicationName: applicationName,
-			ActorSystemName: actorSystemName,
-		}
-
-		// set config
-		assert.Error(t, provider.SetConfig(config))
 	})
 	t.Run("With Initialize", func(t *testing.T) {
 		// create the various config option
 		namespace := "default"
 		applicationName := "accounts"
 		actorSystemName := "AccountsSystem"
-		// create the instance of provider
-		provider := NewDiscovery()
-		// create the config
-		config := discovery.Config{
-			ApplicationName: applicationName,
-			ActorSystemName: actorSystemName,
-			Namespace:       namespace,
+
+		config := &Config{
+			Namespace:        namespace,
+			ActorSystemName:  actorSystemName,
+			ApplicationName:  applicationName,
+			GossipPortName:   gossipPortName,
+			RemotingPortName: remotingPortName,
+			ClusterPortName:  clusterPortName,
 		}
 
-		// set config
-		assert.NoError(t, provider.SetConfig(config))
+		// create the instance of provider
+		provider := NewDiscovery(config)
 		assert.NoError(t, provider.Initialize())
 	})
 	t.Run("With Initialize: already initialized", func(t *testing.T) {
 		// create the instance of provider
-		provider := NewDiscovery()
+		provider := NewDiscovery(nil)
 		provider.initialized = atomic.NewBool(true)
 		assert.Error(t, provider.Initialize())
 	})
 	t.Run("With Deregister", func(t *testing.T) {
 		// create the instance of provider
-		provider := NewDiscovery()
+		provider := NewDiscovery(nil)
 		// for the sake of the test
 		provider.initialized = atomic.NewBool(true)
 		assert.NoError(t, provider.Deregister())
 	})
 	t.Run("With Deregister when not initialized", func(t *testing.T) {
 		// create the instance of provider
-		provider := NewDiscovery()
+		provider := NewDiscovery(nil)
 		// for the sake of the test
 		provider.initialized = atomic.NewBool(false)
 		err := provider.Deregister()

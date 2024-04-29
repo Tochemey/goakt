@@ -43,30 +43,9 @@ import (
 	"github.com/tochemey/goakt/discovery"
 )
 
-const (
-	Namespace        string = "namespace"         // Namespace specifies the kubernetes namespace
-	ActorSystemName         = "actor_system_name" // ActorSystemName specifies the actor system name
-	ApplicationName         = "app_name"          // ApplicationName specifies the application name. This often matches the actor system name
-	GossipPortName          = "gossip-port"
-	ClusterPortName         = "cluster-port"
-	RemotingPortName        = "remoting-port"
-)
-
-// discoConfig represents the kubernetes provider discoConfig
-type discoConfig struct {
-	// Provider specifies the provider name
-	Provider string
-	// NameSpace specifies the namespace
-	NameSpace string
-	// The actor system name
-	ActorSystemName string
-	// ApplicationName specifies the running application
-	ApplicationName string
-}
-
 // Discovery represents the kubernetes discovery
 type Discovery struct {
-	option *discoConfig
+	config *Config
 	client kubernetes.Interface
 	mu     sync.Mutex
 
@@ -79,13 +58,13 @@ type Discovery struct {
 var _ discovery.Provider = &Discovery{}
 
 // NewDiscovery returns an instance of the kubernetes discovery provider
-func NewDiscovery() *Discovery {
+func NewDiscovery(config *Config) *Discovery {
 	// create an instance of
 	discovery := &Discovery{
 		mu:          sync.Mutex{},
 		stopChan:    make(chan struct{}, 1),
 		initialized: atomic.NewBool(false),
-		option:      &discoConfig{},
+		config:      config,
 	}
 
 	return discovery
@@ -105,23 +84,7 @@ func (d *Discovery) Initialize() error {
 		return discovery.ErrAlreadyInitialized
 	}
 
-	if d.option.Provider == "" {
-		d.option.Provider = d.ID()
-	}
-
-	return nil
-}
-
-// SetConfig registers the underlying discovery configuration
-func (d *Discovery) SetConfig(meta discovery.Config) error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-
-	if d.initialized.Load() {
-		return discovery.ErrAlreadyInitialized
-	}
-
-	return d.setConfig(meta)
+	return d.config.Validate()
 }
 
 // Register registers this node to a service discovery directory.
@@ -168,16 +131,15 @@ func (d *Discovery) DiscoverPeers() ([]string, error) {
 	}
 
 	// let us create the pod labels map
-	// TODO: make sure to document it on k8 discovery
 	podLabels := map[string]string{
-		"app.kubernetes.io/part-of":   d.option.ActorSystemName,
-		"app.kubernetes.io/component": d.option.ApplicationName, // TODO: redefine it
-		"app.kubernetes.io/name":      d.option.ApplicationName,
+		"app.kubernetes.io/part-of":   d.config.ActorSystemName,
+		"app.kubernetes.io/component": d.config.ApplicationName,
+		"app.kubernetes.io/name":      d.config.ApplicationName,
 	}
 
 	ctx := context.Background()
 
-	pods, err := d.client.CoreV1().Pods(d.option.NameSpace).List(ctx, metav1.ListOptions{
+	pods, err := d.client.CoreV1().Pods(d.config.Namespace).List(ctx, metav1.ListOptions{
 		LabelSelector: labels.SelectorFromSet(podLabels).String(),
 	})
 
@@ -185,7 +147,7 @@ func (d *Discovery) DiscoverPeers() ([]string, error) {
 		return nil, err
 	}
 
-	validPortNames := []string{ClusterPortName, GossipPortName, RemotingPortName}
+	validPortNames := []string{d.config.ClusterPortName, d.config.GossipPortName, d.config.RemotingPortName}
 
 	// define the addresses list
 	addresses := goset.NewSet[string]()
@@ -212,7 +174,7 @@ MainLoop:
 					continue
 				}
 
-				if port.Name == GossipPortName {
+				if port.Name == d.config.GossipPortName {
 					addresses.Add(net.JoinHostPort(pod.Status.PodIP, strconv.Itoa(int(port.ContainerPort))))
 				}
 			}
@@ -223,29 +185,5 @@ MainLoop:
 
 // Close closes the provider
 func (d *Discovery) Close() error {
-	return nil
-}
-
-// setConfig sets the kubernetes discoConfig
-func (d *Discovery) setConfig(config discovery.Config) (err error) {
-	option := new(discoConfig)
-
-	option.NameSpace, err = config.GetString(Namespace)
-	if err != nil {
-		return err
-	}
-
-	option.ActorSystemName, err = config.GetString(ActorSystemName)
-	if err != nil {
-		return err
-	}
-
-	option.ApplicationName, err = config.GetString(ApplicationName)
-
-	if err != nil {
-		return err
-	}
-
-	d.option = option
 	return nil
 }

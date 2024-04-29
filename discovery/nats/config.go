@@ -22,19 +22,34 @@
  * SOFTWARE.
  */
 
-package discovery
+package nats
 
-import "github.com/pkg/errors"
+import (
+	"time"
 
-var (
-	// ErrAlreadyInitialized is used when attempting to re-initialize the discovery provider
-	ErrAlreadyInitialized = errors.New("provider already initialized")
-	// ErrNotInitialized is used when the provider is not initialized
-	ErrNotInitialized = errors.New("provider not initialized")
-	// ErrAlreadyRegistered is used when attempting to re-register the provider
-	ErrAlreadyRegistered = errors.New("provider already registered")
-	// ErrNotRegistered is used when attempting to de-register the provider
-	ErrNotRegistered = errors.New("provider is not registered")
-	// ErrInvalidConfig is used when the discovery provider configuration is invalid
-	ErrInvalidConfig = errors.New("invalid discovery provider configuration")
+	"github.com/tochemey/goakt/internal/validation"
 )
+
+// Config represents the nats provider discoConfig
+type Config struct {
+	// NatsServer defines the nats server in the format nats://host:port
+	NatsServer string
+	// NatsSubject defines the custom NATS subject
+	NatsSubject string
+	// The actor system name
+	ActorSystemName string
+	// ApplicationName specifies the running application
+	ApplicationName string
+	// Timeout defines the nodes discovery timeout
+	Timeout time.Duration
+}
+
+// Validate checks whether the given discovery configuration is valid
+func (x Config) Validate() error {
+	return validation.New(validation.FailFast()).
+		AddValidator(validation.NewEmptyStringValidator("NatsServer", x.NatsServer)).
+		AddValidator(validation.NewEmptyStringValidator("NatsSubject", x.NatsSubject)).
+		AddValidator(validation.NewEmptyStringValidator("ApplicationName", x.ApplicationName)).
+		AddValidator(validation.NewEmptyStringValidator("ActorSystemName", x.ActorSystemName)).
+		Validate()
+}

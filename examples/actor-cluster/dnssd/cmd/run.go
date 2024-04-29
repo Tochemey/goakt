@@ -44,7 +44,6 @@ import (
 	semconv "go.opentelemetry.io/otel/semconv/v1.21.0"
 
 	goakt "github.com/tochemey/goakt/actors"
-	"github.com/tochemey/goakt/discovery"
 	"github.com/tochemey/goakt/discovery/dnssd"
 	"github.com/tochemey/goakt/examples/actor-cluster/dnssd/service"
 	"github.com/tochemey/goakt/log"
@@ -113,15 +112,12 @@ var runCmd = &cobra.Command{
 		// initialize traces and metric providers
 		initTracer(ctx, config.TraceURL)
 		initMeter()
-		// instantiate the dnssd discovery provider
-		disco := dnssd.NewDiscovery()
 		// define the discovery options
-		discoOptions := discovery.Config{
-			dnssd.DomainName: config.ServiceName,
-			dnssd.IPv6:       false,
+		discoConfig := dnssd.Config{
+			DomainName: config.ServiceName,
 		}
-		// define the service discovery
-		serviceDiscovery := discovery.NewServiceDiscovery(disco, discoOptions)
+		// instantiate the dnssd discovery provider
+		disco := dnssd.NewDiscovery(&discoConfig)
 		// create the actor system
 		actorSystem, err := goakt.NewActorSystem(
 			config.ActorSystemName,
@@ -129,7 +125,7 @@ var runCmd = &cobra.Command{
 			goakt.WithLogger(logger),
 			goakt.WithActorInitMaxRetries(3),
 			goakt.WithTracing(),
-			goakt.WithClustering(serviceDiscovery, 20))
+			goakt.WithClustering(disco, 20))
 		// handle the error
 		if err != nil {
 			logger.Panic(err)
