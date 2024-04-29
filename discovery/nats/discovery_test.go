@@ -25,8 +25,6 @@
 package nats
 
 import (
-	"os"
-	"strconv"
 	"testing"
 	"time"
 
@@ -72,13 +70,6 @@ func newPeer(t *testing.T, serverAddr string) *Discovery {
 
 	// create a Cluster node
 	host := "localhost"
-	// set the environments
-	require.NoError(t, os.Setenv("GOSSIP_PORT", strconv.Itoa(gossipPort)))
-	require.NoError(t, os.Setenv("CLUSTER_PORT", strconv.Itoa(clusterPort)))
-	require.NoError(t, os.Setenv("REMOTING_PORT", strconv.Itoa(remotingPort)))
-	require.NoError(t, os.Setenv("NODE_NAME", "testNode"))
-	require.NoError(t, os.Setenv("NODE_IP", host))
-
 	// create the various config option
 	applicationName := "accounts"
 	actorSystemName := "AccountsSystem"
@@ -92,33 +83,60 @@ func newPeer(t *testing.T, serverAddr string) *Discovery {
 		NatsSubject:     natsSubject,
 	}
 
+	hostNode := discovery.Node{
+		Name:         host,
+		Host:         host,
+		GossipPort:   gossipPort,
+		ClusterPort:  clusterPort,
+		RemotingPort: remotingPort,
+	}
+
 	// create the instance of provider
-	provider := NewDiscovery(config)
+	provider := NewDiscovery(config, &hostNode)
 
 	// initialize
 	err := provider.Initialize()
 	require.NoError(t, err)
-	// clear the env var
-	require.NoError(t, os.Unsetenv("GOSSIP_PORT"))
-	require.NoError(t, os.Unsetenv("CLUSTER_PORT"))
-	require.NoError(t, os.Unsetenv("REMOTING_PORT"))
-	require.NoError(t, os.Unsetenv("NODE_NAME"))
-	require.NoError(t, os.Unsetenv("NODE_IP"))
 	// return the provider
 	return provider
 }
 
 func TestDiscovery(t *testing.T) {
 	t.Run("With a new instance", func(t *testing.T) {
+		// start the NATS server
+		srv := startNatsServer(t)
+
+		// generate the ports for the single node
+		nodePorts := dynaport.Get(3)
+		gossipPort := nodePorts[0]
+		clusterPort := nodePorts[1]
+		remotingPort := nodePorts[2]
+
+		// create a Cluster node
+		host := "localhost"
+		// create the various config option
+		applicationName := "accounts"
+		actorSystemName := "AccountsSystem"
+		natsSubject := "some-subject"
+
 		// create the config
 		config := &Config{
-			NatsServer:      "nats://127.0.0.1:2322",
-			ApplicationName: "applicationName",
-			ActorSystemName: "actorSys",
-			NatsSubject:     "nats-subject",
+			ApplicationName: applicationName,
+			ActorSystemName: actorSystemName,
+			NatsServer:      srv.Addr().String(),
+			NatsSubject:     natsSubject,
 		}
+
+		hostNode := discovery.Node{
+			Name:         host,
+			Host:         host,
+			GossipPort:   gossipPort,
+			ClusterPort:  clusterPort,
+			RemotingPort: remotingPort,
+		}
+
 		// create the instance of provider
-		provider := NewDiscovery(config)
+		provider := NewDiscovery(config, &hostNode)
 		require.NotNil(t, provider)
 		// assert that provider implements the Discovery interface
 		// this is a cheap test
@@ -129,16 +147,39 @@ func TestDiscovery(t *testing.T) {
 		assert.True(t, ok)
 	})
 	t.Run("With ID assertion", func(t *testing.T) {
-		// cheap test
+		// start the NATS server
+		srv := startNatsServer(t)
+
+		// generate the ports for the single node
+		nodePorts := dynaport.Get(3)
+		gossipPort := nodePorts[0]
+		clusterPort := nodePorts[1]
+		remotingPort := nodePorts[2]
+
+		// create a Cluster node
+		host := "localhost"
+		// create the various config option
+		applicationName := "accounts"
+		actorSystemName := "AccountsSystem"
+		natsSubject := "some-subject"
+
 		// create the config
 		config := &Config{
-			NatsServer:      "nats://127.0.0.1:2322",
-			ApplicationName: "applicationName",
-			ActorSystemName: "actorSys",
-			NatsSubject:     "nats-subject",
+			ApplicationName: applicationName,
+			ActorSystemName: actorSystemName,
+			NatsServer:      srv.Addr().String(),
+			NatsSubject:     natsSubject,
+		}
+
+		hostNode := discovery.Node{
+			Name:         host,
+			Host:         host,
+			GossipPort:   gossipPort,
+			ClusterPort:  clusterPort,
+			RemotingPort: remotingPort,
 		}
 		// create the instance of provider
-		provider := NewDiscovery(config)
+		provider := NewDiscovery(config, &hostNode)
 		require.NotNil(t, provider)
 		assert.Equal(t, "nats", provider.ID())
 	})
@@ -155,12 +196,6 @@ func TestDiscovery(t *testing.T) {
 
 		// create a Cluster node
 		host := "localhost"
-		// set the environments
-		t.Setenv("GOSSIP_PORT", strconv.Itoa(gossipPort))
-		t.Setenv("CLUSTER_PORT", strconv.Itoa(clusterPort))
-		t.Setenv("REMOTING_PORT", strconv.Itoa(remotingPort))
-		t.Setenv("NODE_NAME", "testNode")
-		t.Setenv("NODE_IP", host)
 
 		// create the various config option
 		natsServer := srv.Addr().String()
@@ -176,8 +211,16 @@ func TestDiscovery(t *testing.T) {
 			NatsSubject:     natsSubject,
 		}
 
+		hostNode := discovery.Node{
+			Name:         host,
+			Host:         host,
+			GossipPort:   gossipPort,
+			ClusterPort:  clusterPort,
+			RemotingPort: remotingPort,
+		}
+
 		// create the instance of provider
-		provider := NewDiscovery(config, WithLogger(log.DiscardLogger))
+		provider := NewDiscovery(config, &hostNode, WithLogger(log.DiscardLogger))
 
 		// initialize
 		err := provider.Initialize()
@@ -187,52 +230,125 @@ func TestDiscovery(t *testing.T) {
 		t.Cleanup(srv.Shutdown)
 	})
 	t.Run("With Initialize: already initialized", func(t *testing.T) {
+		// start the NATS server
+		srv := startNatsServer(t)
+
+		// generate the ports for the single node
+		nodePorts := dynaport.Get(3)
+		gossipPort := nodePorts[0]
+		clusterPort := nodePorts[1]
+		remotingPort := nodePorts[2]
+
+		// create a Cluster node
+		host := "localhost"
+
+		// create the various config option
+		natsServer := srv.Addr().String()
+		applicationName := "accounts"
+		actorSystemName := "AccountsSystem"
+		natsSubject := "some-subject"
+
 		// create the config
 		config := &Config{
-			NatsServer:      "nats://127.0.0.1:2322",
-			ApplicationName: "applicationName",
-			ActorSystemName: "actorSys",
-			NatsSubject:     "nats-subject",
+			ApplicationName: applicationName,
+			ActorSystemName: actorSystemName,
+			NatsServer:      natsServer,
+			NatsSubject:     natsSubject,
 		}
+
+		hostNode := discovery.Node{
+			Name:         host,
+			Host:         host,
+			GossipPort:   gossipPort,
+			ClusterPort:  clusterPort,
+			RemotingPort: remotingPort,
+		}
+
 		// create the instance of provider
-		provider := NewDiscovery(config)
+		provider := NewDiscovery(config, &hostNode)
 		provider.initialized = atomic.NewBool(true)
 		assert.Error(t, provider.Initialize())
 	})
-	t.Run("With Initialize: with host config not set", func(t *testing.T) {
-		config := &Config{
-			NatsServer:      "nats://127.0.0.1:2322",
-			ApplicationName: "applicationName",
-			ActorSystemName: "actorSys",
-			NatsSubject:     "nats-subject",
-		}
-		// create the instance of provider
-		provider := NewDiscovery(config)
-		assert.Error(t, provider.Initialize())
-	})
+
 	t.Run("With Register: already registered", func(t *testing.T) {
+		// start the NATS server
+		srv := startNatsServer(t)
+
+		// generate the ports for the single node
+		nodePorts := dynaport.Get(3)
+		gossipPort := nodePorts[0]
+		clusterPort := nodePorts[1]
+		remotingPort := nodePorts[2]
+
+		// create a Cluster node
+		host := "localhost"
+
+		// create the various config option
+		natsServer := srv.Addr().String()
+		applicationName := "accounts"
+		actorSystemName := "AccountsSystem"
+		natsSubject := "some-subject"
+
+		// create the config
 		config := &Config{
-			NatsServer:      "nats://127.0.0.1:2322",
-			ApplicationName: "applicationName",
-			ActorSystemName: "actorSys",
-			NatsSubject:     "nats-subject",
+			ApplicationName: applicationName,
+			ActorSystemName: actorSystemName,
+			NatsServer:      natsServer,
+			NatsSubject:     natsSubject,
 		}
+
+		hostNode := discovery.Node{
+			Name:         host,
+			Host:         host,
+			GossipPort:   gossipPort,
+			ClusterPort:  clusterPort,
+			RemotingPort: remotingPort,
+		}
+
 		// create the instance of provider
-		provider := NewDiscovery(config)
+		provider := NewDiscovery(config, &hostNode)
 		provider.registered = atomic.NewBool(true)
 		err := provider.Register()
 		assert.Error(t, err)
 		assert.EqualError(t, err, discovery.ErrAlreadyRegistered.Error())
 	})
 	t.Run("With Deregister: already not registered", func(t *testing.T) {
+		// start the NATS server
+		srv := startNatsServer(t)
+
+		// generate the ports for the single node
+		nodePorts := dynaport.Get(3)
+		gossipPort := nodePorts[0]
+		clusterPort := nodePorts[1]
+		remotingPort := nodePorts[2]
+
+		// create a Cluster node
+		host := "localhost"
+
+		// create the various config option
+		natsServer := srv.Addr().String()
+		applicationName := "accounts"
+		actorSystemName := "AccountsSystem"
+		natsSubject := "some-subject"
+
+		// create the config
 		config := &Config{
-			NatsServer:      "nats://127.0.0.1:2322",
-			ApplicationName: "applicationName",
-			ActorSystemName: "actorSys",
-			NatsSubject:     "nats-subject",
+			ApplicationName: applicationName,
+			ActorSystemName: actorSystemName,
+			NatsServer:      natsServer,
+			NatsSubject:     natsSubject,
 		}
+
+		hostNode := discovery.Node{
+			Name:         host,
+			Host:         host,
+			GossipPort:   gossipPort,
+			ClusterPort:  clusterPort,
+			RemotingPort: remotingPort,
+		}
+
 		// create the instance of provider
-		provider := NewDiscovery(config)
+		provider := NewDiscovery(config, &hostNode)
 		err := provider.Deregister()
 		assert.Error(t, err)
 		assert.EqualError(t, err, discovery.ErrNotRegistered.Error())
@@ -298,13 +414,41 @@ func TestDiscovery(t *testing.T) {
 		t.Cleanup(srv.Shutdown)
 	})
 	t.Run("With DiscoverPeers: not initialized", func(t *testing.T) {
+		// start the NATS server
+		srv := startNatsServer(t)
+
+		// generate the ports for the single node
+		nodePorts := dynaport.Get(3)
+		gossipPort := nodePorts[0]
+		clusterPort := nodePorts[1]
+		remotingPort := nodePorts[2]
+
+		// create a Cluster node
+		host := "localhost"
+
+		// create the various config option
+		natsServer := srv.Addr().String()
+		applicationName := "accounts"
+		actorSystemName := "AccountsSystem"
+		natsSubject := "some-subject"
+
+		// create the config
 		config := &Config{
-			NatsServer:      "nats://127.0.0.1:2322",
-			ApplicationName: "applicationName",
-			ActorSystemName: "actorSys",
-			NatsSubject:     "nats-subject",
+			ApplicationName: applicationName,
+			ActorSystemName: actorSystemName,
+			NatsServer:      natsServer,
+			NatsSubject:     natsSubject,
 		}
-		provider := NewDiscovery(config)
+
+		hostNode := discovery.Node{
+			Name:         host,
+			Host:         host,
+			GossipPort:   gossipPort,
+			ClusterPort:  clusterPort,
+			RemotingPort: remotingPort,
+		}
+
+		provider := NewDiscovery(config, &hostNode)
 		peers, err := provider.DiscoverPeers()
 		assert.Error(t, err)
 		assert.Empty(t, peers)

@@ -342,7 +342,7 @@ go get github.com/tochemey/goakt
 The cluster engine depends upon the [discovery](./discovery/provider.go) mechanism to find other nodes in the cluster.
 Under the hood, it leverages [Olric](https://github.com/buraksezer/olric)
 to scale out and guarantee performant, reliable persistence, simple scalability, partitioning (sharding), and
-re-balancing out-of-the-box.
+re-balancing out-of-the-box. _**It requires remoting to be enabled**_.
 
 At the moment the following providers are implemented:
 
@@ -351,19 +351,7 @@ At the moment the following providers are implemented:
 - the [NATS](https://nats.io/) [integration](discovery/nats) is fully functional
 - the [DNS](discovery/dnssd) is fully functional
 
-Note: One can add additional discovery providers using the following [interface](./discovery/provider.go)
-
-In addition, one needs to set the following environment variables irrespective of the discovery provider to help
-identify the host node on which the cluster service is running:
-
-- `NODE_NAME`: the node name. For instance in kubernetes one can just get it from the `metadata.name`
-- `NODE_IP`: the node host address. For instance in kubernetes one can just get it from the `status.podIP`
-- `GOSSIP_PORT`: the gossip protocol engine port.
-- `CLUSTER_PORT`: the cluster port to help communicate with other GoAkt nodes in the cluster
-- `REMOTING_PORT`: help remoting communication between actors
-
-_Note: Depending upon the discovery provider implementation, the `GOSSIP_PORT` and `CLUSTER_PORT` can be the same.
-The same applies to `NODE_NAME` and `NODE_IP`. This is up to the discretion of the implementation_
+Note: One can add additional discovery providers using the following [interface](./discovery/provider.go).
 
 ### Operations Guide
 
@@ -480,8 +468,12 @@ config := nats.Config{
     NatsServer:      natsServer,
     NatsSubject:     natsSubject,
 }
-// instantiate the NATS discovery provider
-disco := nats.NewDiscovery(&config)
+
+// define the host node instance
+hostNode := discovery.Node{}
+
+// instantiate the NATS discovery provider by passing the config and the hostNode
+disco := nats.NewDiscovery(&config, &hostNode)
 
 // pass the service discovery when enabling cluster mode in the actor system
 ```

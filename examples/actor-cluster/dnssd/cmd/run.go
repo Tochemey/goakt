@@ -118,6 +118,10 @@ var runCmd = &cobra.Command{
 		}
 		// instantiate the dnssd discovery provider
 		disco := dnssd.NewDiscovery(&discoConfig)
+
+		// grab the the host
+		host, _ := os.Hostname()
+
 		// create the actor system
 		actorSystem, err := goakt.NewActorSystem(
 			config.ActorSystemName,
@@ -125,7 +129,8 @@ var runCmd = &cobra.Command{
 			goakt.WithLogger(logger),
 			goakt.WithActorInitMaxRetries(3),
 			goakt.WithTracing(),
-			goakt.WithClustering(disco, 20))
+			goakt.WithRemoting(host, int32(config.RemotingPort)),
+			goakt.WithClustering(disco, 20, config.GossipPort, config.ClusterPort))
 		// handle the error
 		if err != nil {
 			logger.Panic(err)

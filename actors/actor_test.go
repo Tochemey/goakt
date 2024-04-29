@@ -27,7 +27,6 @@ package actors
 import (
 	"context"
 	"os"
-	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -429,13 +428,6 @@ func startClusterSystem(t *testing.T, nodeName, serverAddr string) (ActorSystem,
 
 	// create a Cluster startNode
 	host := "127.0.0.1"
-	// set the environments
-	require.NoError(t, os.Setenv("GOSSIP_PORT", strconv.Itoa(gossipPort)))
-	require.NoError(t, os.Setenv("CLUSTER_PORT", strconv.Itoa(clusterPort)))
-	require.NoError(t, os.Setenv("REMOTING_PORT", strconv.Itoa(remotingPort)))
-	require.NoError(t, os.Setenv("NODE_NAME", nodeName))
-	require.NoError(t, os.Setenv("NODE_IP", host))
-
 	// create the various config option
 	applicationName := "accounts"
 	actorSystemName := "testSystem"
@@ -447,8 +439,17 @@ func startClusterSystem(t *testing.T, nodeName, serverAddr string) (ActorSystem,
 		NatsServer:      serverAddr,
 		NatsSubject:     natsSubject,
 	}
+
+	hostNode := discovery.Node{
+		Name:         host,
+		Host:         host,
+		GossipPort:   gossipPort,
+		ClusterPort:  clusterPort,
+		RemotingPort: remotingPort,
+	}
+
 	// create the instance of provider
-	provider := nats.NewDiscovery(&config)
+	provider := nats.NewDiscovery(&config, &hostNode)
 
 	// create the actor system
 	system, err := NewActorSystem(
@@ -456,21 +457,14 @@ func startClusterSystem(t *testing.T, nodeName, serverAddr string) (ActorSystem,
 		WithPassivationDisabled(),
 		WithLogger(logger),
 		WithReplyTimeout(time.Minute),
-		WithClustering(provider, 10))
+		WithRemoting(host, int32(remotingPort)),
+		WithClustering(provider, 10, gossipPort, clusterPort))
 
 	require.NotNil(t, system)
 	require.NoError(t, err)
 
 	// start the node
 	require.NoError(t, system.Start(ctx))
-
-	// clear the env var
-	require.NoError(t, os.Unsetenv("GOSSIP_PORT"))
-	require.NoError(t, os.Unsetenv("CLUSTER_PORT"))
-	require.NoError(t, os.Unsetenv("REMOTING_PORT"))
-	require.NoError(t, os.Unsetenv("NODE_NAME"))
-	require.NoError(t, os.Unsetenv("NODE_IP"))
-
 	time.Sleep(2 * time.Second)
 
 	// return the cluster startNode

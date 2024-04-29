@@ -64,7 +64,7 @@ type Discovery struct {
 var _ discovery.Provider = &Discovery{}
 
 // NewDiscovery returns an instance of the kubernetes discovery provider
-func NewDiscovery(config *Config, opts ...Option) *Discovery {
+func NewDiscovery(config *Config, hostNode *discovery.Node, opts ...Option) *Discovery {
 	// create an instance of
 	discovery := &Discovery{
 		mu:          sync.Mutex{},
@@ -72,6 +72,7 @@ func NewDiscovery(config *Config, opts ...Option) *Discovery {
 		registered:  atomic.NewBool(false),
 		config:      config,
 		logger:      log.DefaultLogger,
+		hostNode:    hostNode,
 	}
 
 	// apply the various options
@@ -104,21 +105,17 @@ func (d *Discovery) Initialize() error {
 		d.config.Timeout = time.Second
 	}
 
-	hostNode, err := discovery.HostNode()
-	if err != nil {
-		return err
-	}
-
 	// create the nats connection option
 	opts := nats.GetDefaultOptions()
 	opts.Url = d.config.NatsServer
 	//opts.Servers = n.Config.Servers
-	opts.Name = hostNode.Name
+	opts.Name = d.hostNode.Name
 	opts.ReconnectWait = 2 * time.Second
 	opts.MaxReconnect = -1
 
 	var (
 		connection *nats.Conn
+		err        error
 	)
 
 	// let us connect using an exponential backoff mechanism
@@ -144,7 +141,6 @@ func (d *Discovery) Initialize() error {
 	}
 	d.natsConnection = encodedConn
 	d.initialized = atomic.NewBool(true)
-	d.hostNode = hostNode
 	return nil
 }
 

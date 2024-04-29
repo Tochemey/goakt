@@ -31,6 +31,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/caarlos0/env/v11"
 	"github.com/spf13/cobra"
 
 	goakt "github.com/tochemey/goakt/actors"
@@ -40,14 +41,30 @@ import (
 )
 
 const (
-	accountServicePort = 50051
-	namespace          = "default"
-	applicationName    = "accounts"
-	actorSystemName    = "AccountsSystem"
-	gossipPortName     = "gossip-port"
-	clusterPortName    = "cluster-port"
-	remotingPortName   = "remoting-port"
+	namespace        = "default"
+	applicationName  = "accounts"
+	actorSystemName  = "AccountsSystem"
+	gossipPortName   = "gossip-port"
+	clusterPortName  = "cluster-port"
+	remotingPortName = "remoting-port"
 )
+
+type config struct {
+	GossipPort   int `env:"GOSSIP_PORT"`
+	ClusterPort  int `env:"CLUSTER_PORT"`
+	RemotingPort int `env:"REMOTING_PORT"`
+	Port         int `env:"PORT" envDefault:"50051"`
+}
+
+func getConfig() *config {
+	// load the host node configuration
+	cfg := &config{}
+	opts := env.Options{RequiredIfNoDef: true, UseFieldNameByDefault: false}
+	if err := env.ParseWithOptions(cfg, opts); err != nil {
+		panic(err)
+	}
+	return cfg
+}
 
 // runCmd represents the run command
 var runCmd = &cobra.Command{
@@ -60,18 +77,21 @@ var runCmd = &cobra.Command{
 		// use the address default log. real-life implement the log interface`
 		logger := log.New(log.DebugLevel, os.Stdout)
 
-		// define the discovery options
-		config := kubernetes.Config{
+		// instantiate the k8 discovery provider
+		disco := kubernetes.NewDiscovery(&kubernetes.Config{
 			ApplicationName:  applicationName,
 			ActorSystemName:  actorSystemName,
 			Namespace:        namespace,
 			GossipPortName:   gossipPortName,
 			RemotingPortName: remotingPortName,
 			ClusterPortName:  clusterPortName,
-		}
+		})
 
-		// instantiate the k8 discovery provider
-		disco := kubernetes.NewDiscovery(&config)
+		// get the port config
+		config := getConfig()
+
+		// grab the the host
+		host, _ := os.Hostname()
 
 		// create the actor system
 		actorSystem, err := goakt.NewActorSystem(
@@ -79,7 +99,8 @@ var runCmd = &cobra.Command{
 			goakt.WithPassivationDisabled(), // set big passivation time
 			goakt.WithLogger(logger),
 			goakt.WithActorInitMaxRetries(3),
-			goakt.WithClustering(disco, 20))
+			goakt.WithRemoting(host, int32(config.RemotingPort)),
+			goakt.WithClustering(disco, 20, config.GossipPort, config.ClusterPort))
 		// handle the error
 		if err != nil {
 			logger.Panic(err)
@@ -91,7 +112,7 @@ var runCmd = &cobra.Command{
 		}
 
 		// create the account service
-		accountService := service.NewAccountService(actorSystem, logger, accountServicePort)
+		accountService := service.NewAccountService(actorSystem, logger, config.Port)
 		// start the account service
 		accountService.Start()
 

@@ -167,18 +167,7 @@ func TestActorSystem(t *testing.T) {
 		remotingPort := nodePorts[2]
 
 		logger := log.New(log.DebugLevel, os.Stdout)
-
-		podName := "pod"
 		host := "localhost"
-
-		// set the environments
-		t.Setenv("GOSSIP_PORT", strconv.Itoa(gossipPort))
-		t.Setenv("CLUSTER_PORT", strconv.Itoa(clusterPort))
-		t.Setenv("REMOTING_PORT", strconv.Itoa(remotingPort))
-		t.Setenv("NODE_NAME", podName)
-		t.Setenv("NODE_IP", host)
-		t.Setenv("GRPC_GO_LOG_VERBOSITY_LEVEL", "99")
-		t.Setenv("GRPC_GO_LOG_SEVERITY_LEVEL", "info")
 
 		// define discovered addresses
 		addrs := []string{
@@ -192,7 +181,8 @@ func TestActorSystem(t *testing.T) {
 			WithPassivationDisabled(),
 			WithLogger(logger),
 			WithReplyTimeout(time.Minute),
-			WithClustering(provider, 9))
+			WithRemoting(host, int32(remotingPort)),
+			WithClustering(provider, 9, gossipPort, clusterPort))
 		require.NoError(t, err)
 
 		provider.EXPECT().ID().Return("testDisco")
@@ -590,7 +580,6 @@ func TestActorSystem(t *testing.T) {
 		err = newActorSystem.Start(ctx)
 		require.NoError(t, err)
 
-		// wait for the cluster to fully start
 		time.Sleep(time.Second)
 
 		actorName := "some-actor"
@@ -943,18 +932,7 @@ func TestActorSystem(t *testing.T) {
 		remotingPort := nodePorts[2]
 
 		logger := log.New(log.DebugLevel, os.Stdout)
-
-		podName := "pod"
 		host := "localhost"
-
-		// set the environments
-		t.Setenv("GOSSIP_PORT", strconv.Itoa(gossipPort))
-		t.Setenv("CLUSTER_PORT", strconv.Itoa(clusterPort))
-		t.Setenv("REMOTING_PORT", strconv.Itoa(remotingPort))
-		t.Setenv("NODE_NAME", podName)
-		t.Setenv("NODE_IP", host)
-		t.Setenv("GRPC_GO_LOG_VERBOSITY_LEVEL", "99")
-		t.Setenv("GRPC_GO_LOG_SEVERITY_LEVEL", "info")
 
 		// define discovered addresses
 		addrs := []string{
@@ -968,7 +946,8 @@ func TestActorSystem(t *testing.T) {
 			WithExpireActorAfter(passivateAfter),
 			WithLogger(logger),
 			WithReplyTimeout(time.Minute),
-			WithClustering(provider, 9))
+			WithRemoting(host, int32(remotingPort)),
+			WithClustering(provider, 9, gossipPort, clusterPort))
 		require.NoError(t, err)
 
 		provider.EXPECT().ID().Return("testDisco")
@@ -1178,18 +1157,7 @@ func TestActorSystem(t *testing.T) {
 		remotingPort := nodePorts[2]
 
 		logger := log.New(log.DebugLevel, os.Stdout)
-
-		podName := "pod"
 		host := "localhost"
-
-		// set the environments
-		t.Setenv("GOSSIP_PORT", strconv.Itoa(gossipPort))
-		t.Setenv("CLUSTER_PORT", strconv.Itoa(clusterPort))
-		t.Setenv("REMOTING_PORT", strconv.Itoa(remotingPort))
-		t.Setenv("NODE_NAME", podName)
-		t.Setenv("NODE_IP", host)
-		t.Setenv("GRPC_GO_LOG_VERBOSITY_LEVEL", "99")
-		t.Setenv("GRPC_GO_LOG_SEVERITY_LEVEL", "info")
 
 		// define discovered addresses
 		addrs := []string{
@@ -1203,7 +1171,8 @@ func TestActorSystem(t *testing.T) {
 			WithPassivationDisabled(),
 			WithLogger(logger),
 			WithReplyTimeout(time.Minute),
-			WithClustering(provider, 9))
+			WithRemoting(host, int32(remotingPort)),
+			WithClustering(provider, 9, gossipPort, clusterPort))
 		require.NoError(t, err)
 
 		provider.EXPECT().ID().Return("testDisco")
@@ -1411,7 +1380,7 @@ func TestActorSystem(t *testing.T) {
 		})
 	})
 
-	t.Run("With cluster start failure", func(t *testing.T) {
+	t.Run("With cluster start failure with remoting not enabled", func(t *testing.T) {
 		ctx := context.TODO()
 		logger := log.DiscardLogger
 		mockedCluster := new(clustermocks.Interface)
@@ -1420,6 +1389,7 @@ func TestActorSystem(t *testing.T) {
 
 		// mock the discovery provider
 		provider := new(testkit.Provider)
+		provider.EXPECT().ID().Return("id")
 
 		system := &actorSystem{
 			name:              "testSystem",
@@ -1435,5 +1405,6 @@ func TestActorSystem(t *testing.T) {
 
 		err := system.Start(ctx)
 		require.Error(t, err)
+		assert.EqualError(t, err, "clustering needs remoting to be enabled")
 	})
 }

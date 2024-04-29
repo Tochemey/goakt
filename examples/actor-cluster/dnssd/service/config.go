@@ -32,6 +32,9 @@ type Config struct {
 	ServiceName     string `env:"SERVICE_NAME"`
 	ActorSystemName string `env:"SYSTEM_NAME"`
 	TraceURL        string `env:"TRACE_URL"`
+	GossipPort      int    `env:"GOSSIP_PORT"`
+	ClusterPort     int    `env:"CLUSTER_PORT"`
+	RemotingPort    int    `env:"REMOTING_PORT"`
 }
 
 // GetConfig returns the configuration

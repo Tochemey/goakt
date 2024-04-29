@@ -145,7 +145,7 @@ type Node struct {
 var _ Interface = &Node{}
 
 // NewNode creates an instance of cluster Node
-func NewNode(name string, disco discovery.Provider, opts ...Option) (*Node, error) {
+func NewNode(name string, disco discovery.Provider, host *discovery.Node, opts ...Option) (*Node, error) {
 	// create an instance of the Node
 	node := &Node{
 		partitionsCount:    20,
@@ -166,16 +166,8 @@ func NewNode(name string, disco discovery.Provider, opts ...Option) (*Node, erro
 		opt.Apply(node)
 	}
 
-	// get the host info
-	hostNode, err := discovery.HostNode()
-	// handle the error
-	if err != nil {
-		node.logger.Error(errors.Wrap(err, "failed get the host node.💥"))
-		return nil, err
-	}
-
 	// set the host startNode
-	node.host = hostNode
+	node.host = host
 
 	return node, nil
 }
