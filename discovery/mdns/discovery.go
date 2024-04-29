@@ -39,33 +39,9 @@ import (
 	"github.com/tochemey/goakt/discovery"
 )
 
-const (
-	ServiceName = "name"
-	Service     = "service"
-	Domain      = "domain"
-	Port        = "port"
-	IPv6        = "ipv6"
-)
-
-// discoConfig represents the mDNS provider discoConfig
-type discoConfig struct {
-	// Provider specifies the provider name
-	Provider string
-	// Service specifies the service name
-	ServiceName string
-	// Service specifies the service type
-	Service string
-	// Specifies the service domain
-	Domain string
-	// Port specifies the port the service is listening to
-	Port int
-	// IPv6 states whether to fetch ipv6 address instead of ipv4
-	IPv6 *bool
-}
-
 // Discovery defines the mDNS discovery provider
 type Discovery struct {
-	option *discoConfig
+	config *Config
 	mu     sync.Mutex
 
 	stopChan chan struct{}
@@ -82,12 +58,12 @@ type Discovery struct {
 var _ discovery.Provider = &Discovery{}
 
 // NewDiscovery returns an instance of the mDNS discovery provider
-func NewDiscovery() *Discovery {
+func NewDiscovery(config *Config) *Discovery {
 	d := &Discovery{
 		mu:          sync.Mutex{},
 		stopChan:    make(chan struct{}, 1),
 		initialized: atomic.NewBool(false),
-		option:      &discoConfig{},
+		config:      config,
 	}
 
 	return d
@@ -107,12 +83,7 @@ func (d *Discovery) Initialize() error {
 		return discovery.ErrAlreadyInitialized
 	}
 
-	// check the options
-	if d.option.Provider == "" {
-		d.option.Provider = d.ID()
-	}
-
-	return nil
+	return d.config.Validate()
 }
 
 // Register registers this node to a service discovery directory.
@@ -131,7 +102,7 @@ func (d *Discovery) Register() error {
 
 	d.resolver = res
 
-	srv, err := zeroconf.Register(d.option.ServiceName, d.option.Service, d.option.Domain, d.option.Port, []string{"txtv=0", "lo=1", "la=2"}, nil)
+	srv, err := zeroconf.Register(d.config.ServiceName, d.config.Service, d.config.Domain, d.config.Port, []string{"txtv=0", "lo=1", "la=2"}, nil)
 	if err != nil {
 		return err
 	}
@@ -166,42 +137,6 @@ func (d *Discovery) Close() error {
 	return nil
 }
 
-// SetConfig registers the underlying discovery configuration
-func (d *Discovery) SetConfig(config discovery.Config) error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-
-	if d.initialized.Load() {
-		return discovery.ErrAlreadyInitialized
-	}
-
-	var err error
-	if _, ok := config[ServiceName]; !ok {
-		return errors.New("mDNS service name is not provided")
-	}
-
-	if _, ok := config[Service]; !ok {
-		return errors.New("mDNS service type is not provided")
-	}
-
-	if _, ok := config[Port]; !ok {
-		return errors.New("mDNS listening port is not provided")
-	}
-
-	if _, ok := config[Domain]; !ok {
-		return errors.New("mDNS domain is not provided")
-	}
-
-	if _, ok := config[IPv6]; !ok {
-		return errors.New("mDNS ipv6 option is not provided")
-	}
-
-	if err = d.setOptions(config); err != nil {
-		return errors.Wrap(err, "failed to instantiate the mDNS discovery provider")
-	}
-	return nil
-}
-
 // DiscoverPeers returns a list of known nodes.
 func (d *Discovery) DiscoverPeers() ([]string, error) {
 	if !d.initialized.Load() {
@@ -214,14 +149,14 @@ func (d *Discovery) DiscoverPeers() ([]string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	if err := d.resolver.Browse(ctx, d.option.Service, d.option.Domain, entries); err != nil {
+	if err := d.resolver.Browse(ctx, d.config.Service, d.config.Domain, entries); err != nil {
 		return nil, err
 	}
 	<-ctx.Done()
 
 	v6 := false
-	if d.option.IPv6 != nil {
-		v6 = *d.option.IPv6
+	if d.config.IPv6 != nil {
+		v6 = *d.config.IPv6
 	}
 
 	addresses := goset.NewSet[string]()
@@ -243,45 +178,10 @@ func (d *Discovery) DiscoverPeers() ([]string, error) {
 	return addresses.ToSlice(), nil
 }
 
-// setOptions sets the kubernetes discoConfig
-func (d *Discovery) setOptions(config discovery.Config) (err error) {
-	option := new(discoConfig)
-
-	option.ServiceName, err = config.GetString(ServiceName)
-	if err != nil {
-		return err
-	}
-
-	option.Service, err = config.GetString(Service)
-	if err != nil {
-		return err
-	}
-
-	option.Domain, err = config.GetString(Domain)
-	if err != nil {
-		return err
-	}
-
-	option.Port, err = config.GetInt(Port)
-	if err != nil {
-		return err
-	}
-
-	// extract the type of ip address to lookup
-	option.IPv6, err = config.GetBool(IPv6)
-	if err != nil {
-		return err
-	}
-
-	// in case none of the above extraction fails then set the option
-	d.option = option
-	return nil
-}
-
 // validateEntry validates the mDNS discovered entry
 func (d *Discovery) validateEntry(entry *zeroconf.ServiceEntry) bool {
-	return entry.Port == d.option.Port &&
-		entry.Service == d.option.Service &&
-		entry.Domain == d.option.Domain &&
-		entry.Instance == d.option.ServiceName
+	return entry.Port == d.config.Port &&
+		entry.Service == d.config.Service &&
+		entry.Domain == d.config.Domain &&
+		entry.Instance == d.config.ServiceName
 }

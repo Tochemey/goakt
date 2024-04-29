@@ -33,7 +33,6 @@ import (
 	"github.com/travisjeffery/go-dynaport"
 
 	"github.com/tochemey/goakt/discovery"
-	"github.com/tochemey/goakt/discovery/kubernetes"
 	"github.com/tochemey/goakt/log"
 	testkit "github.com/tochemey/goakt/mocks/discovery"
 )
@@ -82,25 +81,13 @@ func TestDiscoveryProvider(t *testing.T) {
 		provider.AssertExpectations(t)
 	})
 	t.Run("With SetConfig: happy path", func(t *testing.T) {
-		// create the various config option
-		namespace := "default"
-		applicationName := "accounts"
-		actorSystemName := "AccountsSystem"
-		// create the config
-		config := discovery.Config{
-			kubernetes.ApplicationName: applicationName,
-			kubernetes.ActorSystemName: actorSystemName,
-			kubernetes.Namespace:       namespace,
-		}
 		// mock the underlying discovery provider
 		provider := new(testkit.Provider)
 		provider.
-			On("ID").Return("testDisco").
-			On("SetConfig", config).Return(nil)
+			On("ID").Return("testDisco")
 		// create the config
 		options := map[string]any{
-			"id":      "testDisco",
-			"options": config,
+			"id": "testDisco",
 		}
 		// create the instance of the wrapper
 		wrapper := &discoveryProvider{
@@ -148,88 +135,7 @@ func TestDiscoveryProvider(t *testing.T) {
 		assert.EqualError(t, err, "invalid discovery provider id")
 		provider.AssertExpectations(t)
 	})
-	t.Run("With SetConfig: options not set", func(t *testing.T) {
-		// mock the underlying discovery provider
-		provider := new(testkit.Provider)
-		provider.
-			On("ID").Return("testDisco")
-		// create the config
-		options := map[string]any{
-			"id": "testDisco",
-		}
-		// create the instance of the wrapper
-		wrapper := &discoveryProvider{
-			provider: provider,
-			log:      log.DefaultLogger.StdLogger(),
-		}
-		// set the options
-		err := wrapper.SetConfig(options)
-		assert.Error(t, err)
-		assert.EqualError(t, err, "discovery provider options is not set")
-		provider.AssertExpectations(t)
-	})
-	t.Run("With SetConfig: failure", func(t *testing.T) {
-		// create the various config option
-		namespace := "default"
-		applicationName := "accounts"
-		actorSystemName := "AccountsSystem"
-		// create the config
-		config := discovery.Config{
-			kubernetes.ApplicationName: applicationName,
-			kubernetes.ActorSystemName: actorSystemName,
-			kubernetes.Namespace:       namespace,
-		}
-		// mock the underlying discovery provider
-		provider := new(testkit.Provider)
-		provider.
-			On("ID").Return("testDisco").
-			On("SetConfig", config).Return(errors.New("failed"))
-		// create the config
-		options := map[string]any{
-			"id":      "testDisco",
-			"options": config,
-		}
-		// create the instance of the wrapper
-		wrapper := &discoveryProvider{
-			provider: provider,
-			log:      log.DefaultLogger.StdLogger(),
-		}
-		// set the options
-		err := wrapper.SetConfig(options)
-		assert.Error(t, err)
-		provider.AssertExpectations(t)
-	})
-	t.Run("With SetConfig: already initialized", func(t *testing.T) {
-		// create the various config option
-		namespace := "default"
-		applicationName := "accounts"
-		actorSystemName := "AccountsSystem"
-		// create the config
-		config := discovery.Config{
-			kubernetes.ApplicationName: applicationName,
-			kubernetes.ActorSystemName: actorSystemName,
-			kubernetes.Namespace:       namespace,
-		}
-		// mock the underlying discovery provider
-		provider := new(testkit.Provider)
-		provider.
-			On("ID").Return("testDisco").
-			On("SetConfig", config).Return(discovery.ErrAlreadyInitialized)
-		// create the config
-		options := map[string]any{
-			"id":      "testDisco",
-			"options": config,
-		}
-		// create the instance of the wrapper
-		wrapper := &discoveryProvider{
-			provider: provider,
-			log:      log.DefaultLogger.StdLogger(),
-		}
-		// set the options
-		err := wrapper.SetConfig(options)
-		assert.NoError(t, err)
-		provider.AssertExpectations(t)
-	})
+
 	t.Run("With Register: happy path", func(t *testing.T) {
 		// mock the underlying discovery provider
 		provider := new(testkit.Provider)

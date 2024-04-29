@@ -26,20 +26,8 @@ package discovery
 
 import (
 	"net"
-	"os"
 	"strconv"
-
-	"github.com/caarlos0/env/v11"
 )
-
-// hostNodeConfig helps read the host Node settings
-type hostNodeConfig struct {
-	GossipPort   int    `env:"GOSSIP_PORT"`
-	ClusterPort  int    `env:"CLUSTER_PORT"`
-	RemotingPort int    `env:"REMOTING_PORT"`
-	Name         string `env:"NODE_NAME" envDefault:""`
-	Host         string `env:"NODE_IP" envDefault:""`
-}
 
 // Node represents a discovered Node
 type Node struct {
@@ -63,35 +51,4 @@ func (n Node) ClusterAddress() string {
 // GossipAddress returns the node discovery address
 func (n Node) GossipAddress() string {
 	return net.JoinHostPort(n.Host, strconv.Itoa(n.GossipPort))
-}
-
-// HostNode returns the Node where the discovery provider is running
-func HostNode() (*Node, error) {
-	// load the host node configuration
-	cfg := &hostNodeConfig{}
-	opts := env.Options{RequiredIfNoDef: true, UseFieldNameByDefault: false}
-	if err := env.ParseWithOptions(cfg, opts); err != nil {
-		return nil, err
-	}
-	// check for empty host and name
-	if cfg.Host == "" {
-		// let us perform a host lookup
-		host, _ := os.Hostname()
-		// set the host
-		cfg.Host = host
-	}
-
-	// set the name as host if it is empty
-	if cfg.Name == "" {
-		cfg.Name = cfg.Host
-	}
-
-	// create the host node
-	return &Node{
-		Name:         cfg.Name,
-		Host:         cfg.Host,
-		GossipPort:   cfg.GossipPort,
-		ClusterPort:  cfg.ClusterPort,
-		RemotingPort: cfg.RemotingPort,
-	}, nil
 }

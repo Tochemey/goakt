@@ -71,17 +71,6 @@ func (d *discoveryProvider) SetConfig(c map[string]any) error {
 		return errors.New("invalid discovery provider id")
 	}
 
-	options, ok := c["options"]
-	if !ok {
-		return errors.New("discovery provider options is not set")
-	}
-
-	meta := options.(discovery.Config)
-	if err := d.provider.SetConfig(meta); err != nil {
-		if !errors.Is(err, discovery.ErrAlreadyInitialized) {
-			return err
-		}
-	}
 	return nil
 }
 

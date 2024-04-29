@@ -34,8 +34,6 @@ type Provider interface {
 	Register() error
 	// Deregister de-registers the service discovery provider.
 	Deregister() error
-	// SetConfig registers the underlying discovery options
-	SetConfig(config Config) error
 	// DiscoverPeers returns a list discovered nodes' addresses.
 	DiscoverPeers() ([]string, error)
 	// Close closes the provider

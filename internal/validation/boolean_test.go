@@ -22,29 +22,33 @@
  * SOFTWARE.
  */
 
-package service
+package validation
 
-import "github.com/caarlos0/env/v11"
+import (
+	"testing"
 
-// Config defines the service configuration
-type Config struct {
-	Port            int    `env:"PORT" envDefault:"50051"`
-	ServiceName     string `env:"SERVICE_NAME"`
-	ActorSystemName string `env:"SYSTEM_NAME"`
-	TraceURL        string `env:"TRACE_URL"`
-	GossipPort      int    `env:"GOSSIP_PORT"`
-	ClusterPort     int    `env:"CLUSTER_PORT"`
-	RemotingPort    int    `env:"REMOTING_PORT"`
+	"github.com/stretchr/testify/suite"
+)
+
+type booleanTestSuite struct {
+	suite.Suite
 }
 
-// GetConfig returns the configuration
-func GetConfig() (*Config, error) {
-	// load the host node configuration
-	cfg := &Config{}
-	opts := env.Options{RequiredIfNoDef: true, UseFieldNameByDefault: false}
-	if err := env.ParseWithOptions(cfg, opts); err != nil {
-		return nil, err
-	}
+// In order for 'go test' to run this suite, we need to create
+// a normal test function and pass our suite to suite.Run
+func TestBooleanValidator(t *testing.T) {
+	suite.Run(t, new(booleanTestSuite))
+}
 
-	return cfg, nil
+func (s *booleanTestSuite) TestBooleanValidator() {
+	s.Run("happy path when condition is true", func() {
+		err := NewBooleanValidator(true, "error message").Validate()
+		s.Assert().NoError(err)
+	})
+	s.Run("happy path when condition is false", func() {
+		errMsg := "error message"
+		err := NewBooleanValidator(false, errMsg).Validate()
+		s.Assert().Error(err)
+		s.Assert().EqualError(err, errMsg)
+	})
 }

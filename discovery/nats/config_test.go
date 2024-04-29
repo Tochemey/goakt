@@ -22,30 +22,31 @@
  * SOFTWARE.
  */
 
-package discovery
+package nats
 
-// ServiceDiscovery defines the cluster service discovery
-type ServiceDiscovery struct {
-	// provider specifies the discovery provider
-	provider Provider
-	// config specifies the discovery config
-	config Config
-}
+import (
+	"testing"
 
-// NewServiceDiscovery creates an instance of ServiceDiscovery
-func NewServiceDiscovery(provider Provider, config Config) *ServiceDiscovery {
-	return &ServiceDiscovery{
-		provider: provider,
-		config:   config,
-	}
-}
+	"github.com/stretchr/testify/assert"
+)
 
-// Provider returns the service discovery provider
-func (s ServiceDiscovery) Provider() Provider {
-	return s.provider
-}
-
-// Config returns the service discovery config
-func (s ServiceDiscovery) Config() Config {
-	return s.config
+func TestConfig(t *testing.T) {
+	t.Run("With valid configuration", func(t *testing.T) {
+		config := &Config{
+			NatsServer:      "nats://127.0.0.1:2322",
+			ApplicationName: "applicationName",
+			ActorSystemName: "actorSys",
+			NatsSubject:     "nats-subject",
+		}
+		assert.NoError(t, config.Validate())
+	})
+	t.Run("With invalid configuration", func(t *testing.T) {
+		config := &Config{
+			NatsServer:      "nats://127.0.0.1:2322",
+			ApplicationName: "applicationName",
+			ActorSystemName: "",
+			NatsSubject:     "nats-subject",
+		}
+		assert.Error(t, config.Validate())
+	})
 }

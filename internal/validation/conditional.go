@@ -22,29 +22,24 @@
  * SOFTWARE.
  */
 
-package service
+package validation
 
-import "github.com/caarlos0/env/v11"
-
-// Config defines the service configuration
-type Config struct {
-	Port            int    `env:"PORT" envDefault:"50051"`
-	ServiceName     string `env:"SERVICE_NAME"`
-	ActorSystemName string `env:"SYSTEM_NAME"`
-	TraceURL        string `env:"TRACE_URL"`
-	GossipPort      int    `env:"GOSSIP_PORT"`
-	ClusterPort     int    `env:"CLUSTER_PORT"`
-	RemotingPort    int    `env:"REMOTING_PORT"`
+// conditionalValidator runs a validator when a condition is met
+type conditionalValidator struct {
+	c bool
+	v Validator
 }
 
-// GetConfig returns the configuration
-func GetConfig() (*Config, error) {
-	// load the host node configuration
-	cfg := &Config{}
-	opts := env.Options{RequiredIfNoDef: true, UseFieldNameByDefault: false}
-	if err := env.ParseWithOptions(cfg, opts); err != nil {
-		return nil, err
-	}
+// NewConditionalValidator creates a conditional validator, that runs the validator if the condition is true.
+// This validator will help when performing data update
+func NewConditionalValidator(condition bool, validator Validator) Validator {
+	return &conditionalValidator{c: condition, v: validator}
+}
 
-	return cfg, nil
+// Validate runs the provided conditional validator
+func (v conditionalValidator) Validate() error {
+	if v.c {
+		return v.v.Validate()
+	}
+	return nil
 }

@@ -40,7 +40,7 @@ import (
 func TestDiscovery(t *testing.T) {
 	t.Run("With a new instance", func(t *testing.T) {
 		// create the instance of provider
-		provider := NewDiscovery()
+		provider := NewDiscovery(nil)
 		require.NotNil(t, provider)
 		// assert that provider implements the Discovery interface
 		// this is a cheap test
@@ -53,104 +53,36 @@ func TestDiscovery(t *testing.T) {
 	t.Run("With ID assertion", func(t *testing.T) {
 		// cheap test
 		// create the instance of provider
-		provider := NewDiscovery()
+		provider := NewDiscovery(nil)
 		require.NotNil(t, provider)
 		assert.Equal(t, "dns-sd", provider.ID())
 	})
-	t.Run("With SetConfig", func(t *testing.T) {
-		// create the instance of provider
-		provider := NewDiscovery()
-		// create the config
-		config := discovery.Config{
-			DomainName: "google.com",
-			IPv6:       false,
-		}
-		// set config
-		assert.NoError(t, provider.SetConfig(config))
-	})
-	t.Run("With SetConfig dns name not set", func(t *testing.T) {
-		// create the instance of provider
-		provider := NewDiscovery()
-		// create the config
-		config := discovery.Config{
-			DomainName: "",
-			IPv6:       false,
-		}
-		// set config
-		assert.Error(t, provider.SetConfig(config))
-	})
-	t.Run("With SetConfig dns name not provided", func(t *testing.T) {
-		// create the instance of provider
-		provider := NewDiscovery()
-		// create the config
-		config := discovery.Config{
-			IPv6: false,
-		}
-		// set config
-		assert.Error(t, provider.SetConfig(config))
-	})
-	t.Run("With SetConfig ipv6 not provided", func(t *testing.T) {
-		// create the instance of provider
-		provider := NewDiscovery()
-		// create the config
-		config := discovery.Config{
-			DomainName: "google.com",
-		}
-		// set config
-		assert.Error(t, provider.SetConfig(config))
-	})
-	t.Run("With SetConfig ipv6 wrong boolean value", func(t *testing.T) {
-		// create the instance of provider
-		provider := NewDiscovery()
-		// create the config
-		config := discovery.Config{
-			DomainName: "google.com",
-			IPv6:       "wrong-value",
-		}
-		// set config
-		assert.Error(t, provider.SetConfig(config))
-	})
-	t.Run("With SetConfig: already initialized", func(t *testing.T) {
-		// create the instance of provider
-		provider := NewDiscovery()
-		provider.initialized = atomic.NewBool(true)
-		// create the config
-		config := discovery.Config{
-			DomainName: "google.com",
-			IPv6:       false,
-		}
-		// set config
-		err := provider.SetConfig(config)
-		assert.Error(t, err)
-		assert.EqualError(t, err, discovery.ErrAlreadyInitialized.Error())
-	})
 	t.Run("With Initialize", func(t *testing.T) {
-		// create the instance of provider
-		provider := NewDiscovery()
 		// create the config
-		config := discovery.Config{
+		config := &Config{
 			DomainName: "google.com",
-			IPv6:       false,
 		}
-		// set config
-		assert.NoError(t, provider.SetConfig(config))
+		// create the instance of provider
+		provider := NewDiscovery(config)
 		assert.NoError(t, provider.Initialize())
 	})
 	t.Run("With Initialize: already initialized", func(t *testing.T) {
+		// create the config
+		config := &Config{
+			DomainName: "google.com",
+		}
 		// create the instance of provider
-		provider := NewDiscovery()
+		provider := NewDiscovery(config)
 		provider.initialized = atomic.NewBool(true)
 		assert.Error(t, provider.Initialize())
 	})
 	t.Run("With Register", func(t *testing.T) {
-		// create the instance of provider
-		provider := NewDiscovery()
 		// create the config
-		config := discovery.Config{
+		config := &Config{
 			DomainName: "google.com",
-			IPv6:       false,
 		}
-		require.NoError(t, provider.SetConfig(config))
+		// create the instance of provider
+		provider := NewDiscovery(config)
 		require.NoError(t, provider.Initialize())
 		require.NoError(t, provider.Register())
 
@@ -161,14 +93,12 @@ func TestDiscovery(t *testing.T) {
 		assert.False(t, provider.initialized.Load())
 	})
 	t.Run("With Register when already registered", func(t *testing.T) {
-		// create the instance of provider
-		provider := NewDiscovery()
 		// create the config
-		config := discovery.Config{
+		config := &Config{
 			DomainName: "google.com",
-			IPv6:       false,
 		}
-		require.NoError(t, provider.SetConfig(config))
+		// create the instance of provider
+		provider := NewDiscovery(config)
 		require.NoError(t, provider.Initialize())
 		require.NoError(t, provider.Register())
 
@@ -182,15 +112,23 @@ func TestDiscovery(t *testing.T) {
 		assert.False(t, provider.initialized.Load())
 	})
 	t.Run("With Deregister", func(t *testing.T) {
+		// create the config
+		config := &Config{
+			DomainName: "google.com",
+		}
 		// create the instance of provider
-		provider := NewDiscovery()
+		provider := NewDiscovery(config)
 		// for the sake of the test
 		provider.initialized = atomic.NewBool(true)
 		assert.NoError(t, provider.Deregister())
 	})
 	t.Run("With Deregister when not initialized", func(t *testing.T) {
+		// create the config
+		config := &Config{
+			DomainName: "google.com",
+		}
 		// create the instance of provider
-		provider := NewDiscovery()
+		provider := NewDiscovery(config)
 		// for the sake of the test
 		provider.initialized = atomic.NewBool(false)
 		err := provider.Deregister()
@@ -198,20 +136,25 @@ func TestDiscovery(t *testing.T) {
 		assert.EqualError(t, err, discovery.ErrNotInitialized.Error())
 	})
 	t.Run("With DiscoverPeers: not initialized", func(t *testing.T) {
-		provider := NewDiscovery()
+		// create the config
+		config := &Config{
+			DomainName: "google.com",
+		}
+		// create the instance of provider
+		provider := NewDiscovery(config)
 		peers, err := provider.DiscoverPeers()
 		assert.Error(t, err)
 		assert.Empty(t, peers)
 		assert.EqualError(t, err, discovery.ErrNotInitialized.Error())
 	})
 	t.Run("With DiscoverPeers", func(t *testing.T) {
-		// create the instance of provider
-		provider := NewDiscovery()
-		config := discovery.Config{
+		// create the config
+		config := &Config{
 			DomainName: "google.com",
-			IPv6:       false,
 		}
-		require.NoError(t, provider.SetConfig(config))
+		// create the instance of provider
+		provider := NewDiscovery(config)
+
 		require.NoError(t, provider.Initialize())
 		require.NoError(t, provider.Register())
 

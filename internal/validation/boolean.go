@@ -22,29 +22,26 @@
  * SOFTWARE.
  */
 
-package service
+package validation
 
-import "github.com/caarlos0/env/v11"
+import "github.com/pkg/errors"
 
-// Config defines the service configuration
-type Config struct {
-	Port            int    `env:"PORT" envDefault:"50051"`
-	ServiceName     string `env:"SERVICE_NAME"`
-	ActorSystemName string `env:"SYSTEM_NAME"`
-	TraceURL        string `env:"TRACE_URL"`
-	GossipPort      int    `env:"GOSSIP_PORT"`
-	ClusterPort     int    `env:"CLUSTER_PORT"`
-	RemotingPort    int    `env:"REMOTING_PORT"`
+// booleanValidator implements Validator.
+type booleanValidator struct {
+	boolCheck  bool
+	errMessage string
 }
 
-// GetConfig returns the configuration
-func GetConfig() (*Config, error) {
-	// load the host node configuration
-	cfg := &Config{}
-	opts := env.Options{RequiredIfNoDef: true, UseFieldNameByDefault: false}
-	if err := env.ParseWithOptions(cfg, opts); err != nil {
-		return nil, err
-	}
+// NewBooleanValidator creates a new boolean validator that returns an error message if condition is false
+// This validator will come handy when dealing with conditional validation
+func NewBooleanValidator(boolCheck bool, errMessage string) Validator {
+	return &booleanValidator{boolCheck: boolCheck, errMessage: errMessage}
+}
 
-	return cfg, nil
+// Validate returns an error if boolean check is false
+func (v booleanValidator) Validate() error {
+	if !v.boolCheck {
+		return errors.New(v.errMessage)
+	}
+	return nil
 }

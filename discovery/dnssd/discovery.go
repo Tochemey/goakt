@@ -41,21 +41,12 @@ const (
 	IPv6       = "ipv6"
 )
 
-// discoConfig represents the discovery configuration
-type discoConfig struct {
-	// Domain specifies the dns name
-	Domain string
-	// IPv6 states whether to fetch ipv6 address instead of ipv4
-	// if it is false then all addresses are extracted
-	IPv6 *bool
-}
-
 // Discovery represents the DNS service discovery
 // IP addresses are looked up by querying the default
 // DNS resolver for A and AAAA records associated with the DNS name.
 type Discovery struct {
 	mu     sync.Mutex
-	config *discoConfig
+	config *Config
 
 	// states whether the actor system has started or not
 	initialized *atomic.Bool
@@ -65,10 +56,10 @@ type Discovery struct {
 var _ discovery.Provider = &Discovery{}
 
 // NewDiscovery returns an instance of the DNS discovery provider
-func NewDiscovery() *Discovery {
+func NewDiscovery(config *Config) *Discovery {
 	return &Discovery{
 		mu:          sync.Mutex{},
-		config:      &discoConfig{},
+		config:      config,
 		initialized: atomic.NewBool(false),
 	}
 }
@@ -86,7 +77,7 @@ func (d *Discovery) Initialize() error {
 		return discovery.ErrAlreadyInitialized
 	}
 
-	return nil
+	return d.config.Validate()
 }
 
 // Register registers this node to a service discovery directory.
@@ -114,34 +105,6 @@ func (d *Discovery) Deregister() error {
 	return nil
 }
 
-// SetConfig registers the underlying discovery configuration
-func (d *Discovery) SetConfig(config discovery.Config) error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-
-	if d.initialized.Load() {
-		return discovery.ErrAlreadyInitialized
-	}
-
-	discoConfig := new(discoConfig)
-	var err error
-	discoConfig.Domain, err = config.GetString(DomainName)
-	if err != nil {
-		return err
-	}
-	if discoConfig.Domain == "" {
-		return errors.New("dns name not set")
-	}
-
-	discoConfig.IPv6, err = config.GetBool(IPv6)
-	if err != nil {
-		return err
-	}
-
-	d.config = discoConfig
-	return nil
-}
-
 // DiscoverPeers returns a list of known nodes.
 func (d *Discovery) DiscoverPeers() ([]string, error) {
 	d.mu.Lock()
@@ -164,7 +127,7 @@ func (d *Discovery) DiscoverPeers() ([]string, error) {
 
 	// only extract ipv6
 	if v6 {
-		ips, err := net.DefaultResolver.LookupIP(ctx, "ip6", d.config.Domain)
+		ips, err := net.DefaultResolver.LookupIP(ctx, "ip6", d.config.DomainName)
 		if err != nil {
 			return nil, err
 		}
@@ -180,7 +143,7 @@ func (d *Discovery) DiscoverPeers() ([]string, error) {
 	}
 
 	// lookup the addresses based upon the dns name
-	addrs, err := net.DefaultResolver.LookupIPAddr(ctx, d.config.Domain)
+	addrs, err := net.DefaultResolver.LookupIPAddr(ctx, d.config.DomainName)
 	if err != nil {
 		return nil, err
 	}

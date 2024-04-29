@@ -40,32 +40,9 @@ import (
 	"github.com/tochemey/goakt/log"
 )
 
-const (
-	NatsServer      string = "nats-server"       // NatsServer specifies the Nats server Address
-	NatsSubject     string = "nats-subject"      // NatsSubject specifies the NATs subject
-	ActorSystemName        = "actor_system_name" // ActorSystemName specifies the actor system name
-	ApplicationName        = "app_name"          // ApplicationName specifies the application name. This often matches the actor system name
-	Timeout                = "timeout"           // Timeout specifies the discovery timeout. The default value is 1 second
-)
-
-// discoConfig represents the nats provider discoConfig
-type discoConfig struct {
-	// NatsServer defines the nats server
-	// nats://host:port of a nats server
-	NatsServer string
-	// NatsSubject defines the custom NATS subject
-	NatsSubject string
-	// The actor system name
-	ActorSystemName string
-	// ApplicationName specifies the running application
-	ApplicationName string
-	// Timeout defines the nodes discovery timeout
-	Timeout time.Duration
-}
-
 // Discovery represents the kubernetes discovery
 type Discovery struct {
-	config *discoConfig
+	config *Config
 	mu     sync.Mutex
 
 	initialized *atomic.Bool
@@ -87,14 +64,15 @@ type Discovery struct {
 var _ discovery.Provider = &Discovery{}
 
 // NewDiscovery returns an instance of the kubernetes discovery provider
-func NewDiscovery(opts ...Option) *Discovery {
+func NewDiscovery(config *Config, hostNode *discovery.Node, opts ...Option) *Discovery {
 	// create an instance of
 	discovery := &Discovery{
 		mu:          sync.Mutex{},
 		initialized: atomic.NewBool(false),
 		registered:  atomic.NewBool(false),
-		config:      &discoConfig{},
+		config:      config,
 		logger:      log.DefaultLogger,
+		hostNode:    hostNode,
 	}
 
 	// apply the various options
@@ -119,25 +97,25 @@ func (d *Discovery) Initialize() error {
 		return discovery.ErrAlreadyInitialized
 	}
 
-	if d.config.Timeout <= 0 {
-		d.config.Timeout = time.Second
+	if err := d.config.Validate(); err != nil {
+		return err
 	}
 
-	hostNode, err := discovery.HostNode()
-	if err != nil {
-		return err
+	if d.config.Timeout <= 0 {
+		d.config.Timeout = time.Second
 	}
 
 	// create the nats connection option
 	opts := nats.GetDefaultOptions()
 	opts.Url = d.config.NatsServer
 	//opts.Servers = n.Config.Servers
-	opts.Name = hostNode.Name
+	opts.Name = d.hostNode.Name
 	opts.ReconnectWait = 2 * time.Second
 	opts.MaxReconnect = -1
 
 	var (
 		connection *nats.Conn
+		err        error
 	)
 
 	// let us connect using an exponential backoff mechanism
@@ -163,7 +141,6 @@ func (d *Discovery) Initialize() error {
 	}
 	d.natsConnection = encodedConn
 	d.initialized = atomic.NewBool(true)
-	d.hostNode = hostNode
 	return nil
 }
 
@@ -254,18 +231,6 @@ func (d *Discovery) Deregister() error {
 	return nil
 }
 
-// SetConfig registers the underlying discovery configuration
-func (d *Discovery) SetConfig(config discovery.Config) error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-
-	if d.initialized.Load() {
-		return discovery.ErrAlreadyInitialized
-	}
-
-	return d.setConfig(config)
-}
-
 // DiscoverPeers returns a list of known nodes.
 func (d *Discovery) DiscoverPeers() ([]string, error) {
 	d.mu.Lock()
@@ -352,34 +317,5 @@ func (d *Discovery) Close() error {
 
 		return d.natsConnection.Flush()
 	}
-	return nil
-}
-
-// setConfig sets the kubernetes discoConfig
-func (d *Discovery) setConfig(config discovery.Config) (err error) {
-	option := new(discoConfig)
-
-	option.NatsServer, err = config.GetString(NatsServer)
-	if err != nil {
-		return err
-	}
-
-	option.NatsSubject, err = config.GetString(NatsSubject)
-	if err != nil {
-		return err
-	}
-
-	// extract the actor system name
-	option.ActorSystemName, err = config.GetString(ActorSystemName)
-	if err != nil {
-		return err
-	}
-
-	option.ApplicationName, err = config.GetString(ApplicationName)
-	if err != nil {
-		return err
-	}
-
-	d.config = option
 	return nil
 }

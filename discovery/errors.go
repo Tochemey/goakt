@@ -35,4 +35,6 @@ var (
 	ErrAlreadyRegistered = errors.New("provider already registered")
 	// ErrNotRegistered is used when attempting to de-register the provider
 	ErrNotRegistered = errors.New("provider is not registered")
+	// ErrInvalidConfig is used when the discovery provider configuration is invalid
+	ErrInvalidConfig = errors.New("invalid discovery provider configuration")
 )

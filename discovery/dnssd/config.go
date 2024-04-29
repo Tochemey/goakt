@@ -22,29 +22,22 @@
  * SOFTWARE.
  */
 
-package service
+package dnssd
 
-import "github.com/caarlos0/env/v11"
+import "github.com/tochemey/goakt/internal/validation"
 
-// Config defines the service configuration
+// Config defines the discovery configuration
 type Config struct {
-	Port            int    `env:"PORT" envDefault:"50051"`
-	ServiceName     string `env:"SERVICE_NAME"`
-	ActorSystemName string `env:"SYSTEM_NAME"`
-	TraceURL        string `env:"TRACE_URL"`
-	GossipPort      int    `env:"GOSSIP_PORT"`
-	ClusterPort     int    `env:"CLUSTER_PORT"`
-	RemotingPort    int    `env:"REMOTING_PORT"`
+	// Domain specifies the dns name
+	DomainName string
+	// IPv6 states whether to fetch ipv6 address instead of ipv4
+	// if it is false then all addresses are extracted
+	IPv6 *bool
 }
 
-// GetConfig returns the configuration
-func GetConfig() (*Config, error) {
-	// load the host node configuration
-	cfg := &Config{}
-	opts := env.Options{RequiredIfNoDef: true, UseFieldNameByDefault: false}
-	if err := env.ParseWithOptions(cfg, opts); err != nil {
-		return nil, err
-	}
-
-	return cfg, nil
+// Validate checks whether the given discovery configuration is valid
+func (x Config) Validate() error {
+	return validation.New(validation.FailFast()).
+		AddValidator(validation.NewEmptyStringValidator("Namespace", x.DomainName)).
+		Validate()
 }

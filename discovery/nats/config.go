@@ -22,29 +22,34 @@
  * SOFTWARE.
  */
 
-package service
+package nats
 
-import "github.com/caarlos0/env/v11"
+import (
+	"time"
 
-// Config defines the service configuration
+	"github.com/tochemey/goakt/internal/validation"
+)
+
+// Config represents the nats provider discoConfig
 type Config struct {
-	Port            int    `env:"PORT" envDefault:"50051"`
-	ServiceName     string `env:"SERVICE_NAME"`
-	ActorSystemName string `env:"SYSTEM_NAME"`
-	TraceURL        string `env:"TRACE_URL"`
-	GossipPort      int    `env:"GOSSIP_PORT"`
-	ClusterPort     int    `env:"CLUSTER_PORT"`
-	RemotingPort    int    `env:"REMOTING_PORT"`
+	// NatsServer defines the nats server in the format nats://host:port
+	NatsServer string
+	// NatsSubject defines the custom NATS subject
+	NatsSubject string
+	// The actor system name
+	ActorSystemName string
+	// ApplicationName specifies the running application
+	ApplicationName string
+	// Timeout defines the nodes discovery timeout
+	Timeout time.Duration
 }
 
-// GetConfig returns the configuration
-func GetConfig() (*Config, error) {
-	// load the host node configuration
-	cfg := &Config{}
-	opts := env.Options{RequiredIfNoDef: true, UseFieldNameByDefault: false}
-	if err := env.ParseWithOptions(cfg, opts); err != nil {
-		return nil, err
-	}
-
-	return cfg, nil
+// Validate checks whether the given discovery configuration is valid
+func (x Config) Validate() error {
+	return validation.New(validation.FailFast()).
+		AddValidator(validation.NewEmptyStringValidator("NatsServer", x.NatsServer)).
+		AddValidator(validation.NewEmptyStringValidator("NatsSubject", x.NatsSubject)).
+		AddValidator(validation.NewEmptyStringValidator("ApplicationName", x.ApplicationName)).
+		AddValidator(validation.NewEmptyStringValidator("ActorSystemName", x.ActorSystemName)).
+		Validate()
 }

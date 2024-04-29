@@ -22,29 +22,24 @@
  * SOFTWARE.
  */
 
-package service
+package validation
 
-import "github.com/caarlos0/env/v11"
+import "fmt"
 
-// Config defines the service configuration
-type Config struct {
-	Port            int    `env:"PORT" envDefault:"50051"`
-	ServiceName     string `env:"SERVICE_NAME"`
-	ActorSystemName string `env:"SYSTEM_NAME"`
-	TraceURL        string `env:"TRACE_URL"`
-	GossipPort      int    `env:"GOSSIP_PORT"`
-	ClusterPort     int    `env:"CLUSTER_PORT"`
-	RemotingPort    int    `env:"REMOTING_PORT"`
+type emptyStringValidator struct {
+	fieldValue string
+	fieldName  string
 }
 
-// GetConfig returns the configuration
-func GetConfig() (*Config, error) {
-	// load the host node configuration
-	cfg := &Config{}
-	opts := env.Options{RequiredIfNoDef: true, UseFieldNameByDefault: false}
-	if err := env.ParseWithOptions(cfg, opts); err != nil {
-		return nil, err
-	}
+// NewEmptyStringValidator creates a string a emptyString validator
+func NewEmptyStringValidator(fieldName, fieldValue string) Validator {
+	return emptyStringValidator{fieldValue: fieldValue, fieldName: fieldName}
+}
 
-	return cfg, nil
+// Validate checks whether the given string is empty or not
+func (v emptyStringValidator) Validate() error {
+	if v.fieldValue == "" {
+		return fmt.Errorf("the [%s] is required", v.fieldName)
+	}
+	return nil
 }

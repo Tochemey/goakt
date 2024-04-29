@@ -177,12 +177,15 @@ type actorSystem struct {
 	// convenient field to check cluster setup
 	clusterEnabled atomic.Bool
 	// cluster discovery method
-	serviceDiscovery *discovery.ServiceDiscovery
+	discoveryProvider discovery.Provider
 	// define the number of partitions to shard the actors in the cluster
 	partitionsCount uint64
 	// cluster mode
-	cluster         cluster.Interface
-	clusterChan     chan *internalpb.WireActor
+	cluster     cluster.Interface
+	clusterChan chan *internalpb.WireActor
+	clusterPort int
+	gossipPort  int
+
 	partitionHasher hash.Hasher
 
 	// help protect some the fields to set
@@ -748,6 +751,10 @@ func (x *actorSystem) Start(ctx context.Context) error {
 
 	x.started.Store(true)
 
+	if x.remotingEnabled.Load() {
+		x.enableRemoting(spanCtx)
+	}
+
 	if x.clusterEnabled.Load() {
 		if err := x.enableClustering(spanCtx); err != nil {
 			return err
@@ -755,10 +762,6 @@ func (x *actorSystem) Start(ctx context.Context) error {
 		// start cluster synchronization
 		// TODO: revisit this
 		// go x.runClusterSync()
-	}
-
-	if x.remotingEnabled.Load() {
-		x.enableRemoting(spanCtx)
 	}
 
 	x.scheduler.Start(spanCtx)
@@ -1067,8 +1070,22 @@ func (x *actorSystem) handleRemoteTell(ctx context.Context, to PID, message prot
 func (x *actorSystem) enableClustering(ctx context.Context) error {
 	x.logger.Info("enabling clustering...")
 
+	if !x.remotingEnabled.Load() {
+		x.logger.Error("clustering needs remoting to be enabled")
+		return errors.New("clustering needs remoting to be enabled")
+	}
+
+	hostNode := discovery.Node{
+		Name:         x.name,
+		Host:         x.remotingHost,
+		GossipPort:   x.gossipPort,
+		ClusterPort:  x.clusterPort,
+		RemotingPort: int(x.remotingPort),
+	}
+
 	cluster, err := cluster.NewNode(x.Name(),
-		x.serviceDiscovery,
+		x.discoveryProvider,
+		&hostNode,
 		cluster.WithLogger(x.logger),
 		cluster.WithPartitionsCount(x.partitionsCount),
 		cluster.WithHasher(x.partitionHasher),
@@ -1096,8 +1113,6 @@ func (x *actorSystem) enableClustering(ctx context.Context) error {
 	x.mutex.Lock()
 	x.cluster = cluster
 	x.eventsChan = cluster.Events()
-	x.remotingHost = cluster.NodeHost()
-	x.remotingPort = int32(cluster.NodeRemotingPort())
 	x.mutex.Unlock()
 
 	go x.broadcastClusterEvents()
