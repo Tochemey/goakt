@@ -536,7 +536,7 @@ func (n *Node) buildConfig() *config.Config {
 	conf := &config.Config{
 		BindAddr:                   n.host.Host,
 		BindPort:                   n.host.ClusterPort,
-		ReadRepair:                 false,
+		ReadRepair:                 true,
 		ReplicaCount:               config.MinimumReplicaCount,
 		WriteQuorum:                config.DefaultWriteQuorum,
 		ReadQuorum:                 config.DefaultReadQuorum,
