@@ -114,11 +114,11 @@ func WithRemoting(host string, port int32) Option {
 }
 
 // WithClustering enables clustering on the actor system.
-func WithClustering(discoveryProvider discovery.Provider, partitionCount uint64, gossipPort, clusterPort int) Option {
+func WithClustering(provider discovery.Provider, partitionCount uint64, gossipPort, clusterPort int) Option {
 	return OptionFunc(func(a *actorSystem) {
 		a.clusterEnabled.Store(true)
 		a.partitionsCount = partitionCount
-		a.discoveryProvider = discoveryProvider
+		a.discoveryProvider = provider
 		a.clusterPort = clusterPort
 		a.gossipPort = gossipPort
 	})

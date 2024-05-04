@@ -29,7 +29,6 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	"reflect"
 	"regexp"
 	"sync"
 	"time"
@@ -213,7 +212,7 @@ type actorSystem struct {
 	metricEnabled atomic.Bool
 	eventsChan    <-chan *cluster.Event
 
-	registry   registry
+	registry   types.Registry
 	reflection reflection
 }
 
@@ -249,7 +248,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		actorInitTimeout:    DefaultInitTimeout,
 		tracer:              noop.NewTracerProvider().Tracer(name),
 		eventsChan:          make(chan *cluster.Event, 1),
-		registry:            newRegistry(),
+		registry:            types.NewRegistry(),
 		clusterSyncStopSig:  make(chan types.Unit, 1),
 	}
 
@@ -382,7 +381,7 @@ func (x *actorSystem) InCluster() bool {
 
 // NumActors returns the total number of active actors in the system
 func (x *actorSystem) NumActors() uint64 {
-	return uint64(x.actors.Len())
+	return uint64(x.actors.len())
 }
 
 // Spawn creates or returns the instance of a given actor in the system
@@ -402,7 +401,7 @@ func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor) (PID,
 		actorPath = NewPath(name, NewAddress(x.name, x.remotingHost, int(x.remotingPort)))
 	}
 
-	pid, exist := x.actors.Get(actorPath)
+	pid, exist := x.actors.get(actorPath)
 	if exist {
 		if pid.IsRunning() {
 			// return the existing instance
@@ -446,16 +445,14 @@ func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor) (PID,
 		return nil, err
 	}
 
-	x.actors.Set(pid)
-	x.registry.RegisterWithKey(name, actor)
-
+	x.actors.set(pid)
 	if x.clusterEnabled.Load() {
-		actorType := reflect.TypeOf(actor).Elem().Name()
+		actorType := types.RuntimeTypeOf(actor)
 		x.clusterChan <- &internalpb.WireActor{
 			ActorName:    name,
 			ActorAddress: actorPath.RemoteAddress(),
 			ActorPath:    actorPath.String(),
-			ActorType:    actorType,
+			ActorType:    actorType.Name(),
 		}
 	}
 
@@ -517,16 +514,14 @@ func (x *actorSystem) SpawnFromFunc(ctx context.Context, receiveFunc ReceiveFunc
 		return nil, err
 	}
 
-	x.actors.Set(pid)
-	x.registry.RegisterWithKey(actorID, actor)
-
+	x.actors.set(pid)
 	if x.clusterEnabled.Load() {
-		actorType := reflect.TypeOf(actor).Elem().Name()
+		actorType := types.RuntimeTypeOf(actor)
 		x.clusterChan <- &internalpb.WireActor{
 			ActorName:    actorID,
 			ActorAddress: actorPath.RemoteAddress(),
 			ActorPath:    actorPath.String(),
-			ActorType:    actorType,
+			ActorType:    actorType.Name(),
 		}
 	}
 
@@ -550,7 +545,7 @@ func (x *actorSystem) Kill(ctx context.Context, name string) error {
 		actorPath = NewPath(name, NewAddress(x.name, x.remotingHost, int(x.remotingPort)))
 	}
 
-	pid, exist := x.actors.Get(actorPath)
+	pid, exist := x.actors.get(actorPath)
 	if exist {
 		// stop the given actor. No need to record error in the span context
 		// because the shutdown method is taking care of that
@@ -580,13 +575,13 @@ func (x *actorSystem) ReSpawn(ctx context.Context, name string) (PID, error) {
 		actorPath = NewPath(name, NewAddress(x.name, x.remotingHost, int(x.remotingPort)))
 	}
 
-	pid, exist := x.actors.Get(actorPath)
+	pid, exist := x.actors.get(actorPath)
 	if exist {
 		if err := pid.Restart(spanCtx); err != nil {
 			return nil, errors.Wrapf(err, "failed to restart actor=%s", actorPath.String())
 		}
 
-		x.actors.Set(pid)
+		x.actors.set(pid)
 		return pid, nil
 	}
 
@@ -607,7 +602,7 @@ func (x *actorSystem) Name() string {
 func (x *actorSystem) Actors() []PID {
 	x.mutex.Lock()
 	defer x.mutex.Unlock()
-	return x.actors.List()
+	return x.actors.pids()
 }
 
 // PeerAddress returns the actor system address known in the cluster. That address is used by other nodes to communicate with the actor system.
@@ -639,7 +634,7 @@ func (x *actorSystem) ActorOf(ctx context.Context, actorName string) (addr *goak
 	}
 
 	// first check whether the actor exist locally
-	items := x.actors.List()
+	items := x.actors.pids()
 	for _, actorRef := range items {
 		if actorRef.ActorPath().Name() == actorName {
 			return actorRef.ActorPath().RemoteAddress(), actorRef, nil
@@ -690,7 +685,7 @@ func (x *actorSystem) LocalActor(actorName string) (PID, error) {
 		return nil, ErrActorSystemNotStarted
 	}
 
-	items := x.actors.List()
+	items := x.actors.pids()
 	for _, actorRef := range items {
 		if actorRef.ActorPath().Name() == actorName {
 			return actorRef, nil
@@ -826,7 +821,7 @@ func (x *actorSystem) Stop(ctx context.Context) error {
 	}
 
 	for _, actor := range x.Actors() {
-		x.actors.Delete(actor.ActorPath())
+		x.actors.delete(actor.ActorPath())
 		if err := actor.Shutdown(ctx); err != nil {
 			x.reset()
 			return err
@@ -847,7 +842,7 @@ func (x *actorSystem) RemoteLookup(_ context.Context, request *connect.Request[i
 	}
 
 	actorPath := NewPath(reqCopy.GetName(), NewAddress(x.Name(), reqCopy.GetHost(), int(reqCopy.GetPort())))
-	pid, exist := x.actors.Get(actorPath)
+	pid, exist := x.actors.get(actorPath)
 	if !exist {
 		logger.Error(ErrAddressNotFound(actorPath.String()).Error())
 		return nil, ErrAddressNotFound(actorPath.String())
@@ -891,7 +886,7 @@ func (x *actorSystem) RemoteAsk(ctx context.Context, stream *connect.BidiStream[
 		name := message.GetReceiver().GetName()
 		actorPath := NewPath(name, NewAddress(x.name, x.remotingHost, int(x.remotingPort)))
 
-		pid, exist := x.actors.Get(actorPath)
+		pid, exist := x.actors.get(actorPath)
 		if !exist {
 			logger.Error(ErrAddressNotFound(actorPath.String()).Error())
 			return ErrAddressNotFound(actorPath.String())
@@ -951,7 +946,7 @@ func (x *actorSystem) RemoteTell(ctx context.Context, stream *connect.ClientStre
 					receiver.GetHost(),
 					int(receiver.GetPort())))
 
-			pid, exist := x.actors.Get(actorPath)
+			pid, exist := x.actors.get(actorPath)
 			if !exist {
 				logger.Error(ErrAddressNotFound(actorPath.String()).Error())
 				return ErrAddressNotFound(actorPath.String())
@@ -983,7 +978,7 @@ func (x *actorSystem) RemoteReSpawn(ctx context.Context, request *connect.Reques
 	}
 
 	actorPath := NewPath(reqCopy.GetName(), NewAddress(x.Name(), reqCopy.GetHost(), int(reqCopy.GetPort())))
-	pid, exist := x.actors.Get(actorPath)
+	pid, exist := x.actors.get(actorPath)
 	if !exist {
 		logger.Error(ErrAddressNotFound(actorPath.String()).Error())
 		return nil, ErrAddressNotFound(actorPath.String())
@@ -993,7 +988,7 @@ func (x *actorSystem) RemoteReSpawn(ctx context.Context, request *connect.Reques
 		return nil, errors.Wrapf(err, "failed to restart actor=%s", actorPath.String())
 	}
 
-	x.actors.Set(pid)
+	x.actors.set(pid)
 	return connect.NewResponse(new(internalpb.RemoteReSpawnResponse)), nil
 }
 
@@ -1008,7 +1003,7 @@ func (x *actorSystem) RemoteStop(ctx context.Context, request *connect.Request[i
 	}
 
 	actorPath := NewPath(reqCopy.GetName(), NewAddress(x.Name(), reqCopy.GetHost(), int(reqCopy.GetPort())))
-	pid, exist := x.actors.Get(actorPath)
+	pid, exist := x.actors.get(actorPath)
 	if !exist {
 		logger.Error(ErrAddressNotFound(actorPath.String()).Error())
 		return nil, ErrAddressNotFound(actorPath.String())
@@ -1018,7 +1013,7 @@ func (x *actorSystem) RemoteStop(ctx context.Context, request *connect.Request[i
 		return nil, errors.Wrapf(err, "failed to stop actor=%s", actorPath.String())
 	}
 
-	x.actors.Delete(actorPath)
+	x.actors.delete(actorPath)
 	return connect.NewResponse(new(internalpb.RemoteStopResponse)), nil
 }
 
@@ -1224,7 +1219,7 @@ func (x *actorSystem) housekeeper() {
 				for _, actor := range x.Actors() {
 					if !actor.IsRunning() {
 						x.logger.Infof("Removing actor=%s from system", actor.ActorPath().Name())
-						x.actors.Delete(actor.ActorPath())
+						x.actors.delete(actor.ActorPath())
 						if x.InCluster() {
 							if err := x.cluster.RemoveActor(context.Background(), actor.ActorPath().Name()); err != nil {
 								x.logger.Error(err.Error())
@@ -1282,10 +1277,10 @@ func (x *actorSystem) broadcastClusterEvents() {
 
 // clusterSync synchronizes the node' actors map to the cluster.
 func (x *actorSystem) clusterSync() {
-	typesMap := x.registry.List()
+	typesMap := x.actors.props()
 	if len(typesMap) != 0 {
 		x.logger.Info("syncing node actors map to the cluster...")
-		for actorID, actorType := range typesMap {
+		for actorID, prop := range typesMap {
 			actorPath := NewPath(actorID, NewAddress(x.name, "", -1))
 			if x.remotingEnabled.Load() {
 				actorPath = NewPath(actorID, NewAddress(x.name, x.remotingHost, int(x.remotingPort)))
@@ -1299,7 +1294,7 @@ func (x *actorSystem) clusterSync() {
 				ActorName:    actorID,
 				ActorAddress: actorPath.RemoteAddress(),
 				ActorPath:    actorPath.String(),
-				ActorType:    actorType.Name(),
+				ActorType:    prop.rtype.Name(),
 			}
 		}
 		x.logger.Info("node actors map successfully synced back to the cluster.")

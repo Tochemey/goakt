@@ -30,12 +30,13 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/tochemey/goakt/goaktpb"
+	"github.com/tochemey/goakt/internal/types"
 )
 
 func TestReflection(t *testing.T) {
 	t.Run("With ActorFrom", func(t *testing.T) {
 		t.Run("With happy path", func(t *testing.T) {
-			newRegistry := newRegistry()
+			newRegistry := types.NewRegistry()
 			// create an instance of an actor
 			actor := newTestActor()
 			// register the actor into the types registry
@@ -51,7 +52,7 @@ func TestReflection(t *testing.T) {
 			assert.IsType(t, new(testActor), actual)
 		})
 		t.Run("With actor not found", func(t *testing.T) {
-			newRegistry := newRegistry()
+			newRegistry := types.NewRegistry()
 			// create an instance of reflection
 			reflection := newReflection(newRegistry)
 			actual, err := reflection.ActorFrom("fakeActor")
@@ -59,55 +60,13 @@ func TestReflection(t *testing.T) {
 			assert.Nil(t, actual)
 		})
 		t.Run("With actor interface not implemented", func(t *testing.T) {
-			tl := newRegistry()
+			tl := types.NewRegistry()
 			nonActor := new(goaktpb.Address)
 			// register the actor into the types registry
 			tl.Register(nonActor)
 			// create an instance of reflection
 			reflection := newReflection(tl)
 			actual, err := reflection.ActorFrom("fakeActor")
-			assert.Error(t, err)
-			assert.Nil(t, actual)
-		})
-	})
-
-	t.Run("With ActorOf", func(t *testing.T) {
-		t.Run("With happy path", func(t *testing.T) {
-			newRegistry := newRegistry()
-			// create an instance of an actor
-			actor := newTestActor()
-			// register the actor into the types registry
-			newRegistry.Register(actor)
-
-			// create an instance of reflection
-			reflection := newReflection(newRegistry)
-
-			rtype, ok := newRegistry.GetType(actor)
-			assert.True(t, ok)
-			assert.NotNil(t, rtype)
-
-			// create an instance of test actor from the string testActor
-			actual, err := reflection.ActorOf(rtype)
-
-			// perform some assertions
-			assert.NoError(t, err)
-			assert.NotNil(t, actual)
-			_, ok = actual.(*testActor)
-			assert.True(t, ok)
-			assert.IsType(t, new(testActor), actual)
-		})
-		t.Run("With unhappy path", func(t *testing.T) {
-			newRegistry := newRegistry()
-			// create an instance of reflection
-			reflection := newReflection(newRegistry)
-			nonActor := new(goaktpb.Address)
-			// register the actor into the types registry
-			newRegistry.Register(nonActor)
-
-			rtype, ok := newRegistry.GetType(nonActor)
-			assert.True(t, ok)
-			assert.NotNil(t, rtype)
-			actual, err := reflection.ActorOf(rtype)
 			assert.Error(t, err)
 			assert.Nil(t, actual)
 		})

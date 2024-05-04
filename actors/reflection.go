@@ -24,50 +24,51 @@
 
 package actors
 
-import "reflect"
+import (
+	"reflect"
+
+	"github.com/tochemey/goakt/internal/types"
+)
 
 // reflection helps create an instance dynamically
 type reflection interface {
-	// ActorOf creates a new instance of Actor from its concrete type
-	ActorOf(rtype reflect.Type) (actor Actor, err error)
 	// ActorFrom creates a new instance of Actor from its FQN
 	ActorFrom(key string) (actor Actor, err error)
 }
 
 // reflectionImpl implements Reflection
 type reflectionImpl struct {
-	registry registry
+	registry types.Registry
 }
 
 // enforce compilation error
 var _ reflection = &reflectionImpl{}
 
 // newReflection creates an instance of Reflection
-func newReflection(registry registry) reflection {
+func newReflection(registry types.Registry) reflection {
 	return &reflectionImpl{registry: registry}
-}
-
-// ActorOf creates a new instance of an Actor
-func (r *reflectionImpl) ActorOf(rtype reflect.Type) (actor Actor, err error) {
-	iface := reflect.TypeOf((*Actor)(nil)).Elem()
-	isActor := rtype.Implements(iface) || reflect.PointerTo(rtype).Implements(iface)
-
-	if !isActor {
-		return nil, ErrInstanceNotAnActor
-	}
-	typVal := reflect.New(rtype)
-
-	if !typVal.IsValid() {
-		return nil, ErrInvalidInstance
-	}
-	return typVal.Interface().(Actor), nil
 }
 
 // ActorFrom creates a new instance of Actor from its FQN
 func (r *reflectionImpl) ActorFrom(key string) (actor Actor, err error) {
-	rtype, ok := r.registry.GetTypeOf(key)
+	rtype, ok := r.registry.TypeOf(key)
 	if !ok {
 		return nil, ErrTypeNotRegistered
 	}
-	return r.ActorOf(rtype)
+	return r.actorOf(rtype)
+}
+
+func (r *reflectionImpl) actorOf(rtype reflect.Type) (actor Actor, err error) {
+	iActor := reflect.TypeOf((*Actor)(nil)).Elem()
+	isActor := rtype.Implements(iActor) || reflect.PointerTo(rtype).Implements(iActor)
+
+	if !isActor {
+		return nil, ErrInstanceNotAnActor
+	}
+
+	newInstance := reflect.New(rtype)
+	if !newInstance.IsValid() {
+		return nil, ErrInvalidInstance
+	}
+	return newInstance.Interface().(Actor), nil
 }
