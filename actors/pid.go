@@ -361,7 +361,7 @@ func (p *pid) Child(name string) (PID, error) {
 		return nil, ErrDead
 	}
 	childActorPath := NewPath(name, p.ActorPath().Address()).WithParent(p.ActorPath())
-	if cid, ok := p.children.Get(childActorPath); ok {
+	if cid, ok := p.children.get(childActorPath); ok {
 		p.childrenCount.Inc()
 		return cid, nil
 	}
@@ -371,7 +371,7 @@ func (p *pid) Child(name string) (PID, error) {
 // Children returns the list of all the children of the given actor that are still alive or an empty list
 func (p *pid) Children() []PID {
 	p.rwMutex.RLock()
-	children := p.children.List()
+	children := p.children.pids()
 	p.rwMutex.RUnlock()
 
 	cids := make([]PID, 0, len(children))
@@ -406,7 +406,7 @@ func (p *pid) Stop(ctx context.Context, cid PID) error {
 	children := p.children
 	p.rwMutex.RUnlock()
 
-	if cid, ok := children.Get(cid.ActorPath()); ok {
+	if cid, ok := children.get(cid.ActorPath()); ok {
 		desc := fmt.Sprintf("child.[%s] Shutdown", cid.ActorPath())
 		if err := cid.Shutdown(spanCtx); err != nil {
 			span.SetStatus(codes.Error, desc)
@@ -519,7 +519,7 @@ func (p *pid) SpawnChild(ctx context.Context, name string, actor Actor) (PID, er
 	children := p.children
 	p.rwMutex.RUnlock()
 
-	if cid, ok := children.Get(childActorPath); ok {
+	if cid, ok := children.get(childActorPath); ok {
 		return cid, nil
 	}
 
@@ -562,7 +562,7 @@ func (p *pid) SpawnChild(ctx context.Context, name string, actor Actor) (PID, er
 		return nil, err
 	}
 
-	p.children.Set(cid)
+	p.children.set(cid)
 	p.Watch(cid)
 
 	span.SetStatus(codes.Ok, "SpawnChild")
@@ -1226,7 +1226,7 @@ func (p *pid) freeChildren(ctx context.Context) {
 
 	for _, child := range p.Children() {
 		p.UnWatch(child)
-		p.children.Delete(child.ActorPath())
+		p.children.delete(child.ActorPath())
 		if err := child.Shutdown(ctx); err != nil {
 			p.logger.Panic(err)
 		}
@@ -1283,7 +1283,7 @@ func (p *pid) supervise(cid PID, watcher *watcher) {
 			switch p.supervisorStrategy {
 			case StopDirective:
 				p.UnWatch(cid)
-				p.children.Delete(cid.ActorPath())
+				p.children.delete(cid.ActorPath())
 				if err := cid.Shutdown(context.Background()); err != nil {
 					// this can enter into some infinite loop if we panic
 					// since we are just shutting down the actor we can just log the error
@@ -1298,7 +1298,7 @@ func (p *pid) supervise(cid PID, watcher *watcher) {
 				p.Watch(cid)
 			default:
 				p.UnWatch(cid)
-				p.children.Delete(cid.ActorPath())
+				p.children.delete(cid.ActorPath())
 				if err := cid.Shutdown(context.Background()); err != nil {
 					// this can enter into some infinite loop if we panic
 					// since we are just shutting down the actor we can just log the error
@@ -1458,11 +1458,11 @@ func (p *pid) removeChild(pid PID) {
 	}
 
 	path := pid.ActorPath()
-	if cid, ok := p.children.Get(path); ok {
+	if cid, ok := p.children.get(path); ok {
 		if cid.IsRunning() {
 			return
 		}
-		p.children.Delete(path)
+		p.children.delete(path)
 	}
 }
 

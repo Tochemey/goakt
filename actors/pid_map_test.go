@@ -39,21 +39,21 @@ func TestPIDMap(t *testing.T) {
 	// create a new PID map
 	pidMap := newPIDMap(5)
 	// add to the map
-	pidMap.Set(actorRef)
+	pidMap.set(actorRef)
 	// assert the length of the map
-	assert.EqualValues(t, 1, pidMap.Len())
+	assert.EqualValues(t, 1, pidMap.len())
 	// list the map
-	lst := pidMap.List()
+	lst := pidMap.pids()
 	assert.Len(t, lst, 1)
 	// fetch the inserted pid back
-	actual, ok := pidMap.Get(actorPath)
+	actual, ok := pidMap.get(actorPath)
 	assert.True(t, ok)
 	assert.NotNil(t, actual)
 	assert.IsType(t, new(pid), actual)
 	// remove the pid from the map
-	pidMap.Delete(actorPath)
+	pidMap.delete(actorPath)
 	// list the map
-	lst = pidMap.List()
+	lst = pidMap.pids()
 	assert.Len(t, lst, 0)
-	assert.EqualValues(t, 0, pidMap.Len())
+	assert.EqualValues(t, 0, pidMap.len())
 }

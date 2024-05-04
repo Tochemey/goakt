@@ -22,7 +22,7 @@
  * SOFTWARE.
  */
 
-package actors
+package types
 
 import (
 	"testing"
@@ -30,52 +30,33 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+type testStruct struct {
+}
+
 func TestRegistry(t *testing.T) {
 	t.Run("With new instance", func(t *testing.T) {
-		newRegistry := newRegistry()
+		newRegistry := NewRegistry()
 		var p any = newRegistry
-		_, ok := p.(registry)
+		_, ok := p.(Registry)
 		assert.True(t, ok)
 	})
 
 	t.Run("With registration", func(t *testing.T) {
-		registry := newRegistry()
+		registry := NewRegistry()
 		// create an instance of an object
-		actor := newTestActor()
+		obj := new(testStruct)
 		// register that actor
-		registry.Register(actor)
-		_, ok := registry.GetType(actor)
+		registry.Register(obj)
+		_, ok := registry.Type(obj)
 		assert.True(t, ok)
 
-		_, ok = registry.GetTypeOf("testActor")
+		_, ok = registry.TypeOf("testStruct")
 		assert.True(t, ok)
-		assert.Len(t, registry.List(), 1)
+		assert.Len(t, registry.TypesMap(), 1)
 
-		registry.Deregister(actor)
-		assert.Len(t, registry.List(), 0)
-	})
+		assert.True(t, registry.Exists(obj))
 
-	t.Run("With registration/deregistration with key", func(t *testing.T) {
-		registry := newRegistry()
-
-		actor := newTestActor()
-		key := "key-1"
-		registry.RegisterWithKey(key, actor)
-		registry.Register(actor)
-
-		_, ok := registry.GetType(actor)
-		assert.True(t, ok)
-		_, ok = registry.GetTypeByKey(key)
-		assert.True(t, ok)
-
-		_, ok = registry.GetTypeOf("testActor")
-		assert.True(t, ok)
-		assert.Len(t, registry.List(), 2)
-
-		registry.Deregister(actor)
-		assert.Len(t, registry.List(), 1)
-
-		registry.DeregisterWithKey(key)
-		assert.Empty(t, registry.List())
+		registry.Deregister(obj)
+		assert.Len(t, registry.TypesMap(), 0)
 	})
 }

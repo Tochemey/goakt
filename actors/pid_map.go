@@ -25,61 +25,89 @@
 package actors
 
 import (
+	"reflect"
 	"sync"
 	"sync/atomic"
+
+	"github.com/tochemey/goakt/internal/types"
 )
 
+type prop struct {
+	pid   PID
+	rtype reflect.Type
+}
+
 type pidMap struct {
-	mu   *sync.RWMutex
-	size atomic.Int64
-	pids map[string]PID
+	mu       *sync.RWMutex
+	size     atomic.Int64
+	propsMap map[string]*prop
 }
 
 func newPIDMap(cap int) *pidMap {
 	return &pidMap{
-		mu:   &sync.RWMutex{},
-		pids: make(map[string]PID, cap),
+		mu:       &sync.RWMutex{},
+		propsMap: make(map[string]*prop, cap),
 	}
 }
 
-// Len returns the number of PIDs
-func (m *pidMap) Len() int {
+// len returns the number of PIDs
+func (m *pidMap) len() int {
 	return int(m.size.Load())
 }
 
-// Get retrieves a pid by its address
-func (m *pidMap) Get(path *Path) (pid PID, ok bool) {
+// get retrieves a pid by its address
+func (m *pidMap) get(path *Path) (pid PID, ok bool) {
 	m.mu.RLock()
-	defer m.mu.RUnlock()
-	pid, ok = m.pids[path.String()]
+	prop, ok := m.propsMap[path.String()]
+	if prop != nil {
+		pid = prop.pid
+		ok = true
+	}
+	m.mu.RUnlock()
 	return
 }
 
-// Set sets a pid in the map
-func (m *pidMap) Set(pid PID) {
+// set sets a pid in the map
+func (m *pidMap) set(pid PID) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	if pid != nil {
-		m.pids[pid.ActorPath().String()] = pid
+		var rtype reflect.Type
+		handle := pid.ActorHandle()
+		if handle != nil {
+			rtype = types.RuntimeTypeOf(handle)
+		}
+
+		m.propsMap[pid.ActorPath().String()] = &prop{
+			pid:   pid,
+			rtype: rtype,
+		}
 		m.size.Add(1)
+		m.mu.Unlock()
 	}
 }
 
-// Delete removes a pid from the map
-func (m *pidMap) Delete(addr *Path) {
+// delete removes a pid from the map
+func (m *pidMap) delete(addr *Path) {
 	m.mu.Lock()
-	delete(m.pids, addr.String())
+	delete(m.propsMap, addr.String())
 	m.size.Add(-1)
 	m.mu.Unlock()
 }
 
-// List returns all actors as a slice
-func (m *pidMap) List() []PID {
+// pids returns all actors as a slice
+func (m *pidMap) pids() []PID {
 	m.mu.Lock()
 	var out []PID
-	for _, actor := range m.pids {
-		out = append(out, actor)
+	for _, prop := range m.propsMap {
+		out = append(out, prop.pid)
 	}
+	m.mu.Unlock()
+	return out
+}
+
+func (m *pidMap) props() map[string]*prop {
+	m.mu.Lock()
+	out := m.propsMap
 	m.mu.Unlock()
 	return out
 }
