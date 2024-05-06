@@ -34,59 +34,59 @@ import (
 // Option is the interface that applies a configuration option.
 type Option interface {
 	// Apply sets the Option value of a config.
-	Apply(cl *Node)
+	Apply(cl *Engine)
 }
 
 var _ Option = OptionFunc(nil)
 
 // OptionFunc implements the Option interface.
-type OptionFunc func(cl *Node)
+type OptionFunc func(eng *Engine)
 
 // Apply applies the Node's option
-func (f OptionFunc) Apply(c *Node) {
+func (f OptionFunc) Apply(c *Engine) {
 	f(c)
 }
 
 // WithPartitionsCount sets the total number of partitions
 func WithPartitionsCount(count uint64) Option {
-	return OptionFunc(func(cl *Node) {
-		cl.partitionsCount = count
+	return OptionFunc(func(eng *Engine) {
+		eng.partitionsCount = count
 	})
 }
 
 // WithLogger sets the logger
 func WithLogger(logger log.Logger) Option {
-	return OptionFunc(func(cl *Node) {
-		cl.logger = logger
+	return OptionFunc(func(eng *Engine) {
+		eng.logger = logger
 	})
 }
 
 // WithWriteTimeout sets the Node write timeout.
 // This timeout specifies the timeout of a data replication
 func WithWriteTimeout(timeout time.Duration) Option {
-	return OptionFunc(func(cl *Node) {
-		cl.writeTimeout = timeout
+	return OptionFunc(func(eng *Engine) {
+		eng.writeTimeout = timeout
 	})
 }
 
 // WithReadTimeout sets the Node read timeout.
 // This timeout specifies the timeout of a data retrieval
 func WithReadTimeout(timeout time.Duration) Option {
-	return OptionFunc(func(cl *Node) {
-		cl.readTimeout = timeout
+	return OptionFunc(func(eng *Engine) {
+		eng.readTimeout = timeout
 	})
 }
 
 // WithShutdownTimeout sets the Node shutdown timeout.
 func WithShutdownTimeout(timeout time.Duration) Option {
-	return OptionFunc(func(cl *Node) {
-		cl.shutdownTimeout = timeout
+	return OptionFunc(func(eng *Engine) {
+		eng.shutdownTimeout = timeout
 	})
 }
 
 // WithHasher sets the custom hasher
 func WithHasher(hasher hash.Hasher) Option {
-	return OptionFunc(func(cl *Node) {
-		cl.hasher = hasher
+	return OptionFunc(func(eng *Engine) {
+		eng.hasher = hasher
 	})
 }

@@ -24,3 +24,12 @@
  */
 
 package cluster
+
+// Peer defines the peer info
+type Peer struct {
+	// Address represents the peer address. It is also the host:port of the peer
+	Address string
+	// Leader states that the given peer is the leader not.
+	// A peer is a leader when it is the oldest node in the cluster
+	Leader bool
+}

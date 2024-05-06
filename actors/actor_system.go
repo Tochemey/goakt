@@ -35,6 +35,7 @@ import (
 
 	"connectrpc.com/connect"
 	"connectrpc.com/otelconnect"
+	"github.com/alphadose/haxmap"
 	"github.com/google/uuid"
 	"github.com/pkg/errors"
 	"go.opentelemetry.io/otel/codes"
@@ -214,6 +215,8 @@ type actorSystem struct {
 
 	registry   types.Registry
 	reflection reflection
+
+	peersCache *haxmap.Map[string, []byte]
 }
 
 // enforce compilation error when all methods of the ActorSystem interface are not implemented
@@ -230,7 +233,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 	}
 
 	system := &actorSystem{
-		actors:              newPIDMap(10),
+		actors:              newPIDMap(1_000), // TODO need to check with memory footprint here since we change the map engine
 		clusterChan:         make(chan *internalpb.WireActor, 10),
 		name:                name,
 		logger:              log.DefaultLogger,
@@ -250,6 +253,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		eventsChan:          make(chan *cluster.Event, 1),
 		registry:            types.NewRegistry(),
 		clusterSyncStopSig:  make(chan types.Unit, 1),
+		peersCache:          haxmap.New[string, []byte](100), // TODO need to check with memory footprint here since we change the map engine
 	}
 
 	system.started.Store(false)
@@ -864,11 +868,11 @@ func (x *actorSystem) RemoteAsk(ctx context.Context, stream *connect.BidiStream[
 	}
 
 	for {
-		switch ctx.Err() {
-		case context.Canceled:
-			return connect.NewError(connect.CodeCanceled, ctx.Err())
-		case context.DeadlineExceeded:
-			return connect.NewError(connect.CodeDeadlineExceeded, ctx.Err())
+		switch err := ctx.Err(); {
+		case errors.Is(err, context.Canceled):
+			return connect.NewError(connect.CodeCanceled, err)
+		case errors.Is(err, context.DeadlineExceeded):
+			return connect.NewError(connect.CodeDeadlineExceeded, err)
 		}
 
 		request, err := stream.Receive()
@@ -1045,6 +1049,24 @@ func (x *actorSystem) RemoteSpawn(ctx context.Context, request *connect.Request[
 	return connect.NewResponse(new(internalpb.RemoteSpawnResponse)), nil
 }
 
+// PushState handles the push state call
+func (x *actorSystem) PushState(_ context.Context, request *connect.Request[internalpb.PushStateRequest]) (*connect.Response[internalpb.PushStateResponse], error) {
+	req := request.Msg
+	peerState := req.GetPeerState()
+	peer := peerState.GetAddress()
+
+	// only handle peer state replication when remoting is enabled.
+	if !x.remotingEnabled.Load() {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrRemotingDisabled)
+	}
+
+	// no need to handle the error
+	bytea, _ := proto.Marshal(peerState)
+
+	x.peersCache.Set(peer, bytea)
+	return connect.NewResponse(new(internalpb.PushStateResponse)), nil
+}
+
 // handleRemoteAsk handles a synchronous message to another actor and expect a response.
 // This block until a response is received or timed out.
 func (x *actorSystem) handleRemoteAsk(ctx context.Context, to PID, message proto.Message) (response proto.Message, err error) {
@@ -1078,7 +1100,7 @@ func (x *actorSystem) enableClustering(ctx context.Context) error {
 		RemotingPort: int(x.remotingPort),
 	}
 
-	cluster, err := cluster.NewNode(x.Name(),
+	cluster, err := cluster.NewEngine(x.Name(),
 		x.discoveryProvider,
 		&hostNode,
 		cluster.WithLogger(x.logger),

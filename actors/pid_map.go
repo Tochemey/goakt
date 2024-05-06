@@ -26,8 +26,8 @@ package actors
 
 import (
 	"reflect"
-	"sync"
-	"sync/atomic"
+
+	"github.com/alphadose/haxmap"
 
 	"github.com/tochemey/goakt/internal/types"
 )
@@ -38,38 +38,32 @@ type prop struct {
 }
 
 type pidMap struct {
-	mu       *sync.RWMutex
-	size     atomic.Int64
-	propsMap map[string]*prop
+	mappings *haxmap.Map[string, *prop]
 }
 
 func newPIDMap(cap int) *pidMap {
 	return &pidMap{
-		mu:       &sync.RWMutex{},
-		propsMap: make(map[string]*prop, cap),
+		mappings: haxmap.New[string, *prop](uintptr(cap)),
 	}
 }
 
 // len returns the number of PIDs
 func (m *pidMap) len() int {
-	return int(m.size.Load())
+	return int(m.mappings.Len())
 }
 
 // get retrieves a pid by its address
 func (m *pidMap) get(path *Path) (pid PID, ok bool) {
-	m.mu.RLock()
-	prop, ok := m.propsMap[path.String()]
+	prop, ok := m.mappings.Get(path.String())
 	if prop != nil {
 		pid = prop.pid
 		ok = true
 	}
-	m.mu.RUnlock()
 	return
 }
 
 // set sets a pid in the map
 func (m *pidMap) set(pid PID) {
-	m.mu.Lock()
 	if pid != nil {
 		var rtype reflect.Type
 		handle := pid.ActorHandle()
@@ -77,37 +71,39 @@ func (m *pidMap) set(pid PID) {
 			rtype = types.RuntimeTypeOf(handle)
 		}
 
-		m.propsMap[pid.ActorPath().String()] = &prop{
+		m.mappings.Set(pid.ActorPath().String(), &prop{
 			pid:   pid,
 			rtype: rtype,
-		}
-		m.size.Add(1)
-		m.mu.Unlock()
+		})
 	}
 }
 
 // delete removes a pid from the map
 func (m *pidMap) delete(addr *Path) {
-	m.mu.Lock()
-	delete(m.propsMap, addr.String())
-	m.size.Add(-1)
-	m.mu.Unlock()
+	m.mappings.Del(addr.String())
 }
 
 // pids returns all actors as a slice
 func (m *pidMap) pids() []PID {
-	m.mu.Lock()
 	var out []PID
-	for _, prop := range m.propsMap {
+	m.mappings.ForEach(func(_ string, prop *prop) bool {
+		if len(out) == int(m.mappings.Len()) {
+			return false
+		}
 		out = append(out, prop.pid)
-	}
-	m.mu.Unlock()
+		return true
+	})
 	return out
 }
 
 func (m *pidMap) props() map[string]*prop {
-	m.mu.Lock()
-	out := m.propsMap
-	m.mu.Unlock()
+	out := make(map[string]*prop, m.mappings.Len())
+	m.mappings.ForEach(func(key string, prop *prop) bool {
+		if len(out) == int(m.mappings.Len()) {
+			return false
+		}
+		out[key] = prop
+		return true
+	})
 	return out
 }

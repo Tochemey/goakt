@@ -84,7 +84,7 @@ func TestSingleNode(t *testing.T) {
 		}
 
 		logger := log.New(log.ErrorLevel, os.Stdout)
-		cluster, err := NewNode("test", provider, &hostNode, WithLogger(logger))
+		cluster, err := NewEngine("test", provider, &hostNode, WithLogger(logger))
 		require.NotNil(t, cluster)
 		require.NoError(t, err)
 
@@ -138,7 +138,7 @@ func TestSingleNode(t *testing.T) {
 			RemotingPort: remotingPort,
 		}
 
-		cluster, err := NewNode("test", provider, &hostNode)
+		cluster, err := NewEngine("test", provider, &hostNode)
 		require.NotNil(t, cluster)
 		require.NoError(t, err)
 
@@ -208,7 +208,7 @@ func TestSingleNode(t *testing.T) {
 			RemotingPort: remotingPort,
 		}
 
-		cluster, err := NewNode("test", provider, &hostNode)
+		cluster, err := NewEngine("test", provider, &hostNode)
 		require.NotNil(t, cluster)
 		require.NoError(t, err)
 
@@ -272,7 +272,7 @@ func TestSingleNode(t *testing.T) {
 		}
 
 		logger := log.New(log.WarningLevel, os.Stdout)
-		cluster, err := NewNode("test", provider, &hostNode, WithLogger(logger))
+		cluster, err := NewEngine("test", provider, &hostNode, WithLogger(logger))
 		require.NotNil(t, cluster)
 		require.NoError(t, err)
 
@@ -314,14 +314,14 @@ func TestMultipleNodes(t *testing.T) {
 	srv := startNatsServer(t)
 
 	// create a cluster node1
-	node1, sd1 := startNode(t, "node1", srv.Addr().String())
+	node1, sd1 := startEngine(t, "node1", srv.Addr().String())
 	require.NotNil(t, node1)
 
 	// wait for the node to start properly
 	time.Sleep(2 * time.Second)
 
 	// create a cluster node1
-	node2, sd2 := startNode(t, "node2", srv.Addr().String())
+	node2, sd2 := startEngine(t, "node2", srv.Addr().String())
 	require.NotNil(t, node2)
 	node2Addr := node2.AdvertisedAddress()
 
@@ -353,6 +353,10 @@ L:
 	require.True(t, ok)
 	require.NotNil(t, nodeJoined)
 	require.Equal(t, node2Addr, nodeJoined.GetAddress())
+	peers, err := node1.Peers(context.TODO())
+	require.NoError(t, err)
+	require.Len(t, peers, 1)
+	require.Equal(t, node2Addr, peers[0].Address)
 
 	// wait for some time
 	time.Sleep(time.Second)
@@ -419,7 +423,7 @@ func startNatsServer(t *testing.T) *natsserver.Server {
 	return serv
 }
 
-func startNode(t *testing.T, nodeName, serverAddr string) (*Node, discovery.Provider) {
+func startEngine(t *testing.T, nodeName, serverAddr string) (*Engine, discovery.Provider) {
 	// create a context
 	ctx := context.TODO()
 
@@ -456,13 +460,13 @@ func startNode(t *testing.T, nodeName, serverAddr string) (*Node, discovery.Prov
 	provider := nats.NewDiscovery(&config, &hostNode)
 
 	// create the startNode
-	node, err := NewNode(nodeName, provider, &hostNode)
+	engine, err := NewEngine(nodeName, provider, &hostNode)
 	require.NoError(t, err)
-	require.NotNil(t, node)
+	require.NotNil(t, engine)
 
 	// start the node
-	require.NoError(t, node.Start(ctx))
+	require.NoError(t, engine.Start(ctx))
 
 	// return the cluster startNode
-	return node, provider
+	return engine, provider
 }

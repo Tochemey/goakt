@@ -11,6 +11,8 @@ option go_package = "github.com/tochemey/goakt/internal/internalpb;internalpb";
 // With remoting one can:
 // - send messages to actors
 // - lookup actor remotely
+// - spawn actor remotely
+// - stop actor remotely
 service RemotingService {
   // RemoteAsk is used to send a message to an actor remotely and expect a response immediately.
   rpc RemoteAsk(stream RemoteAskRequest) returns (stream RemoteAskResponse);

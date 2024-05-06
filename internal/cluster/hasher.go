@@ -35,7 +35,7 @@ type hasherWrapper struct {
 }
 
 // enforce compilation error
-var _ hasher.Hasher = &hasherWrapper{}
+var _ hasher.Hasher = (*hasherWrapper)(nil)
 
 // Sum64 implementation
 func (x hasherWrapper) Sum64(key []byte) uint64 {

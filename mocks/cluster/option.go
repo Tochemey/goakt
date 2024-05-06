@@ -21,7 +21,7 @@ func (_m *Option) EXPECT() *Option_Expecter {
 }
 
 // Apply provides a mock function with given fields: cl
-func (_m *Option) Apply(cl *internalcluster.Node) {
+func (_m *Option) Apply(cl *internalcluster.Engine) {
 	_m.Called(cl)
 }
 
@@ -31,14 +31,14 @@ type Option_Apply_Call struct {
 }
 
 // Apply is a helper method to define mock.On call
-//   - cl *internalcluster.Node
+//   - cl *internalcluster.Engine
 func (_e *Option_Expecter) Apply(cl interface{}) *Option_Apply_Call {
 	return &Option_Apply_Call{Call: _e.mock.On("Apply", cl)}
 }
 
-func (_c *Option_Apply_Call) Run(run func(cl *internalcluster.Node)) *Option_Apply_Call {
+func (_c *Option_Apply_Call) Run(run func(cl *internalcluster.Engine)) *Option_Apply_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(*internalcluster.Node))
+		run(args[0].(*internalcluster.Engine))
 	})
 	return _c
 }
@@ -48,7 +48,7 @@ func (_c *Option_Apply_Call) Return() *Option_Apply_Call {
 	return _c
 }
 
-func (_c *Option_Apply_Call) RunAndReturn(run func(*internalcluster.Node)) *Option_Apply_Call {
+func (_c *Option_Apply_Call) RunAndReturn(run func(*internalcluster.Engine)) *Option_Apply_Call {
 	_c.Call.Return(run)
 	return _c
 }

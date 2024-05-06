@@ -25,7 +25,7 @@
 package hash
 
 import (
-	"github.com/cespare/xxhash/v2"
+	"github.com/zeebo/xxh3"
 )
 
 // Hasher defines the hashcode generator interface.
@@ -40,7 +40,7 @@ var _ Hasher = defaultHasher{}
 
 // HashCode implementation
 func (x defaultHasher) HashCode(key []byte) uint64 {
-	return xxhash.Sum64(key)
+	return xxh3.Hash(key)
 }
 
 // DefaultHasher returns the default hasher
