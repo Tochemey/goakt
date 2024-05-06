@@ -28,6 +28,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/buraksezer/olric"
@@ -99,6 +100,8 @@ type Interface interface {
 	// AdvertisedAddress returns the cluster node cluster address that is known by the
 	// peers in the cluster
 	AdvertisedAddress() string
+	// Peers returns a channel containing the list of peers at a given time
+	Peers() <-chan []*Peer
 }
 
 // Node represents the Node
@@ -139,6 +142,10 @@ type Node struct {
 	pubSub             *redis.PubSub
 	messagesChan       <-chan *redis.Message
 	messagesReaderChan chan types.Unit
+
+	peers                chan []*Peer
+	peersRefreshInterval time.Duration
+	peersRefreshStopSig  chan types.Unit
 }
 
 // enforce compilation error
@@ -148,18 +155,19 @@ var _ Interface = &Node{}
 func NewNode(name string, disco discovery.Provider, host *discovery.Node, opts ...Option) (*Node, error) {
 	// create an instance of the Node
 	node := &Node{
-		partitionsCount:    20,
-		logger:             log.DefaultLogger,
-		name:               name,
-		discoveryProvider:  disco,
-		writeTimeout:       time.Second,
-		readTimeout:        time.Second,
-		shutdownTimeout:    3 * time.Second,
-		hasher:             hash.DefaultHasher(),
-		pubSub:             nil,
-		events:             make(chan *Event, 20),
-		messagesReaderChan: make(chan types.Unit, 1),
-		messagesChan:       make(chan *redis.Message, 1),
+		partitionsCount:      20,
+		logger:               log.DefaultLogger,
+		name:                 name,
+		discoveryProvider:    disco,
+		writeTimeout:         time.Second,
+		readTimeout:          time.Second,
+		shutdownTimeout:      3 * time.Second,
+		hasher:               hash.DefaultHasher(),
+		pubSub:               nil,
+		events:               make(chan *Event, 20),
+		messagesReaderChan:   make(chan types.Unit, 1),
+		messagesChan:         make(chan *redis.Message, 1),
+		peersRefreshInterval: time.Minute,
 	}
 	// apply the various options
 	for _, opt := range opts {
@@ -252,6 +260,7 @@ func (n *Node) Start(ctx context.Context) error {
 	n.pubSub = ps.Subscribe(ctx, events.ClusterEventsChannel)
 	n.messagesChan = n.pubSub.Channel()
 	go n.consume()
+	go n.scanPeers()
 
 	logger.Infof("GoAkt cluster Node=(%s) successfully started. 🎉", n.name)
 	return nil
@@ -444,6 +453,11 @@ func (n *Node) Events() <-chan *Event {
 	return n.events
 }
 
+// Peers returns a channel containing the list of peers at a given time
+func (n *Node) Peers() <-chan []*Peer {
+	return n.peers
+}
+
 // consume reads to the underlying cluster events
 // and emit the event
 func (n *Node) consume() {
@@ -515,6 +529,48 @@ func (n *Node) consume() {
 			}
 		}
 	}
+}
+
+func (n *Node) scanPeers() {
+	n.logger.Info("scanning peers info...")
+	ticker := time.NewTicker(n.peersRefreshInterval)
+	tickerStopSig := make(chan types.Unit, 1)
+
+	go func() {
+		for {
+			select {
+			case <-n.peersRefreshStopSig:
+				tickerStopSig <- types.Unit{}
+				return
+			case <-ticker.C:
+				// fetch the current cluster peers
+				ctx := context.Background()
+				members, err := n.client.Members(ctx)
+				if err != nil {
+					n.logger.Error(errors.Wrap(err, "failed to scan cluster peers"))
+				}
+
+				if len(members) != 0 {
+					peers := make([]*Peer, 0, len(members))
+					for _, member := range members {
+						addresses := []string{
+							n.host.ClusterAddress(),
+							n.host.GossipAddress(),
+						}
+						if slices.Contains(addresses, member.Name) {
+							continue
+						}
+						peers = append(peers, &Peer{Address: member.Name, Leader: member.Coordinator})
+					}
+					n.peers <- peers
+				}
+			}
+		}
+	}()
+
+	<-tickerStopSig
+	ticker.Stop()
+	n.logger.Info("peers scanning has stopped...")
 }
 
 // buildConfig builds the Node configuration
