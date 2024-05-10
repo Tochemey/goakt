@@ -1363,47 +1363,9 @@ func (x *actorSystem) replicateState() {
 					continue
 				}
 
-				if len(peers) > 0 {
-					interceptor, err := otelconnect.NewInterceptor()
-					if err != nil {
-						x.logger.Error(errors.Wrap(err, "failed to create an instance of otel interceptor"))
-						continue
-					}
-
-					actors := x.actors.props()
-					state := new(internalpb.PeerState)
-
-					// TODO: rethink this because this too much data
-					for actorID, prop := range actors {
-						actorPath := NewPath(actorID, NewAddress(x.name, x.remotingHost, int(x.remotingPort)))
-						state.Actors = append(state.Actors, &internalpb.WireActor{
-							ActorName:    actorID,
-							ActorAddress: actorPath.RemoteAddress(),
-							ActorPath:    actorPath.String(),
-							ActorType:    prop.rtype.Name(),
-						})
-					}
-
-					// TODO make it more efficient
-					for _, peer := range peers {
-						stateCopy := proto.Clone(state).(*internalpb.PeerState)
-						stateCopy.Address = peer.Address
-
-						clusterService := internalpbconnect.NewClusterServiceClient(
-							httpclient.NewClient(),
-							fmt.Sprintf("http://%s", peer.Address),
-							connect.WithInterceptors(interceptor),
-							connect.WithGRPC(),
-						)
-
-						request := connect.NewRequest(&internalpb.PushStateRequest{
-							PeerState: stateCopy,
-						})
-
-						if _, err := clusterService.PushState(ctx, request); err != nil {
-							x.logger.Error(errors.Wrapf(err, "failed to replicate state to peer=(%s)", peer.Address))
-						}
-					}
+				// push the actor system state
+				if err := x.pushState(ctx, peers); err != nil {
+					continue
 				}
 
 			case <-x.clusterSyncStopSig:
@@ -1415,4 +1377,57 @@ func (x *actorSystem) replicateState() {
 
 	<-tickerStopSig
 	ticker.Stop()
+	x.logger.Info("replicating state...")
+}
+
+func (x *actorSystem) pushState(ctx context.Context, peers []*cluster.Peer) error {
+	if len(peers) == 0 {
+		return nil
+	}
+
+	actorProps := x.actors.props()
+	peerState := new(internalpb.PeerState)
+
+	interceptor, err := otelconnect.NewInterceptor()
+	if err != nil {
+		x.logger.Errorf("failed to create an instance of otel interceptor: %v", err)
+		return err
+	}
+
+	// TODO: rethink this because this too much data
+	for actorID, actorProp := range actorProps {
+		actorAddress := NewAddress(x.name, x.remotingHost, int(x.remotingPort))
+		actorPath := NewPath(actorID, actorAddress)
+
+		peerState.Actors = append(peerState.Actors, &internalpb.WireActor{
+			ActorName:    actorID,
+			ActorAddress: actorPath.RemoteAddress(),
+			ActorPath:    actorPath.String(),
+			ActorType:    actorProp.rtype.Name(),
+		})
+	}
+
+	// TODO make it more efficient
+	// TODO add some retry mechanism
+	for _, peer := range peers {
+		peerStateCopy := proto.Clone(peerState).(*internalpb.PeerState)
+		peerStateCopy.Address = peer.Address
+
+		clusterService := internalpbconnect.NewClusterServiceClient(
+			httpclient.NewClient(),
+			fmt.Sprintf("http://%s", peer.Address),
+			connect.WithInterceptors(interceptor),
+			connect.WithGRPC(),
+		)
+
+		request := connect.NewRequest(&internalpb.PushStateRequest{
+			PeerState: peerStateCopy,
+		})
+
+		if _, err := clusterService.PushState(ctx, request); err != nil {
+			x.logger.Errorf("failed to replicate state to peer=(%s): %v", peer.Address, err)
+			return err
+		}
+	}
+	return nil
 }
