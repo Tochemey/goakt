@@ -54,6 +54,7 @@ import (
 	"github.com/tochemey/goakt/hash"
 	"github.com/tochemey/goakt/internal/cluster"
 	"github.com/tochemey/goakt/internal/eventstream"
+	httpclient "github.com/tochemey/goakt/internal/http"
 	"github.com/tochemey/goakt/internal/internalpb"
 	"github.com/tochemey/goakt/internal/internalpb/internalpbconnect"
 	"github.com/tochemey/goakt/internal/metric"
@@ -1344,4 +1345,74 @@ func (x *actorSystem) runClusterSync() {
 	<-tickerStopSig
 	ticker.Stop()
 	x.logger.Info("cluster synchronization has stopped...")
+}
+
+func (x *actorSystem) replicateState() {
+	x.logger.Info("replicating state...")
+	// TODO: make this configurable
+	ticker := time.NewTicker(time.Minute)
+	tickerStopSig := make(chan types.Unit, 1)
+	go func() {
+		for {
+			select {
+			case <-ticker.C:
+				ctx := context.Background()
+				peers, err := x.cluster.Peers(ctx)
+				if err != nil {
+					x.logger.Error(errors.Wrap(err, "failed to fetch the list of peers"))
+					continue
+				}
+
+				if len(peers) > 0 {
+					interceptor, err := otelconnect.NewInterceptor()
+					if err != nil {
+						x.logger.Error(errors.Wrap(err, "failed to create an instance of otel interceptor"))
+						continue
+					}
+
+					actors := x.actors.props()
+					state := new(internalpb.PeerState)
+
+					// TODO: rethink this because this too much data
+					for actorID, prop := range actors {
+						actorPath := NewPath(actorID, NewAddress(x.name, x.remotingHost, int(x.remotingPort)))
+						state.Actors = append(state.Actors, &internalpb.WireActor{
+							ActorName:    actorID,
+							ActorAddress: actorPath.RemoteAddress(),
+							ActorPath:    actorPath.String(),
+							ActorType:    prop.rtype.Name(),
+						})
+					}
+
+					// TODO make it more efficient
+					for _, peer := range peers {
+						stateCopy := proto.Clone(state).(*internalpb.PeerState)
+						stateCopy.Address = peer.Address
+
+						clusterService := internalpbconnect.NewClusterServiceClient(
+							httpclient.NewClient(),
+							fmt.Sprintf("http://%s", peer.Address),
+							connect.WithInterceptors(interceptor),
+							connect.WithGRPC(),
+						)
+
+						request := connect.NewRequest(&internalpb.PushStateRequest{
+							PeerState: stateCopy,
+						})
+
+						if _, err := clusterService.PushState(ctx, request); err != nil {
+							x.logger.Error(errors.Wrapf(err, "failed to replicate state to peer=(%s)", peer.Address))
+						}
+					}
+				}
+
+			case <-x.clusterSyncStopSig:
+				tickerStopSig <- types.Unit{}
+				return
+			}
+		}
+	}()
+
+	<-tickerStopSig
+	ticker.Stop()
 }
