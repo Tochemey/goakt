@@ -760,8 +760,7 @@ func (x *actorSystem) Start(ctx context.Context) error {
 			return err
 		}
 		// start cluster synchronization
-		// TODO: revisit this
-		// go x.runClusterSync()
+		go x.replicateState()
 	}
 
 	x.scheduler.Start(spanCtx)
@@ -1324,31 +1323,8 @@ func (x *actorSystem) clusterSync() {
 	}
 }
 
-// runClusterSync runs time to time cluster synchronization
-// by populating the given node actors map to the cluster for availability
-func (x *actorSystem) runClusterSync() {
-	x.logger.Info("cluster synchronization has started...")
-	ticker := time.NewTicker(5 * time.Minute)
-	tickerStopSig := make(chan types.Unit, 1)
-	go func() {
-		for {
-			select {
-			case <-ticker.C:
-				x.clusterSync()
-			case <-x.clusterSyncStopSig:
-				tickerStopSig <- types.Unit{}
-				return
-			}
-		}
-	}()
-
-	<-tickerStopSig
-	ticker.Stop()
-	x.logger.Info("cluster synchronization has stopped...")
-}
-
 func (x *actorSystem) replicateState() {
-	x.logger.Info("replicating state...")
+	x.logger.Info("starte replicating state...")
 	// TODO: make this configurable
 	ticker := time.NewTicker(time.Minute)
 	tickerStopSig := make(chan types.Unit, 1)
@@ -1377,7 +1353,7 @@ func (x *actorSystem) replicateState() {
 
 	<-tickerStopSig
 	ticker.Stop()
-	x.logger.Info("replicating state...")
+	x.logger.Info("state replication stopped...")
 }
 
 func (x *actorSystem) pushState(ctx context.Context, peers []*cluster.Peer) error {
@@ -1388,11 +1364,11 @@ func (x *actorSystem) pushState(ctx context.Context, peers []*cluster.Peer) erro
 	actorProps := x.actors.props()
 	peerState := new(internalpb.PeerState)
 
-	interceptor, err := otelconnect.NewInterceptor()
-	if err != nil {
-		x.logger.Errorf("failed to create an instance of otel interceptor: %v", err)
-		return err
-	}
+	// interceptor, err := otelconnect.NewInterceptor()
+	// if err != nil {
+	// 	x.logger.Errorf("failed to create an instance of otel interceptor: %v", err)
+	// 	return err
+	// }
 
 	// TODO: rethink this because this too much data
 	for actorID, actorProp := range actorProps {
@@ -1416,7 +1392,7 @@ func (x *actorSystem) pushState(ctx context.Context, peers []*cluster.Peer) erro
 		clusterService := internalpbconnect.NewClusterServiceClient(
 			httpclient.NewClient(),
 			fmt.Sprintf("http://%s", peer.Address),
-			connect.WithInterceptors(interceptor),
+			// connect.WithInterceptors(interceptor),
 			connect.WithGRPC(),
 		)
 
