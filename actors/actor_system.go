@@ -1299,10 +1299,10 @@ func (x *actorSystem) broadcastClusterEvents() {
 
 // clusterSync synchronizes the node' actors map to the cluster.
 func (x *actorSystem) clusterSync() {
-	typesMap := x.actors.props()
-	if len(typesMap) != 0 {
+	props := x.actors.props()
+	if len(props) != 0 {
 		x.logger.Info("syncing node actors map to the cluster...")
-		for actorID, prop := range typesMap {
+		for actorID, actorProp := range props {
 			actorPath := NewPath(actorID, NewAddress(x.name, "", -1))
 			if x.remotingEnabled.Load() {
 				actorPath = NewPath(actorID, NewAddress(x.name, x.remotingHost, int(x.remotingPort)))
@@ -1316,7 +1316,7 @@ func (x *actorSystem) clusterSync() {
 				ActorName:    actorID,
 				ActorAddress: actorPath.RemoteAddress(),
 				ActorPath:    actorPath.String(),
-				ActorType:    prop.rtype.Name(),
+				ActorType:    actorProp.rtype.Name(),
 			}
 		}
 		x.logger.Info("node actors map successfully synced back to the cluster.")
