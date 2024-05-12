@@ -574,6 +574,7 @@ func (n *Engine) buildConfig() *config.Config {
 		LogOutput:                  newLogWriter(n.logger),
 		EnableClusterEventsChannel: true,
 		Hasher:                     hasher.NewDefaultHasher(),
+		TriggerBalancerInterval:    config.DefaultTriggerBalancerInterval,
 	}
 
 	// set verbosity when debug is enabled

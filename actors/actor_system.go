@@ -759,8 +759,6 @@ func (x *actorSystem) Start(ctx context.Context) error {
 		if err := x.enableClustering(spanCtx); err != nil {
 			return err
 		}
-		// start cluster synchronization
-		go x.replicateState()
 	}
 
 	x.scheduler.Start(spanCtx)
@@ -1051,19 +1049,50 @@ func (x *actorSystem) RemoteSpawn(ctx context.Context, request *connect.Request[
 
 // PushState handles the push state call
 func (x *actorSystem) PushState(_ context.Context, request *connect.Request[internalpb.PushStateRequest]) (*connect.Response[internalpb.PushStateResponse], error) {
-	req := request.Msg
-	peerState := req.GetPeerState()
-	peer := peerState.GetAddress()
-
 	// only handle peer state replication when remoting is enabled.
 	if !x.remotingEnabled.Load() {
 		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrRemotingDisabled)
 	}
 
-	// no need to handle the error
-	bytea, _ := proto.Marshal(peerState)
+	req := request.Msg
+	peerState := req.GetPeerState()
+	peerAddress := peerState.GetAddress()
 
-	x.peersCache.Set(peer, bytea)
+	priorState := new(internalpb.PeerState)
+	if bytea, ok := x.peersCache.Get(peerAddress); ok {
+		// no need to handle the error here because we pushed the data into the cache
+		_ = proto.Unmarshal(bytea, priorState)
+	}
+
+	// avoid duplicate actors
+	actorsMap := make(map[string]*internalpb.WireActor)
+	for _, actor := range priorState.GetActors() {
+		path := actor.GetActorPath()
+		if path != "" {
+			actorsMap[path] = actor
+		}
+	}
+
+	// iterate over the incoming actors
+	for _, actor := range peerState.GetActors() {
+		path := actor.GetActorPath()
+		if _, ok := actorsMap[path]; !ok {
+			actorsMap[path] = actor
+		}
+	}
+
+	// build the actors list
+	actors := make([]*internalpb.WireActor, 0, len(actorsMap))
+	for _, actor := range actorsMap {
+		actors = append(actors, actor)
+	}
+
+	priorState.Actors = append(priorState.Actors, actors...)
+
+	// no need to handle the error
+	bytea, _ := proto.Marshal(priorState)
+
+	x.peersCache.Set(peerAddress, bytea)
 	return connect.NewResponse(new(internalpb.PushStateResponse)), nil
 }
 
@@ -1215,19 +1244,6 @@ func (x *actorSystem) reset() {
 	x.cluster = nil
 }
 
-// broadcast publishes newly created actor into the cluster when cluster is enabled
-func (x *actorSystem) broadcast(ctx context.Context) {
-	for wireActor := range x.clusterChan {
-		if x.cluster != nil {
-			if err := x.cluster.PutActor(ctx, wireActor); err != nil {
-				x.logger.Error(err.Error())
-				// TODO: stop or continue
-				return
-			}
-		}
-	}
-}
-
 // housekeeper time to time removes dead actors from the system
 // that helps free non-utilized resources
 func (x *actorSystem) housekeeper() {
@@ -1278,13 +1294,67 @@ func (x *actorSystem) registerMetrics() error {
 	return err
 }
 
+// broadcast publishes newly created actor into the cluster when cluster is enabled
+func (x *actorSystem) broadcast(ctx context.Context) {
+	for wireActor := range x.clusterChan {
+		if x.cluster != nil {
+			eg, ctx := errgroup.WithContext(ctx)
+
+			// make the actor cluster aware
+			eg.Go(func() error {
+				return x.cluster.PutActor(ctx, wireActor)
+			})
+
+			// notifies the peers to update their local cache
+			eg.Go(func() error {
+				peers, err := x.cluster.Peers(ctx)
+				if err != nil {
+					return err
+				}
+
+				// no-op when there are no peers
+				if len(peers) == 0 {
+					return nil
+				}
+
+				for _, peer := range peers {
+					clusterService := internalpbconnect.NewClusterServiceClient(
+						httpclient.NewClient(),
+						fmt.Sprintf("http://%s", peer.Address),
+						connect.WithGRPC(),
+					)
+
+					request := connect.NewRequest(&internalpb.PushStateRequest{
+						PeerState: &internalpb.PeerState{
+							Actors:  []*internalpb.WireActor{wireActor},
+							Address: peer.Address,
+						},
+					})
+
+					if _, err := clusterService.PushState(ctx, request); err != nil {
+						if connect.CodeOf(err) != connect.CodeUnavailable {
+							x.logger.Errorf("failed to replicate state to peer=(%s): %v", peer.Address, err)
+							return err
+						}
+					}
+				}
+				return nil
+			})
+
+			if err := eg.Wait(); err != nil {
+				x.logger.Panic(err.Error())
+			}
+		}
+	}
+}
+
 // broadcastClusterEvents listens to cluster events and send them to the event streams
 func (x *actorSystem) broadcastClusterEvents() {
 	for event := range x.eventsChan {
 		if x.clusterEnabled.Load() {
 			if event != nil && event.Payload != nil {
 				// first need to resync actors map back to the cluster
-				x.clusterSync()
+				x.syncActors()
 				// push the event to the event stream
 				message, _ := event.Payload.UnmarshalNew()
 				if x.eventsStream != nil {
@@ -1297,8 +1367,8 @@ func (x *actorSystem) broadcastClusterEvents() {
 	}
 }
 
-// clusterSync synchronizes the node' actors map to the cluster.
-func (x *actorSystem) clusterSync() {
+// syncActors synchronizes the node' actors map to the cluster.
+func (x *actorSystem) syncActors() {
 	props := x.actors.props()
 	if len(props) != 0 {
 		x.logger.Info("syncing node actors map to the cluster...")
@@ -1321,89 +1391,4 @@ func (x *actorSystem) clusterSync() {
 		}
 		x.logger.Info("node actors map successfully synced back to the cluster.")
 	}
-}
-
-func (x *actorSystem) replicateState() {
-	x.logger.Info("starte replicating state...")
-	// TODO: make this configurable
-	ticker := time.NewTicker(time.Minute)
-	tickerStopSig := make(chan types.Unit, 1)
-	go func() {
-		for {
-			select {
-			case <-ticker.C:
-				ctx := context.Background()
-				peers, err := x.cluster.Peers(ctx)
-				if err != nil {
-					x.logger.Error(errors.Wrap(err, "failed to fetch the list of peers"))
-					continue
-				}
-
-				// push the actor system state
-				if err := x.pushState(ctx, peers); err != nil {
-					continue
-				}
-
-			case <-x.clusterSyncStopSig:
-				tickerStopSig <- types.Unit{}
-				return
-			}
-		}
-	}()
-
-	<-tickerStopSig
-	ticker.Stop()
-	x.logger.Info("state replication stopped...")
-}
-
-func (x *actorSystem) pushState(ctx context.Context, peers []*cluster.Peer) error {
-	if len(peers) == 0 {
-		return nil
-	}
-
-	actorProps := x.actors.props()
-	peerState := new(internalpb.PeerState)
-
-	// interceptor, err := otelconnect.NewInterceptor()
-	// if err != nil {
-	// 	x.logger.Errorf("failed to create an instance of otel interceptor: %v", err)
-	// 	return err
-	// }
-
-	// TODO: rethink this because this too much data
-	for actorID, actorProp := range actorProps {
-		actorAddress := NewAddress(x.name, x.remotingHost, int(x.remotingPort))
-		actorPath := NewPath(actorID, actorAddress)
-
-		peerState.Actors = append(peerState.Actors, &internalpb.WireActor{
-			ActorName:    actorID,
-			ActorAddress: actorPath.RemoteAddress(),
-			ActorPath:    actorPath.String(),
-			ActorType:    actorProp.rtype.Name(),
-		})
-	}
-
-	// TODO make it more efficient
-	// TODO add some retry mechanism
-	for _, peer := range peers {
-		peerStateCopy := proto.Clone(peerState).(*internalpb.PeerState)
-		peerStateCopy.Address = peer.Address
-
-		clusterService := internalpbconnect.NewClusterServiceClient(
-			httpclient.NewClient(),
-			fmt.Sprintf("http://%s", peer.Address),
-			// connect.WithInterceptors(interceptor),
-			connect.WithGRPC(),
-		)
-
-		request := connect.NewRequest(&internalpb.PushStateRequest{
-			PeerState: peerStateCopy,
-		})
-
-		if _, err := clusterService.PushState(ctx, request); err != nil {
-			x.logger.Errorf("failed to replicate state to peer=(%s): %v", peer.Address, err)
-			return err
-		}
-	}
-	return nil
 }
