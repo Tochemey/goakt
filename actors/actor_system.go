@@ -830,6 +830,7 @@ func (x *actorSystem) Stop(ctx context.Context) error {
 		}
 	}
 
+	x.actors.close()
 	x.reset()
 	return nil
 }

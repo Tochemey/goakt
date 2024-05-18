@@ -107,3 +107,7 @@ func (m *pidMap) props() map[string]*prop {
 	})
 	return out
 }
+
+func (m *pidMap) close() {
+	m.mappings.Clear()
+}
