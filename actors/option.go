@@ -125,8 +125,6 @@ func WithClustering(provider discovery.Provider, partitionCount uint64, minimumP
 	})
 }
 
-
-
 // WithShutdownTimeout sets the shutdown timeout
 func WithShutdownTimeout(timeout time.Duration) Option {
 	return OptionFunc(func(a *actorSystem) {
