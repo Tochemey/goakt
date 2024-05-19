@@ -380,13 +380,14 @@ To get the kubernetes discovery working as expected, the following pod labels ne
 
 ```go
 const (
-    namespace = "default"
-    applicationName = "accounts"
+    namespace          = "default"
+    applicationName    = "accounts"
     actorSystemName    = "AccountsSystem"
     gossipPortName     = "gossip-port"
-    peersPortName    = "peers-port"
+    peersPortName      = "peers-port"
     remotingPortName   = "remoting-port"
 )
+
 // define the discovery config
 config := kubernetes.Config{
     ApplicationName:  applicationName,
@@ -458,11 +459,12 @@ To use the NATS discovery provider one needs to provide the following:
 
 ```go
 const (
-    natsServerAddr = "nats://localhost:4248"
-    natsSubject = "goakt-gossip"
-    applicationName = "accounts"
-    actorSystemName = "AccountsSystem"
+    natsServerAddr   = "nats://localhost:4248"
+    natsSubject      = "goakt-gossip"
+    applicationName  = "accounts"
+    actorSystemName  = "AccountsSystem"
 )
+
 // define the discovery options
 config := nats.Config{
     ApplicationName: applicationName,
@@ -492,6 +494,7 @@ To use the DNS discovery provider one needs to provide the following:
 
 ```go
 const domainName = "accounts"
+
 // define the discovery options
 config := dnssd.Config{
     dnssd.DomainName: domainName,
