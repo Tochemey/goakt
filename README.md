@@ -16,6 +16,8 @@ across a cluster of computers.
 If you are not familiar with the actor model, the blog post from Brian Storti [here](https://www.brianstorti.com/the-actor-model/) is an excellent and short introduction to the actor model.
 Also, check reference section at the end of the post for more material regarding actor model.
 
+The project adheres to [Semantic Versioning](https://semver.org) and [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/).
+
 ## Table of Content
 
 - [Go-Akt](#go-akt)
