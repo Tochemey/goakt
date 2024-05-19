@@ -199,7 +199,7 @@ You can schedule sending messages to actor that will be acted upon in the future
 #### Cron Expression Format
 
 | Field        | Required | Allowed Values  | Allowed Special Characters |
-|--------------|----------|-----------------|----------------------------|
+| ------------ | -------- | --------------- | -------------------------- |
 | Seconds      | yes      | 0-59            | , - * /                    |
 | Minutes      | yes      | 0-59            | , - * /                    |
 | Hours        | yes      | 0-23            | , - * /                    |
@@ -382,7 +382,7 @@ const (
     applicationName = "accounts"
     actorSystemName    = "AccountsSystem"
     gossipPortName     = "gossip-port"
-    clusterPortName    = "cluster-port"
+    peersPortName    = "peers-port"
     remotingPortName   = "remoting-port"
 )
 // define the discovery config
@@ -392,7 +392,7 @@ config := kubernetes.Config{
     Namespace:        namespace,
     GossipPortName:   gossipPortName,
     RemotingPortName: remotingPortName,
-    ClusterPortName:  clusterPortName,
+    PeersPortName:  peersPortName,
 }
 
 // instantiate the k8 discovery provider

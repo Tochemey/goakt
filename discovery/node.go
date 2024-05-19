@@ -37,15 +37,15 @@ type Node struct {
 	Host string
 	// GossipPort
 	GossipPort int
-	// ClusterPort
-	ClusterPort int
+	// PeersPort
+	PeersPort int
 	// RemotingPort
 	RemotingPort int
 }
 
-// ClusterAddress returns address the node's peers will use to connect to
-func (n Node) ClusterAddress() string {
-	return net.JoinHostPort(n.Host, strconv.Itoa(n.ClusterPort))
+// PeersAddress returns address the node's peers will use to connect to
+func (n Node) PeersAddress() string {
+	return net.JoinHostPort(n.Host, strconv.Itoa(n.PeersPort))
 }
 
 // GossipAddress returns the node discovery address

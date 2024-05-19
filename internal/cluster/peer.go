@@ -20,31 +20,16 @@
  * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
+ *
  */
 
-package service
+package cluster
 
-import "github.com/caarlos0/env/v11"
-
-// Config defines the service configuration
-type Config struct {
-	Port            int    `env:"PORT" envDefault:"50051"`
-	ServiceName     string `env:"SERVICE_NAME"`
-	ActorSystemName string `env:"SYSTEM_NAME"`
-	TraceURL        string `env:"TRACE_URL"`
-	GossipPort      int    `env:"GOSSIP_PORT"`
-	PeersPort       int    `env:"CLUSTER_PORT"`
-	RemotingPort    int    `env:"REMOTING_PORT"`
-}
-
-// GetConfig returns the configuration
-func GetConfig() (*Config, error) {
-	// load the host node configuration
-	cfg := &Config{}
-	opts := env.Options{RequiredIfNoDef: true, UseFieldNameByDefault: false}
-	if err := env.ParseWithOptions(cfg, opts); err != nil {
-		return nil, err
-	}
-
-	return cfg, nil
+// Peer defines the peer info
+type Peer struct {
+	// Address represents the peer address. It is also the host:port of the peer
+	Address string
+	// Leader states that the given peer is the leader not.
+	// A peer is a leader when it is the oldest node in the cluster
+	Leader bool
 }

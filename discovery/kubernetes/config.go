@@ -38,8 +38,8 @@ type Config struct {
 	GossipPortName string
 	// RemotingPortName specifies the remoting port name
 	RemotingPortName string
-	// ClusterPortName specifies the cluster port name
-	ClusterPortName string
+	// PeersPortName specifies the cluster port name
+	PeersPortName string
 	// ActorSystemName specifies the given actor system name
 	ActorSystemName string
 }
@@ -50,7 +50,7 @@ func (x Config) Validate() error {
 		AddValidator(validation.NewEmptyStringValidator("Namespace", x.Namespace)).
 		AddValidator(validation.NewEmptyStringValidator("ApplicationName", x.ApplicationName)).
 		AddValidator(validation.NewEmptyStringValidator("GossipPortName", x.GossipPortName)).
-		AddValidator(validation.NewEmptyStringValidator("ClusterPortName", x.ClusterPortName)).
+		AddValidator(validation.NewEmptyStringValidator("PeersPortName", x.PeersPortName)).
 		AddValidator(validation.NewEmptyStringValidator("RemotingPortName", x.RemotingPortName)).
 		AddValidator(validation.NewEmptyStringValidator("ActorSystemName", x.ActorSystemName)).
 		Validate()

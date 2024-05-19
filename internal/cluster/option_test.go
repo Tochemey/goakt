@@ -39,43 +39,49 @@ func TestOptions(t *testing.T) {
 	testCases := []struct {
 		name     string
 		option   Option
-		expected Node
+		expected Engine
 	}{
 		{
 			name:     "WithPartitionsCount",
 			option:   WithPartitionsCount(2),
-			expected: Node{partitionsCount: 2},
+			expected: Engine{partitionsCount: 2},
 		},
 		{
 			name:     "WithLogger",
 			option:   WithLogger(log.DefaultLogger),
-			expected: Node{logger: log.DefaultLogger},
+			expected: Engine{logger: log.DefaultLogger},
 		},
 		{
 			name:     "WithWriteTimeout",
 			option:   WithWriteTimeout(2 * time.Minute),
-			expected: Node{writeTimeout: 2 * time.Minute},
+			expected: Engine{writeTimeout: 2 * time.Minute},
 		},
 		{
 			name:     "WithReadTimeout",
 			option:   WithReadTimeout(2 * time.Minute),
-			expected: Node{readTimeout: 2 * time.Minute},
+			expected: Engine{readTimeout: 2 * time.Minute},
 		},
 		{
 			name:     "WithShutdownTimeout",
 			option:   WithShutdownTimeout(2 * time.Minute),
-			expected: Node{shutdownTimeout: 2 * time.Minute},
+			expected: Engine{shutdownTimeout: 2 * time.Minute},
 		},
 		{
 			name:     "WithHasher",
 			option:   WithHasher(mockHasher),
-			expected: Node{hasher: mockHasher},
+			expected: Engine{hasher: mockHasher},
+		},
+
+		{
+			name:     "WithMinimumNodes",
+			option:   WithMinimumPeersQuorum(3),
+			expected: Engine{minimumPeersQuorum: 3},
 		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			var cl Node
+			var cl Engine
 			tc.option.Apply(&cl)
 			assert.Equal(t, tc.expected, cl)
 		})

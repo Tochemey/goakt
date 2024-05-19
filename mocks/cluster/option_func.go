@@ -20,9 +20,9 @@ func (_m *OptionFunc) EXPECT() *OptionFunc_Expecter {
 	return &OptionFunc_Expecter{mock: &_m.Mock}
 }
 
-// Execute provides a mock function with given fields: cl
-func (_m *OptionFunc) Execute(cl *internalcluster.Node) {
-	_m.Called(cl)
+// Execute provides a mock function with given fields: eng
+func (_m *OptionFunc) Execute(eng *internalcluster.Engine) {
+	_m.Called(eng)
 }
 
 // OptionFunc_Execute_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Execute'
@@ -31,14 +31,14 @@ type OptionFunc_Execute_Call struct {
 }
 
 // Execute is a helper method to define mock.On call
-//   - cl *internalcluster.Node
-func (_e *OptionFunc_Expecter) Execute(cl interface{}) *OptionFunc_Execute_Call {
-	return &OptionFunc_Execute_Call{Call: _e.mock.On("Execute", cl)}
+//   - eng *internalcluster.Engine
+func (_e *OptionFunc_Expecter) Execute(eng interface{}) *OptionFunc_Execute_Call {
+	return &OptionFunc_Execute_Call{Call: _e.mock.On("Execute", eng)}
 }
 
-func (_c *OptionFunc_Execute_Call) Run(run func(cl *internalcluster.Node)) *OptionFunc_Execute_Call {
+func (_c *OptionFunc_Execute_Call) Run(run func(eng *internalcluster.Engine)) *OptionFunc_Execute_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(*internalcluster.Node))
+		run(args[0].(*internalcluster.Engine))
 	})
 	return _c
 }
@@ -48,7 +48,7 @@ func (_c *OptionFunc_Execute_Call) Return() *OptionFunc_Execute_Call {
 	return _c
 }
 
-func (_c *OptionFunc_Execute_Call) RunAndReturn(run func(*internalcluster.Node)) *OptionFunc_Execute_Call {
+func (_c *OptionFunc_Execute_Call) RunAndReturn(run func(*internalcluster.Engine)) *OptionFunc_Execute_Call {
 	_c.Call.Return(run)
 	return _c
 }

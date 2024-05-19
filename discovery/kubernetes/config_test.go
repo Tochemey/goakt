@@ -37,7 +37,7 @@ func TestConfig(t *testing.T) {
 			ApplicationName:  "applicationName",
 			GossipPortName:   "gossipName",
 			RemotingPortName: "remotingName",
-			ClusterPortName:  "clusterPortName",
+			PeersPortName:    "peersPortName",
 			ActorSystemName:  "actorSys",
 		}
 		assert.NoError(t, config.Validate())
@@ -48,7 +48,7 @@ func TestConfig(t *testing.T) {
 			ApplicationName:  "applicationName",
 			GossipPortName:   "",
 			RemotingPortName: "remotingName",
-			ClusterPortName:  "clusterPortName",
+			PeersPortName:    "peersPortName",
 			ActorSystemName:  "actorSys",
 		}
 		assert.Error(t, config.Validate())

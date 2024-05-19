@@ -45,7 +45,7 @@ const (
 	applicationName  = "accounts"
 	actorSystemName  = "AccountsSystem"
 	gossipPortName   = "gossip-port"
-	clusterPortName  = "cluster-port"
+	peersPortName    = "peers-port"
 	remotingPortName = "remoting-port"
 )
 
@@ -84,7 +84,7 @@ var runCmd = &cobra.Command{
 			Namespace:        namespace,
 			GossipPortName:   gossipPortName,
 			RemotingPortName: remotingPortName,
-			ClusterPortName:  clusterPortName,
+			PeersPortName:    peersPortName,
 		})
 
 		// get the port config
@@ -100,7 +100,7 @@ var runCmd = &cobra.Command{
 			goakt.WithLogger(logger),
 			goakt.WithActorInitMaxRetries(3),
 			goakt.WithRemoting(host, int32(config.RemotingPort)),
-			goakt.WithClustering(disco, 20, config.GossipPort, config.ClusterPort))
+			goakt.WithClustering(disco, 20, 1, config.GossipPort, config.ClusterPort))
 		// handle the error
 		if err != nil {
 			logger.Panic(err)

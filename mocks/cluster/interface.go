@@ -340,6 +340,60 @@ func (_c *Interface_NodeRemotingPort_Call) RunAndReturn(run func() int) *Interfa
 	return _c
 }
 
+// Peers provides a mock function with given fields: ctx
+func (_m *Interface) Peers(ctx context.Context) ([]*internalcluster.Peer, error) {
+	ret := _m.Called(ctx)
+
+	var r0 []*internalcluster.Peer
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context) ([]*internalcluster.Peer, error)); ok {
+		return rf(ctx)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context) []*internalcluster.Peer); ok {
+		r0 = rf(ctx)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*internalcluster.Peer)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context) error); ok {
+		r1 = rf(ctx)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// Interface_Peers_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Peers'
+type Interface_Peers_Call struct {
+	*mock.Call
+}
+
+// Peers is a helper method to define mock.On call
+//   - ctx context.Context
+func (_e *Interface_Expecter) Peers(ctx interface{}) *Interface_Peers_Call {
+	return &Interface_Peers_Call{Call: _e.mock.On("Peers", ctx)}
+}
+
+func (_c *Interface_Peers_Call) Run(run func(ctx context.Context)) *Interface_Peers_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context))
+	})
+	return _c
+}
+
+func (_c *Interface_Peers_Call) Return(_a0 []*internalcluster.Peer, _a1 error) *Interface_Peers_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *Interface_Peers_Call) RunAndReturn(run func(context.Context) ([]*internalcluster.Peer, error)) *Interface_Peers_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // PutActor provides a mock function with given fields: ctx, actor
 func (_m *Interface) PutActor(ctx context.Context, actor *internalpb.WireActor) error {
 	ret := _m.Called(ctx, actor)
