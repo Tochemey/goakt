@@ -59,7 +59,7 @@ spec:
               name: gossip-port
               protocol: TCP
             - containerPort: 3320
-              name: cluster-port
+              name: peers-port
               protocol: TCP
           env:
             - name: NODE_NAME
@@ -72,7 +72,7 @@ spec:
                   fieldPath: status.podIP
             - name: GOSSIP_PORT
               value: "3322"
-            - name: CLUSTER_PORT
+            - name: PEERS_PORT
               value: "3320"
             - name: REMOTING_PORT
               value: "50052"

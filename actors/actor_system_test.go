@@ -182,7 +182,7 @@ func TestActorSystem(t *testing.T) {
 			WithLogger(logger),
 			WithReplyTimeout(time.Minute),
 			WithRemoting(host, int32(remotingPort)),
-			WithClustering(provider, 9, gossipPort, clusterPort))
+			WithClustering(provider, 9, 1, gossipPort, clusterPort))
 		require.NoError(t, err)
 
 		provider.EXPECT().ID().Return("testDisco")
@@ -947,7 +947,7 @@ func TestActorSystem(t *testing.T) {
 			WithLogger(logger),
 			WithReplyTimeout(time.Minute),
 			WithRemoting(host, int32(remotingPort)),
-			WithClustering(provider, 9, gossipPort, clusterPort))
+			WithClustering(provider, 9, 1, gossipPort, clusterPort))
 		require.NoError(t, err)
 
 		provider.EXPECT().ID().Return("testDisco")
@@ -1172,7 +1172,7 @@ func TestActorSystem(t *testing.T) {
 			WithLogger(logger),
 			WithReplyTimeout(time.Minute),
 			WithRemoting(host, int32(remotingPort)),
-			WithClustering(provider, 9, gossipPort, clusterPort))
+			WithClustering(provider, 9, 1, gossipPort, clusterPort))
 		require.NoError(t, err)
 
 		provider.EXPECT().ID().Return("testDisco")

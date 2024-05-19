@@ -147,7 +147,7 @@ func (d *Discovery) DiscoverPeers() ([]string, error) {
 		return nil, err
 	}
 
-	validPortNames := []string{d.config.ClusterPortName, d.config.GossipPortName, d.config.RemotingPortName}
+	validPortNames := []string{d.config.PeersPortName, d.config.GossipPortName, d.config.RemotingPortName}
 
 	// define the addresses list
 	addresses := goset.NewSet[string]()

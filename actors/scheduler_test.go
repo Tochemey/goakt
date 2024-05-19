@@ -73,7 +73,8 @@ func TestScheduler(t *testing.T) {
 
 		time.Sleep(time.Second)
 		typedSystem := newActorSystem.(*actorSystem)
-		keys := typedSystem.scheduler.quartzScheduler.GetJobKeys()
+		keys, err := typedSystem.scheduler.quartzScheduler.GetJobKeys()
+		require.NoError(t, err)
 		assert.Empty(t, keys)
 		assert.EqualValues(t, 1, actor.counter.Load())
 		assert.EqualValues(t, 1, actor.counter.Load())
@@ -152,7 +153,8 @@ func TestScheduler(t *testing.T) {
 		time.Sleep(time.Second)
 		typedSystem := newActorSystem.(*actorSystem)
 		// for test purpose only
-		keys := typedSystem.scheduler.quartzScheduler.GetJobKeys()
+		keys, err := typedSystem.scheduler.quartzScheduler.GetJobKeys()
+		require.NoError(t, err)
 		assert.Empty(t, keys)
 		assert.EqualValues(t, 1, actor.counter.Load())
 		assert.EqualValues(t, 1, actor.counter.Load())

@@ -41,7 +41,7 @@ import (
 
 const (
 	gossipPortName   = "gossip-port"
-	clusterPortName  = "cluster-port"
+	peersPortName    = "peers-port"
 	remotingPortName = "remoting-port"
 )
 
@@ -79,7 +79,7 @@ func TestDiscovery(t *testing.T) {
 			ApplicationName:  "test",
 			GossipPortName:   gossipPortName,
 			RemotingPortName: remotingPortName,
-			ClusterPortName:  clusterPortName,
+			PeersPortName:    peersPortName,
 		}
 
 		// create some bunch of mock pods
@@ -103,7 +103,7 @@ func TestDiscovery(t *testing.T) {
 									ContainerPort: 3379,
 								},
 								{
-									Name:          clusterPortName,
+									Name:          peersPortName,
 									ContainerPort: 3380,
 								},
 								{
@@ -147,7 +147,7 @@ func TestDiscovery(t *testing.T) {
 									ContainerPort: 3379,
 								},
 								{
-									Name:          clusterPortName,
+									Name:          peersPortName,
 									ContainerPort: 3380,
 								},
 								{
@@ -215,7 +215,7 @@ func TestDiscovery(t *testing.T) {
 			ApplicationName:  applicationName,
 			GossipPortName:   gossipPortName,
 			RemotingPortName: remotingPortName,
-			ClusterPortName:  clusterPortName,
+			PeersPortName:    peersPortName,
 		}
 
 		// create the instance of provider

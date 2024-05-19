@@ -54,7 +54,6 @@ import (
 	"github.com/tochemey/goakt/hash"
 	"github.com/tochemey/goakt/internal/cluster"
 	"github.com/tochemey/goakt/internal/eventstream"
-	httpclient "github.com/tochemey/goakt/internal/http"
 	"github.com/tochemey/goakt/internal/internalpb"
 	"github.com/tochemey/goakt/internal/internalpb/internalpbconnect"
 	"github.com/tochemey/goakt/internal/metric"
@@ -182,10 +181,11 @@ type actorSystem struct {
 	// define the number of partitions to shard the actors in the cluster
 	partitionsCount uint64
 	// cluster mode
-	cluster     cluster.Interface
-	clusterChan chan *internalpb.WireActor
-	clusterPort int
-	gossipPort  int
+	cluster            cluster.Interface
+	clusterChan        chan *internalpb.WireActor
+	peersPort          int
+	gossipPort         int
+	minimumPeersQuorum uint16
 
 	partitionHasher hash.Hasher
 
@@ -254,6 +254,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		eventsChan:          make(chan *cluster.Event, 1),
 		registry:            types.NewRegistry(),
 		clusterSyncStopSig:  make(chan types.Unit, 1),
+		minimumPeersQuorum:  1,
 		peersCache:          haxmap.New[string, []byte](100), // TODO need to check with memory footprint here since we change the map engine
 	}
 
@@ -1048,55 +1049,6 @@ func (x *actorSystem) RemoteSpawn(ctx context.Context, request *connect.Request[
 	return connect.NewResponse(new(internalpb.RemoteSpawnResponse)), nil
 }
 
-// PushState handles the push state call
-func (x *actorSystem) PushState(_ context.Context, request *connect.Request[internalpb.PushStateRequest]) (*connect.Response[internalpb.PushStateResponse], error) {
-	// only handle peer state replication when remoting is enabled.
-	if !x.remotingEnabled.Load() {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrRemotingDisabled)
-	}
-
-	req := request.Msg
-	peerState := req.GetPeerState()
-	peerAddress := peerState.GetAddress()
-
-	priorState := new(internalpb.PeerState)
-	if bytea, ok := x.peersCache.Get(peerAddress); ok {
-		// no need to handle the error here because we pushed the data into the cache
-		_ = proto.Unmarshal(bytea, priorState)
-	}
-
-	// avoid duplicate actors
-	actorsMap := make(map[string]*internalpb.WireActor)
-	for _, actor := range priorState.GetActors() {
-		path := actor.GetActorPath()
-		if path != "" {
-			actorsMap[path] = actor
-		}
-	}
-
-	// iterate over the incoming actors
-	for _, actor := range peerState.GetActors() {
-		path := actor.GetActorPath()
-		if _, ok := actorsMap[path]; !ok {
-			actorsMap[path] = actor
-		}
-	}
-
-	// build the actors list
-	actors := make([]*internalpb.WireActor, 0, len(actorsMap))
-	for _, actor := range actorsMap {
-		actors = append(actors, actor)
-	}
-
-	priorState.Actors = append(priorState.Actors, actors...)
-
-	// no need to handle the error
-	bytea, _ := proto.Marshal(priorState)
-
-	x.peersCache.Set(peerAddress, bytea)
-	return connect.NewResponse(new(internalpb.PushStateResponse)), nil
-}
-
 // handleRemoteAsk handles a synchronous message to another actor and expect a response.
 // This block until a response is received or timed out.
 func (x *actorSystem) handleRemoteAsk(ctx context.Context, to PID, message proto.Message) (response proto.Message, err error) {
@@ -1126,7 +1078,7 @@ func (x *actorSystem) enableClustering(ctx context.Context) error {
 		Name:         x.name,
 		Host:         x.remotingHost,
 		GossipPort:   x.gossipPort,
-		ClusterPort:  x.clusterPort,
+		PeersPort:    x.peersPort,
 		RemotingPort: int(x.remotingPort),
 	}
 
@@ -1136,6 +1088,7 @@ func (x *actorSystem) enableClustering(ctx context.Context) error {
 		cluster.WithLogger(x.logger),
 		cluster.WithPartitionsCount(x.partitionsCount),
 		cluster.WithHasher(x.partitionHasher),
+		cluster.WithMinimumPeersQuorum(x.minimumPeersQuorum),
 	)
 	if err != nil {
 		x.logger.Error(errors.Wrap(err, "failed to initialize cluster engine"))
@@ -1299,50 +1252,8 @@ func (x *actorSystem) registerMetrics() error {
 func (x *actorSystem) broadcast(ctx context.Context) {
 	for wireActor := range x.clusterChan {
 		if x.cluster != nil {
-			eg, ctx := errgroup.WithContext(ctx)
-
-			// make the actor cluster aware
-			eg.Go(func() error {
-				return x.cluster.PutActor(ctx, wireActor)
-			})
-
-			// notifies the peers to update their local cache
-			eg.Go(func() error {
-				peers, err := x.cluster.Peers(ctx)
-				if err != nil {
-					return err
-				}
-
-				// no-op when there are no peers
-				if len(peers) == 0 {
-					return nil
-				}
-
-				for _, peer := range peers {
-					clusterService := internalpbconnect.NewClusterServiceClient(
-						httpclient.NewClient(),
-						fmt.Sprintf("http://%s", peer.Address),
-						connect.WithGRPC(),
-					)
-
-					request := connect.NewRequest(&internalpb.PushStateRequest{
-						PeerState: &internalpb.PeerState{
-							Actors:  []*internalpb.WireActor{wireActor},
-							Address: peer.Address,
-						},
-					})
-
-					if _, err := clusterService.PushState(ctx, request); err != nil {
-						if connect.CodeOf(err) != connect.CodeUnavailable {
-							x.logger.Errorf("failed to replicate state to peer=(%s): %v", peer.Address, err)
-							return err
-						}
-					}
-				}
-				return nil
-			})
-
-			if err := eg.Wait(); err != nil {
+			// set the actor in the cluster
+			if err := x.cluster.PutActor(ctx, wireActor); err != nil {
 				x.logger.Panic(err.Error())
 			}
 		}

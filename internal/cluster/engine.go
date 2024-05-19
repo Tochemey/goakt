@@ -109,6 +109,10 @@ type Engine struct {
 	// the default values is 20
 	partitionsCount uint64
 
+	// specifies the minimum number of cluster members
+	// the default values is 1
+	minimumPeersQuorum uint16
+
 	// specifies the logger
 	logger log.Logger
 
@@ -162,6 +166,7 @@ func NewEngine(name string, disco discovery.Provider, host *discovery.Node, opts
 		events:             make(chan *Event, 20),
 		messagesReaderChan: make(chan types.Unit, 1),
 		messagesChan:       make(chan *redis.Message, 1),
+		minimumPeersQuorum: 1,
 	}
 	// apply the various options
 	for _, opt := range opts {
@@ -178,7 +183,7 @@ func NewEngine(name string, disco discovery.Provider, host *discovery.Node, opts
 func (n *Engine) Start(ctx context.Context) error {
 	logger := n.logger
 
-	logger.Infof("Starting GoAkt cluster Engine service on host=(%s)....🤔", n.host.ClusterAddress())
+	logger.Infof("Starting GoAkt cluster Engine service on host=(%s)....🤔", n.host.PeersAddress())
 
 	conf := n.buildConfig()
 	conf.Hasher = &hasherWrapper{n.hasher}
@@ -312,7 +317,7 @@ func (n *Engine) NodeRemotingPort() int {
 // AdvertisedAddress returns the cluster node cluster address that is known by the
 // peers in the cluster
 func (n *Engine) AdvertisedAddress() string {
-	return n.host.ClusterAddress()
+	return n.host.PeersAddress()
 }
 
 // PutActor replicates onto the Node the metadata of an actor
@@ -555,12 +560,12 @@ func (n *Engine) buildConfig() *config.Config {
 	// create the config and return it
 	conf := &config.Config{
 		BindAddr:                   n.host.Host,
-		BindPort:                   n.host.ClusterPort,
+		BindPort:                   n.host.PeersPort,
 		ReadRepair:                 true,
-		ReplicaCount:               config.MinimumReplicaCount,
-		WriteQuorum:                config.DefaultWriteQuorum,
-		ReadQuorum:                 config.DefaultReadQuorum,
-		MemberCountQuorum:          config.DefaultMemberCountQuorum,
+		ReplicaCount:               int(n.minimumPeersQuorum),
+		WriteQuorum:                int(n.minimumPeersQuorum),
+		ReadQuorum:                 int(n.minimumPeersQuorum),
+		MemberCountQuorum:          int32(n.minimumPeersQuorum),
 		Peers:                      []string{},
 		DMaps:                      &config.DMaps{},
 		KeepAlivePeriod:            config.DefaultKeepAlivePeriod,

@@ -90,3 +90,10 @@ func WithHasher(hasher hash.Hasher) Option {
 		eng.hasher = hasher
 	})
 }
+
+// WithMinimumPeersQuorum sets the minimum number of nodes to form a quorum
+func WithMinimumPeersQuorum(count uint16) Option {
+	return OptionFunc(func(eng *Engine) {
+		eng.minimumPeersQuorum = count
+	})
+}

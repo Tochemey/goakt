@@ -71,6 +71,12 @@ func TestOptions(t *testing.T) {
 			option:   WithHasher(mockHasher),
 			expected: Engine{hasher: mockHasher},
 		},
+
+		{
+			name:     "WithMinimumNodes",
+			option:   WithMinimumPeersQuorum(3),
+			expected: Engine{minimumPeersQuorum: 3},
+		},
 	}
 
 	for _, tc := range testCases {

@@ -87,7 +87,7 @@ func newPeer(t *testing.T, serverAddr string) *Discovery {
 		Name:         host,
 		Host:         host,
 		GossipPort:   gossipPort,
-		ClusterPort:  clusterPort,
+		PeersPort:    clusterPort,
 		RemotingPort: remotingPort,
 	}
 
@@ -131,7 +131,7 @@ func TestDiscovery(t *testing.T) {
 			Name:         host,
 			Host:         host,
 			GossipPort:   gossipPort,
-			ClusterPort:  clusterPort,
+			PeersPort:    clusterPort,
 			RemotingPort: remotingPort,
 		}
 
@@ -175,7 +175,7 @@ func TestDiscovery(t *testing.T) {
 			Name:         host,
 			Host:         host,
 			GossipPort:   gossipPort,
-			ClusterPort:  clusterPort,
+			PeersPort:    clusterPort,
 			RemotingPort: remotingPort,
 		}
 		// create the instance of provider
@@ -215,7 +215,7 @@ func TestDiscovery(t *testing.T) {
 			Name:         host,
 			Host:         host,
 			GossipPort:   gossipPort,
-			ClusterPort:  clusterPort,
+			PeersPort:    clusterPort,
 			RemotingPort: remotingPort,
 		}
 
@@ -260,7 +260,7 @@ func TestDiscovery(t *testing.T) {
 			Name:         host,
 			Host:         host,
 			GossipPort:   gossipPort,
-			ClusterPort:  clusterPort,
+			PeersPort:    clusterPort,
 			RemotingPort: remotingPort,
 		}
 
@@ -301,7 +301,7 @@ func TestDiscovery(t *testing.T) {
 			Name:         host,
 			Host:         host,
 			GossipPort:   gossipPort,
-			ClusterPort:  clusterPort,
+			PeersPort:    clusterPort,
 			RemotingPort: remotingPort,
 		}
 
@@ -343,7 +343,7 @@ func TestDiscovery(t *testing.T) {
 			Name:         host,
 			Host:         host,
 			GossipPort:   gossipPort,
-			ClusterPort:  clusterPort,
+			PeersPort:    clusterPort,
 			RemotingPort: remotingPort,
 		}
 
@@ -444,7 +444,7 @@ func TestDiscovery(t *testing.T) {
 			Name:         host,
 			Host:         host,
 			GossipPort:   gossipPort,
-			ClusterPort:  clusterPort,
+			PeersPort:    clusterPort,
 			RemotingPort: remotingPort,
 		}
 

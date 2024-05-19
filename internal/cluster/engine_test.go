@@ -79,7 +79,7 @@ func TestSingleNode(t *testing.T) {
 			Name:         host,
 			Host:         host,
 			GossipPort:   gossipPort,
-			ClusterPort:  clusterPort,
+			PeersPort:    clusterPort,
 			RemotingPort: remotingPort,
 		}
 
@@ -134,7 +134,7 @@ func TestSingleNode(t *testing.T) {
 			Name:         host,
 			Host:         host,
 			GossipPort:   gossipPort,
-			ClusterPort:  clusterPort,
+			PeersPort:    clusterPort,
 			RemotingPort: remotingPort,
 		}
 
@@ -204,7 +204,7 @@ func TestSingleNode(t *testing.T) {
 			Name:         host,
 			Host:         host,
 			GossipPort:   gossipPort,
-			ClusterPort:  clusterPort,
+			PeersPort:    clusterPort,
 			RemotingPort: remotingPort,
 		}
 
@@ -267,7 +267,7 @@ func TestSingleNode(t *testing.T) {
 			Name:         host,
 			Host:         host,
 			GossipPort:   gossipPort,
-			ClusterPort:  clusterPort,
+			PeersPort:    clusterPort,
 			RemotingPort: remotingPort,
 		}
 
@@ -452,7 +452,7 @@ func startEngine(t *testing.T, nodeName, serverAddr string) (*Engine, discovery.
 		Name:         host,
 		Host:         host,
 		GossipPort:   gossipPort,
-		ClusterPort:  clusterPort,
+		PeersPort:    clusterPort,
 		RemotingPort: remotingPort,
 	}
 

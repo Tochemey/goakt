@@ -113,16 +113,19 @@ func WithRemoting(host string, port int32) Option {
 	})
 }
 
-// WithClustering enables clustering on the actor system.
-func WithClustering(provider discovery.Provider, partitionCount uint64, gossipPort, clusterPort int) Option {
+// WithClustering enables the cluster mode.
+func WithClustering(provider discovery.Provider, partitionCount uint64, minimumPeersQuorum uint16, gossipPort, peersPort int) Option {
 	return OptionFunc(func(a *actorSystem) {
 		a.clusterEnabled.Store(true)
 		a.partitionsCount = partitionCount
 		a.discoveryProvider = provider
-		a.clusterPort = clusterPort
+		a.peersPort = peersPort
 		a.gossipPort = gossipPort
+		a.minimumPeersQuorum = minimumPeersQuorum
 	})
 }
+
+
 
 // WithShutdownTimeout sets the shutdown timeout
 func WithShutdownTimeout(timeout time.Duration) Option {
