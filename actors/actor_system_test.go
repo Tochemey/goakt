@@ -87,7 +87,7 @@ func TestActorSystem(t *testing.T) {
 	})
 	t.Run("With Spawn an actor when started", func(t *testing.T) {
 		ctx := context.TODO()
-		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger), WithMailbox(newReceiveContextBuffer(100)))
 
 		// start the actor system
 		err := sys.Start(ctx)
@@ -1172,6 +1172,7 @@ func TestActorSystem(t *testing.T) {
 			WithLogger(logger),
 			WithReplyTimeout(time.Minute),
 			WithRemoting(host, int32(remotingPort)),
+			WithMailbox(newReceiveContextBuffer(100)),
 			WithClustering(provider, 9, 1, gossipPort, clusterPort))
 		require.NoError(t, err)
 

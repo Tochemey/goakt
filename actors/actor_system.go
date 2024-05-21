@@ -415,8 +415,14 @@ func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor) (PID,
 		}
 	}
 
+	var mailbox Mailbox
+	if x.mailbox != nil {
+		// always create a fresh copy of provided mailbox for every new PID
+		mailbox = x.mailbox.Clone()
+	}
+
 	// define the pid options
-	// pid inherit the actor system settings defined during instantiation
+	// pid inherit the actor system settings defined during
 	opts := []pidOption{
 		withInitMaxRetries(x.actorInitMaxRetries),
 		withPassivationAfter(x.expireActorAfter),
@@ -425,7 +431,7 @@ func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor) (PID,
 		withActorSystem(x),
 		withSupervisorStrategy(x.supervisorStrategy),
 		withMailboxSize(x.mailboxSize),
-		withMailbox(x.mailbox),
+		withMailbox(mailbox), // nil mailbox is taken care during initiliazation by the newPID
 		withStash(x.stashCapacity),
 		withEventsStream(x.eventsStream),
 		withInitTimeout(x.actorInitTimeout),
@@ -484,6 +490,12 @@ func (x *actorSystem) SpawnFromFunc(ctx context.Context, receiveFunc ReceiveFunc
 		actorPath = NewPath(actorID, NewAddress(x.name, x.remotingHost, int(x.remotingPort)))
 	}
 
+	var mailbox Mailbox
+	if x.mailbox != nil {
+		// always create a fresh copy of provided mailbox for every new PID
+		mailbox = x.mailbox.Clone()
+	}
+
 	// define the pid options
 	// pid inherit the actor system settings defined during instantiation
 	pidOpts := []pidOption{
@@ -494,7 +506,7 @@ func (x *actorSystem) SpawnFromFunc(ctx context.Context, receiveFunc ReceiveFunc
 		withActorSystem(x),
 		withSupervisorStrategy(x.supervisorStrategy),
 		withMailboxSize(x.mailboxSize),
-		withMailbox(x.mailbox),
+		withMailbox(mailbox), // nil mailbox is taken care during initiliazation by the newPID
 		withStash(x.stashCapacity),
 		withEventsStream(x.eventsStream),
 		withInitTimeout(x.actorInitTimeout),
