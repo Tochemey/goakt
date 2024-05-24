@@ -24,7 +24,7 @@
 
 package mdns
 
-import "github.com/tochemey/goakt/internal/validation"
+import "github.com/tochemey/goakt/v2/internal/validation"
 
 // Config represents the mDNS provider discoConfig
 type Config struct {

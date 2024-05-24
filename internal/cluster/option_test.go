@@ -30,8 +30,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/tochemey/goakt/log"
-	testkit "github.com/tochemey/goakt/mocks/hash"
+	"github.com/tochemey/goakt/v2/log"
+	testkit "github.com/tochemey/goakt/v2/mocks/hash"
 )
 
 func TestOptions(t *testing.T) {

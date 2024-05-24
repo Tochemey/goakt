@@ -35,9 +35,9 @@ import (
 	"github.com/nats-io/nats.go/encoders/protobuf"
 	"go.uber.org/atomic"
 
-	"github.com/tochemey/goakt/discovery"
-	internalpb "github.com/tochemey/goakt/internal/internalpb"
-	"github.com/tochemey/goakt/log"
+	"github.com/tochemey/goakt/v2/discovery"
+	internalpb "github.com/tochemey/goakt/v2/internal/internalpb"
+	"github.com/tochemey/goakt/v2/log"
 )
 
 // Discovery represents the kubernetes discovery

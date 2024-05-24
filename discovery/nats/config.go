@@ -27,7 +27,7 @@ package nats
 import (
 	"time"
 
-	"github.com/tochemey/goakt/internal/validation"
+	"github.com/tochemey/goakt/v2/internal/validation"
 )
 
 // Config represents the nats provider discoConfig

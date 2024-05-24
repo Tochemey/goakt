@@ -32,8 +32,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/tochemey/goakt/log"
-	"github.com/tochemey/goakt/test/data/testpb"
+	"github.com/tochemey/goakt/v2/log"
+	"github.com/tochemey/goakt/v2/test/data/testpb"
 )
 
 func TestStash(t *testing.T) {

@@ -34,10 +34,10 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 
-	"github.com/tochemey/goakt/goaktpb"
-	"github.com/tochemey/goakt/internal/http"
-	"github.com/tochemey/goakt/internal/internalpb"
-	"github.com/tochemey/goakt/internal/internalpb/internalpbconnect"
+	"github.com/tochemey/goakt/v2/goaktpb"
+	"github.com/tochemey/goakt/v2/internal/http"
+	"github.com/tochemey/goakt/v2/internal/internalpb"
+	"github.com/tochemey/goakt/v2/internal/internalpb/internalpbconnect"
 )
 
 // Ask sends a synchronous message to another actor and expect a response.

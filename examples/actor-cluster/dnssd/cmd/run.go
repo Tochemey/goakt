@@ -44,10 +44,10 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.21.0"
 
-	goakt "github.com/tochemey/goakt/actors"
-	"github.com/tochemey/goakt/discovery/dnssd"
-	"github.com/tochemey/goakt/examples/actor-cluster/dnssd/service"
-	"github.com/tochemey/goakt/log"
+	goakt "github.com/tochemey/goakt/v2/actors"
+	"github.com/tochemey/goakt/v2/discovery/dnssd"
+	"github.com/tochemey/goakt/v2/examples/actor-cluster/dnssd/service"
+	"github.com/tochemey/goakt/v2/log"
 )
 
 func initTracer(ctx context.Context, res *resource.Resource, traceURL string) {

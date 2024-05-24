@@ -29,9 +29,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tochemey/goakt/actors"
-	"github.com/tochemey/goakt/log"
-	testspb "github.com/tochemey/goakt/test/data/testpb"
+	"github.com/tochemey/goakt/v2/actors"
+	"github.com/tochemey/goakt/v2/log"
+	testspb "github.com/tochemey/goakt/v2/test/data/testpb"
 )
 
 const (

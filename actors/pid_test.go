@@ -41,10 +41,10 @@ import (
 	"go.opentelemetry.io/otel/trace/noop"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/tochemey/goakt/goaktpb"
-	"github.com/tochemey/goakt/log"
-	"github.com/tochemey/goakt/telemetry"
-	"github.com/tochemey/goakt/test/data/testpb"
+	"github.com/tochemey/goakt/v2/goaktpb"
+	"github.com/tochemey/goakt/v2/log"
+	"github.com/tochemey/goakt/v2/telemetry"
+	"github.com/tochemey/goakt/v2/test/data/testpb"
 )
 
 const (

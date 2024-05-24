@@ -34,10 +34,10 @@ import (
 	"github.com/caarlos0/env/v11"
 	"github.com/spf13/cobra"
 
-	goakt "github.com/tochemey/goakt/actors"
-	"github.com/tochemey/goakt/discovery/kubernetes"
-	"github.com/tochemey/goakt/examples/actor-cluster/k8s/service"
-	"github.com/tochemey/goakt/log"
+	goakt "github.com/tochemey/goakt/v2/actors"
+	"github.com/tochemey/goakt/v2/discovery/kubernetes"
+	"github.com/tochemey/goakt/v2/examples/actor-cluster/k8s/service"
+	"github.com/tochemey/goakt/v2/log"
 )
 
 const (

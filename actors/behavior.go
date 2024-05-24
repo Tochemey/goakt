@@ -25,7 +25,7 @@
 package actors
 
 import (
-	"github.com/tochemey/goakt/internal/stack"
+	"github.com/tochemey/goakt/v2/internal/stack"
 )
 
 // Behavior defines an actor behavior

@@ -1,4 +1,4 @@
-module github.com/tochemey/goakt
+module github.com/tochemey/goakt/v2
 
 go 1.21
 

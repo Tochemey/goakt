@@ -32,7 +32,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/protobuf/encoding/prototext"
 
-	"github.com/tochemey/goakt/goaktpb"
+	"github.com/tochemey/goakt/v2/goaktpb"
 )
 
 func TestPath(t *testing.T) {

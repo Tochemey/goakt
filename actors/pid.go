@@ -45,16 +45,16 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	"github.com/tochemey/goakt/goaktpb"
-	"github.com/tochemey/goakt/internal/eventstream"
-	"github.com/tochemey/goakt/internal/http"
-	"github.com/tochemey/goakt/internal/internalpb"
-	"github.com/tochemey/goakt/internal/internalpb/internalpbconnect"
-	"github.com/tochemey/goakt/internal/metric"
-	"github.com/tochemey/goakt/internal/slices"
-	"github.com/tochemey/goakt/internal/types"
-	"github.com/tochemey/goakt/log"
-	"github.com/tochemey/goakt/telemetry"
+	"github.com/tochemey/goakt/v2/goaktpb"
+	"github.com/tochemey/goakt/v2/internal/eventstream"
+	"github.com/tochemey/goakt/v2/internal/http"
+	"github.com/tochemey/goakt/v2/internal/internalpb"
+	"github.com/tochemey/goakt/v2/internal/internalpb/internalpbconnect"
+	"github.com/tochemey/goakt/v2/internal/metric"
+	"github.com/tochemey/goakt/v2/internal/slices"
+	"github.com/tochemey/goakt/v2/internal/types"
+	"github.com/tochemey/goakt/v2/log"
+	"github.com/tochemey/goakt/v2/telemetry"
 )
 
 // watcher is used to handle parent child relationship.

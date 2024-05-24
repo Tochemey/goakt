@@ -25,7 +25,7 @@
 package main
 
 import (
-	"github.com/tochemey/goakt/examples/actor-cluster/dnssd/cmd"
+	"github.com/tochemey/goakt/v2/examples/actor-cluster/dnssd/cmd"
 )
 
 func main() {
