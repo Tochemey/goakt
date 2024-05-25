@@ -11,8 +11,8 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
-	"github.com/tochemey/goakt/actors"
-	"github.com/tochemey/goakt/goaktpb"
+	"github.com/tochemey/goakt/v2/actors"
+	"github.com/tochemey/goakt/v2/goaktpb"
 )
 
 const (

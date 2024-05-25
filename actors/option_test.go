@@ -31,9 +31,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/atomic"
 
-	"github.com/tochemey/goakt/hash"
-	"github.com/tochemey/goakt/log"
-	"github.com/tochemey/goakt/telemetry"
+	"github.com/tochemey/goakt/v2/hash"
+	"github.com/tochemey/goakt/v2/log"
+	"github.com/tochemey/goakt/v2/telemetry"
 )
 
 func TestOption(t *testing.T) {

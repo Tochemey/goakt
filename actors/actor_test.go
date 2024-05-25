@@ -38,11 +38,11 @@ import (
 	"go.uber.org/atomic"
 	"go.uber.org/goleak"
 
-	"github.com/tochemey/goakt/discovery"
-	"github.com/tochemey/goakt/discovery/nats"
-	"github.com/tochemey/goakt/goaktpb"
-	"github.com/tochemey/goakt/log"
-	testspb "github.com/tochemey/goakt/test/data/testpb"
+	"github.com/tochemey/goakt/v2/discovery"
+	"github.com/tochemey/goakt/v2/discovery/nats"
+	"github.com/tochemey/goakt/v2/goaktpb"
+	"github.com/tochemey/goakt/v2/log"
+	testspb "github.com/tochemey/goakt/v2/test/data/testpb"
 )
 
 func TestMain(m *testing.M) {

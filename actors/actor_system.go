@@ -49,17 +49,17 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 
-	"github.com/tochemey/goakt/discovery"
-	"github.com/tochemey/goakt/goaktpb"
-	"github.com/tochemey/goakt/hash"
-	"github.com/tochemey/goakt/internal/cluster"
-	"github.com/tochemey/goakt/internal/eventstream"
-	"github.com/tochemey/goakt/internal/internalpb"
-	"github.com/tochemey/goakt/internal/internalpb/internalpbconnect"
-	"github.com/tochemey/goakt/internal/metric"
-	"github.com/tochemey/goakt/internal/types"
-	"github.com/tochemey/goakt/log"
-	"github.com/tochemey/goakt/telemetry"
+	"github.com/tochemey/goakt/v2/discovery"
+	"github.com/tochemey/goakt/v2/goaktpb"
+	"github.com/tochemey/goakt/v2/hash"
+	"github.com/tochemey/goakt/v2/internal/cluster"
+	"github.com/tochemey/goakt/v2/internal/eventstream"
+	"github.com/tochemey/goakt/v2/internal/internalpb"
+	"github.com/tochemey/goakt/v2/internal/internalpb/internalpbconnect"
+	"github.com/tochemey/goakt/v2/internal/metric"
+	"github.com/tochemey/goakt/v2/internal/types"
+	"github.com/tochemey/goakt/v2/log"
+	"github.com/tochemey/goakt/v2/telemetry"
 )
 
 // ActorSystem defines the contract of an actor system

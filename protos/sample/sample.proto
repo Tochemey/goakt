@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package samplepb;
 
-option go_package = "github.com/tochemey/goakt/examples/protos/samplepb;samplepb";
+option go_package = "github.com/tochemey/goakt/v2/examples/protos/samplepb;samplepb";
 
 message Ping {
   string id = 1;

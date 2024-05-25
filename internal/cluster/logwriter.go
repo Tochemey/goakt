@@ -29,7 +29,7 @@ import (
 	"io"
 	"regexp"
 
-	"github.com/tochemey/goakt/log"
+	"github.com/tochemey/goakt/v2/log"
 )
 
 // logWriter is a wrapper for the olric logging

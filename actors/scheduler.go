@@ -39,9 +39,9 @@ import (
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/tochemey/goakt/goaktpb"
-	"github.com/tochemey/goakt/internal/cluster"
-	"github.com/tochemey/goakt/log"
+	"github.com/tochemey/goakt/v2/goaktpb"
+	"github.com/tochemey/goakt/v2/internal/cluster"
+	"github.com/tochemey/goakt/v2/log"
 )
 
 var errSkipJobScheduling = errors.New("skip job scheduling")

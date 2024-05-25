@@ -37,10 +37,10 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 
-	"github.com/tochemey/goakt/goaktpb"
-	internalpb "github.com/tochemey/goakt/internal/internalpb"
-	"github.com/tochemey/goakt/log"
-	testpb "github.com/tochemey/goakt/test/data/testpb"
+	"github.com/tochemey/goakt/v2/goaktpb"
+	internalpb "github.com/tochemey/goakt/v2/internal/internalpb"
+	"github.com/tochemey/goakt/v2/log"
+	testpb "github.com/tochemey/goakt/v2/test/data/testpb"
 )
 
 func TestAsk(t *testing.T) {

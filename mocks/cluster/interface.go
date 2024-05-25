@@ -5,8 +5,8 @@ package cluster
 import (
 	context "context"
 
-	internalcluster "github.com/tochemey/goakt/internal/cluster"
-	internalpb "github.com/tochemey/goakt/internal/internalpb"
+	internalcluster "github.com/tochemey/goakt/v2/internal/cluster"
+	internalpb "github.com/tochemey/goakt/v2/internal/internalpb"
 
 	mock "github.com/stretchr/testify/mock"
 )

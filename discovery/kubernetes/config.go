@@ -25,7 +25,7 @@
 package kubernetes
 
 import (
-	"github.com/tochemey/goakt/internal/validation"
+	"github.com/tochemey/goakt/v2/internal/validation"
 )
 
 // Config defines the kubernetes discovery configuration

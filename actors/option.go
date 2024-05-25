@@ -28,10 +28,10 @@ import (
 	"errors"
 	"time"
 
-	"github.com/tochemey/goakt/discovery"
-	"github.com/tochemey/goakt/hash"
-	"github.com/tochemey/goakt/log"
-	"github.com/tochemey/goakt/telemetry"
+	"github.com/tochemey/goakt/v2/discovery"
+	"github.com/tochemey/goakt/v2/hash"
+	"github.com/tochemey/goakt/v2/log"
+	"github.com/tochemey/goakt/v2/telemetry"
 )
 
 var (

@@ -8,7 +8,7 @@ import (
 	connect "connectrpc.com/connect"
 	context "context"
 	errors "errors"
-	samplepb "github.com/tochemey/goakt/examples/protos/samplepb"
+	samplepb "github.com/tochemey/goakt/v2/examples/protos/samplepb"
 	http "net/http"
 	strings "strings"
 )

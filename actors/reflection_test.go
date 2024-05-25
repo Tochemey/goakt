@@ -29,8 +29,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/tochemey/goakt/goaktpb"
-	"github.com/tochemey/goakt/internal/types"
+	"github.com/tochemey/goakt/v2/goaktpb"
+	"github.com/tochemey/goakt/v2/internal/types"
 )
 
 func TestReflection(t *testing.T) {

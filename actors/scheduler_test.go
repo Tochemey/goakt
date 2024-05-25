@@ -34,8 +34,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/travisjeffery/go-dynaport"
 
-	"github.com/tochemey/goakt/log"
-	"github.com/tochemey/goakt/test/data/testpb"
+	"github.com/tochemey/goakt/v2/log"
+	"github.com/tochemey/goakt/v2/test/data/testpb"
 )
 
 func TestScheduler(t *testing.T) {

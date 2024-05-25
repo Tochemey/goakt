@@ -37,11 +37,11 @@ import (
 	"golang.org/x/net/http2/h2c"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/tochemey/goakt/actors"
-	kactors "github.com/tochemey/goakt/examples/actor-cluster/dnssd/actors"
-	samplepb "github.com/tochemey/goakt/examples/protos/samplepb"
-	"github.com/tochemey/goakt/examples/protos/samplepb/samplepbconnect"
-	"github.com/tochemey/goakt/log"
+	"github.com/tochemey/goakt/v2/actors"
+	kactors "github.com/tochemey/goakt/v2/examples/actor-cluster/dnssd/actors"
+	samplepb "github.com/tochemey/goakt/v2/examples/protos/samplepb"
+	"github.com/tochemey/goakt/v2/examples/protos/samplepb/samplepbconnect"
+	"github.com/tochemey/goakt/v2/log"
 )
 
 type AccountService struct {

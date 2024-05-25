@@ -4,7 +4,7 @@ package internalpb;
 
 import "goakt/goakt.proto";
 
-option go_package = "github.com/tochemey/goakt/internal/internalpb;internalpb";
+option go_package = "github.com/tochemey/goakt/v2/internal/internalpb;internalpb";
 
 // WireActor represents the actor information on the wire.
 message WireActor {

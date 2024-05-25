@@ -201,7 +201,7 @@ You can schedule sending messages to actor that will be acted upon in the future
 #### Cron Expression Format
 
 | Field        | Required | Allowed Values  | Allowed Special Characters |
-| ------------ | -------- | --------------- | -------------------------- |
+|--------------|----------|-----------------|----------------------------|
 | Seconds      | yes      | 0-59            | , - * /                    |
 | Minutes      | yes      | 0-59            | , - * /                    |
 | Hours        | yes      | 0-23            | , - * /                    |
@@ -336,7 +336,7 @@ The API interface helps interact with a Go-Akt actor system as kind of client. T
 ## Installation
 
 ```bash
-go get github.com/tochemey/goakt
+go get github.com/tochemey/goakt/v2
 ```
 
 ## Clustering

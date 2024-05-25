@@ -29,7 +29,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/tochemey/goakt/goaktpb"
+	"github.com/tochemey/goakt/v2/goaktpb"
 )
 
 // Path is a unique path to an actor

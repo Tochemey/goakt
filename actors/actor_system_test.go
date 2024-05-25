@@ -45,12 +45,12 @@ import (
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/tochemey/goakt/goaktpb"
-	"github.com/tochemey/goakt/log"
-	clustermocks "github.com/tochemey/goakt/mocks/cluster"
-	testkit "github.com/tochemey/goakt/mocks/discovery"
-	"github.com/tochemey/goakt/telemetry"
-	testpb "github.com/tochemey/goakt/test/data/testpb"
+	"github.com/tochemey/goakt/v2/goaktpb"
+	"github.com/tochemey/goakt/v2/log"
+	clustermocks "github.com/tochemey/goakt/v2/mocks/cluster"
+	testkit "github.com/tochemey/goakt/v2/mocks/discovery"
+	"github.com/tochemey/goakt/v2/telemetry"
+	testpb "github.com/tochemey/goakt/v2/test/data/testpb"
 )
 
 func TestActorSystem(t *testing.T) {

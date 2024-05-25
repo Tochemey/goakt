@@ -33,7 +33,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 
-	"github.com/tochemey/goakt/goaktpb"
+	"github.com/tochemey/goakt/v2/goaktpb"
 )
 
 // ReceiveContext is the context that is used by the actor to receive messages

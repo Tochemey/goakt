@@ -43,10 +43,10 @@ import (
 	semconv "go.opentelemetry.io/otel/semconv/v1.21.0"
 	"go.uber.org/atomic"
 
-	goakt "github.com/tochemey/goakt/actors"
-	samplepb "github.com/tochemey/goakt/examples/protos/samplepb"
-	"github.com/tochemey/goakt/goaktpb"
-	"github.com/tochemey/goakt/log"
+	goakt "github.com/tochemey/goakt/v2/actors"
+	samplepb "github.com/tochemey/goakt/v2/examples/protos/samplepb"
+	"github.com/tochemey/goakt/v2/goaktpb"
+	"github.com/tochemey/goakt/v2/log"
 )
 
 var serviceName = semconv.ServiceNameKey.String("actor-observability")

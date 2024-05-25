@@ -36,7 +36,7 @@ import (
 	"github.com/pkg/errors"
 	"go.uber.org/atomic"
 
-	"github.com/tochemey/goakt/discovery"
+	"github.com/tochemey/goakt/v2/discovery"
 )
 
 // Discovery defines the mDNS discovery provider

@@ -29,7 +29,7 @@ import (
 
 	"github.com/alphadose/haxmap"
 
-	"github.com/tochemey/goakt/internal/types"
+	"github.com/tochemey/goakt/v2/internal/types"
 )
 
 type prop struct {

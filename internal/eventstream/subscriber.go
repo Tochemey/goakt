@@ -29,7 +29,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/tochemey/goakt/internal/queue"
+	"github.com/tochemey/goakt/v2/internal/queue"
 )
 
 // Subscriber defines the Subscriber Interface

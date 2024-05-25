@@ -27,7 +27,7 @@ package actors
 import (
 	"time"
 
-	"github.com/tochemey/goakt/goaktpb"
+	"github.com/tochemey/goakt/v2/goaktpb"
 )
 
 // StrategyDirective represents the supervisor strategy directive
