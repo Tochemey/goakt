@@ -166,7 +166,6 @@ func RemoteTell(ctx context.Context, to *goaktpb.Address, message proto.Message)
 		http.NewClient(),
 		http.URL(to.GetHost(), int(to.GetPort())),
 		connect.WithInterceptors(interceptor),
-		connect.WithGRPC(),
 	)
 
 	request := &internalpb.RemoteTellRequest{
@@ -212,7 +211,6 @@ func RemoteAsk(ctx context.Context, to *goaktpb.Address, message proto.Message) 
 		http.NewClient(),
 		http.URL(to.GetHost(), int(to.GetPort())),
 		connect.WithInterceptors(interceptor),
-		connect.WithGRPC(),
 	)
 
 	request := &internalpb.RemoteAskRequest{
@@ -270,7 +268,6 @@ func RemoteLookup(ctx context.Context, host string, port int, name string) (addr
 		http.NewClient(),
 		http.URL(host, port),
 		connect.WithInterceptors(interceptor),
-		connect.WithGRPC(),
 	)
 
 	request := connect.NewRequest(&internalpb.RemoteLookupRequest{
@@ -318,7 +315,6 @@ func RemoteBatchTell(ctx context.Context, to *goaktpb.Address, messages ...proto
 		http.NewClient(),
 		http.URL(to.GetHost(), int(to.GetPort())),
 		connect.WithInterceptors(interceptor),
-		connect.WithGRPC(),
 	)
 
 	stream := remoteClient.RemoteTell(ctx)
@@ -371,7 +367,6 @@ func RemoteBatchAsk(ctx context.Context, to *goaktpb.Address, messages ...proto.
 		http.NewClient(),
 		http.URL(to.GetHost(), int(to.GetPort())),
 		connect.WithInterceptors(interceptor),
-		connect.WithGRPC(),
 	)
 
 	stream := remoteClient.RemoteAsk(ctx)
@@ -424,7 +419,6 @@ func RemoteReSpawn(ctx context.Context, host string, port int, name string) erro
 		http.NewClient(),
 		http.URL(host, port),
 		connect.WithInterceptors(interceptor),
-		connect.WithGRPC(),
 	)
 
 	request := connect.NewRequest(&internalpb.RemoteReSpawnRequest{
@@ -455,7 +449,6 @@ func RemoteStop(ctx context.Context, host string, port int, name string) error {
 		http.NewClient(),
 		http.URL(host, port),
 		connect.WithInterceptors(interceptor),
-		connect.WithGRPC(),
 	)
 
 	request := connect.NewRequest(&internalpb.RemoteStopRequest{
@@ -486,7 +479,6 @@ func RemoteSpawn(ctx context.Context, host string, port int, name, actorType str
 		http.NewClient(),
 		http.URL(host, port),
 		connect.WithInterceptors(interceptor),
-		connect.WithGRPC(),
 	)
 
 	request := connect.NewRequest(&internalpb.RemoteSpawnRequest{
