@@ -79,6 +79,8 @@ var (
 	ErrInstanceNotAnActor = errors.New("failed to create instance. Reason: instance does not implement the Actor interface")
 	// ErrTypeNotRegistered is returned when a given actor is not registered
 	ErrTypeNotRegistered = errors.New("actor type is not registered")
+	// ErrLeaderNotFound is returned when during network topology change there is no leader found to perform some operation
+	ErrLeaderNotFound = errors.New("actor is not leader")
 )
 
 // IsEOF returns true if the given error is an EOF error

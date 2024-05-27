@@ -54,6 +54,7 @@ import (
 	"github.com/tochemey/goakt/v2/hash"
 	"github.com/tochemey/goakt/v2/internal/cluster"
 	"github.com/tochemey/goakt/v2/internal/eventstream"
+	httpclient "github.com/tochemey/goakt/v2/internal/http"
 	"github.com/tochemey/goakt/v2/internal/internalpb"
 	"github.com/tochemey/goakt/v2/internal/internalpb/internalpbconnect"
 	"github.com/tochemey/goakt/v2/internal/metric"
@@ -134,6 +135,7 @@ type ActorSystem interface {
 // Only a single instance of the ActorSystem can be created on a given node
 type actorSystem struct {
 	internalpbconnect.UnimplementedRemotingServiceHandler
+	internalpbconnect.UnimplementedPeersServiceHandler
 
 	// map of actors in the system
 	actors *pidMap
@@ -182,7 +184,7 @@ type actorSystem struct {
 	partitionsCount uint64
 	// cluster mode
 	cluster            cluster.Interface
-	clusterChan        chan *internalpb.WireActor
+	actorsChan         chan *internalpb.WireActor
 	peersPort          int
 	gossipPort         int
 	minimumPeersQuorum uint16
@@ -211,8 +213,8 @@ type actorSystem struct {
 	tracer       trace.Tracer
 
 	// specifies whether metric is enabled
-	metricEnabled atomic.Bool
-	eventsChan    <-chan *cluster.Event
+	metricEnabled     atomic.Bool
+	clusterEventsChan <-chan *cluster.Event
 
 	registry   types.Registry
 	reflection reflection
@@ -235,7 +237,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 
 	system := &actorSystem{
 		actors:              newPIDMap(1_000), // TODO need to check with memory footprint here since we change the map engine
-		clusterChan:         make(chan *internalpb.WireActor, 10),
+		actorsChan:          make(chan *internalpb.WireActor, 10),
 		name:                name,
 		logger:              log.DefaultLogger,
 		expireActorAfter:    DefaultPassivationTimeout,
@@ -251,7 +253,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		partitionHasher:     hash.DefaultHasher(),
 		actorInitTimeout:    DefaultInitTimeout,
 		tracer:              noop.NewTracerProvider().Tracer(name),
-		eventsChan:          make(chan *cluster.Event, 1),
+		clusterEventsChan:   make(chan *cluster.Event, 1),
 		registry:            types.NewRegistry(),
 		clusterSyncStopSig:  make(chan types.Unit, 1),
 		minimumPeersQuorum:  1,
@@ -460,7 +462,7 @@ func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor) (PID,
 	x.actors.set(pid)
 	if x.clusterEnabled.Load() {
 		actorType := types.RuntimeTypeOf(actor)
-		x.clusterChan <- &internalpb.WireActor{
+		x.actorsChan <- &internalpb.WireActor{
 			ActorName:    name,
 			ActorAddress: actorPath.RemoteAddress(),
 			ActorPath:    actorPath.String(),
@@ -535,7 +537,7 @@ func (x *actorSystem) SpawnFromFunc(ctx context.Context, receiveFunc ReceiveFunc
 	x.actors.set(pid)
 	if x.clusterEnabled.Load() {
 		actorType := types.RuntimeTypeOf(actor)
-		x.clusterChan <- &internalpb.WireActor{
+		x.actorsChan <- &internalpb.WireActor{
 			ActorName:    actorID,
 			ActorAddress: actorPath.RemoteAddress(),
 			ActorPath:    actorPath.String(),
@@ -825,7 +827,7 @@ func (x *actorSystem) Stop(ctx context.Context) error {
 			span.RecordError(err)
 			return err
 		}
-		close(x.clusterChan)
+		close(x.actorsChan)
 		x.clusterSyncStopSig <- types.Unit{}
 		x.clusterEnabled.Store(false)
 	}
@@ -1061,6 +1063,73 @@ func (x *actorSystem) RemoteSpawn(ctx context.Context, request *connect.Request[
 	return connect.NewResponse(new(internalpb.RemoteSpawnResponse)), nil
 }
 
+// PeersSync handles peers synchronization requests
+func (x *actorSystem) PeersSync(ctx context.Context, request *connect.Request[internalpb.PeersSyncRequest]) (*connect.Response[internalpb.PeersSyncResponse], error) {
+	// only handle peer state replication when clustering is enabled.
+	if !x.clusterEnabled.Load() {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrClusterDisabled)
+	}
+
+	// only handle peer state replication when remoting is enabled.
+	if !x.remotingEnabled.Load() {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrRemotingDisabled)
+	}
+
+	req := request.Msg
+	peerAddress := req.GetPeerAddress()
+	actor := req.GetActor()
+
+	peerState := new(internalpb.PeerState)
+	if bytea, ok := x.peersCache.Get(peerAddress); ok {
+		// no need to handle the error here because we pushed the data into the cache
+		_ = proto.Unmarshal(bytea, peerState)
+	}
+
+	// avoid duplicate actors
+	actorsMap := make(map[string]*internalpb.WireActor)
+	for _, actor := range peerState.GetActors() {
+		path := actor.GetActorPath()
+		if path != "" {
+			actorsMap[path] = actor
+		}
+	}
+
+	path := actor.GetActorPath()
+	if _, ok := actorsMap[path]; !ok {
+		actorsMap[path] = actor
+	}
+
+	// build the actors list
+	actors := make([]*internalpb.WireActor, 0, len(actorsMap))
+	for _, actor := range actorsMap {
+		actors = append(actors, actor)
+	}
+
+	// amend the state actors list
+	peerState.Actors = append(peerState.Actors, actors...)
+
+	// no need to handle the error
+	bytea, _ := proto.Marshal(peerState)
+	x.peersCache.Set(peerAddress, bytea)
+	return connect.NewResponse(new(internalpb.PeersSyncResponse)), nil
+}
+
+// Redeploy handles a redeployment request. Only the cluster coordinator/leader can perform such operation
+func (x *actorSystem) Redeploy(ctx context.Context, request *connect.Request[internalpb.RedeployRequest]) (*connect.Response[internalpb.RedeployResponse], error) {
+	// only handle redeployment when clustering is enabled.
+	if !x.clusterEnabled.Load() {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrClusterDisabled)
+	}
+
+	// only handleredeployment when remoting is enabled.
+	if !x.remotingEnabled.Load() {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrRemotingDisabled)
+	}
+
+	panic("")
+
+}
+
 // handleRemoteAsk handles a synchronous message to another actor and expect a response.
 // This block until a response is received or timed out.
 func (x *actorSystem) handleRemoteAsk(ctx context.Context, to PID, message proto.Message) (response proto.Message, err error) {
@@ -1094,7 +1163,7 @@ func (x *actorSystem) enableClustering(ctx context.Context) error {
 		RemotingPort: int(x.remotingPort),
 	}
 
-	cluster, err := cluster.NewEngine(x.Name(),
+	clusterEngine, err := cluster.NewEngine(x.Name(),
 		x.discoveryProvider,
 		&hostNode,
 		cluster.WithLogger(x.logger),
@@ -1108,7 +1177,7 @@ func (x *actorSystem) enableClustering(ctx context.Context) error {
 	}
 
 	x.logger.Info("starting cluster engine...")
-	if err := cluster.Start(ctx); err != nil {
+	if err := clusterEngine.Start(ctx); err != nil {
 		x.logger.Error(errors.Wrap(err, "failed to start cluster engine"))
 		return err
 	}
@@ -1123,12 +1192,12 @@ func (x *actorSystem) enableClustering(ctx context.Context) error {
 	x.logger.Info("cluster engine successfully started...")
 
 	x.mutex.Lock()
-	x.cluster = cluster
-	x.eventsChan = cluster.Events()
+	x.cluster = clusterEngine
+	x.clusterEventsChan = clusterEngine.Events()
 	x.mutex.Unlock()
 
-	go x.broadcastClusterEvents()
-	go x.broadcast(ctx)
+	go x.clusterEventsLoop()
+	go x.clusterReplicationLoop(ctx)
 
 	x.logger.Info("clustering enabled...:)")
 	return nil
@@ -1260,25 +1329,65 @@ func (x *actorSystem) registerMetrics() error {
 	return err
 }
 
-// broadcast publishes newly created actor into the cluster when cluster is enabled
-func (x *actorSystem) broadcast(ctx context.Context) {
-	for wireActor := range x.clusterChan {
-		if x.cluster != nil {
-			// set the actor in the cluster
-			if err := x.cluster.PutActor(ctx, wireActor); err != nil {
+// clusterReplicationLoop publishes newly created actor into the cluster when cluster is enabled
+func (x *actorSystem) clusterReplicationLoop(ctx context.Context) {
+	for actor := range x.actorsChan {
+		if x.clusterEnabled.Load() && x.cluster != nil {
+			eg, ctx := errgroup.WithContext(ctx)
+
+			// make the actor cluster aware
+			eg.Go(func() error {
+				return x.cluster.PutActor(ctx, actor)
+			})
+
+			// notifies the peers to update their local cache
+			eg.Go(func() error {
+				peers, err := x.cluster.Peers(ctx)
+				if err != nil {
+					return err
+				}
+
+				// no-op when there are no peers
+				if len(peers) == 0 {
+					return nil
+				}
+
+				for _, peer := range peers {
+					clusterService := internalpbconnect.NewPeersServiceClient(
+						httpclient.NewClient(),
+						fmt.Sprintf("http://%s", peer.Address),
+						connect.WithGRPC(),
+					)
+
+					request := connect.NewRequest(&internalpb.PeersSyncRequest{
+						PeerAddress: peer.Address,
+						Actor:       actor,
+					})
+
+					if _, err := clusterService.PeersSync(ctx, request); err != nil {
+						if connect.CodeOf(err) != connect.CodeUnavailable {
+							x.logger.Errorf("failed to replicate actor=(%s) to peer=(%s): %v", actor.GetActorPath(), peer.Address, err)
+							return err
+						}
+					}
+				}
+				return nil
+			})
+
+			if err := eg.Wait(); err != nil {
 				x.logger.Panic(err.Error())
 			}
 		}
 	}
 }
 
-// broadcastClusterEvents listens to cluster events and send them to the event streams
-func (x *actorSystem) broadcastClusterEvents() {
-	for event := range x.eventsChan {
+// clusterEventsLoop listens to cluster events and send them to the event streams
+func (x *actorSystem) clusterEventsLoop() {
+	for event := range x.clusterEventsChan {
 		if x.clusterEnabled.Load() {
 			if event != nil && event.Payload != nil {
-				// first need to resync actors map back to the cluster
-				x.syncActors()
+				// first need to replicate actors map back to the cluster
+				x.replicateActors()
 				// push the event to the event stream
 				message, _ := event.Payload.UnmarshalNew()
 				if x.eventsStream != nil {
@@ -1291,8 +1400,8 @@ func (x *actorSystem) broadcastClusterEvents() {
 	}
 }
 
-// syncActors synchronizes the node' actors map to the cluster.
-func (x *actorSystem) syncActors() {
+// replicateActors synchronizes the node' actors map to the cluster.
+func (x *actorSystem) replicateActors() {
 	props := x.actors.props()
 	if len(props) != 0 {
 		x.logger.Info("syncing node actors map to the cluster...")
@@ -1306,7 +1415,7 @@ func (x *actorSystem) syncActors() {
 				return
 			}
 
-			x.clusterChan <- &internalpb.WireActor{
+			x.actorsChan <- &internalpb.WireActor{
 				ActorName:    actorID,
 				ActorAddress: actorPath.RemoteAddress(),
 				ActorPath:    actorPath.String(),
