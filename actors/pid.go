@@ -1531,10 +1531,7 @@ func (p *pid) getConnectionOptions() ([]connect.ClientOption, error) {
 		}
 	}
 
-	clientConnectionOptions := []connect.ClientOption{
-		connect.WithGRPC(),
-	}
-
+	var clientConnectionOptions []connect.ClientOption
 	if interceptor != nil {
 		clientConnectionOptions = append(clientConnectionOptions, connect.WithInterceptors(interceptor))
 	}
