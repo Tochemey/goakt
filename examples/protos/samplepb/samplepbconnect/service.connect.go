@@ -5,12 +5,14 @@
 package samplepbconnect
 
 import (
-	connect "connectrpc.com/connect"
 	context "context"
 	errors "errors"
-	samplepb "github.com/tochemey/goakt/v2/examples/protos/samplepb"
 	http "net/http"
 	strings "strings"
+
+	connect "connectrpc.com/connect"
+
+	samplepb "github.com/tochemey/goakt/v2/examples/protos/samplepb"
 )
 
 // This is a compile-time assertion to ensure that this generated file and the connect package are

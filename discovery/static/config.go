@@ -39,7 +39,7 @@ var errFmt = "invalid address=(%s)"
 
 // Config represents the static discovery provider configuration
 type Config struct {
-	// Hosts defines the list of hosts, ip:port
+	// Hosts defines the list of hosts in the form of ip:port where the port is the  gossip port.
 	Hosts []string
 }
 
