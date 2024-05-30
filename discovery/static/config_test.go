@@ -25,50 +25,22 @@
 package static
 
 import (
-	"github.com/tochemey/goakt/v2/discovery"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
-type Discovery struct {
-	config *Config
-}
-
-// enforce compilation error
-var _ discovery.Provider = &Discovery{}
-
-func NewDiscovery(config *Config) *Discovery {
-	d := &Discovery{
-		config: config,
-	}
-
-	return d
-}
-
-// ID returns the discovery provider identifier
-func (d *Discovery) ID() string {
-	return "static"
-}
-
-// Initialize the discovery provider
-func (d *Discovery) Initialize() error {
-	return d.config.Validate()
-}
-
-// Register registers this node to a service discovery directory.
-func (d *Discovery) Register() error {
-	return nil
-}
-
-// Deregister removes this node from a service discovery directory.
-func (d *Discovery) Deregister() error {
-	return nil
-}
-
-// Close closes the provider
-func (d *Discovery) Close() error {
-	return nil
-}
-
-// DiscoverPeers returns a list of known nodes.
-func (d *Discovery) DiscoverPeers() ([]string, error) {
-	return d.config.Hosts, nil
+func TestConfig(t *testing.T) {
+	t.Run("With valid configuration", func(t *testing.T) {
+		config := &Config{
+			Hosts: []string{"192.168.0.1:1234", "localhost:1234"},
+		}
+		assert.NoError(t, config.Validate())
+	})
+	t.Run("With invalid configuration", func(t *testing.T) {
+		config := &Config{
+			Hosts: []string{"192.168.0.1", "some.port"},
+		}
+		assert.Error(t, config.Validate())
+	})
 }
