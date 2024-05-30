@@ -28,6 +28,7 @@ import (
 	"github.com/tochemey/goakt/v2/discovery"
 )
 
+// Discovery represents the static discovery provider
 type Discovery struct {
 	config *Config
 }
@@ -35,6 +36,7 @@ type Discovery struct {
 // enforce compilation error
 var _ discovery.Provider = &Discovery{}
 
+// NewDiscovery creates an instance of the static discovery provider
 func NewDiscovery(config *Config) *Discovery {
 	d := &Discovery{
 		config: config,

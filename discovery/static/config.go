@@ -37,6 +37,7 @@ import (
 
 var errFmt = "invalid address=(%s)"
 
+// Config represents the static discovery provider configuration
 type Config struct {
 	// Hosts defines the list of hosts, ip:port
 	Hosts []string
