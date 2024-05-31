@@ -26,69 +26,18 @@ package cmd
 
 import (
 	"context"
-	"fmt"
-	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/spf13/cobra"
-	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
-	"go.opentelemetry.io/otel/exporters/prometheus"
-	"go.opentelemetry.io/otel/propagation"
-	"go.opentelemetry.io/otel/sdk/metric"
-	"go.opentelemetry.io/otel/sdk/resource"
-	sdktrace "go.opentelemetry.io/otel/sdk/trace"
-	semconv "go.opentelemetry.io/otel/semconv/v1.21.0"
 
 	goakt "github.com/tochemey/goakt/v2/actors"
 	"github.com/tochemey/goakt/v2/discovery/dnssd"
 	"github.com/tochemey/goakt/v2/examples/actor-cluster/dnssd/service"
 	"github.com/tochemey/goakt/v2/log"
 )
-
-func initTracer(ctx context.Context, res *resource.Resource, traceURL string) {
-	exporter, err := otlptracegrpc.New(ctx,
-		otlptracegrpc.WithInsecure(),
-		otlptracegrpc.WithEndpoint(traceURL),
-	)
-	if err != nil {
-		panic(err)
-	}
-
-	tp := sdktrace.NewTracerProvider(
-		sdktrace.WithSampler(sdktrace.AlwaysSample()),
-		sdktrace.WithSpanProcessor(sdktrace.NewBatchSpanProcessor(exporter)),
-		sdktrace.WithResource(res),
-	)
-
-	otel.SetTracerProvider(tp)
-	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{}))
-}
-
-func initMeter(res *resource.Resource) {
-	// The exporter embeds a default OpenTelemetry Reader and
-	// implements prometheus.Collector, allowing it to be used as
-	// both a Reader and Collector.
-	metricExporter, err := prometheus.New()
-	if err != nil {
-		panic(err)
-	}
-	meterProvider := metric.NewMeterProvider(
-		metric.WithReader(metricExporter),
-		metric.WithResource(res),
-	)
-	otel.SetMeterProvider(meterProvider)
-
-	http.Handle("/metrics", promhttp.Handler())
-	go func() {
-		_ = http.ListenAndServe(":2222", nil)
-	}()
-	fmt.Println("Prometheus server running on :2222")
-}
 
 // runCmd represents the run command
 var runCmd = &cobra.Command{
@@ -107,21 +56,6 @@ var runCmd = &cobra.Command{
 		// use the address default log. real-life implement the log interface`
 		logger := log.New(log.DebugLevel, os.Stdout)
 
-		res, err := resource.New(ctx,
-			resource.WithHost(),
-			resource.WithProcess(),
-			resource.WithTelemetrySDK(),
-			resource.WithAttributes(
-				semconv.ServiceNameKey.String("accounts"),
-			),
-		)
-		if err != nil {
-			panic(err)
-		}
-
-		// initialize traces and metric providers
-		initTracer(ctx, res, config.TraceURL)
-		initMeter(res)
 		// define the discovery options
 		discoConfig := dnssd.Config{
 			DomainName: config.ServiceName,
@@ -138,7 +72,6 @@ var runCmd = &cobra.Command{
 			goakt.WithPassivationDisabled(), // set big passivation time
 			goakt.WithLogger(logger),
 			goakt.WithActorInitMaxRetries(3),
-			goakt.WithTracing(),
 			goakt.WithRemoting(host, int32(config.RemotingPort)),
 			goakt.WithClustering(disco, 20, 1, config.GossipPort, config.PeersPort))
 		// handle the error
