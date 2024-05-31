@@ -52,11 +52,10 @@ The project adheres to [Semantic Versioning](https://semver.org) and [Convention
       - [Kubernetes Discovery Provider Setup](#kubernetes-discovery-provider-setup)
         - [Get Started](#get-started)
         - [Role Based Access](#role-based-access)
-        - [Sample Project](#sample-project)
       - [mDNS Discovery Provider Setup](#mdns-discovery-provider-setup)
       - [NATS Discovery Provider Setup](#nats-discovery-provider-setup)
       - [DNS Provider Setup](#dns-provider-setup)
-        - [Sample Project](#sample-project-1)
+      - [Static Provider Setup](#static-provider-setup)
   - [Examples](#examples)
   - [Contribution](#contribution)
     - [Test \& Linter](#test--linter)
@@ -436,8 +435,6 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
 ```
 
-##### Sample Project
-
 A working example can be found [here](./examples/actor-cluster/k8s) with a
 small [doc](./examples/actor-cluster/k8s/doc.md) showing how to run it.
 
@@ -489,7 +486,7 @@ using docker.
 
 To use the DNS discovery provider one needs to provide the following:
 
-- `Domain Name`: the NATS Server address
+- `Domain Name`: the domain name
 - `IPv6`: States whether to lookup for IPv6 addresses.
 
 ```go
@@ -506,9 +503,29 @@ disco := dnssd.NewDiscovery(&config)
 // pass the service discovery when enabling cluster mode in the actor system
 ```
 
-##### Sample Project
-
 There is an example [here](./examples/actor-cluster/dnssd) that shows how to use it.
+
+#### Static Provider Setup
+
+This provider performs nodes discovery based upon the list of static hosts addresses.
+The address of each host is the form of `host:port` where `port` is the gossip protocol port.
+
+```go
+// define the discovery configuration
+config := static.Config{
+  Hosts: []string{
+    "node1:3322",
+    "node2:3322",
+    "node3:3322",
+  },
+}
+// instantiate the dnssd discovery provider
+disco := static.NewDiscovery(&config)
+
+// pass the service discovery when enabling cluster mode in the actor system
+```
+
+There is an example [here](./examples/actor-cluster/static) that shows how to use it.
 
 ## Examples
 

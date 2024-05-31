@@ -22,28 +22,34 @@
  * SOFTWARE.
  */
 
-package service
+package cmd
 
-import "github.com/caarlos0/env/v11"
+import (
+	"os"
 
-// Config defines the service configuration
-type Config struct {
-	Port            int    `env:"PORT" envDefault:"50051"`
-	ServiceName     string `env:"SERVICE_NAME"`
-	ActorSystemName string `env:"SYSTEM_NAME"`
-	GossipPort      int    `env:"GOSSIP_PORT"`
-	PeersPort       int    `env:"PEERS_PORT"`
-	RemotingPort    int    `env:"REMOTING_PORT"`
+	"github.com/joho/godotenv"
+	"github.com/pkg/errors"
+	"github.com/spf13/cobra"
+)
+
+// rootCmd represents the base command when called without any subcommands
+var rootCmd = &cobra.Command{
+	Use:   "static",
+	Short: "GoAkt cluster example",
 }
 
-// GetConfig returns the configuration
-func GetConfig() (*Config, error) {
-	// load the host node configuration
-	cfg := &Config{}
-	opts := env.Options{RequiredIfNoDef: true, UseFieldNameByDefault: false}
-	if err := env.ParseWithOptions(cfg, opts); err != nil {
-		return nil, err
+// Execute adds all child commands to the root command and sets flags appropriately.
+// This is called by main.main(). It only needs to happen once to the rootCmd.
+func Execute() {
+	err := rootCmd.Execute()
+	if err != nil {
+		os.Exit(1)
 	}
+}
 
-	return cfg, nil
+func init() {
+	err := godotenv.Load()
+	if err != nil && !os.IsNotExist(err) {
+		panic(errors.Wrap(err, "Error loading .env file,"))
+	}
 }

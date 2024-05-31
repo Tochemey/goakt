@@ -22,28 +22,25 @@
  * SOFTWARE.
  */
 
-package service
+package static
 
-import "github.com/caarlos0/env/v11"
+import (
+	"testing"
 
-// Config defines the service configuration
-type Config struct {
-	Port            int    `env:"PORT" envDefault:"50051"`
-	ServiceName     string `env:"SERVICE_NAME"`
-	ActorSystemName string `env:"SYSTEM_NAME"`
-	GossipPort      int    `env:"GOSSIP_PORT"`
-	PeersPort       int    `env:"PEERS_PORT"`
-	RemotingPort    int    `env:"REMOTING_PORT"`
-}
+	"github.com/stretchr/testify/assert"
+)
 
-// GetConfig returns the configuration
-func GetConfig() (*Config, error) {
-	// load the host node configuration
-	cfg := &Config{}
-	opts := env.Options{RequiredIfNoDef: true, UseFieldNameByDefault: false}
-	if err := env.ParseWithOptions(cfg, opts); err != nil {
-		return nil, err
-	}
-
-	return cfg, nil
+func TestConfig(t *testing.T) {
+	t.Run("With valid configuration", func(t *testing.T) {
+		config := &Config{
+			Hosts: []string{"192.168.0.1:1234", "localhost:1234"},
+		}
+		assert.NoError(t, config.Validate())
+	})
+	t.Run("With invalid configuration", func(t *testing.T) {
+		config := &Config{
+			Hosts: []string{"192.168.0.1", "some.port"},
+		}
+		assert.Error(t, config.Validate())
+	})
 }

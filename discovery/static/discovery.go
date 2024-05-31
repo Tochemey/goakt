@@ -22,28 +22,55 @@
  * SOFTWARE.
  */
 
-package service
+package static
 
-import "github.com/caarlos0/env/v11"
+import (
+	"github.com/tochemey/goakt/v2/discovery"
+)
 
-// Config defines the service configuration
-type Config struct {
-	Port            int    `env:"PORT" envDefault:"50051"`
-	ServiceName     string `env:"SERVICE_NAME"`
-	ActorSystemName string `env:"SYSTEM_NAME"`
-	GossipPort      int    `env:"GOSSIP_PORT"`
-	PeersPort       int    `env:"PEERS_PORT"`
-	RemotingPort    int    `env:"REMOTING_PORT"`
+// Discovery represents the static discovery provider
+type Discovery struct {
+	config *Config
 }
 
-// GetConfig returns the configuration
-func GetConfig() (*Config, error) {
-	// load the host node configuration
-	cfg := &Config{}
-	opts := env.Options{RequiredIfNoDef: true, UseFieldNameByDefault: false}
-	if err := env.ParseWithOptions(cfg, opts); err != nil {
-		return nil, err
+// enforce compilation error
+var _ discovery.Provider = &Discovery{}
+
+// NewDiscovery creates an instance of the static discovery provider
+func NewDiscovery(config *Config) *Discovery {
+	d := &Discovery{
+		config: config,
 	}
 
-	return cfg, nil
+	return d
+}
+
+// ID returns the discovery provider identifier
+func (d *Discovery) ID() string {
+	return "static"
+}
+
+// Initialize the discovery provider
+func (d *Discovery) Initialize() error {
+	return d.config.Validate()
+}
+
+// Register registers this node to a service discovery directory.
+func (d *Discovery) Register() error {
+	return nil
+}
+
+// Deregister removes this node from a service discovery directory.
+func (d *Discovery) Deregister() error {
+	return nil
+}
+
+// Close closes the provider
+func (d *Discovery) Close() error {
+	return nil
+}
+
+// DiscoverPeers returns a list of known nodes.
+func (d *Discovery) DiscoverPeers() ([]string, error) {
+	return d.config.Hosts, nil
 }

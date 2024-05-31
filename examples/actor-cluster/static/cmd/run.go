@@ -26,6 +26,7 @@ package cmd
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
@@ -34,8 +35,8 @@ import (
 	"github.com/spf13/cobra"
 
 	goakt "github.com/tochemey/goakt/v2/actors"
-	"github.com/tochemey/goakt/v2/discovery/dnssd"
-	"github.com/tochemey/goakt/v2/examples/actor-cluster/dnssd/service"
+	"github.com/tochemey/goakt/v2/discovery/static"
+	"github.com/tochemey/goakt/v2/examples/actor-cluster/static/service"
 	"github.com/tochemey/goakt/v2/log"
 )
 
@@ -57,13 +58,17 @@ var runCmd = &cobra.Command{
 		logger := log.New(log.DebugLevel, os.Stdout)
 
 		// define the discovery options
-		discoConfig := dnssd.Config{
-			DomainName: config.ServiceName,
+		discoConfig := static.Config{
+			Hosts: []string{
+				fmt.Sprintf("node1:%d", config.GossipPort),
+				fmt.Sprintf("node2:%d", config.GossipPort),
+				fmt.Sprintf("node3:%d", config.GossipPort),
+			},
 		}
 		// instantiate the dnssd discovery provider
-		disco := dnssd.NewDiscovery(&discoConfig)
+		disco := static.NewDiscovery(&discoConfig)
 
-		// grab the the host
+		// grab the host
 		host, _ := os.Hostname()
 
 		// create the actor system
