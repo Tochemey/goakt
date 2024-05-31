@@ -511,15 +511,12 @@ This provider performs nodes discovery based upon the list of static hosts addre
 The address of each host is the form of `host:port` where `port` is the gossip protocol port.
 
 ```go
-// define the discovery options
-const gossipPort = 3322
-
 // define the discovery configuration
 config := static.Config{
   Hosts: []string{
-  fmt.Sprintf("node1:%d", gossipPort),
-  fmt.Sprintf("node2:%d", gossipPort),
-  fmt.Sprintf("node3:%d", gossipPort),
+    "node1:3322",
+    "node2:3322",
+    "node3:3322",
   },
 }
 // instantiate the dnssd discovery provider
