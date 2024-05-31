@@ -28,6 +28,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
+	"strconv"
 	"time"
 
 	"github.com/buraksezer/olric"
@@ -79,7 +81,7 @@ type Interface interface {
 	Stop(ctx context.Context) error
 	// NodeHost returns the cluster startNode host address
 	NodeHost() string
-	// NodeRemotingPort returns the cluster startNode remoting port
+	// NodeRemotingPort returns the cluster remoting port
 	NodeRemotingPort() int
 	// PutActor replicates onto the Node the metadata of an actor
 	PutActor(ctx context.Context, actor *internalpb.WireActor) error
@@ -91,6 +93,8 @@ type Interface interface {
 	SetKey(ctx context.Context, key string) error
 	// KeyExists checks the existence of a given key
 	KeyExists(ctx context.Context, key string) (bool, error)
+	// UnsetKey unsets the already set given key in the cluster
+	UnsetKey(ctx context.Context, key string) error
 	// RemoveActor removes a given actor from the cluster.
 	// An actor is removed from the cluster when this actor has been passivated.
 	RemoveActor(ctx context.Context, actorName string) error
@@ -148,7 +152,7 @@ type Engine struct {
 }
 
 // enforce compilation error
-var _ Interface = &Engine{}
+var _ Interface = (*Engine)(nil)
 
 // NewEngine creates an instance of cluster Engine
 func NewEngine(name string, disco discovery.Provider, host *discovery.Node, opts ...Option) (*Engine, error) {
@@ -437,6 +441,21 @@ func (n *Engine) KeyExists(ctx context.Context, key string) (bool, error) {
 	return resp.Bool()
 }
 
+// UnsetKey unsets the already set given key in the cluster
+func (n *Engine) UnsetKey(ctx context.Context, key string) error {
+	logger := n.logger
+
+	logger.Infof("unsetting key (%s)", key)
+
+	if _, err := n.kvStore.Delete(ctx, key); err != nil {
+		logger.Error(errors.Wrapf(err, "failed to unset key=%s record.💥", key))
+		return err
+	}
+
+	logger.Infof("key (%s) successfully unset", key)
+	return nil
+}
+
 // GetPartition returns the partition where a given actor is stored
 func (n *Engine) GetPartition(actorName string) int {
 	key := []byte(actorName)
@@ -463,7 +482,9 @@ func (n *Engine) Peers(ctx context.Context) ([]*Peer, error) {
 	for _, member := range members {
 		if member.Name != n.AdvertisedAddress() {
 			n.logger.Debugf("node=(%s) has found peer=(%s)", n.AdvertisedAddress(), member.Name)
-			peers = append(peers, &Peer{Address: member.Name, Leader: member.Coordinator})
+			peerHost, port, _ := net.SplitHostPort(member.Name)
+			peerPort, _ := strconv.Atoi(port)
+			peers = append(peers, &Peer{Host: peerHost, Port: peerPort, Leader: member.Coordinator})
 		}
 	}
 	return peers, nil

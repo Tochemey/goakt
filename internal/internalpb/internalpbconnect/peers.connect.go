@@ -35,23 +35,18 @@ const (
 const (
 	// PeersServicePeersSyncProcedure is the fully-qualified name of the PeersService's PeersSync RPC.
 	PeersServicePeersSyncProcedure = "/internalpb.PeersService/PeersSync"
-	// PeersServiceRedeployProcedure is the fully-qualified name of the PeersService's Redeploy RPC.
-	PeersServiceRedeployProcedure = "/internalpb.PeersService/Redeploy"
 )
 
 // These variables are the protoreflect.Descriptor objects for the RPCs defined in this package.
 var (
 	peersServiceServiceDescriptor         = internalpb.File_internal_peers_proto.Services().ByName("PeersService")
 	peersServicePeersSyncMethodDescriptor = peersServiceServiceDescriptor.Methods().ByName("PeersSync")
-	peersServiceRedeployMethodDescriptor  = peersServiceServiceDescriptor.Methods().ByName("Redeploy")
 )
 
 // PeersServiceClient is a client for the internalpb.PeersService service.
 type PeersServiceClient interface {
 	// PeersSync synchronizes with other peers in the cluster
 	PeersSync(context.Context, *connect.Request[internalpb.PeersSyncRequest]) (*connect.Response[internalpb.PeersSyncResponse], error)
-	// Redeploy re-distributes actors amongst the cluster members
-	Redeploy(context.Context, *connect.Request[internalpb.RedeployRequest]) (*connect.Response[internalpb.RedeployResponse], error)
 }
 
 // NewPeersServiceClient constructs a client for the internalpb.PeersService service. By default, it
@@ -70,19 +65,12 @@ func NewPeersServiceClient(httpClient connect.HTTPClient, baseURL string, opts .
 			connect.WithSchema(peersServicePeersSyncMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
-		redeploy: connect.NewClient[internalpb.RedeployRequest, internalpb.RedeployResponse](
-			httpClient,
-			baseURL+PeersServiceRedeployProcedure,
-			connect.WithSchema(peersServiceRedeployMethodDescriptor),
-			connect.WithClientOptions(opts...),
-		),
 	}
 }
 
 // peersServiceClient implements PeersServiceClient.
 type peersServiceClient struct {
 	peersSync *connect.Client[internalpb.PeersSyncRequest, internalpb.PeersSyncResponse]
-	redeploy  *connect.Client[internalpb.RedeployRequest, internalpb.RedeployResponse]
 }
 
 // PeersSync calls internalpb.PeersService.PeersSync.
@@ -90,17 +78,10 @@ func (c *peersServiceClient) PeersSync(ctx context.Context, req *connect.Request
 	return c.peersSync.CallUnary(ctx, req)
 }
 
-// Redeploy calls internalpb.PeersService.Redeploy.
-func (c *peersServiceClient) Redeploy(ctx context.Context, req *connect.Request[internalpb.RedeployRequest]) (*connect.Response[internalpb.RedeployResponse], error) {
-	return c.redeploy.CallUnary(ctx, req)
-}
-
 // PeersServiceHandler is an implementation of the internalpb.PeersService service.
 type PeersServiceHandler interface {
 	// PeersSync synchronizes with other peers in the cluster
 	PeersSync(context.Context, *connect.Request[internalpb.PeersSyncRequest]) (*connect.Response[internalpb.PeersSyncResponse], error)
-	// Redeploy re-distributes actors amongst the cluster members
-	Redeploy(context.Context, *connect.Request[internalpb.RedeployRequest]) (*connect.Response[internalpb.RedeployResponse], error)
 }
 
 // NewPeersServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -115,18 +96,10 @@ func NewPeersServiceHandler(svc PeersServiceHandler, opts ...connect.HandlerOpti
 		connect.WithSchema(peersServicePeersSyncMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
-	peersServiceRedeployHandler := connect.NewUnaryHandler(
-		PeersServiceRedeployProcedure,
-		svc.Redeploy,
-		connect.WithSchema(peersServiceRedeployMethodDescriptor),
-		connect.WithHandlerOptions(opts...),
-	)
 	return "/internalpb.PeersService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case PeersServicePeersSyncProcedure:
 			peersServicePeersSyncHandler.ServeHTTP(w, r)
-		case PeersServiceRedeployProcedure:
-			peersServiceRedeployHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -138,8 +111,4 @@ type UnimplementedPeersServiceHandler struct{}
 
 func (UnimplementedPeersServiceHandler) PeersSync(context.Context, *connect.Request[internalpb.PeersSyncRequest]) (*connect.Response[internalpb.PeersSyncResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("internalpb.PeersService.PeersSync is not implemented"))
-}
-
-func (UnimplementedPeersServiceHandler) Redeploy(context.Context, *connect.Request[internalpb.RedeployRequest]) (*connect.Response[internalpb.RedeployResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("internalpb.PeersService.Redeploy is not implemented"))
 }

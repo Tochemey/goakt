@@ -46,6 +46,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/tochemey/goakt/v2/goaktpb"
+	"github.com/tochemey/goakt/v2/internal/types"
 	"github.com/tochemey/goakt/v2/log"
 	clustermocks "github.com/tochemey/goakt/v2/mocks/cluster"
 	testkit "github.com/tochemey/goakt/v2/mocks/discovery"
@@ -182,7 +183,7 @@ func TestActorSystem(t *testing.T) {
 			WithLogger(logger),
 			WithReplyTimeout(time.Minute),
 			WithRemoting(host, int32(remotingPort)),
-			WithClustering(provider, 9, 1, gossipPort, clusterPort))
+			WithClustering(provider, 9, 1, gossipPort, clusterPort, new(testActor)))
 		require.NoError(t, err)
 
 		provider.EXPECT().ID().Return("testDisco")
@@ -947,7 +948,7 @@ func TestActorSystem(t *testing.T) {
 			WithLogger(logger),
 			WithReplyTimeout(time.Minute),
 			WithRemoting(host, int32(remotingPort)),
-			WithClustering(provider, 9, 1, gossipPort, clusterPort))
+			WithClustering(provider, 9, 1, gossipPort, clusterPort, new(testActor)))
 		require.NoError(t, err)
 
 		provider.EXPECT().ID().Return("testDisco")
@@ -1173,7 +1174,7 @@ func TestActorSystem(t *testing.T) {
 			WithReplyTimeout(time.Minute),
 			WithRemoting(host, int32(remotingPort)),
 			WithMailbox(newReceiveContextBuffer(100)),
-			WithClustering(provider, 9, 1, gossipPort, clusterPort))
+			WithClustering(provider, 9, 1, gossipPort, clusterPort, new(testActor)))
 		require.NoError(t, err)
 
 		provider.EXPECT().ID().Return("testDisco")
@@ -1393,15 +1394,16 @@ func TestActorSystem(t *testing.T) {
 		provider.EXPECT().ID().Return("id")
 
 		system := &actorSystem{
-			name:              "testSystem",
-			logger:            logger,
-			cluster:           mockedCluster,
-			clusterEnabled:    *atomic.NewBool(true),
-			telemetry:         telemetry.New(),
-			mutex:             sync.Mutex{},
-			tracer:            noop.NewTracerProvider().Tracer("testSystem"),
-			scheduler:         newScheduler(logger, time.Second, withSchedulerCluster(mockedCluster)),
-			discoveryProvider: provider,
+			name:           "testSystem",
+			logger:         logger,
+			cluster:        mockedCluster,
+			clusterEnabled: *atomic.NewBool(true),
+			telemetry:      telemetry.New(),
+			mutex:          sync.Mutex{},
+			tracer:         noop.NewTracerProvider().Tracer("testSystem"),
+			scheduler:      newScheduler(logger, time.Second, withSchedulerCluster(mockedCluster)),
+			clusterConfig:  NewClusterConfig(),
+			registry:       types.NewRegistry(),
 		}
 
 		err := system.Start(ctx)

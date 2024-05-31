@@ -10,8 +10,6 @@ option go_package = "github.com/tochemey/goakt/v2/internal/internalpb;internalpb
 service PeersService {
   // PeersSync synchronizes with other peers in the cluster
   rpc PeersSync(PeersSyncRequest) returns (PeersSyncResponse);
-  // Redeploy re-distributes actors amongst the cluster members
-  rpc Redeploy(RedeployRequest) returns (RedeployResponse);
 }
 
 // PeersSyncRequest is used to share a created/ restarted actor
@@ -25,15 +23,6 @@ message PeersSyncRequest {
 
 // PeersSyncResponse is the response to SyncRequest
 message PeersSyncResponse {}
-
-// RedeployRequest is used to redistribute and recreate
-// actors of the node that has left the cluster
-message RedeployRequest {
-  // Specifies the list of peers address
-  repeated string peers = 1;
-}
-
-message RedeployResponse {}
 
 message PeerState {
   // Specifies the node address

@@ -607,6 +607,49 @@ func (_c *Interface_Stop_Call) RunAndReturn(run func(context.Context) error) *In
 	return _c
 }
 
+// UnsetKey provides a mock function with given fields: ctx, key
+func (_m *Interface) UnsetKey(ctx context.Context, key string) error {
+	ret := _m.Called(ctx, key)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, string) error); ok {
+		r0 = rf(ctx, key)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// Interface_UnsetKey_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UnsetKey'
+type Interface_UnsetKey_Call struct {
+	*mock.Call
+}
+
+// UnsetKey is a helper method to define mock.On call
+//   - ctx context.Context
+//   - key string
+func (_e *Interface_Expecter) UnsetKey(ctx interface{}, key interface{}) *Interface_UnsetKey_Call {
+	return &Interface_UnsetKey_Call{Call: _e.mock.On("UnsetKey", ctx, key)}
+}
+
+func (_c *Interface_UnsetKey_Call) Run(run func(ctx context.Context, key string)) *Interface_UnsetKey_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *Interface_UnsetKey_Call) Return(_a0 error) *Interface_UnsetKey_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *Interface_UnsetKey_Call) RunAndReturn(run func(context.Context, string) error) *Interface_UnsetKey_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // NewInterface creates a new instance of Interface. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func NewInterface(t interface {

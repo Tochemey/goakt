@@ -68,7 +68,7 @@ func (m *pidMap) set(pid PID) {
 		var rtype reflect.Type
 		handle := pid.ActorHandle()
 		if handle != nil {
-			rtype = types.RuntimeTypeOf(handle)
+			rtype = types.Of(handle)
 		}
 
 		m.mappings.Set(pid.ActorPath().String(), &prop{

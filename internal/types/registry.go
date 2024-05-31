@@ -100,19 +100,19 @@ func (r *registry) Type(v any) (reflect.Type, bool) {
 	return out, ok
 }
 
-// TypeOf returns the type of an object name
+// TypeOf returns the type of object name
 func (r *registry) TypeOf(name string) (reflect.Type, bool) {
 	out, ok := r.typesMap.Get(strings.ToLower(name))
 	return out, ok
 }
 
 func nameAndTypeOf(v any) (string, reflect.Type) {
-	rtype := RuntimeTypeOf(v)
+	rtype := Of(v)
 	return strings.ToLower(rtype.Name()), rtype
 }
 
-// RuntimeTypeOf returns the runtime type of an object
-func RuntimeTypeOf(v any) reflect.Type {
+// Of returns the runtime type of object
+func Of(v any) reflect.Type {
 	var rtype reflect.Type
 	switch _type := v.(type) {
 	case reflect.Type:

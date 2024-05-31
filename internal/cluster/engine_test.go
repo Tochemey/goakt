@@ -27,7 +27,9 @@ package cluster
 import (
 	"context"
 	"fmt"
+	"net"
 	"os"
+	"strconv"
 	"testing"
 	"time"
 
@@ -173,7 +175,7 @@ func TestSingleNode(t *testing.T) {
 		require.NoError(t, cluster.Stop(ctx))
 		provider.AssertExpectations(t)
 	})
-	t.Run("With SetKey and KeyExists", func(t *testing.T) {
+	t.Run("With Set/UnsetKey and KeyExists", func(t *testing.T) {
 		// create the context
 		ctx := context.TODO()
 
@@ -224,8 +226,12 @@ func TestSingleNode(t *testing.T) {
 		require.NoError(t, err)
 		assert.True(t, isSet)
 
+		// unset the key
+		err = cluster.UnsetKey(ctx, key)
+		require.NoError(t, err)
+
 		// check the key existence
-		isSet, err = cluster.KeyExists(ctx, "fake")
+		isSet, err = cluster.KeyExists(ctx, key)
 		require.NoError(t, err)
 		assert.False(t, isSet)
 
@@ -356,7 +362,7 @@ L:
 	peers, err := node1.Peers(context.TODO())
 	require.NoError(t, err)
 	require.Len(t, peers, 1)
-	require.Equal(t, node2Addr, peers[0].Address)
+	require.Equal(t, node2Addr, net.JoinHostPort(peers[0].Host, strconv.Itoa(peers[0].Port)))
 
 	// wait for some time
 	time.Sleep(time.Second)
