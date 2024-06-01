@@ -57,18 +57,6 @@ func (x *actorSystem) rebalance(ctx context.Context, event *cluster.Event) error
 		return nil
 	}
 
-	// set the rebalance key
-	if err := x.cluster.SetKey(ctx, rebalanceKey); err != nil {
-		return err
-	}
-
-	defer func() {
-		if err := x.cluster.UnsetKey(ctx, rebalanceKey); err != nil {
-			// panic when we cannot unset the key
-			panic(err)
-		}
-	}()
-
 	peers, err := x.cluster.Peers(ctx)
 	if err != nil {
 		x.logger.Errorf("failed to fetch peers: (%v)", err)
@@ -88,6 +76,7 @@ func (x *actorSystem) rebalance(ctx context.Context, event *cluster.Event) error
 
 	// no leader found, then the given node becomes the leader
 	if leader == nil {
+		x.logger.Debug("no leader found in cluster")
 		leader = &cluster.Peer{
 			Host:   x.remotingHost,
 			Port:   x.clusterConfig.PeersPort(),
@@ -95,14 +84,22 @@ func (x *actorSystem) rebalance(ctx context.Context, event *cluster.Event) error
 		}
 	}
 
+	leaderAddress := net.JoinHostPort(leader.Host, strconv.Itoa(leader.Port))
+	x.logger.Debugf("cluster leader found: (%s)", leaderAddress)
+
 	nodeLeft := new(goaktpb.NodeLeft)
 	if err := event.Payload.UnmarshalTo(nodeLeft); err != nil {
 		return err
 	}
 
 	// only the cluster coordinator can perform rebalancing
-	if net.JoinHostPort(leader.Host, strconv.Itoa(leader.Port)) != x.cluster.AdvertisedAddress() {
+	if leaderAddress != x.cluster.AdvertisedAddress() {
 		return nil
+	}
+
+	// set the rebalance key
+	if err := x.cluster.SetKey(ctx, rebalanceKey); err != nil {
+		return err
 	}
 
 	bytea, ok := x.peersCache.Get(nodeLeft.GetAddress())
@@ -122,7 +119,10 @@ func (x *actorSystem) rebalance(ctx context.Context, event *cluster.Event) error
 
 	leaderActors := peerState.GetActors()[:remainder]
 	chunks := slices.Chunk[*internalpb.WireActor](peerState.GetActors()[remainder:], quotient)
-	leaderActors = append(leaderActors, chunks[0]...)
+
+	if len(chunks) > 0 {
+		leaderActors = append(leaderActors, chunks[0]...)
+	}
 
 	eg, ctx := errgroup.WithContext(ctx)
 	eg.SetLimit(2)
@@ -142,6 +142,11 @@ func (x *actorSystem) rebalance(ctx context.Context, event *cluster.Event) error
 	})
 
 	eg.Go(func() error {
+		// defensive progamming
+		if len(chunks) == 0 {
+			return nil
+		}
+
 		for i := 1; i < len(chunks); i++ {
 			actors := chunks[i]
 			peer := peers[i-1]
@@ -158,5 +163,9 @@ func (x *actorSystem) rebalance(ctx context.Context, event *cluster.Event) error
 		return nil
 	})
 
-	return eg.Wait()
+	if err := eg.Wait(); err != nil {
+		return err
+	}
+
+	return x.cluster.UnsetKey(ctx, rebalanceKey)
 }
