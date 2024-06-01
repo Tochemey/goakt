@@ -399,6 +399,7 @@ func (n *Engine) GetPeerSync(ctx context.Context, peerAddress string) (*internal
 		return nil, err
 	}
 
+	logger.Infof("peer (%s) sync record successfully retrieved.🎉", peerAddress)
 	return peerSync, nil
 }
 

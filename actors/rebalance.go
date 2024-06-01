@@ -113,6 +113,10 @@ func (x *actorSystem) rebalance(ctx context.Context, event *cluster.Event) error
 	peerState := new(internalpb.PeerState)
 	_ = proto.Unmarshal(bytea, peerState)
 
+	if len(peerState.GetActors()) == 0 {
+		return nil
+	}
+
 	quotient := len(peerState.GetActors()) / totalPeers
 	remainder := len(peerState.GetActors()) % totalPeers
 

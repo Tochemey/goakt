@@ -58,6 +58,7 @@ import (
 	"github.com/tochemey/goakt/v2/internal/internalpb"
 	"github.com/tochemey/goakt/v2/internal/internalpb/internalpbconnect"
 	"github.com/tochemey/goakt/v2/internal/metric"
+	"github.com/tochemey/goakt/v2/internal/tcp"
 	"github.com/tochemey/goakt/v2/internal/types"
 	"github.com/tochemey/goakt/v2/log"
 	"github.com/tochemey/goakt/v2/telemetry"
@@ -1108,7 +1109,7 @@ func (x *actorSystem) enableClustering(ctx context.Context) error {
 		return errors.New("clustering needs remoting to be enabled")
 	}
 
-	hostNode := discovery.Node{
+	hostNode := &discovery.Node{
 		Name:         x.name,
 		Host:         x.remotingHost,
 		GossipPort:   x.clusterConfig.GossipPort(),
@@ -1118,7 +1119,7 @@ func (x *actorSystem) enableClustering(ctx context.Context) error {
 
 	clusterEngine, err := cluster.NewEngine(x.Name(),
 		x.clusterConfig.Discovery(),
-		&hostNode,
+		hostNode,
 		cluster.WithLogger(x.logger),
 		cluster.WithPartitionsCount(x.clusterConfig.PartitionCount()),
 		cluster.WithHasher(x.partitionHasher),
@@ -1177,6 +1178,15 @@ func (x *actorSystem) enableRemoting(ctx context.Context) {
 	if interceptor != nil {
 		opts = append(opts, connect.WithInterceptors(interceptor))
 	}
+
+	// get the TCP ip address in term of digits
+	remotingHost, remotingPort, err := tcp.GetHostPort(fmt.Sprintf("%s:%d", x.remotingHost, x.remotingPort))
+	if err != nil {
+		x.logger.Panic(errors.Wrap(err, "failed to resolve remoting TCP address"))
+	}
+
+	x.remotingHost = remotingHost
+	x.remotingPort = int32(remotingPort)
 
 	mux := http.NewServeMux()
 	path, handler := internalpbconnect.NewRemotingServiceHandler(x, opts...)
@@ -1422,6 +1432,9 @@ func (x *actorSystem) processPeerSync(ctx context.Context, peer *cluster.Peer) e
 	peerAddress := net.JoinHostPort(peer.Host, strconv.Itoa(peer.Port))
 	peerSync, err := x.cluster.GetPeerSync(ctx, peerAddress)
 	if err != nil {
+		if errors.Is(err, cluster.ErrPeerSyncNotFound) {
+			return nil
+		}
 		x.logger.Error(err)
 		return err
 	}
