@@ -141,8 +141,12 @@ func (x *actorSystem) rebalance(ctx context.Context, event *cluster.Event) error
 		for i := 1; i < len(chunks); i++ {
 			actors := chunks[i]
 			peer := peers[i-1]
+			bytea, _ := x.peersCache.Get(net.JoinHostPort(peer.Host, strconv.Itoa(peer.Port)))
+			state := new(internalpb.PeerState)
+			_ = proto.Unmarshal(bytea, state)
+
 			for _, actor := range actors {
-				if err := RemoteSpawn(ctx, peer.Host, peer.Port, actor.GetActorName(), actor.GetActorPath()); err != nil {
+				if err := RemoteSpawn(ctx, state.GetHost(), int(state.GetRemotingPort()), actor.GetActorName(), actor.GetActorPath()); err != nil {
 					return err
 				}
 			}

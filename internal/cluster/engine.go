@@ -38,6 +38,8 @@ import (
 	"github.com/buraksezer/olric/hasher"
 	"github.com/pkg/errors"
 	"github.com/redis/go-redis/v9"
+	"golang.org/x/sync/errgroup"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
@@ -83,8 +85,6 @@ type Interface interface {
 	NodeHost() string
 	// NodeRemotingPort returns the cluster remoting port
 	NodeRemotingPort() int
-	// PutActor replicates onto the Node the metadata of an actor
-	PutActor(ctx context.Context, actor *internalpb.WireActor) error
 	// GetActor fetches an actor from the Node
 	GetActor(ctx context.Context, actorName string) (*internalpb.WireActor, error)
 	// GetPartition returns the partition where a given actor is stored
@@ -105,6 +105,10 @@ type Interface interface {
 	AdvertisedAddress() string
 	// Peers returns a channel containing the list of peers at a given time
 	Peers(ctx context.Context) ([]*Peer, error)
+	// PutPeerSync pushes to the cluster the peer sync request
+	PutPeerSync(ctx context.Context, data *internalpb.PeersSync) error
+	// GetPeerSync fetches a given peer synchronization record
+	GetPeerSync(ctx context.Context, peerAddress string) (*internalpb.PeersSync, error)
 }
 
 // Engine represents the Engine
@@ -324,29 +328,78 @@ func (n *Engine) AdvertisedAddress() string {
 	return n.host.PeersAddress()
 }
 
-// PutActor replicates onto the Node the metadata of an actor
-func (n *Engine) PutActor(ctx context.Context, actor *internalpb.WireActor) error {
+// PutPeerSync pushes to the cluster the peer sync request
+func (n *Engine) PutPeerSync(ctx context.Context, syncRequest *internalpb.PeersSync) error {
 	ctx, cancelFn := context.WithTimeout(ctx, n.writeTimeout)
 	defer cancelFn()
 
 	logger := n.logger
 
-	logger.Infof("replicating actor (%s)", actor.GetActorName())
+	peerAddress := net.JoinHostPort(syncRequest.GetHost(), strconv.Itoa(int(syncRequest.GetPeersPort())))
+	logger.Infof("synchronization peer (%s)", peerAddress)
 
-	data, err := encode(actor)
-	if err != nil {
-		logger.Error(errors.Wrapf(err, "failed to persist actor=%s data in the cluster", actor.GetActorName()))
-		return errors.Wrapf(err, "failed to persist actor=%s data in the cluster", actor.GetActorName())
-	}
+	eg, ctx := errgroup.WithContext(ctx)
+	eg.SetLimit(2)
 
-	err = n.kvStore.Put(ctx, actor.GetActorName(), data)
-	if err != nil {
-		logger.Error(errors.Wrapf(err, "failed to replicate actor=%s record", actor.GetActorName()))
+	eg.Go(func() error {
+		encoded, _ := encode(syncRequest.GetActor())
+		if err := n.kvStore.Put(ctx, syncRequest.GetActor().GetActorName(), encoded); err != nil {
+			return fmt.Errorf("failed to sync actor=(%s) of peer=(%s): %v", syncRequest.GetActor().GetActorName(), peerAddress, err)
+		}
+
+		return nil
+	})
+
+	eg.Go(func() error {
+		encoded, _ := proto.Marshal(syncRequest)
+		if err := n.kvStore.Put(ctx, peerAddress, encoded); err != nil {
+			return fmt.Errorf("failed to sync peer=(%s) request: %v", peerAddress, err)
+		}
+
+		return nil
+	})
+
+	if err := eg.Wait(); err != nil {
+		logger.Errorf("failed to synchronize peer=(%s): %v", peerAddress, err)
 		return err
 	}
 
-	logger.Infof("actor (%s) successfully replicated in the cluster", actor.GetActorName())
+	logger.Infof("peer (%s) successfully synchronized in the cluster", peerAddress)
 	return nil
+}
+
+// GetPeerSync fetches a given peer synchronization record
+func (n *Engine) GetPeerSync(ctx context.Context, peerAddress string) (*internalpb.PeersSync, error) {
+	ctx, cancelFn := context.WithTimeout(ctx, n.readTimeout)
+	defer cancelFn()
+
+	logger := n.logger
+
+	logger.Infof("retrieving peer (%s) sync record", peerAddress)
+	resp, err := n.kvStore.Get(ctx, peerAddress)
+	if err != nil {
+		if errors.Is(err, olric.ErrKeyNotFound) {
+			logger.Warnf("peer=(%s) sync record is not found", peerAddress)
+			return nil, ErrPeerSyncNotFound
+		}
+
+		logger.Errorf("failed to find peer=(%s) sync record: %v", peerAddress, err)
+		return nil, err
+	}
+
+	bytea, err := resp.Byte()
+	if err != nil {
+		logger.Errorf("failed to read peer=(%s) sync record: %v", err)
+		return nil, err
+	}
+
+	peerSync := new(internalpb.PeersSync)
+	if err := proto.Unmarshal(bytea, peerSync); err != nil {
+		logger.Errorf("failed to decode peer=(%s) sync record: %v", err)
+		return nil, err
+	}
+
+	return peerSync, nil
 }
 
 // GetActor fetches an actor from the Node

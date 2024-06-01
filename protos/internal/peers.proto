@@ -6,27 +6,28 @@ import "internal/wireactor.proto";
 
 option go_package = "github.com/tochemey/goakt/v2/internal/internalpb;internalpb";
 
-// PeersService defines the peers service
-service PeersService {
-  // PeersSync synchronizes with other peers in the cluster
-  rpc PeersSync(PeersSyncRequest) returns (PeersSyncResponse);
-}
-
-// PeersSyncRequest is used to share a created/ restarted actor
+// PeersSync is used to share a created/ restarted actor
 // on a given node to his peers when cluster is enabled
-message PeersSyncRequest {
-  // Specifies the peer address
-  string peer_address = 1;
+message PeersSync {
+  // Specifies the peer host
+  string host = 1;
+  // Specifies the remoting port
+  int32 remoting_port = 2;
+  // Specifies the
+  // Specifies the remoting host
+  int32 peers_port = 3;
   // Specifies the wire actor
-  WireActor actor = 2;
+  WireActor actor = 4;
 }
-
-// PeersSyncResponse is the response to SyncRequest
-message PeersSyncResponse {}
 
 message PeerState {
-  // Specifies the node address
-  string address = 1;
+  // Specifies the peer host
+  string host = 1;
+  // Specifies the remoting port
+  int32 remoting_port = 2;
+  // Specifies the
+  // Specifies the remoting host
+  int32 peers_port = 3;
   // Specifies the list of actors
-  repeated WireActor actors = 2;
+  repeated WireActor actors = 4;
 }

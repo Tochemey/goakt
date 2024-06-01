@@ -105,7 +105,7 @@ func TestSingleNode(t *testing.T) {
 		require.NoError(t, cluster.Stop(ctx))
 		provider.AssertExpectations(t)
 	})
-	t.Run("With PutActor and GetActor", func(t *testing.T) {
+	t.Run("With PeerSync and GetActor", func(t *testing.T) {
 		// create the context
 		ctx := context.TODO()
 
@@ -153,7 +153,13 @@ func TestSingleNode(t *testing.T) {
 		actor := &internalpb.WireActor{ActorName: actorName}
 
 		// replicate the actor in the Node
-		err = cluster.PutActor(ctx, actor)
+		peerSync := &internalpb.PeersSync{
+			Host:         host,
+			RemotingPort: int32(remotingPort),
+			PeersPort:    int32(clusterPort),
+			Actor:        actor,
+		}
+		err = cluster.PutPeerSync(ctx, peerSync)
 		require.NoError(t, err)
 
 		// fetch the actor
@@ -249,7 +255,7 @@ func TestSingleNode(t *testing.T) {
 		// generate the ports for the single startNode
 		nodePorts := dynaport.Get(3)
 		gossipPort := nodePorts[0]
-		clusterPort := nodePorts[1]
+		peersPort := nodePorts[1]
 		remotingPort := nodePorts[2]
 
 		// define discovered addresses
@@ -273,7 +279,7 @@ func TestSingleNode(t *testing.T) {
 			Name:         host,
 			Host:         host,
 			GossipPort:   gossipPort,
-			PeersPort:    clusterPort,
+			PeersPort:    peersPort,
 			RemotingPort: remotingPort,
 		}
 
@@ -290,8 +296,14 @@ func TestSingleNode(t *testing.T) {
 		actorName := uuid.NewString()
 		actor := &internalpb.WireActor{ActorName: actorName}
 
+		peerSync := &internalpb.PeersSync{
+			Host:         host,
+			RemotingPort: int32(remotingPort),
+			PeersPort:    int32(peersPort),
+			Actor:        actor,
+		}
 		// replicate the actor in the Node
-		err = cluster.PutActor(ctx, actor)
+		err = cluster.PutPeerSync(ctx, peerSync)
 		require.NoError(t, err)
 
 		// fetch the actor

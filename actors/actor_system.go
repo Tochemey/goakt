@@ -55,7 +55,6 @@ import (
 	"github.com/tochemey/goakt/v2/hash"
 	"github.com/tochemey/goakt/v2/internal/cluster"
 	"github.com/tochemey/goakt/v2/internal/eventstream"
-	httpclient "github.com/tochemey/goakt/v2/internal/http"
 	"github.com/tochemey/goakt/v2/internal/internalpb"
 	"github.com/tochemey/goakt/v2/internal/internalpb/internalpbconnect"
 	"github.com/tochemey/goakt/v2/internal/metric"
@@ -138,7 +137,6 @@ type ActorSystem interface {
 // Only a single instance of the ActorSystem can be created on a given node
 type actorSystem struct {
 	internalpbconnect.UnimplementedRemotingServiceHandler
-	internalpbconnect.UnimplementedPeersServiceHandler
 
 	// map of actors in the system
 	actors *pidMap
@@ -1070,57 +1068,6 @@ func (x *actorSystem) RemoteSpawn(ctx context.Context, request *connect.Request[
 	return connect.NewResponse(new(internalpb.RemoteSpawnResponse)), nil
 }
 
-// PeersSync handles peers synchronization requests
-func (x *actorSystem) PeersSync(_ context.Context, request *connect.Request[internalpb.PeersSyncRequest]) (*connect.Response[internalpb.PeersSyncResponse], error) {
-	// only handle peer state replication when clustering is enabled.
-	if !x.clusterEnabled.Load() {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrClusterDisabled)
-	}
-
-	// only handle peer state replication when remoting is enabled.
-	if !x.remotingEnabled.Load() {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrRemotingDisabled)
-	}
-
-	req := request.Msg
-	peerAddress := req.GetPeerAddress()
-	actor := req.GetActor()
-
-	peerState := new(internalpb.PeerState)
-	if bytea, ok := x.peersCache.Get(peerAddress); ok {
-		// no need to handle the error here because we pushed the data into the cache
-		_ = proto.Unmarshal(bytea, peerState)
-	}
-
-	// avoid duplicate actors
-	actorsMap := make(map[string]*internalpb.WireActor)
-	for _, actor := range peerState.GetActors() {
-		path := actor.GetActorPath()
-		if path != "" {
-			actorsMap[path] = actor
-		}
-	}
-
-	path := actor.GetActorPath()
-	if _, ok := actorsMap[path]; !ok {
-		actorsMap[path] = actor
-	}
-
-	// build the actors list
-	actors := make([]*internalpb.WireActor, 0, len(actorsMap))
-	for _, actor := range actorsMap {
-		actors = append(actors, actor)
-	}
-
-	// amend the state actors list
-	peerState.Actors = append(peerState.Actors, actors...)
-
-	// no need to handle the error
-	bytea, _ := proto.Marshal(peerState)
-	x.peersCache.Set(peerAddress, bytea)
-	return connect.NewResponse(new(internalpb.PeersSyncResponse)), nil
-}
-
 // Rebalancing helps check when in cluster mode whether there is a Rebalancing ongoing
 func (x *actorSystem) Rebalancing(ctx context.Context) bool {
 	if !x.InCluster() {
@@ -1203,7 +1150,8 @@ func (x *actorSystem) enableClustering(ctx context.Context) error {
 	x.mutex.Unlock()
 
 	go x.clusterEventsLoop()
-	go x.clusterReplicationLoop(ctx)
+	go x.clusterReplicationLoop()
+	go x.peersStateLoop()
 
 	x.logger.Info("clustering enabled...:)")
 	return nil
@@ -1336,53 +1284,18 @@ func (x *actorSystem) registerMetrics() error {
 }
 
 // clusterReplicationLoop publishes newly created actor into the cluster when cluster is enabled
-func (x *actorSystem) clusterReplicationLoop(ctx context.Context) {
+func (x *actorSystem) clusterReplicationLoop() {
 	for actor := range x.actorsChan {
-		if x.clusterEnabled.Load() && x.cluster != nil {
-			eg, ctx := errgroup.WithContext(ctx)
-			eg.SetLimit(2)
+		if x.InCluster() {
+			ctx := context.Background()
+			peerSync := &internalpb.PeersSync{
+				Host:         x.remotingHost,
+				RemotingPort: x.remotingPort,
+				PeersPort:    int32(x.clusterConfig.PeersPort()),
+				Actor:        actor,
+			}
 
-			// make the actor cluster aware
-			eg.Go(func() error {
-				return x.cluster.PutActor(ctx, actor)
-			})
-
-			// notifies the peers to update their local cache
-			eg.Go(func() error {
-				peers, err := x.cluster.Peers(ctx)
-				if err != nil {
-					return err
-				}
-
-				// no-op when there are no peers
-				if len(peers) == 0 {
-					return nil
-				}
-
-				for _, peer := range peers {
-					peerAddress := net.JoinHostPort(peer.Host, strconv.Itoa(peer.Port))
-					clusterService := internalpbconnect.NewPeersServiceClient(
-						httpclient.NewClient(),
-						fmt.Sprintf("http://%s", peerAddress),
-						connect.WithGRPC(),
-					)
-
-					request := connect.NewRequest(&internalpb.PeersSyncRequest{
-						PeerAddress: peerAddress,
-						Actor:       actor,
-					})
-
-					if _, err := clusterService.PeersSync(ctx, request); err != nil {
-						if connect.CodeOf(err) != connect.CodeUnavailable {
-							x.logger.Errorf("failed to replicate actor=(%s) to peer=(%s): %v", actor.GetActorPath(), peerAddress, err)
-							return err
-						}
-					}
-				}
-				return nil
-			})
-
-			if err := eg.Wait(); err != nil {
+			if err := x.cluster.PutPeerSync(ctx, peerSync); err != nil {
 				x.logger.Panic(err.Error())
 			}
 		}
@@ -1392,7 +1305,7 @@ func (x *actorSystem) clusterReplicationLoop(ctx context.Context) {
 // clusterEventsLoop listens to cluster events and send them to the event streams
 func (x *actorSystem) clusterEventsLoop() {
 	for event := range x.clusterEventsChan {
-		if x.clusterEnabled.Load() {
+		if x.InCluster() {
 			if event != nil && event.Payload != nil {
 				// first need to replicate actors map back to the cluster
 				x.resyncActors()
@@ -1438,4 +1351,122 @@ func (x *actorSystem) resyncActors() {
 		}
 		x.logger.Info("node actors map successfully synced back to the cluster.")
 	}
+}
+
+// peersStateLoop fetches the cluster peers' PeerSync and update the node
+// peersCache
+func (x *actorSystem) peersStateLoop() {
+	x.logger.Info("peers state synchronization has started...")
+	ticker := time.NewTicker(10 * time.Second)
+	tickerStopSig := make(chan types.Unit, 1)
+	go func() {
+		for {
+			select {
+			case <-ticker.C:
+				eg, ctx := errgroup.WithContext(context.Background())
+				workersCount := 5
+				peersChan := make(chan *cluster.Peer)
+
+				eg.Go(func() error {
+					defer close(peersChan)
+					peers, err := x.cluster.Peers(ctx)
+					if err != nil {
+						return err
+					}
+
+					for _, peer := range peers {
+						select {
+						case peersChan <- peer:
+						case <-ctx.Done():
+							return ctx.Err()
+						}
+					}
+					return nil
+				})
+
+				for i := 0; i < workersCount; i++ {
+					eg.Go(func() error {
+						for peer := range peersChan {
+							if err := x.processPeerSync(ctx, peer); err != nil {
+								return err
+							}
+							select {
+							case <-ctx.Done():
+								return ctx.Err()
+							default:
+								// pass
+							}
+						}
+						return nil
+					})
+				}
+
+				if err := eg.Wait(); err != nil {
+					x.logger.Error(err)
+					// TODO: stop or panic
+				}
+
+			case <-x.clusterSyncStopSig:
+				tickerStopSig <- types.Unit{}
+				return
+			}
+		}
+	}()
+
+	<-tickerStopSig
+	ticker.Stop()
+	x.logger.Info("peers state synchronization has stopped...")
+}
+
+func (x *actorSystem) processPeerSync(ctx context.Context, peer *cluster.Peer) error {
+	peerAddress := net.JoinHostPort(peer.Host, strconv.Itoa(peer.Port))
+	peerSync, err := x.cluster.GetPeerSync(ctx, peerAddress)
+	if err != nil {
+		x.logger.Error(err)
+		return err
+	}
+
+	peerState := new(internalpb.PeerState)
+	if bytea, ok := x.peersCache.Get(peerAddress); ok {
+		// no need to handle the error here because we pushed the data into the cache
+		_ = proto.Unmarshal(bytea, peerState)
+	}
+
+	// first time entry
+	if proto.Equal(peerState, new(internalpb.PeerState)) {
+		peerState = &internalpb.PeerState{
+			Host:         peerSync.GetHost(),
+			RemotingPort: peerSync.GetRemotingPort(),
+			PeersPort:    peerSync.GetPeersPort(),
+			Actors:       []*internalpb.WireActor{},
+		}
+	}
+
+	// avoid duplicate actors
+	actorsMap := make(map[string]*internalpb.WireActor)
+	for _, actor := range peerState.GetActors() {
+		path := actor.GetActorPath()
+		if path != "" {
+			actorsMap[path] = actor
+		}
+	}
+
+	path := peerSync.GetActor().GetActorPath()
+	if _, ok := actorsMap[path]; !ok {
+		actorsMap[path] = peerSync.GetActor()
+	}
+
+	// build the actors list
+	actors := make([]*internalpb.WireActor, 0, len(actorsMap))
+	for _, actor := range actorsMap {
+		actors = append(actors, actor)
+	}
+
+	// amend the state actors list
+	peerState.Actors = append(peerState.Actors, actors...)
+
+	// no need to handle the error
+	bytea, _ := proto.Marshal(peerState)
+	x.peersCache.Set(peerAddress, bytea)
+	return nil
 }
