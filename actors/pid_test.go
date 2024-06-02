@@ -791,7 +791,7 @@ func TestRemoting(t *testing.T) {
 	// generate the remoting port
 	nodePorts := dynaport.Get(1)
 	remotingPort := nodePorts[0]
-	host := "localhost"
+	host := "127.0.0.1"
 
 	// create the actor system
 	sys, err := NewActorSystem("test",
@@ -1060,7 +1060,7 @@ func TestRemoteLookup(t *testing.T) {
 		// generate the remoting port
 		nodePorts := dynaport.Get(1)
 		remotingPort := nodePorts[0]
-		host := "localhost"
+		host := "127.0.0.1"
 
 		// create the actor system
 		sys, err := NewActorSystem("test",
@@ -1100,7 +1100,7 @@ func TestRemoteLookup(t *testing.T) {
 		// generate the remoting port
 		nodePorts := dynaport.Get(1)
 		remotingPort := nodePorts[0]
-		host := "localhost"
+		host := "127.0.0.1"
 
 		// create the actor system
 		sys, err := NewActorSystem("test",
@@ -1441,7 +1441,7 @@ func TestRemoteReSpawn(t *testing.T) {
 		// generate the remoting port
 		nodePorts := dynaport.Get(1)
 		remotingPort := nodePorts[0]
-		host := "localhost"
+		host := "127.0.0.1"
 
 		// create the actor system
 		sys, err := NewActorSystem("test",
@@ -1479,7 +1479,7 @@ func TestRemoteReSpawn(t *testing.T) {
 		// generate the remoting port
 		nodePorts := dynaport.Get(1)
 		remotingPort := nodePorts[0]
-		host := "localhost"
+		host := "127.0.0.1"
 
 		// create the actor system
 		sys, err := NewActorSystem("test",
@@ -1518,7 +1518,7 @@ func TestRemoteStop(t *testing.T) {
 		// generate the remoting port
 		nodePorts := dynaport.Get(1)
 		remotingPort := nodePorts[0]
-		host := "localhost"
+		host := "127.0.0.1"
 
 		// create the actor system
 		sys, err := NewActorSystem("test",
@@ -1557,7 +1557,7 @@ func TestRemoteStop(t *testing.T) {
 		// generate the remoting port
 		nodePorts := dynaport.Get(1)
 		remotingPort := nodePorts[0]
-		host := "localhost"
+		host := "127.0.0.1"
 
 		// create the actor system
 		sys, err := NewActorSystem("test",
@@ -1599,7 +1599,7 @@ func TestRemoteStop(t *testing.T) {
 		// generate the remoting port
 		nodePorts := dynaport.Get(1)
 		remotingPort := nodePorts[0]
-		host := "localhost"
+		host := "127.0.0.1"
 
 		// create the actor system
 		sys, err := NewActorSystem("test",
@@ -1692,7 +1692,7 @@ func TestRemoteSpawn(t *testing.T) {
 		// generate the remoting port
 		ports := dynaport.Get(1)
 		remotingPort := ports[0]
-		host := "localhost"
+		host := "127.0.0.1"
 
 		// create the actor system
 		sys, err := NewActorSystem("test",
@@ -1726,7 +1726,7 @@ func TestRemoteSpawn(t *testing.T) {
 		require.NoError(t, err)
 
 		// spawn the remote actor
-		err = pid.RemoteSpawn(ctx, host, remotingPort, actorName, "exchanger")
+		err = pid.RemoteSpawn(ctx, host, remotingPort, actorName, "actors.exchanger")
 		require.NoError(t, err)
 
 		// re-fetching the address of the actor should return not nil address after start
@@ -1762,7 +1762,7 @@ func TestRemoteSpawn(t *testing.T) {
 		// generate the remoting port
 		ports := dynaport.Get(1)
 		remotingPort := ports[0]
-		host := "localhost"
+		host := "127.0.0.1"
 
 		// create the actor system
 		sys, err := NewActorSystem("test",
@@ -1810,7 +1810,7 @@ func TestRemoteSpawn(t *testing.T) {
 		// generate the remoting port
 		ports := dynaport.Get(1)
 		remotingPort := ports[0]
-		host := "localhost"
+		host := "127.0.0.1"
 
 		// create the actor system
 		sys, err := NewActorSystem("test",

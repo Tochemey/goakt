@@ -38,22 +38,15 @@ import (
 	"github.com/tochemey/goakt/v2/internal/slices"
 )
 
-const rebalanceKey = "rebalancing"
-
-// rebalance is used when cluster topology changes particularly
+// redistribute is used when cluster topology changes particularly
 // when a given node has left the cluster
-func (x *actorSystem) rebalance(ctx context.Context, event *cluster.Event) error {
+func (x *actorSystem) redistribute(ctx context.Context, event *cluster.Event) error {
 	if event.Type != cluster.NodeLeft {
 		return nil
 	}
 
-	// first check whether rebalancing is not ongoing
-	exist, err := x.cluster.KeyExists(ctx, rebalanceKey)
-	if err != nil {
-		return err
-	}
-
-	if exist {
+	// only the leader can perform redistribution
+	if !x.cluster.IsLeader(ctx) {
 		return nil
 	}
 
@@ -65,40 +58,8 @@ func (x *actorSystem) rebalance(ctx context.Context, event *cluster.Event) error
 
 	totalPeers := len(peers) + 1
 
-	// locate the leader node amongst the peers
-	var leader *cluster.Peer
-	for _, peer := range peers {
-		if peer.Leader {
-			leader = peer
-			break
-		}
-	}
-
-	// no leader found, then the given node becomes the leader
-	if leader == nil {
-		x.logger.Debug("no leader found in cluster")
-		leader = &cluster.Peer{
-			Host:   x.remotingHost,
-			Port:   x.clusterConfig.PeersPort(),
-			Leader: true,
-		}
-	}
-
-	leaderAddress := net.JoinHostPort(leader.Host, strconv.Itoa(leader.Port))
-	x.logger.Debugf("cluster leader found: (%s)", leaderAddress)
-
 	nodeLeft := new(goaktpb.NodeLeft)
 	if err := event.Payload.UnmarshalTo(nodeLeft); err != nil {
-		return err
-	}
-
-	// only the cluster coordinator can perform rebalancing
-	if leaderAddress != x.cluster.AdvertisedAddress() {
-		return nil
-	}
-
-	// set the rebalance key
-	if err := x.cluster.SetKey(ctx, rebalanceKey); err != nil {
 		return err
 	}
 
@@ -110,15 +71,25 @@ func (x *actorSystem) rebalance(ctx context.Context, event *cluster.Event) error
 	peerState := new(internalpb.PeerState)
 	_ = proto.Unmarshal(bytea, peerState)
 
-	if len(peerState.GetActors()) == 0 {
+	actorsCount := len(peerState.GetActors())
+
+	if actorsCount == 0 {
 		return nil
 	}
 
-	quotient := len(peerState.GetActors()) / totalPeers
-	remainder := len(peerState.GetActors()) % totalPeers
+	var (
+		leaderActors []*internalpb.WireActor
+		chunks       [][]*internalpb.WireActor
+	)
 
-	leaderActors := peerState.GetActors()[:remainder]
-	chunks := slices.Chunk[*internalpb.WireActor](peerState.GetActors()[remainder:], quotient)
+	if actorsCount < totalPeers {
+		leaderActors = peerState.GetActors()
+	} else {
+		quotient := actorsCount / totalPeers
+		remainder := actorsCount % totalPeers
+		leaderActors = peerState.GetActors()[:remainder]
+		chunks = slices.Chunk[*internalpb.WireActor](peerState.GetActors()[remainder:], quotient)
+	}
 
 	if len(chunks) > 0 {
 		leaderActors = append(leaderActors, chunks[0]...)
@@ -128,13 +99,13 @@ func (x *actorSystem) rebalance(ctx context.Context, event *cluster.Event) error
 	eg.SetLimit(2)
 
 	eg.Go(func() error {
-		for _, leaderActor := range leaderActors {
-			actor, err := x.reflection.ActorFrom(leaderActor.GetActorType())
+		for _, wireActor := range leaderActors {
+			actor, err := x.reflection.ActorFrom(wireActor.GetActorType())
 			if err != nil {
 				return err
 			}
 
-			if _, err = x.Spawn(ctx, leaderActor.GetActorName(), actor); err != nil {
+			if _, err = x.Spawn(ctx, wireActor.GetActorName(), actor); err != nil {
 				return err
 			}
 		}
@@ -142,7 +113,7 @@ func (x *actorSystem) rebalance(ctx context.Context, event *cluster.Event) error
 	})
 
 	eg.Go(func() error {
-		// defensive progamming
+		// defensive programming
 		if len(chunks) == 0 {
 			return nil
 		}
@@ -163,9 +134,5 @@ func (x *actorSystem) rebalance(ctx context.Context, event *cluster.Event) error
 		return nil
 	})
 
-	if err := eg.Wait(); err != nil {
-		return err
-	}
-
-	return x.cluster.UnsetKey(ctx, rebalanceKey)
+	return eg.Wait()
 }

@@ -109,6 +109,9 @@ type Interface interface {
 	PutPeerSync(ctx context.Context, data *internalpb.PeersSync) error
 	// GetPeerSync fetches a given peer synchronization record
 	GetPeerSync(ctx context.Context, peerAddress string) (*internalpb.PeersSync, error)
+	// IsLeader states whether the given cluster node is a leader or not at a given
+	// point in time in the cluster
+	IsLeader(ctx context.Context) bool
 }
 
 // Engine represents the Engine
@@ -119,7 +122,8 @@ type Engine struct {
 
 	// specifies the minimum number of cluster members
 	// the default values is 1
-	minimumPeersQuorum uint16
+	minimumPeersQuorum uint32
+	replicaCount       uint32
 
 	// specifies the logger
 	logger log.Logger
@@ -175,6 +179,7 @@ func NewEngine(name string, disco discovery.Provider, host *discovery.Node, opts
 		messagesReaderChan: make(chan types.Unit, 1),
 		messagesChan:       make(chan *redis.Message, 1),
 		minimumPeersQuorum: 1,
+		replicaCount:       1,
 	}
 	// apply the various options
 	for _, opt := range opts {
@@ -310,6 +315,17 @@ func (n *Engine) Stop(ctx context.Context) error {
 
 	logger.Infof("GoAkt cluster Node=(%s) successfully stopped.", n.name)
 	return nil
+}
+
+// IsLeader states whether the given cluster node is a leader or not at a given
+// point in time in the cluster
+func (n *Engine) IsLeader(ctx context.Context) bool {
+	stats, err := n.client.Stats(ctx, n.host.PeersAddress())
+	if err != nil {
+		n.logger.Errorf("failed to fetch the cluster node=(%s) stats: %v", n.host.PeersAddress(), err)
+		return false
+	}
+	return stats.ClusterCoordinator.String() == stats.Member.String()
 }
 
 // NodeHost returns the Node Host
@@ -485,7 +501,7 @@ func (n *Engine) KeyExists(ctx context.Context, key string) (bool, error) {
 	resp, err := n.kvStore.Get(ctx, key)
 	if err != nil {
 		if errors.Is(err, olric.ErrKeyNotFound) {
-			logger.Warnf("key=%s is not found in the Node", key)
+			logger.Warnf("key=%s is not found in the cluster", key)
 			return false, nil
 		}
 
@@ -538,7 +554,7 @@ func (n *Engine) Peers(ctx context.Context) ([]*Peer, error) {
 			n.logger.Debugf("node=(%s) has found peer=(%s)", n.AdvertisedAddress(), member.Name)
 			peerHost, port, _ := net.SplitHostPort(member.Name)
 			peerPort, _ := strconv.Atoi(port)
-			peers = append(peers, &Peer{Host: peerHost, Port: peerPort, Leader: member.Coordinator})
+			peers = append(peers, &Peer{Host: peerHost, Port: peerPort, Coordinator: member.Coordinator})
 		}
 	}
 	return peers, nil
@@ -637,9 +653,9 @@ func (n *Engine) buildConfig() *config.Config {
 		BindAddr:                   n.host.Host,
 		BindPort:                   n.host.PeersPort,
 		ReadRepair:                 true,
-		ReplicaCount:               int(n.minimumPeersQuorum),
-		WriteQuorum:                int(n.minimumPeersQuorum),
-		ReadQuorum:                 int(n.minimumPeersQuorum),
+		ReplicaCount:               int(n.replicaCount),
+		WriteQuorum:                config.DefaultWriteQuorum,
+		ReadQuorum:                 config.DefaultReadQuorum,
 		MemberCountQuorum:          int32(n.minimumPeersQuorum),
 		Peers:                      []string{},
 		DMaps:                      &config.DMaps{},

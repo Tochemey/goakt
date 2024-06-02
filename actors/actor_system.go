@@ -121,12 +121,10 @@ type ActorSystem interface {
 	// PeerAddress returns the actor system address known in the cluster. That address is used by other nodes to communicate with the actor system.
 	// This address is empty when cluster mode is not activated
 	PeerAddress() string
-	// Register register an actor for future use. This is necessary when creating an actor remotely
+	// Register registers an actor for future use. This is necessary when creating an actor remotely
 	Register(ctx context.Context, actor Actor) error
 	// Deregister removes a registered actor from the registry
 	Deregister(ctx context.Context, actor Actor) error
-	// Rebalancing helps check when in cluster mode whether there is a Rebalancing ongoing or not
-	Rebalancing(ctx context.Context) bool
 	// handleRemoteAsk handles a synchronous message to another actor and expect a response.
 	// This block until a response is received or timed out.
 	handleRemoteAsk(ctx context.Context, to PID, message proto.Message) (response proto.Message, err error)
@@ -213,8 +211,9 @@ type actorSystem struct {
 	registry   types.Registry
 	reflection reflection
 
-	peersCache    *haxmap.Map[string, []byte]
-	clusterConfig *ClusterConfig
+	peersCache         *haxmap.Map[string, []byte]
+	clusterConfig      *ClusterConfig
+	redistributionChan chan *cluster.Event
 }
 
 // enforce compilation error when all methods of the ActorSystem interface are not implemented
@@ -462,12 +461,11 @@ func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor) (PID,
 
 	x.actors.set(pid)
 	if x.clusterEnabled.Load() {
-		actorType := types.Of(actor)
 		x.actorsChan <- &internalpb.WireActor{
 			ActorName:    name,
 			ActorAddress: actorPath.RemoteAddress(),
 			ActorPath:    actorPath.String(),
-			ActorType:    actorType.Name(),
+			ActorType:    types.NameOf(actor),
 		}
 	}
 
@@ -537,12 +535,11 @@ func (x *actorSystem) SpawnFromFunc(ctx context.Context, receiveFunc ReceiveFunc
 
 	x.actors.set(pid)
 	if x.clusterEnabled.Load() {
-		actorType := types.Of(actor)
 		x.actorsChan <- &internalpb.WireActor{
 			ActorName:    actorID,
 			ActorAddress: actorPath.RemoteAddress(),
 			ActorPath:    actorPath.String(),
-			ActorType:    actorType.Name(),
+			ActorType:    types.NameOf(actor),
 		}
 	}
 
@@ -772,10 +769,6 @@ func (x *actorSystem) Start(ctx context.Context) error {
 	}
 
 	if x.clusterEnabled.Load() {
-		for _, kind := range x.clusterConfig.Kinds() {
-			x.registry.Register(kind)
-		}
-
 		if err := x.enableClustering(spanCtx); err != nil {
 			return err
 		}
@@ -835,6 +828,7 @@ func (x *actorSystem) Stop(ctx context.Context) error {
 		close(x.actorsChan)
 		x.clusterSyncStopSig <- types.Unit{}
 		x.clusterEnabled.Store(false)
+		close(x.redistributionChan)
 	}
 
 	if len(x.Actors()) == 0 {
@@ -1053,7 +1047,8 @@ func (x *actorSystem) RemoteSpawn(ctx context.Context, request *connect.Request[
 
 	actor, err := x.reflection.ActorFrom(req.GetActorType())
 	if err != nil {
-		logger.Errorf("failed to create actor=(%s) on [host=%s, port=%d]: reason: (%v)", req.GetActorName(), req.GetHost(), req.GetPort(), err)
+		logger.Errorf("failed to create actor=[(%s) of type (%s)] on [host=%s, port=%d]: reason: (%v)",
+			req.GetActorName(), req.GetActorType(), req.GetHost(), req.GetPort(), err)
 		if errors.Is(err, ErrTypeNotRegistered) {
 			return nil, connect.NewError(connect.CodeFailedPrecondition, ErrTypeNotRegistered)
 		}
@@ -1067,21 +1062,6 @@ func (x *actorSystem) RemoteSpawn(ctx context.Context, request *connect.Request[
 	}
 
 	return connect.NewResponse(new(internalpb.RemoteSpawnResponse)), nil
-}
-
-// Rebalancing helps check when in cluster mode whether there is a Rebalancing ongoing
-func (x *actorSystem) Rebalancing(ctx context.Context) bool {
-	if !x.InCluster() {
-		return false
-	}
-
-	exists, err := x.cluster.KeyExists(ctx, rebalanceKey)
-	if err != nil {
-		// ignore the error
-		return false
-	}
-
-	return exists
 }
 
 // handleRemoteAsk handles a synchronous message to another actor and expect a response.
@@ -1124,6 +1104,7 @@ func (x *actorSystem) enableClustering(ctx context.Context) error {
 		cluster.WithPartitionsCount(x.clusterConfig.PartitionCount()),
 		cluster.WithHasher(x.partitionHasher),
 		cluster.WithMinimumPeersQuorum(x.clusterConfig.MinimumPeersQuorum()),
+		cluster.WithReplicaCount(x.clusterConfig.ReplicaCount()),
 	)
 	if err != nil {
 		x.logger.Error(errors.Wrap(err, "failed to initialize cluster engine"))
@@ -1148,11 +1129,17 @@ func (x *actorSystem) enableClustering(ctx context.Context) error {
 	x.mutex.Lock()
 	x.cluster = clusterEngine
 	x.clusterEventsChan = clusterEngine.Events()
+	x.redistributionChan = make(chan *cluster.Event, 1)
+	for _, kind := range x.clusterConfig.Kinds() {
+		x.registry.Register(kind)
+		x.logger.Infof("cluster kind=(%s) registered", types.NameOf(kind))
+	}
 	x.mutex.Unlock()
 
 	go x.clusterEventsLoop()
 	go x.clusterReplicationLoop()
 	go x.peersStateLoop()
+	go x.redistributionLoop()
 
 	x.logger.Info("clustering enabled...:)")
 	return nil
@@ -1179,7 +1166,6 @@ func (x *actorSystem) enableRemoting(ctx context.Context) {
 		opts = append(opts, connect.WithInterceptors(interceptor))
 	}
 
-	// get the TCP ip address in term of digits
 	remotingHost, remotingPort, err := tcp.GetHostPort(fmt.Sprintf("%s:%d", x.remotingHost, x.remotingPort))
 	if err != nil {
 		x.logger.Panic(errors.Wrap(err, "failed to resolve remoting TCP address"))
@@ -1317,8 +1303,6 @@ func (x *actorSystem) clusterEventsLoop() {
 	for event := range x.clusterEventsChan {
 		if x.InCluster() {
 			if event != nil && event.Payload != nil {
-				// first need to replicate actors map back to the cluster
-				x.resyncActors()
 				// push the event to the event stream
 				message, _ := event.Payload.UnmarshalNew()
 				if x.eventsStream != nil {
@@ -1326,40 +1310,9 @@ func (x *actorSystem) clusterEventsLoop() {
 					x.eventsStream.Publish(eventsTopic, message)
 					x.logger.Debugf("cluster event=(%s) successfully published by node=(%s)", event.Type, x.name)
 				}
-
-				// check for cluster rebalancing
-				if err := x.rebalance(context.Background(), event); err != nil {
-					x.logger.Errorf("cluster rebalancing failed: %v", err)
-					// TODO: panic or retry or shutdown actor system
-				}
+				x.redistributionChan <- event
 			}
 		}
-	}
-}
-
-// resyncActors synchronizes the node' actors map to the cluster.
-func (x *actorSystem) resyncActors() {
-	props := x.actors.props()
-	if len(props) != 0 {
-		x.logger.Info("syncing node actors map to the cluster...")
-		for actorID, actorProp := range props {
-			actorPath := NewPath(actorID, NewAddress(x.name, "", -1))
-			if x.remotingEnabled.Load() {
-				actorPath = NewPath(actorID, NewAddress(x.name, x.remotingHost, int(x.remotingPort)))
-			}
-
-			if !x.clusterEnabled.Load() {
-				return
-			}
-
-			x.actorsChan <- &internalpb.WireActor{
-				ActorName:    actorID,
-				ActorAddress: actorPath.RemoteAddress(),
-				ActorPath:    actorPath.String(),
-				ActorType:    actorProp.rtype.Name(),
-			}
-		}
-		x.logger.Info("node actors map successfully synced back to the cluster.")
 	}
 }
 
@@ -1426,6 +1379,18 @@ func (x *actorSystem) peersStateLoop() {
 	<-tickerStopSig
 	ticker.Stop()
 	x.logger.Info("peers state synchronization has stopped...")
+}
+
+func (x *actorSystem) redistributionLoop() {
+	for event := range x.redistributionChan {
+		if x.InCluster() {
+			// check for cluster rebalancing
+			if err := x.redistribute(context.Background(), event); err != nil {
+				x.logger.Errorf("cluster rebalancing failed: %v", err)
+				// TODO: panic or retry or shutdown actor system
+			}
+		}
+	}
 }
 
 func (x *actorSystem) processPeerSync(ctx context.Context, peer *cluster.Peer) error {

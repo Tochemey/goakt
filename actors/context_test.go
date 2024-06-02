@@ -280,7 +280,7 @@ func TestReceiveContext(t *testing.T) {
 		// generate the remoting port
 		nodePorts := dynaport.Get(1)
 		remotingPort := nodePorts[0]
-		host := "localhost"
+		host := "127.0.0.1"
 
 		// create the actor system
 		sys, err := NewActorSystem("test",
@@ -345,7 +345,7 @@ func TestReceiveContext(t *testing.T) {
 		// generate the remoting port
 		nodePorts := dynaport.Get(1)
 		remotingPort := nodePorts[0]
-		host := "localhost"
+		host := "127.0.0.1"
 
 		// create the actor system
 		sys, err := NewActorSystem("test",
@@ -387,7 +387,7 @@ func TestReceiveContext(t *testing.T) {
 
 		op := func() {
 			context.RemoteAsk(&goaktpb.Address{
-				Host: "localhost",
+				Host: "127.0.0.1",
 				Port: int32(remotingPort),
 				Name: actorName2,
 				Id:   "",
@@ -410,7 +410,7 @@ func TestReceiveContext(t *testing.T) {
 		// generate the remoting port
 		nodePorts := dynaport.Get(1)
 		remotingPort := nodePorts[0]
-		host := "localhost"
+		host := "127.0.0.1"
 
 		// create the actor system
 		sys, err := NewActorSystem("test",
@@ -476,7 +476,7 @@ func TestReceiveContext(t *testing.T) {
 		// generate the remoting port
 		nodePorts := dynaport.Get(1)
 		remotingPort := nodePorts[0]
-		host := "localhost"
+		host := "127.0.0.1"
 
 		// create the actor system
 		sys, err := NewActorSystem("test",
@@ -519,7 +519,7 @@ func TestReceiveContext(t *testing.T) {
 		// send the message to the exchanger actor one using remote messaging
 		assert.Panics(t, func() {
 			context.RemoteTell(&goaktpb.Address{
-				Host: "localhost",
+				Host: "127.0.0.1",
 				Port: int32(remotingPort),
 				Name: actorName2,
 				Id:   "",
@@ -541,7 +541,7 @@ func TestReceiveContext(t *testing.T) {
 		// generate the remoting port
 		nodePorts := dynaport.Get(1)
 		remotingPort := nodePorts[0]
-		host := "localhost"
+		host := "127.0.0.1"
 
 		// create the actor system
 		sys, err := NewActorSystem("test",
@@ -598,7 +598,7 @@ func TestReceiveContext(t *testing.T) {
 		// generate the remoting port
 		nodePorts := dynaport.Get(1)
 		remotingPort := nodePorts[0]
-		host := "localhost"
+		host := "127.0.0.1"
 
 		// create the actor system
 		sys, err := NewActorSystem("test",
@@ -1575,7 +1575,7 @@ func TestReceiveContext(t *testing.T) {
 		// generate the remoting port
 		nodePorts := dynaport.Get(1)
 		remotingPort := nodePorts[0]
-		host := "localhost"
+		host := "127.0.0.1"
 
 		// create the actor system
 		sys, err := NewActorSystem("test",
@@ -1632,7 +1632,7 @@ func TestReceiveContext(t *testing.T) {
 		// generate the remoting port
 		nodePorts := dynaport.Get(1)
 		remotingPort := nodePorts[0]
-		host := "localhost"
+		host := "127.0.0.1"
 
 		// create the actor system
 		sys, err := NewActorSystem("test",
@@ -1686,7 +1686,7 @@ func TestReceiveContext(t *testing.T) {
 		// generate the remoting port
 		nodePorts := dynaport.Get(1)
 		remotingPort := nodePorts[0]
-		host := "localhost"
+		host := "127.0.0.1"
 
 		// create the actor system
 		sys, err := NewActorSystem("test",
@@ -1729,7 +1729,7 @@ func TestReceiveContext(t *testing.T) {
 		// send the message to the exchanger actor one using remote messaging
 		assert.Panics(t, func() {
 			context.RemoteBatchTell(&goaktpb.Address{
-				Host: "localhost",
+				Host: "127.0.0.1",
 				Port: int32(remotingPort),
 				Name: actorName2,
 				Id:   "",
@@ -1751,7 +1751,7 @@ func TestReceiveContext(t *testing.T) {
 		// generate the remoting port
 		nodePorts := dynaport.Get(1)
 		remotingPort := nodePorts[0]
-		host := "localhost"
+		host := "127.0.0.1"
 
 		// create the actor system
 		sys, err := NewActorSystem("test",
@@ -1793,7 +1793,7 @@ func TestReceiveContext(t *testing.T) {
 
 		op := func() {
 			context.RemoteBatchAsk(&goaktpb.Address{
-				Host: "localhost",
+				Host: "127.0.0.1",
 				Port: int32(remotingPort),
 				Name: actorName2,
 				Id:   "",
@@ -1816,7 +1816,7 @@ func TestReceiveContext(t *testing.T) {
 		// generate the remoting port
 		nodePorts := dynaport.Get(1)
 		remotingPort := nodePorts[0]
-		host := "localhost"
+		host := "127.0.0.1"
 
 		// create the actor system
 		sys, err := NewActorSystem("test",
@@ -1875,7 +1875,7 @@ func TestReceiveContext(t *testing.T) {
 		// generate the remoting port
 		nodePorts := dynaport.Get(1)
 		remotingPort := nodePorts[0]
-		host := "localhost"
+		host := "127.0.0.1"
 
 		// create the actor system
 		sys, err := NewActorSystem("test",

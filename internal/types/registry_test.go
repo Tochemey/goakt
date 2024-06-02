@@ -50,7 +50,7 @@ func TestRegistry(t *testing.T) {
 		_, ok := registry.Type(obj)
 		assert.True(t, ok)
 
-		_, ok = registry.TypeOf("testStruct")
+		_, ok = registry.TypeOf("types.testStruct")
 		assert.True(t, ok)
 		assert.Len(t, registry.TypesMap(), 1)
 

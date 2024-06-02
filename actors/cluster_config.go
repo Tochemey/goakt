@@ -33,7 +33,8 @@ import (
 type ClusterConfig struct {
 	discovery          discovery.Provider
 	partitionCount     uint64
-	minimumPeersQuorum uint16
+	minimumPeersQuorum uint32
+	replicaCount       uint32
 	gossipPort         int
 	peersPort          int
 	kinds              []Actor
@@ -47,6 +48,7 @@ func NewClusterConfig() *ClusterConfig {
 	return &ClusterConfig{
 		kinds:              []Actor{new(fnActor)},
 		minimumPeersQuorum: 1,
+		replicaCount:       2,
 	}
 }
 
@@ -57,7 +59,7 @@ func (x *ClusterConfig) WithPartitionCount(count uint64) *ClusterConfig {
 }
 
 // WithMinimumPeersQuorum sets the cluster config minimum peers quorum
-func (x *ClusterConfig) WithMinimumPeersQuorum(minimumQuorum uint16) *ClusterConfig {
+func (x *ClusterConfig) WithMinimumPeersQuorum(minimumQuorum uint32) *ClusterConfig {
 	x.minimumPeersQuorum = minimumQuorum
 	return x
 }
@@ -86,6 +88,17 @@ func (x *ClusterConfig) WithPeersPort(peersPort int) *ClusterConfig {
 	return x
 }
 
+// WithReplicaCount sets the cluster replica count.
+func (x *ClusterConfig) WithReplicaCount(count uint32) *ClusterConfig {
+	x.replicaCount = count
+	return x
+}
+
+// ReplicaCount returns the replica count.
+func (x *ClusterConfig) ReplicaCount() uint32 {
+	return x.replicaCount
+}
+
 // Discovery returns the discovery provider
 func (x *ClusterConfig) Discovery() discovery.Provider {
 	return x.discovery
@@ -97,7 +110,7 @@ func (x *ClusterConfig) PartitionCount() uint64 {
 }
 
 // MinimumPeersQuorum returns the minimum peers quorum
-func (x *ClusterConfig) MinimumPeersQuorum() uint16 {
+func (x *ClusterConfig) MinimumPeersQuorum() uint32 {
 	return x.minimumPeersQuorum
 }
 
@@ -126,5 +139,7 @@ func (x *ClusterConfig) Validate() error {
 		AddAssertion(x.gossipPort > 0, "gossip port is invalid").
 		AddAssertion(x.peersPort > 0, "peers port is invalid").
 		AddAssertion(len(x.kinds) > 1, "actor kinds are not defined").
+		AddAssertion(x.replicaCount > 0, "actor replicaCount is invalid").
+		AddAssertion(x.replicaCount <= x.minimumPeersQuorum, "replica count should be less or equal to minimum peers quorum").
 		Validate()
 }

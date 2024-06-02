@@ -74,7 +74,7 @@ var runCmd = &cobra.Command{
 			goakt.WithLogger(logger),
 			goakt.WithActorInitMaxRetries(3),
 			goakt.WithRemoting(host, int32(config.RemotingPort)),
-			goakt.WithClustering(disco, 20, 1, config.GossipPort, config.PeersPort, new(actors.AccountEntity)))
+			goakt.WithClustering(disco, 20, 2, config.GossipPort, config.PeersPort, new(actors.AccountEntity)))
 		// handle the error
 		if err != nil {
 			logger.Panic(err)

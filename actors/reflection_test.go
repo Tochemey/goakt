@@ -46,7 +46,7 @@ func TestReflection(t *testing.T) {
 			reflection := newReflection(newRegistry)
 
 			// create an instance of test actor from the string testActor
-			actual, err := reflection.ActorFrom("testActor")
+			actual, err := reflection.ActorFrom("actors.testActor")
 			assert.NoError(t, err)
 			assert.NotNil(t, actual)
 			assert.IsType(t, new(testActor), actual)
@@ -55,7 +55,7 @@ func TestReflection(t *testing.T) {
 			newRegistry := types.NewRegistry()
 			// create an instance of reflection
 			reflection := newReflection(newRegistry)
-			actual, err := reflection.ActorFrom("fakeActor")
+			actual, err := reflection.ActorFrom("actors.fakeActor")
 			assert.Error(t, err)
 			assert.Nil(t, actual)
 		})
@@ -66,7 +66,7 @@ func TestReflection(t *testing.T) {
 			tl.Register(nonActor)
 			// create an instance of reflection
 			reflection := newReflection(tl)
-			actual, err := reflection.ActorFrom("fakeActor")
+			actual, err := reflection.ActorFrom("actors.fakeActor")
 			assert.Error(t, err)
 			assert.Nil(t, actual)
 		})

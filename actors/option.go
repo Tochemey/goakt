@@ -114,12 +114,18 @@ func WithRemoting(host string, port int32) Option {
 func WithClustering(provider discovery.Provider, partitionCount uint64, minimumPeersQuorum uint16, gossipPort, peersPort int, kinds ...Actor) Option {
 	return OptionFunc(func(a *actorSystem) {
 		a.clusterEnabled.Store(true)
+		replicaCount := 2
+		if minimumPeersQuorum < 2 {
+			replicaCount = 1
+		}
+
 		a.clusterConfig = NewClusterConfig().
 			WithDiscovery(provider).
 			WithPartitionCount(partitionCount).
 			WithGossipPort(gossipPort).
 			WithPeersPort(peersPort).
-			WithMinimumPeersQuorum(minimumPeersQuorum).
+			WithMinimumPeersQuorum(uint32(minimumPeersQuorum)).
+			WithReplicaCount(uint32(replicaCount)).
 			WithKinds(kinds...)
 	})
 }

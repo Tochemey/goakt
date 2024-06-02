@@ -92,8 +92,15 @@ func WithHasher(hasher hash.Hasher) Option {
 }
 
 // WithMinimumPeersQuorum sets the minimum number of nodes to form a quorum
-func WithMinimumPeersQuorum(count uint16) Option {
+func WithMinimumPeersQuorum(count uint32) Option {
 	return OptionFunc(func(eng *Engine) {
 		eng.minimumPeersQuorum = count
+	})
+}
+
+// WithReplicaCount sets replica count
+func WithReplicaCount(count uint32) Option {
+	return OptionFunc(func(eng *Engine) {
+		eng.replicaCount = count
 	})
 }

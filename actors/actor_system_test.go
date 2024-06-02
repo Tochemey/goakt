@@ -168,7 +168,7 @@ func TestActorSystem(t *testing.T) {
 		remotingPort := nodePorts[2]
 
 		logger := log.New(log.DebugLevel, os.Stdout)
-		host := "localhost"
+		host := "127.0.0.1"
 
 		// define discovered addresses
 		addrs := []string{
@@ -257,7 +257,7 @@ func TestActorSystem(t *testing.T) {
 		remotingPort := dynaport.Get(1)[0]
 
 		logger := log.New(log.DebugLevel, os.Stdout)
-		host := "localhost"
+		host := "127.0.0.1"
 
 		newActorSystem, err := NewActorSystem(
 			"test",
@@ -343,7 +343,7 @@ func TestActorSystem(t *testing.T) {
 		remotingPort := dynaport.Get(1)[0]
 
 		logger := log.New(log.DebugLevel, os.Stdout)
-		host := "localhost"
+		host := "127.0.0.1"
 
 		newActorSystem, err := NewActorSystem(
 			"test",
@@ -496,7 +496,7 @@ func TestActorSystem(t *testing.T) {
 		remotingPort := dynaport.Get(1)[0]
 
 		logger := log.New(log.DebugLevel, os.Stdout)
-		host := "localhost"
+		host := "127.0.0.1"
 
 		newActorSystem, err := NewActorSystem(
 			"test",
@@ -567,7 +567,7 @@ func TestActorSystem(t *testing.T) {
 		remotingPort := dynaport.Get(1)[0]
 
 		logger := log.New(log.DebugLevel, os.Stdout)
-		host := "localhost"
+		host := "127.0.0.1"
 
 		newActorSystem, err := NewActorSystem(
 			"test",
@@ -611,7 +611,7 @@ func TestActorSystem(t *testing.T) {
 		remotingPort := dynaport.Get(1)[0]
 
 		logger := log.New(log.DebugLevel, os.Stdout)
-		host := "localhost"
+		host := "127.0.0.1"
 
 		newActorSystem, err := NewActorSystem(
 			"test",
@@ -632,7 +632,7 @@ func TestActorSystem(t *testing.T) {
 		remotingPort := dynaport.Get(1)[0]
 
 		logger := log.New(log.DebugLevel, os.Stdout)
-		host := "localhost"
+		host := "127.0.0.1"
 
 		newActorSystem, err := NewActorSystem(
 			"test",
@@ -651,7 +651,7 @@ func TestActorSystem(t *testing.T) {
 		remotingPort := dynaport.Get(1)[0]
 
 		logger := log.New(log.DebugLevel, os.Stdout)
-		host := "localhost"
+		host := "127.0.0.1"
 
 		newActorSystem, err := NewActorSystem(
 			"test",
@@ -933,7 +933,7 @@ func TestActorSystem(t *testing.T) {
 		remotingPort := nodePorts[2]
 
 		logger := log.New(log.DebugLevel, os.Stdout)
-		host := "localhost"
+		host := "127.0.0.1"
 
 		// define discovered addresses
 		addrs := []string{
@@ -1158,7 +1158,7 @@ func TestActorSystem(t *testing.T) {
 		remotingPort := nodePorts[2]
 
 		logger := log.New(log.DebugLevel, os.Stdout)
-		host := "localhost"
+		host := "127.0.0.1"
 
 		// define discovered addresses
 		addrs := []string{
@@ -1409,5 +1409,80 @@ func TestActorSystem(t *testing.T) {
 		err := system.Start(ctx)
 		require.Error(t, err)
 		assert.EqualError(t, err, "clustering needs remoting to be enabled")
+	})
+	t.Run("With RemoteSpawn with clustering enabled", func(t *testing.T) {
+		ctx := context.TODO()
+		nodePorts := dynaport.Get(3)
+		gossipPort := nodePorts[0]
+		clusterPort := nodePorts[1]
+		remotingPort := nodePorts[2]
+
+		logger := log.New(log.DebugLevel, os.Stdout)
+		host := "127.0.0.1"
+
+		// define discovered addresses
+		addrs := []string{
+			net.JoinHostPort(host, strconv.Itoa(gossipPort)),
+		}
+
+		// mock the discovery provider
+		provider := new(testkit.Provider)
+		newActorSystem, err := NewActorSystem(
+			"test",
+			WithPassivationDisabled(),
+			WithLogger(logger),
+			WithReplyTimeout(time.Minute),
+			WithRemoting(host, int32(remotingPort)),
+			WithClustering(provider, 9, 1, gossipPort, clusterPort, new(exchanger)))
+		require.NoError(t, err)
+
+		provider.EXPECT().ID().Return("testDisco")
+		provider.EXPECT().Initialize().Return(nil)
+		provider.EXPECT().Register().Return(nil)
+		provider.EXPECT().Deregister().Return(nil)
+		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
+		provider.EXPECT().Close().Return(nil)
+
+		// start the actor system
+		err = newActorSystem.Start(ctx)
+		require.NoError(t, err)
+
+		// wait for the cluster to start
+		time.Sleep(time.Second)
+
+		// create an actor
+		actorName := "actorID"
+		// fetching the address of the that actor should return nil address
+		addr, err := RemoteLookup(ctx, host, remotingPort, actorName)
+		require.NoError(t, err)
+		require.Nil(t, addr)
+
+		// spawn the remote actor
+		err = RemoteSpawn(ctx, host, remotingPort, actorName, "actors.exchanger")
+		require.NoError(t, err)
+
+		// re-fetching the address of the actor should return not nil address after start
+		addr, err = RemoteLookup(ctx, host, remotingPort, actorName)
+		require.NoError(t, err)
+		require.NotNil(t, addr)
+
+		// send the message to exchanger actor one using remote messaging
+		reply, err := RemoteAsk(ctx, addr, new(testpb.TestReply))
+
+		require.NoError(t, err)
+		require.NotNil(t, reply)
+		require.True(t, reply.MessageIs(new(testpb.Reply)))
+
+		actual := new(testpb.Reply)
+		err = reply.UnmarshalTo(actual)
+		require.NoError(t, err)
+
+		expected := new(testpb.Reply)
+		assert.True(t, proto.Equal(expected, actual))
+
+		t.Cleanup(func() {
+			err = newActorSystem.Stop(ctx)
+			assert.NoError(t, err)
+		})
 	})
 }
