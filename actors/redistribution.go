@@ -82,6 +82,8 @@ func (x *actorSystem) redistribute(ctx context.Context, event *cluster.Event) er
 		chunks       [][]*internalpb.WireActor
 	)
 
+	x.logger.Debugf("total actors: %d on node left[%s]", actorsCount, nodeLeft.GetAddress())
+
 	if actorsCount < totalPeers {
 		leaderActors = peerState.GetActors()
 	} else {
@@ -100,6 +102,7 @@ func (x *actorSystem) redistribute(ctx context.Context, event *cluster.Event) er
 
 	eg.Go(func() error {
 		for _, wireActor := range leaderActors {
+			x.logger.Debugf("re-creating actor=[(%s) of type (%s)]", wireActor.GetActorName(), wireActor.GetActorType())
 			actor, err := x.reflection.ActorFrom(wireActor.GetActorType())
 			if err != nil {
 				return err
@@ -108,6 +111,8 @@ func (x *actorSystem) redistribute(ctx context.Context, event *cluster.Event) er
 			if _, err = x.Spawn(ctx, wireActor.GetActorName(), actor); err != nil {
 				return err
 			}
+
+			x.logger.Debugf("actor=[(%s) of type (%s)] successfully re-created", wireActor.GetActorName(), wireActor.GetActorType())
 		}
 		return nil
 	})
@@ -126,9 +131,11 @@ func (x *actorSystem) redistribute(ctx context.Context, event *cluster.Event) er
 			_ = proto.Unmarshal(bytea, state)
 
 			for _, actor := range actors {
-				if err := RemoteSpawn(ctx, state.GetHost(), int(state.GetRemotingPort()), actor.GetActorName(), actor.GetActorPath()); err != nil {
+				x.logger.Debugf("re-creating actor=[(%s) of type (%s)]", actor.GetActorName(), actor.GetActorType())
+				if err := RemoteSpawn(ctx, state.GetHost(), int(state.GetRemotingPort()), actor.GetActorName(), actor.GetActorType()); err != nil {
 					return err
 				}
+				x.logger.Debugf("actor=[(%s) of type (%s)] successfully re-created", actor.GetActorName(), actor.GetActorType())
 			}
 		}
 		return nil

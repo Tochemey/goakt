@@ -1395,6 +1395,8 @@ func (x *actorSystem) redistributionLoop() {
 
 func (x *actorSystem) processPeerSync(ctx context.Context, peer *cluster.Peer) error {
 	peerAddress := net.JoinHostPort(peer.Host, strconv.Itoa(peer.Port))
+
+	x.logger.Infof("processing peer sync:(%s)", peerAddress)
 	peerSync, err := x.cluster.GetPeerSync(ctx, peerAddress)
 	if err != nil {
 		if errors.Is(err, cluster.ErrPeerSyncNotFound) {
@@ -1440,11 +1442,15 @@ func (x *actorSystem) processPeerSync(ctx context.Context, peer *cluster.Peer) e
 		actors = append(actors, actor)
 	}
 
-	// amend the state actors list
-	peerState.Actors = append(peerState.Actors, actors...)
+	// set the state actors list
+	peerState.Actors = actors
+
+	x.logger.Debugf("peer (%s) actors count (%d)", peerAddress, len(actors))
 
 	// no need to handle the error
 	bytea, _ := proto.Marshal(peerState)
 	x.peersCache.Set(peerAddress, bytea)
+
+	x.logger.Infof("peer sync(%s) successfully processed", peerAddress)
 	return nil
 }

@@ -61,7 +61,7 @@ const (
 func (x EventType) String() string {
 	switch x {
 	case NodeJoined:
-		return "NodJoined"
+		return "NodeJoined"
 	case NodeLeft:
 		return "NodeLeft"
 	default:
@@ -263,7 +263,7 @@ func (n *Engine) Start(ctx context.Context) error {
 	n.kvStore = dmp
 
 	// create a subscriber to consume to cluster events
-	ps, err := n.client.NewPubSub()
+	ps, err := n.client.NewPubSub(olric.ToAddress(n.host.PeersAddress()))
 	if err != nil {
 		logger.Error(errors.Wrapf(err, "failed to start the cluster Engine on host=(%s)", n.name))
 		return n.server.Shutdown(ctx)
