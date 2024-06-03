@@ -101,18 +101,20 @@ func (x *actorSystem) redistribute(ctx context.Context, event *cluster.Event) er
 	eg.SetLimit(2)
 
 	eg.Go(func() error {
-		for _, wireActor := range leaderActors {
-			x.logger.Debugf("re-creating actor=[(%s) of type (%s)]", wireActor.GetActorName(), wireActor.GetActorType())
-			actor, err := x.reflection.ActorFrom(wireActor.GetActorType())
+		for _, actor := range leaderActors {
+			x.logger.Debugf("re-creating actor=[(%s) of type (%s)]", actor.GetActorName(), actor.GetActorType())
+			iactor, err := x.reflection.ActorFrom(actor.GetActorType())
 			if err != nil {
+				x.logger.Error(err)
 				return err
 			}
 
-			if _, err = x.Spawn(ctx, wireActor.GetActorName(), actor); err != nil {
+			if _, err = x.Spawn(ctx, actor.GetActorName(), iactor); err != nil {
+				x.logger.Error(err)
 				return err
 			}
 
-			x.logger.Debugf("actor=[(%s) of type (%s)] successfully re-created", wireActor.GetActorName(), wireActor.GetActorType())
+			x.logger.Debugf("actor=[(%s) of type (%s)] successfully re-created", actor.GetActorName(), actor.GetActorType())
 		}
 		return nil
 	})
@@ -133,6 +135,7 @@ func (x *actorSystem) redistribute(ctx context.Context, event *cluster.Event) er
 			for _, actor := range actors {
 				x.logger.Debugf("re-creating actor=[(%s) of type (%s)]", actor.GetActorName(), actor.GetActorType())
 				if err := RemoteSpawn(ctx, state.GetHost(), int(state.GetRemotingPort()), actor.GetActorName(), actor.GetActorType()); err != nil {
+					x.logger.Error(err)
 					return err
 				}
 				x.logger.Debugf("actor=[(%s) of type (%s)] successfully re-created", actor.GetActorName(), actor.GetActorType())

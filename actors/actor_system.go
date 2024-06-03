@@ -652,8 +652,8 @@ func (x *actorSystem) ActorOf(ctx context.Context, actorName string) (addr *goak
 	}
 
 	// first check whether the actor exist locally
-	items := x.actors.pids()
-	for _, actorRef := range items {
+	pids := x.actors.pids()
+	for _, actorRef := range pids {
 		if actorRef.ActorPath().Name() == actorName {
 			return actorRef.ActorPath().RemoteAddress(), actorRef, nil
 		}
@@ -661,7 +661,7 @@ func (x *actorSystem) ActorOf(ctx context.Context, actorName string) (addr *goak
 
 	// check in the cluster
 	if x.cluster != nil || x.clusterEnabled.Load() {
-		wireActor, err := x.cluster.GetActor(spanCtx, actorName)
+		actor, err := x.cluster.GetActor(spanCtx, actorName)
 		if err != nil {
 			if errors.Is(err, cluster.ErrActorNotFound) {
 				x.logger.Infof("actor=%s not found", actorName)
@@ -677,7 +677,7 @@ func (x *actorSystem) ActorOf(ctx context.Context, actorName string) (addr *goak
 			return nil, nil, e
 		}
 
-		return wireActor.GetActorAddress(), nil, nil
+		return actor.GetActorAddress(), nil, nil
 	}
 
 	if x.remotingEnabled.Load() {
@@ -703,10 +703,10 @@ func (x *actorSystem) LocalActor(actorName string) (PID, error) {
 		return nil, ErrActorSystemNotStarted
 	}
 
-	items := x.actors.pids()
-	for _, actorRef := range items {
-		if actorRef.ActorPath().Name() == actorName {
-			return actorRef, nil
+	pids := x.actors.pids()
+	for _, pid := range pids {
+		if pid.ActorPath().Name() == actorName {
+			return pid, nil
 		}
 	}
 
@@ -738,7 +738,7 @@ func (x *actorSystem) RemoteActor(ctx context.Context, actorName string) (addr *
 		return nil, e
 	}
 
-	wireActor, err := x.cluster.GetActor(spanCtx, actorName)
+	actor, err := x.cluster.GetActor(spanCtx, actorName)
 	if err != nil {
 		if errors.Is(err, cluster.ErrActorNotFound) {
 			x.logger.Infof("actor=%s not found", actorName)
@@ -754,7 +754,7 @@ func (x *actorSystem) RemoteActor(ctx context.Context, actorName string) (addr *
 		return nil, e
 	}
 
-	return wireActor.GetActorAddress(), nil
+	return actor.GetActorAddress(), nil
 }
 
 // Start starts the actor system

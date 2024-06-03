@@ -168,7 +168,7 @@ func (s *AccountService) GetAccount(ctx context.Context, c *connect.Request[samp
 
 	if pid != nil {
 		s.logger.Info("actor is found locally...")
-		message, err = actors.Ask(ctx, pid, command, time.Second)
+		message, err = actors.Ask(ctx, pid, command, actors.DefaultReplyTimeout)
 		if err != nil {
 			return nil, connect.NewError(connect.CodeInternal, err)
 		}
