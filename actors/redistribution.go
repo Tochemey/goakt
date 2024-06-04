@@ -63,7 +63,9 @@ func (x *actorSystem) redistribute(ctx context.Context, event *cluster.Event) er
 		return err
 	}
 
-	bytea, ok := x.peersCache.Get(nodeLeft.GetAddress())
+	x.peersCacheMu.RLock()
+	bytea, ok := x.peersCache[nodeLeft.GetAddress()]
+	x.peersCacheMu.RUnlock()
 	if !ok {
 		return ErrPeerNotFound
 	}
@@ -98,7 +100,6 @@ func (x *actorSystem) redistribute(ctx context.Context, event *cluster.Event) er
 	}
 
 	eg, ctx := errgroup.WithContext(ctx)
-	eg.SetLimit(2)
 
 	eg.Go(func() error {
 		for _, actor := range leaderActors {
@@ -128,7 +129,11 @@ func (x *actorSystem) redistribute(ctx context.Context, event *cluster.Event) er
 		for i := 1; i < len(chunks); i++ {
 			actors := chunks[i]
 			peer := peers[i-1]
-			bytea, _ := x.peersCache.Get(net.JoinHostPort(peer.Host, strconv.Itoa(peer.Port)))
+
+			x.peersCacheMu.RLock()
+			bytea := x.peersCache[net.JoinHostPort(peer.Host, strconv.Itoa(peer.Port))]
+			x.peersCacheMu.RUnlock()
+
 			state := new(internalpb.PeerState)
 			_ = proto.Unmarshal(bytea, state)
 

@@ -153,13 +153,7 @@ func TestSingleNode(t *testing.T) {
 		actor := &internalpb.WireActor{ActorName: actorName}
 
 		// replicate the actor in the Node
-		peerSync := &internalpb.PeersSync{
-			Host:         host,
-			RemotingPort: int32(remotingPort),
-			PeersPort:    int32(clusterPort),
-			Actor:        actor,
-		}
-		err = cluster.PutPeerSync(ctx, peerSync)
+		err = cluster.PutActor(ctx, actor)
 		require.NoError(t, err)
 
 		// fetch the actor
@@ -295,15 +289,8 @@ func TestSingleNode(t *testing.T) {
 		// create an actor
 		actorName := uuid.NewString()
 		actor := &internalpb.WireActor{ActorName: actorName}
-
-		peerSync := &internalpb.PeersSync{
-			Host:         host,
-			RemotingPort: int32(remotingPort),
-			PeersPort:    int32(peersPort),
-			Actor:        actor,
-		}
 		// replicate the actor in the Node
-		err = cluster.PutPeerSync(ctx, peerSync)
+		err = cluster.PutActor(ctx, actor)
 		require.NoError(t, err)
 
 		// fetch the actor

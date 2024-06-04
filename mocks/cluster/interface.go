@@ -205,20 +205,20 @@ func (_c *Interface_GetPartition_Call) RunAndReturn(run func(string) int) *Inter
 	return _c
 }
 
-// GetPeerSync provides a mock function with given fields: ctx, peerAddress
-func (_m *Interface) GetPeerSync(ctx context.Context, peerAddress string) (*internalpb.PeersSync, error) {
+// GetState provides a mock function with given fields: ctx, peerAddress
+func (_m *Interface) GetState(ctx context.Context, peerAddress string) (*internalpb.PeerState, error) {
 	ret := _m.Called(ctx, peerAddress)
 
-	var r0 *internalpb.PeersSync
+	var r0 *internalpb.PeerState
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, string) (*internalpb.PeersSync, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, string) (*internalpb.PeerState, error)); ok {
 		return rf(ctx, peerAddress)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, string) *internalpb.PeersSync); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, string) *internalpb.PeerState); ok {
 		r0 = rf(ctx, peerAddress)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*internalpb.PeersSync)
+			r0 = ret.Get(0).(*internalpb.PeerState)
 		}
 	}
 
@@ -231,31 +231,31 @@ func (_m *Interface) GetPeerSync(ctx context.Context, peerAddress string) (*inte
 	return r0, r1
 }
 
-// Interface_GetPeerSync_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetPeerSync'
-type Interface_GetPeerSync_Call struct {
+// Interface_GetState_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetState'
+type Interface_GetState_Call struct {
 	*mock.Call
 }
 
-// GetPeerSync is a helper method to define mock.On call
+// GetState is a helper method to define mock.On call
 //   - ctx context.Context
 //   - peerAddress string
-func (_e *Interface_Expecter) GetPeerSync(ctx interface{}, peerAddress interface{}) *Interface_GetPeerSync_Call {
-	return &Interface_GetPeerSync_Call{Call: _e.mock.On("GetPeerSync", ctx, peerAddress)}
+func (_e *Interface_Expecter) GetState(ctx interface{}, peerAddress interface{}) *Interface_GetState_Call {
+	return &Interface_GetState_Call{Call: _e.mock.On("GetState", ctx, peerAddress)}
 }
 
-func (_c *Interface_GetPeerSync_Call) Run(run func(ctx context.Context, peerAddress string)) *Interface_GetPeerSync_Call {
+func (_c *Interface_GetState_Call) Run(run func(ctx context.Context, peerAddress string)) *Interface_GetState_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(string))
 	})
 	return _c
 }
 
-func (_c *Interface_GetPeerSync_Call) Return(_a0 *internalpb.PeersSync, _a1 error) *Interface_GetPeerSync_Call {
+func (_c *Interface_GetState_Call) Return(_a0 *internalpb.PeerState, _a1 error) *Interface_GetState_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *Interface_GetPeerSync_Call) RunAndReturn(run func(context.Context, string) (*internalpb.PeersSync, error)) *Interface_GetPeerSync_Call {
+func (_c *Interface_GetState_Call) RunAndReturn(run func(context.Context, string) (*internalpb.PeerState, error)) *Interface_GetState_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -450,13 +450,13 @@ func (_c *Interface_Peers_Call) RunAndReturn(run func(context.Context) ([]*inter
 	return _c
 }
 
-// PutPeerSync provides a mock function with given fields: ctx, data
-func (_m *Interface) PutPeerSync(ctx context.Context, data *internalpb.PeersSync) error {
-	ret := _m.Called(ctx, data)
+// PutActor provides a mock function with given fields: ctx, actor
+func (_m *Interface) PutActor(ctx context.Context, actor *internalpb.WireActor) error {
+	ret := _m.Called(ctx, actor)
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.PeersSync) error); ok {
-		r0 = rf(ctx, data)
+	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.WireActor) error); ok {
+		r0 = rf(ctx, actor)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -464,31 +464,31 @@ func (_m *Interface) PutPeerSync(ctx context.Context, data *internalpb.PeersSync
 	return r0
 }
 
-// Interface_PutPeerSync_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'PutPeerSync'
-type Interface_PutPeerSync_Call struct {
+// Interface_PutActor_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'PutActor'
+type Interface_PutActor_Call struct {
 	*mock.Call
 }
 
-// PutPeerSync is a helper method to define mock.On call
+// PutActor is a helper method to define mock.On call
 //   - ctx context.Context
-//   - data *internalpb.PeersSync
-func (_e *Interface_Expecter) PutPeerSync(ctx interface{}, data interface{}) *Interface_PutPeerSync_Call {
-	return &Interface_PutPeerSync_Call{Call: _e.mock.On("PutPeerSync", ctx, data)}
+//   - actor *internalpb.WireActor
+func (_e *Interface_Expecter) PutActor(ctx interface{}, actor interface{}) *Interface_PutActor_Call {
+	return &Interface_PutActor_Call{Call: _e.mock.On("PutActor", ctx, actor)}
 }
 
-func (_c *Interface_PutPeerSync_Call) Run(run func(ctx context.Context, data *internalpb.PeersSync)) *Interface_PutPeerSync_Call {
+func (_c *Interface_PutActor_Call) Run(run func(ctx context.Context, actor *internalpb.WireActor)) *Interface_PutActor_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*internalpb.PeersSync))
+		run(args[0].(context.Context), args[1].(*internalpb.WireActor))
 	})
 	return _c
 }
 
-func (_c *Interface_PutPeerSync_Call) Return(_a0 error) *Interface_PutPeerSync_Call {
+func (_c *Interface_PutActor_Call) Return(_a0 error) *Interface_PutActor_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *Interface_PutPeerSync_Call) RunAndReturn(run func(context.Context, *internalpb.PeersSync) error) *Interface_PutPeerSync_Call {
+func (_c *Interface_PutActor_Call) RunAndReturn(run func(context.Context, *internalpb.WireActor) error) *Interface_PutActor_Call {
 	_c.Call.Return(run)
 	return _c
 }

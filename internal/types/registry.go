@@ -27,8 +27,7 @@ package types
 import (
 	"reflect"
 	"strings"
-
-	"github.com/alphadose/haxmap"
+	"sync"
 )
 
 // Registry defines the types registry interface
@@ -48,7 +47,8 @@ type Registry interface {
 }
 
 type registry struct {
-	typesMap *haxmap.Map[string, reflect.Type]
+	mu       *sync.RWMutex
+	typesMap map[string]reflect.Type
 }
 
 var _ Registry = (*registry)(nil)
@@ -56,32 +56,31 @@ var _ Registry = (*registry)(nil)
 // NewRegistry creates a new types registry
 func NewRegistry() Registry {
 	return &registry{
-		// TODO need to check with memory footprint here since we change the map engine
-		typesMap: haxmap.New[string, reflect.Type](100),
+		mu:       &sync.RWMutex{},
+		typesMap: make(map[string]reflect.Type),
 	}
 }
 
 // Deregister removes the registered object from the registry
 func (r *registry) Deregister(v any) {
-	r.typesMap.Del(NameOf(v))
+	r.mu.Lock()
+	delete(r.typesMap, NameOf(v))
+	r.mu.Unlock()
 }
 
 // Exists return true when a given object is in the registry
 func (r *registry) Exists(v any) bool {
-	_, ok := r.typesMap.Get(NameOf(v))
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	_, ok := r.typesMap[NameOf(v)]
 	return ok
 }
 
 // TypesMap returns the list of registered at any point in time
 func (r *registry) TypesMap() map[string]reflect.Type {
-	out := make(map[string]reflect.Type, r.typesMap.Len())
-	r.typesMap.ForEach(func(s string, t reflect.Type) bool {
-		if len(out) == int(r.typesMap.Len()) {
-			return false
-		}
-		out[s] = t
-		return true
-	})
+	r.mu.Lock()
+	out := r.typesMap
+	r.mu.Unlock()
 	return out
 }
 
@@ -89,18 +88,24 @@ func (r *registry) TypesMap() map[string]reflect.Type {
 func (r *registry) Register(v any) {
 	rtype := Of(v)
 	name := NameOf(v)
-	r.typesMap.Set(name, rtype)
+	r.mu.Lock()
+	r.typesMap[name] = rtype
+	r.mu.Unlock()
 }
 
 // Type returns the type of object
 func (r *registry) Type(v any) (reflect.Type, bool) {
-	out, ok := r.typesMap.Get(NameOf(v))
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out, ok := r.typesMap[NameOf(v)]
 	return out, ok
 }
 
 // TypeOf returns the type of object name
 func (r *registry) TypeOf(name string) (reflect.Type, bool) {
-	out, ok := r.typesMap.Get(lowTrim(name))
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out, ok := r.typesMap[lowTrim(name)]
 	return out, ok
 }
 

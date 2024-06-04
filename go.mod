@@ -5,7 +5,6 @@ go 1.21
 require (
 	connectrpc.com/connect v1.16.2
 	connectrpc.com/otelconnect v0.7.0
-	github.com/alphadose/haxmap v1.4.0
 	github.com/buraksezer/olric v0.5.6-0.20240510193155-81e12546eb39
 	github.com/caarlos0/env/v11 v11.0.1
 	github.com/deckarep/golang-set/v2 v2.6.0
@@ -103,7 +102,6 @@ require (
 	github.com/vmihailenco/msgpack/v5 v5.4.1 // indirect
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
 	golang.org/x/crypto v0.23.0 // indirect
-	golang.org/x/exp v0.0.0-20240506185415-9bf2ced13842 // indirect
 	golang.org/x/mod v0.17.0 // indirect
 	golang.org/x/oauth2 v0.20.0 // indirect
 	golang.org/x/sys v0.20.0 // indirect

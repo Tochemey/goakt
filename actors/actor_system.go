@@ -36,7 +36,6 @@ import (
 
 	"connectrpc.com/connect"
 	"connectrpc.com/otelconnect"
-	"github.com/alphadose/haxmap"
 	"github.com/google/uuid"
 	"github.com/pkg/errors"
 	"go.opentelemetry.io/otel/codes"
@@ -211,7 +210,8 @@ type actorSystem struct {
 	registry   types.Registry
 	reflection reflection
 
-	peersCache         *haxmap.Map[string, []byte]
+	peersCacheMu       *sync.RWMutex
+	peersCache         map[string][]byte
 	clusterConfig      *ClusterConfig
 	redistributionChan chan *cluster.Event
 }
@@ -250,7 +250,8 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		clusterEventsChan:   make(chan *cluster.Event, 1),
 		registry:            types.NewRegistry(),
 		clusterSyncStopSig:  make(chan types.Unit, 1),
-		peersCache:          haxmap.New[string, []byte](100), // TODO need to check with memory footprint here since we change the map engine
+		peersCacheMu:        &sync.RWMutex{},
+		peersCache:          make(map[string][]byte),
 	}
 
 	system.started.Store(false)
@@ -1139,7 +1140,7 @@ func (x *actorSystem) enableClustering(ctx context.Context) error {
 
 	go x.clusterEventsLoop()
 	go x.clusterReplicationLoop()
-	go x.peersSyncLoop()
+	go x.peersStateLoop()
 	go x.redistributionLoop()
 
 	x.logger.Info("clustering enabled...:)")
@@ -1285,14 +1286,7 @@ func (x *actorSystem) clusterReplicationLoop() {
 	for actor := range x.actorsChan {
 		if x.InCluster() {
 			ctx := context.Background()
-			peerSync := &internalpb.PeersSync{
-				Host:         x.remotingHost,
-				RemotingPort: x.remotingPort,
-				PeersPort:    int32(x.clusterConfig.PeersPort()),
-				Actor:        actor,
-			}
-
-			if err := x.cluster.PutPeerSync(ctx, peerSync); err != nil {
+			if err := x.cluster.PutActor(ctx, actor); err != nil {
 				x.logger.Panic(err.Error())
 			}
 		}
@@ -1317,8 +1311,8 @@ func (x *actorSystem) clusterEventsLoop() {
 	}
 }
 
-// peersSyncLoop fetches the cluster peers' PeerSync and update the node peersCache
-func (x *actorSystem) peersSyncLoop() {
+// peersStateLoop fetches the cluster peers' PeerState and update the node peersCache
+func (x *actorSystem) peersStateLoop() {
 	x.logger.Info("peers state synchronization has started...")
 	ticker := time.NewTicker(10 * time.Second)
 	tickerStopSig := make(chan types.Unit, 1)
@@ -1327,7 +1321,7 @@ func (x *actorSystem) peersSyncLoop() {
 			select {
 			case <-ticker.C:
 				eg, ctx := errgroup.WithContext(context.Background())
-				workersCount := 5
+
 				peersChan := make(chan *cluster.Peer)
 
 				eg.Go(func() error {
@@ -1347,22 +1341,20 @@ func (x *actorSystem) peersSyncLoop() {
 					return nil
 				})
 
-				for i := 0; i < workersCount; i++ {
-					eg.Go(func() error {
-						for peer := range peersChan {
-							if err := x.processPeerSync(ctx, peer); err != nil {
-								return err
-							}
-							select {
-							case <-ctx.Done():
-								return ctx.Err()
-							default:
-								// pass
-							}
+				eg.Go(func() error {
+					for peer := range peersChan {
+						if err := x.processPeerState(ctx, peer); err != nil {
+							return err
 						}
-						return nil
-					})
-				}
+						select {
+						case <-ctx.Done():
+							return ctx.Err()
+						default:
+							// pass
+						}
+					}
+					return nil
+				})
 
 				if err := eg.Wait(); err != nil {
 					x.logger.Error(err)
@@ -1393,12 +1385,15 @@ func (x *actorSystem) redistributionLoop() {
 	}
 }
 
-// processPeerSync processes a given peer synchronization record.
-func (x *actorSystem) processPeerSync(ctx context.Context, peer *cluster.Peer) error {
+// processPeerState processes a given peer synchronization record.
+func (x *actorSystem) processPeerState(ctx context.Context, peer *cluster.Peer) error {
+	x.peersCacheMu.Lock()
+	defer x.peersCacheMu.Unlock()
+
 	peerAddress := net.JoinHostPort(peer.Host, strconv.Itoa(peer.Port))
 
 	x.logger.Infof("processing peer sync:(%s)", peerAddress)
-	peerSync, err := x.cluster.GetPeerSync(ctx, peerAddress)
+	peerState, err := x.cluster.GetState(ctx, peerAddress)
 	if err != nil {
 		if errors.Is(err, cluster.ErrPeerSyncNotFound) {
 			return nil
@@ -1407,51 +1402,16 @@ func (x *actorSystem) processPeerSync(ctx context.Context, peer *cluster.Peer) e
 		return err
 	}
 
-	peerState := new(internalpb.PeerState)
-	if bytea, ok := x.peersCache.Get(peerAddress); ok {
-		// no need to handle the error here because we pushed the data into the cache
-		_ = proto.Unmarshal(bytea, peerState)
-	}
-
-	// first time entry
-	if proto.Equal(peerState, new(internalpb.PeerState)) {
-		peerState = &internalpb.PeerState{
-			Host:         peerSync.GetHost(),
-			RemotingPort: peerSync.GetRemotingPort(),
-			PeersPort:    peerSync.GetPeersPort(),
-			Actors:       []*internalpb.WireActor{},
-		}
-	}
-
-	// avoid duplicate actors
-	actorsMap := make(map[string]*internalpb.WireActor)
-	for _, actor := range peerState.GetActors() {
-		path := actor.GetActorPath()
-		if path != "" {
-			actorsMap[path] = actor
-		}
-	}
-
-	path := peerSync.GetActor().GetActorPath()
-	if _, ok := actorsMap[path]; !ok {
-		actorsMap[path] = peerSync.GetActor()
-	}
-
-	// build the actors list
-	actors := make([]*internalpb.WireActor, 0, len(actorsMap))
-	for _, actor := range actorsMap {
-		actors = append(actors, actor)
-	}
-
-	// set the state actors list
-	peerState.Actors = actors
-
-	x.logger.Debugf("peer (%s) actors count (%d)", peerAddress, len(actors))
+	x.logger.Debugf("peer (%s) actors count (%d)", peerAddress, len(peerState.GetActors()))
 
 	// no need to handle the error
-	bytea, _ := proto.Marshal(peerState)
-	x.peersCache.Set(peerAddress, bytea)
+	bytea, err := proto.Marshal(peerState)
+	if err != nil {
+		x.logger.Error(err)
+		return err
+	}
 
+	x.peersCache[peerAddress] = bytea
 	x.logger.Infof("peer sync(%s) successfully processed", peerAddress)
 	return nil
 }

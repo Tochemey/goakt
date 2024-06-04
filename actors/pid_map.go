@@ -26,10 +26,10 @@ package actors
 
 import (
 	"reflect"
-
-	"github.com/alphadose/haxmap"
+	"sync"
 
 	"github.com/tochemey/goakt/v2/internal/types"
+	"go.uber.org/atomic"
 )
 
 type prop struct {
@@ -38,23 +38,28 @@ type prop struct {
 }
 
 type pidMap struct {
-	mappings *haxmap.Map[string, *prop]
+	mu       *sync.RWMutex
+	size     atomic.Int32
+	mappings map[string]*prop
 }
 
 func newPIDMap(cap int) *pidMap {
 	return &pidMap{
-		mappings: haxmap.New[string, *prop](uintptr(cap)),
+		mappings: make(map[string]*prop, cap),
+		mu:       &sync.RWMutex{},
 	}
 }
 
 // len returns the number of PIDs
 func (m *pidMap) len() int {
-	return int(m.mappings.Len())
+	return int(m.size.Load())
 }
 
 // get retrieves a pid by its address
 func (m *pidMap) get(path *Path) (pid PID, ok bool) {
-	prop, ok := m.mappings.Get(path.String())
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	prop, ok := m.mappings[path.String()]
 	if prop != nil {
 		pid = prop.pid
 		ok = true
@@ -64,6 +69,8 @@ func (m *pidMap) get(path *Path) (pid PID, ok bool) {
 
 // set sets a pid in the map
 func (m *pidMap) set(pid PID) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if pid != nil {
 		var rtype reflect.Type
 		handle := pid.ActorHandle()
@@ -71,43 +78,42 @@ func (m *pidMap) set(pid PID) {
 			rtype = types.Of(handle)
 		}
 
-		m.mappings.Set(pid.ActorPath().String(), &prop{
+		m.mappings[pid.ActorPath().String()] = &prop{
 			pid:   pid,
 			rtype: rtype,
-		})
+		}
+		m.size.Add(1)
 	}
 }
 
 // delete removes a pid from the map
 func (m *pidMap) delete(addr *Path) {
-	m.mappings.Del(addr.String())
+	m.mu.Lock()
+	delete(m.mappings, addr.String())
+	m.size.Add(-1)
+	m.mu.Unlock()
 }
 
 // pids returns all actors as a slice
 func (m *pidMap) pids() []PID {
+	m.mu.Lock()
 	var out []PID
-	m.mappings.ForEach(func(_ string, prop *prop) bool {
-		if len(out) == int(m.mappings.Len()) {
-			return false
-		}
+	for _, prop := range m.mappings {
 		out = append(out, prop.pid)
-		return true
-	})
+	}
+	m.mu.Unlock()
 	return out
 }
 
 func (m *pidMap) props() map[string]*prop {
-	out := make(map[string]*prop, m.mappings.Len())
-	m.mappings.ForEach(func(key string, prop *prop) bool {
-		if len(out) == int(m.mappings.Len()) {
-			return false
-		}
-		out[key] = prop
-		return true
-	})
+	m.mu.Lock()
+	out := m.mappings
+	m.mu.Unlock()
 	return out
 }
 
 func (m *pidMap) close() {
-	m.mappings.Clear()
+	m.mu.Lock()
+	m.mappings = make(map[string]*prop)
+	m.mu.Unlock()
 }
