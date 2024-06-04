@@ -24,7 +24,6 @@ message PeerState {
   string host = 1;
   // Specifies the remoting port
   int32 remoting_port = 2;
-  // Specifies the
   // Specifies the remoting host
   int32 peers_port = 3;
   // Specifies the list of actors

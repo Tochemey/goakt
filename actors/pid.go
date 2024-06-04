@@ -70,6 +70,8 @@ type PID interface {
 	// ID is a convenient method that returns the actor unique identifier
 	// An actor unique identifier is its address in the actor system.
 	ID() string
+	// Name returns the actor given name
+	Name() string
 	// Shutdown gracefully shuts down the given actor
 	// All current messages in the mailbox will be processed before the actor shutdown after a period of time
 	// that can be configured. All child actors will be gracefully shutdown.
@@ -343,6 +345,11 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 // An actor unique identifier is its address in the actor system.
 func (p *pid) ID() string {
 	return p.ActorPath().String()
+}
+
+// Name returns the actor given name
+func (p *pid) Name() string {
+	return p.ActorPath().Name()
 }
 
 // Equals is a convenient method to compare two PIDs

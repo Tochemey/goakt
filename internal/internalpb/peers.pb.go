@@ -31,7 +31,6 @@ type PeersSync struct {
 	Host string `protobuf:"bytes,1,opt,name=host,proto3" json:"host,omitempty"`
 	// Specifies the remoting port
 	RemotingPort int32 `protobuf:"varint,2,opt,name=remoting_port,json=remotingPort,proto3" json:"remoting_port,omitempty"`
-	// Specifies the
 	// Specifies the remoting host
 	PeersPort int32 `protobuf:"varint,3,opt,name=peers_port,json=peersPort,proto3" json:"peers_port,omitempty"`
 	// Specifies the wire actor
@@ -107,7 +106,6 @@ type PeerState struct {
 	Host string `protobuf:"bytes,1,opt,name=host,proto3" json:"host,omitempty"`
 	// Specifies the remoting port
 	RemotingPort int32 `protobuf:"varint,2,opt,name=remoting_port,json=remotingPort,proto3" json:"remoting_port,omitempty"`
-	// Specifies the
 	// Specifies the remoting host
 	PeersPort int32 `protobuf:"varint,3,opt,name=peers_port,json=peersPort,proto3" json:"peers_port,omitempty"`
 	// Specifies the list of actors

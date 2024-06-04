@@ -36,6 +36,7 @@ import (
 	"github.com/tochemey/goakt/v2/log"
 )
 
+// AccountEntity represents the immutable implementation of Actor
 type AccountEntity struct {
 	accountID string
 	balance   *atomic.Float64
@@ -44,26 +45,24 @@ type AccountEntity struct {
 	created   *atomic.Bool
 }
 
+// enforce compilation error
 var _ goakt.Actor = (*AccountEntity)(nil)
 
-// NewAccountEntity creates an instance of AccountEntity
-func NewAccountEntity(id string) *AccountEntity {
-	return &AccountEntity{
-		accountID: id,
-		balance:   atomic.NewFloat64(float64(0)),
-		created:   atomic.NewBool(false),
-	}
-}
-
+// PreStart is used to pre-set initial values for the actor
 func (p *AccountEntity) PreStart(ctx context.Context) error {
-	// set the log
+	p.created = atomic.NewBool(false)
+	p.balance = atomic.NewFloat64(float64(0))
 	p.logger = log.DefaultLogger
 	return nil
 }
 
+// Receive handles the messages sent to the actor
 func (p *AccountEntity) Receive(ctx goakt.ReceiveContext) {
 	switch msg := ctx.Message().(type) {
 	case *goaktpb.PostStart:
+		// set the account ID
+		p.accountID = ctx.Self().Name()
+		p.logger.Infof("account entity=(%s) successfully started", p.accountID)
 	case *samplepb.CreateAccount:
 		p.logger.Info("creating account by setting the balance...")
 		// check whether the create operation has been done already
@@ -77,7 +76,6 @@ func (p *AccountEntity) Receive(ctx goakt.ReceiveContext) {
 		// first check whether the accountID is mine
 		if p.accountID == accountID {
 			p.balance.Store(balance)
-			p.created.Store(true)
 			// here we are handling just an ask
 			ctx.Response(&samplepb.Account{
 				AccountId:      accountID,
@@ -111,6 +109,7 @@ func (p *AccountEntity) Receive(ctx goakt.ReceiveContext) {
 	}
 }
 
+// PostStop is used to free-up resources when the actor stops
 func (p *AccountEntity) PostStop(ctx context.Context) error {
 	return nil
 }

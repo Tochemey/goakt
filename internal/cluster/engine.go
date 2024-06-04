@@ -81,10 +81,10 @@ type Interface interface {
 	Start(ctx context.Context) error
 	// Stop stops the cluster engine
 	Stop(ctx context.Context) error
-	// NodeHost returns the cluster startNode host address
-	NodeHost() string
-	// NodeRemotingPort returns the cluster remoting port
-	NodeRemotingPort() int
+	// Host returns the cluster startNode host address
+	Host() string
+	// RemotingPort returns the cluster remoting port
+	RemotingPort() int
 	// GetActor fetches an actor from the Node
 	GetActor(ctx context.Context, actorName string) (*internalpb.WireActor, error)
 	// GetPartition returns the partition where a given actor is stored
@@ -328,13 +328,13 @@ func (n *Engine) IsLeader(ctx context.Context) bool {
 	return stats.ClusterCoordinator.String() == stats.Member.String()
 }
 
-// NodeHost returns the Node Host
-func (n *Engine) NodeHost() string {
+// Host returns the Node Host
+func (n *Engine) Host() string {
 	return n.host.Host
 }
 
-// NodeRemotingPort returns the Node remoting port
-func (n *Engine) NodeRemotingPort() int {
+// RemotingPort returns the Node remoting port
+func (n *Engine) RemotingPort() int {
 	return n.host.RemotingPort
 }
 

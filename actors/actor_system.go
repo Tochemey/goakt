@@ -1089,17 +1089,18 @@ func (x *actorSystem) enableClustering(ctx context.Context) error {
 		return errors.New("clustering needs remoting to be enabled")
 	}
 
-	hostNode := &discovery.Node{
-		Name:         x.name,
+	node := &discovery.Node{
+		Name:         x.Name(),
 		Host:         x.remotingHost,
 		GossipPort:   x.clusterConfig.GossipPort(),
 		PeersPort:    x.clusterConfig.PeersPort(),
 		RemotingPort: int(x.remotingPort),
 	}
 
-	clusterEngine, err := cluster.NewEngine(x.Name(),
+	clusterEngine, err := cluster.NewEngine(
+		x.Name(),
 		x.clusterConfig.Discovery(),
-		hostNode,
+		node,
 		cluster.WithLogger(x.logger),
 		cluster.WithPartitionsCount(x.clusterConfig.PartitionCount()),
 		cluster.WithHasher(x.partitionHasher),
@@ -1138,7 +1139,7 @@ func (x *actorSystem) enableClustering(ctx context.Context) error {
 
 	go x.clusterEventsLoop()
 	go x.clusterReplicationLoop()
-	go x.peersStateLoop()
+	go x.peersSyncLoop()
 	go x.redistributionLoop()
 
 	x.logger.Info("clustering enabled...:)")
@@ -1316,9 +1317,8 @@ func (x *actorSystem) clusterEventsLoop() {
 	}
 }
 
-// peersStateLoop fetches the cluster peers' PeerSync and update the node
-// peersCache
-func (x *actorSystem) peersStateLoop() {
+// peersSyncLoop fetches the cluster peers' PeerSync and update the node peersCache
+func (x *actorSystem) peersSyncLoop() {
 	x.logger.Info("peers state synchronization has started...")
 	ticker := time.NewTicker(10 * time.Second)
 	tickerStopSig := make(chan types.Unit, 1)
@@ -1393,6 +1393,7 @@ func (x *actorSystem) redistributionLoop() {
 	}
 }
 
+// processPeerSync processes a given peer synchronization record.
 func (x *actorSystem) processPeerSync(ctx context.Context, peer *cluster.Peer) error {
 	peerAddress := net.JoinHostPort(peer.Host, strconv.Itoa(peer.Port))
 

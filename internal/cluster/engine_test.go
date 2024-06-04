@@ -94,7 +94,7 @@ func TestSingleNode(t *testing.T) {
 		err = cluster.Start(ctx)
 		require.NoError(t, err)
 
-		hostNodeAddr := cluster.NodeHost()
+		hostNodeAddr := cluster.Host()
 		assert.Equal(t, host, hostNodeAddr)
 
 		//  shutdown the Node startNode
