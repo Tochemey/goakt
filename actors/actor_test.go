@@ -458,7 +458,7 @@ func startClusterSystem(t *testing.T, nodeName, serverAddr string) (ActorSystem,
 		WithLogger(logger),
 		WithReplyTimeout(time.Minute),
 		WithRemoting(host, int32(remotingPort)),
-		WithClustering(provider, 10, 1, gossipPort, clusterPort))
+		WithClustering(provider, 10, 1, gossipPort, clusterPort, new(testActor)))
 
 	require.NotNil(t, system)
 	require.NoError(t, err)

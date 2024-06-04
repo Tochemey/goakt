@@ -205,6 +205,144 @@ func (_c *Interface_GetPartition_Call) RunAndReturn(run func(string) int) *Inter
 	return _c
 }
 
+// GetPeerSync provides a mock function with given fields: ctx, peerAddress
+func (_m *Interface) GetPeerSync(ctx context.Context, peerAddress string) (*internalpb.PeersSync, error) {
+	ret := _m.Called(ctx, peerAddress)
+
+	var r0 *internalpb.PeersSync
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string) (*internalpb.PeersSync, error)); ok {
+		return rf(ctx, peerAddress)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string) *internalpb.PeersSync); ok {
+		r0 = rf(ctx, peerAddress)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*internalpb.PeersSync)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = rf(ctx, peerAddress)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// Interface_GetPeerSync_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetPeerSync'
+type Interface_GetPeerSync_Call struct {
+	*mock.Call
+}
+
+// GetPeerSync is a helper method to define mock.On call
+//   - ctx context.Context
+//   - peerAddress string
+func (_e *Interface_Expecter) GetPeerSync(ctx interface{}, peerAddress interface{}) *Interface_GetPeerSync_Call {
+	return &Interface_GetPeerSync_Call{Call: _e.mock.On("GetPeerSync", ctx, peerAddress)}
+}
+
+func (_c *Interface_GetPeerSync_Call) Run(run func(ctx context.Context, peerAddress string)) *Interface_GetPeerSync_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *Interface_GetPeerSync_Call) Return(_a0 *internalpb.PeersSync, _a1 error) *Interface_GetPeerSync_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *Interface_GetPeerSync_Call) RunAndReturn(run func(context.Context, string) (*internalpb.PeersSync, error)) *Interface_GetPeerSync_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// Host provides a mock function with given fields:
+func (_m *Interface) Host() string {
+	ret := _m.Called()
+
+	var r0 string
+	if rf, ok := ret.Get(0).(func() string); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+
+	return r0
+}
+
+// Interface_Host_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Host'
+type Interface_Host_Call struct {
+	*mock.Call
+}
+
+// Host is a helper method to define mock.On call
+func (_e *Interface_Expecter) Host() *Interface_Host_Call {
+	return &Interface_Host_Call{Call: _e.mock.On("Host")}
+}
+
+func (_c *Interface_Host_Call) Run(run func()) *Interface_Host_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *Interface_Host_Call) Return(_a0 string) *Interface_Host_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *Interface_Host_Call) RunAndReturn(run func() string) *Interface_Host_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// IsLeader provides a mock function with given fields: ctx
+func (_m *Interface) IsLeader(ctx context.Context) bool {
+	ret := _m.Called(ctx)
+
+	var r0 bool
+	if rf, ok := ret.Get(0).(func(context.Context) bool); ok {
+		r0 = rf(ctx)
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	return r0
+}
+
+// Interface_IsLeader_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'IsLeader'
+type Interface_IsLeader_Call struct {
+	*mock.Call
+}
+
+// IsLeader is a helper method to define mock.On call
+//   - ctx context.Context
+func (_e *Interface_Expecter) IsLeader(ctx interface{}) *Interface_IsLeader_Call {
+	return &Interface_IsLeader_Call{Call: _e.mock.On("IsLeader", ctx)}
+}
+
+func (_c *Interface_IsLeader_Call) Run(run func(ctx context.Context)) *Interface_IsLeader_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context))
+	})
+	return _c
+}
+
+func (_c *Interface_IsLeader_Call) Return(_a0 bool) *Interface_IsLeader_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *Interface_IsLeader_Call) RunAndReturn(run func(context.Context) bool) *Interface_IsLeader_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // KeyExists provides a mock function with given fields: ctx, key
 func (_m *Interface) KeyExists(ctx context.Context, key string) (bool, error) {
 	ret := _m.Called(ctx, key)
@@ -254,88 +392,6 @@ func (_c *Interface_KeyExists_Call) Return(_a0 bool, _a1 error) *Interface_KeyEx
 }
 
 func (_c *Interface_KeyExists_Call) RunAndReturn(run func(context.Context, string) (bool, error)) *Interface_KeyExists_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// NodeHost provides a mock function with given fields:
-func (_m *Interface) NodeHost() string {
-	ret := _m.Called()
-
-	var r0 string
-	if rf, ok := ret.Get(0).(func() string); ok {
-		r0 = rf()
-	} else {
-		r0 = ret.Get(0).(string)
-	}
-
-	return r0
-}
-
-// Interface_NodeHost_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'NodeHost'
-type Interface_NodeHost_Call struct {
-	*mock.Call
-}
-
-// NodeHost is a helper method to define mock.On call
-func (_e *Interface_Expecter) NodeHost() *Interface_NodeHost_Call {
-	return &Interface_NodeHost_Call{Call: _e.mock.On("NodeHost")}
-}
-
-func (_c *Interface_NodeHost_Call) Run(run func()) *Interface_NodeHost_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run()
-	})
-	return _c
-}
-
-func (_c *Interface_NodeHost_Call) Return(_a0 string) *Interface_NodeHost_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *Interface_NodeHost_Call) RunAndReturn(run func() string) *Interface_NodeHost_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// NodeRemotingPort provides a mock function with given fields:
-func (_m *Interface) NodeRemotingPort() int {
-	ret := _m.Called()
-
-	var r0 int
-	if rf, ok := ret.Get(0).(func() int); ok {
-		r0 = rf()
-	} else {
-		r0 = ret.Get(0).(int)
-	}
-
-	return r0
-}
-
-// Interface_NodeRemotingPort_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'NodeRemotingPort'
-type Interface_NodeRemotingPort_Call struct {
-	*mock.Call
-}
-
-// NodeRemotingPort is a helper method to define mock.On call
-func (_e *Interface_Expecter) NodeRemotingPort() *Interface_NodeRemotingPort_Call {
-	return &Interface_NodeRemotingPort_Call{Call: _e.mock.On("NodeRemotingPort")}
-}
-
-func (_c *Interface_NodeRemotingPort_Call) Run(run func()) *Interface_NodeRemotingPort_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run()
-	})
-	return _c
-}
-
-func (_c *Interface_NodeRemotingPort_Call) Return(_a0 int) *Interface_NodeRemotingPort_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *Interface_NodeRemotingPort_Call) RunAndReturn(run func() int) *Interface_NodeRemotingPort_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -394,13 +450,13 @@ func (_c *Interface_Peers_Call) RunAndReturn(run func(context.Context) ([]*inter
 	return _c
 }
 
-// PutActor provides a mock function with given fields: ctx, actor
-func (_m *Interface) PutActor(ctx context.Context, actor *internalpb.WireActor) error {
-	ret := _m.Called(ctx, actor)
+// PutPeerSync provides a mock function with given fields: ctx, data
+func (_m *Interface) PutPeerSync(ctx context.Context, data *internalpb.PeersSync) error {
+	ret := _m.Called(ctx, data)
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.WireActor) error); ok {
-		r0 = rf(ctx, actor)
+	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.PeersSync) error); ok {
+		r0 = rf(ctx, data)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -408,31 +464,72 @@ func (_m *Interface) PutActor(ctx context.Context, actor *internalpb.WireActor) 
 	return r0
 }
 
-// Interface_PutActor_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'PutActor'
-type Interface_PutActor_Call struct {
+// Interface_PutPeerSync_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'PutPeerSync'
+type Interface_PutPeerSync_Call struct {
 	*mock.Call
 }
 
-// PutActor is a helper method to define mock.On call
+// PutPeerSync is a helper method to define mock.On call
 //   - ctx context.Context
-//   - actor *internalpb.WireActor
-func (_e *Interface_Expecter) PutActor(ctx interface{}, actor interface{}) *Interface_PutActor_Call {
-	return &Interface_PutActor_Call{Call: _e.mock.On("PutActor", ctx, actor)}
+//   - data *internalpb.PeersSync
+func (_e *Interface_Expecter) PutPeerSync(ctx interface{}, data interface{}) *Interface_PutPeerSync_Call {
+	return &Interface_PutPeerSync_Call{Call: _e.mock.On("PutPeerSync", ctx, data)}
 }
 
-func (_c *Interface_PutActor_Call) Run(run func(ctx context.Context, actor *internalpb.WireActor)) *Interface_PutActor_Call {
+func (_c *Interface_PutPeerSync_Call) Run(run func(ctx context.Context, data *internalpb.PeersSync)) *Interface_PutPeerSync_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*internalpb.WireActor))
+		run(args[0].(context.Context), args[1].(*internalpb.PeersSync))
 	})
 	return _c
 }
 
-func (_c *Interface_PutActor_Call) Return(_a0 error) *Interface_PutActor_Call {
+func (_c *Interface_PutPeerSync_Call) Return(_a0 error) *Interface_PutPeerSync_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *Interface_PutActor_Call) RunAndReturn(run func(context.Context, *internalpb.WireActor) error) *Interface_PutActor_Call {
+func (_c *Interface_PutPeerSync_Call) RunAndReturn(run func(context.Context, *internalpb.PeersSync) error) *Interface_PutPeerSync_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// RemotingPort provides a mock function with given fields:
+func (_m *Interface) RemotingPort() int {
+	ret := _m.Called()
+
+	var r0 int
+	if rf, ok := ret.Get(0).(func() int); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(int)
+	}
+
+	return r0
+}
+
+// Interface_RemotingPort_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemotingPort'
+type Interface_RemotingPort_Call struct {
+	*mock.Call
+}
+
+// RemotingPort is a helper method to define mock.On call
+func (_e *Interface_Expecter) RemotingPort() *Interface_RemotingPort_Call {
+	return &Interface_RemotingPort_Call{Call: _e.mock.On("RemotingPort")}
+}
+
+func (_c *Interface_RemotingPort_Call) Run(run func()) *Interface_RemotingPort_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *Interface_RemotingPort_Call) Return(_a0 int) *Interface_RemotingPort_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *Interface_RemotingPort_Call) RunAndReturn(run func() int) *Interface_RemotingPort_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -603,6 +700,49 @@ func (_c *Interface_Stop_Call) Return(_a0 error) *Interface_Stop_Call {
 }
 
 func (_c *Interface_Stop_Call) RunAndReturn(run func(context.Context) error) *Interface_Stop_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// UnsetKey provides a mock function with given fields: ctx, key
+func (_m *Interface) UnsetKey(ctx context.Context, key string) error {
+	ret := _m.Called(ctx, key)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, string) error); ok {
+		r0 = rf(ctx, key)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// Interface_UnsetKey_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UnsetKey'
+type Interface_UnsetKey_Call struct {
+	*mock.Call
+}
+
+// UnsetKey is a helper method to define mock.On call
+//   - ctx context.Context
+//   - key string
+func (_e *Interface_Expecter) UnsetKey(ctx interface{}, key interface{}) *Interface_UnsetKey_Call {
+	return &Interface_UnsetKey_Call{Call: _e.mock.On("UnsetKey", ctx, key)}
+}
+
+func (_c *Interface_UnsetKey_Call) Run(run func(ctx context.Context, key string)) *Interface_UnsetKey_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *Interface_UnsetKey_Call) Return(_a0 error) *Interface_UnsetKey_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *Interface_UnsetKey_Call) RunAndReturn(run func(context.Context, string) error) *Interface_UnsetKey_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -20,43 +20,55 @@
  * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
+ *
  */
 
-package types
+package slices
 
 import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-type testStruct struct {
-}
-
-func TestRegistry(t *testing.T) {
-	t.Run("With new instance", func(t *testing.T) {
-		newRegistry := NewRegistry()
-		var p any = newRegistry
-		_, ok := p.(Registry)
-		assert.True(t, ok)
+func TestChunk(t *testing.T) {
+	t.Run("With empty slice", func(t *testing.T) {
+		var items []int
+		chunkSize := 2
+		chunks := Chunk(items, chunkSize)
+		require.Empty(t, chunks)
 	})
+	t.Run("With chunk size a dividend of total number of items", func(t *testing.T) {
+		items := []int{2, 7, 9, 4, 6, 10}
+		chunkSize := 2
+		chunks := Chunk(items, chunkSize)
+		expected := [][]int{
+			{2, 7},
+			{9, 4},
+			{6, 10},
+		}
 
-	t.Run("With registration", func(t *testing.T) {
-		registry := NewRegistry()
-		// create an instance of an object
-		obj := new(testStruct)
-		// register that actor
-		registry.Register(obj)
-		_, ok := registry.Type(obj)
-		assert.True(t, ok)
+		require.EqualValues(t, len(expected), len(chunks))
+		require.ElementsMatch(t, expected[0], chunks[0])
+		require.ElementsMatch(t, expected[1], chunks[1])
+		assert.ElementsMatch(t, expected[2], chunks[2])
+	})
+	t.Run("With chunk size not a dividend of total number of items", func(t *testing.T) {
+		items := []int{2, 7, 9, 4, 6, 10, 11}
+		chunkSize := 2
+		chunks := Chunk(items, chunkSize)
+		expected := [][]int{
+			{2, 7},
+			{9, 4},
+			{6, 10},
+			{11},
+		}
 
-		_, ok = registry.TypeOf("types.testStruct")
-		assert.True(t, ok)
-		assert.Len(t, registry.TypesMap(), 1)
-
-		assert.True(t, registry.Exists(obj))
-
-		registry.Deregister(obj)
-		assert.Len(t, registry.TypesMap(), 0)
+		require.EqualValues(t, len(expected), len(chunks))
+		require.ElementsMatch(t, expected[0], chunks[0])
+		require.ElementsMatch(t, expected[1], chunks[1])
+		require.ElementsMatch(t, expected[2], chunks[2])
+		assert.ElementsMatch(t, expected[3], chunks[3])
 	})
 }

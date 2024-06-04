@@ -28,6 +28,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
+	"strconv"
 	"time"
 
 	"github.com/buraksezer/olric"
@@ -36,6 +38,8 @@ import (
 	"github.com/buraksezer/olric/hasher"
 	"github.com/pkg/errors"
 	"github.com/redis/go-redis/v9"
+	"golang.org/x/sync/errgroup"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
@@ -57,7 +61,7 @@ const (
 func (x EventType) String() string {
 	switch x {
 	case NodeJoined:
-		return "NodJoined"
+		return "NodeJoined"
 	case NodeLeft:
 		return "NodeLeft"
 	default:
@@ -77,12 +81,10 @@ type Interface interface {
 	Start(ctx context.Context) error
 	// Stop stops the cluster engine
 	Stop(ctx context.Context) error
-	// NodeHost returns the cluster startNode host address
-	NodeHost() string
-	// NodeRemotingPort returns the cluster startNode remoting port
-	NodeRemotingPort() int
-	// PutActor replicates onto the Node the metadata of an actor
-	PutActor(ctx context.Context, actor *internalpb.WireActor) error
+	// Host returns the cluster startNode host address
+	Host() string
+	// RemotingPort returns the cluster remoting port
+	RemotingPort() int
 	// GetActor fetches an actor from the Node
 	GetActor(ctx context.Context, actorName string) (*internalpb.WireActor, error)
 	// GetPartition returns the partition where a given actor is stored
@@ -91,6 +93,8 @@ type Interface interface {
 	SetKey(ctx context.Context, key string) error
 	// KeyExists checks the existence of a given key
 	KeyExists(ctx context.Context, key string) (bool, error)
+	// UnsetKey unsets the already set given key in the cluster
+	UnsetKey(ctx context.Context, key string) error
 	// RemoveActor removes a given actor from the cluster.
 	// An actor is removed from the cluster when this actor has been passivated.
 	RemoveActor(ctx context.Context, actorName string) error
@@ -101,6 +105,13 @@ type Interface interface {
 	AdvertisedAddress() string
 	// Peers returns a channel containing the list of peers at a given time
 	Peers(ctx context.Context) ([]*Peer, error)
+	// PutPeerSync pushes to the cluster the peer sync request
+	PutPeerSync(ctx context.Context, data *internalpb.PeersSync) error
+	// GetPeerSync fetches a given peer synchronization record
+	GetPeerSync(ctx context.Context, peerAddress string) (*internalpb.PeersSync, error)
+	// IsLeader states whether the given cluster node is a leader or not at a given
+	// point in time in the cluster
+	IsLeader(ctx context.Context) bool
 }
 
 // Engine represents the Engine
@@ -111,7 +122,8 @@ type Engine struct {
 
 	// specifies the minimum number of cluster members
 	// the default values is 1
-	minimumPeersQuorum uint16
+	minimumPeersQuorum uint32
+	replicaCount       uint32
 
 	// specifies the logger
 	logger log.Logger
@@ -148,7 +160,7 @@ type Engine struct {
 }
 
 // enforce compilation error
-var _ Interface = &Engine{}
+var _ Interface = (*Engine)(nil)
 
 // NewEngine creates an instance of cluster Engine
 func NewEngine(name string, disco discovery.Provider, host *discovery.Node, opts ...Option) (*Engine, error) {
@@ -167,6 +179,7 @@ func NewEngine(name string, disco discovery.Provider, host *discovery.Node, opts
 		messagesReaderChan: make(chan types.Unit, 1),
 		messagesChan:       make(chan *redis.Message, 1),
 		minimumPeersQuorum: 1,
+		replicaCount:       1,
 	}
 	// apply the various options
 	for _, opt := range opts {
@@ -250,7 +263,7 @@ func (n *Engine) Start(ctx context.Context) error {
 	n.kvStore = dmp
 
 	// create a subscriber to consume to cluster events
-	ps, err := n.client.NewPubSub()
+	ps, err := n.client.NewPubSub(olric.ToAddress(n.host.PeersAddress()))
 	if err != nil {
 		logger.Error(errors.Wrapf(err, "failed to start the cluster Engine on host=(%s)", n.name))
 		return n.server.Shutdown(ctx)
@@ -304,13 +317,24 @@ func (n *Engine) Stop(ctx context.Context) error {
 	return nil
 }
 
-// NodeHost returns the Node Host
-func (n *Engine) NodeHost() string {
+// IsLeader states whether the given cluster node is a leader or not at a given
+// point in time in the cluster
+func (n *Engine) IsLeader(ctx context.Context) bool {
+	stats, err := n.client.Stats(ctx, n.host.PeersAddress())
+	if err != nil {
+		n.logger.Errorf("failed to fetch the cluster node=(%s) stats: %v", n.host.PeersAddress(), err)
+		return false
+	}
+	return stats.ClusterCoordinator.String() == stats.Member.String()
+}
+
+// Host returns the Node Host
+func (n *Engine) Host() string {
 	return n.host.Host
 }
 
-// NodeRemotingPort returns the Node remoting port
-func (n *Engine) NodeRemotingPort() int {
+// RemotingPort returns the Node remoting port
+func (n *Engine) RemotingPort() int {
 	return n.host.RemotingPort
 }
 
@@ -320,29 +344,79 @@ func (n *Engine) AdvertisedAddress() string {
 	return n.host.PeersAddress()
 }
 
-// PutActor replicates onto the Node the metadata of an actor
-func (n *Engine) PutActor(ctx context.Context, actor *internalpb.WireActor) error {
+// PutPeerSync pushes to the cluster the peer sync request
+func (n *Engine) PutPeerSync(ctx context.Context, syncRequest *internalpb.PeersSync) error {
 	ctx, cancelFn := context.WithTimeout(ctx, n.writeTimeout)
 	defer cancelFn()
 
 	logger := n.logger
 
-	logger.Infof("replicating actor (%s)", actor.GetActorName())
+	peerAddress := net.JoinHostPort(syncRequest.GetHost(), strconv.Itoa(int(syncRequest.GetPeersPort())))
+	logger.Infof("synchronization peer (%s)", peerAddress)
 
-	data, err := encode(actor)
-	if err != nil {
-		logger.Error(errors.Wrapf(err, "failed to persist actor=%s data in the cluster", actor.GetActorName()))
-		return errors.Wrapf(err, "failed to persist actor=%s data in the cluster", actor.GetActorName())
-	}
+	eg, ctx := errgroup.WithContext(ctx)
+	eg.SetLimit(2)
 
-	err = n.kvStore.Put(ctx, actor.GetActorName(), data)
-	if err != nil {
-		logger.Error(errors.Wrapf(err, "failed to replicate actor=%s record", actor.GetActorName()))
+	eg.Go(func() error {
+		encoded, _ := encode(syncRequest.GetActor())
+		if err := n.kvStore.Put(ctx, syncRequest.GetActor().GetActorName(), encoded); err != nil {
+			return fmt.Errorf("failed to sync actor=(%s) of peer=(%s): %v", syncRequest.GetActor().GetActorName(), peerAddress, err)
+		}
+
+		return nil
+	})
+
+	eg.Go(func() error {
+		encoded, _ := proto.Marshal(syncRequest)
+		if err := n.kvStore.Put(ctx, peerAddress, encoded); err != nil {
+			return fmt.Errorf("failed to sync peer=(%s) request: %v", peerAddress, err)
+		}
+
+		return nil
+	})
+
+	if err := eg.Wait(); err != nil {
+		logger.Errorf("failed to synchronize peer=(%s): %v", peerAddress, err)
 		return err
 	}
 
-	logger.Infof("actor (%s) successfully replicated in the cluster", actor.GetActorName())
+	logger.Infof("peer (%s) successfully synchronized in the cluster", peerAddress)
 	return nil
+}
+
+// GetPeerSync fetches a given peer synchronization record
+func (n *Engine) GetPeerSync(ctx context.Context, peerAddress string) (*internalpb.PeersSync, error) {
+	ctx, cancelFn := context.WithTimeout(ctx, n.readTimeout)
+	defer cancelFn()
+
+	logger := n.logger
+
+	logger.Infof("retrieving peer (%s) sync record", peerAddress)
+	resp, err := n.kvStore.Get(ctx, peerAddress)
+	if err != nil {
+		if errors.Is(err, olric.ErrKeyNotFound) {
+			logger.Warnf("peer=(%s) sync record is not found", peerAddress)
+			return nil, ErrPeerSyncNotFound
+		}
+
+		logger.Errorf("failed to find peer=(%s) sync record: %v", peerAddress, err)
+		return nil, err
+	}
+
+	bytea, err := resp.Byte()
+	if err != nil {
+		logger.Errorf("failed to read peer=(%s) sync record: %v", err)
+		return nil, err
+	}
+
+	peerSync := new(internalpb.PeersSync)
+	if err := proto.Unmarshal(bytea, peerSync); err != nil {
+		logger.Errorf("failed to decode peer=(%s) sync record: %v", err)
+		return nil, err
+	}
+
+	logger.Infof("peer (%s) sync record successfully retrieved.🎉", peerAddress)
+	return peerSync, nil
 }
 
 // GetActor fetches an actor from the Node
@@ -427,7 +501,7 @@ func (n *Engine) KeyExists(ctx context.Context, key string) (bool, error) {
 	resp, err := n.kvStore.Get(ctx, key)
 	if err != nil {
 		if errors.Is(err, olric.ErrKeyNotFound) {
-			logger.Warnf("key=%s is not found in the Node", key)
+			logger.Warnf("key=%s is not found in the cluster", key)
 			return false, nil
 		}
 
@@ -435,6 +509,21 @@ func (n *Engine) KeyExists(ctx context.Context, key string) (bool, error) {
 		return false, err
 	}
 	return resp.Bool()
+}
+
+// UnsetKey unsets the already set given key in the cluster
+func (n *Engine) UnsetKey(ctx context.Context, key string) error {
+	logger := n.logger
+
+	logger.Infof("unsetting key (%s)", key)
+
+	if _, err := n.kvStore.Delete(ctx, key); err != nil {
+		logger.Error(errors.Wrapf(err, "failed to unset key=%s record.💥", key))
+		return err
+	}
+
+	logger.Infof("key (%s) successfully unset", key)
+	return nil
 }
 
 // GetPartition returns the partition where a given actor is stored
@@ -463,7 +552,9 @@ func (n *Engine) Peers(ctx context.Context) ([]*Peer, error) {
 	for _, member := range members {
 		if member.Name != n.AdvertisedAddress() {
 			n.logger.Debugf("node=(%s) has found peer=(%s)", n.AdvertisedAddress(), member.Name)
-			peers = append(peers, &Peer{Address: member.Name, Leader: member.Coordinator})
+			peerHost, port, _ := net.SplitHostPort(member.Name)
+			peerPort, _ := strconv.Atoi(port)
+			peers = append(peers, &Peer{Host: peerHost, Port: peerPort, Coordinator: member.Coordinator})
 		}
 	}
 	return peers, nil
@@ -562,9 +653,9 @@ func (n *Engine) buildConfig() *config.Config {
 		BindAddr:                   n.host.Host,
 		BindPort:                   n.host.PeersPort,
 		ReadRepair:                 true,
-		ReplicaCount:               int(n.minimumPeersQuorum),
-		WriteQuorum:                int(n.minimumPeersQuorum),
-		ReadQuorum:                 int(n.minimumPeersQuorum),
+		ReplicaCount:               int(n.replicaCount),
+		WriteQuorum:                config.DefaultWriteQuorum,
+		ReadQuorum:                 config.DefaultReadQuorum,
 		MemberCountQuorum:          int32(n.minimumPeersQuorum),
 		Peers:                      []string{},
 		DMaps:                      &config.DMaps{},

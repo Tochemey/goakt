@@ -25,7 +25,6 @@
 package actors
 
 import (
-	"errors"
 	"time"
 
 	"github.com/tochemey/goakt/v2/discovery"
@@ -34,16 +33,13 @@ import (
 	"github.com/tochemey/goakt/v2/telemetry"
 )
 
-var (
-	ErrNameRequired = errors.New("actor system is required")
-)
-
 // Option is the interface that applies a configuration option.
 type Option interface {
 	// Apply sets the Option value of a config.
 	Apply(sys *actorSystem)
 }
 
+// enforce compilation error
 var _ Option = OptionFunc(nil)
 
 // OptionFunc implements the Option interface.
@@ -114,14 +110,31 @@ func WithRemoting(host string, port int32) Option {
 }
 
 // WithClustering enables the cluster mode.
-func WithClustering(provider discovery.Provider, partitionCount uint64, minimumPeersQuorum uint16, gossipPort, peersPort int) Option {
+// Deprecated: use rather WithCluster which offers a fluent api to set cluster configuration
+func WithClustering(provider discovery.Provider, partitionCount uint64, minimumPeersQuorum uint16, gossipPort, peersPort int, kinds ...Actor) Option {
 	return OptionFunc(func(a *actorSystem) {
 		a.clusterEnabled.Store(true)
-		a.partitionsCount = partitionCount
-		a.discoveryProvider = provider
-		a.peersPort = peersPort
-		a.gossipPort = gossipPort
-		a.minimumPeersQuorum = minimumPeersQuorum
+		replicaCount := 2
+		if minimumPeersQuorum < 2 {
+			replicaCount = 1
+		}
+
+		a.clusterConfig = NewClusterConfig().
+			WithDiscovery(provider).
+			WithPartitionCount(partitionCount).
+			WithGossipPort(gossipPort).
+			WithPeersPort(peersPort).
+			WithMinimumPeersQuorum(uint32(minimumPeersQuorum)).
+			WithReplicaCount(uint32(replicaCount)).
+			WithKinds(kinds...)
+	})
+}
+
+// WithCluster enables the cluster mode
+func WithCluster(config *ClusterConfig) Option {
+	return OptionFunc(func(a *actorSystem) {
+		a.clusterEnabled.Store(true)
+		a.clusterConfig = config
 	})
 }
 

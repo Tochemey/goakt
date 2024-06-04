@@ -27,7 +27,9 @@ package cluster
 import (
 	"context"
 	"fmt"
+	"net"
 	"os"
+	"strconv"
 	"testing"
 	"time"
 
@@ -92,7 +94,7 @@ func TestSingleNode(t *testing.T) {
 		err = cluster.Start(ctx)
 		require.NoError(t, err)
 
-		hostNodeAddr := cluster.NodeHost()
+		hostNodeAddr := cluster.Host()
 		assert.Equal(t, host, hostNodeAddr)
 
 		//  shutdown the Node startNode
@@ -103,7 +105,7 @@ func TestSingleNode(t *testing.T) {
 		require.NoError(t, cluster.Stop(ctx))
 		provider.AssertExpectations(t)
 	})
-	t.Run("With PutActor and GetActor", func(t *testing.T) {
+	t.Run("With PeerSync and GetActor", func(t *testing.T) {
 		// create the context
 		ctx := context.TODO()
 
@@ -151,7 +153,13 @@ func TestSingleNode(t *testing.T) {
 		actor := &internalpb.WireActor{ActorName: actorName}
 
 		// replicate the actor in the Node
-		err = cluster.PutActor(ctx, actor)
+		peerSync := &internalpb.PeersSync{
+			Host:         host,
+			RemotingPort: int32(remotingPort),
+			PeersPort:    int32(clusterPort),
+			Actor:        actor,
+		}
+		err = cluster.PutPeerSync(ctx, peerSync)
 		require.NoError(t, err)
 
 		// fetch the actor
@@ -173,7 +181,7 @@ func TestSingleNode(t *testing.T) {
 		require.NoError(t, cluster.Stop(ctx))
 		provider.AssertExpectations(t)
 	})
-	t.Run("With SetKey and KeyExists", func(t *testing.T) {
+	t.Run("With Set/UnsetKey and KeyExists", func(t *testing.T) {
 		// create the context
 		ctx := context.TODO()
 
@@ -224,8 +232,12 @@ func TestSingleNode(t *testing.T) {
 		require.NoError(t, err)
 		assert.True(t, isSet)
 
+		// unset the key
+		err = cluster.UnsetKey(ctx, key)
+		require.NoError(t, err)
+
 		// check the key existence
-		isSet, err = cluster.KeyExists(ctx, "fake")
+		isSet, err = cluster.KeyExists(ctx, key)
 		require.NoError(t, err)
 		assert.False(t, isSet)
 
@@ -243,7 +255,7 @@ func TestSingleNode(t *testing.T) {
 		// generate the ports for the single startNode
 		nodePorts := dynaport.Get(3)
 		gossipPort := nodePorts[0]
-		clusterPort := nodePorts[1]
+		peersPort := nodePorts[1]
 		remotingPort := nodePorts[2]
 
 		// define discovered addresses
@@ -267,7 +279,7 @@ func TestSingleNode(t *testing.T) {
 			Name:         host,
 			Host:         host,
 			GossipPort:   gossipPort,
-			PeersPort:    clusterPort,
+			PeersPort:    peersPort,
 			RemotingPort: remotingPort,
 		}
 
@@ -284,8 +296,14 @@ func TestSingleNode(t *testing.T) {
 		actorName := uuid.NewString()
 		actor := &internalpb.WireActor{ActorName: actorName}
 
+		peerSync := &internalpb.PeersSync{
+			Host:         host,
+			RemotingPort: int32(remotingPort),
+			PeersPort:    int32(peersPort),
+			Actor:        actor,
+		}
 		// replicate the actor in the Node
-		err = cluster.PutActor(ctx, actor)
+		err = cluster.PutPeerSync(ctx, peerSync)
 		require.NoError(t, err)
 
 		// fetch the actor
@@ -356,7 +374,7 @@ L:
 	peers, err := node1.Peers(context.TODO())
 	require.NoError(t, err)
 	require.Len(t, peers, 1)
-	require.Equal(t, node2Addr, peers[0].Address)
+	require.Equal(t, node2Addr, net.JoinHostPort(peers[0].Host, strconv.Itoa(peers[0].Port)))
 
 	// wait for some time
 	time.Sleep(time.Second)

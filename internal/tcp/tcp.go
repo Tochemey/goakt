@@ -22,13 +22,17 @@
  * SOFTWARE.
  */
 
-package cluster
+package tcp
 
-import "github.com/pkg/errors"
+import "net"
 
-var (
-	// ErrActorNotFound is return when an actor is not found
-	ErrActorNotFound = errors.New("actor not found")
-	// ErrPeerSyncNotFound is returned when a peerSync record is not found
-	ErrPeerSyncNotFound = errors.New("peerSync record not found")
-)
+// GetHostPort returns the actual ip address and port from a given address
+func GetHostPort(address string) (string, int, error) {
+	// Get the address
+	addr, err := net.ResolveTCPAddr("tcp", address)
+	if err != nil {
+		return "", 0, err
+	}
+
+	return addr.IP.String(), addr.Port, nil
+}

@@ -47,14 +47,14 @@ var (
 	ErrRequestTimeout = errors.New("request timed out")
 	// ErrRemotingDisabled is returned when remoting is not enabled
 	ErrRemotingDisabled = errors.New("remoting is not enabled")
-
 	// ErrAddressNotFound is returned when an actor address is not found
 	ErrAddressNotFound = func(addr string) error {
 		return connect.NewError(connect.CodeNotFound, fmt.Errorf("actor=%s not found", addr))
 	}
 	// ErrRemoteSendFailure is returned when remote message fails
 	ErrRemoteSendFailure = func(err error) error { return connect.NewError(connect.CodeInternal, err) }
-
+	// ErrNameRequired is used when the actor system name is required
+	ErrNameRequired = errors.New("actor system is required")
 	// ErrInvalidInstance is returned when the creation of an actor instance fails
 	ErrInvalidInstance = errors.New("failed to create instance. Reason: invalid instance")
 	// ErrActorNotFound is returned when an actor is not found
@@ -79,6 +79,10 @@ var (
 	ErrInstanceNotAnActor = errors.New("failed to create instance. Reason: instance does not implement the Actor interface")
 	// ErrTypeNotRegistered is returned when a given actor is not registered
 	ErrTypeNotRegistered = errors.New("actor type is not registered")
+	// ErrPeerNotFound is returned when locating a given peer
+	ErrPeerNotFound = errors.New("peer is not found")
+	// ErrKindsRequired is returned when the actor kinds are not provided when enabling the cluster mode
+	ErrKindsRequired = errors.New("actor kinds are required")
 )
 
 // IsEOF returns true if the given error is an EOF error

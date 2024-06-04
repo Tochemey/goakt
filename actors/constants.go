@@ -44,7 +44,7 @@ const (
 	// DefaultPassivationTimeout defines the default passivation timeout
 	DefaultPassivationTimeout = 2 * time.Minute
 	// DefaultReplyTimeout defines the default send/reply timeout
-	DefaultReplyTimeout = 100 * time.Millisecond
+	DefaultReplyTimeout = 20 * time.Second
 	// DefaultInitMaxRetries defines the default value for retrying actor initialization
 	DefaultInitMaxRetries = 5
 	// DefaultSupervisoryStrategy defines the default supervisory strategy

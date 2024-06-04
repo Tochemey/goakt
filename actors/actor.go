@@ -30,10 +30,13 @@ import (
 
 // Actor represents the Actor interface
 // This will be implemented by any user who wants to create an actor
+// Any implementation must immutable which means all fields must be private(unexported).
+// Only make use the PreStart hook to set the initial values.
 type Actor interface {
 	// PreStart pre-starts the actor. This function can be used to set up some database connections
 	// or some sort of initialization before the actor start processing messages
-	// when the initialization failed the actor will not be started
+	// when the initialization failed the actor will not be started.
+	// Use this function to set any fields that will be needed before the actor starts.
 	PreStart(ctx context.Context) error
 	// Receive processes any message dropped into the actor mailbox.
 	// The receiver of any message can either reply to the sender of the message with a new message or reply to the message synchronously
@@ -42,5 +45,6 @@ type Actor interface {
 	Receive(ctx ReceiveContext)
 	// PostStop is executed when the actor is shutting down.
 	// The execution happens when every message that have not been processed yet will be processed before the actor shutdowns
+	// This help free-up resources
 	PostStop(ctx context.Context) error
 }

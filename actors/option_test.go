@@ -41,6 +41,7 @@ func TestOption(t *testing.T) {
 	mailbox := newReceiveContextBuffer(10)
 	var atomicTrue atomic.Bool
 	atomicTrue.Store(true)
+	clusterConfig := NewClusterConfig()
 	hasher := hash.DefaultHasher()
 	testCases := []struct {
 		name     string
@@ -126,6 +127,11 @@ func TestOption(t *testing.T) {
 			name:     "WithMetric",
 			option:   WithMetric(),
 			expected: actorSystem{metricEnabled: atomicTrue},
+		},
+		{
+			name:     "WithCluster",
+			option:   WithCluster(clusterConfig),
+			expected: actorSystem{clusterEnabled: atomicTrue, clusterConfig: clusterConfig},
 		},
 	}
 	for _, tc := range testCases {

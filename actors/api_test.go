@@ -1713,7 +1713,7 @@ func TestAPIRemoteSpawn(t *testing.T) {
 		// generate the remoting port
 		ports := dynaport.Get(1)
 		remotingPort := ports[0]
-		host := "localhost"
+		host := "127.0.0.1"
 
 		// create the actor system
 		sys, err := NewActorSystem("test",
@@ -1742,7 +1742,7 @@ func TestAPIRemoteSpawn(t *testing.T) {
 		require.NoError(t, err)
 
 		// spawn the remote actor
-		err = RemoteSpawn(ctx, host, remotingPort, actorName, "exchanger")
+		err = RemoteSpawn(ctx, host, remotingPort, actorName, "actors.exchanger")
 		require.NoError(t, err)
 
 		// re-fetching the address of the actor should return not nil address after start
@@ -1802,7 +1802,7 @@ func TestAPIRemoteSpawn(t *testing.T) {
 		require.Nil(t, addr)
 
 		// spawn the remote actor
-		err = RemoteSpawn(ctx, host, remotingPort, actorName, "exchanger")
+		err = RemoteSpawn(ctx, host, remotingPort, actorName, "actors.exchanger")
 		require.Error(t, err)
 		assert.EqualError(t, err, ErrTypeNotRegistered.Error())
 
@@ -1838,7 +1838,7 @@ func TestAPIRemoteSpawn(t *testing.T) {
 		actorName := uuid.NewString()
 
 		// spawn the remote actor
-		err = RemoteSpawn(ctx, host, remotingPort, actorName, "exchanger")
+		err = RemoteSpawn(ctx, host, remotingPort, actorName, "actors.exchanger")
 		require.Error(t, err)
 
 		t.Cleanup(func() {

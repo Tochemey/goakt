@@ -1,8 +1,9 @@
-version: "3.9"
-
 services:
   accounts:
     image: "accounts:dev"
+    deploy:
+      mode: replicated
+      replicas: 3
     command:
       - run
     ports:

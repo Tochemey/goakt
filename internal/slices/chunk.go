@@ -22,13 +22,22 @@
  * SOFTWARE.
  */
 
-package cluster
+package slices
 
-import "github.com/pkg/errors"
+// Chunk helps chunk a slice into equal size
+func Chunk[T any](slice []T, chunkSize int) [][]T {
+	var chunks [][]T
+	for {
+		if len(slice) == 0 {
+			break
+		}
 
-var (
-	// ErrActorNotFound is return when an actor is not found
-	ErrActorNotFound = errors.New("actor not found")
-	// ErrPeerSyncNotFound is returned when a peerSync record is not found
-	ErrPeerSyncNotFound = errors.New("peerSync record not found")
-)
+		// required to avoid slicing method beyond slice capacity
+		if len(slice) < chunkSize {
+			chunkSize = len(slice)
+		}
+		chunks = append(chunks, slice[0:chunkSize])
+		slice = slice[chunkSize:]
+	}
+	return chunks
+}

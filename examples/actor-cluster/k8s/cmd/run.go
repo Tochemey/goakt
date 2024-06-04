@@ -36,6 +36,7 @@ import (
 
 	goakt "github.com/tochemey/goakt/v2/actors"
 	"github.com/tochemey/goakt/v2/discovery/kubernetes"
+	"github.com/tochemey/goakt/v2/examples/actor-cluster/k8s/actors"
 	"github.com/tochemey/goakt/v2/examples/actor-cluster/k8s/service"
 	"github.com/tochemey/goakt/v2/log"
 )
@@ -100,7 +101,7 @@ var runCmd = &cobra.Command{
 			goakt.WithLogger(logger),
 			goakt.WithActorInitMaxRetries(3),
 			goakt.WithRemoting(host, int32(config.RemotingPort)),
-			goakt.WithClustering(disco, 20, 1, config.GossipPort, config.ClusterPort))
+			goakt.WithClustering(disco, 20, 1, config.GossipPort, config.ClusterPort, new(actors.AccountEntity)))
 		// handle the error
 		if err != nil {
 			logger.Panic(err)

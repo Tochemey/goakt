@@ -43,7 +43,7 @@ type Registry interface {
 	TypesMap() map[string]reflect.Type
 	// Type returns the type of object
 	Type(v any) (reflect.Type, bool)
-	// TypeOf returns the type of an object name
+	// TypeOf returns the type of object name
 	TypeOf(name string) (reflect.Type, bool)
 }
 
@@ -63,14 +63,12 @@ func NewRegistry() Registry {
 
 // Deregister removes the registered object from the registry
 func (r *registry) Deregister(v any) {
-	name, _ := nameAndTypeOf(v)
-	r.typesMap.Del(name)
+	r.typesMap.Del(NameOf(v))
 }
 
 // Exists return true when a given object is in the registry
 func (r *registry) Exists(v any) bool {
-	name, _ := nameAndTypeOf(v)
-	_, ok := r.typesMap.Get(name)
+	_, ok := r.typesMap.Get(NameOf(v))
 	return ok
 }
 
@@ -89,30 +87,25 @@ func (r *registry) TypesMap() map[string]reflect.Type {
 
 // Register an object
 func (r *registry) Register(v any) {
-	name, rtype := nameAndTypeOf(v)
+	rtype := Of(v)
+	name := NameOf(v)
 	r.typesMap.Set(name, rtype)
 }
 
 // Type returns the type of object
 func (r *registry) Type(v any) (reflect.Type, bool) {
-	name, _ := nameAndTypeOf(v)
-	out, ok := r.typesMap.Get(name)
+	out, ok := r.typesMap.Get(NameOf(v))
 	return out, ok
 }
 
-// TypeOf returns the type of an object name
+// TypeOf returns the type of object name
 func (r *registry) TypeOf(name string) (reflect.Type, bool) {
-	out, ok := r.typesMap.Get(strings.ToLower(name))
+	out, ok := r.typesMap.Get(lowTrim(name))
 	return out, ok
 }
 
-func nameAndTypeOf(v any) (string, reflect.Type) {
-	rtype := RuntimeTypeOf(v)
-	return strings.ToLower(rtype.Name()), rtype
-}
-
-// RuntimeTypeOf returns the runtime type of an object
-func RuntimeTypeOf(v any) reflect.Type {
+// Of returns the runtime type of object
+func Of(v any) reflect.Type {
 	var rtype reflect.Type
 	switch _type := v.(type) {
 	case reflect.Type:
@@ -121,4 +114,14 @@ func RuntimeTypeOf(v any) reflect.Type {
 		rtype = reflect.TypeOf(v).Elem()
 	}
 	return rtype
+}
+
+// NameOf returns the name of a given object
+func NameOf(v any) string {
+	return lowTrim(Of(v).String())
+}
+
+// lowTrim trim any space and lower the string value
+func lowTrim(key string) string {
+	return strings.ToLower(strings.TrimSpace(key))
 }

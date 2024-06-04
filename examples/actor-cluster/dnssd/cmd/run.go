@@ -35,6 +35,7 @@ import (
 
 	goakt "github.com/tochemey/goakt/v2/actors"
 	"github.com/tochemey/goakt/v2/discovery/dnssd"
+	"github.com/tochemey/goakt/v2/examples/actor-cluster/dnssd/actors"
 	"github.com/tochemey/goakt/v2/examples/actor-cluster/dnssd/service"
 	"github.com/tochemey/goakt/v2/log"
 )
@@ -69,11 +70,11 @@ var runCmd = &cobra.Command{
 		// create the actor system
 		actorSystem, err := goakt.NewActorSystem(
 			config.ActorSystemName,
-			goakt.WithPassivationDisabled(), // set big passivation time
+			goakt.WithPassivationDisabled(), // disable passivation
 			goakt.WithLogger(logger),
 			goakt.WithActorInitMaxRetries(3),
 			goakt.WithRemoting(host, int32(config.RemotingPort)),
-			goakt.WithClustering(disco, 20, 1, config.GossipPort, config.PeersPort))
+			goakt.WithClustering(disco, 20, 2, config.GossipPort, config.PeersPort, new(actors.AccountEntity)))
 		// handle the error
 		if err != nil {
 			logger.Panic(err)
