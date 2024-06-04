@@ -48,6 +48,7 @@ The project adheres to [Semantic Versioning](https://semver.org) and [Convention
   - [Installation](#installation)
   - [Clustering](#clustering)
     - [Operations Guide](#operations-guide)
+    - [Redeployment](#redeployment)
     - [Built-in Discovery Providers](#built-in-discovery-providers)
       - [Kubernetes Discovery Provider Setup](#kubernetes-discovery-provider-setup)
         - [Get Started](#get-started)
@@ -253,8 +254,7 @@ These methods can be used from the [API](./actors/api.go) as well as from the [P
 ### Cluster
 
 This offers simple scalability, partitioning (sharding), and re-balancing out-of-the-box. Go-Akt nodes are automatically discovered. See [Clustering](#clustering).
-Beware that at the moment, within the cluster the existence of an actor is unique. When the node where a given actor has left the cluster, the given actor
-is no longer accessible. _We can improve this behaviour by introducing the redeployment of actors on new nodes_.
+Beware that at the moment, within the cluster the existence of an actor is unique.
 
 ### Observability
 
@@ -347,10 +347,11 @@ re-balancing out-of-the-box. _**It requires remoting to be enabled**_.
 
 At the moment the following providers are implemented:
 
-- the [kubernetes](https://kubernetes.io/docs/home/) [api integration](discovery/kubernetes) is fully functional
-- the [mDNS](https://datatracker.ietf.org/doc/html/rfc6762) and [DNS-SD](https://tools.ietf.org/html/rfc6763)
-- the [NATS](https://nats.io/) [integration](discovery/nats) is fully functional
-- the [DNS](discovery/dnssd) is fully functional
+- [kubernetes](https://kubernetes.io/docs/home/) [api integration](discovery/kubernetes) is fully functional
+- [mDNS](https://datatracker.ietf.org/doc/html/rfc6762) and [DNS-SD](https://tools.ietf.org/html/rfc6763)
+- [NATS](https://nats.io/) [integration](discovery/nats) is fully functional
+- [DNS](discovery/dnssd) is fully functional
+- [Static](discovery/static) for demo purpose
 
 Note: One can add additional discovery providers using the following [interface](./discovery/provider.go).
 
@@ -363,7 +364,12 @@ The following outlines the cluster mode operations which can help have a healthy
 - One can remove nodes. However, to avoid losing data, one need to scale down the cluster to the minimum number of nodes
   which started the cluster.
 
-Note: At the moment when a node is removed from the cluster, all actors on the given node are no longer accessible. The remaining members of the cluster will still function as expected. There is some ongoing work to address that issue. One can look at the following [discussion](https://github.com/Tochemey/goakt/discussions/304)
+### Redeployment
+
+When a node leaves the cluster, as long as the cluster quorum is stable, its actors are redeployed on the remaining nodes of the cluster.
+The redeployed actors are created with **_their initial state_**. To be able to recover from their current state before the cluster topology change,
+one needs to persist their state into a distributed storage and recover from there using the `PreStart` hook.
+
 
 ### Built-in Discovery Providers
 
