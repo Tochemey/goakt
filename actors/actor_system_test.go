@@ -54,6 +54,7 @@ import (
 	testpb "github.com/tochemey/goakt/v2/test/data/testpb"
 )
 
+// nolint
 func TestActorSystem(t *testing.T) {
 	t.Run("New instance with Defaults", func(t *testing.T) {
 		actorSys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
@@ -1188,7 +1189,7 @@ func TestActorSystem(t *testing.T) {
 		err = newActorSystem.Start(ctx)
 		require.NoError(t, err)
 
-		receiveFn := func(ctx context.Context, message proto.Message) error {
+		receiveFn := func(_ context.Context, message proto.Message) error {
 			expected := &testpb.Reply{Content: "test spawn from func"}
 			assert.True(t, proto.Equal(expected, message))
 			return nil
@@ -1218,7 +1219,7 @@ func TestActorSystem(t *testing.T) {
 		err := sys.Start(ctx)
 		assert.NoError(t, err)
 
-		receiveFn := func(ctx context.Context, message proto.Message) error {
+		receiveFn := func(_ context.Context, message proto.Message) error {
 			expected := &testpb.Reply{Content: "test spawn from func"}
 			assert.True(t, proto.Equal(expected, message))
 			return nil

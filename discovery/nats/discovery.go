@@ -154,7 +154,7 @@ func (d *Discovery) Register() error {
 	}
 
 	// create the subscription handler
-	subscriptionHandler := func(subj, reply string, msg *internalpb.NatsMessage) {
+	subscriptionHandler := func(_, reply string, msg *internalpb.NatsMessage) {
 		switch msg.GetMessageType() {
 		case internalpb.NatsMessageType_NATS_MESSAGE_TYPE_DEREGISTER:
 			d.logger.Infof("received an de-registration request from peer[name=%s, host=%s, port=%d]",

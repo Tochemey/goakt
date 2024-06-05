@@ -1203,7 +1203,7 @@ func (x *actorSystem) enableRemoting(ctx context.Context) {
 		Handler: h2c.NewHandler(mux, &http2.Server{
 			IdleTimeout: 1200 * time.Second,
 		}),
-		BaseContext: func(listener net.Listener) context.Context {
+		BaseContext: func(_ net.Listener) context.Context {
 			return ctx
 		},
 	}
@@ -1273,7 +1273,7 @@ func (x *actorSystem) registerMetrics() error {
 		return err
 	}
 
-	_, err = meter.RegisterCallback(func(ctx context.Context, observer otelmetric.Observer) error {
+	_, err = meter.RegisterCallback(func(_ context.Context, observer otelmetric.Observer) error {
 		observer.ObserveInt64(metrics.ActorsCount(), int64(x.NumActors()))
 		return nil
 	}, metrics.ActorsCount())

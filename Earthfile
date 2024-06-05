@@ -1,12 +1,9 @@
-VERSION 0.7
+VERSION 0.8
 
-FROM tochemey/docker-go:1.21.0-1.0.0
+FROM tochemey/docker-go:1.22.2-3.1.0
 
-# install the various tools to generate connect-go
-RUN go install github.com/fullstorydev/grpcurl/cmd/grpcurl@latest
-RUN go install connectrpc.com/connect/cmd/protoc-gen-connect-go@latest
-RUN apk --no-cache add git ca-certificates gcc musl-dev libc-dev binutils-gold
 RUN go install github.com/ory/go-acc@latest
+RUN go install github.com/vektra/mockery/v2@v2.43.2
 
 
 test:
@@ -37,9 +34,7 @@ mock:
     FROM +code
 
     # generate the mocks
-    RUN mockery  --all --dir hash --keeptree --exported=true --with-expecter=true --inpackage=true --output ./mocks/hash --case snake
-    RUN mockery  --all --dir discovery --keeptree --exported=true --with-expecter=true --inpackage=true --output ./mocks/discovery --case snake
-    RUN mockery  --all --dir internal/cluster --keeptree --exported=true --with-expecter=true --inpackage=true --output ./mocks/cluster --case snake
+    RUN mockery
 
     SAVE ARTIFACT ./mocks mocks AS LOCAL mocks
 
