@@ -30,6 +30,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+// nolint
 func TestBehaviorStack(t *testing.T) {
 	stack := newBehaviorStack()
 	assert.NotNil(t, stack)

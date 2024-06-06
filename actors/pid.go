@@ -1513,7 +1513,7 @@ func (p *pid) registerMetrics() error {
 		return err
 	}
 
-	_, err = meter.RegisterCallback(func(ctx context.Context, observer otelmetric.Observer) error {
+	_, err = meter.RegisterCallback(func(_ context.Context, observer otelmetric.Observer) error {
 		observer.ObserveInt64(metrics.ChildrenCount(), p.childrenCount.Load())
 		observer.ObserveInt64(metrics.StashCount(), int64(p.StashSize()))
 		observer.ObserveInt64(metrics.RestartCount(), p.restartCount.Load())
