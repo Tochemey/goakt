@@ -38,7 +38,7 @@ import (
 func TestFuture_AwaitUninterruptible(t *testing.T) {
 	t.Run("With Success", func(t *testing.T) {
 		ctx := context.TODO()
-		f := New[string](ctx, func(ctx context.Context) (string, error) {
+		f := New[string](ctx, func(_ context.Context) (string, error) {
 			wg := sync.WaitGroup{}
 			wg.Add(1)
 			go func() {
@@ -59,7 +59,7 @@ func TestFuture_AwaitUninterruptible(t *testing.T) {
 	})
 	t.Run("With Failure", func(t *testing.T) {
 		ctx := context.TODO()
-		f := New[string](ctx, func(ctx context.Context) (string, error) {
+		f := New[string](ctx, func(_ context.Context) (string, error) {
 			wg := sync.WaitGroup{}
 			wg.Add(1)
 			go func() {
@@ -83,7 +83,7 @@ func TestFuture_AwaitUninterruptible(t *testing.T) {
 func TestFuture_Await(t *testing.T) {
 	t.Run("With Success", func(t *testing.T) {
 		ctx := context.TODO()
-		f := New[string](ctx, func(ctx context.Context) (string, error) {
+		f := New[string](ctx, func(_ context.Context) (string, error) {
 			wg := sync.WaitGroup{}
 			wg.Add(1)
 			go func() {
@@ -104,7 +104,7 @@ func TestFuture_Await(t *testing.T) {
 	})
 	t.Run("With Failure", func(t *testing.T) {
 		ctx := context.TODO()
-		f := New[string](ctx, func(ctx context.Context) (string, error) {
+		f := New[string](ctx, func(_ context.Context) (string, error) {
 			wg := sync.WaitGroup{}
 			wg.Add(1)
 			go func() {
@@ -125,7 +125,7 @@ func TestFuture_Await(t *testing.T) {
 	})
 	t.Run("With Timeout", func(t *testing.T) {
 		ctx := context.TODO()
-		f := New[string](ctx, func(ctx context.Context) (string, error) {
+		f := New[string](ctx, func(_ context.Context) (string, error) {
 			wg := sync.WaitGroup{}
 			wg.Add(1)
 			go func() {
@@ -148,7 +148,7 @@ func TestFuture_Await(t *testing.T) {
 
 func TestFuture_Cancel(t *testing.T) {
 	ctx := context.TODO()
-	f := New[string](ctx, func(ctx context.Context) (string, error) {
+	f := New[string](ctx, func(_ context.Context) (string, error) {
 		wg := sync.WaitGroup{}
 		wg.Add(1)
 		go func() {
