@@ -1400,7 +1400,7 @@ func TestActorSystem(t *testing.T) {
 			cluster:        mockedCluster,
 			clusterEnabled: *atomic.NewBool(true),
 			telemetry:      telemetry.New(),
-			mutex:          sync.Mutex{},
+			locker:         sync.Mutex{},
 			tracer:         noop.NewTracerProvider().Tracer("testSystem"),
 			scheduler:      newScheduler(logger, time.Second, withSchedulerCluster(mockedCluster)),
 			clusterConfig:  NewClusterConfig(),

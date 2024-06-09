@@ -66,8 +66,10 @@ func Ask(ctx context.Context, to PID, message proto.Message, timeout time.Durati
 	for await := time.After(timeout); ; {
 		select {
 		case response = <-messageContext.response:
+			to.setLastProcessingDuration(time.Since(to.getLastProcessingTime()))
 			return
 		case <-await:
+			to.setLastProcessingDuration(time.Since(to.getLastProcessingTime()))
 			err = ErrRequestTimeout
 			to.handleError(messageContext, err)
 			return
@@ -99,7 +101,7 @@ func Tell(ctx context.Context, to PID, message proto.Message) error {
 	}
 
 	to.doReceive(messageContext)
-
+	to.setLastProcessingDuration(time.Since(to.getLastProcessingTime()))
 	return nil
 }
 
@@ -114,6 +116,7 @@ func BatchTell(ctx context.Context, to PID, messages ...proto.Message) error {
 		messageContext := newReceiveContext(ctx, NoSender, to, message, true).WithRemoteSender(RemoteNoSender)
 		to.doReceive(messageContext)
 	}
+	to.setLastProcessingDuration(time.Since(to.getLastProcessingTime()))
 	return nil
 }
 
@@ -138,9 +141,11 @@ func BatchAsk(ctx context.Context, to PID, timeout time.Duration, messages ...pr
 		for await := time.After(timeout); ; {
 			select {
 			case resp := <-messageContext.response:
+				to.setLastProcessingDuration(time.Since(to.getLastProcessingTime()))
 				responses <- resp
 				break timerLoop
 			case <-await:
+				to.setLastProcessingDuration(time.Since(to.getLastProcessingTime()))
 				err = ErrRequestTimeout
 				to.handleError(messageContext, err)
 				return

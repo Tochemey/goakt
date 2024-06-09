@@ -339,8 +339,8 @@ func TestRestart(t *testing.T) {
 	})
 	t.Run("noSender cannot be restarted", func(t *testing.T) {
 		pid := &pid{
-			tracer:  noop.NewTracerProvider().Tracer(""),
-			rwMutex: &sync.RWMutex{},
+			tracer:   noop.NewTracerProvider().Tracer(""),
+			rwLocker: &sync.RWMutex{},
 		}
 		err := pid.Restart(context.TODO())
 		assert.Error(t, err)

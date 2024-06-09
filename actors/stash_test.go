@@ -111,6 +111,7 @@ func TestStash(t *testing.T) {
 		opts := []pidOption{
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
+			withStash(0),
 		}
 
 		// create the actor path
@@ -136,6 +137,7 @@ func TestStash(t *testing.T) {
 		opts := []pidOption{
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
+			withStash(0),
 		}
 
 		// create the actor path

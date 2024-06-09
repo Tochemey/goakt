@@ -185,7 +185,7 @@ type actorSystem struct {
 	partitionHasher    hash.Hasher
 
 	// help protect some the fields to set
-	mutex sync.Mutex
+	locker sync.Mutex
 	// specifies actors mailbox size
 	mailboxSize uint64
 	// specifies the mailbox to use for the actors
@@ -239,9 +239,9 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		actorInitMaxRetries: DefaultInitMaxRetries,
 		supervisorStrategy:  DefaultSupervisoryStrategy,
 		telemetry:           telemetry.New(),
-		mutex:               sync.Mutex{},
+		locker:              sync.Mutex{},
 		shutdownTimeout:     DefaultShutdownTimeout,
-		mailboxSize:         defaultMailboxSize,
+		mailboxSize:         DefaultMailboxSize,
 		housekeeperStopSig:  make(chan types.Unit, 1),
 		eventsStream:        eventstream.New(),
 		partitionHasher:     hash.DefaultHasher(),
@@ -294,8 +294,8 @@ func (x *actorSystem) Deregister(ctx context.Context, actor Actor) error {
 	_, span := x.tracer.Start(ctx, "Deregister")
 	defer span.End()
 
-	x.mutex.Lock()
-	defer x.mutex.Unlock()
+	x.locker.Lock()
+	defer x.locker.Unlock()
 
 	if !x.started.Load() {
 		return ErrActorSystemNotStarted
@@ -310,8 +310,8 @@ func (x *actorSystem) Register(ctx context.Context, actor Actor) error {
 	_, span := x.tracer.Start(ctx, "Register")
 	defer span.End()
 
-	x.mutex.Lock()
-	defer x.mutex.Unlock()
+	x.locker.Lock()
+	defer x.locker.Unlock()
 
 	if !x.started.Load() {
 		return ErrActorSystemNotStarted
@@ -612,23 +612,23 @@ func (x *actorSystem) ReSpawn(ctx context.Context, name string) (PID, error) {
 
 // Name returns the actor system name
 func (x *actorSystem) Name() string {
-	x.mutex.Lock()
-	defer x.mutex.Unlock()
+	x.locker.Lock()
+	defer x.locker.Unlock()
 	return x.name
 }
 
 // Actors returns the list of Actors that are alive in the actor system
 func (x *actorSystem) Actors() []PID {
-	x.mutex.Lock()
-	defer x.mutex.Unlock()
+	x.locker.Lock()
+	defer x.locker.Unlock()
 	return x.actors.pids()
 }
 
 // PeerAddress returns the actor system address known in the cluster. That address is used by other nodes to communicate with the actor system.
 // This address is empty when cluster mode is not activated
 func (x *actorSystem) PeerAddress() string {
-	x.mutex.Lock()
-	defer x.mutex.Unlock()
+	x.locker.Lock()
+	defer x.locker.Unlock()
 	if x.clusterEnabled.Load() {
 		return x.cluster.AdvertisedAddress()
 	}
@@ -643,8 +643,8 @@ func (x *actorSystem) ActorOf(ctx context.Context, actorName string) (addr *goak
 	spanCtx, span := x.tracer.Start(ctx, "ActorOf")
 	defer span.End()
 
-	x.mutex.Lock()
-	defer x.mutex.Unlock()
+	x.locker.Lock()
+	defer x.locker.Unlock()
 
 	if !x.started.Load() {
 		span.SetStatus(codes.Error, "ActorOf")
@@ -697,8 +697,8 @@ func (x *actorSystem) ActorOf(ctx context.Context, actorName string) (addr *goak
 // LocalActor returns the reference of a local actor.
 // A local actor is an actor that reside on the same node where the given actor system is running
 func (x *actorSystem) LocalActor(actorName string) (PID, error) {
-	x.mutex.Lock()
-	defer x.mutex.Unlock()
+	x.locker.Lock()
+	defer x.locker.Unlock()
 
 	if !x.started.Load() {
 		return nil, ErrActorSystemNotStarted
@@ -722,8 +722,8 @@ func (x *actorSystem) RemoteActor(ctx context.Context, actorName string) (addr *
 	spanCtx, span := x.tracer.Start(ctx, "RemoteActor")
 	defer span.End()
 
-	x.mutex.Lock()
-	defer x.mutex.Unlock()
+	x.locker.Lock()
+	defer x.locker.Unlock()
 
 	if !x.started.Load() {
 		e := ErrActorSystemNotStarted
@@ -1128,7 +1128,7 @@ func (x *actorSystem) enableClustering(ctx context.Context) error {
 
 	x.logger.Info("cluster engine successfully started...")
 
-	x.mutex.Lock()
+	x.locker.Lock()
 	x.cluster = clusterEngine
 	x.clusterEventsChan = clusterEngine.Events()
 	x.redistributionChan = make(chan *cluster.Event, 1)
@@ -1136,7 +1136,7 @@ func (x *actorSystem) enableClustering(ctx context.Context) error {
 		x.registry.Register(kind)
 		x.logger.Infof("cluster kind=(%s) registered", types.NameOf(kind))
 	}
-	x.mutex.Unlock()
+	x.locker.Unlock()
 
 	go x.clusterEventsLoop()
 	go x.clusterReplicationLoop()
@@ -1216,9 +1216,9 @@ func (x *actorSystem) enableRemoting(ctx context.Context) {
 		}
 	}()
 
-	x.mutex.Lock()
+	x.locker.Lock()
 	x.remotingServer = server
-	x.mutex.Unlock()
+	x.locker.Unlock()
 
 	x.logger.Info("remoting enabled...:)")
 }

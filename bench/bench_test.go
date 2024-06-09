@@ -59,7 +59,7 @@ func (p *Benchmarker) PostStop(context.Context) error {
 }
 
 func BenchmarkActor(b *testing.B) {
-	b.Run("tell(send only)", func(b *testing.B) {
+	b.Run("tell(send only) with parallelism", func(b *testing.B) {
 		ctx := context.TODO()
 
 		// create the actor system
@@ -89,7 +89,7 @@ func BenchmarkActor(b *testing.B) {
 		_ = pid.Shutdown(ctx)
 		_ = actorSystem.Stop(ctx)
 	})
-	b.Run("ask(send/reply)", func(b *testing.B) {
+	b.Run("ask(send/reply) with parallelism", func(b *testing.B) {
 		ctx := context.TODO()
 		// create the actor system
 		actorSystem, _ := actors.NewActorSystem("testSys",
@@ -115,6 +115,62 @@ func BenchmarkActor(b *testing.B) {
 				_, _ = actors.Ask(ctx, pid, new(testspb.TestReply), receivingTimeout)
 			}
 		})
+		_ = pid.Shutdown(ctx)
+		_ = actorSystem.Stop(ctx)
+	})
+	b.Run("tell(send only)", func(b *testing.B) {
+		ctx := context.TODO()
+
+		// create the actor system
+		actorSystem, _ := actors.NewActorSystem("testSys",
+			actors.WithLogger(log.DiscardLogger),
+			actors.WithActorInitMaxRetries(1),
+			actors.WithMailboxSize(uint64(b.N)),
+			actors.WithReplyTimeout(receivingTimeout))
+
+		// start the actor system
+		_ = actorSystem.Start(ctx)
+
+		// define the benchmark actor
+		actor := &Benchmarker{}
+
+		// create the actor ref
+		pid, _ := actorSystem.Spawn(ctx, "test", actor)
+
+		b.ResetTimer() // Reset the benchmark timer
+		for i := 0; i < b.N; i++ {
+			// send a message to the actor
+			_ = actors.Tell(ctx, pid, &testspb.TestSend{})
+		}
+
+		_ = pid.Shutdown(ctx)
+		_ = actorSystem.Stop(ctx)
+	})
+	b.Run("ask(send/reply)", func(b *testing.B) {
+		ctx := context.TODO()
+		// create the actor system
+		actorSystem, _ := actors.NewActorSystem("testSys",
+			actors.WithLogger(log.DiscardLogger),
+			actors.WithActorInitMaxRetries(1),
+			actors.WithMailboxSize(uint64(b.N)),
+			actors.WithExpireActorAfter(5*time.Second),
+			actors.WithReplyTimeout(receivingTimeout))
+
+		// start the actor system
+		_ = actorSystem.Start(ctx)
+
+		// define the benchmark actor
+		actor := &Benchmarker{}
+
+		// create the actor ref
+		pid, _ := actorSystem.Spawn(ctx, "test", actor)
+
+		b.ResetTimer() // Reset the benchmark timer
+		for i := 0; i < b.N; i++ {
+			// send a message to the actor
+			_, _ = actors.Ask(ctx, pid, new(testspb.TestReply), receivingTimeout)
+		}
+
 		_ = pid.Shutdown(ctx)
 		_ = actorSystem.Stop(ctx)
 	})
