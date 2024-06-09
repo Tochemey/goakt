@@ -53,9 +53,11 @@ const (
 	DefaultShutdownTimeout = 2 * time.Second
 	// DefaultInitTimeout defines the default init timeout
 	DefaultInitTimeout = time.Second
-
-	defaultMailboxSize = 4096
-	eventsTopic        = "topic.events"
+	// DefaultMailboxSize defines the default mailbox size
+	DefaultMailboxSize = 1_000_000
+	// DefaultStashCapacity defines the default stash size
+	DefaultStashCapacity = 1_000
+	eventsTopic          = "topic.events"
 )
 
 // NoSender means that there is no sender

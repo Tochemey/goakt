@@ -165,6 +165,9 @@ type PID interface {
 	handleError(receiveCtx ReceiveContext, err error)
 	// removeChild is a utility function to remove child actor
 	removeChild(pid PID)
+
+	getLastProcessingTime() time.Time
+	setLastProcessingDuration(d time.Duration)
 }
 
 // pid specifies an actor unique process
@@ -225,10 +228,12 @@ type pid struct {
 	// specifies the last processing message duration
 	lastProcessingDuration atomic.Duration
 
-	// rwMutex that helps synchronize the pid in a concurrent environment
+	// rwLocker that helps synchronize the pid in a concurrent environment
 	// this helps protect the pid fields accessibility
-	rwMutex   *sync.RWMutex
-	stopMutex *sync.Mutex
+	rwLocker *sync.RWMutex
+
+	stopLocker           *sync.Mutex
+	processingTimeLocker *sync.Mutex
 
 	// supervisor strategy
 	supervisorStrategy StrategyDirective
@@ -245,7 +250,7 @@ type pid struct {
 	// stash settings
 	stashBuffer   Mailbox
 	stashCapacity atomic.Uint64
-	stashMutex    *sync.Mutex
+	stashLocker   *sync.Mutex
 
 	// define an events stream
 	eventsStream *eventstream.EventsStream
@@ -266,33 +271,34 @@ var _ PID = (*pid)(nil)
 // newPID creates a new pid
 func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption) (*pid, error) {
 	p := &pid{
-		Actor:              actor,
-		lastProcessingTime: atomic.Time{},
-		shutdownSignal:     make(chan types.Unit, 1),
-		haltPassivationLnr: make(chan types.Unit, 1),
-		logger:             log.DefaultLogger,
-		mailboxSize:        defaultMailboxSize,
-		children:           newPIDMap(10),
-		supervisorStrategy: DefaultSupervisoryStrategy,
-		watchersList:       slices.NewConcurrentSlice[*watcher](),
-		telemetry:          telemetry.New(),
-		actorPath:          actorPath,
-		rwMutex:            &sync.RWMutex{},
-		stopMutex:          &sync.Mutex{},
-		httpClient:         http.NewClient(),
-		mailbox:            nil,
-		stashBuffer:        nil,
-		stashMutex:         &sync.Mutex{},
-		eventsStream:       nil,
-		tracer:             noop.NewTracerProvider().Tracer("PID"),
-		restartCount:       atomic.NewInt64(0),
-		childrenCount:      atomic.NewInt64(0),
+		Actor:                actor,
+		lastProcessingTime:   atomic.Time{},
+		shutdownSignal:       make(chan types.Unit, 1),
+		haltPassivationLnr:   make(chan types.Unit, 1),
+		logger:               log.DefaultLogger,
+		mailboxSize:          DefaultMailboxSize,
+		children:             newPIDMap(10),
+		supervisorStrategy:   DefaultSupervisoryStrategy,
+		watchersList:         slices.NewConcurrentSlice[*watcher](),
+		telemetry:            telemetry.New(),
+		actorPath:            actorPath,
+		rwLocker:             &sync.RWMutex{},
+		stopLocker:           &sync.Mutex{},
+		httpClient:           http.NewClient(),
+		mailbox:              nil,
+		stashBuffer:          nil,
+		stashLocker:          &sync.Mutex{},
+		eventsStream:         nil,
+		tracer:               noop.NewTracerProvider().Tracer("PID"),
+		restartCount:         atomic.NewInt64(0),
+		childrenCount:        atomic.NewInt64(0),
+		processingTimeLocker: new(sync.Mutex),
 	}
 
 	p.initMaxRetries.Store(DefaultInitMaxRetries)
 	p.shutdownTimeout.Store(DefaultShutdownTimeout)
 	p.lastProcessingDuration.Store(0)
-	p.stashCapacity.Store(0)
+	p.stashCapacity.Store(DefaultStashCapacity)
 	p.isRunning.Store(false)
 	p.passivateAfter.Store(DefaultPassivationTimeout)
 	p.replyTimeout.Store(DefaultReplyTimeout)
@@ -377,9 +383,9 @@ func (p *pid) Child(name string) (PID, error) {
 
 // Children returns the list of all the children of the given actor that are still alive or an empty list
 func (p *pid) Children() []PID {
-	p.rwMutex.RLock()
+	p.rwLocker.RLock()
 	children := p.children.pids()
-	p.rwMutex.RUnlock()
+	p.rwLocker.RUnlock()
 
 	cids := make([]PID, 0, len(children))
 	for _, child := range children {
@@ -409,9 +415,9 @@ func (p *pid) Stop(ctx context.Context, cid PID) error {
 		return ErrUndefinedActor
 	}
 
-	p.rwMutex.RLock()
+	p.rwLocker.RLock()
 	children := p.children
-	p.rwMutex.RUnlock()
+	p.rwLocker.RUnlock()
 
 	if cid, ok := children.get(cid.ActorPath()); ok {
 		desc := fmt.Sprintf("child.[%s] Shutdown", cid.ActorPath())
@@ -439,17 +445,17 @@ func (p *pid) IsRunning() bool {
 
 // ActorSystem returns the actor system
 func (p *pid) ActorSystem() ActorSystem {
-	p.rwMutex.RLock()
+	p.rwLocker.RLock()
 	sys := p.system
-	p.rwMutex.RUnlock()
+	p.rwLocker.RUnlock()
 	return sys
 }
 
 // ActorPath returns the path of the actor
 func (p *pid) ActorPath() *Path {
-	p.rwMutex.RLock()
+	p.rwLocker.RLock()
 	path := p.actorPath
-	p.rwMutex.RUnlock()
+	p.rwLocker.RUnlock()
 	return path
 }
 
@@ -522,16 +528,16 @@ func (p *pid) SpawnChild(ctx context.Context, name string, actor Actor) (PID, er
 
 	childActorPath := NewPath(name, p.ActorPath().Address()).WithParent(p.ActorPath())
 
-	p.rwMutex.RLock()
+	p.rwLocker.RLock()
 	children := p.children
-	p.rwMutex.RUnlock()
+	p.rwLocker.RUnlock()
 
 	if cid, ok := children.get(childActorPath); ok {
 		return cid, nil
 	}
 
-	p.rwMutex.Lock()
-	defer p.rwMutex.Unlock()
+	p.rwLocker.Lock()
+	defer p.rwLocker.Unlock()
 
 	// create the child actor options child inherit parent's options
 	opts := []pidOption{
@@ -611,9 +617,11 @@ func (p *pid) Ask(ctx context.Context, to PID, message proto.Message) (response 
 	for await := time.After(p.replyTimeout.Load()); ; {
 		select {
 		case response = <-messageContext.response:
+			p.lastProcessingDuration.Store(time.Since(p.lastProcessingTime.Load()))
 			span.SetStatus(codes.Ok, "Ask")
 			return
 		case <-await:
+			p.lastProcessingDuration.Store(time.Since(p.lastProcessingTime.Load()))
 			err = ErrRequestTimeout
 			span.SetStatus(codes.Error, "Ask")
 			span.RecordError(err)
@@ -636,7 +644,7 @@ func (p *pid) Tell(ctx context.Context, to PID, message proto.Message) error {
 
 	messageContext := newReceiveContext(spanCtx, p, to, message, true)
 	to.doReceive(messageContext)
-
+	p.lastProcessingDuration.Store(time.Since(p.lastProcessingTime.Load()))
 	span.SetStatus(codes.Ok, "Tell")
 	return nil
 }
@@ -666,6 +674,7 @@ func (p *pid) BatchTell(ctx context.Context, to PID, messages ...proto.Message) 
 		to.doReceive(messageContext)
 	}
 
+	p.lastProcessingDuration.Store(time.Since(p.lastProcessingTime.Load()))
 	span.SetStatus(codes.Ok, "BatchTell")
 	return nil
 }
@@ -696,10 +705,12 @@ func (p *pid) BatchAsk(ctx context.Context, to PID, messages ...proto.Message) (
 		for await := time.After(p.replyTimeout.Load()); ; {
 			select {
 			case resp := <-messageContext.response:
+				p.lastProcessingDuration.Store(time.Since(p.lastProcessingTime.Load()))
 				responses <- resp
 				span.SetStatus(codes.Ok, "BatchAsk")
 				break timerLoop
 			case <-await:
+				p.lastProcessingDuration.Store(time.Since(p.lastProcessingTime.Load()))
 				err = ErrRequestTimeout
 				span.SetStatus(codes.Error, "BatchAsk")
 				span.RecordError(err)
@@ -1070,8 +1081,8 @@ func (p *pid) Shutdown(ctx context.Context) error {
 	spanCtx, span := p.tracer.Start(ctx, "Shutdown")
 	defer span.End()
 
-	p.stopMutex.Lock()
-	defer p.stopMutex.Unlock()
+	p.stopLocker.Lock()
+	defer p.stopLocker.Unlock()
 
 	p.logger.Info("Shutdown process has started...")
 
@@ -1133,21 +1144,14 @@ func (p *pid) watchers() *slices.ConcurrentSlice[*watcher] {
 
 // doReceive pushes a given message to the actor receiveContextBuffer
 func (p *pid) doReceive(ctx ReceiveContext) {
-	p.rwMutex.Lock()
-	defer p.rwMutex.Unlock()
+	p.rwLocker.Lock()
+	mailbox := p.mailbox
+	p.rwLocker.Unlock()
 
 	p.lastProcessingTime.Store(time.Now())
-
-	startTime := time.Now()
-	defer func() {
-		duration := time.Since(startTime)
-		p.lastProcessingDuration.Store(duration)
-	}()
-
-	if err := p.mailbox.Push(ctx); err != nil {
+	if err := mailbox.Push(ctx); err != nil {
 		p.logger.Warn(err)
 		p.handleError(ctx, err)
-		return
 	}
 }
 
@@ -1172,9 +1176,9 @@ func (p *pid) init(ctx context.Context) error {
 		return e
 	}
 
-	p.rwMutex.Lock()
+	p.rwLocker.Lock()
 	p.isRunning.Store(true)
-	p.rwMutex.Unlock()
+	p.rwLocker.Unlock()
 
 	p.logger.Info("Initialization process successfully completed.")
 	span.SetStatus(codes.Ok, "Init")
@@ -1191,7 +1195,7 @@ func (p *pid) init(ctx context.Context) error {
 
 // reset re-initializes the actor PID
 func (p *pid) reset() {
-	p.lastProcessingTime = atomic.Time{}
+	p.lastProcessingTime.Store(time.Time{})
 	p.passivateAfter.Store(DefaultPassivationTimeout)
 	p.replyTimeout.Store(DefaultReplyTimeout)
 	p.shutdownTimeout.Store(DefaultShutdownTimeout)
@@ -1350,8 +1354,8 @@ func (p *pid) passivationListener() {
 		return
 	}
 
-	p.stopMutex.Lock()
-	defer p.stopMutex.Unlock()
+	p.stopLocker.Lock()
+	defer p.stopLocker.Unlock()
 
 	p.logger.Infof("Passivation mode has been triggered for actor=%s...", p.ActorPath().String())
 
@@ -1376,33 +1380,33 @@ func (p *pid) passivationListener() {
 
 // setBehavior is a utility function that helps set the actor behavior
 func (p *pid) setBehavior(behavior Behavior) {
-	p.rwMutex.Lock()
+	p.rwLocker.Lock()
 	p.behaviorStack.Clear()
 	p.behaviorStack.Push(behavior)
-	p.rwMutex.Unlock()
+	p.rwLocker.Unlock()
 }
 
 // resetBehavior is a utility function resets the actor behavior
 func (p *pid) resetBehavior() {
-	p.rwMutex.Lock()
+	p.rwLocker.Lock()
 	p.behaviorStack.Clear()
 	p.behaviorStack.Push(p.Receive)
-	p.rwMutex.Unlock()
+	p.rwLocker.Unlock()
 }
 
 // setBehaviorStacked adds a behavior to the actor's behaviorStack
 func (p *pid) setBehaviorStacked(behavior Behavior) {
-	p.rwMutex.Lock()
+	p.rwLocker.Lock()
 	p.behaviorStack.Push(behavior)
-	p.rwMutex.Unlock()
+	p.rwLocker.Unlock()
 }
 
 // unsetBehaviorStacked sets the actor's behavior to the previous behavior
 // prior to setBehaviorStacked is called
 func (p *pid) unsetBehaviorStacked() {
-	p.rwMutex.Lock()
+	p.rwLocker.Lock()
 	p.behaviorStack.Pop()
-	p.rwMutex.Unlock()
+	p.rwLocker.Unlock()
 }
 
 // doStop stops the actor
@@ -1557,4 +1561,17 @@ func (p *pid) getRemoteServiceClient(host string, port int) (internalpbconnect.R
 		http.URL(host, port),
 		clientConnectionOptions...,
 	), nil
+}
+
+func (p *pid) getLastProcessingTime() time.Time {
+	p.processingTimeLocker.Lock()
+	processingTime := p.lastProcessingTime.Load()
+	p.processingTimeLocker.Unlock()
+	return processingTime
+}
+
+func (p *pid) setLastProcessingDuration(d time.Duration) {
+	p.processingTimeLocker.Lock()
+	p.lastProcessingDuration.Store(d)
+	p.processingTimeLocker.Unlock()
 }

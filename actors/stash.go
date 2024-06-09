@@ -30,8 +30,8 @@ func (p *pid) stash(ctx ReceiveContext) error {
 		return ErrStashBufferNotSet
 	}
 
-	p.stashMutex.Lock()
-	defer p.stashMutex.Unlock()
+	p.stashLocker.Lock()
+	defer p.stashLocker.Unlock()
 
 	return p.stashBuffer.Push(ctx)
 }
@@ -42,8 +42,8 @@ func (p *pid) unstash() error {
 		return ErrStashBufferNotSet
 	}
 
-	p.stashMutex.Lock()
-	defer p.stashMutex.Unlock()
+	p.stashLocker.Lock()
+	defer p.stashLocker.Unlock()
 
 	if !p.stashBuffer.IsEmpty() {
 		received, _ := p.stashBuffer.Pop()
@@ -59,8 +59,8 @@ func (p *pid) unstashAll() error {
 		return ErrStashBufferNotSet
 	}
 
-	p.stashMutex.Lock()
-	defer p.stashMutex.Unlock()
+	p.stashLocker.Lock()
+	defer p.stashLocker.Unlock()
 
 	for !p.stashBuffer.IsEmpty() {
 		received, _ := p.stashBuffer.Pop()
