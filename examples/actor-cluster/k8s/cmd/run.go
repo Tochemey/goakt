@@ -52,7 +52,7 @@ const (
 
 type config struct {
 	GossipPort   int `env:"GOSSIP_PORT"`
-	ClusterPort  int `env:"CLUSTER_PORT"`
+	PeersPort    int `env:"PEERS_PORT"`
 	RemotingPort int `env:"REMOTING_PORT"`
 	Port         int `env:"PORT" envDefault:"50051"`
 }
@@ -79,7 +79,7 @@ var runCmd = &cobra.Command{
 		logger := log.New(log.DebugLevel, os.Stdout)
 
 		// instantiate the k8 discovery provider
-		disco := kubernetes.NewDiscovery(&kubernetes.Config{
+		discovery := kubernetes.NewDiscovery(&kubernetes.Config{
 			ApplicationName:  applicationName,
 			ActorSystemName:  actorSystemName,
 			Namespace:        namespace,
@@ -91,17 +91,28 @@ var runCmd = &cobra.Command{
 		// get the port config
 		config := getConfig()
 
-		// grab the the host
+		// grab the host
 		host, _ := os.Hostname()
+
+		clusterConfig := goakt.
+			NewClusterConfig().
+			WithDiscovery(discovery).
+			WithPartitionCount(20).
+			WithMinimumPeersQuorum(1).
+			WithReplicaCount(1).
+			WithGossipPort(config.GossipPort).
+			WithPeersPort(config.PeersPort).
+			WithKinds(new(actors.AccountEntity))
 
 		// create the actor system
 		actorSystem, err := goakt.NewActorSystem(
 			actorSystemName,
-			goakt.WithPassivationDisabled(), // set big passivation time
+			goakt.WithPassivationDisabled(), // disable passivation
 			goakt.WithLogger(logger),
 			goakt.WithActorInitMaxRetries(3),
 			goakt.WithRemoting(host, int32(config.RemotingPort)),
-			goakt.WithClustering(disco, 20, 1, config.GossipPort, config.ClusterPort, new(actors.AccountEntity)))
+			goakt.WithCluster(clusterConfig))
+
 		// handle the error
 		if err != nil {
 			logger.Panic(err)
