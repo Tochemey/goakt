@@ -75,7 +75,7 @@ var runCmd = &cobra.Command{
 		// create the actor system
 		actorSystem, err := goakt.NewActorSystem(
 			config.ActorSystemName,
-			goakt.WithPassivationDisabled(), // set big passivation time
+			goakt.WithPassivationDisabled(), // disable passivation
 			goakt.WithLogger(logger),
 			goakt.WithActorInitMaxRetries(3),
 			goakt.WithRemoting(host, int32(config.RemotingPort)),
