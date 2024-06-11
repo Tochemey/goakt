@@ -1,4 +1,3 @@
-
 # Go-Akt
 
 [![build](https://img.shields.io/github/actions/workflow/status/Tochemey/goakt/build.yml?branch=main)](https://github.com/Tochemey/goakt/actions/workflows/build.yml)
@@ -535,7 +534,7 @@ There is an example [here](./examples/actor-cluster/static) that shows how to us
 
 ## Examples
 
-Kindly check out the [examples'](./examples) folder.
+Kindly check out the [examples'](https://github.com/Tochemey/goakt-examples) repository.
 
 ## Contribution
 
