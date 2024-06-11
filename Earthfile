@@ -51,7 +51,7 @@ lint:
 local-test:
     FROM +vendor
 
-    RUN go-acc ./... -o coverage.out --ignore goaktpb,examples,mocks,internal/internalpb -- -mod=vendor -race -v
+    RUN go-acc ./... -o coverage.out --ignore goaktpb,mocks,internal/internalpb -- -mod=vendor -race -v
 
     SAVE ARTIFACT coverage.out AS LOCAL coverage.out
 
