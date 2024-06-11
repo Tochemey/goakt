@@ -22,6 +22,9 @@ The project adheres to [Semantic Versioning](https://semver.org) and [Convention
 - [Go-Akt](#go-akt)
   - [Table of Content](#table-of-content)
   - [Design Principles](#design-principles)
+  - [Use Cases](#use-cases)
+  - [Installation](#installation)
+  - [Examples](#examples)
   - [Features](#features)
     - [Actors](#actors)
     - [Passivation](#passivation)
@@ -43,8 +46,6 @@ The project adheres to [Semantic Versioning](https://semver.org) and [Convention
       - [Logging](#logging)
     - [Testkit](#testkit)
   - [API](#api)
-  - [Use Cases](#use-cases)
-  - [Installation](#installation)
   - [Clustering](#clustering)
     - [Operations Guide](#operations-guide)
     - [Redeployment](#redeployment)
@@ -56,7 +57,6 @@ The project adheres to [Semantic Versioning](https://semver.org) and [Convention
       - [NATS Discovery Provider Setup](#nats-discovery-provider-setup)
       - [DNS Provider Setup](#dns-provider-setup)
       - [Static Provider Setup](#static-provider-setup)
-  - [Examples](#examples)
   - [Contribution](#contribution)
     - [Test \& Linter](#test--linter)
   - [Benchmark](#benchmark)
@@ -72,6 +72,22 @@ This framework has been designed:
 - to be very fast.
 - to expose interfaces for custom integrations rather than making it convoluted with unnecessary features.
 
+## Use Cases
+
+- Event-Driven programming
+- Event Sourcing and CQRS - [eGo](https://github.com/Tochemey/ego)
+- Highly Available, Fault-Tolerant Distributed Systems
+
+## Installation
+
+```bash
+go get github.com/tochemey/goakt/v2
+```
+
+## Examples
+
+Kindly check out the [examples'](https://github.com/Tochemey/goakt-examples) repository.
+
 ## Features
 
 ### Actors
@@ -86,29 +102,29 @@ The fundamental building blocks of Go-Akt are actors.
 - They can be stateful and stateless depending upon the system to build.
 - Every actor in Go-Akt:
   - has a process id [`PID`](./actors/pid.go). Via the process id any allowable action can be executed by the
-      actor.
+    actor.
   - has a lifecycle via the following methods: [`PreStart`](./actors/actor.go), [`PostStop`](./actors/actor.go).
-      It means it
-      can live and die like any other process.
+    It means it
+    can live and die like any other process.
   - handles and responds to messages via the method [`Receive`](./actors/actor.go). While handling messages it
-      can:
+    can:
   - create other (child) actors via their process id [`PID`](./actors/pid.go) `SpawnChild` method
   - send messages to other actors locally or remotely via their process
-      id [`PID`](./actors/pid.go) `Ask`, `RemoteAsk`(request/response
-      fashion) and `Tell`, `RemoteTell`(fire-and-forget fashion) methods
+    id [`PID`](./actors/pid.go) `Ask`, `RemoteAsk`(request/response
+    fashion) and `Tell`, `RemoteTell`(fire-and-forget fashion) methods
   - stop (child) actors via their process id [`PID`](./actors/pid.go)
   - watch/unwatch (child) actors via their process id [`PID`](./actors/pid.go) `Watch` and `UnWatch` methods
   - supervise the failure behavior of (child) actors. The supervisory strategy to adopt is set during its
-      creation:
+    creation:
   - Restart and Stop directive are supported at the moment.
   - remotely lookup for an actor on another node via their process id [`PID`](./actors/pid.go) `RemoteLookup`.
-      This
-      allows it to send messages remotely via `RemoteAsk` or `RemoteTell` methods
+    This
+    allows it to send messages remotely via `RemoteAsk` or `RemoteTell` methods
   - stash/unstash messages. See [Stashing](#stashing)
   - can adopt various form using the [Behavior](#behaviors) feature
   - can be restarted (respawned)
   - can be gracefully stopped (killed). Every message in the mailbox prior to stoppage will be processed within a
-      configurable time period.
+    configurable time period.
 
 ### Passivation
 
@@ -169,9 +185,9 @@ The subscription methods can be found on the `ActorSystem` interface.
 - [`NodeJoined`](./protos/goakt/goakt.proto): cluster event emitted when a node joins the cluster. This only happens when cluster mode is enabled
 - [`NodeLeft`](./protos/goakt/goakt.proto): cluster event emitted when a node leaves the cluster. This only happens when cluster mode is enabled
 - [`Deadletter`](./protos/goakt/goakt.proto): emitted when a message cannot be delivered or that were not handled by a given actor.
-Dead letters are automatically emitted when a message cannot be delivered to actors' mailbox or when an Ask times out.
-Also, one can emit dead letters from the receiving actor by using the `ctx.Unhandled()` method. This is useful instead of panicking when
-the receiving actor does not know how to handle a particular message. Dead letters are not propagated over the network, there are tied to the local actor system.
+  Dead letters are automatically emitted when a message cannot be delivered to actors' mailbox or when an Ask times out.
+  Also, one can emit dead letters from the receiving actor by using the `ctx.Unhandled()` method. This is useful instead of panicking when
+  the receiving actor does not know how to handle a particular message. Dead letters are not propagated over the network, there are tied to the local actor system.
 
 ### Messaging
 
@@ -297,13 +313,13 @@ To test that an actor receive and respond to messages one will have to:
 3. Create an instance of test probe: `probe := testkit.NewProbe(ctx)` where `ctx` is a go context
 4. Use the probe to send a message to the actor under test. Example: `probe.Send(pinger, new(testpb.Ping))`
 5. Assert that the actor under test has received the message and responded as expected using the probe methods:
-    - `ExpectMessage(message proto.Message) proto.Message`: asserts that the message received from the test actor is the expected one
-    - `ExpectMessageWithin(duration time.Duration, message proto.Message) proto.Message`: asserts that the message received from the test actor is the expected one within a time duration
-    - `ExpectNoMessage()`: asserts that no message is expected
-    - `ExpectAnyMessage() proto.Message`: asserts that any message is expected
-    - `ExpectAnyMessageWithin(duration time.Duration) proto.Message`: asserts that any message within a time duration
-    - `ExpectMessageOfType(messageType protoreflect.MessageType)`: asserts the expectation of a given message type
-    - `ExpectMessageOfTypeWithin(duration time.Duration, messageType protoreflect.MessageType)`: asserts the expectation of a given message type within a time duration
+  - `ExpectMessage(message proto.Message) proto.Message`: asserts that the message received from the test actor is the expected one
+  - `ExpectMessageWithin(duration time.Duration, message proto.Message) proto.Message`: asserts that the message received from the test actor is the expected one within a time duration
+  - `ExpectNoMessage()`: asserts that no message is expected
+  - `ExpectAnyMessage() proto.Message`: asserts that any message is expected
+  - `ExpectAnyMessageWithin(duration time.Duration) proto.Message`: asserts that any message within a time duration
+  - `ExpectMessageOfType(messageType protoreflect.MessageType)`: asserts the expectation of a given message type
+  - `ExpectMessageOfTypeWithin(duration time.Duration, messageType protoreflect.MessageType)`: asserts the expectation of a given message type within a time duration
 6. Make sure to shut down the testkit and the probe. Example: `probe.Stop()`, `testkit.Shutdown(ctx)` where `ctx` is a go context. These two calls can be in a tear down after all tests run.
 
 To help implement unit tests in GoAkt-based applications. See [Testkit](./testkit)
@@ -325,17 +341,6 @@ The API interface helps interact with a Go-Akt actor system as kind of client. T
 - `RemoteStop`: to stop an actor on a remote machine
 - `RemoteSpawn`: to start an actor on a remote machine. The given actor implementation must be registered using the [`Register`](./actors/actor_system.go) method of the actor system on the remote machine for this call to succeed.
 
-## Use Cases
-
-- Event-Driven programming
-- Event Sourcing and CQRS - [eGo](https://github.com/Tochemey/ego)
-- Highly Available, Fault-Tolerant Distributed Systems
-
-## Installation
-
-```bash
-go get github.com/tochemey/goakt/v2
-```
 
 ## Clustering
 
@@ -384,22 +389,22 @@ To get the kubernetes discovery working as expected, the following pod labels ne
 
 ```go
 const (
-    namespace          = "default"
-    applicationName    = "accounts"
-    actorSystemName    = "AccountsSystem"
-    gossipPortName     = "gossip-port"
-    peersPortName      = "peers-port"
-    remotingPortName   = "remoting-port"
+namespace          = "default"
+applicationName    = "accounts"
+actorSystemName    = "AccountsSystem"
+gossipPortName     = "gossip-port"
+peersPortName      = "peers-port"
+remotingPortName   = "remoting-port"
 )
 
 // define the discovery config
 config := kubernetes.Config{
-    ApplicationName:  applicationName,
-    ActorSystemName:  actorSystemName,
-    Namespace:        namespace,
-    GossipPortName:   gossipPortName,
-    RemotingPortName: remotingPortName,
-    PeersPortName:  peersPortName,
+ApplicationName:  applicationName,
+ActorSystemName:  actorSystemName,
+Namespace:        namespace,
+GossipPortName:   gossipPortName,
+RemotingPortName: remotingPortName,
+PeersPortName:  peersPortName,
 }
 
 // instantiate the k8 discovery provider
@@ -440,8 +445,7 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
 ```
 
-A working example can be found [here](./examples/actor-cluster/k8s) with a
-small [doc](./examples/actor-cluster/k8s/doc.md) showing how to run it.
+A working example can be found [here](https://github.com/Tochemey/goakt-examples/tree/main/actor-cluster/k8s)
 
 #### mDNS Discovery Provider Setup
 
@@ -461,18 +465,18 @@ To use the NATS discovery provider one needs to provide the following:
 
 ```go
 const (
-    natsServerAddr   = "nats://localhost:4248"
-    natsSubject      = "goakt-gossip"
-    applicationName  = "accounts"
-    actorSystemName  = "AccountsSystem"
+natsServerAddr   = "nats://localhost:4248"
+natsSubject      = "goakt-gossip"
+applicationName  = "accounts"
+actorSystemName  = "AccountsSystem"
 )
 
 // define the discovery options
 config := nats.Config{
-    ApplicationName: applicationName,
-    ActorSystemName: actorSystemName,
-    NatsServer:      natsServer,
-    NatsSubject:     natsSubject,
+ApplicationName: applicationName,
+ActorSystemName: actorSystemName,
+NatsServer:      natsServer,
+NatsSubject:     natsSubject,
 }
 
 // define the host node instance
@@ -499,8 +503,8 @@ const domainName = "accounts"
 
 // define the discovery options
 config := dnssd.Config{
-    dnssd.DomainName: domainName,
-    dnssd.IPv6:       false,
+dnssd.DomainName: domainName,
+dnssd.IPv6:       false,
 }
 // instantiate the dnssd discovery provider
 disco := dnssd.NewDiscovery(&config)
@@ -508,7 +512,7 @@ disco := dnssd.NewDiscovery(&config)
 // pass the service discovery when enabling cluster mode in the actor system
 ```
 
-There is an example [here](./examples/actor-cluster/dnssd) that shows how to use it.
+A working example can be found [here](https://github.com/Tochemey/goakt-examples/tree/main/actor-cluster/dnssd)
 
 #### Static Provider Setup
 
@@ -518,11 +522,11 @@ The address of each host is the form of `host:port` where `port` is the gossip p
 ```go
 // define the discovery configuration
 config := static.Config{
-  Hosts: []string{
-    "node1:3322",
-    "node2:3322",
-    "node3:3322",
-  },
+Hosts: []string{
+"node1:3322",
+"node2:3322",
+"node3:3322",
+},
 }
 // instantiate the dnssd discovery provider
 disco := static.NewDiscovery(&config)
@@ -530,11 +534,7 @@ disco := static.NewDiscovery(&config)
 // pass the service discovery when enabling cluster mode in the actor system
 ```
 
-There is an example [here](./examples/actor-cluster/static) that shows how to use it.
-
-## Examples
-
-Kindly check out the [examples'](https://github.com/Tochemey/goakt-examples) repository.
+A working example can be found [here](https://github.com/Tochemey/goakt-examples/tree/main/actor-cluster/static)
 
 ## Contribution
 
