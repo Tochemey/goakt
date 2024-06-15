@@ -63,7 +63,7 @@ func TestPIDOptions(t *testing.T) {
 		},
 		{
 			name:     "WithSendReplyTimeout",
-			option:   withSendReplyTimeout(time.Second),
+			option:   withReplyTimeout(time.Second),
 			expected: &pid{replyTimeout: atomicDuration},
 		},
 		{

@@ -221,9 +221,20 @@ func (x *userActor) DebitAccount(ctx ReceiveContext) {
 	}
 }
 
-type exchanger struct{}
+type exchanger struct {
+	messageCounter *atomic.Int64
+	logger         log.Logger
+	id             string
+}
+
+// Counter is only here for testing purpose
+func (e *exchanger) Counter() int64 {
+	return e.messageCounter.Load()
+}
 
 func (e *exchanger) PreStart(context.Context) error {
+	e.messageCounter = atomic.NewInt64(0)
+	e.logger = log.DefaultLogger
 	return nil
 }
 
@@ -231,11 +242,19 @@ func (e *exchanger) Receive(ctx ReceiveContext) {
 	message := ctx.Message()
 	switch message.(type) {
 	case *goaktpb.PostStart:
+		e.id = ctx.Self().ID()
 	case *testspb.TestSend:
+		e.messageCounter.Inc()
 		_ = ctx.Self().Tell(ctx.Context(), ctx.Sender(), new(testspb.TestSend))
+	case *testspb.TaskComplete:
+		e.messageCounter.Inc()
+		e.logger.Debugf("actor=(%s) has processed so far: %d", e.id, e.messageCounter.Load())
 	case *testspb.TestReply:
+		e.messageCounter.Inc()
+		e.logger.Debugf("actor=(%s) has processed so far: %d", e.id, e.messageCounter.Load())
 		ctx.Response(new(testspb.Reply))
 	case *testspb.TestRemoteSend:
+		e.messageCounter.Inc()
 		_ = ctx.Self().RemoteTell(context.Background(), ctx.RemoteSender(), new(testspb.TestBye))
 	case *testspb.TestBye:
 		_ = ctx.Self().Shutdown(ctx.Context())

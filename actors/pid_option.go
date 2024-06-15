@@ -42,9 +42,9 @@ func withPassivationAfter(duration time.Duration) pidOption {
 	}
 }
 
-// withSendReplyTimeout sets how long in seconds an actor should reply a command
+// withReplyTimeout sets how long in seconds an actor should reply a command
 // in a receive-reply pattern
-func withSendReplyTimeout(timeout time.Duration) pidOption {
+func withReplyTimeout(timeout time.Duration) pidOption {
 	return func(pid *pid) {
 		pid.replyTimeout.Store(timeout)
 	}

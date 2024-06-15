@@ -41,6 +41,7 @@ import (
 	"github.com/tochemey/goakt/v2/internal/eventstream"
 	"github.com/tochemey/goakt/v2/log"
 	testpb "github.com/tochemey/goakt/v2/test/data/testpb"
+	testspb "github.com/tochemey/goakt/v2/test/data/testpb"
 )
 
 func TestReceiveContext(t *testing.T) {
@@ -61,35 +62,35 @@ func TestReceiveContext(t *testing.T) {
 
 		// send Login
 		var expected proto.Message
-		success, err := Ask(ctx, pid, new(testpb.TestLogin), receivingTimeout)
+		success, err := Ask(ctx, pid, new(testpb.TestLogin), replyTimeout)
 		require.NoError(t, err)
 		require.NotNil(t, success)
 		expected = &testpb.TestLoginSuccess{}
 		require.True(t, proto.Equal(expected, success))
 
 		// ask for readiness
-		ready, err := Ask(ctx, pid, new(testpb.TestReadiness), receivingTimeout)
+		ready, err := Ask(ctx, pid, new(testpb.TestReadiness), replyTimeout)
 		require.NoError(t, err)
 		require.NotNil(t, ready)
 		expected = &testpb.TestReady{}
 		require.True(t, proto.Equal(expected, ready))
 
 		// send a message to create account
-		created, err := Ask(ctx, pid, new(testpb.CreateAccount), receivingTimeout)
+		created, err := Ask(ctx, pid, new(testpb.CreateAccount), replyTimeout)
 		require.NoError(t, err)
 		require.NotNil(t, created)
 		expected = &testpb.AccountCreated{}
 		require.True(t, proto.Equal(expected, created))
 
 		// credit account
-		credited, err := Ask(ctx, pid, new(testpb.CreditAccount), receivingTimeout)
+		credited, err := Ask(ctx, pid, new(testpb.CreditAccount), replyTimeout)
 		require.NoError(t, err)
 		require.NotNil(t, credited)
 		expected = &testpb.AccountCredited{}
 		require.True(t, proto.Equal(expected, credited))
 
 		// debit account
-		debited, err := Ask(ctx, pid, new(testpb.DebitAccount), receivingTimeout)
+		debited, err := Ask(ctx, pid, new(testpb.DebitAccount), replyTimeout)
 		require.NoError(t, err)
 		require.NotNil(t, debited)
 		expected = &testpb.AccountDebited{}
@@ -687,7 +688,7 @@ func TestReceiveContext(t *testing.T) {
 			newSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
-			withSendReplyTimeout(receivingTimeout))
+			withReplyTimeout(replyTimeout))
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
@@ -725,7 +726,7 @@ func TestReceiveContext(t *testing.T) {
 			newSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
-			withSendReplyTimeout(receivingTimeout))
+			withReplyTimeout(replyTimeout))
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
@@ -757,7 +758,7 @@ func TestReceiveContext(t *testing.T) {
 			newSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
-			withSendReplyTimeout(receivingTimeout))
+			withReplyTimeout(replyTimeout))
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
@@ -798,7 +799,7 @@ func TestReceiveContext(t *testing.T) {
 			newSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
-			withSendReplyTimeout(receivingTimeout))
+			withReplyTimeout(replyTimeout))
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
@@ -839,7 +840,7 @@ func TestReceiveContext(t *testing.T) {
 			newSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
-			withSendReplyTimeout(receivingTimeout))
+			withReplyTimeout(replyTimeout))
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
@@ -880,7 +881,7 @@ func TestReceiveContext(t *testing.T) {
 			newSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
-			withSendReplyTimeout(receivingTimeout))
+			withReplyTimeout(replyTimeout))
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
@@ -923,7 +924,7 @@ func TestReceiveContext(t *testing.T) {
 			newSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
-			withSendReplyTimeout(receivingTimeout))
+			withReplyTimeout(replyTimeout))
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
@@ -957,7 +958,7 @@ func TestReceiveContext(t *testing.T) {
 			newSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
-			withSendReplyTimeout(receivingTimeout))
+			withReplyTimeout(replyTimeout))
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
@@ -997,7 +998,7 @@ func TestReceiveContext(t *testing.T) {
 			newSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
-			withSendReplyTimeout(receivingTimeout))
+			withReplyTimeout(replyTimeout))
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
@@ -1018,7 +1019,7 @@ func TestReceiveContext(t *testing.T) {
 			newSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
-			withSendReplyTimeout(receivingTimeout))
+			withReplyTimeout(replyTimeout))
 
 		require.NoError(t, err)
 
@@ -1041,7 +1042,7 @@ func TestReceiveContext(t *testing.T) {
 			newSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
-			withSendReplyTimeout(receivingTimeout))
+			withReplyTimeout(replyTimeout))
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
@@ -1291,7 +1292,6 @@ func TestReceiveContext(t *testing.T) {
 			context.Shutdown()
 		})
 	})
-
 	t.Run("With Unhandled with system messages", func(t *testing.T) {
 		ctx := context.TODO()
 		// create the deadletter stream
@@ -1352,7 +1352,6 @@ func TestReceiveContext(t *testing.T) {
 			context.Shutdown()
 		})
 	})
-
 	t.Run("With successful BatchTell", func(t *testing.T) {
 		ctx := context.TODO()
 		// create a Ping actor
@@ -1924,5 +1923,116 @@ func TestReceiveContext(t *testing.T) {
 			assert.NoError(t, pid1.Shutdown(ctx))
 			assert.NoError(t, sys.Stop(ctx))
 		})
+	})
+	t.Run("With successful PipeTo", func(t *testing.T) {
+		askTimeout := time.Minute
+		ctx := context.TODO()
+
+		opts := []pidOption{
+			withInitMaxRetries(1),
+			withReplyTimeout(askTimeout),
+			withPassivationDisabled(),
+			withCustomLogger(log.DefaultLogger),
+		}
+
+		// create actor1
+		actor1 := &exchanger{}
+		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
+		pid1, err := newPID(ctx, actorPath1, actor1, opts...)
+		require.NoError(t, err)
+		require.NotNil(t, pid1)
+
+		// create actor2
+		actor2 := &exchanger{}
+		actorPath2 := NewPath("Exchange2", NewAddress("sys", "host", 1))
+		pid2, err := newPID(ctx, actorPath2, actor2, opts...)
+		require.NoError(t, err)
+		require.NotNil(t, pid2)
+
+		// zero message received by both actors
+		require.Zero(t, actor1.Counter())
+		require.Zero(t, actor2.Counter())
+
+		// create an instance of receive context
+		messageContext := &receiveContext{
+			ctx:            ctx,
+			message:        new(testpb.TaskComplete),
+			sender:         NoSender,
+			recipient:      pid1,
+			mu:             sync.Mutex{},
+			isAsyncMessage: true,
+		}
+
+		task := make(chan proto.Message)
+		messageContext.PipeTo(pid2, task)
+
+		var wg sync.WaitGroup
+		wg.Add(1)
+		go func() {
+			// Wait for some time and during that period send some messages to the actor
+			// send three messages while waiting for the future to completed
+			_, _ = Ask(ctx, pid1, new(testpb.TestReply), askTimeout)
+			_, _ = Ask(ctx, pid1, new(testpb.TestReply), askTimeout)
+			_, _ = Ask(ctx, pid1, new(testpb.TestReply), askTimeout)
+			time.Sleep(time.Second)
+			wg.Done()
+		}()
+
+		// now we complete the Task
+		task <- new(testspb.TaskComplete)
+		wg.Wait()
+
+		require.EqualValues(t, 3, actor1.Counter())
+		require.EqualValues(t, 1, actor2.Counter())
+
+		time.Sleep(time.Second)
+		assert.NoError(t, pid1.Shutdown(ctx))
+		assert.NoError(t, pid2.Shutdown(ctx))
+	})
+	t.Run("With failed PipeTo", func(t *testing.T) {
+		askTimeout := time.Minute
+		ctx := context.TODO()
+
+		opts := []pidOption{
+			withInitMaxRetries(1),
+			withReplyTimeout(askTimeout),
+			withPassivationDisabled(),
+			withCustomLogger(log.DiscardLogger),
+		}
+
+		// create actor1
+		actor1 := &exchanger{}
+		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
+		pid1, err := newPID(ctx, actorPath1, actor1, opts...)
+		require.NoError(t, err)
+		require.NotNil(t, pid1)
+
+		// create actor2
+		actor2 := &exchanger{}
+		actorPath2 := NewPath("Exchange2", NewAddress("sys", "host", 1))
+		pid2, err := newPID(ctx, actorPath2, actor2, opts...)
+		require.NoError(t, err)
+		require.NotNil(t, pid2)
+
+		// zero message received by both actors
+		require.Zero(t, actor1.Counter())
+		require.Zero(t, actor2.Counter())
+
+		// create an instance of receive context
+		messageContext := &receiveContext{
+			ctx:            ctx,
+			message:        new(testpb.TaskComplete),
+			sender:         NoSender,
+			recipient:      pid1,
+			mu:             sync.Mutex{},
+			isAsyncMessage: true,
+		}
+
+		assert.Panics(t, func() {
+			messageContext.PipeTo(pid2, nil)
+		})
+
+		assert.NoError(t, pid1.Shutdown(ctx))
+		assert.NoError(t, pid2.Shutdown(ctx))
 	})
 }

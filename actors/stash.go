@@ -25,46 +25,46 @@
 package actors
 
 // stash adds the current message to the stash buffer
-func (p *pid) stash(ctx ReceiveContext) error {
-	if p.stashBuffer == nil {
+func (x *pid) stash(ctx ReceiveContext) error {
+	if x.stashBuffer == nil {
 		return ErrStashBufferNotSet
 	}
 
-	p.stashLocker.Lock()
-	defer p.stashLocker.Unlock()
+	x.stashLocker.Lock()
+	defer x.stashLocker.Unlock()
 
-	return p.stashBuffer.Push(ctx)
+	return x.stashBuffer.Push(ctx)
 }
 
 // unstash unstashes the oldest message in the stash and prepends to the mailbox
-func (p *pid) unstash() error {
-	if p.stashBuffer == nil {
+func (x *pid) unstash() error {
+	if x.stashBuffer == nil {
 		return ErrStashBufferNotSet
 	}
 
-	p.stashLocker.Lock()
-	defer p.stashLocker.Unlock()
+	x.stashLocker.Lock()
+	defer x.stashLocker.Unlock()
 
-	if !p.stashBuffer.IsEmpty() {
-		received, _ := p.stashBuffer.Pop()
-		p.doReceive(received)
+	if !x.stashBuffer.IsEmpty() {
+		received, _ := x.stashBuffer.Pop()
+		x.doReceive(received)
 	}
 	return nil
 }
 
 // unstashAll unstashes all messages from the stash buffer and prepends in the mailbox
 // (it keeps the messages in the same order as received, unstashing older messages before newer).
-func (p *pid) unstashAll() error {
-	if p.stashBuffer == nil {
+func (x *pid) unstashAll() error {
+	if x.stashBuffer == nil {
 		return ErrStashBufferNotSet
 	}
 
-	p.stashLocker.Lock()
-	defer p.stashLocker.Unlock()
+	x.stashLocker.Lock()
+	defer x.stashLocker.Unlock()
 
-	for !p.stashBuffer.IsEmpty() {
-		received, _ := p.stashBuffer.Pop()
-		p.doReceive(received)
+	for !x.stashBuffer.IsEmpty() {
+		received, _ := x.stashBuffer.Pop()
+		x.doReceive(received)
 	}
 
 	return nil

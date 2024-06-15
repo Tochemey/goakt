@@ -83,6 +83,8 @@ var (
 	ErrPeerNotFound = errors.New("peer is not found")
 	// ErrKindsRequired is returned when the actor kinds are not provided when enabling the cluster mode
 	ErrKindsRequired = errors.New("actor kinds are required")
+	// ErrUndefinedTask is returned when piping a long-running task result to an actor
+	ErrUndefinedTask = errors.New("task is not defined")
 )
 
 // IsEOF returns true if the given error is an EOF error

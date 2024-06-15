@@ -28,8 +28,9 @@ import (
 	"reflect"
 	"sync"
 
-	"github.com/tochemey/goakt/v2/internal/types"
 	"go.uber.org/atomic"
+
+	"github.com/tochemey/goakt/v2/internal/types"
 )
 
 type prop struct {

@@ -72,7 +72,7 @@ func TestAsk(t *testing.T) {
 		// create a message to send to the test actor
 		message := new(testpb.TestReply)
 		// send the message to the actor
-		reply, err := Ask(ctx, actorRef, message, receivingTimeout)
+		reply, err := Ask(ctx, actorRef, message, replyTimeout)
 		// perform some assertions
 		require.NoError(t, err)
 		assert.NotNil(t, reply)
@@ -113,7 +113,7 @@ func TestAsk(t *testing.T) {
 		// create a message to send to the test actor
 		message := new(testpb.TestReply)
 		// send the message to the actor
-		reply, err := Ask(ctx, actorRef, message, receivingTimeout)
+		reply, err := Ask(ctx, actorRef, message, replyTimeout)
 		// perform some assertions
 		require.Error(t, err)
 		assert.EqualError(t, err, ErrDead.Error())
@@ -129,7 +129,7 @@ func TestAsk(t *testing.T) {
 		// create the actor system
 		sys, err := NewActorSystem("test",
 			WithLogger(logger),
-			WithReplyTimeout(receivingTimeout),
+			WithReplyTimeout(replyTimeout),
 			WithPassivationDisabled())
 		// assert there are no error
 		require.NoError(t, err)
@@ -150,7 +150,7 @@ func TestAsk(t *testing.T) {
 		// create a message to send to the test actor
 		message := new(testpb.TestTimeout)
 		// send the message to the actor
-		reply, err := Ask(ctx, actorRef, message, receivingTimeout)
+		reply, err := Ask(ctx, actorRef, message, replyTimeout)
 		// perform some assertions
 		require.Error(t, err)
 		assert.EqualError(t, err, ErrRequestTimeout.Error())
@@ -190,7 +190,7 @@ func TestAsk(t *testing.T) {
 			Message: &anypb.Any{},
 		}
 		// send the message to the actor
-		reply, err := Ask(ctx, actorRef, message, receivingTimeout)
+		reply, err := Ask(ctx, actorRef, message, replyTimeout)
 		// perform some assertions
 		require.Error(t, err)
 		assert.Nil(t, reply)
@@ -224,7 +224,7 @@ func TestAsk(t *testing.T) {
 
 		// create a message to send to the test actor
 		// send the message to the actor
-		replies, err := BatchAsk(ctx, actorRef, receivingTimeout, new(testpb.TestReply), new(testpb.TestReply))
+		replies, err := BatchAsk(ctx, actorRef, replyTimeout, new(testpb.TestReply), new(testpb.TestReply))
 		// perform some assertions
 		require.NoError(t, err)
 		assert.NotNil(t, replies)
@@ -246,7 +246,7 @@ func TestAsk(t *testing.T) {
 		// create the actor system
 		sys, err := NewActorSystem("test",
 			WithLogger(logger),
-			WithReplyTimeout(receivingTimeout),
+			WithReplyTimeout(replyTimeout),
 			WithPassivationDisabled())
 		// assert there are no error
 		require.NoError(t, err)
@@ -266,7 +266,7 @@ func TestAsk(t *testing.T) {
 
 		// create a message to send to the test actor
 		// send the message to the actor
-		replies, err := BatchAsk(ctx, actorRef, receivingTimeout, new(testpb.TestTimeout), new(testpb.TestReply))
+		replies, err := BatchAsk(ctx, actorRef, replyTimeout, new(testpb.TestTimeout), new(testpb.TestReply))
 		// perform some assertions
 		require.Error(t, err)
 		require.EqualError(t, err, ErrRequestTimeout.Error())
@@ -286,7 +286,7 @@ func TestAsk(t *testing.T) {
 		// create the actor system
 		sys, err := NewActorSystem("test",
 			WithLogger(logger),
-			WithReplyTimeout(receivingTimeout),
+			WithReplyTimeout(replyTimeout),
 			WithPassivationDisabled())
 		// assert there are no error
 		require.NoError(t, err)
@@ -309,7 +309,7 @@ func TestAsk(t *testing.T) {
 
 		// create a message to send to the test actor
 		// send the message to the actor
-		replies, err := BatchAsk(ctx, actorRef, receivingTimeout, new(testpb.TestTimeout), new(testpb.TestReply))
+		replies, err := BatchAsk(ctx, actorRef, replyTimeout, new(testpb.TestTimeout), new(testpb.TestReply))
 		// perform some assertions
 		require.Error(t, err)
 		assert.Empty(t, replies)

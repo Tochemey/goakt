@@ -96,7 +96,7 @@ func TestScheduler(t *testing.T) {
 			newTestActor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DefaultLogger),
-			withSendReplyTimeout(receivingTimeout))
+			withReplyTimeout(replyTimeout))
 
 		require.NoError(t, err)
 		assert.NotNil(t, pid)
