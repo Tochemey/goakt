@@ -382,7 +382,7 @@ func TestActorSystem(t *testing.T) {
 		assert.NotNil(t, actorRef)
 
 		// send a message to the actor
-		reply, err := Ask(ctx, actorRef, new(testpb.TestReply), receivingTimeout)
+		reply, err := Ask(ctx, actorRef, new(testpb.TestReply), replyTimeout)
 		require.NoError(t, err)
 		require.NotNil(t, reply)
 		expected := new(testpb.Reply)
@@ -462,7 +462,7 @@ func TestActorSystem(t *testing.T) {
 		assert.NotNil(t, actorRef)
 
 		// send a message to the actor
-		reply, err := Ask(ctx, actorRef, new(testpb.TestReply), receivingTimeout)
+		reply, err := Ask(ctx, actorRef, new(testpb.TestReply), replyTimeout)
 		require.NoError(t, err)
 		require.NotNil(t, reply)
 		expected := new(testpb.Reply)
@@ -517,7 +517,7 @@ func TestActorSystem(t *testing.T) {
 		assert.NotNil(t, actorRef)
 
 		// send a message to the actor
-		reply, err := Ask(ctx, actorRef, new(testpb.TestReply), receivingTimeout)
+		reply, err := Ask(ctx, actorRef, new(testpb.TestReply), replyTimeout)
 		require.NoError(t, err)
 		require.NotNil(t, reply)
 		expected := new(testpb.Reply)

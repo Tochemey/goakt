@@ -57,3 +57,8 @@ message Pong {}
 message Wait {
   uint64 duration = 1;
 }
+
+message RunTask {
+  uint64 duration = 1;
+}
+message TaskComplete {}

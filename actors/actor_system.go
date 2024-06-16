@@ -429,7 +429,7 @@ func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor) (PID,
 	opts := []pidOption{
 		withInitMaxRetries(x.actorInitMaxRetries),
 		withPassivationAfter(x.expireActorAfter),
-		withSendReplyTimeout(x.replyTimeout),
+		withReplyTimeout(x.replyTimeout),
 		withCustomLogger(x.logger),
 		withActorSystem(x),
 		withSupervisorStrategy(x.supervisorStrategy),
@@ -503,7 +503,7 @@ func (x *actorSystem) SpawnFromFunc(ctx context.Context, receiveFunc ReceiveFunc
 	pidOpts := []pidOption{
 		withInitMaxRetries(x.actorInitMaxRetries),
 		withPassivationAfter(x.expireActorAfter),
-		withSendReplyTimeout(x.replyTimeout),
+		withReplyTimeout(x.replyTimeout),
 		withCustomLogger(x.logger),
 		withActorSystem(x),
 		withSupervisorStrategy(x.supervisorStrategy),

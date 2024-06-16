@@ -45,12 +45,13 @@ import (
 	"github.com/tochemey/goakt/v2/log"
 	"github.com/tochemey/goakt/v2/telemetry"
 	"github.com/tochemey/goakt/v2/test/data/testpb"
+	testspb "github.com/tochemey/goakt/v2/test/data/testpb"
 )
 
 const (
-	receivingDelay   = 1 * time.Second
-	receivingTimeout = 100 * time.Millisecond
-	passivateAfter   = 200 * time.Millisecond
+	receivingDelay = 1 * time.Second
+	replyTimeout   = 100 * time.Millisecond
+	passivateAfter = 200 * time.Millisecond
 )
 
 func TestReceive(t *testing.T) {
@@ -66,7 +67,7 @@ func TestReceive(t *testing.T) {
 		newTestActor(),
 		withInitMaxRetries(1),
 		withCustomLogger(log.DefaultLogger),
-		withSendReplyTimeout(receivingTimeout))
+		withReplyTimeout(replyTimeout))
 
 	require.NoError(t, err)
 	assert.NotNil(t, pid)
@@ -96,7 +97,7 @@ func TestPassivation(t *testing.T) {
 		opts := []pidOption{
 			withInitMaxRetries(1),
 			withPassivationAfter(passivateAfter),
-			withSendReplyTimeout(receivingTimeout),
+			withReplyTimeout(replyTimeout),
 		}
 
 		// create the actor path
@@ -125,7 +126,7 @@ func TestPassivation(t *testing.T) {
 		opts := []pidOption{
 			withInitMaxRetries(1),
 			withPassivationAfter(passivateAfter),
-			withSendReplyTimeout(receivingTimeout),
+			withReplyTimeout(replyTimeout),
 		}
 
 		// create the actor path
@@ -165,7 +166,7 @@ func TestReply(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, pid)
 
-		actual, err := Ask(ctx, pid, new(testpb.TestReply), receivingTimeout)
+		actual, err := Ask(ctx, pid, new(testpb.TestReply), replyTimeout)
 		assert.NoError(t, err)
 		assert.NotNil(t, actual)
 		expected := &testpb.Reply{Content: "received message"}
@@ -189,7 +190,7 @@ func TestReply(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, pid)
 
-		actual, err := Ask(ctx, pid, new(testpb.TestSend), receivingTimeout)
+		actual, err := Ask(ctx, pid, new(testpb.TestSend), replyTimeout)
 		assert.Error(t, err)
 		assert.EqualError(t, err, ErrRequestTimeout.Error())
 		assert.Nil(t, actual)
@@ -216,7 +217,7 @@ func TestReply(t *testing.T) {
 		err = pid.Shutdown(ctx)
 		assert.NoError(t, err)
 
-		actual, err := Ask(ctx, pid, new(testpb.TestReply), receivingTimeout)
+		actual, err := Ask(ctx, pid, new(testpb.TestReply), replyTimeout)
 		assert.Error(t, err)
 		assert.EqualError(t, err, ErrDead.Error())
 		assert.Nil(t, actual)
@@ -237,7 +238,7 @@ func TestRestart(t *testing.T) {
 			withInitMaxRetries(1),
 			withPassivationAfter(10*time.Second),
 			withCustomLogger(log.DiscardLogger),
-			withSendReplyTimeout(receivingTimeout))
+			withReplyTimeout(replyTimeout))
 
 		require.NoError(t, err)
 		assert.NotNil(t, pid)
@@ -281,7 +282,7 @@ func TestRestart(t *testing.T) {
 		pid, err := newPID(ctx, actorPath, actor,
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
-			withSendReplyTimeout(receivingTimeout))
+			withReplyTimeout(replyTimeout))
 
 		require.NoError(t, err)
 		assert.NotNil(t, pid)
@@ -320,7 +321,7 @@ func TestRestart(t *testing.T) {
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
 			withPassivationAfter(time.Minute),
-			withSendReplyTimeout(receivingTimeout))
+			withReplyTimeout(replyTimeout))
 
 		require.NoError(t, err)
 		assert.NotNil(t, pid)
@@ -360,7 +361,7 @@ func TestRestart(t *testing.T) {
 			withInitMaxRetries(1),
 			withPassivationAfter(passivateAfter),
 			withCustomLogger(log.DiscardLogger),
-			withSendReplyTimeout(receivingTimeout))
+			withReplyTimeout(replyTimeout))
 
 		require.NoError(t, err)
 		assert.NotNil(t, pid)
@@ -389,7 +390,7 @@ func TestSupervisorStrategy(t *testing.T) {
 			newSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
-			withSendReplyTimeout(receivingTimeout))
+			withReplyTimeout(replyTimeout))
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
@@ -424,7 +425,7 @@ func TestSupervisorStrategy(t *testing.T) {
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
 			withPassivationDisabled(),
-			withSendReplyTimeout(receivingTimeout))
+			withReplyTimeout(replyTimeout))
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
@@ -465,7 +466,7 @@ func TestSupervisorStrategy(t *testing.T) {
 			withCustomLogger(log.DiscardLogger),
 			withPassivationDisabled(),
 			withSupervisorStrategy(-1), // this is a rogue strategy which will default to a Stop
-			withSendReplyTimeout(receivingTimeout))
+			withReplyTimeout(replyTimeout))
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
@@ -506,7 +507,7 @@ func TestSupervisorStrategy(t *testing.T) {
 			withCustomLogger(log.DiscardLogger),
 			withSupervisorStrategy(DefaultSupervisoryStrategy),
 			withPassivationDisabled(),
-			withSendReplyTimeout(receivingTimeout))
+			withReplyTimeout(replyTimeout))
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
@@ -548,7 +549,7 @@ func TestSupervisorStrategy(t *testing.T) {
 			withCustomLogger(logger),
 			withPassivationDisabled(),
 			withSupervisorStrategy(RestartDirective),
-			withSendReplyTimeout(receivingTimeout))
+			withReplyTimeout(replyTimeout))
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
@@ -586,7 +587,7 @@ func TestSupervisorStrategy(t *testing.T) {
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
 			withPassivationDisabled(),
-			withSendReplyTimeout(receivingTimeout))
+			withReplyTimeout(replyTimeout))
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
@@ -742,7 +743,7 @@ func TestMessaging(t *testing.T) {
 		opts := []pidOption{
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
-			withSendReplyTimeout(receivingTimeout),
+			withReplyTimeout(replyTimeout),
 		}
 
 		// create the actor path
@@ -860,7 +861,7 @@ func TestActorHandle(t *testing.T) {
 		&exchanger{},
 		withInitMaxRetries(1),
 		withCustomLogger(log.DefaultLogger),
-		withSendReplyTimeout(receivingTimeout))
+		withReplyTimeout(replyTimeout))
 
 	require.NoError(t, err)
 	assert.NotNil(t, pid)
@@ -885,7 +886,7 @@ func TestPIDActorSystem(t *testing.T) {
 		&exchanger{},
 		withInitMaxRetries(1),
 		withCustomLogger(log.DefaultLogger),
-		withSendReplyTimeout(receivingTimeout))
+		withReplyTimeout(replyTimeout))
 	require.NoError(t, err)
 	assert.NotNil(t, pid)
 	sys := pid.ActorSystem()
@@ -906,7 +907,7 @@ func TestSpawnChild(t *testing.T) {
 			newSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
-			withSendReplyTimeout(receivingTimeout))
+			withReplyTimeout(replyTimeout))
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
@@ -945,7 +946,7 @@ func TestSpawnChild(t *testing.T) {
 			newSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
-			withSendReplyTimeout(receivingTimeout))
+			withReplyTimeout(replyTimeout))
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
@@ -981,7 +982,7 @@ func TestSpawnChild(t *testing.T) {
 			newSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
-			withSendReplyTimeout(receivingTimeout))
+			withReplyTimeout(replyTimeout))
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
@@ -1008,7 +1009,7 @@ func TestSpawnChild(t *testing.T) {
 			newSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
-			withSendReplyTimeout(receivingTimeout))
+			withReplyTimeout(replyTimeout))
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
@@ -1037,7 +1038,7 @@ func TestPoisonPill(t *testing.T) {
 		newTestActor(),
 		withInitMaxRetries(1),
 		withCustomLogger(log.DefaultLogger),
-		withSendReplyTimeout(receivingTimeout))
+		withReplyTimeout(replyTimeout))
 
 	require.NoError(t, err)
 	assert.NotNil(t, pid)
@@ -1173,7 +1174,7 @@ func TestFailedPostStop(t *testing.T) {
 		&testPostStop{},
 		withInitMaxRetries(1),
 		withCustomLogger(log.DefaultLogger),
-		withSendReplyTimeout(receivingTimeout))
+		withReplyTimeout(replyTimeout))
 
 	require.NoError(t, err)
 	assert.NotNil(t, pid)
@@ -1192,7 +1193,7 @@ func TestShutdown(t *testing.T) {
 			newSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
-			withSendReplyTimeout(receivingTimeout))
+			withReplyTimeout(replyTimeout))
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
@@ -1343,7 +1344,7 @@ func TestBatchAsk(t *testing.T) {
 		opts := []pidOption{
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
-			withSendReplyTimeout(receivingTimeout),
+			withReplyTimeout(replyTimeout),
 		}
 
 		// create the actor path
@@ -1383,7 +1384,7 @@ func TestRegisterMetrics(t *testing.T) {
 		withCustomLogger(log.DefaultLogger),
 		withTelemetry(tel),
 		withMetric(),
-		withSendReplyTimeout(receivingTimeout))
+		withReplyTimeout(replyTimeout))
 
 	require.NoError(t, err)
 	assert.NotNil(t, pid)
@@ -1508,7 +1509,6 @@ func TestRemoteReSpawn(t *testing.T) {
 		})
 	})
 }
-
 func TestRemoteStop(t *testing.T) {
 	t.Run("With actor address not found", func(t *testing.T) {
 		// create the context
@@ -1629,7 +1629,6 @@ func TestRemoteStop(t *testing.T) {
 		})
 	})
 }
-
 func TestID(t *testing.T) {
 	ctx := context.TODO()
 	// create the actor path
@@ -1642,7 +1641,7 @@ func TestID(t *testing.T) {
 		&exchanger{},
 		withInitMaxRetries(1),
 		withCustomLogger(log.DiscardLogger),
-		withSendReplyTimeout(receivingTimeout))
+		withReplyTimeout(replyTimeout))
 	require.NoError(t, err)
 	assert.NotNil(t, pid)
 	sys := pid.ActorSystem()
@@ -1657,7 +1656,6 @@ func TestID(t *testing.T) {
 	err = pid.Shutdown(ctx)
 	assert.NoError(t, err)
 }
-
 func TestEquals(t *testing.T) {
 	ctx := context.TODO()
 	logger := log.DiscardLogger
@@ -1682,7 +1680,6 @@ func TestEquals(t *testing.T) {
 	err = sys.Stop(ctx)
 	assert.NoError(t, err)
 }
-
 func TestRemoteSpawn(t *testing.T) {
 	t.Run("When remoting is enabled", func(t *testing.T) {
 		// create the context
@@ -1842,7 +1839,6 @@ func TestRemoteSpawn(t *testing.T) {
 		})
 	})
 }
-
 func TestName(t *testing.T) {
 	ctx := context.TODO()
 	// create the actor path
@@ -1855,7 +1851,7 @@ func TestName(t *testing.T) {
 		&exchanger{},
 		withInitMaxRetries(1),
 		withCustomLogger(log.DiscardLogger),
-		withSendReplyTimeout(receivingTimeout))
+		withReplyTimeout(replyTimeout))
 	require.NoError(t, err)
 	assert.NotNil(t, pid)
 	sys := pid.ActorSystem()
@@ -1869,4 +1865,252 @@ func TestName(t *testing.T) {
 	// stop the actor
 	err = pid.Shutdown(ctx)
 	assert.NoError(t, err)
+}
+func TestPipeTo(t *testing.T) {
+	t.Run("With happy path", func(t *testing.T) {
+		askTimeout := time.Minute
+		ctx := context.TODO()
+
+		opts := []pidOption{
+			withInitMaxRetries(1),
+			withReplyTimeout(askTimeout),
+			withPassivationDisabled(),
+			withCustomLogger(log.DefaultLogger),
+		}
+
+		// create actor1
+		actor1 := &exchanger{}
+		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
+		pid1, err := newPID(ctx, actorPath1, actor1, opts...)
+		require.NoError(t, err)
+		require.NotNil(t, pid1)
+
+		// create actor2
+		actor2 := &exchanger{}
+		actorPath2 := NewPath("Exchange2", NewAddress("sys", "host", 1))
+		pid2, err := newPID(ctx, actorPath2, actor2, opts...)
+		require.NoError(t, err)
+		require.NotNil(t, pid2)
+
+		// zero message received by both actors
+		require.Zero(t, actor1.Counter())
+		require.Zero(t, actor2.Counter())
+
+		task := make(chan proto.Message)
+		err = pid1.PipeTo(ctx, pid2, task)
+		require.NoError(t, err)
+
+		var wg sync.WaitGroup
+		wg.Add(1)
+		go func() {
+			// Wait for some time and during that period send some messages to the actor
+			// send three messages while waiting for the future to completed
+			_, _ = Ask(ctx, pid1, new(testpb.TestReply), askTimeout)
+			_, _ = Ask(ctx, pid1, new(testpb.TestReply), askTimeout)
+			_, _ = Ask(ctx, pid1, new(testpb.TestReply), askTimeout)
+			time.Sleep(time.Second)
+			wg.Done()
+		}()
+
+		// now we complete the Task
+		task <- new(testspb.TaskComplete)
+		wg.Wait()
+
+		require.EqualValues(t, 3, actor1.Counter())
+		require.EqualValues(t, 1, actor2.Counter())
+
+		time.Sleep(time.Second)
+		assert.NoError(t, pid1.Shutdown(ctx))
+		assert.NoError(t, pid2.Shutdown(ctx))
+	})
+	t.Run("With is a dead actor: case 1", func(t *testing.T) {
+		askTimeout := time.Minute
+		ctx := context.TODO()
+
+		opts := []pidOption{
+			withInitMaxRetries(1),
+			withReplyTimeout(askTimeout),
+			withPassivationDisabled(),
+			withCustomLogger(log.DiscardLogger),
+		}
+
+		// create actor1
+		actor1 := &exchanger{}
+		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
+		pid1, err := newPID(ctx, actorPath1, actor1, opts...)
+		require.NoError(t, err)
+		require.NotNil(t, pid1)
+
+		// create actor2
+		actor2 := &exchanger{}
+		actorPath2 := NewPath("Exchange2", NewAddress("sys", "host", 1))
+		pid2, err := newPID(ctx, actorPath2, actor2, opts...)
+		require.NoError(t, err)
+		require.NotNil(t, pid2)
+
+		// shutdown the actor after one second of liveness
+		time.Sleep(time.Second)
+		assert.NoError(t, pid2.Shutdown(ctx))
+
+		task := make(chan proto.Message)
+		err = pid1.PipeTo(ctx, pid2, task)
+		require.Error(t, err)
+		assert.EqualError(t, err, ErrDead.Error())
+
+		time.Sleep(time.Second)
+		assert.NoError(t, pid1.Shutdown(ctx))
+	})
+	t.Run("With is a dead actor: case 2", func(t *testing.T) {
+		askTimeout := time.Minute
+		ctx := context.TODO()
+
+		opts := []pidOption{
+			withInitMaxRetries(1),
+			withReplyTimeout(askTimeout),
+			withPassivationDisabled(),
+			withCustomLogger(log.DiscardLogger),
+		}
+
+		// create actor1
+		actor1 := &exchanger{}
+		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
+		pid1, err := newPID(ctx, actorPath1, actor1, opts...)
+		require.NoError(t, err)
+		require.NotNil(t, pid1)
+
+		// create actor2
+		actor2 := &exchanger{}
+		actorPath2 := NewPath("Exchange2", NewAddress("sys", "host", 1))
+		pid2, err := newPID(ctx, actorPath2, actor2, opts...)
+		require.NoError(t, err)
+		require.NotNil(t, pid2)
+
+		// zero message received by both actors
+		require.Zero(t, actor1.Counter())
+		require.Zero(t, actor2.Counter())
+
+		task := make(chan proto.Message)
+		err = pid1.PipeTo(ctx, pid2, task)
+		require.NoError(t, err)
+
+		var wg sync.WaitGroup
+		wg.Add(1)
+		go func() {
+			// Wait for some time and during that period send some messages to the actor
+			// send three messages while waiting for the future to completed
+			_, _ = Ask(ctx, pid1, new(testpb.TestReply), askTimeout)
+			_, _ = Ask(ctx, pid1, new(testpb.TestReply), askTimeout)
+			_, _ = Ask(ctx, pid1, new(testpb.TestReply), askTimeout)
+			time.Sleep(time.Second)
+			wg.Done()
+		}()
+
+		// now we complete the Task
+		task <- new(testspb.TaskComplete)
+		_ = Tell(ctx, pid2, new(testpb.TestBye))
+
+		wg.Wait()
+
+		require.EqualValues(t, 3, actor1.Counter())
+		require.Zero(t, actor2.Counter())
+
+		time.Sleep(time.Second)
+		assert.NoError(t, pid1.Shutdown(ctx))
+	})
+	t.Run("With undefined task", func(t *testing.T) {
+		askTimeout := time.Minute
+		ctx := context.TODO()
+
+		opts := []pidOption{
+			withInitMaxRetries(1),
+			withReplyTimeout(askTimeout),
+			withPassivationDisabled(),
+			withCustomLogger(log.DiscardLogger),
+		}
+
+		// create actor1
+		actor1 := &exchanger{}
+		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
+		pid1, err := newPID(ctx, actorPath1, actor1, opts...)
+		require.NoError(t, err)
+		require.NotNil(t, pid1)
+
+		// create actor2
+		actor2 := &exchanger{}
+		actorPath2 := NewPath("Exchange2", NewAddress("sys", "host", 1))
+		pid2, err := newPID(ctx, actorPath2, actor2, opts...)
+		require.NoError(t, err)
+		require.NotNil(t, pid2)
+
+		// zero message received by both actors
+		require.Zero(t, actor1.Counter())
+		require.Zero(t, actor2.Counter())
+
+		err = pid1.PipeTo(ctx, pid2, nil)
+		require.Error(t, err)
+		assert.EqualError(t, err, ErrUndefinedTask.Error())
+
+		time.Sleep(time.Second)
+		assert.NoError(t, pid1.Shutdown(ctx))
+		assert.NoError(t, pid2.Shutdown(ctx))
+	})
+	t.Run("With failed task", func(t *testing.T) {
+		askTimeout := time.Minute
+		ctx := context.TODO()
+
+		opts := []pidOption{
+			withInitMaxRetries(1),
+			withReplyTimeout(askTimeout),
+			withPassivationDisabled(),
+			withCustomLogger(log.DiscardLogger),
+		}
+
+		// create actor1
+		actor1 := &exchanger{}
+		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
+		pid1, err := newPID(ctx, actorPath1, actor1, opts...)
+		require.NoError(t, err)
+		require.NotNil(t, pid1)
+
+		// create actor2
+		actor2 := &exchanger{}
+		actorPath2 := NewPath("Exchange2", NewAddress("sys", "host", 1))
+		pid2, err := newPID(ctx, actorPath2, actor2, opts...)
+		require.NoError(t, err)
+		require.NotNil(t, pid2)
+
+		// zero message received by both actors
+		require.Zero(t, actor1.Counter())
+		require.Zero(t, actor2.Counter())
+
+		task := make(chan proto.Message)
+
+		cancelCtx, cancel := context.WithCancel(ctx)
+		err = pid1.PipeTo(cancelCtx, pid2, task)
+		require.NoError(t, err)
+
+		var wg sync.WaitGroup
+		wg.Add(1)
+		go func() {
+			// Wait for some time and during that period send some messages to the actor
+			// send three messages while waiting for the future to completed
+			_, _ = Ask(ctx, pid1, new(testpb.TestReply), askTimeout)
+			_, _ = Ask(ctx, pid1, new(testpb.TestReply), askTimeout)
+			_, _ = Ask(ctx, pid1, new(testpb.TestReply), askTimeout)
+			time.Sleep(time.Second)
+			wg.Done()
+		}()
+
+		cancel()
+		wg.Wait()
+
+		require.EqualValues(t, 3, actor1.Counter())
+
+		// no message piped to the actor
+		require.Zero(t, actor2.Counter())
+
+		time.Sleep(time.Second)
+		assert.NoError(t, pid1.Shutdown(ctx))
+		assert.NoError(t, pid2.Shutdown(ctx))
+	})
 }

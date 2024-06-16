@@ -33,6 +33,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 
+	"github.com/tochemey/goakt/v2/future"
 	"github.com/tochemey/goakt/v2/goaktpb"
 )
 
@@ -134,6 +135,11 @@ type ReceiveContext interface {
 	// Err is used instead of panicking within a message handler.
 	// One can also call panic which is not the recommended way
 	Err(err error)
+	// PipeTo processes a long-running task and pipes the result to the provided actor.
+	// The successful result of the task will be put onto the provided actor mailbox.
+	// This is useful when interacting with external services.
+	// It’s common that you would like to use the value of the response in the actor when the long-running task is completed
+	PipeTo(to PID, task future.Task)
 }
 
 type receiveContext struct {
@@ -179,8 +185,9 @@ func (c *receiveContext) WithRemoteSender(remoteSender *goaktpb.Address) *receiv
 // Self returns the receiver PID of the message
 func (c *receiveContext) Self() PID {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.recipient
+	self := c.recipient
+	c.mu.Unlock()
+	return self
 }
 
 // Err is used instead of panicking within a message handler.
@@ -194,9 +201,9 @@ func (c *receiveContext) Err(err error) {
 func (c *receiveContext) Response(resp proto.Message) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	defer close(c.response)
 	// only set a response when the message is sync message
 	if !c.isAsyncMessage {
+		defer close(c.response)
 		c.response <- resp
 	}
 }
@@ -204,30 +211,34 @@ func (c *receiveContext) Response(resp proto.Message) {
 // Context represents the context attached to the message
 func (c *receiveContext) Context() context.Context {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.ctx
+	ctx := c.ctx
+	c.mu.Unlock()
+	return ctx
 }
 
 // Sender of the message
 func (c *receiveContext) Sender() PID {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.sender
+	sender := c.sender
+	c.mu.Unlock()
+	return sender
 }
 
 // RemoteSender defines the remote sender of the message if it is a remote message
 // This is set to RemoteNoSender when the message is not a remote message
 func (c *receiveContext) RemoteSender() *goaktpb.Address {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.remoteSender
+	sender := c.remoteSender
+	c.mu.Unlock()
+	return sender
 }
 
 // Message is the actual message sent
 func (c *receiveContext) Message() proto.Message {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.message
+	message := c.message
+	c.mu.Unlock()
+	return message
 }
 
 // BecomeStacked sets a new behavior to the actor.
@@ -266,7 +277,7 @@ func (c *receiveContext) Become(behavior Behavior) {
 func (c *receiveContext) Stash() {
 	c.mu.Lock()
 	recipient := c.recipient
-	defer c.mu.Unlock()
+	c.mu.Unlock()
 	if err := recipient.stash(c); err != nil {
 		c.Err(err)
 	}
@@ -276,7 +287,7 @@ func (c *receiveContext) Stash() {
 func (c *receiveContext) Unstash() {
 	c.mu.Lock()
 	recipient := c.recipient
-	defer c.mu.Unlock()
+	c.mu.Unlock()
 	if err := recipient.unstash(); err != nil {
 		c.Err(err)
 	}
@@ -287,7 +298,7 @@ func (c *receiveContext) Unstash() {
 func (c *receiveContext) UnstashAll() {
 	c.mu.Lock()
 	recipient := c.recipient
-	defer c.mu.Unlock()
+	c.mu.Unlock()
 	if err := recipient.unstashAll(); err != nil {
 		c.Err(err)
 	}
@@ -297,8 +308,8 @@ func (c *receiveContext) UnstashAll() {
 func (c *receiveContext) Tell(to PID, message proto.Message) {
 	c.mu.Lock()
 	recipient := c.recipient
-	defer c.mu.Unlock()
 	ctx := context.WithoutCancel(c.ctx)
+	c.mu.Unlock()
 	if err := recipient.Tell(ctx, to, message); err != nil {
 		panic(err)
 	}
@@ -311,8 +322,8 @@ func (c *receiveContext) Tell(to PID, message proto.Message) {
 func (c *receiveContext) BatchTell(to PID, messages ...proto.Message) {
 	c.mu.Lock()
 	recipient := c.recipient
-	defer c.mu.Unlock()
 	ctx := context.WithoutCancel(c.ctx)
+	c.mu.Unlock()
 	if err := recipient.BatchTell(ctx, to, messages...); err != nil {
 		c.Err(err)
 	}
@@ -324,8 +335,8 @@ func (c *receiveContext) BatchTell(to PID, messages ...proto.Message) {
 func (c *receiveContext) Ask(to PID, message proto.Message) (response proto.Message) {
 	c.mu.Lock()
 	recipient := c.recipient
-	defer c.mu.Unlock()
 	ctx := context.WithoutCancel(c.ctx)
+	c.mu.Unlock()
 	reply, err := recipient.Ask(ctx, to, message)
 	if err != nil {
 		c.Err(err)
@@ -339,8 +350,8 @@ func (c *receiveContext) Ask(to PID, message proto.Message) (response proto.Mess
 func (c *receiveContext) BatchAsk(to PID, messages ...proto.Message) (responses chan proto.Message) {
 	c.mu.Lock()
 	recipient := c.recipient
-	defer c.mu.Unlock()
 	ctx := context.WithoutCancel(c.ctx)
+	c.mu.Unlock()
 	reply, err := recipient.BatchAsk(ctx, to, messages...)
 	if err != nil {
 		c.Err(err)
@@ -352,8 +363,8 @@ func (c *receiveContext) BatchAsk(to PID, messages ...proto.Message) (responses 
 func (c *receiveContext) RemoteTell(to *goaktpb.Address, message proto.Message) {
 	c.mu.Lock()
 	recipient := c.recipient
-	defer c.mu.Unlock()
 	ctx := context.WithoutCancel(c.ctx)
+	c.mu.Unlock()
 	if err := recipient.RemoteTell(ctx, to, message); err != nil {
 		c.Err(err)
 	}
@@ -364,8 +375,8 @@ func (c *receiveContext) RemoteTell(to *goaktpb.Address, message proto.Message) 
 func (c *receiveContext) RemoteAsk(to *goaktpb.Address, message proto.Message) (response *anypb.Any) {
 	c.mu.Lock()
 	recipient := c.recipient
-	defer c.mu.Unlock()
 	ctx := context.WithoutCancel(c.ctx)
+	c.mu.Unlock()
 	reply, err := recipient.RemoteAsk(ctx, to, message)
 	if err != nil {
 		c.Err(err)
@@ -378,8 +389,8 @@ func (c *receiveContext) RemoteAsk(to *goaktpb.Address, message proto.Message) (
 func (c *receiveContext) RemoteBatchTell(to *goaktpb.Address, messages ...proto.Message) {
 	c.mu.Lock()
 	recipient := c.recipient
-	defer c.mu.Unlock()
 	ctx := context.WithoutCancel(c.ctx)
+	c.mu.Unlock()
 	if err := recipient.RemoteBatchTell(ctx, to, messages...); err != nil {
 		c.Err(err)
 	}
@@ -391,8 +402,8 @@ func (c *receiveContext) RemoteBatchTell(to *goaktpb.Address, messages ...proto.
 func (c *receiveContext) RemoteBatchAsk(to *goaktpb.Address, messages ...proto.Message) (responses []*anypb.Any) {
 	c.mu.Lock()
 	recipient := c.recipient
-	defer c.mu.Unlock()
 	ctx := context.WithoutCancel(c.ctx)
+	c.mu.Unlock()
 	replies, err := recipient.RemoteBatchAsk(ctx, to, messages...)
 	if err != nil {
 		c.Err(err)
@@ -405,8 +416,8 @@ func (c *receiveContext) RemoteBatchAsk(to *goaktpb.Address, messages ...proto.M
 func (c *receiveContext) RemoteLookup(host string, port int, name string) (addr *goaktpb.Address) {
 	c.mu.Lock()
 	recipient := c.recipient
-	defer c.mu.Unlock()
 	ctx := context.WithoutCancel(c.ctx)
+	c.mu.Unlock()
 	remoteAddr, err := recipient.RemoteLookup(ctx, host, port, name)
 	if err != nil {
 		c.Err(err)
@@ -420,8 +431,8 @@ func (c *receiveContext) RemoteLookup(host string, port int, name string) (addr 
 func (c *receiveContext) Shutdown() {
 	c.mu.Lock()
 	recipient := c.recipient
-	defer c.mu.Unlock()
 	ctx := context.WithoutCancel(c.ctx)
+	c.mu.Unlock()
 	if err := recipient.Shutdown(ctx); err != nil {
 		c.Err(err)
 	}
@@ -431,8 +442,8 @@ func (c *receiveContext) Shutdown() {
 func (c *receiveContext) Spawn(name string, actor Actor) PID {
 	c.mu.Lock()
 	recipient := c.recipient
-	defer c.mu.Unlock()
 	ctx := context.WithoutCancel(c.ctx)
+	c.mu.Unlock()
 	pid, err := recipient.SpawnChild(ctx, name, actor)
 	if err != nil {
 		c.Err(err)
@@ -451,7 +462,7 @@ func (c *receiveContext) Children() []PID {
 func (c *receiveContext) Child(name string) PID {
 	c.mu.Lock()
 	recipient := c.recipient
-	defer c.mu.Unlock()
+	c.mu.Unlock()
 	pid, err := recipient.Child(name)
 	if err != nil {
 		c.Err(err)
@@ -464,11 +475,9 @@ func (c *receiveContext) Child(name string) PID {
 func (c *receiveContext) Stop(child PID) {
 	c.mu.Lock()
 	recipient := c.recipient
-	defer c.mu.Unlock()
-
 	ctx := context.WithoutCancel(c.ctx)
-	err := recipient.Stop(ctx, child)
-	if err != nil {
+	c.mu.Unlock()
+	if err := recipient.Stop(ctx, child); err != nil {
 		c.Err(err)
 	}
 }
@@ -509,10 +518,23 @@ func (c *receiveContext) Unhandled() {
 func (c *receiveContext) RemoteReSpawn(host string, port int, name string) {
 	c.mu.Lock()
 	recipient := c.recipient
-	defer c.mu.Unlock()
 	ctx := context.WithoutCancel(c.ctx)
-	err := recipient.RemoteReSpawn(ctx, host, port, name)
-	if err != nil {
+	c.mu.Unlock()
+	if err := recipient.RemoteReSpawn(ctx, host, port, name); err != nil {
+		c.Err(err)
+	}
+}
+
+// PipeTo processes a long-running task and pipes the result to the provided actor.
+// The successful result of the task will be put onto the provided actor mailbox.
+// This is useful when interacting with external services.
+// It’s common that you would like to use the value of the response in the actor when the long-running task is completed
+func (c *receiveContext) PipeTo(to PID, task future.Task) {
+	c.mu.Lock()
+	recipient := c.recipient
+	ctx := context.WithoutCancel(c.ctx)
+	c.mu.Unlock()
+	if err := recipient.PipeTo(ctx, to, task); err != nil {
 		c.Err(err)
 	}
 }
