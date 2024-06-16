@@ -201,6 +201,7 @@ The choice of protobuf is due to easy serialization over wire and strong schema 
 - `BatchAsk` - send a bulk of messages to an actor and expect responses for each message sent within a time period. Messages are processed one after the other in the other they were sent.
   This help return the response of each message in the same order that message was sent. This method hinders performance drastically when the number of messages to sent is high.
   Kindly use this method with caution.
+- `PipeTo` - send the successful result of a future(long-running task) to self or a given actor. This can be achieved from the [`PID`](./actors/pid.go) as well as from the [ReceiveContext](./actors/context.go)
 
 ### Scheduler
 
@@ -240,7 +241,7 @@ not a requirement.
 
 It’s recommended to avoid stashing too many messages to avoid too much memory usage. If you try to stash more
 messages than the capacity the actor will panic.
-To use the stashing feature, call the following methods on the [ReceiveContext interface](./actors/context.go) when handling a message:
+To use the stashing feature, call the following methods on the [ReceiveContext](./actors/context.go) when handling a message:
 
 - `Stash()` - adds the current message to the stash buffer.
 - `Unstash()` - unstashes the oldest message in the stash and prepends to the stash buffer.
@@ -339,7 +340,6 @@ The API interface helps interact with a Go-Akt actor system as kind of client. T
 - `RemoteStop`: to stop an actor on a remote machine
 - `RemoteSpawn`: to start an actor on a remote machine. The given actor implementation must be registered using the [`Register`](./actors/actor_system.go) method of the actor system on the remote machine for this call to succeed.
 
-
 ## Clustering
 
 The cluster engine depends upon the [discovery](./discovery/provider.go) mechanism to find other nodes in the cluster.
@@ -353,9 +353,9 @@ At the moment the following providers are implemented:
 - [mDNS](https://datatracker.ietf.org/doc/html/rfc6762) and [DNS-SD](https://tools.ietf.org/html/rfc6763)
 - [NATS](https://nats.io/) [integration](discovery/nats) is fully functional
 - [DNS](discovery/dnssd) is fully functional
-- [Static](discovery/static) for demo purpose
+- [Static](discovery/static) is fully functional and for demo purpose
 
-Note: One can add additional discovery providers using the following [interface](./discovery/provider.go).
+Note: One can add additional discovery providers using the following [discovery provider](./discovery/provider.go).
 
 ### Operations Guide
 
@@ -372,7 +372,6 @@ When a node leaves the cluster, as long as the cluster quorum is stable, its act
 The redeployed actors are created with **_their initial state_**. To be able to recover from their current state before the cluster topology change,
 one needs to persist their state into a distributed storage and recover from there using the `PreStart` hook.
 
-
 ### Built-in Discovery Providers
 
 #### Kubernetes Discovery Provider Setup
@@ -386,23 +385,27 @@ To get the kubernetes discovery working as expected, the following pod labels ne
 ##### Get Started
 
 ```go
+package main
+
+import "github.com/tochemey/goakt/v2/discovery/kubernetes"
+
 const (
-namespace          = "default"
-applicationName    = "accounts"
-actorSystemName    = "AccountsSystem"
-gossipPortName     = "gossip-port"
-peersPortName      = "peers-port"
-remotingPortName   = "remoting-port"
+    namespace          = "default"
+    applicationName    = "accounts"
+    actorSystemName    = "AccountsSystem"
+    gossipPortName     = "gossip-port"
+    peersPortName      = "peers-port"
+    remotingPortName   = "remoting-port"
 )
 
 // define the discovery config
 config := kubernetes.Config{
-ApplicationName:  applicationName,
-ActorSystemName:  actorSystemName,
-Namespace:        namespace,
-GossipPortName:   gossipPortName,
-RemotingPortName: remotingPortName,
-PeersPortName:  peersPortName,
+    ApplicationName:  applicationName,
+    ActorSystemName:  actorSystemName,
+    Namespace:        namespace,
+    GossipPortName:   gossipPortName,
+    RemotingPortName: remotingPortName,
+    PeersPortName:  peersPortName,
 }
 
 // instantiate the k8 discovery provider
@@ -462,19 +465,23 @@ To use the NATS discovery provider one needs to provide the following:
 - `Application Name`: the application name
 
 ```go
+package main
+
+import "github.com/tochemey/goakt/v2/discovery/nats"
+
 const (
-natsServerAddr   = "nats://localhost:4248"
-natsSubject      = "goakt-gossip"
-applicationName  = "accounts"
-actorSystemName  = "AccountsSystem"
+    natsServerAddr   = "nats://localhost:4248"
+    natsSubject      = "goakt-gossip"
+    applicationName  = "accounts"
+    actorSystemName  = "AccountsSystem"
 )
 
 // define the discovery options
 config := nats.Config{
-ApplicationName: applicationName,
-ActorSystemName: actorSystemName,
-NatsServer:      natsServer,
-NatsSubject:     natsSubject,
+    ApplicationName: applicationName,
+    ActorSystemName: actorSystemName,
+    NatsServer:      natsServer,
+    NatsSubject:     natsSubject,
 }
 
 // define the host node instance
@@ -497,12 +504,16 @@ To use the DNS discovery provider one needs to provide the following:
 - `IPv6`: States whether to lookup for IPv6 addresses.
 
 ```go
+package main
+
+import "github.com/tochemey/goakt/v2/discovery/dnssd"
+
 const domainName = "accounts"
 
 // define the discovery options
 config := dnssd.Config{
-dnssd.DomainName: domainName,
-dnssd.IPv6:       false,
+    dnssd.DomainName: domainName,
+    dnssd.IPv6:       false,
 }
 // instantiate the dnssd discovery provider
 disco := dnssd.NewDiscovery(&config)
@@ -518,13 +529,17 @@ This provider performs nodes discovery based upon the list of static hosts addre
 The address of each host is the form of `host:port` where `port` is the gossip protocol port.
 
 ```go
+package main
+
+import "github.com/tochemey/goakt/v2/discovery/static"
+
 // define the discovery configuration
 config := static.Config{
-Hosts: []string{
-"node1:3322",
-"node2:3322",
-"node3:3322",
-},
+    Hosts: []string{
+    "node1:3322",
+    "node2:3322",
+    "node3:3322",
+    },
 }
 // instantiate the dnssd discovery provider
 disco := static.NewDiscovery(&config)
