@@ -22,27 +22,32 @@
  * SOFTWARE.
  */
 
-package static
+package client
 
-import (
-	"github.com/tochemey/goakt/v2/internal/validation"
-)
-
-// Config represents the static discovery provider configuration
-type Config struct {
-	// Hosts defines the list of hosts in the form of ip:port where the port is the  gossip port.
-	Hosts []string
+// Actor defines a given actor name and kind
+type Actor struct {
+	name *string // Name defines the actor name. This will be unique in the client
+	kind string  // Kind specifies the actor kind.
 }
 
-// Validate checks whether the given discovery configuration is valid
-func (x Config) Validate() error {
-	chain := validation.
-		New(validation.FailFast()).
-		AddAssertion(len(x.Hosts) != 0, "hosts are required")
-
-	for _, host := range x.Hosts {
-		chain = chain.AddValidator(validation.NewTCPAddressValidator(host))
+// NewActor creates an instance of Actor
+func NewActor(kind string) *Actor {
+	return &Actor{
+		kind: kind,
 	}
+}
 
-	return chain.Validate()
+// WithName set the given name
+func (x *Actor) WithName(name string) {
+	x.name = &name
+}
+
+// Name returns the actor name
+func (x *Actor) Name() string {
+	return *x.name
+}
+
+// Kind returns the actor kind
+func (x *Actor) Kind() string {
+	return x.kind
 }

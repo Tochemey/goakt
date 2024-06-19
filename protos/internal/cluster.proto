@@ -1,0 +1,31 @@
+syntax = "proto3";
+
+package internalpb;
+
+option go_package = "github.com/tochemey/goakt/v2/internal/internalpb;internalpb";
+
+// ClusterService is used to interact with the cluster internal
+service ClusterService {
+  // GetNodeMetric returns the node metric
+  rpc GetNodeMetric(GetNodeMetricRequest) returns (GetNodeMetricResponse);
+  // GetKinds returns the list of cluster kinds
+  rpc GetKinds(GetKindsRequest) returns (GetKindsResponse);
+}
+
+message GetNodeMetricRequest {
+  // Specifies the node address
+  string node_address = 1;
+}
+
+message GetNodeMetricResponse {
+  // Specifies the node address
+  string node_remote_address = 1;
+  // Specifies the actors count for the given node
+  uint64 actors_count = 2;
+}
+
+message GetKindsRequest {}
+message GetKindsResponse {
+  // Specifies the list of kinds
+  repeated string kinds = 1;
+}

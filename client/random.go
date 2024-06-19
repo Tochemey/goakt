@@ -22,27 +22,35 @@
  * SOFTWARE.
  */
 
-package static
+package client
 
 import (
-	"github.com/tochemey/goakt/v2/internal/validation"
+	"math/rand"
+	"sync"
+	"time"
 )
 
-// Config represents the static discovery provider configuration
-type Config struct {
-	// Hosts defines the list of hosts in the form of ip:port where the port is the  gossip port.
-	Hosts []string
+// Random helps pick a node at random
+type Random struct {
+	locker sync.Mutex
+	nodes  []string
+	rnd    *rand.Rand
 }
 
-// Validate checks whether the given discovery configuration is valid
-func (x Config) Validate() error {
-	chain := validation.
-		New(validation.FailFast()).
-		AddAssertion(len(x.Hosts) != 0, "hosts are required")
+var _ Balancer = (*Random)(nil)
 
-	for _, host := range x.Hosts {
-		chain = chain.AddValidator(validation.NewTCPAddressValidator(host))
+// NewRandom creates an instance of Random balancer
+func NewRandom(nodes ...string) *Random {
+	return &Random{
+		nodes:  nodes,
+		locker: sync.Mutex{},
+		rnd:    rand.New(rand.NewSource(time.Now().UTC().UnixNano())), //nolint:gosec
 	}
+}
 
-	return chain.Validate()
+// Next returns the next node in the pool
+func (x *Random) Next() string {
+	x.locker.Lock()
+	defer x.locker.Unlock()
+	return x.nodes[x.rnd.Intn(len(x.nodes))]
 }

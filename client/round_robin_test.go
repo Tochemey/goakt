@@ -22,27 +22,33 @@
  * SOFTWARE.
  */
 
-package static
+package client
 
 import (
-	"github.com/tochemey/goakt/v2/internal/validation"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
-// Config represents the static discovery provider configuration
-type Config struct {
-	// Hosts defines the list of hosts in the form of ip:port where the port is the  gossip port.
-	Hosts []string
-}
-
-// Validate checks whether the given discovery configuration is valid
-func (x Config) Validate() error {
-	chain := validation.
-		New(validation.FailFast()).
-		AddAssertion(len(x.Hosts) != 0, "hosts are required")
-
-	for _, host := range x.Hosts {
-		chain = chain.AddValidator(validation.NewTCPAddressValidator(host))
+func TestRoundRobin(t *testing.T) {
+	nodes := []string{
+		"192.168.34.10:3322",
+		"192.168.34.11:3322",
+		"192.168.34.12:3322",
 	}
 
-	return chain.Validate()
+	expected := []string{
+		"192.168.34.10:3322",
+		"192.168.34.11:3322",
+		"192.168.34.12:3322",
+		"192.168.34.10:3322",
+	}
+
+	robin := NewRoundRobin(nodes...)
+	actual := make([]string, 4)
+	for i := 0; i < 4; i++ {
+		actual[i] = robin.Next()
+	}
+
+	assert.ElementsMatch(t, expected, actual)
 }

@@ -22,27 +22,27 @@
  * SOFTWARE.
  */
 
-package static
+package client
 
-import (
-	"github.com/tochemey/goakt/v2/internal/validation"
-)
-
-// Config represents the static discovery provider configuration
-type Config struct {
-	// Hosts defines the list of hosts in the form of ip:port where the port is the  gossip port.
-	Hosts []string
+// Option is the interface that applies a configuration option.
+type Option interface {
+	// Apply sets the Option value of a config.
+	Apply(cl *client)
 }
 
-// Validate checks whether the given discovery configuration is valid
-func (x Config) Validate() error {
-	chain := validation.
-		New(validation.FailFast()).
-		AddAssertion(len(x.Hosts) != 0, "hosts are required")
+// enforce compilation error
+var _ Option = OptionFunc(nil)
 
-	for _, host := range x.Hosts {
-		chain = chain.AddValidator(validation.NewTCPAddressValidator(host))
-	}
+// OptionFunc implements the Option interface.
+type OptionFunc func(*client)
 
-	return chain.Validate()
+func (f OptionFunc) Apply(c *client) {
+	f(c)
+}
+
+// WithBalancerStrategy sets the client load balancer strategy
+func WithBalancerStrategy(strategy BalancerStrategy) Option {
+	return OptionFunc(func(c *client) {
+		c.strategy = strategy
+	})
 }

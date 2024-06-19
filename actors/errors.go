@@ -85,6 +85,8 @@ var (
 	ErrKindsRequired = errors.New("actor kinds are required")
 	// ErrUndefinedTask is returned when piping a long-running task result to an actor
 	ErrUndefinedTask = errors.New("task is not defined")
+	// ErrInvalidHost is returned when a request is sent to an invalid host
+	ErrInvalidHost = errors.New("invalid host")
 )
 
 // IsEOF returns true if the given error is an EOF error

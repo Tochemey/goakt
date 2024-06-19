@@ -22,27 +22,31 @@
  * SOFTWARE.
  */
 
-package static
+package client
 
 import (
-	"github.com/tochemey/goakt/v2/internal/validation"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
-// Config represents the static discovery provider configuration
-type Config struct {
-	// Hosts defines the list of hosts in the form of ip:port where the port is the  gossip port.
-	Hosts []string
-}
-
-// Validate checks whether the given discovery configuration is valid
-func (x Config) Validate() error {
-	chain := validation.
-		New(validation.FailFast()).
-		AddAssertion(len(x.Hosts) != 0, "hosts are required")
-
-	for _, host := range x.Hosts {
-		chain = chain.AddValidator(validation.NewTCPAddressValidator(host))
+func TestOption(t *testing.T) {
+	testCases := []struct {
+		name     string
+		option   Option
+		expected client
+	}{
+		{
+			name:     "WithBalancerStrategy",
+			option:   WithBalancerStrategy(ConsistentHashingStrategy),
+			expected: client{strategy: ConsistentHashingStrategy},
+		},
 	}
-
-	return chain.Validate()
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			var cfg client
+			tc.option.Apply(&cfg)
+			assert.Equal(t, tc.expected, cfg)
+		})
+	}
 }

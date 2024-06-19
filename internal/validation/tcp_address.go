@@ -22,27 +22,49 @@
  * SOFTWARE.
  */
 
-package static
+package validation
 
 import (
-	"github.com/tochemey/goakt/v2/internal/validation"
+	"fmt"
+	"net"
+	"strconv"
+	"strings"
+
+	"github.com/pkg/errors"
 )
 
-// Config represents the static discovery provider configuration
-type Config struct {
-	// Hosts defines the list of hosts in the form of ip:port where the port is the  gossip port.
-	Hosts []string
+var errFmt = "invalid address=(%s)"
+
+// TCPAddressValidator helps validate a TCP address
+type TCPAddressValidator struct {
+	address string
 }
 
-// Validate checks whether the given discovery configuration is valid
-func (x Config) Validate() error {
-	chain := validation.
-		New(validation.FailFast()).
-		AddAssertion(len(x.Hosts) != 0, "hosts are required")
+// making sure the given struct implements the given interface
+var _ Validator = (*TCPAddressValidator)(nil)
 
-	for _, host := range x.Hosts {
-		chain = chain.AddValidator(validation.NewTCPAddressValidator(host))
+// NewTCPAddressValidator creates an instance of TCPAddressValidator
+func NewTCPAddressValidator(address string) *TCPAddressValidator {
+	return &TCPAddressValidator{address: address}
+}
+
+// Validate implements validation.Validator.
+func (a *TCPAddressValidator) Validate() error {
+	host, port, err := net.SplitHostPort(strings.TrimSpace(a.address))
+	if err != nil {
+		return errors.Wrapf(err, errFmt, a.address)
 	}
 
-	return chain.Validate()
+	// let us validate the port number
+	portNum, err := strconv.Atoi(port)
+	if err != nil {
+		return errors.Wrapf(err, errFmt, a.address)
+	}
+
+	// TODO: maybe we only need to check port number not to be negative
+	if host == "" || portNum > 65535 || portNum < 1 {
+		return fmt.Errorf(errFmt, a.address)
+	}
+
+	return nil
 }

@@ -135,6 +135,7 @@ type ActorSystem interface {
 // Only a single instance of the ActorSystem can be created on a given node
 type actorSystem struct {
 	internalpbconnect.UnimplementedRemotingServiceHandler
+	internalpbconnect.UnimplementedClusterServiceHandler
 
 	// map of actors in the system
 	actors *pidMap
@@ -1065,6 +1066,47 @@ func (x *actorSystem) RemoteSpawn(ctx context.Context, request *connect.Request[
 	return connect.NewResponse(new(internalpb.RemoteSpawnResponse)), nil
 }
 
+// GetNodeMetric handles the GetNodeMetric request send the given node
+func (x *actorSystem) GetNodeMetric(_ context.Context, request *connect.Request[internalpb.GetNodeMetricRequest]) (*connect.Response[internalpb.GetNodeMetricResponse], error) {
+	req := request.Msg
+
+	if !x.remotingEnabled.Load() {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrRemotingDisabled)
+	}
+
+	x.locker.Lock()
+	peerAddr := fmt.Sprintf("%s:%d", x.remotingHost, x.clusterConfig.PeersPort())
+	remoteAddr := fmt.Sprintf("%s:%d", x.remotingHost, x.remotingPort)
+	actorCount := x.actors.len()
+	x.locker.Unlock()
+
+	// routine check
+	if peerAddr != req.GetNodeAddress() {
+		return nil, connect.NewError(connect.CodeInvalidArgument, ErrInvalidHost)
+	}
+
+	return connect.NewResponse(&internalpb.GetNodeMetricResponse{
+		NodeRemoteAddress: remoteAddr,
+		ActorsCount:       uint64(actorCount),
+	}), nil
+}
+
+// GetKinds returns the cluster kinds
+func (x *actorSystem) GetKinds(_ context.Context, _ *connect.Request[internalpb.GetKindsRequest]) (*connect.Response[internalpb.GetKindsResponse], error) {
+	if !x.clusterEnabled.Load() {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrClusterDisabled)
+	}
+
+	x.locker.Lock()
+	kinds := make([]string, len(x.clusterConfig.Kinds()))
+	for i, kind := range x.clusterConfig.Kinds() {
+		kinds[i] = types.NameOf(kind)
+	}
+	x.locker.Unlock()
+
+	return connect.NewResponse(&internalpb.GetKindsResponse{Kinds: kinds}), nil
+}
+
 // handleRemoteAsk handles a synchronous message to another actor and expect a response.
 // This block until a response is received or timed out.
 func (x *actorSystem) handleRemoteAsk(ctx context.Context, to PID, message proto.Message) (response proto.Message, err error) {
@@ -1176,9 +1218,12 @@ func (x *actorSystem) enableRemoting(ctx context.Context) {
 	x.remotingHost = remotingHost
 	x.remotingPort = int32(remotingPort)
 
+	remotingServicePath, remotingServiceHandler := internalpbconnect.NewRemotingServiceHandler(x, opts...)
+	clusterServicePath, clusterServiceHandler := internalpbconnect.NewClusterServiceHandler(x, opts...)
+
 	mux := http.NewServeMux()
-	path, handler := internalpbconnect.NewRemotingServiceHandler(x, opts...)
-	mux.Handle(path, handler)
+	mux.Handle(remotingServicePath, remotingServiceHandler)
+	mux.Handle(clusterServicePath, clusterServiceHandler)
 	serverAddr := fmt.Sprintf("%s:%d", x.remotingHost, x.remotingPort)
 
 	// TODO revisit the timeouts
