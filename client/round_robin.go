@@ -32,20 +32,30 @@ import (
 // RoundRobin implements the round-robin algorithm
 // to pick a particular nodes in the cluster
 type RoundRobin struct {
-	locker sync.Mutex
-	nodes  []string
+	locker *sync.Mutex
+	nodes  []*Node
 	next   uint32
 }
 
 var _ Balancer = (*RoundRobin)(nil)
 
 // NewRoundRobin creates an instance of RoundRobin
-func NewRoundRobin(nodes ...string) *RoundRobin {
-	return &RoundRobin{nodes: nodes, locker: sync.Mutex{}}
+func NewRoundRobin() *RoundRobin {
+	return &RoundRobin{
+		nodes:  make([]*Node, 0),
+		locker: &sync.Mutex{},
+	}
+}
+
+// Set sets the balancer nodes pool
+func (x *RoundRobin) Set(nodes ...*Node) {
+	x.locker.Lock()
+	x.nodes = nodes
+	x.locker.Unlock()
 }
 
 // Next returns the next node in the pool
-func (x *RoundRobin) Next() string {
+func (x *RoundRobin) Next() *Node {
 	x.locker.Lock()
 	defer x.locker.Unlock()
 	n := atomic.AddUint32(&x.next, 1)

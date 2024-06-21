@@ -24,35 +24,17 @@
 
 package client
 
-import "time"
+import (
+	"testing"
 
-// Option is the interface that applies a configuration option.
-type Option interface {
-	// Apply sets the Option value of a config.
-	Apply(cl *Client)
-}
+	"github.com/stretchr/testify/assert"
+)
 
-// enforce compilation error
-var _ Option = OptionFunc(nil)
-
-// OptionFunc implements the Option interface.
-type OptionFunc func(*Client)
-
-func (f OptionFunc) Apply(c *Client) {
-	f(c)
-}
-
-// WithBalancerStrategy sets the Client weight balancer strategy
-func WithBalancerStrategy(strategy BalancerStrategy) Option {
-	return OptionFunc(func(c *Client) {
-		c.strategy = strategy
-	})
-}
-
-// WithRefresh sets a refresh interval. This help check the nodes state
-// time to time. This help remove dead nodes from the pool
-func WithRefresh(interval time.Duration) Option {
-	return OptionFunc(func(c *Client) {
-		c.refreshInterval = interval
-	})
+func TestLeadLoad(t *testing.T) {
+	balancer := NewLeastLoad()
+	balancer.Set(NewNode("192.168.34.10:3322", 2),
+		NewNode("192.168.34.11:3322", 0),
+		NewNode("192.168.34.12:3322", 1))
+	actual := balancer.Next()
+	assert.Equal(t, "192.168.34.11:3322", actual.Address())
 }

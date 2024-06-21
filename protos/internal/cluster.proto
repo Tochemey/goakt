@@ -24,7 +24,11 @@ message GetNodeMetricResponse {
   uint64 actors_count = 2;
 }
 
-message GetKindsRequest {}
+message GetKindsRequest {
+  // Specifies the node address
+  string node_address = 1;
+}
+
 message GetKindsResponse {
   // Specifies the list of kinds
   repeated string kinds = 1;

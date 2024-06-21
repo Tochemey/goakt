@@ -1070,18 +1070,17 @@ func (x *actorSystem) RemoteSpawn(ctx context.Context, request *connect.Request[
 func (x *actorSystem) GetNodeMetric(_ context.Context, request *connect.Request[internalpb.GetNodeMetricRequest]) (*connect.Response[internalpb.GetNodeMetricResponse], error) {
 	req := request.Msg
 
-	if !x.remotingEnabled.Load() {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrRemotingDisabled)
+	if !x.clusterEnabled.Load() {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrClusterDisabled)
 	}
 
 	x.locker.Lock()
-	peerAddr := fmt.Sprintf("%s:%d", x.remotingHost, x.clusterConfig.PeersPort())
 	remoteAddr := fmt.Sprintf("%s:%d", x.remotingHost, x.remotingPort)
 	actorCount := x.actors.len()
 	x.locker.Unlock()
 
 	// routine check
-	if peerAddr != req.GetNodeAddress() {
+	if remoteAddr != req.GetNodeAddress() {
 		return nil, connect.NewError(connect.CodeInvalidArgument, ErrInvalidHost)
 	}
 
@@ -1092,9 +1091,20 @@ func (x *actorSystem) GetNodeMetric(_ context.Context, request *connect.Request[
 }
 
 // GetKinds returns the cluster kinds
-func (x *actorSystem) GetKinds(_ context.Context, _ *connect.Request[internalpb.GetKindsRequest]) (*connect.Response[internalpb.GetKindsResponse], error) {
+func (x *actorSystem) GetKinds(_ context.Context, request *connect.Request[internalpb.GetKindsRequest]) (*connect.Response[internalpb.GetKindsResponse], error) {
 	if !x.clusterEnabled.Load() {
 		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrClusterDisabled)
+	}
+
+	req := request.Msg
+
+	x.locker.Lock()
+	remoteAddr := fmt.Sprintf("%s:%d", x.remotingHost, x.remotingPort)
+	x.locker.Unlock()
+
+	// routine check
+	if remoteAddr != req.GetNodeAddress() {
+		return nil, connect.NewError(connect.CodeInvalidArgument, ErrInvalidHost)
 	}
 
 	x.locker.Lock()

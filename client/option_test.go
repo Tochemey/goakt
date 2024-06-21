@@ -26,6 +26,7 @@ package client
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -34,17 +35,22 @@ func TestOption(t *testing.T) {
 	testCases := []struct {
 		name     string
 		option   Option
-		expected client
+		expected Client
 	}{
 		{
 			name:     "WithBalancerStrategy",
-			option:   WithBalancerStrategy(ConsistentHashingStrategy),
-			expected: client{strategy: ConsistentHashingStrategy},
+			option:   WithBalancerStrategy(LeastLoadStrategy),
+			expected: Client{strategy: LeastLoadStrategy},
+		},
+		{
+			name:     "WithRefresh",
+			option:   WithRefresh(time.Second),
+			expected: Client{refreshInterval: time.Second},
 		},
 	}
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			var cfg client
+			var cfg Client
 			tc.option.Apply(&cfg)
 			assert.Equal(t, tc.expected, cfg)
 		})

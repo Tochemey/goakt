@@ -24,35 +24,40 @@
 
 package client
 
-import "time"
+import "sync"
 
-// Option is the interface that applies a configuration option.
-type Option interface {
-	// Apply sets the Option value of a config.
-	Apply(cl *Client)
+// Node represents the node in the cluster
+type Node struct {
+	address string
+	weight  float64
+	mutex   *sync.Mutex
 }
 
-// enforce compilation error
-var _ Option = OptionFunc(nil)
-
-// OptionFunc implements the Option interface.
-type OptionFunc func(*Client)
-
-func (f OptionFunc) Apply(c *Client) {
-	f(c)
+// NewNode creates an instance of Node
+func NewNode(address string, weight int) *Node {
+	return &Node{
+		address: address,
+		weight:  float64(weight),
+		mutex:   &sync.Mutex{},
+	}
 }
 
-// WithBalancerStrategy sets the Client weight balancer strategy
-func WithBalancerStrategy(strategy BalancerStrategy) Option {
-	return OptionFunc(func(c *Client) {
-		c.strategy = strategy
-	})
+func (n *Node) SetWeight(weight float64) {
+	n.mutex.Lock()
+	n.weight = weight
+	n.mutex.Unlock()
 }
 
-// WithRefresh sets a refresh interval. This help check the nodes state
-// time to time. This help remove dead nodes from the pool
-func WithRefresh(interval time.Duration) Option {
-	return OptionFunc(func(c *Client) {
-		c.refreshInterval = interval
-	})
+func (n *Node) Address() string {
+	n.mutex.Lock()
+	address := n.address
+	n.mutex.Unlock()
+	return address
+}
+
+func (n *Node) Weight() float64 {
+	n.mutex.Lock()
+	load := n.weight
+	n.mutex.Unlock()
+	return load
 }

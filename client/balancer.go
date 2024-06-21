@@ -24,7 +24,7 @@
 
 package client
 
-// BalancerStrategy defines the client load balancer strategy
+// BalancerStrategy defines the Client weight balancer strategy
 type BalancerStrategy int
 
 const (
@@ -32,12 +32,15 @@ const (
 	RoundRobinStrategy BalancerStrategy = iota
 	// RandomStrategy uses the random algorithm to determine the appropriate node
 	RandomStrategy
-	// ConsistentHashingStrategy usex the consistent hashing algorithm to determine the appropriate node
-	ConsistentHashingStrategy
+	// LeastLoadStrategy choses among a pool of nodes the node that has the less weight
+	// at the time of the execution
+	LeastLoadStrategy
 )
 
-// Balancer helps locate the right node to channel client request to
+// Balancer helps locate the right node to channel Client request to
 type Balancer interface {
-	// Next returns the appropriate load-balanced node to use
-	Next() string
+	// Set sets the balancer nodes pool
+	Set(nodes ...*Node)
+	// Next returns the appropriate weight-balanced node to use
+	Next() *Node
 }

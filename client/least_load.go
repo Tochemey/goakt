@@ -24,35 +24,42 @@
 
 package client
 
-import "time"
+import (
+	"cmp"
+	"slices"
+	"sync"
+)
 
-// Option is the interface that applies a configuration option.
-type Option interface {
-	// Apply sets the Option value of a config.
-	Apply(cl *Client)
+// LeastLoad uses the LeastLoadStrategy to pick the next available node
+// in the pool
+type LeastLoad struct {
+	locker *sync.Mutex
+	nodes  []*Node
 }
 
-// enforce compilation error
-var _ Option = OptionFunc(nil)
+var _ Balancer = (*LeastLoad)(nil)
 
-// OptionFunc implements the Option interface.
-type OptionFunc func(*Client)
-
-func (f OptionFunc) Apply(c *Client) {
-	f(c)
+// NewLeastLoad creates an instance of LeastLoad
+func NewLeastLoad() *LeastLoad {
+	return &LeastLoad{
+		nodes:  make([]*Node, 0),
+		locker: &sync.Mutex{},
+	}
 }
 
-// WithBalancerStrategy sets the Client weight balancer strategy
-func WithBalancerStrategy(strategy BalancerStrategy) Option {
-	return OptionFunc(func(c *Client) {
-		c.strategy = strategy
+// Set sets the balancer nodes pool
+func (x *LeastLoad) Set(nodes ...*Node) {
+	x.locker.Lock()
+	x.nodes = nodes
+	x.locker.Unlock()
+}
+
+// Next returns the next node in the pool
+func (x *LeastLoad) Next() *Node {
+	x.locker.Lock()
+	defer x.locker.Unlock()
+	slices.SortStableFunc(x.nodes, func(a, b *Node) int {
+		return cmp.Compare(a.Weight(), b.Weight())
 	})
-}
-
-// WithRefresh sets a refresh interval. This help check the nodes state
-// time to time. This help remove dead nodes from the pool
-func WithRefresh(interval time.Duration) Option {
-	return OptionFunc(func(c *Client) {
-		c.refreshInterval = interval
-	})
+	return x.nodes[0]
 }

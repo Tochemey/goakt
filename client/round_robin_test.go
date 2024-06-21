@@ -31,12 +31,6 @@ import (
 )
 
 func TestRoundRobin(t *testing.T) {
-	nodes := []string{
-		"192.168.34.10:3322",
-		"192.168.34.11:3322",
-		"192.168.34.12:3322",
-	}
-
 	expected := []string{
 		"192.168.34.10:3322",
 		"192.168.34.11:3322",
@@ -44,10 +38,14 @@ func TestRoundRobin(t *testing.T) {
 		"192.168.34.10:3322",
 	}
 
-	robin := NewRoundRobin(nodes...)
+	balancer := NewRoundRobin()
+	balancer.Set(NewNode("192.168.34.10:3322", 2),
+		NewNode("192.168.34.11:3322", 0),
+		NewNode("192.168.34.12:3322", 1))
+
 	actual := make([]string, 4)
 	for i := 0; i < 4; i++ {
-		actual[i] = robin.Next()
+		actual[i] = balancer.Next().Address()
 	}
 
 	assert.ElementsMatch(t, expected, actual)

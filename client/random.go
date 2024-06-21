@@ -32,24 +32,31 @@ import (
 
 // Random helps pick a node at random
 type Random struct {
-	locker sync.Mutex
-	nodes  []string
+	locker *sync.Mutex
+	nodes  []*Node
 	rnd    *rand.Rand
 }
 
 var _ Balancer = (*Random)(nil)
 
 // NewRandom creates an instance of Random balancer
-func NewRandom(nodes ...string) *Random {
+func NewRandom() *Random {
 	return &Random{
-		nodes:  nodes,
-		locker: sync.Mutex{},
+		nodes:  make([]*Node, 0),
+		locker: &sync.Mutex{},
 		rnd:    rand.New(rand.NewSource(time.Now().UTC().UnixNano())), //nolint:gosec
 	}
 }
 
+// Set sets the balancer nodes pool
+func (x *Random) Set(nodes ...*Node) {
+	x.locker.Lock()
+	x.nodes = nodes
+	x.locker.Unlock()
+}
+
 // Next returns the next node in the pool
-func (x *Random) Next() string {
+func (x *Random) Next() *Node {
 	x.locker.Lock()
 	defer x.locker.Unlock()
 	return x.nodes[x.rnd.Intn(len(x.nodes))]
