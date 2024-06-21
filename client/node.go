@@ -42,12 +42,15 @@ func NewNode(address string, weight int) *Node {
 	}
 }
 
+// SetWeight sets the node weight.
+// This is thread safe
 func (n *Node) SetWeight(weight float64) {
 	n.mutex.Lock()
 	n.weight = weight
 	n.mutex.Unlock()
 }
 
+// Address returns the node address
 func (n *Node) Address() string {
 	n.mutex.Lock()
 	address := n.address
@@ -55,6 +58,7 @@ func (n *Node) Address() string {
 	return address
 }
 
+// Weight returns the node weight
 func (n *Node) Weight() float64 {
 	n.mutex.Lock()
 	load := n.weight

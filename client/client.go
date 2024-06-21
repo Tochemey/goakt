@@ -60,11 +60,11 @@ type Client struct {
 // and remoting port of the nodes. The nodes list will be load balanced based upon the load-balancing
 // strategy defined by default round-robin will be used.
 // An instance of the Client can be reused and it is thread safe.
-func New(ctx context.Context, nodes []string, opts ...Option) (*Client, error) {
+func New(ctx context.Context, addresses []string, opts ...Option) (*Client, error) {
 	chain := validation.
 		New(validation.FailFast()).
-		AddAssertion(len(nodes) != 0, "nodes are required")
-	for _, host := range nodes {
+		AddAssertion(len(addresses) != 0, "addresses are required")
+	for _, host := range addresses {
 		chain = chain.AddValidator(validation.NewTCPAddressValidator(host))
 	}
 
@@ -83,12 +83,9 @@ func New(ctx context.Context, nodes []string, opts ...Option) (*Client, error) {
 		opt.Apply(cl)
 	}
 
-	var (
-		verifiedNodes []*Node
-	)
-
-	for _, node := range nodes {
-		weight, ok, err := nodeMetric(ctx, node)
+	var nodes []*Node
+	for _, address := range addresses {
+		weight, ok, err := getNodeMetric(ctx, address)
 		if err != nil {
 			return nil, err
 		}
@@ -97,7 +94,7 @@ func New(ctx context.Context, nodes []string, opts ...Option) (*Client, error) {
 			continue
 		}
 
-		verifiedNodes = append(verifiedNodes, NewNode(node, weight))
+		nodes = append(nodes, NewNode(address, weight))
 	}
 
 	switch cl.strategy {
@@ -111,10 +108,10 @@ func New(ctx context.Context, nodes []string, opts ...Option) (*Client, error) {
 		// TODO: add more balancer strategy
 	}
 
-	cl.nodes = verifiedNodes
+	cl.nodes = nodes
 	cl.balancer.Set(cl.nodes...)
 
-	// only refresh nodes when refresh interval is set
+	// only refresh addresses when refresh interval is set
 	if cl.refreshInterval > 0 {
 		cl.closeSignal = make(chan types.Unit, 1)
 		go cl.refreshNodesLoop()
@@ -217,7 +214,7 @@ func (x *Client) updateNodes(ctx context.Context) error {
 	defer x.locker.Lock()
 
 	for _, node := range x.nodes {
-		weight, ok, err := nodeMetric(ctx, node.Address())
+		weight, ok, err := getNodeMetric(ctx, node.Address())
 		if err != nil {
 			return err
 		}
@@ -231,7 +228,7 @@ func (x *Client) updateNodes(ctx context.Context) error {
 
 // refreshNodesLoop refreshes the nodes
 func (x *Client) refreshNodesLoop() {
-	ticker := time.NewTicker(10 * time.Second)
+	ticker := time.NewTicker(x.refreshInterval)
 	tickerStopSig := make(chan types.Unit, 1)
 	go func() {
 		for {
@@ -251,8 +248,8 @@ func (x *Client) refreshNodesLoop() {
 	ticker.Stop()
 }
 
-// nodeMetric pings a given node and get the node metric info and
-func nodeMetric(ctx context.Context, node string) (int, bool, error) {
+// getNodeMetric pings a given node and get the node metric info and
+func getNodeMetric(ctx context.Context, node string) (int, bool, error) {
 	host, p, _ := net.SplitHostPort(node)
 	port, _ := strconv.Atoi(p)
 	service := internalpbconnect.NewClusterServiceClient(
