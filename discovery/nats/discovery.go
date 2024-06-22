@@ -120,9 +120,7 @@ func (d *Discovery) Initialize() error {
 
 	// let us connect using an exponential backoff mechanism
 	// we will attempt to connect 5 times to see whether there have started successfully or not.
-	const (
-		maxRetries = 5
-	)
+	const maxRetries = 5
 	// create a new instance of retrier that will try a maximum of five times, with
 	// an initial delay of 100 ms and a maximum delay of opts.ReconnectWait
 	retrier := retry.NewRetrier(maxRetries, 100*time.Millisecond, opts.ReconnectWait)

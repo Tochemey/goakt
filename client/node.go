@@ -22,27 +22,46 @@
  * SOFTWARE.
  */
 
-package static
+package client
 
-import (
-	"github.com/tochemey/goakt/v2/internal/validation"
-)
+import "sync"
 
-// Config represents the static discovery provider configuration
-type Config struct {
-	// Hosts defines the list of hosts in the form of ip:port where the port is the  gossip port.
-	Hosts []string
+// Node represents the node in the cluster
+type Node struct {
+	address string
+	weight  float64
+	mutex   *sync.Mutex
 }
 
-// Validate checks whether the given discovery configuration is valid
-func (x Config) Validate() error {
-	chain := validation.
-		New(validation.FailFast()).
-		AddAssertion(len(x.Hosts) != 0, "hosts are required")
-
-	for _, host := range x.Hosts {
-		chain = chain.AddValidator(validation.NewTCPAddressValidator(host))
+// NewNode creates an instance of Node
+func NewNode(address string, weight int) *Node {
+	return &Node{
+		address: address,
+		weight:  float64(weight),
+		mutex:   &sync.Mutex{},
 	}
+}
 
-	return chain.Validate()
+// SetWeight sets the node weight.
+// This is thread safe
+func (n *Node) SetWeight(weight float64) {
+	n.mutex.Lock()
+	n.weight = weight
+	n.mutex.Unlock()
+}
+
+// Address returns the node address
+func (n *Node) Address() string {
+	n.mutex.Lock()
+	address := n.address
+	n.mutex.Unlock()
+	return address
+}
+
+// Weight returns the node weight
+func (n *Node) Weight() float64 {
+	n.mutex.Lock()
+	load := n.weight
+	n.mutex.Unlock()
+	return load
 }

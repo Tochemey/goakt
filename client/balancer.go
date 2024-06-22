@@ -22,27 +22,25 @@
  * SOFTWARE.
  */
 
-package static
+package client
 
-import (
-	"github.com/tochemey/goakt/v2/internal/validation"
+// BalancerStrategy defines the Client weight balancer strategy
+type BalancerStrategy int
+
+const (
+	// RoundRobinStrategy uses the round-robin algorithm to determine the appropriate node
+	RoundRobinStrategy BalancerStrategy = iota
+	// RandomStrategy uses the random algorithm to determine the appropriate node
+	RandomStrategy
+	// LeastLoadStrategy choses among a pool of nodes the node that has the less weight
+	// at the time of the execution
+	LeastLoadStrategy
 )
 
-// Config represents the static discovery provider configuration
-type Config struct {
-	// Hosts defines the list of hosts in the form of ip:port where the port is the  gossip port.
-	Hosts []string
-}
-
-// Validate checks whether the given discovery configuration is valid
-func (x Config) Validate() error {
-	chain := validation.
-		New(validation.FailFast()).
-		AddAssertion(len(x.Hosts) != 0, "hosts are required")
-
-	for _, host := range x.Hosts {
-		chain = chain.AddValidator(validation.NewTCPAddressValidator(host))
-	}
-
-	return chain.Validate()
+// Balancer helps locate the right node to channel Client request to
+type Balancer interface {
+	// Set sets the balancer nodes pool
+	Set(nodes ...*Node)
+	// Next returns the appropriate weight-balanced node to use
+	Next() *Node
 }

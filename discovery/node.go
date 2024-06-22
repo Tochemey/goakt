@@ -25,6 +25,7 @@
 package discovery
 
 import (
+	"fmt"
 	"net"
 	"strconv"
 )
@@ -44,11 +45,16 @@ type Node struct {
 }
 
 // PeersAddress returns address the node's peers will use to connect to
-func (n Node) PeersAddress() string {
+func (n *Node) PeersAddress() string {
 	return net.JoinHostPort(n.Host, strconv.Itoa(n.PeersPort))
 }
 
 // GossipAddress returns the node discovery address
-func (n Node) GossipAddress() string {
+func (n *Node) GossipAddress() string {
 	return net.JoinHostPort(n.Host, strconv.Itoa(n.GossipPort))
+}
+
+// String returns the printable representation of Node
+func (n *Node) String() string {
+	return fmt.Sprintf("[name=%s host=%s gossip=%d  peers=%d remoting=%d]", n.Name, n.Host, n.GossipPort, n.PeersPort, n.RemotingPort)
 }

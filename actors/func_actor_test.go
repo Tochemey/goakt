@@ -22,27 +22,39 @@
  * SOFTWARE.
  */
 
-package static
+package actors
 
 import (
-	"github.com/tochemey/goakt/v2/internal/validation"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
-// Config represents the static discovery provider configuration
-type Config struct {
-	// Hosts defines the list of hosts in the form of ip:port where the port is the  gossip port.
-	Hosts []string
-}
+func TestFuncOption(t *testing.T) {
+	var preStart PreStartFunc
+	var postStop PreStartFunc
+	testCases := []struct {
+		name     string
+		option   FuncOption
+		expected funcActor
+	}{
 
-// Validate checks whether the given discovery configuration is valid
-func (x Config) Validate() error {
-	chain := validation.
-		New(validation.FailFast()).
-		AddAssertion(len(x.Hosts) != 0, "hosts are required")
-
-	for _, host := range x.Hosts {
-		chain = chain.AddValidator(validation.NewTCPAddressValidator(host))
+		{
+			name:     "WithPreStart",
+			option:   WithPreStart(preStart),
+			expected: funcActor{preStart: preStart},
+		},
+		{
+			name:     "WithPostStop",
+			option:   WithPostStop(postStop),
+			expected: funcActor{postStop: postStop},
+		},
 	}
-
-	return chain.Validate()
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			var cfg funcActor
+			tc.option.Apply(&cfg)
+			assert.Equal(t, tc.expected, cfg)
+		})
+	}
 }

@@ -22,27 +22,42 @@
  * SOFTWARE.
  */
 
-package static
+package client
 
 import (
-	"github.com/tochemey/goakt/v2/internal/validation"
+	"sync"
+	"sync/atomic"
 )
 
-// Config represents the static discovery provider configuration
-type Config struct {
-	// Hosts defines the list of hosts in the form of ip:port where the port is the  gossip port.
-	Hosts []string
+// RoundRobin implements the round-robin algorithm
+// to pick a particular nodes in the cluster
+type RoundRobin struct {
+	locker *sync.Mutex
+	nodes  []*Node
+	next   uint32
 }
 
-// Validate checks whether the given discovery configuration is valid
-func (x Config) Validate() error {
-	chain := validation.
-		New(validation.FailFast()).
-		AddAssertion(len(x.Hosts) != 0, "hosts are required")
+var _ Balancer = (*RoundRobin)(nil)
 
-	for _, host := range x.Hosts {
-		chain = chain.AddValidator(validation.NewTCPAddressValidator(host))
+// NewRoundRobin creates an instance of RoundRobin
+func NewRoundRobin() *RoundRobin {
+	return &RoundRobin{
+		nodes:  make([]*Node, 0),
+		locker: &sync.Mutex{},
 	}
+}
 
-	return chain.Validate()
+// Set sets the balancer nodes pool
+func (x *RoundRobin) Set(nodes ...*Node) {
+	x.locker.Lock()
+	x.nodes = nodes
+	x.locker.Unlock()
+}
+
+// Next returns the next node in the pool
+func (x *RoundRobin) Next() *Node {
+	x.locker.Lock()
+	defer x.locker.Unlock()
+	n := atomic.AddUint32(&x.next, 1)
+	return x.nodes[(int(n)-1)%len(x.nodes)]
 }

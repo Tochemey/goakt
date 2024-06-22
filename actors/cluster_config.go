@@ -46,7 +46,7 @@ var _ validation.Validator = (*ClusterConfig)(nil)
 // NewClusterConfig creates an instance of ClusterConfig
 func NewClusterConfig() *ClusterConfig {
 	return &ClusterConfig{
-		kinds:              []Actor{new(fnActor)},
+		kinds:              []Actor{new(funcActor)},
 		minimumPeersQuorum: 1,
 		replicaCount:       2,
 	}

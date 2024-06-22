@@ -22,7 +22,7 @@
  * SOFTWARE.
  */
 
-package actors
+package client
 
 import (
 	"testing"
@@ -30,31 +30,11 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestFuncOption(t *testing.T) {
-	var preStart PreStartFunc
-	var postStop PreStartFunc
-	testCases := []struct {
-		name     string
-		option   FuncOption
-		expected fnActor
-	}{
-
-		{
-			name:     "WithPreStart",
-			option:   WithPreStart(preStart),
-			expected: fnActor{preStart: preStart},
-		},
-		{
-			name:     "WithPostStop",
-			option:   WithPostStop(postStop),
-			expected: fnActor{postStop: postStop},
-		},
-	}
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			var cfg fnActor
-			tc.option.Apply(&cfg)
-			assert.Equal(t, tc.expected, cfg)
-		})
-	}
+func TestLeadLoad(t *testing.T) {
+	balancer := NewLeastLoad()
+	balancer.Set(NewNode("192.168.34.10:3322", 2),
+		NewNode("192.168.34.11:3322", 0),
+		NewNode("192.168.34.12:3322", 1))
+	actual := balancer.Next()
+	assert.Equal(t, "192.168.34.11:3322", actual.Address())
 }

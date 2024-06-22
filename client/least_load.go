@@ -22,27 +22,44 @@
  * SOFTWARE.
  */
 
-package static
+package client
 
 import (
-	"github.com/tochemey/goakt/v2/internal/validation"
+	"cmp"
+	"slices"
+	"sync"
 )
 
-// Config represents the static discovery provider configuration
-type Config struct {
-	// Hosts defines the list of hosts in the form of ip:port where the port is the  gossip port.
-	Hosts []string
+// LeastLoad uses the LeastLoadStrategy to pick the next available node
+// in the pool
+type LeastLoad struct {
+	locker *sync.Mutex
+	nodes  []*Node
 }
 
-// Validate checks whether the given discovery configuration is valid
-func (x Config) Validate() error {
-	chain := validation.
-		New(validation.FailFast()).
-		AddAssertion(len(x.Hosts) != 0, "hosts are required")
+var _ Balancer = (*LeastLoad)(nil)
 
-	for _, host := range x.Hosts {
-		chain = chain.AddValidator(validation.NewTCPAddressValidator(host))
+// NewLeastLoad creates an instance of LeastLoad
+func NewLeastLoad() *LeastLoad {
+	return &LeastLoad{
+		nodes:  make([]*Node, 0),
+		locker: &sync.Mutex{},
 	}
+}
 
-	return chain.Validate()
+// Set sets the balancer nodes pool
+func (x *LeastLoad) Set(nodes ...*Node) {
+	x.locker.Lock()
+	x.nodes = nodes
+	x.locker.Unlock()
+}
+
+// Next returns the next node in the pool
+func (x *LeastLoad) Next() *Node {
+	x.locker.Lock()
+	defer x.locker.Unlock()
+	slices.SortStableFunc(x.nodes, func(a, b *Node) int {
+		return cmp.Compare(a.Weight(), b.Weight())
+	})
+	return x.nodes[0]
 }

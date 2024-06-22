@@ -55,6 +55,8 @@ const (
 	DefaultInitTimeout = time.Second
 	// DefaultMailboxSize defines the default mailbox size
 	DefaultMailboxSize = 1_000_000
+	// DefaultPeerStateLoopInterval defines the default peer state loop interval
+	DefaultPeerStateLoopInterval = 10 * time.Second
 	// DefaultStashCapacity defines the default stash size
 	DefaultStashCapacity = 1_000
 	eventsTopic          = "topic.events"
