@@ -44,35 +44,35 @@ type PostStopFunc = func(ctx context.Context) error
 // FuncOption is the interface that applies a SpawnHook option.
 type FuncOption interface {
 	// Apply sets the Option value of a config.
-	Apply(actor *fnActor)
+	Apply(actor *funcActor)
 }
 
 var _ FuncOption = funcOption(nil)
 
 // funcOption implements the FuncOption interface.
-type funcOption func(*fnActor)
+type funcOption func(*funcActor)
 
 // Apply implementation
-func (f funcOption) Apply(c *fnActor) {
+func (f funcOption) Apply(c *funcActor) {
 	f(c)
 }
 
 // WithPreStart defines the PreStartFunc hook
 func WithPreStart(fn PreStartFunc) FuncOption {
-	return funcOption(func(actor *fnActor) {
+	return funcOption(func(actor *funcActor) {
 		actor.preStart = fn
 	})
 }
 
 // WithPostStop defines the PostStopFunc hook
 func WithPostStop(fn PostStopFunc) FuncOption {
-	return funcOption(func(actor *fnActor) {
+	return funcOption(func(actor *funcActor) {
 		actor.postStop = fn
 	})
 }
 
-// fnActor is an actor that only handles messages
-type fnActor struct {
+// funcActor is an actor that only handles messages
+type funcActor struct {
 	pid         PID
 	id          string
 	receiveFunc ReceiveFunc
@@ -80,10 +80,10 @@ type fnActor struct {
 	postStop    PostStopFunc
 }
 
-// newFnActor creates an instance of fnActor
+// newFnActor creates an instance of funcActor
 func newFnActor(id string, receiveFunc ReceiveFunc, opts ...FuncOption) Actor {
 	// create the actor instance
-	actor := &fnActor{
+	actor := &funcActor{
 		receiveFunc: receiveFunc,
 		id:          id,
 	}
@@ -95,10 +95,10 @@ func newFnActor(id string, receiveFunc ReceiveFunc, opts ...FuncOption) Actor {
 }
 
 // enforce compilation error
-var _ Actor = (*fnActor)(nil)
+var _ Actor = (*funcActor)(nil)
 
 // PreStart pre-starts the actor.
-func (x fnActor) PreStart(ctx context.Context) error {
+func (x funcActor) PreStart(ctx context.Context) error {
 	// check whether the pre-start hook is set and call it
 	preStart := x.preStart
 	if preStart != nil {
@@ -108,7 +108,7 @@ func (x fnActor) PreStart(ctx context.Context) error {
 }
 
 // Receive processes any message dropped into the actor mailbox.
-func (x fnActor) Receive(ctx ReceiveContext) {
+func (x funcActor) Receive(ctx ReceiveContext) {
 	switch m := ctx.Message().(type) {
 	case *goaktpb.PostStart:
 		x.pid = ctx.Self()
@@ -121,7 +121,7 @@ func (x fnActor) Receive(ctx ReceiveContext) {
 }
 
 // PostStop is executed when the actor is shutting down.
-func (x fnActor) PostStop(ctx context.Context) error {
+func (x funcActor) PostStop(ctx context.Context) error {
 	// check whether the pre-start hook is set and call it
 	postStop := x.postStop
 	if postStop != nil {

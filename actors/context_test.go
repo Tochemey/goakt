@@ -40,7 +40,7 @@ import (
 	"github.com/tochemey/goakt/v2/goaktpb"
 	"github.com/tochemey/goakt/v2/internal/eventstream"
 	"github.com/tochemey/goakt/v2/log"
-	testpb "github.com/tochemey/goakt/v2/test/data/testpb"
+	"github.com/tochemey/goakt/v2/test/data/testpb"
 	testspb "github.com/tochemey/goakt/v2/test/data/testpb"
 )
 

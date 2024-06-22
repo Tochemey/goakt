@@ -193,3 +193,10 @@ func WithMetric() Option {
 		system.metricEnabled.Store(true)
 	})
 }
+
+// WithPeerStateLoopInterval sets the peer state loop interval
+func WithPeerStateLoopInterval(interval time.Duration) Option {
+	return OptionFunc(func(system *actorSystem) {
+		system.peersStateLoopInterval = interval
+	})
+}

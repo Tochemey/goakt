@@ -51,7 +51,7 @@ import (
 	clustermocks "github.com/tochemey/goakt/v2/mocks/cluster"
 	testkit "github.com/tochemey/goakt/v2/mocks/discovery"
 	"github.com/tochemey/goakt/v2/telemetry"
-	testpb "github.com/tochemey/goakt/v2/test/data/testpb"
+	"github.com/tochemey/goakt/v2/test/data/testpb"
 )
 
 // nolint
@@ -1382,7 +1382,6 @@ func TestActorSystem(t *testing.T) {
 			assert.Error(t, err)
 		})
 	})
-
 	t.Run("With cluster start failure with remoting not enabled", func(t *testing.T) {
 		ctx := context.TODO()
 		logger := log.DiscardLogger

@@ -26,8 +26,8 @@ package client
 
 // Actor defines a given actor name and kind
 type Actor struct {
-	name *string // Name defines the actor name. This will be unique in the Client
-	kind string  // Kind specifies the actor kind.
+	name string // Name defines the actor name. This will be unique in the Client
+	kind string // Kind specifies the actor kind.
 }
 
 // NewActor creates an instance of Actor
@@ -39,12 +39,12 @@ func NewActor(kind string) *Actor {
 
 // WithName set the given name
 func (x *Actor) WithName(name string) {
-	x.name = &name
+	x.name = name
 }
 
 // Name returns the actor name
 func (x *Actor) Name() string {
-	return *x.name
+	return x.name
 }
 
 // Kind returns the actor kind

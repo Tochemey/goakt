@@ -36,23 +36,23 @@ func TestFuncOption(t *testing.T) {
 	testCases := []struct {
 		name     string
 		option   FuncOption
-		expected fnActor
+		expected funcActor
 	}{
 
 		{
 			name:     "WithPreStart",
 			option:   WithPreStart(preStart),
-			expected: fnActor{preStart: preStart},
+			expected: funcActor{preStart: preStart},
 		},
 		{
 			name:     "WithPostStop",
 			option:   WithPostStop(postStop),
-			expected: fnActor{postStop: postStop},
+			expected: funcActor{postStop: postStop},
 		},
 	}
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			var cfg fnActor
+			var cfg funcActor
 			tc.option.Apply(&cfg)
 			assert.Equal(t, tc.expected, cfg)
 		})

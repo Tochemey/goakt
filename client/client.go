@@ -26,6 +26,7 @@ package client
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"strconv"
 	"sync"
@@ -36,6 +37,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/tochemey/goakt/v2/actors"
+	"github.com/tochemey/goakt/v2/goaktpb"
 	"github.com/tochemey/goakt/v2/internal/http"
 	"github.com/tochemey/goakt/v2/internal/internalpb"
 	"github.com/tochemey/goakt/v2/internal/internalpb/internalpbconnect"
@@ -143,10 +145,11 @@ func (x *Client) Kinds(ctx context.Context) ([]string, error) {
 	service := internalpbconnect.NewClusterServiceClient(
 		http.NewClient(),
 		http.URL(host, port),
-		connect.WithGRPC(),
 		connect.WithInterceptors(interceptor))
 
-	response, err := service.GetKinds(ctx, connect.NewRequest(new(internalpb.GetKindsRequest)))
+	response, err := service.GetKinds(ctx, connect.NewRequest(&internalpb.GetKindsRequest{
+		NodeAddress: fmt.Sprintf("%s:%d", host, port),
+	}))
 	if err != nil {
 		return nil, err
 	}
@@ -169,11 +172,19 @@ func (x *Client) Spawn(ctx context.Context, actor *Actor) (err error) {
 func (x *Client) Tell(ctx context.Context, actor *Actor, message proto.Message) error {
 	x.locker.Lock()
 	defer x.locker.Unlock()
-	host, port := x.getNextRemotingHostAndPort()
-	address, err := actors.RemoteLookup(ctx, host, port, actor.Name())
+
+	remoteHost, remotePort := x.getNextRemotingHostAndPort()
+	// lookup the actor address
+	address, err := actors.RemoteLookup(ctx, remoteHost, remotePort, actor.Name())
 	if err != nil {
 		return err
 	}
+
+	// no address found
+	if address == nil || proto.Equal(address, new(goaktpb.Address)) {
+		return actors.ErrActorNotFound(actor.Name())
+	}
+
 	return actors.RemoteTell(ctx, address, message)
 }
 
@@ -183,12 +194,25 @@ func (x *Client) Tell(ctx context.Context, actor *Actor, message proto.Message) 
 func (x *Client) Ask(ctx context.Context, actor *Actor, message proto.Message) (reply proto.Message, err error) {
 	x.locker.Lock()
 	defer x.locker.Unlock()
-	host, port := x.getNextRemotingHostAndPort()
-	address, err := actors.RemoteLookup(ctx, host, port, actor.Name())
+
+	remoteHost, remotePort := x.getNextRemotingHostAndPort()
+	// lookup the actor address
+	address, err := actors.RemoteLookup(ctx, remoteHost, remotePort, actor.Name())
 	if err != nil {
 		return nil, err
 	}
-	return actors.RemoteAsk(ctx, address, message)
+
+	// no address found
+	if address == nil || proto.Equal(address, new(goaktpb.Address)) {
+		return nil, actors.ErrActorNotFound(actor.Name())
+	}
+
+	response, err := actors.RemoteAsk(ctx, address, message)
+	if err != nil {
+		return nil, err
+	}
+
+	return response.UnmarshalNew()
 }
 
 // Kill kills a given actor in the Client
@@ -254,8 +278,7 @@ func getNodeMetric(ctx context.Context, node string) (int, bool, error) {
 	port, _ := strconv.Atoi(p)
 	service := internalpbconnect.NewClusterServiceClient(
 		http.NewClient(),
-		http.URL(host, port),
-		connect.WithGRPC())
+		http.URL(host, port))
 
 	response, err := service.GetNodeMetric(ctx, connect.NewRequest(&internalpb.GetNodeMetricRequest{NodeAddress: node}))
 	if err != nil {
