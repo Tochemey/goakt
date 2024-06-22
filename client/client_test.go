@@ -109,6 +109,8 @@ func TestClient(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
+		client.Close()
+
 		require.NoError(t, sys1.Stop(ctx))
 		require.NoError(t, sys2.Stop(ctx))
 		require.NoError(t, sys3.Stop(ctx))
