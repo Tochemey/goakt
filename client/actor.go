@@ -38,8 +38,9 @@ func NewActor(kind string) *Actor {
 }
 
 // WithName set the given name
-func (x *Actor) WithName(name string) {
+func (x *Actor) WithName(name string) *Actor {
 	x.name = name
+	return x
 }
 
 // Name returns the actor name

@@ -28,6 +28,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	sdhttp "net/http"
 	"strconv"
 	"sync"
 	"time"
@@ -55,6 +56,7 @@ type Client struct {
 	balancer        Balancer
 	closeSignal     chan types.Unit
 	refreshInterval time.Duration
+	client          *sdhttp.Client
 }
 
 // New creates an instance of Client. The provided nodes are the cluster nodes.
@@ -78,6 +80,7 @@ func New(ctx context.Context, addresses []string, opts ...Option) (*Client, erro
 		locker:          &sync.Mutex{},
 		strategy:        RoundRobinStrategy,
 		refreshInterval: -1,
+		client:          http.NewClient(),
 	}
 
 	// apply the various options
@@ -87,7 +90,7 @@ func New(ctx context.Context, addresses []string, opts ...Option) (*Client, erro
 
 	var nodes []*Node
 	for _, address := range addresses {
-		weight, ok, err := getNodeMetric(ctx, address)
+		weight, ok, err := cl.getNodeMetric(ctx, address)
 		if err != nil {
 			return nil, err
 		}
@@ -129,6 +132,7 @@ func (x *Client) Close() {
 	if x.refreshInterval > 0 {
 		close(x.closeSignal)
 	}
+	x.client.CloseIdleConnections()
 	x.locker.Unlock()
 }
 
@@ -238,7 +242,7 @@ func (x *Client) updateNodes(ctx context.Context) error {
 	defer x.locker.Lock()
 
 	for _, node := range x.nodes {
-		weight, ok, err := getNodeMetric(ctx, node.Address())
+		weight, ok, err := x.getNodeMetric(ctx, node.Address())
 		if err != nil {
 			return err
 		}
@@ -262,7 +266,7 @@ func (x *Client) refreshNodesLoop() {
 					// TODO: is it good to panic?
 					panic(err)
 				}
-			case <-tickerStopSig:
+			case <-x.closeSignal:
 				tickerStopSig <- types.Unit{}
 				return
 			}
@@ -273,11 +277,11 @@ func (x *Client) refreshNodesLoop() {
 }
 
 // getNodeMetric pings a given node and get the node metric info and
-func getNodeMetric(ctx context.Context, node string) (int, bool, error) {
+func (x *Client) getNodeMetric(ctx context.Context, node string) (int, bool, error) {
 	host, p, _ := net.SplitHostPort(node)
 	port, _ := strconv.Atoi(p)
 	service := internalpbconnect.NewClusterServiceClient(
-		http.NewClient(),
+		x.client,
 		http.URL(host, port))
 
 	response, err := service.GetNodeMetric(ctx, connect.NewRequest(&internalpb.GetNodeMetricRequest{NodeAddress: node}))
