@@ -21,8 +21,6 @@ The project adheres to [Semantic Versioning](https://semver.org) and [Convention
 
 ## Table of Content
 
-- [Go-Akt](#go-akt)
-  - [Table of Content](#table-of-content)
   - [Design Principles](#design-principles)
   - [Use Cases](#use-cases)
   - [Installation](#installation)
