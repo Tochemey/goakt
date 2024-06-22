@@ -113,7 +113,7 @@ func TestClient(t *testing.T) {
 		err = client.Tell(ctx, actor, new(testspb.TestSend))
 		require.NoError(t, err)
 
-		err = client.Kill(ctx, actor)
+		err = client.Stop(ctx, actor)
 		require.NoError(t, err)
 
 		t.Cleanup(func() {
@@ -189,7 +189,7 @@ func TestClient(t *testing.T) {
 		err = client.Tell(ctx, actor, new(testspb.TestSend))
 		require.NoError(t, err)
 
-		err = client.Kill(ctx, actor)
+		err = client.Stop(ctx, actor)
 		require.NoError(t, err)
 
 		t.Cleanup(func() {
@@ -266,7 +266,7 @@ func TestClient(t *testing.T) {
 		err = client.Tell(ctx, actor, new(testspb.TestSend))
 		require.NoError(t, err)
 
-		err = client.Kill(ctx, actor)
+		err = client.Stop(ctx, actor)
 		require.NoError(t, err)
 
 		t.Cleanup(func() {
@@ -341,7 +341,7 @@ func TestClient(t *testing.T) {
 		err = client.Tell(ctx, actor, new(testspb.TestSend))
 		require.NoError(t, err)
 
-		err = client.Kill(ctx, actor)
+		err = client.Stop(ctx, actor)
 		require.NoError(t, err)
 
 		t.Cleanup(func() {

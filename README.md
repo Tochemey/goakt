@@ -21,6 +21,8 @@ The project adheres to [Semantic Versioning](https://semver.org) and [Convention
 
 ## Table of Content
 
+- [Go-Akt](#go-akt)
+  - [Table of Content](#table-of-content)
   - [Design Principles](#design-principles)
   - [Use Cases](#use-cases)
   - [Installation](#installation)
@@ -47,6 +49,8 @@ The project adheres to [Semantic Versioning](https://semver.org) and [Convention
     - [Testkit](#testkit)
   - [API](#api)
   - [Client](#client)
+    - [Balancer strategies](#balancer-strategies)
+    - [Features](#features-1)
   - [Clustering](#clustering)
     - [Operations Guide](#operations-guide)
     - [Redeployment](#redeployment)
@@ -315,13 +319,15 @@ To test that an actor receive and respond to messages one will have to:
 3. Create an instance of test probe: `probe := testkit.NewProbe(ctx)` where `ctx` is a go context
 4. Use the probe to send a message to the actor under test. Example: `probe.Send(pinger, new(testpb.Ping))`
 5. Assert that the actor under test has received the message and responded as expected using the probe methods:
-  - `ExpectMessage(message proto.Message) proto.Message`: asserts that the message received from the test actor is the expected one
-  - `ExpectMessageWithin(duration time.Duration, message proto.Message) proto.Message`: asserts that the message received from the test actor is the expected one within a time duration
-  - `ExpectNoMessage()`: asserts that no message is expected
-  - `ExpectAnyMessage() proto.Message`: asserts that any message is expected
-  - `ExpectAnyMessageWithin(duration time.Duration) proto.Message`: asserts that any message within a time duration
-  - `ExpectMessageOfType(messageType protoreflect.MessageType)`: asserts the expectation of a given message type
-  - `ExpectMessageOfTypeWithin(duration time.Duration, messageType protoreflect.MessageType)`: asserts the expectation of a given message type within a time duration
+
+- `ExpectMessage(message proto.Message) proto.Message`: asserts that the message received from the test actor is the expected one
+- `ExpectMessageWithin(duration time.Duration, message proto.Message) proto.Message`: asserts that the message received from the test actor is the expected one within a time duration
+- `ExpectNoMessage()`: asserts that no message is expected
+- `ExpectAnyMessage() proto.Message`: asserts that any message is expected
+- `ExpectAnyMessageWithin(duration time.Duration) proto.Message`: asserts that any message within a time duration
+- `ExpectMessageOfType(messageType protoreflect.MessageType)`: asserts the expectation of a given message type
+- `ExpectMessageOfTypeWithin(duration time.Duration, messageType protoreflect.MessageType)`: asserts the expectation of a given message type within a time duration
+
 6. Make sure to shut down the testkit and the probe. Example: `probe.Stop()`, `testkit.Shutdown(ctx)` where `ctx` is a go context. These two calls can be in a tear down after all tests run.
 
 To help implement unit tests in GoAkt-based applications. See [Testkit](./testkit)
@@ -345,9 +351,9 @@ The API interface helps interact with a Go-Akt actor system as kind of client. T
 
 ## Client
 
-The Go-Akt client facilitates interaction with a specified Go-Akt cluster, contingent upon the activation of cluster mode. 
-The client operates without knowledge of the specific node within the cluster that will process the request. 
-This feature is particularly beneficial when interfacing with a Go-Akt cluster from an external system. 
+The Go-Akt client facilitates interaction with a specified Go-Akt cluster, contingent upon the activation of cluster mode.
+The client operates without knowledge of the specific node within the cluster that will process the request.
+This feature is particularly beneficial when interfacing with a Go-Akt cluster from an external system.
 Go-Akt client is equipped with a mini load-balancer that helps route requests to the appropriate node.
 
 ### Balancer strategies
@@ -356,11 +362,11 @@ Go-Akt client is equipped with a mini load-balancer that helps route requests to
 - [Random](./client/random.go) - a given node is chosen randomly
 - [Least Load](./client/least_load.go) - the node with the least number of actors is chosen
 
-### Features:
+### Features
 
 - `Kinds` - to list all the actor kinds in the cluster
 - `Spawn` - to spawn an actor in the cluster
-- `Kill` - to kill/stop an actor in the cluster
+- `Stop` - to kill/stop an actor in the cluster
 - `Ask` - to send a message to a given actor in the cluster and expect a response
 - `Tell` - to send a fire-forget message to a given actor in the cluster
 - `Whereis` - to locate and get the address of a given actor

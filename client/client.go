@@ -198,8 +198,8 @@ func (x *Client) Ask(ctx context.Context, actor *Actor, message proto.Message) (
 	return response.UnmarshalNew()
 }
 
-// Kill kills a given actor in the Client
-func (x *Client) Kill(ctx context.Context, actor *Actor) error {
+// Stop stops or kills a given actor in the Client
+func (x *Client) Stop(ctx context.Context, actor *Actor) error {
 	x.locker.Lock()
 	remoteHost, remotePort := x.getNextRemotingHostAndPort()
 	x.locker.Unlock()
