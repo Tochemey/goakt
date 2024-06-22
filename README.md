@@ -46,6 +46,7 @@ The project adheres to [Semantic Versioning](https://semver.org) and [Convention
       - [Logging](#logging)
     - [Testkit](#testkit)
   - [API](#api)
+  - [Client](#client)
   - [Clustering](#clustering)
     - [Operations Guide](#operations-guide)
     - [Redeployment](#redeployment)
@@ -341,6 +342,28 @@ The API interface helps interact with a Go-Akt actor system as kind of client. T
 - `RemoteReSpawn`: to restarts an actor on a remote machine
 - `RemoteStop`: to stop an actor on a remote machine
 - `RemoteSpawn`: to start an actor on a remote machine. The given actor implementation must be registered using the [`Register`](./actors/actor_system.go) method of the actor system on the remote machine for this call to succeed.
+
+## Client
+
+The Go-Akt client facilitates interaction with a specified Go-Akt cluster, contingent upon the activation of cluster mode. 
+The client operates without knowledge of the specific node within the cluster that will process the request. 
+This feature is particularly beneficial when interfacing with a Go-Akt cluster from an external system. 
+Go-Akt client is equipped with a mini load-balancer that helps route requests to the appropriate node.
+
+### Balancer strategies
+
+- [Round Robin](./client/round_robin.go) - a given node is chosen using the round-robin strategy
+- [Random](./client/random.go) - a given node is chosen randomly
+- [Least Load](./client/least_load.go) - the node with the least number of actors is chosen
+
+### Features:
+
+- `Kinds` - to list all the actor kinds in the cluster
+- `Spawn` - to spawn an actor in the cluster
+- `Kill` - to kill/stop an actor in the cluster
+- `Ask` - to send a message to a given actor in the cluster and expect a response
+- `Tell` - to send a fire-forget message to a given actor in the cluster
+- `Whereis` - to locate and get the address of a given actor
 
 ## Clustering
 

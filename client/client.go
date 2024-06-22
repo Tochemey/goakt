@@ -165,30 +165,20 @@ func (x *Client) Kinds(ctx context.Context) ([]string, error) {
 // The actor name will be generated and returned when the request is successful
 func (x *Client) Spawn(ctx context.Context, actor *Actor) (err error) {
 	x.locker.Lock()
-	defer x.locker.Unlock()
-	host, port := x.getNextRemotingHostAndPort()
-	return actors.RemoteSpawn(ctx, host, port, actor.Name(), actor.Kind())
+	remoteHost, remotePort := x.getNextRemotingHostAndPort()
+	x.locker.Unlock()
+	return actors.RemoteSpawn(ctx, remoteHost, remotePort, actor.Name(), actor.Kind())
 }
 
 // Tell sends a message to a given actor provided the actor name.
 // If the given actor does not exist it will be created automatically when
 // Client mode is enabled
 func (x *Client) Tell(ctx context.Context, actor *Actor, message proto.Message) error {
-	x.locker.Lock()
-	defer x.locker.Unlock()
-
-	remoteHost, remotePort := x.getNextRemotingHostAndPort()
 	// lookup the actor address
-	address, err := actors.RemoteLookup(ctx, remoteHost, remotePort, actor.Name())
+	address, err := x.Whereis(ctx, actor)
 	if err != nil {
 		return err
 	}
-
-	// no address found
-	if address == nil || proto.Equal(address, new(goaktpb.Address)) {
-		return actors.ErrActorNotFound(actor.Name())
-	}
-
 	return actors.RemoteTell(ctx, address, message)
 }
 
@@ -196,35 +186,41 @@ func (x *Client) Tell(ctx context.Context, actor *Actor, message proto.Message) 
 // If the given actor does not exist it will be created automatically when
 // Client mode is enabled. This will block until a response is received or timed out.
 func (x *Client) Ask(ctx context.Context, actor *Actor, message proto.Message) (reply proto.Message, err error) {
-	x.locker.Lock()
-	defer x.locker.Unlock()
-
-	remoteHost, remotePort := x.getNextRemotingHostAndPort()
 	// lookup the actor address
-	address, err := actors.RemoteLookup(ctx, remoteHost, remotePort, actor.Name())
+	address, err := x.Whereis(ctx, actor)
 	if err != nil {
 		return nil, err
 	}
-
-	// no address found
-	if address == nil || proto.Equal(address, new(goaktpb.Address)) {
-		return nil, actors.ErrActorNotFound(actor.Name())
-	}
-
 	response, err := actors.RemoteAsk(ctx, address, message)
 	if err != nil {
 		return nil, err
 	}
-
 	return response.UnmarshalNew()
 }
 
 // Kill kills a given actor in the Client
 func (x *Client) Kill(ctx context.Context, actor *Actor) error {
 	x.locker.Lock()
-	defer x.locker.Unlock()
-	host, port := x.getNextRemotingHostAndPort()
-	return actors.RemoteStop(ctx, host, port, actor.Name())
+	remoteHost, remotePort := x.getNextRemotingHostAndPort()
+	x.locker.Unlock()
+	return actors.RemoteStop(ctx, remoteHost, remotePort, actor.Name())
+}
+
+// Whereis finds and returns the address of a given actor
+func (x *Client) Whereis(ctx context.Context, actor *Actor) (*goaktpb.Address, error) {
+	x.locker.Lock()
+	remoteHost, remotePort := x.getNextRemotingHostAndPort()
+	x.locker.Unlock()
+	// lookup the actor address
+	address, err := actors.RemoteLookup(ctx, remoteHost, remotePort, actor.Name())
+	if err != nil {
+		return nil, err
+	}
+	// no address found
+	if address == nil || proto.Equal(address, new(goaktpb.Address)) {
+		return nil, actors.ErrActorNotFound(actor.Name())
+	}
+	return address, nil
 }
 
 // getNextRemotingHostAndPort returns the next node host and port
