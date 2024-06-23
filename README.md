@@ -364,10 +364,12 @@ Go-Akt client is equipped with a mini load-balancer that helps route requests to
 
 - `Kinds` - to list all the actor kinds in the cluster
 - `Spawn` - to spawn an actor in the cluster
+- `SpawnWithBalancer` - to spawn an actor in the cluster with a given balancer strategy
 - `Stop` - to kill/stop an actor in the cluster
 - `Ask` - to send a message to a given actor in the cluster and expect a response
 - `Tell` - to send a fire-forget message to a given actor in the cluster
 - `Whereis` - to locate and get the address of a given actor
+- `ReSpawn` - to restart a given actor
 
 ## Clustering
 
