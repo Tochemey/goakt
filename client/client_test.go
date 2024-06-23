@@ -360,6 +360,241 @@ func TestClient(t *testing.T) {
 			time.Sleep(time.Second)
 		})
 	})
+	t.Run("With SpawnWithBalancer", func(t *testing.T) {
+		ctx := context.TODO()
+
+		logger := log.DefaultLogger
+
+		// start the NATS server
+		srv := startNatsServer(t)
+		addr := srv.Addr().String()
+
+		sys1, node1Host, node1Port, sd1 := startNode(t, logger, "node1", addr)
+		sys2, node2Host, node2Port, sd2 := startNode(t, logger, "node2", addr)
+		sys3, node3Host, node3Port, sd3 := startNode(t, logger, "node3", addr)
+
+		// wait for a proper and clean setup of the cluster
+		time.Sleep(time.Second)
+
+		addresses := []string{
+			fmt.Sprintf("%s:%d", node1Host, node1Port),
+			fmt.Sprintf("%s:%d", node2Host, node2Port),
+			fmt.Sprintf("%s:%d", node3Host, node3Port),
+		}
+
+		client, err := New(ctx, addresses)
+		require.NoError(t, err)
+		require.NotNil(t, client)
+
+		kinds, err := client.Kinds(ctx)
+		require.NoError(t, err)
+		require.NotNil(t, kinds)
+		require.NotEmpty(t, kinds)
+		require.Len(t, kinds, 2)
+
+		expected := []string{
+			"actors.funcactor",
+			"client.testactor",
+		}
+
+		require.ElementsMatch(t, expected, kinds)
+		actor := NewActor("client.testactor").WithName("actorName")
+
+		err = client.SpawnWithBalancer(ctx, actor, RandomStrategy)
+		require.NoError(t, err)
+
+		time.Sleep(time.Second)
+
+		// send a message
+		reply, err := client.Ask(ctx, actor, new(testspb.TestReply))
+		require.NoError(t, err)
+		require.NotNil(t, reply)
+		expectedReply := &testpb.Reply{Content: "received message"}
+		assert.True(t, proto.Equal(expectedReply, reply))
+
+		time.Sleep(time.Second)
+
+		err = client.Tell(ctx, actor, new(testspb.TestSend))
+		require.NoError(t, err)
+
+		err = client.Stop(ctx, actor)
+		require.NoError(t, err)
+
+		t.Cleanup(func() {
+			client.Close()
+
+			require.NoError(t, sys1.Stop(ctx))
+			require.NoError(t, sys2.Stop(ctx))
+			require.NoError(t, sys3.Stop(ctx))
+
+			require.NoError(t, sd1.Close())
+			require.NoError(t, sd2.Close())
+			require.NoError(t, sd3.Close())
+
+			srv.Shutdown()
+			time.Sleep(time.Second)
+		})
+	})
+	t.Run("With ReSpawn", func(t *testing.T) {
+		ctx := context.TODO()
+
+		logger := log.DiscardLogger
+
+		// start the NATS server
+		srv := startNatsServer(t)
+		addr := srv.Addr().String()
+
+		sys1, node1Host, node1Port, sd1 := startNode(t, logger, "node1", addr)
+		sys2, node2Host, node2Port, sd2 := startNode(t, logger, "node2", addr)
+		sys3, node3Host, node3Port, sd3 := startNode(t, logger, "node3", addr)
+
+		// wait for a proper and clean setup of the cluster
+		time.Sleep(time.Second)
+
+		addresses := []string{
+			fmt.Sprintf("%s:%d", node1Host, node1Port),
+			fmt.Sprintf("%s:%d", node2Host, node2Port),
+			fmt.Sprintf("%s:%d", node3Host, node3Port),
+		}
+
+		client, err := New(ctx, addresses)
+		require.NoError(t, err)
+		require.NotNil(t, client)
+
+		kinds, err := client.Kinds(ctx)
+		require.NoError(t, err)
+		require.NotNil(t, kinds)
+		require.NotEmpty(t, kinds)
+		require.Len(t, kinds, 2)
+
+		expected := []string{
+			"actors.funcactor",
+			"client.testactor",
+		}
+
+		require.ElementsMatch(t, expected, kinds)
+		actor := NewActor("client.testactor").WithName("actorName")
+
+		err = client.Spawn(ctx, actor)
+		require.NoError(t, err)
+
+		time.Sleep(time.Second)
+
+		// send a message
+		reply, err := client.Ask(ctx, actor, new(testspb.TestReply))
+		require.NoError(t, err)
+		require.NotNil(t, reply)
+		expectedReply := &testpb.Reply{Content: "received message"}
+		assert.True(t, proto.Equal(expectedReply, reply))
+
+		time.Sleep(time.Second)
+
+		err = client.Tell(ctx, actor, new(testspb.TestSend))
+		require.NoError(t, err)
+
+		err = client.ReSpawn(ctx, actor)
+		require.NoError(t, err)
+
+		time.Sleep(time.Second)
+
+		err = client.Stop(ctx, actor)
+		require.NoError(t, err)
+
+		t.Cleanup(func() {
+			client.Close()
+
+			require.NoError(t, sys1.Stop(ctx))
+			require.NoError(t, sys2.Stop(ctx))
+			require.NoError(t, sys3.Stop(ctx))
+
+			require.NoError(t, sd1.Close())
+			require.NoError(t, sd2.Close())
+			require.NoError(t, sd3.Close())
+
+			srv.Shutdown()
+			time.Sleep(time.Second)
+		})
+	})
+	t.Run("With ReSpawn after Stop", func(t *testing.T) {
+		ctx := context.TODO()
+
+		logger := log.DiscardLogger
+
+		// start the NATS server
+		srv := startNatsServer(t)
+		addr := srv.Addr().String()
+
+		sys1, node1Host, node1Port, sd1 := startNode(t, logger, "node1", addr)
+		sys2, node2Host, node2Port, sd2 := startNode(t, logger, "node2", addr)
+		sys3, node3Host, node3Port, sd3 := startNode(t, logger, "node3", addr)
+
+		// wait for a proper and clean setup of the cluster
+		time.Sleep(time.Second)
+
+		addresses := []string{
+			fmt.Sprintf("%s:%d", node1Host, node1Port),
+			fmt.Sprintf("%s:%d", node2Host, node2Port),
+			fmt.Sprintf("%s:%d", node3Host, node3Port),
+		}
+
+		client, err := New(ctx, addresses)
+		require.NoError(t, err)
+		require.NotNil(t, client)
+
+		kinds, err := client.Kinds(ctx)
+		require.NoError(t, err)
+		require.NotNil(t, kinds)
+		require.NotEmpty(t, kinds)
+		require.Len(t, kinds, 2)
+
+		expected := []string{
+			"actors.funcactor",
+			"client.testactor",
+		}
+
+		require.ElementsMatch(t, expected, kinds)
+		actor := NewActor("client.testactor").WithName("actorName")
+
+		err = client.Spawn(ctx, actor)
+		require.NoError(t, err)
+
+		time.Sleep(time.Second)
+
+		// send a message
+		reply, err := client.Ask(ctx, actor, new(testspb.TestReply))
+		require.NoError(t, err)
+		require.NotNil(t, reply)
+		expectedReply := &testpb.Reply{Content: "received message"}
+		assert.True(t, proto.Equal(expectedReply, reply))
+
+		time.Sleep(time.Second)
+
+		err = client.Tell(ctx, actor, new(testspb.TestSend))
+		require.NoError(t, err)
+
+		time.Sleep(time.Second)
+
+		err = client.Stop(ctx, actor)
+		require.NoError(t, err)
+
+		err = client.ReSpawn(ctx, actor)
+		require.NoError(t, err)
+
+		t.Cleanup(func() {
+			client.Close()
+
+			require.NoError(t, sys1.Stop(ctx))
+			require.NoError(t, sys2.Stop(ctx))
+			require.NoError(t, sys3.Stop(ctx))
+
+			require.NoError(t, sd1.Close())
+			require.NoError(t, sd2.Close())
+			require.NoError(t, sd3.Close())
+
+			srv.Shutdown()
+			time.Sleep(time.Second)
+		})
+	})
 }
 
 func startNatsServer(t *testing.T) *natsserver.Server {

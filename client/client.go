@@ -71,18 +71,15 @@ func New(ctx context.Context, addresses []string, opts ...Option) (*Client, erro
 	for _, host := range addresses {
 		chain = chain.AddValidator(validation.NewTCPAddressValidator(host))
 	}
-
 	if err := chain.Validate(); err != nil {
 		return nil, err
 	}
-
 	cl := &Client{
 		locker:          &sync.Mutex{},
 		strategy:        RoundRobinStrategy,
 		refreshInterval: -1,
 		client:          http.NewClient(),
 	}
-
 	// apply the various options
 	for _, opt := range opts {
 		opt.Apply(cl)
@@ -101,27 +98,14 @@ func New(ctx context.Context, addresses []string, opts ...Option) (*Client, erro
 
 		nodes = append(nodes, NewNode(address, weight))
 	}
-
-	switch cl.strategy {
-	case RoundRobinStrategy:
-		cl.balancer = NewRoundRobin()
-	case RandomStrategy:
-		cl.balancer = NewRandom()
-	case LeastLoadStrategy:
-		cl.balancer = NewLeastLoad()
-	default:
-		// TODO: add more balancer strategy
-	}
-
+	cl.balancer = getBalancer(cl.strategy)
 	cl.nodes = nodes
 	cl.balancer.Set(cl.nodes...)
-
 	// only refresh addresses when refresh interval is set
 	if cl.refreshInterval > 0 {
 		cl.closeSignal = make(chan types.Unit, 1)
 		go cl.refreshNodesLoop()
 	}
-
 	return cl, nil
 }
 
@@ -145,7 +129,7 @@ func (x *Client) Kinds(ctx context.Context) ([]string, error) {
 		return nil, err
 	}
 
-	host, port := x.getNextRemotingHostAndPort()
+	host, port := nextRemotingHostAndPort(x.balancer)
 	service := internalpbconnect.NewClusterServiceClient(
 		http.NewClient(),
 		http.URL(host, port),
@@ -162,12 +146,29 @@ func (x *Client) Kinds(ctx context.Context) ([]string, error) {
 }
 
 // Spawn creates an actor provided the actor name.
-// The actor name will be generated and returned when the request is successful
 func (x *Client) Spawn(ctx context.Context, actor *Actor) (err error) {
 	x.locker.Lock()
-	remoteHost, remotePort := x.getNextRemotingHostAndPort()
+	remoteHost, remotePort := nextRemotingHostAndPort(x.balancer)
 	x.locker.Unlock()
 	return actors.RemoteSpawn(ctx, remoteHost, remotePort, actor.Name(), actor.Kind())
+}
+
+// SpawnWithBalancer creates an actor provided the actor name and the balancer strategy
+func (x *Client) SpawnWithBalancer(ctx context.Context, actor *Actor, strategy BalancerStrategy) (err error) {
+	x.locker.Lock()
+	balancer := getBalancer(strategy)
+	balancer.Set(x.nodes...)
+	remoteHost, remotePort := nextRemotingHostAndPort(balancer)
+	x.locker.Unlock()
+	return actors.RemoteSpawn(ctx, remoteHost, remotePort, actor.Name(), actor.Kind())
+}
+
+// ReSpawn restarts a given actor
+func (x *Client) ReSpawn(ctx context.Context, actor *Actor) (err error) {
+	x.locker.Lock()
+	remoteHost, remotePort := nextRemotingHostAndPort(x.balancer)
+	x.locker.Unlock()
+	return actors.RemoteReSpawn(ctx, remoteHost, remotePort, actor.Name())
 }
 
 // Tell sends a message to a given actor provided the actor name.
@@ -201,7 +202,7 @@ func (x *Client) Ask(ctx context.Context, actor *Actor, message proto.Message) (
 // Stop stops or kills a given actor in the Client
 func (x *Client) Stop(ctx context.Context, actor *Actor) error {
 	x.locker.Lock()
-	remoteHost, remotePort := x.getNextRemotingHostAndPort()
+	remoteHost, remotePort := nextRemotingHostAndPort(x.balancer)
 	x.locker.Unlock()
 	return actors.RemoteStop(ctx, remoteHost, remotePort, actor.Name())
 }
@@ -209,7 +210,7 @@ func (x *Client) Stop(ctx context.Context, actor *Actor) error {
 // Whereis finds and returns the address of a given actor
 func (x *Client) Whereis(ctx context.Context, actor *Actor) (*goaktpb.Address, error) {
 	x.locker.Lock()
-	remoteHost, remotePort := x.getNextRemotingHostAndPort()
+	remoteHost, remotePort := nextRemotingHostAndPort(x.balancer)
 	x.locker.Unlock()
 	// lookup the actor address
 	address, err := actors.RemoteLookup(ctx, remoteHost, remotePort, actor.Name())
@@ -223,9 +224,9 @@ func (x *Client) Whereis(ctx context.Context, actor *Actor) (*goaktpb.Address, e
 	return address, nil
 }
 
-// getNextRemotingHostAndPort returns the next node host and port
-func (x *Client) getNextRemotingHostAndPort() (host string, port int) {
-	node := x.balancer.Next()
+// nextRemotingHostAndPort returns the next node host and port
+func nextRemotingHostAndPort(balancer Balancer) (host string, port int) {
+	node := balancer.Next()
 	host, p, _ := net.SplitHostPort(node.Address())
 	port, _ = strconv.Atoi(p)
 	return
@@ -270,6 +271,20 @@ func (x *Client) refreshNodesLoop() {
 	}()
 	<-tickerStopSig
 	ticker.Stop()
+}
+
+// getBalancer returns the balancer based upon the strategy
+func getBalancer(strategy BalancerStrategy) Balancer {
+	switch strategy {
+	case RoundRobinStrategy:
+		return NewRoundRobin()
+	case RandomStrategy:
+		return NewRandom()
+	case LeastLoadStrategy:
+		return NewLeastLoad()
+	default:
+		return NewRoundRobin()
+	}
 }
 
 // getNodeMetric pings a given node and get the node metric info and
