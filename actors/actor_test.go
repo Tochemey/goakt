@@ -262,6 +262,7 @@ func (e *exchanger) Receive(ctx ReceiveContext) {
 }
 
 func (e *exchanger) PostStop(context.Context) error {
+	e.messageCounter.Store(0)
 	return nil
 }
 
