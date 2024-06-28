@@ -11,7 +11,7 @@ require (
 	github.com/google/go-cmp v0.6.0
 	github.com/google/uuid v1.6.0
 	github.com/grandcat/zeroconf v1.0.0
-	github.com/nats-io/nats-server/v2 v2.10.16
+	github.com/nats-io/nats-server/v2 v2.10.17
 	github.com/nats-io/nats.go v1.36.0
 	github.com/pkg/errors v0.9.1
 	github.com/redis/go-redis/v9 v9.5.3
