@@ -1023,7 +1023,7 @@ func TestRemoteAsk(t *testing.T) {
 		// create a message to send to the test actor
 		message := new(testpb.TestReply)
 		// send the message to the actor
-		reply, err := RemoteAsk(ctx, addr, message)
+		reply, err := RemoteAsk(ctx, addr, message, time.Minute)
 		// perform some assertions
 		require.NoError(t, err)
 		require.NotNil(t, reply)
@@ -1079,7 +1079,7 @@ func TestRemoteAsk(t *testing.T) {
 		require.NoError(t, err)
 
 		// send the message to the actor
-		reply, err := RemoteAsk(ctx, addr, nil)
+		reply, err := RemoteAsk(ctx, addr, nil, time.Minute)
 		// perform some assertions
 		require.Error(t, err)
 		require.Nil(t, reply)
@@ -1133,7 +1133,7 @@ func TestRemoteAsk(t *testing.T) {
 		// create a message to send to the test actor
 		message := new(testpb.TestReply)
 		// send the message to the actor
-		reply, err := RemoteAsk(ctx, addr, message)
+		reply, err := RemoteAsk(ctx, addr, message, time.Minute)
 		// perform some assertions
 		require.Error(t, err)
 		require.Nil(t, reply)
@@ -1187,7 +1187,7 @@ func TestRemoteAsk(t *testing.T) {
 		// create a message to send to the test actor
 		message := new(testpb.TestReply)
 		// send the message to the actor
-		reply, err := RemoteAsk(ctx, addr, message)
+		reply, err := RemoteAsk(ctx, addr, message, time.Minute)
 		// perform some assertions
 		require.Error(t, err)
 		require.EqualError(t, err, "failed_precondition: remoting is not enabled")
@@ -1409,7 +1409,7 @@ func TestRemoteAsk(t *testing.T) {
 		// create a message to send to the test actor
 		message := new(testpb.TestReply)
 		// send the message to the actor
-		reply, err := RemoteAsk(ctx, addr, message)
+		reply, err := RemoteAsk(ctx, addr, message, time.Minute)
 		// perform some assertions
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "not found")
@@ -1751,7 +1751,7 @@ func TestAPIRemoteSpawn(t *testing.T) {
 		require.NotNil(t, addr)
 
 		// send the message to exchanger actor one using remote messaging
-		reply, err := RemoteAsk(ctx, addr, new(testpb.TestReply))
+		reply, err := RemoteAsk(ctx, addr, new(testpb.TestReply), time.Minute)
 
 		require.NoError(t, err)
 		require.NotNil(t, reply)

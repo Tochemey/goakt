@@ -126,7 +126,7 @@ type ActorSystem interface {
 	Deregister(ctx context.Context, actor Actor) error
 	// handleRemoteAsk handles a synchronous message to another actor and expect a response.
 	// This block until a response is received or timed out.
-	handleRemoteAsk(ctx context.Context, to PID, message proto.Message) (response proto.Message, err error)
+	handleRemoteAsk(ctx context.Context, to PID, message proto.Message, timeout time.Duration) (response proto.Message, err error)
 	// handleRemoteTell handles an asynchronous message to an actor
 	handleRemoteTell(ctx context.Context, to PID, message proto.Message) error
 }
@@ -153,7 +153,7 @@ type actorSystem struct {
 	expireActorAfter time.Duration
 	// Specifies how long the sender of a receiveContext should wait to receive a reply
 	// when using SendReply. The default value is 5s
-	replyTimeout time.Duration
+	askTimeout time.Duration
 	// Specifies the shutdown timeout. The default value is 30s
 	shutdownTimeout time.Duration
 	// Specifies the maximum of retries to attempt when the actor
@@ -194,7 +194,8 @@ type actorSystem struct {
 	// specifies the stash capacity
 	stashCapacity uint64
 
-	housekeeperStopSig chan types.Unit
+	stopGC     chan types.Unit
+	gcInterval time.Duration
 
 	// specifies the events stream
 	eventsStream *eventstream.EventsStream
@@ -209,7 +210,7 @@ type actorSystem struct {
 	metricEnabled atomic.Bool
 
 	registry   types.Registry
-	reflection reflection
+	reflection *reflection
 
 	peersStateLoopInterval time.Duration
 	peersCacheMu           *sync.RWMutex
@@ -237,14 +238,15 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		name:                   name,
 		logger:                 log.DefaultLogger,
 		expireActorAfter:       DefaultPassivationTimeout,
-		replyTimeout:           DefaultReplyTimeout,
+		askTimeout:             DefaultAskTimeout,
 		actorInitMaxRetries:    DefaultInitMaxRetries,
 		supervisorStrategy:     DefaultSupervisoryStrategy,
 		telemetry:              telemetry.New(),
 		locker:                 sync.Mutex{},
 		shutdownTimeout:        DefaultShutdownTimeout,
 		mailboxSize:            DefaultMailboxSize,
-		housekeeperStopSig:     make(chan types.Unit, 1),
+		stopGC:                 make(chan types.Unit, 1),
+		gcInterval:             DefaultGCInterval,
 		eventsStream:           eventstream.New(),
 		partitionHasher:        hash.DefaultHasher(),
 		actorInitTimeout:       DefaultInitTimeout,
@@ -432,7 +434,7 @@ func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor) (PID,
 	opts := []pidOption{
 		withInitMaxRetries(x.actorInitMaxRetries),
 		withPassivationAfter(x.expireActorAfter),
-		withReplyTimeout(x.replyTimeout),
+		withAskTimeout(x.askTimeout),
 		withCustomLogger(x.logger),
 		withActorSystem(x),
 		withSupervisorStrategy(x.supervisorStrategy),
@@ -506,7 +508,7 @@ func (x *actorSystem) SpawnFromFunc(ctx context.Context, receiveFunc ReceiveFunc
 	pidOpts := []pidOption{
 		withInitMaxRetries(x.actorInitMaxRetries),
 		withPassivationAfter(x.expireActorAfter),
-		withReplyTimeout(x.replyTimeout),
+		withAskTimeout(x.askTimeout),
 		withCustomLogger(x.logger),
 		withActorSystem(x),
 		withSupervisorStrategy(x.supervisorStrategy),
@@ -780,7 +782,7 @@ func (x *actorSystem) Start(ctx context.Context) error {
 
 	x.scheduler.Start(spanCtx)
 
-	go x.housekeeper()
+	go x.gc()
 
 	x.logger.Infof("%s started..:)", x.name)
 	return nil
@@ -799,7 +801,7 @@ func (x *actorSystem) Stop(ctx context.Context) error {
 		return e
 	}
 
-	x.housekeeperStopSig <- types.Unit{}
+	x.stopGC <- types.Unit{}
 	x.logger.Infof("%s is shutting down..:)", x.name)
 
 	x.started.Store(false)
@@ -935,7 +937,12 @@ func (x *actorSystem) RemoteAsk(ctx context.Context, stream *connect.BidiStream[
 			return ErrAddressNotFound(actorPath.String())
 		}
 
-		reply, err := x.handleRemoteAsk(ctx, pid, message)
+		timeout := x.askTimeout
+		if request.GetTimeout() != nil {
+			timeout = request.GetTimeout().AsDuration()
+		}
+
+		reply, err := x.handleRemoteAsk(ctx, pid, message, timeout)
 		if err != nil {
 			logger.Error(ErrRemoteSendFailure(err).Error())
 			return ErrRemoteSendFailure(err)
@@ -1150,10 +1157,10 @@ func (x *actorSystem) GetKinds(_ context.Context, request *connect.Request[inter
 
 // handleRemoteAsk handles a synchronous message to another actor and expect a response.
 // This block until a response is received or timed out.
-func (x *actorSystem) handleRemoteAsk(ctx context.Context, to PID, message proto.Message) (response proto.Message, err error) {
+func (x *actorSystem) handleRemoteAsk(ctx context.Context, to PID, message proto.Message, timeout time.Duration) (response proto.Message, err error) {
 	spanCtx, span := x.tracer.Start(ctx, "HandleRemoteAsk")
 	defer span.End()
-	return Ask(spanCtx, to, message, x.replyTimeout)
+	return Ask(spanCtx, to, message, timeout)
 }
 
 // handleRemoteTell handles an asynchronous message to an actor
@@ -1317,11 +1324,11 @@ func (x *actorSystem) reset() {
 	x.cluster = nil
 }
 
-// housekeeper time to time removes dead actors from the system
+// gc time to time removes dead actors from the system
 // that helps free non-utilized resources
-func (x *actorSystem) housekeeper() {
-	x.logger.Info("Housekeeping has started...")
-	ticker := time.NewTicker(30 * time.Millisecond)
+func (x *actorSystem) gc() {
+	x.logger.Info("garbage collector has started...")
+	ticker := time.NewTicker(x.gcInterval)
 	tickerStopSig := make(chan types.Unit, 1)
 	go func() {
 		for {
@@ -1329,7 +1336,7 @@ func (x *actorSystem) housekeeper() {
 			case <-ticker.C:
 				for _, actor := range x.Actors() {
 					if !actor.IsRunning() {
-						x.logger.Infof("Removing actor=%s from system", actor.ActorPath().Name())
+						x.logger.Infof("removing actor=%s from system", actor.ActorPath().Name())
 						x.actors.delete(actor.ActorPath())
 						if x.InCluster() {
 							if err := x.cluster.RemoveActor(context.Background(), actor.ActorPath().Name()); err != nil {
@@ -1339,7 +1346,7 @@ func (x *actorSystem) housekeeper() {
 						}
 					}
 				}
-			case <-x.housekeeperStopSig:
+			case <-x.stopGC:
 				tickerStopSig <- types.Unit{}
 				return
 			}
@@ -1348,7 +1355,7 @@ func (x *actorSystem) housekeeper() {
 
 	<-tickerStopSig
 	ticker.Stop()
-	x.logger.Info("Housekeeping has stopped...")
+	x.logger.Info("garbage collector has stopped...")
 }
 
 // registerMetrics register the PID metrics with OTel instrumentation.

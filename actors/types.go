@@ -43,8 +43,8 @@ const (
 
 	// DefaultPassivationTimeout defines the default passivation timeout
 	DefaultPassivationTimeout = 2 * time.Minute
-	// DefaultReplyTimeout defines the default send/reply timeout
-	DefaultReplyTimeout = 20 * time.Second
+	// DefaultAskTimeout defines the default Ask timeout
+	DefaultAskTimeout = 20 * time.Second
 	// DefaultInitMaxRetries defines the default value for retrying actor initialization
 	DefaultInitMaxRetries = 5
 	// DefaultSupervisoryStrategy defines the default supervisory strategy
@@ -59,7 +59,11 @@ const (
 	DefaultPeerStateLoopInterval = 10 * time.Second
 	// DefaultStashCapacity defines the default stash size
 	DefaultStashCapacity = 1_000
-	eventsTopic          = "topic.events"
+	// DefaultGCInterval defines the default GC interval
+	// This helps cleanup dead actors from the given actor system
+	DefaultGCInterval = 30 * time.Millisecond
+	// eventsTopic defines the events topic
+	eventsTopic = "topic.events"
 )
 
 // NoSender means that there is no sender

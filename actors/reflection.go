@@ -31,34 +31,22 @@ import (
 )
 
 // reflection helps create an instance dynamically
-type reflection interface {
-	// ActorFrom creates a new instance of Actor from its FQN
-	ActorFrom(key string) (actor Actor, err error)
-}
-
-// reflectionImpl implements Reflection
-type reflectionImpl struct {
+type reflection struct {
 	registry types.Registry
 }
 
-// enforce compilation error
-var _ reflection = &reflectionImpl{}
-
 // newReflection creates an instance of Reflection
-func newReflection(registry types.Registry) reflection {
-	return &reflectionImpl{registry: registry}
+func newReflection(registry types.Registry) *reflection {
+	return &reflection{registry: registry}
 }
 
 // ActorFrom creates a new instance of Actor from its FQN
-func (r *reflectionImpl) ActorFrom(key string) (actor Actor, err error) {
+func (r *reflection) ActorFrom(key string) (actor Actor, err error) {
 	rtype, ok := r.registry.TypeOf(key)
 	if !ok {
 		return nil, ErrTypeNotRegistered
 	}
-	return r.actorOf(rtype)
-}
 
-func (r *reflectionImpl) actorOf(rtype reflect.Type) (actor Actor, err error) {
 	iActor := reflect.TypeOf((*Actor)(nil)).Elem()
 	isActor := rtype.Implements(iActor) || reflect.PointerTo(rtype).Implements(iActor)
 
@@ -66,9 +54,9 @@ func (r *reflectionImpl) actorOf(rtype reflect.Type) (actor Actor, err error) {
 		return nil, ErrInstanceNotAnActor
 	}
 
-	newInstance := reflect.New(rtype)
-	if !newInstance.IsValid() {
+	instance := reflect.New(rtype)
+	if !instance.IsValid() {
 		return nil, ErrInvalidInstance
 	}
-	return newInstance.Interface().(Actor), nil
+	return instance.Interface().(Actor), nil
 }

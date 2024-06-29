@@ -102,7 +102,7 @@ func TestClient(t *testing.T) {
 		time.Sleep(time.Second)
 
 		// send a message
-		reply, err := client.Ask(ctx, actor, new(testspb.TestReply))
+		reply, err := client.Ask(ctx, actor, new(testspb.TestReply), actors.DefaultAskTimeout)
 		require.NoError(t, err)
 		require.NotNil(t, reply)
 		expectedReply := &testpb.Reply{Content: "received message"}
@@ -178,7 +178,7 @@ func TestClient(t *testing.T) {
 		time.Sleep(time.Second)
 
 		// send a message
-		reply, err := client.Ask(ctx, actor, new(testspb.TestReply))
+		reply, err := client.Ask(ctx, actor, new(testspb.TestReply), actors.DefaultAskTimeout)
 		require.NoError(t, err)
 		require.NotNil(t, reply)
 		expectedReply := &testpb.Reply{Content: "received message"}
@@ -255,7 +255,7 @@ func TestClient(t *testing.T) {
 		time.Sleep(time.Second)
 
 		// send a message
-		reply, err := client.Ask(ctx, actor, new(testspb.TestReply))
+		reply, err := client.Ask(ctx, actor, new(testspb.TestReply), actors.DefaultAskTimeout)
 		require.NoError(t, err)
 		require.NotNil(t, reply)
 		expectedReply := &testpb.Reply{Content: "received message"}
@@ -330,7 +330,7 @@ func TestClient(t *testing.T) {
 		time.Sleep(time.Second)
 
 		// send a message
-		reply, err := client.Ask(ctx, actor, new(testspb.TestReply))
+		reply, err := client.Ask(ctx, actor, new(testspb.TestReply), actors.DefaultAskTimeout)
 		require.NoError(t, err)
 		require.NotNil(t, reply)
 		expectedReply := &testpb.Reply{Content: "received message"}
@@ -406,7 +406,7 @@ func TestClient(t *testing.T) {
 		time.Sleep(time.Second)
 
 		// send a message
-		reply, err := client.Ask(ctx, actor, new(testspb.TestReply))
+		reply, err := client.Ask(ctx, actor, new(testspb.TestReply), actors.DefaultAskTimeout)
 		require.NoError(t, err)
 		require.NotNil(t, reply)
 		expectedReply := &testpb.Reply{Content: "received message"}
@@ -481,7 +481,7 @@ func TestClient(t *testing.T) {
 		time.Sleep(time.Second)
 
 		// send a message
-		reply, err := client.Ask(ctx, actor, new(testspb.TestReply))
+		reply, err := client.Ask(ctx, actor, new(testspb.TestReply), actors.DefaultAskTimeout)
 		require.NoError(t, err)
 		require.NotNil(t, reply)
 		expectedReply := &testpb.Reply{Content: "received message"}
@@ -561,7 +561,7 @@ func TestClient(t *testing.T) {
 		time.Sleep(time.Second)
 
 		// send a message
-		reply, err := client.Ask(ctx, actor, new(testspb.TestReply))
+		reply, err := client.Ask(ctx, actor, new(testspb.TestReply), actors.DefaultAskTimeout)
 		require.NoError(t, err)
 		require.NotNil(t, reply)
 		expectedReply := &testpb.Reply{Content: "received message"}

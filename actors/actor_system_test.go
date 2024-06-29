@@ -223,7 +223,7 @@ func TestActorSystem(t *testing.T) {
 		require.NotNil(t, remoteAddr)
 		require.True(t, proto.Equal(remoteAddr, addr))
 
-		reply, err := RemoteAsk(ctx, addr, new(testpb.TestReply))
+		reply, err := RemoteAsk(ctx, addr, new(testpb.TestReply), DefaultAskTimeout)
 		require.NoError(t, err)
 		require.NotNil(t, reply)
 
@@ -595,7 +595,7 @@ func TestActorSystem(t *testing.T) {
 			Port: int32(remotingPort),
 			Name: actorName,
 			Id:   "",
-		}, new(testpb.TestReply))
+		}, new(testpb.TestReply), DefaultAskTimeout)
 		require.Error(t, err)
 		require.Nil(t, reply)
 
@@ -1467,7 +1467,7 @@ func TestActorSystem(t *testing.T) {
 		require.NotNil(t, addr)
 
 		// send the message to exchanger actor one using remote messaging
-		reply, err := RemoteAsk(ctx, addr, new(testpb.TestReply))
+		reply, err := RemoteAsk(ctx, addr, new(testpb.TestReply), DefaultAskTimeout)
 
 		require.NoError(t, err)
 		require.NotNil(t, reply)
