@@ -4,6 +4,7 @@ package internalpb;
 
 import "goakt/goakt.proto";
 import "google/protobuf/any.proto";
+import "google/protobuf/duration.proto";
 
 option go_package = "github.com/tochemey/goakt/v2/internal/internalpb;internalpb";
 
@@ -12,6 +13,7 @@ option go_package = "github.com/tochemey/goakt/v2/internal/internalpb;internalpb
 // - send messages to actors
 // - lookup actor remotely
 // - spawn actor remotely
+// - re-spawn actor remotely
 // - stop actor remotely
 service RemotingService {
   // RemoteAsk is used to send a message to an actor remotely and expect a response immediately.
@@ -34,6 +36,8 @@ service RemotingService {
 message RemoteAskRequest {
   // Specifies the remote message to send
   RemoteMessage remote_message = 1;
+  // Specifies the timeout(how long to wait for a reply)
+  google.protobuf.Duration timeout = 2;
 }
 
 message RemoteAskResponse {

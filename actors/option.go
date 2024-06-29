@@ -68,7 +68,7 @@ func WithLogger(logger log.Logger) Option {
 // in a receive-reply pattern
 func WithReplyTimeout(timeout time.Duration) Option {
 	return OptionFunc(func(a *actorSystem) {
-		a.replyTimeout = timeout
+		a.askTimeout = timeout
 	})
 }
 
@@ -198,5 +198,12 @@ func WithMetric() Option {
 func WithPeerStateLoopInterval(interval time.Duration) Option {
 	return OptionFunc(func(system *actorSystem) {
 		system.peersStateLoopInterval = interval
+	})
+}
+
+// WithGCInterval sets the GC interval
+func WithGCInterval(interval time.Duration) Option {
+	return OptionFunc(func(system *actorSystem) {
+		system.gcInterval = interval
 	})
 }

@@ -56,7 +56,7 @@ func TestOption(t *testing.T) {
 		{
 			name:     "WithReplyTimeout",
 			option:   WithReplyTimeout(2 * time.Second),
-			expected: actorSystem{replyTimeout: 2. * time.Second},
+			expected: actorSystem{askTimeout: 2. * time.Second},
 		},
 		{
 			name:     "WithActorInitMaxRetries",
@@ -137,6 +137,11 @@ func TestOption(t *testing.T) {
 			name:     "WithPeerStateLoopInterval",
 			option:   WithPeerStateLoopInterval(2 * time.Second),
 			expected: actorSystem{peersStateLoopInterval: 2. * time.Second},
+		},
+		{
+			name:     "WithGCInterval",
+			option:   WithGCInterval(2 * time.Second),
+			expected: actorSystem{gcInterval: 2. * time.Second},
 		},
 	}
 	for _, tc := range testCases {

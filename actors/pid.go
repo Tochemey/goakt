@@ -203,7 +203,7 @@ type pid struct {
 
 	// specifies how long the sender of a mail should wait to receive a reply
 	// when using Ask. The default value is 5s
-	replyTimeout atomic.Duration
+	askTimeout atomic.Duration
 
 	// specifies the maximum of retries to attempt when the actor
 	// initialization fails. The default value is 5
@@ -314,7 +314,7 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 	p.stashCapacity.Store(DefaultStashCapacity)
 	p.isRunning.Store(false)
 	p.passivateAfter.Store(DefaultPassivationTimeout)
-	p.replyTimeout.Store(DefaultReplyTimeout)
+	p.askTimeout.Store(DefaultAskTimeout)
 	p.initTimeout.Store(DefaultInitTimeout)
 	p.traceEnabled.Store(false)
 	p.metricEnabled.Store(false)
@@ -556,7 +556,7 @@ func (x *pid) SpawnChild(ctx context.Context, name string, actor Actor) (PID, er
 	opts := []pidOption{
 		withInitMaxRetries(int(x.initMaxRetries.Load())),
 		withPassivationAfter(x.passivateAfter.Load()),
-		withReplyTimeout(x.replyTimeout.Load()),
+		withAskTimeout(x.askTimeout.Load()),
 		withCustomLogger(x.logger),
 		withActorSystem(x.system),
 		withSupervisorStrategy(x.supervisorStrategy),
@@ -655,7 +655,7 @@ func (x *pid) Ask(ctx context.Context, to PID, message proto.Message) (response 
 	messageContext := newReceiveContext(spanCtx, x, to, message, false)
 	to.doReceive(messageContext)
 
-	for await := time.After(x.replyTimeout.Load()); ; {
+	for await := time.After(x.askTimeout.Load()); ; {
 		select {
 		case response = <-messageContext.response:
 			x.lastProcessingDuration.Store(time.Since(x.lastProcessingTime.Load()))
@@ -743,7 +743,7 @@ func (x *pid) BatchAsk(ctx context.Context, to PID, messages ...proto.Message) (
 
 		// await patiently to receive the response from the actor
 	timerLoop:
-		for await := time.After(x.replyTimeout.Load()); ; {
+		for await := time.After(x.askTimeout.Load()); ; {
 			select {
 			case resp := <-messageContext.response:
 				x.lastProcessingDuration.Store(time.Since(x.lastProcessingTime.Load()))
@@ -1238,7 +1238,7 @@ func (x *pid) init(ctx context.Context) error {
 func (x *pid) reset() {
 	x.lastProcessingTime.Store(time.Time{})
 	x.passivateAfter.Store(DefaultPassivationTimeout)
-	x.replyTimeout.Store(DefaultReplyTimeout)
+	x.askTimeout.Store(DefaultAskTimeout)
 	x.shutdownTimeout.Store(DefaultShutdownTimeout)
 	x.initMaxRetries.Store(DefaultInitMaxRetries)
 	x.lastProcessingDuration.Store(0)

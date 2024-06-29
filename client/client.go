@@ -186,13 +186,13 @@ func (x *Client) Tell(ctx context.Context, actor *Actor, message proto.Message) 
 // Ask sends a message to a given actor provided the actor name and expects a response.
 // If the given actor does not exist it will be created automatically when
 // Client mode is enabled. This will block until a response is received or timed out.
-func (x *Client) Ask(ctx context.Context, actor *Actor, message proto.Message) (reply proto.Message, err error) {
+func (x *Client) Ask(ctx context.Context, actor *Actor, message proto.Message, timeout time.Duration) (reply proto.Message, err error) {
 	// lookup the actor address
 	address, err := x.Whereis(ctx, actor)
 	if err != nil {
 		return nil, err
 	}
-	response, err := actors.RemoteAsk(ctx, address, message)
+	response, err := actors.RemoteAsk(ctx, address, message, timeout)
 	if err != nil {
 		return nil, err
 	}
