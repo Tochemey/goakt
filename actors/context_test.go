@@ -688,7 +688,7 @@ func TestReceiveContext(t *testing.T) {
 			newSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
-			withReplyTimeout(replyTimeout))
+			withAskTimeout(replyTimeout))
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
@@ -726,7 +726,7 @@ func TestReceiveContext(t *testing.T) {
 			newSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
-			withReplyTimeout(replyTimeout))
+			withAskTimeout(replyTimeout))
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
@@ -758,7 +758,7 @@ func TestReceiveContext(t *testing.T) {
 			newSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
-			withReplyTimeout(replyTimeout))
+			withAskTimeout(replyTimeout))
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
@@ -799,7 +799,7 @@ func TestReceiveContext(t *testing.T) {
 			newSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
-			withReplyTimeout(replyTimeout))
+			withAskTimeout(replyTimeout))
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
@@ -840,7 +840,7 @@ func TestReceiveContext(t *testing.T) {
 			newSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
-			withReplyTimeout(replyTimeout))
+			withAskTimeout(replyTimeout))
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
@@ -881,7 +881,7 @@ func TestReceiveContext(t *testing.T) {
 			newSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
-			withReplyTimeout(replyTimeout))
+			withAskTimeout(replyTimeout))
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
@@ -924,7 +924,7 @@ func TestReceiveContext(t *testing.T) {
 			newSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
-			withReplyTimeout(replyTimeout))
+			withAskTimeout(replyTimeout))
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
@@ -958,7 +958,7 @@ func TestReceiveContext(t *testing.T) {
 			newSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
-			withReplyTimeout(replyTimeout))
+			withAskTimeout(replyTimeout))
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
@@ -998,7 +998,7 @@ func TestReceiveContext(t *testing.T) {
 			newSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
-			withReplyTimeout(replyTimeout))
+			withAskTimeout(replyTimeout))
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
@@ -1019,7 +1019,7 @@ func TestReceiveContext(t *testing.T) {
 			newSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
-			withReplyTimeout(replyTimeout))
+			withAskTimeout(replyTimeout))
 
 		require.NoError(t, err)
 
@@ -1042,7 +1042,7 @@ func TestReceiveContext(t *testing.T) {
 			newSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
-			withReplyTimeout(replyTimeout))
+			withAskTimeout(replyTimeout))
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
@@ -1930,7 +1930,7 @@ func TestReceiveContext(t *testing.T) {
 
 		opts := []pidOption{
 			withInitMaxRetries(1),
-			withReplyTimeout(askTimeout),
+			withAskTimeout(askTimeout),
 			withPassivationDisabled(),
 			withCustomLogger(log.DefaultLogger),
 		}
@@ -1995,7 +1995,7 @@ func TestReceiveContext(t *testing.T) {
 
 		opts := []pidOption{
 			withInitMaxRetries(1),
-			withReplyTimeout(askTimeout),
+			withAskTimeout(askTimeout),
 			withPassivationDisabled(),
 			withCustomLogger(log.DiscardLogger),
 		}

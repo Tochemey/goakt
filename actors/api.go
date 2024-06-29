@@ -33,6 +33,7 @@ import (
 	"connectrpc.com/otelconnect"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
+	"google.golang.org/protobuf/types/known/durationpb"
 
 	"github.com/tochemey/goakt/v2/goaktpb"
 	"github.com/tochemey/goakt/v2/internal/http"
@@ -201,7 +202,7 @@ func RemoteTell(ctx context.Context, to *goaktpb.Address, message proto.Message)
 }
 
 // RemoteAsk sends a synchronous message to another actor remotely and expect a response.
-func RemoteAsk(ctx context.Context, to *goaktpb.Address, message proto.Message) (response *anypb.Any, err error) {
+func RemoteAsk(ctx context.Context, to *goaktpb.Address, message proto.Message, timeout time.Duration) (response *anypb.Any, err error) {
 	marshaled, err := anypb.New(message)
 	if err != nil {
 		return nil, ErrInvalidRemoteMessage(err)
@@ -224,6 +225,7 @@ func RemoteAsk(ctx context.Context, to *goaktpb.Address, message proto.Message) 
 			Receiver: to,
 			Message:  marshaled,
 		},
+		Timeout: durationpb.New(timeout),
 	}
 	stream := remotingService.RemoteAsk(ctx)
 	errc := make(chan error, 1)
