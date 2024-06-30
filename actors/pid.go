@@ -549,8 +549,7 @@ func (x *pid) SpawnChild(ctx context.Context, name string, actor Actor) (PID, er
 		return cid, nil
 	}
 
-	x.rwLocker.Lock()
-	defer x.rwLocker.Unlock()
+	x.rwLocker.RLock()
 
 	// create the child actor options child inherit parent's options
 	opts := []pidOption{
@@ -585,16 +584,20 @@ func (x *pid) SpawnChild(ctx context.Context, name string, actor Actor) (PID, er
 	if err != nil {
 		span.SetStatus(codes.Error, "SpawnChild")
 		span.RecordError(err)
+		x.rwLocker.RUnlock()
 		return nil, err
 	}
 
 	x.children.set(cid)
-	x.Watch(cid)
+	eventsStream := x.eventsStream
 
+	x.rwLocker.RUnlock()
 	span.SetStatus(codes.Ok, "SpawnChild")
 
-	if x.eventsStream != nil {
-		x.eventsStream.Publish(eventsTopic, &goaktpb.ActorChildCreated{
+	x.Watch(cid)
+
+	if eventsStream != nil {
+		eventsStream.Publish(eventsTopic, &goaktpb.ActorChildCreated{
 			Address:   cid.ActorPath().RemoteAddress(),
 			CreatedAt: timestamppb.Now(),
 			Parent:    x.ActorPath().RemoteAddress(),
