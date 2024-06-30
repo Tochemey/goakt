@@ -42,6 +42,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/tochemey/goakt/v2/goaktpb"
+	"github.com/tochemey/goakt/v2/internal/eventstream"
 	"github.com/tochemey/goakt/v2/log"
 	"github.com/tochemey/goakt/v2/telemetry"
 	"github.com/tochemey/goakt/v2/test/data/testpb"
@@ -1020,6 +1021,58 @@ func TestSpawnChild(t *testing.T) {
 		assert.Nil(t, child)
 
 		assert.Len(t, parent.Children(), 0)
+		//stop the actor
+		err = parent.Shutdown(ctx)
+		assert.NoError(t, err)
+	})
+	t.Run("With child created event published", func(t *testing.T) {
+		// create a test context
+		ctx := context.TODO()
+		// create the actor path
+		actorPath := NewPath("Parent", NewAddress("sys", "host", 1))
+
+		eventsStream := eventstream.New()
+
+		// add a subscriber
+		subsriber := eventsStream.AddSubscriber()
+		eventsStream.Subscribe(subsriber, eventsTopic)
+
+		// create the parent actor
+		parent, err := newPID(ctx, actorPath,
+			newSupervisor(),
+			withInitMaxRetries(1),
+			withCustomLogger(log.DiscardLogger),
+			withEventsStream(eventsStream),
+			withAskTimeout(replyTimeout))
+
+		require.NoError(t, err)
+		assert.NotNil(t, parent)
+
+		// create the child actor
+		child, err := parent.SpawnChild(ctx, "SpawnChild", newSupervised())
+		assert.NoError(t, err)
+		assert.NotNil(t, child)
+
+		assert.Len(t, parent.Children(), 1)
+
+		time.Sleep(time.Second)
+
+		var events []*goaktpb.ActorChildCreated
+		for message := range subsriber.Iterator() {
+			// get the event payload
+			payload := message.Payload()
+			switch msg := payload.(type) {
+			case *goaktpb.ActorChildCreated:
+				events = append(events, msg)
+			}
+		}
+
+		require.NotEmpty(t, events)
+		require.Len(t, events, 1)
+
+		event := events[0]
+		assert.True(t, proto.Equal(parent.ActorPath().RemoteAddress(), event.GetParent()))
+
 		//stop the actor
 		err = parent.Shutdown(ctx)
 		assert.NoError(t, err)
