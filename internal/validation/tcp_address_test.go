@@ -22,7 +22,7 @@
  * SOFTWARE.
  */
 
-package nats
+package validation
 
 import (
 	"testing"
@@ -30,41 +30,25 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestConfig(t *testing.T) {
-	t.Run("With valid configuration", func(t *testing.T) {
-		config := &Config{
-			NatsServer:      "nats://127.0.0.1:2322",
-			ApplicationName: "applicationName",
-			ActorSystemName: "actorSys",
-			NatsSubject:     "nats-subject",
-		}
-		assert.NoError(t, config.Validate())
+func TestTCPAddressValidator(t *testing.T) {
+	t.Run("With happy path", func(t *testing.T) {
+		addr := "127.0.0.1:3222"
+		assert.NoError(t, NewTCPAddressValidator(addr).Validate())
 	})
-	t.Run("With invalid nats address server", func(t *testing.T) {
-		config := &Config{
-			NatsServer:      "127.0.0.1:2322",
-			ApplicationName: "applicationName",
-			ActorSystemName: "actorSys",
-			NatsSubject:     "nats-subject",
-		}
-		assert.Error(t, config.Validate())
+	t.Run("With invalid port number: case 1", func(t *testing.T) {
+		addr := "127.0.0.1:-1"
+		assert.Error(t, NewTCPAddressValidator(addr).Validate())
+	})
+	t.Run("With invalid port number: case 2", func(t *testing.T) {
+		addr := "127.0.0.1:655387"
+		assert.Error(t, NewTCPAddressValidator(addr).Validate())
+	})
+	t.Run("With invalid port number: case 3", func(t *testing.T) {
+		addr := "127.0.0.1:0"
+		assert.Error(t, NewTCPAddressValidator(addr).Validate())
 	})
 	t.Run("With invalid host", func(t *testing.T) {
-		config := &Config{
-			NatsServer:      "nats://:2322",
-			ApplicationName: "applicationName",
-			ActorSystemName: "actorSys",
-			NatsSubject:     "nats-subject",
-		}
-		assert.Error(t, config.Validate())
-	})
-	t.Run("With invalid configuration", func(t *testing.T) {
-		config := &Config{
-			NatsServer:      "nats://127.0.0.1:2322",
-			ApplicationName: "applicationName",
-			ActorSystemName: "",
-			NatsSubject:     "nats-subject",
-		}
-		assert.Error(t, config.Validate())
+		addr := ":3222"
+		assert.Error(t, NewTCPAddressValidator(addr).Validate())
 	})
 }

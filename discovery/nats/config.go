@@ -25,6 +25,8 @@
 package nats
 
 import (
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/tochemey/goakt/v2/internal/validation"
@@ -48,8 +50,33 @@ type Config struct {
 func (x Config) Validate() error {
 	return validation.New(validation.FailFast()).
 		AddValidator(validation.NewEmptyStringValidator("NatsServer", x.NatsServer)).
+		AddValidator(NewServerAddrValidator(x.NatsServer)).
 		AddValidator(validation.NewEmptyStringValidator("NatsSubject", x.NatsSubject)).
 		AddValidator(validation.NewEmptyStringValidator("ApplicationName", x.ApplicationName)).
 		AddValidator(validation.NewEmptyStringValidator("ActorSystemName", x.ActorSystemName)).
 		Validate()
 }
+
+// ServerAddrValidator helps validates the NATs server address
+type ServerAddrValidator struct {
+	server string
+}
+
+// NewServerAddrValidator validates the nats server address
+func NewServerAddrValidator(server string) validation.Validator {
+	return &ServerAddrValidator{server: server}
+}
+
+// Validate execute the validation code
+func (x *ServerAddrValidator) Validate() error {
+	// make sure that the nats prefix is set in the server address
+	if !strings.HasPrefix(x.server, "nats") {
+		return fmt.Errorf("invalid nats server address: %s", x.server)
+	}
+
+	hostAndPort := strings.SplitN(x.server, "nats://", 2)[1]
+	return validation.NewTCPAddressValidator(hostAndPort).Validate()
+}
+
+// enforce compilation error
+var _ validation.Validator = (*ServerAddrValidator)(nil)
