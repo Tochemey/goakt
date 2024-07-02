@@ -25,6 +25,7 @@
 package nats
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -79,7 +80,7 @@ func newPeer(t *testing.T, serverAddr string) *Discovery {
 	config := &Config{
 		ApplicationName: applicationName,
 		ActorSystemName: actorSystemName,
-		NatsServer:      serverAddr,
+		NatsServer:      fmt.Sprintf("nats://%s", serverAddr),
 		NatsSubject:     natsSubject,
 	}
 
@@ -123,7 +124,7 @@ func TestDiscovery(t *testing.T) {
 		config := &Config{
 			ApplicationName: applicationName,
 			ActorSystemName: actorSystemName,
-			NatsServer:      srv.Addr().String(),
+			NatsServer:      fmt.Sprintf("nats://%s", srv.Addr().String()),
 			NatsSubject:     natsSubject,
 		}
 
@@ -167,7 +168,7 @@ func TestDiscovery(t *testing.T) {
 		config := &Config{
 			ApplicationName: applicationName,
 			ActorSystemName: actorSystemName,
-			NatsServer:      srv.Addr().String(),
+			NatsServer:      fmt.Sprintf("nats://%s", srv.Addr().String()),
 			NatsSubject:     natsSubject,
 		}
 
@@ -183,7 +184,6 @@ func TestDiscovery(t *testing.T) {
 		require.NotNil(t, provider)
 		assert.Equal(t, "nats", provider.ID())
 	})
-
 	t.Run("With Initialize", func(t *testing.T) {
 		// start the NATS server
 		srv := startNatsServer(t)
@@ -207,7 +207,7 @@ func TestDiscovery(t *testing.T) {
 		config := &Config{
 			ApplicationName: applicationName,
 			ActorSystemName: actorSystemName,
-			NatsServer:      natsServer,
+			NatsServer:      fmt.Sprintf("nats://%s", natsServer),
 			NatsSubject:     natsSubject,
 		}
 
@@ -252,7 +252,7 @@ func TestDiscovery(t *testing.T) {
 		config := &Config{
 			ApplicationName: applicationName,
 			ActorSystemName: actorSystemName,
-			NatsServer:      natsServer,
+			NatsServer:      fmt.Sprintf("nats://%s", natsServer),
 			NatsSubject:     natsSubject,
 		}
 
@@ -269,7 +269,6 @@ func TestDiscovery(t *testing.T) {
 		provider.initialized = atomic.NewBool(true)
 		assert.Error(t, provider.Initialize())
 	})
-
 	t.Run("With Register: already registered", func(t *testing.T) {
 		// start the NATS server
 		srv := startNatsServer(t)
@@ -293,7 +292,7 @@ func TestDiscovery(t *testing.T) {
 		config := &Config{
 			ApplicationName: applicationName,
 			ActorSystemName: actorSystemName,
-			NatsServer:      natsServer,
+			NatsServer:      fmt.Sprintf("nats://%s", natsServer),
 			NatsSubject:     natsSubject,
 		}
 
@@ -335,7 +334,7 @@ func TestDiscovery(t *testing.T) {
 		config := &Config{
 			ApplicationName: applicationName,
 			ActorSystemName: actorSystemName,
-			NatsServer:      natsServer,
+			NatsServer:      fmt.Sprintf("nats://%s", natsServer),
 			NatsSubject:     natsSubject,
 		}
 
@@ -436,7 +435,7 @@ func TestDiscovery(t *testing.T) {
 		config := &Config{
 			ApplicationName: applicationName,
 			ActorSystemName: actorSystemName,
-			NatsServer:      natsServer,
+			NatsServer:      fmt.Sprintf("nats://%s", natsServer),
 			NatsSubject:     natsSubject,
 		}
 

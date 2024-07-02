@@ -26,6 +26,7 @@ package actors
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"sync"
 	"testing"
@@ -456,7 +457,7 @@ func startClusterSystem(t *testing.T, nodeName, serverAddr string) (ActorSystem,
 	config := nats.Config{
 		ApplicationName: applicationName,
 		ActorSystemName: actorSystemName,
-		NatsServer:      serverAddr,
+		NatsServer:      fmt.Sprintf("nats://%s", serverAddr),
 		NatsSubject:     natsSubject,
 	}
 
