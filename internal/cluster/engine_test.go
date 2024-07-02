@@ -449,7 +449,7 @@ func startEngine(t *testing.T, nodeName, serverAddr string) (*Engine, discovery.
 	config := nats.Config{
 		ApplicationName: applicationName,
 		ActorSystemName: actorSystemName,
-		NatsServer:      serverAddr,
+		NatsServer:      fmt.Sprintf("nats://%s", serverAddr),
 		NatsSubject:     natsSubject,
 	}
 
