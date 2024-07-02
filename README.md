@@ -2,7 +2,7 @@
 
 [![Stability: Maintenance](https://masterminds.github.io/stability/maintenance.svg)](https://masterminds.github.io/stability/maintenance.html)
 
-_Go-Akt up to the latest release is considered feature complete and mature. 
+_Go-Akt is considered feature complete and mature. 
 No future feature development is planned, though bugs and security issues are fixed._
 
 [![build](https://img.shields.io/github/actions/workflow/status/Tochemey/goakt/build.yml?branch=main)](https://github.com/Tochemey/goakt/actions/workflows/build.yml)
