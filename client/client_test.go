@@ -639,7 +639,7 @@ func startNode(t *testing.T, logger log.Logger, nodeName, serverAddr string) (sy
 	config := nats.Config{
 		ApplicationName: applicationName,
 		ActorSystemName: actorSystemName,
-		NatsServer:      serverAddr,
+		NatsServer:      fmt.Sprintf("nats://%s", serverAddr),
 		NatsSubject:     natsSubject,
 	}
 
