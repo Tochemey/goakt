@@ -1,9 +1,6 @@
 # Go-Akt 
 
-[![Stability: Maintenance](https://masterminds.github.io/stability/maintenance.svg)](https://masterminds.github.io/stability/maintenance.html)
-
-_Go-Akt is considered feature complete and mature. 
-No future feature development is planned, though bugs and security issues are fixed._
+_Go-Akt is considered feature complete. No future features development is planned, though bugs and security issues will be fixed and patches will be released accordingly._
 
 [![build](https://img.shields.io/github/actions/workflow/status/Tochemey/goakt/build.yml?branch=main)](https://github.com/Tochemey/goakt/actions/workflows/build.yml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/tochemey/goakt.svg)](https://pkg.go.dev/github.com/tochemey/goakt)
@@ -11,6 +8,8 @@ No future feature development is planned, though bugs and security issues are fi
 ![GitHub Release](https://img.shields.io/github/v/release/Tochemey/goakt)
 [![Go Report Card](https://goreportcard.com/badge/github.com/tochemey/goakt)](https://goreportcard.com/report/github.com/tochemey/goakt)
 [![codecov](https://codecov.io/gh/Tochemey/goakt/graph/badge.svg?token=J0p9MzwSRH)](https://codecov.io/gh/Tochemey/goakt)
+[![Stability: Maintenance](https://masterminds.github.io/stability/maintenance.svg)](https://masterminds.github.io/stability/maintenance.html)
+
 
 Distributed [Go](https://go.dev/) actor framework to build reactive and distributed system in golang using
 _**protocol buffers as actor messages**_.
