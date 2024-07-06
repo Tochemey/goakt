@@ -1,6 +1,6 @@
 # Go-Akt 
 
-_Go-Akt is considered feature complete. No future features development is planned, though bugs and security issues will be fixed and patches will be released accordingly._
+_Go-Akt is considered feature complete. Bugs, security and performance issues will be fixed and released._
 
 [![build](https://img.shields.io/github/actions/workflow/status/Tochemey/goakt/build.yml?branch=main)](https://github.com/Tochemey/goakt/actions/workflows/build.yml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/tochemey/goakt.svg)](https://pkg.go.dev/github.com/tochemey/goakt)
