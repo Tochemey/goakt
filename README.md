@@ -121,8 +121,9 @@ The fundamental building blocks of Go-Akt are actors.
     fashion) and `Tell`, `RemoteTell`(fire-and-forget fashion) methods
   - stop (child) actors via their process id [`PID`](./actors/pid.go)
   - watch/unwatch (child) actors via their process id [`PID`](./actors/pid.go) `Watch` and `UnWatch` methods
-  - supervise the failure behavior of (child) actors. The supervisory strategy to adopt is set during its
-    creation. Go-Akt only supports the _one-for-one strategy_ meaning that each child actor is treated separately. The following directives are supported:
+  - supervise the failure behavior of (child) actors. The supervisory strategy to adopt is set during its creation. 
+    In Go-Akt that each child actor is treated separately. There is no concept of one-for-one and one-for-all strategies. 
+    The following directives are supported:
       - [`Restart`](./actors/types.go): to restart the child actor
       - [`Stop`](./actors/types.go): to stop the child actor which is the default one
   - remotely lookup for an actor on another node via their process id [`PID`](./actors/pid.go) `RemoteLookup`.
