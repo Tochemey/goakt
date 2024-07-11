@@ -22,12 +22,17 @@
  * SOFTWARE.
  */
 
-package supervisor
+package actors
 
-import "time"
+import (
+	"context"
+	"time"
 
-// Directive defines the supervisor directive
-type Directive interface {
+	"github.com/flowchartsman/retry"
+)
+
+// supervisorDirective defines the supervisor directive
+type supervisorDirective interface {
 	isSupervisorDirective()
 }
 
@@ -39,7 +44,7 @@ func NewStopDirective() *StopDirective {
 	return new(StopDirective)
 }
 
-func (StopDirective) isSupervisorDirective() {}
+func (*StopDirective) isSupervisorDirective() {}
 
 // ResumeDirective defines the supervisor resume directive
 // This ignores the failure and process the next message, instead
@@ -50,7 +55,7 @@ func NewResumeDirective() *ResumeDirective {
 	return new(ResumeDirective)
 }
 
-func (ResumeDirective) isSupervisorDirective() {}
+func (*ResumeDirective) isSupervisorDirective() {}
 
 // RestartDirective defines supervisor restart directive
 type RestartDirective struct {
@@ -59,6 +64,16 @@ type RestartDirective struct {
 	maxNumRetries uint32
 	// Specifies the time range to restart the faulty actor
 	timeout time.Duration
+}
+
+// MaxNumRetries returns the max num retries
+func (x *RestartDirective) MaxNumRetries() uint32 {
+	return x.maxNumRetries
+}
+
+// Timeout returns the timeout
+func (x *RestartDirective) Timeout() time.Duration {
+	return x.timeout
 }
 
 // NewRestartDirective creates an instance of RestartDirective
@@ -77,13 +92,62 @@ func (x *RestartDirective) WithLimit(maxNumRetries uint32, timeout time.Duration
 
 func (*RestartDirective) isSupervisorDirective() {}
 
-// EscalateDirective defines the supervisor escalate directive
-type EscalateDirective struct {
+// supervise watches for child actor's failure and act based upon the supervisory strategy
+func (x *pid) supervise(cid PID, watcher *watcher) {
+	for {
+		select {
+		case <-watcher.Done:
+			x.logger.Debugf("stop watching cid=(%s)", cid.ActorPath().String())
+			return
+		case err := <-watcher.ErrChan:
+			x.logger.Errorf("child actor=(%s) is failing: Err=%v", cid.ActorPath().String(), err)
+			switch directive := x.supervisorDirective.(type) {
+			case *StopDirective:
+				x.handleStopDirective(cid)
+			case *RestartDirective:
+				x.handleRestartDirective(cid, directive.MaxNumRetries(), directive.Timeout())
+			case *ResumeDirective:
+				// pass
+			default:
+				x.handleStopDirective(cid)
+			}
+		}
+	}
 }
 
-// NewEscalateDirective creates an instance of EscalateDirective
-func NewEscalateDirective() *EscalateDirective {
-	return new(EscalateDirective)
+// handleStopDirective handles the supervisor stop directive
+func (x *pid) handleStopDirective(cid PID) {
+	x.UnWatch(cid)
+	x.children.delete(cid.ActorPath())
+	if err := cid.Shutdown(context.Background()); err != nil {
+		// this can enter into some infinite loop if we panic
+		// since we are just shutting down the actor we can just log the error
+		// TODO: rethink properly about PostStop error handling
+		x.logger.Error(err)
+	}
 }
 
-func (*EscalateDirective) isSupervisorDirective() {}
+// handleRestartDirective handles the supervisor restart directive
+func (x *pid) handleRestartDirective(cid PID, maxRetries uint32, timeout time.Duration) {
+	x.UnWatch(cid)
+	ctx := context.Background()
+	var err error
+	if maxRetries == 0 || timeout <= 0 {
+		err = cid.Restart(ctx)
+	} else {
+		// TODO: handle the initial delay
+		retrier := retry.NewRetrier(int(maxRetries), 100*time.Millisecond, timeout)
+		err = retrier.RunContext(ctx, cid.Restart)
+	}
+
+	if err != nil {
+		x.logger.Error(err)
+		// remove the actor and stop it
+		x.children.delete(cid.ActorPath())
+		if err := cid.Shutdown(ctx); err != nil {
+			x.logger.Error(err)
+		}
+		return
+	}
+	x.Watch(cid)
+}

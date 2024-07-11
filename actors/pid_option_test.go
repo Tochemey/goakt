@@ -37,6 +37,7 @@ import (
 
 func TestPIDOptions(t *testing.T) {
 	mailbox := newReceiveContextBuffer(10)
+	resumeDirective := NewResumeDirective()
 	var (
 		atomicDuration   atomic.Duration
 		atomicInt        atomic.Int32
@@ -78,8 +79,8 @@ func TestPIDOptions(t *testing.T) {
 		},
 		{
 			name:     "WithSupervisorStrategy",
-			option:   withSupervisorStrategy(RestartDirective),
-			expected: &pid{supervisorStrategy: RestartDirective},
+			option:   withSupervisorDirective(resumeDirective),
+			expected: &pid{supervisorDirective: resumeDirective},
 		},
 		{
 			name:     "WithShutdownTimeout",

@@ -249,7 +249,7 @@ type pid struct {
 	processingTimeLocker *sync.Mutex
 
 	// supervisor strategy
-	supervisorStrategy StrategyDirective
+	supervisorDirective supervisorDirective
 
 	// observability settings
 	telemetry *telemetry.Telemetry
@@ -291,7 +291,7 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 		logger:               log.DefaultLogger,
 		mailboxSize:          DefaultMailboxSize,
 		children:             newPIDMap(10),
-		supervisorStrategy:   DefaultSupervisoryStrategy,
+		supervisorDirective:  DefaultSupervisoryStrategy,
 		watchersList:         slices.NewConcurrentSlice[*watcher](),
 		telemetry:            telemetry.New(),
 		actorPath:            actorPath,
@@ -558,7 +558,7 @@ func (x *pid) SpawnChild(ctx context.Context, name string, actor Actor) (PID, er
 		withAskTimeout(x.askTimeout.Load()),
 		withCustomLogger(x.logger),
 		withActorSystem(x.system),
-		withSupervisorStrategy(x.supervisorStrategy),
+		withSupervisorDirective(x.supervisorDirective),
 		withMailboxSize(x.mailboxSize),
 		withStash(x.stashCapacity.Load()),
 		withMailbox(x.mailbox.Clone()),
@@ -1323,45 +1323,6 @@ func (x *pid) handleReceived(received ReceiveContext) {
 	// send the message to the current actor behavior
 	if behavior, ok := x.behaviorStack.Peek(); ok {
 		behavior(received)
-	}
-}
-
-// supervise watches for child actor's failure and act based upon the supervisory strategy
-func (x *pid) supervise(cid PID, watcher *watcher) {
-	for {
-		select {
-		case <-watcher.Done:
-			x.logger.Debugf("stop watching cid=(%s)", cid.ActorPath().String())
-			return
-		case err := <-watcher.ErrChan:
-			x.logger.Errorf("child actor=(%s) is failing: Err=%v", cid.ActorPath().String(), err)
-			switch x.supervisorStrategy {
-			case StopDirective:
-				x.UnWatch(cid)
-				x.children.delete(cid.ActorPath())
-				if err := cid.Shutdown(context.Background()); err != nil {
-					// this can enter into some infinite loop if we panic
-					// since we are just shutting down the actor we can just log the error
-					// TODO: rethink properly about PostStop error handling
-					x.logger.Error(err)
-				}
-			case RestartDirective:
-				x.UnWatch(cid)
-				if err := cid.Restart(context.Background()); err != nil {
-					x.logger.Panic(err)
-				}
-				x.Watch(cid)
-			default:
-				x.UnWatch(cid)
-				x.children.delete(cid.ActorPath())
-				if err := cid.Shutdown(context.Background()); err != nil {
-					// this can enter into some infinite loop if we panic
-					// since we are just shutting down the actor we can just log the error
-					// TODO: rethink properly about PostStop error handling
-					x.logger.Error(err)
-				}
-			}
-		}
 	}
 }
 

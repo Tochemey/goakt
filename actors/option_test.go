@@ -39,6 +39,7 @@ import (
 func TestOption(t *testing.T) {
 	tel := telemetry.New()
 	mailbox := newReceiveContextBuffer(10)
+	resumeDirective := NewResumeDirective()
 	var atomicTrue atomic.Bool
 	atomicTrue.Store(true)
 	clusterConfig := NewClusterConfig()
@@ -74,9 +75,9 @@ func TestOption(t *testing.T) {
 			expected: actorSystem{expireActorAfter: -1},
 		},
 		{
-			name:     "WithSupervisorStrategy",
-			option:   WithSupervisorStrategy(RestartDirective),
-			expected: actorSystem{supervisorStrategy: RestartDirective},
+			name:     "WithSupervisorDirective",
+			option:   WithSupervisorDirective(resumeDirective),
+			expected: actorSystem{supervisorDirective: resumeDirective},
 		},
 		{
 			name:     "WithRemoting",

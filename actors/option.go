@@ -86,10 +86,10 @@ func WithPassivationDisabled() Option {
 	})
 }
 
-// WithSupervisorStrategy sets the supervisor strategy
-func WithSupervisorStrategy(strategy StrategyDirective) Option {
+// WithSupervisorDirective sets the supervisor strategy directive
+func WithSupervisorDirective(directive supervisorDirective) Option {
 	return OptionFunc(func(a *actorSystem) {
-		a.supervisorStrategy = strategy
+		a.supervisorDirective = directive
 	})
 }
 

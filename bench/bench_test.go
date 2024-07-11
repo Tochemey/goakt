@@ -67,6 +67,7 @@ func BenchmarkActor(b *testing.B) {
 			actors.WithLogger(log.DiscardLogger),
 			actors.WithActorInitMaxRetries(1),
 			actors.WithMailboxSize(uint64(b.N)),
+			actors.WithSupervisorDirective(actors.NewStopDirective()),
 			actors.WithReplyTimeout(receivingTimeout))
 
 		// start the actor system
