@@ -490,7 +490,7 @@ func (x *actorSystem) SpawnFromFunc(ctx context.Context, receiveFunc ReceiveFunc
 	}
 
 	actorID := uuid.NewString()
-	actor := newFnActor(actorID, receiveFunc, opts...)
+	actor := newFuncActor(actorID, receiveFunc, opts...)
 
 	actorPath := NewPath(actorID, NewAddress(x.name, "", -1))
 	if x.remotingEnabled.Load() {
