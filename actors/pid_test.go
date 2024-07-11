@@ -380,7 +380,7 @@ func TestRestart(t *testing.T) {
 	})
 }
 func TestSupervisorStrategy(t *testing.T) {
-	t.Run("With happy path", func(t *testing.T) {
+	t.Run("With stop as supervisor directive", func(t *testing.T) {
 		// create a test context
 		ctx := context.TODO()
 		// create the actor path
@@ -391,6 +391,7 @@ func TestSupervisorStrategy(t *testing.T) {
 			newSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
+			withSupervisorDirective(NewStopDirective()),
 			withAskTimeout(replyTimeout))
 
 		require.NoError(t, err)
@@ -413,7 +414,7 @@ func TestSupervisorStrategy(t *testing.T) {
 		err = parent.Shutdown(ctx)
 		assert.NoError(t, err)
 	})
-	t.Run("With stop as default strategy", func(t *testing.T) {
+	t.Run("With the default supervisor directive", func(t *testing.T) {
 		// create a test context
 		ctx := context.TODO()
 		// create the actor path
@@ -466,7 +467,7 @@ func TestSupervisorStrategy(t *testing.T) {
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
 			withPassivationDisabled(),
-			withSupervisorStrategy(-1), // this is a rogue strategy which will default to a Stop
+			withSupervisorDirective(new(unhandledSupervisorDirective)), // only for test to handle default case
 			withAskTimeout(replyTimeout))
 
 		require.NoError(t, err)
@@ -494,7 +495,7 @@ func TestSupervisorStrategy(t *testing.T) {
 		err = parent.Shutdown(ctx)
 		assert.NoError(t, err)
 	})
-	t.Run("With stop as default strategy with child actor shutdown failure", func(t *testing.T) {
+	t.Run("With stop as supervisor directive with child actor shutdown failure", func(t *testing.T) {
 		// create a test context
 		ctx := context.TODO()
 		// create the actor path
@@ -506,7 +507,7 @@ func TestSupervisorStrategy(t *testing.T) {
 			newSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
-			withSupervisorStrategy(DefaultSupervisoryStrategy),
+			withSupervisorDirective(DefaultSupervisoryStrategy),
 			withPassivationDisabled(),
 			withAskTimeout(replyTimeout))
 
@@ -535,7 +536,7 @@ func TestSupervisorStrategy(t *testing.T) {
 		err = parent.Shutdown(ctx)
 		assert.NoError(t, err)
 	})
-	t.Run("With restart as default strategy", func(t *testing.T) {
+	t.Run("With restart as supervisor strategy", func(t *testing.T) {
 		// create a test context
 		ctx := context.TODO()
 
@@ -549,7 +550,7 @@ func TestSupervisorStrategy(t *testing.T) {
 			withInitMaxRetries(1),
 			withCustomLogger(logger),
 			withPassivationDisabled(),
-			withSupervisorStrategy(RestartDirective),
+			withSupervisorDirective(NewRestartDirective()),
 			withAskTimeout(replyTimeout))
 
 		require.NoError(t, err)
@@ -593,9 +594,6 @@ func TestSupervisorStrategy(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
 
-		// this is for the sake of the test
-		parent.supervisorStrategy = StrategyDirective(-1)
-
 		// create the child actor
 		child, err := parent.SpawnChild(ctx, "SpawnChild", newSupervised())
 		assert.NoError(t, err)
@@ -611,6 +609,97 @@ func TestSupervisorStrategy(t *testing.T) {
 		// assert the actor state
 		assert.False(t, child.IsRunning())
 		assert.Len(t, parent.Children(), 0)
+
+		//stop the actor
+		err = parent.Shutdown(ctx)
+		assert.NoError(t, err)
+	})
+	t.Run("With resume as supervisor strategy", func(t *testing.T) {
+		// create a test context
+		ctx := context.TODO()
+
+		logger := log.New(log.DebugLevel, os.Stdout)
+		// create the actor path
+		actorPath := NewPath("Parent", NewAddress("sys", "host", 1))
+		// create the parent actor
+		parent, err := newPID(ctx,
+			actorPath,
+			newSupervisor(),
+			withInitMaxRetries(1),
+			withCustomLogger(logger),
+			withPassivationDisabled(),
+			withSupervisorDirective(NewResumeDirective()),
+			withAskTimeout(replyTimeout))
+
+		require.NoError(t, err)
+		assert.NotNil(t, parent)
+
+		// create the child actor
+		child, err := parent.SpawnChild(ctx, "SpawnChild", newSupervised())
+		assert.NoError(t, err)
+		assert.NotNil(t, child)
+
+		assert.Len(t, parent.Children(), 1)
+		// send a test panic message to the actor
+		assert.NoError(t, Tell(ctx, child, new(testpb.TestPanic)))
+
+		// wait for the child to properly shutdown
+		time.Sleep(time.Second)
+
+		// assert the actor state
+		assert.True(t, child.IsRunning())
+		require.Len(t, parent.Children(), 1)
+
+		reply, err := Ask(ctx, child, new(testpb.TestReply), time.Minute)
+		require.NoError(t, err)
+		require.NotNil(t, reply)
+		expected := new(testpb.Reply)
+		assert.True(t, proto.Equal(expected, reply))
+
+		//stop the actor
+		err = parent.Shutdown(ctx)
+		assert.NoError(t, err)
+	})
+	t.Run("With restart with limit as supervisor strategy", func(t *testing.T) {
+		// create a test context
+		ctx := context.TODO()
+
+		logger := log.New(log.DebugLevel, os.Stdout)
+		// create the actor path
+		actorPath := NewPath("Parent", NewAddress("sys", "host", 1))
+
+		// create the directive
+		restart := NewRestartDirective()
+		restart.WithLimit(2, time.Minute)
+
+		// create the parent actor
+		parent, err := newPID(ctx,
+			actorPath,
+			newSupervisor(),
+			withInitMaxRetries(1),
+			withCustomLogger(logger),
+			withPassivationDisabled(),
+			withSupervisorDirective(restart),
+			withAskTimeout(replyTimeout))
+
+		require.NoError(t, err)
+		assert.NotNil(t, parent)
+
+		// create the child actor
+		child, err := parent.SpawnChild(ctx, "SpawnChild", newSupervised())
+		assert.NoError(t, err)
+		assert.NotNil(t, child)
+
+		assert.Len(t, parent.Children(), 1)
+		// send a test panic message to the actor
+		assert.NoError(t, Tell(ctx, child, new(testpb.TestPanic)))
+
+		// wait for the child to properly shutdown
+		time.Sleep(time.Second)
+
+		// assert the actor state
+		assert.True(t, child.IsRunning())
+		require.Len(t, parent.Children(), 1)
 
 		//stop the actor
 		err = parent.Shutdown(ctx)

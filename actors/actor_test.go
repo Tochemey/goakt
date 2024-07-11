@@ -147,14 +147,16 @@ func newSupervised() *supervised {
 	return &supervised{}
 }
 
-func (c *supervised) PreStart(context.Context) error {
+func (x *supervised) PreStart(context.Context) error {
 	return nil
 }
 
-func (c *supervised) Receive(ctx ReceiveContext) {
+func (x *supervised) Receive(ctx ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *goaktpb.PostStart:
 	case *testspb.TestSend:
+	case *testspb.TestReply:
+		ctx.Response(new(testspb.Reply))
 	case *testspb.TestPanic:
 		panic("panicked")
 	default:
@@ -162,7 +164,7 @@ func (c *supervised) Receive(ctx ReceiveContext) {
 	}
 }
 
-func (c *supervised) PostStop(context.Context) error {
+func (x *supervised) PostStop(context.Context) error {
 	return nil
 }
 
@@ -491,3 +493,7 @@ func startClusterSystem(t *testing.T, nodeName, serverAddr string) (ActorSystem,
 	// return the cluster startNode
 	return system, provider
 }
+
+type unhandledSupervisorDirective struct{}
+
+func (x unhandledSupervisorDirective) isSupervisorDirective() {}

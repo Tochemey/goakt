@@ -80,8 +80,8 @@ type funcActor struct {
 	postStop    PostStopFunc
 }
 
-// newFnActor creates an instance of funcActor
-func newFnActor(id string, receiveFunc ReceiveFunc, opts ...FuncOption) Actor {
+// newFuncActor creates an instance of funcActor
+func newFuncActor(id string, receiveFunc ReceiveFunc, opts ...FuncOption) Actor {
 	// create the actor instance
 	actor := &funcActor{
 		receiveFunc: receiveFunc,
@@ -98,7 +98,7 @@ func newFnActor(id string, receiveFunc ReceiveFunc, opts ...FuncOption) Actor {
 var _ Actor = (*funcActor)(nil)
 
 // PreStart pre-starts the actor.
-func (x funcActor) PreStart(ctx context.Context) error {
+func (x *funcActor) PreStart(ctx context.Context) error {
 	// check whether the pre-start hook is set and call it
 	preStart := x.preStart
 	if preStart != nil {
@@ -108,7 +108,7 @@ func (x funcActor) PreStart(ctx context.Context) error {
 }
 
 // Receive processes any message dropped into the actor mailbox.
-func (x funcActor) Receive(ctx ReceiveContext) {
+func (x *funcActor) Receive(ctx ReceiveContext) {
 	switch m := ctx.Message().(type) {
 	case *goaktpb.PostStart:
 		x.pid = ctx.Self()
@@ -121,7 +121,7 @@ func (x funcActor) Receive(ctx ReceiveContext) {
 }
 
 // PostStop is executed when the actor is shutting down.
-func (x funcActor) PostStop(ctx context.Context) error {
+func (x *funcActor) PostStop(ctx context.Context) error {
 	// check whether the pre-start hook is set and call it
 	postStop := x.postStop
 	if postStop != nil {

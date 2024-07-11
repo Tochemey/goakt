@@ -163,7 +163,7 @@ type actorSystem struct {
 	// The default value is 1s
 	actorInitTimeout time.Duration
 	// Specifies the supervisor strategy
-	supervisorStrategy StrategyDirective
+	supervisorDirective supervisorDirective
 	// Specifies the telemetry config
 	telemetry *telemetry.Telemetry
 	// Specifies whether remoting is enabled.
@@ -240,7 +240,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		expireActorAfter:       DefaultPassivationTimeout,
 		askTimeout:             DefaultAskTimeout,
 		actorInitMaxRetries:    DefaultInitMaxRetries,
-		supervisorStrategy:     DefaultSupervisoryStrategy,
+		supervisorDirective:    DefaultSupervisoryStrategy,
 		telemetry:              telemetry.New(),
 		locker:                 sync.Mutex{},
 		shutdownTimeout:        DefaultShutdownTimeout,
@@ -437,7 +437,7 @@ func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor) (PID,
 		withAskTimeout(x.askTimeout),
 		withCustomLogger(x.logger),
 		withActorSystem(x),
-		withSupervisorStrategy(x.supervisorStrategy),
+		withSupervisorDirective(x.supervisorDirective),
 		withMailboxSize(x.mailboxSize),
 		withMailbox(mailbox), // nil mailbox is taken care during initiliazation by the newPID
 		withStash(x.stashCapacity),
@@ -490,7 +490,7 @@ func (x *actorSystem) SpawnFromFunc(ctx context.Context, receiveFunc ReceiveFunc
 	}
 
 	actorID := uuid.NewString()
-	actor := newFnActor(actorID, receiveFunc, opts...)
+	actor := newFuncActor(actorID, receiveFunc, opts...)
 
 	actorPath := NewPath(actorID, NewAddress(x.name, "", -1))
 	if x.remotingEnabled.Load() {
@@ -511,7 +511,7 @@ func (x *actorSystem) SpawnFromFunc(ctx context.Context, receiveFunc ReceiveFunc
 		withAskTimeout(x.askTimeout),
 		withCustomLogger(x.logger),
 		withActorSystem(x),
-		withSupervisorStrategy(x.supervisorStrategy),
+		withSupervisorDirective(x.supervisorDirective),
 		withMailboxSize(x.mailboxSize),
 		withMailbox(mailbox), // nil mailbox is taken care during initiliazation by the newPID
 		withStash(x.stashCapacity),

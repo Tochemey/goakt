@@ -30,16 +30,9 @@ import (
 	"github.com/tochemey/goakt/v2/goaktpb"
 )
 
-// StrategyDirective represents the supervisor strategy directive
-type StrategyDirective int
-
 const (
 	// protocol defines the Go-Akt addressing protocol
 	protocol = "goakt"
-	// RestartDirective defines the restart strategy when handling actors failure
-	RestartDirective StrategyDirective = iota
-	// StopDirective defines the stop strategy when handling actors failure
-	StopDirective
 
 	// DefaultPassivationTimeout defines the default passivation timeout
 	DefaultPassivationTimeout = 2 * time.Minute
@@ -47,8 +40,6 @@ const (
 	DefaultAskTimeout = 20 * time.Second
 	// DefaultInitMaxRetries defines the default value for retrying actor initialization
 	DefaultInitMaxRetries = 5
-	// DefaultSupervisoryStrategy defines the default supervisory strategy
-	DefaultSupervisoryStrategy = StopDirective
 	// DefaultShutdownTimeout defines the default shutdown timeout
 	DefaultShutdownTimeout = 2 * time.Second
 	// DefaultInitTimeout defines the default init timeout
@@ -66,8 +57,11 @@ const (
 	eventsTopic = "topic.events"
 )
 
-// NoSender means that there is no sender
-var NoSender PID
-
-// RemoteNoSender means that there is no sender
-var RemoteNoSender = new(goaktpb.Address)
+var (
+	// NoSender means that there is no sender
+	NoSender PID
+	// DefaultSupervisoryStrategy defines the default supervisory strategy
+	DefaultSupervisoryStrategy = NewStopDirective()
+	// RemoteNoSender means that there is no sender
+	RemoteNoSender = new(goaktpb.Address)
+)
