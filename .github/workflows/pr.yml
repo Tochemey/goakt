@@ -33,7 +33,7 @@ jobs:
           password: ${{ secrets.DOCKERHUB_TOKEN}}
       - uses: earthly/actions/setup-earthly@v1
         with:
-          version: v0.8.14
+          version: v0.8.15
       - name: Earthly version
         run: earthly --version
       - name: Run Linter and Tests
