@@ -38,20 +38,21 @@ import (
 // then for n messages sent through the router, each actor is forwarded one message.
 type RoundRobin struct {
 	// list of routees
-	routees     []actors.PID
-	routeeKinds []actors.Actor
-	next        uint32
+	// list of routeeRefs
+	routeesMap map[string]actors.PID
+	routees    []actors.Actor
+	next       uint32
 }
 
 // enforce compilation error
 var _ actors.Actor = (*RoundRobin)(nil)
 
 // NewRoundRobin creates an instance of RoundRobin router
-func NewRoundRobin(kinds ...actors.Actor) *RoundRobin {
+func NewRoundRobin(routees ...actors.Actor) *RoundRobin {
 	// create the router instance
 	router := &RoundRobin{
-		routees:     make([]actors.PID, 0, len(kinds)),
-		routeeKinds: kinds,
+		routeesMap: make(map[string]actors.PID, len(routees)),
+		routees:    routees,
 	}
 	return router
 }
@@ -79,10 +80,10 @@ func (x *RoundRobin) PostStop(context.Context) error {
 
 // postStart spawns routees
 func (x *RoundRobin) postStart(ctx actors.ReceiveContext) {
-	for index, routeeKind := range x.routeeKinds {
+	for index, routee := range x.routees {
 		name := fmt.Sprintf("routee-%s-%d", ctx.Self().Name(), index)
-		routee := ctx.Spawn(name, routeeKind)
-		x.routees = append(x.routees, routee)
+		routee := ctx.Spawn(name, routee)
+		x.routeesMap[routee.ID()] = routee
 	}
 	ctx.Become(x.broadcast)
 }
@@ -93,20 +94,24 @@ func (x *RoundRobin) broadcast(ctx actors.ReceiveContext) {
 	switch msg := ctx.Message().(type) {
 	case *goaktpb.Broadcast:
 		message = msg
+	case *goaktpb.Terminated:
+		delete(x.routeesMap, msg.GetActorId())
+		return
 	default:
 		ctx.Unhandled()
 		return
 	}
 
-	routees := make([]actors.PID, 0, len(x.routees))
-	for _, routee := range x.routees {
+	routees := make([]actors.PID, 0, len(x.routeesMap))
+	for _, routee := range x.routeesMap {
 		if routee.IsRunning() {
 			routees = append(routees, routee)
 		}
 	}
 
 	if len(routees) == 0 {
-		return
+		// push message to deadletters
+		ctx.Unhandled()
 	}
 
 	msg, err := message.GetMessage().UnmarshalNew()
