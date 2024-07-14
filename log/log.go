@@ -35,7 +35,7 @@ import (
 )
 
 // DefaultLogger represents the default Log to use
-// This Log wraps zerolog under the hood
+// This Log wraps zap under the hood
 var DefaultLogger = New(DebugLevel, os.Stdout)
 var DiscardLogger = New(DebugLevel, io.Discard)
 

@@ -129,6 +129,8 @@ type ActorSystem interface {
 	handleRemoteAsk(ctx context.Context, to PID, message proto.Message, timeout time.Duration) (response proto.Message, err error)
 	// handleRemoteTell handles an asynchronous message to an actor
 	handleRemoteTell(ctx context.Context, to PID, message proto.Message) error
+	// setActor sets actor in the actor system actors registry
+	setActor(actor PID)
 }
 
 // ActorSystem represent a collection of actors on a given node
@@ -465,16 +467,7 @@ func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor) (PID,
 		return nil, err
 	}
 
-	x.actors.set(pid)
-	if x.clusterEnabled.Load() {
-		x.actorsChan <- &internalpb.WireActor{
-			ActorName:    name,
-			ActorAddress: actorPath.RemoteAddress(),
-			ActorPath:    actorPath.String(),
-			ActorType:    types.NameOf(actor),
-		}
-	}
-
+	x.setActor(pid)
 	return pid, nil
 }
 
@@ -539,16 +532,7 @@ func (x *actorSystem) SpawnFromFunc(ctx context.Context, receiveFunc ReceiveFunc
 		return nil, err
 	}
 
-	x.actors.set(pid)
-	if x.clusterEnabled.Load() {
-		x.actorsChan <- &internalpb.WireActor{
-			ActorName:    actorID,
-			ActorAddress: actorPath.RemoteAddress(),
-			ActorPath:    actorPath.String(),
-			ActorType:    types.NameOf(actor),
-		}
-	}
-
+	x.setActor(pid)
 	return pid, nil
 }
 
@@ -1168,6 +1152,19 @@ func (x *actorSystem) handleRemoteTell(ctx context.Context, to PID, message prot
 	spanCtx, span := x.tracer.Start(ctx, "HandleRemoteTell")
 	defer span.End()
 	return Tell(spanCtx, to, message)
+}
+
+// setActor implements ActorSystem.
+func (x *actorSystem) setActor(actor PID) {
+	x.actors.set(actor)
+	if x.clusterEnabled.Load() {
+		x.actorsChan <- &internalpb.WireActor{
+			ActorName:    actor.Name(),
+			ActorAddress: actor.ActorPath().RemoteAddress(),
+			ActorPath:    actor.ActorPath().String(),
+			ActorType:    types.NameOf(actor),
+		}
+	}
 }
 
 // enableClustering enables clustering. When clustering is enabled remoting is also enabled to facilitate remote

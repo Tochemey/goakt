@@ -197,7 +197,6 @@ func (x *userActor) Receive(ctx ReceiveContext) {
 // Authenticated behavior is executed when the actor receive the TestAuth message
 func (x *userActor) Authenticated(ctx ReceiveContext) {
 	switch ctx.Message().(type) {
-	case *goaktpb.PostStart:
 	case *testspb.TestReadiness:
 		ctx.Response(new(testspb.TestReady))
 		ctx.UnBecome()
@@ -206,7 +205,6 @@ func (x *userActor) Authenticated(ctx ReceiveContext) {
 
 func (x *userActor) CreditAccount(ctx ReceiveContext) {
 	switch ctx.Message().(type) {
-	case *goaktpb.PostStart:
 	case *testspb.CreditAccount:
 		ctx.Response(new(testspb.AccountCredited))
 		ctx.BecomeStacked(x.DebitAccount)
@@ -217,7 +215,6 @@ func (x *userActor) CreditAccount(ctx ReceiveContext) {
 
 func (x *userActor) DebitAccount(ctx ReceiveContext) {
 	switch ctx.Message().(type) {
-	case *goaktpb.PostStart:
 	case *testspb.DebitAccount:
 		ctx.Response(new(testspb.AccountDebited))
 		ctx.UnBecomeStacked()

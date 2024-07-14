@@ -157,7 +157,7 @@ type PID interface {
 	// push a message to the actor's receiveContextBuffer
 	doReceive(ctx ReceiveContext)
 	// watchers returns the list of watchMen
-	watchers() *slices.ConcurrentSlice[*watcher]
+	watchers() *slices.ThreadSafe[*watcher]
 	// setBehavior is a utility function that helps set the actor behavior
 	setBehavior(behavior Behavior)
 	// setBehaviorStacked adds a behavior to the actor's behaviors
@@ -227,7 +227,7 @@ type pid struct {
 	haltPassivationLnr chan types.Unit
 
 	// set of watchersList watching the given actor
-	watchersList *slices.ConcurrentSlice[*watcher]
+	watchersList *slices.ThreadSafe[*watcher]
 
 	// hold the list of the children
 	children *pidMap
@@ -257,7 +257,7 @@ type pid struct {
 	// http client
 	httpClient *stdhttp.Client
 
-	// specifies the current actor behavior
+	// specifies the actor behavior stack
 	behaviorStack *behaviorStack
 
 	// stash settings
@@ -292,7 +292,7 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 		mailboxSize:          DefaultMailboxSize,
 		children:             newPIDMap(10),
 		supervisorDirective:  DefaultSupervisoryStrategy,
-		watchersList:         slices.NewConcurrentSlice[*watcher](),
+		watchersList:         slices.NewThreadSafe[*watcher](),
 		telemetry:            telemetry.New(),
 		actorPath:            actorPath,
 		rwLocker:             &sync.RWMutex{},
@@ -602,6 +602,11 @@ func (x *pid) SpawnChild(ctx context.Context, name string, actor Actor) (PID, er
 			CreatedAt: timestamppb.Now(),
 			Parent:    x.ActorPath().RemoteAddress(),
 		})
+	}
+
+	// set the actor in the given actor system registry
+	if x.ActorSystem() != nil {
+		x.ActorSystem().setActor(cid)
 	}
 
 	return cid, nil
@@ -1182,7 +1187,7 @@ func (x *pid) UnWatch(pid PID) {
 }
 
 // Watchers return the list of watchersList
-func (x *pid) watchers() *slices.ConcurrentSlice[*watcher] {
+func (x *pid) watchers() *slices.ThreadSafe[*watcher] {
 	return x.watchersList
 }
 
@@ -1247,7 +1252,7 @@ func (x *pid) reset() {
 	x.lastProcessingDuration.Store(0)
 	x.initTimeout.Store(DefaultInitTimeout)
 	x.children = newPIDMap(10)
-	x.watchersList = slices.NewConcurrentSlice[*watcher]()
+	x.watchersList = slices.NewThreadSafe[*watcher]()
 	x.telemetry = telemetry.New()
 	x.mailbox.Reset()
 	x.resetBehavior()
@@ -1265,7 +1270,9 @@ func (x *pid) freeWatchers(ctx context.Context) {
 	if watchers.Len() > 0 {
 		for item := range watchers.Iter() {
 			watcher := item.Value
-			terminated := &goaktpb.Terminated{}
+			terminated := &goaktpb.Terminated{
+				ActorId: x.ID(),
+			}
 			if watcher.WatcherID.IsRunning() {
 				// TODO: handle error and push to some system dead-letters queue
 				_ = x.Tell(ctx, watcher.WatcherID, terminated)
@@ -1394,7 +1401,6 @@ func (x *pid) setBehavior(behavior Behavior) {
 // resetBehavior is a utility function resets the actor behavior
 func (x *pid) resetBehavior() {
 	x.rwLocker.Lock()
-	x.behaviorStack.Clear()
 	x.behaviorStack.Push(x.Receive)
 	x.rwLocker.Unlock()
 }

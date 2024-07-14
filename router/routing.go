@@ -22,30 +22,20 @@
  * SOFTWARE.
  */
 
-package slices
+package router
 
-import (
-	"testing"
+// RoutingStrategy defines the routing strategy
+type RoutingStrategy int
 
-	"github.com/stretchr/testify/assert"
+const (
+	// RoundRobinStrategy rotates over the set of routeesMap making sure that if there are n routeesMap,
+	// then for n messages sent through the router, each actor is forwarded one message.
+	RoundRobinStrategy RoutingStrategy = iota
+	// RandomStrategy selects a routee when a message is sent through the router.
+	RandomStrategy
+	// ConsistentHashingStrategy uses consistent hashing to select a routee based on the sent message.
+	// Consistent hashing delivers messages with the same hash to the same routee as long as the set of routeesMap stays the same.
+	// When the set of routeesMap changes, consistent hashing tries to make sure,
+	// but does not guarantee, that messages with the same hash are routed to the same routee.
+	ConsistentHashingStrategy
 )
-
-func TestNewThreadSafeSlice(t *testing.T) {
-	// create a concurrent slice of integer
-	sl := NewThreadSafe[int]()
-
-	// add some items
-	sl.Append(2)
-	sl.Append(4)
-	sl.Append(5)
-
-	// assert the length
-	assert.EqualValues(t, 3, sl.Len())
-	// get the element at index 2
-	assert.EqualValues(t, 5, sl.Get(2))
-	// remove the element at index 1
-	sl.Delete(1)
-	// assert the length
-	assert.EqualValues(t, 2, sl.Len())
-	assert.Nil(t, sl.Get(4))
-}

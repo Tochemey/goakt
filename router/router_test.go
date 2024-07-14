@@ -22,30 +22,45 @@
  * SOFTWARE.
  */
 
-package slices
+package router
 
 import (
-	"testing"
+	"context"
 
-	"github.com/stretchr/testify/assert"
+	"github.com/tochemey/goakt/v2/actors"
+	"github.com/tochemey/goakt/v2/log"
+	"github.com/tochemey/goakt/v2/test/data/testpb"
 )
 
-func TestNewThreadSafeSlice(t *testing.T) {
-	// create a concurrent slice of integer
-	sl := NewThreadSafe[int]()
+type worker struct {
+	counter int
+	logger  log.Logger
+}
 
-	// add some items
-	sl.Append(2)
-	sl.Append(4)
-	sl.Append(5)
+var _ actors.Actor = (*worker)(nil)
 
-	// assert the length
-	assert.EqualValues(t, 3, sl.Len())
-	// get the element at index 2
-	assert.EqualValues(t, 5, sl.Get(2))
-	// remove the element at index 1
-	sl.Delete(1)
-	// assert the length
-	assert.EqualValues(t, 2, sl.Len())
-	assert.Nil(t, sl.Get(4))
+func newWorker() *worker {
+	return &worker{}
+}
+
+func (x *worker) PreStart(context.Context) error {
+	x.logger = log.DefaultLogger
+	return nil
+}
+
+func (x *worker) Receive(ctx actors.ReceiveContext) {
+	switch msg := ctx.Message().(type) {
+	case *testpb.DoLog:
+		x.counter++
+		x.logger.Infof("Got message: %s", msg.GetText())
+	case *testpb.GetCount:
+		x.counter++
+		ctx.Response(&testpb.Count{Value: int32(x.counter)})
+	default:
+		ctx.Unhandled()
+	}
+}
+
+func (x *worker) PostStop(context.Context) error {
+	return nil
 }

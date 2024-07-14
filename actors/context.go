@@ -193,8 +193,10 @@ func (c *receiveContext) Self() PID {
 // Err is used instead of panicking within a message handler.
 // One can also call panic which is not the recommended way
 func (c *receiveContext) Err(err error) {
-	// this will be recovered
-	panic(err)
+	if err != nil {
+		// this will be recovered
+		panic(err)
+	}
 }
 
 // Response sets the message response
