@@ -1112,6 +1112,138 @@ func (*TaskComplete) Descriptor() ([]byte, []int) {
 	return file_test_test_proto_rawDescGZIP(), []int{25}
 }
 
+type DoLog struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	Text string `protobuf:"bytes,1,opt,name=text,proto3" json:"text,omitempty"`
+}
+
+func (x *DoLog) Reset() {
+	*x = DoLog{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_test_test_proto_msgTypes[26]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *DoLog) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DoLog) ProtoMessage() {}
+
+func (x *DoLog) ProtoReflect() protoreflect.Message {
+	mi := &file_test_test_proto_msgTypes[26]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DoLog.ProtoReflect.Descriptor instead.
+func (*DoLog) Descriptor() ([]byte, []int) {
+	return file_test_test_proto_rawDescGZIP(), []int{26}
+}
+
+func (x *DoLog) GetText() string {
+	if x != nil {
+		return x.Text
+	}
+	return ""
+}
+
+type GetCount struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+}
+
+func (x *GetCount) Reset() {
+	*x = GetCount{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_test_test_proto_msgTypes[27]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *GetCount) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetCount) ProtoMessage() {}
+
+func (x *GetCount) ProtoReflect() protoreflect.Message {
+	mi := &file_test_test_proto_msgTypes[27]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetCount.ProtoReflect.Descriptor instead.
+func (*GetCount) Descriptor() ([]byte, []int) {
+	return file_test_test_proto_rawDescGZIP(), []int{27}
+}
+
+type Count struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	Value int32 `protobuf:"varint,1,opt,name=value,proto3" json:"value,omitempty"`
+}
+
+func (x *Count) Reset() {
+	*x = Count{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_test_test_proto_msgTypes[28]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *Count) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Count) ProtoMessage() {}
+
+func (x *Count) ProtoReflect() protoreflect.Message {
+	mi := &file_test_test_proto_msgTypes[28]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Count.ProtoReflect.Descriptor instead.
+func (*Count) Descriptor() ([]byte, []int) {
+	return file_test_test_proto_rawDescGZIP(), []int{28}
+}
+
+func (x *Count) GetValue() int32 {
+	if x != nil {
+		return x.Value
+	}
+	return 0
+}
+
 var File_test_test_proto protoreflect.FileDescriptor
 
 var file_test_test_proto_rawDesc = []byte{
@@ -1164,15 +1296,20 @@ var file_test_test_proto_rawDesc = []byte{
 	0x07, 0x52, 0x75, 0x6e, 0x54, 0x61, 0x73, 0x6b, 0x12, 0x1a, 0x0a, 0x08, 0x64, 0x75, 0x72, 0x61,
 	0x74, 0x69, 0x6f, 0x6e, 0x18, 0x01, 0x20, 0x01, 0x28, 0x04, 0x52, 0x08, 0x64, 0x75, 0x72, 0x61,
 	0x74, 0x69, 0x6f, 0x6e, 0x22, 0x0e, 0x0a, 0x0c, 0x54, 0x61, 0x73, 0x6b, 0x43, 0x6f, 0x6d, 0x70,
-	0x6c, 0x65, 0x74, 0x65, 0x42, 0x80, 0x01, 0x0a, 0x0a, 0x63, 0x6f, 0x6d, 0x2e, 0x74, 0x65, 0x73,
-	0x74, 0x70, 0x62, 0x42, 0x09, 0x54, 0x65, 0x73, 0x74, 0x50, 0x72, 0x6f, 0x74, 0x6f, 0x48, 0x02,
-	0x50, 0x01, 0x5a, 0x2d, 0x67, 0x69, 0x74, 0x68, 0x75, 0x62, 0x2e, 0x63, 0x6f, 0x6d, 0x2f, 0x74,
-	0x6f, 0x63, 0x68, 0x65, 0x6d, 0x65, 0x79, 0x2f, 0x67, 0x6f, 0x61, 0x6b, 0x74, 0x2f, 0x76, 0x32,
-	0x2f, 0x74, 0x65, 0x73, 0x74, 0x2f, 0x64, 0x61, 0x74, 0x61, 0x3b, 0x74, 0x65, 0x73, 0x74, 0x70,
-	0x62, 0xa2, 0x02, 0x03, 0x54, 0x58, 0x58, 0xaa, 0x02, 0x06, 0x54, 0x65, 0x73, 0x74, 0x70, 0x62,
-	0xca, 0x02, 0x06, 0x54, 0x65, 0x73, 0x74, 0x70, 0x62, 0xe2, 0x02, 0x12, 0x54, 0x65, 0x73, 0x74,
-	0x70, 0x62, 0x5c, 0x47, 0x50, 0x42, 0x4d, 0x65, 0x74, 0x61, 0x64, 0x61, 0x74, 0x61, 0xea, 0x02,
-	0x06, 0x54, 0x65, 0x73, 0x74, 0x70, 0x62, 0x62, 0x06, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x33,
+	0x6c, 0x65, 0x74, 0x65, 0x22, 0x1b, 0x0a, 0x05, 0x44, 0x6f, 0x4c, 0x6f, 0x67, 0x12, 0x12, 0x0a,
+	0x04, 0x74, 0x65, 0x78, 0x74, 0x18, 0x01, 0x20, 0x01, 0x28, 0x09, 0x52, 0x04, 0x74, 0x65, 0x78,
+	0x74, 0x22, 0x0a, 0x0a, 0x08, 0x47, 0x65, 0x74, 0x43, 0x6f, 0x75, 0x6e, 0x74, 0x22, 0x1d, 0x0a,
+	0x05, 0x43, 0x6f, 0x75, 0x6e, 0x74, 0x12, 0x14, 0x0a, 0x05, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x18,
+	0x01, 0x20, 0x01, 0x28, 0x05, 0x52, 0x05, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x42, 0x80, 0x01, 0x0a,
+	0x0a, 0x63, 0x6f, 0x6d, 0x2e, 0x74, 0x65, 0x73, 0x74, 0x70, 0x62, 0x42, 0x09, 0x54, 0x65, 0x73,
+	0x74, 0x50, 0x72, 0x6f, 0x74, 0x6f, 0x48, 0x02, 0x50, 0x01, 0x5a, 0x2d, 0x67, 0x69, 0x74, 0x68,
+	0x75, 0x62, 0x2e, 0x63, 0x6f, 0x6d, 0x2f, 0x74, 0x6f, 0x63, 0x68, 0x65, 0x6d, 0x65, 0x79, 0x2f,
+	0x67, 0x6f, 0x61, 0x6b, 0x74, 0x2f, 0x76, 0x32, 0x2f, 0x74, 0x65, 0x73, 0x74, 0x2f, 0x64, 0x61,
+	0x74, 0x61, 0x3b, 0x74, 0x65, 0x73, 0x74, 0x70, 0x62, 0xa2, 0x02, 0x03, 0x54, 0x58, 0x58, 0xaa,
+	0x02, 0x06, 0x54, 0x65, 0x73, 0x74, 0x70, 0x62, 0xca, 0x02, 0x06, 0x54, 0x65, 0x73, 0x74, 0x70,
+	0x62, 0xe2, 0x02, 0x12, 0x54, 0x65, 0x73, 0x74, 0x70, 0x62, 0x5c, 0x47, 0x50, 0x42, 0x4d, 0x65,
+	0x74, 0x61, 0x64, 0x61, 0x74, 0x61, 0xea, 0x02, 0x06, 0x54, 0x65, 0x73, 0x74, 0x70, 0x62, 0x62,
+	0x06, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x33,
 }
 
 var (
@@ -1187,7 +1324,7 @@ func file_test_test_proto_rawDescGZIP() []byte {
 	return file_test_test_proto_rawDescData
 }
 
-var file_test_test_proto_msgTypes = make([]protoimpl.MessageInfo, 26)
+var file_test_test_proto_msgTypes = make([]protoimpl.MessageInfo, 29)
 var file_test_test_proto_goTypes = []interface{}{
 	(*TestReply)(nil),        // 0: testpb.TestReply
 	(*TestPanic)(nil),        // 1: testpb.TestPanic
@@ -1215,6 +1352,9 @@ var file_test_test_proto_goTypes = []interface{}{
 	(*Wait)(nil),             // 23: testpb.Wait
 	(*RunTask)(nil),          // 24: testpb.RunTask
 	(*TaskComplete)(nil),     // 25: testpb.TaskComplete
+	(*DoLog)(nil),            // 26: testpb.DoLog
+	(*GetCount)(nil),         // 27: testpb.GetCount
+	(*Count)(nil),            // 28: testpb.Count
 }
 var file_test_test_proto_depIdxs = []int32{
 	0, // [0:0] is the sub-list for method output_type
@@ -1542,6 +1682,42 @@ func file_test_test_proto_init() {
 				return nil
 			}
 		}
+		file_test_test_proto_msgTypes[26].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*DoLog); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_test_test_proto_msgTypes[27].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*GetCount); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_test_test_proto_msgTypes[28].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*Count); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -1549,7 +1725,7 @@ func file_test_test_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: file_test_test_proto_rawDesc,
 			NumEnums:      0,
-			NumMessages:   26,
+			NumMessages:   29,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

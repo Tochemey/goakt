@@ -61,4 +61,15 @@ message Wait {
 message RunTask {
   uint64 duration = 1;
 }
+
 message TaskComplete {}
+
+message DoLog {
+  string text = 1;
+}
+
+message GetCount {}
+
+message Count {
+  int32 value = 1;
+}

@@ -34,6 +34,7 @@ The project adheres to [Semantic Versioning](https://semver.org) and [Convention
     - [Actor System](#actor-system)
     - [Behaviors](#behaviors)
     - [Mailbox](#mailbox)
+    - [Routers](#routers)
     - [Events Stream](#events-stream)
       - [Supported events](#supported-events)
     - [Messaging](#messaging)
@@ -123,8 +124,11 @@ The fundamental building blocks of Go-Akt are actors.
   - supervise the failure behavior of (child) actors. The supervisory strategy to adopt is set during its creation. 
     In Go-Akt that each child actor is treated separately. There is no concept of one-for-one and one-for-all strategies. 
     The following directives are supported:
-      - [`Restart`](./actors/types.go): to restart the child actor
-      - [`Stop`](./actors/types.go): to stop the child actor which is the default one
+      - [`Restart`](./actors/supervisor.go): to restart the child actor. One can control how the restart is done using the following options:
+            - `maxNumRetries`: defines the maximum of restart attempts
+            - `timeout`: how to attempt restarting the faulty actor
+      - [`Stop`](./actors/supervisor.go): to stop the child actor which is the default one
+      - [`Resume`](./actors/supervisor.go): ignores the failure and process the next message, instead
   - remotely lookup for an actor on another node via their process id [`PID`](./actors/pid.go) `RemoteLookup`.
     This
     allows it to send messages remotely via `RemoteAsk` or `RemoteTell` methods
@@ -176,6 +180,10 @@ To change the behavior, call the following methods on the [ReceiveContext interf
 ### Mailbox
 
 Once can implement a custom mailbox. See [Mailbox](./actors/mailbox.go). The default mailbox makes use of buffered channels.
+
+### Routers
+
+Go-Akt comes shipped with some routers. See [docs](./router/router.md)
 
 ### Events Stream
 

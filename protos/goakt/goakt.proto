@@ -94,7 +94,10 @@ message NodeLeft {
 
 // Terminated is used to notify watching actors
 // of the shutdown of its child actor.
-message Terminated {}
+message Terminated {
+  // Specifies the terminated actor
+  string actor_id = 1;
+}
 
 // PoisonPill is sent the stop an actor.
 // It is enqueued as ordinary messages.
@@ -106,3 +109,9 @@ message PostStart {}
 
 // PreStart is used when an actor is about to start
 message PreStart {}
+
+// Broadcast is used to send message to a router
+message Broadcast {
+  // Specifies the actual message
+  google.protobuf.Any message = 1;
+}

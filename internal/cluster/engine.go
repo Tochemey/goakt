@@ -31,6 +31,7 @@ import (
 	"net"
 	"slices"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/buraksezer/olric"
@@ -117,6 +118,7 @@ type Interface interface {
 
 // Engine represents the Engine
 type Engine struct {
+	*sync.Mutex
 	// specifies the total number of partitions
 	// the default values is 20
 	partitionsCount uint64
@@ -184,6 +186,7 @@ func NewEngine(name string, disco discovery.Provider, host *discovery.Node, opts
 		messagesChan:       make(chan *redis.Message, 1),
 		minimumPeersQuorum: 1,
 		replicaCount:       1,
+		Mutex:              new(sync.Mutex),
 	}
 	// apply the various options
 	for _, opt := range opts {
@@ -332,7 +335,12 @@ func (n *Engine) Stop(ctx context.Context) error {
 // IsLeader states whether the given cluster node is a leader or not at a given
 // point in time in the cluster
 func (n *Engine) IsLeader(ctx context.Context) bool {
-	stats, err := n.client.Stats(ctx, n.host.PeersAddress())
+	n.Lock()
+	client := n.client
+	host := n.host
+	n.Unlock()
+
+	stats, err := client.Stats(ctx, host.PeersAddress())
 	if err != nil {
 		n.logger.Errorf("failed to fetch the cluster node=(%s) stats: %v", n.host.PeersAddress(), err)
 		return false
@@ -342,24 +350,36 @@ func (n *Engine) IsLeader(ctx context.Context) bool {
 
 // Host returns the Node Host
 func (n *Engine) Host() string {
-	return n.host.Host
+	n.Lock()
+	host := n.host
+	n.Unlock()
+	return host.Host
 }
 
 // RemotingPort returns the Node remoting port
 func (n *Engine) RemotingPort() int {
-	return n.host.RemotingPort
+	n.Lock()
+	host := n.host
+	n.Unlock()
+	return host.RemotingPort
 }
 
 // AdvertisedAddress returns the cluster node cluster address that is known by the
 // peers in the cluster
 func (n *Engine) AdvertisedAddress() string {
-	return n.host.PeersAddress()
+	n.Lock()
+	host := n.host
+	n.Unlock()
+	return host.PeersAddress()
 }
 
 // PutActor pushes to the cluster the peer sync request
 func (n *Engine) PutActor(ctx context.Context, actor *internalpb.WireActor) error {
 	ctx, cancelFn := context.WithTimeout(ctx, n.writeTimeout)
 	defer cancelFn()
+
+	n.Lock()
+	defer n.Unlock()
 
 	logger := n.logger
 
@@ -408,6 +428,9 @@ func (n *Engine) GetState(ctx context.Context, peerAddress string) (*internalpb.
 	ctx, cancelFn := context.WithTimeout(ctx, n.readTimeout)
 	defer cancelFn()
 
+	n.Lock()
+	defer n.Unlock()
+
 	logger := n.logger
 
 	logger.Infof("[%s] retrieving peer (%s) sync record", n.host.PeersAddress(), peerAddress)
@@ -443,6 +466,9 @@ func (n *Engine) GetActor(ctx context.Context, actorName string) (*internalpb.Wi
 	ctx, cancelFn := context.WithTimeout(ctx, n.readTimeout)
 	defer cancelFn()
 
+	n.Lock()
+	defer n.Unlock()
+
 	logger := n.logger
 
 	logger.Infof("[%s] retrieving actor (%s) from the cluster", n.host.PeersAddress(), actorName)
@@ -477,6 +503,8 @@ func (n *Engine) GetActor(ctx context.Context, actorName string) (*internalpb.Wi
 // An actor is removed from the cluster when this actor has been passivated.
 func (n *Engine) RemoveActor(ctx context.Context, actorName string) error {
 	logger := n.logger
+	n.Lock()
+	defer n.Unlock()
 
 	logger.Infof("removing actor (%s)", actorName)
 
@@ -495,6 +523,9 @@ func (n *Engine) SetKey(ctx context.Context, key string) error {
 	ctx, cancelFn := context.WithTimeout(ctx, n.writeTimeout)
 	defer cancelFn()
 
+	n.Lock()
+	defer n.Unlock()
+
 	logger := n.logger
 
 	logger.Infof("replicating key (%s)", key)
@@ -512,6 +543,9 @@ func (n *Engine) SetKey(ctx context.Context, key string) error {
 func (n *Engine) KeyExists(ctx context.Context, key string) (bool, error) {
 	ctx, cancelFn := context.WithTimeout(ctx, n.readTimeout)
 	defer cancelFn()
+
+	n.Lock()
+	defer n.Unlock()
 
 	logger := n.logger
 
@@ -533,6 +567,9 @@ func (n *Engine) KeyExists(ctx context.Context, key string) (bool, error) {
 // UnsetKey unsets the already set given key in the cluster
 func (n *Engine) UnsetKey(ctx context.Context, key string) error {
 	logger := n.logger
+
+	n.Lock()
+	defer n.Unlock()
 
 	logger.Infof("unsetting key (%s)", key)
 
@@ -561,7 +598,11 @@ func (n *Engine) Events() <-chan *Event {
 
 // Peers returns a channel containing the list of peers at a given time
 func (n *Engine) Peers(ctx context.Context) ([]*Peer, error) {
-	members, err := n.client.Members(ctx)
+	n.Lock()
+	client := n.client
+	n.Unlock()
+
+	members, err := client.Members(ctx)
 	if err != nil {
 		n.logger.Error(errors.Wrap(err, "failed to read cluster peers"))
 		return nil, err
