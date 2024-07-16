@@ -183,7 +183,16 @@ Once can implement a custom mailbox. See [Mailbox](./actors/mailbox.go). The def
 
 ### Routers
 
-Go-Akt comes shipped with some routers. See [docs](./router/router.md)
+Routers help send the same type of message to a set of actors to be processed in parallel depending upon
+the type of the router used. Routers should be used with caution because they can hinder performance
+Go-Akt comes shipped with the following routers:
+* `Broadcast router`: This router broadcasts the given message to all its available routees in parallel. When the router receives a message to broadcast, every routee is checked whether alive or not.
+  When a routee is not alive the router removes it from its set of routees. When the last routee stops the router itself stops
+* `Random router`: This type of router randomly pick a routee in its set of routees and send the message to it.
+  Only routees that are alive are considered when the router receives a message.
+* `Round-Robin router`: This type of router rotates over the set of routees making sure that if there are n routees.
+  Only routees that are alive are considered when the router receives a message.
+  For n messages sent through the router, each actor is forwarded one message.
 
 ### Events Stream
 
