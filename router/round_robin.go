@@ -38,7 +38,6 @@ import (
 // then for n messages sent through the router, each actor is forwarded one message.
 type RoundRobin struct {
 	// list of routees
-	// list of routeeRefs
 	routeesMap map[string]actors.PID
 	routees    []actors.Actor
 	next       uint32

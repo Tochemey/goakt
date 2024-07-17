@@ -25,16 +25,14 @@
 package client
 
 import (
-	"math/rand"
+	"math/rand/v2"
 	"sync"
-	"time"
 )
 
 // Random helps pick a node at random
 type Random struct {
 	locker *sync.Mutex
 	nodes  []*Node
-	rnd    *rand.Rand
 }
 
 var _ Balancer = (*Random)(nil)
@@ -44,7 +42,6 @@ func NewRandom() *Random {
 	return &Random{
 		nodes:  make([]*Node, 0),
 		locker: &sync.Mutex{},
-		rnd:    rand.New(rand.NewSource(time.Now().UTC().UnixNano())), //nolint:gosec
 	}
 }
 
@@ -59,5 +56,5 @@ func (x *Random) Set(nodes ...*Node) {
 func (x *Random) Next() *Node {
 	x.locker.Lock()
 	defer x.locker.Unlock()
-	return x.nodes[x.rnd.Intn(len(x.nodes))]
+	return x.nodes[rand.IntN(len(x.nodes))]
 }

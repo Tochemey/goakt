@@ -193,6 +193,9 @@ Go-Akt comes shipped with the following routers:
 * `Round-Robin router`: This type of router send messages to its routee in a round-robin way. For n messages sent through the router, each actor is forwarded one message.
   Only routees that are alive are considered when the router receives a message.
 
+The routers are just actors that can be spawned like any other actors. Once the given router has started it will spawn its routees.
+Once a router dies all its routees die with it.
+
 ### Events Stream
 
 To receive some system events and act on them for some particular business cases,  you just need to call the actor system `Subscribe`.

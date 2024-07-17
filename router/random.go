@@ -27,8 +27,7 @@ package router
 import (
 	"context"
 	"fmt"
-	"math/rand"
-	"time"
+	"math/rand/v2"
 
 	"github.com/tochemey/goakt/v2/actors"
 	"github.com/tochemey/goakt/v2/goaktpb"
@@ -37,10 +36,9 @@ import (
 // Random defines a Random router.
 // The router selects a routee at random when a message is sent through the router.
 type Random struct {
-	// list of routeeRefs
+	// list of routees
 	routeesMap map[string]actors.PID
 	routees    []actors.Actor
-	rnd        *rand.Rand
 }
 
 // enforce compilation error
@@ -58,7 +56,6 @@ func NewRandom(routees ...actors.Actor) *Random {
 
 // PreStart pre-starts the actor.
 func (x *Random) PreStart(context.Context) error {
-	x.rnd = rand.New(rand.NewSource(time.Now().UTC().UnixNano())) //nolint:gosec
 	return nil
 }
 
@@ -120,6 +117,6 @@ func (x *Random) broadcast(ctx actors.ReceiveContext) {
 		ctx.Err(err)
 	}
 
-	routee := routees[x.rnd.Intn(len(routees))]
+	routee := routees[rand.IntN(len(routees))]
 	ctx.Tell(routee, msg)
 }

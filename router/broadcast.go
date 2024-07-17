@@ -37,7 +37,7 @@ import (
 // When a routee is not alive the router removes it from its set of routeesMap.
 // When the last routee stops the router itself stops.
 type Broadcaster struct {
-	// list of routeesMap
+	// list of routees
 	routeesMap map[string]actors.PID
 	routees    []actors.Actor
 }
