@@ -1,13 +1,10 @@
 # Go-Akt 
 
-_Go-Akt is considered feature complete. Bugs, security and performance issues will be fixed and released._
-
 [![build](https://img.shields.io/github/actions/workflow/status/Tochemey/goakt/build.yml?branch=main)](https://github.com/Tochemey/goakt/actions/workflows/build.yml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/tochemey/goakt.svg)](https://pkg.go.dev/github.com/tochemey/goakt)
 ![GitHub Release](https://img.shields.io/github/v/release/Tochemey/goakt)
 [![Go Report Card](https://goreportcard.com/badge/github.com/tochemey/goakt)](https://goreportcard.com/report/github.com/tochemey/goakt)
 [![codecov](https://codecov.io/gh/Tochemey/goakt/graph/badge.svg?token=J0p9MzwSRH)](https://codecov.io/gh/Tochemey/goakt)
-[![Stability: Maintenance](https://masterminds.github.io/stability/maintenance.svg)](https://masterminds.github.io/stability/maintenance.html)
 
 
 Distributed [Go](https://go.dev/) actor framework to build reactive and distributed system in golang using
