@@ -78,6 +78,9 @@ type ActorSystem interface {
 	// SpawnFromFunc creates an actor with the given receive function. One can set the PreStart and PostStop lifecycle hooks
 	// in the given optional options
 	SpawnFromFunc(ctx context.Context, receiveFunc ReceiveFunc, opts ...FuncOption) (PID, error)
+	// SpawnNamedFromFunc creates an actor with the given receive function and provided name. One can set the PreStart and PostStop lifecycle hooks
+	// in the given optional options
+	SpawnNamedFromFunc(ctx context.Context, name string, receiveFunc ReceiveFunc, opts ...FuncOption) (PID, error)
 	// Kill stops a given actor in the system
 	Kill(ctx context.Context, name string) error
 	// ReSpawn recreates a given actor in the system
@@ -425,42 +428,31 @@ func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor) (PID,
 		}
 	}
 
-	var mailbox Mailbox
-	if x.mailbox != nil {
-		// always create a fresh copy of provided mailbox for every new PID
-		mailbox = x.mailbox.Clone()
+	pid, err := x.configPID(spanCtx, name, actor)
+	if err != nil {
+		span.SetStatus(codes.Error, "Spawn")
+		span.RecordError(err)
+		return nil, err
 	}
 
-	// define the pid options
-	// pid inherit the actor system settings defined during
-	opts := []pidOption{
-		withInitMaxRetries(x.actorInitMaxRetries),
-		withPassivationAfter(x.expireActorAfter),
-		withAskTimeout(x.askTimeout),
-		withCustomLogger(x.logger),
-		withActorSystem(x),
-		withSupervisorDirective(x.supervisorDirective),
-		withMailboxSize(x.mailboxSize),
-		withMailbox(mailbox), // nil mailbox is taken care during initiliazation by the newPID
-		withStash(x.stashCapacity),
-		withEventsStream(x.eventsStream),
-		withInitTimeout(x.actorInitTimeout),
-		withTelemetry(x.telemetry),
+	x.setActor(pid)
+	return pid, nil
+}
+
+// SpawnNamedFromFunc creates an actor with the given receive function and provided name. One can set the PreStart and PostStop lifecycle hooks
+// in the given optional options
+func (x *actorSystem) SpawnNamedFromFunc(ctx context.Context, name string, receiveFunc ReceiveFunc, opts ...FuncOption) (PID, error) {
+	spanCtx, span := x.tracer.Start(ctx, "SpawnFromFunc")
+	defer span.End()
+
+	if !x.started.Load() {
+		span.SetStatus(codes.Error, "SpawnFromFunc")
+		span.RecordError(ErrDead)
+		return nil, ErrActorSystemNotStarted
 	}
 
-	if x.traceEnabled.Load() {
-		opts = append(opts, withTracing())
-	}
-
-	if x.metricEnabled.Load() {
-		opts = append(opts, withMetric())
-	}
-
-	pid, err := newPID(spanCtx,
-		actorPath,
-		actor,
-		opts...)
-
+	actor := newFuncActor(name, receiveFunc, opts...)
+	pid, err := x.configPID(spanCtx, name, actor)
 	if err != nil {
 		span.SetStatus(codes.Error, "Spawn")
 		span.RecordError(err)
@@ -473,67 +465,7 @@ func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor) (PID,
 
 // SpawnFromFunc creates an actor with the given receive function.
 func (x *actorSystem) SpawnFromFunc(ctx context.Context, receiveFunc ReceiveFunc, opts ...FuncOption) (PID, error) {
-	spanCtx, span := x.tracer.Start(ctx, "SpawnFromFunc")
-	defer span.End()
-
-	if !x.started.Load() {
-		span.SetStatus(codes.Error, "SpawnFromFunc")
-		span.RecordError(ErrDead)
-		return nil, ErrActorSystemNotStarted
-	}
-
-	actorID := uuid.NewString()
-	actor := newFuncActor(actorID, receiveFunc, opts...)
-
-	actorPath := NewPath(actorID, NewAddress(x.name, "", -1))
-	if x.remotingEnabled.Load() {
-		actorPath = NewPath(actorID, NewAddress(x.name, x.remotingHost, int(x.remotingPort)))
-	}
-
-	var mailbox Mailbox
-	if x.mailbox != nil {
-		// always create a fresh copy of provided mailbox for every new PID
-		mailbox = x.mailbox.Clone()
-	}
-
-	// define the pid options
-	// pid inherit the actor system settings defined during instantiation
-	pidOpts := []pidOption{
-		withInitMaxRetries(x.actorInitMaxRetries),
-		withPassivationAfter(x.expireActorAfter),
-		withAskTimeout(x.askTimeout),
-		withCustomLogger(x.logger),
-		withActorSystem(x),
-		withSupervisorDirective(x.supervisorDirective),
-		withMailboxSize(x.mailboxSize),
-		withMailbox(mailbox), // nil mailbox is taken care during initiliazation by the newPID
-		withStash(x.stashCapacity),
-		withEventsStream(x.eventsStream),
-		withInitTimeout(x.actorInitTimeout),
-		withTelemetry(x.telemetry),
-	}
-
-	if x.traceEnabled.Load() {
-		pidOpts = append(pidOpts, withTracing())
-	}
-
-	if x.metricEnabled.Load() {
-		pidOpts = append(pidOpts, withMetric())
-	}
-
-	pid, err := newPID(spanCtx,
-		actorPath,
-		actor,
-		pidOpts...)
-
-	if err != nil {
-		span.SetStatus(codes.Error, "Spawn")
-		span.RecordError(err)
-		return nil, err
-	}
-
-	x.setActor(pid)
-	return pid, nil
+	return x.SpawnNamedFromFunc(ctx, uuid.NewString(), receiveFunc, opts...)
 }
 
 // Kill stops a given actor in the system
@@ -1504,4 +1436,54 @@ func (x *actorSystem) processPeerState(ctx context.Context, peer *cluster.Peer) 
 	x.peersCache[peerAddress] = bytea
 	x.logger.Infof("peer sync(%s) successfully processed", peerAddress)
 	return nil
+}
+
+// configPID constructs a PID provided the actor name and the actor kind
+// this is a utility function used when spawning actors
+func (x *actorSystem) configPID(ctx context.Context, name string, actor Actor) (PID, error) {
+	actorPath := NewPath(name, NewAddress(x.name, "", -1))
+	if x.remotingEnabled.Load() {
+		actorPath = NewPath(name, NewAddress(x.name, x.remotingHost, int(x.remotingPort)))
+	}
+
+	var mailbox Mailbox
+	if x.mailbox != nil {
+		// always create a fresh copy of provided mailbox for every new PID
+		mailbox = x.mailbox.Clone()
+	}
+
+	// define the pid options
+	// pid inherit the actor system settings defined during instantiation
+	pidOpts := []pidOption{
+		withInitMaxRetries(x.actorInitMaxRetries),
+		withPassivationAfter(x.expireActorAfter),
+		withAskTimeout(x.askTimeout),
+		withCustomLogger(x.logger),
+		withActorSystem(x),
+		withSupervisorDirective(x.supervisorDirective),
+		withMailboxSize(x.mailboxSize),
+		withMailbox(mailbox),
+		withStash(x.stashCapacity),
+		withEventsStream(x.eventsStream),
+		withInitTimeout(x.actorInitTimeout),
+		withTelemetry(x.telemetry),
+	}
+
+	if x.traceEnabled.Load() {
+		pidOpts = append(pidOpts, withTracing())
+	}
+
+	if x.metricEnabled.Load() {
+		pidOpts = append(pidOpts, withMetric())
+	}
+
+	pid, err := newPID(ctx,
+		actorPath,
+		actor,
+		pidOpts...)
+
+	if err != nil {
+		return nil, err
+	}
+	return pid, nil
 }
