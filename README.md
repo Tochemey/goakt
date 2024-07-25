@@ -31,7 +31,7 @@ The project adheres to [Semantic Versioning](https://semver.org) and [Convention
     - [Actor System](#actor-system)
     - [Behaviors](#behaviors)
     - [Mailbox](#mailbox)
-    - [Routers](#routers)
+    - [Router](#router)
     - [Events Stream](#events-stream)
       - [Supported events](#supported-events)
     - [Messaging](#messaging)
@@ -178,20 +178,21 @@ To change the behavior, call the following methods on the [ReceiveContext interf
 
 Once can implement a custom mailbox. See [Mailbox](./actors/mailbox.go). The default mailbox makes use of buffered channels.
 
-### Routers
+### Router
 
 Routers help send the same type of message to a set of actors to be processed in parallel depending upon
-the type of the router used. Routers should be used with caution because they can hinder performance
-Go-Akt comes shipped with the following routers:
-* `Broadcast router`: This router broadcasts the given message to all its available routees in parallel. When the router receives a message to broadcast, every routee is checked whether alive or not.
-  When a routee is not alive the router removes it from its set of routees. When the last routee stops the router itself stops
-* `Random router`: This type of router randomly pick a routee in its set of routees and send the message to it.
-  Only routees that are alive are considered when the router receives a message. 
-* `Round-Robin router`: This type of router send messages to its routee in a round-robin way. For n messages sent through the router, each actor is forwarded one message.
-  Only routees that are alive are considered when the router receives a message.
+the type of the router used. Routers should be used with caution because they can hinder performance.
+When the router receives a message to broadcast, every routee is checked whether alive or not.
+When a routee is not alive the router removes it from its set of routees. 
+When the last routee stops the router itself stops.
 
-The routers are just actors that can be spawned like any other actors. Once the given router has started it will spawn its routees.
-Once a router dies all its routees die with it.
+Go-Akt comes shipped with the following routing strategies:
+* `Fan-Out`: This strategy broadcasts the given message to all its available routees in parallel.
+* `Random`: This strategy randomly picks a routee in its set of routees and send the message to it.
+* `Round-Robin`: This strategy sends messages to its routee in a round-robin way. For n messages sent through the router, each actor is forwarded one message.
+
+A router a just like any other actor that can be spawned. To spawn router just call the [ActorSystem](./actors/actor_system.go) `SpawnRouter` method.
+Router as well as their routees are not passivated.
 
 ### Events Stream
 

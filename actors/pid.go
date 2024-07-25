@@ -257,7 +257,7 @@ type pid struct {
 	processingTimeLocker *sync.Mutex
 
 	// testSupervisor strategy
-	supervisorDirective supervisorDirective
+	supervisorDirective SupervisorDirective
 
 	// observability settings
 	telemetry *telemetry.Telemetry

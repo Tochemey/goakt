@@ -82,6 +82,10 @@ type ActorSystem interface {
 	// SpawnNamedFromFunc creates an actor with the given receive function and provided name. One can set the PreStart and PostStop lifecycle hooks
 	// in the given optional options
 	SpawnNamedFromFunc(ctx context.Context, name string, receiveFunc ReceiveFunc, opts ...FuncOption) (PID, error)
+	// SpawnRouter creates a new router. One can additionally set the router options.
+	// A router is a special type of actor that helps distribute messages of the same type over a set of actors, so that messages can be processed in parallel.
+	// A single actor will only process one message at a time.
+	SpawnRouter(ctx context.Context, poolSize int, routeesKind Actor, opts ...RouterOption) (PID, error)
 	// Kill stops a given actor in the system
 	Kill(ctx context.Context, name string) error
 	// ReSpawn recreates a given actor in the system
@@ -128,6 +132,8 @@ type ActorSystem interface {
 	Register(ctx context.Context, actor Actor) error
 	// Deregister removes a registered actor from the registry
 	Deregister(ctx context.Context, actor Actor) error
+	// Logger returns the logger sets when creating the actor system
+	Logger() log.Logger
 	// handleRemoteAsk handles a synchronous message to another actor and expect a response.
 	// This block until a response is received or timed out.
 	handleRemoteAsk(ctx context.Context, to PID, message proto.Message, timeout time.Duration) (response proto.Message, err error)
@@ -171,7 +177,7 @@ type actorSystem struct {
 	// The default value is 1s
 	actorInitTimeout time.Duration
 	// Specifies the supervisor strategy
-	supervisorDirective supervisorDirective
+	supervisorDirective SupervisorDirective
 	// Specifies the telemetry config
 	telemetry *telemetry.Telemetry
 	// Specifies whether remoting is enabled.
@@ -302,6 +308,14 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 	}
 
 	return system, nil
+}
+
+// Logger returns the logger sets when creating the actor system
+func (x *actorSystem) Logger() log.Logger {
+	x.locker.Lock()
+	logger := x.logger
+	x.locker.Unlock()
+	return logger
 }
 
 // Deregister removes a registered actor from the registry
@@ -473,6 +487,15 @@ func (x *actorSystem) SpawnNamedFromFunc(ctx context.Context, name string, recei
 // SpawnFromFunc creates an actor with the given receive function.
 func (x *actorSystem) SpawnFromFunc(ctx context.Context, receiveFunc ReceiveFunc, opts ...FuncOption) (PID, error) {
 	return x.SpawnNamedFromFunc(ctx, uuid.NewString(), receiveFunc, opts...)
+}
+
+// SpawnRouter creates a new router. One can additionally set the router options.
+// A router is a special type of actor that helps distribute messages of the same type over a set of actors, so that messages can be processed in parallel.
+// A single actor will only process one message at a time.
+func (x *actorSystem) SpawnRouter(ctx context.Context, poolSize int, routeesKind Actor, opts ...RouterOption) (PID, error) {
+	router := newRouter(poolSize, routeesKind, x.logger, opts...)
+	routerName := x.getSystemActorName(routerType)
+	return x.Spawn(ctx, routerName, router)
 }
 
 // Kill stops a given actor in the system
@@ -713,7 +736,7 @@ func (x *actorSystem) Start(ctx context.Context) error {
 
 	x.scheduler.Start(spanCtx)
 
-	actorName := x.getSuperviorName()
+	actorName := x.getSystemActorName(supervisorType)
 	pid, err := x.configPID(ctx, actorName, newSystemSupervisor(x.logger))
 	if err != nil {
 		return fmt.Errorf("actor=%s failed to start system supervisor: %w", actorName, err)
@@ -1531,22 +1554,22 @@ func (x *actorSystem) configPID(ctx context.Context, name string, actor Actor) (
 	return pid, nil
 }
 
-// getSuperviorName returns the system supervisor name
-func (x *actorSystem) getSuperviorName() string {
+// getSystemActorName returns the system supervisor name
+func (x *actorSystem) getSystemActorName(nameType nameType) string {
 	if x.remotingEnabled.Load() {
 		return fmt.Sprintf("%s%s%s-%d-%d",
-			goaktSupervisorName,
+			systemNames[nameType],
 			strings.ToTitle(x.name),
 			x.remotingHost,
 			x.remotingPort,
 			time.Now().UnixNano())
 	}
 	return fmt.Sprintf("%s%s-%d",
-		goaktSupervisorName,
+		systemNames[nameType],
 		strings.ToTitle(x.name),
 		time.Now().UnixNano())
 }
 
 func isSystemName(name string) bool {
-	return strings.HasPrefix(name, goakSystemNamePrefix)
+	return strings.HasPrefix(name, systemNamePrefix)
 }

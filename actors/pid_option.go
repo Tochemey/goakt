@@ -73,7 +73,7 @@ func withActorSystem(sys ActorSystem) pidOption {
 
 // withSupervisorDirective sets the supervisor strategy to used when dealing
 // with child actors
-func withSupervisorDirective(directive supervisorDirective) pidOption {
+func withSupervisorDirective(directive SupervisorDirective) pidOption {
 	return func(pid *pid) {
 		pid.supervisorDirective = directive
 	}

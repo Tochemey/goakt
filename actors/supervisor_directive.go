@@ -26,8 +26,8 @@ package actors
 
 import "time"
 
-// supervisorDirective defines the testSupervisor directive
-type supervisorDirective interface {
+// SupervisorDirective defines the testSupervisor directive
+type SupervisorDirective interface {
 	isSupervisorDirective()
 }
 
