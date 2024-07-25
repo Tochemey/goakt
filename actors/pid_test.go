@@ -388,7 +388,7 @@ func TestSupervisorStrategy(t *testing.T) {
 
 		// create the parent actor
 		parent, err := newPID(ctx, actorPath,
-			newSupervisor(),
+			newTestSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
 			withSupervisorDirective(NewStopDirective()),
@@ -398,11 +398,12 @@ func TestSupervisorStrategy(t *testing.T) {
 		assert.NotNil(t, parent)
 
 		// create the child actor
-		child, err := parent.SpawnChild(ctx, "SpawnChild", newSupervised())
+		child, err := parent.SpawnChild(ctx, "SpawnChild", newTestSupervised())
 		assert.NoError(t, err)
 		assert.NotNil(t, child)
 
 		assert.Len(t, parent.Children(), 1)
+		assert.Len(t, child.Parents(), 1)
 		// let us send 10 public to the actors
 		count := 10
 		for i := 0; i < count; i++ {
@@ -423,7 +424,7 @@ func TestSupervisorStrategy(t *testing.T) {
 		// create the parent actor
 		parent, err := newPID(ctx,
 			actorPath,
-			newSupervisor(),
+			newTestSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
 			withPassivationDisabled(),
@@ -433,7 +434,7 @@ func TestSupervisorStrategy(t *testing.T) {
 		assert.NotNil(t, parent)
 
 		// create the child actor
-		child, err := parent.SpawnChild(ctx, "SpawnChild", newSupervised())
+		child, err := parent.SpawnChild(ctx, "SpawnChild", newTestSupervised())
 		assert.NoError(t, err)
 		assert.NotNil(t, child)
 
@@ -463,7 +464,7 @@ func TestSupervisorStrategy(t *testing.T) {
 		// create the parent actor
 		parent, err := newPID(ctx,
 			actorPath,
-			newSupervisor(),
+			newTestSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
 			withPassivationDisabled(),
@@ -504,7 +505,7 @@ func TestSupervisorStrategy(t *testing.T) {
 		// create the parent actor
 		parent, err := newPID(ctx,
 			actorPath,
-			newSupervisor(),
+			newTestSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
 			withSupervisorDirective(DefaultSupervisoryStrategy),
@@ -546,7 +547,7 @@ func TestSupervisorStrategy(t *testing.T) {
 		// create the parent actor
 		parent, err := newPID(ctx,
 			actorPath,
-			newSupervisor(),
+			newTestSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(logger),
 			withPassivationDisabled(),
@@ -557,7 +558,7 @@ func TestSupervisorStrategy(t *testing.T) {
 		assert.NotNil(t, parent)
 
 		// create the child actor
-		child, err := parent.SpawnChild(ctx, "SpawnChild", newSupervised())
+		child, err := parent.SpawnChild(ctx, "SpawnChild", newTestSupervised())
 		assert.NoError(t, err)
 		assert.NotNil(t, child)
 
@@ -585,7 +586,7 @@ func TestSupervisorStrategy(t *testing.T) {
 		// create the parent actor
 		parent, err := newPID(ctx,
 			actorPath,
-			newSupervisor(),
+			newTestSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
 			withPassivationDisabled(),
@@ -595,7 +596,7 @@ func TestSupervisorStrategy(t *testing.T) {
 		assert.NotNil(t, parent)
 
 		// create the child actor
-		child, err := parent.SpawnChild(ctx, "SpawnChild", newSupervised())
+		child, err := parent.SpawnChild(ctx, "SpawnChild", newTestSupervised())
 		assert.NoError(t, err)
 		assert.NotNil(t, child)
 
@@ -624,7 +625,7 @@ func TestSupervisorStrategy(t *testing.T) {
 		// create the parent actor
 		parent, err := newPID(ctx,
 			actorPath,
-			newSupervisor(),
+			newTestSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(logger),
 			withPassivationDisabled(),
@@ -635,7 +636,7 @@ func TestSupervisorStrategy(t *testing.T) {
 		assert.NotNil(t, parent)
 
 		// create the child actor
-		child, err := parent.SpawnChild(ctx, "SpawnChild", newSupervised())
+		child, err := parent.SpawnChild(ctx, "SpawnChild", newTestSupervised())
 		assert.NoError(t, err)
 		assert.NotNil(t, child)
 
@@ -675,7 +676,7 @@ func TestSupervisorStrategy(t *testing.T) {
 		// create the parent actor
 		parent, err := newPID(ctx,
 			actorPath,
-			newSupervisor(),
+			newTestSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(logger),
 			withPassivationDisabled(),
@@ -686,7 +687,7 @@ func TestSupervisorStrategy(t *testing.T) {
 		assert.NotNil(t, parent)
 
 		// create the child actor
-		child, err := parent.SpawnChild(ctx, "SpawnChild", newSupervised())
+		child, err := parent.SpawnChild(ctx, "SpawnChild", newTestSupervised())
 		assert.NoError(t, err)
 		assert.NotNil(t, child)
 
@@ -994,7 +995,7 @@ func TestSpawnChild(t *testing.T) {
 
 		// create the parent actor
 		parent, err := newPID(ctx, actorPath,
-			newSupervisor(),
+			newTestSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
 			withAskTimeout(replyTimeout))
@@ -1003,7 +1004,7 @@ func TestSpawnChild(t *testing.T) {
 		assert.NotNil(t, parent)
 
 		// create the child actor
-		child, err := parent.SpawnChild(ctx, "SpawnChild", newSupervised())
+		child, err := parent.SpawnChild(ctx, "SpawnChild", newTestSupervised())
 		assert.NoError(t, err)
 		assert.NotNil(t, child)
 
@@ -1014,7 +1015,7 @@ func TestSpawnChild(t *testing.T) {
 
 		time.Sleep(100 * time.Millisecond)
 		// create the child actor
-		child, err = parent.SpawnChild(ctx, "SpawnChild", newSupervised())
+		child, err = parent.SpawnChild(ctx, "SpawnChild", newTestSupervised())
 		assert.NoError(t, err)
 		assert.NotNil(t, child)
 
@@ -1033,7 +1034,7 @@ func TestSpawnChild(t *testing.T) {
 
 		// create the parent actor
 		parent, err := newPID(ctx, actorPath,
-			newSupervisor(),
+			newTestSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
 			withAskTimeout(replyTimeout))
@@ -1042,7 +1043,7 @@ func TestSpawnChild(t *testing.T) {
 		assert.NotNil(t, parent)
 
 		// create the child actor
-		child, err := parent.SpawnChild(ctx, "SpawnChild", newSupervised())
+		child, err := parent.SpawnChild(ctx, "SpawnChild", newTestSupervised())
 		assert.NoError(t, err)
 		assert.NotNil(t, child)
 
@@ -1050,7 +1051,7 @@ func TestSpawnChild(t *testing.T) {
 
 		time.Sleep(100 * time.Millisecond)
 		// create the child actor
-		child, err = parent.SpawnChild(ctx, "SpawnChild", newSupervised())
+		child, err = parent.SpawnChild(ctx, "SpawnChild", newTestSupervised())
 		assert.NoError(t, err)
 		assert.NotNil(t, child)
 
@@ -1069,7 +1070,7 @@ func TestSpawnChild(t *testing.T) {
 
 		// create the parent actor
 		parent, err := newPID(ctx, actorPath,
-			newSupervisor(),
+			newTestSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
 			withAskTimeout(replyTimeout))
@@ -1083,7 +1084,7 @@ func TestSpawnChild(t *testing.T) {
 		assert.NoError(t, err)
 
 		// create the child actor
-		child, err := parent.SpawnChild(ctx, "SpawnChild", newSupervised())
+		child, err := parent.SpawnChild(ctx, "SpawnChild", newTestSupervised())
 		assert.Error(t, err)
 		assert.EqualError(t, err, ErrDead.Error())
 		assert.Nil(t, child)
@@ -1096,7 +1097,7 @@ func TestSpawnChild(t *testing.T) {
 
 		// create the parent actor
 		parent, err := newPID(ctx, actorPath,
-			newSupervisor(),
+			newTestSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
 			withAskTimeout(replyTimeout))
@@ -1128,7 +1129,7 @@ func TestSpawnChild(t *testing.T) {
 
 		// create the parent actor
 		parent, err := newPID(ctx, actorPath,
-			newSupervisor(),
+			newTestSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
 			withEventsStream(eventsStream),
@@ -1138,7 +1139,7 @@ func TestSpawnChild(t *testing.T) {
 		assert.NotNil(t, parent)
 
 		// create the child actor
-		child, err := parent.SpawnChild(ctx, "SpawnChild", newSupervised())
+		child, err := parent.SpawnChild(ctx, "SpawnChild", newTestSupervised())
 		assert.NoError(t, err)
 		assert.NotNil(t, child)
 
@@ -1332,7 +1333,7 @@ func TestShutdown(t *testing.T) {
 
 		// create the parent actor
 		parent, err := newPID(ctx, actorPath,
-			newSupervisor(),
+			newTestSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
 			withAskTimeout(replyTimeout))

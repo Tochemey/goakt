@@ -31,6 +31,7 @@ import (
 	"net/http"
 	"regexp"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -134,6 +135,8 @@ type ActorSystem interface {
 	handleRemoteTell(ctx context.Context, to PID, message proto.Message) error
 	// setActor sets actor in the actor system actors registry
 	setActor(actor PID)
+	// supervisor return the system supervisor
+	getSupervisor() PID
 }
 
 // ActorSystem represent a collection of actors on a given node
@@ -222,6 +225,8 @@ type actorSystem struct {
 	peersCache             map[string][]byte
 	clusterConfig          *ClusterConfig
 	redistributionChan     chan *cluster.Event
+
+	supervisor PID
 }
 
 // enforce compilation error when all methods of the ActorSystem interface are not implemented
@@ -400,7 +405,7 @@ func (x *actorSystem) InCluster() bool {
 
 // NumActors returns the total number of active actors in the system
 func (x *actorSystem) NumActors() uint64 {
-	return uint64(x.actors.len())
+	return uint64(len(x.Actors()))
 }
 
 // Spawn creates or returns the instance of a given actor in the system
@@ -435,6 +440,7 @@ func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor) (PID,
 		return nil, err
 	}
 
+	x.supervisor.Watch(pid)
 	x.setActor(pid)
 	return pid, nil
 }
@@ -459,6 +465,7 @@ func (x *actorSystem) SpawnNamedFromFunc(ctx context.Context, name string, recei
 		return nil, err
 	}
 
+	x.supervisor.Watch(pid)
 	x.setActor(pid)
 	return pid, nil
 }
@@ -522,6 +529,7 @@ func (x *actorSystem) ReSpawn(ctx context.Context, name string) (PID, error) {
 		}
 
 		x.actors.set(pid)
+		x.supervisor.Watch(pid)
 		return pid, nil
 	}
 
@@ -541,8 +549,15 @@ func (x *actorSystem) Name() string {
 // Actors returns the list of Actors that are alive in the actor system
 func (x *actorSystem) Actors() []PID {
 	x.locker.Lock()
+	pids := x.actors.pids()
 	defer x.locker.Unlock()
-	return x.actors.pids()
+	actors := make([]PID, 0, len(pids))
+	for _, pid := range pids {
+		if !isSystemName(pid.Name()) {
+			actors = append(actors, pid)
+		}
+	}
+	return actors
 }
 
 // PeerAddress returns the actor system address known in the cluster. That address is used by other nodes to communicate with the actor system.
@@ -698,6 +713,15 @@ func (x *actorSystem) Start(ctx context.Context) error {
 
 	x.scheduler.Start(spanCtx)
 
+	actorName := x.getSuperviorName()
+	pid, err := x.configPID(ctx, actorName, newSystemSupervisor(x.logger))
+	if err != nil {
+		return fmt.Errorf("actor=%s failed to start system supervisor: %w", actorName, err)
+	}
+
+	x.supervisor = pid
+	x.setActor(pid)
+
 	go x.gc()
 
 	x.logger.Infof("%s started..:)", x.name)
@@ -708,6 +732,8 @@ func (x *actorSystem) Start(ctx context.Context) error {
 func (x *actorSystem) Stop(ctx context.Context) error {
 	spanCtx, span := x.tracer.Start(ctx, "Stop")
 	defer span.End()
+
+	x.logger.Infof("%s shutting down...", x.name)
 
 	// make sure the actor system has started
 	if !x.started.Load() {
@@ -753,10 +779,13 @@ func (x *actorSystem) Stop(ctx context.Context) error {
 		close(x.redistributionChan)
 	}
 
-	if len(x.Actors()) == 0 {
-		x.logger.Info("No online actors to shutdown. Shutting down successfully done")
-		return nil
+	// stop the supervisor actor
+	if err := x.getSupervisor().Shutdown(ctx); err != nil {
+		x.reset()
+		return err
 	}
+	// remove the supervisor from the actors list
+	x.actors.delete(x.supervisor.ActorPath())
 
 	for _, actor := range x.Actors() {
 		x.actors.delete(actor.ActorPath())
@@ -766,8 +795,8 @@ func (x *actorSystem) Stop(ctx context.Context) error {
 		}
 	}
 
-	x.actors.close()
 	x.reset()
+	x.logger.Infof("%s shuts down successfully", x.name)
 	return nil
 }
 
@@ -1084,6 +1113,14 @@ func (x *actorSystem) handleRemoteTell(ctx context.Context, to PID, message prot
 	spanCtx, span := x.tracer.Start(ctx, "HandleRemoteTell")
 	defer span.End()
 	return Tell(spanCtx, to, message)
+}
+
+// getSupervisor return the system supervisor
+func (x *actorSystem) getSupervisor() PID {
+	x.locker.Lock()
+	supervisor := x.supervisor
+	x.locker.Unlock()
+	return supervisor
 }
 
 // setActor implements ActorSystem.
@@ -1456,7 +1493,6 @@ func (x *actorSystem) configPID(ctx context.Context, name string, actor Actor) (
 	// pid inherit the actor system settings defined during instantiation
 	pidOpts := []pidOption{
 		withInitMaxRetries(x.actorInitMaxRetries),
-		withPassivationAfter(x.expireActorAfter),
 		withAskTimeout(x.askTimeout),
 		withCustomLogger(x.logger),
 		withActorSystem(x),
@@ -1467,6 +1503,13 @@ func (x *actorSystem) configPID(ctx context.Context, name string, actor Actor) (
 		withEventsStream(x.eventsStream),
 		withInitTimeout(x.actorInitTimeout),
 		withTelemetry(x.telemetry),
+	}
+
+	// disable passivation for system supervisor
+	if isSystemName(name) {
+		pidOpts = append(pidOpts, withPassivationDisabled())
+	} else {
+		pidOpts = append(pidOpts, withPassivationAfter(x.expireActorAfter))
 	}
 
 	if x.traceEnabled.Load() {
@@ -1486,4 +1529,24 @@ func (x *actorSystem) configPID(ctx context.Context, name string, actor Actor) (
 		return nil, err
 	}
 	return pid, nil
+}
+
+// getSuperviorName returns the system supervisor name
+func (x *actorSystem) getSuperviorName() string {
+	if x.remotingEnabled.Load() {
+		return fmt.Sprintf("%s%s%s-%d-%d",
+			goaktSupervisorName,
+			strings.ToTitle(x.name),
+			x.remotingHost,
+			x.remotingPort,
+			time.Now().UnixNano())
+	}
+	return fmt.Sprintf("%s%s-%d",
+		goaktSupervisorName,
+		strings.ToTitle(x.name),
+		time.Now().UnixNano())
+}
+
+func isSystemName(name string) bool {
+	return strings.HasPrefix(name, goakSystemNamePrefix)
 }

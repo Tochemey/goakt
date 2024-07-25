@@ -26,6 +26,7 @@ package actors
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	stdhttp "net/http"
 	"strings"
@@ -35,7 +36,6 @@ import (
 	"connectrpc.com/connect"
 	"connectrpc.com/otelconnect"
 	"github.com/flowchartsman/retry"
-	"github.com/pkg/errors"
 	"go.opentelemetry.io/otel/codes"
 	otelmetric "go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
@@ -137,9 +137,12 @@ type PID interface {
 	RemoteStop(ctx context.Context, host string, port int, name string) error
 	// RemoteSpawn creates an actor on a remote node. The given actor needs to be registered on the remote node using the Register method of ActorSystem
 	RemoteSpawn(ctx context.Context, host string, port int, name, actorType string) error
-	// Children returns the list of all the children of the given actor that are still alive
-	// or an empty list.
+	// Children returns the list of all the direct children of the given actor
+	// Only alive actors are included in the list or an empty list is returned
 	Children() []PID
+	// Parents returns the list of all direct parents of a given actor.
+	// Only alive actors are included in the list or an empty list is returned
+	Parents() []PID
 	// Child returns the named child actor if it is alive
 	Child(name string) (PID, error)
 	// Stop forces the child Actor under the given name to terminate after it finishes processing its current message.
@@ -156,8 +159,10 @@ type PID interface {
 	PipeTo(ctx context.Context, to PID, task future.Task) error
 	// push a message to the actor's receiveContextBuffer
 	doReceive(ctx ReceiveContext)
-	// watchers returns the list of watchMen
-	watchers() *slices.ThreadSafe[*watcher]
+	// watchers returns the list of actors watching this actor
+	watchers() *slices.Safe[*watcher]
+	// watchees returns the list of actors watched by this actor
+	watchees() *pidMap
 	// setBehavior is a utility function that helps set the actor behavior
 	setBehavior(behavior Behavior)
 	// setBehaviorStacked adds a behavior to the actor's behaviors
@@ -226,11 +231,14 @@ type pid struct {
 	shutdownSignal     chan types.Unit
 	haltPassivationLnr chan types.Unit
 
-	// set of watchersList watching the given actor
-	watchersList *slices.ThreadSafe[*watcher]
+	// hold the watchersList watching the given actor
+	watchersList *slices.Safe[*watcher]
 
 	// hold the list of the children
 	children *pidMap
+
+	// hold the list of watched actors
+	watchedList *pidMap
 
 	// the actor system
 	system ActorSystem
@@ -248,7 +256,7 @@ type pid struct {
 	stopLocker           *sync.Mutex
 	processingTimeLocker *sync.Mutex
 
-	// supervisor strategy
+	// testSupervisor strategy
 	supervisorDirective supervisorDirective
 
 	// observability settings
@@ -283,6 +291,16 @@ var _ PID = (*pid)(nil)
 
 // newPID creates a new pid
 func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption) (*pid, error) {
+	// actor path is required
+	if actorPath == nil {
+		return nil, errors.New("actorPath is required")
+	}
+
+	// validate actor path
+	if err := actorPath.Validate(); err != nil {
+		return nil, err
+	}
+
 	p := &pid{
 		Actor:                actor,
 		lastProcessingTime:   atomic.Time{},
@@ -292,7 +310,8 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 		mailboxSize:          DefaultMailboxSize,
 		children:             newPIDMap(10),
 		supervisorDirective:  DefaultSupervisoryStrategy,
-		watchersList:         slices.NewThreadSafe[*watcher](),
+		watchersList:         slices.NewSafe[*watcher](),
+		watchedList:          newPIDMap(10),
 		telemetry:            telemetry.New(),
 		actorPath:            actorPath,
 		rwLocker:             &sync.RWMutex{},
@@ -351,7 +370,7 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 
 	if p.metricEnabled.Load() {
 		if err := p.registerMetrics(); err != nil {
-			return nil, errors.Wrapf(err, "failed to register actor=%s metrics", p.ActorPath().String())
+			return nil, fmt.Errorf("failed to register actor=%s metrics: %w", p.ID(), err)
 		}
 	}
 
@@ -394,7 +413,29 @@ func (x *pid) Child(name string) (PID, error) {
 	return nil, ErrActorNotFound(childActorPath.String())
 }
 
-// Children returns the list of all the children of the given actor that are still alive or an empty list
+// Parents returns the list of all direct parents of a given actor.
+// Only alive actors are included in the list or an empty list is returned
+func (x *pid) Parents() []PID {
+	x.rwLocker.Lock()
+	watchers := x.watchersList
+	x.rwLocker.Unlock()
+	var parents []PID
+	if watchers.Len() > 0 {
+		for item := range watchers.Iter() {
+			watcher := item.Value
+			if watcher != nil {
+				pid := watcher.WatcherID
+				if pid.IsRunning() {
+					parents = append(parents, pid)
+				}
+			}
+		}
+	}
+	return parents
+}
+
+// Children returns the list of all the direct children of the given actor
+// Only alive actors are included in the list or an empty list is returned
 func (x *pid) Children() []PID {
 	x.rwLocker.RLock()
 	children := x.children.pids()
@@ -832,13 +873,15 @@ func (x *pid) RemoteTell(ctx context.Context, to *goaktpb.Address, message proto
 			}
 			return nil
 		}
-		x.logger.Error(errors.Wrapf(err, "failed to send message to remote=(%s:%d)", to.GetHost(), to.GetPort()))
-		return err
+		fmtErr := fmt.Errorf("failed to send message to remote=(%s:%d): %w", to.GetHost(), to.GetPort(), err)
+		x.logger.Error(fmtErr)
+		return fmtErr
 	}
 
 	if _, err := stream.CloseAndReceive(); err != nil {
-		x.logger.Error(errors.Wrapf(err, "failed to send message to remote=(%s:%d)", to.GetHost(), to.GetPort()))
-		return err
+		fmtErr := fmt.Errorf("failed to send message to remote=(%s:%d): %w", to.GetHost(), to.GetPort(), err)
+		x.logger.Error(fmtErr)
+		return fmtErr
 	}
 
 	x.logger.Debugf("message successfully sent to remote=(%s:%d)", to.GetHost(), to.GetPort())
@@ -1147,7 +1190,7 @@ func (x *pid) Shutdown(ctx context.Context) error {
 	}
 
 	if err := x.doStop(spanCtx); err != nil {
-		x.logger.Errorf("failed to stop actor=(%s)", x.ActorPath().String())
+		x.logger.Errorf("failed to cleanly stop actor=(%s)", x.ID())
 		return err
 	}
 
@@ -1158,7 +1201,7 @@ func (x *pid) Shutdown(ctx context.Context) error {
 		})
 	}
 
-	x.logger.Infof("Actor=%s successfully shutdown", x.ActorPath().String())
+	x.logger.Infof("Actor=%s successfully shutdown", x.ID())
 	span.SetStatus(codes.Ok, "Shutdown")
 	return nil
 }
@@ -1171,6 +1214,7 @@ func (x *pid) Watch(cid PID) {
 		Done:      make(chan types.Unit, 1),
 	}
 	cid.watchers().Append(w)
+	x.watchees().set(cid)
 	go x.supervise(cid, w)
 }
 
@@ -1178,17 +1222,23 @@ func (x *pid) Watch(cid PID) {
 func (x *pid) UnWatch(pid PID) {
 	for item := range pid.watchers().Iter() {
 		w := item.Value
-		if w.WatcherID.ActorPath().Equals(x.ActorPath()) {
+		if w.WatcherID.Equals(x) {
 			w.Done <- types.Unit{}
+			x.watchees().delete(pid.ActorPath())
 			pid.watchers().Delete(item.Index)
 			break
 		}
 	}
 }
 
-// Watchers return the list of watchersList
-func (x *pid) watchers() *slices.ThreadSafe[*watcher] {
+// watchers return the list of watchersList
+func (x *pid) watchers() *slices.Safe[*watcher] {
 	return x.watchersList
+}
+
+// watchees returns the list of actors watched by this actor
+func (x *pid) watchees() *pidMap {
+	return x.watchedList
 }
 
 // doReceive pushes a given message to the actor receiveContextBuffer
@@ -1252,20 +1302,20 @@ func (x *pid) reset() {
 	x.lastProcessingDuration.Store(0)
 	x.initTimeout.Store(DefaultInitTimeout)
 	x.children = newPIDMap(10)
-	x.watchersList = slices.NewThreadSafe[*watcher]()
+	x.watchersList = slices.NewSafe[*watcher]()
 	x.telemetry = telemetry.New()
 	x.mailbox.Reset()
 	x.resetBehavior()
 	if x.metricEnabled.Load() {
 		if err := x.registerMetrics(); err != nil {
-			x.logger.Error(errors.Wrapf(err, "failed to register actor=%s metrics", x.ActorPath().String()))
+			fmtErr := fmt.Errorf("failed to register actor=%s metrics: %w", x.ID(), err)
+			x.logger.Error(fmtErr)
 		}
 	}
 }
 
 func (x *pid) freeWatchers(ctx context.Context) {
 	x.logger.Debug("freeing all watcher actors...")
-
 	watchers := x.watchers()
 	if watchers.Len() > 0 {
 		for item := range watchers.Iter() {
@@ -1274,24 +1324,44 @@ func (x *pid) freeWatchers(ctx context.Context) {
 				ActorId: x.ID(),
 			}
 			if watcher.WatcherID.IsRunning() {
+				x.logger.Debugf("watcher=(%s) releasing watched=(%s)", watcher.WatcherID.ID(), x.ID())
 				// TODO: handle error and push to some system dead-letters queue
 				_ = x.Tell(ctx, watcher.WatcherID, terminated)
 				watcher.WatcherID.UnWatch(x)
 				watcher.WatcherID.removeChild(x)
+				x.logger.Debugf("watcher=(%s) released watched=(%s)", watcher.WatcherID.ID(), x.ID())
 			}
 		}
 	}
 }
 
+func (x *pid) freeWatchees(ctx context.Context) {
+	x.logger.Debug("freeing all watched actors...")
+	for _, watched := range x.watchedList.pids() {
+		x.logger.Debugf("watcher=(%s) unwatching actor=(%s)", x.ID(), watched.ID())
+		x.UnWatch(watched)
+		if err := watched.Shutdown(ctx); err != nil {
+			x.logger.Panic(
+				fmt.Errorf("watcher=(%s) failed to unwatch actor=(%s): %w",
+					x.ID(), watched.ID(), err))
+		}
+		x.logger.Debugf("watcher=(%s) successfully unwatch actor=(%s)", x.ID(), watched.ID())
+	}
+}
+
 func (x *pid) freeChildren(ctx context.Context) {
 	x.logger.Debug("freeing all child actors...")
-
 	for _, child := range x.Children() {
+		x.logger.Debugf("parent=(%s) disowning child=(%s)", x.ID(), child.ID())
 		x.UnWatch(child)
 		x.children.delete(child.ActorPath())
 		if err := child.Shutdown(ctx); err != nil {
-			x.logger.Panic(err)
+			x.logger.Panic(
+				fmt.Errorf(
+					"parent=(%s) failed to disown child=(%s): %w", x.ID(), child.ID(),
+					err))
 		}
+		x.logger.Debugf("parent=(%s) successfully disown child=(%s)", x.ID(), child.ID())
 	}
 }
 
@@ -1430,6 +1500,7 @@ func (x *pid) doStop(ctx context.Context) error {
 	// TODO: just signal stash processing done and ignore the messages or process them
 	for x.stashBuffer != nil && !x.stashBuffer.IsEmpty() {
 		if err := x.unstashAll(); err != nil {
+			x.logger.Errorf("actor=(%s) failed to unstash messages", x.ActorPath().String())
 			span.SetStatus(codes.Error, "doStop")
 			span.RecordError(err)
 			return err
@@ -1461,6 +1532,8 @@ func (x *pid) doStop(ctx context.Context) error {
 	<-tickerStopSig
 	x.shutdownSignal <- types.Unit{}
 	x.httpClient.CloseIdleConnections()
+
+	x.freeWatchees(spanCtx)
 	x.freeChildren(spanCtx)
 	x.freeWatchers(spanCtx)
 
@@ -1549,7 +1622,7 @@ func (x *pid) getConnectionOptions() ([]connect.ClientOption, error) {
 			otelconnect.WithTracerProvider(x.telemetry.TracerProvider),
 			otelconnect.WithMeterProvider(x.telemetry.MeterProvider))
 		if err != nil {
-			return nil, errors.Wrap(err, "failed to initialize observability feature")
+			return nil, fmt.Errorf("failed to initialize observability feature: %w", err)
 		}
 	}
 
@@ -1639,4 +1712,64 @@ func (x *pid) handleCompletion(ctx context.Context, completion *completion) {
 	messageContext := newReceiveContext(ctx, x, to, result.Success(), true)
 	to.doReceive(messageContext)
 	span.SetStatus(codes.Ok, "TaskCompletion")
+}
+
+// supervise watches for child actor's failure and act based upon the supervisory strategy
+func (x *pid) supervise(cid PID, watcher *watcher) {
+	for {
+		select {
+		case <-watcher.Done:
+			x.logger.Debugf("stop watching cid=(%s)", cid.ID())
+			return
+		case err := <-watcher.ErrChan:
+			x.logger.Errorf("child actor=(%s) is failing: Err=%v", cid.ID(), err)
+			switch directive := x.supervisorDirective.(type) {
+			case *StopDirective:
+				x.handleStopDirective(cid)
+			case *RestartDirective:
+				x.handleRestartDirective(cid, directive.MaxNumRetries(), directive.Timeout())
+			case *ResumeDirective:
+				// pass
+			default:
+				x.handleStopDirective(cid)
+			}
+		}
+	}
+}
+
+// handleStopDirective handles the testSupervisor stop directive
+func (x *pid) handleStopDirective(cid PID) {
+	x.UnWatch(cid)
+	x.children.delete(cid.ActorPath())
+	if err := cid.Shutdown(context.Background()); err != nil {
+		// this can enter into some infinite loop if we panic
+		// since we are just shutting down the actor we can just log the error
+		// TODO: rethink properly about PostStop error handling
+		x.logger.Error(err)
+	}
+}
+
+// handleRestartDirective handles the testSupervisor restart directive
+func (x *pid) handleRestartDirective(cid PID, maxRetries uint32, timeout time.Duration) {
+	x.UnWatch(cid)
+	ctx := context.Background()
+	var err error
+	if maxRetries == 0 || timeout <= 0 {
+		err = cid.Restart(ctx)
+	} else {
+		// TODO: handle the initial delay
+		retrier := retry.NewRetrier(int(maxRetries), 100*time.Millisecond, timeout)
+		err = retrier.RunContext(ctx, cid.Restart)
+	}
+
+	if err != nil {
+		x.logger.Error(err)
+		// remove the actor and stop it
+		x.children.delete(cid.ActorPath())
+		if err := cid.Shutdown(ctx); err != nil {
+			x.logger.Error(err)
+		}
+		return
+	}
+	x.Watch(cid)
 }

@@ -26,8 +26,8 @@ package slices
 
 import "sync"
 
-// ThreadSafe type that can be safely shared between goroutines.
-type ThreadSafe[T any] struct {
+// Safe type that can be safely shared between goroutines.
+type Safe[T any] struct {
 	sync.RWMutex
 	items []T
 }
@@ -38,9 +38,9 @@ type Item[T any] struct {
 	Value T
 }
 
-// NewThreadSafe creates a new synchronized slice.
-func NewThreadSafe[T any]() *ThreadSafe[T] {
-	cs := &ThreadSafe[T]{
+// NewSafe creates a new synchronized slice.
+func NewSafe[T any]() *Safe[T] {
+	cs := &Safe[T]{
 		items: make([]T, 0),
 	}
 
@@ -48,21 +48,21 @@ func NewThreadSafe[T any]() *ThreadSafe[T] {
 }
 
 // Len returns the number of items
-func (cs *ThreadSafe[T]) Len() int {
+func (cs *Safe[T]) Len() int {
 	cs.Lock()
 	defer cs.Unlock()
 	return len(cs.items)
 }
 
 // Append adds an item to the concurrent slice.
-func (cs *ThreadSafe[T]) Append(item T) {
+func (cs *Safe[T]) Append(item T) {
 	cs.Lock()
 	defer cs.Unlock()
 	cs.items = append(cs.items, item)
 }
 
 // Get returns the slice item at the given index
-func (cs *ThreadSafe[T]) Get(index int) (item any) {
+func (cs *Safe[T]) Get(index int) (item any) {
 	cs.RLock()
 	defer cs.RUnlock()
 	if isSet(cs.items, index) {
@@ -72,7 +72,7 @@ func (cs *ThreadSafe[T]) Get(index int) (item any) {
 }
 
 // Delete an item from the slice
-func (cs *ThreadSafe[T]) Delete(index int) {
+func (cs *Safe[T]) Delete(index int) {
 	cs.RLock()
 	defer cs.RUnlock()
 	var nilState T
@@ -91,7 +91,7 @@ func isSet[T any](arr []T, index int) bool {
 // Iter iterates the items in the concurrent slice.
 // Each item is sent over a channel, so that
 // we can iterate over the slice using the builtin range keyword.
-func (cs *ThreadSafe[T]) Iter() <-chan Item[T] {
+func (cs *Safe[T]) Iter() <-chan Item[T] {
 	c := make(chan Item[T])
 	f := func() {
 		cs.RLock()

@@ -22,7 +22,7 @@
  * SOFTWARE.
  */
 
-package router
+package actors
 
 import (
 	"context"
@@ -35,21 +35,20 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 
-	"github.com/tochemey/goakt/v2/actors"
 	"github.com/tochemey/goakt/v2/goaktpb"
 	"github.com/tochemey/goakt/v2/log"
 	"github.com/tochemey/goakt/v2/test/data/testpb"
 )
 
-func TestRandom(t *testing.T) {
+func TestRandomRouter(t *testing.T) {
 	t.Run("With happy path", func(t *testing.T) {
 		ctx := context.TODO()
 		logger := log.DefaultLogger
-		system, err := actors.NewActorSystem(
+		system, err := NewActorSystem(
 			"testSystem",
-			actors.WithPassivationDisabled(),
-			actors.WithLogger(logger),
-			actors.WithReplyTimeout(time.Minute))
+			WithPassivationDisabled(),
+			WithLogger(logger),
+			WithReplyTimeout(time.Minute))
 
 		require.NoError(t, err)
 		require.NotNil(t, system)
@@ -61,7 +60,7 @@ func TestRandom(t *testing.T) {
 		// create a random router with one routee
 		// this is for the purpose of testing to make sure given routee does receive the
 		// message sent
-		random := NewRandom(newWorker())
+		random := newRandomRouter(newWorker())
 
 		router, err := system.Spawn(ctx, "worker-pool", random)
 		require.NoError(t, err)
@@ -71,13 +70,13 @@ func TestRandom(t *testing.T) {
 
 		// send a broadcast message to the router
 		message, _ := anypb.New(&testpb.DoLog{Text: "msg"})
-		err = actors.Tell(ctx, router, &goaktpb.Broadcast{Message: message})
+		err = Tell(ctx, router, &goaktpb.Broadcast{Message: message})
 		require.NoError(t, err)
 
 		time.Sleep(time.Second)
 
 		// this is just for tests purpose
-		workerName := fmt.Sprintf("routee-%s-%d", router.Name(), 0)
+		workerName := fmt.Sprintf("GoAktRoutee-%s-%d", router.Name(), 0)
 
 		workerOneRef, err := system.LocalActor(workerName)
 		require.NoError(t, err)
@@ -85,7 +84,7 @@ func TestRandom(t *testing.T) {
 
 		expected := &testpb.Count{Value: 2}
 
-		reply, err := actors.Ask(ctx, workerOneRef, new(testpb.GetCount), time.Minute)
+		reply, err := Ask(ctx, workerOneRef, new(testpb.GetCount), time.Minute)
 		require.NoError(t, err)
 		require.NotNil(t, reply)
 		assert.True(t, proto.Equal(expected, reply))
@@ -97,11 +96,11 @@ func TestRandom(t *testing.T) {
 	t.Run("With no available routees router is alive and message in deadletter", func(t *testing.T) {
 		ctx := context.TODO()
 		logger := log.DefaultLogger
-		system, err := actors.NewActorSystem(
+		system, err := NewActorSystem(
 			"testSystem",
-			actors.WithPassivationDisabled(),
-			actors.WithLogger(logger),
-			actors.WithReplyTimeout(time.Minute))
+			WithPassivationDisabled(),
+			WithLogger(logger),
+			WithReplyTimeout(time.Minute))
 
 		require.NoError(t, err)
 		require.NotNil(t, system)
@@ -117,7 +116,7 @@ func TestRandom(t *testing.T) {
 		// create a random router with one routee
 		// this is for the purpose of testing to make sure given routee does receive the
 		// message sent
-		random := NewRandom(newWorker())
+		random := newRandomRouter(newWorker())
 
 		router, err := system.Spawn(ctx, "worker-pool", random)
 		require.NoError(t, err)
@@ -126,13 +125,13 @@ func TestRandom(t *testing.T) {
 		time.Sleep(time.Second)
 
 		// this is just for tests purpose
-		workerName := fmt.Sprintf("routee-%s-%d", router.Name(), 0)
+		workerName := fmt.Sprintf("GoAktRoutee-%s-%d", router.Name(), 0)
 		err = system.Kill(ctx, workerName)
 		require.NoError(t, err)
 
 		// send a broadcast message to the router
 		message, _ := anypb.New(&testpb.DoLog{Text: "msg"})
-		err = actors.Tell(ctx, router, &goaktpb.Broadcast{Message: message})
+		err = Tell(ctx, router, &goaktpb.Broadcast{Message: message})
 		require.NoError(t, err)
 
 		time.Sleep(time.Second)

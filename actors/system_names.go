@@ -22,26 +22,12 @@
  * SOFTWARE.
  */
 
-package validation
+package actors
 
-import "errors"
-
-// booleanValidator implements Validator.
-type booleanValidator struct {
-	boolCheck  bool
-	errMessage string
-}
-
-// NewBooleanValidator creates a new boolean validator that returns an error message if condition is false
-// This validator will come handy when dealing with conditional validation
-func NewBooleanValidator(boolCheck bool, errMessage string) Validator {
-	return &booleanValidator{boolCheck: boolCheck, errMessage: errMessage}
-}
-
-// Validate returns an error if boolean check is false
-func (v booleanValidator) Validate() error {
-	if !v.boolCheck {
-		return errors.New(v.errMessage)
-	}
-	return nil
-}
+const (
+	goakSystemNamePrefix = "GoAkt"
+	goaktSupervisorName  = "GoAktSupervisor"
+	goakRouteeNamePrefix = "GoAktRoutee"
+	goaktPoolRouterName  = "GoAktPoolRouter"
+	goakGroupRouterName  = "GoAktGroupRouter"
+)

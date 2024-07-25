@@ -26,10 +26,13 @@ package actors
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
+	"github.com/pkg/errors"
 
 	"github.com/tochemey/goakt/v2/goaktpb"
+	"github.com/tochemey/goakt/v2/internal/validation"
 )
 
 // Path is a unique path to an actor
@@ -43,6 +46,8 @@ type Path struct {
 	// specifies the path for the parent actor.
 	parent *Path
 }
+
+var _ validation.Validator = (*Path)(nil)
 
 // NewPath creates an immutable Path
 func NewPath(name string, address *Address) *Path {
@@ -104,4 +109,15 @@ func (p *Path) RemoteAddress() *goaktpb.Address {
 		Name: p.Name(),
 		Id:   p.ID().String(),
 	}
+}
+
+// Validate returns an error when the path is not valid
+func (p *Path) Validate() error {
+	pattern := "^[a-zA-Z0-9][a-zA-Z0-9-_\\.]*$"
+	customErr := errors.New("path name must contain only word characters (i.e. [a-zA-Z0-9] plus non-leading '-' or '_')")
+	return validation.
+		New(validation.FailFast()).
+		AddValidator(validation.NewPatternValidator(pattern, strings.TrimSpace(p.name), customErr)).
+		AddAssertion(p.address != nil, "address is required").
+		Validate()
 }

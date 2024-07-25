@@ -22,45 +22,46 @@
  * SOFTWARE.
  */
 
-package router
+package actors
 
 import (
 	"context"
 	"fmt"
-	"math/rand/v2"
+	"sync/atomic"
 
-	"github.com/tochemey/goakt/v2/actors"
 	"github.com/tochemey/goakt/v2/goaktpb"
 )
 
-// Random defines a Random router.
-// The router selects a routee at random when a message is sent through the router.
-type Random struct {
+// roundRobinRouter defines a Random router.
+// It rotates over the set of routeesMap making sure that if there are n routeesMap,
+// then for n messages sent through the router, each actor is forwarded one message.
+type roundRobinRouter struct {
 	// list of routees
-	routeesMap map[string]actors.PID
-	routees    []actors.Actor
+	routeesMap map[string]PID
+	routees    []Actor
+	next       uint32
 }
 
 // enforce compilation error
-var _ actors.Actor = (*Random)(nil)
+var _ Actor = (*roundRobinRouter)(nil)
 
-// NewRandom creates an instance of Random router
-func NewRandom(routees ...actors.Actor) *Random {
+// newRoundRobinRouter creates an instance of roundRobinRouter router
+func newRoundRobinRouter(routees ...Actor) *roundRobinRouter {
 	// create the router instance
-	router := &Random{
-		routeesMap: make(map[string]actors.PID, len(routees)),
+	router := &roundRobinRouter{
+		routeesMap: make(map[string]PID, len(routees)),
 		routees:    routees,
 	}
 	return router
 }
 
 // PreStart pre-starts the actor.
-func (x *Random) PreStart(context.Context) error {
+func (x *roundRobinRouter) PreStart(context.Context) error {
 	return nil
 }
 
 // Receive handles messages sent to the Random router
-func (x *Random) Receive(ctx actors.ReceiveContext) {
+func (x *roundRobinRouter) Receive(ctx ReceiveContext) {
 	message := ctx.Message()
 	switch message.(type) {
 	case *goaktpb.PostStart:
@@ -71,22 +72,22 @@ func (x *Random) Receive(ctx actors.ReceiveContext) {
 }
 
 // PostStop is executed when the actor is shutting down.
-func (x *Random) PostStop(context.Context) error {
+func (x *roundRobinRouter) PostStop(context.Context) error {
 	return nil
 }
 
-// postStart spawns routeeRefs
-func (x *Random) postStart(ctx actors.ReceiveContext) {
+// postStart spawns routees
+func (x *roundRobinRouter) postStart(ctx ReceiveContext) {
 	for index, routee := range x.routees {
-		name := fmt.Sprintf("routee-%s-%d", ctx.Self().Name(), index)
+		name := fmt.Sprintf("%s-%s-%d", goakRouteeNamePrefix, ctx.Self().Name(), index)
 		routee := ctx.Spawn(name, routee)
 		x.routeesMap[routee.ID()] = routee
 	}
 	ctx.Become(x.broadcast)
 }
 
-// broadcast send message to all the routeeRefs
-func (x *Random) broadcast(ctx actors.ReceiveContext) {
+// broadcast send message to all the routees
+func (x *roundRobinRouter) broadcast(ctx ReceiveContext) {
 	var message *goaktpb.Broadcast
 	switch msg := ctx.Message().(type) {
 	case *goaktpb.Broadcast:
@@ -99,7 +100,7 @@ func (x *Random) broadcast(ctx actors.ReceiveContext) {
 		return
 	}
 
-	routees := make([]actors.PID, 0, len(x.routeesMap))
+	routees := make([]PID, 0, len(x.routeesMap))
 	for _, routee := range x.routeesMap {
 		if routee.IsRunning() {
 			routees = append(routees, routee)
@@ -116,7 +117,7 @@ func (x *Random) broadcast(ctx actors.ReceiveContext) {
 	if err != nil {
 		ctx.Err(err)
 	}
-
-	routee := routees[rand.IntN(len(routees))]
+	n := atomic.AddUint32(&x.next, 1)
+	routee := routees[(int(n)-1)%len(routees)]
 	ctx.Tell(routee, msg)
 }

@@ -506,11 +506,11 @@ func (n *Engine) RemoveActor(ctx context.Context, actorName string) error {
 	n.Lock()
 	defer n.Unlock()
 
-	logger.Infof("removing actor (%s)", actorName)
+	logger.Infof("removing actor (%s) from cluster", actorName)
 
 	_, err := n.dmap.Delete(ctx, actorName)
 	if err != nil {
-		logger.Error(errors.Wrapf(err, "failed to remove actor=%s record", actorName))
+		logger.Error(errors.Wrapf(err, "failed to remove actor=%s record from the cluster", actorName))
 		return err
 	}
 

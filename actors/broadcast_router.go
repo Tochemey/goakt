@@ -22,47 +22,46 @@
  * SOFTWARE.
  */
 
-package router
+package actors
 
 import (
 	"context"
 	"fmt"
 
-	"github.com/tochemey/goakt/v2/actors"
 	"github.com/tochemey/goakt/v2/goaktpb"
 )
 
-// Broadcaster defines a broadcast router. This is a pool router
+// broadcastRouter defines a broadcast router. This is a pool router
 // When the router receives a message to broadcast, every routee is checked whether alive or not.
 // When a routee is not alive the router removes it from its set of routeesMap.
 // When the last routee stops the router itself stops.
-type Broadcaster struct {
+type broadcastRouter struct {
 	// list of routees
-	routeesMap map[string]actors.PID
-	routees    []actors.Actor
+	routeesMap map[string]PID
+	routees    []Actor
 }
 
 // enforce compilation error
-var _ actors.Actor = (*Broadcaster)(nil)
+var _ Actor = (*broadcastRouter)(nil)
 
-// NewBroadcaster creates an instance of Broadcaster router
+// newBroadcastRouter creates an instance of broadcastRouter router
 // routeeRefs can be of different types as long as they can handle the router broadcast message
-func NewBroadcaster(routees ...actors.Actor) *Broadcaster {
+func newBroadcastRouter(routees ...Actor) *broadcastRouter {
 	// create the router instance
-	router := &Broadcaster{
-		routeesMap: make(map[string]actors.PID, len(routees)),
+	router := &broadcastRouter{
+		routeesMap: make(map[string]PID, len(routees)),
 		routees:    routees,
 	}
 	return router
 }
 
 // PreStart pre-starts the actor.
-func (x *Broadcaster) PreStart(context.Context) error {
+func (x *broadcastRouter) PreStart(context.Context) error {
 	return nil
 }
 
-// Receive handles messages sent to the Broadcaster router
-func (x *Broadcaster) Receive(ctx actors.ReceiveContext) {
+// Receive handles messages sent to the broadcastRouter router
+func (x *broadcastRouter) Receive(ctx ReceiveContext) {
 	message := ctx.Message()
 	switch message.(type) {
 	case *goaktpb.PostStart:
@@ -73,14 +72,14 @@ func (x *Broadcaster) Receive(ctx actors.ReceiveContext) {
 }
 
 // PostStop is executed when the actor is shutting down.
-func (x *Broadcaster) PostStop(context.Context) error {
+func (x *broadcastRouter) PostStop(context.Context) error {
 	return nil
 }
 
 // postStart spawns routeesMap
-func (x *Broadcaster) postStart(ctx actors.ReceiveContext) {
+func (x *broadcastRouter) postStart(ctx ReceiveContext) {
 	for index, routee := range x.routees {
-		name := fmt.Sprintf("routee-%s-%d", ctx.Self().Name(), index)
+		name := fmt.Sprintf("%s-%s-%d", goakRouteeNamePrefix, ctx.Self().Name(), index)
 		routee := ctx.Spawn(name, routee)
 		x.routeesMap[routee.ID()] = routee
 	}
@@ -89,7 +88,7 @@ func (x *Broadcaster) postStart(ctx actors.ReceiveContext) {
 }
 
 // broadcast send message to all the routeesMap
-func (x *Broadcaster) broadcast(ctx actors.ReceiveContext) {
+func (x *broadcastRouter) broadcast(ctx ReceiveContext) {
 	var message *goaktpb.Broadcast
 	switch msg := ctx.Message().(type) {
 	case *goaktpb.Broadcast:
@@ -118,14 +117,14 @@ func (x *Broadcaster) broadcast(ctx actors.ReceiveContext) {
 
 	for _, routee := range x.routeesMap {
 		routee := routee
-		go func(pid actors.PID) {
+		go func(pid PID) {
 			ctx.Tell(pid, msg)
 		}(routee)
 	}
 }
 
 // canProceed check whether there are available routeesMap to proceed
-func (x *Broadcaster) canProceed() bool {
+func (x *broadcastRouter) canProceed() bool {
 	for _, routee := range x.routeesMap {
 		if !routee.IsRunning() {
 			delete(x.routeesMap, routee.ID())

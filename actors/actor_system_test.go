@@ -89,7 +89,7 @@ func TestActorSystem(t *testing.T) {
 	})
 	t.Run("With Spawn an actor when started", func(t *testing.T) {
 		ctx := context.TODO()
-		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger), WithMailbox(newReceiveContextBuffer(100)))
+		sys, _ := NewActorSystem("testSys", WithLogger(log.DefaultLogger), WithMailbox(newReceiveContextBuffer(100)))
 
 		// start the actor system
 		err := sys.Start(ctx)
@@ -840,8 +840,9 @@ func TestActorSystem(t *testing.T) {
 		time.Sleep(time.Second)
 
 		t.Cleanup(func() {
-			err = sys.Stop(ctx)
-			assert.Error(t, err)
+			assert.Panics(t, func() {
+				_ = sys.Stop(ctx)
+			})
 		})
 	})
 	t.Run("With deadletters subscription ", func(t *testing.T) {
@@ -862,7 +863,7 @@ func TestActorSystem(t *testing.T) {
 
 		// create the black hole actor
 		actor := &discarder{}
-		actorRef, err := sys.Spawn(ctx, "discarder ", actor)
+		actorRef, err := sys.Spawn(ctx, "discarder", actor)
 		assert.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
@@ -1240,7 +1241,7 @@ func TestActorSystem(t *testing.T) {
 	})
 	t.Run("With SpawnFromFunc with PreStop error", func(t *testing.T) {
 		ctx := context.TODO()
-		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		sys, _ := NewActorSystem("testSys", WithLogger(log.DefaultLogger))
 
 		// start the actor system
 		err := sys.Start(ctx)
@@ -1267,8 +1268,9 @@ func TestActorSystem(t *testing.T) {
 		require.NoError(t, Tell(ctx, actorRef, &testpb.Reply{Content: "test spawn from func"}))
 
 		t.Cleanup(func() {
-			err = sys.Stop(ctx)
-			assert.Error(t, err)
+			assert.Panics(t, func() {
+				_ = sys.Stop(ctx)
+			})
 		})
 	})
 	t.Run("With SpawnFromFunc with actorSystem not started", func(t *testing.T) {

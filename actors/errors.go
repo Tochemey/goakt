@@ -25,11 +25,11 @@
 package actors
 
 import (
+	"errors"
 	"fmt"
 	"io"
 
 	"connectrpc.com/connect"
-	"github.com/pkg/errors"
 )
 
 var (
@@ -62,11 +62,11 @@ var (
 	// ErrMethodCallNotAllowed is returned when rpc call is not allowed
 	ErrMethodCallNotAllowed = errors.New("method call not allowed")
 	// ErrInvalidRemoteMessage is returned when an invalid remote message is sent
-	ErrInvalidRemoteMessage = func(err error) error { return errors.Wrap(err, "invalid remote message") }
+	ErrInvalidRemoteMessage = func(err error) error { return fmt.Errorf("invalid remote message: %w", err) }
 	// ErrStashBufferNotSet when stashing is not set while requesting for messages to be stashed
 	ErrStashBufferNotSet = errors.New("actor is not setup with a stash buffer")
 	// ErrInitFailure is returned when the initialization of an actor fails.
-	ErrInitFailure = func(err error) error { return errors.Wrap(err, "failed to initialize") }
+	ErrInitFailure = func(err error) error { return fmt.Errorf("failed to initialize: %w", err) }
 	// ErrActorSystemNotStarted is returned when the actor is not started while accessing the features of the actor system
 	ErrActorSystemNotStarted = errors.New("actor system has not started yet")
 	// ErrLocalAddress is returned when a remote address is used instead of a local address
@@ -87,6 +87,8 @@ var (
 	ErrUndefinedTask = errors.New("task is not defined")
 	// ErrInvalidHost is returned when a request is sent to an invalid host
 	ErrInvalidHost = errors.New("invalid host")
+	// ErrInvalidPath is returned when an actor path is invalid
+	ErrInvalidPath = func(err error) error { return fmt.Errorf("invalid path: %w", err) }
 )
 
 // IsEOF returns true if the given error is an EOF error

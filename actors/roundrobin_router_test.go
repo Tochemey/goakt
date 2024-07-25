@@ -22,7 +22,7 @@
  * SOFTWARE.
  */
 
-package router
+package actors
 
 import (
 	"context"
@@ -35,21 +35,20 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 
-	"github.com/tochemey/goakt/v2/actors"
 	"github.com/tochemey/goakt/v2/goaktpb"
 	"github.com/tochemey/goakt/v2/log"
 	"github.com/tochemey/goakt/v2/test/data/testpb"
 )
 
-func TestBroadcast(t *testing.T) {
+func TestRoundRobinRouter(t *testing.T) {
 	t.Run("With happy path", func(t *testing.T) {
 		ctx := context.TODO()
 		logger := log.DefaultLogger
-		system, err := actors.NewActorSystem(
+		system, err := NewActorSystem(
 			"testSystem",
-			actors.WithPassivationDisabled(),
-			actors.WithLogger(logger),
-			actors.WithReplyTimeout(time.Minute))
+			WithPassivationDisabled(),
+			WithLogger(logger),
+			WithReplyTimeout(time.Minute))
 
 		require.NoError(t, err)
 		require.NotNil(t, system)
@@ -58,10 +57,12 @@ func TestBroadcast(t *testing.T) {
 
 		time.Sleep(time.Second)
 
-		// create a broadcast router with two routeeRefs
-		broadcaster := NewBroadcaster(newWorker(), newWorker())
+		// create a roundrobin router with one routee
+		// this is for the purpose of testing to make sure given routee does receive the
+		// message sent
+		roundrobin := newRoundRobinRouter(newWorker())
 
-		router, err := system.Spawn(ctx, "worker-pool", broadcaster)
+		router, err := system.Spawn(ctx, "worker-pool", roundrobin)
 		require.NoError(t, err)
 		require.NotNil(t, router)
 
@@ -69,31 +70,21 @@ func TestBroadcast(t *testing.T) {
 
 		// send a broadcast message to the router
 		message, _ := anypb.New(&testpb.DoLog{Text: "msg"})
-		err = actors.Tell(ctx, router, &goaktpb.Broadcast{Message: message})
+		err = Tell(ctx, router, &goaktpb.Broadcast{Message: message})
 		require.NoError(t, err)
 
 		time.Sleep(time.Second)
 
 		// this is just for tests purpose
-		workerOneName := fmt.Sprintf("routee-%s-%d", router.Name(), 0)
-		workerTwoName := fmt.Sprintf("routee-%s-%d", router.Name(), 1)
+		workerName := fmt.Sprintf("GoAktRoutee-%s-%d", router.Name(), 0)
 
-		workerOneRef, err := system.LocalActor(workerOneName)
+		workerOneRef, err := system.LocalActor(workerName)
 		require.NoError(t, err)
 		require.NotNil(t, workerOneRef)
 
-		workerTwoRef, err := system.LocalActor(workerTwoName)
-		require.NoError(t, err)
-		require.NotNil(t, workerTwoRef)
-
 		expected := &testpb.Count{Value: 2}
 
-		reply, err := actors.Ask(ctx, workerOneRef, new(testpb.GetCount), time.Minute)
-		require.NoError(t, err)
-		require.NotNil(t, reply)
-		assert.True(t, proto.Equal(expected, reply))
-
-		reply, err = actors.Ask(ctx, workerTwoRef, new(testpb.GetCount), time.Minute)
+		reply, err := Ask(ctx, workerOneRef, new(testpb.GetCount), time.Minute)
 		require.NoError(t, err)
 		require.NotNil(t, reply)
 		assert.True(t, proto.Equal(expected, reply))
@@ -102,49 +93,63 @@ func TestBroadcast(t *testing.T) {
 			assert.NoError(t, system.Stop(ctx))
 		})
 	})
-	t.Run("With no available routees router shuts down", func(t *testing.T) {
+	t.Run("With no available routees router is alive and message in deadletter", func(t *testing.T) {
 		ctx := context.TODO()
 		logger := log.DefaultLogger
-		system, err := actors.NewActorSystem(
+		system, err := NewActorSystem(
 			"testSystem",
-			actors.WithPassivationDisabled(),
-			actors.WithLogger(logger),
-			actors.WithReplyTimeout(time.Minute))
+			WithPassivationDisabled(),
+			WithLogger(logger),
+			WithReplyTimeout(time.Minute))
 
 		require.NoError(t, err)
 		require.NotNil(t, system)
-
 		require.NoError(t, system.Start(ctx))
 
 		time.Sleep(time.Second)
 
-		// create a broadcast router with two routeeRefs
-		broadcaster := NewBroadcaster(newWorker(), newWorker())
+		// create a deadletter subscriber
+		consumer, err := system.Subscribe()
+		require.NoError(t, err)
+		require.NotNil(t, consumer)
 
-		router, err := system.Spawn(ctx, "worker-pool", broadcaster)
+		// create a roundRobin router with one routee
+		// this is for the purpose of testing to make sure given routee does receive the
+		// message sent
+		roundRobin := newRoundRobinRouter(newWorker())
+
+		router, err := system.Spawn(ctx, "worker-pool", roundRobin)
 		require.NoError(t, err)
 		require.NotNil(t, router)
 
 		time.Sleep(time.Second)
 
 		// this is just for tests purpose
-		workerOneName := fmt.Sprintf("routee-%s-%d", router.Name(), 0)
-		workerTwoName := fmt.Sprintf("routee-%s-%d", router.Name(), 1)
-
-		require.NoError(t, system.Kill(ctx, workerOneName))
-		require.NoError(t, system.Kill(ctx, workerTwoName))
-
-		// send a broadcast message to the router
-		message, _ := anypb.New(&testpb.DoLog{Text: "msg"})
-		err = actors.Tell(ctx, router, &goaktpb.Broadcast{Message: message})
+		workerName := fmt.Sprintf("GoAktRoutee-%s-%d", router.Name(), 0)
+		err = system.Kill(ctx, workerName)
 		require.NoError(t, err)
 
 		time.Sleep(time.Second)
 
-		ref, err := system.LocalActor("worker-pool")
-		require.Error(t, err)
-		require.Nil(t, ref)
-		assert.EqualError(t, err, actors.ErrActorNotFound("worker-pool").Error())
+		// send a broadcast message to the router
+		message, _ := anypb.New(&testpb.DoLog{Text: "msg"})
+		err = Tell(ctx, router, &goaktpb.Broadcast{Message: message})
+		require.NoError(t, err)
+
+		time.Sleep(time.Second)
+		assert.True(t, router.IsRunning())
+
+		var items []*goaktpb.Deadletter
+		for message := range consumer.Iterator() {
+			payload := message.Payload()
+			// only listening to deadletters
+			deadletter, ok := payload.(*goaktpb.Deadletter)
+			if ok {
+				items = append(items, deadletter)
+			}
+		}
+
+		require.Len(t, items, 1)
 
 		t.Cleanup(func() {
 			assert.NoError(t, system.Stop(ctx))

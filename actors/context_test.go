@@ -685,7 +685,7 @@ func TestReceiveContext(t *testing.T) {
 
 		// create the parent actor
 		parent, err := newPID(ctx, actorPath,
-			newSupervisor(),
+			newTestSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
 			withAskTimeout(replyTimeout))
@@ -705,7 +705,7 @@ func TestReceiveContext(t *testing.T) {
 
 		// create the child actor
 		name := "monitored"
-		child := context.Spawn(name, newSupervised())
+		child := context.Spawn(name, newTestSupervised())
 		assert.NotNil(t, child)
 		assert.Len(t, context.Children(), 1)
 
@@ -723,7 +723,7 @@ func TestReceiveContext(t *testing.T) {
 
 		// create the parent actor
 		parent, err := newPID(ctx, actorPath,
-			newSupervisor(),
+			newTestSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
 			withAskTimeout(replyTimeout))
@@ -746,7 +746,7 @@ func TestReceiveContext(t *testing.T) {
 
 		// create the child actor
 		assert.Panics(t, func() {
-			context.Spawn("SpawnChild", newSupervised())
+			context.Spawn("SpawnChild", newTestSupervised())
 		})
 	})
 	t.Run("With not found Child", func(t *testing.T) {
@@ -755,7 +755,7 @@ func TestReceiveContext(t *testing.T) {
 
 		// create the parent actor
 		parent, err := newPID(ctx, actorPath,
-			newSupervisor(),
+			newTestSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
 			withAskTimeout(replyTimeout))
@@ -775,7 +775,7 @@ func TestReceiveContext(t *testing.T) {
 
 		// create the child actor
 		name := "monitored"
-		child := context.Spawn(name, newSupervised())
+		child := context.Spawn(name, newTestSupervised())
 		assert.NotNil(t, child)
 		assert.Len(t, context.Children(), 1)
 
@@ -796,7 +796,7 @@ func TestReceiveContext(t *testing.T) {
 
 		// create the parent actor
 		parent, err := newPID(ctx, actorPath,
-			newSupervisor(),
+			newTestSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
 			withAskTimeout(replyTimeout))
@@ -816,7 +816,7 @@ func TestReceiveContext(t *testing.T) {
 
 		// create the child actor
 		name := "monitored"
-		child := context.Spawn(name, newSupervised())
+		child := context.Spawn(name, newTestSupervised())
 		assert.NotNil(t, child)
 		assert.Len(t, context.Children(), 1)
 
@@ -837,7 +837,7 @@ func TestReceiveContext(t *testing.T) {
 
 		// create the parent actor
 		parent, err := newPID(ctx, actorPath,
-			newSupervisor(),
+			newTestSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
 			withAskTimeout(replyTimeout))
@@ -857,7 +857,7 @@ func TestReceiveContext(t *testing.T) {
 
 		// create the child actor
 		name := "monitored"
-		child := context.Spawn(name, newSupervised())
+		child := context.Spawn(name, newTestSupervised())
 		assert.NotNil(t, child)
 		assert.Len(t, context.Children(), 1)
 
@@ -878,7 +878,7 @@ func TestReceiveContext(t *testing.T) {
 
 		// create the parent actor
 		parent, err := newPID(ctx, actorPath,
-			newSupervisor(),
+			newTestSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
 			withAskTimeout(replyTimeout))
@@ -898,7 +898,7 @@ func TestReceiveContext(t *testing.T) {
 
 		// create the child actor
 		name := "monitored"
-		child := context.Spawn(name, newSupervised())
+		child := context.Spawn(name, newTestSupervised())
 		assert.NotNil(t, child)
 		assert.Len(t, context.Children(), 1)
 
@@ -921,7 +921,7 @@ func TestReceiveContext(t *testing.T) {
 
 		// create the parent actor
 		parent, err := newPID(ctx, actorPath,
-			newSupervisor(),
+			newTestSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
 			withAskTimeout(replyTimeout))
@@ -955,7 +955,7 @@ func TestReceiveContext(t *testing.T) {
 
 		// create the parent actor
 		parent, err := newPID(ctx, actorPath,
-			newSupervisor(),
+			newTestSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
 			withAskTimeout(replyTimeout))
@@ -974,7 +974,7 @@ func TestReceiveContext(t *testing.T) {
 		}
 
 		name := "monitored"
-		child := context.Spawn(name, newSupervised())
+		child := context.Spawn(name, newTestSupervised())
 		assert.NotNil(t, child)
 		assert.Len(t, context.Children(), 1)
 
@@ -995,7 +995,7 @@ func TestReceiveContext(t *testing.T) {
 
 		// create the parent actor
 		parent, err := newPID(ctx, actorPath,
-			newSupervisor(),
+			newTestSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
 			withAskTimeout(replyTimeout))
@@ -1016,7 +1016,7 @@ func TestReceiveContext(t *testing.T) {
 		// create the child actor
 		childPath := NewPath("child", NewAddress("sys", "host", 1))
 		child, err := newPID(ctx, childPath,
-			newSupervisor(),
+			newTestSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
 			withAskTimeout(replyTimeout))
@@ -1039,7 +1039,7 @@ func TestReceiveContext(t *testing.T) {
 
 		// create the parent actor
 		parent, err := newPID(ctx, actorPath,
-			newSupervisor(),
+			newTestSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
 			withAskTimeout(replyTimeout))
@@ -1059,7 +1059,7 @@ func TestReceiveContext(t *testing.T) {
 
 		// create the child actor
 		name := "monitored"
-		child := context.Spawn(name, newSupervised())
+		child := context.Spawn(name, newTestSupervised())
 		assert.NotNil(t, child)
 		assert.Len(t, context.Children(), 1)
 
