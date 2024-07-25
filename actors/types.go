@@ -55,6 +55,16 @@ const (
 	DefaultGCInterval = 30 * time.Millisecond
 	// eventsTopic defines the events topic
 	eventsTopic = "topic.events"
+
+	systemNamePrefix = "GoAkt"
+	routeeNamePrefix = "GoAktRoutee"
+)
+
+type nameType int
+
+const (
+	supervisorType nameType = iota
+	routerType
 )
 
 var (
@@ -64,4 +74,9 @@ var (
 	DefaultSupervisoryStrategy = NewStopDirective()
 	// RemoteNoSender means that there is no sender
 	RemoteNoSender = new(goaktpb.Address)
+
+	systemNames = map[nameType]string{
+		supervisorType: "GoAktSupervisor",
+		routerType:     "GoAktRouter",
+	}
 )

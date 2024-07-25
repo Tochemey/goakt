@@ -25,28 +25,20 @@
 package actors
 
 import (
-	"reflect"
 	"sync"
 
 	"go.uber.org/atomic"
-
-	"github.com/tochemey/goakt/v2/internal/types"
 )
-
-type prop struct {
-	pid   PID
-	rtype reflect.Type
-}
 
 type pidMap struct {
 	mu       *sync.RWMutex
 	size     atomic.Int32
-	mappings map[string]*prop
+	mappings map[string]PID
 }
 
 func newPIDMap(cap int) *pidMap {
 	return &pidMap{
-		mappings: make(map[string]*prop, cap),
+		mappings: make(map[string]PID, cap),
 		mu:       &sync.RWMutex{},
 	}
 }
@@ -59,12 +51,8 @@ func (m *pidMap) len() int {
 // get retrieves a pid by its address
 func (m *pidMap) get(path *Path) (pid PID, ok bool) {
 	m.mu.RLock()
-	defer m.mu.RUnlock()
-	prop, ok := m.mappings[path.String()]
-	if prop != nil {
-		pid = prop.pid
-		ok = true
-	}
+	pid, ok = m.mappings[path.String()]
+	m.mu.RUnlock()
 	return
 }
 
@@ -73,16 +61,7 @@ func (m *pidMap) set(pid PID) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if pid != nil {
-		var rtype reflect.Type
-		handle := pid.ActorHandle()
-		if handle != nil {
-			rtype = types.Of(handle)
-		}
-
-		m.mappings[pid.ActorPath().String()] = &prop{
-			pid:   pid,
-			rtype: rtype,
-		}
+		m.mappings[pid.ActorPath().String()] = pid
 		m.size.Add(1)
 	}
 }
@@ -100,21 +79,14 @@ func (m *pidMap) pids() []PID {
 	m.mu.Lock()
 	var out []PID
 	for _, prop := range m.mappings {
-		out = append(out, prop.pid)
+		out = append(out, prop)
 	}
-	m.mu.Unlock()
-	return out
-}
-
-func (m *pidMap) props() map[string]*prop {
-	m.mu.Lock()
-	out := m.mappings
 	m.mu.Unlock()
 	return out
 }
 
 func (m *pidMap) close() {
 	m.mu.Lock()
-	m.mappings = make(map[string]*prop)
+	m.mappings = make(map[string]PID)
 	m.mu.Unlock()
 }

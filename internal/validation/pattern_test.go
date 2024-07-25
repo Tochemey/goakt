@@ -24,24 +24,24 @@
 
 package validation
 
-import "errors"
+import (
+	"errors"
+	"testing"
 
-// booleanValidator implements Validator.
-type booleanValidator struct {
-	boolCheck  bool
-	errMessage string
-}
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
 
-// NewBooleanValidator creates a new boolean validator that returns an error message if condition is false
-// This validator will come handy when dealing with conditional validation
-func NewBooleanValidator(boolCheck bool, errMessage string) Validator {
-	return &booleanValidator{boolCheck: boolCheck, errMessage: errMessage}
-}
+func TestPatternValidator(t *testing.T) {
+	pattern := "^[a-zA-Z0-9][a-zA-Z0-9-_\\.]*$"
+	expression := "discarder"
+	validator := NewPatternValidator(pattern, expression, nil)
+	assert.NoError(t, validator.Validate())
 
-// Validate returns an error if boolean check is false
-func (v booleanValidator) Validate() error {
-	if !v.boolCheck {
-		return errors.New(v.errMessage)
-	}
-	return nil
+	expression = "$omeN@me"
+	customError := errors.New("custom error")
+	validator = NewPatternValidator(pattern, expression, customError)
+	err := validator.Validate()
+	require.Error(t, err)
+	assert.EqualError(t, err, customError.Error())
 }

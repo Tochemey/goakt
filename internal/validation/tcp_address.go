@@ -25,15 +25,14 @@
 package validation
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"strconv"
 	"strings"
-
-	"github.com/pkg/errors"
 )
 
-var errFmt = "invalid address=(%s)"
+var errFmt = "invalid address=(%s): %w"
 
 // TCPAddressValidator helps validate a TCP address
 type TCPAddressValidator struct {
@@ -52,18 +51,18 @@ func NewTCPAddressValidator(address string) *TCPAddressValidator {
 func (a *TCPAddressValidator) Validate() error {
 	host, port, err := net.SplitHostPort(strings.TrimSpace(a.address))
 	if err != nil {
-		return errors.Wrapf(err, errFmt, a.address)
+		return fmt.Errorf(errFmt, a.address, err)
 	}
 
 	// let us validate the port number
 	portNum, err := strconv.Atoi(port)
 	if err != nil {
-		return errors.Wrapf(err, errFmt, a.address)
+		return fmt.Errorf(errFmt, a.address, err)
 	}
 
 	// TODO: maybe we only need to check port number not to be negative
 	if host == "" || portNum > 65535 || portNum < 1 {
-		return fmt.Errorf(errFmt, a.address)
+		return fmt.Errorf(errFmt, a.address, errors.New("invalid address"))
 	}
 
 	return nil

@@ -131,7 +131,7 @@ func TestClient(t *testing.T) {
 			time.Sleep(time.Second)
 		})
 	})
-	t.Run("With Random strategy", func(t *testing.T) {
+	t.Run("With randomRouter strategy", func(t *testing.T) {
 		ctx := context.TODO()
 		logger := log.DiscardLogger
 		// start the NATS server

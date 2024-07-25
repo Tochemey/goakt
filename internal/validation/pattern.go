@@ -22,45 +22,40 @@
  * SOFTWARE.
  */
 
-package router
+package validation
 
 import (
-	"context"
-
-	"github.com/tochemey/goakt/v2/actors"
-	"github.com/tochemey/goakt/v2/log"
-	"github.com/tochemey/goakt/v2/test/data/testpb"
+	"errors"
+	"regexp"
 )
 
-type worker struct {
-	counter int
-	logger  log.Logger
+// patternValidator is used to perform a validation
+// provided a given pattern
+type patternValidator struct {
+	pattern    string
+	expression string
+	customErr  error
 }
 
-var _ actors.Actor = (*worker)(nil)
+var _ Validator = (*patternValidator)(nil)
 
-func newWorker() *worker {
-	return &worker{}
-}
-
-func (x *worker) PreStart(context.Context) error {
-	x.logger = log.DefaultLogger
-	return nil
-}
-
-func (x *worker) Receive(ctx actors.ReceiveContext) {
-	switch msg := ctx.Message().(type) {
-	case *testpb.DoLog:
-		x.counter++
-		x.logger.Infof("Got message: %s", msg.GetText())
-	case *testpb.GetCount:
-		x.counter++
-		ctx.Response(&testpb.Count{Value: int32(x.counter)})
-	default:
-		ctx.Unhandled()
+// NewPatternValidator creates an instance of the validator
+// The given pattern should be valid regular expression
+func NewPatternValidator(pattern, expression string, customErr error) Validator {
+	return &patternValidator{
+		pattern:    pattern,
+		expression: expression,
+		customErr:  customErr,
 	}
 }
 
-func (x *worker) PostStop(context.Context) error {
+// Validate executes the validation
+func (x *patternValidator) Validate() error {
+	if match, _ := regexp.MatchString(x.pattern, x.expression); !match {
+		if x.customErr != nil {
+			return x.customErr
+		}
+		return errors.New("invalid expression")
+	}
 	return nil
 }

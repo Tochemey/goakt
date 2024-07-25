@@ -43,6 +43,7 @@ import (
 	"github.com/tochemey/goakt/v2/discovery/nats"
 	"github.com/tochemey/goakt/v2/goaktpb"
 	"github.com/tochemey/goakt/v2/log"
+	"github.com/tochemey/goakt/v2/test/data/testpb"
 	testspb "github.com/tochemey/goakt/v2/test/data/testpb"
 )
 
@@ -107,23 +108,23 @@ func (p *testActor) Receive(ctx ReceiveContext) {
 	}
 }
 
-// supervisor is an actor that monitors another actor
+// testSupervisor is an actor that monitors another actor
 // and reacts to its failure.
-type supervisor struct{}
+type testSupervisor struct{}
 
 // enforce compilation error
-var _ Actor = (*supervisor)(nil)
+var _ Actor = (*testSupervisor)(nil)
 
-// newSupervisor creates an instance of supervisor
-func newSupervisor() *supervisor {
-	return &supervisor{}
+// newTestSupervisor creates an instance of testSupervisor
+func newTestSupervisor() *testSupervisor {
+	return &testSupervisor{}
 }
 
-func (p *supervisor) PreStart(context.Context) error {
+func (p *testSupervisor) PreStart(context.Context) error {
 	return nil
 }
 
-func (p *supervisor) Receive(ctx ReceiveContext) {
+func (p *testSupervisor) Receive(ctx ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *goaktpb.PostStart:
 	case *testspb.TestSend:
@@ -132,26 +133,26 @@ func (p *supervisor) Receive(ctx ReceiveContext) {
 	}
 }
 
-func (p *supervisor) PostStop(context.Context) error {
+func (p *testSupervisor) PostStop(context.Context) error {
 	return nil
 }
 
-// supervised is an actor that is monitored
-type supervised struct{}
+// testSupervised is an actor that is monitored
+type testSupervised struct{}
 
 // enforce compilation error
-var _ Actor = (*supervised)(nil)
+var _ Actor = (*testSupervised)(nil)
 
-// newSupervised creates an instance of supervised
-func newSupervised() *supervised {
-	return &supervised{}
+// newTestSupervised creates an instance of testSupervised
+func newTestSupervised() *testSupervised {
+	return &testSupervised{}
 }
 
-func (x *supervised) PreStart(context.Context) error {
+func (x *testSupervised) PreStart(context.Context) error {
 	return nil
 }
 
-func (x *supervised) Receive(ctx ReceiveContext) {
+func (x *testSupervised) Receive(ctx ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *goaktpb.PostStart:
 	case *testspb.TestSend:
@@ -164,7 +165,7 @@ func (x *supervised) Receive(ctx ReceiveContext) {
 	}
 }
 
-func (x *supervised) PostStop(context.Context) error {
+func (x *testSupervised) PostStop(context.Context) error {
 	return nil
 }
 
@@ -494,3 +495,36 @@ func startClusterSystem(t *testing.T, nodeName, serverAddr string) (ActorSystem,
 type unhandledSupervisorDirective struct{}
 
 func (x unhandledSupervisorDirective) isSupervisorDirective() {}
+
+type worker struct {
+	counter int
+	logger  log.Logger
+}
+
+var _ Actor = (*worker)(nil)
+
+func newWorker() *worker {
+	return &worker{}
+}
+
+func (x *worker) PreStart(context.Context) error {
+	x.logger = log.DefaultLogger
+	return nil
+}
+
+func (x *worker) Receive(ctx ReceiveContext) {
+	switch msg := ctx.Message().(type) {
+	case *testpb.DoLog:
+		x.counter++
+		x.logger.Infof("Got message: %s", msg.GetText())
+	case *testpb.GetCount:
+		x.counter++
+		ctx.Response(&testpb.Count{Value: int32(x.counter)})
+	default:
+		ctx.Unhandled()
+	}
+}
+
+func (x *worker) PostStop(context.Context) error {
+	return nil
+}

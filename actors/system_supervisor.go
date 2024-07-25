@@ -22,26 +22,46 @@
  * SOFTWARE.
  */
 
-package validation
+package actors
 
-import "errors"
+import (
+	"context"
 
-// booleanValidator implements Validator.
-type booleanValidator struct {
-	boolCheck  bool
-	errMessage string
+	"github.com/tochemey/goakt/v2/goaktpb"
+	"github.com/tochemey/goakt/v2/log"
+)
+
+// systemSupervisor is an actor which roles is to handle
+// escalation failure
+type systemSupervisor struct {
+	logger log.Logger
 }
 
-// NewBooleanValidator creates a new boolean validator that returns an error message if condition is false
-// This validator will come handy when dealing with conditional validation
-func NewBooleanValidator(boolCheck bool, errMessage string) Validator {
-	return &booleanValidator{boolCheck: boolCheck, errMessage: errMessage}
-}
+// enforce compilation error
+var _ Actor = (*systemSupervisor)(nil)
 
-// Validate returns an error if boolean check is false
-func (v booleanValidator) Validate() error {
-	if !v.boolCheck {
-		return errors.New(v.errMessage)
+// newSupervisor creates an instance of a testSupervisor
+func newSystemSupervisor(logger log.Logger) *systemSupervisor {
+	return &systemSupervisor{
+		logger: logger,
 	}
+}
+
+func (s *systemSupervisor) PreStart(context.Context) error {
+	s.logger.Info("starting the system supervisor actor")
+	return nil
+}
+
+func (s *systemSupervisor) Receive(ctx ReceiveContext) {
+	switch ctx.Message().(type) {
+	case *goaktpb.PostStart:
+		s.logger.Info("system supervior successfully started")
+	default:
+		ctx.Unhandled()
+	}
+}
+
+func (s *systemSupervisor) PostStop(context.Context) error {
+	s.logger.Info("system supervior stopped")
 	return nil
 }
