@@ -5,7 +5,7 @@ on:
     branches: [ main ]
     paths-ignore:
       - '**/README.md'
-      - 'bench/**'
+      - '**/bench/**'
 
 jobs:
   build:

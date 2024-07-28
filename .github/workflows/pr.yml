@@ -5,7 +5,7 @@ on:
     branches: [ main ]
     paths-ignore:
       - '**/README.md'
-      - 'bench/**'
+      - '**/bench/**'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
