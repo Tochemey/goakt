@@ -1,11 +1,10 @@
-# Go-Akt 
+# Go-Akt
 
 [![build](https://img.shields.io/github/actions/workflow/status/Tochemey/goakt/build.yml?branch=main)](https://github.com/Tochemey/goakt/actions/workflows/build.yml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/tochemey/goakt.svg)](https://pkg.go.dev/github.com/tochemey/goakt)
 ![GitHub Release](https://img.shields.io/github/v/release/Tochemey/goakt)
 [![Go Report Card](https://goreportcard.com/badge/github.com/tochemey/goakt)](https://goreportcard.com/report/github.com/tochemey/goakt)
 [![codecov](https://codecov.io/gh/Tochemey/goakt/graph/badge.svg?token=J0p9MzwSRH)](https://codecov.io/gh/Tochemey/goakt)
-
 
 Distributed [Go](https://go.dev/) actor framework to build reactive and distributed system in golang using
 _**protocol buffers as actor messages**_.
@@ -21,49 +20,49 @@ The project adheres to [Semantic Versioning](https://semver.org) and [Convention
 
 ## Table of Content
 
-  - [Design Principles](#design-principles)
-  - [Use Cases](#use-cases)
-  - [Installation](#installation)
-  - [Examples](#examples)
-  - [Features](#features)
-    - [Actors](#actors)
-    - [Passivation](#passivation)
-    - [Actor System](#actor-system)
-    - [Behaviors](#behaviors)
-    - [Mailbox](#mailbox)
-    - [Router](#router)
-    - [Events Stream](#events-stream)
-      - [Supported events](#supported-events)
-    - [Messaging](#messaging)
-    - [Scheduler](#scheduler)
-      - [Cron Expression Format](#cron-expression-format)
-      - [Note](#note)
-    - [Stashing](#stashing)
-    - [Remoting](#remoting)
-    - [Cluster](#cluster)
-    - [Observability](#observability)
-      - [Tracing](#tracing)
-      - [Metrics](#metrics)
-      - [Logging](#logging)
-    - [Testkit](#testkit)
-  - [API](#api)
-  - [Client](#client)
-    - [Balancer strategies](#balancer-strategies)
-    - [Features](#features-1)
-  - [Clustering](#clustering)
-    - [Operations Guide](#operations-guide)
-    - [Redeployment](#redeployment)
-    - [Built-in Discovery Providers](#built-in-discovery-providers)
-      - [Kubernetes Discovery Provider Setup](#kubernetes-discovery-provider-setup)
-        - [Get Started](#get-started)
-        - [Role Based Access](#role-based-access)
-      - [mDNS Discovery Provider Setup](#mdns-discovery-provider-setup)
-      - [NATS Discovery Provider Setup](#nats-discovery-provider-setup)
-      - [DNS Provider Setup](#dns-provider-setup)
-      - [Static Provider Setup](#static-provider-setup)
-  - [Contribution](#contribution)
-    - [Test \& Linter](#test--linter)
-  - [Benchmark](#benchmark)
+- [Design Principles](#design-principles)
+- [Use Cases](#use-cases)
+- [Installation](#installation)
+- [Examples](#examples)
+- [Features](#features)
+  - [Actors](#actors)
+  - [Passivation](#passivation)
+  - [Actor System](#actor-system)
+  - [Behaviors](#behaviors)
+  - [Mailbox](#mailbox)
+  - [Router](#router)
+  - [Events Stream](#events-stream)
+    - [Supported events](#supported-events)
+  - [Messaging](#messaging)
+  - [Scheduler](#scheduler)
+    - [Cron Expression Format](#cron-expression-format)
+    - [Note](#note)
+  - [Stashing](#stashing)
+  - [Remoting](#remoting)
+  - [Cluster](#cluster)
+  - [Observability](#observability)
+    - [Tracing](#tracing)
+    - [Metrics](#metrics)
+    - [Logging](#logging)
+  - [Testkit](#testkit)
+- [API](#api)
+- [Client](#client)
+  - [Balancer strategies](#balancer-strategies)
+  - [Features](#features-1)
+- [Clustering](#clustering)
+  - [Operations Guide](#operations-guide)
+  - [Redeployment](#redeployment)
+  - [Built-in Discovery Providers](#built-in-discovery-providers)
+    - [Kubernetes Discovery Provider Setup](#kubernetes-discovery-provider-setup)
+      - [Get Started](#get-started)
+      - [Role Based Access](#role-based-access)
+    - [mDNS Discovery Provider Setup](#mdns-discovery-provider-setup)
+    - [NATS Discovery Provider Setup](#nats-discovery-provider-setup)
+    - [DNS Provider Setup](#dns-provider-setup)
+    - [Static Provider Setup](#static-provider-setup)
+- [Contribution](#contribution)
+  - [Test \& Linter](#test--linter)
+- [Benchmark](#benchmark)
 
 ## Design Principles
 
@@ -118,14 +117,12 @@ The fundamental building blocks of Go-Akt are actors.
     fashion) and `Tell`, `RemoteTell`(fire-and-forget fashion) methods
   - stop (child) actors via their process id [`PID`](./actors/pid.go)
   - watch/unwatch (child) actors via their process id [`PID`](./actors/pid.go) `Watch` and `UnWatch` methods
-  - supervise the failure behavior of (child) actors. The supervisory strategy to adopt is set during its creation. 
-    In Go-Akt that each child actor is treated separately. There is no concept of one-for-one and one-for-all strategies. 
+  - supervise the failure behavior of (child) actors. The supervisory strategy to adopt is set during its creation.
+    In Go-Akt that each child actor is treated separately. There is no concept of one-for-one and one-for-all strategies.
     The following directives are supported:
-      - [`Restart`](./actors/supervisor.go): to restart the child actor. One can control how the restart is done using the following options:
-            - `maxNumRetries`: defines the maximum of restart attempts
-            - `timeout`: how to attempt restarting the faulty actor
-      - [`Stop`](./actors/supervisor.go): to stop the child actor which is the default one
-      - [`Resume`](./actors/supervisor.go): ignores the failure and process the next message, instead
+    - [`Restart`](./actors/supervisor.go): to restart the child actor. One can control how the restart is done using the following options: - `maxNumRetries`: defines the maximum of restart attempts - `timeout`: how to attempt restarting the faulty actor
+    - [`Stop`](./actors/supervisor.go): to stop the child actor which is the default one
+    - [`Resume`](./actors/supervisor.go): ignores the failure and process the next message, instead
   - remotely lookup for an actor on another node via their process id [`PID`](./actors/pid.go) `RemoteLookup`.
     This
     allows it to send messages remotely via `RemoteAsk` or `RemoteTell` methods
@@ -183,20 +180,21 @@ Once can implement a custom mailbox. See [Mailbox](./actors/mailbox.go). The def
 Routers help send the same type of message to a set of actors to be processed in parallel depending upon
 the type of the router used. Routers should be used with caution because they can hinder performance.
 When the router receives a message to broadcast, every routee is checked whether alive or not.
-When a routee is not alive the router removes it from its set of routees. 
+When a routee is not alive the router removes it from its set of routees.
 When the last routee stops the router itself stops.
 
 Go-Akt comes shipped with the following routing strategies:
-* `Fan-Out`: This strategy broadcasts the given message to all its available routees in parallel.
-* `Random`: This strategy randomly picks a routee in its set of routees and send the message to it.
-* `Round-Robin`: This strategy sends messages to its routee in a round-robin way. For n messages sent through the router, each actor is forwarded one message.
+
+- `Fan-Out`: This strategy broadcasts the given message to all its available routees in parallel.
+- `Random`: This strategy randomly picks a routee in its set of routees and send the message to it.
+- `Round-Robin`: This strategy sends messages to its routee in a round-robin way. For n messages sent through the router, each actor is forwarded one message.
 
 A router a just like any other actor that can be spawned. To spawn router just call the [ActorSystem](./actors/actor_system.go) `SpawnRouter` method.
 Router as well as their routees are not passivated.
 
 ### Events Stream
 
-To receive some system events and act on them for some particular business cases,  you just need to call the actor system `Subscribe`.
+To receive some system events and act on them for some particular business cases, you just need to call the actor system `Subscribe`.
 Make sure to `Unsubscribe` whenever the subscription is no longer needed to free allocated resources.
 The subscription methods can be found on the `ActorSystem` interface.
 
@@ -242,14 +240,14 @@ You can schedule sending messages to actor that will be acted upon in the future
 #### Cron Expression Format
 
 | Field        | Required | Allowed Values  | Allowed Special Characters |
-|--------------|----------|-----------------|----------------------------|
-| Seconds      | yes      | 0-59            | , - * /                    |
-| Minutes      | yes      | 0-59            | , - * /                    |
-| Hours        | yes      | 0-23            | , - * /                    |
-| Day of month | yes      | 1-31            | , - * ? /                  |
-| Month        | yes      | 1-12 or JAN-DEC | , - * /                    |
-| Day of week  | yes      | 1-7 or SUN-SAT  | , - * ? /                  |
-| Year         | no       | empty, 1970-    | , - * /                    |
+| ------------ | -------- | --------------- | -------------------------- |
+| Seconds      | yes      | 0-59            | , - \* /                   |
+| Minutes      | yes      | 0-59            | , - \* /                   |
+| Hours        | yes      | 0-23            | , - \* /                   |
+| Day of month | yes      | 1-31            | , - \* ? /                 |
+| Month        | yes      | 1-12 or JAN-DEC | , - \* /                   |
+| Day of week  | yes      | 1-7 or SUN-SAT  | , - \* ? /                 |
+| Year         | no       | empty, 1970-    | , - \* /                   |
 
 #### Note
 
@@ -625,5 +623,7 @@ earthly +test
 
 ## Benchmark
 
-One can run the benchmark test: `go test -bench=. -benchtime 2s -count 5 -benchmem -cpu 8 -run notest` from
-the [bench package](./bench) or just run the command `make bench`.
+One can run the benchmark test from the [bench package](./bench):
+
+- `make bench` to run the benchmark
+- `make stats` to see the benchmark stats
