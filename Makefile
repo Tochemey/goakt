@@ -4,6 +4,6 @@ bench:
 
 .PHONY: stats
 stats:
-	cd bench && rm -f benchstat.txt  && benchstat bench.txt | tee benchstat.txt
+	cd bench && rm -f benchstat.txt && benchstat bench.txt | tee benchstat.txt
 
 
