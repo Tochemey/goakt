@@ -180,6 +180,7 @@ func BenchmarkActor(b *testing.B) {
 }
 
 func runParallel(b *testing.B, benchFn func(pb *testing.PB)) {
+	b.ReportAllocs()
 	b.ResetTimer()
 	start := time.Now()
 	b.RunParallel(benchFn)
