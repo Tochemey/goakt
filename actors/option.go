@@ -152,13 +152,6 @@ func WithMailboxSize(size uint64) Option {
 	})
 }
 
-// WithMailbox sets the custom mailbox used by the actors in the actor system
-func WithMailbox(mailbox Mailbox) Option {
-	return OptionFunc(func(a *actorSystem) {
-		a.mailbox = mailbox
-	})
-}
-
 // WithStash sets the stash buffer size
 func WithStash(capacity uint64) Option {
 	return OptionFunc(func(a *actorSystem) {

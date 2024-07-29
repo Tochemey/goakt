@@ -223,7 +223,7 @@ type pid struct {
 	shutdownTimeout atomic.Duration
 
 	// specifies the actor mailbox
-	mailbox     Mailbox
+	mailbox     chan ReceiveContext
 	mailboxSize uint64
 
 	// receives a shutdown signal. Once the signal is received
@@ -249,9 +249,9 @@ type pid struct {
 	// specifies the last processing message duration
 	lastProcessingDuration atomic.Duration
 
-	// rwLocker that helps synchronize the pid in a concurrent environment
+	// fieldsLocker that helps synchronize the pid in a concurrent environment
 	// this helps protect the pid fields accessibility
-	rwLocker *sync.RWMutex
+	fieldsLocker *sync.RWMutex
 
 	stopLocker           *sync.Mutex
 	processingTimeLocker *sync.Mutex
@@ -269,7 +269,7 @@ type pid struct {
 	behaviorStack *behaviorStack
 
 	// stash settings
-	stashBuffer   Mailbox
+	stashBuffer   chan ReceiveContext
 	stashCapacity atomic.Uint64
 	stashLocker   *sync.Mutex
 
@@ -314,7 +314,7 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 		watchedList:          newPIDMap(10),
 		telemetry:            telemetry.New(),
 		actorPath:            actorPath,
-		rwLocker:             &sync.RWMutex{},
+		fieldsLocker:         &sync.RWMutex{},
 		stopLocker:           &sync.Mutex{},
 		httpClient:           http.NewClient(),
 		mailbox:              nil,
@@ -342,12 +342,9 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 		opt(p)
 	}
 
-	if p.mailbox == nil {
-		p.mailbox = newReceiveContextBuffer(p.mailboxSize)
-	}
-
+	p.mailbox = make(chan ReceiveContext, p.mailboxSize)
 	if p.stashCapacity.Load() > 0 {
-		p.stashBuffer = newReceiveContextBuffer(p.stashCapacity.Load())
+		p.stashBuffer = make(chan ReceiveContext, p.stashCapacity.Load())
 	}
 
 	behaviorStack := newBehaviorStack()
@@ -416,9 +413,9 @@ func (x *pid) Child(name string) (PID, error) {
 // Parents returns the list of all direct parents of a given actor.
 // Only alive actors are included in the list or an empty list is returned
 func (x *pid) Parents() []PID {
-	x.rwLocker.Lock()
+	x.fieldsLocker.Lock()
 	watchers := x.watchersList
-	x.rwLocker.Unlock()
+	x.fieldsLocker.Unlock()
 	var parents []PID
 	if watchers.Len() > 0 {
 		for item := range watchers.Iter() {
@@ -437,9 +434,9 @@ func (x *pid) Parents() []PID {
 // Children returns the list of all the direct children of the given actor
 // Only alive actors are included in the list or an empty list is returned
 func (x *pid) Children() []PID {
-	x.rwLocker.RLock()
+	x.fieldsLocker.RLock()
 	children := x.children.pids()
-	x.rwLocker.RUnlock()
+	x.fieldsLocker.RUnlock()
 
 	cids := make([]PID, 0, len(children))
 	for _, child := range children {
@@ -469,9 +466,9 @@ func (x *pid) Stop(ctx context.Context, cid PID) error {
 		return ErrUndefinedActor
 	}
 
-	x.rwLocker.RLock()
+	x.fieldsLocker.RLock()
 	children := x.children
-	x.rwLocker.RUnlock()
+	x.fieldsLocker.RUnlock()
 
 	if cid, ok := children.get(cid.ActorPath()); ok {
 		desc := fmt.Sprintf("child.[%s] Shutdown", cid.ActorPath())
@@ -499,17 +496,17 @@ func (x *pid) IsRunning() bool {
 
 // ActorSystem returns the actor system
 func (x *pid) ActorSystem() ActorSystem {
-	x.rwLocker.RLock()
+	x.fieldsLocker.RLock()
 	sys := x.system
-	x.rwLocker.RUnlock()
+	x.fieldsLocker.RUnlock()
 	return sys
 }
 
 // ActorPath returns the path of the actor
 func (x *pid) ActorPath() *Path {
-	x.rwLocker.RLock()
+	x.fieldsLocker.RLock()
 	path := x.actorPath
-	x.rwLocker.RUnlock()
+	x.fieldsLocker.RUnlock()
 	return path
 }
 
@@ -545,7 +542,6 @@ func (x *pid) Restart(ctx context.Context) error {
 		ticker.Stop()
 	}
 
-	x.mailbox.Reset()
 	x.resetBehavior()
 	if err := x.init(spanCtx); err != nil {
 		return err
@@ -582,15 +578,15 @@ func (x *pid) SpawnChild(ctx context.Context, name string, actor Actor) (PID, er
 
 	childActorPath := NewPath(name, x.ActorPath().Address()).WithParent(x.ActorPath())
 
-	x.rwLocker.RLock()
+	x.fieldsLocker.RLock()
 	children := x.children
-	x.rwLocker.RUnlock()
+	x.fieldsLocker.RUnlock()
 
 	if cid, ok := children.get(childActorPath); ok {
 		return cid, nil
 	}
 
-	x.rwLocker.RLock()
+	x.fieldsLocker.RLock()
 
 	// create the child actor options child inherit parent's options
 	opts := []pidOption{
@@ -602,7 +598,6 @@ func (x *pid) SpawnChild(ctx context.Context, name string, actor Actor) (PID, er
 		withSupervisorDirective(x.supervisorDirective),
 		withMailboxSize(x.mailboxSize),
 		withStash(x.stashCapacity.Load()),
-		withMailbox(x.mailbox.Clone()),
 		withEventsStream(x.eventsStream),
 		withInitTimeout(x.initTimeout.Load()),
 		withShutdownTimeout(x.shutdownTimeout.Load()),
@@ -625,14 +620,14 @@ func (x *pid) SpawnChild(ctx context.Context, name string, actor Actor) (PID, er
 	if err != nil {
 		span.SetStatus(codes.Error, "SpawnChild")
 		span.RecordError(err)
-		x.rwLocker.RUnlock()
+		x.fieldsLocker.RUnlock()
 		return nil, err
 	}
 
 	x.children.set(cid)
 	eventsStream := x.eventsStream
 
-	x.rwLocker.RUnlock()
+	x.fieldsLocker.RUnlock()
 	span.SetStatus(codes.Ok, "SpawnChild")
 
 	x.Watch(cid)
@@ -658,7 +653,7 @@ func (x *pid) StashSize() uint64 {
 	if x.stashBuffer == nil {
 		return 0
 	}
-	return x.stashBuffer.Size()
+	return uint64(len(x.stashBuffer))
 }
 
 // PipeTo processes a long-running task and pipes the result to the provided actor.
@@ -1243,15 +1238,10 @@ func (x *pid) watchees() *pidMap {
 
 // doReceive pushes a given message to the actor receiveContextBuffer
 func (x *pid) doReceive(ctx ReceiveContext) {
-	x.rwLocker.Lock()
-	mailbox := x.mailbox
-	x.rwLocker.Unlock()
-
+	x.fieldsLocker.Lock()
 	x.lastProcessingTime.Store(time.Now())
-	if err := mailbox.Push(ctx); err != nil {
-		x.logger.Warn(err)
-		x.handleError(ctx, err)
-	}
+	x.mailbox <- ctx
+	x.fieldsLocker.Unlock()
 }
 
 // init initializes the given actor and init processing messages
@@ -1275,9 +1265,9 @@ func (x *pid) init(ctx context.Context) error {
 		return e
 	}
 
-	x.rwLocker.Lock()
+	x.fieldsLocker.Lock()
 	x.isRunning.Store(true)
-	x.rwLocker.Unlock()
+	x.fieldsLocker.Unlock()
 
 	x.logger.Info("Initialization process successfully completed.")
 	span.SetStatus(codes.Ok, "Init")
@@ -1304,7 +1294,6 @@ func (x *pid) reset() {
 	x.children = newPIDMap(10)
 	x.watchersList = slices.NewSafe[*watcher]()
 	x.telemetry = telemetry.New()
-	x.mailbox.Reset()
 	x.resetBehavior()
 	if x.metricEnabled.Load() {
 		if err := x.registerMetrics(); err != nil {
@@ -1371,7 +1360,7 @@ func (x *pid) receive() {
 		select {
 		case <-x.shutdownSignal:
 			return
-		case received, ok := <-x.mailbox.Iterator():
+		case received, ok := <-x.mailbox:
 			// break out of the loop when the channel is closed
 			if !ok {
 				return
@@ -1397,8 +1386,13 @@ func (x *pid) handleReceived(received ReceiveContext) {
 			}
 		}
 	}()
+
+	x.fieldsLocker.Lock()
+	behaviorStack := *x.behaviorStack
+	x.fieldsLocker.Unlock()
+
 	// send the message to the current actor behavior
-	if behavior, ok := x.behaviorStack.Peek(); ok {
+	if behavior, ok := behaviorStack.Peek(); ok {
 		behavior(received)
 	}
 }
@@ -1462,32 +1456,32 @@ func (x *pid) passivationListener() {
 
 // setBehavior is a utility function that helps set the actor behavior
 func (x *pid) setBehavior(behavior Behavior) {
-	x.rwLocker.Lock()
+	x.fieldsLocker.Lock()
 	x.behaviorStack.Clear()
 	x.behaviorStack.Push(behavior)
-	x.rwLocker.Unlock()
+	x.fieldsLocker.Unlock()
 }
 
 // resetBehavior is a utility function resets the actor behavior
 func (x *pid) resetBehavior() {
-	x.rwLocker.Lock()
+	x.fieldsLocker.Lock()
 	x.behaviorStack.Push(x.Receive)
-	x.rwLocker.Unlock()
+	x.fieldsLocker.Unlock()
 }
 
 // setBehaviorStacked adds a behavior to the actor's behaviorStack
 func (x *pid) setBehaviorStacked(behavior Behavior) {
-	x.rwLocker.Lock()
+	x.fieldsLocker.Lock()
 	x.behaviorStack.Push(behavior)
-	x.rwLocker.Unlock()
+	x.fieldsLocker.Unlock()
 }
 
 // unsetBehaviorStacked sets the actor's behavior to the previous behavior
 // prior to setBehaviorStacked is called
 func (x *pid) unsetBehaviorStacked() {
-	x.rwLocker.Lock()
+	x.fieldsLocker.Lock()
 	x.behaviorStack.Pop()
-	x.rwLocker.Unlock()
+	x.fieldsLocker.Unlock()
 }
 
 // doStop stops the actor
@@ -1498,7 +1492,7 @@ func (x *pid) doStop(ctx context.Context) error {
 	x.isRunning.Store(false)
 
 	// TODO: just signal stash processing done and ignore the messages or process them
-	for x.stashBuffer != nil && !x.stashBuffer.IsEmpty() {
+	if x.stashBuffer != nil {
 		if err := x.unstashAll(); err != nil {
 			x.logger.Errorf("actor=(%s) failed to unstash messages", x.ActorPath().String())
 			span.SetStatus(codes.Error, "doStop")
@@ -1518,7 +1512,7 @@ func (x *pid) doStop(ctx context.Context) error {
 		for {
 			select {
 			case <-ticker.C:
-				if x.mailbox.IsEmpty() {
+				if len(x.mailbox) == 0 {
 					close(tickerStopSig)
 					return
 				}

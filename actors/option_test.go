@@ -38,7 +38,6 @@ import (
 
 func TestOption(t *testing.T) {
 	tel := telemetry.New()
-	mailbox := newReceiveContextBuffer(10)
 	resumeDirective := NewResumeDirective()
 	var atomicTrue atomic.Bool
 	atomicTrue.Store(true)
@@ -98,11 +97,6 @@ func TestOption(t *testing.T) {
 			name:     "WithMailboxSize",
 			option:   WithMailboxSize(10),
 			expected: actorSystem{mailboxSize: 10},
-		},
-		{
-			name:     "WithMailbox",
-			option:   WithMailbox(mailbox),
-			expected: actorSystem{mailbox: mailbox},
 		},
 		{
 			name:     "WithStash",

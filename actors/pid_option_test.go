@@ -36,7 +36,6 @@ import (
 )
 
 func TestPIDOptions(t *testing.T) {
-	mailbox := newReceiveContextBuffer(10)
 	resumeDirective := NewResumeDirective()
 	var (
 		atomicDuration   atomic.Duration
@@ -96,11 +95,6 @@ func TestPIDOptions(t *testing.T) {
 			name:     "WithMailboxSize",
 			option:   withMailboxSize(10),
 			expected: &pid{mailboxSize: 10},
-		},
-		{
-			name:     "WithMailbox",
-			option:   withMailbox(mailbox),
-			expected: &pid{mailbox: mailbox},
 		},
 		{
 			name:     "WithStash",
