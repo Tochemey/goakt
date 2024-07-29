@@ -107,13 +107,6 @@ func withMailboxSize(size uint64) pidOption {
 	}
 }
 
-// withMailbox sets the custom actor receiveContextBuffer
-func withMailbox(box Mailbox) pidOption {
-	return func(pid *pid) {
-		pid.mailbox = box
-	}
-}
-
 // withStash sets the actor's stash buffer
 func withStash(capacity uint64) pidOption {
 	return func(pid *pid) {

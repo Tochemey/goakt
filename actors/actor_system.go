@@ -203,8 +203,6 @@ type actorSystem struct {
 	locker sync.Mutex
 	// specifies actors mailbox size
 	mailboxSize uint64
-	// specifies the mailbox to use for the actors
-	mailbox Mailbox
 	// specifies the stash capacity
 	stashCapacity uint64
 
@@ -261,6 +259,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		locker:                 sync.Mutex{},
 		shutdownTimeout:        DefaultShutdownTimeout,
 		mailboxSize:            DefaultMailboxSize,
+		stashCapacity:          DefaultStashCapacity,
 		stopGC:                 make(chan types.Unit, 1),
 		gcInterval:             DefaultGCInterval,
 		eventsStream:           eventstream.New(),
@@ -1506,12 +1505,6 @@ func (x *actorSystem) configPID(ctx context.Context, name string, actor Actor) (
 		actorPath = NewPath(name, NewAddress(x.name, x.remotingHost, int(x.remotingPort)))
 	}
 
-	var mailbox Mailbox
-	if x.mailbox != nil {
-		// always create a fresh copy of provided mailbox for every new PID
-		mailbox = x.mailbox.Clone()
-	}
-
 	// define the pid options
 	// pid inherit the actor system settings defined during instantiation
 	pidOpts := []pidOption{
@@ -1521,7 +1514,6 @@ func (x *actorSystem) configPID(ctx context.Context, name string, actor Actor) (
 		withActorSystem(x),
 		withSupervisorDirective(x.supervisorDirective),
 		withMailboxSize(x.mailboxSize),
-		withMailbox(mailbox),
 		withStash(x.stashCapacity),
 		withEventsStream(x.eventsStream),
 		withInitTimeout(x.actorInitTimeout),

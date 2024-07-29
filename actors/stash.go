@@ -24,6 +24,8 @@
 
 package actors
 
+import "errors"
+
 // stash adds the current message to the stash buffer
 func (x *pid) stash(ctx ReceiveContext) error {
 	if x.stashBuffer == nil {
@@ -31,9 +33,9 @@ func (x *pid) stash(ctx ReceiveContext) error {
 	}
 
 	x.stashLocker.Lock()
-	defer x.stashLocker.Unlock()
-
-	return x.stashBuffer.Push(ctx)
+	x.stashBuffer <- ctx
+	x.stashLocker.Unlock()
+	return nil
 }
 
 // unstash unstashes the oldest message in the stash and prepends to the mailbox
@@ -44,11 +46,11 @@ func (x *pid) unstash() error {
 
 	x.stashLocker.Lock()
 	defer x.stashLocker.Unlock()
-
-	if !x.stashBuffer.IsEmpty() {
-		received, _ := x.stashBuffer.Pop()
-		x.doReceive(received)
+	received, ok := <-x.stashBuffer
+	if !ok {
+		return errors.New("stash buffer may be closed")
 	}
+	x.doReceive(received)
 	return nil
 }
 
@@ -62,8 +64,11 @@ func (x *pid) unstashAll() error {
 	x.stashLocker.Lock()
 	defer x.stashLocker.Unlock()
 
-	for !x.stashBuffer.IsEmpty() {
-		received, _ := x.stashBuffer.Pop()
+	for len(x.stashBuffer) > 0 {
+		received, ok := <-x.stashBuffer
+		if !ok {
+			return errors.New("stash buffer may be closed")
+		}
 		x.doReceive(received)
 	}
 

@@ -29,7 +29,6 @@ The project adheres to [Semantic Versioning](https://semver.org) and [Convention
   - [Passivation](#passivation)
   - [Actor System](#actor-system)
   - [Behaviors](#behaviors)
-  - [Mailbox](#mailbox)
   - [Router](#router)
   - [Events Stream](#events-stream)
     - [Supported events](#supported-events)
@@ -170,10 +169,6 @@ To change the behavior, call the following methods on the [ReceiveContext interf
 - `UnBecome` - resets the actor behavior to the default one which is the Actor.Receive method.
 - `BecomeStacked` - sets a new behavior to the actor to the top of the behavior stack, while maintaining the previous ones.
 - `UnBecomeStacked()` - sets the actor behavior to the previous behavior before `BecomeStacked()` was called. This only works with `BecomeStacked()`.
-
-### Mailbox
-
-Once can implement a custom mailbox. See [Mailbox](./actors/mailbox.go). The default mailbox makes use of buffered channels.
 
 ### Router
 
