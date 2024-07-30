@@ -31,9 +31,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestUnboundedQueue(t *testing.T) {
+func TestQueue(t *testing.T) {
 	t.Run("With Push/Pop", func(t *testing.T) {
-		q := NewUnbounded[int]()
+		q := New[int]()
 		require.True(t, q.IsEmpty())
 		for j := 0; j < 100; j++ {
 			if q.Len() != 0 {
@@ -88,7 +88,7 @@ func TestUnboundedQueue(t *testing.T) {
 		assert.Zero(t, q.Cap())
 	})
 	t.Run("With Wait", func(t *testing.T) {
-		q := NewUnbounded[int]()
+		q := New[int]()
 		assert.True(t, q.Push(1))
 		assert.True(t, q.Push(2))
 		assert.True(t, q.Push(3))
@@ -105,7 +105,7 @@ func TestUnboundedQueue(t *testing.T) {
 		assert.Zero(t, q.Cap())
 	})
 	t.Run("With Close remaining", func(t *testing.T) {
-		q := NewUnbounded[int]()
+		q := New[int]()
 		for j := 0; j < 100; j++ {
 			q.Push(j)
 		}
@@ -119,8 +119,8 @@ func TestUnboundedQueue(t *testing.T) {
 	})
 }
 
-func BenchmarkUnbounded_Push(b *testing.B) {
-	q := NewUnbounded[int]()
+func BenchmarkQueue_Push(b *testing.B) {
+	q := New[int]()
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -128,8 +128,8 @@ func BenchmarkUnbounded_Push(b *testing.B) {
 	}
 }
 
-func BenchmarkUnbounded_Pop(b *testing.B) {
-	q := NewUnbounded[int]()
+func BenchmarkQueue_Pop(b *testing.B) {
+	q := New[int]()
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
