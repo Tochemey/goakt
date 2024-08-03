@@ -129,8 +129,8 @@ func (q *Queue[T]) Wait() (T, bool) {
 	q.mu.Lock()
 	if q.closed {
 		q.mu.Unlock()
-		var nilElt T
-		return nilElt, false
+		var xnil T
+		return xnil, false
 	}
 	if q.count != 0 {
 		q.mu.Unlock()
