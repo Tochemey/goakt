@@ -92,11 +92,6 @@ func TestPIDOptions(t *testing.T) {
 			expected: &pid{passivateAfter: negativeDuration},
 		},
 		{
-			name:     "WithMailboxSize",
-			option:   withMailboxSize(10),
-			expected: &pid{mailboxSize: 10},
-		},
-		{
 			name:     "WithStash",
 			option:   withStash(10),
 			expected: &pid{stashCapacity: atomicUint64},

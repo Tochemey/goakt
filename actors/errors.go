@@ -71,24 +71,16 @@ var (
 	ErrActorSystemNotStarted = errors.New("actor system has not started yet")
 	// ErrLocalAddress is returned when a remote address is used instead of a local address
 	ErrLocalAddress = errors.New("address is a local address")
-	// ErrEmptyMailbox is returned when the mailbox is empty
-	ErrEmptyMailbox = errors.New("mailbox is empty")
-	// ErrFullMailbox is returned when the mailbox is full
-	ErrFullMailbox = errors.New("mailbox is full")
 	// ErrInstanceNotAnActor is returned when we failed to create the instance of an actor
 	ErrInstanceNotAnActor = errors.New("failed to create instance. Reason: instance does not implement the Actor interface")
 	// ErrTypeNotRegistered is returned when a given actor is not registered
 	ErrTypeNotRegistered = errors.New("actor type is not registered")
 	// ErrPeerNotFound is returned when locating a given peer
 	ErrPeerNotFound = errors.New("peer is not found")
-	// ErrKindsRequired is returned when the actor kinds are not provided when enabling the cluster mode
-	ErrKindsRequired = errors.New("actor kinds are required")
 	// ErrUndefinedTask is returned when piping a long-running task result to an actor
 	ErrUndefinedTask = errors.New("task is not defined")
 	// ErrInvalidHost is returned when a request is sent to an invalid host
 	ErrInvalidHost = errors.New("invalid host")
-	// ErrInvalidPath is returned when an actor path is invalid
-	ErrInvalidPath = func(err error) error { return fmt.Errorf("invalid path: %w", err) }
 )
 
 // IsEOF returns true if the given error is an EOF error

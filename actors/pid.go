@@ -52,6 +52,7 @@ import (
 	"github.com/tochemey/goakt/v2/internal/internalpb"
 	"github.com/tochemey/goakt/v2/internal/internalpb/internalpbconnect"
 	"github.com/tochemey/goakt/v2/internal/metric"
+	"github.com/tochemey/goakt/v2/internal/queue"
 	"github.com/tochemey/goakt/v2/internal/slices"
 	"github.com/tochemey/goakt/v2/internal/types"
 	"github.com/tochemey/goakt/v2/log"
@@ -223,8 +224,7 @@ type pid struct {
 	shutdownTimeout atomic.Duration
 
 	// specifies the actor mailbox
-	mailbox     chan ReceiveContext
-	mailboxSize uint64
+	mailbox *queue.Queue[ReceiveContext]
 
 	// receives a shutdown signal. Once the signal is received
 	// the actor is shut down gracefully.
@@ -307,7 +307,6 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 		shutdownSignal:       make(chan types.Unit, 1),
 		haltPassivationLnr:   make(chan types.Unit, 1),
 		logger:               log.DefaultLogger,
-		mailboxSize:          DefaultMailboxSize,
 		children:             newPIDMap(10),
 		supervisorDirective:  DefaultSupervisoryStrategy,
 		watchersList:         slices.NewSafe[*watcher](),
@@ -317,7 +316,7 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 		fieldsLocker:         &sync.RWMutex{},
 		stopLocker:           &sync.Mutex{},
 		httpClient:           http.NewClient(),
-		mailbox:              nil,
+		mailbox:              queue.New[ReceiveContext](),
 		stashBuffer:          nil,
 		stashLocker:          &sync.Mutex{},
 		eventsStream:         nil,
@@ -342,7 +341,6 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 		opt(p)
 	}
 
-	p.mailbox = make(chan ReceiveContext, p.mailboxSize)
 	if p.stashCapacity.Load() > 0 {
 		p.stashBuffer = make(chan ReceiveContext, p.stashCapacity.Load())
 	}
@@ -596,7 +594,6 @@ func (x *pid) SpawnChild(ctx context.Context, name string, actor Actor) (PID, er
 		withCustomLogger(x.logger),
 		withActorSystem(x.system),
 		withSupervisorDirective(x.supervisorDirective),
-		withMailboxSize(x.mailboxSize),
 		withStash(x.stashCapacity.Load()),
 		withEventsStream(x.eventsStream),
 		withInitTimeout(x.initTimeout.Load()),
@@ -1240,8 +1237,12 @@ func (x *pid) watchees() *pidMap {
 func (x *pid) doReceive(ctx ReceiveContext) {
 	x.fieldsLocker.Lock()
 	x.lastProcessingTime.Store(time.Now())
-	x.mailbox <- ctx
 	x.fieldsLocker.Unlock()
+	if !x.mailbox.Push(ctx) {
+		err := errors.New("actor mailbox is closed")
+		x.logger.Warn(err)
+		x.handleError(ctx, err)
+	}
 }
 
 // init initializes the given actor and init processing messages
@@ -1301,6 +1302,7 @@ func (x *pid) reset() {
 			x.logger.Error(fmtErr)
 		}
 	}
+	x.mailbox.Close()
 }
 
 func (x *pid) freeWatchers(ctx context.Context) {
@@ -1360,10 +1362,14 @@ func (x *pid) receive() {
 		select {
 		case <-x.shutdownSignal:
 			return
-		case received, ok := <-x.mailbox:
+		default:
+			received, ok := x.mailbox.Pop()
 			// break out of the loop when the channel is closed
 			if !ok {
-				return
+				if x.mailbox.IsClosed() {
+					return
+				}
+				continue
 			}
 
 			switch received.Message().(type) {
@@ -1373,11 +1379,26 @@ func (x *pid) receive() {
 			default:
 				x.handleReceived(received)
 			}
+
+			//case received, ok := <-x.mailbox:
+			//	// break out of the loop when the channel is closed
+			//	if !ok {
+			//		return
+			//	}
+			//
+			//	switch received.Message().(type) {
+			//	case *goaktpb.PoisonPill:
+			//		// stop the actor
+			//		_ = x.Shutdown(received.Context())
+			//	default:
+			//		x.handleReceived(received)
+			//	}
 		}
 	}
 }
 
 func (x *pid) handleReceived(received ReceiveContext) {
+	// handle panic when the processing of the message fails
 	defer func() {
 		if r := recover(); r != nil {
 			err := fmt.Errorf("%s", r)
@@ -1436,7 +1457,6 @@ func (x *pid) passivationListener() {
 	x.logger.Infof("Passivation mode has been triggered for actor=%s...", x.ActorPath().String())
 
 	ctx := context.Background()
-
 	if err := x.doStop(ctx); err != nil {
 		// TODO: rethink properly about PostStop error handling
 		x.logger.Errorf("failed to passivate actor=(%s): reason=(%v)", x.ActorPath().String(), err)
@@ -1512,7 +1532,7 @@ func (x *pid) doStop(ctx context.Context) error {
 		for {
 			select {
 			case <-ticker.C:
-				if len(x.mailbox) == 0 {
+				if x.mailbox.IsEmpty() {
 					close(tickerStopSig)
 					return
 				}
