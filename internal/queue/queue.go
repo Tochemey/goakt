@@ -146,11 +146,14 @@ func (q *Queue[T]) Wait() (T, bool) {
 // or 2) the queue is closed.
 func (q *Queue[T]) Pop() (T, bool) {
 	q.mu.Lock()
-	defer q.mu.Unlock()
-	if q.count == 0 {
-		var nilElt T
-		return nilElt, false
+	count := q.count
+	q.mu.Unlock()
+	if count == 0 {
+		var xnil T
+		return xnil, false
 	}
+
+	q.mu.Lock()
 	i := q.nodes[q.head]
 	q.nodes[q.head] = nil
 	// bitwise modulus
@@ -160,7 +163,7 @@ func (q *Queue[T]) Pop() (T, bool) {
 	if len(q.nodes) > minQueueLen && (q.count<<2) == len(q.nodes) {
 		q.resize()
 	}
-
+	q.mu.Unlock()
 	return *i, true
 }
 

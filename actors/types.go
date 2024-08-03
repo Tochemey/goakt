@@ -44,8 +44,6 @@ const (
 	DefaultShutdownTimeout = 2 * time.Second
 	// DefaultInitTimeout defines the default init timeout
 	DefaultInitTimeout = time.Second
-	// DefaultMailboxSize defines the default mailbox size
-	DefaultMailboxSize = 1_000_000
 	// DefaultPeerStateLoopInterval defines the default peer state loop interval
 	DefaultPeerStateLoopInterval = 10 * time.Second
 	// DefaultStashCapacity defines the default stash size
