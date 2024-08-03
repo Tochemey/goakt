@@ -70,7 +70,7 @@ func newPeer(t *testing.T, serverAddr string) *Discovery {
 	remotingPort := nodePorts[2]
 
 	// create a Cluster node
-	host := "localhost"
+	host := "127.0.0.1"
 	// create the various config option
 	applicationName := "accounts"
 	actorSystemName := "AccountsSystem"
@@ -114,7 +114,7 @@ func TestDiscovery(t *testing.T) {
 		remotingPort := nodePorts[2]
 
 		// create a Cluster node
-		host := "localhost"
+		host := "127.0.0.1"
 		// create the various config option
 		applicationName := "accounts"
 		actorSystemName := "AccountsSystem"
@@ -158,7 +158,7 @@ func TestDiscovery(t *testing.T) {
 		remotingPort := nodePorts[2]
 
 		// create a Cluster node
-		host := "localhost"
+		host := "127.0.0.1"
 		// create the various config option
 		applicationName := "accounts"
 		actorSystemName := "AccountsSystem"
@@ -195,7 +195,7 @@ func TestDiscovery(t *testing.T) {
 		remotingPort := nodePorts[2]
 
 		// create a Cluster node
-		host := "localhost"
+		host := "127.0.0.1"
 
 		// create the various config option
 		natsServer := srv.Addr().String()
@@ -240,7 +240,7 @@ func TestDiscovery(t *testing.T) {
 		remotingPort := nodePorts[2]
 
 		// create a Cluster node
-		host := "localhost"
+		host := "127.0.0.1"
 
 		// create the various config option
 		natsServer := srv.Addr().String()
@@ -280,7 +280,7 @@ func TestDiscovery(t *testing.T) {
 		remotingPort := nodePorts[2]
 
 		// create a Cluster node
-		host := "localhost"
+		host := "127.0.0.1"
 
 		// create the various config option
 		natsServer := srv.Addr().String()
@@ -322,7 +322,7 @@ func TestDiscovery(t *testing.T) {
 		remotingPort := nodePorts[2]
 
 		// create a Cluster node
-		host := "localhost"
+		host := "127.0.0.1"
 
 		// create the various config option
 		natsServer := srv.Addr().String()
@@ -423,7 +423,7 @@ func TestDiscovery(t *testing.T) {
 		remotingPort := nodePorts[2]
 
 		// create a Cluster node
-		host := "localhost"
+		host := "127.0.0.1"
 
 		// create the various config option
 		natsServer := srv.Addr().String()

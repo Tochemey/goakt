@@ -221,7 +221,7 @@ func TestDiscoveryProvider(t *testing.T) {
 		gossipPort := nodePorts[0]
 
 		addrs := []string{
-			fmt.Sprintf("localhost:%d", gossipPort),
+			fmt.Sprintf("127.0.0.1:%d", gossipPort),
 		}
 		// mock the underlying discovery provider
 		provider := new(testkit.Provider)

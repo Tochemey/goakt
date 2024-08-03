@@ -1820,7 +1820,7 @@ func TestAPIRemoteSpawn(t *testing.T) {
 		// generate the remoting port
 		ports := dynaport.Get(1)
 		remotingPort := ports[0]
-		host := "localhost"
+		host := "127.0.0.1"
 
 		// create the actor system
 		sys, err := NewActorSystem("test",

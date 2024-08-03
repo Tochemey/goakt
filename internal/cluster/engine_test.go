@@ -61,7 +61,7 @@ func TestSingleNode(t *testing.T) {
 
 		// define discovered addresses
 		addrs := []string{
-			fmt.Sprintf("localhost:%d", gossipPort),
+			fmt.Sprintf("127.0.0.1:%d", gossipPort),
 		}
 
 		// mock the discovery provider
@@ -75,7 +75,7 @@ func TestSingleNode(t *testing.T) {
 		provider.EXPECT().Close().Return(nil)
 
 		// create a Node startNode
-		host := "localhost"
+		host := "127.0.0.1"
 
 		hostNode := discovery.Node{
 			Name:         host,
@@ -117,7 +117,7 @@ func TestSingleNode(t *testing.T) {
 
 		// define discovered addresses
 		addrs := []string{
-			fmt.Sprintf("localhost:%d", gossipPort),
+			fmt.Sprintf("127.0.0.1:%d", gossipPort),
 		}
 
 		// mock the discovery provider
@@ -131,7 +131,7 @@ func TestSingleNode(t *testing.T) {
 		provider.EXPECT().Close().Return(nil)
 
 		// create a Node startNode
-		host := "localhost"
+		host := "127.0.0.1"
 		hostNode := discovery.Node{
 			Name:         host,
 			Host:         host,
@@ -187,7 +187,7 @@ func TestSingleNode(t *testing.T) {
 
 		// define discovered addresses
 		addrs := []string{
-			fmt.Sprintf("localhost:%d", gossipPort),
+			fmt.Sprintf("127.0.0.1:%d", gossipPort),
 		}
 
 		// mock the discovery provider
@@ -201,7 +201,7 @@ func TestSingleNode(t *testing.T) {
 		provider.EXPECT().Close().Return(nil)
 
 		// create a Node startNode
-		host := "localhost"
+		host := "127.0.0.1"
 		hostNode := discovery.Node{
 			Name:         host,
 			Host:         host,
@@ -254,7 +254,7 @@ func TestSingleNode(t *testing.T) {
 
 		// define discovered addresses
 		addrs := []string{
-			fmt.Sprintf("localhost:%d", gossipPort),
+			fmt.Sprintf("127.0.0.1:%d", gossipPort),
 		}
 
 		// mock the discovery provider
@@ -268,7 +268,7 @@ func TestSingleNode(t *testing.T) {
 		provider.EXPECT().Close().Return(nil)
 
 		// create a Node startNode
-		host := "localhost"
+		host := "127.0.0.1"
 		hostNode := discovery.Node{
 			Name:         host,
 			Host:         host,

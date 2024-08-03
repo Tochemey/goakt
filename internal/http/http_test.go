@@ -44,9 +44,9 @@ func TestClient(t *testing.T) {
 }
 
 func TestURL(t *testing.T) {
-	host := "localhost"
+	host := "127.0.0.1"
 	port := 123
 
 	url := URL(host, port)
-	assert.Equal(t, "http://localhost:123", url)
+	assert.Equal(t, "http://127.0.0.1:123", url)
 }

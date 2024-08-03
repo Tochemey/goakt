@@ -42,7 +42,7 @@ func TestCodec(t *testing.T) {
 		actor := &internalpb.WireActor{
 			ActorName: "account-1",
 			ActorAddress: &goaktpb.Address{
-				Host: "localhost",
+				Host: "127.0.0.1",
 				Port: 2345,
 				Name: "account-1",
 				Id:   uuid.NewString(),

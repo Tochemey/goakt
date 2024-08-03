@@ -516,7 +516,7 @@ package main
 import "github.com/tochemey/goakt/v2/discovery/nats"
 
 const (
-    natsServerAddr   = "nats://localhost:4248"
+    natsServerAddr   = "nats://127.0.0.1:4248"
     natsSubject      = "goakt-gossip"
     applicationName  = "accounts"
     actorSystemName  = "AccountsSystem"
