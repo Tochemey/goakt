@@ -1363,12 +1363,14 @@ func (x *pid) receive() {
 		case <-x.shutdownSignal:
 			return
 		default:
-			received, ok := x.mailbox.Pop()
 			// break out of the loop when the channel is closed
+			if x.mailbox.IsClosed() {
+				return
+			}
+
+			// fetch the data and continue the loop when there are no records yet
+			received, ok := x.mailbox.Pop()
 			if !ok {
-				if x.mailbox.IsClosed() {
-					return
-				}
 				continue
 			}
 
@@ -1379,20 +1381,6 @@ func (x *pid) receive() {
 			default:
 				x.handleReceived(received)
 			}
-
-			//case received, ok := <-x.mailbox:
-			//	// break out of the loop when the channel is closed
-			//	if !ok {
-			//		return
-			//	}
-			//
-			//	switch received.Message().(type) {
-			//	case *goaktpb.PoisonPill:
-			//		// stop the actor
-			//		_ = x.Shutdown(received.Context())
-			//	default:
-			//		x.handleReceived(received)
-			//	}
 		}
 	}
 }
