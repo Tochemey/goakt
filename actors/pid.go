@@ -1238,7 +1238,11 @@ func (x *pid) doReceive(ctx ReceiveContext) {
 	x.fieldsLocker.Lock()
 	x.lastProcessingTime.Store(time.Now())
 	x.fieldsLocker.Unlock()
-	x.mailbox.Push(ctx)
+	if !x.mailbox.Push(ctx) {
+		err := errors.New("actor mailbox is closed")
+		x.logger.Warn(err)
+		x.handleError(ctx, err)
+	}
 }
 
 // init initializes the given actor and init processing messages
@@ -1394,6 +1398,7 @@ func (x *pid) receive() {
 }
 
 func (x *pid) handleReceived(received ReceiveContext) {
+	// handle panic when the processing of the message fails
 	defer func() {
 		if r := recover(); r != nil {
 			err := fmt.Errorf("%s", r)
@@ -1452,7 +1457,6 @@ func (x *pid) passivationListener() {
 	x.logger.Infof("Passivation mode has been triggered for actor=%s...", x.ActorPath().String())
 
 	ctx := context.Background()
-
 	if err := x.doStop(ctx); err != nil {
 		// TODO: rethink properly about PostStop error handling
 		x.logger.Errorf("failed to passivate actor=(%s): reason=(%v)", x.ActorPath().String(), err)
