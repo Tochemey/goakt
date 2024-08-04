@@ -151,8 +151,8 @@ ActorSystem has the following characteristics:
 - Actors lifecycle management (Spawn, Kill, ReSpawn)
 - Concurrency and Parallelism - Multiple actors can be managed and execute their tasks independently and
   concurrently. This helps utilize multicore processors efficiently.
-- Location Transparency - The physical location of actors is abstracted. Remote actors can be accessed via their
-  address once _remoting_ is enabled.
+- Location Transparency - The physical location of actors is abstracted when cluster mode is enabled. Remote actors can be accessed via their
+  address once _remoting_ is enabled. 
 - Fault Tolerance and Supervision - Set during the creation of the actor system.
 - Actor Addressing - Every actor in the ActorSystem has an address.
 
