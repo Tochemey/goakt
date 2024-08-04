@@ -29,6 +29,7 @@ import (
 	"errors"
 	"fmt"
 	stdhttp "net/http"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -67,9 +68,9 @@ type watcher struct {
 	Done      chan types.Unit // Done when watching is completed
 }
 
-// completion is used to track completions' completion
+// taskCompletion is used to track completions' taskCompletion
 // to pipe the result to the appropriate PID
-type completion struct {
+type taskCompletion struct {
 	Receiver PID
 	Task     future.Task
 }
@@ -673,7 +674,7 @@ func (x *pid) PipeTo(ctx context.Context, to PID, task future.Task) error {
 		return ErrDead
 	}
 
-	go x.handleCompletion(ctx, &completion{
+	go x.handleCompletion(ctx, &taskCompletion{
 		Receiver: to,
 		Task:     task,
 	})
@@ -1371,6 +1372,7 @@ func (x *pid) receive() {
 			// fetch the data and continue the loop when there are no records yet
 			received, ok := x.mailbox.Pop()
 			if !ok {
+				runtime.Gosched()
 				continue
 			}
 
@@ -1666,7 +1668,7 @@ func (x *pid) setLastProcessingDuration(d time.Duration) {
 
 // handleCompletion processes a long-running task and pipe the result to
 // the completion receiver
-func (x *pid) handleCompletion(ctx context.Context, completion *completion) {
+func (x *pid) handleCompletion(ctx context.Context, completion *taskCompletion) {
 	ctx, span := x.tracer.Start(ctx, "TaskCompletion")
 	defer span.End()
 
