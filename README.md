@@ -140,7 +140,7 @@ When cluster mode is enabled, passivated actors are removed from the entire clus
 
 In Go-Akt, supervision allows to define the various strategies to apply when a given actor is faulty.
 The supervisory strategy to adopt is set during the creation of the actor system.
-In Go-Akt that each child actor is treated separately. There is no concept of one-for-one and one-for-all strategies.
+In Go-Akt each child actor is treated separately. There is no concept of one-for-one and one-for-all strategies.
 The following directives are supported:
 - [`Restart`](./actors/supervisor.go): to restart the child actor. One can control how the restart is done using the following options: - `maxNumRetries`: defines the maximum of restart attempts - `timeout`: how to attempt restarting the faulty actor.
 - [`Stop`](./actors/supervisor.go): to stop the child actor which is the default one
@@ -243,7 +243,7 @@ You can schedule sending messages to actor that will be acted upon in the future
 #### Cron Expression Format
 
 | Field        | Required | Allowed Values  | Allowed Special Characters |
-| ------------ | -------- | --------------- | -------------------------- |
+|--------------|----------|-----------------|----------------------------|
 | Seconds      | yes      | 0-59            | , - \* /                   |
 | Minutes      | yes      | 0-59            | , - \* /                   |
 | Hours        | yes      | 0-23            | , - \* /                   |
