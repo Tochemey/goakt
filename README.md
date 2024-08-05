@@ -27,6 +27,7 @@ The project adheres to [Semantic Versioning](https://semver.org) and [Convention
 - [Features](#features)
   - [Actors](#actors)
   - [Passivation](#passivation)
+  - [Supervision](#supervision)
   - [Actor System](#actor-system)
   - [Behaviors](#behaviors)
   - [Router](#router)
@@ -116,12 +117,7 @@ The fundamental building blocks of Go-Akt are actors.
     fashion) and `Tell`, `RemoteTell`(fire-and-forget fashion) methods
   - stop (child) actors via their process id [`PID`](./actors/pid.go)
   - watch/unwatch (child) actors via their process id [`PID`](./actors/pid.go) `Watch` and `UnWatch` methods
-  - supervise the failure behavior of (child) actors. The supervisory strategy to adopt is set during its creation.
-    In Go-Akt that each child actor is treated separately. There is no concept of one-for-one and one-for-all strategies.
-    The following directives are supported:
-    - [`Restart`](./actors/supervisor.go): to restart the child actor. One can control how the restart is done using the following options: - `maxNumRetries`: defines the maximum of restart attempts - `timeout`: how to attempt restarting the faulty actor
-    - [`Stop`](./actors/supervisor.go): to stop the child actor which is the default one
-    - [`Resume`](./actors/supervisor.go): ignores the failure and process the next message, instead
+  - supervise the failure behavior of (child) actors. 
   - remotely lookup for an actor on another node via their process id [`PID`](./actors/pid.go) `RemoteLookup`.
     This
     allows it to send messages remotely via `RemoteAsk` or `RemoteTell` methods
@@ -139,6 +135,18 @@ When cluster mode is enabled, passivated actors are removed from the entire clus
 
 - To enable passivation use the actor system option `WithExpireActorAfter(duration time.Duration)` when creating the actor system. See actor system [options](./actors/option.go).
 - To disable passivation use the actor system option `WithPassivationDisabled` when creating the actor system. See actor system [options](./actors/option.go).
+
+### Supervision
+
+In Go-Akt, supervision allows to define the various strategies to apply when a given actor is faulty.
+The supervisory strategy to adopt is set during the creation of the actor system.
+In Go-Akt that each child actor is treated separately. There is no concept of one-for-one and one-for-all strategies.
+The following directives are supported:
+- [`Restart`](./actors/supervisor.go): to restart the child actor. One can control how the restart is done using the following options: - `maxNumRetries`: defines the maximum of restart attempts - `timeout`: how to attempt restarting the faulty actor.
+- [`Stop`](./actors/supervisor.go): to stop the child actor which is the default one
+- [`Resume`](./actors/supervisor.go): ignores the failure and process the next message, instead.
+
+with the `Restart` directive, every child actor of the faulty is stopped and garbage-collected when the given parent is restarted. This helps avoid resources leaking.
 
 ### Actor System
 
