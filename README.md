@@ -146,7 +146,10 @@ The following directives are supported:
 - [`Stop`](./actors/supervisor.go): to stop the child actor which is the default one
 - [`Resume`](./actors/supervisor.go): ignores the failure and process the next message, instead.
 
-with the `Restart` directive, every child actor of the faulty is stopped and garbage-collected when the given parent is restarted. This helps avoid resources leaking.
+With the `Restart` directive, every child actor of the faulty is stopped and garbage-collected when the given parent is restarted. This helps avoid resources leaking.
+There are only two scenarios where an actor can supervise another actor:
+- It watches the given actor via the `Watch` method. With this method the parent actor can also listen to the `Terminated` message to decide what happens next to the child actor.
+- The actor to be supervised is a child of the given actor.
 
 ### Actor System
 
