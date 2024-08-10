@@ -1563,7 +1563,7 @@ func TestRegisterMetrics(t *testing.T) {
 	}
 	// sort the array
 	sort.Strings(expected)
-	// get the metric names
+	// get the metrics names
 	actual := make([]string, len(got.ScopeMetrics[0].Metrics))
 	for i, metric := range got.ScopeMetrics[0].Metrics {
 		actual[i] = metric.Name
