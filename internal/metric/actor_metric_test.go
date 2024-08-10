@@ -44,4 +44,5 @@ func TestNewActorMetric(t *testing.T) {
 	assert.NotNil(t, actorMetric.SpawnCount())
 	assert.NotNil(t, actorMetric.LastReceivedDuration())
 	assert.NotNil(t, actorMetric.ChildrenCount())
+	assert.NotNil(t, actorMetric.ProcessedCount())
 }

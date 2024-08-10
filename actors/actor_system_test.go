@@ -1034,13 +1034,14 @@ func TestActorSystem(t *testing.T) {
 		err = r.Collect(ctx, got)
 		require.NoError(t, err)
 		assert.Len(t, got.ScopeMetrics, 1)
-		assert.Len(t, got.ScopeMetrics[0].Metrics, 4)
+		assert.Len(t, got.ScopeMetrics[0].Metrics, 5)
 
 		expected := []string{
 			"actor_child_count",
 			"actor_stash_count",
 			"actor_restart_count",
 			"actors_count",
+			"actor_processed_count",
 		}
 		// sort the array
 		sort.Strings(expected)
