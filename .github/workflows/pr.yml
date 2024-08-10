@@ -27,6 +27,8 @@ jobs:
           check-latest: true
           cache-dependency-path: "**/*.sum"
       - run: go version
+      - name: Vendoring and Tidy
+        run: go mod tidy && go mod vendor
       - name: Login to GitHub Docker
         env:
           DOCKER_REGISTRY: ghcr.io
