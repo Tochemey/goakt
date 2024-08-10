@@ -48,7 +48,7 @@ jobs:
           check-latest: true
           cache-dependency-path: "**/*.sum"
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v3
+        uses: golangci/golangci-lint-action@v6
         with:
           version: v1.59.1
           args: --timeout 10m --config .golangci.yml
