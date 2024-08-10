@@ -17,33 +17,38 @@ jobs:
         with:
           submodules: false
           fetch-depth: 0
-      - name: Login to GitHub Docker
-        env:
-          DOCKER_REGISTRY: ghcr.io
-          DOCKER_USER: ${{ github.actor }}
-          DOCKER_PASS: ${{ secrets.GITHUB_TOKEN }}
-        run: docker login $DOCKER_REGISTRY --username "$DOCKER_USER" --password "$DOCKER_PASS"
-      - name: Login to Docker Hub
-        uses: docker/login-action@v3
+      - uses: actions/setup-go@v5
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN}}
-      - uses: earthly/actions/setup-earthly@v1
-        with:
-          version: v0.8.15
-      - name: Earthly version
-        run: earthly --version
-      - name: Run Linter and Tests
-        env:
-          EARTHLY_BUILD_ARGS: "COMMIT_HASH"
-          EARTHLY_TOKEN: ${{ secrets.EARTHLY_TOKEN }}
-          COMMIT_HASH: ${{ github.sha }}
-          FORCE_COLOR: 1
+          go-version: '>=1.22.0'
+          check-latest: true
+          cache-dependency-path: "**/*.sum"
+      - run: go version
+      - name: Vendoring and Tidy
+        run: go mod tidy && go mod vendor
+      - name: Install dependencies
         run: |
-          earthly -P -use-inline-cache --save-inline-cache --strict --push +test
+          go install github.com/ory/go-acc@latest
+      - name: Run tests
+        run: |
+          go-acc ./... -o coverage.out --ignore goaktpb,mocks,internal/internalpb -- -mod=vendor -race -v
       - uses: codecov/codecov-action@v4
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ./coverage.out
           fail_ci_if_error: false
           verbose: true
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '>=1.22.0'
+          check-latest: true
+          cache-dependency-path: "**/*.sum"
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v3
+        with:
+          version: v1.59.1
+          args: --timeout 10m --config .golangci.yml

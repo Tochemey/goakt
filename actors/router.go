@@ -171,7 +171,7 @@ func (x *router) broadcast(ctx ReceiveContext) {
 		routee := routees[(int(n)-1)%len(routees)]
 		ctx.Tell(routee, msg)
 	case RandomRouting:
-		routee := routees[rand.IntN(len(routees))]
+		routee := routees[rand.IntN(len(routees))] //nolint:gosec
 		ctx.Tell(routee, msg)
 	default:
 		for _, routee := range routees {

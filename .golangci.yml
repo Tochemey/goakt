@@ -12,6 +12,13 @@ run:
   # Default: true
   tests: true
 
+output:
+  print-issued-lines: true
+  print-linter-name: true
+  uniq-by-line: false
+  path-prefix: ""
+  sort-results: true
+
 linters:
   disable-all: true
   enable:

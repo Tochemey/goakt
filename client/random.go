@@ -56,5 +56,5 @@ func (x *Random) Set(nodes ...*Node) {
 func (x *Random) Next() *Node {
 	x.locker.Lock()
 	defer x.locker.Unlock()
-	return x.nodes[rand.IntN(len(x.nodes))]
+	return x.nodes[rand.IntN(len(x.nodes))] //nolint:gosec
 }

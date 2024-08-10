@@ -326,6 +326,7 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 		tracer:               noop.NewTracerProvider().Tracer("PID"),
 		restartCount:         atomic.NewInt64(0),
 		childrenCount:        atomic.NewInt64(0),
+		processedCount:       atomic.NewInt64(0),
 		processingTimeLocker: new(sync.Mutex),
 	}
 
@@ -1311,6 +1312,7 @@ func (x *pid) reset() {
 			x.logger.Error(fmtErr)
 		}
 	}
+	x.processedCount.Store(0)
 	x.mailbox.Close()
 }
 
@@ -1790,5 +1792,7 @@ func (x *pid) handleRestartDirective(cid PID, maxRetries uint32, timeout time.Du
 
 func (x *pid) recordLastReceivedDurationMetric(ctx context.Context) {
 	x.lastReceivedDuration.Store(time.Since(x.lastProcessingTime.Load()))
-	x.metrics.LastReceivedDuration().Record(ctx, x.lastReceivedDuration.Load().Milliseconds())
+	if x.metricEnabled.Load() {
+		x.metrics.LastReceivedDuration().Record(ctx, x.lastReceivedDuration.Load().Milliseconds())
+	}
 }
