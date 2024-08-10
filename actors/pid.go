@@ -216,8 +216,8 @@ type pid struct {
 	// initialization fails. The default value is 5
 	initMaxRetries atomic.Int32
 
-	// specifies the init timeout. the default initialization timeout is
-	// 1s
+	// specifies the init timeout.
+	// the default initialization timeout is 1s
 	initTimeout atomic.Duration
 
 	// shutdownTimeout specifies the graceful shutdown timeout
@@ -248,7 +248,7 @@ type pid struct {
 	logger log.Logger
 
 	// specifies the last processing message duration
-	lastProcessingDuration atomic.Duration
+	lastReceivedDuration atomic.Duration
 
 	// fieldsLocker that helps synchronize the pid in a concurrent environment
 	// this helps protect the pid fields accessibility
@@ -281,10 +281,12 @@ type pid struct {
 	traceEnabled atomic.Bool
 	tracer       trace.Tracer
 
-	// set the metric settings
-	restartCount  *atomic.Int64
-	childrenCount *atomic.Int64
-	metricEnabled atomic.Bool
+	// set the metrics settings
+	restartCount   *atomic.Int64
+	childrenCount  *atomic.Int64
+	processedCount *atomic.Int64
+	metricEnabled  atomic.Bool
+	metrics        *metric.ActorMetric
 }
 
 // enforce compilation error
@@ -329,7 +331,7 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 
 	p.initMaxRetries.Store(DefaultInitMaxRetries)
 	p.shutdownTimeout.Store(DefaultShutdownTimeout)
-	p.lastProcessingDuration.Store(0)
+	p.lastReceivedDuration.Store(0)
 	p.stashCapacity.Store(DefaultStashCapacity)
 	p.isRunning.Store(false)
 	p.passivateAfter.Store(DefaultPassivationTimeout)
@@ -365,6 +367,12 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 	}
 
 	if p.metricEnabled.Load() {
+		metrics, err := metric.NewActorMetric(p.telemetry.Meter)
+		if err != nil {
+			return nil, err
+		}
+
+		p.metrics = metrics
 		if err := p.registerMetrics(); err != nil {
 			return nil, fmt.Errorf("failed to register actor=%s metrics: %w", p.ID(), err)
 		}
@@ -450,7 +458,7 @@ func (x *pid) Children() []PID {
 // Stop forces the child Actor under the given name to terminate after it finishes processing its current message.
 // Nothing happens if child is already stopped.
 func (x *pid) Stop(ctx context.Context, cid PID) error {
-	spanCtx, span := x.tracer.Start(ctx, "Stop")
+	ctx, span := x.tracer.Start(ctx, "Stop")
 	defer span.End()
 
 	if !x.IsRunning() {
@@ -471,7 +479,7 @@ func (x *pid) Stop(ctx context.Context, cid PID) error {
 
 	if cid, ok := children.get(cid.ActorPath()); ok {
 		desc := fmt.Sprintf("child.[%s] Shutdown", cid.ActorPath())
-		if err := cid.Shutdown(spanCtx); err != nil {
+		if err := cid.Shutdown(ctx); err != nil {
 			span.SetStatus(codes.Error, desc)
 			span.RecordError(err)
 			return err
@@ -512,7 +520,7 @@ func (x *pid) ActorPath() *Path {
 // Restart restarts the actor.
 // During restart all messages that are in the mailbox and not yet processed will be ignored
 func (x *pid) Restart(ctx context.Context) error {
-	spanCtx, span := x.tracer.Start(ctx, "Restart")
+	ctx, span := x.tracer.Start(ctx, "Restart")
 	defer span.End()
 
 	if x == nil || x.ActorPath() == nil {
@@ -524,7 +532,7 @@ func (x *pid) Restart(ctx context.Context) error {
 	x.logger.Debugf("restarting actor=(%s)", x.actorPath.String())
 
 	if x.IsRunning() {
-		if err := x.Shutdown(spanCtx); err != nil {
+		if err := x.Shutdown(ctx); err != nil {
 			return err
 		}
 		ticker := time.NewTicker(10 * time.Millisecond)
@@ -542,7 +550,7 @@ func (x *pid) Restart(ctx context.Context) error {
 	}
 
 	x.resetBehavior()
-	if err := x.init(spanCtx); err != nil {
+	if err := x.init(ctx); err != nil {
 		return err
 	}
 	go x.receive()
@@ -566,7 +574,7 @@ func (x *pid) Restart(ctx context.Context) error {
 // SpawnChild creates a child actor and start watching it for error
 // When the given child actor already exists its PID will only be returned
 func (x *pid) SpawnChild(ctx context.Context, name string, actor Actor) (PID, error) {
-	spanCtx, span := x.tracer.Start(ctx, "SpawnChild")
+	ctx, span := x.tracer.Start(ctx, "SpawnChild")
 	defer span.End()
 
 	if !x.IsRunning() {
@@ -609,7 +617,7 @@ func (x *pid) SpawnChild(ctx context.Context, name string, actor Actor) (PID, er
 		opts = append(opts, withMetric())
 	}
 
-	cid, err := newPID(spanCtx,
+	cid, err := newPID(ctx,
 		childActorPath,
 		actor,
 		opts...,
@@ -685,7 +693,7 @@ func (x *pid) PipeTo(ctx context.Context, to PID, task future.Task) error {
 // Ask sends a synchronous message to another actor and expect a response.
 // This block until a response is received or timed out.
 func (x *pid) Ask(ctx context.Context, to PID, message proto.Message) (response proto.Message, err error) {
-	spanCtx, span := x.tracer.Start(ctx, "Ask")
+	ctx, span := x.tracer.Start(ctx, "Ask")
 	defer span.End()
 
 	if !to.IsRunning() {
@@ -694,17 +702,17 @@ func (x *pid) Ask(ctx context.Context, to PID, message proto.Message) (response 
 		return nil, ErrDead
 	}
 
-	messageContext := newReceiveContext(spanCtx, x, to, message, false)
+	messageContext := newReceiveContext(ctx, x, to, message, false)
 	to.doReceive(messageContext)
 
 	for await := time.After(x.askTimeout.Load()); ; {
 		select {
 		case response = <-messageContext.response:
-			x.lastProcessingDuration.Store(time.Since(x.lastProcessingTime.Load()))
+			x.recordLastReceivedDurationMetric(ctx)
 			span.SetStatus(codes.Ok, "Ask")
 			return
 		case <-await:
-			x.lastProcessingDuration.Store(time.Since(x.lastProcessingTime.Load()))
+			x.recordLastReceivedDurationMetric(ctx)
 			err = ErrRequestTimeout
 			span.SetStatus(codes.Error, "Ask")
 			span.RecordError(err)
@@ -716,7 +724,7 @@ func (x *pid) Ask(ctx context.Context, to PID, message proto.Message) (response 
 
 // Tell sends an asynchronous message to another PID
 func (x *pid) Tell(ctx context.Context, to PID, message proto.Message) error {
-	spanCtx, span := x.tracer.Start(ctx, "Tell")
+	ctx, span := x.tracer.Start(ctx, "Tell")
 	defer span.End()
 
 	if !to.IsRunning() {
@@ -725,9 +733,9 @@ func (x *pid) Tell(ctx context.Context, to PID, message proto.Message) error {
 		return ErrDead
 	}
 
-	messageContext := newReceiveContext(spanCtx, x, to, message, true)
+	messageContext := newReceiveContext(ctx, x, to, message, true)
 	to.doReceive(messageContext)
-	x.lastProcessingDuration.Store(time.Since(x.lastProcessingTime.Load()))
+	x.recordLastReceivedDurationMetric(ctx)
 	span.SetStatus(codes.Ok, "Tell")
 	return nil
 }
@@ -737,7 +745,7 @@ func (x *pid) Tell(ctx context.Context, to PID, message proto.Message) error {
 // This is a design choice to follow the simple principle of one message at a time processing by actors.
 // When BatchTell encounter a single message it will fall back to a Tell call.
 func (x *pid) BatchTell(ctx context.Context, to PID, messages ...proto.Message) error {
-	spanCtx, span := x.tracer.Start(ctx, "BatchTell")
+	ctx, span := x.tracer.Start(ctx, "BatchTell")
 	defer span.End()
 
 	if !to.IsRunning() {
@@ -748,7 +756,7 @@ func (x *pid) BatchTell(ctx context.Context, to PID, messages ...proto.Message) 
 
 	if len(messages) == 1 {
 		// no need to record span error here because Tell handles it
-		return x.Tell(spanCtx, to, messages[0])
+		return x.Tell(ctx, to, messages[0])
 	}
 
 	for i := 0; i < len(messages); i++ {
@@ -757,7 +765,7 @@ func (x *pid) BatchTell(ctx context.Context, to PID, messages ...proto.Message) 
 		to.doReceive(messageContext)
 	}
 
-	x.lastProcessingDuration.Store(time.Since(x.lastProcessingTime.Load()))
+	x.recordLastReceivedDurationMetric(ctx)
 	span.SetStatus(codes.Ok, "BatchTell")
 	return nil
 }
@@ -766,7 +774,7 @@ func (x *pid) BatchTell(ctx context.Context, to PID, messages ...proto.Message) 
 // The messages will be processed one after the other in the order they are sent.
 // This is a design choice to follow the simple principle of one message at a time processing by actors.
 func (x *pid) BatchAsk(ctx context.Context, to PID, messages ...proto.Message) (responses chan proto.Message, err error) {
-	spanCtx, span := x.tracer.Start(ctx, "BatchAsk")
+	ctx, span := x.tracer.Start(ctx, "BatchAsk")
 	defer span.End()
 
 	if !to.IsRunning() {
@@ -780,7 +788,7 @@ func (x *pid) BatchAsk(ctx context.Context, to PID, messages ...proto.Message) (
 
 	for i := 0; i < len(messages); i++ {
 		message := messages[i]
-		messageContext := newReceiveContext(spanCtx, x, to, message, false)
+		messageContext := newReceiveContext(ctx, x, to, message, false)
 		to.doReceive(messageContext)
 
 		// await patiently to receive the response from the actor
@@ -788,13 +796,13 @@ func (x *pid) BatchAsk(ctx context.Context, to PID, messages ...proto.Message) (
 		for await := time.After(x.askTimeout.Load()); ; {
 			select {
 			case resp := <-messageContext.response:
-				x.lastProcessingDuration.Store(time.Since(x.lastProcessingTime.Load()))
 				responses <- resp
 				span.SetStatus(codes.Ok, "BatchAsk")
+				x.recordLastReceivedDurationMetric(ctx)
 				break timerLoop
 			case <-await:
-				x.lastProcessingDuration.Store(time.Since(x.lastProcessingTime.Load()))
 				err = ErrRequestTimeout
+				x.recordLastReceivedDurationMetric(ctx)
 				span.SetStatus(codes.Error, "BatchAsk")
 				span.RecordError(err)
 				x.handleError(messageContext, err)
@@ -1163,7 +1171,7 @@ func (x *pid) RemoteReSpawn(ctx context.Context, host string, port int, name str
 // All current messages in the mailbox will be processed before the actor shutdown after a period of time
 // that can be configured. All child actors will be gracefully shutdown.
 func (x *pid) Shutdown(ctx context.Context) error {
-	spanCtx, span := x.tracer.Start(ctx, "Shutdown")
+	ctx, span := x.tracer.Start(ctx, "Shutdown")
 	defer span.End()
 
 	x.stopLocker.Lock()
@@ -1182,7 +1190,7 @@ func (x *pid) Shutdown(ctx context.Context) error {
 		x.haltPassivationLnr <- types.Unit{}
 	}
 
-	if err := x.doStop(spanCtx); err != nil {
+	if err := x.doStop(ctx); err != nil {
 		x.logger.Errorf("failed to cleanly stop actor=(%s)", x.ID())
 		return err
 	}
@@ -1249,12 +1257,12 @@ func (x *pid) doReceive(ctx ReceiveContext) {
 // init initializes the given actor and init processing messages
 // when the initialization failed the actor will not be started
 func (x *pid) init(ctx context.Context) error {
-	spanCtx, span := x.tracer.Start(ctx, "Init")
+	ctx, span := x.tracer.Start(ctx, "Init")
 	defer span.End()
 
 	x.logger.Info("Initialization process has started...")
 
-	cancelCtx, cancel := context.WithTimeout(spanCtx, x.initTimeout.Load())
+	cancelCtx, cancel := context.WithTimeout(ctx, x.initTimeout.Load())
 	defer cancel()
 
 	// create a new retrier that will try a maximum of `initMaxRetries` times, with
@@ -1291,7 +1299,7 @@ func (x *pid) reset() {
 	x.askTimeout.Store(DefaultAskTimeout)
 	x.shutdownTimeout.Store(DefaultShutdownTimeout)
 	x.initMaxRetries.Store(DefaultInitMaxRetries)
-	x.lastProcessingDuration.Store(0)
+	x.lastReceivedDuration.Store(0)
 	x.initTimeout.Store(DefaultInitTimeout)
 	x.children = newPIDMap(10)
 	x.watchersList = slices.NewSafe[*watcher]()
@@ -1396,6 +1404,10 @@ func (x *pid) handleReceived(received ReceiveContext) {
 				item.Value.ErrChan <- err
 			}
 		}
+		// set the total messages processed
+		x.fieldsLocker.Lock()
+		x.processedCount.Inc()
+		x.fieldsLocker.Unlock()
 	}()
 
 	x.fieldsLocker.Lock()
@@ -1496,7 +1508,7 @@ func (x *pid) unsetBehaviorStacked() {
 
 // doStop stops the actor
 func (x *pid) doStop(ctx context.Context) error {
-	spanCtx, span := x.tracer.Start(ctx, "doStop")
+	ctx, span := x.tracer.Start(ctx, "doStop")
 	defer span.End()
 
 	x.isRunning.Store(false)
@@ -1537,13 +1549,13 @@ func (x *pid) doStop(ctx context.Context) error {
 	x.shutdownSignal <- types.Unit{}
 	x.httpClient.CloseIdleConnections()
 
-	x.freeWatchees(spanCtx)
-	x.freeChildren(spanCtx)
-	x.freeWatchers(spanCtx)
+	x.freeWatchees(ctx)
+	x.freeChildren(ctx)
+	x.freeWatchers(ctx)
 
 	x.logger.Infof("Shutdown process is on going for actor=%s...", x.ActorPath().String())
 	x.reset()
-	return x.Actor.PostStop(spanCtx)
+	return x.Actor.PostStop(ctx)
 }
 
 // removeChild helps remove child actor
@@ -1600,25 +1612,23 @@ func (x *pid) handleError(receiveCtx ReceiveContext, err error) {
 // registerMetrics register the PID metrics with OTel instrumentation.
 func (x *pid) registerMetrics() error {
 	meter := x.telemetry.Meter
-	metrics, err := metric.NewActorMetric(meter)
-	if err != nil {
-		return err
-	}
-
-	_, err = meter.RegisterCallback(func(_ context.Context, observer otelmetric.Observer) error {
+	metrics := x.metrics
+	_, err := meter.RegisterCallback(func(_ context.Context, observer otelmetric.Observer) error {
 		observer.ObserveInt64(metrics.ChildrenCount(), x.childrenCount.Load())
 		observer.ObserveInt64(metrics.StashCount(), int64(x.StashSize()))
 		observer.ObserveInt64(metrics.RestartCount(), x.restartCount.Load())
+		observer.ObserveInt64(metrics.ProcessedCount(), x.processedCount.Load())
 		return nil
 	}, metrics.ChildrenCount(),
 		metrics.StashCount(),
+		metrics.ProcessedCount(),
 		metrics.RestartCount())
 
 	return err
 }
 
-// getConnectionOptions returns the gRPC client connections options
-func (x *pid) getConnectionOptions() ([]connect.ClientOption, error) {
+// grpcClientOptions returns the gRPC client connections options
+func (x *pid) grpcClientOptions() ([]connect.ClientOption, error) {
 	var interceptor *otelconnect.Interceptor
 	var err error
 	if x.metricEnabled.Load() || x.traceEnabled.Load() {
@@ -1639,7 +1649,7 @@ func (x *pid) getConnectionOptions() ([]connect.ClientOption, error) {
 
 // getRemoteServiceClient returns an instance of the Remote Service client
 func (x *pid) getRemoteServiceClient(host string, port int) (internalpbconnect.RemotingServiceClient, error) {
-	clientConnectionOptions, err := x.getConnectionOptions()
+	clientConnectionOptions, err := x.grpcClientOptions()
 	if err != nil {
 		return nil, err
 	}
@@ -1662,7 +1672,7 @@ func (x *pid) getLastProcessingTime() time.Time {
 // setLastProcessingDuration sets the last processing duration
 func (x *pid) setLastProcessingDuration(d time.Duration) {
 	x.processingTimeLocker.Lock()
-	x.lastProcessingDuration.Store(d)
+	x.lastReceivedDuration.Store(d)
 	x.processingTimeLocker.Unlock()
 }
 
@@ -1776,4 +1786,9 @@ func (x *pid) handleRestartDirective(cid PID, maxRetries uint32, timeout time.Du
 		return
 	}
 	x.Watch(cid)
+}
+
+func (x *pid) recordLastReceivedDurationMetric(ctx context.Context) {
+	x.lastReceivedDuration.Store(time.Since(x.lastProcessingTime.Load()))
+	x.metrics.LastReceivedDuration().Record(ctx, x.lastReceivedDuration.Load().Milliseconds())
 }

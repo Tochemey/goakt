@@ -42,7 +42,9 @@ type ActorMetric struct {
 	spawnCount metric.Int64ObservableCounter
 	// Specifies the last message received processing duration
 	// This is expressed in milliseconds
-	lastReceivedDuration metric.Float64Histogram
+	lastReceivedDuration metric.Int64Histogram
+	// Specifies the total number of messages processed
+	processedCount metric.Int64ObservableCounter
 }
 
 // NewActorMetric creates an instance of ActorMetric
@@ -55,14 +57,14 @@ func NewActorMetric(meter metric.Meter) (*ActorMetric, error) {
 		"actor_child_count",
 		metric.WithDescription("Total number of child actors"),
 	); err != nil {
-		return nil, fmt.Errorf("failed to create childrenCount instrument, %v", err)
+		return nil, fmt.Errorf("failed to create childrenCount instrument, %w", err)
 	}
 	// set the stashed messages count instrument
 	if actorMetric.stashCount, err = meter.Int64ObservableCounter(
 		"actor_stash_count",
 		metric.WithDescription("Total number of messages stashed"),
 	); err != nil {
-		return nil, fmt.Errorf("failed to create stashCount instrument, %v", err)
+		return nil, fmt.Errorf("failed to create stashCount instrument, %w", err)
 	}
 
 	// set the spawn messages count instrument
@@ -70,7 +72,7 @@ func NewActorMetric(meter metric.Meter) (*ActorMetric, error) {
 		"actor_spawn_count",
 		metric.WithDescription("Total number of instances created"),
 	); err != nil {
-		return nil, fmt.Errorf("failed to create spawnCount instrument, %v", err)
+		return nil, fmt.Errorf("failed to create spawnCount instrument, %w", err)
 	}
 
 	// set the spawn messages count instrument
@@ -78,15 +80,24 @@ func NewActorMetric(meter metric.Meter) (*ActorMetric, error) {
 		"actor_restart_count",
 		metric.WithDescription("Total number of restart"),
 	); err != nil {
-		return nil, fmt.Errorf("failed to create restartCount instrument, %v", err)
+		return nil, fmt.Errorf("failed to create restartCount instrument, %w", err)
 	}
 
-	if actorMetric.lastReceivedDuration, err = meter.Float64Histogram(
+	// set the last received message duration instrument
+	if actorMetric.lastReceivedDuration, err = meter.Int64Histogram(
 		"actor_received_duration",
 		metric.WithDescription("The latency of the last message processed in milliseconds"),
 		metric.WithUnit("ms"),
 	); err != nil {
-		return nil, fmt.Errorf("failed to create lastReceivedDuration instrument, %v", err)
+		return nil, fmt.Errorf("failed to create lastReceivedDuration instrument, %w", err)
+	}
+
+	// set the processed count instrument
+	if actorMetric.processedCount, err = meter.Int64ObservableCounter(
+		"actor_processed_count",
+		metric.WithDescription("Total number of messages processed"),
+	); err != nil {
+		return nil, fmt.Errorf("failed to create processedCount instrument, %w", err)
 	}
 
 	return actorMetric, nil
@@ -113,6 +124,12 @@ func (x *ActorMetric) SpawnCount() metric.Int64ObservableCounter {
 }
 
 // LastReceivedDuration returns the last message received duration latency in milliseconds
-func (x *ActorMetric) LastReceivedDuration() metric.Float64Histogram {
+func (x *ActorMetric) LastReceivedDuration() metric.Int64Histogram {
 	return x.lastReceivedDuration
+}
+
+// ProcessedCount returns the total number of messages processed by the given actor
+// at a given time in point
+func (x *ActorMetric) ProcessedCount() metric.Int64ObservableCounter {
+	return x.processedCount
 }
