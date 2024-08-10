@@ -1792,5 +1792,7 @@ func (x *pid) handleRestartDirective(cid PID, maxRetries uint32, timeout time.Du
 
 func (x *pid) recordLastReceivedDurationMetric(ctx context.Context) {
 	x.lastReceivedDuration.Store(time.Since(x.lastProcessingTime.Load()))
-	x.metrics.LastReceivedDuration().Record(ctx, x.lastReceivedDuration.Load().Milliseconds())
+	if x.metricEnabled.Load() {
+		x.metrics.LastReceivedDuration().Record(ctx, x.lastReceivedDuration.Load().Milliseconds())
+	}
 }
