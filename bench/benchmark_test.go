@@ -166,8 +166,8 @@ func TestBenchmark_Bench(t *testing.T) {
 	ctx := context.TODO()
 
 	actorsCount := 2000
-	workersCount := 20
-	duration := 10 * time.Second
+	workersCount := 50
+	duration := 30 * time.Second
 
 	benchmark := NewBenchmark(actorsCount, workersCount, duration)
 	require.NoError(t, benchmark.Start(ctx))
@@ -177,8 +177,9 @@ func TestBenchmark_Bench(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	fmt.Printf("workers: %d messages sent: %d, messages received: %d - duration: %v\n", workersCount, totalSent.Load(), totalRecv.Load(), duration)
-	fmt.Printf("messages per second: %d\n", totalRecv.Load()/int64(duration.Seconds()))
+	fmt.Printf("total actors spawned: (%d)\n", actorsCount)
+	fmt.Printf("total workers: (%d), total messages sent: (%d), total messages received: (%d) - duration: (%v)\n", workersCount, totalSent.Load(), totalRecv.Load(), duration)
+	fmt.Printf("messages per second: (%d)\n", totalRecv.Load()/int64(duration.Seconds()))
 	t.Cleanup(func() {
 		require.NoError(t, benchmark.Stop(ctx))
 	})
