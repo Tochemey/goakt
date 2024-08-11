@@ -26,47 +26,25 @@ package bench
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/tochemey/goakt/v2/actors"
+	"github.com/tochemey/goakt/v2/bench/benchmarkpb"
 	"github.com/tochemey/goakt/v2/log"
-	testspb "github.com/tochemey/goakt/v2/test/data/testpb"
 )
-
-const (
-	receivingTimeout = 100 * time.Millisecond
-)
-
-// Benchmarker is an actor that helps run benchmark tests
-type Benchmarker struct {
-}
-
-func (p *Benchmarker) PreStart(context.Context) error {
-	return nil
-}
-
-func (p *Benchmarker) Receive(ctx actors.ReceiveContext) {
-	switch ctx.Message().(type) {
-	case *testspb.TestSend:
-	case *testspb.TestReply:
-		ctx.Response(&testspb.Reply{Content: "received message"})
-	}
-}
-
-func (p *Benchmarker) PostStop(context.Context) error {
-	return nil
-}
 
 func BenchmarkActor(b *testing.B) {
 	b.Run("tell", func(b *testing.B) {
 		ctx := context.TODO()
 
 		// create the actor system
-		actorSystem, _ := actors.NewActorSystem("testSys",
+		actorSystem, _ := actors.NewActorSystem("bench",
 			actors.WithLogger(log.DiscardLogger),
 			actors.WithActorInitMaxRetries(1),
-			actors.WithMailboxSize(uint64(b.N)),
 			actors.WithSupervisorDirective(actors.NewStopDirective()),
 			actors.WithReplyTimeout(receivingTimeout))
 
@@ -82,7 +60,7 @@ func BenchmarkActor(b *testing.B) {
 		runParallel(b, func(pb *testing.PB) {
 			for pb.Next() {
 				// send a message to the actor
-				_ = actors.Tell(ctx, pid, &testspb.TestSend{})
+				_ = actors.Tell(ctx, pid, new(benchmarkpb.BenchTell))
 			}
 		})
 
@@ -93,10 +71,9 @@ func BenchmarkActor(b *testing.B) {
 		ctx := context.TODO()
 
 		// create the actor system
-		actorSystem, _ := actors.NewActorSystem("testSys",
+		actorSystem, _ := actors.NewActorSystem("bench",
 			actors.WithLogger(log.DiscardLogger),
 			actors.WithActorInitMaxRetries(1),
-			actors.WithMailboxSize(uint64(b.N)),
 			actors.WithSupervisorDirective(actors.NewStopDirective()),
 			actors.WithPassivationDisabled(),
 			actors.WithReplyTimeout(receivingTimeout))
@@ -113,21 +90,19 @@ func BenchmarkActor(b *testing.B) {
 		runParallel(b, func(pb *testing.PB) {
 			for pb.Next() {
 				// send a message to the actor
-				_ = actors.Tell(ctx, pid, &testspb.TestSend{})
+				_ = actors.Tell(ctx, pid, new(benchmarkpb.BenchTell))
 			}
 		})
 
 		_ = pid.Shutdown(ctx)
 		_ = actorSystem.Stop(ctx)
 	})
-
 	b.Run("ask", func(b *testing.B) {
 		ctx := context.TODO()
 		// create the actor system
-		actorSystem, _ := actors.NewActorSystem("testSys",
+		actorSystem, _ := actors.NewActorSystem("bench",
 			actors.WithLogger(log.DiscardLogger),
 			actors.WithActorInitMaxRetries(1),
-			actors.WithMailboxSize(uint64(b.N)),
 			actors.WithExpireActorAfter(5*time.Second),
 			actors.WithReplyTimeout(receivingTimeout))
 
@@ -142,7 +117,7 @@ func BenchmarkActor(b *testing.B) {
 		runParallel(b, func(pb *testing.PB) {
 			for pb.Next() {
 				// send a message to the actor
-				_, _ = actors.Ask(ctx, pid, new(testspb.TestReply), receivingTimeout)
+				_, _ = actors.Ask(ctx, pid, new(benchmarkpb.BenchRequest), receivingTimeout)
 			}
 		})
 
@@ -152,10 +127,9 @@ func BenchmarkActor(b *testing.B) {
 	b.Run("ask without passivation", func(b *testing.B) {
 		ctx := context.TODO()
 		// create the actor system
-		actorSystem, _ := actors.NewActorSystem("testSys",
+		actorSystem, _ := actors.NewActorSystem("bench",
 			actors.WithLogger(log.DiscardLogger),
 			actors.WithActorInitMaxRetries(1),
-			actors.WithMailboxSize(uint64(b.N)),
 			actors.WithPassivationDisabled(),
 			actors.WithReplyTimeout(receivingTimeout))
 
@@ -170,7 +144,7 @@ func BenchmarkActor(b *testing.B) {
 		runParallel(b, func(pb *testing.PB) {
 			for pb.Next() {
 				// send a message to the actor
-				_, _ = actors.Ask(ctx, pid, new(testspb.TestReply), receivingTimeout)
+				_, _ = actors.Ask(ctx, pid, new(benchmarkpb.BenchRequest), receivingTimeout)
 			}
 		})
 
@@ -184,6 +158,28 @@ func runParallel(b *testing.B, benchFn func(pb *testing.PB)) {
 	b.ResetTimer()
 	start := time.Now()
 	b.RunParallel(benchFn)
-	opsPerSec := float64(b.N) / float64(time.Since(start).Seconds())
+	opsPerSec := float64(b.N) / time.Since(start).Seconds()
 	b.ReportMetric(opsPerSec, "ops/s")
+}
+
+func TestBenchmark_Bench(t *testing.T) {
+	ctx := context.TODO()
+
+	actorsCount := 2000
+	workersCount := 20
+	duration := 10 * time.Second
+
+	benchmark := NewBenchmark(actorsCount, workersCount, duration)
+	require.NoError(t, benchmark.Start(ctx))
+
+	fmt.Printf("starting benchmark for (%v): num workers:(%d)\n", duration, workersCount)
+	if err := benchmark.Bench(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	fmt.Printf("workers: %d messages sent: %d, messages received: %d - duration: %v\n", workersCount, totalSent.Load(), totalRecv.Load(), duration)
+	fmt.Printf("messages per second: %d\n", totalRecv.Load()/int64(duration.Seconds()))
+	t.Cleanup(func() {
+		require.NoError(t, benchmark.Stop(ctx))
+	})
 }
