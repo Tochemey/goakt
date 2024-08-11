@@ -145,13 +145,6 @@ func WithShutdownTimeout(timeout time.Duration) Option {
 	})
 }
 
-// WithMailboxSize sets the actors mailbox size
-func WithMailboxSize(size uint64) Option {
-	return OptionFunc(func(a *actorSystem) {
-		a.mailboxSize = size
-	})
-}
-
 // WithStash sets the stash buffer size
 func WithStash(capacity uint64) Option {
 	return OptionFunc(func(a *actorSystem) {

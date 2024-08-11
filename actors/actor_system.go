@@ -201,8 +201,6 @@ type actorSystem struct {
 
 	// help protect some the fields to set
 	locker sync.Mutex
-	// specifies actors mailbox size
-	mailboxSize uint64
 	// specifies the stash capacity
 	stashCapacity uint64
 
