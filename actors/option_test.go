@@ -94,11 +94,6 @@ func TestOption(t *testing.T) {
 			expected: actorSystem{telemetry: tel},
 		},
 		{
-			name:     "WithMailboxSize",
-			option:   WithMailboxSize(10),
-			expected: actorSystem{mailboxSize: 10},
-		},
-		{
 			name:     "WithStash",
 			option:   WithStash(10),
 			expected: actorSystem{stashCapacity: 10},
