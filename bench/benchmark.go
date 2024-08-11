@@ -61,6 +61,7 @@ func (p *Benchmarker) Receive(ctx actors.ReceiveContext) {
 	case *benchmarkpb.BenchTell:
 		totalRecv.Add(1)
 	case *benchmarkpb.BenchRequest:
+		totalRecv.Add(1)
 		ctx.Response(&benchmarkpb.BenchResponse{})
 	default:
 		ctx.Unhandled()
@@ -129,8 +130,8 @@ func (b *Benchmark) Stop(ctx context.Context) error {
 	return b.system.Stop(ctx)
 }
 
-// Bench sends messages to a random actor
-func (b *Benchmark) Bench(ctx context.Context) error {
+// BenchTell sends messages to a random actor
+func (b *Benchmark) BenchTell(ctx context.Context) error {
 	wg := sync.WaitGroup{}
 	wg.Add(b.workersCount)
 	deadline := time.Now().Add(b.duration)
@@ -142,6 +143,34 @@ func (b *Benchmark) Bench(ctx context.Context) error {
 				pid := b.pids[rand.IntN(len(b.pids))] //nolint:gosec
 				// send a message
 				_ = actors.Tell(ctx, pid, new(benchmarkpb.BenchTell))
+				// increase sent counter
+				totalSent.Add(1)
+			}
+		}()
+	}
+
+	// wait for the messages to be delivered
+	wg.Wait()
+	time.Sleep(500 * time.Millisecond)
+	if totalSent.Load() != totalRecv.Load() {
+		return fmt.Errorf("send count and receive count does not match: %d != %d", totalSent.Load(), totalRecv.Load())
+	}
+	return nil
+}
+
+// BenchAsk sends messages to a random actor
+func (b *Benchmark) BenchAsk(ctx context.Context) error {
+	wg := sync.WaitGroup{}
+	wg.Add(b.workersCount)
+	deadline := time.Now().Add(b.duration)
+	for i := 0; i < b.workersCount; i++ {
+		go func() {
+			defer wg.Done()
+			for time.Now().Before(deadline) {
+				// randomly pick and actor
+				pid := b.pids[rand.IntN(len(b.pids))] //nolint:gosec
+				// send a message
+				_, _ = actors.Ask(ctx, pid, new(benchmarkpb.BenchRequest), receivingTimeout)
 				// increase sent counter
 				totalSent.Add(1)
 			}

@@ -162,7 +162,7 @@ func runParallel(b *testing.B, benchFn func(pb *testing.PB)) {
 	b.ReportMetric(opsPerSec, "ops/s")
 }
 
-func TestBenchmark_Bench(t *testing.T) {
+func TestBenchmark_BenchTell(t *testing.T) {
 	ctx := context.TODO()
 
 	actorsCount := 2000
@@ -173,7 +173,30 @@ func TestBenchmark_Bench(t *testing.T) {
 	require.NoError(t, benchmark.Start(ctx))
 
 	fmt.Printf("starting benchmark for (%v): num workers:(%d)\n", duration, workersCount)
-	if err := benchmark.Bench(ctx); err != nil {
+	if err := benchmark.BenchTell(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	fmt.Printf("total actors spawned: (%d)\n", actorsCount)
+	fmt.Printf("total workers: (%d), total messages sent: (%d), total messages received: (%d) - duration: (%v)\n", workersCount, totalSent.Load(), totalRecv.Load(), duration)
+	fmt.Printf("messages per second: (%d)\n", totalRecv.Load()/int64(duration.Seconds()))
+	t.Cleanup(func() {
+		require.NoError(t, benchmark.Stop(ctx))
+	})
+}
+
+func TestBenchmark_BenchAsk(t *testing.T) {
+	ctx := context.TODO()
+
+	actorsCount := 2000
+	workersCount := 50
+	duration := 30 * time.Second
+
+	benchmark := NewBenchmark(actorsCount, workersCount, duration)
+	require.NoError(t, benchmark.Start(ctx))
+
+	fmt.Printf("starting benchmark for (%v): num workers:(%d)\n", duration, workersCount)
+	if err := benchmark.BenchAsk(ctx); err != nil {
 		t.Fatal(err)
 	}
 
