@@ -195,7 +195,7 @@ func TestBenchmark_BenchAsk(t *testing.T) {
 
 	actorsCount := 2000
 	workersCount := 20
-	duration := 10 * time.Second
+	duration := 30 * time.Second
 
 	benchmark := NewBenchmark(actorsCount, workersCount, duration)
 	require.NoError(t, benchmark.Start(ctx))
