@@ -1414,7 +1414,7 @@ func (x *pid) handleReceived(received ReceiveContext) {
 	}()
 
 	x.fieldsLocker.Lock()
-	behaviorStack := *x.behaviorStack
+	behaviorStack := x.behaviorStack
 	x.fieldsLocker.Unlock()
 
 	// send the message to the current actor behavior

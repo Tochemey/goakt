@@ -189,7 +189,7 @@ func TestBenchmark_BenchAsk(t *testing.T) {
 	ctx := context.TODO()
 
 	actorsCount := 2000
-	workersCount := 10
+	workersCount := 20
 	duration := 10 * time.Second
 
 	benchmark := NewBenchmark(actorsCount, workersCount, duration)
