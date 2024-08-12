@@ -31,7 +31,7 @@ import (
 	"testing"
 	"time"
 
-	. "github.com/klauspost/cpuid/v2"
+	. "github.com/klauspost/cpuid/v2" //nolint
 	"github.com/stretchr/testify/require"
 
 	"github.com/tochemey/goakt/v2/actors"
