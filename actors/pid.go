@@ -550,7 +550,6 @@ func (x *pid) Restart(ctx context.Context) error {
 		ticker.Stop()
 	}
 
-	x.mailbox = queue.NewMpsc[ReceiveContext]()
 	x.resetBehavior()
 	if err := x.init(ctx); err != nil {
 		return err
