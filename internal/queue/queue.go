@@ -31,8 +31,6 @@ import "sync"
 const minQueueLen = 16
 
 // Queue thread-safe Queue using ring-buffer
-// reference: https://blog.dubbelboer.com/2015/04/25/go-faster-queue.html
-// https://github.com/eapache/queue
 type Queue[T any] struct {
 	mu      sync.RWMutex
 	cond    *sync.Cond
@@ -54,10 +52,10 @@ func New[T any]() *Queue[T] {
 	return sq
 }
 
-// Push adds an item to the back of the queue
+// Push adds an QueueItem to the back of the queue
 // It can be safely called from multiple goroutines
 // It will return false if the queue is closed.
-// In that case the Item is dropped.
+// In that case the node is dropped.
 func (q *Queue[T]) Push(i T) bool {
 	q.mu.Lock()
 	if q.closed {
@@ -120,7 +118,7 @@ func (q *Queue[T]) IsClosed() bool {
 	return c
 }
 
-// Wait for an item to be added.
+// Wait for an QueueItem to be added.
 // If there is items on the queue the first will
 // be returned immediately.
 // Will return nil, false if the queue is closed.
@@ -141,7 +139,7 @@ func (q *Queue[T]) Wait() (T, bool) {
 	return q.Pop()
 }
 
-// Pop removes the item from the front of the queue
+// Pop removes the QueueItem from the front of the queue
 // If false is returned, it either means 1) there were no items on the queue
 // or 2) the queue is closed.
 func (q *Queue[T]) Pop() (T, bool) {

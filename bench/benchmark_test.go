@@ -27,9 +27,11 @@ package bench
 import (
 	"context"
 	"fmt"
+	"runtime"
 	"testing"
 	"time"
 
+	. "github.com/klauspost/cpuid/v2" //nolint
 	"github.com/stretchr/testify/require"
 
 	"github.com/tochemey/goakt/v2/actors"
@@ -167,19 +169,22 @@ func TestBenchmark_BenchTell(t *testing.T) {
 
 	actorsCount := 2000
 	workersCount := 20
-	duration := 10 * time.Second
+	duration := 30 * time.Second
 
 	benchmark := NewBenchmark(actorsCount, workersCount, duration)
 	require.NoError(t, benchmark.Start(ctx))
 
-	fmt.Printf("starting benchmark for (%v): num workers:(%d)\n", duration, workersCount)
+	fmt.Printf("Starting benchmark for (%v): num workers:(%d)\n", duration, workersCount)
 	if err := benchmark.BenchTell(ctx); err != nil {
 		t.Fatal(err)
 	}
 
-	fmt.Printf("total actors spawned: (%d)\n", actorsCount)
-	fmt.Printf("total workers: (%d), total messages sent: (%d), total messages received: (%d) - duration: (%v)\n", workersCount, totalSent.Load(), totalRecv.Load(), duration)
-	fmt.Printf("messages per second: (%d)\n", totalRecv.Load()/int64(duration.Seconds()))
+	fmt.Printf("Go Version: %s\n", runtime.Version())
+	fmt.Printf("cpu: %s (Physical Cores: %d)\n", CPU.BrandName, CPU.PhysicalCores)
+	fmt.Printf("Runtime CPUs: %d\n", runtime.NumCPU())
+	fmt.Printf("Total actors spawned: (%d)\n", actorsCount)
+	fmt.Printf("Total workers: (%d), total messages sent: (%d), total messages received: (%d) - duration: (%v)\n", workersCount, totalSent.Load(), totalRecv.Load(), duration)
+	fmt.Printf("Messages per second: (%d)\n", totalRecv.Load()/int64(duration.Seconds()))
 	t.Cleanup(func() {
 		require.NoError(t, benchmark.Stop(ctx))
 	})
@@ -190,19 +195,22 @@ func TestBenchmark_BenchAsk(t *testing.T) {
 
 	actorsCount := 2000
 	workersCount := 20
-	duration := 10 * time.Second
+	duration := 30 * time.Second
 
 	benchmark := NewBenchmark(actorsCount, workersCount, duration)
 	require.NoError(t, benchmark.Start(ctx))
 
-	fmt.Printf("starting benchmark for (%v): num workers:(%d)\n", duration, workersCount)
+	fmt.Printf("Starting benchmark for (%v): num workers:(%d)\n", duration, workersCount)
 	if err := benchmark.BenchAsk(ctx); err != nil {
 		t.Fatal(err)
 	}
 
-	fmt.Printf("total actors spawned: (%d)\n", actorsCount)
-	fmt.Printf("total workers: (%d), total messages sent: (%d), total messages received: (%d) - duration: (%v)\n", workersCount, totalSent.Load(), totalRecv.Load(), duration)
-	fmt.Printf("messages per second: (%d)\n", totalRecv.Load()/int64(duration.Seconds()))
+	fmt.Printf("Go Version: %s\n", runtime.Version())
+	fmt.Printf("cpu: %s (Physical Cores: %d)\n", CPU.BrandName, CPU.PhysicalCores)
+	fmt.Printf("Runtime CPUs: %d\n", runtime.NumCPU())
+	fmt.Printf("Total actors spawned: (%d)\n", actorsCount)
+	fmt.Printf("Total workers: (%d), total messages sent: (%d), total messages received: (%d) - duration: (%v)\n", workersCount, totalSent.Load(), totalRecv.Load(), duration)
+	fmt.Printf("Messages per second: (%d)\n", totalRecv.Load()/int64(duration.Seconds()))
 	t.Cleanup(func() {
 		require.NoError(t, benchmark.Stop(ctx))
 	})
