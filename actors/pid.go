@@ -225,7 +225,7 @@ type pid struct {
 	shutdownTimeout atomic.Duration
 
 	// specifies the actor mailbox
-	mailbox *queue.Queue[ReceiveContext]
+	mailbox *queue.Mpsc[ReceiveContext]
 
 	// receives a shutdown signal. Once the signal is received
 	// the actor is shut down gracefully.
@@ -319,7 +319,7 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 		fieldsLocker:         &sync.RWMutex{},
 		stopLocker:           &sync.Mutex{},
 		httpClient:           http.NewClient(),
-		mailbox:              queue.New[ReceiveContext](),
+		mailbox:              queue.NewMpsc[ReceiveContext](),
 		stashBuffer:          nil,
 		stashLocker:          &sync.Mutex{},
 		eventsStream:         nil,
@@ -550,7 +550,7 @@ func (x *pid) Restart(ctx context.Context) error {
 		ticker.Stop()
 	}
 
-	x.mailbox = queue.New[ReceiveContext]()
+	x.mailbox = queue.NewMpsc[ReceiveContext]()
 	x.resetBehavior()
 	if err := x.init(ctx); err != nil {
 		return err
@@ -1314,7 +1314,6 @@ func (x *pid) reset() {
 		}
 	}
 	x.processedCount.Store(0)
-	x.mailbox.Close()
 }
 
 func (x *pid) freeWatchers(ctx context.Context) {
@@ -1375,11 +1374,6 @@ func (x *pid) receive() {
 		case <-x.shutdownSignal:
 			return
 		default:
-			// break out of the loop when the channel is closed
-			if x.mailbox.IsClosed() {
-				return
-			}
-
 			// fetch the data and continue the loop when there are no records yet
 			received, ok := x.mailbox.Pop()
 			if !ok {
