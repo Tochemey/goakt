@@ -25,6 +25,7 @@
 package queue
 
 import (
+	"sync"
 	"sync/atomic"
 	"unsafe"
 )
@@ -41,6 +42,7 @@ type Mpsc[T any] struct {
 	head   *node[T]
 	tail   *node[T]
 	length int64
+	lock   sync.Mutex
 }
 
 // NewMpsc create an instance of Mpsc
@@ -50,6 +52,7 @@ func NewMpsc[T any]() *Mpsc[T] {
 		head:   item,
 		tail:   item,
 		length: 0,
+		lock:   sync.Mutex{},
 	}
 }
 
@@ -72,7 +75,9 @@ func (q *Mpsc[T]) Pop() (T, bool) {
 		return tnil, false
 	}
 
+	q.lock.Lock()
 	q.tail = next
+	q.lock.Unlock()
 	value := next.value
 	next.value = tnil
 	atomic.AddInt64(&q.length, -1)
@@ -87,7 +92,9 @@ func (q *Mpsc[T]) Len() int64 {
 // IsEmpty returns true when the queue is empty
 // must be called from a single, consumer goroutine
 func (q *Mpsc[T]) IsEmpty() bool {
+	q.lock.Lock()
 	tail := q.tail
+	q.lock.Unlock()
 	next := (*node[T])(atomic.LoadPointer((*unsafe.Pointer)(unsafe.Pointer(&tail.next))))
 	return next == nil
 }
