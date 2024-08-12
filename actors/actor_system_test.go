@@ -412,6 +412,12 @@ func TestActorSystem(t *testing.T) {
 
 		require.Len(t, items, 1)
 
+		// send a message to the actor
+		reply, err = Ask(ctx, actorRef, new(testpb.TestReply), replyTimeout)
+		require.NoError(t, err)
+		require.NotNil(t, reply)
+		expected = new(testpb.Reply)
+
 		t.Cleanup(func() {
 			err = sys.Stop(ctx)
 			assert.NoError(t, err)

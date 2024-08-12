@@ -550,6 +550,7 @@ func (x *pid) Restart(ctx context.Context) error {
 		ticker.Stop()
 	}
 
+	x.mailbox = queue.New[ReceiveContext]()
 	x.resetBehavior()
 	if err := x.init(ctx); err != nil {
 		return err
@@ -1413,7 +1414,7 @@ func (x *pid) handleReceived(received ReceiveContext) {
 	}()
 
 	x.fieldsLocker.Lock()
-	behaviorStack := *x.behaviorStack
+	behaviorStack := x.behaviorStack
 	x.fieldsLocker.Unlock()
 
 	// send the message to the current actor behavior

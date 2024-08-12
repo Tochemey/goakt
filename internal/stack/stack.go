@@ -28,14 +28,14 @@ import "sync"
 
 // Stack is a last-in-first-out data structure
 type Stack[T any] struct {
-	mutex sync.Mutex
+	mutex sync.RWMutex
 	items []T
 }
 
 // New creates a new stack
 func New[T any]() *Stack[T] {
 	return &Stack[T]{
-		mutex: sync.Mutex{},
+		mutex: sync.RWMutex{},
 		items: make([]T, 0),
 	}
 }
@@ -43,12 +43,15 @@ func New[T any]() *Stack[T] {
 // Peek helps view the top item on the stack
 func (s *Stack[T]) Peek() (item T, ok bool) {
 	// acquire the lock
-	s.mutex.Lock()
+	s.mutex.RLock()
+	length := len(s.items)
 	// release the lock
-	defer s.mutex.Unlock()
-	if length := len(s.items); length > 0 {
+	s.mutex.RUnlock()
+	if length > 0 {
 		ok = true
+		s.mutex.Lock()
 		item = s.items[length-1]
+		s.mutex.Unlock()
 	}
 	return
 }
@@ -56,17 +59,23 @@ func (s *Stack[T]) Peek() (item T, ok bool) {
 // Pop removes and return top element of stack. Return false if stack is empty.
 func (s *Stack[T]) Pop() (item T, ok bool) {
 	// acquire the lock
-	s.mutex.Lock()
+	s.mutex.RLock()
+	length := len(s.items)
 	// release the lock
-	defer s.mutex.Unlock()
-	if length := len(s.items); length > 0 {
+	s.mutex.RUnlock()
+
+	// release the lock
+	if length > 0 {
 		// get the index of the top most element.
 		length--
 		ok = true
+		s.mutex.Lock()
 		// index into the slice and obtain the element.
 		item = s.items[length]
 		// remove it from the stack by slicing it off.
 		s.items = s.items[:length]
+		// release the lock
+		s.mutex.Unlock()
 	}
 	return
 }
@@ -75,18 +84,21 @@ func (s *Stack[T]) Pop() (item T, ok bool) {
 func (s *Stack[T]) Push(item T) {
 	// acquire the lock
 	s.mutex.Lock()
-	// release the lock
-	defer s.mutex.Unlock()
+	// add the items to the list
 	s.items = append(s.items, item)
+	// release the lock
+	s.mutex.Unlock()
 }
 
 // Len returns the length of the stack.
 func (s *Stack[T]) Len() int {
 	// acquire the lock
-	s.mutex.Lock()
+	s.mutex.RLock()
+	// set the length of items
+	length := len(s.items)
 	// release the lock
-	defer s.mutex.Unlock()
-	return len(s.items)
+	s.mutex.RUnlock()
+	return length
 }
 
 // IsEmpty checks if stack is empty
