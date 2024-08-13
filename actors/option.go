@@ -166,13 +166,6 @@ func WithActorInitTimeout(timeout time.Duration) Option {
 	})
 }
 
-// WithTracing enables tracing
-func WithTracing() Option {
-	return OptionFunc(func(system *actorSystem) {
-		system.traceEnabled.Store(true)
-	})
-}
-
 // WithMetric enables metrics
 func WithMetric() Option {
 	return OptionFunc(func(system *actorSystem) {

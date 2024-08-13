@@ -122,13 +122,6 @@ func withInitTimeout(duration time.Duration) pidOption {
 	}
 }
 
-// withTracing enables tracing
-func withTracing() pidOption {
-	return func(pid *pid) {
-		pid.traceEnabled.Store(true)
-	}
-}
-
 func withMetric() pidOption {
 	return func(pid *pid) {
 		pid.metricEnabled.Store(true)

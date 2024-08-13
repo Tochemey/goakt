@@ -109,11 +109,6 @@ func TestOption(t *testing.T) {
 			expected: actorSystem{actorInitTimeout: 2. * time.Second},
 		},
 		{
-			name:     "WithTracing",
-			option:   WithTracing(),
-			expected: actorSystem{traceEnabled: atomicTrue},
-		},
-		{
 			name:     "WithMetric",
 			option:   WithMetric(),
 			expected: actorSystem{metricEnabled: atomicTrue},

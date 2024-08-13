@@ -102,11 +102,6 @@ func TestPIDOptions(t *testing.T) {
 			expected: &pid{initTimeout: atomicDuration},
 		},
 		{
-			name:     "withTracing",
-			option:   withTracing(),
-			expected: &pid{traceEnabled: atomicTrue},
-		},
-		{
 			name:     "withMetric",
 			option:   withMetric(),
 			expected: &pid{metricEnabled: atomicTrue},
