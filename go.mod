@@ -11,7 +11,6 @@ require (
 	github.com/google/go-cmp v0.6.0
 	github.com/google/uuid v1.6.0
 	github.com/grandcat/zeroconf v1.0.0
-	github.com/klauspost/cpuid/v2 v2.2.8
 	github.com/nats-io/nats-server/v2 v2.10.18
 	github.com/nats-io/nats.go v1.37.0
 	github.com/pkg/errors v0.9.1
@@ -70,6 +69,7 @@ require (
 	github.com/josharian/intern v1.0.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/klauspost/compress v1.17.9 // indirect
+	github.com/klauspost/cpuid/v2 v2.2.8 // indirect
 	github.com/mailru/easyjson v0.7.7 // indirect
 	github.com/miekg/dns v1.1.61 // indirect
 	github.com/minio/highwayhash v1.0.3 // indirect
