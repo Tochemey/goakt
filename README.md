@@ -633,4 +633,4 @@ earthly +test
 One can run the benchmark test from the [bench package](./bench):
 
 - `make bench` to run the benchmark
-- `make stats` to see the benchmark stats
+- `make bench-stats` to see the benchmark stats
