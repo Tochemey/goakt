@@ -34,7 +34,7 @@ import (
 // TODO: add go routine-based tests
 func TestMpscQueue(t *testing.T) {
 	t.Run("With Push/Pop", func(t *testing.T) {
-		q := NewMpsc[int]()
+		q := NewMpscQueue[int]()
 		require.True(t, q.IsEmpty())
 		for j := 0; j < 100; j++ {
 			if q.Len() != 0 {

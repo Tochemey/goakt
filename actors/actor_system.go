@@ -245,7 +245,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 	}
 
 	system := &actorSystem{
-		actors:                 newPIDMap(1_000), // TODO need to check with memory footprint here since we change the map engine
+		actors:                 newPIDMap(1_000),
 		actorsChan:             make(chan *internalpb.WireActor, 10),
 		name:                   name,
 		logger:                 log.DefaultLogger,
@@ -1214,7 +1214,7 @@ func (x *actorSystem) enableClustering(ctx context.Context) error {
 	x.locker.Unlock()
 
 	go x.clusterEventsLoop()
-	go x.clusterReplicationLoop()
+	go x.replicationLoop()
 	go x.peersStateLoop()
 	go x.redistributionLoop()
 
@@ -1359,8 +1359,8 @@ func (x *actorSystem) registerMetrics() error {
 	return err
 }
 
-// clusterReplicationLoop publishes newly created actor into the cluster when cluster is enabled
-func (x *actorSystem) clusterReplicationLoop() {
+// replicationLoop publishes newly created actor into the cluster when cluster is enabled
+func (x *actorSystem) replicationLoop() {
 	for actor := range x.actorsChan {
 		if x.InCluster() {
 			ctx := context.Background()
