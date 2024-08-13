@@ -146,9 +146,9 @@ func WithShutdownTimeout(timeout time.Duration) Option {
 }
 
 // WithStash sets the stash buffer size
-func WithStash(capacity uint64) Option {
+func WithStash() Option {
 	return OptionFunc(func(a *actorSystem) {
-		a.stashCapacity = capacity
+		a.stashEnabled = true
 	})
 }
 
@@ -163,13 +163,6 @@ func WithPartitionHasher(hasher hash.Hasher) Option {
 func WithActorInitTimeout(timeout time.Duration) Option {
 	return OptionFunc(func(a *actorSystem) {
 		a.actorInitTimeout = timeout
-	})
-}
-
-// WithTracing enables tracing
-func WithTracing() Option {
-	return OptionFunc(func(system *actorSystem) {
-		system.traceEnabled.Store(true)
 	})
 }
 

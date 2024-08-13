@@ -92,11 +92,6 @@ func TestPIDOptions(t *testing.T) {
 			expected: &pid{passivateAfter: negativeDuration},
 		},
 		{
-			name:     "WithStash",
-			option:   withStash(10),
-			expected: &pid{stashCapacity: atomicUint64},
-		},
-		{
 			name:     "withEventsStream",
 			option:   withEventsStream(eventsStream),
 			expected: &pid{eventsStream: eventsStream},
@@ -105,11 +100,6 @@ func TestPIDOptions(t *testing.T) {
 			name:     "withInitTimeout",
 			option:   withInitTimeout(time.Second),
 			expected: &pid{initTimeout: atomicDuration},
-		},
-		{
-			name:     "withTracing",
-			option:   withTracing(),
-			expected: &pid{traceEnabled: atomicTrue},
 		},
 		{
 			name:     "withMetric",

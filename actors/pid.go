@@ -37,10 +37,7 @@ import (
 	"connectrpc.com/connect"
 	"connectrpc.com/otelconnect"
 	"github.com/flowchartsman/retry"
-	"go.opentelemetry.io/otel/codes"
 	otelmetric "go.opentelemetry.io/otel/metric"
-	"go.opentelemetry.io/otel/trace"
-	"go.opentelemetry.io/otel/trace/noop"
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
@@ -270,16 +267,11 @@ type pid struct {
 	behaviorStack *behaviorStack
 
 	// stash settings
-	stashBuffer   chan ReceiveContext
-	stashCapacity atomic.Uint64
-	stashLocker   *sync.Mutex
+	stashBuffer *queue.MpscQueue[ReceiveContext]
+	stashLocker *sync.Mutex
 
 	// define an events stream
 	eventsStream *eventstream.EventsStream
-
-	// define tracing
-	traceEnabled atomic.Bool
-	tracer       trace.Tracer
 
 	// set the metrics settings
 	restartCount   *atomic.Int64
@@ -323,7 +315,6 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 		stashBuffer:          nil,
 		stashLocker:          &sync.Mutex{},
 		eventsStream:         nil,
-		tracer:               noop.NewTracerProvider().Tracer("PID"),
 		restartCount:         atomic.NewInt64(0),
 		childrenCount:        atomic.NewInt64(0),
 		processedCount:       atomic.NewInt64(0),
@@ -333,29 +324,19 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 	p.initMaxRetries.Store(DefaultInitMaxRetries)
 	p.shutdownTimeout.Store(DefaultShutdownTimeout)
 	p.lastReceivedDuration.Store(0)
-	p.stashCapacity.Store(DefaultStashCapacity)
 	p.isRunning.Store(false)
 	p.passivateAfter.Store(DefaultPassivationTimeout)
 	p.askTimeout.Store(DefaultAskTimeout)
 	p.initTimeout.Store(DefaultInitTimeout)
-	p.traceEnabled.Store(false)
 	p.metricEnabled.Store(false)
 
 	for _, opt := range opts {
 		opt(p)
 	}
 
-	if p.stashCapacity.Load() > 0 {
-		p.stashBuffer = make(chan ReceiveContext, p.stashCapacity.Load())
-	}
-
 	behaviorStack := newBehaviorStack()
 	behaviorStack.Push(p.Receive)
 	p.behaviorStack = behaviorStack
-
-	if p.traceEnabled.Load() {
-		p.tracer = p.telemetry.Tracer
-	}
 
 	if err := p.init(ctx); err != nil {
 		return nil, err
@@ -459,18 +440,11 @@ func (x *pid) Children() []PID {
 // Stop forces the child Actor under the given name to terminate after it finishes processing its current message.
 // Nothing happens if child is already stopped.
 func (x *pid) Stop(ctx context.Context, cid PID) error {
-	ctx, span := x.tracer.Start(ctx, "Stop")
-	defer span.End()
-
 	if !x.IsRunning() {
-		span.SetStatus(codes.Error, "Stop")
-		span.RecordError(ErrDead)
 		return ErrDead
 	}
 
 	if cid == nil || cid == NoSender {
-		span.SetStatus(codes.Error, "Stop")
-		span.RecordError(ErrUndefinedActor)
 		return ErrUndefinedActor
 	}
 
@@ -479,21 +453,14 @@ func (x *pid) Stop(ctx context.Context, cid PID) error {
 	x.fieldsLocker.RUnlock()
 
 	if cid, ok := children.get(cid.ActorPath()); ok {
-		desc := fmt.Sprintf("child.[%s] Shutdown", cid.ActorPath())
 		if err := cid.Shutdown(ctx); err != nil {
-			span.SetStatus(codes.Error, desc)
-			span.RecordError(err)
 			return err
 		}
 
-		span.SetStatus(codes.Ok, desc)
 		return nil
 	}
 
-	err := ErrActorNotFound(cid.ActorPath().String())
-	span.SetStatus(codes.Error, "Stop")
-	span.RecordError(err)
-	return err
+	return ErrActorNotFound(cid.ActorPath().String())
 }
 
 // IsRunning returns true when the actor is alive ready to process messages and false
@@ -521,12 +488,7 @@ func (x *pid) ActorPath() *Path {
 // Restart restarts the actor.
 // During restart all messages that are in the mailbox and not yet processed will be ignored
 func (x *pid) Restart(ctx context.Context) error {
-	ctx, span := x.tracer.Start(ctx, "Restart")
-	defer span.End()
-
 	if x == nil || x.ActorPath() == nil {
-		span.SetStatus(codes.Error, "Restart")
-		span.RecordError(ErrUndefinedActor)
 		return ErrUndefinedActor
 	}
 
@@ -559,7 +521,6 @@ func (x *pid) Restart(ctx context.Context) error {
 		go x.passivationLoop()
 	}
 
-	span.SetStatus(codes.Ok, "Restart")
 	x.restartCount.Inc()
 
 	if x.eventsStream != nil {
@@ -575,12 +536,7 @@ func (x *pid) Restart(ctx context.Context) error {
 // SpawnChild creates a child actor and start watching it for error
 // When the given child actor already exists its PID will only be returned
 func (x *pid) SpawnChild(ctx context.Context, name string, actor Actor) (PID, error) {
-	ctx, span := x.tracer.Start(ctx, "SpawnChild")
-	defer span.End()
-
 	if !x.IsRunning() {
-		span.SetStatus(codes.Error, "SpawnChild")
-		span.RecordError(ErrDead)
 		return nil, ErrDead
 	}
 
@@ -604,14 +560,9 @@ func (x *pid) SpawnChild(ctx context.Context, name string, actor Actor) (PID, er
 		withCustomLogger(x.logger),
 		withActorSystem(x.system),
 		withSupervisorDirective(x.supervisorDirective),
-		withStash(x.stashCapacity.Load()),
 		withEventsStream(x.eventsStream),
 		withInitTimeout(x.initTimeout.Load()),
 		withShutdownTimeout(x.shutdownTimeout.Load()),
-	}
-
-	if x.traceEnabled.Load() {
-		opts = append(opts, withTracing())
 	}
 
 	if x.metricEnabled.Load() {
@@ -625,8 +576,6 @@ func (x *pid) SpawnChild(ctx context.Context, name string, actor Actor) (PID, er
 	)
 
 	if err != nil {
-		span.SetStatus(codes.Error, "SpawnChild")
-		span.RecordError(err)
 		x.fieldsLocker.RUnlock()
 		return nil, err
 	}
@@ -635,7 +584,6 @@ func (x *pid) SpawnChild(ctx context.Context, name string, actor Actor) (PID, er
 	eventsStream := x.eventsStream
 
 	x.fieldsLocker.RUnlock()
-	span.SetStatus(codes.Ok, "SpawnChild")
 
 	x.Watch(cid)
 
@@ -660,7 +608,7 @@ func (x *pid) StashSize() uint64 {
 	if x.stashBuffer == nil {
 		return 0
 	}
-	return uint64(len(x.stashBuffer))
+	return uint64(x.stashBuffer.Len())
 }
 
 // PipeTo processes a long-running task and pipes the result to the provided actor.
@@ -668,18 +616,11 @@ func (x *pid) StashSize() uint64 {
 // This is useful when interacting with external services.
 // It’s common that you would like to use the value of the response in the actor when the long-running task is completed
 func (x *pid) PipeTo(ctx context.Context, to PID, task future.Task) error {
-	ctx, span := x.tracer.Start(ctx, "PipeTo")
-	defer span.End()
-
 	if task == nil {
-		span.SetStatus(codes.Error, "PipeTo")
-		span.RecordError(ErrUndefinedTask)
 		return ErrUndefinedTask
 	}
 
 	if !to.IsRunning() {
-		span.SetStatus(codes.Error, "PipeTo")
-		span.RecordError(ErrDead)
 		return ErrDead
 	}
 
@@ -694,12 +635,7 @@ func (x *pid) PipeTo(ctx context.Context, to PID, task future.Task) error {
 // Ask sends a synchronous message to another actor and expect a response.
 // This block until a response is received or timed out.
 func (x *pid) Ask(ctx context.Context, to PID, message proto.Message) (response proto.Message, err error) {
-	ctx, span := x.tracer.Start(ctx, "Ask")
-	defer span.End()
-
 	if !to.IsRunning() {
-		span.SetStatus(codes.Error, "Ask")
-		span.RecordError(ErrDead)
 		return nil, ErrDead
 	}
 
@@ -710,13 +646,10 @@ func (x *pid) Ask(ctx context.Context, to PID, message proto.Message) (response 
 		select {
 		case response = <-messageContext.response:
 			x.recordLastReceivedDurationMetric(ctx)
-			span.SetStatus(codes.Ok, "Ask")
 			return
 		case <-await:
 			x.recordLastReceivedDurationMetric(ctx)
 			err = ErrRequestTimeout
-			span.SetStatus(codes.Error, "Ask")
-			span.RecordError(err)
 			x.handleError(messageContext, err)
 			return nil, err
 		}
@@ -725,19 +658,13 @@ func (x *pid) Ask(ctx context.Context, to PID, message proto.Message) (response 
 
 // Tell sends an asynchronous message to another PID
 func (x *pid) Tell(ctx context.Context, to PID, message proto.Message) error {
-	ctx, span := x.tracer.Start(ctx, "Tell")
-	defer span.End()
-
 	if !to.IsRunning() {
-		span.SetStatus(codes.Error, "Tell")
-		span.RecordError(ErrDead)
 		return ErrDead
 	}
 
 	messageContext := newReceiveContext(ctx, x, to, message, true)
 	to.doReceive(messageContext)
 	x.recordLastReceivedDurationMetric(ctx)
-	span.SetStatus(codes.Ok, "Tell")
 	return nil
 }
 
@@ -746,17 +673,11 @@ func (x *pid) Tell(ctx context.Context, to PID, message proto.Message) error {
 // This is a design choice to follow the simple principle of one message at a time processing by actors.
 // When BatchTell encounter a single message it will fall back to a Tell call.
 func (x *pid) BatchTell(ctx context.Context, to PID, messages ...proto.Message) error {
-	ctx, span := x.tracer.Start(ctx, "BatchTell")
-	defer span.End()
-
 	if !to.IsRunning() {
-		span.SetStatus(codes.Error, "BatchTell")
-		span.RecordError(ErrDead)
 		return ErrDead
 	}
 
 	if len(messages) == 1 {
-		// no need to record span error here because Tell handles it
 		return x.Tell(ctx, to, messages[0])
 	}
 
@@ -767,7 +688,6 @@ func (x *pid) BatchTell(ctx context.Context, to PID, messages ...proto.Message) 
 	}
 
 	x.recordLastReceivedDurationMetric(ctx)
-	span.SetStatus(codes.Ok, "BatchTell")
 	return nil
 }
 
@@ -775,12 +695,7 @@ func (x *pid) BatchTell(ctx context.Context, to PID, messages ...proto.Message) 
 // The messages will be processed one after the other in the order they are sent.
 // This is a design choice to follow the simple principle of one message at a time processing by actors.
 func (x *pid) BatchAsk(ctx context.Context, to PID, messages ...proto.Message) (responses chan proto.Message, err error) {
-	ctx, span := x.tracer.Start(ctx, "BatchAsk")
-	defer span.End()
-
 	if !to.IsRunning() {
-		span.SetStatus(codes.Error, "BatchAsk")
-		span.RecordError(ErrDead)
 		return nil, ErrDead
 	}
 
@@ -798,14 +713,11 @@ func (x *pid) BatchAsk(ctx context.Context, to PID, messages ...proto.Message) (
 			select {
 			case resp := <-messageContext.response:
 				responses <- resp
-				span.SetStatus(codes.Ok, "BatchAsk")
 				x.recordLastReceivedDurationMetric(ctx)
 				break timerLoop
 			case <-await:
 				err = ErrRequestTimeout
 				x.recordLastReceivedDurationMetric(ctx)
-				span.SetStatus(codes.Error, "BatchAsk")
-				span.RecordError(err)
 				x.handleError(messageContext, err)
 				return nil, err
 			}
@@ -1172,9 +1084,6 @@ func (x *pid) RemoteReSpawn(ctx context.Context, host string, port int, name str
 // All current messages in the mailbox will be processed before the actor shutdown after a period of time
 // that can be configured. All child actors will be gracefully shutdown.
 func (x *pid) Shutdown(ctx context.Context) error {
-	ctx, span := x.tracer.Start(ctx, "Shutdown")
-	defer span.End()
-
 	x.stopLocker.Lock()
 	defer x.stopLocker.Unlock()
 
@@ -1182,7 +1091,6 @@ func (x *pid) Shutdown(ctx context.Context) error {
 
 	if !x.isRunning.Load() {
 		x.logger.Infof("Actor=%s is offline. Maybe it has been passivated or stopped already", x.ActorPath().String())
-		span.SetStatus(codes.Ok, "Shutdown")
 		return nil
 	}
 
@@ -1204,7 +1112,6 @@ func (x *pid) Shutdown(ctx context.Context) error {
 	}
 
 	x.logger.Infof("Actor=%s successfully shutdown", x.ID())
-	span.SetStatus(codes.Ok, "Shutdown")
 	return nil
 }
 
@@ -1245,25 +1152,13 @@ func (x *pid) watchees() *pidMap {
 
 // doReceive pushes a given message to the actor receiveContextBuffer
 func (x *pid) doReceive(ctx ReceiveContext) {
-	x.fieldsLocker.Lock()
 	x.lastProcessingTime.Store(time.Now())
-	x.fieldsLocker.Unlock()
-	if !x.mailbox.Push(ctx) {
-		err := errors.New("actor mailbox is closed")
-		x.logger.Warn(err)
-		x.handleError(ctx, err)
-	}
-	x.fieldsLocker.Lock()
-	x.lastProcessingTime.Store(time.Now())
-	x.fieldsLocker.Unlock()
+	x.mailbox.Push(ctx)
 }
 
 // init initializes the given actor and init processing messages
 // when the initialization failed the actor will not be started
 func (x *pid) init(ctx context.Context) error {
-	ctx, span := x.tracer.Start(ctx, "Init")
-	defer span.End()
-
 	x.logger.Info("Initialization process has started...")
 
 	cancelCtx, cancel := context.WithTimeout(ctx, x.initTimeout.Load())
@@ -1274,8 +1169,6 @@ func (x *pid) init(ctx context.Context) error {
 	retrier := retry.NewRetrier(int(x.initMaxRetries.Load()), 100*time.Millisecond, time.Second)
 	if err := retrier.RunContext(cancelCtx, x.Actor.PreStart); err != nil {
 		e := ErrInitFailure(err)
-		span.SetStatus(codes.Error, "Init")
-		span.RecordError(e)
 		return e
 	}
 
@@ -1284,7 +1177,6 @@ func (x *pid) init(ctx context.Context) error {
 	x.fieldsLocker.Unlock()
 
 	x.logger.Info("Initialization process successfully completed.")
-	span.SetStatus(codes.Ok, "Init")
 
 	if x.eventsStream != nil {
 		x.eventsStream.Publish(eventsTopic, &goaktpb.ActorStarted{
@@ -1404,15 +1296,10 @@ func (x *pid) handleReceived(received ReceiveContext) {
 			}
 		}
 		// set the total messages processed
-		x.fieldsLocker.Lock()
 		x.processedCount.Inc()
-		x.fieldsLocker.Unlock()
 	}()
 
-	x.fieldsLocker.Lock()
 	behaviorStack := x.behaviorStack
-	x.fieldsLocker.Unlock()
-
 	// send the message to the current actor behavior
 	if behavior, ok := behaviorStack.Peek(); ok {
 		behavior(received)
@@ -1451,9 +1338,6 @@ func (x *pid) passivationLoop() {
 		x.logger.Infof("Actor=%s is offline. No need to passivate", x.ActorPath().String())
 		return
 	}
-
-	x.stopLocker.Lock()
-	defer x.stopLocker.Unlock()
 
 	x.logger.Infof("Passivation mode has been triggered for actor=%s...", x.ActorPath().String())
 
@@ -1507,17 +1391,12 @@ func (x *pid) unsetBehaviorStacked() {
 
 // doStop stops the actor
 func (x *pid) doStop(ctx context.Context) error {
-	ctx, span := x.tracer.Start(ctx, "doStop")
-	defer span.End()
-
 	x.isRunning.Store(false)
 
 	// TODO: just signal stash processing done and ignore the messages or process them
 	if x.stashBuffer != nil {
 		if err := x.unstashAll(); err != nil {
 			x.logger.Errorf("actor=(%s) failed to unstash messages", x.ActorPath().String())
-			span.SetStatus(codes.Error, "doStop")
-			span.RecordError(err)
 			return err
 		}
 	}
@@ -1630,7 +1509,7 @@ func (x *pid) registerMetrics() error {
 func (x *pid) grpcClientOptions() ([]connect.ClientOption, error) {
 	var interceptor *otelconnect.Interceptor
 	var err error
-	if x.metricEnabled.Load() || x.traceEnabled.Load() {
+	if x.metricEnabled.Load() {
 		interceptor, err = otelconnect.NewInterceptor(
 			otelconnect.WithTracerProvider(x.telemetry.TracerProvider),
 			otelconnect.WithMeterProvider(x.telemetry.MeterProvider))
@@ -1678,17 +1557,12 @@ func (x *pid) setLastProcessingDuration(d time.Duration) {
 // handleCompletion processes a long-running task and pipe the result to
 // the completion receiver
 func (x *pid) handleCompletion(ctx context.Context, completion *taskCompletion) {
-	ctx, span := x.tracer.Start(ctx, "TaskCompletion")
-	defer span.End()
-
 	// defensive programming
 	if completion == nil ||
 		completion.Receiver == nil ||
 		completion.Receiver == NoSender ||
 		completion.Task == nil {
 		x.logger.Error(ErrUndefinedTask)
-		span.RecordError(ErrUndefinedTask)
-		span.SetStatus(codes.Error, "TaskCompletion")
 		return
 	}
 
@@ -1708,8 +1582,6 @@ func (x *pid) handleCompletion(ctx context.Context, completion *taskCompletion) 
 	// logger the error when the task returns an error
 	if err := result.Failure(); err != nil {
 		x.logger.Error(err)
-		span.RecordError(err)
-		span.SetStatus(codes.Error, "TaskCompletion")
 		return
 	}
 
@@ -1717,14 +1589,11 @@ func (x *pid) handleCompletion(ctx context.Context, completion *taskCompletion) 
 	to := completion.Receiver
 	if !to.IsRunning() {
 		x.logger.Errorf("unable to pipe message to actor=(%s): not running", to.ActorPath().String())
-		span.RecordError(ErrDead)
-		span.SetStatus(codes.Error, "TaskCompletion")
 		return
 	}
 
 	messageContext := newReceiveContext(ctx, x, to, result.Success(), true)
 	to.doReceive(messageContext)
-	span.SetStatus(codes.Ok, "TaskCompletion")
 }
 
 // supervise watches for child actor's failure and act based upon the supervisory strategy

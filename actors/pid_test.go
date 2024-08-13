@@ -38,7 +38,6 @@ import (
 	"github.com/travisjeffery/go-dynaport"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
-	"go.opentelemetry.io/otel/trace/noop"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/tochemey/goakt/v2/goaktpb"
@@ -80,7 +79,6 @@ func TestReceive(t *testing.T) {
 			message:   new(testpb.TestSend),
 			sender:    NoSender,
 			recipient: pid,
-			mu:        sync.Mutex{},
 			async:     true,
 		}
 
@@ -341,7 +339,6 @@ func TestRestart(t *testing.T) {
 	})
 	t.Run("noSender cannot be restarted", func(t *testing.T) {
 		pid := &pid{
-			tracer:       noop.NewTracerProvider().Tracer(""),
 			fieldsLocker: &sync.RWMutex{},
 		}
 		err := pid.Restart(context.TODO())
@@ -1540,7 +1537,6 @@ func TestRegisterMetrics(t *testing.T) {
 			message:   new(testpb.TestSend),
 			sender:    NoSender,
 			recipient: pid,
-			mu:        sync.Mutex{},
 			async:     true,
 		}
 

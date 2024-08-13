@@ -95,8 +95,8 @@ func TestOption(t *testing.T) {
 		},
 		{
 			name:     "WithStash",
-			option:   WithStash(10),
-			expected: actorSystem{stashCapacity: 10},
+			option:   WithStash(),
+			expected: actorSystem{stashEnabled: true},
 		},
 		{
 			name:     "WithPartitionHasher",
@@ -107,11 +107,6 @@ func TestOption(t *testing.T) {
 			name:     "WithActorInitTimeout",
 			option:   WithActorInitTimeout(2 * time.Second),
 			expected: actorSystem{actorInitTimeout: 2. * time.Second},
-		},
-		{
-			name:     "WithTracing",
-			option:   WithTracing(),
-			expected: actorSystem{traceEnabled: atomicTrue},
 		},
 		{
 			name:     "WithMetric",

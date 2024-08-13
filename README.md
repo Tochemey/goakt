@@ -63,7 +63,6 @@ The project adheres to [Semantic Versioning](https://semver.org) and [Convention
     - [Static Provider Setup](#static-provider-setup)
 - [Contribution](#contribution)
   - [Test \& Linter](#test--linter)
-- [Benchmark](#benchmark)
 
 ## Design Principles
 
@@ -627,10 +626,3 @@ Prior to submitting a [pull request](https://help.github.com/articles/using-pull
 ```bash
 earthly +test
 ```
-
-## Benchmark
-
-One can run the benchmark test from the [bench package](./bench):
-
-- `make bench` to run the benchmark
-- `make bench-stats` to see the benchmark stats

@@ -124,7 +124,6 @@ func TestReceiveContext(t *testing.T) {
 			message:   new(testpb.TestSend),
 			sender:    NoSender,
 			recipient: pid1,
-			mu:        sync.Mutex{},
 			async:     true,
 		}
 
@@ -165,7 +164,6 @@ func TestReceiveContext(t *testing.T) {
 			message:   new(testpb.TestSend),
 			sender:    NoSender,
 			recipient: pid1,
-			mu:        sync.Mutex{},
 			async:     true,
 		}
 
@@ -209,7 +207,6 @@ func TestReceiveContext(t *testing.T) {
 			message:   new(testpb.TestSend),
 			sender:    NoSender,
 			recipient: pid1,
-			mu:        sync.Mutex{},
 			async:     true,
 		}
 
@@ -250,7 +247,6 @@ func TestReceiveContext(t *testing.T) {
 			message:   new(testpb.TestSend),
 			sender:    NoSender,
 			recipient: pid1,
-			mu:        sync.Mutex{},
 			async:     true,
 		}
 
@@ -319,7 +315,6 @@ func TestReceiveContext(t *testing.T) {
 			message:   new(testpb.TestSend),
 			sender:    NoSender,
 			recipient: pid1,
-			mu:        sync.Mutex{},
 			async:     true,
 		}
 
@@ -382,7 +377,6 @@ func TestReceiveContext(t *testing.T) {
 			message:   new(testpb.TestSend),
 			sender:    NoSender,
 			recipient: pid1,
-			mu:        sync.Mutex{},
 			async:     true,
 		}
 
@@ -451,7 +445,6 @@ func TestReceiveContext(t *testing.T) {
 			message:   new(testpb.TestSend),
 			sender:    NoSender,
 			recipient: pid1,
-			mu:        sync.Mutex{},
 			async:     true,
 		}
 
@@ -513,7 +506,6 @@ func TestReceiveContext(t *testing.T) {
 			message:   new(testpb.TestSend),
 			sender:    NoSender,
 			recipient: pid1,
-			mu:        sync.Mutex{},
 			async:     true,
 		}
 
@@ -578,7 +570,6 @@ func TestReceiveContext(t *testing.T) {
 			message:   new(testpb.TestSend),
 			sender:    NoSender,
 			recipient: pid1,
-			mu:        sync.Mutex{},
 			async:     true,
 		}
 
@@ -634,7 +625,6 @@ func TestReceiveContext(t *testing.T) {
 			message:   new(testpb.TestSend),
 			sender:    NoSender,
 			recipient: pid1,
-			mu:        sync.Mutex{},
 			async:     true,
 		}
 
@@ -671,7 +661,6 @@ func TestReceiveContext(t *testing.T) {
 			message:   new(testpb.TestSend),
 			sender:    NoSender,
 			recipient: pid1,
-			mu:        sync.Mutex{},
 			async:     true,
 		}
 
@@ -699,7 +688,6 @@ func TestReceiveContext(t *testing.T) {
 			message:   new(testpb.TestSend),
 			sender:    NoSender,
 			recipient: parent,
-			mu:        sync.Mutex{},
 			async:     true,
 		}
 
@@ -737,7 +725,6 @@ func TestReceiveContext(t *testing.T) {
 			message:   new(testpb.TestSend),
 			sender:    NoSender,
 			recipient: parent,
-			mu:        sync.Mutex{},
 			async:     true,
 		}
 
@@ -769,7 +756,6 @@ func TestReceiveContext(t *testing.T) {
 			message:   new(testpb.TestSend),
 			sender:    NoSender,
 			recipient: parent,
-			mu:        sync.Mutex{},
 			async:     true,
 		}
 
@@ -810,7 +796,6 @@ func TestReceiveContext(t *testing.T) {
 			message:   new(testpb.TestSend),
 			sender:    NoSender,
 			recipient: parent,
-			mu:        sync.Mutex{},
 			async:     true,
 		}
 
@@ -851,7 +836,6 @@ func TestReceiveContext(t *testing.T) {
 			message:   new(testpb.TestSend),
 			sender:    NoSender,
 			recipient: parent,
-			mu:        sync.Mutex{},
 			async:     true,
 		}
 
@@ -892,7 +876,6 @@ func TestReceiveContext(t *testing.T) {
 			message:   new(testpb.TestSend),
 			sender:    NoSender,
 			recipient: parent,
-			mu:        sync.Mutex{},
 			async:     true,
 		}
 
@@ -935,7 +918,6 @@ func TestReceiveContext(t *testing.T) {
 			message:   new(testpb.TestSend),
 			sender:    NoSender,
 			recipient: parent,
-			mu:        sync.Mutex{},
 			async:     true,
 		}
 
@@ -969,7 +951,6 @@ func TestReceiveContext(t *testing.T) {
 			message:   new(testpb.TestSend),
 			sender:    NoSender,
 			recipient: parent,
-			mu:        sync.Mutex{},
 			async:     true,
 		}
 
@@ -1009,7 +990,6 @@ func TestReceiveContext(t *testing.T) {
 			message:   new(testpb.TestSend),
 			sender:    NoSender,
 			recipient: parent,
-			mu:        sync.Mutex{},
 			async:     true,
 		}
 
@@ -1053,7 +1033,6 @@ func TestReceiveContext(t *testing.T) {
 			message:   new(testpb.TestSend),
 			sender:    NoSender,
 			recipient: parent,
-			mu:        sync.Mutex{},
 			async:     true,
 		}
 
@@ -1097,7 +1076,6 @@ func TestReceiveContext(t *testing.T) {
 			message:   new(testpb.TestSend),
 			sender:    NoSender,
 			recipient: pid1,
-			mu:        sync.Mutex{},
 			async:     true,
 		}
 
@@ -1183,7 +1161,6 @@ func TestReceiveContext(t *testing.T) {
 			message:   send,
 			sender:    NoSender,
 			recipient: pid1,
-			mu:        sync.Mutex{},
 			async:     true,
 		}
 
@@ -1255,7 +1232,6 @@ func TestReceiveContext(t *testing.T) {
 			message:   send,
 			sender:    pid2,
 			recipient: pid1,
-			mu:        sync.Mutex{},
 			async:     true,
 		}
 
@@ -1322,7 +1298,6 @@ func TestReceiveContext(t *testing.T) {
 			message:   new(goaktpb.PostStart),
 			sender:    NoSender,
 			recipient: pid1,
-			mu:        sync.Mutex{},
 			async:     true,
 		}
 
@@ -1373,7 +1348,6 @@ func TestReceiveContext(t *testing.T) {
 			message:   new(testpb.TestSend),
 			sender:    NoSender,
 			recipient: pid1,
-			mu:        sync.Mutex{},
 			async:     true,
 		}
 
@@ -1414,7 +1388,6 @@ func TestReceiveContext(t *testing.T) {
 			message:   new(testpb.TestSend),
 			sender:    NoSender,
 			recipient: pid1,
-			mu:        sync.Mutex{},
 			async:     true,
 		}
 
@@ -1455,7 +1428,6 @@ func TestReceiveContext(t *testing.T) {
 			message:   new(testpb.TestSend),
 			sender:    NoSender,
 			recipient: pid1,
-			mu:        sync.Mutex{},
 			async:     true,
 		}
 
@@ -1499,7 +1471,6 @@ func TestReceiveContext(t *testing.T) {
 			message:   new(testpb.TestSend),
 			sender:    NoSender,
 			recipient: pid1,
-			mu:        sync.Mutex{},
 			async:     true,
 		}
 
@@ -1543,7 +1514,6 @@ func TestReceiveContext(t *testing.T) {
 			message:   new(testpb.TestSend),
 			sender:    NoSender,
 			recipient: pid1,
-			mu:        sync.Mutex{},
 			async:     true,
 		}
 
@@ -1601,7 +1571,6 @@ func TestReceiveContext(t *testing.T) {
 			ctx:       ctx,
 			sender:    NoSender,
 			recipient: testerRef,
-			mu:        sync.Mutex{},
 			async:     true,
 		}
 
@@ -1658,7 +1627,6 @@ func TestReceiveContext(t *testing.T) {
 			ctx:       ctx,
 			sender:    NoSender,
 			recipient: testerRef,
-			mu:        sync.Mutex{},
 			async:     true,
 		}
 
@@ -1721,7 +1689,6 @@ func TestReceiveContext(t *testing.T) {
 			message:   new(testpb.TestSend),
 			sender:    NoSender,
 			recipient: pid1,
-			mu:        sync.Mutex{},
 			async:     true,
 		}
 
@@ -1786,7 +1753,6 @@ func TestReceiveContext(t *testing.T) {
 			message:   new(testpb.TestSend),
 			sender:    NoSender,
 			recipient: pid1,
-			mu:        sync.Mutex{},
 			async:     true,
 		}
 
@@ -1851,7 +1817,6 @@ func TestReceiveContext(t *testing.T) {
 			message:   new(testpb.TestSend),
 			sender:    NoSender,
 			recipient: pid1,
-			mu:        sync.Mutex{},
 			async:     true,
 		}
 
@@ -1909,7 +1874,6 @@ func TestReceiveContext(t *testing.T) {
 			message:   new(testpb.TestSend),
 			sender:    NoSender,
 			recipient: pid1,
-			mu:        sync.Mutex{},
 			async:     true,
 		}
 
@@ -1959,7 +1923,6 @@ func TestReceiveContext(t *testing.T) {
 			message:   new(testpb.TaskComplete),
 			sender:    NoSender,
 			recipient: pid1,
-			mu:        sync.Mutex{},
 			async:     true,
 		}
 
@@ -2024,7 +1987,6 @@ func TestReceiveContext(t *testing.T) {
 			message:   new(testpb.TaskComplete),
 			sender:    NoSender,
 			recipient: pid1,
-			mu:        sync.Mutex{},
 			async:     true,
 		}
 

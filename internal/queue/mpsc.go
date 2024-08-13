@@ -56,15 +56,14 @@ func NewMpscQueue[T any]() *MpscQueue[T] {
 	}
 }
 
-// Push place the given value in the queue head (FIFO). Returns always true
-func (q *MpscQueue[T]) Push(value T) bool {
+// Push place the given value in the queue head (FIFO).
+func (q *MpscQueue[T]) Push(value T) {
 	tnode := &node[T]{
 		value: value,
 	}
 	previousHead := (*node[T])(atomic.SwapPointer((*unsafe.Pointer)(unsafe.Pointer(&q.head)), unsafe.Pointer(tnode)))
 	atomic.StorePointer((*unsafe.Pointer)(unsafe.Pointer(&previousHead.next)), unsafe.Pointer(tnode))
 	atomic.AddInt64(&q.length, 1)
-	return true
 }
 
 // Pop takes the QueueItem from the queue tail.

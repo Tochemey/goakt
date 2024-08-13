@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/tochemey/goakt/v2/internal/eventstream"
+	"github.com/tochemey/goakt/v2/internal/queue"
 	"github.com/tochemey/goakt/v2/log"
 	"github.com/tochemey/goakt/v2/telemetry"
 )
@@ -101,9 +102,9 @@ func withTelemetry(telemetry *telemetry.Telemetry) pidOption {
 }
 
 // withStash sets the actor's stash buffer
-func withStash(capacity uint64) pidOption {
+func withStash() pidOption {
 	return func(pid *pid) {
-		pid.stashCapacity.Store(capacity)
+		pid.stashBuffer = queue.NewMpscQueue[ReceiveContext]()
 	}
 }
 
@@ -118,13 +119,6 @@ func withEventsStream(stream *eventstream.EventsStream) pidOption {
 func withInitTimeout(duration time.Duration) pidOption {
 	return func(pid *pid) {
 		pid.initTimeout.Store(duration)
-	}
-}
-
-// withTracing enables tracing
-func withTracing() pidOption {
-	return func(pid *pid) {
-		pid.traceEnabled.Store(true)
 	}
 }
 

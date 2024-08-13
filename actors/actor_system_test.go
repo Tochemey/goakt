@@ -41,7 +41,6 @@ import (
 	"github.com/travisjeffery/go-dynaport"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
-	"go.opentelemetry.io/otel/trace/noop"
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
 
@@ -102,31 +101,6 @@ func TestActorSystem(t *testing.T) {
 
 		// stop the actor after some time
 		time.Sleep(time.Second)
-
-		t.Cleanup(func() {
-			err = sys.Stop(ctx)
-			assert.NoError(t, err)
-		})
-	})
-	t.Run("With Spawn an actor when started with tracing", func(t *testing.T) {
-		ctx := context.TODO()
-		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger), WithTracing())
-
-		// start the actor system
-		err := sys.Start(ctx)
-		assert.NoError(t, err)
-
-		actor := newTestActor()
-		actorRef, err := sys.Spawn(ctx, "Test", actor)
-		assert.NoError(t, err)
-		assert.NotNil(t, actorRef)
-
-		// stop the actor after some time
-		time.Sleep(time.Second)
-		actorSystem := sys.(*actorSystem)
-		assert.True(t, actorSystem.traceEnabled.Load())
-		pid := actorRef.(*pid)
-		assert.True(t, pid.traceEnabled.Load())
 
 		t.Cleanup(func() {
 			err = sys.Stop(ctx)
@@ -1016,7 +990,7 @@ func TestActorSystem(t *testing.T) {
 		sys, _ := NewActorSystem("testSys",
 			WithMetric(),
 			WithTelemetry(tel),
-			WithStash(5),
+			WithStash(),
 			WithLogger(log.DiscardLogger))
 
 		// start the actor system
@@ -1408,7 +1382,6 @@ func TestActorSystem(t *testing.T) {
 			clusterEnabled: *atomic.NewBool(true),
 			telemetry:      telemetry.New(),
 			locker:         sync.Mutex{},
-			tracer:         noop.NewTracerProvider().Tracer("testSystem"),
 			scheduler:      newScheduler(logger, time.Second, withSchedulerCluster(mockedCluster)),
 			clusterConfig:  NewClusterConfig(),
 			registry:       types.NewRegistry(),
