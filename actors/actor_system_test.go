@@ -1016,7 +1016,7 @@ func TestActorSystem(t *testing.T) {
 		sys, _ := NewActorSystem("testSys",
 			WithMetric(),
 			WithTelemetry(tel),
-			WithStash(5),
+			WithStash(),
 			WithLogger(log.DiscardLogger))
 
 		// start the actor system

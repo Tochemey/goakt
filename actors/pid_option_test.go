@@ -92,11 +92,6 @@ func TestPIDOptions(t *testing.T) {
 			expected: &pid{passivateAfter: negativeDuration},
 		},
 		{
-			name:     "WithStash",
-			option:   withStash(10),
-			expected: &pid{stashCapacity: atomicUint64},
-		},
-		{
 			name:     "withEventsStream",
 			option:   withEventsStream(eventsStream),
 			expected: &pid{eventsStream: eventsStream},

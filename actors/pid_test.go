@@ -80,7 +80,6 @@ func TestReceive(t *testing.T) {
 			message:   new(testpb.TestSend),
 			sender:    NoSender,
 			recipient: pid,
-			mu:        sync.Mutex{},
 			async:     true,
 		}
 
@@ -1540,7 +1539,6 @@ func TestRegisterMetrics(t *testing.T) {
 			message:   new(testpb.TestSend),
 			sender:    NoSender,
 			recipient: pid,
-			mu:        sync.Mutex{},
 			async:     true,
 		}
 

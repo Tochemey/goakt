@@ -146,9 +146,9 @@ func WithShutdownTimeout(timeout time.Duration) Option {
 }
 
 // WithStash sets the stash buffer size
-func WithStash(capacity uint64) Option {
+func WithStash() Option {
 	return OptionFunc(func(a *actorSystem) {
-		a.stashCapacity = capacity
+		a.stashEnabled = true
 	})
 }
 

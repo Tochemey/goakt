@@ -95,8 +95,8 @@ func TestOption(t *testing.T) {
 		},
 		{
 			name:     "WithStash",
-			option:   WithStash(10),
-			expected: actorSystem{stashCapacity: 10},
+			option:   WithStash(),
+			expected: actorSystem{stashEnabled: true},
 		},
 		{
 			name:     "WithPartitionHasher",

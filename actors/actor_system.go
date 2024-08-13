@@ -202,7 +202,7 @@ type actorSystem struct {
 	// help protect some the fields to set
 	locker sync.Mutex
 	// specifies the stash capacity
-	stashCapacity uint64
+	stashEnabled bool
 
 	stopGC     chan types.Unit
 	gcInterval time.Duration
@@ -256,7 +256,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		telemetry:              telemetry.New(),
 		locker:                 sync.Mutex{},
 		shutdownTimeout:        DefaultShutdownTimeout,
-		stashCapacity:          DefaultStashCapacity,
+		stashEnabled:           false,
 		stopGC:                 make(chan types.Unit, 1),
 		gcInterval:             DefaultGCInterval,
 		eventsStream:           eventstream.New(),
@@ -1510,10 +1510,14 @@ func (x *actorSystem) configPID(ctx context.Context, name string, actor Actor) (
 		withCustomLogger(x.logger),
 		withActorSystem(x),
 		withSupervisorDirective(x.supervisorDirective),
-		withStash(x.stashCapacity),
 		withEventsStream(x.eventsStream),
 		withInitTimeout(x.actorInitTimeout),
 		withTelemetry(x.telemetry),
+	}
+
+	// enable stash
+	if x.stashEnabled {
+		pidOpts = append(pidOpts, withStash())
 	}
 
 	// disable passivation for system supervisor

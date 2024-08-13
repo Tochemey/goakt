@@ -270,9 +270,8 @@ type pid struct {
 	behaviorStack *behaviorStack
 
 	// stash settings
-	stashBuffer   chan ReceiveContext
-	stashCapacity atomic.Uint64
-	stashLocker   *sync.Mutex
+	stashBuffer *queue.MpscQueue[ReceiveContext]
+	stashLocker *sync.Mutex
 
 	// define an events stream
 	eventsStream *eventstream.EventsStream
@@ -333,7 +332,6 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 	p.initMaxRetries.Store(DefaultInitMaxRetries)
 	p.shutdownTimeout.Store(DefaultShutdownTimeout)
 	p.lastReceivedDuration.Store(0)
-	p.stashCapacity.Store(DefaultStashCapacity)
 	p.isRunning.Store(false)
 	p.passivateAfter.Store(DefaultPassivationTimeout)
 	p.askTimeout.Store(DefaultAskTimeout)
@@ -343,10 +341,6 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 
 	for _, opt := range opts {
 		opt(p)
-	}
-
-	if p.stashCapacity.Load() > 0 {
-		p.stashBuffer = make(chan ReceiveContext, p.stashCapacity.Load())
 	}
 
 	behaviorStack := newBehaviorStack()
@@ -604,7 +598,6 @@ func (x *pid) SpawnChild(ctx context.Context, name string, actor Actor) (PID, er
 		withCustomLogger(x.logger),
 		withActorSystem(x.system),
 		withSupervisorDirective(x.supervisorDirective),
-		withStash(x.stashCapacity.Load()),
 		withEventsStream(x.eventsStream),
 		withInitTimeout(x.initTimeout.Load()),
 		withShutdownTimeout(x.shutdownTimeout.Load()),
@@ -660,7 +653,7 @@ func (x *pid) StashSize() uint64 {
 	if x.stashBuffer == nil {
 		return 0
 	}
-	return uint64(len(x.stashBuffer))
+	return uint64(x.stashBuffer.Len())
 }
 
 // PipeTo processes a long-running task and pipes the result to the provided actor.
@@ -1245,17 +1238,8 @@ func (x *pid) watchees() *pidMap {
 
 // doReceive pushes a given message to the actor receiveContextBuffer
 func (x *pid) doReceive(ctx ReceiveContext) {
-	x.fieldsLocker.Lock()
 	x.lastProcessingTime.Store(time.Now())
-	x.fieldsLocker.Unlock()
-	if !x.mailbox.Push(ctx) {
-		err := errors.New("actor mailbox is closed")
-		x.logger.Warn(err)
-		x.handleError(ctx, err)
-	}
-	x.fieldsLocker.Lock()
-	x.lastProcessingTime.Store(time.Now())
-	x.fieldsLocker.Unlock()
+	x.mailbox.Push(ctx)
 }
 
 // init initializes the given actor and init processing messages
@@ -1404,15 +1388,10 @@ func (x *pid) handleReceived(received ReceiveContext) {
 			}
 		}
 		// set the total messages processed
-		x.fieldsLocker.Lock()
 		x.processedCount.Inc()
-		x.fieldsLocker.Unlock()
 	}()
 
-	x.fieldsLocker.Lock()
 	behaviorStack := x.behaviorStack
-	x.fieldsLocker.Unlock()
-
 	// send the message to the current actor behavior
 	if behavior, ok := behaviorStack.Peek(); ok {
 		behavior(received)
@@ -1451,9 +1430,6 @@ func (x *pid) passivationLoop() {
 		x.logger.Infof("Actor=%s is offline. No need to passivate", x.ActorPath().String())
 		return
 	}
-
-	x.stopLocker.Lock()
-	defer x.stopLocker.Unlock()
 
 	x.logger.Infof("Passivation mode has been triggered for actor=%s...", x.ActorPath().String())
 

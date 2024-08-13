@@ -31,10 +31,7 @@ func (x *pid) stash(ctx ReceiveContext) error {
 	if x.stashBuffer == nil {
 		return ErrStashBufferNotSet
 	}
-
-	x.stashLocker.Lock()
-	x.stashBuffer <- ctx
-	x.stashLocker.Unlock()
+	x.stashBuffer.Push(ctx)
 	return nil
 }
 
@@ -44,9 +41,7 @@ func (x *pid) unstash() error {
 		return ErrStashBufferNotSet
 	}
 
-	x.stashLocker.Lock()
-	defer x.stashLocker.Unlock()
-	received, ok := <-x.stashBuffer
+	received, ok := x.stashBuffer.Pop()
 	if !ok {
 		return errors.New("stash buffer may be closed")
 	}
@@ -64,8 +59,8 @@ func (x *pid) unstashAll() error {
 	x.stashLocker.Lock()
 	defer x.stashLocker.Unlock()
 
-	for len(x.stashBuffer) > 0 {
-		received, ok := <-x.stashBuffer
+	for x.stashBuffer.Len() > 0 {
+		received, ok := x.stashBuffer.Pop()
 		if !ok {
 			return errors.New("stash buffer may be closed")
 		}
