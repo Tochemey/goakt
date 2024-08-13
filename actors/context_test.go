@@ -120,12 +120,12 @@ func TestReceiveContext(t *testing.T) {
 
 		// create an instance of receive context
 		context := &receiveContext{
-			ctx:            ctx,
-			message:        new(testpb.TestSend),
-			sender:         NoSender,
-			recipient:      pid1,
-			mu:             sync.Mutex{},
-			isAsyncMessage: true,
+			ctx:       ctx,
+			message:   new(testpb.TestSend),
+			sender:    NoSender,
+			recipient: pid1,
+			mu:        sync.Mutex{},
+			async:     true,
 		}
 
 		// create actor2
@@ -161,12 +161,12 @@ func TestReceiveContext(t *testing.T) {
 
 		// create an instance of receive context
 		context := &receiveContext{
-			ctx:            ctx,
-			message:        new(testpb.TestSend),
-			sender:         NoSender,
-			recipient:      pid1,
-			mu:             sync.Mutex{},
-			isAsyncMessage: true,
+			ctx:       ctx,
+			message:   new(testpb.TestSend),
+			sender:    NoSender,
+			recipient: pid1,
+			mu:        sync.Mutex{},
+			async:     true,
 		}
 
 		// create actor2
@@ -205,12 +205,12 @@ func TestReceiveContext(t *testing.T) {
 
 		// create an instance of receive context
 		context := &receiveContext{
-			ctx:            ctx,
-			message:        new(testpb.TestSend),
-			sender:         NoSender,
-			recipient:      pid1,
-			mu:             sync.Mutex{},
-			isAsyncMessage: true,
+			ctx:       ctx,
+			message:   new(testpb.TestSend),
+			sender:    NoSender,
+			recipient: pid1,
+			mu:        sync.Mutex{},
+			async:     true,
 		}
 
 		// create actor2
@@ -246,12 +246,12 @@ func TestReceiveContext(t *testing.T) {
 
 		// create an instance of receive context
 		context := &receiveContext{
-			ctx:            ctx,
-			message:        new(testpb.TestSend),
-			sender:         NoSender,
-			recipient:      pid1,
-			mu:             sync.Mutex{},
-			isAsyncMessage: true,
+			ctx:       ctx,
+			message:   new(testpb.TestSend),
+			sender:    NoSender,
+			recipient: pid1,
+			mu:        sync.Mutex{},
+			async:     true,
 		}
 
 		// create actor2
@@ -315,12 +315,12 @@ func TestReceiveContext(t *testing.T) {
 
 		// create an instance of receive context
 		context := &receiveContext{
-			ctx:            ctx,
-			message:        new(testpb.TestSend),
-			sender:         NoSender,
-			recipient:      pid1,
-			mu:             sync.Mutex{},
-			isAsyncMessage: true,
+			ctx:       ctx,
+			message:   new(testpb.TestSend),
+			sender:    NoSender,
+			recipient: pid1,
+			mu:        sync.Mutex{},
+			async:     true,
 		}
 
 		// get the address of the exchanger actor one
@@ -378,12 +378,12 @@ func TestReceiveContext(t *testing.T) {
 
 		// create an instance of receive context
 		context := &receiveContext{
-			ctx:            ctx,
-			message:        new(testpb.TestSend),
-			sender:         NoSender,
-			recipient:      pid1,
-			mu:             sync.Mutex{},
-			isAsyncMessage: true,
+			ctx:       ctx,
+			message:   new(testpb.TestSend),
+			sender:    NoSender,
+			recipient: pid1,
+			mu:        sync.Mutex{},
+			async:     true,
 		}
 
 		op := func() {
@@ -447,12 +447,12 @@ func TestReceiveContext(t *testing.T) {
 
 		// create an instance of receive context
 		context := &receiveContext{
-			ctx:            ctx,
-			message:        new(testpb.TestSend),
-			sender:         NoSender,
-			recipient:      pid1,
-			mu:             sync.Mutex{},
-			isAsyncMessage: true,
+			ctx:       ctx,
+			message:   new(testpb.TestSend),
+			sender:    NoSender,
+			recipient: pid1,
+			mu:        sync.Mutex{},
+			async:     true,
 		}
 
 		// get the address of the exchanger actor one
@@ -509,12 +509,12 @@ func TestReceiveContext(t *testing.T) {
 
 		// create an instance of receive context
 		context := &receiveContext{
-			ctx:            ctx,
-			message:        new(testpb.TestSend),
-			sender:         NoSender,
-			recipient:      pid1,
-			mu:             sync.Mutex{},
-			isAsyncMessage: true,
+			ctx:       ctx,
+			message:   new(testpb.TestSend),
+			sender:    NoSender,
+			recipient: pid1,
+			mu:        sync.Mutex{},
+			async:     true,
 		}
 
 		// send the message to the exchanger actor one using remote messaging
@@ -574,12 +574,12 @@ func TestReceiveContext(t *testing.T) {
 
 		// create an instance of receive context
 		context := &receiveContext{
-			ctx:            ctx,
-			message:        new(testpb.TestSend),
-			sender:         NoSender,
-			recipient:      pid1,
-			mu:             sync.Mutex{},
-			isAsyncMessage: true,
+			ctx:       ctx,
+			message:   new(testpb.TestSend),
+			sender:    NoSender,
+			recipient: pid1,
+			mu:        sync.Mutex{},
+			async:     true,
 		}
 
 		require.Nil(t, context.RemoteLookup(host, remotingPort, actorName2))
@@ -630,12 +630,12 @@ func TestReceiveContext(t *testing.T) {
 
 		// create an instance of receive context
 		context := &receiveContext{
-			ctx:            ctx,
-			message:        new(testpb.TestSend),
-			sender:         NoSender,
-			recipient:      pid1,
-			mu:             sync.Mutex{},
-			isAsyncMessage: true,
+			ctx:       ctx,
+			message:   new(testpb.TestSend),
+			sender:    NoSender,
+			recipient: pid1,
+			mu:        sync.Mutex{},
+			async:     true,
 		}
 
 		assert.Panics(t, func() {
@@ -667,12 +667,12 @@ func TestReceiveContext(t *testing.T) {
 
 		// create an instance of receive context
 		context := &receiveContext{
-			ctx:            ctx,
-			message:        new(testpb.TestSend),
-			sender:         NoSender,
-			recipient:      pid1,
-			mu:             sync.Mutex{},
-			isAsyncMessage: true,
+			ctx:       ctx,
+			message:   new(testpb.TestSend),
+			sender:    NoSender,
+			recipient: pid1,
+			mu:        sync.Mutex{},
+			async:     true,
 		}
 
 		assert.NotPanics(t, func() {
@@ -695,12 +695,12 @@ func TestReceiveContext(t *testing.T) {
 
 		// create an instance of receive context
 		context := &receiveContext{
-			ctx:            ctx,
-			message:        new(testpb.TestSend),
-			sender:         NoSender,
-			recipient:      parent,
-			mu:             sync.Mutex{},
-			isAsyncMessage: true,
+			ctx:       ctx,
+			message:   new(testpb.TestSend),
+			sender:    NoSender,
+			recipient: parent,
+			mu:        sync.Mutex{},
+			async:     true,
 		}
 
 		// create the child actor
@@ -733,12 +733,12 @@ func TestReceiveContext(t *testing.T) {
 
 		// create an instance of receive context
 		context := &receiveContext{
-			ctx:            ctx,
-			message:        new(testpb.TestSend),
-			sender:         NoSender,
-			recipient:      parent,
-			mu:             sync.Mutex{},
-			isAsyncMessage: true,
+			ctx:       ctx,
+			message:   new(testpb.TestSend),
+			sender:    NoSender,
+			recipient: parent,
+			mu:        sync.Mutex{},
+			async:     true,
 		}
 
 		// stop the actor
@@ -765,12 +765,12 @@ func TestReceiveContext(t *testing.T) {
 
 		// create an instance of receive context
 		context := &receiveContext{
-			ctx:            ctx,
-			message:        new(testpb.TestSend),
-			sender:         NoSender,
-			recipient:      parent,
-			mu:             sync.Mutex{},
-			isAsyncMessage: true,
+			ctx:       ctx,
+			message:   new(testpb.TestSend),
+			sender:    NoSender,
+			recipient: parent,
+			mu:        sync.Mutex{},
+			async:     true,
 		}
 
 		// create the child actor
@@ -806,12 +806,12 @@ func TestReceiveContext(t *testing.T) {
 
 		// create an instance of receive context
 		context := &receiveContext{
-			ctx:            ctx,
-			message:        new(testpb.TestSend),
-			sender:         NoSender,
-			recipient:      parent,
-			mu:             sync.Mutex{},
-			isAsyncMessage: true,
+			ctx:       ctx,
+			message:   new(testpb.TestSend),
+			sender:    NoSender,
+			recipient: parent,
+			mu:        sync.Mutex{},
+			async:     true,
 		}
 
 		// create the child actor
@@ -847,12 +847,12 @@ func TestReceiveContext(t *testing.T) {
 
 		// create an instance of receive context
 		context := &receiveContext{
-			ctx:            ctx,
-			message:        new(testpb.TestSend),
-			sender:         NoSender,
-			recipient:      parent,
-			mu:             sync.Mutex{},
-			isAsyncMessage: true,
+			ctx:       ctx,
+			message:   new(testpb.TestSend),
+			sender:    NoSender,
+			recipient: parent,
+			mu:        sync.Mutex{},
+			async:     true,
 		}
 
 		// create the child actor
@@ -888,12 +888,12 @@ func TestReceiveContext(t *testing.T) {
 
 		// create an instance of receive context
 		context := &receiveContext{
-			ctx:            ctx,
-			message:        new(testpb.TestSend),
-			sender:         NoSender,
-			recipient:      parent,
-			mu:             sync.Mutex{},
-			isAsyncMessage: true,
+			ctx:       ctx,
+			message:   new(testpb.TestSend),
+			sender:    NoSender,
+			recipient: parent,
+			mu:        sync.Mutex{},
+			async:     true,
 		}
 
 		// create the child actor
@@ -931,12 +931,12 @@ func TestReceiveContext(t *testing.T) {
 
 		// create an instance of receive context
 		context := &receiveContext{
-			ctx:            ctx,
-			message:        new(testpb.TestSend),
-			sender:         NoSender,
-			recipient:      parent,
-			mu:             sync.Mutex{},
-			isAsyncMessage: true,
+			ctx:       ctx,
+			message:   new(testpb.TestSend),
+			sender:    NoSender,
+			recipient: parent,
+			mu:        sync.Mutex{},
+			async:     true,
 		}
 
 		time.Sleep(time.Second)
@@ -965,12 +965,12 @@ func TestReceiveContext(t *testing.T) {
 
 		// create an instance of receive context
 		context := &receiveContext{
-			ctx:            ctx,
-			message:        new(testpb.TestSend),
-			sender:         NoSender,
-			recipient:      parent,
-			mu:             sync.Mutex{},
-			isAsyncMessage: true,
+			ctx:       ctx,
+			message:   new(testpb.TestSend),
+			sender:    NoSender,
+			recipient: parent,
+			mu:        sync.Mutex{},
+			async:     true,
 		}
 
 		name := "monitored"
@@ -1005,12 +1005,12 @@ func TestReceiveContext(t *testing.T) {
 
 		// create an instance of receive context
 		context := &receiveContext{
-			ctx:            ctx,
-			message:        new(testpb.TestSend),
-			sender:         NoSender,
-			recipient:      parent,
-			mu:             sync.Mutex{},
-			isAsyncMessage: true,
+			ctx:       ctx,
+			message:   new(testpb.TestSend),
+			sender:    NoSender,
+			recipient: parent,
+			mu:        sync.Mutex{},
+			async:     true,
 		}
 
 		// create the child actor
@@ -1049,12 +1049,12 @@ func TestReceiveContext(t *testing.T) {
 
 		// create an instance of receive context
 		context := &receiveContext{
-			ctx:            ctx,
-			message:        new(testpb.TestSend),
-			sender:         NoSender,
-			recipient:      parent,
-			mu:             sync.Mutex{},
-			isAsyncMessage: true,
+			ctx:       ctx,
+			message:   new(testpb.TestSend),
+			sender:    NoSender,
+			recipient: parent,
+			mu:        sync.Mutex{},
+			async:     true,
 		}
 
 		// create the child actor
@@ -1093,12 +1093,12 @@ func TestReceiveContext(t *testing.T) {
 
 		// create an instance of receive context
 		context := &receiveContext{
-			ctx:            ctx,
-			message:        new(testpb.TestSend),
-			sender:         NoSender,
-			recipient:      pid1,
-			mu:             sync.Mutex{},
-			isAsyncMessage: true,
+			ctx:       ctx,
+			message:   new(testpb.TestSend),
+			sender:    NoSender,
+			recipient: pid1,
+			mu:        sync.Mutex{},
+			async:     true,
 		}
 
 		assert.Panics(t, func() {
@@ -1179,12 +1179,12 @@ func TestReceiveContext(t *testing.T) {
 		send := new(testpb.TestSend)
 		// create an instance of receive context
 		context := &receiveContext{
-			ctx:            ctx,
-			message:        send,
-			sender:         NoSender,
-			recipient:      pid1,
-			mu:             sync.Mutex{},
-			isAsyncMessage: true,
+			ctx:       ctx,
+			message:   send,
+			sender:    NoSender,
+			recipient: pid1,
+			mu:        sync.Mutex{},
+			async:     true,
 		}
 
 		// calling unhandled will push the current message to deadletters
@@ -1251,12 +1251,12 @@ func TestReceiveContext(t *testing.T) {
 		send := new(testpb.TestSend)
 		// create an instance of receive context
 		context := &receiveContext{
-			ctx:            ctx,
-			message:        send,
-			sender:         pid2,
-			recipient:      pid1,
-			mu:             sync.Mutex{},
-			isAsyncMessage: true,
+			ctx:       ctx,
+			message:   send,
+			sender:    pid2,
+			recipient: pid1,
+			mu:        sync.Mutex{},
+			async:     true,
 		}
 
 		// calling unhandled will push the current message to deadletters
@@ -1318,12 +1318,12 @@ func TestReceiveContext(t *testing.T) {
 
 		// create an instance of receive context
 		context := &receiveContext{
-			ctx:            ctx,
-			message:        new(goaktpb.PostStart),
-			sender:         NoSender,
-			recipient:      pid1,
-			mu:             sync.Mutex{},
-			isAsyncMessage: true,
+			ctx:       ctx,
+			message:   new(goaktpb.PostStart),
+			sender:    NoSender,
+			recipient: pid1,
+			mu:        sync.Mutex{},
+			async:     true,
 		}
 
 		// calling unhandled will push the current message to deadletters
@@ -1369,12 +1369,12 @@ func TestReceiveContext(t *testing.T) {
 
 		// create an instance of receive context
 		context := &receiveContext{
-			ctx:            ctx,
-			message:        new(testpb.TestSend),
-			sender:         NoSender,
-			recipient:      pid1,
-			mu:             sync.Mutex{},
-			isAsyncMessage: true,
+			ctx:       ctx,
+			message:   new(testpb.TestSend),
+			sender:    NoSender,
+			recipient: pid1,
+			mu:        sync.Mutex{},
+			async:     true,
 		}
 
 		// create actor2
@@ -1410,12 +1410,12 @@ func TestReceiveContext(t *testing.T) {
 
 		// create an instance of receive context
 		context := &receiveContext{
-			ctx:            ctx,
-			message:        new(testpb.TestSend),
-			sender:         NoSender,
-			recipient:      pid1,
-			mu:             sync.Mutex{},
-			isAsyncMessage: true,
+			ctx:       ctx,
+			message:   new(testpb.TestSend),
+			sender:    NoSender,
+			recipient: pid1,
+			mu:        sync.Mutex{},
+			async:     true,
 		}
 
 		// create actor2
@@ -1451,12 +1451,12 @@ func TestReceiveContext(t *testing.T) {
 
 		// create an instance of receive context
 		context := &receiveContext{
-			ctx:            ctx,
-			message:        new(testpb.TestSend),
-			sender:         NoSender,
-			recipient:      pid1,
-			mu:             sync.Mutex{},
-			isAsyncMessage: true,
+			ctx:       ctx,
+			message:   new(testpb.TestSend),
+			sender:    NoSender,
+			recipient: pid1,
+			mu:        sync.Mutex{},
+			async:     true,
 		}
 
 		// create actor2
@@ -1495,12 +1495,12 @@ func TestReceiveContext(t *testing.T) {
 
 		// create an instance of receive context
 		context := &receiveContext{
-			ctx:            ctx,
-			message:        new(testpb.TestSend),
-			sender:         NoSender,
-			recipient:      pid1,
-			mu:             sync.Mutex{},
-			isAsyncMessage: true,
+			ctx:       ctx,
+			message:   new(testpb.TestSend),
+			sender:    NoSender,
+			recipient: pid1,
+			mu:        sync.Mutex{},
+			async:     true,
 		}
 
 		// create actor2
@@ -1539,12 +1539,12 @@ func TestReceiveContext(t *testing.T) {
 
 		// create an instance of receive context
 		context := &receiveContext{
-			ctx:            ctx,
-			message:        new(testpb.TestSend),
-			sender:         NoSender,
-			recipient:      pid1,
-			mu:             sync.Mutex{},
-			isAsyncMessage: true,
+			ctx:       ctx,
+			message:   new(testpb.TestSend),
+			sender:    NoSender,
+			recipient: pid1,
+			mu:        sync.Mutex{},
+			async:     true,
 		}
 
 		// create actor2
@@ -1598,11 +1598,11 @@ func TestReceiveContext(t *testing.T) {
 
 		// create an instance of receive context
 		context := &receiveContext{
-			ctx:            ctx,
-			sender:         NoSender,
-			recipient:      testerRef,
-			mu:             sync.Mutex{},
-			isAsyncMessage: true,
+			ctx:       ctx,
+			sender:    NoSender,
+			recipient: testerRef,
+			mu:        sync.Mutex{},
+			async:     true,
 		}
 
 		// get the address of the exchanger actor one
@@ -1655,11 +1655,11 @@ func TestReceiveContext(t *testing.T) {
 
 		// create an instance of receive context
 		context := &receiveContext{
-			ctx:            ctx,
-			sender:         NoSender,
-			recipient:      testerRef,
-			mu:             sync.Mutex{},
-			isAsyncMessage: true,
+			ctx:       ctx,
+			sender:    NoSender,
+			recipient: testerRef,
+			mu:        sync.Mutex{},
+			async:     true,
 		}
 
 		// get the address of the exchanger actor one
@@ -1717,12 +1717,12 @@ func TestReceiveContext(t *testing.T) {
 
 		// create an instance of receive context
 		context := &receiveContext{
-			ctx:            ctx,
-			message:        new(testpb.TestSend),
-			sender:         NoSender,
-			recipient:      pid1,
-			mu:             sync.Mutex{},
-			isAsyncMessage: true,
+			ctx:       ctx,
+			message:   new(testpb.TestSend),
+			sender:    NoSender,
+			recipient: pid1,
+			mu:        sync.Mutex{},
+			async:     true,
 		}
 
 		// send the message to the exchanger actor one using remote messaging
@@ -1782,12 +1782,12 @@ func TestReceiveContext(t *testing.T) {
 
 		// create an instance of receive context
 		context := &receiveContext{
-			ctx:            ctx,
-			message:        new(testpb.TestSend),
-			sender:         NoSender,
-			recipient:      pid1,
-			mu:             sync.Mutex{},
-			isAsyncMessage: true,
+			ctx:       ctx,
+			message:   new(testpb.TestSend),
+			sender:    NoSender,
+			recipient: pid1,
+			mu:        sync.Mutex{},
+			async:     true,
 		}
 
 		op := func() {
@@ -1847,12 +1847,12 @@ func TestReceiveContext(t *testing.T) {
 
 		// create an instance of receive context
 		context := &receiveContext{
-			ctx:            ctx,
-			message:        new(testpb.TestSend),
-			sender:         NoSender,
-			recipient:      pid1,
-			mu:             sync.Mutex{},
-			isAsyncMessage: true,
+			ctx:       ctx,
+			message:   new(testpb.TestSend),
+			sender:    NoSender,
+			recipient: pid1,
+			mu:        sync.Mutex{},
+			async:     true,
 		}
 
 		assert.NotPanics(t, func() {
@@ -1905,12 +1905,12 @@ func TestReceiveContext(t *testing.T) {
 
 		// create an instance of receive context
 		context := &receiveContext{
-			ctx:            ctx,
-			message:        new(testpb.TestSend),
-			sender:         NoSender,
-			recipient:      pid1,
-			mu:             sync.Mutex{},
-			isAsyncMessage: true,
+			ctx:       ctx,
+			message:   new(testpb.TestSend),
+			sender:    NoSender,
+			recipient: pid1,
+			mu:        sync.Mutex{},
+			async:     true,
 		}
 
 		assert.Panics(t, func() {
@@ -1955,12 +1955,12 @@ func TestReceiveContext(t *testing.T) {
 
 		// create an instance of receive context
 		messageContext := &receiveContext{
-			ctx:            ctx,
-			message:        new(testpb.TaskComplete),
-			sender:         NoSender,
-			recipient:      pid1,
-			mu:             sync.Mutex{},
-			isAsyncMessage: true,
+			ctx:       ctx,
+			message:   new(testpb.TaskComplete),
+			sender:    NoSender,
+			recipient: pid1,
+			mu:        sync.Mutex{},
+			async:     true,
 		}
 
 		task := make(chan proto.Message)
@@ -2020,12 +2020,12 @@ func TestReceiveContext(t *testing.T) {
 
 		// create an instance of receive context
 		messageContext := &receiveContext{
-			ctx:            ctx,
-			message:        new(testpb.TaskComplete),
-			sender:         NoSender,
-			recipient:      pid1,
-			mu:             sync.Mutex{},
-			isAsyncMessage: true,
+			ctx:       ctx,
+			message:   new(testpb.TaskComplete),
+			sender:    NoSender,
+			recipient: pid1,
+			mu:        sync.Mutex{},
+			async:     true,
 		}
 
 		assert.Panics(t, func() {

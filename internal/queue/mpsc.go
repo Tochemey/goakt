@@ -36,19 +36,19 @@ type node[T any] struct {
 	next  *node[T]
 }
 
-// Mpsc is a Multi-Producer-Single-Consumer Queue
+// MpscQueue is a Multi-Producer-Single-Consumer Queue
 // reference: https://concurrencyfreaks.blogspot.com/2014/04/multi-producer-single-consumer-queue.html
-type Mpsc[T any] struct {
+type MpscQueue[T any] struct {
 	head   *node[T]
 	tail   *node[T]
 	length int64
 	lock   sync.Mutex
 }
 
-// NewMpsc create an instance of Mpsc
-func NewMpsc[T any]() *Mpsc[T] {
+// NewMpscQueue create an instance of MpscQueue
+func NewMpscQueue[T any]() *MpscQueue[T] {
 	item := new(node[T])
-	return &Mpsc[T]{
+	return &MpscQueue[T]{
 		head:   item,
 		tail:   item,
 		length: 0,
@@ -57,7 +57,7 @@ func NewMpsc[T any]() *Mpsc[T] {
 }
 
 // Push place the given value in the queue head (FIFO). Returns always true
-func (q *Mpsc[T]) Push(value T) bool {
+func (q *MpscQueue[T]) Push(value T) bool {
 	tnode := &node[T]{
 		value: value,
 	}
@@ -67,8 +67,9 @@ func (q *Mpsc[T]) Push(value T) bool {
 	return true
 }
 
-// Pop takes the QueueItem from the queue tail. Returns false if the queue is empty. Can be used in a single consumer (goroutine) only.
-func (q *Mpsc[T]) Pop() (T, bool) {
+// Pop takes the QueueItem from the queue tail.
+// Returns false if the queue is empty. Can be used in a single consumer (goroutine) only.
+func (q *MpscQueue[T]) Pop() (T, bool) {
 	var tnil T
 	next := (*node[T])(atomic.LoadPointer((*unsafe.Pointer)(unsafe.Pointer(&q.tail.next))))
 	if next == nil {
@@ -85,13 +86,13 @@ func (q *Mpsc[T]) Pop() (T, bool) {
 }
 
 // Len returns queue length
-func (q *Mpsc[T]) Len() int64 {
+func (q *MpscQueue[T]) Len() int64 {
 	return atomic.LoadInt64(&q.length)
 }
 
 // IsEmpty returns true when the queue is empty
 // must be called from a single, consumer goroutine
-func (q *Mpsc[T]) IsEmpty() bool {
+func (q *MpscQueue[T]) IsEmpty() bool {
 	q.lock.Lock()
 	tail := q.tail
 	q.lock.Unlock()

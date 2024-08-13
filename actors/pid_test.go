@@ -76,12 +76,12 @@ func TestReceive(t *testing.T) {
 	count := 10
 	for i := 0; i < count; i++ {
 		receiveContext := &receiveContext{
-			ctx:            ctx,
-			message:        new(testpb.TestSend),
-			sender:         NoSender,
-			recipient:      pid,
-			mu:             sync.Mutex{},
-			isAsyncMessage: true,
+			ctx:       ctx,
+			message:   new(testpb.TestSend),
+			sender:    NoSender,
+			recipient: pid,
+			mu:        sync.Mutex{},
+			async:     true,
 		}
 
 		pid.doReceive(receiveContext)
@@ -1536,12 +1536,12 @@ func TestRegisterMetrics(t *testing.T) {
 	count := 10
 	for i := 0; i < count; i++ {
 		receiveContext := &receiveContext{
-			ctx:            ctx,
-			message:        new(testpb.TestSend),
-			sender:         NoSender,
-			recipient:      pid,
-			mu:             sync.Mutex{},
-			isAsyncMessage: true,
+			ctx:       ctx,
+			message:   new(testpb.TestSend),
+			sender:    NoSender,
+			recipient: pid,
+			mu:        sync.Mutex{},
+			async:     true,
 		}
 
 		pid.doReceive(receiveContext)

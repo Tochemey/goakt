@@ -225,7 +225,7 @@ type pid struct {
 	shutdownTimeout atomic.Duration
 
 	// specifies the actor mailbox
-	mailbox *queue.Mpsc[ReceiveContext]
+	mailbox *queue.MpscQueue[ReceiveContext]
 
 	// receives a shutdown signal. Once the signal is received
 	// the actor is shut down gracefully.
@@ -319,7 +319,7 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 		fieldsLocker:         &sync.RWMutex{},
 		stopLocker:           &sync.Mutex{},
 		httpClient:           http.NewClient(),
-		mailbox:              queue.NewMpsc[ReceiveContext](),
+		mailbox:              queue.NewMpscQueue[ReceiveContext](),
 		stashBuffer:          nil,
 		stashLocker:          &sync.Mutex{},
 		eventsStream:         nil,
@@ -364,7 +364,7 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 	go p.receive()
 
 	if p.passivateAfter.Load() > 0 {
-		go p.passivationListener()
+		go p.passivationLoop()
 	}
 
 	if p.metricEnabled.Load() {
@@ -556,7 +556,7 @@ func (x *pid) Restart(ctx context.Context) error {
 	}
 	go x.receive()
 	if x.passivateAfter.Load() > 0 {
-		go x.passivationListener()
+		go x.passivationLoop()
 	}
 
 	span.SetStatus(codes.Ok, "Restart")
@@ -816,7 +816,7 @@ func (x *pid) BatchAsk(ctx context.Context, to PID, messages ...proto.Message) (
 
 // RemoteLookup look for an actor address on a remote node.
 func (x *pid) RemoteLookup(ctx context.Context, host string, port int, name string) (addr *goaktpb.Address, err error) {
-	remoteClient, err := x.getRemoteServiceClient(host, port)
+	remoteClient, err := x.remotingClient(host, port)
 	if err != nil {
 		return nil, err
 	}
@@ -846,7 +846,7 @@ func (x *pid) RemoteTell(ctx context.Context, to *goaktpb.Address, message proto
 		return err
 	}
 
-	remoteService, err := x.getRemoteServiceClient(to.GetHost(), int(to.GetPort()))
+	remoteService, err := x.remotingClient(to.GetHost(), int(to.GetPort()))
 	if err != nil {
 		return err
 	}
@@ -897,7 +897,7 @@ func (x *pid) RemoteAsk(ctx context.Context, to *goaktpb.Address, message proto.
 		return nil, err
 	}
 
-	remoteService, err := x.getRemoteServiceClient(to.GetHost(), int(to.GetPort()))
+	remoteService, err := x.remotingClient(to.GetHost(), int(to.GetPort()))
 	if err != nil {
 		return nil, err
 	}
@@ -990,7 +990,7 @@ func (x *pid) RemoteBatchTell(ctx context.Context, to *goaktpb.Address, messages
 		})
 	}
 
-	remoteService, err := x.getRemoteServiceClient(to.GetHost(), int(to.GetPort()))
+	remoteService, err := x.remotingClient(to.GetHost(), int(to.GetPort()))
 	if err != nil {
 		return err
 	}
@@ -1046,7 +1046,7 @@ func (x *pid) RemoteBatchAsk(ctx context.Context, to *goaktpb.Address, messages 
 		})
 	}
 
-	remoteService, err := x.getRemoteServiceClient(to.GetHost(), int(to.GetPort()))
+	remoteService, err := x.remotingClient(to.GetHost(), int(to.GetPort()))
 	if err != nil {
 		return nil, err
 	}
@@ -1092,7 +1092,7 @@ func (x *pid) RemoteBatchAsk(ctx context.Context, to *goaktpb.Address, messages 
 
 // RemoteStop stops an actor on a remote node
 func (x *pid) RemoteStop(ctx context.Context, host string, port int, name string) error {
-	remoteService, err := x.getRemoteServiceClient(host, port)
+	remoteService, err := x.remotingClient(host, port)
 	if err != nil {
 		return err
 	}
@@ -1116,7 +1116,7 @@ func (x *pid) RemoteStop(ctx context.Context, host string, port int, name string
 
 // RemoteSpawn creates an actor on a remote node. The given actor needs to be registered on the remote node using the Register method of ActorSystem
 func (x *pid) RemoteSpawn(ctx context.Context, host string, port int, name, actorType string) error {
-	remoteService, err := x.getRemoteServiceClient(host, port)
+	remoteService, err := x.remotingClient(host, port)
 	if err != nil {
 		return err
 	}
@@ -1146,7 +1146,7 @@ func (x *pid) RemoteSpawn(ctx context.Context, host string, port int, name, acto
 
 // RemoteReSpawn restarts an actor on a remote node.
 func (x *pid) RemoteReSpawn(ctx context.Context, host string, port int, name string) error {
-	remoteService, err := x.getRemoteServiceClient(host, port)
+	remoteService, err := x.remotingClient(host, port)
 	if err != nil {
 		return err
 	}
@@ -1253,6 +1253,9 @@ func (x *pid) doReceive(ctx ReceiveContext) {
 		x.logger.Warn(err)
 		x.handleError(ctx, err)
 	}
+	x.fieldsLocker.Lock()
+	x.lastProcessingTime.Store(time.Now())
+	x.fieldsLocker.Unlock()
 }
 
 // init initializes the given actor and init processing messages
@@ -1416,9 +1419,9 @@ func (x *pid) handleReceived(received ReceiveContext) {
 	}
 }
 
-// passivationListener checks whether the actor is processing public or not.
+// passivationLoop checks whether the actor is processing public or not.
 // when the actor is idle, it automatically shuts down to free resources
-func (x *pid) passivationListener() {
+func (x *pid) passivationLoop() {
 	x.logger.Info("start the passivation listener...")
 	x.logger.Infof("passivation timeout is (%s)", x.passivateAfter.Load().String())
 	ticker := time.NewTicker(x.passivateAfter.Load())
@@ -1643,8 +1646,8 @@ func (x *pid) grpcClientOptions() ([]connect.ClientOption, error) {
 	return clientOptions, err
 }
 
-// getRemoteServiceClient returns an instance of the Remote Service client
-func (x *pid) getRemoteServiceClient(host string, port int) (internalpbconnect.RemotingServiceClient, error) {
+// remotingClient returns an instance of the Remote Service client
+func (x *pid) remotingClient(host string, port int) (internalpbconnect.RemotingServiceClient, error) {
 	clientConnectionOptions, err := x.grpcClientOptions()
 	if err != nil {
 		return nil, err

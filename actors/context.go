@@ -143,15 +143,15 @@ type ReceiveContext interface {
 }
 
 type receiveContext struct {
-	ctx            context.Context
-	message        proto.Message
-	sender         PID
-	remoteSender   *goaktpb.Address
-	response       chan proto.Message
-	recipient      PID
-	mu             sync.Mutex
-	isAsyncMessage bool
-	sendTime       atomic.Time
+	ctx          context.Context
+	message      proto.Message
+	sender       PID
+	remoteSender *goaktpb.Address
+	response     chan proto.Message
+	recipient    PID
+	mu           sync.Mutex
+	async        bool
+	sendTime     atomic.Time
 }
 
 // force compilation error
@@ -167,7 +167,7 @@ func newReceiveContext(ctx context.Context, from, to PID, message proto.Message,
 	context.sender = from
 	context.recipient = to
 	context.message = message
-	context.isAsyncMessage = async
+	context.async = async
 	context.mu = sync.Mutex{}
 	context.response = make(chan proto.Message, 1)
 	context.sendTime.Store(time.Now())
@@ -204,7 +204,7 @@ func (c *receiveContext) Response(resp proto.Message) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	// only set a response when the message is sync message
-	if !c.isAsyncMessage {
+	if !c.async {
 		defer close(c.response)
 		c.response <- resp
 	}
@@ -497,12 +497,12 @@ func (c *receiveContext) Forward(to PID) {
 	if to.IsRunning() {
 		ctx := context.WithoutCancel(c.ctx)
 		receiveContext := &receiveContext{
-			ctx:            ctx,
-			message:        message,
-			sender:         sender,
-			recipient:      to,
-			mu:             sync.Mutex{},
-			isAsyncMessage: false,
+			ctx:       ctx,
+			message:   message,
+			sender:    sender,
+			recipient: to,
+			mu:        sync.Mutex{},
+			async:     false,
 		}
 		to.doReceive(receiveContext)
 	}
