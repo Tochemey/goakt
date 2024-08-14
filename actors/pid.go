@@ -1261,27 +1261,26 @@ func (x *pid) freeChildren(ctx context.Context) {
 	}
 }
 
-// receive handles every mail in the actor receiveContextBuffer
+// receive extracts every message from the actor mailbox
 func (x *pid) receive() {
 	for {
-		select {
-		case <-x.shutdownSignal:
+		if !x.isRunning.Load() {
 			return
-		default:
-			// fetch the data and continue the loop when there are no records yet
-			received, ok := x.mailbox.Pop()
-			if !ok {
-				runtime.Gosched()
-				continue
-			}
+		}
 
-			switch received.Message().(type) {
-			case *goaktpb.PoisonPill:
-				// stop the actor
-				_ = x.Shutdown(received.Context())
-			default:
-				x.handleReceived(received)
-			}
+		// fetch the data and continue the loop when there are no records yet
+		received, ok := x.mailbox.Pop()
+		if !ok {
+			runtime.Gosched()
+			continue
+		}
+
+		switch received.Message().(type) {
+		case *goaktpb.PoisonPill:
+			// stop the actor
+			_ = x.Shutdown(received.Context())
+		default:
+			x.handleReceived(received)
 		}
 	}
 }
@@ -1424,7 +1423,7 @@ func (x *pid) doStop(ctx context.Context) error {
 	}()
 
 	<-tickerStopSig
-	x.shutdownSignal <- types.Unit{}
+	//x.shutdownSignal <- types.Unit{}
 	x.httpClient.CloseIdleConnections()
 
 	x.freeWatchees(ctx)
