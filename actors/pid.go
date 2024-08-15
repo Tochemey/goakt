@@ -222,7 +222,7 @@ type pid struct {
 	shutdownTimeout atomic.Duration
 
 	// specifies the actor mailbox
-	mailbox *queue.MpscQueue[ReceiveContext]
+	mailbox queue.Queue[ReceiveContext]
 
 	haltPassivationLnr chan types.Unit
 
@@ -264,7 +264,7 @@ type pid struct {
 	behaviorStack *behaviorStack
 
 	// stash settings
-	stashBuffer *queue.MpscQueue[ReceiveContext]
+	stashBuffer *queue.Mpsc[ReceiveContext]
 	stashLocker *sync.Mutex
 
 	// define an events stream
@@ -307,7 +307,7 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 		fieldsLocker:         &sync.RWMutex{},
 		stopLocker:           &sync.Mutex{},
 		httpClient:           http.NewClient(),
-		mailbox:              queue.NewMpscQueue[ReceiveContext](),
+		mailbox:              queue.NewLinked[ReceiveContext](),
 		stashBuffer:          nil,
 		stashLocker:          &sync.Mutex{},
 		eventsStream:         nil,

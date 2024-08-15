@@ -104,7 +104,7 @@ func withTelemetry(telemetry *telemetry.Telemetry) pidOption {
 // withStash sets the actor's stash buffer
 func withStash() pidOption {
 	return func(pid *pid) {
-		pid.stashBuffer = queue.NewMpscQueue[ReceiveContext]()
+		pid.stashBuffer = queue.NewMpsc[ReceiveContext]()
 	}
 }
 

@@ -51,7 +51,7 @@ type subscriber struct {
 	// sem represents a lock
 	sem sync.Mutex
 	// messages of the subscriber
-	messages *queue.Queue[*Message]
+	messages *queue.Ring[*Message]
 	// topics define the topic the subscriber subscribed to
 	topics map[string]bool
 	// states whether the given subscriber is active or not
@@ -70,7 +70,7 @@ func newSubscriber() *subscriber {
 	return &subscriber{
 		id:       id,
 		sem:      sync.Mutex{},
-		messages: queue.New[*Message](),
+		messages: queue.NewRing[*Message](),
 		topics:   make(map[string]bool),
 		active:   true,
 	}

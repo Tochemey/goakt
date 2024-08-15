@@ -26,6 +26,7 @@ package queue
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -33,7 +34,7 @@ import (
 
 func TestQueue(t *testing.T) {
 	t.Run("With Push/Pop", func(t *testing.T) {
-		q := New[int]()
+		q := NewRing[int]()
 		require.True(t, q.IsEmpty())
 		for j := 0; j < 100; j++ {
 			if q.Len() != 0 {
@@ -88,7 +89,7 @@ func TestQueue(t *testing.T) {
 		assert.Zero(t, q.Cap())
 	})
 	t.Run("With Wait", func(t *testing.T) {
-		q := New[int]()
+		q := NewRing[int]()
 		assert.True(t, q.Push(1))
 		assert.True(t, q.Push(2))
 		assert.True(t, q.Push(3))
@@ -105,7 +106,7 @@ func TestQueue(t *testing.T) {
 		assert.Zero(t, q.Cap())
 	})
 	t.Run("With Close remaining", func(t *testing.T) {
-		q := New[int]()
+		q := NewRing[int]()
 		for j := 0; j < 100; j++ {
 			q.Push(j)
 		}
@@ -120,7 +121,7 @@ func TestQueue(t *testing.T) {
 }
 
 func BenchmarkQueue_Push(b *testing.B) {
-	q := New[int]()
+	q := NewRing[int]()
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -129,16 +130,18 @@ func BenchmarkQueue_Push(b *testing.B) {
 }
 
 func BenchmarkQueue_Pop(b *testing.B) {
-	q := New[int]()
+	q := NewRing[int]()
 	b.ReportAllocs()
 	b.ResetTimer()
+	start := time.Now()
 	for i := 0; i < b.N; i++ {
 		q.Push(i)
 		if q.Len() > 10 {
 			q.Pop()
 		}
 	}
-
+	opsPerSec := float64(b.N) / time.Since(start).Seconds()
+	b.ReportMetric(opsPerSec, "ops/s")
 	//for i := 0; i < b.N; i++ {
 	//	q.Pop()
 	//}
