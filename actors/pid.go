@@ -224,9 +224,6 @@ type pid struct {
 	// specifies the actor mailbox
 	mailbox *queue.MpscQueue[ReceiveContext]
 
-	// receives a shutdown signal. Once the signal is received
-	// the actor is shut down gracefully.
-	shutdownSignal     chan types.Unit
 	haltPassivationLnr chan types.Unit
 
 	// hold the watchersList watching the given actor
@@ -299,7 +296,6 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 	p := &pid{
 		Actor:                actor,
 		lastProcessingTime:   atomic.Time{},
-		shutdownSignal:       make(chan types.Unit, 1),
 		haltPassivationLnr:   make(chan types.Unit, 1),
 		logger:               log.DefaultLogger,
 		children:             newPIDMap(10),
