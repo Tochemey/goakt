@@ -224,9 +224,6 @@ type pid struct {
 	// specifies the actor mailbox
 	mailbox *queue.MpscQueue[ReceiveContext]
 
-	// receives a shutdown signal. Once the signal is received
-	// the actor is shut down gracefully.
-	shutdownSignal     chan types.Unit
 	haltPassivationLnr chan types.Unit
 
 	// hold the watchersList watching the given actor
@@ -299,7 +296,6 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 	p := &pid{
 		Actor:                actor,
 		lastProcessingTime:   atomic.Time{},
-		shutdownSignal:       make(chan types.Unit, 1),
 		haltPassivationLnr:   make(chan types.Unit, 1),
 		logger:               log.DefaultLogger,
 		children:             newPIDMap(10),
@@ -1261,27 +1257,26 @@ func (x *pid) freeChildren(ctx context.Context) {
 	}
 }
 
-// receive handles every mail in the actor receiveContextBuffer
+// receive extracts every message from the actor mailbox
 func (x *pid) receive() {
 	for {
-		select {
-		case <-x.shutdownSignal:
+		if !x.isRunning.Load() {
 			return
-		default:
-			// fetch the data and continue the loop when there are no records yet
-			received, ok := x.mailbox.Pop()
-			if !ok {
-				runtime.Gosched()
-				continue
-			}
+		}
 
-			switch received.Message().(type) {
-			case *goaktpb.PoisonPill:
-				// stop the actor
-				_ = x.Shutdown(received.Context())
-			default:
-				x.handleReceived(received)
-			}
+		// fetch the data and continue the loop when there are no records yet
+		received, ok := x.mailbox.Pop()
+		if !ok {
+			runtime.Gosched()
+			continue
+		}
+
+		switch received.Message().(type) {
+		case *goaktpb.PoisonPill:
+			// stop the actor
+			_ = x.Shutdown(received.Context())
+		default:
+			x.handleReceived(received)
 		}
 	}
 }
@@ -1424,7 +1419,7 @@ func (x *pid) doStop(ctx context.Context) error {
 	}()
 
 	<-tickerStopSig
-	x.shutdownSignal <- types.Unit{}
+	//x.shutdownSignal <- types.Unit{}
 	x.httpClient.CloseIdleConnections()
 
 	x.freeWatchees(ctx)
