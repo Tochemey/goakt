@@ -29,7 +29,6 @@ import (
 	"errors"
 	"fmt"
 	stdhttp "net/http"
-	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -276,6 +275,9 @@ type pid struct {
 	processedCount *atomic.Int64
 	metricEnabled  atomic.Bool
 	metrics        *metric.ActorMetric
+
+	// holds error when processing message
+	receivedErrBuffer chan error
 }
 
 // enforce compilation error
@@ -315,6 +317,7 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 		childrenCount:        atomic.NewInt64(0),
 		processedCount:       atomic.NewInt64(0),
 		processingTimeLocker: new(sync.Mutex),
+		receivedErrBuffer:    make(chan error, 1),
 	}
 
 	p.initMaxRetries.Store(DefaultInitMaxRetries)
@@ -339,7 +342,7 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 	}
 
 	go p.receive()
-
+	go p.receivedErrorLoop()
 	if p.passivateAfter.Load() > 0 {
 		go p.passivationLoop()
 	}
@@ -508,11 +511,14 @@ func (x *pid) Restart(ctx context.Context) error {
 		ticker.Stop()
 	}
 
+	x.receivedErrBuffer = make(chan error, 1)
 	x.resetBehavior()
 	if err := x.init(ctx); err != nil {
 		return err
 	}
+
 	go x.receive()
+	go x.receivedErrorLoop()
 	if x.passivateAfter.Load() > 0 {
 		go x.passivationLoop()
 	}
@@ -1267,7 +1273,6 @@ func (x *pid) receive() {
 		// fetch the data and continue the loop when there are no records yet
 		received, ok := x.mailbox.Pop()
 		if !ok {
-			runtime.Gosched()
 			continue
 		}
 
@@ -1285,19 +1290,26 @@ func (x *pid) handleReceived(received ReceiveContext) {
 	// handle panic when the processing of the message fails
 	defer func() {
 		if r := recover(); r != nil {
-			err := fmt.Errorf("%s", r)
-			for item := range x.watchersList.Iter() {
-				item.Value.ErrChan <- err
-			}
+			x.receivedErrBuffer <- fmt.Errorf("%s", r)
 		}
-		// set the total messages processed
-		x.processedCount.Inc()
 	}()
 
-	behaviorStack := x.behaviorStack
 	// send the message to the current actor behavior
-	if behavior, ok := behaviorStack.Peek(); ok {
+	if behavior, ok := x.behaviorStack.Peek(); ok {
+		// set the total messages processed
+		x.processedCount.Inc()
+		// let the actor handle the message
 		behavior(received)
+	}
+}
+
+// receivedErrorLoop process error during message processing
+// and notifies the various supervisors in case there are some.
+func (x *pid) receivedErrorLoop() {
+	for err := range x.receivedErrBuffer {
+		for item := range x.watchersList.Iter() {
+			item.Value.ErrChan <- err
+		}
 	}
 }
 
@@ -1387,6 +1399,7 @@ func (x *pid) unsetBehaviorStacked() {
 // doStop stops the actor
 func (x *pid) doStop(ctx context.Context) error {
 	x.isRunning.Store(false)
+	close(x.receivedErrBuffer)
 
 	// TODO: just signal stash processing done and ignore the messages or process them
 	if x.stashBuffer != nil {
