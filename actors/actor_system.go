@@ -512,7 +512,7 @@ func (x *actorSystem) Name() string {
 func (x *actorSystem) Actors() []PID {
 	x.locker.Lock()
 	pids := x.actors.pids()
-	defer x.locker.Unlock()
+	x.locker.Unlock()
 	actors := make([]PID, 0, len(pids))
 	for _, pid := range pids {
 		if !isSystemName(pid.Name()) {
