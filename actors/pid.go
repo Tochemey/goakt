@@ -511,7 +511,9 @@ func (x *pid) Restart(ctx context.Context) error {
 		ticker.Stop()
 	}
 
+	x.fieldsLocker.Lock()
 	x.receivedErrBuffer = make(chan error, 1)
+	x.fieldsLocker.Unlock()
 	x.resetBehavior()
 	if err := x.init(ctx); err != nil {
 		return err
