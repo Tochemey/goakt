@@ -28,7 +28,7 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"net/http"
+	stdhttp "net/http"
 	"regexp"
 	"strconv"
 	"strings"
@@ -41,8 +41,6 @@ import (
 	"github.com/pkg/errors"
 	otelmetric "go.opentelemetry.io/otel/metric"
 	"go.uber.org/atomic"
-	"golang.org/x/net/http2"
-	"golang.org/x/net/http2/h2c"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
@@ -52,6 +50,7 @@ import (
 	"github.com/tochemey/goakt/v2/hash"
 	"github.com/tochemey/goakt/v2/internal/cluster"
 	"github.com/tochemey/goakt/v2/internal/eventstream"
+	"github.com/tochemey/goakt/v2/internal/http"
 	"github.com/tochemey/goakt/v2/internal/internalpb"
 	"github.com/tochemey/goakt/v2/internal/internalpb/internalpbconnect"
 	"github.com/tochemey/goakt/v2/internal/metric"
@@ -185,7 +184,7 @@ type actorSystem struct {
 	// Specifies the remoting host
 	remotingHost string
 	// Specifies the remoting server
-	remotingServer *http.Server
+	remotingServer *stdhttp.Server
 
 	// cluster settings
 	clusterEnabled atomic.Bool
@@ -513,7 +512,7 @@ func (x *actorSystem) Name() string {
 func (x *actorSystem) Actors() []PID {
 	x.locker.Lock()
 	pids := x.actors.pids()
-	defer x.locker.Unlock()
+	x.locker.Unlock()
 	actors := make([]PID, 0, len(pids))
 	for _, pid := range pids {
 		if !isSystemName(pid.Name()) {
@@ -1151,41 +1150,14 @@ func (x *actorSystem) enableRemoting(ctx context.Context) {
 	remotingServicePath, remotingServiceHandler := internalpbconnect.NewRemotingServiceHandler(x, opts...)
 	clusterServicePath, clusterServiceHandler := internalpbconnect.NewClusterServiceHandler(x, opts...)
 
-	mux := http.NewServeMux()
+	mux := stdhttp.NewServeMux()
 	mux.Handle(remotingServicePath, remotingServiceHandler)
 	mux.Handle(clusterServicePath, clusterServiceHandler)
-	serverAddr := fmt.Sprintf("%s:%d", x.remotingHost, x.remotingPort)
-
-	// TODO revisit the timeouts
-	// reference: https://adam-p.ca/blog/2022/01/golang-http-server-timeouts/
-	server := &http.Server{
-		Addr: serverAddr,
-		// The maximum duration for reading the entire request, including the body.
-		// It’s implemented in net/http by calling SetReadDeadline immediately after Accept
-		// ReadTimeout := handler_timeout + ReadHeaderTimeout + wiggle_room
-		ReadTimeout: 3 * time.Second,
-		// ReadHeaderTimeout is the amount of time allowed to read request headers
-		ReadHeaderTimeout: time.Second,
-		// WriteTimeout is the maximum duration before timing out writes of the response.
-		// It is reset whenever a new request’s header is read.
-		// This effectively covers the lifetime of the ServeHTTP handler stack
-		WriteTimeout: time.Second,
-		// IdleTimeout is the maximum amount of time to wait for the next request when keep-alive are enabled.
-		// If IdleTimeout is zero, the value of ReadTimeout is used. Not relevant to request timeouts
-		IdleTimeout: 1200 * time.Second,
-		// For gRPC clients, it's convenient to support HTTP/2 without TLS. You can
-		// avoid x/net/http2 by using http.ListenAndServeTLS.
-		Handler: h2c.NewHandler(mux, &http2.Server{
-			IdleTimeout: 1200 * time.Second,
-		}),
-		BaseContext: func(_ net.Listener) context.Context {
-			return ctx
-		},
-	}
+	server := http.NewServer(ctx, x.remotingHost, remotingPort, mux)
 
 	go func() {
 		if err := server.ListenAndServe(); err != nil {
-			if !errors.Is(err, http.ErrServerClosed) {
+			if !errors.Is(err, stdhttp.ErrServerClosed) {
 				x.logger.Panic(errors.Wrap(err, "failed to start remoting service"))
 			}
 		}
