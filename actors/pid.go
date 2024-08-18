@@ -1199,7 +1199,6 @@ func (x *pid) reset() {
 	x.initTimeout.Store(DefaultInitTimeout)
 	x.children.close()
 	x.watchersList.Reset()
-	x.telemetry = telemetry.New()
 	x.resetBehavior()
 	if x.metricEnabled.Load() {
 		if err := x.registerMetrics(); err != nil {
