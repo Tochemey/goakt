@@ -31,15 +31,17 @@ import (
 )
 
 type pidMap struct {
-	mu       *sync.RWMutex
-	size     atomic.Int32
-	mappings map[string]PID
+	mu         *sync.RWMutex
+	size       atomic.Int32
+	mappings   map[string]PID
+	initialCap int
 }
 
 func newPIDMap(cap int) *pidMap {
 	return &pidMap{
-		mappings: make(map[string]PID, cap),
-		mu:       &sync.RWMutex{},
+		mappings:   make(map[string]PID, cap),
+		mu:         &sync.RWMutex{},
+		initialCap: cap,
 	}
 }
 
@@ -87,6 +89,6 @@ func (m *pidMap) pids() []PID {
 
 func (m *pidMap) close() {
 	m.mu.Lock()
-	m.mappings = make(map[string]PID)
+	m.mappings = make(map[string]PID, m.initialCap)
 	m.mu.Unlock()
 }
