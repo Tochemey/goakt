@@ -50,24 +50,26 @@ func NewSafe[T any]() *Safe[T] {
 // Len returns the number of items
 func (cs *Safe[T]) Len() int {
 	cs.Lock()
-	defer cs.Unlock()
-	return len(cs.items)
+	length := len(cs.items)
+	cs.Unlock()
+	return length
 }
 
 // Append adds an item to the concurrent slice.
 func (cs *Safe[T]) Append(item T) {
 	cs.Lock()
-	defer cs.Unlock()
 	cs.items = append(cs.items, item)
+	cs.Unlock()
 }
 
 // Get returns the slice item at the given index
 func (cs *Safe[T]) Get(index int) (item any) {
 	cs.RLock()
-	defer cs.RUnlock()
 	if isSet(cs.items, index) {
+		cs.RUnlock()
 		return cs.items[index]
 	}
+	cs.RUnlock()
 	return nil
 }
 
@@ -82,10 +84,6 @@ func (cs *Safe[T]) Delete(index int) {
 		cs.items[len(cs.items)-1] = nilState        // Erase last element (write zero value).
 		cs.items = cs.items[:len(cs.items)-1]       // Truncate slice.
 	}
-}
-
-func isSet[T any](arr []T, index int) bool {
-	return len(arr) > index
 }
 
 // Iter iterates the items in the concurrent slice.
@@ -104,4 +102,15 @@ func (cs *Safe[T]) Iter() <-chan Item[T] {
 	go f()
 
 	return c
+}
+
+// Reset resets the slice
+func (cs *Safe[T]) Reset() {
+	cs.Lock()
+	cs.items = make([]T, 0)
+	cs.Unlock()
+}
+
+func isSet[T any](arr []T, index int) bool {
+	return len(arr) > index
 }

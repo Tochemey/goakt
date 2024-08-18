@@ -1198,7 +1198,7 @@ func (x *pid) reset() {
 	x.lastReceivedDuration.Store(0)
 	x.initTimeout.Store(DefaultInitTimeout)
 	x.children = newPIDMap(10)
-	x.watchersList = slices.NewSafe[*watcher]()
+	x.watchersList.Reset()
 	x.telemetry = telemetry.New()
 	x.resetBehavior()
 	if x.metricEnabled.Load() {
