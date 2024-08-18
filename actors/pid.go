@@ -29,7 +29,6 @@ import (
 	"errors"
 	"fmt"
 	stdhttp "net/http"
-	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -276,6 +275,8 @@ type pid struct {
 	processedCount *atomic.Int64
 	metricEnabled  atomic.Bool
 	metrics        *metric.ActorMetric
+
+	errChan chan error
 }
 
 // enforce compilation error
@@ -315,6 +316,7 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 		childrenCount:        atomic.NewInt64(0),
 		processedCount:       atomic.NewInt64(0),
 		processingTimeLocker: new(sync.Mutex),
+		errChan:              make(chan error, 1),
 	}
 
 	p.initMaxRetries.Store(DefaultInitMaxRetries)
@@ -338,6 +340,7 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 		return nil, err
 	}
 
+	go p.errorPropagationLoop()
 	go p.receive()
 
 	if p.passivateAfter.Load() > 0 {
@@ -512,6 +515,7 @@ func (x *pid) Restart(ctx context.Context) error {
 	if err := x.init(ctx); err != nil {
 		return err
 	}
+	go x.errorPropagationLoop()
 	go x.receive()
 	if x.passivateAfter.Load() > 0 {
 		go x.passivationLoop()
@@ -1267,7 +1271,6 @@ func (x *pid) receive() {
 		// fetch the data and continue the loop when there are no records yet
 		received, ok := x.mailbox.Pop()
 		if !ok {
-			runtime.Gosched()
 			continue
 		}
 
@@ -1285,19 +1288,32 @@ func (x *pid) handleReceived(received ReceiveContext) {
 	// handle panic when the processing of the message fails
 	defer func() {
 		if r := recover(); r != nil {
-			err := fmt.Errorf("%s", r)
-			for item := range x.watchersList.Iter() {
-				item.Value.ErrChan <- err
-			}
+			x.errChan <- fmt.Errorf("%s", r)
 		}
-		// set the total messages processed
-		x.processedCount.Inc()
 	}()
 
 	behaviorStack := x.behaviorStack
 	// send the message to the current actor behavior
 	if behavior, ok := behaviorStack.Peek(); ok {
+		x.processedCount.Inc()
 		behavior(received)
+	}
+}
+
+// errorPropagationLoop propagates the error when an actor panic during message processing
+func (x *pid) errorPropagationLoop() {
+	for {
+		select {
+		case err := <-x.errChan:
+			for item := range x.watchersList.Iter() {
+				item.Value.ErrChan <- err
+			}
+		default:
+			// stop the loop when pid is not running
+			if !x.IsRunning() {
+				return
+			}
+		}
 	}
 }
 
