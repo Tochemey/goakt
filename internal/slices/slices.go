@@ -26,8 +26,8 @@ package slices
 
 import "sync"
 
-// Safe type that can be safely shared between goroutines.
-type Safe[T any] struct {
+// Slice type that can be safely shared between goroutines.
+type Slice[T any] struct {
 	sync.RWMutex
 	items []T
 }
@@ -38,9 +38,9 @@ type Item[T any] struct {
 	Value T
 }
 
-// NewSafe creates a new synchronized slice.
-func NewSafe[T any]() *Safe[T] {
-	cs := &Safe[T]{
+// New creates a new synchronized slice.
+func New[T any]() *Slice[T] {
+	cs := &Slice[T]{
 		items: make([]T, 0),
 	}
 
@@ -48,21 +48,22 @@ func NewSafe[T any]() *Safe[T] {
 }
 
 // Len returns the number of items
-func (cs *Safe[T]) Len() int {
+func (cs *Slice[T]) Len() int {
 	cs.Lock()
-	defer cs.Unlock()
-	return len(cs.items)
+	length := len(cs.items)
+	cs.Unlock()
+	return length
 }
 
 // Append adds an item to the concurrent slice.
-func (cs *Safe[T]) Append(item T) {
+func (cs *Slice[T]) Append(item T) {
 	cs.Lock()
-	defer cs.Unlock()
 	cs.items = append(cs.items, item)
+	cs.Unlock()
 }
 
 // Get returns the slice item at the given index
-func (cs *Safe[T]) Get(index int) (item any) {
+func (cs *Slice[T]) Get(index int) (item any) {
 	cs.RLock()
 	defer cs.RUnlock()
 	if isSet(cs.items, index) {
@@ -72,7 +73,7 @@ func (cs *Safe[T]) Get(index int) (item any) {
 }
 
 // Delete an item from the slice
-func (cs *Safe[T]) Delete(index int) {
+func (cs *Slice[T]) Delete(index int) {
 	cs.RLock()
 	defer cs.RUnlock()
 	var nilState T
@@ -84,14 +85,10 @@ func (cs *Safe[T]) Delete(index int) {
 	}
 }
 
-func isSet[T any](arr []T, index int) bool {
-	return len(arr) > index
-}
-
 // Iter iterates the items in the concurrent slice.
 // Each item is sent over a channel, so that
 // we can iterate over the slice using the builtin range keyword.
-func (cs *Safe[T]) Iter() <-chan Item[T] {
+func (cs *Slice[T]) Iter() <-chan Item[T] {
 	c := make(chan Item[T])
 	f := func() {
 		cs.RLock()
@@ -104,4 +101,15 @@ func (cs *Safe[T]) Iter() <-chan Item[T] {
 	go f()
 
 	return c
+}
+
+// Reset resets the slice
+func (cs *Slice[T]) Reset() {
+	cs.Lock()
+	cs.items = make([]T, 0)
+	cs.Unlock()
+}
+
+func isSet[T any](arr []T, index int) bool {
+	return len(arr) > index
 }

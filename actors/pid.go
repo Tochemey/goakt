@@ -29,7 +29,6 @@ import (
 	"errors"
 	"fmt"
 	stdhttp "net/http"
-	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -159,7 +158,7 @@ type PID interface {
 	// push a message to the actor's receiveContextBuffer
 	doReceive(ctx ReceiveContext)
 	// watchers returns the list of actors watching this actor
-	watchers() *slices.Safe[*watcher]
+	watchers() *slices.Slice[*watcher]
 	// watchees returns the list of actors watched by this actor
 	watchees() *pidMap
 	// setBehavior is a utility function that helps set the actor behavior
@@ -227,7 +226,7 @@ type pid struct {
 	haltPassivationLnr chan types.Unit
 
 	// hold the watchersList watching the given actor
-	watchersList *slices.Safe[*watcher]
+	watchersList *slices.Slice[*watcher]
 
 	// hold the list of the children
 	children *pidMap
@@ -276,6 +275,7 @@ type pid struct {
 	processedCount *atomic.Int64
 	metricEnabled  atomic.Bool
 	metrics        *metric.ActorMetric
+	errChan        chan error
 }
 
 // enforce compilation error
@@ -300,7 +300,7 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 		logger:               log.DefaultLogger,
 		children:             newPIDMap(10),
 		supervisorDirective:  DefaultSupervisoryStrategy,
-		watchersList:         slices.NewSafe[*watcher](),
+		watchersList:         slices.New[*watcher](),
 		watchedList:          newPIDMap(10),
 		telemetry:            telemetry.New(),
 		actorPath:            actorPath,
@@ -338,6 +338,7 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 		return nil, err
 	}
 
+	go p.errorLoop()
 	go p.receive()
 
 	if p.passivateAfter.Load() > 0 {
@@ -512,6 +513,7 @@ func (x *pid) Restart(ctx context.Context) error {
 	if err := x.init(ctx); err != nil {
 		return err
 	}
+	go x.errorLoop()
 	go x.receive()
 	if x.passivateAfter.Load() > 0 {
 		go x.passivationLoop()
@@ -1137,7 +1139,7 @@ func (x *pid) UnWatch(pid PID) {
 }
 
 // watchers return the list of watchersList
-func (x *pid) watchers() *slices.Safe[*watcher] {
+func (x *pid) watchers() *slices.Slice[*watcher] {
 	return x.watchersList
 }
 
@@ -1170,6 +1172,7 @@ func (x *pid) init(ctx context.Context) error {
 
 	x.fieldsLocker.Lock()
 	x.isRunning.Store(true)
+	x.errChan = make(chan error, 1)
 	x.fieldsLocker.Unlock()
 
 	x.logger.Info("Initialization process successfully completed.")
@@ -1193,9 +1196,8 @@ func (x *pid) reset() {
 	x.initMaxRetries.Store(DefaultInitMaxRetries)
 	x.lastReceivedDuration.Store(0)
 	x.initTimeout.Store(DefaultInitTimeout)
-	x.children = newPIDMap(10)
-	x.watchersList = slices.NewSafe[*watcher]()
-	x.telemetry = telemetry.New()
+	x.children.close()
+	x.watchersList.Reset()
 	x.resetBehavior()
 	if x.metricEnabled.Load() {
 		if err := x.registerMetrics(); err != nil {
@@ -1204,6 +1206,7 @@ func (x *pid) reset() {
 		}
 	}
 	x.processedCount.Store(0)
+	close(x.errChan)
 }
 
 func (x *pid) freeWatchers(ctx context.Context) {
@@ -1267,7 +1270,6 @@ func (x *pid) receive() {
 		// fetch the data and continue the loop when there are no records yet
 		received, ok := x.mailbox.Pop()
 		if !ok {
-			runtime.Gosched()
 			continue
 		}
 
@@ -1285,19 +1287,32 @@ func (x *pid) handleReceived(received ReceiveContext) {
 	// handle panic when the processing of the message fails
 	defer func() {
 		if r := recover(); r != nil {
-			err := fmt.Errorf("%s", r)
-			for item := range x.watchersList.Iter() {
-				item.Value.ErrChan <- err
-			}
+			x.errChan <- fmt.Errorf("%s", r)
 		}
-		// set the total messages processed
-		x.processedCount.Inc()
 	}()
 
 	behaviorStack := x.behaviorStack
 	// send the message to the current actor behavior
 	if behavior, ok := behaviorStack.Peek(); ok {
+		// set the total messages processed
+		x.processedCount.Inc()
+		// handle the message
 		behavior(received)
+	}
+}
+
+// errorLoop is used to process error during message processing
+func (x *pid) errorLoop() {
+	for {
+		if !x.isRunning.Load() {
+			return
+		}
+		select {
+		case err := <-x.errChan:
+			for item := range x.watchersList.Iter() {
+				item.Value.ErrChan <- err
+			}
+		}
 	}
 }
 
@@ -1500,8 +1515,8 @@ func (x *pid) registerMetrics() error {
 	return err
 }
 
-// grpcClientOptions returns the gRPC client connections options
-func (x *pid) grpcClientOptions() ([]connect.ClientOption, error) {
+// clientOptions returns the gRPC client connections options
+func (x *pid) clientOptions() ([]connect.ClientOption, error) {
 	var interceptor *otelconnect.Interceptor
 	var err error
 	if x.metricEnabled.Load() {
@@ -1522,7 +1537,7 @@ func (x *pid) grpcClientOptions() ([]connect.ClientOption, error) {
 
 // remotingClient returns an instance of the Remote Service client
 func (x *pid) remotingClient(host string, port int) (internalpbconnect.RemotingServiceClient, error) {
-	clientConnectionOptions, err := x.grpcClientOptions()
+	clientConnectionOptions, err := x.clientOptions()
 	if err != nil {
 		return nil, err
 	}

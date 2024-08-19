@@ -32,7 +32,7 @@ import (
 
 func TestNewThreadSafeSlice(t *testing.T) {
 	// create a concurrent slice of integer
-	sl := NewSafe[int]()
+	sl := New[int]()
 
 	// add some items
 	sl.Append(2)
