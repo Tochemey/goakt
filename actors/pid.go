@@ -1206,7 +1206,6 @@ func (x *pid) reset() {
 		}
 	}
 	x.processedCount.Store(0)
-	close(x.errChan)
 }
 
 func (x *pid) freeWatchers(ctx context.Context) {
@@ -1307,8 +1306,7 @@ func (x *pid) errorLoop() {
 		if !x.isRunning.Load() {
 			return
 		}
-		select {
-		case err := <-x.errChan:
+		for err := range x.errChan {
 			for item := range x.watchersList.Iter() {
 				item.Value.ErrChan <- err
 			}
@@ -1402,6 +1400,7 @@ func (x *pid) unsetBehaviorStacked() {
 // doStop stops the actor
 func (x *pid) doStop(ctx context.Context) error {
 	x.isRunning.Store(false)
+	close(x.errChan)
 
 	// TODO: just signal stash processing done and ignore the messages or process them
 	if x.stashBuffer != nil {
