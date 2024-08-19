@@ -29,7 +29,6 @@ import (
 	"errors"
 	"fmt"
 	stdhttp "net/http"
-	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -51,7 +50,7 @@ import (
 	"github.com/tochemey/goakt/v2/internal/internalpb/internalpbconnect"
 	"github.com/tochemey/goakt/v2/internal/metric"
 	"github.com/tochemey/goakt/v2/internal/queue"
-	"github.com/tochemey/goakt/v2/internal/slices"
+	"github.com/tochemey/goakt/v2/internal/slice"
 	"github.com/tochemey/goakt/v2/internal/types"
 	"github.com/tochemey/goakt/v2/log"
 	"github.com/tochemey/goakt/v2/telemetry"
@@ -159,7 +158,7 @@ type PID interface {
 	// push a message to the actor's receiveContextBuffer
 	doReceive(ctx ReceiveContext)
 	// watchers returns the list of actors watching this actor
-	watchers() *slices.Safe[*watcher]
+	watchers() *slice.Slice[*watcher]
 	// watchees returns the list of actors watched by this actor
 	watchees() *pidMap
 	// setBehavior is a utility function that helps set the actor behavior
@@ -179,7 +178,7 @@ type PID interface {
 	// unstash unstashes the oldest message in the stash and prepends to the mailbox
 	unstash() error
 	// toDeadletters add the given message to the deadletters queue
-	handleError(receiveCtx ReceiveContext, err error)
+	onError(receiveCtx ReceiveContext, err error)
 	// removeChild is a utility function to remove child actor
 	removeChild(pid PID)
 
@@ -227,7 +226,7 @@ type pid struct {
 	haltPassivationLnr chan types.Unit
 
 	// hold the watchersList watching the given actor
-	watchersList *slices.Safe[*watcher]
+	watchersList *slice.Slice[*watcher]
 
 	// hold the list of the children
 	children *pidMap
@@ -300,7 +299,7 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 		logger:               log.DefaultLogger,
 		children:             newPIDMap(10),
 		supervisorDirective:  DefaultSupervisoryStrategy,
-		watchersList:         slices.NewSafe[*watcher](),
+		watchersList:         slice.New[*watcher](),
 		watchedList:          newPIDMap(10),
 		telemetry:            telemetry.New(),
 		actorPath:            actorPath,
@@ -403,7 +402,7 @@ func (x *pid) Parents() []PID {
 	x.fieldsLocker.Unlock()
 	var parents []PID
 	if watchers.Len() > 0 {
-		for item := range watchers.Iter() {
+		for _, item := range watchers.Items() {
 			watcher := item.Value
 			if watcher != nil {
 				pid := watcher.WatcherID
@@ -646,7 +645,7 @@ func (x *pid) Ask(ctx context.Context, to PID, message proto.Message) (response 
 		case <-await:
 			x.recordLastReceivedDurationMetric(ctx)
 			err = ErrRequestTimeout
-			x.handleError(messageContext, err)
+			x.onError(messageContext, err)
 			return nil, err
 		}
 	}
@@ -714,7 +713,7 @@ func (x *pid) BatchAsk(ctx context.Context, to PID, messages ...proto.Message) (
 			case <-await:
 				err = ErrRequestTimeout
 				x.recordLastReceivedDurationMetric(ctx)
-				x.handleError(messageContext, err)
+				x.onError(messageContext, err)
 				return nil, err
 			}
 		}
@@ -1125,7 +1124,7 @@ func (x *pid) Watch(cid PID) {
 
 // UnWatch stops watching a given actor
 func (x *pid) UnWatch(pid PID) {
-	for item := range pid.watchers().Iter() {
+	for _, item := range pid.watchers().Items() {
 		w := item.Value
 		if w.WatcherID.Equals(x) {
 			w.Done <- types.Unit{}
@@ -1137,7 +1136,7 @@ func (x *pid) UnWatch(pid PID) {
 }
 
 // watchers return the list of watchersList
-func (x *pid) watchers() *slices.Safe[*watcher] {
+func (x *pid) watchers() *slice.Slice[*watcher] {
 	return x.watchersList
 }
 
@@ -1194,7 +1193,7 @@ func (x *pid) reset() {
 	x.lastReceivedDuration.Store(0)
 	x.initTimeout.Store(DefaultInitTimeout)
 	x.children = newPIDMap(10)
-	x.watchersList = slices.NewSafe[*watcher]()
+	x.watchersList = slice.New[*watcher]()
 	x.telemetry = telemetry.New()
 	x.resetBehavior()
 	if x.metricEnabled.Load() {
@@ -1210,7 +1209,7 @@ func (x *pid) freeWatchers(ctx context.Context) {
 	x.logger.Debug("freeing all watcher actors...")
 	watchers := x.watchers()
 	if watchers.Len() > 0 {
-		for item := range watchers.Iter() {
+		for _, item := range watchers.Items() {
 			watcher := item.Value
 			terminated := &goaktpb.Terminated{
 				ActorId: x.ID(),
@@ -1267,7 +1266,6 @@ func (x *pid) receive() {
 		// fetch the data and continue the loop when there are no records yet
 		received, ok := x.mailbox.Pop()
 		if !ok {
-			runtime.Gosched()
 			continue
 		}
 
@@ -1281,23 +1279,38 @@ func (x *pid) receive() {
 	}
 }
 
+// handleReceived picks the right behavior and processes the message
 func (x *pid) handleReceived(received ReceiveContext) {
-	// handle panic when the processing of the message fails
-	defer func() {
-		if r := recover(); r != nil {
-			err := fmt.Errorf("%s", r)
-			for item := range x.watchersList.Iter() {
-				item.Value.ErrChan <- err
-			}
-		}
-		// set the total messages processed
-		x.processedCount.Inc()
-	}()
-
+	// handle panic or any error during processing
+	defer x.recovery(received)
+	// pick the current behvior from the stack
 	behaviorStack := x.behaviorStack
 	// send the message to the current actor behavior
 	if behavior, ok := behaviorStack.Peek(); ok {
+		// set the total messages processed
+		x.processedCount.Inc()
+		// call the behavior to handle the message
 		behavior(received)
+	}
+}
+
+// recovery is called upon after message is processed
+func (x *pid) recovery(received ReceiveContext) {
+	// track some processing panic error
+	var err error
+	if r := recover(); r != nil {
+		err = fmt.Errorf("%s", r)
+	}
+
+	// no panic
+	if err == nil {
+		// check whether the proper way to return error is used
+		err = received.getError()
+	}
+
+	// only handle error when defined
+	if err != nil {
+		x.onError(received, err)
 	}
 }
 
@@ -1450,8 +1463,25 @@ func (x *pid) removeChild(pid PID) {
 	}
 }
 
-// handleError handles the error during a message handling
-func (x *pid) handleError(receiveCtx ReceiveContext, err error) {
+// onError handles the error during a message handling
+func (x *pid) onError(receiveCtx ReceiveContext, err error) {
+	// all unhandled error goes to deadletter
+	if !errors.Is(err, ErrUnhandled) {
+		// check whether there are supervisors and push the error message to them
+		if x.watchers().Len() != 0 {
+			// TODO: roundrobin pick or all of them
+			for _, item := range x.watchers().Items() {
+				item.Value.ErrChan <- err
+			}
+			return
+		}
+	}
+	x.toDeadletterQueue(receiveCtx, err)
+}
+
+// toDeadletterQueue sends message to deadletter queue
+func (x *pid) toDeadletterQueue(receiveCtx ReceiveContext, err error) {
+	// the message is lost
 	if x.eventsStream == nil {
 		return
 	}
@@ -1470,16 +1500,13 @@ func (x *pid) handleError(receiveCtx ReceiveContext, err error) {
 		senderAddr = receiveCtx.Sender().ActorPath().RemoteAddress()
 	}
 
-	receiver := x.actorPath.RemoteAddress()
-	deadletter := &goaktpb.Deadletter{
+	x.eventsStream.Publish(eventsTopic, &goaktpb.Deadletter{
 		Sender:   senderAddr,
-		Receiver: receiver,
+		Receiver: x.actorPath.RemoteAddress(),
 		Message:  msg,
 		SendTime: timestamppb.Now(),
 		Reason:   err.Error(),
-	}
-
-	x.eventsStream.Publish(eventsTopic, deadletter)
+	})
 }
 
 // registerMetrics register the PID metrics with OTel instrumentation.
@@ -1500,8 +1527,8 @@ func (x *pid) registerMetrics() error {
 	return err
 }
 
-// grpcClientOptions returns the gRPC client connections options
-func (x *pid) grpcClientOptions() ([]connect.ClientOption, error) {
+// clientOptions returns the gRPC client connections options
+func (x *pid) clientOptions() ([]connect.ClientOption, error) {
 	var interceptor *otelconnect.Interceptor
 	var err error
 	if x.metricEnabled.Load() {
@@ -1522,7 +1549,7 @@ func (x *pid) grpcClientOptions() ([]connect.ClientOption, error) {
 
 // remotingClient returns an instance of the Remote Service client
 func (x *pid) remotingClient(host string, port int) (internalpbconnect.RemotingServiceClient, error) {
-	clientConnectionOptions, err := x.grpcClientOptions()
+	clientOptions, err := x.clientOptions()
 	if err != nil {
 		return nil, err
 	}
@@ -1530,7 +1557,7 @@ func (x *pid) remotingClient(host string, port int) (internalpbconnect.RemotingS
 	return internalpbconnect.NewRemotingServiceClient(
 		x.httpClient,
 		http.URL(host, port),
-		clientConnectionOptions...,
+		clientOptions...,
 	), nil
 }
 

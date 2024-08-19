@@ -50,9 +50,9 @@ func New() *EventsStream {
 // AddSubscriber adds a subscriber
 func (b *EventsStream) AddSubscriber() Subscriber {
 	b.mu.Lock()
-	defer b.mu.Unlock()
 	c := newSubscriber()
 	b.subs[c.ID()] = c
+	b.mu.Unlock()
 	return c
 }
 
@@ -90,8 +90,9 @@ func (b *EventsStream) Broadcast(msg any, topics []string) {
 func (b *EventsStream) SubscribersCount(topic string) int {
 	// get total subscribers subscribed to given topic.
 	b.mu.Lock()
-	defer b.mu.Unlock()
-	return len(b.topics[topic])
+	count := len(b.topics[topic])
+	b.mu.Unlock()
+	return count
 }
 
 // Subscribe subscribes a subscriber to a topic
@@ -157,4 +158,12 @@ func (b *EventsStream) Shutdown() {
 	}
 	b.subs = Subscribers{}
 	b.topics = map[string]Subscribers{}
+}
+
+// Subscribers returns the list of subscribers
+func (b *EventsStream) Subscribers() Subscribers {
+	b.mu.Lock()
+	subs := b.subs
+	b.mu.Unlock()
+	return subs
 }
