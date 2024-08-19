@@ -1286,7 +1286,9 @@ func (x *pid) handleReceived(received ReceiveContext) {
 	// handle panic when the processing of the message fails
 	defer func() {
 		if r := recover(); r != nil {
+			x.fieldsLocker.Lock()
 			x.errChan <- fmt.Errorf("%s", r)
+			x.fieldsLocker.Unlock()
 		}
 	}()
 
@@ -1400,7 +1402,6 @@ func (x *pid) unsetBehaviorStacked() {
 // doStop stops the actor
 func (x *pid) doStop(ctx context.Context) error {
 	x.isRunning.Store(false)
-	close(x.errChan)
 
 	// TODO: just signal stash processing done and ignore the messages or process them
 	if x.stashBuffer != nil {
@@ -1433,7 +1434,7 @@ func (x *pid) doStop(ctx context.Context) error {
 	}()
 
 	<-tickerStopSig
-	//x.shutdownSignal <- types.Unit{}
+	close(x.errChan)
 	x.httpClient.CloseIdleConnections()
 
 	x.freeWatchees(ctx)
