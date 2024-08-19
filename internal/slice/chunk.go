@@ -22,7 +22,7 @@
  * SOFTWARE.
  */
 
-package slices
+package slice
 
 // Chunk helps chunk a slice into equal size
 func Chunk[T any](slice []T, chunkSize int) [][]T {

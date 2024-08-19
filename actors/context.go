@@ -86,7 +86,7 @@ type ReceiveContext interface {
 	// When TellStream encounter a single message it will fall back to a Tell call.
 	BatchTell(to PID, messages ...proto.Message)
 	// Ask sends a synchronous message to another actor and expect a response. This method is good when interacting with a child actor.
-	// Ask has a timeout which can cause the sender to panic. When ask times out, the receiving actor does not know and may still process the message.
+	// Ask has a timeout which can cause the sender to return an error. When ask times out, the receiving actor does not know and may still process the message.
 	// It is recommended to set a good timeout to quickly receive response and try to avoid false positives
 	Ask(to PID, message proto.Message) (response proto.Message)
 	// BatchAsk sends a synchronous bunch of messages to the given PID and expect responses in the same order as the messages.
@@ -117,7 +117,7 @@ type ReceiveContext interface {
 	// All current messages in the mailbox will be processed before the actor shutdown after a period of time
 	// that can be configured. All child actors will be gracefully shutdown.
 	Shutdown()
-	// Spawn creates a child actor or panic
+	// Spawn creates a child actor or sets the context error
 	Spawn(name string, actor Actor) PID
 	// Children returns the list of all the children of the given actor
 	Children() []PID
@@ -132,13 +132,14 @@ type ReceiveContext interface {
 	// RemoteReSpawn restarts an actor on a remote node.
 	RemoteReSpawn(host string, port int, name string)
 	// Err is used instead of panicking within a message handler.
-	// One can also call panic which is not the recommended way
 	Err(err error)
 	// PipeTo processes a long-running task and pipes the result to the provided actor.
 	// The successful result of the task will be put onto the provided actor mailbox.
 	// This is useful when interacting with external services.
 	// It’s common that you would like to use the value of the response in the actor when the long-running task is completed
 	PipeTo(to PID, task future.Task)
+
+	getError() error
 }
 
 type receiveContext struct {
@@ -150,6 +151,7 @@ type receiveContext struct {
 	recipient    PID
 	async        bool
 	sendTime     atomic.Time
+	err          error
 }
 
 // force compilation error
@@ -186,11 +188,9 @@ func (c *receiveContext) Self() PID {
 }
 
 // Err is used instead of panicking within a message handler.
-// One can also call panic which is not the recommended way
 func (c *receiveContext) Err(err error) {
 	if err != nil {
-		// this will be recovered
-		panic(err)
+		c.err = err
 	}
 }
 
@@ -198,8 +198,8 @@ func (c *receiveContext) Err(err error) {
 func (c *receiveContext) Response(resp proto.Message) {
 	// only set a response when the message is sync message
 	if !c.async {
-		defer close(c.response)
 		c.response <- resp
+		close(c.response)
 	}
 }
 
@@ -282,7 +282,7 @@ func (c *receiveContext) Tell(to PID, message proto.Message) {
 	recipient := c.recipient
 	ctx := context.WithoutCancel(c.ctx)
 	if err := recipient.Tell(ctx, to, message); err != nil {
-		panic(err)
+		c.Err(err)
 	}
 }
 
@@ -299,7 +299,7 @@ func (c *receiveContext) BatchTell(to PID, messages ...proto.Message) {
 }
 
 // Ask sends a synchronous message to another actor and expect a response. This method is good when interacting with a child actor.
-// Ask has a timeout which can cause the sender to panic. When ask times out, the receiving actor does not know and may still process the message.
+// Ask has a timeout which can cause the sender to set the context error. When ask times out, the receiving actor does not know and may still process the message.
 // It is recommended to set a good timeout to quickly receive response and try to avoid false positives
 func (c *receiveContext) Ask(to PID, message proto.Message) (response proto.Message) {
 	recipient := c.recipient
@@ -391,7 +391,7 @@ func (c *receiveContext) Shutdown() {
 	}
 }
 
-// Spawn creates a child actor or panic
+// Spawn creates a child actor or return error
 func (c *receiveContext) Spawn(name string, actor Actor) PID {
 	recipient := c.recipient
 	ctx := context.WithoutCancel(c.ctx)
@@ -418,7 +418,7 @@ func (c *receiveContext) Child(name string) PID {
 }
 
 // Stop forces the child Actor under the given name to terminate after it finishes processing its current message.
-// Nothing happens if child is already stopped. However, it panics when the child cannot be stopped.
+// Nothing happens if child is already stopped. However, it returns an error when the child cannot be stopped.
 func (c *receiveContext) Stop(child PID) {
 	recipient := c.recipient
 	ctx := context.WithoutCancel(c.ctx)
@@ -451,7 +451,7 @@ func (c *receiveContext) Forward(to PID) {
 // Unhandled is used to handle unhandled messages instead of throwing error
 func (c *receiveContext) Unhandled() {
 	me := c.recipient
-	me.handleError(c, ErrUnhandled)
+	me.onError(c, ErrUnhandled)
 }
 
 // RemoteReSpawn restarts an actor on a remote node.
@@ -473,4 +473,9 @@ func (c *receiveContext) PipeTo(to PID, task future.Task) {
 	if err := recipient.PipeTo(ctx, to, task); err != nil {
 		c.Err(err)
 	}
+}
+
+// getError returns any error during message processing
+func (c *receiveContext) getError() error {
+	return c.err
 }

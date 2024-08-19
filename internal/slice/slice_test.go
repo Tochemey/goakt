@@ -20,55 +20,34 @@
  * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
- *
  */
 
-package slices
+package slice
 
 import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
-func TestChunk(t *testing.T) {
-	t.Run("With empty slice", func(t *testing.T) {
-		var items []int
-		chunkSize := 2
-		chunks := Chunk(items, chunkSize)
-		require.Empty(t, chunks)
-	})
-	t.Run("With chunk size a dividend of total number of items", func(t *testing.T) {
-		items := []int{2, 7, 9, 4, 6, 10}
-		chunkSize := 2
-		chunks := Chunk(items, chunkSize)
-		expected := [][]int{
-			{2, 7},
-			{9, 4},
-			{6, 10},
-		}
+func TestSlice(t *testing.T) {
+	// create a concurrent slice of integer
+	sl := New[int]()
 
-		require.EqualValues(t, len(expected), len(chunks))
-		require.ElementsMatch(t, expected[0], chunks[0])
-		require.ElementsMatch(t, expected[1], chunks[1])
-		assert.ElementsMatch(t, expected[2], chunks[2])
-	})
-	t.Run("With chunk size not a dividend of total number of items", func(t *testing.T) {
-		items := []int{2, 7, 9, 4, 6, 10, 11}
-		chunkSize := 2
-		chunks := Chunk(items, chunkSize)
-		expected := [][]int{
-			{2, 7},
-			{9, 4},
-			{6, 10},
-			{11},
-		}
+	// add some items
+	sl.Append(2)
+	sl.Append(4)
+	sl.Append(5)
 
-		require.EqualValues(t, len(expected), len(chunks))
-		require.ElementsMatch(t, expected[0], chunks[0])
-		require.ElementsMatch(t, expected[1], chunks[1])
-		require.ElementsMatch(t, expected[2], chunks[2])
-		assert.ElementsMatch(t, expected[3], chunks[3])
-	})
+	// assert the length
+	assert.EqualValues(t, 3, sl.Len())
+	assert.NotEmpty(t, sl.Items())
+	assert.Len(t, sl.Items(), 3)
+	// get the element at index 2
+	assert.EqualValues(t, 5, sl.Get(2))
+	// remove the element at index 1
+	sl.Delete(1)
+	// assert the length
+	assert.EqualValues(t, 2, sl.Len())
+	assert.Nil(t, sl.Get(4))
 }

@@ -60,6 +60,7 @@ func TestBroker(t *testing.T) {
 	t.Run("With Unsubscription", func(t *testing.T) {
 		broker := New()
 
+		require.Empty(t, broker.Subscribers())
 		// add consumer
 		cons := broker.AddSubscriber()
 		require.NotNil(t, cons)

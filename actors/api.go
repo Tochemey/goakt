@@ -72,7 +72,7 @@ func Ask(ctx context.Context, to PID, message proto.Message, timeout time.Durati
 		case <-await:
 			to.setLastProcessingDuration(time.Since(to.getLastProcessingTime()))
 			err = ErrRequestTimeout
-			to.handleError(messageContext, err)
+			to.onError(messageContext, err)
 			return
 		}
 	}
@@ -148,7 +148,7 @@ func BatchAsk(ctx context.Context, to PID, timeout time.Duration, messages ...pr
 			case <-await:
 				to.setLastProcessingDuration(time.Since(to.getLastProcessingTime()))
 				err = ErrRequestTimeout
-				to.handleError(messageContext, err)
+				to.onError(messageContext, err)
 				return
 			}
 		}

@@ -22,12 +22,12 @@
  * SOFTWARE.
  */
 
-package slices
+package slice
 
 import "sync"
 
-// Safe type that can be safely shared between goroutines.
-type Safe[T any] struct {
+// Slice type that can be safely shared between goroutines.
+type Slice[T any] struct {
 	sync.RWMutex
 	items []T
 }
@@ -38,9 +38,9 @@ type Item[T any] struct {
 	Value T
 }
 
-// NewSafe creates a new synchronized slice.
-func NewSafe[T any]() *Safe[T] {
-	cs := &Safe[T]{
+// New creates a new synchronized slice.
+func New[T any]() *Slice[T] {
+	cs := &Slice[T]{
 		items: make([]T, 0),
 	}
 
@@ -48,21 +48,22 @@ func NewSafe[T any]() *Safe[T] {
 }
 
 // Len returns the number of items
-func (cs *Safe[T]) Len() int {
+func (cs *Slice[T]) Len() int {
 	cs.Lock()
-	defer cs.Unlock()
-	return len(cs.items)
+	length := len(cs.items)
+	cs.Unlock()
+	return length
 }
 
 // Append adds an item to the concurrent slice.
-func (cs *Safe[T]) Append(item T) {
+func (cs *Slice[T]) Append(item T) {
 	cs.Lock()
-	defer cs.Unlock()
 	cs.items = append(cs.items, item)
+	cs.Unlock()
 }
 
 // Get returns the slice item at the given index
-func (cs *Safe[T]) Get(index int) (item any) {
+func (cs *Slice[T]) Get(index int) (item any) {
 	cs.RLock()
 	defer cs.RUnlock()
 	if isSet(cs.items, index) {
@@ -72,36 +73,33 @@ func (cs *Safe[T]) Get(index int) (item any) {
 }
 
 // Delete an item from the slice
-func (cs *Safe[T]) Delete(index int) {
+func (cs *Slice[T]) Delete(index int) {
 	cs.RLock()
-	defer cs.RUnlock()
+	isSet := isSet(cs.items, index)
+	cs.RUnlock()
 	var nilState T
-	if isSet(cs.items, index) {
+	if isSet {
+		cs.Lock()
 		// Pop the element at index from the slice
 		cs.items[index] = cs.items[len(cs.items)-1] // Copy last element to index.
 		cs.items[len(cs.items)-1] = nilState        // Erase last element (write zero value).
 		cs.items = cs.items[:len(cs.items)-1]       // Truncate slice.
+		cs.Unlock()
 	}
+}
+
+// Items returns the list of items
+func (cs *Slice[T]) Items() []Item[T] {
+	cs.RLock()
+	items := cs.items
+	cs.RUnlock()
+	output := make([]Item[T], len(items))
+	for index, value := range items {
+		output[index] = Item[T]{Index: index, Value: value}
+	}
+	return output
 }
 
 func isSet[T any](arr []T, index int) bool {
 	return len(arr) > index
-}
-
-// Iter iterates the items in the concurrent slice.
-// Each item is sent over a channel, so that
-// we can iterate over the slice using the builtin range keyword.
-func (cs *Safe[T]) Iter() <-chan Item[T] {
-	c := make(chan Item[T])
-	f := func() {
-		cs.RLock()
-		defer cs.RUnlock()
-		for index, value := range cs.items {
-			c <- Item[T]{Index: index, Value: value}
-		}
-		close(c)
-	}
-	go f()
-
-	return c
 }

@@ -35,7 +35,7 @@ import (
 	"github.com/tochemey/goakt/v2/goaktpb"
 	"github.com/tochemey/goakt/v2/internal/cluster"
 	"github.com/tochemey/goakt/v2/internal/internalpb"
-	"github.com/tochemey/goakt/v2/internal/slices"
+	"github.com/tochemey/goakt/v2/internal/slice"
 )
 
 // redistribute is used when cluster topology changes particularly
@@ -92,7 +92,7 @@ func (x *actorSystem) redistribute(ctx context.Context, event *cluster.Event) er
 		quotient := actorsCount / totalPeers
 		remainder := actorsCount % totalPeers
 		leaderActors = peerState.GetActors()[:remainder]
-		chunks = slices.Chunk[*internalpb.WireActor](peerState.GetActors()[remainder:], quotient)
+		chunks = slice.Chunk[*internalpb.WireActor](peerState.GetActors()[remainder:], quotient)
 	}
 
 	if len(chunks) > 0 {
