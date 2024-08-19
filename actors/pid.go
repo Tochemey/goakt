@@ -275,7 +275,7 @@ type pid struct {
 	processedCount *atomic.Int64
 	metricEnabled  atomic.Bool
 	metrics        *metric.ActorMetric
-	errChan        chan error
+	errBuffer      *queue.Queue[error]
 }
 
 // enforce compilation error
@@ -1172,7 +1172,7 @@ func (x *pid) init(ctx context.Context) error {
 
 	x.fieldsLocker.Lock()
 	x.isRunning.Store(true)
-	x.errChan = make(chan error, 1)
+	x.errBuffer = queue.New[error]()
 	x.fieldsLocker.Unlock()
 
 	x.logger.Info("Initialization process successfully completed.")
@@ -1286,9 +1286,7 @@ func (x *pid) handleReceived(received ReceiveContext) {
 	// handle panic when the processing of the message fails
 	defer func() {
 		if r := recover(); r != nil {
-			x.fieldsLocker.Lock()
-			x.errChan <- fmt.Errorf("%s", r)
-			x.fieldsLocker.Unlock()
+			x.errBuffer.Push(fmt.Errorf("%s", r))
 		}
 	}()
 
@@ -1308,10 +1306,15 @@ func (x *pid) errorLoop() {
 		if !x.isRunning.Load() {
 			return
 		}
-		for err := range x.errChan {
-			for item := range x.watchersList.Iter() {
-				item.Value.ErrChan <- err
-			}
+		if x.errBuffer.IsClosed() {
+			return
+		}
+		err, ok := x.errBuffer.Pop()
+		if !ok {
+			continue
+		}
+		for item := range x.watchersList.Iter() {
+			item.Value.ErrChan <- err
 		}
 	}
 }
@@ -1434,7 +1437,7 @@ func (x *pid) doStop(ctx context.Context) error {
 	}()
 
 	<-tickerStopSig
-	close(x.errChan)
+	x.errBuffer.Close()
 	x.httpClient.CloseIdleConnections()
 
 	x.freeWatchees(ctx)
