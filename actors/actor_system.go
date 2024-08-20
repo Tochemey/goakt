@@ -1173,7 +1173,7 @@ func (x *actorSystem) enableRemoting(ctx context.Context) {
 // reset the actor system
 func (x *actorSystem) reset() {
 	x.telemetry = nil
-	x.actors.close()
+	x.actors.reset()
 	x.name = ""
 	x.cluster = nil
 }
