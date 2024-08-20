@@ -636,18 +636,17 @@ func (x *pid) Ask(ctx context.Context, to PID, message proto.Message) (response 
 
 	messageContext := newReceiveContext(ctx, x, to, message, false)
 	to.doReceive(messageContext)
+	timeout := x.askTimeout.Load()
 
-	for await := time.After(x.askTimeout.Load()); ; {
-		select {
-		case response = <-messageContext.response:
-			x.recordLastReceivedDurationMetric(ctx)
-			return
-		case <-await:
-			x.recordLastReceivedDurationMetric(ctx)
-			err = ErrRequestTimeout
-			x.onError(messageContext, err)
-			return nil, err
-		}
+	select {
+	case result := <-messageContext.response:
+		x.recordLastReceivedDurationMetric(ctx)
+		return result, nil
+	case <-time.After(timeout):
+		x.recordLastReceivedDurationMetric(ctx)
+		err = ErrRequestTimeout
+		x.onError(messageContext, err)
+		return nil, err
 	}
 }
 
@@ -1192,8 +1191,8 @@ func (x *pid) reset() {
 	x.initMaxRetries.Store(DefaultInitMaxRetries)
 	x.lastReceivedDuration.Store(0)
 	x.initTimeout.Store(DefaultInitTimeout)
-	x.children = newPIDMap(10)
-	x.watchersList = slice.New[*watcher]()
+	x.children.reset()
+	x.watchersList.Reset()
 	x.telemetry = telemetry.New()
 	x.resetBehavior()
 	if x.metricEnabled.Load() {

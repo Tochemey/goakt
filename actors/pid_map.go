@@ -85,7 +85,7 @@ func (m *pidMap) pids() []PID {
 	return out
 }
 
-func (m *pidMap) close() {
+func (m *pidMap) reset() {
 	m.mu.Lock()
 	m.mappings = make(map[string]PID)
 	m.mu.Unlock()

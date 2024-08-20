@@ -64,17 +64,15 @@ func Ask(ctx context.Context, to PID, message proto.Message, timeout time.Durati
 	to.doReceive(messageContext)
 
 	// await patiently to receive the response from the actor
-	for await := time.After(timeout); ; {
-		select {
-		case response = <-messageContext.response:
-			to.setLastProcessingDuration(time.Since(to.getLastProcessingTime()))
-			return
-		case <-await:
-			to.setLastProcessingDuration(time.Since(to.getLastProcessingTime()))
-			err = ErrRequestTimeout
-			to.onError(messageContext, err)
-			return
-		}
+	select {
+	case response = <-messageContext.response:
+		to.setLastProcessingDuration(time.Since(to.getLastProcessingTime()))
+		return
+	case <-time.After(timeout):
+		to.setLastProcessingDuration(time.Since(to.getLastProcessingTime()))
+		err = ErrRequestTimeout
+		to.onError(messageContext, err)
+		return
 	}
 }
 

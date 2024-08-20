@@ -100,6 +100,12 @@ func (cs *Slice[T]) Items() []Item[T] {
 	return output
 }
 
+func (cs *Slice[T]) Reset() {
+	cs.Lock()
+	cs.items = make([]T, 0)
+	cs.Unlock()
+}
+
 func isSet[T any](arr []T, index int) bool {
 	return len(arr) > index
 }
