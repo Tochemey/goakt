@@ -75,7 +75,7 @@ func main() {
 	done := make(chan struct{})
 	go func() {
 		for await := time.After(duration); ; {
-			select {
+			select { // nolint
 			case <-await:
 				done <- struct{}{}
 				return
@@ -102,7 +102,6 @@ func main() {
 	// stop the actor system
 	_ = actorSystem.Stop(ctx)
 	os.Exit(0)
-
 }
 
 type Ping struct {
