@@ -133,6 +133,7 @@ func (b *Benchmark) BenchTell(ctx context.Context) error {
 	wg := sync.WaitGroup{}
 	wg.Add(b.workersCount)
 	deadline := time.Now().Add(b.duration)
+
 	for i := 0; i < b.workersCount; i++ {
 		go func() {
 			defer wg.Done()
