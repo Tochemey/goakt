@@ -177,8 +177,8 @@ type PID interface {
 	unstashAll() error
 	// unstash unstashes the oldest message in the stash and prepends to the mailbox
 	unstash() error
-	// toDeadletters add the given message to the deadletters queue
-	onError(receiveCtx ReceiveContext, err error)
+	// toDeadletterQueue add the given message to the deadletters queue
+	toDeadletterQueue(receiveCtx ReceiveContext, err error)
 	// removeChild is a utility function to remove child actor
 	removeChild(pid PID)
 
@@ -634,18 +634,18 @@ func (x *pid) Ask(ctx context.Context, to PID, message proto.Message) (response 
 		return nil, ErrDead
 	}
 
-	messageContext := newReceiveContext(ctx, x, to, message, false)
-	to.doReceive(messageContext)
+	receiveContext := newReceiveContext(ctx, x, to, message, false)
+	to.doReceive(receiveContext)
 	timeout := x.askTimeout.Load()
 
 	select {
-	case result := <-messageContext.response:
+	case result := <-receiveContext.response:
 		x.recordLastReceivedDurationMetric(ctx)
 		return result, nil
 	case <-time.After(timeout):
 		x.recordLastReceivedDurationMetric(ctx)
 		err = ErrRequestTimeout
-		x.onError(messageContext, err)
+		x.toDeadletterQueue(receiveContext, err)
 		return nil, err
 	}
 }
@@ -656,8 +656,7 @@ func (x *pid) Tell(ctx context.Context, to PID, message proto.Message) error {
 		return ErrDead
 	}
 
-	messageContext := newReceiveContext(ctx, x, to, message, true)
-	to.doReceive(messageContext)
+	to.doReceive(newReceiveContext(ctx, x, to, message, true))
 	x.recordLastReceivedDurationMetric(ctx)
 	return nil
 }
@@ -676,12 +675,10 @@ func (x *pid) BatchTell(ctx context.Context, to PID, messages ...proto.Message) 
 	}
 
 	for i := 0; i < len(messages); i++ {
-		message := messages[i]
-		messageContext := newReceiveContext(ctx, x, to, message, true)
-		to.doReceive(messageContext)
+		to.doReceive(newReceiveContext(ctx, x, to, messages[i], true))
+		x.recordLastReceivedDurationMetric(ctx)
 	}
 
-	x.recordLastReceivedDurationMetric(ctx)
 	return nil
 }
 
@@ -697,25 +694,11 @@ func (x *pid) BatchAsk(ctx context.Context, to PID, messages ...proto.Message) (
 	defer close(responses)
 
 	for i := 0; i < len(messages); i++ {
-		message := messages[i]
-		messageContext := newReceiveContext(ctx, x, to, message, false)
-		to.doReceive(messageContext)
-
-		// await patiently to receive the response from the actor
-	timerLoop:
-		for await := time.After(x.askTimeout.Load()); ; {
-			select {
-			case resp := <-messageContext.response:
-				responses <- resp
-				x.recordLastReceivedDurationMetric(ctx)
-				break timerLoop
-			case <-await:
-				err = ErrRequestTimeout
-				x.recordLastReceivedDurationMetric(ctx)
-				x.onError(messageContext, err)
-				return nil, err
-			}
+		response, err := x.Ask(ctx, to, messages[i])
+		if err != nil {
+			return nil, err
 		}
+		responses <- response
 	}
 	return
 }
@@ -1145,9 +1128,9 @@ func (x *pid) watchees() *pidMap {
 }
 
 // doReceive pushes a given message to the actor receiveContextBuffer
-func (x *pid) doReceive(ctx ReceiveContext) {
+func (x *pid) doReceive(receiveCtx ReceiveContext) {
 	x.lastProcessingTime.Store(time.Now())
-	x.mailbox.Push(ctx)
+	x.mailbox.Push(receiveCtx)
 }
 
 // init initializes the given actor and init processing messages
@@ -1283,9 +1266,8 @@ func (x *pid) handleReceived(received ReceiveContext) {
 	// handle panic or any error during processing
 	defer x.recovery(received)
 	// pick the current behvior from the stack
-	behaviorStack := x.behaviorStack
 	// send the message to the current actor behavior
-	if behavior, ok := behaviorStack.Peek(); ok {
+	if behavior, ok := x.behaviorStack.Peek(); ok {
 		// set the total messages processed
 		x.processedCount.Inc()
 		// call the behavior to handle the message
@@ -1295,22 +1277,12 @@ func (x *pid) handleReceived(received ReceiveContext) {
 
 // recovery is called upon after message is processed
 func (x *pid) recovery(received ReceiveContext) {
-	// track some processing panic error
-	var err error
 	if r := recover(); r != nil {
-		err = fmt.Errorf("%s", r)
+		x.notifyWatchers(fmt.Errorf("%s", r))
+		return
 	}
-
 	// no panic
-	if err == nil {
-		// check whether the proper way to return error is used
-		err = received.getError()
-	}
-
-	// only handle error when defined
-	if err != nil {
-		x.onError(received, err)
-	}
+	x.notifyWatchers(received.getError())
 }
 
 // passivationLoop checks whether the actor is processing public or not.
@@ -1462,20 +1434,13 @@ func (x *pid) removeChild(pid PID) {
 	}
 }
 
-// onError handles the error during a message handling
-func (x *pid) onError(receiveCtx ReceiveContext, err error) {
-	// all unhandled error goes to deadletter
-	if !errors.Is(err, ErrUnhandled) {
-		// check whether there are supervisors and push the error message to them
-		if x.watchers().Len() != 0 {
-			// TODO: roundrobin pick or all of them
-			for _, item := range x.watchers().Items() {
-				item.Value.ErrChan <- err
-			}
-			return
+// notifyWatchers send error to watchers
+func (x *pid) notifyWatchers(err error) {
+	if err != nil {
+		for _, item := range x.watchers().Items() {
+			item.Value.ErrChan <- err
 		}
 	}
-	x.toDeadletterQueue(receiveCtx, err)
 }
 
 // toDeadletterQueue sends message to deadletter queue

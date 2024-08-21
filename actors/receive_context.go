@@ -451,7 +451,7 @@ func (c *receiveContext) Forward(to PID) {
 // Unhandled is used to handle unhandled messages instead of throwing error
 func (c *receiveContext) Unhandled() {
 	me := c.recipient
-	me.onError(c, ErrUnhandled)
+	me.toDeadletterQueue(c, ErrUnhandled)
 }
 
 // RemoteReSpawn restarts an actor on a remote node.
