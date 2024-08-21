@@ -133,20 +133,14 @@ func BatchAsk(ctx context.Context, to PID, timeout time.Duration, messages ...pr
 	for i := 0; i < len(messages); i++ {
 		receiveContext := newReceiveContext(ctx, NoSender, to, messages[i], false)
 		to.doReceive(receiveContext)
-
-		// await patiently to receive the response from the actor
-	timerLoop:
-		for await := time.After(timeout); ; {
-			select {
-			case resp := <-receiveContext.response:
-				to.setLastProcessingDuration(time.Since(to.getLastProcessingTime()))
-				responses <- resp
-				break timerLoop
-			case <-await:
-				to.setLastProcessingDuration(time.Since(to.getLastProcessingTime()))
-				to.toDeadletterQueue(receiveContext, ErrRequestTimeout)
-				return
-			}
+		select {
+		case result := <-receiveContext.response:
+			responses <- result
+			to.setLastProcessingDuration(time.Since(to.getLastProcessingTime()))
+		case <-time.After(timeout):
+			to.setLastProcessingDuration(time.Since(to.getLastProcessingTime()))
+			to.toDeadletterQueue(receiveContext, ErrRequestTimeout)
+			return nil, ErrRequestTimeout
 		}
 	}
 	return
