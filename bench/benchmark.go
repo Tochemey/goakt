@@ -53,7 +53,7 @@ func (p *Benchmarker) PreStart(context.Context) error {
 	return nil
 }
 
-func (p *Benchmarker) Receive(ctx actors.ReceiveContext) {
+func (p *Benchmarker) Receive(ctx *actors.ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *goaktpb.PostStart:
 	case *benchmarkpb.BenchTell:

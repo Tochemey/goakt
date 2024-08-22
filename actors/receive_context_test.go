@@ -118,12 +118,11 @@ func TestReceiveContext(t *testing.T) {
 		require.NotNil(t, pid1)
 
 		// create an instance of receive context
-		context := &receiveContext{
+		context := &ReceiveContext{
 			ctx:       ctx,
 			message:   new(testpb.TestSend),
 			sender:    NoSender,
 			recipient: pid1,
-			async:     true,
 		}
 
 		// create actor2
@@ -156,12 +155,11 @@ func TestReceiveContext(t *testing.T) {
 		require.NotNil(t, pid1)
 
 		// create an instance of receive context
-		context := &receiveContext{
+		context := &ReceiveContext{
 			ctx:       ctx,
 			message:   new(testpb.TestSend),
 			sender:    NoSender,
 			recipient: pid1,
-			async:     true,
 		}
 
 		// create actor2
@@ -196,12 +194,11 @@ func TestReceiveContext(t *testing.T) {
 		require.NotNil(t, pid1)
 
 		// create an instance of receive context
-		context := &receiveContext{
+		context := &ReceiveContext{
 			ctx:       ctx,
 			message:   new(testpb.TestSend),
 			sender:    NoSender,
 			recipient: pid1,
-			async:     true,
 		}
 
 		// create actor2
@@ -236,12 +233,11 @@ func TestReceiveContext(t *testing.T) {
 		require.NotNil(t, pid1)
 
 		// create an instance of receive context
-		context := &receiveContext{
+		context := &ReceiveContext{
 			ctx:       ctx,
 			message:   new(testpb.TestSend),
 			sender:    NoSender,
 			recipient: pid1,
-			async:     true,
 		}
 
 		// create actor2
@@ -302,12 +298,11 @@ func TestReceiveContext(t *testing.T) {
 		require.NotNil(t, pid1)
 
 		// create an instance of receive context
-		context := &receiveContext{
+		context := &ReceiveContext{
 			ctx:       ctx,
 			message:   new(testpb.TestSend),
 			sender:    NoSender,
 			recipient: pid1,
-			async:     true,
 		}
 
 		// get the address of the exchanger actor one
@@ -364,12 +359,11 @@ func TestReceiveContext(t *testing.T) {
 		require.NotNil(t, pid1)
 
 		// create an instance of receive context
-		context := &receiveContext{
+		context := &ReceiveContext{
 			ctx:       ctx,
 			message:   new(testpb.TestSend),
 			sender:    NoSender,
 			recipient: pid1,
-			async:     true,
 		}
 
 		context.RemoteAsk(&goaktpb.Address{
@@ -429,12 +423,11 @@ func TestReceiveContext(t *testing.T) {
 		require.NotNil(t, pid1)
 
 		// create an instance of receive context
-		context := &receiveContext{
+		context := &ReceiveContext{
 			ctx:       ctx,
 			message:   new(testpb.TestSend),
 			sender:    NoSender,
 			recipient: pid1,
-			async:     true,
 		}
 
 		// get the address of the exchanger actor one
@@ -488,12 +481,11 @@ func TestReceiveContext(t *testing.T) {
 		require.NotNil(t, pid1)
 
 		// create an instance of receive context
-		context := &receiveContext{
+		context := &ReceiveContext{
 			ctx:       ctx,
 			message:   new(testpb.TestSend),
 			sender:    NoSender,
 			recipient: pid1,
-			async:     true,
 		}
 
 		// send the message to the exchanger actor one using remote messaging
@@ -550,12 +542,11 @@ func TestReceiveContext(t *testing.T) {
 		require.NotNil(t, pid1)
 
 		// create an instance of receive context
-		context := &receiveContext{
+		context := &ReceiveContext{
 			ctx:       ctx,
 			message:   new(testpb.TestSend),
 			sender:    NoSender,
 			recipient: pid1,
-			async:     true,
 		}
 
 		require.Nil(t, context.RemoteLookup(host, remotingPort, actorName2))
@@ -605,12 +596,11 @@ func TestReceiveContext(t *testing.T) {
 		require.NotNil(t, pid1)
 
 		// create an instance of receive context
-		context := &receiveContext{
+		context := &ReceiveContext{
 			ctx:       ctx,
 			message:   new(testpb.TestSend),
 			sender:    NoSender,
 			recipient: pid1,
-			async:     true,
 		}
 		context.RemoteLookup(host, remotingPort, actorName2)
 		require.Error(t, context.getError())
@@ -638,12 +628,11 @@ func TestReceiveContext(t *testing.T) {
 		require.NotNil(t, pid1)
 
 		// create an instance of receive context
-		context := &receiveContext{
+		context := &ReceiveContext{
 			ctx:       ctx,
 			message:   new(testpb.TestSend),
 			sender:    NoSender,
 			recipient: pid1,
-			async:     true,
 		}
 
 		context.Shutdown()
@@ -663,27 +652,26 @@ func TestReceiveContext(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
 
-		// create an instance of receive context
-		context := &receiveContext{
+		// create an instance of receive receiveCtx
+		receiveCtx := &ReceiveContext{
 			ctx:       ctx,
 			message:   new(testpb.TestSend),
 			sender:    NoSender,
 			recipient: parent,
-			async:     true,
 		}
 
 		// create the child actor
 		name := "monitored"
-		child := context.Spawn(name, newTestSupervised())
+		child := receiveCtx.Spawn(name, newTestSupervised())
 		assert.NotNil(t, child)
-		assert.Len(t, context.Children(), 1)
+		assert.Len(t, receiveCtx.Children(), 1)
 
-		actual := context.Child(name)
+		actual := receiveCtx.Child(name)
 		require.NotNil(t, actual)
 		assert.Equal(t, child.ActorPath().String(), actual.ActorPath().String())
 
 		t.Cleanup(func() {
-			context.Shutdown()
+			receiveCtx.Shutdown()
 		})
 	})
 	t.Run("With failed SpawnChild", func(t *testing.T) {
@@ -701,12 +689,11 @@ func TestReceiveContext(t *testing.T) {
 		assert.NotNil(t, parent)
 
 		// create an instance of receive context
-		context := &receiveContext{
+		context := &ReceiveContext{
 			ctx:       ctx,
 			message:   new(testpb.TestSend),
 			sender:    NoSender,
 			recipient: parent,
-			async:     true,
 		}
 
 		// stop the actor
@@ -731,12 +718,11 @@ func TestReceiveContext(t *testing.T) {
 		assert.NotNil(t, parent)
 
 		// create an instance of receive context
-		context := &receiveContext{
+		context := &ReceiveContext{
 			ctx:       ctx,
 			message:   new(testpb.TestSend),
 			sender:    NoSender,
 			recipient: parent,
-			async:     true,
 		}
 
 		// create the child actor
@@ -769,12 +755,11 @@ func TestReceiveContext(t *testing.T) {
 		assert.NotNil(t, parent)
 
 		// create an instance of receive context
-		context := &receiveContext{
+		context := &ReceiveContext{
 			ctx:       ctx,
 			message:   new(testpb.TestSend),
 			sender:    NoSender,
 			recipient: parent,
-			async:     true,
 		}
 
 		// create the child actor
@@ -807,12 +792,11 @@ func TestReceiveContext(t *testing.T) {
 		assert.NotNil(t, parent)
 
 		// create an instance of receive context
-		context := &receiveContext{
+		context := &ReceiveContext{
 			ctx:       ctx,
 			message:   new(testpb.TestSend),
 			sender:    NoSender,
 			recipient: parent,
-			async:     true,
 		}
 
 		// create the child actor
@@ -845,12 +829,11 @@ func TestReceiveContext(t *testing.T) {
 		assert.NotNil(t, parent)
 
 		// create an instance of receive context
-		context := &receiveContext{
+		context := &ReceiveContext{
 			ctx:       ctx,
 			message:   new(testpb.TestSend),
 			sender:    NoSender,
 			recipient: parent,
-			async:     true,
 		}
 
 		// create the child actor
@@ -887,12 +870,11 @@ func TestReceiveContext(t *testing.T) {
 		assert.NotNil(t, parent)
 
 		// create an instance of receive context
-		context := &receiveContext{
+		context := &ReceiveContext{
 			ctx:       ctx,
 			message:   new(testpb.TestSend),
 			sender:    NoSender,
 			recipient: parent,
-			async:     true,
 		}
 
 		time.Sleep(time.Second)
@@ -918,12 +900,11 @@ func TestReceiveContext(t *testing.T) {
 		assert.NotNil(t, parent)
 
 		// create an instance of receive context
-		context := &receiveContext{
+		context := &ReceiveContext{
 			ctx:       ctx,
 			message:   new(testpb.TestSend),
 			sender:    NoSender,
 			recipient: parent,
-			async:     true,
 		}
 
 		name := "monitored"
@@ -956,12 +937,11 @@ func TestReceiveContext(t *testing.T) {
 		assert.NotNil(t, parent)
 
 		// create an instance of receive context
-		context := &receiveContext{
+		context := &ReceiveContext{
 			ctx:       ctx,
 			message:   new(testpb.TestSend),
 			sender:    NoSender,
 			recipient: parent,
-			async:     true,
 		}
 
 		// create the child actor
@@ -997,12 +977,11 @@ func TestReceiveContext(t *testing.T) {
 		assert.NotNil(t, parent)
 
 		// create an instance of receive context
-		context := &receiveContext{
+		context := &ReceiveContext{
 			ctx:       ctx,
 			message:   new(testpb.TestSend),
 			sender:    NoSender,
 			recipient: parent,
-			async:     true,
 		}
 
 		// create the child actor
@@ -1038,12 +1017,11 @@ func TestReceiveContext(t *testing.T) {
 		require.NotNil(t, pid1)
 
 		// create an instance of receive context
-		context := &receiveContext{
+		context := &ReceiveContext{
 			ctx:       ctx,
 			message:   new(testpb.TestSend),
 			sender:    NoSender,
 			recipient: pid1,
-			async:     true,
 		}
 
 		context.Shutdown()
@@ -1122,12 +1100,11 @@ func TestReceiveContext(t *testing.T) {
 
 		send := new(testpb.TestSend)
 		// create an instance of receive context
-		context := &receiveContext{
+		context := &ReceiveContext{
 			ctx:       ctx,
 			message:   send,
 			sender:    NoSender,
 			recipient: pid1,
-			async:     true,
 		}
 
 		// calling unhandled will push the current message to deadletters
@@ -1193,12 +1170,11 @@ func TestReceiveContext(t *testing.T) {
 
 		send := new(testpb.TestSend)
 		// create an instance of receive context
-		context := &receiveContext{
+		context := &ReceiveContext{
 			ctx:       ctx,
 			message:   send,
 			sender:    pid2,
 			recipient: pid1,
-			async:     true,
 		}
 
 		// calling unhandled will push the current message to deadletters
@@ -1259,12 +1235,11 @@ func TestReceiveContext(t *testing.T) {
 		require.NotNil(t, pid1)
 
 		// create an instance of receive context
-		context := &receiveContext{
+		context := &ReceiveContext{
 			ctx:       ctx,
 			message:   new(goaktpb.PostStart),
 			sender:    NoSender,
 			recipient: pid1,
-			async:     true,
 		}
 
 		// calling unhandled will push the current message to deadletters
@@ -1309,12 +1284,11 @@ func TestReceiveContext(t *testing.T) {
 		require.NotNil(t, pid1)
 
 		// create an instance of receive context
-		context := &receiveContext{
+		context := &ReceiveContext{
 			ctx:       ctx,
 			message:   new(testpb.TestSend),
 			sender:    NoSender,
 			recipient: pid1,
-			async:     true,
 		}
 
 		// create actor2
@@ -1347,12 +1321,11 @@ func TestReceiveContext(t *testing.T) {
 		require.NotNil(t, pid1)
 
 		// create an instance of receive context
-		context := &receiveContext{
+		context := &ReceiveContext{
 			ctx:       ctx,
 			message:   new(testpb.TestSend),
 			sender:    NoSender,
 			recipient: pid1,
-			async:     true,
 		}
 
 		// create actor2
@@ -1385,12 +1358,11 @@ func TestReceiveContext(t *testing.T) {
 		require.NotNil(t, pid1)
 
 		// create an instance of receive context
-		context := &receiveContext{
+		context := &ReceiveContext{
 			ctx:       ctx,
 			message:   new(testpb.TestSend),
 			sender:    NoSender,
 			recipient: pid1,
-			async:     true,
 		}
 
 		// create actor2
@@ -1426,12 +1398,11 @@ func TestReceiveContext(t *testing.T) {
 		require.NotNil(t, pid1)
 
 		// create an instance of receive context
-		context := &receiveContext{
+		context := &ReceiveContext{
 			ctx:       ctx,
 			message:   new(testpb.TestSend),
 			sender:    NoSender,
 			recipient: pid1,
-			async:     true,
 		}
 
 		// create actor2
@@ -1469,12 +1440,11 @@ func TestReceiveContext(t *testing.T) {
 		require.NotNil(t, pid1)
 
 		// create an instance of receive context
-		context := &receiveContext{
+		context := &ReceiveContext{
 			ctx:       ctx,
 			message:   new(testpb.TestSend),
 			sender:    NoSender,
 			recipient: pid1,
-			async:     true,
 		}
 
 		// create actor2
@@ -1525,11 +1495,10 @@ func TestReceiveContext(t *testing.T) {
 		require.NotNil(t, testerRef)
 
 		// create an instance of receive context
-		context := &receiveContext{
+		context := &ReceiveContext{
 			ctx:       ctx,
 			sender:    NoSender,
 			recipient: testerRef,
-			async:     true,
 		}
 
 		// get the address of the exchanger actor one
@@ -1579,11 +1548,10 @@ func TestReceiveContext(t *testing.T) {
 		require.NotNil(t, testerRef)
 
 		// create an instance of receive context
-		context := &receiveContext{
+		context := &ReceiveContext{
 			ctx:       ctx,
 			sender:    NoSender,
 			recipient: testerRef,
-			async:     true,
 		}
 
 		// get the address of the exchanger actor one
@@ -1638,12 +1606,11 @@ func TestReceiveContext(t *testing.T) {
 		require.NotNil(t, pid1)
 
 		// create an instance of receive context
-		context := &receiveContext{
+		context := &ReceiveContext{
 			ctx:       ctx,
 			message:   new(testpb.TestSend),
 			sender:    NoSender,
 			recipient: pid1,
-			async:     true,
 		}
 
 		// send the message to the exchanger actor one using remote messaging
@@ -1700,12 +1667,11 @@ func TestReceiveContext(t *testing.T) {
 		require.NotNil(t, pid1)
 
 		// create an instance of receive context
-		context := &receiveContext{
+		context := &ReceiveContext{
 			ctx:       ctx,
 			message:   new(testpb.TestSend),
 			sender:    NoSender,
 			recipient: pid1,
-			async:     true,
 		}
 
 		context.RemoteBatchAsk(&goaktpb.Address{
@@ -1761,12 +1727,11 @@ func TestReceiveContext(t *testing.T) {
 		require.NotNil(t, pid1)
 
 		// create an instance of receive context
-		context := &receiveContext{
+		context := &ReceiveContext{
 			ctx:       ctx,
 			message:   new(testpb.TestSend),
 			sender:    NoSender,
 			recipient: pid1,
-			async:     true,
 		}
 
 		context.RemoteReSpawn(host, remotingPort, actorName2)
@@ -1816,12 +1781,11 @@ func TestReceiveContext(t *testing.T) {
 		require.NotNil(t, pid1)
 
 		// create an instance of receive context
-		context := &receiveContext{
+		context := &ReceiveContext{
 			ctx:       ctx,
 			message:   new(testpb.TestSend),
 			sender:    NoSender,
 			recipient: pid1,
-			async:     true,
 		}
 
 		context.RemoteReSpawn(host, remotingPort, actorName2)
@@ -1863,12 +1827,11 @@ func TestReceiveContext(t *testing.T) {
 		require.Zero(t, actor2.Counter())
 
 		// create an instance of receive context
-		messageContext := &receiveContext{
+		messageContext := &ReceiveContext{
 			ctx:       ctx,
 			message:   new(testpb.TaskComplete),
 			sender:    NoSender,
 			recipient: pid1,
-			async:     true,
 		}
 
 		task := make(chan proto.Message)
@@ -1927,12 +1890,11 @@ func TestReceiveContext(t *testing.T) {
 		require.Zero(t, actor2.Counter())
 
 		// create an instance of receive context
-		messageContext := &receiveContext{
+		messageContext := &ReceiveContext{
 			ctx:       ctx,
 			message:   new(testpb.TaskComplete),
 			sender:    NoSender,
 			recipient: pid1,
-			async:     true,
 		}
 
 		messageContext.PipeTo(pid2, nil)

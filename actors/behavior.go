@@ -29,7 +29,7 @@ import (
 )
 
 // Behavior defines an actor behavior
-type Behavior func(ctx ReceiveContext)
+type Behavior func(ctx *ReceiveContext)
 
 // behaviorStack defines a stack of Behavior
 type behaviorStack struct {

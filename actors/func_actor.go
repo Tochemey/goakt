@@ -108,7 +108,7 @@ func (x *funcActor) PreStart(ctx context.Context) error {
 }
 
 // Receive processes any message dropped into the actor mailbox.
-func (x *funcActor) Receive(ctx ReceiveContext) {
+func (x *funcActor) Receive(ctx *ReceiveContext) {
 	switch m := ctx.Message().(type) {
 	case *goaktpb.PostStart:
 		x.pid = ctx.Self()

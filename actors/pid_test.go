@@ -74,12 +74,11 @@ func TestReceive(t *testing.T) {
 	// let us send 10 public to the actor
 	count := 10
 	for i := 0; i < count; i++ {
-		receiveContext := &receiveContext{
+		receiveContext := &ReceiveContext{
 			ctx:       ctx,
 			message:   new(testpb.TestSend),
 			sender:    NoSender,
 			recipient: pid,
-			async:     true,
 		}
 
 		pid.doReceive(receiveContext)
@@ -1532,12 +1531,11 @@ func TestRegisterMetrics(t *testing.T) {
 	// let us send 10 public to the actor
 	count := 10
 	for i := 0; i < count; i++ {
-		receiveContext := &receiveContext{
+		receiveContext := &ReceiveContext{
 			ctx:       ctx,
 			message:   new(testpb.TestSend),
 			sender:    NoSender,
 			recipient: pid,
-			async:     true,
 		}
 
 		pid.doReceive(receiveContext)

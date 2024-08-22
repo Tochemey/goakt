@@ -123,7 +123,7 @@ func TestStash(t *testing.T) {
 		// wait for the actor to properly start
 		time.Sleep(5 * time.Millisecond)
 
-		err = pid.stash(new(receiveContext))
+		err = pid.stash(new(ReceiveContext))
 		assert.Error(t, err)
 		assert.EqualError(t, err, ErrStashBufferNotSet.Error())
 

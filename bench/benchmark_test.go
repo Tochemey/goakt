@@ -111,7 +111,7 @@ func BenchmarkActor(b *testing.B) {
 
 func TestBenchmark_BenchTell(t *testing.T) {
 	// remove this line for local benchmark
-	t.Skip("only run this test for local benchmark")
+	//	t.Skip("only run this test for local benchmark")
 	ctx := context.TODO()
 
 	totalSent = atomic.NewInt64(0)

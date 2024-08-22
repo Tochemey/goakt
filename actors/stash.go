@@ -27,7 +27,7 @@ package actors
 import "errors"
 
 // stash adds the current message to the stash buffer
-func (x *pid) stash(ctx ReceiveContext) error {
+func (x *pid) stash(ctx *ReceiveContext) error {
 	if x.stashBuffer == nil {
 		return ErrStashBufferNotSet
 	}

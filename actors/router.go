@@ -107,7 +107,7 @@ func (x *router) PreStart(context.Context) error {
 }
 
 // Receive handles messages sent to the router
-func (x *router) Receive(ctx ReceiveContext) {
+func (x *router) Receive(ctx *ReceiveContext) {
 	message := ctx.Message()
 	switch message.(type) {
 	case *goaktpb.PostStart:
@@ -124,7 +124,7 @@ func (x *router) PostStop(context.Context) error {
 }
 
 // postStart spawns routeesMap
-func (x *router) postStart(ctx ReceiveContext) {
+func (x *router) postStart(ctx *ReceiveContext) {
 	x.logger.Info("router successfully started")
 	for i := 0; i < x.poolSize; i++ {
 		routeeName := routeeName(ctx.Self().Name(), i)
@@ -136,7 +136,7 @@ func (x *router) postStart(ctx ReceiveContext) {
 }
 
 // broadcast send message to all the routeesMap
-func (x *router) broadcast(ctx ReceiveContext) {
+func (x *router) broadcast(ctx *ReceiveContext) {
 	var message *goaktpb.Broadcast
 	switch msg := ctx.Message().(type) {
 	case *goaktpb.Broadcast:

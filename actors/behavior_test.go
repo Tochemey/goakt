@@ -37,7 +37,7 @@ func TestBehaviorStack(t *testing.T) {
 	assert.True(t, stack.IsEmpty())
 
 	// push a behavior onto the stack
-	behavior := func(ctx ReceiveContext) {}
+	behavior := func(ctx *ReceiveContext) {}
 	stack.Push(behavior)
 	stack.Push(behavior)
 
