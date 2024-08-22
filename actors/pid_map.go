@@ -33,12 +33,12 @@ import (
 type pidMap struct {
 	mu       *sync.RWMutex
 	size     atomic.Int32
-	mappings map[string]PID
+	mappings map[string]*PID
 }
 
 func newPIDMap(cap int) *pidMap {
 	return &pidMap{
-		mappings: make(map[string]PID, cap),
+		mappings: make(map[string]*PID, cap),
 		mu:       &sync.RWMutex{},
 	}
 }
@@ -49,7 +49,7 @@ func (m *pidMap) len() int {
 }
 
 // get retrieves a pid by its address
-func (m *pidMap) get(path *Path) (pid PID, ok bool) {
+func (m *pidMap) get(path *Path) (pid *PID, ok bool) {
 	m.mu.RLock()
 	pid, ok = m.mappings[path.String()]
 	m.mu.RUnlock()
@@ -57,7 +57,7 @@ func (m *pidMap) get(path *Path) (pid PID, ok bool) {
 }
 
 // set sets a pid in the map
-func (m *pidMap) set(pid PID) {
+func (m *pidMap) set(pid *PID) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if pid != nil {
@@ -75,9 +75,9 @@ func (m *pidMap) delete(addr *Path) {
 }
 
 // pids returns all actors as a slice
-func (m *pidMap) pids() []PID {
+func (m *pidMap) pids() []*PID {
 	m.mu.Lock()
-	var out []PID
+	var out []*PID
 	for _, prop := range m.mappings {
 		out = append(out, prop)
 	}
@@ -87,6 +87,6 @@ func (m *pidMap) pids() []PID {
 
 func (m *pidMap) reset() {
 	m.mu.Lock()
-	m.mappings = make(map[string]PID)
+	m.mappings = make(map[string]*PID)
 	m.mu.Unlock()
 }

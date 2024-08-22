@@ -372,7 +372,7 @@ func (x *testRestart) PostStop(context.Context) error {
 var _ Actor = &testRestart{}
 
 type forwarder struct {
-	actorRef PID
+	actorRef *PID
 }
 
 func (x *forwarder) PreStart(context.Context) error {

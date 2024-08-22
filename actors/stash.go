@@ -27,7 +27,7 @@ package actors
 import "errors"
 
 // stash adds the current message to the stash buffer
-func (x *pid) stash(ctx *ReceiveContext) error {
+func (x *PID) stash(ctx *ReceiveContext) error {
 	if x.stashBuffer == nil {
 		return ErrStashBufferNotSet
 	}
@@ -36,7 +36,7 @@ func (x *pid) stash(ctx *ReceiveContext) error {
 }
 
 // unstash unstashes the oldest message in the stash and prepends to the mailbox
-func (x *pid) unstash() error {
+func (x *PID) unstash() error {
 	if x.stashBuffer == nil {
 		return ErrStashBufferNotSet
 	}
@@ -51,7 +51,7 @@ func (x *pid) unstash() error {
 
 // unstashAll unstashes all messages from the stash buffer and prepends in the mailbox
 // (it keeps the messages in the same order as received, unstashing older messages before newer).
-func (x *pid) unstashAll() error {
+func (x *PID) unstashAll() error {
 	if x.stashBuffer == nil {
 		return ErrStashBufferNotSet
 	}

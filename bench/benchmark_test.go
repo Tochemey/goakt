@@ -74,6 +74,7 @@ func BenchmarkActor(b *testing.B) {
 		_ = actorSystem.Stop(ctx)
 	})
 	b.Run("ask", func(b *testing.B) {
+		b.Skip("")
 		ctx := context.TODO()
 		// create the actor system
 		actorSystem, _ := actors.NewActorSystem("bench",

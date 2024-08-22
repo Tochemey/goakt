@@ -124,7 +124,7 @@ func (x *scheduler) Stop(ctx context.Context) {
 // ScheduleOnce schedules a message that will be delivered to the receiver actor
 // This will send the given message to the actor after the given interval specified.
 // The message will be sent once
-func (x *scheduler) ScheduleOnce(ctx context.Context, message proto.Message, pid PID, interval time.Duration) error {
+func (x *scheduler) ScheduleOnce(ctx context.Context, message proto.Message, pid *PID, interval time.Duration) error {
 	x.mu.Lock()
 	defer x.mu.Unlock()
 
@@ -183,7 +183,7 @@ func (x *scheduler) RemoteScheduleOnce(ctx context.Context, message proto.Messag
 }
 
 // ScheduleWithCron schedules a message to be sent to an actor in the future using a cron expression.
-func (x *scheduler) ScheduleWithCron(ctx context.Context, message proto.Message, pid PID, cronExpression string) error {
+func (x *scheduler) ScheduleWithCron(ctx context.Context, message proto.Message, pid *PID, cronExpression string) error {
 	x.mu.Lock()
 	defer x.mu.Unlock()
 	if !x.started.Load() {
