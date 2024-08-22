@@ -46,8 +46,7 @@ const (
 	DefaultInitTimeout = time.Second
 	// DefaultPeerStateLoopInterval defines the default peer state loop interval
 	DefaultPeerStateLoopInterval = 10 * time.Second
-	// DefaultStashCapacity defines the default stash size
-	DefaultStashCapacity = 1_000
+
 	// DefaultGCInterval defines the default GC interval
 	// This helps cleanup dead actors from the given actor system
 	DefaultGCInterval = 30 * time.Millisecond
