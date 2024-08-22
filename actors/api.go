@@ -48,7 +48,7 @@ func Ask(ctx context.Context, to PID, message proto.Message, timeout time.Durati
 		return nil, ErrDead
 	}
 
-	var messageContext *receiveContext
+	var messageContext *ReceiveContext
 
 	switch msg := message.(type) {
 	case *internalpb.RemoteMessage:
@@ -56,9 +56,9 @@ func Ask(ctx context.Context, to PID, message proto.Message, timeout time.Durati
 		if actual, err = msg.GetMessage().UnmarshalNew(); err != nil {
 			return nil, ErrInvalidRemoteMessage(err)
 		}
-		messageContext = newReceiveContext(ctx, NoSender, to, actual, false).WithRemoteSender(msg.GetSender())
+		messageContext = newReceiveContext(ctx, NoSender, to, actual).WithRemoteSender(msg.GetSender())
 	default:
-		messageContext = newReceiveContext(ctx, NoSender, to, message, false).WithRemoteSender(RemoteNoSender)
+		messageContext = newReceiveContext(ctx, NoSender, to, message).WithRemoteSender(RemoteNoSender)
 	}
 
 	to.doReceive(messageContext)
@@ -82,7 +82,7 @@ func Tell(ctx context.Context, to PID, message proto.Message) error {
 		return ErrDead
 	}
 
-	var messageContext *receiveContext
+	var messageContext *ReceiveContext
 
 	switch msg := message.(type) {
 	case *internalpb.RemoteMessage:
@@ -94,9 +94,9 @@ func Tell(ctx context.Context, to PID, message proto.Message) error {
 		if actual, err = msg.GetMessage().UnmarshalNew(); err != nil {
 			return ErrInvalidRemoteMessage(err)
 		}
-		messageContext = newReceiveContext(ctx, NoSender, to, actual, true).WithRemoteSender(msg.GetSender())
+		messageContext = newReceiveContext(ctx, NoSender, to, actual).WithRemoteSender(msg.GetSender())
 	default:
-		messageContext = newReceiveContext(ctx, NoSender, to, message, true).WithRemoteSender(RemoteNoSender)
+		messageContext = newReceiveContext(ctx, NoSender, to, message).WithRemoteSender(RemoteNoSender)
 	}
 
 	to.doReceive(messageContext)
@@ -112,7 +112,7 @@ func BatchTell(ctx context.Context, to PID, messages ...proto.Message) error {
 
 	for i := 0; i < len(messages); i++ {
 		message := messages[i]
-		messageContext := newReceiveContext(ctx, NoSender, to, message, true).WithRemoteSender(RemoteNoSender)
+		messageContext := newReceiveContext(ctx, NoSender, to, message).WithRemoteSender(RemoteNoSender)
 		to.doReceive(messageContext)
 	}
 	to.setLastProcessingDuration(time.Since(to.getLastProcessingTime()))
@@ -131,7 +131,7 @@ func BatchAsk(ctx context.Context, to PID, timeout time.Duration, messages ...pr
 	defer close(responses)
 
 	for i := 0; i < len(messages); i++ {
-		receiveContext := newReceiveContext(ctx, NoSender, to, messages[i], false)
+		receiveContext := newReceiveContext(ctx, NoSender, to, messages[i])
 		to.doReceive(receiveContext)
 		select {
 		case result := <-receiveContext.response:

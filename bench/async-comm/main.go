@@ -119,7 +119,7 @@ func (p *Ping) PreStart(context.Context) error {
 	return nil
 }
 
-func (p *Ping) Receive(ctx actors.ReceiveContext) {
+func (p *Ping) Receive(ctx *actors.ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *goaktpb.PostStart:
 	case *benchmarkpb.Pong:
@@ -150,7 +150,7 @@ func (p *Pong) PreStart(context.Context) error {
 	return nil
 }
 
-func (p *Pong) Receive(ctx actors.ReceiveContext) {
+func (p *Pong) Receive(ctx *actors.ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *goaktpb.PostStart:
 	case *benchmarkpb.Ping:

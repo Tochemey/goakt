@@ -172,7 +172,7 @@ func (t pinger) PreStart(_ context.Context) error {
 	return nil
 }
 
-func (t pinger) Receive(ctx actors.ReceiveContext) {
+func (t pinger) Receive(ctx *actors.ReceiveContext) {
 	switch x := ctx.Message().(type) {
 	case *testpb.Ping:
 		_ = ctx.Self().Tell(ctx.Context(), ctx.Sender(), new(testpb.Pong))

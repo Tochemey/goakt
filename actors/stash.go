@@ -27,7 +27,7 @@ package actors
 import "errors"
 
 // stash adds the current message to the stash buffer
-func (x *pid) stash(ctx ReceiveContext) error {
+func (x *pid) stash(ctx *ReceiveContext) error {
 	if x.stashBuffer == nil {
 		return ErrStashBufferNotSet
 	}
@@ -41,8 +41,8 @@ func (x *pid) unstash() error {
 		return ErrStashBufferNotSet
 	}
 
-	received, ok := x.stashBuffer.Pop()
-	if !ok {
+	received := x.stashBuffer.Pop()
+	if received == nil {
 		return errors.New("stash buffer may be closed")
 	}
 	x.doReceive(received)
@@ -60,8 +60,8 @@ func (x *pid) unstashAll() error {
 	defer x.stashLocker.Unlock()
 
 	for x.stashBuffer.Len() > 0 {
-		received, ok := x.stashBuffer.Pop()
-		if !ok {
+		received := x.stashBuffer.Pop()
+		if received == nil {
 			return errors.New("stash buffer may be closed")
 		}
 		x.doReceive(received)

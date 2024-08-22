@@ -65,7 +65,7 @@ func (x *probeActor) PreStart(_ context.Context) error {
 }
 
 // Receive handle message received
-func (x *probeActor) Receive(ctx actors.ReceiveContext) {
+func (x *probeActor) Receive(ctx *actors.ReceiveContext) {
 	switch ctx.Message().(type) {
 	// skip system message
 	case *goaktpb.PoisonPill,

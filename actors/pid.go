@@ -49,7 +49,6 @@ import (
 	"github.com/tochemey/goakt/v2/internal/internalpb"
 	"github.com/tochemey/goakt/v2/internal/internalpb/internalpbconnect"
 	"github.com/tochemey/goakt/v2/internal/metric"
-	"github.com/tochemey/goakt/v2/internal/queue"
 	"github.com/tochemey/goakt/v2/internal/slice"
 	"github.com/tochemey/goakt/v2/internal/types"
 	"github.com/tochemey/goakt/v2/log"
@@ -156,7 +155,7 @@ type PID interface {
 	// It’s common that you would like to use the value of the response in the actor when the long-running task is completed
 	PipeTo(ctx context.Context, to PID, task future.Task) error
 	// push a message to the actor's receiveContextBuffer
-	doReceive(ctx ReceiveContext)
+	doReceive(ctx *ReceiveContext)
 	// watchers returns the list of actors watching this actor
 	watchers() *slice.Slice[*watcher]
 	// watchees returns the list of actors watched by this actor
@@ -171,14 +170,14 @@ type PID interface {
 	// resetBehavior is a utility function resets the actor behavior
 	resetBehavior()
 	// stash adds the current message to the stash buffer
-	stash(ctx ReceiveContext) error
+	stash(ctx *ReceiveContext) error
 	// unstashAll unstashes all messages from the stash buffer and prepends in the mailbox
 	// (it keeps the messages in the same order as received, unstashing older messages before newer)
 	unstashAll() error
 	// unstash unstashes the oldest message in the stash and prepends to the mailbox
 	unstash() error
 	// toDeadletterQueue add the given message to the deadletters queue
-	toDeadletterQueue(receiveCtx ReceiveContext, err error)
+	toDeadletterQueue(receiveCtx *ReceiveContext, err error)
 	// removeChild is a utility function to remove child actor
 	removeChild(pid PID)
 
@@ -187,7 +186,7 @@ type PID interface {
 }
 
 // pid specifies an actor unique process
-// With the pid one can send a receiveContext to the actor
+// With the pid one can send a ReceiveContext to the actor
 type pid struct {
 	Actor
 
@@ -195,7 +194,7 @@ type pid struct {
 	actorPath *Path
 
 	// helps determine whether the actor should handle public or not.
-	isRunning atomic.Bool
+	running atomic.Bool
 	// is captured whenever a mail is sent to the actor
 	lastProcessingTime atomic.Time
 
@@ -221,7 +220,7 @@ type pid struct {
 	shutdownTimeout atomic.Duration
 
 	// specifies the actor mailbox
-	mailbox *queue.MpscQueue[ReceiveContext]
+	mailbox *mailbox
 
 	haltPassivationLnr chan types.Unit
 
@@ -263,7 +262,7 @@ type pid struct {
 	behaviorStack *behaviorStack
 
 	// stash settings
-	stashBuffer *queue.MpscQueue[ReceiveContext]
+	stashBuffer *mailbox
 	stashLocker *sync.Mutex
 
 	// define an events stream
@@ -306,7 +305,7 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 		fieldsLocker:         &sync.RWMutex{},
 		stopLocker:           &sync.Mutex{},
 		httpClient:           http.NewClient(),
-		mailbox:              queue.NewMpscQueue[ReceiveContext](),
+		mailbox:              newMailbox(),
 		stashBuffer:          nil,
 		stashLocker:          &sync.Mutex{},
 		eventsStream:         nil,
@@ -319,7 +318,7 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 	p.initMaxRetries.Store(DefaultInitMaxRetries)
 	p.shutdownTimeout.Store(DefaultShutdownTimeout)
 	p.lastReceivedDuration.Store(0)
-	p.isRunning.Store(false)
+	p.running.Store(false)
 	p.passivateAfter.Store(DefaultPassivationTimeout)
 	p.askTimeout.Store(DefaultAskTimeout)
 	p.initTimeout.Store(DefaultInitTimeout)
@@ -355,7 +354,7 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 		}
 	}
 
-	p.doReceive(newReceiveContext(ctx, NoSender, p, new(goaktpb.PostStart), true))
+	p.doReceive(newReceiveContext(ctx, NoSender, p, new(goaktpb.PostStart)))
 
 	return p, nil
 }
@@ -461,7 +460,7 @@ func (x *pid) Stop(ctx context.Context, cid PID) error {
 // IsRunning returns true when the actor is alive ready to process messages and false
 // when the actor is stopped or not started at all
 func (x *pid) IsRunning() bool {
-	return x != nil && x != NoSender && x.isRunning.Load()
+	return x != nil && x != NoSender && x.running.Load()
 }
 
 // ActorSystem returns the actor system
@@ -634,7 +633,7 @@ func (x *pid) Ask(ctx context.Context, to PID, message proto.Message) (response 
 		return nil, ErrDead
 	}
 
-	receiveContext := newReceiveContext(ctx, x, to, message, false)
+	receiveContext := newReceiveContext(ctx, x, to, message)
 	to.doReceive(receiveContext)
 	timeout := x.askTimeout.Load()
 
@@ -656,7 +655,7 @@ func (x *pid) Tell(ctx context.Context, to PID, message proto.Message) error {
 		return ErrDead
 	}
 
-	to.doReceive(newReceiveContext(ctx, x, to, message, true))
+	to.doReceive(newReceiveContext(ctx, x, to, message))
 	x.recordLastReceivedDurationMetric(ctx)
 	return nil
 }
@@ -675,7 +674,7 @@ func (x *pid) BatchTell(ctx context.Context, to PID, messages ...proto.Message) 
 	}
 
 	for i := 0; i < len(messages); i++ {
-		to.doReceive(newReceiveContext(ctx, x, to, messages[i], true))
+		to.doReceive(newReceiveContext(ctx, x, to, messages[i]))
 		x.recordLastReceivedDurationMetric(ctx)
 	}
 
@@ -1066,7 +1065,7 @@ func (x *pid) Shutdown(ctx context.Context) error {
 
 	x.logger.Info("Shutdown process has started...")
 
-	if !x.isRunning.Load() {
+	if !x.running.Load() {
 		x.logger.Infof("Actor=%s is offline. Maybe it has been passivated or stopped already", x.ActorPath().String())
 		return nil
 	}
@@ -1128,7 +1127,7 @@ func (x *pid) watchees() *pidMap {
 }
 
 // doReceive pushes a given message to the actor receiveContextBuffer
-func (x *pid) doReceive(receiveCtx ReceiveContext) {
+func (x *pid) doReceive(receiveCtx *ReceiveContext) {
 	x.lastProcessingTime.Store(time.Now())
 	x.mailbox.Push(receiveCtx)
 }
@@ -1150,7 +1149,7 @@ func (x *pid) init(ctx context.Context) error {
 	}
 
 	x.fieldsLocker.Lock()
-	x.isRunning.Store(true)
+	x.running.Store(true)
 	x.fieldsLocker.Unlock()
 
 	x.logger.Info("Initialization process successfully completed.")
@@ -1177,7 +1176,7 @@ func (x *pid) reset() {
 	x.children.reset()
 	x.watchersList.Reset()
 	x.telemetry = telemetry.New()
-	x.resetBehavior()
+	x.behaviorStack.Reset()
 	if x.metricEnabled.Load() {
 		if err := x.registerMetrics(); err != nil {
 			fmtErr := fmt.Errorf("failed to register actor=%s metrics: %w", x.ID(), err)
@@ -1240,14 +1239,10 @@ func (x *pid) freeChildren(ctx context.Context) {
 
 // receive extracts every message from the actor mailbox
 func (x *pid) receive() {
-	for {
-		if !x.isRunning.Load() {
-			return
-		}
-
-		// fetch the data and continue the loop when there are no records yet
-		received, ok := x.mailbox.Pop()
-		if !ok {
+	for x.running.Load() {
+		received := x.mailbox.Pop()
+		if received == nil {
+			//runtime.Gosched()
 			continue
 		}
 
@@ -1262,12 +1257,12 @@ func (x *pid) receive() {
 }
 
 // handleReceived picks the right behavior and processes the message
-func (x *pid) handleReceived(received ReceiveContext) {
+func (x *pid) handleReceived(received *ReceiveContext) {
 	// handle panic or any error during processing
 	defer x.recovery(received)
 	// pick the current behvior from the stack
 	// send the message to the current actor behavior
-	if behavior, ok := x.behaviorStack.Peek(); ok {
+	if behavior := x.behaviorStack.Peek(); behavior != nil {
 		// set the total messages processed
 		x.processedCount.Inc()
 		// call the behavior to handle the message
@@ -1276,7 +1271,7 @@ func (x *pid) handleReceived(received ReceiveContext) {
 }
 
 // recovery is called upon after message is processed
-func (x *pid) recovery(received ReceiveContext) {
+func (x *pid) recovery(received *ReceiveContext) {
 	if r := recover(); r != nil {
 		x.notifyWatchers(fmt.Errorf("%s", r))
 		return
@@ -1341,7 +1336,7 @@ func (x *pid) passivationLoop() {
 // setBehavior is a utility function that helps set the actor behavior
 func (x *pid) setBehavior(behavior Behavior) {
 	x.fieldsLocker.Lock()
-	x.behaviorStack.Clear()
+	x.behaviorStack.Reset()
 	x.behaviorStack.Push(behavior)
 	x.fieldsLocker.Unlock()
 }
@@ -1370,7 +1365,7 @@ func (x *pid) unsetBehaviorStacked() {
 
 // doStop stops the actor
 func (x *pid) doStop(ctx context.Context) error {
-	x.isRunning.Store(false)
+	x.running.Store(false)
 
 	// TODO: just signal stash processing done and ignore the messages or process them
 	if x.stashBuffer != nil {
@@ -1403,7 +1398,6 @@ func (x *pid) doStop(ctx context.Context) error {
 	}()
 
 	<-tickerStopSig
-	//x.shutdownSignal <- types.Unit{}
 	x.httpClient.CloseIdleConnections()
 
 	x.freeWatchees(ctx)
@@ -1444,7 +1438,7 @@ func (x *pid) notifyWatchers(err error) {
 }
 
 // toDeadletterQueue sends message to deadletter queue
-func (x *pid) toDeadletterQueue(receiveCtx ReceiveContext, err error) {
+func (x *pid) toDeadletterQueue(receiveCtx *ReceiveContext, err error) {
 	// the message is lost
 	if x.eventsStream == nil {
 		return
@@ -1578,7 +1572,7 @@ func (x *pid) handleCompletion(ctx context.Context, completion *taskCompletion) 
 		return
 	}
 
-	messageContext := newReceiveContext(ctx, x, to, result.Success(), true)
+	messageContext := newReceiveContext(ctx, x, to, result.Success())
 	to.doReceive(messageContext)
 }
 

@@ -22,48 +22,65 @@
  * SOFTWARE.
  */
 
-package stack
+package actors
 
 import (
+	"runtime"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 )
 
-func TestStack(t *testing.T) {
-	// create an instance of stack
-	stack := New[int]()
-	assert.NotNil(t, stack)
-	assert.True(t, stack.IsEmpty())
+func TestMailbox_PushPop(t *testing.T) {
+	q := newMailbox()
 
-	// assert push
-	stack.Push(1)
-	stack.Push(2)
-	stack.Push(3)
+	in1 := &ReceiveContext{}
+	in2 := &ReceiveContext{}
 
-	assert.False(t, stack.IsEmpty())
-	assert.EqualValues(t, 3, stack.Len())
+	q.Push(in1)
+	q.Push(in2)
 
-	// assert peek
-	peek, ok := stack.Peek()
-	assert.True(t, ok)
-	assert.NotNil(t, peek)
-	assert.EqualValues(t, 3, peek)
-	assert.EqualValues(t, 3, stack.Len())
+	out1 := q.Pop()
+	out2 := q.Pop()
 
-	// assert pop
-	pop, ok := stack.Pop()
-	assert.True(t, ok)
-	assert.NotNil(t, pop)
-	assert.EqualValues(t, 2, stack.Len())
-	assert.EqualValues(t, 3, pop)
-	peek, ok = stack.Peek()
-	assert.True(t, ok)
-	assert.NotNil(t, peek)
-	assert.EqualValues(t, 2, peek)
+	assert.Equal(t, in1, out1)
+	assert.Equal(t, in2, out2)
+	assert.True(t, q.IsEmpty())
+}
 
-	// assert clear
-	stack.Clear()
-	assert.True(t, stack.IsEmpty())
-	stack.Clear()
+func TestMailbox_IsEmpty(t *testing.T) {
+	q := newMailbox()
+	assert.True(t, q.IsEmpty())
+	q.Push(new(ReceiveContext))
+	assert.False(t, q.IsEmpty())
+}
+
+func TestMailbox_PushPopOneProducer(t *testing.T) {
+	t.Helper()
+	expCount := 100
+	var wg sync.WaitGroup
+	wg.Add(1)
+	q := newMailbox()
+	go func() {
+		i := 0
+		for {
+			r := q.Pop()
+			if r == nil {
+				runtime.Gosched()
+				continue
+			}
+			i++
+			if i == expCount {
+				wg.Done()
+				return
+			}
+		}
+	}()
+
+	for i := 0; i < expCount; i++ {
+		q.Push(new(ReceiveContext))
+	}
+
+	wg.Wait()
 }

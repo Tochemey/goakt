@@ -20,9 +20,10 @@
  * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
+ *
  */
 
-package queue
+package actors
 
 import (
 	"sync"
@@ -31,24 +32,24 @@ import (
 )
 
 // node returns the queue node
-type node[T any] struct {
-	value T
-	next  *node[T]
+type node struct {
+	value *ReceiveContext
+	next  *node
 }
 
-// MpscQueue is a Multi-Producer-Single-Consumer Queue
+// mailbox is a Multi-Producer-Single-Consumer Queue
 // reference: https://concurrencyfreaks.blogspot.com/2014/04/multi-producer-single-consumer-queue.html
-type MpscQueue[T any] struct {
-	head   *node[T]
-	tail   *node[T]
+type mailbox struct {
+	head   *node
+	tail   *node
 	length int64
 	lock   sync.Mutex
 }
 
-// NewMpscQueue create an instance of MpscQueue
-func NewMpscQueue[T any]() *MpscQueue[T] {
-	item := new(node[T])
-	return &MpscQueue[T]{
+// newMailbox create an instance of mailbox
+func newMailbox() *mailbox {
+	item := new(node)
+	return &mailbox{
 		head:   item,
 		tail:   item,
 		length: 0,
@@ -57,44 +58,43 @@ func NewMpscQueue[T any]() *MpscQueue[T] {
 }
 
 // Push place the given value in the queue head (FIFO).
-func (q *MpscQueue[T]) Push(value T) {
-	tnode := &node[T]{
+func (m *mailbox) Push(value *ReceiveContext) {
+	tnode := &node{
 		value: value,
 	}
-	previousHead := (*node[T])(atomic.SwapPointer((*unsafe.Pointer)(unsafe.Pointer(&q.head)), unsafe.Pointer(tnode)))
+	previousHead := (*node)(atomic.SwapPointer((*unsafe.Pointer)(unsafe.Pointer(&m.head)), unsafe.Pointer(tnode)))
 	atomic.StorePointer((*unsafe.Pointer)(unsafe.Pointer(&previousHead.next)), unsafe.Pointer(tnode))
-	atomic.AddInt64(&q.length, 1)
+	atomic.AddInt64(&m.length, 1)
 }
 
 // Pop takes the QueueItem from the queue tail.
 // Returns false if the queue is empty. Can be used in a single consumer (goroutine) only.
-func (q *MpscQueue[T]) Pop() (T, bool) {
-	var tnil T
-	next := (*node[T])(atomic.LoadPointer((*unsafe.Pointer)(unsafe.Pointer(&q.tail.next))))
+func (m *mailbox) Pop() *ReceiveContext {
+	next := (*node)(atomic.LoadPointer((*unsafe.Pointer)(unsafe.Pointer(&m.tail.next))))
 	if next == nil {
-		return tnil, false
+		return nil
 	}
 
-	q.lock.Lock()
-	q.tail = next
-	q.lock.Unlock()
+	m.lock.Lock()
+	m.tail = next
+	m.lock.Unlock()
 	value := next.value
-	next.value = tnil
-	atomic.AddInt64(&q.length, -1)
-	return value, true
+	next.value = nil
+	atomic.AddInt64(&m.length, -1)
+	return value
 }
 
 // Len returns queue length
-func (q *MpscQueue[T]) Len() int64 {
-	return atomic.LoadInt64(&q.length)
+func (m *mailbox) Len() int64 {
+	return atomic.LoadInt64(&m.length)
 }
 
 // IsEmpty returns true when the queue is empty
 // must be called from a single, consumer goroutine
-func (q *MpscQueue[T]) IsEmpty() bool {
-	q.lock.Lock()
-	tail := q.tail
-	q.lock.Unlock()
-	next := (*node[T])(atomic.LoadPointer((*unsafe.Pointer)(unsafe.Pointer(&tail.next))))
+func (m *mailbox) IsEmpty() bool {
+	m.lock.Lock()
+	tail := m.tail
+	m.lock.Unlock()
+	next := (*node)(atomic.LoadPointer((*unsafe.Pointer)(unsafe.Pointer(&tail.next))))
 	return next == nil
 }

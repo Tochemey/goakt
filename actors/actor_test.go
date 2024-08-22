@@ -84,7 +84,7 @@ func (p *testActor) PostStop(context.Context) error {
 }
 
 // Receive processes any message dropped into the actor mailbox without a reply
-func (p *testActor) Receive(ctx ReceiveContext) {
+func (p *testActor) Receive(ctx *ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *goaktpb.PostStart:
 	case *testspb.TestSend:
@@ -124,7 +124,7 @@ func (p *testSupervisor) PreStart(context.Context) error {
 	return nil
 }
 
-func (p *testSupervisor) Receive(ctx ReceiveContext) {
+func (p *testSupervisor) Receive(ctx *ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *goaktpb.PostStart:
 	case *testspb.TestSend:
@@ -152,7 +152,7 @@ func (x *testSupervised) PreStart(context.Context) error {
 	return nil
 }
 
-func (x *testSupervised) Receive(ctx ReceiveContext) {
+func (x *testSupervised) Receive(ctx *ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *goaktpb.PostStart:
 	case *testspb.TestSend:
@@ -183,7 +183,7 @@ func (x *userActor) PostStop(_ context.Context) error {
 	return nil
 }
 
-func (x *userActor) Receive(ctx ReceiveContext) {
+func (x *userActor) Receive(ctx *ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *goaktpb.PostStart:
 	case *testspb.TestLogin:
@@ -196,7 +196,7 @@ func (x *userActor) Receive(ctx ReceiveContext) {
 }
 
 // Authenticated behavior is executed when the actor receive the TestAuth message
-func (x *userActor) Authenticated(ctx ReceiveContext) {
+func (x *userActor) Authenticated(ctx *ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *testspb.TestReadiness:
 		ctx.Response(new(testspb.TestReady))
@@ -204,7 +204,7 @@ func (x *userActor) Authenticated(ctx ReceiveContext) {
 	}
 }
 
-func (x *userActor) CreditAccount(ctx ReceiveContext) {
+func (x *userActor) CreditAccount(ctx *ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *testspb.CreditAccount:
 		ctx.Response(new(testspb.AccountCredited))
@@ -214,7 +214,7 @@ func (x *userActor) CreditAccount(ctx ReceiveContext) {
 	}
 }
 
-func (x *userActor) DebitAccount(ctx ReceiveContext) {
+func (x *userActor) DebitAccount(ctx *ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *testspb.DebitAccount:
 		ctx.Response(new(testspb.AccountDebited))
@@ -239,7 +239,7 @@ func (e *exchanger) PreStart(context.Context) error {
 	return nil
 }
 
-func (e *exchanger) Receive(ctx ReceiveContext) {
+func (e *exchanger) Receive(ctx *ReceiveContext) {
 	message := ctx.Message()
 	switch message.(type) {
 	case *goaktpb.PostStart:
@@ -275,7 +275,7 @@ func (x *stasher) PreStart(context.Context) error {
 	return nil
 }
 
-func (x *stasher) Receive(ctx ReceiveContext) {
+func (x *stasher) Receive(ctx *ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *goaktpb.PostStart:
 	case *testspb.TestStash:
@@ -287,7 +287,7 @@ func (x *stasher) Receive(ctx ReceiveContext) {
 	}
 }
 
-func (x *stasher) Ready(ctx ReceiveContext) {
+func (x *stasher) Ready(ctx *ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *goaktpb.PostStart:
 	case *testspb.TestStash:
@@ -315,7 +315,7 @@ func (x *testPreStart) PreStart(context.Context) error {
 	return errors.New("failed")
 }
 
-func (x *testPreStart) Receive(ReceiveContext) {}
+func (x *testPreStart) Receive(*ReceiveContext) {}
 
 func (x *testPreStart) PostStop(context.Context) error {
 	return nil
@@ -329,7 +329,7 @@ func (x *testPostStop) PreStart(context.Context) error {
 	return nil
 }
 
-func (x *testPostStop) Receive(ctx ReceiveContext) {
+func (x *testPostStop) Receive(ctx *ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *goaktpb.PostStart:
 	case *testspb.TestSend:
@@ -362,7 +362,7 @@ func (x *testRestart) PreStart(context.Context) error {
 	return nil
 }
 
-func (x *testRestart) Receive(ReceiveContext) {
+func (x *testRestart) Receive(*ReceiveContext) {
 }
 
 func (x *testRestart) PostStop(context.Context) error {
@@ -379,7 +379,7 @@ func (x *forwarder) PreStart(context.Context) error {
 	return nil
 }
 
-func (x *forwarder) Receive(ctx ReceiveContext) {
+func (x *forwarder) Receive(ctx *ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *goaktpb.PostStart:
 	case *testspb.TestBye:
@@ -401,7 +401,7 @@ func (d *discarder) PreStart(context.Context) error {
 	return nil
 }
 
-func (d *discarder) Receive(ctx ReceiveContext) {
+func (d *discarder) Receive(ctx *ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *goaktpb.PostStart:
 		// pass
@@ -512,7 +512,7 @@ func (x *worker) PreStart(context.Context) error {
 	return nil
 }
 
-func (x *worker) Receive(ctx ReceiveContext) {
+func (x *worker) Receive(ctx *ReceiveContext) {
 	switch msg := ctx.Message().(type) {
 	case *testpb.DoLog:
 		x.counter++

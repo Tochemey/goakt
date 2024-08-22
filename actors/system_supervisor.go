@@ -52,7 +52,7 @@ func (s *systemSupervisor) PreStart(context.Context) error {
 	return nil
 }
 
-func (s *systemSupervisor) Receive(ctx ReceiveContext) {
+func (s *systemSupervisor) Receive(ctx *ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *goaktpb.PostStart:
 		s.logger.Info("system supervior successfully started")

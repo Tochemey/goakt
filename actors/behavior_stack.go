@@ -24,21 +24,91 @@
 
 package actors
 
-import (
-	"github.com/tochemey/goakt/v2/internal/stack"
-)
+import "sync"
 
 // Behavior defines an actor behavior
-type Behavior func(ctx ReceiveContext)
+type Behavior func(ctx *ReceiveContext)
+
+type bnode struct {
+	value    Behavior
+	previous *bnode
+}
 
 // behaviorStack defines a stack of Behavior
 type behaviorStack struct {
-	*stack.Stack[Behavior]
+	top    *bnode
+	length int
+	mutex  *sync.RWMutex
 }
 
 // newBehaviorStack creates an instance of behaviorStack
 func newBehaviorStack() *behaviorStack {
 	return &behaviorStack{
-		stack.New[Behavior](),
+		top:    nil,
+		length: 0,
+		mutex:  &sync.RWMutex{},
 	}
+}
+
+// Len returns the length of the stack.
+func (bs *behaviorStack) Len() int {
+	bs.mutex.RLock()
+	length := bs.length
+	bs.mutex.RUnlock()
+	return length
+}
+
+// Peek helps view the top item on the stack
+func (bs *behaviorStack) Peek() Behavior {
+	bs.mutex.RLock()
+	length := bs.length
+	bs.mutex.RUnlock()
+	if length == 0 {
+		return nil
+	}
+
+	bs.mutex.RLock()
+	value := bs.top.value
+	bs.mutex.RUnlock()
+	return value
+}
+
+// Pop removes and return top element of stack
+func (bs *behaviorStack) Pop() Behavior {
+	bs.mutex.RLock()
+	length := bs.length
+	bs.mutex.RUnlock()
+	if length == 0 {
+		return nil
+	}
+
+	bs.mutex.RLock()
+	n := bs.top
+	bs.top = n.previous
+	bs.length--
+	value := n.value
+	bs.mutex.RUnlock()
+	return value
+}
+
+// Push a new value onto the stack
+func (bs *behaviorStack) Push(behavior Behavior) {
+	bs.mutex.Lock()
+	n := &bnode{behavior, bs.top}
+	bs.top = n
+	bs.length++
+	bs.mutex.Unlock()
+}
+
+// IsEmpty checks if stack is empty
+func (bs *behaviorStack) IsEmpty() bool {
+	return bs.Len() == 0
+}
+
+// Reset empty the stack
+func (bs *behaviorStack) Reset() {
+	bs.mutex.Lock()
+	bs.top = nil
+	bs.length = 0
+	bs.mutex.Unlock()
 }

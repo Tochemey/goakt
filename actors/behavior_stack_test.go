@@ -22,62 +22,36 @@
  * SOFTWARE.
  */
 
-package queue
+package actors
 
 import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
-// TODO: add go routine-based tests
-func TestMpscQueue(t *testing.T) {
-	t.Run("With Push/Pop", func(t *testing.T) {
-		q := NewMpscQueue[int]()
-		require.True(t, q.IsEmpty())
-		for j := 0; j < 100; j++ {
-			if q.Len() != 0 {
-				t.Fatal("expected no elements")
-			} else if _, ok := q.Pop(); ok {
-				t.Fatal("expected no elements")
-			}
+// nolint
+func TestBehaviorStack(t *testing.T) {
+	stack := newBehaviorStack()
+	assert.NotNil(t, stack)
+	assert.True(t, stack.IsEmpty())
 
-			for i := 0; i < j; i++ {
-				q.Push(i)
-			}
+	// push a behavior onto the stack
+	behavior := func(ctx *ReceiveContext) {}
+	stack.Push(behavior)
+	stack.Push(behavior)
 
-			for i := 0; i < j; i++ {
-				if x, ok := q.Pop(); !ok {
-					t.Fatal("expected an element")
-				} else if x != i {
-					t.Fatalf("expected %d got %d", i, x)
-				}
-			}
-		}
+	assert.False(t, stack.IsEmpty())
+	assert.EqualValues(t, 2, stack.Len())
 
-		a := 0
-		r := 0
-		for j := 0; j < 100; j++ {
-			for i := 0; i < 4; i++ {
-				q.Push(a)
-				a++
-			}
+	peek := stack.Peek()
+	assert.NotNil(t, peek)
+	assert.EqualValues(t, 2, stack.Len())
 
-			for i := 0; i < 2; i++ {
-				if x, ok := q.Pop(); !ok {
-					t.Fatal("expected an element")
-				} else if x != r {
-					t.Fatalf("expected %d got %d", r, x)
-				}
-				r++
-			}
-		}
+	pop := stack.Pop()
+	assert.NotNil(t, pop)
+	assert.EqualValues(t, 1, stack.Len())
 
-		if q.Len() != 200 {
-			t.Fatalf("expected 200 elements have %d", q.Len())
-		}
-
-		assert.True(t, q.Len() > 0)
-	})
+	stack.Reset()
+	assert.True(t, stack.IsEmpty())
 }
