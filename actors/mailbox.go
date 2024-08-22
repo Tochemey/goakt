@@ -58,43 +58,43 @@ func newMailbox() *mailbox {
 }
 
 // Push place the given value in the queue head (FIFO).
-func (q *mailbox) Push(value *ReceiveContext) {
+func (m *mailbox) Push(value *ReceiveContext) {
 	tnode := &node{
 		value: value,
 	}
-	previousHead := (*node)(atomic.SwapPointer((*unsafe.Pointer)(unsafe.Pointer(&q.head)), unsafe.Pointer(tnode)))
+	previousHead := (*node)(atomic.SwapPointer((*unsafe.Pointer)(unsafe.Pointer(&m.head)), unsafe.Pointer(tnode)))
 	atomic.StorePointer((*unsafe.Pointer)(unsafe.Pointer(&previousHead.next)), unsafe.Pointer(tnode))
-	atomic.AddInt64(&q.length, 1)
+	atomic.AddInt64(&m.length, 1)
 }
 
 // Pop takes the QueueItem from the queue tail.
 // Returns false if the queue is empty. Can be used in a single consumer (goroutine) only.
-func (q *mailbox) Pop() (*ReceiveContext, bool) {
-	next := (*node)(atomic.LoadPointer((*unsafe.Pointer)(unsafe.Pointer(&q.tail.next))))
+func (m *mailbox) Pop() *ReceiveContext {
+	next := (*node)(atomic.LoadPointer((*unsafe.Pointer)(unsafe.Pointer(&m.tail.next))))
 	if next == nil {
-		return nil, false
+		return nil
 	}
 
-	q.lock.Lock()
-	q.tail = next
-	q.lock.Unlock()
+	m.lock.Lock()
+	m.tail = next
+	m.lock.Unlock()
 	value := next.value
 	next.value = nil
-	atomic.AddInt64(&q.length, -1)
-	return value, true
+	atomic.AddInt64(&m.length, -1)
+	return value
 }
 
 // Len returns queue length
-func (q *mailbox) Len() int64 {
-	return atomic.LoadInt64(&q.length)
+func (m *mailbox) Len() int64 {
+	return atomic.LoadInt64(&m.length)
 }
 
 // IsEmpty returns true when the queue is empty
 // must be called from a single, consumer goroutine
-func (q *mailbox) IsEmpty() bool {
-	q.lock.Lock()
-	tail := q.tail
-	q.lock.Unlock()
+func (m *mailbox) IsEmpty() bool {
+	m.lock.Lock()
+	tail := m.tail
+	m.lock.Unlock()
 	next := (*node)(atomic.LoadPointer((*unsafe.Pointer)(unsafe.Pointer(&tail.next))))
 	return next == nil
 }

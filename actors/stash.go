@@ -41,8 +41,8 @@ func (x *pid) unstash() error {
 		return ErrStashBufferNotSet
 	}
 
-	received, ok := x.stashBuffer.Pop()
-	if !ok {
+	received := x.stashBuffer.Pop()
+	if received == nil {
 		return errors.New("stash buffer may be closed")
 	}
 	x.doReceive(received)
@@ -60,8 +60,8 @@ func (x *pid) unstashAll() error {
 	defer x.stashLocker.Unlock()
 
 	for x.stashBuffer.Len() > 0 {
-		received, ok := x.stashBuffer.Pop()
-		if !ok {
+		received := x.stashBuffer.Pop()
+		if received == nil {
 			return errors.New("stash buffer may be closed")
 		}
 		x.doReceive(received)

@@ -1176,7 +1176,7 @@ func (x *pid) reset() {
 	x.children.reset()
 	x.watchersList.Reset()
 	x.telemetry = telemetry.New()
-	x.resetBehavior()
+	x.behaviorStack.Reset()
 	if x.metricEnabled.Load() {
 		if err := x.registerMetrics(); err != nil {
 			fmtErr := fmt.Errorf("failed to register actor=%s metrics: %w", x.ID(), err)
@@ -1240,8 +1240,9 @@ func (x *pid) freeChildren(ctx context.Context) {
 // receive extracts every message from the actor mailbox
 func (x *pid) receive() {
 	for x.running.Load() {
-		received, ok := x.mailbox.Pop()
-		if !ok {
+		received := x.mailbox.Pop()
+		if received == nil {
+			//runtime.Gosched()
 			continue
 		}
 
@@ -1261,7 +1262,7 @@ func (x *pid) handleReceived(received *ReceiveContext) {
 	defer x.recovery(received)
 	// pick the current behvior from the stack
 	// send the message to the current actor behavior
-	if behavior, ok := x.behaviorStack.Peek(); ok {
+	if behavior := x.behaviorStack.Peek(); behavior != nil {
 		// set the total messages processed
 		x.processedCount.Inc()
 		// call the behavior to handle the message
@@ -1335,7 +1336,7 @@ func (x *pid) passivationLoop() {
 // setBehavior is a utility function that helps set the actor behavior
 func (x *pid) setBehavior(behavior Behavior) {
 	x.fieldsLocker.Lock()
-	x.behaviorStack.Clear()
+	x.behaviorStack.Reset()
 	x.behaviorStack.Push(behavior)
 	x.fieldsLocker.Unlock()
 }

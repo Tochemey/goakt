@@ -44,16 +44,14 @@ func TestBehaviorStack(t *testing.T) {
 	assert.False(t, stack.IsEmpty())
 	assert.EqualValues(t, 2, stack.Len())
 
-	peek, ok := stack.Peek()
-	assert.True(t, ok)
+	peek := stack.Peek()
 	assert.NotNil(t, peek)
 	assert.EqualValues(t, 2, stack.Len())
 
-	pop, ok := stack.Pop()
-	assert.True(t, ok)
+	pop := stack.Pop()
 	assert.NotNil(t, pop)
 	assert.EqualValues(t, 1, stack.Len())
 
-	stack.Clear()
+	stack.Reset()
 	assert.True(t, stack.IsEmpty())
 }

@@ -715,7 +715,7 @@ func (p *testActor) PostStop(context.Context) error {
 }
 
 // Receive processes any message dropped into the actor mailbox without a reply
-func (p *testActor) Receive(ctx actors.ReceiveContext) {
+func (p *testActor) Receive(ctx *actors.ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *goaktpb.PostStart:
 		p.logger.Info("post start")

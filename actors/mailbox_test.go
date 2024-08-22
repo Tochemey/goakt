@@ -25,20 +25,62 @@
 package actors
 
 import (
-	"github.com/tochemey/goakt/v2/internal/stack"
+	"runtime"
+	"sync"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
-// Behavior defines an actor behavior
-type Behavior func(ctx *ReceiveContext)
+func TestMailbox_PushPop(t *testing.T) {
+	q := newMailbox()
 
-// behaviorStack defines a stack of Behavior
-type behaviorStack struct {
-	*stack.Stack[Behavior]
+	in1 := &ReceiveContext{}
+	in2 := &ReceiveContext{}
+
+	q.Push(in1)
+	q.Push(in2)
+
+	out1 := q.Pop()
+	out2 := q.Pop()
+
+	assert.Equal(t, in1, out1)
+	assert.Equal(t, in2, out2)
+	assert.True(t, q.IsEmpty())
 }
 
-// newBehaviorStack creates an instance of behaviorStack
-func newBehaviorStack() *behaviorStack {
-	return &behaviorStack{
-		stack.New[Behavior](),
+func TestMailbox_IsEmpty(t *testing.T) {
+	q := newMailbox()
+	assert.True(t, q.IsEmpty())
+	q.Push(new(ReceiveContext))
+	assert.False(t, q.IsEmpty())
+}
+
+func TestMailbox_PushPopOneProducer(t *testing.T) {
+	t.Helper()
+	expCount := 100
+	var wg sync.WaitGroup
+	wg.Add(1)
+	q := newMailbox()
+	go func() {
+		i := 0
+		for {
+			r := q.Pop()
+			if r == nil {
+				runtime.Gosched()
+				continue
+			}
+			i++
+			if i == expCount {
+				wg.Done()
+				return
+			}
+		}
+	}()
+
+	for i := 0; i < expCount; i++ {
+		q.Push(new(ReceiveContext))
 	}
+
+	wg.Wait()
 }
