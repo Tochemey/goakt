@@ -58,7 +58,7 @@ import (
 // watcher is used to handle parent child relationship.
 // This helps handle error propagation from a child actor using any of supervisory strategies
 type watcher struct {
-	WatcherID PID             // the WatcherID of the actor watching
+	WatcherID *PID            // the WatcherID of the actor watching
 	ErrChan   chan error      // ErrChan the channel where to pass error message
 	Done      chan types.Unit // Done when watching is completed
 }
@@ -66,129 +66,15 @@ type watcher struct {
 // taskCompletion is used to track completions' taskCompletion
 // to pipe the result to the appropriate PID
 type taskCompletion struct {
-	Receiver PID
+	Receiver *PID
 	Task     future.Task
 }
 
-// PID defines the various actions one can perform on a given actor
-type PID interface {
-	// ID is a convenient method that returns the actor unique identifier
-	// An actor unique identifier is its address in the actor system.
-	ID() string
-	// Name returns the actor given name
-	Name() string
-	// Shutdown gracefully shuts down the given actor
-	// All current messages in the mailbox will be processed before the actor shutdown after a period of time
-	// that can be configured. All child actors will be gracefully shutdown.
-	Shutdown(ctx context.Context) error
-	// IsRunning returns true when the actor is running ready to process public and false
-	// when the actor is stopped or not started at all
-	IsRunning() bool
-	// SpawnChild creates a child actor
-	// When the given child actor already exists its PID will only be returned
-	SpawnChild(ctx context.Context, name string, actor Actor) (PID, error)
-	// Restart restarts the actor
-	Restart(ctx context.Context) error
-	// Watch an actor
-	Watch(pid PID)
-	// UnWatch stops watching a given actor
-	UnWatch(pid PID)
-	// ActorSystem returns the underlying actor system
-	ActorSystem() ActorSystem
-	// ActorPath returns the path of the actor
-	ActorPath() *Path
-	// ActorHandle returns the underlying actor
-	ActorHandle() Actor
-	// Tell sends an asynchronous message to another PID
-	Tell(ctx context.Context, to PID, message proto.Message) error
-	// BatchTell sends an asynchronous bunch of messages to the given PID
-	// The messages will be processed one after the other in the order they are sent
-	// This is a design choice to follow the simple principle of one message at a time processing by actors.
-	// When BatchTell encounter a single message it will fall back to a Tell call.
-	BatchTell(ctx context.Context, to PID, messages ...proto.Message) error
-	// Ask sends a synchronous message to another actor and expect a response.
-	Ask(ctx context.Context, to PID, message proto.Message) (response proto.Message, err error)
-	// BatchAsk sends a synchronous bunch of messages to the given PID and expect responses in the same order as the messages.
-	// The messages will be processed one after the other in the order they are sent
-	// This is a design choice to follow the simple principle of one message at a time processing by actors.
-	// This can hinder performance if it is not properly used.
-	BatchAsk(ctx context.Context, to PID, messages ...proto.Message) (responses chan proto.Message, err error)
-	// RemoteTell sends a message to an actor remotely without expecting any reply
-	RemoteTell(ctx context.Context, to *goaktpb.Address, message proto.Message) error
-	// RemoteBatchTell sends a batch of messages to a remote actor in a way fire-and-forget manner
-	// Messages are processed one after the other in the order they are sent.
-	RemoteBatchTell(ctx context.Context, to *goaktpb.Address, messages ...proto.Message) error
-	// RemoteAsk is used to send a message to an actor remotely and expect a response
-	// immediately. With this type of message the receiver cannot communicate back to Sender
-	// except reply the message with a response. This one-way communication.
-	RemoteAsk(ctx context.Context, to *goaktpb.Address, message proto.Message) (response *anypb.Any, err error)
-	// RemoteBatchAsk sends a synchronous bunch of messages to a remote actor and expect responses in the same order as the messages.
-	// Messages are processed one after the other in the order they are sent.
-	// This can hinder performance if it is not properly used.
-	RemoteBatchAsk(ctx context.Context, to *goaktpb.Address, messages ...proto.Message) (responses []*anypb.Any, err error)
-	// RemoteLookup look for an actor address on a remote node.
-	RemoteLookup(ctx context.Context, host string, port int, name string) (addr *goaktpb.Address, err error)
-	// RemoteReSpawn restarts an actor on a remote node.
-	RemoteReSpawn(ctx context.Context, host string, port int, name string) error
-	// RemoteStop stops an actor on a remote node
-	RemoteStop(ctx context.Context, host string, port int, name string) error
-	// RemoteSpawn creates an actor on a remote node. The given actor needs to be registered on the remote node using the Register method of ActorSystem
-	RemoteSpawn(ctx context.Context, host string, port int, name, actorType string) error
-	// Children returns the list of all the direct children of the given actor
-	// Only alive actors are included in the list or an empty list is returned
-	Children() []PID
-	// Parents returns the list of all direct parents of a given actor.
-	// Only alive actors are included in the list or an empty list is returned
-	Parents() []PID
-	// Child returns the named child actor if it is alive
-	Child(name string) (PID, error)
-	// Stop forces the child Actor under the given name to terminate after it finishes processing its current message.
-	// Nothing happens if child is already stopped.
-	Stop(ctx context.Context, pid PID) error
-	// StashSize returns the stash buffer size
-	StashSize() uint64
-	// Equals is a convenient method to compare two PIDs
-	Equals(to PID) bool
-	// PipeTo processes a long-running task and pipes the result to the provided actor.
-	// The successful result of the task will be put onto the provided actor mailbox.
-	// This is useful when interacting with external services.
-	// It’s common that you would like to use the value of the response in the actor when the long-running task is completed
-	PipeTo(ctx context.Context, to PID, task future.Task) error
-	// push a message to the actor's receiveContextBuffer
-	doReceive(ctx *ReceiveContext)
-	// watchers returns the list of actors watching this actor
-	watchers() *slice.Slice[*watcher]
-	// watchees returns the list of actors watched by this actor
-	watchees() *pidMap
-	// setBehavior is a utility function that helps set the actor behavior
-	setBehavior(behavior Behavior)
-	// setBehaviorStacked adds a behavior to the actor's behaviors
-	setBehaviorStacked(behavior Behavior)
-	// unsetBehaviorStacked sets the actor's behavior to the previous behavior
-	// prior to setBehaviorStacked is called
-	unsetBehaviorStacked()
-	// resetBehavior is a utility function resets the actor behavior
-	resetBehavior()
-	// stash adds the current message to the stash buffer
-	stash(ctx *ReceiveContext) error
-	// unstashAll unstashes all messages from the stash buffer and prepends in the mailbox
-	// (it keeps the messages in the same order as received, unstashing older messages before newer)
-	unstashAll() error
-	// unstash unstashes the oldest message in the stash and prepends to the mailbox
-	unstash() error
-	// toDeadletterQueue add the given message to the deadletters queue
-	toDeadletterQueue(receiveCtx *ReceiveContext, err error)
-	// removeChild is a utility function to remove child actor
-	removeChild(pid PID)
-
-	getLastProcessingTime() time.Time
-	setLastProcessingDuration(d time.Duration)
-}
-
-// pid specifies an actor unique process
-// With the pid one can send a ReceiveContext to the actor
-type pid struct {
-	Actor
+// PID specifies an actor unique process
+// With the PID one can send a ReceiveContext to the actor
+type PID struct {
+	// specifies the message processor
+	actor Actor
 
 	// specifies the actor path
 	actorPath *Path
@@ -276,11 +162,8 @@ type pid struct {
 	metrics        *metric.ActorMetric
 }
 
-// enforce compilation error
-var _ PID = (*pid)(nil)
-
 // newPID creates a new pid
-func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption) (*pid, error) {
+func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption) (*PID, error) {
 	// actor path is required
 	if actorPath == nil {
 		return nil, errors.New("actorPath is required")
@@ -291,8 +174,8 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 		return nil, err
 	}
 
-	p := &pid{
-		Actor:                actor,
+	p := &PID{
+		actor:                actor,
 		lastProcessingTime:   atomic.Time{},
 		haltPassivationLnr:   make(chan types.Unit, 1),
 		logger:               log.DefaultLogger,
@@ -329,7 +212,7 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 	}
 
 	behaviorStack := newBehaviorStack()
-	behaviorStack.Push(p.Receive)
+	behaviorStack.Push(p.actor.Receive)
 	p.behaviorStack = behaviorStack
 
 	if err := p.init(ctx); err != nil {
@@ -361,27 +244,27 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 
 // ID is a convenient method that returns the actor unique identifier
 // An actor unique identifier is its address in the actor system.
-func (x *pid) ID() string {
+func (x *PID) ID() string {
 	return x.ActorPath().String()
 }
 
 // Name returns the actor given name
-func (x *pid) Name() string {
+func (x *PID) Name() string {
 	return x.ActorPath().Name()
 }
 
 // Equals is a convenient method to compare two PIDs
-func (x *pid) Equals(to PID) bool {
+func (x *PID) Equals(to *PID) bool {
 	return strings.EqualFold(x.ID(), to.ID())
 }
 
 // ActorHandle returns the underlying Actor
-func (x *pid) ActorHandle() Actor {
-	return x.Actor
+func (x *PID) ActorHandle() Actor {
+	return x.actor
 }
 
 // Child returns the named child actor if it is alive
-func (x *pid) Child(name string) (PID, error) {
+func (x *PID) Child(name string) (*PID, error) {
 	if !x.IsRunning() {
 		return nil, ErrDead
 	}
@@ -395,11 +278,11 @@ func (x *pid) Child(name string) (PID, error) {
 
 // Parents returns the list of all direct parents of a given actor.
 // Only alive actors are included in the list or an empty list is returned
-func (x *pid) Parents() []PID {
+func (x *PID) Parents() []*PID {
 	x.fieldsLocker.Lock()
 	watchers := x.watchersList
 	x.fieldsLocker.Unlock()
-	var parents []PID
+	var parents []*PID
 	if watchers.Len() > 0 {
 		for _, item := range watchers.Items() {
 			watcher := item.Value
@@ -416,12 +299,12 @@ func (x *pid) Parents() []PID {
 
 // Children returns the list of all the direct children of the given actor
 // Only alive actors are included in the list or an empty list is returned
-func (x *pid) Children() []PID {
+func (x *PID) Children() []*PID {
 	x.fieldsLocker.RLock()
 	children := x.children.pids()
 	x.fieldsLocker.RUnlock()
 
-	cids := make([]PID, 0, len(children))
+	cids := make([]*PID, 0, len(children))
 	for _, child := range children {
 		if child.IsRunning() {
 			cids = append(cids, child)
@@ -433,7 +316,7 @@ func (x *pid) Children() []PID {
 
 // Stop forces the child Actor under the given name to terminate after it finishes processing its current message.
 // Nothing happens if child is already stopped.
-func (x *pid) Stop(ctx context.Context, cid PID) error {
+func (x *PID) Stop(ctx context.Context, cid *PID) error {
 	if !x.IsRunning() {
 		return ErrDead
 	}
@@ -459,12 +342,12 @@ func (x *pid) Stop(ctx context.Context, cid PID) error {
 
 // IsRunning returns true when the actor is alive ready to process messages and false
 // when the actor is stopped or not started at all
-func (x *pid) IsRunning() bool {
+func (x *PID) IsRunning() bool {
 	return x != nil && x != NoSender && x.running.Load()
 }
 
 // ActorSystem returns the actor system
-func (x *pid) ActorSystem() ActorSystem {
+func (x *PID) ActorSystem() ActorSystem {
 	x.fieldsLocker.RLock()
 	sys := x.system
 	x.fieldsLocker.RUnlock()
@@ -472,7 +355,7 @@ func (x *pid) ActorSystem() ActorSystem {
 }
 
 // ActorPath returns the path of the actor
-func (x *pid) ActorPath() *Path {
+func (x *PID) ActorPath() *Path {
 	x.fieldsLocker.RLock()
 	path := x.actorPath
 	x.fieldsLocker.RUnlock()
@@ -481,7 +364,7 @@ func (x *pid) ActorPath() *Path {
 
 // Restart restarts the actor.
 // During restart all messages that are in the mailbox and not yet processed will be ignored
-func (x *pid) Restart(ctx context.Context) error {
+func (x *PID) Restart(ctx context.Context) error {
 	if x == nil || x.ActorPath() == nil {
 		return ErrUndefinedActor
 	}
@@ -529,7 +412,7 @@ func (x *pid) Restart(ctx context.Context) error {
 
 // SpawnChild creates a child actor and start watching it for error
 // When the given child actor already exists its PID will only be returned
-func (x *pid) SpawnChild(ctx context.Context, name string, actor Actor) (PID, error) {
+func (x *PID) SpawnChild(ctx context.Context, name string, actor Actor) (*PID, error) {
 	if !x.IsRunning() {
 		return nil, ErrDead
 	}
@@ -598,7 +481,7 @@ func (x *pid) SpawnChild(ctx context.Context, name string, actor Actor) (PID, er
 }
 
 // StashSize returns the stash buffer size
-func (x *pid) StashSize() uint64 {
+func (x *PID) StashSize() uint64 {
 	if x.stashBuffer == nil {
 		return 0
 	}
@@ -609,7 +492,7 @@ func (x *pid) StashSize() uint64 {
 // The successful result of the task will be put onto the provided actor mailbox.
 // This is useful when interacting with external services.
 // It’s common that you would like to use the value of the response in the actor when the long-running task is completed
-func (x *pid) PipeTo(ctx context.Context, to PID, task future.Task) error {
+func (x *PID) PipeTo(ctx context.Context, to *PID, task future.Task) error {
 	if task == nil {
 		return ErrUndefinedTask
 	}
@@ -628,7 +511,7 @@ func (x *pid) PipeTo(ctx context.Context, to PID, task future.Task) error {
 
 // Ask sends a synchronous message to another actor and expect a response.
 // This block until a response is received or timed out.
-func (x *pid) Ask(ctx context.Context, to PID, message proto.Message) (response proto.Message, err error) {
+func (x *PID) Ask(ctx context.Context, to *PID, message proto.Message) (response proto.Message, err error) {
 	if !to.IsRunning() {
 		return nil, ErrDead
 	}
@@ -650,7 +533,7 @@ func (x *pid) Ask(ctx context.Context, to PID, message proto.Message) (response 
 }
 
 // Tell sends an asynchronous message to another PID
-func (x *pid) Tell(ctx context.Context, to PID, message proto.Message) error {
+func (x *PID) Tell(ctx context.Context, to *PID, message proto.Message) error {
 	if !to.IsRunning() {
 		return ErrDead
 	}
@@ -664,7 +547,7 @@ func (x *pid) Tell(ctx context.Context, to PID, message proto.Message) error {
 // The messages will be processed one after the other in the order they are sent.
 // This is a design choice to follow the simple principle of one message at a time processing by actors.
 // When BatchTell encounter a single message it will fall back to a Tell call.
-func (x *pid) BatchTell(ctx context.Context, to PID, messages ...proto.Message) error {
+func (x *PID) BatchTell(ctx context.Context, to *PID, messages ...proto.Message) error {
 	if !to.IsRunning() {
 		return ErrDead
 	}
@@ -684,7 +567,7 @@ func (x *pid) BatchTell(ctx context.Context, to PID, messages ...proto.Message) 
 // BatchAsk sends a synchronous bunch of messages to the given PID and expect responses in the same order as the messages.
 // The messages will be processed one after the other in the order they are sent.
 // This is a design choice to follow the simple principle of one message at a time processing by actors.
-func (x *pid) BatchAsk(ctx context.Context, to PID, messages ...proto.Message) (responses chan proto.Message, err error) {
+func (x *PID) BatchAsk(ctx context.Context, to *PID, messages ...proto.Message) (responses chan proto.Message, err error) {
 	if !to.IsRunning() {
 		return nil, ErrDead
 	}
@@ -703,7 +586,7 @@ func (x *pid) BatchAsk(ctx context.Context, to PID, messages ...proto.Message) (
 }
 
 // RemoteLookup look for an actor address on a remote node.
-func (x *pid) RemoteLookup(ctx context.Context, host string, port int, name string) (addr *goaktpb.Address, err error) {
+func (x *PID) RemoteLookup(ctx context.Context, host string, port int, name string) (addr *goaktpb.Address, err error) {
 	remoteClient, err := x.remotingClient(host, port)
 	if err != nil {
 		return nil, err
@@ -728,7 +611,7 @@ func (x *pid) RemoteLookup(ctx context.Context, host string, port int, name stri
 }
 
 // RemoteTell sends a message to an actor remotely without expecting any reply
-func (x *pid) RemoteTell(ctx context.Context, to *goaktpb.Address, message proto.Message) error {
+func (x *PID) RemoteTell(ctx context.Context, to *goaktpb.Address, message proto.Message) error {
 	marshaled, err := anypb.New(message)
 	if err != nil {
 		return err
@@ -779,7 +662,7 @@ func (x *pid) RemoteTell(ctx context.Context, to *goaktpb.Address, message proto
 }
 
 // RemoteAsk sends a synchronous message to another actor remotely and expect a response.
-func (x *pid) RemoteAsk(ctx context.Context, to *goaktpb.Address, message proto.Message) (response *anypb.Any, err error) {
+func (x *PID) RemoteAsk(ctx context.Context, to *goaktpb.Address, message proto.Message) (response *anypb.Any, err error) {
 	marshaled, err := anypb.New(message)
 	if err != nil {
 		return nil, err
@@ -847,7 +730,7 @@ func (x *pid) RemoteAsk(ctx context.Context, to *goaktpb.Address, message proto.
 
 // RemoteBatchTell sends a batch of messages to a remote actor in a way fire-and-forget manner
 // Messages are processed one after the other in the order they are sent.
-func (x *pid) RemoteBatchTell(ctx context.Context, to *goaktpb.Address, messages ...proto.Message) error {
+func (x *PID) RemoteBatchTell(ctx context.Context, to *goaktpb.Address, messages ...proto.Message) error {
 	if len(messages) == 1 {
 		return x.RemoteTell(ctx, to, messages[0])
 	}
@@ -907,7 +790,7 @@ func (x *pid) RemoteBatchTell(ctx context.Context, to *goaktpb.Address, messages
 // RemoteBatchAsk sends a synchronous bunch of messages to a remote actor and expect responses in the same order as the messages.
 // Messages are processed one after the other in the order they are sent.
 // This can hinder performance if it is not properly used.
-func (x *pid) RemoteBatchAsk(ctx context.Context, to *goaktpb.Address, messages ...proto.Message) (responses []*anypb.Any, err error) {
+func (x *PID) RemoteBatchAsk(ctx context.Context, to *goaktpb.Address, messages ...proto.Message) (responses []*anypb.Any, err error) {
 	senderPath := x.ActorPath()
 	senderAddress := senderPath.Address()
 
@@ -979,7 +862,7 @@ func (x *pid) RemoteBatchAsk(ctx context.Context, to *goaktpb.Address, messages 
 }
 
 // RemoteStop stops an actor on a remote node
-func (x *pid) RemoteStop(ctx context.Context, host string, port int, name string) error {
+func (x *PID) RemoteStop(ctx context.Context, host string, port int, name string) error {
 	remoteService, err := x.remotingClient(host, port)
 	if err != nil {
 		return err
@@ -1003,7 +886,7 @@ func (x *pid) RemoteStop(ctx context.Context, host string, port int, name string
 }
 
 // RemoteSpawn creates an actor on a remote node. The given actor needs to be registered on the remote node using the Register method of ActorSystem
-func (x *pid) RemoteSpawn(ctx context.Context, host string, port int, name, actorType string) error {
+func (x *PID) RemoteSpawn(ctx context.Context, host string, port int, name, actorType string) error {
 	remoteService, err := x.remotingClient(host, port)
 	if err != nil {
 		return err
@@ -1033,7 +916,7 @@ func (x *pid) RemoteSpawn(ctx context.Context, host string, port int, name, acto
 }
 
 // RemoteReSpawn restarts an actor on a remote node.
-func (x *pid) RemoteReSpawn(ctx context.Context, host string, port int, name string) error {
+func (x *PID) RemoteReSpawn(ctx context.Context, host string, port int, name string) error {
 	remoteService, err := x.remotingClient(host, port)
 	if err != nil {
 		return err
@@ -1059,7 +942,7 @@ func (x *pid) RemoteReSpawn(ctx context.Context, host string, port int, name str
 // Shutdown gracefully shuts down the given actor
 // All current messages in the mailbox will be processed before the actor shutdown after a period of time
 // that can be configured. All child actors will be gracefully shutdown.
-func (x *pid) Shutdown(ctx context.Context) error {
+func (x *PID) Shutdown(ctx context.Context) error {
 	x.stopLocker.Lock()
 	defer x.stopLocker.Unlock()
 
@@ -1092,7 +975,7 @@ func (x *pid) Shutdown(ctx context.Context) error {
 }
 
 // Watch a pid for errors, and send on the returned channel if an error occurred
-func (x *pid) Watch(cid PID) {
+func (x *PID) Watch(cid *PID) {
 	w := &watcher{
 		WatcherID: x,
 		ErrChan:   make(chan error, 1),
@@ -1104,7 +987,7 @@ func (x *pid) Watch(cid PID) {
 }
 
 // UnWatch stops watching a given actor
-func (x *pid) UnWatch(pid PID) {
+func (x *PID) UnWatch(pid *PID) {
 	for _, item := range pid.watchers().Items() {
 		w := item.Value
 		if w.WatcherID.Equals(x) {
@@ -1117,24 +1000,24 @@ func (x *pid) UnWatch(pid PID) {
 }
 
 // watchers return the list of watchersList
-func (x *pid) watchers() *slice.Slice[*watcher] {
+func (x *PID) watchers() *slice.Slice[*watcher] {
 	return x.watchersList
 }
 
 // watchees returns the list of actors watched by this actor
-func (x *pid) watchees() *pidMap {
+func (x *PID) watchees() *pidMap {
 	return x.watchedList
 }
 
 // doReceive pushes a given message to the actor receiveContextBuffer
-func (x *pid) doReceive(receiveCtx *ReceiveContext) {
+func (x *PID) doReceive(receiveCtx *ReceiveContext) {
 	x.lastProcessingTime.Store(time.Now())
 	x.mailbox.Push(receiveCtx)
 }
 
 // init initializes the given actor and init processing messages
 // when the initialization failed the actor will not be started
-func (x *pid) init(ctx context.Context) error {
+func (x *PID) init(ctx context.Context) error {
 	x.logger.Info("Initialization process has started...")
 
 	cancelCtx, cancel := context.WithTimeout(ctx, x.initTimeout.Load())
@@ -1143,7 +1026,7 @@ func (x *pid) init(ctx context.Context) error {
 	// create a new retrier that will try a maximum of `initMaxRetries` times, with
 	// an initial delay of 100 ms and a maximum delay of 1 second
 	retrier := retry.NewRetrier(int(x.initMaxRetries.Load()), 100*time.Millisecond, time.Second)
-	if err := retrier.RunContext(cancelCtx, x.Actor.PreStart); err != nil {
+	if err := retrier.RunContext(cancelCtx, x.actor.PreStart); err != nil {
 		e := ErrInitFailure(err)
 		return e
 	}
@@ -1165,7 +1048,7 @@ func (x *pid) init(ctx context.Context) error {
 }
 
 // reset re-initializes the actor PID
-func (x *pid) reset() {
+func (x *PID) reset() {
 	x.lastProcessingTime.Store(time.Time{})
 	x.passivateAfter.Store(DefaultPassivationTimeout)
 	x.askTimeout.Store(DefaultAskTimeout)
@@ -1186,7 +1069,7 @@ func (x *pid) reset() {
 	x.processedCount.Store(0)
 }
 
-func (x *pid) freeWatchers(ctx context.Context) {
+func (x *PID) freeWatchers(ctx context.Context) {
 	x.logger.Debug("freeing all watcher actors...")
 	watchers := x.watchers()
 	if watchers.Len() > 0 {
@@ -1207,7 +1090,7 @@ func (x *pid) freeWatchers(ctx context.Context) {
 	}
 }
 
-func (x *pid) freeWatchees(ctx context.Context) {
+func (x *PID) freeWatchees(ctx context.Context) {
 	x.logger.Debug("freeing all watched actors...")
 	for _, watched := range x.watchedList.pids() {
 		x.logger.Debugf("watcher=(%s) unwatching actor=(%s)", x.ID(), watched.ID())
@@ -1221,7 +1104,7 @@ func (x *pid) freeWatchees(ctx context.Context) {
 	}
 }
 
-func (x *pid) freeChildren(ctx context.Context) {
+func (x *PID) freeChildren(ctx context.Context) {
 	x.logger.Debug("freeing all child actors...")
 	for _, child := range x.Children() {
 		x.logger.Debugf("parent=(%s) disowning child=(%s)", x.ID(), child.ID())
@@ -1238,7 +1121,7 @@ func (x *pid) freeChildren(ctx context.Context) {
 }
 
 // receive extracts every message from the actor mailbox
-func (x *pid) receive() {
+func (x *PID) receive() {
 	for x.running.Load() {
 		received := x.mailbox.Pop()
 		if received == nil {
@@ -1257,7 +1140,7 @@ func (x *pid) receive() {
 }
 
 // handleReceived picks the right behavior and processes the message
-func (x *pid) handleReceived(received *ReceiveContext) {
+func (x *PID) handleReceived(received *ReceiveContext) {
 	// handle panic or any error during processing
 	defer x.recovery(received)
 	// pick the current behvior from the stack
@@ -1271,7 +1154,7 @@ func (x *pid) handleReceived(received *ReceiveContext) {
 }
 
 // recovery is called upon after message is processed
-func (x *pid) recovery(received *ReceiveContext) {
+func (x *PID) recovery(received *ReceiveContext) {
 	if r := recover(); r != nil {
 		x.notifyWatchers(fmt.Errorf("%s", r))
 		return
@@ -1282,7 +1165,7 @@ func (x *pid) recovery(received *ReceiveContext) {
 
 // passivationLoop checks whether the actor is processing public or not.
 // when the actor is idle, it automatically shuts down to free resources
-func (x *pid) passivationLoop() {
+func (x *PID) passivationLoop() {
 	x.logger.Info("start the passivation listener...")
 	x.logger.Infof("passivation timeout is (%s)", x.passivateAfter.Load().String())
 	ticker := time.NewTicker(x.passivateAfter.Load())
@@ -1334,7 +1217,7 @@ func (x *pid) passivationLoop() {
 }
 
 // setBehavior is a utility function that helps set the actor behavior
-func (x *pid) setBehavior(behavior Behavior) {
+func (x *PID) setBehavior(behavior Behavior) {
 	x.fieldsLocker.Lock()
 	x.behaviorStack.Reset()
 	x.behaviorStack.Push(behavior)
@@ -1342,14 +1225,14 @@ func (x *pid) setBehavior(behavior Behavior) {
 }
 
 // resetBehavior is a utility function resets the actor behavior
-func (x *pid) resetBehavior() {
+func (x *PID) resetBehavior() {
 	x.fieldsLocker.Lock()
-	x.behaviorStack.Push(x.Receive)
+	x.behaviorStack.Push(x.actor.Receive)
 	x.fieldsLocker.Unlock()
 }
 
 // setBehaviorStacked adds a behavior to the actor's behaviorStack
-func (x *pid) setBehaviorStacked(behavior Behavior) {
+func (x *PID) setBehaviorStacked(behavior Behavior) {
 	x.fieldsLocker.Lock()
 	x.behaviorStack.Push(behavior)
 	x.fieldsLocker.Unlock()
@@ -1357,14 +1240,14 @@ func (x *pid) setBehaviorStacked(behavior Behavior) {
 
 // unsetBehaviorStacked sets the actor's behavior to the previous behavior
 // prior to setBehaviorStacked is called
-func (x *pid) unsetBehaviorStacked() {
+func (x *PID) unsetBehaviorStacked() {
 	x.fieldsLocker.Lock()
 	x.behaviorStack.Pop()
 	x.fieldsLocker.Unlock()
 }
 
 // doStop stops the actor
-func (x *pid) doStop(ctx context.Context) error {
+func (x *PID) doStop(ctx context.Context) error {
 	x.running.Store(false)
 
 	// TODO: just signal stash processing done and ignore the messages or process them
@@ -1406,11 +1289,11 @@ func (x *pid) doStop(ctx context.Context) error {
 
 	x.logger.Infof("Shutdown process is on going for actor=%s...", x.ActorPath().String())
 	x.reset()
-	return x.Actor.PostStop(ctx)
+	return x.actor.PostStop(ctx)
 }
 
 // removeChild helps remove child actor
-func (x *pid) removeChild(pid PID) {
+func (x *PID) removeChild(pid *PID) {
 	if !x.IsRunning() {
 		return
 	}
@@ -1429,7 +1312,7 @@ func (x *pid) removeChild(pid PID) {
 }
 
 // notifyWatchers send error to watchers
-func (x *pid) notifyWatchers(err error) {
+func (x *PID) notifyWatchers(err error) {
 	if err != nil {
 		for _, item := range x.watchers().Items() {
 			item.Value.ErrChan <- err
@@ -1438,7 +1321,7 @@ func (x *pid) notifyWatchers(err error) {
 }
 
 // toDeadletterQueue sends message to deadletter queue
-func (x *pid) toDeadletterQueue(receiveCtx *ReceiveContext, err error) {
+func (x *PID) toDeadletterQueue(receiveCtx *ReceiveContext, err error) {
 	// the message is lost
 	if x.eventsStream == nil {
 		return
@@ -1468,7 +1351,7 @@ func (x *pid) toDeadletterQueue(receiveCtx *ReceiveContext, err error) {
 }
 
 // registerMetrics register the PID metrics with OTel instrumentation.
-func (x *pid) registerMetrics() error {
+func (x *PID) registerMetrics() error {
 	meter := x.telemetry.Meter
 	metrics := x.metrics
 	_, err := meter.RegisterCallback(func(_ context.Context, observer otelmetric.Observer) error {
@@ -1486,7 +1369,7 @@ func (x *pid) registerMetrics() error {
 }
 
 // clientOptions returns the gRPC client connections options
-func (x *pid) clientOptions() ([]connect.ClientOption, error) {
+func (x *PID) clientOptions() ([]connect.ClientOption, error) {
 	var interceptor *otelconnect.Interceptor
 	var err error
 	if x.metricEnabled.Load() {
@@ -1506,7 +1389,7 @@ func (x *pid) clientOptions() ([]connect.ClientOption, error) {
 }
 
 // remotingClient returns an instance of the Remote Service client
-func (x *pid) remotingClient(host string, port int) (internalpbconnect.RemotingServiceClient, error) {
+func (x *PID) remotingClient(host string, port int) (internalpbconnect.RemotingServiceClient, error) {
 	clientOptions, err := x.clientOptions()
 	if err != nil {
 		return nil, err
@@ -1520,7 +1403,7 @@ func (x *pid) remotingClient(host string, port int) (internalpbconnect.RemotingS
 }
 
 // getLastProcessingTime returns the last processing time
-func (x *pid) getLastProcessingTime() time.Time {
+func (x *PID) getLastProcessingTime() time.Time {
 	x.processingTimeLocker.Lock()
 	processingTime := x.lastProcessingTime.Load()
 	x.processingTimeLocker.Unlock()
@@ -1528,7 +1411,7 @@ func (x *pid) getLastProcessingTime() time.Time {
 }
 
 // setLastProcessingDuration sets the last processing duration
-func (x *pid) setLastProcessingDuration(d time.Duration) {
+func (x *PID) setLastProcessingDuration(d time.Duration) {
 	x.processingTimeLocker.Lock()
 	x.lastReceivedDuration.Store(d)
 	x.processingTimeLocker.Unlock()
@@ -1536,7 +1419,7 @@ func (x *pid) setLastProcessingDuration(d time.Duration) {
 
 // handleCompletion processes a long-running task and pipe the result to
 // the completion receiver
-func (x *pid) handleCompletion(ctx context.Context, completion *taskCompletion) {
+func (x *PID) handleCompletion(ctx context.Context, completion *taskCompletion) {
 	// defensive programming
 	if completion == nil ||
 		completion.Receiver == nil ||
@@ -1577,7 +1460,7 @@ func (x *pid) handleCompletion(ctx context.Context, completion *taskCompletion) 
 }
 
 // supervise watches for child actor's failure and act based upon the supervisory strategy
-func (x *pid) supervise(cid PID, watcher *watcher) {
+func (x *PID) supervise(cid *PID, watcher *watcher) {
 	for {
 		select {
 		case <-watcher.Done:
@@ -1600,7 +1483,7 @@ func (x *pid) supervise(cid PID, watcher *watcher) {
 }
 
 // handleStopDirective handles the testSupervisor stop directive
-func (x *pid) handleStopDirective(cid PID) {
+func (x *PID) handleStopDirective(cid *PID) {
 	x.UnWatch(cid)
 	x.children.delete(cid.ActorPath())
 	if err := cid.Shutdown(context.Background()); err != nil {
@@ -1612,7 +1495,7 @@ func (x *pid) handleStopDirective(cid PID) {
 }
 
 // handleRestartDirective handles the testSupervisor restart directive
-func (x *pid) handleRestartDirective(cid PID, maxRetries uint32, timeout time.Duration) {
+func (x *PID) handleRestartDirective(cid *PID, maxRetries uint32, timeout time.Duration) {
 	x.UnWatch(cid)
 	ctx := context.Background()
 	var err error
@@ -1636,7 +1519,7 @@ func (x *pid) handleRestartDirective(cid PID, maxRetries uint32, timeout time.Du
 	x.Watch(cid)
 }
 
-func (x *pid) recordLastReceivedDurationMetric(ctx context.Context) {
+func (x *PID) recordLastReceivedDurationMetric(ctx context.Context) {
 	x.lastReceivedDuration.Store(time.Since(x.lastProcessingTime.Load()))
 	if x.metricEnabled.Load() {
 		x.metrics.LastReceivedDuration().Record(ctx, x.lastReceivedDuration.Load().Milliseconds())

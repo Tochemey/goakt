@@ -66,7 +66,7 @@ const (
 
 var (
 	// NoSender means that there is no sender
-	NoSender PID
+	NoSender *PID
 	// DefaultSupervisoryStrategy defines the default supervisory strategy
 	DefaultSupervisoryStrategy = NewStopDirective()
 	// RemoteNoSender means that there is no sender

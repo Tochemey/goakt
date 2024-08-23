@@ -79,7 +79,7 @@ type Benchmark struct {
 	workersCount int
 	// duration specifies how long the load testing will run
 	duration time.Duration
-	pids     []actors.PID
+	pids     []*actors.PID
 	system   actors.ActorSystem
 }
 
@@ -89,7 +89,7 @@ func NewBenchmark(actorsCount, workersCount int, duration time.Duration) *Benchm
 		actorsCount:  actorsCount,
 		workersCount: workersCount,
 		duration:     duration,
-		pids:         make([]actors.PID, 0, actorsCount),
+		pids:         make([]*actors.PID, 0, actorsCount),
 	}
 }
 

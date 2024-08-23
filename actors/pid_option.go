@@ -33,11 +33,11 @@ import (
 )
 
 // pidOption represents the pid
-type pidOption func(pid *pid)
+type pidOption func(pid *PID)
 
 // withPassivationAfter sets the actor passivation time
 func withPassivationAfter(duration time.Duration) pidOption {
-	return func(pid *pid) {
+	return func(pid *PID) {
 		pid.passivateAfter.Store(duration)
 	}
 }
@@ -45,28 +45,28 @@ func withPassivationAfter(duration time.Duration) pidOption {
 // withAskTimeout sets how long in seconds an actor should reply a command
 // in a receive-reply pattern
 func withAskTimeout(timeout time.Duration) pidOption {
-	return func(pid *pid) {
+	return func(pid *PID) {
 		pid.askTimeout.Store(timeout)
 	}
 }
 
 // withInitMaxRetries sets the number of times to retry an actor init process
 func withInitMaxRetries(max int) pidOption {
-	return func(pid *pid) {
+	return func(pid *PID) {
 		pid.initMaxRetries.Store(int32(max))
 	}
 }
 
 // withCustomLogger sets the log
 func withCustomLogger(logger log.Logger) pidOption {
-	return func(pid *pid) {
+	return func(pid *PID) {
 		pid.logger = logger
 	}
 }
 
 // withActorSystem set the actor system of the pid
 func withActorSystem(sys ActorSystem) pidOption {
-	return func(pid *pid) {
+	return func(pid *PID) {
 		pid.system = sys
 	}
 }
@@ -74,55 +74,55 @@ func withActorSystem(sys ActorSystem) pidOption {
 // withSupervisorDirective sets the supervisor strategy to used when dealing
 // with child actors
 func withSupervisorDirective(directive SupervisorDirective) pidOption {
-	return func(pid *pid) {
+	return func(pid *PID) {
 		pid.supervisorDirective = directive
 	}
 }
 
 // withShutdownTimeout sets the shutdown timeout
 func withShutdownTimeout(duration time.Duration) pidOption {
-	return func(pid *pid) {
+	return func(pid *PID) {
 		pid.shutdownTimeout.Store(duration)
 	}
 }
 
 // withNoPassivation disable passivation
 func withPassivationDisabled() pidOption {
-	return func(pid *pid) {
+	return func(pid *PID) {
 		pid.passivateAfter.Store(-1)
 	}
 }
 
 // withTelemetry sets the custom telemetry
 func withTelemetry(telemetry *telemetry.Telemetry) pidOption {
-	return func(pid *pid) {
+	return func(pid *PID) {
 		pid.telemetry = telemetry
 	}
 }
 
 // withStash sets the actor's stash buffer
 func withStash() pidOption {
-	return func(pid *pid) {
+	return func(pid *PID) {
 		pid.stashBuffer = newMailbox()
 	}
 }
 
 // withEventsStream set the events stream
 func withEventsStream(stream *eventstream.EventsStream) pidOption {
-	return func(pid *pid) {
+	return func(pid *PID) {
 		pid.eventsStream = stream
 	}
 }
 
 // withInitTimeout sets the init timeout
 func withInitTimeout(duration time.Duration) pidOption {
-	return func(pid *pid) {
+	return func(pid *PID) {
 		pid.initTimeout.Store(duration)
 	}
 }
 
 func withMetric() pidOption {
-	return func(pid *pid) {
+	return func(pid *PID) {
 		pid.metricEnabled.Store(true)
 	}
 }

@@ -74,7 +74,7 @@ type router struct {
 	strategy RoutingStrategy
 	poolSize int
 	// list of routees
-	routeesMap  map[string]PID
+	routeesMap  map[string]*PID
 	next        uint32
 	routeesKind reflect.Type
 	logger      log.Logger
@@ -88,7 +88,7 @@ func newRouter(poolSize int, routeesKind Actor, loggger log.Logger, opts ...Rout
 	router := &router{
 		strategy:    FanOutRouting,
 		poolSize:    poolSize,
-		routeesMap:  make(map[string]PID, poolSize),
+		routeesMap:  make(map[string]*PID, poolSize),
 		routeesKind: reflect.TypeOf(routeesKind).Elem(),
 		logger:      loggger,
 	}
@@ -176,7 +176,7 @@ func (x *router) broadcast(ctx *ReceiveContext) {
 	default:
 		for _, routee := range routees {
 			routee := routee
-			go func(pid PID) {
+			go func(pid *PID) {
 				ctx.Tell(pid, msg)
 			}(routee)
 		}
@@ -188,8 +188,8 @@ func routeeName(routerName string, routeeIndex int) string {
 	return fmt.Sprintf("%s-%s-%d", routeeNamePrefix, routerName, routeeIndex)
 }
 
-func (x *router) availableRoutees() ([]PID, bool) {
-	routees := make([]PID, 0, x.poolSize)
+func (x *router) availableRoutees() ([]*PID, bool) {
+	routees := make([]*PID, 0, x.poolSize)
 	for _, routee := range x.routeesMap {
 		if !routee.IsRunning() {
 			delete(x.routeesMap, routee.ID())

@@ -43,7 +43,7 @@ import (
 
 // Ask sends a synchronous message to another actor and expect a response.
 // This block until a response is received or timed out.
-func Ask(ctx context.Context, to PID, message proto.Message, timeout time.Duration) (response proto.Message, err error) {
+func Ask(ctx context.Context, to *PID, message proto.Message, timeout time.Duration) (response proto.Message, err error) {
 	if !to.IsRunning() {
 		return nil, ErrDead
 	}
@@ -77,7 +77,7 @@ func Ask(ctx context.Context, to PID, message proto.Message, timeout time.Durati
 }
 
 // Tell sends an asynchronous message to an actor
-func Tell(ctx context.Context, to PID, message proto.Message) error {
+func Tell(ctx context.Context, to *PID, message proto.Message) error {
 	if !to.IsRunning() {
 		return ErrDead
 	}
@@ -105,7 +105,7 @@ func Tell(ctx context.Context, to PID, message proto.Message) error {
 }
 
 // BatchTell sends bulk asynchronous messages to an actor
-func BatchTell(ctx context.Context, to PID, messages ...proto.Message) error {
+func BatchTell(ctx context.Context, to *PID, messages ...proto.Message) error {
 	if !to.IsRunning() {
 		return ErrDead
 	}
@@ -122,7 +122,7 @@ func BatchTell(ctx context.Context, to PID, messages ...proto.Message) error {
 // BatchAsk sends a synchronous bunch of messages to the given PID and expect responses in the same order as the messages.
 // The messages will be processed one after the other in the order they are sent
 // This is a design choice to follow the simple principle of one message at a time processing by actors.
-func BatchAsk(ctx context.Context, to PID, timeout time.Duration, messages ...proto.Message) (responses chan proto.Message, err error) {
+func BatchAsk(ctx context.Context, to *PID, timeout time.Duration, messages ...proto.Message) (responses chan proto.Message, err error) {
 	if !to.IsRunning() {
 		return nil, ErrDead
 	}

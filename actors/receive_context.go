@@ -38,15 +38,15 @@ import (
 type ReceiveContext struct {
 	ctx          context.Context
 	message      proto.Message
-	sender       PID
+	sender       *PID
 	remoteSender *goaktpb.Address
 	response     chan proto.Message
-	recipient    PID
+	recipient    *PID
 	err          error
 }
 
 // newReceiveContext creates an instance of ReceiveContext
-func newReceiveContext(ctx context.Context, from, to PID, message proto.Message) *ReceiveContext {
+func newReceiveContext(ctx context.Context, from, to *PID, message proto.Message) *ReceiveContext {
 	// create a message receiveContext
 	return &ReceiveContext{
 		ctx:       ctx,
@@ -64,7 +64,7 @@ func (c *ReceiveContext) WithRemoteSender(remoteSender *goaktpb.Address) *Receiv
 }
 
 // Self returns the receiver PID of the message
-func (c *ReceiveContext) Self() PID {
+func (c *ReceiveContext) Self() *PID {
 	return c.recipient
 }
 
@@ -85,7 +85,7 @@ func (c *ReceiveContext) Context() context.Context {
 }
 
 // Sender of the message
-func (c *ReceiveContext) Sender() PID {
+func (c *ReceiveContext) Sender() *PID {
 	return c.sender
 }
 
@@ -150,7 +150,7 @@ func (c *ReceiveContext) UnstashAll() {
 }
 
 // Tell sends an asynchronous message to another PID
-func (c *ReceiveContext) Tell(to PID, message proto.Message) {
+func (c *ReceiveContext) Tell(to *PID, message proto.Message) {
 	recipient := c.recipient
 	ctx := context.WithoutCancel(c.ctx)
 	if err := recipient.Tell(ctx, to, message); err != nil {
@@ -162,7 +162,7 @@ func (c *ReceiveContext) Tell(to PID, message proto.Message) {
 // The messages will be processed one after the other in the order they are sent
 // This is a design choice to follow the simple principle of one message at a time processing by actors.
 // When BatchTell encounter a single message it will fall back to a Tell call.
-func (c *ReceiveContext) BatchTell(to PID, messages ...proto.Message) {
+func (c *ReceiveContext) BatchTell(to *PID, messages ...proto.Message) {
 	recipient := c.recipient
 	ctx := context.WithoutCancel(c.ctx)
 	if err := recipient.BatchTell(ctx, to, messages...); err != nil {
@@ -173,7 +173,7 @@ func (c *ReceiveContext) BatchTell(to PID, messages ...proto.Message) {
 // Ask sends a synchronous message to another actor and expect a response. This method is good when interacting with a child actor.
 // Ask has a timeout which can cause the sender to set the context error. When ask times out, the receiving actor does not know and may still process the message.
 // It is recommended to set a good timeout to quickly receive response and try to avoid false positives
-func (c *ReceiveContext) Ask(to PID, message proto.Message) (response proto.Message) {
+func (c *ReceiveContext) Ask(to *PID, message proto.Message) (response proto.Message) {
 	recipient := c.recipient
 	ctx := context.WithoutCancel(c.ctx)
 	reply, err := recipient.Ask(ctx, to, message)
@@ -186,7 +186,7 @@ func (c *ReceiveContext) Ask(to PID, message proto.Message) (response proto.Mess
 // BatchAsk sends a synchronous bunch of messages to the given PID and expect responses in the same order as the messages.
 // The messages will be processed one after the other in the order they are sent
 // This is a design choice to follow the simple principle of one message at a time processing by actors.
-func (c *ReceiveContext) BatchAsk(to PID, messages ...proto.Message) (responses chan proto.Message) {
+func (c *ReceiveContext) BatchAsk(to *PID, messages ...proto.Message) (responses chan proto.Message) {
 	recipient := c.recipient
 	ctx := context.WithoutCancel(c.ctx)
 	reply, err := recipient.BatchAsk(ctx, to, messages...)
@@ -264,7 +264,7 @@ func (c *ReceiveContext) Shutdown() {
 }
 
 // Spawn creates a child actor or return error
-func (c *ReceiveContext) Spawn(name string, actor Actor) PID {
+func (c *ReceiveContext) Spawn(name string, actor Actor) *PID {
 	recipient := c.recipient
 	ctx := context.WithoutCancel(c.ctx)
 	pid, err := recipient.SpawnChild(ctx, name, actor)
@@ -275,12 +275,12 @@ func (c *ReceiveContext) Spawn(name string, actor Actor) PID {
 }
 
 // Children returns the list of all the children of the given actor
-func (c *ReceiveContext) Children() []PID {
+func (c *ReceiveContext) Children() []*PID {
 	return c.recipient.Children()
 }
 
 // Child returns the named child actor if it is alive
-func (c *ReceiveContext) Child(name string) PID {
+func (c *ReceiveContext) Child(name string) *PID {
 	recipient := c.recipient
 	pid, err := recipient.Child(name)
 	if err != nil {
@@ -291,7 +291,7 @@ func (c *ReceiveContext) Child(name string) PID {
 
 // Stop forces the child Actor under the given name to terminate after it finishes processing its current message.
 // Nothing happens if child is already stopped. However, it returns an error when the child cannot be stopped.
-func (c *ReceiveContext) Stop(child PID) {
+func (c *ReceiveContext) Stop(child *PID) {
 	recipient := c.recipient
 	ctx := context.WithoutCancel(c.ctx)
 	if err := recipient.Stop(ctx, child); err != nil {
@@ -303,7 +303,7 @@ func (c *ReceiveContext) Stop(child PID) {
 // As a result, the actor receiving the forwarded messages knows who the actual sender of the message is.
 // The message that is forwarded is the current message received by the received context.
 // This operation does nothing when the receiving actor is not running
-func (c *ReceiveContext) Forward(to PID) {
+func (c *ReceiveContext) Forward(to *PID) {
 	message := c.Message()
 	sender := c.Sender()
 
@@ -333,7 +333,7 @@ func (c *ReceiveContext) RemoteReSpawn(host string, port int, name string) {
 // The successful result of the task will be put onto the provided actor mailbox.
 // This is useful when interacting with external services.
 // It’s common that you would like to use the value of the response in the actor when the long-running task is completed
-func (c *ReceiveContext) PipeTo(to PID, task future.Task) {
+func (c *ReceiveContext) PipeTo(to *PID, task future.Task) {
 	recipient := c.recipient
 	ctx := context.WithoutCancel(c.ctx)
 	if err := recipient.PipeTo(ctx, to, task); err != nil {

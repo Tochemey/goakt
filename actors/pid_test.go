@@ -337,7 +337,7 @@ func TestRestart(t *testing.T) {
 		assert.NoError(t, err)
 	})
 	t.Run("noSender cannot be restarted", func(t *testing.T) {
-		pid := &pid{
+		pid := &PID{
 			fieldsLocker: &sync.RWMutex{},
 		}
 		err := pid.Restart(context.TODO())

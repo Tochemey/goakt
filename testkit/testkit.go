@@ -41,7 +41,7 @@ func New(ctx context.Context, t *testing.T) *TestKit {
 }
 
 // Spawn create an actor
-func (k *TestKit) Spawn(ctx context.Context, name string, actor actors.Actor) actors.PID {
+func (k *TestKit) Spawn(ctx context.Context, name string, actor actors.Actor) *actors.PID {
 	// create and instance of actor
 	pid, err := k.actorSystem.Spawn(ctx, name, actor)
 	// handle the error

@@ -35,7 +35,7 @@ func TestPIDMap(t *testing.T) {
 	// create the actor path
 	actorPath := NewPath("Test", NewAddress("TestSys", "host", 444))
 	// create the PID
-	actorRef := &pid{actorPath: actorPath, fieldsLocker: &sync.RWMutex{}, stopLocker: &sync.Mutex{}}
+	actorRef := &PID{actorPath: actorPath, fieldsLocker: &sync.RWMutex{}, stopLocker: &sync.Mutex{}}
 	// create a new PID map
 	pidMap := newPIDMap(5)
 	// add to the map
@@ -49,7 +49,7 @@ func TestPIDMap(t *testing.T) {
 	actual, ok := pidMap.get(actorPath)
 	assert.True(t, ok)
 	assert.NotNil(t, actual)
-	assert.IsType(t, new(pid), actual)
+	assert.IsType(t, new(PID), actual)
 	// remove the pid from the map
 	pidMap.delete(actorPath)
 	// list the map

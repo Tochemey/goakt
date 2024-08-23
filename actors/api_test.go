@@ -1596,7 +1596,7 @@ func TestAPIRemoteReSpawn(t *testing.T) {
 		assert.NotNil(t, actorRef)
 
 		// assert the actor restart count
-		pid := actorRef.(*pid)
+		pid := actorRef
 		assert.Zero(t, pid.restartCount.Load())
 
 		// get the address of the actor
@@ -1687,7 +1687,7 @@ func TestAPIRemoteStop(t *testing.T) {
 		assert.NotNil(t, actorRef)
 
 		// assert the actor restart count
-		pid := actorRef.(*pid)
+		pid := actorRef
 		assert.Zero(t, pid.restartCount.Load())
 
 		// get the address of the actor

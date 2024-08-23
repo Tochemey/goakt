@@ -54,62 +54,62 @@ func TestPIDOptions(t *testing.T) {
 	testCases := []struct {
 		name     string
 		option   pidOption
-		expected *pid
+		expected *PID
 	}{
 		{
 			name:     "WithPassivationAfter",
 			option:   withPassivationAfter(time.Second),
-			expected: &pid{passivateAfter: atomicDuration},
+			expected: &PID{passivateAfter: atomicDuration},
 		},
 		{
 			name:     "WithAskTimeout",
 			option:   withAskTimeout(time.Second),
-			expected: &pid{askTimeout: atomicDuration},
+			expected: &PID{askTimeout: atomicDuration},
 		},
 		{
 			name:     "WithInitMaxRetries",
 			option:   withInitMaxRetries(5),
-			expected: &pid{initMaxRetries: atomicInt},
+			expected: &PID{initMaxRetries: atomicInt},
 		},
 		{
 			name:     "WithLogger",
 			option:   withCustomLogger(log.DefaultLogger),
-			expected: &pid{logger: log.DefaultLogger},
+			expected: &PID{logger: log.DefaultLogger},
 		},
 		{
 			name:     "WithSupervisorStrategy",
 			option:   withSupervisorDirective(resumeDirective),
-			expected: &pid{supervisorDirective: resumeDirective},
+			expected: &PID{supervisorDirective: resumeDirective},
 		},
 		{
 			name:     "WithShutdownTimeout",
 			option:   withShutdownTimeout(time.Second),
-			expected: &pid{shutdownTimeout: atomicDuration},
+			expected: &PID{shutdownTimeout: atomicDuration},
 		},
 		{
 			name:     "WithPassivationDisabled",
 			option:   withPassivationDisabled(),
-			expected: &pid{passivateAfter: negativeDuration},
+			expected: &PID{passivateAfter: negativeDuration},
 		},
 		{
 			name:     "withEventsStream",
 			option:   withEventsStream(eventsStream),
-			expected: &pid{eventsStream: eventsStream},
+			expected: &PID{eventsStream: eventsStream},
 		},
 		{
 			name:     "withInitTimeout",
 			option:   withInitTimeout(time.Second),
-			expected: &pid{initTimeout: atomicDuration},
+			expected: &PID{initTimeout: atomicDuration},
 		},
 		{
 			name:     "withMetric",
 			option:   withMetric(),
-			expected: &pid{metricEnabled: atomicTrue},
+			expected: &PID{metricEnabled: atomicTrue},
 		},
 	}
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			pid := &pid{}
+			pid := &PID{}
 			tc.option(pid)
 			assert.Equal(t, tc.expected, pid)
 		})

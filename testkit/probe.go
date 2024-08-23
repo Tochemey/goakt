@@ -38,17 +38,17 @@ type Probe interface {
 	// ExpectMessageOfTypeWithin asserts the expectation of a given message type within a time duration
 	ExpectMessageOfTypeWithin(duration time.Duration, messageType protoreflect.MessageType)
 	// Send sends a message to an actor and also provides probe's test actor PID as sender.
-	Send(to actors.PID, message proto.Message)
+	Send(to *actors.PID, message proto.Message)
 	// Sender returns the sender of last received message.
-	Sender() actors.PID
+	Sender() *actors.PID
 	// PID returns the pid of the test actor
-	PID() actors.PID
+	PID() *actors.PID
 	// Stop stops the test probe
 	Stop()
 }
 
 type message struct {
-	sender  actors.PID
+	sender  *actors.PID
 	payload proto.Message
 }
 
@@ -91,15 +91,15 @@ type probe struct {
 	pt *testing.T
 
 	testCtx        context.Context
-	pid            actors.PID
+	pid            *actors.PID
 	lastMessage    proto.Message
-	lastSender     actors.PID
+	lastSender     *actors.PID
 	messageQueue   chan message
 	defaultTimeout time.Duration
 }
 
 // ensure that probe implements Probe
-var _ Probe = &probe{}
+var _ Probe = (*probe)(nil)
 
 // newProbe creates an instance of probe
 func newProbe(ctx context.Context, actorSystem actors.ActorSystem, t *testing.T) (*probe, error) {
@@ -158,18 +158,18 @@ func (x *probe) ExpectAnyMessageWithin(duration time.Duration) proto.Message {
 }
 
 // Send sends a message to the given actor
-func (x *probe) Send(to actors.PID, message proto.Message) {
+func (x *probe) Send(to *actors.PID, message proto.Message) {
 	err := x.pid.Tell(x.testCtx, to, message)
 	require.NoError(x.pt, err)
 }
 
 // Sender returns the last sender
-func (x *probe) Sender() actors.PID {
+func (x *probe) Sender() *actors.PID {
 	return x.lastSender
 }
 
 // PID returns the pid of the test actor
-func (x *probe) PID() actors.PID {
+func (x *probe) PID() *actors.PID {
 	return x.pid
 }
 

@@ -73,7 +73,7 @@ func WithPostStop(fn PostStopFunc) FuncOption {
 
 // funcActor is an actor that only handles messages
 type funcActor struct {
-	pid         PID
+	pid         *PID
 	id          string
 	receiveFunc ReceiveFunc
 	preStart    PreStartFunc
