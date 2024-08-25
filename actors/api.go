@@ -48,30 +48,22 @@ func Ask(ctx context.Context, to *PID, message proto.Message, timeout time.Durat
 		return nil, ErrDead
 	}
 
-	var messageContext *ReceiveContext
-
-	switch msg := message.(type) {
-	case *internalpb.RemoteMessage:
-		var actual proto.Message
-		if actual, err = msg.GetMessage().UnmarshalNew(); err != nil {
-			return nil, ErrInvalidRemoteMessage(err)
-		}
-		messageContext = newReceiveContext(ctx, NoSender, to, actual).WithRemoteSender(msg.GetSender())
-	default:
-		messageContext = newReceiveContext(ctx, NoSender, to, message).WithRemoteSender(RemoteNoSender)
+	receiveContext, err := toReceiveContext(ctx, to, message)
+	if err != nil {
+		return nil, err
 	}
 
-	to.doReceive(messageContext)
+	to.doReceive(receiveContext)
 
 	// await patiently to receive the response from the actor
 	select {
-	case response = <-messageContext.response:
-		to.setLastProcessingDuration(time.Since(to.getLastProcessingTime()))
+	case response = <-receiveContext.response:
+		to.recordLatestReceiveDurationMetric(ctx)
 		return
 	case <-time.After(timeout):
-		to.setLastProcessingDuration(time.Since(to.getLastProcessingTime()))
+		to.recordLatestReceiveDurationMetric(ctx)
 		err = ErrRequestTimeout
-		to.toDeadletterQueue(messageContext, err)
+		to.toDeadletterQueue(receiveContext, err)
 		return
 	}
 }
@@ -82,40 +74,26 @@ func Tell(ctx context.Context, to *PID, message proto.Message) error {
 		return ErrDead
 	}
 
-	var messageContext *ReceiveContext
-
-	switch msg := message.(type) {
-	case *internalpb.RemoteMessage:
-		var (
-			actual proto.Message
-			err    error
-		)
-
-		if actual, err = msg.GetMessage().UnmarshalNew(); err != nil {
-			return ErrInvalidRemoteMessage(err)
-		}
-		messageContext = newReceiveContext(ctx, NoSender, to, actual).WithRemoteSender(msg.GetSender())
-	default:
-		messageContext = newReceiveContext(ctx, NoSender, to, message).WithRemoteSender(RemoteNoSender)
+	receiveContext, err := toReceiveContext(ctx, to, message)
+	if err != nil {
+		return err
 	}
 
-	to.doReceive(messageContext)
-	to.setLastProcessingDuration(time.Since(to.getLastProcessingTime()))
+	to.doReceive(receiveContext)
+	to.recordLatestReceiveDurationMetric(ctx)
 	return nil
 }
 
 // BatchTell sends bulk asynchronous messages to an actor
+// The messages will be processed one after the other in the order they are sent
+// This is a design choice to follow the simple principle of one message at a time processing by actors.
 func BatchTell(ctx context.Context, to *PID, messages ...proto.Message) error {
-	if !to.IsRunning() {
-		return ErrDead
+	// messages are processed one after the other
+	for _, mesage := range messages {
+		if err := Tell(ctx, to, mesage); err != nil {
+			return err
+		}
 	}
-
-	for i := 0; i < len(messages); i++ {
-		message := messages[i]
-		messageContext := newReceiveContext(ctx, NoSender, to, message).WithRemoteSender(RemoteNoSender)
-		to.doReceive(messageContext)
-	}
-	to.setLastProcessingDuration(time.Since(to.getLastProcessingTime()))
 	return nil
 }
 
@@ -123,25 +101,14 @@ func BatchTell(ctx context.Context, to *PID, messages ...proto.Message) error {
 // The messages will be processed one after the other in the order they are sent
 // This is a design choice to follow the simple principle of one message at a time processing by actors.
 func BatchAsk(ctx context.Context, to *PID, timeout time.Duration, messages ...proto.Message) (responses chan proto.Message, err error) {
-	if !to.IsRunning() {
-		return nil, ErrDead
-	}
-
 	responses = make(chan proto.Message, len(messages))
 	defer close(responses)
-
-	for i := 0; i < len(messages); i++ {
-		receiveContext := newReceiveContext(ctx, NoSender, to, messages[i])
-		to.doReceive(receiveContext)
-		select {
-		case result := <-receiveContext.response:
-			responses <- result
-			to.setLastProcessingDuration(time.Since(to.getLastProcessingTime()))
-		case <-time.After(timeout):
-			to.setLastProcessingDuration(time.Since(to.getLastProcessingTime()))
-			to.toDeadletterQueue(receiveContext, ErrRequestTimeout)
-			return nil, ErrRequestTimeout
+	for _, mesage := range messages {
+		response, err := Ask(ctx, to, mesage, timeout)
+		if err != nil {
+			return nil, err
 		}
+		responses <- response
 	}
 	return
 }
@@ -498,4 +465,18 @@ func RemoteSpawn(ctx context.Context, host string, port int, name, actorType str
 		return err
 	}
 	return nil
+}
+
+// toReceiveContext creates a ReceiveContext provided a message and a receiver
+func toReceiveContext(ctx context.Context, to *PID, message proto.Message) (*ReceiveContext, error) {
+	switch msg := message.(type) {
+	case *internalpb.RemoteMessage:
+		actual, err := msg.GetMessage().UnmarshalNew()
+		if err != nil {
+			return nil, ErrInvalidRemoteMessage(err)
+		}
+		return newReceiveContext(ctx, NoSender, to, actual).WithRemoteSender(msg.GetSender()), nil
+	default:
+		return newReceiveContext(ctx, NoSender, to, message).WithRemoteSender(RemoteNoSender), nil
+	}
 }

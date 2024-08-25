@@ -63,18 +63,24 @@ func BenchmarkActor(b *testing.B) {
 		// wait for actors to start properly
 		time.Sleep(1 * time.Second)
 
-		runParallel(b, func(pb *testing.PB) {
+		b.SetParallelism(7)
+		b.ResetTimer()
+		b.ReportAllocs()
+		start := time.Now()
+		b.RunParallel(func(pb *testing.PB) {
 			for pb.Next() {
-				// send a message to the actor
 				_ = actors.Tell(ctx, pid, new(benchmarkpb.BenchTell))
 			}
 		})
 
+		opsPerSec := float64(b.N) / time.Since(start).Seconds()
+		b.ReportMetric(opsPerSec, "ops/s")
+
 		_ = pid.Shutdown(ctx)
 		_ = actorSystem.Stop(ctx)
 	})
+
 	b.Run("ask", func(b *testing.B) {
-		b.Skip("")
 		ctx := context.TODO()
 		// create the actor system
 		actorSystem, _ := actors.NewActorSystem("bench",
@@ -98,12 +104,18 @@ func BenchmarkActor(b *testing.B) {
 		// wait for actors to start properly
 		time.Sleep(1 * time.Second)
 
-		runParallel(b, func(pb *testing.PB) {
+		b.SetParallelism(7)
+		b.ResetTimer()
+		b.ReportAllocs()
+		start := time.Now()
+
+		b.RunParallel(func(pb *testing.PB) {
 			for pb.Next() {
-				// send a message to the actor
 				_, _ = actors.Ask(ctx, pid, new(benchmarkpb.BenchRequest), receivingTimeout)
 			}
 		})
+		opsPerSec := float64(b.N) / time.Since(start).Seconds()
+		b.ReportMetric(opsPerSec, "ops/s")
 
 		_ = pid.Shutdown(ctx)
 		_ = actorSystem.Stop(ctx)
@@ -111,18 +123,16 @@ func BenchmarkActor(b *testing.B) {
 }
 
 func TestBenchmark_BenchTell(t *testing.T) {
-	// remove this line for local benchmark
-	t.Skip("only run this test for local benchmark")
+	t.Skip("")
 	ctx := context.TODO()
 
 	totalSent = atomic.NewInt64(0)
 	totalRecv = atomic.NewInt64(0)
 
-	actorsCount := 2000
-	workersCount := 20
+	workersCount := 100
 	duration := 30 * time.Second
 
-	benchmark := NewBenchmark(actorsCount, workersCount, duration)
+	benchmark := NewBenchmark(workersCount, duration)
 	if err := benchmark.Start(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -132,7 +142,6 @@ func TestBenchmark_BenchTell(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	fmt.Printf("Total actors spawned: (%d)\n", actorsCount)
 	fmt.Printf("Total workers: (%d), total messages sent: (%d), total messages received: (%d) - duration: (%v)\n", workersCount, totalSent.Load(), totalRecv.Load(), duration)
 	fmt.Printf("Messages per second: (%d)\n", totalRecv.Load()/int64(duration.Seconds()))
 	t.Cleanup(func() {
@@ -143,18 +152,15 @@ func TestBenchmark_BenchTell(t *testing.T) {
 }
 
 func TestBenchmark_BenchAsk(t *testing.T) {
-	// remove this line for local benchmark
-	t.Skip("only run this test for local benchmark")
-
 	ctx := context.TODO()
-
+	t.Skip("")
 	totalSent = atomic.NewInt64(0)
 	totalRecv = atomic.NewInt64(0)
-	actorsCount := 2000
-	workersCount := 20
+
+	workersCount := 100
 	duration := 30 * time.Second
 
-	benchmark := NewBenchmark(actorsCount, workersCount, duration)
+	benchmark := NewBenchmark(workersCount, duration)
 	if err := benchmark.Start(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -164,7 +170,6 @@ func TestBenchmark_BenchAsk(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	fmt.Printf("Total actors spawned: (%d)\n", actorsCount)
 	fmt.Printf("Total workers: (%d), total messages sent: (%d), total messages received: (%d) - duration: (%v)\n", workersCount, totalSent.Load(), totalRecv.Load(), duration)
 	fmt.Printf("Messages per second: (%d)\n", totalRecv.Load()/int64(duration.Seconds()))
 	t.Cleanup(func() {
@@ -172,13 +177,4 @@ func TestBenchmark_BenchAsk(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
-}
-
-func runParallel(b *testing.B, benchFn func(pb *testing.PB)) {
-	b.ReportAllocs()
-	b.ResetTimer()
-	start := time.Now()
-	b.RunParallel(benchFn)
-	opsPerSec := float64(b.N) / time.Since(start).Seconds()
-	b.ReportMetric(opsPerSec, "ops/s")
 }

@@ -29,6 +29,7 @@ import (
 	"errors"
 	"fmt"
 	stdhttp "net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -81,8 +82,9 @@ type PID struct {
 
 	// helps determine whether the actor should handle public or not.
 	running atomic.Bool
-	// is captured whenever a mail is sent to the actor
-	lastProcessingTime atomic.Time
+
+	latestReceiveTime     atomic.Time
+	latestReceiveDuration atomic.Duration
 
 	// specifies at what point in time to passivate the actor.
 	// when the actor is passivated it is stopped which means it does not consume
@@ -125,9 +127,6 @@ type PID struct {
 	// specifies the logger to use
 	logger log.Logger
 
-	// specifies the last processing message duration
-	lastReceivedDuration atomic.Duration
-
 	// fieldsLocker that helps synchronize the pid in a concurrent environment
 	// this helps protect the pid fields accessibility
 	fieldsLocker *sync.RWMutex
@@ -160,6 +159,9 @@ type PID struct {
 	processedCount *atomic.Int64
 	metricEnabled  atomic.Bool
 	metrics        *metric.ActorMetric
+
+	watcherNotificationChan        chan error
+	watchersNotificationStopSignal chan types.Unit
 }
 
 // newPID creates a new pid
@@ -175,32 +177,34 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 	}
 
 	p := &PID{
-		actor:                actor,
-		lastProcessingTime:   atomic.Time{},
-		haltPassivationLnr:   make(chan types.Unit, 1),
-		logger:               log.DefaultLogger,
-		children:             newPIDMap(10),
-		supervisorDirective:  DefaultSupervisoryStrategy,
-		watchersList:         slice.New[*watcher](),
-		watchedList:          newPIDMap(10),
-		telemetry:            telemetry.New(),
-		actorPath:            actorPath,
-		fieldsLocker:         &sync.RWMutex{},
-		stopLocker:           &sync.Mutex{},
-		httpClient:           http.NewClient(),
-		mailbox:              newMailbox(),
-		stashBuffer:          nil,
-		stashLocker:          &sync.Mutex{},
-		eventsStream:         nil,
-		restartCount:         atomic.NewInt64(0),
-		childrenCount:        atomic.NewInt64(0),
-		processedCount:       atomic.NewInt64(0),
-		processingTimeLocker: new(sync.Mutex),
+		actor:                          actor,
+		latestReceiveTime:              atomic.Time{},
+		haltPassivationLnr:             make(chan types.Unit, 1),
+		logger:                         log.New(log.InfoLevel, os.Stderr),
+		children:                       newPIDMap(10),
+		supervisorDirective:            DefaultSupervisoryStrategy,
+		watchersList:                   slice.New[*watcher](),
+		watchedList:                    newPIDMap(10),
+		telemetry:                      telemetry.New(),
+		actorPath:                      actorPath,
+		fieldsLocker:                   new(sync.RWMutex),
+		stopLocker:                     new(sync.Mutex),
+		httpClient:                     http.NewClient(),
+		mailbox:                        newMailbox(),
+		stashBuffer:                    nil,
+		stashLocker:                    &sync.Mutex{},
+		eventsStream:                   nil,
+		restartCount:                   atomic.NewInt64(0),
+		childrenCount:                  atomic.NewInt64(0),
+		processedCount:                 atomic.NewInt64(0),
+		processingTimeLocker:           new(sync.Mutex),
+		watcherNotificationChan:        make(chan error, 1),
+		watchersNotificationStopSignal: make(chan types.Unit, 1),
 	}
 
 	p.initMaxRetries.Store(DefaultInitMaxRetries)
 	p.shutdownTimeout.Store(DefaultShutdownTimeout)
-	p.lastReceivedDuration.Store(0)
+	p.latestReceiveDuration.Store(0)
 	p.running.Store(false)
 	p.passivateAfter.Store(DefaultPassivationTimeout)
 	p.askTimeout.Store(DefaultAskTimeout)
@@ -220,7 +224,7 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 	}
 
 	go p.receive()
-
+	go p.notifyWatchers()
 	if p.passivateAfter.Load() > 0 {
 		go p.passivationLoop()
 	}
@@ -394,6 +398,7 @@ func (x *PID) Restart(ctx context.Context) error {
 		return err
 	}
 	go x.receive()
+	go x.notifyWatchers()
 	if x.passivateAfter.Load() > 0 {
 		go x.passivationLoop()
 	}
@@ -522,10 +527,10 @@ func (x *PID) Ask(ctx context.Context, to *PID, message proto.Message) (response
 
 	select {
 	case result := <-receiveContext.response:
-		x.recordLastReceivedDurationMetric(ctx)
+		x.recordLatestReceiveDurationMetric(ctx)
 		return result, nil
 	case <-time.After(timeout):
-		x.recordLastReceivedDurationMetric(ctx)
+		x.recordLatestReceiveDurationMetric(ctx)
 		err = ErrRequestTimeout
 		x.toDeadletterQueue(receiveContext, err)
 		return nil, err
@@ -539,7 +544,7 @@ func (x *PID) Tell(ctx context.Context, to *PID, message proto.Message) error {
 	}
 
 	to.doReceive(newReceiveContext(ctx, x, to, message))
-	x.recordLastReceivedDurationMetric(ctx)
+	x.recordLatestReceiveDurationMetric(ctx)
 	return nil
 }
 
@@ -548,19 +553,11 @@ func (x *PID) Tell(ctx context.Context, to *PID, message proto.Message) error {
 // This is a design choice to follow the simple principle of one message at a time processing by actors.
 // When BatchTell encounter a single message it will fall back to a Tell call.
 func (x *PID) BatchTell(ctx context.Context, to *PID, messages ...proto.Message) error {
-	if !to.IsRunning() {
-		return ErrDead
+	for _, message := range messages {
+		if err := x.Tell(ctx, to, message); err != nil {
+			return err
+		}
 	}
-
-	if len(messages) == 1 {
-		return x.Tell(ctx, to, messages[0])
-	}
-
-	for i := 0; i < len(messages); i++ {
-		to.doReceive(newReceiveContext(ctx, x, to, messages[i]))
-		x.recordLastReceivedDurationMetric(ctx)
-	}
-
 	return nil
 }
 
@@ -568,10 +565,6 @@ func (x *PID) BatchTell(ctx context.Context, to *PID, messages ...proto.Message)
 // The messages will be processed one after the other in the order they are sent.
 // This is a design choice to follow the simple principle of one message at a time processing by actors.
 func (x *PID) BatchAsk(ctx context.Context, to *PID, messages ...proto.Message) (responses chan proto.Message, err error) {
-	if !to.IsRunning() {
-		return nil, ErrDead
-	}
-
 	responses = make(chan proto.Message, len(messages))
 	defer close(responses)
 
@@ -1011,7 +1004,7 @@ func (x *PID) watchees() *pidMap {
 
 // doReceive pushes a given message to the actor receiveContextBuffer
 func (x *PID) doReceive(receiveCtx *ReceiveContext) {
-	x.lastProcessingTime.Store(time.Now())
+	x.latestReceiveTime.Store(time.Now())
 	x.mailbox.Push(receiveCtx)
 }
 
@@ -1049,12 +1042,12 @@ func (x *PID) init(ctx context.Context) error {
 
 // reset re-initializes the actor PID
 func (x *PID) reset() {
-	x.lastProcessingTime.Store(time.Time{})
+	x.latestReceiveTime.Store(time.Time{})
 	x.passivateAfter.Store(DefaultPassivationTimeout)
 	x.askTimeout.Store(DefaultAskTimeout)
 	x.shutdownTimeout.Store(DefaultShutdownTimeout)
 	x.initMaxRetries.Store(DefaultInitMaxRetries)
-	x.lastReceivedDuration.Store(0)
+	x.latestReceiveDuration.Store(0)
 	x.initTimeout.Store(DefaultInitTimeout)
 	x.children.reset()
 	x.watchersList.Reset()
@@ -1125,7 +1118,6 @@ func (x *PID) receive() {
 	for x.running.Load() {
 		received := x.mailbox.Pop()
 		if received == nil {
-			//runtime.Gosched()
 			continue
 		}
 
@@ -1141,14 +1133,10 @@ func (x *PID) receive() {
 
 // handleReceived picks the right behavior and processes the message
 func (x *PID) handleReceived(received *ReceiveContext) {
-	// handle panic or any error during processing
 	defer x.recovery(received)
-	// pick the current behvior from the stack
-	// send the message to the current actor behavior
+
 	if behavior := x.behaviorStack.Peek(); behavior != nil {
-		// set the total messages processed
 		x.processedCount.Inc()
-		// call the behavior to handle the message
 		behavior(received)
 	}
 }
@@ -1156,11 +1144,11 @@ func (x *PID) handleReceived(received *ReceiveContext) {
 // recovery is called upon after message is processed
 func (x *PID) recovery(received *ReceiveContext) {
 	if r := recover(); r != nil {
-		x.notifyWatchers(fmt.Errorf("%s", r))
+		x.watcherNotificationChan <- fmt.Errorf("%s", r)
 		return
 	}
-	// no panic
-	x.notifyWatchers(received.getError())
+	// no panic or recommended way to handle error
+	x.watcherNotificationChan <- received.getError()
 }
 
 // passivationLoop checks whether the actor is processing public or not.
@@ -1176,7 +1164,7 @@ func (x *PID) passivationLoop() {
 		for {
 			select {
 			case <-ticker.C:
-				idleTime := time.Since(x.lastProcessingTime.Load())
+				idleTime := time.Since(x.latestReceiveTime.Load())
 				if idleTime >= x.passivateAfter.Load() {
 					tickerStopSig <- types.Unit{}
 					return
@@ -1282,7 +1270,7 @@ func (x *PID) doStop(ctx context.Context) error {
 
 	<-tickerStopSig
 	x.httpClient.CloseIdleConnections()
-
+	x.watchersNotificationStopSignal <- types.Unit{}
 	x.freeWatchees(ctx)
 	x.freeChildren(ctx)
 	x.freeWatchers(ctx)
@@ -1312,10 +1300,17 @@ func (x *PID) removeChild(pid *PID) {
 }
 
 // notifyWatchers send error to watchers
-func (x *PID) notifyWatchers(err error) {
-	if err != nil {
-		for _, item := range x.watchers().Items() {
-			item.Value.ErrChan <- err
+func (x *PID) notifyWatchers() {
+	for {
+		select {
+		case err := <-x.watcherNotificationChan:
+			if err != nil {
+				for _, item := range x.watchers().Items() {
+					item.Value.ErrChan <- err
+				}
+			}
+		case <-x.watchersNotificationStopSignal:
+			return
 		}
 	}
 }
@@ -1400,21 +1395,6 @@ func (x *PID) remotingClient(host string, port int) (internalpbconnect.RemotingS
 		http.URL(host, port),
 		clientOptions...,
 	), nil
-}
-
-// getLastProcessingTime returns the last processing time
-func (x *PID) getLastProcessingTime() time.Time {
-	x.processingTimeLocker.Lock()
-	processingTime := x.lastProcessingTime.Load()
-	x.processingTimeLocker.Unlock()
-	return processingTime
-}
-
-// setLastProcessingDuration sets the last processing duration
-func (x *PID) setLastProcessingDuration(d time.Duration) {
-	x.processingTimeLocker.Lock()
-	x.lastReceivedDuration.Store(d)
-	x.processingTimeLocker.Unlock()
 }
 
 // handleCompletion processes a long-running task and pipe the result to
@@ -1519,9 +1499,10 @@ func (x *PID) handleRestartDirective(cid *PID, maxRetries uint32, timeout time.D
 	x.Watch(cid)
 }
 
-func (x *PID) recordLastReceivedDurationMetric(ctx context.Context) {
-	x.lastReceivedDuration.Store(time.Since(x.lastProcessingTime.Load()))
+func (x *PID) recordLatestReceiveDurationMetric(ctx context.Context) {
+	// record processing time
+	x.latestReceiveDuration.Store(time.Since(x.latestReceiveTime.Load()))
 	if x.metricEnabled.Load() {
-		x.metrics.LastReceivedDuration().Record(ctx, x.lastReceivedDuration.Load().Milliseconds())
+		x.metrics.LastReceivedDuration().Record(ctx, x.latestReceiveDuration.Load().Milliseconds())
 	}
 }
