@@ -1014,7 +1014,7 @@ func (x *actorSystem) GetKinds(_ context.Context, request *connect.Request[inter
 
 	kinds := make([]string, len(x.clusterConfig.Kinds()))
 	for i, kind := range x.clusterConfig.Kinds() {
-		kinds[i] = types.NameOf(kind)
+		kinds[i] = types.TypeName(kind)
 	}
 
 	return connect.NewResponse(&internalpb.GetKindsResponse{Kinds: kinds}), nil
@@ -1047,7 +1047,7 @@ func (x *actorSystem) setActor(actor *PID) {
 			ActorName:    actor.Name(),
 			ActorAddress: actor.ActorPath().RemoteAddress(),
 			ActorPath:    actor.ActorPath().String(),
-			ActorType:    types.NameOf(actor),
+			ActorType:    types.TypeName(actor),
 		}
 	}
 }
@@ -1106,7 +1106,7 @@ func (x *actorSystem) enableClustering(ctx context.Context) error {
 	x.redistributionChan = make(chan *cluster.Event, 1)
 	for _, kind := range x.clusterConfig.Kinds() {
 		x.registry.Register(kind)
-		x.logger.Infof("cluster kind=(%s) registered", types.NameOf(kind))
+		x.logger.Infof("cluster kind=(%s) registered", types.TypeName(kind))
 	}
 	x.locker.Unlock()
 

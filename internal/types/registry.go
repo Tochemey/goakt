@@ -64,7 +64,7 @@ func NewRegistry() Registry {
 // Deregister removes the registered object from the registry
 func (r *registry) Deregister(v any) {
 	r.mu.Lock()
-	delete(r.typesMap, NameOf(v))
+	delete(r.typesMap, TypeName(v))
 	r.mu.Unlock()
 }
 
@@ -72,7 +72,7 @@ func (r *registry) Deregister(v any) {
 func (r *registry) Exists(v any) bool {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	_, ok := r.typesMap[NameOf(v)]
+	_, ok := r.typesMap[TypeName(v)]
 	return ok
 }
 
@@ -86,8 +86,8 @@ func (r *registry) TypesMap() map[string]reflect.Type {
 
 // Register an object
 func (r *registry) Register(v any) {
-	rtype := Of(v)
-	name := NameOf(v)
+	rtype := reflectType(v)
+	name := TypeName(v)
 	r.mu.Lock()
 	r.typesMap[name] = rtype
 	r.mu.Unlock()
@@ -97,7 +97,7 @@ func (r *registry) Register(v any) {
 func (r *registry) Type(v any) (reflect.Type, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	out, ok := r.typesMap[NameOf(v)]
+	out, ok := r.typesMap[TypeName(v)]
 	return out, ok
 }
 
@@ -109,8 +109,8 @@ func (r *registry) TypeOf(name string) (reflect.Type, bool) {
 	return out, ok
 }
 
-// Of returns the runtime type of object
-func Of(v any) reflect.Type {
+// reflectType returns the runtime type of object
+func reflectType(v any) reflect.Type {
 	var rtype reflect.Type
 	switch _type := v.(type) {
 	case reflect.Type:
@@ -121,9 +121,9 @@ func Of(v any) reflect.Type {
 	return rtype
 }
 
-// NameOf returns the name of a given object
-func NameOf(v any) string {
-	return lowTrim(Of(v).String())
+// TypeName returns the name of a given object
+func TypeName(v any) string {
+	return lowTrim(reflectType(v).String())
 }
 
 // lowTrim trim any space and lower the string value
