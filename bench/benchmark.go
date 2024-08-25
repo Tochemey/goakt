@@ -27,7 +27,6 @@ package bench
 import (
 	"context"
 	"fmt"
-	"math/rand/v2"
 	"sync"
 	"time"
 
@@ -45,6 +44,11 @@ var (
 	totalSent *atomic.Int64
 	totalRecv *atomic.Int64
 )
+
+func init() {
+	totalSent = atomic.NewInt64(0)
+	totalRecv = atomic.NewInt64(0)
+}
 
 type Benchmarker struct {
 }
@@ -79,17 +83,15 @@ type Benchmark struct {
 	workersCount int
 	// duration specifies how long the load testing will run
 	duration time.Duration
-	pids     []*actors.PID
+	pid      *actors.PID
 	system   actors.ActorSystem
 }
 
 // NewBenchmark creates an instance of Loader
-func NewBenchmark(actorsCount, workersCount int, duration time.Duration) *Benchmark {
+func NewBenchmark(workersCount int, duration time.Duration) *Benchmark {
 	return &Benchmark{
-		actorsCount:  actorsCount,
 		workersCount: workersCount,
 		duration:     duration,
-		pids:         make([]*actors.PID, 0, actorsCount),
 	}
 }
 
@@ -110,14 +112,13 @@ func (b *Benchmark) Start(ctx context.Context) error {
 	// wait for the actor system to properly start
 	time.Sleep(time.Second)
 
-	for i := 0; i < b.actorsCount; i++ {
-		actorName := fmt.Sprintf("actor-%d", i)
-		pid, err := b.system.Spawn(ctx, actorName, &Benchmarker{})
-		if err != nil {
-			return err
-		}
-		b.pids = append(b.pids, pid)
+	pid, err := b.system.Spawn(ctx, "Benchmarker", &Benchmarker{})
+	if err != nil {
+		return err
 	}
+
+	b.pid = pid
+
 	// wait for the actors to properly start
 	time.Sleep(time.Second)
 	return nil
@@ -138,10 +139,7 @@ func (b *Benchmark) BenchTell(ctx context.Context) error {
 		go func() {
 			defer wg.Done()
 			for time.Now().Before(deadline) {
-				// randomly pick and actor
-				pid := b.pids[rand.IntN(len(b.pids))] //nolint:gosec
-				// send a message
-				_ = actors.Tell(ctx, pid, new(benchmarkpb.BenchTell))
+				_ = actors.Tell(ctx, b.pid, new(benchmarkpb.BenchTell))
 				// increase sent counter
 				totalSent.Inc()
 			}
@@ -166,10 +164,7 @@ func (b *Benchmark) BenchAsk(ctx context.Context) error {
 		go func() {
 			defer wg.Done()
 			for time.Now().Before(deadline) {
-				// randomly pick and actor
-				pid := b.pids[rand.IntN(len(b.pids))] //nolint:gosec
-				// send a message
-				_, _ = actors.Ask(ctx, pid, new(benchmarkpb.BenchRequest), receivingTimeout)
+				_, _ = actors.Ask(ctx, b.pid, new(benchmarkpb.BenchRequest), receivingTimeout)
 				// increase sent counter
 				totalSent.Add(1)
 			}
