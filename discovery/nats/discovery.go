@@ -25,6 +25,7 @@
 package nats
 
 import (
+	"errors"
 	"net"
 	"strconv"
 	"sync"
@@ -32,11 +33,11 @@ import (
 
 	"github.com/flowchartsman/retry"
 	"github.com/nats-io/nats.go"
-	"github.com/nats-io/nats.go/encoders/protobuf"
 	"go.uber.org/atomic"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/tochemey/goakt/v2/discovery"
-	internalpb "github.com/tochemey/goakt/v2/internal/internalpb"
+	"github.com/tochemey/goakt/v2/internal/internalpb"
 	"github.com/tochemey/goakt/v2/log"
 )
 
@@ -49,7 +50,7 @@ type Discovery struct {
 	registered  *atomic.Bool
 
 	// define the nats connection
-	natsConnection *nats.EncodedConn
+	connection *nats.Conn
 	// define a slice of subscriptions
 	subscriptions []*nats.Subscription
 
@@ -132,12 +133,8 @@ func (d *Discovery) Initialize() error {
 		return nil
 	})
 
-	// create the NATs connection encoder
-	encodedConn, err := nats.NewEncodedConn(connection, protobuf.PROTOBUF_ENCODER)
-	if err != nil {
-		return err
-	}
-	d.natsConnection = encodedConn
+	// create the NATs connection
+	d.connection = connection
 	d.initialized = atomic.NewBool(true)
 	return nil
 }
@@ -152,33 +149,41 @@ func (d *Discovery) Register() error {
 	}
 
 	// create the subscription handler
-	subscriptionHandler := func(_, reply string, msg *internalpb.NatsMessage) {
-		switch msg.GetMessageType() {
+	handler := func(msg *nats.Msg) {
+		message := new(internalpb.NatsMessage)
+		if err := proto.Unmarshal(msg.Data, message); err != nil {
+			// TODO: need to read more and see how to propagate the error
+			d.connection.Opts.AsyncErrorCB(d.connection, msg.Sub, errors.New("nats: Got an error trying to unmarshal: "+err.Error()))
+			return
+		}
+
+		switch message.GetMessageType() {
 		case internalpb.NatsMessageType_NATS_MESSAGE_TYPE_DEREGISTER:
 			d.logger.Infof("received an de-registration request from peer[name=%s, host=%s, port=%d]",
-				msg.GetName(), msg.GetHost(), msg.GetPort())
+				message.GetName(), message.GetHost(), message.GetPort())
 		case internalpb.NatsMessageType_NATS_MESSAGE_TYPE_REGISTER:
 			d.logger.Infof("received an registration request from peer[name=%s, host=%s, port=%d]",
-				msg.GetName(), msg.GetHost(), msg.GetPort())
+				message.GetName(), message.GetHost(), message.GetPort())
 		case internalpb.NatsMessageType_NATS_MESSAGE_TYPE_REQUEST:
 			d.logger.Infof("received an identification request from peer[name=%s, host=%s, port=%d]",
-				msg.GetName(), msg.GetHost(), msg.GetPort())
+				message.GetName(), message.GetHost(), message.GetPort())
 
-			replyMessage := &internalpb.NatsMessage{
+			response := &internalpb.NatsMessage{
 				Host:        d.hostNode.Host,
 				Port:        int32(d.hostNode.GossipPort),
 				Name:        d.hostNode.Name,
 				MessageType: internalpb.NatsMessageType_NATS_MESSAGE_TYPE_RESPONSE,
 			}
 
-			if err := d.natsConnection.Publish(reply, replyMessage); err != nil {
+			bytea, _ := proto.Marshal(response)
+			if err := d.connection.Publish(msg.Reply, bytea); err != nil {
 				d.logger.Errorf("failed to reply for identification request from peer[name=%s, host=%s, port=%d]",
-					msg.GetName(), msg.GetHost(), msg.GetPort())
+					message.GetName(), message.GetHost(), message.GetPort())
 			}
 		}
 	}
 
-	subscription, err := d.natsConnection.Subscribe(d.config.NatsSubject, subscriptionHandler)
+	subscription, err := d.connection.Subscribe(d.config.NatsSubject, handler)
 	if err != nil {
 		return err
 	}
@@ -215,14 +220,17 @@ func (d *Discovery) Deregister() error {
 	}
 
 	// send the de-registration message to notify peers
-	if d.natsConnection != nil {
+	if d.connection != nil {
 		// send a message to deregister stating we are out
-		return d.natsConnection.Publish(d.config.NatsSubject, &internalpb.NatsMessage{
+		message := &internalpb.NatsMessage{
 			Host:        d.hostNode.Host,
 			Port:        int32(d.hostNode.GossipPort),
 			Name:        d.hostNode.Name,
 			MessageType: internalpb.NatsMessageType_NATS_MESSAGE_TYPE_DEREGISTER,
-		})
+		}
+
+		bytea, _ := proto.Marshal(message)
+		return d.connection.Publish(d.config.NatsSubject, bytea)
 	}
 
 	d.registered.Store(false)
@@ -246,37 +254,45 @@ func (d *Discovery) DiscoverPeers() ([]string, error) {
 	// report their presence.
 	// collect as many responses as possible in the given timeout.
 	inbox := nats.NewInbox()
-	recv := make(chan *internalpb.NatsMessage)
+	recv := make(chan *nats.Msg, 1)
 
 	// bind to receive messages
-	sub, err := d.natsConnection.BindRecvChan(inbox, recv)
+	sub, err := d.connection.ChanSubscribe(inbox, recv)
 	if err != nil {
 		return nil, err
 	}
 
-	if err = d.natsConnection.PublishRequest(d.config.NatsSubject, inbox, &internalpb.NatsMessage{
+	request := &internalpb.NatsMessage{
 		Host:        d.hostNode.Host,
 		Port:        int32(d.hostNode.GossipPort),
 		Name:        d.hostNode.Name,
 		MessageType: internalpb.NatsMessageType_NATS_MESSAGE_TYPE_REQUEST,
-	}); err != nil {
+	}
+
+	bytea, _ := proto.Marshal(request)
+	if err = d.connection.PublishRequest(d.config.NatsSubject, inbox, bytea); err != nil {
 		return nil, err
 	}
 
 	var peers []string
 	timeout := time.After(d.config.Timeout)
 	me := d.hostNode.GossipAddress()
-
 	for {
 		select {
-		case m, ok := <-recv:
+		case msg, ok := <-recv:
 			if !ok {
 				// Subscription is closed
 				return peers, nil
 			}
 
+			message := new(internalpb.NatsMessage)
+			if err := proto.Unmarshal(msg.Data, message); err != nil {
+				d.logger.Errorf("failed to unmarshal nats message: %v", err)
+				return nil, err
+			}
+
 			// get the found peer address
-			addr := net.JoinHostPort(m.GetHost(), strconv.Itoa(int(m.GetPort())))
+			addr := net.JoinHostPort(message.GetHost(), strconv.Itoa(int(message.GetPort())))
 			if addr == me {
 				continue
 			}
@@ -297,10 +313,10 @@ func (d *Discovery) Close() error {
 
 	d.initialized.Store(false)
 
-	if d.natsConnection != nil {
+	if d.connection != nil {
 		defer func() {
-			d.natsConnection.Close()
-			d.natsConnection = nil
+			d.connection.Close()
+			d.connection = nil
 		}()
 
 		for _, subscription := range d.subscriptions {
@@ -313,7 +329,7 @@ func (d *Discovery) Close() error {
 			}
 		}
 
-		return d.natsConnection.Flush()
+		return d.connection.Flush()
 	}
 	return nil
 }
