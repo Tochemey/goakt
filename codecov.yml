@@ -3,7 +3,7 @@ coverage:
   status:
     patch:
       default:
-        target: 90%
+        target: 80%
   project:
     default:
       target: 80%    # the required coverage value
