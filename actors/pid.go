@@ -162,6 +162,8 @@ type PID struct {
 
 	watcherNotificationChan        chan error
 	watchersNotificationStopSignal chan types.Unit
+	receiveSignal                  chan types.Unit
+	receiveStopSignal              chan types.Unit
 }
 
 // newPID creates a new pid
@@ -198,8 +200,10 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 		childrenCount:                  atomic.NewInt64(0),
 		processedCount:                 atomic.NewInt64(0),
 		processingTimeLocker:           new(sync.Mutex),
-		watcherNotificationChan:        make(chan error, 1),
-		watchersNotificationStopSignal: make(chan types.Unit, 1),
+		watcherNotificationChan:        make(chan error),
+		watchersNotificationStopSignal: make(chan types.Unit),
+		receiveSignal:                  make(chan types.Unit),
+		receiveStopSignal:              make(chan types.Unit),
 	}
 
 	p.initMaxRetries.Store(DefaultInitMaxRetries)
@@ -1006,6 +1010,7 @@ func (x *PID) watchees() *pidMap {
 func (x *PID) doReceive(receiveCtx *ReceiveContext) {
 	x.latestReceiveTime.Store(time.Now())
 	x.mailbox.Push(receiveCtx)
+	x.receiveSignal <- types.Unit{}
 }
 
 // init initializes the given actor and init processing messages
@@ -1115,18 +1120,23 @@ func (x *PID) freeChildren(ctx context.Context) {
 
 // receive extracts every message from the actor mailbox
 func (x *PID) receive() {
-	for x.running.Load() {
-		received := x.mailbox.Pop()
-		if received == nil {
-			continue
-		}
+	for {
+		select {
+		case <-x.receiveStopSignal:
+			return
+		case <-x.receiveSignal:
+			received := x.mailbox.Pop()
+			if received == nil {
+				continue
+			}
 
-		switch received.Message().(type) {
-		case *goaktpb.PoisonPill:
-			// stop the actor
-			_ = x.Shutdown(received.Context())
-		default:
-			x.handleReceived(received)
+			switch received.Message().(type) {
+			case *goaktpb.PoisonPill:
+				// stop the actor
+				_ = x.Shutdown(received.Context())
+			default:
+				x.handleReceived(received)
+			}
 		}
 	}
 }
@@ -1271,6 +1281,7 @@ func (x *PID) doStop(ctx context.Context) error {
 	<-tickerStopSig
 	x.httpClient.CloseIdleConnections()
 	x.watchersNotificationStopSignal <- types.Unit{}
+	x.receiveStopSignal <- types.Unit{}
 	x.freeWatchees(ctx)
 	x.freeChildren(ctx)
 	x.freeWatchers(ctx)
