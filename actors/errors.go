@@ -83,7 +83,7 @@ var (
 	ErrInvalidHost = errors.New("invalid host")
 )
 
-// IsEOF returns true if the given error is an EOF error
-func IsEOF(err error) bool {
+// eof returns true if the given error is an EOF error
+func eof(err error) bool {
 	return err != nil && (errors.Is(err, io.EOF) || errors.Unwrap(err) == io.EOF)
 }

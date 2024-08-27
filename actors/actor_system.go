@@ -777,7 +777,7 @@ func (x *actorSystem) RemoteAsk(ctx context.Context, stream *connect.BidiStream[
 		}
 
 		request, err := stream.Receive()
-		if IsEOF(err) {
+		if eof(err) {
 			return nil
 		}
 

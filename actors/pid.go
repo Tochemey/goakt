@@ -637,7 +637,7 @@ func (x *PID) RemoteTell(ctx context.Context, to *goaktpb.Address, message proto
 	x.logger.Debugf("sending a message to remote=(%s:%d)", to.GetHost(), to.GetPort())
 	stream := remoteService.RemoteTell(ctx)
 	if err := stream.Send(request); err != nil {
-		if IsEOF(err) {
+		if eof(err) {
 			if _, err := stream.CloseAndReceive(); err != nil {
 				return err
 			}
@@ -714,7 +714,7 @@ func (x *PID) RemoteAsk(ctx context.Context, to *goaktpb.Address, message proto.
 	}
 
 	err = <-errc
-	if IsEOF(err) {
+	if eof(err) {
 		return response, nil
 	}
 
@@ -766,7 +766,7 @@ func (x *PID) RemoteBatchTell(ctx context.Context, to *goaktpb.Address, messages
 	stream := remoteService.RemoteTell(ctx)
 	for _, request := range requests {
 		if err := stream.Send(request); err != nil {
-			if IsEOF(err) {
+			if eof(err) {
 				if _, err := stream.CloseAndReceive(); err != nil {
 					return err
 				}
@@ -847,7 +847,7 @@ func (x *PID) RemoteBatchAsk(ctx context.Context, to *goaktpb.Address, messages 
 	}
 
 	err = <-errc
-	if IsEOF(err) {
+	if eof(err) {
 		return responses, nil
 	}
 
