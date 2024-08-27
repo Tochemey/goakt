@@ -200,10 +200,10 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 		childrenCount:                  atomic.NewInt64(0),
 		processedCount:                 atomic.NewInt64(0),
 		processingTimeLocker:           new(sync.Mutex),
-		watcherNotificationChan:        make(chan error),
-		watchersNotificationStopSignal: make(chan types.Unit),
-		receiveSignal:                  make(chan types.Unit),
-		receiveStopSignal:              make(chan types.Unit),
+		watcherNotificationChan:        make(chan error, 1),
+		watchersNotificationStopSignal: make(chan types.Unit, 1),
+		receiveSignal:                  make(chan types.Unit, 1),
+		receiveStopSignal:              make(chan types.Unit, 1),
 	}
 
 	p.initMaxRetries.Store(DefaultInitMaxRetries)
