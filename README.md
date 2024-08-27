@@ -42,7 +42,6 @@ The project adheres to [Semantic Versioning](https://semver.org) and [Convention
   - [Remoting](#remoting)
   - [Cluster](#cluster)
   - [Observability](#observability)
-    - [Tracing](#tracing)
     - [Metrics](#metrics)
     - [Logging](#logging)
   - [Testkit](#testkit)
@@ -306,13 +305,6 @@ Beware that at the moment, within the cluster the existence of an actor is uniqu
 
 Observability is key in distributed system. It helps to understand and track the performance of a system.
 Go-Akt offers out of the box features that can help track, monitor and measure the performance of a Go-Akt based system.
-
-#### Tracing
-
-One can enable/disable tracing on a Go-Akt actor system to instrument and measure the performance of some of the methods.
-Go-Akt uses under the hood [OpenTelemetry](https://opentelemetry.io/docs/instrumentation/go/) to instrument a system.
-One just need to use the `WithTracing` option when instantiating a Go-Akt actor system and use the default [Telemetry](./telemetry/telemetry.go)
-engine or set a custom one with `WithTelemetry` option of the actor system.
 
 #### Metrics
 
