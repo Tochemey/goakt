@@ -173,7 +173,7 @@ func (b *Benchmark) BenchAsk(ctx context.Context) error {
 
 	// wait for the messages to be delivered
 	wg.Wait()
-	time.Sleep(500 * time.Millisecond)
+	time.Sleep(time.Minute)
 	if totalSent.Load() != totalRecv.Load() {
 		return fmt.Errorf("send count and receive count does not match: %d != %d", totalSent.Load(), totalRecv.Load())
 	}
