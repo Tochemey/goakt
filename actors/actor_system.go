@@ -26,6 +26,7 @@ package actors
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	stdhttp "net/http"
@@ -38,7 +39,6 @@ import (
 	"connectrpc.com/connect"
 	"connectrpc.com/otelconnect"
 	"github.com/google/uuid"
-	"github.com/pkg/errors"
 	otelmetric "go.opentelemetry.io/otel/metric"
 	"go.uber.org/atomic"
 	"golang.org/x/sync/errgroup"
@@ -490,7 +490,7 @@ func (x *actorSystem) ReSpawn(ctx context.Context, name string) (*PID, error) {
 	pid, exist := x.actors.get(actorPath)
 	if exist {
 		if err := pid.Restart(ctx); err != nil {
-			return nil, errors.Wrapf(err, "failed to restart actor=%s", actorPath.String())
+			return nil, fmt.Errorf("failed to restart actor=%s: %w", actorPath.String(), err)
 		}
 
 		x.actors.set(pid)
@@ -563,7 +563,7 @@ func (x *actorSystem) ActorOf(ctx context.Context, actorName string) (addr *goak
 				return nil, nil, e
 			}
 
-			return nil, nil, errors.Wrapf(err, "failed to fetch remote actor=%s", actorName)
+			return nil, nil, fmt.Errorf("failed to fetch remote actor=%s: %w", actorName, err)
 		}
 
 		return actor.GetActorAddress(), nil, nil
@@ -621,7 +621,7 @@ func (x *actorSystem) RemoteActor(ctx context.Context, actorName string) (addr *
 			return nil, ErrActorNotFound(actorName)
 		}
 
-		return nil, errors.Wrapf(err, "failed to fetch remote actor=%s", actorName)
+		return nil, fmt.Errorf("failed to fetch remote actor=%s: %w", actorName, err)
 	}
 
 	return actor.GetActorAddress(), nil
@@ -906,7 +906,7 @@ func (x *actorSystem) RemoteReSpawn(ctx context.Context, request *connect.Reques
 	}
 
 	if err := pid.Restart(ctx); err != nil {
-		return nil, errors.Wrapf(err, "failed to restart actor=%s", actorPath.String())
+		return nil, fmt.Errorf("failed to restart actor=%s: %w", actorPath.String(), err)
 	}
 
 	x.actors.set(pid)
@@ -936,7 +936,7 @@ func (x *actorSystem) RemoteStop(ctx context.Context, request *connect.Request[i
 	}
 
 	if err := pid.Shutdown(ctx); err != nil {
-		return nil, errors.Wrapf(err, "failed to stop actor=%s", actorPath.String())
+		return nil, fmt.Errorf("failed to stop actor=%s: %w", actorPath.String(), err)
 	}
 
 	x.actors.delete(actorPath)
@@ -1081,13 +1081,13 @@ func (x *actorSystem) enableClustering(ctx context.Context) error {
 		cluster.WithReplicaCount(x.clusterConfig.ReplicaCount()),
 	)
 	if err != nil {
-		x.logger.Error(errors.Wrap(err, "failed to initialize cluster engine"))
+		x.logger.Errorf("failed to initialize cluster engine: %v", err)
 		return err
 	}
 
 	x.logger.Info("starting cluster engine...")
 	if err := clusterEngine.Start(ctx); err != nil {
-		x.logger.Error(errors.Wrap(err, "failed to start cluster engine"))
+		x.logger.Errorf("failed to start cluster engine: %v", err)
 		return err
 	}
 
@@ -1130,7 +1130,7 @@ func (x *actorSystem) enableRemoting(ctx context.Context) {
 			otelconnect.WithMeterProvider(x.telemetry.MeterProvider),
 		)
 		if err != nil {
-			x.logger.Panic(errors.Wrap(err, "failed to initialize observability feature"))
+			x.logger.Panic(fmt.Errorf("failed to initialize observability feature: %w", err))
 		}
 	}
 
@@ -1141,7 +1141,7 @@ func (x *actorSystem) enableRemoting(ctx context.Context) {
 
 	remotingHost, remotingPort, err := tcp.GetHostPort(fmt.Sprintf("%s:%d", x.remotingHost, x.remotingPort))
 	if err != nil {
-		x.logger.Panic(errors.Wrap(err, "failed to resolve remoting TCP address"))
+		x.logger.Panic(fmt.Errorf("failed to resolve remoting TCP address: %w", err))
 	}
 
 	x.remotingHost = remotingHost
@@ -1158,7 +1158,7 @@ func (x *actorSystem) enableRemoting(ctx context.Context) {
 	go func() {
 		if err := server.ListenAndServe(); err != nil {
 			if !errors.Is(err, stdhttp.ErrServerClosed) {
-				x.logger.Panic(errors.Wrap(err, "failed to start remoting service"))
+				x.logger.Panic(fmt.Errorf("failed to start remoting service: %w", err))
 			}
 		}
 	}()

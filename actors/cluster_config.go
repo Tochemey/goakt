@@ -29,6 +29,11 @@ import (
 	"github.com/tochemey/goakt/v2/internal/validation"
 )
 
+// defaultKinds defines the default system kinds
+var defaultKinds = []Actor{
+	new(funcActor),
+}
+
 // ClusterConfig defines the cluster mode settings
 type ClusterConfig struct {
 	discovery          discovery.Provider
@@ -46,7 +51,7 @@ var _ validation.Validator = (*ClusterConfig)(nil)
 // NewClusterConfig creates an instance of ClusterConfig
 func NewClusterConfig() *ClusterConfig {
 	return &ClusterConfig{
-		kinds:              []Actor{new(funcActor)},
+		kinds:              defaultKinds,
 		minimumPeersQuorum: 1,
 		replicaCount:       2,
 	}
