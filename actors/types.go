@@ -49,7 +49,7 @@ const (
 
 	// DefaultGCInterval defines the default GC interval
 	// This helps cleanup dead actors from the given actor system
-	DefaultGCInterval = 30 * time.Millisecond
+	DefaultGCInterval = 2 * time.Minute
 	// eventsTopic defines the events topic
 	eventsTopic = "topic.events"
 

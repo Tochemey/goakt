@@ -103,15 +103,20 @@ func (x *actorSystem) redistribute(ctx context.Context, event *cluster.Event) er
 
 	eg.Go(func() error {
 		for _, actor := range leaderActors {
+			// never redistribute system actors
+			if isSystemName(actor.GetActorName()) {
+				continue
+			}
+
 			x.logger.Debugf("re-creating actor=[(%s) of type (%s)]", actor.GetActorName(), actor.GetActorType())
 			iactor, err := x.reflection.ActorFrom(actor.GetActorType())
 			if err != nil {
-				x.logger.Error(err)
+				x.logger.Errorf("failed to create actor=[(%s) of type (%s)]: %v", actor.GetActorName(), actor.GetActorType(), err)
 				return err
 			}
 
 			if _, err = x.Spawn(ctx, actor.GetActorName(), iactor); err != nil {
-				x.logger.Error(err)
+				x.logger.Errorf("failed to spawn actor=[(%s) of type (%s)]: %v", actor.GetActorName(), actor.GetActorType(), err)
 				return err
 			}
 
@@ -138,6 +143,11 @@ func (x *actorSystem) redistribute(ctx context.Context, event *cluster.Event) er
 			_ = proto.Unmarshal(bytea, state)
 
 			for _, actor := range actors {
+				// never redistribute system actors
+				if isSystemName(actor.GetActorName()) {
+					continue
+				}
+
 				x.logger.Debugf("re-creating actor=[(%s) of type (%s)]", actor.GetActorName(), actor.GetActorType())
 				if err := RemoteSpawn(ctx, state.GetHost(), int(state.GetRemotingPort()), actor.GetActorName(), actor.GetActorType()); err != nil {
 					x.logger.Error(err)
