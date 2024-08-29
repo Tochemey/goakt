@@ -5,13 +5,13 @@ go 1.22.0
 require (
 	connectrpc.com/connect v1.16.2
 	connectrpc.com/otelconnect v0.7.1
-	github.com/buraksezer/olric v0.5.6-0.20240510193155-81e12546eb39
+	github.com/buraksezer/olric v0.5.6
 	github.com/deckarep/golang-set/v2 v2.6.0
 	github.com/flowchartsman/retry v1.2.0
 	github.com/google/go-cmp v0.6.0
 	github.com/google/uuid v1.6.0
 	github.com/grandcat/zeroconf v1.0.0
-	github.com/nats-io/nats-server/v2 v2.10.19
+	github.com/nats-io/nats-server/v2 v2.10.20
 	github.com/nats-io/nats.go v1.37.0
 	github.com/pkg/errors v0.9.1
 	github.com/redis/go-redis/v9 v9.6.1
