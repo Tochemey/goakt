@@ -1047,7 +1047,7 @@ func (x *actorSystem) setActor(actor *PID) {
 			ActorName:    actor.Name(),
 			ActorAddress: actor.ActorPath().RemoteAddress(),
 			ActorPath:    actor.ActorPath().String(),
-			ActorType:    types.TypeName(actor),
+			ActorType:    types.TypeName(actor.ActorHandle()),
 		}
 	}
 }
