@@ -37,7 +37,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/travisjeffery/go-dynaport"
 	"go.uber.org/atomic"
-	"go.uber.org/goleak"
 
 	"github.com/tochemey/goakt/v2/discovery"
 	"github.com/tochemey/goakt/v2/discovery/nats"
@@ -46,15 +45,6 @@ import (
 	"github.com/tochemey/goakt/v2/test/data/testpb"
 	testspb "github.com/tochemey/goakt/v2/test/data/testpb"
 )
-
-func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, goleak.IgnoreTopFunction("github.com/golang/glog.(*loggingT).flushDaemon"),
-		goleak.IgnoreTopFunction("github.com/go-redis/redis/v8/internal/pool.(*ConnPool).reaper"),
-		goleak.IgnoreTopFunction("golang.org/x/net/http2.(*serverConn).serve"),
-		goleak.IgnoreTopFunction("github.com/nats-io/nats%2ego.(*Conn).doReconnect"),
-		goleak.IgnoreTopFunction("sync.runtime_notifyListWait"),
-		goleak.IgnoreTopFunction("internal/poll.runtime_pollWait"))
-}
 
 // testActor is an actor that helps run various test scenarios
 type testActor struct {
