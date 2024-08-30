@@ -1047,7 +1047,7 @@ func (x *actorSystem) setActor(actor *PID) {
 			ActorName:    actor.Name(),
 			ActorAddress: actor.ActorPath().RemoteAddress(),
 			ActorPath:    actor.ActorPath().String(),
-			ActorType:    types.TypeName(actor),
+			ActorType:    types.TypeName(actor.ActorHandle()),
 		}
 	}
 }
@@ -1231,6 +1231,11 @@ func (x *actorSystem) registerMetrics() error {
 // replicationLoop publishes newly created actor into the cluster when cluster is enabled
 func (x *actorSystem) replicationLoop() {
 	for actor := range x.actorsChan {
+		// never replicate system actors because there are specific to the
+		// running node
+		if isSystemName(actor.GetActorName()) {
+			continue
+		}
 		if x.InCluster() {
 			ctx := context.Background()
 			if err := x.cluster.PutActor(ctx, actor); err != nil {
