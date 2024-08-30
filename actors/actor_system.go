@@ -539,17 +539,18 @@ func (x *actorSystem) PeerAddress() string {
 // An actor not found error is return when the actor is not found.
 func (x *actorSystem) ActorOf(ctx context.Context, actorName string) (addr *goaktpb.Address, pid *PID, err error) {
 	x.locker.Lock()
-	defer x.locker.Unlock()
 
 	if !x.started.Load() {
+		x.locker.Unlock()
 		return nil, nil, ErrActorSystemNotStarted
 	}
 
 	// first check whether the actor exist locally
 	pids := x.actors.pids()
-	for _, actorRef := range pids {
-		if actorRef.ActorPath().Name() == actorName {
-			return actorRef.ActorPath().RemoteAddress(), actorRef, nil
+	for _, lpid := range pids {
+		if lpid.ActorPath().Name() == actorName {
+			x.locker.Unlock()
+			return lpid.ActorPath().RemoteAddress(), lpid, nil
 		}
 	}
 
@@ -560,20 +561,25 @@ func (x *actorSystem) ActorOf(ctx context.Context, actorName string) (addr *goak
 			if errors.Is(err, cluster.ErrActorNotFound) {
 				x.logger.Infof("actor=%s not found", actorName)
 				e := ErrActorNotFound(actorName)
+				x.locker.Unlock()
 				return nil, nil, e
 			}
 
+			x.locker.Unlock()
 			return nil, nil, fmt.Errorf("failed to fetch remote actor=%s: %w", actorName, err)
 		}
 
+		x.locker.Unlock()
 		return actor.GetActorAddress(), nil, nil
 	}
 
 	if x.remotingEnabled.Load() {
+		x.locker.Unlock()
 		return nil, nil, ErrMethodCallNotAllowed
 	}
 
 	x.logger.Infof("actor=%s not found", actorName)
+	x.locker.Unlock()
 	return nil, nil, ErrActorNotFound(actorName)
 }
 
@@ -581,20 +587,22 @@ func (x *actorSystem) ActorOf(ctx context.Context, actorName string) (addr *goak
 // A local actor is an actor that reside on the same node where the given actor system is running
 func (x *actorSystem) LocalActor(actorName string) (*PID, error) {
 	x.locker.Lock()
-	defer x.locker.Unlock()
 
 	if !x.started.Load() {
+		x.locker.Unlock()
 		return nil, ErrActorSystemNotStarted
 	}
 
 	pids := x.actors.pids()
 	for _, pid := range pids {
 		if pid.ActorPath().Name() == actorName {
+			x.locker.Unlock()
 			return pid, nil
 		}
 	}
 
 	x.logger.Infof("actor=%s not found", actorName)
+	x.locker.Unlock()
 	return nil, ErrActorNotFound(actorName)
 }
 
@@ -603,14 +611,15 @@ func (x *actorSystem) LocalActor(actorName string) (*PID, error) {
 // One can always check whether cluster is enabled before calling this method or just use the ActorOf method.
 func (x *actorSystem) RemoteActor(ctx context.Context, actorName string) (addr *goaktpb.Address, err error) {
 	x.locker.Lock()
-	defer x.locker.Unlock()
 
 	if !x.started.Load() {
 		e := ErrActorSystemNotStarted
+		x.locker.Unlock()
 		return nil, e
 	}
 
 	if x.cluster == nil {
+		x.locker.Unlock()
 		return nil, ErrClusterDisabled
 	}
 
@@ -618,12 +627,15 @@ func (x *actorSystem) RemoteActor(ctx context.Context, actorName string) (addr *
 	if err != nil {
 		if errors.Is(err, cluster.ErrActorNotFound) {
 			x.logger.Infof("actor=%s not found", actorName)
+			x.locker.Unlock()
 			return nil, ErrActorNotFound(actorName)
 		}
 
+		x.locker.Unlock()
 		return nil, fmt.Errorf("failed to fetch remote actor=%s: %w", actorName, err)
 	}
 
+	x.locker.Unlock()
 	return actor.GetActorAddress(), nil
 }
 
