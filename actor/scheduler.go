@@ -152,7 +152,7 @@ func (x *scheduler) scheduleOnce(ctx context.Context, message proto.Message, pid
 }
 
 // remoteScheduleOnce schedules a message to be sent to a remote actor in the future.
-// This requires remoting to be enabled on the actor actorSystem.
+// This requires remoting to be enabled on the actor ActorSystem.
 // This will send the given message to the actor after the given interval specified
 // The message will be sent once
 func (x *scheduler) remoteScheduleOnce(ctx context.Context, message proto.Message, address *goaktpb.Address, interval time.Duration) error {

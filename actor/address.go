@@ -69,7 +69,7 @@ func (a *Address) WithPort(port int) (*Address, error) {
 	return NewAddress(a.System(), a.Host(), port), nil
 }
 
-// WithSystem sets the actor actorSystem of a given Address and returns a new instance of the address
+// WithSystem sets the actor ActorSystem of a given Address and returns a new instance of the address
 func (a *Address) WithSystem(system string) *Address {
 	return NewAddress(system, a.Host(), a.Port())
 }
@@ -84,7 +84,7 @@ func (a *Address) Port() int {
 	return a.port
 }
 
-// ActorSystem returns the actor actorSystem name
+// ActorSystem returns the actor ActorSystem name
 func (a *Address) System() string {
 	return a.system
 }
@@ -111,7 +111,7 @@ func (a *Address) HostPort() string {
 }
 
 // String returns the canonical String representation of this Address formatted as:
-// `protocol://actorSystem@host:port`
+// `protocol://ActorSystem@host:port`
 func (a *Address) String() string {
 	buf := bytes.NewBuffer(nil)
 	buf.WriteString(a.protocol)

@@ -84,7 +84,7 @@ type Benchmark struct {
 	// duration specifies how long the load testing will run
 	duration time.Duration
 	pid      *actor.PID
-	system   actor.ActorSystem
+	system   *actor.ActorSystem
 }
 
 // NewBenchmark creates an instance of Loader

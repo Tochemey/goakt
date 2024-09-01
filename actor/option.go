@@ -34,30 +34,30 @@ import (
 // Option is the interface that applies a configuration option.
 type Option interface {
 	// Apply sets the Option value of a config.
-	Apply(sys *actorSystem)
+	Apply(sys *ActorSystem)
 }
 
 // enforce compilation error
 var _ Option = OptionFunc(nil)
 
 // OptionFunc implements the Option interface.
-type OptionFunc func(*actorSystem)
+type OptionFunc func(*ActorSystem)
 
-func (f OptionFunc) Apply(c *actorSystem) {
+func (f OptionFunc) Apply(c *ActorSystem) {
 	f(c)
 }
 
 // WithExpireActorAfter sets the actor expiry duration.
-// After such duration an idle actor will be expired and removed from the actor actorSystem
+// After such duration an idle actor will be expired and removed from the actor ActorSystem
 func WithExpireActorAfter(duration time.Duration) Option {
-	return OptionFunc(func(a *actorSystem) {
+	return OptionFunc(func(a *ActorSystem) {
 		a.expireActorAfter = duration
 	})
 }
 
-// WithLogger sets the actor actorSystem custom log
+// WithLogger sets the actor ActorSystem custom log
 func WithLogger(logger log.Logger) Option {
-	return OptionFunc(func(a *actorSystem) {
+	return OptionFunc(func(a *ActorSystem) {
 		a.logger = logger
 	})
 }
@@ -65,35 +65,35 @@ func WithLogger(logger log.Logger) Option {
 // WithAskTimeout sets how long in seconds an actor should reply a command
 // in a receive-reply pattern
 func WithAskTimeout(timeout time.Duration) Option {
-	return OptionFunc(func(a *actorSystem) {
+	return OptionFunc(func(a *ActorSystem) {
 		a.askTimeout = timeout
 	})
 }
 
 // WithActorInitMaxRetries sets the number of times to retry an actor init process
 func WithActorInitMaxRetries(max int) Option {
-	return OptionFunc(func(a *actorSystem) {
+	return OptionFunc(func(a *ActorSystem) {
 		a.actorInitMaxRetries = max
 	})
 }
 
 // WithPassivationDisabled disable the passivation mode
 func WithPassivationDisabled() Option {
-	return OptionFunc(func(a *actorSystem) {
+	return OptionFunc(func(a *ActorSystem) {
 		a.expireActorAfter = -1
 	})
 }
 
 // WithSupervisorDirective sets the supervisor strategy directive
 func WithSupervisorDirective(directive SupervisorDirective) Option {
-	return OptionFunc(func(a *actorSystem) {
+	return OptionFunc(func(a *ActorSystem) {
 		a.supervisorDirective = directive
 	})
 }
 
 // WithCluster enables the cluster mode
 func WithCluster(config *ClusterConfig) Option {
-	return OptionFunc(func(a *actorSystem) {
+	return OptionFunc(func(a *ActorSystem) {
 		a.clusterEnabled.Store(true)
 		a.clusterConfig = config
 	})
@@ -101,56 +101,56 @@ func WithCluster(config *ClusterConfig) Option {
 
 // WithShutdownTimeout sets the shutdown timeout
 func WithShutdownTimeout(timeout time.Duration) Option {
-	return OptionFunc(func(a *actorSystem) {
+	return OptionFunc(func(a *ActorSystem) {
 		a.shutdownTimeout = timeout
 	})
 }
 
 // WithStash sets the stash buffer size
 func WithStash() Option {
-	return OptionFunc(func(a *actorSystem) {
+	return OptionFunc(func(a *ActorSystem) {
 		a.stashEnabled = true
 	})
 }
 
 // WithPartitionHasher sets the partition hasher.
 func WithPartitionHasher(hasher hash.Hasher) Option {
-	return OptionFunc(func(a *actorSystem) {
+	return OptionFunc(func(a *ActorSystem) {
 		a.partitionHasher = hasher
 	})
 }
 
 // WithActorInitTimeout sets how long in seconds an actor start timeout
 func WithActorInitTimeout(timeout time.Duration) Option {
-	return OptionFunc(func(a *actorSystem) {
+	return OptionFunc(func(a *ActorSystem) {
 		a.actorInitTimeout = timeout
 	})
 }
 
 // WithMetric enables metrics
 func WithMetric() Option {
-	return OptionFunc(func(system *actorSystem) {
+	return OptionFunc(func(system *ActorSystem) {
 		system.metricEnabled.Store(true)
 	})
 }
 
 // WithPeerStateLoopInterval sets the peer state loop interval
 func WithPeerStateLoopInterval(interval time.Duration) Option {
-	return OptionFunc(func(system *actorSystem) {
+	return OptionFunc(func(system *ActorSystem) {
 		system.peersStateLoopInterval = interval
 	})
 }
 
 // WithGCInterval sets the GC interval
 func WithGCInterval(interval time.Duration) Option {
-	return OptionFunc(func(system *actorSystem) {
+	return OptionFunc(func(system *ActorSystem) {
 		system.gcInterval = interval
 	})
 }
 
-// WithHost sets the actor actorSystem host
+// WithHost sets the actor ActorSystem host
 func WithHost(host string) Option {
-	return OptionFunc(func(system *actorSystem) {
+	return OptionFunc(func(system *ActorSystem) {
 		system.host = host
 	})
 }

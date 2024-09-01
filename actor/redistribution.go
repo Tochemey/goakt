@@ -40,19 +40,19 @@ import (
 
 // redistribute is used when cluster topology changes particularly
 // when a given node has left the cluster
-func (system *actorSystem) redistribute(ctx context.Context, event *cluster.Event) error {
+func (actorSystem *ActorSystem) redistribute(ctx context.Context, event *cluster.Event) error {
 	if event.Type != cluster.NodeLeft {
 		return nil
 	}
 
 	// only the leader can perform redistribution
-	if !system.cluster.IsLeader(ctx) {
+	if !actorSystem.cluster.IsLeader(ctx) {
 		return nil
 	}
 
-	peers, err := system.cluster.Peers(ctx)
+	peers, err := actorSystem.cluster.Peers(ctx)
 	if err != nil {
-		system.logger.Errorf("failed to fetch peers: (%v)", err)
+		actorSystem.logger.Errorf("failed to fetch peers: (%v)", err)
 		return err
 	}
 
@@ -63,9 +63,9 @@ func (system *actorSystem) redistribute(ctx context.Context, event *cluster.Even
 		return err
 	}
 
-	system.peersCacheMu.RLock()
-	bytea, ok := system.peersCache[nodeLeft.GetAddress()]
-	system.peersCacheMu.RUnlock()
+	actorSystem.peersCacheMu.RLock()
+	bytea, ok := actorSystem.peersCache[nodeLeft.GetAddress()]
+	actorSystem.peersCacheMu.RUnlock()
 	if !ok {
 		return ErrPeerNotFound
 	}
@@ -84,7 +84,7 @@ func (system *actorSystem) redistribute(ctx context.Context, event *cluster.Even
 		chunks       [][]*internalpb.WireActor
 	)
 
-	system.logger.Debugf("total actors: %d on node left[%s]", actorsCount, nodeLeft.GetAddress())
+	actorSystem.logger.Debugf("total actors: %d on node left[%s]", actorsCount, nodeLeft.GetAddress())
 
 	if actorsCount < totalPeers {
 		leaderActors = peerState.GetActors()
@@ -103,24 +103,24 @@ func (system *actorSystem) redistribute(ctx context.Context, event *cluster.Even
 
 	eg.Go(func() error {
 		for _, actor := range leaderActors {
-			// never redistribute actorSystem actors
+			// never redistribute ActorSystem actors
 			if isSystemName(actor.GetActorName()) {
 				continue
 			}
 
-			system.logger.Debugf("re-creating actor=[(%s) of type (%s)]", actor.GetActorName(), actor.GetActorType())
-			iactor, err := system.reflection.ActorFrom(actor.GetActorType())
+			actorSystem.logger.Debugf("re-creating actor=[(%s) of type (%s)]", actor.GetActorName(), actor.GetActorType())
+			iactor, err := actorSystem.reflection.ActorFrom(actor.GetActorType())
 			if err != nil {
-				system.logger.Errorf("failed to create actor=[(%s) of type (%s)]: %v", actor.GetActorName(), actor.GetActorType(), err)
+				actorSystem.logger.Errorf("failed to create actor=[(%s) of type (%s)]: %v", actor.GetActorName(), actor.GetActorType(), err)
 				return err
 			}
 
-			if _, err = system.Spawn(ctx, actor.GetActorName(), iactor); err != nil {
-				system.logger.Errorf("failed to spawn actor=[(%s) of type (%s)]: %v", actor.GetActorName(), actor.GetActorType(), err)
+			if _, err = actorSystem.Spawn(ctx, actor.GetActorName(), iactor); err != nil {
+				actorSystem.logger.Errorf("failed to spawn actor=[(%s) of type (%s)]: %v", actor.GetActorName(), actor.GetActorType(), err)
 				return err
 			}
 
-			system.logger.Debugf("actor=[(%s) of type (%s)] successfully re-created", actor.GetActorName(), actor.GetActorType())
+			actorSystem.logger.Debugf("actor=[(%s) of type (%s)] successfully re-created", actor.GetActorName(), actor.GetActorType())
 		}
 		return nil
 	})
@@ -135,25 +135,25 @@ func (system *actorSystem) redistribute(ctx context.Context, event *cluster.Even
 			actors := chunks[i]
 			peer := peers[i-1]
 
-			system.peersCacheMu.RLock()
-			bytea := system.peersCache[net.JoinHostPort(peer.Host, strconv.Itoa(peer.Port))]
-			system.peersCacheMu.RUnlock()
+			actorSystem.peersCacheMu.RLock()
+			bytea := actorSystem.peersCache[net.JoinHostPort(peer.Host, strconv.Itoa(peer.Port))]
+			actorSystem.peersCacheMu.RUnlock()
 
 			state := new(internalpb.PeerState)
 			_ = proto.Unmarshal(bytea, state)
 
 			for _, actor := range actors {
-				// never redistribute actorSystem actors
+				// never redistribute ActorSystem actors
 				if isSystemName(actor.GetActorName()) {
 					continue
 				}
 
-				system.logger.Debugf("re-creating actor=[(%s) of type (%s)]", actor.GetActorName(), actor.GetActorType())
+				actorSystem.logger.Debugf("re-creating actor=[(%s) of type (%s)]", actor.GetActorName(), actor.GetActorType())
 				if err := RemoteSpawn(ctx, state.GetHost(), int(state.GetRemotingPort()), actor.GetActorName(), actor.GetActorType()); err != nil {
-					system.logger.Error(err)
+					actorSystem.logger.Error(err)
 					return err
 				}
-				system.logger.Debugf("actor=[(%s) of type (%s)] successfully re-created", actor.GetActorName(), actor.GetActorType())
+				actorSystem.logger.Debugf("actor=[(%s) of type (%s)] successfully re-created", actor.GetActorName(), actor.GetActorType())
 			}
 		}
 		return nil

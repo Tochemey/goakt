@@ -123,7 +123,7 @@ type PID struct {
 	watchedList *pidMap
 
 	// the actor system
-	system ActorSystem
+	system *ActorSystem
 
 	// specifies the logger to use
 	logger log.Logger
@@ -252,7 +252,7 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 }
 
 // ID is a convenient method that returns the actor unique identifier
-// An actor unique identifier is its address in the actor actorSystem.
+// An actor unique identifier is its address in the actor ActorSystem.
 func (x *PID) ID() string {
 	return x.ActorPath().String()
 }
@@ -355,8 +355,8 @@ func (x *PID) IsRunning() bool {
 	return x != nil && x != NoSender && x.running.Load()
 }
 
-// ActorSystem returns the actor actorSystem
-func (x *PID) ActorSystem() ActorSystem {
+// ActorSystem returns the actor ActorSystem
+func (x *PID) ActorSystem() *ActorSystem {
 	x.fieldsLocker.RLock()
 	sys := x.system
 	x.fieldsLocker.RUnlock()
@@ -482,7 +482,7 @@ func (x *PID) SpawnChild(ctx context.Context, name string, actor Actor) (*PID, e
 		})
 	}
 
-	// set the actor in the given actor actorSystem registry
+	// set the actor in the given actor ActorSystem registry
 	if x.ActorSystem() != nil {
 		x.ActorSystem().setActor(cid)
 	}
@@ -850,7 +850,7 @@ func (x *PID) freeWatchers(ctx context.Context) {
 			}
 			if watcher.WatcherID.IsRunning() {
 				x.logger.Debugf("watcher=(%s) releasing watched=(%s)", watcher.WatcherID.ID(), x.ID())
-				// TODO: handle error and push to some actorSystem dead-letters queue
+				// TODO: handle error and push to some ActorSystem dead-letters queue
 				_ = x.doTell(ctx, watcher.WatcherID, terminated)
 				watcher.WatcherID.UnWatch(x)
 				watcher.WatcherID.removeChild(x)
@@ -1075,7 +1075,7 @@ func (x *PID) toDeadletterQueue(receiveCtx *ReceiveContext, err error) {
 		return
 	}
 
-	// skip actorSystem messages
+	// skip ActorSystem messages
 	switch receiveCtx.Message().(type) {
 	case *goaktpb.PostStart:
 		return

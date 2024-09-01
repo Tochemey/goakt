@@ -64,8 +64,8 @@ func withCustomLogger(logger log.Logger) pidOption {
 	}
 }
 
-// withActorSystem set the actor actorSystem of the pid
-func withActorSystem(sys ActorSystem) pidOption {
+// withActorSystem set the actor ActorSystem of the pid
+func withActorSystem(sys *ActorSystem) pidOption {
 	return func(pid *PID) {
 		pid.system = sys
 	}
