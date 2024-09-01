@@ -39,8 +39,6 @@ func newPIDMap(cap int) *pidMap {
 		csmap.WithCustomHasher[string, *PID](func(key string) uint64 {
 			return xxh3.Hash([]byte(key))
 		}),
-
-		// set the total capacity, every shard map has total capacity/shard count capacity. the default value is 0.
 		csmap.WithSize[string, *PID](uint64(cap)),
 	)
 	return &pidMap{
@@ -50,7 +48,7 @@ func newPIDMap(cap int) *pidMap {
 
 // len returns the number of PIDs
 func (m *pidMap) len() int {
-	return m.len()
+	return m.mappings.Count()
 }
 
 // get retrieves a pid by its address
