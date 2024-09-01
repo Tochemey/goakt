@@ -102,7 +102,7 @@ func TestAddress(t *testing.T) {
 		addr = NewAddress("sys", "host", 1234)
 		assert.Equal(t, protocol, addr.Protocol())
 	})
-	t.Run("With Actor System", func(t *testing.T) {
+	t.Run("With Actor ActorSystem", func(t *testing.T) {
 		addr := NewAddress("sys", "host", 1234)
 		expected := "goakt://sys@host:1234"
 		assert.Equal(t, expected, addr.String())

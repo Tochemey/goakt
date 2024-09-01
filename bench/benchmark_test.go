@@ -42,7 +42,7 @@ func BenchmarkActor(b *testing.B) {
 		ctx := context.TODO()
 
 		// create the actor system
-		actorSystem, _ := actor.NewSystem("bench",
+		actorSystem, _ := actor.NewActorSystem("bench",
 			actor.WithLogger(log.DiscardLogger),
 			actor.WithActorInitMaxRetries(1),
 			actor.WithSupervisorDirective(actor.NewStopDirective()),
@@ -80,7 +80,7 @@ func BenchmarkActor(b *testing.B) {
 	b.Run("ask", func(b *testing.B) {
 		ctx := context.TODO()
 		// create the actor system
-		actorSystem, _ := actor.NewSystem("bench",
+		actorSystem, _ := actor.NewActorSystem("bench",
 			actor.WithLogger(log.DiscardLogger),
 			actor.WithActorInitMaxRetries(1),
 			actor.WithExpireActorAfter(5*time.Second),

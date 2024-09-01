@@ -46,7 +46,7 @@ func main() {
 	logger := log.DefaultLogger
 
 	// create the actor system. kindly in real-life application handle the error
-	actorSystem, _ := actor.NewSystem("SampleActorSystem",
+	actorSystem, _ := actor.NewActorSystem("SampleActorSystem",
 		actor.WithLogger(logger),
 		actor.WithPassivationDisabled(),
 		actor.WithActorInitMaxRetries(3))

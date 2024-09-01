@@ -122,7 +122,7 @@ type PID struct {
 	watchedList *pidMap
 
 	// the actor system
-	system System
+	system ActorSystem
 
 	// specifies the logger to use
 	logger log.Logger
@@ -251,7 +251,7 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 }
 
 // ID is a convenient method that returns the actor unique identifier
-// An actor unique identifier is its address in the actor system.
+// An actor unique identifier is its address in the actor actorSystem.
 func (x *PID) ID() string {
 	return x.ActorPath().String()
 }
@@ -354,8 +354,8 @@ func (x *PID) IsRunning() bool {
 	return x != nil && x != NoSender && x.running.Load()
 }
 
-// ActorSystem returns the actor system
-func (x *PID) ActorSystem() System {
+// ActorSystem returns the actor actorSystem
+func (x *PID) ActorSystem() ActorSystem {
 	x.fieldsLocker.RLock()
 	sys := x.system
 	x.fieldsLocker.RUnlock()
@@ -481,7 +481,7 @@ func (x *PID) SpawnChild(ctx context.Context, name string, actor Actor) (*PID, e
 		})
 	}
 
-	// set the actor in the given actor system registry
+	// set the actor in the given actor actorSystem registry
 	if x.ActorSystem() != nil {
 		x.ActorSystem().setActor(cid)
 	}
@@ -619,7 +619,7 @@ func (x *PID) RemoteStop(ctx context.Context, host string, port int, name string
 	return nil
 }
 
-// RemoteSpawn creates an actor on a remote node. The given actor needs to be registered on the remote node using the Register method of System
+// RemoteSpawn creates an actor on a remote node. The given actor needs to be registered on the remote node using the Register method of ActorSystem
 func (x *PID) RemoteSpawn(ctx context.Context, host string, port int, name, actorType string) error {
 	remoteService, err := x.remotingClient(host, port)
 	if err != nil {
@@ -848,7 +848,7 @@ func (x *PID) freeWatchers(ctx context.Context) {
 			}
 			if watcher.WatcherID.IsRunning() {
 				x.logger.Debugf("watcher=(%s) releasing watched=(%s)", watcher.WatcherID.ID(), x.ID())
-				// TODO: handle error and push to some system dead-letters queue
+				// TODO: handle error and push to some actorSystem dead-letters queue
 				_ = x.doTell(ctx, watcher.WatcherID, terminated)
 				watcher.WatcherID.UnWatch(x)
 				watcher.WatcherID.removeChild(x)
@@ -1070,7 +1070,7 @@ func (x *PID) toDeadletterQueue(receiveCtx *ReceiveContext, err error) {
 		return
 	}
 
-	// skip system messages
+	// skip actorSystem messages
 	switch receiveCtx.Message().(type) {
 	case *goaktpb.PostStart:
 		return

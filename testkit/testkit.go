@@ -11,14 +11,14 @@ import (
 
 // TestKit defines actor test kit
 type TestKit struct {
-	actorSystem actor.System
+	actorSystem actor.ActorSystem
 	kt          *testing.T
 }
 
 // New creates an instance of TestKit
 func New(ctx context.Context, t *testing.T) *TestKit {
 	// create an actor system
-	system, err := actor.NewSystem(
+	system, err := actor.NewActorSystem(
 		"testkit",
 		actor.WithPassivationDisabled(),
 		actor.WithLogger(log.DefaultLogger),

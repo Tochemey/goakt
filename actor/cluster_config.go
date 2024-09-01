@@ -29,7 +29,7 @@ import (
 	"github.com/tochemey/goakt/v2/internal/validation"
 )
 
-// defaultKinds defines the default system kinds
+// defaultKinds defines the default actorSystem kinds
 var defaultKinds = []Actor{
 	new(funcActor),
 }

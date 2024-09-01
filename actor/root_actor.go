@@ -48,20 +48,20 @@ func newRootActor(logger log.Logger) *rootActor {
 }
 
 func (s *rootActor) PreStart(context.Context) error {
-	s.logger.Info("starting the system supervisor actor")
+	s.logger.Info("starting the actorSystem supervisor actor")
 	return nil
 }
 
 func (s *rootActor) Receive(ctx *ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *goaktpb.PostStart:
-		s.logger.Info("system supervior successfully started")
+		s.logger.Info("actorSystem supervior successfully started")
 	default:
 		ctx.Unhandled()
 	}
 }
 
 func (s *rootActor) PostStop(context.Context) error {
-	s.logger.Info("system supervior stopped")
+	s.logger.Info("actorSystem supervior stopped")
 	return nil
 }

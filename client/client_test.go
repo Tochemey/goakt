@@ -610,7 +610,7 @@ func startNatsServer(t *testing.T) *natsserver.Server {
 	return serv
 }
 
-func startNode(t *testing.T, logger log.Logger, nodeName, serverAddr string) (system actor.System, remotingHost string, remotingPort int, provider discovery.Provider) {
+func startNode(t *testing.T, logger log.Logger, nodeName, serverAddr string) (system actor.ActorSystem, remotingHost string, remotingPort int, provider discovery.Provider) {
 	ctx := context.TODO()
 
 	// generate the ports for the single startNode
@@ -655,7 +655,7 @@ func startNode(t *testing.T, logger log.Logger, nodeName, serverAddr string) (sy
 		WithPartitionCount(10)
 
 	// create the actor system
-	system, err := actor.NewSystem(
+	system, err := actor.NewActorSystem(
 		applicationName,
 		actor.WithPassivationDisabled(),
 		actor.WithLogger(logger),

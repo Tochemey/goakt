@@ -84,7 +84,7 @@ type Benchmark struct {
 	// duration specifies how long the load testing will run
 	duration time.Duration
 	pid      *actor.PID
-	system   actor.System
+	system   actor.ActorSystem
 }
 
 // NewBenchmark creates an instance of Loader
@@ -99,7 +99,7 @@ func NewBenchmark(workersCount int, duration time.Duration) *Benchmark {
 func (b *Benchmark) Start(ctx context.Context) error {
 	// create the benchmark actor system
 	name := "benchmark-system"
-	b.system, _ = actor.NewSystem(name,
+	b.system, _ = actor.NewActorSystem(name,
 		actor.WithLogger(log.DiscardLogger),
 		actor.WithActorInitMaxRetries(1),
 		actor.WithSupervisorDirective(actor.NewStopDirective()),

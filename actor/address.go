@@ -30,7 +30,7 @@ import (
 )
 
 // Address represents the physical location under which an Actor can be
-// reached. Examples are local addresses, identified by the System’s name,
+// reached. Examples are local addresses, identified by the ActorSystem’s name,
 // and remote addresses, identified by protocol, host and port.
 type Address struct {
 	// host is the host address
@@ -69,7 +69,7 @@ func (a *Address) WithPort(port int) (*Address, error) {
 	return NewAddress(a.System(), a.Host(), port), nil
 }
 
-// WithSystem sets the actor system of a given Address and returns a new instance of the address
+// WithSystem sets the actor actorSystem of a given Address and returns a new instance of the address
 func (a *Address) WithSystem(system string) *Address {
 	return NewAddress(system, a.Host(), a.Port())
 }
@@ -84,7 +84,7 @@ func (a *Address) Port() int {
 	return a.port
 }
 
-// System returns the actor system name
+// ActorSystem returns the actor actorSystem name
 func (a *Address) System() string {
 	return a.system
 }
@@ -111,7 +111,7 @@ func (a *Address) HostPort() string {
 }
 
 // String returns the canonical String representation of this Address formatted as:
-// `protocol://system@host:port`
+// `protocol://actorSystem@host:port`
 func (a *Address) String() string {
 	buf := bytes.NewBuffer(nil)
 	buf.WriteString(a.protocol)

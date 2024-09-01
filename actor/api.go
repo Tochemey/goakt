@@ -159,7 +159,7 @@ func RemoteLookup(ctx context.Context, host string, port int, name string) (addr
 	return response.Msg.GetAddress(), nil
 }
 
-// RemoteSpawn creates an actor on a remote node. The given actor needs to be registered on the remote node using the Register method of System
+// RemoteSpawn creates an actor on a remote node. The given actor needs to be registered on the remote node using the Register method of ActorSystem
 func RemoteSpawn(ctx context.Context, host string, port int, name, actorType string) error {
 	interceptor, err := otelconnect.NewInterceptor()
 	if err != nil {

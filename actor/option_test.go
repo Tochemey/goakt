@@ -44,82 +44,82 @@ func TestOption(t *testing.T) {
 	testCases := []struct {
 		name     string
 		option   Option
-		expected system
+		expected actorSystem
 	}{
 		{
 			name:     "WithExpireActorAfter",
 			option:   WithExpireActorAfter(2 * time.Second),
-			expected: system{expireActorAfter: 2. * time.Second},
+			expected: actorSystem{expireActorAfter: 2. * time.Second},
 		},
 		{
 			name:     "WithReplyTimeout",
 			option:   WithAskTimeout(2 * time.Second),
-			expected: system{askTimeout: 2. * time.Second},
+			expected: actorSystem{askTimeout: 2. * time.Second},
 		},
 		{
 			name:     "WithActorInitMaxRetries",
 			option:   WithActorInitMaxRetries(2),
-			expected: system{actorInitMaxRetries: 2},
+			expected: actorSystem{actorInitMaxRetries: 2},
 		},
 		{
 			name:     "WithLogger",
 			option:   WithLogger(log.DefaultLogger),
-			expected: system{logger: log.DefaultLogger},
+			expected: actorSystem{logger: log.DefaultLogger},
 		},
 		{
 			name:     "WithPassivationDisabled",
 			option:   WithPassivationDisabled(),
-			expected: system{expireActorAfter: -1},
+			expected: actorSystem{expireActorAfter: -1},
 		},
 		{
 			name:     "WithSupervisorDirective",
 			option:   WithSupervisorDirective(resumeDirective),
-			expected: system{supervisorDirective: resumeDirective},
+			expected: actorSystem{supervisorDirective: resumeDirective},
 		},
 		{
 			name:     "WithShutdownTimeout",
 			option:   WithShutdownTimeout(2 * time.Second),
-			expected: system{shutdownTimeout: 2. * time.Second},
+			expected: actorSystem{shutdownTimeout: 2. * time.Second},
 		},
 		{
 			name:     "WithStash",
 			option:   WithStash(),
-			expected: system{stashEnabled: true},
+			expected: actorSystem{stashEnabled: true},
 		},
 		{
 			name:     "WithPartitionHasher",
 			option:   WithPartitionHasher(hasher),
-			expected: system{partitionHasher: hasher},
+			expected: actorSystem{partitionHasher: hasher},
 		},
 		{
 			name:     "WithActorInitTimeout",
 			option:   WithActorInitTimeout(2 * time.Second),
-			expected: system{actorInitTimeout: 2. * time.Second},
+			expected: actorSystem{actorInitTimeout: 2. * time.Second},
 		},
 		{
 			name:     "WithMetric",
 			option:   WithMetric(),
-			expected: system{metricEnabled: atomicTrue},
+			expected: actorSystem{metricEnabled: atomicTrue},
 		},
 		{
 			name:     "WithCluster",
 			option:   WithCluster(clusterConfig),
-			expected: system{clusterEnabled: atomicTrue, clusterConfig: clusterConfig},
+			expected: actorSystem{clusterEnabled: atomicTrue, clusterConfig: clusterConfig},
 		},
 		{
 			name:     "WithPeerStateLoopInterval",
 			option:   WithPeerStateLoopInterval(2 * time.Second),
-			expected: system{peersStateLoopInterval: 2. * time.Second},
+			expected: actorSystem{peersStateLoopInterval: 2. * time.Second},
 		},
 		{
 			name:     "WithGCInterval",
 			option:   WithGCInterval(2 * time.Second),
-			expected: system{gcInterval: 2. * time.Second},
+			expected: actorSystem{gcInterval: 2. * time.Second},
 		},
 	}
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			var cfg system
+			var cfg actorSystem
 			tc.option.Apply(&cfg)
 			assert.Equal(t, tc.expected, cfg)
 		})

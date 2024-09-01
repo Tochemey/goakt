@@ -61,17 +61,17 @@ import (
 	"github.com/tochemey/goakt/v2/telemetry"
 )
 
-// System defines the contract of an actor system
-type System interface {
-	// Name returns the actor system name
+// ActorSystem defines the contract of an actor actorSystem
+type ActorSystem interface {
+	// Name returns the actor actorSystem name
 	Name() string
-	// Actors returns the list of Actors that are alive in the actor system
+	// Actors returns the list of Actors that are alive in the actor actorSystem
 	Actors() []*PID
-	// Start starts the actor system
+	// Start starts the actor actorSystem
 	Start(ctx context.Context) error
-	// Stop stops the actor system
+	// Stop stops the actor actorSystem
 	Stop(ctx context.Context) error
-	// Spawn creates an actor in the system and starts it
+	// Spawn creates an actor in the actorSystem and starts it
 	Spawn(ctx context.Context, name string, actor Actor) (*PID, error)
 	// SpawnFromFunc creates an actor with the given receive function. One can set the PreStart and PostStop lifecycle hooks
 	// in the given optional options
@@ -83,14 +83,12 @@ type System interface {
 	// A router is a special type of actor that helps distribute messages of the same type over a set of actors, so that messages can be processed in parallel.
 	// A single actor will only process one message at a time.
 	SpawnRouter(ctx context.Context, poolSize int, routeesKind Actor, opts ...RouterOption) (*PID, error)
-	// Kill stops a given actor in the system
+	// Kill stops a given actor in the actorSystem
 	Kill(ctx context.Context, name string) error
-	// ReSpawn recreates a given actor in the system
+	// ReSpawn recreates a given actor in the actorSystem
 	ReSpawn(ctx context.Context, name string) (*PID, error)
-	// ActorsCount returns the total number of active actors in the system
+	// ActorsCount returns the total number of active actors in the actorSystem
 	ActorsCount() uint64
-	// InCluster states whether the actor system is running within a cluster of nodes
-	InCluster() bool
 	// GetPartition returns the partition where a given actor is located
 	GetPartition(actorName string) uint64
 	// Subscribe creates an event subscriber.
@@ -103,46 +101,48 @@ type System interface {
 	ScheduleOnce(ctx context.Context, message proto.Message, actorName string, interval time.Duration) error
 	// ScheduleWithCron schedules a message to be sent to an actor in the future using a cron expression.
 	ScheduleWithCron(ctx context.Context, message proto.Message, actorName string, cronExpression string) error
-	// PeerAddress returns the actor system address known in the cluster. That address is used by other nodes to communicate with the actor system.
+	// PeerAddress returns the actor actorSystem address known in the cluster. That address is used by other nodes to communicate with the actor actorSystem.
 	// This address is empty when cluster mode is not activated
 	PeerAddress() string
 	// Register registers an actor for future use. This is necessary when creating an actor remotely
 	Register(ctx context.Context, actor Actor) error
 	// Deregister removes a registered actor from the registry
 	Deregister(ctx context.Context, actor Actor) error
-	// Logger returns the logger sets when creating the actor system
+	// Logger returns the logger sets when creating the actor actorSystem
 	Logger() log.Logger
 	// handleRemoteAsk handles a synchronous message to another actor and expect a response.
 	// This block until a response is received or timed out.
 	handleRemoteAsk(ctx context.Context, to *PID, message proto.Message, timeout time.Duration) (response proto.Message, err error)
 	// handleRemoteTell handles an asynchronous message to an actor
 	handleRemoteTell(ctx context.Context, to *PID, message proto.Message) error
-	// setActor sets actor in the actor system actors registry
+	// setActor sets actor in the actor actorSystem actors registry
 	setActor(actor *PID)
-	// supervisor return the system supervisor
+	// supervisor return the actorSystem supervisor
 	getSupervisor() *PID
-	// actorOf returns an existing actor in the local system or in the cluster when clustering is enabled
+	// actorOf returns an existing actor in the local actorSystem or in the cluster when clustering is enabled
 	// When cluster mode is activated, the PID will be nil.
 	// When remoting is enabled this method will return and error
 	// An actor not found error is return when the actor is not found.
 	actorOf(ctx context.Context, actorName string) (addr *goaktpb.Address, pid *PID, err error)
+	// inCluster states whether the actor actorSystem is running within a cluster of nodes
+	inCluster() bool
 }
 
-// System represent a collection of actors on a given node
-// Only a single instance of the System can be created on a given node
-type system struct {
+// ActorSystem represent a collection of actors on a given node
+// Only a single instance of the ActorSystem can be created on a given node
+type actorSystem struct {
 	internalpbconnect.UnimplementedRemotingServiceHandler
 	internalpbconnect.UnimplementedClusterServiceHandler
 
-	// map of actors in the system
+	// map of actors in the actorSystem
 	actors *pidMap
 
-	// states whether the actor system has started or not
+	// states whether the actor actorSystem has started or not
 	started atomic.Bool
 
-	// Specifies the actor system name
+	// Specifies the actor actorSystem name
 	name string
-	// Specifies the logger to use in the system
+	// Specifies the logger to use in the actorSystem
 	logger log.Logger
 	// Specifies at what point in time to passivate the actor.
 	// when the actor is passivated it is stopped which means it does not consume
@@ -208,12 +208,12 @@ type system struct {
 	supervisor *PID
 }
 
-// enforce compilation error when all methods of the System interface are not implemented
-// by the struct system
-var _ System = (*system)(nil)
+// enforce compilation error when all methods of the ActorSystem interface are not implemented
+// by the struct actorSystem
+var _ ActorSystem = (*actorSystem)(nil)
 
-// NewSystem creates an instance of System
-func NewSystem(name string, opts ...Option) (System, error) {
+// NewActorSystem creates an instance of ActorSystem
+func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 	if name == "" {
 		return nil, ErrNameRequired
 	}
@@ -221,7 +221,7 @@ func NewSystem(name string, opts ...Option) (System, error) {
 		return nil, ErrInvalidActorSystemName
 	}
 
-	system := &system{
+	system := &actorSystem{
 		actors:                 newPIDMap(1_000),
 		actorsChan:             make(chan *internalpb.WireActor, 10),
 		name:                   name,
@@ -277,124 +277,119 @@ func NewSystem(name string, opts ...Option) (System, error) {
 	return system, nil
 }
 
-// Logger returns the logger sets when creating the actor system
-func (sys *system) Logger() log.Logger {
-	sys.locker.Lock()
-	logger := sys.logger
-	sys.locker.Unlock()
+// Logger returns the logger sets when creating the actor actorSystem
+func (system *actorSystem) Logger() log.Logger {
+	system.locker.Lock()
+	logger := system.logger
+	system.locker.Unlock()
 	return logger
 }
 
 // Deregister removes a registered actor from the registry
-func (sys *system) Deregister(_ context.Context, actor Actor) error {
-	sys.locker.Lock()
-	defer sys.locker.Unlock()
+func (system *actorSystem) Deregister(_ context.Context, actor Actor) error {
+	system.locker.Lock()
+	defer system.locker.Unlock()
 
-	if !sys.started.Load() {
+	if !system.started.Load() {
 		return ErrActorSystemNotStarted
 	}
 
-	sys.registry.Deregister(actor)
+	system.registry.Deregister(actor)
 	return nil
 }
 
 // Register registers an actor for future use. This is necessary when creating an actor remotely
-func (sys *system) Register(_ context.Context, actor Actor) error {
-	sys.locker.Lock()
-	defer sys.locker.Unlock()
+func (system *actorSystem) Register(_ context.Context, actor Actor) error {
+	system.locker.Lock()
+	defer system.locker.Unlock()
 
-	if !sys.started.Load() {
+	if !system.started.Load() {
 		return ErrActorSystemNotStarted
 	}
 
-	sys.registry.Register(actor)
+	system.registry.Register(actor)
 	return nil
 }
 
 // ScheduleOnce schedules a message that will be delivered to the receiver actor
 // This will send the given message to the actor after the given interval specified.
 // The message will be sent once
-func (sys *system) ScheduleOnce(ctx context.Context, message proto.Message, actorName string, interval time.Duration) error {
-	addr, pid, err := sys.actorOf(ctx, actorName)
+func (system *actorSystem) ScheduleOnce(ctx context.Context, message proto.Message, actorName string, interval time.Duration) error {
+	addr, pid, err := system.actorOf(ctx, actorName)
 	if err != nil {
 		return err
 	}
 
 	if pid != nil {
-		return sys.scheduler.scheduleOnce(ctx, message, pid, interval)
+		return system.scheduler.scheduleOnce(ctx, message, pid, interval)
 	}
 
 	if addr != nil {
-		return sys.scheduler.remoteScheduleOnce(ctx, message, addr, interval)
+		return system.scheduler.remoteScheduleOnce(ctx, message, addr, interval)
 	}
 
 	return ErrActorNotFound(actorName)
 }
 
 // ScheduleWithCron schedules a message to be sent to an actor in the future using a cron expression.
-func (sys *system) ScheduleWithCron(ctx context.Context, message proto.Message, actorName string, cronExpression string) error {
-	addr, pid, err := sys.actorOf(ctx, actorName)
+func (system *actorSystem) ScheduleWithCron(ctx context.Context, message proto.Message, actorName string, cronExpression string) error {
+	addr, pid, err := system.actorOf(ctx, actorName)
 	if err != nil {
 		return err
 	}
 
 	if pid != nil {
-		return sys.scheduler.scheduleWithCron(ctx, message, pid, cronExpression)
+		return system.scheduler.scheduleWithCron(ctx, message, pid, cronExpression)
 	}
 
 	if addr != nil {
-		return sys.scheduler.remoteScheduleWithCron(ctx, message, addr, cronExpression)
+		return system.scheduler.remoteScheduleWithCron(ctx, message, addr, cronExpression)
 	}
 
 	return ErrActorNotFound(actorName)
 }
 
 // Subscribe help receive dead letters whenever there are available
-func (sys *system) Subscribe() (eventstream.Subscriber, error) {
-	if !sys.started.Load() {
+func (system *actorSystem) Subscribe() (eventstream.Subscriber, error) {
+	if !system.started.Load() {
 		return nil, ErrActorSystemNotStarted
 	}
-	subscriber := sys.eventsStream.AddSubscriber()
-	sys.eventsStream.Subscribe(subscriber, eventsTopic)
+	subscriber := system.eventsStream.AddSubscriber()
+	system.eventsStream.Subscribe(subscriber, eventsTopic)
 	return subscriber, nil
 }
 
 // Unsubscribe unsubscribes a subscriber.
-func (sys *system) Unsubscribe(subscriber eventstream.Subscriber) error {
-	if !sys.started.Load() {
+func (system *actorSystem) Unsubscribe(subscriber eventstream.Subscriber) error {
+	if !system.started.Load() {
 		return ErrActorSystemNotStarted
 	}
-	sys.eventsStream.Unsubscribe(subscriber, eventsTopic)
-	sys.eventsStream.RemoveSubscriber(subscriber)
+	system.eventsStream.Unsubscribe(subscriber, eventsTopic)
+	system.eventsStream.RemoveSubscriber(subscriber)
 	return nil
 }
 
 // GetPartition returns the partition where a given actor is located
-func (sys *system) GetPartition(actorName string) uint64 {
-	if !sys.InCluster() {
+func (system *actorSystem) GetPartition(actorName string) uint64 {
+	if !system.inCluster() {
 		// TODO: maybe add a partitioner function
 		return 0
 	}
-	return uint64(sys.cluster.GetPartition(actorName))
+	return uint64(system.cluster.GetPartition(actorName))
 }
 
-// InCluster states whether the actor system is running within a cluster of nodes
-func (sys *system) InCluster() bool {
-	return sys.clusterEnabled.Load() && sys.cluster != nil
+// ActorsCount returns the total number of active actors in the actorSystem
+func (system *actorSystem) ActorsCount() uint64 {
+	return uint64(len(system.Actors()))
 }
 
-// ActorsCount returns the total number of active actors in the system
-func (sys *system) ActorsCount() uint64 {
-	return uint64(len(sys.Actors()))
-}
-
-// Spawn creates or returns the instance of a given actor in the system
-func (sys *system) Spawn(ctx context.Context, name string, actor Actor) (*PID, error) {
-	if !sys.started.Load() {
+// Spawn creates or returns the instance of a given actor in the actorSystem
+func (system *actorSystem) Spawn(ctx context.Context, name string, actor Actor) (*PID, error) {
+	if !system.started.Load() {
 		return nil, ErrActorSystemNotStarted
 	}
 
-	pid, exist := sys.actors.get(sys.buildActorPath(name))
+	pid, exist := system.actors.get(system.actorPath(name))
 	if exist {
 		if pid.IsRunning() {
 			// return the existing instance
@@ -402,56 +397,56 @@ func (sys *system) Spawn(ctx context.Context, name string, actor Actor) (*PID, e
 		}
 	}
 
-	pid, err := sys.configPID(ctx, name, actor)
+	pid, err := system.configPID(ctx, name, actor)
 	if err != nil {
 		return nil, err
 	}
 
-	sys.supervisor.Watch(pid)
-	sys.setActor(pid)
+	system.supervisor.Watch(pid)
+	system.setActor(pid)
 	return pid, nil
 }
 
 // SpawnNamedFromFunc creates an actor with the given receive function and provided name. One can set the PreStart and PostStop lifecycle hooks
 // in the given optional options
-func (sys *system) SpawnNamedFromFunc(ctx context.Context, name string, receiveFunc ReceiveFunc, opts ...FuncOption) (*PID, error) {
-	if !sys.started.Load() {
+func (system *actorSystem) SpawnNamedFromFunc(ctx context.Context, name string, receiveFunc ReceiveFunc, opts ...FuncOption) (*PID, error) {
+	if !system.started.Load() {
 		return nil, ErrActorSystemNotStarted
 	}
 
 	actor := newFuncActor(name, receiveFunc, opts...)
-	pid, err := sys.configPID(ctx, name, actor)
+	pid, err := system.configPID(ctx, name, actor)
 	if err != nil {
 		return nil, err
 	}
 
-	sys.supervisor.Watch(pid)
-	sys.setActor(pid)
+	system.supervisor.Watch(pid)
+	system.setActor(pid)
 	return pid, nil
 }
 
 // SpawnFromFunc creates an actor with the given receive function.
-func (sys *system) SpawnFromFunc(ctx context.Context, receiveFunc ReceiveFunc, opts ...FuncOption) (*PID, error) {
-	return sys.SpawnNamedFromFunc(ctx, uuid.NewString(), receiveFunc, opts...)
+func (system *actorSystem) SpawnFromFunc(ctx context.Context, receiveFunc ReceiveFunc, opts ...FuncOption) (*PID, error) {
+	return system.SpawnNamedFromFunc(ctx, uuid.NewString(), receiveFunc, opts...)
 }
 
 // SpawnRouter creates a new router. One can additionally set the router options.
 // A router is a special type of actor that helps distribute messages of the same type over a set of actors, so that messages can be processed in parallel.
 // A single actor will only process one message at a time.
-func (sys *system) SpawnRouter(ctx context.Context, poolSize int, routeesKind Actor, opts ...RouterOption) (*PID, error) {
-	router := newRouter(poolSize, routeesKind, sys.logger, opts...)
-	routerName := sys.getSystemActorName(routerType)
-	return sys.Spawn(ctx, routerName, router)
+func (system *actorSystem) SpawnRouter(ctx context.Context, poolSize int, routeesKind Actor, opts ...RouterOption) (*PID, error) {
+	router := newRouter(poolSize, routeesKind, system.logger, opts...)
+	routerName := system.getSystemActorName(routerType)
+	return system.Spawn(ctx, routerName, router)
 }
 
-// Kill stops a given actor in the system
-func (sys *system) Kill(ctx context.Context, name string) error {
-	if !sys.started.Load() {
+// Kill stops a given actor in the actorSystem
+func (system *actorSystem) Kill(ctx context.Context, name string) error {
+	if !system.started.Load() {
 		return ErrActorSystemNotStarted
 	}
 
-	actorPath := sys.buildActorPath(name)
-	pid, exist := sys.actors.get(actorPath)
+	actorPath := system.actorPath(name)
+	pid, exist := system.actors.get(actorPath)
 	if exist {
 		// stop the given actor. No need to record error in the span context
 		// because the shutdown method is taking care of that
@@ -461,39 +456,39 @@ func (sys *system) Kill(ctx context.Context, name string) error {
 	return ErrActorNotFound(actorPath.String())
 }
 
-// ReSpawn recreates a given actor in the system
-func (sys *system) ReSpawn(ctx context.Context, name string) (*PID, error) {
-	if !sys.started.Load() {
+// ReSpawn recreates a given actor in the actorSystem
+func (system *actorSystem) ReSpawn(ctx context.Context, name string) (*PID, error) {
+	if !system.started.Load() {
 		return nil, ErrActorSystemNotStarted
 	}
 
-	actorPath := sys.buildActorPath(name)
-	pid, exist := sys.actors.get(actorPath)
+	actorPath := system.actorPath(name)
+	pid, exist := system.actors.get(actorPath)
 	if exist {
 		if err := pid.Restart(ctx); err != nil {
 			return nil, fmt.Errorf("failed to restart actor=%s: %w", actorPath.String(), err)
 		}
 
-		sys.actors.set(pid)
-		sys.supervisor.Watch(pid)
+		system.actors.set(pid)
+		system.supervisor.Watch(pid)
 		return pid, nil
 	}
 
 	return nil, ErrActorNotFound(actorPath.String())
 }
 
-// Name returns the actor system name
-func (sys *system) Name() string {
-	sys.locker.Lock()
-	defer sys.locker.Unlock()
-	return sys.name
+// Name returns the actor actorSystem name
+func (system *actorSystem) Name() string {
+	system.locker.Lock()
+	defer system.locker.Unlock()
+	return system.name
 }
 
-// Actors returns the list of Actors that are alive in the actor system
-func (sys *system) Actors() []*PID {
-	sys.locker.Lock()
-	pids := sys.actors.pids()
-	sys.locker.Unlock()
+// Actors returns the list of Actors that are alive in the actor actorSystem
+func (system *actorSystem) Actors() []*PID {
+	system.locker.Lock()
+	pids := system.actors.pids()
+	system.locker.Unlock()
 	actors := make([]*PID, 0, len(pids))
 	for _, pid := range pids {
 		if !isSystemName(pid.Name()) {
@@ -503,121 +498,121 @@ func (sys *system) Actors() []*PID {
 	return actors
 }
 
-// PeerAddress returns the actor system address known in the cluster. That address is used by other nodes to communicate with the actor system.
+// PeerAddress returns the actor actorSystem address known in the cluster. That address is used by other nodes to communicate with the actor actorSystem.
 // This address is empty when cluster mode is not activated
-func (sys *system) PeerAddress() string {
-	sys.locker.Lock()
-	defer sys.locker.Unlock()
-	if sys.clusterEnabled.Load() {
-		return sys.cluster.AdvertisedAddress()
+func (system *actorSystem) PeerAddress() string {
+	system.locker.Lock()
+	defer system.locker.Unlock()
+	if system.clusterEnabled.Load() {
+		return system.cluster.AdvertisedAddress()
 	}
 	return ""
 }
 
-// Start starts the actor system
-func (sys *system) Start(ctx context.Context) error {
-	sys.started.Store(true)
+// Start starts the actor actorSystem
+func (system *actorSystem) Start(ctx context.Context) error {
+	system.started.Store(true)
 
-	if sys.clusterEnabled.Load() {
-		sys.enableRemoting(ctx)
-		if err := sys.enableClustering(ctx); err != nil {
+	if system.clusterEnabled.Load() {
+		system.enableRemoting(ctx)
+		if err := system.enableClustering(ctx); err != nil {
 			return err
 		}
 	}
 
-	sys.scheduler.start(ctx)
-	actorName := sys.getSystemActorName(supervisorType)
-	pid, err := sys.configPID(ctx, actorName, newRootActor(sys.logger))
+	system.scheduler.start(ctx)
+	actorName := system.getSystemActorName(supervisorType)
+	pid, err := system.configPID(ctx, actorName, newRootActor(system.logger))
 	if err != nil {
-		return fmt.Errorf("actor=%s failed to start system supervisor: %w", actorName, err)
+		return fmt.Errorf("actor=%s failed to start actorSystem supervisor: %w", actorName, err)
 	}
 
-	sys.supervisor = pid
-	sys.setActor(pid)
+	system.supervisor = pid
+	system.setActor(pid)
 
-	go sys.gc()
+	go system.janitor()
 
-	sys.logger.Infof("%s started..:)", sys.name)
+	system.logger.Infof("%s started..:)", system.name)
 	return nil
 }
 
-// Stop stops the actor system
-func (sys *system) Stop(ctx context.Context) error {
-	sys.logger.Infof("%s shutting down...", sys.name)
+// Stop stops the actor actorSystem
+func (system *actorSystem) Stop(ctx context.Context) error {
+	system.logger.Infof("%s shutting down...", system.name)
 
-	// make sure the actor system has started
-	if !sys.started.Load() {
+	// make sure the actor actorSystem has started
+	if !system.started.Load() {
 		return ErrActorSystemNotStarted
 	}
 
-	sys.stopGC <- types.Unit{}
-	sys.logger.Infof("%s is shutting down..:)", sys.name)
+	system.stopGC <- types.Unit{}
+	system.logger.Infof("%s is shutting down..:)", system.name)
 
-	sys.started.Store(false)
-	sys.scheduler.stop(ctx)
+	system.started.Store(false)
+	system.scheduler.stop(ctx)
 
-	if sys.eventsStream != nil {
-		sys.eventsStream.Shutdown()
+	if system.eventsStream != nil {
+		system.eventsStream.Shutdown()
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, sys.shutdownTimeout)
+	ctx, cancel := context.WithTimeout(ctx, system.shutdownTimeout)
 	defer cancel()
 
-	if sys.clusterEnabled.Load() {
-		if err := sys.remotingServer.Shutdown(ctx); err != nil {
+	if system.clusterEnabled.Load() {
+		if err := system.remotingServer.Shutdown(ctx); err != nil {
 			return err
 		}
-		sys.remotingServer = nil
+		system.remotingServer = nil
 	}
 
-	if sys.clusterEnabled.Load() {
-		if err := sys.cluster.Stop(ctx); err != nil {
+	if system.clusterEnabled.Load() {
+		if err := system.cluster.Stop(ctx); err != nil {
 			return err
 		}
-		close(sys.actorsChan)
-		sys.clusterSyncStopSig <- types.Unit{}
-		sys.clusterEnabled.Store(false)
-		close(sys.redistributionChan)
+		close(system.actorsChan)
+		system.clusterSyncStopSig <- types.Unit{}
+		system.clusterEnabled.Store(false)
+		close(system.redistributionChan)
 	}
 
 	// stop the supervisor actor
-	if err := sys.getSupervisor().Shutdown(ctx); err != nil {
-		sys.reset()
+	if err := system.getSupervisor().Shutdown(ctx); err != nil {
+		system.reset()
 		return err
 	}
 	// remove the supervisor from the actors list
-	sys.actors.delete(sys.supervisor.ActorPath())
+	system.actors.delete(system.supervisor.ActorPath())
 
-	for _, actor := range sys.Actors() {
-		sys.actors.delete(actor.ActorPath())
+	for _, actor := range system.Actors() {
+		system.actors.delete(actor.ActorPath())
 		if err := actor.Shutdown(ctx); err != nil {
-			sys.reset()
+			system.reset()
 			return err
 		}
 	}
 
-	sys.reset()
-	sys.logger.Infof("%s shuts down successfully", sys.name)
+	system.reset()
+	system.logger.Infof("%s shuts down successfully", system.name)
 	return nil
 }
 
 // RemoteLookup for an actor on a remote host.
-func (sys *system) RemoteLookup(ctx context.Context, request *connect.Request[internalpb.RemoteLookupRequest]) (*connect.Response[internalpb.RemoteLookupResponse], error) {
-	logger := sys.logger
+func (system *actorSystem) RemoteLookup(ctx context.Context, request *connect.Request[internalpb.RemoteLookupRequest]) (*connect.Response[internalpb.RemoteLookupResponse], error) {
+	logger := system.logger
 	msg := request.Msg
 
-	if !sys.clusterEnabled.Load() {
+	if !system.clusterEnabled.Load() {
 		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrRemotingDisabled)
 	}
 
-	remoteAddr := fmt.Sprintf("%s:%d", sys.host, sys.remotingPort)
+	remoteAddr := fmt.Sprintf("%s:%d", system.host, system.remotingPort)
 	if remoteAddr != net.JoinHostPort(msg.GetHost(), strconv.Itoa(int(msg.GetPort()))) {
 		return nil, connect.NewError(connect.CodeInvalidArgument, ErrInvalidHost)
 	}
 
-	if sys.clusterEnabled.Load() {
+	if system.clusterEnabled.Load() {
 		actorName := msg.GetName()
-		actor, err := sys.cluster.GetActor(ctx, actorName)
+		actor, err := system.cluster.GetActor(ctx, actorName)
 		if err != nil {
 			if errors.Is(err, cluster.ErrActorNotFound) {
 				logger.Error(ErrAddressNotFound(actorName).Error())
@@ -629,8 +624,8 @@ func (sys *system) RemoteLookup(ctx context.Context, request *connect.Request[in
 		return connect.NewResponse(&internalpb.RemoteLookupResponse{Address: actor.GetActorAddress()}), nil
 	}
 
-	actorPath := NewPath(msg.GetName(), NewAddress(sys.Name(), msg.GetHost(), int(msg.GetPort())))
-	pid, exist := sys.actors.get(actorPath)
+	actorPath := NewPath(msg.GetName(), NewAddress(system.Name(), msg.GetHost(), int(msg.GetPort())))
+	pid, exist := system.actors.get(actorPath)
 	if !exist {
 		logger.Error(ErrAddressNotFound(actorPath.String()).Error())
 		return nil, ErrAddressNotFound(actorPath.String())
@@ -642,10 +637,10 @@ func (sys *system) RemoteLookup(ctx context.Context, request *connect.Request[in
 // RemoteAsk is used to send a message to an actor remotely and expect a response
 // immediately. With this type of message the receiver cannot communicate back to Sender
 // except reply the message with a response. This one-way communication
-func (sys *system) RemoteAsk(ctx context.Context, stream *connect.BidiStream[internalpb.RemoteAskRequest, internalpb.RemoteAskResponse]) error {
-	logger := sys.logger
+func (system *actorSystem) RemoteAsk(ctx context.Context, stream *connect.BidiStream[internalpb.RemoteAskRequest, internalpb.RemoteAskResponse]) error {
+	logger := system.logger
 
-	if !sys.clusterEnabled.Load() {
+	if !system.clusterEnabled.Load() {
 		return connect.NewError(connect.CodeFailedPrecondition, ErrRemotingDisabled)
 	}
 
@@ -671,24 +666,24 @@ func (sys *system) RemoteAsk(ctx context.Context, stream *connect.BidiStream[int
 		receiver := message.GetReceiver()
 		name := receiver.GetName()
 
-		remoteAddr := fmt.Sprintf("%s:%d", sys.host, sys.remotingPort)
+		remoteAddr := fmt.Sprintf("%s:%d", system.host, system.remotingPort)
 		if remoteAddr != net.JoinHostPort(receiver.GetHost(), strconv.Itoa(int(receiver.GetPort()))) {
 			return connect.NewError(connect.CodeInvalidArgument, ErrInvalidHost)
 		}
 
-		actorPath := NewPath(name, NewAddress(sys.name, sys.host, int(sys.remotingPort)))
-		pid, exist := sys.actors.get(actorPath)
+		actorPath := NewPath(name, NewAddress(system.name, system.host, int(system.remotingPort)))
+		pid, exist := system.actors.get(actorPath)
 		if !exist {
 			logger.Error(ErrAddressNotFound(actorPath.String()).Error())
 			return ErrAddressNotFound(actorPath.String())
 		}
 
-		timeout := sys.askTimeout
+		timeout := system.askTimeout
 		if request.GetTimeout() != nil {
 			timeout = request.GetTimeout().AsDuration()
 		}
 
-		reply, err := sys.handleRemoteAsk(ctx, pid, message, timeout)
+		reply, err := system.handleRemoteAsk(ctx, pid, message, timeout)
 		if err != nil {
 			logger.Error(ErrRemoteSendFailure(err).Error())
 			return ErrRemoteSendFailure(err)
@@ -703,10 +698,10 @@ func (sys *system) RemoteAsk(ctx context.Context, stream *connect.BidiStream[int
 }
 
 // RemoteTell is used to send a message to an actor remotely by another actor
-func (sys *system) RemoteTell(ctx context.Context, stream *connect.ClientStream[internalpb.RemoteTellRequest]) (*connect.Response[internalpb.RemoteTellResponse], error) {
-	logger := sys.logger
+func (system *actorSystem) RemoteTell(ctx context.Context, stream *connect.ClientStream[internalpb.RemoteTellRequest]) (*connect.Response[internalpb.RemoteTellResponse], error) {
+	logger := system.logger
 
-	if !sys.clusterEnabled.Load() {
+	if !system.clusterEnabled.Load() {
 		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrRemotingDisabled)
 	}
 
@@ -739,17 +734,17 @@ func (sys *system) RemoteTell(ctx context.Context, stream *connect.ClientStream[
 			actorPath := NewPath(
 				receiver.GetName(),
 				NewAddress(
-					sys.Name(),
+					system.Name(),
 					receiver.GetHost(),
 					int(receiver.GetPort())))
 
-			pid, exist := sys.actors.get(actorPath)
+			pid, exist := system.actors.get(actorPath)
 			if !exist {
 				logger.Error(ErrAddressNotFound(actorPath.String()).Error())
 				return ErrAddressNotFound(actorPath.String())
 			}
 
-			if err := sys.handleRemoteTell(ctx, pid, request.GetRemoteMessage()); err != nil {
+			if err := system.handleRemoteTell(ctx, pid, request.GetRemoteMessage()); err != nil {
 				logger.Error(ErrRemoteSendFailure(err))
 				return ErrRemoteSendFailure(err)
 			}
@@ -765,22 +760,22 @@ func (sys *system) RemoteTell(ctx context.Context, stream *connect.ClientStream[
 }
 
 // RemoteReSpawn is used the handle the re-creation of an actor from a remote host or from an api call
-func (sys *system) RemoteReSpawn(ctx context.Context, request *connect.Request[internalpb.RemoteReSpawnRequest]) (*connect.Response[internalpb.RemoteReSpawnResponse], error) {
-	logger := sys.logger
+func (system *actorSystem) RemoteReSpawn(ctx context.Context, request *connect.Request[internalpb.RemoteReSpawnRequest]) (*connect.Response[internalpb.RemoteReSpawnResponse], error) {
+	logger := system.logger
 
 	msg := request.Msg
 
-	if !sys.clusterEnabled.Load() {
+	if !system.clusterEnabled.Load() {
 		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrRemotingDisabled)
 	}
 
-	remoteAddr := fmt.Sprintf("%s:%d", sys.host, sys.remotingPort)
+	remoteAddr := fmt.Sprintf("%s:%d", system.host, system.remotingPort)
 	if remoteAddr != net.JoinHostPort(msg.GetHost(), strconv.Itoa(int(msg.GetPort()))) {
 		return nil, connect.NewError(connect.CodeInvalidArgument, ErrInvalidHost)
 	}
 
-	actorPath := NewPath(msg.GetName(), NewAddress(sys.Name(), msg.GetHost(), int(msg.GetPort())))
-	pid, exist := sys.actors.get(actorPath)
+	actorPath := NewPath(msg.GetName(), NewAddress(system.Name(), msg.GetHost(), int(msg.GetPort())))
+	pid, exist := system.actors.get(actorPath)
 	if !exist {
 		logger.Error(ErrAddressNotFound(actorPath.String()).Error())
 		return nil, ErrAddressNotFound(actorPath.String())
@@ -790,27 +785,27 @@ func (sys *system) RemoteReSpawn(ctx context.Context, request *connect.Request[i
 		return nil, fmt.Errorf("failed to restart actor=%s: %w", actorPath.String(), err)
 	}
 
-	sys.actors.set(pid)
+	system.actors.set(pid)
 	return connect.NewResponse(new(internalpb.RemoteReSpawnResponse)), nil
 }
 
 // RemoteStop stops an actor on a remote machine
-func (sys *system) RemoteStop(ctx context.Context, request *connect.Request[internalpb.RemoteStopRequest]) (*connect.Response[internalpb.RemoteStopResponse], error) {
-	logger := sys.logger
+func (system *actorSystem) RemoteStop(ctx context.Context, request *connect.Request[internalpb.RemoteStopRequest]) (*connect.Response[internalpb.RemoteStopResponse], error) {
+	logger := system.logger
 
 	msg := request.Msg
 
-	if !sys.clusterEnabled.Load() {
+	if !system.clusterEnabled.Load() {
 		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrRemotingDisabled)
 	}
 
-	remoteAddr := fmt.Sprintf("%s:%d", sys.host, sys.remotingPort)
+	remoteAddr := fmt.Sprintf("%s:%d", system.host, system.remotingPort)
 	if remoteAddr != net.JoinHostPort(msg.GetHost(), strconv.Itoa(int(msg.GetPort()))) {
 		return nil, connect.NewError(connect.CodeInvalidArgument, ErrInvalidHost)
 	}
 
-	actorPath := NewPath(msg.GetName(), NewAddress(sys.Name(), msg.GetHost(), int(msg.GetPort())))
-	pid, exist := sys.actors.get(actorPath)
+	actorPath := NewPath(msg.GetName(), NewAddress(system.Name(), msg.GetHost(), int(msg.GetPort())))
+	pid, exist := system.actors.get(actorPath)
 	if !exist {
 		logger.Error(ErrAddressNotFound(actorPath.String()).Error())
 		return nil, ErrAddressNotFound(actorPath.String())
@@ -820,25 +815,25 @@ func (sys *system) RemoteStop(ctx context.Context, request *connect.Request[inte
 		return nil, fmt.Errorf("failed to stop actor=%s: %w", actorPath.String(), err)
 	}
 
-	sys.actors.delete(actorPath)
+	system.actors.delete(actorPath)
 	return connect.NewResponse(new(internalpb.RemoteStopResponse)), nil
 }
 
 // RemoteSpawn handles the remoteSpawn call
-func (sys *system) RemoteSpawn(ctx context.Context, request *connect.Request[internalpb.RemoteSpawnRequest]) (*connect.Response[internalpb.RemoteSpawnResponse], error) {
-	logger := sys.logger
+func (system *actorSystem) RemoteSpawn(ctx context.Context, request *connect.Request[internalpb.RemoteSpawnRequest]) (*connect.Response[internalpb.RemoteSpawnResponse], error) {
+	logger := system.logger
 
 	msg := request.Msg
-	if !sys.clusterEnabled.Load() {
+	if !system.clusterEnabled.Load() {
 		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrRemotingDisabled)
 	}
 
-	remoteAddr := fmt.Sprintf("%s:%d", sys.host, sys.remotingPort)
+	remoteAddr := fmt.Sprintf("%s:%d", system.host, system.remotingPort)
 	if remoteAddr != net.JoinHostPort(msg.GetHost(), strconv.Itoa(int(msg.GetPort()))) {
 		return nil, connect.NewError(connect.CodeInvalidArgument, ErrInvalidHost)
 	}
 
-	actor, err := sys.reflection.ActorFrom(msg.GetActorType())
+	actor, err := system.reflection.ActorFrom(msg.GetActorType())
 	if err != nil {
 		logger.Errorf("failed to create actor=[(%s) of type (%s)] on [host=%s, port=%d]: reason: (%v)",
 			msg.GetActorName(), msg.GetActorType(), msg.GetHost(), msg.GetPort(), err)
@@ -850,7 +845,7 @@ func (sys *system) RemoteSpawn(ctx context.Context, request *connect.Request[int
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 
-	if _, err = sys.Spawn(ctx, msg.GetActorName(), actor); err != nil {
+	if _, err = system.Spawn(ctx, msg.GetActorName(), actor); err != nil {
 		logger.Errorf("failed to create actor=(%s) on [host=%s, port=%d]: reason: (%v)", msg.GetActorName(), msg.GetHost(), msg.GetPort(), err)
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
@@ -860,19 +855,19 @@ func (sys *system) RemoteSpawn(ctx context.Context, request *connect.Request[int
 }
 
 // GetNodeMetric handles the GetNodeMetric request send the given node
-func (sys *system) GetNodeMetric(_ context.Context, request *connect.Request[internalpb.GetNodeMetricRequest]) (*connect.Response[internalpb.GetNodeMetricResponse], error) {
-	if !sys.clusterEnabled.Load() {
+func (system *actorSystem) GetNodeMetric(_ context.Context, request *connect.Request[internalpb.GetNodeMetricRequest]) (*connect.Response[internalpb.GetNodeMetricResponse], error) {
+	if !system.clusterEnabled.Load() {
 		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrClusterDisabled)
 	}
 
 	req := request.Msg
 
-	remoteAddr := fmt.Sprintf("%s:%d", sys.host, sys.remotingPort)
+	remoteAddr := fmt.Sprintf("%s:%d", system.host, system.remotingPort)
 	if remoteAddr != req.GetNodeAddress() {
 		return nil, connect.NewError(connect.CodeInvalidArgument, ErrInvalidHost)
 	}
 
-	actorCount := sys.actors.len()
+	actorCount := system.actors.len()
 	return connect.NewResponse(&internalpb.GetNodeMetricResponse{
 		NodeRemoteAddress: remoteAddr,
 		ActorsCount:       uint64(actorCount),
@@ -880,21 +875,21 @@ func (sys *system) GetNodeMetric(_ context.Context, request *connect.Request[int
 }
 
 // GetKinds returns the cluster kinds
-func (sys *system) GetKinds(_ context.Context, request *connect.Request[internalpb.GetKindsRequest]) (*connect.Response[internalpb.GetKindsResponse], error) {
-	if !sys.clusterEnabled.Load() {
+func (system *actorSystem) GetKinds(_ context.Context, request *connect.Request[internalpb.GetKindsRequest]) (*connect.Response[internalpb.GetKindsResponse], error) {
+	if !system.clusterEnabled.Load() {
 		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrClusterDisabled)
 	}
 
 	req := request.Msg
-	remoteAddr := fmt.Sprintf("%s:%d", sys.host, sys.remotingPort)
+	remoteAddr := fmt.Sprintf("%s:%d", system.host, system.remotingPort)
 
 	// routine check
 	if remoteAddr != req.GetNodeAddress() {
 		return nil, connect.NewError(connect.CodeInvalidArgument, ErrInvalidHost)
 	}
 
-	kinds := make([]string, len(sys.clusterConfig.Kinds()))
-	for i, kind := range sys.clusterConfig.Kinds() {
+	kinds := make([]string, len(system.clusterConfig.Kinds()))
+	for i, kind := range system.clusterConfig.Kinds() {
 		kinds[i] = types.TypeName(kind)
 	}
 
@@ -903,28 +898,28 @@ func (sys *system) GetKinds(_ context.Context, request *connect.Request[internal
 
 // handleRemoteAsk handles a synchronous message to another actor and expect a response.
 // This block until a response is received or timed out.
-func (sys *system) handleRemoteAsk(ctx context.Context, to *PID, message proto.Message, timeout time.Duration) (response proto.Message, err error) {
+func (system *actorSystem) handleRemoteAsk(ctx context.Context, to *PID, message proto.Message, timeout time.Duration) (response proto.Message, err error) {
 	return Ask(ctx, to, message, timeout)
 }
 
 // handleRemoteTell handles an asynchronous message to an actor
-func (sys *system) handleRemoteTell(ctx context.Context, to *PID, message proto.Message) error {
+func (system *actorSystem) handleRemoteTell(ctx context.Context, to *PID, message proto.Message) error {
 	return Tell(ctx, to, message)
 }
 
-// getSupervisor return the system supervisor
-func (sys *system) getSupervisor() *PID {
-	sys.locker.Lock()
-	supervisor := sys.supervisor
-	sys.locker.Unlock()
+// getSupervisor return the actorSystem supervisor
+func (system *actorSystem) getSupervisor() *PID {
+	system.locker.Lock()
+	supervisor := system.supervisor
+	system.locker.Unlock()
 	return supervisor
 }
 
-// setActor implements System.
-func (sys *system) setActor(actor *PID) {
-	sys.actors.set(actor)
-	if sys.clusterEnabled.Load() {
-		sys.actorsChan <- &internalpb.WireActor{
+// setActor implements ActorSystem.
+func (system *actorSystem) setActor(actor *PID) {
+	system.actors.set(actor)
+	if system.clusterEnabled.Load() {
+		system.actorsChan <- &internalpb.WireActor{
 			ActorName:    actor.Name(),
 			ActorAddress: actor.ActorPath().RemoteAddress(),
 			ActorPath:    actor.ActorPath().String(),
@@ -935,35 +930,35 @@ func (sys *system) setActor(actor *PID) {
 
 // enableClustering enables clustering. When clustering is enabled remoting is also enabled to facilitate remote
 // communication
-func (sys *system) enableClustering(ctx context.Context) error {
-	sys.logger.Info("enabling clustering...")
+func (system *actorSystem) enableClustering(ctx context.Context) error {
+	system.logger.Info("enabling clustering...")
 
 	node := &discovery.Node{
-		Name:         sys.Name(),
-		Host:         sys.host,
-		GossipPort:   sys.clusterConfig.GossipPort(),
-		PeersPort:    sys.clusterConfig.PeersPort(),
-		RemotingPort: sys.clusterConfig.RemotingPort(),
+		Name:         system.Name(),
+		Host:         system.host,
+		GossipPort:   system.clusterConfig.GossipPort(),
+		PeersPort:    system.clusterConfig.PeersPort(),
+		RemotingPort: system.clusterConfig.RemotingPort(),
 	}
 
 	clusterEngine, err := cluster.NewEngine(
-		sys.Name(),
-		sys.clusterConfig.Discovery(),
+		system.Name(),
+		system.clusterConfig.Discovery(),
 		node,
-		cluster.WithLogger(sys.logger),
-		cluster.WithPartitionsCount(sys.clusterConfig.PartitionCount()),
-		cluster.WithHasher(sys.partitionHasher),
-		cluster.WithMinimumPeersQuorum(sys.clusterConfig.MinimumPeersQuorum()),
-		cluster.WithReplicaCount(sys.clusterConfig.ReplicaCount()),
+		cluster.WithLogger(system.logger),
+		cluster.WithPartitionsCount(system.clusterConfig.PartitionCount()),
+		cluster.WithHasher(system.partitionHasher),
+		cluster.WithMinimumPeersQuorum(system.clusterConfig.MinimumPeersQuorum()),
+		cluster.WithReplicaCount(system.clusterConfig.ReplicaCount()),
 	)
 	if err != nil {
-		sys.logger.Errorf("failed to initialize cluster engine: %v", err)
+		system.logger.Errorf("failed to initialize cluster engine: %v", err)
 		return err
 	}
 
-	sys.logger.Info("starting cluster engine...")
+	system.logger.Info("starting cluster engine...")
 	if err := clusterEngine.Start(ctx); err != nil {
-		sys.logger.Errorf("failed to start cluster engine: %v", err)
+		system.logger.Errorf("failed to start cluster engine: %v", err)
 		return err
 	}
 
@@ -974,39 +969,39 @@ func (sys *system) enableClustering(ctx context.Context) error {
 	<-bootstrapChan
 	timer.Stop()
 
-	sys.logger.Info("cluster engine successfully started...")
+	system.logger.Info("cluster engine successfully started...")
 
-	sys.locker.Lock()
-	sys.cluster = clusterEngine
-	sys.clusterEventsChan = clusterEngine.Events()
-	sys.redistributionChan = make(chan *cluster.Event, 1)
-	for _, kind := range sys.clusterConfig.Kinds() {
-		sys.registry.Register(kind)
-		sys.logger.Infof("cluster kind=(%s) registered", types.TypeName(kind))
+	system.locker.Lock()
+	system.cluster = clusterEngine
+	system.clusterEventsChan = clusterEngine.Events()
+	system.redistributionChan = make(chan *cluster.Event, 1)
+	for _, kind := range system.clusterConfig.Kinds() {
+		system.registry.Register(kind)
+		system.logger.Infof("cluster kind=(%s) registered", types.TypeName(kind))
 	}
-	sys.locker.Unlock()
+	system.locker.Unlock()
 
-	go sys.clusterEventsLoop()
-	go sys.replicationLoop()
-	go sys.peersStateLoop()
-	go sys.redistributionLoop()
+	go system.clusterEventsLoop()
+	go system.replicationLoop()
+	go system.peersStateLoop()
+	go system.redistributionLoop()
 
-	sys.logger.Info("clustering enabled...:)")
+	system.logger.Info("clustering enabled...:)")
 	return nil
 }
 
 // enableRemoting enables the remoting service to handle remote messaging
-func (sys *system) enableRemoting(ctx context.Context) {
-	sys.logger.Info("enabling remoting...")
+func (system *actorSystem) enableRemoting(ctx context.Context) {
+	system.logger.Info("enabling remoting...")
 
 	var interceptor *otelconnect.Interceptor
 	var err error
-	if sys.metricEnabled.Load() {
+	if system.metricEnabled.Load() {
 		interceptor, err = otelconnect.NewInterceptor(
-			otelconnect.WithMeterProvider(sys.telemetry.MeterProvider),
+			otelconnect.WithMeterProvider(system.telemetry.MeterProvider),
 		)
 		if err != nil {
-			sys.logger.Panic(fmt.Errorf("failed to initialize observability feature: %w", err))
+			system.logger.Panic(fmt.Errorf("failed to initialize observability feature: %w", err))
 		}
 	}
 
@@ -1015,72 +1010,72 @@ func (sys *system) enableRemoting(ctx context.Context) {
 		opts = append(opts, connect.WithInterceptors(interceptor))
 	}
 
-	if sys.host == "" {
-		sys.host, _ = os.Hostname()
+	if system.host == "" {
+		system.host, _ = os.Hostname()
 	}
 
-	remotingHost, remotingPort, err := tcp.GetHostPort(fmt.Sprintf("%s:%d", sys.host, sys.remotingPort))
+	remotingHost, remotingPort, err := tcp.GetHostPort(fmt.Sprintf("%s:%d", system.host, system.remotingPort))
 	if err != nil {
-		sys.logger.Panic(fmt.Errorf("failed to resolve remoting TCP address: %w", err))
+		system.logger.Panic(fmt.Errorf("failed to resolve remoting TCP address: %w", err))
 	}
 
-	sys.host = remotingHost
-	sys.remotingPort = int32(remotingPort)
+	system.host = remotingHost
+	system.remotingPort = int32(remotingPort)
 
-	remotingServicePath, remotingServiceHandler := internalpbconnect.NewRemotingServiceHandler(sys, opts...)
-	clusterServicePath, clusterServiceHandler := internalpbconnect.NewClusterServiceHandler(sys, opts...)
+	remotingServicePath, remotingServiceHandler := internalpbconnect.NewRemotingServiceHandler(system, opts...)
+	clusterServicePath, clusterServiceHandler := internalpbconnect.NewClusterServiceHandler(system, opts...)
 
 	mux := stdhttp.NewServeMux()
 	mux.Handle(remotingServicePath, remotingServiceHandler)
 	mux.Handle(clusterServicePath, clusterServiceHandler)
-	server := http.NewServer(ctx, sys.host, remotingPort, mux)
+	server := http.NewServer(ctx, system.host, remotingPort, mux)
 
 	go func() {
 		if err := server.ListenAndServe(); err != nil {
 			if !errors.Is(err, stdhttp.ErrServerClosed) {
-				sys.logger.Panic(fmt.Errorf("failed to start remoting service: %w", err))
+				system.logger.Panic(fmt.Errorf("failed to start remoting service: %w", err))
 			}
 		}
 	}()
 
-	sys.locker.Lock()
-	sys.remotingServer = server
-	sys.locker.Unlock()
+	system.locker.Lock()
+	system.remotingServer = server
+	system.locker.Unlock()
 
-	sys.logger.Info("remoting enabled...:)")
+	system.logger.Info("remoting enabled...:)")
 }
 
-// reset the actor system
-func (sys *system) reset() {
-	sys.telemetry = nil
-	sys.actors.reset()
-	sys.name = ""
-	sys.cluster = nil
+// reset the actor actorSystem
+func (system *actorSystem) reset() {
+	system.telemetry = nil
+	system.actors.reset()
+	system.name = ""
+	system.cluster = nil
 }
 
-// gc time to time removes dead actors from the system
+// janitor time to time removes dead actors from the actorSystem
 // that helps free non-utilized resources
-func (sys *system) gc() {
-	sys.logger.Info("garbage collector has started...")
-	ticker := time.NewTicker(sys.gcInterval)
+func (system *actorSystem) janitor() {
+	system.logger.Info("janitor has started...")
+	ticker := time.NewTicker(system.gcInterval)
 	tickerStopSig := make(chan types.Unit, 1)
 	go func() {
 		for {
 			select {
 			case <-ticker.C:
-				for _, actor := range sys.Actors() {
+				for _, actor := range system.Actors() {
 					if !actor.IsRunning() {
-						sys.logger.Infof("removing actor=%s from system", actor.ActorPath().Name())
-						sys.actors.delete(actor.ActorPath())
-						if sys.InCluster() {
-							if err := sys.cluster.RemoveActor(context.Background(), actor.ActorPath().Name()); err != nil {
-								sys.logger.Error(err.Error())
+						system.logger.Infof("removing actor=%s from actorSystem", actor.ActorPath().Name())
+						system.actors.delete(actor.ActorPath())
+						if system.inCluster() {
+							if err := system.cluster.RemoveActor(context.Background(), actor.ActorPath().Name()); err != nil {
+								system.logger.Error(err.Error())
 								// TODO: stop or continue
 							}
 						}
 					}
 				}
-			case <-sys.stopGC:
+			case <-system.stopGC:
 				tickerStopSig <- types.Unit{}
 				return
 			}
@@ -1089,19 +1084,19 @@ func (sys *system) gc() {
 
 	<-tickerStopSig
 	ticker.Stop()
-	sys.logger.Info("garbage collector has stopped...")
+	system.logger.Info("janitor has stopped...")
 }
 
 // registerMetrics register the PID metrics with OTel instrumentation.
-func (sys *system) registerMetrics() error {
-	meter := sys.telemetry.Meter
+func (system *actorSystem) registerMetrics() error {
+	meter := system.telemetry.Meter
 	metrics, err := metric.NewActorSystemMetric(meter)
 	if err != nil {
 		return err
 	}
 
 	_, err = meter.RegisterCallback(func(_ context.Context, observer otelmetric.Observer) error {
-		observer.ObserveInt64(metrics.ActorsCount(), int64(sys.ActorsCount()))
+		observer.ObserveInt64(metrics.ActorsCount(), int64(system.ActorsCount()))
 		return nil
 	}, metrics.ActorsCount())
 
@@ -1109,44 +1104,44 @@ func (sys *system) registerMetrics() error {
 }
 
 // replicationLoop publishes newly created actor into the cluster when cluster is enabled
-func (sys *system) replicationLoop() {
-	for actor := range sys.actorsChan {
-		// never replicate system actors because there are specific to the
+func (system *actorSystem) replicationLoop() {
+	for actor := range system.actorsChan {
+		// never replicate actorSystem actors because there are specific to the
 		// running node
 		if isSystemName(actor.GetActorName()) {
 			continue
 		}
-		if sys.InCluster() {
+		if system.inCluster() {
 			ctx := context.Background()
-			if err := sys.cluster.PutActor(ctx, actor); err != nil {
-				sys.logger.Panic(err.Error())
+			if err := system.cluster.PutActor(ctx, actor); err != nil {
+				system.logger.Panic(err.Error())
 			}
 		}
 	}
 }
 
 // clusterEventsLoop listens to cluster events and send them to the event streams
-func (sys *system) clusterEventsLoop() {
-	for event := range sys.clusterEventsChan {
-		if sys.InCluster() {
+func (system *actorSystem) clusterEventsLoop() {
+	for event := range system.clusterEventsChan {
+		if system.inCluster() {
 			if event != nil && event.Payload != nil {
 				// push the event to the event stream
 				message, _ := event.Payload.UnmarshalNew()
-				if sys.eventsStream != nil {
-					sys.logger.Debugf("node=(%s) publishing cluster event=(%s)....", sys.name, event.Type)
-					sys.eventsStream.Publish(eventsTopic, message)
-					sys.logger.Debugf("cluster event=(%s) successfully published by node=(%s)", event.Type, sys.name)
+				if system.eventsStream != nil {
+					system.logger.Debugf("node=(%s) publishing cluster event=(%s)....", system.name, event.Type)
+					system.eventsStream.Publish(eventsTopic, message)
+					system.logger.Debugf("cluster event=(%s) successfully published by node=(%s)", event.Type, system.name)
 				}
-				sys.redistributionChan <- event
+				system.redistributionChan <- event
 			}
 		}
 	}
 }
 
 // peersStateLoop fetches the cluster peers' PeerState and update the node peersCache
-func (sys *system) peersStateLoop() {
-	sys.logger.Info("peers state synchronization has started...")
-	ticker := time.NewTicker(sys.peersStateLoopInterval)
+func (system *actorSystem) peersStateLoop() {
+	system.logger.Info("peers state synchronization has started...")
+	ticker := time.NewTicker(system.peersStateLoopInterval)
 	tickerStopSig := make(chan types.Unit, 1)
 	go func() {
 		for {
@@ -1158,7 +1153,7 @@ func (sys *system) peersStateLoop() {
 
 				eg.Go(func() error {
 					defer close(peersChan)
-					peers, err := sys.cluster.Peers(ctx)
+					peers, err := system.cluster.Peers(ctx)
 					if err != nil {
 						return err
 					}
@@ -1175,7 +1170,7 @@ func (sys *system) peersStateLoop() {
 
 				eg.Go(func() error {
 					for peer := range peersChan {
-						if err := sys.processPeerState(ctx, peer); err != nil {
+						if err := system.processPeerState(ctx, peer); err != nil {
 							return err
 						}
 						select {
@@ -1189,11 +1184,11 @@ func (sys *system) peersStateLoop() {
 				})
 
 				if err := eg.Wait(); err != nil {
-					sys.logger.Error(err)
+					system.logger.Error(err)
 					// TODO: stop or panic
 				}
 
-			case <-sys.clusterSyncStopSig:
+			case <-system.clusterSyncStopSig:
 				tickerStopSig <- types.Unit{}
 				return
 			}
@@ -1202,86 +1197,86 @@ func (sys *system) peersStateLoop() {
 
 	<-tickerStopSig
 	ticker.Stop()
-	sys.logger.Info("peers state synchronization has stopped...")
+	system.logger.Info("peers state synchronization has stopped...")
 }
 
-func (sys *system) redistributionLoop() {
-	for event := range sys.redistributionChan {
-		if sys.InCluster() {
+func (system *actorSystem) redistributionLoop() {
+	for event := range system.redistributionChan {
+		if system.inCluster() {
 			// check for cluster rebalancing
-			if err := sys.redistribute(context.Background(), event); err != nil {
-				sys.logger.Errorf("cluster rebalancing failed: %v", err)
-				// TODO: panic or retry or shutdown actor system
+			if err := system.redistribute(context.Background(), event); err != nil {
+				system.logger.Errorf("cluster rebalancing failed: %v", err)
+				// TODO: panic or retry or shutdown actor actorSystem
 			}
 		}
 	}
 }
 
 // processPeerState processes a given peer synchronization record.
-func (sys *system) processPeerState(ctx context.Context, peer *cluster.Peer) error {
-	sys.peersCacheMu.Lock()
-	defer sys.peersCacheMu.Unlock()
+func (system *actorSystem) processPeerState(ctx context.Context, peer *cluster.Peer) error {
+	system.peersCacheMu.Lock()
+	defer system.peersCacheMu.Unlock()
 
 	peerAddress := net.JoinHostPort(peer.Host, strconv.Itoa(peer.Port))
 
-	sys.logger.Infof("processing peer sync:(%s)", peerAddress)
-	peerState, err := sys.cluster.GetState(ctx, peerAddress)
+	system.logger.Infof("processing peer sync:(%s)", peerAddress)
+	peerState, err := system.cluster.GetState(ctx, peerAddress)
 	if err != nil {
 		if errors.Is(err, cluster.ErrPeerSyncNotFound) {
 			return nil
 		}
-		sys.logger.Error(err)
+		system.logger.Error(err)
 		return err
 	}
 
-	sys.logger.Debugf("peer (%s) actors count (%d)", peerAddress, len(peerState.GetActors()))
+	system.logger.Debugf("peer (%s) actors count (%d)", peerAddress, len(peerState.GetActors()))
 
 	// no need to handle the error
 	bytea, err := proto.Marshal(peerState)
 	if err != nil {
-		sys.logger.Error(err)
+		system.logger.Error(err)
 		return err
 	}
 
-	sys.peersCache[peerAddress] = bytea
-	sys.logger.Infof("peer sync(%s) successfully processed", peerAddress)
+	system.peersCache[peerAddress] = bytea
+	system.logger.Infof("peer sync(%s) successfully processed", peerAddress)
 	return nil
 }
 
 // configPID constructs a PID provided the actor name and the actor kind
 // this is a utility function used when spawning actors
-func (sys *system) configPID(ctx context.Context, name string, actor Actor) (*PID, error) {
-	actorPath := NewPath(name, NewAddress(sys.name, "", -1))
-	if sys.clusterEnabled.Load() {
-		actorPath = NewPath(name, NewAddress(sys.name, sys.host, int(sys.remotingPort)))
+func (system *actorSystem) configPID(ctx context.Context, name string, actor Actor) (*PID, error) {
+	actorPath := NewPath(name, NewAddress(system.name, "", -1))
+	if system.clusterEnabled.Load() {
+		actorPath = NewPath(name, NewAddress(system.name, system.host, int(system.remotingPort)))
 	}
 
 	// define the pid options
-	// pid inherit the actor system settings defined during instantiation
+	// pid inherit the actor actorSystem settings defined during instantiation
 	pidOpts := []pidOption{
-		withInitMaxRetries(sys.actorInitMaxRetries),
-		withAskTimeout(sys.askTimeout),
-		withCustomLogger(sys.logger),
-		withActorSystem(sys),
-		withSupervisorDirective(sys.supervisorDirective),
-		withEventsStream(sys.eventsStream),
-		withInitTimeout(sys.actorInitTimeout),
-		withTelemetry(sys.telemetry),
+		withInitMaxRetries(system.actorInitMaxRetries),
+		withAskTimeout(system.askTimeout),
+		withCustomLogger(system.logger),
+		withActorSystem(system),
+		withSupervisorDirective(system.supervisorDirective),
+		withEventsStream(system.eventsStream),
+		withInitTimeout(system.actorInitTimeout),
+		withTelemetry(system.telemetry),
 	}
 
 	// enable stash
-	if sys.stashEnabled {
+	if system.stashEnabled {
 		pidOpts = append(pidOpts, withStash())
 	}
 
-	// disable passivation for system supervisor
+	// disable passivation for actorSystem supervisor
 	if isSystemName(name) {
 		pidOpts = append(pidOpts, withPassivationDisabled())
 	} else {
-		pidOpts = append(pidOpts, withPassivationAfter(sys.expireActorAfter))
+		pidOpts = append(pidOpts, withPassivationAfter(system.expireActorAfter))
 	}
 
-	if sys.metricEnabled.Load() {
+	if system.metricEnabled.Load() {
 		pidOpts = append(pidOpts, withMetric())
 	}
 
@@ -1296,19 +1291,19 @@ func (sys *system) configPID(ctx context.Context, name string, actor Actor) (*PI
 	return pid, nil
 }
 
-// getSystemActorName returns the system supervisor name
-func (sys *system) getSystemActorName(nameType nameType) string {
-	if sys.clusterEnabled.Load() {
+// getSystemActorName returns the actorSystem supervisor name
+func (system *actorSystem) getSystemActorName(nameType nameType) string {
+	if system.clusterEnabled.Load() {
 		return fmt.Sprintf("%s%s%s-%d-%d",
 			systemNames[nameType],
-			strings.ToTitle(sys.name),
-			sys.host,
-			sys.remotingPort,
+			strings.ToTitle(system.name),
+			system.host,
+			system.remotingPort,
 			time.Now().UnixNano())
 	}
 	return fmt.Sprintf("%s%s-%d",
 		systemNames[nameType],
-		strings.ToTitle(sys.name),
+		strings.ToTitle(system.name),
 		time.Now().UnixNano())
 }
 
@@ -1316,48 +1311,53 @@ func isSystemName(name string) bool {
 	return strings.HasPrefix(name, systemNamePrefix)
 }
 
-// ActorOf returns an existing actor in the local system or in the cluster when clustering is enabled
+// ActorOf returns an existing actor in the local actorSystem or in the cluster when clustering is enabled
 // When cluster mode is activated, the PID will be nil.
 // An actor not found error is return when the actor is not found.
-func (sys *system) actorOf(ctx context.Context, actorName string) (addr *goaktpb.Address, pid *PID, err error) {
-	sys.locker.Lock()
+func (system *actorSystem) actorOf(ctx context.Context, actorName string) (addr *goaktpb.Address, pid *PID, err error) {
+	system.locker.Lock()
 
-	if !sys.started.Load() {
-		sys.locker.Unlock()
+	if !system.started.Load() {
+		system.locker.Unlock()
 		return nil, nil, ErrActorSystemNotStarted
 	}
 
-	actorPath := sys.buildActorPath(actorName)
-	if pid, ok := sys.actors.get(actorPath); ok {
-		sys.locker.Unlock()
+	actorPath := system.actorPath(actorName)
+	if pid, ok := system.actors.get(actorPath); ok {
+		system.locker.Unlock()
 		return pid.ActorPath().RemoteAddress(), pid, nil
 	}
 
 	// check in the cluster
-	if sys.clusterEnabled.Load() {
-		actor, err := sys.cluster.GetActor(ctx, actorName)
+	if system.clusterEnabled.Load() {
+		actor, err := system.cluster.GetActor(ctx, actorName)
 		if err != nil {
 			if errors.Is(err, cluster.ErrActorNotFound) {
-				sys.logger.Infof("actor=%s not found", actorName)
+				system.logger.Infof("actor=%s not found", actorName)
 				e := ErrActorNotFound(actorName)
-				sys.locker.Unlock()
+				system.locker.Unlock()
 				return nil, nil, e
 			}
 
-			sys.locker.Unlock()
+			system.locker.Unlock()
 			return nil, nil, fmt.Errorf("failed to fetch remote actor=%s: %w", actorName, err)
 		}
 
-		sys.locker.Unlock()
+		system.locker.Unlock()
 		return actor.GetActorAddress(), nil, nil
 	}
 
-	sys.logger.Infof("actor=%s not found", actorName)
-	sys.locker.Unlock()
+	system.logger.Infof("actor=%s not found", actorName)
+	system.locker.Unlock()
 	return nil, nil, ErrActorNotFound(actorName)
 }
 
-// buildActorPath returns the actor path provided the actor name
-func (sys *system) buildActorPath(name string) *Path {
-	return NewPath(name, NewAddress(sys.name, sys.host, int(sys.remotingPort)))
+// actorPath returns the actor path provided the actor name
+func (system *actorSystem) actorPath(name string) *Path {
+	return NewPath(name, NewAddress(system.name, system.host, int(system.remotingPort)))
+}
+
+// inCluster states whether the actor actorSystem is running within a cluster of nodes
+func (system *actorSystem) inCluster() bool {
+	return system.clusterEnabled.Load() && system.cluster != nil
 }

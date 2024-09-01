@@ -33,8 +33,8 @@ import (
 )
 
 var (
-	// ErrInvalidActorSystemName is returned when the actor system name is invalid
-	ErrInvalidActorSystemName = errors.New("invalid System name, must contain only word characters (i.e. [a-zA-Z0-9] plus non-leading '-' or '_')")
+	// ErrInvalidActorSystemName is returned when the actor actorSystem name is invalid
+	ErrInvalidActorSystemName = errors.New("invalid ActorSystem name, must contain only word characters (i.e. [a-zA-Z0-9] plus non-leading '-' or '_')")
 	// ErrDead means that the given actor is not alive
 	ErrDead = errors.New("actor is not alive")
 	// ErrUnhandled is used when an actor can handle a given message

@@ -102,7 +102,7 @@ type probe struct {
 var _ Probe = (*probe)(nil)
 
 // newProbe creates an instance of probe
-func newProbe(ctx context.Context, actorSystem actor.System, t *testing.T) (*probe, error) {
+func newProbe(ctx context.Context, actorSystem actor.ActorSystem, t *testing.T) (*probe, error) {
 	// create the message queue
 	msgQueue := make(chan message, MessagesQueueMax)
 	// create the test probe actor
