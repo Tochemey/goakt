@@ -30,7 +30,6 @@ import (
 	"fmt"
 	stdhttp "net/http"
 	"os"
-	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -760,7 +759,6 @@ func (x *PID) receive() {
 		case <-x.receiveSignal:
 			received := x.mailbox.Pop()
 			if received == nil {
-				runtime.Gosched()
 				continue
 			}
 
