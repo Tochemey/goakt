@@ -175,7 +175,7 @@ func (t pinger) PreStart(_ context.Context) error {
 func (t pinger) Receive(ctx *actor.ReceiveContext) {
 	switch x := ctx.Message().(type) {
 	case *testpb.Ping:
-		_ = ctx.Self().tell(ctx.Context(), ctx.Sender(), new(testpb.Pong))
+		ctx.Tell(ctx.Sender().Name(), new(testpb.Pong))
 	case *testpb.Wait:
 		// delay for a while before sending the reply
 		wg := sync.WaitGroup{}
@@ -187,7 +187,7 @@ func (t pinger) Receive(ctx *actor.ReceiveContext) {
 		// block until timer is up
 		wg.Wait()
 		// reply the sender
-		_ = ctx.Self().tell(ctx.Context(), ctx.Sender(), new(testpb.Pong))
+		ctx.Tell(ctx.Sender().Name(), new(testpb.Pong))
 	}
 }
 
