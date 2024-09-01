@@ -76,7 +76,7 @@ func TestPassivation_WhenPostStopReturnsError_ReturnsNoError(t *testing.T) {
 		withAskTimeout(askTimeout),
 	}
 	path := NewPath("test", NewAddress("system", "127.0.0.1", 1))
-	pid, err := newPID(ctx, path, new(faultyPostStopActor), opts...)
+	pid, err := newPID(ctx, path, new(postStopActor), opts...)
 	require.NoError(t, err)
 	require.NotNil(t, pid)
 
@@ -222,7 +222,7 @@ func TestRestart_WhenPreStartReturnsError_ReturnsError(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	path := NewPath("test", NewAddress("system", "127.0.0.1", 1))
-	pid, err := newPID(ctx, path, new(faultyPreStartActor))
+	pid, err := newPID(ctx, path, new(preStartActor))
 	require.NoError(t, err)
 	require.NotNil(t, pid)
 
@@ -240,6 +240,22 @@ func TestRestart_WhenPreStartReturnsError_ReturnsError(t *testing.T) {
 	defer timer.Stop()
 
 	<-continueCh
+
+	// restart the actor
+	err = pid.Restart(ctx)
+	require.Error(t, err)
+	require.False(t, pid.IsRunning())
+}
+func TestRestart_WhenPostStopReturnsError_ReturnsError(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	path := NewPath("test", NewAddress("system", "127.0.0.1", 1))
+	pid, err := newPID(ctx, path, new(postStopActor))
+	require.NoError(t, err)
+	require.NotNil(t, pid)
+
+	// wait awhile for a proper start
+	assert.True(t, pid.IsRunning())
 
 	// restart the actor
 	err = pid.Restart(ctx)

@@ -58,11 +58,11 @@ func (actor *testActor) Receive(ctx *ReceiveContext) {
 }
 func (actor *testActor) PostStop(context.Context) error { return nil }
 
-type faultyPostStopActor struct{}
+type postStopActor struct{}
 
-func (actor *faultyPostStopActor) PostStop(context.Context) error { return errors.New("failed") }
-func (actor *faultyPostStopActor) PreStart(context.Context) error { return nil }
-func (actor *faultyPostStopActor) Receive(ctx *ReceiveContext) {
+func (actor *postStopActor) PostStop(context.Context) error { return errors.New("failed") }
+func (actor *postStopActor) PreStart(context.Context) error { return nil }
+func (actor *postStopActor) Receive(ctx *ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *testpb.TestTell:
 	default:
@@ -70,16 +70,16 @@ func (actor *faultyPostStopActor) Receive(ctx *ReceiveContext) {
 	}
 }
 
-type faultyPreStartActor struct {
+type preStartActor struct {
 	count int
 }
 
-func (actor *faultyPreStartActor) PreStart(ctx context.Context) error {
+func (actor *preStartActor) PreStart(context.Context) error {
 	actor.count++
 	if actor.count > 1 {
 		return errors.New("failed")
 	}
 	return nil
 }
-func (actor *faultyPreStartActor) PostStop(ctx context.Context) error { return nil }
-func (actor *faultyPreStartActor) Receive(ctx *ReceiveContext)        {}
+func (actor *preStartActor) PostStop(context.Context) error { return nil }
+func (actor *preStartActor) Receive(*ReceiveContext)        {}
