@@ -20,14 +20,14 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-type TestReply struct {
+type TestTell struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 }
 
-func (x *TestReply) Reset() {
-	*x = TestReply{}
+func (x *TestTell) Reset() {
+	*x = TestTell{}
 	if protoimpl.UnsafeEnabled {
 		mi := &file_test_test_proto_msgTypes[0]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -35,13 +35,13 @@ func (x *TestReply) Reset() {
 	}
 }
 
-func (x *TestReply) String() string {
+func (x *TestTell) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*TestReply) ProtoMessage() {}
+func (*TestTell) ProtoMessage() {}
 
-func (x *TestReply) ProtoReflect() protoreflect.Message {
+func (x *TestTell) ProtoReflect() protoreflect.Message {
 	mi := &file_test_test_proto_msgTypes[0]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -53,19 +53,19 @@ func (x *TestReply) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use TestReply.ProtoReflect.Descriptor instead.
-func (*TestReply) Descriptor() ([]byte, []int) {
+// Deprecated: Use TestTell.ProtoReflect.Descriptor instead.
+func (*TestTell) Descriptor() ([]byte, []int) {
 	return file_test_test_proto_rawDescGZIP(), []int{0}
 }
 
-type TestPanic struct {
+type TestAsk struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 }
 
-func (x *TestPanic) Reset() {
-	*x = TestPanic{}
+func (x *TestAsk) Reset() {
+	*x = TestAsk{}
 	if protoimpl.UnsafeEnabled {
 		mi := &file_test_test_proto_msgTypes[1]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -73,13 +73,13 @@ func (x *TestPanic) Reset() {
 	}
 }
 
-func (x *TestPanic) String() string {
+func (x *TestAsk) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*TestPanic) ProtoMessage() {}
+func (*TestAsk) ProtoMessage() {}
 
-func (x *TestPanic) ProtoReflect() protoreflect.Message {
+func (x *TestAsk) ProtoReflect() protoreflect.Message {
 	mi := &file_test_test_proto_msgTypes[1]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -91,703 +91,9 @@ func (x *TestPanic) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use TestPanic.ProtoReflect.Descriptor instead.
-func (*TestPanic) Descriptor() ([]byte, []int) {
+// Deprecated: Use TestAsk.ProtoReflect.Descriptor instead.
+func (*TestAsk) Descriptor() ([]byte, []int) {
 	return file_test_test_proto_rawDescGZIP(), []int{1}
-}
-
-type TestTimeout struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
-	unknownFields protoimpl.UnknownFields
-}
-
-func (x *TestTimeout) Reset() {
-	*x = TestTimeout{}
-	if protoimpl.UnsafeEnabled {
-		mi := &file_test_test_proto_msgTypes[2]
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		ms.StoreMessageInfo(mi)
-	}
-}
-
-func (x *TestTimeout) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*TestTimeout) ProtoMessage() {}
-
-func (x *TestTimeout) ProtoReflect() protoreflect.Message {
-	mi := &file_test_test_proto_msgTypes[2]
-	if protoimpl.UnsafeEnabled && x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use TestTimeout.ProtoReflect.Descriptor instead.
-func (*TestTimeout) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{2}
-}
-
-type Reply struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
-	unknownFields protoimpl.UnknownFields
-
-	Content string `protobuf:"bytes,1,opt,name=content,proto3" json:"content,omitempty"`
-}
-
-func (x *Reply) Reset() {
-	*x = Reply{}
-	if protoimpl.UnsafeEnabled {
-		mi := &file_test_test_proto_msgTypes[3]
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		ms.StoreMessageInfo(mi)
-	}
-}
-
-func (x *Reply) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*Reply) ProtoMessage() {}
-
-func (x *Reply) ProtoReflect() protoreflect.Message {
-	mi := &file_test_test_proto_msgTypes[3]
-	if protoimpl.UnsafeEnabled && x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use Reply.ProtoReflect.Descriptor instead.
-func (*Reply) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{3}
-}
-
-func (x *Reply) GetContent() string {
-	if x != nil {
-		return x.Content
-	}
-	return ""
-}
-
-type TestSend struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
-	unknownFields protoimpl.UnknownFields
-}
-
-func (x *TestSend) Reset() {
-	*x = TestSend{}
-	if protoimpl.UnsafeEnabled {
-		mi := &file_test_test_proto_msgTypes[4]
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		ms.StoreMessageInfo(mi)
-	}
-}
-
-func (x *TestSend) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*TestSend) ProtoMessage() {}
-
-func (x *TestSend) ProtoReflect() protoreflect.Message {
-	mi := &file_test_test_proto_msgTypes[4]
-	if protoimpl.UnsafeEnabled && x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use TestSend.ProtoReflect.Descriptor instead.
-func (*TestSend) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{4}
-}
-
-type TestRemoteSend struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
-	unknownFields protoimpl.UnknownFields
-}
-
-func (x *TestRemoteSend) Reset() {
-	*x = TestRemoteSend{}
-	if protoimpl.UnsafeEnabled {
-		mi := &file_test_test_proto_msgTypes[5]
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		ms.StoreMessageInfo(mi)
-	}
-}
-
-func (x *TestRemoteSend) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*TestRemoteSend) ProtoMessage() {}
-
-func (x *TestRemoteSend) ProtoReflect() protoreflect.Message {
-	mi := &file_test_test_proto_msgTypes[5]
-	if protoimpl.UnsafeEnabled && x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use TestRemoteSend.ProtoReflect.Descriptor instead.
-func (*TestRemoteSend) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{5}
-}
-
-type Account struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
-	unknownFields protoimpl.UnknownFields
-
-	AccountId      string  `protobuf:"bytes,1,opt,name=account_id,json=accountId,proto3" json:"account_id,omitempty"`
-	AccountBalance float64 `protobuf:"fixed64,2,opt,name=account_balance,json=accountBalance,proto3" json:"account_balance,omitempty"`
-}
-
-func (x *Account) Reset() {
-	*x = Account{}
-	if protoimpl.UnsafeEnabled {
-		mi := &file_test_test_proto_msgTypes[6]
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		ms.StoreMessageInfo(mi)
-	}
-}
-
-func (x *Account) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*Account) ProtoMessage() {}
-
-func (x *Account) ProtoReflect() protoreflect.Message {
-	mi := &file_test_test_proto_msgTypes[6]
-	if protoimpl.UnsafeEnabled && x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use Account.ProtoReflect.Descriptor instead.
-func (*Account) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{6}
-}
-
-func (x *Account) GetAccountId() string {
-	if x != nil {
-		return x.AccountId
-	}
-	return ""
-}
-
-func (x *Account) GetAccountBalance() float64 {
-	if x != nil {
-		return x.AccountBalance
-	}
-	return 0
-}
-
-type CreateAccount struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
-	unknownFields protoimpl.UnknownFields
-
-	AccountBalance float64 `protobuf:"fixed64,2,opt,name=account_balance,json=accountBalance,proto3" json:"account_balance,omitempty"`
-}
-
-func (x *CreateAccount) Reset() {
-	*x = CreateAccount{}
-	if protoimpl.UnsafeEnabled {
-		mi := &file_test_test_proto_msgTypes[7]
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		ms.StoreMessageInfo(mi)
-	}
-}
-
-func (x *CreateAccount) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*CreateAccount) ProtoMessage() {}
-
-func (x *CreateAccount) ProtoReflect() protoreflect.Message {
-	mi := &file_test_test_proto_msgTypes[7]
-	if protoimpl.UnsafeEnabled && x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use CreateAccount.ProtoReflect.Descriptor instead.
-func (*CreateAccount) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{7}
-}
-
-func (x *CreateAccount) GetAccountBalance() float64 {
-	if x != nil {
-		return x.AccountBalance
-	}
-	return 0
-}
-
-type CreditAccount struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
-	unknownFields protoimpl.UnknownFields
-
-	AccountId string  `protobuf:"bytes,1,opt,name=account_id,json=accountId,proto3" json:"account_id,omitempty"`
-	Balance   float64 `protobuf:"fixed64,2,opt,name=balance,proto3" json:"balance,omitempty"`
-}
-
-func (x *CreditAccount) Reset() {
-	*x = CreditAccount{}
-	if protoimpl.UnsafeEnabled {
-		mi := &file_test_test_proto_msgTypes[8]
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		ms.StoreMessageInfo(mi)
-	}
-}
-
-func (x *CreditAccount) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*CreditAccount) ProtoMessage() {}
-
-func (x *CreditAccount) ProtoReflect() protoreflect.Message {
-	mi := &file_test_test_proto_msgTypes[8]
-	if protoimpl.UnsafeEnabled && x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use CreditAccount.ProtoReflect.Descriptor instead.
-func (*CreditAccount) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{8}
-}
-
-func (x *CreditAccount) GetAccountId() string {
-	if x != nil {
-		return x.AccountId
-	}
-	return ""
-}
-
-func (x *CreditAccount) GetBalance() float64 {
-	if x != nil {
-		return x.Balance
-	}
-	return 0
-}
-
-type AccountCreated struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
-	unknownFields protoimpl.UnknownFields
-
-	AccountId      string  `protobuf:"bytes,1,opt,name=account_id,json=accountId,proto3" json:"account_id,omitempty"`
-	AccountBalance float64 `protobuf:"fixed64,2,opt,name=account_balance,json=accountBalance,proto3" json:"account_balance,omitempty"`
-}
-
-func (x *AccountCreated) Reset() {
-	*x = AccountCreated{}
-	if protoimpl.UnsafeEnabled {
-		mi := &file_test_test_proto_msgTypes[9]
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		ms.StoreMessageInfo(mi)
-	}
-}
-
-func (x *AccountCreated) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*AccountCreated) ProtoMessage() {}
-
-func (x *AccountCreated) ProtoReflect() protoreflect.Message {
-	mi := &file_test_test_proto_msgTypes[9]
-	if protoimpl.UnsafeEnabled && x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use AccountCreated.ProtoReflect.Descriptor instead.
-func (*AccountCreated) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{9}
-}
-
-func (x *AccountCreated) GetAccountId() string {
-	if x != nil {
-		return x.AccountId
-	}
-	return ""
-}
-
-func (x *AccountCreated) GetAccountBalance() float64 {
-	if x != nil {
-		return x.AccountBalance
-	}
-	return 0
-}
-
-type AccountCredited struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
-	unknownFields protoimpl.UnknownFields
-
-	AccountId      string  `protobuf:"bytes,1,opt,name=account_id,json=accountId,proto3" json:"account_id,omitempty"`
-	AccountBalance float64 `protobuf:"fixed64,2,opt,name=account_balance,json=accountBalance,proto3" json:"account_balance,omitempty"`
-}
-
-func (x *AccountCredited) Reset() {
-	*x = AccountCredited{}
-	if protoimpl.UnsafeEnabled {
-		mi := &file_test_test_proto_msgTypes[10]
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		ms.StoreMessageInfo(mi)
-	}
-}
-
-func (x *AccountCredited) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*AccountCredited) ProtoMessage() {}
-
-func (x *AccountCredited) ProtoReflect() protoreflect.Message {
-	mi := &file_test_test_proto_msgTypes[10]
-	if protoimpl.UnsafeEnabled && x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use AccountCredited.ProtoReflect.Descriptor instead.
-func (*AccountCredited) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{10}
-}
-
-func (x *AccountCredited) GetAccountId() string {
-	if x != nil {
-		return x.AccountId
-	}
-	return ""
-}
-
-func (x *AccountCredited) GetAccountBalance() float64 {
-	if x != nil {
-		return x.AccountBalance
-	}
-	return 0
-}
-
-type DebitAccount struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
-	unknownFields protoimpl.UnknownFields
-}
-
-func (x *DebitAccount) Reset() {
-	*x = DebitAccount{}
-	if protoimpl.UnsafeEnabled {
-		mi := &file_test_test_proto_msgTypes[11]
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		ms.StoreMessageInfo(mi)
-	}
-}
-
-func (x *DebitAccount) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*DebitAccount) ProtoMessage() {}
-
-func (x *DebitAccount) ProtoReflect() protoreflect.Message {
-	mi := &file_test_test_proto_msgTypes[11]
-	if protoimpl.UnsafeEnabled && x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use DebitAccount.ProtoReflect.Descriptor instead.
-func (*DebitAccount) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{11}
-}
-
-type AccountDebited struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
-	unknownFields protoimpl.UnknownFields
-}
-
-func (x *AccountDebited) Reset() {
-	*x = AccountDebited{}
-	if protoimpl.UnsafeEnabled {
-		mi := &file_test_test_proto_msgTypes[12]
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		ms.StoreMessageInfo(mi)
-	}
-}
-
-func (x *AccountDebited) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*AccountDebited) ProtoMessage() {}
-
-func (x *AccountDebited) ProtoReflect() protoreflect.Message {
-	mi := &file_test_test_proto_msgTypes[12]
-	if protoimpl.UnsafeEnabled && x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use AccountDebited.ProtoReflect.Descriptor instead.
-func (*AccountDebited) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{12}
-}
-
-type TestLogin struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
-	unknownFields protoimpl.UnknownFields
-}
-
-func (x *TestLogin) Reset() {
-	*x = TestLogin{}
-	if protoimpl.UnsafeEnabled {
-		mi := &file_test_test_proto_msgTypes[13]
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		ms.StoreMessageInfo(mi)
-	}
-}
-
-func (x *TestLogin) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*TestLogin) ProtoMessage() {}
-
-func (x *TestLogin) ProtoReflect() protoreflect.Message {
-	mi := &file_test_test_proto_msgTypes[13]
-	if protoimpl.UnsafeEnabled && x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use TestLogin.ProtoReflect.Descriptor instead.
-func (*TestLogin) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{13}
-}
-
-type TestLoginSuccess struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
-	unknownFields protoimpl.UnknownFields
-}
-
-func (x *TestLoginSuccess) Reset() {
-	*x = TestLoginSuccess{}
-	if protoimpl.UnsafeEnabled {
-		mi := &file_test_test_proto_msgTypes[14]
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		ms.StoreMessageInfo(mi)
-	}
-}
-
-func (x *TestLoginSuccess) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*TestLoginSuccess) ProtoMessage() {}
-
-func (x *TestLoginSuccess) ProtoReflect() protoreflect.Message {
-	mi := &file_test_test_proto_msgTypes[14]
-	if protoimpl.UnsafeEnabled && x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use TestLoginSuccess.ProtoReflect.Descriptor instead.
-func (*TestLoginSuccess) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{14}
-}
-
-type TestReadiness struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
-	unknownFields protoimpl.UnknownFields
-}
-
-func (x *TestReadiness) Reset() {
-	*x = TestReadiness{}
-	if protoimpl.UnsafeEnabled {
-		mi := &file_test_test_proto_msgTypes[15]
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		ms.StoreMessageInfo(mi)
-	}
-}
-
-func (x *TestReadiness) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*TestReadiness) ProtoMessage() {}
-
-func (x *TestReadiness) ProtoReflect() protoreflect.Message {
-	mi := &file_test_test_proto_msgTypes[15]
-	if protoimpl.UnsafeEnabled && x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use TestReadiness.ProtoReflect.Descriptor instead.
-func (*TestReadiness) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{15}
-}
-
-type TestReady struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
-	unknownFields protoimpl.UnknownFields
-}
-
-func (x *TestReady) Reset() {
-	*x = TestReady{}
-	if protoimpl.UnsafeEnabled {
-		mi := &file_test_test_proto_msgTypes[16]
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		ms.StoreMessageInfo(mi)
-	}
-}
-
-func (x *TestReady) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*TestReady) ProtoMessage() {}
-
-func (x *TestReady) ProtoReflect() protoreflect.Message {
-	mi := &file_test_test_proto_msgTypes[16]
-	if protoimpl.UnsafeEnabled && x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use TestReady.ProtoReflect.Descriptor instead.
-func (*TestReady) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{16}
-}
-
-type TestBye struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
-	unknownFields protoimpl.UnknownFields
-}
-
-func (x *TestBye) Reset() {
-	*x = TestBye{}
-	if protoimpl.UnsafeEnabled {
-		mi := &file_test_test_proto_msgTypes[17]
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		ms.StoreMessageInfo(mi)
-	}
-}
-
-func (x *TestBye) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*TestBye) ProtoMessage() {}
-
-func (x *TestBye) ProtoReflect() protoreflect.Message {
-	mi := &file_test_test_proto_msgTypes[17]
-	if protoimpl.UnsafeEnabled && x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use TestBye.ProtoReflect.Descriptor instead.
-func (*TestBye) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{17}
 }
 
 type TestStash struct {
@@ -799,7 +105,7 @@ type TestStash struct {
 func (x *TestStash) Reset() {
 	*x = TestStash{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_test_test_proto_msgTypes[18]
+		mi := &file_test_test_proto_msgTypes[2]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -812,7 +118,7 @@ func (x *TestStash) String() string {
 func (*TestStash) ProtoMessage() {}
 
 func (x *TestStash) ProtoReflect() protoreflect.Message {
-	mi := &file_test_test_proto_msgTypes[18]
+	mi := &file_test_test_proto_msgTypes[2]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -825,7 +131,7 @@ func (x *TestStash) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TestStash.ProtoReflect.Descriptor instead.
 func (*TestStash) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{18}
+	return file_test_test_proto_rawDescGZIP(), []int{2}
 }
 
 type TestUnstash struct {
@@ -837,7 +143,7 @@ type TestUnstash struct {
 func (x *TestUnstash) Reset() {
 	*x = TestUnstash{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_test_test_proto_msgTypes[19]
+		mi := &file_test_test_proto_msgTypes[3]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -850,7 +156,7 @@ func (x *TestUnstash) String() string {
 func (*TestUnstash) ProtoMessage() {}
 
 func (x *TestUnstash) ProtoReflect() protoreflect.Message {
-	mi := &file_test_test_proto_msgTypes[19]
+	mi := &file_test_test_proto_msgTypes[3]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -863,7 +169,7 @@ func (x *TestUnstash) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TestUnstash.ProtoReflect.Descriptor instead.
 func (*TestUnstash) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{19}
+	return file_test_test_proto_rawDescGZIP(), []int{3}
 }
 
 type TestUnstashAll struct {
@@ -875,7 +181,7 @@ type TestUnstashAll struct {
 func (x *TestUnstashAll) Reset() {
 	*x = TestUnstashAll{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_test_test_proto_msgTypes[20]
+		mi := &file_test_test_proto_msgTypes[4]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -888,7 +194,7 @@ func (x *TestUnstashAll) String() string {
 func (*TestUnstashAll) ProtoMessage() {}
 
 func (x *TestUnstashAll) ProtoReflect() protoreflect.Message {
-	mi := &file_test_test_proto_msgTypes[20]
+	mi := &file_test_test_proto_msgTypes[4]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -901,32 +207,32 @@ func (x *TestUnstashAll) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TestUnstashAll.ProtoReflect.Descriptor instead.
 func (*TestUnstashAll) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{20}
+	return file_test_test_proto_rawDescGZIP(), []int{4}
 }
 
-type Ping struct {
+type TestPanic struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 }
 
-func (x *Ping) Reset() {
-	*x = Ping{}
+func (x *TestPanic) Reset() {
+	*x = TestPanic{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_test_test_proto_msgTypes[21]
+		mi := &file_test_test_proto_msgTypes[5]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
 }
 
-func (x *Ping) String() string {
+func (x *TestPanic) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*Ping) ProtoMessage() {}
+func (*TestPanic) ProtoMessage() {}
 
-func (x *Ping) ProtoReflect() protoreflect.Message {
-	mi := &file_test_test_proto_msgTypes[21]
+func (x *TestPanic) ProtoReflect() protoreflect.Message {
+	mi := &file_test_test_proto_msgTypes[5]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -937,34 +243,34 @@ func (x *Ping) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use Ping.ProtoReflect.Descriptor instead.
-func (*Ping) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{21}
+// Deprecated: Use TestPanic.ProtoReflect.Descriptor instead.
+func (*TestPanic) Descriptor() ([]byte, []int) {
+	return file_test_test_proto_rawDescGZIP(), []int{5}
 }
 
-type Pong struct {
+type TestAskTimeout struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 }
 
-func (x *Pong) Reset() {
-	*x = Pong{}
+func (x *TestAskTimeout) Reset() {
+	*x = TestAskTimeout{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_test_test_proto_msgTypes[22]
+		mi := &file_test_test_proto_msgTypes[6]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
 }
 
-func (x *Pong) String() string {
+func (x *TestAskTimeout) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*Pong) ProtoMessage() {}
+func (*TestAskTimeout) ProtoMessage() {}
 
-func (x *Pong) ProtoReflect() protoreflect.Message {
-	mi := &file_test_test_proto_msgTypes[22]
+func (x *TestAskTimeout) ProtoReflect() protoreflect.Message {
+	mi := &file_test_test_proto_msgTypes[6]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -975,341 +281,31 @@ func (x *Pong) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use Pong.ProtoReflect.Descriptor instead.
-func (*Pong) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{22}
-}
-
-type Wait struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
-	unknownFields protoimpl.UnknownFields
-
-	Duration uint64 `protobuf:"varint,1,opt,name=duration,proto3" json:"duration,omitempty"`
-}
-
-func (x *Wait) Reset() {
-	*x = Wait{}
-	if protoimpl.UnsafeEnabled {
-		mi := &file_test_test_proto_msgTypes[23]
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		ms.StoreMessageInfo(mi)
-	}
-}
-
-func (x *Wait) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*Wait) ProtoMessage() {}
-
-func (x *Wait) ProtoReflect() protoreflect.Message {
-	mi := &file_test_test_proto_msgTypes[23]
-	if protoimpl.UnsafeEnabled && x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use Wait.ProtoReflect.Descriptor instead.
-func (*Wait) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{23}
-}
-
-func (x *Wait) GetDuration() uint64 {
-	if x != nil {
-		return x.Duration
-	}
-	return 0
-}
-
-type RunTask struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
-	unknownFields protoimpl.UnknownFields
-
-	Duration uint64 `protobuf:"varint,1,opt,name=duration,proto3" json:"duration,omitempty"`
-}
-
-func (x *RunTask) Reset() {
-	*x = RunTask{}
-	if protoimpl.UnsafeEnabled {
-		mi := &file_test_test_proto_msgTypes[24]
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		ms.StoreMessageInfo(mi)
-	}
-}
-
-func (x *RunTask) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*RunTask) ProtoMessage() {}
-
-func (x *RunTask) ProtoReflect() protoreflect.Message {
-	mi := &file_test_test_proto_msgTypes[24]
-	if protoimpl.UnsafeEnabled && x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use RunTask.ProtoReflect.Descriptor instead.
-func (*RunTask) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{24}
-}
-
-func (x *RunTask) GetDuration() uint64 {
-	if x != nil {
-		return x.Duration
-	}
-	return 0
-}
-
-type TaskComplete struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
-	unknownFields protoimpl.UnknownFields
-}
-
-func (x *TaskComplete) Reset() {
-	*x = TaskComplete{}
-	if protoimpl.UnsafeEnabled {
-		mi := &file_test_test_proto_msgTypes[25]
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		ms.StoreMessageInfo(mi)
-	}
-}
-
-func (x *TaskComplete) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*TaskComplete) ProtoMessage() {}
-
-func (x *TaskComplete) ProtoReflect() protoreflect.Message {
-	mi := &file_test_test_proto_msgTypes[25]
-	if protoimpl.UnsafeEnabled && x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use TaskComplete.ProtoReflect.Descriptor instead.
-func (*TaskComplete) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{25}
-}
-
-type DoLog struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
-	unknownFields protoimpl.UnknownFields
-
-	Text string `protobuf:"bytes,1,opt,name=text,proto3" json:"text,omitempty"`
-}
-
-func (x *DoLog) Reset() {
-	*x = DoLog{}
-	if protoimpl.UnsafeEnabled {
-		mi := &file_test_test_proto_msgTypes[26]
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		ms.StoreMessageInfo(mi)
-	}
-}
-
-func (x *DoLog) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*DoLog) ProtoMessage() {}
-
-func (x *DoLog) ProtoReflect() protoreflect.Message {
-	mi := &file_test_test_proto_msgTypes[26]
-	if protoimpl.UnsafeEnabled && x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use DoLog.ProtoReflect.Descriptor instead.
-func (*DoLog) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{26}
-}
-
-func (x *DoLog) GetText() string {
-	if x != nil {
-		return x.Text
-	}
-	return ""
-}
-
-type GetCount struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
-	unknownFields protoimpl.UnknownFields
-}
-
-func (x *GetCount) Reset() {
-	*x = GetCount{}
-	if protoimpl.UnsafeEnabled {
-		mi := &file_test_test_proto_msgTypes[27]
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		ms.StoreMessageInfo(mi)
-	}
-}
-
-func (x *GetCount) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*GetCount) ProtoMessage() {}
-
-func (x *GetCount) ProtoReflect() protoreflect.Message {
-	mi := &file_test_test_proto_msgTypes[27]
-	if protoimpl.UnsafeEnabled && x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use GetCount.ProtoReflect.Descriptor instead.
-func (*GetCount) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{27}
-}
-
-type Count struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
-	unknownFields protoimpl.UnknownFields
-
-	Value int32 `protobuf:"varint,1,opt,name=value,proto3" json:"value,omitempty"`
-}
-
-func (x *Count) Reset() {
-	*x = Count{}
-	if protoimpl.UnsafeEnabled {
-		mi := &file_test_test_proto_msgTypes[28]
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		ms.StoreMessageInfo(mi)
-	}
-}
-
-func (x *Count) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*Count) ProtoMessage() {}
-
-func (x *Count) ProtoReflect() protoreflect.Message {
-	mi := &file_test_test_proto_msgTypes[28]
-	if protoimpl.UnsafeEnabled && x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use Count.ProtoReflect.Descriptor instead.
-func (*Count) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{28}
-}
-
-func (x *Count) GetValue() int32 {
-	if x != nil {
-		return x.Value
-	}
-	return 0
+// Deprecated: Use TestAskTimeout.ProtoReflect.Descriptor instead.
+func (*TestAskTimeout) Descriptor() ([]byte, []int) {
+	return file_test_test_proto_rawDescGZIP(), []int{6}
 }
 
 var File_test_test_proto protoreflect.FileDescriptor
 
 var file_test_test_proto_rawDesc = []byte{
 	0x0a, 0x0f, 0x74, 0x65, 0x73, 0x74, 0x2f, 0x74, 0x65, 0x73, 0x74, 0x2e, 0x70, 0x72, 0x6f, 0x74,
-	0x6f, 0x12, 0x06, 0x74, 0x65, 0x73, 0x74, 0x70, 0x62, 0x22, 0x0b, 0x0a, 0x09, 0x54, 0x65, 0x73,
-	0x74, 0x52, 0x65, 0x70, 0x6c, 0x79, 0x22, 0x0b, 0x0a, 0x09, 0x54, 0x65, 0x73, 0x74, 0x50, 0x61,
-	0x6e, 0x69, 0x63, 0x22, 0x0d, 0x0a, 0x0b, 0x54, 0x65, 0x73, 0x74, 0x54, 0x69, 0x6d, 0x65, 0x6f,
-	0x75, 0x74, 0x22, 0x21, 0x0a, 0x05, 0x52, 0x65, 0x70, 0x6c, 0x79, 0x12, 0x18, 0x0a, 0x07, 0x63,
-	0x6f, 0x6e, 0x74, 0x65, 0x6e, 0x74, 0x18, 0x01, 0x20, 0x01, 0x28, 0x09, 0x52, 0x07, 0x63, 0x6f,
-	0x6e, 0x74, 0x65, 0x6e, 0x74, 0x22, 0x0a, 0x0a, 0x08, 0x54, 0x65, 0x73, 0x74, 0x53, 0x65, 0x6e,
-	0x64, 0x22, 0x10, 0x0a, 0x0e, 0x54, 0x65, 0x73, 0x74, 0x52, 0x65, 0x6d, 0x6f, 0x74, 0x65, 0x53,
-	0x65, 0x6e, 0x64, 0x22, 0x51, 0x0a, 0x07, 0x41, 0x63, 0x63, 0x6f, 0x75, 0x6e, 0x74, 0x12, 0x1d,
-	0x0a, 0x0a, 0x61, 0x63, 0x63, 0x6f, 0x75, 0x6e, 0x74, 0x5f, 0x69, 0x64, 0x18, 0x01, 0x20, 0x01,
-	0x28, 0x09, 0x52, 0x09, 0x61, 0x63, 0x63, 0x6f, 0x75, 0x6e, 0x74, 0x49, 0x64, 0x12, 0x27, 0x0a,
-	0x0f, 0x61, 0x63, 0x63, 0x6f, 0x75, 0x6e, 0x74, 0x5f, 0x62, 0x61, 0x6c, 0x61, 0x6e, 0x63, 0x65,
-	0x18, 0x02, 0x20, 0x01, 0x28, 0x01, 0x52, 0x0e, 0x61, 0x63, 0x63, 0x6f, 0x75, 0x6e, 0x74, 0x42,
-	0x61, 0x6c, 0x61, 0x6e, 0x63, 0x65, 0x22, 0x38, 0x0a, 0x0d, 0x43, 0x72, 0x65, 0x61, 0x74, 0x65,
-	0x41, 0x63, 0x63, 0x6f, 0x75, 0x6e, 0x74, 0x12, 0x27, 0x0a, 0x0f, 0x61, 0x63, 0x63, 0x6f, 0x75,
-	0x6e, 0x74, 0x5f, 0x62, 0x61, 0x6c, 0x61, 0x6e, 0x63, 0x65, 0x18, 0x02, 0x20, 0x01, 0x28, 0x01,
-	0x52, 0x0e, 0x61, 0x63, 0x63, 0x6f, 0x75, 0x6e, 0x74, 0x42, 0x61, 0x6c, 0x61, 0x6e, 0x63, 0x65,
-	0x22, 0x48, 0x0a, 0x0d, 0x43, 0x72, 0x65, 0x64, 0x69, 0x74, 0x41, 0x63, 0x63, 0x6f, 0x75, 0x6e,
-	0x74, 0x12, 0x1d, 0x0a, 0x0a, 0x61, 0x63, 0x63, 0x6f, 0x75, 0x6e, 0x74, 0x5f, 0x69, 0x64, 0x18,
-	0x01, 0x20, 0x01, 0x28, 0x09, 0x52, 0x09, 0x61, 0x63, 0x63, 0x6f, 0x75, 0x6e, 0x74, 0x49, 0x64,
-	0x12, 0x18, 0x0a, 0x07, 0x62, 0x61, 0x6c, 0x61, 0x6e, 0x63, 0x65, 0x18, 0x02, 0x20, 0x01, 0x28,
-	0x01, 0x52, 0x07, 0x62, 0x61, 0x6c, 0x61, 0x6e, 0x63, 0x65, 0x22, 0x58, 0x0a, 0x0e, 0x41, 0x63,
-	0x63, 0x6f, 0x75, 0x6e, 0x74, 0x43, 0x72, 0x65, 0x61, 0x74, 0x65, 0x64, 0x12, 0x1d, 0x0a, 0x0a,
-	0x61, 0x63, 0x63, 0x6f, 0x75, 0x6e, 0x74, 0x5f, 0x69, 0x64, 0x18, 0x01, 0x20, 0x01, 0x28, 0x09,
-	0x52, 0x09, 0x61, 0x63, 0x63, 0x6f, 0x75, 0x6e, 0x74, 0x49, 0x64, 0x12, 0x27, 0x0a, 0x0f, 0x61,
-	0x63, 0x63, 0x6f, 0x75, 0x6e, 0x74, 0x5f, 0x62, 0x61, 0x6c, 0x61, 0x6e, 0x63, 0x65, 0x18, 0x02,
-	0x20, 0x01, 0x28, 0x01, 0x52, 0x0e, 0x61, 0x63, 0x63, 0x6f, 0x75, 0x6e, 0x74, 0x42, 0x61, 0x6c,
-	0x61, 0x6e, 0x63, 0x65, 0x22, 0x59, 0x0a, 0x0f, 0x41, 0x63, 0x63, 0x6f, 0x75, 0x6e, 0x74, 0x43,
-	0x72, 0x65, 0x64, 0x69, 0x74, 0x65, 0x64, 0x12, 0x1d, 0x0a, 0x0a, 0x61, 0x63, 0x63, 0x6f, 0x75,
-	0x6e, 0x74, 0x5f, 0x69, 0x64, 0x18, 0x01, 0x20, 0x01, 0x28, 0x09, 0x52, 0x09, 0x61, 0x63, 0x63,
-	0x6f, 0x75, 0x6e, 0x74, 0x49, 0x64, 0x12, 0x27, 0x0a, 0x0f, 0x61, 0x63, 0x63, 0x6f, 0x75, 0x6e,
-	0x74, 0x5f, 0x62, 0x61, 0x6c, 0x61, 0x6e, 0x63, 0x65, 0x18, 0x02, 0x20, 0x01, 0x28, 0x01, 0x52,
-	0x0e, 0x61, 0x63, 0x63, 0x6f, 0x75, 0x6e, 0x74, 0x42, 0x61, 0x6c, 0x61, 0x6e, 0x63, 0x65, 0x22,
-	0x0e, 0x0a, 0x0c, 0x44, 0x65, 0x62, 0x69, 0x74, 0x41, 0x63, 0x63, 0x6f, 0x75, 0x6e, 0x74, 0x22,
-	0x10, 0x0a, 0x0e, 0x41, 0x63, 0x63, 0x6f, 0x75, 0x6e, 0x74, 0x44, 0x65, 0x62, 0x69, 0x74, 0x65,
-	0x64, 0x22, 0x0b, 0x0a, 0x09, 0x54, 0x65, 0x73, 0x74, 0x4c, 0x6f, 0x67, 0x69, 0x6e, 0x22, 0x12,
-	0x0a, 0x10, 0x54, 0x65, 0x73, 0x74, 0x4c, 0x6f, 0x67, 0x69, 0x6e, 0x53, 0x75, 0x63, 0x63, 0x65,
-	0x73, 0x73, 0x22, 0x0f, 0x0a, 0x0d, 0x54, 0x65, 0x73, 0x74, 0x52, 0x65, 0x61, 0x64, 0x69, 0x6e,
-	0x65, 0x73, 0x73, 0x22, 0x0b, 0x0a, 0x09, 0x54, 0x65, 0x73, 0x74, 0x52, 0x65, 0x61, 0x64, 0x79,
-	0x22, 0x09, 0x0a, 0x07, 0x54, 0x65, 0x73, 0x74, 0x42, 0x79, 0x65, 0x22, 0x0b, 0x0a, 0x09, 0x54,
-	0x65, 0x73, 0x74, 0x53, 0x74, 0x61, 0x73, 0x68, 0x22, 0x0d, 0x0a, 0x0b, 0x54, 0x65, 0x73, 0x74,
-	0x55, 0x6e, 0x73, 0x74, 0x61, 0x73, 0x68, 0x22, 0x10, 0x0a, 0x0e, 0x54, 0x65, 0x73, 0x74, 0x55,
-	0x6e, 0x73, 0x74, 0x61, 0x73, 0x68, 0x41, 0x6c, 0x6c, 0x22, 0x06, 0x0a, 0x04, 0x50, 0x69, 0x6e,
-	0x67, 0x22, 0x06, 0x0a, 0x04, 0x50, 0x6f, 0x6e, 0x67, 0x22, 0x22, 0x0a, 0x04, 0x57, 0x61, 0x69,
-	0x74, 0x12, 0x1a, 0x0a, 0x08, 0x64, 0x75, 0x72, 0x61, 0x74, 0x69, 0x6f, 0x6e, 0x18, 0x01, 0x20,
-	0x01, 0x28, 0x04, 0x52, 0x08, 0x64, 0x75, 0x72, 0x61, 0x74, 0x69, 0x6f, 0x6e, 0x22, 0x25, 0x0a,
-	0x07, 0x52, 0x75, 0x6e, 0x54, 0x61, 0x73, 0x6b, 0x12, 0x1a, 0x0a, 0x08, 0x64, 0x75, 0x72, 0x61,
-	0x74, 0x69, 0x6f, 0x6e, 0x18, 0x01, 0x20, 0x01, 0x28, 0x04, 0x52, 0x08, 0x64, 0x75, 0x72, 0x61,
-	0x74, 0x69, 0x6f, 0x6e, 0x22, 0x0e, 0x0a, 0x0c, 0x54, 0x61, 0x73, 0x6b, 0x43, 0x6f, 0x6d, 0x70,
-	0x6c, 0x65, 0x74, 0x65, 0x22, 0x1b, 0x0a, 0x05, 0x44, 0x6f, 0x4c, 0x6f, 0x67, 0x12, 0x12, 0x0a,
-	0x04, 0x74, 0x65, 0x78, 0x74, 0x18, 0x01, 0x20, 0x01, 0x28, 0x09, 0x52, 0x04, 0x74, 0x65, 0x78,
-	0x74, 0x22, 0x0a, 0x0a, 0x08, 0x47, 0x65, 0x74, 0x43, 0x6f, 0x75, 0x6e, 0x74, 0x22, 0x1d, 0x0a,
-	0x05, 0x43, 0x6f, 0x75, 0x6e, 0x74, 0x12, 0x14, 0x0a, 0x05, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x18,
-	0x01, 0x20, 0x01, 0x28, 0x05, 0x52, 0x05, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x42, 0x80, 0x01, 0x0a,
-	0x0a, 0x63, 0x6f, 0x6d, 0x2e, 0x74, 0x65, 0x73, 0x74, 0x70, 0x62, 0x42, 0x09, 0x54, 0x65, 0x73,
-	0x74, 0x50, 0x72, 0x6f, 0x74, 0x6f, 0x48, 0x02, 0x50, 0x01, 0x5a, 0x2d, 0x67, 0x69, 0x74, 0x68,
-	0x75, 0x62, 0x2e, 0x63, 0x6f, 0x6d, 0x2f, 0x74, 0x6f, 0x63, 0x68, 0x65, 0x6d, 0x65, 0x79, 0x2f,
-	0x67, 0x6f, 0x61, 0x6b, 0x74, 0x2f, 0x76, 0x32, 0x2f, 0x74, 0x65, 0x73, 0x74, 0x2f, 0x64, 0x61,
-	0x74, 0x61, 0x3b, 0x74, 0x65, 0x73, 0x74, 0x70, 0x62, 0xa2, 0x02, 0x03, 0x54, 0x58, 0x58, 0xaa,
-	0x02, 0x06, 0x54, 0x65, 0x73, 0x74, 0x70, 0x62, 0xca, 0x02, 0x06, 0x54, 0x65, 0x73, 0x74, 0x70,
-	0x62, 0xe2, 0x02, 0x12, 0x54, 0x65, 0x73, 0x74, 0x70, 0x62, 0x5c, 0x47, 0x50, 0x42, 0x4d, 0x65,
-	0x74, 0x61, 0x64, 0x61, 0x74, 0x61, 0xea, 0x02, 0x06, 0x54, 0x65, 0x73, 0x74, 0x70, 0x62, 0x62,
-	0x06, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x33,
+	0x6f, 0x12, 0x06, 0x74, 0x65, 0x73, 0x74, 0x70, 0x62, 0x22, 0x0a, 0x0a, 0x08, 0x54, 0x65, 0x73,
+	0x74, 0x54, 0x65, 0x6c, 0x6c, 0x22, 0x09, 0x0a, 0x07, 0x54, 0x65, 0x73, 0x74, 0x41, 0x73, 0x6b,
+	0x22, 0x0b, 0x0a, 0x09, 0x54, 0x65, 0x73, 0x74, 0x53, 0x74, 0x61, 0x73, 0x68, 0x22, 0x0d, 0x0a,
+	0x0b, 0x54, 0x65, 0x73, 0x74, 0x55, 0x6e, 0x73, 0x74, 0x61, 0x73, 0x68, 0x22, 0x10, 0x0a, 0x0e,
+	0x54, 0x65, 0x73, 0x74, 0x55, 0x6e, 0x73, 0x74, 0x61, 0x73, 0x68, 0x41, 0x6c, 0x6c, 0x22, 0x0b,
+	0x0a, 0x09, 0x54, 0x65, 0x73, 0x74, 0x50, 0x61, 0x6e, 0x69, 0x63, 0x22, 0x10, 0x0a, 0x0e, 0x54,
+	0x65, 0x73, 0x74, 0x41, 0x73, 0x6b, 0x54, 0x69, 0x6d, 0x65, 0x6f, 0x75, 0x74, 0x42, 0x80, 0x01,
+	0x0a, 0x0a, 0x63, 0x6f, 0x6d, 0x2e, 0x74, 0x65, 0x73, 0x74, 0x70, 0x62, 0x42, 0x09, 0x54, 0x65,
+	0x73, 0x74, 0x50, 0x72, 0x6f, 0x74, 0x6f, 0x48, 0x02, 0x50, 0x01, 0x5a, 0x2d, 0x67, 0x69, 0x74,
+	0x68, 0x75, 0x62, 0x2e, 0x63, 0x6f, 0x6d, 0x2f, 0x74, 0x6f, 0x63, 0x68, 0x65, 0x6d, 0x65, 0x79,
+	0x2f, 0x67, 0x6f, 0x61, 0x6b, 0x74, 0x2f, 0x76, 0x32, 0x2f, 0x74, 0x65, 0x73, 0x74, 0x2f, 0x64,
+	0x61, 0x74, 0x61, 0x3b, 0x74, 0x65, 0x73, 0x74, 0x70, 0x62, 0xa2, 0x02, 0x03, 0x54, 0x58, 0x58,
+	0xaa, 0x02, 0x06, 0x54, 0x65, 0x73, 0x74, 0x70, 0x62, 0xca, 0x02, 0x06, 0x54, 0x65, 0x73, 0x74,
+	0x70, 0x62, 0xe2, 0x02, 0x12, 0x54, 0x65, 0x73, 0x74, 0x70, 0x62, 0x5c, 0x47, 0x50, 0x42, 0x4d,
+	0x65, 0x74, 0x61, 0x64, 0x61, 0x74, 0x61, 0xea, 0x02, 0x06, 0x54, 0x65, 0x73, 0x74, 0x70, 0x62,
+	0x62, 0x06, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x33,
 }
 
 var (
@@ -1324,37 +320,15 @@ func file_test_test_proto_rawDescGZIP() []byte {
 	return file_test_test_proto_rawDescData
 }
 
-var file_test_test_proto_msgTypes = make([]protoimpl.MessageInfo, 29)
+var file_test_test_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
 var file_test_test_proto_goTypes = []any{
-	(*TestReply)(nil),        // 0: testpb.TestReply
-	(*TestPanic)(nil),        // 1: testpb.TestPanic
-	(*TestTimeout)(nil),      // 2: testpb.TestTimeout
-	(*Reply)(nil),            // 3: testpb.Reply
-	(*TestSend)(nil),         // 4: testpb.TestSend
-	(*TestRemoteSend)(nil),   // 5: testpb.TestRemoteSend
-	(*Account)(nil),          // 6: testpb.Account
-	(*CreateAccount)(nil),    // 7: testpb.CreateAccount
-	(*CreditAccount)(nil),    // 8: testpb.CreditAccount
-	(*AccountCreated)(nil),   // 9: testpb.AccountCreated
-	(*AccountCredited)(nil),  // 10: testpb.AccountCredited
-	(*DebitAccount)(nil),     // 11: testpb.DebitAccount
-	(*AccountDebited)(nil),   // 12: testpb.AccountDebited
-	(*TestLogin)(nil),        // 13: testpb.TestLogin
-	(*TestLoginSuccess)(nil), // 14: testpb.TestLoginSuccess
-	(*TestReadiness)(nil),    // 15: testpb.TestReadiness
-	(*TestReady)(nil),        // 16: testpb.TestReady
-	(*TestBye)(nil),          // 17: testpb.TestBye
-	(*TestStash)(nil),        // 18: testpb.TestStash
-	(*TestUnstash)(nil),      // 19: testpb.TestUnstash
-	(*TestUnstashAll)(nil),   // 20: testpb.TestUnstashAll
-	(*Ping)(nil),             // 21: testpb.Ping
-	(*Pong)(nil),             // 22: testpb.Pong
-	(*Wait)(nil),             // 23: testpb.Wait
-	(*RunTask)(nil),          // 24: testpb.RunTask
-	(*TaskComplete)(nil),     // 25: testpb.TaskComplete
-	(*DoLog)(nil),            // 26: testpb.DoLog
-	(*GetCount)(nil),         // 27: testpb.GetCount
-	(*Count)(nil),            // 28: testpb.Count
+	(*TestTell)(nil),       // 0: testpb.TestTell
+	(*TestAsk)(nil),        // 1: testpb.TestAsk
+	(*TestStash)(nil),      // 2: testpb.TestStash
+	(*TestUnstash)(nil),    // 3: testpb.TestUnstash
+	(*TestUnstashAll)(nil), // 4: testpb.TestUnstashAll
+	(*TestPanic)(nil),      // 5: testpb.TestPanic
+	(*TestAskTimeout)(nil), // 6: testpb.TestAskTimeout
 }
 var file_test_test_proto_depIdxs = []int32{
 	0, // [0:0] is the sub-list for method output_type
@@ -1371,7 +345,7 @@ func file_test_test_proto_init() {
 	}
 	if !protoimpl.UnsafeEnabled {
 		file_test_test_proto_msgTypes[0].Exporter = func(v any, i int) any {
-			switch v := v.(*TestReply); i {
+			switch v := v.(*TestTell); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -1383,7 +357,7 @@ func file_test_test_proto_init() {
 			}
 		}
 		file_test_test_proto_msgTypes[1].Exporter = func(v any, i int) any {
-			switch v := v.(*TestPanic); i {
+			switch v := v.(*TestAsk); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -1395,198 +369,6 @@ func file_test_test_proto_init() {
 			}
 		}
 		file_test_test_proto_msgTypes[2].Exporter = func(v any, i int) any {
-			switch v := v.(*TestTimeout); i {
-			case 0:
-				return &v.state
-			case 1:
-				return &v.sizeCache
-			case 2:
-				return &v.unknownFields
-			default:
-				return nil
-			}
-		}
-		file_test_test_proto_msgTypes[3].Exporter = func(v any, i int) any {
-			switch v := v.(*Reply); i {
-			case 0:
-				return &v.state
-			case 1:
-				return &v.sizeCache
-			case 2:
-				return &v.unknownFields
-			default:
-				return nil
-			}
-		}
-		file_test_test_proto_msgTypes[4].Exporter = func(v any, i int) any {
-			switch v := v.(*TestSend); i {
-			case 0:
-				return &v.state
-			case 1:
-				return &v.sizeCache
-			case 2:
-				return &v.unknownFields
-			default:
-				return nil
-			}
-		}
-		file_test_test_proto_msgTypes[5].Exporter = func(v any, i int) any {
-			switch v := v.(*TestRemoteSend); i {
-			case 0:
-				return &v.state
-			case 1:
-				return &v.sizeCache
-			case 2:
-				return &v.unknownFields
-			default:
-				return nil
-			}
-		}
-		file_test_test_proto_msgTypes[6].Exporter = func(v any, i int) any {
-			switch v := v.(*Account); i {
-			case 0:
-				return &v.state
-			case 1:
-				return &v.sizeCache
-			case 2:
-				return &v.unknownFields
-			default:
-				return nil
-			}
-		}
-		file_test_test_proto_msgTypes[7].Exporter = func(v any, i int) any {
-			switch v := v.(*CreateAccount); i {
-			case 0:
-				return &v.state
-			case 1:
-				return &v.sizeCache
-			case 2:
-				return &v.unknownFields
-			default:
-				return nil
-			}
-		}
-		file_test_test_proto_msgTypes[8].Exporter = func(v any, i int) any {
-			switch v := v.(*CreditAccount); i {
-			case 0:
-				return &v.state
-			case 1:
-				return &v.sizeCache
-			case 2:
-				return &v.unknownFields
-			default:
-				return nil
-			}
-		}
-		file_test_test_proto_msgTypes[9].Exporter = func(v any, i int) any {
-			switch v := v.(*AccountCreated); i {
-			case 0:
-				return &v.state
-			case 1:
-				return &v.sizeCache
-			case 2:
-				return &v.unknownFields
-			default:
-				return nil
-			}
-		}
-		file_test_test_proto_msgTypes[10].Exporter = func(v any, i int) any {
-			switch v := v.(*AccountCredited); i {
-			case 0:
-				return &v.state
-			case 1:
-				return &v.sizeCache
-			case 2:
-				return &v.unknownFields
-			default:
-				return nil
-			}
-		}
-		file_test_test_proto_msgTypes[11].Exporter = func(v any, i int) any {
-			switch v := v.(*DebitAccount); i {
-			case 0:
-				return &v.state
-			case 1:
-				return &v.sizeCache
-			case 2:
-				return &v.unknownFields
-			default:
-				return nil
-			}
-		}
-		file_test_test_proto_msgTypes[12].Exporter = func(v any, i int) any {
-			switch v := v.(*AccountDebited); i {
-			case 0:
-				return &v.state
-			case 1:
-				return &v.sizeCache
-			case 2:
-				return &v.unknownFields
-			default:
-				return nil
-			}
-		}
-		file_test_test_proto_msgTypes[13].Exporter = func(v any, i int) any {
-			switch v := v.(*TestLogin); i {
-			case 0:
-				return &v.state
-			case 1:
-				return &v.sizeCache
-			case 2:
-				return &v.unknownFields
-			default:
-				return nil
-			}
-		}
-		file_test_test_proto_msgTypes[14].Exporter = func(v any, i int) any {
-			switch v := v.(*TestLoginSuccess); i {
-			case 0:
-				return &v.state
-			case 1:
-				return &v.sizeCache
-			case 2:
-				return &v.unknownFields
-			default:
-				return nil
-			}
-		}
-		file_test_test_proto_msgTypes[15].Exporter = func(v any, i int) any {
-			switch v := v.(*TestReadiness); i {
-			case 0:
-				return &v.state
-			case 1:
-				return &v.sizeCache
-			case 2:
-				return &v.unknownFields
-			default:
-				return nil
-			}
-		}
-		file_test_test_proto_msgTypes[16].Exporter = func(v any, i int) any {
-			switch v := v.(*TestReady); i {
-			case 0:
-				return &v.state
-			case 1:
-				return &v.sizeCache
-			case 2:
-				return &v.unknownFields
-			default:
-				return nil
-			}
-		}
-		file_test_test_proto_msgTypes[17].Exporter = func(v any, i int) any {
-			switch v := v.(*TestBye); i {
-			case 0:
-				return &v.state
-			case 1:
-				return &v.sizeCache
-			case 2:
-				return &v.unknownFields
-			default:
-				return nil
-			}
-		}
-		file_test_test_proto_msgTypes[18].Exporter = func(v any, i int) any {
 			switch v := v.(*TestStash); i {
 			case 0:
 				return &v.state
@@ -1598,7 +380,7 @@ func file_test_test_proto_init() {
 				return nil
 			}
 		}
-		file_test_test_proto_msgTypes[19].Exporter = func(v any, i int) any {
+		file_test_test_proto_msgTypes[3].Exporter = func(v any, i int) any {
 			switch v := v.(*TestUnstash); i {
 			case 0:
 				return &v.state
@@ -1610,7 +392,7 @@ func file_test_test_proto_init() {
 				return nil
 			}
 		}
-		file_test_test_proto_msgTypes[20].Exporter = func(v any, i int) any {
+		file_test_test_proto_msgTypes[4].Exporter = func(v any, i int) any {
 			switch v := v.(*TestUnstashAll); i {
 			case 0:
 				return &v.state
@@ -1622,8 +404,8 @@ func file_test_test_proto_init() {
 				return nil
 			}
 		}
-		file_test_test_proto_msgTypes[21].Exporter = func(v any, i int) any {
-			switch v := v.(*Ping); i {
+		file_test_test_proto_msgTypes[5].Exporter = func(v any, i int) any {
+			switch v := v.(*TestPanic); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -1634,80 +416,8 @@ func file_test_test_proto_init() {
 				return nil
 			}
 		}
-		file_test_test_proto_msgTypes[22].Exporter = func(v any, i int) any {
-			switch v := v.(*Pong); i {
-			case 0:
-				return &v.state
-			case 1:
-				return &v.sizeCache
-			case 2:
-				return &v.unknownFields
-			default:
-				return nil
-			}
-		}
-		file_test_test_proto_msgTypes[23].Exporter = func(v any, i int) any {
-			switch v := v.(*Wait); i {
-			case 0:
-				return &v.state
-			case 1:
-				return &v.sizeCache
-			case 2:
-				return &v.unknownFields
-			default:
-				return nil
-			}
-		}
-		file_test_test_proto_msgTypes[24].Exporter = func(v any, i int) any {
-			switch v := v.(*RunTask); i {
-			case 0:
-				return &v.state
-			case 1:
-				return &v.sizeCache
-			case 2:
-				return &v.unknownFields
-			default:
-				return nil
-			}
-		}
-		file_test_test_proto_msgTypes[25].Exporter = func(v any, i int) any {
-			switch v := v.(*TaskComplete); i {
-			case 0:
-				return &v.state
-			case 1:
-				return &v.sizeCache
-			case 2:
-				return &v.unknownFields
-			default:
-				return nil
-			}
-		}
-		file_test_test_proto_msgTypes[26].Exporter = func(v any, i int) any {
-			switch v := v.(*DoLog); i {
-			case 0:
-				return &v.state
-			case 1:
-				return &v.sizeCache
-			case 2:
-				return &v.unknownFields
-			default:
-				return nil
-			}
-		}
-		file_test_test_proto_msgTypes[27].Exporter = func(v any, i int) any {
-			switch v := v.(*GetCount); i {
-			case 0:
-				return &v.state
-			case 1:
-				return &v.sizeCache
-			case 2:
-				return &v.unknownFields
-			default:
-				return nil
-			}
-		}
-		file_test_test_proto_msgTypes[28].Exporter = func(v any, i int) any {
-			switch v := v.(*Count); i {
+		file_test_test_proto_msgTypes[6].Exporter = func(v any, i int) any {
+			switch v := v.(*TestAskTimeout); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -1725,7 +435,7 @@ func file_test_test_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: file_test_test_proto_rawDesc,
 			NumEnums:      0,
-			NumMessages:   29,
+			NumMessages:   7,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

@@ -102,13 +102,13 @@ type probe struct {
 var _ Probe = (*probe)(nil)
 
 // newProbe creates an instance of probe
-func newProbe(ctx context.Context, actorSystem actor.ActorSystem, t *testing.T) (*probe, error) {
+func newProbe(ctx context.Context, actorSystem *actor.ActorSystem, t *testing.T) (*probe, error) {
 	// create the message queue
 	msgQueue := make(chan message, MessagesQueueMax)
-	// create the test probe actor
-	actor := &probeActor{messageQueue: msgQueue}
-	// spawn the probe actor
-	pid, err := actorSystem.Spawn(ctx, "probActor", actor)
+	// create the test probe prober
+	prober := &probeActor{messageQueue: msgQueue}
+	// spawn the probe prober
+	pid, err := actorSystem.Spawn(ctx, "probeActor", prober)
 	if err != nil {
 		return nil, err
 	}

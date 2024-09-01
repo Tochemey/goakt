@@ -11,7 +11,7 @@ import (
 
 // TestKit defines actor test kit
 type TestKit struct {
-	actorSystem actor.ActorSystem
+	actorSystem *actor.ActorSystem
 	kt          *testing.T
 }
 

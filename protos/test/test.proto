@@ -4,71 +4,10 @@ package testpb;
 
 option go_package = "github.com/tochemey/goakt/v2/test/data;testpb";
 
-message TestReply {}
-message TestPanic {}
-message TestTimeout {}
-message Reply {
-  string content = 1;
-}
-
-message TestSend {}
-
-message Account {
-  string account_id = 1;
-  double account_balance = 2;
-}
-
-message CreateAccount {
-  double account_balance = 2;
-}
-
-message CreditAccount {
-  string account_id = 1;
-  double balance = 2;
-}
-
-message AccountCreated {
-  string account_id = 1;
-  double account_balance = 2;
-}
-
-message AccountCredited {
-  string account_id = 1;
-  double account_balance = 2;
-}
-
-message DebitAccount {}
-message AccountDebited {}
-
-message TestLogin {}
-message TestLoginSuccess {}
-message TestReadiness {}
-message TestReady {}
-message TestBye {}
-
+message TestTell {}
+message TestAsk {}
 message TestStash {}
 message TestUnstash {}
 message TestUnstashAll {}
-
-message Ping {}
-message Pong {}
-
-message Wait {
-  uint64 duration = 1;
-}
-
-message RunTask {
-  uint64 duration = 1;
-}
-
-message TaskComplete {}
-
-message DoLog {
-  string text = 1;
-}
-
-message GetCount {}
-
-message Count {
-  int32 value = 1;
-}
+message TestPanic {}
+message TestAskTimeout {}

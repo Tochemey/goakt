@@ -111,6 +111,7 @@ type PID struct {
 	mailbox *mailbox
 
 	haltPassivationLnr chan types.Unit
+	normalStop         *atomic.Bool
 
 	// hold the watchersList watching the given actor
 	watchersList *slice.Slice[*watcher]
@@ -204,6 +205,7 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 		watchersNotificationStopSignal: make(chan types.Unit, 1),
 		receiveSignal:                  make(chan types.Unit, 1),
 		receiveStopSignal:              make(chan types.Unit, 1),
+		normalStop:                     atomic.NewBool(false),
 	}
 
 	p.initMaxRetries.Store(DefaultInitMaxRetries)
@@ -796,6 +798,7 @@ func (x *PID) doPreStart(ctx context.Context) error {
 	retrier := retry.NewRetrier(int(x.initMaxRetries.Load()), 100*time.Millisecond, time.Second)
 	if err := retrier.RunContext(cancelCtx, x.actor.PreStart); err != nil {
 		e := ErrInitFailure(err)
+		x.logger.Error(e)
 		return e
 	}
 
@@ -828,6 +831,7 @@ func (x *PID) reset() {
 	x.watchersList.Reset()
 	x.telemetry = telemetry.New()
 	x.behaviorStack.Reset()
+	x.normalStop.Store(false)
 	if x.metricEnabled.Load() {
 		if err := x.registerMetrics(); err != nil {
 			fmtErr := fmt.Errorf("failed to register actor=%s metrics: %w", x.ID(), err)
@@ -918,6 +922,7 @@ func (x *PID) passivationLoop() {
 				}
 			case <-x.haltPassivationLnr:
 				tickerStopSig <- types.Unit{}
+				x.normalStop.Store(true)
 				return
 			}
 		}
@@ -926,16 +931,15 @@ func (x *PID) passivationLoop() {
 	<-tickerStopSig
 	ticker.Stop()
 
-	if !x.IsRunning() {
-		x.logger.Infof("Actor=%s is offline. No need to passivate", x.ActorPath().String())
+	if x.normalStop.Load() {
+		x.logger.Infof("normal Stop process triggered for Actor=%s. No need to passivate", x.ActorPath().String())
 		return
 	}
 
-	x.logger.Infof("Passivation mode has been triggered for actor=%s...", x.ActorPath().String())
+	x.logger.Infof("passivation mode has been triggered for actor=%s...", x.ActorPath().String())
 
 	ctx := context.Background()
 	if err := x.doStop(ctx); err != nil {
-		// TODO: rethink properly about PostStop error handling
 		x.logger.Errorf("failed to passivate actor=(%s): reason=(%v)", x.ActorPath().String(), err)
 		return
 	}
@@ -1023,6 +1027,8 @@ func (x *PID) doStop(ctx context.Context) error {
 
 	x.logger.Infof("Shutdown process is on going for actor=%s...", x.ActorPath().String())
 	if err := x.actor.PostStop(ctx); err != nil {
+		x.running.Store(false)
+		x.reset()
 		return err
 	}
 

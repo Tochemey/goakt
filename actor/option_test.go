@@ -116,6 +116,11 @@ func TestOption(t *testing.T) {
 			option:   WithGCInterval(2 * time.Second),
 			expected: ActorSystem{gcInterval: 2. * time.Second},
 		},
+		{
+			name:     "WithHost",
+			option:   WithHost("127.0.0.1"),
+			expected: ActorSystem{host: "127.0.0.1"},
+		},
 	}
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
