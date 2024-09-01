@@ -33,7 +33,7 @@ import (
 
 	"go.uber.org/atomic"
 
-	"github.com/tochemey/goakt/v2/actors"
+	"github.com/tochemey/goakt/v2/actor"
 	"github.com/tochemey/goakt/v2/bench/benchmarkpb"
 	"github.com/tochemey/goakt/v2/goaktpb"
 	"github.com/tochemey/goakt/v2/log"
@@ -46,10 +46,10 @@ func main() {
 	logger := log.DefaultLogger
 
 	// create the actor system. kindly in real-life application handle the error
-	actorSystem, _ := actors.NewActorSystem("SampleActorSystem",
-		actors.WithLogger(logger),
-		actors.WithPassivationDisabled(),
-		actors.WithActorInitMaxRetries(3))
+	actorSystem, _ := actor.NewSystem("SampleActorSystem",
+		actor.WithLogger(logger),
+		actor.WithPassivationDisabled(),
+		actor.WithActorInitMaxRetries(3))
 
 	// start the actor system
 	_ = actorSystem.Start(ctx)
@@ -67,7 +67,7 @@ func main() {
 	time.Sleep(1 * time.Second)
 
 	duration := time.Minute
-	if err := pingActor.Tell(ctx, pongActor, new(benchmarkpb.Ping)); err != nil {
+	if err := pingActor.Tell(ctx, "Pong", new(benchmarkpb.Ping)); err != nil {
 		panic(err)
 	}
 
@@ -108,7 +108,7 @@ type Ping struct {
 	count *atomic.Int32
 }
 
-var _ actors.Actor = (*Ping)(nil)
+var _ actor.Actor = (*Ping)(nil)
 
 func NewPing() *Ping {
 	return &Ping{}
@@ -119,13 +119,13 @@ func (p *Ping) PreStart(context.Context) error {
 	return nil
 }
 
-func (p *Ping) Receive(ctx *actors.ReceiveContext) {
+func (p *Ping) Receive(ctx *actor.ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *goaktpb.PostStart:
 	case *benchmarkpb.Pong:
 		p.count.Add(1)
 		// let us reply to the sender
-		_ = ctx.Self().Tell(ctx.Context(), ctx.Sender(), new(benchmarkpb.Ping))
+		ctx.Tell(ctx.Sender().Name(), new(benchmarkpb.Ping))
 	default:
 		ctx.Unhandled()
 	}
@@ -139,7 +139,7 @@ type Pong struct {
 	count *atomic.Int32
 }
 
-var _ actors.Actor = (*Pong)(nil)
+var _ actor.Actor = (*Pong)(nil)
 
 func NewPong() *Pong {
 	return &Pong{}
@@ -150,13 +150,13 @@ func (p *Pong) PreStart(context.Context) error {
 	return nil
 }
 
-func (p *Pong) Receive(ctx *actors.ReceiveContext) {
+func (p *Pong) Receive(ctx *actor.ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *goaktpb.PostStart:
 	case *benchmarkpb.Ping:
 		p.count.Add(1)
 		// reply the sender in case there is a sender
-		_ = ctx.Self().Tell(ctx.Context(), ctx.Sender(), new(benchmarkpb.Pong))
+		ctx.Tell(ctx.Sender().Name(), new(benchmarkpb.Pong))
 	default:
 		ctx.Unhandled()
 	}

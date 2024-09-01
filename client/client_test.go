@@ -36,7 +36,7 @@ import (
 	"github.com/travisjeffery/go-dynaport"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/tochemey/goakt/v2/actors"
+	"github.com/tochemey/goakt/v2/actor"
 	"github.com/tochemey/goakt/v2/discovery"
 	"github.com/tochemey/goakt/v2/discovery/nats"
 	"github.com/tochemey/goakt/v2/goaktpb"
@@ -92,7 +92,7 @@ func TestClient(t *testing.T) {
 		time.Sleep(time.Second)
 
 		// send a message
-		reply, err := client.Ask(ctx, actor, new(testspb.TestReply), actors.DefaultAskTimeout)
+		reply, err := client.Ask(ctx, actor, new(testspb.TestReply), actor.DefaultAskTimeout)
 		require.NoError(t, err)
 		require.NotNil(t, reply)
 		expectedReply := &testpb.Reply{Content: "received message"}
@@ -168,7 +168,7 @@ func TestClient(t *testing.T) {
 		time.Sleep(time.Second)
 
 		// send a message
-		reply, err := client.Ask(ctx, actor, new(testspb.TestReply), actors.DefaultAskTimeout)
+		reply, err := client.Ask(ctx, actor, new(testspb.TestReply), actor.DefaultAskTimeout)
 		require.NoError(t, err)
 		require.NotNil(t, reply)
 		expectedReply := &testpb.Reply{Content: "received message"}
@@ -245,7 +245,7 @@ func TestClient(t *testing.T) {
 		time.Sleep(time.Second)
 
 		// send a message
-		reply, err := client.Ask(ctx, actor, new(testspb.TestReply), actors.DefaultAskTimeout)
+		reply, err := client.Ask(ctx, actor, new(testspb.TestReply), actor.DefaultAskTimeout)
 		require.NoError(t, err)
 		require.NotNil(t, reply)
 		expectedReply := &testpb.Reply{Content: "received message"}
@@ -320,7 +320,7 @@ func TestClient(t *testing.T) {
 		time.Sleep(time.Second)
 
 		// send a message
-		reply, err := client.Ask(ctx, actor, new(testspb.TestReply), actors.DefaultAskTimeout)
+		reply, err := client.Ask(ctx, actor, new(testspb.TestReply), actor.DefaultAskTimeout)
 		require.NoError(t, err)
 		require.NotNil(t, reply)
 		expectedReply := &testpb.Reply{Content: "received message"}
@@ -396,7 +396,7 @@ func TestClient(t *testing.T) {
 		time.Sleep(time.Second)
 
 		// send a message
-		reply, err := client.Ask(ctx, actor, new(testspb.TestReply), actors.DefaultAskTimeout)
+		reply, err := client.Ask(ctx, actor, new(testspb.TestReply), actor.DefaultAskTimeout)
 		require.NoError(t, err)
 		require.NotNil(t, reply)
 		expectedReply := &testpb.Reply{Content: "received message"}
@@ -471,7 +471,7 @@ func TestClient(t *testing.T) {
 		time.Sleep(time.Second)
 
 		// send a message
-		reply, err := client.Ask(ctx, actor, new(testspb.TestReply), actors.DefaultAskTimeout)
+		reply, err := client.Ask(ctx, actor, new(testspb.TestReply), actor.DefaultAskTimeout)
 		require.NoError(t, err)
 		require.NotNil(t, reply)
 		expectedReply := &testpb.Reply{Content: "received message"}
@@ -551,7 +551,7 @@ func TestClient(t *testing.T) {
 		time.Sleep(time.Second)
 
 		// send a message
-		reply, err := client.Ask(ctx, actor, new(testspb.TestReply), actors.DefaultAskTimeout)
+		reply, err := client.Ask(ctx, actor, new(testspb.TestReply), actor.DefaultAskTimeout)
 		require.NoError(t, err)
 		require.NotNil(t, reply)
 		expectedReply := &testpb.Reply{Content: "received message"}
@@ -610,7 +610,7 @@ func startNatsServer(t *testing.T) *natsserver.Server {
 	return serv
 }
 
-func startNode(t *testing.T, logger log.Logger, nodeName, serverAddr string) (system actors.ActorSystem, remotingHost string, remotingPort int, provider discovery.Provider) {
+func startNode(t *testing.T, logger log.Logger, nodeName, serverAddr string) (system actor.System, remotingHost string, remotingPort int, provider discovery.Provider) {
 	ctx := context.TODO()
 
 	// generate the ports for the single startNode
@@ -644,7 +644,7 @@ func startNode(t *testing.T, logger log.Logger, nodeName, serverAddr string) (sy
 	// create the instance of provider
 	natsProvider := nats.NewDiscovery(&config, &hostNode, nats.WithLogger(logger))
 
-	clusterConfig := actors.
+	clusterConfig := actor.
 		NewClusterConfig().
 		WithKinds(new(testActor)).
 		WithDiscovery(natsProvider).
@@ -655,14 +655,14 @@ func startNode(t *testing.T, logger log.Logger, nodeName, serverAddr string) (sy
 		WithPartitionCount(10)
 
 	// create the actor system
-	system, err := actors.NewActorSystem(
+	system, err := actor.NewSystem(
 		applicationName,
-		actors.WithPassivationDisabled(),
-		actors.WithLogger(logger),
-		actors.WithReplyTimeout(time.Minute),
-		actors.WithRemoting(host, int32(remotePort)),
-		actors.WithPeerStateLoopInterval(100*time.Millisecond),
-		actors.WithCluster(clusterConfig))
+		actor.WithPassivationDisabled(),
+		actor.WithLogger(logger),
+		actor.WithAskTimeout(time.Minute),
+		actor.WithRemoting(host, int32(remotePort)),
+		actor.WithPeerStateLoopInterval(100*time.Millisecond),
+		actor.WithCluster(clusterConfig))
 
 	require.NotNil(t, system)
 	require.NoError(t, err)
@@ -683,7 +683,7 @@ type testActor struct {
 }
 
 // enforce compilation error
-var _ actors.Actor = (*testActor)(nil)
+var _ actor.Actor = (*testActor)(nil)
 
 // newTestActor creates a testActor
 func newTestActor() *testActor {
@@ -705,7 +705,7 @@ func (p *testActor) PostStop(context.Context) error {
 }
 
 // Receive processes any message dropped into the actor mailbox without a reply
-func (p *testActor) Receive(ctx *actors.ReceiveContext) {
+func (p *testActor) Receive(ctx *actor.ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *goaktpb.PostStart:
 		p.logger.Info("post start")

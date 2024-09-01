@@ -11,7 +11,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
-	"github.com/tochemey/goakt/v2/actors"
+	"github.com/tochemey/goakt/v2/actor"
 	"github.com/tochemey/goakt/v2/goaktpb"
 )
 
@@ -38,17 +38,17 @@ type Probe interface {
 	// ExpectMessageOfTypeWithin asserts the expectation of a given message type within a time duration
 	ExpectMessageOfTypeWithin(duration time.Duration, messageType protoreflect.MessageType)
 	// Send sends a message to an actor and also provides probe's test actor PID as sender.
-	Send(to *actors.PID, message proto.Message)
+	Send(to *actor.PID, message proto.Message)
 	// Sender returns the sender of last received message.
-	Sender() *actors.PID
+	Sender() *actor.PID
 	// PID returns the pid of the test actor
-	PID() *actors.PID
+	PID() *actor.PID
 	// Stop stops the test probe
 	Stop()
 }
 
 type message struct {
-	sender  *actors.PID
+	sender  *actor.PID
 	payload proto.Message
 }
 
@@ -57,7 +57,7 @@ type probeActor struct {
 }
 
 // ensure that probeActor implements the Actor interface
-var _ actors.Actor = &probeActor{}
+var _ actor.Actor = &probeActor{}
 
 // PreStart is called before the actor starts
 func (x *probeActor) PreStart(_ context.Context) error {
@@ -65,7 +65,7 @@ func (x *probeActor) PreStart(_ context.Context) error {
 }
 
 // Receive handle message received
-func (x *probeActor) Receive(ctx *actors.ReceiveContext) {
+func (x *probeActor) Receive(ctx *actor.ReceiveContext) {
 	switch ctx.Message().(type) {
 	// skip system message
 	case *goaktpb.PoisonPill,
@@ -91,9 +91,9 @@ type probe struct {
 	pt *testing.T
 
 	testCtx        context.Context
-	pid            *actors.PID
+	pid            *actor.PID
 	lastMessage    proto.Message
-	lastSender     *actors.PID
+	lastSender     *actor.PID
 	messageQueue   chan message
 	defaultTimeout time.Duration
 }
@@ -102,7 +102,7 @@ type probe struct {
 var _ Probe = (*probe)(nil)
 
 // newProbe creates an instance of probe
-func newProbe(ctx context.Context, actorSystem actors.ActorSystem, t *testing.T) (*probe, error) {
+func newProbe(ctx context.Context, actorSystem actor.System, t *testing.T) (*probe, error) {
 	// create the message queue
 	msgQueue := make(chan message, MessagesQueueMax)
 	// create the test probe actor
@@ -158,18 +158,18 @@ func (x *probe) ExpectAnyMessageWithin(duration time.Duration) proto.Message {
 }
 
 // Send sends a message to the given actor
-func (x *probe) Send(to *actors.PID, message proto.Message) {
-	err := x.pid.Tell(x.testCtx, to, message)
+func (x *probe) Send(to *actor.PID, message proto.Message) {
+	err := x.pid.tell(x.testCtx, to, message)
 	require.NoError(x.pt, err)
 }
 
 // Sender returns the last sender
-func (x *probe) Sender() *actors.PID {
+func (x *probe) Sender() *actor.PID {
 	return x.lastSender
 }
 
 // PID returns the pid of the test actor
-func (x *probe) PID() *actors.PID {
+func (x *probe) PID() *actor.PID {
 	return x.pid
 }
 

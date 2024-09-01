@@ -37,7 +37,6 @@ import (
 	"connectrpc.com/otelconnect"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/tochemey/goakt/v2/actors"
 	"github.com/tochemey/goakt/v2/goaktpb"
 	"github.com/tochemey/goakt/v2/internal/http"
 	"github.com/tochemey/goakt/v2/internal/internalpb"
@@ -150,7 +149,7 @@ func (x *Client) Spawn(ctx context.Context, actor *Actor) (err error) {
 	x.locker.Lock()
 	remoteHost, remotePort := nextRemotingHostAndPort(x.balancer)
 	x.locker.Unlock()
-	return actors.RemoteSpawn(ctx, remoteHost, remotePort, actor.Name(), actor.Kind())
+	return actor.RemoteSpawn(ctx, remoteHost, remotePort, actor.Name(), actor.Kind())
 }
 
 // SpawnWithBalancer creates an actor provided the actor name and the balancer strategy
@@ -160,7 +159,7 @@ func (x *Client) SpawnWithBalancer(ctx context.Context, actor *Actor, strategy B
 	balancer.Set(x.nodes...)
 	remoteHost, remotePort := nextRemotingHostAndPort(balancer)
 	x.locker.Unlock()
-	return actors.RemoteSpawn(ctx, remoteHost, remotePort, actor.Name(), actor.Kind())
+	return actor.RemoteSpawn(ctx, remoteHost, remotePort, actor.Name(), actor.Kind())
 }
 
 // ReSpawn restarts a given actor
@@ -168,7 +167,7 @@ func (x *Client) ReSpawn(ctx context.Context, actor *Actor) (err error) {
 	x.locker.Lock()
 	remoteHost, remotePort := nextRemotingHostAndPort(x.balancer)
 	x.locker.Unlock()
-	return actors.RemoteReSpawn(ctx, remoteHost, remotePort, actor.Name())
+	return actor.RemoteReSpawn(ctx, remoteHost, remotePort, actor.Name())
 }
 
 // Tell sends a message to a given actor provided the actor name.
@@ -180,7 +179,7 @@ func (x *Client) Tell(ctx context.Context, actor *Actor, message proto.Message) 
 	if err != nil {
 		return err
 	}
-	return actors.RemoteTell(ctx, address, message)
+	return actor.RemoteTell(ctx, address, message)
 }
 
 // Ask sends a message to a given actor provided the actor name and expects a response.
@@ -192,7 +191,7 @@ func (x *Client) Ask(ctx context.Context, actor *Actor, message proto.Message, t
 	if err != nil {
 		return nil, err
 	}
-	response, err := actors.RemoteAsk(ctx, address, message, timeout)
+	response, err := actor.RemoteAsk(ctx, address, message, timeout)
 	if err != nil {
 		return nil, err
 	}
@@ -204,7 +203,7 @@ func (x *Client) Stop(ctx context.Context, actor *Actor) error {
 	x.locker.Lock()
 	remoteHost, remotePort := nextRemotingHostAndPort(x.balancer)
 	x.locker.Unlock()
-	return actors.RemoteStop(ctx, remoteHost, remotePort, actor.Name())
+	return actor.RemoteStop(ctx, remoteHost, remotePort, actor.Name())
 }
 
 // Whereis finds and returns the address of a given actor
@@ -213,13 +212,13 @@ func (x *Client) Whereis(ctx context.Context, actor *Actor) (*goaktpb.Address, e
 	remoteHost, remotePort := nextRemotingHostAndPort(x.balancer)
 	x.locker.Unlock()
 	// lookup the actor address
-	address, err := actors.RemoteLookup(ctx, remoteHost, remotePort, actor.Name())
+	address, err := actor.RemoteLookup(ctx, remoteHost, remotePort, actor.Name())
 	if err != nil {
 		return nil, err
 	}
 	// no address found
 	if address == nil || proto.Equal(address, new(goaktpb.Address)) {
-		return nil, actors.ErrActorNotFound(actor.Name())
+		return nil, actor.ErrActorNotFound(actor.Name())
 	}
 	return address, nil
 }

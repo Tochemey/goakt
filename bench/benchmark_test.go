@@ -32,7 +32,7 @@ import (
 
 	"go.uber.org/atomic"
 
-	"github.com/tochemey/goakt/v2/actors"
+	"github.com/tochemey/goakt/v2/actor"
 	"github.com/tochemey/goakt/v2/bench/benchmarkpb"
 	"github.com/tochemey/goakt/v2/log"
 )
@@ -42,11 +42,11 @@ func BenchmarkActor(b *testing.B) {
 		ctx := context.TODO()
 
 		// create the actor system
-		actorSystem, _ := actors.NewActorSystem("bench",
-			actors.WithLogger(log.DiscardLogger),
-			actors.WithActorInitMaxRetries(1),
-			actors.WithSupervisorDirective(actors.NewStopDirective()),
-			actors.WithReplyTimeout(receivingTimeout))
+		actorSystem, _ := actor.NewSystem("bench",
+			actor.WithLogger(log.DiscardLogger),
+			actor.WithActorInitMaxRetries(1),
+			actor.WithSupervisorDirective(actor.NewStopDirective()),
+			actor.WithAskTimeout(receivingTimeout))
 
 		// start the actor system
 		_ = actorSystem.Start(ctx)
@@ -54,11 +54,8 @@ func BenchmarkActor(b *testing.B) {
 		// wait for system to start properly
 		time.Sleep(1 * time.Second)
 
-		// define the benchmark actor
-		actor := &Benchmarker{}
-
 		// create the actor ref
-		pid, _ := actorSystem.Spawn(ctx, "test", actor)
+		pid, _ := actorSystem.Spawn(ctx, "test", new(Benchmarker))
 
 		// wait for actors to start properly
 		time.Sleep(1 * time.Second)
@@ -69,7 +66,7 @@ func BenchmarkActor(b *testing.B) {
 		start := time.Now()
 		b.RunParallel(func(pb *testing.PB) {
 			for pb.Next() {
-				_ = actors.Tell(ctx, pid, new(benchmarkpb.BenchTell))
+				_ = actor.Tell(ctx, pid, new(benchmarkpb.BenchTell))
 			}
 		})
 
@@ -83,11 +80,11 @@ func BenchmarkActor(b *testing.B) {
 	b.Run("ask", func(b *testing.B) {
 		ctx := context.TODO()
 		// create the actor system
-		actorSystem, _ := actors.NewActorSystem("bench",
-			actors.WithLogger(log.DiscardLogger),
-			actors.WithActorInitMaxRetries(1),
-			actors.WithExpireActorAfter(5*time.Second),
-			actors.WithReplyTimeout(receivingTimeout))
+		actorSystem, _ := actor.NewSystem("bench",
+			actor.WithLogger(log.DiscardLogger),
+			actor.WithActorInitMaxRetries(1),
+			actor.WithExpireActorAfter(5*time.Second),
+			actor.WithAskTimeout(receivingTimeout))
 
 		// start the actor system
 		_ = actorSystem.Start(ctx)
@@ -95,11 +92,8 @@ func BenchmarkActor(b *testing.B) {
 		// wait for system to start properly
 		time.Sleep(1 * time.Second)
 
-		// define the benchmark actor
-		actor := &Benchmarker{}
-
 		// create the actor ref
-		pid, _ := actorSystem.Spawn(ctx, "test", actor)
+		pid, _ := actorSystem.Spawn(ctx, "test", new(Benchmarker))
 
 		// wait for actors to start properly
 		time.Sleep(1 * time.Second)
@@ -111,7 +105,7 @@ func BenchmarkActor(b *testing.B) {
 
 		b.RunParallel(func(pb *testing.PB) {
 			for pb.Next() {
-				_, _ = actors.Ask(ctx, pid, new(benchmarkpb.BenchRequest), receivingTimeout)
+				_, _ = actor.Ask(ctx, pid, new(benchmarkpb.BenchRequest), receivingTimeout)
 			}
 		})
 		opsPerSec := float64(b.N) / time.Since(start).Seconds()

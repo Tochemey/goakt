@@ -12,7 +12,6 @@ message Reply {
 }
 
 message TestSend {}
-message TestRemoteSend {}
 
 message Account {
   string account_id = 1;

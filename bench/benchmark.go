@@ -32,7 +32,7 @@ import (
 
 	"go.uber.org/atomic"
 
-	"github.com/tochemey/goakt/v2/actors"
+	"github.com/tochemey/goakt/v2/actor"
 	"github.com/tochemey/goakt/v2/bench/benchmarkpb"
 	"github.com/tochemey/goakt/v2/goaktpb"
 	"github.com/tochemey/goakt/v2/log"
@@ -57,7 +57,7 @@ func (p *Benchmarker) PreStart(context.Context) error {
 	return nil
 }
 
-func (p *Benchmarker) Receive(ctx *actors.ReceiveContext) {
+func (p *Benchmarker) Receive(ctx *actor.ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *goaktpb.PostStart:
 	case *benchmarkpb.BenchTell:
@@ -83,8 +83,8 @@ type Benchmark struct {
 	workersCount int
 	// duration specifies how long the load testing will run
 	duration time.Duration
-	pid      *actors.PID
-	system   actors.ActorSystem
+	pid      *actor.PID
+	system   actor.System
 }
 
 // NewBenchmark creates an instance of Loader
@@ -99,11 +99,11 @@ func NewBenchmark(workersCount int, duration time.Duration) *Benchmark {
 func (b *Benchmark) Start(ctx context.Context) error {
 	// create the benchmark actor system
 	name := "benchmark-system"
-	b.system, _ = actors.NewActorSystem(name,
-		actors.WithLogger(log.DiscardLogger),
-		actors.WithActorInitMaxRetries(1),
-		actors.WithSupervisorDirective(actors.NewStopDirective()),
-		actors.WithReplyTimeout(receivingTimeout))
+	b.system, _ = actor.NewSystem(name,
+		actor.WithLogger(log.DiscardLogger),
+		actor.WithActorInitMaxRetries(1),
+		actor.WithSupervisorDirective(actor.NewStopDirective()),
+		actor.WithAskTimeout(receivingTimeout))
 
 	if err := b.system.Start(ctx); err != nil {
 		return err
@@ -139,7 +139,7 @@ func (b *Benchmark) BenchTell(ctx context.Context) error {
 		go func() {
 			defer wg.Done()
 			for time.Now().Before(deadline) {
-				_ = actors.Tell(ctx, b.pid, new(benchmarkpb.BenchTell))
+				_ = actor.Tell(ctx, b.pid, new(benchmarkpb.BenchTell))
 				// increase sent counter
 				totalSent.Inc()
 			}
@@ -164,7 +164,7 @@ func (b *Benchmark) BenchAsk(ctx context.Context) error {
 		go func() {
 			defer wg.Done()
 			for time.Now().Before(deadline) {
-				_, _ = actors.Ask(ctx, b.pid, new(benchmarkpb.BenchRequest), receivingTimeout)
+				_, _ = actor.Ask(ctx, b.pid, new(benchmarkpb.BenchRequest), receivingTimeout)
 				// increase sent counter
 				totalSent.Add(1)
 			}

@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/encoding/prototext"
 
-	"github.com/tochemey/goakt/v2/actors"
+	"github.com/tochemey/goakt/v2/actor"
 	"github.com/tochemey/goakt/v2/test/data/testpb"
 )
 
@@ -172,10 +172,10 @@ func (t pinger) PreStart(_ context.Context) error {
 	return nil
 }
 
-func (t pinger) Receive(ctx *actors.ReceiveContext) {
+func (t pinger) Receive(ctx *actor.ReceiveContext) {
 	switch x := ctx.Message().(type) {
 	case *testpb.Ping:
-		_ = ctx.Self().Tell(ctx.Context(), ctx.Sender(), new(testpb.Pong))
+		_ = ctx.Self().tell(ctx.Context(), ctx.Sender(), new(testpb.Pong))
 	case *testpb.Wait:
 		// delay for a while before sending the reply
 		wg := sync.WaitGroup{}
@@ -187,7 +187,7 @@ func (t pinger) Receive(ctx *actors.ReceiveContext) {
 		// block until timer is up
 		wg.Wait()
 		// reply the sender
-		_ = ctx.Self().Tell(ctx.Context(), ctx.Sender(), new(testpb.Pong))
+		_ = ctx.Self().tell(ctx.Context(), ctx.Sender(), new(testpb.Pong))
 	}
 }
 
@@ -195,4 +195,4 @@ func (t pinger) PostStop(_ context.Context) error {
 	return nil
 }
 
-var _ actors.Actor = &pinger{}
+var _ actor.Actor = &pinger{}

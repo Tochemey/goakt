@@ -5,26 +5,26 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tochemey/goakt/v2/actors"
+	"github.com/tochemey/goakt/v2/actor"
 	"github.com/tochemey/goakt/v2/log"
 )
 
 // TestKit defines actor test kit
 type TestKit struct {
-	actorSystem actors.ActorSystem
+	actorSystem actor.System
 	kt          *testing.T
 }
 
 // New creates an instance of TestKit
 func New(ctx context.Context, t *testing.T) *TestKit {
 	// create an actor system
-	system, err := actors.NewActorSystem(
+	system, err := actor.NewSystem(
 		"testkit",
-		actors.WithPassivationDisabled(),
-		actors.WithLogger(log.DefaultLogger),
-		actors.WithActorInitTimeout(time.Second),
-		actors.WithActorInitMaxRetries(5),
-		actors.WithReplyTimeout(time.Minute))
+		actor.WithPassivationDisabled(),
+		actor.WithLogger(log.DefaultLogger),
+		actor.WithActorInitTimeout(time.Second),
+		actor.WithActorInitMaxRetries(5),
+		actor.WithAskTimeout(time.Minute))
 	if err != nil {
 		t.Fatal(err.Error())
 	}
@@ -41,7 +41,7 @@ func New(ctx context.Context, t *testing.T) *TestKit {
 }
 
 // Spawn create an actor
-func (k *TestKit) Spawn(ctx context.Context, name string, actor actors.Actor) *actors.PID {
+func (k *TestKit) Spawn(ctx context.Context, name string, actor actor.Actor) *actor.PID {
 	// create and instance of actor
 	pid, err := k.actorSystem.Spawn(ctx, name, actor)
 	// handle the error
