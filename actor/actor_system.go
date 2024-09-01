@@ -548,7 +548,6 @@ func (system *actorSystem) Stop(ctx context.Context) error {
 	system.stopGC <- types.Unit{}
 	system.logger.Infof("%s is shutting down..:)", system.name)
 
-	system.started.Store(false)
 	system.scheduler.stop(ctx)
 
 	if system.eventsStream != nil {
@@ -563,9 +562,7 @@ func (system *actorSystem) Stop(ctx context.Context) error {
 			return err
 		}
 		system.remotingServer = nil
-	}
 
-	if system.clusterEnabled.Load() {
 		if err := system.cluster.Stop(ctx); err != nil {
 			return err
 		}
@@ -580,6 +577,7 @@ func (system *actorSystem) Stop(ctx context.Context) error {
 		system.reset()
 		return err
 	}
+
 	// remove the supervisor from the actors list
 	system.actors.delete(system.supervisor.ActorPath())
 
@@ -591,6 +589,7 @@ func (system *actorSystem) Stop(ctx context.Context) error {
 		}
 	}
 
+	system.started.Store(false)
 	system.reset()
 	system.logger.Infof("%s shuts down successfully", system.name)
 	return nil

@@ -25,68 +25,59 @@
 package actor
 
 import (
-	"sync"
-
-	"go.uber.org/atomic"
+	csmap "github.com/mhmtszr/concurrent-swiss-map"
+	"github.com/zeebo/xxh3"
 )
 
 type pidMap struct {
-	mu       *sync.RWMutex
-	size     atomic.Int32
-	mappings map[string]*PID
+	mappings *csmap.CsMap[string, *PID]
 }
 
 func newPIDMap(cap int) *pidMap {
+	m := csmap.Create[string, *PID](
+		csmap.WithShardCount[string, *PID](32),
+		csmap.WithCustomHasher[string, *PID](func(key string) uint64 {
+			return xxh3.Hash([]byte(key))
+		}),
+
+		// set the total capacity, every shard map has total capacity/shard count capacity. the default value is 0.
+		csmap.WithSize[string, *PID](uint64(cap)),
+	)
 	return &pidMap{
-		mappings: make(map[string]*PID, cap),
-		mu:       &sync.RWMutex{},
+		mappings: m,
 	}
 }
 
 // len returns the number of PIDs
 func (m *pidMap) len() int {
-	return int(m.size.Load())
+	return m.len()
 }
 
 // get retrieves a pid by its address
 func (m *pidMap) get(path *Path) (pid *PID, ok bool) {
-	m.mu.RLock()
-	pid, ok = m.mappings[path.String()]
-	m.mu.RUnlock()
-	return
+	return m.mappings.Load(path.String())
 }
 
 // set sets a pid in the map
 func (m *pidMap) set(pid *PID) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if pid != nil {
-		m.mappings[pid.ActorPath().String()] = pid
-		m.size.Add(1)
-	}
+	m.mappings.Store(pid.ActorPath().String(), pid)
 }
 
 // delete removes a pid from the map
 func (m *pidMap) delete(addr *Path) {
-	m.mu.Lock()
-	delete(m.mappings, addr.String())
-	m.size.Add(-1)
-	m.mu.Unlock()
+	m.mappings.Delete(addr.String())
 }
 
 // pids returns all actors as a slice
 func (m *pidMap) pids() []*PID {
-	m.mu.Lock()
 	var out []*PID
-	for _, prop := range m.mappings {
-		out = append(out, prop)
-	}
-	m.mu.Unlock()
+	m.mappings.Range(func(k string, v *PID) bool {
+		out = append(out, v)
+		return m.mappings.Count() == len(out)
+	})
 	return out
 }
 
 func (m *pidMap) reset() {
-	m.mu.Lock()
-	m.mappings = make(map[string]*PID)
-	m.mu.Unlock()
+	m.mappings.Clear()
 }

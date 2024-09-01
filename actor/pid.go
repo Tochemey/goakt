@@ -30,6 +30,7 @@ import (
 	"fmt"
 	stdhttp "net/http"
 	"os"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -680,7 +681,7 @@ func (x *PID) Shutdown(ctx context.Context) error {
 	x.stopLocker.Lock()
 	defer x.stopLocker.Unlock()
 
-	x.logger.Info("Shutdown process has started...")
+	x.logger.Infof("Actor=(%s) started shutdown process...", x.ID())
 
 	if !x.running.Load() {
 		x.logger.Infof("Actor=%s is offline. Maybe it has been passivated or stopped already", x.ActorPath().String())
@@ -704,7 +705,7 @@ func (x *PID) Shutdown(ctx context.Context) error {
 		})
 	}
 
-	x.logger.Infof("Actor=%s successfully shutdown", x.ID())
+	x.logger.Infof("Actor=(%s) successfully shutdown", x.ID())
 	return nil
 }
 
@@ -759,6 +760,7 @@ func (x *PID) receive() {
 		case <-x.receiveSignal:
 			received := x.mailbox.Pop()
 			if received == nil {
+				runtime.Gosched()
 				continue
 			}
 
@@ -983,8 +985,6 @@ func (x *PID) unsetBehaviorStacked() {
 
 // doStop stops the actor
 func (x *PID) doStop(ctx context.Context) error {
-	x.running.Store(false)
-
 	// TODO: just signal stash processing done and ignore the messages or process them
 	if x.stashBuffer != nil {
 		if err := x.unstashAll(); err != nil {
@@ -1024,8 +1024,13 @@ func (x *PID) doStop(ctx context.Context) error {
 	x.freeWatchers(ctx)
 
 	x.logger.Infof("Shutdown process is on going for actor=%s...", x.ActorPath().String())
+	if err := x.actor.PostStop(ctx); err != nil {
+		return err
+	}
+
+	x.running.Store(false)
 	x.reset()
-	return x.actor.PostStop(ctx)
+	return nil
 }
 
 // removeChild helps remove child actor
