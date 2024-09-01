@@ -159,7 +159,7 @@ func (x *probe) ExpectAnyMessageWithin(duration time.Duration) proto.Message {
 
 // Send sends a message to the given actor
 func (x *probe) Send(to *actor.PID, message proto.Message) {
-	err := x.pid.tell(x.testCtx, to, message)
+	err := x.pid.Tell(x.testCtx, to.Name(), message)
 	require.NoError(x.pt, err)
 }
 
