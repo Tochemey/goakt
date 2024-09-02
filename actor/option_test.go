@@ -33,10 +33,12 @@ import (
 
 	"github.com/tochemey/goakt/v2/hash"
 	"github.com/tochemey/goakt/v2/log"
+	"github.com/tochemey/goakt/v2/telemetry"
 )
 
 func TestOption(t *testing.T) {
 	resumeDirective := NewResumeDirective()
+	tel := telemetry.New()
 	var atomicTrue atomic.Bool
 	atomicTrue.Store(true)
 	clusterConfig := NewClusterConfig()
@@ -108,13 +110,18 @@ func TestOption(t *testing.T) {
 		},
 		{
 			name:     "WithPeerStateLoopInterval",
-			option:   WithPeerStateLoopInterval(2 * time.Second),
-			expected: ActorSystem{peersStateLoopInterval: 2. * time.Second},
+			option:   WithPeerStateSyncInterval(2 * time.Second),
+			expected: ActorSystem{peersStateSyncInterval: 2. * time.Second},
 		},
 		{
-			name:     "WithGCInterval",
-			option:   WithGCInterval(2 * time.Second),
+			name:     "WithJanitorInterval",
+			option:   WithJanitorInterval(2 * time.Second),
 			expected: ActorSystem{gcInterval: 2. * time.Second},
+		},
+		{
+			name:     "WithTelemetry",
+			option:   WithTelemetry(tel),
+			expected: ActorSystem{telemetry: tel},
 		},
 		{
 			name:     "WithHost",

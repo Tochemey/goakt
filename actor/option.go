@@ -29,6 +29,7 @@ import (
 
 	"github.com/tochemey/goakt/v2/hash"
 	"github.com/tochemey/goakt/v2/log"
+	"github.com/tochemey/goakt/v2/telemetry"
 )
 
 // Option is the interface that applies a configuration option.
@@ -134,15 +135,22 @@ func WithMetric() Option {
 	})
 }
 
-// WithPeerStateLoopInterval sets the peer state loop interval
-func WithPeerStateLoopInterval(interval time.Duration) Option {
-	return OptionFunc(func(system *ActorSystem) {
-		system.peersStateLoopInterval = interval
+// WithTelemetry sets the custom telemetry
+func WithTelemetry(telemetry *telemetry.Telemetry) Option {
+	return OptionFunc(func(a *ActorSystem) {
+		a.telemetry = telemetry
 	})
 }
 
-// WithGCInterval sets the GC interval
-func WithGCInterval(interval time.Duration) Option {
+// WithPeerStateSyncInterval sets the peer state loop interval
+func WithPeerStateSyncInterval(interval time.Duration) Option {
+	return OptionFunc(func(system *ActorSystem) {
+		system.peersStateSyncInterval = interval
+	})
+}
+
+// WithJanitorInterval sets the GC interval
+func WithJanitorInterval(interval time.Duration) Option {
 	return OptionFunc(func(system *ActorSystem) {
 		system.gcInterval = interval
 	})

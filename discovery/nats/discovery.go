@@ -159,13 +159,16 @@ func (d *Discovery) Register() error {
 
 		switch message.GetMessageType() {
 		case internalpb.NatsMessageType_NATS_MESSAGE_TYPE_DEREGISTER:
-			d.logger.Infof("received an de-registration request from peer[name=%s, host=%s, port=%d]",
+			d.logger.Infof("[%s] received an de-registration request from peer[name=%s, host=%s, port=%d]",
+				d.hostNode.PeersAddress(),
 				message.GetName(), message.GetHost(), message.GetPort())
 		case internalpb.NatsMessageType_NATS_MESSAGE_TYPE_REGISTER:
-			d.logger.Infof("received an registration request from peer[name=%s, host=%s, port=%d]",
+			d.logger.Infof("[%s] received an registration request from peer[name=%s, host=%s, port=%d]",
+				d.hostNode.PeersAddress(),
 				message.GetName(), message.GetHost(), message.GetPort())
 		case internalpb.NatsMessageType_NATS_MESSAGE_TYPE_REQUEST:
-			d.logger.Infof("received an identification request from peer[name=%s, host=%s, port=%d]",
+			d.logger.Infof("[%s] received an identification request from peer[name=%s, host=%s, port=%d]",
+				d.hostNode.PeersAddress(),
 				message.GetName(), message.GetHost(), message.GetPort())
 
 			response := &internalpb.NatsMessage{
@@ -177,7 +180,8 @@ func (d *Discovery) Register() error {
 
 			bytea, _ := proto.Marshal(response)
 			if err := d.connection.Publish(msg.Reply, bytea); err != nil {
-				d.logger.Errorf("failed to reply for identification request from peer[name=%s, host=%s, port=%d]",
+				d.logger.Errorf("[%s] failed to reply for identification request from peer[name=%s, host=%s, port=%d]",
+					d.hostNode.PeersAddress(),
 					message.GetName(), message.GetHost(), message.GetPort())
 			}
 		}

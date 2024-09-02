@@ -27,8 +27,17 @@ package actor
 import (
 	"context"
 	"errors"
+	"fmt"
+	"testing"
 	"time"
 
+	natsserver "github.com/nats-io/nats-server/v2/server"
+	"github.com/stretchr/testify/require"
+	"github.com/travisjeffery/go-dynaport"
+
+	"github.com/tochemey/goakt/v2/discovery"
+	"github.com/tochemey/goakt/v2/discovery/nats"
+	"github.com/tochemey/goakt/v2/log"
 	"github.com/tochemey/goakt/v2/test/data/testpb"
 )
 
@@ -83,3 +92,89 @@ func (actor *preStartActor) PreStart(context.Context) error {
 }
 func (actor *preStartActor) PostStop(context.Context) error { return nil }
 func (actor *preStartActor) Receive(*ReceiveContext)        {}
+
+func startNatsServer(t *testing.T) *natsserver.Server {
+	t.Helper()
+	serv, err := natsserver.NewServer(&natsserver.Options{
+		Host: "127.0.0.1",
+		Port: -1,
+	})
+
+	require.NoError(t, err)
+
+	ready := make(chan bool)
+	go func() {
+		ready <- true
+		serv.Start()
+	}()
+	<-ready
+
+	if !serv.ReadyForConnections(2 * time.Second) {
+		t.Fatalf("nats-io server failed to start")
+	}
+
+	return serv
+}
+
+func startNode(t *testing.T, nodeName, serverAddr string) (*ActorSystem, discovery.Provider) {
+	ctx := context.Background()
+
+	// generate the ports for the single startNode
+	nodePorts := dynaport.Get(3)
+	gossipPort := nodePorts[0]
+	peersPort := nodePorts[1]
+	remotingPort := nodePorts[2]
+
+	// create a Cluster startNode
+	host := "127.0.0.1"
+	// create the various config option
+	applicationName := "accounts"
+	actorSystemName := "testSystem"
+	natsSubject := "some-subject"
+	// create the config
+	config := nats.Config{
+		ApplicationName: applicationName,
+		ActorSystemName: actorSystemName,
+		NatsServer:      fmt.Sprintf("nats://%s", serverAddr),
+		NatsSubject:     natsSubject,
+	}
+
+	hostNode := discovery.Node{
+		Name:         nodeName,
+		Host:         host,
+		GossipPort:   gossipPort,
+		PeersPort:    peersPort,
+		RemotingPort: remotingPort,
+	}
+
+	// create the instance of provider
+	provider := nats.NewDiscovery(&config, &hostNode)
+
+	// create the actor system
+	system, err := NewActorSystem(
+		nodeName,
+		WithPassivationDisabled(),
+		WithLogger(log.DiscardLogger),
+		WithAskTimeout(time.Minute),
+		WithHost(host),
+		WithCluster(
+			NewClusterConfig().
+				WithKinds(new(testActor)).
+				WithPartitionCount(10).
+				WithReplicaCount(1).
+				WithRemotingPort(remotingPort).
+				WithGossipPort(gossipPort).
+				WithPeersPort(peersPort).
+				WithMinimumPeersQuorum(1).
+				WithDiscovery(provider)))
+
+	require.NotNil(t, system)
+	require.NoError(t, err)
+
+	// start the node
+	require.NoError(t, system.Start(ctx))
+	time.Sleep(2 * time.Second)
+
+	// return the cluster startNode
+	return system, provider
+}

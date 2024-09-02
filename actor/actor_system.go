@@ -132,7 +132,7 @@ type ActorSystem struct {
 	registry   types.Registry
 	reflection *reflection
 
-	peersStateLoopInterval time.Duration
+	peersStateSyncInterval time.Duration
 	peersCacheMu           *sync.RWMutex
 	peersCache             map[string][]byte
 	clusterConfig          *ClusterConfig
@@ -150,7 +150,7 @@ func NewActorSystem(name string, opts ...Option) (*ActorSystem, error) {
 		return nil, ErrInvalidActorSystemName
 	}
 
-	system := &ActorSystem{
+	actorSystem := &ActorSystem{
 		actors:                 newPIDMap(1_000),
 		actorsChan:             make(chan *internalpb.WireActor, 10),
 		name:                   name,
@@ -173,37 +173,40 @@ func NewActorSystem(name string, opts ...Option) (*ActorSystem, error) {
 		clusterSyncStopSig:     make(chan types.Unit, 1),
 		peersCacheMu:           &sync.RWMutex{},
 		peersCache:             make(map[string][]byte),
-		peersStateLoopInterval: DefaultPeerStateLoopInterval,
+		peersStateSyncInterval: DefaultPeerStateSyncInterval,
 		host:                   "",
 		remotingPort:           -1,
 	}
 
-	system.started.Store(false)
-	system.clusterEnabled.Store(false)
-	system.metricEnabled.Store(false)
+	actorSystem.started.Store(false)
+	actorSystem.clusterEnabled.Store(false)
+	actorSystem.metricEnabled.Store(false)
 
-	system.reflection = newReflection(system.registry)
+	actorSystem.reflection = newReflection(actorSystem.registry)
 
 	// apply the various options
 	for _, opt := range opts {
-		opt.Apply(system)
+		opt.Apply(actorSystem)
 	}
 
-	// we need to make sure the cluster kinds are defined
-	if system.clusterEnabled.Load() {
-		if err := system.clusterConfig.Validate(); err != nil {
+	if actorSystem.clusterEnabled.Load() {
+		if err := actorSystem.clusterConfig.Validate(); err != nil {
+			return nil, err
+		}
+
+		if err := actorSystem.setRemotingHostAndPort(); err != nil {
 			return nil, err
 		}
 	}
 
-	system.scheduler = newScheduler(system.logger, system.shutdownTimeout, withSchedulerCluster(system.cluster))
-	if system.metricEnabled.Load() {
-		if err := system.registerMetrics(); err != nil {
+	actorSystem.scheduler = newScheduler(actorSystem.logger, actorSystem.shutdownTimeout, withSchedulerCluster(actorSystem.cluster))
+	if actorSystem.metricEnabled.Load() {
+		if err := actorSystem.registerMetrics(); err != nil {
 			return nil, err
 		}
 	}
 
-	return system, nil
+	return actorSystem, nil
 }
 
 // Logger returns the logger sets when creating the actor ActorSystem
@@ -938,25 +941,13 @@ func (actorSystem *ActorSystem) enableRemoting(ctx context.Context) {
 		opts = append(opts, connect.WithInterceptors(interceptor))
 	}
 
-	if actorSystem.host == "" {
-		actorSystem.host, _ = os.Hostname()
-	}
-
-	remotingHost, remotingPort, err := tcp.GetHostPort(fmt.Sprintf("%s:%d", actorSystem.host, actorSystem.remotingPort))
-	if err != nil {
-		actorSystem.logger.Panic(fmt.Errorf("failed to resolve remoting TCP address: %w", err))
-	}
-
-	actorSystem.host = remotingHost
-	actorSystem.remotingPort = int32(remotingPort)
-
 	remotingServicePath, remotingServiceHandler := internalpbconnect.NewRemotingServiceHandler(actorSystem, opts...)
 	clusterServicePath, clusterServiceHandler := internalpbconnect.NewClusterServiceHandler(actorSystem, opts...)
 
 	mux := stdhttp.NewServeMux()
 	mux.Handle(remotingServicePath, remotingServiceHandler)
 	mux.Handle(clusterServicePath, clusterServiceHandler)
-	server := http.NewServer(ctx, actorSystem.host, remotingPort, mux)
+	server := http.NewServer(ctx, actorSystem.host, int(actorSystem.remotingPort), mux)
 
 	go func() {
 		if err := server.ListenAndServe(); err != nil {
@@ -1069,16 +1060,14 @@ func (actorSystem *ActorSystem) clusterEventsLoop() {
 // peersStateLoop fetches the cluster peers' PeerState and update the node peersCache
 func (actorSystem *ActorSystem) peersStateLoop() {
 	actorSystem.logger.Info("peers state synchronization has started...")
-	ticker := time.NewTicker(actorSystem.peersStateLoopInterval)
+	ticker := time.NewTicker(actorSystem.peersStateSyncInterval)
 	tickerStopSig := make(chan types.Unit, 1)
 	go func() {
 		for {
 			select {
 			case <-ticker.C:
 				eg, ctx := errgroup.WithContext(context.Background())
-
 				peersChan := make(chan *cluster.Peer)
-
 				eg.Go(func() error {
 					defer close(peersChan)
 					peers, err := actorSystem.cluster.Peers(ctx)
@@ -1263,9 +1252,8 @@ func (actorSystem *ActorSystem) actorOf(ctx context.Context, actorName string) (
 		if err != nil {
 			if errors.Is(err, cluster.ErrActorNotFound) {
 				actorSystem.logger.Infof("actor=%s not found", actorName)
-				e := ErrActorNotFound(actorName)
 				actorSystem.locker.Unlock()
-				return nil, nil, e
+				return nil, nil, ErrActorNotFound(actorName)
 			}
 
 			actorSystem.locker.Unlock()
@@ -1289,4 +1277,27 @@ func (actorSystem *ActorSystem) actorPath(name string) *Path {
 // inCluster states whether the actor ActorSystem is running within a cluster of nodes
 func (actorSystem *ActorSystem) inCluster() bool {
 	return actorSystem.clusterEnabled.Load() && actorSystem.cluster != nil
+}
+
+// setRemotingHostAndPort sets the appropriate remoting host and port configuration
+func (actorSystem *ActorSystem) setRemotingHostAndPort() error {
+	if actorSystem.clusterEnabled.Load() {
+		if err := actorSystem.clusterConfig.Validate(); err != nil {
+			return err
+		}
+
+		actorSystem.remotingPort = int32(actorSystem.clusterConfig.RemotingPort())
+		if actorSystem.host == "" {
+			actorSystem.host, _ = os.Hostname()
+		}
+
+		remotingHost, remotingPort, err := tcp.GetHostPort(fmt.Sprintf("%s:%d", actorSystem.host, actorSystem.remotingPort))
+		if err != nil {
+			actorSystem.logger.Panic(fmt.Errorf("failed to resolve remoting TCP address: %w", err))
+		}
+
+		actorSystem.host = remotingHost
+		actorSystem.remotingPort = int32(remotingPort)
+	}
+	return nil
 }

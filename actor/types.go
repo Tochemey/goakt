@@ -44,8 +44,8 @@ const (
 	DefaultShutdownTimeout = 2 * time.Second
 	// DefaultInitTimeout defines the default init timeout
 	DefaultInitTimeout = time.Second
-	// DefaultPeerStateLoopInterval defines the default peer state loop interval
-	DefaultPeerStateLoopInterval = 10 * time.Second
+	// DefaultPeerStateSyncInterval defines the default peer state loop interval
+	DefaultPeerStateSyncInterval = 10 * time.Second
 
 	// DefaultGCInterval defines the default GC interval
 	// This helps cleanup dead actors from the given actor ActorSystem

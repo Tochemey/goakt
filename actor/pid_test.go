@@ -34,16 +34,18 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/tochemey/goakt/v2/internal/types"
+	"github.com/tochemey/goakt/v2/log"
 	"github.com/tochemey/goakt/v2/test/data/testpb"
 )
 
-func TestPassivation_HappyPath(t *testing.T) {
+func TestPassivation(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	opts := []pidOption{
 		withInitMaxRetries(1),
 		withPassivationAfter(passivateAfter),
 		withAskTimeout(askTimeout),
+		withCustomLogger(log.DiscardLogger),
 	}
 	path := NewPath("test", NewAddress("system", "127.0.0.1", 1))
 	pid, err := newPID(ctx, path, new(testActor), opts...)
@@ -67,6 +69,7 @@ func TestPassivation_HappyPath(t *testing.T) {
 	assert.Error(t, err)
 	assert.EqualError(t, err, ErrDead.Error())
 }
+
 func TestPassivation_WhenPostStopReturnsError_ReturnsNoError(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -74,6 +77,7 @@ func TestPassivation_WhenPostStopReturnsError_ReturnsNoError(t *testing.T) {
 		withInitMaxRetries(1),
 		withPassivationAfter(passivateAfter),
 		withAskTimeout(askTimeout),
+		withCustomLogger(log.DiscardLogger),
 	}
 	path := NewPath("test", NewAddress("system", "127.0.0.1", 1))
 	pid, err := newPID(ctx, path, new(postStopActor), opts...)
@@ -97,11 +101,12 @@ func TestPassivation_WhenPostStopReturnsError_ReturnsNoError(t *testing.T) {
 	assert.Error(t, err)
 	assert.EqualError(t, err, ErrDead.Error())
 }
+
 func TestReceive(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	path := NewPath("test", NewAddress("system", "127.0.0.1", 1))
-	pid, err := newPID(ctx, path, new(testActor))
+	pid, err := newPID(ctx, path, new(testActor), withCustomLogger(log.DiscardLogger))
 	require.NoError(t, err)
 	require.NotNil(t, pid)
 
@@ -122,11 +127,12 @@ func TestReceive(t *testing.T) {
 		assert.NoError(t, err)
 	})
 }
-func TestAsk_HappyPath(t *testing.T) {
+
+func TestAsk(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	path := NewPath("test", NewAddress("system", "127.0.0.1", 1))
-	pid, err := newPID(ctx, path, new(testActor))
+	pid, err := newPID(ctx, path, new(testActor), withCustomLogger(log.DiscardLogger))
 	require.NoError(t, err)
 	require.NotNil(t, pid)
 
@@ -141,11 +147,12 @@ func TestAsk_HappyPath(t *testing.T) {
 		assert.NoError(t, err)
 	})
 }
+
 func TestAsk_WhenRequestTimesOut_ReturnsError(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	path := NewPath("test", NewAddress("system", "127.0.0.1", 1))
-	pid, err := newPID(ctx, path, new(testActor))
+	pid, err := newPID(ctx, path, new(testActor), withCustomLogger(log.DiscardLogger))
 	require.NoError(t, err)
 	require.NotNil(t, pid)
 
@@ -160,11 +167,12 @@ func TestAsk_WhenRequestTimesOut_ReturnsError(t *testing.T) {
 		assert.NoError(t, err)
 	})
 }
+
 func TestAsk_WhenActorNotReady_ReturnsError(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	path := NewPath("test", NewAddress("system", "127.0.0.1", 1))
-	pid, err := newPID(ctx, path, new(testActor))
+	pid, err := newPID(ctx, path, new(testActor), withCustomLogger(log.DiscardLogger))
 	require.NoError(t, err)
 	require.NotNil(t, pid)
 
@@ -176,11 +184,12 @@ func TestAsk_WhenActorNotReady_ReturnsError(t *testing.T) {
 	require.Nil(t, response)
 	assert.EqualError(t, err, ErrDead.Error())
 }
-func TestRestart_HappyPath(t *testing.T) {
+
+func TestRestart(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	path := NewPath("test", NewAddress("system", "127.0.0.1", 1))
-	pid, err := newPID(ctx, path, new(testActor))
+	pid, err := newPID(ctx, path, new(testActor), withCustomLogger(log.DiscardLogger))
 	require.NoError(t, err)
 	require.NotNil(t, pid)
 
@@ -218,11 +227,12 @@ func TestRestart_HappyPath(t *testing.T) {
 		assert.NoError(t, err)
 	})
 }
+
 func TestRestart_WhenPreStartReturnsError_ReturnsError(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	path := NewPath("test", NewAddress("system", "127.0.0.1", 1))
-	pid, err := newPID(ctx, path, new(preStartActor))
+	pid, err := newPID(ctx, path, new(preStartActor), withCustomLogger(log.DiscardLogger))
 	require.NoError(t, err)
 	require.NotNil(t, pid)
 
@@ -246,11 +256,12 @@ func TestRestart_WhenPreStartReturnsError_ReturnsError(t *testing.T) {
 	require.Error(t, err)
 	require.False(t, pid.IsRunning())
 }
+
 func TestRestart_WhenPostStopReturnsError_ReturnsError(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	path := NewPath("test", NewAddress("system", "127.0.0.1", 1))
-	pid, err := newPID(ctx, path, new(postStopActor))
+	pid, err := newPID(ctx, path, new(postStopActor), withCustomLogger(log.DiscardLogger))
 	require.NoError(t, err)
 	require.NotNil(t, pid)
 
@@ -261,4 +272,67 @@ func TestRestart_WhenPostStopReturnsError_ReturnsError(t *testing.T) {
 	err = pid.Restart(ctx)
 	require.Error(t, err)
 	require.False(t, pid.IsRunning())
+}
+
+func TestTell(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	path := NewPath("test", NewAddress("system", "127.0.0.1", 1))
+	pid, err := newPID(ctx, path, new(testActor), withCustomLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NotNil(t, pid)
+
+	err = Tell(ctx, pid, new(testpb.TestTell))
+	require.NoError(t, err)
+
+	t.Cleanup(func() {
+		// stop the actor
+		err = pid.Shutdown(ctx)
+		assert.NoError(t, err)
+	})
+}
+
+func TestTell_WhenActorNotReady_ReturnsError(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	path := NewPath("test", NewAddress("system", "127.0.0.1", 1))
+	pid, err := newPID(ctx, path, new(testActor), withCustomLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NotNil(t, pid)
+
+	err = pid.Shutdown(ctx)
+	require.NoError(t, err)
+
+	err = Tell(ctx, pid, new(testpb.TestTell))
+	require.Error(t, err)
+	assert.EqualError(t, err, ErrDead.Error())
+}
+
+func TestTell_WhenMultiNodesRunning_HappyPath(t *testing.T) {
+	t.Parallel()
+	t.Skip("")
+	ctx := context.Background()
+	server := startNatsServer(t)
+
+	node1, sd1 := startNode(t, "node1", server.Addr().String())
+	node2, sd2 := startNode(t, "node2", server.Addr().String())
+
+	actor1, err := node1.Spawn(ctx, "actor1", new(testActor))
+	require.NoError(t, err)
+	require.NotNil(t, actor1)
+
+	actor2, err := node2.Spawn(ctx, "actor2", new(testActor))
+	require.NoError(t, err)
+	require.NotNil(t, actor2)
+
+	err = actor1.Tell(ctx, actor2.Name(), new(testpb.TestTell))
+	require.NoError(t, err)
+
+	t.Cleanup(func() {
+		assert.NoError(t, node1.Stop(ctx))
+		assert.NoError(t, node2.Stop(ctx))
+		assert.NoError(t, sd2.Close())
+		assert.NoError(t, sd1.Close())
+		server.Shutdown()
+	})
 }
