@@ -56,13 +56,13 @@ func New(opts ...ChainOption) *Chain {
 	return chain
 }
 
-// FailFast sets whether a chain should stop validation on first error.
-func FailFast() ChainOption {
+// ReturnFirstViolation sets whether a chain should stop validation on first error.
+func ReturnFirstViolation() ChainOption {
 	return func(c *Chain) { c.failFast = true }
 }
 
-// AllErrors sets whether a chain should return all errors.
-func AllErrors() ChainOption {
+// ReturnAllViolations sets whether a chain should return all errors.
+func ReturnAllViolations() ChainOption {
 	return func(c *Chain) { c.failFast = false }
 }
 
@@ -79,7 +79,7 @@ func (c *Chain) AddAssertion(isTrue bool, message string) *Chain {
 }
 
 // Validate runs validation chain and returns resulting error(s).
-// It returns all validation error by default, use FailFast option to stop validation on first error.
+// It returns all validation error by default, use ReturnFirstViolation option to stop validation on first error.
 func (c *Chain) Validate() error {
 	for _, v := range c.validators {
 		if violations := v.Validate(); violations != nil {

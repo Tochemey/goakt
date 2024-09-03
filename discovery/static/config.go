@@ -37,7 +37,7 @@ type Config struct {
 // Validate checks whether the given discovery configuration is valid
 func (x Config) Validate() error {
 	chain := validation.
-		New(validation.FailFast()).
+		New(validation.ReturnFirstViolation()).
 		AddAssertion(len(x.Hosts) != 0, "hosts are required")
 
 	for _, host := range x.Hosts {

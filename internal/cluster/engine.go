@@ -238,41 +238,47 @@ func (n *Engine) Start(ctx context.Context) error {
 		defer cancel()
 	}
 
-	eng, err := olric.New(conf)
+	server, err := olric.New(conf)
 	if err != nil {
 		logger.Error(errors.Wrapf(err, "failed to start the cluster Engine on host=(%s)", n.name))
 		return err
 	}
 
 	// set the server
-	n.server = eng
+	errChan := make(chan error, 1)
+	n.server = server
 	go func() {
 		if err = n.server.Start(); err != nil {
+			// attempt to release resources by shutting down
 			if e := n.server.Shutdown(ctx); e != nil {
-				logger.Panic(e)
+				errChan <- e
 			}
-			// the expectation is to exit the application
-			logger.Fatal(errors.Wrapf(err, "failed to start the cluster Engine on host=(%s)", n.name))
+			errChan <- fmt.Errorf("failed to start the cluster Engine on host=(%s): %w", n.host.PeersAddress(), err)
 		}
 	}()
 
-	<-startCtx.Done()
-	logger.Info("cluster engine successfully started. 🎉")
+	// wait for the server to start
+	select {
+	case <-startCtx.Done():
+	case err := <-errChan:
+		logger.Error(err)
+		return err
+	}
 
 	// set the client
 	n.client = n.server.NewEmbeddedClient()
-	dmp, err := n.client.NewDMap(n.name)
+	dmap, err := n.client.NewDMap(n.name)
 	if err != nil {
-		logger.Error(errors.Wrapf(err, "failed to start the cluster Engine on host=(%s)", n.name))
+		logger.Error(fmt.Errorf("failed to start the cluster Engine on host=(%s): %w", n.host.PeersAddress(), err))
 		return n.server.Shutdown(ctx)
 	}
 
-	n.dmap = dmp
+	n.dmap = dmap
 
 	// create a subscriber to consume to cluster events
 	ps, err := n.client.NewPubSub(olric.ToAddress(n.host.PeersAddress()))
 	if err != nil {
-		logger.Error(errors.Wrapf(err, "failed to start the cluster Engine on host=(%s)", n.name))
+		logger.Error(fmt.Errorf("failed to start the cluster Engine on host=(%s): %w", n.host.PeersAddress(), err))
 		return n.server.Shutdown(ctx)
 	}
 
@@ -288,7 +294,7 @@ func (n *Engine) Start(ctx context.Context) error {
 	n.messagesChan = n.pubSub.Channel()
 	go n.consume()
 
-	logger.Infof("GoAkt cluster Engine=(%s) successfully started.", n.name)
+	logger.Infof("GoAkt cluster Engine=(%s) successfully started.  🎉", n.name)
 	return nil
 }
 

@@ -46,10 +46,10 @@ func (s *validationTestSuite) TestNewChain() {
 		s.Assert().NotNil(chain)
 	})
 	s.Run("new chain with options", func() {
-		chain := New(FailFast())
+		chain := New(ReturnFirstViolation())
 		s.Assert().NotNil(chain)
 		s.Assert().True(chain.failFast)
-		chain2 := New(AllErrors())
+		chain2 := New(ReturnAllViolations())
 		s.Assert().NotNil(chain2)
 		s.Assert().False(chain2.failFast)
 	})
@@ -85,7 +85,7 @@ func (s *validationTestSuite) TestValidate() {
 		s.Assert().EqualError(err, "the [field] is required")
 	})
 	s.Run("with multiple validators and FailFast option", func() {
-		chain := New(FailFast())
+		chain := New(ReturnFirstViolation())
 		s.Assert().NotNil(chain)
 		chain.
 			AddValidator(NewEmptyStringValidator("field", "")).
@@ -97,7 +97,7 @@ func (s *validationTestSuite) TestValidate() {
 		s.Assert().EqualError(err, "the [field] is required")
 	})
 	s.Run("with multiple validators and AllErrors option", func() {
-		chain := New(AllErrors())
+		chain := New(ReturnAllViolations())
 		s.Assert().NotNil(chain)
 		chain.
 			AddValidator(NewEmptyStringValidator("field", "")).

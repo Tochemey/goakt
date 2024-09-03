@@ -45,6 +45,7 @@ import (
 
 	"github.com/tochemey/goakt/v2/future"
 	"github.com/tochemey/goakt/v2/goaktpb"
+	"github.com/tochemey/goakt/v2/internal/errorchain"
 	"github.com/tochemey/goakt/v2/internal/eventstream"
 	"github.com/tochemey/goakt/v2/internal/http"
 	"github.com/tochemey/goakt/v2/internal/internalpb"
@@ -841,7 +842,8 @@ func (x *PID) reset() {
 	x.processedCount.Store(0)
 }
 
-func (x *PID) freeWatchers(ctx context.Context) {
+// freeWatchers releases all the actor watching the given actor
+func (x *PID) freeWatchers(ctx context.Context) error {
 	x.logger.Debug("freeing all watcher actors...")
 	watchers := x.watchers()
 	if watchers.Len() > 0 {
@@ -852,44 +854,54 @@ func (x *PID) freeWatchers(ctx context.Context) {
 			}
 			if watcher.WatcherID.IsRunning() {
 				x.logger.Debugf("watcher=(%s) releasing watched=(%s)", watcher.WatcherID.ID(), x.ID())
-				// TODO: handle error and push to some ActorSystem dead-letters queue
-				_ = x.doTell(ctx, watcher.WatcherID, terminated)
+				if err := x.doTell(ctx, watcher.WatcherID, terminated); err != nil {
+					e := fmt.Errorf("failed to release watcher %s: %w", watcher.WatcherID.ID(), err)
+					x.logger.Error(e)
+					return e
+				}
 				watcher.WatcherID.UnWatch(x)
 				watcher.WatcherID.removeChild(x)
 				x.logger.Debugf("watcher=(%s) released watched=(%s)", watcher.WatcherID.ID(), x.ID())
 			}
 		}
 	}
+	return nil
 }
 
-func (x *PID) freeWatchees(ctx context.Context) {
+// freeWatchees unwatch all supervised actors
+func (x *PID) freeWatchees(ctx context.Context) error {
 	x.logger.Debug("freeing all watched actors...")
 	for _, watched := range x.watchedList.pids() {
 		x.logger.Debugf("watcher=(%s) unwatching actor=(%s)", x.ID(), watched.ID())
 		x.UnWatch(watched)
 		if err := watched.Shutdown(ctx); err != nil {
-			x.logger.Panic(
-				fmt.Errorf("watcher=(%s) failed to unwatch actor=(%s): %w",
-					x.ID(), watched.ID(), err))
+			e := fmt.Errorf("watcher=(%s) failed to unwatch actor=(%s): %w",
+				x.ID(), watched.ID(), err)
+			x.logger.Error(e)
+			return e
 		}
 		x.logger.Debugf("watcher=(%s) successfully unwatch actor=(%s)", x.ID(), watched.ID())
 	}
+	return nil
 }
 
-func (x *PID) freeChildren(ctx context.Context) {
+// freeChildren release all child actor created by the given actor
+func (x *PID) freeChildren(ctx context.Context) error {
 	x.logger.Debug("freeing all child actors...")
 	for _, child := range x.Children() {
 		x.logger.Debugf("parent=(%s) disowning child=(%s)", x.ID(), child.ID())
 		x.UnWatch(child)
 		x.children.delete(child.ActorPath())
 		if err := child.Shutdown(ctx); err != nil {
-			x.logger.Panic(
-				fmt.Errorf(
-					"parent=(%s) failed to disown child=(%s): %w", x.ID(), child.ID(),
-					err))
+			e := fmt.Errorf(
+				"parent=(%s) failed to disown child=(%s): %w", x.ID(), child.ID(),
+				err)
+			x.logger.Error(e)
+			return e
 		}
 		x.logger.Debugf("parent=(%s) successfully disown child=(%s)", x.ID(), child.ID())
 	}
+	return nil
 }
 
 // recovery is called upon after message is processed
@@ -1021,12 +1033,16 @@ func (x *PID) doStop(ctx context.Context) error {
 	x.httpClient.CloseIdleConnections()
 	x.watchersNotificationStopSignal <- types.Unit{}
 	x.receiveStopSignal <- types.Unit{}
-	x.freeWatchees(ctx)
-	x.freeChildren(ctx)
-	x.freeWatchers(ctx)
 
 	x.logger.Infof("Shutdown process is on going for actor=%s...", x.ActorPath().String())
-	if err := x.actor.PostStop(ctx); err != nil {
+
+	if err := errorchain.
+		New(errorchain.ReturnFirst()).
+		AddError(x.freeWatchees(ctx)).
+		AddError(x.freeChildren(ctx)).
+		AddError(x.freeChildren(ctx)).
+		AddError(x.actor.PostStop(ctx)).
+		Error(); err != nil {
 		x.running.Store(false)
 		x.reset()
 		return err

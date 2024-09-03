@@ -66,7 +66,7 @@ type Client struct {
 // An instance of the Client can be reused and it is thread safe.
 func New(ctx context.Context, addresses []string, opts ...Option) (*Client, error) {
 	chain := validation.
-		New(validation.FailFast()).
+		New(validation.ReturnFirstViolation()).
 		AddAssertion(len(addresses) != 0, "addresses are required")
 	for _, host := range addresses {
 		chain = chain.AddValidator(validation.NewTCPAddressValidator(host))

@@ -26,6 +26,7 @@ package actor
 
 import (
 	"context"
+	"errors"
 	"net"
 	"sort"
 	"strconv"
@@ -71,7 +72,7 @@ func TestEventsSubscriptions(t *testing.T) {
 	require.NotNil(t, subscriber2)
 
 	// wait for some time
-	time.Sleep(time.Second)
+	pause(time.Second)
 
 	// capture the joins
 	var joins []*goaktpb.NodeJoined
@@ -90,7 +91,7 @@ func TestEventsSubscriptions(t *testing.T) {
 	require.Equal(t, peerAddress2, joins[0].GetAddress())
 
 	// wait for some time
-	time.Sleep(time.Second)
+	pause(time.Second)
 
 	// stop the node
 	require.NoError(t, node1.Unsubscribe(subscriber1))
@@ -98,7 +99,7 @@ func TestEventsSubscriptions(t *testing.T) {
 	assert.NoError(t, sd1.Close())
 
 	// wait for some time
-	time.Sleep(time.Second)
+	pause(time.Second)
 
 	var lefts []*goaktpb.NodeLeft
 	for event := range subscriber2.Iterator() {
@@ -180,7 +181,7 @@ func TestMetrics(t *testing.T) {
 	assert.ElementsMatch(t, expected, actual)
 
 	// stop the actor after some time
-	time.Sleep(time.Second)
+	pause(time.Second)
 
 	t.Cleanup(func() {
 		err = actorSystem.Stop(ctx)
@@ -299,13 +300,13 @@ func TestActorSystem_ReSpawn(t *testing.T) {
 	require.True(t, pid.IsRunning())
 
 	// wait for a while for the system to stop
-	time.Sleep(time.Second)
+	pause(time.Second)
 	// restart the actor
 	_, err = actorSystem.ReSpawn(ctx, actorName)
 	require.NoError(t, err)
 
 	// wait for the actor to complete start
-	time.Sleep(time.Second)
+	pause(time.Second)
 	require.True(t, pid.IsRunning())
 
 	var items []*goaktpb.ActorRestarted
@@ -349,7 +350,7 @@ func TestActorSystem_ReSpawn_WhenPreStartReturnsError_ReturnsError(t *testing.T)
 	require.True(t, pid.IsRunning())
 
 	// wait for a while for the system to stop
-	time.Sleep(time.Second)
+	pause(time.Second)
 
 	// restart the actor
 	pid, err = actorSystem.ReSpawn(ctx, actorName)
@@ -389,7 +390,7 @@ func TestActorSystem_ReSpawn_WhenActorNotFound_ReturnsError(t *testing.T) {
 	err = actorSystem.Kill(ctx, actorName)
 	require.NoError(t, err)
 	// wait for a while for the system to stop
-	time.Sleep(time.Second)
+	pause(time.Second)
 
 	// restart the actor
 	_, err = actorSystem.ReSpawn(ctx, actorName)
@@ -424,7 +425,7 @@ func TestActorSystem_ActorsCount(t *testing.T) {
 	assert.NotNil(t, actorRef)
 
 	// wait for the start of the actor to be complete
-	time.Sleep(time.Second)
+	pause(time.Second)
 
 	assert.EqualValues(t, 1, actorSystem.ActorsCount())
 
@@ -473,7 +474,7 @@ func TestActorSystem_Janitor(t *testing.T) {
 	assert.NoError(t, err)
 
 	// wait for the system to properly start
-	time.Sleep(time.Second)
+	pause(time.Second)
 
 	actorName := "testActor"
 	pid, err := actorSystem.Spawn(ctx, actorName, new(testActor))
@@ -481,12 +482,12 @@ func TestActorSystem_Janitor(t *testing.T) {
 	require.NotNil(t, pid)
 
 	// wait for the actor to properly start
-	time.Sleep(time.Second)
+	pause(time.Second)
 
 	assert.Zero(t, actorSystem.ActorsCount())
 
 	// stop the actor after some time
-	time.Sleep(time.Second)
+	pause(time.Second)
 
 	t.Cleanup(func() {
 		err = actorSystem.Stop(ctx)
@@ -505,7 +506,7 @@ func TestActorSystem_GetPartition_WhenClusterDisabled_ReturnsZero(t *testing.T) 
 	assert.NoError(t, err)
 
 	// wait for the system to properly start
-	time.Sleep(time.Second)
+	pause(time.Second)
 
 	partition := actorSystem.GetPartition("some-actor")
 	assert.Zero(t, partition)
@@ -516,7 +517,7 @@ func TestActorSystem_GetPartition_WhenClusterDisabled_ReturnsZero(t *testing.T) 
 	})
 }
 
-func TestActorSystem_Stop_WhenActorPostStopReturnsError_Panics(t *testing.T) {
+func TestActorSystem_Stop_WhenActorPostStopReturnsError_ReturnsError(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	actorSystem, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
@@ -530,13 +531,8 @@ func TestActorSystem_Stop_WhenActorPostStopReturnsError_Panics(t *testing.T) {
 	require.NotNil(t, pid)
 
 	// stop the actor after some time
-	time.Sleep(time.Second)
-
-	t.Cleanup(func() {
-		assert.Panics(t, func() {
-			_ = actorSystem.Stop(ctx)
-		})
-	})
+	pause(time.Second)
+	assert.Error(t, actorSystem.Stop(ctx))
 }
 
 func TestActorSystem_DeadletterSubscription(t *testing.T) {
@@ -549,7 +545,7 @@ func TestActorSystem_DeadletterSubscription(t *testing.T) {
 	require.NoError(t, err)
 
 	// wait for complete start
-	time.Sleep(time.Second)
+	pause(time.Second)
 
 	// create a deadletter subscriber
 	subscriber, err := actorSystem.Subscribe()
@@ -562,14 +558,14 @@ func TestActorSystem_DeadletterSubscription(t *testing.T) {
 	require.NotNil(t, pid)
 
 	// wait a while
-	time.Sleep(time.Second)
+	pause(time.Second)
 
 	// every message sent to the actor will result in deadletters
 	for i := 0; i < 5; i++ {
 		require.NoError(t, Tell(ctx, pid, &emptypb.Empty{}))
 	}
 
-	time.Sleep(time.Second)
+	pause(time.Second)
 
 	var items []*goaktpb.Deadletter
 	for message := range subscriber.Iterator() {
@@ -602,6 +598,7 @@ func TestActorSystem_Subscription_WhenNotStarted_ReturnsError(t *testing.T) {
 }
 
 func TestActorSystem_Unsubscribe_WhenShutdown_ReturnsError(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	actorSystem, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
 
@@ -616,7 +613,7 @@ func TestActorSystem_Unsubscribe_WhenShutdown_ReturnsError(t *testing.T) {
 	// stop the actor system
 	assert.NoError(t, actorSystem.Stop(ctx))
 
-	time.Sleep(time.Second)
+	pause(time.Second)
 
 	// create a deadletter subscriber
 	err = actorSystem.Unsubscribe(subscriber)
@@ -670,7 +667,7 @@ func TestNewActorSystem_ActorOf_WhenActorPassivatedInCluster_ReturnsNotFound(t *
 	assert.NoError(t, err)
 
 	// wait for the cluster to start
-	time.Sleep(time.Second)
+	pause(time.Second)
 
 	// create an actor
 	actorName := uuid.NewString()
@@ -681,7 +678,7 @@ func TestNewActorSystem_ActorOf_WhenActorPassivatedInCluster_ReturnsNotFound(t *
 
 	// wait for a while for replication to take effect
 	// otherwise the subsequent test will return actor not found
-	time.Sleep(time.Second)
+	pause(time.Second)
 
 	// get the actor
 	addr, pid, err := actorSystem.actorOf(ctx, actorName)
@@ -707,4 +704,384 @@ func TestActorSystem_PeerAddress_WhenNoCluster_ReturnsEmpty(t *testing.T) {
 	assert.NoError(t, err)
 	require.Empty(t, actorSystem.PeerAddress())
 	require.NoError(t, actorSystem.Stop(ctx))
+}
+
+func TestActorSystem_SpawnFromFunc(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	actorSystem, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+
+	// start the actor system
+	err := actorSystem.Start(ctx)
+	assert.NoError(t, err)
+
+	receiveFn := func(_ context.Context, message proto.Message) error {
+		expected := &testpb.TestTell{}
+		require.True(t, proto.Equal(expected, message))
+		return nil
+	}
+
+	pid, err := actorSystem.SpawnFromFunc(ctx, receiveFn)
+	require.NoError(t, err)
+	require.NotNil(t, pid)
+
+	// stop the actor after some time
+	pause(time.Second)
+
+	// send a message to the actor
+	require.NoError(t, Tell(ctx, pid, &testpb.TestTell{}))
+
+	t.Cleanup(func() {
+		err = actorSystem.Stop(ctx)
+		assert.NoError(t, err)
+	})
+}
+
+func TestActorSystem_SpawnFromFunc_WhenClusterIsEnabled(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	ports := dynaport.Get(3)
+	host := "127.0.0.1"
+	gossipPort := ports[0]
+	peersPort := ports[1]
+	remotingPort := ports[2]
+
+	// define discovered addresses
+	addrs := []string{
+		net.JoinHostPort(host, strconv.Itoa(gossipPort)),
+	}
+
+	// mock the discovery provider
+	provider := new(mocksdiscovery.Provider)
+	actorSystem, err := NewActorSystem(
+		"test",
+		WithExpireActorAfter(time.Minute),
+		WithLogger(log.DiscardLogger),
+		WithAskTimeout(time.Minute),
+		WithHost(host),
+		WithCluster(
+			NewClusterConfig().
+				WithKinds(new(testActor)).
+				WithPartitionCount(10).
+				WithReplicaCount(1).
+				WithRemotingPort(remotingPort).
+				WithGossipPort(gossipPort).
+				WithPeersPort(peersPort).
+				WithMinimumPeersQuorum(1).
+				WithDiscovery(provider)))
+
+	require.NoError(t, err)
+
+	provider.EXPECT().ID().Return("testDisco")
+	provider.EXPECT().Initialize().Return(nil)
+	provider.EXPECT().Register().Return(nil)
+	provider.EXPECT().Deregister().Return(nil)
+	provider.EXPECT().DiscoverPeers().Return(addrs, nil)
+	provider.EXPECT().Close().Return(nil)
+
+	// start the actor system
+	err = actorSystem.Start(ctx)
+	assert.NoError(t, err)
+
+	// wait for the cluster to start
+	pause(time.Second)
+
+	receiveFn := func(_ context.Context, message proto.Message) error {
+		expected := &testpb.TestTell{}
+		require.True(t, proto.Equal(expected, message))
+		return nil
+	}
+
+	pid, err := actorSystem.SpawnFromFunc(ctx, receiveFn)
+	require.NoError(t, err)
+	require.NotNil(t, pid)
+
+	// stop the actor after some time
+	pause(time.Second)
+
+	// send a message to the actor
+	require.NoError(t, Tell(ctx, pid, &testpb.TestTell{}))
+
+	t.Cleanup(func() {
+		err = actorSystem.Stop(ctx)
+		assert.NoError(t, err)
+	})
+}
+
+func TestActorSystem_SpawnFromFunc_WhenPreStartReturnsError_ReturnError(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	actorSystem, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+
+	// start the actor system
+	err := actorSystem.Start(ctx)
+	assert.NoError(t, err)
+
+	preStart := func(ctx context.Context) error {
+		return errors.New("failed")
+	}
+	receiveFn := func(_ context.Context, message proto.Message) error {
+		expected := &testpb.TestTell{}
+		require.True(t, proto.Equal(expected, message))
+		return nil
+	}
+
+	pid, err := actorSystem.SpawnFromFunc(ctx, receiveFn, WithPreStart(preStart))
+	require.Error(t, err)
+	require.Nil(t, pid)
+
+	t.Cleanup(func() {
+		err = actorSystem.Stop(ctx)
+		assert.NoError(t, err)
+	})
+}
+
+func TestActorSystem_SpawnFromFunc_WhenPostStopReturnsError_ReturnError(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	actorSystem, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+
+	// start the actor system
+	err := actorSystem.Start(ctx)
+	assert.NoError(t, err)
+
+	preStart := func(ctx context.Context) error {
+		return nil
+	}
+
+	postStop := func(ctx context.Context) error {
+		return errors.New("failed")
+	}
+
+	receiveFn := func(_ context.Context, message proto.Message) error {
+		expected := &testpb.TestTell{}
+		require.True(t, proto.Equal(expected, message))
+		return nil
+	}
+
+	pid, err := actorSystem.SpawnFromFunc(ctx,
+		receiveFn,
+		WithPreStart(preStart),
+		WithPostStop(postStop))
+
+	// stop the actor after some time
+	pause(time.Second)
+
+	// send a message to the actor
+	require.NoError(t, Tell(ctx, pid, &testpb.TestTell{}))
+
+	assert.Error(t, actorSystem.Stop(ctx))
+}
+
+func TestActorSystem_SpawnFromFunc_WhenSystemNotStarted_ReturnsError(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	actorSystem, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+
+	receiveFn := func(_ context.Context, message proto.Message) error {
+		expected := &testpb.TestTell{}
+		require.True(t, proto.Equal(expected, message))
+		return nil
+	}
+
+	pid, err := actorSystem.SpawnFromFunc(ctx, receiveFn)
+	assert.Error(t, err)
+	assert.EqualError(t, err, ErrActorSystemNotStarted.Error())
+	assert.Nil(t, pid)
+}
+
+func TestActorSystem_Register(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	actorSystem, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+
+	// start the actor system
+	err := actorSystem.Start(ctx)
+	assert.NoError(t, err)
+
+	// register the actor
+	err = actorSystem.Register(ctx, new(testActor))
+	require.NoError(t, err)
+
+	t.Cleanup(func() {
+		err = actorSystem.Stop(ctx)
+		assert.NoError(t, err)
+	})
+}
+
+func TestActorSystem_Register_WhenSystemNotStarted_ReturnsError(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	actorSystem, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+
+	// register the actor
+	err := actorSystem.Register(ctx, new(testActor))
+	require.Error(t, err)
+	assert.EqualError(t, err, ErrActorSystemNotStarted.Error())
+
+	t.Cleanup(func() {
+		err = actorSystem.Stop(ctx)
+		assert.NoError(t, err)
+	})
+}
+
+func TestActorSystem_Deregister(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	actorSystem, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+
+	// start the actor system
+	err := actorSystem.Start(ctx)
+	assert.NoError(t, err)
+
+	// register the actor
+	err = actorSystem.Register(ctx, new(testActor))
+	require.NoError(t, err)
+
+	err = actorSystem.Deregister(ctx, new(testActor))
+	require.NoError(t, err)
+
+	t.Cleanup(func() {
+		err = actorSystem.Stop(ctx)
+		assert.NoError(t, err)
+	})
+}
+
+func TestActorSystem_Deregister_WhenSystemNotStarted_ReturnsError(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	actorSystem, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+
+	// register the actor
+	err := actorSystem.Deregister(ctx, new(testActor))
+	require.Error(t, err)
+	assert.EqualError(t, err, ErrActorSystemNotStarted.Error())
+}
+
+func TestActorSystem_Start_WhenStartClusterFails_ReturnsError(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	ports := dynaport.Get(3)
+	host := "127.0.0.1"
+	gossipPort := ports[0]
+	peersPort := ports[1]
+	remotingPort := ports[2]
+
+	// define discovered addresses
+	addrs := []string{
+		net.JoinHostPort(host, strconv.Itoa(gossipPort)),
+	}
+
+	// mock the discovery provider
+	provider := new(mocksdiscovery.Provider)
+	mockErr := errors.New("failed")
+	provider.EXPECT().ID().Return("testDisco")
+	provider.EXPECT().Initialize().Return(mockErr)
+	provider.EXPECT().Register().Return(nil)
+	provider.EXPECT().Deregister().Return(nil)
+	provider.EXPECT().DiscoverPeers().Return(addrs, nil)
+	provider.EXPECT().Close().Return(nil)
+
+	actorSystem, err := NewActorSystem(
+		"test",
+		WithExpireActorAfter(passivateAfter),
+		WithLogger(log.DiscardLogger),
+		WithAskTimeout(time.Minute),
+		WithHost(host),
+		WithCluster(
+			NewClusterConfig().
+				WithKinds(new(testActor)).
+				WithPartitionCount(2).
+				WithReplicaCount(1).
+				WithRemotingPort(remotingPort).
+				WithGossipPort(gossipPort).
+				WithPeersPort(peersPort).
+				WithMinimumPeersQuorum(1).
+				WithDiscovery(provider)))
+
+	require.NoError(t, err)
+	require.Error(t, actorSystem.Start(ctx))
+}
+
+func TestActorSystem_RemoteSpawn_WhenClusterEnabled(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	ports := dynaport.Get(3)
+	host := "127.0.0.1"
+	gossipPort := ports[0]
+	peersPort := ports[1]
+	remotingPort := ports[2]
+
+	// define discovered addresses
+	addrs := []string{
+		net.JoinHostPort(host, strconv.Itoa(gossipPort)),
+	}
+
+	// mock the discovery provider
+	provider := new(mocksdiscovery.Provider)
+	provider.EXPECT().ID().Return("testDisco")
+	provider.EXPECT().Initialize().Return(nil)
+	provider.EXPECT().Register().Return(nil)
+	provider.EXPECT().Deregister().Return(nil)
+	provider.EXPECT().DiscoverPeers().Return(addrs, nil)
+	provider.EXPECT().Close().Return(nil)
+
+	actorSystem, err := NewActorSystem(
+		"test",
+		WithExpireActorAfter(passivateAfter),
+		WithLogger(log.DiscardLogger),
+		WithAskTimeout(time.Minute),
+		WithHost(host),
+		WithCluster(
+			NewClusterConfig().
+				WithKinds(new(testActor)).
+				WithPartitionCount(2).
+				WithReplicaCount(1).
+				WithRemotingPort(remotingPort).
+				WithGossipPort(gossipPort).
+				WithPeersPort(peersPort).
+				WithMinimumPeersQuorum(1).
+				WithDiscovery(provider)))
+
+	require.NoError(t, err)
+	require.NoError(t, actorSystem.Start(ctx))
+
+	pause(time.Second)
+
+	// create an actor
+	actorName := "actorID"
+	// fetching the address of the that actor should return nil address
+	addr, err := RemoteLookup(ctx, host, remotingPort, actorName)
+	require.NoError(t, err)
+	require.Nil(t, addr)
+
+	// spawn the remote actor
+	err = RemoteSpawn(ctx, host, remotingPort, actorName, "actor.testActor")
+	require.NoError(t, err)
+
+	// re-fetching the address of the actor should return not nil address after start
+	addr, err = RemoteLookup(ctx, host, remotingPort, actorName)
+	require.NoError(t, err)
+	require.NotNil(t, addr)
+
+	// send the message to exchanger actor one using remote messaging
+	response, err := RemoteAsk(ctx, addr, new(testpb.TestAsk), DefaultAskTimeout)
+
+	require.NoError(t, err)
+	require.NotNil(t, response)
+	require.True(t, response.MessageIs(new(testpb.TestAsk)))
+
+	actual := new(testpb.TestAsk)
+	err = response.UnmarshalTo(actual)
+	require.NoError(t, err)
+
+	expected := new(testpb.TestAsk)
+	assert.True(t, proto.Equal(expected, actual))
+
+	t.Cleanup(func() {
+		err = actorSystem.Stop(ctx)
+		assert.NoError(t, err)
+	})
 }

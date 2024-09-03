@@ -22,7 +22,7 @@
  * SOFTWARE.
  */
 
-package error
+package errorchain
 
 import "go.uber.org/multierr"
 
@@ -35,8 +35,9 @@ type Chain struct {
 // ChainOption configures a validation chain at creation time.
 type ChainOption func(*Chain)
 
-// NewChain creates a new error chain.
-func NewChain(opts ...ChainOption) *Chain {
+// New creates a new error chain. All errors will be evaluated respectively
+// according to their insertion order
+func New(opts ...ChainOption) *Chain {
 	chain := &Chain{
 		errs: make([]error, 0),
 	}
@@ -75,7 +76,7 @@ func ReturnFirst() ChainOption {
 	return func(c *Chain) { c.returnFirst = true }
 }
 
-// AllErrors sets whether a chain should return all errors.
-func AllErrors() ChainOption {
+// ReturnAll sets whether a chain should return all errors.
+func ReturnAll() ChainOption {
 	return func(c *Chain) { c.returnFirst = false }
 }

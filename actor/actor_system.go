@@ -50,6 +50,7 @@ import (
 	"github.com/tochemey/goakt/v2/goaktpb"
 	"github.com/tochemey/goakt/v2/hash"
 	"github.com/tochemey/goakt/v2/internal/cluster"
+	"github.com/tochemey/goakt/v2/internal/errorchain"
 	"github.com/tochemey/goakt/v2/internal/eventstream"
 	"github.com/tochemey/goakt/v2/internal/http"
 	"github.com/tochemey/goakt/v2/internal/internalpb"
@@ -490,14 +491,13 @@ func (actorSystem *ActorSystem) Stop(ctx context.Context) error {
 	defer cancel()
 
 	if actorSystem.clusterEnabled.Load() {
-		if err := actorSystem.remotingServer.Shutdown(ctx); err != nil {
+		if err := errorchain.New(errorchain.ReturnFirst()).
+			AddError(actorSystem.remotingServer.Shutdown(ctx)).
+			AddError(actorSystem.cluster.Stop(ctx)).Error(); err != nil {
+			actorSystem.remotingServer = nil
 			return err
 		}
-		actorSystem.remotingServer = nil
 
-		if err := actorSystem.cluster.Stop(ctx); err != nil {
-			return err
-		}
 		close(actorSystem.actorsChan)
 		actorSystem.clusterSyncStopSig <- types.Unit{}
 		actorSystem.clusterEnabled.Store(false)
@@ -512,7 +512,6 @@ func (actorSystem *ActorSystem) Stop(ctx context.Context) error {
 
 	// remove the supervisor from the actors list
 	actorSystem.actors.delete(actorSystem.supervisor.ActorPath())
-
 	for _, actor := range actorSystem.Actors() {
 		actorSystem.actors.delete(actor.ActorPath())
 		if err := actor.Shutdown(ctx); err != nil {
@@ -893,9 +892,9 @@ func (actorSystem *ActorSystem) enableClustering(ctx context.Context) error {
 		return err
 	}
 
-	bootstrapChan := make(chan struct{}, 1)
+	bootstrapChan := make(chan types.Unit, 1)
 	timer := time.AfterFunc(time.Second, func() {
-		bootstrapChan <- struct{}{}
+		bootstrapChan <- types.Unit{}
 	})
 	<-bootstrapChan
 	timer.Stop()

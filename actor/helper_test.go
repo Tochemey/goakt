@@ -37,6 +37,7 @@ import (
 
 	"github.com/tochemey/goakt/v2/discovery"
 	"github.com/tochemey/goakt/v2/discovery/nats"
+	"github.com/tochemey/goakt/v2/internal/types"
 	"github.com/tochemey/goakt/v2/log"
 	"github.com/tochemey/goakt/v2/test/data/testpb"
 )
@@ -177,4 +178,13 @@ func startNode(t *testing.T, nodeName, serverAddr string) (*ActorSystem, discove
 
 	// return the cluster startNode
 	return system, provider
+}
+
+func pause(duration time.Duration) {
+	bootstrapChan := make(chan types.Unit, 1)
+	timer := time.AfterFunc(duration, func() {
+		bootstrapChan <- types.Unit{}
+	})
+	<-bootstrapChan
+	timer.Stop()
 }

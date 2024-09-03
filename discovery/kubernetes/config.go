@@ -46,7 +46,7 @@ type Config struct {
 
 // Validate checks whether the given discovery configuration is valid
 func (x Config) Validate() error {
-	return validation.New(validation.FailFast()).
+	return validation.New(validation.ReturnFirstViolation()).
 		AddValidator(validation.NewEmptyStringValidator("Namespace", x.Namespace)).
 		AddValidator(validation.NewEmptyStringValidator("ApplicationName", x.ApplicationName)).
 		AddValidator(validation.NewEmptyStringValidator("GossipPortName", x.GossipPortName)).

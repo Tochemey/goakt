@@ -116,7 +116,7 @@ func (p *Path) Validate() error {
 	pattern := "^[a-zA-Z0-9][a-zA-Z0-9-_\\.]*$"
 	customErr := errors.New("path name must contain only word characters (i.e. [a-zA-Z0-9] plus non-leading '-' or '_')")
 	return validation.
-		New(validation.FailFast()).
+		New(validation.ReturnFirstViolation()).
 		AddValidator(validation.NewPatternValidator(pattern, strings.TrimSpace(p.name), customErr)).
 		AddAssertion(p.address != nil, "address is required").
 		Validate()

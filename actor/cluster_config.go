@@ -149,7 +149,7 @@ func (x *ClusterConfig) Kinds() []Actor {
 // Validate validates the cluster config
 func (x *ClusterConfig) Validate() error {
 	return validation.
-		New(validation.AllErrors()).
+		New(validation.ReturnAllViolations()).
 		AddAssertion(x.discovery != nil, "discovery provider is not set").
 		AddAssertion(x.partitionCount > 0, "partition count need to greater than zero").
 		AddAssertion(x.minimumPeersQuorum >= 1, "minimum peers quorum must be at least one").
