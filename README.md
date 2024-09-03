@@ -21,48 +21,52 @@ The project adheres to [Semantic Versioning](https://semver.org) and [Convention
 
 ## Table of Content
 
-- [Design Principles](#design-principles)
-- [Use Cases](#use-cases)
-- [Installation](#installation)
-- [Examples](#examples)
-- [Features](#features)
-  - [Actors](#actors)
-  - [Passivation](#passivation)
-  - [Supervision](#supervision)
-  - [Actor System](#actor-system)
-  - [Behaviors](#behaviors)
-  - [Router](#router)
-  - [Events Stream](#events-stream)
-    - [Supported events](#supported-events)
-  - [Messaging](#messaging)
-  - [Scheduler](#scheduler)
-    - [Cron Expression Format](#cron-expression-format)
-    - [Note](#note)
-  - [Stashing](#stashing)
-  - [Remoting](#remoting)
-  - [Cluster](#cluster)
-  - [Observability](#observability)
-    - [Metrics](#metrics)
-    - [Logging](#logging)
-  - [Testkit](#testkit)
-- [API](#api)
-- [Client](#client)
-  - [Balancer strategies](#balancer-strategies)
-  - [Features](#features-1)
-- [Clustering](#clustering)
-  - [Operations Guide](#operations-guide)
-  - [Redeployment](#redeployment)
-  - [Built-in Discovery Providers](#built-in-discovery-providers)
-    - [Kubernetes Discovery Provider Setup](#kubernetes-discovery-provider-setup)
-      - [Get Started](#get-started)
-      - [Role Based Access](#role-based-access)
-    - [mDNS Discovery Provider Setup](#mdns-discovery-provider-setup)
-    - [NATS Discovery Provider Setup](#nats-discovery-provider-setup)
-    - [DNS Provider Setup](#dns-provider-setup)
-    - [Static Provider Setup](#static-provider-setup)
-- [Contribution](#contribution)
-  - [Test \& Linter](#test--linter)
-- [Benchmark](#benchmark)
+- [Go-Akt](#go-akt)
+  - [Table of Content](#table-of-content)
+  - [Design Principles](#design-principles)
+  - [Use Cases](#use-cases)
+  - [Installation](#installation)
+  - [Examples](#examples)
+  - [Features](#features)
+    - [Actors](#actors)
+    - [Passivation](#passivation)
+    - [Supervision](#supervision)
+    - [Actor System](#actor-system)
+    - [Behaviors](#behaviors)
+    - [Router](#router)
+    - [Events Stream](#events-stream)
+      - [Supported events](#supported-events)
+    - [Messaging](#messaging)
+    - [Scheduler](#scheduler)
+      - [Cron Expression Format](#cron-expression-format)
+      - [Note](#note)
+    - [Stashing](#stashing)
+    - [Remoting](#remoting)
+    - [Cluster](#cluster)
+      - [Working code](#working-code)
+      - [Not working code](#not-working-code)
+    - [Observability](#observability)
+      - [Metrics](#metrics)
+      - [Logging](#logging)
+    - [Testkit](#testkit)
+  - [API](#api)
+  - [Client](#client)
+    - [Balancer strategies](#balancer-strategies)
+    - [Features](#features-1)
+  - [Clustering](#clustering)
+    - [Operations Guide](#operations-guide)
+    - [Redeployment](#redeployment)
+    - [Built-in Discovery Providers](#built-in-discovery-providers)
+      - [Kubernetes Discovery Provider Setup](#kubernetes-discovery-provider-setup)
+        - [Get Started](#get-started)
+        - [Role Based Access](#role-based-access)
+      - [mDNS Discovery Provider Setup](#mdns-discovery-provider-setup)
+      - [NATS Discovery Provider Setup](#nats-discovery-provider-setup)
+      - [DNS Provider Setup](#dns-provider-setup)
+      - [Static Provider Setup](#static-provider-setup)
+  - [Contribution](#contribution)
+    - [Test \& Linter](#test--linter)
+  - [Benchmark](#benchmark)
 
 ## Design Principles
 
@@ -300,6 +304,28 @@ These methods can be used from the [API](./actors/api.go) as well as from the [P
 
 This offers simple scalability, partitioning (sharding), and re-balancing out-of-the-box. Go-Akt nodes are automatically discovered. See [Clustering](#clustering).
 Beware that at the moment, within the cluster the existence of an actor is unique.
+
+When levereging cluster re-balancing, leaving the supervisor to re-instatiate an actor in case of node fail, actors should be created as plain structs without parameters. This is required because when the supervisor re-creates needed actors will not be aware of those parameters.
+
+#### Working code
+
+```go
+type Ping struct{}
+
+pid, err = actorSystem.Spawn(ctx, "ping", &Ping{})
+```
+
+#### Not working code
+
+```go
+type Ping struct{
+  Afield string
+}
+
+pid, err = actorSystem.Spawn(ctx, "ping", &Ping{Afield: "dummy"})
+```
+
+In the **not working code** when actor will be re-created by the re-balancing process the **Afield** will be empty.
 
 ### Observability
 
