@@ -918,11 +918,6 @@ func TestActorSystem_Register_WhenSystemNotStarted_ReturnsError(t *testing.T) {
 	err := actorSystem.Register(ctx, new(testActor))
 	require.Error(t, err)
 	assert.EqualError(t, err, ErrActorSystemNotStarted.Error())
-
-	t.Cleanup(func() {
-		err = actorSystem.Stop(ctx)
-		assert.NoError(t, err)
-	})
 }
 
 func TestActorSystem_Deregister(t *testing.T) {
