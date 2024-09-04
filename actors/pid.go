@@ -183,7 +183,7 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 		actor:                          actor,
 		latestReceiveTime:              atomic.Time{},
 		haltPassivationLnr:             make(chan types.Unit, 1),
-		logger:                         log.New(log.InfoLevel, os.Stderr),
+		logger:                         log.New(log.ErrorLevel, os.Stderr),
 		children:                       newPIDMap(10),
 		supervisorDirective:            DefaultSupervisoryStrategy,
 		watchersList:                   slice.New[*watcher](),

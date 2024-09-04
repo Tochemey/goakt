@@ -242,7 +242,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		actors:                 newPIDMap(1_000),
 		actorsChan:             make(chan *internalpb.WireActor, 10),
 		name:                   name,
-		logger:                 log.New(log.InfoLevel, os.Stderr),
+		logger:                 log.New(log.ErrorLevel, os.Stderr),
 		expireActorAfter:       DefaultPassivationTimeout,
 		askTimeout:             DefaultAskTimeout,
 		actorInitMaxRetries:    DefaultInitMaxRetries,

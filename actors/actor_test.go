@@ -27,7 +27,6 @@ package actors
 import (
 	"context"
 	"fmt"
-	"os"
 	"sync"
 	"testing"
 	"time"
@@ -430,7 +429,7 @@ func startNatsServer(t *testing.T) *natsserver.Server {
 
 func startClusterSystem(t *testing.T, nodeName, serverAddr string) (ActorSystem, discovery.Provider) {
 	ctx := context.TODO()
-	logger := log.New(log.DebugLevel, os.Stdout)
+	logger := log.DiscardLogger
 
 	// generate the ports for the single startNode
 	nodePorts := dynaport.Get(3)
