@@ -1350,10 +1350,7 @@ func TestShutdown(t *testing.T) {
 		assert.Len(t, parent.Children(), 1)
 
 		//stop the
-		assert.Panics(t, func() {
-			err = parent.Shutdown(ctx)
-			assert.Nil(t, err)
-		})
+		assert.Error(t, parent.Shutdown(ctx))
 	})
 }
 func TestBatchTell(t *testing.T) {
@@ -2267,14 +2264,14 @@ func TestSendAsync(t *testing.T) {
 
 	pause(time.Second)
 
-	receiver, err := actorSystem.Spawn(ctx, "receiver", newTestActor())
+	receivingActor := newTestActor()
+	receiver, err := actorSystem.Spawn(ctx, "receiver", receivingActor)
 	assert.NoError(t, err)
 	assert.NotNil(t, receiver)
 
 	pause(time.Second)
 
-	actor2 := newTestActor()
-	sender, err := actorSystem.Spawn(ctx, "sender", actor2)
+	sender, err := actorSystem.Spawn(ctx, "sender", newTestActor())
 	assert.NoError(t, err)
 	assert.NotNil(t, sender)
 
@@ -2282,7 +2279,8 @@ func TestSendAsync(t *testing.T) {
 
 	err = sender.SendAsync(ctx, receiver.Name(), new(testpb.TestSend))
 	require.NoError(t, err)
-	assert.EqualValues(t, 1, actor2.counter.Load())
+
+	assert.EqualValues(t, 1, receivingActor.counter.Load())
 
 	t.Cleanup(func() {
 		assert.NoError(t, actorSystem.Stop(ctx))
