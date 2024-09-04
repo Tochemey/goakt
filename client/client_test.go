@@ -353,7 +353,7 @@ func TestClient(t *testing.T) {
 	t.Run("With SpawnWithBalancer", func(t *testing.T) {
 		ctx := context.TODO()
 
-		logger := log.DefaultLogger
+		logger := log.DiscardLogger
 
 		// start the NATS server
 		srv := startNatsServer(t)

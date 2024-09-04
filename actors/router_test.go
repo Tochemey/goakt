@@ -43,7 +43,7 @@ import (
 func TestRouter(t *testing.T) {
 	t.Run("With Fan-Out strategy", func(t *testing.T) {
 		ctx := context.TODO()
-		logger := log.DefaultLogger
+		logger := log.DiscardLogger
 		system, err := NewActorSystem(
 			"testSystem",
 			WithPassivationDisabled(),
@@ -103,7 +103,7 @@ func TestRouter(t *testing.T) {
 	})
 	t.Run("With Fan-Out strategy With no available routees router shuts down", func(t *testing.T) {
 		ctx := context.TODO()
-		logger := log.DefaultLogger
+		logger := log.DiscardLogger
 		system, err := NewActorSystem(
 			"testSystem",
 			WithPassivationDisabled(),
@@ -151,7 +151,7 @@ func TestRouter(t *testing.T) {
 	})
 	t.Run("With Round Robin strategy", func(t *testing.T) {
 		ctx := context.TODO()
-		logger := log.DefaultLogger
+		logger := log.DiscardLogger
 		system, err := NewActorSystem(
 			"testSystem",
 			WithPassivationDisabled(),
@@ -201,7 +201,7 @@ func TestRouter(t *testing.T) {
 	})
 	t.Run("With Round Robin strategy With no available routees router is alive and message in deadletter", func(t *testing.T) {
 		ctx := context.TODO()
-		logger := log.DefaultLogger
+		logger := log.DiscardLogger
 
 		system, err := NewActorSystem(
 			"testSystem",
@@ -264,7 +264,7 @@ func TestRouter(t *testing.T) {
 	})
 	t.Run("With Random strategy", func(t *testing.T) {
 		ctx := context.TODO()
-		logger := log.DefaultLogger
+		logger := log.DiscardLogger
 		system, err := NewActorSystem(
 			"testSystem",
 			WithPassivationDisabled(),

@@ -2273,7 +2273,8 @@ func TestSendAsync(t *testing.T) {
 
 	pause(time.Second)
 
-	sender, err := actorSystem.Spawn(ctx, "sender", newTestActor())
+	actor2 := newTestActor()
+	sender, err := actorSystem.Spawn(ctx, "sender", actor2)
 	assert.NoError(t, err)
 	assert.NotNil(t, sender)
 
@@ -2281,7 +2282,7 @@ func TestSendAsync(t *testing.T) {
 
 	err = sender.SendAsync(ctx, receiver.Name(), new(testpb.TestSend))
 	require.NoError(t, err)
-	assert.EqualValues(t, 1, receiver.processedCount.Load()-1) // -1 because of the PostStart message
+	assert.EqualValues(t, 1, actor2.counter.Load())
 
 	t.Cleanup(func() {
 		assert.NoError(t, actorSystem.Stop(ctx))
