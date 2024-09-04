@@ -27,7 +27,6 @@ package actors
 import (
 	"context"
 	"net"
-	"os"
 	"sort"
 	"strconv"
 	"sync"
@@ -142,7 +141,7 @@ func TestActorSystem(t *testing.T) {
 		clusterPort := nodePorts[1]
 		remotingPort := nodePorts[2]
 
-		logger := log.New(log.DebugLevel, os.Stdout)
+		logger := log.DiscardLogger
 		host := "127.0.0.1"
 
 		// define discovered addresses
@@ -231,7 +230,7 @@ func TestActorSystem(t *testing.T) {
 		ctx := context.TODO()
 		remotingPort := dynaport.Get(1)[0]
 
-		logger := log.New(log.DebugLevel, os.Stdout)
+		logger := log.DiscardLogger
 		host := "127.0.0.1"
 
 		newActorSystem, err := NewActorSystem(
@@ -317,7 +316,7 @@ func TestActorSystem(t *testing.T) {
 		ctx := context.TODO()
 		remotingPort := dynaport.Get(1)[0]
 
-		logger := log.New(log.DebugLevel, os.Stdout)
+		logger := log.DiscardLogger
 		host := "127.0.0.1"
 
 		newActorSystem, err := NewActorSystem(
@@ -475,7 +474,7 @@ func TestActorSystem(t *testing.T) {
 		ctx := context.TODO()
 		remotingPort := dynaport.Get(1)[0]
 
-		logger := log.New(log.DebugLevel, os.Stdout)
+		logger := log.DiscardLogger
 		host := "127.0.0.1"
 
 		newActorSystem, err := NewActorSystem(
@@ -546,7 +545,7 @@ func TestActorSystem(t *testing.T) {
 		ctx := context.TODO()
 		remotingPort := dynaport.Get(1)[0]
 
-		logger := log.New(log.DebugLevel, os.Stdout)
+		logger := log.DiscardLogger
 		host := "127.0.0.1"
 
 		newActorSystem, err := NewActorSystem(
@@ -590,7 +589,7 @@ func TestActorSystem(t *testing.T) {
 		ctx := context.TODO()
 		remotingPort := dynaport.Get(1)[0]
 
-		logger := log.New(log.DebugLevel, os.Stdout)
+		logger := log.DiscardLogger
 		host := "127.0.0.1"
 
 		newActorSystem, err := NewActorSystem(
@@ -611,7 +610,7 @@ func TestActorSystem(t *testing.T) {
 		ctx := context.TODO()
 		remotingPort := dynaport.Get(1)[0]
 
-		logger := log.New(log.DebugLevel, os.Stdout)
+		logger := log.DiscardLogger
 		host := "127.0.0.1"
 
 		newActorSystem, err := NewActorSystem(
@@ -630,7 +629,7 @@ func TestActorSystem(t *testing.T) {
 		ctx := context.TODO()
 		remotingPort := dynaport.Get(1)[0]
 
-		logger := log.New(log.DebugLevel, os.Stdout)
+		logger := log.DiscardLogger
 		host := "127.0.0.1"
 
 		newActorSystem, err := NewActorSystem(
@@ -911,7 +910,7 @@ func TestActorSystem(t *testing.T) {
 		clusterPort := nodePorts[1]
 		remotingPort := nodePorts[2]
 
-		logger := log.New(log.DebugLevel, os.Stdout)
+		logger := log.DiscardLogger
 		host := "127.0.0.1"
 
 		// define discovered addresses
@@ -1138,7 +1137,7 @@ func TestActorSystem(t *testing.T) {
 		clusterPort := nodePorts[1]
 		remotingPort := nodePorts[2]
 
-		logger := log.New(log.DebugLevel, os.Stdout)
+		logger := log.DiscardLogger
 		host := "127.0.0.1"
 
 		// define discovered addresses
@@ -1270,7 +1269,7 @@ func TestActorSystem(t *testing.T) {
 	})
 	t.Run("With happy path Register", func(t *testing.T) {
 		ctx := context.TODO()
-		logger := log.New(log.DebugLevel, os.Stdout)
+		logger := log.DiscardLogger
 
 		// create the actor system
 		sys, err := NewActorSystem("test",
@@ -1294,7 +1293,7 @@ func TestActorSystem(t *testing.T) {
 	})
 	t.Run("With Register when actor system not started", func(t *testing.T) {
 		ctx := context.TODO()
-		logger := log.New(log.DebugLevel, os.Stdout)
+		logger := log.DiscardLogger
 
 		// create the actor system
 		sys, err := NewActorSystem("test",
@@ -1315,7 +1314,7 @@ func TestActorSystem(t *testing.T) {
 	})
 	t.Run("With happy path Deregister", func(t *testing.T) {
 		ctx := context.TODO()
-		logger := log.New(log.DebugLevel, os.Stdout)
+		logger := log.DiscardLogger
 
 		// create the actor system
 		sys, err := NewActorSystem("test",
@@ -1342,7 +1341,7 @@ func TestActorSystem(t *testing.T) {
 	})
 	t.Run("With Deregister when actor system not started", func(t *testing.T) {
 		ctx := context.TODO()
-		logger := log.New(log.DebugLevel, os.Stdout)
+		logger := log.DiscardLogger
 
 		// create the actor system
 		sys, err := NewActorSystem("test",
@@ -1394,7 +1393,7 @@ func TestActorSystem(t *testing.T) {
 		clusterPort := nodePorts[1]
 		remotingPort := nodePorts[2]
 
-		logger := log.New(log.DebugLevel, os.Stdout)
+		logger := log.DiscardLogger
 		host := "127.0.0.1"
 
 		// define discovered addresses
