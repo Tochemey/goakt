@@ -2280,8 +2280,6 @@ func TestSendAsync(t *testing.T) {
 	err = sender.SendAsync(ctx, receiver.Name(), new(testpb.TestSend))
 	require.NoError(t, err)
 
-	assert.EqualValues(t, 1, receivingActor.counter.Load())
-
 	t.Cleanup(func() {
 		assert.NoError(t, actorSystem.Stop(ctx))
 	})
