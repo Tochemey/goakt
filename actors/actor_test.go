@@ -41,6 +41,7 @@ import (
 	"github.com/tochemey/goakt/v2/discovery"
 	"github.com/tochemey/goakt/v2/discovery/nats"
 	"github.com/tochemey/goakt/v2/goaktpb"
+	"github.com/tochemey/goakt/v2/internal/types"
 	"github.com/tochemey/goakt/v2/log"
 	"github.com/tochemey/goakt/v2/test/data/testpb"
 	testspb "github.com/tochemey/goakt/v2/test/data/testpb"
@@ -517,4 +518,13 @@ func (x *worker) Receive(ctx *ReceiveContext) {
 
 func (x *worker) PostStop(context.Context) error {
 	return nil
+}
+
+func pause(duration time.Duration) {
+	stopCh := make(chan types.Unit, 1)
+	timer := time.AfterFunc(duration, func() {
+		stopCh <- types.Unit{}
+	})
+	<-stopCh
+	timer.Stop()
 }

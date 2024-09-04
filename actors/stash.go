@@ -27,44 +27,44 @@ package actors
 import "errors"
 
 // stash adds the current message to the stash buffer
-func (x *PID) stash(ctx *ReceiveContext) error {
-	if x.stashBuffer == nil {
+func (pid *PID) stash(ctx *ReceiveContext) error {
+	if pid.stashBuffer == nil {
 		return ErrStashBufferNotSet
 	}
-	x.stashBuffer.Push(ctx)
+	pid.stashBuffer.Push(ctx)
 	return nil
 }
 
 // unstash unstashes the oldest message in the stash and prepends to the mailbox
-func (x *PID) unstash() error {
-	if x.stashBuffer == nil {
+func (pid *PID) unstash() error {
+	if pid.stashBuffer == nil {
 		return ErrStashBufferNotSet
 	}
 
-	received := x.stashBuffer.Pop()
+	received := pid.stashBuffer.Pop()
 	if received == nil {
 		return errors.New("stash buffer may be closed")
 	}
-	x.doReceive(received)
+	pid.doReceive(received)
 	return nil
 }
 
 // unstashAll unstashes all messages from the stash buffer and prepends in the mailbox
 // (it keeps the messages in the same order as received, unstashing older messages before newer).
-func (x *PID) unstashAll() error {
-	if x.stashBuffer == nil {
+func (pid *PID) unstashAll() error {
+	if pid.stashBuffer == nil {
 		return ErrStashBufferNotSet
 	}
 
-	x.stashLocker.Lock()
-	defer x.stashLocker.Unlock()
+	pid.stashLocker.Lock()
+	defer pid.stashLocker.Unlock()
 
-	for x.stashBuffer.Len() > 0 {
-		received := x.stashBuffer.Pop()
+	for pid.stashBuffer.Len() > 0 {
+		received := pid.stashBuffer.Pop()
 		if received == nil {
 			return errors.New("stash buffer may be closed")
 		}
-		x.doReceive(received)
+		pid.doReceive(received)
 	}
 
 	return nil

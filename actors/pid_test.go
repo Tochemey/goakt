@@ -75,10 +75,10 @@ func TestReceive(t *testing.T) {
 	count := 10
 	for i := 0; i < count; i++ {
 		receiveContext := &ReceiveContext{
-			ctx:       ctx,
-			message:   new(testpb.TestSend),
-			sender:    NoSender,
-			recipient: pid,
+			ctx:     ctx,
+			message: new(testpb.TestSend),
+			sender:  NoSender,
+			self:    pid,
 		}
 
 		pid.doReceive(receiveContext)
@@ -108,7 +108,7 @@ func TestPassivation(t *testing.T) {
 		wg := sync.WaitGroup{}
 		wg.Add(1)
 		go func() {
-			time.Sleep(receivingDelay)
+			pause(receivingDelay)
 			wg.Done()
 		}()
 		// block until timer is up
@@ -137,7 +137,7 @@ func TestPassivation(t *testing.T) {
 		wg := sync.WaitGroup{}
 		wg.Add(1)
 		go func() {
-			time.Sleep(receivingDelay)
+			pause(receivingDelay)
 			wg.Done()
 		}()
 		// block until timer is up
@@ -245,7 +245,7 @@ func TestRestart(t *testing.T) {
 		err = pid.Shutdown(ctx)
 		assert.NoError(t, err)
 
-		time.Sleep(time.Second)
+		pause(time.Second)
 
 		// let us send a message to the actor
 		err = Tell(ctx, pid, new(testpb.TestSend))
@@ -434,14 +434,14 @@ func TestSupervisorStrategy(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, child)
 
-		time.Sleep(time.Second)
+		pause(time.Second)
 
 		assert.Len(t, parent.Children(), 1)
 		// send a test panic message to the actor
 		assert.NoError(t, Tell(ctx, child, new(testpb.TestPanic)))
 
 		// wait for the child to properly shutdown
-		time.Sleep(time.Second)
+		pause(time.Second)
 
 		// assert the actor state
 		assert.False(t, child.IsRunning())
@@ -475,14 +475,14 @@ func TestSupervisorStrategy(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, child)
 
-		time.Sleep(time.Second)
+		pause(time.Second)
 
 		assert.Len(t, parent.Children(), 1)
 		// send a test panic message to the actor
 		assert.NoError(t, Tell(ctx, child, new(testpb.TestPanic)))
 
 		// wait for the child to properly shutdown
-		time.Sleep(time.Second)
+		pause(time.Second)
 
 		// assert the actor state
 		assert.False(t, child.IsRunning())
@@ -516,14 +516,14 @@ func TestSupervisorStrategy(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, child)
 
-		time.Sleep(time.Second)
+		pause(time.Second)
 
 		assert.Len(t, parent.Children(), 1)
 		// send a test panic message to the actor
 		assert.NoError(t, Tell(ctx, child, new(testpb.TestPanic)))
 
 		// wait for the child to properly shutdown
-		time.Sleep(time.Second)
+		pause(time.Second)
 
 		// assert the actor state
 		assert.False(t, child.IsRunning())
@@ -563,7 +563,7 @@ func TestSupervisorStrategy(t *testing.T) {
 		assert.NoError(t, Tell(ctx, child, new(testpb.TestPanic)))
 
 		// wait for the child to properly shutdown
-		time.Sleep(time.Second)
+		pause(time.Second)
 
 		// assert the actor state
 		assert.True(t, child.IsRunning())
@@ -601,7 +601,7 @@ func TestSupervisorStrategy(t *testing.T) {
 		assert.NoError(t, Tell(ctx, child, new(testpb.TestPanic)))
 
 		// wait for the child to properly shutdown
-		time.Sleep(time.Second)
+		pause(time.Second)
 
 		// assert the actor state
 		assert.False(t, child.IsRunning())
@@ -641,7 +641,7 @@ func TestSupervisorStrategy(t *testing.T) {
 		assert.NoError(t, Tell(ctx, child, new(testpb.TestPanic)))
 
 		// wait for the child to properly shutdown
-		time.Sleep(time.Second)
+		pause(time.Second)
 
 		// assert the actor state
 		assert.True(t, child.IsRunning())
@@ -692,7 +692,7 @@ func TestSupervisorStrategy(t *testing.T) {
 		assert.NoError(t, Tell(ctx, child, new(testpb.TestPanic)))
 
 		// wait for the child to properly shutdown
-		time.Sleep(time.Second)
+		pause(time.Second)
 
 		// assert the actor state
 		assert.True(t, child.IsRunning())
@@ -737,17 +737,17 @@ func TestMessaging(t *testing.T) {
 		assert.True(t, proto.Equal(expected, reply))
 
 		// wait a while because exchange is ongoing
-		time.Sleep(time.Second)
+		pause(time.Second)
 
 		err = Tell(ctx, pid1, new(testpb.TestBye))
 		require.NoError(t, err)
 
-		time.Sleep(time.Second)
+		pause(time.Second)
 		assert.False(t, pid1.IsRunning())
 		assert.True(t, pid2.IsRunning())
 
 		err = Tell(ctx, pid2, new(testpb.TestBye))
-		time.Sleep(time.Second)
+		pause(time.Second)
 		assert.False(t, pid2.IsRunning())
 	})
 	t.Run("With Ask when not ready", func(t *testing.T) {
@@ -772,7 +772,7 @@ func TestMessaging(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
 
-		time.Sleep(time.Second)
+		pause(time.Second)
 
 		assert.NoError(t, pid2.Shutdown(ctx))
 
@@ -783,7 +783,7 @@ func TestMessaging(t *testing.T) {
 		require.Nil(t, reply)
 
 		// wait a while because exchange is ongoing
-		time.Sleep(time.Second)
+		pause(time.Second)
 
 		err = Tell(ctx, pid1, new(testpb.TestBye))
 		require.NoError(t, err)
@@ -809,7 +809,7 @@ func TestMessaging(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
 
-		time.Sleep(time.Second)
+		pause(time.Second)
 
 		assert.NoError(t, pid2.Shutdown(ctx))
 
@@ -819,7 +819,7 @@ func TestMessaging(t *testing.T) {
 		require.EqualError(t, err, ErrDead.Error())
 
 		// wait a while because exchange is ongoing
-		time.Sleep(time.Second)
+		pause(time.Second)
 
 		err = Tell(ctx, pid1, new(testpb.TestBye))
 		require.NoError(t, err)
@@ -857,16 +857,16 @@ func TestMessaging(t *testing.T) {
 		require.Nil(t, reply)
 
 		// wait a while because exchange is ongoing
-		time.Sleep(time.Second)
+		pause(time.Second)
 
 		err = Tell(ctx, pid1, new(testpb.TestBye))
 		require.NoError(t, err)
 
-		time.Sleep(time.Second)
+		pause(time.Second)
 		assert.False(t, pid1.IsRunning())
 		assert.True(t, pid2.IsRunning())
 
-		time.Sleep(time.Second)
+		pause(time.Second)
 		assert.NoError(t, pid2.Shutdown(ctx))
 		assert.False(t, pid2.IsRunning())
 	})
@@ -929,7 +929,7 @@ func TestRemoting(t *testing.T) {
 	require.NoError(t, err)
 
 	// stop the actor after some time
-	time.Sleep(time.Second)
+	pause(time.Second)
 
 	t.Cleanup(func() {
 		err = sys.Stop(ctx)
@@ -952,7 +952,7 @@ func TestActorHandle(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.NotNil(t, pid)
-	actorHandle := pid.ActorHandle()
+	actorHandle := pid.Actor()
 	assert.IsType(t, &exchanger{}, actorHandle)
 	var p interface{} = actorHandle
 	_, ok := p.(Actor)
@@ -1009,13 +1009,13 @@ func TestSpawnChild(t *testing.T) {
 		// stop the child actor
 		assert.NoError(t, child.Shutdown(ctx))
 
-		time.Sleep(100 * time.Millisecond)
+		pause(100 * time.Millisecond)
 		// create the child actor
 		child, err = parent.SpawnChild(ctx, "SpawnChild", newTestSupervised())
 		assert.NoError(t, err)
 		assert.NotNil(t, child)
 
-		time.Sleep(time.Second)
+		pause(time.Second)
 
 		assert.Len(t, parent.Children(), 1)
 		//stop the actor
@@ -1045,13 +1045,13 @@ func TestSpawnChild(t *testing.T) {
 
 		assert.Len(t, parent.Children(), 1)
 
-		time.Sleep(100 * time.Millisecond)
+		pause(100 * time.Millisecond)
 		// create the child actor
 		child, err = parent.SpawnChild(ctx, "SpawnChild", newTestSupervised())
 		assert.NoError(t, err)
 		assert.NotNil(t, child)
 
-		time.Sleep(time.Second)
+		pause(time.Second)
 
 		assert.Len(t, parent.Children(), 1)
 		//stop the actor
@@ -1074,7 +1074,7 @@ func TestSpawnChild(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
 
-		time.Sleep(100 * time.Millisecond)
+		pause(100 * time.Millisecond)
 		//stop the actor
 		err = parent.Shutdown(ctx)
 		assert.NoError(t, err)
@@ -1141,7 +1141,7 @@ func TestSpawnChild(t *testing.T) {
 
 		assert.Len(t, parent.Children(), 1)
 
-		time.Sleep(time.Second)
+		pause(time.Second)
 
 		var events []*goaktpb.ActorChildCreated
 		for message := range subsriber.Iterator() {
@@ -1188,7 +1188,7 @@ func TestPoisonPill(t *testing.T) {
 	assert.NoError(t, err)
 
 	// wait for the graceful shutdown
-	time.Sleep(time.Second)
+	pause(time.Second)
 	assert.False(t, pid.IsRunning())
 }
 func TestRemoteLookup(t *testing.T) {
@@ -1370,11 +1370,11 @@ func TestBatchTell(t *testing.T) {
 		// batch tell
 		require.NoError(t, pid.BatchTell(ctx, pid, new(testpb.TestSend), new(testpb.TestSend)))
 		// wait for the asynchronous processing to complete
-		time.Sleep(100 * time.Millisecond)
+		pause(100 * time.Millisecond)
 		assert.EqualValues(t, 2, actor.counter.Load())
 		// shutdown the actor when
 		// wait a while because exchange is ongoing
-		time.Sleep(time.Second)
+		pause(time.Second)
 		assert.NoError(t, pid.Shutdown(ctx))
 	})
 	t.Run("With a Tell behavior", func(t *testing.T) {
@@ -1395,11 +1395,11 @@ func TestBatchTell(t *testing.T) {
 		// batch tell
 		require.NoError(t, pid.BatchTell(ctx, pid, new(testpb.TestSend)))
 		// wait for the asynchronous processing to complete
-		time.Sleep(100 * time.Millisecond)
+		pause(100 * time.Millisecond)
 		assert.EqualValues(t, 1, actor.counter.Load())
 		// shutdown the actor when
 		// wait a while because exchange is ongoing
-		time.Sleep(time.Second)
+		pause(time.Second)
 		assert.NoError(t, pid.Shutdown(ctx))
 	})
 	t.Run("With a dead actor", func(t *testing.T) {
@@ -1417,7 +1417,7 @@ func TestBatchTell(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 
-		time.Sleep(time.Second)
+		pause(time.Second)
 		assert.NoError(t, pid.Shutdown(ctx))
 
 		// batch tell
@@ -1451,7 +1451,7 @@ func TestBatchAsk(t *testing.T) {
 		}
 
 		// wait a while because exchange is ongoing
-		time.Sleep(time.Second)
+		pause(time.Second)
 		assert.NoError(t, pid.Shutdown(ctx))
 	})
 	t.Run("With a dead actor", func(t *testing.T) {
@@ -1469,7 +1469,7 @@ func TestBatchAsk(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 
-		time.Sleep(time.Second)
+		pause(time.Second)
 		assert.NoError(t, pid.Shutdown(ctx))
 
 		// batch ask
@@ -1499,7 +1499,7 @@ func TestBatchAsk(t *testing.T) {
 		require.Empty(t, responses)
 
 		// wait a while because exchange is ongoing
-		time.Sleep(time.Second)
+		pause(time.Second)
 		assert.NoError(t, pid.Shutdown(ctx))
 	})
 }
@@ -1532,10 +1532,10 @@ func TestRegisterMetrics(t *testing.T) {
 	count := 10
 	for i := 0; i < count; i++ {
 		receiveContext := &ReceiveContext{
-			ctx:       ctx,
-			message:   new(testpb.TestSend),
-			sender:    NoSender,
-			recipient: pid,
+			ctx:     ctx,
+			message: new(testpb.TestSend),
+			sender:  NoSender,
+			self:    pid,
 		}
 
 		pid.doReceive(receiveContext)
@@ -2046,7 +2046,7 @@ func TestPipeTo(t *testing.T) {
 			_, _ = Ask(ctx, pid1, new(testpb.TestReply), askTimeout)
 			_, _ = Ask(ctx, pid1, new(testpb.TestReply), askTimeout)
 			_, _ = Ask(ctx, pid1, new(testpb.TestReply), askTimeout)
-			time.Sleep(time.Second)
+			pause(time.Second)
 			wg.Done()
 		}()
 
@@ -2057,7 +2057,7 @@ func TestPipeTo(t *testing.T) {
 		require.EqualValues(t, 3, actor1.Counter())
 		require.EqualValues(t, 1, actor2.Counter())
 
-		time.Sleep(time.Second)
+		pause(time.Second)
 		assert.NoError(t, pid1.Shutdown(ctx))
 		assert.NoError(t, pid2.Shutdown(ctx))
 	})
@@ -2087,7 +2087,7 @@ func TestPipeTo(t *testing.T) {
 		require.NotNil(t, pid2)
 
 		// shutdown the actor after one second of liveness
-		time.Sleep(time.Second)
+		pause(time.Second)
 		assert.NoError(t, pid2.Shutdown(ctx))
 
 		task := make(chan proto.Message)
@@ -2095,7 +2095,7 @@ func TestPipeTo(t *testing.T) {
 		require.Error(t, err)
 		assert.EqualError(t, err, ErrDead.Error())
 
-		time.Sleep(time.Second)
+		pause(time.Second)
 		assert.NoError(t, pid1.Shutdown(ctx))
 	})
 	t.Run("With is a dead actor: case 2", func(t *testing.T) {
@@ -2139,7 +2139,7 @@ func TestPipeTo(t *testing.T) {
 			_, _ = Ask(ctx, pid1, new(testpb.TestReply), askTimeout)
 			_, _ = Ask(ctx, pid1, new(testpb.TestReply), askTimeout)
 			_, _ = Ask(ctx, pid1, new(testpb.TestReply), askTimeout)
-			time.Sleep(time.Second)
+			pause(time.Second)
 			wg.Done()
 		}()
 
@@ -2152,7 +2152,7 @@ func TestPipeTo(t *testing.T) {
 		require.EqualValues(t, 3, actor1.Counter())
 		require.Zero(t, actor2.Counter())
 
-		time.Sleep(time.Second)
+		pause(time.Second)
 		assert.NoError(t, pid1.Shutdown(ctx))
 	})
 	t.Run("With undefined task", func(t *testing.T) {
@@ -2188,7 +2188,7 @@ func TestPipeTo(t *testing.T) {
 		require.Error(t, err)
 		assert.EqualError(t, err, ErrUndefinedTask.Error())
 
-		time.Sleep(time.Second)
+		pause(time.Second)
 		assert.NoError(t, pid1.Shutdown(ctx))
 		assert.NoError(t, pid2.Shutdown(ctx))
 	})
@@ -2235,7 +2235,7 @@ func TestPipeTo(t *testing.T) {
 			_, _ = Ask(ctx, pid1, new(testpb.TestReply), askTimeout)
 			_, _ = Ask(ctx, pid1, new(testpb.TestReply), askTimeout)
 			_, _ = Ask(ctx, pid1, new(testpb.TestReply), askTimeout)
-			time.Sleep(time.Second)
+			pause(time.Second)
 			wg.Done()
 		}()
 
@@ -2247,8 +2247,70 @@ func TestPipeTo(t *testing.T) {
 		// no message piped to the actor
 		require.Zero(t, actor2.Counter())
 
-		time.Sleep(time.Second)
+		pause(time.Second)
 		assert.NoError(t, pid1.Shutdown(ctx))
 		assert.NoError(t, pid2.Shutdown(ctx))
+	})
+}
+func TestSendAsync(t *testing.T) {
+	ctx := context.Background()
+	actorSystem, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+
+	// start the actor system
+	err := actorSystem.Start(ctx)
+	assert.NoError(t, err)
+
+	pause(time.Second)
+
+	receiver, err := actorSystem.Spawn(ctx, "receiver", newTestActor())
+	assert.NoError(t, err)
+	assert.NotNil(t, receiver)
+
+	pause(time.Second)
+
+	sender, err := actorSystem.Spawn(ctx, "sender", newTestActor())
+	assert.NoError(t, err)
+	assert.NotNil(t, sender)
+
+	pause(time.Second)
+
+	err = sender.SendAsync(ctx, receiver.Name(), new(testpb.TestSend))
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, receiver.processedCount.Load()-1) // -1 because of the PostStart message
+
+	t.Cleanup(func() {
+		assert.NoError(t, actorSystem.Stop(ctx))
+	})
+}
+func TestSendSync(t *testing.T) {
+	ctx := context.Background()
+	actorSystem, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+
+	// start the actor system
+	err := actorSystem.Start(ctx)
+	assert.NoError(t, err)
+
+	pause(time.Second)
+
+	receiver, err := actorSystem.Spawn(ctx, "receiver", newTestActor())
+	assert.NoError(t, err)
+	assert.NotNil(t, receiver)
+
+	pause(time.Second)
+
+	sender, err := actorSystem.Spawn(ctx, "sender", newTestActor())
+	assert.NoError(t, err)
+	assert.NotNil(t, sender)
+
+	pause(time.Second)
+
+	response, err := sender.SendSync(ctx, receiver.Name(), new(testpb.TestReply))
+	require.NoError(t, err)
+	require.NotNil(t, response)
+	expected := &testpb.Reply{Content: "received message"}
+	assert.True(t, proto.Equal(expected, response))
+
+	t.Cleanup(func() {
+		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 }

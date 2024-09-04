@@ -30,6 +30,7 @@ import (
 	"fmt"
 	"net"
 	stdhttp "net/http"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -241,7 +242,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		actors:                 newPIDMap(1_000),
 		actorsChan:             make(chan *internalpb.WireActor, 10),
 		name:                   name,
-		logger:                 log.DefaultLogger,
+		logger:                 log.New(log.InfoLevel, os.Stderr),
 		expireActorAfter:       DefaultPassivationTimeout,
 		askTimeout:             DefaultAskTimeout,
 		actorInitMaxRetries:    DefaultInitMaxRetries,
@@ -261,6 +262,8 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		peersCacheMu:           &sync.RWMutex{},
 		peersCache:             make(map[string][]byte),
 		peersStateLoopInterval: DefaultPeerStateLoopInterval,
+		remotingPort:           -1,
+		remotingHost:           "",
 	}
 
 	system.started.Store(false)
@@ -398,11 +401,7 @@ func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor) (*PID
 	}
 
 	// set the default actor path assuming we are running locally
-	actorPath := NewPath(name, NewAddress(x.name, "", -1))
-	if x.remotingEnabled.Load() {
-		actorPath = NewPath(name, NewAddress(x.name, x.remotingHost, int(x.remotingPort)))
-	}
-
+	actorPath := x.actorPath(name)
 	pid, exist := x.actors.get(actorPath)
 	if exist {
 		if pid.IsRunning() {
@@ -481,12 +480,7 @@ func (x *actorSystem) ReSpawn(ctx context.Context, name string) (*PID, error) {
 		return nil, ErrActorSystemNotStarted
 	}
 
-	actorPath := NewPath(name, NewAddress(x.name, "", -1))
-
-	if x.remotingEnabled.Load() {
-		actorPath = NewPath(name, NewAddress(x.name, x.remotingHost, int(x.remotingPort)))
-	}
-
+	actorPath := x.actorPath(name)
 	pid, exist := x.actors.get(actorPath)
 	if exist {
 		if err := pid.Restart(ctx); err != nil {
@@ -546,12 +540,10 @@ func (x *actorSystem) ActorOf(ctx context.Context, actorName string) (addr *goak
 	}
 
 	// first check whether the actor exist locally
-	pids := x.actors.pids()
-	for _, lpid := range pids {
-		if lpid.ActorPath().Name() == actorName {
-			x.locker.Unlock()
-			return lpid.ActorPath().RemoteAddress(), lpid, nil
-		}
+	actorPath := x.actorPath(actorName)
+	if lpid, ok := x.actors.get(actorPath); ok {
+		x.locker.Unlock()
+		return lpid.ActorPath().RemoteAddress(), lpid, nil
 	}
 
 	// check in the cluster
@@ -593,12 +585,10 @@ func (x *actorSystem) LocalActor(actorName string) (*PID, error) {
 		return nil, ErrActorSystemNotStarted
 	}
 
-	pids := x.actors.pids()
-	for _, pid := range pids {
-		if pid.ActorPath().Name() == actorName {
-			x.locker.Unlock()
-			return pid, nil
-		}
+	actorPath := x.actorPath(actorName)
+	if lpid, ok := x.actors.get(actorPath); ok {
+		x.locker.Unlock()
+		return lpid, nil
 	}
 
 	x.logger.Infof("actor=%s not found", actorName)
@@ -1059,7 +1049,7 @@ func (x *actorSystem) setActor(actor *PID) {
 			ActorName:    actor.Name(),
 			ActorAddress: actor.ActorPath().RemoteAddress(),
 			ActorPath:    actor.ActorPath().String(),
-			ActorType:    types.TypeName(actor.ActorHandle()),
+			ActorType:    types.TypeName(actor.Actor()),
 		}
 	}
 }
@@ -1446,4 +1436,9 @@ func (x *actorSystem) getSystemActorName(nameType nameType) string {
 
 func isSystemName(name string) bool {
 	return strings.HasPrefix(name, systemNamePrefix)
+}
+
+// actorPath returns the actor path provided the actor name
+func (x *actorSystem) actorPath(name string) *Path {
+	return NewPath(name, NewAddress(x.name, x.remotingHost, int(x.remotingPort)))
 }
