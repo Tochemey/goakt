@@ -1563,7 +1563,7 @@ func (pid *PID) handleRestartDirective(cid *PID, maxRetries uint32, timeout time
 
 	if err != nil {
 		pid.logger.Error(err)
-		// remove the actor and stop it
+		// remove the actor in case it is a child and stop it
 		pid.children.delete(cid.ActorPath())
 		if err := cid.Shutdown(ctx); err != nil {
 			pid.logger.Error(err)

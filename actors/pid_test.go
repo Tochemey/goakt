@@ -26,7 +26,6 @@ package actors
 
 import (
 	"context"
-	"os"
 	"sort"
 	"sync"
 	"testing"
@@ -537,7 +536,7 @@ func TestSupervisorStrategy(t *testing.T) {
 		// create a test context
 		ctx := context.TODO()
 
-		logger := log.New(log.DebugLevel, os.Stdout)
+		logger := log.DiscardLogger
 		// create the actor path
 		actorPath := NewPath("Parent", NewAddress("sys", "host", 1))
 		// create the parent actor
@@ -619,7 +618,7 @@ func TestSupervisorStrategy(t *testing.T) {
 		// create a test context
 		ctx := context.TODO()
 
-		logger := log.New(log.DebugLevel, os.Stdout)
+		logger := log.DiscardLogger
 		// create the actor path
 		actorPath := NewPath("Parent", NewAddress("sys", "host", 1))
 		// create the parent actor
@@ -665,7 +664,7 @@ func TestSupervisorStrategy(t *testing.T) {
 		// create a test context
 		ctx := context.TODO()
 
-		logger := log.New(log.DebugLevel, os.Stdout)
+		logger := log.DiscardLogger
 		// create the actor path
 		actorPath := NewPath("Parent", NewAddress("sys", "host", 1))
 
@@ -881,7 +880,7 @@ func TestRemoting(t *testing.T) {
 	// create the context
 	ctx := context.TODO()
 	// define the logger to use
-	logger := log.New(log.DebugLevel, os.Stdout)
+	logger := log.DiscardLogger
 	// generate the remoting port
 	nodePorts := dynaport.Get(1)
 	remotingPort := nodePorts[0]
@@ -1202,7 +1201,7 @@ func TestRemoteLookup(t *testing.T) {
 		// create the context
 		ctx := context.TODO()
 		// define the logger to use
-		logger := log.New(log.DebugLevel, os.Stdout)
+		logger := log.DiscardLogger
 		// generate the remoting port
 		nodePorts := dynaport.Get(1)
 		remotingPort := nodePorts[0]
@@ -1242,7 +1241,7 @@ func TestRemoteLookup(t *testing.T) {
 		// create the context
 		ctx := context.TODO()
 		// define the logger to use
-		logger := log.New(log.DebugLevel, os.Stdout)
+		logger := log.DiscardLogger
 		// generate the remoting port
 		nodePorts := dynaport.Get(1)
 		remotingPort := nodePorts[0]
@@ -1281,7 +1280,7 @@ func TestFailedPreStart(t *testing.T) {
 	// create the context
 	ctx := context.TODO()
 	// define the logger to use
-	logger := log.New(log.DebugLevel, os.Stdout)
+	logger := log.DiscardLogger
 
 	// create the actor system
 	sys, err := NewActorSystem("test",
@@ -1582,7 +1581,7 @@ func TestRemoteReSpawn(t *testing.T) {
 		// create the context
 		ctx := context.TODO()
 		// define the logger to use
-		logger := log.New(log.DebugLevel, os.Stdout)
+		logger := log.DiscardLogger
 		// generate the remoting port
 		nodePorts := dynaport.Get(1)
 		remotingPort := nodePorts[0]
@@ -1620,7 +1619,7 @@ func TestRemoteReSpawn(t *testing.T) {
 		// create the context
 		ctx := context.TODO()
 		// define the logger to use
-		logger := log.New(log.DebugLevel, os.Stdout)
+		logger := log.DiscardLogger
 		// generate the remoting port
 		nodePorts := dynaport.Get(1)
 		remotingPort := nodePorts[0]
@@ -1658,7 +1657,7 @@ func TestRemoteStop(t *testing.T) {
 		// create the context
 		ctx := context.TODO()
 		// define the logger to use
-		logger := log.New(log.DebugLevel, os.Stdout)
+		logger := log.DiscardLogger
 		// generate the remoting port
 		nodePorts := dynaport.Get(1)
 		remotingPort := nodePorts[0]
@@ -1697,7 +1696,7 @@ func TestRemoteStop(t *testing.T) {
 		// create the context
 		ctx := context.TODO()
 		// define the logger to use
-		logger := log.New(log.DebugLevel, os.Stdout)
+		logger := log.DiscardLogger
 		// generate the remoting port
 		nodePorts := dynaport.Get(1)
 		remotingPort := nodePorts[0]
@@ -1739,7 +1738,7 @@ func TestRemoteStop(t *testing.T) {
 		// create the context
 		ctx := context.TODO()
 		// define the logger to use
-		logger := log.New(log.DebugLevel, os.Stdout)
+		logger := log.DiscardLogger
 		// generate the remoting port
 		nodePorts := dynaport.Get(1)
 		remotingPort := nodePorts[0]
@@ -1829,7 +1828,7 @@ func TestRemoteSpawn(t *testing.T) {
 		// create the context
 		ctx := context.TODO()
 		// define the logger to use
-		logger := log.New(log.DebugLevel, os.Stdout)
+		logger := log.DiscardLogger
 		// generate the remoting port
 		ports := dynaport.Get(1)
 		remotingPort := ports[0]
@@ -1899,7 +1898,7 @@ func TestRemoteSpawn(t *testing.T) {
 		// create the context
 		ctx := context.TODO()
 		// define the logger to use
-		logger := log.New(log.DebugLevel, os.Stdout)
+		logger := log.DiscardLogger
 		// generate the remoting port
 		ports := dynaport.Get(1)
 		remotingPort := ports[0]
@@ -1947,7 +1946,7 @@ func TestRemoteSpawn(t *testing.T) {
 		// create the context
 		ctx := context.TODO()
 		// define the logger to use
-		logger := log.New(log.DebugLevel, os.Stdout)
+		logger := log.DiscardLogger
 		// generate the remoting port
 		ports := dynaport.Get(1)
 		remotingPort := ports[0]
