@@ -65,7 +65,7 @@ func TestReceive(t *testing.T) {
 		actorPath,
 		newTestActor(),
 		withInitMaxRetries(1),
-		withCustomLogger(log.DefaultLogger),
+		withCustomLogger(log.DiscardLogger),
 		withAskTimeout(replyTimeout))
 
 	require.NoError(t, err)
@@ -952,7 +952,7 @@ func TestActorHandle(t *testing.T) {
 		actorPath,
 		&exchanger{},
 		withInitMaxRetries(1),
-		withCustomLogger(log.DefaultLogger),
+		withCustomLogger(log.DiscardLogger),
 		withAskTimeout(replyTimeout))
 
 	require.NoError(t, err)
@@ -977,7 +977,7 @@ func TestPIDActorSystem(t *testing.T) {
 		actorPath,
 		&exchanger{},
 		withInitMaxRetries(1),
-		withCustomLogger(log.DefaultLogger),
+		withCustomLogger(log.DiscardLogger),
 		withAskTimeout(replyTimeout))
 	require.NoError(t, err)
 	assert.NotNil(t, pid)
@@ -1181,7 +1181,7 @@ func TestPoisonPill(t *testing.T) {
 		actorPath,
 		newTestActor(),
 		withInitMaxRetries(1),
-		withCustomLogger(log.DefaultLogger),
+		withCustomLogger(log.DiscardLogger),
 		withAskTimeout(replyTimeout))
 
 	require.NoError(t, err)
@@ -1317,7 +1317,7 @@ func TestFailedPostStop(t *testing.T) {
 		actorPath,
 		&testPostStop{},
 		withInitMaxRetries(1),
-		withCustomLogger(log.DefaultLogger),
+		withCustomLogger(log.DiscardLogger),
 		withAskTimeout(replyTimeout))
 
 	require.NoError(t, err)
@@ -1522,7 +1522,7 @@ func TestRegisterMetrics(t *testing.T) {
 		actorPath,
 		newTestActor(),
 		withInitMaxRetries(1),
-		withCustomLogger(log.DefaultLogger),
+		withCustomLogger(log.DiscardLogger),
 		withTelemetry(tel),
 		withMetric(),
 		withAskTimeout(replyTimeout))
@@ -2015,7 +2015,7 @@ func TestPipeTo(t *testing.T) {
 			withInitMaxRetries(1),
 			withAskTimeout(askTimeout),
 			withPassivationDisabled(),
-			withCustomLogger(log.DefaultLogger),
+			withCustomLogger(log.DiscardLogger),
 		}
 
 		// create actor1

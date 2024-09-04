@@ -225,7 +225,7 @@ func (e *exchanger) Counter() int64 {
 
 func (e *exchanger) PreStart(context.Context) error {
 	e.messageCounter = atomic.NewInt64(0)
-	e.logger = log.DefaultLogger
+	e.logger = log.DiscardLogger
 	return nil
 }
 
@@ -498,7 +498,7 @@ func newWorker() *worker {
 }
 
 func (x *worker) PreStart(context.Context) error {
-	x.logger = log.DefaultLogger
+	x.logger = log.DiscardLogger
 	return nil
 }
 

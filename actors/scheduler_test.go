@@ -84,7 +84,7 @@ func TestScheduler(t *testing.T) {
 	})
 	t.Run("With ScheduleOnce with scheduler not started", func(t *testing.T) {
 		ctx := context.TODO()
-		scheduler := newScheduler(log.DefaultLogger, time.Second)
+		scheduler := newScheduler(log.DiscardLogger, time.Second)
 		// create the actor path
 		actorPath := NewPath("Test", NewAddress("sys", "host", 1))
 
@@ -94,7 +94,7 @@ func TestScheduler(t *testing.T) {
 			actorPath,
 			newTestActor(),
 			withInitMaxRetries(1),
-			withCustomLogger(log.DefaultLogger),
+			withCustomLogger(log.DiscardLogger),
 			withAskTimeout(replyTimeout))
 
 		require.NoError(t, err)

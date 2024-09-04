@@ -1804,7 +1804,7 @@ func TestReceiveContext(t *testing.T) {
 			withInitMaxRetries(1),
 			withAskTimeout(askTimeout),
 			withPassivationDisabled(),
-			withCustomLogger(log.DefaultLogger),
+			withCustomLogger(log.DiscardLogger),
 		}
 
 		// create actor1
