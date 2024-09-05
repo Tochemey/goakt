@@ -224,8 +224,11 @@ Communication between actors is achieved exclusively through message passing. In
 Protocol Buffers_ is used to define messages.
 The choice of protobuf is due to easy serialization over wire and strong schema definition. As stated previously the following messaging patterns are supported:
 
-- `Tell/RemoteTell` - send a message to an actor and forget it
-- `Ask/RemoteAsk` - send a message to an actor and expect a reply within a time period
+- `Tell/RemoteTell` - send a message to an actor and forget it. `Tell` is used for local messaging.
+- `Ask/RemoteAsk` - send a message to an actor and expect a reply within a time period. `Ask` is used for local messaging.
+- `SendAsync` - behave the same way as `Tell`. This call is location transparent which means that the system will locate the given actor whether locally or remotely to send the message. This
+  is possible when cluster mode is enabled.
+- `SendSync` - behave the same way as `Asks` except the location of the provided actor is transparent. This is possible when cluster mode is enabled.
 - `Forward` - pass a message from one actor to the actor by preserving the initial sender of the message.
   At the moment you can only forward messages from the `ReceiveContext` when handling a message within an actor and this to a local actor.
 - `BatchTell` - send a bulk of messages to actor in a fire-forget manner. Messages are processed one after the other in the other they have been sent.
