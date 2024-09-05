@@ -88,7 +88,7 @@ func (p *testActor) Receive(ctx *ReceiveContext) {
 		wg := sync.WaitGroup{}
 		wg.Add(1)
 		go func() {
-			time.Sleep(receivingDelay)
+			pause(receivingDelay)
 			wg.Done()
 		}()
 		// block until timer is up
@@ -452,7 +452,7 @@ func startClusterSystem(t *testing.T, nodeName, serverAddr string) (ActorSystem,
 	}
 
 	hostNode := discovery.Node{
-		Name:         host,
+		Name:         nodeName,
 		Host:         host,
 		GossipPort:   gossipPort,
 		PeersPort:    clusterPort,
@@ -460,11 +460,11 @@ func startClusterSystem(t *testing.T, nodeName, serverAddr string) (ActorSystem,
 	}
 
 	// create the instance of provider
-	provider := nats.NewDiscovery(&config, &hostNode)
+	provider := nats.NewDiscovery(&config, &hostNode, nats.WithLogger(log.DiscardLogger))
 
 	// create the actor system
 	system, err := NewActorSystem(
-		nodeName,
+		actorSystemName,
 		WithPassivationDisabled(),
 		WithLogger(logger),
 		WithReplyTimeout(time.Minute),
@@ -476,7 +476,7 @@ func startClusterSystem(t *testing.T, nodeName, serverAddr string) (ActorSystem,
 
 	// start the node
 	require.NoError(t, system.Start(ctx))
-	time.Sleep(2 * time.Second)
+	pause(2 * time.Second)
 
 	// return the cluster startNode
 	return system, provider

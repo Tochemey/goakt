@@ -55,14 +55,15 @@ import (
 // nolint
 func TestActorSystem(t *testing.T) {
 	t.Run("New instance with Defaults", func(t *testing.T) {
-		actorSys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		actorSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
 		require.NoError(t, err)
-		require.NotNil(t, actorSys)
-		var iface any = actorSys
+		require.NotNil(t, actorSystem)
+		var iface any = actorSystem
 		_, ok := iface.(ActorSystem)
 		assert.True(t, ok)
-		assert.Equal(t, "testSys", actorSys.Name())
-		assert.Empty(t, actorSys.Actors())
+		assert.Equal(t, "testSys", actorSystem.Name())
+		assert.Empty(t, actorSystem.Actors())
+		assert.NotNil(t, actorSystem.Logger())
 	})
 	t.Run("New instance with Missing Name", func(t *testing.T) {
 		sys, err := NewActorSystem("")
@@ -97,6 +98,28 @@ func TestActorSystem(t *testing.T) {
 		actorRef, err := sys.Spawn(ctx, "Test", actor)
 		assert.NoError(t, err)
 		assert.NotNil(t, actorRef)
+
+		// stop the actor after some time
+		pause(time.Second)
+
+		t.Cleanup(func() {
+			err = sys.Stop(ctx)
+			assert.NoError(t, err)
+		})
+	})
+	t.Run("With Spawn an actor with invalid actor name", func(t *testing.T) {
+		ctx := context.TODO()
+		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+
+		// start the actor system
+		err := sys.Start(ctx)
+		require.NoError(t, err)
+
+		actor := newTestActor()
+		actorRef, err := sys.Spawn(ctx, "$omeN@me", actor)
+		require.Error(t, err)
+		assert.EqualError(t, err, "path name must contain only word characters (i.e. [a-zA-Z0-9] plus non-leading '-' or '_')")
+		assert.Nil(t, actorRef)
 
 		// stop the actor after some time
 		pause(time.Second)

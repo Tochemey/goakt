@@ -998,6 +998,7 @@ func TestSpawnChild(t *testing.T) {
 		parent, err := newPID(ctx, actorPath,
 			newTestSupervisor(),
 			withInitMaxRetries(1),
+			withMetric(),
 			withCustomLogger(log.DiscardLogger),
 			withAskTimeout(replyTimeout))
 
@@ -2255,64 +2256,314 @@ func TestPipeTo(t *testing.T) {
 	})
 }
 func TestSendAsync(t *testing.T) {
-	ctx := context.Background()
-	actorSystem, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+	t.Run("With local actor", func(t *testing.T) {
+		ctx := context.Background()
+		actorSystem, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
 
-	// start the actor system
-	err := actorSystem.Start(ctx)
-	assert.NoError(t, err)
+		// start the actor system
+		err := actorSystem.Start(ctx)
+		assert.NoError(t, err)
 
-	pause(time.Second)
+		pause(time.Second)
 
-	receivingActor := newTestActor()
-	receiver, err := actorSystem.Spawn(ctx, "receiver", receivingActor)
-	assert.NoError(t, err)
-	assert.NotNil(t, receiver)
+		receivingActor := newTestActor()
+		receiver, err := actorSystem.Spawn(ctx, "receiver", receivingActor)
+		assert.NoError(t, err)
+		assert.NotNil(t, receiver)
 
-	pause(time.Second)
+		pause(time.Second)
 
-	sender, err := actorSystem.Spawn(ctx, "sender", newTestActor())
-	assert.NoError(t, err)
-	assert.NotNil(t, sender)
+		sender, err := actorSystem.Spawn(ctx, "sender", newTestActor())
+		assert.NoError(t, err)
+		assert.NotNil(t, sender)
 
-	pause(time.Second)
+		pause(time.Second)
 
-	err = sender.SendAsync(ctx, receiver.Name(), new(testpb.TestSend))
-	require.NoError(t, err)
+		err = sender.SendAsync(ctx, receiver.Name(), new(testpb.TestSend))
+		require.NoError(t, err)
 
-	t.Cleanup(func() {
-		assert.NoError(t, actorSystem.Stop(ctx))
+		t.Cleanup(func() {
+			assert.NoError(t, actorSystem.Stop(ctx))
+		})
+	})
+	t.Run("With dead Sender", func(t *testing.T) {
+		ctx := context.Background()
+		actorSystem, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+
+		// start the actor system
+		err := actorSystem.Start(ctx)
+		assert.NoError(t, err)
+
+		pause(time.Second)
+
+		receivingActor := newTestActor()
+		receiver, err := actorSystem.Spawn(ctx, "receiver", receivingActor)
+		assert.NoError(t, err)
+		assert.NotNil(t, receiver)
+
+		pause(time.Second)
+
+		sender, err := actorSystem.Spawn(ctx, "sender", newTestActor())
+		assert.NoError(t, err)
+		assert.NotNil(t, sender)
+
+		pause(time.Second)
+
+		require.NoError(t, actorSystem.Kill(ctx, sender.Name()))
+
+		err = sender.SendAsync(ctx, receiver.Name(), new(testpb.TestSend))
+		require.Error(t, err)
+		assert.EqualError(t, err, ErrDead.Error())
+
+		t.Cleanup(func() {
+			assert.NoError(t, actorSystem.Stop(ctx))
+		})
+	})
+	t.Run("With cluster enabled", func(t *testing.T) {
+		// create a context
+		ctx := context.TODO()
+		// start the NATS server
+		srv := startNatsServer(t)
+
+		// create and start system cluster
+		node1, sd1 := startClusterSystem(t, "Node1", srv.Addr().String())
+		require.NotNil(t, node1)
+		require.NotNil(t, sd1)
+
+		// create and start system cluster
+		node2, sd2 := startClusterSystem(t, "Node2", srv.Addr().String())
+		require.NotNil(t, node2)
+		require.NotNil(t, sd2)
+
+		// create an actor on node1
+		receiver, err := node1.Spawn(ctx, "receiver", newTestActor())
+		assert.NoError(t, err)
+		assert.NotNil(t, receiver)
+		pause(time.Second)
+
+		sender, err := node2.Spawn(ctx, "sender", newTestActor())
+		assert.NoError(t, err)
+		assert.NotNil(t, sender)
+
+		pause(time.Second)
+
+		err = sender.SendAsync(ctx, receiver.Name(), new(testpb.TestSend))
+		require.NoError(t, err)
+
+		t.Cleanup(func() {
+			assert.NoError(t, node1.Stop(ctx))
+			assert.NoError(t, node2.Stop(ctx))
+			assert.NoError(t, sd2.Close())
+			assert.NoError(t, sd1.Close())
+			srv.Shutdown()
+		})
+	})
+	t.Run("With cluster enabled and Actor not found", func(t *testing.T) {
+		// create a context
+		ctx := context.TODO()
+		// start the NATS server
+		srv := startNatsServer(t)
+
+		// create and start system cluster
+		node1, sd1 := startClusterSystem(t, "Node1", srv.Addr().String())
+		require.NotNil(t, node1)
+		require.NotNil(t, sd1)
+
+		// create and start system cluster
+		node2, sd2 := startClusterSystem(t, "Node2", srv.Addr().String())
+		require.NotNil(t, node2)
+		require.NotNil(t, sd2)
+
+		sender, err := node2.Spawn(ctx, "sender", newTestActor())
+		assert.NoError(t, err)
+		assert.NotNil(t, sender)
+
+		pause(time.Second)
+
+		err = sender.SendAsync(ctx, "receiver", new(testpb.TestSend))
+		require.Error(t, err)
+		assert.EqualError(t, err, ErrActorNotFound("receiver").Error())
+
+		t.Cleanup(func() {
+			assert.NoError(t, node1.Stop(ctx))
+			assert.NoError(t, node2.Stop(ctx))
+			assert.NoError(t, sd2.Close())
+			assert.NoError(t, sd1.Close())
+			srv.Shutdown()
+		})
 	})
 }
 func TestSendSync(t *testing.T) {
-	ctx := context.Background()
-	actorSystem, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+	t.Run("With local actor", func(t *testing.T) {
+		ctx := context.Background()
+		actorSystem, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
 
-	// start the actor system
-	err := actorSystem.Start(ctx)
-	assert.NoError(t, err)
+		// start the actor system
+		err := actorSystem.Start(ctx)
+		assert.NoError(t, err)
 
-	pause(time.Second)
+		pause(time.Second)
 
-	receiver, err := actorSystem.Spawn(ctx, "receiver", newTestActor())
-	assert.NoError(t, err)
-	assert.NotNil(t, receiver)
+		receiver, err := actorSystem.Spawn(ctx, "receiver", newTestActor())
+		assert.NoError(t, err)
+		assert.NotNil(t, receiver)
 
-	pause(time.Second)
+		pause(time.Second)
 
-	sender, err := actorSystem.Spawn(ctx, "sender", newTestActor())
-	assert.NoError(t, err)
-	assert.NotNil(t, sender)
+		sender, err := actorSystem.Spawn(ctx, "sender", newTestActor())
+		assert.NoError(t, err)
+		assert.NotNil(t, sender)
 
-	pause(time.Second)
+		pause(time.Second)
 
-	response, err := sender.SendSync(ctx, receiver.Name(), new(testpb.TestReply))
-	require.NoError(t, err)
-	require.NotNil(t, response)
-	expected := &testpb.Reply{Content: "received message"}
-	assert.True(t, proto.Equal(expected, response))
+		response, err := sender.SendSync(ctx, receiver.Name(), new(testpb.TestReply))
+		require.NoError(t, err)
+		require.NotNil(t, response)
+		expected := &testpb.Reply{Content: "received message"}
+		assert.True(t, proto.Equal(expected, response))
 
-	t.Cleanup(func() {
-		assert.NoError(t, actorSystem.Stop(ctx))
+		t.Cleanup(func() {
+			assert.NoError(t, actorSystem.Stop(ctx))
+		})
+	})
+	t.Run("With dead Sender", func(t *testing.T) {
+		ctx := context.Background()
+		actorSystem, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+
+		// start the actor system
+		err := actorSystem.Start(ctx)
+		assert.NoError(t, err)
+
+		pause(time.Second)
+
+		receiver, err := actorSystem.Spawn(ctx, "receiver", newTestActor())
+		assert.NoError(t, err)
+		assert.NotNil(t, receiver)
+
+		pause(time.Second)
+
+		sender, err := actorSystem.Spawn(ctx, "sender", newTestActor())
+		assert.NoError(t, err)
+		assert.NotNil(t, sender)
+
+		pause(time.Second)
+		err = actorSystem.Kill(ctx, sender.Name())
+		require.NoError(t, err)
+
+		response, err := sender.SendSync(ctx, receiver.Name(), new(testpb.TestReply))
+		require.Error(t, err)
+		require.Nil(t, response)
+		assert.EqualError(t, err, ErrDead.Error())
+
+		t.Cleanup(func() {
+			assert.NoError(t, actorSystem.Stop(ctx))
+		})
+	})
+	t.Run("With cluster enabled", func(t *testing.T) {
+		// create a context
+		ctx := context.TODO()
+		// start the NATS server
+		srv := startNatsServer(t)
+
+		// create and start system cluster
+		node1, sd1 := startClusterSystem(t, "Node1", srv.Addr().String())
+		require.NotNil(t, node1)
+		require.NotNil(t, sd1)
+
+		// create and start system cluster
+		node2, sd2 := startClusterSystem(t, "Node2", srv.Addr().String())
+		require.NotNil(t, node2)
+		require.NotNil(t, sd2)
+
+		// create an actor on node1
+		receiver, err := node1.Spawn(ctx, "receiver", newTestActor())
+		assert.NoError(t, err)
+		assert.NotNil(t, receiver)
+		pause(time.Second)
+
+		sender, err := node2.Spawn(ctx, "sender", newTestActor())
+		assert.NoError(t, err)
+		assert.NotNil(t, sender)
+
+		pause(time.Second)
+
+		response, err := sender.SendSync(ctx, receiver.Name(), new(testpb.TestReply))
+		require.NoError(t, err)
+		require.NotNil(t, response)
+		expected := &testpb.Reply{Content: "received message"}
+		assert.True(t, proto.Equal(expected, response))
+
+		t.Cleanup(func() {
+			assert.NoError(t, node1.Stop(ctx))
+			assert.NoError(t, node2.Stop(ctx))
+			assert.NoError(t, sd2.Close())
+			assert.NoError(t, sd1.Close())
+			srv.Shutdown()
+		})
+	})
+	t.Run("With cluster enabled and Actor not found", func(t *testing.T) {
+		// create a context
+		ctx := context.TODO()
+		// start the NATS server
+		srv := startNatsServer(t)
+
+		// create and start system cluster
+		node1, sd1 := startClusterSystem(t, "Node1", srv.Addr().String())
+		require.NotNil(t, node1)
+		require.NotNil(t, sd1)
+
+		// create and start system cluster
+		node2, sd2 := startClusterSystem(t, "Node2", srv.Addr().String())
+		require.NotNil(t, node2)
+		require.NotNil(t, sd2)
+
+		sender, err := node2.Spawn(ctx, "sender", newTestActor())
+		assert.NoError(t, err)
+		assert.NotNil(t, sender)
+
+		pause(time.Second)
+
+		response, err := sender.SendSync(ctx, "receiver", new(testpb.TestReply))
+		require.Nil(t, response)
+		require.Error(t, err)
+		assert.EqualError(t, err, ErrActorNotFound("receiver").Error())
+
+		t.Cleanup(func() {
+			assert.NoError(t, node1.Stop(ctx))
+			assert.NoError(t, node2.Stop(ctx))
+			assert.NoError(t, sd2.Close())
+			assert.NoError(t, sd1.Close())
+			srv.Shutdown()
+		})
+	})
+}
+func TestStopChild(t *testing.T) {
+	t.Run("With Stop failure", func(t *testing.T) {
+		// create a test context
+		ctx := context.TODO()
+		// create the actor path
+		actorPath := NewPath("Parent", NewAddress("sys", "host", 1))
+
+		// create the parent actor
+		parent, err := newPID(ctx, actorPath,
+			newTestSupervisor(),
+			withInitMaxRetries(1),
+			withCustomLogger(log.DiscardLogger),
+			withAskTimeout(replyTimeout))
+
+		require.NoError(t, err)
+		require.NotNil(t, parent)
+
+		// create the child actor
+		child, err := parent.SpawnChild(ctx, "SpawnChild", new(testPostStop))
+		require.NoError(t, err)
+		require.NotNil(t, child)
+		require.Len(t, parent.Children(), 1)
+		// stop the child actor
+		require.Error(t, parent.Stop(ctx, child))
+
+		//stop the actor
+		err = parent.Shutdown(ctx)
+		assert.NoError(t, err)
 	})
 }

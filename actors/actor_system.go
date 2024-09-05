@@ -552,9 +552,8 @@ func (x *actorSystem) ActorOf(ctx context.Context, actorName string) (addr *goak
 		if err != nil {
 			if errors.Is(err, cluster.ErrActorNotFound) {
 				x.logger.Infof("actor=%s not found", actorName)
-				e := ErrActorNotFound(actorName)
 				x.locker.Unlock()
-				return nil, nil, e
+				return nil, nil, ErrActorNotFound(actorName)
 			}
 
 			x.locker.Unlock()
