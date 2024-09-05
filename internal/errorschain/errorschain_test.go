@@ -22,50 +22,32 @@
  * SOFTWARE.
  */
 
-package actors
+package errorschain
 
-import "errors"
+import (
+	"errors"
+	"testing"
 
-// stash adds the current message to the stash buffer
-func (pid *PID) stash(ctx *ReceiveContext) error {
-	if pid.stashBuffer == nil {
-		return ErrStashBufferNotSet
-	}
-	pid.stashBuffer.Push(ctx)
-	return nil
-}
+	"github.com/stretchr/testify/assert"
+)
 
-// unstash unstashes the oldest message in the stash and prepends to the mailbox
-func (pid *PID) unstash() error {
-	if pid.stashBuffer == nil {
-		return ErrStashBufferNotSet
-	}
+func TestErrorsChain(t *testing.T) {
+	t.Run("With ReturnFirst", func(t *testing.T) {
+		e1 := errors.New("err1")
+		e2 := errors.New("err2")
+		e3 := errors.New("err3")
 
-	received := pid.stashBuffer.Pop()
-	if received == nil {
-		return errors.New("stash buffer may be closed")
-	}
-	pid.doReceive(received)
-	return nil
-}
+		chain := New(ReturnFirst()).AddError(e1).AddError(e2).AddError(e3)
+		actual := chain.Error()
+		assert.True(t, errors.Is(actual, e1))
+	})
+	t.Run("With ReturnAll", func(t *testing.T) {
+		e1 := errors.New("err1")
+		e2 := errors.New("err2")
+		e3 := errors.New("err3")
 
-// unstashAll unstashes all messages from the stash buffer and prepends in the mailbox
-// (it keeps the messages in the same order as received, unstashing older messages before newer).
-func (pid *PID) unstashAll() error {
-	if pid.stashBuffer == nil {
-		return ErrStashBufferNotSet
-	}
-
-	pid.stashLocker.Lock()
-	defer pid.stashLocker.Unlock()
-
-	for pid.stashBuffer.Len() > 0 {
-		received := pid.stashBuffer.Pop()
-		if received == nil {
-			return errors.New("stash buffer may be closed")
-		}
-		pid.doReceive(received)
-	}
-
-	return nil
+		chain := New(ReturnAll()).AddError(e1).AddError(e2).AddError(e3)
+		actual := chain.Error()
+		assert.EqualError(t, actual, "err1; err2; err3")
+	})
 }

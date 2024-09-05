@@ -353,7 +353,7 @@ func TestClient(t *testing.T) {
 	t.Run("With SpawnWithBalancer", func(t *testing.T) {
 		ctx := context.TODO()
 
-		logger := log.DefaultLogger
+		logger := log.DiscardLogger
 
 		// start the NATS server
 		srv := startNatsServer(t)
@@ -693,7 +693,7 @@ func newTestActor() *testActor {
 // Init initialize the actor. This function can be used to set up some database connections
 // or some sort of initialization before the actor init processing public
 func (p *testActor) PreStart(context.Context) error {
-	p.logger = log.DefaultLogger
+	p.logger = log.DiscardLogger
 	p.logger.Info("pre start")
 	return nil
 }

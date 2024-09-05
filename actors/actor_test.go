@@ -27,7 +27,6 @@ package actors
 import (
 	"context"
 	"fmt"
-	"os"
 	"sync"
 	"testing"
 	"time"
@@ -41,6 +40,7 @@ import (
 	"github.com/tochemey/goakt/v2/discovery"
 	"github.com/tochemey/goakt/v2/discovery/nats"
 	"github.com/tochemey/goakt/v2/goaktpb"
+	"github.com/tochemey/goakt/v2/internal/types"
 	"github.com/tochemey/goakt/v2/log"
 	"github.com/tochemey/goakt/v2/test/data/testpb"
 	testspb "github.com/tochemey/goakt/v2/test/data/testpb"
@@ -88,7 +88,7 @@ func (p *testActor) Receive(ctx *ReceiveContext) {
 		wg := sync.WaitGroup{}
 		wg.Add(1)
 		go func() {
-			time.Sleep(receivingDelay)
+			pause(receivingDelay)
 			wg.Done()
 		}()
 		// block until timer is up
@@ -225,7 +225,7 @@ func (e *exchanger) Counter() int64 {
 
 func (e *exchanger) PreStart(context.Context) error {
 	e.messageCounter = atomic.NewInt64(0)
-	e.logger = log.DefaultLogger
+	e.logger = log.DiscardLogger
 	return nil
 }
 
@@ -429,7 +429,7 @@ func startNatsServer(t *testing.T) *natsserver.Server {
 
 func startClusterSystem(t *testing.T, nodeName, serverAddr string) (ActorSystem, discovery.Provider) {
 	ctx := context.TODO()
-	logger := log.New(log.DebugLevel, os.Stdout)
+	logger := log.DiscardLogger
 
 	// generate the ports for the single startNode
 	nodePorts := dynaport.Get(3)
@@ -452,7 +452,7 @@ func startClusterSystem(t *testing.T, nodeName, serverAddr string) (ActorSystem,
 	}
 
 	hostNode := discovery.Node{
-		Name:         host,
+		Name:         nodeName,
 		Host:         host,
 		GossipPort:   gossipPort,
 		PeersPort:    clusterPort,
@@ -460,11 +460,11 @@ func startClusterSystem(t *testing.T, nodeName, serverAddr string) (ActorSystem,
 	}
 
 	// create the instance of provider
-	provider := nats.NewDiscovery(&config, &hostNode)
+	provider := nats.NewDiscovery(&config, &hostNode, nats.WithLogger(log.DiscardLogger))
 
 	// create the actor system
 	system, err := NewActorSystem(
-		nodeName,
+		actorSystemName,
 		WithPassivationDisabled(),
 		WithLogger(logger),
 		WithReplyTimeout(time.Minute),
@@ -476,7 +476,7 @@ func startClusterSystem(t *testing.T, nodeName, serverAddr string) (ActorSystem,
 
 	// start the node
 	require.NoError(t, system.Start(ctx))
-	time.Sleep(2 * time.Second)
+	pause(2 * time.Second)
 
 	// return the cluster startNode
 	return system, provider
@@ -498,7 +498,7 @@ func newWorker() *worker {
 }
 
 func (x *worker) PreStart(context.Context) error {
-	x.logger = log.DefaultLogger
+	x.logger = log.DiscardLogger
 	return nil
 }
 
@@ -517,4 +517,13 @@ func (x *worker) Receive(ctx *ReceiveContext) {
 
 func (x *worker) PostStop(context.Context) error {
 	return nil
+}
+
+func pause(duration time.Duration) {
+	stopCh := make(chan types.Unit, 1)
+	timer := time.AfterFunc(duration, func() {
+		stopCh <- types.Unit{}
+	})
+	<-stopCh
+	timer.Stop()
 }

@@ -27,7 +27,6 @@ package actors
 import (
 	"context"
 	"net"
-	"os"
 	"sort"
 	"strconv"
 	"sync"
@@ -56,14 +55,15 @@ import (
 // nolint
 func TestActorSystem(t *testing.T) {
 	t.Run("New instance with Defaults", func(t *testing.T) {
-		actorSys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		actorSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
 		require.NoError(t, err)
-		require.NotNil(t, actorSys)
-		var iface any = actorSys
+		require.NotNil(t, actorSystem)
+		var iface any = actorSystem
 		_, ok := iface.(ActorSystem)
 		assert.True(t, ok)
-		assert.Equal(t, "testSys", actorSys.Name())
-		assert.Empty(t, actorSys.Actors())
+		assert.Equal(t, "testSys", actorSystem.Name())
+		assert.Empty(t, actorSystem.Actors())
+		assert.NotNil(t, actorSystem.Logger())
 	})
 	t.Run("New instance with Missing Name", func(t *testing.T) {
 		sys, err := NewActorSystem("")
@@ -88,7 +88,7 @@ func TestActorSystem(t *testing.T) {
 	})
 	t.Run("With Spawn an actor when started", func(t *testing.T) {
 		ctx := context.TODO()
-		sys, _ := NewActorSystem("testSys", WithLogger(log.DefaultLogger))
+		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
 
 		// start the actor system
 		err := sys.Start(ctx)
@@ -100,7 +100,29 @@ func TestActorSystem(t *testing.T) {
 		assert.NotNil(t, actorRef)
 
 		// stop the actor after some time
-		time.Sleep(time.Second)
+		pause(time.Second)
+
+		t.Cleanup(func() {
+			err = sys.Stop(ctx)
+			assert.NoError(t, err)
+		})
+	})
+	t.Run("With Spawn an actor with invalid actor name", func(t *testing.T) {
+		ctx := context.TODO()
+		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+
+		// start the actor system
+		err := sys.Start(ctx)
+		require.NoError(t, err)
+
+		actor := newTestActor()
+		actorRef, err := sys.Spawn(ctx, "$omeN@me", actor)
+		require.Error(t, err)
+		assert.EqualError(t, err, "path name must contain only word characters (i.e. [a-zA-Z0-9] plus non-leading '-' or '_')")
+		assert.Nil(t, actorRef)
+
+		// stop the actor after some time
+		pause(time.Second)
 
 		t.Cleanup(func() {
 			err = sys.Stop(ctx)
@@ -128,7 +150,7 @@ func TestActorSystem(t *testing.T) {
 		assert.True(t, ref1 == ref2)
 
 		// stop the actor after some time
-		time.Sleep(time.Second)
+		pause(time.Second)
 
 		t.Cleanup(func() {
 			err = sys.Stop(ctx)
@@ -142,7 +164,7 @@ func TestActorSystem(t *testing.T) {
 		clusterPort := nodePorts[1]
 		remotingPort := nodePorts[2]
 
-		logger := log.New(log.DebugLevel, os.Stdout)
+		logger := log.DiscardLogger
 		host := "127.0.0.1"
 
 		// define discovered addresses
@@ -173,7 +195,7 @@ func TestActorSystem(t *testing.T) {
 		require.NoError(t, err)
 
 		// wait for the cluster to start
-		time.Sleep(time.Second)
+		pause(time.Second)
 
 		// create an actor
 		actorName := uuid.NewString()
@@ -184,7 +206,7 @@ func TestActorSystem(t *testing.T) {
 
 		// wait for a while for replication to take effect
 		// otherwise the subsequent test will return actor not found
-		time.Sleep(time.Second)
+		pause(time.Second)
 
 		// get the actor
 		addr, _, err := newActorSystem.ActorOf(ctx, actorName)
@@ -219,7 +241,7 @@ func TestActorSystem(t *testing.T) {
 		require.Nil(t, remoteAddr)
 
 		// stop the actor after some time
-		time.Sleep(time.Second)
+		pause(time.Second)
 
 		t.Cleanup(func() {
 			err = newActorSystem.Stop(ctx)
@@ -231,7 +253,7 @@ func TestActorSystem(t *testing.T) {
 		ctx := context.TODO()
 		remotingPort := dynaport.Get(1)[0]
 
-		logger := log.New(log.DebugLevel, os.Stdout)
+		logger := log.DiscardLogger
 		host := "127.0.0.1"
 
 		newActorSystem, err := NewActorSystem(
@@ -247,7 +269,7 @@ func TestActorSystem(t *testing.T) {
 		require.NoError(t, err)
 
 		// wait for the cluster to fully start
-		time.Sleep(time.Second)
+		pause(time.Second)
 
 		// create an actor
 		actorName := uuid.NewString()
@@ -283,7 +305,7 @@ func TestActorSystem(t *testing.T) {
 		require.Nil(t, addr)
 
 		// stop the actor after some time
-		time.Sleep(time.Second)
+		pause(time.Second)
 
 		t.Cleanup(func() {
 			err = sys.Stop(ctx)
@@ -306,7 +328,7 @@ func TestActorSystem(t *testing.T) {
 		require.Nil(t, addr)
 
 		// stop the actor after some time
-		time.Sleep(time.Second)
+		pause(time.Second)
 
 		t.Cleanup(func() {
 			err = sys.Stop(ctx)
@@ -317,7 +339,7 @@ func TestActorSystem(t *testing.T) {
 		ctx := context.TODO()
 		remotingPort := dynaport.Get(1)[0]
 
-		logger := log.New(log.DebugLevel, os.Stdout)
+		logger := log.DiscardLogger
 		host := "127.0.0.1"
 
 		newActorSystem, err := NewActorSystem(
@@ -364,14 +386,14 @@ func TestActorSystem(t *testing.T) {
 		require.True(t, actorRef.IsRunning())
 
 		// wait for a while for the system to stop
-		time.Sleep(time.Second)
+		pause(time.Second)
 		// restart the actor
 		_, err = sys.ReSpawn(ctx, actorName)
 		require.NoError(t, err)
 
 		// wait for the actor to complete start
 		// TODO we can add a callback for complete start
-		time.Sleep(time.Second)
+		pause(time.Second)
 		require.True(t, actorRef.IsRunning())
 
 		var items []*goaktpb.ActorRestarted
@@ -414,7 +436,7 @@ func TestActorSystem(t *testing.T) {
 		require.True(t, actorRef.IsRunning())
 
 		// wait for a while for the system to stop
-		time.Sleep(time.Second)
+		pause(time.Second)
 		// restart the actor
 		pid, err := sys.ReSpawn(ctx, actorName)
 		require.Error(t, err)
@@ -448,13 +470,13 @@ func TestActorSystem(t *testing.T) {
 		require.True(t, proto.Equal(expected, reply))
 		require.True(t, actorRef.IsRunning())
 		// stop the actor after some time
-		time.Sleep(time.Second)
+		pause(time.Second)
 
 		err = sys.Kill(ctx, actorName)
 		require.NoError(t, err)
 
 		// wait for a while for the system to stop
-		time.Sleep(time.Second)
+		pause(time.Second)
 		// restart the actor
 		_, err = sys.ReSpawn(ctx, actorName)
 		require.Error(t, err)
@@ -475,7 +497,7 @@ func TestActorSystem(t *testing.T) {
 		ctx := context.TODO()
 		remotingPort := dynaport.Get(1)[0]
 
-		logger := log.New(log.DebugLevel, os.Stdout)
+		logger := log.DiscardLogger
 		host := "127.0.0.1"
 
 		newActorSystem, err := NewActorSystem(
@@ -503,7 +525,7 @@ func TestActorSystem(t *testing.T) {
 		require.True(t, proto.Equal(expected, reply))
 		require.True(t, actorRef.IsRunning())
 		// stop the actor after some time
-		time.Sleep(time.Second)
+		pause(time.Second)
 
 		// restart the actor
 		_, err = newActorSystem.ReSpawn(ctx, actorName)
@@ -511,7 +533,7 @@ func TestActorSystem(t *testing.T) {
 
 		// wait for the actor to complete start
 		// TODO we can add a callback for complete start
-		time.Sleep(time.Second)
+		pause(time.Second)
 		require.True(t, actorRef.IsRunning())
 
 		t.Cleanup(func() {
@@ -533,7 +555,7 @@ func TestActorSystem(t *testing.T) {
 		assert.NotNil(t, actorRef)
 
 		// wait for the start of the actor to be complete
-		time.Sleep(time.Second)
+		pause(time.Second)
 
 		assert.EqualValues(t, 1, sys.NumActors())
 
@@ -546,7 +568,7 @@ func TestActorSystem(t *testing.T) {
 		ctx := context.TODO()
 		remotingPort := dynaport.Get(1)[0]
 
-		logger := log.New(log.DebugLevel, os.Stdout)
+		logger := log.DiscardLogger
 		host := "127.0.0.1"
 
 		newActorSystem, err := NewActorSystem(
@@ -561,7 +583,7 @@ func TestActorSystem(t *testing.T) {
 		err = newActorSystem.Start(ctx)
 		require.NoError(t, err)
 
-		time.Sleep(time.Second)
+		pause(time.Second)
 
 		actorName := "some-actor"
 		addr, err := RemoteLookup(ctx, host, remotingPort, actorName)
@@ -579,7 +601,7 @@ func TestActorSystem(t *testing.T) {
 		require.Nil(t, reply)
 
 		// stop the actor after some time
-		time.Sleep(time.Second)
+		pause(time.Second)
 
 		t.Cleanup(func() {
 			err = newActorSystem.Stop(ctx)
@@ -590,7 +612,7 @@ func TestActorSystem(t *testing.T) {
 		ctx := context.TODO()
 		remotingPort := dynaport.Get(1)[0]
 
-		logger := log.New(log.DebugLevel, os.Stdout)
+		logger := log.DiscardLogger
 		host := "127.0.0.1"
 
 		newActorSystem, err := NewActorSystem(
@@ -611,7 +633,7 @@ func TestActorSystem(t *testing.T) {
 		ctx := context.TODO()
 		remotingPort := dynaport.Get(1)[0]
 
-		logger := log.New(log.DebugLevel, os.Stdout)
+		logger := log.DiscardLogger
 		host := "127.0.0.1"
 
 		newActorSystem, err := NewActorSystem(
@@ -630,7 +652,7 @@ func TestActorSystem(t *testing.T) {
 		ctx := context.TODO()
 		remotingPort := dynaport.Get(1)[0]
 
-		logger := log.New(log.DebugLevel, os.Stdout)
+		logger := log.DiscardLogger
 		host := "127.0.0.1"
 
 		newActorSystem, err := NewActorSystem(
@@ -653,7 +675,7 @@ func TestActorSystem(t *testing.T) {
 		require.Nil(t, remoteAddr)
 
 		// stop the actor after some time
-		time.Sleep(time.Second)
+		pause(time.Second)
 
 		t.Cleanup(func() {
 			err = newActorSystem.Stop(ctx)
@@ -682,7 +704,7 @@ func TestActorSystem(t *testing.T) {
 		require.Equal(t, ref.ActorPath().String(), local.ActorPath().String())
 
 		// stop the actor after some time
-		time.Sleep(time.Second)
+		pause(time.Second)
 
 		t.Cleanup(func() {
 			err = sys.Stop(ctx)
@@ -704,7 +726,7 @@ func TestActorSystem(t *testing.T) {
 		require.EqualError(t, err, ErrActorNotFound("some-name").Error())
 
 		// stop the actor after some time
-		time.Sleep(time.Second)
+		pause(time.Second)
 
 		t.Cleanup(func() {
 			err = sys.Stop(ctx)
@@ -748,7 +770,7 @@ func TestActorSystem(t *testing.T) {
 	t.Run("With housekeeping", func(t *testing.T) {
 		ctx := context.TODO()
 		sys, _ := NewActorSystem("housekeeperSys",
-			WithLogger(log.DefaultLogger),
+			WithLogger(log.DiscardLogger),
 			WithExpireActorAfter(passivateAfter))
 
 		// start the actor system
@@ -756,7 +778,7 @@ func TestActorSystem(t *testing.T) {
 		assert.NoError(t, err)
 
 		// wait for the system to properly start
-		time.Sleep(time.Second)
+		pause(time.Second)
 
 		actorName := "HousekeeperActor"
 		actorHandler := newTestActor()
@@ -765,7 +787,7 @@ func TestActorSystem(t *testing.T) {
 		require.NotNil(t, actorRef)
 
 		// wait for the actor to properly start
-		time.Sleep(time.Second)
+		pause(time.Second)
 
 		// locate the actor
 		ref, err := sys.LocalActor(actorName)
@@ -774,7 +796,7 @@ func TestActorSystem(t *testing.T) {
 		require.EqualError(t, err, ErrActorNotFound(actorName).Error())
 
 		// stop the actor after some time
-		time.Sleep(time.Second)
+		pause(time.Second)
 
 		t.Cleanup(func() {
 			err = sys.Stop(ctx)
@@ -784,7 +806,7 @@ func TestActorSystem(t *testing.T) {
 	t.Run("With GetPartition returning zero in non cluster env", func(t *testing.T) {
 		ctx := context.TODO()
 		sys, _ := NewActorSystem("housekeeperSys",
-			WithLogger(log.DefaultLogger),
+			WithLogger(log.DiscardLogger),
 			WithExpireActorAfter(passivateAfter))
 
 		// start the actor system
@@ -792,7 +814,7 @@ func TestActorSystem(t *testing.T) {
 		assert.NoError(t, err)
 
 		// wait for the system to properly start
-		time.Sleep(time.Second)
+		pause(time.Second)
 
 		partition := sys.GetPartition("some-actor")
 		assert.Zero(t, partition)
@@ -816,12 +838,10 @@ func TestActorSystem(t *testing.T) {
 		assert.NotNil(t, actorRef)
 
 		// stop the actor after some time
-		time.Sleep(time.Second)
+		pause(time.Second)
 
 		t.Cleanup(func() {
-			assert.Panics(t, func() {
-				_ = sys.Stop(ctx)
-			})
+			assert.Error(t, sys.Stop(ctx))
 		})
 	})
 	t.Run("With deadletters subscription ", func(t *testing.T) {
@@ -833,7 +853,7 @@ func TestActorSystem(t *testing.T) {
 		assert.NoError(t, err)
 
 		// wait for complete start
-		time.Sleep(time.Second)
+		pause(time.Second)
 
 		// create a deadletter subscriber
 		consumer, err := sys.Subscribe()
@@ -847,14 +867,14 @@ func TestActorSystem(t *testing.T) {
 		assert.NotNil(t, actorRef)
 
 		// wait a while
-		time.Sleep(time.Second)
+		pause(time.Second)
 
 		// every message sent to the actor will result in deadletters
 		for i := 0; i < 5; i++ {
 			require.NoError(t, Tell(ctx, actorRef, new(testpb.TestSend)))
 		}
 
-		time.Sleep(time.Second)
+		pause(time.Second)
 
 		var items []*goaktpb.Deadletter
 		for message := range consumer.Iterator() {
@@ -900,7 +920,7 @@ func TestActorSystem(t *testing.T) {
 		// stop the actor system
 		assert.NoError(t, sys.Stop(ctx))
 
-		time.Sleep(time.Second)
+		pause(time.Second)
 
 		// create a deadletter subscriber
 		err = sys.Unsubscribe(consumer)
@@ -913,7 +933,7 @@ func TestActorSystem(t *testing.T) {
 		clusterPort := nodePorts[1]
 		remotingPort := nodePorts[2]
 
-		logger := log.New(log.DebugLevel, os.Stdout)
+		logger := log.DiscardLogger
 		host := "127.0.0.1"
 
 		// define discovered addresses
@@ -944,7 +964,7 @@ func TestActorSystem(t *testing.T) {
 		require.NoError(t, err)
 
 		// wait for the cluster to start
-		time.Sleep(time.Second)
+		pause(time.Second)
 
 		// create an actor
 		actorName := uuid.NewString()
@@ -955,7 +975,7 @@ func TestActorSystem(t *testing.T) {
 
 		// wait for a while for replication to take effect
 		// otherwise the subsequent test will return actor not found
-		time.Sleep(time.Second)
+		pause(time.Second)
 
 		// get the actor
 		addr, pid, err := newActorSystem.ActorOf(ctx, actorName)
@@ -971,7 +991,7 @@ func TestActorSystem(t *testing.T) {
 		require.Nil(t, remoteAddr)
 
 		// stop the actor after some time
-		time.Sleep(time.Second)
+		pause(time.Second)
 
 		t.Cleanup(func() {
 			err = newActorSystem.Stop(ctx)
@@ -1035,7 +1055,7 @@ func TestActorSystem(t *testing.T) {
 		assert.ElementsMatch(t, expected, actual)
 
 		// stop the actor after some time
-		time.Sleep(time.Second)
+		pause(time.Second)
 
 		t.Cleanup(func() {
 			err = sys.Stop(ctx)
@@ -1069,7 +1089,7 @@ func TestActorSystem(t *testing.T) {
 		require.NotNil(t, subscriber2)
 
 		// wait for some time
-		time.Sleep(time.Second)
+		pause(time.Second)
 
 		// capture the joins
 		var joins []*goaktpb.NodeJoined
@@ -1088,7 +1108,7 @@ func TestActorSystem(t *testing.T) {
 		require.Equal(t, peerAddress2, joins[0].GetAddress())
 
 		// wait for some time
-		time.Sleep(time.Second)
+		pause(time.Second)
 
 		// stop the node
 		require.NoError(t, cl1.Unsubscribe(subscriber1))
@@ -1096,7 +1116,7 @@ func TestActorSystem(t *testing.T) {
 		assert.NoError(t, sd1.Close())
 
 		// wait for some time
-		time.Sleep(time.Second)
+		pause(time.Second)
 
 		var lefts []*goaktpb.NodeLeft
 		for event := range subscriber2.Iterator() {
@@ -1140,7 +1160,7 @@ func TestActorSystem(t *testing.T) {
 		clusterPort := nodePorts[1]
 		remotingPort := nodePorts[2]
 
-		logger := log.New(log.DebugLevel, os.Stdout)
+		logger := log.DiscardLogger
 		host := "127.0.0.1"
 
 		// define discovered addresses
@@ -1181,7 +1201,7 @@ func TestActorSystem(t *testing.T) {
 		assert.NotNil(t, actorRef)
 
 		// stop the actor after some time
-		time.Sleep(time.Second)
+		pause(time.Second)
 
 		// send a message to the actor
 		require.NoError(t, Tell(ctx, actorRef, &testpb.Reply{Content: "test spawn from func"}))
@@ -1221,7 +1241,7 @@ func TestActorSystem(t *testing.T) {
 	})
 	t.Run("With SpawnFromFunc with PreStop error", func(t *testing.T) {
 		ctx := context.TODO()
-		sys, _ := NewActorSystem("testSys", WithLogger(log.DefaultLogger))
+		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
 
 		// start the actor system
 		err := sys.Start(ctx)
@@ -1242,15 +1262,13 @@ func TestActorSystem(t *testing.T) {
 		assert.NotNil(t, actorRef)
 
 		// stop the actor after some time
-		time.Sleep(time.Second)
+		pause(time.Second)
 
 		// send a message to the actor
 		require.NoError(t, Tell(ctx, actorRef, &testpb.Reply{Content: "test spawn from func"}))
 
 		t.Cleanup(func() {
-			assert.Panics(t, func() {
-				_ = sys.Stop(ctx)
-			})
+			assert.Error(t, sys.Stop(ctx))
 		})
 	})
 	t.Run("With SpawnFromFunc with actorSystem not started", func(t *testing.T) {
@@ -1274,7 +1292,7 @@ func TestActorSystem(t *testing.T) {
 	})
 	t.Run("With happy path Register", func(t *testing.T) {
 		ctx := context.TODO()
-		logger := log.New(log.DebugLevel, os.Stdout)
+		logger := log.DiscardLogger
 
 		// create the actor system
 		sys, err := NewActorSystem("test",
@@ -1298,7 +1316,7 @@ func TestActorSystem(t *testing.T) {
 	})
 	t.Run("With Register when actor system not started", func(t *testing.T) {
 		ctx := context.TODO()
-		logger := log.New(log.DebugLevel, os.Stdout)
+		logger := log.DiscardLogger
 
 		// create the actor system
 		sys, err := NewActorSystem("test",
@@ -1319,7 +1337,7 @@ func TestActorSystem(t *testing.T) {
 	})
 	t.Run("With happy path Deregister", func(t *testing.T) {
 		ctx := context.TODO()
-		logger := log.New(log.DebugLevel, os.Stdout)
+		logger := log.DiscardLogger
 
 		// create the actor system
 		sys, err := NewActorSystem("test",
@@ -1346,7 +1364,7 @@ func TestActorSystem(t *testing.T) {
 	})
 	t.Run("With Deregister when actor system not started", func(t *testing.T) {
 		ctx := context.TODO()
-		logger := log.New(log.DebugLevel, os.Stdout)
+		logger := log.DiscardLogger
 
 		// create the actor system
 		sys, err := NewActorSystem("test",
@@ -1398,7 +1416,7 @@ func TestActorSystem(t *testing.T) {
 		clusterPort := nodePorts[1]
 		remotingPort := nodePorts[2]
 
-		logger := log.New(log.DebugLevel, os.Stdout)
+		logger := log.DiscardLogger
 		host := "127.0.0.1"
 
 		// define discovered addresses
@@ -1429,7 +1447,7 @@ func TestActorSystem(t *testing.T) {
 		require.NoError(t, err)
 
 		// wait for the cluster to start
-		time.Sleep(time.Second)
+		pause(time.Second)
 
 		// create an actor
 		actorName := "actorID"
