@@ -2567,3 +2567,18 @@ func TestStopChild(t *testing.T) {
 		assert.NoError(t, err)
 	})
 }
+func TestNewPID(t *testing.T) {
+	t.Run("With actor path not defined", func(t *testing.T) {
+		ctx := context.Background()
+		pid, err := newPID(
+			ctx,
+			nil,
+			newTestActor(),
+			withInitMaxRetries(1),
+			withCustomLogger(log.DiscardLogger),
+			withAskTimeout(replyTimeout))
+
+		require.Error(t, err)
+		assert.Nil(t, pid)
+	})
+}

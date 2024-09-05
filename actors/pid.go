@@ -569,11 +569,7 @@ func (pid *PID) SendAsync(ctx context.Context, actorName string, message proto.M
 		return pid.Tell(ctx, cid, message)
 	}
 
-	if addr != nil {
-		return pid.RemoteTell(ctx, addr, message)
-	}
-
-	return ErrActorNotFound(actorName)
+	return pid.RemoteTell(ctx, addr, message)
 }
 
 // SendSync sends a synchronous message to another actor and expect a response.
@@ -593,15 +589,11 @@ func (pid *PID) SendSync(ctx context.Context, actorName string, message proto.Me
 		return pid.Ask(ctx, cid, message)
 	}
 
-	if addr != nil {
-		reply, err := pid.RemoteAsk(ctx, addr, message)
-		if err != nil {
-			return nil, err
-		}
-		return reply.UnmarshalNew()
+	reply, err := pid.RemoteAsk(ctx, addr, message)
+	if err != nil {
+		return nil, err
 	}
-
-	return nil, ErrActorNotFound(actorName)
+	return reply.UnmarshalNew()
 }
 
 // BatchTell sends an asynchronous bunch of messages to the given PID
