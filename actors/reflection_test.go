@@ -34,41 +34,41 @@ import (
 )
 
 func TestReflection(t *testing.T) {
-	t.Run("With ActorFrom", func(t *testing.T) {
-		t.Run("With happy path", func(t *testing.T) {
-			newRegistry := types.NewRegistry()
-			// create an instance of an actor
-			actor := newTestActor()
-			// register the actor into the types registry
-			newRegistry.Register(actor)
-
-			// create an instance of reflection
-			reflection := newReflection(newRegistry)
-
-			// create an instance of test actor from the string testActor
-			actual, err := reflection.ActorFrom("actors.testActor")
-			assert.NoError(t, err)
-			assert.NotNil(t, actual)
-			assert.IsType(t, new(testActor), actual)
-		})
-		t.Run("With actor not found", func(t *testing.T) {
-			newRegistry := types.NewRegistry()
-			// create an instance of reflection
-			reflection := newReflection(newRegistry)
-			actual, err := reflection.ActorFrom("actors.fakeActor")
-			assert.Error(t, err)
-			assert.Nil(t, actual)
-		})
-		t.Run("With actor interface not implemented", func(t *testing.T) {
-			tl := types.NewRegistry()
-			nonActor := new(goaktpb.Address)
-			// register the actor into the types registry
-			tl.Register(nonActor)
-			// create an instance of reflection
-			reflection := newReflection(tl)
-			actual, err := reflection.ActorFrom("actors.fakeActor")
-			assert.Error(t, err)
-			assert.Nil(t, actual)
-		})
+	t.Run("With ActorFrom happy path", func(t *testing.T) {
+		newRegistry := types.NewRegistry()
+		actor := newTestActor()
+		newRegistry.Register(actor)
+		reflection := newReflection(newRegistry)
+		actual, err := reflection.ActorFrom("actors.testActor")
+		assert.NoError(t, err)
+		assert.NotNil(t, actual)
+		assert.IsType(t, new(testActor), actual)
+	})
+	t.Run("With ActorFrom actor not found", func(t *testing.T) {
+		newRegistry := types.NewRegistry()
+		reflection := newReflection(newRegistry)
+		actual, err := reflection.ActorFrom("actors.fakeActor")
+		assert.Error(t, err)
+		assert.Nil(t, actual)
+	})
+	t.Run("With unregistered actor", func(t *testing.T) {
+		tl := types.NewRegistry()
+		nonActor := new(goaktpb.Address)
+		tl.Register(nonActor)
+		reflection := newReflection(tl)
+		actual, err := reflection.ActorFrom("actors.fakeActor")
+		assert.Error(t, err)
+		assert.EqualError(t, err, ErrTypeNotRegistered.Error())
+		assert.Nil(t, actual)
+	})
+	t.Run("With ActorFrom actor interface not implemented", func(t *testing.T) {
+		newRegistry := types.NewRegistry()
+		type normalStruct struct{}
+		newRegistry.Register(new(normalStruct))
+		reflection := newReflection(newRegistry)
+		actual, err := reflection.ActorFrom("actors.normalStruct")
+		assert.Error(t, err)
+		assert.EqualError(t, err, ErrInstanceNotAnActor.Error())
+		assert.Nil(t, actual)
 	})
 }
