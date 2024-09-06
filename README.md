@@ -106,9 +106,10 @@ The fundamental building blocks of Go-Akt are actors.
 - Every actor in Go-Akt:
   - has a process id [`PID`](./actors/pid.go). Via the process id any allowable action can be executed by the
     actor.
-  - has a lifecycle via the following methods: [`PreStart`](./actors/actor.go), [`PostStop`](./actors/actor.go).
-    It means it
-    can live and die like any other process.
+  - has a lifecycle via the following methods: [`PreStart`](./actors/actor.go), [`PostStop`](./actors/actor.go). 
+    `PreStart` hook is used to initialise actor state. It is like the actor constructor.
+    `PostStop` hook is used to clean up resources used by the Actor. It is like the actor destructor.
+    It means it can live and die like any other process.
   - handles and responds to messages via the method [`Receive`](./actors/actor.go). While handling messages it
     can:
   - create other (child) actors via their process id [`PID`](./actors/pid.go) `SpawnChild` method
@@ -422,8 +423,8 @@ The following outlines the cluster mode operations which can help have a healthy
 ### Redeployment
 
 When a node leaves the cluster, as long as the cluster quorum is stable, its actors are redeployed on the remaining nodes of the cluster.
-The redeployed actors are created with **_their initial state_**. To be able to recover from their current state before the cluster topology change,
-one needs to persist their state into a distributed storage and recover from there using the `PreStart` hook.
+The redeployed actors are created with **_their initial state_**. Every field of the Actor set using the `PreStart` will have their value set
+as expected. On the contrary every field of the Actor will be set to their default go type value because actors are created using reflection.
 
 ### Built-in Discovery Providers
 

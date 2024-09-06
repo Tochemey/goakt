@@ -37,6 +37,7 @@ type Actor interface {
 	// or some sort of initialization before the actor start processing messages
 	// when the initialization failed the actor will not be started.
 	// Use this function to set any fields that will be needed before the actor starts.
+	// This hook helps set the default values needed by any fields of the actor.
 	PreStart(ctx context.Context) error
 	// Receive processes any message dropped into the actor mailbox.
 	// The receiver of any message can either reply to the sender of the message with a new message or reply to the message synchronously
