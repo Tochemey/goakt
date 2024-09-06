@@ -25,6 +25,7 @@
 package actors
 
 import (
+	"bytes"
 	"context"
 	"sort"
 	"sync"
@@ -2580,5 +2581,37 @@ func TestNewPID(t *testing.T) {
 
 		require.Error(t, err)
 		assert.Nil(t, pid)
+	})
+}
+func TestLogger(t *testing.T) {
+	ctx := context.TODO()
+	buffer := new(bytes.Buffer)
+	buffer.Reset()
+
+	actorPath := NewPath("Test", NewAddress("sys", "host", 1))
+	pid, err := newPID(
+		ctx,
+		actorPath,
+		&exchanger{},
+		withInitMaxRetries(1),
+		withCustomLogger(log.New(log.InfoLevel, buffer)),
+		withAskTimeout(replyTimeout))
+
+	require.NoError(t, err)
+	require.NotNil(t, pid)
+
+	buffer.Reset()
+
+	pid.Logger().Info("test debug")
+	actual, err := extractMessage(buffer.Bytes())
+	require.NoError(t, err)
+
+	expected := "test debug"
+	require.Equal(t, expected, actual)
+
+	t.Cleanup(func() {
+		// reset the buffer
+		buffer.Reset()
+		assert.NoError(t, pid.Shutdown(ctx))
 	})
 }

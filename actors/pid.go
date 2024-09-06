@@ -1040,6 +1040,14 @@ func (pid *PID) UnWatch(cid *PID) {
 	}
 }
 
+// Logger returns the logger sets when creating the PID
+func (pid *PID) Logger() log.Logger {
+	pid.fieldsLocker.Lock()
+	logger := pid.logger
+	pid.fieldsLocker.Unlock()
+	return logger
+}
+
 // watchers return the list of watchersList
 func (pid *PID) watchers() *slice.Slice[*watcher] {
 	return pid.watchersList

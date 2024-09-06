@@ -26,7 +26,9 @@ package actors
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -535,4 +537,38 @@ func pause(duration time.Duration) {
 	})
 	<-stopCh
 	timer.Stop()
+}
+
+func extractMessage(bytes []byte) (string, error) {
+	// a map container to decode the JSON structure into
+	c := make(map[string]json.RawMessage)
+
+	// unmarshal JSON
+	if err := json.Unmarshal(bytes, &c); err != nil {
+		return "", err
+	}
+	for k, v := range c {
+		if k == "msg" {
+			return strconv.Unquote(string(v))
+		}
+	}
+
+	return "", nil
+}
+
+func extractLevel(bytes []byte) (string, error) {
+	// a map container to decode the JSON structure into
+	c := make(map[string]json.RawMessage)
+
+	// unmarshal JSON
+	if err := json.Unmarshal(bytes, &c); err != nil {
+		return "", err
+	}
+	for k, v := range c {
+		if k == "level" {
+			return strconv.Unquote(string(v))
+		}
+	}
+
+	return "", nil
 }

@@ -54,7 +54,7 @@ func TestScheduler(t *testing.T) {
 		err = newActorSystem.Start(ctx)
 		assert.NoError(t, err)
 
-		time.Sleep(time.Second)
+		pause(time.Second)
 
 		// create a test actor
 		actorName := "test"
@@ -63,14 +63,14 @@ func TestScheduler(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
-		time.Sleep(time.Second)
+		pause(time.Second)
 
 		// send a message to the actor after 100 ms
 		message := new(testpb.TestSend)
 		err = newActorSystem.ScheduleOnce(ctx, message, actorRef, 100*time.Millisecond)
 		require.NoError(t, err)
 
-		time.Sleep(time.Second)
+		pause(time.Second)
 		typedSystem := newActorSystem.(*actorSystem)
 		keys, err := typedSystem.scheduler.quartzScheduler.GetJobKeys()
 		require.NoError(t, err)
@@ -131,7 +131,7 @@ func TestScheduler(t *testing.T) {
 		err = newActorSystem.Start(ctx)
 		assert.NoError(t, err)
 
-		time.Sleep(time.Second)
+		pause(time.Second)
 
 		// create a test actor
 		actorName := "test"
@@ -149,7 +149,7 @@ func TestScheduler(t *testing.T) {
 		err = newActorSystem.RemoteScheduleOnce(ctx, message, addr, 100*time.Millisecond)
 		require.NoError(t, err)
 
-		time.Sleep(time.Second)
+		pause(time.Second)
 		typedSystem := newActorSystem.(*actorSystem)
 		// for test purpose only
 		keys, err := typedSystem.scheduler.quartzScheduler.GetJobKeys()
@@ -185,7 +185,7 @@ func TestScheduler(t *testing.T) {
 		err = newActorSystem.Start(ctx)
 		assert.NoError(t, err)
 
-		time.Sleep(time.Second)
+		pause(time.Second)
 
 		// test purpose only
 		typedSystem := newActorSystem.(*actorSystem)
@@ -228,7 +228,7 @@ func TestScheduler(t *testing.T) {
 		err = newActorSystem.Start(ctx)
 		assert.NoError(t, err)
 
-		time.Sleep(time.Second)
+		pause(time.Second)
 
 		// create a test actor
 		actorName := "test"
@@ -237,7 +237,7 @@ func TestScheduler(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
-		time.Sleep(time.Second)
+		pause(time.Second)
 
 		// send a message to the actor after 100 ms
 		message := new(testpb.TestSend)
@@ -247,7 +247,7 @@ func TestScheduler(t *testing.T) {
 		require.NoError(t, err)
 
 		// wait for two seconds
-		time.Sleep(2 * time.Second)
+		pause(2 * time.Second)
 		assert.EqualValues(t, 2, actor.counter.Load())
 
 		// stop the actor
@@ -270,7 +270,7 @@ func TestScheduler(t *testing.T) {
 		err = newActorSystem.Start(ctx)
 		assert.NoError(t, err)
 
-		time.Sleep(time.Second)
+		pause(time.Second)
 
 		// create a test actor
 		actorName := "test"
@@ -279,7 +279,7 @@ func TestScheduler(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
-		time.Sleep(time.Second)
+		pause(time.Second)
 
 		// send a message to the actor after 100 ms
 		message := new(testpb.TestSend)
@@ -308,7 +308,7 @@ func TestScheduler(t *testing.T) {
 		err = newActorSystem.Start(ctx)
 		assert.NoError(t, err)
 
-		time.Sleep(time.Second)
+		pause(time.Second)
 
 		// test purpose only
 		typedSystem := newActorSystem.(*actorSystem)
@@ -321,7 +321,7 @@ func TestScheduler(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
-		time.Sleep(time.Second)
+		pause(time.Second)
 
 		// send a message to the actor after 100 ms
 		message := new(testpb.TestSend)
@@ -358,7 +358,7 @@ func TestScheduler(t *testing.T) {
 		err = newActorSystem.Start(ctx)
 		assert.NoError(t, err)
 
-		time.Sleep(time.Second)
+		pause(time.Second)
 
 		// create a test actor
 		actorName := "test"
@@ -379,7 +379,7 @@ func TestScheduler(t *testing.T) {
 		require.NoError(t, err)
 
 		// wait for two seconds
-		time.Sleep(2 * time.Second)
+		pause(2 * time.Second)
 		assert.EqualValues(t, 2, actor.counter.Load())
 
 		// stop the actor
@@ -409,7 +409,7 @@ func TestScheduler(t *testing.T) {
 		err = newActorSystem.Start(ctx)
 		assert.NoError(t, err)
 
-		time.Sleep(time.Second)
+		pause(time.Second)
 
 		// create a test actor
 		actorName := "test"
@@ -456,7 +456,7 @@ func TestScheduler(t *testing.T) {
 		err = newActorSystem.Start(ctx)
 		assert.NoError(t, err)
 
-		time.Sleep(time.Second)
+		pause(time.Second)
 		// test purpose only
 		typedSystem := newActorSystem.(*actorSystem)
 		typedSystem.scheduler.Stop(ctx)
