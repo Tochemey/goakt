@@ -56,14 +56,13 @@ var _ Actor = (*testActor)(nil)
 
 // newTestActor creates a testActor
 func newTestActor() *testActor {
-	return &testActor{
-		counter: atomic.NewInt64(0),
-	}
+	return &testActor{}
 }
 
 // Init initialize the actor. This function can be used to set up some database connections
 // or some sort of initialization before the actor init processing public
 func (p *testActor) PreStart(context.Context) error {
+	p.counter = atomic.NewInt64(0)
 	return nil
 }
 
@@ -469,7 +468,17 @@ func startClusterSystem(t *testing.T, nodeName, serverAddr string) (ActorSystem,
 		WithLogger(logger),
 		WithReplyTimeout(time.Minute),
 		WithRemoting(host, int32(remotingPort)),
-		WithClustering(provider, 10, 1, gossipPort, clusterPort, new(testActor)))
+		WithPeerStateLoopInterval(500*time.Millisecond),
+		WithCluster(
+			NewClusterConfig().
+				WithKinds(new(testActor)).
+				WithPartitionCount(10).
+				WithReplicaCount(1).
+				WithPeersPort(clusterPort).
+				WithMinimumPeersQuorum(1).
+				WithGossipPort(gossipPort).
+				WithDiscovery(provider).WithKinds(new(testActor))),
+	)
 
 	require.NotNil(t, system)
 	require.NoError(t, err)
