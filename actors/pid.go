@@ -1174,10 +1174,6 @@ func (pid *PID) receive() {
 			return
 		case <-pid.receiveSignal:
 			received := pid.mailbox.Pop()
-			if received == nil {
-				continue
-			}
-
 			switch received.Message().(type) {
 			case *goaktpb.PoisonPill:
 				// stop the actor
