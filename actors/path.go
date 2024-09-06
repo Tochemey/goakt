@@ -94,7 +94,7 @@ func (p *Path) String() string {
 
 // Equals is used to compare two paths
 func (p *Path) Equals(x *Path) bool {
-	return p.id.ID() == x.ID().ID() && p.String() == x.String()
+	return p.ID().ID() == x.ID().ID() && p.String() == x.String()
 }
 
 // RemoteAddress returns the remote from path
