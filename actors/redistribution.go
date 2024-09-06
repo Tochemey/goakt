@@ -60,6 +60,7 @@ func (x *actorSystem) redistribute(ctx context.Context, event *cluster.Event) er
 
 	nodeLeft := new(goaktpb.NodeLeft)
 	if err := event.Payload.UnmarshalTo(nodeLeft); err != nil {
+		x.logger.Errorf("failed to unmarshal payload: (%v)", err)
 		return err
 	}
 
@@ -67,6 +68,7 @@ func (x *actorSystem) redistribute(ctx context.Context, event *cluster.Event) er
 	bytea, ok := x.peersCache[nodeLeft.GetAddress()]
 	x.peersCacheMu.RUnlock()
 	if !ok {
+		x.logger.Errorf("peer %s not found", nodeLeft.GetAddress())
 		return ErrPeerNotFound
 	}
 
