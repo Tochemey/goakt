@@ -458,12 +458,7 @@ func (x *actorSystem) Kill(ctx context.Context, name string) error {
 		return ErrActorSystemNotStarted
 	}
 
-	// set the default actor path assuming we are running locally
-	actorPath := NewPath(name, NewAddress(x.name, "", -1))
-	if x.remotingEnabled.Load() {
-		actorPath = NewPath(name, NewAddress(x.name, x.remotingHost, int(x.remotingPort)))
-	}
-
+	actorPath := x.actorPath(name)
 	pid, exist := x.actors.get(actorPath)
 	if exist {
 		// stop the given actor. No need to record error in the span context
@@ -653,7 +648,7 @@ func (x *actorSystem) Start(ctx context.Context) error {
 	x.supervisor = pid
 	x.setActor(pid)
 
-	go x.gc()
+	go x.janitor()
 
 	x.logger.Infof("%s started..:)", x.name)
 	return nil
@@ -1179,10 +1174,10 @@ func (x *actorSystem) reset() {
 	x.cluster = nil
 }
 
-// gc time to time removes dead actors from the system
+// janitor time to time removes dead actors from the system
 // that helps free non-utilized resources
-func (x *actorSystem) gc() {
-	x.logger.Info("garbage collector has started...")
+func (x *actorSystem) janitor() {
+	x.logger.Info("janitor has started...")
 	ticker := time.NewTicker(x.gcInterval)
 	tickerStopSig := make(chan types.Unit, 1)
 	go func() {
@@ -1210,7 +1205,7 @@ func (x *actorSystem) gc() {
 
 	<-tickerStopSig
 	ticker.Stop()
-	x.logger.Info("garbage collector has stopped...")
+	x.logger.Info("janitor has stopped...")
 }
 
 // registerMetrics register the PID metrics with OTel instrumentation.

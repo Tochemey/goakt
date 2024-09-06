@@ -30,7 +30,6 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
-	"connectrpc.com/otelconnect"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/durationpb"
@@ -120,15 +119,9 @@ func RemoteTell(ctx context.Context, to *goaktpb.Address, message proto.Message)
 		return ErrInvalidRemoteMessage(err)
 	}
 
-	interceptor, err := otelconnect.NewInterceptor()
-	if err != nil {
-		return err
-	}
-
 	remoteClient := internalpbconnect.NewRemotingServiceClient(
 		http.NewClient(),
 		http.URL(to.GetHost(), int(to.GetPort())),
-		connect.WithInterceptors(interceptor),
 	)
 
 	request := &internalpb.RemoteTellRequest{
@@ -165,15 +158,9 @@ func RemoteAsk(ctx context.Context, to *goaktpb.Address, message proto.Message, 
 		return nil, ErrInvalidRemoteMessage(err)
 	}
 
-	interceptor, err := otelconnect.NewInterceptor()
-	if err != nil {
-		return nil, err
-	}
-
 	remotingService := internalpbconnect.NewRemotingServiceClient(
 		http.NewClient(),
 		http.URL(to.GetHost(), int(to.GetPort())),
-		connect.WithInterceptors(interceptor),
 	)
 
 	request := &internalpb.RemoteAskRequest{
@@ -223,15 +210,9 @@ func RemoteAsk(ctx context.Context, to *goaktpb.Address, message proto.Message, 
 
 // RemoteLookup look for an actor address on a remote node.
 func RemoteLookup(ctx context.Context, host string, port int, name string) (addr *goaktpb.Address, err error) {
-	interceptor, err := otelconnect.NewInterceptor()
-	if err != nil {
-		return nil, err
-	}
-
 	remoteClient := internalpbconnect.NewRemotingServiceClient(
 		http.NewClient(),
 		http.URL(host, port),
-		connect.WithInterceptors(interceptor),
 	)
 
 	request := connect.NewRequest(&internalpb.RemoteLookupRequest{
@@ -254,11 +235,6 @@ func RemoteLookup(ctx context.Context, host string, port int, name string) (addr
 
 // RemoteBatchTell sends bulk asynchronous messages to an actor
 func RemoteBatchTell(ctx context.Context, to *goaktpb.Address, messages ...proto.Message) error {
-	interceptor, err := otelconnect.NewInterceptor()
-	if err != nil {
-		return err
-	}
-
 	var requests []*internalpb.RemoteTellRequest
 	for _, message := range messages {
 		packed, err := anypb.New(message)
@@ -278,7 +254,6 @@ func RemoteBatchTell(ctx context.Context, to *goaktpb.Address, messages ...proto
 	remoteClient := internalpbconnect.NewRemotingServiceClient(
 		http.NewClient(),
 		http.URL(to.GetHost(), int(to.GetPort())),
-		connect.WithInterceptors(interceptor),
 	)
 
 	stream := remoteClient.RemoteTell(ctx)
@@ -306,11 +281,6 @@ func RemoteBatchTell(ctx context.Context, to *goaktpb.Address, messages ...proto
 
 // RemoteBatchAsk sends bulk messages to an actor with responses expected
 func RemoteBatchAsk(ctx context.Context, to *goaktpb.Address, messages ...proto.Message) (responses []*anypb.Any, err error) {
-	interceptor, err := otelconnect.NewInterceptor()
-	if err != nil {
-		return nil, err
-	}
-
 	var requests []*internalpb.RemoteAskRequest
 	for _, message := range messages {
 		packed, err := anypb.New(message)
@@ -330,7 +300,6 @@ func RemoteBatchAsk(ctx context.Context, to *goaktpb.Address, messages ...proto.
 	remoteClient := internalpbconnect.NewRemotingServiceClient(
 		http.NewClient(),
 		http.URL(to.GetHost(), int(to.GetPort())),
-		connect.WithInterceptors(interceptor),
 	)
 
 	stream := remoteClient.RemoteAsk(ctx)
@@ -374,15 +343,9 @@ func RemoteBatchAsk(ctx context.Context, to *goaktpb.Address, messages ...proto.
 
 // RemoteReSpawn restarts actor on a remote node.
 func RemoteReSpawn(ctx context.Context, host string, port int, name string) error {
-	interceptor, err := otelconnect.NewInterceptor()
-	if err != nil {
-		return err
-	}
-
 	remoteClient := internalpbconnect.NewRemotingServiceClient(
 		http.NewClient(),
 		http.URL(host, port),
-		connect.WithInterceptors(interceptor),
 	)
 
 	request := connect.NewRequest(&internalpb.RemoteReSpawnRequest{
@@ -391,7 +354,7 @@ func RemoteReSpawn(ctx context.Context, host string, port int, name string) erro
 		Name: name,
 	})
 
-	if _, err = remoteClient.RemoteReSpawn(ctx, request); err != nil {
+	if _, err := remoteClient.RemoteReSpawn(ctx, request); err != nil {
 		code := connect.CodeOf(err)
 		if code == connect.CodeNotFound {
 			return nil
@@ -404,15 +367,9 @@ func RemoteReSpawn(ctx context.Context, host string, port int, name string) erro
 
 // RemoteStop stops an actor on a remote node.
 func RemoteStop(ctx context.Context, host string, port int, name string) error {
-	interceptor, err := otelconnect.NewInterceptor()
-	if err != nil {
-		return err
-	}
-
 	remoteClient := internalpbconnect.NewRemotingServiceClient(
 		http.NewClient(),
 		http.URL(host, port),
-		connect.WithInterceptors(interceptor),
 	)
 
 	request := connect.NewRequest(&internalpb.RemoteStopRequest{
@@ -421,7 +378,7 @@ func RemoteStop(ctx context.Context, host string, port int, name string) error {
 		Name: name,
 	})
 
-	if _, err = remoteClient.RemoteStop(ctx, request); err != nil {
+	if _, err := remoteClient.RemoteStop(ctx, request); err != nil {
 		code := connect.CodeOf(err)
 		if code == connect.CodeNotFound {
 			return nil
@@ -434,15 +391,9 @@ func RemoteStop(ctx context.Context, host string, port int, name string) error {
 
 // RemoteSpawn creates an actor on a remote node. The given actor needs to be registered on the remote node using the Register method of ActorSystem
 func RemoteSpawn(ctx context.Context, host string, port int, name, actorType string) error {
-	interceptor, err := otelconnect.NewInterceptor()
-	if err != nil {
-		return err
-	}
-
 	remoteClient := internalpbconnect.NewRemotingServiceClient(
 		http.NewClient(),
 		http.URL(host, port),
-		connect.WithInterceptors(interceptor),
 	)
 
 	request := connect.NewRequest(&internalpb.RemoteSpawnRequest{
