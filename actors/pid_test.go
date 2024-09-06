@@ -2584,23 +2584,12 @@ func TestNewPID(t *testing.T) {
 	})
 }
 func TestLogger(t *testing.T) {
-	ctx := context.TODO()
 	buffer := new(bytes.Buffer)
-	buffer.Reset()
 
-	actorPath := NewPath("Test", NewAddress("sys", "host", 1))
-	pid, err := newPID(
-		ctx,
-		actorPath,
-		&exchanger{},
-		withInitMaxRetries(1),
-		withCustomLogger(log.New(log.InfoLevel, buffer)),
-		withAskTimeout(replyTimeout))
-
-	require.NoError(t, err)
-	require.NotNil(t, pid)
-
-	buffer.Reset()
+	pid := &PID{
+		logger:       log.New(log.InfoLevel, buffer),
+		fieldsLocker: &sync.RWMutex{},
+	}
 
 	pid.Logger().Info("test debug")
 	actual, err := extractMessage(buffer.Bytes())
@@ -2612,6 +2601,5 @@ func TestLogger(t *testing.T) {
 	t.Cleanup(func() {
 		// reset the buffer
 		buffer.Reset()
-		assert.NoError(t, pid.Shutdown(ctx))
 	})
 }
