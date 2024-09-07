@@ -147,7 +147,7 @@ func (d *Discovery) DiscoverPeers() ([]string, error) {
 		return nil, err
 	}
 
-	validPortNames := []string{d.config.PeersPortName, d.config.GossipPortName, d.config.RemotingPortName}
+	validPortNames := []string{d.config.PeersPortName, d.config.DiscoveryPortName, d.config.RemotingPortName}
 
 	// define the addresses list
 	addresses := goset.NewSet[string]()
@@ -174,7 +174,7 @@ MainLoop:
 					continue
 				}
 
-				if port.Name == d.config.GossipPortName {
+				if port.Name == d.config.DiscoveryPortName {
 					addresses.Add(net.JoinHostPort(pod.Status.PodIP, strconv.Itoa(int(port.ContainerPort))))
 				}
 			}

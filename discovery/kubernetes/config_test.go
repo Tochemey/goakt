@@ -33,23 +33,23 @@ import (
 func TestConfig(t *testing.T) {
 	t.Run("With valid configuration", func(t *testing.T) {
 		config := &Config{
-			Namespace:        "namespace",
-			ApplicationName:  "applicationName",
-			GossipPortName:   "gossipName",
-			RemotingPortName: "remotingName",
-			PeersPortName:    "peersPortName",
-			ActorSystemName:  "actorSys",
+			Namespace:         "namespace",
+			ApplicationName:   "applicationName",
+			DiscoveryPortName: "gossipName",
+			RemotingPortName:  "remotingName",
+			PeersPortName:     "peersPortName",
+			ActorSystemName:   "actorSys",
 		}
 		assert.NoError(t, config.Validate())
 	})
 	t.Run("With invalid configuration", func(t *testing.T) {
 		config := &Config{
-			Namespace:        "namespace",
-			ApplicationName:  "applicationName",
-			GossipPortName:   "",
-			RemotingPortName: "remotingName",
-			PeersPortName:    "peersPortName",
-			ActorSystemName:  "actorSys",
+			Namespace:         "namespace",
+			ApplicationName:   "applicationName",
+			DiscoveryPortName: "",
+			RemotingPortName:  "remotingName",
+			PeersPortName:     "peersPortName",
+			ActorSystemName:   "actorSys",
 		}
 		assert.Error(t, config.Validate())
 	})
