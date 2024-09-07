@@ -57,8 +57,8 @@ func newReceiveContext(ctx context.Context, from, to *PID, message proto.Message
 	}
 }
 
-// WithRemoteSender set the remote sender for a given context
-func (c *ReceiveContext) WithRemoteSender(remoteSender *goaktpb.Address) *ReceiveContext {
+// withRemoteSender set the remote sender for a given context
+func (c *ReceiveContext) withRemoteSender(remoteSender *goaktpb.Address) *ReceiveContext {
 	c.remoteSender = remoteSender
 	return c
 }
