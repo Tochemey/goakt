@@ -181,9 +181,9 @@ type actorSystem struct {
 	// This allows to handle remote messaging
 	remotingEnabled atomic.Bool
 	// Specifies the remoting port
-	remotingPort int32
+	port int32
 	// Specifies the remoting host
-	remotingHost string
+	host string
 	// Specifies the remoting server
 	remotingServer *stdhttp.Server
 
@@ -262,8 +262,8 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		peersCacheMu:           &sync.RWMutex{},
 		peersCache:             make(map[string][]byte),
 		peersStateLoopInterval: DefaultPeerStateLoopInterval,
-		remotingPort:           0,
-		remotingHost:           "127.0.0.1",
+		port:                   0,
+		host:                   "127.0.0.1",
 	}
 
 	system.started.Store(false)
@@ -725,7 +725,7 @@ func (x *actorSystem) RemoteLookup(ctx context.Context, request *connect.Request
 		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrRemotingDisabled)
 	}
 
-	remoteAddr := fmt.Sprintf("%s:%d", x.remotingHost, x.remotingPort)
+	remoteAddr := fmt.Sprintf("%s:%d", x.host, x.port)
 	if remoteAddr != net.JoinHostPort(msg.GetHost(), strconv.Itoa(int(msg.GetPort()))) {
 		return nil, connect.NewError(connect.CodeInvalidArgument, ErrInvalidHost)
 	}
@@ -786,7 +786,7 @@ func (x *actorSystem) RemoteAsk(ctx context.Context, stream *connect.BidiStream[
 		receiver := message.GetReceiver()
 		name := receiver.GetName()
 
-		remoteAddr := fmt.Sprintf("%s:%d", x.remotingHost, x.remotingPort)
+		remoteAddr := fmt.Sprintf("%s:%d", x.host, x.port)
 		if remoteAddr != net.JoinHostPort(receiver.GetHost(), strconv.Itoa(int(receiver.GetPort()))) {
 			return connect.NewError(connect.CodeInvalidArgument, ErrInvalidHost)
 		}
@@ -883,7 +883,7 @@ func (x *actorSystem) RemoteReSpawn(ctx context.Context, request *connect.Reques
 		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrRemotingDisabled)
 	}
 
-	remoteAddr := fmt.Sprintf("%s:%d", x.remotingHost, x.remotingPort)
+	remoteAddr := fmt.Sprintf("%s:%d", x.host, x.port)
 	if remoteAddr != net.JoinHostPort(msg.GetHost(), strconv.Itoa(int(msg.GetPort()))) {
 		return nil, connect.NewError(connect.CodeInvalidArgument, ErrInvalidHost)
 	}
@@ -913,7 +913,7 @@ func (x *actorSystem) RemoteStop(ctx context.Context, request *connect.Request[i
 		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrRemotingDisabled)
 	}
 
-	remoteAddr := fmt.Sprintf("%s:%d", x.remotingHost, x.remotingPort)
+	remoteAddr := fmt.Sprintf("%s:%d", x.host, x.port)
 	if remoteAddr != net.JoinHostPort(msg.GetHost(), strconv.Itoa(int(msg.GetPort()))) {
 		return nil, connect.NewError(connect.CodeInvalidArgument, ErrInvalidHost)
 	}
@@ -942,7 +942,7 @@ func (x *actorSystem) RemoteSpawn(ctx context.Context, request *connect.Request[
 		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrRemotingDisabled)
 	}
 
-	remoteAddr := fmt.Sprintf("%s:%d", x.remotingHost, x.remotingPort)
+	remoteAddr := fmt.Sprintf("%s:%d", x.host, x.port)
 	if remoteAddr != net.JoinHostPort(msg.GetHost(), strconv.Itoa(int(msg.GetPort()))) {
 		return nil, connect.NewError(connect.CodeInvalidArgument, ErrInvalidHost)
 	}
@@ -976,7 +976,7 @@ func (x *actorSystem) GetNodeMetric(_ context.Context, request *connect.Request[
 
 	req := request.Msg
 
-	remoteAddr := fmt.Sprintf("%s:%d", x.remotingHost, x.remotingPort)
+	remoteAddr := fmt.Sprintf("%s:%d", x.host, x.port)
 	if remoteAddr != req.GetNodeAddress() {
 		return nil, connect.NewError(connect.CodeInvalidArgument, ErrInvalidHost)
 	}
@@ -995,7 +995,7 @@ func (x *actorSystem) GetKinds(_ context.Context, request *connect.Request[inter
 	}
 
 	req := request.Msg
-	remoteAddr := fmt.Sprintf("%s:%d", x.remotingHost, x.remotingPort)
+	remoteAddr := fmt.Sprintf("%s:%d", x.host, x.port)
 
 	// routine check
 	if remoteAddr != req.GetNodeAddress() {
@@ -1052,10 +1052,10 @@ func (x *actorSystem) enableClustering(ctx context.Context) error {
 
 	node := &discovery.Node{
 		Name:         x.Name(),
-		Host:         x.remotingHost,
+		Host:         x.host,
 		GossipPort:   x.clusterConfig.GossipPort(),
 		PeersPort:    x.clusterConfig.PeersPort(),
-		RemotingPort: int(x.remotingPort),
+		RemotingPort: int(x.port),
 	}
 
 	clusterEngine, err := cluster.NewEngine(
@@ -1127,13 +1127,13 @@ func (x *actorSystem) enableRemoting(ctx context.Context) {
 		opts = append(opts, connect.WithInterceptors(interceptor))
 	}
 
-	remotingHost, remotingPort, err := tcp.GetHostPort(fmt.Sprintf("%s:%d", x.remotingHost, x.remotingPort))
+	remotingHost, remotingPort, err := tcp.GetHostPort(fmt.Sprintf("%s:%d", x.host, x.port))
 	if err != nil {
 		x.logger.Panic(fmt.Errorf("failed to resolve remoting TCP address: %w", err))
 	}
 
-	x.remotingHost = remotingHost
-	x.remotingPort = int32(remotingPort)
+	x.host = remotingHost
+	x.port = int32(remotingPort)
 
 	remotingServicePath, remotingServiceHandler := internalpbconnect.NewRemotingServiceHandler(x, opts...)
 	clusterServicePath, clusterServiceHandler := internalpbconnect.NewClusterServiceHandler(x, opts...)
@@ -1141,7 +1141,7 @@ func (x *actorSystem) enableRemoting(ctx context.Context) {
 	mux := stdhttp.NewServeMux()
 	mux.Handle(remotingServicePath, remotingServiceHandler)
 	mux.Handle(clusterServicePath, clusterServiceHandler)
-	server := http.NewServer(ctx, x.remotingHost, remotingPort, mux)
+	server := http.NewServer(ctx, x.host, remotingPort, mux)
 
 	go func() {
 		if err := server.ListenAndServe(); err != nil {
@@ -1410,8 +1410,8 @@ func (x *actorSystem) getSystemActorName(nameType nameType) string {
 		return fmt.Sprintf("%s%s%s-%d-%d",
 			systemNames[nameType],
 			strings.ToTitle(x.name),
-			x.remotingHost,
-			x.remotingPort,
+			x.host,
+			x.port,
 			time.Now().UnixNano())
 	}
 	return fmt.Sprintf("%s%s-%d",
@@ -1426,5 +1426,5 @@ func isSystemName(name string) bool {
 
 // actorAddress returns the actor path provided the actor name
 func (x *actorSystem) actorAddress(name string) *address.Address {
-	return address.New(name, x.name, x.remotingHost, int(x.remotingPort))
+	return address.New(name, x.name, x.host, int(x.port))
 }

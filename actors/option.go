@@ -104,8 +104,8 @@ func WithTelemetry(telemetry *telemetry.Telemetry) Option {
 func WithRemoting(host string, port int32) Option {
 	return OptionFunc(func(a *actorSystem) {
 		a.remotingEnabled.Store(true)
-		a.remotingPort = port
-		a.remotingHost = host
+		a.port = port
+		a.host = host
 	})
 }
 

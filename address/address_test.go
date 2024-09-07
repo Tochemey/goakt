@@ -89,4 +89,17 @@ func TestAddress(t *testing.T) {
 		assert.NoError(t, addr.Validate())
 		assert.Equal(t, "goakt://system@localhost:123/name", addr.String())
 	})
+	t.Run("With marshaling", func(t *testing.T) {
+		addr := New("name", "system", "host", 1234)
+
+		bytea, err := addr.MarshalBinary()
+		assert.NoError(t, err)
+		assert.NotNil(t, bytea)
+
+		actual := new(Address)
+		err = actual.UnmarshalBinary(bytea)
+		assert.NoError(t, err)
+
+		assert.True(t, actual.Equals(addr))
+	})
 }

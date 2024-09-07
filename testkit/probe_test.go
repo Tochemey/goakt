@@ -81,7 +81,7 @@ func TestTestProbe(t *testing.T) {
 
 		actual := probe.ExpectMessage(msg)
 		require.Equal(t, prototext.Format(msg), prototext.Format(actual))
-		require.Equal(t, pinger.ActorPath().String(), probe.Sender().ActorPath().String())
+		require.Equal(t, pinger.Address().String(), probe.Sender().Address().String())
 		probe.ExpectNoMessage()
 
 		t.Cleanup(func() {
