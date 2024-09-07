@@ -236,7 +236,7 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 	}
 
 	if p.metricEnabled.Load() {
-		metrics, err := metric.NewActorMetric(p.telemetry.Meter)
+		metrics, err := metric.NewActorMetric(p.telemetry.Meter())
 		if err != nil {
 			return nil, err
 		}
@@ -629,11 +629,7 @@ func (pid *PID) BatchAsk(ctx context.Context, to *PID, messages ...proto.Message
 
 // RemoteLookup look for an actor address on a remote node.
 func (pid *PID) RemoteLookup(ctx context.Context, host string, port int, name string) (addr *goaktpb.Address, err error) {
-	remoteClient, err := pid.remotingClient(host, port)
-	if err != nil {
-		return nil, err
-	}
-
+	remoteClient := pid.remotingClient(host, port)
 	request := connect.NewRequest(&internalpb.RemoteLookupRequest{
 		Host: host,
 		Port: int32(port),
@@ -659,10 +655,7 @@ func (pid *PID) RemoteTell(ctx context.Context, to *address.Address, message pro
 		return err
 	}
 
-	remoteService, err := pid.remotingClient(to.GetHost(), int(to.GetPort()))
-	if err != nil {
-		return err
-	}
+	remoteService := pid.remotingClient(to.GetHost(), int(to.GetPort()))
 
 	sender := &goaktpb.Address{
 		Host: pid.Address().Host(),
@@ -710,10 +703,7 @@ func (pid *PID) RemoteAsk(ctx context.Context, to *address.Address, message prot
 		return nil, err
 	}
 
-	remoteService, err := pid.remotingClient(to.GetHost(), int(to.GetPort()))
-	if err != nil {
-		return nil, err
-	}
+	remoteService := pid.remotingClient(to.GetHost(), int(to.GetPort()))
 
 	senderAddress := pid.Address()
 	sender := &goaktpb.Address{
@@ -798,10 +788,7 @@ func (pid *PID) RemoteBatchTell(ctx context.Context, to *address.Address, messag
 		})
 	}
 
-	remoteService, err := pid.remotingClient(to.GetHost(), int(to.GetPort()))
-	if err != nil {
-		return err
-	}
+	remoteService := pid.remotingClient(to.GetHost(), int(to.GetPort()))
 
 	stream := remoteService.RemoteTell(ctx)
 	for _, request := range requests {
@@ -851,11 +838,7 @@ func (pid *PID) RemoteBatchAsk(ctx context.Context, to *address.Address, message
 		})
 	}
 
-	remoteService, err := pid.remotingClient(to.GetHost(), int(to.GetPort()))
-	if err != nil {
-		return nil, err
-	}
-
+	remoteService := pid.remotingClient(to.GetHost(), int(to.GetPort()))
 	stream := remoteService.RemoteAsk(ctx)
 	errc := make(chan error, 1)
 
@@ -897,42 +880,31 @@ func (pid *PID) RemoteBatchAsk(ctx context.Context, to *address.Address, message
 
 // RemoteStop stops an actor on a remote node
 func (pid *PID) RemoteStop(ctx context.Context, host string, port int, name string) error {
-	remoteService, err := pid.remotingClient(host, port)
-	if err != nil {
-		return err
-	}
-
+	remoteService := pid.remotingClient(host, port)
 	request := connect.NewRequest(&internalpb.RemoteStopRequest{
 		Host: host,
 		Port: int32(port),
 		Name: name,
 	})
-
-	if _, err = remoteService.RemoteStop(ctx, request); err != nil {
+	if _, err := remoteService.RemoteStop(ctx, request); err != nil {
 		code := connect.CodeOf(err)
 		if code == connect.CodeNotFound {
 			return nil
 		}
 		return err
 	}
-
 	return nil
 }
 
 // RemoteSpawn creates an actor on a remote node. The given actor needs to be registered on the remote node using the Register method of ActorSystem
 func (pid *PID) RemoteSpawn(ctx context.Context, host string, port int, name, actorType string) error {
-	remoteService, err := pid.remotingClient(host, port)
-	if err != nil {
-		return err
-	}
-
+	remoteService := pid.remotingClient(host, port)
 	request := connect.NewRequest(&internalpb.RemoteSpawnRequest{
 		Host:      host,
 		Port:      int32(port),
 		ActorName: name,
 		ActorType: actorType,
 	})
-
 	if _, err := remoteService.RemoteSpawn(ctx, request); err != nil {
 		code := connect.CodeOf(err)
 		if code == connect.CodeFailedPrecondition {
@@ -945,31 +917,24 @@ func (pid *PID) RemoteSpawn(ctx context.Context, host string, port int, name, ac
 		}
 		return err
 	}
-
 	return nil
 }
 
 // RemoteReSpawn restarts an actor on a remote node.
 func (pid *PID) RemoteReSpawn(ctx context.Context, host string, port int, name string) error {
-	remoteService, err := pid.remotingClient(host, port)
-	if err != nil {
-		return err
-	}
-
+	remoteService := pid.remotingClient(host, port)
 	request := connect.NewRequest(&internalpb.RemoteReSpawnRequest{
 		Host: host,
 		Port: int32(port),
 		Name: name,
 	})
-
-	if _, err = remoteService.RemoteReSpawn(ctx, request); err != nil {
+	if _, err := remoteService.RemoteReSpawn(ctx, request); err != nil {
 		code := connect.CodeOf(err)
 		if code == connect.CodeNotFound {
 			return nil
 		}
 		return err
 	}
-
 	return nil
 }
 
@@ -1410,7 +1375,7 @@ func (pid *PID) toDeadletterQueue(receiveCtx *ReceiveContext, err error) {
 
 // registerMetrics register the PID metrics with OTel instrumentation.
 func (pid *PID) registerMetrics() error {
-	meter := pid.telemetry.Meter
+	meter := pid.telemetry.Meter()
 	metrics := pid.metrics
 	_, err := meter.RegisterCallback(func(_ context.Context, observer otelmetric.Observer) error {
 		observer.ObserveInt64(metrics.ChildrenCount(), pid.childrenCount.Load())
@@ -1427,37 +1392,30 @@ func (pid *PID) registerMetrics() error {
 }
 
 // clientOptions returns the gRPC client connections options
-func (pid *PID) clientOptions() ([]connect.ClientOption, error) {
+func (pid *PID) clientOptions() []connect.ClientOption {
 	var interceptor *otelconnect.Interceptor
-	var err error
 	if pid.metricEnabled.Load() {
-		interceptor, err = otelconnect.NewInterceptor(
-			otelconnect.WithTracerProvider(pid.telemetry.TracerProvider),
-			otelconnect.WithMeterProvider(pid.telemetry.MeterProvider))
-		if err != nil {
-			return nil, fmt.Errorf("failed to initialize observability feature: %w", err)
-		}
+		// no need to handle the error because a NoOp trace and meter provider will be
+		// returned by the telemetry engine when none is provided
+		interceptor, _ = otelconnect.NewInterceptor(
+			otelconnect.WithTracerProvider(pid.telemetry.TraceProvider()),
+			otelconnect.WithMeterProvider(pid.telemetry.MeterProvider()))
 	}
 
 	var clientOptions []connect.ClientOption
 	if interceptor != nil {
 		clientOptions = append(clientOptions, connect.WithInterceptors(interceptor))
 	}
-	return clientOptions, err
+	return clientOptions
 }
 
 // remotingClient returns an instance of the Remote Service client
-func (pid *PID) remotingClient(host string, port int) (internalpbconnect.RemotingServiceClient, error) {
-	clientOptions, err := pid.clientOptions()
-	if err != nil {
-		return nil, err
-	}
-
+func (pid *PID) remotingClient(host string, port int) internalpbconnect.RemotingServiceClient {
 	return internalpbconnect.NewRemotingServiceClient(
 		pid.httpClient,
 		http.URL(host, port),
-		clientOptions...,
-	), nil
+		pid.clientOptions()...,
+	)
 }
 
 // handleCompletion processes a long-running task and pipe the result to

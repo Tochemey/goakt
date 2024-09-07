@@ -1115,7 +1115,7 @@ func (x *actorSystem) enableRemoting(ctx context.Context) {
 	var err error
 	if x.metricEnabled.Load() {
 		interceptor, err = otelconnect.NewInterceptor(
-			otelconnect.WithMeterProvider(x.telemetry.MeterProvider),
+			otelconnect.WithMeterProvider(x.telemetry.MeterProvider()),
 		)
 		if err != nil {
 			x.logger.Panic(fmt.Errorf("failed to initialize observability feature: %w", err))
@@ -1202,7 +1202,7 @@ func (x *actorSystem) janitor() {
 
 // registerMetrics register the PID metrics with OTel instrumentation.
 func (x *actorSystem) registerMetrics() error {
-	meter := x.telemetry.Meter
+	meter := x.telemetry.Meter()
 	metrics, err := metric.NewActorSystemMetric(meter)
 	if err != nil {
 		return err

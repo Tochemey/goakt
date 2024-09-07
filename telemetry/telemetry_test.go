@@ -25,37 +25,29 @@
 package telemetry
 
 import (
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 )
 
-// Option is the interface that applies a configuration option.
-type Option interface {
-	// Apply sets the Option value of a config.
-	Apply(config *Telemetry)
-}
+func TestTelemetry(t *testing.T) {
+	tel := New()
+	assert.NotNil(t, tel)
+	globalTracer := otel.GetTracerProvider()
+	globalMeterProvider := otel.GetMeterProvider()
 
-var _ Option = OptionFunc(nil)
+	actual := tel.TraceProvider()
+	assert.NotNil(t, actual)
+	assert.Equal(t, globalTracer, actual)
+	assert.Equal(t, globalTracer.Tracer(instrumentationName,
+		trace.WithInstrumentationVersion(Version())), tel.Tracer())
 
-// OptionFunc implements the Option interface.
-type OptionFunc func(*Telemetry)
-
-func (f OptionFunc) Apply(c *Telemetry) {
-	f(c)
-}
-
-// WithTracerProvider specifies a tracer provider to use for creating a tracer.
-// If none is specified, the global provider is used.
-func WithTracerProvider(provider trace.TracerProvider) Option {
-	return OptionFunc(func(cfg *Telemetry) {
-		cfg.tracerProvider = provider
-	})
-}
-
-// WithMeterProvider specifies a tracer provider to use for creating a tracer.
-// If none is specified, the global provider is used.
-func WithMeterProvider(provider metric.MeterProvider) Option {
-	return OptionFunc(func(cfg *Telemetry) {
-		cfg.meterProvider = provider
-	})
+	actualmp := tel.MeterProvider()
+	assert.NotNil(t, actualmp)
+	assert.Equal(t, globalMeterProvider, actualmp)
+	assert.Equal(t, globalMeterProvider.Meter(instrumentationName,
+		metric.WithInstrumentationVersion(Version())), tel.Meter())
 }
