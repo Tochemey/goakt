@@ -29,13 +29,17 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/travisjeffery/go-dynaport"
+
+	"github.com/tochemey/goakt/v2/address"
 )
 
 func TestPIDMap(t *testing.T) {
+	ports := dynaport.Get(1)
 	// create the actor path
-	actorPath := NewPath("Test", NewAddress("TestSys", "host", 444))
+	actorPath := address.New("Test", "TestSys", "host", ports[0])
 	// create the PID
-	actorRef := &PID{actorPath: actorPath, fieldsLocker: &sync.RWMutex{}, stopLocker: &sync.Mutex{}}
+	actorRef := &PID{address: actorPath, fieldsLocker: &sync.RWMutex{}, stopLocker: &sync.Mutex{}}
 	// create a new PID map
 	pidMap := newPIDMap(5)
 	// add to the map

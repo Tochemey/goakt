@@ -33,6 +33,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/travisjeffery/go-dynaport"
 
+	"github.com/tochemey/goakt/v2/address"
 	"github.com/tochemey/goakt/v2/log"
 	"github.com/tochemey/goakt/v2/test/data/testpb"
 )
@@ -85,8 +86,10 @@ func TestScheduler(t *testing.T) {
 	t.Run("With ScheduleOnce with scheduler not started", func(t *testing.T) {
 		ctx := context.TODO()
 		scheduler := newScheduler(log.DiscardLogger, time.Second)
+		ports := dynaport.Get(1)
+
 		// create the actor path
-		actorPath := NewPath("Test", NewAddress("sys", "host", 1))
+		actorPath := address.New("Test", "sys", "host", ports[0])
 
 		// create the actor ref
 		pid, err := newPID(

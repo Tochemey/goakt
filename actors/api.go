@@ -34,7 +34,7 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/durationpb"
 
-	"github.com/tochemey/goakt/v2/goaktpb"
+	"github.com/tochemey/goakt/v2/address"
 	"github.com/tochemey/goakt/v2/internal/http"
 	"github.com/tochemey/goakt/v2/internal/internalpb"
 	"github.com/tochemey/goakt/v2/internal/internalpb/internalpbconnect"
@@ -113,7 +113,7 @@ func BatchAsk(ctx context.Context, to *PID, timeout time.Duration, messages ...p
 }
 
 // RemoteTell sends a message to an actor remotely without expecting any reply
-func RemoteTell(ctx context.Context, to *goaktpb.Address, message proto.Message) error {
+func RemoteTell(ctx context.Context, to *address.Address, message proto.Message) error {
 	marshaled, err := anypb.New(message)
 	if err != nil {
 		return ErrInvalidRemoteMessage(err)
@@ -126,8 +126,8 @@ func RemoteTell(ctx context.Context, to *goaktpb.Address, message proto.Message)
 
 	request := &internalpb.RemoteTellRequest{
 		RemoteMessage: &internalpb.RemoteMessage{
-			Sender:   RemoteNoSender,
-			Receiver: to,
+			Sender:   address.NoSender,
+			Receiver: to.Address,
 			Message:  marshaled,
 		},
 	}
@@ -152,7 +152,7 @@ func RemoteTell(ctx context.Context, to *goaktpb.Address, message proto.Message)
 }
 
 // RemoteAsk sends a synchronous message to another actor remotely and expect a response.
-func RemoteAsk(ctx context.Context, to *goaktpb.Address, message proto.Message, timeout time.Duration) (response *anypb.Any, err error) {
+func RemoteAsk(ctx context.Context, to *address.Address, message proto.Message, timeout time.Duration) (response *anypb.Any, err error) {
 	marshaled, err := anypb.New(message)
 	if err != nil {
 		return nil, ErrInvalidRemoteMessage(err)
@@ -165,8 +165,8 @@ func RemoteAsk(ctx context.Context, to *goaktpb.Address, message proto.Message, 
 
 	request := &internalpb.RemoteAskRequest{
 		RemoteMessage: &internalpb.RemoteMessage{
-			Sender:   RemoteNoSender,
-			Receiver: to,
+			Sender:   address.NoSender,
+			Receiver: to.Address,
 			Message:  marshaled,
 		},
 		Timeout: durationpb.New(timeout),
@@ -209,7 +209,7 @@ func RemoteAsk(ctx context.Context, to *goaktpb.Address, message proto.Message, 
 }
 
 // RemoteLookup look for an actor address on a remote node.
-func RemoteLookup(ctx context.Context, host string, port int, name string) (addr *goaktpb.Address, err error) {
+func RemoteLookup(ctx context.Context, host string, port int, name string) (addr *address.Address, err error) {
 	remoteClient := internalpbconnect.NewRemotingServiceClient(
 		http.NewClient(),
 		http.URL(host, port),
@@ -230,11 +230,11 @@ func RemoteLookup(ctx context.Context, host string, port int, name string) (addr
 		return nil, err
 	}
 
-	return response.Msg.GetAddress(), nil
+	return address.From(response.Msg.GetAddress()), nil
 }
 
 // RemoteBatchTell sends bulk asynchronous messages to an actor
-func RemoteBatchTell(ctx context.Context, to *goaktpb.Address, messages ...proto.Message) error {
+func RemoteBatchTell(ctx context.Context, to *address.Address, messages ...proto.Message) error {
 	var requests []*internalpb.RemoteTellRequest
 	for _, message := range messages {
 		packed, err := anypb.New(message)
@@ -244,8 +244,8 @@ func RemoteBatchTell(ctx context.Context, to *goaktpb.Address, messages ...proto
 
 		requests = append(requests, &internalpb.RemoteTellRequest{
 			RemoteMessage: &internalpb.RemoteMessage{
-				Sender:   RemoteNoSender,
-				Receiver: to,
+				Sender:   address.NoSender,
+				Receiver: to.Address,
 				Message:  packed,
 			},
 		})
@@ -280,7 +280,7 @@ func RemoteBatchTell(ctx context.Context, to *goaktpb.Address, messages ...proto
 }
 
 // RemoteBatchAsk sends bulk messages to an actor with responses expected
-func RemoteBatchAsk(ctx context.Context, to *goaktpb.Address, messages ...proto.Message) (responses []*anypb.Any, err error) {
+func RemoteBatchAsk(ctx context.Context, to *address.Address, messages ...proto.Message) (responses []*anypb.Any, err error) {
 	var requests []*internalpb.RemoteAskRequest
 	for _, message := range messages {
 		packed, err := anypb.New(message)
@@ -290,8 +290,8 @@ func RemoteBatchAsk(ctx context.Context, to *goaktpb.Address, messages ...proto.
 
 		requests = append(requests, &internalpb.RemoteAskRequest{
 			RemoteMessage: &internalpb.RemoteMessage{
-				Sender:   RemoteNoSender,
-				Receiver: to,
+				Sender:   address.NoSender,
+				Receiver: to.Address,
 				Message:  packed,
 			},
 		})
@@ -426,8 +426,8 @@ func toReceiveContext(ctx context.Context, to *PID, message proto.Message) (*Rec
 		if err != nil {
 			return nil, ErrInvalidRemoteMessage(err)
 		}
-		return newReceiveContext(ctx, NoSender, to, actual).withRemoteSender(msg.GetSender()), nil
+		return newReceiveContext(ctx, NoSender, to, actual).withRemoteSender(address.From(msg.GetSender())), nil
 	default:
-		return newReceiveContext(ctx, NoSender, to, message).withRemoteSender(RemoteNoSender), nil
+		return newReceiveContext(ctx, NoSender, to, message).withRemoteSender(address.From(address.NoSender)), nil
 	}
 }

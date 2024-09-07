@@ -30,6 +30,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 
+	"github.com/tochemey/goakt/v2/address"
 	"github.com/tochemey/goakt/v2/future"
 	"github.com/tochemey/goakt/v2/goaktpb"
 )
@@ -39,7 +40,7 @@ type ReceiveContext struct {
 	ctx          context.Context
 	message      proto.Message
 	sender       *PID
-	remoteSender *goaktpb.Address
+	remoteSender *address.Address
 	response     chan proto.Message
 	self         *PID
 	err          error
@@ -58,7 +59,7 @@ func newReceiveContext(ctx context.Context, from, to *PID, message proto.Message
 }
 
 // withRemoteSender set the remote sender for a given context
-func (c *ReceiveContext) withRemoteSender(remoteSender *goaktpb.Address) *ReceiveContext {
+func (c *ReceiveContext) withRemoteSender(remoteSender *address.Address) *ReceiveContext {
 	c.remoteSender = remoteSender
 	return c
 }
@@ -90,8 +91,8 @@ func (c *ReceiveContext) Sender() *PID {
 }
 
 // RemoteSender defines the remote sender of the message if it is a remote message
-// This is set to RemoteNoSender when the message is not a remote message
-func (c *ReceiveContext) RemoteSender() *goaktpb.Address {
+// This is set to NoSender when the message is not a remote message
+func (c *ReceiveContext) RemoteSender() *address.Address {
 	return c.remoteSender
 }
 
@@ -220,7 +221,7 @@ func (c *ReceiveContext) BatchAsk(to *PID, messages ...proto.Message) (responses
 }
 
 // RemoteTell sends a message to an actor remotely without expecting any reply
-func (c *ReceiveContext) RemoteTell(to *goaktpb.Address, message proto.Message) {
+func (c *ReceiveContext) RemoteTell(to *address.Address, message proto.Message) {
 	recipient := c.self
 	ctx := context.WithoutCancel(c.ctx)
 	if err := recipient.RemoteTell(ctx, to, message); err != nil {
@@ -230,7 +231,7 @@ func (c *ReceiveContext) RemoteTell(to *goaktpb.Address, message proto.Message) 
 
 // RemoteAsk is used to send a message to an actor remotely and expect a response
 // immediately.
-func (c *ReceiveContext) RemoteAsk(to *goaktpb.Address, message proto.Message) (response *anypb.Any) {
+func (c *ReceiveContext) RemoteAsk(to *address.Address, message proto.Message) (response *anypb.Any) {
 	recipient := c.self
 	ctx := context.WithoutCancel(c.ctx)
 	reply, err := recipient.RemoteAsk(ctx, to, message)
@@ -242,7 +243,7 @@ func (c *ReceiveContext) RemoteAsk(to *goaktpb.Address, message proto.Message) (
 
 // RemoteBatchTell sends a batch of messages to a remote actor in a way fire-and-forget manner
 // Messages are processed one after the other in the order they are sent.
-func (c *ReceiveContext) RemoteBatchTell(to *goaktpb.Address, messages ...proto.Message) {
+func (c *ReceiveContext) RemoteBatchTell(to *address.Address, messages ...proto.Message) {
 	recipient := c.self
 	ctx := context.WithoutCancel(c.ctx)
 	if err := recipient.RemoteBatchTell(ctx, to, messages...); err != nil {
@@ -253,7 +254,7 @@ func (c *ReceiveContext) RemoteBatchTell(to *goaktpb.Address, messages ...proto.
 // RemoteBatchAsk sends a synchronous bunch of messages to a remote actor and expect responses in the same order as the messages.
 // Messages are processed one after the other in the order they are sent.
 // This can hinder performance if it is not properly used.
-func (c *ReceiveContext) RemoteBatchAsk(to *goaktpb.Address, messages ...proto.Message) (responses []*anypb.Any) {
+func (c *ReceiveContext) RemoteBatchAsk(to *address.Address, messages ...proto.Message) (responses []*anypb.Any) {
 	recipient := c.self
 	ctx := context.WithoutCancel(c.ctx)
 	replies, err := recipient.RemoteBatchAsk(ctx, to, messages...)

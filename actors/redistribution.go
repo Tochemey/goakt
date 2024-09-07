@@ -82,8 +82,8 @@ func (x *actorSystem) redistribute(ctx context.Context, event *cluster.Event) er
 	}
 
 	var (
-		leaderActors []*internalpb.WireActor
-		chunks       [][]*internalpb.WireActor
+		leaderActors []*internalpb.ActorRef
+		chunks       [][]*internalpb.ActorRef
 	)
 
 	x.logger.Debugf("total actors: %d on node left[%s]", actorsCount, nodeLeft.GetAddress())
@@ -94,7 +94,7 @@ func (x *actorSystem) redistribute(ctx context.Context, event *cluster.Event) er
 		quotient := actorsCount / totalPeers
 		remainder := actorsCount % totalPeers
 		leaderActors = peerState.GetActors()[:remainder]
-		chunks = slice.Chunk[*internalpb.WireActor](peerState.GetActors()[remainder:], quotient)
+		chunks = slice.Chunk[*internalpb.ActorRef](peerState.GetActors()[remainder:], quotient)
 	}
 
 	if len(chunks) > 0 {
@@ -106,23 +106,23 @@ func (x *actorSystem) redistribute(ctx context.Context, event *cluster.Event) er
 	eg.Go(func() error {
 		for _, actor := range leaderActors {
 			// never redistribute system actors
-			if isSystemName(actor.GetActorName()) {
+			if isSystemName(actor.GetActorAddress().GetName()) {
 				continue
 			}
 
-			x.logger.Debugf("re-creating actor=[(%s) of type (%s)]", actor.GetActorName(), actor.GetActorType())
+			x.logger.Debugf("re-creating actor=[(%s) of type (%s)]", actor.GetActorAddress().GetName(), actor.GetActorType())
 			iactor, err := x.reflection.ActorFrom(actor.GetActorType())
 			if err != nil {
-				x.logger.Errorf("failed to create actor=[(%s) of type (%s)]: %v", actor.GetActorName(), actor.GetActorType(), err)
+				x.logger.Errorf("failed to create actor=[(%s) of type (%s)]: %v", actor.GetActorAddress().GetName(), actor.GetActorType(), err)
 				return err
 			}
 
-			if _, err = x.Spawn(ctx, actor.GetActorName(), iactor); err != nil {
-				x.logger.Errorf("failed to spawn actor=[(%s) of type (%s)]: %v", actor.GetActorName(), actor.GetActorType(), err)
+			if _, err = x.Spawn(ctx, actor.GetActorAddress().GetName(), iactor); err != nil {
+				x.logger.Errorf("failed to spawn actor=[(%s) of type (%s)]: %v", actor.GetActorAddress().GetName(), actor.GetActorType(), err)
 				return err
 			}
 
-			x.logger.Debugf("actor=[(%s) of type (%s)] successfully re-created", actor.GetActorName(), actor.GetActorType())
+			x.logger.Debugf("actor=[(%s) of type (%s)] successfully re-created", actor.GetActorAddress().GetName(), actor.GetActorType())
 		}
 		return nil
 	})
@@ -146,16 +146,16 @@ func (x *actorSystem) redistribute(ctx context.Context, event *cluster.Event) er
 
 			for _, actor := range actors {
 				// never redistribute system actors
-				if isSystemName(actor.GetActorName()) {
+				if isSystemName(actor.GetActorAddress().GetName()) {
 					continue
 				}
 
-				x.logger.Debugf("re-creating actor=[(%s) of type (%s)]", actor.GetActorName(), actor.GetActorType())
-				if err := RemoteSpawn(ctx, state.GetHost(), int(state.GetRemotingPort()), actor.GetActorName(), actor.GetActorType()); err != nil {
+				x.logger.Debugf("re-creating actor=[(%s) of type (%s)]", actor.GetActorAddress().GetName(), actor.GetActorType())
+				if err := RemoteSpawn(ctx, state.GetHost(), int(state.GetRemotingPort()), actor.GetActorAddress().GetName(), actor.GetActorType()); err != nil {
 					x.logger.Error(err)
 					return err
 				}
-				x.logger.Debugf("actor=[(%s) of type (%s)] successfully re-created", actor.GetActorName(), actor.GetActorType())
+				x.logger.Debugf("actor=[(%s) of type (%s)] successfully re-created", actor.GetActorAddress().GetName(), actor.GetActorType())
 			}
 		}
 		return nil

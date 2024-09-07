@@ -656,7 +656,7 @@ func startNode(t *testing.T, logger log.Logger, nodeName, serverAddr string) (sy
 
 	// create the actor system
 	system, err := actors.NewActorSystem(
-		applicationName,
+		actorSystemName,
 		actors.WithPassivationDisabled(),
 		actors.WithLogger(logger),
 		actors.WithReplyTimeout(time.Minute),

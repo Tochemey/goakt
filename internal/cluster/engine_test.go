@@ -150,7 +150,7 @@ func TestSingleNode(t *testing.T) {
 
 		// create an actor
 		actorName := uuid.NewString()
-		actor := &internalpb.WireActor{ActorName: actorName}
+		actor := &internalpb.ActorRef{ActorAddress: &goaktpb.Address{Name: actorName}}
 
 		// replicate the actor in the Node
 		err = cluster.PutActor(ctx, actor)
@@ -288,7 +288,7 @@ func TestSingleNode(t *testing.T) {
 
 		// create an actor
 		actorName := uuid.NewString()
-		actor := &internalpb.WireActor{ActorName: actorName}
+		actor := &internalpb.ActorRef{ActorAddress: &goaktpb.Address{Name: actorName}}
 		// replicate the actor in the Node
 		err = cluster.PutActor(ctx, actor)
 		require.NoError(t, err)

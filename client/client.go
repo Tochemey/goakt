@@ -38,6 +38,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/tochemey/goakt/v2/actors"
+	"github.com/tochemey/goakt/v2/address"
 	"github.com/tochemey/goakt/v2/goaktpb"
 	"github.com/tochemey/goakt/v2/internal/http"
 	"github.com/tochemey/goakt/v2/internal/internalpb"
@@ -208,7 +209,7 @@ func (x *Client) Stop(ctx context.Context, actor *Actor) error {
 }
 
 // Whereis finds and returns the address of a given actor
-func (x *Client) Whereis(ctx context.Context, actor *Actor) (*goaktpb.Address, error) {
+func (x *Client) Whereis(ctx context.Context, actor *Actor) (*address.Address, error) {
 	x.locker.Lock()
 	remoteHost, remotePort := nextRemotingHostAndPort(x.balancer)
 	x.locker.Unlock()

@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+package internalpb;
+
+import "goakt/goakt.proto";
+
+option go_package = "github.com/tochemey/goakt/v2/internal/internalpb;internalpb";
+
+// ActorRef represents the actor information on the wire.
+message ActorRef {
+  // Specifies the actor address
+  goaktpb.Address actor_address = 1;
+  // Specifies the actor type
+  string actor_type = 2;
+}
