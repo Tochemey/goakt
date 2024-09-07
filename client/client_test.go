@@ -634,11 +634,11 @@ func startNode(t *testing.T, logger log.Logger, nodeName, serverAddr string) (sy
 	}
 
 	hostNode := discovery.Node{
-		Name:         nodeName,
-		Host:         host,
-		GossipPort:   gossipPort,
-		PeersPort:    peersPort,
-		RemotingPort: remotePort,
+		Name:          nodeName,
+		Host:          host,
+		DiscoveryPort: gossipPort,
+		PeersPort:     peersPort,
+		RemotingPort:  remotePort,
 	}
 
 	// create the instance of provider
@@ -649,7 +649,7 @@ func startNode(t *testing.T, logger log.Logger, nodeName, serverAddr string) (sy
 		WithKinds(new(testActor)).
 		WithDiscovery(natsProvider).
 		WithPeersPort(peersPort).
-		WithGossipPort(gossipPort).
+		WithDiscoveryPort(gossipPort).
 		WithReplicaCount(1).
 		WithMinimumPeersQuorum(1).
 		WithPartitionCount(10)

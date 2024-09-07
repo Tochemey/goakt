@@ -78,11 +78,11 @@ func TestSingleNode(t *testing.T) {
 		host := "127.0.0.1"
 
 		hostNode := discovery.Node{
-			Name:         host,
-			Host:         host,
-			GossipPort:   gossipPort,
-			PeersPort:    clusterPort,
-			RemotingPort: remotingPort,
+			Name:          host,
+			Host:          host,
+			DiscoveryPort: gossipPort,
+			PeersPort:     clusterPort,
+			RemotingPort:  remotingPort,
 		}
 
 		logger := log.New(log.ErrorLevel, os.Stdout)
@@ -133,11 +133,11 @@ func TestSingleNode(t *testing.T) {
 		// create a Node startNode
 		host := "127.0.0.1"
 		hostNode := discovery.Node{
-			Name:         host,
-			Host:         host,
-			GossipPort:   gossipPort,
-			PeersPort:    clusterPort,
-			RemotingPort: remotingPort,
+			Name:          host,
+			Host:          host,
+			DiscoveryPort: gossipPort,
+			PeersPort:     clusterPort,
+			RemotingPort:  remotingPort,
 		}
 
 		cluster, err := NewEngine("test", provider, &hostNode)
@@ -203,11 +203,11 @@ func TestSingleNode(t *testing.T) {
 		// create a Node startNode
 		host := "127.0.0.1"
 		hostNode := discovery.Node{
-			Name:         host,
-			Host:         host,
-			GossipPort:   gossipPort,
-			PeersPort:    clusterPort,
-			RemotingPort: remotingPort,
+			Name:          host,
+			Host:          host,
+			DiscoveryPort: gossipPort,
+			PeersPort:     clusterPort,
+			RemotingPort:  remotingPort,
 		}
 
 		cluster, err := NewEngine("test", provider, &hostNode)
@@ -270,11 +270,11 @@ func TestSingleNode(t *testing.T) {
 		// create a Node startNode
 		host := "127.0.0.1"
 		hostNode := discovery.Node{
-			Name:         host,
-			Host:         host,
-			GossipPort:   gossipPort,
-			PeersPort:    peersPort,
-			RemotingPort: remotingPort,
+			Name:          host,
+			Host:          host,
+			DiscoveryPort: gossipPort,
+			PeersPort:     peersPort,
+			RemotingPort:  remotingPort,
 		}
 
 		logger := log.New(log.WarningLevel, os.Stdout)
@@ -454,11 +454,11 @@ func startEngine(t *testing.T, nodeName, serverAddr string) (*Engine, discovery.
 	}
 
 	hostNode := discovery.Node{
-		Name:         host,
-		Host:         host,
-		GossipPort:   gossipPort,
-		PeersPort:    clusterPort,
-		RemotingPort: remotingPort,
+		Name:          host,
+		Host:          host,
+		DiscoveryPort: gossipPort,
+		PeersPort:     clusterPort,
+		RemotingPort:  remotingPort,
 	}
 
 	// create the instance of provider

@@ -216,8 +216,8 @@ func (n *Engine) Start(ctx context.Context) error {
 
 	// sets the bindings
 	m.BindAddr = n.host.Host
-	m.BindPort = n.host.GossipPort
-	m.AdvertisePort = n.host.GossipPort
+	m.BindPort = n.host.DiscoveryPort
+	m.AdvertisePort = n.host.DiscoveryPort
 	conf.MemberlistConfig = m
 
 	// set the discovery provider

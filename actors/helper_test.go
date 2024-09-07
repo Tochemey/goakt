@@ -453,11 +453,11 @@ func startClusterSystem(t *testing.T, nodeName, serverAddr string) (ActorSystem,
 	}
 
 	hostNode := discovery.Node{
-		Name:         nodeName,
-		Host:         host,
-		GossipPort:   gossipPort,
-		PeersPort:    clusterPort,
-		RemotingPort: remotingPort,
+		Name:          nodeName,
+		Host:          host,
+		DiscoveryPort: gossipPort,
+		PeersPort:     clusterPort,
+		RemotingPort:  remotingPort,
 	}
 
 	// create the instance of provider
@@ -478,7 +478,7 @@ func startClusterSystem(t *testing.T, nodeName, serverAddr string) (ActorSystem,
 				WithReplicaCount(1).
 				WithPeersPort(clusterPort).
 				WithMinimumPeersQuorum(1).
-				WithGossipPort(gossipPort).
+				WithDiscoveryPort(gossipPort).
 				WithDiscovery(provider).WithKinds(new(testActor))),
 	)
 

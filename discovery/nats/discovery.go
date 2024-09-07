@@ -170,7 +170,7 @@ func (d *Discovery) Register() error {
 
 			response := &internalpb.NatsMessage{
 				Host:        d.hostNode.Host,
-				Port:        int32(d.hostNode.GossipPort),
+				Port:        int32(d.hostNode.DiscoveryPort),
 				Name:        d.hostNode.Name,
 				MessageType: internalpb.NatsMessageType_NATS_MESSAGE_TYPE_RESPONSE,
 			}
@@ -224,7 +224,7 @@ func (d *Discovery) Deregister() error {
 		// send a message to deregister stating we are out
 		message := &internalpb.NatsMessage{
 			Host:        d.hostNode.Host,
-			Port:        int32(d.hostNode.GossipPort),
+			Port:        int32(d.hostNode.DiscoveryPort),
 			Name:        d.hostNode.Name,
 			MessageType: internalpb.NatsMessageType_NATS_MESSAGE_TYPE_DEREGISTER,
 		}
@@ -264,7 +264,7 @@ func (d *Discovery) DiscoverPeers() ([]string, error) {
 
 	request := &internalpb.NatsMessage{
 		Host:        d.hostNode.Host,
-		Port:        int32(d.hostNode.GossipPort),
+		Port:        int32(d.hostNode.DiscoveryPort),
 		Name:        d.hostNode.Name,
 		MessageType: internalpb.NatsMessageType_NATS_MESSAGE_TYPE_REQUEST,
 	}
@@ -276,7 +276,7 @@ func (d *Discovery) DiscoverPeers() ([]string, error) {
 
 	var peers []string
 	timeout := time.After(d.config.Timeout)
-	me := d.hostNode.GossipAddress()
+	me := d.hostNode.DiscoveryAddress()
 	for {
 		select {
 		case msg, ok := <-recv:
