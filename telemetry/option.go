@@ -48,7 +48,7 @@ func (f OptionFunc) Apply(c *Telemetry) {
 // If none is specified, the global provider is used.
 func WithTracerProvider(provider trace.TracerProvider) Option {
 	return OptionFunc(func(cfg *Telemetry) {
-		cfg.TracerProvider = provider
+		cfg.tracerProvider = provider
 	})
 }
 
@@ -56,6 +56,6 @@ func WithTracerProvider(provider trace.TracerProvider) Option {
 // If none is specified, the global provider is used.
 func WithMeterProvider(provider metric.MeterProvider) Option {
 	return OptionFunc(func(cfg *Telemetry) {
-		cfg.MeterProvider = provider
+		cfg.meterProvider = provider
 	})
 }

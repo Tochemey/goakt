@@ -40,7 +40,7 @@ type ClusterConfig struct {
 	partitionCount     uint64
 	minimumPeersQuorum uint32
 	replicaCount       uint32
-	gossipPort         int
+	discoveryPort      int
 	peersPort          int
 	kinds              []Actor
 }
@@ -81,9 +81,9 @@ func (x *ClusterConfig) WithKinds(kinds ...Actor) *ClusterConfig {
 	return x
 }
 
-// WithGossipPort sets the gossip port
-func (x *ClusterConfig) WithGossipPort(port int) *ClusterConfig {
-	x.gossipPort = port
+// WithDiscoveryPort sets the discovery port
+func (x *ClusterConfig) WithDiscoveryPort(port int) *ClusterConfig {
+	x.discoveryPort = port
 	return x
 }
 
@@ -119,9 +119,9 @@ func (x *ClusterConfig) MinimumPeersQuorum() uint32 {
 	return x.minimumPeersQuorum
 }
 
-// GossipPort returns the gossip port
-func (x *ClusterConfig) GossipPort() int {
-	return x.gossipPort
+// DiscoveryPort returns the discovery port
+func (x *ClusterConfig) DiscoveryPort() int {
+	return x.discoveryPort
 }
 
 // PeersPort returns the peers port
@@ -141,7 +141,7 @@ func (x *ClusterConfig) Validate() error {
 		AddAssertion(x.discovery != nil, "discovery provider is not set").
 		AddAssertion(x.partitionCount > 0, "partition count need to greater than zero").
 		AddAssertion(x.minimumPeersQuorum >= 1, "minimum peers quorum must be at least one").
-		AddAssertion(x.gossipPort > 0, "gossip port is invalid").
+		AddAssertion(x.discoveryPort > 0, "gossip port is invalid").
 		AddAssertion(x.peersPort > 0, "peers port is invalid").
 		AddAssertion(len(x.kinds) > 1, "actor kinds are not defined").
 		AddAssertion(x.replicaCount > 0, "actor replicaCount is invalid").

@@ -43,6 +43,7 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	"github.com/tochemey/goakt/v2/address"
 	"github.com/tochemey/goakt/v2/future"
 	"github.com/tochemey/goakt/v2/goaktpb"
 	"github.com/tochemey/goakt/v2/internal/errorschain"
@@ -78,8 +79,8 @@ type PID struct {
 	// specifies the message processor
 	actor Actor
 
-	// specifies the actor path
-	actorPath *Path
+	// specifies the actor address
+	address *address.Address
 
 	// helps determine whether the actor should handle public or not.
 	running atomic.Bool
@@ -168,14 +169,14 @@ type PID struct {
 }
 
 // newPID creates a new pid
-func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption) (*PID, error) {
-	// actor path is required
-	if actorPath == nil {
-		return nil, errors.New("actorPath is required")
+func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...pidOption) (*PID, error) {
+	// actor address is required
+	if address == nil {
+		return nil, errors.New("address is required")
 	}
 
-	// validate actor path
-	if err := actorPath.Validate(); err != nil {
+	// validate the address
+	if err := address.Validate(); err != nil {
 		return nil, err
 	}
 
@@ -189,7 +190,7 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 		watchersList:                   slice.New[*watcher](),
 		watchedList:                    newPIDMap(10),
 		telemetry:                      telemetry.New(),
-		actorPath:                      actorPath,
+		address:                        address,
 		fieldsLocker:                   new(sync.RWMutex),
 		stopLocker:                     new(sync.Mutex),
 		httpClient:                     http.NewClient(),
@@ -235,7 +236,7 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 	}
 
 	if p.metricEnabled.Load() {
-		metrics, err := metric.NewActorMetric(p.telemetry.Meter)
+		metrics, err := metric.NewActorMetric(p.telemetry.Meter())
 		if err != nil {
 			return nil, err
 		}
@@ -254,12 +255,12 @@ func newPID(ctx context.Context, actorPath *Path, actor Actor, opts ...pidOption
 // ID is a convenient method that returns the actor unique identifier
 // An actor unique identifier is its address in the actor system.
 func (pid *PID) ID() string {
-	return pid.ActorPath().String()
+	return pid.Address().String()
 }
 
 // Name returns the actor given name
 func (pid *PID) Name() string {
-	return pid.ActorPath().Name()
+	return pid.Address().Name()
 }
 
 // Equals is a convenient method to compare two PIDs
@@ -277,12 +278,13 @@ func (pid *PID) Child(name string) (*PID, error) {
 	if !pid.IsRunning() {
 		return nil, ErrDead
 	}
-	childActorPath := NewPath(name, pid.ActorPath().Address()).WithParent(pid.ActorPath())
-	if cid, ok := pid.children.get(childActorPath); ok {
+
+	childAddress := address.New(name, pid.Address().System(), pid.Address().Host(), pid.Address().Port()).WithParent(pid.Address())
+	if cid, ok := pid.children.get(childAddress); ok {
 		pid.childrenCount.Inc()
 		return cid, nil
 	}
-	return nil, ErrActorNotFound(childActorPath.String())
+	return nil, ErrActorNotFound(childAddress.String())
 }
 
 // Parents returns the list of all direct parents of a given actor.
@@ -338,7 +340,7 @@ func (pid *PID) Stop(ctx context.Context, cid *PID) error {
 	children := pid.children
 	pid.fieldsLocker.RUnlock()
 
-	if cid, ok := children.get(cid.ActorPath()); ok {
+	if cid, ok := children.get(cid.Address()); ok {
 		if err := cid.Shutdown(ctx); err != nil {
 			return err
 		}
@@ -346,7 +348,7 @@ func (pid *PID) Stop(ctx context.Context, cid *PID) error {
 		return nil
 	}
 
-	return ErrActorNotFound(cid.ActorPath().String())
+	return ErrActorNotFound(cid.Address().String())
 }
 
 // IsRunning returns true when the actor is alive ready to process messages and false
@@ -363,10 +365,10 @@ func (pid *PID) ActorSystem() ActorSystem {
 	return sys
 }
 
-// ActorPath returns the path of the actor
-func (pid *PID) ActorPath() *Path {
+// Address returns address of the actor
+func (pid *PID) Address() *address.Address {
 	pid.fieldsLocker.RLock()
-	path := pid.actorPath
+	path := pid.address
 	pid.fieldsLocker.RUnlock()
 	return path
 }
@@ -374,11 +376,11 @@ func (pid *PID) ActorPath() *Path {
 // Restart restarts the actor.
 // During restart all messages that are in the mailbox and not yet processed will be ignored
 func (pid *PID) Restart(ctx context.Context) error {
-	if pid == nil || pid.ActorPath() == nil {
+	if pid == nil || pid.Address() == nil {
 		return ErrUndefinedActor
 	}
 
-	pid.logger.Debugf("restarting actor=(%s)", pid.actorPath.String())
+	pid.logger.Debugf("restarting actor=(%s)", pid.address.String())
 
 	if pid.IsRunning() {
 		if err := pid.Shutdown(ctx); err != nil {
@@ -412,7 +414,7 @@ func (pid *PID) Restart(ctx context.Context) error {
 
 	if pid.eventsStream != nil {
 		pid.eventsStream.Publish(eventsTopic, &goaktpb.ActorRestarted{
-			Address:     pid.ActorPath().RemoteAddress(),
+			Address:     pid.Address().Address,
 			RestartedAt: timestamppb.Now(),
 		})
 	}
@@ -427,13 +429,12 @@ func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor) (*PID,
 		return nil, ErrDead
 	}
 
-	childActorPath := NewPath(name, pid.ActorPath().Address()).WithParent(pid.ActorPath())
-
+	childAddress := address.New(name, pid.Address().System(), pid.Address().Host(), pid.Address().Port()).WithParent(pid.Address())
 	pid.fieldsLocker.RLock()
 	children := pid.children
 	pid.fieldsLocker.RUnlock()
 
-	if cid, ok := children.get(childActorPath); ok {
+	if cid, ok := children.get(childAddress); ok {
 		return cid, nil
 	}
 
@@ -457,7 +458,7 @@ func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor) (*PID,
 	}
 
 	cid, err := newPID(ctx,
-		childActorPath,
+		childAddress,
 		actor,
 		opts...,
 	)
@@ -476,9 +477,9 @@ func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor) (*PID,
 
 	if eventsStream != nil {
 		eventsStream.Publish(eventsTopic, &goaktpb.ActorChildCreated{
-			Address:   cid.ActorPath().RemoteAddress(),
+			Address:   cid.Address().Address,
 			CreatedAt: timestamppb.Now(),
-			Parent:    pid.ActorPath().RemoteAddress(),
+			Parent:    pid.Address().Address,
 		})
 	}
 
@@ -628,11 +629,7 @@ func (pid *PID) BatchAsk(ctx context.Context, to *PID, messages ...proto.Message
 
 // RemoteLookup look for an actor address on a remote node.
 func (pid *PID) RemoteLookup(ctx context.Context, host string, port int, name string) (addr *goaktpb.Address, err error) {
-	remoteClient, err := pid.remotingClient(host, port)
-	if err != nil {
-		return nil, err
-	}
-
+	remoteClient := pid.remotingClient(host, port)
 	request := connect.NewRequest(&internalpb.RemoteLookupRequest{
 		Host: host,
 		Port: int32(port),
@@ -652,28 +649,25 @@ func (pid *PID) RemoteLookup(ctx context.Context, host string, port int, name st
 }
 
 // RemoteTell sends a message to an actor remotely without expecting any reply
-func (pid *PID) RemoteTell(ctx context.Context, to *goaktpb.Address, message proto.Message) error {
+func (pid *PID) RemoteTell(ctx context.Context, to *address.Address, message proto.Message) error {
 	marshaled, err := anypb.New(message)
 	if err != nil {
 		return err
 	}
 
-	remoteService, err := pid.remotingClient(to.GetHost(), int(to.GetPort()))
-	if err != nil {
-		return err
-	}
+	remoteService := pid.remotingClient(to.GetHost(), int(to.GetPort()))
 
 	sender := &goaktpb.Address{
-		Host: pid.ActorPath().Address().Host(),
-		Port: int32(pid.ActorPath().Address().Port()),
-		Name: pid.ActorPath().Name(),
-		Id:   pid.ActorPath().ID().String(),
+		Host: pid.Address().Host(),
+		Port: int32(pid.Address().Port()),
+		Name: pid.Address().Name(),
+		Id:   pid.Address().ID(),
 	}
 
 	request := &internalpb.RemoteTellRequest{
 		RemoteMessage: &internalpb.RemoteMessage{
 			Sender:   sender,
-			Receiver: to,
+			Receiver: to.Address,
 			Message:  marshaled,
 		},
 	}
@@ -703,31 +697,26 @@ func (pid *PID) RemoteTell(ctx context.Context, to *goaktpb.Address, message pro
 }
 
 // RemoteAsk sends a synchronous message to another actor remotely and expect a response.
-func (pid *PID) RemoteAsk(ctx context.Context, to *goaktpb.Address, message proto.Message) (response *anypb.Any, err error) {
+func (pid *PID) RemoteAsk(ctx context.Context, to *address.Address, message proto.Message) (response *anypb.Any, err error) {
 	marshaled, err := anypb.New(message)
 	if err != nil {
 		return nil, err
 	}
 
-	remoteService, err := pid.remotingClient(to.GetHost(), int(to.GetPort()))
-	if err != nil {
-		return nil, err
-	}
+	remoteService := pid.remotingClient(to.GetHost(), int(to.GetPort()))
 
-	senderPath := pid.ActorPath()
-	senderAddress := senderPath.Address()
-
+	senderAddress := pid.Address()
 	sender := &goaktpb.Address{
 		Host: senderAddress.Host(),
 		Port: int32(senderAddress.Port()),
-		Name: senderPath.Name(),
-		Id:   senderPath.ID().String(),
+		Name: senderAddress.Name(),
+		Id:   senderAddress.ID(),
 	}
 
 	request := &internalpb.RemoteAskRequest{
 		RemoteMessage: &internalpb.RemoteMessage{
 			Sender:   sender,
-			Receiver: to,
+			Receiver: to.Address,
 			Message:  marshaled,
 		},
 	}
@@ -771,19 +760,16 @@ func (pid *PID) RemoteAsk(ctx context.Context, to *goaktpb.Address, message prot
 
 // RemoteBatchTell sends a batch of messages to a remote actor in a way fire-and-forget manner
 // Messages are processed one after the other in the order they are sent.
-func (pid *PID) RemoteBatchTell(ctx context.Context, to *goaktpb.Address, messages ...proto.Message) error {
+func (pid *PID) RemoteBatchTell(ctx context.Context, to *address.Address, messages ...proto.Message) error {
 	if len(messages) == 1 {
 		return pid.RemoteTell(ctx, to, messages[0])
 	}
 
-	senderPath := pid.ActorPath()
-	senderAddress := senderPath.Address()
-
 	sender := &goaktpb.Address{
-		Host: senderAddress.Host(),
-		Port: int32(senderAddress.Port()),
-		Name: senderPath.Name(),
-		Id:   senderPath.ID().String(),
+		Host: pid.Address().Host(),
+		Port: int32(pid.Address().Port()),
+		Name: pid.Address().Name(),
+		Id:   pid.Address().ID(),
 	}
 
 	var requests []*internalpb.RemoteTellRequest
@@ -796,16 +782,13 @@ func (pid *PID) RemoteBatchTell(ctx context.Context, to *goaktpb.Address, messag
 		requests = append(requests, &internalpb.RemoteTellRequest{
 			RemoteMessage: &internalpb.RemoteMessage{
 				Sender:   sender,
-				Receiver: to,
+				Receiver: to.Address,
 				Message:  packed,
 			},
 		})
 	}
 
-	remoteService, err := pid.remotingClient(to.GetHost(), int(to.GetPort()))
-	if err != nil {
-		return err
-	}
+	remoteService := pid.remotingClient(to.GetHost(), int(to.GetPort()))
 
 	stream := remoteService.RemoteTell(ctx)
 	for _, request := range requests {
@@ -831,15 +814,12 @@ func (pid *PID) RemoteBatchTell(ctx context.Context, to *goaktpb.Address, messag
 // RemoteBatchAsk sends a synchronous bunch of messages to a remote actor and expect responses in the same order as the messages.
 // Messages are processed one after the other in the order they are sent.
 // This can hinder performance if it is not properly used.
-func (pid *PID) RemoteBatchAsk(ctx context.Context, to *goaktpb.Address, messages ...proto.Message) (responses []*anypb.Any, err error) {
-	senderPath := pid.ActorPath()
-	senderAddress := senderPath.Address()
-
+func (pid *PID) RemoteBatchAsk(ctx context.Context, to *address.Address, messages ...proto.Message) (responses []*anypb.Any, err error) {
 	sender := &goaktpb.Address{
-		Host: senderAddress.Host(),
-		Port: int32(senderAddress.Port()),
-		Name: senderPath.Name(),
-		Id:   senderPath.ID().String(),
+		Host: pid.Address().Host(),
+		Port: int32(pid.Address().Port()),
+		Name: pid.Address().Name(),
+		Id:   pid.Address().ID(),
 	}
 
 	var requests []*internalpb.RemoteAskRequest
@@ -852,17 +832,13 @@ func (pid *PID) RemoteBatchAsk(ctx context.Context, to *goaktpb.Address, message
 		requests = append(requests, &internalpb.RemoteAskRequest{
 			RemoteMessage: &internalpb.RemoteMessage{
 				Sender:   sender,
-				Receiver: to,
+				Receiver: to.Address,
 				Message:  packed,
 			},
 		})
 	}
 
-	remoteService, err := pid.remotingClient(to.GetHost(), int(to.GetPort()))
-	if err != nil {
-		return nil, err
-	}
-
+	remoteService := pid.remotingClient(to.GetHost(), int(to.GetPort()))
 	stream := remoteService.RemoteAsk(ctx)
 	errc := make(chan error, 1)
 
@@ -904,42 +880,31 @@ func (pid *PID) RemoteBatchAsk(ctx context.Context, to *goaktpb.Address, message
 
 // RemoteStop stops an actor on a remote node
 func (pid *PID) RemoteStop(ctx context.Context, host string, port int, name string) error {
-	remoteService, err := pid.remotingClient(host, port)
-	if err != nil {
-		return err
-	}
-
+	remoteService := pid.remotingClient(host, port)
 	request := connect.NewRequest(&internalpb.RemoteStopRequest{
 		Host: host,
 		Port: int32(port),
 		Name: name,
 	})
-
-	if _, err = remoteService.RemoteStop(ctx, request); err != nil {
+	if _, err := remoteService.RemoteStop(ctx, request); err != nil {
 		code := connect.CodeOf(err)
 		if code == connect.CodeNotFound {
 			return nil
 		}
 		return err
 	}
-
 	return nil
 }
 
 // RemoteSpawn creates an actor on a remote node. The given actor needs to be registered on the remote node using the Register method of ActorSystem
 func (pid *PID) RemoteSpawn(ctx context.Context, host string, port int, name, actorType string) error {
-	remoteService, err := pid.remotingClient(host, port)
-	if err != nil {
-		return err
-	}
-
+	remoteService := pid.remotingClient(host, port)
 	request := connect.NewRequest(&internalpb.RemoteSpawnRequest{
 		Host:      host,
 		Port:      int32(port),
 		ActorName: name,
 		ActorType: actorType,
 	})
-
 	if _, err := remoteService.RemoteSpawn(ctx, request); err != nil {
 		code := connect.CodeOf(err)
 		if code == connect.CodeFailedPrecondition {
@@ -952,31 +917,24 @@ func (pid *PID) RemoteSpawn(ctx context.Context, host string, port int, name, ac
 		}
 		return err
 	}
-
 	return nil
 }
 
 // RemoteReSpawn restarts an actor on a remote node.
 func (pid *PID) RemoteReSpawn(ctx context.Context, host string, port int, name string) error {
-	remoteService, err := pid.remotingClient(host, port)
-	if err != nil {
-		return err
-	}
-
+	remoteService := pid.remotingClient(host, port)
 	request := connect.NewRequest(&internalpb.RemoteReSpawnRequest{
 		Host: host,
 		Port: int32(port),
 		Name: name,
 	})
-
-	if _, err = remoteService.RemoteReSpawn(ctx, request); err != nil {
+	if _, err := remoteService.RemoteReSpawn(ctx, request); err != nil {
 		code := connect.CodeOf(err)
 		if code == connect.CodeNotFound {
 			return nil
 		}
 		return err
 	}
-
 	return nil
 }
 
@@ -990,7 +948,7 @@ func (pid *PID) Shutdown(ctx context.Context) error {
 	pid.logger.Info("Shutdown process has started...")
 
 	if !pid.running.Load() {
-		pid.logger.Infof("Actor=%s is offline. Maybe it has been passivated or stopped already", pid.ActorPath().String())
+		pid.logger.Infof("Actor=%s is offline. Maybe it has been passivated or stopped already", pid.Address().String())
 		return nil
 	}
 
@@ -1006,7 +964,7 @@ func (pid *PID) Shutdown(ctx context.Context) error {
 
 	if pid.eventsStream != nil {
 		pid.eventsStream.Publish(eventsTopic, &goaktpb.ActorStopped{
-			Address:   pid.ActorPath().RemoteAddress(),
+			Address:   pid.Address().Address,
 			StoppedAt: timestamppb.Now(),
 		})
 	}
@@ -1033,7 +991,7 @@ func (pid *PID) UnWatch(cid *PID) {
 		w := item.Value
 		if w.WatcherID.Equals(cid) {
 			w.Done <- types.Unit{}
-			pid.watchees().delete(cid.ActorPath())
+			pid.watchees().delete(cid.Address())
 			cid.watchers().Delete(item.Index)
 			break
 		}
@@ -1089,7 +1047,7 @@ func (pid *PID) init(ctx context.Context) error {
 
 	if pid.eventsStream != nil {
 		pid.eventsStream.Publish(eventsTopic, &goaktpb.ActorStarted{
-			Address:   pid.ActorPath().RemoteAddress(),
+			Address:   pid.Address().Address,
 			StartedAt: timestamppb.Now(),
 		})
 	}
@@ -1162,7 +1120,7 @@ func (pid *PID) freeChildren(ctx context.Context) error {
 	for _, child := range pid.Children() {
 		pid.logger.Debugf("parent=(%s) disowning child=(%s)", pid.ID(), child.ID())
 		pid.UnWatch(child)
-		pid.children.delete(child.ActorPath())
+		pid.children.delete(child.Address())
 		if err := child.Shutdown(ctx); err != nil {
 			errwrap := fmt.Errorf(
 				"parent=(%s) failed to disown child=(%s): %w", pid.ID(), child.ID(),
@@ -1242,28 +1200,28 @@ func (pid *PID) passivationLoop() {
 	ticker.Stop()
 
 	if !pid.IsRunning() {
-		pid.logger.Infof("Actor=%s is offline. No need to passivate", pid.ActorPath().String())
+		pid.logger.Infof("Actor=%s is offline. No need to passivate", pid.Address().String())
 		return
 	}
 
-	pid.logger.Infof("Passivation mode has been triggered for actor=%s...", pid.ActorPath().String())
+	pid.logger.Infof("Passivation mode has been triggered for actor=%s...", pid.Address().String())
 
 	ctx := context.Background()
 	if err := pid.doStop(ctx); err != nil {
 		// TODO: rethink properly about PostStop error handling
-		pid.logger.Errorf("failed to passivate actor=(%s): reason=(%v)", pid.ActorPath().String(), err)
+		pid.logger.Errorf("failed to passivate actor=(%s): reason=(%v)", pid.Address().String(), err)
 		return
 	}
 
 	if pid.eventsStream != nil {
 		event := &goaktpb.ActorPassivated{
-			Address:      pid.ActorPath().RemoteAddress(),
+			Address:      pid.Address().Address,
 			PassivatedAt: timestamppb.Now(),
 		}
 		pid.eventsStream.Publish(eventsTopic, event)
 	}
 
-	pid.logger.Infof("Actor=%s successfully passivated", pid.ActorPath().String())
+	pid.logger.Infof("Actor=%s successfully passivated", pid.Address().String())
 }
 
 // setBehavior is a utility function that helps set the actor behavior
@@ -1303,7 +1261,7 @@ func (pid *PID) doStop(ctx context.Context) error {
 	// TODO: just signal stash processing done and ignore the messages or process them
 	if pid.stashBuffer != nil {
 		if err := pid.unstashAll(); err != nil {
-			pid.logger.Errorf("actor=(%s) failed to unstash messages", pid.ActorPath().String())
+			pid.logger.Errorf("actor=(%s) failed to unstash messages", pid.Address().String())
 			return err
 		}
 	}
@@ -1345,7 +1303,7 @@ func (pid *PID) doStop(ctx context.Context) error {
 		return err
 	}
 
-	pid.logger.Infof("Shutdown process is on going for actor=%s...", pid.ActorPath().String())
+	pid.logger.Infof("Shutdown process is on going for actor=%s...", pid.Address().String())
 	pid.reset()
 	return pid.actor.PostStop(ctx)
 }
@@ -1360,7 +1318,7 @@ func (pid *PID) removeChild(cid *PID) {
 		return
 	}
 
-	path := cid.ActorPath()
+	path := cid.Address()
 	if c, ok := pid.children.get(path); ok {
 		if c.IsRunning() {
 			return
@@ -1403,12 +1361,12 @@ func (pid *PID) toDeadletterQueue(receiveCtx *ReceiveContext, err error) {
 	msg, _ := anypb.New(receiveCtx.Message())
 	var senderAddr *goaktpb.Address
 	if receiveCtx.Sender() != nil || receiveCtx.Sender() != NoSender {
-		senderAddr = receiveCtx.Sender().ActorPath().RemoteAddress()
+		senderAddr = receiveCtx.Sender().Address().Address
 	}
 
 	pid.eventsStream.Publish(eventsTopic, &goaktpb.Deadletter{
 		Sender:   senderAddr,
-		Receiver: pid.actorPath.RemoteAddress(),
+		Receiver: pid.Address().Address,
 		Message:  msg,
 		SendTime: timestamppb.Now(),
 		Reason:   err.Error(),
@@ -1417,7 +1375,7 @@ func (pid *PID) toDeadletterQueue(receiveCtx *ReceiveContext, err error) {
 
 // registerMetrics register the PID metrics with OTel instrumentation.
 func (pid *PID) registerMetrics() error {
-	meter := pid.telemetry.Meter
+	meter := pid.telemetry.Meter()
 	metrics := pid.metrics
 	_, err := meter.RegisterCallback(func(_ context.Context, observer otelmetric.Observer) error {
 		observer.ObserveInt64(metrics.ChildrenCount(), pid.childrenCount.Load())
@@ -1434,37 +1392,30 @@ func (pid *PID) registerMetrics() error {
 }
 
 // clientOptions returns the gRPC client connections options
-func (pid *PID) clientOptions() ([]connect.ClientOption, error) {
+func (pid *PID) clientOptions() []connect.ClientOption {
 	var interceptor *otelconnect.Interceptor
-	var err error
 	if pid.metricEnabled.Load() {
-		interceptor, err = otelconnect.NewInterceptor(
-			otelconnect.WithTracerProvider(pid.telemetry.TracerProvider),
-			otelconnect.WithMeterProvider(pid.telemetry.MeterProvider))
-		if err != nil {
-			return nil, fmt.Errorf("failed to initialize observability feature: %w", err)
-		}
+		// no need to handle the error because a NoOp trace and meter provider will be
+		// returned by the telemetry engine when none is provided
+		interceptor, _ = otelconnect.NewInterceptor(
+			otelconnect.WithTracerProvider(pid.telemetry.TraceProvider()),
+			otelconnect.WithMeterProvider(pid.telemetry.MeterProvider()))
 	}
 
 	var clientOptions []connect.ClientOption
 	if interceptor != nil {
 		clientOptions = append(clientOptions, connect.WithInterceptors(interceptor))
 	}
-	return clientOptions, err
+	return clientOptions
 }
 
 // remotingClient returns an instance of the Remote Service client
-func (pid *PID) remotingClient(host string, port int) (internalpbconnect.RemotingServiceClient, error) {
-	clientOptions, err := pid.clientOptions()
-	if err != nil {
-		return nil, err
-	}
-
+func (pid *PID) remotingClient(host string, port int) internalpbconnect.RemotingServiceClient {
 	return internalpbconnect.NewRemotingServiceClient(
 		pid.httpClient,
 		http.URL(host, port),
-		clientOptions...,
-	), nil
+		pid.clientOptions()...,
+	)
 }
 
 // handleCompletion processes a long-running task and pipe the result to
@@ -1501,7 +1452,7 @@ func (pid *PID) handleCompletion(ctx context.Context, completion *taskCompletion
 	// make sure that the receiver is still alive
 	to := completion.Receiver
 	if !to.IsRunning() {
-		pid.logger.Errorf("unable to pipe message to actor=(%s): not running", to.ActorPath().String())
+		pid.logger.Errorf("unable to pipe message to actor=(%s): not running", to.Address().String())
 		return
 	}
 
@@ -1535,7 +1486,7 @@ func (pid *PID) supervise(cid *PID, watcher *watcher) {
 // handleStopDirective handles the testSupervisor stop directive
 func (pid *PID) handleStopDirective(cid *PID) {
 	pid.UnWatch(cid)
-	pid.children.delete(cid.ActorPath())
+	pid.children.delete(cid.Address())
 	if err := cid.Shutdown(context.Background()); err != nil {
 		// this can enter into some infinite loop if we panic
 		// since we are just shutting down the actor we can just log the error
@@ -1560,7 +1511,7 @@ func (pid *PID) handleRestartDirective(cid *PID, maxRetries uint32, timeout time
 	if err != nil {
 		pid.logger.Error(err)
 		// remove the actor in case it is a child and stop it
-		pid.children.delete(cid.ActorPath())
+		pid.children.delete(cid.Address())
 		if err := cid.Shutdown(ctx); err != nil {
 			pid.logger.Error(err)
 		}

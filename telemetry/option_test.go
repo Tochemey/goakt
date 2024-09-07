@@ -44,12 +44,12 @@ func TestOptions(t *testing.T) {
 		{
 			name:           "WithTracerProvider",
 			option:         WithTracerProvider(tracerProvider),
-			expectedConfig: Telemetry{TracerProvider: tracerProvider},
+			expectedConfig: Telemetry{tracerProvider: tracerProvider},
 		},
 		{
 			name:           "WithMeterProvider",
 			option:         WithMeterProvider(meterProvider),
-			expectedConfig: Telemetry{MeterProvider: meterProvider},
+			expectedConfig: Telemetry{meterProvider: meterProvider},
 		},
 	}
 	for _, tc := range testCases {

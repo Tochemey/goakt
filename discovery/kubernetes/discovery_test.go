@@ -74,12 +74,12 @@ func TestDiscovery(t *testing.T) {
 		ts2 := time.Now()
 
 		config := &Config{
-			Namespace:        "test",
-			ActorSystemName:  "test",
-			ApplicationName:  "test",
-			GossipPortName:   gossipPortName,
-			RemotingPortName: remotingPortName,
-			PeersPortName:    peersPortName,
+			Namespace:         "test",
+			ActorSystemName:   "test",
+			ApplicationName:   "test",
+			DiscoveryPortName: gossipPortName,
+			RemotingPortName:  remotingPortName,
+			PeersPortName:     peersPortName,
 		}
 
 		// create some bunch of mock pods
@@ -210,12 +210,12 @@ func TestDiscovery(t *testing.T) {
 		actorSystemName := "AccountsSystem"
 
 		config := &Config{
-			Namespace:        namespace,
-			ActorSystemName:  actorSystemName,
-			ApplicationName:  applicationName,
-			GossipPortName:   gossipPortName,
-			RemotingPortName: remotingPortName,
-			PeersPortName:    peersPortName,
+			Namespace:         namespace,
+			ActorSystemName:   actorSystemName,
+			ApplicationName:   applicationName,
+			DiscoveryPortName: gossipPortName,
+			RemotingPortName:  remotingPortName,
+			PeersPortName:     peersPortName,
 		}
 
 		// create the instance of provider

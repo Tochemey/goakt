@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package internalpb;
 
-import "internal/wireactor.proto";
+import "internal/actor.proto";
 
 option go_package = "github.com/tochemey/goakt/v2/internal/internalpb;internalpb";
 
@@ -16,7 +16,7 @@ message PeersSync {
   // Specifies the remoting host
   int32 peers_port = 3;
   // Specifies the wire actor
-  WireActor actor = 4;
+  ActorRef actor = 4;
 }
 
 message PeerState {
@@ -27,5 +27,5 @@ message PeerState {
   // Specifies the remoting host
   int32 peers_port = 3;
   // Specifies the list of actors
-  repeated WireActor actors = 4;
+  repeated ActorRef actors = 4;
 }

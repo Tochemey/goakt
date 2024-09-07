@@ -22,56 +22,32 @@
  * SOFTWARE.
  */
 
-package actors
+package telemetry
 
 import (
 	"testing"
 
-	"github.com/google/go-cmp/cmp"
-	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-	"google.golang.org/protobuf/encoding/prototext"
-
-	"github.com/tochemey/goakt/v2/goaktpb"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/trace"
 )
 
-func TestPath(t *testing.T) {
-	name := "testActor"
-	addr := &Address{
-		host:     "localhost",
-		port:     888,
-		system:   "Sys",
-		protocol: protocol,
-	}
+func TestTelemetry(t *testing.T) {
+	tel := New()
+	assert.NotNil(t, tel)
+	globalTracer := otel.GetTracerProvider()
+	globalMeterProvider := otel.GetMeterProvider()
 
-	path := NewPath(name, addr)
-	assert.NotNil(t, path)
-	assert.IsType(t, new(Path), path)
+	actual := tel.TraceProvider()
+	assert.NotNil(t, actual)
+	assert.Equal(t, globalTracer, actual)
+	assert.Equal(t, globalTracer.Tracer(instrumentationName,
+		trace.WithInstrumentationVersion(Version())), tel.Tracer())
 
-	// these are just routine assertions
-	require.Equal(t, name, path.Name())
-	require.Equal(t, "goakt://Sys@localhost:888/testActor", path.String())
-	remoteAddr := &goaktpb.Address{
-		Host: "localhost",
-		Port: 888,
-		Name: name,
-		Id:   path.ID().String(),
-	}
-
-	pathRemoteAddr := path.RemoteAddress()
-	assert.Equal(t, prototext.Format(remoteAddr), prototext.Format(pathRemoteAddr))
-
-	parent := NewPath("parent", &Address{
-		host:     "localhost",
-		port:     887,
-		system:   "Sys",
-		protocol: protocol,
-	})
-
-	newPath := path.WithParent(parent)
-	assert.True(t, cmp.Equal(parent, newPath.Parent(), cmpopts.IgnoreUnexported(Path{})))
-
-	pathCopy := path
-	require.True(t, path.Equals(pathCopy))
+	actualmp := tel.MeterProvider()
+	assert.NotNil(t, actualmp)
+	assert.Equal(t, globalMeterProvider, actualmp)
+	assert.Equal(t, globalMeterProvider.Meter(instrumentationName,
+		metric.WithInstrumentationVersion(Version())), tel.Meter())
 }

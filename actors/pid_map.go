@@ -28,6 +28,8 @@ import (
 	"sync"
 
 	"go.uber.org/atomic"
+
+	"github.com/tochemey/goakt/v2/address"
 )
 
 type pidMap struct {
@@ -49,9 +51,9 @@ func (m *pidMap) len() int {
 }
 
 // get retrieves a pid by its address
-func (m *pidMap) get(path *Path) (pid *PID, ok bool) {
+func (m *pidMap) get(address *address.Address) (pid *PID, ok bool) {
 	m.mu.RLock()
-	pid, ok = m.mappings[path.String()]
+	pid, ok = m.mappings[address.String()]
 	m.mu.RUnlock()
 	return
 }
@@ -61,13 +63,13 @@ func (m *pidMap) set(pid *PID) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if pid != nil {
-		m.mappings[pid.ActorPath().String()] = pid
+		m.mappings[pid.Address().String()] = pid
 		m.size.Add(1)
 	}
 }
 
 // delete removes a pid from the map
-func (m *pidMap) delete(addr *Path) {
+func (m *pidMap) delete(addr *address.Address) {
 	m.mu.Lock()
 	delete(m.mappings, addr.String())
 	m.size.Add(-1)

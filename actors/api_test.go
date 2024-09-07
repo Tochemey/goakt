@@ -36,6 +36,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 
+	"github.com/tochemey/goakt/v2/address"
 	"github.com/tochemey/goakt/v2/goaktpb"
 	"github.com/tochemey/goakt/v2/internal/internalpb"
 	"github.com/tochemey/goakt/v2/log"
@@ -649,7 +650,7 @@ func TestRemoteTell(t *testing.T) {
 		// create a message to send to the test actor
 		message := new(testpb.TestSend)
 		// send the message to the actor
-		err = RemoteTell(ctx, addr, message)
+		err = RemoteTell(ctx, address.From(addr), message)
 		// perform some assertions
 		require.Error(t, err)
 
@@ -809,7 +810,7 @@ func TestRemoteTell(t *testing.T) {
 		// create a message to send to the test actor
 		message := new(testpb.TestSend)
 		// send the message to the actor
-		err = RemoteBatchTell(ctx, addr, message)
+		err = RemoteBatchTell(ctx, address.From(addr), message)
 		// perform some assertions
 		require.Error(t, err)
 
@@ -1132,7 +1133,7 @@ func TestRemoteAsk(t *testing.T) {
 		// create a message to send to the test actor
 		message := new(testpb.TestReply)
 		// send the message to the actor
-		reply, err := RemoteAsk(ctx, addr, message, time.Minute)
+		reply, err := RemoteAsk(ctx, address.From(addr), message, time.Minute)
 		// perform some assertions
 		require.Error(t, err)
 		require.Nil(t, reply)
@@ -1300,7 +1301,7 @@ func TestRemoteAsk(t *testing.T) {
 		// create a message to send to the test actor
 		message := new(testpb.TestReply)
 		// send the message to the actor
-		reply, err := RemoteBatchAsk(ctx, addr, message)
+		reply, err := RemoteBatchAsk(ctx, address.From(addr), message)
 		// perform some assertions
 		require.Error(t, err)
 		require.Nil(t, reply)

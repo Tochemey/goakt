@@ -15,8 +15,12 @@ message Address {
   int32 port = 2;
   // Specifies the actor name
   string name = 3;
-  // Specifies the actor unique id on the remote host
+  // Specifies the actor unique id
   string id = 4;
+  // Specifies the actor system
+  string system = 5;
+  // Specifies the parent address
+  Address parent = 6;
 }
 
 // Deadletter defines the deadletter event
@@ -106,9 +110,6 @@ message PoisonPill {}
 
 // PostStart is used when an actor has successfully started
 message PostStart {}
-
-// PreStart is used when an actor is about to start
-message PreStart {}
 
 // Broadcast is used to send message to a router
 message Broadcast {

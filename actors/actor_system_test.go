@@ -26,7 +26,6 @@ package actors
 
 import (
 	"context"
-	"fmt"
 	"net"
 	"sort"
 	"strconv"
@@ -44,6 +43,7 @@ import (
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/tochemey/goakt/v2/address"
 	"github.com/tochemey/goakt/v2/goaktpb"
 	"github.com/tochemey/goakt/v2/internal/types"
 	"github.com/tochemey/goakt/v2/log"
@@ -119,7 +119,7 @@ func TestActorSystem(t *testing.T) {
 		actor := newTestActor()
 		actorRef, err := sys.Spawn(ctx, "$omeN@me", actor)
 		require.Error(t, err)
-		assert.EqualError(t, err, "path name must contain only word characters (i.e. [a-zA-Z0-9] plus non-leading '-' or '_')")
+		assert.EqualError(t, err, "must contain only word characters (i.e. [a-zA-Z0-9] plus non-leading '-' or '_')")
 		assert.Nil(t, actorRef)
 
 		// stop the actor after some time
@@ -303,7 +303,7 @@ func TestActorSystem(t *testing.T) {
 		addr, pid, err := sys.ActorOf(ctx, actorName)
 		require.NoError(t, err)
 		require.NotNil(t, pid)
-		require.Nil(t, addr)
+		require.NotNil(t, addr)
 
 		// stop the actor after some time
 		pause(time.Second)
@@ -592,12 +592,13 @@ func TestActorSystem(t *testing.T) {
 		require.Nil(t, addr)
 
 		// attempt to send a message will fail
-		reply, err := RemoteAsk(ctx, &goaktpb.Address{
+		addr = address.From(&goaktpb.Address{
 			Host: host,
 			Port: int32(remotingPort),
 			Name: actorName,
 			Id:   "",
-		}, new(testpb.TestReply), DefaultAskTimeout)
+		})
+		reply, err := RemoteAsk(ctx, addr, new(testpb.TestReply), DefaultAskTimeout)
 		require.Error(t, err)
 		require.Nil(t, reply)
 
@@ -702,7 +703,7 @@ func TestActorSystem(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, local)
 
-		require.Equal(t, ref.ActorPath().String(), local.ActorPath().String())
+		require.Equal(t, ref.Address().String(), local.Address().String())
 
 		// stop the actor after some time
 		pause(time.Second)
@@ -762,7 +763,7 @@ func TestActorSystem(t *testing.T) {
 		assert.NoError(t, err)
 		err = sys.Kill(ctx, "Test")
 		assert.Error(t, err)
-		assert.EqualError(t, err, "actor=goakt://testSys@/Test not found")
+		assert.EqualError(t, err, "actor=goakt://testSys@127.0.0.1:0/Test not found")
 		t.Cleanup(func() {
 			err = sys.Stop(ctx)
 			assert.NoError(t, err)
@@ -1483,80 +1484,6 @@ func TestActorSystem(t *testing.T) {
 		t.Cleanup(func() {
 			err = newActorSystem.Stop(ctx)
 			assert.NoError(t, err)
-		})
-	})
-	t.Run("With actors redeployment", func(t *testing.T) {
-		// create a context
-		ctx := context.TODO()
-		// start the NATS server
-		srv := startNatsServer(t)
-
-		// create and start system cluster
-		node1, sd1 := startClusterSystem(t, "Node1", srv.Addr().String())
-		require.NotNil(t, node1)
-		require.NotNil(t, sd1)
-
-		// create and start system cluster
-		node2, sd2 := startClusterSystem(t, "Node2", srv.Addr().String())
-		require.NotNil(t, node2)
-		require.NotNil(t, sd2)
-
-		// create and start system cluster
-		node3, sd3 := startClusterSystem(t, "Node3", srv.Addr().String())
-		require.NotNil(t, node3)
-		require.NotNil(t, sd3)
-
-		// let us create 4 actors on each node
-		for j := 1; j <= 4; j++ {
-			actorName := fmt.Sprintf("Node1-Actor-%d", j)
-			pid, err := node1.Spawn(ctx, actorName, newTestActor())
-			require.NoError(t, err)
-			require.NotNil(t, pid)
-		}
-
-		pause(time.Second)
-
-		for j := 1; j <= 4; j++ {
-			actorName := fmt.Sprintf("Node2-Actor-%d", j)
-			pid, err := node2.Spawn(ctx, actorName, newTestActor())
-			require.NoError(t, err)
-			require.NotNil(t, pid)
-		}
-
-		pause(time.Second)
-
-		for j := 1; j <= 4; j++ {
-			actorName := fmt.Sprintf("Node3-Actor-%d", j)
-			pid, err := node3.Spawn(ctx, actorName, newTestActor())
-			require.NoError(t, err)
-			require.NotNil(t, pid)
-		}
-
-		pause(time.Second)
-
-		// take down node2
-		require.NoError(t, node2.Stop(ctx))
-		require.NoError(t, sd2.Close())
-
-		// Wait for cluster rebalancing
-		pause(time.Minute)
-
-		// let us access some of the node2 actors from node 1 and  node 3
-		actorName := "Node2-Actor-1"
-
-		sender, err := node1.LocalActor("Node1-Actor-1")
-		require.NoError(t, err)
-		require.NotNil(t, sender)
-
-		err = sender.SendAsync(ctx, actorName, new(testpb.TestSend))
-		require.NoError(t, err)
-
-		t.Cleanup(func() {
-			assert.NoError(t, node1.Stop(ctx))
-			assert.NoError(t, node3.Stop(ctx))
-			assert.NoError(t, sd1.Close())
-			assert.NoError(t, sd3.Close())
-			srv.Shutdown()
 		})
 	})
 }

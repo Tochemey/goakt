@@ -88,9 +88,9 @@ type Interface interface {
 	// RemotingPort returns the cluster remoting port
 	RemotingPort() int
 	// PutActor replicates onto the Node the metadata of an actor
-	PutActor(ctx context.Context, actor *internalpb.WireActor) error
+	PutActor(ctx context.Context, actor *internalpb.ActorRef) error
 	// GetActor fetches an actor from the Node
-	GetActor(ctx context.Context, actorName string) (*internalpb.WireActor, error)
+	GetActor(ctx context.Context, actorName string) (*internalpb.ActorRef, error)
 	// GetPartition returns the partition where a given actor is stored
 	GetPartition(actorName string) int
 	// SetKey sets a given key to the cluster
@@ -216,8 +216,8 @@ func (n *Engine) Start(ctx context.Context) error {
 
 	// sets the bindings
 	m.BindAddr = n.host.Host
-	m.BindPort = n.host.GossipPort
-	m.AdvertisePort = n.host.GossipPort
+	m.BindPort = n.host.DiscoveryPort
+	m.AdvertisePort = n.host.DiscoveryPort
 	conf.MemberlistConfig = m
 
 	// set the discovery provider
@@ -281,7 +281,7 @@ func (n *Engine) Start(ctx context.Context) error {
 		Host:         n.Host(),
 		RemotingPort: int32(n.host.RemotingPort),
 		PeersPort:    int32(n.host.PeersPort),
-		Actors:       []*internalpb.WireActor{},
+		Actors:       []*internalpb.ActorRef{},
 	}
 
 	n.pubSub = ps.Subscribe(ctx, events.ClusterEventsChannel)
@@ -374,7 +374,7 @@ func (n *Engine) AdvertisedAddress() string {
 }
 
 // PutActor pushes to the cluster the peer sync request
-func (n *Engine) PutActor(ctx context.Context, actor *internalpb.WireActor) error {
+func (n *Engine) PutActor(ctx context.Context, actor *internalpb.ActorRef) error {
 	ctx, cancelFn := context.WithTimeout(ctx, n.writeTimeout)
 	defer cancelFn()
 
@@ -390,8 +390,8 @@ func (n *Engine) PutActor(ctx context.Context, actor *internalpb.WireActor) erro
 
 	eg.Go(func() error {
 		encoded, _ := encode(actor)
-		if err := n.dmap.Put(ctx, actor.GetActorName(), encoded); err != nil {
-			return fmt.Errorf("failed to sync actor=(%s) of peer=(%s): %v", actor.GetActorName(), n.host.PeersAddress(), err)
+		if err := n.dmap.Put(ctx, actor.GetActorAddress().GetName(), encoded); err != nil {
+			return fmt.Errorf("failed to sync actor=(%s) of peer=(%s): %v", actor.GetActorAddress().GetName(), n.host.PeersAddress(), err)
 		}
 
 		return nil
@@ -401,7 +401,7 @@ func (n *Engine) PutActor(ctx context.Context, actor *internalpb.WireActor) erro
 		// append to the existing list
 		actors := append(n.peerState.GetActors(), actor)
 		// remove duplicates
-		compacted := slices.CompactFunc(actors, func(actor *internalpb.WireActor, actor2 *internalpb.WireActor) bool {
+		compacted := slices.CompactFunc(actors, func(actor *internalpb.ActorRef, actor2 *internalpb.ActorRef) bool {
 			return proto.Equal(actor, actor2)
 		})
 
@@ -462,7 +462,7 @@ func (n *Engine) GetState(ctx context.Context, peerAddress string) (*internalpb.
 }
 
 // GetActor fetches an actor from the Node
-func (n *Engine) GetActor(ctx context.Context, actorName string) (*internalpb.WireActor, error) {
+func (n *Engine) GetActor(ctx context.Context, actorName string) (*internalpb.ActorRef, error) {
 	ctx, cancelFn := context.WithTimeout(ctx, n.readTimeout)
 	defer cancelFn()
 
@@ -495,7 +495,7 @@ func (n *Engine) GetActor(ctx context.Context, actorName string) (*internalpb.Wi
 		return nil, err
 	}
 
-	logger.Infof("[%s] successfully retrieved from the cluster actor (%s)", n.host.PeersAddress(), actor.GetActorName())
+	logger.Infof("[%s] successfully retrieved from the cluster actor (%s)", n.host.PeersAddress(), actor.GetActorAddress().GetName())
 	return actor, nil
 }
 

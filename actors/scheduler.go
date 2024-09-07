@@ -39,7 +39,7 @@ import (
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/tochemey/goakt/v2/goaktpb"
+	"github.com/tochemey/goakt/v2/address"
 	"github.com/tochemey/goakt/v2/internal/cluster"
 	"github.com/tochemey/goakt/v2/log"
 )
@@ -140,7 +140,7 @@ func (x *scheduler) ScheduleOnce(ctx context.Context, message proto.Message, pid
 		return true, nil
 	})
 
-	jobDetails := quartz.NewJobDetail(job, quartz.NewJobKey(pid.ActorPath().String()))
+	jobDetails := quartz.NewJobDetail(job, quartz.NewJobKey(pid.Address().String()))
 	if err := x.distributeJobKeyOrNot(ctx, jobDetails); err != nil {
 		if errors.Is(err, errSkipJobScheduling) {
 			return nil
@@ -155,7 +155,7 @@ func (x *scheduler) ScheduleOnce(ctx context.Context, message proto.Message, pid
 // This requires remoting to be enabled on the actor system.
 // This will send the given message to the actor after the given interval specified
 // The message will be sent once
-func (x *scheduler) RemoteScheduleOnce(ctx context.Context, message proto.Message, address *goaktpb.Address, interval time.Duration) error {
+func (x *scheduler) RemoteScheduleOnce(ctx context.Context, message proto.Message, address *address.Address, interval time.Duration) error {
 	x.mu.Lock()
 	defer x.mu.Unlock()
 
@@ -197,7 +197,7 @@ func (x *scheduler) ScheduleWithCron(ctx context.Context, message proto.Message,
 		return true, nil
 	})
 
-	jobDetails := quartz.NewJobDetail(job, quartz.NewJobKey(pid.ActorPath().String()))
+	jobDetails := quartz.NewJobDetail(job, quartz.NewJobKey(pid.Address().String()))
 	if err := x.distributeJobKeyOrNot(ctx, jobDetails); err != nil {
 		if errors.Is(err, errSkipJobScheduling) {
 			return nil
@@ -216,7 +216,7 @@ func (x *scheduler) ScheduleWithCron(ctx context.Context, message proto.Message,
 }
 
 // RemoteScheduleWithCron schedules a message to be sent to an actor in the future using a cron expression.
-func (x *scheduler) RemoteScheduleWithCron(ctx context.Context, message proto.Message, address *goaktpb.Address, cronExpression string) error {
+func (x *scheduler) RemoteScheduleWithCron(ctx context.Context, message proto.Message, address *address.Address, cronExpression string) error {
 	x.mu.Lock()
 	defer x.mu.Unlock()
 

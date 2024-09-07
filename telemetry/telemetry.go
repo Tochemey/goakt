@@ -36,19 +36,19 @@ const (
 
 // Telemetry encapsulates some settings for an actor
 type Telemetry struct {
-	TracerProvider trace.TracerProvider
-	Tracer         trace.Tracer
+	tracerProvider trace.TracerProvider
+	tracer         trace.Tracer
 
-	MeterProvider metric.MeterProvider
-	Meter         metric.Meter
+	meterProvider metric.MeterProvider
+	meter         metric.Meter
 }
 
 // New creates an instance of Telemetry
 func New(options ...Option) *Telemetry {
 	// create a config instance
 	telemetry := &Telemetry{
-		TracerProvider: otel.GetTracerProvider(),
-		MeterProvider:  otel.GetMeterProvider(),
+		tracerProvider: otel.GetTracerProvider(),
+		meterProvider:  otel.GetMeterProvider(),
 	}
 
 	// apply the various options
@@ -57,16 +57,36 @@ func New(options ...Option) *Telemetry {
 	}
 
 	// set the tracer
-	telemetry.Tracer = telemetry.TracerProvider.Tracer(
+	telemetry.tracer = telemetry.tracerProvider.Tracer(
 		instrumentationName,
 		trace.WithInstrumentationVersion(Version()),
 	)
 
 	// set the meter
-	telemetry.Meter = telemetry.MeterProvider.Meter(
+	telemetry.meter = telemetry.meterProvider.Meter(
 		instrumentationName,
 		metric.WithInstrumentationVersion(Version()),
 	)
 
 	return telemetry
+}
+
+// TraceProvider returns the trace provider
+func (t *Telemetry) TraceProvider() trace.TracerProvider {
+	return t.tracerProvider
+}
+
+// MeterProvider returns the meter provider
+func (t *Telemetry) MeterProvider() metric.MeterProvider {
+	return t.meterProvider
+}
+
+// Meter returns the meter
+func (t *Telemetry) Meter() metric.Meter {
+	return t.meter
+}
+
+// Tracer returns the tracer
+func (t *Telemetry) Tracer() trace.Tracer {
+	return t.tracer
 }

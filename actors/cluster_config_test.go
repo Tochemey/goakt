@@ -42,7 +42,7 @@ func TestClusterConfig(t *testing.T) {
 		kinds := []Actor{tester, exchanger}
 		config := NewClusterConfig().
 			WithKinds(kinds...).
-			WithGossipPort(3220).
+			WithDiscoveryPort(3220).
 			WithPeersPort(3222).
 			WithMinimumPeersQuorum(1).
 			WithReplicaCount(1).
@@ -50,7 +50,7 @@ func TestClusterConfig(t *testing.T) {
 			WithDiscovery(disco)
 
 		require.NoError(t, config.Validate())
-		assert.EqualValues(t, 3220, config.GossipPort())
+		assert.EqualValues(t, 3220, config.DiscoveryPort())
 		assert.EqualValues(t, 3222, config.PeersPort())
 		assert.EqualValues(t, 1, config.MinimumPeersQuorum())
 		assert.EqualValues(t, 1, config.ReplicaCount())
@@ -62,7 +62,7 @@ func TestClusterConfig(t *testing.T) {
 	t.Run("With invalid config setting", func(t *testing.T) {
 		config := NewClusterConfig().
 			WithKinds(new(exchanger), new(testActor)).
-			WithGossipPort(3220).
+			WithDiscoveryPort(3220).
 			WithPeersPort(3222).
 			WithMinimumPeersQuorum(1).
 			WithReplicaCount(1).

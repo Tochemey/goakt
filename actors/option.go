@@ -104,14 +104,14 @@ func WithTelemetry(telemetry *telemetry.Telemetry) Option {
 func WithRemoting(host string, port int32) Option {
 	return OptionFunc(func(a *actorSystem) {
 		a.remotingEnabled.Store(true)
-		a.remotingPort = port
-		a.remotingHost = host
+		a.port = port
+		a.host = host
 	})
 }
 
 // WithClustering enables the cluster mode.
 // Deprecated: use rather WithCluster which offers a fluent api to set cluster configuration
-func WithClustering(provider discovery.Provider, partitionCount uint64, minimumPeersQuorum uint16, gossipPort, peersPort int, kinds ...Actor) Option {
+func WithClustering(provider discovery.Provider, partitionCount uint64, minimumPeersQuorum uint16, discoveryPort, peersPort int, kinds ...Actor) Option {
 	return OptionFunc(func(a *actorSystem) {
 		a.clusterEnabled.Store(true)
 		replicaCount := 2
@@ -122,7 +122,7 @@ func WithClustering(provider discovery.Provider, partitionCount uint64, minimumP
 		a.clusterConfig = NewClusterConfig().
 			WithDiscovery(provider).
 			WithPartitionCount(partitionCount).
-			WithGossipPort(gossipPort).
+			WithDiscoveryPort(discoveryPort).
 			WithPeersPort(peersPort).
 			WithMinimumPeersQuorum(uint32(minimumPeersQuorum)).
 			WithReplicaCount(uint32(replicaCount)).

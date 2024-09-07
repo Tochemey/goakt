@@ -61,7 +61,7 @@ func (a *TCPAddressValidator) Validate() error {
 	}
 
 	// TODO: maybe we only need to check port number not to be negative
-	if host == "" || portNum > 65535 || portNum < 1 {
+	if host == "" || portNum > 65535 || portNum < 0 {
 		return fmt.Errorf(errFmt, a.address, errors.New("invalid address"))
 	}
 

@@ -447,7 +447,7 @@ const (
     namespace          = "default"
     applicationName    = "accounts"
     actorSystemName    = "AccountsSystem"
-    gossipPortName     = "gossip-port"
+    discoveryPortName  = "discovery-port"
     peersPortName      = "peers-port"
     remotingPortName   = "remoting-port"
 )
@@ -457,7 +457,7 @@ config := kubernetes.Config{
     ApplicationName:  applicationName,
     ActorSystemName:  actorSystemName,
     Namespace:        namespace,
-    GossipPortName:   gossipPortName,
+    DiscoveryPortName:   gossipPortName,
     RemotingPortName: remotingPortName,
     PeersPortName:  peersPortName,
 }

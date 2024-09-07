@@ -26,8 +26,6 @@ package actors
 
 import (
 	"time"
-
-	"github.com/tochemey/goakt/v2/goaktpb"
 )
 
 const (
@@ -69,8 +67,6 @@ var (
 	NoSender *PID
 	// DefaultSupervisoryStrategy defines the default supervisory strategy
 	DefaultSupervisoryStrategy = NewStopDirective()
-	// RemoteNoSender means that there is no sender
-	RemoteNoSender = new(goaktpb.Address)
 
 	systemNames = map[nameType]string{
 		supervisorType: "GoAktSupervisor",

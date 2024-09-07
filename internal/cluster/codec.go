@@ -32,16 +32,16 @@ import (
 
 // encode marshals a wire actor into a byte array
 // the output of this function can be persisted to the Cluster
-func encode(actor *internalpb.WireActor) ([]byte, error) {
+func encode(actor *internalpb.ActorRef) ([]byte, error) {
 	// let us marshal it
 	bytea, _ := proto.Marshal(actor)
 	return bytea, nil
 }
 
 // decode decodes the encoded base64 representation of a wire actor
-func decode(bytea []byte) (*internalpb.WireActor, error) {
+func decode(bytea []byte) (*internalpb.ActorRef, error) {
 	// create an instance of proto message
-	actor := new(internalpb.WireActor)
+	actor := new(internalpb.ActorRef)
 	// let us unpack the byte array
 	if err := proto.Unmarshal(bytea, actor); err != nil {
 		return nil, err

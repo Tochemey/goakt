@@ -1,0 +1,36 @@
+name: Stale
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 12 * * *'
+
+jobs:
+  Stale:
+    runs-on: ubuntu-latest
+    name: Run stale
+    steps:
+      - name: Checkout
+        id: checkout
+        uses: actions/checkout@v4
+      - name: Stale
+        id: stale
+        uses: sonia-corporation/stale@2.5.0
+        with:
+          pull-request-stale-label: stale-label
+          pull-request-days-before-stale: 14
+          pull-request-days-before-close: 10
+          pull-request-ignore-all-assignees: true
+          pull-request-delete-branch-after-close: true
+          pull-request-stale-comment: |
+            This pull is inactive since 14 days!
+            If there is no activity, it will be closed in two weeks.
+          issue-stale-label: inactive
+          issue-ignore-all-assignees: true
+          issue-days-before-stale: 14
+          issue-days-before-close: 10
+          issue-stale-comment: |
+            This issue is inactive since 14 days!
+            If there is no activity, it will be closed in two weeks.
+          issue-add-labels-after-close: |
+            closed-due-to-inactivity

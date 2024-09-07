@@ -43,9 +43,9 @@ func TestTCPAddressValidator(t *testing.T) {
 		addr := "127.0.0.1:655387"
 		assert.Error(t, NewTCPAddressValidator(addr).Validate())
 	})
-	t.Run("With invalid port number: case 3", func(t *testing.T) {
+	t.Run("With  zero port number: case 3", func(t *testing.T) {
 		addr := "127.0.0.1:0"
-		assert.Error(t, NewTCPAddressValidator(addr).Validate())
+		assert.NoError(t, NewTCPAddressValidator(addr).Validate())
 	})
 	t.Run("With invalid host", func(t *testing.T) {
 		addr := ":3222"

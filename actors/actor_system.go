@@ -46,8 +46,8 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 
+	"github.com/tochemey/goakt/v2/address"
 	"github.com/tochemey/goakt/v2/discovery"
-	"github.com/tochemey/goakt/v2/goaktpb"
 	"github.com/tochemey/goakt/v2/hash"
 	"github.com/tochemey/goakt/v2/internal/cluster"
 	"github.com/tochemey/goakt/v2/internal/eventstream"
@@ -95,12 +95,12 @@ type ActorSystem interface {
 	// RemoteActor returns the address of a remote actor when cluster is enabled
 	// When the cluster mode is not enabled an actor not found error will be returned
 	// One can always check whether cluster is enabled before calling this method or just use the ActorOf method.
-	RemoteActor(ctx context.Context, actorName string) (addr *goaktpb.Address, err error)
+	RemoteActor(ctx context.Context, actorName string) (addr *address.Address, err error)
 	// ActorOf returns an existing actor in the local system or in the cluster when clustering is enabled
 	// When cluster mode is activated, the PID will be nil.
 	// When remoting is enabled this method will return and error
 	// An actor not found error is return when the actor is not found.
-	ActorOf(ctx context.Context, actorName string) (addr *goaktpb.Address, pid *PID, err error)
+	ActorOf(ctx context.Context, actorName string) (addr *address.Address, pid *PID, err error)
 	// InCluster states whether the actor system is running within a cluster of nodes
 	InCluster() bool
 	// GetPartition returns the partition where a given actor is located
@@ -117,11 +117,11 @@ type ActorSystem interface {
 	// This requires remoting to be enabled on the actor system.
 	// This will send the given message to the actor after the given interval specified
 	// The message will be sent once
-	RemoteScheduleOnce(ctx context.Context, message proto.Message, address *goaktpb.Address, interval time.Duration) error
+	RemoteScheduleOnce(ctx context.Context, message proto.Message, address *address.Address, interval time.Duration) error
 	// ScheduleWithCron schedules a message to be sent to an actor in the future using a cron expression.
 	ScheduleWithCron(ctx context.Context, message proto.Message, pid *PID, cronExpression string) error
 	// RemoteScheduleWithCron schedules a message to be sent to an actor in the future using a cron expression.
-	RemoteScheduleWithCron(ctx context.Context, message proto.Message, address *goaktpb.Address, cronExpression string) error
+	RemoteScheduleWithCron(ctx context.Context, message proto.Message, address *address.Address, cronExpression string) error
 	// PeerAddress returns the actor system address known in the cluster. That address is used by other nodes to communicate with the actor system.
 	// This address is empty when cluster mode is not activated
 	PeerAddress() string
@@ -181,9 +181,9 @@ type actorSystem struct {
 	// This allows to handle remote messaging
 	remotingEnabled atomic.Bool
 	// Specifies the remoting port
-	remotingPort int32
+	port int32
 	// Specifies the remoting host
-	remotingHost string
+	host string
 	// Specifies the remoting server
 	remotingServer *stdhttp.Server
 
@@ -191,7 +191,7 @@ type actorSystem struct {
 	clusterEnabled atomic.Bool
 	// cluster mode
 	cluster            cluster.Interface
-	actorsChan         chan *internalpb.WireActor
+	actorsChan         chan *internalpb.ActorRef
 	clusterEventsChan  <-chan *cluster.Event
 	clusterSyncStopSig chan types.Unit
 	partitionHasher    hash.Hasher
@@ -240,7 +240,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 
 	system := &actorSystem{
 		actors:                 newPIDMap(1_000),
-		actorsChan:             make(chan *internalpb.WireActor, 10),
+		actorsChan:             make(chan *internalpb.ActorRef, 10),
 		name:                   name,
 		logger:                 log.New(log.ErrorLevel, os.Stderr),
 		expireActorAfter:       DefaultPassivationTimeout,
@@ -262,8 +262,8 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		peersCacheMu:           &sync.RWMutex{},
 		peersCache:             make(map[string][]byte),
 		peersStateLoopInterval: DefaultPeerStateLoopInterval,
-		remotingPort:           -1,
-		remotingHost:           "",
+		port:                   0,
+		host:                   "127.0.0.1",
 	}
 
 	system.started.Store(false)
@@ -341,7 +341,7 @@ func (x *actorSystem) ScheduleOnce(ctx context.Context, message proto.Message, p
 // This requires remoting to be enabled on the actor system.
 // This will send the given message to the actor after the given interval specified
 // The message will be sent once
-func (x *actorSystem) RemoteScheduleOnce(ctx context.Context, message proto.Message, address *goaktpb.Address, interval time.Duration) error {
+func (x *actorSystem) RemoteScheduleOnce(ctx context.Context, message proto.Message, address *address.Address, interval time.Duration) error {
 	return x.scheduler.RemoteScheduleOnce(ctx, message, address, interval)
 }
 
@@ -351,7 +351,7 @@ func (x *actorSystem) ScheduleWithCron(ctx context.Context, message proto.Messag
 }
 
 // RemoteScheduleWithCron schedules a message to be sent to an actor in the future using a cron expression.
-func (x *actorSystem) RemoteScheduleWithCron(ctx context.Context, message proto.Message, address *goaktpb.Address, cronExpression string) error {
+func (x *actorSystem) RemoteScheduleWithCron(ctx context.Context, message proto.Message, address *address.Address, cronExpression string) error {
 	return x.scheduler.RemoteScheduleWithCron(ctx, message, address, cronExpression)
 }
 
@@ -401,7 +401,7 @@ func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor) (*PID
 	}
 
 	// set the default actor path assuming we are running locally
-	actorPath := x.actorPath(name)
+	actorPath := x.actorAddress(name)
 	pid, exist := x.actors.get(actorPath)
 	if exist {
 		if pid.IsRunning() {
@@ -458,7 +458,7 @@ func (x *actorSystem) Kill(ctx context.Context, name string) error {
 		return ErrActorSystemNotStarted
 	}
 
-	actorPath := x.actorPath(name)
+	actorPath := x.actorAddress(name)
 	pid, exist := x.actors.get(actorPath)
 	if exist {
 		// stop the given actor. No need to record error in the span context
@@ -475,7 +475,7 @@ func (x *actorSystem) ReSpawn(ctx context.Context, name string) (*PID, error) {
 		return nil, ErrActorSystemNotStarted
 	}
 
-	actorPath := x.actorPath(name)
+	actorPath := x.actorAddress(name)
 	pid, exist := x.actors.get(actorPath)
 	if exist {
 		if err := pid.Restart(ctx); err != nil {
@@ -526,7 +526,7 @@ func (x *actorSystem) PeerAddress() string {
 // When cluster mode is activated, the PID will be nil.
 // When remoting is enabled this method will return and error
 // An actor not found error is return when the actor is not found.
-func (x *actorSystem) ActorOf(ctx context.Context, actorName string) (addr *goaktpb.Address, pid *PID, err error) {
+func (x *actorSystem) ActorOf(ctx context.Context, actorName string) (addr *address.Address, pid *PID, err error) {
 	x.locker.Lock()
 
 	if !x.started.Load() {
@@ -535,10 +535,10 @@ func (x *actorSystem) ActorOf(ctx context.Context, actorName string) (addr *goak
 	}
 
 	// first check whether the actor exist locally
-	actorPath := x.actorPath(actorName)
+	actorPath := x.actorAddress(actorName)
 	if lpid, ok := x.actors.get(actorPath); ok {
 		x.locker.Unlock()
-		return lpid.ActorPath().RemoteAddress(), lpid, nil
+		return lpid.Address(), lpid, nil
 	}
 
 	// check in the cluster
@@ -556,7 +556,7 @@ func (x *actorSystem) ActorOf(ctx context.Context, actorName string) (addr *goak
 		}
 
 		x.locker.Unlock()
-		return actor.GetActorAddress(), nil, nil
+		return address.From(actor.GetActorAddress()), nil, nil
 	}
 
 	if x.remotingEnabled.Load() {
@@ -579,7 +579,7 @@ func (x *actorSystem) LocalActor(actorName string) (*PID, error) {
 		return nil, ErrActorSystemNotStarted
 	}
 
-	actorPath := x.actorPath(actorName)
+	actorPath := x.actorAddress(actorName)
 	if lpid, ok := x.actors.get(actorPath); ok {
 		x.locker.Unlock()
 		return lpid, nil
@@ -593,7 +593,7 @@ func (x *actorSystem) LocalActor(actorName string) (*PID, error) {
 // RemoteActor returns the address of a remote actor when cluster is enabled
 // When the cluster mode is not enabled an actor not found error will be returned
 // One can always check whether cluster is enabled before calling this method or just use the ActorOf method.
-func (x *actorSystem) RemoteActor(ctx context.Context, actorName string) (addr *goaktpb.Address, err error) {
+func (x *actorSystem) RemoteActor(ctx context.Context, actorName string) (addr *address.Address, err error) {
 	x.locker.Lock()
 
 	if !x.started.Load() {
@@ -620,7 +620,7 @@ func (x *actorSystem) RemoteActor(ctx context.Context, actorName string) (addr *
 	}
 
 	x.locker.Unlock()
-	return actor.GetActorAddress(), nil
+	return address.From(actor.GetActorAddress()), nil
 }
 
 // Start starts the actor system
@@ -701,10 +701,10 @@ func (x *actorSystem) Stop(ctx context.Context) error {
 		return err
 	}
 	// remove the supervisor from the actors list
-	x.actors.delete(x.supervisor.ActorPath())
+	x.actors.delete(x.supervisor.Address())
 
 	for _, actor := range x.Actors() {
-		x.actors.delete(actor.ActorPath())
+		x.actors.delete(actor.Address())
 		if err := actor.Shutdown(ctx); err != nil {
 			x.reset()
 			return err
@@ -725,7 +725,7 @@ func (x *actorSystem) RemoteLookup(ctx context.Context, request *connect.Request
 		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrRemotingDisabled)
 	}
 
-	remoteAddr := fmt.Sprintf("%s:%d", x.remotingHost, x.remotingPort)
+	remoteAddr := fmt.Sprintf("%s:%d", x.host, x.port)
 	if remoteAddr != net.JoinHostPort(msg.GetHost(), strconv.Itoa(int(msg.GetPort()))) {
 		return nil, connect.NewError(connect.CodeInvalidArgument, ErrInvalidHost)
 	}
@@ -744,14 +744,14 @@ func (x *actorSystem) RemoteLookup(ctx context.Context, request *connect.Request
 		return connect.NewResponse(&internalpb.RemoteLookupResponse{Address: actor.GetActorAddress()}), nil
 	}
 
-	actorPath := NewPath(msg.GetName(), NewAddress(x.Name(), msg.GetHost(), int(msg.GetPort())))
-	pid, exist := x.actors.get(actorPath)
+	addr := address.New(msg.GetName(), x.Name(), msg.GetHost(), int(msg.GetPort()))
+	pid, exist := x.actors.get(addr)
 	if !exist {
-		logger.Error(ErrAddressNotFound(actorPath.String()).Error())
-		return nil, ErrAddressNotFound(actorPath.String())
+		logger.Error(ErrAddressNotFound(addr.String()).Error())
+		return nil, ErrAddressNotFound(addr.String())
 	}
 
-	return connect.NewResponse(&internalpb.RemoteLookupResponse{Address: pid.ActorPath().RemoteAddress()}), nil
+	return connect.NewResponse(&internalpb.RemoteLookupResponse{Address: pid.Address().Address}), nil
 }
 
 // RemoteAsk is used to send a message to an actor remotely and expect a response
@@ -786,16 +786,16 @@ func (x *actorSystem) RemoteAsk(ctx context.Context, stream *connect.BidiStream[
 		receiver := message.GetReceiver()
 		name := receiver.GetName()
 
-		remoteAddr := fmt.Sprintf("%s:%d", x.remotingHost, x.remotingPort)
+		remoteAddr := fmt.Sprintf("%s:%d", x.host, x.port)
 		if remoteAddr != net.JoinHostPort(receiver.GetHost(), strconv.Itoa(int(receiver.GetPort()))) {
 			return connect.NewError(connect.CodeInvalidArgument, ErrInvalidHost)
 		}
 
-		actorPath := NewPath(name, NewAddress(x.name, x.remotingHost, int(x.remotingPort)))
-		pid, exist := x.actors.get(actorPath)
+		addr := x.actorAddress(name)
+		pid, exist := x.actors.get(addr)
 		if !exist {
-			logger.Error(ErrAddressNotFound(actorPath.String()).Error())
-			return ErrAddressNotFound(actorPath.String())
+			logger.Error(ErrAddressNotFound(addr.String()).Error())
+			return ErrAddressNotFound(addr.String())
 		}
 
 		timeout := x.askTimeout
@@ -851,17 +851,11 @@ func (x *actorSystem) RemoteTell(ctx context.Context, stream *connect.ClientStre
 	eg.Go(func() error {
 		for request := range requestc {
 			receiver := request.GetRemoteMessage().GetReceiver()
-			actorPath := NewPath(
-				receiver.GetName(),
-				NewAddress(
-					x.Name(),
-					receiver.GetHost(),
-					int(receiver.GetPort())))
-
-			pid, exist := x.actors.get(actorPath)
+			addr := address.New(receiver.GetName(), x.Name(), receiver.GetHost(), int(receiver.GetPort()))
+			pid, exist := x.actors.get(addr)
 			if !exist {
-				logger.Error(ErrAddressNotFound(actorPath.String()).Error())
-				return ErrAddressNotFound(actorPath.String())
+				logger.Error(ErrAddressNotFound(addr.String()).Error())
+				return ErrAddressNotFound(addr.String())
 			}
 
 			if err := x.handleRemoteTell(ctx, pid, request.GetRemoteMessage()); err != nil {
@@ -889,12 +883,12 @@ func (x *actorSystem) RemoteReSpawn(ctx context.Context, request *connect.Reques
 		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrRemotingDisabled)
 	}
 
-	remoteAddr := fmt.Sprintf("%s:%d", x.remotingHost, x.remotingPort)
+	remoteAddr := fmt.Sprintf("%s:%d", x.host, x.port)
 	if remoteAddr != net.JoinHostPort(msg.GetHost(), strconv.Itoa(int(msg.GetPort()))) {
 		return nil, connect.NewError(connect.CodeInvalidArgument, ErrInvalidHost)
 	}
 
-	actorPath := NewPath(msg.GetName(), NewAddress(x.Name(), msg.GetHost(), int(msg.GetPort())))
+	actorPath := address.New(msg.GetName(), x.Name(), msg.GetHost(), int(msg.GetPort()))
 	pid, exist := x.actors.get(actorPath)
 	if !exist {
 		logger.Error(ErrAddressNotFound(actorPath.String()).Error())
@@ -919,12 +913,12 @@ func (x *actorSystem) RemoteStop(ctx context.Context, request *connect.Request[i
 		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrRemotingDisabled)
 	}
 
-	remoteAddr := fmt.Sprintf("%s:%d", x.remotingHost, x.remotingPort)
+	remoteAddr := fmt.Sprintf("%s:%d", x.host, x.port)
 	if remoteAddr != net.JoinHostPort(msg.GetHost(), strconv.Itoa(int(msg.GetPort()))) {
 		return nil, connect.NewError(connect.CodeInvalidArgument, ErrInvalidHost)
 	}
 
-	actorPath := NewPath(msg.GetName(), NewAddress(x.Name(), msg.GetHost(), int(msg.GetPort())))
+	actorPath := address.New(msg.GetName(), x.Name(), msg.GetHost(), int(msg.GetPort()))
 	pid, exist := x.actors.get(actorPath)
 	if !exist {
 		logger.Error(ErrAddressNotFound(actorPath.String()).Error())
@@ -948,7 +942,7 @@ func (x *actorSystem) RemoteSpawn(ctx context.Context, request *connect.Request[
 		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrRemotingDisabled)
 	}
 
-	remoteAddr := fmt.Sprintf("%s:%d", x.remotingHost, x.remotingPort)
+	remoteAddr := fmt.Sprintf("%s:%d", x.host, x.port)
 	if remoteAddr != net.JoinHostPort(msg.GetHost(), strconv.Itoa(int(msg.GetPort()))) {
 		return nil, connect.NewError(connect.CodeInvalidArgument, ErrInvalidHost)
 	}
@@ -982,7 +976,7 @@ func (x *actorSystem) GetNodeMetric(_ context.Context, request *connect.Request[
 
 	req := request.Msg
 
-	remoteAddr := fmt.Sprintf("%s:%d", x.remotingHost, x.remotingPort)
+	remoteAddr := fmt.Sprintf("%s:%d", x.host, x.port)
 	if remoteAddr != req.GetNodeAddress() {
 		return nil, connect.NewError(connect.CodeInvalidArgument, ErrInvalidHost)
 	}
@@ -1001,7 +995,7 @@ func (x *actorSystem) GetKinds(_ context.Context, request *connect.Request[inter
 	}
 
 	req := request.Msg
-	remoteAddr := fmt.Sprintf("%s:%d", x.remotingHost, x.remotingPort)
+	remoteAddr := fmt.Sprintf("%s:%d", x.host, x.port)
 
 	// routine check
 	if remoteAddr != req.GetNodeAddress() {
@@ -1039,10 +1033,8 @@ func (x *actorSystem) getSupervisor() *PID {
 func (x *actorSystem) setActor(actor *PID) {
 	x.actors.set(actor)
 	if x.clusterEnabled.Load() {
-		x.actorsChan <- &internalpb.WireActor{
-			ActorName:    actor.Name(),
-			ActorAddress: actor.ActorPath().RemoteAddress(),
-			ActorPath:    actor.ActorPath().String(),
+		x.actorsChan <- &internalpb.ActorRef{
+			ActorAddress: actor.Address().Address,
 			ActorType:    types.TypeName(actor.Actor()),
 		}
 	}
@@ -1059,11 +1051,11 @@ func (x *actorSystem) enableClustering(ctx context.Context) error {
 	}
 
 	node := &discovery.Node{
-		Name:         x.Name(),
-		Host:         x.remotingHost,
-		GossipPort:   x.clusterConfig.GossipPort(),
-		PeersPort:    x.clusterConfig.PeersPort(),
-		RemotingPort: int(x.remotingPort),
+		Name:          x.Name(),
+		Host:          x.host,
+		DiscoveryPort: x.clusterConfig.DiscoveryPort(),
+		PeersPort:     x.clusterConfig.PeersPort(),
+		RemotingPort:  int(x.port),
 	}
 
 	clusterEngine, err := cluster.NewEngine(
@@ -1123,7 +1115,7 @@ func (x *actorSystem) enableRemoting(ctx context.Context) {
 	var err error
 	if x.metricEnabled.Load() {
 		interceptor, err = otelconnect.NewInterceptor(
-			otelconnect.WithMeterProvider(x.telemetry.MeterProvider),
+			otelconnect.WithMeterProvider(x.telemetry.MeterProvider()),
 		)
 		if err != nil {
 			x.logger.Panic(fmt.Errorf("failed to initialize observability feature: %w", err))
@@ -1135,13 +1127,13 @@ func (x *actorSystem) enableRemoting(ctx context.Context) {
 		opts = append(opts, connect.WithInterceptors(interceptor))
 	}
 
-	remotingHost, remotingPort, err := tcp.GetHostPort(fmt.Sprintf("%s:%d", x.remotingHost, x.remotingPort))
+	remotingHost, remotingPort, err := tcp.GetHostPort(fmt.Sprintf("%s:%d", x.host, x.port))
 	if err != nil {
 		x.logger.Panic(fmt.Errorf("failed to resolve remoting TCP address: %w", err))
 	}
 
-	x.remotingHost = remotingHost
-	x.remotingPort = int32(remotingPort)
+	x.host = remotingHost
+	x.port = int32(remotingPort)
 
 	remotingServicePath, remotingServiceHandler := internalpbconnect.NewRemotingServiceHandler(x, opts...)
 	clusterServicePath, clusterServiceHandler := internalpbconnect.NewClusterServiceHandler(x, opts...)
@@ -1149,7 +1141,7 @@ func (x *actorSystem) enableRemoting(ctx context.Context) {
 	mux := stdhttp.NewServeMux()
 	mux.Handle(remotingServicePath, remotingServiceHandler)
 	mux.Handle(clusterServicePath, clusterServiceHandler)
-	server := http.NewServer(ctx, x.remotingHost, remotingPort, mux)
+	server := http.NewServer(ctx, x.host, remotingPort, mux)
 
 	go func() {
 		if err := server.ListenAndServe(); err != nil {
@@ -1186,10 +1178,10 @@ func (x *actorSystem) janitor() {
 			case <-ticker.C:
 				for _, actor := range x.Actors() {
 					if !actor.IsRunning() {
-						x.logger.Infof("removing actor=%s from system", actor.ActorPath().Name())
-						x.actors.delete(actor.ActorPath())
+						x.logger.Infof("removing actor=%s from system", actor.Address().Name())
+						x.actors.delete(actor.Address())
 						if x.InCluster() {
-							if err := x.cluster.RemoveActor(context.Background(), actor.ActorPath().Name()); err != nil {
+							if err := x.cluster.RemoveActor(context.Background(), actor.Address().Name()); err != nil {
 								x.logger.Error(err.Error())
 								// TODO: stop or continue
 							}
@@ -1210,7 +1202,7 @@ func (x *actorSystem) janitor() {
 
 // registerMetrics register the PID metrics with OTel instrumentation.
 func (x *actorSystem) registerMetrics() error {
-	meter := x.telemetry.Meter
+	meter := x.telemetry.Meter()
 	metrics, err := metric.NewActorSystemMetric(meter)
 	if err != nil {
 		return err
@@ -1229,7 +1221,7 @@ func (x *actorSystem) replicationLoop() {
 	for actor := range x.actorsChan {
 		// never replicate system actors because there are specific to the
 		// running node
-		if isSystemName(actor.GetActorName()) {
+		if isSystemName(actor.GetActorAddress().GetName()) {
 			continue
 		}
 		if x.InCluster() {
@@ -1367,9 +1359,9 @@ func (x *actorSystem) processPeerState(ctx context.Context, peer *cluster.Peer) 
 // configPID constructs a PID provided the actor name and the actor kind
 // this is a utility function used when spawning actors
 func (x *actorSystem) configPID(ctx context.Context, name string, actor Actor) (*PID, error) {
-	actorPath := NewPath(name, NewAddress(x.name, "", -1))
-	if x.remotingEnabled.Load() {
-		actorPath = NewPath(name, NewAddress(x.name, x.remotingHost, int(x.remotingPort)))
+	addr := x.actorAddress(name)
+	if err := addr.Validate(); err != nil {
+		return nil, err
 	}
 
 	// define the pid options
@@ -1402,7 +1394,7 @@ func (x *actorSystem) configPID(ctx context.Context, name string, actor Actor) (
 	}
 
 	pid, err := newPID(ctx,
-		actorPath,
+		addr,
 		actor,
 		pidOpts...)
 
@@ -1418,8 +1410,8 @@ func (x *actorSystem) getSystemActorName(nameType nameType) string {
 		return fmt.Sprintf("%s%s%s-%d-%d",
 			systemNames[nameType],
 			strings.ToTitle(x.name),
-			x.remotingHost,
-			x.remotingPort,
+			x.host,
+			x.port,
 			time.Now().UnixNano())
 	}
 	return fmt.Sprintf("%s%s-%d",
@@ -1432,7 +1424,7 @@ func isSystemName(name string) bool {
 	return strings.HasPrefix(name, systemNamePrefix)
 }
 
-// actorPath returns the actor path provided the actor name
-func (x *actorSystem) actorPath(name string) *Path {
-	return NewPath(name, NewAddress(x.name, x.remotingHost, int(x.remotingPort)))
+// actorAddress returns the actor path provided the actor name
+func (x *actorSystem) actorAddress(name string) *address.Address {
+	return address.New(name, x.name, x.host, int(x.port))
 }

@@ -31,7 +31,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/travisjeffery/go-dynaport"
 
+	"github.com/tochemey/goakt/v2/address"
 	"github.com/tochemey/goakt/v2/log"
 	"github.com/tochemey/goakt/v2/test/data/testpb"
 )
@@ -46,9 +48,11 @@ func TestStash(t *testing.T) {
 			withStash(),
 		}
 
+		ports := dynaport.Get(1)
+
 		// create the actor path
 		actor := &stasher{}
-		actorPath := NewPath("stasher", NewAddress("sys", "host", 1))
+		actorPath := address.New("stasher", "sys", "host", ports[0])
 		pid, err := newPID(ctx, actorPath, actor, opts...)
 		require.NoError(t, err)
 		require.NotNil(t, pid)
@@ -113,9 +117,10 @@ func TestStash(t *testing.T) {
 			withCustomLogger(log.DiscardLogger),
 		}
 
+		ports := dynaport.Get(1)
 		// create the actor path
 		actor := &stasher{}
-		actorPath := NewPath("stasher", NewAddress("sys", "host", 1))
+		actorPath := address.New("stasher", "sys", "host", ports[0])
 		pid, err := newPID(ctx, actorPath, actor, opts...)
 		require.NoError(t, err)
 		require.NotNil(t, pid)
@@ -137,10 +142,10 @@ func TestStash(t *testing.T) {
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
 		}
-
+		ports := dynaport.Get(1)
 		// create the actor path
 		actor := &stasher{}
-		actorPath := NewPath("stasher", NewAddress("sys", "host", 1))
+		actorPath := address.New("stasher", "sys", "host", ports[0])
 		pid, err := newPID(ctx, actorPath, actor, opts...)
 		require.NoError(t, err)
 		require.NotNil(t, pid)

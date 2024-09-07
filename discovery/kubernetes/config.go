@@ -34,8 +34,8 @@ type Config struct {
 	Namespace string
 	// ApplicationName specifies the application name
 	ApplicationName string
-	// GossipPortName specifies the gossip port name
-	GossipPortName string
+	// DiscoveryPortName specifies the gossip port name
+	DiscoveryPortName string
 	// RemotingPortName specifies the remoting port name
 	RemotingPortName string
 	// PeersPortName specifies the cluster port name
@@ -49,7 +49,7 @@ func (x Config) Validate() error {
 	return validation.New(validation.FailFast()).
 		AddValidator(validation.NewEmptyStringValidator("Namespace", x.Namespace)).
 		AddValidator(validation.NewEmptyStringValidator("ApplicationName", x.ApplicationName)).
-		AddValidator(validation.NewEmptyStringValidator("GossipPortName", x.GossipPortName)).
+		AddValidator(validation.NewEmptyStringValidator("DiscoveryPortName", x.DiscoveryPortName)).
 		AddValidator(validation.NewEmptyStringValidator("PeersPortName", x.PeersPortName)).
 		AddValidator(validation.NewEmptyStringValidator("RemotingPortName", x.RemotingPortName)).
 		AddValidator(validation.NewEmptyStringValidator("ActorSystemName", x.ActorSystemName)).

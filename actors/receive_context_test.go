@@ -35,6 +35,7 @@ import (
 	"github.com/travisjeffery/go-dynaport"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/tochemey/goakt/v2/address"
 	"github.com/tochemey/goakt/v2/goaktpb"
 	"github.com/tochemey/goakt/v2/internal/eventstream"
 	"github.com/tochemey/goakt/v2/log"
@@ -53,7 +54,10 @@ func TestReceiveContext(t *testing.T) {
 
 		// create the actor path
 		actor := &userActor{}
-		actorPath := NewPath("User", NewAddress("sys", "host", 1))
+		ports := dynaport.Get(1)
+		// create the actor path
+		actorPath := address.New("User", "sys", "host", ports[0])
+
 		pid, err := newPID(ctx, actorPath, actor, opts...)
 		require.NoError(t, err)
 		require.NotNil(t, pid)
@@ -109,9 +113,11 @@ func TestReceiveContext(t *testing.T) {
 			withCustomLogger(log.DiscardLogger),
 		}
 
+		ports := dynaport.Get(1)
+
 		// create actor1
 		actor1 := &exchanger{}
-		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
+		actorPath1 := address.New("Exchange1", "sys", "host", ports[0])
 		pid1, err := newPID(ctx, actorPath1, actor1, opts...)
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
@@ -126,7 +132,7 @@ func TestReceiveContext(t *testing.T) {
 
 		// create actor2
 		actor2 := &exchanger{}
-		actorPath2 := NewPath("Exchange2", NewAddress("sys", "host", 1))
+		actorPath2 := address.New("Exchange2", "sys", "host", ports[0])
 		pid2, err := newPID(ctx, actorPath2, actor2, opts...)
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
@@ -145,10 +151,10 @@ func TestReceiveContext(t *testing.T) {
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
 		}
-
+		ports := dynaport.Get(1)
 		// create actor1
 		actor1 := &exchanger{}
-		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
+		actorPath1 := address.New("Exchange1", "sys", "host", ports[0])
 		pid1, err := newPID(ctx, actorPath1, actor1, opts...)
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
@@ -163,7 +169,7 @@ func TestReceiveContext(t *testing.T) {
 
 		// create actor2
 		actor2 := &exchanger{}
-		actorPath2 := NewPath("Exchange2", NewAddress("sys", "host", 1))
+		actorPath2 := address.New("Exchange2", "sys", "host", ports[0])
 		pid2, err := newPID(ctx, actorPath2, actor2, opts...)
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
@@ -184,10 +190,10 @@ func TestReceiveContext(t *testing.T) {
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
 		}
-
+		ports := dynaport.Get(1)
 		// create actor1
 		actor1 := &exchanger{}
-		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
+		actorPath1 := address.New("Exchange1", "sys", "host", ports[0])
 		pid1, err := newPID(ctx, actorPath1, actor1, opts...)
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
@@ -202,7 +208,7 @@ func TestReceiveContext(t *testing.T) {
 
 		// create actor2
 		actor2 := &exchanger{}
-		actorPath2 := NewPath("Exchange2", NewAddress("sys", "host", 1))
+		actorPath2 := address.New("Exchange2", "sys", "host", ports[0])
 		pid2, err := newPID(ctx, actorPath2, actor2, opts...)
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
@@ -223,10 +229,10 @@ func TestReceiveContext(t *testing.T) {
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
 		}
-
+		ports := dynaport.Get(1)
 		// create actor1
 		actor1 := &exchanger{}
-		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
+		actorPath1 := address.New("Exchange1", "sys", "host", ports[0])
 		pid1, err := newPID(ctx, actorPath1, actor1, opts...)
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
@@ -241,7 +247,7 @@ func TestReceiveContext(t *testing.T) {
 
 		// create actor2
 		actor2 := &exchanger{}
-		actorPath2 := NewPath("Exchange2", NewAddress("sys", "host", 1))
+		actorPath2 := address.New("Exchange2", "sys", "host", ports[0])
 		pid2, err := newPID(ctx, actorPath2, actor2, opts...)
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
@@ -287,7 +293,8 @@ func TestReceiveContext(t *testing.T) {
 
 		// create actor1
 		actor1 := &exchanger{}
-		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
+		ports := dynaport.Get(1)
+		actorPath1 := address.New("Exchange1", "sys", "host", ports[0])
 		pid1, err := newPID(ctx,
 			actorPath1,
 			actor1,
@@ -307,7 +314,7 @@ func TestReceiveContext(t *testing.T) {
 		// get the address of the exchanger actor one
 		addr1 := context.RemoteLookup(host, remotingPort, actorName2)
 		// send the message to t exchanger actor one using remote messaging
-		reply := context.RemoteAsk(addr1, new(testpb.TestReply))
+		reply := context.RemoteAsk(address.From(addr1), new(testpb.TestReply))
 		// perform some assertions
 		require.NotNil(t, reply)
 		require.True(t, reply.MessageIs(new(testpb.Reply)))
@@ -347,7 +354,8 @@ func TestReceiveContext(t *testing.T) {
 
 		// create actor1
 		actor1 := &exchanger{}
-		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
+		ports := dynaport.Get(1)
+		actorPath1 := address.New("Exchange1", "sys", "host", ports[0])
 		pid1, err := newPID(ctx,
 			actorPath1,
 			actor1,
@@ -365,12 +373,12 @@ func TestReceiveContext(t *testing.T) {
 			self:    pid1,
 		}
 
-		context.RemoteAsk(&goaktpb.Address{
+		context.RemoteAsk(address.From(&goaktpb.Address{
 			Host: "127.0.0.1",
 			Port: int32(remotingPort),
 			Name: actorName2,
 			Id:   "",
-		}, new(testpb.TestReply))
+		}), new(testpb.TestReply))
 		require.Error(t, context.getError())
 		pause(time.Second)
 
@@ -411,7 +419,8 @@ func TestReceiveContext(t *testing.T) {
 
 		// create actor1
 		actor1 := &exchanger{}
-		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
+		ports := dynaport.Get(1)
+		actorPath1 := address.New("Exchange1", "sys", "host", ports[0])
 		pid1, err := newPID(ctx,
 			actorPath1,
 			actor1,
@@ -432,7 +441,7 @@ func TestReceiveContext(t *testing.T) {
 		// get the address of the exchanger actor one
 		addr1 := context.RemoteLookup(host, remotingPort, actorName2)
 		// send the message to t exchanger actor one using remote messaging
-		context.RemoteTell(addr1, new(testpb.TestRemoteSend))
+		context.RemoteTell(address.From(addr1), new(testpb.TestRemoteSend))
 		require.NoError(t, context.getError())
 		pause(time.Second)
 
@@ -469,7 +478,8 @@ func TestReceiveContext(t *testing.T) {
 
 		// create actor1
 		actor1 := &exchanger{}
-		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
+		ports := dynaport.Get(1)
+		actorPath1 := address.New("Exchange1", "sys", "host", ports[0])
 		pid1, err := newPID(ctx,
 			actorPath1,
 			actor1,
@@ -488,12 +498,12 @@ func TestReceiveContext(t *testing.T) {
 		}
 
 		// send the message to the exchanger actor one using remote messaging
-		context.RemoteTell(&goaktpb.Address{
+		context.RemoteTell(address.From(&goaktpb.Address{
 			Host: "127.0.0.1",
 			Port: int32(remotingPort),
 			Name: actorName2,
 			Id:   "",
-		}, new(testpb.TestRemoteSend))
+		}), new(testpb.TestRemoteSend))
 		require.Error(t, context.getError())
 		pause(time.Second)
 
@@ -530,7 +540,8 @@ func TestReceiveContext(t *testing.T) {
 
 		// create actor1
 		actor1 := &exchanger{}
-		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
+		ports := dynaport.Get(1)
+		actorPath1 := address.New("Exchange1", "sys", "host", ports[0])
 		pid1, err := newPID(ctx,
 			actorPath1,
 			actor1,
@@ -584,7 +595,8 @@ func TestReceiveContext(t *testing.T) {
 
 		// create actor1
 		actor1 := &exchanger{}
-		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
+		ports := dynaport.Get(1)
+		actorPath1 := address.New("Exchange1", "sys", "host", ports[0])
 		pid1, err := newPID(ctx,
 			actorPath1,
 			actor1,
@@ -620,7 +632,8 @@ func TestReceiveContext(t *testing.T) {
 
 		// create actor1
 		actor1 := &exchanger{}
-		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
+		ports := dynaport.Get(1)
+		actorPath1 := address.New("Exchange1", "sys", "host", ports[0])
 		pid1, err := newPID(ctx, actorPath1, actor1, opts...)
 
 		require.NoError(t, err)
@@ -639,7 +652,8 @@ func TestReceiveContext(t *testing.T) {
 	})
 	t.Run("With successful SpawnChild", func(t *testing.T) {
 		ctx := context.TODO()
-		actorPath := NewPath("Parent", NewAddress("sys", "host", 1))
+		ports := dynaport.Get(1)
+		actorPath := address.New("Parent", "sys", "host", ports[0])
 
 		// create the parent actor
 		parent, err := newPID(ctx, actorPath,
@@ -667,7 +681,7 @@ func TestReceiveContext(t *testing.T) {
 
 		actual := receiveCtx.Child(name)
 		require.NotNil(t, actual)
-		assert.Equal(t, child.ActorPath().String(), actual.ActorPath().String())
+		assert.Equal(t, child.Address().String(), actual.Address().String())
 
 		t.Cleanup(func() {
 			receiveCtx.Shutdown()
@@ -675,7 +689,8 @@ func TestReceiveContext(t *testing.T) {
 	})
 	t.Run("With failed SpawnChild", func(t *testing.T) {
 		ctx := context.TODO()
-		actorPath := NewPath("Parent", NewAddress("sys", "host", 1))
+		ports := dynaport.Get(1)
+		actorPath := address.New("Parent", "sys", "host", ports[0])
 
 		// create the parent actor
 		parent, err := newPID(ctx, actorPath,
@@ -704,7 +719,8 @@ func TestReceiveContext(t *testing.T) {
 	})
 	t.Run("With not found Child", func(t *testing.T) {
 		ctx := context.TODO()
-		actorPath := NewPath("Parent", NewAddress("sys", "host", 1))
+		ports := dynaport.Get(1)
+		actorPath := address.New("Parent", "sys", "host", ports[0])
 
 		// create the parent actor
 		parent, err := newPID(ctx, actorPath,
@@ -741,7 +757,8 @@ func TestReceiveContext(t *testing.T) {
 	})
 	t.Run("With dead parent Child", func(t *testing.T) {
 		ctx := context.TODO()
-		actorPath := NewPath("Parent", NewAddress("sys", "host", 1))
+		ports := dynaport.Get(1)
+		actorPath := address.New("Parent", "sys", "host", ports[0])
 
 		// create the parent actor
 		parent, err := newPID(ctx, actorPath,
@@ -778,7 +795,8 @@ func TestReceiveContext(t *testing.T) {
 	})
 	t.Run("With successful Stop", func(t *testing.T) {
 		ctx := context.TODO()
-		actorPath := NewPath("Parent", NewAddress("sys", "host", 1))
+		ports := dynaport.Get(1)
+		actorPath := address.New("Parent", "sys", "host", ports[0])
 
 		// create the parent actor
 		parent, err := newPID(ctx, actorPath,
@@ -815,7 +833,8 @@ func TestReceiveContext(t *testing.T) {
 	})
 	t.Run("With child actor Stop freeing up parent link", func(t *testing.T) {
 		ctx := context.TODO()
-		actorPath := NewPath("Parent", NewAddress("sys", "host", 1))
+		ports := dynaport.Get(1)
+		actorPath := address.New("Parent", "sys", "host", ports[0])
 
 		// create the parent actor
 		parent, err := newPID(ctx, actorPath,
@@ -856,7 +875,8 @@ func TestReceiveContext(t *testing.T) {
 	})
 	t.Run("With failed Stop: child not defined", func(t *testing.T) {
 		ctx := context.TODO()
-		actorPath := NewPath("Parent", NewAddress("sys", "host", 1))
+		ports := dynaport.Get(1)
+		actorPath := address.New("Parent", "sys", "host", ports[0])
 
 		// create the parent actor
 		parent, err := newPID(ctx, actorPath,
@@ -886,7 +906,9 @@ func TestReceiveContext(t *testing.T) {
 	})
 	t.Run("With failed Stop: parent is dead", func(t *testing.T) {
 		ctx := context.TODO()
-		actorPath := NewPath("Parent", NewAddress("sys", "host", 1))
+		ports := dynaport.Get(1)
+		// create the actor path
+		actorPath := address.New("Test", "sys", "host", ports[0])
 
 		// create the parent actor
 		parent, err := newPID(ctx, actorPath,
@@ -923,7 +945,8 @@ func TestReceiveContext(t *testing.T) {
 	})
 	t.Run("With failed Stop: actor not found", func(t *testing.T) {
 		ctx := context.TODO()
-		actorPath := NewPath("parent", NewAddress("sys", "host", 1))
+		ports := dynaport.Get(1)
+		actorPath := address.New("Parent", "sys", "host", ports[0])
 
 		// create the parent actor
 		parent, err := newPID(ctx, actorPath,
@@ -944,7 +967,7 @@ func TestReceiveContext(t *testing.T) {
 		}
 
 		// create the child actor
-		childPath := NewPath("child", NewAddress("sys", "host", 1))
+		childPath := address.New("child", "sys", "host", ports[0])
 		child, err := newPID(ctx, childPath,
 			newTestSupervisor(),
 			withInitMaxRetries(1),
@@ -963,7 +986,8 @@ func TestReceiveContext(t *testing.T) {
 	})
 	t.Run("With Stop when child is already stopped", func(t *testing.T) {
 		ctx := context.TODO()
-		actorPath := NewPath("Parent", NewAddress("sys", "host", 1))
+		ports := dynaport.Get(1)
+		actorPath := address.New("Parent", "sys", "host", ports[0])
 
 		// create the parent actor
 		parent, err := newPID(ctx, actorPath,
@@ -1008,9 +1032,11 @@ func TestReceiveContext(t *testing.T) {
 			withCustomLogger(log.DiscardLogger),
 		}
 
+		ports := dynaport.Get(1)
+
 		// create actor1
 		actor1 := &testPostStop{}
-		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
+		actorPath1 := address.New("Exchange1", "sys", "host", ports[0])
 		pid1, err := newPID(ctx, actorPath1, actor1, opts...)
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
@@ -1034,16 +1060,18 @@ func TestReceiveContext(t *testing.T) {
 			withCustomLogger(log.DiscardLogger),
 		}
 
+		ports := dynaport.Get(1)
+
 		// create actorA
 		actorA := &exchanger{}
-		actorPath1 := NewPath("actorA", NewAddress("sys", "host", 1))
+		actorPath1 := address.New("actorA", "sys", "host", ports[0])
 		pidA, err := newPID(ctx, actorPath1, actorA, opts...)
 		require.NoError(t, err)
 		require.NotNil(t, pidA)
 
 		// create actorC
 		actorC := &exchanger{}
-		actorPath3 := NewPath("actorC", NewAddress("sys", "host", 1))
+		actorPath3 := address.New("actorC", "sys", "host", ports[0])
 		pidC, err := newPID(ctx, actorPath3, actorC, opts...)
 		require.NoError(t, err)
 		require.NotNil(t, pidC)
@@ -1052,7 +1080,7 @@ func TestReceiveContext(t *testing.T) {
 		actorB := &forwarder{
 			actorRef: pidC,
 		}
-		actorPath2 := NewPath("actorB", NewAddress("sys", "host", 1))
+		actorPath2 := address.New("actorB", "sys", "host", ports[0])
 		pidB, err := newPID(ctx, actorPath2, actorB, opts...)
 		require.NoError(t, err)
 		require.NotNil(t, pidB)
@@ -1089,9 +1117,11 @@ func TestReceiveContext(t *testing.T) {
 			withEventsStream(eventsStream),
 		}
 
+		ports := dynaport.Get(1)
+
 		// create actor1
 		actor1 := &exchanger{}
-		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
+		actorPath1 := address.New("Exchange1", "sys", "host", ports[0])
 		pid1, err := newPID(ctx, actorPath1, actor1, opts...)
 
 		require.NoError(t, err)
@@ -1155,16 +1185,18 @@ func TestReceiveContext(t *testing.T) {
 			withEventsStream(eventsStream),
 		}
 
+		ports := dynaport.Get(1)
+
 		// create actor1
 		actor1 := &exchanger{}
-		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
+		actorPath1 := address.New("Exchange1", "sys", "host", ports[0])
 		pid1, err := newPID(ctx, actorPath1, actor1, opts...)
 
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
 
 		actor2 := &exchanger{}
-		actorPath2 := NewPath("Exchange1", NewAddress("sys", "host", 1))
+		actorPath2 := address.New("Exchange2", "sys", "host", ports[0])
 		pid2, err := newPID(ctx, actorPath2, actor2, opts...)
 
 		send := new(testpb.TestSend)
@@ -1198,7 +1230,7 @@ func TestReceiveContext(t *testing.T) {
 		require.NoError(t, msg.UnmarshalTo(actual))
 		require.True(t, proto.Equal(send, actual))
 		require.Equal(t, deadletter.GetReason(), ErrUnhandled.Error())
-		assert.True(t, proto.Equal(deadletter.GetSender(), actorPath2.RemoteAddress()))
+		assert.True(t, proto.Equal(deadletter.GetSender(), actorPath2.Address))
 
 		assert.EqualValues(t, 1, len(consumer.Topics()))
 
@@ -1225,9 +1257,11 @@ func TestReceiveContext(t *testing.T) {
 			withEventsStream(eventsStream),
 		}
 
+		ports := dynaport.Get(1)
+
 		// create actor1
 		actor1 := &exchanger{}
-		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
+		actorPath1 := address.New("Exchange1", "sys", "host", ports[0])
 		pid1, err := newPID(ctx, actorPath1, actor1, opts...)
 
 		require.NoError(t, err)
@@ -1275,9 +1309,11 @@ func TestReceiveContext(t *testing.T) {
 			withCustomLogger(log.DiscardLogger),
 		}
 
+		ports := dynaport.Get(1)
+
 		// create actor1
 		actor1 := &exchanger{}
-		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
+		actorPath1 := address.New("Exchange1", "sys", "host", ports[0])
 		pid1, err := newPID(ctx, actorPath1, actor1, opts...)
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
@@ -1292,7 +1328,7 @@ func TestReceiveContext(t *testing.T) {
 
 		// create actor2
 		actor2 := &exchanger{}
-		actorPath2 := NewPath("Exchange2", NewAddress("sys", "host", 1))
+		actorPath2 := address.New("Exchange2", "sys", "host", ports[0])
 		pid2, err := newPID(ctx, actorPath2, actor2, opts...)
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
@@ -1312,9 +1348,11 @@ func TestReceiveContext(t *testing.T) {
 			withCustomLogger(log.DiscardLogger),
 		}
 
+		ports := dynaport.Get(1)
+
 		// create actor1
 		actor1 := &exchanger{}
-		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
+		actorPath1 := address.New("Exchange1", "sys", "host", ports[0])
 		pid1, err := newPID(ctx, actorPath1, actor1, opts...)
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
@@ -1329,7 +1367,7 @@ func TestReceiveContext(t *testing.T) {
 
 		// create actor2
 		actor2 := &exchanger{}
-		actorPath2 := NewPath("Exchange2", NewAddress("sys", "host", 1))
+		actorPath2 := address.New("Exchange2", "sys", "host", ports[0])
 		pid2, err := newPID(ctx, actorPath2, actor2, opts...)
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
@@ -1349,9 +1387,11 @@ func TestReceiveContext(t *testing.T) {
 			withCustomLogger(log.DiscardLogger),
 		}
 
+		ports := dynaport.Get(1)
+
 		// create actor1
 		actor1 := &exchanger{}
-		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
+		actorPath1 := address.New("Exchange1", "sys", "host", ports[0])
 		pid1, err := newPID(ctx, actorPath1, actor1, opts...)
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
@@ -1366,7 +1406,7 @@ func TestReceiveContext(t *testing.T) {
 
 		// create actor2
 		actor2 := &exchanger{}
-		actorPath2 := NewPath("Exchange2", NewAddress("sys", "host", 1))
+		actorPath2 := address.New("Exchange2", "sys", "host", ports[0])
 		pid2, err := newPID(ctx, actorPath2, actor2, opts...)
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
@@ -1389,9 +1429,11 @@ func TestReceiveContext(t *testing.T) {
 			withCustomLogger(log.DiscardLogger),
 		}
 
+		ports := dynaport.Get(1)
+
 		// create actor1
 		actor1 := &exchanger{}
-		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
+		actorPath1 := address.New("Exchange1", "sys", "host", ports[0])
 		pid1, err := newPID(ctx, actorPath1, actor1, opts...)
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
@@ -1406,7 +1448,7 @@ func TestReceiveContext(t *testing.T) {
 
 		// create actor2
 		actor2 := &exchanger{}
-		actorPath2 := NewPath("Exchange2", NewAddress("sys", "host", 1))
+		actorPath2 := address.New("Exchange2", "sys", "host", ports[0])
 		pid2, err := newPID(ctx, actorPath2, actor2, opts...)
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
@@ -1431,9 +1473,11 @@ func TestReceiveContext(t *testing.T) {
 			withCustomLogger(log.DiscardLogger),
 		}
 
+		ports := dynaport.Get(1)
+
 		// create actor1
 		actor1 := &exchanger{}
-		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
+		actorPath1 := address.New("Exchange1", "sys", "host", ports[0])
 		pid1, err := newPID(ctx, actorPath1, actor1, opts...)
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
@@ -1448,7 +1492,7 @@ func TestReceiveContext(t *testing.T) {
 
 		// create actor2
 		actor2 := &exchanger{}
-		actorPath2 := NewPath("Exchange2", NewAddress("sys", "host", 1))
+		actorPath2 := address.New("Exchange2", "sys", "host", ports[0])
 		pid2, err := newPID(ctx, actorPath2, actor2, opts...)
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
@@ -1503,7 +1547,7 @@ func TestReceiveContext(t *testing.T) {
 		// get the address of the exchanger actor one
 		testerAddr := context.RemoteLookup(host, remotingPort, tester)
 		// send the message to t exchanger actor one using remote messaging
-		context.RemoteBatchTell(testerAddr, new(testpb.TestSend), new(testpb.TestSend), new(testpb.TestSend))
+		context.RemoteBatchTell(address.From(testerAddr), new(testpb.TestSend), new(testpb.TestSend), new(testpb.TestSend))
 		require.NoError(t, context.getError())
 		// wait for processing to complete on the actor side
 		pause(500 * time.Millisecond)
@@ -1556,7 +1600,7 @@ func TestReceiveContext(t *testing.T) {
 		// get the address of the exchanger actor one
 		testerAddr := context.RemoteLookup(host, remotingPort, tester)
 		// send the message to t exchanger actor one using remote messaging
-		replies := context.RemoteBatchAsk(testerAddr, new(testpb.TestReply), new(testpb.TestReply), new(testpb.TestReply))
+		replies := context.RemoteBatchAsk(address.From(testerAddr), new(testpb.TestReply), new(testpb.TestReply), new(testpb.TestReply))
 		require.NoError(t, context.getError())
 		require.Len(t, replies, 3)
 		pause(time.Second)
@@ -1593,8 +1637,9 @@ func TestReceiveContext(t *testing.T) {
 		actorName2 := "Exchange2"
 
 		// create actor1
+		ports := dynaport.Get(1)
 		actor1 := &exchanger{}
-		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
+		actorPath1 := address.New("Exchange1", "sys", "host", ports[0])
 		pid1, err := newPID(ctx,
 			actorPath1,
 			actor1,
@@ -1613,12 +1658,12 @@ func TestReceiveContext(t *testing.T) {
 		}
 
 		// send the message to the exchanger actor one using remote messaging
-		context.RemoteBatchTell(&goaktpb.Address{
+		context.RemoteBatchTell(address.From(&goaktpb.Address{
 			Host: "127.0.0.1",
 			Port: int32(remotingPort),
 			Name: actorName2,
 			Id:   "",
-		}, new(testpb.TestRemoteSend))
+		}), new(testpb.TestRemoteSend))
 		require.Error(t, context.getError())
 		pause(time.Second)
 
@@ -1654,8 +1699,9 @@ func TestReceiveContext(t *testing.T) {
 		actorName2 := "Exchange2"
 
 		// create actor1
+		ports := dynaport.Get(1)
 		actor1 := &exchanger{}
-		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
+		actorPath1 := address.New("Exchange1", "sys", "host", ports[0])
 		pid1, err := newPID(ctx,
 			actorPath1,
 			actor1,
@@ -1673,12 +1719,12 @@ func TestReceiveContext(t *testing.T) {
 			self:    pid1,
 		}
 
-		context.RemoteBatchAsk(&goaktpb.Address{
+		context.RemoteBatchAsk(address.From(&goaktpb.Address{
 			Host: "127.0.0.1",
 			Port: int32(remotingPort),
 			Name: actorName2,
 			Id:   "",
-		}, new(testpb.TestReply))
+		}), new(testpb.TestReply))
 		require.Error(t, context.getError())
 		pause(time.Second)
 
@@ -1714,8 +1760,9 @@ func TestReceiveContext(t *testing.T) {
 		actorName2 := "Exchange2"
 
 		// create actor1
+		ports := dynaport.Get(1)
 		actor1 := &exchanger{}
-		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
+		actorPath1 := address.New("Exchange1", "sys", "host", ports[0])
 		pid1, err := newPID(ctx,
 			actorPath1,
 			actor1,
@@ -1769,7 +1816,8 @@ func TestReceiveContext(t *testing.T) {
 
 		// create actor1
 		actor1 := &exchanger{}
-		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
+		ports := dynaport.Get(1)
+		actorPath1 := address.New("Exchange1", "sys", "host", ports[0])
 		pid1, err := newPID(ctx,
 			actorPath1,
 			actor1,
@@ -1807,16 +1855,17 @@ func TestReceiveContext(t *testing.T) {
 			withCustomLogger(log.DiscardLogger),
 		}
 
+		ports := dynaport.Get(1)
 		// create actor1
 		actor1 := &exchanger{}
-		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
+		actorPath1 := address.New("Exchange1", "sys", "host", ports[0])
 		pid1, err := newPID(ctx, actorPath1, actor1, opts...)
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
 
 		// create actor2
 		actor2 := &exchanger{}
-		actorPath2 := NewPath("Exchange2", NewAddress("sys", "host", 1))
+		actorPath2 := address.New("Exchange2", "sys", "host", ports[0])
 		pid2, err := newPID(ctx, actorPath2, actor2, opts...)
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
@@ -1870,16 +1919,18 @@ func TestReceiveContext(t *testing.T) {
 			withCustomLogger(log.DiscardLogger),
 		}
 
+		ports := dynaport.Get(1)
+
 		// create actor1
 		actor1 := &exchanger{}
-		actorPath1 := NewPath("Exchange1", NewAddress("sys", "host", 1))
+		actorPath1 := address.New("Exchange1", "sys", "host", ports[0])
 		pid1, err := newPID(ctx, actorPath1, actor1, opts...)
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
 
 		// create actor2
 		actor2 := &exchanger{}
-		actorPath2 := NewPath("Exchange2", NewAddress("sys", "host", 1))
+		actorPath2 := address.New("Exchange2", "sys", "host", ports[0])
 		pid2, err := newPID(ctx, actorPath2, actor2, opts...)
 		require.NoError(t, err)
 		require.NotNil(t, pid2)

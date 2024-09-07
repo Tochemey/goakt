@@ -85,11 +85,11 @@ func newPeer(t *testing.T, serverAddr string) *Discovery {
 	}
 
 	hostNode := discovery.Node{
-		Name:         host,
-		Host:         host,
-		GossipPort:   gossipPort,
-		PeersPort:    clusterPort,
-		RemotingPort: remotingPort,
+		Name:          host,
+		Host:          host,
+		DiscoveryPort: gossipPort,
+		PeersPort:     clusterPort,
+		RemotingPort:  remotingPort,
 	}
 
 	// create the instance of provider
@@ -129,11 +129,11 @@ func TestDiscovery(t *testing.T) {
 		}
 
 		hostNode := discovery.Node{
-			Name:         host,
-			Host:         host,
-			GossipPort:   gossipPort,
-			PeersPort:    clusterPort,
-			RemotingPort: remotingPort,
+			Name:          host,
+			Host:          host,
+			DiscoveryPort: gossipPort,
+			PeersPort:     clusterPort,
+			RemotingPort:  remotingPort,
 		}
 
 		// create the instance of provider
@@ -173,11 +173,11 @@ func TestDiscovery(t *testing.T) {
 		}
 
 		hostNode := discovery.Node{
-			Name:         host,
-			Host:         host,
-			GossipPort:   gossipPort,
-			PeersPort:    clusterPort,
-			RemotingPort: remotingPort,
+			Name:          host,
+			Host:          host,
+			DiscoveryPort: gossipPort,
+			PeersPort:     clusterPort,
+			RemotingPort:  remotingPort,
 		}
 		// create the instance of provider
 		provider := NewDiscovery(config, &hostNode)
@@ -212,11 +212,11 @@ func TestDiscovery(t *testing.T) {
 		}
 
 		hostNode := discovery.Node{
-			Name:         host,
-			Host:         host,
-			GossipPort:   gossipPort,
-			PeersPort:    clusterPort,
-			RemotingPort: remotingPort,
+			Name:          host,
+			Host:          host,
+			DiscoveryPort: gossipPort,
+			PeersPort:     clusterPort,
+			RemotingPort:  remotingPort,
 		}
 
 		// create the instance of provider
@@ -257,11 +257,11 @@ func TestDiscovery(t *testing.T) {
 		}
 
 		hostNode := discovery.Node{
-			Name:         host,
-			Host:         host,
-			GossipPort:   gossipPort,
-			PeersPort:    clusterPort,
-			RemotingPort: remotingPort,
+			Name:          host,
+			Host:          host,
+			DiscoveryPort: gossipPort,
+			PeersPort:     clusterPort,
+			RemotingPort:  remotingPort,
 		}
 
 		// create the instance of provider
@@ -297,11 +297,11 @@ func TestDiscovery(t *testing.T) {
 		}
 
 		hostNode := discovery.Node{
-			Name:         host,
-			Host:         host,
-			GossipPort:   gossipPort,
-			PeersPort:    clusterPort,
-			RemotingPort: remotingPort,
+			Name:          host,
+			Host:          host,
+			DiscoveryPort: gossipPort,
+			PeersPort:     clusterPort,
+			RemotingPort:  remotingPort,
 		}
 
 		// create the instance of provider
@@ -339,11 +339,11 @@ func TestDiscovery(t *testing.T) {
 		}
 
 		hostNode := discovery.Node{
-			Name:         host,
-			Host:         host,
-			GossipPort:   gossipPort,
-			PeersPort:    clusterPort,
-			RemotingPort: remotingPort,
+			Name:          host,
+			Host:          host,
+			DiscoveryPort: gossipPort,
+			PeersPort:     clusterPort,
+			RemotingPort:  remotingPort,
 		}
 
 		// create the instance of provider
@@ -382,7 +382,7 @@ func TestDiscovery(t *testing.T) {
 		require.NoError(t, err)
 		require.NotEmpty(t, peers)
 		require.Len(t, peers, 1)
-		discoveredNodeAddr := client2.hostNode.GossipAddress()
+		discoveredNodeAddr := client2.hostNode.DiscoveryAddress()
 		require.Equal(t, peers[0], discoveredNodeAddr)
 
 		// discover more peers from client 2
@@ -390,7 +390,7 @@ func TestDiscovery(t *testing.T) {
 		require.NoError(t, err)
 		require.NotEmpty(t, peers)
 		require.Len(t, peers, 1)
-		discoveredNodeAddr = client1.hostNode.GossipAddress()
+		discoveredNodeAddr = client1.hostNode.DiscoveryAddress()
 		require.Equal(t, peers[0], discoveredNodeAddr)
 
 		// de-register client 2 but it can see client1
@@ -398,7 +398,7 @@ func TestDiscovery(t *testing.T) {
 		peers, err = client2.DiscoverPeers()
 		require.NoError(t, err)
 		require.NotEmpty(t, peers)
-		discoveredNodeAddr = client1.hostNode.GossipAddress()
+		discoveredNodeAddr = client1.hostNode.DiscoveryAddress()
 		require.Equal(t, peers[0], discoveredNodeAddr)
 
 		// client-1 cannot see the deregistered client
@@ -440,11 +440,11 @@ func TestDiscovery(t *testing.T) {
 		}
 
 		hostNode := discovery.Node{
-			Name:         host,
-			Host:         host,
-			GossipPort:   gossipPort,
-			PeersPort:    clusterPort,
-			RemotingPort: remotingPort,
+			Name:          host,
+			Host:          host,
+			DiscoveryPort: gossipPort,
+			PeersPort:     clusterPort,
+			RemotingPort:  remotingPort,
 		}
 
 		provider := NewDiscovery(config, &hostNode)
