@@ -88,7 +88,7 @@ go get github.com/tochemey/goakt/v2
 
 ## Versioning
 
-The version system adopt in Go-Akt deviates a bit from the standard semantic versioning system.
+The version system adopted in Go-Akt deviates a bit from the standard semantic versioning system.
 The version format is as follows:
 
 - The `MAJOR` part of the version will stay at `v2` for the meantime.
@@ -514,19 +514,23 @@ A working example can be found [here](https://github.com/Tochemey/goakt-examples
 
 #### mDNS Discovery Provider Setup
 
-- `Service Name`: the service name
-- `Domain`: The mDNS discovery domain
-- `Port`: The mDNS discovery port
-- `IPv6`: States whether to lookup for IPv6 addresses.
+- `ServiceName`: the service name
+- `Service`: the service type
+- `Domain`: the mDNS discovery domain
+- `Port`: the mDNS discovery port
+- `IPv6`: it states whether to lookup for IPv6 addresses.
 
 #### NATS Discovery Provider Setup
 
 To use the NATS discovery provider one needs to provide the following:
 
-- `NATS Server Address`: the NATS Server address
-- `NATS Subject`: the NATS subject to use
-- `Actor System Name`: the actor system name
-- `Application Name`: the application name
+- `NatsServer`: the NATS Server address
+- `NatsSubject`: the NATS subject to use
+- `ActorSystemName`: the actor system name
+- `ApplicationName`: the application name
+- `Timeout`: the nodes discovery timeout
+- `MaxJoinAttempts`: the maximum number of attempts to connect an existing NATs server. Defaults to `5`
+- `ReconnectWait`: the time to backoff after attempting a reconnect to a server that we were already connected to previously. Default to `2 seconds`
 
 ```go
 package main
@@ -564,8 +568,8 @@ using docker.
 
 To use the DNS discovery provider one needs to provide the following:
 
-- `Domain Name`: the domain name
-- `IPv6`: States whether to lookup for IPv6 addresses.
+- `DomainName`: the domain name
+- `IPv6`: it states whether to lookup for IPv6 addresses.
 
 ```go
 package main
