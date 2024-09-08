@@ -117,8 +117,8 @@ The fundamental building blocks of Go-Akt are actors.
   - has a process id [`PID`](./actors/pid.go). Via the process id any allowable action can be executed by the
     actor.
   - has a lifecycle via the following methods: [`PreStart`](./actors/actor.go), [`PostStop`](./actors/actor.go). 
-    `PreStart` hook is used to initialise actor state. It is like the actor constructor.
-    `PostStop` hook is used to clean up resources used by the Actor. It is like the actor destructor.
+      - `PreStart` hook is used to initialise actor state. It is like the actor constructor.
+      - `PostStop` hook is used to clean up resources used by the Actor. It is like the actor destructor.
     It means it can live and die like any other process.
   - handles and responds to messages via the method [`Receive`](./actors/actor.go). While handling messages it
     can:
