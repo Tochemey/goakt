@@ -29,9 +29,6 @@ import (
 )
 
 const (
-	// protocol defines the Go-Akt addressing protocol
-	protocol = "goakt"
-
 	// DefaultPassivationTimeout defines the default passivation timeout
 	DefaultPassivationTimeout = 2 * time.Minute
 	// DefaultAskTimeout defines the default Ask timeout

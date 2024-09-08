@@ -122,7 +122,7 @@ func (x *funcActor) Receive(ctx *ReceiveContext) {
 
 // PostStop is executed when the actor is shutting down.
 func (x *funcActor) PostStop(ctx context.Context) error {
-	// check whether the pre-start hook is set and call it
+	// check whether the post-stop hook is set and call it
 	postStop := x.postStop
 	if postStop != nil {
 		return postStop(ctx)
