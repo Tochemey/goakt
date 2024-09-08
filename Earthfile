@@ -17,9 +17,6 @@ RUN export PATH="$PATH:$(go env GOPATH)/bin"
 # install buf from source
 RUN GO111MODULE=on GOBIN=/usr/local/bin go install github.com/bufbuild/buf/cmd/buf@v1.36.0
 
-# install oapi to generate swagger
-RUN go install github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@latest
-
 # install the various tools to generate connect-go
 RUN go install github.com/fullstorydev/grpcurl/cmd/grpcurl@latest
 RUN go install connectrpc.com/connect/cmd/protoc-gen-connect-go@latest
