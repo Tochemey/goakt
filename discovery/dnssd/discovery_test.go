@@ -195,7 +195,6 @@ func TestDiscovery(t *testing.T) {
 		assert.NoError(t, provider.Deregister())
 		assert.NoError(t, provider.Close())
 	})
-
 }
 
 func validateAddrs(addrs []string) error {
