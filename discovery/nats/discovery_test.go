@@ -93,7 +93,7 @@ func newPeer(t *testing.T, serverAddr string) *Discovery {
 	}
 
 	// create the instance of provider
-	provider := NewDiscovery(config, &hostNode)
+	provider := NewDiscovery(config, &hostNode, WithLogger(log.DiscardLogger))
 
 	// initialize
 	err := provider.Initialize()
@@ -137,7 +137,7 @@ func TestDiscovery(t *testing.T) {
 		}
 
 		// create the instance of provider
-		provider := NewDiscovery(config, &hostNode)
+		provider := NewDiscovery(config, &hostNode, WithLogger(log.DiscardLogger))
 		require.NotNil(t, provider)
 		// assert that provider implements the Discovery interface
 		// this is a cheap test
@@ -180,7 +180,7 @@ func TestDiscovery(t *testing.T) {
 			RemotingPort:  remotingPort,
 		}
 		// create the instance of provider
-		provider := NewDiscovery(config, &hostNode)
+		provider := NewDiscovery(config, &hostNode, WithLogger(log.DiscardLogger))
 		require.NotNil(t, provider)
 		assert.Equal(t, "nats", provider.ID())
 	})
@@ -265,7 +265,7 @@ func TestDiscovery(t *testing.T) {
 		}
 
 		// create the instance of provider
-		provider := NewDiscovery(config, &hostNode)
+		provider := NewDiscovery(config, &hostNode, WithLogger(log.DiscardLogger))
 		provider.initialized = atomic.NewBool(true)
 		assert.Error(t, provider.Initialize())
 	})
@@ -305,7 +305,7 @@ func TestDiscovery(t *testing.T) {
 		}
 
 		// create the instance of provider
-		provider := NewDiscovery(config, &hostNode)
+		provider := NewDiscovery(config, &hostNode, WithLogger(log.DiscardLogger))
 		provider.registered = atomic.NewBool(true)
 		err := provider.Register()
 		assert.Error(t, err)
@@ -347,7 +347,7 @@ func TestDiscovery(t *testing.T) {
 		}
 
 		// create the instance of provider
-		provider := NewDiscovery(config, &hostNode)
+		provider := NewDiscovery(config, &hostNode, WithLogger(log.DiscardLogger))
 		err := provider.Deregister()
 		assert.Error(t, err)
 		assert.EqualError(t, err, discovery.ErrNotRegistered.Error())
@@ -447,7 +447,7 @@ func TestDiscovery(t *testing.T) {
 			RemotingPort:  remotingPort,
 		}
 
-		provider := NewDiscovery(config, &hostNode)
+		provider := NewDiscovery(config, &hostNode, WithLogger(log.DiscardLogger))
 		peers, err := provider.DiscoverPeers()
 		assert.Error(t, err)
 		assert.Empty(t, peers)

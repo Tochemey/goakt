@@ -31,7 +31,7 @@ import (
 )
 
 const (
-	instrumentationName = "github.com/Tochemey/goakt"
+	instrumentationName = "github.com/Tochemey/goakt/v2"
 )
 
 // Telemetry encapsulates some settings for an actor

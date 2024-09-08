@@ -28,7 +28,6 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"os"
 	"strconv"
 	"testing"
 	"time"
@@ -85,7 +84,7 @@ func TestSingleNode(t *testing.T) {
 			RemotingPort:  remotingPort,
 		}
 
-		logger := log.New(log.ErrorLevel, os.Stdout)
+		logger := log.DiscardLogger
 		cluster, err := NewEngine("test", provider, &hostNode, WithLogger(logger))
 		require.NotNil(t, cluster)
 		require.NoError(t, err)
@@ -140,7 +139,7 @@ func TestSingleNode(t *testing.T) {
 			RemotingPort:  remotingPort,
 		}
 
-		cluster, err := NewEngine("test", provider, &hostNode)
+		cluster, err := NewEngine("test", provider, &hostNode, WithLogger(log.DiscardLogger))
 		require.NotNil(t, cluster)
 		require.NoError(t, err)
 
@@ -210,7 +209,7 @@ func TestSingleNode(t *testing.T) {
 			RemotingPort:  remotingPort,
 		}
 
-		cluster, err := NewEngine("test", provider, &hostNode)
+		cluster, err := NewEngine("test", provider, &hostNode, WithLogger(log.DiscardLogger))
 		require.NotNil(t, cluster)
 		require.NoError(t, err)
 
@@ -277,7 +276,7 @@ func TestSingleNode(t *testing.T) {
 			RemotingPort:  remotingPort,
 		}
 
-		logger := log.New(log.WarningLevel, os.Stdout)
+		logger := log.DiscardLogger
 		cluster, err := NewEngine("test", provider, &hostNode, WithLogger(logger))
 		require.NotNil(t, cluster)
 		require.NoError(t, err)
@@ -465,7 +464,7 @@ func startEngine(t *testing.T, nodeName, serverAddr string) (*Engine, discovery.
 	provider := nats.NewDiscovery(&config, &hostNode)
 
 	// create the startNode
-	engine, err := NewEngine(nodeName, provider, &hostNode)
+	engine, err := NewEngine(nodeName, provider, &hostNode, WithLogger(log.DiscardLogger))
 	require.NoError(t, err)
 	require.NotNil(t, engine)
 

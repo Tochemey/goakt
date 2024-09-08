@@ -26,5 +26,5 @@ package telemetry
 
 // Version is the current release version of goakt in use.
 func Version() string {
-	return "1.3.7"
+	return "2.6.1"
 }
