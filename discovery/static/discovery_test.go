@@ -75,5 +75,6 @@ func TestDiscovery(t *testing.T) {
 		require.Len(t, peers, 3)
 
 		assert.NoError(t, provider.Deregister())
+		assert.NoError(t, provider.Close())
 	})
 }

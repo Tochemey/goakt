@@ -44,6 +44,13 @@ type Config struct {
 	ApplicationName string
 	// Timeout defines the nodes discovery timeout
 	Timeout time.Duration
+	// MaxJoinAttempts denotes the maximum number of attempts to connect an existing NATs server
+	// Default to 5
+	MaxJoinAttempts int
+	// ReconnectWait sets the time to backoff after attempting a reconnect
+	// to a server that we were already connected to previously.
+	// Defaults to 2s.
+	ReconnectWait time.Duration
 }
 
 // Validate checks whether the given discovery configuration is valid

@@ -225,6 +225,42 @@ func TestDiscovery(t *testing.T) {
 		require.NotEmpty(t, peers)
 
 		assert.NoError(t, provider.Deregister())
+		assert.NoError(t, provider.Close())
+	})
+	t.Run("With DiscoverPeers with IPV6", func(t *testing.T) {
+		// create the various config option
+		ports := dynaport.Get(1)
+		port := ports[0]
+		service := "_workstation._tcp"
+		serviceName := "AccountsSystem"
+		domain := "local."
+
+		ipv6 := true
+		// create the config
+		config := Config{
+			Service:     service,
+			ServiceName: serviceName,
+			Domain:      domain,
+			Port:        port,
+			IPv6:        &ipv6,
+		}
+
+		// create the instance of provider
+		provider := NewDiscovery(&config)
+		require.NoError(t, provider.Initialize())
+		require.NoError(t, provider.Register())
+
+		// wait for registration to be completed
+		time.Sleep(time.Second)
+		require.True(t, provider.initialized.Load())
+
+		// discover peers
+		peers, err := provider.DiscoverPeers()
+		require.NoError(t, err)
+		require.NotEmpty(t, peers)
+
+		assert.NoError(t, provider.Deregister())
+		assert.NoError(t, provider.Close())
 	})
 	t.Run("With DiscoverPeers: not initialized", func(t *testing.T) {
 		// create the various config option

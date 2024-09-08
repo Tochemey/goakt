@@ -168,7 +168,34 @@ func TestDiscovery(t *testing.T) {
 		require.NotEmpty(t, peers)
 		require.NoError(t, validateAddrs(peers))
 		assert.NoError(t, provider.Deregister())
+		assert.NoError(t, provider.Close())
 	})
+	t.Run("With DiscoverPeers with IPV6", func(t *testing.T) {
+		// create the config
+		ipv6 := true
+		config := &Config{
+			DomainName: "google.com",
+			IPv6:       &ipv6,
+		}
+		// create the instance of provider
+		provider := NewDiscovery(config)
+
+		require.NoError(t, provider.Initialize())
+		require.NoError(t, provider.Register())
+
+		// wait for registration to be completed
+		time.Sleep(time.Second)
+		require.True(t, provider.initialized.Load())
+
+		// discover peers
+		peers, err := provider.DiscoverPeers()
+		require.NoError(t, err)
+		require.NotEmpty(t, peers)
+		require.NoError(t, validateAddrs(peers))
+		assert.NoError(t, provider.Deregister())
+		assert.NoError(t, provider.Close())
+	})
+
 }
 
 func validateAddrs(addrs []string) error {

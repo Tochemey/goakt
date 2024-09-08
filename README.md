@@ -17,13 +17,12 @@ across a cluster of computers.
 If you are not familiar with the actor model, the blog post from Brian Storti [here](https://www.brianstorti.com/the-actor-model/) is an excellent and short introduction to the actor model.
 Also, check reference section at the end of the post for more material regarding actor model.
 
-The project adheres to [Semantic Versioning](https://semver.org) and [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/).
-
 ## Table of Content
 
 - [Design Principles](#design-principles)
 - [Use Cases](#use-cases)
 - [Installation](#installation)
+- [Versioning](#versioning)
 - [Examples](#examples)
 - [Features](#features)
   - [Actors](#actors)
@@ -86,6 +85,17 @@ This framework has been designed:
 ```bash
 go get github.com/tochemey/goakt/v2
 ```
+
+## Versioning
+
+The version system adopt in Go-Akt deviates a bit from the standard semantic versioning system.
+The version format is as follows:
+
+- The `MAJOR` part of the version will stay at `v2` for the meantime.
+- The `MINOR` part of the version will cater for any new _features_, _breaking changes_  with a note on the breaking changes.
+- The `PATCH` part of the version will cater for dependencies upgrades, bug fixes, security patches and co.
+
+The versioning will remain like `v2.x.x` until further notice.
 
 ## Examples
 

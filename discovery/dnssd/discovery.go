@@ -30,7 +30,6 @@ import (
 	"sync"
 
 	goset "github.com/deckarep/golang-set/v2"
-	"github.com/pkg/errors"
 	"go.uber.org/atomic"
 
 	"github.com/tochemey/goakt/v2/discovery"
@@ -122,7 +121,6 @@ func (d *Discovery) DiscoverPeers() ([]string, error) {
 		v6 = *d.config.IPv6
 	}
 
-	peers := goset.NewSet[string]()
 	var err error
 
 	// only extract ipv6
@@ -132,14 +130,12 @@ func (d *Discovery) DiscoverPeers() ([]string, error) {
 			return nil, err
 		}
 
-		for _, ip := range ips {
-			if !peers.Add(ip.String()) {
-				// return an error when fail to add to the list
-				return nil, errors.New("failed to retrieve addresses")
-			}
+		ipList := make([]string, len(ips))
+		for index, ip := range ips {
+			ipList[index] = ip.String()
 		}
 
-		return peers.ToSlice(), nil
+		return goset.NewSet[string](ipList...).ToSlice(), nil
 	}
 
 	// lookup the addresses based upon the dns name
@@ -148,14 +144,12 @@ func (d *Discovery) DiscoverPeers() ([]string, error) {
 		return nil, err
 	}
 
-	for _, addr := range addrs {
-		if !peers.Add(addr.IP.String()) {
-			// return an error when fail to add to the list
-			return nil, errors.New("failed to retrieve addresses")
-		}
+	ipList := make([]string, len(addrs))
+	for index, addr := range addrs {
+		ipList[index] = addr.IP.String()
 	}
 
-	return peers.ToSlice(), nil
+	return goset.NewSet[string](ipList...).ToSlice(), nil
 }
 
 // Close closes the provider

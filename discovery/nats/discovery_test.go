@@ -453,4 +453,12 @@ func TestDiscovery(t *testing.T) {
 		assert.Empty(t, peers)
 		assert.EqualError(t, err, discovery.ErrNotInitialized.Error())
 	})
+	t.Run("With Initialize: invalid config", func(t *testing.T) {
+		config := &Config{}
+		provider := NewDiscovery(config, nil, WithLogger(log.DiscardLogger))
+
+		// initialize
+		err := provider.Initialize()
+		assert.Error(t, err)
+	})
 }

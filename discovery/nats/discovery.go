@@ -106,12 +106,19 @@ func (d *Discovery) Initialize() error {
 		d.config.Timeout = time.Second
 	}
 
+	if d.config.MaxJoinAttempts == 0 {
+		d.config.MaxJoinAttempts = 5
+	}
+
+	if d.config.ReconnectWait <= 0 {
+		d.config.ReconnectWait = 2 * time.Second
+	}
+
 	// create the nats connection option
 	opts := nats.GetDefaultOptions()
 	opts.Url = d.config.NatsServer
-	//opts.Servers = n.Config.Servers
 	opts.Name = d.hostNode.Name
-	opts.ReconnectWait = 2 * time.Second
+	opts.ReconnectWait = d.config.ReconnectWait
 	opts.MaxReconnect = -1
 
 	var (
@@ -120,11 +127,9 @@ func (d *Discovery) Initialize() error {
 	)
 
 	// let us connect using an exponential backoff mechanism
-	// we will attempt to connect 5 times to see whether there have started successfully or not.
-	const maxRetries = 5
 	// create a new instance of retrier that will try a maximum of five times, with
 	// an initial delay of 100 ms and a maximum delay of opts.ReconnectWait
-	retrier := retry.NewRetrier(maxRetries, 100*time.Millisecond, opts.ReconnectWait)
+	retrier := retry.NewRetrier(d.config.MaxJoinAttempts, 100*time.Millisecond, opts.ReconnectWait)
 	err = retrier.Run(func() error {
 		connection, err = opts.Connect()
 		if err != nil {
@@ -195,9 +200,7 @@ func (d *Discovery) Register() error {
 
 // Deregister removes this node from a service discovery directory.
 func (d *Discovery) Deregister() error {
-	// acquire the lock
 	d.mu.Lock()
-	// release the lock
 	defer d.mu.Unlock()
 
 	// first check whether the discovery provider has been registered or not
@@ -232,7 +235,6 @@ func (d *Discovery) Deregister() error {
 		bytea, _ := proto.Marshal(message)
 		return d.connection.Publish(d.config.NatsSubject, bytea)
 	}
-
 	d.registered.Store(false)
 	return nil
 }
@@ -312,6 +314,7 @@ func (d *Discovery) Close() error {
 	defer d.mu.Unlock()
 
 	d.initialized.Store(false)
+	d.registered.Store(false)
 
 	if d.connection != nil {
 		defer func() {
