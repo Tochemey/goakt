@@ -51,7 +51,7 @@ import (
 
 const (
 	receivingDelay = 1 * time.Second
-	replyTimeout   = 100 * time.Millisecond
+	askTimeout     = 100 * time.Millisecond
 	passivateAfter = 200 * time.Millisecond
 )
 
@@ -67,8 +67,8 @@ func TestReceive(t *testing.T) {
 		actorPath,
 		newTestActor(),
 		withInitMaxRetries(1),
-		withCustomLogger(log.DiscardLogger),
-		withAskTimeout(replyTimeout))
+		withCustomLogger(log.DefaultLogger),
+		withAskTimeout(askTimeout))
 
 	require.NoError(t, err)
 	assert.NotNil(t, pid)
@@ -96,7 +96,7 @@ func TestPassivation(t *testing.T) {
 		opts := []pidOption{
 			withInitMaxRetries(1),
 			withPassivationAfter(passivateAfter),
-			withAskTimeout(replyTimeout),
+			withAskTimeout(askTimeout),
 		}
 
 		ports := dynaport.Get(1)
@@ -127,7 +127,7 @@ func TestPassivation(t *testing.T) {
 		opts := []pidOption{
 			withInitMaxRetries(1),
 			withPassivationAfter(passivateAfter),
-			withAskTimeout(replyTimeout),
+			withAskTimeout(askTimeout),
 		}
 
 		ports := dynaport.Get(1)
@@ -172,7 +172,7 @@ func TestReply(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, pid)
 
-		actual, err := Ask(ctx, pid, new(testpb.TestReply), replyTimeout)
+		actual, err := Ask(ctx, pid, new(testpb.TestReply), askTimeout)
 		assert.NoError(t, err)
 		assert.NotNil(t, actual)
 		expected := &testpb.Reply{Content: "received message"}
@@ -198,7 +198,7 @@ func TestReply(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, pid)
 
-		actual, err := Ask(ctx, pid, new(testpb.TestSend), replyTimeout)
+		actual, err := Ask(ctx, pid, new(testpb.TestSend), askTimeout)
 		assert.Error(t, err)
 		assert.EqualError(t, err, ErrRequestTimeout.Error())
 		assert.Nil(t, actual)
@@ -223,37 +223,7 @@ func TestReply(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, pid)
 
-		// stop the actor
-		err = pid.Shutdown(ctx)
-		assert.NoError(t, err)
-
-		actual, err := Ask(ctx, pid, new(testpb.TestReply), replyTimeout)
-		assert.Error(t, err)
-		assert.EqualError(t, err, ErrDead.Error())
-		assert.Nil(t, actual)
-	})
-}
-func TestRestart(t *testing.T) {
-	t.Run("With restart a stopped actor", func(t *testing.T) {
-		ctx := context.TODO()
-
-		// create a Ping actor
-		actor := newTestActor()
-		assert.NotNil(t, actor)
-
-		// create the actor path
-		ports := dynaport.Get(1)
-		// create the actor path
-		actorPath := address.New("Test", "sys", "host", ports[0])
-		// create the actor ref
-		pid, err := newPID(ctx, actorPath, actor,
-			withInitMaxRetries(1),
-			withPassivationAfter(10*time.Second),
-			withCustomLogger(log.DiscardLogger),
-			withAskTimeout(replyTimeout))
-
-		require.NoError(t, err)
-		assert.NotNil(t, pid)
+		pause(time.Second)
 
 		// stop the actor
 		err = pid.Shutdown(ctx)
@@ -261,140 +231,175 @@ func TestRestart(t *testing.T) {
 
 		pause(time.Second)
 
-		// let us send a message to the actor
-		err = Tell(ctx, pid, new(testpb.TestSend))
+		actual, err := Ask(ctx, pid, new(testpb.TestReply), askTimeout)
 		assert.Error(t, err)
 		assert.EqualError(t, err, ErrDead.Error())
-
-		// restart the actor
-		err = pid.Restart(ctx)
-		assert.NoError(t, err)
-		assert.True(t, pid.IsRunning())
-		// let us send 10 public to the actor
-		count := 10
-		for i := 0; i < count; i++ {
-			err = Tell(ctx, pid, new(testpb.TestSend))
-			assert.NoError(t, err)
-		}
-
-		// stop the actor
-		err = pid.Shutdown(ctx)
-		assert.NoError(t, err)
-	})
-	t.Run("With restart an actor", func(t *testing.T) {
-		ctx := context.TODO()
-
-		// create a Ping actor
-		actor := newTestActor()
-		assert.NotNil(t, actor)
-		// create the actor path
-		ports := dynaport.Get(1)
-		// create the actor path
-		actorPath := address.New("Test", "sys", "host", ports[0])
-
-		// create the actor ref
-		pid, err := newPID(ctx, actorPath, actor,
-			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
-			withAskTimeout(replyTimeout))
-
-		require.NoError(t, err)
-		assert.NotNil(t, pid)
-		// let us send 10 public to the actor
-		count := 10
-		for i := 0; i < count; i++ {
-			err := Tell(ctx, pid, new(testpb.TestSend))
-			assert.NoError(t, err)
-		}
-
-		// restart the actor
-		err = pid.Restart(ctx)
-		assert.NoError(t, err)
-		assert.True(t, pid.IsRunning())
-		// let us send 10 public to the actor
-		for i := 0; i < count; i++ {
-			err = Tell(ctx, pid, new(testpb.TestSend))
-			assert.NoError(t, err)
-		}
-
-		// stop the actor
-		err = pid.Shutdown(ctx)
-		assert.NoError(t, err)
-	})
-	t.Run("With restart an actor with PreStart failure", func(t *testing.T) {
-		ctx := context.TODO()
-
-		// create a Ping actor
-		actor := newTestRestart()
-		assert.NotNil(t, actor)
-		// create the actor path
-		ports := dynaport.Get(1)
-		// create the actor path
-		actorPath := address.New("Test", "sys", "host", ports[0])
-
-		// create the actor ref
-		pid, err := newPID(ctx, actorPath, actor,
-			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
-			withPassivationAfter(time.Minute),
-			withAskTimeout(replyTimeout))
-
-		require.NoError(t, err)
-		assert.NotNil(t, pid)
-
-		// wait awhile for a proper start
-		assert.True(t, pid.IsRunning())
-
-		// restart the actor
-		err = pid.Restart(ctx)
-		assert.Error(t, err)
-		assert.False(t, pid.IsRunning())
-
-		// stop the actor
-		err = pid.Shutdown(ctx)
-		assert.NoError(t, err)
-	})
-	t.Run("noSender cannot be restarted", func(t *testing.T) {
-		pid := &PID{
-			fieldsLocker: &sync.RWMutex{},
-		}
-		err := pid.Restart(context.TODO())
-		assert.Error(t, err)
-		assert.EqualError(t, err, ErrUndefinedActor.Error())
-	})
-	t.Run("With restart failed due to PostStop failure", func(t *testing.T) {
-		ctx := context.TODO()
-
-		// create a Ping actor
-		actor := &testPostStop{}
-		assert.NotNil(t, actor)
-		// create the actor path
-		ports := dynaport.Get(1)
-		// create the actor path
-		actorPath := address.New("Test", "sys", "host", ports[0])
-
-		// create the actor ref
-		pid, err := newPID(ctx, actorPath, actor,
-			withInitMaxRetries(1),
-			withPassivationAfter(passivateAfter),
-			withCustomLogger(log.DiscardLogger),
-			withAskTimeout(replyTimeout))
-
-		require.NoError(t, err)
-		assert.NotNil(t, pid)
-		// let us send 10 public to the actor
-		count := 10
-		for i := 0; i < count; i++ {
-			err := Tell(ctx, pid, new(testpb.TestSend))
-			assert.NoError(t, err)
-		}
-
-		// restart the actor
-		err = pid.Restart(ctx)
-		assert.Error(t, err)
-		assert.False(t, pid.IsRunning())
+		assert.Nil(t, actual)
 	})
 }
+
+//	func TestRestart(t *testing.T) {
+//		t.Run("With restart a stopped actor", func(t *testing.T) {
+//			ctx := context.TODO()
+//
+//			// create a Ping actor
+//			actor := newTestActor()
+//			assert.NotNil(t, actor)
+//
+//			// create the actor path
+//			ports := dynaport.Get(1)
+//			// create the actor path
+//			actorPath := address.New("Test", "sys", "host", ports[0])
+//			// create the actor ref
+//			pid, err := newPID(ctx, actorPath, actor,
+//				withInitMaxRetries(1),
+//				withPassivationAfter(10*time.Second),
+//				withCustomLogger(log.DiscardLogger),
+//				withAskTimeout(askTimeout))
+//
+//			require.NoError(t, err)
+//			assert.NotNil(t, pid)
+//
+//			// stop the actor
+//			err = pid.Shutdown(ctx)
+//			assert.NoError(t, err)
+//
+//			pause(time.Second)
+//
+//			// let us send a message to the actor
+//			err = Tell(ctx, pid, new(testpb.TestSend))
+//			assert.Error(t, err)
+//			assert.EqualError(t, err, ErrDead.Error())
+//
+//			// restart the actor
+//			err = pid.Restart(ctx)
+//			assert.NoError(t, err)
+//			assert.True(t, pid.IsRunning())
+//			// let us send 10 public to the actor
+//			count := 10
+//			for i := 0; i < count; i++ {
+//				err = Tell(ctx, pid, new(testpb.TestSend))
+//				assert.NoError(t, err)
+//			}
+//
+//			// stop the actor
+//			err = pid.Shutdown(ctx)
+//			assert.NoError(t, err)
+//		})
+//		t.Run("With restart an actor", func(t *testing.T) {
+//			ctx := context.TODO()
+//
+//			// create a Ping actor
+//			actor := newTestActor()
+//			assert.NotNil(t, actor)
+//			// create the actor path
+//			ports := dynaport.Get(1)
+//			// create the actor path
+//			actorPath := address.New("Test", "sys", "host", ports[0])
+//
+//			// create the actor ref
+//			pid, err := newPID(ctx, actorPath, actor,
+//				withInitMaxRetries(1),
+//				withCustomLogger(log.DiscardLogger),
+//				withAskTimeout(askTimeout))
+//
+//			require.NoError(t, err)
+//			assert.NotNil(t, pid)
+//			// let us send 10 public to the actor
+//			count := 10
+//			for i := 0; i < count; i++ {
+//				err := Tell(ctx, pid, new(testpb.TestSend))
+//				assert.NoError(t, err)
+//			}
+//
+//			// restart the actor
+//			err = pid.Restart(ctx)
+//			assert.NoError(t, err)
+//			assert.True(t, pid.IsRunning())
+//			// let us send 10 public to the actor
+//			for i := 0; i < count; i++ {
+//				err = Tell(ctx, pid, new(testpb.TestSend))
+//				assert.NoError(t, err)
+//			}
+//
+//			// stop the actor
+//			err = pid.Shutdown(ctx)
+//			assert.NoError(t, err)
+//		})
+//		t.Run("With restart an actor with PreStart failure", func(t *testing.T) {
+//			ctx := context.TODO()
+//
+//			// create a Ping actor
+//			actor := newTestRestart()
+//			assert.NotNil(t, actor)
+//			// create the actor path
+//			ports := dynaport.Get(1)
+//			// create the actor path
+//			actorPath := address.New("Test", "sys", "host", ports[0])
+//
+//			// create the actor ref
+//			pid, err := newPID(ctx, actorPath, actor,
+//				withInitMaxRetries(1),
+//				withCustomLogger(log.DiscardLogger),
+//				withPassivationAfter(time.Minute),
+//				withAskTimeout(askTimeout))
+//
+//			require.NoError(t, err)
+//			assert.NotNil(t, pid)
+//
+//			// wait awhile for a proper start
+//			assert.True(t, pid.IsRunning())
+//
+//			// restart the actor
+//			err = pid.Restart(ctx)
+//			assert.Error(t, err)
+//			assert.False(t, pid.IsRunning())
+//
+//			// stop the actor
+//			err = pid.Shutdown(ctx)
+//			assert.NoError(t, err)
+//		})
+//		t.Run("noSender cannot be restarted", func(t *testing.T) {
+//			pid := &PID{
+//				fieldsLocker: &sync.RWMutex{},
+//			}
+//			err := pid.Restart(context.TODO())
+//			assert.Error(t, err)
+//			assert.EqualError(t, err, ErrUndefinedActor.Error())
+//		})
+//		t.Run("With restart failed due to PostStop failure", func(t *testing.T) {
+//			ctx := context.TODO()
+//
+//			// create a Ping actor
+//			actor := &testPostStop{}
+//			assert.NotNil(t, actor)
+//			// create the actor path
+//			ports := dynaport.Get(1)
+//			// create the actor path
+//			actorPath := address.New("Test", "sys", "host", ports[0])
+//
+//			// create the actor ref
+//			pid, err := newPID(ctx, actorPath, actor,
+//				withInitMaxRetries(1),
+//				withPassivationAfter(passivateAfter),
+//				withCustomLogger(log.DiscardLogger),
+//				withAskTimeout(askTimeout))
+//
+//			require.NoError(t, err)
+//			assert.NotNil(t, pid)
+//			// let us send 10 public to the actor
+//			count := 10
+//			for i := 0; i < count; i++ {
+//				err := Tell(ctx, pid, new(testpb.TestSend))
+//				assert.NoError(t, err)
+//			}
+//
+//			// restart the actor
+//			err = pid.Restart(ctx)
+//			assert.Error(t, err)
+//			assert.False(t, pid.IsRunning())
+//		})
+//	}
 func TestSupervisorStrategy(t *testing.T) {
 	t.Run("With stop as supervisor directive", func(t *testing.T) {
 		// create a test context
@@ -410,7 +415,7 @@ func TestSupervisorStrategy(t *testing.T) {
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
 			withSupervisorDirective(NewStopDirective()),
-			withAskTimeout(replyTimeout))
+			withAskTimeout(askTimeout))
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
@@ -448,7 +453,7 @@ func TestSupervisorStrategy(t *testing.T) {
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
 			withPassivationDisabled(),
-			withAskTimeout(replyTimeout))
+			withAskTimeout(askTimeout))
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
@@ -491,7 +496,7 @@ func TestSupervisorStrategy(t *testing.T) {
 			withCustomLogger(log.DiscardLogger),
 			withPassivationDisabled(),
 			withSupervisorDirective(new(unhandledSupervisorDirective)), // only for test to handle default case
-			withAskTimeout(replyTimeout))
+			withAskTimeout(askTimeout))
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
@@ -534,7 +539,7 @@ func TestSupervisorStrategy(t *testing.T) {
 			withCustomLogger(log.DiscardLogger),
 			withSupervisorDirective(DefaultSupervisoryStrategy),
 			withPassivationDisabled(),
-			withAskTimeout(replyTimeout))
+			withAskTimeout(askTimeout))
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
@@ -564,22 +569,19 @@ func TestSupervisorStrategy(t *testing.T) {
 	t.Run("With restart as supervisor strategy", func(t *testing.T) {
 		// create a test context
 		ctx := context.TODO()
+		actorSystem, _ := NewActorSystem("testSys",
+			WithPassivationDisabled(),
+			WithAskTimeout(askTimeout),
+			WithSupervisorDirective(NewRestartDirective()),
+			WithLogger(log.DiscardLogger))
 
-		logger := log.DiscardLogger
-		// create the actor path
-		ports := dynaport.Get(1)
-		// create the actor path
-		actorPath := address.New("Test", "sys", "host", ports[0])
-		// create the parent actor
-		parent, err := newPID(ctx,
-			actorPath,
-			newTestSupervisor(),
-			withInitMaxRetries(1),
-			withCustomLogger(logger),
-			withPassivationDisabled(),
-			withSupervisorDirective(NewRestartDirective()),
-			withAskTimeout(replyTimeout))
+		// start the actor system
+		err := actorSystem.Start(ctx)
+		require.NoError(t, err)
 
+		pause(500 * time.Millisecond)
+
+		parent, err := actorSystem.Spawn(ctx, "TestSupervisor", newTestSupervisor())
 		require.NoError(t, err)
 		require.NotNil(t, parent)
 
@@ -597,15 +599,18 @@ func TestSupervisorStrategy(t *testing.T) {
 		// wait for the child to properly shutdown
 		pause(time.Second)
 
+		require.Len(t, parent.Children(), 1)
+		child = parent.Children()[0]
+
 		// assert the actor state
 		require.True(t, child.IsRunning())
 
 		// TODO: fix the child relationship supervisor mode
 		// require.Len(t, parent.Children(), 1)
 
-		//stop the actor
-		err = parent.Shutdown(ctx)
-		assert.NoError(t, err)
+		t.Cleanup(func() {
+			assert.NoError(t, actorSystem.Stop(ctx))
+		})
 	})
 	t.Run("With no strategy set will default to a Shutdown", func(t *testing.T) {
 		// create a test context
@@ -622,7 +627,7 @@ func TestSupervisorStrategy(t *testing.T) {
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
 			withPassivationDisabled(),
-			withAskTimeout(replyTimeout))
+			withAskTimeout(askTimeout))
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
@@ -663,7 +668,7 @@ func TestSupervisorStrategy(t *testing.T) {
 			withCustomLogger(logger),
 			withPassivationDisabled(),
 			withSupervisorDirective(NewResumeDirective()),
-			withAskTimeout(replyTimeout))
+			withAskTimeout(askTimeout))
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
@@ -698,25 +703,19 @@ func TestSupervisorStrategy(t *testing.T) {
 		// create a test context
 		ctx := context.TODO()
 
-		logger := log.DiscardLogger
-		// create the actor path
-		ports := dynaport.Get(1)
-		actorPath := address.New("Test", "sys", "host", ports[0])
+		actorSystem, _ := NewActorSystem("testSys",
+			WithPassivationDisabled(),
+			WithAskTimeout(askTimeout),
+			WithSupervisorDirective(NewRestartDirective()),
+			WithLogger(log.DiscardLogger))
 
-		// create the directive
-		restart := NewRestartDirective()
-		restart.WithLimit(2, time.Minute)
+		// start the actor system
+		err := actorSystem.Start(ctx)
+		require.NoError(t, err)
 
-		// create the parent actor
-		parent, err := newPID(ctx,
-			actorPath,
-			newTestSupervisor(),
-			withInitMaxRetries(1),
-			withCustomLogger(logger),
-			withPassivationDisabled(),
-			withSupervisorDirective(restart),
-			withAskTimeout(replyTimeout))
+		pause(500 * time.Millisecond)
 
+		parent, err := actorSystem.Spawn(ctx, "TestSupervisor", newTestSupervisor())
 		require.NoError(t, err)
 		require.NotNil(t, parent)
 
@@ -732,15 +731,18 @@ func TestSupervisorStrategy(t *testing.T) {
 		// wait for the child to properly shutdown
 		pause(time.Second)
 
+		require.Len(t, parent.Children(), 1)
+		child = parent.Children()[0]
+
 		// assert the actor state
 		require.True(t, child.IsRunning())
 
 		// TODO: fix the child relationship supervisor mode
 		// require.Len(t, parent.Children(), 1)
 
-		//stop the actor
-		err = parent.Shutdown(ctx)
-		assert.NoError(t, err)
+		t.Cleanup(func() {
+			assert.NoError(t, actorSystem.Stop(ctx))
+		})
 	})
 }
 func TestMessaging(t *testing.T) {
@@ -871,7 +873,7 @@ func TestMessaging(t *testing.T) {
 		opts := []pidOption{
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
-			withAskTimeout(replyTimeout),
+			withAskTimeout(askTimeout),
 		}
 		ports := dynaport.Get(1)
 
@@ -991,7 +993,7 @@ func TestActorHandle(t *testing.T) {
 		&exchanger{},
 		withInitMaxRetries(1),
 		withCustomLogger(log.DiscardLogger),
-		withAskTimeout(replyTimeout))
+		withAskTimeout(askTimeout))
 
 	require.NoError(t, err)
 	assert.NotNil(t, pid)
@@ -1017,7 +1019,7 @@ func TestPIDActorSystem(t *testing.T) {
 		&exchanger{},
 		withInitMaxRetries(1),
 		withCustomLogger(log.DiscardLogger),
-		withAskTimeout(replyTimeout))
+		withAskTimeout(askTimeout))
 	require.NoError(t, err)
 	assert.NotNil(t, pid)
 	sys := pid.ActorSystem()
@@ -1040,7 +1042,7 @@ func TestSpawnChild(t *testing.T) {
 			withInitMaxRetries(1),
 			withMetric(),
 			withCustomLogger(log.DiscardLogger),
-			withAskTimeout(replyTimeout))
+			withAskTimeout(askTimeout))
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
@@ -1080,7 +1082,7 @@ func TestSpawnChild(t *testing.T) {
 			newTestSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
-			withAskTimeout(replyTimeout))
+			withAskTimeout(askTimeout))
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
@@ -1117,7 +1119,7 @@ func TestSpawnChild(t *testing.T) {
 			newTestSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
-			withAskTimeout(replyTimeout))
+			withAskTimeout(askTimeout))
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
@@ -1145,7 +1147,7 @@ func TestSpawnChild(t *testing.T) {
 			newTestSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
-			withAskTimeout(replyTimeout))
+			withAskTimeout(askTimeout))
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
@@ -1179,7 +1181,7 @@ func TestSpawnChild(t *testing.T) {
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
 			withEventsStream(eventsStream),
-			withAskTimeout(replyTimeout))
+			withAskTimeout(askTimeout))
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
@@ -1228,7 +1230,7 @@ func TestPoisonPill(t *testing.T) {
 		newTestActor(),
 		withInitMaxRetries(1),
 		withCustomLogger(log.DiscardLogger),
-		withAskTimeout(replyTimeout))
+		withAskTimeout(askTimeout))
 
 	require.NoError(t, err)
 	assert.NotNil(t, pid)
@@ -1365,7 +1367,7 @@ func TestFailedPostStop(t *testing.T) {
 		&testPostStop{},
 		withInitMaxRetries(1),
 		withCustomLogger(log.DiscardLogger),
-		withAskTimeout(replyTimeout))
+		withAskTimeout(askTimeout))
 
 	require.NoError(t, err)
 	assert.NotNil(t, pid)
@@ -1385,7 +1387,7 @@ func TestShutdown(t *testing.T) {
 			newTestSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
-			withAskTimeout(replyTimeout))
+			withAskTimeout(askTimeout))
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
@@ -1538,7 +1540,7 @@ func TestBatchAsk(t *testing.T) {
 		opts := []pidOption{
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
-			withAskTimeout(replyTimeout),
+			withAskTimeout(askTimeout),
 		}
 
 		// create the actor path
@@ -1580,7 +1582,7 @@ func TestRegisterMetrics(t *testing.T) {
 		withCustomLogger(log.DiscardLogger),
 		withTelemetry(tel),
 		withMetric(),
-		withAskTimeout(replyTimeout))
+		withAskTimeout(askTimeout))
 
 	require.NoError(t, err)
 	assert.NotNil(t, pid)
@@ -1605,12 +1607,11 @@ func TestRegisterMetrics(t *testing.T) {
 	err = r.Collect(ctx, got)
 	require.NoError(t, err)
 	assert.Len(t, got.ScopeMetrics, 1)
-	assert.Len(t, got.ScopeMetrics[0].Metrics, 4)
+	assert.Len(t, got.ScopeMetrics[0].Metrics, 3)
 
 	expected := []string{
 		"actor_child_count",
 		"actor_stash_count",
-		"actor_restart_count",
 		"actor_processed_count",
 	}
 	// sort the array
@@ -1837,7 +1838,7 @@ func TestID(t *testing.T) {
 		&exchanger{},
 		withInitMaxRetries(1),
 		withCustomLogger(log.DiscardLogger),
-		withAskTimeout(replyTimeout))
+		withAskTimeout(askTimeout))
 	require.NoError(t, err)
 	assert.NotNil(t, pid)
 	sys := pid.ActorSystem()
@@ -2048,7 +2049,7 @@ func TestName(t *testing.T) {
 		&exchanger{},
 		withInitMaxRetries(1),
 		withCustomLogger(log.DiscardLogger),
-		withAskTimeout(replyTimeout))
+		withAskTimeout(askTimeout))
 	require.NoError(t, err)
 	assert.NotNil(t, pid)
 	sys := pid.ActorSystem()
@@ -2611,7 +2612,7 @@ func TestStopChild(t *testing.T) {
 			newTestSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
-			withAskTimeout(replyTimeout))
+			withAskTimeout(askTimeout))
 
 		require.NoError(t, err)
 		require.NotNil(t, parent)
@@ -2638,7 +2639,7 @@ func TestNewPID(t *testing.T) {
 			newTestActor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
-			withAskTimeout(replyTimeout))
+			withAskTimeout(askTimeout))
 
 		require.Error(t, err)
 		assert.Nil(t, pid)

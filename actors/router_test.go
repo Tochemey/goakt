@@ -48,7 +48,7 @@ func TestRouter(t *testing.T) {
 			"testSystem",
 			WithPassivationDisabled(),
 			WithLogger(logger),
-			WithReplyTimeout(time.Minute))
+			WithAskTimeout(time.Minute))
 
 		require.NoError(t, err)
 		require.NotNil(t, system)
@@ -108,7 +108,7 @@ func TestRouter(t *testing.T) {
 			"testSystem",
 			WithPassivationDisabled(),
 			WithLogger(logger),
-			WithReplyTimeout(time.Minute))
+			WithAskTimeout(time.Minute))
 
 		require.NoError(t, err)
 		require.NotNil(t, system)
@@ -156,7 +156,7 @@ func TestRouter(t *testing.T) {
 			"testSystem",
 			WithPassivationDisabled(),
 			WithLogger(logger),
-			WithReplyTimeout(time.Minute))
+			WithAskTimeout(time.Minute))
 
 		require.NoError(t, err)
 		require.NotNil(t, system)
@@ -207,7 +207,7 @@ func TestRouter(t *testing.T) {
 			"testSystem",
 			WithPassivationDisabled(),
 			WithLogger(logger),
-			WithReplyTimeout(time.Minute))
+			WithAskTimeout(time.Minute))
 
 		require.NoError(t, err)
 		require.NotNil(t, system)
@@ -269,7 +269,7 @@ func TestRouter(t *testing.T) {
 			"testSystem",
 			WithPassivationDisabled(),
 			WithLogger(logger),
-			WithReplyTimeout(time.Minute))
+			WithAskTimeout(time.Minute))
 
 		require.NoError(t, err)
 		require.NotNil(t, system)

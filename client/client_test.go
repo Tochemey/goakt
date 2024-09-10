@@ -659,7 +659,7 @@ func startNode(t *testing.T, logger log.Logger, nodeName, serverAddr string) (sy
 		actorSystemName,
 		actors.WithPassivationDisabled(),
 		actors.WithLogger(logger),
-		actors.WithReplyTimeout(time.Minute),
+		actors.WithAskTimeout(time.Minute),
 		actors.WithRemoting(host, int32(remotePort)),
 		actors.WithPeerStateLoopInterval(100*time.Millisecond),
 		actors.WithCluster(clusterConfig))

@@ -45,9 +45,11 @@ import (
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/tochemey/goakt/v2/address"
 	"github.com/tochemey/goakt/v2/discovery"
+	"github.com/tochemey/goakt/v2/goaktpb"
 	"github.com/tochemey/goakt/v2/hash"
 	"github.com/tochemey/goakt/v2/internal/cluster"
 	"github.com/tochemey/goakt/v2/internal/eventstream"
@@ -475,19 +477,45 @@ func (x *actorSystem) ReSpawn(ctx context.Context, name string) (*PID, error) {
 		return nil, ErrActorSystemNotStarted
 	}
 
-	actorPath := x.actorAddress(name)
-	pid, exist := x.actors.get(actorPath)
+	addr := x.actorAddress(name)
+	pid, exist := x.actors.get(addr)
 	if exist {
-		if err := pid.Restart(ctx); err != nil {
-			return nil, fmt.Errorf("failed to restart actor=%s: %w", actorPath.String(), err)
+		actor := pid.Actor()
+		if err := pid.Shutdown(ctx); err != nil {
+			return nil, fmt.Errorf("failed to restart actor=%s: %w", addr.String(), err)
 		}
 
-		x.actors.set(pid)
-		x.supervisor.Watch(pid)
+		// wait for the actor to properly stop
+		ticker := time.NewTicker(10 * time.Millisecond)
+		tickerStopSig := make(chan types.Unit)
+		go func() {
+			for range ticker.C {
+				if !pid.IsRunning() {
+					close(tickerStopSig)
+					return
+				}
+			}
+		}()
+		<-tickerStopSig
+		ticker.Stop()
+
+		// create a new actor with the same name
+		pid, err := x.Spawn(ctx, name, actor)
+		if err != nil {
+			return nil, fmt.Errorf("failed to restart actor=%s: %w", addr.String(), err)
+		}
+
+		if x.eventsStream != nil {
+			x.eventsStream.Publish(eventsTopic, &goaktpb.ActorRestarted{
+				Address:     addr.Address,
+				RestartedAt: timestamppb.Now(),
+			})
+		}
+
 		return pid, nil
 	}
 
-	return nil, ErrActorNotFound(actorPath.String())
+	return nil, ErrActorNotFound(addr.String())
 }
 
 // Name returns the actor system name
@@ -888,18 +916,44 @@ func (x *actorSystem) RemoteReSpawn(ctx context.Context, request *connect.Reques
 		return nil, connect.NewError(connect.CodeInvalidArgument, ErrInvalidHost)
 	}
 
-	actorPath := address.New(msg.GetName(), x.Name(), msg.GetHost(), int(msg.GetPort()))
-	pid, exist := x.actors.get(actorPath)
+	addr := address.New(msg.GetName(), x.Name(), msg.GetHost(), int(msg.GetPort()))
+	pid, exist := x.actors.get(addr)
 	if !exist {
-		logger.Error(ErrAddressNotFound(actorPath.String()).Error())
-		return nil, ErrAddressNotFound(actorPath.String())
+		logger.Error(ErrAddressNotFound(addr.String()).Error())
+		return nil, ErrAddressNotFound(addr.String())
 	}
 
-	if err := pid.Restart(ctx); err != nil {
-		return nil, fmt.Errorf("failed to restart actor=%s: %w", actorPath.String(), err)
+	actor := pid.Actor()
+	if err := pid.Shutdown(ctx); err != nil {
+		return nil, fmt.Errorf("failed to restart actor=%s: %w", addr.String(), err)
 	}
 
-	x.actors.set(pid)
+	// wait for the actor to properly stop
+	ticker := time.NewTicker(10 * time.Millisecond)
+	tickerStopSig := make(chan types.Unit, 1)
+	go func() {
+		for range ticker.C {
+			if !pid.IsRunning() {
+				close(tickerStopSig)
+				return
+			}
+		}
+	}()
+	<-tickerStopSig
+	ticker.Stop()
+
+	pid, err := x.Spawn(ctx, msg.GetName(), actor)
+	if err != nil {
+		return nil, fmt.Errorf("failed to restart actor=%s: %w", addr.String(), err)
+	}
+
+	if x.eventsStream != nil {
+		x.eventsStream.Publish(eventsTopic, &goaktpb.ActorRestarted{
+			Address:     addr.Address,
+			RestartedAt: timestamppb.Now(),
+		})
+	}
+
 	return connect.NewResponse(new(internalpb.RemoteReSpawnResponse)), nil
 }
 

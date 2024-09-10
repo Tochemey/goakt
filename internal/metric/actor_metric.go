@@ -36,8 +36,6 @@ type ActorMetric struct {
 	childrenCount metric.Int64ObservableCounter
 	// Specifies the total number of stashed messages
 	stashCount metric.Int64ObservableCounter
-	// Specifies the total number of restarts
-	restartCount metric.Int64ObservableCounter
 	// Specifies the total number of instance created
 	spawnCount metric.Int64ObservableCounter
 	// Specifies the last message received processing duration
@@ -75,14 +73,6 @@ func NewActorMetric(meter metric.Meter) (*ActorMetric, error) {
 		return nil, fmt.Errorf("failed to create spawnCount instrument, %w", err)
 	}
 
-	// set the spawn messages count instrument
-	if actorMetric.restartCount, err = meter.Int64ObservableCounter(
-		"actor_restart_count",
-		metric.WithDescription("Total number of restart"),
-	); err != nil {
-		return nil, fmt.Errorf("failed to create restartCount instrument, %w", err)
-	}
-
 	// set the last received message duration instrument
 	if actorMetric.lastReceivedDuration, err = meter.Int64Histogram(
 		"actor_received_duration",
@@ -111,11 +101,6 @@ func (x *ActorMetric) ChildrenCount() metric.Int64ObservableCounter {
 // StashCount returns the total number of stashed messages
 func (x *ActorMetric) StashCount() metric.Int64ObservableCounter {
 	return x.stashCount
-}
-
-// RestartCount returns the total number of restart
-func (x *ActorMetric) RestartCount() metric.Int64ObservableCounter {
-	return x.restartCount
 }
 
 // SpawnCount returns the total number of instances created for the given actor

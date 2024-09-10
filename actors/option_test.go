@@ -55,7 +55,7 @@ func TestOption(t *testing.T) {
 		},
 		{
 			name:     "WithReplyTimeout",
-			option:   WithReplyTimeout(2 * time.Second),
+			option:   WithAskTimeout(2 * time.Second),
 			expected: actorSystem{askTimeout: 2. * time.Second},
 		},
 		{

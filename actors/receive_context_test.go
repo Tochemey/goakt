@@ -64,35 +64,35 @@ func TestReceiveContext(t *testing.T) {
 
 		// send Login
 		var expected proto.Message
-		success, err := Ask(ctx, pid, new(testpb.TestLogin), replyTimeout)
+		success, err := Ask(ctx, pid, new(testpb.TestLogin), askTimeout)
 		require.NoError(t, err)
 		require.NotNil(t, success)
 		expected = &testpb.TestLoginSuccess{}
 		require.True(t, proto.Equal(expected, success))
 
 		// ask for readiness
-		ready, err := Ask(ctx, pid, new(testpb.TestReadiness), replyTimeout)
+		ready, err := Ask(ctx, pid, new(testpb.TestReadiness), askTimeout)
 		require.NoError(t, err)
 		require.NotNil(t, ready)
 		expected = &testpb.TestReady{}
 		require.True(t, proto.Equal(expected, ready))
 
 		// send a message to create account
-		created, err := Ask(ctx, pid, new(testpb.CreateAccount), replyTimeout)
+		created, err := Ask(ctx, pid, new(testpb.CreateAccount), askTimeout)
 		require.NoError(t, err)
 		require.NotNil(t, created)
 		expected = &testpb.AccountCreated{}
 		require.True(t, proto.Equal(expected, created))
 
 		// credit account
-		credited, err := Ask(ctx, pid, new(testpb.CreditAccount), replyTimeout)
+		credited, err := Ask(ctx, pid, new(testpb.CreditAccount), askTimeout)
 		require.NoError(t, err)
 		require.NotNil(t, credited)
 		expected = &testpb.AccountCredited{}
 		require.True(t, proto.Equal(expected, credited))
 
 		// debit account
-		debited, err := Ask(ctx, pid, new(testpb.DebitAccount), replyTimeout)
+		debited, err := Ask(ctx, pid, new(testpb.DebitAccount), askTimeout)
 		require.NoError(t, err)
 		require.NotNil(t, debited)
 		expected = &testpb.AccountDebited{}
@@ -660,7 +660,7 @@ func TestReceiveContext(t *testing.T) {
 			newTestSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
-			withAskTimeout(replyTimeout))
+			withAskTimeout(askTimeout))
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
@@ -697,7 +697,7 @@ func TestReceiveContext(t *testing.T) {
 			newTestSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
-			withAskTimeout(replyTimeout))
+			withAskTimeout(askTimeout))
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
@@ -727,7 +727,7 @@ func TestReceiveContext(t *testing.T) {
 			newTestSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
-			withAskTimeout(replyTimeout))
+			withAskTimeout(askTimeout))
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
@@ -765,7 +765,7 @@ func TestReceiveContext(t *testing.T) {
 			newTestSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
-			withAskTimeout(replyTimeout))
+			withAskTimeout(askTimeout))
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
@@ -803,7 +803,7 @@ func TestReceiveContext(t *testing.T) {
 			newTestSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
-			withAskTimeout(replyTimeout))
+			withAskTimeout(askTimeout))
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
@@ -841,7 +841,7 @@ func TestReceiveContext(t *testing.T) {
 			newTestSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
-			withAskTimeout(replyTimeout))
+			withAskTimeout(askTimeout))
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
@@ -883,7 +883,7 @@ func TestReceiveContext(t *testing.T) {
 			newTestSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
-			withAskTimeout(replyTimeout))
+			withAskTimeout(askTimeout))
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
@@ -915,7 +915,7 @@ func TestReceiveContext(t *testing.T) {
 			newTestSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
-			withAskTimeout(replyTimeout))
+			withAskTimeout(askTimeout))
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
@@ -953,7 +953,7 @@ func TestReceiveContext(t *testing.T) {
 			newTestSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
-			withAskTimeout(replyTimeout))
+			withAskTimeout(askTimeout))
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
@@ -972,7 +972,7 @@ func TestReceiveContext(t *testing.T) {
 			newTestSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
-			withAskTimeout(replyTimeout))
+			withAskTimeout(askTimeout))
 
 		require.NoError(t, err)
 
@@ -994,7 +994,7 @@ func TestReceiveContext(t *testing.T) {
 			newTestSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
-			withAskTimeout(replyTimeout))
+			withAskTimeout(askTimeout))
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)

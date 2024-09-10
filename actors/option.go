@@ -64,9 +64,9 @@ func WithLogger(logger log.Logger) Option {
 	})
 }
 
-// WithReplyTimeout sets how long in seconds an actor should reply a command
+// WithAskTimeout sets how long in seconds an actor should reply a command
 // in a receive-reply pattern
-func WithReplyTimeout(timeout time.Duration) Option {
+func WithAskTimeout(timeout time.Duration) Option {
 	return OptionFunc(func(a *actorSystem) {
 		a.askTimeout = timeout
 	})

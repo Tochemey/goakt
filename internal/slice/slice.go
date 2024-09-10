@@ -26,8 +26,8 @@ package slice
 
 import "sync"
 
-// Slice type that can be safely shared between goroutines.
-type Slice[T any] struct {
+// Safe type that can be safely shared between goroutines.
+type Safe[T any] struct {
 	sync.RWMutex
 	items []T
 }
@@ -39,8 +39,8 @@ type Item[T any] struct {
 }
 
 // New creates a new synchronized slice.
-func New[T any]() *Slice[T] {
-	cs := &Slice[T]{
+func New[T any]() *Safe[T] {
+	cs := &Safe[T]{
 		items: make([]T, 0),
 	}
 
@@ -48,7 +48,7 @@ func New[T any]() *Slice[T] {
 }
 
 // Len returns the number of items
-func (cs *Slice[T]) Len() int {
+func (cs *Safe[T]) Len() int {
 	cs.Lock()
 	length := len(cs.items)
 	cs.Unlock()
@@ -56,14 +56,14 @@ func (cs *Slice[T]) Len() int {
 }
 
 // Append adds an item to the concurrent slice.
-func (cs *Slice[T]) Append(item T) {
+func (cs *Safe[T]) Append(item T) {
 	cs.Lock()
 	cs.items = append(cs.items, item)
 	cs.Unlock()
 }
 
 // Get returns the slice item at the given index
-func (cs *Slice[T]) Get(index int) (item any) {
+func (cs *Safe[T]) Get(index int) (item any) {
 	cs.RLock()
 	defer cs.RUnlock()
 	if isSet(cs.items, index) {
@@ -73,7 +73,7 @@ func (cs *Slice[T]) Get(index int) (item any) {
 }
 
 // Delete an item from the slice
-func (cs *Slice[T]) Delete(index int) {
+func (cs *Safe[T]) Delete(index int) {
 	cs.RLock()
 	isSet := isSet(cs.items, index)
 	cs.RUnlock()
@@ -89,7 +89,7 @@ func (cs *Slice[T]) Delete(index int) {
 }
 
 // Items returns the list of items
-func (cs *Slice[T]) Items() []Item[T] {
+func (cs *Safe[T]) Items() []Item[T] {
 	cs.RLock()
 	items := cs.items
 	cs.RUnlock()
@@ -100,7 +100,7 @@ func (cs *Slice[T]) Items() []Item[T] {
 	return output
 }
 
-func (cs *Slice[T]) Reset() {
+func (cs *Safe[T]) Reset() {
 	cs.Lock()
 	cs.items = make([]T, 0)
 	cs.Unlock()

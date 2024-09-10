@@ -67,36 +67,36 @@ func TestActorSystem(t *testing.T) {
 		assert.NotNil(t, actorSystem.Logger())
 	})
 	t.Run("New instance with Missing Name", func(t *testing.T) {
-		sys, err := NewActorSystem("")
+		actorSystem, err := NewActorSystem("")
 		assert.Error(t, err)
-		assert.Nil(t, sys)
+		assert.Nil(t, actorSystem)
 		assert.EqualError(t, err, ErrNameRequired.Error())
 	})
 	t.Run("With invalid actor system Name", func(t *testing.T) {
-		sys, err := NewActorSystem("$omeN@me")
+		actorSystem, err := NewActorSystem("$omeN@me")
 		assert.Error(t, err)
-		assert.Nil(t, sys)
+		assert.Nil(t, actorSystem)
 		assert.EqualError(t, err, ErrInvalidActorSystemName.Error())
 	})
 	t.Run("With Spawn an actor when not System started", func(t *testing.T) {
 		ctx := context.TODO()
-		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		actorSystem, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
 		actor := newTestActor()
-		actorRef, err := sys.Spawn(ctx, "Test", actor)
+		actorRef, err := actorSystem.Spawn(ctx, "Test", actor)
 		assert.Error(t, err)
 		assert.EqualError(t, err, ErrActorSystemNotStarted.Error())
 		assert.Nil(t, actorRef)
 	})
 	t.Run("With Spawn an actor when started", func(t *testing.T) {
 		ctx := context.TODO()
-		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		actorSystem, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
 
 		// start the actor system
-		err := sys.Start(ctx)
+		err := actorSystem.Start(ctx)
 		assert.NoError(t, err)
 
 		actor := newTestActor()
-		actorRef, err := sys.Spawn(ctx, "Test", actor)
+		actorRef, err := actorSystem.Spawn(ctx, "Test", actor)
 		assert.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
@@ -104,20 +104,20 @@ func TestActorSystem(t *testing.T) {
 		pause(time.Second)
 
 		t.Cleanup(func() {
-			err = sys.Stop(ctx)
+			err = actorSystem.Stop(ctx)
 			assert.NoError(t, err)
 		})
 	})
 	t.Run("With Spawn an actor with invalid actor name", func(t *testing.T) {
 		ctx := context.TODO()
-		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		actorSystem, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
 
 		// start the actor system
-		err := sys.Start(ctx)
+		err := actorSystem.Start(ctx)
 		require.NoError(t, err)
 
 		actor := newTestActor()
-		actorRef, err := sys.Spawn(ctx, "$omeN@me", actor)
+		actorRef, err := actorSystem.Spawn(ctx, "$omeN@me", actor)
 		require.Error(t, err)
 		assert.EqualError(t, err, "must contain only word characters (i.e. [a-zA-Z0-9] plus non-leading '-' or '_')")
 		assert.Nil(t, actorRef)
@@ -126,24 +126,24 @@ func TestActorSystem(t *testing.T) {
 		pause(time.Second)
 
 		t.Cleanup(func() {
-			err = sys.Stop(ctx)
+			err = actorSystem.Stop(ctx)
 			assert.NoError(t, err)
 		})
 	})
 	t.Run("With Spawn an actor already exist", func(t *testing.T) {
 		ctx := context.TODO()
-		sys, _ := NewActorSystem("test", WithLogger(log.DiscardLogger))
+		actorSystem, _ := NewActorSystem("test", WithLogger(log.DiscardLogger))
 
 		// start the actor system
-		err := sys.Start(ctx)
+		err := actorSystem.Start(ctx)
 		assert.NoError(t, err)
 
 		actor := newTestActor()
-		ref1, err := sys.Spawn(ctx, "Test", actor)
+		ref1, err := actorSystem.Spawn(ctx, "Test", actor)
 		assert.NoError(t, err)
 		assert.NotNil(t, ref1)
 
-		ref2, err := sys.Spawn(ctx, "Test", actor)
+		ref2, err := actorSystem.Spawn(ctx, "Test", actor)
 		assert.NotNil(t, ref2)
 		assert.NoError(t, err)
 
@@ -154,7 +154,7 @@ func TestActorSystem(t *testing.T) {
 		pause(time.Second)
 
 		t.Cleanup(func() {
-			err = sys.Stop(ctx)
+			err = actorSystem.Stop(ctx)
 			assert.NoError(t, err)
 		})
 	})
@@ -179,7 +179,7 @@ func TestActorSystem(t *testing.T) {
 			"test",
 			WithPassivationDisabled(),
 			WithLogger(logger),
-			WithReplyTimeout(time.Minute),
+			WithAskTimeout(time.Minute),
 			WithRemoting(host, int32(remotingPort)),
 			WithClustering(provider, 9, 1, gossipPort, clusterPort, new(testActor)))
 		require.NoError(t, err)
@@ -261,7 +261,7 @@ func TestActorSystem(t *testing.T) {
 			"test",
 			WithPassivationDisabled(),
 			WithLogger(logger),
-			WithReplyTimeout(time.Minute),
+			WithAskTimeout(time.Minute),
 			WithRemoting(host, int32(remotingPort)))
 		require.NoError(t, err)
 
@@ -288,19 +288,19 @@ func TestActorSystem(t *testing.T) {
 	})
 	t.Run("With ActorOf:remoting not enabled", func(t *testing.T) {
 		ctx := context.TODO()
-		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		actorSystem, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
 
 		// start the actor system
-		err := sys.Start(ctx)
+		err := actorSystem.Start(ctx)
 		assert.NoError(t, err)
 
 		actorName := "testActor"
 		actor := newTestActor()
-		actorRef, err := sys.Spawn(ctx, actorName, actor)
+		actorRef, err := actorSystem.Spawn(ctx, actorName, actor)
 		assert.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
-		addr, pid, err := sys.ActorOf(ctx, actorName)
+		addr, pid, err := actorSystem.ActorOf(ctx, actorName)
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 		require.NotNil(t, addr)
@@ -309,20 +309,20 @@ func TestActorSystem(t *testing.T) {
 		pause(time.Second)
 
 		t.Cleanup(func() {
-			err = sys.Stop(ctx)
+			err = actorSystem.Stop(ctx)
 			assert.NoError(t, err)
 		})
 	})
 	t.Run("With ActorOf: not found", func(t *testing.T) {
 		ctx := context.TODO()
-		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		actorSystem, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
 
 		// start the actor system
-		err := sys.Start(ctx)
+		err := actorSystem.Start(ctx)
 		assert.NoError(t, err)
 
 		actorName := "notFound"
-		addr, pid, err := sys.ActorOf(ctx, actorName)
+		addr, pid, err := actorSystem.ActorOf(ctx, actorName)
 		require.Error(t, err)
 		require.EqualError(t, err, ErrActorNotFound(actorName).Error())
 		require.Nil(t, pid)
@@ -332,7 +332,7 @@ func TestActorSystem(t *testing.T) {
 		pause(time.Second)
 
 		t.Cleanup(func() {
-			err = sys.Stop(ctx)
+			err = actorSystem.Stop(ctx)
 			assert.NoError(t, err)
 		})
 	})
@@ -347,7 +347,7 @@ func TestActorSystem(t *testing.T) {
 			"test",
 			WithPassivationDisabled(),
 			WithLogger(logger),
-			WithReplyTimeout(time.Minute),
+			WithAskTimeout(time.Minute),
 			WithRemoting(host, int32(remotingPort)))
 		require.NoError(t, err)
 
@@ -362,24 +362,24 @@ func TestActorSystem(t *testing.T) {
 	})
 	t.Run("With ReSpawn", func(t *testing.T) {
 		ctx := context.TODO()
-		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		actorSystem, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
 
 		// start the actor system
-		err := sys.Start(ctx)
+		err := actorSystem.Start(ctx)
 		assert.NoError(t, err)
 
 		// create a deadletter subscriber
-		consumer, err := sys.Subscribe()
+		consumer, err := actorSystem.Subscribe()
 		require.NoError(t, err)
 		require.NotNil(t, consumer)
 
 		actorName := "exchanger"
-		actorRef, err := sys.Spawn(ctx, actorName, &exchanger{})
+		actorRef, err := actorSystem.Spawn(ctx, actorName, &exchanger{})
 		assert.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
 		// send a message to the actor
-		reply, err := Ask(ctx, actorRef, new(testpb.TestReply), replyTimeout)
+		reply, err := Ask(ctx, actorRef, new(testpb.TestReply), askTimeout)
 		require.NoError(t, err)
 		require.NotNil(t, reply)
 		expected := new(testpb.Reply)
@@ -389,7 +389,7 @@ func TestActorSystem(t *testing.T) {
 		// wait for a while for the system to stop
 		pause(time.Second)
 		// restart the actor
-		_, err = sys.ReSpawn(ctx, actorName)
+		actorRef, err = actorSystem.ReSpawn(ctx, actorName)
 		require.NoError(t, err)
 
 		// wait for the actor to complete start
@@ -410,27 +410,27 @@ func TestActorSystem(t *testing.T) {
 		require.Len(t, items, 1)
 
 		// send a message to the actor
-		reply, err = Ask(ctx, actorRef, new(testpb.TestReply), replyTimeout)
+		reply, err = Ask(ctx, actorRef, new(testpb.TestReply), askTimeout)
 		require.NoError(t, err)
 		require.NotNil(t, reply)
 
 		t.Cleanup(func() {
-			err = sys.Stop(ctx)
+			err = actorSystem.Stop(ctx)
 			assert.NoError(t, err)
 		})
 	})
 	t.Run("With ReSpawn with PreStart failure", func(t *testing.T) {
 		ctx := context.TODO()
-		sys, _ := NewActorSystem("testSys",
+		actorSystem, _ := NewActorSystem("testSys",
 			WithLogger(log.DiscardLogger),
 			WithExpireActorAfter(time.Minute))
 
 		// start the actor system
-		err := sys.Start(ctx)
+		err := actorSystem.Start(ctx)
 		assert.NoError(t, err)
 
 		actorName := "actor"
-		actorRef, err := sys.Spawn(ctx, actorName, newTestRestart())
+		actorRef, err := actorSystem.Spawn(ctx, actorName, newTestRestart())
 		assert.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
@@ -439,32 +439,32 @@ func TestActorSystem(t *testing.T) {
 		// wait for a while for the system to stop
 		pause(time.Second)
 		// restart the actor
-		pid, err := sys.ReSpawn(ctx, actorName)
+		pid, err := actorSystem.ReSpawn(ctx, actorName)
 		require.Error(t, err)
 		require.Nil(t, pid)
 
 		require.False(t, actorRef.IsRunning())
 
 		t.Cleanup(func() {
-			err = sys.Stop(ctx)
+			err = actorSystem.Stop(ctx)
 			assert.NoError(t, err)
 		})
 	})
 	t.Run("With ReSpawn: actor not found", func(t *testing.T) {
 		ctx := context.TODO()
-		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		actorSystem, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
 
 		// start the actor system
-		err := sys.Start(ctx)
+		err := actorSystem.Start(ctx)
 		assert.NoError(t, err)
 
 		actorName := "exchanger"
-		actorRef, err := sys.Spawn(ctx, actorName, &exchanger{})
+		actorRef, err := actorSystem.Spawn(ctx, actorName, &exchanger{})
 		assert.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
 		// send a message to the actor
-		reply, err := Ask(ctx, actorRef, new(testpb.TestReply), replyTimeout)
+		reply, err := Ask(ctx, actorRef, new(testpb.TestReply), askTimeout)
 		require.NoError(t, err)
 		require.NotNil(t, reply)
 		expected := new(testpb.Reply)
@@ -473,24 +473,24 @@ func TestActorSystem(t *testing.T) {
 		// stop the actor after some time
 		pause(time.Second)
 
-		err = sys.Kill(ctx, actorName)
+		err = actorSystem.Kill(ctx, actorName)
 		require.NoError(t, err)
 
 		// wait for a while for the system to stop
 		pause(time.Second)
 		// restart the actor
-		_, err = sys.ReSpawn(ctx, actorName)
+		_, err = actorSystem.ReSpawn(ctx, actorName)
 		require.Error(t, err)
 
 		t.Cleanup(func() {
-			err = sys.Stop(ctx)
+			err = actorSystem.Stop(ctx)
 			assert.NoError(t, err)
 		})
 	})
 	t.Run("With ReSpawn an actor when not System started", func(t *testing.T) {
 		ctx := context.TODO()
-		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
-		_, err := sys.ReSpawn(ctx, "some-actor")
+		actorSystem, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		_, err := actorSystem.ReSpawn(ctx, "some-actor")
 		assert.Error(t, err)
 		assert.EqualError(t, err, "actor system has not started yet")
 	})
@@ -505,7 +505,7 @@ func TestActorSystem(t *testing.T) {
 			"test",
 			WithPassivationDisabled(),
 			WithLogger(logger),
-			WithReplyTimeout(time.Minute),
+			WithAskTimeout(time.Minute),
 			WithRemoting(host, int32(remotingPort)))
 		require.NoError(t, err)
 
@@ -519,7 +519,7 @@ func TestActorSystem(t *testing.T) {
 		assert.NotNil(t, actorRef)
 
 		// send a message to the actor
-		reply, err := Ask(ctx, actorRef, new(testpb.TestReply), replyTimeout)
+		reply, err := Ask(ctx, actorRef, new(testpb.TestReply), askTimeout)
 		require.NoError(t, err)
 		require.NotNil(t, reply)
 		expected := new(testpb.Reply)
@@ -529,7 +529,7 @@ func TestActorSystem(t *testing.T) {
 		pause(time.Second)
 
 		// restart the actor
-		_, err = newActorSystem.ReSpawn(ctx, actorName)
+		actorRef, err = newActorSystem.ReSpawn(ctx, actorName)
 		require.NoError(t, err)
 
 		// wait for the actor to complete start
@@ -544,24 +544,24 @@ func TestActorSystem(t *testing.T) {
 	})
 	t.Run("With NumActors", func(t *testing.T) {
 		ctx := context.TODO()
-		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		actorSystem, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
 
 		// start the actor system
-		err := sys.Start(ctx)
+		err := actorSystem.Start(ctx)
 		assert.NoError(t, err)
 
 		actorName := "exchanger"
-		actorRef, err := sys.Spawn(ctx, actorName, &exchanger{})
+		actorRef, err := actorSystem.Spawn(ctx, actorName, &exchanger{})
 		assert.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
 		// wait for the start of the actor to be complete
 		pause(time.Second)
 
-		assert.EqualValues(t, 1, sys.NumActors())
+		assert.EqualValues(t, 1, actorSystem.NumActors())
 
 		t.Cleanup(func() {
-			err = sys.Stop(ctx)
+			err = actorSystem.Stop(ctx)
 			assert.NoError(t, err)
 		})
 	})
@@ -576,7 +576,7 @@ func TestActorSystem(t *testing.T) {
 			"test",
 			WithPassivationDisabled(),
 			WithLogger(logger),
-			WithReplyTimeout(time.Minute),
+			WithAskTimeout(time.Minute),
 			WithRemoting(host, int32(remotingPort)))
 		require.NoError(t, err)
 
@@ -621,7 +621,7 @@ func TestActorSystem(t *testing.T) {
 			"test",
 			WithPassivationDisabled(),
 			WithLogger(logger),
-			WithReplyTimeout(time.Minute),
+			WithAskTimeout(time.Minute),
 			WithRemoting(host, int32(remotingPort)))
 		require.NoError(t, err)
 
@@ -642,7 +642,7 @@ func TestActorSystem(t *testing.T) {
 			"test",
 			WithPassivationDisabled(),
 			WithLogger(logger),
-			WithReplyTimeout(time.Minute),
+			WithAskTimeout(time.Minute),
 			WithRemoting(host, int32(remotingPort)))
 		require.NoError(t, err)
 
@@ -661,7 +661,7 @@ func TestActorSystem(t *testing.T) {
 			"test",
 			WithPassivationDisabled(),
 			WithLogger(logger),
-			WithReplyTimeout(time.Minute),
+			WithAskTimeout(time.Minute),
 			WithRemoting(host, int32(remotingPort)))
 		require.NoError(t, err)
 
@@ -686,20 +686,20 @@ func TestActorSystem(t *testing.T) {
 	})
 	t.Run("With LocalActor", func(t *testing.T) {
 		ctx := context.TODO()
-		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		actorSystem, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
 
 		// start the actor system
-		err := sys.Start(ctx)
+		err := actorSystem.Start(ctx)
 		assert.NoError(t, err)
 
 		// create an actor
 		actorName := "exchanger"
-		ref, err := sys.Spawn(ctx, actorName, &exchanger{})
+		ref, err := actorSystem.Spawn(ctx, actorName, &exchanger{})
 		assert.NoError(t, err)
 		require.NotNil(t, ref)
 
 		// locate the actor
-		local, err := sys.LocalActor(actorName)
+		local, err := actorSystem.LocalActor(actorName)
 		require.NoError(t, err)
 		require.NotNil(t, local)
 
@@ -709,20 +709,20 @@ func TestActorSystem(t *testing.T) {
 		pause(time.Second)
 
 		t.Cleanup(func() {
-			err = sys.Stop(ctx)
+			err = actorSystem.Stop(ctx)
 			assert.NoError(t, err)
 		})
 	})
 	t.Run("With LocalActor: Actor not found", func(t *testing.T) {
 		ctx := context.TODO()
-		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		actorSystem, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
 
 		// start the actor system
-		err := sys.Start(ctx)
+		err := actorSystem.Start(ctx)
 		assert.NoError(t, err)
 
 		// locate the actor
-		ref, err := sys.LocalActor("some-name")
+		ref, err := actorSystem.LocalActor("some-name")
 		require.Error(t, err)
 		require.Nil(t, ref)
 		require.EqualError(t, err, ErrActorNotFound("some-name").Error())
@@ -731,52 +731,52 @@ func TestActorSystem(t *testing.T) {
 		pause(time.Second)
 
 		t.Cleanup(func() {
-			err = sys.Stop(ctx)
+			err = actorSystem.Stop(ctx)
 			assert.NoError(t, err)
 		})
 	})
 	t.Run("With LocalActor when system not started", func(t *testing.T) {
-		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		actorSystem, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
 
 		// create an actor
 		actorName := "exchanger"
 
 		// locate the actor
-		local, err := sys.LocalActor(actorName)
+		local, err := actorSystem.LocalActor(actorName)
 		require.Error(t, err)
 		require.EqualError(t, err, ErrActorSystemNotStarted.Error())
 		require.Nil(t, local)
 	})
 	t.Run("With Kill an actor when not System started", func(t *testing.T) {
 		ctx := context.TODO()
-		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
-		err := sys.Kill(ctx, "Test")
+		actorSystem, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		err := actorSystem.Kill(ctx, "Test")
 		assert.Error(t, err)
 		assert.EqualError(t, err, "actor system has not started yet")
 	})
 	t.Run("With Kill an actor when actor not found", func(t *testing.T) {
 		ctx := context.TODO()
-		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		actorSystem, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
 
 		// start the actor system
-		err := sys.Start(ctx)
+		err := actorSystem.Start(ctx)
 		assert.NoError(t, err)
-		err = sys.Kill(ctx, "Test")
+		err = actorSystem.Kill(ctx, "Test")
 		assert.Error(t, err)
 		assert.EqualError(t, err, "actor=goakt://testSys@127.0.0.1:0/Test not found")
 		t.Cleanup(func() {
-			err = sys.Stop(ctx)
+			err = actorSystem.Stop(ctx)
 			assert.NoError(t, err)
 		})
 	})
 	t.Run("With housekeeping", func(t *testing.T) {
 		ctx := context.TODO()
-		sys, _ := NewActorSystem("housekeeperSys",
+		actorSystem, _ := NewActorSystem("housekeeperSys",
 			WithLogger(log.DiscardLogger),
 			WithExpireActorAfter(passivateAfter))
 
 		// start the actor system
-		err := sys.Start(ctx)
+		err := actorSystem.Start(ctx)
 		assert.NoError(t, err)
 
 		// wait for the system to properly start
@@ -784,7 +784,7 @@ func TestActorSystem(t *testing.T) {
 
 		actorName := "HousekeeperActor"
 		actorHandler := newTestActor()
-		actorRef, err := sys.Spawn(ctx, actorName, actorHandler)
+		actorRef, err := actorSystem.Spawn(ctx, actorName, actorHandler)
 		assert.NoError(t, err)
 		require.NotNil(t, actorRef)
 
@@ -792,7 +792,7 @@ func TestActorSystem(t *testing.T) {
 		pause(time.Second)
 
 		// locate the actor
-		ref, err := sys.LocalActor(actorName)
+		ref, err := actorSystem.LocalActor(actorName)
 		require.Error(t, err)
 		require.Nil(t, ref)
 		require.EqualError(t, err, ErrActorNotFound(actorName).Error())
@@ -801,41 +801,41 @@ func TestActorSystem(t *testing.T) {
 		pause(time.Second)
 
 		t.Cleanup(func() {
-			err = sys.Stop(ctx)
+			err = actorSystem.Stop(ctx)
 			assert.NoError(t, err)
 		})
 	})
 	t.Run("With GetPartition returning zero in non cluster env", func(t *testing.T) {
 		ctx := context.TODO()
-		sys, _ := NewActorSystem("housekeeperSys",
+		actorSystem, _ := NewActorSystem("housekeeperSys",
 			WithLogger(log.DiscardLogger),
 			WithExpireActorAfter(passivateAfter))
 
 		// start the actor system
-		err := sys.Start(ctx)
+		err := actorSystem.Start(ctx)
 		assert.NoError(t, err)
 
 		// wait for the system to properly start
 		pause(time.Second)
 
-		partition := sys.GetPartition("some-actor")
+		partition := actorSystem.GetPartition("some-actor")
 		assert.Zero(t, partition)
 
 		t.Cleanup(func() {
-			err = sys.Stop(ctx)
+			err = actorSystem.Stop(ctx)
 			assert.NoError(t, err)
 		})
 	})
 	t.Run("With actor PostStop error", func(t *testing.T) {
 		ctx := context.TODO()
-		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		actorSystem, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
 
 		// start the actor system
-		err := sys.Start(ctx)
+		err := actorSystem.Start(ctx)
 		assert.NoError(t, err)
 
 		actor := &testPostStop{}
-		actorRef, err := sys.Spawn(ctx, "Test", actor)
+		actorRef, err := actorSystem.Spawn(ctx, "Test", actor)
 		assert.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
@@ -843,28 +843,28 @@ func TestActorSystem(t *testing.T) {
 		pause(time.Second)
 
 		t.Cleanup(func() {
-			assert.Error(t, sys.Stop(ctx))
+			assert.Error(t, actorSystem.Stop(ctx))
 		})
 	})
 	t.Run("With deadletters subscription ", func(t *testing.T) {
 		ctx := context.TODO()
-		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		actorSystem, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
 
 		// start the actor system
-		err := sys.Start(ctx)
+		err := actorSystem.Start(ctx)
 		assert.NoError(t, err)
 
 		// wait for complete start
 		pause(time.Second)
 
 		// create a deadletter subscriber
-		consumer, err := sys.Subscribe()
+		consumer, err := actorSystem.Subscribe()
 		require.NoError(t, err)
 		require.NotNil(t, consumer)
 
 		// create the black hole actor
 		actor := &discarder{}
-		actorRef, err := sys.Spawn(ctx, "discarder", actor)
+		actorRef, err := actorSystem.Spawn(ctx, "discarder", actor)
 		assert.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
@@ -891,41 +891,41 @@ func TestActorSystem(t *testing.T) {
 		require.Len(t, items, 5)
 
 		// unsubscribe the consumer
-		err = sys.Unsubscribe(consumer)
+		err = actorSystem.Unsubscribe(consumer)
 		require.NoError(t, err)
 
 		t.Cleanup(func() {
-			err = sys.Stop(ctx)
+			err = actorSystem.Stop(ctx)
 			assert.NoError(t, err)
 		})
 	})
 	t.Run("With deadletters subscription when not started", func(t *testing.T) {
-		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		actorSystem, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
 
 		// create a deadletter subscriber
-		consumer, err := sys.Subscribe()
+		consumer, err := actorSystem.Subscribe()
 		require.Error(t, err)
 		require.Nil(t, consumer)
 	})
 	t.Run("With deadletters unsubscription when not started", func(t *testing.T) {
 		ctx := context.TODO()
-		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		actorSystem, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
 
 		// start the actor system
-		err := sys.Start(ctx)
+		err := actorSystem.Start(ctx)
 		assert.NoError(t, err)
 
-		consumer, err := sys.Subscribe()
+		consumer, err := actorSystem.Subscribe()
 		require.NoError(t, err)
 		require.NotNil(t, consumer)
 
 		// stop the actor system
-		assert.NoError(t, sys.Stop(ctx))
+		assert.NoError(t, actorSystem.Stop(ctx))
 
 		pause(time.Second)
 
 		// create a deadletter subscriber
-		err = sys.Unsubscribe(consumer)
+		err = actorSystem.Unsubscribe(consumer)
 		require.Error(t, err)
 	})
 	t.Run("With Passivation with clustering enabled", func(t *testing.T) {
@@ -949,7 +949,7 @@ func TestActorSystem(t *testing.T) {
 			"test",
 			WithExpireActorAfter(passivateAfter),
 			WithLogger(logger),
-			WithReplyTimeout(time.Minute),
+			WithAskTimeout(time.Minute),
 			WithRemoting(host, int32(remotingPort)),
 			WithClustering(provider, 9, 1, gossipPort, clusterPort, new(testActor)))
 		require.NoError(t, err)
@@ -1008,18 +1008,18 @@ func TestActorSystem(t *testing.T) {
 		tel := telemetry.New(telemetry.WithMeterProvider(mp))
 
 		ctx := context.TODO()
-		sys, _ := NewActorSystem("testSys",
+		actorSystem, _ := NewActorSystem("testSys",
 			WithMetric(),
 			WithTelemetry(tel),
 			WithStash(),
 			WithLogger(log.DiscardLogger))
 
 		// start the actor system
-		err := sys.Start(ctx)
+		err := actorSystem.Start(ctx)
 		assert.NoError(t, err)
 
 		actor := newTestActor()
-		actorRef, err := sys.Spawn(ctx, "Test", actor)
+		actorRef, err := actorSystem.Spawn(ctx, "Test", actor)
 		assert.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
@@ -1035,12 +1035,11 @@ func TestActorSystem(t *testing.T) {
 		err = r.Collect(ctx, got)
 		require.NoError(t, err)
 		require.Len(t, got.ScopeMetrics, 1)
-		require.Len(t, got.ScopeMetrics[0].Metrics, 6)
+		require.Len(t, got.ScopeMetrics[0].Metrics, 5)
 
 		expected := []string{
 			"actor_child_count",
 			"actor_stash_count",
-			"actor_restart_count",
 			"actors_count",
 			"actor_processed_count",
 			"actor_received_duration",
@@ -1060,7 +1059,7 @@ func TestActorSystem(t *testing.T) {
 		pause(time.Second)
 
 		t.Cleanup(func() {
-			err = sys.Stop(ctx)
+			err = actorSystem.Stop(ctx)
 			assert.NoError(t, err)
 		})
 	})
@@ -1146,14 +1145,14 @@ func TestActorSystem(t *testing.T) {
 	})
 	t.Run("With PeerAddress empty when cluster not enabled", func(t *testing.T) {
 		ctx := context.TODO()
-		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		actorSystem, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
 
 		// start the actor system
-		err := sys.Start(ctx)
+		err := actorSystem.Start(ctx)
 		assert.NoError(t, err)
-		require.Empty(t, sys.PeerAddress())
+		require.Empty(t, actorSystem.PeerAddress())
 
-		require.NoError(t, sys.Stop(ctx))
+		require.NoError(t, actorSystem.Stop(ctx))
 	})
 	t.Run("With SpawnFromFunc (cluster/remote enabled)", func(t *testing.T) {
 		ctx := context.TODO()
@@ -1176,7 +1175,7 @@ func TestActorSystem(t *testing.T) {
 			"test",
 			WithPassivationDisabled(),
 			WithLogger(logger),
-			WithReplyTimeout(time.Minute),
+			WithAskTimeout(time.Minute),
 			WithRemoting(host, int32(remotingPort)),
 			WithClustering(provider, 9, 1, gossipPort, clusterPort, new(testActor)))
 		require.NoError(t, err)
@@ -1216,10 +1215,10 @@ func TestActorSystem(t *testing.T) {
 	})
 	t.Run("With SpawnFromFunc with PreStart error", func(t *testing.T) {
 		ctx := context.TODO()
-		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		actorSystem, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
 
 		// start the actor system
-		err := sys.Start(ctx)
+		err := actorSystem.Start(ctx)
 		assert.NoError(t, err)
 
 		receiveFn := func(_ context.Context, message proto.Message) error {
@@ -1232,21 +1231,21 @@ func TestActorSystem(t *testing.T) {
 			return errors.New("failed")
 		}
 
-		actorRef, err := sys.SpawnFromFunc(ctx, receiveFn, WithPreStart(preStart))
+		actorRef, err := actorSystem.SpawnFromFunc(ctx, receiveFn, WithPreStart(preStart))
 		assert.Error(t, err)
 		assert.Nil(t, actorRef)
 
 		t.Cleanup(func() {
-			err = sys.Stop(ctx)
+			err = actorSystem.Stop(ctx)
 			assert.NoError(t, err)
 		})
 	})
 	t.Run("With SpawnFromFunc with PreStop error", func(t *testing.T) {
 		ctx := context.TODO()
-		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		actorSystem, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
 
 		// start the actor system
-		err := sys.Start(ctx)
+		err := actorSystem.Start(ctx)
 		assert.NoError(t, err)
 
 		receiveFn := func(ctx context.Context, message proto.Message) error {
@@ -1259,7 +1258,7 @@ func TestActorSystem(t *testing.T) {
 			return errors.New("failed")
 		}
 
-		actorRef, err := sys.SpawnFromFunc(ctx, receiveFn, WithPostStop(postStop))
+		actorRef, err := actorSystem.SpawnFromFunc(ctx, receiveFn, WithPostStop(postStop))
 		assert.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
@@ -1270,12 +1269,12 @@ func TestActorSystem(t *testing.T) {
 		require.NoError(t, Tell(ctx, actorRef, &testpb.Reply{Content: "test spawn from func"}))
 
 		t.Cleanup(func() {
-			assert.Error(t, sys.Stop(ctx))
+			assert.Error(t, actorSystem.Stop(ctx))
 		})
 	})
 	t.Run("With SpawnFromFunc with actorSystem not started", func(t *testing.T) {
 		ctx := context.TODO()
-		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		actorSystem, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
 
 		receiveFn := func(ctx context.Context, message proto.Message) error {
 			expected := &testpb.Reply{Content: "test spawn from func"}
@@ -1287,7 +1286,7 @@ func TestActorSystem(t *testing.T) {
 			return errors.New("failed")
 		}
 
-		actorRef, err := sys.SpawnFromFunc(ctx, receiveFn, WithPreStart(preStart))
+		actorRef, err := actorSystem.SpawnFromFunc(ctx, receiveFn, WithPreStart(preStart))
 		assert.Error(t, err)
 		assert.EqualError(t, err, ErrActorSystemNotStarted.Error())
 		assert.Nil(t, actorRef)
@@ -1297,22 +1296,22 @@ func TestActorSystem(t *testing.T) {
 		logger := log.DiscardLogger
 
 		// create the actor system
-		sys, err := NewActorSystem("test",
+		actorSystem, err := NewActorSystem("test",
 			WithLogger(logger),
 			WithPassivationDisabled())
 		// assert there are no error
 		require.NoError(t, err)
 
 		// start the actor system
-		err = sys.Start(ctx)
+		err = actorSystem.Start(ctx)
 		assert.NoError(t, err)
 
 		// register the actor
-		err = sys.Register(ctx, &exchanger{})
+		err = actorSystem.Register(ctx, &exchanger{})
 		require.NoError(t, err)
 
 		t.Cleanup(func() {
-			err = sys.Stop(ctx)
+			err = actorSystem.Stop(ctx)
 			assert.NoError(t, err)
 		})
 	})
@@ -1321,19 +1320,19 @@ func TestActorSystem(t *testing.T) {
 		logger := log.DiscardLogger
 
 		// create the actor system
-		sys, err := NewActorSystem("test",
+		actorSystem, err := NewActorSystem("test",
 			WithLogger(logger),
 			WithPassivationDisabled())
 		// assert there are no error
 		require.NoError(t, err)
 
 		// register the actor
-		err = sys.Register(ctx, &exchanger{})
+		err = actorSystem.Register(ctx, &exchanger{})
 		require.Error(t, err)
 		assert.EqualError(t, err, ErrActorSystemNotStarted.Error())
 
 		t.Cleanup(func() {
-			err = sys.Stop(ctx)
+			err = actorSystem.Stop(ctx)
 			assert.Error(t, err)
 		})
 	})
@@ -1342,25 +1341,25 @@ func TestActorSystem(t *testing.T) {
 		logger := log.DiscardLogger
 
 		// create the actor system
-		sys, err := NewActorSystem("test",
+		actorSystem, err := NewActorSystem("test",
 			WithLogger(logger),
 			WithPassivationDisabled())
 		// assert there are no error
 		require.NoError(t, err)
 
 		// start the actor system
-		err = sys.Start(ctx)
+		err = actorSystem.Start(ctx)
 		assert.NoError(t, err)
 
 		// register the actor
-		err = sys.Register(ctx, &exchanger{})
+		err = actorSystem.Register(ctx, &exchanger{})
 		require.NoError(t, err)
 
-		err = sys.Deregister(ctx, &exchanger{})
+		err = actorSystem.Deregister(ctx, &exchanger{})
 		require.NoError(t, err)
 
 		t.Cleanup(func() {
-			err = sys.Stop(ctx)
+			err = actorSystem.Stop(ctx)
 			assert.NoError(t, err)
 		})
 	})
@@ -1369,18 +1368,18 @@ func TestActorSystem(t *testing.T) {
 		logger := log.DiscardLogger
 
 		// create the actor system
-		sys, err := NewActorSystem("test",
+		actorSystem, err := NewActorSystem("test",
 			WithLogger(logger),
 			WithPassivationDisabled())
 		// assert there are no error
 		require.NoError(t, err)
 
-		err = sys.Deregister(ctx, &exchanger{})
+		err = actorSystem.Deregister(ctx, &exchanger{})
 		require.Error(t, err)
 		assert.EqualError(t, err, ErrActorSystemNotStarted.Error())
 
 		t.Cleanup(func() {
-			err = sys.Stop(ctx)
+			err = actorSystem.Stop(ctx)
 			assert.Error(t, err)
 		})
 	})
@@ -1432,7 +1431,7 @@ func TestActorSystem(t *testing.T) {
 			"test",
 			WithPassivationDisabled(),
 			WithLogger(logger),
-			WithReplyTimeout(time.Minute),
+			WithAskTimeout(time.Minute),
 			WithRemoting(host, int32(remotingPort)),
 			WithClustering(provider, 9, 1, gossipPort, clusterPort, new(exchanger)))
 		require.NoError(t, err)

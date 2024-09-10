@@ -24,7 +24,7 @@ func New(ctx context.Context, t *testing.T) *TestKit {
 		actors.WithLogger(log.DefaultLogger),
 		actors.WithActorInitTimeout(time.Second),
 		actors.WithActorInitMaxRetries(5),
-		actors.WithReplyTimeout(time.Minute))
+		actors.WithAskTimeout(time.Minute))
 	if err != nil {
 		t.Fatal(err.Error())
 	}

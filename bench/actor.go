@@ -22,51 +22,45 @@
  * SOFTWARE.
  */
 
-package actors
+package bench
 
-import "errors"
+import (
+	"context"
 
-// stash adds the current message to the stash buffer
-func (pid *PID) stash(ctx *ReceiveContext) error {
-	if pid.stashBuffer == nil {
-		return ErrStashBufferNotSet
-	}
-	pid.stashBuffer.Push(ctx)
+	"go.uber.org/atomic"
+
+	"github.com/tochemey/goakt/v2/actors"
+	"github.com/tochemey/goakt/v2/bench/benchmarkpb"
+	"github.com/tochemey/goakt/v2/goaktpb"
+)
+
+type Benchmarker struct {
+	totalReceived *atomic.Int64
+}
+
+func (bench *Benchmarker) PreStart(context.Context) error {
+	bench.totalReceived = atomic.NewInt64(0)
 	return nil
 }
 
-// unstash unstashes the oldest message in the stash and prepends to the mailbox
-func (pid *PID) unstash() error {
-	if pid.stashBuffer == nil {
-		return ErrStashBufferNotSet
+func (bench *Benchmarker) Receive(ctx *actors.ReceiveContext) {
+	switch ctx.Message().(type) {
+	case *goaktpb.PostStart:
+	case *benchmarkpb.BenchTell:
+		bench.totalReceived.Inc()
+	case *benchmarkpb.BenchRequest:
+		bench.totalReceived.Inc()
+		ctx.Response(&benchmarkpb.BenchResponse{})
+	default:
+		ctx.Unhandled()
 	}
+}
 
-	received := pid.stashBuffer.Pop()
-	if received == nil {
-		return errors.New("stash buffer may be closed")
-	}
-	pid.doReceive(received)
+func (bench *Benchmarker) PostStop(context.Context) error {
+	bench.totalReceived.Store(0)
 	return nil
 }
 
-// unstashAll unstashes all messages from the stash buffer and prepends in the mailbox
-// (it keeps the messages in the same order as received, unstashing older messages before newer).
-func (pid *PID) unstashAll() error {
-	pid.stashLocker.Lock()
-	if pid.stashBuffer == nil {
-		pid.stashLocker.Unlock()
-		return ErrStashBufferNotSet
-	}
-
-	for pid.stashBuffer.Len() > 0 {
-		received := pid.stashBuffer.Pop()
-		if received == nil {
-			pid.stashLocker.Unlock()
-			return errors.New("stash buffer may be closed")
-		}
-		pid.doReceive(received)
-	}
-
-	pid.stashLocker.Unlock()
-	return nil
+func (bench *Benchmarker) TotalReceived() int64 {
+	return bench.totalReceived.Load()
 }

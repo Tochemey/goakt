@@ -44,7 +44,7 @@ func TestStash(t *testing.T) {
 		// create a Ping actor
 		opts := []pidOption{
 			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
+			withCustomLogger(log.DefaultLogger),
 			withStash(),
 		}
 
@@ -58,14 +58,14 @@ func TestStash(t *testing.T) {
 		require.NotNil(t, pid)
 
 		// wait for the actor to properly start
-		time.Sleep(time.Second)
+		pause(time.Second)
 
 		// send a stash message to the actor
 		err = Tell(ctx, pid, new(testpb.TestStash))
 		require.NoError(t, err)
 
 		// add some pause here due to async calls
-		time.Sleep(time.Second)
+		pause(time.Second)
 		require.EqualValues(t, 1, pid.StashSize())
 
 		// at this stage any message sent to the actor is stashed
@@ -74,7 +74,7 @@ func TestStash(t *testing.T) {
 		}
 
 		// add some pause here due to async calls
-		time.Sleep(time.Second)
+		pause(time.Second)
 
 		// when we assert the actor received count it will only show 1
 		require.EqualValues(t, 1, pid.StashSize())
@@ -82,23 +82,23 @@ func TestStash(t *testing.T) {
 		// send another stash
 		require.NoError(t, Tell(ctx, pid, new(testpb.TestLogin)))
 		// add some pause here due to async calls
-		time.Sleep(time.Second)
+		pause(time.Second)
 		require.EqualValues(t, 2, pid.StashSize())
 
 		// add some pause here due to async calls
-		time.Sleep(time.Second)
+		pause(time.Second)
 		assert.NoError(t, Tell(ctx, pid, new(testpb.TestUnstash)))
 
 		// add some pause here due to async calls
-		time.Sleep(time.Second)
+		pause(time.Second)
 		require.EqualValues(t, 1, pid.StashSize())
 
 		// add some pause here due to async calls
-		time.Sleep(time.Second)
+		pause(time.Second)
 		assert.NoError(t, Tell(ctx, pid, new(testpb.TestUnstashAll)))
 
 		// add some pause here due to async calls
-		time.Sleep(time.Second)
+		pause(time.Second)
 
 		require.Zero(t, pid.StashSize())
 
@@ -106,7 +106,7 @@ func TestStash(t *testing.T) {
 		err = Tell(ctx, pid, new(testpb.TestBye))
 		require.NoError(t, err)
 
-		time.Sleep(time.Second)
+		pause(time.Second)
 		assert.False(t, pid.IsRunning())
 	})
 	t.Run("With stash failure", func(t *testing.T) {
@@ -126,7 +126,7 @@ func TestStash(t *testing.T) {
 		require.NotNil(t, pid)
 
 		// wait for the actor to properly start
-		time.Sleep(5 * time.Millisecond)
+		pause(5 * time.Millisecond)
 
 		err = pid.stash(new(ReceiveContext))
 		assert.Error(t, err)
@@ -151,7 +151,7 @@ func TestStash(t *testing.T) {
 		require.NotNil(t, pid)
 
 		// wait for the actor to properly start
-		time.Sleep(5 * time.Millisecond)
+		pause(5 * time.Millisecond)
 
 		err = pid.unstash()
 		assert.Error(t, err)

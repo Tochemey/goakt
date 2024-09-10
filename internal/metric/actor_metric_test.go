@@ -39,7 +39,6 @@ func TestNewActorMetric(t *testing.T) {
 	actorMetric, err := NewActorMetric(meter)
 	require.NoError(t, err)
 	assert.NotNil(t, actorMetric)
-	assert.NotNil(t, actorMetric.RestartCount())
 	assert.NotNil(t, actorMetric.StashCount())
 	assert.NotNil(t, actorMetric.SpawnCount())
 	assert.NotNil(t, actorMetric.LastReceivedDuration())

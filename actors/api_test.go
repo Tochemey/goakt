@@ -72,7 +72,7 @@ func TestAsk(t *testing.T) {
 		// create a message to send to the test actor
 		message := new(testpb.TestReply)
 		// send the message to the actor
-		reply, err := Ask(ctx, actorRef, message, replyTimeout)
+		reply, err := Ask(ctx, actorRef, message, askTimeout)
 		// perform some assertions
 		require.NoError(t, err)
 		assert.NotNil(t, reply)
@@ -113,7 +113,7 @@ func TestAsk(t *testing.T) {
 		// create a message to send to the test actor
 		message := new(testpb.TestReply)
 		// send the message to the actor
-		reply, err := Ask(ctx, actorRef, message, replyTimeout)
+		reply, err := Ask(ctx, actorRef, message, askTimeout)
 		// perform some assertions
 		require.Error(t, err)
 		assert.EqualError(t, err, ErrDead.Error())
@@ -129,7 +129,7 @@ func TestAsk(t *testing.T) {
 		// create the actor system
 		sys, err := NewActorSystem("test",
 			WithLogger(logger),
-			WithReplyTimeout(replyTimeout),
+			WithAskTimeout(askTimeout),
 			WithPassivationDisabled())
 		// assert there are no error
 		require.NoError(t, err)
@@ -147,16 +147,20 @@ func TestAsk(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
+		pause(time.Second)
+
 		// create a message to send to the test actor
 		message := new(testpb.TestTimeout)
 		// send the message to the actor
-		reply, err := Ask(ctx, actorRef, message, replyTimeout)
+		reply, err := Ask(ctx, actorRef, message, askTimeout)
 		// perform some assertions
 		require.Error(t, err)
 		assert.EqualError(t, err, ErrRequestTimeout.Error())
 		assert.Nil(t, reply)
 
-		err = sys.Stop(ctx)
+		t.Cleanup(func() {
+			err = sys.Stop(ctx)
+		})
 	})
 	t.Run("With invalid remote message", func(t *testing.T) {
 		// create the context
@@ -190,7 +194,7 @@ func TestAsk(t *testing.T) {
 			Message: &anypb.Any{},
 		}
 		// send the message to the actor
-		reply, err := Ask(ctx, actorRef, message, replyTimeout)
+		reply, err := Ask(ctx, actorRef, message, askTimeout)
 		// perform some assertions
 		require.Error(t, err)
 		assert.Nil(t, reply)
@@ -224,7 +228,7 @@ func TestAsk(t *testing.T) {
 
 		// create a message to send to the test actor
 		// send the message to the actor
-		replies, err := BatchAsk(ctx, actorRef, replyTimeout, new(testpb.TestReply), new(testpb.TestReply))
+		replies, err := BatchAsk(ctx, actorRef, askTimeout, new(testpb.TestReply), new(testpb.TestReply))
 		// perform some assertions
 		require.NoError(t, err)
 		assert.NotNil(t, replies)
@@ -246,7 +250,7 @@ func TestAsk(t *testing.T) {
 		// create the actor system
 		sys, err := NewActorSystem("test",
 			WithLogger(logger),
-			WithReplyTimeout(replyTimeout),
+			WithAskTimeout(askTimeout),
 			WithPassivationDisabled())
 		// assert there are no error
 		require.NoError(t, err)
@@ -266,7 +270,7 @@ func TestAsk(t *testing.T) {
 
 		// create a message to send to the test actor
 		// send the message to the actor
-		replies, err := BatchAsk(ctx, actorRef, replyTimeout, new(testpb.TestTimeout), new(testpb.TestReply))
+		replies, err := BatchAsk(ctx, actorRef, askTimeout, new(testpb.TestTimeout), new(testpb.TestReply))
 		// perform some assertions
 		require.Error(t, err)
 		require.EqualError(t, err, ErrRequestTimeout.Error())
@@ -286,7 +290,7 @@ func TestAsk(t *testing.T) {
 		// create the actor system
 		sys, err := NewActorSystem("test",
 			WithLogger(logger),
-			WithReplyTimeout(replyTimeout),
+			WithAskTimeout(askTimeout),
 			WithPassivationDisabled())
 		// assert there are no error
 		require.NoError(t, err)
@@ -309,7 +313,7 @@ func TestAsk(t *testing.T) {
 
 		// create a message to send to the test actor
 		// send the message to the actor
-		replies, err := BatchAsk(ctx, actorRef, replyTimeout, new(testpb.TestTimeout), new(testpb.TestReply))
+		replies, err := BatchAsk(ctx, actorRef, askTimeout, new(testpb.TestTimeout), new(testpb.TestReply))
 		// perform some assertions
 		require.Error(t, err)
 		assert.Empty(t, replies)
@@ -1597,15 +1601,9 @@ func TestAPIRemoteReSpawn(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
-		// assert the actor restart count
-		pid := actorRef
-		assert.Zero(t, pid.restartCount.Load())
-
 		// get the address of the actor
 		err = RemoteReSpawn(ctx, host, remotingPort, actorName)
 		require.NoError(t, err)
-
-		assert.EqualValues(t, 1, pid.restartCount.Load())
 
 		// stop the actor after some time
 		pause(time.Second)
@@ -1687,10 +1685,6 @@ func TestAPIRemoteStop(t *testing.T) {
 		actorRef, err := sys.Spawn(ctx, actorName, actor)
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
-
-		// assert the actor restart count
-		pid := actorRef
-		assert.Zero(t, pid.restartCount.Load())
 
 		// get the address of the actor
 		err = RemoteStop(ctx, host, remotingPort, actorName)

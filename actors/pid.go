@@ -115,7 +115,7 @@ type PID struct {
 	haltPassivationLnr chan types.Unit
 
 	// hold the watchersList watching the given actor
-	watchersList *slice.Slice[*watcher]
+	watchersList *slice.Safe[*watcher]
 
 	// hold the list of the children
 	children *pidMap
@@ -156,7 +156,6 @@ type PID struct {
 	eventsStream *eventstream.EventsStream
 
 	// set the metrics settings
-	restartCount   *atomic.Int64
 	childrenCount  *atomic.Int64
 	processedCount *atomic.Int64
 	metricEnabled  atomic.Bool
@@ -164,7 +163,6 @@ type PID struct {
 
 	watcherNotificationChan        chan error
 	watchersNotificationStopSignal chan types.Unit
-	receiveSignal                  chan types.Unit
 	receiveStopSignal              chan types.Unit
 }
 
@@ -183,7 +181,7 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 	p := &PID{
 		actor:                          actor,
 		latestReceiveTime:              atomic.Time{},
-		haltPassivationLnr:             make(chan types.Unit, 1),
+		haltPassivationLnr:             make(chan types.Unit),
 		logger:                         log.New(log.ErrorLevel, os.Stderr),
 		children:                       newPIDMap(10),
 		supervisorDirective:            DefaultSupervisoryStrategy,
@@ -198,14 +196,12 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 		stashBuffer:                    nil,
 		stashLocker:                    &sync.Mutex{},
 		eventsStream:                   nil,
-		restartCount:                   atomic.NewInt64(0),
 		childrenCount:                  atomic.NewInt64(0),
 		processedCount:                 atomic.NewInt64(0),
 		processingTimeLocker:           new(sync.Mutex),
-		watcherNotificationChan:        make(chan error, 1),
-		watchersNotificationStopSignal: make(chan types.Unit, 1),
-		receiveSignal:                  make(chan types.Unit, 1),
-		receiveStopSignal:              make(chan types.Unit, 1),
+		watcherNotificationChan:        make(chan error),
+		watchersNotificationStopSignal: make(chan types.Unit),
+		receiveStopSignal:              make(chan types.Unit),
 	}
 
 	p.initMaxRetries.Store(DefaultInitMaxRetries)
@@ -371,55 +367,6 @@ func (pid *PID) Address() *address.Address {
 	path := pid.address
 	pid.fieldsLocker.RUnlock()
 	return path
-}
-
-// Restart restarts the actor.
-// During restart all messages that are in the mailbox and not yet processed will be ignored
-func (pid *PID) Restart(ctx context.Context) error {
-	if pid == nil || pid.Address() == nil {
-		return ErrUndefinedActor
-	}
-
-	pid.logger.Debugf("restarting actor=(%s)", pid.address.String())
-
-	if pid.IsRunning() {
-		if err := pid.Shutdown(ctx); err != nil {
-			return err
-		}
-		ticker := time.NewTicker(10 * time.Millisecond)
-		tickerStopSig := make(chan types.Unit, 1)
-		go func() {
-			for range ticker.C {
-				if !pid.IsRunning() {
-					tickerStopSig <- types.Unit{}
-					return
-				}
-			}
-		}()
-		<-tickerStopSig
-		ticker.Stop()
-	}
-
-	pid.resetBehavior()
-	if err := pid.init(ctx); err != nil {
-		return err
-	}
-	go pid.receive()
-	go pid.notifyWatchers()
-	if pid.passivateAfter.Load() > 0 {
-		go pid.passivationLoop()
-	}
-
-	pid.restartCount.Inc()
-
-	if pid.eventsStream != nil {
-		pid.eventsStream.Publish(eventsTopic, &goaktpb.ActorRestarted{
-			Address:     pid.Address().Address,
-			RestartedAt: timestamppb.Now(),
-		})
-	}
-
-	return nil
 }
 
 // SpawnChild creates a child actor and start watching it for error
@@ -952,6 +899,7 @@ func (pid *PID) Shutdown(ctx context.Context) error {
 		return nil
 	}
 
+	pid.running.Store(false)
 	if pid.passivateAfter.Load() > 0 {
 		pid.logger.Debug("sending a signal to stop passivation listener....")
 		pid.haltPassivationLnr <- types.Unit{}
@@ -1007,7 +955,7 @@ func (pid *PID) Logger() log.Logger {
 }
 
 // watchers return the list of watchersList
-func (pid *PID) watchers() *slice.Slice[*watcher] {
+func (pid *PID) watchers() *slice.Safe[*watcher] {
 	return pid.watchersList
 }
 
@@ -1020,7 +968,45 @@ func (pid *PID) watchees() *pidMap {
 func (pid *PID) doReceive(receiveCtx *ReceiveContext) {
 	pid.latestReceiveTime.Store(time.Now())
 	pid.mailbox.Push(receiveCtx)
-	pid.receiveSignal <- types.Unit{}
+}
+
+// receive extracts every message from the actor mailbox
+func (pid *PID) receive() {
+	for {
+		select {
+		case <-pid.receiveStopSignal:
+			return
+		default:
+			if received := pid.mailbox.Pop(); received != nil {
+				switch received.Message().(type) {
+				case *goaktpb.PoisonPill:
+					_ = pid.Shutdown(received.Context())
+				default:
+					pid.handleReceived(received)
+				}
+			}
+		}
+	}
+}
+
+// handleReceived picks the right behavior and processes the message
+func (pid *PID) handleReceived(received *ReceiveContext) {
+	defer pid.recovery(received)
+
+	if behavior := pid.behaviorStack.Peek(); behavior != nil {
+		pid.processedCount.Inc()
+		behavior(received)
+	}
+}
+
+// recovery is called upon after message is processed
+func (pid *PID) recovery(received *ReceiveContext) {
+	if r := recover(); r != nil {
+		pid.watcherNotificationChan <- fmt.Errorf("%s", r)
+		return
+	}
+	// no panic or recommended way to handle error
+	pid.watcherNotificationChan <- received.getError()
 }
 
 // init initializes the given actor and init processing messages
@@ -1132,52 +1118,13 @@ func (pid *PID) freeChildren(ctx context.Context) error {
 	return nil
 }
 
-// receive extracts every message from the actor mailbox
-func (pid *PID) receive() {
-	for {
-		select {
-		case <-pid.receiveStopSignal:
-			return
-		case <-pid.receiveSignal:
-			received := pid.mailbox.Pop()
-			switch received.Message().(type) {
-			case *goaktpb.PoisonPill:
-				// stop the actor
-				_ = pid.Shutdown(received.Context())
-			default:
-				pid.handleReceived(received)
-			}
-		}
-	}
-}
-
-// handleReceived picks the right behavior and processes the message
-func (pid *PID) handleReceived(received *ReceiveContext) {
-	defer pid.recovery(received)
-
-	if behavior := pid.behaviorStack.Peek(); behavior != nil {
-		pid.processedCount.Inc()
-		behavior(received)
-	}
-}
-
-// recovery is called upon after message is processed
-func (pid *PID) recovery(received *ReceiveContext) {
-	if r := recover(); r != nil {
-		pid.watcherNotificationChan <- fmt.Errorf("%s", r)
-		return
-	}
-	// no panic or recommended way to handle error
-	pid.watcherNotificationChan <- received.getError()
-}
-
 // passivationLoop checks whether the actor is processing public or not.
 // when the actor is idle, it automatically shuts down to free resources
 func (pid *PID) passivationLoop() {
 	pid.logger.Info("start the passivation listener...")
 	pid.logger.Infof("passivation timeout is (%s)", pid.passivateAfter.Load().String())
 	ticker := time.NewTicker(pid.passivateAfter.Load())
-	tickerStopSig := make(chan types.Unit, 1)
+	tickerStopSig := make(chan types.Unit)
 
 	// start ticking
 	go func() {
@@ -1186,11 +1133,11 @@ func (pid *PID) passivationLoop() {
 			case <-ticker.C:
 				idleTime := time.Since(pid.latestReceiveTime.Load())
 				if idleTime >= pid.passivateAfter.Load() {
-					tickerStopSig <- types.Unit{}
+					close(tickerStopSig)
 					return
 				}
 			case <-pid.haltPassivationLnr:
-				tickerStopSig <- types.Unit{}
+				close(tickerStopSig)
 				return
 			}
 		}
@@ -1205,7 +1152,7 @@ func (pid *PID) passivationLoop() {
 	}
 
 	pid.logger.Infof("Passivation mode has been triggered for actor=%s...", pid.Address().String())
-
+	pid.running.Store(false)
 	ctx := context.Background()
 	if err := pid.doStop(ctx); err != nil {
 		// TODO: rethink properly about PostStop error handling
@@ -1256,8 +1203,6 @@ func (pid *PID) unsetBehaviorStacked() {
 
 // doStop stops the actor
 func (pid *PID) doStop(ctx context.Context) error {
-	pid.running.Store(false)
-
 	// TODO: just signal stash processing done and ignore the messages or process them
 	if pid.stashBuffer != nil {
 		if err := pid.unstashAll(); err != nil {
@@ -1272,7 +1217,7 @@ func (pid *PID) doStop(ctx context.Context) error {
 	ticker := time.NewTicker(10 * time.Millisecond)
 	timer := time.After(pid.shutdownTimeout.Load())
 	tickerStopSig := make(chan types.Unit)
-	// start ticking
+
 	go func() {
 		for {
 			select {
@@ -1290,8 +1235,9 @@ func (pid *PID) doStop(ctx context.Context) error {
 
 	<-tickerStopSig
 	pid.httpClient.CloseIdleConnections()
-	pid.watchersNotificationStopSignal <- types.Unit{}
-	pid.receiveStopSignal <- types.Unit{}
+
+	close(pid.watchersNotificationStopSignal)
+	close(pid.receiveStopSignal)
 
 	if err := errorschain.
 		New(errorschain.ReturnFirst()).
@@ -1380,13 +1326,11 @@ func (pid *PID) registerMetrics() error {
 	_, err := meter.RegisterCallback(func(_ context.Context, observer otelmetric.Observer) error {
 		observer.ObserveInt64(metrics.ChildrenCount(), pid.childrenCount.Load())
 		observer.ObserveInt64(metrics.StashCount(), int64(pid.StashSize()))
-		observer.ObserveInt64(metrics.RestartCount(), pid.restartCount.Load())
 		observer.ObserveInt64(metrics.ProcessedCount(), pid.processedCount.Load())
 		return nil
 	}, metrics.ChildrenCount(),
 		metrics.StashCount(),
-		metrics.ProcessedCount(),
-		metrics.RestartCount())
+		metrics.ProcessedCount())
 
 	return err
 }
@@ -1498,25 +1442,36 @@ func (pid *PID) handleStopDirective(cid *PID) {
 // handleRestartDirective handles the testSupervisor restart directive
 func (pid *PID) handleRestartDirective(cid *PID, maxRetries uint32, timeout time.Duration) {
 	pid.UnWatch(cid)
+	addr := cid.Address()
 	ctx := context.Background()
-	var err error
+
 	if maxRetries == 0 || timeout <= 0 {
-		err = cid.Restart(ctx)
-	} else {
-		// TODO: handle the initial delay
-		retrier := retry.NewRetrier(int(maxRetries), 100*time.Millisecond, timeout)
-		err = retrier.RunContext(ctx, cid.Restart)
+		cid, err := pid.ActorSystem().ReSpawn(ctx, cid.Name())
+		if err != nil {
+			pid.children.delete(addr)
+			pid.logger.Error(err)
+			return
+		}
+		pid.children.set(cid)
+		pid.Watch(cid)
+		return
 	}
+
+	var err error
+	// TODO: handle the initial delay
+	retrier := retry.NewRetrier(int(maxRetries), 100*time.Millisecond, timeout)
+	err = retrier.RunContext(ctx, func(ctx context.Context) error {
+		cid, err = pid.ActorSystem().ReSpawn(ctx, cid.Name())
+		return err
+	})
 
 	if err != nil {
 		pid.logger.Error(err)
-		// remove the actor in case it is a child and stop it
-		pid.children.delete(cid.Address())
-		if err := cid.Shutdown(ctx); err != nil {
-			pid.logger.Error(err)
-		}
+		pid.children.delete(addr)
 		return
 	}
+
+	pid.children.set(cid)
 	pid.Watch(cid)
 }
 
