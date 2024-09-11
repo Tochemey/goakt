@@ -354,7 +354,7 @@ func (pid *PID) Stop(ctx context.Context, cid *PID) error {
 // IsRunning returns true when the actor is alive ready to process messages and false
 // when the actor is stopped or not started at all
 func (pid *PID) IsRunning() bool {
-	return pid != nil && pid != NoSender && pid.running.Load()
+	return pid.running.Load()
 }
 
 // ActorSystem returns the actor system
@@ -943,12 +943,11 @@ func (pid *PID) RemoteReSpawn(ctx context.Context, host string, port int, name s
 // that can be configured. All child actors will be gracefully shutdown.
 func (pid *PID) Shutdown(ctx context.Context) error {
 	pid.stopLocker.Lock()
-	defer pid.stopLocker.Unlock()
-
 	pid.logger.Info("Shutdown process has started...")
 
 	if !pid.running.Load() {
 		pid.logger.Infof("Actor=%s is offline. Maybe it has been passivated or stopped already", pid.Address().String())
+		pid.stopLocker.Unlock()
 		return nil
 	}
 
@@ -959,6 +958,7 @@ func (pid *PID) Shutdown(ctx context.Context) error {
 
 	if err := pid.doStop(ctx); err != nil {
 		pid.logger.Errorf("failed to cleanly stop actor=(%s)", pid.ID())
+		pid.stopLocker.Unlock()
 		return err
 	}
 
@@ -969,6 +969,7 @@ func (pid *PID) Shutdown(ctx context.Context) error {
 		})
 	}
 
+	pid.stopLocker.Unlock()
 	pid.logger.Infof("Actor=%s successfully shutdown", pid.ID())
 	return nil
 }
@@ -1029,20 +1030,16 @@ func (pid *PID) init(ctx context.Context) error {
 	pid.logger.Info("Initialization process has started...")
 
 	cancelCtx, cancel := context.WithTimeout(ctx, pid.initTimeout.Load())
-	defer cancel()
-
 	// create a new retrier that will try a maximum of `initMaxRetries` times, with
 	// an initial delay of 100 ms and a maximum delay of 1 second
 	retrier := retry.NewRetrier(int(pid.initMaxRetries.Load()), 100*time.Millisecond, time.Second)
 	if err := retrier.RunContext(cancelCtx, pid.actor.PreStart); err != nil {
 		e := ErrInitFailure(err)
+		cancel()
 		return e
 	}
 
-	pid.fieldsLocker.Lock()
 	pid.running.Store(true)
-	pid.fieldsLocker.Unlock()
-
 	pid.logger.Info("Initialization process successfully completed.")
 
 	if pid.eventsStream != nil {
@@ -1052,6 +1049,7 @@ func (pid *PID) init(ctx context.Context) error {
 		})
 	}
 
+	cancel()
 	return nil
 }
 
