@@ -115,7 +115,7 @@ type PID struct {
 	haltPassivationLnr chan types.Unit
 
 	// hold the watchersList watching the given actor
-	watchersList *slice.Slice[*watcher]
+	watchersList *slice.Safe[*watcher]
 
 	// hold the list of the children
 	children *pidMap
@@ -1007,7 +1007,7 @@ func (pid *PID) Logger() log.Logger {
 }
 
 // watchers return the list of watchersList
-func (pid *PID) watchers() *slice.Slice[*watcher] {
+func (pid *PID) watchers() *slice.Safe[*watcher] {
 	return pid.watchersList
 }
 
