@@ -25,6 +25,7 @@
 package queue
 
 import (
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -121,25 +122,34 @@ func TestQueue(t *testing.T) {
 
 func BenchmarkQueue_Push(b *testing.B) {
 	q := New[int]()
-	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		q.Push(i)
 	}
+	b.ReportAllocs()
 }
 
 func BenchmarkQueue_Pop(b *testing.B) {
+	var wg sync.WaitGroup
 	q := New[int]()
-	b.ReportAllocs()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		q.Push(i)
-		if q.Len() > 10 {
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			if q.IsEmpty() {
+				return
+			}
 			q.Pop()
 		}
-	}
+	}()
 
-	//for i := 0; i < b.N; i++ {
-	//	q.Pop()
-	//}
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			q.Push(1)
+		}
+	})
+
+	wg.Wait()
+	b.ReportAllocs()
 }

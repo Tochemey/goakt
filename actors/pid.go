@@ -1139,13 +1139,14 @@ func (pid *PID) receive() {
 		case <-pid.receiveStopSignal:
 			return
 		case <-pid.receiveSignal:
-			received := pid.mailbox.Pop()
-			switch received.Message().(type) {
-			case *goaktpb.PoisonPill:
-				// stop the actor
-				_ = pid.Shutdown(received.Context())
-			default:
-				pid.handleReceived(received)
+			if received := pid.mailbox.Pop(); received != nil {
+				switch received.Message().(type) {
+				case *goaktpb.PoisonPill:
+					// stop the actor
+					_ = pid.Shutdown(received.Context())
+				default:
+					pid.handleReceived(received)
+				}
 			}
 		}
 	}
