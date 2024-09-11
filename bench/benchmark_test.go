@@ -26,11 +26,8 @@ package bench
 
 import (
 	"context"
-	"fmt"
 	"testing"
 	"time"
-
-	"go.uber.org/atomic"
 
 	"github.com/tochemey/goakt/v2/actors"
 	"github.com/tochemey/goakt/v2/bench/benchmarkpb"
@@ -38,8 +35,10 @@ import (
 	"github.com/tochemey/goakt/v2/log"
 )
 
+const receivingTimeout = 100 * time.Millisecond
+
 func BenchmarkActor(b *testing.B) {
-	b.Run("Tell", func(b *testing.B) {
+	b.Run("Tell(api)", func(b *testing.B) {
 		ctx := context.TODO()
 
 		// create the actor system
@@ -80,7 +79,45 @@ func BenchmarkActor(b *testing.B) {
 		_ = pid.Shutdown(ctx)
 		_ = actorSystem.Stop(ctx)
 	})
-	b.Run("SendSync", func(b *testing.B) {
+	b.Run("Tell", func(b *testing.B) {
+		ctx := context.TODO()
+
+		// create the actor system
+		actorSystem, _ := actors.NewActorSystem("bench",
+			actors.WithLogger(log.DiscardLogger),
+			actors.WithActorInitMaxRetries(1),
+			actors.WithSupervisorDirective(actors.NewStopDirective()),
+			actors.WithReplyTimeout(receivingTimeout))
+
+		// start the actor system
+		_ = actorSystem.Start(ctx)
+
+		// wait for system to start properly
+		pause(1 * time.Second)
+
+		// create the actors
+		sender, _ := actorSystem.Spawn(ctx, "sender", new(Benchmarker))
+		receiver, _ := actorSystem.Spawn(ctx, "receiver", new(Benchmarker))
+
+		// wait for actors to start properly
+		pause(1 * time.Second)
+
+		b.SetParallelism(7)
+		b.ResetTimer()
+		b.ReportAllocs()
+		start := time.Now()
+		b.RunParallel(func(pb *testing.PB) {
+			for pb.Next() {
+				_ = sender.Tell(ctx, receiver, new(benchmarkpb.BenchTell))
+			}
+		})
+
+		opsPerSec := float64(b.N) / time.Since(start).Seconds()
+		b.ReportMetric(opsPerSec, "ops/s")
+
+		_ = actorSystem.Stop(ctx)
+	})
+	b.Run("SendAsync", func(b *testing.B) {
 		ctx := context.TODO()
 
 		// create the actor system
@@ -118,7 +155,7 @@ func BenchmarkActor(b *testing.B) {
 
 		_ = actorSystem.Stop(ctx)
 	})
-	b.Run("Ask", func(b *testing.B) {
+	b.Run("Ask(api)", func(b *testing.B) {
 		ctx := context.TODO()
 		// create the actor system
 		actorSystem, _ := actors.NewActorSystem("bench",
@@ -157,63 +194,6 @@ func BenchmarkActor(b *testing.B) {
 
 		_ = pid.Shutdown(ctx)
 		_ = actorSystem.Stop(ctx)
-	})
-}
-
-func TestBenchmark_BenchTell(t *testing.T) {
-	t.Skip("")
-	ctx := context.TODO()
-
-	totalSent = atomic.NewInt64(0)
-	totalRecv = atomic.NewInt64(0)
-
-	workersCount := 100
-	duration := 30 * time.Second
-
-	benchmark := NewBenchmark(workersCount, duration)
-	if err := benchmark.Start(ctx); err != nil {
-		t.Fatal(err)
-	}
-
-	fmt.Printf("Starting benchmark for (%v): num workers:(%d)\n", duration, workersCount)
-	if err := benchmark.BenchTell(ctx); err != nil {
-		t.Fatal(err)
-	}
-
-	fmt.Printf("Total workers: (%d), total messages sent: (%d), total messages received: (%d) - duration: (%v)\n", workersCount, totalSent.Load(), totalRecv.Load(), duration)
-	fmt.Printf("Messages per second: (%d)\n", totalRecv.Load()/int64(duration.Seconds()))
-	t.Cleanup(func() {
-		if err := benchmark.Stop(ctx); err != nil {
-			t.Fatal(err)
-		}
-	})
-}
-
-func TestBenchmark_BenchAsk(t *testing.T) {
-	ctx := context.TODO()
-	t.Skip("")
-	totalSent = atomic.NewInt64(0)
-	totalRecv = atomic.NewInt64(0)
-
-	workersCount := 100
-	duration := 30 * time.Second
-
-	benchmark := NewBenchmark(workersCount, duration)
-	if err := benchmark.Start(ctx); err != nil {
-		t.Fatal(err)
-	}
-
-	fmt.Printf("Starting benchmark for (%v): num workers:(%d)\n", duration, workersCount)
-	if err := benchmark.BenchAsk(ctx); err != nil {
-		t.Fatal(err)
-	}
-
-	fmt.Printf("Total workers: (%d), total messages sent: (%d), total messages received: (%d) - duration: (%v)\n", workersCount, totalSent.Load(), totalRecv.Load(), duration)
-	fmt.Printf("Messages per second: (%d)\n", totalRecv.Load()/int64(duration.Seconds()))
-	t.Cleanup(func() {
-		if err := benchmark.Stop(ctx); err != nil {
-			t.Fatal(err)
-		}
 	})
 }
 
