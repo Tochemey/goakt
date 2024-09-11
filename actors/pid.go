@@ -990,7 +990,7 @@ func (pid *PID) Watch(cid *PID) {
 func (pid *PID) UnWatch(cid *PID) {
 	for _, item := range cid.watchers().Items() {
 		w := item.Value
-		if w.WatcherID.Equals(cid) {
+		if w.WatcherID.Equals(pid) {
 			w.Done <- types.Unit{}
 			pid.watchees().delete(cid.Address())
 			cid.watchers().Delete(item.Index)
