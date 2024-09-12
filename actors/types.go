@@ -42,9 +42,9 @@ const (
 	// DefaultPeerStateLoopInterval defines the default peer state loop interval
 	DefaultPeerStateLoopInterval = 10 * time.Second
 
-	// DefaultGCInterval defines the default GC interval
+	// DefaultJanitorInterval defines the default GC interval
 	// This helps cleanup dead actors from the given actor system
-	DefaultGCInterval = 30 * time.Millisecond
+	DefaultJanitorInterval = 30 * time.Millisecond
 	// eventsTopic defines the events topic
 	eventsTopic = "topic.events"
 

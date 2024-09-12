@@ -1380,7 +1380,7 @@ func TestRemoteAsk(t *testing.T) {
 		sys, err := NewActorSystem("test",
 			WithLogger(logger),
 			WithPassivationDisabled(),
-			WithGCInterval(30*time.Millisecond),
+			WithJanitorInterval(30*time.Millisecond),
 			WithRemoting(host, int32(remotingPort)),
 		)
 		// assert there are no error
@@ -1436,7 +1436,7 @@ func TestRemoteAsk(t *testing.T) {
 		sys, err := NewActorSystem("test",
 			WithLogger(logger),
 			WithPassivationDisabled(),
-			WithGCInterval(30*time.Millisecond),
+			WithJanitorInterval(30*time.Millisecond),
 			WithRemoting(host, int32(remotingPort)),
 		)
 		// assert there are no error

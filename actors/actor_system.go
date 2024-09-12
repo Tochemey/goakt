@@ -201,8 +201,8 @@ type actorSystem struct {
 	// specifies the stash capacity
 	stashEnabled bool
 
-	stopGC     chan types.Unit
-	gcInterval time.Duration
+	stopGC          chan types.Unit
+	janitorInterval time.Duration
 
 	// specifies the events stream
 	eventsStream *eventstream.EventsStream
@@ -252,7 +252,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		shutdownTimeout:        DefaultShutdownTimeout,
 		stashEnabled:           false,
 		stopGC:                 make(chan types.Unit, 1),
-		gcInterval:             DefaultGCInterval,
+		janitorInterval:        DefaultJanitorInterval,
 		eventsStream:           eventstream.New(),
 		partitionHasher:        hash.DefaultHasher(),
 		actorInitTimeout:       DefaultInitTimeout,
@@ -1170,7 +1170,7 @@ func (x *actorSystem) reset() {
 // that helps free non-utilized resources
 func (x *actorSystem) janitor() {
 	x.logger.Info("janitor has started...")
-	ticker := time.NewTicker(x.gcInterval)
+	ticker := time.NewTicker(x.janitorInterval)
 	tickerStopSig := make(chan types.Unit, 1)
 	go func() {
 		for {
