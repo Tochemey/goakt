@@ -125,8 +125,8 @@ func TestOption(t *testing.T) {
 		},
 		{
 			name:     "WithGCInterval",
-			option:   WithGCInterval(2 * time.Second),
-			expected: actorSystem{gcInterval: 2. * time.Second},
+			option:   WithJanitorInterval(2 * time.Second),
+			expected: actorSystem{janitorInterval: 2. * time.Second},
 		},
 	}
 	for _, tc := range testCases {

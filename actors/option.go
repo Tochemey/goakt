@@ -180,9 +180,9 @@ func WithPeerStateLoopInterval(interval time.Duration) Option {
 	})
 }
 
-// WithGCInterval sets the GC interval
-func WithGCInterval(interval time.Duration) Option {
+// WithJanitorInterval sets the janitor interval
+func WithJanitorInterval(interval time.Duration) Option {
 	return OptionFunc(func(system *actorSystem) {
-		system.gcInterval = interval
+		system.janitorInterval = interval
 	})
 }
