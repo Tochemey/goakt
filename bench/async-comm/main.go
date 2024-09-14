@@ -36,6 +36,7 @@ import (
 	"github.com/tochemey/goakt/v2/actors"
 	"github.com/tochemey/goakt/v2/bench/benchmarkpb"
 	"github.com/tochemey/goakt/v2/goaktpb"
+	"github.com/tochemey/goakt/v2/internal/lib"
 	"github.com/tochemey/goakt/v2/log"
 )
 
@@ -55,7 +56,7 @@ func main() {
 	_ = actorSystem.Start(ctx)
 
 	// wait for system to start properly
-	time.Sleep(1 * time.Second)
+	lib.Pause(1 * time.Second)
 
 	// create the actors
 	ping := NewPing()
@@ -64,7 +65,7 @@ func main() {
 	pongActor, _ := actorSystem.Spawn(ctx, "Pong", pong)
 
 	// wait for actors to start properly
-	time.Sleep(1 * time.Second)
+	lib.Pause(1 * time.Second)
 
 	duration := time.Minute
 	if err := pingActor.SendAsync(ctx, pongActor.Name(), new(benchmarkpb.Ping)); err != nil {

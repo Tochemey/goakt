@@ -13,6 +13,7 @@ import (
 
 	"github.com/tochemey/goakt/v2/actors"
 	"github.com/tochemey/goakt/v2/goaktpb"
+	"github.com/tochemey/goakt/v2/internal/lib"
 )
 
 const (
@@ -187,7 +188,7 @@ func (x *probe) receiveOne(max time.Duration) proto.Message {
 
 	// wait for max duration to expire
 	go func() {
-		time.Sleep(max)
+		lib.Pause(max)
 		timeout <- true
 	}()
 

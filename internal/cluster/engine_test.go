@@ -43,6 +43,7 @@ import (
 	"github.com/tochemey/goakt/v2/discovery/nats"
 	"github.com/tochemey/goakt/v2/goaktpb"
 	"github.com/tochemey/goakt/v2/internal/internalpb"
+	"github.com/tochemey/goakt/v2/internal/lib"
 	"github.com/tochemey/goakt/v2/log"
 	testkit "github.com/tochemey/goakt/v2/mocks/discovery"
 )
@@ -168,7 +169,7 @@ func TestSingleNode(t *testing.T) {
 		require.Nil(t, actual)
 		assert.EqualError(t, err, ErrActorNotFound.Error())
 		//  shutdown the Node startNode
-		time.Sleep(time.Second)
+		lib.Pause(time.Second)
 
 		// stop the startNode
 		require.NoError(t, cluster.Stop(ctx))
@@ -235,7 +236,7 @@ func TestSingleNode(t *testing.T) {
 		assert.False(t, isSet)
 
 		//  shutdown the Node startNode
-		time.Sleep(time.Second)
+		lib.Pause(time.Second)
 
 		// stop the startNode
 		require.NoError(t, cluster.Stop(ctx))
@@ -322,7 +323,7 @@ func TestMultipleNodes(t *testing.T) {
 	require.NotNil(t, node1)
 
 	// wait for the node to start properly
-	time.Sleep(2 * time.Second)
+	lib.Pause(2 * time.Second)
 
 	// create a cluster node1
 	node2, sd2 := startEngine(t, "node2", srv.Addr().String())
@@ -330,7 +331,7 @@ func TestMultipleNodes(t *testing.T) {
 	node2Addr := node2.AdvertisedAddress()
 
 	// wait for the node to start properly
-	time.Sleep(time.Second)
+	lib.Pause(time.Second)
 
 	// assert the node joined cluster event
 	var events []*Event
@@ -363,12 +364,12 @@ L:
 	require.Equal(t, node2Addr, net.JoinHostPort(peers[0].Host, strconv.Itoa(peers[0].Port)))
 
 	// wait for some time
-	time.Sleep(time.Second)
+	lib.Pause(time.Second)
 
 	// stop the second node
 	require.NoError(t, node2.Stop(context.TODO()))
 	// wait for the event to propagate properly
-	time.Sleep(time.Second)
+	lib.Pause(time.Second)
 
 	// reset the slice
 	events = []*Event{}

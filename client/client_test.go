@@ -40,6 +40,7 @@ import (
 	"github.com/tochemey/goakt/v2/discovery"
 	"github.com/tochemey/goakt/v2/discovery/nats"
 	"github.com/tochemey/goakt/v2/goaktpb"
+	"github.com/tochemey/goakt/v2/internal/lib"
 	"github.com/tochemey/goakt/v2/log"
 	"github.com/tochemey/goakt/v2/test/data/testpb"
 	testspb "github.com/tochemey/goakt/v2/test/data/testpb"
@@ -60,7 +61,7 @@ func TestClient(t *testing.T) {
 		sys3, node3Host, node3Port, sd3 := startNode(t, logger, "node3", addr)
 
 		// wait for a proper and clean setup of the cluster
-		time.Sleep(time.Second)
+		lib.Pause(time.Second)
 
 		addresses := []string{
 			fmt.Sprintf("%s:%d", node1Host, node1Port),
@@ -89,7 +90,7 @@ func TestClient(t *testing.T) {
 		err = client.Spawn(ctx, actor)
 		require.NoError(t, err)
 
-		time.Sleep(time.Second)
+		lib.Pause(time.Second)
 
 		// send a message
 		reply, err := client.Ask(ctx, actor, new(testspb.TestReply), actors.DefaultAskTimeout)
@@ -98,7 +99,7 @@ func TestClient(t *testing.T) {
 		expectedReply := &testpb.Reply{Content: "received message"}
 		assert.True(t, proto.Equal(expectedReply, reply))
 
-		time.Sleep(time.Second)
+		lib.Pause(time.Second)
 
 		err = client.Tell(ctx, actor, new(testspb.TestSend))
 		require.NoError(t, err)
@@ -118,7 +119,7 @@ func TestClient(t *testing.T) {
 			require.NoError(t, sd3.Close())
 
 			srv.Shutdown()
-			time.Sleep(time.Second)
+			lib.Pause(time.Second)
 		})
 	})
 	t.Run("With randomRouter strategy", func(t *testing.T) {
@@ -133,7 +134,7 @@ func TestClient(t *testing.T) {
 		sys3, node3Host, node3Port, sd3 := startNode(t, logger, "node3", addr)
 
 		// wait for a proper and clean setup of the cluster
-		time.Sleep(time.Second)
+		lib.Pause(time.Second)
 
 		addresses := []string{
 			fmt.Sprintf("%s:%d", node1Host, node1Port),
@@ -165,7 +166,7 @@ func TestClient(t *testing.T) {
 		err = client.Spawn(ctx, actor)
 		require.NoError(t, err)
 
-		time.Sleep(time.Second)
+		lib.Pause(time.Second)
 
 		// send a message
 		reply, err := client.Ask(ctx, actor, new(testspb.TestReply), actors.DefaultAskTimeout)
@@ -174,7 +175,7 @@ func TestClient(t *testing.T) {
 		expectedReply := &testpb.Reply{Content: "received message"}
 		assert.True(t, proto.Equal(expectedReply, reply))
 
-		time.Sleep(time.Second)
+		lib.Pause(time.Second)
 
 		err = client.Tell(ctx, actor, new(testspb.TestSend))
 		require.NoError(t, err)
@@ -195,7 +196,7 @@ func TestClient(t *testing.T) {
 
 			srv.Shutdown()
 
-			time.Sleep(time.Second)
+			lib.Pause(time.Second)
 		})
 	})
 	t.Run("With Least-Load strategy", func(t *testing.T) {
@@ -210,7 +211,7 @@ func TestClient(t *testing.T) {
 		sys3, node3Host, node3Port, sd3 := startNode(t, logger, "node3", addr)
 
 		// wait for a proper and clean setup of the cluster
-		time.Sleep(time.Second)
+		lib.Pause(time.Second)
 
 		addresses := []string{
 			fmt.Sprintf("%s:%d", node1Host, node1Port),
@@ -242,7 +243,7 @@ func TestClient(t *testing.T) {
 		err = client.Spawn(ctx, actor)
 		require.NoError(t, err)
 
-		time.Sleep(time.Second)
+		lib.Pause(time.Second)
 
 		// send a message
 		reply, err := client.Ask(ctx, actor, new(testspb.TestReply), actors.DefaultAskTimeout)
@@ -251,7 +252,7 @@ func TestClient(t *testing.T) {
 		expectedReply := &testpb.Reply{Content: "received message"}
 		assert.True(t, proto.Equal(expectedReply, reply))
 
-		time.Sleep(time.Second)
+		lib.Pause(time.Second)
 
 		err = client.Tell(ctx, actor, new(testspb.TestSend))
 		require.NoError(t, err)
@@ -271,7 +272,7 @@ func TestClient(t *testing.T) {
 			require.NoError(t, sd3.Close())
 
 			srv.Shutdown()
-			time.Sleep(time.Second)
+			lib.Pause(time.Second)
 		})
 	})
 	t.Run("With Refresh Interval", func(t *testing.T) {
@@ -288,7 +289,7 @@ func TestClient(t *testing.T) {
 		sys3, node3Host, node3Port, sd3 := startNode(t, logger, "node3", addr)
 
 		// wait for a proper and clean setup of the cluster
-		time.Sleep(time.Second)
+		lib.Pause(time.Second)
 
 		addresses := []string{
 			fmt.Sprintf("%s:%d", node1Host, node1Port),
@@ -317,7 +318,7 @@ func TestClient(t *testing.T) {
 		err = client.Spawn(ctx, actor)
 		require.NoError(t, err)
 
-		time.Sleep(time.Second)
+		lib.Pause(time.Second)
 
 		// send a message
 		reply, err := client.Ask(ctx, actor, new(testspb.TestReply), actors.DefaultAskTimeout)
@@ -326,7 +327,7 @@ func TestClient(t *testing.T) {
 		expectedReply := &testpb.Reply{Content: "received message"}
 		assert.True(t, proto.Equal(expectedReply, reply))
 
-		time.Sleep(time.Second)
+		lib.Pause(time.Second)
 
 		err = client.Tell(ctx, actor, new(testspb.TestSend))
 		require.NoError(t, err)
@@ -347,7 +348,7 @@ func TestClient(t *testing.T) {
 
 			srv.Shutdown()
 
-			time.Sleep(time.Second)
+			lib.Pause(time.Second)
 		})
 	})
 	t.Run("With SpawnWithBalancer", func(t *testing.T) {
@@ -364,7 +365,7 @@ func TestClient(t *testing.T) {
 		sys3, node3Host, node3Port, sd3 := startNode(t, logger, "node3", addr)
 
 		// wait for a proper and clean setup of the cluster
-		time.Sleep(time.Second)
+		lib.Pause(time.Second)
 
 		addresses := []string{
 			fmt.Sprintf("%s:%d", node1Host, node1Port),
@@ -393,7 +394,7 @@ func TestClient(t *testing.T) {
 		err = client.SpawnWithBalancer(ctx, actor, RandomStrategy)
 		require.NoError(t, err)
 
-		time.Sleep(time.Second)
+		lib.Pause(time.Second)
 
 		// send a message
 		reply, err := client.Ask(ctx, actor, new(testspb.TestReply), actors.DefaultAskTimeout)
@@ -402,7 +403,7 @@ func TestClient(t *testing.T) {
 		expectedReply := &testpb.Reply{Content: "received message"}
 		assert.True(t, proto.Equal(expectedReply, reply))
 
-		time.Sleep(time.Second)
+		lib.Pause(time.Second)
 
 		err = client.Tell(ctx, actor, new(testspb.TestSend))
 		require.NoError(t, err)
@@ -422,7 +423,7 @@ func TestClient(t *testing.T) {
 			require.NoError(t, sd3.Close())
 
 			srv.Shutdown()
-			time.Sleep(time.Second)
+			lib.Pause(time.Second)
 		})
 	})
 	t.Run("With ReSpawn", func(t *testing.T) {
@@ -439,7 +440,7 @@ func TestClient(t *testing.T) {
 		sys3, node3Host, node3Port, sd3 := startNode(t, logger, "node3", addr)
 
 		// wait for a proper and clean setup of the cluster
-		time.Sleep(time.Second)
+		lib.Pause(time.Second)
 
 		addresses := []string{
 			fmt.Sprintf("%s:%d", node1Host, node1Port),
@@ -468,7 +469,7 @@ func TestClient(t *testing.T) {
 		err = client.Spawn(ctx, actor)
 		require.NoError(t, err)
 
-		time.Sleep(time.Second)
+		lib.Pause(time.Second)
 
 		// send a message
 		reply, err := client.Ask(ctx, actor, new(testspb.TestReply), actors.DefaultAskTimeout)
@@ -477,7 +478,7 @@ func TestClient(t *testing.T) {
 		expectedReply := &testpb.Reply{Content: "received message"}
 		assert.True(t, proto.Equal(expectedReply, reply))
 
-		time.Sleep(time.Second)
+		lib.Pause(time.Second)
 
 		err = client.Tell(ctx, actor, new(testspb.TestSend))
 		require.NoError(t, err)
@@ -485,7 +486,7 @@ func TestClient(t *testing.T) {
 		err = client.ReSpawn(ctx, actor)
 		require.NoError(t, err)
 
-		time.Sleep(time.Second)
+		lib.Pause(time.Second)
 
 		err = client.Stop(ctx, actor)
 		require.NoError(t, err)
@@ -502,7 +503,7 @@ func TestClient(t *testing.T) {
 			require.NoError(t, sd3.Close())
 
 			srv.Shutdown()
-			time.Sleep(time.Second)
+			lib.Pause(time.Second)
 		})
 	})
 	t.Run("With ReSpawn after Stop", func(t *testing.T) {
@@ -519,7 +520,7 @@ func TestClient(t *testing.T) {
 		sys3, node3Host, node3Port, sd3 := startNode(t, logger, "node3", addr)
 
 		// wait for a proper and clean setup of the cluster
-		time.Sleep(time.Second)
+		lib.Pause(time.Second)
 
 		addresses := []string{
 			fmt.Sprintf("%s:%d", node1Host, node1Port),
@@ -548,7 +549,7 @@ func TestClient(t *testing.T) {
 		err = client.Spawn(ctx, actor)
 		require.NoError(t, err)
 
-		time.Sleep(time.Second)
+		lib.Pause(time.Second)
 
 		// send a message
 		reply, err := client.Ask(ctx, actor, new(testspb.TestReply), actors.DefaultAskTimeout)
@@ -557,12 +558,12 @@ func TestClient(t *testing.T) {
 		expectedReply := &testpb.Reply{Content: "received message"}
 		assert.True(t, proto.Equal(expectedReply, reply))
 
-		time.Sleep(time.Second)
+		lib.Pause(time.Second)
 
 		err = client.Tell(ctx, actor, new(testspb.TestSend))
 		require.NoError(t, err)
 
-		time.Sleep(time.Second)
+		lib.Pause(time.Second)
 
 		err = client.Stop(ctx, actor)
 		require.NoError(t, err)
@@ -582,7 +583,7 @@ func TestClient(t *testing.T) {
 			require.NoError(t, sd3.Close())
 
 			srv.Shutdown()
-			time.Sleep(time.Second)
+			lib.Pause(time.Second)
 		})
 	})
 }
@@ -670,7 +671,7 @@ func startNode(t *testing.T, logger log.Logger, nodeName, serverAddr string) (sy
 	// start the node
 	require.NoError(t, system.Start(ctx))
 
-	time.Sleep(time.Second)
+	lib.Pause(time.Second)
 
 	logger.Infof("node information=%s", hostNode.String())
 

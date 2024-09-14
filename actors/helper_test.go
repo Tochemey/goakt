@@ -42,7 +42,7 @@ import (
 	"github.com/tochemey/goakt/v2/discovery"
 	"github.com/tochemey/goakt/v2/discovery/nats"
 	"github.com/tochemey/goakt/v2/goaktpb"
-	"github.com/tochemey/goakt/v2/internal/types"
+	"github.com/tochemey/goakt/v2/internal/lib"
 	"github.com/tochemey/goakt/v2/log"
 	"github.com/tochemey/goakt/v2/test/data/testpb"
 	testspb "github.com/tochemey/goakt/v2/test/data/testpb"
@@ -89,7 +89,7 @@ func (p *testActor) Receive(ctx *ReceiveContext) {
 		wg := sync.WaitGroup{}
 		wg.Add(1)
 		go func() {
-			pause(receivingDelay)
+			lib.Pause(receivingDelay)
 			wg.Done()
 		}()
 		// block until timer is up
@@ -487,7 +487,7 @@ func startClusterSystem(t *testing.T, nodeName, serverAddr string) (ActorSystem,
 
 	// start the node
 	require.NoError(t, system.Start(ctx))
-	pause(2 * time.Second)
+	lib.Pause(2 * time.Second)
 
 	// return the cluster startNode
 	return system, provider
@@ -528,15 +528,6 @@ func (x *worker) Receive(ctx *ReceiveContext) {
 
 func (x *worker) PostStop(context.Context) error {
 	return nil
-}
-
-func pause(duration time.Duration) {
-	stopCh := make(chan types.Unit, 1)
-	timer := time.AfterFunc(duration, func() {
-		stopCh <- types.Unit{}
-	})
-	<-stopCh
-	timer.Stop()
 }
 
 func extractMessage(bytes []byte) (string, error) {

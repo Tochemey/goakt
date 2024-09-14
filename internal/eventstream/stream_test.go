@@ -30,6 +30,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/tochemey/goakt/v2/internal/lib"
 )
 
 func TestBroker(t *testing.T) {
@@ -102,7 +104,7 @@ func TestBroker(t *testing.T) {
 		broker.Publish("t1", "hi")
 		broker.Publish("t2", "hello")
 
-		time.Sleep(time.Second)
+		lib.Pause(time.Second)
 
 		var messages []*Message
 		for message := range cons.Iterator() {
@@ -130,7 +132,7 @@ func TestBroker(t *testing.T) {
 
 		broker.Broadcast("hi", []string{"t1", "t2"})
 
-		time.Sleep(time.Second)
+		lib.Pause(time.Second)
 
 		var messages []*Message
 		for message := range cons.Iterator() {
