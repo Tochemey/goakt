@@ -3,7 +3,7 @@ module github.com/tochemey/goakt/v2
 go 1.22.0
 
 require (
-	connectrpc.com/connect v1.16.2
+	connectrpc.com/connect v1.17.0
 	connectrpc.com/otelconnect v0.7.1
 	github.com/buraksezer/olric v0.5.6-0.20240510193155-81e12546eb39
 	github.com/deckarep/golang-set/v2 v2.6.0
