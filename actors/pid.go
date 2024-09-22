@@ -30,6 +30,7 @@ import (
 	"fmt"
 	stdhttp "net/http"
 	"os"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -46,6 +47,7 @@ import (
 	"github.com/tochemey/goakt/v2/address"
 	"github.com/tochemey/goakt/v2/future"
 	"github.com/tochemey/goakt/v2/goaktpb"
+	"github.com/tochemey/goakt/v2/internal/collection"
 	"github.com/tochemey/goakt/v2/internal/errorschain"
 	"github.com/tochemey/goakt/v2/internal/eventstream"
 	"github.com/tochemey/goakt/v2/internal/http"
@@ -110,7 +112,7 @@ type PID struct {
 	shutdownTimeout atomic.Duration
 
 	// specifies the actor mailbox
-	mailbox *mailbox
+	mailbox *collection.Queue
 
 	haltPassivationLnr chan types.Unit
 
@@ -149,7 +151,7 @@ type PID struct {
 	behaviorStack *behaviorStack
 
 	// stash settings
-	stashBuffer *mailbox
+	stashBuffer *collection.Queue
 	stashLocker *sync.Mutex
 
 	// define an events stream
@@ -164,8 +166,6 @@ type PID struct {
 
 	watcherNotificationChan        chan error
 	watchersNotificationStopSignal chan types.Unit
-	receiveSignal                  chan types.Unit
-	receiveStopSignal              chan types.Unit
 }
 
 // newPID creates a new pid
@@ -194,7 +194,7 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 		fieldsLocker:                   new(sync.RWMutex),
 		stopLocker:                     new(sync.Mutex),
 		httpClient:                     http.NewClient(),
-		mailbox:                        newMailbox(),
+		mailbox:                        collection.NewQueue(),
 		stashBuffer:                    nil,
 		stashLocker:                    &sync.Mutex{},
 		eventsStream:                   nil,
@@ -204,8 +204,6 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 		processingTimeLocker:           new(sync.Mutex),
 		watcherNotificationChan:        make(chan error, 1),
 		watchersNotificationStopSignal: make(chan types.Unit, 1),
-		receiveSignal:                  make(chan types.Unit, 1),
-		receiveStopSignal:              make(chan types.Unit, 1),
 	}
 
 	p.initMaxRetries.Store(DefaultInitMaxRetries)
@@ -229,7 +227,6 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 		return nil, err
 	}
 
-	go p.receive()
 	go p.notifyWatchers()
 	if p.passivateAfter.Load() > 0 {
 		go p.passivationLoop()
@@ -404,7 +401,7 @@ func (pid *PID) Restart(ctx context.Context) error {
 	if err := pid.init(ctx); err != nil {
 		return err
 	}
-	go pid.receive()
+
 	go pid.notifyWatchers()
 	if pid.passivateAfter.Load() > 0 {
 		go pid.passivationLoop()
@@ -496,7 +493,7 @@ func (pid *PID) StashSize() uint64 {
 	if pid.stashBuffer == nil {
 		return 0
 	}
-	return uint64(pid.stashBuffer.Len())
+	return uint64(pid.stashBuffer.Length())
 }
 
 // PipeTo processes a long-running task and pipes the result to the provided actor.
@@ -1019,9 +1016,52 @@ func (pid *PID) watchees() *pidMap {
 
 // doReceive pushes a given message to the actor receiveContextBuffer
 func (pid *PID) doReceive(receiveCtx *ReceiveContext) {
-	pid.latestReceiveTime.Store(time.Now())
-	pid.mailbox.Push(receiveCtx)
-	pid.receiveSignal <- types.Unit{}
+	pid.mailbox.Enqueue(receiveCtx)
+	pid.receive()
+}
+
+// receive extracts every message from the actor mailbox
+func (pid *PID) receive() {
+	go func() {
+		dequeue := pid.mailbox.Dequeue()
+		if dequeue == nil {
+			runtime.Gosched()
+			return
+		}
+
+		received := dequeue.(*ReceiveContext)
+		switch received.Message().(type) {
+		case *goaktpb.PoisonPill:
+			_ = pid.Shutdown(received.Context())
+			runtime.Gosched()
+			return
+		default:
+			pid.latestReceiveTime.Store(time.Now())
+			pid.handleReceived(received)
+			runtime.Gosched()
+			return
+		}
+	}()
+}
+
+// handleReceived picks the right behavior and processes the message
+func (pid *PID) handleReceived(received *ReceiveContext) {
+	defer pid.recovery(received)
+
+	if behavior := pid.behaviorStack.Peek(); behavior != nil {
+		pid.processedCount.Inc()
+		behavior(received)
+	}
+}
+
+// recovery is called upon after message is processed
+func (pid *PID) recovery(received *ReceiveContext) {
+	if r := recover(); r != nil {
+		pid.watcherNotificationChan <- fmt.Errorf("%s", r)
+		return
+	}
+	// no panic or recommended way to handle error
+	pid.watcherNotificationChan <- received.getError()
 }
 
 // init initializes the given actor and init processing messages
@@ -1130,46 +1170,6 @@ func (pid *PID) freeChildren(ctx context.Context) error {
 	return nil
 }
 
-// receive extracts every message from the actor mailbox
-func (pid *PID) receive() {
-	for {
-		select {
-		case <-pid.receiveStopSignal:
-			return
-		case <-pid.receiveSignal:
-			if received := pid.mailbox.Pop(); received != nil {
-				switch received.Message().(type) {
-				case *goaktpb.PoisonPill:
-					// stop the actor
-					_ = pid.Shutdown(received.Context())
-				default:
-					pid.handleReceived(received)
-				}
-			}
-		}
-	}
-}
-
-// handleReceived picks the right behavior and processes the message
-func (pid *PID) handleReceived(received *ReceiveContext) {
-	defer pid.recovery(received)
-
-	if behavior := pid.behaviorStack.Peek(); behavior != nil {
-		pid.processedCount.Inc()
-		behavior(received)
-	}
-}
-
-// recovery is called upon after message is processed
-func (pid *PID) recovery(received *ReceiveContext) {
-	if r := recover(); r != nil {
-		pid.watcherNotificationChan <- fmt.Errorf("%s", r)
-		return
-	}
-	// no panic or recommended way to handle error
-	pid.watcherNotificationChan <- received.getError()
-}
-
 // passivationLoop checks whether the actor is processing public or not.
 // when the actor is idle, it automatically shuts down to free resources
 func (pid *PID) passivationLoop() {
@@ -1276,7 +1276,7 @@ func (pid *PID) doStop(ctx context.Context) error {
 		for {
 			select {
 			case <-ticker.C:
-				if pid.mailbox.IsEmpty() {
+				if pid.mailbox.Length() == 0 {
 					close(tickerStopSig)
 					return
 				}
@@ -1290,7 +1290,6 @@ func (pid *PID) doStop(ctx context.Context) error {
 	<-tickerStopSig
 	pid.httpClient.CloseIdleConnections()
 	pid.watchersNotificationStopSignal <- types.Unit{}
-	pid.receiveStopSignal <- types.Unit{}
 
 	if err := errorschain.
 		New(errorschain.ReturnFirst()).

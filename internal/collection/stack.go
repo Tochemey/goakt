@@ -22,50 +22,57 @@
  * SOFTWARE.
  */
 
-package actors
+package collection
 
-import "errors"
+import (
+	"sync/atomic"
+	"unsafe"
+)
 
-// stash adds the current message to the stash buffer
-func (pid *PID) stash(ctx *ReceiveContext) error {
-	if pid.stashBuffer == nil {
-		return ErrStashBufferNotSet
-	}
-	pid.stashBuffer.Enqueue(ctx)
-	return nil
+// Stack implements lock-free freelist based stack.
+// code has been lifted as it is from https://github.com/golang-design/lockfree
+type Stack struct {
+	top unsafe.Pointer
+	len uint64
 }
 
-// unstash unstashes the oldest message in the stash and prepends to the mailbox
-func (pid *PID) unstash() error {
-	if pid.stashBuffer == nil {
-		return ErrStashBufferNotSet
-	}
-
-	received := pid.stashBuffer.Dequeue()
-	if received == nil {
-		return errors.New("stash buffer may be closed")
-	}
-	pid.doReceive(received.(*ReceiveContext))
-	return nil
+// NewStack creates a new lock-free queue.
+func NewStack() *Stack {
+	return &Stack{}
 }
 
-// unstashAll unstashes all messages from the stash buffer and prepends in the mailbox
-// (it keeps the messages in the same order as received, unstashing older messages before newer).
-func (pid *PID) unstashAll() error {
-	if pid.stashBuffer == nil {
-		return ErrStashBufferNotSet
-	}
-
-	pid.stashLocker.Lock()
-	defer pid.stashLocker.Unlock()
-
-	for pid.stashBuffer.Length() > 0 {
-		received := pid.stashBuffer.Dequeue()
-		if received == nil {
-			return errors.New("stash buffer may be closed")
+// Pop pops value from the top of the stack.
+func (s *Stack) Pop() interface{} {
+	var top, next unsafe.Pointer
+	var item *directItem
+	for {
+		top = atomic.LoadPointer(&s.top)
+		if top == nil {
+			return nil
 		}
-		pid.doReceive(received.(*ReceiveContext))
+		item = (*directItem)(top)
+		next = atomic.LoadPointer(&item.next)
+		if atomic.CompareAndSwapPointer(&s.top, top, next) {
+			atomic.AddUint64(&s.len, ^uint64(0))
+			return item.v
+		}
 	}
+}
 
-	return nil
+// Push pushes a value on top of the stack.
+func (s *Stack) Push(v interface{}) {
+	item := directItem{v: v}
+	var top unsafe.Pointer
+	for {
+		top = atomic.LoadPointer(&s.top)
+		item.next = top
+		if atomic.CompareAndSwapPointer(&s.top, top, unsafe.Pointer(&item)) {
+			atomic.AddUint64(&s.len, 1)
+			return
+		}
+	}
+}
+
+func (s *Stack) Peek() interface{} {
+	return *(*interface{})(atomic.LoadPointer(&s.top))
 }
