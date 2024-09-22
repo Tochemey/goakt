@@ -1022,6 +1022,7 @@ func (pid *PID) doReceive(receiveCtx *ReceiveContext) {
 
 // receive extracts every message from the actor mailbox
 func (pid *PID) receive() {
+	// TODO: make sure messages are processed in order
 	go func() {
 		dequeue := pid.mailbox.Dequeue()
 		if dequeue == nil {
