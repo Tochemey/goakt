@@ -234,7 +234,7 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 	p.receive()
 	p.notifyWatchers()
 	if p.passivateAfter.Load() > 0 {
-		p.passivationLoop()
+		go p.passivationLoop()
 	}
 
 	if p.metricEnabled.Load() {
@@ -410,7 +410,7 @@ func (pid *PID) Restart(ctx context.Context) error {
 	pid.receive()
 	pid.notifyWatchers()
 	if pid.passivateAfter.Load() > 0 {
-		pid.passivationLoop()
+		go pid.passivationLoop()
 	}
 
 	pid.restartCount.Inc()
