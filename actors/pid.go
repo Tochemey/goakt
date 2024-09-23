@@ -111,7 +111,7 @@ type PID struct {
 	shutdownTimeout atomic.Duration
 
 	// specifies the actor mailbox
-	mailbox *collection.Queue
+	mailbox *mailbox
 
 	haltPassivationLnr chan types.Unit
 
@@ -168,6 +168,9 @@ type PID struct {
 
 	receiveSignal     chan types.Unit
 	receiveStopSignal chan types.Unit
+
+	// atomic flag indicating whether the actor is processing messages
+	processingMessages atomic.Int32
 }
 
 // newPID creates a new pid
@@ -196,7 +199,7 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 		fieldsLocker:                   new(sync.RWMutex),
 		stopLocker:                     new(sync.Mutex),
 		httpClient:                     http.NewClient(),
-		mailbox:                        collection.NewQueue(),
+		mailbox:                        newMailbox(),
 		stashBuffer:                    nil,
 		stashLocker:                    &sync.Mutex{},
 		eventsStream:                   nil,
@@ -1023,8 +1026,19 @@ func (pid *PID) watchees() *pidMap {
 // doReceive pushes a given message to the actor mailbox
 // and signals the receiveLoop to process it
 func (pid *PID) doReceive(receiveCtx *ReceiveContext) {
-	pid.mailbox.Enqueue(receiveCtx)
-	pid.receiveSignal <- types.Unit{}
+	pid.mailbox.Push(receiveCtx)
+	pid.signalMessage()
+}
+
+// Signal that a message has arrived and wake up the actor if needed
+func (pid *PID) signalMessage() {
+	// only signal if the actor is not already processing messages
+	if pid.processingMessages.CompareAndSwap(0, 1) {
+		select {
+		case pid.receiveSignal <- types.Unit{}:
+		default:
+		}
+	}
 }
 
 // receiveLoop extracts every message from the actor mailbox
@@ -1036,8 +1050,19 @@ func (pid *PID) receiveLoop() {
 			case <-pid.receiveStopSignal:
 				return
 			case <-pid.receiveSignal:
-				if dequeue := pid.mailbox.Dequeue(); dequeue != nil {
-					received := dequeue.(*ReceiveContext)
+				// Process all messages in the queue one by one
+				for {
+					received := pid.mailbox.Pop()
+					if received == nil {
+						// If no more messages, stop processing
+						pid.processingMessages.Store(0)
+						// Check if new messages were added in the meantime and restart processing
+						if !pid.mailbox.IsEmpty() && pid.processingMessages.CompareAndSwap(0, 1) {
+							continue
+						}
+						break
+					}
+					// Process the message
 					switch received.Message().(type) {
 					case *goaktpb.PoisonPill:
 						_ = pid.Shutdown(received.Context())
@@ -1282,7 +1307,7 @@ func (pid *PID) doStop(ctx context.Context) error {
 		for {
 			select {
 			case <-ticker.C:
-				if pid.mailbox.Length() == 0 {
+				if pid.mailbox.IsEmpty() {
 					close(tickerStopSig)
 					return
 				}

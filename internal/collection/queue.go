@@ -25,53 +25,51 @@
 package collection
 
 import (
-	"sync"
 	"sync/atomic"
 	"unsafe"
 )
 
-// Queue defines a lock-free Queue
-// code has been lifted as it is from https://github.com/golang-design/lockfree
+// Queue defines a lock-free Queue.
 type Queue struct {
-	head unsafe.Pointer
-	tail unsafe.Pointer
-	len  uint64
-	pool sync.Pool
+	head unsafe.Pointer // pointer to the head of the queue
+	tail unsafe.Pointer // pointer to the tail of the queue
+	len  uint64         // length of the queue
 }
 
-// NewQueue creates a new lock-free queue.
+// item is a single node in the queue.
+type item struct {
+	next unsafe.Pointer // pointer to the next item in the queue
+	v    interface{}    // the value stored in the queue item
+}
+
+// NewQueue creates and returns a new lock-free queue.
 func NewQueue() *Queue {
-	head := item{next: nil, v: nil} // allocate a free item
+	// Initial node is an empty item to act as a sentinel (dummy node).
+	dummy := &item{}
 	return &Queue{
-		tail: unsafe.Pointer(&head), // both head and tail points
-		head: unsafe.Pointer(&head), // to the free item
-		pool: sync.Pool{
-			New: func() interface{} {
-				return &item{}
-			},
-		},
+		head: unsafe.Pointer(dummy), // both head and tail point to the dummy node
+		tail: unsafe.Pointer(dummy),
 	}
 }
 
-// Enqueue puts the given value v at the tail of the queue.
+// Enqueue adds a value to the tail of the queue.
 func (q *Queue) Enqueue(v interface{}) {
-	i := q.pool.Get().(*item)
-	i.next = nil
-	i.v = v
-
-	var last, lastnext *item
+	xitem := &item{v: v}
 	for {
-		last = loaditem(&q.tail)
-		lastnext = loaditem(&last.next)
-		if loaditem(&q.tail) == last { // are tail and next consistent?
-			if lastnext == nil { // was tail pointing to the last node?
-				if casitem(&last.next, lastnext, i) { // try to link item at the end of linked list
-					casitem(&q.tail, last, i) // enqueue is done. try swing tail to the inserted node
+		last := loadItem(&q.tail)        // Load current tail
+		lastNext := loadItem(&last.next) // Load the next pointer of tail
+		if last == loadItem(&q.tail) {   // Check tail consistency
+			if lastNext == nil { // Is tail really pointing to the last node?
+				// Try to link the new item at the end
+				if casItem(&last.next, nil, xitem) {
+					// Enqueue successful, now try to move the tail pointer
+					casItem(&q.tail, last, xitem)
 					atomic.AddUint64(&q.len, 1)
 					return
 				}
-			} else { // tail was not pointing to the last node
-				casitem(&q.tail, last, lastnext) // try swing tail to the next node
+			} else {
+				// Tail was pointing to an intermediate node, help move it forward
+				casItem(&q.tail, last, lastNext)
 			}
 		}
 	}
@@ -80,42 +78,46 @@ func (q *Queue) Enqueue(v interface{}) {
 // Dequeue removes and returns the value at the head of the queue.
 // It returns nil if the queue is empty.
 func (q *Queue) Dequeue() interface{} {
-	var first, last, firstnext *item
 	for {
-		first = loaditem(&q.head)
-		last = loaditem(&q.tail)
-		firstnext = loaditem(&first.next)
-		if first == loaditem(&q.head) { // are head, tail and next consistent?
-			if first == last { // is queue empty?
-				if firstnext == nil { // queue is empty, couldn't dequeue
+		head := loadItem(&q.head)      // Load the current head
+		tail := loadItem(&q.tail)      // Load the current tail
+		next := loadItem(&head.next)   // Load the next node after head
+		if head == loadItem(&q.head) { // Check head consistency
+			if head == tail { // Is the queue empty?
+				if next == nil { // Confirm that queue is empty
 					return nil
 				}
-				casitem(&q.tail, last, firstnext) // tail is falling behind, try to advance it
-			} else { // read value before cas, otherwise another dequeue might free the next node
-				v := firstnext.v
-				if casitem(&q.head, first, firstnext) { // try to swing head to the next node
-					atomic.AddUint64(&q.len, ^uint64(0))
-					q.pool.Put(first)
-					return v // queue was not empty and dequeue finished.
+				// Tail is lagging behind, move it forward
+				casItem(&q.tail, tail, next)
+			} else {
+				// Get the value before CAS to avoid freeing the node too early
+				v := next.v
+				// Try to swing the head to the next node
+				if casItem(&q.head, head, next) {
+					atomic.AddUint64(&q.len, ^uint64(0)) // decrement length
+					return v                             // return the dequeued value
 				}
 			}
 		}
 	}
 }
 
-// Length returns the length of the queue.
+// Length returns the number of items in the queue.
 func (q *Queue) Length() uint64 {
 	return atomic.LoadUint64(&q.len)
 }
 
-type item struct {
-	next unsafe.Pointer
-	v    interface{}
+// IsEmpty returns true when the queue is empty
+func (q *Queue) IsEmpty() bool {
+	return atomic.LoadUint64(&q.len) == 0
 }
 
-func loaditem(p *unsafe.Pointer) *item {
+// loadItem atomically loads an item pointer from the given unsafe pointer.
+func loadItem(p *unsafe.Pointer) *item {
 	return (*item)(atomic.LoadPointer(p))
 }
-func casitem(p *unsafe.Pointer, old, new *item) bool {
+
+// casItem performs an atomic compare-and-swap on an unsafe pointer.
+func casItem(p *unsafe.Pointer, old, new *item) bool {
 	return atomic.CompareAndSwapPointer(p, unsafe.Pointer(old), unsafe.Pointer(new))
 }

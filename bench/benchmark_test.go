@@ -63,18 +63,13 @@ func BenchmarkActor(b *testing.B) {
 		// wait for actors to start properly
 		pause(1 * time.Second)
 
-		b.SetParallelism(7)
 		b.ResetTimer()
 		b.ReportAllocs()
-		start := time.Now()
 		b.RunParallel(func(pb *testing.PB) {
 			for pb.Next() {
 				_ = actors.Tell(ctx, pid, new(benchmarkpb.BenchTell))
 			}
 		})
-
-		opsPerSec := float64(b.N) / time.Since(start).Seconds()
-		b.ReportMetric(opsPerSec, "ops/s")
 
 		_ = pid.Shutdown(ctx)
 		_ = actorSystem.Stop(ctx)
@@ -102,18 +97,13 @@ func BenchmarkActor(b *testing.B) {
 		// wait for actors to start properly
 		pause(1 * time.Second)
 
-		b.SetParallelism(7)
 		b.ResetTimer()
 		b.ReportAllocs()
-		start := time.Now()
 		b.RunParallel(func(pb *testing.PB) {
 			for pb.Next() {
 				_ = sender.Tell(ctx, receiver, new(benchmarkpb.BenchTell))
 			}
 		})
-
-		opsPerSec := float64(b.N) / time.Since(start).Seconds()
-		b.ReportMetric(opsPerSec, "ops/s")
 
 		_ = actorSystem.Stop(ctx)
 	})
@@ -139,19 +129,14 @@ func BenchmarkActor(b *testing.B) {
 
 		// wait for actors to start properly
 		pause(1 * time.Second)
-
-		b.SetParallelism(7)
 		b.ResetTimer()
 		b.ReportAllocs()
-		start := time.Now()
+
 		b.RunParallel(func(pb *testing.PB) {
 			for pb.Next() {
 				_ = sender.SendAsync(ctx, receiver.Name(), new(benchmarkpb.BenchTell))
 			}
 		})
-
-		opsPerSec := float64(b.N) / time.Since(start).Seconds()
-		b.ReportMetric(opsPerSec, "ops/s")
 
 		_ = actorSystem.Stop(ctx)
 	})
@@ -178,19 +163,13 @@ func BenchmarkActor(b *testing.B) {
 
 		// wait for actors to start properly
 		pause(1 * time.Second)
-
-		b.SetParallelism(7)
 		b.ResetTimer()
 		b.ReportAllocs()
-		start := time.Now()
-
 		b.RunParallel(func(pb *testing.PB) {
 			for pb.Next() {
 				_, _ = actors.Ask(ctx, pid, new(benchmarkpb.BenchRequest), receivingTimeout)
 			}
 		})
-		opsPerSec := float64(b.N) / time.Since(start).Seconds()
-		b.ReportMetric(opsPerSec, "ops/s")
 
 		_ = pid.Shutdown(ctx)
 		_ = actorSystem.Stop(ctx)
@@ -218,19 +197,13 @@ func BenchmarkActor(b *testing.B) {
 		// wait for actors to start properly
 		pause(1 * time.Second)
 
-		b.SetParallelism(7)
 		b.ResetTimer()
 		b.ReportAllocs()
-		start := time.Now()
 		b.RunParallel(func(pb *testing.PB) {
 			for pb.Next() {
 				_, _ = sender.Ask(ctx, receiver, new(benchmarkpb.BenchRequest))
 			}
 		})
-
-		opsPerSec := float64(b.N) / time.Since(start).Seconds()
-		b.ReportMetric(opsPerSec, "ops/s")
-
 		_ = actorSystem.Stop(ctx)
 	})
 }
