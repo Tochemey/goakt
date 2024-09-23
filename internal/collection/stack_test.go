@@ -33,7 +33,7 @@ import (
 
 func TestStackPopEmpty(t *testing.T) {
 	s := NewStack()
-	require.NotNil(t, s.Pop())
+	require.Nil(t, s.Pop())
 	s.Push(1)
 	s.Push(2)
 	s.Push(3)
