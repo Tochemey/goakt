@@ -30,7 +30,6 @@ import (
 	"fmt"
 	stdhttp "net/http"
 	"os"
-	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -166,6 +165,9 @@ type PID struct {
 
 	watcherNotificationChan        chan error
 	watchersNotificationStopSignal chan types.Unit
+
+	receiveSignal     chan types.Unit
+	receiveStopSignal chan types.Unit
 }
 
 // newPID creates a new pid
@@ -204,6 +206,8 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 		processingTimeLocker:           new(sync.Mutex),
 		watcherNotificationChan:        make(chan error, 1),
 		watchersNotificationStopSignal: make(chan types.Unit, 1),
+		receiveSignal:                  make(chan types.Unit, 1),
+		receiveStopSignal:              make(chan types.Unit, 1),
 	}
 
 	p.initMaxRetries.Store(DefaultInitMaxRetries)
@@ -227,9 +231,10 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 		return nil, err
 	}
 
-	go p.notifyWatchers()
+	p.receive()
+	p.notifyWatchers()
 	if p.passivateAfter.Load() > 0 {
-		go p.passivationLoop()
+		p.passivationLoop()
 	}
 
 	if p.metricEnabled.Load() {
@@ -402,9 +407,10 @@ func (pid *PID) Restart(ctx context.Context) error {
 		return err
 	}
 
-	go pid.notifyWatchers()
+	pid.receive()
+	pid.notifyWatchers()
 	if pid.passivateAfter.Load() > 0 {
-		go pid.passivationLoop()
+		pid.passivationLoop()
 	}
 
 	pid.restartCount.Inc()
@@ -1017,30 +1023,28 @@ func (pid *PID) watchees() *pidMap {
 // doReceive pushes a given message to the actor receiveContextBuffer
 func (pid *PID) doReceive(receiveCtx *ReceiveContext) {
 	pid.mailbox.Enqueue(receiveCtx)
-	pid.receive()
+	pid.receiveSignal <- types.Unit{}
 }
 
 // receive extracts every message from the actor mailbox
 func (pid *PID) receive() {
-	// TODO: make sure messages are processed in order
 	go func() {
-		dequeue := pid.mailbox.Dequeue()
-		if dequeue == nil {
-			runtime.Gosched()
-			return
-		}
-
-		received := dequeue.(*ReceiveContext)
-		switch received.Message().(type) {
-		case *goaktpb.PoisonPill:
-			_ = pid.Shutdown(received.Context())
-			runtime.Gosched()
-			return
-		default:
-			pid.latestReceiveTime.Store(time.Now())
-			pid.handleReceived(received)
-			runtime.Gosched()
-			return
+		for {
+			select {
+			case <-pid.receiveStopSignal:
+				return
+			case <-pid.receiveSignal:
+				if dequeue := pid.mailbox.Dequeue(); dequeue != nil {
+					received := dequeue.(*ReceiveContext)
+					switch received.Message().(type) {
+					case *goaktpb.PoisonPill:
+						_ = pid.Shutdown(received.Context())
+					default:
+						pid.latestReceiveTime.Store(time.Now())
+						pid.handleReceived(received)
+					}
+				}
+			}
 		}
 	}()
 }
@@ -1291,6 +1295,7 @@ func (pid *PID) doStop(ctx context.Context) error {
 	<-tickerStopSig
 	pid.httpClient.CloseIdleConnections()
 	pid.watchersNotificationStopSignal <- types.Unit{}
+	pid.receiveStopSignal <- types.Unit{}
 
 	if err := errorschain.
 		New(errorschain.ReturnFirst()).
@@ -1328,18 +1333,20 @@ func (pid *PID) removeChild(cid *PID) {
 
 // notifyWatchers send error to watchers
 func (pid *PID) notifyWatchers() {
-	for {
-		select {
-		case err := <-pid.watcherNotificationChan:
-			if err != nil {
-				for _, item := range pid.watchers().Items() {
-					item.Value.ErrChan <- err
+	go func() {
+		for {
+			select {
+			case err := <-pid.watcherNotificationChan:
+				if err != nil {
+					for _, item := range pid.watchers().Items() {
+						item.Value.ErrChan <- err
+					}
 				}
+			case <-pid.watchersNotificationStopSignal:
+				return
 			}
-		case <-pid.watchersNotificationStopSignal:
-			return
 		}
-	}
+	}()
 }
 
 // toDeadletterQueue sends message to deadletter queue

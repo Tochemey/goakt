@@ -73,6 +73,17 @@ func (s *Stack) Push(v interface{}) {
 	}
 }
 
+// Peek helps view the top item on the stack
 func (s *Stack) Peek() interface{} {
-	return *(*interface{})(atomic.LoadPointer(&s.top))
+	top := atomic.LoadPointer(&s.top)
+	if top == nil {
+		return nil
+	}
+	item := (*directItem)(top)
+	return item.v
+}
+
+// Length returns the length of the Stack.
+func (s *Stack) Length() uint64 {
+	return atomic.LoadUint64(&s.len)
 }
