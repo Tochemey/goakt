@@ -68,7 +68,7 @@ func main() {
 	lib.Pause(1 * time.Second)
 
 	duration := time.Minute
-	if err := pingActor.SendAsync(ctx, pongActor.Name(), new(benchmarkpb.Ping)); err != nil {
+	if err := pingActor.Tell(ctx, pongActor, new(benchmarkpb.Ping)); err != nil {
 		panic(err)
 	}
 

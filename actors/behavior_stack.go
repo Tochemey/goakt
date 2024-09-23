@@ -24,21 +24,23 @@
 
 package actors
 
-import "sync"
+import (
+	"sync/atomic"
+	"unsafe"
+)
 
 // Behavior defines an actor behavior
 type Behavior func(ctx *ReceiveContext)
 
 type bnode struct {
-	value    Behavior
-	previous *bnode
+	value Behavior
+	next  unsafe.Pointer
 }
 
 // behaviorStack defines a stack of Behavior
 type behaviorStack struct {
-	top    *bnode
-	length int
-	mutex  *sync.RWMutex
+	top    unsafe.Pointer
+	length uint64
 }
 
 // newBehaviorStack creates an instance of behaviorStack
@@ -46,58 +48,54 @@ func newBehaviorStack() *behaviorStack {
 	return &behaviorStack{
 		top:    nil,
 		length: 0,
-		mutex:  &sync.RWMutex{},
 	}
 }
 
 // Len returns the length of the stack.
 func (bs *behaviorStack) Len() int {
-	bs.mutex.RLock()
-	length := bs.length
-	bs.mutex.RUnlock()
-	return length
+	return int(atomic.LoadUint64(&bs.length))
 }
 
 // Peek helps view the top item on the stack
 func (bs *behaviorStack) Peek() Behavior {
-	bs.mutex.RLock()
-	length := bs.length
-	bs.mutex.RUnlock()
-	if length == 0 {
+	top := atomic.LoadPointer(&bs.top)
+	if top == nil {
 		return nil
 	}
-
-	bs.mutex.RLock()
-	value := bs.top.value
-	bs.mutex.RUnlock()
-	return value
+	item := (*bnode)(top)
+	return item.value
 }
 
 // Pop removes and return top element of stack
 func (bs *behaviorStack) Pop() Behavior {
-	bs.mutex.RLock()
-	length := bs.length
-	bs.mutex.RUnlock()
-	if length == 0 {
-		return nil
+	var top, next unsafe.Pointer
+	var item *bnode
+	for {
+		top = atomic.LoadPointer(&bs.top)
+		if top == nil {
+			return nil
+		}
+		item = (*bnode)(top)
+		next = atomic.LoadPointer(&item.next)
+		if atomic.CompareAndSwapPointer(&bs.top, top, next) {
+			atomic.AddUint64(&bs.length, ^uint64(0))
+			return item.value
+		}
 	}
-
-	bs.mutex.RLock()
-	n := bs.top
-	bs.top = n.previous
-	bs.length--
-	value := n.value
-	bs.mutex.RUnlock()
-	return value
 }
 
 // Push a new value onto the stack
 func (bs *behaviorStack) Push(behavior Behavior) {
-	bs.mutex.Lock()
-	n := &bnode{behavior, bs.top}
-	bs.top = n
-	bs.length++
-	bs.mutex.Unlock()
+	node := bnode{value: behavior}
+	var top unsafe.Pointer
+	for {
+		top = atomic.LoadPointer(&bs.top)
+		node.next = top
+		if atomic.CompareAndSwapPointer(&bs.top, top, unsafe.Pointer(&node)) {
+			atomic.AddUint64(&bs.length, 1)
+			return
+		}
+	}
 }
 
 // IsEmpty checks if stack is empty
@@ -107,8 +105,6 @@ func (bs *behaviorStack) IsEmpty() bool {
 
 // Reset empty the stack
 func (bs *behaviorStack) Reset() {
-	bs.mutex.Lock()
-	bs.top = nil
-	bs.length = 0
-	bs.mutex.Unlock()
+	atomic.StorePointer(&bs.top, nil)
+	atomic.StoreUint64(&bs.length, 0)
 }

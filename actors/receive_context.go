@@ -104,13 +104,13 @@ func (c *ReceiveContext) Message() proto.Message {
 // BecomeStacked sets a new behavior to the actor.
 // The current message in process during the transition will still be processed with the current
 // behavior before the transition. However, subsequent messages will be processed with the new behavior.
-// One needs to call UnBecomeStacked to go the previous the actor's behavior.
+// One needs to call UnBecomeStacked to go the next the actor's behavior.
 // which is the default behavior.
 func (c *ReceiveContext) BecomeStacked(behavior Behavior) {
 	c.self.setBehaviorStacked(behavior)
 }
 
-// UnBecomeStacked sets the actor behavior to the previous behavior before BecomeStacked was called
+// UnBecomeStacked sets the actor behavior to the next behavior before BecomeStacked was called
 func (c *ReceiveContext) UnBecomeStacked() {
 	c.self.unsetBehaviorStacked()
 }

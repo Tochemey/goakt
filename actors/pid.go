@@ -1250,7 +1250,7 @@ func (pid *PID) setBehaviorStacked(behavior Behavior) {
 	pid.fieldsLocker.Unlock()
 }
 
-// unsetBehaviorStacked sets the actor's behavior to the previous behavior
+// unsetBehaviorStacked sets the actor's behavior to the next behavior
 // prior to setBehaviorStacked is called
 func (pid *PID) unsetBehaviorStacked() {
 	pid.fieldsLocker.Lock()

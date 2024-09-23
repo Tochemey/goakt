@@ -41,13 +41,13 @@ type Queue struct {
 
 // NewQueue creates a new lock-free queue.
 func NewQueue() *Queue {
-	head := directItem{next: nil, v: nil} // allocate a free item
+	head := item{next: nil, v: nil} // allocate a free item
 	return &Queue{
 		tail: unsafe.Pointer(&head), // both head and tail points
 		head: unsafe.Pointer(&head), // to the free item
 		pool: sync.Pool{
 			New: func() interface{} {
-				return &directItem{}
+				return &item{}
 			},
 		},
 	}
@@ -55,11 +55,11 @@ func NewQueue() *Queue {
 
 // Enqueue puts the given value v at the tail of the queue.
 func (q *Queue) Enqueue(v interface{}) {
-	i := q.pool.Get().(*directItem)
+	i := q.pool.Get().(*item)
 	i.next = nil
 	i.v = v
 
-	var last, lastnext *directItem
+	var last, lastnext *item
 	for {
 		last = loaditem(&q.tail)
 		lastnext = loaditem(&last.next)
@@ -80,7 +80,7 @@ func (q *Queue) Enqueue(v interface{}) {
 // Dequeue removes and returns the value at the head of the queue.
 // It returns nil if the queue is empty.
 func (q *Queue) Dequeue() interface{} {
-	var first, last, firstnext *directItem
+	var first, last, firstnext *item
 	for {
 		first = loaditem(&q.head)
 		last = loaditem(&q.tail)
@@ -108,14 +108,14 @@ func (q *Queue) Length() uint64 {
 	return atomic.LoadUint64(&q.len)
 }
 
-type directItem struct {
+type item struct {
 	next unsafe.Pointer
 	v    interface{}
 }
 
-func loaditem(p *unsafe.Pointer) *directItem {
-	return (*directItem)(atomic.LoadPointer(p))
+func loaditem(p *unsafe.Pointer) *item {
+	return (*item)(atomic.LoadPointer(p))
 }
-func casitem(p *unsafe.Pointer, old, new *directItem) bool {
+func casitem(p *unsafe.Pointer, old, new *item) bool {
 	return atomic.CompareAndSwapPointer(p, unsafe.Pointer(old), unsafe.Pointer(new))
 }
