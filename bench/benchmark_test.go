@@ -195,6 +195,44 @@ func BenchmarkActor(b *testing.B) {
 		_ = pid.Shutdown(ctx)
 		_ = actorSystem.Stop(ctx)
 	})
+	b.Run("Ask", func(b *testing.B) {
+		ctx := context.TODO()
+
+		// create the actor system
+		actorSystem, _ := actors.NewActorSystem("bench",
+			actors.WithLogger(log.DiscardLogger),
+			actors.WithActorInitMaxRetries(1),
+			actors.WithSupervisorDirective(actors.NewStopDirective()),
+			actors.WithReplyTimeout(receivingTimeout))
+
+		// start the actor system
+		_ = actorSystem.Start(ctx)
+
+		// wait for system to start properly
+		pause(1 * time.Second)
+
+		// create the actors
+		sender, _ := actorSystem.Spawn(ctx, "sender", new(Benchmarker))
+		receiver, _ := actorSystem.Spawn(ctx, "receiver", new(Benchmarker))
+
+		// wait for actors to start properly
+		pause(1 * time.Second)
+
+		b.SetParallelism(7)
+		b.ResetTimer()
+		b.ReportAllocs()
+		start := time.Now()
+		b.RunParallel(func(pb *testing.PB) {
+			for pb.Next() {
+				_, _ = sender.Ask(ctx, receiver, new(benchmarkpb.BenchRequest))
+			}
+		})
+
+		opsPerSec := float64(b.N) / time.Since(start).Seconds()
+		b.ReportMetric(opsPerSec, "ops/s")
+
+		_ = actorSystem.Stop(ctx)
+	})
 }
 
 func pause(duration time.Duration) {

@@ -94,7 +94,7 @@ type PID struct {
 	// any further resources like memory and cpu. The default value is 120 seconds
 	passivateAfter atomic.Duration
 
-	// specifies how long the sender of a mail should wait to receive a reply
+	// specifies how long the sender of a mail should wait to receiveLoop a reply
 	// when using Ask. The default value is 5s
 	askTimeout atomic.Duration
 
@@ -231,7 +231,7 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 		return nil, err
 	}
 
-	p.receive()
+	p.receiveLoop()
 	p.notifyWatchers()
 	if p.passivateAfter.Load() > 0 {
 		go p.passivationLoop()
@@ -407,7 +407,7 @@ func (pid *PID) Restart(ctx context.Context) error {
 		return err
 	}
 
-	pid.receive()
+	pid.receiveLoop()
 	pid.notifyWatchers()
 	if pid.passivateAfter.Load() > 0 {
 		go pid.passivationLoop()
@@ -1020,14 +1020,16 @@ func (pid *PID) watchees() *pidMap {
 	return pid.watchedList
 }
 
-// doReceive pushes a given message to the actor receiveContextBuffer
+// doReceive pushes a given message to the actor mailbox
+// and signals the receiveLoop to process it
 func (pid *PID) doReceive(receiveCtx *ReceiveContext) {
 	pid.mailbox.Enqueue(receiveCtx)
 	pid.receiveSignal <- types.Unit{}
 }
 
-// receive extracts every message from the actor mailbox
-func (pid *PID) receive() {
+// receiveLoop extracts every message from the actor mailbox
+// and pass it to the appropriate behavior for handling
+func (pid *PID) receiveLoop() {
 	go func() {
 		for {
 			select {
@@ -1040,7 +1042,6 @@ func (pid *PID) receive() {
 					case *goaktpb.PoisonPill:
 						_ = pid.Shutdown(received.Context())
 					default:
-						pid.latestReceiveTime.Store(time.Now())
 						pid.handleReceived(received)
 					}
 				}
@@ -1052,8 +1053,8 @@ func (pid *PID) receive() {
 // handleReceived picks the right behavior and processes the message
 func (pid *PID) handleReceived(received *ReceiveContext) {
 	defer pid.recovery(received)
-
 	if behavior := pid.behaviorStack.Peek(); behavior != nil {
+		pid.latestReceiveTime.Store(time.Now())
 		pid.processedCount.Inc()
 		behavior(received)
 	}
