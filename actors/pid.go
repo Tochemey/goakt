@@ -59,6 +59,17 @@ import (
 	"github.com/tochemey/goakt/v2/telemetry"
 )
 
+// specifies the state in which the PID is
+// regarding message processing
+type processingState int32
+
+const (
+	// idle means there are no messages to process
+	idle processingState = iota
+	// processing means the PID is processing messages
+	processing
+)
+
 // watcher is used to handle parent child relationship.
 // This helps handle error propagation from a child actor using any of supervisory strategies
 type watcher struct {
@@ -1030,10 +1041,10 @@ func (pid *PID) doReceive(receiveCtx *ReceiveContext) {
 	pid.signalMessage()
 }
 
-// Signal that a message has arrived and wake up the actor if needed
+// signal that a message has arrived and wake up the actor if needed
 func (pid *PID) signalMessage() {
 	// only signal if the actor is not already processing messages
-	if pid.processingMessages.CompareAndSwap(0, 1) {
+	if pid.processingMessages.CompareAndSwap(int32(idle), int32(processing)) {
 		select {
 		case pid.receiveSignal <- types.Unit{}:
 		default:
@@ -1055,9 +1066,9 @@ func (pid *PID) receiveLoop() {
 					received := pid.mailbox.Pop()
 					if received == nil {
 						// If no more messages, stop processing
-						pid.processingMessages.Store(0)
+						pid.processingMessages.Store(int32(idle))
 						// Check if new messages were added in the meantime and restart processing
-						if !pid.mailbox.IsEmpty() && pid.processingMessages.CompareAndSwap(0, 1) {
+						if !pid.mailbox.IsEmpty() && pid.processingMessages.CompareAndSwap(int32(idle), int32(processing)) {
 							continue
 						}
 						break
