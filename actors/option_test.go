@@ -79,7 +79,7 @@ func TestOption(t *testing.T) {
 		{
 			name:     "WithRemoting",
 			option:   WithRemoting("localhost", 3100),
-			expected: actorSystem{remotingEnabled: atomic.Bool{}, port: 3100, host: "localhost"},
+			expected: actorSystem{remotingEnabled: atomicTrue, port: 3100, host: "localhost"},
 		},
 		{
 			name:     "WithShutdownTimeout",
