@@ -27,7 +27,6 @@ package actors
 import (
 	"time"
 
-	"github.com/tochemey/goakt/v2/internal/collection"
 	"github.com/tochemey/goakt/v2/internal/eventstream"
 	"github.com/tochemey/goakt/v2/log"
 	"github.com/tochemey/goakt/v2/telemetry"
@@ -104,7 +103,7 @@ func withTelemetry(telemetry *telemetry.Telemetry) pidOption {
 // withStash sets the actor's stash buffer
 func withStash() pidOption {
 	return func(pid *PID) {
-		pid.stashBuffer = collection.NewQueue()
+		pid.stashBuffer = newMailbox()
 	}
 }
 
