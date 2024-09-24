@@ -38,9 +38,7 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
-	"connectrpc.com/otelconnect"
 	"github.com/google/uuid"
-	otelmetric "go.opentelemetry.io/otel/metric"
 	"go.uber.org/atomic"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
@@ -54,11 +52,9 @@ import (
 	"github.com/tochemey/goakt/v2/internal/http"
 	"github.com/tochemey/goakt/v2/internal/internalpb"
 	"github.com/tochemey/goakt/v2/internal/internalpb/internalpbconnect"
-	"github.com/tochemey/goakt/v2/internal/metric"
 	"github.com/tochemey/goakt/v2/internal/tcp"
 	"github.com/tochemey/goakt/v2/internal/types"
 	"github.com/tochemey/goakt/v2/log"
-	"github.com/tochemey/goakt/v2/telemetry"
 )
 
 // ActorSystem defines the contract of an actor system
@@ -175,8 +171,7 @@ type actorSystem struct {
 	actorInitTimeout time.Duration
 	// Specifies the supervisor strategy
 	supervisorDirective SupervisorDirective
-	// Specifies the telemetry config
-	telemetry *telemetry.Telemetry
+
 	// Specifies whether remoting is enabled.
 	// This allows to handle remote messaging
 	remotingEnabled atomic.Bool
@@ -209,9 +204,6 @@ type actorSystem struct {
 
 	// specifies the message scheduler
 	scheduler *scheduler
-
-	// specifies whether metrics is enabled
-	metricEnabled atomic.Bool
 
 	registry   types.Registry
 	reflection *reflection
@@ -247,7 +239,6 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		askTimeout:             DefaultAskTimeout,
 		actorInitMaxRetries:    DefaultInitMaxRetries,
 		supervisorDirective:    DefaultSupervisoryStrategy,
-		telemetry:              telemetry.New(),
 		locker:                 sync.Mutex{},
 		shutdownTimeout:        DefaultShutdownTimeout,
 		stashEnabled:           false,
@@ -269,7 +260,6 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 	system.started.Store(false)
 	system.remotingEnabled.Store(false)
 	system.clusterEnabled.Store(false)
-	system.metricEnabled.Store(false)
 
 	system.reflection = newReflection(system.registry)
 
@@ -286,13 +276,6 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 	}
 
 	system.scheduler = newScheduler(system.logger, system.shutdownTimeout, withSchedulerCluster(system.cluster))
-
-	if system.metricEnabled.Load() {
-		if err := system.registerMetrics(); err != nil {
-			return nil, err
-		}
-	}
-
 	return system, nil
 }
 
@@ -1111,22 +1094,6 @@ func (x *actorSystem) enableClustering(ctx context.Context) error {
 func (x *actorSystem) enableRemoting(ctx context.Context) {
 	x.logger.Info("enabling remoting...")
 
-	var interceptor *otelconnect.Interceptor
-	var err error
-	if x.metricEnabled.Load() {
-		interceptor, err = otelconnect.NewInterceptor(
-			otelconnect.WithMeterProvider(x.telemetry.MeterProvider()),
-		)
-		if err != nil {
-			x.logger.Panic(fmt.Errorf("failed to initialize observability feature: %w", err))
-		}
-	}
-
-	var opts []connect.HandlerOption
-	if interceptor != nil {
-		opts = append(opts, connect.WithInterceptors(interceptor))
-	}
-
 	remotingHost, remotingPort, err := tcp.GetHostPort(fmt.Sprintf("%s:%d", x.host, x.port))
 	if err != nil {
 		x.logger.Panic(fmt.Errorf("failed to resolve remoting TCP address: %w", err))
@@ -1135,8 +1102,8 @@ func (x *actorSystem) enableRemoting(ctx context.Context) {
 	x.host = remotingHost
 	x.port = int32(remotingPort)
 
-	remotingServicePath, remotingServiceHandler := internalpbconnect.NewRemotingServiceHandler(x, opts...)
-	clusterServicePath, clusterServiceHandler := internalpbconnect.NewClusterServiceHandler(x, opts...)
+	remotingServicePath, remotingServiceHandler := internalpbconnect.NewRemotingServiceHandler(x)
+	clusterServicePath, clusterServiceHandler := internalpbconnect.NewClusterServiceHandler(x)
 
 	mux := stdhttp.NewServeMux()
 	mux.Handle(remotingServicePath, remotingServiceHandler)
@@ -1160,7 +1127,6 @@ func (x *actorSystem) enableRemoting(ctx context.Context) {
 
 // reset the actor system
 func (x *actorSystem) reset() {
-	x.telemetry = nil
 	x.actors.reset()
 	x.name = ""
 	x.cluster = nil
@@ -1198,22 +1164,6 @@ func (x *actorSystem) janitor() {
 	<-tickerStopSig
 	ticker.Stop()
 	x.logger.Info("janitor has stopped...")
-}
-
-// registerMetrics register the PID metrics with OTel instrumentation.
-func (x *actorSystem) registerMetrics() error {
-	meter := x.telemetry.Meter()
-	metrics, err := metric.NewActorSystemMetric(meter)
-	if err != nil {
-		return err
-	}
-
-	_, err = meter.RegisterCallback(func(_ context.Context, observer otelmetric.Observer) error {
-		observer.ObserveInt64(metrics.ActorsCount(), int64(x.NumActors()))
-		return nil
-	}, metrics.ActorsCount())
-
-	return err
 }
 
 // replicationLoop publishes newly created actor into the cluster when cluster is enabled
@@ -1374,7 +1324,6 @@ func (x *actorSystem) configPID(ctx context.Context, name string, actor Actor) (
 		withSupervisorDirective(x.supervisorDirective),
 		withEventsStream(x.eventsStream),
 		withInitTimeout(x.actorInitTimeout),
-		withTelemetry(x.telemetry),
 	}
 
 	// enable stash
@@ -1387,10 +1336,6 @@ func (x *actorSystem) configPID(ctx context.Context, name string, actor Actor) (
 		pidOpts = append(pidOpts, withPassivationDisabled())
 	} else {
 		pidOpts = append(pidOpts, withPassivationAfter(x.expireActorAfter))
-	}
-
-	if x.metricEnabled.Load() {
-		pidOpts = append(pidOpts, withMetric())
 	}
 
 	pid, err := newPID(ctx,

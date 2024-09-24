@@ -29,7 +29,6 @@ import (
 
 	"github.com/tochemey/goakt/v2/internal/eventstream"
 	"github.com/tochemey/goakt/v2/log"
-	"github.com/tochemey/goakt/v2/telemetry"
 )
 
 // pidOption represents the pid
@@ -93,13 +92,6 @@ func withPassivationDisabled() pidOption {
 	}
 }
 
-// withTelemetry sets the custom telemetry
-func withTelemetry(telemetry *telemetry.Telemetry) pidOption {
-	return func(pid *PID) {
-		pid.telemetry = telemetry
-	}
-}
-
 // withStash sets the actor's stash buffer
 func withStash() pidOption {
 	return func(pid *PID) {
@@ -118,11 +110,5 @@ func withEventsStream(stream *eventstream.EventsStream) pidOption {
 func withInitTimeout(duration time.Duration) pidOption {
 	return func(pid *PID) {
 		pid.initTimeout.Store(duration)
-	}
-}
-
-func withMetric() pidOption {
-	return func(pid *PID) {
-		pid.metricEnabled.Store(true)
 	}
 }

@@ -27,7 +27,6 @@ package actors
 import (
 	"bytes"
 	"context"
-	"sort"
 	"sync"
 	"testing"
 	"time"
@@ -36,8 +35,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/travisjeffery/go-dynaport"
-	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
-	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/tochemey/goakt/v2/address"
@@ -45,7 +42,6 @@ import (
 	"github.com/tochemey/goakt/v2/internal/eventstream"
 	"github.com/tochemey/goakt/v2/internal/lib"
 	"github.com/tochemey/goakt/v2/log"
-	"github.com/tochemey/goakt/v2/telemetry"
 	"github.com/tochemey/goakt/v2/test/data/testpb"
 	testspb "github.com/tochemey/goakt/v2/test/data/testpb"
 )
@@ -86,6 +82,10 @@ func TestReceive(t *testing.T) {
 		pid.doReceive(receiveContext)
 	}
 
+	lib.Pause(500 * time.Millisecond)
+	assert.Zero(t, pid.ChildrenCount())
+	assert.NotZero(t, pid.LatestProcessedDuration())
+	assert.EqualValues(t, 11, pid.ProcessedCount()) // 1 because of the PostStart message
 	// stop the actor
 	err = pid.Shutdown(ctx)
 	assert.NoError(t, err)
@@ -312,6 +312,8 @@ func TestRestart(t *testing.T) {
 		err = pid.Restart(ctx)
 		assert.NoError(t, err)
 		assert.True(t, pid.IsRunning())
+
+		assert.EqualValues(t, 1, pid.RestartCount())
 		// let us send 10 public to the actor
 		for i := 0; i < count; i++ {
 			err = Tell(ctx, pid, new(testpb.TestSend))
@@ -1039,7 +1041,6 @@ func TestSpawnChild(t *testing.T) {
 		parent, err := newPID(ctx, actorPath,
 			newTestSupervisor(),
 			withInitMaxRetries(1),
-			withMetric(),
 			withCustomLogger(log.DiscardLogger),
 			withAskTimeout(replyTimeout))
 
@@ -1559,75 +1560,6 @@ func TestBatchAsk(t *testing.T) {
 		lib.Pause(time.Second)
 		assert.NoError(t, pid.Shutdown(ctx))
 	})
-}
-func TestRegisterMetrics(t *testing.T) {
-	r := sdkmetric.NewManualReader()
-	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(r))
-	// create an instance of telemetry
-	tel := telemetry.New(telemetry.WithMeterProvider(mp))
-
-	ctx := context.TODO()
-
-	// create the actor path
-	ports := dynaport.Get(1)
-	actorPath := address.New("Test", "sys", "host", ports[0])
-
-	// create the actor ref
-	pid, err := newPID(
-		ctx,
-		actorPath,
-		newTestActor(),
-		withInitMaxRetries(1),
-		withCustomLogger(log.DiscardLogger),
-		withTelemetry(tel),
-		withMetric(),
-		withAskTimeout(replyTimeout))
-
-	require.NoError(t, err)
-	assert.NotNil(t, pid)
-
-	// let us send 10 public to the actor
-	count := 10
-	for i := 0; i < count; i++ {
-		receiveContext := &ReceiveContext{
-			ctx:     ctx,
-			message: new(testpb.TestSend),
-			sender:  NoSender,
-			self:    pid,
-		}
-
-		pid.doReceive(receiveContext)
-	}
-
-	// assert some metrics
-
-	// Should collect 3 metrics
-	got := &metricdata.ResourceMetrics{}
-	err = r.Collect(ctx, got)
-	require.NoError(t, err)
-	assert.Len(t, got.ScopeMetrics, 1)
-	assert.Len(t, got.ScopeMetrics[0].Metrics, 4)
-
-	expected := []string{
-		"actor_child_count",
-		"actor_stash_count",
-		"actor_restart_count",
-		"actor_processed_count",
-	}
-	// sort the array
-	sort.Strings(expected)
-	// get the metrics names
-	actual := make([]string, len(got.ScopeMetrics[0].Metrics))
-	for i, metric := range got.ScopeMetrics[0].Metrics {
-		actual[i] = metric.Name
-	}
-	sort.Strings(actual)
-
-	assert.ElementsMatch(t, expected, actual)
-
-	// stop the actor
-	err = pid.Shutdown(ctx)
-	assert.NoError(t, err)
 }
 func TestRemoteReSpawn(t *testing.T) {
 	t.Run("With actor address not found", func(t *testing.T) {

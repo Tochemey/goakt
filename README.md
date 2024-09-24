@@ -322,19 +322,12 @@ Go-Akt offers out of the box features that can help track, monitor and measure t
 
 #### Metrics
 
-One can enable/disable metrics on a Go-Akt actor system to collect the following metrics:
-
-- Actor Metrics:
-  - Number of children
-  - Number of messages stashed
-  - Number of Restarts
-  - Last message received processing latency in milliseconds
-- System Metrics:
-  - Total Number of Actors
-
-Go-Akt uses under the hood [OpenTelemetry](https://opentelemetry.io/docs/instrumentation/go/) to instrument a system.
-One just need to use the `WithMetric` option when instantiating a Go-Akt actor system and use the default [Telemetry](./telemetry/telemetry.go)
-engine or set a custom one with `WithTelemetry` option of the actor system.
+The following methods have been implemented to help push some metrics to any observability tool:
+  - Total Number of children at a given point in time [PID](./actors/pid.go)
+  - Number of messages stashed at a given point in time [PID](./actors/pid.go)
+  - Number of Restarts at a given point in time [PID](./actors/pid.go)
+  - Latest message received processing duration in milliseconds [PID](./actors/pid.go)
+  - Total Number of Actors at a given point in time [ActorSystem](./actors/actor_system.go)
 
 #### Logging
 

@@ -35,9 +35,7 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
-	"connectrpc.com/otelconnect"
 	"github.com/flowchartsman/retry"
-	otelmetric "go.opentelemetry.io/otel/metric"
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
@@ -51,11 +49,9 @@ import (
 	"github.com/tochemey/goakt/v2/internal/http"
 	"github.com/tochemey/goakt/v2/internal/internalpb"
 	"github.com/tochemey/goakt/v2/internal/internalpb/internalpbconnect"
-	"github.com/tochemey/goakt/v2/internal/metric"
 	"github.com/tochemey/goakt/v2/internal/slice"
 	"github.com/tochemey/goakt/v2/internal/types"
 	"github.com/tochemey/goakt/v2/log"
-	"github.com/tochemey/goakt/v2/telemetry"
 )
 
 // specifies the state in which the PID is
@@ -150,9 +146,6 @@ type PID struct {
 	// testSupervisor strategy
 	supervisorDirective SupervisorDirective
 
-	// observability settings
-	telemetry *telemetry.Telemetry
-
 	// http client
 	httpClient *stdhttp.Client
 
@@ -170,8 +163,6 @@ type PID struct {
 	restartCount   *atomic.Int64
 	childrenCount  *atomic.Int64
 	processedCount *atomic.Int64
-	metricEnabled  atomic.Bool
-	metrics        *metric.ActorMetric
 
 	watcherNotificationChan        chan error
 	watchersNotificationStopSignal chan types.Unit
@@ -204,7 +195,6 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 		supervisorDirective:            DefaultSupervisoryStrategy,
 		watchersList:                   slice.New[*watcher](),
 		watchedList:                    newPIDMap(10),
-		telemetry:                      telemetry.New(),
 		address:                        address,
 		fieldsLocker:                   new(sync.RWMutex),
 		stopLocker:                     new(sync.Mutex),
@@ -230,7 +220,6 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 	p.passivateAfter.Store(DefaultPassivationTimeout)
 	p.askTimeout.Store(DefaultAskTimeout)
 	p.initTimeout.Store(DefaultInitTimeout)
-	p.metricEnabled.Store(false)
 
 	for _, opt := range opts {
 		opt(p)
@@ -248,18 +237,6 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 	p.notifyWatchers()
 	if p.passivateAfter.Load() > 0 {
 		go p.passivationLoop()
-	}
-
-	if p.metricEnabled.Load() {
-		metrics, err := metric.NewActorMetric(p.telemetry.Meter())
-		if err != nil {
-			return nil, err
-		}
-
-		p.metrics = metrics
-		if err := p.registerMetrics(); err != nil {
-			return nil, fmt.Errorf("failed to register actor=%s metrics: %w", p.ID(), err)
-		}
 	}
 
 	p.doReceive(newReceiveContext(ctx, NoSender, p, new(goaktpb.PostStart)))
@@ -438,6 +415,30 @@ func (pid *PID) Restart(ctx context.Context) error {
 	return nil
 }
 
+// RestartCount returns the total number of re-starts by the given PID
+func (pid *PID) RestartCount() int {
+	count := pid.restartCount.Load()
+	return int(count)
+}
+
+// ChildrenCount returns the total number of children for the given PID
+func (pid *PID) ChildrenCount() int {
+	count := pid.childrenCount.Load()
+	return int(count)
+}
+
+// ProcessedCount returns the total number of messages processed at a given time
+func (pid *PID) ProcessedCount() int {
+	count := pid.processedCount.Load()
+	return int(count)
+}
+
+// LatestProcessedDuration returns the duration of the latest message processed
+func (pid *PID) LatestProcessedDuration() time.Duration {
+	pid.latestReceiveDuration.Store(time.Since(pid.latestReceiveTime.Load()))
+	return pid.latestReceiveDuration.Load()
+}
+
 // SpawnChild creates a child actor and start watching it for error
 // When the given child actor already exists its PID will only be returned
 func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor) (*PID, error) {
@@ -467,10 +468,6 @@ func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor) (*PID,
 		withEventsStream(pid.eventsStream),
 		withInitTimeout(pid.initTimeout.Load()),
 		withShutdownTimeout(pid.shutdownTimeout.Load()),
-	}
-
-	if pid.metricEnabled.Load() {
-		opts = append(opts, withMetric())
 	}
 
 	cid, err := newPID(ctx,
@@ -549,10 +546,8 @@ func (pid *PID) Ask(ctx context.Context, to *PID, message proto.Message) (respon
 
 	select {
 	case result := <-receiveContext.response:
-		pid.recordLatestReceiveDurationMetric(ctx)
 		return result, nil
 	case <-time.After(timeout):
-		pid.recordLatestReceiveDurationMetric(ctx)
 		err = ErrRequestTimeout
 		pid.toDeadletterQueue(receiveContext, err)
 		return nil, err
@@ -564,9 +559,7 @@ func (pid *PID) Tell(ctx context.Context, to *PID, message proto.Message) error 
 	if !to.IsRunning() {
 		return ErrDead
 	}
-
 	to.doReceive(newReceiveContext(ctx, pid, to, message))
-	pid.recordLatestReceiveDurationMetric(ctx)
 	return nil
 }
 
@@ -1145,14 +1138,7 @@ func (pid *PID) reset() {
 	pid.initTimeout.Store(DefaultInitTimeout)
 	pid.children.reset()
 	pid.watchersList.Reset()
-	pid.telemetry = telemetry.New()
 	pid.behaviorStack.Reset()
-	if pid.metricEnabled.Load() {
-		if err := pid.registerMetrics(); err != nil {
-			fmtErr := fmt.Errorf("failed to register actor=%s metrics: %w", pid.ID(), err)
-			pid.logger.Error(fmtErr)
-		}
-	}
 	pid.processedCount.Store(0)
 }
 
@@ -1415,48 +1401,11 @@ func (pid *PID) toDeadletterQueue(receiveCtx *ReceiveContext, err error) {
 	})
 }
 
-// registerMetrics register the PID metrics with OTel instrumentation.
-func (pid *PID) registerMetrics() error {
-	meter := pid.telemetry.Meter()
-	metrics := pid.metrics
-	_, err := meter.RegisterCallback(func(_ context.Context, observer otelmetric.Observer) error {
-		observer.ObserveInt64(metrics.ChildrenCount(), pid.childrenCount.Load())
-		observer.ObserveInt64(metrics.StashCount(), int64(pid.StashSize()))
-		observer.ObserveInt64(metrics.RestartCount(), pid.restartCount.Load())
-		observer.ObserveInt64(metrics.ProcessedCount(), pid.processedCount.Load())
-		return nil
-	}, metrics.ChildrenCount(),
-		metrics.StashCount(),
-		metrics.ProcessedCount(),
-		metrics.RestartCount())
-
-	return err
-}
-
-// clientOptions returns the gRPC client connections options
-func (pid *PID) clientOptions() []connect.ClientOption {
-	var interceptor *otelconnect.Interceptor
-	if pid.metricEnabled.Load() {
-		// no need to handle the error because a NoOp trace and meter provider will be
-		// returned by the telemetry engine when none is provided
-		interceptor, _ = otelconnect.NewInterceptor(
-			otelconnect.WithTracerProvider(pid.telemetry.TraceProvider()),
-			otelconnect.WithMeterProvider(pid.telemetry.MeterProvider()))
-	}
-
-	var clientOptions []connect.ClientOption
-	if interceptor != nil {
-		clientOptions = append(clientOptions, connect.WithInterceptors(interceptor))
-	}
-	return clientOptions
-}
-
 // remotingClient returns an instance of the Remote Service client
 func (pid *PID) remotingClient(host string, port int) internalpbconnect.RemotingServiceClient {
 	return internalpbconnect.NewRemotingServiceClient(
 		pid.httpClient,
 		http.URL(host, port),
-		pid.clientOptions()...,
 	)
 }
 
@@ -1560,12 +1509,4 @@ func (pid *PID) handleRestartDirective(cid *PID, maxRetries uint32, timeout time
 		return
 	}
 	pid.Watch(cid)
-}
-
-func (pid *PID) recordLatestReceiveDurationMetric(ctx context.Context) {
-	// record processing time
-	pid.latestReceiveDuration.Store(time.Since(pid.latestReceiveTime.Load()))
-	if pid.metricEnabled.Load() {
-		pid.metrics.LastReceivedDuration().Record(ctx, pid.latestReceiveDuration.Load().Milliseconds())
-	}
 }
