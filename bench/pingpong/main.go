@@ -68,7 +68,7 @@ func main() {
 	lib.Pause(1 * time.Second)
 
 	duration := time.Minute
-	if err := pingActor.SendAsync(ctx, pongActor.Name(), new(benchmarkpb.Ping)); err != nil {
+	if err := pingActor.Tell(ctx, pongActor, new(benchmarkpb.Ping)); err != nil {
 		panic(err)
 	}
 
@@ -124,9 +124,9 @@ func (p *Ping) Receive(ctx *actors.ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *goaktpb.PostStart:
 	case *benchmarkpb.Pong:
-		p.count.Add(1)
+		p.count.Inc()
 		// let us reply to the sender
-		_ = ctx.Self().Tell(ctx.Context(), ctx.Sender(), new(benchmarkpb.Ping))
+		ctx.Tell(ctx.Sender(), new(benchmarkpb.Ping))
 	default:
 		ctx.Unhandled()
 	}
@@ -155,9 +155,8 @@ func (p *Pong) Receive(ctx *actors.ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *goaktpb.PostStart:
 	case *benchmarkpb.Ping:
-		p.count.Add(1)
-		// reply the sender in case there is a sender
-		_ = ctx.Self().Tell(ctx.Context(), ctx.Sender(), new(benchmarkpb.Pong))
+		p.count.Inc()
+		ctx.Tell(ctx.Sender(), new(benchmarkpb.Pong))
 	default:
 		ctx.Unhandled()
 	}

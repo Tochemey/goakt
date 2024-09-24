@@ -46,6 +46,7 @@ import (
 	"github.com/tochemey/goakt/v2/address"
 	"github.com/tochemey/goakt/v2/future"
 	"github.com/tochemey/goakt/v2/goaktpb"
+	"github.com/tochemey/goakt/v2/internal/collection"
 	"github.com/tochemey/goakt/v2/internal/errorschain"
 	"github.com/tochemey/goakt/v2/internal/eventstream"
 	"github.com/tochemey/goakt/v2/internal/http"
@@ -56,6 +57,17 @@ import (
 	"github.com/tochemey/goakt/v2/internal/types"
 	"github.com/tochemey/goakt/v2/log"
 	"github.com/tochemey/goakt/v2/telemetry"
+)
+
+// specifies the state in which the PID is
+// regarding message processing
+type processingState int32
+
+const (
+	// idle means there are no messages to process
+	idle processingState = iota
+	// processing means the PID is processing messages
+	processing
 )
 
 // watcher is used to handle parent child relationship.
@@ -93,7 +105,7 @@ type PID struct {
 	// any further resources like memory and cpu. The default value is 120 seconds
 	passivateAfter atomic.Duration
 
-	// specifies how long the sender of a mail should wait to receive a reply
+	// specifies how long the sender of a mail should wait to receiveLoop a reply
 	// when using Ask. The default value is 5s
 	askTimeout atomic.Duration
 
@@ -149,7 +161,7 @@ type PID struct {
 	behaviorStack *behaviorStack
 
 	// stash settings
-	stashBuffer *mailbox
+	stashBuffer *collection.Queue
 	stashLocker *sync.Mutex
 
 	// define an events stream
@@ -164,8 +176,12 @@ type PID struct {
 
 	watcherNotificationChan        chan error
 	watchersNotificationStopSignal chan types.Unit
-	receiveSignal                  chan types.Unit
-	receiveStopSignal              chan types.Unit
+
+	receiveSignal     chan types.Unit
+	receiveStopSignal chan types.Unit
+
+	// atomic flag indicating whether the actor is processing messages
+	processingMessages atomic.Int32
 }
 
 // newPID creates a new pid
@@ -229,8 +245,8 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 		return nil, err
 	}
 
-	go p.receive()
-	go p.notifyWatchers()
+	p.receiveLoop()
+	p.notifyWatchers()
 	if p.passivateAfter.Load() > 0 {
 		go p.passivationLoop()
 	}
@@ -404,8 +420,9 @@ func (pid *PID) Restart(ctx context.Context) error {
 	if err := pid.init(ctx); err != nil {
 		return err
 	}
-	go pid.receive()
-	go pid.notifyWatchers()
+
+	pid.receiveLoop()
+	pid.notifyWatchers()
 	if pid.passivateAfter.Load() > 0 {
 		go pid.passivationLoop()
 	}
@@ -496,7 +513,7 @@ func (pid *PID) StashSize() uint64 {
 	if pid.stashBuffer == nil {
 		return 0
 	}
-	return uint64(pid.stashBuffer.Len())
+	return uint64(pid.stashBuffer.Length())
 }
 
 // PipeTo processes a long-running task and pipes the result to the provided actor.
@@ -1017,11 +1034,76 @@ func (pid *PID) watchees() *pidMap {
 	return pid.watchedList
 }
 
-// doReceive pushes a given message to the actor receiveContextBuffer
+// doReceive pushes a given message to the actor mailbox
+// and signals the receiveLoop to process it
 func (pid *PID) doReceive(receiveCtx *ReceiveContext) {
-	pid.latestReceiveTime.Store(time.Now())
 	pid.mailbox.Push(receiveCtx)
-	pid.receiveSignal <- types.Unit{}
+	pid.signalMessage()
+}
+
+// signal that a message has arrived and wake up the actor if needed
+func (pid *PID) signalMessage() {
+	// only signal if the actor is not already processing messages
+	if pid.processingMessages.CompareAndSwap(int32(idle), int32(processing)) {
+		select {
+		case pid.receiveSignal <- types.Unit{}:
+		default:
+		}
+	}
+}
+
+// receiveLoop extracts every message from the actor mailbox
+// and pass it to the appropriate behavior for handling
+func (pid *PID) receiveLoop() {
+	go func() {
+		for {
+			select {
+			case <-pid.receiveStopSignal:
+				return
+			case <-pid.receiveSignal:
+				// Process all messages in the queue one by one
+				for {
+					received := pid.mailbox.Pop()
+					if received == nil {
+						// If no more messages, stop processing
+						pid.processingMessages.Store(int32(idle))
+						// Check if new messages were added in the meantime and restart processing
+						if !pid.mailbox.IsEmpty() && pid.processingMessages.CompareAndSwap(int32(idle), int32(processing)) {
+							continue
+						}
+						break
+					}
+					// Process the message
+					switch received.Message().(type) {
+					case *goaktpb.PoisonPill:
+						_ = pid.Shutdown(received.Context())
+					default:
+						pid.handleReceived(received)
+					}
+				}
+			}
+		}
+	}()
+}
+
+// handleReceived picks the right behavior and processes the message
+func (pid *PID) handleReceived(received *ReceiveContext) {
+	defer pid.recovery(received)
+	if behavior := pid.behaviorStack.Peek(); behavior != nil {
+		pid.latestReceiveTime.Store(time.Now())
+		pid.processedCount.Inc()
+		behavior(received)
+	}
+}
+
+// recovery is called upon after message is processed
+func (pid *PID) recovery(received *ReceiveContext) {
+	if r := recover(); r != nil {
+		pid.watcherNotificationChan <- fmt.Errorf("%s", r)
+		return
+	}
+	// no panic or recommended way to handle error
+	pid.watcherNotificationChan <- received.getError()
 }
 
 // init initializes the given actor and init processing messages
@@ -1130,46 +1212,6 @@ func (pid *PID) freeChildren(ctx context.Context) error {
 	return nil
 }
 
-// receive extracts every message from the actor mailbox
-func (pid *PID) receive() {
-	for {
-		select {
-		case <-pid.receiveStopSignal:
-			return
-		case <-pid.receiveSignal:
-			if received := pid.mailbox.Pop(); received != nil {
-				switch received.Message().(type) {
-				case *goaktpb.PoisonPill:
-					// stop the actor
-					_ = pid.Shutdown(received.Context())
-				default:
-					pid.handleReceived(received)
-				}
-			}
-		}
-	}
-}
-
-// handleReceived picks the right behavior and processes the message
-func (pid *PID) handleReceived(received *ReceiveContext) {
-	defer pid.recovery(received)
-
-	if behavior := pid.behaviorStack.Peek(); behavior != nil {
-		pid.processedCount.Inc()
-		behavior(received)
-	}
-}
-
-// recovery is called upon after message is processed
-func (pid *PID) recovery(received *ReceiveContext) {
-	if r := recover(); r != nil {
-		pid.watcherNotificationChan <- fmt.Errorf("%s", r)
-		return
-	}
-	// no panic or recommended way to handle error
-	pid.watcherNotificationChan <- received.getError()
-}
-
 // passivationLoop checks whether the actor is processing public or not.
 // when the actor is idle, it automatically shuts down to free resources
 func (pid *PID) passivationLoop() {
@@ -1245,7 +1287,7 @@ func (pid *PID) setBehaviorStacked(behavior Behavior) {
 	pid.fieldsLocker.Unlock()
 }
 
-// unsetBehaviorStacked sets the actor's behavior to the previous behavior
+// unsetBehaviorStacked sets the actor's behavior to the next behavior
 // prior to setBehaviorStacked is called
 func (pid *PID) unsetBehaviorStacked() {
 	pid.fieldsLocker.Lock()
@@ -1328,18 +1370,20 @@ func (pid *PID) removeChild(cid *PID) {
 
 // notifyWatchers send error to watchers
 func (pid *PID) notifyWatchers() {
-	for {
-		select {
-		case err := <-pid.watcherNotificationChan:
-			if err != nil {
-				for _, item := range pid.watchers().Items() {
-					item.Value.ErrChan <- err
+	go func() {
+		for {
+			select {
+			case err := <-pid.watcherNotificationChan:
+				if err != nil {
+					for _, item := range pid.watchers().Items() {
+						item.Value.ErrChan <- err
+					}
 				}
+			case <-pid.watchersNotificationStopSignal:
+				return
 			}
-		case <-pid.watchersNotificationStopSignal:
-			return
 		}
-	}
+	}()
 }
 
 // toDeadletterQueue sends message to deadletter queue

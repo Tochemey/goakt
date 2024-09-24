@@ -26,12 +26,13 @@ package bench
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/tochemey/goakt/v2/actors"
 	"github.com/tochemey/goakt/v2/bench/benchmarkpb"
-	"github.com/tochemey/goakt/v2/internal/types"
+	"github.com/tochemey/goakt/v2/internal/lib"
 	"github.com/tochemey/goakt/v2/log"
 )
 
@@ -52,7 +53,7 @@ func BenchmarkActor(b *testing.B) {
 		_ = actorSystem.Start(ctx)
 
 		// wait for system to start properly
-		pause(1 * time.Second)
+		lib.Pause(1 * time.Second)
 
 		// define the benchmark actor
 		actor := &Benchmarker{}
@@ -61,20 +62,24 @@ func BenchmarkActor(b *testing.B) {
 		pid, _ := actorSystem.Spawn(ctx, "test", actor)
 
 		// wait for actors to start properly
-		pause(1 * time.Second)
+		lib.Pause(1 * time.Second)
 
-		b.SetParallelism(7)
+		var counter int64
 		b.ResetTimer()
 		b.ReportAllocs()
-		start := time.Now()
 		b.RunParallel(func(pb *testing.PB) {
 			for pb.Next() {
-				_ = actors.Tell(ctx, pid, new(benchmarkpb.BenchTell))
+				if err := actors.Tell(ctx, pid, new(benchmarkpb.BenchTell)); err != nil {
+					b.Fatal(err)
+				}
+				atomic.AddInt64(&counter, 1)
 			}
 		})
 
-		opsPerSec := float64(b.N) / time.Since(start).Seconds()
-		b.ReportMetric(opsPerSec, "ops/s")
+		b.StopTimer()
+
+		messagesPerSec := float64(atomic.LoadInt64(&counter)) / b.Elapsed().Seconds()
+		b.ReportMetric(messagesPerSec, "messages/sec")
 
 		_ = pid.Shutdown(ctx)
 		_ = actorSystem.Stop(ctx)
@@ -93,28 +98,29 @@ func BenchmarkActor(b *testing.B) {
 		_ = actorSystem.Start(ctx)
 
 		// wait for system to start properly
-		pause(1 * time.Second)
+		lib.Pause(1 * time.Second)
 
 		// create the actors
 		sender, _ := actorSystem.Spawn(ctx, "sender", new(Benchmarker))
 		receiver, _ := actorSystem.Spawn(ctx, "receiver", new(Benchmarker))
 
 		// wait for actors to start properly
-		pause(1 * time.Second)
-
-		b.SetParallelism(7)
+		lib.Pause(1 * time.Second)
+		var counter int64
 		b.ResetTimer()
 		b.ReportAllocs()
-		start := time.Now()
 		b.RunParallel(func(pb *testing.PB) {
 			for pb.Next() {
-				_ = sender.Tell(ctx, receiver, new(benchmarkpb.BenchTell))
+				err := sender.Tell(ctx, receiver, new(benchmarkpb.BenchTell))
+				if err != nil {
+					b.Fatal(err)
+				}
+				atomic.AddInt64(&counter, 1)
 			}
 		})
-
-		opsPerSec := float64(b.N) / time.Since(start).Seconds()
-		b.ReportMetric(opsPerSec, "ops/s")
-
+		b.StopTimer()
+		messagesPerSec := float64(atomic.LoadInt64(&counter)) / b.Elapsed().Seconds()
+		b.ReportMetric(messagesPerSec, "messages/sec")
 		_ = actorSystem.Stop(ctx)
 	})
 	b.Run("SendAsync", func(b *testing.B) {
@@ -131,27 +137,29 @@ func BenchmarkActor(b *testing.B) {
 		_ = actorSystem.Start(ctx)
 
 		// wait for system to start properly
-		pause(1 * time.Second)
+		lib.Pause(1 * time.Second)
 
 		// create the actors
 		sender, _ := actorSystem.Spawn(ctx, "sender", new(Benchmarker))
 		receiver, _ := actorSystem.Spawn(ctx, "receiver", new(Benchmarker))
 
 		// wait for actors to start properly
-		pause(1 * time.Second)
-
-		b.SetParallelism(7)
+		lib.Pause(1 * time.Second)
+		var counter int64
 		b.ResetTimer()
 		b.ReportAllocs()
-		start := time.Now()
 		b.RunParallel(func(pb *testing.PB) {
 			for pb.Next() {
-				_ = sender.SendAsync(ctx, receiver.Name(), new(benchmarkpb.BenchTell))
+				if err := sender.SendAsync(ctx, receiver.Name(), new(benchmarkpb.BenchTell)); err != nil {
+					b.Fatal(err)
+				}
+				atomic.AddInt64(&counter, 1)
 			}
 		})
+		b.StopTimer()
 
-		opsPerSec := float64(b.N) / time.Since(start).Seconds()
-		b.ReportMetric(opsPerSec, "ops/s")
+		messagesPerSec := float64(atomic.LoadInt64(&counter)) / b.Elapsed().Seconds()
+		b.ReportMetric(messagesPerSec, "messages/sec")
 
 		_ = actorSystem.Stop(ctx)
 	})
@@ -168,7 +176,7 @@ func BenchmarkActor(b *testing.B) {
 		_ = actorSystem.Start(ctx)
 
 		// wait for system to start properly
-		pause(1 * time.Second)
+		lib.Pause(1 * time.Second)
 
 		// define the benchmark actor
 		actor := &Benchmarker{}
@@ -177,31 +185,65 @@ func BenchmarkActor(b *testing.B) {
 		pid, _ := actorSystem.Spawn(ctx, "test", actor)
 
 		// wait for actors to start properly
-		pause(1 * time.Second)
-
-		b.SetParallelism(7)
+		lib.Pause(1 * time.Second)
+		var counter int64
 		b.ResetTimer()
 		b.ReportAllocs()
-		start := time.Now()
-
 		b.RunParallel(func(pb *testing.PB) {
 			for pb.Next() {
-				_, _ = actors.Ask(ctx, pid, new(benchmarkpb.BenchRequest), receivingTimeout)
+				if _, err := actors.Ask(ctx, pid, new(benchmarkpb.BenchRequest), receivingTimeout); err != nil {
+					b.Fatal(err)
+				}
+				atomic.AddInt64(&counter, 1)
 			}
 		})
-		opsPerSec := float64(b.N) / time.Since(start).Seconds()
-		b.ReportMetric(opsPerSec, "ops/s")
+		b.StopTimer()
+
+		messagesPerSec := float64(atomic.LoadInt64(&counter)) / b.Elapsed().Seconds()
+		b.ReportMetric(messagesPerSec, "messages/sec")
 
 		_ = pid.Shutdown(ctx)
 		_ = actorSystem.Stop(ctx)
 	})
-}
+	b.Run("Ask", func(b *testing.B) {
+		ctx := context.TODO()
 
-func pause(duration time.Duration) {
-	bootstrapChan := make(chan types.Unit, 1)
-	timer := time.AfterFunc(duration, func() {
-		bootstrapChan <- types.Unit{}
+		// create the actor system
+		actorSystem, _ := actors.NewActorSystem("bench",
+			actors.WithLogger(log.DiscardLogger),
+			actors.WithActorInitMaxRetries(1),
+			actors.WithSupervisorDirective(actors.NewStopDirective()),
+			actors.WithReplyTimeout(receivingTimeout))
+
+		// start the actor system
+		_ = actorSystem.Start(ctx)
+
+		// wait for system to start properly
+		lib.Pause(1 * time.Second)
+
+		// create the actors
+		sender, _ := actorSystem.Spawn(ctx, "sender", new(Benchmarker))
+		receiver, _ := actorSystem.Spawn(ctx, "receiver", new(Benchmarker))
+
+		// wait for actors to start properly
+		lib.Pause(1 * time.Second)
+
+		var counter int64
+		b.ResetTimer()
+		b.ReportAllocs()
+		b.RunParallel(func(pb *testing.PB) {
+			for pb.Next() {
+				if _, err := sender.Ask(ctx, receiver, new(benchmarkpb.BenchRequest)); err != nil {
+					b.Fatal(err)
+				}
+				atomic.AddInt64(&counter, 1)
+			}
+		})
+		b.StopTimer()
+
+		messagesPerSec := float64(atomic.LoadInt64(&counter)) / b.Elapsed().Seconds()
+		b.ReportMetric(messagesPerSec, "messages/sec")
+
+		_ = actorSystem.Stop(ctx)
 	})
-	<-bootstrapChan
-	timer.Stop()
 }

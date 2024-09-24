@@ -26,7 +26,6 @@
 package actors
 
 import (
-	"sync"
 	"sync/atomic"
 	"unsafe"
 )
@@ -43,7 +42,6 @@ type mailbox struct {
 	head   *node
 	tail   *node
 	length int64
-	lock   sync.Mutex
 }
 
 // newMailbox create an instance of mailbox
@@ -53,7 +51,6 @@ func newMailbox() *mailbox {
 		head:   item,
 		tail:   item,
 		length: 0,
-		lock:   sync.Mutex{},
 	}
 }
 
@@ -75,9 +72,7 @@ func (m *mailbox) Pop() *ReceiveContext {
 		return nil
 	}
 
-	m.lock.Lock()
 	m.tail = next
-	m.lock.Unlock()
 	value := next.value
 	next.value = nil
 	atomic.AddInt64(&m.length, -1)
@@ -90,11 +85,6 @@ func (m *mailbox) Len() int64 {
 }
 
 // IsEmpty returns true when the queue is empty
-// must be called from a single, consumer goroutine
 func (m *mailbox) IsEmpty() bool {
-	m.lock.Lock()
-	tail := m.tail
-	m.lock.Unlock()
-	next := (*node)(atomic.LoadPointer((*unsafe.Pointer)(unsafe.Pointer(&tail.next))))
-	return next == nil
+	return atomic.LoadInt64(&m.length) == 0
 }

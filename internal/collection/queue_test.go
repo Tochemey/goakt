@@ -22,50 +22,30 @@
  * SOFTWARE.
  */
 
-package actors
+package collection
 
-import "errors"
+import "testing"
 
-// stash adds the current message to the stash buffer
-func (pid *PID) stash(ctx *ReceiveContext) error {
-	if pid.stashBuffer == nil {
-		return ErrStashBufferNotSet
+func TestQueueDequeueEmpty(t *testing.T) {
+	q := NewQueue()
+	if q.Dequeue() != nil {
+		t.Fatalf("dequeue empty queue returns non-nil")
 	}
-	pid.stashBuffer.Enqueue(ctx)
-	return nil
 }
 
-// unstash unstashes the oldest message in the stash and prepends to the mailbox
-func (pid *PID) unstash() error {
-	if pid.stashBuffer == nil {
-		return ErrStashBufferNotSet
+func TestQueueLength(t *testing.T) {
+	q := NewQueue()
+	if q.Length() != 0 {
+		t.Fatalf("empty queue has non-zero length")
 	}
 
-	received := pid.stashBuffer.Dequeue()
-	if received == nil {
-		return errors.New("stash buffer may be closed")
-	}
-	pid.doReceive(received.(*ReceiveContext))
-	return nil
-}
-
-// unstashAll unstashes all messages from the stash buffer and prepends in the mailbox
-// (it keeps the messages in the same order as received, unstashing older messages before newer).
-func (pid *PID) unstashAll() error {
-	if pid.stashBuffer == nil {
-		return ErrStashBufferNotSet
+	q.Enqueue(1)
+	if q.Length() != 1 {
+		t.Fatalf("count of enqueue wrong, want %d, got %d.", 1, q.Length())
 	}
 
-	pid.stashLocker.Lock()
-	defer pid.stashLocker.Unlock()
-
-	for pid.stashBuffer.Length() > 0 {
-		received := pid.stashBuffer.Dequeue()
-		if received == nil {
-			return errors.New("stash buffer may be closed")
-		}
-		pid.doReceive(received.(*ReceiveContext))
+	q.Dequeue()
+	if q.Length() != 0 {
+		t.Fatalf("count of dequeue wrong, want %d, got %d", 0, q.Length())
 	}
-
-	return nil
 }
