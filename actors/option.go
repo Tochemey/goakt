@@ -30,7 +30,6 @@ import (
 	"github.com/tochemey/goakt/v2/discovery"
 	"github.com/tochemey/goakt/v2/hash"
 	"github.com/tochemey/goakt/v2/log"
-	"github.com/tochemey/goakt/v2/telemetry"
 )
 
 // Option is the interface that applies a configuration option.
@@ -90,13 +89,6 @@ func WithPassivationDisabled() Option {
 func WithSupervisorDirective(directive SupervisorDirective) Option {
 	return OptionFunc(func(a *actorSystem) {
 		a.supervisorDirective = directive
-	})
-}
-
-// WithTelemetry sets the custom telemetry
-func WithTelemetry(telemetry *telemetry.Telemetry) Option {
-	return OptionFunc(func(a *actorSystem) {
-		a.telemetry = telemetry
 	})
 }
 
@@ -163,13 +155,6 @@ func WithPartitionHasher(hasher hash.Hasher) Option {
 func WithActorInitTimeout(timeout time.Duration) Option {
 	return OptionFunc(func(a *actorSystem) {
 		a.actorInitTimeout = timeout
-	})
-}
-
-// WithMetric enables metrics
-func WithMetric() Option {
-	return OptionFunc(func(system *actorSystem) {
-		system.metricEnabled.Store(true)
 	})
 }
 

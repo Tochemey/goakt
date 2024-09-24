@@ -101,11 +101,6 @@ func TestPIDOptions(t *testing.T) {
 			option:   withInitTimeout(time.Second),
 			expected: &PID{initTimeout: atomicDuration},
 		},
-		{
-			name:     "withMetric",
-			option:   withMetric(),
-			expected: &PID{metricEnabled: atomicTrue},
-		},
 	}
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {

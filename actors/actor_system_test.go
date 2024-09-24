@@ -27,7 +27,6 @@ package actors
 import (
 	"context"
 	"net"
-	"sort"
 	"strconv"
 	"sync"
 	"testing"
@@ -38,9 +37,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/travisjeffery/go-dynaport"
-	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
-	"go.opentelemetry.io/otel/sdk/metric/metricdata"
-	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/tochemey/goakt/v2/address"
@@ -50,7 +46,6 @@ import (
 	"github.com/tochemey/goakt/v2/log"
 	clustermocks "github.com/tochemey/goakt/v2/mocks/cluster"
 	testkit "github.com/tochemey/goakt/v2/mocks/discovery"
-	"github.com/tochemey/goakt/v2/telemetry"
 	"github.com/tochemey/goakt/v2/test/data/testpb"
 )
 
@@ -1002,69 +997,6 @@ func TestActorSystem(t *testing.T) {
 			provider.AssertExpectations(t)
 		})
 	})
-	t.Run("With Metric enabled", func(t *testing.T) {
-		r := sdkmetric.NewManualReader()
-		mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(r))
-		// create an instance of telemetry
-		tel := telemetry.New(telemetry.WithMeterProvider(mp))
-
-		ctx := context.TODO()
-		sys, _ := NewActorSystem("testSys",
-			WithMetric(),
-			WithTelemetry(tel),
-			WithStash(),
-			WithLogger(log.DiscardLogger))
-
-		// start the actor system
-		err := sys.Start(ctx)
-		assert.NoError(t, err)
-
-		actor := newTestActor()
-		actorRef, err := sys.Spawn(ctx, "Test", actor)
-		assert.NoError(t, err)
-		assert.NotNil(t, actorRef)
-
-		// create a message to send to the test actor
-		message := new(testpb.TestSend)
-		// send the message to the actor
-		err = Tell(ctx, actorRef, message)
-		// perform some assertions
-		require.NoError(t, err)
-
-		// Should collect 4 metrics, 3 for the actor and 1 for the actor system
-		got := &metricdata.ResourceMetrics{}
-		err = r.Collect(ctx, got)
-		require.NoError(t, err)
-		require.Len(t, got.ScopeMetrics, 1)
-		require.Len(t, got.ScopeMetrics[0].Metrics, 6)
-
-		expected := []string{
-			"actor_child_count",
-			"actor_stash_count",
-			"actor_restart_count",
-			"actors_count",
-			"actor_processed_count",
-			"actor_received_duration",
-		}
-		// sort the array
-		sort.Strings(expected)
-		// get the metrics names
-		actual := make([]string, len(got.ScopeMetrics[0].Metrics))
-		for i, metric := range got.ScopeMetrics[0].Metrics {
-			actual[i] = metric.Name
-		}
-		sort.Strings(actual)
-
-		assert.ElementsMatch(t, expected, actual)
-
-		// stop the actor after some time
-		lib.Pause(time.Second)
-
-		t.Cleanup(func() {
-			err = sys.Stop(ctx)
-			assert.NoError(t, err)
-		})
-	})
 	t.Run("With cluster events subscription", func(t *testing.T) {
 		// create a context
 		ctx := context.TODO()
@@ -1397,16 +1329,15 @@ func TestActorSystem(t *testing.T) {
 		provider.EXPECT().ID().Return("id")
 
 		system := &actorSystem{
-			name:           "testSystem",
-			logger:         logger,
-			cluster:        mockedCluster,
-			clusterEnabled: *atomic.NewBool(true),
-			telemetry:      telemetry.New(),
-			locker:         sync.Mutex{},
-			scheduler:      newScheduler(logger, time.Second, withSchedulerCluster(mockedCluster)),
-			clusterConfig:  NewClusterConfig(),
-			registry:       types.NewRegistry(),
+			name:          "testSystem",
+			logger:        logger,
+			cluster:       mockedCluster,
+			locker:        sync.Mutex{},
+			scheduler:     newScheduler(logger, time.Second, withSchedulerCluster(mockedCluster)),
+			clusterConfig: NewClusterConfig(),
+			registry:      types.NewRegistry(),
 		}
+		system.clusterEnabled.Store(true)
 
 		err := system.Start(ctx)
 		require.Error(t, err)

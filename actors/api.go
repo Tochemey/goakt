@@ -57,10 +57,8 @@ func Ask(ctx context.Context, to *PID, message proto.Message, timeout time.Durat
 	// await patiently to receive the response from the actor
 	select {
 	case response = <-receiveContext.response:
-		to.recordLatestReceiveDurationMetric(ctx)
 		return
 	case <-time.After(timeout):
-		to.recordLatestReceiveDurationMetric(ctx)
 		err = ErrRequestTimeout
 		to.toDeadletterQueue(receiveContext, err)
 		return
@@ -79,7 +77,6 @@ func Tell(ctx context.Context, to *PID, message proto.Message) error {
 	}
 
 	to.doReceive(receiveContext)
-	to.recordLatestReceiveDurationMetric(ctx)
 	return nil
 }
 

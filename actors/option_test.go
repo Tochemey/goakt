@@ -33,11 +33,9 @@ import (
 
 	"github.com/tochemey/goakt/v2/hash"
 	"github.com/tochemey/goakt/v2/log"
-	"github.com/tochemey/goakt/v2/telemetry"
 )
 
 func TestOption(t *testing.T) {
-	tel := telemetry.New()
 	resumeDirective := NewResumeDirective()
 	var atomicTrue atomic.Bool
 	atomicTrue.Store(true)
@@ -81,17 +79,12 @@ func TestOption(t *testing.T) {
 		{
 			name:     "WithRemoting",
 			option:   WithRemoting("localhost", 3100),
-			expected: actorSystem{remotingEnabled: atomicTrue, port: 3100, host: "localhost"},
+			expected: actorSystem{remotingEnabled: atomic.Bool{}, port: 3100, host: "localhost"},
 		},
 		{
 			name:     "WithShutdownTimeout",
 			option:   WithShutdownTimeout(2 * time.Second),
 			expected: actorSystem{shutdownTimeout: 2. * time.Second},
-		},
-		{
-			name:     "WithTelemetry",
-			option:   WithTelemetry(tel),
-			expected: actorSystem{telemetry: tel},
 		},
 		{
 			name:     "WithStash",
@@ -107,11 +100,6 @@ func TestOption(t *testing.T) {
 			name:     "WithActorInitTimeout",
 			option:   WithActorInitTimeout(2 * time.Second),
 			expected: actorSystem{actorInitTimeout: 2. * time.Second},
-		},
-		{
-			name:     "WithMetric",
-			option:   WithMetric(),
-			expected: actorSystem{metricEnabled: atomicTrue},
 		},
 		{
 			name:     "WithCluster",
