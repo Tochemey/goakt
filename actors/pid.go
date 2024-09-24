@@ -46,7 +46,6 @@ import (
 	"github.com/tochemey/goakt/v2/address"
 	"github.com/tochemey/goakt/v2/future"
 	"github.com/tochemey/goakt/v2/goaktpb"
-	"github.com/tochemey/goakt/v2/internal/collection"
 	"github.com/tochemey/goakt/v2/internal/errorschain"
 	"github.com/tochemey/goakt/v2/internal/eventstream"
 	"github.com/tochemey/goakt/v2/internal/http"
@@ -161,7 +160,7 @@ type PID struct {
 	behaviorStack *behaviorStack
 
 	// stash settings
-	stashBuffer *collection.Queue
+	stashBuffer *mailbox
 	stashLocker *sync.Mutex
 
 	// define an events stream
@@ -513,7 +512,7 @@ func (pid *PID) StashSize() uint64 {
 	if pid.stashBuffer == nil {
 		return 0
 	}
-	return uint64(pid.stashBuffer.Length())
+	return uint64(pid.stashBuffer.Len())
 }
 
 // PipeTo processes a long-running task and pipes the result to the provided actor.

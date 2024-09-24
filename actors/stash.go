@@ -31,7 +31,7 @@ func (pid *PID) stash(ctx *ReceiveContext) error {
 	if pid.stashBuffer == nil {
 		return ErrStashBufferNotSet
 	}
-	pid.stashBuffer.Enqueue(ctx)
+	pid.stashBuffer.Push(ctx)
 	return nil
 }
 
@@ -41,11 +41,11 @@ func (pid *PID) unstash() error {
 		return ErrStashBufferNotSet
 	}
 
-	received := pid.stashBuffer.Dequeue()
+	received := pid.stashBuffer.Pop()
 	if received == nil {
 		return errors.New("stash buffer may be closed")
 	}
-	pid.doReceive(received.(*ReceiveContext))
+	pid.doReceive(received)
 	return nil
 }
 
@@ -59,12 +59,12 @@ func (pid *PID) unstashAll() error {
 	pid.stashLocker.Lock()
 	defer pid.stashLocker.Unlock()
 
-	for pid.stashBuffer.Length() > 0 {
-		received := pid.stashBuffer.Dequeue()
+	for pid.stashBuffer.IsEmpty() {
+		received := pid.stashBuffer.Pop()
 		if received == nil {
 			return errors.New("stash buffer may be closed")
 		}
-		pid.doReceive(received.(*ReceiveContext))
+		pid.doReceive(received)
 	}
 
 	return nil
