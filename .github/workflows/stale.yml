@@ -25,6 +25,10 @@ jobs:
           pull-request-stale-comment: |
             This pull is inactive since 14 days!
             If there is no activity, it will be closed in two weeks.
+            
+            You should take one of the following actions:
+            - Manually close this PR if it is no longer relevant
+            - Push new commits or comment if you have more information to share
           issue-stale-label: inactive
           issue-ignore-all-assignees: true
           issue-days-before-stale: 14
@@ -32,5 +36,9 @@ jobs:
           issue-stale-comment: |
             This issue is inactive since 14 days!
             If there is no activity, it will be closed in two weeks.
+            
+            You should take one of the following actions:
+            - Manually close this issue if it is no longer relevant
+            - Comment if you have more information to share
           issue-add-labels-after-close: |
             closed-due-to-inactivity
