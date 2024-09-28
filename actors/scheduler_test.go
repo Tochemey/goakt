@@ -77,8 +77,7 @@ func TestScheduler(t *testing.T) {
 		keys, err := typedSystem.scheduler.quartzScheduler.GetJobKeys()
 		require.NoError(t, err)
 		assert.Empty(t, keys)
-		assert.EqualValues(t, 1, actor.counter.Load())
-		assert.EqualValues(t, 1, actor.counter.Load())
+		assert.EqualValues(t, 1, actorRef.ProcessedCount()-1)
 
 		// stop the actor
 		err = newActorSystem.Stop(ctx)
@@ -159,8 +158,7 @@ func TestScheduler(t *testing.T) {
 		keys, err := typedSystem.scheduler.quartzScheduler.GetJobKeys()
 		require.NoError(t, err)
 		assert.Empty(t, keys)
-		assert.EqualValues(t, 1, actor.counter.Load())
-		assert.EqualValues(t, 1, actor.counter.Load())
+		assert.EqualValues(t, 1, actorRef.ProcessedCount()-1)
 
 		// stop the actor
 		err = newActorSystem.Stop(ctx)
@@ -252,7 +250,7 @@ func TestScheduler(t *testing.T) {
 
 		// wait for two seconds
 		lib.Pause(2 * time.Second)
-		assert.EqualValues(t, 2, actor.counter.Load())
+		assert.EqualValues(t, 2, actorRef.ProcessedCount()-1)
 
 		// stop the actor
 		err = newActorSystem.Stop(ctx)
@@ -384,7 +382,7 @@ func TestScheduler(t *testing.T) {
 
 		// wait for two seconds
 		lib.Pause(2 * time.Second)
-		assert.EqualValues(t, 2, actor.counter.Load())
+		assert.EqualValues(t, 2, actorRef.ProcessedCount()-1)
 
 		// stop the actor
 		err = newActorSystem.Stop(ctx)

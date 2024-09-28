@@ -102,4 +102,11 @@ func TestAddress(t *testing.T) {
 
 		assert.True(t, actual.Equals(addr))
 	})
+
+	t.Run("With unmarshaling failure", func(t *testing.T) {
+		bytea := []byte("some")
+		actual := new(Address)
+		err := actual.UnmarshalBinary(bytea)
+		assert.Error(t, err)
+	})
 }

@@ -28,39 +28,25 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-func TestFuncOption(t *testing.T) {
-	var preStart PreStartFunc
-	var postStop PreStartFunc
-	mailbox := NewUnboundedMailbox()
-	testCases := []struct {
-		name     string
-		option   FuncOption
-		expected funcConfig
-	}{
-
-		{
-			name:     "WithPreStart",
-			option:   WithPreStart(preStart),
-			expected: funcConfig{preStart: preStart},
-		},
-		{
-			name:     "WithPostStop",
-			option:   WithPostStop(postStop),
-			expected: funcConfig{postStop: postStop},
-		},
-		{
-			name:     "WithFuncMailbox",
-			option:   WithFuncMailbox(mailbox),
-			expected: funcConfig{spawnConfig: spawnConfig{mailbox: mailbox}},
-		},
+func TestBoundedMailbox(t *testing.T) {
+	mailbox := NewBoundedMailbox(20)
+	for i := 0; i < 20; i++ {
+		require.NoError(t, mailbox.Enqueue(&ReceiveContext{}))
 	}
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			var cfg funcConfig
-			tc.option.Apply(&cfg)
-			assert.Equal(t, tc.expected, cfg)
-		})
+	assert.False(t, mailbox.IsEmpty())
+	err := mailbox.Enqueue(&ReceiveContext{})
+	require.Error(t, err)
+	assert.EqualError(t, err, ErrFullMailbox.Error())
+	dequeue := mailbox.Dequeue()
+	require.NotNil(t, dequeue)
+	assert.EqualValues(t, 19, mailbox.Len())
+	counter := 19
+	for counter > 0 {
+		mailbox.Dequeue()
+		counter--
 	}
+	assert.True(t, mailbox.IsEmpty())
 }

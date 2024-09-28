@@ -288,10 +288,10 @@ func (c *ReceiveContext) Shutdown() {
 }
 
 // Spawn creates a child actor or return error
-func (c *ReceiveContext) Spawn(name string, actor Actor) *PID {
+func (c *ReceiveContext) Spawn(name string, actor Actor, opts ...SpawnOption) *PID {
 	recipient := c.self
 	ctx := context.WithoutCancel(c.ctx)
-	pid, err := recipient.SpawnChild(ctx, name, actor)
+	pid, err := recipient.SpawnChild(ctx, name, actor, opts...)
 	if err != nil {
 		c.Err(err)
 	}

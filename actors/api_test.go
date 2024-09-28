@@ -468,7 +468,7 @@ func TestTell(t *testing.T) {
 		require.NoError(t, err)
 		// wait for processing to be done
 		lib.Pause(500 * time.Millisecond)
-		require.EqualValues(t, 2, actor.counter.Load())
+		require.EqualValues(t, 2, actorRef.ProcessedCount()-1)
 
 		err = sys.Stop(ctx)
 		assert.NoError(t, err)
@@ -761,7 +761,7 @@ func TestRemoteTell(t *testing.T) {
 
 		// wait for processing to complete on the actor side
 		lib.Pause(500 * time.Millisecond)
-		require.EqualValues(t, 10, actor.counter.Load())
+		require.EqualValues(t, 10, actorRef.ProcessedCount()-1)
 
 		// stop the actor after some time
 		lib.Pause(time.Second)

@@ -39,7 +39,7 @@ import (
 const receivingTimeout = 100 * time.Millisecond
 
 func BenchmarkActor(b *testing.B) {
-	b.Run("Tell(api)", func(b *testing.B) {
+	b.Run("Tell(api:default mailbox)", func(b *testing.B) {
 		ctx := context.TODO()
 
 		// create the actor system
@@ -84,7 +84,7 @@ func BenchmarkActor(b *testing.B) {
 		_ = pid.Shutdown(ctx)
 		_ = actorSystem.Stop(ctx)
 	})
-	b.Run("Tell", func(b *testing.B) {
+	b.Run("Tell(default mailbox)", func(b *testing.B) {
 		ctx := context.TODO()
 
 		// create the actor system
@@ -123,7 +123,46 @@ func BenchmarkActor(b *testing.B) {
 		b.ReportMetric(messagesPerSec, "messages/sec")
 		_ = actorSystem.Stop(ctx)
 	})
-	b.Run("SendAsync", func(b *testing.B) {
+	b.Run("Tell(bounded mailbox)", func(b *testing.B) {
+		ctx := context.TODO()
+
+		// create the actor system
+		actorSystem, _ := actors.NewActorSystem("bench",
+			actors.WithLogger(log.DiscardLogger),
+			actors.WithActorInitMaxRetries(1),
+			actors.WithSupervisorDirective(actors.NewStopDirective()),
+			actors.WithReplyTimeout(receivingTimeout))
+
+		// start the actor system
+		_ = actorSystem.Start(ctx)
+
+		// wait for system to start properly
+		lib.Pause(1 * time.Second)
+
+		// create the actors
+		sender, _ := actorSystem.Spawn(ctx, "sender", new(Benchmarker), actors.WithMailbox(actors.NewBoundedMailbox(b.N)))
+		receiver, _ := actorSystem.Spawn(ctx, "receiver", new(Benchmarker), actors.WithMailbox(actors.NewBoundedMailbox(b.N)))
+
+		// wait for actors to start properly
+		lib.Pause(1 * time.Second)
+		var counter int64
+		b.ResetTimer()
+		b.ReportAllocs()
+		b.RunParallel(func(pb *testing.PB) {
+			for pb.Next() {
+				err := sender.Tell(ctx, receiver, new(benchmarkpb.BenchTell))
+				if err != nil {
+					b.Fatal(err)
+				}
+				atomic.AddInt64(&counter, 1)
+			}
+		})
+		b.StopTimer()
+		messagesPerSec := float64(atomic.LoadInt64(&counter)) / b.Elapsed().Seconds()
+		b.ReportMetric(messagesPerSec, "messages/sec")
+		_ = actorSystem.Stop(ctx)
+	})
+	b.Run("SendAsync(default mailbox)", func(b *testing.B) {
 		ctx := context.TODO()
 
 		// create the actor system
@@ -163,7 +202,7 @@ func BenchmarkActor(b *testing.B) {
 
 		_ = actorSystem.Stop(ctx)
 	})
-	b.Run("Ask(api)", func(b *testing.B) {
+	b.Run("Ask(api:default mailbox)", func(b *testing.B) {
 		ctx := context.TODO()
 		// create the actor system
 		actorSystem, _ := actors.NewActorSystem("bench",
@@ -205,7 +244,7 @@ func BenchmarkActor(b *testing.B) {
 		_ = pid.Shutdown(ctx)
 		_ = actorSystem.Stop(ctx)
 	})
-	b.Run("Ask", func(b *testing.B) {
+	b.Run("Ask(default mailbox)", func(b *testing.B) {
 		ctx := context.TODO()
 
 		// create the actor system

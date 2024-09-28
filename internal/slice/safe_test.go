@@ -22,65 +22,34 @@
  * SOFTWARE.
  */
 
-package actors
+package slice
 
 import (
-	"runtime"
-	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 )
 
-func TestMailbox_PushPop(t *testing.T) {
-	q := newMailbox()
+func TestSlice(t *testing.T) {
+	// create a concurrent slice of integer
+	sl := NewSafe[int]()
 
-	in1 := &ReceiveContext{}
-	in2 := &ReceiveContext{}
+	// add some items
+	sl.Append(2)
+	sl.Append(4)
+	sl.Append(5)
 
-	q.Push(in1)
-	q.Push(in2)
-
-	out1 := q.Pop()
-	out2 := q.Pop()
-
-	assert.Equal(t, in1, out1)
-	assert.Equal(t, in2, out2)
-	assert.True(t, q.IsEmpty())
-}
-
-func TestMailbox_IsEmpty(t *testing.T) {
-	q := newMailbox()
-	assert.True(t, q.IsEmpty())
-	q.Push(new(ReceiveContext))
-	assert.False(t, q.IsEmpty())
-}
-
-func TestMailbox_PushPopOneProducer(t *testing.T) {
-	t.Helper()
-	expCount := 100
-	var wg sync.WaitGroup
-	wg.Add(1)
-	q := newMailbox()
-	go func() {
-		i := 0
-		for {
-			r := q.Pop()
-			if r == nil {
-				runtime.Gosched()
-				continue
-			}
-			i++
-			if i == expCount {
-				wg.Done()
-				return
-			}
-		}
-	}()
-
-	for i := 0; i < expCount; i++ {
-		q.Push(new(ReceiveContext))
-	}
-
-	wg.Wait()
+	// assert the length
+	assert.EqualValues(t, 3, sl.Len())
+	assert.NotEmpty(t, sl.Items())
+	assert.Len(t, sl.Items(), 3)
+	// get the element at index 2
+	assert.EqualValues(t, 5, sl.Get(2))
+	// remove the element at index 1
+	sl.Delete(1)
+	// assert the length
+	assert.EqualValues(t, 2, sl.Len())
+	assert.Zero(t, sl.Get(4))
+	sl.Reset()
+	assert.Zero(t, sl.Len())
 }

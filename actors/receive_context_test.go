@@ -1552,7 +1552,7 @@ func TestReceiveContext(t *testing.T) {
 		require.NoError(t, context.getError())
 		// wait for processing to complete on the actor side
 		lib.Pause(500 * time.Millisecond)
-		require.EqualValues(t, 3, testActor.counter.Load())
+		require.EqualValues(t, 3, testerRef.ProcessedCount()-1)
 
 		lib.Pause(time.Second)
 
@@ -1871,9 +1871,11 @@ func TestReceiveContext(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
 
+		lib.Pause(time.Second)
+
 		// zero message received by both actors
-		require.Zero(t, actor1.Counter())
-		require.Zero(t, actor2.Counter())
+		require.Zero(t, pid1.ProcessedCount()-1)
+		require.Zero(t, pid2.ProcessedCount()-1)
 
 		// create an instance of receive context
 		messageContext := &ReceiveContext{
@@ -1902,8 +1904,8 @@ func TestReceiveContext(t *testing.T) {
 		task <- new(testspb.TaskComplete)
 		wg.Wait()
 
-		require.EqualValues(t, 3, actor1.Counter())
-		require.EqualValues(t, 1, actor2.Counter())
+		require.EqualValues(t, 3, pid1.ProcessedCount()-1)
+		require.EqualValues(t, 1, pid2.ProcessedCount()-1)
 
 		lib.Pause(time.Second)
 		assert.NoError(t, pid1.Shutdown(ctx))
@@ -1936,9 +1938,11 @@ func TestReceiveContext(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
 
+		lib.Pause(time.Second)
+
 		// zero message received by both actors
-		require.Zero(t, actor1.Counter())
-		require.Zero(t, actor2.Counter())
+		require.Zero(t, pid1.ProcessedCount()-1)
+		require.Zero(t, pid2.ProcessedCount()-1)
 
 		// create an instance of receive context
 		messageContext := &ReceiveContext{
