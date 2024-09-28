@@ -186,7 +186,7 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 		return nil, err
 	}
 
-	p := &PID{
+	pid := &PID{
 		actor:                          actor,
 		latestReceiveTime:              atomic.Time{},
 		haltPassivationLnr:             make(chan types.Unit, 1),
@@ -213,35 +213,35 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 		receiveStopSignal:              make(chan types.Unit, 1),
 	}
 
-	p.initMaxRetries.Store(DefaultInitMaxRetries)
-	p.shutdownTimeout.Store(DefaultShutdownTimeout)
-	p.latestReceiveDuration.Store(0)
-	p.running.Store(false)
-	p.passivateAfter.Store(DefaultPassivationTimeout)
-	p.askTimeout.Store(DefaultAskTimeout)
-	p.initTimeout.Store(DefaultInitTimeout)
+	pid.initMaxRetries.Store(DefaultInitMaxRetries)
+	pid.shutdownTimeout.Store(DefaultShutdownTimeout)
+	pid.latestReceiveDuration.Store(0)
+	pid.running.Store(false)
+	pid.passivateAfter.Store(DefaultPassivationTimeout)
+	pid.askTimeout.Store(DefaultAskTimeout)
+	pid.initTimeout.Store(DefaultInitTimeout)
 
 	for _, opt := range opts {
-		opt(p)
+		opt(pid)
 	}
 
 	behaviorStack := newBehaviorStack()
-	behaviorStack.Push(p.actor.Receive)
-	p.behaviorStack = behaviorStack
+	behaviorStack.Push(pid.actor.Receive)
+	pid.behaviorStack = behaviorStack
 
-	if err := p.init(ctx); err != nil {
+	if err := pid.init(ctx); err != nil {
 		return nil, err
 	}
 
-	p.receiveLoop()
-	p.notifyWatchers()
-	if p.passivateAfter.Load() > 0 {
-		go p.passivationLoop()
+	pid.receiveLoop()
+	pid.notifyWatchers()
+	if pid.passivateAfter.Load() > 0 {
+		go pid.passivationLoop()
 	}
 
-	p.doReceive(newReceiveContext(ctx, NoSender, p, new(goaktpb.PostStart)))
+	pid.doReceive(newReceiveContext(ctx, NoSender, pid, new(goaktpb.PostStart)))
 
-	return p, nil
+	return pid, nil
 }
 
 // ID is a convenient method that returns the actor unique identifier

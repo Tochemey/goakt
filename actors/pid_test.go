@@ -53,42 +53,44 @@ const (
 )
 
 func TestReceive(t *testing.T) {
-	ctx := context.TODO()
-	ports := dynaport.Get(1)
-	// create the actor path
-	actorPath := address.New("Test", "sys", "host", ports[0])
+	t.Run("With happy path", func(t *testing.T) {
+		ctx := context.TODO()
+		ports := dynaport.Get(1)
+		// create the actor path
+		actorPath := address.New("Test", "sys", "host", ports[0])
 
-	// create the actor ref
-	pid, err := newPID(
-		ctx,
-		actorPath,
-		newTestActor(),
-		withInitMaxRetries(1),
-		withCustomLogger(log.DiscardLogger),
-		withAskTimeout(replyTimeout))
+		// create the actor ref
+		pid, err := newPID(
+			ctx,
+			actorPath,
+			newTestActor(),
+			withInitMaxRetries(1),
+			withCustomLogger(log.DiscardLogger),
+			withAskTimeout(replyTimeout))
 
-	require.NoError(t, err)
-	assert.NotNil(t, pid)
-	// let us send 10 public to the actor
-	count := 10
-	for i := 0; i < count; i++ {
-		receiveContext := &ReceiveContext{
-			ctx:     ctx,
-			message: new(testpb.TestSend),
-			sender:  NoSender,
-			self:    pid,
+		require.NoError(t, err)
+		assert.NotNil(t, pid)
+		// let us send 10 public to the actor
+		count := 10
+		for i := 0; i < count; i++ {
+			receiveContext := &ReceiveContext{
+				ctx:     ctx,
+				message: new(testpb.TestSend),
+				sender:  NoSender,
+				self:    pid,
+			}
+
+			pid.doReceive(receiveContext)
 		}
 
-		pid.doReceive(receiveContext)
-	}
-
-	lib.Pause(500 * time.Millisecond)
-	assert.Zero(t, pid.ChildrenCount())
-	assert.NotZero(t, pid.LatestProcessedDuration())
-	assert.EqualValues(t, 11, pid.ProcessedCount()) // 1 because of the PostStart message
-	// stop the actor
-	err = pid.Shutdown(ctx)
-	assert.NoError(t, err)
+		lib.Pause(500 * time.Millisecond)
+		assert.Zero(t, pid.ChildrenCount())
+		assert.NotZero(t, pid.LatestProcessedDuration())
+		assert.EqualValues(t, 10, pid.ProcessedCount()-1) // 1 because of the PostStart message
+		// stop the actor
+		err = pid.Shutdown(ctx)
+		assert.NoError(t, err)
+	})
 }
 func TestPassivation(t *testing.T) {
 	t.Run("With happy path", func(t *testing.T) {
@@ -1070,6 +1072,36 @@ func TestSpawnChild(t *testing.T) {
 		err = parent.Shutdown(ctx)
 		assert.NoError(t, err)
 	})
+	t.Run("With starting child actor with a different mailbox", func(t *testing.T) {
+		// create a test context
+		ctx := context.TODO()
+		// create the actor path
+		ports := dynaport.Get(1)
+		actorPath := address.New("Test", "sys", "host", ports[0])
+
+		// create the parent actor
+		parent, err := newPID(ctx, actorPath,
+			newTestSupervisor(),
+			withInitMaxRetries(1),
+			withCustomLogger(log.DiscardLogger),
+			withAskTimeout(replyTimeout))
+
+		require.NoError(t, err)
+		assert.NotNil(t, parent)
+
+		// create the child actor
+		child, err := parent.SpawnChild(ctx, "child", newTestSupervised(), WithMailbox(NewBoundedMailbox(20)))
+		assert.NoError(t, err)
+		assert.NotNil(t, child)
+		lib.Pause(time.Second)
+		assert.Len(t, parent.Children(), 1)
+
+		assert.NoError(t, Tell(ctx, child, new(testpb.TestSend)))
+
+		//stop the actor
+		err = parent.Shutdown(ctx)
+		assert.NoError(t, err)
+	})
 	t.Run("With restarting child actor when not shutdown", func(t *testing.T) {
 		// create a test context
 		ctx := context.TODO()
@@ -1424,7 +1456,7 @@ func TestBatchTell(t *testing.T) {
 		require.NoError(t, pid.BatchTell(ctx, pid, new(testpb.TestSend), new(testpb.TestSend)))
 		// wait for the asynchronous processing to complete
 		lib.Pause(100 * time.Millisecond)
-		assert.EqualValues(t, 2, actor.counter.Load())
+		assert.EqualValues(t, 2, pid.ProcessedCount()-1)
 		// shutdown the actor when
 		// wait a while because exchange is ongoing
 		lib.Pause(time.Second)
@@ -1450,7 +1482,7 @@ func TestBatchTell(t *testing.T) {
 		require.NoError(t, pid.BatchTell(ctx, pid, new(testpb.TestSend)))
 		// wait for the asynchronous processing to complete
 		lib.Pause(100 * time.Millisecond)
-		assert.EqualValues(t, 1, actor.counter.Load())
+		assert.EqualValues(t, 1, pid.ProcessedCount()-1)
 		// shutdown the actor when
 		// wait a while because exchange is ongoing
 		lib.Pause(time.Second)
@@ -2023,9 +2055,10 @@ func TestPipeTo(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
 
+		lib.Pause(500 * time.Millisecond)
 		// zero message received by both actors
-		require.Zero(t, actor1.Counter())
-		require.Zero(t, actor2.Counter())
+		require.Zero(t, pid1.ProcessedCount()-1)
+		require.Zero(t, pid2.ProcessedCount()-1)
 
 		task := make(chan proto.Message)
 		err = pid1.PipeTo(ctx, pid2, task)
@@ -2047,8 +2080,10 @@ func TestPipeTo(t *testing.T) {
 		task <- new(testspb.TaskComplete)
 		wg.Wait()
 
-		require.EqualValues(t, 3, actor1.Counter())
-		require.EqualValues(t, 1, actor2.Counter())
+		lib.Pause(time.Second)
+
+		require.EqualValues(t, 3, pid1.ProcessedCount()-1)
+		require.EqualValues(t, 1, pid2.ProcessedCount()-1)
 
 		lib.Pause(time.Second)
 		assert.NoError(t, pid1.Shutdown(ctx))
@@ -2118,9 +2153,11 @@ func TestPipeTo(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
 
+		lib.Pause(time.Second)
+
 		// zero message received by both actors
-		require.Zero(t, actor1.Counter())
-		require.Zero(t, actor2.Counter())
+		require.Zero(t, pid1.ProcessedCount()-1)
+		require.Zero(t, pid2.ProcessedCount()-1)
 
 		task := make(chan proto.Message)
 		err = pid1.PipeTo(ctx, pid2, task)
@@ -2144,8 +2181,10 @@ func TestPipeTo(t *testing.T) {
 
 		wg.Wait()
 
-		require.EqualValues(t, 3, actor1.Counter())
-		require.Zero(t, actor2.Counter())
+		lib.Pause(time.Second)
+
+		require.EqualValues(t, 3, pid1.ProcessedCount()-1)
+		require.Zero(t, pid2.ProcessedCount())
 
 		lib.Pause(time.Second)
 		assert.NoError(t, pid1.Shutdown(ctx))
@@ -2176,9 +2215,11 @@ func TestPipeTo(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
 
+		lib.Pause(time.Second)
+
 		// zero message received by both actors
-		require.Zero(t, actor1.Counter())
-		require.Zero(t, actor2.Counter())
+		require.Zero(t, pid1.ProcessedCount()-1)
+		require.Zero(t, pid2.ProcessedCount()-1)
 
 		err = pid1.PipeTo(ctx, pid2, nil)
 		require.Error(t, err)
@@ -2214,9 +2255,11 @@ func TestPipeTo(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
 
+		lib.Pause(time.Second)
+
 		// zero message received by both actors
-		require.Zero(t, actor1.Counter())
-		require.Zero(t, actor2.Counter())
+		require.Zero(t, pid1.ProcessedCount()-1)
+		require.Zero(t, pid2.ProcessedCount()-1)
 
 		task := make(chan proto.Message)
 
@@ -2239,10 +2282,12 @@ func TestPipeTo(t *testing.T) {
 		cancel()
 		wg.Wait()
 
-		require.EqualValues(t, 3, actor1.Counter())
+		lib.Pause(time.Second)
+
+		require.EqualValues(t, 3, pid1.ProcessedCount()-1)
 
 		// no message piped to the actor
-		require.Zero(t, actor2.Counter())
+		require.Zero(t, pid2.ProcessedCount()-1)
 
 		lib.Pause(time.Second)
 		assert.NoError(t, pid1.Shutdown(ctx))

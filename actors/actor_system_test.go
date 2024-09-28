@@ -1418,4 +1418,43 @@ func TestActorSystem(t *testing.T) {
 			assert.NoError(t, err)
 		})
 	})
+	t.Run("With Spawn with custom mailbox", func(t *testing.T) {
+		ctx := context.TODO()
+		actorSystem, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+
+		// start the actor system
+		err := actorSystem.Start(ctx)
+		assert.NoError(t, err)
+
+		// wait for complete start
+		lib.Pause(time.Second)
+
+		// create the black hole actor
+		actor := newTestActor()
+		pid, err := actorSystem.Spawn(ctx, "test", actor, WithMailbox(NewBoundedMailbox(10)))
+		assert.NoError(t, err)
+		assert.NotNil(t, pid)
+
+		// wait a while
+		lib.Pause(time.Second)
+		assert.EqualValues(t, 1, pid.ProcessedCount())
+		require.True(t, pid.IsRunning())
+
+		// every message sent to the actor will result in deadletters
+		counter := 0
+		for i := 1; i <= 5; i++ {
+			require.NoError(t, Tell(ctx, pid, new(testpb.TestSend)))
+			counter = counter + 1
+		}
+
+		lib.Pause(time.Second)
+
+		assert.EqualValues(t, counter, pid.ProcessedCount()-1)
+		require.NoError(t, err)
+
+		t.Cleanup(func() {
+			err = actorSystem.Stop(ctx)
+			assert.NoError(t, err)
+		})
+	})
 }

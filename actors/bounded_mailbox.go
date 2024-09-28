@@ -26,7 +26,6 @@ package actors
 
 import (
 	"sync"
-	"sync/atomic"
 )
 
 // BoundedMailbox defines a bounded mailbox using ring buffer queue
@@ -35,7 +34,7 @@ type BoundedMailbox struct {
 	buffer     []*ReceiveContext
 	head, tail int
 	len, cap   int
-	state      atomic.Uint64
+	full       bool
 	lock       *sync.Mutex
 }
 
@@ -57,18 +56,15 @@ func NewBoundedMailbox(cap int) *BoundedMailbox {
 // Enqueue places the given value in the mailbox
 // This will return an error when the mailbox is full
 func (mailbox *BoundedMailbox) Enqueue(msg *ReceiveContext) error {
-	mailbox.lock.Lock()
-	if mailbox.len == mailbox.cap {
-		mailbox.lock.Unlock()
+	if mailbox.isFull() {
 		return ErrFullMailbox
 	}
 
+	mailbox.lock.Lock()
 	mailbox.buffer[mailbox.tail] = msg
-	mailbox.tail++
-	if mailbox.tail > mailbox.cap-1 {
-		mailbox.tail = 0
-	}
+	mailbox.tail = (mailbox.tail + 1) % mailbox.cap
 	mailbox.len++
+	mailbox.full = mailbox.head == mailbox.tail
 	mailbox.lock.Unlock()
 	return nil
 }
@@ -76,12 +72,14 @@ func (mailbox *BoundedMailbox) Enqueue(msg *ReceiveContext) error {
 // Dequeue takes the mail from the mailbox
 // It returns nil when the mailbox is empty
 func (mailbox *BoundedMailbox) Dequeue() (msg *ReceiveContext) {
+	if mailbox.IsEmpty() {
+		return nil
+	}
+
 	mailbox.lock.Lock()
 	item := mailbox.buffer[mailbox.head]
-	mailbox.head++
-	if mailbox.head > mailbox.cap-1 {
-		mailbox.head = 0
-	}
+	mailbox.full = false
+	mailbox.head = (mailbox.head + 1) % mailbox.cap
 	mailbox.len--
 	mailbox.lock.Unlock()
 	return item
@@ -90,9 +88,9 @@ func (mailbox *BoundedMailbox) Dequeue() (msg *ReceiveContext) {
 // IsEmpty returns true when the mailbox is empty
 func (mailbox *BoundedMailbox) IsEmpty() bool {
 	mailbox.lock.Lock()
-	empty := mailbox.len == mailbox.cap
+	empty := mailbox.head == mailbox.tail && !mailbox.full
 	mailbox.lock.Unlock()
-	return !empty
+	return empty
 }
 
 // Len returns queue length
@@ -101,4 +99,11 @@ func (mailbox *BoundedMailbox) Len() int64 {
 	length := mailbox.len
 	mailbox.lock.Unlock()
 	return int64(length)
+}
+
+func (mailbox *BoundedMailbox) isFull() bool {
+	mailbox.lock.Lock()
+	full := mailbox.full
+	mailbox.lock.Unlock()
+	return full
 }
