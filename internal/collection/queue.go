@@ -25,6 +25,7 @@
 package collection
 
 import (
+	"sync"
 	"sync/atomic"
 	"unsafe"
 )
@@ -34,6 +35,7 @@ type Queue struct {
 	head unsafe.Pointer // pointer to the head of the queue
 	tail unsafe.Pointer // pointer to the tail of the queue
 	len  uint64         // length of the queue
+	pool sync.Pool
 }
 
 // item is a single node in the queue.
@@ -49,12 +51,20 @@ func NewQueue() *Queue {
 	return &Queue{
 		head: unsafe.Pointer(dummy), // both head and tail point to the dummy node
 		tail: unsafe.Pointer(dummy),
+		pool: sync.Pool{
+			New: func() interface{} {
+				return &item{}
+			},
+		},
 	}
 }
 
 // Enqueue adds a value to the tail of the queue.
 func (q *Queue) Enqueue(v interface{}) {
-	xitem := &item{v: v}
+	xitem := q.pool.Get().(*item)
+	xitem.next = nil
+	xitem.v = v
+
 	for {
 		last := loadItem(&q.tail)        // Load current tail
 		lastNext := loadItem(&last.next) // Load the next pointer of tail
@@ -95,7 +105,8 @@ func (q *Queue) Dequeue() interface{} {
 				// Try to swing the head to the next node
 				if casItem(&q.head, head, next) {
 					atomic.AddUint64(&q.len, ^uint64(0)) // decrement length
-					return v                             // return the dequeued value
+					q.pool.Put(next)
+					return v // return the dequeued value
 				}
 			}
 		}

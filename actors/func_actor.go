@@ -44,30 +44,51 @@ type PostStopFunc = func(ctx context.Context) error
 // FuncOption is the interface that applies a SpawnHook option.
 type FuncOption interface {
 	// Apply sets the Option value of a config.
-	Apply(actor *funcActor)
+	Apply(actor *funcConfig)
 }
 
 var _ FuncOption = funcOption(nil)
 
 // funcOption implements the FuncOption interface.
-type funcOption func(*funcActor)
+type funcOption func(config *funcConfig)
 
 // Apply implementation
-func (f funcOption) Apply(c *funcActor) {
+func (f funcOption) Apply(c *funcConfig) {
 	f(c)
+}
+
+type funcConfig struct {
+	spawnConfig
+	preStart PreStartFunc
+	postStop PostStopFunc
+}
+
+func newFuncConfig(opts ...FuncOption) *funcConfig {
+	config := &funcConfig{}
+	for _, opt := range opts {
+		opt.Apply(config)
+	}
+	return config
 }
 
 // WithPreStart defines the PreStartFunc hook
 func WithPreStart(fn PreStartFunc) FuncOption {
-	return funcOption(func(actor *funcActor) {
+	return funcOption(func(actor *funcConfig) {
 		actor.preStart = fn
 	})
 }
 
 // WithPostStop defines the PostStopFunc hook
 func WithPostStop(fn PostStopFunc) FuncOption {
-	return funcOption(func(actor *funcActor) {
+	return funcOption(func(actor *funcConfig) {
 		actor.postStop = fn
+	})
+}
+
+// WithFuncMailbox sets the mailbox to use when starting the func-based actor
+func WithFuncMailbox(mailbox Mailbox) FuncOption {
+	return funcOption(func(actor *funcConfig) {
+		actor.mailbox = mailbox
 	})
 }
 
@@ -76,20 +97,16 @@ type funcActor struct {
 	pid         *PID
 	id          string
 	receiveFunc ReceiveFunc
-	preStart    PreStartFunc
-	postStop    PostStopFunc
+	config      *funcConfig
 }
 
 // newFuncActor creates an instance of funcActor
-func newFuncActor(id string, receiveFunc ReceiveFunc, opts ...FuncOption) Actor {
+func newFuncActor(id string, receiveFunc ReceiveFunc, config *funcConfig) *funcActor {
 	// create the actor instance
 	actor := &funcActor{
 		receiveFunc: receiveFunc,
 		id:          id,
-	}
-	// apply the spawn option
-	for _, opt := range opts {
-		opt.Apply(actor)
+		config:      config,
 	}
 	return actor
 }
@@ -100,7 +117,7 @@ var _ Actor = (*funcActor)(nil)
 // PreStart pre-starts the actor.
 func (x *funcActor) PreStart(ctx context.Context) error {
 	// check whether the pre-start hook is set and call it
-	preStart := x.preStart
+	preStart := x.config.preStart
 	if preStart != nil {
 		return preStart(ctx)
 	}
@@ -123,7 +140,7 @@ func (x *funcActor) Receive(ctx *ReceiveContext) {
 // PostStop is executed when the actor is shutting down.
 func (x *funcActor) PostStop(ctx context.Context) error {
 	// check whether the post-stop hook is set and call it
-	postStop := x.postStop
+	postStop := x.config.postStop
 	if postStop != nil {
 		return postStop(ctx)
 	}

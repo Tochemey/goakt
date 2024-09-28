@@ -24,43 +24,40 @@
 
 package actors
 
-import (
-	"testing"
+// spawnConfig defines the configuration to apply when creating an actor
+type spawnConfig struct {
+	// mailbox defines the mailbox to use when spawning the actor
+	mailbox Mailbox
+}
 
-	"github.com/stretchr/testify/assert"
-)
-
-func TestFuncOption(t *testing.T) {
-	var preStart PreStartFunc
-	var postStop PreStartFunc
-	mailbox := NewUnboundedMailbox()
-	testCases := []struct {
-		name     string
-		option   FuncOption
-		expected funcConfig
-	}{
-
-		{
-			name:     "WithPreStart",
-			option:   WithPreStart(preStart),
-			expected: funcConfig{preStart: preStart},
-		},
-		{
-			name:     "WithPostStop",
-			option:   WithPostStop(postStop),
-			expected: funcConfig{postStop: postStop},
-		},
-		{
-			name:     "WithFuncMailbox",
-			option:   WithFuncMailbox(mailbox),
-			expected: funcConfig{spawnConfig: spawnConfig{mailbox: mailbox}},
-		},
+// newSpawnConfig creates an instance of spawnConfig
+func newSpawnConfig(opts ...SpawnOption) *spawnConfig {
+	config := new(spawnConfig)
+	for _, opt := range opts {
+		opt.Apply(config)
 	}
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			var cfg funcConfig
-			tc.option.Apply(&cfg)
-			assert.Equal(t, tc.expected, cfg)
-		})
-	}
+	return config
+}
+
+// SpawnOption is the interface that applies to
+type SpawnOption interface {
+	// Apply sets the Option value of a config.
+	Apply(config *spawnConfig)
+}
+
+var _ SpawnOption = spawnOption(nil)
+
+// funcOption implements the FuncOption interface.
+type spawnOption func(config *spawnConfig)
+
+// Apply implementation
+func (f spawnOption) Apply(c *spawnConfig) {
+	f(c)
+}
+
+// WithMailbox sets the mailbox to use when starting the given actor
+func WithMailbox(mailbox Mailbox) SpawnOption {
+	return spawnOption(func(config *spawnConfig) {
+		config.mailbox = mailbox
+	})
 }

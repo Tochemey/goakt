@@ -81,6 +81,8 @@ var (
 	ErrUndefinedTask = errors.New("task is not defined")
 	// ErrInvalidHost is returned when a request is sent to an invalid host
 	ErrInvalidHost = errors.New("invalid host")
+	// ErrFullMailbox is returned when the mailbox is full
+	ErrFullMailbox = errors.New("mailbox is full")
 )
 
 // eof returns true if the given error is an EOF error

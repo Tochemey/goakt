@@ -37,6 +37,7 @@ import (
 
 func TestPIDOptions(t *testing.T) {
 	resumeDirective := NewResumeDirective()
+	mailbox := NewUnboundedMailbox()
 	var (
 		atomicDuration   atomic.Duration
 		atomicInt        atomic.Int32
@@ -100,6 +101,11 @@ func TestPIDOptions(t *testing.T) {
 			name:     "withInitTimeout",
 			option:   withInitTimeout(time.Second),
 			expected: &PID{initTimeout: atomicDuration},
+		},
+		{
+			name:     "WithMailbox",
+			option:   withMailbox(mailbox),
+			expected: &PID{mailbox: mailbox},
 		},
 	}
 	for _, tc := range testCases {

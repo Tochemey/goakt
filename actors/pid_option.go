@@ -95,7 +95,14 @@ func withPassivationDisabled() pidOption {
 // withStash sets the actor's stash buffer
 func withStash() pidOption {
 	return func(pid *PID) {
-		pid.stashBuffer = newMailbox()
+		pid.stashBuffer = NewUnboundedMailbox()
+	}
+}
+
+// withMailbox sets the custom actor mailbox
+func withMailbox(box Mailbox) pidOption {
+	return func(pid *PID) {
+		pid.mailbox = box
 	}
 }
 

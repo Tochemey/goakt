@@ -68,7 +68,7 @@ type ActorSystem interface {
 	// Stop stops the actor system
 	Stop(ctx context.Context) error
 	// Spawn creates an actor in the system and starts it
-	Spawn(ctx context.Context, name string, actor Actor) (*PID, error)
+	Spawn(ctx context.Context, name string, actor Actor, opts ...SpawnOption) (*PID, error)
 	// SpawnFromFunc creates an actor with the given receive function. One can set the PreStart and PostStop lifecycle hooks
 	// in the given optional options
 	SpawnFromFunc(ctx context.Context, receiveFunc ReceiveFunc, opts ...FuncOption) (*PID, error)
@@ -378,7 +378,7 @@ func (x *actorSystem) NumActors() uint64 {
 }
 
 // Spawn creates or returns the instance of a given actor in the system
-func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor) (*PID, error) {
+func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor, opts ...SpawnOption) (*PID, error) {
 	if !x.started.Load() {
 		return nil, ErrActorSystemNotStarted
 	}
@@ -393,7 +393,7 @@ func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor) (*PID
 		}
 	}
 
-	pid, err := x.configPID(ctx, name, actor)
+	pid, err := x.configPID(ctx, name, actor, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -410,8 +410,9 @@ func (x *actorSystem) SpawnNamedFromFunc(ctx context.Context, name string, recei
 		return nil, ErrActorSystemNotStarted
 	}
 
-	actor := newFuncActor(name, receiveFunc, opts...)
-	pid, err := x.configPID(ctx, name, actor)
+	config := newFuncConfig(opts...)
+	actor := newFuncActor(name, receiveFunc, config)
+	pid, err := x.configPID(ctx, name, actor, WithMailbox(config.mailbox))
 	if err != nil {
 		return nil, err
 	}
@@ -1308,7 +1309,7 @@ func (x *actorSystem) processPeerState(ctx context.Context, peer *cluster.Peer) 
 
 // configPID constructs a PID provided the actor name and the actor kind
 // this is a utility function used when spawning actors
-func (x *actorSystem) configPID(ctx context.Context, name string, actor Actor) (*PID, error) {
+func (x *actorSystem) configPID(ctx context.Context, name string, actor Actor, opts ...SpawnOption) (*PID, error) {
 	addr := x.actorAddress(name)
 	if err := addr.Validate(); err != nil {
 		return nil, err
@@ -1324,6 +1325,12 @@ func (x *actorSystem) configPID(ctx context.Context, name string, actor Actor) (
 		withSupervisorDirective(x.supervisorDirective),
 		withEventsStream(x.eventsStream),
 		withInitTimeout(x.actorInitTimeout),
+	}
+
+	spawnConfig := newSpawnConfig(opts...)
+	// set the mailbox option
+	if spawnConfig.mailbox != nil {
+		pidOpts = append(pidOpts, withMailbox(spawnConfig.mailbox))
 	}
 
 	// enable stash

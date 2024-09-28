@@ -25,66 +25,16 @@
 
 package actors
 
-import (
-	"sync/atomic"
-	"unsafe"
-)
-
-// node returns the queue node
-type node struct {
-	value *ReceiveContext
-	next  *node
-}
-
-// mailbox is a Multi-Producer-Single-Consumer Queue
-// reference: https://concurrencyfreaks.blogspot.com/2014/04/multi-producer-single-consumer-queue.html
-type mailbox struct {
-	head   *node
-	tail   *node
-	length int64
-}
-
-// newMailbox create an instance of mailbox
-func newMailbox() *mailbox {
-	item := new(node)
-	return &mailbox{
-		head:   item,
-		tail:   item,
-		length: 0,
-	}
-}
-
-// Push place the given value in the queue head (FIFO).
-func (m *mailbox) Push(value *ReceiveContext) {
-	tnode := &node{
-		value: value,
-	}
-	previousHead := (*node)(atomic.SwapPointer((*unsafe.Pointer)(unsafe.Pointer(&m.head)), unsafe.Pointer(tnode)))
-	atomic.StorePointer((*unsafe.Pointer)(unsafe.Pointer(&previousHead.next)), unsafe.Pointer(tnode))
-	atomic.AddInt64(&m.length, 1)
-}
-
-// Pop takes the QueueItem from the queue tail.
-// Returns false if the queue is empty. Can be used in a single consumer (goroutine) only.
-func (m *mailbox) Pop() *ReceiveContext {
-	next := (*node)(atomic.LoadPointer((*unsafe.Pointer)(unsafe.Pointer(&m.tail.next))))
-	if next == nil {
-		return nil
-	}
-
-	m.tail = next
-	value := next.value
-	next.value = nil
-	atomic.AddInt64(&m.length, -1)
-	return value
-}
-
-// Len returns queue length
-func (m *mailbox) Len() int64 {
-	return atomic.LoadInt64(&m.length)
-}
-
-// IsEmpty returns true when the queue is empty
-func (m *mailbox) IsEmpty() bool {
-	return atomic.LoadInt64(&m.length) == 0
+// Mailbox defines the actor mailbox.
+// Any implementation should be a thread-safe FIFO
+type Mailbox interface {
+	// Enqueue pushes a message into the mailbox. This returns an error
+	// when the box is full
+	Enqueue(msg *ReceiveContext) error
+	// Dequeue fetches a message from the mailbox
+	Dequeue() (msg *ReceiveContext)
+	// IsEmpty returns true when the mailbox is empty
+	IsEmpty() bool
+	// Len returns the size of the mailbox
+	Len() int64
 }

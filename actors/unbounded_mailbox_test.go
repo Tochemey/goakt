@@ -25,42 +25,59 @@
 package actors
 
 import (
+	"runtime"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-func TestFuncOption(t *testing.T) {
-	var preStart PreStartFunc
-	var postStop PreStartFunc
+func TestUnboundedMailbox(t *testing.T) {
 	mailbox := NewUnboundedMailbox()
-	testCases := []struct {
-		name     string
-		option   FuncOption
-		expected funcConfig
-	}{
 
-		{
-			name:     "WithPreStart",
-			option:   WithPreStart(preStart),
-			expected: funcConfig{preStart: preStart},
-		},
-		{
-			name:     "WithPostStop",
-			option:   WithPostStop(postStop),
-			expected: funcConfig{postStop: postStop},
-		},
-		{
-			name:     "WithFuncMailbox",
-			option:   WithFuncMailbox(mailbox),
-			expected: funcConfig{spawnConfig: spawnConfig{mailbox: mailbox}},
-		},
+	in1 := &ReceiveContext{}
+	in2 := &ReceiveContext{}
+
+	err := mailbox.Enqueue(in1)
+	require.NoError(t, err)
+	err = mailbox.Enqueue(in2)
+	require.NoError(t, err)
+
+	out1 := mailbox.Dequeue()
+	out2 := mailbox.Dequeue()
+
+	assert.Equal(t, in1, out1)
+	assert.Equal(t, in2, out2)
+	assert.True(t, mailbox.IsEmpty())
+}
+
+func TestUnboundedMailboxOneProducer(t *testing.T) {
+	t.Helper()
+	expCount := 100
+	var wg sync.WaitGroup
+	wg.Add(1)
+	mailbox := NewUnboundedMailbox()
+	go func() {
+		i := 0
+		for {
+			r := mailbox.Dequeue()
+			if r == nil {
+				runtime.Gosched()
+				continue
+			}
+			i++
+			if i == expCount {
+				wg.Done()
+				return
+			}
+		}
+	}()
+
+	for i := 0; i < expCount; i++ {
+		err := mailbox.Enqueue(new(ReceiveContext))
+		require.NoError(t, err)
 	}
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			var cfg funcConfig
-			tc.option.Apply(&cfg)
-			assert.Equal(t, tc.expected, cfg)
-		})
-	}
+
+	wg.Wait()
 }

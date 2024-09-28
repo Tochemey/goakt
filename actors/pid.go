@@ -117,7 +117,7 @@ type PID struct {
 	shutdownTimeout atomic.Duration
 
 	// specifies the actor mailbox
-	mailbox *mailbox
+	mailbox Mailbox
 
 	haltPassivationLnr chan types.Unit
 
@@ -153,7 +153,7 @@ type PID struct {
 	behaviorStack *behaviorStack
 
 	// stash settings
-	stashBuffer *mailbox
+	stashBuffer *UnboundedMailbox
 	stashLocker *sync.Mutex
 
 	// define an events stream
@@ -193,13 +193,13 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 		logger:                         log.New(log.ErrorLevel, os.Stderr),
 		children:                       newPIDMap(10),
 		supervisorDirective:            DefaultSupervisoryStrategy,
-		watchersList:                   slice.New[*watcher](),
+		watchersList:                   slice.NewSafe[*watcher](),
 		watchedList:                    newPIDMap(10),
 		address:                        address,
 		fieldsLocker:                   new(sync.RWMutex),
 		stopLocker:                     new(sync.Mutex),
 		httpClient:                     http.NewClient(),
-		mailbox:                        newMailbox(),
+		mailbox:                        NewUnboundedMailbox(),
 		stashBuffer:                    nil,
 		stashLocker:                    &sync.Mutex{},
 		eventsStream:                   nil,
@@ -288,7 +288,7 @@ func (pid *PID) Parents() []*PID {
 	var parents []*PID
 	if watchers.Len() > 0 {
 		for _, item := range watchers.Items() {
-			watcher := item.Value
+			watcher := item
 			if watcher != nil {
 				pid := watcher.WatcherID
 				if pid.IsRunning() {
@@ -441,7 +441,7 @@ func (pid *PID) LatestProcessedDuration() time.Duration {
 
 // SpawnChild creates a child actor and start watching it for error
 // When the given child actor already exists its PID will only be returned
-func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor) (*PID, error) {
+func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor, opts ...SpawnOption) (*PID, error) {
 	if !pid.IsRunning() {
 		return nil, ErrDead
 	}
@@ -458,7 +458,7 @@ func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor) (*PID,
 	pid.fieldsLocker.RLock()
 
 	// create the child actor options child inherit parent's options
-	opts := []pidOption{
+	pidOptions := []pidOption{
 		withInitMaxRetries(int(pid.initMaxRetries.Load())),
 		withPassivationAfter(pid.passivateAfter.Load()),
 		withAskTimeout(pid.askTimeout.Load()),
@@ -470,10 +470,15 @@ func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor) (*PID,
 		withShutdownTimeout(pid.shutdownTimeout.Load()),
 	}
 
+	spawnConfig := newSpawnConfig(opts...)
+	if spawnConfig.mailbox != nil {
+		pidOptions = append(pidOptions, withMailbox(spawnConfig.mailbox))
+	}
+
 	cid, err := newPID(ctx,
 		childAddress,
 		actor,
-		opts...,
+		pidOptions...,
 	)
 
 	if err != nil {
@@ -997,12 +1002,12 @@ func (pid *PID) Watch(cid *PID) {
 
 // UnWatch stops watching a given actor
 func (pid *PID) UnWatch(cid *PID) {
-	for _, item := range cid.watchers().Items() {
-		w := item.Value
+	for index, item := range cid.watchers().Items() {
+		w := item
 		if w.WatcherID.Equals(pid) {
 			w.Done <- types.Unit{}
 			pid.watchees().delete(cid.Address())
-			cid.watchers().Delete(item.Index)
+			cid.watchers().Delete(index)
 			break
 		}
 	}
@@ -1029,7 +1034,12 @@ func (pid *PID) watchees() *pidMap {
 // doReceive pushes a given message to the actor mailbox
 // and signals the receiveLoop to process it
 func (pid *PID) doReceive(receiveCtx *ReceiveContext) {
-	pid.mailbox.Push(receiveCtx)
+	if err := pid.mailbox.Enqueue(receiveCtx); err != nil {
+		// add a warning log because the mailbox is full and do nothing
+		pid.logger.Warn(err)
+		// push the message as a deadletter
+		pid.toDeadletterQueue(receiveCtx, err)
+	}
 	pid.signalMessage()
 }
 
@@ -1055,7 +1065,7 @@ func (pid *PID) receiveLoop() {
 			case <-pid.receiveSignal:
 				// Process all messages in the queue one by one
 				for {
-					received := pid.mailbox.Pop()
+					received := pid.mailbox.Dequeue()
 					if received == nil {
 						// If no more messages, stop processing
 						pid.processingMessages.Store(int32(idle))
@@ -1147,7 +1157,7 @@ func (pid *PID) freeWatchers(ctx context.Context) error {
 	watchers := pid.watchers()
 	if watchers.Len() > 0 {
 		for _, item := range watchers.Items() {
-			watcher := item.Value
+			watcher := item
 			terminated := &goaktpb.Terminated{
 				ActorId: pid.ID(),
 			}
@@ -1361,7 +1371,7 @@ func (pid *PID) notifyWatchers() {
 			case err := <-pid.watcherNotificationChan:
 				if err != nil {
 					for _, item := range pid.watchers().Items() {
-						item.Value.ErrChan <- err
+						item.ErrChan <- err
 					}
 				}
 			case <-pid.watchersNotificationStopSignal:
