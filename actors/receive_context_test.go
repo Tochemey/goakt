@@ -2114,4 +2114,106 @@ func TestReceiveContext(t *testing.T) {
 			assert.NoError(t, actorSystem.Stop(ctx))
 		})
 	})
+	t.Run("With Stash when stash not set", func(t *testing.T) {
+		ctx := context.TODO()
+		// create an actor
+		opts := []pidOption{
+			withInitMaxRetries(1),
+			withCustomLogger(log.DiscardLogger),
+		}
+
+		ports := dynaport.Get(1)
+		// create the actor path
+		actor := &stasher{}
+		actorPath := address.New("stasher", "sys", "host", ports[0])
+		pid, err := newPID(ctx, actorPath, actor, opts...)
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+
+		// wait for the actor to properly start
+		lib.Pause(5 * time.Millisecond)
+
+		// create a receive context
+		receiveContext := &ReceiveContext{
+			ctx:     ctx,
+			message: new(testpb.TestSend),
+			sender:  NoSender,
+			self:    pid,
+		}
+
+		receiveContext.Stash()
+		err = receiveContext.getError()
+		require.Error(t, err)
+		assert.EqualError(t, err, ErrStashBufferNotSet.Error())
+		err = pid.Shutdown(ctx)
+		assert.NoError(t, err)
+	})
+	t.Run("With Unstash when stash not set", func(t *testing.T) {
+		ctx := context.TODO()
+		// create an actor
+		opts := []pidOption{
+			withInitMaxRetries(1),
+			withCustomLogger(log.DiscardLogger),
+		}
+
+		ports := dynaport.Get(1)
+		// create the actor path
+		actor := &stasher{}
+		actorPath := address.New("stasher", "sys", "host", ports[0])
+		pid, err := newPID(ctx, actorPath, actor, opts...)
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+
+		// wait for the actor to properly start
+		lib.Pause(5 * time.Millisecond)
+
+		// create a receive context
+		receiveContext := &ReceiveContext{
+			ctx:     ctx,
+			message: new(testpb.TestSend),
+			sender:  NoSender,
+			self:    pid,
+		}
+
+		receiveContext.Unstash()
+		err = receiveContext.getError()
+		require.Error(t, err)
+		assert.EqualError(t, err, ErrStashBufferNotSet.Error())
+		err = pid.Shutdown(ctx)
+		assert.NoError(t, err)
+	})
+	t.Run("With UnstashAll when stash not set", func(t *testing.T) {
+		ctx := context.TODO()
+		// create an actor
+		opts := []pidOption{
+			withInitMaxRetries(1),
+			withCustomLogger(log.DiscardLogger),
+		}
+
+		ports := dynaport.Get(1)
+		// create the actor path
+		actor := &stasher{}
+		actorPath := address.New("stasher", "sys", "host", ports[0])
+		pid, err := newPID(ctx, actorPath, actor, opts...)
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+
+		// wait for the actor to properly start
+		lib.Pause(5 * time.Millisecond)
+
+		// create a receive context
+		receiveContext := &ReceiveContext{
+			ctx:     ctx,
+			message: new(testpb.TestSend),
+			sender:  NoSender,
+			self:    pid,
+		}
+
+		receiveContext.UnstashAll()
+		err = receiveContext.getError()
+		require.Error(t, err)
+		assert.EqualError(t, err, ErrStashBufferNotSet.Error())
+		err = pid.Shutdown(ctx)
+		assert.NoError(t, err)
+	})
 }
