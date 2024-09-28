@@ -31,6 +31,7 @@ Also, check reference section at the end of the post for more material regarding
   - [Actor System](#actor-system)
   - [Behaviors](#behaviors)
   - [Router](#router)
+  - [Mailbox](#mailbox)
   - [Events Stream](#events-stream)
     - [Supported events](#supported-events)
   - [Messaging](#messaging)
@@ -208,6 +209,14 @@ Go-Akt comes shipped with the following routing strategies:
 
 A router a just like any other actor that can be spawned. To spawn router just call the [ActorSystem](./actors/actor_system.go) `SpawnRouter` method.
 Router as well as their routees are not passivated.
+
+### Mailbox
+
+Once can implement a custom mailbox. See [Mailbox](./actors/mailbox.go).
+Go-Akt comes with the following mailboxes built-in:
+
+- [`UnboundedMailbox`](./actors/unbounded_mailbox.go): this is the default mailbox. It is implemented using the lock-free Multi-Producer-Single-Consumer Queue.
+- [`BoundedMailbox`](./actors/bounded_mailbox.go): this is a thread-safe mailbox implemented using the ring buffer queue. Setting a reasonable capacity for the queue can enhance throughput.
 
 ### Events Stream
 
