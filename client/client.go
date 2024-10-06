@@ -34,7 +34,6 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
-	"connectrpc.com/otelconnect"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/tochemey/goakt/v2/actors"
@@ -75,7 +74,7 @@ func New(ctx context.Context, addresses []string, opts ...Option) (*Client, erro
 	if err := chain.Validate(); err != nil {
 		return nil, err
 	}
-	cl := &Client{
+	client := &Client{
 		locker:          &sync.Mutex{},
 		strategy:        RoundRobinStrategy,
 		refreshInterval: -1,
@@ -83,12 +82,12 @@ func New(ctx context.Context, addresses []string, opts ...Option) (*Client, erro
 	}
 	// apply the various options
 	for _, opt := range opts {
-		opt.Apply(cl)
+		opt.Apply(client)
 	}
 
 	var nodes []*Node
-	for _, address := range addresses {
-		weight, ok, err := cl.getNodeMetric(ctx, address)
+	for _, url := range addresses {
+		weight, ok, err := client.getNodeMetric(ctx, url)
 		if err != nil {
 			return nil, err
 		}
@@ -96,18 +95,17 @@ func New(ctx context.Context, addresses []string, opts ...Option) (*Client, erro
 		if !ok {
 			continue
 		}
-
-		nodes = append(nodes, NewNode(address, weight))
+		nodes = append(nodes, NewNode(url, weight))
 	}
-	cl.balancer = getBalancer(cl.strategy)
-	cl.nodes = nodes
-	cl.balancer.Set(cl.nodes...)
+	client.balancer = getBalancer(client.strategy)
+	client.nodes = nodes
+	client.balancer.Set(client.nodes...)
 	// only refresh addresses when refresh interval is set
-	if cl.refreshInterval > 0 {
-		cl.closeSignal = make(chan types.Unit, 1)
-		go cl.refreshNodesLoop()
+	if client.refreshInterval > 0 {
+		client.closeSignal = make(chan types.Unit, 1)
+		go client.refreshNodesLoop()
 	}
-	return cl, nil
+	return client, nil
 }
 
 // Close closes the Client connection
@@ -125,16 +123,11 @@ func (x *Client) Close() {
 func (x *Client) Kinds(ctx context.Context) ([]string, error) {
 	x.locker.Lock()
 	defer x.locker.Unlock()
-	interceptor, err := otelconnect.NewInterceptor()
-	if err != nil {
-		return nil, err
-	}
 
 	host, port := nextRemotingHostAndPort(x.balancer)
 	service := internalpbconnect.NewClusterServiceClient(
 		http.NewClient(),
-		http.URL(host, port),
-		connect.WithInterceptors(interceptor))
+		http.URL(host, port))
 
 	response, err := service.GetKinds(ctx, connect.NewRequest(&internalpb.GetKindsRequest{
 		NodeAddress: fmt.Sprintf("%s:%d", host, port),
@@ -142,7 +135,6 @@ func (x *Client) Kinds(ctx context.Context) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-
 	return response.Msg.GetKinds(), nil
 }
 
@@ -299,7 +291,6 @@ func (x *Client) getNodeMetric(ctx context.Context, node string) (int, bool, err
 	response, err := service.GetNodeMetric(ctx, connect.NewRequest(&internalpb.GetNodeMetricRequest{NodeAddress: node}))
 	if err != nil {
 		code := connect.CodeOf(err)
-
 		// here node may not be available
 		if code == connect.CodeUnavailable ||
 			code == connect.CodeCanceled ||
