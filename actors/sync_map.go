@@ -71,7 +71,7 @@ func (m *syncMap) Remove(addr *address.Address) {
 
 // List returns all actors as a slice
 func (m *syncMap) List() []*PID {
-	out := make([]*PID, 0, m.Size())
+	var out []*PID
 	m.Range(func(_, value interface{}) bool {
 		out = append(out, value.(*PID))
 		return !(m.Size() == len(out))
