@@ -32,13 +32,13 @@ import (
 )
 
 type syncMap struct {
-	sync.Map
+	*sync.Map
 	counter uint64
 }
 
 func newSyncMap() *syncMap {
 	return &syncMap{
-		Map:     sync.Map{},
+		Map:     &sync.Map{},
 		counter: 0,
 	}
 }
@@ -82,6 +82,6 @@ func (m *syncMap) List() []*PID {
 
 // Reset resets the pids map
 func (m *syncMap) Reset() {
-	m.Map.Clear()
+	m.Clear()
 	atomic.StoreUint64(&m.counter, 0)
 }
