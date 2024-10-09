@@ -32,13 +32,12 @@ import (
 )
 
 type syncMap struct {
-	*sync.Map
+	sync.Map
 	counter uint64
 }
 
 func newSyncMap() *syncMap {
 	return &syncMap{
-		Map:     &sync.Map{},
 		counter: 0,
 	}
 }
