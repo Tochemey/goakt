@@ -82,6 +82,6 @@ func (m *syncMap) List() []*PID {
 
 // Reset resets the pids map
 func (m *syncMap) Reset() {
-	m.Clear()
+	m.Map.Clear()
 	atomic.StoreUint64(&m.counter, 0)
 }
