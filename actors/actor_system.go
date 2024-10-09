@@ -145,7 +145,7 @@ type actorSystem struct {
 	internalpbconnect.UnimplementedClusterServiceHandler
 
 	// map of actors in the system
-	actors *pidMap
+	actors *syncMap
 
 	// states whether the actor system has started or not
 	started atomic.Bool
@@ -231,7 +231,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 	}
 
 	system := &actorSystem{
-		actors:                 newPIDMap(1_000),
+		actors:                 newSyncMap(),
 		actorsChan:             make(chan *internalpb.ActorRef, 10),
 		name:                   name,
 		logger:                 log.New(log.ErrorLevel, os.Stderr),
@@ -385,7 +385,7 @@ func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor, opts 
 
 	// set the default actor path assuming we are running locally
 	actorPath := x.actorAddress(name)
-	pid, exist := x.actors.get(actorPath)
+	pid, exist := x.actors.Get(actorPath)
 	if exist {
 		if pid.IsRunning() {
 			// return the existing instance
@@ -443,7 +443,7 @@ func (x *actorSystem) Kill(ctx context.Context, name string) error {
 	}
 
 	actorPath := x.actorAddress(name)
-	pid, exist := x.actors.get(actorPath)
+	pid, exist := x.actors.Get(actorPath)
 	if exist {
 		// stop the given actor. No need to record error in the span context
 		// because the shutdown method is taking care of that
@@ -460,13 +460,13 @@ func (x *actorSystem) ReSpawn(ctx context.Context, name string) (*PID, error) {
 	}
 
 	actorPath := x.actorAddress(name)
-	pid, exist := x.actors.get(actorPath)
+	pid, exist := x.actors.Get(actorPath)
 	if exist {
 		if err := pid.Restart(ctx); err != nil {
 			return nil, fmt.Errorf("failed to restart actor=%s: %w", actorPath.String(), err)
 		}
 
-		x.actors.set(pid)
+		x.actors.Set(pid)
 		x.supervisor.Watch(pid)
 		return pid, nil
 	}
@@ -484,7 +484,7 @@ func (x *actorSystem) Name() string {
 // Actors returns the list of Actors that are alive in the actor system
 func (x *actorSystem) Actors() []*PID {
 	x.locker.Lock()
-	pids := x.actors.pids()
+	pids := x.actors.List()
 	x.locker.Unlock()
 	actors := make([]*PID, 0, len(pids))
 	for _, pid := range pids {
@@ -520,7 +520,7 @@ func (x *actorSystem) ActorOf(ctx context.Context, actorName string) (addr *addr
 
 	// first check whether the actor exist locally
 	actorPath := x.actorAddress(actorName)
-	if lpid, ok := x.actors.get(actorPath); ok {
+	if lpid, ok := x.actors.Get(actorPath); ok {
 		x.locker.Unlock()
 		return lpid.Address(), lpid, nil
 	}
@@ -564,7 +564,7 @@ func (x *actorSystem) LocalActor(actorName string) (*PID, error) {
 	}
 
 	actorPath := x.actorAddress(actorName)
-	if lpid, ok := x.actors.get(actorPath); ok {
+	if lpid, ok := x.actors.Get(actorPath); ok {
 		x.locker.Unlock()
 		return lpid, nil
 	}
@@ -685,10 +685,10 @@ func (x *actorSystem) Stop(ctx context.Context) error {
 		return err
 	}
 	// remove the supervisor from the actors list
-	x.actors.delete(x.supervisor.Address())
+	x.actors.Remove(x.supervisor.Address())
 
 	for _, actor := range x.Actors() {
-		x.actors.delete(actor.Address())
+		x.actors.Remove(actor.Address())
 		if err := actor.Shutdown(ctx); err != nil {
 			x.reset()
 			return err
@@ -729,7 +729,7 @@ func (x *actorSystem) RemoteLookup(ctx context.Context, request *connect.Request
 	}
 
 	addr := address.New(msg.GetName(), x.Name(), msg.GetHost(), int(msg.GetPort()))
-	pid, exist := x.actors.get(addr)
+	pid, exist := x.actors.Get(addr)
 	if !exist {
 		logger.Error(ErrAddressNotFound(addr.String()).Error())
 		return nil, ErrAddressNotFound(addr.String())
@@ -776,7 +776,7 @@ func (x *actorSystem) RemoteAsk(ctx context.Context, stream *connect.BidiStream[
 		}
 
 		addr := x.actorAddress(name)
-		pid, exist := x.actors.get(addr)
+		pid, exist := x.actors.Get(addr)
 		if !exist {
 			logger.Error(ErrAddressNotFound(addr.String()).Error())
 			return ErrAddressNotFound(addr.String())
@@ -836,7 +836,7 @@ func (x *actorSystem) RemoteTell(ctx context.Context, stream *connect.ClientStre
 		for request := range requestc {
 			receiver := request.GetRemoteMessage().GetReceiver()
 			addr := address.New(receiver.GetName(), x.Name(), receiver.GetHost(), int(receiver.GetPort()))
-			pid, exist := x.actors.get(addr)
+			pid, exist := x.actors.Get(addr)
 			if !exist {
 				logger.Error(ErrAddressNotFound(addr.String()).Error())
 				return ErrAddressNotFound(addr.String())
@@ -873,7 +873,7 @@ func (x *actorSystem) RemoteReSpawn(ctx context.Context, request *connect.Reques
 	}
 
 	actorPath := address.New(msg.GetName(), x.Name(), msg.GetHost(), int(msg.GetPort()))
-	pid, exist := x.actors.get(actorPath)
+	pid, exist := x.actors.Get(actorPath)
 	if !exist {
 		logger.Error(ErrAddressNotFound(actorPath.String()).Error())
 		return nil, ErrAddressNotFound(actorPath.String())
@@ -883,7 +883,7 @@ func (x *actorSystem) RemoteReSpawn(ctx context.Context, request *connect.Reques
 		return nil, fmt.Errorf("failed to restart actor=%s: %w", actorPath.String(), err)
 	}
 
-	x.actors.set(pid)
+	x.actors.Set(pid)
 	return connect.NewResponse(new(internalpb.RemoteReSpawnResponse)), nil
 }
 
@@ -903,7 +903,7 @@ func (x *actorSystem) RemoteStop(ctx context.Context, request *connect.Request[i
 	}
 
 	actorPath := address.New(msg.GetName(), x.Name(), msg.GetHost(), int(msg.GetPort()))
-	pid, exist := x.actors.get(actorPath)
+	pid, exist := x.actors.Get(actorPath)
 	if !exist {
 		logger.Error(ErrAddressNotFound(actorPath.String()).Error())
 		return nil, ErrAddressNotFound(actorPath.String())
@@ -913,7 +913,7 @@ func (x *actorSystem) RemoteStop(ctx context.Context, request *connect.Request[i
 		return nil, fmt.Errorf("failed to stop actor=%s: %w", actorPath.String(), err)
 	}
 
-	x.actors.delete(actorPath)
+	x.actors.Remove(actorPath)
 	return connect.NewResponse(new(internalpb.RemoteStopResponse)), nil
 }
 
@@ -965,7 +965,7 @@ func (x *actorSystem) GetNodeMetric(_ context.Context, request *connect.Request[
 		return nil, connect.NewError(connect.CodeInvalidArgument, ErrInvalidHost)
 	}
 
-	actorCount := x.actors.len()
+	actorCount := x.actors.Size()
 	return connect.NewResponse(&internalpb.GetNodeMetricResponse{
 		NodeRemoteAddress: remoteAddr,
 		ActorsCount:       uint64(actorCount),
@@ -1015,7 +1015,7 @@ func (x *actorSystem) getSupervisor() *PID {
 
 // setActor implements ActorSystem.
 func (x *actorSystem) setActor(actor *PID) {
-	x.actors.set(actor)
+	x.actors.Set(actor)
 	if x.clusterEnabled.Load() {
 		x.actorsChan <- &internalpb.ActorRef{
 			ActorAddress: actor.Address().Address,
@@ -1128,7 +1128,7 @@ func (x *actorSystem) enableRemoting(ctx context.Context) {
 
 // reset the actor system
 func (x *actorSystem) reset() {
-	x.actors.reset()
+	x.actors.Reset()
 	x.name = ""
 	x.cluster = nil
 }
@@ -1146,7 +1146,7 @@ func (x *actorSystem) janitor() {
 				for _, actor := range x.Actors() {
 					if !actor.IsRunning() {
 						x.logger.Infof("removing actor=%s from system", actor.Address().Name())
-						x.actors.delete(actor.Address())
+						x.actors.Remove(actor.Address())
 						if x.InCluster() {
 							if err := x.cluster.RemoveActor(context.Background(), actor.Address().Name()); err != nil {
 								x.logger.Error(err.Error())

@@ -26,69 +26,38 @@ package actors
 
 import (
 	"sync"
+	"testing"
 
-	"go.uber.org/atomic"
+	"github.com/stretchr/testify/assert"
+	"github.com/travisjeffery/go-dynaport"
 
 	"github.com/tochemey/goakt/v2/address"
 )
 
-type pidMap struct {
-	mu       *sync.RWMutex
-	size     atomic.Int32
-	mappings map[string]*PID
-}
-
-func newPIDMap(cap int) *pidMap {
-	return &pidMap{
-		mappings: make(map[string]*PID, cap),
-		mu:       &sync.RWMutex{},
-	}
-}
-
-// len returns the number of PIDs
-func (m *pidMap) len() int {
-	return int(m.size.Load())
-}
-
-// get retrieves a pid by its address
-func (m *pidMap) get(address *address.Address) (pid *PID, ok bool) {
-	m.mu.RLock()
-	pid, ok = m.mappings[address.String()]
-	m.mu.RUnlock()
-	return
-}
-
-// set sets a pid in the map
-func (m *pidMap) set(pid *PID) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if pid != nil {
-		m.mappings[pid.Address().String()] = pid
-		m.size.Add(1)
-	}
-}
-
-// delete removes a pid from the map
-func (m *pidMap) delete(addr *address.Address) {
-	m.mu.Lock()
-	delete(m.mappings, addr.String())
-	m.size.Add(-1)
-	m.mu.Unlock()
-}
-
-// pids returns all actors as a slice
-func (m *pidMap) pids() []*PID {
-	m.mu.Lock()
-	var out []*PID
-	for _, prop := range m.mappings {
-		out = append(out, prop)
-	}
-	m.mu.Unlock()
-	return out
-}
-
-func (m *pidMap) reset() {
-	m.mu.Lock()
-	m.mappings = make(map[string]*PID)
-	m.mu.Unlock()
+func TestPIDMap(t *testing.T) {
+	ports := dynaport.Get(1)
+	// create the actor path
+	actorPath := address.New("Test", "TestSys", "host", ports[0])
+	// create the PID
+	actorRef := &PID{address: actorPath, fieldsLocker: &sync.RWMutex{}, stopLocker: &sync.Mutex{}}
+	// create a new PID map
+	pidMap := newSyncMap()
+	// add to the map
+	pidMap.Set(actorRef)
+	// assert the length of the map
+	assert.EqualValues(t, 1, pidMap.Size())
+	// list the map
+	lst := pidMap.List()
+	assert.Len(t, lst, 1)
+	// fetch the inserted pid back
+	actual, ok := pidMap.Get(actorPath)
+	assert.True(t, ok)
+	assert.NotNil(t, actual)
+	assert.IsType(t, new(PID), actual)
+	// remove the pid from the map
+	pidMap.Remove(actorPath)
+	// list the map
+	lst = pidMap.List()
+	assert.Len(t, lst, 0)
+	assert.EqualValues(t, 0, pidMap.Size())
 }

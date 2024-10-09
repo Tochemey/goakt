@@ -26,38 +26,62 @@ package actors
 
 import (
 	"sync"
-	"testing"
-
-	"github.com/stretchr/testify/assert"
-	"github.com/travisjeffery/go-dynaport"
+	"sync/atomic"
 
 	"github.com/tochemey/goakt/v2/address"
 )
 
-func TestPIDMap(t *testing.T) {
-	ports := dynaport.Get(1)
-	// create the actor path
-	actorPath := address.New("Test", "TestSys", "host", ports[0])
-	// create the PID
-	actorRef := &PID{address: actorPath, fieldsLocker: &sync.RWMutex{}, stopLocker: &sync.Mutex{}}
-	// create a new PID map
-	pidMap := newPIDMap(5)
-	// add to the map
-	pidMap.set(actorRef)
-	// assert the length of the map
-	assert.EqualValues(t, 1, pidMap.len())
-	// list the map
-	lst := pidMap.pids()
-	assert.Len(t, lst, 1)
-	// fetch the inserted pid back
-	actual, ok := pidMap.get(actorPath)
-	assert.True(t, ok)
-	assert.NotNil(t, actual)
-	assert.IsType(t, new(PID), actual)
-	// remove the pid from the map
-	pidMap.delete(actorPath)
-	// list the map
-	lst = pidMap.pids()
-	assert.Len(t, lst, 0)
-	assert.EqualValues(t, 0, pidMap.len())
+type syncMap struct {
+	sync.Map
+	counter uint64
+}
+
+func newSyncMap() *syncMap {
+	return &syncMap{
+		Map:     sync.Map{},
+		counter: 0,
+	}
+}
+
+// Size returns the number of List
+func (m *syncMap) Size() int {
+	return int(atomic.LoadUint64(&m.counter))
+}
+
+// Get retrieves a pid by its address
+func (m *syncMap) Get(address *address.Address) (pid *PID, ok bool) {
+	if val, found := m.Load(address.String()); found {
+		return val.(*PID), found
+	}
+	return
+}
+
+// Set sets a pid in the map
+func (m *syncMap) Set(pid *PID) {
+	if pid != nil {
+		m.Store(pid.Address().String(), pid)
+		atomic.AddUint64(&m.counter, 1)
+	}
+}
+
+// Remove removes a pid from the map
+func (m *syncMap) Remove(addr *address.Address) {
+	m.Delete(addr.String())
+	atomic.AddUint64(&m.counter, ^uint64(0))
+}
+
+// List returns all actors as a slice
+func (m *syncMap) List() []*PID {
+	out := make([]*PID, 0, m.Size())
+	m.Range(func(_, value interface{}) bool {
+		out = append(out, value.(*PID))
+		return !(m.Size() == len(out))
+	})
+	return out
+}
+
+// Reset resets the pids map
+func (m *syncMap) Reset() {
+	m.Clear()
+	atomic.StoreUint64(&m.counter, 0)
 }
