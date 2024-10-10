@@ -80,6 +80,7 @@ func (m *syncMap) List() []*PID {
 }
 
 // Reset resets the pids map
+// nolint
 func (m *syncMap) Reset() {
 	// TODO: remove this line when migrated to go 1.23
 	//m.Clear()
