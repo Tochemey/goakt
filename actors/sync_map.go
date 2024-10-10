@@ -81,6 +81,11 @@ func (m *syncMap) List() []*PID {
 
 // Reset resets the pids map
 func (m *syncMap) Reset() {
-	m.Clear()
+	// TODO: remove this line when migrated to go 1.23
+	//m.Clear()
+	m.Range(func(key interface{}, value interface{}) bool {
+		m.Delete(key)
+		return true
+	})
 	atomic.StoreUint64(&m.counter, 0)
 }
