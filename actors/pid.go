@@ -171,7 +171,7 @@ type PID struct {
 	receiveStopSignal chan types.Unit
 
 	// atomic flag indicating whether the actor is processing messages
-	processingMessages atomic.Int32
+	processingState atomic.Int32
 }
 
 // newPID creates a new pid
@@ -239,7 +239,7 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 		go pid.passivationLoop()
 	}
 
-	pid.doReceive(newReceiveContext(ctx, NoSender, pid, new(goaktpb.PostStart)))
+	pid.doReceive(fromPool(ctx, NoSender, pid, new(goaktpb.PostStart)))
 
 	return pid, nil
 }
@@ -545,7 +545,7 @@ func (pid *PID) Ask(ctx context.Context, to *PID, message proto.Message) (respon
 		return nil, ErrDead
 	}
 
-	receiveContext := newReceiveContext(ctx, pid, to, message)
+	receiveContext := fromPool(ctx, pid, to, message)
 	to.doReceive(receiveContext)
 	timeout := pid.askTimeout.Load()
 
@@ -564,7 +564,8 @@ func (pid *PID) Tell(ctx context.Context, to *PID, message proto.Message) error 
 	if !to.IsRunning() {
 		return ErrDead
 	}
-	to.doReceive(newReceiveContext(ctx, pid, to, message))
+
+	to.doReceive(fromPool(ctx, pid, to, message))
 	return nil
 }
 
@@ -1046,7 +1047,7 @@ func (pid *PID) doReceive(receiveCtx *ReceiveContext) {
 // signal that a message has arrived and wake up the actor if needed
 func (pid *PID) signalMessage() {
 	// only signal if the actor is not already processing messages
-	if pid.processingMessages.CompareAndSwap(int32(idle), int32(processing)) {
+	if pid.processingState.CompareAndSwap(int32(idle), int32(processing)) {
 		select {
 		case pid.receiveSignal <- types.Unit{}:
 		default:
@@ -1068,15 +1069,19 @@ func (pid *PID) receiveLoop() {
 					received := pid.mailbox.Dequeue()
 					if received == nil {
 						// If no more messages, stop processing
-						pid.processingMessages.Store(int32(idle))
+						pid.processingState.Store(int32(idle))
 						// Check if new messages were added in the meantime and restart processing
-						if !pid.mailbox.IsEmpty() && pid.processingMessages.CompareAndSwap(int32(idle), int32(processing)) {
+						if !pid.mailbox.IsEmpty() && pid.processingState.CompareAndSwap(int32(idle), int32(processing)) {
 							continue
 						}
 						break
 					}
+					// get a copy to be processed
+					copied := received
+					// put the dequeued value back to the pool
+					toPool(received)
 					// Process the message
-					switch received.Message().(type) {
+					switch copied.Message().(type) {
 					case *goaktpb.PoisonPill:
 						_ = pid.Shutdown(received.Context())
 					default:
