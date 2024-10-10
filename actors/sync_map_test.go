@@ -41,23 +41,23 @@ func TestPIDMap(t *testing.T) {
 	// create the PID
 	actorRef := &PID{address: actorPath, fieldsLocker: &sync.RWMutex{}, stopLocker: &sync.Mutex{}}
 	// create a new PID map
-	pidMap := newPIDMap(5)
+	pidMap := newSyncMap()
 	// add to the map
-	pidMap.set(actorRef)
+	pidMap.Set(actorRef)
 	// assert the length of the map
-	assert.EqualValues(t, 1, pidMap.len())
+	assert.EqualValues(t, 1, pidMap.Size())
 	// list the map
-	lst := pidMap.pids()
+	lst := pidMap.List()
 	assert.Len(t, lst, 1)
 	// fetch the inserted pid back
-	actual, ok := pidMap.get(actorPath)
+	actual, ok := pidMap.Get(actorPath)
 	assert.True(t, ok)
 	assert.NotNil(t, actual)
 	assert.IsType(t, new(PID), actual)
 	// remove the pid from the map
-	pidMap.delete(actorPath)
+	pidMap.Remove(actorPath)
 	// list the map
-	lst = pidMap.pids()
+	lst = pidMap.List()
 	assert.Len(t, lst, 0)
-	assert.EqualValues(t, 0, pidMap.len())
+	assert.EqualValues(t, 0, pidMap.Size())
 }

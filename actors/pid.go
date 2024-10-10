@@ -125,10 +125,10 @@ type PID struct {
 	watchersList *slice.Safe[*watcher]
 
 	// hold the list of the children
-	children *pidMap
+	children *syncMap
 
 	// hold the list of watched actors
-	watchedList *pidMap
+	watchedList *syncMap
 
 	// the actor system
 	system ActorSystem
@@ -143,7 +143,7 @@ type PID struct {
 	stopLocker           *sync.Mutex
 	processingTimeLocker *sync.Mutex
 
-	// testSupervisor strategy
+	// supervisor strategy
 	supervisorDirective SupervisorDirective
 
 	// http client
@@ -191,10 +191,10 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 		latestReceiveTime:              atomic.Time{},
 		haltPassivationLnr:             make(chan types.Unit, 1),
 		logger:                         log.New(log.ErrorLevel, os.Stderr),
-		children:                       newPIDMap(10),
+		children:                       newSyncMap(),
 		supervisorDirective:            DefaultSupervisoryStrategy,
 		watchersList:                   slice.NewSafe[*watcher](),
-		watchedList:                    newPIDMap(10),
+		watchedList:                    newSyncMap(),
 		address:                        address,
 		fieldsLocker:                   new(sync.RWMutex),
 		stopLocker:                     new(sync.Mutex),
@@ -272,7 +272,7 @@ func (pid *PID) Child(name string) (*PID, error) {
 	}
 
 	childAddress := address.New(name, pid.Address().System(), pid.Address().Host(), pid.Address().Port()).WithParent(pid.Address())
-	if cid, ok := pid.children.get(childAddress); ok {
+	if cid, ok := pid.children.Get(childAddress); ok {
 		pid.childrenCount.Inc()
 		return cid, nil
 	}
@@ -304,7 +304,7 @@ func (pid *PID) Parents() []*PID {
 // Only alive actors are included in the list or an empty list is returned
 func (pid *PID) Children() []*PID {
 	pid.fieldsLocker.RLock()
-	children := pid.children.pids()
+	children := pid.children.List()
 	pid.fieldsLocker.RUnlock()
 
 	cids := make([]*PID, 0, len(children))
@@ -332,7 +332,7 @@ func (pid *PID) Stop(ctx context.Context, cid *PID) error {
 	children := pid.children
 	pid.fieldsLocker.RUnlock()
 
-	if cid, ok := children.get(cid.Address()); ok {
+	if cid, ok := children.Get(cid.Address()); ok {
 		if err := cid.Shutdown(ctx); err != nil {
 			return err
 		}
@@ -451,7 +451,7 @@ func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor, opts .
 	children := pid.children
 	pid.fieldsLocker.RUnlock()
 
-	if cid, ok := children.get(childAddress); ok {
+	if cid, ok := children.Get(childAddress); ok {
 		return cid, nil
 	}
 
@@ -486,7 +486,7 @@ func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor, opts .
 		return nil, err
 	}
 
-	pid.children.set(cid)
+	pid.children.Set(cid)
 	eventsStream := pid.eventsStream
 
 	pid.fieldsLocker.RUnlock()
@@ -996,7 +996,7 @@ func (pid *PID) Watch(cid *PID) {
 		Done:      make(chan types.Unit, 1),
 	}
 	cid.watchers().Append(w)
-	pid.watchees().set(cid)
+	pid.watchees().Set(cid)
 	go pid.supervise(cid, w)
 }
 
@@ -1006,7 +1006,7 @@ func (pid *PID) UnWatch(cid *PID) {
 		w := item
 		if w.WatcherID.Equals(pid) {
 			w.Done <- types.Unit{}
-			pid.watchees().delete(cid.Address())
+			pid.watchees().Remove(cid.Address())
 			cid.watchers().Delete(index)
 			break
 		}
@@ -1027,7 +1027,7 @@ func (pid *PID) watchers() *slice.Safe[*watcher] {
 }
 
 // watchees returns the list of actors watched by this actor
-func (pid *PID) watchees() *pidMap {
+func (pid *PID) watchees() *syncMap {
 	return pid.watchedList
 }
 
@@ -1146,7 +1146,7 @@ func (pid *PID) reset() {
 	pid.initMaxRetries.Store(DefaultInitMaxRetries)
 	pid.latestReceiveDuration.Store(0)
 	pid.initTimeout.Store(DefaultInitTimeout)
-	pid.children.reset()
+	pid.children.Reset()
 	pid.watchersList.Reset()
 	pid.behaviorStack.Reset()
 	pid.processedCount.Store(0)
@@ -1177,7 +1177,7 @@ func (pid *PID) freeWatchers(ctx context.Context) error {
 
 func (pid *PID) freeWatchees(ctx context.Context) error {
 	pid.logger.Debug("freeing all watched actors...")
-	for _, watched := range pid.watchedList.pids() {
+	for _, watched := range pid.watchedList.List() {
 		pid.logger.Debugf("watcher=(%s) unwatching actor=(%s)", pid.ID(), watched.ID())
 		pid.UnWatch(watched)
 		if err := watched.Shutdown(ctx); err != nil {
@@ -1195,7 +1195,7 @@ func (pid *PID) freeChildren(ctx context.Context) error {
 	for _, child := range pid.Children() {
 		pid.logger.Debugf("parent=(%s) disowning child=(%s)", pid.ID(), child.ID())
 		pid.UnWatch(child)
-		pid.children.delete(child.Address())
+		pid.children.Remove(child.Address())
 		if err := child.Shutdown(ctx); err != nil {
 			errwrap := fmt.Errorf(
 				"parent=(%s) failed to disown child=(%s): %w", pid.ID(), child.ID(),
@@ -1355,11 +1355,11 @@ func (pid *PID) removeChild(cid *PID) {
 	}
 
 	path := cid.Address()
-	if c, ok := pid.children.get(path); ok {
+	if c, ok := pid.children.Get(path); ok {
 		if c.IsRunning() {
 			return
 		}
-		pid.children.delete(path)
+		pid.children.Remove(path)
 	}
 }
 
@@ -1484,10 +1484,10 @@ func (pid *PID) supervise(cid *PID, watcher *watcher) {
 	}
 }
 
-// handleStopDirective handles the testSupervisor stop directive
+// handleStopDirective handles the Supervisor stop directive
 func (pid *PID) handleStopDirective(cid *PID) {
 	pid.UnWatch(cid)
-	pid.children.delete(cid.Address())
+	pid.children.Remove(cid.Address())
 	if err := cid.Shutdown(context.Background()); err != nil {
 		// this can enter into some infinite loop if we panic
 		// since we are just shutting down the actor we can just log the error
@@ -1496,7 +1496,7 @@ func (pid *PID) handleStopDirective(cid *PID) {
 	}
 }
 
-// handleRestartDirective handles the testSupervisor restart directive
+// handleRestartDirective handles the Supervisor restart directive
 func (pid *PID) handleRestartDirective(cid *PID, maxRetries uint32, timeout time.Duration) {
 	pid.UnWatch(cid)
 	ctx := context.Background()
@@ -1512,7 +1512,7 @@ func (pid *PID) handleRestartDirective(cid *PID, maxRetries uint32, timeout time
 	if err != nil {
 		pid.logger.Error(err)
 		// remove the actor in case it is a child and stop it
-		pid.children.delete(cid.Address())
+		pid.children.Remove(cid.Address())
 		if err := cid.Shutdown(ctx); err != nil {
 			pid.logger.Error(err)
 		}

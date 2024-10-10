@@ -26,69 +26,61 @@ package actors
 
 import (
 	"sync"
-
-	"go.uber.org/atomic"
+	"sync/atomic"
 
 	"github.com/tochemey/goakt/v2/address"
 )
 
-type pidMap struct {
-	mu       *sync.RWMutex
-	size     atomic.Int32
-	mappings map[string]*PID
+type syncMap struct {
+	sync.Map
+	counter uint64
 }
 
-func newPIDMap(cap int) *pidMap {
-	return &pidMap{
-		mappings: make(map[string]*PID, cap),
-		mu:       &sync.RWMutex{},
+func newSyncMap() *syncMap {
+	return &syncMap{
+		counter: 0,
 	}
 }
 
-// len returns the number of PIDs
-func (m *pidMap) len() int {
-	return int(m.size.Load())
+// Size returns the number of List
+func (m *syncMap) Size() int {
+	return int(atomic.LoadUint64(&m.counter))
 }
 
-// get retrieves a pid by its address
-func (m *pidMap) get(address *address.Address) (pid *PID, ok bool) {
-	m.mu.RLock()
-	pid, ok = m.mappings[address.String()]
-	m.mu.RUnlock()
+// Get retrieves a pid by its address
+func (m *syncMap) Get(address *address.Address) (pid *PID, ok bool) {
+	if val, found := m.Load(address.String()); found {
+		return val.(*PID), found
+	}
 	return
 }
 
-// set sets a pid in the map
-func (m *pidMap) set(pid *PID) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+// Set sets a pid in the map
+func (m *syncMap) Set(pid *PID) {
 	if pid != nil {
-		m.mappings[pid.Address().String()] = pid
-		m.size.Add(1)
+		m.Store(pid.Address().String(), pid)
+		atomic.AddUint64(&m.counter, 1)
 	}
 }
 
-// delete removes a pid from the map
-func (m *pidMap) delete(addr *address.Address) {
-	m.mu.Lock()
-	delete(m.mappings, addr.String())
-	m.size.Add(-1)
-	m.mu.Unlock()
+// Remove removes a pid from the map
+func (m *syncMap) Remove(addr *address.Address) {
+	m.Delete(addr.String())
+	atomic.AddUint64(&m.counter, ^uint64(0))
 }
 
-// pids returns all actors as a slice
-func (m *pidMap) pids() []*PID {
-	m.mu.Lock()
+// List returns all actors as a slice
+func (m *syncMap) List() []*PID {
 	var out []*PID
-	for _, prop := range m.mappings {
-		out = append(out, prop)
-	}
-	m.mu.Unlock()
+	m.Range(func(_, value interface{}) bool {
+		out = append(out, value.(*PID))
+		return !(m.Size() == len(out))
+	})
 	return out
 }
 
-func (m *pidMap) reset() {
-	m.mu.Lock()
-	m.mappings = make(map[string]*PID)
-	m.mu.Unlock()
+// Reset resets the pids map
+func (m *syncMap) Reset() {
+	m.Clear()
+	atomic.StoreUint64(&m.counter, 0)
 }
