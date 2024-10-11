@@ -1072,8 +1072,8 @@ func (pid *PID) receiveLoop() {
 			case <-pid.receiveSignal:
 				// Process all messages in the queue one by one
 				for {
-					received := pid.mailbox.Dequeue()
-					if received == nil {
+					dequeued := pid.mailbox.Dequeue()
+					if dequeued == nil {
 						// If no more messages, stop processing
 						pid.processingMessages.Store(int32(idle))
 						// Check if new messages were added in the meantime and restart processing
@@ -1082,6 +1082,8 @@ func (pid *PID) receiveLoop() {
 						}
 						break
 					}
+					received := dequeued
+					pid.releaseReceiveContext(dequeued)
 					// Process the message
 					switch received.Message().(type) {
 					case *goaktpb.PoisonPill:
@@ -1097,7 +1099,6 @@ func (pid *PID) receiveLoop() {
 
 // handleReceived picks the right behavior and processes the message
 func (pid *PID) handleReceived(received *ReceiveContext) {
-	defer pid.releaseReceiveContext(received)
 	defer pid.recovery(received)
 	if behavior := pid.behaviorStack.Peek(); behavior != nil {
 		pid.latestReceiveTime.Store(time.Now())
