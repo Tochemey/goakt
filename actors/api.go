@@ -212,13 +212,11 @@ func RemoteLookup(ctx context.Context, host string, port int, name string) (addr
 		http.URL(host, port),
 	)
 
-	request := connect.NewRequest(
-		&internalpb.RemoteLookupRequest{
-			Host: host,
-			Port: int32(port),
-			Name: name,
-		},
-	)
+	request := connect.NewRequest(&internalpb.RemoteLookupRequest{
+		Host: host,
+		Port: int32(port),
+		Name: name,
+	})
 
 	response, err := remoteClient.RemoteLookup(ctx, request)
 	if err != nil {
@@ -351,13 +349,11 @@ func RemoteReSpawn(ctx context.Context, host string, port int, name string) erro
 		http.URL(host, port),
 	)
 
-	request := connect.NewRequest(
-		&internalpb.RemoteReSpawnRequest{
-			Host: host,
-			Port: int32(port),
-			Name: name,
-		},
-	)
+	request := connect.NewRequest(&internalpb.RemoteReSpawnRequest{
+		Host: host,
+		Port: int32(port),
+		Name: name,
+	})
 
 	if _, err := remoteClient.RemoteReSpawn(ctx, request); err != nil {
 		code := connect.CodeOf(err)
@@ -377,13 +373,11 @@ func RemoteStop(ctx context.Context, host string, port int, name string) error {
 		http.URL(host, port),
 	)
 
-	request := connect.NewRequest(
-		&internalpb.RemoteStopRequest{
-			Host: host,
-			Port: int32(port),
-			Name: name,
-		},
-	)
+	request := connect.NewRequest(&internalpb.RemoteStopRequest{
+		Host: host,
+		Port: int32(port),
+		Name: name,
+	})
 
 	if _, err := remoteClient.RemoteStop(ctx, request); err != nil {
 		code := connect.CodeOf(err)
@@ -403,14 +397,12 @@ func RemoteSpawn(ctx context.Context, host string, port int, name, actorType str
 		http.URL(host, port),
 	)
 
-	request := connect.NewRequest(
-		&internalpb.RemoteSpawnRequest{
-			Host:      host,
-			Port:      int32(port),
-			ActorName: name,
-			ActorType: actorType,
-		},
-	)
+	request := connect.NewRequest(&internalpb.RemoteSpawnRequest{
+		Host:      host,
+		Port:      int32(port),
+		ActorName: name,
+		ActorType: actorType,
+	})
 
 	if _, err := remoteClient.RemoteSpawn(ctx, request); err != nil {
 		code := connect.CodeOf(err)

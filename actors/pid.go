@@ -278,9 +278,7 @@ func (pid *PID) Child(name string) (*PID, error) {
 		return nil, ErrDead
 	}
 
-	childAddress := address.New(
-		name, pid.Address().System(), pid.Address().Host(), pid.Address().Port(),
-	).WithParent(pid.Address())
+	childAddress := address.New(name, pid.Address().System(), pid.Address().Host(), pid.Address().Port()).WithParent(pid.Address())
 	if cid, ok := pid.children.Get(childAddress); ok {
 		pid.childrenCount.Inc()
 		return cid, nil
@@ -415,12 +413,10 @@ func (pid *PID) Restart(ctx context.Context) error {
 	pid.restartCount.Inc()
 
 	if pid.eventsStream != nil {
-		pid.eventsStream.Publish(
-			eventsTopic, &goaktpb.ActorRestarted{
-				Address:     pid.Address().Address,
-				RestartedAt: timestamppb.Now(),
-			},
-		)
+		pid.eventsStream.Publish(eventsTopic, &goaktpb.ActorRestarted{
+			Address:     pid.Address().Address,
+			RestartedAt: timestamppb.Now(),
+		})
 	}
 
 	return nil
