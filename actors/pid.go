@@ -246,7 +246,7 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 		go pid.passivationLoop()
 	}
 
-	pid.doReceive(pid.newReceiveContext(ctx, NoSender, pid, new(goaktpb.PostStart)))
+	pid.doReceive(pid.newReceiveContext().with(ctx, NoSender, pid, new(goaktpb.PostStart)))
 
 	return pid, nil
 }
@@ -552,7 +552,7 @@ func (pid *PID) Ask(ctx context.Context, to *PID, message proto.Message) (respon
 		return nil, ErrDead
 	}
 
-	receiveContext := pid.newReceiveContext(ctx, pid, to, message)
+	receiveContext := pid.newReceiveContext().with(ctx, pid, to, message)
 	to.doReceive(receiveContext)
 	timeout := pid.askTimeout.Load()
 
@@ -571,7 +571,7 @@ func (pid *PID) Tell(ctx context.Context, to *PID, message proto.Message) error 
 	if !to.IsRunning() {
 		return ErrDead
 	}
-	to.doReceive(pid.newReceiveContext(ctx, pid, to, message))
+	to.doReceive(pid.newReceiveContext().with(ctx, pid, to, message))
 	return nil
 }
 
@@ -1465,7 +1465,7 @@ func (pid *PID) handleCompletion(ctx context.Context, completion *taskCompletion
 		return
 	}
 
-	receiveContext := pid.newReceiveContext(ctx, pid, to, result.Success())
+	receiveContext := pid.newReceiveContext().with(ctx, pid, to, result.Success())
 	to.doReceive(receiveContext)
 }
 
@@ -1530,14 +1530,8 @@ func (pid *PID) handleRestartDirective(cid *PID, maxRetries uint32, timeout time
 }
 
 // newReceiveContext fetches a ReceiveContext from the pool
-func (pid *PID) newReceiveContext(ctx context.Context, from, to *PID, message proto.Message) *ReceiveContext {
-	receiveContext := pid.pool.Get().(*ReceiveContext)
-	receiveContext.ctx = ctx
-	receiveContext.sender = from
-	receiveContext.self = to
-	receiveContext.message = message
-	receiveContext.response = make(chan proto.Message, 1)
-	return receiveContext
+func (pid *PID) newReceiveContext() *ReceiveContext {
+	return pid.pool.Get().(*ReceiveContext)
 }
 
 // releaseReceiveContext sends back to the pool the ReceiveContext

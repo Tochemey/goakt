@@ -427,8 +427,8 @@ func toReceiveContext(ctx context.Context, to *PID, message proto.Message) (*Rec
 		if err != nil {
 			return nil, ErrInvalidRemoteMessage(err)
 		}
-		return to.newReceiveContext(ctx, NoSender, to, actual).withRemoteSender(address.From(msg.GetSender())), nil
+		return to.newReceiveContext().with(ctx, NoSender, to, actual).withRemoteSender(address.From(msg.GetSender())), nil
 	default:
-		return to.newReceiveContext(ctx, NoSender, to, message).withRemoteSender(address.From(address.NoSender)), nil
+		return to.newReceiveContext().with(ctx, NoSender, to, message).withRemoteSender(address.From(address.NoSender)), nil
 	}
 }
