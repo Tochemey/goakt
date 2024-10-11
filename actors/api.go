@@ -212,11 +212,13 @@ func RemoteLookup(ctx context.Context, host string, port int, name string) (addr
 		http.URL(host, port),
 	)
 
-	request := connect.NewRequest(&internalpb.RemoteLookupRequest{
-		Host: host,
-		Port: int32(port),
-		Name: name,
-	})
+	request := connect.NewRequest(
+		&internalpb.RemoteLookupRequest{
+			Host: host,
+			Port: int32(port),
+			Name: name,
+		},
+	)
 
 	response, err := remoteClient.RemoteLookup(ctx, request)
 	if err != nil {
@@ -239,13 +241,15 @@ func RemoteBatchTell(ctx context.Context, to *address.Address, messages ...proto
 			return ErrInvalidRemoteMessage(err)
 		}
 
-		requests = append(requests, &internalpb.RemoteTellRequest{
-			RemoteMessage: &internalpb.RemoteMessage{
-				Sender:   address.NoSender,
-				Receiver: to.Address,
-				Message:  packed,
+		requests = append(
+			requests, &internalpb.RemoteTellRequest{
+				RemoteMessage: &internalpb.RemoteMessage{
+					Sender:   address.NoSender,
+					Receiver: to.Address,
+					Message:  packed,
+				},
 			},
-		})
+		)
 	}
 
 	remoteClient := internalpbconnect.NewRemotingServiceClient(
@@ -285,13 +289,15 @@ func RemoteBatchAsk(ctx context.Context, to *address.Address, messages ...proto.
 			return nil, ErrInvalidRemoteMessage(err)
 		}
 
-		requests = append(requests, &internalpb.RemoteAskRequest{
-			RemoteMessage: &internalpb.RemoteMessage{
-				Sender:   address.NoSender,
-				Receiver: to.Address,
-				Message:  packed,
+		requests = append(
+			requests, &internalpb.RemoteAskRequest{
+				RemoteMessage: &internalpb.RemoteMessage{
+					Sender:   address.NoSender,
+					Receiver: to.Address,
+					Message:  packed,
+				},
 			},
-		})
+		)
 	}
 
 	remoteClient := internalpbconnect.NewRemotingServiceClient(
@@ -345,11 +351,13 @@ func RemoteReSpawn(ctx context.Context, host string, port int, name string) erro
 		http.URL(host, port),
 	)
 
-	request := connect.NewRequest(&internalpb.RemoteReSpawnRequest{
-		Host: host,
-		Port: int32(port),
-		Name: name,
-	})
+	request := connect.NewRequest(
+		&internalpb.RemoteReSpawnRequest{
+			Host: host,
+			Port: int32(port),
+			Name: name,
+		},
+	)
 
 	if _, err := remoteClient.RemoteReSpawn(ctx, request); err != nil {
 		code := connect.CodeOf(err)
@@ -369,11 +377,13 @@ func RemoteStop(ctx context.Context, host string, port int, name string) error {
 		http.URL(host, port),
 	)
 
-	request := connect.NewRequest(&internalpb.RemoteStopRequest{
-		Host: host,
-		Port: int32(port),
-		Name: name,
-	})
+	request := connect.NewRequest(
+		&internalpb.RemoteStopRequest{
+			Host: host,
+			Port: int32(port),
+			Name: name,
+		},
+	)
 
 	if _, err := remoteClient.RemoteStop(ctx, request); err != nil {
 		code := connect.CodeOf(err)
@@ -393,12 +403,14 @@ func RemoteSpawn(ctx context.Context, host string, port int, name, actorType str
 		http.URL(host, port),
 	)
 
-	request := connect.NewRequest(&internalpb.RemoteSpawnRequest{
-		Host:      host,
-		Port:      int32(port),
-		ActorName: name,
-		ActorType: actorType,
-	})
+	request := connect.NewRequest(
+		&internalpb.RemoteSpawnRequest{
+			Host:      host,
+			Port:      int32(port),
+			ActorName: name,
+			ActorType: actorType,
+		},
+	)
 
 	if _, err := remoteClient.RemoteSpawn(ctx, request); err != nil {
 		code := connect.CodeOf(err)
@@ -423,8 +435,8 @@ func toReceiveContext(ctx context.Context, to *PID, message proto.Message) (*Rec
 		if err != nil {
 			return nil, ErrInvalidRemoteMessage(err)
 		}
-		return newReceiveContext(ctx, NoSender, to, actual).withRemoteSender(address.From(msg.GetSender())), nil
+		return to.newReceiveContext(ctx, NoSender, to, actual).withRemoteSender(address.From(msg.GetSender())), nil
 	default:
-		return newReceiveContext(ctx, NoSender, to, message).withRemoteSender(address.From(address.NoSender)), nil
+		return to.newReceiveContext(ctx, NoSender, to, message).withRemoteSender(address.From(address.NoSender)), nil
 	}
 }

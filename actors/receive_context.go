@@ -46,18 +46,6 @@ type ReceiveContext struct {
 	err          error
 }
 
-// newReceiveContext creates an instance of ReceiveContext
-func newReceiveContext(ctx context.Context, from, to *PID, message proto.Message) *ReceiveContext {
-	// create a message receiveContext
-	return &ReceiveContext{
-		ctx:      ctx,
-		message:  message,
-		sender:   from,
-		response: make(chan proto.Message, 1),
-		self:     to,
-	}
-}
-
 // withRemoteSender set the remote sender for a given context
 func (c *ReceiveContext) withRemoteSender(remoteSender *address.Address) *ReceiveContext {
 	c.remoteSender = remoteSender
@@ -333,8 +321,7 @@ func (c *ReceiveContext) Forward(to *PID) {
 
 	if to.IsRunning() {
 		ctx := context.WithoutCancel(c.ctx)
-		receiveContext := newReceiveContext(ctx, sender, to, message)
-		to.doReceive(receiveContext)
+		to.doReceive(to.newReceiveContext(ctx, sender, to, message))
 	}
 }
 

@@ -172,6 +172,8 @@ type PID struct {
 
 	// atomic flag indicating whether the actor is processing messages
 	processingMessages atomic.Int32
+
+	pool sync.Pool
 }
 
 // newPID creates a new pid
@@ -211,6 +213,11 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 		watchersNotificationStopSignal: make(chan types.Unit, 1),
 		receiveSignal:                  make(chan types.Unit, 1),
 		receiveStopSignal:              make(chan types.Unit, 1),
+		pool: sync.Pool{
+			New: func() any {
+				return &ReceiveContext{}
+			},
+		},
 	}
 
 	pid.initMaxRetries.Store(DefaultInitMaxRetries)
@@ -239,7 +246,7 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 		go pid.passivationLoop()
 	}
 
-	pid.doReceive(newReceiveContext(ctx, NoSender, pid, new(goaktpb.PostStart)))
+	pid.doReceive(pid.newReceiveContext(ctx, NoSender, pid, new(goaktpb.PostStart)))
 
 	return pid, nil
 }
@@ -271,7 +278,9 @@ func (pid *PID) Child(name string) (*PID, error) {
 		return nil, ErrDead
 	}
 
-	childAddress := address.New(name, pid.Address().System(), pid.Address().Host(), pid.Address().Port()).WithParent(pid.Address())
+	childAddress := address.New(
+		name, pid.Address().System(), pid.Address().Host(), pid.Address().Port(),
+	).WithParent(pid.Address())
 	if cid, ok := pid.children.Get(childAddress); ok {
 		pid.childrenCount.Inc()
 		return cid, nil
@@ -406,10 +415,12 @@ func (pid *PID) Restart(ctx context.Context) error {
 	pid.restartCount.Inc()
 
 	if pid.eventsStream != nil {
-		pid.eventsStream.Publish(eventsTopic, &goaktpb.ActorRestarted{
-			Address:     pid.Address().Address,
-			RestartedAt: timestamppb.Now(),
-		})
+		pid.eventsStream.Publish(
+			eventsTopic, &goaktpb.ActorRestarted{
+				Address:     pid.Address().Address,
+				RestartedAt: timestamppb.Now(),
+			},
+		)
 	}
 
 	return nil
@@ -545,7 +556,7 @@ func (pid *PID) Ask(ctx context.Context, to *PID, message proto.Message) (respon
 		return nil, ErrDead
 	}
 
-	receiveContext := newReceiveContext(ctx, pid, to, message)
+	receiveContext := pid.newReceiveContext(ctx, pid, to, message)
 	to.doReceive(receiveContext)
 	timeout := pid.askTimeout.Load()
 
@@ -564,7 +575,7 @@ func (pid *PID) Tell(ctx context.Context, to *PID, message proto.Message) error 
 	if !to.IsRunning() {
 		return ErrDead
 	}
-	to.doReceive(newReceiveContext(ctx, pid, to, message))
+	to.doReceive(pid.newReceiveContext(ctx, pid, to, message))
 	return nil
 }
 
@@ -1090,6 +1101,7 @@ func (pid *PID) receiveLoop() {
 
 // handleReceived picks the right behavior and processes the message
 func (pid *PID) handleReceived(received *ReceiveContext) {
+	defer pid.releaseReceiveContext(received)
 	defer pid.recovery(received)
 	if behavior := pid.behaviorStack.Peek(); behavior != nil {
 		pid.latestReceiveTime.Store(time.Now())
@@ -1457,8 +1469,8 @@ func (pid *PID) handleCompletion(ctx context.Context, completion *taskCompletion
 		return
 	}
 
-	messageContext := newReceiveContext(ctx, pid, to, result.Success())
-	to.doReceive(messageContext)
+	receiveContext := pid.newReceiveContext(ctx, pid, to, result.Success())
+	to.doReceive(receiveContext)
 }
 
 // supervise watches for child actor's failure and act based upon the supervisory strategy
@@ -1519,4 +1531,21 @@ func (pid *PID) handleRestartDirective(cid *PID, maxRetries uint32, timeout time
 		return
 	}
 	pid.Watch(cid)
+}
+
+// newReceiveContext fetches a ReceiveContext from the pool
+func (pid *PID) newReceiveContext(ctx context.Context, from, to *PID, message proto.Message) *ReceiveContext {
+	receiveContext := pid.pool.Get().(*ReceiveContext)
+	receiveContext.ctx = ctx
+	receiveContext.sender = from
+	receiveContext.self = to
+	receiveContext.message = message
+	receiveContext.response = make(chan proto.Message, 1)
+	return receiveContext
+}
+
+// releaseReceiveContext sends back to the pool the ReceiveContext
+// fetched
+func (pid *PID) releaseReceiveContext(recvCtx *ReceiveContext) {
+	pid.pool.Put(recvCtx)
 }
