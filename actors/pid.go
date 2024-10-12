@@ -239,7 +239,9 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 		go pid.passivationLoop()
 	}
 
-	pid.doReceive(newReceiveContext(ctx, NoSender, pid, new(goaktpb.PostStart)))
+	receiveContext := contextFromPool()
+	receiveContext.build(ctx, NoSender, pid, new(goaktpb.PostStart), true)
+	pid.doReceive(receiveContext)
 
 	return pid, nil
 }
@@ -545,7 +547,9 @@ func (pid *PID) Ask(ctx context.Context, to *PID, message proto.Message) (respon
 		return nil, ErrDead
 	}
 
-	receiveContext := newReceiveContext(ctx, pid, to, message)
+	receiveContext := contextFromPool()
+	receiveContext.build(ctx, pid, to, message, false)
+
 	to.doReceive(receiveContext)
 	timeout := pid.askTimeout.Load()
 
@@ -564,7 +568,11 @@ func (pid *PID) Tell(ctx context.Context, to *PID, message proto.Message) error 
 	if !to.IsRunning() {
 		return ErrDead
 	}
-	to.doReceive(newReceiveContext(ctx, pid, to, message))
+
+	receiveContext := contextFromPool()
+	receiveContext.build(ctx, pid, to, message, true)
+
+	to.doReceive(receiveContext)
 	return nil
 }
 
@@ -1063,9 +1071,15 @@ func (pid *PID) receiveLoop() {
 			case <-pid.receiveStopSignal:
 				return
 			case <-pid.receiveSignal:
+				var received *ReceiveContext
+				if received != nil {
+					returnToPool(received)
+					received = nil
+				}
+
 				// Process all messages in the queue one by one
 				for {
-					received := pid.mailbox.Dequeue()
+					received = pid.mailbox.Dequeue()
 					if received == nil {
 						// If no more messages, stop processing
 						pid.processingMessages.Store(int32(idle))
@@ -1469,6 +1483,10 @@ func (pid *PID) supervise(cid *PID, watcher *watcher) {
 			pid.logger.Debugf("stop watching cid=(%s)", cid.ID())
 			return
 		case err := <-watcher.ErrChan:
+			// skip dead error
+			if errors.Is(err, ErrDead) {
+				return
+			}
 			pid.logger.Errorf("child actor=(%s) is failing: Err=%v", cid.ID(), err)
 			switch directive := pid.supervisorDirective.(type) {
 			case *StopDirective:

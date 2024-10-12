@@ -26,6 +26,7 @@ package actors
 
 import (
 	"context"
+	"sync"
 
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
@@ -34,6 +35,24 @@ import (
 	"github.com/tochemey/goakt/v2/future"
 	"github.com/tochemey/goakt/v2/goaktpb"
 )
+
+// pool holds a pool of ReceiveContext
+var pool = sync.Pool{
+	New: func() interface{} {
+		return new(ReceiveContext)
+	},
+}
+
+// contextFromPool retrieves a message from the pool
+func contextFromPool() *ReceiveContext {
+	return pool.Get().(*ReceiveContext)
+}
+
+// returnToPool sends the message context back to the pool
+func returnToPool(receiveContext *ReceiveContext) {
+	receiveContext.reset()
+	pool.Put(receiveContext)
+}
 
 // ReceiveContext is the context that is used by the actor to receive messages
 type ReceiveContext struct {
@@ -56,6 +75,29 @@ func newReceiveContext(ctx context.Context, from, to *PID, message proto.Message
 		response: make(chan proto.Message, 1),
 		self:     to,
 	}
+}
+
+// build sets the necessary fields of ReceiveContext
+func (c *ReceiveContext) build(ctx context.Context, from, to *PID, message proto.Message, async bool) *ReceiveContext {
+	c.ctx = ctx
+	c.sender = from
+	c.self = to
+	c.message = message
+
+	if async {
+		return c
+	}
+	c.response = make(chan proto.Message, 1)
+	return c
+}
+
+// reset resets the fields of ReceiveContext
+func (c *ReceiveContext) reset() {
+	var pid *PID
+	c.message = nil
+	c.self = pid
+	c.sender = pid
+	c.err = nil
 }
 
 // withRemoteSender set the remote sender for a given context
@@ -333,7 +375,8 @@ func (c *ReceiveContext) Forward(to *PID) {
 
 	if to.IsRunning() {
 		ctx := context.WithoutCancel(c.ctx)
-		receiveContext := newReceiveContext(ctx, sender, to, message)
+		receiveContext := contextFromPool()
+		receiveContext.build(ctx, sender, to, message, true)
 		to.doReceive(receiveContext)
 	}
 }

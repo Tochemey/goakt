@@ -47,7 +47,7 @@ func Ask(ctx context.Context, to *PID, message proto.Message, timeout time.Durat
 		return nil, ErrDead
 	}
 
-	receiveContext, err := toReceiveContext(ctx, to, message)
+	receiveContext, err := toReceiveContext(ctx, to, message, false)
 	if err != nil {
 		return nil, err
 	}
@@ -71,7 +71,7 @@ func Tell(ctx context.Context, to *PID, message proto.Message) error {
 		return ErrDead
 	}
 
-	receiveContext, err := toReceiveContext(ctx, to, message)
+	receiveContext, err := toReceiveContext(ctx, to, message, true)
 	if err != nil {
 		return err
 	}
@@ -416,15 +416,19 @@ func RemoteSpawn(ctx context.Context, host string, port int, name, actorType str
 }
 
 // toReceiveContext creates a ReceiveContext provided a message and a receiver
-func toReceiveContext(ctx context.Context, to *PID, message proto.Message) (*ReceiveContext, error) {
+func toReceiveContext(ctx context.Context, to *PID, message proto.Message, async bool) (*ReceiveContext, error) {
 	switch msg := message.(type) {
 	case *internalpb.RemoteMessage:
 		actual, err := msg.GetMessage().UnmarshalNew()
 		if err != nil {
 			return nil, ErrInvalidRemoteMessage(err)
 		}
-		return newReceiveContext(ctx, NoSender, to, actual).withRemoteSender(address.From(msg.GetSender())), nil
+		receiveContext := contextFromPool()
+		receiveContext.build(ctx, NoSender, to, actual, async)
+		return receiveContext.withRemoteSender(address.From(msg.GetSender())), nil
 	default:
-		return newReceiveContext(ctx, NoSender, to, message).withRemoteSender(address.From(address.NoSender)), nil
+		receiveContext := contextFromPool()
+		receiveContext.build(ctx, NoSender, to, message, async)
+		return receiveContext.withRemoteSender(address.From(address.NoSender)), nil
 	}
 }

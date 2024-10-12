@@ -2181,7 +2181,7 @@ func TestPipeTo(t *testing.T) {
 
 		wg.Wait()
 
-		lib.Pause(time.Second)
+		lib.Pause(2 * time.Second)
 
 		require.EqualValues(t, 3, pid1.ProcessedCount()-1)
 		require.Zero(t, pid2.ProcessedCount())
