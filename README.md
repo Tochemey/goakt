@@ -411,7 +411,8 @@ Go-Akt client is equipped with a mini load-balancer that helps route requests to
 The cluster engine depends upon the [discovery](./discovery/provider.go) mechanism to find other nodes in the cluster.
 Under the hood, it leverages [Olric](https://github.com/buraksezer/olric)
 to scale out and guarantee performant, reliable persistence, simple scalability, partitioning (sharding), and
-re-balancing out-of-the-box. _**It requires remoting to be enabled**_.
+re-balancing out-of-the-box. _**It requires remoting to be enabled**_. One can implement a custom hasher for the partitioning using
+the [Hasher](./hash/hasher.go) interface and the `Actor System` [option](./actors/option.go) to set it. The default hasher uses the `XXH3 algorithm`.
 
 At the moment the following providers are implemented:
 

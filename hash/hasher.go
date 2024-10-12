@@ -29,6 +29,7 @@ import (
 )
 
 // Hasher defines the hashcode generator interface.
+// This help for actors partitioning when cluster mode is enabled
 type Hasher interface {
 	// HashCode is responsible for generating unsigned, 64-bit hash of provided byte slice
 	HashCode(key []byte) uint64
