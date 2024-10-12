@@ -239,7 +239,7 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 		go pid.passivationLoop()
 	}
 
-	receiveContext := ContextFromPool()
+	receiveContext := contextFromPool()
 	receiveContext.build(ctx, NoSender, pid, new(goaktpb.PostStart), true)
 	pid.doReceive(receiveContext)
 
@@ -547,7 +547,7 @@ func (pid *PID) Ask(ctx context.Context, to *PID, message proto.Message) (respon
 		return nil, ErrDead
 	}
 
-	receiveContext := ContextFromPool()
+	receiveContext := contextFromPool()
 	receiveContext.build(ctx, pid, to, message, false)
 
 	to.doReceive(receiveContext)
@@ -569,7 +569,7 @@ func (pid *PID) Tell(ctx context.Context, to *PID, message proto.Message) error 
 		return ErrDead
 	}
 
-	receiveContext := ContextFromPool()
+	receiveContext := contextFromPool()
 	receiveContext.build(ctx, pid, to, message, true)
 
 	to.doReceive(receiveContext)
@@ -1073,7 +1073,7 @@ func (pid *PID) receiveLoop() {
 			case <-pid.receiveSignal:
 				var received *ReceiveContext
 				if received != nil {
-					ReturnToPool(received)
+					returnToPool(received)
 					received = nil
 				}
 

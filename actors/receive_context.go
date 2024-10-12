@@ -43,13 +43,13 @@ var pool = sync.Pool{
 	},
 }
 
-// ContextFromPool retrieves a message from the pool
-func ContextFromPool() *ReceiveContext {
+// contextFromPool retrieves a message from the pool
+func contextFromPool() *ReceiveContext {
 	return pool.Get().(*ReceiveContext)
 }
 
-// ReturnToPool sends the message context back to the pool
-func ReturnToPool(receiveContext *ReceiveContext) {
+// returnToPool sends the message context back to the pool
+func returnToPool(receiveContext *ReceiveContext) {
 	receiveContext.reset()
 	pool.Put(receiveContext)
 }
@@ -375,7 +375,7 @@ func (c *ReceiveContext) Forward(to *PID) {
 
 	if to.IsRunning() {
 		ctx := context.WithoutCancel(c.ctx)
-		receiveContext := ContextFromPool()
+		receiveContext := contextFromPool()
 		receiveContext.build(ctx, sender, to, message, true)
 		to.doReceive(receiveContext)
 	}

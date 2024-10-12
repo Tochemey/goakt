@@ -423,11 +423,11 @@ func toReceiveContext(ctx context.Context, to *PID, message proto.Message, async
 		if err != nil {
 			return nil, ErrInvalidRemoteMessage(err)
 		}
-		receiveContext := ContextFromPool()
+		receiveContext := contextFromPool()
 		receiveContext.build(ctx, NoSender, to, actual, async)
 		return receiveContext.withRemoteSender(address.From(msg.GetSender())), nil
 	default:
-		receiveContext := ContextFromPool()
+		receiveContext := contextFromPool()
 		receiveContext.build(ctx, NoSender, to, message, async)
 		return receiveContext.withRemoteSender(address.From(address.NoSender)), nil
 	}
