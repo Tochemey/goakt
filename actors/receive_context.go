@@ -84,10 +84,10 @@ func (c *ReceiveContext) build(ctx context.Context, from, to *PID, message proto
 	c.self = to
 	c.message = message
 
-	if !async {
-		c.response = make(chan proto.Message, 1)
+	if async {
+		return c
 	}
-
+	c.response = make(chan proto.Message, 1)
 	return c
 }
 
