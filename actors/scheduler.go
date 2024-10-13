@@ -26,13 +26,13 @@ package actors
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"strconv"
 	"sync"
 	"time"
 
-	"github.com/pkg/errors"
 	"github.com/reugn/go-quartz/job"
 	quartzlogger "github.com/reugn/go-quartz/logger"
 	"github.com/reugn/go-quartz/quartz"
@@ -129,8 +129,7 @@ func (x *scheduler) ScheduleOnce(ctx context.Context, message proto.Message, pid
 	defer x.mu.Unlock()
 
 	if !x.started.Load() {
-		// TODO: add a custom error
-		return errors.New("messages scheduler is not started")
+		return ErrSchedulerNotStarted
 	}
 
 	job := job.NewFunctionJob[bool](func(ctx context.Context) (bool, error) {
@@ -151,6 +150,33 @@ func (x *scheduler) ScheduleOnce(ctx context.Context, message proto.Message, pid
 	return x.quartzScheduler.ScheduleJob(jobDetails, quartz.NewRunOnceTrigger(interval))
 }
 
+// Schedule schedules a message that will be delivered to the receiving actor using the given interval specified
+func (x *scheduler) Schedule(ctx context.Context, message proto.Message, pid *PID, interval time.Duration) error {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+
+	if !x.started.Load() {
+		return ErrSchedulerNotStarted
+	}
+
+	job := job.NewFunctionJob[bool](func(ctx context.Context) (bool, error) {
+		if err := Tell(ctx, pid, message); err != nil {
+			return false, err
+		}
+		return true, nil
+	})
+
+	jobDetails := quartz.NewJobDetail(job, quartz.NewJobKey(pid.Address().String()))
+	if err := x.distributeJobKeyOrNot(ctx, jobDetails); err != nil {
+		if errors.Is(err, errSkipJobScheduling) {
+			return nil
+		}
+		return err
+	}
+
+	return x.quartzScheduler.ScheduleJob(jobDetails, quartz.NewSimpleTrigger(interval))
+}
+
 // RemoteScheduleOnce schedules a message to be sent to a remote actor in the future.
 // This requires remoting to be enabled on the actor system.
 // This will send the given message to the actor after the given interval specified
@@ -160,8 +186,7 @@ func (x *scheduler) RemoteScheduleOnce(ctx context.Context, message proto.Messag
 	defer x.mu.Unlock()
 
 	if !x.started.Load() {
-		// TODO: add a custom error
-		return errors.New("messages scheduler is not started")
+		return ErrSchedulerNotStarted
 	}
 	job := job.NewFunctionJob[bool](func(ctx context.Context) (bool, error) {
 		if err := RemoteTell(ctx, address, message); err != nil {
@@ -182,12 +207,41 @@ func (x *scheduler) RemoteScheduleOnce(ctx context.Context, message proto.Messag
 	return x.quartzScheduler.ScheduleJob(jobDetails, quartz.NewRunOnceTrigger(interval))
 }
 
+// RemoteSchedule schedules a message to be sent to a remote actor in the future.
+// This requires remoting to be enabled on the actor system.
+// This will send the given message to the actor at the given interval specified
+func (x *scheduler) RemoteSchedule(ctx context.Context, message proto.Message, address *address.Address, interval time.Duration) error {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+
+	if !x.started.Load() {
+		return ErrSchedulerNotStarted
+	}
+	job := job.NewFunctionJob[bool](func(ctx context.Context) (bool, error) {
+		if err := RemoteTell(ctx, address, message); err != nil {
+			return false, err
+		}
+		return true, nil
+	})
+
+	key := fmt.Sprintf("%s@%s", address.GetName(), net.JoinHostPort(address.GetHost(), strconv.Itoa(int(address.GetPort()))))
+	jobDetails := quartz.NewJobDetail(job, quartz.NewJobKey(key))
+	if err := x.distributeJobKeyOrNot(ctx, jobDetails); err != nil {
+		if errors.Is(err, errSkipJobScheduling) {
+			return nil
+		}
+		return err
+	}
+	// schedule the job
+	return x.quartzScheduler.ScheduleJob(jobDetails, quartz.NewSimpleTrigger(interval))
+}
+
 // ScheduleWithCron schedules a message to be sent to an actor in the future using a cron expression.
 func (x *scheduler) ScheduleWithCron(ctx context.Context, message proto.Message, pid *PID, cronExpression string) error {
 	x.mu.Lock()
 	defer x.mu.Unlock()
 	if !x.started.Load() {
-		return errors.New("messages scheduler is not started")
+		return ErrSchedulerNotStarted
 	}
 
 	job := job.NewFunctionJob[bool](func(ctx context.Context) (bool, error) {
@@ -208,7 +262,7 @@ func (x *scheduler) ScheduleWithCron(ctx context.Context, message proto.Message,
 	location := time.Now().Location()
 	trigger, err := quartz.NewCronTriggerWithLoc(cronExpression, location)
 	if err != nil {
-		x.logger.Error(errors.Wrap(err, "failed to schedule message"))
+		x.logger.Error(fmt.Errorf("failed to schedule message: %w", err))
 		return err
 	}
 
@@ -221,7 +275,7 @@ func (x *scheduler) RemoteScheduleWithCron(ctx context.Context, message proto.Me
 	defer x.mu.Unlock()
 
 	if !x.started.Load() {
-		return errors.New("messages scheduler is not started")
+		return ErrSchedulerNotStarted
 	}
 
 	job := job.NewFunctionJob[bool](func(ctx context.Context) (bool, error) {
@@ -244,7 +298,7 @@ func (x *scheduler) RemoteScheduleWithCron(ctx context.Context, message proto.Me
 	location := time.Now().Location()
 	trigger, err := quartz.NewCronTriggerWithLoc(cronExpression, location)
 	if err != nil {
-		x.logger.Error(errors.Wrap(err, "failed to schedule message"))
+		x.logger.Error(fmt.Errorf("failed to schedule message: %w", err))
 		return err
 	}
 
