@@ -83,6 +83,8 @@ var (
 	ErrInvalidHost = errors.New("invalid host")
 	// ErrFullMailbox is returned when the mailbox is full
 	ErrFullMailbox = errors.New("mailbox is full")
+	// ErrSchedulerNotStarted is returned when the scheduler has not started
+	ErrSchedulerNotStarted = errors.New("scheduler has not started")
 )
 
 // eof returns true if the given error is an EOF error

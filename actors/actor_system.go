@@ -109,11 +109,18 @@ type ActorSystem interface {
 	// This will send the given message to the actor after the given interval specified.
 	// The message will be sent once
 	ScheduleOnce(ctx context.Context, message proto.Message, pid *PID, interval time.Duration) error
+	// Schedule schedules a message that will be delivered to the receiver actor
+	// This will send the given message to the actor after the given interval specified.
+	Schedule(ctx context.Context, message proto.Message, pid *PID, interval time.Duration) error
 	// RemoteScheduleOnce schedules a message to be sent to a remote actor in the future.
 	// This requires remoting to be enabled on the actor system.
 	// This will send the given message to the actor after the given interval specified
 	// The message will be sent once
 	RemoteScheduleOnce(ctx context.Context, message proto.Message, address *address.Address, interval time.Duration) error
+	// RemoteSchedule schedules a message to be sent to a remote actor in the future.
+	// This requires remoting to be enabled on the actor system.
+	// This will send the given message to the actor after the given interval specified
+	RemoteSchedule(ctx context.Context, message proto.Message, address *address.Address, interval time.Duration) error
 	// ScheduleWithCron schedules a message to be sent to an actor in the future using a cron expression.
 	ScheduleWithCron(ctx context.Context, message proto.Message, pid *PID, cronExpression string) error
 	// RemoteScheduleWithCron schedules a message to be sent to an actor in the future using a cron expression.
@@ -311,6 +318,19 @@ func (x *actorSystem) Register(_ context.Context, actor Actor) error {
 
 	x.registry.Register(actor)
 	return nil
+}
+
+// Schedule schedules a message that will be delivered to the receiver actor
+// This will send the given message to the actor at the given interval specified.
+func (x *actorSystem) Schedule(ctx context.Context, message proto.Message, pid *PID, interval time.Duration) error {
+	return x.scheduler.Schedule(ctx, message, pid, interval)
+}
+
+// RemoteSchedule schedules a message to be sent to a remote actor in the future.
+// This requires remoting to be enabled on the actor system.
+// This will send the given message to the actor at the given interval specified
+func (x *actorSystem) RemoteSchedule(ctx context.Context, message proto.Message, address *address.Address, interval time.Duration) error {
+	return x.scheduler.RemoteSchedule(ctx, message, address, interval)
 }
 
 // ScheduleOnce schedules a message that will be delivered to the receiver actor
