@@ -26,13 +26,13 @@ package actors
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"strconv"
 	"sync"
 	"time"
 
-	"github.com/pkg/errors"
 	"github.com/reugn/go-quartz/job"
 	quartzlogger "github.com/reugn/go-quartz/logger"
 	"github.com/reugn/go-quartz/quartz"
