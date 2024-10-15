@@ -6,6 +6,7 @@
 ![GitHub Tag](https://img.shields.io/github/v/tag/Tochemey/goakt)
 [![Go Report Card](https://goreportcard.com/badge/github.com/tochemey/goakt)](https://goreportcard.com/report/github.com/tochemey/goakt)
 [![codecov](https://codecov.io/gh/Tochemey/goakt/graph/badge.svg?token=J0p9MzwSRH)](https://codecov.io/gh/Tochemey/goakt)
+[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2FTochemey%2Fgoakt.svg?type=shield)](https://app.fossa.com/projects/git%2Bgithub.com%2FTochemey%2Fgoakt?ref=badge_shield)
 
 Distributed [Go](https://go.dev/) actor framework to build reactive and distributed system in golang using
 _**protocol buffers as actor messages**_.
@@ -650,3 +651,6 @@ One can run the benchmark test from the [bench package](./bench):
 
 - `make bench` to run the benchmark
 - `make bench-stats` to see the benchmark stats
+
+## License
+[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2FTochemey%2Fgoakt.svg?type=large)](https://app.fossa.com/projects/git%2Bgithub.com%2FTochemey%2Fgoakt?ref=badge_large)
