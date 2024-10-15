@@ -12,7 +12,7 @@ require (
 	github.com/nats-io/nats-server/v2 v2.10.21
 	github.com/nats-io/nats.go v1.37.0
 	github.com/pkg/errors v0.9.1
-	github.com/redis/go-redis/v9 v9.6.1
+	github.com/redis/go-redis/v9 v9.6.2
 	github.com/reugn/go-quartz v0.13.0
 	github.com/stretchr/testify v1.9.0
 	github.com/travisjeffery/go-dynaport v1.0.0
