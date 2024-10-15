@@ -11,6 +11,7 @@ import (
 
 	"github.com/tochemey/goakt/v2/actors"
 	"github.com/tochemey/goakt/v2/internal/lib"
+	"github.com/tochemey/goakt/v2/log"
 	"github.com/tochemey/goakt/v2/test/data/testpb"
 )
 
@@ -19,7 +20,7 @@ func TestTestProbe(t *testing.T) {
 		// create a test context
 		ctx := context.TODO()
 		// create a test kit
-		testkit := New(ctx, t)
+		testkit := New(ctx, t, WithLogging(log.ErrorLevel))
 
 		// create the actor
 		pinger := testkit.Spawn(ctx, "pinger", &pinger{})
@@ -31,8 +32,7 @@ func TestTestProbe(t *testing.T) {
 		// send a message to the actor to be tested
 		probe.Send(pinger, new(testpb.Ping))
 
-		actual := probe.ExpectMessage(msg)
-		require.Equal(t, prototext.Format(msg), prototext.Format(actual))
+		probe.ExpectMessage(msg)
 		probe.ExpectNoMessage()
 
 		t.Cleanup(func() {
@@ -44,7 +44,7 @@ func TestTestProbe(t *testing.T) {
 		// create a test context
 		ctx := context.TODO()
 		// create a test kit
-		testkit := New(ctx, t)
+		testkit := New(ctx, t, WithLogging(log.ErrorLevel))
 
 		// create the actor
 		pinger := testkit.Spawn(ctx, "pinger", &pinger{})
@@ -69,7 +69,7 @@ func TestTestProbe(t *testing.T) {
 		// create a test context
 		ctx := context.TODO()
 		// create a test kit
-		testkit := New(ctx, t)
+		testkit := New(ctx, t, WithLogging(log.ErrorLevel))
 
 		// create the actor
 		pinger := testkit.Spawn(ctx, "pinger", &pinger{})
@@ -80,8 +80,7 @@ func TestTestProbe(t *testing.T) {
 		// send a message to the actor to be tested
 		probe.Send(pinger, new(testpb.Ping))
 
-		actual := probe.ExpectMessage(msg)
-		require.Equal(t, prototext.Format(msg), prototext.Format(actual))
+		probe.ExpectMessage(msg)
 		require.Equal(t, pinger.Address().String(), probe.Sender().Address().String())
 		probe.ExpectNoMessage()
 
@@ -130,8 +129,7 @@ func TestTestProbe(t *testing.T) {
 		duration := time.Second
 		probe.Send(pinger, &testpb.Wait{Duration: uint64(duration)})
 
-		actual := probe.ExpectMessageWithin(2*time.Second, msg)
-		require.Equal(t, prototext.Format(msg), prototext.Format(actual))
+		probe.ExpectMessageWithin(2*time.Second, msg)
 		probe.ExpectNoMessage()
 
 		t.Cleanup(func() {

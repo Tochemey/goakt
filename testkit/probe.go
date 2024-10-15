@@ -25,9 +25,9 @@ const (
 // when implementing unit tests with actors
 type Probe interface {
 	// ExpectMessage asserts that the message received from the test actor is the expected one
-	ExpectMessage(message proto.Message) proto.Message
+	ExpectMessage(message proto.Message)
 	// ExpectMessageWithin asserts that the message received from the test actor is the expected one within a time duration
-	ExpectMessageWithin(duration time.Duration, message proto.Message) proto.Message
+	ExpectMessageWithin(duration time.Duration, message proto.Message)
 	// ExpectNoMessage asserts that no message is expected
 	ExpectNoMessage()
 	// ExpectAnyMessage asserts that any message is expected
@@ -134,13 +134,13 @@ func (x *probe) ExpectMessageOfTypeWithin(duration time.Duration, messageType pr
 }
 
 // ExpectMessage assert message expectation
-func (x *probe) ExpectMessage(message proto.Message) proto.Message {
-	return x.expectMessage(x.defaultTimeout, message)
+func (x *probe) ExpectMessage(message proto.Message) {
+	x.expectMessage(x.defaultTimeout, message)
 }
 
 // ExpectMessageWithin expects message within a time duration
-func (x *probe) ExpectMessageWithin(duration time.Duration, message proto.Message) proto.Message {
-	return x.expectMessage(duration, message)
+func (x *probe) ExpectMessageWithin(duration time.Duration, message proto.Message) {
+	x.expectMessage(duration, message)
 }
 
 // ExpectNoMessage expects no message
@@ -212,13 +212,12 @@ func (x *probe) receiveOne(max time.Duration) proto.Message {
 }
 
 // expectMessage assert the expectation of a message within a maximum time duration
-func (x *probe) expectMessage(max time.Duration, message proto.Message) proto.Message {
+func (x *probe) expectMessage(max time.Duration, message proto.Message) {
 	// receive one message
 	received := x.receiveOne(max)
 	// let us assert the received message
 	require.NotNil(x.pt, received, fmt.Sprintf("timeout (%v) during expectMessage while waiting for %v", max, message))
 	require.Equal(x.pt, prototext.Format(message), prototext.Format(received), fmt.Sprintf("expected %v, found %v", message, received))
-	return received
 }
 
 // expectNoMessage asserts that no message is expected
