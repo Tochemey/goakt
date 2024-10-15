@@ -13,15 +13,25 @@ import (
 type TestKit struct {
 	actorSystem actors.ActorSystem
 	kt          *testing.T
+	logger      log.Logger
 }
 
 // New creates an instance of TestKit
-func New(ctx context.Context, t *testing.T) *TestKit {
+func New(ctx context.Context, t *testing.T, opts ...Option) *TestKit {
+	// create the testkit instance
+	testkit := &TestKit{
+		kt:     t,
+		logger: log.DiscardLogger,
+	}
+	// apply the various options
+	for _, opt := range opts {
+		opt.Apply(testkit)
+	}
 	// create an actor system
 	system, err := actors.NewActorSystem(
 		"testkit",
 		actors.WithPassivationDisabled(),
-		actors.WithLogger(log.DefaultLogger),
+		actors.WithLogger(testkit.logger),
 		actors.WithActorInitTimeout(time.Second),
 		actors.WithActorInitMaxRetries(5),
 		actors.WithReplyTimeout(time.Minute))
@@ -34,10 +44,8 @@ func New(ctx context.Context, t *testing.T) *TestKit {
 		t.Fatal(err.Error())
 	}
 
-	return &TestKit{
-		actorSystem: system,
-		kt:          t,
-	}
+	testkit.actorSystem = system
+	return testkit
 }
 
 // Spawn create an actor

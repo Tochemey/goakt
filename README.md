@@ -1,4 +1,4 @@
-# Go-Akt
+# GoAkt
 
 [![build](https://img.shields.io/github/actions/workflow/status/Tochemey/goakt/build.yml?branch=main)](https://github.com/Tochemey/goakt/actions/workflows/build.yml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/tochemey/goakt.svg)](https://pkg.go.dev/github.com/tochemey/goakt)
@@ -89,7 +89,7 @@ go get github.com/tochemey/goakt/v2
 
 ## Versioning
 
-The version system adopted in Go-Akt deviates a bit from the standard semantic versioning system.
+The version system adopted in GoAkt deviates a bit from the standard semantic versioning system.
 The version format is as follows:
 
 - The `MAJOR` part of the version will stay at `v2` for the meantime.
@@ -106,7 +106,7 @@ Kindly check out the [examples'](https://github.com/Tochemey/goakt-examples) rep
 
 ### Actors
 
-The fundamental building blocks of Go-Akt are actors.
+The fundamental building blocks of GoAkt are actors.
 
 - They are independent, isolated unit of computation with their own state.
 - They can be _long-lived_ actors or be _passivated_ after some period of time that is configured during their
@@ -114,7 +114,7 @@ The fundamental building blocks of Go-Akt are actors.
 - They are automatically thread-safe without having to use locks or any other shared-memory synchronization
   mechanisms.
 - They can be stateful and stateless depending upon the system to build.
-- Every actor in Go-Akt:
+- Every actor in GoAkt:
   - has a process id [`PID`](./actors/pid.go). Via the process id any allowable action can be executed by the
     actor.
   - has a lifecycle via the following methods: [`PreStart`](./actors/actor.go), [`PostStop`](./actors/actor.go). 
@@ -150,9 +150,9 @@ When cluster mode is enabled, passivated actors are removed from the entire clus
 
 ### Supervision
 
-In Go-Akt, supervision allows to define the various strategies to apply when a given actor is faulty.
+In GoAkt, supervision allows to define the various strategies to apply when a given actor is faulty.
 The supervisory strategy to adopt is set during the creation of the actor system.
-In Go-Akt each child actor is treated separately. There is no concept of one-for-one and one-for-all strategies.
+In GoAkt each child actor is treated separately. There is no concept of one-for-one and one-for-all strategies.
 The following directives are supported:
 - [`Restart`](./actors/supervisor.go): to restart the child actor. One can control how the restart is done using the following options: - `maxNumRetries`: defines the maximum of restart attempts - `timeout`: how to attempt restarting the faulty actor.
 - [`Stop`](./actors/supervisor.go): to stop the child actor which is the default one
@@ -165,10 +165,10 @@ There are only two scenarios where an actor can supervise another actor:
 
 ### Actor System
 
-Without an actor system, it is not possible to create actors in Go-Akt. Only a single actor system
-is recommended to be created per application when using Go-Akt. At the moment the single instance is not enforced in Go-Akt, this simple implementation is left to the discretion of the developer. To
+Without an actor system, it is not possible to create actors in GoAkt. Only a single actor system
+is recommended to be created per application when using GoAkt. At the moment the single instance is not enforced in GoAkt, this simple implementation is left to the discretion of the developer. To
 create an actor system one just need to use
-the [`NewActorSystem`](./actors/actor_system.go) method with the various [Options](./actors/option.go). Go-Akt
+the [`NewActorSystem`](./actors/actor_system.go) method with the various [Options](./actors/option.go). GoAkt
 ActorSystem has the following characteristics:
 
 - Actors lifecycle management (Spawn, Kill, ReSpawn)
@@ -181,7 +181,7 @@ ActorSystem has the following characteristics:
 
 ### Behaviors
 
-Actors in Go-Akt have the power to switch their behaviors at any point in time. When you change the actor behavior, the new
+Actors in GoAkt have the power to switch their behaviors at any point in time. When you change the actor behavior, the new
 behavior will take effect for all subsequent messages until the behavior is changed again. The current message will
 continue processing with the existing behavior. You can use [Stashing](#stashing) to reprocess the current
 message with the new behavior.
@@ -201,7 +201,7 @@ When the router receives a message to broadcast, every routee is checked whether
 When a routee is not alive the router removes it from its set of routees.
 When the last routee stops the router itself stops.
 
-Go-Akt comes shipped with the following routing strategies:
+GoAkt comes shipped with the following routing strategies:
 
 - `Fan-Out`: This strategy broadcasts the given message to all its available routees in parallel.
 - `Random`: This strategy randomly picks a routee in its set of routees and send the message to it.
@@ -213,7 +213,7 @@ Router as well as their routees are not passivated.
 ### Mailbox
 
 Once can implement a custom mailbox. See [Mailbox](./actors/mailbox.go).
-Go-Akt comes with the following mailboxes built-in:
+GoAkt comes with the following mailboxes built-in:
 
 - [`UnboundedMailbox`](./actors/unbounded_mailbox.go): this is the default mailbox. It is implemented using the lock-free Multi-Producer-Single-Consumer Queue.
 - [`BoundedMailbox`](./actors/bounded_mailbox.go): this is a thread-safe mailbox implemented using the Ring-Buffer Queue. When the mailbox is full any new message is sent to the deadletter queue. Setting a reasonable capacity for the queue can enhance throughput.
@@ -240,7 +240,7 @@ The subscription methods can be found on the `ActorSystem` interface.
 
 ### Messaging
 
-Communication between actors is achieved exclusively through message passing. In Go-Akt _Google
+Communication between actors is achieved exclusively through message passing. In GoAkt _Google
 Protocol Buffers_ is used to define messages.
 The choice of protobuf is due to easy serialization over wire and strong schema definition. As stated previously the following messaging patterns are supported:
 
@@ -290,7 +290,7 @@ Stashing is a mechanism you can enable in your actors, so they can temporarily s
 not handle at the moment.
 Another way to see it is that stashing allows you to keep processing messages you can handle while saving for later
 messages you can't.
-Stashing are handled by Go-Akt out of the actor instance just like the mailbox, so if the actor dies while processing a
+Stashing are handled by GoAkt out of the actor instance just like the mailbox, so if the actor dies while processing a
 message, all messages in the stash are processed.
 This feature is usually used together with [Become/UnBecome](#behaviors), as they fit together very well, but this is
 not a requirement.
@@ -323,13 +323,13 @@ These methods can be used from the [API](./actors/api.go) as well as from the [P
 
 ### Cluster
 
-This offers simple scalability, partitioning (sharding), and re-balancing out-of-the-box. Go-Akt nodes are automatically discovered. See [Clustering](#clustering).
+This offers simple scalability, partitioning (sharding), and re-balancing out-of-the-box. GoAkt nodes are automatically discovered. See [Clustering](#clustering).
 Beware that at the moment, within the cluster the existence of an actor is unique.
 
 ### Observability
 
 Observability is key in distributed system. It helps to understand and track the performance of a system.
-Go-Akt offers out of the box features that can help track, monitor and measure the performance of a Go-Akt based system.
+GoAkt offers out of the box features that can help track, monitor and measure the performance of a GoAkt based system.
 
 #### Metrics
 
@@ -346,17 +346,18 @@ A simple logging interface to allow custom logger to be implemented instead of u
 
 ### Testkit
 
-Go-Akt comes packaged with a testkit that can help test that actors receive expected messages within _unit tests_.
+GoAkt comes packaged with a testkit that can help test that actors receive expected messages within _unit tests_.
+The teskit in GoAkt uses underneath the [`https://github.com/stretchr/testify`](https://github.com/stretchr/testify) package.
 To test that an actor receive and respond to messages one will have to:
 
 1. Create an instance of the testkit: `testkit := New(ctx, t)` where `ctx` is a go context and `t` the instance of `*testing.T`. This can be done in setup before the run of each test.
 2. Create the instance of the actor under test. Example: `pinger := testkit.Spawn(ctx, "pinger", &pinger{})`
-3. Create an instance of test probe: `probe := testkit.NewProbe(ctx)` where `ctx` is a go context
+3. Create an instance of test probe: `probe := testkit.NewProbe(ctx)` where `ctx` is a go context. One can set some [options](./testkit/option.go)
 4. Use the probe to send a message to the actor under test. Example: `probe.Send(pinger, new(testpb.Ping))`
 5. Assert that the actor under test has received the message and responded as expected using the probe methods:
 
-- `ExpectMessage(message proto.Message) proto.Message`: asserts that the message received from the test actor is the expected one
-- `ExpectMessageWithin(duration time.Duration, message proto.Message) proto.Message`: asserts that the message received from the test actor is the expected one within a time duration
+- `ExpectMessage(message proto.Message)`: asserts that the message received from the test actor is the expected one
+- `ExpectMessageWithin(duration time.Duration, message proto.Message)`: asserts that the message received from the test actor is the expected one within a time duration
 - `ExpectNoMessage()`: asserts that no message is expected
 - `ExpectAnyMessage() proto.Message`: asserts that any message is expected
 - `ExpectAnyMessageWithin(duration time.Duration) proto.Message`: asserts that any message within a time duration
@@ -369,7 +370,7 @@ To help implement unit tests in GoAkt-based applications. See [Testkit](./testki
 
 ## API
 
-The API interface helps interact with a Go-Akt actor system as kind of client. The following features are available:
+The API interface helps interact with a GoAkt actor system as kind of client. The following features are available:
 
 - `Tell`: to send a message to an actor in a fire-and-forget manner
 - `Ask`: to send a message to an actor and expect a response within a given timeout
@@ -386,10 +387,10 @@ The API interface helps interact with a Go-Akt actor system as kind of client. T
 
 ## Client
 
-The Go-Akt client facilitates interaction with a specified Go-Akt cluster, contingent upon the activation of cluster mode.
+The GoAkt client facilitates interaction with a specified GoAkt cluster, contingent upon the activation of cluster mode.
 The client operates without knowledge of the specific node within the cluster that will process the request.
-This feature is particularly beneficial when interfacing with a Go-Akt cluster from an external system.
-Go-Akt client is equipped with a mini load-balancer that helps route requests to the appropriate node.
+This feature is particularly beneficial when interfacing with a GoAkt cluster from an external system.
+GoAkt client is equipped with a mini load-balancer that helps route requests to the appropriate node.
 
 ### Balancer strategies
 
