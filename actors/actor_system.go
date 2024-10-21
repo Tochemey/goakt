@@ -26,10 +26,11 @@ package actors
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"net"
-	stdhttp "net/http"
+	nethttp "net/http"
 	"os"
 	"regexp"
 	"strconv"
@@ -40,6 +41,9 @@ import (
 	"connectrpc.com/connect"
 	"github.com/google/uuid"
 	"go.uber.org/atomic"
+	"golang.org/x/crypto/acme/autocert"
+	"golang.org/x/net/http2"
+	"golang.org/x/net/http2/h2c"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
@@ -49,11 +53,12 @@ import (
 	"github.com/tochemey/goakt/v2/hash"
 	"github.com/tochemey/goakt/v2/internal/cluster"
 	"github.com/tochemey/goakt/v2/internal/eventstream"
-	"github.com/tochemey/goakt/v2/internal/http"
 	"github.com/tochemey/goakt/v2/internal/internalpb"
 	"github.com/tochemey/goakt/v2/internal/internalpb/internalpbconnect"
+	"github.com/tochemey/goakt/v2/internal/lib"
 	"github.com/tochemey/goakt/v2/internal/tcp"
 	"github.com/tochemey/goakt/v2/internal/types"
+	"github.com/tochemey/goakt/v2/internal/validation"
 	"github.com/tochemey/goakt/v2/log"
 )
 
@@ -143,6 +148,8 @@ type ActorSystem interface {
 	setActor(actor *PID)
 	// supervisor return the system supervisor
 	getSupervisor() *PID
+	// isTLSEnabled return true when secure transport is enabled
+	isTLSEnabled() bool
 }
 
 // ActorSystem represent a collection of actors on a given node
@@ -186,8 +193,18 @@ type actorSystem struct {
 	port int32
 	// Specifies the remoting host
 	host string
+
 	// Specifies the remoting server
-	remotingServer *stdhttp.Server
+	server         *nethttp.Server
+	listener       net.Listener
+	tlsEnabled     atomic.Bool
+	tlsServer      *nethttp.Server
+	tlsListener    net.Listener
+	tlsConfig      *tls.Config
+	certFile       string
+	privateKey     string
+	rootCertFile   string
+	autoTLSManager *autocert.Manager
 
 	// cluster settings
 	clusterEnabled atomic.Bool
@@ -267,12 +284,18 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 	system.started.Store(false)
 	system.remotingEnabled.Store(false)
 	system.clusterEnabled.Store(false)
+	system.tlsEnabled.Store(false)
 
 	system.reflection = newReflection(system.registry)
 
 	// apply the various options
 	for _, opt := range opts {
 		opt.Apply(system)
+	}
+
+	// validate TLS settings when set
+	if err := system.validateTLS(); err != nil {
+		return nil, err
 	}
 
 	// we need to make sure the cluster kinds are defined
@@ -631,6 +654,11 @@ func (x *actorSystem) RemoteActor(ctx context.Context, actorName string) (addr *
 func (x *actorSystem) Start(ctx context.Context) error {
 	x.started.Store(true)
 
+	// enable TLS when it is set
+	if err := x.enableTLS(); err != nil {
+		return err
+	}
+
 	if x.remotingEnabled.Load() {
 		x.enableRemoting(ctx)
 	}
@@ -681,12 +709,12 @@ func (x *actorSystem) Stop(ctx context.Context) error {
 	defer cancel()
 
 	if x.remotingEnabled.Load() {
-		if err := x.remotingServer.Shutdown(ctx); err != nil {
+		if err := x.shutdownHTTPServer(ctx); err != nil {
 			return err
 		}
 
 		x.remotingEnabled.Store(false)
-		x.remotingServer = nil
+		x.server = nil
 	}
 
 	if x.clusterEnabled.Load() {
@@ -1118,6 +1146,7 @@ func (x *actorSystem) enableRemoting(ctx context.Context) {
 	remotingHost, remotingPort, err := tcp.GetHostPort(fmt.Sprintf("%s:%d", x.host, x.port))
 	if err != nil {
 		x.logger.Panic(fmt.Errorf("failed to resolve remoting TCP address: %w", err))
+		return
 	}
 
 	x.host = remotingHost
@@ -1126,22 +1155,26 @@ func (x *actorSystem) enableRemoting(ctx context.Context) {
 	remotingServicePath, remotingServiceHandler := internalpbconnect.NewRemotingServiceHandler(x)
 	clusterServicePath, clusterServiceHandler := internalpbconnect.NewClusterServiceHandler(x)
 
-	mux := stdhttp.NewServeMux()
+	mux := nethttp.NewServeMux()
 	mux.Handle(remotingServicePath, remotingServiceHandler)
 	mux.Handle(clusterServicePath, clusterServiceHandler)
-	server := http.NewServer(ctx, x.host, remotingPort, mux)
+
+	x.locker.Lock()
+	// configure the appropriate server
+	if err := x.configureServer(ctx, mux); err != nil {
+		x.locker.Unlock()
+		x.logger.Panic(fmt.Errorf("failed enable remoting: %w", err))
+		return
+	}
+	x.locker.Unlock()
 
 	go func() {
-		if err := server.ListenAndServe(); err != nil {
-			if !errors.Is(err, stdhttp.ErrServerClosed) {
+		if err := x.startHTTPServer(); err != nil {
+			if !errors.Is(err, nethttp.ErrServerClosed) {
 				x.logger.Panic(fmt.Errorf("failed to start remoting service: %w", err))
 			}
 		}
 	}()
-
-	x.locker.Lock()
-	x.remotingServer = server
-	x.locker.Unlock()
 
 	x.logger.Info("remoting enabled...:)")
 }
@@ -1365,6 +1398,21 @@ func (x *actorSystem) configPID(ctx context.Context, name string, actor Actor, o
 		pidOpts = append(pidOpts, withPassivationAfter(x.expireActorAfter))
 	}
 
+	// set the root CA when TLS is enabled
+	// TODO: need to read the root certificate at startup into memory
+	if x.tlsEnabled.Load() {
+		switch {
+		case lib.FileExists(x.rootCertFile):
+			cert, err := os.ReadFile(x.rootCertFile)
+			if err != nil {
+				return nil, err
+			}
+			pidOpts = append(pidOpts, withCert(cert))
+		default:
+			pidOpts = append(pidOpts, withCert([]byte(x.rootCertFile)))
+		}
+	}
+
 	pid, err := newPID(ctx,
 		addr,
 		actor,
@@ -1399,4 +1447,132 @@ func isSystemName(name string) bool {
 // actorAddress returns the actor path provided the actor name
 func (x *actorSystem) actorAddress(name string) *address.Address {
 	return address.New(name, x.name, x.host, int(x.port))
+}
+
+// validateTLS validates the TLS settings if any set
+func (x *actorSystem) validateTLS() error {
+	// skip when TLS is not enabled
+	if !x.tlsEnabled.Load() {
+		return nil
+	}
+
+	// skip when auto TLS is set
+	if x.autoTLSManager != nil {
+		return nil
+	}
+
+	return validation.
+		New(validation.AllErrors()).
+		AddValidator(validation.NewEmptyStringValidator("rootCA", x.rootCertFile)).
+		AddValidator(validation.NewEmptyStringValidator("certfile", x.certFile)).
+		AddValidator(validation.NewEmptyStringValidator("keyfile", x.privateKey)).
+		Validate()
+}
+
+// enableTLS enables TLS if any set
+func (x *actorSystem) enableTLS() error {
+	// skip when TLS is not enabled
+	if !x.tlsEnabled.Load() {
+		return nil
+	}
+
+	// skip when it is an auto TLS
+	if x.autoTLSManager != nil {
+		return nil
+	}
+
+	var (
+		certificate tls.Certificate
+		err         error
+	)
+	switch {
+	case lib.FileExists(x.certFile) && lib.FileExists(x.privateKey):
+		certificate, err = tls.LoadX509KeyPair(x.certFile, x.privateKey)
+	default:
+		certificate, err = tls.X509KeyPair([]byte(x.certFile), []byte(x.privateKey))
+	}
+
+	if err != nil {
+		return err
+	}
+
+	x.tlsConfig = lib.GetServerTLSConfig(&certificate)
+	return nil
+}
+
+// configureServer configure the various http server and listeners based upon the various settings
+func (x *actorSystem) configureServer(ctx context.Context, mux *nethttp.ServeMux) error {
+	hostPort := net.JoinHostPort(x.host, strconv.Itoa(int(x.port)))
+	httpServer := getServer(ctx, hostPort)
+	// set the http server
+	x.server = httpServer
+	// For gRPC clients, it's convenient to support HTTP/2 without TLS. You can
+	// avoid x/net/http2 by using http.ListenAndServeTLS.
+	x.server.Handler = h2c.NewHandler(mux, &http2.Server{
+		IdleTimeout: 1200 * time.Second,
+	})
+
+	// create a tpc listener
+	lnr, err := net.Listen("tcp", hostPort)
+	if err != nil {
+		return err
+	}
+
+	// set the http TLS server
+	if x.tlsConfig != nil {
+		x.tlsServer = httpServer
+		x.tlsServer.Handler = mux
+		x.tlsListener = tls.NewListener(lnr, x.tlsConfig)
+		return nil
+	}
+
+	// set the non-secure http server
+	x.listener = lnr
+	return nil
+}
+
+// startHTTPServer starts the appropriate http server
+func (x *actorSystem) startHTTPServer() error {
+	if x.tlsConfig != nil {
+		return x.tlsServer.Serve(x.tlsListener)
+	}
+	return x.server.Serve(x.listener)
+}
+
+// shutdownHTTPServer stops the appropriate http server
+func (x *actorSystem) shutdownHTTPServer(ctx context.Context) error {
+	if x.tlsConfig != nil {
+		return x.tlsServer.Shutdown(ctx)
+	}
+	return x.server.Shutdown(ctx)
+}
+
+// isTLSEnabled return true when secure transport is enabled
+func (x *actorSystem) isTLSEnabled() bool {
+	x.locker.Lock()
+	defer x.locker.Unlock()
+	return x.tlsEnabled.Load()
+}
+
+// getServer creates an instance of http server
+func getServer(ctx context.Context, address string) *nethttp.Server {
+	return &nethttp.Server{
+		Addr: address,
+		// The maximum duration for reading the entire request, including the body.
+		// It’s implemented in net/http by calling SetReadDeadline immediately after Accept
+		// ReadTimeout := handler_timeout + ReadHeaderTimeout + wiggle_room
+		ReadTimeout: 3 * time.Second,
+		// ReadHeaderTimeout is the amount of time allowed to read request headers
+		ReadHeaderTimeout: time.Second,
+		// WriteTimeout is the maximum duration before timing out writes of the response.
+		// It is reset whenever a new request’s header is read.
+		// This effectively covers the lifetime of the ServeHTTP handler stack
+		WriteTimeout: time.Second,
+		// IdleTimeout is the maximum amount of time to wait for the next request when keep-alive are enabled.
+		// If IdleTimeout is zero, the value of ReadTimeout is used. Not relevant to request timeouts
+		IdleTimeout: 1200 * time.Second,
+		BaseContext: func(_ net.Listener) context.Context {
+			return ctx
+		},
+	}
 }

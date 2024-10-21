@@ -28,7 +28,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	stdhttp "net/http"
+	nethttp "net/http"
 	"os"
 	"strings"
 	"sync"
@@ -49,6 +49,7 @@ import (
 	"github.com/tochemey/goakt/v2/internal/http"
 	"github.com/tochemey/goakt/v2/internal/internalpb"
 	"github.com/tochemey/goakt/v2/internal/internalpb/internalpbconnect"
+	"github.com/tochemey/goakt/v2/internal/lib"
 	"github.com/tochemey/goakt/v2/internal/slice"
 	"github.com/tochemey/goakt/v2/internal/types"
 	"github.com/tochemey/goakt/v2/log"
@@ -147,7 +148,8 @@ type PID struct {
 	supervisorDirective SupervisorDirective
 
 	// http client
-	httpClient *stdhttp.Client
+	httpClient *nethttp.Client
+	rootCA     []byte
 
 	// specifies the actor behavior stack
 	behaviorStack *behaviorStack
@@ -470,6 +472,7 @@ func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor, opts .
 		withEventsStream(pid.eventsStream),
 		withInitTimeout(pid.initTimeout.Load()),
 		withShutdownTimeout(pid.shutdownTimeout.Load()),
+		withCert(pid.rootCA),
 	}
 
 	spawnConfig := newSpawnConfig(opts...)
@@ -1427,9 +1430,15 @@ func (pid *PID) toDeadletterQueue(receiveCtx *ReceiveContext, err error) {
 
 // remotingClient returns an instance of the Remote Service client
 func (pid *PID) remotingClient(host string, port int) internalpbconnect.RemotingServiceClient {
+	endpoint := http.URL(host, port)
+	if len(pid.rootCA) != 0 {
+		pid.httpClient = http.NewSafeClient(lib.GetClientTLSConfig(pid.rootCA))
+		endpoint = http.SafeURL(host, port)
+	}
+
 	return internalpbconnect.NewRemotingServiceClient(
 		pid.httpClient,
-		http.URL(host, port),
+		endpoint,
 	)
 }
 

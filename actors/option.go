@@ -25,7 +25,11 @@
 package actors
 
 import (
+	"crypto/tls"
 	"time"
+
+	"golang.org/x/crypto/acme"
+	"golang.org/x/crypto/acme/autocert"
 
 	"github.com/tochemey/goakt/v2/discovery"
 	"github.com/tochemey/goakt/v2/hash"
@@ -169,5 +173,33 @@ func WithPeerStateLoopInterval(interval time.Duration) Option {
 func WithJanitorInterval(interval time.Duration) Option {
 	return OptionFunc(func(system *actorSystem) {
 		system.janitorInterval = interval
+	})
+}
+
+// WithTLS sets the TLS certificate a public/private key pair from a pair of
+// files. The files must contain PEM encoded data. The certificate file may
+// contain intermediate certificates following the leaf certificate to form a
+// certificate chain. On successful return, Certificate.Leaf will be populated.
+//
+// In addition, the root certificate file need to be provided to allow secured client calls
+func WithTLS(certFile, privateKey, rootCert string) Option {
+	return OptionFunc(func(system *actorSystem) {
+		system.tlsEnabled.Store(true)
+		system.privateKey = privateKey
+		system.certFile = certFile
+		system.rootCertFile = rootCert
+	})
+}
+
+// WithAutoTLS enables auto TLS using certificates automatically installed from https://letsencrypt.org.
+func WithAutoTLS() Option {
+	return OptionFunc(func(system *actorSystem) {
+		system.tlsEnabled.Store(true)
+		system.autoTLSManager = &autocert.Manager{
+			Prompt: autocert.AcceptTOS,
+		}
+		system.tlsConfig = new(tls.Config)
+		system.tlsConfig.GetCertificate = system.autoTLSManager.GetCertificate
+		system.tlsConfig.NextProtos = []string{"h2", "http/1.1", acme.ALPNProto}
 	})
 }
