@@ -26,6 +26,8 @@ package client
 
 import (
 	"time"
+
+	"github.com/tochemey/goakt/v2/secureconn"
 )
 
 // Option is the interface that applies a configuration option.
@@ -63,13 +65,11 @@ func WithRefresh(interval time.Duration) Option {
 	)
 }
 
-// WithTLS enables ssl configuration by defining the root certificate file
-// that will be used to communicate with the remote actors' nodes
-func WithTLS(rootCertFile string) Option {
+// WithSecureConn enables secure connection settings
+func WithSecureConn(conn *secureconn.SecureConn) Option {
 	return OptionFunc(
 		func(c *Client) {
-			c.rootCertFile = rootCertFile
-			c.tlsEnabled = true
+			c.secureConn = conn
 		},
 	)
 }
