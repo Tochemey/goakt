@@ -55,13 +55,13 @@ func (s *systemSupervisor) PreStart(context.Context) error {
 func (s *systemSupervisor) Receive(ctx *ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *goaktpb.PostStart:
-		s.logger.Info("system supervior successfully started")
+		s.logger.Info("system supervisor successfully started")
 	default:
 		ctx.Unhandled()
 	}
 }
 
 func (s *systemSupervisor) PostStop(context.Context) error {
-	s.logger.Info("system supervior stopped")
+	s.logger.Info("system supervisor stopped")
 	return nil
 }
