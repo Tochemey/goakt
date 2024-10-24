@@ -42,7 +42,6 @@ import (
 	"github.com/tochemey/goakt/v2/address"
 	"github.com/tochemey/goakt/v2/internal/cluster"
 	"github.com/tochemey/goakt/v2/log"
-	"github.com/tochemey/goakt/v2/remoting"
 )
 
 var errSkipJobScheduling = errors.New("skip job scheduling")
@@ -183,7 +182,7 @@ func (x *scheduler) Schedule(ctx context.Context, message proto.Message, pid *PI
 }
 
 // RemoteScheduleOnce schedules a message to be sent to a remote actor in the future.
-// This requires remoting to be enabled on the actor system.
+// This requires Remoting to be enabled on the actor system.
 // This will send the given message to the actor after the given interval specified
 // The message will be sent once
 func (x *scheduler) RemoteScheduleOnce(ctx context.Context, message proto.Message, address *address.Address, interval time.Duration) error {
@@ -195,7 +194,7 @@ func (x *scheduler) RemoteScheduleOnce(ctx context.Context, message proto.Messag
 	}
 	job := job.NewFunctionJob[bool](
 		func(ctx context.Context) (bool, error) {
-			remoting := remoting.New(remoting.WithSecureConn(address.SecureConn()))
+			remoting := NewRemoting().WithSecureConn(address.SecureConn())
 			if err := remoting.RemoteTell(ctx, address, message); err != nil {
 				return false, err
 			}
@@ -216,7 +215,7 @@ func (x *scheduler) RemoteScheduleOnce(ctx context.Context, message proto.Messag
 }
 
 // RemoteSchedule schedules a message to be sent to a remote actor in the future.
-// This requires remoting to be enabled on the actor system.
+// This requires Remoting to be enabled on the actor system.
 // This will send the given message to the actor at the given interval specified
 func (x *scheduler) RemoteSchedule(ctx context.Context, message proto.Message, address *address.Address, interval time.Duration) error {
 	x.mu.Lock()
@@ -227,7 +226,7 @@ func (x *scheduler) RemoteSchedule(ctx context.Context, message proto.Message, a
 	}
 	job := job.NewFunctionJob[bool](
 		func(ctx context.Context) (bool, error) {
-			remoting := remoting.New(remoting.WithSecureConn(address.SecureConn()))
+			remoting := NewRemoting().WithSecureConn(address.SecureConn())
 			if err := remoting.RemoteTell(ctx, address, message); err != nil {
 				return false, err
 			}
@@ -293,7 +292,7 @@ func (x *scheduler) RemoteScheduleWithCron(ctx context.Context, message proto.Me
 
 	job := job.NewFunctionJob[bool](
 		func(ctx context.Context) (bool, error) {
-			remoting := remoting.New(remoting.WithSecureConn(address.SecureConn()))
+			remoting := NewRemoting().WithSecureConn(address.SecureConn())
 			if err := remoting.RemoteTell(ctx, address, message); err != nil {
 				return false, err
 			}

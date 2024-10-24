@@ -43,7 +43,6 @@ import (
 	"github.com/tochemey/goakt/v2/internal/internalpb"
 	"github.com/tochemey/goakt/v2/internal/internalpb/internalpbconnect"
 	"github.com/tochemey/goakt/v2/internal/types"
-	"github.com/tochemey/goakt/v2/remoting"
 	"github.com/tochemey/goakt/v2/secureconn"
 )
 
@@ -58,7 +57,7 @@ type Client struct {
 	closeSignal     chan types.Unit
 	refreshInterval time.Duration
 	client          *nethttp.Client
-	remoting        remoting.Remoting
+	remoting        *actors.Remoting
 	secureConn      *secureconn.SecureConn
 }
 
@@ -86,13 +85,13 @@ func New(ctx context.Context, addresses []string, opts ...Option) (*Client, erro
 		opt.Apply(client)
 	}
 
-	var remote remoting.Remoting
+	var remote *actors.Remoting
 
 	switch {
 	case client.secureConn != nil:
-		remote = remoting.New(remoting.WithSecureConn(client.secureConn))
+		remote = actors.NewRemoting().WithSecureConn(client.secureConn)
 	default:
-		remote = remoting.New()
+		remote = actors.NewRemoting()
 	}
 	client.remoting = remote
 

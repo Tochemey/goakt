@@ -85,6 +85,8 @@ var (
 	ErrFullMailbox = errors.New("mailbox is full")
 	// ErrSchedulerNotStarted is returned when the scheduler has not started
 	ErrSchedulerNotStarted = errors.New("scheduler has not started")
+	// ErrInvalidMessage is returned when an invalid remote message is sent
+	ErrInvalidMessage = func(err error) error { return fmt.Errorf("invalid remote message: %w", err) }
 )
 
 // eof returns true if the given error is an EOF error

@@ -994,7 +994,7 @@ func TestRemoting(t *testing.T) {
 	ctx := context.TODO()
 	// define the logger to use
 	logger := log.DiscardLogger
-	// generate the remoting port
+	// generate the Remoting port
 	nodePorts := dynaport.Get(1)
 	remotingPort := nodePorts[0]
 	host := "127.0.0.1"
@@ -1384,7 +1384,7 @@ func TestRemoteLookup(t *testing.T) {
 			ctx := context.TODO()
 			// define the logger to use
 			logger := log.DiscardLogger
-			// generate the remoting port
+			// generate the Remoting port
 			nodePorts := dynaport.Get(1)
 			remotingPort := nodePorts[0]
 			host := "127.0.0.1"
@@ -1424,12 +1424,12 @@ func TestRemoteLookup(t *testing.T) {
 		},
 	)
 	t.Run(
-		"With remoting not enabled", func(t *testing.T) {
+		"With Remoting not enabled", func(t *testing.T) {
 			// create the context
 			ctx := context.TODO()
 			// define the logger to use
 			logger := log.DiscardLogger
-			// generate the remoting port
+			// generate the Remoting port
 			nodePorts := dynaport.Get(1)
 			remotingPort := nodePorts[0]
 			host := "127.0.0.1"
@@ -1733,7 +1733,7 @@ func TestRemoteReSpawn(t *testing.T) {
 			ctx := context.TODO()
 			// define the logger to use
 			logger := log.DiscardLogger
-			// generate the remoting port
+			// generate the Remoting port
 			nodePorts := dynaport.Get(1)
 			remotingPort := nodePorts[0]
 			host := "127.0.0.1"
@@ -1771,12 +1771,12 @@ func TestRemoteReSpawn(t *testing.T) {
 		},
 	)
 	t.Run(
-		"With remoting not enabled", func(t *testing.T) {
+		"With Remoting not enabled", func(t *testing.T) {
 			// create the context
 			ctx := context.TODO()
 			// define the logger to use
 			logger := log.DiscardLogger
-			// generate the remoting port
+			// generate the Remoting port
 			nodePorts := dynaport.Get(1)
 			remotingPort := nodePorts[0]
 			host := "127.0.0.1"
@@ -1820,7 +1820,7 @@ func TestRemoteStop(t *testing.T) {
 			ctx := context.TODO()
 			// define the logger to use
 			logger := log.DiscardLogger
-			// generate the remoting port
+			// generate the Remoting port
 			nodePorts := dynaport.Get(1)
 			remotingPort := nodePorts[0]
 			host := "127.0.0.1"
@@ -1859,12 +1859,12 @@ func TestRemoteStop(t *testing.T) {
 		},
 	)
 	t.Run(
-		"With remoting enabled and actor started", func(t *testing.T) {
+		"With Remoting enabled and actor started", func(t *testing.T) {
 			// create the context
 			ctx := context.TODO()
 			// define the logger to use
 			logger := log.DiscardLogger
-			// generate the remoting port
+			// generate the Remoting port
 			nodePorts := dynaport.Get(1)
 			remotingPort := nodePorts[0]
 			host := "127.0.0.1"
@@ -1906,12 +1906,12 @@ func TestRemoteStop(t *testing.T) {
 		},
 	)
 	t.Run(
-		"With remoting enabled and actor not started", func(t *testing.T) {
+		"With Remoting enabled and actor not started", func(t *testing.T) {
 			// create the context
 			ctx := context.TODO()
 			// define the logger to use
 			logger := log.DiscardLogger
-			// generate the remoting port
+			// generate the Remoting port
 			nodePorts := dynaport.Get(1)
 			remotingPort := nodePorts[0]
 			host := "127.0.0.1"
@@ -2005,12 +2005,12 @@ func TestEquals(t *testing.T) {
 }
 func TestRemoteSpawn(t *testing.T) {
 	t.Run(
-		"When remoting is enabled", func(t *testing.T) {
+		"When Remoting is enabled", func(t *testing.T) {
 			// create the context
 			ctx := context.TODO()
 			// define the logger to use
 			logger := log.DiscardLogger
-			// generate the remoting port
+			// generate the Remoting port
 			ports := dynaport.Get(1)
 			remotingPort := ports[0]
 			host := "127.0.0.1"
@@ -2085,7 +2085,7 @@ func TestRemoteSpawn(t *testing.T) {
 			ctx := context.TODO()
 			// define the logger to use
 			logger := log.DiscardLogger
-			// generate the remoting port
+			// generate the Remoting port
 			ports := dynaport.Get(1)
 			remotingPort := ports[0]
 			host := "127.0.0.1"
@@ -2133,12 +2133,12 @@ func TestRemoteSpawn(t *testing.T) {
 	)
 
 	t.Run(
-		"When remoting is not enabled", func(t *testing.T) {
+		"When Remoting is not enabled", func(t *testing.T) {
 			// create the context
 			ctx := context.TODO()
 			// define the logger to use
 			logger := log.DiscardLogger
-			// generate the remoting port
+			// generate the Remoting port
 			ports := dynaport.Get(1)
 			remotingPort := ports[0]
 			host := "127.0.0.1"

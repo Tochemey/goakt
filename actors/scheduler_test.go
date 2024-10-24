@@ -36,7 +36,6 @@ import (
 	"github.com/tochemey/goakt/v2/address"
 	"github.com/tochemey/goakt/v2/internal/lib"
 	"github.com/tochemey/goakt/v2/log"
-	"github.com/tochemey/goakt/v2/remoting"
 	"github.com/tochemey/goakt/v2/test/data/testpb"
 )
 
@@ -174,7 +173,7 @@ func TestScheduler(t *testing.T) {
 			ctx := context.TODO()
 			// define the logger to use
 			logger := log.DiscardLogger
-			// generate the remoting port
+			// generate the Remoting port
 			nodePorts := dynaport.Get(1)
 			remotingPort := nodePorts[0]
 			host := "0.0.0.0"
@@ -202,7 +201,7 @@ func TestScheduler(t *testing.T) {
 			require.NoError(t, err)
 			assert.NotNil(t, actorRef)
 
-			remote := remoting.New()
+			remote := NewRemoting()
 
 			// get the address of the actor
 			addr, err := remote.RemoteLookup(ctx, host, remotingPort, actorName)
@@ -233,7 +232,7 @@ func TestScheduler(t *testing.T) {
 			ctx := context.TODO()
 			// define the logger to use
 			logger := log.DiscardLogger
-			// generate the remoting port
+			// generate the Remoting port
 			nodePorts := dynaport.Get(1)
 			remotingPort := nodePorts[0]
 			host := "0.0.0.0"
@@ -265,7 +264,7 @@ func TestScheduler(t *testing.T) {
 			require.NoError(t, err)
 			assert.NotNil(t, actorRef)
 
-			remote := remoting.New()
+			remote := NewRemoting()
 
 			// get the address of the actor
 			addr, err := remote.RemoteLookup(ctx, host, remotingPort, actorName)
@@ -424,7 +423,7 @@ func TestScheduler(t *testing.T) {
 			ctx := context.TODO()
 			// define the logger to use
 			logger := log.DiscardLogger
-			// generate the remoting port
+			// generate the Remoting port
 			nodePorts := dynaport.Get(1)
 			remotingPort := nodePorts[0]
 			host := "0.0.0.0"
@@ -452,7 +451,7 @@ func TestScheduler(t *testing.T) {
 			require.NoError(t, err)
 			assert.NotNil(t, actorRef)
 
-			remote := remoting.New()
+			remote := NewRemoting()
 
 			// get the address of the actor
 			addr, err := remote.RemoteLookup(ctx, host, remotingPort, actorName)
@@ -481,7 +480,7 @@ func TestScheduler(t *testing.T) {
 			ctx := context.TODO()
 			// define the logger to use
 			logger := log.DiscardLogger
-			// generate the remoting port
+			// generate the Remoting port
 			nodePorts := dynaport.Get(1)
 			remotingPort := nodePorts[0]
 			host := "0.0.0.0"
@@ -509,7 +508,7 @@ func TestScheduler(t *testing.T) {
 			require.NoError(t, err)
 			assert.NotNil(t, actorRef)
 
-			remote := remoting.New()
+			remote := NewRemoting()
 
 			// get the address of the actor
 			addr, err := remote.RemoteLookup(ctx, host, remotingPort, actorName)
@@ -534,7 +533,7 @@ func TestScheduler(t *testing.T) {
 			ctx := context.TODO()
 			// define the logger to use
 			logger := log.DiscardLogger
-			// generate the remoting port
+			// generate the Remoting port
 			nodePorts := dynaport.Get(1)
 			remotingPort := nodePorts[0]
 			host := "0.0.0.0"
@@ -565,7 +564,7 @@ func TestScheduler(t *testing.T) {
 			require.NoError(t, err)
 			assert.NotNil(t, actorRef)
 
-			remote := remoting.New()
+			remote := NewRemoting()
 			// get the address of the actor
 			addr, err := remote.RemoteLookup(ctx, host, remotingPort, actorName)
 			require.NoError(t, err)
@@ -740,7 +739,7 @@ func TestScheduler(t *testing.T) {
 			ctx := context.TODO()
 			// define the logger to use
 			logger := log.DiscardLogger
-			// generate the remoting port
+			// generate the Remoting port
 			nodePorts := dynaport.Get(1)
 			remotingPort := nodePorts[0]
 			host := "0.0.0.0"
@@ -768,7 +767,7 @@ func TestScheduler(t *testing.T) {
 			require.NoError(t, err)
 			assert.NotNil(t, actorRef)
 
-			remote := remoting.New()
+			remote := NewRemoting()
 
 			// get the address of the actor
 			addr, err := remote.RemoteLookup(ctx, host, remotingPort, actorName)
@@ -804,7 +803,7 @@ func TestScheduler(t *testing.T) {
 			ctx := context.TODO()
 			// define the logger to use
 			logger := log.DiscardLogger
-			// generate the remoting port
+			// generate the Remoting port
 			nodePorts := dynaport.Get(1)
 			remotingPort := nodePorts[0]
 			host := "0.0.0.0"
@@ -836,7 +835,7 @@ func TestScheduler(t *testing.T) {
 			require.NoError(t, err)
 			assert.NotNil(t, actorRef)
 
-			remote := remoting.New()
+			remote := NewRemoting()
 
 			// get the address of the actor
 			addr, err := remote.RemoteLookup(ctx, host, remotingPort, actorName)
@@ -860,7 +859,7 @@ func TestScheduler(t *testing.T) {
 			ctx := context.TODO()
 			// define the logger to use
 			logger := log.DiscardLogger
-			// generate the remoting port
+			// generate the Remoting port
 			nodePorts := dynaport.Get(1)
 			remotingPort := nodePorts[0]
 			host := "0.0.0.0"
@@ -889,7 +888,7 @@ func TestScheduler(t *testing.T) {
 			require.NoError(t, err)
 			assert.NotNil(t, actorRef)
 
-			remote := remoting.New()
+			remote := NewRemoting()
 
 			// get the address of the actor
 			addr, err := remote.RemoteLookup(ctx, host, remotingPort, actorName)

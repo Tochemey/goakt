@@ -22,7 +22,7 @@
  * SOFTWARE.
  */
 
-package remoting
+package actors
 
 import (
 	"context"
@@ -43,36 +43,24 @@ import (
 	"github.com/tochemey/goakt/v2/secureconn"
 )
 
-// Remoting defines the remoting APIs
-// This requires remoting is enabled on the connected actor system
-type Remoting interface {
-	// RemoteTell sends a message to an actor remotely without expecting any reply
-	RemoteTell(ctx context.Context, to *address.Address, message proto.Message) error
-	// RemoteAsk sends a synchronous message to another actor remotely and expect a response.
-	RemoteAsk(ctx context.Context, to *address.Address, message proto.Message, timeout time.Duration) (response *anypb.Any, err error)
-	// RemoteLookup look for an actor address on a remote node.
-	RemoteLookup(ctx context.Context, host string, port int, name string) (addr *address.Address, err error)
-	// RemoteBatchTell sends bulk asynchronous messages to an actor
-	RemoteBatchTell(ctx context.Context, to *address.Address, messages ...proto.Message) error
-	// RemoteBatchAsk sends bulk messages to an actor with responses expected
-	RemoteBatchAsk(ctx context.Context, to *address.Address, messages ...proto.Message) (responses []*anypb.Any, err error)
-	// RemoteSpawn creates an actor on a remote node. The given actor needs to be registered on the remote node using the Register method of ActorSystem
-	RemoteSpawn(ctx context.Context, host string, port int, name, actorType string) error
-	// RemoteReSpawn restarts actor on a remote node.
-	RemoteReSpawn(ctx context.Context, host string, port int, name string) error
-	// RemoteStop stops an actor on a remote node.
-	RemoteStop(ctx context.Context, host string, port int, name string) error
-	// Close closes the underlying http client connection
-	Close()
-}
-
-type remoting struct {
+// Remoting defines the Remoting APIs
+// This requires Remoting is enabled on the connected actor system
+type Remoting struct {
 	secureConn *secureconn.SecureConn
 	client     *nethttp.Client
 }
 
+// NewRemoting creates an instance Remoting
+// This requires Remoting is enabled on the connected actor system
+// Make sure to call Close to free up resources
+func NewRemoting() *Remoting {
+	return &Remoting{
+		client: http.NewClient(),
+	}
+}
+
 // RemoteTell sends a message to an actor remotely without expecting any reply
-func (r remoting) RemoteTell(ctx context.Context, to *address.Address, message proto.Message) error {
+func (r *Remoting) RemoteTell(ctx context.Context, to *address.Address, message proto.Message) error {
 	marshaled, err := anypb.New(message)
 	if err != nil {
 		return ErrInvalidMessage(err)
@@ -107,7 +95,7 @@ func (r remoting) RemoteTell(ctx context.Context, to *address.Address, message p
 }
 
 // RemoteAsk sends a synchronous message to another actor remotely and expect a response.
-func (r remoting) RemoteAsk(ctx context.Context, to *address.Address, message proto.Message, timeout time.Duration) (response *anypb.Any, err error) {
+func (r *Remoting) RemoteAsk(ctx context.Context, to *address.Address, message proto.Message, timeout time.Duration) (response *anypb.Any, err error) {
 	marshaled, err := anypb.New(message)
 	if err != nil {
 		return nil, ErrInvalidMessage(err)
@@ -160,7 +148,7 @@ func (r remoting) RemoteAsk(ctx context.Context, to *address.Address, message pr
 }
 
 // RemoteLookup look for an actor address on a remote node.
-func (r remoting) RemoteLookup(ctx context.Context, host string, port int, name string) (addr *address.Address, err error) {
+func (r *Remoting) RemoteLookup(ctx context.Context, host string, port int, name string) (addr *address.Address, err error) {
 	remoteClient := r.remoteClient(host, port)
 	request := connect.NewRequest(
 		&internalpb.RemoteLookupRequest{
@@ -183,7 +171,7 @@ func (r remoting) RemoteLookup(ctx context.Context, host string, port int, name 
 }
 
 // RemoteBatchTell sends bulk asynchronous messages to an actor
-func (r remoting) RemoteBatchTell(ctx context.Context, to *address.Address, messages ...proto.Message) error {
+func (r *Remoting) RemoteBatchTell(ctx context.Context, to *address.Address, messages ...proto.Message) error {
 	var requests []*internalpb.RemoteTellRequest
 	for _, message := range messages {
 		packed, err := anypb.New(message)
@@ -227,7 +215,7 @@ func (r remoting) RemoteBatchTell(ctx context.Context, to *address.Address, mess
 }
 
 // RemoteBatchAsk sends bulk messages to an actor with responses expected
-func (r remoting) RemoteBatchAsk(ctx context.Context, to *address.Address, messages ...proto.Message) (responses []*anypb.Any, err error) {
+func (r *Remoting) RemoteBatchAsk(ctx context.Context, to *address.Address, messages ...proto.Message) (responses []*anypb.Any, err error) {
 	var requests []*internalpb.RemoteAskRequest
 	for _, message := range messages {
 		packed, err := anypb.New(message)
@@ -287,7 +275,7 @@ func (r remoting) RemoteBatchAsk(ctx context.Context, to *address.Address, messa
 }
 
 // RemoteSpawn creates an actor on a remote node. The given actor needs to be registered on the remote node using the Register method of ActorSystem
-func (r remoting) RemoteSpawn(ctx context.Context, host string, port int, name, actorType string) error {
+func (r *Remoting) RemoteSpawn(ctx context.Context, host string, port int, name, actorType string) error {
 	remoteClient := r.remoteClient(host, port)
 	request := connect.NewRequest(
 		&internalpb.RemoteSpawnRequest{
@@ -314,7 +302,7 @@ func (r remoting) RemoteSpawn(ctx context.Context, host string, port int, name, 
 }
 
 // RemoteReSpawn restarts actor on a remote node.
-func (r remoting) RemoteReSpawn(ctx context.Context, host string, port int, name string) error {
+func (r *Remoting) RemoteReSpawn(ctx context.Context, host string, port int, name string) error {
 	remoteClient := r.remoteClient(host, port)
 	request := connect.NewRequest(
 		&internalpb.RemoteReSpawnRequest{
@@ -336,7 +324,7 @@ func (r remoting) RemoteReSpawn(ctx context.Context, host string, port int, name
 }
 
 // RemoteStop stops an actor on a remote node.
-func (r remoting) RemoteStop(ctx context.Context, host string, port int, name string) error {
+func (r *Remoting) RemoteStop(ctx context.Context, host string, port int, name string) error {
 	remoteClient := r.remoteClient(host, port)
 	request := connect.NewRequest(
 		&internalpb.RemoteStopRequest{
@@ -357,33 +345,23 @@ func (r remoting) RemoteStop(ctx context.Context, host string, port int, name st
 	return nil
 }
 
-// New creates an instance Remoting
-// This requires remoting is enabled on the connected actor system
-// Make sure to call Close to free up resources
-func New(opts ...Option) Remoting {
-	remoting := &remoting{
-		client: http.NewClient(),
+// WithSecureConn enables ssl configuration by defining the root certificate file
+// that will be used to communicate with the remote actors' node
+func (r *Remoting) WithSecureConn(conn *secureconn.SecureConn) *Remoting {
+	r.secureConn = conn
+	if r.secureConn != nil {
+		r.client = http.NewTLSClient(r.secureConn.SecureClient())
 	}
-
-	// apply the options
-	for _, opt := range opts {
-		opt(remoting)
-	}
-
-	if remoting.secureConn != nil {
-		remoting.client = http.NewTLSClient(remoting.secureConn.SecureClient())
-	}
-
-	return remoting
+	return r
 }
 
 // Close closes the Client connection
-func (r remoting) Close() {
+func (r *Remoting) Close() {
 	r.client.CloseIdleConnections()
 }
 
-// remoteClient returns a remoting service client instance
-func (r remoting) remoteClient(host string, port int) internalpbconnect.RemotingServiceClient {
+// remoteClient returns a Remoting service client instance
+func (r *Remoting) remoteClient(host string, port int) internalpbconnect.RemotingServiceClient {
 	endpoint := http.URL(host, port)
 	if r.secureConn != nil {
 		endpoint = http.SafeURL(host, port)

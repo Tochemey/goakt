@@ -46,7 +46,6 @@ import (
 	"github.com/tochemey/goakt/v2/log"
 	clustermocks "github.com/tochemey/goakt/v2/mocks/cluster"
 	testkit "github.com/tochemey/goakt/v2/mocks/discovery"
-	"github.com/tochemey/goakt/v2/remoting"
 	"github.com/tochemey/goakt/v2/test/data/testpb"
 )
 
@@ -239,7 +238,7 @@ func TestActorSystem(t *testing.T) {
 			require.NotNil(t, remoteAddr)
 			require.True(t, proto.Equal(remoteAddr, addr))
 
-			remote := remoting.New()
+			remote := NewRemoting()
 
 			reply, err := remote.RemoteAsk(ctx, addr, new(testpb.TestReply), DefaultAskTimeout)
 			require.NoError(t, err)
@@ -276,7 +275,7 @@ func TestActorSystem(t *testing.T) {
 		},
 	)
 	t.Run(
-		"With remoting enabled", func(t *testing.T) {
+		"With Remoting enabled", func(t *testing.T) {
 			ctx := context.TODO()
 			remotingPort := dynaport.Get(1)[0]
 
@@ -317,7 +316,7 @@ func TestActorSystem(t *testing.T) {
 		},
 	)
 	t.Run(
-		"With ActorOf:remoting not enabled", func(t *testing.T) {
+		"With ActorOf:Remoting not enabled", func(t *testing.T) {
 			ctx := context.TODO()
 			sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
 
@@ -552,7 +551,7 @@ func TestActorSystem(t *testing.T) {
 		},
 	)
 	t.Run(
-		"ReSpawn with remoting enabled", func(t *testing.T) {
+		"ReSpawn with Remoting enabled", func(t *testing.T) {
 			ctx := context.TODO()
 			remotingPort := dynaport.Get(1)[0]
 
@@ -632,7 +631,7 @@ func TestActorSystem(t *testing.T) {
 		},
 	)
 	t.Run(
-		"With remoting enabled: Actor not found", func(t *testing.T) {
+		"With Remoting enabled: Actor not found", func(t *testing.T) {
 			ctx := context.TODO()
 			remotingPort := dynaport.Get(1)[0]
 
@@ -654,7 +653,7 @@ func TestActorSystem(t *testing.T) {
 
 			lib.Pause(time.Second)
 
-			remote := remoting.New()
+			remote := NewRemoting()
 
 			actorName := "some-actor"
 			addr, err := remote.RemoteLookup(ctx, host, remotingPort, actorName)
@@ -1499,7 +1498,7 @@ func TestActorSystem(t *testing.T) {
 		},
 	)
 	t.Run(
-		"With cluster start failure with remoting not enabled", func(t *testing.T) {
+		"With cluster start failure with Remoting not enabled", func(t *testing.T) {
 			ctx := context.TODO()
 			logger := log.DiscardLogger
 			mockedCluster := new(clustermocks.Interface)
@@ -1523,7 +1522,7 @@ func TestActorSystem(t *testing.T) {
 
 			err := system.Start(ctx)
 			require.Error(t, err)
-			assert.EqualError(t, err, "clustering needs remoting to be enabled")
+			assert.EqualError(t, err, "clustering needs Remoting to be enabled")
 		},
 	)
 	t.Run(
@@ -1568,7 +1567,7 @@ func TestActorSystem(t *testing.T) {
 			// wait for the cluster to start
 			lib.Pause(time.Second)
 
-			remote := remoting.New()
+			remote := NewRemoting()
 
 			// create an actor
 			actorName := "actorID"
