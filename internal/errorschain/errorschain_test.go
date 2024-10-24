@@ -32,22 +32,26 @@ import (
 )
 
 func TestErrorsChain(t *testing.T) {
-	t.Run("With ReturnFirst", func(t *testing.T) {
-		e1 := errors.New("err1")
-		e2 := errors.New("err2")
-		e3 := errors.New("err3")
+	t.Run(
+		"With ReturnFirst", func(t *testing.T) {
+			e1 := errors.New("err1")
+			e2 := errors.New("err2")
+			e3 := errors.New("err3")
 
-		chain := New(ReturnFirst()).AddError(e1).AddError(e2).AddError(e3)
-		actual := chain.Error()
-		assert.True(t, errors.Is(actual, e1))
-	})
-	t.Run("With ReturnAll", func(t *testing.T) {
-		e1 := errors.New("err1")
-		e2 := errors.New("err2")
-		e3 := errors.New("err3")
+			chain := New(ReturnFirst()).AddError(e1).AddError(e2).AddError(e3)
+			actual := chain.Error()
+			assert.True(t, errors.Is(actual, e1))
+		},
+	)
+	t.Run(
+		"With ReturnAll", func(t *testing.T) {
+			e1 := errors.New("err1")
+			e2 := errors.New("err2")
+			e3 := errors.New("err3")
 
-		chain := New(ReturnAll()).AddError(e1).AddError(e2).AddError(e3)
-		actual := chain.Error()
-		assert.EqualError(t, actual, "err1; err2; err3")
-	})
+			chain := New(ReturnAll()).AddError(e1).AddError(e2).AddError(e3)
+			actual := chain.Error()
+			assert.EqualError(t, actual, "err1; err2; err3")
+		},
+	)
 }

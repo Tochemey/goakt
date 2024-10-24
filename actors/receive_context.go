@@ -34,6 +34,7 @@ import (
 	"github.com/tochemey/goakt/v2/address"
 	"github.com/tochemey/goakt/v2/future"
 	"github.com/tochemey/goakt/v2/goaktpb"
+	"github.com/tochemey/goakt/v2/secureconn"
 )
 
 // pool holds a pool of ReceiveContext
@@ -308,10 +309,10 @@ func (c *ReceiveContext) RemoteBatchAsk(to *address.Address, messages ...proto.M
 
 // RemoteLookup look for an actor address on a remote node. If the actorSystem is nil then the lookup will be done
 // using the same actor system as the PID actor system
-func (c *ReceiveContext) RemoteLookup(host string, port int, name string) (addr *goaktpb.Address) {
+func (c *ReceiveContext) RemoteLookup(host string, port int, name string, conn *secureconn.SecureConn) (addr *goaktpb.Address) {
 	recipient := c.self
 	ctx := context.WithoutCancel(c.ctx)
-	remoteAddr, err := recipient.RemoteLookup(ctx, host, port, name)
+	remoteAddr, err := recipient.RemoteLookup(ctx, host, port, name, conn)
 	if err != nil {
 		c.Err(err)
 	}
@@ -388,10 +389,10 @@ func (c *ReceiveContext) Unhandled() {
 }
 
 // RemoteReSpawn restarts an actor on a remote node.
-func (c *ReceiveContext) RemoteReSpawn(host string, port int, name string) {
+func (c *ReceiveContext) RemoteReSpawn(host string, port int, name string, conn *secureconn.SecureConn) {
 	recipient := c.self
 	ctx := context.WithoutCancel(c.ctx)
-	if err := recipient.RemoteReSpawn(ctx, host, port, name); err != nil {
+	if err := recipient.RemoteReSpawn(ctx, host, port, name, conn); err != nil {
 		c.Err(err)
 	}
 }

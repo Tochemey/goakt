@@ -42,10 +42,12 @@ type Safe[T any] struct {
 // NewSafe creates a new lock-free thread-safe slice.
 func NewSafe[T any]() *Safe[T] {
 	return &Safe[T]{
-		head: unsafe.Pointer(&header[T]{
-			data:  make([]T, 0),
-			count: 0,
-		}),
+		head: unsafe.Pointer(
+			&header[T]{
+				data:  make([]T, 0),
+				count: 0,
+			},
+		),
 	}
 }
 
@@ -109,10 +111,12 @@ func (cs *Safe[T]) Items() []T {
 func (cs *Safe[T]) Reset() {
 	for {
 		currentHead := (*header[T])(atomic.LoadPointer(&cs.head))
-		newHead := unsafe.Pointer(&header[T]{
-			data:  make([]T, 0),
-			count: 0,
-		})
+		newHead := unsafe.Pointer(
+			&header[T]{
+				data:  make([]T, 0),
+				count: 0,
+			},
+		)
 		if atomic.CompareAndSwapPointer(&cs.head, unsafe.Pointer(currentHead), unsafe.Pointer(newHead)) {
 			return
 		}

@@ -34,29 +34,33 @@ type testStruct struct {
 }
 
 func TestRegistry(t *testing.T) {
-	t.Run("With new instance", func(t *testing.T) {
-		newRegistry := NewRegistry()
-		var p any = newRegistry
-		_, ok := p.(Registry)
-		assert.True(t, ok)
-	})
+	t.Run(
+		"With new instance", func(t *testing.T) {
+			newRegistry := NewRegistry()
+			var p any = newRegistry
+			_, ok := p.(Registry)
+			assert.True(t, ok)
+		},
+	)
 
-	t.Run("With registration", func(t *testing.T) {
-		registry := NewRegistry()
-		// create an instance of an object
-		obj := new(testStruct)
-		// register that actor
-		registry.Register(obj)
-		_, ok := registry.Type(obj)
-		assert.True(t, ok)
+	t.Run(
+		"With registration", func(t *testing.T) {
+			registry := NewRegistry()
+			// create an instance of an object
+			obj := new(testStruct)
+			// register that actor
+			registry.Register(obj)
+			_, ok := registry.Type(obj)
+			assert.True(t, ok)
 
-		_, ok = registry.TypeOf("types.testStruct")
-		assert.True(t, ok)
-		assert.Len(t, registry.TypesMap(), 1)
+			_, ok = registry.TypeOf("types.testStruct")
+			assert.True(t, ok)
+			assert.Len(t, registry.TypesMap(), 1)
 
-		assert.True(t, registry.Exists(obj))
+			assert.True(t, registry.Exists(obj))
 
-		registry.Deregister(obj)
-		assert.Len(t, registry.TypesMap(), 0)
-	})
+			registry.Deregister(obj)
+			assert.Len(t, registry.TypesMap(), 0)
+		},
+	)
 }

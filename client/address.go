@@ -25,18 +25,38 @@
 package client
 
 import (
-	"testing"
-
-	"github.com/stretchr/testify/assert"
+	"github.com/tochemey/goakt/v2/internal/errorschain"
+	"github.com/tochemey/goakt/v2/internal/validation"
 )
 
-func TestLeadLoad(t *testing.T) {
-	balancer := NewLeastLoad()
-	balancer.Set(
-		NewNode("192.168.34.10:3322", 2),
-		NewNode("192.168.34.11:3322", 0),
-		NewNode("192.168.34.12:3322", 1),
-	)
-	actual := balancer.Next()
-	assert.Equal(t, "192.168.34.11:3322", actual.Address())
+// addr defines an TCP address
+// in the form of host:port
+type addr string
+
+// Validate validates the given address
+func (a addr) Validate() error {
+	return validation.
+		New(validation.FailFast()).
+		AddValidator(validation.NewEmptyStringValidator("address", string(a))).
+		AddValidator(validation.NewTCPAddressValidator(string(a))).
+		Validate()
+}
+
+type addrs []addr
+
+// Validate the slice of addresses
+func (a addrs) Validate() error {
+	chain := errorschain.New(errorschain.ReturnFirst())
+	for _, addr := range a {
+		chain.AddError(addr.Validate())
+	}
+	return chain.Error()
+}
+
+func validateAddress(addresses []string) error {
+	wrapped := make(addrs, len(addresses))
+	for index, address := range addresses {
+		wrapped[index] = addr(address)
+	}
+	return wrapped.Validate()
 }

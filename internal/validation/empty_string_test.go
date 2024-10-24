@@ -41,17 +41,21 @@ func TestEmptyStringValidator(t *testing.T) {
 }
 
 func (s *emptyStringTestSuite) TestEmptyStringValidator() {
-	s.Run("with string value set", func() {
-		validator := NewEmptyStringValidator("field", "some-value")
-		s.Assert().NotNil(validator)
-		err := validator.Validate()
-		s.Assert().NoError(err)
-	})
-	s.Run("with string value not set", func() {
-		validator := NewEmptyStringValidator("field", "")
-		s.Assert().NotNil(validator)
-		err := validator.Validate()
-		s.Assert().Error(err)
-		s.Assert().EqualError(err, "the [field] is required")
-	})
+	s.Run(
+		"with string value set", func() {
+			validator := NewEmptyStringValidator("field", "some-value")
+			s.Assert().NotNil(validator)
+			err := validator.Validate()
+			s.Assert().NoError(err)
+		},
+	)
+	s.Run(
+		"with string value not set", func() {
+			validator := NewEmptyStringValidator("field", "")
+			s.Assert().NotNil(validator)
+			err := validator.Validate()
+			s.Assert().Error(err)
+			s.Assert().EqualError(err, "the [field] is required")
+		},
+	)
 }

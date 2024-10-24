@@ -389,10 +389,12 @@ func (d *discarder) PostStop(context.Context) error {
 
 func startNatsServer(t *testing.T) *natsserver.Server {
 	t.Helper()
-	serv, err := natsserver.NewServer(&natsserver.Options{
-		Host: "127.0.0.1",
-		Port: -1,
-	})
+	serv, err := natsserver.NewServer(
+		&natsserver.Options{
+			Host: "127.0.0.1",
+			Port: -1,
+		},
+	)
 
 	require.NoError(t, err)
 
@@ -461,7 +463,8 @@ func startClusterSystem(t *testing.T, nodeName, serverAddr string) (ActorSystem,
 				WithPeersPort(clusterPort).
 				WithMinimumPeersQuorum(1).
 				WithDiscoveryPort(gossipPort).
-				WithDiscovery(provider).WithKinds(new(testActor))),
+				WithDiscovery(provider).WithKinds(new(testActor)),
+		),
 	)
 
 	require.NotNil(t, system)

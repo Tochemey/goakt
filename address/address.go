@@ -36,6 +36,7 @@ import (
 
 	"github.com/tochemey/goakt/v2/goaktpb"
 	"github.com/tochemey/goakt/v2/internal/validation"
+	"github.com/tochemey/goakt/v2/secureconn"
 )
 
 // protocol defines the Go-Akt addressing protocol
@@ -46,6 +47,7 @@ var NoSender = new(goaktpb.Address)
 
 type Address struct {
 	*goaktpb.Address
+	secureConn *secureconn.SecureConn
 }
 
 var _ validation.Validator = (*Address)(nil)
@@ -53,7 +55,7 @@ var _ validation.Validator = (*Address)(nil)
 // New creates an instance of Address
 func New(name, system string, host string, port int) *Address {
 	return &Address{
-		&goaktpb.Address{
+		Address: &goaktpb.Address{
 			Host:   host,
 			Port:   int32(port),
 			Name:   name,
@@ -67,14 +69,14 @@ func New(name, system string, host string, port int) *Address {
 // From creates an instance of Address provided the serializable address instance
 func From(addr *goaktpb.Address) *Address {
 	return &Address{
-		addr,
+		Address: addr,
 	}
 }
 
 // Default creates an instance of Address with default values.
 func Default() *Address {
 	return &Address{
-		NoSender,
+		Address: NoSender,
 	}
 }
 
@@ -108,9 +110,15 @@ func (a *Address) WithParent(parent *Address) *Address {
 	return a
 }
 
+// WithSecureConn sets the address with some secured connection settings
+func (a *Address) WithSecureConn(conn *secureconn.SecureConn) *Address {
+	a.secureConn = conn
+	return a
+}
+
 // Parent returns the parent path
 func (a *Address) Parent() *Address {
-	return &Address{a.GetParent()}
+	return &Address{Address: a.GetParent(), secureConn: a.secureConn}
 }
 
 // Name returns the name
@@ -208,4 +216,14 @@ func (a *Address) Validate() error {
 		AddValidator(validation.NewPatternValidator(pattern, strings.TrimSpace(a.GetName()), customErr)).
 		AddAssertion(a.Address != nil, "address is required").
 		Validate()
+}
+
+// IsSecured returns true when the given address is secured or not
+func (a *Address) IsSecured() bool {
+	return a.secureConn != nil
+}
+
+// SecureConn returns the secureConn instance
+func (a *Address) SecureConn() *secureconn.SecureConn {
+	return a.secureConn
 }

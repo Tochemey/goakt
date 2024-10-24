@@ -49,10 +49,12 @@ func TestOption(t *testing.T) {
 		},
 	}
 	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			var cfg Client
-			tc.option.Apply(&cfg)
-			assert.Equal(t, tc.expected, cfg)
-		})
+		t.Run(
+			tc.name, func(t *testing.T) {
+				var cfg Client
+				tc.option.Apply(&cfg)
+				assert.Equal(t, tc.expected, cfg)
+			},
+		)
 	}
 }

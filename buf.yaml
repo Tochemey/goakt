@@ -3,7 +3,7 @@ modules:
   - path: protos
     lint:
       use:
-        - DEFAULT
+        - STANDARD
         - PACKAGE_SAME_GO_PACKAGE
       except:
         - ENUM_VALUE_PREFIX

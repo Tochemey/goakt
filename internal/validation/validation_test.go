@@ -41,18 +41,22 @@ func TestValidation(t *testing.T) {
 }
 
 func (s *validationTestSuite) TestNewChain() {
-	s.Run("new chain without option", func() {
-		chain := New()
-		s.Assert().NotNil(chain)
-	})
-	s.Run("new chain with options", func() {
-		chain := New(FailFast())
-		s.Assert().NotNil(chain)
-		s.Assert().True(chain.failFast)
-		chain2 := New(AllErrors())
-		s.Assert().NotNil(chain2)
-		s.Assert().False(chain2.failFast)
-	})
+	s.Run(
+		"new chain without option", func() {
+			chain := New()
+			s.Assert().NotNil(chain)
+		},
+	)
+	s.Run(
+		"new chain with options", func() {
+			chain := New(FailFast())
+			s.Assert().NotNil(chain)
+			s.Assert().True(chain.failFast)
+			chain2 := New(AllErrors())
+			s.Assert().NotNil(chain2)
+			s.Assert().False(chain2.failFast)
+		},
+	)
 }
 
 func (s *validationTestSuite) TestAddValidator() {
@@ -74,38 +78,44 @@ func (s *validationTestSuite) TestAddAssertion() {
 }
 
 func (s *validationTestSuite) TestValidate() {
-	s.Run("with single validator", func() {
-		chain := New()
-		s.Assert().NotNil(chain)
-		chain.AddValidator(NewEmptyStringValidator("field", ""))
-		s.Assert().Nil(chain.violations)
-		err := chain.Validate()
-		s.Assert().NotNil(chain.violations)
-		s.Assert().Error(err)
-		s.Assert().EqualError(err, "the [field] is required")
-	})
-	s.Run("with multiple validators and FailFast option", func() {
-		chain := New(FailFast())
-		s.Assert().NotNil(chain)
-		chain.
-			AddValidator(NewEmptyStringValidator("field", "")).
-			AddAssertion(false, "this is false")
-		s.Assert().Nil(chain.violations)
-		err := chain.Validate()
-		s.Assert().Nil(chain.violations)
-		s.Assert().Error(err)
-		s.Assert().EqualError(err, "the [field] is required")
-	})
-	s.Run("with multiple validators and AllErrors option", func() {
-		chain := New(AllErrors())
-		s.Assert().NotNil(chain)
-		chain.
-			AddValidator(NewEmptyStringValidator("field", "")).
-			AddAssertion(false, "this is false")
-		s.Assert().Nil(chain.violations)
-		err := chain.Validate()
-		s.Assert().NotNil(chain.violations)
-		s.Assert().Error(err)
-		s.Assert().EqualError(err, "the [field] is required; this is false")
-	})
+	s.Run(
+		"with single validator", func() {
+			chain := New()
+			s.Assert().NotNil(chain)
+			chain.AddValidator(NewEmptyStringValidator("field", ""))
+			s.Assert().Nil(chain.violations)
+			err := chain.Validate()
+			s.Assert().NotNil(chain.violations)
+			s.Assert().Error(err)
+			s.Assert().EqualError(err, "the [field] is required")
+		},
+	)
+	s.Run(
+		"with multiple validators and FailFast option", func() {
+			chain := New(FailFast())
+			s.Assert().NotNil(chain)
+			chain.
+				AddValidator(NewEmptyStringValidator("field", "")).
+				AddAssertion(false, "this is false")
+			s.Assert().Nil(chain.violations)
+			err := chain.Validate()
+			s.Assert().Nil(chain.violations)
+			s.Assert().Error(err)
+			s.Assert().EqualError(err, "the [field] is required")
+		},
+	)
+	s.Run(
+		"with multiple validators and AllErrors option", func() {
+			chain := New(AllErrors())
+			s.Assert().NotNil(chain)
+			chain.
+				AddValidator(NewEmptyStringValidator("field", "")).
+				AddAssertion(false, "this is false")
+			s.Assert().Nil(chain.violations)
+			err := chain.Validate()
+			s.Assert().NotNil(chain.violations)
+			s.Assert().Error(err)
+			s.Assert().EqualError(err, "the [field] is required; this is false")
+		},
+	)
 }

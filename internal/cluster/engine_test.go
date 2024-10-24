@@ -49,269 +49,277 @@ import (
 )
 
 func TestSingleNode(t *testing.T) {
-	t.Run("With Start and Shutdown", func(t *testing.T) {
-		// create the context
-		ctx := context.TODO()
+	t.Run(
+		"With Start and Shutdown", func(t *testing.T) {
+			// create the context
+			ctx := context.TODO()
 
-		// generate the ports for the single startNode
-		nodePorts := dynaport.Get(3)
-		gossipPort := nodePorts[0]
-		clusterPort := nodePorts[1]
-		remotingPort := nodePorts[2]
+			// generate the ports for the single startNode
+			nodePorts := dynaport.Get(3)
+			gossipPort := nodePorts[0]
+			clusterPort := nodePorts[1]
+			remotingPort := nodePorts[2]
 
-		// define discovered addresses
-		addrs := []string{
-			fmt.Sprintf("127.0.0.1:%d", gossipPort),
-		}
+			// define discovered addresses
+			addrs := []string{
+				fmt.Sprintf("127.0.0.1:%d", gossipPort),
+			}
 
-		// mock the discovery provider
-		provider := new(testkit.Provider)
+			// mock the discovery provider
+			provider := new(testkit.Provider)
 
-		provider.EXPECT().ID().Return("testDisco")
-		provider.EXPECT().Initialize().Return(nil)
-		provider.EXPECT().Register().Return(nil)
-		provider.EXPECT().Deregister().Return(nil)
-		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
-		provider.EXPECT().Close().Return(nil)
+			provider.EXPECT().ID().Return("testDisco")
+			provider.EXPECT().Initialize().Return(nil)
+			provider.EXPECT().Register().Return(nil)
+			provider.EXPECT().Deregister().Return(nil)
+			provider.EXPECT().DiscoverPeers().Return(addrs, nil)
+			provider.EXPECT().Close().Return(nil)
 
-		// create a Node startNode
-		host := "127.0.0.1"
+			// create a Node startNode
+			host := "127.0.0.1"
 
-		hostNode := discovery.Node{
-			Name:          host,
-			Host:          host,
-			DiscoveryPort: gossipPort,
-			PeersPort:     clusterPort,
-			RemotingPort:  remotingPort,
-		}
+			hostNode := discovery.Node{
+				Name:          host,
+				Host:          host,
+				DiscoveryPort: gossipPort,
+				PeersPort:     clusterPort,
+				RemotingPort:  remotingPort,
+			}
 
-		logger := log.DiscardLogger
-		cluster, err := NewEngine("test", provider, &hostNode, WithLogger(logger))
-		require.NotNil(t, cluster)
-		require.NoError(t, err)
+			logger := log.DiscardLogger
+			cluster, err := NewEngine("test", provider, &hostNode, WithLogger(logger))
+			require.NotNil(t, cluster)
+			require.NoError(t, err)
 
-		// start the Node startNode
-		err = cluster.Start(ctx)
-		require.NoError(t, err)
+			// start the Node startNode
+			err = cluster.Start(ctx)
+			require.NoError(t, err)
 
-		hostNodeAddr := cluster.Host()
-		assert.Equal(t, host, hostNodeAddr)
+			hostNodeAddr := cluster.Host()
+			assert.Equal(t, host, hostNodeAddr)
 
-		//  shutdown the Node startNode
-		ctx, cancel := context.WithTimeout(ctx, time.Second)
-		defer cancel()
+			//  shutdown the Node startNode
+			ctx, cancel := context.WithTimeout(ctx, time.Second)
+			defer cancel()
 
-		// stop the startNode
-		require.NoError(t, cluster.Stop(ctx))
-		provider.AssertExpectations(t)
-	})
-	t.Run("With PeerSync and GetActor", func(t *testing.T) {
-		// create the context
-		ctx := context.TODO()
+			// stop the startNode
+			require.NoError(t, cluster.Stop(ctx))
+			provider.AssertExpectations(t)
+		},
+	)
+	t.Run(
+		"With PeerSync and GetActor", func(t *testing.T) {
+			// create the context
+			ctx := context.TODO()
 
-		// generate the ports for the single startNode
-		nodePorts := dynaport.Get(3)
-		gossipPort := nodePorts[0]
-		clusterPort := nodePorts[1]
-		remotingPort := nodePorts[2]
+			// generate the ports for the single startNode
+			nodePorts := dynaport.Get(3)
+			gossipPort := nodePorts[0]
+			clusterPort := nodePorts[1]
+			remotingPort := nodePorts[2]
 
-		// define discovered addresses
-		addrs := []string{
-			fmt.Sprintf("127.0.0.1:%d", gossipPort),
-		}
+			// define discovered addresses
+			addrs := []string{
+				fmt.Sprintf("127.0.0.1:%d", gossipPort),
+			}
 
-		// mock the discovery provider
-		provider := new(testkit.Provider)
+			// mock the discovery provider
+			provider := new(testkit.Provider)
 
-		provider.EXPECT().ID().Return("testDisco")
-		provider.EXPECT().Initialize().Return(nil)
-		provider.EXPECT().Register().Return(nil)
-		provider.EXPECT().Deregister().Return(nil)
-		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
-		provider.EXPECT().Close().Return(nil)
+			provider.EXPECT().ID().Return("testDisco")
+			provider.EXPECT().Initialize().Return(nil)
+			provider.EXPECT().Register().Return(nil)
+			provider.EXPECT().Deregister().Return(nil)
+			provider.EXPECT().DiscoverPeers().Return(addrs, nil)
+			provider.EXPECT().Close().Return(nil)
 
-		// create a Node startNode
-		host := "127.0.0.1"
-		hostNode := discovery.Node{
-			Name:          host,
-			Host:          host,
-			DiscoveryPort: gossipPort,
-			PeersPort:     clusterPort,
-			RemotingPort:  remotingPort,
-		}
+			// create a Node startNode
+			host := "127.0.0.1"
+			hostNode := discovery.Node{
+				Name:          host,
+				Host:          host,
+				DiscoveryPort: gossipPort,
+				PeersPort:     clusterPort,
+				RemotingPort:  remotingPort,
+			}
 
-		cluster, err := NewEngine("test", provider, &hostNode, WithLogger(log.DiscardLogger))
-		require.NotNil(t, cluster)
-		require.NoError(t, err)
+			cluster, err := NewEngine("test", provider, &hostNode, WithLogger(log.DiscardLogger))
+			require.NotNil(t, cluster)
+			require.NoError(t, err)
 
-		// start the Node startNode
-		err = cluster.Start(ctx)
-		require.NoError(t, err)
+			// start the Node startNode
+			err = cluster.Start(ctx)
+			require.NoError(t, err)
 
-		// create an actor
-		actorName := uuid.NewString()
-		actor := &internalpb.ActorRef{ActorAddress: &goaktpb.Address{Name: actorName}}
+			// create an actor
+			actorName := uuid.NewString()
+			actor := &internalpb.ActorRef{ActorAddress: &goaktpb.Address{Name: actorName}}
 
-		// replicate the actor in the Node
-		err = cluster.PutActor(ctx, actor)
-		require.NoError(t, err)
+			// replicate the actor in the Node
+			err = cluster.PutActor(ctx, actor)
+			require.NoError(t, err)
 
-		// fetch the actor
-		actual, err := cluster.GetActor(ctx, actorName)
-		require.NoError(t, err)
-		require.NotNil(t, actual)
+			// fetch the actor
+			actual, err := cluster.GetActor(ctx, actorName)
+			require.NoError(t, err)
+			require.NotNil(t, actual)
 
-		assert.True(t, proto.Equal(actor, actual))
+			assert.True(t, proto.Equal(actor, actual))
 
-		//  fetch non-existing actor
-		fakeActorName := "fake"
-		actual, err = cluster.GetActor(ctx, fakeActorName)
-		require.Nil(t, actual)
-		assert.EqualError(t, err, ErrActorNotFound.Error())
-		//  shutdown the Node startNode
-		lib.Pause(time.Second)
+			//  fetch non-existing actor
+			fakeActorName := "fake"
+			actual, err = cluster.GetActor(ctx, fakeActorName)
+			require.Nil(t, actual)
+			assert.EqualError(t, err, ErrActorNotFound.Error())
+			//  shutdown the Node startNode
+			lib.Pause(time.Second)
 
-		// stop the startNode
-		require.NoError(t, cluster.Stop(ctx))
-		provider.AssertExpectations(t)
-	})
-	t.Run("With Set/UnsetKey and KeyExists", func(t *testing.T) {
-		// create the context
-		ctx := context.TODO()
+			// stop the startNode
+			require.NoError(t, cluster.Stop(ctx))
+			provider.AssertExpectations(t)
+		},
+	)
+	t.Run(
+		"With Set/UnsetKey and KeyExists", func(t *testing.T) {
+			// create the context
+			ctx := context.TODO()
 
-		// generate the ports for the single startNode
-		nodePorts := dynaport.Get(3)
-		gossipPort := nodePorts[0]
-		clusterPort := nodePorts[1]
-		remotingPort := nodePorts[2]
+			// generate the ports for the single startNode
+			nodePorts := dynaport.Get(3)
+			gossipPort := nodePorts[0]
+			clusterPort := nodePorts[1]
+			remotingPort := nodePorts[2]
 
-		// define discovered addresses
-		addrs := []string{
-			fmt.Sprintf("127.0.0.1:%d", gossipPort),
-		}
+			// define discovered addresses
+			addrs := []string{
+				fmt.Sprintf("127.0.0.1:%d", gossipPort),
+			}
 
-		// mock the discovery provider
-		provider := new(testkit.Provider)
+			// mock the discovery provider
+			provider := new(testkit.Provider)
 
-		provider.EXPECT().ID().Return("testDisco")
-		provider.EXPECT().Initialize().Return(nil)
-		provider.EXPECT().Register().Return(nil)
-		provider.EXPECT().Deregister().Return(nil)
-		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
-		provider.EXPECT().Close().Return(nil)
+			provider.EXPECT().ID().Return("testDisco")
+			provider.EXPECT().Initialize().Return(nil)
+			provider.EXPECT().Register().Return(nil)
+			provider.EXPECT().Deregister().Return(nil)
+			provider.EXPECT().DiscoverPeers().Return(addrs, nil)
+			provider.EXPECT().Close().Return(nil)
 
-		// create a Node startNode
-		host := "127.0.0.1"
-		hostNode := discovery.Node{
-			Name:          host,
-			Host:          host,
-			DiscoveryPort: gossipPort,
-			PeersPort:     clusterPort,
-			RemotingPort:  remotingPort,
-		}
+			// create a Node startNode
+			host := "127.0.0.1"
+			hostNode := discovery.Node{
+				Name:          host,
+				Host:          host,
+				DiscoveryPort: gossipPort,
+				PeersPort:     clusterPort,
+				RemotingPort:  remotingPort,
+			}
 
-		cluster, err := NewEngine("test", provider, &hostNode, WithLogger(log.DiscardLogger))
-		require.NotNil(t, cluster)
-		require.NoError(t, err)
+			cluster, err := NewEngine("test", provider, &hostNode, WithLogger(log.DiscardLogger))
+			require.NotNil(t, cluster)
+			require.NoError(t, err)
 
-		// start the Node startNode
-		err = cluster.Start(ctx)
-		require.NoError(t, err)
+			// start the Node startNode
+			err = cluster.Start(ctx)
+			require.NoError(t, err)
 
-		// set key
-		key := "my-key"
-		require.NoError(t, cluster.SetKey(ctx, key))
+			// set key
+			key := "my-key"
+			require.NoError(t, cluster.SetKey(ctx, key))
 
-		isSet, err := cluster.KeyExists(ctx, key)
-		require.NoError(t, err)
-		assert.True(t, isSet)
+			isSet, err := cluster.KeyExists(ctx, key)
+			require.NoError(t, err)
+			assert.True(t, isSet)
 
-		// unset the key
-		err = cluster.UnsetKey(ctx, key)
-		require.NoError(t, err)
+			// unset the key
+			err = cluster.UnsetKey(ctx, key)
+			require.NoError(t, err)
 
-		// check the key existence
-		isSet, err = cluster.KeyExists(ctx, key)
-		require.NoError(t, err)
-		assert.False(t, isSet)
+			// check the key existence
+			isSet, err = cluster.KeyExists(ctx, key)
+			require.NoError(t, err)
+			assert.False(t, isSet)
 
-		//  shutdown the Node startNode
-		lib.Pause(time.Second)
+			//  shutdown the Node startNode
+			lib.Pause(time.Second)
 
-		// stop the startNode
-		require.NoError(t, cluster.Stop(ctx))
-		provider.AssertExpectations(t)
-	})
-	t.Run("With RemoveActor", func(t *testing.T) {
-		// create the context
-		ctx := context.TODO()
+			// stop the startNode
+			require.NoError(t, cluster.Stop(ctx))
+			provider.AssertExpectations(t)
+		},
+	)
+	t.Run(
+		"With RemoveActor", func(t *testing.T) {
+			// create the context
+			ctx := context.TODO()
 
-		// generate the ports for the single startNode
-		nodePorts := dynaport.Get(3)
-		gossipPort := nodePorts[0]
-		peersPort := nodePorts[1]
-		remotingPort := nodePorts[2]
+			// generate the ports for the single startNode
+			nodePorts := dynaport.Get(3)
+			gossipPort := nodePorts[0]
+			peersPort := nodePorts[1]
+			remotingPort := nodePorts[2]
 
-		// define discovered addresses
-		addrs := []string{
-			fmt.Sprintf("127.0.0.1:%d", gossipPort),
-		}
+			// define discovered addresses
+			addrs := []string{
+				fmt.Sprintf("127.0.0.1:%d", gossipPort),
+			}
 
-		// mock the discovery provider
-		provider := new(testkit.Provider)
+			// mock the discovery provider
+			provider := new(testkit.Provider)
 
-		provider.EXPECT().ID().Return("testDisco")
-		provider.EXPECT().Initialize().Return(nil)
-		provider.EXPECT().Register().Return(nil)
-		provider.EXPECT().Deregister().Return(nil)
-		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
-		provider.EXPECT().Close().Return(nil)
+			provider.EXPECT().ID().Return("testDisco")
+			provider.EXPECT().Initialize().Return(nil)
+			provider.EXPECT().Register().Return(nil)
+			provider.EXPECT().Deregister().Return(nil)
+			provider.EXPECT().DiscoverPeers().Return(addrs, nil)
+			provider.EXPECT().Close().Return(nil)
 
-		// create a Node startNode
-		host := "127.0.0.1"
-		hostNode := discovery.Node{
-			Name:          host,
-			Host:          host,
-			DiscoveryPort: gossipPort,
-			PeersPort:     peersPort,
-			RemotingPort:  remotingPort,
-		}
+			// create a Node startNode
+			host := "127.0.0.1"
+			hostNode := discovery.Node{
+				Name:          host,
+				Host:          host,
+				DiscoveryPort: gossipPort,
+				PeersPort:     peersPort,
+				RemotingPort:  remotingPort,
+			}
 
-		logger := log.DiscardLogger
-		cluster, err := NewEngine("test", provider, &hostNode, WithLogger(logger))
-		require.NotNil(t, cluster)
-		require.NoError(t, err)
+			logger := log.DiscardLogger
+			cluster, err := NewEngine("test", provider, &hostNode, WithLogger(logger))
+			require.NotNil(t, cluster)
+			require.NoError(t, err)
 
-		// start the Node startNode
-		err = cluster.Start(ctx)
-		require.NoError(t, err)
+			// start the Node startNode
+			err = cluster.Start(ctx)
+			require.NoError(t, err)
 
-		// create an actor
-		actorName := uuid.NewString()
-		actor := &internalpb.ActorRef{ActorAddress: &goaktpb.Address{Name: actorName}}
-		// replicate the actor in the Node
-		err = cluster.PutActor(ctx, actor)
-		require.NoError(t, err)
+			// create an actor
+			actorName := uuid.NewString()
+			actor := &internalpb.ActorRef{ActorAddress: &goaktpb.Address{Name: actorName}}
+			// replicate the actor in the Node
+			err = cluster.PutActor(ctx, actor)
+			require.NoError(t, err)
 
-		// fetch the actor
-		actual, err := cluster.GetActor(ctx, actorName)
-		require.NoError(t, err)
-		require.NotNil(t, actual)
+			// fetch the actor
+			actual, err := cluster.GetActor(ctx, actorName)
+			require.NoError(t, err)
+			require.NotNil(t, actual)
 
-		assert.True(t, proto.Equal(actor, actual))
+			assert.True(t, proto.Equal(actor, actual))
 
-		// let us remove the actor
-		err = cluster.RemoveActor(ctx, actorName)
-		require.NoError(t, err)
+			// let us remove the actor
+			err = cluster.RemoveActor(ctx, actorName)
+			require.NoError(t, err)
 
-		actual, err = cluster.GetActor(ctx, actorName)
-		require.Nil(t, actual)
-		assert.EqualError(t, err, ErrActorNotFound.Error())
+			actual, err = cluster.GetActor(ctx, actorName)
+			require.Nil(t, actual)
+			assert.EqualError(t, err, ErrActorNotFound.Error())
 
-		// stop the node
-		require.NoError(t, cluster.Stop(ctx))
-		provider.AssertExpectations(t)
-	})
+			// stop the node
+			require.NoError(t, cluster.Stop(ctx))
+			provider.AssertExpectations(t)
+		},
+	)
 }
 
 func TestMultipleNodes(t *testing.T) {
@@ -397,20 +405,24 @@ L2:
 	require.NotNil(t, nodeLeft)
 	require.Equal(t, node2Addr, nodeLeft.GetAddress())
 
-	t.Cleanup(func() {
-		require.NoError(t, node1.Stop(context.TODO()))
-		require.NoError(t, sd1.Close())
-		require.NoError(t, sd2.Close())
-		srv.Shutdown()
-	})
+	t.Cleanup(
+		func() {
+			require.NoError(t, node1.Stop(context.TODO()))
+			require.NoError(t, sd1.Close())
+			require.NoError(t, sd2.Close())
+			srv.Shutdown()
+		},
+	)
 }
 
 func startNatsServer(t *testing.T) *natsserver.Server {
 	t.Helper()
-	serv, err := natsserver.NewServer(&natsserver.Options{
-		Host: "127.0.0.1",
-		Port: -1,
-	})
+	serv, err := natsserver.NewServer(
+		&natsserver.Options{
+			Host: "127.0.0.1",
+			Port: -1,
+		},
+	)
 
 	require.NoError(t, err)
 

@@ -39,9 +39,11 @@ func TestRoundRobin(t *testing.T) {
 	}
 
 	balancer := NewRoundRobin()
-	balancer.Set(NewNode("192.168.34.10:3322", 2),
+	balancer.Set(
+		NewNode("192.168.34.10:3322", 2),
 		NewNode("192.168.34.11:3322", 0),
-		NewNode("192.168.34.12:3322", 1))
+		NewNode("192.168.34.12:3322", 1),
+	)
 
 	actual := make([]string, 4)
 	for i := 0; i < 4; i++ {

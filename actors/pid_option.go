@@ -119,11 +119,3 @@ func withInitTimeout(duration time.Duration) pidOption {
 		pid.initTimeout.Store(duration)
 	}
 }
-
-// withCert sets the root certifacte when TLS is enabled
-// in the actor system
-func withCert(rootCert []byte) pidOption {
-	return func(pid *PID) {
-		pid.rootCA = rootCert
-	}
-}

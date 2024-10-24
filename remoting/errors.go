@@ -22,21 +22,22 @@
  * SOFTWARE.
  */
 
-package client
+package remoting
 
 import (
-	"testing"
-
-	"github.com/stretchr/testify/assert"
+	"errors"
+	"fmt"
+	"io"
 )
 
-func TestLeadLoad(t *testing.T) {
-	balancer := NewLeastLoad()
-	balancer.Set(
-		NewNode("192.168.34.10:3322", 2),
-		NewNode("192.168.34.11:3322", 0),
-		NewNode("192.168.34.12:3322", 1),
-	)
-	actual := balancer.Next()
-	assert.Equal(t, "192.168.34.11:3322", actual.Address())
+var (
+	// ErrInvalidMessage is returned when an invalid remote message is sent
+	ErrInvalidMessage = func(err error) error { return fmt.Errorf("invalid remote message: %w", err) }
+	// ErrTypeNotRegistered is returned when a given actor is not registered
+	ErrTypeNotRegistered = errors.New("actor type is not registered")
+)
+
+// eof returns true if the given error is an EOF error
+func eof(err error) bool {
+	return err != nil && (errors.Is(err, io.EOF) || errors.Unwrap(err) == io.EOF)
 }

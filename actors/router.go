@@ -53,9 +53,11 @@ func (f RouterOptionFunc) Apply(c *router) {
 
 // WithRoutingStrategy sets the routing strategy
 func WithRoutingStrategy(strategy RoutingStrategy) RouterOption {
-	return RouterOptionFunc(func(r *router) {
-		r.strategy = strategy
-	})
+	return RouterOptionFunc(
+		func(r *router) {
+			r.strategy = strategy
+		},
+	)
 }
 
 // RoutingStrategy defines the routing strategy to use when

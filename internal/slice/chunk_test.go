@@ -33,42 +33,48 @@ import (
 )
 
 func TestChunk(t *testing.T) {
-	t.Run("With empty slice", func(t *testing.T) {
-		var items []int
-		chunkSize := 2
-		chunks := Chunk(items, chunkSize)
-		require.Empty(t, chunks)
-	})
-	t.Run("With chunk size a dividend of total number of items", func(t *testing.T) {
-		items := []int{2, 7, 9, 4, 6, 10}
-		chunkSize := 2
-		chunks := Chunk(items, chunkSize)
-		expected := [][]int{
-			{2, 7},
-			{9, 4},
-			{6, 10},
-		}
+	t.Run(
+		"With empty slice", func(t *testing.T) {
+			var items []int
+			chunkSize := 2
+			chunks := Chunk(items, chunkSize)
+			require.Empty(t, chunks)
+		},
+	)
+	t.Run(
+		"With chunk size a dividend of total number of items", func(t *testing.T) {
+			items := []int{2, 7, 9, 4, 6, 10}
+			chunkSize := 2
+			chunks := Chunk(items, chunkSize)
+			expected := [][]int{
+				{2, 7},
+				{9, 4},
+				{6, 10},
+			}
 
-		require.EqualValues(t, len(expected), len(chunks))
-		require.ElementsMatch(t, expected[0], chunks[0])
-		require.ElementsMatch(t, expected[1], chunks[1])
-		assert.ElementsMatch(t, expected[2], chunks[2])
-	})
-	t.Run("With chunk size not a dividend of total number of items", func(t *testing.T) {
-		items := []int{2, 7, 9, 4, 6, 10, 11}
-		chunkSize := 2
-		chunks := Chunk(items, chunkSize)
-		expected := [][]int{
-			{2, 7},
-			{9, 4},
-			{6, 10},
-			{11},
-		}
+			require.EqualValues(t, len(expected), len(chunks))
+			require.ElementsMatch(t, expected[0], chunks[0])
+			require.ElementsMatch(t, expected[1], chunks[1])
+			assert.ElementsMatch(t, expected[2], chunks[2])
+		},
+	)
+	t.Run(
+		"With chunk size not a dividend of total number of items", func(t *testing.T) {
+			items := []int{2, 7, 9, 4, 6, 10, 11}
+			chunkSize := 2
+			chunks := Chunk(items, chunkSize)
+			expected := [][]int{
+				{2, 7},
+				{9, 4},
+				{6, 10},
+				{11},
+			}
 
-		require.EqualValues(t, len(expected), len(chunks))
-		require.ElementsMatch(t, expected[0], chunks[0])
-		require.ElementsMatch(t, expected[1], chunks[1])
-		require.ElementsMatch(t, expected[2], chunks[2])
-		assert.ElementsMatch(t, expected[3], chunks[3])
-	})
+			require.EqualValues(t, len(expected), len(chunks))
+			require.ElementsMatch(t, expected[0], chunks[0])
+			require.ElementsMatch(t, expected[1], chunks[1])
+			require.ElementsMatch(t, expected[2], chunks[2])
+			assert.ElementsMatch(t, expected[3], chunks[3])
+		},
+	)
 }

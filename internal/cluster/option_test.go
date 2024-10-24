@@ -84,10 +84,12 @@ func TestOptions(t *testing.T) {
 	}
 
 	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			var cl Engine
-			tc.option.Apply(&cl)
-			assert.Equal(t, tc.expected, cl)
-		})
+		t.Run(
+			tc.name, func(t *testing.T) {
+				var cl Engine
+				tc.option.Apply(&cl)
+				assert.Equal(t, tc.expected, cl)
+			},
+		)
 	}
 }

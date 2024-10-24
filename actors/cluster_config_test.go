@@ -35,40 +35,44 @@ import (
 )
 
 func TestClusterConfig(t *testing.T) {
-	t.Run("With happy path", func(t *testing.T) {
-		disco := new(testkit.Provider)
-		exchanger := new(exchanger)
-		tester := new(testActor)
-		kinds := []Actor{tester, exchanger}
-		config := NewClusterConfig().
-			WithKinds(kinds...).
-			WithDiscoveryPort(3220).
-			WithPeersPort(3222).
-			WithMinimumPeersQuorum(1).
-			WithReplicaCount(1).
-			WithPartitionCount(3).
-			WithDiscovery(disco)
+	t.Run(
+		"With happy path", func(t *testing.T) {
+			disco := new(testkit.Provider)
+			exchanger := new(exchanger)
+			tester := new(testActor)
+			kinds := []Actor{tester, exchanger}
+			config := NewClusterConfig().
+				WithKinds(kinds...).
+				WithDiscoveryPort(3220).
+				WithPeersPort(3222).
+				WithMinimumPeersQuorum(1).
+				WithReplicaCount(1).
+				WithPartitionCount(3).
+				WithDiscovery(disco)
 
-		require.NoError(t, config.Validate())
-		assert.EqualValues(t, 3220, config.DiscoveryPort())
-		assert.EqualValues(t, 3222, config.PeersPort())
-		assert.EqualValues(t, 1, config.MinimumPeersQuorum())
-		assert.EqualValues(t, 1, config.ReplicaCount())
-		assert.EqualValues(t, 3, config.PartitionCount())
-		assert.True(t, disco == config.Discovery())
-		assert.Len(t, config.Kinds(), 3)
-	})
+			require.NoError(t, config.Validate())
+			assert.EqualValues(t, 3220, config.DiscoveryPort())
+			assert.EqualValues(t, 3222, config.PeersPort())
+			assert.EqualValues(t, 1, config.MinimumPeersQuorum())
+			assert.EqualValues(t, 1, config.ReplicaCount())
+			assert.EqualValues(t, 3, config.PartitionCount())
+			assert.True(t, disco == config.Discovery())
+			assert.Len(t, config.Kinds(), 3)
+		},
+	)
 
-	t.Run("With invalid config setting", func(t *testing.T) {
-		config := NewClusterConfig().
-			WithKinds(new(exchanger), new(testActor)).
-			WithDiscoveryPort(3220).
-			WithPeersPort(3222).
-			WithMinimumPeersQuorum(1).
-			WithReplicaCount(1).
-			WithPartitionCount(0). // invalid partition count
-			WithDiscovery(new(testkit.Provider))
+	t.Run(
+		"With invalid config setting", func(t *testing.T) {
+			config := NewClusterConfig().
+				WithKinds(new(exchanger), new(testActor)).
+				WithDiscoveryPort(3220).
+				WithPeersPort(3222).
+				WithMinimumPeersQuorum(1).
+				WithReplicaCount(1).
+				WithPartitionCount(0). // invalid partition count
+				WithDiscovery(new(testkit.Provider))
 
-		assert.Error(t, config.Validate())
-	})
+			assert.Error(t, config.Validate())
+		},
+	)
 }

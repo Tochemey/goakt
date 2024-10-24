@@ -37,30 +37,34 @@ import (
 )
 
 func TestCodec(t *testing.T) {
-	t.Run("With happy path", func(t *testing.T) {
-		// create an instance of wire actor
-		actor := &internalpb.ActorRef{
-			ActorAddress: &goaktpb.Address{
-				Host: "127.0.0.1",
-				Port: 2345,
-				Name: "account-1",
-				Id:   uuid.NewString(),
-			},
-		}
+	t.Run(
+		"With happy path", func(t *testing.T) {
+			// create an instance of wire actor
+			actor := &internalpb.ActorRef{
+				ActorAddress: &goaktpb.Address{
+					Host: "127.0.0.1",
+					Port: 2345,
+					Name: "account-1",
+					Id:   uuid.NewString(),
+				},
+			}
 
-		// encode the actor
-		actual, err := encode(actor)
-		require.NoError(t, err)
-		assert.NotEmpty(t, actual)
+			// encode the actor
+			actual, err := encode(actor)
+			require.NoError(t, err)
+			assert.NotEmpty(t, actual)
 
-		// decode the actor
-		decoded, err := decode(actual)
-		require.NoError(t, err)
-		assert.True(t, proto.Equal(actor, decoded))
-	})
-	t.Run("With invalid encoded actor", func(t *testing.T) {
-		decoded, err := decode([]byte("invalid proto message"))
-		require.Error(t, err)
-		assert.Nil(t, decoded)
-	})
+			// decode the actor
+			decoded, err := decode(actual)
+			require.NoError(t, err)
+			assert.True(t, proto.Equal(actor, decoded))
+		},
+	)
+	t.Run(
+		"With invalid encoded actor", func(t *testing.T) {
+			decoded, err := decode([]byte("invalid proto message"))
+			require.Error(t, err)
+			assert.Nil(t, decoded)
+		},
+	)
 }

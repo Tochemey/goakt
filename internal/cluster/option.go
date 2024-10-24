@@ -49,58 +49,74 @@ func (f OptionFunc) Apply(c *Engine) {
 
 // WithPartitionsCount sets the total number of partitions
 func WithPartitionsCount(count uint64) Option {
-	return OptionFunc(func(eng *Engine) {
-		eng.partitionsCount = count
-	})
+	return OptionFunc(
+		func(eng *Engine) {
+			eng.partitionsCount = count
+		},
+	)
 }
 
 // WithLogger sets the logger
 func WithLogger(logger log.Logger) Option {
-	return OptionFunc(func(eng *Engine) {
-		eng.logger = logger
-	})
+	return OptionFunc(
+		func(eng *Engine) {
+			eng.logger = logger
+		},
+	)
 }
 
 // WithWriteTimeout sets the Node write timeout.
 // This timeout specifies the timeout of a data replication
 func WithWriteTimeout(timeout time.Duration) Option {
-	return OptionFunc(func(eng *Engine) {
-		eng.writeTimeout = timeout
-	})
+	return OptionFunc(
+		func(eng *Engine) {
+			eng.writeTimeout = timeout
+		},
+	)
 }
 
 // WithReadTimeout sets the Node read timeout.
 // This timeout specifies the timeout of a data retrieval
 func WithReadTimeout(timeout time.Duration) Option {
-	return OptionFunc(func(eng *Engine) {
-		eng.readTimeout = timeout
-	})
+	return OptionFunc(
+		func(eng *Engine) {
+			eng.readTimeout = timeout
+		},
+	)
 }
 
 // WithShutdownTimeout sets the Node shutdown timeout.
 func WithShutdownTimeout(timeout time.Duration) Option {
-	return OptionFunc(func(eng *Engine) {
-		eng.shutdownTimeout = timeout
-	})
+	return OptionFunc(
+		func(eng *Engine) {
+			eng.shutdownTimeout = timeout
+		},
+	)
 }
 
 // WithHasher sets the custom hasher
 func WithHasher(hasher hash.Hasher) Option {
-	return OptionFunc(func(eng *Engine) {
-		eng.hasher = hasher
-	})
+	return OptionFunc(
+		func(eng *Engine) {
+			eng.hasher = hasher
+		},
+	)
 }
 
 // WithMinimumPeersQuorum sets the minimum number of nodes to form a quorum
 func WithMinimumPeersQuorum(count uint32) Option {
-	return OptionFunc(func(eng *Engine) {
-		eng.minimumPeersQuorum = count
-	})
+	return OptionFunc(
+		func(eng *Engine) {
+			eng.minimumPeersQuorum = count
+		},
+	)
 }
 
 // WithReplicaCount sets replica count
 func WithReplicaCount(count uint32) Option {
-	return OptionFunc(func(eng *Engine) {
-		eng.replicaCount = count
-	})
+	return OptionFunc(
+		func(eng *Engine) {
+			eng.replicaCount = count
+		},
+	)
 }

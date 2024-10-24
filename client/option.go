@@ -24,7 +24,9 @@
 
 package client
 
-import "time"
+import (
+	"time"
+)
 
 // Option is the interface that applies a configuration option.
 type Option interface {
@@ -44,15 +46,30 @@ func (f OptionFunc) Apply(c *Client) {
 
 // WithBalancerStrategy sets the Client weight balancer strategy
 func WithBalancerStrategy(strategy BalancerStrategy) Option {
-	return OptionFunc(func(c *Client) {
-		c.strategy = strategy
-	})
+	return OptionFunc(
+		func(c *Client) {
+			c.strategy = strategy
+		},
+	)
 }
 
 // WithRefresh sets a refresh interval. This help check the nodes state
 // time to time. This help remove dead nodes from the pool
 func WithRefresh(interval time.Duration) Option {
-	return OptionFunc(func(c *Client) {
-		c.refreshInterval = interval
-	})
+	return OptionFunc(
+		func(c *Client) {
+			c.refreshInterval = interval
+		},
+	)
+}
+
+// WithTLS enables ssl configuration by defining the root certificate file
+// that will be used to communicate with the remote actors' nodes
+func WithTLS(rootCertFile string) Option {
+	return OptionFunc(
+		func(c *Client) {
+			c.rootCertFile = rootCertFile
+			c.tlsEnabled = true
+		},
+	)
 }

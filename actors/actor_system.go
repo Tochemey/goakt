@@ -41,7 +41,6 @@ import (
 	"connectrpc.com/connect"
 	"github.com/google/uuid"
 	"go.uber.org/atomic"
-	"golang.org/x/crypto/acme/autocert"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
 	"golang.org/x/sync/errgroup"
@@ -55,11 +54,10 @@ import (
 	"github.com/tochemey/goakt/v2/internal/eventstream"
 	"github.com/tochemey/goakt/v2/internal/internalpb"
 	"github.com/tochemey/goakt/v2/internal/internalpb/internalpbconnect"
-	"github.com/tochemey/goakt/v2/internal/lib"
 	"github.com/tochemey/goakt/v2/internal/tcp"
 	"github.com/tochemey/goakt/v2/internal/types"
-	"github.com/tochemey/goakt/v2/internal/validation"
 	"github.com/tochemey/goakt/v2/log"
+	"github.com/tochemey/goakt/v2/secureconn"
 )
 
 // ActorSystem defines the contract of an actor system
@@ -148,8 +146,6 @@ type ActorSystem interface {
 	setActor(actor *PID)
 	// supervisor return the system supervisor
 	getSupervisor() *PID
-	// isTLSEnabled return true when secure transport is enabled
-	isTLSEnabled() bool
 }
 
 // ActorSystem represent a collection of actors on a given node
@@ -189,6 +185,7 @@ type actorSystem struct {
 	// Specifies whether remoting is enabled.
 	// This allows to handle remote messaging
 	remotingEnabled atomic.Bool
+
 	// Specifies the remoting port
 	port int32
 	// Specifies the remoting host
@@ -197,14 +194,9 @@ type actorSystem struct {
 	// Specifies the remoting server
 	server         *nethttp.Server
 	listener       net.Listener
-	tlsEnabled     atomic.Bool
-	tlsServer      *nethttp.Server
-	tlsListener    net.Listener
-	tlsConfig      *tls.Config
-	certFile       string
-	privateKey     string
-	rootCertFile   string
-	autoTLSManager *autocert.Manager
+	secureServer   *nethttp.Server
+	secureListener net.Listener
+	secureConn     *secureconn.SecureConn
 
 	// cluster settings
 	clusterEnabled atomic.Bool
@@ -284,18 +276,12 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 	system.started.Store(false)
 	system.remotingEnabled.Store(false)
 	system.clusterEnabled.Store(false)
-	system.tlsEnabled.Store(false)
 
 	system.reflection = newReflection(system.registry)
 
 	// apply the various options
 	for _, opt := range opts {
 		opt.Apply(system)
-	}
-
-	// validate TLS settings when set
-	if err := system.validateTLS(); err != nil {
-		return nil, err
 	}
 
 	// we need to make sure the cluster kinds are defined
@@ -654,11 +640,6 @@ func (x *actorSystem) RemoteActor(ctx context.Context, actorName string) (addr *
 func (x *actorSystem) Start(ctx context.Context) error {
 	x.started.Store(true)
 
-	// enable TLS when it is set
-	if err := x.enableTLS(); err != nil {
-		return err
-	}
-
 	if x.remotingEnabled.Load() {
 		x.enableRemoting(ctx)
 	}
@@ -777,6 +758,10 @@ func (x *actorSystem) RemoteLookup(ctx context.Context, request *connect.Request
 	}
 
 	addr := address.New(msg.GetName(), x.Name(), msg.GetHost(), int(msg.GetPort()))
+	if x.secureConn != nil {
+		addr = addr.WithSecureConn(x.secureConn)
+	}
+
 	pid, exist := x.actors.Get(addr)
 	if !exist {
 		logger.Error(ErrAddressNotFound(addr.String()).Error())
@@ -861,42 +846,49 @@ func (x *actorSystem) RemoteTell(ctx context.Context, stream *connect.ClientStre
 	eg, ctx := errgroup.WithContext(ctx)
 	eg.SetLimit(2)
 
-	eg.Go(func() error {
-		defer close(requestc)
-		for stream.Receive() {
-			select {
-			case requestc <- stream.Msg():
-			case <-ctx.Done():
-				logger.Error(ctx.Err())
-				return connect.NewError(connect.CodeCanceled, ctx.Err())
-			}
-		}
-
-		if err := stream.Err(); err != nil {
-			logger.Error(err)
-			return connect.NewError(connect.CodeUnknown, err)
-		}
-
-		return nil
-	})
-
-	eg.Go(func() error {
-		for request := range requestc {
-			receiver := request.GetRemoteMessage().GetReceiver()
-			addr := address.New(receiver.GetName(), x.Name(), receiver.GetHost(), int(receiver.GetPort()))
-			pid, exist := x.actors.Get(addr)
-			if !exist {
-				logger.Error(ErrAddressNotFound(addr.String()).Error())
-				return ErrAddressNotFound(addr.String())
+	eg.Go(
+		func() error {
+			defer close(requestc)
+			for stream.Receive() {
+				select {
+				case requestc <- stream.Msg():
+				case <-ctx.Done():
+					logger.Error(ctx.Err())
+					return connect.NewError(connect.CodeCanceled, ctx.Err())
+				}
 			}
 
-			if err := x.handleRemoteTell(ctx, pid, request.GetRemoteMessage()); err != nil {
-				logger.Error(ErrRemoteSendFailure(err))
-				return ErrRemoteSendFailure(err)
+			if err := stream.Err(); err != nil {
+				logger.Error(err)
+				return connect.NewError(connect.CodeUnknown, err)
 			}
-		}
-		return nil
-	})
+
+			return nil
+		},
+	)
+
+	eg.Go(
+		func() error {
+			for request := range requestc {
+				receiver := request.GetRemoteMessage().GetReceiver()
+				addr := address.New(receiver.GetName(), x.Name(), receiver.GetHost(), int(receiver.GetPort()))
+				if x.secureConn != nil {
+					addr = addr.WithSecureConn(x.secureConn)
+				}
+				pid, exist := x.actors.Get(addr)
+				if !exist {
+					logger.Error(ErrAddressNotFound(addr.String()).Error())
+					return ErrAddressNotFound(addr.String())
+				}
+
+				if err := x.handleRemoteTell(ctx, pid, request.GetRemoteMessage()); err != nil {
+					logger.Error(ErrRemoteSendFailure(err))
+					return ErrRemoteSendFailure(err)
+				}
+			}
+			return nil
+		},
+	)
 
 	if err := eg.Wait(); err != nil {
 		return nil, err
@@ -921,6 +913,9 @@ func (x *actorSystem) RemoteReSpawn(ctx context.Context, request *connect.Reques
 	}
 
 	actorPath := address.New(msg.GetName(), x.Name(), msg.GetHost(), int(msg.GetPort()))
+	if x.secureConn != nil {
+		actorPath = actorPath.WithSecureConn(x.secureConn)
+	}
 	pid, exist := x.actors.Get(actorPath)
 	if !exist {
 		logger.Error(ErrAddressNotFound(actorPath.String()).Error())
@@ -951,6 +946,10 @@ func (x *actorSystem) RemoteStop(ctx context.Context, request *connect.Request[i
 	}
 
 	actorPath := address.New(msg.GetName(), x.Name(), msg.GetHost(), int(msg.GetPort()))
+	if x.secureConn != nil {
+		actorPath = actorPath.WithSecureConn(x.secureConn)
+	}
+
 	pid, exist := x.actors.Get(actorPath)
 	if !exist {
 		logger.Error(ErrAddressNotFound(actorPath.String()).Error())
@@ -981,8 +980,10 @@ func (x *actorSystem) RemoteSpawn(ctx context.Context, request *connect.Request[
 
 	actor, err := x.reflection.ActorFrom(msg.GetActorType())
 	if err != nil {
-		logger.Errorf("failed to create actor=[(%s) of type (%s)] on [host=%s, port=%d]: reason: (%v)",
-			msg.GetActorName(), msg.GetActorType(), msg.GetHost(), msg.GetPort(), err)
+		logger.Errorf(
+			"failed to create actor=[(%s) of type (%s)] on [host=%s, port=%d]: reason: (%v)",
+			msg.GetActorName(), msg.GetActorType(), msg.GetHost(), msg.GetPort(), err,
+		)
 
 		if errors.Is(err, ErrTypeNotRegistered) {
 			return nil, connect.NewError(connect.CodeFailedPrecondition, ErrTypeNotRegistered)
@@ -1014,10 +1015,12 @@ func (x *actorSystem) GetNodeMetric(_ context.Context, request *connect.Request[
 	}
 
 	actorCount := x.actors.Size()
-	return connect.NewResponse(&internalpb.GetNodeMetricResponse{
-		NodeRemoteAddress: remoteAddr,
-		ActorsCount:       uint64(actorCount),
-	}), nil
+	return connect.NewResponse(
+		&internalpb.GetNodeMetricResponse{
+			NodeRemoteAddress: remoteAddr,
+			ActorsCount:       uint64(actorCount),
+		},
+	), nil
 }
 
 // GetKinds returns the cluster kinds
@@ -1112,9 +1115,11 @@ func (x *actorSystem) enableClustering(ctx context.Context) error {
 	}
 
 	bootstrapChan := make(chan struct{}, 1)
-	timer := time.AfterFunc(time.Second, func() {
-		bootstrapChan <- struct{}{}
-	})
+	timer := time.AfterFunc(
+		time.Second, func() {
+			bootstrapChan <- struct{}{}
+		},
+	)
 	<-bootstrapChan
 	timer.Stop()
 
@@ -1268,37 +1273,41 @@ func (x *actorSystem) peersStateLoop() {
 
 				peersChan := make(chan *cluster.Peer)
 
-				eg.Go(func() error {
-					defer close(peersChan)
-					peers, err := x.cluster.Peers(ctx)
-					if err != nil {
-						return err
-					}
-
-					for _, peer := range peers {
-						select {
-						case peersChan <- peer:
-						case <-ctx.Done():
-							return ctx.Err()
-						}
-					}
-					return nil
-				})
-
-				eg.Go(func() error {
-					for peer := range peersChan {
-						if err := x.processPeerState(ctx, peer); err != nil {
+				eg.Go(
+					func() error {
+						defer close(peersChan)
+						peers, err := x.cluster.Peers(ctx)
+						if err != nil {
 							return err
 						}
-						select {
-						case <-ctx.Done():
-							return ctx.Err()
-						default:
-							// pass
+
+						for _, peer := range peers {
+							select {
+							case peersChan <- peer:
+							case <-ctx.Done():
+								return ctx.Err()
+							}
 						}
-					}
-					return nil
-				})
+						return nil
+					},
+				)
+
+				eg.Go(
+					func() error {
+						for peer := range peersChan {
+							if err := x.processPeerState(ctx, peer); err != nil {
+								return err
+							}
+							select {
+							case <-ctx.Done():
+								return ctx.Err()
+							default:
+								// pass
+							}
+						}
+						return nil
+					},
+				)
 
 				if err := eg.Wait(); err != nil {
 					x.logger.Error(err)
@@ -1398,25 +1407,12 @@ func (x *actorSystem) configPID(ctx context.Context, name string, actor Actor, o
 		pidOpts = append(pidOpts, withPassivationAfter(x.expireActorAfter))
 	}
 
-	// set the root CA when TLS is enabled
-	// TODO: need to read the root certificate at startup into memory
-	if x.tlsEnabled.Load() {
-		switch {
-		case lib.FileExists(x.rootCertFile):
-			cert, err := os.ReadFile(x.rootCertFile)
-			if err != nil {
-				return nil, err
-			}
-			pidOpts = append(pidOpts, withCert(cert))
-		default:
-			pidOpts = append(pidOpts, withCert([]byte(x.rootCertFile)))
-		}
-	}
-
-	pid, err := newPID(ctx,
+	pid, err := newPID(
+		ctx,
 		addr,
 		actor,
-		pidOpts...)
+		pidOpts...,
+	)
 
 	if err != nil {
 		return nil, err
@@ -1427,17 +1423,21 @@ func (x *actorSystem) configPID(ctx context.Context, name string, actor Actor, o
 // getSystemActorName returns the system supervisor name
 func (x *actorSystem) getSystemActorName(nameType nameType) string {
 	if x.remotingEnabled.Load() {
-		return fmt.Sprintf("%s%s%s-%d-%d",
+		return fmt.Sprintf(
+			"%s%s%s-%d-%d",
 			systemNames[nameType],
 			strings.ToTitle(x.name),
 			x.host,
 			x.port,
-			time.Now().UnixNano())
+			time.Now().UnixNano(),
+		)
 	}
-	return fmt.Sprintf("%s%s-%d",
+	return fmt.Sprintf(
+		"%s%s-%d",
 		systemNames[nameType],
 		strings.ToTitle(x.name),
-		time.Now().UnixNano())
+		time.Now().UnixNano(),
+	)
 }
 
 func isSystemName(name string) bool {
@@ -1446,58 +1446,11 @@ func isSystemName(name string) bool {
 
 // actorAddress returns the actor path provided the actor name
 func (x *actorSystem) actorAddress(name string) *address.Address {
-	return address.New(name, x.name, x.host, int(x.port))
-}
-
-// validateTLS validates the TLS settings if any set
-func (x *actorSystem) validateTLS() error {
-	// skip when TLS is not enabled
-	if !x.tlsEnabled.Load() {
-		return nil
+	addr := address.New(name, x.name, x.host, int(x.port))
+	if x.secureConn != nil {
+		addr = addr.WithSecureConn(x.secureConn)
 	}
-
-	// skip when auto TLS is set
-	if x.autoTLSManager != nil {
-		return nil
-	}
-
-	return validation.
-		New(validation.AllErrors()).
-		AddValidator(validation.NewEmptyStringValidator("rootCA", x.rootCertFile)).
-		AddValidator(validation.NewEmptyStringValidator("certfile", x.certFile)).
-		AddValidator(validation.NewEmptyStringValidator("keyfile", x.privateKey)).
-		Validate()
-}
-
-// enableTLS enables TLS if any set
-func (x *actorSystem) enableTLS() error {
-	// skip when TLS is not enabled
-	if !x.tlsEnabled.Load() {
-		return nil
-	}
-
-	// skip when it is an auto TLS
-	if x.autoTLSManager != nil {
-		return nil
-	}
-
-	var (
-		certificate tls.Certificate
-		err         error
-	)
-	switch {
-	case lib.FileExists(x.certFile) && lib.FileExists(x.privateKey):
-		certificate, err = tls.LoadX509KeyPair(x.certFile, x.privateKey)
-	default:
-		certificate, err = tls.X509KeyPair([]byte(x.certFile), []byte(x.privateKey))
-	}
-
-	if err != nil {
-		return err
-	}
-
-	x.tlsConfig = lib.GetServerTLSConfig(&certificate)
-	return nil
+	return addr
 }
 
 // configureServer configure the various http server and listeners based upon the various settings
@@ -1508,9 +1461,11 @@ func (x *actorSystem) configureServer(ctx context.Context, mux *nethttp.ServeMux
 	x.server = httpServer
 	// For gRPC clients, it's convenient to support HTTP/2 without TLS. You can
 	// avoid x/net/http2 by using http.ListenAndServeTLS.
-	x.server.Handler = h2c.NewHandler(mux, &http2.Server{
-		IdleTimeout: 1200 * time.Second,
-	})
+	x.server.Handler = h2c.NewHandler(
+		mux, &http2.Server{
+			IdleTimeout: 1200 * time.Second,
+		},
+	)
 
 	// create a tpc listener
 	lnr, err := net.Listen("tcp", hostPort)
@@ -1519,10 +1474,10 @@ func (x *actorSystem) configureServer(ctx context.Context, mux *nethttp.ServeMux
 	}
 
 	// set the http TLS server
-	if x.tlsConfig != nil {
-		x.tlsServer = httpServer
-		x.tlsServer.Handler = mux
-		x.tlsListener = tls.NewListener(lnr, x.tlsConfig)
+	if x.secureConn != nil {
+		x.secureServer = httpServer
+		x.secureServer.Handler = mux
+		x.secureListener = tls.NewListener(lnr, x.secureConn.SecureServer())
 		return nil
 	}
 
@@ -1533,25 +1488,18 @@ func (x *actorSystem) configureServer(ctx context.Context, mux *nethttp.ServeMux
 
 // startHTTPServer starts the appropriate http server
 func (x *actorSystem) startHTTPServer() error {
-	if x.tlsConfig != nil {
-		return x.tlsServer.Serve(x.tlsListener)
+	if x.secureConn != nil {
+		return x.secureServer.Serve(x.secureListener)
 	}
 	return x.server.Serve(x.listener)
 }
 
 // shutdownHTTPServer stops the appropriate http server
 func (x *actorSystem) shutdownHTTPServer(ctx context.Context) error {
-	if x.tlsConfig != nil {
-		return x.tlsServer.Shutdown(ctx)
+	if x.secureConn != nil {
+		return x.secureServer.Shutdown(ctx)
 	}
 	return x.server.Shutdown(ctx)
-}
-
-// isTLSEnabled return true when secure transport is enabled
-func (x *actorSystem) isTLSEnabled() bool {
-	x.locker.Lock()
-	defer x.locker.Unlock()
-	return x.tlsEnabled.Load()
 }
 
 // getServer creates an instance of http server

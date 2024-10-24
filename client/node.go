@@ -50,7 +50,7 @@ func (n *Node) SetWeight(weight float64) {
 	n.mutex.Unlock()
 }
 
-// Address returns the node address
+// addr returns the node address
 func (n *Node) Address() string {
 	n.mutex.Lock()
 	address := n.address

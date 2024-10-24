@@ -28,7 +28,7 @@ import (
 	"context"
 	"fmt"
 	"net"
-	sdhttp "net/http"
+	nethttp "net/http"
 	"strconv"
 	"sync"
 	"time"
@@ -43,12 +43,13 @@ import (
 	"github.com/tochemey/goakt/v2/internal/internalpb"
 	"github.com/tochemey/goakt/v2/internal/internalpb/internalpbconnect"
 	"github.com/tochemey/goakt/v2/internal/types"
-	"github.com/tochemey/goakt/v2/internal/validation"
+	"github.com/tochemey/goakt/v2/remoting"
+	"github.com/tochemey/goakt/v2/secureconn"
 )
 
-// Client connects to af Go-Akt nodes.
+// Client connects to af GoAkt nodes.
 // This client can only be used when remoting is enabled on the various nodes.
-// The client is only used against a Go-Akt cluster
+// The client is only used against a GoAkt cluster
 type Client struct {
 	nodes           []*Node
 	locker          *sync.Mutex
@@ -56,7 +57,9 @@ type Client struct {
 	balancer        Balancer
 	closeSignal     chan types.Unit
 	refreshInterval time.Duration
-	client          *sdhttp.Client
+	client          *nethttp.Client
+	remoting        remoting.Remoting
+	secureConn      *secureconn.SecureConn
 }
 
 // New creates an instance of Client. The provided nodes are the cluster nodes.
@@ -64,26 +67,41 @@ type Client struct {
 // and remoting port of the nodes. The nodes list will be load balanced based upon the load-balancing
 // strategy defined by default round-robin will be used.
 // An instance of the Client can be reused and it is thread safe.
+// Make sure to call Close to free up resources
 func New(ctx context.Context, addresses []string, opts ...Option) (*Client, error) {
-	chain := validation.
-		New(validation.FailFast()).
-		AddAssertion(len(addresses) != 0, "addresses are required")
-	for _, host := range addresses {
-		chain = chain.AddValidator(validation.NewTCPAddressValidator(host))
-	}
-	if err := chain.Validate(); err != nil {
+	// validate the provided addresses
+	if err := validateAddress(addresses); err != nil {
 		return nil, err
 	}
+
 	client := &Client{
 		locker:          &sync.Mutex{},
 		strategy:        RoundRobinStrategy,
 		refreshInterval: -1,
 		client:          http.NewClient(),
 	}
+
 	// apply the various options
 	for _, opt := range opts {
 		opt.Apply(client)
 	}
+
+	var (
+		remote remoting.Remoting
+		err    error
+	)
+
+	switch {
+	case client.secureConn != nil:
+		remote, err = remoting.New(remoting.WithSecureConn(client.secureConn))
+	default:
+		remote, err = remoting.New()
+	}
+
+	if err != nil {
+		return nil, err
+	}
+	client.remoting = remote
 
 	var nodes []*Node
 	for _, url := range addresses {
@@ -97,14 +115,22 @@ func New(ctx context.Context, addresses []string, opts ...Option) (*Client, erro
 		}
 		nodes = append(nodes, NewNode(url, weight))
 	}
+
 	client.balancer = getBalancer(client.strategy)
 	client.nodes = nodes
 	client.balancer.Set(client.nodes...)
+
+	// handle ssl settings
+	if client.secureConn != nil {
+		client.client = http.NewTLSClient(client.secureConn.SecureClient())
+	}
+
 	// only refresh addresses when refresh interval is set
 	if client.refreshInterval > 0 {
 		client.closeSignal = make(chan types.Unit, 1)
 		go client.refreshNodesLoop()
 	}
+
 	return client, nil
 }
 
@@ -116,22 +142,32 @@ func (x *Client) Close() {
 		close(x.closeSignal)
 	}
 	x.client.CloseIdleConnections()
+	x.remoting.Close()
 	x.locker.Unlock()
 }
 
 // Kinds returns the list of all the Client kinds registered
+// This call will succeed when the cluster mode is enabled on the actor systems
 func (x *Client) Kinds(ctx context.Context) ([]string, error) {
 	x.locker.Lock()
 	defer x.locker.Unlock()
 
 	host, port := nextRemotingHostAndPort(x.balancer)
-	service := internalpbconnect.NewClusterServiceClient(
-		http.NewClient(),
-		http.URL(host, port))
+	endpoint := http.URL(host, port)
+	client := http.NewClient()
+	if x.secureConn != nil {
+		endpoint = http.SafeURL(host, port)
+		client = http.NewTLSClient(x.secureConn.SecureClient())
+	}
 
-	response, err := service.GetKinds(ctx, connect.NewRequest(&internalpb.GetKindsRequest{
-		NodeAddress: fmt.Sprintf("%s:%d", host, port),
-	}))
+	service := internalpbconnect.NewClusterServiceClient(client, endpoint)
+	response, err := service.GetKinds(
+		ctx, connect.NewRequest(
+			&internalpb.GetKindsRequest{
+				NodeAddress: fmt.Sprintf("%s:%d", host, port),
+			},
+		),
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -142,8 +178,9 @@ func (x *Client) Kinds(ctx context.Context) ([]string, error) {
 func (x *Client) Spawn(ctx context.Context, actor *Actor) (err error) {
 	x.locker.Lock()
 	remoteHost, remotePort := nextRemotingHostAndPort(x.balancer)
+	remoting := x.remoting
 	x.locker.Unlock()
-	return actors.RemoteSpawn(ctx, remoteHost, remotePort, actor.Name(), actor.Kind())
+	return remoting.RemoteSpawn(ctx, remoteHost, remotePort, actor.Name(), actor.Kind())
 }
 
 // SpawnWithBalancer creates an actor provided the actor name and the balancer strategy
@@ -152,16 +189,18 @@ func (x *Client) SpawnWithBalancer(ctx context.Context, actor *Actor, strategy B
 	balancer := getBalancer(strategy)
 	balancer.Set(x.nodes...)
 	remoteHost, remotePort := nextRemotingHostAndPort(balancer)
+	remoting := x.remoting
 	x.locker.Unlock()
-	return actors.RemoteSpawn(ctx, remoteHost, remotePort, actor.Name(), actor.Kind())
+	return remoting.RemoteSpawn(ctx, remoteHost, remotePort, actor.Name(), actor.Kind())
 }
 
 // ReSpawn restarts a given actor
 func (x *Client) ReSpawn(ctx context.Context, actor *Actor) (err error) {
 	x.locker.Lock()
 	remoteHost, remotePort := nextRemotingHostAndPort(x.balancer)
+	remoting := x.remoting
 	x.locker.Unlock()
-	return actors.RemoteReSpawn(ctx, remoteHost, remotePort, actor.Name())
+	return remoting.RemoteReSpawn(ctx, remoteHost, remotePort, actor.Name())
 }
 
 // Tell sends a message to a given actor provided the actor name.
@@ -173,7 +212,10 @@ func (x *Client) Tell(ctx context.Context, actor *Actor, message proto.Message) 
 	if err != nil {
 		return err
 	}
-	return actors.RemoteTell(ctx, address, message)
+	x.locker.Lock()
+	remoting := x.remoting
+	x.locker.Unlock()
+	return remoting.RemoteTell(ctx, address, message)
 }
 
 // Ask sends a message to a given actor provided the actor name and expects a response.
@@ -185,7 +227,11 @@ func (x *Client) Ask(ctx context.Context, actor *Actor, message proto.Message, t
 	if err != nil {
 		return nil, err
 	}
-	response, err := actors.RemoteAsk(ctx, address, message, timeout)
+
+	x.locker.Lock()
+	remoting := x.remoting
+	x.locker.Unlock()
+	response, err := remoting.RemoteAsk(ctx, address, message, timeout)
 	if err != nil {
 		return nil, err
 	}
@@ -196,17 +242,19 @@ func (x *Client) Ask(ctx context.Context, actor *Actor, message proto.Message, t
 func (x *Client) Stop(ctx context.Context, actor *Actor) error {
 	x.locker.Lock()
 	remoteHost, remotePort := nextRemotingHostAndPort(x.balancer)
+	remoting := x.remoting
 	x.locker.Unlock()
-	return actors.RemoteStop(ctx, remoteHost, remotePort, actor.Name())
+	return remoting.RemoteStop(ctx, remoteHost, remotePort, actor.Name())
 }
 
 // Whereis finds and returns the address of a given actor
 func (x *Client) Whereis(ctx context.Context, actor *Actor) (*address.Address, error) {
 	x.locker.Lock()
 	remoteHost, remotePort := nextRemotingHostAndPort(x.balancer)
+	remoting := x.remoting
 	x.locker.Unlock()
 	// lookup the actor address
-	address, err := actors.RemoteLookup(ctx, remoteHost, remotePort, actor.Name())
+	address, err := remoting.RemoteLookup(ctx, remoteHost, remotePort, actor.Name())
 	if err != nil {
 		return nil, err
 	}
@@ -286,7 +334,8 @@ func (x *Client) getNodeMetric(ctx context.Context, node string) (int, bool, err
 	port, _ := strconv.Atoi(p)
 	service := internalpbconnect.NewClusterServiceClient(
 		x.client,
-		http.URL(host, port))
+		http.URL(host, port),
+	)
 
 	response, err := service.GetNodeMetric(ctx, connect.NewRequest(&internalpb.GetNodeMetricRequest{NodeAddress: node}))
 	if err != nil {

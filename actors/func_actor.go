@@ -73,23 +73,29 @@ func newFuncConfig(opts ...FuncOption) *funcConfig {
 
 // WithPreStart defines the PreStartFunc hook
 func WithPreStart(fn PreStartFunc) FuncOption {
-	return funcOption(func(actor *funcConfig) {
-		actor.preStart = fn
-	})
+	return funcOption(
+		func(actor *funcConfig) {
+			actor.preStart = fn
+		},
+	)
 }
 
 // WithPostStop defines the PostStopFunc hook
 func WithPostStop(fn PostStopFunc) FuncOption {
-	return funcOption(func(actor *funcConfig) {
-		actor.postStop = fn
-	})
+	return funcOption(
+		func(actor *funcConfig) {
+			actor.postStop = fn
+		},
+	)
 }
 
 // WithFuncMailbox sets the mailbox to use when starting the func-based actor
 func WithFuncMailbox(mailbox Mailbox) FuncOption {
-	return funcOption(func(actor *funcConfig) {
-		actor.mailbox = mailbox
-	})
+	return funcOption(
+		func(actor *funcConfig) {
+			actor.mailbox = mailbox
+		},
+	)
 }
 
 // funcActor is an actor that only handles messages

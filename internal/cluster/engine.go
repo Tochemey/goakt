@@ -388,31 +388,37 @@ func (n *Engine) PutActor(ctx context.Context, actor *internalpb.ActorRef) error
 	eg, ctx := errgroup.WithContext(ctx)
 	eg.SetLimit(2)
 
-	eg.Go(func() error {
-		encoded, _ := encode(actor)
-		if err := n.dmap.Put(ctx, actor.GetActorAddress().GetName(), encoded); err != nil {
-			return fmt.Errorf("failed to sync actor=(%s) of peer=(%s): %v", actor.GetActorAddress().GetName(), n.host.PeersAddress(), err)
-		}
+	eg.Go(
+		func() error {
+			encoded, _ := encode(actor)
+			if err := n.dmap.Put(ctx, actor.GetActorAddress().GetName(), encoded); err != nil {
+				return fmt.Errorf("failed to sync actor=(%s) of peer=(%s): %v", actor.GetActorAddress().GetName(), n.host.PeersAddress(), err)
+			}
 
-		return nil
-	})
+			return nil
+		},
+	)
 
-	eg.Go(func() error {
-		// append to the existing list
-		actors := append(n.peerState.GetActors(), actor)
-		// remove duplicates
-		compacted := slices.CompactFunc(actors, func(actor *internalpb.ActorRef, actor2 *internalpb.ActorRef) bool {
-			return proto.Equal(actor, actor2)
-		})
+	eg.Go(
+		func() error {
+			// append to the existing list
+			actors := append(n.peerState.GetActors(), actor)
+			// remove duplicates
+			compacted := slices.CompactFunc(
+				actors, func(actor *internalpb.ActorRef, actor2 *internalpb.ActorRef) bool {
+					return proto.Equal(actor, actor2)
+				},
+			)
 
-		n.peerState.Actors = compacted
-		encoded, _ := proto.Marshal(n.peerState)
-		if err := n.dmap.Put(ctx, n.host.PeersAddress(), encoded); err != nil {
-			return fmt.Errorf("failed to sync peer=(%s) request: %v", n.host.PeersAddress(), err)
-		}
+			n.peerState.Actors = compacted
+			encoded, _ := proto.Marshal(n.peerState)
+			if err := n.dmap.Put(ctx, n.host.PeersAddress(), encoded); err != nil {
+				return fmt.Errorf("failed to sync peer=(%s) request: %v", n.host.PeersAddress(), err)
+			}
 
-		return nil
-	})
+			return nil
+		},
+	)
 
 	if err := eg.Wait(); err != nil {
 		logger.Errorf("failed to synchronize peer=(%s): %v", n.host.PeersAddress(), err)

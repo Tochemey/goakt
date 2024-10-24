@@ -116,22 +116,14 @@ func TestOption(t *testing.T) {
 			option:   WithJanitorInterval(2 * time.Second),
 			expected: actorSystem{janitorInterval: 2. * time.Second},
 		},
-		{
-			name:   "WithTLS",
-			option: WithTLS("certfile.pem", "keyfile.pem", "cert.ca"),
-			expected: actorSystem{
-				tlsEnabled:   atomicTrue,
-				certFile:     "certfile.pem",
-				privateKey:   "keyfile.pem",
-				rootCertFile: "cert.ca",
-			},
-		},
 	}
 	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			var cfg actorSystem
-			tc.option.Apply(&cfg)
-			assert.Equal(t, tc.expected, cfg)
-		})
+		t.Run(
+			tc.name, func(t *testing.T) {
+				var cfg actorSystem
+				tc.option.Apply(&cfg)
+				assert.Equal(t, tc.expected, cfg)
+			},
+		)
 	}
 }

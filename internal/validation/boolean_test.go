@@ -41,14 +41,18 @@ func TestBooleanValidator(t *testing.T) {
 }
 
 func (s *booleanTestSuite) TestBooleanValidator() {
-	s.Run("happy path when condition is true", func() {
-		err := NewBooleanValidator(true, "error message").Validate()
-		s.Assert().NoError(err)
-	})
-	s.Run("happy path when condition is false", func() {
-		errMsg := "error message"
-		err := NewBooleanValidator(false, errMsg).Validate()
-		s.Assert().Error(err)
-		s.Assert().EqualError(err, errMsg)
-	})
+	s.Run(
+		"happy path when condition is true", func() {
+			err := NewBooleanValidator(true, "error message").Validate()
+			s.Assert().NoError(err)
+		},
+	)
+	s.Run(
+		"happy path when condition is false", func() {
+			errMsg := "error message"
+			err := NewBooleanValidator(false, errMsg).Validate()
+			s.Assert().Error(err)
+			s.Assert().EqualError(err, errMsg)
+		},
+	)
 }

@@ -58,8 +58,10 @@ func (x *LeastLoad) Set(nodes ...*Node) {
 func (x *LeastLoad) Next() *Node {
 	x.locker.Lock()
 	defer x.locker.Unlock()
-	slices.SortStableFunc(x.nodes, func(a, b *Node) int {
-		return cmp.Compare(a.Weight(), b.Weight())
-	})
+	slices.SortStableFunc(
+		x.nodes, func(a, b *Node) int {
+			return cmp.Compare(a.Weight(), b.Weight())
+		},
+	)
 	return x.nodes[0]
 }

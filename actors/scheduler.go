@@ -42,6 +42,7 @@ import (
 	"github.com/tochemey/goakt/v2/address"
 	"github.com/tochemey/goakt/v2/internal/cluster"
 	"github.com/tochemey/goakt/v2/log"
+	"github.com/tochemey/goakt/v2/remoting"
 )
 
 var errSkipJobScheduling = errors.New("skip job scheduling")
@@ -132,12 +133,14 @@ func (x *scheduler) ScheduleOnce(ctx context.Context, message proto.Message, pid
 		return ErrSchedulerNotStarted
 	}
 
-	job := job.NewFunctionJob[bool](func(ctx context.Context) (bool, error) {
-		if err := Tell(ctx, pid, message); err != nil {
-			return false, err
-		}
-		return true, nil
-	})
+	job := job.NewFunctionJob[bool](
+		func(ctx context.Context) (bool, error) {
+			if err := Tell(ctx, pid, message); err != nil {
+				return false, err
+			}
+			return true, nil
+		},
+	)
 
 	jobDetails := quartz.NewJobDetail(job, quartz.NewJobKey(pid.Address().String()))
 	if err := x.distributeJobKeyOrNot(ctx, jobDetails); err != nil {
@@ -159,12 +162,14 @@ func (x *scheduler) Schedule(ctx context.Context, message proto.Message, pid *PI
 		return ErrSchedulerNotStarted
 	}
 
-	job := job.NewFunctionJob[bool](func(ctx context.Context) (bool, error) {
-		if err := Tell(ctx, pid, message); err != nil {
-			return false, err
-		}
-		return true, nil
-	})
+	job := job.NewFunctionJob[bool](
+		func(ctx context.Context) (bool, error) {
+			if err := Tell(ctx, pid, message); err != nil {
+				return false, err
+			}
+			return true, nil
+		},
+	)
 
 	jobDetails := quartz.NewJobDetail(job, quartz.NewJobKey(pid.Address().String()))
 	if err := x.distributeJobKeyOrNot(ctx, jobDetails); err != nil {
@@ -188,12 +193,15 @@ func (x *scheduler) RemoteScheduleOnce(ctx context.Context, message proto.Messag
 	if !x.started.Load() {
 		return ErrSchedulerNotStarted
 	}
-	job := job.NewFunctionJob[bool](func(ctx context.Context) (bool, error) {
-		if err := RemoteTell(ctx, address, message); err != nil {
-			return false, err
-		}
-		return true, nil
-	})
+	job := job.NewFunctionJob[bool](
+		func(ctx context.Context) (bool, error) {
+			remoting := remoting.New(remoting.WithSecureConn(address.SecureConn()))
+			if err := remoting.RemoteTell(ctx, address, message); err != nil {
+				return false, err
+			}
+			return true, nil
+		},
+	)
 
 	key := fmt.Sprintf("%s@%s", address.GetName(), net.JoinHostPort(address.GetHost(), strconv.Itoa(int(address.GetPort()))))
 	jobDetails := quartz.NewJobDetail(job, quartz.NewJobKey(key))
@@ -217,12 +225,15 @@ func (x *scheduler) RemoteSchedule(ctx context.Context, message proto.Message, a
 	if !x.started.Load() {
 		return ErrSchedulerNotStarted
 	}
-	job := job.NewFunctionJob[bool](func(ctx context.Context) (bool, error) {
-		if err := RemoteTell(ctx, address, message); err != nil {
-			return false, err
-		}
-		return true, nil
-	})
+	job := job.NewFunctionJob[bool](
+		func(ctx context.Context) (bool, error) {
+			remoting := remoting.New(remoting.WithSecureConn(address.SecureConn()))
+			if err := remoting.RemoteTell(ctx, address, message); err != nil {
+				return false, err
+			}
+			return true, nil
+		},
+	)
 
 	key := fmt.Sprintf("%s@%s", address.GetName(), net.JoinHostPort(address.GetHost(), strconv.Itoa(int(address.GetPort()))))
 	jobDetails := quartz.NewJobDetail(job, quartz.NewJobKey(key))
@@ -244,12 +255,14 @@ func (x *scheduler) ScheduleWithCron(ctx context.Context, message proto.Message,
 		return ErrSchedulerNotStarted
 	}
 
-	job := job.NewFunctionJob[bool](func(ctx context.Context) (bool, error) {
-		if err := Tell(ctx, pid, message); err != nil {
-			return false, err
-		}
-		return true, nil
-	})
+	job := job.NewFunctionJob[bool](
+		func(ctx context.Context) (bool, error) {
+			if err := Tell(ctx, pid, message); err != nil {
+				return false, err
+			}
+			return true, nil
+		},
+	)
 
 	jobDetails := quartz.NewJobDetail(job, quartz.NewJobKey(pid.Address().String()))
 	if err := x.distributeJobKeyOrNot(ctx, jobDetails); err != nil {
@@ -278,12 +291,15 @@ func (x *scheduler) RemoteScheduleWithCron(ctx context.Context, message proto.Me
 		return ErrSchedulerNotStarted
 	}
 
-	job := job.NewFunctionJob[bool](func(ctx context.Context) (bool, error) {
-		if err := RemoteTell(ctx, address, message); err != nil {
-			return false, err
-		}
-		return true, nil
-	})
+	job := job.NewFunctionJob[bool](
+		func(ctx context.Context) (bool, error) {
+			remoting := remoting.New(remoting.WithSecureConn(address.SecureConn()))
+			if err := remoting.RemoteTell(ctx, address, message); err != nil {
+				return false, err
+			}
+			return true, nil
+		},
+	)
 
 	key := fmt.Sprintf("%s@%s", address.GetName(), net.JoinHostPort(address.GetHost(), strconv.Itoa(int(address.GetPort()))))
 	jobDetails := quartz.NewJobDetail(job, quartz.NewJobKey(key))

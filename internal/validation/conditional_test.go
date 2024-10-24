@@ -41,19 +41,23 @@ func TestConditionalValidator(t *testing.T) {
 }
 
 func (s *conditionalTestSuite) TestConditionalValidator() {
-	s.Run("with condition set to true", func() {
-		fieldName := "field"
-		fieldValue := ""
-		validator := NewConditionalValidator(true, NewEmptyStringValidator(fieldName, fieldValue))
-		err := validator.Validate()
-		s.Assert().Error(err)
-		s.Assert().EqualError(err, "the [field] is required")
-	})
-	s.Run("with condition set to false", func() {
-		fieldName := "field"
-		fieldValue := ""
-		validator := NewConditionalValidator(false, NewEmptyStringValidator(fieldName, fieldValue))
-		err := validator.Validate()
-		s.Assert().NoError(err)
-	})
+	s.Run(
+		"with condition set to true", func() {
+			fieldName := "field"
+			fieldValue := ""
+			validator := NewConditionalValidator(true, NewEmptyStringValidator(fieldName, fieldValue))
+			err := validator.Validate()
+			s.Assert().Error(err)
+			s.Assert().EqualError(err, "the [field] is required")
+		},
+	)
+	s.Run(
+		"with condition set to false", func() {
+			fieldName := "field"
+			fieldValue := ""
+			validator := NewConditionalValidator(false, NewEmptyStringValidator(fieldName, fieldValue))
+			err := validator.Validate()
+			s.Assert().NoError(err)
+		},
+	)
 }

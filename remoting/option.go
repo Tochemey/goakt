@@ -22,21 +22,17 @@
  * SOFTWARE.
  */
 
-package client
+package remoting
 
-import (
-	"testing"
+import "github.com/tochemey/goakt/v2/secureconn"
 
-	"github.com/stretchr/testify/assert"
-)
+// Option defines the remoting option
+type Option func(*remoting)
 
-func TestLeadLoad(t *testing.T) {
-	balancer := NewLeastLoad()
-	balancer.Set(
-		NewNode("192.168.34.10:3322", 2),
-		NewNode("192.168.34.11:3322", 0),
-		NewNode("192.168.34.12:3322", 1),
-	)
-	actual := balancer.Next()
-	assert.Equal(t, "192.168.34.11:3322", actual.Address())
+// WithSecureConn enables ssl configuration by defining the root certificate file
+// that will be used to communicate with the remote actors' node
+func WithSecureConn(conn *secureconn.SecureConn) Option {
+	return func(r *remoting) {
+		r.secureConn = conn
+	}
 }

@@ -109,10 +109,12 @@ func TestPIDOptions(t *testing.T) {
 		},
 	}
 	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			pid := &PID{}
-			tc.option(pid)
-			assert.Equal(t, tc.expected, pid)
-		})
+		t.Run(
+			tc.name, func(t *testing.T) {
+				pid := &PID{}
+				tc.option(pid)
+				assert.Equal(t, tc.expected, pid)
+			},
+		)
 	}
 }

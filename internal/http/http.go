@@ -57,8 +57,8 @@ func NewClient() *http.Client {
 	}
 }
 
-// NewSafeClient creates a secured http client
-func NewSafeClient(tlsConfig *tls.Config) *http.Client {
+// NewTLSClient creates a secured http client
+func NewTLSClient(tlsConfig *tls.Config) *http.Client {
 	return &http.Client{
 		// Most RPC servers don't use HTTP redirects
 		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
