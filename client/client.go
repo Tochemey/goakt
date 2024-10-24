@@ -86,20 +86,13 @@ func New(ctx context.Context, addresses []string, opts ...Option) (*Client, erro
 		opt.Apply(client)
 	}
 
-	var (
-		remote remoting.Remoting
-		err    error
-	)
+	var remote remoting.Remoting
 
 	switch {
 	case client.secureConn != nil:
-		remote, err = remoting.New(remoting.WithSecureConn(client.secureConn))
+		remote = remoting.New(remoting.WithSecureConn(client.secureConn))
 	default:
-		remote, err = remoting.New()
-	}
-
-	if err != nil {
-		return nil, err
+		remote = remoting.New()
 	}
 	client.remoting = remote
 
