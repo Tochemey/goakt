@@ -37,7 +37,8 @@ type TLS struct {
 	cert   *tls.Certificate
 }
 
-// NewTLS creates an instance of TLS instance
+// NewTLS creates an instance of TLS instance by providing a valid
+// signed root certificate and a certificate
 func NewTLS(rootCA *x509.CertPool, cert *tls.Certificate) *TLS {
 	return &TLS{
 		rootCA: rootCA,
