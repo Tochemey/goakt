@@ -117,6 +117,11 @@ func TestMTLS(t *testing.T) {
 		m, err := NewTLSFromPEMBlocks(caPEM.Bytes(), certPrivKeyPEM.Bytes(), certPEM.Bytes())
 		require.NoError(t, err)
 		assert.NotNil(t, m)
+
+		clientConf := m.ClientConfig()
+		serverConf := m.ServerConfig()
+		assert.NotNil(t, clientConf)
+		assert.NotNil(t, serverConf)
 	})
 	t.Run("With new instance from PEM bocks with invalid PEM blocks", func(t *testing.T) {
 		m, err := NewTLSFromPEMBlocks(nil, nil, nil)
