@@ -58,6 +58,25 @@ func NewClient() *http.Client {
 	}
 }
 
+// NewSafeClient creates a secured http client
+func NewSafeClient(tlsConfig *tls.Config) *http.Client {
+	return &http.Client{
+		// Most RPC servers don't use HTTP redirects
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+		Transport: &http2.Transport{
+			TLSClientConfig: tlsConfig,
+			AllowHTTP:       true,
+			DialTLSContext: func(_ context.Context, network, addr string, _ *tls.Config) (net.Conn, error) {
+				return tls.Dial(network, addr, tlsConfig)
+			},
+			PingTimeout:     30 * time.Second,
+			ReadIdleTimeout: 30 * time.Second,
+		},
+	}
+}
+
 // NewServer returns an instance of an http server
 func NewServer(ctx context.Context, host string, port int, mux *http.ServeMux) *http.Server {
 	// TODO revisit the timeouts
@@ -79,9 +98,11 @@ func NewServer(ctx context.Context, host string, port int, mux *http.ServeMux) *
 		IdleTimeout: 1200 * time.Second,
 		// For gRPC clients, it's convenient to support HTTP/2 without TLS. You can
 		// avoid x/net/http2 by using http.ListenAndServeTLS.
-		Handler: h2c.NewHandler(mux, &http2.Server{
-			IdleTimeout: 1200 * time.Second,
-		}),
+		Handler: h2c.NewHandler(
+			mux, &http2.Server{
+				IdleTimeout: 1200 * time.Second,
+			},
+		),
 		BaseContext: func(_ net.Listener) context.Context {
 			return ctx
 		},
@@ -91,4 +112,9 @@ func NewServer(ctx context.Context, host string, port int, mux *http.ServeMux) *
 // URL create a http connection address
 func URL(host string, port int) string {
 	return fmt.Sprintf("http://%s", net.JoinHostPort(host, strconv.Itoa(port)))
+}
+
+// SafeURL create a http connection address
+func SafeURL(host string, port int) string {
+	return fmt.Sprintf("https://%s", net.JoinHostPort(host, strconv.Itoa(port)))
 }

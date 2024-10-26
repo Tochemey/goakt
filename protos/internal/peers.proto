@@ -28,4 +28,21 @@ message PeerState {
   int32 peers_port = 3;
   // Specifies the list of actors
   repeated ActorRef actors = 4;
+  // Specifies the certificate
+  PeerCert certificate = 5;
+}
+
+message PeerCert {
+  // Specifies the root cas
+  // This is the trusted CA certificate
+  bytes root_cas_pem_block = 1;
+  // Specifies the  certifcate private key
+  // The remote peer need to have this already set when booting to allow secured
+  // and smooth handshake
+  bytes key_pem_block = 2;
+  // Specifies the certifcate file block
+  // This will be used by peers to connect to this peer securely
+  // The remote peer need to have this already set when booting to allow secured
+  // and smooth handshake
+  bytes cert_pem_block = 3;
 }

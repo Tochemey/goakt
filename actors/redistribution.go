@@ -103,63 +103,79 @@ func (x *actorSystem) redistribute(ctx context.Context, event *cluster.Event) er
 
 	eg, ctx := errgroup.WithContext(ctx)
 
-	eg.Go(func() error {
-		for _, actor := range leaderActors {
-			// never redistribute system actors
-			if isSystemName(actor.GetActorAddress().GetName()) {
-				continue
-			}
-
-			x.logger.Debugf("re-creating actor=[(%s) of type (%s)]", actor.GetActorAddress().GetName(), actor.GetActorType())
-			iactor, err := x.reflection.ActorFrom(actor.GetActorType())
-			if err != nil {
-				x.logger.Errorf("failed to create actor=[(%s) of type (%s)]: %v", actor.GetActorAddress().GetName(), actor.GetActorType(), err)
-				return err
-			}
-
-			if _, err = x.Spawn(ctx, actor.GetActorAddress().GetName(), iactor); err != nil {
-				x.logger.Errorf("failed to spawn actor=[(%s) of type (%s)]: %v", actor.GetActorAddress().GetName(), actor.GetActorType(), err)
-				return err
-			}
-
-			x.logger.Debugf("actor=[(%s) of type (%s)] successfully re-created", actor.GetActorAddress().GetName(), actor.GetActorType())
-		}
-		return nil
-	})
-
-	eg.Go(func() error {
-		// defensive programming
-		if len(chunks) == 0 {
-			return nil
-		}
-
-		for i := 1; i < len(chunks); i++ {
-			actors := chunks[i]
-			peer := peers[i-1]
-
-			x.peersCacheMu.RLock()
-			bytea := x.peersCache[net.JoinHostPort(peer.Host, strconv.Itoa(peer.Port))]
-			x.peersCacheMu.RUnlock()
-
-			state := new(internalpb.PeerState)
-			_ = proto.Unmarshal(bytea, state)
-
-			for _, actor := range actors {
+	eg.Go(
+		func() error {
+			for _, actor := range leaderActors {
 				// never redistribute system actors
 				if isSystemName(actor.GetActorAddress().GetName()) {
 					continue
 				}
 
 				x.logger.Debugf("re-creating actor=[(%s) of type (%s)]", actor.GetActorAddress().GetName(), actor.GetActorType())
-				if err := RemoteSpawn(ctx, state.GetHost(), int(state.GetRemotingPort()), actor.GetActorAddress().GetName(), actor.GetActorType()); err != nil {
-					x.logger.Error(err)
+				iactor, err := x.reflection.ActorFrom(actor.GetActorType())
+				if err != nil {
+					x.logger.Errorf("failed to create actor=[(%s) of type (%s)]: %v", actor.GetActorAddress().GetName(), actor.GetActorType(), err)
 					return err
 				}
+
+				if _, err = x.Spawn(ctx, actor.GetActorAddress().GetName(), iactor); err != nil {
+					x.logger.Errorf("failed to spawn actor=[(%s) of type (%s)]: %v", actor.GetActorAddress().GetName(), actor.GetActorType(), err)
+					return err
+				}
+
 				x.logger.Debugf("actor=[(%s) of type (%s)] successfully re-created", actor.GetActorAddress().GetName(), actor.GetActorType())
 			}
-		}
-		return nil
-	})
+			return nil
+		},
+	)
+
+	eg.Go(
+		func() error {
+			// defensive programming
+			if len(chunks) == 0 {
+				return nil
+			}
+
+			for i := 1; i < len(chunks); i++ {
+				actors := chunks[i]
+				peer := peers[i-1]
+
+				x.peersCacheMu.RLock()
+				bytea := x.peersCache[net.JoinHostPort(peer.Host, strconv.Itoa(peer.Port))]
+				x.peersCacheMu.RUnlock()
+
+				peerState := new(internalpb.PeerState)
+				_ = proto.Unmarshal(bytea, peerState)
+
+				for _, actor := range actors {
+					// never redistribute system actors
+					if isSystemName(actor.GetActorAddress().GetName()) {
+						continue
+					}
+
+					x.logger.Debugf("re-creating actor=[(%s) of type (%s)]", actor.GetActorAddress().GetName(), actor.GetActorType())
+					remoteTLS, err := NewTLSFromPEMBlocks(
+						peerState.GetCertificate().GetRootCasPemBlock(),
+						peerState.GetCertificate().GetKeyPemBlock(),
+						peerState.GetCertificate().GetCertPemBlock(),
+					)
+					if err != nil {
+						return err
+					}
+
+					remoting := NewRemoting(WithRemotingTLS(remoteTLS))
+					if err := remoting.RemoteSpawn(ctx, peerState.GetHost(), int(peerState.GetRemotingPort()), actor.GetActorAddress().GetName(), actor.GetActorType()); err != nil {
+						x.logger.Error(err)
+						return err
+					}
+
+					remoting.Close()
+					x.logger.Debugf("actor=[(%s) of type (%s)] successfully re-created", actor.GetActorAddress().GetName(), actor.GetActorType())
+				}
+			}
+			return nil
+		},
+	)
 
 	return eg.Wait()
 }

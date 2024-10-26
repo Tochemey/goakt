@@ -263,20 +263,20 @@ func (c *ReceiveContext) BatchAsk(to *PID, messages ...proto.Message) (responses
 }
 
 // RemoteTell sends a message to an actor remotely without expecting any reply
-func (c *ReceiveContext) RemoteTell(to *address.Address, message proto.Message) {
+func (c *ReceiveContext) RemoteTell(to *address.Address, message proto.Message, opts ...RemotingOption) {
 	recipient := c.self
 	ctx := context.WithoutCancel(c.ctx)
-	if err := recipient.RemoteTell(ctx, to, message); err != nil {
+	if err := recipient.RemoteTell(ctx, to, message, opts...); err != nil {
 		c.Err(err)
 	}
 }
 
 // RemoteAsk is used to send a message to an actor remotely and expect a response
 // immediately.
-func (c *ReceiveContext) RemoteAsk(to *address.Address, message proto.Message) (response *anypb.Any) {
+func (c *ReceiveContext) RemoteAsk(to *address.Address, message proto.Message, opts ...RemotingOption) (response *anypb.Any) {
 	recipient := c.self
 	ctx := context.WithoutCancel(c.ctx)
-	reply, err := recipient.RemoteAsk(ctx, to, message)
+	reply, err := recipient.RemoteAsk(ctx, to, message, opts...)
 	if err != nil {
 		c.Err(err)
 	}
@@ -285,10 +285,10 @@ func (c *ReceiveContext) RemoteAsk(to *address.Address, message proto.Message) (
 
 // RemoteBatchTell sends a batch of messages to a remote actor in a way fire-and-forget manner
 // Messages are processed one after the other in the order they are sent.
-func (c *ReceiveContext) RemoteBatchTell(to *address.Address, messages ...proto.Message) {
+func (c *ReceiveContext) RemoteBatchTell(to *address.Address, messages []proto.Message, opts ...RemotingOption) {
 	recipient := c.self
 	ctx := context.WithoutCancel(c.ctx)
-	if err := recipient.RemoteBatchTell(ctx, to, messages...); err != nil {
+	if err := recipient.RemoteBatchTell(ctx, to, messages, opts...); err != nil {
 		c.Err(err)
 	}
 }
@@ -296,10 +296,10 @@ func (c *ReceiveContext) RemoteBatchTell(to *address.Address, messages ...proto.
 // RemoteBatchAsk sends a synchronous bunch of messages to a remote actor and expect responses in the same order as the messages.
 // Messages are processed one after the other in the order they are sent.
 // This can hinder performance if it is not properly used.
-func (c *ReceiveContext) RemoteBatchAsk(to *address.Address, messages ...proto.Message) (responses []*anypb.Any) {
+func (c *ReceiveContext) RemoteBatchAsk(to *address.Address, messages []proto.Message, opts ...RemotingOption) (responses []*anypb.Any) {
 	recipient := c.self
 	ctx := context.WithoutCancel(c.ctx)
-	replies, err := recipient.RemoteBatchAsk(ctx, to, messages...)
+	replies, err := recipient.RemoteBatchAsk(ctx, to, messages, opts...)
 	if err != nil {
 		c.Err(err)
 	}
@@ -308,10 +308,10 @@ func (c *ReceiveContext) RemoteBatchAsk(to *address.Address, messages ...proto.M
 
 // RemoteLookup look for an actor address on a remote node. If the actorSystem is nil then the lookup will be done
 // using the same actor system as the PID actor system
-func (c *ReceiveContext) RemoteLookup(host string, port int, name string) (addr *goaktpb.Address) {
+func (c *ReceiveContext) RemoteLookup(host string, port int, name string, opts ...RemotingOption) (addr *goaktpb.Address) {
 	recipient := c.self
 	ctx := context.WithoutCancel(c.ctx)
-	remoteAddr, err := recipient.RemoteLookup(ctx, host, port, name)
+	remoteAddr, err := recipient.RemoteLookup(ctx, host, port, name, opts...)
 	if err != nil {
 		c.Err(err)
 	}
@@ -388,10 +388,10 @@ func (c *ReceiveContext) Unhandled() {
 }
 
 // RemoteReSpawn restarts an actor on a remote node.
-func (c *ReceiveContext) RemoteReSpawn(host string, port int, name string) {
+func (c *ReceiveContext) RemoteReSpawn(host string, port int, name string, opts ...RemotingOption) {
 	recipient := c.self
 	ctx := context.WithoutCancel(c.ctx)
-	if err := recipient.RemoteReSpawn(ctx, host, port, name); err != nil {
+	if err := recipient.RemoteReSpawn(ctx, host, port, name, opts...); err != nil {
 		c.Err(err)
 	}
 }

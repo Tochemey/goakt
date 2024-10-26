@@ -32,9 +32,11 @@ import (
 
 func TestLeadLoad(t *testing.T) {
 	balancer := NewLeastLoad()
-	balancer.Set(NewNode("192.168.34.10:3322", 2),
-		NewNode("192.168.34.11:3322", 0),
-		NewNode("192.168.34.12:3322", 1))
+	balancer.Set(
+		NewNode("192.168.34.10:3322", WithWeight(2)),
+		NewNode("192.168.34.11:3322", WithWeight(0)),
+		NewNode("192.168.34.12:3322", WithWeight(1)),
+	)
 	actual := balancer.Next()
 	assert.Equal(t, "192.168.34.11:3322", actual.Address())
 }
