@@ -383,19 +383,23 @@ func (r *Remoting) Close() {
 
 // Client returns a Remoting service client instance
 func (r *Remoting) Client(host string, port int) internalpbconnect.RemotingServiceClient {
-	endpoint := http.URL(host, port)
+	var endpoint string
 	if r.tls != nil {
 		endpoint = http.SafeURL(host, port)
 		r.client = http.NewSafeClient(r.tls.ClientConfig())
+	} else {
+		endpoint = http.URL(host, port)
+		r.client = http.NewClient()
 	}
 
-	r.client = http.NewClient()
 	return internalpbconnect.NewRemotingServiceClient(r.client, endpoint)
 }
 
 // applyOptions applies the various to the given Remoting instance
 func (r *Remoting) applyOptions(opts ...RemotingOption) {
-	for _, opt := range opts {
-		opt(r)
+	if len(opts) > 0 {
+		for _, opt := range opts {
+			opt(r)
+		}
 	}
 }

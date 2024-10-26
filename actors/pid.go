@@ -468,6 +468,7 @@ func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor, opts .
 		withEventsStream(pid.eventsStream),
 		withInitTimeout(pid.initTimeout.Load()),
 		withShutdownTimeout(pid.shutdownTimeout.Load()),
+		withRemoting(pid.remoting),
 	}
 
 	spawnConfig := newSpawnConfig(opts...)
@@ -1551,6 +1552,7 @@ func (pid *PID) supervise(cid *PID, watcher *watcher) {
 			if errors.Is(err, ErrDead) {
 				return
 			}
+
 			pid.logger.Errorf("child actor=(%s) is failing: Err=%v", cid.ID(), err)
 			switch directive := pid.supervisorDirective.(type) {
 			case *StopDirective:

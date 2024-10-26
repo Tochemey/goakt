@@ -1372,7 +1372,6 @@ func (x *actorSystem) configPID(ctx context.Context, name string, actor Actor, o
 		withSupervisorDirective(x.supervisorDirective),
 		withEventsStream(x.eventsStream),
 		withInitTimeout(x.actorInitTimeout),
-		withRemoting(NewRemoting()),
 	}
 
 	spawnConfig := newSpawnConfig(opts...)
@@ -1455,17 +1454,7 @@ func (x *actorSystem) shutdownHTTPServer(ctx context.Context) error {
 func (x *actorSystem) configureServer(ctx context.Context, mux *nethttp.ServeMux) error {
 	hostPort := net.JoinHostPort(x.host, strconv.Itoa(int(x.port)))
 	httpServer := getServer(ctx, hostPort)
-	// set the http server
-	x.server = httpServer
-	// For gRPC clients, it's convenient to support HTTP/2 without TLS. You can
-	// avoid x/net/http2 by using http.ListenAndServeTLS.
-	x.server.Handler = h2c.NewHandler(
-		mux, &http2.Server{
-			IdleTimeout: 1200 * time.Second,
-		},
-	)
-
-	// create a tpc listener
+	// create a tcp listener
 	lnr, err := net.Listen("tcp", hostPort)
 	if err != nil {
 		return err
@@ -1479,6 +1468,14 @@ func (x *actorSystem) configureServer(ctx context.Context, mux *nethttp.ServeMux
 		return nil
 	}
 
+	// set the http server
+	x.server = httpServer
+	// For gRPC clients, it's convenient to support HTTP/2 without TLS.
+	x.server.Handler = h2c.NewHandler(
+		mux, &http2.Server{
+			IdleTimeout: 1200 * time.Second,
+		},
+	)
 	// set the non-secure http server
 	x.listener = lnr
 	return nil
