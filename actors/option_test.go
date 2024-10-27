@@ -41,6 +41,7 @@ func TestOption(t *testing.T) {
 	atomicTrue.Store(true)
 	clusterConfig := NewClusterConfig()
 	hasher := hash.DefaultHasher()
+
 	testCases := []struct {
 		name     string
 		option   Option

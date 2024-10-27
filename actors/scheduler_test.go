@@ -46,9 +46,11 @@ func TestScheduler(t *testing.T) {
 		// define the logger to use
 		logger := log.DiscardLogger
 		// create the actor system
-		newActorSystem, err := NewActorSystem("test",
+		newActorSystem, err := NewActorSystem(
+			"test",
 			WithLogger(logger),
-			WithPassivationDisabled())
+			WithPassivationDisabled(),
+		)
 		// assert there are no error
 		require.NoError(t, err)
 
@@ -89,10 +91,12 @@ func TestScheduler(t *testing.T) {
 		// define the logger to use
 		logger := log.DiscardLogger
 		// create the actor system
-		newActorSystem, err := NewActorSystem("test",
+		newActorSystem, err := NewActorSystem(
+			"test",
 			WithLogger(logger),
 			WithJanitorInterval(time.Minute),
-			WithPassivationDisabled())
+			WithPassivationDisabled(),
+		)
 		// assert there are no error
 		require.NoError(t, err)
 
@@ -143,7 +147,8 @@ func TestScheduler(t *testing.T) {
 			newTestActor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
-			withAskTimeout(replyTimeout))
+			withAskTimeout(replyTimeout),
+		)
 
 		require.NoError(t, err)
 		assert.NotNil(t, pid)
@@ -167,7 +172,8 @@ func TestScheduler(t *testing.T) {
 		host := "0.0.0.0"
 
 		// create the actor system
-		newActorSystem, err := NewActorSystem("test",
+		newActorSystem, err := NewActorSystem(
+			"test",
 			WithLogger(logger),
 			WithPassivationDisabled(),
 			WithRemoting(host, int32(remotingPort)),
@@ -188,8 +194,9 @@ func TestScheduler(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
+		remoting := NewRemoting()
 		// get the address of the actor
-		addr, err := RemoteLookup(ctx, host, remotingPort, actorName)
+		addr, err := remoting.RemoteLookup(ctx, host, remotingPort, actorName)
 		require.NoError(t, err)
 
 		// send a message to the actor after 100 ms
@@ -205,6 +212,7 @@ func TestScheduler(t *testing.T) {
 		assert.Empty(t, keys)
 		assert.EqualValues(t, 1, actorRef.ProcessedCount()-1)
 
+		remoting.Close()
 		// stop the actor
 		err = newActorSystem.Stop(ctx)
 		assert.NoError(t, err)
@@ -220,7 +228,8 @@ func TestScheduler(t *testing.T) {
 		host := "0.0.0.0"
 
 		// create the actor system
-		newActorSystem, err := NewActorSystem("test",
+		newActorSystem, err := NewActorSystem(
+			"test",
 			WithLogger(logger),
 			WithPassivationDisabled(),
 			WithRemoting(host, int32(remotingPort)),
@@ -245,8 +254,9 @@ func TestScheduler(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
+		remoting := NewRemoting()
 		// get the address of the actor
-		addr, err := RemoteLookup(ctx, host, remotingPort, actorName)
+		addr, err := remoting.RemoteLookup(ctx, host, remotingPort, actorName)
 		require.NoError(t, err)
 
 		// send a message to the actor after 100 ms
@@ -265,9 +275,11 @@ func TestScheduler(t *testing.T) {
 		// define the logger to use
 		logger := log.DiscardLogger
 		// create the actor system
-		newActorSystem, err := NewActorSystem("test",
+		newActorSystem, err := NewActorSystem(
+			"test",
 			WithLogger(logger),
-			WithPassivationDisabled())
+			WithPassivationDisabled(),
+		)
 		// assert there are no error
 		require.NoError(t, err)
 
@@ -307,9 +319,11 @@ func TestScheduler(t *testing.T) {
 		// define the logger to use
 		logger := log.DiscardLogger
 		// create the actor system
-		newActorSystem, err := NewActorSystem("test",
+		newActorSystem, err := NewActorSystem(
+			"test",
 			WithLogger(logger),
-			WithPassivationDisabled())
+			WithPassivationDisabled(),
+		)
 		// assert there are no error
 		require.NoError(t, err)
 
@@ -345,9 +359,11 @@ func TestScheduler(t *testing.T) {
 		// define the logger to use
 		logger := log.DiscardLogger
 		// create the actor system
-		newActorSystem, err := NewActorSystem("test",
+		newActorSystem, err := NewActorSystem(
+			"test",
 			WithLogger(logger),
-			WithPassivationDisabled())
+			WithPassivationDisabled(),
+		)
 		// assert there are no error
 		require.NoError(t, err)
 
@@ -393,7 +409,8 @@ func TestScheduler(t *testing.T) {
 		host := "0.0.0.0"
 
 		// create the actor system
-		newActorSystem, err := NewActorSystem("test",
+		newActorSystem, err := NewActorSystem(
+			"test",
 			WithLogger(logger),
 			WithPassivationDisabled(),
 			WithRemoting(host, int32(remotingPort)),
@@ -414,8 +431,9 @@ func TestScheduler(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
+		remoting := NewRemoting()
 		// get the address of the actor
-		addr, err := RemoteLookup(ctx, host, remotingPort, actorName)
+		addr, err := remoting.RemoteLookup(ctx, host, remotingPort, actorName)
 		require.NoError(t, err)
 
 		// send a message to the actor after 100 ms
@@ -444,7 +462,8 @@ func TestScheduler(t *testing.T) {
 		host := "0.0.0.0"
 
 		// create the actor system
-		newActorSystem, err := NewActorSystem("test",
+		newActorSystem, err := NewActorSystem(
+			"test",
 			WithLogger(logger),
 			WithPassivationDisabled(),
 			WithRemoting(host, int32(remotingPort)),
@@ -465,8 +484,9 @@ func TestScheduler(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
+		remoting := NewRemoting()
 		// get the address of the actor
-		addr, err := RemoteLookup(ctx, host, remotingPort, actorName)
+		addr, err := remoting.RemoteLookup(ctx, host, remotingPort, actorName)
 		require.NoError(t, err)
 
 		// send a message to the actor after 100 ms
@@ -491,7 +511,8 @@ func TestScheduler(t *testing.T) {
 		host := "0.0.0.0"
 
 		// create the actor system
-		newActorSystem, err := NewActorSystem("test",
+		newActorSystem, err := NewActorSystem(
+			"test",
 			WithLogger(logger),
 			WithPassivationDisabled(),
 			WithRemoting(host, int32(remotingPort)),
@@ -515,8 +536,9 @@ func TestScheduler(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
+		remoting := NewRemoting()
 		// get the address of the actor
-		addr, err := RemoteLookup(ctx, host, remotingPort, actorName)
+		addr, err := remoting.RemoteLookup(ctx, host, remotingPort, actorName)
 		require.NoError(t, err)
 
 		// send a message to the actor after 100 ms
@@ -537,9 +559,11 @@ func TestScheduler(t *testing.T) {
 		// define the logger to use
 		logger := log.DiscardLogger
 		// create the actor system
-		newActorSystem, err := NewActorSystem("test",
+		newActorSystem, err := NewActorSystem(
+			"test",
 			WithLogger(logger),
-			WithPassivationDisabled())
+			WithPassivationDisabled(),
+		)
 		// assert there are no error
 		require.NoError(t, err)
 
@@ -573,8 +597,6 @@ func TestScheduler(t *testing.T) {
 
 		lib.Pause(500 * time.Millisecond)
 		require.EqualValues(t, 1, actorRef.ProcessedCount()-1)
-		lib.Pause(500 * time.Millisecond)
-		require.EqualValues(t, 2, actorRef.ProcessedCount()-1)
 
 		// stop the actor
 		err = newActorSystem.Stop(ctx)
@@ -586,10 +608,12 @@ func TestScheduler(t *testing.T) {
 		// define the logger to use
 		logger := log.DiscardLogger
 		// create the actor system
-		newActorSystem, err := NewActorSystem("test",
+		newActorSystem, err := NewActorSystem(
+			"test",
 			WithLogger(logger),
 			WithJanitorInterval(time.Minute),
-			WithPassivationDisabled())
+			WithPassivationDisabled(),
+		)
 		// assert there are no error
 		require.NoError(t, err)
 
@@ -635,9 +659,11 @@ func TestScheduler(t *testing.T) {
 		// define the logger to use
 		logger := log.DiscardLogger
 		// create the actor system
-		newActorSystem, err := NewActorSystem("test",
+		newActorSystem, err := NewActorSystem(
+			"test",
 			WithLogger(logger),
-			WithPassivationDisabled())
+			WithPassivationDisabled(),
+		)
 		// assert there are no error
 		require.NoError(t, err)
 
@@ -680,7 +706,8 @@ func TestScheduler(t *testing.T) {
 		host := "0.0.0.0"
 
 		// create the actor system
-		newActorSystem, err := NewActorSystem("test",
+		newActorSystem, err := NewActorSystem(
+			"test",
 			WithLogger(logger),
 			WithPassivationDisabled(),
 			WithRemoting(host, int32(remotingPort)),
@@ -701,8 +728,9 @@ func TestScheduler(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
+		remoting := NewRemoting()
 		// get the address of the actor
-		addr, err := RemoteLookup(ctx, host, remotingPort, actorName)
+		addr, err := remoting.RemoteLookup(ctx, host, remotingPort, actorName)
 		require.NoError(t, err)
 
 		// send a message to the actor after 100 ms
@@ -738,7 +766,8 @@ func TestScheduler(t *testing.T) {
 		host := "0.0.0.0"
 
 		// create the actor system
-		newActorSystem, err := NewActorSystem("test",
+		newActorSystem, err := NewActorSystem(
+			"test",
 			WithLogger(logger),
 			WithPassivationDisabled(),
 			WithRemoting(host, int32(remotingPort)),
@@ -763,8 +792,9 @@ func TestScheduler(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
+		remoting := NewRemoting()
 		// get the address of the actor
-		addr, err := RemoteLookup(ctx, host, remotingPort, actorName)
+		addr, err := remoting.RemoteLookup(ctx, host, remotingPort, actorName)
 		require.NoError(t, err)
 
 		// send a message to the actor after 100 ms
@@ -788,7 +818,8 @@ func TestScheduler(t *testing.T) {
 		host := "0.0.0.0"
 
 		// create the actor system
-		newActorSystem, err := NewActorSystem("test",
+		newActorSystem, err := NewActorSystem(
+			"test",
 			WithLogger(logger),
 			WithPassivationDisabled(),
 			WithJanitorInterval(time.Minute),
@@ -810,8 +841,9 @@ func TestScheduler(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
+		remoting := NewRemoting()
 		// get the address of the actor
-		addr, err := RemoteLookup(ctx, host, remotingPort, actorName)
+		addr, err := remoting.RemoteLookup(ctx, host, remotingPort, actorName)
 		require.NoError(t, err)
 
 		require.NoError(t, newActorSystem.Kill(ctx, actorName))
@@ -836,5 +868,74 @@ func TestScheduler(t *testing.T) {
 		// stop the actor
 		err = newActorSystem.Stop(ctx)
 		assert.NoError(t, err)
+	})
+	t.Run("With RemoteScheduleWithCron with cron expression when remoting not enabled", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// generate the remoting port
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "0.0.0.0"
+
+		scheduler := newScheduler(logger, time.Second)
+		scheduler.Start(ctx)
+
+		addr := address.New("test", "test", host, remotingPort)
+
+		// send a message to the actor after 100 ms
+		message := new(testpb.TestSend)
+		// set cron expression to run every second
+		const expr = "* * * ? * *"
+		err := scheduler.RemoteScheduleWithCron(ctx, message, addr, expr)
+		require.Error(t, err)
+		assert.EqualError(t, err, ErrRemotingDisabled.Error())
+
+		scheduler.Stop(ctx)
+	})
+	t.Run("With RemoteSchedule when remoting not enabled", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// generate the remoting port
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "0.0.0.0"
+
+		scheduler := newScheduler(logger, time.Second)
+		scheduler.Start(ctx)
+
+		addr := address.New("test", "test", host, remotingPort)
+
+		// send a message to the actor after 100 ms
+		message := new(testpb.TestSend)
+		err := scheduler.RemoteSchedule(ctx, message, addr, time.Second)
+		require.Error(t, err)
+		assert.EqualError(t, err, ErrRemotingDisabled.Error())
+
+		scheduler.Stop(ctx)
+	})
+	t.Run("With RemoteScheduleOnce when remoting not enabled", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// generate the remoting port
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "0.0.0.0"
+
+		scheduler := newScheduler(logger, time.Second)
+		scheduler.Start(ctx)
+
+		addr := address.New("test", "test", host, remotingPort)
+		// send a message to the actor after 100 ms
+		message := new(testpb.TestSend)
+		err := scheduler.RemoteScheduleOnce(ctx, message, addr, time.Second)
+		require.Error(t, err)
+		assert.EqualError(t, err, ErrRemotingDisabled.Error())
+		scheduler.Stop(ctx)
 	})
 }

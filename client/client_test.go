@@ -69,7 +69,12 @@ func TestClient(t *testing.T) {
 			fmt.Sprintf("%s:%d", node3Host, node3Port),
 		}
 
-		client, err := New(ctx, addresses)
+		nodes := make([]*Node, len(addresses))
+		for i, addr := range addresses {
+			nodes[i] = NewNode(addr)
+		}
+
+		client, err := New(ctx, nodes)
 		require.NoError(t, err)
 		require.NotNil(t, client)
 
@@ -107,20 +112,21 @@ func TestClient(t *testing.T) {
 		err = client.Stop(ctx, actor)
 		require.NoError(t, err)
 
-		t.Cleanup(func() {
-			client.Close()
+		t.Cleanup(
+			func() {
+				client.Close()
 
-			require.NoError(t, sys1.Stop(ctx))
-			require.NoError(t, sys2.Stop(ctx))
-			require.NoError(t, sys3.Stop(ctx))
+				require.NoError(t, sys1.Stop(ctx))
+				require.NoError(t, sys2.Stop(ctx))
+				require.NoError(t, sys3.Stop(ctx))
 
-			require.NoError(t, sd1.Close())
-			require.NoError(t, sd2.Close())
-			require.NoError(t, sd3.Close())
+				require.NoError(t, sd1.Close())
+				require.NoError(t, sd2.Close())
+				require.NoError(t, sd3.Close())
 
-			srv.Shutdown()
-			lib.Pause(time.Second)
-		})
+				srv.Shutdown()
+				lib.Pause(time.Second)
+			})
 	})
 	t.Run("With randomRouter strategy", func(t *testing.T) {
 		ctx := context.TODO()
@@ -142,9 +148,16 @@ func TestClient(t *testing.T) {
 			fmt.Sprintf("%s:%d", node3Host, node3Port),
 		}
 
-		client, err := New(ctx,
-			addresses,
-			WithBalancerStrategy(RoundRobinStrategy))
+		nodes := make([]*Node, len(addresses))
+		for i, addr := range addresses {
+			nodes[i] = NewNode(addr)
+		}
+
+		client, err := New(
+			ctx,
+			nodes,
+			WithBalancerStrategy(RoundRobinStrategy),
+		)
 
 		require.NoError(t, err)
 		require.NotNil(t, client)
@@ -183,21 +196,23 @@ func TestClient(t *testing.T) {
 		err = client.Stop(ctx, actor)
 		require.NoError(t, err)
 
-		t.Cleanup(func() {
-			client.Close()
+		t.Cleanup(
+			func() {
+				client.Close()
 
-			require.NoError(t, sys1.Stop(ctx))
-			require.NoError(t, sys2.Stop(ctx))
-			require.NoError(t, sys3.Stop(ctx))
+				require.NoError(t, sys1.Stop(ctx))
+				require.NoError(t, sys2.Stop(ctx))
+				require.NoError(t, sys3.Stop(ctx))
 
-			require.NoError(t, sd1.Close())
-			require.NoError(t, sd2.Close())
-			require.NoError(t, sd3.Close())
+				require.NoError(t, sd1.Close())
+				require.NoError(t, sd2.Close())
+				require.NoError(t, sd3.Close())
 
-			srv.Shutdown()
+				srv.Shutdown()
 
-			lib.Pause(time.Second)
-		})
+				lib.Pause(time.Second)
+			},
+		)
 	})
 	t.Run("With Least-Load strategy", func(t *testing.T) {
 		ctx := context.TODO()
@@ -219,9 +234,16 @@ func TestClient(t *testing.T) {
 			fmt.Sprintf("%s:%d", node3Host, node3Port),
 		}
 
-		client, err := New(ctx,
-			addresses,
-			WithBalancerStrategy(LeastLoadStrategy))
+		nodes := make([]*Node, len(addresses))
+		for i, addr := range addresses {
+			nodes[i] = NewNode(addr)
+		}
+
+		client, err := New(
+			ctx,
+			nodes,
+			WithBalancerStrategy(LeastLoadStrategy),
+		)
 
 		require.NoError(t, err)
 		require.NotNil(t, client)
@@ -260,20 +282,22 @@ func TestClient(t *testing.T) {
 		err = client.Stop(ctx, actor)
 		require.NoError(t, err)
 
-		t.Cleanup(func() {
-			client.Close()
+		t.Cleanup(
+			func() {
+				client.Close()
 
-			require.NoError(t, sys1.Stop(ctx))
-			require.NoError(t, sys2.Stop(ctx))
-			require.NoError(t, sys3.Stop(ctx))
+				require.NoError(t, sys1.Stop(ctx))
+				require.NoError(t, sys2.Stop(ctx))
+				require.NoError(t, sys3.Stop(ctx))
 
-			require.NoError(t, sd1.Close())
-			require.NoError(t, sd2.Close())
-			require.NoError(t, sd3.Close())
+				require.NoError(t, sd1.Close())
+				require.NoError(t, sd2.Close())
+				require.NoError(t, sd3.Close())
 
-			srv.Shutdown()
-			lib.Pause(time.Second)
-		})
+				srv.Shutdown()
+				lib.Pause(time.Second)
+			},
+		)
 	})
 	t.Run("With Refresh Interval", func(t *testing.T) {
 		ctx := context.TODO()
@@ -297,7 +321,12 @@ func TestClient(t *testing.T) {
 			fmt.Sprintf("%s:%d", node3Host, node3Port),
 		}
 
-		client, err := New(ctx, addresses, WithRefresh(time.Minute))
+		nodes := make([]*Node, len(addresses))
+		for i, addr := range addresses {
+			nodes[i] = NewNode(addr)
+		}
+
+		client, err := New(ctx, nodes, WithRefresh(time.Minute))
 		require.NoError(t, err)
 		require.NotNil(t, client)
 
@@ -335,21 +364,23 @@ func TestClient(t *testing.T) {
 		err = client.Stop(ctx, actor)
 		require.NoError(t, err)
 
-		t.Cleanup(func() {
-			client.Close()
+		t.Cleanup(
+			func() {
+				client.Close()
 
-			require.NoError(t, sys1.Stop(ctx))
-			require.NoError(t, sys2.Stop(ctx))
-			require.NoError(t, sys3.Stop(ctx))
+				require.NoError(t, sys1.Stop(ctx))
+				require.NoError(t, sys2.Stop(ctx))
+				require.NoError(t, sys3.Stop(ctx))
 
-			require.NoError(t, sd1.Close())
-			require.NoError(t, sd2.Close())
-			require.NoError(t, sd3.Close())
+				require.NoError(t, sd1.Close())
+				require.NoError(t, sd2.Close())
+				require.NoError(t, sd3.Close())
 
-			srv.Shutdown()
+				srv.Shutdown()
 
-			lib.Pause(time.Second)
-		})
+				lib.Pause(time.Second)
+			},
+		)
 	})
 	t.Run("With SpawnWithBalancer", func(t *testing.T) {
 		ctx := context.TODO()
@@ -373,7 +404,12 @@ func TestClient(t *testing.T) {
 			fmt.Sprintf("%s:%d", node3Host, node3Port),
 		}
 
-		client, err := New(ctx, addresses)
+		nodes := make([]*Node, len(addresses))
+		for i, addr := range addresses {
+			nodes[i] = NewNode(addr)
+		}
+
+		client, err := New(ctx, nodes)
 		require.NoError(t, err)
 		require.NotNil(t, client)
 
@@ -411,20 +447,22 @@ func TestClient(t *testing.T) {
 		err = client.Stop(ctx, actor)
 		require.NoError(t, err)
 
-		t.Cleanup(func() {
-			client.Close()
+		t.Cleanup(
+			func() {
+				client.Close()
 
-			require.NoError(t, sys1.Stop(ctx))
-			require.NoError(t, sys2.Stop(ctx))
-			require.NoError(t, sys3.Stop(ctx))
+				require.NoError(t, sys1.Stop(ctx))
+				require.NoError(t, sys2.Stop(ctx))
+				require.NoError(t, sys3.Stop(ctx))
 
-			require.NoError(t, sd1.Close())
-			require.NoError(t, sd2.Close())
-			require.NoError(t, sd3.Close())
+				require.NoError(t, sd1.Close())
+				require.NoError(t, sd2.Close())
+				require.NoError(t, sd3.Close())
 
-			srv.Shutdown()
-			lib.Pause(time.Second)
-		})
+				srv.Shutdown()
+				lib.Pause(time.Second)
+			},
+		)
 	})
 	t.Run("With ReSpawn", func(t *testing.T) {
 		ctx := context.TODO()
@@ -448,7 +486,12 @@ func TestClient(t *testing.T) {
 			fmt.Sprintf("%s:%d", node3Host, node3Port),
 		}
 
-		client, err := New(ctx, addresses)
+		nodes := make([]*Node, len(addresses))
+		for i, addr := range addresses {
+			nodes[i] = NewNode(addr)
+		}
+
+		client, err := New(ctx, nodes)
 		require.NoError(t, err)
 		require.NotNil(t, client)
 
@@ -491,20 +534,22 @@ func TestClient(t *testing.T) {
 		err = client.Stop(ctx, actor)
 		require.NoError(t, err)
 
-		t.Cleanup(func() {
-			client.Close()
+		t.Cleanup(
+			func() {
+				client.Close()
 
-			require.NoError(t, sys1.Stop(ctx))
-			require.NoError(t, sys2.Stop(ctx))
-			require.NoError(t, sys3.Stop(ctx))
+				require.NoError(t, sys1.Stop(ctx))
+				require.NoError(t, sys2.Stop(ctx))
+				require.NoError(t, sys3.Stop(ctx))
 
-			require.NoError(t, sd1.Close())
-			require.NoError(t, sd2.Close())
-			require.NoError(t, sd3.Close())
+				require.NoError(t, sd1.Close())
+				require.NoError(t, sd2.Close())
+				require.NoError(t, sd3.Close())
 
-			srv.Shutdown()
-			lib.Pause(time.Second)
-		})
+				srv.Shutdown()
+				lib.Pause(time.Second)
+			},
+		)
 	})
 	t.Run("With ReSpawn after Stop", func(t *testing.T) {
 		ctx := context.TODO()
@@ -528,7 +573,12 @@ func TestClient(t *testing.T) {
 			fmt.Sprintf("%s:%d", node3Host, node3Port),
 		}
 
-		client, err := New(ctx, addresses)
+		nodes := make([]*Node, len(addresses))
+		for i, addr := range addresses {
+			nodes[i] = NewNode(addr)
+		}
+
+		client, err := New(ctx, nodes)
 		require.NoError(t, err)
 		require.NotNil(t, client)
 
@@ -571,29 +621,107 @@ func TestClient(t *testing.T) {
 		err = client.ReSpawn(ctx, actor)
 		require.NoError(t, err)
 
-		t.Cleanup(func() {
-			client.Close()
+		t.Cleanup(
+			func() {
+				client.Close()
 
-			require.NoError(t, sys1.Stop(ctx))
-			require.NoError(t, sys2.Stop(ctx))
-			require.NoError(t, sys3.Stop(ctx))
+				require.NoError(t, sys1.Stop(ctx))
+				require.NoError(t, sys2.Stop(ctx))
+				require.NoError(t, sys3.Stop(ctx))
 
-			require.NoError(t, sd1.Close())
-			require.NoError(t, sd2.Close())
-			require.NoError(t, sd3.Close())
+				require.NoError(t, sd1.Close())
+				require.NoError(t, sd2.Close())
+				require.NoError(t, sd3.Close())
 
-			srv.Shutdown()
-			lib.Pause(time.Second)
-		})
+				srv.Shutdown()
+				lib.Pause(time.Second)
+			},
+		)
+	})
+	t.Run("With Whereis", func(t *testing.T) {
+		ctx := context.TODO()
+
+		logger := log.DiscardLogger
+
+		// start the NATS server
+		srv := startNatsServer(t)
+		addr := srv.Addr().String()
+
+		sys1, node1Host, node1Port, sd1 := startNode(t, logger, "node1", addr)
+		sys2, node2Host, node2Port, sd2 := startNode(t, logger, "node2", addr)
+		sys3, node3Host, node3Port, sd3 := startNode(t, logger, "node3", addr)
+
+		// wait for a proper and clean setup of the cluster
+		lib.Pause(time.Second)
+
+		addresses := []string{
+			fmt.Sprintf("%s:%d", node1Host, node1Port),
+			fmt.Sprintf("%s:%d", node2Host, node2Port),
+			fmt.Sprintf("%s:%d", node3Host, node3Port),
+		}
+
+		nodes := make([]*Node, len(addresses))
+		for i, addr := range addresses {
+			nodes[i] = NewNode(addr)
+		}
+
+		client, err := New(ctx, nodes)
+		require.NoError(t, err)
+		require.NotNil(t, client)
+
+		kinds, err := client.Kinds(ctx)
+		require.NoError(t, err)
+		require.NotNil(t, kinds)
+		require.NotEmpty(t, kinds)
+		require.Len(t, kinds, 2)
+
+		expected := []string{
+			"actors.funcactor",
+			"client.testactor",
+		}
+
+		require.ElementsMatch(t, expected, kinds)
+		actor := NewActor("client.testactor").WithName("actorName")
+
+		err = client.Spawn(ctx, actor)
+		require.NoError(t, err)
+
+		lib.Pause(time.Second)
+
+		whereis, err := client.Whereis(ctx, actor)
+		require.NoError(t, err)
+		require.NotNil(t, whereis)
+		assert.Equal(t, actor.Name(), whereis.Name())
+
+		err = client.Stop(ctx, actor)
+		require.NoError(t, err)
+
+		t.Cleanup(
+			func() {
+				client.Close()
+
+				require.NoError(t, sys1.Stop(ctx))
+				require.NoError(t, sys2.Stop(ctx))
+				require.NoError(t, sys3.Stop(ctx))
+
+				require.NoError(t, sd1.Close())
+				require.NoError(t, sd2.Close())
+				require.NoError(t, sd3.Close())
+
+				srv.Shutdown()
+				lib.Pause(time.Second)
+			})
 	})
 }
 
 func startNatsServer(t *testing.T) *natsserver.Server {
 	t.Helper()
-	serv, err := natsserver.NewServer(&natsserver.Options{
-		Host: "127.0.0.1",
-		Port: -1,
-	})
+	serv, err := natsserver.NewServer(
+		&natsserver.Options{
+			Host: "127.0.0.1",
+			Port: -1,
+		},
+	)
 
 	require.NoError(t, err)
 
@@ -663,7 +791,8 @@ func startNode(t *testing.T, logger log.Logger, nodeName, serverAddr string) (sy
 		actors.WithReplyTimeout(time.Minute),
 		actors.WithRemoting(host, int32(remotePort)),
 		actors.WithPeerStateLoopInterval(100*time.Millisecond),
-		actors.WithCluster(clusterConfig))
+		actors.WithCluster(clusterConfig),
+	)
 
 	require.NotNil(t, system)
 	require.NoError(t, err)

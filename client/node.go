@@ -24,23 +24,53 @@
 
 package client
 
-import "sync"
+import (
+	"net"
+	nethttp "net/http"
+	"strconv"
+	"sync"
+
+	"github.com/tochemey/goakt/v2/actors"
+	"github.com/tochemey/goakt/v2/internal/http"
+	"github.com/tochemey/goakt/v2/internal/validation"
+)
+
+type NodeOption func(*Node)
+
+// WithWeight set the node weight
+func WithWeight(weight float64) NodeOption {
+	return func(n *Node) {
+		n.weight = weight
+	}
+}
 
 // Node represents the node in the cluster
 type Node struct {
 	address string
 	weight  float64
 	mutex   *sync.Mutex
+
+	client   *nethttp.Client
+	remoting *actors.Remoting
 }
 
 // NewNode creates an instance of Node
-func NewNode(address string, weight int) *Node {
-	return &Node{
-		address: address,
-		weight:  float64(weight),
-		mutex:   &sync.Mutex{},
+func NewNode(address string, opts ...NodeOption) *Node {
+	node := &Node{
+		address:  address,
+		mutex:    &sync.Mutex{},
+		client:   http.NewClient(),
+		remoting: actors.NewRemoting(),
+		weight:   0,
 	}
+	for _, opt := range opts {
+		opt(node)
+	}
+
+	return node
 }
+
+var _ validation.Validator = (*Node)(nil)
 
 // SetWeight sets the node weight.
 // This is thread safe
@@ -64,4 +94,49 @@ func (n *Node) Weight() float64 {
 	load := n.weight
 	n.mutex.Unlock()
 	return load
+}
+
+func (n *Node) Validate() error {
+	address := n.Address()
+	return validation.NewTCPAddressValidator(address).Validate()
+}
+
+// HTTPClient returns the underlying http client for the given node
+func (n *Node) HTTPClient() *nethttp.Client {
+	n.mutex.Lock()
+	client := n.client
+	n.mutex.Unlock()
+	return client
+}
+
+// Remoting returns the remoting instance
+func (n *Node) Remoting() *actors.Remoting {
+	n.mutex.Lock()
+	remoting := n.remoting
+	n.mutex.Unlock()
+	return remoting
+}
+
+// HTTPEndPoint returns the node remote endpoint
+func (n *Node) HTTPEndPoint() string {
+	n.mutex.Lock()
+	host, p, _ := net.SplitHostPort(n.address)
+	port, _ := strconv.Atoi(p)
+	n.mutex.Unlock()
+	return http.URL(host, port)
+}
+
+// Free closes the underlying http client connection of the given node
+func (n *Node) Free() {
+	n.HTTPClient().CloseIdleConnections()
+	n.Remoting().Close()
+}
+
+// HostAndPort returns the node host and port
+func (n *Node) HostAndPort() (string, int) {
+	n.mutex.Lock()
+	host, p, _ := net.SplitHostPort(n.address)
+	port, _ := strconv.Atoi(p)
+	n.mutex.Unlock()
+	return host, port
 }

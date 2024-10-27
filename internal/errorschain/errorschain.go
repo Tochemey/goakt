@@ -55,6 +55,12 @@ func (c *Chain) AddError(err error) *Chain {
 	return c
 }
 
+// AddErrors add a slice of errors to the chain. Remember the slice order does matter here
+func (c *Chain) AddErrors(errs ...error) *Chain {
+	c.errs = append(c.errs, errs...)
+	return c
+}
+
 // Error returns the error
 func (c *Chain) Error() error {
 	var err error
