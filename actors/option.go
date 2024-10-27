@@ -111,7 +111,6 @@ func WithRemoting(host string, port int32) Option {
 			a.remotingEnabled.Store(true)
 			a.port = port
 			a.host = host
-			a.remoting = NewRemoting()
 		},
 	)
 }

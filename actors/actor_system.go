@@ -1162,6 +1162,7 @@ func (x *actorSystem) enableRemoting(ctx context.Context) {
 		}
 	}()
 
+	x.remoting = NewRemoting()
 	x.logger.Info("remoting enabled...:)")
 }
 
