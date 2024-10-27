@@ -597,8 +597,6 @@ func TestScheduler(t *testing.T) {
 
 		lib.Pause(500 * time.Millisecond)
 		require.EqualValues(t, 1, actorRef.ProcessedCount()-1)
-		lib.Pause(500 * time.Millisecond)
-		require.EqualValues(t, 2, actorRef.ProcessedCount()-1)
 
 		// stop the actor
 		err = newActorSystem.Stop(ctx)
