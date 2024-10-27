@@ -654,12 +654,11 @@ func (pid *PID) BatchAsk(ctx context.Context, to *PID, messages ...proto.Message
 }
 
 // RemoteLookup look for an actor address on a remote node.
-func (pid *PID) RemoteLookup(ctx context.Context, host string, port int, name string, opts ...RemotingOption) (addr *goaktpb.Address, err error) {
+func (pid *PID) RemoteLookup(ctx context.Context, host string, port int, name string) (addr *goaktpb.Address, err error) {
 	if pid.remoting == nil {
 		return nil, ErrRemotingDisabled
 	}
 
-	pid.remoting.applyOptions(opts...)
 	remoteClient := pid.remoting.Client(host, port)
 	request := connect.NewRequest(
 		&internalpb.RemoteLookupRequest{
@@ -682,7 +681,7 @@ func (pid *PID) RemoteLookup(ctx context.Context, host string, port int, name st
 }
 
 // RemoteTell sends a message to an actor remotely without expecting any reply
-func (pid *PID) RemoteTell(ctx context.Context, to *address.Address, message proto.Message, opts ...RemotingOption) error {
+func (pid *PID) RemoteTell(ctx context.Context, to *address.Address, message proto.Message) error {
 	if pid.remoting == nil {
 		return ErrRemotingDisabled
 	}
@@ -692,7 +691,6 @@ func (pid *PID) RemoteTell(ctx context.Context, to *address.Address, message pro
 		return err
 	}
 
-	pid.remoting.applyOptions(opts...)
 	remoteService := pid.remoting.Client(to.GetHost(), int(to.GetPort()))
 
 	sender := &goaktpb.Address{
@@ -735,7 +733,7 @@ func (pid *PID) RemoteTell(ctx context.Context, to *address.Address, message pro
 }
 
 // RemoteAsk sends a synchronous message to another actor remotely and expect a response.
-func (pid *PID) RemoteAsk(ctx context.Context, to *address.Address, message proto.Message, opts ...RemotingOption) (response *anypb.Any, err error) {
+func (pid *PID) RemoteAsk(ctx context.Context, to *address.Address, message proto.Message) (response *anypb.Any, err error) {
 	if pid.remoting == nil {
 		return nil, ErrRemotingDisabled
 	}
@@ -745,7 +743,6 @@ func (pid *PID) RemoteAsk(ctx context.Context, to *address.Address, message prot
 		return nil, err
 	}
 
-	pid.remoting.applyOptions(opts...)
 	remoteService := pid.remoting.Client(to.GetHost(), int(to.GetPort()))
 
 	senderAddress := pid.Address()
@@ -803,12 +800,10 @@ func (pid *PID) RemoteAsk(ctx context.Context, to *address.Address, message prot
 
 // RemoteBatchTell sends a batch of messages to a remote actor in a way fire-and-forget manner
 // Messages are processed one after the other in the order they are sent.
-func (pid *PID) RemoteBatchTell(ctx context.Context, to *address.Address, messages []proto.Message, opts ...RemotingOption) error {
+func (pid *PID) RemoteBatchTell(ctx context.Context, to *address.Address, messages []proto.Message) error {
 	if pid.remoting == nil {
 		return ErrRemotingDisabled
 	}
-
-	pid.remoting.applyOptions(opts...)
 
 	if len(messages) == 1 {
 		return pid.RemoteTell(ctx, to, messages[0])
@@ -865,12 +860,10 @@ func (pid *PID) RemoteBatchTell(ctx context.Context, to *address.Address, messag
 // RemoteBatchAsk sends a synchronous bunch of messages to a remote actor and expect responses in the same order as the messages.
 // Messages are processed one after the other in the order they are sent.
 // This can hinder performance if it is not properly used.
-func (pid *PID) RemoteBatchAsk(ctx context.Context, to *address.Address, messages []proto.Message, opts ...RemotingOption) (responses []*anypb.Any, err error) {
+func (pid *PID) RemoteBatchAsk(ctx context.Context, to *address.Address, messages []proto.Message) (responses []*anypb.Any, err error) {
 	if pid.remoting == nil {
 		return nil, ErrRemotingDisabled
 	}
-
-	pid.remoting.applyOptions(opts...)
 
 	sender := &goaktpb.Address{
 		Host: pid.Address().Host(),
@@ -938,12 +931,11 @@ func (pid *PID) RemoteBatchAsk(ctx context.Context, to *address.Address, message
 }
 
 // RemoteStop stops an actor on a remote node
-func (pid *PID) RemoteStop(ctx context.Context, host string, port int, name string, opts ...RemotingOption) error {
+func (pid *PID) RemoteStop(ctx context.Context, host string, port int, name string) error {
 	if pid.remoting == nil {
 		return ErrRemotingDisabled
 	}
 
-	pid.remoting.applyOptions(opts...)
 	remoteService := pid.remoting.Client(host, port)
 	request := connect.NewRequest(
 		&internalpb.RemoteStopRequest{
@@ -964,12 +956,11 @@ func (pid *PID) RemoteStop(ctx context.Context, host string, port int, name stri
 }
 
 // RemoteSpawn creates an actor on a remote node. The given actor needs to be registered on the remote node using the Register method of ActorSystem
-func (pid *PID) RemoteSpawn(ctx context.Context, host string, port int, name, actorType string, opts ...RemotingOption) error {
+func (pid *PID) RemoteSpawn(ctx context.Context, host string, port int, name, actorType string) error {
 	if pid.remoting == nil {
 		return ErrRemotingDisabled
 	}
 
-	pid.remoting.applyOptions(opts...)
 	remoteService := pid.remoting.Client(host, port)
 	request := connect.NewRequest(
 		&internalpb.RemoteSpawnRequest{
@@ -996,12 +987,11 @@ func (pid *PID) RemoteSpawn(ctx context.Context, host string, port int, name, ac
 }
 
 // RemoteReSpawn restarts an actor on a remote node.
-func (pid *PID) RemoteReSpawn(ctx context.Context, host string, port int, name string, opts ...RemotingOption) error {
+func (pid *PID) RemoteReSpawn(ctx context.Context, host string, port int, name string) error {
 	if pid.remoting == nil {
 		return ErrRemotingDisabled
 	}
 
-	pid.remoting.applyOptions(opts...)
 	remoteService := pid.remoting.Client(host, port)
 	request := connect.NewRequest(
 		&internalpb.RemoteReSpawnRequest{

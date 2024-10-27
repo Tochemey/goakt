@@ -111,6 +111,7 @@ func WithRemoting(host string, port int32) Option {
 			a.remotingEnabled.Store(true)
 			a.port = port
 			a.host = host
+			a.remoting = NewRemoting()
 		},
 	)
 }
@@ -198,16 +199,6 @@ func WithJanitorInterval(interval time.Duration) Option {
 	return OptionFunc(
 		func(system *actorSystem) {
 			system.janitorInterval = interval
-		},
-	)
-}
-
-// WithTLS enables secured connection with this actor system
-// node when remoting or cluster operations are required
-func WithTLS(tls *TLS) Option {
-	return OptionFunc(
-		func(system *actorSystem) {
-			system.tls = tls
 		},
 	)
 }

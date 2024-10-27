@@ -382,16 +382,14 @@ func TestReceiveContext(t *testing.T) {
 			self:    pid1,
 		}
 
-		context.RemoteAsk(
-			address.From(
-				&goaktpb.Address{
-					Host: "127.0.0.1",
-					Port: int32(remotingPort),
-					Name: actorName2,
-					Id:   "",
-				},
-			), new(testpb.TestReply),
-		)
+		context.RemoteAsk(address.From(
+			&goaktpb.Address{
+				Host: "127.0.0.1",
+				Port: int32(remotingPort),
+				Name: actorName2,
+				Id:   "",
+			},
+		), new(testpb.TestReply))
 		require.Error(t, context.getError())
 		lib.Pause(time.Second)
 
@@ -521,16 +519,14 @@ func TestReceiveContext(t *testing.T) {
 		}
 
 		// send the message to the exchanger actor one using remote messaging
-		context.RemoteTell(
-			address.From(
-				&goaktpb.Address{
-					Host: "127.0.0.1",
-					Port: int32(remotingPort),
-					Name: actorName2,
-					Id:   "",
-				},
-			), new(testpb.TestRemoteSend),
-		)
+		context.RemoteTell(address.From(
+			&goaktpb.Address{
+				Host: "127.0.0.1",
+				Port: int32(remotingPort),
+				Name: actorName2,
+				Id:   "",
+			},
+		), new(testpb.TestRemoteSend))
 		require.Error(t, context.getError())
 		lib.Pause(time.Second)
 
@@ -1808,16 +1804,14 @@ func TestReceiveContext(t *testing.T) {
 		}
 
 		// send the message to the exchanger actor one using remote messaging
-		context.RemoteBatchTell(
-			address.From(
-				&goaktpb.Address{
-					Host: "127.0.0.1",
-					Port: int32(remotingPort),
-					Name: actorName2,
-					Id:   "",
-				},
-			), []proto.Message{new(testpb.TestRemoteSend)},
-		)
+		context.RemoteBatchTell(address.From(
+			&goaktpb.Address{
+				Host: "127.0.0.1",
+				Port: int32(remotingPort),
+				Name: actorName2,
+				Id:   "",
+			},
+		), []proto.Message{new(testpb.TestRemoteSend)})
 		require.Error(t, context.getError())
 		lib.Pause(time.Second)
 
@@ -1937,16 +1931,14 @@ func TestReceiveContext(t *testing.T) {
 			self:    pid1,
 		}
 
-		context.RemoteBatchAsk(
-			address.From(
-				&goaktpb.Address{
-					Host: "127.0.0.1",
-					Port: int32(remotingPort),
-					Name: actorName2,
-					Id:   "",
-				},
-			), []proto.Message{new(testpb.TestReply)},
-		)
+		context.RemoteBatchAsk(address.From(
+			&goaktpb.Address{
+				Host: "127.0.0.1",
+				Port: int32(remotingPort),
+				Name: actorName2,
+				Id:   "",
+			},
+		), []proto.Message{new(testpb.TestReply)})
 		require.Error(t, context.getError())
 		lib.Pause(time.Second)
 

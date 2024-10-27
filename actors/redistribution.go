@@ -154,22 +154,10 @@ func (x *actorSystem) redistribute(ctx context.Context, event *cluster.Event) er
 					}
 
 					x.logger.Debugf("re-creating actor=[(%s) of type (%s)]", actor.GetActorAddress().GetName(), actor.GetActorType())
-					remoteTLS, err := NewTLSFromPEMBlocks(
-						peerState.GetCertificate().GetRootCasPemBlock(),
-						peerState.GetCertificate().GetKeyPemBlock(),
-						peerState.GetCertificate().GetCertPemBlock(),
-					)
-					if err != nil {
-						return err
-					}
-
-					remoting := NewRemoting(WithRemotingTLS(remoteTLS))
-					if err := remoting.RemoteSpawn(ctx, peerState.GetHost(), int(peerState.GetRemotingPort()), actor.GetActorAddress().GetName(), actor.GetActorType()); err != nil {
+					if err := x.remoting.RemoteSpawn(ctx, peerState.GetHost(), int(peerState.GetRemotingPort()), actor.GetActorAddress().GetName(), actor.GetActorType()); err != nil {
 						x.logger.Error(err)
 						return err
 					}
-
-					remoting.Close()
 					x.logger.Debugf("actor=[(%s) of type (%s)] successfully re-created", actor.GetActorAddress().GetName(), actor.GetActorType())
 				}
 			}

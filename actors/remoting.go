@@ -42,28 +42,9 @@ import (
 	"github.com/tochemey/goakt/v2/internal/internalpb/internalpbconnect"
 )
 
-// RemotingOption sets the remoting option
-type RemotingOption func(*Remoting)
-
-// WithRemotingTLS states that the given remoting will use a secured connection
-// to interact with the given remote node
-func WithRemotingTLS(tls *TLS) RemotingOption {
-	return func(r *Remoting) {
-		r.tls = tls
-	}
-}
-
-// WithRemotingNoTLS states that remoting should not use any secure connection
-func WithRemotingNoTLS() RemotingOption {
-	return func(r *Remoting) {
-		r.tls = nil
-	}
-}
-
 // Remoting defines the Remoting APIs
 // This requires Remoting is enabled on the connected actor system
 type Remoting struct {
-	tls    *TLS
 	client *nethttp.Client
 }
 
@@ -73,22 +54,19 @@ type Remoting struct {
 // Make sure to call Close to free up resources otherwise you may be leaking socket connections
 //
 // One can also override the remoting option when calling any of the method for custom one.
-func NewRemoting(opts ...RemotingOption) *Remoting {
+func NewRemoting() *Remoting {
 	r := &Remoting{
 		client: http.NewClient(),
 	}
-	r.applyOptions(opts...)
 	return r
 }
 
 // RemoteTell sends a message to an actor remotely without expecting any reply
-func (r *Remoting) RemoteTell(ctx context.Context, to *address.Address, message proto.Message, opts ...RemotingOption) error {
+func (r *Remoting) RemoteTell(ctx context.Context, to *address.Address, message proto.Message) error {
 	marshaled, err := anypb.New(message)
 	if err != nil {
 		return ErrInvalidMessage(err)
 	}
-
-	r.applyOptions(opts...)
 
 	remoteClient := r.Client(to.GetHost(), int(to.GetPort()))
 	request := &internalpb.RemoteTellRequest{
@@ -119,13 +97,12 @@ func (r *Remoting) RemoteTell(ctx context.Context, to *address.Address, message 
 }
 
 // RemoteAsk sends a synchronous message to another actor remotely and expect a response.
-func (r *Remoting) RemoteAsk(ctx context.Context, to *address.Address, message proto.Message, timeout time.Duration, opts ...RemotingOption) (response *anypb.Any, err error) {
+func (r *Remoting) RemoteAsk(ctx context.Context, to *address.Address, message proto.Message, timeout time.Duration) (response *anypb.Any, err error) {
 	marshaled, err := anypb.New(message)
 	if err != nil {
 		return nil, ErrInvalidMessage(err)
 	}
 
-	r.applyOptions(opts...)
 	remoteClient := r.Client(to.GetHost(), int(to.GetPort()))
 	request := &internalpb.RemoteAskRequest{
 		RemoteMessage: &internalpb.RemoteMessage{
@@ -173,8 +150,7 @@ func (r *Remoting) RemoteAsk(ctx context.Context, to *address.Address, message p
 }
 
 // RemoteLookup look for an actor address on a remote node.
-func (r *Remoting) RemoteLookup(ctx context.Context, host string, port int, name string, opts ...RemotingOption) (addr *address.Address, err error) {
-	r.applyOptions(opts...)
+func (r *Remoting) RemoteLookup(ctx context.Context, host string, port int, name string) (addr *address.Address, err error) {
 	remoteClient := r.Client(host, port)
 	request := connect.NewRequest(
 		&internalpb.RemoteLookupRequest{
@@ -197,8 +173,7 @@ func (r *Remoting) RemoteLookup(ctx context.Context, host string, port int, name
 }
 
 // RemoteBatchTell sends bulk asynchronous messages to an actor
-func (r *Remoting) RemoteBatchTell(ctx context.Context, to *address.Address, messages []proto.Message, opts ...RemotingOption) error {
-	r.applyOptions(opts...)
+func (r *Remoting) RemoteBatchTell(ctx context.Context, to *address.Address, messages []proto.Message) error {
 	var requests []*internalpb.RemoteTellRequest
 	for _, message := range messages {
 		packed, err := anypb.New(message)
@@ -242,8 +217,7 @@ func (r *Remoting) RemoteBatchTell(ctx context.Context, to *address.Address, mes
 }
 
 // RemoteBatchAsk sends bulk messages to an actor with responses expected
-func (r *Remoting) RemoteBatchAsk(ctx context.Context, to *address.Address, messages []proto.Message, opts ...RemotingOption) (responses []*anypb.Any, err error) {
-	r.applyOptions(opts...)
+func (r *Remoting) RemoteBatchAsk(ctx context.Context, to *address.Address, messages []proto.Message) (responses []*anypb.Any, err error) {
 	var requests []*internalpb.RemoteAskRequest
 	for _, message := range messages {
 		packed, err := anypb.New(message)
@@ -303,8 +277,7 @@ func (r *Remoting) RemoteBatchAsk(ctx context.Context, to *address.Address, mess
 }
 
 // RemoteSpawn creates an actor on a remote node. The given actor needs to be registered on the remote node using the Register method of ActorSystem
-func (r *Remoting) RemoteSpawn(ctx context.Context, host string, port int, name, actorType string, opts ...RemotingOption) error {
-	r.applyOptions(opts...)
+func (r *Remoting) RemoteSpawn(ctx context.Context, host string, port int, name, actorType string) error {
 	remoteClient := r.Client(host, port)
 	request := connect.NewRequest(
 		&internalpb.RemoteSpawnRequest{
@@ -331,8 +304,7 @@ func (r *Remoting) RemoteSpawn(ctx context.Context, host string, port int, name,
 }
 
 // RemoteReSpawn restarts actor on a remote node.
-func (r *Remoting) RemoteReSpawn(ctx context.Context, host string, port int, name string, opts ...RemotingOption) error {
-	r.applyOptions(opts...)
+func (r *Remoting) RemoteReSpawn(ctx context.Context, host string, port int, name string) error {
 	remoteClient := r.Client(host, port)
 	request := connect.NewRequest(
 		&internalpb.RemoteReSpawnRequest{
@@ -354,8 +326,7 @@ func (r *Remoting) RemoteReSpawn(ctx context.Context, host string, port int, nam
 }
 
 // RemoteStop stops an actor on a remote node.
-func (r *Remoting) RemoteStop(ctx context.Context, host string, port int, name string, opts ...RemotingOption) error {
-	r.applyOptions(opts...)
+func (r *Remoting) RemoteStop(ctx context.Context, host string, port int, name string) error {
 	remoteClient := r.Client(host, port)
 	request := connect.NewRequest(
 		&internalpb.RemoteStopRequest{
@@ -383,23 +354,6 @@ func (r *Remoting) Close() {
 
 // Client returns a Remoting service client instance
 func (r *Remoting) Client(host string, port int) internalpbconnect.RemotingServiceClient {
-	var endpoint string
-	if r.tls != nil {
-		endpoint = http.SafeURL(host, port)
-		r.client = http.NewSafeClient(r.tls.ClientConfig())
-	} else {
-		endpoint = http.URL(host, port)
-		r.client = http.NewClient()
-	}
-
+	endpoint := http.URL(host, port)
 	return internalpbconnect.NewRemotingServiceClient(r.client, endpoint)
-}
-
-// applyOptions applies the various to the given Remoting instance
-func (r *Remoting) applyOptions(opts ...RemotingOption) {
-	if len(opts) > 0 {
-		for _, opt := range opts {
-			opt(r)
-		}
-	}
 }

@@ -26,7 +26,6 @@ package actors
 
 import (
 	"context"
-	"crypto/tls"
 	"errors"
 	"fmt"
 	"net"
@@ -118,15 +117,15 @@ type ActorSystem interface {
 	// This requires remoting to be enabled on the actor system.
 	// This will send the given message to the actor after the given interval specified
 	// The message will be sent once
-	RemoteScheduleOnce(ctx context.Context, message proto.Message, address *address.Address, interval time.Duration, opts ...RemotingOption) error
+	RemoteScheduleOnce(ctx context.Context, message proto.Message, address *address.Address, interval time.Duration) error
 	// RemoteSchedule schedules a message to be sent to a remote actor in the future.
 	// This requires remoting to be enabled on the actor system.
 	// This will send the given message to the actor after the given interval specified
-	RemoteSchedule(ctx context.Context, message proto.Message, address *address.Address, interval time.Duration, opts ...RemotingOption) error
+	RemoteSchedule(ctx context.Context, message proto.Message, address *address.Address, interval time.Duration) error
 	// ScheduleWithCron schedules a message to be sent to an actor in the future using a cron expression.
 	ScheduleWithCron(ctx context.Context, message proto.Message, pid *PID, cronExpression string) error
 	// RemoteScheduleWithCron schedules a message to be sent to an actor in the future using a cron expression.
-	RemoteScheduleWithCron(ctx context.Context, message proto.Message, address *address.Address, cronExpression string, opts ...RemotingOption) error
+	RemoteScheduleWithCron(ctx context.Context, message proto.Message, address *address.Address, cronExpression string) error
 	// PeerAddress returns the actor system address known in the cluster. That address is used by other nodes to communicate with the actor system.
 	// This address is empty when cluster mode is not activated
 	PeerAddress() string
@@ -184,16 +183,14 @@ type actorSystem struct {
 	// Specifies whether remoting is enabled.
 	// This allows to handle remote messaging
 	remotingEnabled atomic.Bool
+	remoting        *Remoting
 	// Specifies the remoting port
 	port int32
 	// Specifies the remoting host
 	host string
 	// Specifies the remoting server
-	server         *nethttp.Server
-	listener       net.Listener
-	secureServer   *nethttp.Server
-	secureListener net.Listener
-	tls            *TLS
+	server   *nethttp.Server
+	listener net.Listener
 
 	// cluster settings
 	clusterEnabled atomic.Bool
@@ -335,8 +332,8 @@ func (x *actorSystem) Schedule(ctx context.Context, message proto.Message, pid *
 // RemoteSchedule schedules a message to be sent to a remote actor in the future.
 // This requires remoting to be enabled on the actor system.
 // This will send the given message to the actor at the given interval specified
-func (x *actorSystem) RemoteSchedule(ctx context.Context, message proto.Message, address *address.Address, interval time.Duration, opts ...RemotingOption) error {
-	return x.scheduler.RemoteSchedule(ctx, message, address, interval, opts...)
+func (x *actorSystem) RemoteSchedule(ctx context.Context, message proto.Message, address *address.Address, interval time.Duration) error {
+	return x.scheduler.RemoteSchedule(ctx, message, address, interval)
 }
 
 // ScheduleOnce schedules a message that will be delivered to the receiver actor
@@ -350,8 +347,8 @@ func (x *actorSystem) ScheduleOnce(ctx context.Context, message proto.Message, p
 // This requires remoting to be enabled on the actor system.
 // This will send the given message to the actor after the given interval specified
 // The message will be sent once
-func (x *actorSystem) RemoteScheduleOnce(ctx context.Context, message proto.Message, address *address.Address, interval time.Duration, opts ...RemotingOption) error {
-	return x.scheduler.RemoteScheduleOnce(ctx, message, address, interval, opts...)
+func (x *actorSystem) RemoteScheduleOnce(ctx context.Context, message proto.Message, address *address.Address, interval time.Duration) error {
+	return x.scheduler.RemoteScheduleOnce(ctx, message, address, interval)
 }
 
 // ScheduleWithCron schedules a message to be sent to an actor in the future using a cron expression.
@@ -360,8 +357,8 @@ func (x *actorSystem) ScheduleWithCron(ctx context.Context, message proto.Messag
 }
 
 // RemoteScheduleWithCron schedules a message to be sent to an actor in the future using a cron expression.
-func (x *actorSystem) RemoteScheduleWithCron(ctx context.Context, message proto.Message, address *address.Address, cronExpression string, opts ...RemotingOption) error {
-	return x.scheduler.RemoteScheduleWithCron(ctx, message, address, cronExpression, opts...)
+func (x *actorSystem) RemoteScheduleWithCron(ctx context.Context, message proto.Message, address *address.Address, cronExpression string) error {
+	return x.scheduler.RemoteScheduleWithCron(ctx, message, address, cronExpression)
 }
 
 // Subscribe help receive dead letters whenever there are available
@@ -687,15 +684,14 @@ func (x *actorSystem) Stop(ctx context.Context) error {
 	defer cancel()
 
 	if x.remotingEnabled.Load() {
+		x.remoting.Close()
 		if err := x.shutdownHTTPServer(ctx); err != nil {
 			return err
 		}
 
 		x.remotingEnabled.Store(false)
 		x.server = nil
-		x.secureServer = nil
 		x.listener = nil
-		x.secureListener = nil
 	}
 
 	if x.clusterEnabled.Load() {
@@ -1436,17 +1432,11 @@ func (x *actorSystem) actorAddress(name string) *address.Address {
 
 // startHTTPServer starts the appropriate http server
 func (x *actorSystem) startHTTPServer() error {
-	if x.tls != nil {
-		return x.secureServer.Serve(x.secureListener)
-	}
 	return x.server.Serve(x.listener)
 }
 
 // shutdownHTTPServer stops the appropriate http server
 func (x *actorSystem) shutdownHTTPServer(ctx context.Context) error {
-	if x.tls != nil {
-		return x.secureServer.Shutdown(ctx)
-	}
 	return x.server.Shutdown(ctx)
 }
 
@@ -1458,14 +1448,6 @@ func (x *actorSystem) configureServer(ctx context.Context, mux *nethttp.ServeMux
 	lnr, err := net.Listen("tcp", hostPort)
 	if err != nil {
 		return err
-	}
-
-	// set the http TLS server
-	if x.tls != nil {
-		x.secureServer = httpServer
-		x.secureServer.Handler = mux
-		x.secureListener = tls.NewListener(lnr, x.tls.ServerConfig())
-		return nil
 	}
 
 	// set the http server

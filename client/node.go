@@ -37,14 +37,6 @@ import (
 
 type NodeOption func(*Node)
 
-// WithTLS enables secured connection with this actor system
-// node when remoting or cluster operations are required
-func WithTLS(tls *actors.TLS) NodeOption {
-	return func(n *Node) {
-		n.tls = tls
-	}
-}
-
 // WithWeight set the node weight
 func WithWeight(weight float64) NodeOption {
 	return func(n *Node) {
@@ -55,7 +47,6 @@ func WithWeight(weight float64) NodeOption {
 // Node represents the node in the cluster
 type Node struct {
 	address string
-	tls     *actors.TLS
 	weight  float64
 	mutex   *sync.Mutex
 
@@ -74,11 +65,6 @@ func NewNode(address string, opts ...NodeOption) *Node {
 	}
 	for _, opt := range opts {
 		opt(node)
-	}
-
-	if node.tls != nil {
-		node.client = http.NewSafeClient(node.tls.ClientConfig())
-		node.remoting = actors.NewRemoting(actors.WithRemotingTLS(node.tls))
 	}
 
 	return node
@@ -134,13 +120,9 @@ func (n *Node) Remoting() *actors.Remoting {
 // HTTPEndPoint returns the node remote endpoint
 func (n *Node) HTTPEndPoint() string {
 	n.mutex.Lock()
-	tls := n.tls
 	host, p, _ := net.SplitHostPort(n.address)
 	port, _ := strconv.Atoi(p)
 	n.mutex.Unlock()
-	if tls == nil {
-		return http.URL(host, port)
-	}
 	return http.SafeURL(host, port)
 }
 
