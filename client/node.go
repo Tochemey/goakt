@@ -123,7 +123,7 @@ func (n *Node) HTTPEndPoint() string {
 	host, p, _ := net.SplitHostPort(n.address)
 	port, _ := strconv.Atoi(p)
 	n.mutex.Unlock()
-	return http.SafeURL(host, port)
+	return http.URL(host, port)
 }
 
 // Free closes the underlying http client connection of the given node
