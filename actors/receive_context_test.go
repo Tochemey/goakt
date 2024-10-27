@@ -1701,6 +1701,62 @@ func TestReceiveContext(t *testing.T) {
 			},
 		)
 	})
+	t.Run("With RemoteBatchAsk when remoting is not enabled", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// generate the remoting port
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "127.0.0.1"
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithPassivationDisabled(),
+			WithRemoting(host, int32(remotingPort)),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		// create test actor
+		tester := "test"
+		testActor := newTestActor()
+		testerRef, err := sys.Spawn(ctx, tester, testActor)
+		require.NoError(t, err)
+		require.NotNil(t, testerRef)
+
+		// create an instance of receive context
+		context := &ReceiveContext{
+			ctx:    ctx,
+			sender: NoSender,
+			self:   testerRef,
+		}
+
+		testerRef.remoting = nil
+		// get the address of the exchanger actor one
+		testerAddr := context.RemoteLookup(host, remotingPort, tester)
+		// send the message to t exchanger actor one using remote messaging
+		messages := []proto.Message{new(testpb.TestReply), new(testpb.TestReply), new(testpb.TestReply)}
+		replies := context.RemoteBatchAsk(address.From(testerAddr), messages)
+		err = context.getError()
+		require.Error(t, err)
+		require.Empty(t, replies)
+		assert.EqualError(t, err, ErrRemotingDisabled.Error())
+
+		t.Cleanup(
+			func() {
+				assert.NoError(t, testerRef.Shutdown(ctx))
+				assert.NoError(t, sys.Stop(ctx))
+			},
+		)
+	})
 	t.Run("With failed RemoteBatchTell", func(t *testing.T) {
 		// create the context
 		ctx := context.TODO()
@@ -1768,6 +1824,65 @@ func TestReceiveContext(t *testing.T) {
 		t.Cleanup(
 			func() {
 				assert.NoError(t, pid1.Shutdown(ctx))
+				assert.NoError(t, sys.Stop(ctx))
+			},
+		)
+	})
+	t.Run("With RemoteBatchTell when remoting is not enabled", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// generate the remoting port
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "127.0.0.1"
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithPassivationDisabled(),
+			WithRemoting(host, int32(remotingPort)),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		// create test actor
+		tester := "test"
+		testActor := newTestActor()
+		testerRef, err := sys.Spawn(ctx, tester, testActor)
+		require.NoError(t, err)
+		require.NotNil(t, testerRef)
+
+		// create an instance of receive context
+		context := &ReceiveContext{
+			ctx:    ctx,
+			sender: NoSender,
+			self:   testerRef,
+		}
+
+		// get the address of the exchanger actor one
+		testerAddr := context.RemoteLookup(host, remotingPort, tester)
+
+		testerRef.remoting = nil
+
+		// send the message to t exchanger actor one using remote messaging
+		messages := []proto.Message{new(testpb.TestSend), new(testpb.TestSend), new(testpb.TestSend)}
+		context.RemoteBatchTell(address.From(testerAddr), messages)
+		err = context.getError()
+		require.Error(t, err)
+		assert.EqualError(t, err, ErrRemotingDisabled.Error())
+
+		lib.Pause(time.Second)
+
+		t.Cleanup(
+			func() {
+				assert.NoError(t, testerRef.Shutdown(ctx))
 				assert.NoError(t, sys.Stop(ctx))
 			},
 		)
