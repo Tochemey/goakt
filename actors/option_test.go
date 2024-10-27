@@ -41,6 +41,8 @@ func TestOption(t *testing.T) {
 	atomicTrue.Store(true)
 	clusterConfig := NewClusterConfig()
 	hasher := hash.DefaultHasher()
+	mtls := &TLS{}
+
 	testCases := []struct {
 		name     string
 		option   Option
@@ -115,6 +117,11 @@ func TestOption(t *testing.T) {
 			name:     "WithGCInterval",
 			option:   WithJanitorInterval(2 * time.Second),
 			expected: actorSystem{janitorInterval: 2. * time.Second},
+		},
+		{
+			name:     "WithTLS",
+			option:   WithTLS(mtls),
+			expected: actorSystem{tls: mtls},
 		},
 	}
 	for _, tc := range testCases {
