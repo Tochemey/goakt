@@ -25,42 +25,28 @@
 package cluster
 
 import (
-	"encoding/json"
+	"github.com/groupcache/groupcache-go/v3"
 
-	"github.com/hashicorp/memberlist"
+	"github.com/tochemey/goakt/v2/log"
 )
 
-// groupDelegate implements memberlist Delegate
-type groupDelegate struct {
-	meta []byte
+type cacheLogger struct {
+	logger log.Logger
 }
 
-// newGroupDelegate creates an instance of groupDelegate
-func (g *Group) newGroupDelegate() (*groupDelegate, error) {
-	node := g.node
-	bytea, err := json.Marshal(node)
-	if err != nil {
-		return nil, err
-	}
-	return &groupDelegate{bytea}, nil
+// enforce compilation error
+var _ groupcache.Logger = (*cacheLogger)(nil)
+
+func newCacheLogger(logger log.Logger) *cacheLogger {
+	return &cacheLogger{logger: logger}
 }
 
-func (deletgate *groupDelegate) NodeMeta(limit int) []byte {
-	return deletgate.meta
+// Error implements groupcache.Logger.
+func (x *cacheLogger) Error(msg string, args ...any) {
+	x.logger.Errorf(msg, args...)
 }
 
-func (deletgate *groupDelegate) NotifyMsg(bytes []byte) {
+// Info implements groupcache.Logger.
+func (x *cacheLogger) Info(msg string, args ...any) {
+	x.logger.Infof(msg, args...)
 }
-
-func (deletgate *groupDelegate) GetBroadcasts(overhead, limit int) [][]byte {
-	return nil
-}
-
-func (deletgate *groupDelegate) LocalState(join bool) []byte {
-	return nil
-}
-
-func (deletgate *groupDelegate) MergeRemoteState(buf []byte, join bool) {
-}
-
-var _ memberlist.Delegate = (*groupDelegate)(nil)
