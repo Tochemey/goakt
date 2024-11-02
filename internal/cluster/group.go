@@ -247,6 +247,8 @@ func (g *Group) Stop(ctx context.Context) error {
 	// add some logging information
 	logger.Infof("Stopping GoAkt cluster Node=(%s)....🤔", g.name)
 
+	g.started.Store(false)
+
 	// create a cancellation context
 	ctx, cancelFn := context.WithTimeout(ctx, g.shutdownTimeout)
 	defer cancelFn()
