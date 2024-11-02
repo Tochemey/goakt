@@ -42,6 +42,8 @@ type Node struct {
 	PeersPort int
 	// RemotingPort
 	RemotingPort int
+	// Birthdate
+	Birthdate int64
 }
 
 // PeersAddress returns address the node's peers will use to connect to

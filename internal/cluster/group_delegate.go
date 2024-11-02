@@ -24,15 +24,43 @@
 
 package cluster
 
-import "github.com/pkg/errors"
+import (
+	"encoding/json"
 
-var (
-	// ErrActorNotFound is return when an actor is not found
-	ErrActorNotFound = errors.New("actor not found")
-	// ErrPeerSyncNotFound is returned when a peerSync record is not found
-	ErrPeerSyncNotFound = errors.New("peerSync record not found")
-	// ErrClusterQuorum means that the cluster could not reach a healthy numbers of members to operate.
-	ErrClusterQuorum = errors.New("cannot be reached cluster quorum to operate")
-	// ErrKeyNotFound means that the given does not exist in the cluster
-	ErrKeyNotFound = errors.New("key not found")
+	"github.com/hashicorp/memberlist"
 )
+
+// groupDelegate implements memberlist Delegate
+type groupDelegate struct {
+	meta []byte
+}
+
+// newGroupDelegate creates an instance of groupDelegate
+func (g *Group) newGroupDelegate() (*groupDelegate, error) {
+	node := g.node
+	bytea, err := json.Marshal(node)
+	if err != nil {
+		return nil, err
+	}
+	return &groupDelegate{bytea}, nil
+}
+
+func (deletgate *groupDelegate) NodeMeta(limit int) []byte {
+	return deletgate.meta
+}
+
+func (deletgate *groupDelegate) NotifyMsg(bytes []byte) {
+}
+
+func (deletgate *groupDelegate) GetBroadcasts(overhead, limit int) [][]byte {
+	return nil
+}
+
+func (deletgate *groupDelegate) LocalState(join bool) []byte {
+	return nil
+}
+
+func (deletgate *groupDelegate) MergeRemoteState(buf []byte, join bool) {
+}
+
+var _ memberlist.Delegate = (*groupDelegate)(nil)

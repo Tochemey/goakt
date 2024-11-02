@@ -72,7 +72,7 @@ func (m *syncMap) Remove(addr *address.Address) {
 // List returns all actors as a slice
 func (m *syncMap) List() []*PID {
 	var out []*PID
-	m.Range(func(_, value interface{}) bool {
+	m.Range(func(_, value any) bool {
 		out = append(out, value.(*PID))
 		return !(m.Size() == len(out))
 	})
@@ -84,7 +84,7 @@ func (m *syncMap) List() []*PID {
 func (m *syncMap) Reset() {
 	// TODO: remove this line when migrated to go 1.23
 	//m.Clear()
-	m.Range(func(key interface{}, value interface{}) bool {
+	m.Range(func(key any, value any) bool {
 		m.Delete(key)
 		return true
 	})

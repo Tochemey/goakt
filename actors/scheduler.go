@@ -343,14 +343,14 @@ func (x *scheduler) RemoteScheduleWithCron(ctx context.Context, message proto.Me
 func (x *scheduler) distributeJobKeyOrNot(ctx context.Context, job *quartz.JobDetail) error {
 	jobKey := job.JobKey().String()
 	if x.cluster != nil {
-		ok, err := x.cluster.KeyExists(ctx, jobKey)
+		ok, err := x.cluster.JobKeyExists(ctx, jobKey)
 		if err != nil {
 			return err
 		}
 		if ok {
 			return errSkipJobScheduling
 		}
-		if err := x.cluster.SetKey(ctx, jobKey); err != nil {
+		if err := x.cluster.SetJobKey(ctx, jobKey); err != nil {
 			return err
 		}
 	}

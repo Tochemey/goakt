@@ -93,12 +93,12 @@ type Interface interface {
 	GetActor(ctx context.Context, actorName string) (*internalpb.ActorRef, error)
 	// GetPartition returns the partition where a given actor is stored
 	GetPartition(actorName string) int
-	// SetKey sets a given key to the cluster
-	SetKey(ctx context.Context, key string) error
-	// KeyExists checks the existence of a given key
-	KeyExists(ctx context.Context, key string) (bool, error)
-	// UnsetKey unsets the already set given key in the cluster
-	UnsetKey(ctx context.Context, key string) error
+	// SetJobKey sets a given key to the cluster
+	SetJobKey(ctx context.Context, key string) error
+	// JobKeyExists checks the existence of a given key
+	JobKeyExists(ctx context.Context, key string) (bool, error)
+	// UnsetJobKey unsets the already set given key in the cluster
+	UnsetJobKey(ctx context.Context, key string) error
 	// RemoveActor removes a given actor from the cluster.
 	// An actor is removed from the cluster when this actor has been passivated.
 	RemoveActor(ctx context.Context, actorName string) error
@@ -518,8 +518,8 @@ func (n *Engine) RemoveActor(ctx context.Context, actorName string) error {
 	return nil
 }
 
-// SetKey sets a given key to the cluster
-func (n *Engine) SetKey(ctx context.Context, key string) error {
+// SetJobKey sets a given key to the cluster
+func (n *Engine) SetJobKey(ctx context.Context, key string) error {
 	ctx, cancelFn := context.WithTimeout(ctx, n.writeTimeout)
 	defer cancelFn()
 
@@ -539,8 +539,8 @@ func (n *Engine) SetKey(ctx context.Context, key string) error {
 	return nil
 }
 
-// KeyExists checks the existence of a given key
-func (n *Engine) KeyExists(ctx context.Context, key string) (bool, error) {
+// JobKeyExists checks the existence of a given key
+func (n *Engine) JobKeyExists(ctx context.Context, key string) (bool, error) {
 	ctx, cancelFn := context.WithTimeout(ctx, n.readTimeout)
 	defer cancelFn()
 
@@ -564,8 +564,8 @@ func (n *Engine) KeyExists(ctx context.Context, key string) (bool, error) {
 	return resp.Bool()
 }
 
-// UnsetKey unsets the already set given key in the cluster
-func (n *Engine) UnsetKey(ctx context.Context, key string) error {
+// UnsetJobKey unsets the already set given key in the cluster
+func (n *Engine) UnsetJobKey(ctx context.Context, key string) error {
 	logger := n.logger
 
 	n.Lock()

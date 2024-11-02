@@ -372,7 +372,7 @@ func (_c *Interface_IsLeader_Call) RunAndReturn(run func(context.Context) bool) 
 }
 
 // KeyExists provides a mock function with given fields: ctx, key
-func (_m *Interface) KeyExists(ctx context.Context, key string) (bool, error) {
+func (_m *Interface) JobKeyExists(ctx context.Context, key string) (bool, error) {
 	ret := _m.Called(ctx, key)
 
 	if len(ret) == 0 {
@@ -626,7 +626,7 @@ func (_c *Interface_RemoveActor_Call) RunAndReturn(run func(context.Context, str
 }
 
 // SetKey provides a mock function with given fields: ctx, key
-func (_m *Interface) SetKey(ctx context.Context, key string) error {
+func (_m *Interface) SetJobKey(ctx context.Context, key string) error {
 	ret := _m.Called(ctx, key)
 
 	if len(ret) == 0 {
@@ -765,7 +765,7 @@ func (_c *Interface_Stop_Call) RunAndReturn(run func(context.Context) error) *In
 }
 
 // UnsetKey provides a mock function with given fields: ctx, key
-func (_m *Interface) UnsetKey(ctx context.Context, key string) error {
+func (_m *Interface) UnsetJobKey(ctx context.Context, key string) error {
 	ret := _m.Called(ctx, key)
 
 	if len(ret) == 0 {

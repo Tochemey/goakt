@@ -24,15 +24,29 @@
 
 package cluster
 
-import "github.com/pkg/errors"
+import (
+	"github.com/groupcache/groupcache-go/v3"
 
-var (
-	// ErrActorNotFound is return when an actor is not found
-	ErrActorNotFound = errors.New("actor not found")
-	// ErrPeerSyncNotFound is returned when a peerSync record is not found
-	ErrPeerSyncNotFound = errors.New("peerSync record not found")
-	// ErrClusterQuorum means that the cluster could not reach a healthy numbers of members to operate.
-	ErrClusterQuorum = errors.New("cannot be reached cluster quorum to operate")
-	// ErrKeyNotFound means that the given does not exist in the cluster
-	ErrKeyNotFound = errors.New("key not found")
+	"github.com/tochemey/goakt/v2/log"
 )
+
+type groupLogger struct {
+	logger log.Logger
+}
+
+// enforce compilation error
+var _ groupcache.Logger = (*groupLogger)(nil)
+
+func newGroupLogger(logger log.Logger) *groupLogger {
+	return &groupLogger{logger: logger}
+}
+
+// Error implements groupcache.Logger.
+func (g *groupLogger) Error(msg string, args ...any) {
+	g.logger.Errorf(msg, args...)
+}
+
+// Info implements groupcache.Logger.
+func (g *groupLogger) Info(msg string, args ...any) {
+	g.logger.Infof(msg, args...)
+}

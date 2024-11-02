@@ -220,18 +220,18 @@ func TestSingleNode(t *testing.T) {
 
 		// set key
 		key := "my-key"
-		require.NoError(t, cluster.SetKey(ctx, key))
+		require.NoError(t, cluster.SetJobKey(ctx, key))
 
-		isSet, err := cluster.KeyExists(ctx, key)
+		isSet, err := cluster.JobKeyExists(ctx, key)
 		require.NoError(t, err)
 		assert.True(t, isSet)
 
 		// unset the key
-		err = cluster.UnsetKey(ctx, key)
+		err = cluster.UnsetJobKey(ctx, key)
 		require.NoError(t, err)
 
 		// check the key existence
-		isSet, err = cluster.KeyExists(ctx, key)
+		isSet, err = cluster.JobKeyExists(ctx, key)
 		require.NoError(t, err)
 		assert.False(t, isSet)
 
