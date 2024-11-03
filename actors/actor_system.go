@@ -32,6 +32,7 @@ import (
 	nethttp "net/http"
 	"os"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -632,6 +633,7 @@ func (x *actorSystem) RemoteActor(ctx context.Context, actorName string) (addr *
 
 // Start starts the actor system
 func (x *actorSystem) Start(ctx context.Context) error {
+	x.logger.Infof("GoAkt on %s/%s %s", runtime.GOOS, runtime.GOARCH, runtime.Version())
 	x.started.Store(true)
 
 	if x.remotingEnabled.Load() {
@@ -1073,6 +1075,7 @@ func (x *actorSystem) enableClustering(ctx context.Context) error {
 		DiscoveryPort: x.clusterConfig.DiscoveryPort(),
 		PeersPort:     x.clusterConfig.PeersPort(),
 		RemotingPort:  int(x.port),
+		Birthdate:     time.Now().UnixNano(),
 	}
 
 	clusterEngine, err := cluster.NewEngine(

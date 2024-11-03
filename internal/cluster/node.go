@@ -33,7 +33,6 @@ import (
 	"sort"
 	"strconv"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	goset "github.com/deckarep/golang-set/v2"
@@ -43,6 +42,7 @@ import (
 	"github.com/groupcache/groupcache-go/v3/transport/peer"
 	"github.com/hashicorp/memberlist"
 	"github.com/reugn/go-quartz/logger"
+	"go.uber.org/atomic"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
@@ -138,7 +138,7 @@ func NewNode(name string, disco discovery.Provider, host *discovery.Node, opts .
 		hasher:                hash.DefaultHasher(),
 		events:                make(chan *Event, 20),
 		minimumPeersQuorum:    1,
-		replicaCount:          50,
+		replicaCount:          1,
 		maxJoinTimeout:        time.Second,
 		maxJoinRetryInterval:  time.Second,
 		maxJoinAttempts:       10,
@@ -149,6 +149,7 @@ func NewNode(name string, disco discovery.Provider, host *discovery.Node, opts .
 		peerStatesGroupLock:   new(sync.RWMutex),
 		stopEventsListenerSig: make(chan types.Unit, 1),
 		jobsCache:             new(sync.Map),
+		started:               atomic.NewBool(false),
 	}
 
 	for _, opt := range opts {
@@ -156,7 +157,6 @@ func NewNode(name string, disco discovery.Provider, host *discovery.Node, opts .
 	}
 
 	// set the host startNode
-	host.Birthdate = time.Now().UnixNano()
 	n.node = host
 
 	return n
@@ -226,6 +226,14 @@ func (n *Node) Start(ctx context.Context) error {
 		Error(); err != nil {
 		logger.Error(fmt.Errorf("failed to create GoAkt cluster actors groups: %w", err))
 		return err
+	}
+
+	// set the peer state
+	n.peerState = &internalpb.PeerState{
+		Host:         n.Host(),
+		RemotingPort: int32(n.node.RemotingPort),
+		PeersPort:    int32(n.node.PeersPort),
+		Actors:       []*internalpb.ActorRef{},
 	}
 
 	n.started.Store(true)
@@ -478,6 +486,11 @@ func (n *Node) Peers(ctx context.Context) ([]*Peer, error) {
 		}
 	}
 
+	// no peers found
+	if len(nodes) == 0 {
+		return nil, nil
+	}
+
 	sort.Slice(nodes, func(i int, j int) bool {
 		return nodes[i].Birthdate < nodes[j].Birthdate
 	})
@@ -661,7 +674,7 @@ func (n *Node) joinCluster(ctx context.Context) error {
 
 	if len(peers) > 0 {
 		// check whether the cluster quorum is met to operate
-		if n.minimumPeersQuorum < uint(len(peers)) {
+		if n.minimumPeersQuorum > uint(len(peers)) {
 			return ErrClusterQuorum
 		}
 
