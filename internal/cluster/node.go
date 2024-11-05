@@ -248,7 +248,7 @@ func (n *Node) RemotingPort() int {
 }
 
 // PutActor pushes to the cluster the peer sync request
-func (n *Node) PutActor(ctx context.Context, actor *internalpb.ActorRef) error {
+func (n *Node) PutActor(_ context.Context, actor *internalpb.ActorRef) error {
 	logger := n.logger
 	logger.Infof("synchronization peer (%s)", n.node.PeersAddress())
 	n.actorsGroupLock.Lock()
@@ -259,7 +259,7 @@ func (n *Node) PutActor(ctx context.Context, actor *internalpb.ActorRef) error {
 }
 
 // GetActor fetches an actor from the Node
-func (n *Node) GetActor(ctx context.Context, actorName string) (*internalpb.ActorRef, error) {
+func (n *Node) GetActor(_ context.Context, actorName string) (*internalpb.ActorRef, error) {
 	logger := n.logger
 	n.actorsGroupLock.Lock()
 	logger.Infof("[%s] retrieving actor (%s) from the cluster", n.node.PeersAddress(), actorName)
@@ -274,14 +274,13 @@ func (n *Node) GetActor(ctx context.Context, actorName string) (*internalpb.Acto
 }
 
 // GetPartition returns the partition where a given actor is stored
-// nolint
-func (n *Node) GetPartition(actorName string) int {
+func (n *Node) GetPartition(string) int {
 	//TODO implement me
 	return 0
 }
 
 // SetJobKey sets a given key to the cluster
-func (n *Node) SetJobKey(ctx context.Context, key string) error {
+func (n *Node) SetJobKey(_ context.Context, key string) error {
 	logger := n.logger
 	logger.Infof("replicating Job key (%s)", key)
 	n.jobsGroupLock.Lock()
@@ -292,7 +291,7 @@ func (n *Node) SetJobKey(ctx context.Context, key string) error {
 }
 
 // JobKeyExists checks the existence of a given key
-func (n *Node) JobKeyExists(ctx context.Context, key string) (bool, error) {
+func (n *Node) JobKeyExists(_ context.Context, key string) (bool, error) {
 	logger := n.logger
 	logger.Infof("checking Job key (%s) existence in the cluster", key)
 	n.jobsGroupLock.Lock()
@@ -302,7 +301,7 @@ func (n *Node) JobKeyExists(ctx context.Context, key string) (bool, error) {
 }
 
 // UnsetJobKey unsets the already set given key in the cluster
-func (n *Node) UnsetJobKey(ctx context.Context, key string) error {
+func (n *Node) UnsetJobKey(_ context.Context, key string) error {
 	logger := n.logger
 	logger.Infof("unsetting Job key (%s)", key)
 	n.jobsGroupLock.Lock()
@@ -314,7 +313,7 @@ func (n *Node) UnsetJobKey(ctx context.Context, key string) error {
 
 // RemoveActor removes a given actor from the cluster.
 // An actor is removed from the cluster when this actor has been passivated.
-func (n *Node) RemoveActor(ctx context.Context, actorName string) error {
+func (n *Node) RemoveActor(_ context.Context, actorName string) error {
 	logger := n.logger
 	logger.Infof("removing actor (%s) from cluster", actorName)
 	n.actorsGroupLock.Lock()
@@ -325,7 +324,7 @@ func (n *Node) RemoveActor(ctx context.Context, actorName string) error {
 }
 
 // GetState fetches a given peer state
-func (n *Node) GetState(ctx context.Context, peerAddress string) (*internalpb.PeerState, error) {
+func (n *Node) GetState(_ context.Context, peerAddress string) (*internalpb.PeerState, error) {
 	logger := n.logger
 	logger.Infof("[%s] retrieving peer (%s) sync record", n.node.PeersAddress(), peerAddress)
 	n.peerStatesGroupLock.Lock()
@@ -356,8 +355,7 @@ func (n *Node) AdvertisedAddress() string {
 }
 
 // Peers returns a channel containing the list of peers at a given time
-// nolint
-func (n *Node) Peers(ctx context.Context) ([]*Peer, error) {
+func (n *Node) Peers(context.Context) ([]*Peer, error) {
 	n.lock.Lock()
 	mnodes := n.mlist.Members()
 	n.lock.Unlock()
@@ -398,8 +396,7 @@ func (n *Node) Peers(ctx context.Context) ([]*Peer, error) {
 
 // IsLeader states whether the given cluster node is a leader or not at a given
 // point in time in the cluster
-// nolint
-func (n *Node) IsLeader(ctx context.Context) bool {
+func (n *Node) IsLeader(context.Context) bool {
 	n.lock.Lock()
 	mnodes := n.mlist.Members()
 	n.lock.Unlock()
