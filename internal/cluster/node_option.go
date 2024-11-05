@@ -27,7 +27,6 @@ package cluster
 import (
 	"time"
 
-	"github.com/tochemey/goakt/v2/hash"
 	"github.com/tochemey/goakt/v2/log"
 )
 
@@ -54,22 +53,6 @@ func WithNodeLogger(logger log.Logger) NodeOption {
 	})
 }
 
-// WithNodeWriteTimeout sets the Node write timeout.
-// This timeout specifies the timeout of a data replication
-func WithNodeWriteTimeout(timeout time.Duration) NodeOption {
-	return NodeOptionFunc(func(node *Node) {
-		node.writeTimeout = timeout
-	})
-}
-
-// WithNodeReadTimeout sets the Node read timeout.
-// This timeout specifies the timeout of a data retrieval
-func WithNodeReadTimeout(timeout time.Duration) NodeOption {
-	return NodeOptionFunc(func(node *Node) {
-		node.readTimeout = timeout
-	})
-}
-
 // WithNodeShutdownTimeout sets the Node shutdown timeout.
 func WithNodeShutdownTimeout(timeout time.Duration) NodeOption {
 	return NodeOptionFunc(func(node *Node) {
@@ -77,24 +60,10 @@ func WithNodeShutdownTimeout(timeout time.Duration) NodeOption {
 	})
 }
 
-// WithNodeHasher sets the custom hasher
-func WithNodeHasher(hasher hash.Hasher) NodeOption {
-	return NodeOptionFunc(func(node *Node) {
-		node.hasher = hasher
-	})
-}
-
 // WithNodesMinimumPeersQuorum sets the minimum number of nodes to form a quorum
 func WithNodesMinimumPeersQuorum(minimumQuorum uint) NodeOption {
 	return NodeOptionFunc(func(node *Node) {
 		node.minimumPeersQuorum = minimumQuorum
-	})
-}
-
-// WithNodeReplicaCount sets replica count for the node
-func WithNodeReplicaCount(count uint) NodeOption {
-	return NodeOptionFunc(func(node *Node) {
-		node.replicaCount = count
 	})
 }
 
@@ -116,5 +85,12 @@ func WithNodeMaxJoinAttempts(attempts int) NodeOption {
 func WithNodeMaxJoinRetryInterval(retryInterval time.Duration) NodeOption {
 	return NodeOptionFunc(func(node *Node) {
 		node.maxJoinRetryInterval = retryInterval
+	})
+}
+
+// WithNodeSyncInterval sets the sync interval
+func WithNodeSyncInterval(interval time.Duration) NodeOption {
+	return NodeOptionFunc(func(node *Node) {
+		node.syncInterval = interval
 	})
 }

@@ -28,29 +28,20 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net"
-	"slices"
 	"sort"
-	"strconv"
 	"sync"
 	"time"
 
-	goset "github.com/deckarep/golang-set/v2"
 	"github.com/flowchartsman/retry"
-	groupcache "github.com/groupcache/groupcache-go/v3"
-	"github.com/groupcache/groupcache-go/v3/transport"
-	"github.com/groupcache/groupcache-go/v3/transport/peer"
 	"github.com/hashicorp/memberlist"
 	"github.com/reugn/go-quartz/logger"
 	"go.uber.org/atomic"
-	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/tochemey/goakt/v2/discovery"
 	"github.com/tochemey/goakt/v2/goaktpb"
-	"github.com/tochemey/goakt/v2/hash"
 	"github.com/tochemey/goakt/v2/internal/errorschain"
 	"github.com/tochemey/goakt/v2/internal/internalpb"
 	"github.com/tochemey/goakt/v2/internal/types"
@@ -71,13 +62,13 @@ const (
 
 // Node defines the cluster Node
 type Node struct {
-	mconfig *memberlist.Config
-	mlist   *memberlist.Memberlist
-	started *atomic.Bool
+	mconfig  *memberlist.Config
+	mlist    *memberlist.Memberlist
+	delegate *nodeDelegate
+	started  *atomic.Bool
 	// specifies the minimum number of cluster members
 	// the default values is 1
 	minimumPeersQuorum uint
-	replicaCount       uint
 	maxJoinAttempts    int
 
 	// specifies the Node name
@@ -89,37 +80,25 @@ type Node struct {
 	// specifies the underlying node
 	node *discovery.Node
 
-	// specifies the hasher
-	hasher hash.Hasher
-
 	// specifies the discovery provider
 	provider discovery.Provider
 
-	writeTimeout         time.Duration
-	readTimeout          time.Duration
 	shutdownTimeout      time.Duration
 	maxJoinTimeout       time.Duration
 	maxJoinRetryInterval time.Duration
+	syncInterval         time.Duration
 
 	events                chan *Event
 	eventsLock            *sync.Mutex
 	lock                  *sync.Mutex
 	stopEventsListenerSig chan types.Unit
 
-	actorsGroup         groupcache.Group
 	actorsGroupLock     *sync.RWMutex
-	peerStatesGroup     groupcache.Group
 	peerStatesGroupLock *sync.RWMutex
-	jobsGroup           groupcache.Group
 	jobsGroupLock       *sync.RWMutex
-
-	daemon *groupcache.Daemon
 
 	// specifies the node state
 	peerState *internalpb.PeerState
-
-	// specifies the keys state
-	jobsCache *sync.Map
 }
 
 // enforce compilation error
@@ -132,15 +111,12 @@ func NewNode(name string, disco discovery.Provider, host *discovery.Node, opts .
 		logger:                log.DefaultLogger,
 		name:                  name,
 		provider:              disco,
-		writeTimeout:          time.Second,
-		readTimeout:           time.Second,
 		shutdownTimeout:       3 * time.Second,
-		hasher:                hash.DefaultHasher(),
 		events:                make(chan *Event, 20),
 		minimumPeersQuorum:    1,
-		replicaCount:          1,
 		maxJoinTimeout:        time.Second,
 		maxJoinRetryInterval:  time.Second,
+		syncInterval:          time.Minute,
 		maxJoinAttempts:       10,
 		lock:                  new(sync.Mutex),
 		eventsLock:            new(sync.Mutex),
@@ -148,7 +124,6 @@ func NewNode(name string, disco discovery.Provider, host *discovery.Node, opts .
 		jobsGroupLock:         new(sync.RWMutex),
 		peerStatesGroupLock:   new(sync.RWMutex),
 		stopEventsListenerSig: make(chan types.Unit, 1),
-		jobsCache:             new(sync.Map),
 		started:               atomic.NewBool(false),
 	}
 
@@ -175,6 +150,15 @@ func (n *Node) Start(ctx context.Context) error {
 	n.mconfig.AdvertisePort = n.node.DiscoveryPort
 	n.mconfig.LogOutput = newLogWriter(n.logger)
 	n.mconfig.Name = n.node.DiscoveryAddress()
+	n.mconfig.PushPullInterval = n.syncInterval
+
+	// set the peer state
+	n.peerState = &internalpb.PeerState{
+		Host:         n.Host(),
+		RemotingPort: int32(n.node.RemotingPort),
+		PeersPort:    int32(n.node.PeersPort),
+		Actors:       []*internalpb.ActorRef{},
+	}
 
 	// get the nodeDelegate
 	delegate, err := n.newNodeDelegate()
@@ -183,8 +167,9 @@ func (n *Node) Start(ctx context.Context) error {
 		return err
 	}
 
+	n.delegate = delegate
 	// set the nodeDelegate
-	n.mconfig.Delegate = delegate
+	n.mconfig.Delegate = n.delegate
 
 	// start process
 	if err := errorschain.
@@ -201,39 +186,6 @@ func (n *Node) Start(ctx context.Context) error {
 	eventsCh := make(chan memberlist.NodeEvent, 256)
 	n.mconfig.Events = &memberlist.ChannelEventDelegate{
 		Ch: eventsCh,
-	}
-
-	// start the group cache engine
-	n.daemon, err = groupcache.ListenAndServe(ctx, n.node.PeersAddress(), groupcache.Options{
-		HashFn: func(data []byte) uint64 {
-			return n.hasher.HashCode(data)
-		},
-		Replicas:  int(n.replicaCount),
-		Logger:    newCacheLogger(n.logger),
-		Transport: transport.NewHttpTransport(transport.HttpTransportOptions{}),
-	})
-	if err != nil {
-		logger.Error(fmt.Errorf("failed to start the GoAkt cluster Engine=(%s) :%w", n.name, err))
-		return err
-	}
-
-	// start the various groups
-	if err := errorschain.
-		New(errorschain.ReturnFirst()).
-		AddError(n.setupActorsGroup()).
-		AddError(n.setupJobsGroup()).
-		AddError(n.setupPeersStageGroup()).
-		Error(); err != nil {
-		logger.Error(fmt.Errorf("failed to create GoAkt cluster actors groups: %w", err))
-		return err
-	}
-
-	// set the peer state
-	n.peerState = &internalpb.PeerState{
-		Host:         n.Host(),
-		RemotingPort: int32(n.node.RemotingPort),
-		PeersPort:    int32(n.node.PeersPort),
-		Actors:       []*internalpb.ActorRef{},
 	}
 
 	n.started.Store(true)
@@ -271,7 +223,6 @@ func (n *Node) Stop(ctx context.Context) error {
 		AddError(n.provider.Deregister()).
 		AddError(n.provider.Close()).
 		AddError(n.mlist.Shutdown()).
-		AddError(n.daemon.Shutdown(ctx)).
 		Error(); err != nil {
 		logger.Error(fmt.Errorf("failed to shutdown the cluster engine=(%s): %w", n.name, err))
 		return err
@@ -298,74 +249,27 @@ func (n *Node) RemotingPort() int {
 
 // PutActor pushes to the cluster the peer sync request
 func (n *Node) PutActor(ctx context.Context, actor *internalpb.ActorRef) error {
-	ctx, cancelFn := context.WithTimeout(ctx, n.writeTimeout)
-	defer cancelFn()
-
 	logger := n.logger
-
-	n.lock.Lock()
-	defer n.lock.Unlock()
-
 	logger.Infof("synchronization peer (%s)", n.node.PeersAddress())
-
-	eg, ctx := errgroup.WithContext(ctx)
-	eg.SetLimit(2)
-
-	eg.Go(func() error {
-		encoded, _ := encode(actor)
-		if err := n.actorsGroup.Set(ctx, actor.GetActorAddress().GetName(), encoded, NoExpiry, true); err != nil {
-			return fmt.Errorf("failed to sync actor=(%s) of peer=(%s): %w", actor.GetActorAddress().GetName(), n.node.PeersAddress(), err)
-		}
-		return nil
-	})
-
-	eg.Go(func() error {
-		actors := append(n.peerState.GetActors(), actor)
-
-		compacted := slices.CompactFunc(actors, func(actor *internalpb.ActorRef, actor2 *internalpb.ActorRef) bool {
-			return proto.Equal(actor, actor2)
-		})
-
-		n.peerState.Actors = compacted
-		encoded, _ := proto.Marshal(n.peerState)
-		if err := n.peerStatesGroup.Set(ctx, n.node.PeersAddress(), encoded, NoExpiry, true); err != nil {
-			return fmt.Errorf("failed to sync peer=(%s) request: %w", n.node.PeersAddress(), err)
-		}
-
-		return nil
-	})
-
-	if err := eg.Wait(); err != nil {
-		logger.Errorf("failed to synchronize peer=(%s): %w", n.node.PeersAddress(), err)
-		return err
-	}
-
+	n.actorsGroupLock.Lock()
+	n.delegate.PutActor(actor)
+	n.actorsGroupLock.Unlock()
 	logger.Infof("peer (%s) successfully synchronized in the cluster", n.node.PeersAddress())
 	return nil
 }
 
 // GetActor fetches an actor from the Node
 func (n *Node) GetActor(ctx context.Context, actorName string) (*internalpb.ActorRef, error) {
-	ctx, cancelFn := context.WithTimeout(ctx, n.readTimeout)
-	defer cancelFn()
-
 	logger := n.logger
-
-	n.lock.Lock()
+	n.actorsGroupLock.Lock()
 	logger.Infof("[%s] retrieving actor (%s) from the cluster", n.node.PeersAddress(), actorName)
-	actor := new(internalpb.ActorRef)
-	if err := n.actorsGroup.Get(ctx, actorName, transport.ProtoSink(actor)); err != nil {
+	actor, err := n.delegate.GetActor(actorName)
+	if err != nil {
 		logger.Error(fmt.Errorf("failed to get actor=(%s) from the cluster: %w", actorName, err))
-		n.lock.Unlock()
+		n.actorsGroupLock.Unlock()
 		return nil, err
 	}
-
-	if proto.Equal(actor, new(internalpb.ActorRef)) {
-		n.lock.Unlock()
-		return nil, ErrActorNotFound
-	}
-
-	n.lock.Unlock()
+	n.actorsGroupLock.Unlock()
 	return actor, nil
 }
 
@@ -378,61 +282,32 @@ func (n *Node) GetPartition(actorName string) int {
 
 // SetJobKey sets a given key to the cluster
 func (n *Node) SetJobKey(ctx context.Context, key string) error {
-	ctx, cancelFn := context.WithTimeout(ctx, n.writeTimeout)
-	defer cancelFn()
-
 	logger := n.logger
-
+	logger.Infof("replicating Job key (%s)", key)
 	n.jobsGroupLock.Lock()
-	n.jobsCache.Store(key, key)
+	n.delegate.PutJobKey(key)
 	n.jobsGroupLock.Unlock()
-
-	n.lock.Lock()
-	logger.Infof("replicating key (%s)", key)
-	if err := n.jobsGroup.Set(ctx, key, []byte(key), NoExpiry, true); err != nil {
-		logger.Error(fmt.Errorf("failed to sync job=(%s) key: %w", key, err))
-		n.lock.Lock()
-		return err
-	}
-
-	n.lock.Unlock()
 	logger.Infof("Job key (%s) successfully replicated", key)
 	return nil
 }
 
 // JobKeyExists checks the existence of a given key
 func (n *Node) JobKeyExists(ctx context.Context, key string) (bool, error) {
-	ctx, cancelFn := context.WithTimeout(ctx, n.readTimeout)
-	defer cancelFn()
-
 	logger := n.logger
-
-	n.lock.Lock()
 	logger.Infof("checking Job key (%s) existence in the cluster", key)
-	var actual string
-	if err := n.jobsGroup.Get(ctx, key, transport.StringSink(&actual)); err != nil {
-		logger.Error(fmt.Errorf("failed to get job=(%s) key: %w", key, err))
-		n.lock.Unlock()
-		return false, err
-	}
-
-	n.lock.Unlock()
-	return actual != "", nil
+	n.jobsGroupLock.Lock()
+	exist := n.delegate.JobKeyExists(key)
+	n.jobsGroupLock.Unlock()
+	return exist, nil
 }
 
 // UnsetJobKey unsets the already set given key in the cluster
 func (n *Node) UnsetJobKey(ctx context.Context, key string) error {
 	logger := n.logger
-
-	n.lock.Lock()
 	logger.Infof("unsetting Job key (%s)", key)
-	if err := n.jobsGroup.Remove(ctx, key); err != nil {
-		logger.Error(fmt.Errorf("failed to remove job=(%s) key: %w", key, err))
-		n.lock.Unlock()
-		return err
-	}
-
-	n.lock.Unlock()
+	n.jobsGroupLock.Lock()
+	n.delegate.DeleteJobKey(key)
+	n.jobsGroupLock.Unlock()
 	logger.Infof("Job key (%s) successfully unset", key)
 	return nil
 }
@@ -441,17 +316,29 @@ func (n *Node) UnsetJobKey(ctx context.Context, key string) error {
 // An actor is removed from the cluster when this actor has been passivated.
 func (n *Node) RemoveActor(ctx context.Context, actorName string) error {
 	logger := n.logger
-
-	n.lock.Lock()
 	logger.Infof("removing actor (%s) from cluster", actorName)
-	if err := n.actorsGroup.Remove(ctx, actorName); err != nil {
-		logger.Error(fmt.Errorf("failed to remove actor=(%s) from the cluster: %w", actorName, err))
-		n.lock.Unlock()
-		return err
-	}
-	n.lock.Unlock()
+	n.actorsGroupLock.Lock()
+	n.delegate.DeleteActor(actorName)
+	n.actorsGroupLock.Unlock()
 	logger.Infof("actor (%s) successfully removed from the cluster", actorName)
 	return nil
+}
+
+// GetState fetches a given peer state
+func (n *Node) GetState(ctx context.Context, peerAddress string) (*internalpb.PeerState, error) {
+	logger := n.logger
+	logger.Infof("[%s] retrieving peer (%s) sync record", n.node.PeersAddress(), peerAddress)
+	n.peerStatesGroupLock.Lock()
+	peerState, err := n.delegate.GetPeerState(peerAddress)
+	if err != nil {
+		logger.Errorf("[%s] failed to decode peer=(%s) sync record: %v", n.node.PeersAddress(), peerAddress, err)
+		n.peerStatesGroupLock.Unlock()
+		return nil, err
+	}
+
+	n.peerStatesGroupLock.Unlock()
+	logger.Infof("[%s] successfully retrieved peer (%s) sync record .🎉", n.node.PeersAddress(), peerAddress)
+	return peerState, nil
 }
 
 // Events returns a channel where cluster events are published
@@ -509,31 +396,6 @@ func (n *Node) Peers(ctx context.Context) ([]*Peer, error) {
 	return peers, nil
 }
 
-// GetState fetches a given peer state
-func (n *Node) GetState(ctx context.Context, peerAddress string) (*internalpb.PeerState, error) {
-	ctx, cancelFn := context.WithTimeout(ctx, n.readTimeout)
-	defer cancelFn()
-
-	logger := n.logger
-
-	n.lock.Lock()
-	defer n.lock.Unlock()
-
-	logger.Infof("[%s] retrieving peer (%s) sync record", n.node.PeersAddress(), peerAddress)
-	peerState := new(internalpb.PeerState)
-	if err := n.peerStatesGroup.Get(ctx, peerAddress, transport.ProtoSink(peerState)); err != nil {
-		logger.Errorf("[%s] failed to decode peer=(%s) sync record: %v", n.node.PeersAddress(), peerAddress, err)
-		return nil, err
-	}
-
-	if proto.Equal(peerState, new(internalpb.PeerState)) {
-		return nil, ErrPeerSyncNotFound
-	}
-
-	logger.Infof("[%s] successfully retrieved peer (%s) sync record .🎉", n.node.PeersAddress(), peerAddress)
-	return peerState, nil
-}
-
 // IsLeader states whether the given cluster node is a leader or not at a given
 // point in time in the cluster
 // nolint
@@ -571,6 +433,10 @@ func (n *Node) eventsListener(eventsChan chan memberlist.NodeEvent) {
 			close(n.events)
 			return
 		case event := <-eventsChan:
+			if event.Node == nil {
+				continue
+			}
+
 			var node *discovery.Node
 			if err := json.Unmarshal(event.Node.Meta, &node); err != nil {
 				logger.Error(fmt.Errorf("failed to unpack GoAkt cluster node:(%s) meta: %w", event.Node.Address(), err))
@@ -581,25 +447,10 @@ func (n *Node) eventsListener(eventsChan chan memberlist.NodeEvent) {
 				continue
 			}
 
-			var xevent proto.Message
-			var xtype EventType
-			ctx := context.Background()
-			// we need to add the new peers
-			currentPeers, _ := n.Peers(ctx)
-			peersSet := goset.NewSet[peer.Info]()
-			peersSet.Add(peer.Info{
-				Address: n.node.PeersAddress(),
-				IsSelf:  true,
-			})
-
-			for _, xpeer := range currentPeers {
-				addr := net.JoinHostPort(xpeer.Host, strconv.Itoa(xpeer.Port))
-				peersSet.Add(peer.Info{
-					Address: addr,
-					IsSelf:  false,
-				})
-			}
-
+			var (
+				xevent proto.Message
+				xtype  EventType
+			)
 			switch event.Event {
 			case memberlist.NodeJoin:
 				xevent = &goaktpb.NodeJoined{
@@ -607,34 +458,12 @@ func (n *Node) eventsListener(eventsChan chan memberlist.NodeEvent) {
 					Timestamp: timestamppb.New(time.Now().UTC()),
 				}
 				xtype = NodeJoined
-
-				// add the joined node to the peers list
-				// and set it to the daemon
-				n.eventsLock.Lock()
-				peersSet.Add(peer.Info{
-					Address: node.PeersAddress(),
-					IsSelf:  false,
-				})
-				_ = n.daemon.SetPeers(ctx, peersSet.ToSlice())
-				n.eventsLock.Unlock()
-
 			case memberlist.NodeLeave:
 				xevent = &goaktpb.NodeLeft{
 					Address:   node.PeersAddress(),
 					Timestamp: timestamppb.New(time.Now().UTC()),
 				}
 				xtype = NodeLeft
-
-				// remove the left node from the peers list
-				// and set it to the daemon
-				n.eventsLock.Lock()
-				peersSet.Remove(peer.Info{
-					Address: node.PeersAddress(),
-					IsSelf:  false,
-				})
-				_ = n.daemon.SetPeers(ctx, peersSet.ToSlice())
-				n.eventsLock.Unlock()
-
 			case memberlist.NodeUpdate:
 				// TODO: need to handle that later
 				continue
@@ -694,63 +523,4 @@ func (n *Node) joinCluster(ctx context.Context) error {
 	}
 
 	return nil
-}
-
-// setupActorsGroup sets the actors group
-// nolint
-func (n *Node) setupActorsGroup() error {
-	var err error
-	// create a new group cache with a max cache size of 3MB
-	// todo: revisit the cache size
-	n.actorsGroup, err = n.daemon.NewGroup(ActorsGroup, 3000000, groupcache.GetterFunc(func(ctx context.Context, key string, dest transport.Sink) error {
-		n.actorsGroupLock.Lock()
-		defer n.actorsGroupLock.Unlock()
-
-		var actor *internalpb.ActorRef
-		for _, ref := range n.peerState.Actors {
-			if ref.GetActorAddress().GetName() == key {
-				actor = ref
-			}
-		}
-
-		if actor == nil || proto.Equal(actor, new(internalpb.ActorRef)) {
-			return ErrActorNotFound
-		}
-		encoded, _ := encode(actor)
-		return dest.SetBytes(encoded, NoExpiry)
-	}))
-	return err
-}
-
-// setupJobsGroup sets the jobs group
-// nolint
-func (n *Node) setupJobsGroup() error {
-	var err error
-	n.jobsGroup, err = n.daemon.NewGroup(JobsGroups, 3000000, groupcache.GetterFunc(func(ctx context.Context, key string, dest transport.Sink) error {
-		n.jobsGroupLock.Lock()
-		defer n.jobsGroupLock.Unlock()
-
-		if value, ok := n.jobsCache.Load(key); ok {
-			return dest.SetString(value.(string), NoExpiry)
-		}
-
-		return ErrKeyNotFound
-	}))
-	return err
-}
-
-// setupPeersStageGroup sets the peers stage group
-// nolint
-func (n *Node) setupPeersStageGroup() error {
-	var err error
-	n.peerStatesGroup, err = n.daemon.NewGroup(PeerStatesGroup, 3000000, groupcache.GetterFunc(func(ctx context.Context, key string, dest transport.Sink) error {
-		n.peerStatesGroupLock.Lock()
-		defer n.peerStatesGroupLock.Unlock()
-
-		if key != n.node.PeersAddress() {
-			return ErrPeerSyncNotFound
-		}
-		return dest.SetProto(n.peerState, NoExpiry)
-	}))
-	return err
 }

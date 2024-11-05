@@ -54,7 +54,7 @@ func TestNodes(t *testing.T) {
 	node1, provider1 := startNode(t, "node1", srv.Addr().String())
 	require.NotNil(t, node1)
 	require.NotNil(t, provider1)
-	node1Addr := node1.AdvertisedAddress()
+	addr1 := node1.AdvertisedAddress()
 
 	// wait for the node to start properly
 	lib.Pause(2 * time.Second)
@@ -62,7 +62,7 @@ func TestNodes(t *testing.T) {
 	node2, provider2 := startNode(t, "node2", srv.Addr().String())
 	require.NotNil(t, node2)
 	require.NotNil(t, provider2)
-	node2Addr := node2.AdvertisedAddress()
+	addr2 := node2.AdvertisedAddress()
 
 	// wait for the node to start properly
 	lib.Pause(2 * time.Second)
@@ -70,7 +70,7 @@ func TestNodes(t *testing.T) {
 	node3, provider3 := startNode(t, "node3", srv.Addr().String())
 	require.NotNil(t, node3)
 	require.NotNil(t, provider3)
-	node3Adrr := node3.AdvertisedAddress()
+	addr3 := node3.AdvertisedAddress()
 
 	// wait for the node to start properly
 	lib.Pause(2 * time.Second)
@@ -84,7 +84,7 @@ func TestNodes(t *testing.T) {
 		peer := node1Peers[i]
 		node1PeerAddrs[i] = net.JoinHostPort(peer.Host, strconv.Itoa(peer.Port))
 	}
-	require.ElementsMatch(t, node1PeerAddrs, []string{node2Addr, node3Adrr})
+	require.ElementsMatch(t, node1PeerAddrs, []string{addr2, addr3})
 
 	node2Peers, err := node2.Peers(ctx)
 	require.NoError(t, err)
@@ -95,7 +95,7 @@ func TestNodes(t *testing.T) {
 		peer := node2Peers[i]
 		node2PeerAddrs[i] = net.JoinHostPort(peer.Host, strconv.Itoa(peer.Port))
 	}
-	require.ElementsMatch(t, node2PeerAddrs, []string{node1Addr, node3Adrr})
+	require.ElementsMatch(t, node2PeerAddrs, []string{addr1, addr3})
 
 	node3Peers, err := node3.Peers(ctx)
 	require.NoError(t, err)
@@ -106,7 +106,7 @@ func TestNodes(t *testing.T) {
 		peer := node3Peers[i]
 		node3PeerAddrs[i] = net.JoinHostPort(peer.Host, strconv.Itoa(peer.Port))
 	}
-	require.ElementsMatch(t, node3PeerAddrs, []string{node1Addr, node2Addr})
+	require.ElementsMatch(t, node3PeerAddrs, []string{addr1, addr2})
 
 	// persist some actor on node1 and retrieve it on node3
 
@@ -131,6 +131,92 @@ func TestNodes(t *testing.T) {
 	require.NoError(t, provider1.Close())
 	require.NoError(t, provider2.Close())
 	require.NoError(t, provider3.Close())
+}
+
+func TestEvents(t *testing.T) {
+	ctx := context.Background()
+	// start the NATS server
+	srv := startNatsServer(t)
+
+	node1, provider1 := startNode(t, "node1", srv.Addr().String())
+	require.NotNil(t, node1)
+	require.NotNil(t, provider1)
+
+	// wait for the node to start properly
+	lib.Pause(2 * time.Second)
+
+	node2, provider2 := startNode(t, "node2", srv.Addr().String())
+	require.NotNil(t, node2)
+	require.NotNil(t, provider2)
+	node2Addr := node2.AdvertisedAddress()
+
+	// assert the node joined cluster event
+	var events []*Event
+	// define an events reader loop and read events for some time
+L:
+	for {
+		select {
+		case event, ok := <-node1.Events():
+			if ok {
+				events = append(events, event)
+			}
+		case <-time.After(time.Second):
+			break L
+		}
+	}
+
+	require.NotEmpty(t, events)
+	require.Len(t, events, 1)
+	event := events[0]
+	msg, err := event.Payload.UnmarshalNew()
+	require.NoError(t, err)
+	nodeJoined, ok := msg.(*goaktpb.NodeJoined)
+	require.True(t, ok)
+	require.NotNil(t, nodeJoined)
+	require.Equal(t, node2Addr, nodeJoined.GetAddress())
+	peers, err := node1.Peers(ctx)
+	require.NoError(t, err)
+	require.Len(t, peers, 1)
+	require.Equal(t, node2Addr, net.JoinHostPort(peers[0].Host, strconv.Itoa(peers[0].Port)))
+
+	// wait for some time
+	lib.Pause(time.Second)
+
+	// stop the second node
+	require.NoError(t, node2.Stop(context.TODO()))
+	// wait for the event to propagate properly
+	lib.Pause(time.Second)
+
+	// reset the slice
+	events = []*Event{}
+
+	// define an events reader loop and read events for some time
+L2:
+	for {
+		select {
+		case event, ok := <-node1.Events():
+			if ok {
+				events = append(events, event)
+			}
+		case <-time.After(time.Second):
+			break L2
+		}
+	}
+
+	require.NotEmpty(t, events)
+	require.Len(t, events, 1)
+	event = events[0]
+	msg, err = event.Payload.UnmarshalNew()
+	require.NoError(t, err)
+	nodeLeft, ok := msg.(*goaktpb.NodeLeft)
+	require.True(t, ok)
+	require.NotNil(t, nodeLeft)
+	require.Equal(t, node2Addr, nodeLeft.GetAddress())
+
+	require.NoError(t, node1.Stop(ctx))
+	require.NoError(t, provider1.Close())
+	require.NoError(t, provider2.Close())
+	srv.Shutdown()
 }
 
 func startNode(t *testing.T, nodeName, serverAddr string) (*Node, discovery.Provider) {
@@ -173,7 +259,16 @@ func startNode(t *testing.T, nodeName, serverAddr string) (*Node, discovery.Prov
 	provider := nats.NewDiscovery(&config, &hostNode, nats.WithLogger(logger))
 
 	// create the cluster node
-	node := NewNode(nodeName, provider, &hostNode, WithNodeLogger(logger))
+	node := NewNode(nodeName,
+		provider,
+		&hostNode,
+		WithNodeLogger(logger),
+		WithNodeMaxJoinAttempts(10),
+		WithNodeMaxJoinRetryInterval(500*time.Millisecond),
+		WithNodeMaxJoinTimeout(time.Second),
+		WithNodeShutdownTimeout(time.Second),
+		WithNodesMinimumPeersQuorum(1),
+		WithNodeSyncInterval(500*time.Millisecond))
 
 	// start the node
 	require.NoError(t, node.Start(ctx))
