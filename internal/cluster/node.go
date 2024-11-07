@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (c) 2022-2024 Tochemey
+ * Copyright (c) 2022-2024  Arsene Tochemey Gandote
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -26,22 +26,19 @@ package cluster
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/flowchartsman/retry"
 	"github.com/hashicorp/memberlist"
-	"github.com/reugn/go-quartz/logger"
 	"go.uber.org/atomic"
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/anypb"
-	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/tochemey/goakt/v2/discovery"
-	"github.com/tochemey/goakt/v2/goaktpb"
 	"github.com/tochemey/goakt/v2/internal/errorschain"
 	"github.com/tochemey/goakt/v2/internal/internalpb"
 	"github.com/tochemey/goakt/v2/internal/types"
@@ -99,6 +96,13 @@ type Node struct {
 
 	// specifies the node state
 	peerState *internalpb.PeerState
+
+	// specifies the secrets
+	// A list of base64 encoded keys. Each key should be either 16, 24, or 32 bytes
+	// when decoded to select AES-128, AES-192, or AES-256 respectively.
+	// The first key in the list will be used for encrypting outbound messages. All keys are
+	// attempted when decrypting gossip, which allows for rotations.
+	secretKeys []string
 }
 
 // enforce compilation error
@@ -108,23 +112,22 @@ var _ Interface = (*Node)(nil)
 func NewNode(name string, disco discovery.Provider, host *discovery.Node, opts ...NodeOption) *Node {
 	// create an instance of Node
 	n := &Node{
-		logger:                log.DefaultLogger,
-		name:                  name,
-		provider:              disco,
-		shutdownTimeout:       3 * time.Second,
-		events:                make(chan *Event, 20),
-		minimumPeersQuorum:    1,
-		maxJoinTimeout:        time.Second,
-		maxJoinRetryInterval:  time.Second,
-		syncInterval:          time.Minute,
-		maxJoinAttempts:       10,
-		lock:                  new(sync.Mutex),
-		eventsLock:            new(sync.Mutex),
-		actorsGroupLock:       new(sync.RWMutex),
-		jobsGroupLock:         new(sync.RWMutex),
-		peerStatesGroupLock:   new(sync.RWMutex),
-		stopEventsListenerSig: make(chan types.Unit, 1),
-		started:               atomic.NewBool(false),
+		logger:               log.DefaultLogger,
+		name:                 name,
+		provider:             disco,
+		shutdownTimeout:      3 * time.Second,
+		events:               make(chan *Event, 20),
+		minimumPeersQuorum:   1,
+		maxJoinTimeout:       time.Second,
+		maxJoinRetryInterval: time.Second,
+		syncInterval:         time.Minute,
+		maxJoinAttempts:      10,
+		lock:                 new(sync.Mutex),
+		eventsLock:           new(sync.Mutex),
+		actorsGroupLock:      new(sync.RWMutex),
+		jobsGroupLock:        new(sync.RWMutex),
+		peerStatesGroupLock:  new(sync.RWMutex),
+		started:              atomic.NewBool(false),
 	}
 
 	for _, opt := range opts {
@@ -151,6 +154,27 @@ func (n *Node) Start(ctx context.Context) error {
 	n.mconfig.LogOutput = newLogWriter(n.logger)
 	n.mconfig.Name = n.node.DiscoveryAddress()
 	n.mconfig.PushPullInterval = n.syncInterval
+
+	// Enable gossip encryption if a key is defined.
+	if len(n.secretKeys) != 0 {
+		n.mconfig.GossipVerifyIncoming = true
+		n.mconfig.GossipVerifyOutgoing = true
+		for i, key := range n.secretKeys {
+			secret, err := base64.StdEncoding.DecodeString(strings.TrimSpace(key))
+			if err != nil {
+				return fmt.Errorf("unable to base64 decode memberlist encryption key at index %d: %w", i, err)
+			}
+
+			if err = n.mconfig.Keyring.AddKey(secret); err != nil {
+				return fmt.Errorf("error adding memberlist encryption key at index %d: %w", i, err)
+			}
+
+			// set the first key as the default for encrypting outbound messages.
+			if i == 0 {
+				n.mconfig.SecretKey = secret
+			}
+		}
+	}
 
 	// set the peer state
 	n.peerState = &internalpb.PeerState{
@@ -183,14 +207,9 @@ func (n *Node) Start(ctx context.Context) error {
 
 	// create enough buffer to house the cluster events
 	// TODO: revisit this number
-	eventsCh := make(chan memberlist.NodeEvent, 256)
-	n.mconfig.Events = &memberlist.ChannelEventDelegate{
-		Ch: eventsCh,
-	}
 
 	n.started.Store(true)
-	// start listening to events
-	go n.eventsListener(eventsCh)
+	n.mconfig.Events = n.newEventsHandler()
 
 	logger.Infof("GoAkt cluster Engine=(%s) successfully started.", n.name)
 	return nil
@@ -215,7 +234,7 @@ func (n *Node) Stop(ctx context.Context) error {
 	defer cancelFn()
 
 	// stop the events loop
-	close(n.stopEventsListenerSig)
+	close(n.events)
 
 	if err := errorschain.
 		New(errorschain.ReturnFirst()).
@@ -419,57 +438,6 @@ func (n *Node) IsLeader(context.Context) bool {
 
 	coordinator := nodes[0]
 	return coordinator.PeersAddress() == n.node.PeersAddress()
-}
-
-// eventsListener listens to cluster events
-func (n *Node) eventsListener(eventsChan chan memberlist.NodeEvent) {
-	for {
-		select {
-		case <-n.stopEventsListenerSig:
-			// finish listening to cluster events
-			close(n.events)
-			return
-		case event := <-eventsChan:
-			if event.Node == nil {
-				continue
-			}
-
-			var node *discovery.Node
-			if err := json.Unmarshal(event.Node.Meta, &node); err != nil {
-				logger.Error(fmt.Errorf("failed to unpack GoAkt cluster node:(%s) meta: %w", event.Node.Address(), err))
-				continue
-			}
-
-			if node.DiscoveryAddress() == n.node.DiscoveryAddress() {
-				continue
-			}
-
-			var (
-				xevent proto.Message
-				xtype  EventType
-			)
-			switch event.Event {
-			case memberlist.NodeJoin:
-				xevent = &goaktpb.NodeJoined{
-					Address:   node.PeersAddress(),
-					Timestamp: timestamppb.New(time.Now().UTC()),
-				}
-				xtype = NodeJoined
-			case memberlist.NodeLeave:
-				xevent = &goaktpb.NodeLeft{
-					Address:   node.PeersAddress(),
-					Timestamp: timestamppb.New(time.Now().UTC()),
-				}
-				xtype = NodeLeft
-			case memberlist.NodeUpdate:
-				// TODO: need to handle that later
-				continue
-			}
-
-			payload, _ := anypb.New(xevent)
-			n.events <- &Event{payload, xtype}
-		}
-	}
 }
 
 // joinCluster attempts to join an existing cluster if peers are provided

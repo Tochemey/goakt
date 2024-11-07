@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (c) 2022-2024 Tochemey
+ * Copyright (c) 2022-2024  Arsene Tochemey Gandote
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -92,5 +92,17 @@ func WithNodeMaxJoinRetryInterval(retryInterval time.Duration) NodeOption {
 func WithNodeSyncInterval(interval time.Duration) NodeOption {
 	return NodeOptionFunc(func(node *Node) {
 		node.syncInterval = interval
+	})
+}
+
+// WithNodeSecretKeys defines the secret keys
+// A list of base64 encoded keys. Each key should be either 16, 24, or 32 bytes
+// when decoded to select AES-128, AES-192, or AES-256 respectively.
+// The first key in the list will be used for encrypting outbound messages. All keys are
+// attempted when decrypting gossip, which allows for rotations.
+// These keys should be the same for all nodes in the cluster
+func WithNodeSecretKeys(secretKeys []string) NodeOption {
+	return NodeOptionFunc(func(node *Node) {
+		node.secretKeys = secretKeys
 	})
 }
