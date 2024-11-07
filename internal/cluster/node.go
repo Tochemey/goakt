@@ -289,9 +289,14 @@ func (n *Node) GetActor(ctx context.Context, actorName string) (*internalpb.Acto
 	// retry twice to access the data once to ensure that consistency has taken place
 	retrier := retry.NewRetrier(2, 50*time.Millisecond, n.readTimeout)
 	if err := retrier.RunContext(ctx, func(ctx context.Context) error {
-		actor, rerr = n.delegate.GetActor(actorName)
-		if rerr != nil {
-			return rerr
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+			actor, rerr = n.delegate.GetActor(actorName)
+			if rerr != nil {
+				return rerr
+			}
 		}
 		return nil
 	}); err != nil {
@@ -369,9 +374,14 @@ func (n *Node) GetState(ctx context.Context, peerAddress string) (*internalpb.Pe
 	// retry twice to access the data once to ensure that consistency has taken place
 	retrier := retry.NewRetrier(2, 50*time.Millisecond, n.readTimeout)
 	if err := retrier.RunContext(ctx, func(ctx context.Context) error {
-		peerState, rerr = n.delegate.GetPeerState(peerAddress)
-		if rerr != nil {
-			return rerr
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+			peerState, rerr = n.delegate.GetPeerState(peerAddress)
+			if rerr != nil {
+				return rerr
+			}
 		}
 		return nil
 	}); err != nil {
