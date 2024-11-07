@@ -216,7 +216,7 @@ func (n *Node) Start(ctx context.Context) error {
 }
 
 // Stop stops the Engine gracefully
-func (n *Node) Stop(ctx context.Context) error {
+func (n *Node) Stop(context.Context) error {
 	if !n.started.Load() {
 		return nil
 	}
@@ -228,13 +228,6 @@ func (n *Node) Stop(ctx context.Context) error {
 	logger.Infof("Stopping GoAkt cluster Node=(%s)....🤔", n.name)
 
 	n.started.Store(false)
-
-	// create a cancellation context
-	ctx, cancelFn := context.WithTimeout(ctx, n.shutdownTimeout)
-	defer cancelFn()
-
-	// stop the events loop
-	close(n.events)
 
 	if err := errorschain.
 		New(errorschain.ReturnFirst()).
