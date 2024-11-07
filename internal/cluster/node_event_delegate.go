@@ -100,7 +100,7 @@ func (handler *eventsHandler) NotifyLeave(node *memberlist.Node) {
 }
 
 // NotifyUpdate is executed when a node is updated in the cluster
-func (handler *eventsHandler) NotifyUpdate(node *memberlist.Node) {
+func (handler *eventsHandler) NotifyUpdate(*memberlist.Node) {
 	// no-op
 }
 
