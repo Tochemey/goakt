@@ -80,6 +80,7 @@ type Node struct {
 	// specifies the discovery provider
 	provider discovery.Provider
 
+	readTimeout          time.Duration
 	shutdownTimeout      time.Duration
 	maxJoinTimeout       time.Duration
 	maxJoinRetryInterval time.Duration
@@ -118,9 +119,10 @@ func NewNode(name string, disco discovery.Provider, host *discovery.Node, opts .
 		shutdownTimeout:      3 * time.Second,
 		events:               make(chan *Event, 20),
 		minimumPeersQuorum:   1,
+		readTimeout:          100 * time.Millisecond,
 		maxJoinTimeout:       time.Second,
 		maxJoinRetryInterval: time.Second,
-		syncInterval:         time.Minute,
+		syncInterval:         time.Second,
 		maxJoinAttempts:      10,
 		lock:                 new(sync.Mutex),
 		eventsLock:           new(sync.Mutex),
@@ -240,6 +242,7 @@ func (n *Node) Stop(context.Context) error {
 		return err
 	}
 
+	close(n.events)
 	return nil
 }
 
@@ -271,12 +274,27 @@ func (n *Node) PutActor(_ context.Context, actor *internalpb.ActorRef) error {
 }
 
 // GetActor fetches an actor from the Node
-func (n *Node) GetActor(_ context.Context, actorName string) (*internalpb.ActorRef, error) {
+func (n *Node) GetActor(ctx context.Context, actorName string) (*internalpb.ActorRef, error) {
 	logger := n.logger
+	ctx, cancelFn := context.WithTimeout(ctx, n.readTimeout)
+	defer cancelFn()
+
 	n.actorsGroupLock.Lock()
 	logger.Infof("[%s] retrieving actor (%s) from the cluster", n.node.PeersAddress(), actorName)
-	actor, err := n.delegate.GetActor(actorName)
-	if err != nil {
+
+	var (
+		actor *internalpb.ActorRef
+		rerr  error
+	)
+	// retry twice to access the data once to ensure that consistency has taken place
+	retrier := retry.NewRetrier(2, 50*time.Millisecond, n.readTimeout)
+	if err := retrier.RunContext(ctx, func(ctx context.Context) error {
+		actor, rerr = n.delegate.GetActor(actorName)
+		if rerr != nil {
+			return rerr
+		}
+		return nil
+	}); err != nil {
 		logger.Error(fmt.Errorf("failed to get actor=(%s) from the cluster: %w", actorName, err))
 		n.actorsGroupLock.Unlock()
 		return nil, err
@@ -336,12 +354,27 @@ func (n *Node) RemoveActor(_ context.Context, actorName string) error {
 }
 
 // GetState fetches a given peer state
-func (n *Node) GetState(_ context.Context, peerAddress string) (*internalpb.PeerState, error) {
+func (n *Node) GetState(ctx context.Context, peerAddress string) (*internalpb.PeerState, error) {
 	logger := n.logger
+	ctx, cancelFn := context.WithTimeout(ctx, n.readTimeout)
+	defer cancelFn()
+
 	logger.Infof("[%s] retrieving peer (%s) sync record", n.node.PeersAddress(), peerAddress)
 	n.peerStatesGroupLock.Lock()
-	peerState, err := n.delegate.GetPeerState(peerAddress)
-	if err != nil {
+
+	var (
+		peerState *internalpb.PeerState
+		rerr      error
+	)
+	// retry twice to access the data once to ensure that consistency has taken place
+	retrier := retry.NewRetrier(2, 50*time.Millisecond, n.readTimeout)
+	if err := retrier.RunContext(ctx, func(ctx context.Context) error {
+		peerState, rerr = n.delegate.GetPeerState(peerAddress)
+		if rerr != nil {
+			return rerr
+		}
+		return nil
+	}); err != nil {
 		logger.Errorf("[%s] failed to decode peer=(%s) sync record: %v", n.node.PeersAddress(), peerAddress, err)
 		n.peerStatesGroupLock.Unlock()
 		return nil, err
@@ -378,7 +411,7 @@ func (n *Node) Peers(context.Context) ([]*Peer, error) {
 			return nil, err
 		}
 
-		if node != nil && node.DiscoveryAddress() != n.node.DiscoveryAddress() {
+		if node != nil && node.PeersAddress() != n.node.PeersAddress() {
 			nodes = append(nodes, node)
 		}
 	}

@@ -106,3 +106,11 @@ func WithNodeSecretKeys(secretKeys []string) NodeOption {
 		node.secretKeys = secretKeys
 	})
 }
+
+// WithNodeReadTimeout sets the read timeout. This value defines
+// how long it should take to timeout during a read operation in the cluster
+func WithNodeReadTimeout(timeout time.Duration) NodeOption {
+	return NodeOptionFunc(func(node *Node) {
+		node.readTimeout = timeout
+	})
+}
