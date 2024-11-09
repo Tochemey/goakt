@@ -1,6 +1,6 @@
 module github.com/tochemey/goakt/v2
 
-go 1.22.0
+go 1.23.0
 
 require (
 	connectrpc.com/connect v1.17.0

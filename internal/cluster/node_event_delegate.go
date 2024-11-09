@@ -97,6 +97,7 @@ func (handler *eventsHandler) NotifyLeave(node *memberlist.Node) {
 	})
 
 	handler.events <- &Event{payload, NodeLeft}
+	close(handler.events)
 }
 
 // NotifyUpdate is executed when a node is updated in the cluster

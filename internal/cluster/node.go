@@ -117,7 +117,7 @@ func NewNode(name string, disco discovery.Provider, host *discovery.Node, opts .
 		name:                 name,
 		provider:             disco,
 		shutdownTimeout:      3 * time.Second,
-		events:               make(chan *Event, 20),
+		events:               make(chan *Event, 256),
 		minimumPeersQuorum:   1,
 		readTimeout:          time.Second,
 		maxJoinTimeout:       time.Second,
@@ -243,7 +243,6 @@ func (n *Node) Stop(context.Context) error {
 		return err
 	}
 
-	close(n.events)
 	return nil
 }
 
