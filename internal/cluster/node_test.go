@@ -268,6 +268,7 @@ func startNode(t *testing.T, nodeName, serverAddr string) (*Node, discovery.Prov
 		WithNodeMaxJoinTimeout(time.Second),
 		WithNodeShutdownTimeout(time.Second),
 		WithNodesMinimumPeersQuorum(1),
+		WithNodeReadTimeout(time.Second),
 		WithNodeSyncInterval(500*time.Millisecond))
 
 	// start the node

@@ -220,8 +220,6 @@ type actorSystem struct {
 	reflection *reflection
 
 	peersStateLoopInterval time.Duration
-	peersCacheMu           *sync.RWMutex
-	peersCache             map[string][]byte
 	clusterConfig          *ClusterConfig
 	redistributionChan     chan *cluster.Event
 
@@ -261,8 +259,6 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		clusterEventsChan:      make(chan *cluster.Event, 1),
 		registry:               types.NewRegistry(),
 		clusterSyncStopSig:     make(chan types.Unit, 1),
-		peersCacheMu:           &sync.RWMutex{},
-		peersCache:             make(map[string][]byte),
 		peersStateLoopInterval: DefaultPeerStateLoopInterval,
 		port:                   0,
 		host:                   "127.0.0.1",
@@ -1069,7 +1065,7 @@ func (x *actorSystem) enableClustering(ctx context.Context) error {
 		return errors.New("clustering needs remoting to be enabled")
 	}
 
-	node := &discovery.Node{
+	hostNode := &discovery.Node{
 		Name:          x.Name(),
 		Host:          x.host,
 		DiscoveryPort: x.clusterConfig.DiscoveryPort(),
@@ -1078,20 +1074,35 @@ func (x *actorSystem) enableClustering(ctx context.Context) error {
 		Birthdate:     time.Now().UnixNano(),
 	}
 
-	clusterEngine, err := cluster.NewEngine(
+	clusterEngine := cluster.NewNode(
 		x.Name(),
 		x.clusterConfig.Discovery(),
-		node,
-		cluster.WithLogger(x.logger),
-		cluster.WithPartitionsCount(x.clusterConfig.PartitionCount()),
-		cluster.WithHasher(x.partitionHasher),
-		cluster.WithMinimumPeersQuorum(x.clusterConfig.MinimumPeersQuorum()),
-		cluster.WithReplicaCount(x.clusterConfig.ReplicaCount()),
+		hostNode,
+		cluster.WithNodeLogger(x.logger),
+		cluster.WithNodesMinimumPeersQuorum(uint(x.clusterConfig.MinimumPeersQuorum())),
+		cluster.WithNodeShutdownTimeout(x.shutdownTimeout), // TODO: revisit this setting
+		cluster.WithNodeMaxJoinAttempts(x.clusterConfig.MaxJoinAttempts()),
+		cluster.WithNodeMaxJoinRetryInterval(x.clusterConfig.JoinRetryInterval()),
+		cluster.WithNodeMaxJoinTimeout(x.clusterConfig.JoinTimeout()),
+		cluster.WithNodeSyncInterval(x.clusterConfig.SyncInterval()),
+		cluster.WithNodeReadTimeout(x.clusterConfig.ReadTimeout()),
+		// TODO: add the secret keys for data encryption
 	)
-	if err != nil {
-		x.logger.Errorf("failed to initialize cluster engine: %v", err)
-		return err
-	}
+
+	// clusterEngine, err := cluster.NewEngine(
+	// 	x.Name(),
+	// 	x.clusterConfig.Discovery(),
+	// 	hostNode,
+	// 	cluster.WithLogger(x.logger),
+	// 	cluster.WithPartitionsCount(x.clusterConfig.PartitionCount()),
+	// 	cluster.WithHasher(x.partitionHasher),
+	// 	cluster.WithMinimumPeersQuorum(x.clusterConfig.MinimumPeersQuorum()),
+	// 	cluster.WithReplicaCount(x.clusterConfig.ReplicaCount()),
+	// )
+	// if err != nil {
+	// 	x.logger.Errorf("failed to initialize cluster engine: %v", err)
+	// 	return err
+	// }
 
 	x.logger.Info("starting cluster engine...")
 	if err := clusterEngine.Start(ctx); err != nil {
@@ -1122,7 +1133,6 @@ func (x *actorSystem) enableClustering(ctx context.Context) error {
 
 	go x.clusterEventsLoop()
 	go x.replicationLoop()
-	go x.peersStateLoop()
 	go x.redistributionLoop()
 
 	x.logger.Info("clustering enabled...:)")
@@ -1245,72 +1255,6 @@ func (x *actorSystem) clusterEventsLoop() {
 	}
 }
 
-// peersStateLoop fetches the cluster peers' PeerState and update the node peersCache
-func (x *actorSystem) peersStateLoop() {
-	x.logger.Info("peers state synchronization has started...")
-	ticker := time.NewTicker(x.peersStateLoopInterval)
-	tickerStopSig := make(chan types.Unit, 1)
-	go func() {
-		for {
-			select {
-			case <-ticker.C:
-				eg, ctx := errgroup.WithContext(context.Background())
-
-				peersChan := make(chan *cluster.Peer)
-
-				eg.Go(
-					func() error {
-						defer close(peersChan)
-						peers, err := x.cluster.Peers(ctx)
-						if err != nil {
-							return err
-						}
-
-						for _, peer := range peers {
-							select {
-							case peersChan <- peer:
-							case <-ctx.Done():
-								return ctx.Err()
-							}
-						}
-						return nil
-					},
-				)
-
-				eg.Go(
-					func() error {
-						for peer := range peersChan {
-							if err := x.processPeerState(ctx, peer); err != nil {
-								return err
-							}
-							select {
-							case <-ctx.Done():
-								return ctx.Err()
-							default:
-								// pass
-							}
-						}
-						return nil
-					},
-				)
-
-				if err := eg.Wait(); err != nil {
-					x.logger.Error(err)
-					// TODO: stop or panic
-				}
-
-			case <-x.clusterSyncStopSig:
-				tickerStopSig <- types.Unit{}
-				return
-			}
-		}
-	}()
-
-	<-tickerStopSig
-	ticker.Stop()
-	x.logger.Info("peers state synchronization has stopped...")
-}
-
 func (x *actorSystem) redistributionLoop() {
 	for event := range x.redistributionChan {
 		if x.InCluster() {
@@ -1321,37 +1265,6 @@ func (x *actorSystem) redistributionLoop() {
 			}
 		}
 	}
-}
-
-// processPeerState processes a given peer synchronization record.
-func (x *actorSystem) processPeerState(ctx context.Context, peer *cluster.Peer) error {
-	x.peersCacheMu.Lock()
-	defer x.peersCacheMu.Unlock()
-
-	peerAddress := net.JoinHostPort(peer.Host, strconv.Itoa(peer.Port))
-
-	x.logger.Infof("processing peer sync:(%s)", peerAddress)
-	peerState, err := x.cluster.GetState(ctx, peerAddress)
-	if err != nil {
-		if errors.Is(err, cluster.ErrPeerSyncNotFound) {
-			return nil
-		}
-		x.logger.Error(err)
-		return err
-	}
-
-	x.logger.Debugf("peer (%s) actors count (%d)", peerAddress, len(peerState.GetActors()))
-
-	// no need to handle the error
-	bytea, err := proto.Marshal(peerState)
-	if err != nil {
-		x.logger.Error(err)
-		return err
-	}
-
-	x.peersCache[peerAddress] = bytea
-	x.logger.Infof("peer sync(%s) successfully processed", peerAddress)
-	return nil
 }
 
 // configPID constructs a PID provided the actor name and the actor kind

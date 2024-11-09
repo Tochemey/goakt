@@ -30,7 +30,6 @@ import (
 	"strconv"
 
 	"golang.org/x/sync/errgroup"
-	"google.golang.org/protobuf/proto"
 
 	"github.com/tochemey/goakt/v2/goaktpb"
 	"github.com/tochemey/goakt/v2/internal/cluster"
@@ -64,19 +63,14 @@ func (x *actorSystem) redistribute(ctx context.Context, event *cluster.Event) er
 		return err
 	}
 
-	x.peersCacheMu.RLock()
-	bytea, ok := x.peersCache[nodeLeft.GetAddress()]
-	x.peersCacheMu.RUnlock()
-	if !ok {
-		x.logger.Errorf("peer %s not found", nodeLeft.GetAddress())
+	leftAddress := nodeLeft.GetAddress()
+	peerState, err := x.cluster.GetState(ctx, leftAddress)
+	if err != nil {
+		x.logger.Errorf("peer %s not found: %v", nodeLeft.GetAddress(), err)
 		return ErrPeerNotFound
 	}
 
-	peerState := new(internalpb.PeerState)
-	_ = proto.Unmarshal(bytea, peerState)
-
 	actorsCount := len(peerState.GetActors())
-
 	if actorsCount == 0 {
 		return nil
 	}
@@ -139,13 +133,11 @@ func (x *actorSystem) redistribute(ctx context.Context, event *cluster.Event) er
 			for i := 1; i < len(chunks); i++ {
 				actors := chunks[i]
 				peer := peers[i-1]
-
-				x.peersCacheMu.RLock()
-				bytea := x.peersCache[net.JoinHostPort(peer.Host, strconv.Itoa(peer.Port))]
-				x.peersCacheMu.RUnlock()
-
-				peerState := new(internalpb.PeerState)
-				_ = proto.Unmarshal(bytea, peerState)
+				peerState, err := x.cluster.GetState(ctx, net.JoinHostPort(peer.Host, strconv.Itoa(peer.Port)))
+				if err != nil {
+					x.logger.Error(err)
+					return err
+				}
 
 				for _, actor := range actors {
 					// never redistribute system actors

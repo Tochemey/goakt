@@ -26,6 +26,7 @@ package actors
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -33,12 +34,14 @@ import (
 	testkit "github.com/tochemey/goakt/v2/mocks/discovery"
 )
 
+// nolint
 func TestClusterConfig(t *testing.T) {
 	t.Run("With happy path", func(t *testing.T) {
 		disco := new(testkit.Provider)
 		exchanger := new(exchanger)
 		tester := new(testActor)
 		kinds := []Actor{tester, exchanger}
+		timeout := time.Second
 		config := NewClusterConfig().
 			WithKinds(kinds...).
 			WithDiscoveryPort(3220).
@@ -46,6 +49,11 @@ func TestClusterConfig(t *testing.T) {
 			WithMinimumPeersQuorum(1).
 			WithReplicaCount(1).
 			WithPartitionCount(3).
+			WithMaxJoinAttempts(10).
+			WithReadTimeout(timeout).
+			WithJoinTimeout(timeout).
+			WithJoinRetryInterval(timeout).
+			WithSyncInterval(timeout).
 			WithDiscovery(disco)
 
 		require.NoError(t, config.Validate())
@@ -54,6 +62,11 @@ func TestClusterConfig(t *testing.T) {
 		assert.EqualValues(t, 1, config.MinimumPeersQuorum())
 		assert.EqualValues(t, 1, config.ReplicaCount())
 		assert.EqualValues(t, 3, config.PartitionCount())
+		assert.EqualValues(t, 10, config.MaxJoinAttempts())
+		assert.EqualValues(t, timeout, config.ReadTimeout())
+		assert.EqualValues(t, timeout, config.JoinTimeout())
+		assert.EqualValues(t, timeout, config.JoinRetryInterval())
+		assert.EqualValues(t, timeout, config.SyncInterval())
 		assert.True(t, disco == config.Discovery())
 		assert.Len(t, config.Kinds(), 3)
 	})

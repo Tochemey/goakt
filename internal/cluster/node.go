@@ -213,7 +213,7 @@ func (n *Node) Start(ctx context.Context) error {
 	n.started.Store(true)
 	n.mconfig.Events = n.newEventsHandler()
 
-	logger.Infof("GoAkt cluster Engine=(%s) successfully started.", n.name)
+	logger.Infof("GoAkt cluster Engine=(%s) successfully started with %s provider", n.name, n.provider.ID())
 	return nil
 }
 

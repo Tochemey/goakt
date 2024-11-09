@@ -25,6 +25,8 @@
 package actors
 
 import (
+	"time"
+
 	"github.com/tochemey/goakt/v2/discovery"
 	"github.com/tochemey/goakt/v2/internal/validation"
 )
@@ -43,6 +45,11 @@ type ClusterConfig struct {
 	discoveryPort      int
 	peersPort          int
 	kinds              []Actor
+	joinTimeout        time.Duration
+	joinRetryInterval  time.Duration
+	maxJoinAttempts    int
+	syncInterval       time.Duration
+	readTimeout        time.Duration
 }
 
 // enforce compilation error
@@ -57,7 +64,43 @@ func NewClusterConfig() *ClusterConfig {
 	}
 }
 
+// WithMaxJoinAttempts sets the max join attempts
+func (x *ClusterConfig) WithMaxJoinAttempts(max int) *ClusterConfig {
+	x.maxJoinAttempts = max
+	return x
+}
+
+// WithJoinRetryInterval sets the join tretyr interval
+func (x *ClusterConfig) WithJoinRetryInterval(interval time.Duration) *ClusterConfig {
+	x.joinRetryInterval = interval
+	return x
+}
+
+// WithJoinTimeout sets the join timeout
+func (x *ClusterConfig) WithJoinTimeout(timeout time.Duration) *ClusterConfig {
+	x.joinTimeout = timeout
+	return x
+}
+
+// WithSyncInterval sets the cluster synchronization interval.
+// This is the interval between complete states synchronization between nodes.
+// Complete states synchronization are done with a single node over TCP and are
+// quite expensive relative to standard gossiped messages.
+// Setting this interval lower (more frequent) will increase convergence
+// speeds across larger clusters at the expense of increased bandwidth usage.
+func (x *ClusterConfig) WithSyncInterval(interval time.Duration) *ClusterConfig {
+	x.syncInterval = interval
+	return x
+}
+
+// WithReadTimeout sets the read timeout
+func (x *ClusterConfig) WithReadTimeout(timeout time.Duration) *ClusterConfig {
+	x.readTimeout = timeout
+	return x
+}
+
 // WithPartitionCount sets the cluster config partition count
+// Deprecated: this method will no longer be needed in the next release
 func (x *ClusterConfig) WithPartitionCount(count uint64) *ClusterConfig {
 	x.partitionCount = count
 	return x
@@ -94,12 +137,14 @@ func (x *ClusterConfig) WithPeersPort(peersPort int) *ClusterConfig {
 }
 
 // WithReplicaCount sets the cluster replica count.
+// Deprecated: this method will no longer be needed in the next release
 func (x *ClusterConfig) WithReplicaCount(count uint32) *ClusterConfig {
 	x.replicaCount = count
 	return x
 }
 
 // ReplicaCount returns the replica count.
+// Deprecated: this method will no longer be needed in the next release
 func (x *ClusterConfig) ReplicaCount() uint32 {
 	return x.replicaCount
 }
@@ -110,6 +155,7 @@ func (x *ClusterConfig) Discovery() discovery.Provider {
 }
 
 // PartitionCount returns the partition count
+// Deprecated: this method will no longer be needed in the next release
 func (x *ClusterConfig) PartitionCount() uint64 {
 	return x.partitionCount
 }
@@ -132,6 +178,31 @@ func (x *ClusterConfig) PeersPort() int {
 // Kinds returns the actor kinds
 func (x *ClusterConfig) Kinds() []Actor {
 	return x.kinds
+}
+
+// JoinTimeout returns the join timeout
+func (x *ClusterConfig) JoinTimeout() time.Duration {
+	return x.joinTimeout
+}
+
+// JoinRetryInterval returns the join retry interval
+func (x *ClusterConfig) JoinRetryInterval() time.Duration {
+	return x.joinRetryInterval
+}
+
+// MaxJoinAttempts returns the max join attempts
+func (x *ClusterConfig) MaxJoinAttempts() int {
+	return x.maxJoinAttempts
+}
+
+// SyncInterval returns the state synchronization interval
+func (x *ClusterConfig) SyncInterval() time.Duration {
+	return x.syncInterval
+}
+
+// ReadTimeout returns the read timeout
+func (x *ClusterConfig) ReadTimeout() time.Duration {
+	return x.readTimeout
 }
 
 // Validate validates the cluster config
