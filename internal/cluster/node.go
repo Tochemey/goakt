@@ -287,7 +287,7 @@ func (n *Node) GetActor(ctx context.Context, actorName string) (*internalpb.Acto
 		rerr  error
 	)
 	// retry twice to access the data once to ensure that consistency has taken place
-	retrier := retry.NewRetrier(2, 50*time.Millisecond, n.readTimeout)
+	retrier := retry.NewRetrier(2, n.readTimeout, n.syncInterval)
 	if err := retrier.RunContext(ctx, func(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
@@ -372,7 +372,7 @@ func (n *Node) GetState(ctx context.Context, peerAddress string) (*internalpb.Pe
 		rerr      error
 	)
 	// retry twice to access the data once to ensure that consistency has taken place
-	retrier := retry.NewRetrier(2, 50*time.Millisecond, n.readTimeout)
+	retrier := retry.NewRetrier(2, n.readTimeout, n.syncInterval)
 	if err := retrier.RunContext(ctx, func(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
@@ -440,9 +440,10 @@ func (n *Node) Peers(context.Context) ([]*Peer, error) {
 	for i := 0; i < len(nodes); i++ {
 		member := nodes[i]
 		peer := &Peer{
-			Host:        member.Host,
-			Port:        member.PeersPort,
-			Coordinator: member.DiscoveryAddress() == coordinator.DiscoveryAddress(),
+			Host:         member.Host,
+			Port:         member.PeersPort,
+			RemotingPort: member.RemotingPort,
+			Coordinator:  member.DiscoveryAddress() == coordinator.DiscoveryAddress(),
 		}
 		peers[i] = peer
 	}

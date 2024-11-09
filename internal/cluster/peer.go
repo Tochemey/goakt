@@ -30,6 +30,8 @@ type Peer struct {
 	Host string
 	// Port represents the peer port
 	Port int
+	// Remoting Port
+	RemotingPort int
 	// Coordinator states that the given peer is the leader not.
 	// A peer is a coordinator when it is the oldest node in the cluster
 	Coordinator bool
