@@ -78,7 +78,6 @@ func TestSingleNode(t *testing.T) {
 		host := "127.0.0.1"
 
 		hostNode := discovery.Node{
-			Name:          host,
 			Host:          host,
 			DiscoveryPort: gossipPort,
 			PeersPort:     clusterPort,
@@ -133,7 +132,6 @@ func TestSingleNode(t *testing.T) {
 		// create a Node startNode
 		host := "127.0.0.1"
 		hostNode := discovery.Node{
-			Name:          host,
 			Host:          host,
 			DiscoveryPort: gossipPort,
 			PeersPort:     clusterPort,
@@ -203,7 +201,6 @@ func TestSingleNode(t *testing.T) {
 		// create a Node startNode
 		host := "127.0.0.1"
 		hostNode := discovery.Node{
-			Name:          host,
 			Host:          host,
 			DiscoveryPort: gossipPort,
 			PeersPort:     clusterPort,
@@ -270,7 +267,6 @@ func TestSingleNode(t *testing.T) {
 		// create a Node startNode
 		host := "127.0.0.1"
 		hostNode := discovery.Node{
-			Name:          host,
 			Host:          host,
 			DiscoveryPort: gossipPort,
 			PeersPort:     peersPort,
@@ -454,7 +450,6 @@ func startEngine(t *testing.T, nodeName, serverAddr string) (*Engine, discovery.
 	}
 
 	hostNode := discovery.Node{
-		Name:          host,
 		Host:          host,
 		DiscoveryPort: gossipPort,
 		PeersPort:     clusterPort,
@@ -462,7 +457,7 @@ func startEngine(t *testing.T, nodeName, serverAddr string) (*Engine, discovery.
 	}
 
 	// create the instance of provider
-	provider := nats.NewDiscovery(&config, &hostNode)
+	provider := nats.NewDiscovery(&config, host, gossipPort)
 
 	// create the startNode
 	engine, err := NewEngine(nodeName, provider, &hostNode, WithLogger(log.DiscardLogger))

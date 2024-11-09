@@ -410,6 +410,7 @@ func startNatsServer(t *testing.T) *natsserver.Server {
 	return serv
 }
 
+// nolint
 func startClusterSystem(t *testing.T, nodeName, serverAddr string) (ActorSystem, discovery.Provider) {
 	ctx := context.TODO()
 	logger := log.DiscardLogger
@@ -434,16 +435,8 @@ func startClusterSystem(t *testing.T, nodeName, serverAddr string) (ActorSystem,
 		NatsSubject:     natsSubject,
 	}
 
-	hostNode := discovery.Node{
-		Name:          nodeName,
-		Host:          host,
-		DiscoveryPort: gossipPort,
-		PeersPort:     clusterPort,
-		RemotingPort:  remotingPort,
-	}
-
 	// create the instance of provider
-	provider := nats.NewDiscovery(&config, &hostNode, nats.WithLogger(log.DiscardLogger))
+	provider := nats.NewDiscovery(&config, host, gossipPort, nats.WithLogger(log.DiscardLogger))
 
 	// create the actor system
 	system, err := NewActorSystem(
@@ -461,6 +454,8 @@ func startClusterSystem(t *testing.T, nodeName, serverAddr string) (ActorSystem,
 				WithPeersPort(clusterPort).
 				WithMinimumPeersQuorum(1).
 				WithDiscoveryPort(gossipPort).
+				WithSyncInterval(500*time.Millisecond).
+				WithReadTimeout(time.Second).
 				WithDiscovery(provider).WithKinds(new(testActor))),
 	)
 

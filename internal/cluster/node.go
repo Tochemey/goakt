@@ -119,7 +119,7 @@ func NewNode(name string, disco discovery.Provider, host *discovery.Node, opts .
 		shutdownTimeout:      3 * time.Second,
 		events:               make(chan *Event, 20),
 		minimumPeersQuorum:   1,
-		readTimeout:          100 * time.Millisecond,
+		readTimeout:          time.Second,
 		maxJoinTimeout:       time.Second,
 		maxJoinRetryInterval: time.Second,
 		syncInterval:         time.Second,
@@ -137,6 +137,7 @@ func NewNode(name string, disco discovery.Provider, host *discovery.Node, opts .
 	}
 
 	// set the host startNode
+	host.Birthdate = time.Now().UnixNano()
 	n.node = host
 
 	return n
@@ -287,6 +288,7 @@ func (n *Node) GetActor(ctx context.Context, actorName string) (*internalpb.Acto
 		rerr  error
 	)
 	// retry twice to access the data once to ensure that consistency has taken place
+	// TODO: revisit this settings because it can become performance bottleneck
 	retrier := retry.NewRetrier(2, n.readTimeout, n.syncInterval)
 	if err := retrier.RunContext(ctx, func(ctx context.Context) error {
 		select {
@@ -372,6 +374,7 @@ func (n *Node) GetState(ctx context.Context, peerAddress string) (*internalpb.Pe
 		rerr      error
 	)
 	// retry twice to access the data once to ensure that consistency has taken place
+	// TODO: revisit this settings because it can become performance bottleneck
 	retrier := retry.NewRetrier(2, n.readTimeout, n.syncInterval)
 	if err := retrier.RunContext(ctx, func(ctx context.Context) error {
 		select {

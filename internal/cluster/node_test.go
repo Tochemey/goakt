@@ -245,7 +245,6 @@ func startNode(t *testing.T, nodeName, serverAddr string) (*Node, discovery.Prov
 	}
 
 	hostNode := discovery.Node{
-		Name:          host,
 		Host:          host,
 		DiscoveryPort: gossipPort,
 		PeersPort:     clusterPort,
@@ -253,10 +252,10 @@ func startNode(t *testing.T, nodeName, serverAddr string) (*Node, discovery.Prov
 		Birthdate:     time.Now().UnixNano(),
 	}
 
-	logger := log.DefaultLogger
+	logger := log.DiscardLogger
 
 	// create the instance of provider
-	provider := nats.NewDiscovery(&config, &hostNode, nats.WithLogger(logger))
+	provider := nats.NewDiscovery(&config, host, gossipPort, nats.WithLogger(logger))
 
 	// create the cluster node
 	node := NewNode(nodeName,

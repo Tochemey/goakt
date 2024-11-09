@@ -185,6 +185,7 @@ func WithActorInitTimeout(timeout time.Duration) Option {
 }
 
 // WithPeerStateLoopInterval sets the peer state loop interval
+// Deprecated: this method will no longer be needed in the next release
 func WithPeerStateLoopInterval(interval time.Duration) Option {
 	return OptionFunc(
 		func(system *actorSystem) {

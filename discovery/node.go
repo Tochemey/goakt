@@ -32,8 +32,6 @@ import (
 
 // Node represents a discovered Node
 type Node struct {
-	// Name specifies the discovered node's Name
-	Name string
 	// Host specifies the discovered node's Host
 	Host string
 	// DiscoveryPort
@@ -58,5 +56,5 @@ func (n *Node) DiscoveryAddress() string {
 
 // String returns the printable representation of Node
 func (n *Node) String() string {
-	return fmt.Sprintf("[name=%s host=%s gossip=%d  peers=%d remoting=%d]", n.Name, n.Host, n.DiscoveryPort, n.PeersPort, n.RemotingPort)
+	return fmt.Sprintf("[host=%s gossip=%d  peers=%d remoting=%d]", n.Host, n.DiscoveryPort, n.PeersPort, n.RemotingPort)
 }

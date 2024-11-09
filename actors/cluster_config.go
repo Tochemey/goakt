@@ -94,6 +94,7 @@ func (x *ClusterConfig) WithSyncInterval(interval time.Duration) *ClusterConfig 
 }
 
 // WithReadTimeout sets the read timeout
+// The read timeout should be either greater or equal to syncInterval
 func (x *ClusterConfig) WithReadTimeout(timeout time.Duration) *ClusterConfig {
 	x.readTimeout = timeout
 	return x

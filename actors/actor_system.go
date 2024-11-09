@@ -1066,12 +1066,10 @@ func (x *actorSystem) enableClustering(ctx context.Context) error {
 	}
 
 	hostNode := &discovery.Node{
-		Name:          x.Name(),
 		Host:          x.host,
 		DiscoveryPort: x.clusterConfig.DiscoveryPort(),
 		PeersPort:     x.clusterConfig.PeersPort(),
 		RemotingPort:  int(x.port),
-		Birthdate:     time.Now().UnixNano(),
 	}
 
 	clusterEngine := cluster.NewNode(
