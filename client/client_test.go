@@ -763,7 +763,6 @@ func startNode(t *testing.T, logger log.Logger, nodeName, serverAddr string) (sy
 	}
 
 	hostNode := discovery.Node{
-		Name:          nodeName,
 		Host:          host,
 		DiscoveryPort: gossipPort,
 		PeersPort:     peersPort,
@@ -771,7 +770,7 @@ func startNode(t *testing.T, logger log.Logger, nodeName, serverAddr string) (sy
 	}
 
 	// create the instance of provider
-	natsProvider := nats.NewDiscovery(&config, &hostNode, nats.WithLogger(logger))
+	natsProvider := nats.NewDiscovery(&config, host, gossipPort, nats.WithLogger(logger))
 
 	clusterConfig := actors.
 		NewClusterConfig().
