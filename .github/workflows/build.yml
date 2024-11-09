@@ -40,18 +40,18 @@ jobs:
           files: ./coverage.out
           fail_ci_if_error: false
           verbose: true
-#  lint:
-#    runs-on: ubuntu-latest
-#    timeout-minutes: 10
-#    steps:
-#      - uses: actions/checkout@v4
-#      - uses: actions/setup-go@v5
-#        with:
-#          go-version: '>=1.23.0'
-#          check-latest: true
-#          cache-dependency-path: "**/*.sum"
-#      - name: golangci-lint
-#        uses: golangci/golangci-lint-action@v6
-#        with:
-#          version: v1.60.1
-#          args: --timeout 10m --config .golangci.yml
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '>=1.23.0'
+          check-latest: true
+          cache-dependency-path: "**/*.sum"
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: v1.61.0
+          args: --timeout 10m --config .golangci.yml
