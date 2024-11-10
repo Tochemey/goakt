@@ -307,7 +307,7 @@ To use the stashing feature, call the following methods on the [ReceiveContext](
 
 ### Remoting
 
-This allows remote actors to communicate. The underlying technology is gRPC. To enable remoting just use the `WithRemoting` option when
+[Remoting](./actors/remoting.go) allows remote actors to communicate. The underlying technology is gRPC. To enable remoting just use the `WithRemoting` option when
 creating the actor system. See actor system [options](./actors/option.go). These are the following remoting features available:
 
 - `RemoteTell`: to send a fire-and-forget message to an actor remotely
@@ -319,7 +319,7 @@ creating the actor system. See actor system [options](./actors/option.go). These
 - `RemoteStop`: to stop an actor on a remote machine
 - `RemoteSpawn`: to start an actor on a remote machine. The given actor implementation must be registered using the [`Register`](./actors/actor_system.go) method of the actor system on the remote machine for this call to succeed.
 
-These methods can be used from the [API](./actors/remoting.go) as well as from the [PID](./actors/pid.go) which is the actor reference when an actor is created.
+These methods can be found as well as on the [PID](./actors/pid.go) which is the actor reference when an actor is created.
 
 ### Cluster
 
@@ -370,20 +370,20 @@ To help implement unit tests in GoAkt-based applications. See [Testkit](./testki
 
 ## API
 
-The API interface helps interact with a GoAkt actor system as kind of client. The following features are available:
+The [API](./actors/api.go) interface helps interact with a GoAkt actor system as kind of client. The following features are available:
 
-- `Tell`: to send a message to an actor in a fire-and-forget manner
-- `Ask`: to send a message to an actor and expect a response within a given timeout
+- `Tell`: to send a message to an actor in a fire-and-forget manner.
+- `Ask`: to send a message to an actor and expect a response within a given timeout.
 - `BatchAsk`: to send a batch of requests to an actore remotely and expect responses back for each request.
-- `BatchTell`: to send a batch of fire-and-forget messages to an actor remotely
-- `RemoteTell`: to send a fire-and-forget message to an actor remotely
-- `RemoteAsk`: to send a request/response type of message to a remote actor
-- `RemoteBatchTell`: to send a fire-and-forget bulk of messages to a remote actor
-- `RemoteBatchAsk`: to send a bulk messages to a remote actor with replies
-- `RemoteLookup`: to lookup for an actor on a remote host
-- `RemoteReSpawn`: to restarts an actor on a remote machine
-- `RemoteStop`: to stop an actor on a remote machine
-- `RemoteSpawn`: to start an actor on a remote machine. The given actor implementation must be registered using the [`Register`](./actors/actor_system.go) method of the actor system on the remote machine for this call to succeed.
+- `BatchTell`: to send a batch of fire-and-forget messages to an actor remotely.
+- `RemoteTell`: to send a fire-and-forget message to an actor remotely using the [Remoting](./actors/remoting.go) API.
+- `RemoteAsk`: to send a request/response type of message to a remote actor using the [Remoting](./actors/remoting.go) API.
+- `RemoteBatchTell`: to send a fire-and-forget bulk of messages to a remote actor using the [Remoting](./actors/remoting.go) API.
+- `RemoteBatchAsk`: to send a bulk messages to a remote actor with replies using the [Remoting](./actors/remoting.go) API.
+- `RemoteLookup`: to lookup for an actor on a remote host using the [Remoting](./actors/remoting.go) API.
+- `RemoteReSpawn`: to restarts an actor on a remote machine using the [Remoting](./actors/remoting.go) API.
+- `RemoteStop`: to stop an actor on a remote machine using the [Remoting](./actors/remoting.go) API.
+- `RemoteSpawn`: to start an actor on a remote machine using the [Remoting](./actors/remoting.go) API. The given actor implementation must be registered using the [`Register`](./actors/actor_system.go) method of the actor system on the remote machine for this call to succeed.
 
 ## Client
 
