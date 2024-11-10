@@ -64,16 +64,14 @@ func (x *actorSystem) redistribute(ctx context.Context, event *cluster.Event) er
 		return err
 	}
 
-	x.peersCacheMu.RLock()
-	bytea, ok := x.peersCache[nodeLeft.GetAddress()]
-	x.peersCacheMu.RUnlock()
+	value, ok := x.peersCache.Load(nodeLeft.GetAddress())
 	if !ok {
 		x.logger.Errorf("peer %s not found", nodeLeft.GetAddress())
 		return ErrPeerNotFound
 	}
 
 	peerState := new(internalpb.PeerState)
-	_ = proto.Unmarshal(bytea, peerState)
+	_ = proto.Unmarshal(value.([]byte), peerState)
 
 	actorsCount := len(peerState.GetActors())
 
@@ -140,12 +138,9 @@ func (x *actorSystem) redistribute(ctx context.Context, event *cluster.Event) er
 				actors := chunks[i]
 				peer := peers[i-1]
 
-				x.peersCacheMu.RLock()
-				bytea := x.peersCache[net.JoinHostPort(peer.Host, strconv.Itoa(peer.Port))]
-				x.peersCacheMu.RUnlock()
-
+				value, _ = x.peersCache.Load(net.JoinHostPort(peer.Host, strconv.Itoa(peer.Port)))
 				peerState := new(internalpb.PeerState)
-				_ = proto.Unmarshal(bytea, peerState)
+				_ = proto.Unmarshal(value.([]byte), peerState)
 
 				for _, actor := range actors {
 					// never redistribute system actors

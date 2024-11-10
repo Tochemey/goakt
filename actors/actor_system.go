@@ -219,8 +219,7 @@ type actorSystem struct {
 	reflection *reflection
 
 	peersStateLoopInterval time.Duration
-	peersCacheMu           *sync.RWMutex
-	peersCache             map[string][]byte
+	peersCache             *sync.Map
 	clusterConfig          *ClusterConfig
 	redistributionChan     chan *cluster.Event
 
@@ -260,8 +259,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		clusterEventsChan:      make(chan *cluster.Event, 1),
 		registry:               types.NewRegistry(),
 		clusterSyncStopSig:     make(chan types.Unit, 1),
-		peersCacheMu:           &sync.RWMutex{},
-		peersCache:             make(map[string][]byte),
+		peersCache:             &sync.Map{},
 		peersStateLoopInterval: DefaultPeerStateLoopInterval,
 		port:                   0,
 		host:                   "127.0.0.1",
@@ -1322,9 +1320,6 @@ func (x *actorSystem) redistributionLoop() {
 
 // processPeerState processes a given peer synchronization record.
 func (x *actorSystem) processPeerState(ctx context.Context, peer *cluster.Peer) error {
-	x.peersCacheMu.Lock()
-	defer x.peersCacheMu.Unlock()
-
 	peerAddress := net.JoinHostPort(peer.Host, strconv.Itoa(peer.Port))
 
 	x.logger.Infof("processing peer sync:(%s)", peerAddress)
@@ -1346,7 +1341,7 @@ func (x *actorSystem) processPeerState(ctx context.Context, peer *cluster.Peer) 
 		return err
 	}
 
-	x.peersCache[peerAddress] = bytea
+	x.peersCache.Store(peerAddress, bytea)
 	x.logger.Infof("peer sync(%s) successfully processed", peerAddress)
 	return nil
 }
