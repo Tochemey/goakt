@@ -348,7 +348,7 @@ A simple logging interface to allow custom logger to be implemented instead of u
 ### Encryption and mTLS
 
 GoAkt does not support at the moment any form of data encryption or TLS to prevent any form of mitm attack. This feature may come in the future.
-At the moment, I will recommend a GoAkt-based behind a vpc or using a service mesh like Linkerd or Istio which offers great mTLS support when it comes to service communucation.
+At the moment, I will recommend a GoAkt-based application should be deployed behind a vpc or using a service mesh like Linkerd or Istio which offers great mTLS support when it comes to service communucation.
 
 ### Testkit
 
