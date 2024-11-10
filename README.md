@@ -319,7 +319,7 @@ creating the actor system. See actor system [options](./actors/option.go). These
 - `RemoteStop`: to stop an actor on a remote machine
 - `RemoteSpawn`: to start an actor on a remote machine. The given actor implementation must be registered using the [`Register`](./actors/actor_system.go) method of the actor system on the remote machine for this call to succeed.
 
-These methods can be used from the [API](./actors/api.go) as well as from the [PID](./actors/pid.go) which is the actor reference when an actor is created.
+These methods can be used from the [API](./actors/remoting.go) as well as from the [PID](./actors/pid.go) which is the actor reference when an actor is created.
 
 ### Cluster
 
