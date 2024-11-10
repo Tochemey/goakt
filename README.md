@@ -44,6 +44,7 @@ Also, check reference section at the end of the post for more material regarding
   - [Observability](#observability)
     - [Metrics](#metrics)
     - [Logging](#logging)
+  - [Security](#encryption-and-mtls)
   - [Testkit](#testkit)
 - [API](#api)
 - [Client](#client)
@@ -343,6 +344,10 @@ The following methods have been implemented to help push some metrics to any obs
 #### Logging
 
 A simple logging interface to allow custom logger to be implemented instead of using the default logger.
+
+### Encryption and mTLS
+
+GoAkt does not support at the moment any form of data encryption or TLS to prevent any form of mitm attack. This feature may come in the future.
 
 ### Testkit
 
