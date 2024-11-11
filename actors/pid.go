@@ -38,6 +38,7 @@ import (
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
+	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/tochemey/goakt/v2/address"
@@ -96,10 +97,6 @@ type PID struct {
 	// when the actor is passivated it is stopped which means it does not consume
 	// any further resources like memory and cpu. The default value is 120 seconds
 	passivateAfter atomic.Duration
-
-	// specifies how long the sender of a mail should wait to receiveLoop a reply
-	// when using Ask. The default value is 5s
-	askTimeout atomic.Duration
 
 	// specifies the maximum of retries to attempt when the actor
 	// initialization fails. The default value is 5
@@ -214,7 +211,6 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 	pid.latestReceiveDuration.Store(0)
 	pid.running.Store(false)
 	pid.passivateAfter.Store(DefaultPassivationTimeout)
-	pid.askTimeout.Store(DefaultAskTimeout)
 	pid.initTimeout.Store(DefaultInitTimeout)
 
 	for _, opt := range opts {
@@ -461,7 +457,6 @@ func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor, opts .
 	pidOptions := []pidOption{
 		withInitMaxRetries(int(pid.initMaxRetries.Load())),
 		withPassivationAfter(pid.passivateAfter.Load()),
-		withAskTimeout(pid.askTimeout.Load()),
 		withCustomLogger(pid.logger),
 		withActorSystem(pid.system),
 		withSupervisorDirective(pid.supervisorDirective),
@@ -546,16 +541,18 @@ func (pid *PID) PipeTo(ctx context.Context, to *PID, task future.Task) error {
 
 // Ask sends a synchronous message to another actor and expect a response.
 // This block until a response is received or timed out.
-func (pid *PID) Ask(ctx context.Context, to *PID, message proto.Message) (response proto.Message, err error) {
+func (pid *PID) Ask(ctx context.Context, to *PID, message proto.Message, timeout time.Duration) (response proto.Message, err error) {
 	if !to.IsRunning() {
 		return nil, ErrDead
 	}
 
+	if timeout <= 0 {
+		return nil, ErrInvalidTimeout
+	}
+
 	receiveContext := contextFromPool()
 	receiveContext.build(ctx, pid, to, message, false)
-
 	to.doReceive(receiveContext)
-	timeout := pid.askTimeout.Load()
 
 	select {
 	case result := <-receiveContext.response:
@@ -602,7 +599,7 @@ func (pid *PID) SendAsync(ctx context.Context, actorName string, message proto.M
 // SendSync sends a synchronous message to another actor and expect a response.
 // The location of the given actor is transparent to the caller.
 // This block until a response is received or timed out.
-func (pid *PID) SendSync(ctx context.Context, actorName string, message proto.Message) (response proto.Message, err error) {
+func (pid *PID) SendSync(ctx context.Context, actorName string, message proto.Message, timeout time.Duration) (response proto.Message, err error) {
 	if !pid.IsRunning() {
 		return nil, ErrDead
 	}
@@ -613,10 +610,10 @@ func (pid *PID) SendSync(ctx context.Context, actorName string, message proto.Me
 	}
 
 	if cid != nil {
-		return pid.Ask(ctx, cid, message)
+		return pid.Ask(ctx, cid, message, timeout)
 	}
 
-	reply, err := pid.RemoteAsk(ctx, addr, message)
+	reply, err := pid.RemoteAsk(ctx, addr, message, timeout)
 	if err != nil {
 		return nil, err
 	}
@@ -639,12 +636,12 @@ func (pid *PID) BatchTell(ctx context.Context, to *PID, messages ...proto.Messag
 // BatchAsk sends a synchronous bunch of messages to the given PID and expect responses in the same order as the messages.
 // The messages will be processed one after the other in the order they are sent.
 // This is a design choice to follow the simple principle of one message at a time processing by actors.
-func (pid *PID) BatchAsk(ctx context.Context, to *PID, messages ...proto.Message) (responses chan proto.Message, err error) {
+func (pid *PID) BatchAsk(ctx context.Context, to *PID, messages []proto.Message, timeout time.Duration) (responses chan proto.Message, err error) {
 	responses = make(chan proto.Message, len(messages))
 	defer close(responses)
 
 	for i := 0; i < len(messages); i++ {
-		response, err := pid.Ask(ctx, to, messages[i])
+		response, err := pid.Ask(ctx, to, messages[i], timeout)
 		if err != nil {
 			return nil, err
 		}
@@ -733,9 +730,13 @@ func (pid *PID) RemoteTell(ctx context.Context, to *address.Address, message pro
 }
 
 // RemoteAsk sends a synchronous message to another actor remotely and expect a response.
-func (pid *PID) RemoteAsk(ctx context.Context, to *address.Address, message proto.Message) (response *anypb.Any, err error) {
+func (pid *PID) RemoteAsk(ctx context.Context, to *address.Address, message proto.Message, timeout time.Duration) (response *anypb.Any, err error) {
 	if pid.remoting == nil {
 		return nil, ErrRemotingDisabled
+	}
+
+	if timeout <= 0 {
+		return nil, ErrInvalidTimeout
 	}
 
 	marshaled, err := anypb.New(message)
@@ -759,6 +760,7 @@ func (pid *PID) RemoteAsk(ctx context.Context, to *address.Address, message prot
 			Receiver: to.Address,
 			Message:  marshaled,
 		},
+		Timeout: durationpb.New(timeout),
 	}
 
 	stream := remoteService.RemoteAsk(ctx)
@@ -860,7 +862,7 @@ func (pid *PID) RemoteBatchTell(ctx context.Context, to *address.Address, messag
 // RemoteBatchAsk sends a synchronous bunch of messages to a remote actor and expect responses in the same order as the messages.
 // Messages are processed one after the other in the order they are sent.
 // This can hinder performance if it is not properly used.
-func (pid *PID) RemoteBatchAsk(ctx context.Context, to *address.Address, messages []proto.Message) (responses []*anypb.Any, err error) {
+func (pid *PID) RemoteBatchAsk(ctx context.Context, to *address.Address, messages []proto.Message, timeout time.Duration) (responses []*anypb.Any, err error) {
 	if pid.remoting == nil {
 		return nil, ErrRemotingDisabled
 	}
@@ -886,6 +888,7 @@ func (pid *PID) RemoteBatchAsk(ctx context.Context, to *address.Address, message
 					Receiver: to.Address,
 					Message:  packed,
 				},
+				Timeout: durationpb.New(timeout),
 			},
 		)
 	}
@@ -1210,7 +1213,6 @@ func (pid *PID) init(ctx context.Context) error {
 func (pid *PID) reset() {
 	pid.latestReceiveTime.Store(time.Time{})
 	pid.passivateAfter.Store(DefaultPassivationTimeout)
-	pid.askTimeout.Store(DefaultAskTimeout)
 	pid.shutdownTimeout.Store(DefaultShutdownTimeout)
 	pid.initMaxRetries.Store(DefaultInitMaxRetries)
 	pid.latestReceiveDuration.Store(0)

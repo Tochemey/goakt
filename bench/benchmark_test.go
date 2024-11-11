@@ -46,8 +46,7 @@ func BenchmarkActor(b *testing.B) {
 		actorSystem, _ := actors.NewActorSystem("bench",
 			actors.WithLogger(log.DiscardLogger),
 			actors.WithActorInitMaxRetries(1),
-			actors.WithSupervisorDirective(actors.NewStopDirective()),
-			actors.WithReplyTimeout(receivingTimeout))
+			actors.WithSupervisorDirective(actors.NewStopDirective()))
 
 		// start the actor system
 		_ = actorSystem.Start(ctx)
@@ -91,8 +90,7 @@ func BenchmarkActor(b *testing.B) {
 		actorSystem, _ := actors.NewActorSystem("bench",
 			actors.WithLogger(log.DiscardLogger),
 			actors.WithActorInitMaxRetries(1),
-			actors.WithSupervisorDirective(actors.NewStopDirective()),
-			actors.WithReplyTimeout(receivingTimeout))
+			actors.WithSupervisorDirective(actors.NewStopDirective()))
 
 		// start the actor system
 		_ = actorSystem.Start(ctx)
@@ -130,8 +128,7 @@ func BenchmarkActor(b *testing.B) {
 		actorSystem, _ := actors.NewActorSystem("bench",
 			actors.WithLogger(log.DiscardLogger),
 			actors.WithActorInitMaxRetries(1),
-			actors.WithSupervisorDirective(actors.NewStopDirective()),
-			actors.WithReplyTimeout(receivingTimeout))
+			actors.WithSupervisorDirective(actors.NewStopDirective()))
 
 		// start the actor system
 		_ = actorSystem.Start(ctx)
@@ -169,8 +166,7 @@ func BenchmarkActor(b *testing.B) {
 		actorSystem, _ := actors.NewActorSystem("bench",
 			actors.WithLogger(log.DiscardLogger),
 			actors.WithActorInitMaxRetries(1),
-			actors.WithSupervisorDirective(actors.NewStopDirective()),
-			actors.WithReplyTimeout(receivingTimeout))
+			actors.WithSupervisorDirective(actors.NewStopDirective()))
 
 		// start the actor system
 		_ = actorSystem.Start(ctx)
@@ -208,8 +204,7 @@ func BenchmarkActor(b *testing.B) {
 		actorSystem, _ := actors.NewActorSystem("bench",
 			actors.WithLogger(log.DiscardLogger),
 			actors.WithActorInitMaxRetries(1),
-			actors.WithExpireActorAfter(5*time.Second),
-			actors.WithReplyTimeout(receivingTimeout))
+			actors.WithExpireActorAfter(5*time.Second))
 
 		// start the actor system
 		_ = actorSystem.Start(ctx)
@@ -251,8 +246,7 @@ func BenchmarkActor(b *testing.B) {
 		actorSystem, _ := actors.NewActorSystem("bench",
 			actors.WithLogger(log.DiscardLogger),
 			actors.WithActorInitMaxRetries(1),
-			actors.WithSupervisorDirective(actors.NewStopDirective()),
-			actors.WithReplyTimeout(receivingTimeout))
+			actors.WithSupervisorDirective(actors.NewStopDirective()))
 
 		// start the actor system
 		_ = actorSystem.Start(ctx)
@@ -272,7 +266,7 @@ func BenchmarkActor(b *testing.B) {
 		b.ReportAllocs()
 		b.RunParallel(func(pb *testing.PB) {
 			for pb.Next() {
-				if _, err := sender.Ask(ctx, receiver, new(benchmarkpb.BenchRequest)); err != nil {
+				if _, err := sender.Ask(ctx, receiver, new(benchmarkpb.BenchRequest), receivingTimeout); err != nil {
 					b.Fatal(err)
 				}
 				atomic.AddInt64(&counter, 1)

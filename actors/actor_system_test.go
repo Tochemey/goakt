@@ -196,7 +196,6 @@ func TestActorSystem(t *testing.T) {
 				"test",
 				WithPassivationDisabled(),
 				WithLogger(logger),
-				WithReplyTimeout(time.Minute),
 				WithRemoting(host, int32(remotingPort)),
 				WithClustering(provider, 9, 1, gossipPort, clusterPort, new(testActor)),
 			)
@@ -239,7 +238,7 @@ func TestActorSystem(t *testing.T) {
 			require.True(t, proto.Equal(remoteAddr, addr))
 
 			remoting := NewRemoting()
-			reply, err := remoting.RemoteAsk(ctx, addr, new(testpb.TestReply), DefaultAskTimeout)
+			reply, err := remoting.RemoteAsk(ctx, addr, new(testpb.TestReply), 20*time.Second)
 			require.NoError(t, err)
 			require.NotNil(t, reply)
 
@@ -285,7 +284,6 @@ func TestActorSystem(t *testing.T) {
 				"test",
 				WithPassivationDisabled(),
 				WithLogger(logger),
-				WithReplyTimeout(time.Minute),
 				WithRemoting(host, int32(remotingPort)),
 			)
 			require.NoError(t, err)
@@ -384,7 +382,6 @@ func TestActorSystem(t *testing.T) {
 				"test",
 				WithPassivationDisabled(),
 				WithLogger(logger),
-				WithReplyTimeout(time.Minute),
 				WithRemoting(host, int32(remotingPort)),
 			)
 			require.NoError(t, err)
@@ -561,7 +558,6 @@ func TestActorSystem(t *testing.T) {
 				"test",
 				WithPassivationDisabled(),
 				WithLogger(logger),
-				WithReplyTimeout(time.Minute),
 				WithRemoting(host, int32(remotingPort)),
 			)
 			require.NoError(t, err)
@@ -641,7 +637,6 @@ func TestActorSystem(t *testing.T) {
 				"test",
 				WithPassivationDisabled(),
 				WithLogger(logger),
-				WithReplyTimeout(time.Minute),
 				WithRemoting(host, int32(remotingPort)),
 			)
 			require.NoError(t, err)
@@ -667,7 +662,7 @@ func TestActorSystem(t *testing.T) {
 					Id:   "",
 				},
 			)
-			reply, err := remoting.RemoteAsk(ctx, addr, new(testpb.TestReply), DefaultAskTimeout)
+			reply, err := remoting.RemoteAsk(ctx, addr, new(testpb.TestReply), 20*time.Second)
 			require.Error(t, err)
 			require.Nil(t, reply)
 
@@ -695,7 +690,6 @@ func TestActorSystem(t *testing.T) {
 				"test",
 				WithPassivationDisabled(),
 				WithLogger(logger),
-				WithReplyTimeout(time.Minute),
 				WithRemoting(host, int32(remotingPort)),
 			)
 			require.NoError(t, err)
@@ -719,7 +713,6 @@ func TestActorSystem(t *testing.T) {
 				"test",
 				WithPassivationDisabled(),
 				WithLogger(logger),
-				WithReplyTimeout(time.Minute),
 				WithRemoting(host, int32(remotingPort)),
 			)
 			require.NoError(t, err)
@@ -741,7 +734,6 @@ func TestActorSystem(t *testing.T) {
 				"test",
 				WithPassivationDisabled(),
 				WithLogger(logger),
-				WithReplyTimeout(time.Minute),
 				WithRemoting(host, int32(remotingPort)),
 			)
 			require.NoError(t, err)
@@ -1074,7 +1066,6 @@ func TestActorSystem(t *testing.T) {
 				"test",
 				WithExpireActorAfter(passivateAfter),
 				WithLogger(logger),
-				WithReplyTimeout(time.Minute),
 				WithRemoting(host, int32(remotingPort)),
 				WithClustering(provider, 9, 1, gossipPort, clusterPort, new(testActor)),
 			)
@@ -1249,7 +1240,6 @@ func TestActorSystem(t *testing.T) {
 				"test",
 				WithPassivationDisabled(),
 				WithLogger(logger),
-				WithReplyTimeout(time.Minute),
 				WithRemoting(host, int32(remotingPort)),
 				WithClustering(provider, 9, 1, gossipPort, clusterPort, new(testActor)),
 			)
@@ -1545,7 +1535,6 @@ func TestActorSystem(t *testing.T) {
 				"test",
 				WithPassivationDisabled(),
 				WithLogger(logger),
-				WithReplyTimeout(time.Minute),
 				WithRemoting(host, int32(remotingPort)),
 				WithClustering(provider, 9, 1, gossipPort, clusterPort, new(exchanger)),
 			)
@@ -1583,7 +1572,7 @@ func TestActorSystem(t *testing.T) {
 			require.NotNil(t, addr)
 
 			// send the message to exchanger actor one using remote messaging
-			reply, err := remoting.RemoteAsk(ctx, addr, new(testpb.TestReply), DefaultAskTimeout)
+			reply, err := remoting.RemoteAsk(ctx, addr, new(testpb.TestReply), 20*time.Second)
 
 			require.NoError(t, err)
 			require.NotNil(t, reply)

@@ -65,8 +65,7 @@ func TestReceive(t *testing.T) {
 			actorPath,
 			newTestActor(),
 			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
-			withAskTimeout(replyTimeout))
+			withCustomLogger(log.DiscardLogger))
 
 		require.NoError(t, err)
 		assert.NotNil(t, pid)
@@ -99,7 +98,6 @@ func TestPassivation(t *testing.T) {
 		opts := []pidOption{
 			withInitMaxRetries(1),
 			withPassivationAfter(passivateAfter),
-			withAskTimeout(replyTimeout),
 		}
 
 		ports := dynaport.Get(1)
@@ -130,7 +128,6 @@ func TestPassivation(t *testing.T) {
 		opts := []pidOption{
 			withInitMaxRetries(1),
 			withPassivationAfter(passivateAfter),
-			withAskTimeout(replyTimeout),
 		}
 
 		ports := dynaport.Get(1)
@@ -252,8 +249,7 @@ func TestRestart(t *testing.T) {
 		pid, err := newPID(ctx, actorPath, actor,
 			withInitMaxRetries(1),
 			withPassivationAfter(10*time.Second),
-			withCustomLogger(log.DiscardLogger),
-			withAskTimeout(replyTimeout))
+			withCustomLogger(log.DiscardLogger))
 
 		require.NoError(t, err)
 		assert.NotNil(t, pid)
@@ -298,8 +294,7 @@ func TestRestart(t *testing.T) {
 		// create the actor ref
 		pid, err := newPID(ctx, actorPath, actor,
 			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
-			withAskTimeout(replyTimeout))
+			withCustomLogger(log.DiscardLogger))
 
 		require.NoError(t, err)
 		assert.NotNil(t, pid)
@@ -341,8 +336,7 @@ func TestRestart(t *testing.T) {
 		pid, err := newPID(ctx, actorPath, actor,
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
-			withPassivationAfter(time.Minute),
-			withAskTimeout(replyTimeout))
+			withPassivationAfter(time.Minute))
 
 		require.NoError(t, err)
 		assert.NotNil(t, pid)
@@ -382,8 +376,7 @@ func TestRestart(t *testing.T) {
 		pid, err := newPID(ctx, actorPath, actor,
 			withInitMaxRetries(1),
 			withPassivationAfter(passivateAfter),
-			withCustomLogger(log.DiscardLogger),
-			withAskTimeout(replyTimeout))
+			withCustomLogger(log.DiscardLogger))
 
 		require.NoError(t, err)
 		assert.NotNil(t, pid)
@@ -414,8 +407,7 @@ func TestSupervisorStrategy(t *testing.T) {
 			newTestSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
-			withSupervisorDirective(NewStopDirective()),
-			withAskTimeout(replyTimeout))
+			withSupervisorDirective(NewStopDirective()))
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
@@ -452,8 +444,7 @@ func TestSupervisorStrategy(t *testing.T) {
 			newTestSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
-			withPassivationDisabled(),
-			withAskTimeout(replyTimeout))
+			withPassivationDisabled())
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
@@ -496,7 +487,7 @@ func TestSupervisorStrategy(t *testing.T) {
 			withCustomLogger(log.DiscardLogger),
 			withPassivationDisabled(),
 			withSupervisorDirective(new(unhandledSupervisorDirective)), // only for test to handle default case
-			withAskTimeout(replyTimeout))
+		)
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
@@ -539,7 +530,7 @@ func TestSupervisorStrategy(t *testing.T) {
 			withCustomLogger(log.DiscardLogger),
 			withSupervisorDirective(DefaultSupervisoryStrategy),
 			withPassivationDisabled(),
-			withAskTimeout(replyTimeout))
+		)
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
@@ -583,7 +574,7 @@ func TestSupervisorStrategy(t *testing.T) {
 			withCustomLogger(logger),
 			withPassivationDisabled(),
 			withSupervisorDirective(NewRestartDirective()),
-			withAskTimeout(replyTimeout))
+		)
 
 		require.NoError(t, err)
 		require.NotNil(t, parent)
@@ -627,7 +618,7 @@ func TestSupervisorStrategy(t *testing.T) {
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
 			withPassivationDisabled(),
-			withAskTimeout(replyTimeout))
+		)
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
@@ -668,7 +659,7 @@ func TestSupervisorStrategy(t *testing.T) {
 			withCustomLogger(logger),
 			withPassivationDisabled(),
 			withSupervisorDirective(NewResumeDirective()),
-			withAskTimeout(replyTimeout))
+		)
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
@@ -720,7 +711,7 @@ func TestSupervisorStrategy(t *testing.T) {
 			withCustomLogger(logger),
 			withPassivationDisabled(),
 			withSupervisorDirective(restart),
-			withAskTimeout(replyTimeout))
+		)
 
 		require.NoError(t, err)
 		require.NotNil(t, parent)
@@ -775,7 +766,7 @@ func TestMessaging(t *testing.T) {
 		require.NoError(t, err)
 
 		// send an ask
-		reply, err := pid1.Ask(ctx, pid2, new(testpb.TestReply))
+		reply, err := pid1.Ask(ctx, pid2, new(testpb.TestReply), 20*time.Second)
 		require.NoError(t, err)
 		require.NotNil(t, reply)
 		expected := new(testpb.Reply)
@@ -822,7 +813,7 @@ func TestMessaging(t *testing.T) {
 		assert.NoError(t, pid2.Shutdown(ctx))
 
 		// send an ask
-		reply, err := pid1.Ask(ctx, pid2, new(testpb.TestReply))
+		reply, err := pid1.Ask(ctx, pid2, new(testpb.TestReply), 20*time.Second)
 		require.Error(t, err)
 		require.EqualError(t, err, ErrDead.Error())
 		require.Nil(t, reply)
@@ -876,7 +867,6 @@ func TestMessaging(t *testing.T) {
 		opts := []pidOption{
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
-			withAskTimeout(replyTimeout),
 		}
 		ports := dynaport.Get(1)
 
@@ -898,7 +888,7 @@ func TestMessaging(t *testing.T) {
 		require.NoError(t, err)
 
 		// send an ask
-		reply, err := pid1.Ask(ctx, pid2, new(testpb.TestTimeout))
+		reply, err := pid1.Ask(ctx, pid2, new(testpb.TestTimeout), replyTimeout)
 		require.Error(t, err)
 		require.EqualError(t, err, ErrRequestTimeout.Error())
 		require.Nil(t, reply)
@@ -959,7 +949,7 @@ func TestRemoting(t *testing.T) {
 		require.NoError(t, err)
 
 		// send the message to exchanger actor one using remote messaging
-		reply, err := actorRef2.RemoteAsk(ctx, address.From(addr1), new(testpb.TestReply))
+		reply, err := actorRef2.RemoteAsk(ctx, address.From(addr1), new(testpb.TestReply), replyTimeout)
 		// perform some assertions
 		require.NoError(t, err)
 		require.NotNil(t, reply)
@@ -1025,7 +1015,7 @@ func TestRemoting(t *testing.T) {
 
 		actorRef2.remoting = nil
 		// send the message to exchanger actor one using remote messaging
-		reply, err := actorRef2.RemoteAsk(ctx, address.From(addr1), new(testpb.TestReply))
+		reply, err := actorRef2.RemoteAsk(ctx, address.From(addr1), new(testpb.TestReply), replyTimeout)
 		// perform some assertions
 		require.Error(t, err)
 		require.Nil(t, reply)
@@ -1057,8 +1047,7 @@ func TestActorHandle(t *testing.T) {
 		actorPath,
 		&exchanger{},
 		withInitMaxRetries(1),
-		withCustomLogger(log.DiscardLogger),
-		withAskTimeout(replyTimeout))
+		withCustomLogger(log.DiscardLogger))
 
 	require.NoError(t, err)
 	assert.NotNil(t, pid)
@@ -1083,8 +1072,8 @@ func TestPIDActorSystem(t *testing.T) {
 		actorPath,
 		&exchanger{},
 		withInitMaxRetries(1),
-		withCustomLogger(log.DiscardLogger),
-		withAskTimeout(replyTimeout))
+		withCustomLogger(log.DiscardLogger))
+
 	require.NoError(t, err)
 	assert.NotNil(t, pid)
 	sys := pid.ActorSystem()
@@ -1105,8 +1094,7 @@ func TestSpawnChild(t *testing.T) {
 		parent, err := newPID(ctx, actorPath,
 			newTestSupervisor(),
 			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
-			withAskTimeout(replyTimeout))
+			withCustomLogger(log.DiscardLogger))
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
@@ -1145,8 +1133,7 @@ func TestSpawnChild(t *testing.T) {
 		parent, err := newPID(ctx, actorPath,
 			newTestSupervisor(),
 			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
-			withAskTimeout(replyTimeout))
+			withCustomLogger(log.DiscardLogger))
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
@@ -1175,8 +1162,7 @@ func TestSpawnChild(t *testing.T) {
 		parent, err := newPID(ctx, actorPath,
 			newTestSupervisor(),
 			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
-			withAskTimeout(replyTimeout))
+			withCustomLogger(log.DiscardLogger))
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
@@ -1212,8 +1198,7 @@ func TestSpawnChild(t *testing.T) {
 		parent, err := newPID(ctx, actorPath,
 			newTestSupervisor(),
 			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
-			withAskTimeout(replyTimeout))
+			withCustomLogger(log.DiscardLogger))
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
@@ -1240,8 +1225,7 @@ func TestSpawnChild(t *testing.T) {
 		parent, err := newPID(ctx, actorPath,
 			newTestSupervisor(),
 			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
-			withAskTimeout(replyTimeout))
+			withCustomLogger(log.DiscardLogger))
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
@@ -1274,8 +1258,7 @@ func TestSpawnChild(t *testing.T) {
 			newTestSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
-			withEventsStream(eventsStream),
-			withAskTimeout(replyTimeout))
+			withEventsStream(eventsStream))
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
@@ -1323,8 +1306,7 @@ func TestPoisonPill(t *testing.T) {
 		actorPath,
 		newTestActor(),
 		withInitMaxRetries(1),
-		withCustomLogger(log.DiscardLogger),
-		withAskTimeout(replyTimeout))
+		withCustomLogger(log.DiscardLogger))
 
 	require.NoError(t, err)
 	assert.NotNil(t, pid)
@@ -1503,8 +1485,7 @@ func TestFailedPostStop(t *testing.T) {
 		actorPath,
 		&testPostStop{},
 		withInitMaxRetries(1),
-		withCustomLogger(log.DiscardLogger),
-		withAskTimeout(replyTimeout))
+		withCustomLogger(log.DiscardLogger))
 
 	require.NoError(t, err)
 	assert.NotNil(t, pid)
@@ -1523,8 +1504,7 @@ func TestShutdown(t *testing.T) {
 		parent, err := newPID(ctx, actorPath,
 			newTestSupervisor(),
 			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
-			withAskTimeout(replyTimeout))
+			withCustomLogger(log.DiscardLogger))
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
@@ -1634,7 +1614,7 @@ func TestBatchAsk(t *testing.T) {
 		require.NotNil(t, pid)
 
 		// batch ask
-		responses, err := pid.BatchAsk(ctx, pid, new(testpb.TestReply), new(testpb.TestReply))
+		responses, err := pid.BatchAsk(ctx, pid, []proto.Message{new(testpb.TestReply), new(testpb.TestReply)}, replyTimeout)
 		require.NoError(t, err)
 		for reply := range responses {
 			require.NoError(t, err)
@@ -1667,7 +1647,7 @@ func TestBatchAsk(t *testing.T) {
 		assert.NoError(t, pid.Shutdown(ctx))
 
 		// batch ask
-		responses, err := pid.BatchAsk(ctx, pid, new(testpb.TestReply), new(testpb.TestReply))
+		responses, err := pid.BatchAsk(ctx, pid, []proto.Message{new(testpb.TestReply), new(testpb.TestReply)}, replyTimeout)
 		require.Error(t, err)
 		require.Nil(t, responses)
 	})
@@ -1677,7 +1657,6 @@ func TestBatchAsk(t *testing.T) {
 		opts := []pidOption{
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
-			withAskTimeout(replyTimeout),
 		}
 
 		// create the actor path
@@ -1689,7 +1668,7 @@ func TestBatchAsk(t *testing.T) {
 		require.NotNil(t, pid)
 
 		// batch ask
-		responses, err := pid.BatchAsk(ctx, pid, new(testpb.TestTimeout), new(testpb.TestReply))
+		responses, err := pid.BatchAsk(ctx, pid, []proto.Message{new(testpb.TestTimeout), new(testpb.TestReply)}, replyTimeout)
 		require.Error(t, err)
 		require.Empty(t, responses)
 
@@ -1987,8 +1966,8 @@ func TestID(t *testing.T) {
 		actorPath,
 		&exchanger{},
 		withInitMaxRetries(1),
-		withCustomLogger(log.DiscardLogger),
-		withAskTimeout(replyTimeout))
+		withCustomLogger(log.DiscardLogger))
+
 	require.NoError(t, err)
 	assert.NotNil(t, pid)
 	sys := pid.ActorSystem()
@@ -2079,7 +2058,7 @@ func TestRemoteSpawn(t *testing.T) {
 		require.NotNil(t, addr)
 
 		// send the message to exchanger actor one using remote messaging
-		reply, err := pid.RemoteAsk(ctx, address.From(addr), new(testpb.TestReply))
+		reply, err := pid.RemoteAsk(ctx, address.From(addr), new(testpb.TestReply), replyTimeout)
 
 		require.NoError(t, err)
 		require.NotNil(t, reply)
@@ -2250,8 +2229,7 @@ func TestName(t *testing.T) {
 		actorPath,
 		&exchanger{},
 		withInitMaxRetries(1),
-		withCustomLogger(log.DiscardLogger),
-		withAskTimeout(replyTimeout))
+		withCustomLogger(log.DiscardLogger))
 	require.NoError(t, err)
 	assert.NotNil(t, pid)
 	sys := pid.ActorSystem()
@@ -2273,7 +2251,6 @@ func TestPipeTo(t *testing.T) {
 
 		opts := []pidOption{
 			withInitMaxRetries(1),
-			withAskTimeout(askTimeout),
 			withPassivationDisabled(),
 			withCustomLogger(log.DiscardLogger),
 		}
@@ -2328,12 +2305,10 @@ func TestPipeTo(t *testing.T) {
 		assert.NoError(t, pid2.Shutdown(ctx))
 	})
 	t.Run("With is a dead actor: case 1", func(t *testing.T) {
-		askTimeout := time.Minute
 		ctx := context.TODO()
 
 		opts := []pidOption{
 			withInitMaxRetries(1),
-			withAskTimeout(askTimeout),
 			withPassivationDisabled(),
 			withCustomLogger(log.DiscardLogger),
 		}
@@ -2371,7 +2346,6 @@ func TestPipeTo(t *testing.T) {
 
 		opts := []pidOption{
 			withInitMaxRetries(1),
-			withAskTimeout(askTimeout),
 			withPassivationDisabled(),
 			withCustomLogger(log.DiscardLogger),
 		}
@@ -2428,12 +2402,10 @@ func TestPipeTo(t *testing.T) {
 		assert.NoError(t, pid1.Shutdown(ctx))
 	})
 	t.Run("With undefined task", func(t *testing.T) {
-		askTimeout := time.Minute
 		ctx := context.TODO()
 
 		opts := []pidOption{
 			withInitMaxRetries(1),
-			withAskTimeout(askTimeout),
 			withPassivationDisabled(),
 			withCustomLogger(log.DiscardLogger),
 		}
@@ -2473,7 +2445,6 @@ func TestPipeTo(t *testing.T) {
 
 		opts := []pidOption{
 			withInitMaxRetries(1),
-			withAskTimeout(askTimeout),
 			withPassivationDisabled(),
 			withCustomLogger(log.DiscardLogger),
 		}
@@ -2693,7 +2664,7 @@ func TestSendSync(t *testing.T) {
 
 		lib.Pause(time.Second)
 
-		response, err := sender.SendSync(ctx, receiver.Name(), new(testpb.TestReply))
+		response, err := sender.SendSync(ctx, receiver.Name(), new(testpb.TestReply), replyTimeout)
 		require.NoError(t, err)
 		require.NotNil(t, response)
 		expected := &testpb.Reply{Content: "received message"}
@@ -2727,7 +2698,7 @@ func TestSendSync(t *testing.T) {
 		err = actorSystem.Kill(ctx, sender.Name())
 		require.NoError(t, err)
 
-		response, err := sender.SendSync(ctx, receiver.Name(), new(testpb.TestReply))
+		response, err := sender.SendSync(ctx, receiver.Name(), new(testpb.TestReply), replyTimeout)
 		require.Error(t, err)
 		require.Nil(t, response)
 		assert.EqualError(t, err, ErrDead.Error())
@@ -2764,7 +2735,7 @@ func TestSendSync(t *testing.T) {
 
 		lib.Pause(time.Second)
 
-		response, err := sender.SendSync(ctx, receiver.Name(), new(testpb.TestReply))
+		response, err := sender.SendSync(ctx, receiver.Name(), new(testpb.TestReply), replyTimeout)
 		require.NoError(t, err)
 		require.NotNil(t, response)
 		expected := &testpb.Reply{Content: "received message"}
@@ -2800,7 +2771,7 @@ func TestSendSync(t *testing.T) {
 
 		lib.Pause(time.Second)
 
-		response, err := sender.SendSync(ctx, "receiver", new(testpb.TestReply))
+		response, err := sender.SendSync(ctx, "receiver", new(testpb.TestReply), time.Minute)
 		require.Nil(t, response)
 		require.Error(t, err)
 		assert.EqualError(t, err, ErrActorNotFound("receiver").Error())
@@ -2826,8 +2797,7 @@ func TestStopChild(t *testing.T) {
 		parent, err := newPID(ctx, actorPath,
 			newTestSupervisor(),
 			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
-			withAskTimeout(replyTimeout))
+			withCustomLogger(log.DiscardLogger))
 
 		require.NoError(t, err)
 		require.NotNil(t, parent)
@@ -2853,8 +2823,7 @@ func TestNewPID(t *testing.T) {
 			nil,
 			newTestActor(),
 			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
-			withAskTimeout(replyTimeout))
+			withCustomLogger(log.DiscardLogger))
 
 		require.Error(t, err)
 		assert.Nil(t, pid)

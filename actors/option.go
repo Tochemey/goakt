@@ -67,16 +67,6 @@ func WithLogger(logger log.Logger) Option {
 	)
 }
 
-// WithReplyTimeout sets how long in seconds an actor should reply a command
-// in a receive-reply pattern
-func WithReplyTimeout(timeout time.Duration) Option {
-	return OptionFunc(
-		func(a *actorSystem) {
-			a.askTimeout = timeout
-		},
-	)
-}
-
 // WithActorInitMaxRetries sets the number of times to retry an actor init process
 func WithActorInitMaxRetries(max int) Option {
 	return OptionFunc(

@@ -217,7 +217,7 @@ func (r *Remoting) RemoteBatchTell(ctx context.Context, to *address.Address, mes
 }
 
 // RemoteBatchAsk sends bulk messages to an actor with responses expected
-func (r *Remoting) RemoteBatchAsk(ctx context.Context, to *address.Address, messages []proto.Message) (responses []*anypb.Any, err error) {
+func (r *Remoting) RemoteBatchAsk(ctx context.Context, to *address.Address, messages []proto.Message, timeout time.Duration) (responses []*anypb.Any, err error) {
 	var requests []*internalpb.RemoteAskRequest
 	for _, message := range messages {
 		packed, err := anypb.New(message)
@@ -232,6 +232,7 @@ func (r *Remoting) RemoteBatchAsk(ctx context.Context, to *address.Address, mess
 					Receiver: to.Address,
 					Message:  packed,
 				},
+				Timeout: durationpb.New(timeout),
 			},
 		)
 	}

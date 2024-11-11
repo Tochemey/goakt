@@ -214,7 +214,7 @@ func TestReceiveContext(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
 
-		reply := context.Ask(pid2, new(testpb.TestReply))
+		reply := context.Ask(pid2, new(testpb.TestReply), time.Minute)
 		require.NotNil(t, reply)
 		expected := new(testpb.Reply)
 		assert.True(t, proto.Equal(expected, reply))
@@ -257,7 +257,7 @@ func TestReceiveContext(t *testing.T) {
 		lib.Pause(time.Second)
 		assert.NoError(t, pid2.Shutdown(ctx))
 
-		context.Ask(pid2, new(testpb.TestReply))
+		context.Ask(pid2, new(testpb.TestReply), time.Minute)
 		require.Error(t, context.getError())
 
 		lib.Pause(time.Second)
@@ -318,7 +318,7 @@ func TestReceiveContext(t *testing.T) {
 		// get the address of the exchanger actor one
 		addr1 := context.RemoteLookup(host, remotingPort, actorName2)
 		// send the message to t exchanger actor one using remote messaging
-		reply := context.RemoteAsk(address.From(addr1), new(testpb.TestReply))
+		reply := context.RemoteAsk(address.From(addr1), new(testpb.TestReply), time.Minute)
 		// perform some assertions
 		require.NotNil(t, reply)
 		require.True(t, reply.MessageIs(new(testpb.Reply)))
@@ -389,7 +389,7 @@ func TestReceiveContext(t *testing.T) {
 				Name: actorName2,
 				Id:   "",
 			},
-		), new(testpb.TestReply))
+		), new(testpb.TestReply), time.Minute)
 		require.Error(t, context.getError())
 		lib.Pause(time.Second)
 
@@ -696,7 +696,6 @@ func TestReceiveContext(t *testing.T) {
 			newTestSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
-			withAskTimeout(replyTimeout),
 		)
 
 		require.NoError(t, err)
@@ -737,7 +736,6 @@ func TestReceiveContext(t *testing.T) {
 			newTestSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
-			withAskTimeout(replyTimeout),
 		)
 
 		require.NoError(t, err)
@@ -769,7 +767,6 @@ func TestReceiveContext(t *testing.T) {
 			newTestSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
-			withAskTimeout(replyTimeout),
 		)
 
 		require.NoError(t, err)
@@ -811,7 +808,6 @@ func TestReceiveContext(t *testing.T) {
 			newTestSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
-			withAskTimeout(replyTimeout),
 		)
 
 		require.NoError(t, err)
@@ -853,7 +849,6 @@ func TestReceiveContext(t *testing.T) {
 			newTestSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
-			withAskTimeout(replyTimeout),
 		)
 
 		require.NoError(t, err)
@@ -895,7 +890,6 @@ func TestReceiveContext(t *testing.T) {
 			newTestSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
-			withAskTimeout(replyTimeout),
 		)
 
 		require.NoError(t, err)
@@ -941,7 +935,6 @@ func TestReceiveContext(t *testing.T) {
 			newTestSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
-			withAskTimeout(replyTimeout),
 		)
 
 		require.NoError(t, err)
@@ -977,7 +970,6 @@ func TestReceiveContext(t *testing.T) {
 			newTestSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
-			withAskTimeout(replyTimeout),
 		)
 
 		require.NoError(t, err)
@@ -1017,7 +1009,6 @@ func TestReceiveContext(t *testing.T) {
 			newTestSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
-			withAskTimeout(replyTimeout),
 		)
 
 		require.NoError(t, err)
@@ -1038,7 +1029,6 @@ func TestReceiveContext(t *testing.T) {
 			newTestSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
-			withAskTimeout(replyTimeout),
 		)
 
 		require.NoError(t, err)
@@ -1064,7 +1054,6 @@ func TestReceiveContext(t *testing.T) {
 			newTestSupervisor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
-			withAskTimeout(replyTimeout),
 		)
 
 		require.NoError(t, err)
@@ -1532,7 +1521,7 @@ func TestReceiveContext(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
 
-		replies := context.BatchAsk(pid2, new(testpb.TestReply), new(testpb.TestReply))
+		replies := context.BatchAsk(pid2, []proto.Message{new(testpb.TestReply), new(testpb.TestReply)}, time.Minute)
 		require.NotNil(t, replies)
 		require.Len(t, replies, 2)
 		for reply := range replies {
@@ -1580,7 +1569,7 @@ func TestReceiveContext(t *testing.T) {
 		lib.Pause(time.Second)
 		assert.NoError(t, pid2.Shutdown(ctx))
 
-		context.BatchAsk(pid2, new(testpb.TestReply), new(testpb.TestReply))
+		context.BatchAsk(pid2, []proto.Message{new(testpb.TestReply), new(testpb.TestReply)}, time.Minute)
 		require.Error(t, context.getError())
 
 		lib.Pause(time.Second)
@@ -1685,7 +1674,7 @@ func TestReceiveContext(t *testing.T) {
 		testerAddr := context.RemoteLookup(host, remotingPort, tester)
 		// send the message to t exchanger actor one using remote messaging
 		messages := []proto.Message{new(testpb.TestReply), new(testpb.TestReply), new(testpb.TestReply)}
-		replies := context.RemoteBatchAsk(address.From(testerAddr), messages)
+		replies := context.RemoteBatchAsk(address.From(testerAddr), messages, time.Minute)
 		require.NoError(t, context.getError())
 		require.Len(t, replies, 3)
 		lib.Pause(time.Second)
@@ -1740,7 +1729,7 @@ func TestReceiveContext(t *testing.T) {
 		testerAddr := context.RemoteLookup(host, remotingPort, tester)
 		// send the message to t exchanger actor one using remote messaging
 		messages := []proto.Message{new(testpb.TestReply), new(testpb.TestReply), new(testpb.TestReply)}
-		replies := context.RemoteBatchAsk(address.From(testerAddr), messages)
+		replies := context.RemoteBatchAsk(address.From(testerAddr), messages, time.Minute)
 		err = context.getError()
 		require.Error(t, err)
 		require.Empty(t, replies)
@@ -1938,7 +1927,7 @@ func TestReceiveContext(t *testing.T) {
 				Name: actorName2,
 				Id:   "",
 			},
-		), []proto.Message{new(testpb.TestReply)})
+		), []proto.Message{new(testpb.TestReply)}, time.Minute)
 		require.Error(t, context.getError())
 		lib.Pause(time.Second)
 
@@ -2076,7 +2065,6 @@ func TestReceiveContext(t *testing.T) {
 
 		opts := []pidOption{
 			withInitMaxRetries(1),
-			withAskTimeout(askTimeout),
 			withPassivationDisabled(),
 			withCustomLogger(log.DiscardLogger),
 		}
@@ -2137,12 +2125,10 @@ func TestReceiveContext(t *testing.T) {
 		assert.NoError(t, pid2.Shutdown(ctx))
 	})
 	t.Run("With failed PipeTo", func(t *testing.T) {
-		askTimeout := time.Minute
 		ctx := context.TODO()
 
 		opts := []pidOption{
 			withInitMaxRetries(1),
-			withAskTimeout(askTimeout),
 			withPassivationDisabled(),
 			withCustomLogger(log.DiscardLogger),
 		}
@@ -2293,7 +2279,7 @@ func TestReceiveContext(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
 
-		reply := context.SendSync(pid2.Name(), new(testpb.TestReply))
+		reply := context.SendSync(pid2.Name(), new(testpb.TestReply), time.Minute)
 		require.NotNil(t, reply)
 		expected := new(testpb.Reply)
 		assert.True(t, proto.Equal(expected, reply))
@@ -2338,7 +2324,7 @@ func TestReceiveContext(t *testing.T) {
 		lib.Pause(time.Second)
 		assert.NoError(t, pid2.Shutdown(ctx))
 
-		context.SendSync(pid2.Name(), new(testpb.TestReply))
+		context.SendSync(pid2.Name(), new(testpb.TestReply), time.Minute)
 		require.Error(t, context.getError())
 
 		t.Cleanup(

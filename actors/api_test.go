@@ -136,7 +136,6 @@ func TestAsk(t *testing.T) {
 			sys, err := NewActorSystem(
 				"test",
 				WithLogger(logger),
-				WithReplyTimeout(replyTimeout),
 				WithPassivationDisabled(),
 			)
 			// assert there are no error
@@ -265,7 +264,6 @@ func TestAsk(t *testing.T) {
 			sys, err := NewActorSystem(
 				"test",
 				WithLogger(logger),
-				WithReplyTimeout(replyTimeout),
 				WithPassivationDisabled(),
 			)
 			// assert there are no error
@@ -309,7 +307,6 @@ func TestAsk(t *testing.T) {
 			sys, err := NewActorSystem(
 				"test",
 				WithLogger(logger),
-				WithReplyTimeout(replyTimeout),
 				WithPassivationDisabled(),
 			)
 			// assert there are no error

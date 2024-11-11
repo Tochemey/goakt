@@ -147,7 +147,6 @@ func TestScheduler(t *testing.T) {
 			newTestActor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
-			withAskTimeout(replyTimeout),
 		)
 
 		require.NoError(t, err)

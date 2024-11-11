@@ -41,14 +41,6 @@ func withPassivationAfter(duration time.Duration) pidOption {
 	}
 }
 
-// withAskTimeout sets how long in seconds an actor should reply a command
-// in a receive-reply pattern
-func withAskTimeout(timeout time.Duration) pidOption {
-	return func(pid *PID) {
-		pid.askTimeout.Store(timeout)
-	}
-}
-
 // withInitMaxRetries sets the number of times to retry an actor init process
 func withInitMaxRetries(max int) pidOption {
 	return func(pid *PID) {
