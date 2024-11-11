@@ -53,11 +53,6 @@ func TestOption(t *testing.T) {
 			expected: actorSystem{expireActorAfter: 2. * time.Second},
 		},
 		{
-			name:     "WithReplyTimeout",
-			option:   WithReplyTimeout(2 * time.Second),
-			expected: actorSystem{askTimeout: 2. * time.Second},
-		},
-		{
 			name:     "WithActorInitMaxRetries",
 			option:   WithActorInitMaxRetries(2),
 			expected: actorSystem{actorInitMaxRetries: 2},

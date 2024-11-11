@@ -63,11 +63,6 @@ func TestPIDOptions(t *testing.T) {
 			expected: &PID{passivateAfter: atomicDuration},
 		},
 		{
-			name:     "WithAskTimeout",
-			option:   withAskTimeout(time.Second),
-			expected: &PID{askTimeout: atomicDuration},
-		},
-		{
 			name:     "WithInitMaxRetries",
 			option:   withInitMaxRetries(5),
 			expected: &PID{initMaxRetries: atomicInt},

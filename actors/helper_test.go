@@ -450,7 +450,6 @@ func startClusterSystem(t *testing.T, nodeName, serverAddr string) (ActorSystem,
 		actorSystemName,
 		WithPassivationDisabled(),
 		WithLogger(logger),
-		WithReplyTimeout(time.Minute),
 		WithRemoting(host, int32(remotingPort)),
 		WithPeerStateLoopInterval(500*time.Millisecond),
 		WithCluster(

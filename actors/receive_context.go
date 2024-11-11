@@ -27,6 +27,7 @@ package actors
 import (
 	"context"
 	"sync"
+	"time"
 
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
@@ -216,10 +217,10 @@ func (c *ReceiveContext) BatchTell(to *PID, messages ...proto.Message) {
 // Ask sends a synchronous message to another actor and expect a response. This method is good when interacting with a child actor.
 // Ask has a timeout which can cause the sender to set the context error. When ask times out, the receiving actor does not know and may still process the message.
 // It is recommended to set a good timeout to quickly receive response and try to avoid false positives
-func (c *ReceiveContext) Ask(to *PID, message proto.Message) (response proto.Message) {
+func (c *ReceiveContext) Ask(to *PID, message proto.Message, timeout time.Duration) (response proto.Message) {
 	self := c.self
 	ctx := context.WithoutCancel(c.ctx)
-	reply, err := self.Ask(ctx, to, message)
+	reply, err := self.Ask(ctx, to, message, timeout)
 	if err != nil {
 		c.Err(err)
 	}
@@ -239,10 +240,10 @@ func (c *ReceiveContext) SendAsync(actorName string, message proto.Message) {
 // SendSync sends a synchronous message to another actor and expect a response.
 // The location of the given actor is transparent to the caller.
 // This block until a response is received or timed out.
-func (c *ReceiveContext) SendSync(actorName string, message proto.Message) (response proto.Message) {
+func (c *ReceiveContext) SendSync(actorName string, message proto.Message, timeout time.Duration) (response proto.Message) {
 	self := c.self
 	ctx := context.WithoutCancel(c.ctx)
-	reply, err := self.SendSync(ctx, actorName, message)
+	reply, err := self.SendSync(ctx, actorName, message, timeout)
 	if err != nil {
 		c.Err(err)
 	}
@@ -252,10 +253,10 @@ func (c *ReceiveContext) SendSync(actorName string, message proto.Message) (resp
 // BatchAsk sends a synchronous bunch of messages to the given PID and expect responses in the same order as the messages.
 // The messages will be processed one after the other in the order they are sent
 // This is a design choice to follow the simple principle of one message at a time processing by actors.
-func (c *ReceiveContext) BatchAsk(to *PID, messages ...proto.Message) (responses chan proto.Message) {
+func (c *ReceiveContext) BatchAsk(to *PID, messages []proto.Message, timeout time.Duration) (responses chan proto.Message) {
 	recipient := c.self
 	ctx := context.WithoutCancel(c.ctx)
-	reply, err := recipient.BatchAsk(ctx, to, messages...)
+	reply, err := recipient.BatchAsk(ctx, to, messages, timeout)
 	if err != nil {
 		c.Err(err)
 	}
@@ -273,10 +274,10 @@ func (c *ReceiveContext) RemoteTell(to *address.Address, message proto.Message) 
 
 // RemoteAsk is used to send a message to an actor remotely and expect a response
 // immediately.
-func (c *ReceiveContext) RemoteAsk(to *address.Address, message proto.Message) (response *anypb.Any) {
+func (c *ReceiveContext) RemoteAsk(to *address.Address, message proto.Message, timeout time.Duration) (response *anypb.Any) {
 	recipient := c.self
 	ctx := context.WithoutCancel(c.ctx)
-	reply, err := recipient.RemoteAsk(ctx, to, message)
+	reply, err := recipient.RemoteAsk(ctx, to, message, timeout)
 	if err != nil {
 		c.Err(err)
 	}
@@ -296,10 +297,10 @@ func (c *ReceiveContext) RemoteBatchTell(to *address.Address, messages []proto.M
 // RemoteBatchAsk sends a synchronous bunch of messages to a remote actor and expect responses in the same order as the messages.
 // Messages are processed one after the other in the order they are sent.
 // This can hinder performance if it is not properly used.
-func (c *ReceiveContext) RemoteBatchAsk(to *address.Address, messages []proto.Message) (responses []*anypb.Any) {
+func (c *ReceiveContext) RemoteBatchAsk(to *address.Address, messages []proto.Message, timeout time.Duration) (responses []*anypb.Any) {
 	recipient := c.self
 	ctx := context.WithoutCancel(c.ctx)
-	replies, err := recipient.RemoteBatchAsk(ctx, to, messages)
+	replies, err := recipient.RemoteBatchAsk(ctx, to, messages, timeout)
 	if err != nil {
 		c.Err(err)
 	}

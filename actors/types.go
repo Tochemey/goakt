@@ -31,8 +31,6 @@ import (
 const (
 	// DefaultPassivationTimeout defines the default passivation timeout
 	DefaultPassivationTimeout = 2 * time.Minute
-	// DefaultAskTimeout defines the default Ask timeout
-	DefaultAskTimeout = 20 * time.Second
 	// DefaultInitMaxRetries defines the default value for retrying actor initialization
 	DefaultInitMaxRetries = 5
 	// DefaultShutdownTimeout defines the default shutdown timeout

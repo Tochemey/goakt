@@ -245,7 +245,6 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		name:                   name,
 		logger:                 log.New(log.ErrorLevel, os.Stderr),
 		expireActorAfter:       DefaultPassivationTimeout,
-		askTimeout:             DefaultAskTimeout,
 		actorInitMaxRetries:    DefaultInitMaxRetries,
 		supervisorDirective:    DefaultSupervisoryStrategy,
 		locker:                 sync.Mutex{},
@@ -1358,7 +1357,6 @@ func (x *actorSystem) configPID(ctx context.Context, name string, actor Actor, o
 	// pid inherit the actor system settings defined during instantiation
 	pidOpts := []pidOption{
 		withInitMaxRetries(x.actorInitMaxRetries),
-		withAskTimeout(x.askTimeout),
 		withCustomLogger(x.logger),
 		withActorSystem(x),
 		withSupervisorDirective(x.supervisorDirective),

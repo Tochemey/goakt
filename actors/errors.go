@@ -87,6 +87,8 @@ var (
 	ErrSchedulerNotStarted = errors.New("scheduler has not started")
 	// ErrInvalidMessage is returned when an invalid remote message is sent
 	ErrInvalidMessage = func(err error) error { return fmt.Errorf("invalid remote message: %w", err) }
+	// ErrInvalidTimeout is returned when a given timeout is negative or zero
+	ErrInvalidTimeout = errors.New("invalid timeout")
 )
 
 // eof returns true if the given error is an EOF error
