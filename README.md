@@ -155,9 +155,9 @@ In GoAkt, supervision allows to define the various strategies to apply when a gi
 The supervisory strategy to adopt is set during the creation of the actor system.
 In GoAkt each child actor is treated separately. There is no concept of one-for-one and one-for-all strategies.
 The following directives are supported:
-- [`Restart`](./actors/supervisor.go): to restart the child actor. One can control how the restart is done using the following options: - `maxNumRetries`: defines the maximum of restart attempts - `timeout`: how to attempt restarting the faulty actor.
-- [`Stop`](./actors/supervisor.go): to stop the child actor which is the default one
-- [`Resume`](./actors/supervisor.go): ignores the failure and process the next message, instead.
+- [`Restart`](./actors/supervisor_directive.go): to restart the child actor. One can control how the restart is done using the following options: - `maxNumRetries`: defines the maximum of restart attempts - `timeout`: how to attempt restarting the faulty actor.
+- [`Stop`](./actors/supervisor_directive.go): to stop the child actor which is the default one
+- [`Resume`](./actors/supervisor_directive.go): ignores the failure and process the next message, instead.
 
 With the `Restart` directive, every child actor of the faulty is stopped and garbage-collected when the given parent is restarted. This helps avoid resources leaking.
 There are only two scenarios where an actor can supervise another actor:
