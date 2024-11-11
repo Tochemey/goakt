@@ -838,7 +838,7 @@ func TestRemoteAsk(t *testing.T) {
 			// create a message to send to the test actor
 			message := new(testpb.TestReply)
 			// send the message to the actor
-			replies, err := remoting.RemoteBatchAsk(ctx, addr, []proto.Message{message})
+			replies, err := remoting.RemoteBatchAsk(ctx, addr, []proto.Message{message}, time.Minute)
 			// perform some assertions
 			require.NoError(t, err)
 			require.Len(t, replies, 1)
@@ -906,7 +906,7 @@ func TestRemoteAsk(t *testing.T) {
 			// create a message to send to the test actor
 			message := new(testpb.TestReply)
 			// send the message to the actor
-			reply, err := remoting.RemoteBatchAsk(ctx, address.From(addr), []proto.Message{message})
+			reply, err := remoting.RemoteBatchAsk(ctx, address.From(addr), []proto.Message{message}, time.Minute)
 			// perform some assertions
 			require.Error(t, err)
 			require.Nil(t, reply)
@@ -967,7 +967,7 @@ func TestRemoteAsk(t *testing.T) {
 			// create a message to send to the test actor
 			message := new(testpb.TestReply)
 			// send the message to the actor
-			reply, err := remoting.RemoteBatchAsk(ctx, addr, []proto.Message{message})
+			reply, err := remoting.RemoteBatchAsk(ctx, addr, []proto.Message{message}, time.Minute)
 			// perform some assertions
 			require.Error(t, err)
 			require.EqualError(t, err, "failed_precondition: remoting is not enabled")
@@ -1092,7 +1092,7 @@ func TestRemoteAsk(t *testing.T) {
 			// create a message to send to the test actor
 			message := new(testpb.TestReply)
 			// send the message to the actor
-			reply, err := remoting.RemoteBatchAsk(ctx, addr, []proto.Message{message})
+			reply, err := remoting.RemoteBatchAsk(ctx, addr, []proto.Message{message}, time.Minute)
 			// perform some assertions
 			require.Error(t, err)
 			require.Contains(t, err.Error(), "not found")
