@@ -4,7 +4,7 @@ go 1.22.0
 
 require (
 	connectrpc.com/connect v1.17.0
-	github.com/buraksezer/olric v0.5.6-0.20240925183822-6ca0e20256e0
+	github.com/buraksezer/olric v0.5.7
 	github.com/deckarep/golang-set/v2 v2.6.0
 	github.com/flowchartsman/retry v1.2.0
 	github.com/google/uuid v1.6.0
