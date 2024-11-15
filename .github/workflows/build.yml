@@ -34,7 +34,7 @@ jobs:
       - name: Run tests
         run: |
           go-acc ./... -o coverage.out --ignore goaktpb,mocks,internal/internalpb,bench -- -mod=vendor -race -v
-      - uses: codecov/codecov-action@v4
+      - uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ./coverage.out
