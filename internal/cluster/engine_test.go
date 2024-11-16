@@ -451,6 +451,8 @@ func startEngine(t *testing.T, nodeName, serverAddr string) (*Engine, discovery.
 		ActorSystemName: actorSystemName,
 		NatsServer:      fmt.Sprintf("nats://%s", serverAddr),
 		NatsSubject:     natsSubject,
+		Host:            host,
+		DiscoveryPort:   gossipPort,
 	}
 
 	hostNode := discovery.Node{
@@ -462,7 +464,7 @@ func startEngine(t *testing.T, nodeName, serverAddr string) (*Engine, discovery.
 	}
 
 	// create the instance of provider
-	provider := nats.NewDiscovery(&config, &hostNode)
+	provider := nats.NewDiscovery(&config)
 
 	// create the startNode
 	engine, err := NewEngine(nodeName, provider, &hostNode, WithLogger(log.DiscardLogger))

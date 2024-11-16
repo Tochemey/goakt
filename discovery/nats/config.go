@@ -51,6 +51,10 @@ type Config struct {
 	// to a server that we were already connected to previously.
 	// Defaults to 2s.
 	ReconnectWait time.Duration
+	// specifies the host address
+	Host string
+	// specifies the discovery port
+	DiscoveryPort int
 }
 
 // Validate checks whether the given discovery configuration is valid
@@ -61,6 +65,8 @@ func (x Config) Validate() error {
 		AddValidator(validation.NewEmptyStringValidator("NatsSubject", x.NatsSubject)).
 		AddValidator(validation.NewEmptyStringValidator("ApplicationName", x.ApplicationName)).
 		AddValidator(validation.NewEmptyStringValidator("ActorSystemName", x.ActorSystemName)).
+		AddValidator(validation.NewEmptyStringValidator("Host", x.Host)).
+		AddAssertion(x.DiscoveryPort > 0, "DiscoveryPort is invalid").
 		Validate()
 }
 

@@ -432,18 +432,12 @@ func startClusterSystem(t *testing.T, nodeName, serverAddr string) (ActorSystem,
 		ActorSystemName: actorSystemName,
 		NatsServer:      fmt.Sprintf("nats://%s", serverAddr),
 		NatsSubject:     natsSubject,
-	}
-
-	hostNode := discovery.Node{
-		Name:          nodeName,
-		Host:          host,
-		DiscoveryPort: gossipPort,
-		PeersPort:     clusterPort,
-		RemotingPort:  remotingPort,
+		Host:            host,
+		DiscoveryPort:   gossipPort,
 	}
 
 	// create the instance of provider
-	provider := nats.NewDiscovery(&config, &hostNode, nats.WithLogger(log.DiscardLogger))
+	provider := nats.NewDiscovery(&config, nats.WithLogger(log.DiscardLogger))
 
 	// create the actor system
 	system, err := NewActorSystem(

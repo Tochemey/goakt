@@ -543,6 +543,8 @@ To use the NATS discovery provider one needs to provide the following:
 - `Timeout`: the nodes discovery timeout
 - `MaxJoinAttempts`: the maximum number of attempts to connect an existing NATs server. Defaults to `5`
 - `ReconnectWait`: the time to backoff after attempting a reconnect to a server that we were already connected to previously. Default to `2 seconds`
+- `Host`: the given node host address
+- `DiscoveryPort`: the discovery port of the given node
 
 ```go
 package main
@@ -562,13 +564,12 @@ config := nats.Config{
     ActorSystemName: actorSystemName,
     NatsServer:      natsServer,
     NatsSubject:     natsSubject,
+	Host: "127.0.0.1",
+    DiscoveryPort: 2003
 }
 
-// define the host node instance
-hostNode := discovery.Node{}
-
 // instantiate the NATS discovery provider by passing the config and the hostNode
-disco := nats.NewDiscovery(&config, &hostNode)
+disco := nats.NewDiscovery(&config)
 
 // pass the service discovery when enabling cluster mode in the actor system
 ```
