@@ -54,34 +54,33 @@ type Discovery struct {
 	// define a slice of subscriptions
 	subscriptions []*nats.Subscription
 
-	// defines the host node
-	hostNode *discovery.Node
-
 	// define a logger
 	logger log.Logger
+
+	address string
 }
 
 // enforce compilation error
 var _ discovery.Provider = &Discovery{}
 
 // NewDiscovery returns an instance of the kubernetes discovery provider
-func NewDiscovery(config *Config, hostNode *discovery.Node, opts ...Option) *Discovery {
+func NewDiscovery(config *Config, opts ...Option) *Discovery {
 	// create an instance of
-	discovery := &Discovery{
+	d := &Discovery{
 		mu:          sync.Mutex{},
 		initialized: atomic.NewBool(false),
 		registered:  atomic.NewBool(false),
 		config:      config,
 		logger:      log.DefaultLogger,
-		hostNode:    hostNode,
 	}
 
 	// apply the various options
 	for _, opt := range opts {
-		opt.Apply(discovery)
+		opt.Apply(d)
 	}
 
-	return discovery
+	d.address = net.JoinHostPort(config.Host, strconv.Itoa(config.DiscoveryPort))
+	return d
 }
 
 // ID returns the discovery provider id
@@ -117,7 +116,7 @@ func (d *Discovery) Initialize() error {
 	// create the nats connection option
 	opts := nats.GetDefaultOptions()
 	opts.Url = d.config.NatsServer
-	opts.Name = d.hostNode.Name
+	opts.Name = d.address
 	opts.ReconnectWait = d.config.ReconnectWait
 	opts.MaxReconnect = -1
 
@@ -174,9 +173,9 @@ func (d *Discovery) Register() error {
 				message.GetName(), message.GetHost(), message.GetPort())
 
 			response := &internalpb.NatsMessage{
-				Host:        d.hostNode.Host,
-				Port:        int32(d.hostNode.DiscoveryPort),
-				Name:        d.hostNode.Name,
+				Host:        d.config.Host,
+				Port:        int32(d.config.DiscoveryPort),
+				Name:        d.address,
 				MessageType: internalpb.NatsMessageType_NATS_MESSAGE_TYPE_RESPONSE,
 			}
 
@@ -226,9 +225,9 @@ func (d *Discovery) Deregister() error {
 	if d.connection != nil {
 		// send a message to deregister stating we are out
 		message := &internalpb.NatsMessage{
-			Host:        d.hostNode.Host,
-			Port:        int32(d.hostNode.DiscoveryPort),
-			Name:        d.hostNode.Name,
+			Host:        d.config.Host,
+			Port:        int32(d.config.DiscoveryPort),
+			Name:        d.address,
 			MessageType: internalpb.NatsMessageType_NATS_MESSAGE_TYPE_DEREGISTER,
 		}
 
@@ -265,9 +264,9 @@ func (d *Discovery) DiscoverPeers() ([]string, error) {
 	}
 
 	request := &internalpb.NatsMessage{
-		Host:        d.hostNode.Host,
-		Port:        int32(d.hostNode.DiscoveryPort),
-		Name:        d.hostNode.Name,
+		Host:        d.config.Host,
+		Port:        int32(d.config.DiscoveryPort),
+		Name:        d.address,
 		MessageType: internalpb.NatsMessageType_NATS_MESSAGE_TYPE_REQUEST,
 	}
 
@@ -278,7 +277,7 @@ func (d *Discovery) DiscoverPeers() ([]string, error) {
 
 	var peers []string
 	timeout := time.After(d.config.Timeout)
-	me := d.hostNode.DiscoveryAddress()
+	me := d.address
 	for {
 		select {
 		case msg, ok := <-recv:

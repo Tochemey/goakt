@@ -2574,12 +2574,12 @@ func TestSendAsync(t *testing.T) {
 		srv := startNatsServer(t)
 
 		// create and start system cluster
-		node1, sd1 := startClusterSystem(t, "Node1", srv.Addr().String())
+		node1, sd1 := startClusterSystem(t, srv.Addr().String())
 		require.NotNil(t, node1)
 		require.NotNil(t, sd1)
 
 		// create and start system cluster
-		node2, sd2 := startClusterSystem(t, "Node2", srv.Addr().String())
+		node2, sd2 := startClusterSystem(t, srv.Addr().String())
 		require.NotNil(t, node2)
 		require.NotNil(t, sd2)
 
@@ -2613,12 +2613,12 @@ func TestSendAsync(t *testing.T) {
 		srv := startNatsServer(t)
 
 		// create and start system cluster
-		node1, sd1 := startClusterSystem(t, "Node1", srv.Addr().String())
+		node1, sd1 := startClusterSystem(t, srv.Addr().String())
 		require.NotNil(t, node1)
 		require.NotNil(t, sd1)
 
 		// create and start system cluster
-		node2, sd2 := startClusterSystem(t, "Node2", srv.Addr().String())
+		node2, sd2 := startClusterSystem(t, srv.Addr().String())
 		require.NotNil(t, node2)
 		require.NotNil(t, sd2)
 
@@ -2714,12 +2714,12 @@ func TestSendSync(t *testing.T) {
 		srv := startNatsServer(t)
 
 		// create and start system cluster
-		node1, sd1 := startClusterSystem(t, "Node1", srv.Addr().String())
+		node1, sd1 := startClusterSystem(t, srv.Addr().String())
 		require.NotNil(t, node1)
 		require.NotNil(t, sd1)
 
 		// create and start system cluster
-		node2, sd2 := startClusterSystem(t, "Node2", srv.Addr().String())
+		node2, sd2 := startClusterSystem(t, srv.Addr().String())
 		require.NotNil(t, node2)
 		require.NotNil(t, sd2)
 
@@ -2756,12 +2756,12 @@ func TestSendSync(t *testing.T) {
 		srv := startNatsServer(t)
 
 		// create and start system cluster
-		node1, sd1 := startClusterSystem(t, "Node1", srv.Addr().String())
+		node1, sd1 := startClusterSystem(t, srv.Addr().String())
 		require.NotNil(t, node1)
 		require.NotNil(t, sd1)
 
 		// create and start system cluster
-		node2, sd2 := startClusterSystem(t, "Node2", srv.Addr().String())
+		node2, sd2 := startClusterSystem(t, srv.Addr().String())
 		require.NotNil(t, node2)
 		require.NotNil(t, sd2)
 

@@ -64,10 +64,8 @@ func startNatsServer(t *testing.T) *natsserver.Server {
 
 func newPeer(t *testing.T, serverAddr string) *Discovery {
 	// generate the ports for the single node
-	nodePorts := dynaport.Get(3)
+	nodePorts := dynaport.Get(1)
 	gossipPort := nodePorts[0]
-	clusterPort := nodePorts[1]
-	remotingPort := nodePorts[2]
 
 	// create a Cluster node
 	host := "127.0.0.1"
@@ -82,18 +80,11 @@ func newPeer(t *testing.T, serverAddr string) *Discovery {
 		ActorSystemName: actorSystemName,
 		NatsServer:      fmt.Sprintf("nats://%s", serverAddr),
 		NatsSubject:     natsSubject,
+		Host:            host,
+		DiscoveryPort:   gossipPort,
 	}
-
-	hostNode := discovery.Node{
-		Name:          host,
-		Host:          host,
-		DiscoveryPort: gossipPort,
-		PeersPort:     clusterPort,
-		RemotingPort:  remotingPort,
-	}
-
 	// create the instance of provider
-	provider := NewDiscovery(config, &hostNode, WithLogger(log.DiscardLogger))
+	provider := NewDiscovery(config, WithLogger(log.DiscardLogger))
 
 	// initialize
 	err := provider.Initialize()
@@ -108,10 +99,8 @@ func TestDiscovery(t *testing.T) {
 		srv := startNatsServer(t)
 
 		// generate the ports for the single node
-		nodePorts := dynaport.Get(3)
+		nodePorts := dynaport.Get(1)
 		gossipPort := nodePorts[0]
-		clusterPort := nodePorts[1]
-		remotingPort := nodePorts[2]
 
 		// create a Cluster node
 		host := "127.0.0.1"
@@ -126,18 +115,12 @@ func TestDiscovery(t *testing.T) {
 			ActorSystemName: actorSystemName,
 			NatsServer:      fmt.Sprintf("nats://%s", srv.Addr().String()),
 			NatsSubject:     natsSubject,
-		}
-
-		hostNode := discovery.Node{
-			Name:          host,
-			Host:          host,
-			DiscoveryPort: gossipPort,
-			PeersPort:     clusterPort,
-			RemotingPort:  remotingPort,
+			Host:            host,
+			DiscoveryPort:   gossipPort,
 		}
 
 		// create the instance of provider
-		provider := NewDiscovery(config, &hostNode, WithLogger(log.DiscardLogger))
+		provider := NewDiscovery(config, WithLogger(log.DiscardLogger))
 		require.NotNil(t, provider)
 		// assert that provider implements the Discovery interface
 		// this is a cheap test
@@ -152,10 +135,8 @@ func TestDiscovery(t *testing.T) {
 		srv := startNatsServer(t)
 
 		// generate the ports for the single node
-		nodePorts := dynaport.Get(3)
+		nodePorts := dynaport.Get(1)
 		gossipPort := nodePorts[0]
-		clusterPort := nodePorts[1]
-		remotingPort := nodePorts[2]
 
 		// create a Cluster node
 		host := "127.0.0.1"
@@ -170,17 +151,12 @@ func TestDiscovery(t *testing.T) {
 			ActorSystemName: actorSystemName,
 			NatsServer:      fmt.Sprintf("nats://%s", srv.Addr().String()),
 			NatsSubject:     natsSubject,
+			Host:            host,
+			DiscoveryPort:   gossipPort,
 		}
 
-		hostNode := discovery.Node{
-			Name:          host,
-			Host:          host,
-			DiscoveryPort: gossipPort,
-			PeersPort:     clusterPort,
-			RemotingPort:  remotingPort,
-		}
 		// create the instance of provider
-		provider := NewDiscovery(config, &hostNode, WithLogger(log.DiscardLogger))
+		provider := NewDiscovery(config, WithLogger(log.DiscardLogger))
 		require.NotNil(t, provider)
 		assert.Equal(t, "nats", provider.ID())
 	})
@@ -189,10 +165,8 @@ func TestDiscovery(t *testing.T) {
 		srv := startNatsServer(t)
 
 		// generate the ports for the single node
-		nodePorts := dynaport.Get(3)
+		nodePorts := dynaport.Get(1)
 		gossipPort := nodePorts[0]
-		clusterPort := nodePorts[1]
-		remotingPort := nodePorts[2]
 
 		// create a Cluster node
 		host := "127.0.0.1"
@@ -209,18 +183,12 @@ func TestDiscovery(t *testing.T) {
 			ActorSystemName: actorSystemName,
 			NatsServer:      fmt.Sprintf("nats://%s", natsServer),
 			NatsSubject:     natsSubject,
-		}
-
-		hostNode := discovery.Node{
-			Name:          host,
-			Host:          host,
-			DiscoveryPort: gossipPort,
-			PeersPort:     clusterPort,
-			RemotingPort:  remotingPort,
+			Host:            host,
+			DiscoveryPort:   gossipPort,
 		}
 
 		// create the instance of provider
-		provider := NewDiscovery(config, &hostNode, WithLogger(log.DiscardLogger))
+		provider := NewDiscovery(config, WithLogger(log.DiscardLogger))
 
 		// initialize
 		err := provider.Initialize()
@@ -234,10 +202,8 @@ func TestDiscovery(t *testing.T) {
 		srv := startNatsServer(t)
 
 		// generate the ports for the single node
-		nodePorts := dynaport.Get(3)
+		nodePorts := dynaport.Get(1)
 		gossipPort := nodePorts[0]
-		clusterPort := nodePorts[1]
-		remotingPort := nodePorts[2]
 
 		// create a Cluster node
 		host := "127.0.0.1"
@@ -254,18 +220,12 @@ func TestDiscovery(t *testing.T) {
 			ActorSystemName: actorSystemName,
 			NatsServer:      fmt.Sprintf("nats://%s", natsServer),
 			NatsSubject:     natsSubject,
-		}
-
-		hostNode := discovery.Node{
-			Name:          host,
-			Host:          host,
-			DiscoveryPort: gossipPort,
-			PeersPort:     clusterPort,
-			RemotingPort:  remotingPort,
+			Host:            host,
+			DiscoveryPort:   gossipPort,
 		}
 
 		// create the instance of provider
-		provider := NewDiscovery(config, &hostNode, WithLogger(log.DiscardLogger))
+		provider := NewDiscovery(config, WithLogger(log.DiscardLogger))
 		provider.initialized = atomic.NewBool(true)
 		assert.Error(t, provider.Initialize())
 	})
@@ -274,10 +234,8 @@ func TestDiscovery(t *testing.T) {
 		srv := startNatsServer(t)
 
 		// generate the ports for the single node
-		nodePorts := dynaport.Get(3)
+		nodePorts := dynaport.Get(1)
 		gossipPort := nodePorts[0]
-		clusterPort := nodePorts[1]
-		remotingPort := nodePorts[2]
 
 		// create a Cluster node
 		host := "127.0.0.1"
@@ -294,18 +252,12 @@ func TestDiscovery(t *testing.T) {
 			ActorSystemName: actorSystemName,
 			NatsServer:      fmt.Sprintf("nats://%s", natsServer),
 			NatsSubject:     natsSubject,
-		}
-
-		hostNode := discovery.Node{
-			Name:          host,
-			Host:          host,
-			DiscoveryPort: gossipPort,
-			PeersPort:     clusterPort,
-			RemotingPort:  remotingPort,
+			Host:            host,
+			DiscoveryPort:   gossipPort,
 		}
 
 		// create the instance of provider
-		provider := NewDiscovery(config, &hostNode, WithLogger(log.DiscardLogger))
+		provider := NewDiscovery(config, WithLogger(log.DiscardLogger))
 		provider.registered = atomic.NewBool(true)
 		err := provider.Register()
 		assert.Error(t, err)
@@ -316,10 +268,8 @@ func TestDiscovery(t *testing.T) {
 		srv := startNatsServer(t)
 
 		// generate the ports for the single node
-		nodePorts := dynaport.Get(3)
+		nodePorts := dynaport.Get(1)
 		gossipPort := nodePorts[0]
-		clusterPort := nodePorts[1]
-		remotingPort := nodePorts[2]
 
 		// create a Cluster node
 		host := "127.0.0.1"
@@ -336,18 +286,12 @@ func TestDiscovery(t *testing.T) {
 			ActorSystemName: actorSystemName,
 			NatsServer:      fmt.Sprintf("nats://%s", natsServer),
 			NatsSubject:     natsSubject,
-		}
-
-		hostNode := discovery.Node{
-			Name:          host,
-			Host:          host,
-			DiscoveryPort: gossipPort,
-			PeersPort:     clusterPort,
-			RemotingPort:  remotingPort,
+			Host:            host,
+			DiscoveryPort:   gossipPort,
 		}
 
 		// create the instance of provider
-		provider := NewDiscovery(config, &hostNode, WithLogger(log.DiscardLogger))
+		provider := NewDiscovery(config, WithLogger(log.DiscardLogger))
 		err := provider.Deregister()
 		assert.Error(t, err)
 		assert.EqualError(t, err, discovery.ErrNotRegistered.Error())
@@ -382,7 +326,7 @@ func TestDiscovery(t *testing.T) {
 		require.NoError(t, err)
 		require.NotEmpty(t, peers)
 		require.Len(t, peers, 1)
-		discoveredNodeAddr := client2.hostNode.DiscoveryAddress()
+		discoveredNodeAddr := client2.address
 		require.Equal(t, peers[0], discoveredNodeAddr)
 
 		// discover more peers from client 2
@@ -390,7 +334,7 @@ func TestDiscovery(t *testing.T) {
 		require.NoError(t, err)
 		require.NotEmpty(t, peers)
 		require.Len(t, peers, 1)
-		discoveredNodeAddr = client1.hostNode.DiscoveryAddress()
+		discoveredNodeAddr = client1.address
 		require.Equal(t, peers[0], discoveredNodeAddr)
 
 		// de-register client 2 but it can see client1
@@ -398,7 +342,7 @@ func TestDiscovery(t *testing.T) {
 		peers, err = client2.DiscoverPeers()
 		require.NoError(t, err)
 		require.NotEmpty(t, peers)
-		discoveredNodeAddr = client1.hostNode.DiscoveryAddress()
+		discoveredNodeAddr = client1.address
 		require.Equal(t, peers[0], discoveredNodeAddr)
 
 		// client-1 cannot see the deregistered client
@@ -417,10 +361,8 @@ func TestDiscovery(t *testing.T) {
 		srv := startNatsServer(t)
 
 		// generate the ports for the single node
-		nodePorts := dynaport.Get(3)
+		nodePorts := dynaport.Get(1)
 		gossipPort := nodePorts[0]
-		clusterPort := nodePorts[1]
-		remotingPort := nodePorts[2]
 
 		// create a Cluster node
 		host := "127.0.0.1"
@@ -437,17 +379,11 @@ func TestDiscovery(t *testing.T) {
 			ActorSystemName: actorSystemName,
 			NatsServer:      fmt.Sprintf("nats://%s", natsServer),
 			NatsSubject:     natsSubject,
+			Host:            host,
+			DiscoveryPort:   gossipPort,
 		}
 
-		hostNode := discovery.Node{
-			Name:          host,
-			Host:          host,
-			DiscoveryPort: gossipPort,
-			PeersPort:     clusterPort,
-			RemotingPort:  remotingPort,
-		}
-
-		provider := NewDiscovery(config, &hostNode, WithLogger(log.DiscardLogger))
+		provider := NewDiscovery(config, WithLogger(log.DiscardLogger))
 		peers, err := provider.DiscoverPeers()
 		assert.Error(t, err)
 		assert.Empty(t, peers)
@@ -455,7 +391,7 @@ func TestDiscovery(t *testing.T) {
 	})
 	t.Run("With Initialize: invalid config", func(t *testing.T) {
 		config := &Config{}
-		provider := NewDiscovery(config, nil, WithLogger(log.DiscardLogger))
+		provider := NewDiscovery(config, WithLogger(log.DiscardLogger))
 
 		// initialize
 		err := provider.Initialize()

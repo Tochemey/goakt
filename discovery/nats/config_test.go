@@ -37,6 +37,8 @@ func TestConfig(t *testing.T) {
 			ApplicationName: "applicationName",
 			ActorSystemName: "actorSys",
 			NatsSubject:     "nats-subject",
+			Host:            "host",
+			DiscoveryPort:   123,
 		}
 		assert.NoError(t, config.Validate())
 	})
@@ -46,15 +48,19 @@ func TestConfig(t *testing.T) {
 			ApplicationName: "applicationName",
 			ActorSystemName: "actorSys",
 			NatsSubject:     "nats-subject",
+			Host:            "host",
+			DiscoveryPort:   123,
 		}
 		assert.Error(t, config.Validate())
 	})
-	t.Run("With invalid host", func(t *testing.T) {
+	t.Run("With invalid nats server address", func(t *testing.T) {
 		config := &Config{
 			NatsServer:      "nats://:2322",
 			ApplicationName: "applicationName",
 			ActorSystemName: "actorSys",
 			NatsSubject:     "nats-subject",
+			Host:            "host",
+			DiscoveryPort:   123,
 		}
 		assert.Error(t, config.Validate())
 	})

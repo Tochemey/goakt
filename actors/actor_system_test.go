@@ -1129,7 +1129,7 @@ func TestActorSystem(t *testing.T) {
 			srv := startNatsServer(t)
 
 			// create and start system cluster
-			cl1, sd1 := startClusterSystem(t, "Node1", srv.Addr().String())
+			cl1, sd1 := startClusterSystem(t, srv.Addr().String())
 			peerAddress1 := cl1.PeerAddress()
 			require.NotEmpty(t, peerAddress1)
 
@@ -1139,7 +1139,7 @@ func TestActorSystem(t *testing.T) {
 			require.NotNil(t, subscriber1)
 
 			// create and start system cluster
-			cl2, sd2 := startClusterSystem(t, "Node2", srv.Addr().String())
+			cl2, sd2 := startClusterSystem(t, srv.Addr().String())
 			peerAddress2 := cl2.PeerAddress()
 			require.NotEmpty(t, peerAddress2)
 
