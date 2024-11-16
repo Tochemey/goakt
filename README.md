@@ -562,10 +562,10 @@ const (
 config := nats.Config{
     ApplicationName: applicationName,
     ActorSystemName: actorSystemName,
-    NatsServer:      natsServer,
+    NatsServer:      natsServerAddr,
     NatsSubject:     natsSubject,
-	Host:            "127.0.0.1",
-    DiscoveryPort:   2003
+    Host:            "127.0.0.1",
+    DiscoveryPort:   20380,
 }
 
 // instantiate the NATS discovery provider by passing the config and the hostNode
