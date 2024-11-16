@@ -410,7 +410,7 @@ func startNatsServer(t *testing.T) *natsserver.Server {
 	return serv
 }
 
-func startClusterSystem(t *testing.T, nodeName, serverAddr string) (ActorSystem, discovery.Provider) {
+func startClusterSystem(t *testing.T, serverAddr string) (ActorSystem, discovery.Provider) {
 	ctx := context.TODO()
 	logger := log.DiscardLogger
 
