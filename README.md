@@ -564,8 +564,8 @@ config := nats.Config{
     ActorSystemName: actorSystemName,
     NatsServer:      natsServer,
     NatsSubject:     natsSubject,
-	Host: "127.0.0.1",
-    DiscoveryPort: 2003
+	Host:            "127.0.0.1",
+    DiscoveryPort:   2003
 }
 
 // instantiate the NATS discovery provider by passing the config and the hostNode
