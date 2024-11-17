@@ -24,51 +24,6 @@ func (_m *Interface) EXPECT() *Interface_Expecter {
 	return &Interface_Expecter{mock: &_m.Mock}
 }
 
-// AdvertisedAddress provides a mock function with given fields:
-func (_m *Interface) AdvertisedAddress() string {
-	ret := _m.Called()
-
-	if len(ret) == 0 {
-		panic("no return value specified for AdvertisedAddress")
-	}
-
-	var r0 string
-	if rf, ok := ret.Get(0).(func() string); ok {
-		r0 = rf()
-	} else {
-		r0 = ret.Get(0).(string)
-	}
-
-	return r0
-}
-
-// Interface_AdvertisedAddress_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AdvertisedAddress'
-type Interface_AdvertisedAddress_Call struct {
-	*mock.Call
-}
-
-// AdvertisedAddress is a helper method to define mock.On call
-func (_e *Interface_Expecter) AdvertisedAddress() *Interface_AdvertisedAddress_Call {
-	return &Interface_AdvertisedAddress_Call{Call: _e.mock.On("AdvertisedAddress")}
-}
-
-func (_c *Interface_AdvertisedAddress_Call) Run(run func()) *Interface_AdvertisedAddress_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run()
-	})
-	return _c
-}
-
-func (_c *Interface_AdvertisedAddress_Call) Return(_a0 string) *Interface_AdvertisedAddress_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *Interface_AdvertisedAddress_Call) RunAndReturn(run func() string) *Interface_AdvertisedAddress_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // Events provides a mock function with given fields:
 func (_m *Interface) Events() <-chan *internalcluster.Event {
 	ret := _m.Called()
@@ -280,51 +235,6 @@ func (_c *Interface_GetState_Call) RunAndReturn(run func(context.Context, string
 	return _c
 }
 
-// Host provides a mock function with given fields:
-func (_m *Interface) Host() string {
-	ret := _m.Called()
-
-	if len(ret) == 0 {
-		panic("no return value specified for Host")
-	}
-
-	var r0 string
-	if rf, ok := ret.Get(0).(func() string); ok {
-		r0 = rf()
-	} else {
-		r0 = ret.Get(0).(string)
-	}
-
-	return r0
-}
-
-// Interface_Host_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Host'
-type Interface_Host_Call struct {
-	*mock.Call
-}
-
-// Host is a helper method to define mock.On call
-func (_e *Interface_Expecter) Host() *Interface_Host_Call {
-	return &Interface_Host_Call{Call: _e.mock.On("Host")}
-}
-
-func (_c *Interface_Host_Call) Run(run func()) *Interface_Host_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run()
-	})
-	return _c
-}
-
-func (_c *Interface_Host_Call) Return(_a0 string) *Interface_Host_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *Interface_Host_Call) RunAndReturn(run func() string) *Interface_Host_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // IsLeader provides a mock function with given fields: ctx
 func (_m *Interface) IsLeader(ctx context.Context) bool {
 	ret := _m.Called(ctx)
@@ -367,63 +277,6 @@ func (_c *Interface_IsLeader_Call) Return(_a0 bool) *Interface_IsLeader_Call {
 }
 
 func (_c *Interface_IsLeader_Call) RunAndReturn(run func(context.Context) bool) *Interface_IsLeader_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// KeyExists provides a mock function with given fields: ctx, key
-func (_m *Interface) KeyExists(ctx context.Context, key string) (bool, error) {
-	ret := _m.Called(ctx, key)
-
-	if len(ret) == 0 {
-		panic("no return value specified for KeyExists")
-	}
-
-	var r0 bool
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, string) (bool, error)); ok {
-		return rf(ctx, key)
-	}
-	if rf, ok := ret.Get(0).(func(context.Context, string) bool); ok {
-		r0 = rf(ctx, key)
-	} else {
-		r0 = ret.Get(0).(bool)
-	}
-
-	if rf, ok := ret.Get(1).(func(context.Context, string) error); ok {
-		r1 = rf(ctx, key)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-// Interface_KeyExists_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'KeyExists'
-type Interface_KeyExists_Call struct {
-	*mock.Call
-}
-
-// KeyExists is a helper method to define mock.On call
-//   - ctx context.Context
-//   - key string
-func (_e *Interface_Expecter) KeyExists(ctx interface{}, key interface{}) *Interface_KeyExists_Call {
-	return &Interface_KeyExists_Call{Call: _e.mock.On("KeyExists", ctx, key)}
-}
-
-func (_c *Interface_KeyExists_Call) Run(run func(ctx context.Context, key string)) *Interface_KeyExists_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(string))
-	})
-	return _c
-}
-
-func (_c *Interface_KeyExists_Call) Return(_a0 bool, _a1 error) *Interface_KeyExists_Call {
-	_c.Call.Return(_a0, _a1)
-	return _c
-}
-
-func (_c *Interface_KeyExists_Call) RunAndReturn(run func(context.Context, string) (bool, error)) *Interface_KeyExists_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -533,51 +386,6 @@ func (_c *Interface_PutActor_Call) RunAndReturn(run func(context.Context, *inter
 	return _c
 }
 
-// RemotingPort provides a mock function with given fields:
-func (_m *Interface) RemotingPort() int {
-	ret := _m.Called()
-
-	if len(ret) == 0 {
-		panic("no return value specified for RemotingPort")
-	}
-
-	var r0 int
-	if rf, ok := ret.Get(0).(func() int); ok {
-		r0 = rf()
-	} else {
-		r0 = ret.Get(0).(int)
-	}
-
-	return r0
-}
-
-// Interface_RemotingPort_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemotingPort'
-type Interface_RemotingPort_Call struct {
-	*mock.Call
-}
-
-// RemotingPort is a helper method to define mock.On call
-func (_e *Interface_Expecter) RemotingPort() *Interface_RemotingPort_Call {
-	return &Interface_RemotingPort_Call{Call: _e.mock.On("RemotingPort")}
-}
-
-func (_c *Interface_RemotingPort_Call) Run(run func()) *Interface_RemotingPort_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run()
-	})
-	return _c
-}
-
-func (_c *Interface_RemotingPort_Call) Return(_a0 int) *Interface_RemotingPort_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *Interface_RemotingPort_Call) RunAndReturn(run func() int) *Interface_RemotingPort_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // RemoveActor provides a mock function with given fields: ctx, actorName
 func (_m *Interface) RemoveActor(ctx context.Context, actorName string) error {
 	ret := _m.Called(ctx, actorName)
@@ -625,12 +433,69 @@ func (_c *Interface_RemoveActor_Call) RunAndReturn(run func(context.Context, str
 	return _c
 }
 
-// SetKey provides a mock function with given fields: ctx, key
-func (_m *Interface) SetKey(ctx context.Context, key string) error {
+// SchedulerJobKeyExists provides a mock function with given fields: ctx, key
+func (_m *Interface) SchedulerJobKeyExists(ctx context.Context, key string) (bool, error) {
 	ret := _m.Called(ctx, key)
 
 	if len(ret) == 0 {
-		panic("no return value specified for SetKey")
+		panic("no return value specified for SchedulerJobKeyExists")
+	}
+
+	var r0 bool
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string) (bool, error)); ok {
+		return rf(ctx, key)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string) bool); ok {
+		r0 = rf(ctx, key)
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = rf(ctx, key)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// Interface_SchedulerJobKeyExists_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SchedulerJobKeyExists'
+type Interface_SchedulerJobKeyExists_Call struct {
+	*mock.Call
+}
+
+// SchedulerJobKeyExists is a helper method to define mock.On call
+//   - ctx context.Context
+//   - key string
+func (_e *Interface_Expecter) SchedulerJobKeyExists(ctx interface{}, key interface{}) *Interface_SchedulerJobKeyExists_Call {
+	return &Interface_SchedulerJobKeyExists_Call{Call: _e.mock.On("SchedulerJobKeyExists", ctx, key)}
+}
+
+func (_c *Interface_SchedulerJobKeyExists_Call) Run(run func(ctx context.Context, key string)) *Interface_SchedulerJobKeyExists_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *Interface_SchedulerJobKeyExists_Call) Return(_a0 bool, _a1 error) *Interface_SchedulerJobKeyExists_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *Interface_SchedulerJobKeyExists_Call) RunAndReturn(run func(context.Context, string) (bool, error)) *Interface_SchedulerJobKeyExists_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// SetSchedulerJobKey provides a mock function with given fields: ctx, key
+func (_m *Interface) SetSchedulerJobKey(ctx context.Context, key string) error {
+	ret := _m.Called(ctx, key)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SetSchedulerJobKey")
 	}
 
 	var r0 error
@@ -643,31 +508,31 @@ func (_m *Interface) SetKey(ctx context.Context, key string) error {
 	return r0
 }
 
-// Interface_SetKey_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetKey'
-type Interface_SetKey_Call struct {
+// Interface_SetSchedulerJobKey_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetSchedulerJobKey'
+type Interface_SetSchedulerJobKey_Call struct {
 	*mock.Call
 }
 
-// SetKey is a helper method to define mock.On call
+// SetSchedulerJobKey is a helper method to define mock.On call
 //   - ctx context.Context
 //   - key string
-func (_e *Interface_Expecter) SetKey(ctx interface{}, key interface{}) *Interface_SetKey_Call {
-	return &Interface_SetKey_Call{Call: _e.mock.On("SetKey", ctx, key)}
+func (_e *Interface_Expecter) SetSchedulerJobKey(ctx interface{}, key interface{}) *Interface_SetSchedulerJobKey_Call {
+	return &Interface_SetSchedulerJobKey_Call{Call: _e.mock.On("SetSchedulerJobKey", ctx, key)}
 }
 
-func (_c *Interface_SetKey_Call) Run(run func(ctx context.Context, key string)) *Interface_SetKey_Call {
+func (_c *Interface_SetSchedulerJobKey_Call) Run(run func(ctx context.Context, key string)) *Interface_SetSchedulerJobKey_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(string))
 	})
 	return _c
 }
 
-func (_c *Interface_SetKey_Call) Return(_a0 error) *Interface_SetKey_Call {
+func (_c *Interface_SetSchedulerJobKey_Call) Return(_a0 error) *Interface_SetSchedulerJobKey_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *Interface_SetKey_Call) RunAndReturn(run func(context.Context, string) error) *Interface_SetKey_Call {
+func (_c *Interface_SetSchedulerJobKey_Call) RunAndReturn(run func(context.Context, string) error) *Interface_SetSchedulerJobKey_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -764,12 +629,12 @@ func (_c *Interface_Stop_Call) RunAndReturn(run func(context.Context) error) *In
 	return _c
 }
 
-// UnsetKey provides a mock function with given fields: ctx, key
-func (_m *Interface) UnsetKey(ctx context.Context, key string) error {
+// UnsetSchedulerJobKey provides a mock function with given fields: ctx, key
+func (_m *Interface) UnsetSchedulerJobKey(ctx context.Context, key string) error {
 	ret := _m.Called(ctx, key)
 
 	if len(ret) == 0 {
-		panic("no return value specified for UnsetKey")
+		panic("no return value specified for UnsetSchedulerJobKey")
 	}
 
 	var r0 error
@@ -782,31 +647,31 @@ func (_m *Interface) UnsetKey(ctx context.Context, key string) error {
 	return r0
 }
 
-// Interface_UnsetKey_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UnsetKey'
-type Interface_UnsetKey_Call struct {
+// Interface_UnsetSchedulerJobKey_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UnsetSchedulerJobKey'
+type Interface_UnsetSchedulerJobKey_Call struct {
 	*mock.Call
 }
 
-// UnsetKey is a helper method to define mock.On call
+// UnsetSchedulerJobKey is a helper method to define mock.On call
 //   - ctx context.Context
 //   - key string
-func (_e *Interface_Expecter) UnsetKey(ctx interface{}, key interface{}) *Interface_UnsetKey_Call {
-	return &Interface_UnsetKey_Call{Call: _e.mock.On("UnsetKey", ctx, key)}
+func (_e *Interface_Expecter) UnsetSchedulerJobKey(ctx interface{}, key interface{}) *Interface_UnsetSchedulerJobKey_Call {
+	return &Interface_UnsetSchedulerJobKey_Call{Call: _e.mock.On("UnsetSchedulerJobKey", ctx, key)}
 }
 
-func (_c *Interface_UnsetKey_Call) Run(run func(ctx context.Context, key string)) *Interface_UnsetKey_Call {
+func (_c *Interface_UnsetSchedulerJobKey_Call) Run(run func(ctx context.Context, key string)) *Interface_UnsetSchedulerJobKey_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(string))
 	})
 	return _c
 }
 
-func (_c *Interface_UnsetKey_Call) Return(_a0 error) *Interface_UnsetKey_Call {
+func (_c *Interface_UnsetSchedulerJobKey_Call) Return(_a0 error) *Interface_UnsetSchedulerJobKey_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *Interface_UnsetKey_Call) RunAndReturn(run func(context.Context, string) error) *Interface_UnsetKey_Call {
+func (_c *Interface_UnsetSchedulerJobKey_Call) RunAndReturn(run func(context.Context, string) error) *Interface_UnsetSchedulerJobKey_Call {
 	_c.Call.Return(run)
 	return _c
 }

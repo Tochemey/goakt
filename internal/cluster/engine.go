@@ -27,6 +27,7 @@ package cluster
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"slices"
@@ -38,7 +39,7 @@ import (
 	"github.com/buraksezer/olric/config"
 	"github.com/buraksezer/olric/events"
 	"github.com/buraksezer/olric/hasher"
-	"github.com/pkg/errors"
+
 	"github.com/redis/go-redis/v9"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
@@ -83,30 +84,23 @@ type Interface interface {
 	Start(ctx context.Context) error
 	// Stop stops the cluster engine
 	Stop(ctx context.Context) error
-	// Host returns the cluster startNode host address
-	Host() string
-	// RemotingPort returns the cluster remoting port
-	RemotingPort() int
 	// PutActor replicates onto the Node the metadata of an actor
 	PutActor(ctx context.Context, actor *internalpb.ActorRef) error
 	// GetActor fetches an actor from the Node
 	GetActor(ctx context.Context, actorName string) (*internalpb.ActorRef, error)
 	// GetPartition returns the partition where a given actor is stored
 	GetPartition(actorName string) int
-	// SetKey sets a given key to the cluster
-	SetKey(ctx context.Context, key string) error
-	// KeyExists checks the existence of a given key
-	KeyExists(ctx context.Context, key string) (bool, error)
-	// UnsetKey unsets the already set given key in the cluster
-	UnsetKey(ctx context.Context, key string) error
+	// SetSchedulerJobKey sets a given key to the cluster
+	SetSchedulerJobKey(ctx context.Context, key string) error
+	// SchedulerJobKeyExists checks the existence of a given key
+	SchedulerJobKeyExists(ctx context.Context, key string) (bool, error)
+	// UnsetSchedulerJobKey unsets the already set given key in the cluster
+	UnsetSchedulerJobKey(ctx context.Context, key string) error
 	// RemoveActor removes a given actor from the cluster.
 	// An actor is removed from the cluster when this actor has been passivated.
 	RemoveActor(ctx context.Context, actorName string) error
 	// Events returns a channel where cluster events are published
 	Events() <-chan *Event
-	// AdvertisedAddress returns the cluster node cluster address that is known by the
-	// peers in the cluster
-	AdvertisedAddress() string
 	// Peers returns a channel containing the list of peers at a given time
 	Peers(ctx context.Context) ([]*Peer, error)
 	// GetState fetches a given peer state
@@ -143,8 +137,8 @@ type Engine struct {
 	// specifies the distributed key value store
 	dmap olric.DMap
 
-	// specifies the Node host
-	host *discovery.Node
+	// specifies the Node node
+	node *discovery.Node
 
 	// specifies the hasher
 	hasher hash.Hasher
@@ -193,8 +187,8 @@ func NewEngine(name string, disco discovery.Provider, host *discovery.Node, opts
 		opt.Apply(engine)
 	}
 
-	// set the host startNode
-	engine.host = host
+	// set the node startNode
+	engine.node = host
 
 	return engine, nil
 }
@@ -203,21 +197,21 @@ func NewEngine(name string, disco discovery.Provider, host *discovery.Node, opts
 func (n *Engine) Start(ctx context.Context) error {
 	logger := n.logger
 
-	logger.Infof("Starting GoAkt cluster Engine service on host=(%s)....🤔", n.host.PeersAddress())
+	logger.Infof("Starting GoAkt cluster Engine service on node=(%s)....🤔", n.node.PeersAddress())
 
 	conf := n.buildConfig()
 	conf.Hasher = &hasherWrapper{n.hasher}
 
 	m, err := config.NewMemberlistConfig("lan")
 	if err != nil {
-		logger.Error(errors.Wrap(err, "failed to configure the cluster Engine members list.💥"))
+		logger.Errorf("failed to configure the cluster Engine members list.💥: %v", err)
 		return err
 	}
 
 	// sets the bindings
-	m.BindAddr = n.host.Host
-	m.BindPort = n.host.DiscoveryPort
-	m.AdvertisePort = n.host.DiscoveryPort
+	m.BindAddr = n.node.Host
+	m.BindPort = n.node.DiscoveryPort
+	m.AdvertisePort = n.node.DiscoveryPort
 	conf.MemberlistConfig = m
 
 	// set the discovery provider
@@ -240,7 +234,7 @@ func (n *Engine) Start(ctx context.Context) error {
 
 	eng, err := olric.New(conf)
 	if err != nil {
-		logger.Error(errors.Wrapf(err, "failed to start the cluster Engine on host=(%s)", n.name))
+		logger.Error(fmt.Errorf("failed to start the cluster Engine on node=(%s): %w", n.name, err))
 		return err
 	}
 
@@ -252,7 +246,7 @@ func (n *Engine) Start(ctx context.Context) error {
 				logger.Panic(e)
 			}
 			// the expectation is to exit the application
-			logger.Fatal(errors.Wrapf(err, "failed to start the cluster Engine on host=(%s)", n.name))
+			logger.Error(fmt.Errorf("failed to start the cluster Engine on node=(%s): %w", n.name, err))
 		}
 	}()
 
@@ -261,26 +255,26 @@ func (n *Engine) Start(ctx context.Context) error {
 
 	// set the client
 	n.client = n.server.NewEmbeddedClient()
-	dmp, err := n.client.NewDMap(n.name)
+	newDMap, err := n.client.NewDMap(n.name)
 	if err != nil {
-		logger.Error(errors.Wrapf(err, "failed to start the cluster Engine on host=(%s)", n.name))
+		logger.Error(fmt.Errorf("failed to start the cluster Engine on node=(%s): %w", n.name, err))
 		return n.server.Shutdown(ctx)
 	}
 
-	n.dmap = dmp
+	n.dmap = newDMap
 
 	// create a subscriber to consume to cluster events
-	ps, err := n.client.NewPubSub(olric.ToAddress(n.host.PeersAddress()))
+	ps, err := n.client.NewPubSub(olric.ToAddress(n.node.PeersAddress()))
 	if err != nil {
-		logger.Error(errors.Wrapf(err, "failed to start the cluster Engine on host=(%s)", n.name))
+		logger.Error(fmt.Errorf("failed to start the cluster Engine on node=(%s): %w", n.name, err))
 		return n.server.Shutdown(ctx)
 	}
 
 	// set the peer state
 	n.peerState = &internalpb.PeerState{
-		Host:         n.Host(),
-		RemotingPort: int32(n.host.RemotingPort),
-		PeersPort:    int32(n.host.PeersPort),
+		Host:         n.node.Host,
+		RemotingPort: int32(n.node.RemotingPort),
+		PeersPort:    int32(n.node.PeersPort),
 		Actors:       []*internalpb.ActorRef{},
 	}
 
@@ -306,19 +300,19 @@ func (n *Engine) Stop(ctx context.Context) error {
 
 	// close the events listener
 	if err := n.pubSub.Close(); err != nil {
-		logger.Error(errors.Wrap(err, "failed to shutdown the cluster events listener"))
+		logger.Errorf("failed to stop the cluster Engine on node=(%s): %w", n.node.PeersAddress(), err)
 		return err
 	}
 
 	// close the Node client
 	if err := n.client.Close(ctx); err != nil {
-		logger.Error(errors.Wrapf(err, "failed to shutdown the cluster engine=(%s)", n.name))
+		logger.Errorf("failed to stop the cluster Engine on node=(%s): %w", n.node.PeersAddress(), err)
 		return err
 	}
 
 	// let us stop the server
 	if err := n.server.Shutdown(ctx); err != nil {
-		logger.Error(errors.Wrapf(err, "failed to shutdown the cluster engine=(%s)", n.name))
+		logger.Errorf("failed to stop the cluster Engine on node=(%s): %w", n.node.PeersAddress(), err)
 		return err
 	}
 
@@ -337,40 +331,15 @@ func (n *Engine) Stop(ctx context.Context) error {
 func (n *Engine) IsLeader(ctx context.Context) bool {
 	n.Lock()
 	client := n.client
-	host := n.host
+	host := n.node
 	n.Unlock()
 
 	stats, err := client.Stats(ctx, host.PeersAddress())
 	if err != nil {
-		n.logger.Errorf("failed to fetch the cluster node=(%s) stats: %v", n.host.PeersAddress(), err)
+		n.logger.Errorf("failed to fetch the cluster node=(%s) stats: %v", n.node.PeersAddress(), err)
 		return false
 	}
 	return stats.ClusterCoordinator.String() == stats.Member.String()
-}
-
-// Host returns the Node Host
-func (n *Engine) Host() string {
-	n.Lock()
-	host := n.host
-	n.Unlock()
-	return host.Host
-}
-
-// RemotingPort returns the Node remoting port
-func (n *Engine) RemotingPort() int {
-	n.Lock()
-	host := n.host
-	n.Unlock()
-	return host.RemotingPort
-}
-
-// AdvertisedAddress returns the cluster node cluster address that is known by the
-// peers in the cluster
-func (n *Engine) AdvertisedAddress() string {
-	n.Lock()
-	host := n.host
-	n.Unlock()
-	return host.PeersAddress()
 }
 
 // PutActor pushes to the cluster the peer sync request
@@ -383,7 +352,7 @@ func (n *Engine) PutActor(ctx context.Context, actor *internalpb.ActorRef) error
 
 	logger := n.logger
 
-	logger.Infof("synchronization peer (%s)", n.host.PeersAddress())
+	logger.Infof("synchronization peer (%s)", n.node.PeersAddress())
 
 	eg, ctx := errgroup.WithContext(ctx)
 	eg.SetLimit(2)
@@ -391,7 +360,7 @@ func (n *Engine) PutActor(ctx context.Context, actor *internalpb.ActorRef) error
 	eg.Go(func() error {
 		encoded, _ := encode(actor)
 		if err := n.dmap.Put(ctx, actor.GetActorAddress().GetName(), encoded); err != nil {
-			return fmt.Errorf("failed to sync actor=(%s) of peer=(%s): %v", actor.GetActorAddress().GetName(), n.host.PeersAddress(), err)
+			return fmt.Errorf("failed to sync actor=(%s) of peer=(%s): %v", actor.GetActorAddress().GetName(), n.node.PeersAddress(), err)
 		}
 
 		return nil
@@ -407,19 +376,19 @@ func (n *Engine) PutActor(ctx context.Context, actor *internalpb.ActorRef) error
 
 		n.peerState.Actors = compacted
 		encoded, _ := proto.Marshal(n.peerState)
-		if err := n.dmap.Put(ctx, n.host.PeersAddress(), encoded); err != nil {
-			return fmt.Errorf("failed to sync peer=(%s) request: %v", n.host.PeersAddress(), err)
+		if err := n.dmap.Put(ctx, n.node.PeersAddress(), encoded); err != nil {
+			return fmt.Errorf("failed to sync peer=(%s) request: %v", n.node.PeersAddress(), err)
 		}
 
 		return nil
 	})
 
 	if err := eg.Wait(); err != nil {
-		logger.Errorf("failed to synchronize peer=(%s): %v", n.host.PeersAddress(), err)
+		logger.Errorf("failed to synchronize peer=(%s): %v", n.node.PeersAddress(), err)
 		return err
 	}
 
-	logger.Infof("peer (%s) successfully synchronized in the cluster", n.host.PeersAddress())
+	logger.Infof("peer (%s) successfully synchronized in the cluster", n.node.PeersAddress())
 	return nil
 }
 
@@ -433,31 +402,31 @@ func (n *Engine) GetState(ctx context.Context, peerAddress string) (*internalpb.
 
 	logger := n.logger
 
-	logger.Infof("[%s] retrieving peer (%s) sync record", n.host.PeersAddress(), peerAddress)
+	logger.Infof("[%s] retrieving peer (%s) sync record", n.node.PeersAddress(), peerAddress)
 	resp, err := n.dmap.Get(ctx, peerAddress)
 	if err != nil {
 		if errors.Is(err, olric.ErrKeyNotFound) {
-			logger.Warnf("[%s] has not found peer=(%s) sync record", n.host.PeersAddress(), peerAddress)
+			logger.Warnf("[%s] has not found peer=(%s) sync record", n.node.PeersAddress(), peerAddress)
 			return nil, ErrPeerSyncNotFound
 		}
 
-		logger.Errorf("[%s] failed to find peer=(%s) sync record: %v", n.host.PeersAddress(), peerAddress, err)
+		logger.Errorf("[%s] failed to find peer=(%s) sync record: %v", n.node.PeersAddress(), peerAddress, err)
 		return nil, err
 	}
 
 	bytea, err := resp.Byte()
 	if err != nil {
-		logger.Errorf("[%s] failed to read peer=(%s) sync record: %v", n.host.PeersAddress(), peerAddress, err)
+		logger.Errorf("[%s] failed to read peer=(%s) sync record: %v", n.node.PeersAddress(), peerAddress, err)
 		return nil, err
 	}
 
 	peerState := new(internalpb.PeerState)
 	if err := proto.Unmarshal(bytea, peerState); err != nil {
-		logger.Errorf("[%s] failed to decode peer=(%s) sync record: %v", n.host.PeersAddress(), peerAddress, err)
+		logger.Errorf("[%s] failed to decode peer=(%s) sync record: %v", n.node.PeersAddress(), peerAddress, err)
 		return nil, err
 	}
 
-	logger.Infof("[%s] successfully retrieved peer (%s) sync record .🎉", n.host.PeersAddress(), peerAddress)
+	logger.Infof("[%s] successfully retrieved peer (%s) sync record .🎉", n.node.PeersAddress(), peerAddress)
 	return peerState, nil
 }
 
@@ -471,31 +440,31 @@ func (n *Engine) GetActor(ctx context.Context, actorName string) (*internalpb.Ac
 
 	logger := n.logger
 
-	logger.Infof("[%s] retrieving actor (%s) from the cluster", n.host.PeersAddress(), actorName)
+	logger.Infof("[%s] retrieving actor (%s) from the cluster", n.node.PeersAddress(), actorName)
 
 	resp, err := n.dmap.Get(ctx, actorName)
 	if err != nil {
 		if errors.Is(err, olric.ErrKeyNotFound) {
-			logger.Warnf("[%s] could not find actor=%s the cluster", n.host.PeersAddress(), actorName)
+			logger.Warnf("[%s] could not find actor=%s the cluster", n.node.PeersAddress(), actorName)
 			return nil, ErrActorNotFound
 		}
-		logger.Error(errors.Wrapf(err, "[%s] failed to get actor=%s record", n.host.PeersAddress(), actorName))
+		logger.Errorf("[%s] failed to get actor=(%s) record from the cluster: %v", n.node.PeersAddress(), actorName, err)
 		return nil, err
 	}
 
 	bytea, err := resp.Byte()
 	if err != nil {
-		logger.Error(errors.Wrapf(err, "[%s] failed to read the record at:{%s}", n.host.PeersAddress(), actorName))
+		logger.Errorf("[%s] failed to read actor=(%s) record: %v", n.node.PeersAddress(), actorName, err)
 		return nil, err
 	}
 
 	actor, err := decode(bytea)
 	if err != nil {
-		logger.Error(errors.Wrapf(err, "[%s] failed to decode actor=%s record", n.host.PeersAddress(), actorName))
+		logger.Errorf("[%s] failed to decode actor=(%s) record: %v", n.node.PeersAddress(), actorName, err)
 		return nil, err
 	}
 
-	logger.Infof("[%s] successfully retrieved from the cluster actor (%s)", n.host.PeersAddress(), actor.GetActorAddress().GetName())
+	logger.Infof("[%s] successfully retrieved from the cluster actor (%s)", n.node.PeersAddress(), actor.GetActorAddress().GetName())
 	return actor, nil
 }
 
@@ -510,7 +479,7 @@ func (n *Engine) RemoveActor(ctx context.Context, actorName string) error {
 
 	_, err := n.dmap.Delete(ctx, actorName)
 	if err != nil {
-		logger.Error(errors.Wrapf(err, "failed to remove actor=%s record from the cluster", actorName))
+		logger.Errorf("[%s] failed to remove actor=(%s) record from cluster: %v", n.node.PeersAddress(), actorName, err)
 		return err
 	}
 
@@ -518,8 +487,8 @@ func (n *Engine) RemoveActor(ctx context.Context, actorName string) error {
 	return nil
 }
 
-// SetKey sets a given key to the cluster
-func (n *Engine) SetKey(ctx context.Context, key string) error {
+// SetSchedulerJobKey sets a given key to the cluster
+func (n *Engine) SetSchedulerJobKey(ctx context.Context, key string) error {
 	ctx, cancelFn := context.WithTimeout(ctx, n.writeTimeout)
 	defer cancelFn()
 
@@ -531,7 +500,7 @@ func (n *Engine) SetKey(ctx context.Context, key string) error {
 	logger.Infof("replicating key (%s)", key)
 
 	if err := n.dmap.Put(ctx, key, true); err != nil {
-		logger.Error(errors.Wrapf(err, "failed to replicate key=%s record.💥", key))
+		logger.Errorf("failed to replicate scheduler job key (%s): %v", key, err)
 		return err
 	}
 
@@ -539,8 +508,8 @@ func (n *Engine) SetKey(ctx context.Context, key string) error {
 	return nil
 }
 
-// KeyExists checks the existence of a given key
-func (n *Engine) KeyExists(ctx context.Context, key string) (bool, error) {
+// SchedulerJobKeyExists checks the existence of a given key
+func (n *Engine) SchedulerJobKeyExists(ctx context.Context, key string) (bool, error) {
 	ctx, cancelFn := context.WithTimeout(ctx, n.readTimeout)
 	defer cancelFn()
 
@@ -558,14 +527,14 @@ func (n *Engine) KeyExists(ctx context.Context, key string) (bool, error) {
 			return false, nil
 		}
 
-		logger.Error(errors.Wrapf(err, "failed to check key=%s existence", key))
+		logger.Errorf("[%s] failed to check scheduler job key (%s) existence: %v", n.node.PeersAddress(), key, err)
 		return false, err
 	}
 	return resp.Bool()
 }
 
-// UnsetKey unsets the already set given key in the cluster
-func (n *Engine) UnsetKey(ctx context.Context, key string) error {
+// UnsetSchedulerJobKey unsets the already set given key in the cluster
+func (n *Engine) UnsetSchedulerJobKey(ctx context.Context, key string) error {
 	logger := n.logger
 
 	n.Lock()
@@ -574,7 +543,7 @@ func (n *Engine) UnsetKey(ctx context.Context, key string) error {
 	logger.Infof("unsetting key (%s)", key)
 
 	if _, err := n.dmap.Delete(ctx, key); err != nil {
-		logger.Error(errors.Wrapf(err, "failed to unset key=%s record.💥", key))
+		logger.Errorf("failed to unset scheduler job key (%s): %v", key, err)
 		return err
 	}
 
@@ -604,14 +573,14 @@ func (n *Engine) Peers(ctx context.Context) ([]*Peer, error) {
 
 	members, err := client.Members(ctx)
 	if err != nil {
-		n.logger.Error(errors.Wrap(err, "failed to read cluster peers"))
+		n.logger.Errorf("failed to read cluster peers: %v", err)
 		return nil, err
 	}
 
 	peers := make([]*Peer, 0, len(members))
 	for _, member := range members {
-		if member.Name != n.AdvertisedAddress() {
-			n.logger.Debugf("node=(%s) has found peer=(%s)", n.AdvertisedAddress(), member.Name)
+		if member.Name != n.node.PeersAddress() {
+			n.logger.Debugf("node=(%s) has found peer=(%s)", n.node.PeersAddress(), member.Name)
 			peerHost, port, _ := net.SplitHostPort(member.Name)
 			peerPort, _ := strconv.Atoi(port)
 			peers = append(peers, &Peer{Host: peerHost, Port: peerPort, Coordinator: member.Coordinator})
@@ -634,7 +603,7 @@ func (n *Engine) consume() {
 			payload := message.Payload
 			var event map[string]any
 			if err := json.Unmarshal([]byte(payload), &event); err != nil {
-				n.logger.Error(errors.Wrap(err, "failed to decode cluster event"))
+				n.logger.Errorf("failed to unmarshal cluster event: %v", err)
 				// TODO: should we continue or not
 				continue
 			}
@@ -644,12 +613,12 @@ func (n *Engine) consume() {
 			case events.KindNodeJoinEvent:
 				nodeJoined := new(events.NodeJoinEvent)
 				if err := json.Unmarshal([]byte(payload), &nodeJoined); err != nil {
-					n.logger.Error(errors.Wrap(err, "failed to decode NodeJoined cluster event"))
+					n.logger.Errorf("failed to unmarshal node join cluster event: %v", err)
 					// TODO: should we continue or not
 					continue
 				}
 
-				if n.AdvertisedAddress() == nodeJoined.NodeJoin {
+				if n.node.PeersAddress() == nodeJoined.NodeJoin {
 					n.logger.Debug("skipping self")
 					continue
 				}
@@ -669,7 +638,7 @@ func (n *Engine) consume() {
 			case events.KindNodeLeftEvent:
 				nodeLeft := new(events.NodeLeftEvent)
 				if err := json.Unmarshal([]byte(payload), &nodeLeft); err != nil {
-					n.logger.Error(errors.Wrap(err, "failed to decode NodeLeft cluster event"))
+					n.logger.Errorf("failed to unmarshal node left cluster event: %v", err)
 					// TODO: should we continue or not
 					continue
 				}
@@ -710,8 +679,8 @@ func (n *Engine) buildConfig() *config.Config {
 
 	// create the config and return it
 	conf := &config.Config{
-		BindAddr:                   n.host.Host,
-		BindPort:                   n.host.PeersPort,
+		BindAddr:                   n.node.Host,
+		BindPort:                   n.node.PeersPort,
 		ReadRepair:                 true,
 		ReplicaCount:               int(n.replicaCount),
 		WriteQuorum:                config.DefaultWriteQuorum,
