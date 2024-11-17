@@ -119,10 +119,10 @@ type PID struct {
 	watchersList *slice.Safe[*watcher]
 
 	// hold the list of the children
-	children *syncMap
+	children *pidMap
 
 	// hold the list of watched actors
-	watchedList *syncMap
+	watchedList *pidMap
 
 	// the actor system
 	system ActorSystem
@@ -184,10 +184,10 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 		latestReceiveTime:              atomic.Time{},
 		haltPassivationLnr:             make(chan types.Unit, 1),
 		logger:                         log.New(log.ErrorLevel, os.Stderr),
-		children:                       newSyncMap(),
+		children:                       newMap(),
 		supervisorDirective:            DefaultSupervisoryStrategy,
 		watchersList:                   slice.NewSafe[*watcher](),
-		watchedList:                    newSyncMap(),
+		watchedList:                    newMap(),
 		address:                        address,
 		fieldsLocker:                   new(sync.RWMutex),
 		stopLocker:                     new(sync.Mutex),
@@ -1091,7 +1091,7 @@ func (pid *PID) watchers() *slice.Safe[*watcher] {
 }
 
 // watchees returns the list of actors watched by this actor
-func (pid *PID) watchees() *syncMap {
+func (pid *PID) watchees() *pidMap {
 	return pid.watchedList
 }
 

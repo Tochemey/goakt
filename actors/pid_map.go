@@ -31,24 +31,24 @@ import (
 	"github.com/tochemey/goakt/v2/address"
 )
 
-type syncMap struct {
+type pidMap struct {
 	sync.Map
 	counter uint64
 }
 
-func newSyncMap() *syncMap {
-	return &syncMap{
+func newMap() *pidMap {
+	return &pidMap{
 		counter: 0,
 	}
 }
 
 // Size returns the number of List
-func (m *syncMap) Size() int {
+func (m *pidMap) Size() int {
 	return int(atomic.LoadUint64(&m.counter))
 }
 
 // Get retrieves a pid by its address
-func (m *syncMap) Get(address *address.Address) (pid *PID, ok bool) {
+func (m *pidMap) Get(address *address.Address) (pid *PID, ok bool) {
 	if val, found := m.Load(address.String()); found {
 		return val.(*PID), found
 	}
@@ -56,7 +56,7 @@ func (m *syncMap) Get(address *address.Address) (pid *PID, ok bool) {
 }
 
 // Set sets a pid in the map
-func (m *syncMap) Set(pid *PID) {
+func (m *pidMap) Set(pid *PID) {
 	if pid != nil {
 		m.Store(pid.Address().String(), pid)
 		atomic.AddUint64(&m.counter, 1)
@@ -64,13 +64,13 @@ func (m *syncMap) Set(pid *PID) {
 }
 
 // Remove removes a pid from the map
-func (m *syncMap) Remove(addr *address.Address) {
+func (m *pidMap) Remove(addr *address.Address) {
 	m.Delete(addr.String())
 	atomic.AddUint64(&m.counter, ^uint64(0))
 }
 
 // List returns all actors as a slice
-func (m *syncMap) List() []*PID {
+func (m *pidMap) List() []*PID {
 	var out []*PID
 	m.Range(func(_, value interface{}) bool {
 		out = append(out, value.(*PID))
@@ -81,7 +81,7 @@ func (m *syncMap) List() []*PID {
 
 // Reset resets the pids map
 // nolint
-func (m *syncMap) Reset() {
+func (m *pidMap) Reset() {
 	// TODO: remove this line when migrated to go 1.23
 	//m.Clear()
 	m.Range(func(key interface{}, value interface{}) bool {

@@ -153,7 +153,7 @@ type actorSystem struct {
 	internalpbconnect.UnimplementedClusterServiceHandler
 
 	// map of actors in the system
-	actors *syncMap
+	actors *pidMap
 
 	// states whether the actor system has started or not
 	started atomic.Bool
@@ -200,6 +200,7 @@ type actorSystem struct {
 	clusterEventsChan  <-chan *cluster.Event
 	clusterSyncStopSig chan types.Unit
 	partitionHasher    hash.Hasher
+	clusterNode        *discovery.Node
 
 	// help protect some the fields to set
 	locker sync.Mutex
@@ -240,7 +241,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 	}
 
 	system := &actorSystem{
-		actors:                 newSyncMap(),
+		actors:                 newMap(),
 		actorsChan:             make(chan *internalpb.ActorRef, 10),
 		name:                   name,
 		logger:                 log.New(log.ErrorLevel, os.Stderr),
@@ -521,7 +522,7 @@ func (x *actorSystem) PeerAddress() string {
 	x.locker.Lock()
 	defer x.locker.Unlock()
 	if x.clusterEnabled.Load() {
-		return x.cluster.AdvertisedAddress()
+		return x.clusterNode.PeersAddress()
 	}
 	return ""
 }
@@ -1064,7 +1065,7 @@ func (x *actorSystem) enableClustering(ctx context.Context) error {
 		return errors.New("clustering needs remoting to be enabled")
 	}
 
-	node := &discovery.Node{
+	x.clusterNode = &discovery.Node{
 		Name:          x.Name(),
 		Host:          x.host,
 		DiscoveryPort: x.clusterConfig.DiscoveryPort(),
@@ -1075,7 +1076,7 @@ func (x *actorSystem) enableClustering(ctx context.Context) error {
 	clusterEngine, err := cluster.NewEngine(
 		x.Name(),
 		x.clusterConfig.Discovery(),
-		node,
+		x.clusterNode,
 		cluster.WithLogger(x.logger),
 		cluster.WithPartitionsCount(x.clusterConfig.PartitionCount()),
 		cluster.WithHasher(x.partitionHasher),

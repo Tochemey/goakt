@@ -41,7 +41,7 @@ func TestPIDMap(t *testing.T) {
 	// create the PID
 	actorRef := &PID{address: actorPath, fieldsLocker: &sync.RWMutex{}, stopLocker: &sync.Mutex{}}
 	// create a new PID map
-	pidMap := newSyncMap()
+	pidMap := newMap()
 	// add to the map
 	pidMap.Set(actorRef)
 	// assert the length of the map
