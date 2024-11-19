@@ -1541,7 +1541,7 @@ func (x *actorSystem) createRebalancer(ctx context.Context) error {
 	actorName := x.getSystemActorName(rebalancerType)
 	x.rebalancer, err = x.configPID(ctx,
 		actorName,
-		newRebalancer(x.cluster, x.reflection),
+		newRebalancer(x.reflection),
 		WithSupervisor(NewResumeDirective()),
 	)
 	if err != nil {

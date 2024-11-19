@@ -31,7 +31,6 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/tochemey/goakt/v2/goaktpb"
-	"github.com/tochemey/goakt/v2/internal/cluster"
 	"github.com/tochemey/goakt/v2/internal/internalpb"
 	"github.com/tochemey/goakt/v2/internal/slice"
 )
@@ -48,7 +47,7 @@ type rebalancer struct {
 var _ Actor = (*rebalancer)(nil)
 
 // newRebalancer creates an instance of rebalancer
-func newRebalancer(cluster cluster.Interface, reflection *reflection) *rebalancer {
+func newRebalancer(reflection *reflection) *rebalancer {
 	return &rebalancer{
 		reflection: reflection,
 	}
