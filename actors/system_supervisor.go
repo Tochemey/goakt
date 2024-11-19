@@ -34,7 +34,8 @@ import (
 // systemSupervisor is an actor which roles is to handle
 // escalation failure
 type systemSupervisor struct {
-	logger log.Logger
+	logger           log.Logger
+	underlyingSystem ActorSystem
 }
 
 // enforce compilation error
@@ -53,9 +54,22 @@ func (s *systemSupervisor) PreStart(context.Context) error {
 }
 
 func (s *systemSupervisor) Receive(ctx *ReceiveContext) {
-	switch ctx.Message().(type) {
+	switch msg := ctx.Message().(type) {
 	case *goaktpb.PostStart:
 		s.logger.Info("system supervisor successfully started")
+		s.underlyingSystem = ctx.Self().ActorSystem()
+	case *goaktpb.Terminated:
+		actorID := msg.GetActorId()
+		if actorID == s.underlyingSystem.getSystemActorName(rebalancerType) {
+			// rebalancer is dead which means either there is an issue during the cluster topology changes
+			// log a message error and stop the actor system
+			s.logger.Warn("%s rebalancer is down. %s is going to shutdown. Kindly check logs and fix any potential issue with the cluster",
+				s.underlyingSystem.Name(),
+				s.underlyingSystem.Name())
+
+			// blindly shutdown the actor system. No need to check any error
+			_ = s.underlyingSystem.Stop(context.WithoutCancel(ctx.Context()))
+		}
 	default:
 		ctx.Unhandled()
 	}

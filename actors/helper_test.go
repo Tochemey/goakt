@@ -454,7 +454,7 @@ func startClusterSystem(t *testing.T, serverAddr string) (ActorSystem, discovery
 				WithPeersPort(clusterPort).
 				WithMinimumPeersQuorum(1).
 				WithDiscoveryPort(gossipPort).
-				WithDiscovery(provider).WithKinds(new(testActor))),
+				WithDiscovery(provider)),
 	)
 
 	require.NotNil(t, system)

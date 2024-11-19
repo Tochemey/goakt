@@ -23,3 +23,183 @@
  */
 
 package actors
+
+import (
+	"context"
+
+	"golang.org/x/sync/errgroup"
+	"google.golang.org/protobuf/proto"
+
+	"github.com/tochemey/goakt/v2/goaktpb"
+	"github.com/tochemey/goakt/v2/internal/cluster"
+	"github.com/tochemey/goakt/v2/internal/internalpb"
+	"github.com/tochemey/goakt/v2/internal/slice"
+)
+
+// rebalancer is a system actor that helps rebalance cluster
+// when the cluster topology changes
+type rebalancer struct {
+	cluster    cluster.Interface
+	reflection *reflection
+	remoting   *Remoting
+	pid        *PID
+}
+
+// enforce compilation error
+var _ Actor = (*rebalancer)(nil)
+
+// newRebalancer creates an instance of rebalancer
+func newRebalancer(cluster cluster.Interface, reflection *reflection) *rebalancer {
+	return &rebalancer{
+		cluster:    cluster,
+		reflection: reflection,
+	}
+}
+
+// PreStart pre-starts the actor.
+// nolint
+func (r *rebalancer) PreStart(ctx context.Context) error {
+	return nil
+}
+
+// Receive handles messages sent to the router
+func (r *rebalancer) Receive(ctx *ReceiveContext) {
+	switch ctx.Message().(type) {
+	case *goaktpb.PostStart:
+		r.pid = ctx.Self()
+		r.remoting = NewRemoting()
+		ctx.Become(r.Rebalance)
+	default:
+		ctx.Unhandled()
+	}
+}
+
+func (r *rebalancer) Rebalance(ctx *ReceiveContext) {
+	switch msg := ctx.Message().(type) {
+	case *internalpb.Rebalance:
+		if proto.Equal(msg.GetPeerState(), new(internalpb.PeerState)) {
+			ctx.Unhandled()
+			return
+		}
+
+		rctx := context.WithoutCancel(ctx.Context())
+		// make sure we are the leader node
+		if !r.cluster.IsLeader(rctx) {
+			// no-op and discard message
+			ctx.Unhandled()
+			return
+		}
+
+		peerState := msg.GetPeerState()
+		// make sure we have some actors to rebalance
+		if len(peerState.GetActors()) == 0 {
+			// no-op and discard message
+			ctx.Unhandled()
+			return
+		}
+
+		// grab all our active peers
+		peers, err := r.cluster.Peers(rctx)
+		if err != nil {
+			ctx.Err(err)
+			return
+		}
+
+		leaderShares, peersShares := r.computeRebalancing(len(peers)+1, peerState)
+		eg, egCtx := errgroup.WithContext(rctx)
+		logger := r.pid.Logger()
+
+		if len(leaderShares) > 0 {
+			eg.Go(func() error {
+				for _, actor := range leaderShares {
+					if isSystemName(actor.GetActorAddress().GetName()) {
+						continue
+					}
+
+					iactor, err := r.reflection.ActorFrom(actor.GetActorType())
+					if err != nil {
+						return err
+					}
+
+					if _, err = r.pid.ActorSystem().Spawn(egCtx, actor.GetActorAddress().GetName(), iactor); err != nil {
+						return err
+					}
+				}
+				return nil
+			})
+		}
+
+		// defensive programming
+		if len(peersShares) == 0 {
+			return
+		}
+
+		eg.Go(func() error {
+			for i := 1; i < len(peersShares); i++ {
+				actors := peersShares[i]
+				peer := peers[i-1]
+				peerState, err := r.pid.ActorSystem().getPeerStateFromCache(peer.PeerAddress())
+				if err != nil {
+					return err
+				}
+
+				for _, actor := range actors {
+					// never redistribute system actors
+					if isSystemName(actor.GetActorAddress().GetName()) {
+						continue
+					}
+
+					if err := r.remoting.RemoteSpawn(egCtx,
+						peerState.GetHost(),
+						int(peerState.GetRemotingPort()),
+						actor.GetActorAddress().GetName(),
+						actor.GetActorType()); err != nil {
+						logger.Error(err)
+						return err
+					}
+				}
+			}
+			return nil
+		})
+
+		if err := eg.Wait(); err != nil {
+			logger.Errorf("cluster rebalancing failed: %v", err)
+			ctx.Shutdown()
+		}
+
+	default:
+		ctx.Unhandled()
+	}
+}
+
+// PostStop is executed when the actor is shutting down.
+// nolint
+func (r *rebalancer) PostStop(ctx context.Context) error {
+	r.remoting.Close()
+	return nil
+}
+
+// computeRebalancing build the list of actors to create on the leader node and the peers in the cluster
+func (r *rebalancer) computeRebalancing(totalPeers int, nodeLeftState *internalpb.PeerState) (leaderShares []*internalpb.ActorRef, peersShares [][]*internalpb.ActorRef) {
+	var (
+		chunks      [][]*internalpb.ActorRef
+		actorsCount = len(nodeLeftState.GetActors())
+	)
+
+	// distribute actors amongst the peers with the leader taking the heavy load
+	switch {
+	case actorsCount < totalPeers:
+		leaderShares = nodeLeftState.GetActors()
+	default:
+		quotient := actorsCount / totalPeers
+		remainder := actorsCount % totalPeers
+		leaderShares = nodeLeftState.GetActors()[:remainder]
+		chunks = slice.Chunk[*internalpb.ActorRef](nodeLeftState.GetActors()[remainder:], quotient)
+	}
+
+	if len(chunks) > 0 {
+		leaderShares = append(leaderShares, chunks[0]...)
+	}
+
+	return leaderShares, chunks
+}

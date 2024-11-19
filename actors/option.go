@@ -86,6 +86,7 @@ func WithPassivationDisabled() Option {
 }
 
 // WithSupervisorDirective sets the supervisor strategy directive
+// that will be globally used when there is no supervisor directive sets
 func WithSupervisorDirective(directive SupervisorDirective) Option {
 	return OptionFunc(
 		func(a *actorSystem) {

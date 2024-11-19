@@ -37,7 +37,7 @@ import (
 	"github.com/tochemey/goakt/v2/test/data/testpb"
 )
 
-func TestRedistribution(t *testing.T) {
+func TestRebalancing(t *testing.T) {
 	t.Run("With successful actors redeployment", func(t *testing.T) {
 		// create a context
 		ctx := context.TODO()

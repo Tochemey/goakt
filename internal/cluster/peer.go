@@ -24,6 +24,11 @@
 
 package cluster
 
+import (
+	"net"
+	"strconv"
+)
+
 // Peer defines the peer info
 type Peer struct {
 	// Host represents the peer address.
@@ -33,4 +38,9 @@ type Peer struct {
 	// Coordinator states that the given peer is the leader not.
 	// A peer is a coordinator when it is the oldest node in the cluster
 	Coordinator bool
+}
+
+// PeerAddress returns address the node's peers will use to connect to
+func (peer Peer) PeerAddress() string {
+	return net.JoinHostPort(peer.Host, strconv.Itoa(peer.Port))
 }
