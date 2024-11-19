@@ -1544,7 +1544,7 @@ func (x *actorSystem) createRebalancer(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("actor=%s failed to start cluster rebalancer: %w", actorName, err)
 	}
-	x.setActor(x.supervisor)
+	x.setActor(x.rebalancer)
 	x.supervisor.Watch(x.rebalancer)
 	return nil
 }
