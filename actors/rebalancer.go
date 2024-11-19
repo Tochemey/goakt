@@ -39,7 +39,6 @@ import (
 // rebalancer is a system actor that helps rebalance cluster
 // when the cluster topology changes
 type rebalancer struct {
-	cluster    cluster.Interface
 	reflection *reflection
 	remoting   *Remoting
 	pid        *PID
@@ -51,7 +50,6 @@ var _ Actor = (*rebalancer)(nil)
 // newRebalancer creates an instance of rebalancer
 func newRebalancer(cluster cluster.Interface, reflection *reflection) *rebalancer {
 	return &rebalancer{
-		cluster:    cluster,
 		reflection: reflection,
 	}
 }
@@ -84,7 +82,7 @@ func (r *rebalancer) Rebalance(ctx *ReceiveContext) {
 
 		rctx := context.WithoutCancel(ctx.Context())
 		// make sure we are the leader node
-		if !r.cluster.IsLeader(rctx) {
+		if !r.pid.ActorSystem().getCluster().IsLeader(rctx) {
 			// no-op and discard message
 			ctx.Unhandled()
 			return
@@ -99,7 +97,7 @@ func (r *rebalancer) Rebalance(ctx *ReceiveContext) {
 		}
 
 		// grab all our active peers
-		peers, err := r.cluster.Peers(rctx)
+		peers, err := r.pid.ActorSystem().getCluster().Peers(rctx)
 		if err != nil {
 			ctx.Err(err)
 			return

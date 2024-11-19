@@ -150,6 +150,8 @@ type ActorSystem interface {
 	getPeerStateFromCache(address string) (*internalpb.PeerState, error)
 	// getSystemActorName returns the system actor's name based upon their types
 	getSystemActorName(nameType nameType) string
+	// getCluster returns the cluster engine
+	getCluster() cluster.Interface
 }
 
 // ActorSystem represent a collection of actors on a given node
@@ -1430,6 +1432,11 @@ func (x *actorSystem) configPID(ctx context.Context, name string, actor Actor, o
 		return nil, err
 	}
 	return pid, nil
+}
+
+// getCluster returns the cluster engine
+func (x *actorSystem) getCluster() cluster.Interface {
+	return x.cluster
 }
 
 // getSystemActorName returns the system actor name
