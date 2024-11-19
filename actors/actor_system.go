@@ -1331,6 +1331,7 @@ func (x *actorSystem) peersStateLoop() {
 	x.logger.Info("peers state synchronization has stopped...")
 }
 
+// rebalancingLoop help perform cluster rebalancing
 func (x *actorSystem) rebalancingLoop() {
 	for event := range x.rebalancingChan {
 		if x.InCluster() {
@@ -1341,12 +1342,25 @@ func (x *actorSystem) rebalancingLoop() {
 				continue
 			}
 
+			ctx := context.Background()
+			if !x.shouldRebalance(ctx, peerState) {
+				continue
+			}
+
 			message := &internalpb.Rebalance{PeerState: peerState}
-			if err := x.supervisor.Tell(context.Background(), x.rebalancer, message); err != nil {
+			if err := x.supervisor.Tell(ctx, x.rebalancer, message); err != nil {
 				x.logger.Error(err)
 			}
 		}
 	}
+}
+
+// shouldRebalance returns true when the current can perform the cluster rebalancing
+func (x *actorSystem) shouldRebalance(ctx context.Context, peerState *internalpb.PeerState) bool {
+	return !(peerState == nil ||
+		proto.Equal(peerState, new(internalpb.PeerState)) ||
+		len(peerState.GetActors()) == 0 ||
+		!x.cluster.IsLeader(ctx))
 }
 
 // processPeerState processes a given peer synchronization record.

@@ -28,7 +28,6 @@ import (
 	"context"
 
 	"golang.org/x/sync/errgroup"
-	"google.golang.org/protobuf/proto"
 
 	"github.com/tochemey/goakt/v2/goaktpb"
 	"github.com/tochemey/goakt/v2/internal/internalpb"
@@ -74,26 +73,8 @@ func (r *rebalancer) Receive(ctx *ReceiveContext) {
 func (r *rebalancer) Rebalance(ctx *ReceiveContext) {
 	switch msg := ctx.Message().(type) {
 	case *internalpb.Rebalance:
-		if proto.Equal(msg.GetPeerState(), new(internalpb.PeerState)) {
-			ctx.Unhandled()
-			return
-		}
-
 		rctx := context.WithoutCancel(ctx.Context())
-		// make sure we are the leader node
-		if !r.pid.ActorSystem().getCluster().IsLeader(rctx) {
-			// no-op and discard message
-			ctx.Unhandled()
-			return
-		}
-
 		peerState := msg.GetPeerState()
-		// make sure we have some actors to rebalance
-		if len(peerState.GetActors()) == 0 {
-			// no-op and discard message
-			ctx.Unhandled()
-			return
-		}
 
 		// grab all our active peers
 		peers, err := r.pid.ActorSystem().getCluster().Peers(rctx)
@@ -163,7 +144,6 @@ func (r *rebalancer) Rebalance(ctx *ReceiveContext) {
 			logger.Errorf("cluster rebalancing failed: %v", err)
 			ctx.Shutdown()
 		}
-
 	default:
 		ctx.Unhandled()
 	}
