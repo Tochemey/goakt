@@ -451,7 +451,7 @@ func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor, opts .
 		return cid, nil
 	}
 
-	pid.fieldsLocker.RLock()
+	pid.fieldsLocker.Lock()
 
 	// create the child actor options child inherit parent's options
 	pidOptions := []pidOption{
@@ -492,14 +492,14 @@ func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor, opts .
 	)
 
 	if err != nil {
-		pid.fieldsLocker.RUnlock()
+		pid.fieldsLocker.Unlock()
 		return nil, err
 	}
 
 	pid.children.Set(cid)
 	eventsStream := pid.eventsStream
 
-	pid.fieldsLocker.RUnlock()
+	pid.fieldsLocker.Unlock()
 
 	pid.Watch(cid)
 

@@ -1536,7 +1536,7 @@ func (x *actorSystem) createSystemSupervisor(ctx context.Context) error {
 func (x *actorSystem) createRebalancer(ctx context.Context) error {
 	var err error
 	actorName := x.getSystemActorName(rebalancerType)
-	x.rebalancer, err = x.supervisor.SpawnChild(ctx,
+	x.rebalancer, err = x.configPID(ctx,
 		actorName,
 		newRebalancer(x.cluster, x.reflection),
 		WithSupervisor(NewResumeDirective()),
@@ -1544,6 +1544,8 @@ func (x *actorSystem) createRebalancer(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("actor=%s failed to start cluster rebalancer: %w", actorName, err)
 	}
+	x.setActor(x.supervisor)
+	x.supervisor.Watch(x.rebalancer)
 	return nil
 }
 
