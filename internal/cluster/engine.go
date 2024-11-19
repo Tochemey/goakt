@@ -39,7 +39,6 @@ import (
 	"github.com/buraksezer/olric/config"
 	"github.com/buraksezer/olric/events"
 	"github.com/buraksezer/olric/hasher"
-
 	"github.com/redis/go-redis/v9"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
@@ -332,13 +331,14 @@ func (n *Engine) IsLeader(ctx context.Context) bool {
 	n.Lock()
 	client := n.client
 	host := n.node
-	n.Unlock()
 
 	stats, err := client.Stats(ctx, host.PeersAddress())
 	if err != nil {
 		n.logger.Errorf("failed to fetch the cluster node=(%s) stats: %v", n.node.PeersAddress(), err)
+		n.Unlock()
 		return false
 	}
+	n.Unlock()
 	return stats.ClusterCoordinator.String() == stats.Member.String()
 }
 
@@ -569,11 +569,11 @@ func (n *Engine) Events() <-chan *Event {
 func (n *Engine) Peers(ctx context.Context) ([]*Peer, error) {
 	n.Lock()
 	client := n.client
-	n.Unlock()
 
 	members, err := client.Members(ctx)
 	if err != nil {
 		n.logger.Errorf("failed to read cluster peers: %v", err)
+		n.Unlock()
 		return nil, err
 	}
 
@@ -586,6 +586,7 @@ func (n *Engine) Peers(ctx context.Context) ([]*Peer, error) {
 			peers = append(peers, &Peer{Host: peerHost, Port: peerPort, Coordinator: member.Coordinator})
 		}
 	}
+	n.Unlock()
 	return peers, nil
 }
 
