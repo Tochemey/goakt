@@ -329,16 +329,15 @@ func (n *Engine) Stop(ctx context.Context) error {
 // point in time in the cluster
 func (n *Engine) IsLeader(ctx context.Context) bool {
 	n.Lock()
+	defer n.Unlock()
 	client := n.client
 	host := n.node
 
 	stats, err := client.Stats(ctx, host.PeersAddress())
 	if err != nil {
 		n.logger.Errorf("failed to fetch the cluster node=(%s) stats: %v", n.node.PeersAddress(), err)
-		n.Unlock()
 		return false
 	}
-	n.Unlock()
 	return stats.ClusterCoordinator.String() == stats.Member.String()
 }
 
@@ -568,12 +567,12 @@ func (n *Engine) Events() <-chan *Event {
 // Peers returns a channel containing the list of peers at a given time
 func (n *Engine) Peers(ctx context.Context) ([]*Peer, error) {
 	n.Lock()
+	defer n.Unlock()
 	client := n.client
 
 	members, err := client.Members(ctx)
 	if err != nil {
 		n.logger.Errorf("failed to read cluster peers: %v", err)
-		n.Unlock()
 		return nil, err
 	}
 
@@ -586,7 +585,6 @@ func (n *Engine) Peers(ctx context.Context) ([]*Peer, error) {
 			peers = append(peers, &Peer{Host: peerHost, Port: peerPort, Coordinator: member.Coordinator})
 		}
 	}
-	n.Unlock()
 	return peers, nil
 }
 

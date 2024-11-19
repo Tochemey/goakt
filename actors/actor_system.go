@@ -650,6 +650,7 @@ func (x *actorSystem) Start(ctx context.Context) error {
 	if err := errorschain.
 		New(errorschain.ReturnFirst()).
 		AddError(x.createSystemSupervisor(ctx)).
+		AddError(x.createRebalancer(ctx)).
 		AddError(x.enableRemoting(ctx)).
 		AddError(x.enableClustering(ctx)).
 		Error(); err != nil {
@@ -1139,11 +1140,6 @@ func (x *actorSystem) enableClustering(ctx context.Context) error {
 		x.registry.Register(kind)
 		x.logger.Infof("cluster kind=(%s) registered", types.TypeName(kind))
 	}
-
-	if err := x.createRebalancer(ctx); err != nil {
-		return err
-	}
-
 	x.locker.Unlock()
 
 	go x.clusterEventsLoop()
