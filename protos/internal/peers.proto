@@ -30,3 +30,7 @@ message PeerState {
   repeated ActorRef actors = 4;
 }
 
+message Rebalance {
+  // Specifies the peer state
+  PeerState peer_state = 1;
+}

@@ -55,6 +55,7 @@ type nameType int
 const (
 	supervisorType nameType = iota
 	routerType
+	rebalancerType
 )
 
 var (
@@ -66,5 +67,6 @@ var (
 	systemNames = map[nameType]string{
 		supervisorType: "GoAktSupervisor",
 		routerType:     "GoAktRouter",
+		rebalancerType: "GoAktRebalancer",
 	}
 )

@@ -451,15 +451,13 @@ func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor, opts .
 		return cid, nil
 	}
 
-	pid.fieldsLocker.RLock()
+	pid.fieldsLocker.Lock()
 
 	// create the child actor options child inherit parent's options
 	pidOptions := []pidOption{
 		withInitMaxRetries(int(pid.initMaxRetries.Load())),
-		withPassivationAfter(pid.passivateAfter.Load()),
 		withCustomLogger(pid.logger),
 		withActorSystem(pid.system),
-		withSupervisorDirective(pid.supervisorDirective),
 		withEventsStream(pid.eventsStream),
 		withInitTimeout(pid.initTimeout.Load()),
 		withShutdownTimeout(pid.shutdownTimeout.Load()),
@@ -471,6 +469,21 @@ func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor, opts .
 		pidOptions = append(pidOptions, withMailbox(spawnConfig.mailbox))
 	}
 
+	// set the supervisor directive defines in the spawn options
+	// otherwise fallback to the parent supervisor stragetgy directive
+	if spawnConfig.supervisorDirective != nil {
+		pidOptions = append(pidOptions, withSupervisorDirective(spawnConfig.supervisorDirective))
+	} else {
+		pidOptions = append(pidOptions, withSupervisorDirective(pid.supervisorDirective))
+	}
+
+	// disable passivation for system actor
+	if isSystemName(name) {
+		pidOptions = append(pidOptions, withPassivationDisabled())
+	} else {
+		pidOptions = append(pidOptions, withPassivationAfter(pid.passivateAfter.Load()))
+	}
+
 	cid, err := newPID(
 		ctx,
 		childAddress,
@@ -479,14 +492,14 @@ func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor, opts .
 	)
 
 	if err != nil {
-		pid.fieldsLocker.RUnlock()
+		pid.fieldsLocker.Unlock()
 		return nil, err
 	}
 
 	pid.children.Set(cid)
 	eventsStream := pid.eventsStream
 
-	pid.fieldsLocker.RUnlock()
+	pid.fieldsLocker.Unlock()
 
 	pid.Watch(cid)
 
@@ -1546,7 +1559,7 @@ func (pid *PID) supervise(cid *PID, watcher *watcher) {
 			}
 
 			pid.logger.Errorf("child actor=(%s) is failing: Err=%v", cid.ID(), err)
-			switch directive := pid.supervisorDirective.(type) {
+			switch directive := cid.supervisorDirective.(type) {
 			case *StopDirective:
 				pid.handleStopDirective(cid)
 			case *RestartDirective:

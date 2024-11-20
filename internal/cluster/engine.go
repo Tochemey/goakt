@@ -39,7 +39,6 @@ import (
 	"github.com/buraksezer/olric/config"
 	"github.com/buraksezer/olric/events"
 	"github.com/buraksezer/olric/hasher"
-
 	"github.com/redis/go-redis/v9"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
@@ -330,9 +329,9 @@ func (n *Engine) Stop(ctx context.Context) error {
 // point in time in the cluster
 func (n *Engine) IsLeader(ctx context.Context) bool {
 	n.Lock()
+	defer n.Unlock()
 	client := n.client
 	host := n.node
-	n.Unlock()
 
 	stats, err := client.Stats(ctx, host.PeersAddress())
 	if err != nil {
@@ -568,8 +567,8 @@ func (n *Engine) Events() <-chan *Event {
 // Peers returns a channel containing the list of peers at a given time
 func (n *Engine) Peers(ctx context.Context) ([]*Peer, error) {
 	n.Lock()
+	defer n.Unlock()
 	client := n.client
-	n.Unlock()
 
 	members, err := client.Members(ctx)
 	if err != nil {

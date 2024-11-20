@@ -36,6 +36,10 @@ func TestSpawnOption(t *testing.T) {
 	option := WithMailbox(mailbox)
 	option.Apply(config)
 	require.Equal(t, &spawnConfig{mailbox: mailbox}, config)
+	directive := NewStopDirective()
+	option = WithSupervisor(directive)
+	option.Apply(config)
+	require.Equal(t, &spawnConfig{mailbox: mailbox, supervisorDirective: directive}, config)
 }
 
 func TestNewSpawnConfig(t *testing.T) {
