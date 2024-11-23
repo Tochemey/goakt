@@ -47,7 +47,6 @@ func newSupervisor() *supervisor {
 }
 
 func (s *supervisor) PreStart(context.Context) error {
-	s.logger.Info("starting the system supervisor actor")
 	return nil
 }
 
