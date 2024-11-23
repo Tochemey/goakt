@@ -430,7 +430,9 @@ func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor, opts .
 	pid.fieldsLocker.RUnlock()
 
 	if cid, ok := children.Get(childAddress); ok {
-		return cid, nil
+		if cid.IsRunning() {
+			return cid, nil
+		}
 	}
 
 	pid.fieldsLocker.Lock()
@@ -485,7 +487,6 @@ func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor, opts .
 	eventsStream := pid.eventsStream
 
 	pid.fieldsLocker.Unlock()
-
 	pid.Watch(cid)
 
 	if eventsStream != nil {
@@ -1237,24 +1238,28 @@ func (pid *PID) freeWatchers(ctx context.Context) error {
 			}
 		}
 	}
+	pid.logger.Debug("%s does not have any watcher actors")
 	return nil
 }
 
 // freeWatchees releases all actors that have been watched by this actor
 func (pid *PID) freeWatchees(ctx context.Context) error {
 	pid.logger.Debug("freeing all watched actors...")
-	for _, watched := range pid.watcheesMap.List() {
-		pid.logger.Debugf("watcher=(%s) unwatching actor=(%s)", pid.ID(), watched.ID())
-		pid.UnWatch(watched)
-		if err := watched.Shutdown(ctx); err != nil {
-			errwrap := fmt.Errorf(
-				"watcher=(%s) failed to unwatch actor=(%s): %w",
-				pid.ID(), watched.ID(), err,
-			)
-			return errwrap
+	if pid.watcheesMap.Size() > 0 {
+		for _, watched := range pid.watcheesMap.List() {
+			pid.logger.Debugf("watcher=(%s) unwatching actor=(%s)", pid.ID(), watched.ID())
+			pid.UnWatch(watched)
+			if err := watched.Shutdown(ctx); err != nil {
+				errwrap := fmt.Errorf(
+					"watcher=(%s) failed to unwatch actor=(%s): %w",
+					pid.ID(), watched.ID(), err,
+				)
+				return errwrap
+			}
+			pid.logger.Debugf("watcher=(%s) successfully unwatch actor=(%s)", pid.ID(), watched.ID())
 		}
-		pid.logger.Debugf("watcher=(%s) successfully unwatch actor=(%s)", pid.ID(), watched.ID())
 	}
+	pid.logger.Debug("%s does not have any watched actors", pid.ID())
 	return nil
 }
 
@@ -1362,12 +1367,12 @@ func (pid *PID) unsetBehaviorStacked() {
 
 // doStop stops the actor
 func (pid *PID) doStop(ctx context.Context) error {
-	pid.running.Store(false)
-
 	// TODO: just signal stash processing done and ignore the messages or process them
 	if pid.stashBox != nil {
 		if err := pid.unstashAll(); err != nil {
 			pid.logger.Errorf("actor=(%s) failed to unstash messages", pid.Address().String())
+			pid.running.Store(false)
+			pid.reset()
 			return err
 		}
 	}
@@ -1408,11 +1413,13 @@ func (pid *PID) doStop(ctx context.Context) error {
 		AddError(pid.freeChildren(ctx)).
 		AddError(pid.freeWatchers(ctx)).
 		Error(); err != nil {
+		pid.running.Store(false)
 		pid.reset()
 		return err
 	}
 
-	pid.logger.Infof("Shutdown process is on going for actor=%s...", pid.Address().String())
+	pid.running.Store(false)
+	pid.logger.Infof("post shutdown process is on going for actor=%s...", pid.Address().String())
 	pid.reset()
 	return pid.actor.PostStop(ctx)
 }

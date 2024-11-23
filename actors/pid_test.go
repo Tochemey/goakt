@@ -1114,7 +1114,7 @@ func TestSpawnChild(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, child)
 
-		lib.Pause(time.Second)
+		lib.Pause(100 * time.Millisecond)
 
 		assert.Len(t, parent.Children(), 1)
 		//stop the actor
