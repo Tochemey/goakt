@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+package internalpb;
+
+option go_package = "github.com/tochemey/goakt/v2/internal/internalpb;internalpb";
+
+// HandleFault message is sent by a child
+// actor to its parent when it is panicking or returning an error
+// while processing message
+message HandleFault {
+  // Specifies the actor id
+  string actor_id = 1;
+  // Specifies the message
+  string message = 2;
+}

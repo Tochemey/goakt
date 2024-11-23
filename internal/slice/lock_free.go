@@ -34,14 +34,14 @@ type header[T any] struct {
 	count uint64
 }
 
-// Safe type that can be safely shared between goroutines.
-type Safe[T any] struct {
+// LockFree type that can be safely shared between goroutines.
+type LockFree[T any] struct {
 	head unsafe.Pointer
 }
 
-// NewSafe creates a new lock-free thread-safe slice.
-func NewSafe[T any]() *Safe[T] {
-	return &Safe[T]{
+// NewLockFree creates a new lock-free thread-safe slice.
+func NewLockFree[T any]() *LockFree[T] {
+	return &LockFree[T]{
 		head: unsafe.Pointer(&header[T]{
 			data:  make([]T, 0),
 			count: 0,
@@ -50,13 +50,13 @@ func NewSafe[T any]() *Safe[T] {
 }
 
 // Len returns the number of items
-func (cs *Safe[T]) Len() int {
+func (cs *LockFree[T]) Len() int {
 	head := (*header[T])(atomic.LoadPointer(&cs.head))
 	return int(atomic.LoadUint64(&head.count))
 }
 
 // Append adds an item to the concurrent slice.
-func (cs *Safe[T]) Append(item T) {
+func (cs *LockFree[T]) Append(item T) {
 	for {
 		currentHead := (*header[T])(atomic.LoadPointer(&cs.head))
 		newData := append(currentHead.data, item)
@@ -73,7 +73,7 @@ func (cs *Safe[T]) Append(item T) {
 }
 
 // Get returns the slice item at the given index
-func (cs *Safe[T]) Get(index int) (item T) {
+func (cs *LockFree[T]) Get(index int) (item T) {
 	data := (*header[T])(atomic.LoadPointer(&cs.head)).data
 	if isSet(data, index) {
 		return data[index]
@@ -83,7 +83,7 @@ func (cs *Safe[T]) Get(index int) (item T) {
 }
 
 // Delete an item from the slice
-func (cs *Safe[T]) Delete(index int) {
+func (cs *LockFree[T]) Delete(index int) {
 	for {
 		currentHead := (*header[T])(atomic.LoadPointer(&cs.head))
 		if isSet(currentHead.data, index) {
@@ -101,12 +101,12 @@ func (cs *Safe[T]) Delete(index int) {
 }
 
 // Items returns the list of items
-func (cs *Safe[T]) Items() []T {
+func (cs *LockFree[T]) Items() []T {
 	return (*header[T])(atomic.LoadPointer(&cs.head)).data
 }
 
 // Reset resets the slice
-func (cs *Safe[T]) Reset() {
+func (cs *LockFree[T]) Reset() {
 	for {
 		currentHead := (*header[T])(atomic.LoadPointer(&cs.head))
 		newHead := unsafe.Pointer(&header[T]{

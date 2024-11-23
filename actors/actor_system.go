@@ -148,8 +148,8 @@ type ActorSystem interface {
 	getSupervisor() *PID
 	// getPeerStateFromCache returns the peer state from the cache
 	getPeerStateFromCache(address string) (*internalpb.PeerState, error)
-	// getSystemActorName returns the system actor's name based upon their types
-	getSystemActorName(nameType nameType) string
+	// reservedName returns reserved actor's name
+	reservedName(nameType nameType) string
 	// getCluster returns the cluster engine
 	getCluster() cluster.Interface
 }
@@ -471,7 +471,7 @@ func (x *actorSystem) SpawnFromFunc(ctx context.Context, receiveFunc ReceiveFunc
 // A single actor will only process one message at a time.
 func (x *actorSystem) SpawnRouter(ctx context.Context, poolSize int, routeesKind Actor, opts ...RouterOption) (*PID, error) {
 	router := newRouter(poolSize, routeesKind, x.logger, opts...)
-	routerName := x.getSystemActorName(routerType)
+	routerName := x.reservedName(routerType)
 	return x.Spawn(ctx, routerName, router)
 }
 
@@ -527,7 +527,7 @@ func (x *actorSystem) Actors() []*PID {
 	x.locker.Unlock()
 	actors := make([]*PID, 0, len(pids))
 	for _, pid := range pids {
-		if !isSystemName(pid.Name()) {
+		if !isReservedName(pid.Name()) {
 			actors = append(actors, pid)
 		}
 	}
@@ -651,8 +651,8 @@ func (x *actorSystem) Start(ctx context.Context) error {
 	x.started.Store(true)
 	if err := errorschain.
 		New(errorschain.ReturnFirst()).
-		AddError(x.createSystemSupervisor(ctx)).
-		AddError(x.createRebalancer(ctx)).
+		AddError(x.spawnSupervisor(ctx)).
+		AddError(x.spawnRebalancer(ctx)).
 		AddError(x.enableRemoting(ctx)).
 		AddError(x.enableClustering(ctx)).
 		Error(); err != nil {
@@ -1235,7 +1235,7 @@ func (x *actorSystem) replicationLoop() {
 	for actor := range x.actorsChan {
 		// never replicate system actors because there are specific to the
 		// running node
-		if isSystemName(actor.GetActorAddress().GetName()) {
+		if isReservedName(actor.GetActorAddress().GetName()) {
 			continue
 		}
 		if x.InCluster() {
@@ -1429,7 +1429,7 @@ func (x *actorSystem) configPID(ctx context.Context, name string, actor Actor, o
 	}
 
 	// disable passivation for system actor
-	if isSystemName(name) {
+	if isReservedName(name) {
 		pidOpts = append(pidOpts, withPassivationDisabled())
 	} else {
 		pidOpts = append(pidOpts, withPassivationAfter(x.expireActorAfter))
@@ -1453,8 +1453,8 @@ func (x *actorSystem) getCluster() cluster.Interface {
 	return x.cluster
 }
 
-// getSystemActorName returns the system actor name
-func (x *actorSystem) getSystemActorName(nameType nameType) string {
+// reservedName returns reserved actor's name
+func (x *actorSystem) reservedName(nameType nameType) string {
 	if x.remotingEnabled.Load() {
 		return fmt.Sprintf(
 			"%s%s%s-%d-%d",
@@ -1536,11 +1536,11 @@ func (x *actorSystem) setHostPort() error {
 	return nil
 }
 
-// createSystemSupervisor creates the system supervisor
-func (x *actorSystem) createSystemSupervisor(ctx context.Context) error {
+// spawnSupervisor creates the system supervisor
+func (x *actorSystem) spawnSupervisor(ctx context.Context) error {
 	var err error
-	actorName := x.getSystemActorName(supervisorType)
-	x.supervisor, err = x.configPID(ctx, actorName, newSystemSupervisor(x.logger))
+	actorName := x.reservedName(supervisorType)
+	x.supervisor, err = x.configPID(ctx, actorName, newSupervisor())
 	if err != nil {
 		return fmt.Errorf("actor=%s failed to start system supervisor: %w", actorName, err)
 	}
@@ -1549,10 +1549,10 @@ func (x *actorSystem) createSystemSupervisor(ctx context.Context) error {
 	return nil
 }
 
-// createRebalancer creates the cluster rebalancer
-func (x *actorSystem) createRebalancer(ctx context.Context) error {
+// spawnRebalancer creates the cluster rebalancer
+func (x *actorSystem) spawnRebalancer(ctx context.Context) error {
 	var err error
-	actorName := x.getSystemActorName(rebalancerType)
+	actorName := x.reservedName(rebalancerType)
 	x.rebalancer, err = x.configPID(ctx,
 		actorName,
 		newRebalancer(x.reflection),
@@ -1561,12 +1561,14 @@ func (x *actorSystem) createRebalancer(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("actor=%s failed to start cluster rebalancer: %w", actorName, err)
 	}
+
 	x.setActor(x.rebalancer)
+	x.rebalancer.setParent(x.supervisor)
 	x.supervisor.Watch(x.rebalancer)
 	return nil
 }
 
-func isSystemName(name string) bool {
+func isReservedName(name string) bool {
 	return strings.HasPrefix(name, systemNamePrefix)
 }
 

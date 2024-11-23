@@ -418,7 +418,6 @@ func TestSupervisorStrategy(t *testing.T) {
 		assert.NotNil(t, child)
 
 		assert.Len(t, parent.Children(), 1)
-		assert.Len(t, child.Parents(), 1)
 		// let us send 10 public to the actors
 		count := 10
 		for i := 0; i < count; i++ {
