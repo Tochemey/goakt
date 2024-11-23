@@ -79,8 +79,9 @@ type PID struct {
 	// specifies the actor address
 	address *address.Address
 
-	// helps determine whether the actor should handle public or not.
-	running atomic.Bool
+	// helps determine whether the actor should handle messags or not.
+	started  atomic.Bool
+	stopping atomic.Bool
 
 	latestReceiveTime     atomic.Time
 	latestReceiveDuration atomic.Duration
@@ -203,7 +204,8 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 	pid.initMaxRetries.Store(DefaultInitMaxRetries)
 	pid.shutdownTimeout.Store(DefaultShutdownTimeout)
 	pid.latestReceiveDuration.Store(0)
-	pid.running.Store(false)
+	pid.started.Store(false)
+	pid.stopping.Store(false)
 	pid.passivateAfter.Store(DefaultPassivationTimeout)
 	pid.initTimeout.Store(DefaultInitTimeout)
 
@@ -322,7 +324,7 @@ func (pid *PID) Stop(ctx context.Context, cid *PID) error {
 // IsRunning returns true when the actor is alive ready to process messages and false
 // when the actor is stopped or not started at all
 func (pid *PID) IsRunning() bool {
-	return pid.running.Load()
+	return pid.started.Load()
 }
 
 // ActorSystem returns the actor system
@@ -515,10 +517,10 @@ func (pid *PID) StashSize() uint64 {
 	return uint64(pid.stashBox.Len())
 }
 
-// PipeTo processes a long-running task and pipes the result to the provided actor.
+// PipeTo processes a long-started task and pipes the result to the provided actor.
 // The successful result of the task will be put onto the provided actor mailbox.
 // This is useful when interacting with external services.
-// It’s common that you would like to use the value of the response in the actor when the long-running task is completed
+// It’s common that you would like to use the value of the response in the actor when the long-started task is completed
 func (pid *PID) PipeTo(ctx context.Context, to *PID, task future.Task) error {
 	if task == nil {
 		return ErrUndefinedTask
@@ -1020,13 +1022,14 @@ func (pid *PID) Shutdown(ctx context.Context) error {
 	pid.stopLocker.Lock()
 	pid.logger.Info("Shutdown process has started...")
 
-	if !pid.running.Load() {
+	if !pid.started.Load() {
 		pid.logger.Infof("Actor=%s is offline. Maybe it has been passivated or stopped already", pid.Address().String())
 		pid.stopLocker.Unlock()
 		return nil
 	}
 
 	if pid.passivateAfter.Load() > 0 {
+		pid.stopping.Store(true)
 		pid.logger.Debug("sending a signal to stop passivation listener....")
 		pid.haltPassivationLnr <- types.Unit{}
 	}
@@ -1186,7 +1189,7 @@ func (pid *PID) init(ctx context.Context) error {
 		return e
 	}
 
-	pid.running.Store(true)
+	pid.started.Store(true)
 	pid.logger.Info("Initialization process successfully completed.")
 
 	if pid.eventsStream != nil {
@@ -1215,11 +1218,12 @@ func (pid *PID) reset() {
 	pid.watchees().Reset()
 	pid.behaviorStack.Reset()
 	pid.processedCount.Store(0)
+	pid.stopping.Store(false)
 }
 
 // freeWatchers releases all the actors watching this actor
 func (pid *PID) freeWatchers(ctx context.Context) error {
-	pid.logger.Debug("freeing all watcher actors...")
+	pid.logger.Debugf("%s freeing all watcher actors...", pid.ID())
 	watchers := pid.watchers()
 	if watchers.Len() > 0 {
 		for _, watcher := range watchers.Items() {
@@ -1238,13 +1242,13 @@ func (pid *PID) freeWatchers(ctx context.Context) error {
 			}
 		}
 	}
-	pid.logger.Debug("%s does not have any watcher actors")
+	pid.logger.Debugf("%s does not have any watcher actors", pid.ID())
 	return nil
 }
 
 // freeWatchees releases all actors that have been watched by this actor
 func (pid *PID) freeWatchees(ctx context.Context) error {
-	pid.logger.Debug("freeing all watched actors...")
+	pid.logger.Debugf("%s freeing all watched actors...", pid.ID())
 	if pid.watcheesMap.Size() > 0 {
 		for _, watched := range pid.watcheesMap.List() {
 			pid.logger.Debugf("watcher=(%s) unwatching actor=(%s)", pid.ID(), watched.ID())
@@ -1259,13 +1263,13 @@ func (pid *PID) freeWatchees(ctx context.Context) error {
 			pid.logger.Debugf("watcher=(%s) successfully unwatch actor=(%s)", pid.ID(), watched.ID())
 		}
 	}
-	pid.logger.Debug("%s does not have any watched actors", pid.ID())
+	pid.logger.Debugf("%s does not have any watched actors", pid.ID())
 	return nil
 }
 
 // freeChildren releases all child actors
 func (pid *PID) freeChildren(ctx context.Context) error {
-	pid.logger.Debug("freeing all child actors...")
+	pid.logger.Debug("%s freeing all child actors...", pid.ID())
 	for _, child := range pid.Children() {
 		pid.logger.Debugf("parent=(%s) disowning child=(%s)", pid.ID(), child.ID())
 		pid.UnWatch(child)
@@ -1310,8 +1314,8 @@ func (pid *PID) passivationLoop() {
 	<-tickerStopSig
 	ticker.Stop()
 
-	if !pid.IsRunning() {
-		pid.logger.Infof("Actor=%s is offline. No need to passivate", pid.Address().String())
+	if pid.stopping.Load() {
+		pid.logger.Infof("Actor=%s is stopping. No need to passivate", pid.Address().String())
 		return
 	}
 
@@ -1371,8 +1375,7 @@ func (pid *PID) doStop(ctx context.Context) error {
 	if pid.stashBox != nil {
 		if err := pid.unstashAll(); err != nil {
 			pid.logger.Errorf("actor=(%s) failed to unstash messages", pid.Address().String())
-			pid.running.Store(false)
-			pid.reset()
+			pid.started.Store(false)
 			return err
 		}
 	}
@@ -1413,12 +1416,12 @@ func (pid *PID) doStop(ctx context.Context) error {
 		AddError(pid.freeChildren(ctx)).
 		AddError(pid.freeWatchers(ctx)).
 		Error(); err != nil {
-		pid.running.Store(false)
+		pid.started.Store(false)
 		pid.reset()
 		return err
 	}
 
-	pid.running.Store(false)
+	pid.started.Store(false)
 	pid.logger.Infof("post shutdown process is on going for actor=%s...", pid.Address().String())
 	pid.reset()
 	return pid.actor.PostStop(ctx)
@@ -1491,7 +1494,7 @@ func (pid *PID) toDeadletterQueue(receiveCtx *ReceiveContext, err error) {
 	)
 }
 
-// handleCompletion processes a long-running task and pipe the result to
+// handleCompletion processes a long-started task and pipe the result to
 // the completion receiver
 func (pid *PID) handleCompletion(ctx context.Context, completion *taskCompletion) {
 	// defensive programming
@@ -1525,7 +1528,7 @@ func (pid *PID) handleCompletion(ctx context.Context, completion *taskCompletion
 	// make sure that the receiver is still alive
 	to := completion.Receiver
 	if !to.IsRunning() {
-		pid.logger.Errorf("unable to pipe message to actor=(%s): not running", to.Address().String())
+		pid.logger.Errorf("unable to pipe message to actor=(%s): not started", to.Address().String())
 		return
 	}
 

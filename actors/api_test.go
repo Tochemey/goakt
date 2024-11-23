@@ -42,7 +42,7 @@ import (
 
 func TestAsk(t *testing.T) {
 	t.Run(
-		"With running actor", func(t *testing.T) {
+		"With started actor", func(t *testing.T) {
 			// create the context
 			ctx := context.TODO()
 			// define the logger to use
@@ -342,7 +342,7 @@ func TestAsk(t *testing.T) {
 
 func TestTell(t *testing.T) {
 	t.Run(
-		"With running actor", func(t *testing.T) {
+		"With started actor", func(t *testing.T) {
 			// create the context
 			ctx := context.TODO()
 			// define the logger to use

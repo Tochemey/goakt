@@ -89,7 +89,7 @@ type ActorSystem interface {
 	// NumActors returns the total number of active actors in the system
 	NumActors() uint64
 	// LocalActor returns the reference of a local actor.
-	// A local actor is an actor that reside on the same node where the given actor system is running
+	// A local actor is an actor that reside on the same node where the given actor system has started
 	LocalActor(actorName string) (*PID, error)
 	// RemoteActor returns the address of a remote actor when cluster is enabled
 	// When the cluster mode is not enabled an actor not found error will be returned
@@ -100,7 +100,7 @@ type ActorSystem interface {
 	// When remoting is enabled this method will return and error
 	// An actor not found error is return when the actor is not found.
 	ActorOf(ctx context.Context, actorName string) (addr *address.Address, pid *PID, err error)
-	// InCluster states whether the actor system is running within a cluster of nodes
+	// InCluster states whether the actor system has started within a cluster of nodes
 	InCluster() bool
 	// GetPartition returns the partition where a given actor is located
 	GetPartition(actorName string) uint64
@@ -406,7 +406,7 @@ func (x *actorSystem) GetPartition(actorName string) uint64 {
 	return uint64(x.cluster.GetPartition(actorName))
 }
 
-// InCluster states whether the actor system is running within a cluster of nodes
+// InCluster states whether the actor system is started within a cluster of nodes
 func (x *actorSystem) InCluster() bool {
 	return x.clusterEnabled.Load() && x.cluster != nil
 }
@@ -422,7 +422,7 @@ func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor, opts 
 		return nil, ErrActorSystemNotStarted
 	}
 
-	// set the default actor path assuming we are running locally
+	// set the default actor path assuming we are started locally
 	actorPath := x.actorAddress(name)
 	pid, exist := x.actors.Get(actorPath)
 	if exist {
@@ -593,7 +593,7 @@ func (x *actorSystem) ActorOf(ctx context.Context, actorName string) (addr *addr
 }
 
 // LocalActor returns the reference of a local actor.
-// A local actor is an actor that reside on the same node where the given actor system is running
+// A local actor is an actor that reside on the same node where the given actor system has started
 func (x *actorSystem) LocalActor(actorName string) (*PID, error) {
 	x.locker.Lock()
 
@@ -1234,7 +1234,7 @@ func (x *actorSystem) janitor() {
 func (x *actorSystem) replicationLoop() {
 	for actor := range x.actorsChan {
 		// never replicate system actors because there are specific to the
-		// running node
+		// started node
 		if isReservedName(actor.GetActorAddress().GetName()) {
 			continue
 		}

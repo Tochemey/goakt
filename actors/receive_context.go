@@ -329,7 +329,7 @@ func (rctx *ReceiveContext) Stop(child *PID) {
 // Forward method works similarly to the Tell() method except that the sender of a forwarded message is kept as the original sender.
 // As a result, the actor receiving the forwarded messages knows who the actual sender of the message is.
 // The message that is forwarded is the current message received by the received context.
-// This operation does nothing when the receiving actor is not running
+// This operation does nothing when the receiving actor has not started
 func (rctx *ReceiveContext) Forward(to *PID) {
 	message := rctx.Message()
 	sender := rctx.Sender()
