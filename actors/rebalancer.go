@@ -70,6 +70,7 @@ func (r *rebalancer) Receive(ctx *ReceiveContext) {
 	}
 }
 
+// Rebalance behavior
 func (r *rebalancer) Rebalance(ctx *ReceiveContext) {
 	switch msg := ctx.Message().(type) {
 	case *internalpb.Rebalance:
@@ -90,7 +91,7 @@ func (r *rebalancer) Rebalance(ctx *ReceiveContext) {
 		if len(leaderShares) > 0 {
 			eg.Go(func() error {
 				for _, actor := range leaderShares {
-					if isSystemName(actor.GetActorAddress().GetName()) {
+					if isReservedName(actor.GetActorAddress().GetName()) {
 						continue
 					}
 
@@ -123,7 +124,7 @@ func (r *rebalancer) Rebalance(ctx *ReceiveContext) {
 
 				for _, actor := range actors {
 					// never redistribute system actors
-					if isSystemName(actor.GetActorAddress().GetName()) {
+					if isReservedName(actor.GetActorAddress().GetName()) {
 						continue
 					}
 

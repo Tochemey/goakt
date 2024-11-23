@@ -31,51 +31,49 @@ import (
 	"github.com/tochemey/goakt/v2/log"
 )
 
-// systemSupervisor is an actor which roles is to handle
+// supervisor is an actor which roles is to handle
 // escalation failure
-type systemSupervisor struct {
-	logger           log.Logger
-	underlyingSystem ActorSystem
+type supervisor struct {
+	logger log.Logger
+	system ActorSystem
 }
 
 // enforce compilation error
-var _ Actor = (*systemSupervisor)(nil)
+var _ Actor = (*supervisor)(nil)
 
 // newSupervisor creates an instance of a testSupervisor
-func newSystemSupervisor(logger log.Logger) *systemSupervisor {
-	return &systemSupervisor{
-		logger: logger,
-	}
+func newSupervisor() *supervisor {
+	return &supervisor{}
 }
 
-func (s *systemSupervisor) PreStart(context.Context) error {
-	s.logger.Info("starting the system supervisor actor")
+func (s *supervisor) PreStart(context.Context) error {
 	return nil
 }
 
-func (s *systemSupervisor) Receive(ctx *ReceiveContext) {
+func (s *supervisor) Receive(ctx *ReceiveContext) {
 	switch msg := ctx.Message().(type) {
 	case *goaktpb.PostStart:
+		s.system = ctx.ActorSystem()
+		s.logger = ctx.Logger()
 		s.logger.Info("system supervisor successfully started")
-		s.underlyingSystem = ctx.Self().ActorSystem()
 	case *goaktpb.Terminated:
 		actorID := msg.GetActorId()
-		if actorID == s.underlyingSystem.getSystemActorName(rebalancerType) {
+		if actorID == s.system.reservedName(rebalancerType) {
 			// rebalancer is dead which means either there is an issue during the cluster topology changes
 			// log a message error and stop the actor system
 			s.logger.Warn("%s rebalancer is down. %s is going to shutdown. Kindly check logs and fix any potential issue with the cluster",
-				s.underlyingSystem.Name(),
-				s.underlyingSystem.Name())
+				s.system.Name(),
+				s.system.Name())
 
 			// blindly shutdown the actor system. No need to check any error
-			_ = s.underlyingSystem.Stop(context.WithoutCancel(ctx.Context()))
+			_ = s.system.Stop(context.WithoutCancel(ctx.Context()))
 		}
 	default:
 		ctx.Unhandled()
 	}
 }
 
-func (s *systemSupervisor) PostStop(context.Context) error {
+func (s *supervisor) PostStop(context.Context) error {
 	s.logger.Info("system supervisor stopped")
 	return nil
 }

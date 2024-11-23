@@ -63,14 +63,6 @@ const (
 	processing
 )
 
-// watcher is used to handle parent child relationship.
-// This helps handle error propagation from a child actor using any of supervisory strategies
-type watcher struct {
-	WatcherID *PID            // the WatcherID of the actor watching
-	ErrChan   chan error      // ErrChan the channel where to pass error message
-	Done      chan types.Unit // Done when watching is completed
-}
-
 // taskCompletion is used to track completions' taskCompletion
 // to pipe the result to the appropriate PID
 type taskCompletion struct {
@@ -87,8 +79,9 @@ type PID struct {
 	// specifies the actor address
 	address *address.Address
 
-	// helps determine whether the actor should handle public or not.
-	running atomic.Bool
+	// helps determine whether the actor should handle messags or not.
+	started  atomic.Bool
+	stopping atomic.Bool
 
 	latestReceiveTime     atomic.Time
 	latestReceiveDuration atomic.Duration
@@ -115,14 +108,14 @@ type PID struct {
 
 	haltPassivationLnr chan types.Unit
 
-	// hold the watchersList watching the given actor
-	watchersList *slice.Safe[*watcher]
+	// hold the list of actors watching the given actor
+	watchersList *slice.LockFree[*PID]
 
-	// hold the list of the children
-	children *pidMap
+	// hold the list of actors watched by this PID
+	watcheesMap *pidMap
 
-	// hold the list of watched actors
-	watchedList *pidMap
+	// hold the list of the childrenMap
+	childrenMap *pidMap
 
 	// the actor system
 	system ActorSystem
@@ -130,21 +123,17 @@ type PID struct {
 	// specifies the logger to use
 	logger log.Logger
 
-	// fieldsLocker that helps synchronize the pid in a concurrent environment
-	// this helps protect the pid fields accessibility
-	fieldsLocker *sync.RWMutex
-
+	// various lockers to protect the PID fields
+	// in a concurrent environment
+	fieldsLocker         *sync.RWMutex
 	stopLocker           *sync.Mutex
 	processingTimeLocker *sync.Mutex
-
-	// supervisor strategy
-	supervisorDirective SupervisorDirective
 
 	// specifies the actor behavior stack
 	behaviorStack *behaviorStack
 
 	// stash settings
-	stashBuffer *UnboundedMailbox
+	stashBox    *UnboundedMailbox
 	stashLocker *sync.Mutex
 
 	// define an events stream
@@ -155,8 +144,10 @@ type PID struct {
 	childrenCount  *atomic.Int64
 	processedCount *atomic.Int64
 
-	watcherNotificationChan        chan error
-	watchersNotificationStopSignal chan types.Unit
+	// supervisor strategy
+	supervisorDirective   SupervisorDirective
+	supervisionChan       chan error
+	supervisionStopSignal chan types.Unit
 
 	receiveSignal     chan types.Unit
 	receiveStopSignal chan types.Unit
@@ -165,6 +156,10 @@ type PID struct {
 	processingMessages atomic.Int32
 
 	remoting *Remoting
+
+	// specifies the actor parent
+	// this field is set when this PID is a child actor
+	parent *PID
 }
 
 // newPID creates a new pid
@@ -180,36 +175,37 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 	}
 
 	pid := &PID{
-		actor:                          actor,
-		latestReceiveTime:              atomic.Time{},
-		haltPassivationLnr:             make(chan types.Unit, 1),
-		logger:                         log.New(log.ErrorLevel, os.Stderr),
-		children:                       newMap(),
-		supervisorDirective:            DefaultSupervisoryStrategy,
-		watchersList:                   slice.NewSafe[*watcher](),
-		watchedList:                    newMap(),
-		address:                        address,
-		fieldsLocker:                   new(sync.RWMutex),
-		stopLocker:                     new(sync.Mutex),
-		mailbox:                        NewUnboundedMailbox(),
-		stashBuffer:                    nil,
-		stashLocker:                    &sync.Mutex{},
-		eventsStream:                   nil,
-		restartCount:                   atomic.NewInt64(0),
-		childrenCount:                  atomic.NewInt64(0),
-		processedCount:                 atomic.NewInt64(0),
-		processingTimeLocker:           new(sync.Mutex),
-		watcherNotificationChan:        make(chan error, 1),
-		watchersNotificationStopSignal: make(chan types.Unit, 1),
-		receiveSignal:                  make(chan types.Unit, 1),
-		receiveStopSignal:              make(chan types.Unit, 1),
-		remoting:                       NewRemoting(),
+		actor:                 actor,
+		latestReceiveTime:     atomic.Time{},
+		haltPassivationLnr:    make(chan types.Unit, 1),
+		logger:                log.New(log.ErrorLevel, os.Stderr),
+		childrenMap:           newMap(),
+		supervisorDirective:   DefaultSupervisoryStrategy,
+		watchersList:          slice.NewLockFree[*PID](),
+		watcheesMap:           newMap(),
+		address:               address,
+		fieldsLocker:          new(sync.RWMutex),
+		stopLocker:            new(sync.Mutex),
+		mailbox:               NewUnboundedMailbox(),
+		stashBox:              nil,
+		stashLocker:           &sync.Mutex{},
+		eventsStream:          nil,
+		restartCount:          atomic.NewInt64(0),
+		childrenCount:         atomic.NewInt64(0),
+		processedCount:        atomic.NewInt64(0),
+		processingTimeLocker:  new(sync.Mutex),
+		supervisionChan:       make(chan error, 1),
+		supervisionStopSignal: make(chan types.Unit, 1),
+		receiveSignal:         make(chan types.Unit, 1),
+		receiveStopSignal:     make(chan types.Unit, 1),
+		remoting:              NewRemoting(),
 	}
 
 	pid.initMaxRetries.Store(DefaultInitMaxRetries)
 	pid.shutdownTimeout.Store(DefaultShutdownTimeout)
 	pid.latestReceiveDuration.Store(0)
-	pid.running.Store(false)
+	pid.started.Store(false)
+	pid.stopping.Store(false)
 	pid.passivateAfter.Store(DefaultPassivationTimeout)
 	pid.initTimeout.Store(DefaultInitTimeout)
 
@@ -226,7 +222,7 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 	}
 
 	pid.receiveLoop()
-	pid.notifyWatchers()
+	pid.supervisionLoop()
 	if pid.passivateAfter.Load() > 0 {
 		go pid.passivationLoop()
 	}
@@ -265,40 +261,25 @@ func (pid *PID) Child(name string) (*PID, error) {
 		return nil, ErrDead
 	}
 
-	childAddress := address.New(name, pid.Address().System(), pid.Address().Host(), pid.Address().Port()).WithParent(pid.Address())
-	if cid, ok := pid.children.Get(childAddress); ok {
-		pid.childrenCount.Inc()
-		return cid, nil
+	childAddress := pid.childAddress(name)
+	if cid, ok := pid.childrenMap.Get(childAddress); ok {
+		if cid.IsRunning() {
+			return cid, nil
+		}
 	}
 	return nil, ErrActorNotFound(childAddress.String())
 }
 
-// Parents returns the list of all direct parents of a given actor.
-// Only alive actors are included in the list or an empty list is returned
-func (pid *PID) Parents() []*PID {
-	pid.fieldsLocker.Lock()
-	watchers := pid.watchersList
-	pid.fieldsLocker.Unlock()
-	var parents []*PID
-	if watchers.Len() > 0 {
-		for _, item := range watchers.Items() {
-			watcher := item
-			if watcher != nil {
-				pid := watcher.WatcherID
-				if pid.IsRunning() {
-					parents = append(parents, pid)
-				}
-			}
-		}
-	}
-	return parents
+// Parent returns the parent of this PID
+func (pid *PID) Parent() *PID {
+	return pid.parent
 }
 
-// Children returns the list of all the direct children of the given actor
+// Children returns the list of all the direct childrenMap of the given actor
 // Only alive actors are included in the list or an empty list is returned
 func (pid *PID) Children() []*PID {
 	pid.fieldsLocker.RLock()
-	children := pid.children.List()
+	children := pid.childrenMap.List()
 	pid.fieldsLocker.RUnlock()
 
 	cids := make([]*PID, 0, len(children))
@@ -322,15 +303,18 @@ func (pid *PID) Stop(ctx context.Context, cid *PID) error {
 		return ErrUndefinedActor
 	}
 
+	if !cid.IsRunning() {
+		return ErrActorNotFound(cid.Address().String())
+	}
+
 	pid.fieldsLocker.RLock()
-	children := pid.children
+	children := pid.childrenMap
 	pid.fieldsLocker.RUnlock()
 
 	if cid, ok := children.Get(cid.Address()); ok {
 		if err := cid.Shutdown(ctx); err != nil {
 			return err
 		}
-
 		return nil
 	}
 
@@ -340,7 +324,7 @@ func (pid *PID) Stop(ctx context.Context, cid *PID) error {
 // IsRunning returns true when the actor is alive ready to process messages and false
 // when the actor is stopped or not started at all
 func (pid *PID) IsRunning() bool {
-	return pid.running.Load()
+	return pid.started.Load()
 }
 
 // ActorSystem returns the actor system
@@ -392,7 +376,7 @@ func (pid *PID) Restart(ctx context.Context) error {
 	}
 
 	pid.receiveLoop()
-	pid.notifyWatchers()
+	pid.supervisionLoop()
 	if pid.passivateAfter.Load() > 0 {
 		go pid.passivationLoop()
 	}
@@ -417,7 +401,7 @@ func (pid *PID) RestartCount() int {
 	return int(count)
 }
 
-// ChildrenCount returns the total number of children for the given PID
+// ChildrenCount returns the total number of childrenMap for the given PID
 func (pid *PID) ChildrenCount() int {
 	count := pid.childrenCount.Load()
 	return int(count)
@@ -442,13 +426,15 @@ func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor, opts .
 		return nil, ErrDead
 	}
 
-	childAddress := address.New(name, pid.Address().System(), pid.Address().Host(), pid.Address().Port()).WithParent(pid.Address())
+	childAddress := pid.childAddress(name)
 	pid.fieldsLocker.RLock()
-	children := pid.children
+	children := pid.childrenMap
 	pid.fieldsLocker.RUnlock()
 
 	if cid, ok := children.Get(childAddress); ok {
-		return cid, nil
+		if cid.IsRunning() {
+			return cid, nil
+		}
 	}
 
 	pid.fieldsLocker.Lock()
@@ -462,6 +448,7 @@ func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor, opts .
 		withInitTimeout(pid.initTimeout.Load()),
 		withShutdownTimeout(pid.shutdownTimeout.Load()),
 		withRemoting(pid.remoting),
+		withParent(pid),
 	}
 
 	spawnConfig := newSpawnConfig(opts...)
@@ -478,12 +465,13 @@ func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor, opts .
 	}
 
 	// disable passivation for system actor
-	if isSystemName(name) {
+	if isReservedName(name) {
 		pidOptions = append(pidOptions, withPassivationDisabled())
 	} else {
 		pidOptions = append(pidOptions, withPassivationAfter(pid.passivateAfter.Load()))
 	}
 
+	// create the child PID
 	cid, err := newPID(
 		ctx,
 		childAddress,
@@ -496,11 +484,11 @@ func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor, opts .
 		return nil, err
 	}
 
-	pid.children.Set(cid)
+	pid.childrenCount.Inc()
+	pid.childrenMap.Set(cid)
 	eventsStream := pid.eventsStream
 
 	pid.fieldsLocker.Unlock()
-
 	pid.Watch(cid)
 
 	if eventsStream != nil {
@@ -523,16 +511,16 @@ func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor, opts .
 
 // StashSize returns the stash buffer size
 func (pid *PID) StashSize() uint64 {
-	if pid.stashBuffer == nil {
+	if pid.stashBox == nil {
 		return 0
 	}
-	return uint64(pid.stashBuffer.Len())
+	return uint64(pid.stashBox.Len())
 }
 
-// PipeTo processes a long-running task and pipes the result to the provided actor.
+// PipeTo processes a long-started task and pipes the result to the provided actor.
 // The successful result of the task will be put onto the provided actor mailbox.
 // This is useful when interacting with external services.
-// It’s common that you would like to use the value of the response in the actor when the long-running task is completed
+// It’s common that you would like to use the value of the response in the actor when the long-started task is completed
 func (pid *PID) PipeTo(ctx context.Context, to *PID, task future.Task) error {
 	if task == nil {
 		return ErrUndefinedTask
@@ -1034,13 +1022,14 @@ func (pid *PID) Shutdown(ctx context.Context) error {
 	pid.stopLocker.Lock()
 	pid.logger.Info("Shutdown process has started...")
 
-	if !pid.running.Load() {
+	if !pid.started.Load() {
 		pid.logger.Infof("Actor=%s is offline. Maybe it has been passivated or stopped already", pid.Address().String())
 		pid.stopLocker.Unlock()
 		return nil
 	}
 
 	if pid.passivateAfter.Load() > 0 {
+		pid.stopping.Store(true)
 		pid.logger.Debug("sending a signal to stop passivation listener....")
 		pid.haltPassivationLnr <- types.Unit{}
 	}
@@ -1065,24 +1054,16 @@ func (pid *PID) Shutdown(ctx context.Context) error {
 	return nil
 }
 
-// Watch a pid for errors, and send on the returned channel if an error occurred
+// Watch watches a given actor for a Terminated message when the watched actor shutdown
 func (pid *PID) Watch(cid *PID) {
-	w := &watcher{
-		WatcherID: pid,
-		ErrChan:   make(chan error, 1),
-		Done:      make(chan types.Unit, 1),
-	}
-	cid.watchers().Append(w)
+	cid.watchers().Append(pid)
 	pid.watchees().Set(cid)
-	go pid.supervise(cid, w)
 }
 
 // UnWatch stops watching a given actor
 func (pid *PID) UnWatch(cid *PID) {
-	for index, item := range cid.watchers().Items() {
-		w := item
-		if w.WatcherID.Equals(pid) {
-			w.Done <- types.Unit{}
+	for index, watcher := range cid.watchers().Items() {
+		if watcher.Equals(pid) {
 			pid.watchees().Remove(cid.Address())
 			cid.watchers().Delete(index)
 			break
@@ -1099,13 +1080,13 @@ func (pid *PID) Logger() log.Logger {
 }
 
 // watchers return the list of watchersList
-func (pid *PID) watchers() *slice.Safe[*watcher] {
+func (pid *PID) watchers() *slice.LockFree[*PID] {
 	return pid.watchersList
 }
 
 // watchees returns the list of actors watched by this actor
 func (pid *PID) watchees() *pidMap {
-	return pid.watchedList
+	return pid.watcheesMap
 }
 
 // doReceive pushes a given message to the actor mailbox
@@ -1159,9 +1140,11 @@ func (pid *PID) receiveLoop() {
 						break
 					}
 					// Process the message
-					switch received.Message().(type) {
+					switch msg := received.Message().(type) {
 					case *goaktpb.PoisonPill:
 						_ = pid.Shutdown(received.Context())
+					case *internalpb.HandleFault:
+						pid.handleFaultyChild(msg)
 					default:
 						pid.handleReceived(received)
 					}
@@ -1184,11 +1167,11 @@ func (pid *PID) handleReceived(received *ReceiveContext) {
 // recovery is called upon after message is processed
 func (pid *PID) recovery(received *ReceiveContext) {
 	if r := recover(); r != nil {
-		pid.watcherNotificationChan <- fmt.Errorf("%s", r)
+		pid.supervisionChan <- fmt.Errorf("%s", r)
 		return
 	}
 	// no panic or recommended way to handle error
-	pid.watcherNotificationChan <- received.getError()
+	pid.supervisionChan <- received.getError()
 }
 
 // init initializes the given actor and init processing messages
@@ -1206,7 +1189,7 @@ func (pid *PID) init(ctx context.Context) error {
 		return e
 	}
 
-	pid.running.Store(true)
+	pid.started.Store(true)
 	pid.logger.Info("Initialization process successfully completed.")
 
 	if pid.eventsStream != nil {
@@ -1230,58 +1213,67 @@ func (pid *PID) reset() {
 	pid.initMaxRetries.Store(DefaultInitMaxRetries)
 	pid.latestReceiveDuration.Store(0)
 	pid.initTimeout.Store(DefaultInitTimeout)
-	pid.children.Reset()
+	pid.childrenMap.Reset()
 	pid.watchersList.Reset()
+	pid.watchees().Reset()
 	pid.behaviorStack.Reset()
 	pid.processedCount.Store(0)
+	pid.stopping.Store(false)
 }
 
+// freeWatchers releases all the actors watching this actor
 func (pid *PID) freeWatchers(ctx context.Context) error {
-	pid.logger.Debug("freeing all watcher actors...")
+	pid.logger.Debugf("%s freeing all watcher actors...", pid.ID())
 	watchers := pid.watchers()
 	if watchers.Len() > 0 {
-		for _, item := range watchers.Items() {
-			watcher := item
+		for _, watcher := range watchers.Items() {
 			terminated := &goaktpb.Terminated{
 				ActorId: pid.ID(),
 			}
-			if watcher.WatcherID.IsRunning() {
-				pid.logger.Debugf("watcher=(%s) releasing watched=(%s)", watcher.WatcherID.ID(), pid.ID())
-				if err := pid.Tell(ctx, watcher.WatcherID, terminated); err != nil {
+
+			if watcher.IsRunning() {
+				pid.logger.Debugf("watcher=(%s) releasing watched=(%s)", watcher.ID(), pid.ID())
+				if err := pid.Tell(ctx, watcher, terminated); err != nil {
 					return err
 				}
-				watcher.WatcherID.UnWatch(pid)
-				watcher.WatcherID.removeChild(pid)
-				pid.logger.Debugf("watcher=(%s) released watched=(%s)", watcher.WatcherID.ID(), pid.ID())
+
+				watcher.UnWatch(pid)
+				pid.logger.Debugf("watcher=(%s) released watched=(%s)", watcher.ID(), pid.ID())
 			}
 		}
 	}
+	pid.logger.Debugf("%s does not have any watcher actors", pid.ID())
 	return nil
 }
 
+// freeWatchees releases all actors that have been watched by this actor
 func (pid *PID) freeWatchees(ctx context.Context) error {
-	pid.logger.Debug("freeing all watched actors...")
-	for _, watched := range pid.watchedList.List() {
-		pid.logger.Debugf("watcher=(%s) unwatching actor=(%s)", pid.ID(), watched.ID())
-		pid.UnWatch(watched)
-		if err := watched.Shutdown(ctx); err != nil {
-			errwrap := fmt.Errorf(
-				"watcher=(%s) failed to unwatch actor=(%s): %w",
-				pid.ID(), watched.ID(), err,
-			)
-			return errwrap
+	pid.logger.Debugf("%s freeing all watched actors...", pid.ID())
+	if pid.watcheesMap.Size() > 0 {
+		for _, watched := range pid.watcheesMap.List() {
+			pid.logger.Debugf("watcher=(%s) unwatching actor=(%s)", pid.ID(), watched.ID())
+			pid.UnWatch(watched)
+			if err := watched.Shutdown(ctx); err != nil {
+				errwrap := fmt.Errorf(
+					"watcher=(%s) failed to unwatch actor=(%s): %w",
+					pid.ID(), watched.ID(), err,
+				)
+				return errwrap
+			}
+			pid.logger.Debugf("watcher=(%s) successfully unwatch actor=(%s)", pid.ID(), watched.ID())
 		}
-		pid.logger.Debugf("watcher=(%s) successfully unwatch actor=(%s)", pid.ID(), watched.ID())
 	}
+	pid.logger.Debugf("%s does not have any watched actors", pid.ID())
 	return nil
 }
 
+// freeChildren releases all child actors
 func (pid *PID) freeChildren(ctx context.Context) error {
-	pid.logger.Debug("freeing all child actors...")
+	pid.logger.Debug("%s freeing all child actors...", pid.ID())
 	for _, child := range pid.Children() {
 		pid.logger.Debugf("parent=(%s) disowning child=(%s)", pid.ID(), child.ID())
 		pid.UnWatch(child)
-		pid.children.Remove(child.Address())
+		pid.childrenMap.Remove(child.Address())
 		if err := child.Shutdown(ctx); err != nil {
 			errwrap := fmt.Errorf(
 				"parent=(%s) failed to disown child=(%s): %w", pid.ID(), child.ID(),
@@ -1322,8 +1314,8 @@ func (pid *PID) passivationLoop() {
 	<-tickerStopSig
 	ticker.Stop()
 
-	if !pid.IsRunning() {
-		pid.logger.Infof("Actor=%s is offline. No need to passivate", pid.Address().String())
+	if pid.stopping.Load() {
+		pid.logger.Infof("Actor=%s is stopping. No need to passivate", pid.Address().String())
 		return
 	}
 
@@ -1379,12 +1371,11 @@ func (pid *PID) unsetBehaviorStacked() {
 
 // doStop stops the actor
 func (pid *PID) doStop(ctx context.Context) error {
-	pid.running.Store(false)
-
 	// TODO: just signal stash processing done and ignore the messages or process them
-	if pid.stashBuffer != nil {
+	if pid.stashBox != nil {
 		if err := pid.unstashAll(); err != nil {
 			pid.logger.Errorf("actor=(%s) failed to unstash messages", pid.Address().String())
+			pid.started.Store(false)
 			return err
 		}
 	}
@@ -1416,7 +1407,7 @@ func (pid *PID) doStop(ctx context.Context) error {
 		pid.remoting.Close()
 	}
 
-	pid.watchersNotificationStopSignal <- types.Unit{}
+	pid.supervisionStopSignal <- types.Unit{}
 	pid.receiveStopSignal <- types.Unit{}
 
 	if err := errorschain.
@@ -1425,50 +1416,50 @@ func (pid *PID) doStop(ctx context.Context) error {
 		AddError(pid.freeChildren(ctx)).
 		AddError(pid.freeWatchers(ctx)).
 		Error(); err != nil {
+		pid.started.Store(false)
 		pid.reset()
 		return err
 	}
 
-	pid.logger.Infof("Shutdown process is on going for actor=%s...", pid.Address().String())
+	pid.started.Store(false)
+	pid.logger.Infof("post shutdown process is on going for actor=%s...", pid.Address().String())
 	pid.reset()
 	return pid.actor.PostStop(ctx)
 }
 
-// removeChild helps remove child actor
-func (pid *PID) removeChild(cid *PID) {
-	if !pid.IsRunning() {
-		return
-	}
-
-	if cid == nil || cid == NoSender {
-		return
-	}
-
-	path := cid.Address()
-	if c, ok := pid.children.Get(path); ok {
-		if c.IsRunning() {
-			return
-		}
-		pid.children.Remove(path)
-	}
+// setParent set the actor parent.
+func (pid *PID) setParent(parent *PID) {
+	pid.fieldsLocker.Lock()
+	pid.parent = parent
+	pid.fieldsLocker.Unlock()
 }
 
-// notifyWatchers send error to watchers
-func (pid *PID) notifyWatchers() {
+// supervisionLoop send error to watchers
+func (pid *PID) supervisionLoop() {
 	go func() {
 		for {
 			select {
-			case err := <-pid.watcherNotificationChan:
-				if err != nil {
-					for _, item := range pid.watchers().Items() {
-						item.ErrChan <- err
-					}
-				}
-			case <-pid.watchersNotificationStopSignal:
+			case err := <-pid.supervisionChan:
+				pid.notifyParent(err)
+			case <-pid.supervisionStopSignal:
 				return
 			}
 		}
 	}()
+}
+
+// notifyParent sends a notification to the parent actor
+func (pid *PID) notifyParent(err error) {
+	if err == nil || errors.Is(err, ErrDead) {
+		return
+	}
+	// send a message to the parent
+	if pid.parent != nil {
+		_ = pid.Tell(context.Background(), pid.parent, &internalpb.HandleFault{
+			ActorId: pid.ID(),
+			Message: err.Error(),
+		})
+	}
 }
 
 // toDeadletterQueue sends message to deadletter queue
@@ -1503,7 +1494,7 @@ func (pid *PID) toDeadletterQueue(receiveCtx *ReceiveContext, err error) {
 	)
 }
 
-// handleCompletion processes a long-running task and pipe the result to
+// handleCompletion processes a long-started task and pipe the result to
 // the completion receiver
 func (pid *PID) handleCompletion(ctx context.Context, completion *taskCompletion) {
 	// defensive programming
@@ -1537,7 +1528,7 @@ func (pid *PID) handleCompletion(ctx context.Context, completion *taskCompletion
 	// make sure that the receiver is still alive
 	to := completion.Receiver
 	if !to.IsRunning() {
-		pid.logger.Errorf("unable to pipe message to actor=(%s): not running", to.Address().String())
+		pid.logger.Errorf("unable to pipe message to actor=(%s): not started", to.Address().String())
 		return
 	}
 
@@ -1545,20 +1536,12 @@ func (pid *PID) handleCompletion(ctx context.Context, completion *taskCompletion
 	to.doReceive(messageContext)
 }
 
-// supervise watches for child actor's failure and act based upon the supervisory strategy
-func (pid *PID) supervise(cid *PID, watcher *watcher) {
-	for {
-		select {
-		case <-watcher.Done:
-			pid.logger.Debugf("stop watching cid=(%s)", cid.ID())
-			return
-		case err := <-watcher.ErrChan:
-			// skip dead error
-			if errors.Is(err, ErrDead) {
-				return
-			}
-
-			pid.logger.Errorf("child actor=(%s) is failing: Err=%v", cid.ID(), err)
+// handleFaultyChild watches for child actor's failure and act based upon the supervisory strategy
+func (pid *PID) handleFaultyChild(msg *internalpb.HandleFault) {
+	for _, cid := range pid.childrenMap.List() {
+		if cid.ID() == msg.GetActorId() {
+			message := msg.GetMessage()
+			pid.logger.Errorf("child actor=(%s) is failing: Err=%s", cid.ID(), message)
 			switch directive := cid.supervisorDirective.(type) {
 			case *StopDirective:
 				pid.handleStopDirective(cid)
@@ -1576,7 +1559,7 @@ func (pid *PID) supervise(cid *PID, watcher *watcher) {
 // handleStopDirective handles the Supervisor stop directive
 func (pid *PID) handleStopDirective(cid *PID) {
 	pid.UnWatch(cid)
-	pid.children.Remove(cid.Address())
+	pid.childrenMap.Remove(cid.Address())
 	if err := cid.Shutdown(context.Background()); err != nil {
 		// this can enter into some infinite loop if we panic
 		// since we are just shutting down the actor we can just log the error
@@ -1601,11 +1584,20 @@ func (pid *PID) handleRestartDirective(cid *PID, maxRetries uint32, timeout time
 	if err != nil {
 		pid.logger.Error(err)
 		// remove the actor in case it is a child and stop it
-		pid.children.Remove(cid.Address())
+		pid.childrenMap.Remove(cid.Address())
 		if err := cid.Shutdown(ctx); err != nil {
 			pid.logger.Error(err)
 		}
 		return
 	}
 	pid.Watch(cid)
+}
+
+// childAddress returns the address of the given child actor provided the name
+func (pid *PID) childAddress(name string) *address.Address {
+	return address.New(name,
+		pid.Address().System(),
+		pid.Address().Host(),
+		pid.Address().Port()).
+		WithParent(pid.Address())
 }

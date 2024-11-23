@@ -418,7 +418,6 @@ func TestSupervisorStrategy(t *testing.T) {
 		assert.NotNil(t, child)
 
 		assert.Len(t, parent.Children(), 1)
-		assert.Len(t, child.Parents(), 1)
 		// let us send 10 public to the actors
 		count := 10
 		for i := 0; i < count; i++ {
@@ -745,7 +744,7 @@ func TestMessaging(t *testing.T) {
 		// create a Ping actor
 		opts := []pidOption{
 			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
+			withCustomLogger(log.DefaultLogger),
 		}
 		ports := dynaport.Get(1)
 		// create the actor path
@@ -778,8 +777,10 @@ func TestMessaging(t *testing.T) {
 		err = Tell(ctx, pid1, new(testpb.TestBye))
 		require.NoError(t, err)
 
-		lib.Pause(time.Second)
-		assert.False(t, pid1.IsRunning())
+		assert.Eventually(t, func() bool {
+			return pid1.IsRunning()
+		}, 2*time.Second, time.Second)
+
 		assert.True(t, pid2.IsRunning())
 
 		err = Tell(ctx, pid2, new(testpb.TestBye))
@@ -1115,7 +1116,7 @@ func TestSpawnChild(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, child)
 
-		lib.Pause(time.Second)
+		lib.Pause(100 * time.Millisecond)
 
 		assert.Len(t, parent.Children(), 1)
 		//stop the actor

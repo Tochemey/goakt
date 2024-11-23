@@ -28,19 +28,19 @@ import "errors"
 
 // stash adds the current message to the stash buffer
 func (pid *PID) stash(ctx *ReceiveContext) error {
-	if pid.stashBuffer == nil {
+	if pid.stashBox == nil {
 		return ErrStashBufferNotSet
 	}
-	return pid.stashBuffer.Enqueue(ctx)
+	return pid.stashBox.Enqueue(ctx)
 }
 
 // unstash unstashes the oldest message in the stash and prepends to the mailbox
 func (pid *PID) unstash() error {
-	if pid.stashBuffer == nil {
+	if pid.stashBox == nil {
 		return ErrStashBufferNotSet
 	}
 
-	received := pid.stashBuffer.Dequeue()
+	received := pid.stashBox.Dequeue()
 	if received == nil {
 		return errors.New("stash buffer may be closed")
 	}
@@ -51,15 +51,15 @@ func (pid *PID) unstash() error {
 // unstashAll unstashes all messages from the stash buffer and prepends in the mailbox
 // (it keeps the messages in the same order as received, unstashing older messages before newer).
 func (pid *PID) unstashAll() error {
-	if pid.stashBuffer == nil {
+	if pid.stashBox == nil {
 		return ErrStashBufferNotSet
 	}
 
 	pid.stashLocker.Lock()
 	defer pid.stashLocker.Unlock()
 
-	for !pid.stashBuffer.IsEmpty() {
-		received := pid.stashBuffer.Dequeue()
+	for !pid.stashBox.IsEmpty() {
+		received := pid.stashBox.Dequeue()
 		if received == nil {
 			return errors.New("stash buffer may be closed")
 		}

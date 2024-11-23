@@ -412,6 +412,8 @@ func TestActorSystem(t *testing.T) {
 			assert.NoError(t, err)
 			assert.NotNil(t, actorRef)
 
+			lib.Pause(500 * time.Millisecond)
+
 			// send a message to the actor
 			reply, err := Ask(ctx, actorRef, new(testpb.TestReply), replyTimeout)
 			require.NoError(t, err)
@@ -420,8 +422,8 @@ func TestActorSystem(t *testing.T) {
 			require.True(t, proto.Equal(expected, reply))
 			require.True(t, actorRef.IsRunning())
 
-			// wait for a while for the system to stop
-			lib.Pause(time.Second)
+			lib.Pause(500 * time.Millisecond)
+
 			// restart the actor
 			_, err = sys.ReSpawn(ctx, actorName)
 			require.NoError(t, err)
