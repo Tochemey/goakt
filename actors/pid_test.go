@@ -744,7 +744,7 @@ func TestMessaging(t *testing.T) {
 		// create a Ping actor
 		opts := []pidOption{
 			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
+			withCustomLogger(log.DefaultLogger),
 		}
 		ports := dynaport.Get(1)
 		// create the actor path
@@ -777,8 +777,10 @@ func TestMessaging(t *testing.T) {
 		err = Tell(ctx, pid1, new(testpb.TestBye))
 		require.NoError(t, err)
 
-		lib.Pause(time.Second)
-		assert.False(t, pid1.IsRunning())
+		assert.Eventually(t, func() bool {
+			return pid1.IsRunning()
+		}, 2*time.Second, time.Second)
+
 		assert.True(t, pid2.IsRunning())
 
 		err = Tell(ctx, pid2, new(testpb.TestBye))
