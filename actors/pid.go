@@ -261,8 +261,9 @@ func (pid *PID) Child(name string) (*PID, error) {
 
 	childAddress := pid.childAddress(name)
 	if cid, ok := pid.childrenMap.Get(childAddress); ok {
-		pid.childrenCount.Inc()
-		return cid, nil
+		if cid.IsRunning() {
+			return cid, nil
+		}
 	}
 	return nil, ErrActorNotFound(childAddress.String())
 }
@@ -300,6 +301,10 @@ func (pid *PID) Stop(ctx context.Context, cid *PID) error {
 		return ErrUndefinedActor
 	}
 
+	if !cid.IsRunning() {
+		return ErrActorNotFound(cid.Address().String())
+	}
+
 	pid.fieldsLocker.RLock()
 	children := pid.childrenMap
 	pid.fieldsLocker.RUnlock()
@@ -308,7 +313,6 @@ func (pid *PID) Stop(ctx context.Context, cid *PID) error {
 		if err := cid.Shutdown(ctx); err != nil {
 			return err
 		}
-
 		return nil
 	}
 
@@ -476,6 +480,7 @@ func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor, opts .
 		return nil, err
 	}
 
+	pid.childrenCount.Inc()
 	pid.childrenMap.Set(cid)
 	eventsStream := pid.eventsStream
 
@@ -1211,6 +1216,7 @@ func (pid *PID) reset() {
 	pid.processedCount.Store(0)
 }
 
+// freeWatchers releases all the actors watching this actor
 func (pid *PID) freeWatchers(ctx context.Context) error {
 	pid.logger.Debug("freeing all watcher actors...")
 	watchers := pid.watchers()
@@ -1234,6 +1240,7 @@ func (pid *PID) freeWatchers(ctx context.Context) error {
 	return nil
 }
 
+// freeWatchees releases all actors that have been watched by this actor
 func (pid *PID) freeWatchees(ctx context.Context) error {
 	pid.logger.Debug("freeing all watched actors...")
 	for _, watched := range pid.watcheesMap.List() {
@@ -1251,6 +1258,7 @@ func (pid *PID) freeWatchees(ctx context.Context) error {
 	return nil
 }
 
+// freeChildren releases all child actors
 func (pid *PID) freeChildren(ctx context.Context) error {
 	pid.logger.Debug("freeing all child actors...")
 	for _, child := range pid.Children() {
