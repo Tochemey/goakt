@@ -1552,6 +1552,7 @@ func (pid *PID) handleFaultyChild(msg *internalpb.HandleFault) {
 			default:
 				pid.handleStopDirective(cid)
 			}
+			return
 		}
 	}
 }
