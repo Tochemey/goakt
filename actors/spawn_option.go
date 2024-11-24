@@ -50,10 +50,10 @@ type SpawnOption interface {
 
 var _ SpawnOption = spawnOption(nil)
 
-// funcOption implements the FuncOption interface.
+// spawnOption implements the SpawnOption interface.
 type spawnOption func(config *spawnConfig)
 
-// Apply implementation
+// Apply sets the Option value of a config.
 func (f spawnOption) Apply(c *spawnConfig) {
 	f(c)
 }

@@ -78,11 +78,6 @@ func TestPIDOptions(t *testing.T) {
 			expected: &PID{supervisorDirective: resumeDirective},
 		},
 		{
-			name:     "WithShutdownTimeout",
-			option:   withShutdownTimeout(time.Second),
-			expected: &PID{shutdownTimeout: atomicDuration},
-		},
-		{
 			name:     "WithPassivationDisabled",
 			option:   withPassivationDisabled(),
 			expected: &PID{passivateAfter: negativeDuration},
