@@ -413,9 +413,10 @@ func TestSupervisorStrategy(t *testing.T) {
 		assert.NotNil(t, parent)
 
 		// create the child actor
-		child, err := parent.SpawnChild(ctx, "SpawnChild", newTestSupervised())
+		child, err := parent.SpawnChild(ctx, "SpawnChild", newTestSupervised(), WithSupervisor(NewStopDirective()))
 		assert.NoError(t, err)
 		assert.NotNil(t, child)
+		assert.Equal(t, parent.ID(), child.Parent().ID())
 
 		assert.Len(t, parent.Children(), 1)
 		// let us send 10 public to the actors
@@ -786,6 +787,36 @@ func TestMessaging(t *testing.T) {
 		err = Tell(ctx, pid2, new(testpb.TestBye))
 		lib.Pause(time.Second)
 		assert.False(t, pid2.IsRunning())
+	})
+	t.Run("With Ask invalid timeout", func(t *testing.T) {
+		ctx := context.TODO()
+		// create a Ping actor
+		opts := []pidOption{
+			withInitMaxRetries(1),
+			withCustomLogger(log.DefaultLogger),
+		}
+		ports := dynaport.Get(1)
+		// create the actor path
+		actor1 := &exchanger{}
+		actorPath1 := address.New("Exchange1", "sys", "host", ports[0])
+		pid1, err := newPID(ctx, actorPath1, actor1, opts...)
+
+		require.NoError(t, err)
+		require.NotNil(t, pid1)
+
+		actor2 := &exchanger{}
+		actorPath2 := address.New("Exchange2", "sys", "host", ports[0])
+		pid2, err := newPID(ctx, actorPath2, actor2, opts...)
+		require.NoError(t, err)
+		require.NotNil(t, pid2)
+
+		// send an ask
+		_, err = pid1.Ask(ctx, pid2, new(testpb.TestReply), 0)
+		require.Error(t, err)
+		require.EqualError(t, err, ErrInvalidTimeout.Error())
+
+		require.NoError(t, pid1.Shutdown(ctx))
+		require.NoError(t, pid2.Shutdown(ctx))
 	})
 	t.Run("With Ask when not ready", func(t *testing.T) {
 		ctx := context.TODO()
