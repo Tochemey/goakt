@@ -34,7 +34,7 @@ const (
 	// DefaultInitMaxRetries defines the default value for retrying actor initialization
 	DefaultInitMaxRetries = 5
 	// DefaultShutdownTimeout defines the default shutdown timeout
-	DefaultShutdownTimeout = 2 * time.Second
+	DefaultShutdownTimeout = time.Minute
 	// DefaultInitTimeout defines the default init timeout
 	DefaultInitTimeout = time.Second
 	// DefaultPeerStateLoopInterval defines the default peer state loop interval

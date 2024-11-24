@@ -99,10 +99,6 @@ type PID struct {
 	// the default initialization timeout is 1s
 	initTimeout atomic.Duration
 
-	// shutdownTimeout specifies the graceful shutdown timeout
-	// the default value is 5 seconds
-	shutdownTimeout atomic.Duration
-
 	// specifies the actor mailbox
 	mailbox Mailbox
 
@@ -202,7 +198,6 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 	}
 
 	pid.initMaxRetries.Store(DefaultInitMaxRetries)
-	pid.shutdownTimeout.Store(DefaultShutdownTimeout)
 	pid.latestReceiveDuration.Store(0)
 	pid.started.Store(false)
 	pid.stopping.Store(false)
@@ -446,7 +441,6 @@ func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor, opts .
 		withActorSystem(pid.system),
 		withEventsStream(pid.eventsStream),
 		withInitTimeout(pid.initTimeout.Load()),
-		withShutdownTimeout(pid.shutdownTimeout.Load()),
 		withRemoting(pid.remoting),
 		withParent(pid),
 	}
@@ -1209,7 +1203,6 @@ func (pid *PID) init(ctx context.Context) error {
 func (pid *PID) reset() {
 	pid.latestReceiveTime.Store(time.Time{})
 	pid.passivateAfter.Store(DefaultPassivationTimeout)
-	pid.shutdownTimeout.Store(DefaultShutdownTimeout)
 	pid.initMaxRetries.Store(DefaultInitMaxRetries)
 	pid.latestReceiveDuration.Store(0)
 	pid.initTimeout.Store(DefaultInitTimeout)
@@ -1223,7 +1216,8 @@ func (pid *PID) reset() {
 
 // freeWatchers releases all the actors watching this actor
 func (pid *PID) freeWatchers(ctx context.Context) error {
-	pid.logger.Debugf("%s freeing all watcher actors...", pid.ID())
+	logger := pid.logger
+	logger.Debugf("%s freeing all watcher actors...", pid.ID())
 	watchers := pid.watchers()
 	if watchers.Len() > 0 {
 		for _, watcher := range watchers.Items() {
@@ -1232,26 +1226,30 @@ func (pid *PID) freeWatchers(ctx context.Context) error {
 			}
 
 			if watcher.IsRunning() {
-				pid.logger.Debugf("watcher=(%s) releasing watched=(%s)", watcher.ID(), pid.ID())
+				logger.Debugf("watcher=(%s) releasing watched=(%s)", watcher.ID(), pid.ID())
 				if err := pid.Tell(ctx, watcher, terminated); err != nil {
 					return err
 				}
 
 				watcher.UnWatch(pid)
-				pid.logger.Debugf("watcher=(%s) released watched=(%s)", watcher.ID(), pid.ID())
+				logger.Debugf("watcher=(%s) released watched=(%s)", watcher.ID(), pid.ID())
 			}
 		}
+		logger.Debugf("%s successfully frees all watcher actors...", pid.ID())
+		return nil
 	}
-	pid.logger.Debugf("%s does not have any watcher actors", pid.ID())
+	logger.Debugf("%s does not have any watcher actors", pid.ID())
 	return nil
 }
 
 // freeWatchees releases all actors that have been watched by this actor
 func (pid *PID) freeWatchees(ctx context.Context) error {
-	pid.logger.Debugf("%s freeing all watched actors...", pid.ID())
-	if pid.watcheesMap.Size() > 0 {
+	logger := pid.logger
+	logger.Debugf("%s freeing all watched actors...", pid.ID())
+	size := pid.watcheesMap.Size()
+	if size > 0 {
 		for _, watched := range pid.watcheesMap.List() {
-			pid.logger.Debugf("watcher=(%s) unwatching actor=(%s)", pid.ID(), watched.ID())
+			logger.Debugf("watcher=(%s) unwatching actor=(%s)", pid.ID(), watched.ID())
 			pid.UnWatch(watched)
 			if err := watched.Shutdown(ctx); err != nil {
 				errwrap := fmt.Errorf(
@@ -1260,29 +1258,38 @@ func (pid *PID) freeWatchees(ctx context.Context) error {
 				)
 				return errwrap
 			}
-			pid.logger.Debugf("watcher=(%s) successfully unwatch actor=(%s)", pid.ID(), watched.ID())
+			logger.Debugf("watcher=(%s) successfully unwatch actor=(%s)", pid.ID(), watched.ID())
 		}
+		logger.Debugf("%s successfully unwatch all watched actors...", pid.ID())
+		return nil
 	}
-	pid.logger.Debugf("%s does not have any watched actors", pid.ID())
+	logger.Debugf("%s does not have any watched actors", pid.ID())
 	return nil
 }
 
 // freeChildren releases all child actors
 func (pid *PID) freeChildren(ctx context.Context) error {
-	pid.logger.Debug("%s freeing all child actors...", pid.ID())
-	for _, child := range pid.Children() {
-		pid.logger.Debugf("parent=(%s) disowning child=(%s)", pid.ID(), child.ID())
-		pid.UnWatch(child)
-		pid.childrenMap.Remove(child.Address())
-		if err := child.Shutdown(ctx); err != nil {
-			errwrap := fmt.Errorf(
-				"parent=(%s) failed to disown child=(%s): %w", pid.ID(), child.ID(),
-				err,
-			)
-			return errwrap
+	logger := pid.logger
+	logger.Debugf("%s freeing all child actors...", pid.ID())
+	size := pid.childrenMap.Size()
+	if size > 0 {
+		for _, child := range pid.Children() {
+			logger.Debugf("parent=(%s) disowning child=(%s)", pid.ID(), child.ID())
+			pid.UnWatch(child)
+			pid.childrenMap.Remove(child.Address())
+			if err := child.Shutdown(ctx); err != nil {
+				errwrap := fmt.Errorf(
+					"parent=(%s) failed to disown child=(%s): %w", pid.ID(), child.ID(),
+					err,
+				)
+				return errwrap
+			}
+			logger.Debugf("parent=(%s) successfully disown child=(%s)", pid.ID(), child.ID())
 		}
-		pid.logger.Debugf("parent=(%s) successfully disown child=(%s)", pid.ID(), child.ID())
+		logger.Debugf("%s successfully free all child actors...", pid.ID())
+		return nil
 	}
+	pid.logger.Debugf("%s does not have any children", pid.ID())
 	return nil
 }
 
@@ -1382,11 +1389,10 @@ func (pid *PID) doStop(ctx context.Context) error {
 
 	// wait for all messages in the mailbox to be processed
 	// init a ticker that run every 10 ms to make sure we process all messages in the
-	// mailbox.
+	// mailbox within a second
+	// TODO: revisit this timeout or discard all remaining messages in the mailbox
 	ticker := time.NewTicker(10 * time.Millisecond)
-	timer := time.After(pid.shutdownTimeout.Load())
 	tickerStopSig := make(chan types.Unit)
-	// start ticking
 	go func() {
 		for {
 			select {
@@ -1395,7 +1401,7 @@ func (pid *PID) doStop(ctx context.Context) error {
 					close(tickerStopSig)
 					return
 				}
-			case <-timer:
+			case <-time.After(2 * time.Second):
 				close(tickerStopSig)
 				return
 			}

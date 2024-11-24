@@ -70,13 +70,6 @@ func withSupervisorDirective(directive SupervisorDirective) pidOption {
 	}
 }
 
-// withShutdownTimeout sets the shutdown timeout
-func withShutdownTimeout(duration time.Duration) pidOption {
-	return func(pid *PID) {
-		pid.shutdownTimeout.Store(duration)
-	}
-}
-
 // withNoPassivation disable passivation
 func withPassivationDisabled() pidOption {
 	return func(pid *PID) {

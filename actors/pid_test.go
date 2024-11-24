@@ -413,9 +413,10 @@ func TestSupervisorStrategy(t *testing.T) {
 		assert.NotNil(t, parent)
 
 		// create the child actor
-		child, err := parent.SpawnChild(ctx, "SpawnChild", newTestSupervised())
+		child, err := parent.SpawnChild(ctx, "SpawnChild", newTestSupervised(), WithSupervisor(NewStopDirective()))
 		assert.NoError(t, err)
 		assert.NotNil(t, child)
+		assert.Equal(t, parent.ID(), child.Parent().ID())
 
 		assert.Len(t, parent.Children(), 1)
 		// let us send 10 public to the actors
@@ -786,6 +787,36 @@ func TestMessaging(t *testing.T) {
 		err = Tell(ctx, pid2, new(testpb.TestBye))
 		lib.Pause(time.Second)
 		assert.False(t, pid2.IsRunning())
+	})
+	t.Run("With Ask invalid timeout", func(t *testing.T) {
+		ctx := context.TODO()
+		// create a Ping actor
+		opts := []pidOption{
+			withInitMaxRetries(1),
+			withCustomLogger(log.DefaultLogger),
+		}
+		ports := dynaport.Get(1)
+		// create the actor path
+		actor1 := &exchanger{}
+		actorPath1 := address.New("Exchange1", "sys", "host", ports[0])
+		pid1, err := newPID(ctx, actorPath1, actor1, opts...)
+
+		require.NoError(t, err)
+		require.NotNil(t, pid1)
+
+		actor2 := &exchanger{}
+		actorPath2 := address.New("Exchange2", "sys", "host", ports[0])
+		pid2, err := newPID(ctx, actorPath2, actor2, opts...)
+		require.NoError(t, err)
+		require.NotNil(t, pid2)
+
+		// send an ask
+		_, err = pid1.Ask(ctx, pid2, new(testpb.TestReply), 0)
+		require.Error(t, err)
+		require.EqualError(t, err, ErrInvalidTimeout.Error())
+
+		require.NoError(t, pid1.Shutdown(ctx))
+		require.NoError(t, pid2.Shutdown(ctx))
 	})
 	t.Run("With Ask when not ready", func(t *testing.T) {
 		ctx := context.TODO()
@@ -2344,25 +2375,23 @@ func TestPipeTo(t *testing.T) {
 	t.Run("With is a dead actor: case 2", func(t *testing.T) {
 		askTimeout := time.Minute
 		ctx := context.TODO()
-
-		opts := []pidOption{
-			withInitMaxRetries(1),
-			withPassivationDisabled(),
-			withCustomLogger(log.DiscardLogger),
-		}
 		ports := dynaport.Get(1)
+		actorSystem, err := NewActorSystem("sys",
+			WithActorInitMaxRetries(1),
+			WithLogger(log.DiscardLogger),
+			WithRemoting("127.0.0.1", int32(ports[0])),
+			WithPassivationDisabled())
+
+		require.NoError(t, actorSystem.Start(ctx))
+		lib.Pause(time.Second)
 
 		// create actor1
-		actor1 := &exchanger{}
-		actorPath1 := address.New("Exchange1", "sys", "host", ports[0])
-		pid1, err := newPID(ctx, actorPath1, actor1, opts...)
+		pid1, err := actorSystem.Spawn(ctx, "Exchange1", &exchanger{})
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
 
 		// create actor2
-		actor2 := &exchanger{}
-		actorPath2 := address.New("Exchange2", "sys", "host", ports[0])
-		pid2, err := newPID(ctx, actorPath2, actor2, opts...)
+		pid2, err := actorSystem.Spawn(ctx, "Exchange2", &exchanger{})
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
 
@@ -2379,28 +2408,27 @@ func TestPipeTo(t *testing.T) {
 		var wg sync.WaitGroup
 		wg.Add(1)
 		go func() {
-			// Wait for some time and during that period send some messages to the actor
-			// send three messages while waiting for the future to completed
 			_, _ = Ask(ctx, pid1, new(testpb.TestReply), askTimeout)
 			_, _ = Ask(ctx, pid1, new(testpb.TestReply), askTimeout)
 			_, _ = Ask(ctx, pid1, new(testpb.TestReply), askTimeout)
+
+			task <- new(testspb.TaskComplete)
+
 			lib.Pause(time.Second)
+
+			close(task)
 			wg.Done()
 		}()
-
-		// now we complete the Task
-		task <- new(testspb.TaskComplete)
-		_ = Tell(ctx, pid2, new(testpb.TestBye))
-
 		wg.Wait()
 
-		lib.Pause(2 * time.Second)
-
 		require.EqualValues(t, 3, pid1.ProcessedCount()-1)
+		require.NotZero(t, pid2.ProcessedCount())
+
+		_ = Tell(ctx, pid2, new(testpb.TestBye))
+		lib.Pause(2 * time.Second)
 		require.Zero(t, pid2.ProcessedCount())
 
-		lib.Pause(time.Second)
-		assert.NoError(t, pid1.Shutdown(ctx))
+		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 	t.Run("With undefined task", func(t *testing.T) {
 		ctx := context.TODO()
