@@ -36,7 +36,6 @@ import (
 	"connectrpc.com/connect"
 	"github.com/flowchartsman/retry"
 	"go.uber.org/atomic"
-	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/durationpb"
@@ -1217,88 +1216,78 @@ func (pid *PID) reset() {
 
 // freeWatchers releases all the actors watching this actor
 func (pid *PID) freeWatchers(ctx context.Context) error {
-	pid.logger.Debugf("%s freeing all watcher actors...", pid.ID())
+	logger := pid.logger
+	logger.Debugf("%s freeing all watcher actors...", pid.ID())
 	watchers := pid.watchers()
 	if watchers.Len() > 0 {
-		eg, ctx := errgroup.WithContext(ctx)
 		for _, watcher := range watchers.Items() {
-			watcher := watcher
-			eg.Go(func() error {
-				terminated := &goaktpb.Terminated{
-					ActorId: pid.ID(),
+			terminated := &goaktpb.Terminated{
+				ActorId: pid.ID(),
+			}
+
+			if watcher.IsRunning() {
+				logger.Debugf("watcher=(%s) releasing watched=(%s)", watcher.ID(), pid.ID())
+				if err := pid.Tell(ctx, watcher, terminated); err != nil {
+					return err
 				}
 
-				if watcher.IsRunning() {
-					pid.logger.Debugf("watcher=(%s) releasing watched=(%s)", watcher.ID(), pid.ID())
-					if err := pid.Tell(ctx, watcher, terminated); err != nil {
-						return err
-					}
-
-					watcher.UnWatch(pid)
-					pid.logger.Debugf("watcher=(%s) released watched=(%s)", watcher.ID(), pid.ID())
-				}
-				return nil
-			})
+				watcher.UnWatch(pid)
+				logger.Debugf("watcher=(%s) released watched=(%s)", watcher.ID(), pid.ID())
+			}
 		}
-		return eg.Wait()
+		logger.Debugf("%s successfully frees all watcher actors...", pid.ID())
+		return nil
 	}
-	pid.logger.Debugf("%s does not have any watcher actors", pid.ID())
+	logger.Debugf("%s does not have any watcher actors", pid.ID())
 	return nil
 }
 
 // freeWatchees releases all actors that have been watched by this actor
 func (pid *PID) freeWatchees(ctx context.Context) error {
-	pid.logger.Debugf("%s freeing all watched actors...", pid.ID())
+	logger := pid.logger
+	logger.Debugf("%s freeing all watched actors...", pid.ID())
 	size := pid.watcheesMap.Size()
 	if size > 0 {
-		eg, ctx := errgroup.WithContext(ctx)
 		for _, watched := range pid.watcheesMap.List() {
-			watched := watched
-			eg.Go(func() error {
-				pid.logger.Debugf("watcher=(%s) unwatching actor=(%s)", pid.ID(), watched.ID())
-				pid.UnWatch(watched)
-				if err := watched.Shutdown(ctx); err != nil {
-					errwrap := fmt.Errorf(
-						"watcher=(%s) failed to unwatch actor=(%s): %w",
-						pid.ID(), watched.ID(), err,
-					)
-					return errwrap
-				}
-				pid.logger.Debugf("watcher=(%s) successfully unwatch actor=(%s)", pid.ID(), watched.ID())
-				return nil
-			})
+			logger.Debugf("watcher=(%s) unwatching actor=(%s)", pid.ID(), watched.ID())
+			pid.UnWatch(watched)
+			if err := watched.Shutdown(ctx); err != nil {
+				errwrap := fmt.Errorf(
+					"watcher=(%s) failed to unwatch actor=(%s): %w",
+					pid.ID(), watched.ID(), err,
+				)
+				return errwrap
+			}
+			logger.Debugf("watcher=(%s) successfully unwatch actor=(%s)", pid.ID(), watched.ID())
 		}
-		return eg.Wait()
+		logger.Debugf("%s successfully unwatch all watched actors...", pid.ID())
+		return nil
 	}
-	pid.logger.Debugf("%s does not have any watched actors", pid.ID())
+	logger.Debugf("%s does not have any watched actors", pid.ID())
 	return nil
 }
 
 // freeChildren releases all child actors
 func (pid *PID) freeChildren(ctx context.Context) error {
-	pid.logger.Debugf("%s freeing all child actors...", pid.ID())
+	logger := pid.logger
+	logger.Debugf("%s freeing all child actors...", pid.ID())
 	size := pid.childrenMap.Size()
 	if size > 0 {
-		eg, ctx := errgroup.WithContext(ctx)
 		for _, child := range pid.Children() {
-			child := child
-			logger := pid.logger
-			eg.Go(func() error {
-				logger.Debugf("parent=(%s) disowning child=(%s)", pid.ID(), child.ID())
-				pid.UnWatch(child)
-				pid.childrenMap.Remove(child.Address())
-				if err := child.Shutdown(ctx); err != nil {
-					errwrap := fmt.Errorf(
-						"parent=(%s) failed to disown child=(%s): %w", pid.ID(), child.ID(),
-						err,
-					)
-					return errwrap
-				}
-				logger.Debugf("parent=(%s) successfully disown child=(%s)", pid.ID(), child.ID())
-				return nil
-			})
+			logger.Debugf("parent=(%s) disowning child=(%s)", pid.ID(), child.ID())
+			pid.UnWatch(child)
+			pid.childrenMap.Remove(child.Address())
+			if err := child.Shutdown(ctx); err != nil {
+				errwrap := fmt.Errorf(
+					"parent=(%s) failed to disown child=(%s): %w", pid.ID(), child.ID(),
+					err,
+				)
+				return errwrap
+			}
+			logger.Debugf("parent=(%s) successfully disown child=(%s)", pid.ID(), child.ID())
 		}
-		return eg.Wait()
+		logger.Debugf("%s successfully free all child actors...", pid.ID())
+		return nil
 	}
 	pid.logger.Debugf("%s does not have any children", pid.ID())
 	return nil
@@ -1400,7 +1389,7 @@ func (pid *PID) doStop(ctx context.Context) error {
 
 	// wait for all messages in the mailbox to be processed
 	// init a ticker that run every 10 ms to make sure we process all messages in the
-	// mailbox within 500 ms
+	// mailbox within a second
 	// TODO: revisit this timeout or discard all remaining messages in the mailbox
 	ticker := time.NewTicker(10 * time.Millisecond)
 	tickerStopSig := make(chan types.Unit)
@@ -1412,7 +1401,7 @@ func (pid *PID) doStop(ctx context.Context) error {
 					close(tickerStopSig)
 					return
 				}
-			case <-time.After(500 * time.Millisecond):
+			case <-time.After(2 * time.Second):
 				close(tickerStopSig)
 				return
 			}
