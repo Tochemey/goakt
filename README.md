@@ -263,7 +263,7 @@ The choice of protobuf is due to easy serialization over wire and strong schema 
 You can schedule sending messages to actor that will be acted upon in the future. To achieve that you can use the following methods on the [Actor System](./actors/actor_system.go):
 
 - `ScheduleOnce` - will send the given message to a local actor _**once**_ after a given interval
-- `Schedule` - will sendd the given message to a local actor at a given interval
+- `Schedule` - will send the given message to a local actor at a given interval
 - `RemoteSchedule` - will send the given message to a remote actor at a given interval. This requires remoting to be enabled on the actor system.
 - `RemoteScheduleOnce` - will send the given message to a remote actor _**once**_ after a given interval. This requires remoting to be enabled on the actor system.
 - `ScheduleWithCron` - will send the given message to a local actor using a [cron expression](#cron-expression-format).
