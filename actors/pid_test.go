@@ -2387,7 +2387,6 @@ func TestPipeTo(t *testing.T) {
 
 			close(task)
 			wg.Done()
-			return
 		}()
 		wg.Wait()
 
