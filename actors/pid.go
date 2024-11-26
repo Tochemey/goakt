@@ -686,16 +686,9 @@ func (pid *PID) RemoteTell(ctx context.Context, to *address.Address, message pro
 
 	remoteService := pid.remoting.Client(to.GetHost(), int(to.GetPort()))
 
-	sender := &goaktpb.Address{
-		Host: pid.Address().Host(),
-		Port: int32(pid.Address().Port()),
-		Name: pid.Address().Name(),
-		Id:   pid.Address().ID(),
-	}
-
 	request := &internalpb.RemoteTellRequest{
 		RemoteMessage: &internalpb.RemoteMessage{
-			Sender:   sender,
+			Sender:   pid.Address().Address,
 			Receiver: to.Address,
 			Message:  marshaled,
 		},
@@ -743,16 +736,10 @@ func (pid *PID) RemoteAsk(ctx context.Context, to *address.Address, message prot
 	remoteService := pid.remoting.Client(to.GetHost(), int(to.GetPort()))
 
 	senderAddress := pid.Address()
-	sender := &goaktpb.Address{
-		Host: senderAddress.Host(),
-		Port: int32(senderAddress.Port()),
-		Name: senderAddress.Name(),
-		Id:   senderAddress.ID(),
-	}
 
 	request := &internalpb.RemoteAskRequest{
 		RemoteMessage: &internalpb.RemoteMessage{
-			Sender:   sender,
+			Sender:   senderAddress.Address,
 			Receiver: to.Address,
 			Message:  marshaled,
 		},
@@ -807,13 +794,6 @@ func (pid *PID) RemoteBatchTell(ctx context.Context, to *address.Address, messag
 		return pid.RemoteTell(ctx, to, messages[0])
 	}
 
-	sender := &goaktpb.Address{
-		Host: pid.Address().Host(),
-		Port: int32(pid.Address().Port()),
-		Name: pid.Address().Name(),
-		Id:   pid.Address().ID(),
-	}
-
 	var requests []*internalpb.RemoteTellRequest
 	for _, message := range messages {
 		packed, err := anypb.New(message)
@@ -824,7 +804,7 @@ func (pid *PID) RemoteBatchTell(ctx context.Context, to *address.Address, messag
 		requests = append(
 			requests, &internalpb.RemoteTellRequest{
 				RemoteMessage: &internalpb.RemoteMessage{
-					Sender:   sender,
+					Sender:   pid.Address().Address,
 					Receiver: to.Address,
 					Message:  packed,
 				},
@@ -863,13 +843,6 @@ func (pid *PID) RemoteBatchAsk(ctx context.Context, to *address.Address, message
 		return nil, ErrRemotingDisabled
 	}
 
-	sender := &goaktpb.Address{
-		Host: pid.Address().Host(),
-		Port: int32(pid.Address().Port()),
-		Name: pid.Address().Name(),
-		Id:   pid.Address().ID(),
-	}
-
 	var requests []*internalpb.RemoteAskRequest
 	for _, message := range messages {
 		packed, err := anypb.New(message)
@@ -880,7 +853,7 @@ func (pid *PID) RemoteBatchAsk(ctx context.Context, to *address.Address, message
 		requests = append(
 			requests, &internalpb.RemoteAskRequest{
 				RemoteMessage: &internalpb.RemoteMessage{
-					Sender:   sender,
+					Sender:   pid.Address().Address,
 					Receiver: to.Address,
 					Message:  packed,
 				},
