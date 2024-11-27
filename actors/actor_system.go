@@ -55,7 +55,6 @@ import (
 	"github.com/tochemey/goakt/v2/internal/eventstream"
 	"github.com/tochemey/goakt/v2/internal/internalpb"
 	"github.com/tochemey/goakt/v2/internal/internalpb/internalpbconnect"
-	"github.com/tochemey/goakt/v2/internal/tcp"
 	"github.com/tochemey/goakt/v2/internal/types"
 	"github.com/tochemey/goakt/v2/log"
 )
@@ -1526,13 +1525,27 @@ func (x *actorSystem) nodeLeftStateFromEvent(event *cluster.Event) (*internalpb.
 
 // setHostPort sets the host and port
 func (x *actorSystem) setHostPort() error {
-	remotingHost, remotingPort, err := tcp.GetHostPort(fmt.Sprintf("%s:%d", x.host, x.port))
+	// combine host and port into an hostPort string
+	hostPort := fmt.Sprintf("%s:%d", x.host, x.port)
+
+	// attempt to resolve the hostPort
+	resolvedAddr, err := net.ResolveTCPAddr("tcp", hostPort)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to resolve hostPort: %w", err)
 	}
 
-	x.host = remotingHost
-	x.port = int32(remotingPort)
+	// check if the original host is a DNS name or IP
+	switch {
+	case net.ParseIP(x.host) == nil:
+		// if it's a DNS name, keep the original host
+		// Only update the port from the resolved address
+		x.port = int32(resolvedAddr.Port)
+	default:
+		// if it's an IP address, update the host to the resolved IP
+		x.host = resolvedAddr.IP.String()
+		x.port = int32(resolvedAddr.Port)
+	}
+
 	return nil
 }
 
