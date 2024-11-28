@@ -163,16 +163,19 @@ func (x *Client) Tell(ctx context.Context, actor *Actor, message proto.Message) 
 	node := nextNode(x.balancer)
 	x.locker.Unlock()
 	remoteHost, remotePort := node.HostAndPort()
+
 	// lookup the actor address
-	address, err := node.Remoting().RemoteLookup(ctx, remoteHost, remotePort, actor.Name())
+	to, err := node.Remoting().RemoteLookup(ctx, remoteHost, remotePort, actor.Name())
 	if err != nil {
 		return err
 	}
 	// no address found
-	if address == nil || proto.Equal(address, new(goaktpb.Address)) {
+	if to.Equals(address.NoSender()) {
 		return actors.ErrActorNotFound(actor.Name())
 	}
-	return node.remoting.RemoteTell(ctx, address, message)
+
+	from := address.NoSender()
+	return node.remoting.RemoteTell(ctx, from, to, message)
 }
 
 // Ask sends a message to a given actor provided the actor name and expects a response.
@@ -184,15 +187,16 @@ func (x *Client) Ask(ctx context.Context, actor *Actor, message proto.Message, t
 	x.locker.Unlock()
 	remoteHost, remotePort := node.HostAndPort()
 	// lookup the actor address
-	address, err := node.Remoting().RemoteLookup(ctx, remoteHost, remotePort, actor.Name())
+	to, err := node.Remoting().RemoteLookup(ctx, remoteHost, remotePort, actor.Name())
 	if err != nil {
 		return nil, err
 	}
 	// no address found
-	if address == nil || proto.Equal(address, new(goaktpb.Address)) {
+	if to.Equals(address.NoSender()) {
 		return nil, actors.ErrActorNotFound(actor.Name())
 	}
-	response, err := node.Remoting().RemoteAsk(ctx, address, message, timeout)
+	from := address.NoSender()
+	response, err := node.Remoting().RemoteAsk(ctx, from, to, message, timeout)
 	if err != nil {
 		return nil, err
 	}

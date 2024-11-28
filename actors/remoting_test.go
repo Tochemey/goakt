@@ -82,9 +82,10 @@ func TestRemoteTell(t *testing.T) {
 		require.NoError(t, err)
 		// create a message to send to the test actor
 		message := new(testpb.TestSend)
+		from := address.NoSender()
 		// send the message to the actor
 		for i := 0; i < 10; i++ {
-			err = remoting.RemoteTell(ctx, addr, message)
+			err = remoting.RemoteTell(ctx, from, addr, message)
 			// perform some assertions
 			require.NoError(t, err)
 		}
@@ -133,7 +134,8 @@ func TestRemoteTell(t *testing.T) {
 		// get the address of the actor
 		addr, err := remoting.RemoteLookup(ctx, host, remotingPort, actorName)
 		require.NoError(t, err)
-		err = remoting.RemoteTell(ctx, addr, nil)
+		from := address.NoSender()
+		err = remoting.RemoteTell(ctx, from, addr, nil)
 		// perform some assertions
 		require.Error(t, err)
 
@@ -189,7 +191,8 @@ func TestRemoteTell(t *testing.T) {
 		// create a message to send to the test actor
 		message := new(testpb.TestSend)
 		// send the message to the actor
-		err = remoting.RemoteTell(ctx, address.From(addr), message)
+		from := address.NoSender()
+		err = remoting.RemoteTell(ctx, from, address.From(addr), message)
 		// perform some assertions
 		require.Error(t, err)
 
@@ -244,7 +247,8 @@ func TestRemoteTell(t *testing.T) {
 		// create a message to send to the test actor
 		message := new(testpb.TestSend)
 		// send the message to the actor
-		err = remoting.RemoteTell(ctx, addr, message)
+		from := address.NoSender()
+		err = remoting.RemoteTell(ctx, from, addr, message)
 		// perform some assertions
 		require.Error(t, err)
 		require.EqualError(t, err, "failed_precondition: remoting is not enabled")
@@ -301,7 +305,8 @@ func TestRemoteTell(t *testing.T) {
 			messages[i] = new(testpb.TestSend)
 		}
 
-		err = remoting.RemoteBatchTell(ctx, addr, messages)
+		from := address.NoSender()
+		err = remoting.RemoteBatchTell(ctx, from, addr, messages)
 		require.NoError(t, err)
 
 		// wait for processing to complete on the actor side
@@ -357,10 +362,11 @@ func TestRemoteTell(t *testing.T) {
 		}
 
 		remoting := NewRemoting()
+		from := address.NoSender()
 		// create a message to send to the test actor
 		message := new(testpb.TestSend)
 		// send the message to the actor
-		err = remoting.RemoteBatchTell(ctx, address.From(addr), []proto.Message{message})
+		err = remoting.RemoteBatchTell(ctx, from, address.From(addr), []proto.Message{message})
 		// perform some assertions
 		require.Error(t, err)
 
@@ -407,7 +413,7 @@ func TestRemoteTell(t *testing.T) {
 		remoting := NewRemoting()
 		addr, err := remoting.RemoteLookup(ctx, host, remotingPort, actorName)
 		require.NoError(t, err)
-
+		from := address.NoSender()
 		// let us disable remoting
 		actorsSystem := sys.(*actorSystem)
 		actorsSystem.remotingEnabled.Store(false)
@@ -415,7 +421,7 @@ func TestRemoteTell(t *testing.T) {
 		// create a message to send to the test actor
 		message := new(testpb.TestSend)
 		// send the message to the actor
-		err = remoting.RemoteBatchTell(ctx, addr, []proto.Message{message})
+		err = remoting.RemoteBatchTell(ctx, from, addr, []proto.Message{message})
 		// perform some assertions
 		require.Error(t, err)
 		require.EqualError(t, err, "failed_precondition: remoting is not enabled")
@@ -469,10 +475,11 @@ func TestRemoteTell(t *testing.T) {
 		require.NoError(t, actorRef.Shutdown(ctx))
 		lib.Pause(time.Second)
 
+		from := address.NoSender()
 		// create a message to send to the test actor
 		message := new(testpb.TestSend)
 		// send the message to the actor
-		err = remoting.RemoteTell(ctx, addr, message)
+		err = remoting.RemoteTell(ctx, from, addr, message)
 		// perform some assertions
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "not found")
@@ -526,10 +533,11 @@ func TestRemoteTell(t *testing.T) {
 		require.NoError(t, actorRef.Shutdown(ctx))
 		lib.Pause(time.Second)
 
+		from := address.NoSender()
 		// create a message to send to the test actor
 		message := new(testpb.TestSend)
 		// send the message to the actor
-		err = remoting.RemoteBatchTell(ctx, addr, []proto.Message{message})
+		err = remoting.RemoteBatchTell(ctx, from, addr, []proto.Message{message})
 		// perform some assertions
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "not found")
@@ -578,6 +586,7 @@ func TestRemoteAsk(t *testing.T) {
 			assert.NotNil(t, actorRef)
 
 			remoting := NewRemoting()
+			from := address.NoSender()
 			// get the address of the actor
 			addr, err := remoting.RemoteLookup(ctx, host, remotingPort, actorName)
 			require.NoError(t, err)
@@ -585,7 +594,7 @@ func TestRemoteAsk(t *testing.T) {
 			// create a message to send to the test actor
 			message := new(testpb.TestReply)
 			// send the message to the actor
-			reply, err := remoting.RemoteAsk(ctx, addr, message, time.Minute)
+			reply, err := remoting.RemoteAsk(ctx, from, addr, message, time.Minute)
 			// perform some assertions
 			require.NoError(t, err)
 			require.NotNil(t, reply)
@@ -645,8 +654,9 @@ func TestRemoteAsk(t *testing.T) {
 			addr, err := remoting.RemoteLookup(ctx, host, remotingPort, actorName)
 			require.NoError(t, err)
 
+			from := address.NoSender()
 			// send the message to the actor
-			reply, err := remoting.RemoteAsk(ctx, addr, nil, time.Minute)
+			reply, err := remoting.RemoteAsk(ctx, from, addr, nil, time.Minute)
 			// perform some assertions
 			require.Error(t, err)
 			require.Nil(t, reply)
@@ -701,10 +711,11 @@ func TestRemoteAsk(t *testing.T) {
 			}
 
 			remoting := NewRemoting()
+			from := address.NoSender()
 			// create a message to send to the test actor
 			message := new(testpb.TestReply)
 			// send the message to the actor
-			reply, err := remoting.RemoteAsk(ctx, address.From(addr), message, time.Minute)
+			reply, err := remoting.RemoteAsk(ctx, from, address.From(addr), message, time.Minute)
 			// perform some assertions
 			require.Error(t, err)
 			require.Nil(t, reply)
@@ -762,10 +773,11 @@ func TestRemoteAsk(t *testing.T) {
 			actorsSystem := sys.(*actorSystem)
 			actorsSystem.remotingEnabled.Store(false)
 
+			from := address.NoSender()
 			// create a message to send to the test actor
 			message := new(testpb.TestReply)
 			// send the message to the actor
-			reply, err := remoting.RemoteAsk(ctx, addr, message, time.Minute)
+			reply, err := remoting.RemoteAsk(ctx, from, addr, message, time.Minute)
 			// perform some assertions
 			require.Error(t, err)
 			require.EqualError(t, err, "failed_precondition: remoting is not enabled")
@@ -817,10 +829,11 @@ func TestRemoteAsk(t *testing.T) {
 			addr, err := remoting.RemoteLookup(ctx, host, remotingPort, actorName)
 			require.NoError(t, err)
 
+			from := address.NoSender()
 			// create a message to send to the test actor
 			message := new(testpb.TestReply)
 			// send the message to the actor
-			replies, err := remoting.RemoteBatchAsk(ctx, addr, []proto.Message{message}, time.Minute)
+			replies, err := remoting.RemoteBatchAsk(ctx, from, addr, []proto.Message{message}, time.Minute)
 			// perform some assertions
 			require.NoError(t, err)
 			require.Len(t, replies, 1)
@@ -885,10 +898,11 @@ func TestRemoteAsk(t *testing.T) {
 			}
 
 			remoting := NewRemoting()
+			from := address.NoSender()
 			// create a message to send to the test actor
 			message := new(testpb.TestReply)
 			// send the message to the actor
-			reply, err := remoting.RemoteBatchAsk(ctx, address.From(addr), []proto.Message{message}, time.Minute)
+			reply, err := remoting.RemoteBatchAsk(ctx, from, address.From(addr), []proto.Message{message}, time.Minute)
 			// perform some assertions
 			require.Error(t, err)
 			require.Nil(t, reply)
@@ -946,10 +960,11 @@ func TestRemoteAsk(t *testing.T) {
 			actorsSystem := sys.(*actorSystem)
 			actorsSystem.remotingEnabled.Store(false)
 
+			from := address.NoSender()
 			// create a message to send to the test actor
 			message := new(testpb.TestReply)
 			// send the message to the actor
-			reply, err := remoting.RemoteBatchAsk(ctx, addr, []proto.Message{message}, time.Minute)
+			reply, err := remoting.RemoteBatchAsk(ctx, from, addr, []proto.Message{message}, time.Minute)
 			// perform some assertions
 			require.Error(t, err)
 			require.EqualError(t, err, "failed_precondition: remoting is not enabled")
@@ -1001,7 +1016,7 @@ func TestRemoteAsk(t *testing.T) {
 			assert.NotNil(t, actorRef)
 
 			remoting := NewRemoting()
-
+			from := address.NoSender()
 			// get the address of the actor
 			addr, err := remoting.RemoteLookup(ctx, host, remotingPort, actorName)
 			require.NoError(t, err)
@@ -1013,7 +1028,7 @@ func TestRemoteAsk(t *testing.T) {
 			// create a message to send to the test actor
 			message := new(testpb.TestReply)
 			// send the message to the actor
-			reply, err := remoting.RemoteAsk(ctx, addr, message, time.Minute)
+			reply, err := remoting.RemoteAsk(ctx, from, addr, message, time.Minute)
 			// perform some assertions
 			require.Error(t, err)
 			require.Contains(t, err.Error(), "not found")
@@ -1071,10 +1086,11 @@ func TestRemoteAsk(t *testing.T) {
 			require.NoError(t, actorRef.Shutdown(ctx))
 			lib.Pause(time.Second)
 
+			from := address.NoSender()
 			// create a message to send to the test actor
 			message := new(testpb.TestReply)
 			// send the message to the actor
-			reply, err := remoting.RemoteBatchAsk(ctx, addr, []proto.Message{message}, time.Minute)
+			reply, err := remoting.RemoteBatchAsk(ctx, from, addr, []proto.Message{message}, time.Minute)
 			// perform some assertions
 			require.Error(t, err)
 			require.Contains(t, err.Error(), "not found")
@@ -1392,8 +1408,9 @@ func TestAPIRemoteSpawn(t *testing.T) {
 			require.NoError(t, err)
 			require.NotNil(t, addr)
 
+			from := address.NoSender()
 			// send the message to exchanger actor one using remote messaging
-			reply, err := remoting.RemoteAsk(ctx, addr, new(testpb.TestReply), time.Minute)
+			reply, err := remoting.RemoteAsk(ctx, from, addr, new(testpb.TestReply), time.Minute)
 
 			require.NoError(t, err)
 			require.NotNil(t, reply)

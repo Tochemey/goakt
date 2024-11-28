@@ -117,6 +117,6 @@ func toReceiveContext(ctx context.Context, to *PID, message proto.Message, async
 	default:
 		receiveContext := contextFromPool()
 		receiveContext.build(ctx, NoSender, to, message, async)
-		return receiveContext.withRemoteSender(address.From(address.NoSender)), nil
+		return receiveContext.withRemoteSender(address.NoSender()), nil
 	}
 }

@@ -2015,28 +2015,35 @@ func TestID(t *testing.T) {
 	assert.NoError(t, err)
 }
 func TestEquals(t *testing.T) {
-	ctx := context.TODO()
-	logger := log.DiscardLogger
-	sys, err := NewActorSystem("test",
-		WithLogger(logger),
-		WithPassivationDisabled())
+	t.Run("case 1", func(t *testing.T) {
+		ctx := context.TODO()
+		logger := log.DiscardLogger
+		sys, err := NewActorSystem("test",
+			WithLogger(logger),
+			WithPassivationDisabled())
 
-	require.NoError(t, err)
-	err = sys.Start(ctx)
-	assert.NoError(t, err)
+		require.NoError(t, err)
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
 
-	pid1, err := sys.Spawn(ctx, "test", newActor())
-	require.NoError(t, err)
-	assert.NotNil(t, pid1)
+		pid1, err := sys.Spawn(ctx, "test", newActor())
+		require.NoError(t, err)
+		assert.NotNil(t, pid1)
 
-	pid2, err := sys.Spawn(ctx, "exchange", &exchanger{})
-	require.NoError(t, err)
-	assert.NotNil(t, pid2)
+		pid2, err := sys.Spawn(ctx, "exchange", &exchanger{})
+		require.NoError(t, err)
+		assert.NotNil(t, pid2)
 
-	assert.False(t, pid1.Equals(pid2))
+		assert.False(t, pid1.Equals(NoSender))
+		assert.False(t, pid2.Equals(NoSender))
+		assert.False(t, pid1.Equals(pid2))
 
-	err = sys.Stop(ctx)
-	assert.NoError(t, err)
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
+	})
+	t.Run("case 2", func(t *testing.T) {
+		assert.True(t, NoSender.Equals(NoSender))
+	})
 }
 func TestRemoteSpawn(t *testing.T) {
 	t.Run("When remoting is enabled", func(t *testing.T) {

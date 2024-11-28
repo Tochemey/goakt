@@ -62,7 +62,7 @@ func NewRemoting() *Remoting {
 }
 
 // RemoteTell sends a message to an actor remotely without expecting any reply
-func (r *Remoting) RemoteTell(ctx context.Context, to *address.Address, message proto.Message) error {
+func (r *Remoting) RemoteTell(ctx context.Context, from, to *address.Address, message proto.Message) error {
 	marshaled, err := anypb.New(message)
 	if err != nil {
 		return ErrInvalidMessage(err)
@@ -71,7 +71,7 @@ func (r *Remoting) RemoteTell(ctx context.Context, to *address.Address, message 
 	remoteClient := r.Client(to.GetHost(), int(to.GetPort()))
 	request := &internalpb.RemoteTellRequest{
 		RemoteMessage: &internalpb.RemoteMessage{
-			Sender:   address.NoSender,
+			Sender:   from.Address,
 			Receiver: to.Address,
 			Message:  marshaled,
 		},
@@ -97,7 +97,7 @@ func (r *Remoting) RemoteTell(ctx context.Context, to *address.Address, message 
 }
 
 // RemoteAsk sends a synchronous message to another actor remotely and expect a response.
-func (r *Remoting) RemoteAsk(ctx context.Context, to *address.Address, message proto.Message, timeout time.Duration) (response *anypb.Any, err error) {
+func (r *Remoting) RemoteAsk(ctx context.Context, from, to *address.Address, message proto.Message, timeout time.Duration) (response *anypb.Any, err error) {
 	marshaled, err := anypb.New(message)
 	if err != nil {
 		return nil, ErrInvalidMessage(err)
@@ -106,7 +106,7 @@ func (r *Remoting) RemoteAsk(ctx context.Context, to *address.Address, message p
 	remoteClient := r.Client(to.GetHost(), int(to.GetPort()))
 	request := &internalpb.RemoteAskRequest{
 		RemoteMessage: &internalpb.RemoteMessage{
-			Sender:   address.NoSender,
+			Sender:   from.Address,
 			Receiver: to.Address,
 			Message:  marshaled,
 		},
@@ -173,7 +173,7 @@ func (r *Remoting) RemoteLookup(ctx context.Context, host string, port int, name
 }
 
 // RemoteBatchTell sends bulk asynchronous messages to an actor
-func (r *Remoting) RemoteBatchTell(ctx context.Context, to *address.Address, messages []proto.Message) error {
+func (r *Remoting) RemoteBatchTell(ctx context.Context, from, to *address.Address, messages []proto.Message) error {
 	var requests []*internalpb.RemoteTellRequest
 	for _, message := range messages {
 		packed, err := anypb.New(message)
@@ -184,7 +184,7 @@ func (r *Remoting) RemoteBatchTell(ctx context.Context, to *address.Address, mes
 		requests = append(
 			requests, &internalpb.RemoteTellRequest{
 				RemoteMessage: &internalpb.RemoteMessage{
-					Sender:   address.NoSender,
+					Sender:   from.Address,
 					Receiver: to.Address,
 					Message:  packed,
 				},
@@ -217,7 +217,7 @@ func (r *Remoting) RemoteBatchTell(ctx context.Context, to *address.Address, mes
 }
 
 // RemoteBatchAsk sends bulk messages to an actor with responses expected
-func (r *Remoting) RemoteBatchAsk(ctx context.Context, to *address.Address, messages []proto.Message, timeout time.Duration) (responses []*anypb.Any, err error) {
+func (r *Remoting) RemoteBatchAsk(ctx context.Context, from, to *address.Address, messages []proto.Message, timeout time.Duration) (responses []*anypb.Any, err error) {
 	var requests []*internalpb.RemoteAskRequest
 	for _, message := range messages {
 		packed, err := anypb.New(message)
@@ -228,7 +228,7 @@ func (r *Remoting) RemoteBatchAsk(ctx context.Context, to *address.Address, mess
 		requests = append(
 			requests, &internalpb.RemoteAskRequest{
 				RemoteMessage: &internalpb.RemoteMessage{
-					Sender:   address.NoSender,
+					Sender:   from.Address,
 					Receiver: to.Address,
 					Message:  packed,
 				},
