@@ -330,6 +330,7 @@ func (rctx *ReceiveContext) Stop(child *PID) {
 // As a result, the actor receiving the forwarded messages knows who the actual sender of the message is.
 // The message that is forwarded is the current message received by the received context.
 // This operation does nothing when the receiving actor has not started
+// This method can only be used on a single node actor system because the actor reference PID is needed
 func (rctx *ReceiveContext) Forward(to *PID) {
 	message := rctx.Message()
 	sender := rctx.Sender()
@@ -339,6 +340,35 @@ func (rctx *ReceiveContext) Forward(to *PID) {
 		receiveContext := contextFromPool()
 		receiveContext.build(ctx, sender, to, message, true)
 		to.doReceive(receiveContext)
+	}
+}
+
+// ForwardTo method works similarly to the Tell() method except that the sender of a forwarded message is kept as the original sender.
+// As a result, the actor receiving the forwarded messages knows who the actual sender of the message is.
+// The message that is forwarded is the current message received by the received context.
+// This operation does nothing when the receiving actor has not started
+// This method is only when the actor system is in the cluster mode because it is location transparent.
+func (rctx *ReceiveContext) ForwardTo(actorName string) {
+	message := rctx.Message()
+	sender := rctx.Sender()
+	ctx := context.WithoutCancel(rctx.ctx)
+	if rctx.ActorSystem().InCluster() {
+		if err := sender.SendAsync(ctx, actorName, message); err != nil {
+			rctx.Err(err)
+		}
+	}
+}
+
+// RemoteForward method works similarly to the RemoteTell() method except that the sender of a forwarded message is kept as the original sender.
+// As a result, the actor receiving the forwarded messages knows who the actual sender of the message is.
+// The message that is forwarded is the current message received by the received context.
+// This method can only be used when remoting is enabled on the running actor system
+func (rctx *ReceiveContext) RemoteForward(to *address.Address) {
+	sender := rctx.Sender()
+	message := rctx.Message()
+	ctx := context.WithoutCancel(rctx.ctx)
+	if err := sender.RemoteTell(ctx, to, message); err != nil {
+		rctx.Err(err)
 	}
 }
 

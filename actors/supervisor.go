@@ -41,7 +41,7 @@ type supervisor struct {
 // enforce compilation error
 var _ Actor = (*supervisor)(nil)
 
-// newSupervisor creates an instance of a testSupervisor
+// newSupervisor creates an instance of a supervisorQA
 func newSupervisor() *supervisor {
 	return &supervisor{}
 }

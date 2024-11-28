@@ -62,7 +62,7 @@ func TestScheduler(t *testing.T) {
 
 		// create a test actor
 		actorName := "test"
-		actor := newTestActor()
+		actor := newActor()
 		actorRef, err := newActorSystem.Spawn(ctx, actorName, actor)
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
@@ -108,7 +108,7 @@ func TestScheduler(t *testing.T) {
 
 		// create a test actor
 		actorName := "test"
-		actor := newTestActor()
+		actor := newActor()
 		actorRef, err := newActorSystem.Spawn(ctx, actorName, actor)
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
@@ -144,7 +144,7 @@ func TestScheduler(t *testing.T) {
 		pid, err := newPID(
 			ctx,
 			actorPath,
-			newTestActor(),
+			newActor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
 		)
@@ -188,7 +188,7 @@ func TestScheduler(t *testing.T) {
 
 		// create a test actor
 		actorName := "test"
-		actor := newTestActor()
+		actor := newActor()
 		actorRef, err := newActorSystem.Spawn(ctx, actorName, actor)
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
@@ -248,7 +248,7 @@ func TestScheduler(t *testing.T) {
 
 		// create a test actor
 		actorName := "test"
-		actor := newTestActor()
+		actor := newActor()
 		actorRef, err := newActorSystem.Spawn(ctx, actorName, actor)
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
@@ -290,7 +290,7 @@ func TestScheduler(t *testing.T) {
 
 		// create a test actor
 		actorName := "test"
-		actor := newTestActor()
+		actor := newActor()
 		actorRef, err := newActorSystem.Spawn(ctx, actorName, actor)
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
@@ -334,7 +334,7 @@ func TestScheduler(t *testing.T) {
 
 		// create a test actor
 		actorName := "test"
-		actor := newTestActor()
+		actor := newActor()
 		actorRef, err := newActorSystem.Spawn(ctx, actorName, actor)
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
@@ -378,7 +378,7 @@ func TestScheduler(t *testing.T) {
 
 		// create a test actor
 		actorName := "test"
-		actor := newTestActor()
+		actor := newActor()
 		actorRef, err := newActorSystem.Spawn(ctx, actorName, actor)
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
@@ -425,7 +425,7 @@ func TestScheduler(t *testing.T) {
 
 		// create a test actor
 		actorName := "test"
-		actor := newTestActor()
+		actor := newActor()
 		actorRef, err := newActorSystem.Spawn(ctx, actorName, actor)
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
@@ -478,7 +478,7 @@ func TestScheduler(t *testing.T) {
 
 		// create a test actor
 		actorName := "test"
-		actor := newTestActor()
+		actor := newActor()
 		actorRef, err := newActorSystem.Spawn(ctx, actorName, actor)
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
@@ -530,7 +530,7 @@ func TestScheduler(t *testing.T) {
 
 		// create a test actor
 		actorName := "test"
-		actor := newTestActor()
+		actor := newActor()
 		actorRef, err := newActorSystem.Spawn(ctx, actorName, actor)
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
@@ -574,7 +574,7 @@ func TestScheduler(t *testing.T) {
 
 		// create a test actor
 		actorName := "test"
-		actor := newTestActor()
+		actor := newActor()
 		actorRef, err := newActorSystem.Spawn(ctx, actorName, actor)
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
@@ -624,7 +624,7 @@ func TestScheduler(t *testing.T) {
 
 		// create a test actor
 		actorName := "test"
-		actor := newTestActor()
+		actor := newActor()
 		actorRef, err := newActorSystem.Spawn(ctx, actorName, actor)
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
@@ -677,7 +677,7 @@ func TestScheduler(t *testing.T) {
 
 		// create a test actor
 		actorName := "test"
-		actor := newTestActor()
+		actor := newActor()
 		actorRef, err := newActorSystem.Spawn(ctx, actorName, actor)
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
@@ -722,7 +722,7 @@ func TestScheduler(t *testing.T) {
 
 		// create a test actor
 		actorName := "test"
-		actor := newTestActor()
+		actor := newActor()
 		actorRef, err := newActorSystem.Spawn(ctx, actorName, actor)
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
@@ -786,7 +786,7 @@ func TestScheduler(t *testing.T) {
 
 		// create a test actor
 		actorName := "test"
-		actor := newTestActor()
+		actor := newActor()
 		actorRef, err := newActorSystem.Spawn(ctx, actorName, actor)
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
@@ -835,7 +835,7 @@ func TestScheduler(t *testing.T) {
 
 		// create a test actor
 		actorName := "test"
-		actor := newTestActor()
+		actor := newActor()
 		actorRef, err := newActorSystem.Spawn(ctx, actorName, actor)
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)

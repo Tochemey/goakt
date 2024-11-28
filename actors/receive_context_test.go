@@ -54,7 +54,7 @@ func TestReceiveContext(t *testing.T) {
 		}
 
 		// create the actor path
-		actor := &userActor{}
+		actor := &behaviorQA{}
 		ports := dynaport.Get(1)
 		// create the actor path
 		actorPath := address.New("User", "sys", "host", ports[0])
@@ -1097,7 +1097,7 @@ func TestReceiveContext(t *testing.T) {
 		ports := dynaport.Get(1)
 
 		// create actor1
-		actor1 := &testPostStop{}
+		actor1 := &postStopQA{}
 		actorPath1 := address.New("Exchange1", "sys", "host", ports[0])
 		pid1, err := newPID(ctx, actorPath1, actor1, opts...)
 		require.NoError(t, err)
@@ -1139,7 +1139,7 @@ func TestReceiveContext(t *testing.T) {
 		require.NotNil(t, pidC)
 
 		// create actorB
-		actorB := &forwarder{
+		actorB := &forwardQA{
 			actorRef: pidC,
 		}
 		actorPath2 := address.New("actorB", "sys", "host", ports[0])
@@ -1601,7 +1601,7 @@ func TestReceiveContext(t *testing.T) {
 
 		// create test actor
 		tester := "test"
-		testActor := newTestActor()
+		testActor := newActor()
 		testerRef, err := sys.Spawn(ctx, tester, testActor)
 		require.NoError(t, err)
 		require.NotNil(t, testerRef)
@@ -1658,7 +1658,7 @@ func TestReceiveContext(t *testing.T) {
 
 		// create test actor
 		tester := "test"
-		testActor := newTestActor()
+		testActor := newActor()
 		testerRef, err := sys.Spawn(ctx, tester, testActor)
 		require.NoError(t, err)
 		require.NotNil(t, testerRef)
@@ -1712,7 +1712,7 @@ func TestReceiveContext(t *testing.T) {
 
 		// create test actor
 		tester := "test"
-		testActor := newTestActor()
+		testActor := newActor()
 		testerRef, err := sys.Spawn(ctx, tester, testActor)
 		require.NoError(t, err)
 		require.NotNil(t, testerRef)
@@ -1837,7 +1837,7 @@ func TestReceiveContext(t *testing.T) {
 
 		// create test actor
 		tester := "test"
-		testActor := newTestActor()
+		testActor := newActor()
 		testerRef, err := sys.Spawn(ctx, tester, testActor)
 		require.NoError(t, err)
 		require.NotNil(t, testerRef)
@@ -2343,8 +2343,8 @@ func TestReceiveContext(t *testing.T) {
 
 		ports := dynaport.Get(1)
 		// create the actor path
-		actor := &stasher{}
-		actorPath := address.New("stasher", "sys", "host", ports[0])
+		actor := &stasQA{}
+		actorPath := address.New("stasQA", "sys", "host", ports[0])
 		pid, err := newPID(ctx, actorPath, actor, opts...)
 		require.NoError(t, err)
 		require.NotNil(t, pid)
@@ -2377,8 +2377,8 @@ func TestReceiveContext(t *testing.T) {
 
 		ports := dynaport.Get(1)
 		// create the actor path
-		actor := &stasher{}
-		actorPath := address.New("stasher", "sys", "host", ports[0])
+		actor := &stasQA{}
+		actorPath := address.New("stasQA", "sys", "host", ports[0])
 		pid, err := newPID(ctx, actorPath, actor, opts...)
 		require.NoError(t, err)
 		require.NotNil(t, pid)
@@ -2411,8 +2411,8 @@ func TestReceiveContext(t *testing.T) {
 
 		ports := dynaport.Get(1)
 		// create the actor path
-		actor := &stasher{}
-		actorPath := address.New("stasher", "sys", "host", ports[0])
+		actor := &stasQA{}
+		actorPath := address.New("stasQA", "sys", "host", ports[0])
 		pid, err := newPID(ctx, actorPath, actor, opts...)
 		require.NoError(t, err)
 		require.NotNil(t, pid)
@@ -2434,5 +2434,233 @@ func TestReceiveContext(t *testing.T) {
 		assert.EqualError(t, err, ErrStashBufferNotSet.Error())
 		err = pid.Shutdown(ctx)
 		assert.NoError(t, err)
+	})
+	t.Run("With successful RemoteForward", func(t *testing.T) {
+		ctx := context.TODO()
+		ports := dynaport.Get(2)
+		host := "127.0.0.1"
+
+		actorSystem, err := NewActorSystem("testSys",
+			WithRemoting(host, int32(ports[0])),
+			WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+
+		actorSystem2, err := NewActorSystem("testSys", WithRemoting(host, int32(ports[1])),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem2)
+
+		require.NoError(t, actorSystem2.Start(ctx))
+
+		// create actorA
+		pidA, err := actorSystem2.Spawn(ctx, "ExchangeA", &exchanger{})
+		require.NoError(t, err)
+		require.NotNil(t, pidA)
+
+		pidC, err := actorSystem2.Spawn(ctx, "ExchangeC", &remoteQA{})
+		require.NoError(t, err)
+		require.NotNil(t, pidC)
+
+		// create actorB
+		actorB := &forwardQA{
+			remoteRef: pidC,
+		}
+
+		pidB, err := actorSystem2.Spawn(ctx, "ExchangeB", actorB)
+		require.NoError(t, err)
+		require.NotNil(t, pidB)
+
+		// actor A is killing actor C using a forward pattern
+		// actorA tell actorB forward actorC
+		err = pidA.Tell(ctx, pidB, new(testpb.RemoteForward))
+		require.NoError(t, err)
+
+		// wait for the async call to properly complete
+		lib.Pause(time.Second)
+		require.True(t, pidA.IsRunning())
+		require.True(t, pidB.IsRunning())
+		require.False(t, pidC.IsRunning())
+
+		// let us shutdown the rest
+		require.NoError(t, pidA.Shutdown(ctx))
+		require.NoError(t, pidB.Shutdown(ctx))
+	})
+	t.Run("With failed RemoteForward", func(t *testing.T) {
+		ctx := context.TODO()
+		ports := dynaport.Get(2)
+		host := "127.0.0.1"
+
+		actorSystem, err := NewActorSystem("testSys",
+			WithRemoting(host, int32(ports[0])),
+			WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+
+		actorSystem2, err := NewActorSystem("testSys", WithRemoting(host, int32(ports[1])),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem2)
+
+		require.NoError(t, actorSystem2.Start(ctx))
+
+		// create actorA
+		pidA, err := actorSystem2.Spawn(ctx, "ExchangeA", &exchanger{})
+		require.NoError(t, err)
+		require.NotNil(t, pidA)
+
+		pidC, err := actorSystem2.Spawn(ctx, "ExchangeC", &remoteQA{})
+		require.NoError(t, err)
+		require.NotNil(t, pidC)
+
+		// create actorB
+		actorB := &forwardQA{
+			remoteRef: pidC,
+		}
+
+		require.NoError(t, pidC.Shutdown(ctx))
+
+		pidB, err := actorSystem2.Spawn(ctx, "ExchangeB", actorB)
+		require.NoError(t, err)
+		require.NotNil(t, pidB)
+
+		// create an instance of receive context
+		context := &ReceiveContext{
+			ctx:     ctx,
+			message: new(testpb.RemoteForward),
+			sender:  pidA,
+			self:    pidB,
+		}
+
+		// actor A is killing actor C using a forward pattern
+		// actorA tell actorB forward actorC
+		context.RemoteForward(pidC.Address())
+		require.Error(t, context.getError())
+
+		// let us shutdown the rest
+		require.NoError(t, pidA.Shutdown(ctx))
+		require.NoError(t, pidB.Shutdown(ctx))
+	})
+	t.Run("With successful ForwardTo", func(t *testing.T) {
+		// create a context
+		ctx := context.TODO()
+		// start the NATS server
+		srv := startNatsServer(t)
+
+		// create and start system cluster
+		actorSystem, provider1 := startClusterSystem(t, srv.Addr().String())
+		require.NotNil(t, actorSystem)
+		require.NotNil(t, provider1)
+
+		// create and start system cluster
+		actorSystem2, provider2 := startClusterSystem(t, srv.Addr().String())
+		require.NotNil(t, actorSystem2)
+		require.NotNil(t, provider2)
+
+		// create actorA
+		pidA, err := actorSystem2.Spawn(ctx, "ExchangeA", &exchanger{})
+		require.NoError(t, err)
+		require.NotNil(t, pidA)
+
+		// create actorC
+		pidC, err := actorSystem2.Spawn(ctx, "ExchangeC", &remoteQA{})
+		require.NoError(t, err)
+		require.NotNil(t, pidC)
+
+		// create actorB
+		actorB := &forwardQA{
+			remoteRef: pidC,
+		}
+
+		pidB, err := actorSystem2.Spawn(ctx, "ExchangeB", actorB)
+		require.NoError(t, err)
+		require.NotNil(t, pidB)
+
+		// create an instance of receive context
+		context := &ReceiveContext{
+			ctx:     ctx,
+			message: new(testpb.RemoteForward),
+			sender:  pidA,
+			self:    pidB,
+		}
+
+		// actor A is killing actor C using a forward pattern
+		// actorA tell actorB forward actorC
+		context.ForwardTo("ExchangeC")
+		require.NoError(t, context.getError())
+
+		// wait for the async call to properly complete
+		lib.Pause(time.Second)
+
+		require.True(t, pidA.IsRunning())
+		require.True(t, pidB.IsRunning())
+		require.False(t, pidC.IsRunning())
+
+		// let us shutdown the rest
+		require.NoError(t, actorSystem.Stop(ctx))
+		require.NoError(t, actorSystem2.Stop(ctx))
+	})
+	t.Run("With failed ForwardTo", func(t *testing.T) {
+		// create a context
+		ctx := context.TODO()
+		// start the NATS server
+		srv := startNatsServer(t)
+
+		// create and start system cluster
+		actorSystem, provider1 := startClusterSystem(t, srv.Addr().String())
+		require.NotNil(t, actorSystem)
+		require.NotNil(t, provider1)
+
+		// create and start system cluster
+		actorSystem2, provider2 := startClusterSystem(t, srv.Addr().String())
+		require.NotNil(t, actorSystem2)
+		require.NotNil(t, provider2)
+
+		// create actorA
+		pidA, err := actorSystem2.Spawn(ctx, "ExchangeA", &exchanger{})
+		require.NoError(t, err)
+		require.NotNil(t, pidA)
+
+		// create actorC
+		pidC, err := actorSystem2.Spawn(ctx, "ExchangeC", &remoteQA{})
+		require.NoError(t, err)
+		require.NotNil(t, pidC)
+
+		// create actorB
+		actorB := &forwardQA{
+			remoteRef: pidC,
+		}
+
+		require.NoError(t, pidC.Shutdown(ctx))
+
+		pidB, err := actorSystem2.Spawn(ctx, "ExchangeB", actorB)
+		require.NoError(t, err)
+		require.NotNil(t, pidB)
+
+		// create an instance of receive context
+		context := &ReceiveContext{
+			ctx:     ctx,
+			message: new(testpb.RemoteForward),
+			sender:  pidA,
+			self:    pidB,
+		}
+
+		// actor A is killing actor C using a forward pattern
+		// actorA tell actorB forward actorC
+		context.ForwardTo("ExchangeC")
+		require.Error(t, context.getError())
+
+		// wait for the async call to properly complete
+		lib.Pause(time.Second)
+
+		// let us shutdown the rest
+		require.NoError(t, actorSystem.Stop(ctx))
+		require.NoError(t, actorSystem2.Stop(ctx))
 	})
 }

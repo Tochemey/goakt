@@ -63,7 +63,7 @@ func TestReceive(t *testing.T) {
 		pid, err := newPID(
 			ctx,
 			actorPath,
-			newTestActor(),
+			newActor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger))
 
@@ -104,7 +104,7 @@ func TestPassivation(t *testing.T) {
 		// create the actor path
 		actorPath := address.New("Test", "sys", "host", ports[0])
 
-		pid, err := newPID(ctx, actorPath, newTestActor(), opts...)
+		pid, err := newPID(ctx, actorPath, newActor(), opts...)
 		require.NoError(t, err)
 		assert.NotNil(t, pid)
 
@@ -134,7 +134,7 @@ func TestPassivation(t *testing.T) {
 		// create the actor path
 		actorPath := address.New("Test", "sys", "host", ports[0])
 
-		pid, err := newPID(ctx, actorPath, &testPostStop{}, opts...)
+		pid, err := newPID(ctx, actorPath, &postStopQA{}, opts...)
 		require.NoError(t, err)
 		assert.NotNil(t, pid)
 
@@ -167,7 +167,7 @@ func TestReply(t *testing.T) {
 		// create the actor path
 		actorPath := address.New("Test", "sys", "host", ports[0])
 
-		pid, err := newPID(ctx, actorPath, newTestActor(), opts...)
+		pid, err := newPID(ctx, actorPath, newActor(), opts...)
 
 		require.NoError(t, err)
 		assert.NotNil(t, pid)
@@ -193,7 +193,7 @@ func TestReply(t *testing.T) {
 		ports := dynaport.Get(1)
 		// create the actor path
 		actorPath := address.New("Test", "sys", "host", ports[0])
-		pid, err := newPID(ctx, actorPath, newTestActor(), opts...)
+		pid, err := newPID(ctx, actorPath, newActor(), opts...)
 
 		require.NoError(t, err)
 		assert.NotNil(t, pid)
@@ -218,7 +218,7 @@ func TestReply(t *testing.T) {
 		ports := dynaport.Get(1)
 		// create the actor path
 		actorPath := address.New("Test", "sys", "host", ports[0])
-		pid, err := newPID(ctx, actorPath, newTestActor(), opts...)
+		pid, err := newPID(ctx, actorPath, newActor(), opts...)
 
 		require.NoError(t, err)
 		assert.NotNil(t, pid)
@@ -238,7 +238,7 @@ func TestRestart(t *testing.T) {
 		ctx := context.TODO()
 
 		// create a Ping actor
-		actor := newTestActor()
+		actor := newActor()
 		assert.NotNil(t, actor)
 
 		// create the actor path
@@ -284,7 +284,7 @@ func TestRestart(t *testing.T) {
 		ctx := context.TODO()
 
 		// create a Ping actor
-		actor := newTestActor()
+		actor := newActor()
 		assert.NotNil(t, actor)
 		// create the actor path
 		ports := dynaport.Get(1)
@@ -325,7 +325,7 @@ func TestRestart(t *testing.T) {
 		ctx := context.TODO()
 
 		// create a Ping actor
-		actor := newTestRestart()
+		actor := newRestart()
 		assert.NotNil(t, actor)
 		// create the actor path
 		ports := dynaport.Get(1)
@@ -365,7 +365,7 @@ func TestRestart(t *testing.T) {
 		ctx := context.TODO()
 
 		// create a Ping actor
-		actor := &testPostStop{}
+		actor := &postStopQA{}
 		assert.NotNil(t, actor)
 		// create the actor path
 		ports := dynaport.Get(1)
@@ -493,7 +493,7 @@ func TestSupervisorStrategy(t *testing.T) {
 		assert.NotNil(t, parent)
 
 		// create the child actor
-		child, err := parent.SpawnChild(ctx, "SpawnChild", &testPostStop{})
+		child, err := parent.SpawnChild(ctx, "SpawnChild", &postStopQA{})
 		assert.NoError(t, err)
 		assert.NotNil(t, child)
 
@@ -536,7 +536,7 @@ func TestSupervisorStrategy(t *testing.T) {
 		assert.NotNil(t, parent)
 
 		// create the child actor
-		child, err := parent.SpawnChild(ctx, "SpawnChild", &testPostStop{})
+		child, err := parent.SpawnChild(ctx, "SpawnChild", &postStopQA{})
 		assert.NoError(t, err)
 		assert.NotNil(t, child)
 
@@ -910,7 +910,7 @@ func TestMessaging(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
 
-		actor2 := newTestActor()
+		actor2 := newActor()
 		actorPath2 := address.New("Exchange2", "sys", "host", ports[0])
 		pid2, err := newPID(ctx, actorPath2, actor2, opts...)
 		require.NoError(t, err)
@@ -1263,7 +1263,7 @@ func TestSpawnChild(t *testing.T) {
 		assert.NotNil(t, parent)
 
 		// create the child actor
-		child, err := parent.SpawnChild(ctx, "SpawnChild", &testPreStart{})
+		child, err := parent.SpawnChild(ctx, "SpawnChild", &preStartQA{})
 		assert.Error(t, err)
 		assert.Nil(t, child)
 
@@ -1336,7 +1336,7 @@ func TestPoisonPill(t *testing.T) {
 	pid, err := newPID(
 		ctx,
 		actorPath,
-		newTestActor(),
+		newActor(),
 		withInitMaxRetries(1),
 		withCustomLogger(log.DiscardLogger))
 
@@ -1495,7 +1495,7 @@ func TestFailedPreStart(t *testing.T) {
 
 	// create an exchanger 1
 	actorName1 := "Exchange1"
-	pid, err := sys.Spawn(ctx, actorName1, &testPreStart{})
+	pid, err := sys.Spawn(ctx, actorName1, &preStartQA{})
 	require.Error(t, err)
 	require.EqualError(t, err, "failed to initialize: failed")
 	require.Nil(t, pid)
@@ -1515,7 +1515,7 @@ func TestFailedPostStop(t *testing.T) {
 	pid, err := newPID(
 		ctx,
 		actorPath,
-		&testPostStop{},
+		&postStopQA{},
 		withInitMaxRetries(1),
 		withCustomLogger(log.DiscardLogger))
 
@@ -1542,7 +1542,7 @@ func TestShutdown(t *testing.T) {
 		assert.NotNil(t, parent)
 
 		// create the child actor
-		child, err := parent.SpawnChild(ctx, "SpawnChild", &testPostStop{})
+		child, err := parent.SpawnChild(ctx, "SpawnChild", &postStopQA{})
 		assert.NoError(t, err)
 		assert.NotNil(t, child)
 
@@ -1562,7 +1562,7 @@ func TestBatchTell(t *testing.T) {
 		}
 
 		// create the actor path
-		actor := newTestActor()
+		actor := newActor()
 		ports := dynaport.Get(1)
 		actorPath := address.New("Test", "sys", "host", ports[0])
 		pid, err := newPID(ctx, actorPath, actor, opts...)
@@ -1588,7 +1588,7 @@ func TestBatchTell(t *testing.T) {
 		}
 
 		// create the actor path
-		actor := newTestActor()
+		actor := newActor()
 		ports := dynaport.Get(1)
 		actorPath := address.New("Test", "sys", "host", ports[0])
 		pid, err := newPID(ctx, actorPath, actor, opts...)
@@ -1614,7 +1614,7 @@ func TestBatchTell(t *testing.T) {
 		}
 
 		// create the actor path
-		actor := newTestActor()
+		actor := newActor()
 		ports := dynaport.Get(1)
 		actorPath := address.New("Test", "sys", "host", ports[0])
 		pid, err := newPID(ctx, actorPath, actor, opts...)
@@ -1692,7 +1692,7 @@ func TestBatchAsk(t *testing.T) {
 		}
 
 		// create the actor path
-		actor := newTestActor()
+		actor := newActor()
 		ports := dynaport.Get(1)
 		actorPath := address.New("Test", "sys", "host", ports[0])
 		pid, err := newPID(ctx, actorPath, actor, opts...)
@@ -2025,7 +2025,7 @@ func TestEquals(t *testing.T) {
 	err = sys.Start(ctx)
 	assert.NoError(t, err)
 
-	pid1, err := sys.Spawn(ctx, "test", newTestActor())
+	pid1, err := sys.Spawn(ctx, "test", newActor())
 	require.NoError(t, err)
 	assert.NotNil(t, pid1)
 
@@ -2543,14 +2543,14 @@ func TestSendAsync(t *testing.T) {
 
 		lib.Pause(time.Second)
 
-		receivingActor := newTestActor()
+		receivingActor := newActor()
 		receiver, err := actorSystem.Spawn(ctx, "receiver", receivingActor)
 		assert.NoError(t, err)
 		assert.NotNil(t, receiver)
 
 		lib.Pause(time.Second)
 
-		sender, err := actorSystem.Spawn(ctx, "sender", newTestActor())
+		sender, err := actorSystem.Spawn(ctx, "sender", newActor())
 		assert.NoError(t, err)
 		assert.NotNil(t, sender)
 
@@ -2573,14 +2573,14 @@ func TestSendAsync(t *testing.T) {
 
 		lib.Pause(time.Second)
 
-		receivingActor := newTestActor()
+		receivingActor := newActor()
 		receiver, err := actorSystem.Spawn(ctx, "receiver", receivingActor)
 		assert.NoError(t, err)
 		assert.NotNil(t, receiver)
 
 		lib.Pause(time.Second)
 
-		sender, err := actorSystem.Spawn(ctx, "sender", newTestActor())
+		sender, err := actorSystem.Spawn(ctx, "sender", newActor())
 		assert.NoError(t, err)
 		assert.NotNil(t, sender)
 
@@ -2613,12 +2613,12 @@ func TestSendAsync(t *testing.T) {
 		require.NotNil(t, sd2)
 
 		// create an actor on node1
-		receiver, err := node1.Spawn(ctx, "receiver", newTestActor())
+		receiver, err := node1.Spawn(ctx, "receiver", newActor())
 		assert.NoError(t, err)
 		assert.NotNil(t, receiver)
 		lib.Pause(time.Second)
 
-		sender, err := node2.Spawn(ctx, "sender", newTestActor())
+		sender, err := node2.Spawn(ctx, "sender", newActor())
 		assert.NoError(t, err)
 		assert.NotNil(t, sender)
 
@@ -2651,7 +2651,7 @@ func TestSendAsync(t *testing.T) {
 		require.NotNil(t, node2)
 		require.NotNil(t, sd2)
 
-		sender, err := node2.Spawn(ctx, "sender", newTestActor())
+		sender, err := node2.Spawn(ctx, "sender", newActor())
 		assert.NoError(t, err)
 		assert.NotNil(t, sender)
 
@@ -2681,13 +2681,13 @@ func TestSendSync(t *testing.T) {
 
 		lib.Pause(time.Second)
 
-		receiver, err := actorSystem.Spawn(ctx, "receiver", newTestActor())
+		receiver, err := actorSystem.Spawn(ctx, "receiver", newActor())
 		assert.NoError(t, err)
 		assert.NotNil(t, receiver)
 
 		lib.Pause(time.Second)
 
-		sender, err := actorSystem.Spawn(ctx, "sender", newTestActor())
+		sender, err := actorSystem.Spawn(ctx, "sender", newActor())
 		assert.NoError(t, err)
 		assert.NotNil(t, sender)
 
@@ -2713,13 +2713,13 @@ func TestSendSync(t *testing.T) {
 
 		lib.Pause(time.Second)
 
-		receiver, err := actorSystem.Spawn(ctx, "receiver", newTestActor())
+		receiver, err := actorSystem.Spawn(ctx, "receiver", newActor())
 		assert.NoError(t, err)
 		assert.NotNil(t, receiver)
 
 		lib.Pause(time.Second)
 
-		sender, err := actorSystem.Spawn(ctx, "sender", newTestActor())
+		sender, err := actorSystem.Spawn(ctx, "sender", newActor())
 		assert.NoError(t, err)
 		assert.NotNil(t, sender)
 
@@ -2753,12 +2753,12 @@ func TestSendSync(t *testing.T) {
 		require.NotNil(t, sd2)
 
 		// create an actor on node1
-		receiver, err := node1.Spawn(ctx, "receiver", newTestActor())
+		receiver, err := node1.Spawn(ctx, "receiver", newActor())
 		assert.NoError(t, err)
 		assert.NotNil(t, receiver)
 		lib.Pause(time.Second)
 
-		sender, err := node2.Spawn(ctx, "sender", newTestActor())
+		sender, err := node2.Spawn(ctx, "sender", newActor())
 		assert.NoError(t, err)
 		assert.NotNil(t, sender)
 
@@ -2794,7 +2794,7 @@ func TestSendSync(t *testing.T) {
 		require.NotNil(t, node2)
 		require.NotNil(t, sd2)
 
-		sender, err := node2.Spawn(ctx, "sender", newTestActor())
+		sender, err := node2.Spawn(ctx, "sender", newActor())
 		assert.NoError(t, err)
 		assert.NotNil(t, sender)
 
@@ -2832,7 +2832,7 @@ func TestStopChild(t *testing.T) {
 		require.NotNil(t, parent)
 
 		// create the child actor
-		child, err := parent.SpawnChild(ctx, "SpawnChild", new(testPostStop))
+		child, err := parent.SpawnChild(ctx, "SpawnChild", new(postStopQA))
 		require.NoError(t, err)
 		require.NotNil(t, child)
 		require.Len(t, parent.Children(), 1)
@@ -2850,7 +2850,7 @@ func TestNewPID(t *testing.T) {
 		pid, err := newPID(
 			ctx,
 			nil,
-			newTestActor(),
+			newActor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger))
 
