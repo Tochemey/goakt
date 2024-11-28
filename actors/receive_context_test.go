@@ -2547,6 +2547,60 @@ func TestReceiveContext(t *testing.T) {
 		require.NoError(t, pidA.Shutdown(ctx))
 		require.NoError(t, pidB.Shutdown(ctx))
 	})
+	t.Run("With successful RemoteForward case 2", func(t *testing.T) {
+		ctx := context.TODO()
+		ports := dynaport.Get(2)
+		host := "127.0.0.1"
+
+		actorSystem, err := NewActorSystem("testSys",
+			WithRemoting(host, int32(ports[0])),
+			WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+
+		actorSystem2, err := NewActorSystem("testSys", WithRemoting(host, int32(ports[1])),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem2)
+
+		require.NoError(t, actorSystem2.Start(ctx))
+
+		// create actorA
+		pidA, err := actorSystem2.Spawn(ctx, "ExchangeA", &exchanger{})
+		require.NoError(t, err)
+		require.NotNil(t, pidA)
+
+		pidC, err := actorSystem2.Spawn(ctx, "ExchangeC", &remoteQA{})
+		require.NoError(t, err)
+		require.NotNil(t, pidC)
+
+		// create actorB
+		actorB := &forwardQA{
+			remoteRef: pidC,
+		}
+
+		pidB, err := actorSystem2.Spawn(ctx, "ExchangeB", actorB)
+		require.NoError(t, err)
+		require.NotNil(t, pidB)
+
+		// actor A is killing actor C using a forward pattern
+		// actorA tell actorB forward actorC
+		err = pidA.RemoteTell(ctx, pidB.Address(), new(testpb.RemoteForward))
+		require.NoError(t, err)
+
+		// wait for the async call to properly complete
+		lib.Pause(time.Second)
+		require.True(t, pidA.IsRunning())
+		require.True(t, pidB.IsRunning())
+		require.False(t, pidC.IsRunning())
+
+		// let us shutdown the rest
+		require.NoError(t, pidA.Shutdown(ctx))
+		require.NoError(t, pidB.Shutdown(ctx))
+	})
 	t.Run("With successful ForwardTo", func(t *testing.T) {
 		// create a context
 		ctx := context.TODO()

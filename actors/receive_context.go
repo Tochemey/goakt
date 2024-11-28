@@ -378,8 +378,8 @@ func (rctx *ReceiveContext) RemoteForward(to *address.Address) {
 	}
 
 	if !remoteSender.Equals(address.NoSender()) && remoting != nil {
+		message := rctx.Message()
 		ctx := context.WithoutCancel(rctx.ctx)
-		message, _ := anypb.New(rctx.Message())
 		if err := remoting.RemoteTell(ctx, remoteSender, to, message); err != nil {
 			rctx.Err(err)
 		}
