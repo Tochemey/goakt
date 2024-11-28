@@ -26,12 +26,12 @@ package actors
 
 import "time"
 
-// SupervisorDirective defines the testSupervisor directive
+// SupervisorDirective defines the supervisorQA directive
 type SupervisorDirective interface {
 	isSupervisorDirective()
 }
 
-// StopDirective defines the testSupervisor stop directive
+// StopDirective defines the supervisorQA stop directive
 type StopDirective struct{}
 
 // NewStopDirective creates an instance of StopDirective
@@ -41,7 +41,7 @@ func NewStopDirective() *StopDirective {
 
 func (*StopDirective) isSupervisorDirective() {}
 
-// ResumeDirective defines the testSupervisor resume directive
+// ResumeDirective defines the supervisorQA resume directive
 // This ignores the failure and process the next message, instead
 type ResumeDirective struct{}
 
@@ -52,7 +52,7 @@ func NewResumeDirective() *ResumeDirective {
 
 func (*ResumeDirective) isSupervisorDirective() {}
 
-// RestartDirective defines testSupervisor restart directive
+// RestartDirective defines supervisorQA restart directive
 type RestartDirective struct {
 	// Specifies the maximum number of retries
 	// When reaching this number the faulty actor is stopped

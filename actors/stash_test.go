@@ -52,8 +52,8 @@ func TestStash(t *testing.T) {
 		ports := dynaport.Get(1)
 
 		// create the actor path
-		actor := &stasher{}
-		actorPath := address.New("stasher", "sys", "host", ports[0])
+		actor := &stasQA{}
+		actorPath := address.New("stasQA", "sys", "host", ports[0])
 		pid, err := newPID(ctx, actorPath, actor, opts...)
 		require.NoError(t, err)
 		require.NotNil(t, pid)
@@ -120,8 +120,8 @@ func TestStash(t *testing.T) {
 
 		ports := dynaport.Get(1)
 		// create the actor path
-		actor := &stasher{}
-		actorPath := address.New("stasher", "sys", "host", ports[0])
+		actor := &stasQA{}
+		actorPath := address.New("stasQA", "sys", "host", ports[0])
 		pid, err := newPID(ctx, actorPath, actor, opts...)
 		require.NoError(t, err)
 		require.NotNil(t, pid)
@@ -145,8 +145,8 @@ func TestStash(t *testing.T) {
 		}
 		ports := dynaport.Get(1)
 		// create the actor path
-		actor := &stasher{}
-		actorPath := address.New("stasher", "sys", "host", ports[0])
+		actor := &stasQA{}
+		actorPath := address.New("stasQA", "sys", "host", ports[0])
 		pid, err := newPID(ctx, actorPath, actor, opts...)
 		require.NoError(t, err)
 		require.NotNil(t, pid)
@@ -177,8 +177,8 @@ func TestStash(t *testing.T) {
 		ports := dynaport.Get(1)
 
 		// create the actor path
-		actor := &stasher{}
-		actorPath := address.New("stasher", "sys", "host", ports[0])
+		actor := &stasQA{}
+		actorPath := address.New("stasQA", "sys", "host", ports[0])
 		pid, err := newPID(ctx, actorPath, actor, opts...)
 		require.NoError(t, err)
 		require.NotNil(t, pid)

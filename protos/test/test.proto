@@ -73,3 +73,6 @@ message GetCount {}
 message Count {
   int32 value = 1;
 }
+
+message RemoteForward {}
+message ClusterForward {}
