@@ -41,7 +41,7 @@ func TestAddress(t *testing.T) {
 		assert.EqualValues(t, 1234, addr.Port())
 		assert.NotEmpty(t, addr.ID())
 		assert.NotNil(t, addr.Parent())
-		assert.True(t, proto.Equal(addr.Parent(), NoSender))
+		assert.True(t, proto.Equal(addr.Parent(), nilAddress))
 		assert.Equal(t, expected, addr.String())
 	})
 
@@ -82,7 +82,7 @@ func TestAddress(t *testing.T) {
 		assert.Equal(t, expected, actual.String())
 	})
 	t.Run("With Default", func(t *testing.T) {
-		addr := Default()
+		addr := NoSender()
 		assert.NoError(t, addr.Validate())
 
 		addr.WithHost("localhost").WithPort(123).WithSystem("system").WithName("name")

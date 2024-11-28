@@ -41,8 +41,8 @@ import (
 // protocol defines the Go-Akt addressing protocol
 const protocol = "goakt"
 
-// NoSender means that there is no sender
-var NoSender = new(goaktpb.Address)
+// nilAddress means that there is no sender
+var nilAddress = new(goaktpb.Address)
 
 type Address struct {
 	*goaktpb.Address
@@ -59,7 +59,7 @@ func New(name, system string, host string, port int) *Address {
 			Name:   name,
 			Id:     uuid.NewString(),
 			System: system,
-			Parent: NoSender,
+			Parent: nilAddress,
 		},
 	}
 }
@@ -71,10 +71,10 @@ func From(addr *goaktpb.Address) *Address {
 	}
 }
 
-// Default creates an instance of Address with default values.
-func Default() *Address {
+// NoSender creates an instance of Address with default values.
+func NoSender() *Address {
 	return &Address{
-		NoSender,
+		nilAddress,
 	}
 }
 
@@ -194,7 +194,7 @@ func (a *Address) UnmarshalBinary(data []byte) error {
 
 // Validate returns an error when the address is not valid
 func (a *Address) Validate() error {
-	if proto.Equal(a.Address, NoSender) {
+	if proto.Equal(a.Address, nilAddress) {
 		return nil
 	}
 	pattern := "^[a-zA-Z0-9][a-zA-Z0-9-_\\.]*$"

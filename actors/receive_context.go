@@ -365,10 +365,24 @@ func (rctx *ReceiveContext) ForwardTo(actorName string) {
 // This method can only be used when remoting is enabled on the running actor system
 func (rctx *ReceiveContext) RemoteForward(to *address.Address) {
 	sender := rctx.Sender()
-	message := rctx.Message()
-	ctx := context.WithoutCancel(rctx.ctx)
-	if err := sender.RemoteTell(ctx, to, message); err != nil {
-		rctx.Err(err)
+	remoteSender := rctx.RemoteSender()
+	remoting := rctx.Self().remoting
+
+	if !sender.Equals(NoSender) {
+		message := rctx.Message()
+		ctx := context.WithoutCancel(rctx.ctx)
+		if err := sender.RemoteTell(ctx, to, message); err != nil {
+			rctx.Err(err)
+		}
+		return
+	}
+
+	if !remoteSender.Equals(address.NoSender()) && remoting != nil {
+		ctx := context.WithoutCancel(rctx.ctx)
+		message, _ := anypb.New(rctx.Message())
+		if err := remoting.RemoteTell(ctx, remoteSender, to, message); err != nil {
+			rctx.Err(err)
+		}
 	}
 }
 

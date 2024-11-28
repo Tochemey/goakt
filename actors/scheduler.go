@@ -228,7 +228,7 @@ func (x *scheduler) ScheduleWithCron(ctx context.Context, message proto.Message,
 // This requires remoting to be enabled on the actor system.
 // This will send the given message to the actor after the given interval specified
 // The message will be sent once
-func (x *scheduler) RemoteScheduleOnce(ctx context.Context, message proto.Message, address *address.Address, interval time.Duration) error {
+func (x *scheduler) RemoteScheduleOnce(ctx context.Context, message proto.Message, to *address.Address, interval time.Duration) error {
 	x.mu.Lock()
 	defer x.mu.Unlock()
 
@@ -242,14 +242,15 @@ func (x *scheduler) RemoteScheduleOnce(ctx context.Context, message proto.Messag
 
 	job := job.NewFunctionJob[bool](
 		func(ctx context.Context) (bool, error) {
-			if err := x.remoting.RemoteTell(ctx, address, message); err != nil {
+			from := address.NoSender()
+			if err := x.remoting.RemoteTell(ctx, from, to, message); err != nil {
 				return false, err
 			}
 			return true, nil
 		},
 	)
 
-	key := fmt.Sprintf("%s@%s", address.GetName(), net.JoinHostPort(address.GetHost(), strconv.Itoa(int(address.GetPort()))))
+	key := fmt.Sprintf("%s@%s", to.GetName(), net.JoinHostPort(to.GetHost(), strconv.Itoa(int(to.GetPort()))))
 	jobDetails := quartz.NewJobDetail(job, quartz.NewJobKey(key))
 	if err := x.distributeJobKeyOrNot(ctx, jobDetails); err != nil {
 		if errors.Is(err, errSkipJobScheduling) {
@@ -264,7 +265,7 @@ func (x *scheduler) RemoteScheduleOnce(ctx context.Context, message proto.Messag
 // RemoteSchedule schedules a message to be sent to a remote actor in the future.
 // This requires remoting to be enabled on the actor system.
 // This will send the given message to the actor at the given interval specified
-func (x *scheduler) RemoteSchedule(ctx context.Context, message proto.Message, address *address.Address, interval time.Duration) error {
+func (x *scheduler) RemoteSchedule(ctx context.Context, message proto.Message, to *address.Address, interval time.Duration) error {
 	x.mu.Lock()
 	defer x.mu.Unlock()
 
@@ -278,14 +279,15 @@ func (x *scheduler) RemoteSchedule(ctx context.Context, message proto.Message, a
 
 	job := job.NewFunctionJob[bool](
 		func(ctx context.Context) (bool, error) {
-			if err := x.remoting.RemoteTell(ctx, address, message); err != nil {
+			from := address.NoSender()
+			if err := x.remoting.RemoteTell(ctx, from, to, message); err != nil {
 				return false, err
 			}
 			return true, nil
 		},
 	)
 
-	key := fmt.Sprintf("%s@%s", address.GetName(), net.JoinHostPort(address.GetHost(), strconv.Itoa(int(address.GetPort()))))
+	key := fmt.Sprintf("%s@%s", to.GetName(), net.JoinHostPort(to.GetHost(), strconv.Itoa(int(to.GetPort()))))
 	jobDetails := quartz.NewJobDetail(job, quartz.NewJobKey(key))
 	if err := x.distributeJobKeyOrNot(ctx, jobDetails); err != nil {
 		if errors.Is(err, errSkipJobScheduling) {
@@ -298,7 +300,7 @@ func (x *scheduler) RemoteSchedule(ctx context.Context, message proto.Message, a
 }
 
 // RemoteScheduleWithCron schedules a message to be sent to an actor in the future using a cron expression.
-func (x *scheduler) RemoteScheduleWithCron(ctx context.Context, message proto.Message, address *address.Address, cronExpression string) error {
+func (x *scheduler) RemoteScheduleWithCron(ctx context.Context, message proto.Message, to *address.Address, cronExpression string) error {
 	x.mu.Lock()
 	defer x.mu.Unlock()
 
@@ -312,14 +314,15 @@ func (x *scheduler) RemoteScheduleWithCron(ctx context.Context, message proto.Me
 
 	job := job.NewFunctionJob[bool](
 		func(ctx context.Context) (bool, error) {
-			if err := x.remoting.RemoteTell(ctx, address, message); err != nil {
+			from := address.NoSender()
+			if err := x.remoting.RemoteTell(ctx, from, to, message); err != nil {
 				return false, err
 			}
 			return true, nil
 		},
 	)
 
-	key := fmt.Sprintf("%s@%s", address.GetName(), net.JoinHostPort(address.GetHost(), strconv.Itoa(int(address.GetPort()))))
+	key := fmt.Sprintf("%s@%s", to.GetName(), net.JoinHostPort(to.GetHost(), strconv.Itoa(int(to.GetPort()))))
 	jobDetails := quartz.NewJobDetail(job, quartz.NewJobKey(key))
 
 	if err := x.distributeJobKeyOrNot(ctx, jobDetails); err != nil {

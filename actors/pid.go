@@ -243,6 +243,9 @@ func (pid *PID) Name() string {
 
 // Equals is a convenient method to compare two PIDs
 func (pid *PID) Equals(to *PID) bool {
+	if to == nil {
+		return false
+	}
 	return strings.EqualFold(pid.ID(), to.ID())
 }
 

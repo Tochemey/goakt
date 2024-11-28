@@ -220,7 +220,8 @@ func TestActorSystem(t *testing.T) {
 		require.True(t, proto.Equal(remoteAddr, addr))
 
 		remoting := NewRemoting()
-		reply, err := remoting.RemoteAsk(ctx, addr, new(testpb.TestReply), 20*time.Second)
+		from := address.NoSender()
+		reply, err := remoting.RemoteAsk(ctx, from, addr, new(testpb.TestReply), 20*time.Second)
 		require.NoError(t, err)
 		require.NotNil(t, reply)
 
@@ -624,7 +625,8 @@ func TestActorSystem(t *testing.T) {
 				Id:   "",
 			},
 		)
-		reply, err := remoting.RemoteAsk(ctx, addr, new(testpb.TestReply), 20*time.Second)
+		from := address.NoSender()
+		reply, err := remoting.RemoteAsk(ctx, from, addr, new(testpb.TestReply), 20*time.Second)
 		require.Error(t, err)
 		require.Nil(t, reply)
 
@@ -1454,7 +1456,8 @@ func TestActorSystem(t *testing.T) {
 		require.NotNil(t, addr)
 
 		// send the message to exchanger actor one using remote messaging
-		reply, err := remoting.RemoteAsk(ctx, addr, new(testpb.TestReply), 20*time.Second)
+		from := address.NoSender()
+		reply, err := remoting.RemoteAsk(ctx, from, addr, new(testpb.TestReply), 20*time.Second)
 
 		require.NoError(t, err)
 		require.NotNil(t, reply)
