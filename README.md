@@ -252,6 +252,7 @@ The choice of protobuf is due to easy serialization over wire and strong schema 
 - `SendSync` - behave the same way as `Asks` except the location of the provided actor is transparent. This is possible when cluster mode is enabled.
 - `Forward` - pass a message from one actor to the actor by preserving the initial sender of the message.
   At the moment you can only forward messages from the `ReceiveContext` when handling a message within an actor and this to a local actor.
+- `ForwardTo` - behave the same as `Forward` but when cluster mode is enabled.
 - `BatchTell` - send a bulk of messages to actor in a fire-forget manner. Messages are processed one after the other in the other they have been sent.
 - `BatchAsk` - send a bulk of messages to an actor and expect responses for each message sent within a time period. Messages are processed one after the other in the other they were sent.
   This help return the response of each message in the same order that message was sent. This method hinders performance drastically when the number of messages to sent is high.
@@ -319,6 +320,7 @@ creating the actor system. See actor system [options](./actors/option.go). These
 - `RemoteReSpawn`: to restarts an actor on a remote machine
 - `RemoteStop`: to stop an actor on a remote machine
 - `RemoteSpawn`: to start an actor on a remote machine. The given actor implementation must be registered using the [`Register`](./actors/actor_system.go) method of the actor system on the remote machine for this call to succeed.
+- `RemoteForward`: to pass a message from one actor to the actor by preserving the initial sender of the message.
 
 These methods can be found as well as on the [PID](./actors/pid.go) which is the actor reference when an actor is created.
 
