@@ -645,7 +645,7 @@ func (pid *PID) RemoteLookup(ctx context.Context, host string, port int, name st
 		return nil, ErrRemotingDisabled
 	}
 
-	remoteClient := pid.remoting.Client(host, port)
+	remoteClient := pid.remoting.serviceClient(host, port)
 	request := connect.NewRequest(
 		&internalpb.RemoteLookupRequest{
 			Host: host,
@@ -677,7 +677,7 @@ func (pid *PID) RemoteTell(ctx context.Context, to *address.Address, message pro
 		return err
 	}
 
-	remoteService := pid.remoting.Client(to.GetHost(), int(to.GetPort()))
+	remoteService := pid.remoting.serviceClient(to.GetHost(), int(to.GetPort()))
 
 	request := &internalpb.RemoteTellRequest{
 		RemoteMessage: &internalpb.RemoteMessage{
@@ -726,7 +726,7 @@ func (pid *PID) RemoteAsk(ctx context.Context, to *address.Address, message prot
 		return nil, err
 	}
 
-	remoteService := pid.remoting.Client(to.GetHost(), int(to.GetPort()))
+	remoteService := pid.remoting.serviceClient(to.GetHost(), int(to.GetPort()))
 
 	senderAddress := pid.Address()
 
@@ -805,7 +805,7 @@ func (pid *PID) RemoteBatchTell(ctx context.Context, to *address.Address, messag
 		)
 	}
 
-	remoteService := pid.remoting.Client(to.GetHost(), int(to.GetPort()))
+	remoteService := pid.remoting.serviceClient(to.GetHost(), int(to.GetPort()))
 
 	stream := remoteService.RemoteTell(ctx)
 	for _, request := range requests {
@@ -855,7 +855,7 @@ func (pid *PID) RemoteBatchAsk(ctx context.Context, to *address.Address, message
 		)
 	}
 
-	remoteService := pid.remoting.Client(to.GetHost(), int(to.GetPort()))
+	remoteService := pid.remoting.serviceClient(to.GetHost(), int(to.GetPort()))
 	stream := remoteService.RemoteAsk(ctx)
 	errc := make(chan error, 1)
 
@@ -901,7 +901,7 @@ func (pid *PID) RemoteStop(ctx context.Context, host string, port int, name stri
 		return ErrRemotingDisabled
 	}
 
-	remoteService := pid.remoting.Client(host, port)
+	remoteService := pid.remoting.serviceClient(host, port)
 	request := connect.NewRequest(
 		&internalpb.RemoteStopRequest{
 			Host: host,
@@ -926,7 +926,7 @@ func (pid *PID) RemoteSpawn(ctx context.Context, host string, port int, name, ac
 		return ErrRemotingDisabled
 	}
 
-	remoteService := pid.remoting.Client(host, port)
+	remoteService := pid.remoting.serviceClient(host, port)
 	request := connect.NewRequest(
 		&internalpb.RemoteSpawnRequest{
 			Host:      host,
@@ -957,7 +957,7 @@ func (pid *PID) RemoteReSpawn(ctx context.Context, host string, port int, name s
 		return ErrRemotingDisabled
 	}
 
-	remoteService := pid.remoting.Client(host, port)
+	remoteService := pid.remoting.serviceClient(host, port)
 	request := connect.NewRequest(
 		&internalpb.RemoteReSpawnRequest{
 			Host: host,
@@ -1240,20 +1240,13 @@ func (pid *PID) freeWatchees(ctx context.Context) error {
 
 	size := pnode.Watchees.Len()
 	if size > 0 {
-		eg, ctx := errgroup.WithContext(ctx)
+		eg := new(errgroup.Group)
 		for _, watched := range pnode.Watchees.Items() {
 			watched := watched
 			wid := watched.GetValue()
 			eg.Go(func() error {
 				logger.Debugf("watcher=(%s) unwatching actor=(%s)", pid.ID(), watched.ID)
 				pid.UnWatch(wid)
-				if err := wid.Shutdown(ctx); err != nil {
-					errwrap := fmt.Errorf(
-						"watcher=(%s) failed to unwatch actor=(%s): %w",
-						pid.ID(), watched.ID, err,
-					)
-					return errwrap
-				}
 				logger.Debugf("watcher=(%s) successfully unwatch actor=(%s)", pid.ID(), watched.ID)
 				return nil
 			})

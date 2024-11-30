@@ -749,9 +749,17 @@ func (x *actorSystem) Stop(ctx context.Context) error {
 		x.reset()
 		return err
 	}
-	// TODO: it is necessary
+
 	// remove the supervisor from the actors list
 	x.actors.DeleteNode(x.supervisor)
+
+	// shutdown all actors in the system
+	for _, actor := range x.Actors() {
+		if err := actor.Shutdown(ctx); err != nil {
+			x.reset()
+			return err
+		}
+	}
 
 	x.reset()
 	x.logger.Infof("%s shuts down successfully", x.name)

@@ -82,11 +82,13 @@ func TestActorSystem(t *testing.T) {
 	})
 	t.Run("With Spawn an actor when started", func(t *testing.T) {
 		ctx := context.TODO()
-		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		sys, _ := NewActorSystem("testSys", WithLogger(log.DefaultLogger))
 
 		// start the actor system
 		err := sys.Start(ctx)
 		assert.NoError(t, err)
+
+		lib.Pause(time.Second)
 
 		actor := newActor()
 		actorRef, err := sys.Spawn(ctx, "Test", actor)
@@ -95,7 +97,6 @@ func TestActorSystem(t *testing.T) {
 
 		// stop the actor after some time
 		lib.Pause(time.Second)
-
 		err = sys.Stop(ctx)
 		assert.NoError(t, err)
 	})
