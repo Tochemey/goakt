@@ -142,7 +142,7 @@ type ActorSystem interface {
 	// handleRemoteTell handles an asynchronous message to an actor
 	handleRemoteTell(ctx context.Context, to *PID, message proto.Message) error
 	// setActor sets actor in the actor system actors registry
-	setActor(actor *PID)
+	broadcastActor(actor *PID)
 	// supervisor return the system supervisor
 	getSupervisor() *PID
 	// getPeerStateFromCache returns the peer state from the cache
@@ -151,6 +151,8 @@ type ActorSystem interface {
 	reservedName(nameType nameType) string
 	// getCluster returns the cluster engine
 	getCluster() cluster.Interface
+	// tree returns the actors tree
+	tree() *pidTree
 }
 
 // ActorSystem represent a collection of actors on a given node
@@ -159,8 +161,8 @@ type actorSystem struct {
 	internalpbconnect.UnimplementedRemotingServiceHandler
 	internalpbconnect.UnimplementedClusterServiceHandler
 
-	// map of actors in the system
-	actors *pidMap
+	// hold the actors tree in the system
+	actors *pidTree
 
 	// states whether the actor system has started or not
 	started atomic.Bool
@@ -249,7 +251,6 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 	}
 
 	system := &actorSystem{
-		actors:                 newMap(),
 		actorsChan:             make(chan *internalpb.ActorRef, 10),
 		name:                   name,
 		logger:                 log.New(log.ErrorLevel, os.Stderr),
@@ -271,6 +272,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		peersStateLoopInterval: DefaultPeerStateLoopInterval,
 		port:                   0,
 		host:                   "127.0.0.1",
+		actors:                 newTree(),
 	}
 
 	system.started.Store(false)
@@ -421,12 +423,11 @@ func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor, opts 
 		return nil, ErrActorSystemNotStarted
 	}
 
-	// set the default actor path assuming we are started locally
-	actorPath := x.actorAddress(name)
-	pid, exist := x.actors.Get(actorPath)
+	actorAddress := x.actorAddress(name)
+	pidNode, exist := x.actors.GetNode(actorAddress.String())
 	if exist {
+		pid := pidNode.GetValue()
 		if pid.IsRunning() {
-			// return the existing instance
 			return pid, nil
 		}
 	}
@@ -436,8 +437,13 @@ func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor, opts 
 		return nil, err
 	}
 
-	x.supervisor.Watch(pid)
-	x.setActor(pid)
+	// add the given actor to the tree and supervise it
+	if err := x.actors.AddNode(NoSender, pid); err != nil {
+		return nil, err
+	}
+
+	x.actors.AddWatcher(pid, x.supervisor)
+	x.broadcastActor(pid)
 	return pid, nil
 }
 
@@ -448,6 +454,15 @@ func (x *actorSystem) SpawnNamedFromFunc(ctx context.Context, name string, recei
 		return nil, ErrActorSystemNotStarted
 	}
 
+	actorAddress := x.actorAddress(name)
+	pidNode, exist := x.actors.GetNode(actorAddress.String())
+	if exist {
+		pid := pidNode.GetValue()
+		if pid.IsRunning() {
+			return pid, nil
+		}
+	}
+
 	config := newFuncConfig(opts...)
 	actor := newFuncActor(name, receiveFunc, config)
 	pid, err := x.configPID(ctx, name, actor, WithMailbox(config.mailbox))
@@ -455,8 +470,12 @@ func (x *actorSystem) SpawnNamedFromFunc(ctx context.Context, name string, recei
 		return nil, err
 	}
 
-	x.supervisor.Watch(pid)
-	x.setActor(pid)
+	if err := x.actors.AddNode(NoSender, pid); err != nil {
+		return nil, err
+	}
+
+	x.actors.AddWatcher(pid, x.supervisor)
+	x.broadcastActor(pid)
 	return pid, nil
 }
 
@@ -480,15 +499,16 @@ func (x *actorSystem) Kill(ctx context.Context, name string) error {
 		return ErrActorSystemNotStarted
 	}
 
-	actorPath := x.actorAddress(name)
-	pid, exist := x.actors.Get(actorPath)
+	actorAddress := x.actorAddress(name)
+	pidNode, exist := x.actors.GetNode(actorAddress.String())
 	if exist {
+		pid := pidNode.GetValue()
 		// stop the given actor. No need to record error in the span context
 		// because the shutdown method is taking care of that
 		return pid.Shutdown(ctx)
 	}
 
-	return ErrActorNotFound(actorPath.String())
+	return ErrActorNotFound(actorAddress.String())
 }
 
 // ReSpawn recreates a given actor in the system
@@ -497,35 +517,47 @@ func (x *actorSystem) ReSpawn(ctx context.Context, name string) (*PID, error) {
 		return nil, ErrActorSystemNotStarted
 	}
 
-	actorPath := x.actorAddress(name)
-	pid, exist := x.actors.Get(actorPath)
+	actorAddress := x.actorAddress(name)
+	pidNode, exist := x.actors.GetNode(actorAddress.String())
 	if exist {
-		if err := pid.Restart(ctx); err != nil {
-			return nil, fmt.Errorf("failed to restart actor=%s: %w", actorPath.String(), err)
+		pid := pidNode.GetValue()
+
+		parent := NoSender
+		if parentNode, ok := x.actors.Parent(pid); ok {
+			parent = parentNode.GetValue()
 		}
 
-		x.actors.Set(pid)
-		x.supervisor.Watch(pid)
+		if err := pid.Restart(ctx); err != nil {
+			return nil, fmt.Errorf("failed to restart actor=%s: %w", actorAddress.String(), err)
+		}
+
+		if err := x.actors.AddNode(parent, pid); err != nil {
+			return nil, err
+		}
+
+		x.actors.AddWatcher(pid, x.supervisor)
 		return pid, nil
 	}
 
-	return nil, ErrActorNotFound(actorPath.String())
+	return nil, ErrActorNotFound(actorAddress.String())
 }
 
 // Name returns the actor system name
 func (x *actorSystem) Name() string {
 	x.locker.Lock()
-	defer x.locker.Unlock()
-	return x.name
+	name := x.name
+	x.locker.Unlock()
+	return name
 }
 
 // Actors returns the list of Actors that are alive in the actor system
 func (x *actorSystem) Actors() []*PID {
 	x.locker.Lock()
-	pids := x.actors.List()
+	pidNodes := x.actors.Nodes()
 	x.locker.Unlock()
-	actors := make([]*PID, 0, len(pids))
-	for _, pid := range pids {
+	actors := make([]*PID, 0, len(pidNodes))
+	for _, pidNode := range pidNodes {
+		pid := pidNode.GetValue()
 		if !isReservedName(pid.Name()) {
 			actors = append(actors, pid)
 		}
@@ -557,9 +589,10 @@ func (x *actorSystem) ActorOf(ctx context.Context, actorName string) (addr *addr
 	}
 
 	// first check whether the actor exist locally
-	actorPath := x.actorAddress(actorName)
-	if lpid, ok := x.actors.Get(actorPath); ok {
+	actorAddress := x.actorAddress(actorName)
+	if lpidNode, ok := x.actors.GetNode(actorAddress.String()); ok {
 		x.locker.Unlock()
+		lpid := lpidNode.GetValue()
 		return lpid.Address(), lpid, nil
 	}
 
@@ -601,9 +634,10 @@ func (x *actorSystem) LocalActor(actorName string) (*PID, error) {
 		return nil, ErrActorSystemNotStarted
 	}
 
-	actorPath := x.actorAddress(actorName)
-	if lpid, ok := x.actors.Get(actorPath); ok {
+	actorAddress := x.actorAddress(actorName)
+	if lpidNode, ok := x.actors.GetNode(actorAddress.String()); ok {
 		x.locker.Unlock()
+		lpid := lpidNode.GetValue()
 		return lpid, nil
 	}
 
@@ -715,16 +749,9 @@ func (x *actorSystem) Stop(ctx context.Context) error {
 		x.reset()
 		return err
 	}
+	// TODO: it is necessary
 	// remove the supervisor from the actors list
-	x.actors.Remove(x.supervisor.Address())
-
-	for _, actor := range x.Actors() {
-		x.actors.Remove(actor.Address())
-		if err := actor.Shutdown(ctx); err != nil {
-			x.reset()
-			return err
-		}
-	}
+	x.actors.DeleteNode(x.supervisor)
 
 	x.reset()
 	x.logger.Infof("%s shuts down successfully", x.name)
@@ -760,12 +787,13 @@ func (x *actorSystem) RemoteLookup(ctx context.Context, request *connect.Request
 	}
 
 	addr := address.New(msg.GetName(), x.Name(), msg.GetHost(), int(msg.GetPort()))
-	pid, exist := x.actors.Get(addr)
+	pidNode, exist := x.actors.GetNode(addr.String())
 	if !exist {
 		logger.Error(ErrAddressNotFound(addr.String()).Error())
 		return nil, ErrAddressNotFound(addr.String())
 	}
 
+	pid := pidNode.GetValue()
 	return connect.NewResponse(&internalpb.RemoteLookupResponse{Address: pid.Address().Address}), nil
 }
 
@@ -807,7 +835,7 @@ func (x *actorSystem) RemoteAsk(ctx context.Context, stream *connect.BidiStream[
 		}
 
 		addr := x.actorAddress(name)
-		pid, exist := x.actors.Get(addr)
+		pidNode, exist := x.actors.GetNode(addr.String())
 		if !exist {
 			logger.Error(ErrAddressNotFound(addr.String()).Error())
 			return ErrAddressNotFound(addr.String())
@@ -818,6 +846,7 @@ func (x *actorSystem) RemoteAsk(ctx context.Context, stream *connect.BidiStream[
 			timeout = request.GetTimeout().AsDuration()
 		}
 
+		pid := pidNode.GetValue()
 		reply, err := x.handleRemoteAsk(ctx, pid, message, timeout)
 		if err != nil {
 			logger.Error(ErrRemoteSendFailure(err).Error())
@@ -870,12 +899,13 @@ func (x *actorSystem) RemoteTell(ctx context.Context, stream *connect.ClientStre
 			for request := range requestc {
 				receiver := request.GetRemoteMessage().GetReceiver()
 				addr := address.New(receiver.GetName(), x.Name(), receiver.GetHost(), int(receiver.GetPort()))
-				pid, exist := x.actors.Get(addr)
+				pidNode, exist := x.actors.GetNode(addr.String())
 				if !exist {
 					logger.Error(ErrAddressNotFound(addr.String()).Error())
 					return ErrAddressNotFound(addr.String())
 				}
 
+				pid := pidNode.GetValue()
 				if err := x.handleRemoteTell(ctx, pid, request.GetRemoteMessage()); err != nil {
 					logger.Error(ErrRemoteSendFailure(err))
 					return ErrRemoteSendFailure(err)
@@ -907,18 +937,27 @@ func (x *actorSystem) RemoteReSpawn(ctx context.Context, request *connect.Reques
 		return nil, connect.NewError(connect.CodeInvalidArgument, ErrInvalidHost)
 	}
 
-	actorPath := address.New(msg.GetName(), x.Name(), msg.GetHost(), int(msg.GetPort()))
-	pid, exist := x.actors.Get(actorPath)
+	actorAddress := address.New(msg.GetName(), x.Name(), msg.GetHost(), int(msg.GetPort()))
+	pidNode, exist := x.actors.GetNode(actorAddress.String())
 	if !exist {
-		logger.Error(ErrAddressNotFound(actorPath.String()).Error())
-		return nil, ErrAddressNotFound(actorPath.String())
+		logger.Error(ErrAddressNotFound(actorAddress.String()).Error())
+		return nil, ErrAddressNotFound(actorAddress.String())
+	}
+
+	pid := pidNode.GetValue()
+	parent := NoSender
+	if parentNode, ok := x.actors.Parent(pid); ok {
+		parent = parentNode.GetValue()
 	}
 
 	if err := pid.Restart(ctx); err != nil {
-		return nil, fmt.Errorf("failed to restart actor=%s: %w", actorPath.String(), err)
+		return nil, fmt.Errorf("failed to restart actor=%s: %w", actorAddress.String(), err)
 	}
 
-	x.actors.Set(pid)
+	if err := x.actors.AddNode(parent, pid); err != nil {
+		return nil, err
+	}
+
 	return connect.NewResponse(new(internalpb.RemoteReSpawnResponse)), nil
 }
 
@@ -937,18 +976,18 @@ func (x *actorSystem) RemoteStop(ctx context.Context, request *connect.Request[i
 		return nil, connect.NewError(connect.CodeInvalidArgument, ErrInvalidHost)
 	}
 
-	actorPath := address.New(msg.GetName(), x.Name(), msg.GetHost(), int(msg.GetPort()))
-	pid, exist := x.actors.Get(actorPath)
+	actorAddress := address.New(msg.GetName(), x.Name(), msg.GetHost(), int(msg.GetPort()))
+	pidNode, exist := x.actors.GetNode(actorAddress.String())
 	if !exist {
-		logger.Error(ErrAddressNotFound(actorPath.String()).Error())
-		return nil, ErrAddressNotFound(actorPath.String())
+		logger.Error(ErrAddressNotFound(actorAddress.String()).Error())
+		return nil, ErrAddressNotFound(actorAddress.String())
 	}
 
+	pid := pidNode.GetValue()
 	if err := pid.Shutdown(ctx); err != nil {
-		return nil, fmt.Errorf("failed to stop actor=%s: %w", actorPath.String(), err)
+		return nil, fmt.Errorf("failed to stop actor=%s: %w", actorAddress.String(), err)
 	}
 
-	x.actors.Remove(actorPath)
 	return connect.NewResponse(new(internalpb.RemoteStopResponse)), nil
 }
 
@@ -1068,9 +1107,8 @@ func (x *actorSystem) getPeerStateFromCache(address string) (*internalpb.PeerSta
 	return peerState, nil
 }
 
-// setActor implements ActorSystem.
-func (x *actorSystem) setActor(actor *PID) {
-	x.actors.Set(actor)
+// broadcastActor broadcast the newly (re)spawned actor into the cluster
+func (x *actorSystem) broadcastActor(actor *PID) {
 	if x.clusterEnabled.Load() {
 		x.actorsChan <- &internalpb.ActorRef{
 			ActorAddress: actor.Address().Address,
@@ -1207,8 +1245,8 @@ func (x *actorSystem) janitor() {
 			case <-ticker.C:
 				for _, actor := range x.Actors() {
 					if !actor.IsRunning() {
-						x.logger.Infof("removing actor=%s from system", actor.Address().Name())
-						x.actors.Remove(actor.Address())
+						x.logger.Infof("janitor removing actor=%s from system", actor.ID())
+						x.actors.DeleteNode(actor)
 						if x.InCluster() {
 							if err := x.cluster.RemoveActor(context.Background(), actor.Address().Name()); err != nil {
 								x.logger.Error(err.Error())
@@ -1447,6 +1485,11 @@ func (x *actorSystem) configPID(ctx context.Context, name string, actor Actor, o
 	return pid, nil
 }
 
+// tree returns the actors tree
+func (x *actorSystem) tree() *pidTree {
+	return x.actors
+}
+
 // getCluster returns the cluster engine
 func (x *actorSystem) getCluster() cluster.Interface {
 	return x.cluster
@@ -1558,7 +1601,12 @@ func (x *actorSystem) spawnSupervisor(ctx context.Context) error {
 		return fmt.Errorf("actor=%s failed to start system supervisor: %w", actorName, err)
 	}
 
-	x.setActor(x.supervisor)
+	// set the supervisor in the tree
+	if err := x.actors.AddNode(NoSender, x.supervisor); err != nil {
+		return fmt.Errorf("failed to add actor=%s: to the tree %w", actorName, err)
+	}
+
+	x.broadcastActor(x.supervisor)
 	return nil
 }
 
@@ -1575,9 +1623,12 @@ func (x *actorSystem) spawnRebalancer(ctx context.Context) error {
 		return fmt.Errorf("actor=%s failed to start cluster rebalancer: %w", actorName, err)
 	}
 
-	x.setActor(x.rebalancer)
-	x.rebalancer.setParent(x.supervisor)
-	x.supervisor.Watch(x.rebalancer)
+	// set the balancer in the tree with the supervisor as its parent
+	if err := x.actors.AddNode(x.supervisor, x.rebalancer); err != nil {
+		return fmt.Errorf("failed to add actor=%s: to the tree %w", actorName, err)
+	}
+
+	x.broadcastActor(x.rebalancer)
 	return nil
 }
 

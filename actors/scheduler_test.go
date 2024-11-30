@@ -133,22 +133,31 @@ func TestScheduler(t *testing.T) {
 		assert.NoError(t, err)
 	})
 	t.Run("With ScheduleOnce with scheduler not started", func(t *testing.T) {
+		// create the context
 		ctx := context.TODO()
-		scheduler := newScheduler(log.DiscardLogger, time.Second)
-		ports := dynaport.Get(1)
+		// define the logger to use
+		logger := log.DiscardLogger
+		// create the actor system
+		newActorSystem, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithJanitorInterval(time.Minute),
+			WithPassivationDisabled(),
+		)
+		// assert there are no error
+		require.NoError(t, err)
 
-		// create the actor path
-		actorPath := address.New("Test", "sys", "host", ports[0])
+		// start the actor system
+		err = newActorSystem.Start(ctx)
+		assert.NoError(t, err)
+
+		lib.Pause(time.Second)
+
+		scheduler := newActorSystem.(*actorSystem).scheduler
+		scheduler.Stop(ctx)
 
 		// create the actor ref
-		pid, err := newPID(
-			ctx,
-			actorPath,
-			newActor(),
-			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
-		)
-
+		pid, err := newActorSystem.Spawn(ctx, "test", newActor())
 		require.NoError(t, err)
 		assert.NotNil(t, pid)
 

@@ -22,29 +22,47 @@
  * SOFTWARE.
  */
 
-package lib
+package actors
 
 import (
-	"log"
-	"runtime"
-	"time"
+	"sync/atomic"
 
-	"github.com/tochemey/goakt/v2/internal/types"
+	"github.com/tochemey/goakt/v2/internal/slice"
 )
 
-// Pause pauses the running process for some time period
-func Pause(duration time.Duration) {
-	stopCh := make(chan types.Unit, 1)
-	timer := time.AfterFunc(duration, func() {
-		stopCh <- types.Unit{}
-	})
-	<-stopCh
-	timer.Stop()
+// pidValue represents the data stored in each
+// node of the actors Tree
+type pidValue struct {
+	data *PID
 }
 
-// Debug is used this to detect if a goroutine is stuck
-func Debug() {
-	buf := make([]byte, 1<<20)
-	runtime.Stack(buf, true)
-	log.Printf("%s", buf)
+// newPidValue creates an instance of pidValue
+func newPidValue(data *PID) *pidValue {
+	return &pidValue{data: data}
+}
+
+// Value returns the actual pidValue value
+func (v *pidValue) Value() *PID {
+	return v.data
+}
+
+// pidNode represents a single actor node
+// in the actors Tree
+type pidNode struct {
+	ID          string
+	value       atomic.Pointer[pidValue]
+	Descendants *slice.LockFree[*pidNode]
+	Watchers    *slice.LockFree[*pidNode]
+	Watchees    *slice.LockFree[*pidNode]
+}
+
+// SetValue sets a node value
+func (x *pidNode) SetValue(v *pidValue) {
+	x.value.Store(v)
+}
+
+// GetValue returns the underlying value of the node
+func (x *pidNode) GetValue() *PID {
+	v := x.value.Load()
+	return v.Value()
 }
