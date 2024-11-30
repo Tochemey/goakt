@@ -726,6 +726,8 @@ func (x *actorSystem) Stop(ctx context.Context) error {
 	if x.remotingEnabled.Load() {
 		x.remoting.Close()
 		if err := x.shutdownHTTPServer(ctx); err != nil {
+			x.reset()
+			x.logger.Errorf("%s failed to shutdown: %w", x.name, err)
 			return err
 		}
 
@@ -736,6 +738,8 @@ func (x *actorSystem) Stop(ctx context.Context) error {
 
 	if x.clusterEnabled.Load() {
 		if err := x.cluster.Stop(ctx); err != nil {
+			x.reset()
+			x.logger.Errorf("%s failed to shutdown cleanly: %w", x.name, err)
 			return err
 		}
 		close(x.actorsChan)
@@ -747,6 +751,7 @@ func (x *actorSystem) Stop(ctx context.Context) error {
 	// stop the supervisor actor
 	if err := x.getSupervisor().Shutdown(ctx); err != nil {
 		x.reset()
+		x.logger.Errorf("%s failed to shutdown cleanly: %w", x.name, err)
 		return err
 	}
 
@@ -757,6 +762,7 @@ func (x *actorSystem) Stop(ctx context.Context) error {
 	for _, actor := range x.Actors() {
 		if err := actor.Shutdown(ctx); err != nil {
 			x.reset()
+			x.logger.Errorf("%s failed to shutdown cleanly: %w", x.name, err)
 			return err
 		}
 	}

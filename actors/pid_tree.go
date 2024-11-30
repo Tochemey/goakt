@@ -49,9 +49,9 @@ func newTree() *pidTree {
 		nodePool: &sync.Pool{
 			New: func() any {
 				return &pidNode{
-					Descendants: slice.NewLockFree[*pidNode](),
-					Watchees:    slice.NewLockFree[*pidNode](),
-					Watchers:    slice.NewLockFree[*pidNode](),
+					Descendants: slice.NewThreadSafe[*pidNode](),
+					Watchees:    slice.NewThreadSafe[*pidNode](),
+					Watchers:    slice.NewThreadSafe[*pidNode](),
 				}
 			},
 		},
@@ -278,7 +278,7 @@ func (t *pidTree) updateAncestors(parentID, childID string) {
 }
 
 // filterOutChild removes the node with the given ID from the Children slice.
-func filterOutChild(children *slice.LockFree[*pidNode], childID string) *slice.LockFree[*pidNode] {
+func filterOutChild(children *slice.ThreadSafe[*pidNode], childID string) *slice.ThreadSafe[*pidNode] {
 	for i, child := range children.Items() {
 		if child.ID == childID {
 			children.Delete(i)
