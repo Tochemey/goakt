@@ -96,12 +96,8 @@ func TestActorSystem(t *testing.T) {
 		// stop the actor after some time
 		lib.Pause(time.Second)
 
-		t.Cleanup(
-			func() {
-				err = sys.Stop(ctx)
-				assert.NoError(t, err)
-			},
-		)
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
 	})
 	t.Run("With Spawn an actor with invalid actor name", func(t *testing.T) {
 		ctx := context.TODO()
