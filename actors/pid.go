@@ -405,8 +405,8 @@ func (pid *PID) RestartCount() int {
 
 // ChildrenCount returns the total number of childrenMap for the given PID
 func (pid *PID) ChildrenCount() int {
-	descendands := pid.Children()
-	return len(descendands)
+	descendants := pid.Children()
+	return len(descendants)
 }
 
 // ProcessedCount returns the total number of messages processed at a given time
@@ -1411,15 +1411,15 @@ func (pid *PID) doStop(ctx context.Context) error {
 	pid.receiveStopSignal <- types.Unit{}
 
 	// move remaining messages in the mailbox to deadletter queue
-	// any subscription to the actor system can hande them.
-	if pid.mailbox.Len() > 0 {
-		pid.logger.Debugf("actor=(%s) mailbox is not empty. remaining messages will be sent to the deadletter queue", pid.Address().String())
-		for !pid.mailbox.IsEmpty() {
-			if dequeued := pid.mailbox.Dequeue(); dequeued != nil {
-				pid.toDeadletterQueue(dequeued, ErrUnhandled)
-			}
-		}
-	}
+	// any subscription to the actor system can handle them.
+	// if pid.mailbox.Len() > 0 {
+	// 	pid.logger.Debugf("actor=(%s) mailbox is not empty. remaining messages will be sent to the deadletter queue", pid.Address().String())
+	// 	for !pid.mailbox.IsEmpty() {
+	// 		if dequeued := pid.mailbox.Dequeue(); dequeued != nil {
+	// 			pid.toDeadletterQueue(dequeued, ErrUnhandled)
+	// 		}
+	// 	}
+	// }
 
 	if pid.remoting != nil {
 		pid.remoting.Close()
