@@ -1347,6 +1347,8 @@ func TestAPIRemoteStop(t *testing.T) {
 			err = remoting.RemoteStop(ctx, host, remotingPort, actorName)
 			require.NoError(t, err)
 
+			lib.Pause(time.Second)
+
 			assert.Empty(t, sys.Actors())
 
 			// stop the actor after some time

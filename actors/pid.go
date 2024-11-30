@@ -128,7 +128,6 @@ type PID struct {
 
 	// set the metrics settings
 	restartCount   *atomic.Int64
-	childrenCount  *atomic.Int64
 	processedCount *atomic.Int64
 
 	// supervisor strategy
@@ -171,7 +170,6 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 		stashLocker:           &sync.Mutex{},
 		eventsStream:          nil,
 		restartCount:          atomic.NewInt64(0),
-		childrenCount:         atomic.NewInt64(0),
 		processedCount:        atomic.NewInt64(0),
 		processingTimeLocker:  new(sync.Mutex),
 		supervisionChan:       make(chan error, 1),
@@ -273,12 +271,13 @@ func (pid *PID) Parent() *PID {
 func (pid *PID) Children() []*PID {
 	pid.fieldsLocker.RLock()
 	tree := pid.ActorSystem().tree()
-	descendants, ok := tree.Descendants(pid)
+	pnode, ok := tree.GetNode(pid.ID())
 	if !ok {
 		pid.fieldsLocker.RUnlock()
 		return nil
 	}
 
+	descendants := pnode.Descendants.Items()
 	cids := make([]*PID, 0, len(descendants))
 	for _, cnode := range descendants {
 		cid := cnode.GetValue()
@@ -307,11 +306,15 @@ func (pid *PID) Stop(ctx context.Context, cid *PID) error {
 	}
 
 	pid.fieldsLocker.RLock()
-	if _, ok := pid.system.tree().GetNode(cid.Address().String()); ok {
+	tree := pid.system.tree()
+	if _, ok := tree.GetNode(cid.Address().String()); ok {
 		if err := cid.Shutdown(ctx); err != nil {
 			pid.fieldsLocker.RUnlock()
 			return err
 		}
+
+		// remove the node from the tree
+		tree.DeleteNode(cid)
 		pid.fieldsLocker.RUnlock()
 		return nil
 	}
@@ -402,8 +405,8 @@ func (pid *PID) RestartCount() int {
 
 // ChildrenCount returns the total number of childrenMap for the given PID
 func (pid *PID) ChildrenCount() int {
-	count := pid.childrenCount.Load()
-	return int(count)
+	descendands := pid.Children()
+	return len(descendands)
 }
 
 // ProcessedCount returns the total number of messages processed at a given time
@@ -476,7 +479,6 @@ func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor, opts .
 		return nil, err
 	}
 
-	pid.childrenCount.Inc()
 	if err := tree.AddNode(pid, cid); err != nil {
 		return nil, err
 	}

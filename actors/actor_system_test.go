@@ -82,7 +82,7 @@ func TestActorSystem(t *testing.T) {
 	})
 	t.Run("With Spawn an actor when started", func(t *testing.T) {
 		ctx := context.TODO()
-		sys, _ := NewActorSystem("testSys", WithLogger(log.DefaultLogger))
+		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
 
 		// start the actor system
 		err := sys.Start(ctx)
