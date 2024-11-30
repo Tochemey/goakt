@@ -78,7 +78,7 @@ func (s *shardedMap) Reset() {
 	// Reset each shard's map
 	for i := 0; i < numShards; i++ {
 		shard := s.shards[i]
-		shard.Range(func(key, value interface{}) bool {
+		shard.Range(func(key, _ any) bool {
 			shard.Delete(key) // Clear the entry
 			return true
 		})
