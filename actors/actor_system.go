@@ -1243,8 +1243,6 @@ func (x *actorSystem) enableRemoting(ctx context.Context) error {
 // reset the actor system
 func (x *actorSystem) reset() {
 	x.actors.Reset()
-	x.name = ""
-	x.cluster = nil
 }
 
 // janitor time to time removes dead actors from the system
