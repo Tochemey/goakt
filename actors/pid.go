@@ -1229,7 +1229,7 @@ func (pid *PID) freeWatchers(ctx context.Context) error {
 }
 
 // freeWatchees releases all actors that have been watched by this actor
-func (pid *PID) freeWatchees(ctx context.Context) error {
+func (pid *PID) freeWatchees() error {
 	logger := pid.logger
 	logger.Debugf("%s freeing all watched actors...", pid.ID())
 	pnode, ok := pid.ActorSystem().tree().GetNode(pid.ID())
@@ -1425,7 +1425,7 @@ func (pid *PID) doStop(ctx context.Context) error {
 
 	if err := errorschain.
 		New(errorschain.ReturnFirst()).
-		AddError(pid.freeWatchees(ctx)).
+		AddError(pid.freeWatchees()).
 		AddError(pid.freeChildren(ctx)).
 		AddError(pid.freeWatchers(ctx)).
 		Error(); err != nil {
