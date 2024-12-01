@@ -105,7 +105,7 @@ func TestRemoteTell(t *testing.T) {
 		// generate the remoting port
 		nodePorts := dynaport.Get(1)
 		remotingPort := nodePorts[0]
-		host := "localhost"
+		host := "0.0.0.0"
 
 		// create the actor system
 		sys, err := NewActorSystem(
