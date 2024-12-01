@@ -1610,10 +1610,7 @@ func (x *actorSystem) spawnSupervisor(ctx context.Context) error {
 	}
 
 	// set the supervisor in the tree
-	if err := x.actors.AddNode(NoSender, x.supervisor); err != nil {
-		return fmt.Errorf("failed to add actor=%s: to the tree %w", actorName, err)
-	}
-
+	_ = x.actors.AddNode(NoSender, x.supervisor)
 	x.broadcastActor(x.supervisor)
 	return nil
 }
@@ -1632,10 +1629,7 @@ func (x *actorSystem) spawnRebalancer(ctx context.Context) error {
 	}
 
 	// set the balancer in the tree with the supervisor as its parent
-	if err := x.actors.AddNode(x.supervisor, x.rebalancer); err != nil {
-		return fmt.Errorf("failed to add actor=%s: to the tree %w", actorName, err)
-	}
-
+	_ = x.actors.AddNode(x.supervisor, x.rebalancer)
 	x.broadcastActor(x.rebalancer)
 	return nil
 }
