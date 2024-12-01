@@ -47,6 +47,60 @@ func TestRemoteTell(t *testing.T) {
 		// create the context
 		ctx := context.TODO()
 		// define the logger to use
+		logger := log.DefaultLogger
+		// generate the remoting port
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "0.0.0.0"
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithPassivationDisabled(),
+			WithRemoting(host, int32(remotingPort)),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		lib.Pause(time.Second)
+
+		// create a test actor
+		actorName := "test"
+		actor := newActor()
+		actorRef, err := sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		remoting := NewRemoting()
+		// get the address of the actor
+		addr, err := remoting.RemoteLookup(ctx, sys.Host(), int(sys.Port()), actorName)
+		require.NoError(t, err)
+		// create a message to send to the test actor
+		message := new(testpb.TestSend)
+		from := address.NoSender()
+		// send the message to the actor
+		for i := 0; i < 10; i++ {
+			err = remoting.RemoteTell(ctx, from, addr, message)
+			// perform some assertions
+			require.NoError(t, err)
+		}
+
+		// stop the actor after some time
+		lib.Pause(time.Second)
+
+		remoting.Close()
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
+	})
+	t.Run("With invalid message", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
 		logger := log.DiscardLogger
 		// generate the remoting port
 		nodePorts := dynaport.Get(1)
@@ -78,61 +132,7 @@ func TestRemoteTell(t *testing.T) {
 
 		remoting := NewRemoting()
 		// get the address of the actor
-		addr, err := remoting.RemoteLookup(ctx, host, remotingPort, actorName)
-		require.NoError(t, err)
-		// create a message to send to the test actor
-		message := new(testpb.TestSend)
-		from := address.NoSender()
-		// send the message to the actor
-		for i := 0; i < 10; i++ {
-			err = remoting.RemoteTell(ctx, from, addr, message)
-			// perform some assertions
-			require.NoError(t, err)
-		}
-
-		// stop the actor after some time
-		lib.Pause(time.Second)
-
-		remoting.Close()
-		err = sys.Stop(ctx)
-		assert.NoError(t, err)
-	})
-	t.Run("With invalid message", func(t *testing.T) {
-		// create the context
-		ctx := context.TODO()
-		// define the logger to use
-		logger := log.DiscardLogger
-		// generate the remoting port
-		nodePorts := dynaport.Get(1)
-		remotingPort := nodePorts[0]
-		host := "localhost"
-
-		// create the actor system
-		sys, err := NewActorSystem(
-			"test",
-			WithLogger(logger),
-			WithPassivationDisabled(),
-			WithRemoting(host, int32(remotingPort)),
-		)
-		// assert there are no error
-		require.NoError(t, err)
-
-		// start the actor system
-		err = sys.Start(ctx)
-		assert.NoError(t, err)
-
-		lib.Pause(time.Second)
-
-		// create a test actor
-		actorName := "test"
-		actor := newActor()
-		actorRef, err := sys.Spawn(ctx, actorName, actor)
-		require.NoError(t, err)
-		assert.NotNil(t, actorRef)
-
-		remoting := NewRemoting()
-		// get the address of the actor
-		addr, err := remoting.RemoteLookup(ctx, host, remotingPort, actorName)
+		addr, err := remoting.RemoteLookup(ctx, sys.Host(), int(sys.Port()), actorName)
 		require.NoError(t, err)
 		from := address.NoSender()
 		err = remoting.RemoteTell(ctx, from, addr, nil)
@@ -237,7 +237,7 @@ func TestRemoteTell(t *testing.T) {
 		assert.NotNil(t, actorRef)
 
 		remoting := NewRemoting()
-		addr, err := remoting.RemoteLookup(ctx, host, remotingPort, actorName)
+		addr, err := remoting.RemoteLookup(ctx, sys.Host(), int(sys.Port()), actorName)
 		require.NoError(t, err)
 
 		// let us disable remoting
@@ -296,7 +296,7 @@ func TestRemoteTell(t *testing.T) {
 		remoting := NewRemoting()
 
 		// get the address of the actor
-		addr, err := remoting.RemoteLookup(ctx, host, remotingPort, actorName)
+		addr, err := remoting.RemoteLookup(ctx, sys.Host(), int(sys.Port()), actorName)
 		require.NoError(t, err)
 		// create a message to send to the test actor
 		messages := make([]proto.Message, 10)
@@ -411,7 +411,7 @@ func TestRemoteTell(t *testing.T) {
 		assert.NotNil(t, actorRef)
 
 		remoting := NewRemoting()
-		addr, err := remoting.RemoteLookup(ctx, host, remotingPort, actorName)
+		addr, err := remoting.RemoteLookup(ctx, sys.Host(), int(sys.Port()), actorName)
 		require.NoError(t, err)
 		from := address.NoSender()
 		// let us disable remoting
@@ -468,7 +468,7 @@ func TestRemoteTell(t *testing.T) {
 
 		remoting := NewRemoting()
 		// get the address of the actor
-		addr, err := remoting.RemoteLookup(ctx, host, remotingPort, actorName)
+		addr, err := remoting.RemoteLookup(ctx, sys.Host(), int(sys.Port()), actorName)
 		require.NoError(t, err)
 
 		// stop the actor when wait for cleanup to take place
@@ -526,7 +526,7 @@ func TestRemoteTell(t *testing.T) {
 
 		remoting := NewRemoting()
 		// get the address of the actor
-		addr, err := remoting.RemoteLookup(ctx, host, remotingPort, actorName)
+		addr, err := remoting.RemoteLookup(ctx, sys.Host(), int(sys.Port()), actorName)
 		require.NoError(t, err)
 
 		// stop the actor when wait for cleanup to take place
@@ -588,7 +588,7 @@ func TestRemoteAsk(t *testing.T) {
 			remoting := NewRemoting()
 			from := address.NoSender()
 			// get the address of the actor
-			addr, err := remoting.RemoteLookup(ctx, host, remotingPort, actorName)
+			addr, err := remoting.RemoteLookup(ctx, sys.Host(), int(sys.Port()), actorName)
 			require.NoError(t, err)
 
 			// create a message to send to the test actor
@@ -651,7 +651,7 @@ func TestRemoteAsk(t *testing.T) {
 
 			remoting := NewRemoting()
 			// get the address of the actor
-			addr, err := remoting.RemoteLookup(ctx, host, remotingPort, actorName)
+			addr, err := remoting.RemoteLookup(ctx, sys.Host(), int(sys.Port()), actorName)
 			require.NoError(t, err)
 
 			from := address.NoSender()
@@ -766,7 +766,7 @@ func TestRemoteAsk(t *testing.T) {
 
 			remoting := NewRemoting()
 			// get the address of the actor
-			addr, err := remoting.RemoteLookup(ctx, host, remotingPort, actorName)
+			addr, err := remoting.RemoteLookup(ctx, sys.Host(), int(sys.Port()), actorName)
 			require.NoError(t, err)
 
 			// let us disable remoting
@@ -826,7 +826,7 @@ func TestRemoteAsk(t *testing.T) {
 
 			remoting := NewRemoting()
 			// get the address of the actor
-			addr, err := remoting.RemoteLookup(ctx, host, remotingPort, actorName)
+			addr, err := remoting.RemoteLookup(ctx, sys.Host(), int(sys.Port()), actorName)
 			require.NoError(t, err)
 
 			from := address.NoSender()
@@ -953,7 +953,7 @@ func TestRemoteAsk(t *testing.T) {
 
 			remoting := NewRemoting()
 
-			addr, err := remoting.RemoteLookup(ctx, host, remotingPort, actorName)
+			addr, err := remoting.RemoteLookup(ctx, sys.Host(), int(sys.Port()), actorName)
 			require.NoError(t, err)
 
 			// let us disable remoting
@@ -1018,7 +1018,7 @@ func TestRemoteAsk(t *testing.T) {
 			remoting := NewRemoting()
 			from := address.NoSender()
 			// get the address of the actor
-			addr, err := remoting.RemoteLookup(ctx, host, remotingPort, actorName)
+			addr, err := remoting.RemoteLookup(ctx, sys.Host(), int(sys.Port()), actorName)
 			require.NoError(t, err)
 
 			// stop the actor when wait for cleanup to take place
@@ -1079,7 +1079,7 @@ func TestRemoteAsk(t *testing.T) {
 
 			remoting := NewRemoting()
 			// get the address of the actor
-			addr, err := remoting.RemoteLookup(ctx, host, remotingPort, actorName)
+			addr, err := remoting.RemoteLookup(ctx, sys.Host(), int(sys.Port()), actorName)
 			require.NoError(t, err)
 
 			// stop the actor when wait for cleanup to take place
@@ -1140,7 +1140,7 @@ func TestAPIRemoteLookup(t *testing.T) {
 			// create a test actor
 			actorName := "test"
 			// get the address of the actor
-			addr, err := remoting.RemoteLookup(ctx, host, remotingPort, actorName)
+			addr, err := remoting.RemoteLookup(ctx, sys.Host(), int(sys.Port()), actorName)
 			require.Error(t, err)
 			require.EqualError(t, err, "failed_precondition: remoting is not enabled")
 			require.Nil(t, addr)
@@ -1189,7 +1189,7 @@ func TestAPIRemoteReSpawn(t *testing.T) {
 			// create a test actor
 			actorName := "test"
 			// get the address of the actor
-			err = remoting.RemoteReSpawn(ctx, host, remotingPort, actorName)
+			err = remoting.RemoteReSpawn(ctx, sys.Host(), int(sys.Port()), actorName)
 			require.Error(t, err)
 			require.EqualError(t, err, "failed_precondition: remoting is not enabled")
 
@@ -1240,7 +1240,7 @@ func TestAPIRemoteReSpawn(t *testing.T) {
 			assert.Zero(t, pid.restartCount.Load())
 			remoting := NewRemoting()
 			// get the address of the actor
-			err = remoting.RemoteReSpawn(ctx, host, remotingPort, actorName)
+			err = remoting.RemoteReSpawn(ctx, sys.Host(), int(sys.Port()), actorName)
 			require.NoError(t, err)
 
 			assert.EqualValues(t, 1, pid.restartCount.Load())
@@ -1291,7 +1291,7 @@ func TestAPIRemoteStop(t *testing.T) {
 			// create a test actor
 			actorName := "test"
 			// get the address of the actor
-			err = remoting.RemoteStop(ctx, host, remotingPort, actorName)
+			err = remoting.RemoteStop(ctx, sys.Host(), int(sys.Port()), actorName)
 			require.Error(t, err)
 			require.EqualError(t, err, "failed_precondition: remoting is not enabled")
 
@@ -1344,8 +1344,10 @@ func TestAPIRemoteStop(t *testing.T) {
 			remoting := NewRemoting()
 
 			// get the address of the actor
-			err = remoting.RemoteStop(ctx, host, remotingPort, actorName)
+			err = remoting.RemoteStop(ctx, sys.Host(), int(sys.Port()), actorName)
 			require.NoError(t, err)
+
+			lib.Pause(time.Second)
 
 			assert.Empty(t, sys.Actors())
 
@@ -1391,7 +1393,7 @@ func TestAPIRemoteSpawn(t *testing.T) {
 
 			remoting := NewRemoting()
 			// fetching the address of the that actor should return nil address
-			addr, err := remoting.RemoteLookup(ctx, host, remotingPort, actorName)
+			addr, err := remoting.RemoteLookup(ctx, sys.Host(), int(sys.Port()), actorName)
 			require.NoError(t, err)
 			require.Nil(t, addr)
 
@@ -1463,12 +1465,12 @@ func TestAPIRemoteSpawn(t *testing.T) {
 
 			remoting := NewRemoting()
 			// fetching the address of the that actor should return nil address
-			addr, err := remoting.RemoteLookup(ctx, host, remotingPort, actorName)
+			addr, err := remoting.RemoteLookup(ctx, sys.Host(), int(sys.Port()), actorName)
 			require.NoError(t, err)
 			require.Nil(t, addr)
 
 			// spawn the remote actor
-			err = remoting.RemoteSpawn(ctx, host, remotingPort, actorName, "actors.exchanger")
+			err = remoting.RemoteSpawn(ctx, sys.Host(), int(sys.Port()), actorName, "actors.exchanger")
 			require.Error(t, err)
 			assert.EqualError(t, err, ErrTypeNotRegistered.Error())
 

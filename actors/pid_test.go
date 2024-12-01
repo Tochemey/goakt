@@ -39,7 +39,6 @@ import (
 
 	"github.com/tochemey/goakt/v2/address"
 	"github.com/tochemey/goakt/v2/goaktpb"
-	"github.com/tochemey/goakt/v2/internal/eventstream"
 	"github.com/tochemey/goakt/v2/internal/lib"
 	"github.com/tochemey/goakt/v2/log"
 	"github.com/tochemey/goakt/v2/test/data/testpb"
@@ -56,20 +55,24 @@ func TestReceive(t *testing.T) {
 	t.Run("With happy path", func(t *testing.T) {
 		ctx := context.TODO()
 		ports := dynaport.Get(1)
-		// create the actor path
-		actorPath := address.New("Test", "sys", "host", ports[0])
+		host := "127.0.0.1"
+
+		actorSystem, err := NewActorSystem("testSys",
+			WithRemoting(host, int32(ports[0])),
+			WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+
+		lib.Pause(time.Second)
 
 		// create the actor ref
-		pid, err := newPID(
-			ctx,
-			actorPath,
-			newActor(),
-			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger))
-
+		pid, err := actorSystem.Spawn(ctx, "name", newActor())
 		require.NoError(t, err)
 		assert.NotNil(t, pid)
-		// let us send 10 public to the actor
+
+		// let us send 10 messages to the actor
 		count := 10
 		for i := 0; i < count; i++ {
 			receiveContext := &ReceiveContext{
@@ -89,22 +92,28 @@ func TestReceive(t *testing.T) {
 		// stop the actor
 		err = pid.Shutdown(ctx)
 		assert.NoError(t, err)
+		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 }
 func TestPassivation(t *testing.T) {
 	t.Run("With happy path", func(t *testing.T) {
 		ctx := context.TODO()
-		// create a Ping actor
-		opts := []pidOption{
-			withInitMaxRetries(1),
-			withPassivationAfter(passivateAfter),
-		}
-
 		ports := dynaport.Get(1)
-		// create the actor path
-		actorPath := address.New("Test", "sys", "host", ports[0])
+		host := "127.0.0.1"
 
-		pid, err := newPID(ctx, actorPath, newActor(), opts...)
+		actorSystem, err := NewActorSystem("testSys",
+			WithRemoting(host, int32(ports[0])),
+			WithExpireActorAfter(passivateAfter),
+			WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+
+		lib.Pause(time.Second)
+
+		// create the actor path
+		pid, err := actorSystem.Spawn(ctx, "test", newActor())
 		require.NoError(t, err)
 		assert.NotNil(t, pid)
 
@@ -121,20 +130,26 @@ func TestPassivation(t *testing.T) {
 		err = Tell(ctx, pid, new(testpb.TestSend))
 		assert.Error(t, err)
 		assert.EqualError(t, err, ErrDead.Error())
+		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 	t.Run("With actor shutdown failure", func(t *testing.T) {
 		ctx := context.TODO()
-		// create a Ping actor
-		opts := []pidOption{
-			withInitMaxRetries(1),
-			withPassivationAfter(passivateAfter),
-		}
-
+		host := "127.0.0.1"
 		ports := dynaport.Get(1)
-		// create the actor path
-		actorPath := address.New("Test", "sys", "host", ports[0])
 
-		pid, err := newPID(ctx, actorPath, &postStopQA{}, opts...)
+		actorSystem, err := NewActorSystem("testSys",
+			WithRemoting(host, int32(ports[0])),
+			WithExpireActorAfter(passivateAfter),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+		lib.Pause(time.Second)
+
+		// create the actor path
+		pid, err := actorSystem.Spawn(ctx, "test", &postStopQA{})
 		require.NoError(t, err)
 		assert.NotNil(t, pid)
 
@@ -151,24 +166,26 @@ func TestPassivation(t *testing.T) {
 		err = Tell(ctx, pid, new(testpb.TestSend))
 		assert.Error(t, err)
 		assert.EqualError(t, err, ErrDead.Error())
+		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 }
 func TestReply(t *testing.T) {
 	t.Run("With happy path", func(t *testing.T) {
 		ctx := context.TODO()
-		// create a Ping actor
-		opts := []pidOption{
-			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
-		}
-
-		// create the actor path
+		host := "127.0.0.1"
 		ports := dynaport.Get(1)
-		// create the actor path
-		actorPath := address.New("Test", "sys", "host", ports[0])
 
-		pid, err := newPID(ctx, actorPath, newActor(), opts...)
+		actorSystem, err := NewActorSystem("testSys",
+			WithRemoting(host, int32(ports[0])),
+			WithLogger(log.DiscardLogger))
 
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+		lib.Pause(time.Second)
+
+		pid, err := actorSystem.Spawn(ctx, "test", newActor())
 		require.NoError(t, err)
 		assert.NotNil(t, pid)
 
@@ -180,21 +197,25 @@ func TestReply(t *testing.T) {
 		// stop the actor
 		err = pid.Shutdown(ctx)
 		assert.NoError(t, err)
+		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 	t.Run("With timeout", func(t *testing.T) {
 		ctx := context.TODO()
-		// create a Ping actor
-		opts := []pidOption{
-			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
-		}
-
-		// create the actor path
+		host := "127.0.0.1"
 		ports := dynaport.Get(1)
-		// create the actor path
-		actorPath := address.New("Test", "sys", "host", ports[0])
-		pid, err := newPID(ctx, actorPath, newActor(), opts...)
 
+		actorSystem, err := NewActorSystem("testSys",
+			WithRemoting(host, int32(ports[0])),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+		lib.Pause(time.Second)
+
+		// create the actor path
+		pid, err := actorSystem.Spawn(ctx, "test", newActor())
 		require.NoError(t, err)
 		assert.NotNil(t, pid)
 
@@ -205,21 +226,26 @@ func TestReply(t *testing.T) {
 		// stop the actor
 		err = pid.Shutdown(ctx)
 		assert.NoError(t, err)
+		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 	t.Run("With actor not ready", func(t *testing.T) {
 		ctx := context.TODO()
-		// create a Ping actor
-		opts := []pidOption{
-			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
-		}
-
-		// create the actor path
+		host := "127.0.0.1"
 		ports := dynaport.Get(1)
-		// create the actor path
-		actorPath := address.New("Test", "sys", "host", ports[0])
-		pid, err := newPID(ctx, actorPath, newActor(), opts...)
 
+		actorSystem, err := NewActorSystem("testSys",
+			WithRemoting(host, int32(ports[0])),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+
+		lib.Pause(time.Second)
+
+		// create the actor path
+		pid, err := actorSystem.Spawn(ctx, "test", newActor())
 		require.NoError(t, err)
 		assert.NotNil(t, pid)
 
@@ -231,25 +257,28 @@ func TestReply(t *testing.T) {
 		assert.Error(t, err)
 		assert.EqualError(t, err, ErrDead.Error())
 		assert.Nil(t, actual)
+		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 }
 func TestRestart(t *testing.T) {
 	t.Run("With restart a stopped actor", func(t *testing.T) {
 		ctx := context.TODO()
-
-		// create a Ping actor
-		actor := newActor()
-		assert.NotNil(t, actor)
-
-		// create the actor path
+		host := "127.0.0.1"
 		ports := dynaport.Get(1)
-		// create the actor path
-		actorPath := address.New("Test", "sys", "host", ports[0])
-		// create the actor ref
-		pid, err := newPID(ctx, actorPath, actor,
-			withInitMaxRetries(1),
-			withPassivationAfter(10*time.Second),
-			withCustomLogger(log.DiscardLogger))
+
+		actorSystem, err := NewActorSystem("testSys",
+			WithRemoting(host, int32(ports[0])),
+			WithExpireActorAfter(10*time.Second),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+
+		lib.Pause(time.Second)
+
+		pid, err := actorSystem.Spawn(ctx, "test", newActor())
 
 		require.NoError(t, err)
 		assert.NotNil(t, pid)
@@ -279,22 +308,25 @@ func TestRestart(t *testing.T) {
 		// stop the actor
 		err = pid.Shutdown(ctx)
 		assert.NoError(t, err)
+		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 	t.Run("With restart an actor", func(t *testing.T) {
 		ctx := context.TODO()
-
-		// create a Ping actor
-		actor := newActor()
-		assert.NotNil(t, actor)
-		// create the actor path
+		host := "127.0.0.1"
 		ports := dynaport.Get(1)
-		// create the actor path
-		actorPath := address.New("Test", "sys", "host", ports[0])
 
-		// create the actor ref
-		pid, err := newPID(ctx, actorPath, actor,
-			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger))
+		actorSystem, err := NewActorSystem("testSys",
+			WithRemoting(host, int32(ports[0])),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+
+		lib.Pause(time.Second)
+
+		pid, err := actorSystem.Spawn(ctx, "test", newActor())
 
 		require.NoError(t, err)
 		assert.NotNil(t, pid)
@@ -320,23 +352,30 @@ func TestRestart(t *testing.T) {
 		// stop the actor
 		err = pid.Shutdown(ctx)
 		assert.NoError(t, err)
+		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 	t.Run("With restart an actor with PreStart failure", func(t *testing.T) {
 		ctx := context.TODO()
+		host := "127.0.0.1"
+		ports := dynaport.Get(1)
+
+		actorSystem, err := NewActorSystem("testSys",
+			WithRemoting(host, int32(ports[0])),
+			WithExpireActorAfter(time.Minute),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+
+		lib.Pause(time.Second)
 
 		// create a Ping actor
 		actor := newRestart()
 		assert.NotNil(t, actor)
-		// create the actor path
-		ports := dynaport.Get(1)
-		// create the actor path
-		actorPath := address.New("Test", "sys", "host", ports[0])
 
-		// create the actor ref
-		pid, err := newPID(ctx, actorPath, actor,
-			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
-			withPassivationAfter(time.Minute))
+		pid, err := actorSystem.Spawn(ctx, "test", actor)
 
 		require.NoError(t, err)
 		assert.NotNil(t, pid)
@@ -352,6 +391,7 @@ func TestRestart(t *testing.T) {
 		// stop the actor
 		err = pid.Shutdown(ctx)
 		assert.NoError(t, err)
+		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 	t.Run("noSender cannot be restarted", func(t *testing.T) {
 		pid := &PID{
@@ -363,20 +403,28 @@ func TestRestart(t *testing.T) {
 	})
 	t.Run("With restart failed due to PostStop failure", func(t *testing.T) {
 		ctx := context.TODO()
+		host := "127.0.0.1"
+		ports := dynaport.Get(1)
+
+		actorSystem, err := NewActorSystem("testSys",
+			WithRemoting(host, int32(ports[0])),
+			WithExpireActorAfter(passivateAfter),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+
+		lib.Pause(time.Second)
 
 		// create a Ping actor
 		actor := &postStopQA{}
 		assert.NotNil(t, actor)
-		// create the actor path
-		ports := dynaport.Get(1)
-		// create the actor path
-		actorPath := address.New("Test", "sys", "host", ports[0])
 
-		// create the actor ref
-		pid, err := newPID(ctx, actorPath, actor,
-			withInitMaxRetries(1),
-			withPassivationAfter(passivateAfter),
-			withCustomLogger(log.DiscardLogger))
+		pid, err := actorSystem.Spawn(ctx, "test", actor)
+		require.NoError(t, err)
+		assert.NotNil(t, pid)
 
 		require.NoError(t, err)
 		assert.NotNil(t, pid)
@@ -391,24 +439,28 @@ func TestRestart(t *testing.T) {
 		err = pid.Restart(ctx)
 		assert.Error(t, err)
 		assert.False(t, pid.IsRunning())
+		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 }
 func TestSupervisorStrategy(t *testing.T) {
 	t.Run("With stop as supervisor directive", func(t *testing.T) {
-		// create a test context
 		ctx := context.TODO()
-		// create the actor path
+		host := "127.0.0.1"
 		ports := dynaport.Get(1)
-		// create the actor path
-		actorPath := address.New("Test", "sys", "host", ports[0])
 
-		// create the parent actor
-		parent, err := newPID(ctx, actorPath,
-			newTestSupervisor(),
-			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
-			withSupervisorDirective(NewStopDirective()))
+		actorSystem, err := NewActorSystem("testSys",
+			WithRemoting(host, int32(ports[0])),
+			WithExpireActorAfter(passivateAfter),
+			WithLogger(log.DiscardLogger))
 
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+
+		lib.Pause(time.Second)
+
+		parent, err := actorSystem.Spawn(ctx, "test", newTestSupervisor())
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
 
@@ -429,23 +481,26 @@ func TestSupervisorStrategy(t *testing.T) {
 		//stop the actor
 		err = parent.Shutdown(ctx)
 		assert.NoError(t, err)
+		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 	t.Run("With the default supervisor directive", func(t *testing.T) {
-		// create a test context
 		ctx := context.TODO()
-		// create the actor path
+		host := "127.0.0.1"
 		ports := dynaport.Get(1)
-		// create the actor path
-		actorPath := address.New("Test", "sys", "host", ports[0])
 
-		// create the parent actor
-		parent, err := newPID(ctx,
-			actorPath,
-			newTestSupervisor(),
-			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
-			withPassivationDisabled())
+		actorSystem, err := NewActorSystem("testSys",
+			WithRemoting(host, int32(ports[0])),
+			WithPassivationDisabled(),
+			WithLogger(log.DiscardLogger))
 
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+
+		lib.Pause(time.Second)
+
+		parent, err := actorSystem.Spawn(ctx, "test", newTestSupervisor())
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
 
@@ -470,25 +525,26 @@ func TestSupervisorStrategy(t *testing.T) {
 		//stop the actor
 		err = parent.Shutdown(ctx)
 		assert.NoError(t, err)
+		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 	t.Run("With default strategy with child actor shutdown failure", func(t *testing.T) {
-		// create a test context
 		ctx := context.TODO()
-		// create the actor path
+		host := "127.0.0.1"
 		ports := dynaport.Get(1)
-		// create the actor path
-		actorPath := address.New("Test", "sys", "host", ports[0])
 
-		// create the parent actor
-		parent, err := newPID(ctx,
-			actorPath,
-			newTestSupervisor(),
-			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
-			withPassivationDisabled(),
-			withSupervisorDirective(new(unhandledSupervisorDirective)), // only for test to handle default case
-		)
+		actorSystem, err := NewActorSystem("testSys",
+			WithRemoting(host, int32(ports[0])),
+			WithPassivationDisabled(),
+			WithLogger(log.DiscardLogger))
 
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+
+		lib.Pause(time.Second)
+
+		parent, err := actorSystem.Spawn(ctx, "test", newTestSupervisor(), WithSupervisor(new(unhandledSupervisorDirective)))
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
 
@@ -513,24 +569,26 @@ func TestSupervisorStrategy(t *testing.T) {
 		//stop the actor
 		err = parent.Shutdown(ctx)
 		assert.NoError(t, err)
+		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 	t.Run("With stop as supervisor directive with child actor shutdown failure", func(t *testing.T) {
-		// create a test context
 		ctx := context.TODO()
-		// create the actor path
+		host := "127.0.0.1"
 		ports := dynaport.Get(1)
-		// create the actor path
-		actorPath := address.New("Test", "sys", "host", ports[0])
 
-		// create the parent actor
-		parent, err := newPID(ctx,
-			actorPath,
-			newTestSupervisor(),
-			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
-			withSupervisorDirective(DefaultSupervisoryStrategy),
-			withPassivationDisabled(),
-		)
+		actorSystem, err := NewActorSystem("testSys",
+			WithRemoting(host, int32(ports[0])),
+			WithPassivationDisabled(),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+
+		lib.Pause(time.Second)
+
+		parent, err := actorSystem.Spawn(ctx, "test", newTestSupervisor(), WithSupervisor(DefaultSupervisoryStrategy))
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
@@ -556,26 +614,26 @@ func TestSupervisorStrategy(t *testing.T) {
 		//stop the actor
 		err = parent.Shutdown(ctx)
 		assert.NoError(t, err)
+		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 	t.Run("With restart as supervisor strategy", func(t *testing.T) {
-		// create a test context
 		ctx := context.TODO()
-
-		logger := log.DiscardLogger
-		// create the actor path
+		host := "127.0.0.1"
 		ports := dynaport.Get(1)
-		// create the actor path
-		actorPath := address.New("Test", "sys", "host", ports[0])
-		// create the parent actor
-		parent, err := newPID(ctx,
-			actorPath,
-			newTestSupervisor(),
-			withInitMaxRetries(1),
-			withCustomLogger(logger),
-			withPassivationDisabled(),
-			withSupervisorDirective(NewRestartDirective()),
-		)
 
+		actorSystem, err := NewActorSystem("testSys",
+			WithRemoting(host, int32(ports[0])),
+			WithPassivationDisabled(),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+
+		lib.Pause(time.Second)
+
+		parent, err := actorSystem.Spawn(ctx, "test", newTestSupervisor(), WithSupervisor(NewRestartDirective()))
 		require.NoError(t, err)
 		require.NotNil(t, parent)
 
@@ -602,23 +660,26 @@ func TestSupervisorStrategy(t *testing.T) {
 		//stop the actor
 		err = parent.Shutdown(ctx)
 		assert.NoError(t, err)
+		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 	t.Run("With no strategy set will default to a Shutdown", func(t *testing.T) {
-		// create a test context
 		ctx := context.TODO()
-		// create the actor path
+		host := "127.0.0.1"
 		ports := dynaport.Get(1)
-		// create the actor path
-		actorPath := address.New("Test", "sys", "host", ports[0])
 
-		// create the parent actor
-		parent, err := newPID(ctx,
-			actorPath,
-			newTestSupervisor(),
-			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
-			withPassivationDisabled(),
-		)
+		actorSystem, err := NewActorSystem("testSys",
+			WithRemoting(host, int32(ports[0])),
+			WithPassivationDisabled(),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+
+		lib.Pause(time.Second)
+
+		parent, err := actorSystem.Spawn(ctx, "test", newTestSupervisor())
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
@@ -642,25 +703,26 @@ func TestSupervisorStrategy(t *testing.T) {
 		//stop the actor
 		err = parent.Shutdown(ctx)
 		assert.NoError(t, err)
+		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 	t.Run("With resume as supervisor strategy", func(t *testing.T) {
-		// create a test context
 		ctx := context.TODO()
-
-		logger := log.DiscardLogger
-		// create the actor path
+		host := "127.0.0.1"
 		ports := dynaport.Get(1)
-		actorPath := address.New("Test", "sys", "host", ports[0])
-		// create the parent actor
-		parent, err := newPID(ctx,
-			actorPath,
-			newTestSupervisor(),
-			withInitMaxRetries(1),
-			withCustomLogger(logger),
-			withPassivationDisabled(),
-			withSupervisorDirective(NewResumeDirective()),
-		)
 
+		actorSystem, err := NewActorSystem("testSys",
+			WithRemoting(host, int32(ports[0])),
+			WithPassivationDisabled(),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+
+		lib.Pause(time.Second)
+
+		parent, err := actorSystem.Spawn(ctx, "test", newTestSupervisor(), WithSupervisor(NewResumeDirective()))
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
 
@@ -689,30 +751,30 @@ func TestSupervisorStrategy(t *testing.T) {
 		//stop the actor
 		err = parent.Shutdown(ctx)
 		assert.NoError(t, err)
+		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 	t.Run("With restart with limit as supervisor strategy", func(t *testing.T) {
-		// create a test context
 		ctx := context.TODO()
-
-		logger := log.DiscardLogger
-		// create the actor path
+		host := "127.0.0.1"
 		ports := dynaport.Get(1)
-		actorPath := address.New("Test", "sys", "host", ports[0])
+
+		actorSystem, err := NewActorSystem("testSys",
+			WithRemoting(host, int32(ports[0])),
+			WithPassivationDisabled(),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+
+		lib.Pause(time.Second)
 
 		// create the directive
 		restart := NewRestartDirective()
 		restart.WithLimit(2, time.Minute)
 
-		// create the parent actor
-		parent, err := newPID(ctx,
-			actorPath,
-			newTestSupervisor(),
-			withInitMaxRetries(1),
-			withCustomLogger(logger),
-			withPassivationDisabled(),
-			withSupervisorDirective(restart),
-		)
-
+		parent, err := actorSystem.Spawn(ctx, "test", newTestSupervisor(), WithSupervisor(restart))
 		require.NoError(t, err)
 		require.NotNil(t, parent)
 
@@ -737,36 +799,43 @@ func TestSupervisorStrategy(t *testing.T) {
 		//stop the actor
 		err = parent.Shutdown(ctx)
 		assert.NoError(t, err)
+		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 }
 func TestMessaging(t *testing.T) {
 	t.Run("With happy", func(t *testing.T) {
 		ctx := context.TODO()
-		// create a Ping actor
-		opts := []pidOption{
-			withInitMaxRetries(1),
-			withCustomLogger(log.DefaultLogger),
-		}
+		host := "127.0.0.1"
 		ports := dynaport.Get(1)
-		// create the actor path
-		actor1 := &exchanger{}
-		actorPath1 := address.New("Exchange1", "sys", "host", ports[0])
-		pid1, err := newPID(ctx, actorPath1, actor1, opts...)
 
+		actorSystem, err := NewActorSystem("testSys",
+			WithRemoting(host, int32(ports[0])),
+			WithPassivationDisabled(),
+			WithJanitorInterval(time.Minute),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+
+		lib.Pause(time.Second)
+
+		pid1, err := actorSystem.Spawn(ctx, "Exchange1", &exchanger{})
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
 
-		actor2 := &exchanger{}
-		actorPath2 := address.New("Exchange2", "sys", "host", ports[0])
-		pid2, err := newPID(ctx, actorPath2, actor2, opts...)
+		pid2, err := actorSystem.Spawn(ctx, "Exchange2", &exchanger{})
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
+
+		lib.Pause(time.Second)
 
 		err = pid1.Tell(ctx, pid2, new(testpb.TestSend))
 		require.NoError(t, err)
 
 		// send an ask
-		reply, err := pid1.Ask(ctx, pid2, new(testpb.TestReply), 20*time.Second)
+		reply, err := pid1.Ask(ctx, pid2, new(testpb.TestReply), time.Second)
 		require.NoError(t, err)
 		require.NotNil(t, reply)
 		expected := new(testpb.Reply)
@@ -778,35 +847,43 @@ func TestMessaging(t *testing.T) {
 		err = Tell(ctx, pid1, new(testpb.TestBye))
 		require.NoError(t, err)
 
-		assert.Eventually(t, func() bool {
-			return pid1.IsRunning()
-		}, 2*time.Second, time.Second)
+		lib.Pause(time.Second)
 
+		assert.False(t, pid1.IsRunning())
 		assert.True(t, pid2.IsRunning())
 
 		err = Tell(ctx, pid2, new(testpb.TestBye))
+		assert.NoError(t, err)
 		lib.Pause(time.Second)
 		assert.False(t, pid2.IsRunning())
+		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 	t.Run("With Ask invalid timeout", func(t *testing.T) {
 		ctx := context.TODO()
-		// create a Ping actor
-		opts := []pidOption{
-			withInitMaxRetries(1),
-			withCustomLogger(log.DefaultLogger),
-		}
+		host := "127.0.0.1"
 		ports := dynaport.Get(1)
+
+		actorSystem, err := NewActorSystem("testSys",
+			WithRemoting(host, int32(ports[0])),
+			WithPassivationDisabled(),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+
+		lib.Pause(time.Second)
+
 		// create the actor path
 		actor1 := &exchanger{}
-		actorPath1 := address.New("Exchange1", "sys", "host", ports[0])
-		pid1, err := newPID(ctx, actorPath1, actor1, opts...)
+		pid1, err := actorSystem.Spawn(ctx, "Exchange1", actor1)
 
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
 
 		actor2 := &exchanger{}
-		actorPath2 := address.New("Exchange2", "sys", "host", ports[0])
-		pid2, err := newPID(ctx, actorPath2, actor2, opts...)
+		pid2, err := actorSystem.Spawn(ctx, "Exchange2", actor2)
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
 
@@ -817,26 +894,34 @@ func TestMessaging(t *testing.T) {
 
 		require.NoError(t, pid1.Shutdown(ctx))
 		require.NoError(t, pid2.Shutdown(ctx))
+		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 	t.Run("With Ask when not ready", func(t *testing.T) {
 		ctx := context.TODO()
-		// create a Ping actor
-		opts := []pidOption{
-			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
-		}
+		host := "127.0.0.1"
 		ports := dynaport.Get(1)
+
+		actorSystem, err := NewActorSystem("testSys",
+			WithRemoting(host, int32(ports[0])),
+			WithPassivationDisabled(),
+			WithJanitorInterval(time.Minute),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+
+		lib.Pause(time.Second)
+
 		// create the actor path
 		actor1 := &exchanger{}
-		actorPath1 := address.New("Exchange1", "sys", "host", ports[0])
-		pid1, err := newPID(ctx, actorPath1, actor1, opts...)
-
+		pid1, err := actorSystem.Spawn(ctx, "Exchange1", actor1)
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
 
 		actor2 := &exchanger{}
-		actorPath2 := address.New("Exchange2", "sys", "host", ports[0])
-		pid2, err := newPID(ctx, actorPath2, actor2, opts...)
+		pid2, err := actorSystem.Spawn(ctx, "Exchange2", actor2)
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
 
@@ -855,26 +940,34 @@ func TestMessaging(t *testing.T) {
 
 		err = Tell(ctx, pid1, new(testpb.TestBye))
 		require.NoError(t, err)
+		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 	t.Run("With Tell when not ready", func(t *testing.T) {
 		ctx := context.TODO()
-		// create a Ping actor
-		opts := []pidOption{
-			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
-		}
+		host := "127.0.0.1"
 		ports := dynaport.Get(1)
+
+		actorSystem, err := NewActorSystem("testSys",
+			WithRemoting(host, int32(ports[0])),
+			WithPassivationDisabled(),
+			WithJanitorInterval(time.Minute),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+
+		lib.Pause(time.Second)
 
 		// create the actor path
 		actor1 := &exchanger{}
-		actorPath1 := address.New("Exchange1", "sys", "host", ports[0])
-		pid1, err := newPID(ctx, actorPath1, actor1, opts...)
+		pid1, err := actorSystem.Spawn(ctx, "Exchange1", actor1)
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
 
 		actor2 := &exchanger{}
-		actorPath2 := address.New("Exchange2", "sys", "host", ports[0])
-		pid2, err := newPID(ctx, actorPath2, actor2, opts...)
+		pid2, err := actorSystem.Spawn(ctx, "Exchange2", actor2)
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
 
@@ -892,27 +985,35 @@ func TestMessaging(t *testing.T) {
 
 		err = Tell(ctx, pid1, new(testpb.TestBye))
 		require.NoError(t, err)
+		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 	t.Run("With Ask timeout", func(t *testing.T) {
 		ctx := context.TODO()
-		// create a Ping actor
-		opts := []pidOption{
-			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
-		}
+		host := "127.0.0.1"
 		ports := dynaport.Get(1)
+
+		actorSystem, err := NewActorSystem("testSys",
+			WithRemoting(host, int32(ports[0])),
+			WithPassivationDisabled(),
+			WithJanitorInterval(time.Minute),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+
+		lib.Pause(time.Second)
 
 		// create the actor path
 		actor1 := &exchanger{}
-		actorPath1 := address.New("Exchange1", "sys", "host", ports[0])
-		pid1, err := newPID(ctx, actorPath1, actor1, opts...)
+		pid1, err := actorSystem.Spawn(ctx, "Exchange1", actor1)
 
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
 
 		actor2 := newActor()
-		actorPath2 := address.New("Exchange2", "sys", "host", ports[0])
-		pid2, err := newPID(ctx, actorPath2, actor2, opts...)
+		pid2, err := actorSystem.Spawn(ctx, "Exchange2", actor2)
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
 
@@ -938,6 +1039,7 @@ func TestMessaging(t *testing.T) {
 		lib.Pause(time.Second)
 		assert.NoError(t, pid2.Shutdown(ctx))
 		assert.False(t, pid2.IsRunning())
+		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 }
 func TestRemoting(t *testing.T) {
@@ -1069,17 +1171,24 @@ func TestRemoting(t *testing.T) {
 }
 func TestActorHandle(t *testing.T) {
 	ctx := context.TODO()
-	// create the actor path
+	host := "127.0.0.1"
 	ports := dynaport.Get(1)
-	actorPath := address.New("Test", "sys", "host", ports[0])
+
+	actorSystem, err := NewActorSystem("testSys",
+		WithRemoting(host, int32(ports[0])),
+		WithPassivationDisabled(),
+		WithJanitorInterval(time.Minute),
+		WithLogger(log.DiscardLogger))
+
+	require.NoError(t, err)
+	require.NotNil(t, actorSystem)
+
+	require.NoError(t, actorSystem.Start(ctx))
+
+	lib.Pause(time.Second)
 
 	// create the actor ref
-	pid, err := newPID(
-		ctx,
-		actorPath,
-		&exchanger{},
-		withInitMaxRetries(1),
-		withCustomLogger(log.DiscardLogger))
+	pid, err := actorSystem.Spawn(ctx, "Exchanger", &exchanger{})
 
 	require.NoError(t, err)
 	assert.NotNil(t, pid)
@@ -1091,81 +1200,163 @@ func TestActorHandle(t *testing.T) {
 	// stop the actor
 	err = pid.Shutdown(ctx)
 	assert.NoError(t, err)
+	lib.Pause(time.Second)
+	assert.NoError(t, actorSystem.Stop(ctx))
 }
 func TestPIDActorSystem(t *testing.T) {
 	ctx := context.TODO()
-	// create the actor path
+	host := "127.0.0.1"
 	ports := dynaport.Get(1)
-	actorPath := address.New("Test", "sys", "host", ports[0])
+
+	actorSystem, err := NewActorSystem("testSys",
+		WithRemoting(host, int32(ports[0])),
+		WithPassivationDisabled(),
+		WithJanitorInterval(time.Minute),
+		WithLogger(log.DiscardLogger))
+
+	require.NoError(t, err)
+	require.NotNil(t, actorSystem)
+
+	require.NoError(t, actorSystem.Start(ctx))
+
+	lib.Pause(time.Second)
 
 	// create the actor ref
-	pid, err := newPID(
-		ctx,
-		actorPath,
-		&exchanger{},
-		withInitMaxRetries(1),
-		withCustomLogger(log.DiscardLogger))
+	pid, err := actorSystem.Spawn(ctx, "Exchanger", &exchanger{})
 
 	require.NoError(t, err)
 	assert.NotNil(t, pid)
 	sys := pid.ActorSystem()
-	assert.Nil(t, sys)
+	require.NotNil(t, sys)
 	// stop the actor
 	err = pid.Shutdown(ctx)
-	assert.NoError(t, err)
+	require.NoError(t, err)
+	lib.Pause(time.Second)
+	assert.NoError(t, actorSystem.Stop(ctx))
 }
 func TestSpawnChild(t *testing.T) {
 	t.Run("With restarting child actor", func(t *testing.T) {
-		// create a test context
 		ctx := context.TODO()
-		// create the actor path
+		host := "127.0.0.1"
 		ports := dynaport.Get(1)
-		actorPath := address.New("Test", "sys", "host", ports[0])
 
-		// create the parent actor
-		parent, err := newPID(ctx, actorPath,
-			newTestSupervisor(),
-			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger))
+		actorSystem, err := NewActorSystem("testSys",
+			WithRemoting(host, int32(ports[0])),
+			WithPassivationDisabled(),
+			WithLogger(log.DefaultLogger))
 
 		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+
+		lib.Pause(time.Second)
+
+		// create the parent actor
+		parent, err := actorSystem.Spawn(ctx, "Parent", newTestSupervisor())
+		require.NoError(t, err)
 		assert.NotNil(t, parent)
+
+		lib.Pause(time.Second)
 
 		// create the child actor
 		child, err := parent.SpawnChild(ctx, "SpawnChild", newTestSupervised())
 		assert.NoError(t, err)
 		assert.NotNil(t, child)
 
-		assert.Len(t, parent.Children(), 1)
+		lib.Pause(time.Second)
+
+		require.Len(t, parent.Children(), 1)
 
 		// stop the child actor
-		assert.NoError(t, child.Shutdown(ctx))
+		require.NoError(t, child.Shutdown(ctx))
 
-		lib.Pause(100 * time.Millisecond)
+		lib.Pause(time.Second)
+		require.False(t, child.IsRunning())
+		require.Empty(t, parent.Children())
+
 		// create the child actor
 		child, err = parent.SpawnChild(ctx, "SpawnChild", newTestSupervised())
 		assert.NoError(t, err)
 		assert.NotNil(t, child)
 
-		lib.Pause(100 * time.Millisecond)
+		lib.Pause(time.Second)
 
 		assert.Len(t, parent.Children(), 1)
 		//stop the actor
 		err = parent.Shutdown(ctx)
 		assert.NoError(t, err)
+		lib.Pause(time.Second)
+		assert.NoError(t, actorSystem.Stop(ctx))
 	})
-	t.Run("With starting child actor with a different mailbox", func(t *testing.T) {
-		// create a test context
+	t.Run("With empty children when actor is not running or does not exist", func(t *testing.T) {
 		ctx := context.TODO()
-		// create the actor path
+		host := "127.0.0.1"
 		ports := dynaport.Get(1)
-		actorPath := address.New("Test", "sys", "host", ports[0])
+
+		actorSystem, err := NewActorSystem("testSys",
+			WithRemoting(host, int32(ports[0])),
+			WithPassivationDisabled(),
+			WithJanitorInterval(100*time.Millisecond),
+			WithLogger(log.DefaultLogger))
+
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+
+		lib.Pause(time.Second)
 
 		// create the parent actor
-		parent, err := newPID(ctx, actorPath,
-			newTestSupervisor(),
-			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger))
+		parent, err := actorSystem.Spawn(ctx, "Parent", newTestSupervisor())
+		require.NoError(t, err)
+		assert.NotNil(t, parent)
+
+		lib.Pause(time.Second)
+
+		// create the child actor
+		child, err := parent.SpawnChild(ctx, "SpawnChild", newTestSupervised())
+		assert.NoError(t, err)
+		assert.NotNil(t, child)
+
+		lib.Pause(time.Second)
+
+		require.Len(t, parent.Children(), 1)
+
+		// stop the child actor
+		require.NoError(t, child.Shutdown(ctx))
+
+		lib.Pause(time.Second)
+		require.False(t, child.IsRunning())
+		require.Empty(t, parent.Children())
+
+		// stop the parent actor
+		require.NoError(t, parent.Shutdown(ctx))
+		lib.Pause(time.Second)
+
+		require.Empty(t, parent.Children())
+		assert.NoError(t, actorSystem.Stop(ctx))
+	})
+	t.Run("With starting child actor with a different mailbox", func(t *testing.T) {
+		ctx := context.TODO()
+		host := "127.0.0.1"
+		ports := dynaport.Get(1)
+
+		actorSystem, err := NewActorSystem("testSys",
+			WithRemoting(host, int32(ports[0])),
+			WithPassivationDisabled(),
+			WithJanitorInterval(time.Minute),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+
+		lib.Pause(time.Second)
+
+		// create the parent actor
+		parent, err := actorSystem.Spawn(ctx, "Parent", newTestSupervisor())
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
@@ -1182,19 +1373,29 @@ func TestSpawnChild(t *testing.T) {
 		//stop the actor
 		err = parent.Shutdown(ctx)
 		assert.NoError(t, err)
+		lib.Pause(time.Second)
+		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 	t.Run("With restarting child actor when not shutdown", func(t *testing.T) {
-		// create a test context
 		ctx := context.TODO()
-		// create the actor path
+		host := "127.0.0.1"
 		ports := dynaport.Get(1)
-		actorPath := address.New("Test", "sys", "host", ports[0])
+
+		actorSystem, err := NewActorSystem("testSys",
+			WithRemoting(host, int32(ports[0])),
+			WithPassivationDisabled(),
+			WithJanitorInterval(time.Minute),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+
+		lib.Pause(time.Second)
 
 		// create the parent actor
-		parent, err := newPID(ctx, actorPath,
-			newTestSupervisor(),
-			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger))
+		parent, err := actorSystem.Spawn(ctx, "Parent", newTestSupervisor())
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
@@ -1218,20 +1419,29 @@ func TestSpawnChild(t *testing.T) {
 		//stop the actor
 		err = parent.Shutdown(ctx)
 		assert.NoError(t, err)
+		lib.Pause(time.Second)
+		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 	t.Run("With parent not ready", func(t *testing.T) {
-		// create a test context
 		ctx := context.TODO()
-		// create the actor path
+		host := "127.0.0.1"
 		ports := dynaport.Get(1)
-		actorPath := address.New("Test", "sys", "host", ports[0])
+
+		actorSystem, err := NewActorSystem("testSys",
+			WithRemoting(host, int32(ports[0])),
+			WithPassivationDisabled(),
+			WithJanitorInterval(time.Minute),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+
+		lib.Pause(time.Second)
 
 		// create the parent actor
-		parent, err := newPID(ctx, actorPath,
-			newTestSupervisor(),
-			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger))
-
+		parent, err := actorSystem.Spawn(ctx, "Parent", newTestSupervisor())
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
 
@@ -1245,19 +1455,28 @@ func TestSpawnChild(t *testing.T) {
 		assert.Error(t, err)
 		assert.EqualError(t, err, ErrDead.Error())
 		assert.Nil(t, child)
+		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 	t.Run("With failed init", func(t *testing.T) {
-		// create a test context
 		ctx := context.TODO()
-		// create the actor path
+		host := "127.0.0.1"
 		ports := dynaport.Get(1)
-		actorPath := address.New("Test", "sys", "host", ports[0])
+
+		actorSystem, err := NewActorSystem("testSys",
+			WithRemoting(host, int32(ports[0])),
+			WithPassivationDisabled(),
+			WithJanitorInterval(time.Minute),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+
+		lib.Pause(time.Second)
 
 		// create the parent actor
-		parent, err := newPID(ctx, actorPath,
-			newTestSupervisor(),
-			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger))
+		parent, err := actorSystem.Spawn(ctx, "Parent", newTestSupervisor())
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
@@ -1271,26 +1490,33 @@ func TestSpawnChild(t *testing.T) {
 		//stop the actor
 		err = parent.Shutdown(ctx)
 		assert.NoError(t, err)
+		lib.Pause(time.Second)
+		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 	t.Run("With child created event published", func(t *testing.T) {
-		// create a test context
 		ctx := context.TODO()
-		// create the actor path
+		host := "127.0.0.1"
 		ports := dynaport.Get(1)
-		actorPath := address.New("Test", "sys", "host", ports[0])
 
-		eventsStream := eventstream.New()
+		actorSystem, err := NewActorSystem("testSys",
+			WithRemoting(host, int32(ports[0])),
+			WithPassivationDisabled(),
+			WithJanitorInterval(time.Minute),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+
+		lib.Pause(time.Second)
 
 		// add a subscriber
-		subsriber := eventsStream.AddSubscriber()
-		eventsStream.Subscribe(subsriber, eventsTopic)
+		subsriber, err := actorSystem.Subscribe()
+		require.NoError(t, err)
 
 		// create the parent actor
-		parent, err := newPID(ctx, actorPath,
-			newTestSupervisor(),
-			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
-			withEventsStream(eventsStream))
+		parent, err := actorSystem.Spawn(ctx, "Parent", newTestSupervisor())
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
@@ -1323,22 +1549,30 @@ func TestSpawnChild(t *testing.T) {
 		//stop the actor
 		err = parent.Shutdown(ctx)
 		assert.NoError(t, err)
+		lib.Pause(time.Second)
+		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 }
 func TestPoisonPill(t *testing.T) {
 	ctx := context.TODO()
-
-	// create the actor path
+	host := "127.0.0.1"
 	ports := dynaport.Get(1)
-	actorPath := address.New("Test", "sys", "host", ports[0])
+
+	actorSystem, err := NewActorSystem("testSys",
+		WithRemoting(host, int32(ports[0])),
+		WithPassivationDisabled(),
+		WithJanitorInterval(time.Minute),
+		WithLogger(log.DiscardLogger))
+
+	require.NoError(t, err)
+	require.NotNil(t, actorSystem)
+
+	require.NoError(t, actorSystem.Start(ctx))
+
+	lib.Pause(time.Second)
 
 	// create the actor ref
-	pid, err := newPID(
-		ctx,
-		actorPath,
-		newActor(),
-		withInitMaxRetries(1),
-		withCustomLogger(log.DiscardLogger))
+	pid, err := actorSystem.Spawn(ctx, "PoisonPill", newActor())
 
 	require.NoError(t, err)
 	assert.NotNil(t, pid)
@@ -1351,6 +1585,8 @@ func TestPoisonPill(t *testing.T) {
 	// wait for the graceful shutdown
 	lib.Pause(time.Second)
 	assert.False(t, pid.IsRunning())
+	lib.Pause(time.Second)
+	assert.NoError(t, actorSystem.Stop(ctx))
 }
 func TestRemoteLookup(t *testing.T) {
 	t.Run("With actor address not found", func(t *testing.T) {
@@ -1506,38 +1742,51 @@ func TestFailedPreStart(t *testing.T) {
 }
 func TestFailedPostStop(t *testing.T) {
 	ctx := context.TODO()
-
-	// create the actor path
+	host := "127.0.0.1"
 	ports := dynaport.Get(1)
-	actorPath := address.New("Test", "sys", "host", ports[0])
 
-	// create the actor ref
-	pid, err := newPID(
-		ctx,
-		actorPath,
-		&postStopQA{},
-		withInitMaxRetries(1),
-		withCustomLogger(log.DiscardLogger))
+	actorSystem, err := NewActorSystem("testSys",
+		WithRemoting(host, int32(ports[0])),
+		WithPassivationDisabled(),
+		WithJanitorInterval(time.Minute),
+		WithLogger(log.DiscardLogger))
+
+	require.NoError(t, err)
+	require.NotNil(t, actorSystem)
+
+	require.NoError(t, actorSystem.Start(ctx))
+
+	lib.Pause(time.Second)
+	pid, err := actorSystem.Spawn(ctx, "PostStop", &postStopQA{})
 
 	require.NoError(t, err)
 	assert.NotNil(t, pid)
 
 	assert.Error(t, pid.Shutdown(ctx))
+	lib.Pause(time.Second)
+	assert.NoError(t, actorSystem.Stop(ctx))
 }
 func TestShutdown(t *testing.T) {
 	t.Run("With Shutdown panic to child stop failure", func(t *testing.T) {
 		// create a test context
 		ctx := context.TODO()
-		// create the actor path
+		host := "127.0.0.1"
 		ports := dynaport.Get(1)
-		actorPath := address.New("Test", "sys", "host", ports[0])
 
-		// create the parent actor
-		parent, err := newPID(ctx, actorPath,
-			newTestSupervisor(),
-			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger))
+		actorSystem, err := NewActorSystem("testSys",
+			WithRemoting(host, int32(ports[0])),
+			WithPassivationDisabled(),
+			WithJanitorInterval(time.Minute),
+			WithLogger(log.DiscardLogger))
 
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+
+		lib.Pause(time.Second)
+
+		parent, err := actorSystem.Spawn(ctx, "test", newTestSupervisor())
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
 
@@ -1550,22 +1799,32 @@ func TestShutdown(t *testing.T) {
 
 		//stop the
 		assert.Error(t, parent.Shutdown(ctx))
+		lib.Pause(2 * time.Second)
+		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 }
 func TestBatchTell(t *testing.T) {
 	t.Run("With happy path", func(t *testing.T) {
 		ctx := context.TODO()
-		// create a Ping actor
-		opts := []pidOption{
-			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
-		}
+		host := "127.0.0.1"
+		ports := dynaport.Get(1)
+
+		actorSystem, err := NewActorSystem("testSys",
+			WithRemoting(host, int32(ports[0])),
+			WithPassivationDisabled(),
+			WithJanitorInterval(time.Minute),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+
+		lib.Pause(time.Second)
 
 		// create the actor path
 		actor := newActor()
-		ports := dynaport.Get(1)
-		actorPath := address.New("Test", "sys", "host", ports[0])
-		pid, err := newPID(ctx, actorPath, actor, opts...)
+		pid, err := actorSystem.Spawn(ctx, "test", actor)
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 
@@ -1578,20 +1837,30 @@ func TestBatchTell(t *testing.T) {
 		// wait a while because exchange is ongoing
 		lib.Pause(time.Second)
 		assert.NoError(t, pid.Shutdown(ctx))
+		lib.Pause(time.Second)
+		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 	t.Run("With a Tell behavior", func(t *testing.T) {
 		ctx := context.TODO()
-		// create a Ping actor
-		opts := []pidOption{
-			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
-		}
+		host := "127.0.0.1"
+		ports := dynaport.Get(1)
+
+		actorSystem, err := NewActorSystem("testSys",
+			WithRemoting(host, int32(ports[0])),
+			WithPassivationDisabled(),
+			WithJanitorInterval(time.Minute),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+
+		lib.Pause(time.Second)
 
 		// create the actor path
 		actor := newActor()
-		ports := dynaport.Get(1)
-		actorPath := address.New("Test", "sys", "host", ports[0])
-		pid, err := newPID(ctx, actorPath, actor, opts...)
+		pid, err := actorSystem.Spawn(ctx, "test", actor)
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 
@@ -1604,44 +1873,63 @@ func TestBatchTell(t *testing.T) {
 		// wait a while because exchange is ongoing
 		lib.Pause(time.Second)
 		assert.NoError(t, pid.Shutdown(ctx))
+		lib.Pause(time.Second)
+		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 	t.Run("With a dead actor", func(t *testing.T) {
 		ctx := context.TODO()
-		// create a Ping actor
-		opts := []pidOption{
-			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
-		}
+		host := "127.0.0.1"
+		ports := dynaport.Get(1)
 
+		actorSystem, err := NewActorSystem("testSys",
+			WithRemoting(host, int32(ports[0])),
+			WithPassivationDisabled(),
+			WithJanitorInterval(time.Minute),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+
+		lib.Pause(time.Second)
 		// create the actor path
 		actor := newActor()
-		ports := dynaport.Get(1)
-		actorPath := address.New("Test", "sys", "host", ports[0])
-		pid, err := newPID(ctx, actorPath, actor, opts...)
+		pid, err := actorSystem.Spawn(ctx, "test", actor)
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 
 		lib.Pause(time.Second)
 		assert.NoError(t, pid.Shutdown(ctx))
 
+		lib.Pause(time.Second)
 		// batch tell
 		require.Error(t, pid.BatchTell(ctx, pid, new(testpb.TestSend)))
+		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 }
 func TestBatchAsk(t *testing.T) {
 	t.Run("With happy path", func(t *testing.T) {
 		ctx := context.TODO()
-		// create a Ping actor
-		opts := []pidOption{
-			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
-		}
+		host := "127.0.0.1"
+		ports := dynaport.Get(1)
 
+		actorSystem, err := NewActorSystem("testSys",
+			WithRemoting(host, int32(ports[0])),
+			WithPassivationDisabled(),
+			WithJanitorInterval(time.Minute),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+
+		lib.Pause(time.Second)
 		// create the actor path
 		actor := &exchanger{}
-		ports := dynaport.Get(1)
-		actorPath := address.New("Test", "sys", "host", ports[0])
-		pid, err := newPID(ctx, actorPath, actor, opts...)
+
+		pid, err := actorSystem.Spawn(ctx, "test", actor)
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 
@@ -1658,44 +1946,66 @@ func TestBatchAsk(t *testing.T) {
 		// wait a while because exchange is ongoing
 		lib.Pause(time.Second)
 		assert.NoError(t, pid.Shutdown(ctx))
+		lib.Pause(time.Second)
+		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 	t.Run("With a dead actor", func(t *testing.T) {
 		ctx := context.TODO()
-		// create a Ping actor
-		opts := []pidOption{
-			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
-		}
+		host := "127.0.0.1"
+		ports := dynaport.Get(1)
 
+		actorSystem, err := NewActorSystem("testSys",
+			WithRemoting(host, int32(ports[0])),
+			WithPassivationDisabled(),
+			WithJanitorInterval(time.Minute),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+
+		lib.Pause(time.Second)
 		// create the actor path
 		actor := &exchanger{}
-		ports := dynaport.Get(1)
-		actorPath := address.New("Test", "sys", "host", ports[0])
-		pid, err := newPID(ctx, actorPath, actor, opts...)
+
+		pid, err := actorSystem.Spawn(ctx, "test", actor)
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 
 		lib.Pause(time.Second)
 		assert.NoError(t, pid.Shutdown(ctx))
 
+		lib.Pause(time.Second)
+
 		// batch ask
 		responses, err := pid.BatchAsk(ctx, pid, []proto.Message{new(testpb.TestReply), new(testpb.TestReply)}, replyTimeout)
 		require.Error(t, err)
 		require.Nil(t, responses)
+		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 	t.Run("With a timeout", func(t *testing.T) {
 		ctx := context.TODO()
-		// create a Ping actor
-		opts := []pidOption{
-			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
-		}
+		host := "127.0.0.1"
+		ports := dynaport.Get(1)
+
+		actorSystem, err := NewActorSystem("testSys",
+			WithRemoting(host, int32(ports[0])),
+			WithPassivationDisabled(),
+			WithJanitorInterval(time.Minute),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+
+		lib.Pause(time.Second)
 
 		// create the actor path
 		actor := newActor()
-		ports := dynaport.Get(1)
-		actorPath := address.New("Test", "sys", "host", ports[0])
-		pid, err := newPID(ctx, actorPath, actor, opts...)
+
+		pid, err := actorSystem.Spawn(ctx, "test", actor)
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 
@@ -1707,6 +2017,8 @@ func TestBatchAsk(t *testing.T) {
 		// wait a while because exchange is ongoing
 		lib.Pause(time.Second)
 		assert.NoError(t, pid.Shutdown(ctx))
+		lib.Pause(time.Second)
+		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 }
 func TestRemoteReSpawn(t *testing.T) {
@@ -1841,6 +2153,7 @@ func TestRemoteStop(t *testing.T) {
 		sys, err := NewActorSystem("test",
 			WithLogger(logger),
 			WithPassivationDisabled(),
+			WithJanitorInterval(time.Minute),
 			WithRemoting(host, int32(remotingPort)),
 		)
 		// assert there are no error
@@ -1880,6 +2193,7 @@ func TestRemoteStop(t *testing.T) {
 		sys, err := NewActorSystem("test",
 			WithLogger(logger),
 			WithPassivationDisabled(),
+			WithJanitorInterval(time.Minute),
 			WithRemoting(host, int32(remotingPort)),
 		)
 		// assert there are no error
@@ -1986,34 +2300,7 @@ func TestRemoteStop(t *testing.T) {
 		})
 	})
 }
-func TestID(t *testing.T) {
-	ctx := context.TODO()
-	// create the actor path
-	ports := dynaport.Get(1)
-	actorPath := address.New("Test", "sys", "host", ports[0])
 
-	// create the actor ref
-	pid, err := newPID(
-		ctx,
-		actorPath,
-		&exchanger{},
-		withInitMaxRetries(1),
-		withCustomLogger(log.DiscardLogger))
-
-	require.NoError(t, err)
-	assert.NotNil(t, pid)
-	sys := pid.ActorSystem()
-	assert.Nil(t, sys)
-
-	expected := actorPath.String()
-	actual := pid.ID()
-
-	require.Equal(t, expected, actual)
-
-	// stop the actor
-	err = pid.Shutdown(ctx)
-	assert.NoError(t, err)
-}
 func TestEquals(t *testing.T) {
 	t.Run("case 1", func(t *testing.T) {
 		ctx := context.TODO()
@@ -2060,6 +2347,7 @@ func TestRemoteSpawn(t *testing.T) {
 		sys, err := NewActorSystem("test",
 			WithLogger(logger),
 			WithPassivationDisabled(),
+			WithJanitorInterval(time.Minute),
 			WithRemoting(host, int32(remotingPort)),
 		)
 		// assert there are no error
@@ -2258,54 +2546,64 @@ func TestRemoteSpawn(t *testing.T) {
 }
 func TestName(t *testing.T) {
 	ctx := context.TODO()
-	// create the actor path
+	host := "127.0.0.1"
 	ports := dynaport.Get(1)
-	actorPath := address.New("Test", "sys", "host", ports[0])
+
+	actorSystem, err := NewActorSystem("testSys",
+		WithRemoting(host, int32(ports[0])),
+		WithPassivationDisabled(),
+		WithJanitorInterval(time.Minute),
+		WithLogger(log.DiscardLogger))
+
+	require.NoError(t, err)
+	require.NotNil(t, actorSystem)
+
+	require.NoError(t, actorSystem.Start(ctx))
+
+	lib.Pause(time.Second)
 
 	// create the actor ref
-	pid, err := newPID(
-		ctx,
-		actorPath,
-		&exchanger{},
-		withInitMaxRetries(1),
-		withCustomLogger(log.DiscardLogger))
+	pid, err := actorSystem.Spawn(ctx, "Exchange1", &exchanger{})
 	require.NoError(t, err)
 	assert.NotNil(t, pid)
-	sys := pid.ActorSystem()
-	assert.Nil(t, sys)
 
-	expected := actorPath.Name()
+	expected := "Exchange1"
 	actual := pid.Name()
-
 	require.Equal(t, expected, actual)
 
 	// stop the actor
 	err = pid.Shutdown(ctx)
 	assert.NoError(t, err)
+	lib.Pause(time.Second)
+	assert.NoError(t, actorSystem.Stop(ctx))
 }
 func TestPipeTo(t *testing.T) {
 	t.Run("With happy path", func(t *testing.T) {
 		askTimeout := time.Minute
 		ctx := context.TODO()
-
-		opts := []pidOption{
-			withInitMaxRetries(1),
-			withPassivationDisabled(),
-			withCustomLogger(log.DiscardLogger),
-		}
+		host := "127.0.0.1"
 		ports := dynaport.Get(1)
 
+		actorSystem, err := NewActorSystem("testSys",
+			WithRemoting(host, int32(ports[0])),
+			WithPassivationDisabled(),
+			WithJanitorInterval(time.Minute),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+
+		lib.Pause(time.Second)
+
 		// create actor1
-		actor1 := &exchanger{}
-		actorPath1 := address.New("Exchange1", "sys", "host", ports[0])
-		pid1, err := newPID(ctx, actorPath1, actor1, opts...)
+		pid1, err := actorSystem.Spawn(ctx, "Exchange1", &exchanger{})
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
 
 		// create actor2
-		actor2 := &exchanger{}
-		actorPath2 := address.New("Exchange2", "sys", "host", ports[0])
-		pid2, err := newPID(ctx, actorPath2, actor2, opts...)
+		pid2, err := actorSystem.Spawn(ctx, "Exchange2", &exchanger{})
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
 
@@ -2342,28 +2640,34 @@ func TestPipeTo(t *testing.T) {
 		lib.Pause(time.Second)
 		assert.NoError(t, pid1.Shutdown(ctx))
 		assert.NoError(t, pid2.Shutdown(ctx))
+		lib.Pause(time.Second)
+		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 	t.Run("With is a dead actor: case 1", func(t *testing.T) {
 		ctx := context.TODO()
-
-		opts := []pidOption{
-			withInitMaxRetries(1),
-			withPassivationDisabled(),
-			withCustomLogger(log.DiscardLogger),
-		}
+		host := "127.0.0.1"
 		ports := dynaport.Get(1)
 
+		actorSystem, err := NewActorSystem("testSys",
+			WithRemoting(host, int32(ports[0])),
+			WithPassivationDisabled(),
+			WithJanitorInterval(time.Minute),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+
+		lib.Pause(time.Second)
+
 		// create actor1
-		actor1 := &exchanger{}
-		actorPath1 := address.New("Exchange1", "sys", "host", ports[0])
-		pid1, err := newPID(ctx, actorPath1, actor1, opts...)
+		pid1, err := actorSystem.Spawn(ctx, "Exchange1", &exchanger{})
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
 
 		// create actor2
-		actor2 := &exchanger{}
-		actorPath2 := address.New("Exchange2", "sys", "host", ports[0])
-		pid2, err := newPID(ctx, actorPath2, actor2, opts...)
+		pid2, err := actorSystem.Spawn(ctx, "Exchange2", &exchanger{})
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
 
@@ -2378,6 +2682,8 @@ func TestPipeTo(t *testing.T) {
 
 		lib.Pause(time.Second)
 		assert.NoError(t, pid1.Shutdown(ctx))
+		lib.Pause(time.Second)
+		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 	t.Run("With is a dead actor: case 2", func(t *testing.T) {
 		askTimeout := time.Minute
@@ -2439,25 +2745,29 @@ func TestPipeTo(t *testing.T) {
 	})
 	t.Run("With undefined task", func(t *testing.T) {
 		ctx := context.TODO()
-
-		opts := []pidOption{
-			withInitMaxRetries(1),
-			withPassivationDisabled(),
-			withCustomLogger(log.DiscardLogger),
-		}
+		host := "127.0.0.1"
 		ports := dynaport.Get(1)
 
+		actorSystem, err := NewActorSystem("testSys",
+			WithRemoting(host, int32(ports[0])),
+			WithPassivationDisabled(),
+			WithJanitorInterval(time.Minute),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+
+		lib.Pause(time.Second)
+
 		// create actor1
-		actor1 := &exchanger{}
-		actorPath1 := address.New("Exchange1", "sys", "host", ports[0])
-		pid1, err := newPID(ctx, actorPath1, actor1, opts...)
+		pid1, err := actorSystem.Spawn(ctx, "Exchange1", &exchanger{})
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
 
 		// create actor2
-		actor2 := &exchanger{}
-		actorPath2 := address.New("Exchange2", "sys", "host", ports[0])
-		pid2, err := newPID(ctx, actorPath2, actor2, opts...)
+		pid2, err := actorSystem.Spawn(ctx, "Exchange2", &exchanger{})
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
 
@@ -2474,29 +2784,35 @@ func TestPipeTo(t *testing.T) {
 		lib.Pause(time.Second)
 		assert.NoError(t, pid1.Shutdown(ctx))
 		assert.NoError(t, pid2.Shutdown(ctx))
+		lib.Pause(time.Second)
+		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 	t.Run("With failed task", func(t *testing.T) {
 		askTimeout := time.Minute
 		ctx := context.TODO()
-
-		opts := []pidOption{
-			withInitMaxRetries(1),
-			withPassivationDisabled(),
-			withCustomLogger(log.DiscardLogger),
-		}
+		host := "127.0.0.1"
 		ports := dynaport.Get(1)
 
+		actorSystem, err := NewActorSystem("testSys",
+			WithRemoting(host, int32(ports[0])),
+			WithPassivationDisabled(),
+			WithJanitorInterval(time.Minute),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+
+		lib.Pause(time.Second)
+
 		// create actor1
-		actor1 := &exchanger{}
-		actorPath1 := address.New("Exchange1", "sys", "host", ports[0])
-		pid1, err := newPID(ctx, actorPath1, actor1, opts...)
+		pid1, err := actorSystem.Spawn(ctx, "Exchange1", &exchanger{})
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
 
 		// create actor2
-		actor2 := &exchanger{}
-		actorPath2 := address.New("Exchange2", "sys", "host", ports[0])
-		pid2, err := newPID(ctx, actorPath2, actor2, opts...)
+		pid2, err := actorSystem.Spawn(ctx, "Exchange2", &exchanger{})
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
 
@@ -2537,6 +2853,8 @@ func TestPipeTo(t *testing.T) {
 		lib.Pause(time.Second)
 		assert.NoError(t, pid1.Shutdown(ctx))
 		assert.NoError(t, pid2.Shutdown(ctx))
+		lib.Pause(time.Second)
+		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 }
 func TestSendAsync(t *testing.T) {
@@ -2572,7 +2890,9 @@ func TestSendAsync(t *testing.T) {
 	})
 	t.Run("With dead Sender", func(t *testing.T) {
 		ctx := context.Background()
-		actorSystem, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		actorSystem, _ := NewActorSystem("testSys",
+			WithJanitorInterval(time.Minute),
+			WithLogger(log.DiscardLogger))
 
 		// start the actor system
 		err := actorSystem.Start(ctx)
@@ -2680,7 +3000,7 @@ func TestSendAsync(t *testing.T) {
 func TestSendSync(t *testing.T) {
 	t.Run("With local actor", func(t *testing.T) {
 		ctx := context.Background()
-		actorSystem, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		actorSystem, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger), WithJanitorInterval(time.Minute))
 
 		// start the actor system
 		err := actorSystem.Start(ctx)
@@ -2712,7 +3032,7 @@ func TestSendSync(t *testing.T) {
 	})
 	t.Run("With dead Sender", func(t *testing.T) {
 		ctx := context.Background()
-		actorSystem, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		actorSystem, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger), WithJanitorInterval(time.Minute))
 
 		// start the actor system
 		err := actorSystem.Start(ctx)
@@ -2823,18 +3143,24 @@ func TestSendSync(t *testing.T) {
 }
 func TestStopChild(t *testing.T) {
 	t.Run("With Stop failure", func(t *testing.T) {
-		// create a test context
 		ctx := context.TODO()
-		// create the actor path
+		host := "127.0.0.1"
 		ports := dynaport.Get(1)
-		actorPath := address.New("Test", "sys", "host", ports[0])
 
-		// create the parent actor
-		parent, err := newPID(ctx, actorPath,
-			newTestSupervisor(),
-			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger))
+		actorSystem, err := NewActorSystem("testSys",
+			WithRemoting(host, int32(ports[0])),
+			WithPassivationDisabled(),
+			WithJanitorInterval(time.Minute),
+			WithLogger(log.DiscardLogger))
 
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+
+		lib.Pause(time.Second)
+
+		parent, err := actorSystem.Spawn(ctx, "parent", newTestSupervisor())
 		require.NoError(t, err)
 		require.NotNil(t, parent)
 
@@ -2849,6 +3175,8 @@ func TestStopChild(t *testing.T) {
 		//stop the actor
 		err = parent.Shutdown(ctx)
 		assert.NoError(t, err)
+		lib.Pause(time.Second)
+		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 }
 func TestNewPID(t *testing.T) {

@@ -33,7 +33,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/travisjeffery/go-dynaport"
 
-	"github.com/tochemey/goakt/v2/address"
 	"github.com/tochemey/goakt/v2/internal/lib"
 	"github.com/tochemey/goakt/v2/log"
 	"github.com/tochemey/goakt/v2/test/data/testpb"
@@ -42,19 +41,23 @@ import (
 func TestStash(t *testing.T) {
 	t.Run("With happy path", func(t *testing.T) {
 		ctx := context.TODO()
-		// create a Ping actor
-		opts := []pidOption{
-			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
-			withStash(),
-		}
-
 		ports := dynaport.Get(1)
+		host := "127.0.0.1"
+
+		actorSystem, err := NewActorSystem("testSys",
+			WithRemoting(host, int32(ports[0])),
+			WithStash(),
+			WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+
+		lib.Pause(time.Second)
 
 		// create the actor path
-		actor := &stasQA{}
-		actorPath := address.New("stasQA", "sys", "host", ports[0])
-		pid, err := newPID(ctx, actorPath, actor, opts...)
+		actor := &stashQA{}
+		pid, err := actorSystem.Spawn(ctx, "Stash", actor)
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 
@@ -96,7 +99,7 @@ func TestStash(t *testing.T) {
 
 		// add some pause here due to async calls
 		lib.Pause(time.Second)
-		assert.NoError(t, Tell(ctx, pid, new(testpb.TestUnstashAll)))
+		require.NoError(t, Tell(ctx, pid, new(testpb.TestUnstashAll)))
 
 		// add some pause here due to async calls
 		lib.Pause(time.Second)
@@ -108,21 +111,27 @@ func TestStash(t *testing.T) {
 		require.NoError(t, err)
 
 		lib.Pause(time.Second)
-		assert.False(t, pid.IsRunning())
+		require.False(t, pid.IsRunning())
+		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 	t.Run("With stash failure", func(t *testing.T) {
 		ctx := context.TODO()
-		// create an actor
-		opts := []pidOption{
-			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
-		}
-
 		ports := dynaport.Get(1)
+		host := "127.0.0.1"
+
+		actorSystem, err := NewActorSystem("testSys",
+			WithRemoting(host, int32(ports[0])),
+			WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+
+		lib.Pause(time.Second)
+
 		// create the actor path
-		actor := &stasQA{}
-		actorPath := address.New("stasQA", "sys", "host", ports[0])
-		pid, err := newPID(ctx, actorPath, actor, opts...)
+		actor := &stashQA{}
+		pid, err := actorSystem.Spawn(ctx, "Stash", actor)
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 
@@ -135,19 +144,27 @@ func TestStash(t *testing.T) {
 
 		err = pid.Shutdown(ctx)
 		assert.NoError(t, err)
+		lib.Pause(time.Second)
+		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 	t.Run("With unstash when stash not set", func(t *testing.T) {
 		ctx := context.TODO()
-		// create a Ping actor
-		opts := []pidOption{
-			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
-		}
 		ports := dynaport.Get(1)
+		host := "127.0.0.1"
+
+		actorSystem, err := NewActorSystem("testSys",
+			WithRemoting(host, int32(ports[0])),
+			WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+
+		lib.Pause(time.Second)
+
 		// create the actor path
-		actor := &stasQA{}
-		actorPath := address.New("stasQA", "sys", "host", ports[0])
-		pid, err := newPID(ctx, actorPath, actor, opts...)
+		actor := &stashQA{}
+		pid, err := actorSystem.Spawn(ctx, "Stash", actor)
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 
@@ -164,22 +181,28 @@ func TestStash(t *testing.T) {
 
 		err = pid.Shutdown(ctx)
 		assert.NoError(t, err)
+		lib.Pause(time.Second)
+		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 	t.Run("With unstash when there is no stashed message", func(t *testing.T) {
 		ctx := context.TODO()
-		// create a Ping actor
-		opts := []pidOption{
-			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
-			withStash(),
-		}
-
 		ports := dynaport.Get(1)
+		host := "127.0.0.1"
+
+		actorSystem, err := NewActorSystem("testSys",
+			WithRemoting(host, int32(ports[0])),
+			WithStash(),
+			WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+
+		lib.Pause(time.Second)
 
 		// create the actor path
-		actor := &stasQA{}
-		actorPath := address.New("stasQA", "sys", "host", ports[0])
-		pid, err := newPID(ctx, actorPath, actor, opts...)
+		actor := &stashQA{}
+		pid, err := actorSystem.Spawn(ctx, "Stash", actor)
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 
@@ -234,5 +257,7 @@ func TestStash(t *testing.T) {
 
 		err = pid.Shutdown(ctx)
 		assert.NoError(t, err)
+		lib.Pause(time.Second)
+		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 }

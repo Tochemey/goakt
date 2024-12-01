@@ -111,10 +111,3 @@ func withRemoting(remoting *Remoting) pidOption {
 		pid.remoting = remoting
 	}
 }
-
-// withParent sets the parent id
-func withParent(parent *PID) pidOption {
-	return func(pid *PID) {
-		pid.parent = parent
-	}
-}

@@ -88,6 +88,8 @@ func TestActorSystem(t *testing.T) {
 		err := sys.Start(ctx)
 		assert.NoError(t, err)
 
+		lib.Pause(time.Second)
+
 		actor := newActor()
 		actorRef, err := sys.Spawn(ctx, "Test", actor)
 		assert.NoError(t, err)
@@ -95,13 +97,8 @@ func TestActorSystem(t *testing.T) {
 
 		// stop the actor after some time
 		lib.Pause(time.Second)
-
-		t.Cleanup(
-			func() {
-				err = sys.Stop(ctx)
-				assert.NoError(t, err)
-			},
-		)
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
 	})
 	t.Run("With Spawn an actor with invalid actor name", func(t *testing.T) {
 		ctx := context.TODO()
@@ -1146,6 +1143,55 @@ func TestActorSystem(t *testing.T) {
 		require.Empty(t, sys.PeerAddress())
 
 		require.NoError(t, sys.Stop(ctx))
+	})
+	t.Run("With SpawnNamedFromFunc when actor already exist", func(t *testing.T) {
+		ctx := context.TODO()
+		ports := dynaport.Get(1)
+
+		logger := log.DiscardLogger
+		host := "127.0.0.1"
+
+		newActorSystem, err := NewActorSystem(
+			"test",
+			WithPassivationDisabled(),
+			WithLogger(logger),
+			WithJanitorInterval(time.Minute),
+			WithRemoting(host, int32(ports[0])))
+
+		require.NoError(t, err)
+
+		// start the actor system
+		err = newActorSystem.Start(ctx)
+		require.NoError(t, err)
+
+		receiveFn := func(_ context.Context, message proto.Message) error {
+			expected := &testpb.Reply{Content: "test spawn from func"}
+			assert.True(t, proto.Equal(expected, message))
+			return nil
+		}
+
+		actorName := "name"
+		actorRef, err := newActorSystem.SpawnNamedFromFunc(ctx, actorName, receiveFn)
+		assert.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		// stop the actor after some time
+		lib.Pause(time.Second)
+
+		// send a message to the actor
+		require.NoError(t, Tell(ctx, actorRef, &testpb.Reply{Content: "test spawn from func"}))
+
+		newInstance, err := newActorSystem.SpawnNamedFromFunc(ctx, actorName, receiveFn)
+		require.NoError(t, err)
+		require.NotNil(t, newInstance)
+		require.True(t, newInstance.Equals(actorRef))
+
+		t.Cleanup(
+			func() {
+				err = newActorSystem.Stop(ctx)
+				assert.NoError(t, err)
+			},
+		)
 	})
 	t.Run("With SpawnFromFunc (cluster/remote enabled)", func(t *testing.T) {
 		ctx := context.TODO()

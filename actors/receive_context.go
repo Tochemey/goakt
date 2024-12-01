@@ -413,13 +413,6 @@ func (rctx *ReceiveContext) PipeTo(to *PID, task future.Task) {
 	}
 }
 
-// Parent returns the parent of the given actor
-// in case the receiving actor is a child actor
-// this is just a convenient method
-func (rctx *ReceiveContext) Parent() *PID {
-	return rctx.self.Parent()
-}
-
 // Logger returns the logger used in the actor system
 func (rctx *ReceiveContext) Logger() log.Logger {
 	return rctx.self.Logger()

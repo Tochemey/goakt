@@ -37,7 +37,6 @@ import (
 
 	"github.com/tochemey/goakt/v2/address"
 	"github.com/tochemey/goakt/v2/goaktpb"
-	"github.com/tochemey/goakt/v2/internal/eventstream"
 	"github.com/tochemey/goakt/v2/internal/lib"
 	"github.com/tochemey/goakt/v2/log"
 	"github.com/tochemey/goakt/v2/test/data/testpb"
@@ -47,19 +46,20 @@ import (
 func TestReceiveContext(t *testing.T) {
 	t.Run("With behaviors handling", func(t *testing.T) {
 		ctx := context.TODO()
-		// create the actor options
-		opts := []pidOption{
-			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
-		}
-
 		// create the actor path
 		actor := &behaviorQA{}
 		ports := dynaport.Get(1)
-		// create the actor path
-		actorPath := address.New("User", "sys", "host", ports[0])
 
-		pid, err := newPID(ctx, actorPath, actor, opts...)
+		actorSystem, err := NewActorSystem("sys",
+			WithRemoting("127.0.0.1", int32(ports[0])),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NoError(t, actorSystem.Start(ctx))
+
+		lib.Pause(time.Second)
+
+		pid, err := actorSystem.Spawn(ctx, "User", actor)
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 
@@ -105,21 +105,24 @@ func TestReceiveContext(t *testing.T) {
 
 		lib.Pause(time.Second)
 		assert.False(t, pid.IsRunning())
+		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 	t.Run("With successful Tell command", func(t *testing.T) {
 		ctx := context.TODO()
-		// create a Ping actor
-		opts := []pidOption{
-			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
-		}
-
 		ports := dynaport.Get(1)
+
+		actorSystem, err := NewActorSystem("sys",
+			WithRemoting("127.0.0.1", int32(ports[0])),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NoError(t, actorSystem.Start(ctx))
+
+		lib.Pause(time.Second)
 
 		// create actor1
 		actor1 := &exchanger{}
-		actorPath1 := address.New("Exchange1", "sys", "host", ports[0])
-		pid1, err := newPID(ctx, actorPath1, actor1, opts...)
+		pid1, err := actorSystem.Spawn(ctx, "Exchange1", actor1)
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
 
@@ -133,8 +136,7 @@ func TestReceiveContext(t *testing.T) {
 
 		// create actor2
 		actor2 := &exchanger{}
-		actorPath2 := address.New("Exchange2", "sys", "host", ports[0])
-		pid2, err := newPID(ctx, actorPath2, actor2, opts...)
+		pid2, err := actorSystem.Spawn(ctx, "Exchange2", actor2)
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
 
@@ -142,21 +144,24 @@ func TestReceiveContext(t *testing.T) {
 		require.NoError(t, context.getError())
 
 		lib.Pause(time.Second)
-		assert.NoError(t, pid1.Shutdown(ctx))
-		assert.NoError(t, pid2.Shutdown(ctx))
+		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 	t.Run("With failed Tell", func(t *testing.T) {
 		ctx := context.TODO()
-		// create a Ping actor
-		opts := []pidOption{
-			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
-		}
 		ports := dynaport.Get(1)
+
+		actorSystem, err := NewActorSystem("sys",
+			WithRemoting("127.0.0.1", int32(ports[0])),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NoError(t, actorSystem.Start(ctx))
+
+		lib.Pause(time.Second)
+
 		// create actor1
 		actor1 := &exchanger{}
-		actorPath1 := address.New("Exchange1", "sys", "host", ports[0])
-		pid1, err := newPID(ctx, actorPath1, actor1, opts...)
+		pid1, err := actorSystem.Spawn(ctx, "Exchange1", actor1)
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
 
@@ -170,8 +175,7 @@ func TestReceiveContext(t *testing.T) {
 
 		// create actor2
 		actor2 := &exchanger{}
-		actorPath2 := address.New("Exchange2", "sys", "host", ports[0])
-		pid2, err := newPID(ctx, actorPath2, actor2, opts...)
+		pid2, err := actorSystem.Spawn(ctx, "Exchange2", actor2)
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
 
@@ -182,20 +186,23 @@ func TestReceiveContext(t *testing.T) {
 		require.Error(t, context.getError())
 
 		lib.Pause(time.Second)
-		assert.NoError(t, pid1.Shutdown(ctx))
+		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 	t.Run("With successful Ask command", func(t *testing.T) {
 		ctx := context.TODO()
-		// create a Ping actor
-		opts := []pidOption{
-			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
-		}
 		ports := dynaport.Get(1)
+		actorSystem, err := NewActorSystem("sys",
+			WithRemoting("127.0.0.1", int32(ports[0])),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NoError(t, actorSystem.Start(ctx))
+
+		lib.Pause(time.Second)
+
 		// create actor1
 		actor1 := &exchanger{}
-		actorPath1 := address.New("Exchange1", "sys", "host", ports[0])
-		pid1, err := newPID(ctx, actorPath1, actor1, opts...)
+		pid1, err := actorSystem.Spawn(ctx, "Exchange1", actor1)
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
 
@@ -209,8 +216,7 @@ func TestReceiveContext(t *testing.T) {
 
 		// create actor2
 		actor2 := &exchanger{}
-		actorPath2 := address.New("Exchange2", "sys", "host", ports[0])
-		pid2, err := newPID(ctx, actorPath2, actor2, opts...)
+		pid2, err := actorSystem.Spawn(ctx, "Exchange2", actor2)
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
 
@@ -220,21 +226,23 @@ func TestReceiveContext(t *testing.T) {
 		assert.True(t, proto.Equal(expected, reply))
 
 		lib.Pause(time.Second)
-		assert.NoError(t, pid1.Shutdown(ctx))
-		assert.NoError(t, pid2.Shutdown(ctx))
+		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 	t.Run("With failed Ask", func(t *testing.T) {
 		ctx := context.TODO()
-		// create a Ping actor
-		opts := []pidOption{
-			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
-		}
 		ports := dynaport.Get(1)
+		actorSystem, err := NewActorSystem("sys",
+			WithRemoting("127.0.0.1", int32(ports[0])),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NoError(t, actorSystem.Start(ctx))
+
+		lib.Pause(time.Second)
+
 		// create actor1
 		actor1 := &exchanger{}
-		actorPath1 := address.New("Exchange1", "sys", "host", ports[0])
-		pid1, err := newPID(ctx, actorPath1, actor1, opts...)
+		pid1, err := actorSystem.Spawn(ctx, "Exchange1", actor1)
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
 
@@ -248,8 +256,7 @@ func TestReceiveContext(t *testing.T) {
 
 		// create actor2
 		actor2 := &exchanger{}
-		actorPath2 := address.New("Exchange2", "sys", "host", ports[0])
-		pid2, err := newPID(ctx, actorPath2, actor2, opts...)
+		pid2, err := actorSystem.Spawn(ctx, "Exchange2", actor2)
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
 
@@ -261,7 +268,7 @@ func TestReceiveContext(t *testing.T) {
 		require.Error(t, context.getError())
 
 		lib.Pause(time.Second)
-		assert.NoError(t, pid1.Shutdown(ctx))
+		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 	t.Run("With successful RemoteAsk", func(t *testing.T) {
 		// create the context
@@ -295,15 +302,7 @@ func TestReceiveContext(t *testing.T) {
 
 		// create actor1
 		actor1 := &exchanger{}
-		ports := dynaport.Get(1)
-		actorPath1 := address.New("Exchange1", "sys", "host", ports[0])
-		pid1, err := newPID(
-			ctx,
-			actorPath1,
-			actor1,
-			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
-		)
+		pid1, err := sys.Spawn(ctx, "Exchange1", actor1)
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
 
@@ -361,15 +360,7 @@ func TestReceiveContext(t *testing.T) {
 
 		// create actor1
 		actor1 := &exchanger{}
-		ports := dynaport.Get(1)
-		actorPath1 := address.New("Exchange1", "sys", "host", ports[0])
-		pid1, err := newPID(
-			ctx,
-			actorPath1,
-			actor1,
-			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
-		)
+		pid1, err := sys.Spawn(ctx, "Exchange1", actor1)
 
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
@@ -406,7 +397,7 @@ func TestReceiveContext(t *testing.T) {
 		// define the logger to use
 		logger := log.DiscardLogger
 		// generate the remoting port
-		nodePorts := dynaport.Get(1)
+		nodePorts := dynaport.Get(2)
 		remotingPort := nodePorts[0]
 		host := "127.0.0.1"
 
@@ -433,16 +424,16 @@ func TestReceiveContext(t *testing.T) {
 
 		// create actor1
 		actor1 := &exchanger{}
-		ports := dynaport.Get(1)
-		actorPath1 := address.New("Exchange1", "sys", "host", ports[0])
-		pid1, err := newPID(
-			ctx,
-			actorPath1,
-			actor1,
-			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
-		)
+		sys2, err := NewActorSystem("sys", WithLogger(logger),
+			WithPassivationDisabled(),
+			WithRemoting(host, int32(nodePorts[1])))
 
+		require.NoError(t, err)
+		require.NoError(t, sys2.Start(ctx))
+
+		lib.Pause(time.Second)
+
+		pid1, err := sys2.Spawn(ctx, "Exchange1", actor1)
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
 
@@ -465,6 +456,7 @@ func TestReceiveContext(t *testing.T) {
 			func() {
 				assert.NoError(t, pid1.Shutdown(ctx))
 				assert.NoError(t, sys.Stop(ctx))
+				assert.NoError(t, sys2.Stop(ctx))
 			},
 		)
 	})
@@ -498,15 +490,12 @@ func TestReceiveContext(t *testing.T) {
 		// create actor1
 		actor1 := &exchanger{}
 		ports := dynaport.Get(1)
-		actorPath1 := address.New("Exchange1", "sys", "host", ports[0])
-		pid1, err := newPID(
-			ctx,
-			actorPath1,
-			actor1,
-			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
-		)
+		sys2, err := NewActorSystem("sys", WithLogger(logger), WithRemoting(host, int32(ports[0])))
+		require.NoError(t, err)
+		require.NoError(t, sys2.Start(ctx))
+		lib.Pause(time.Second)
 
+		pid1, err := sys2.Spawn(ctx, "Exchange1", actor1)
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
 
@@ -534,6 +523,7 @@ func TestReceiveContext(t *testing.T) {
 			func() {
 				assert.NoError(t, pid1.Shutdown(ctx))
 				assert.NoError(t, sys.Stop(ctx))
+				assert.NoError(t, sys2.Stop(ctx))
 			},
 		)
 	})
@@ -567,15 +557,12 @@ func TestReceiveContext(t *testing.T) {
 		// create actor1
 		actor1 := &exchanger{}
 		ports := dynaport.Get(1)
-		actorPath1 := address.New("Exchange1", "sys", "host", ports[0])
-		pid1, err := newPID(
-			ctx,
-			actorPath1,
-			actor1,
-			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
-		)
+		sys2, err := NewActorSystem("sys", WithLogger(logger), WithRemoting(host, int32(ports[0])))
+		require.NoError(t, err)
+		require.NoError(t, sys2.Start(ctx))
+		lib.Pause(time.Second)
 
+		pid1, err := sys2.Spawn(ctx, "Exchange1", actor1)
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
 
@@ -595,6 +582,7 @@ func TestReceiveContext(t *testing.T) {
 			func() {
 				assert.NoError(t, pid1.Shutdown(ctx))
 				assert.NoError(t, sys.Stop(ctx))
+				assert.NoError(t, sys2.Stop(ctx))
 			},
 		)
 	})
@@ -627,14 +615,15 @@ func TestReceiveContext(t *testing.T) {
 		// create actor1
 		actor1 := &exchanger{}
 		ports := dynaport.Get(1)
-		actorPath1 := address.New("Exchange1", "sys", "host", ports[0])
-		pid1, err := newPID(
-			ctx,
-			actorPath1,
-			actor1,
-			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
-		)
+
+		sys2, err := NewActorSystem("sys", WithLogger(logger), WithRemoting(host, int32(ports[0])))
+		require.NoError(t, err)
+		require.NoError(t, sys2.Start(ctx))
+		lib.Pause(time.Second)
+
+		pid1, err := sys2.Spawn(ctx, "Exchange1", actor1)
+		require.NoError(t, err)
+		require.NotNil(t, pid1)
 
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
@@ -654,22 +643,25 @@ func TestReceiveContext(t *testing.T) {
 			func() {
 				assert.NoError(t, pid1.Shutdown(ctx))
 				assert.NoError(t, sys.Stop(ctx))
+				assert.NoError(t, sys2.Stop(ctx))
 			},
 		)
 	})
 	t.Run("With successful Shutdown", func(t *testing.T) {
 		ctx := context.TODO()
-		// create a Ping actor
-		opts := []pidOption{
-			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
-		}
+		ports := dynaport.Get(1)
+		actorSystem, err := NewActorSystem("sys",
+			WithRemoting("127.0.0.1", int32(ports[0])),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NoError(t, actorSystem.Start(ctx))
+
+		lib.Pause(time.Second)
 
 		// create actor1
 		actor1 := &exchanger{}
-		ports := dynaport.Get(1)
-		actorPath1 := address.New("Exchange1", "sys", "host", ports[0])
-		pid1, err := newPID(ctx, actorPath1, actor1, opts...)
+		pid1, err := actorSystem.Spawn(ctx, "Exchange1", actor1)
 
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
@@ -684,22 +676,26 @@ func TestReceiveContext(t *testing.T) {
 
 		context.Shutdown()
 		require.NoError(t, context.getError())
+		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 	t.Run("With successful SpawnChild", func(t *testing.T) {
 		ctx := context.TODO()
 		ports := dynaport.Get(1)
-		actorPath := address.New("Parent", "sys", "host", ports[0])
-
-		// create the parent actor
-		parent, err := newPID(
-			ctx, actorPath,
-			newTestSupervisor(),
-			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
-		)
+		actorSystem, err := NewActorSystem("sys",
+			WithRemoting("127.0.0.1", int32(ports[0])),
+			WithLogger(log.DiscardLogger))
 
 		require.NoError(t, err)
+		require.NoError(t, actorSystem.Start(ctx))
+
+		lib.Pause(time.Second)
+
+		// create the parent actor
+		parent, err := actorSystem.Spawn(ctx, "Parent", newTestSupervisor())
+		require.NoError(t, err)
 		assert.NotNil(t, parent)
+
+		lib.Pause(time.Second)
 
 		// create an instance of receive receiveCtx
 		receiveCtx := &ReceiveContext{
@@ -722,21 +718,29 @@ func TestReceiveContext(t *testing.T) {
 		t.Cleanup(
 			func() {
 				receiveCtx.Shutdown()
+				assert.NoError(t, actorSystem.Stop(ctx))
 			},
 		)
 	})
 	t.Run("With failed SpawnChild", func(t *testing.T) {
 		ctx := context.TODO()
 		ports := dynaport.Get(1)
-		actorPath := address.New("Parent", "sys", "host", ports[0])
+
+		actorSystem, err := NewActorSystem("sys",
+			WithRemoting("127.0.0.1", int32(ports[0])),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NoError(t, actorSystem.Start(ctx))
+
+		lib.Pause(time.Second)
 
 		// create the parent actor
-		parent, err := newPID(
-			ctx, actorPath,
-			newTestSupervisor(),
-			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
-		)
+		parent, err := actorSystem.Spawn(ctx, "Parent", newTestSupervisor())
+		require.NoError(t, err)
+		assert.NotNil(t, parent)
+
+		lib.Pause(time.Second)
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
@@ -755,20 +759,23 @@ func TestReceiveContext(t *testing.T) {
 		// create the child actor
 		context.Spawn("SpawnChild", newTestSupervised())
 		require.Error(t, context.getError())
+		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 	t.Run("With not found Child", func(t *testing.T) {
 		ctx := context.TODO()
 		ports := dynaport.Get(1)
-		actorPath := address.New("Parent", "sys", "host", ports[0])
+
+		actorSystem, err := NewActorSystem("sys",
+			WithRemoting("127.0.0.1", int32(ports[0])),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NoError(t, actorSystem.Start(ctx))
+
+		lib.Pause(time.Second)
 
 		// create the parent actor
-		parent, err := newPID(
-			ctx, actorPath,
-			newTestSupervisor(),
-			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
-		)
-
+		parent, err := actorSystem.Spawn(ctx, "Parent", newTestSupervisor())
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
 
@@ -794,21 +801,24 @@ func TestReceiveContext(t *testing.T) {
 		t.Cleanup(
 			func() {
 				context.Shutdown()
+				assert.NoError(t, actorSystem.Stop(ctx))
 			},
 		)
 	})
 	t.Run("With dead parent Child", func(t *testing.T) {
 		ctx := context.TODO()
 		ports := dynaport.Get(1)
-		actorPath := address.New("Parent", "sys", "host", ports[0])
+		actorSystem, err := NewActorSystem("sys",
+			WithRemoting("127.0.0.1", int32(ports[0])),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NoError(t, actorSystem.Start(ctx))
+
+		lib.Pause(time.Second)
 
 		// create the parent actor
-		parent, err := newPID(
-			ctx, actorPath,
-			newTestSupervisor(),
-			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
-		)
+		parent, err := actorSystem.Spawn(ctx, "Parent", newTestSupervisor())
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
@@ -835,21 +845,22 @@ func TestReceiveContext(t *testing.T) {
 		t.Cleanup(
 			func() {
 				require.NoError(t, child.Shutdown(ctx))
+				assert.NoError(t, actorSystem.Stop(ctx))
 			},
 		)
 	})
 	t.Run("With successful Stop", func(t *testing.T) {
 		ctx := context.TODO()
 		ports := dynaport.Get(1)
-		actorPath := address.New("Parent", "sys", "host", ports[0])
+		actorSystem, err := NewActorSystem("sys",
+			WithRemoting("127.0.0.1", int32(ports[0])),
+			WithLogger(log.DiscardLogger))
 
-		// create the parent actor
-		parent, err := newPID(
-			ctx, actorPath,
-			newTestSupervisor(),
-			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
-		)
+		require.NoError(t, err)
+		require.NoError(t, actorSystem.Start(ctx))
+
+		lib.Pause(time.Second)
+		parent, err := actorSystem.Spawn(ctx, "Parent", newTestSupervisor())
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
@@ -876,21 +887,23 @@ func TestReceiveContext(t *testing.T) {
 		t.Cleanup(
 			func() {
 				context.Shutdown()
+				assert.NoError(t, actorSystem.Stop(ctx))
 			},
 		)
 	})
 	t.Run("With child actor Stop freeing up parent link", func(t *testing.T) {
 		ctx := context.TODO()
 		ports := dynaport.Get(1)
-		actorPath := address.New("Parent", "sys", "host", ports[0])
+		actorSystem, err := NewActorSystem("sys",
+			WithRemoting("127.0.0.1", int32(ports[0])),
+			WithLogger(log.DiscardLogger))
 
-		// create the parent actor
-		parent, err := newPID(
-			ctx, actorPath,
-			newTestSupervisor(),
-			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
-		)
+		require.NoError(t, err)
+		require.NoError(t, actorSystem.Start(ctx))
+
+		lib.Pause(time.Second)
+
+		parent, err := actorSystem.Spawn(ctx, "Parent", newTestSupervisor())
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
@@ -921,21 +934,23 @@ func TestReceiveContext(t *testing.T) {
 		t.Cleanup(
 			func() {
 				context.Shutdown()
+				assert.NoError(t, actorSystem.Stop(ctx))
 			},
 		)
 	})
 	t.Run("With failed Stop: child not defined", func(t *testing.T) {
 		ctx := context.TODO()
 		ports := dynaport.Get(1)
-		actorPath := address.New("Parent", "sys", "host", ports[0])
+		actorSystem, err := NewActorSystem("sys",
+			WithRemoting("127.0.0.1", int32(ports[0])),
+			WithLogger(log.DiscardLogger))
 
-		// create the parent actor
-		parent, err := newPID(
-			ctx, actorPath,
-			newTestSupervisor(),
-			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
-		)
+		require.NoError(t, err)
+		require.NoError(t, actorSystem.Start(ctx))
+
+		lib.Pause(time.Second)
+
+		parent, err := actorSystem.Spawn(ctx, "Parent", newTestSupervisor())
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
@@ -955,22 +970,23 @@ func TestReceiveContext(t *testing.T) {
 		t.Cleanup(
 			func() {
 				context.Shutdown()
+				assert.NoError(t, actorSystem.Stop(ctx))
 			},
 		)
 	})
 	t.Run("With failed Stop: parent is dead", func(t *testing.T) {
 		ctx := context.TODO()
 		ports := dynaport.Get(1)
-		// create the actor path
-		actorPath := address.New("Test", "sys", "host", ports[0])
+		actorSystem, err := NewActorSystem("sys",
+			WithRemoting("127.0.0.1", int32(ports[0])),
+			WithLogger(log.DiscardLogger))
 
-		// create the parent actor
-		parent, err := newPID(
-			ctx, actorPath,
-			newTestSupervisor(),
-			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
-		)
+		require.NoError(t, err)
+		require.NoError(t, actorSystem.Start(ctx))
+
+		lib.Pause(time.Second)
+
+		parent, err := actorSystem.Spawn(ctx, "Parent", newTestSupervisor())
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
@@ -997,20 +1013,21 @@ func TestReceiveContext(t *testing.T) {
 		// stop the child actor
 		context.Stop(child)
 		require.Error(t, context.getError())
+		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 	t.Run("With failed Stop: actor not found", func(t *testing.T) {
 		ctx := context.TODO()
 		ports := dynaport.Get(1)
-		actorPath := address.New("Parent", "sys", "host", ports[0])
+		actorSystem, err := NewActorSystem("sys",
+			WithRemoting("127.0.0.1", int32(ports[0])),
+			WithLogger(log.DiscardLogger))
 
-		// create the parent actor
-		parent, err := newPID(
-			ctx, actorPath,
-			newTestSupervisor(),
-			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
-		)
+		require.NoError(t, err)
+		require.NoError(t, actorSystem.Start(ctx))
 
+		lib.Pause(time.Second)
+
+		parent, err := actorSystem.Spawn(ctx, "Parent", newTestSupervisor())
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
 
@@ -1023,11 +1040,12 @@ func TestReceiveContext(t *testing.T) {
 		}
 
 		// create the child actor
-		childPath := address.New("child", "sys", "host", ports[0])
+		childPath := address.New("child", "sys", "127.0.0.1", ports[0])
 		child, err := newPID(
 			ctx, childPath,
 			newTestSupervisor(),
 			withInitMaxRetries(1),
+			withActorSystem(actorSystem),
 			withCustomLogger(log.DiscardLogger),
 		)
 
@@ -1040,21 +1058,23 @@ func TestReceiveContext(t *testing.T) {
 			func() {
 				context.Shutdown()
 				assert.NoError(t, child.Shutdown(ctx))
+				assert.NoError(t, actorSystem.Stop(ctx))
 			},
 		)
 	})
 	t.Run("With Stop when child is already stopped", func(t *testing.T) {
 		ctx := context.TODO()
 		ports := dynaport.Get(1)
-		actorPath := address.New("Parent", "sys", "host", ports[0])
+		actorSystem, err := NewActorSystem("sys",
+			WithRemoting("127.0.0.1", int32(ports[0])),
+			WithLogger(log.DiscardLogger))
 
-		// create the parent actor
-		parent, err := newPID(
-			ctx, actorPath,
-			newTestSupervisor(),
-			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
-		)
+		require.NoError(t, err)
+		require.NoError(t, actorSystem.Start(ctx))
+
+		lib.Pause(time.Second)
+
+		parent, err := actorSystem.Spawn(ctx, "Parent", newTestSupervisor())
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
@@ -1083,23 +1103,25 @@ func TestReceiveContext(t *testing.T) {
 		t.Cleanup(
 			func() {
 				context.Shutdown()
+				assert.NoError(t, actorSystem.Stop(ctx))
 			},
 		)
 	})
 	t.Run("With failed Shutdown", func(t *testing.T) {
 		ctx := context.TODO()
-		// create a Ping actor
-		opts := []pidOption{
-			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
-		}
-
 		ports := dynaport.Get(1)
+		actorSystem, err := NewActorSystem("sys",
+			WithRemoting("127.0.0.1", int32(ports[0])),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NoError(t, actorSystem.Start(ctx))
+
+		lib.Pause(time.Second)
 
 		// create actor1
 		actor1 := &postStopQA{}
-		actorPath1 := address.New("Exchange1", "sys", "host", ports[0])
-		pid1, err := newPID(ctx, actorPath1, actor1, opts...)
+		pid1, err := actorSystem.Spawn(ctx, "Exchange1", actor1)
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
 
@@ -1113,28 +1135,30 @@ func TestReceiveContext(t *testing.T) {
 
 		context.Shutdown()
 		require.Error(t, context.getError())
+		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 	t.Run("With successful Forward", func(t *testing.T) {
 		ctx := context.TODO()
-		// create a Ping actor
-		opts := []pidOption{
-			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
-		}
-
 		ports := dynaport.Get(1)
+
+		actorSystem, err := NewActorSystem("sys",
+			WithRemoting("127.0.0.1", int32(ports[0])),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NoError(t, actorSystem.Start(ctx))
+
+		lib.Pause(time.Second)
 
 		// create actorA
 		actorA := &exchanger{}
-		actorPath1 := address.New("actorA", "sys", "host", ports[0])
-		pidA, err := newPID(ctx, actorPath1, actorA, opts...)
+		pidA, err := actorSystem.Spawn(ctx, "actorA", actorA)
 		require.NoError(t, err)
 		require.NotNil(t, pidA)
 
 		// create actorC
 		actorC := &exchanger{}
-		actorPath3 := address.New("actorC", "sys", "host", ports[0])
-		pidC, err := newPID(ctx, actorPath3, actorC, opts...)
+		pidC, err := actorSystem.Spawn(ctx, "actorC", actorC)
 		require.NoError(t, err)
 		require.NotNil(t, pidC)
 
@@ -1142,8 +1166,8 @@ func TestReceiveContext(t *testing.T) {
 		actorB := &forwardQA{
 			actorRef: pidC,
 		}
-		actorPath2 := address.New("actorB", "sys", "host", ports[0])
-		pidB, err := newPID(ctx, actorPath2, actorB, opts...)
+
+		pidB, err := actorSystem.Spawn(ctx, "actorB", actorB)
 		require.NoError(t, err)
 		require.NotNil(t, pidB)
 
@@ -1162,30 +1186,27 @@ func TestReceiveContext(t *testing.T) {
 		// let us shutdown the rest
 		require.NoError(t, pidA.Shutdown(ctx))
 		require.NoError(t, pidB.Shutdown(ctx))
+		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 	t.Run("With Unhandled with no sender", func(t *testing.T) {
 		ctx := context.TODO()
-		// create the deadletter stream
-		eventsStream := eventstream.New()
+		ports := dynaport.Get(1)
+		actorSystem, err := NewActorSystem("sys",
+			WithRemoting("127.0.0.1", int32(ports[0])),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NoError(t, actorSystem.Start(ctx))
+
+		lib.Pause(time.Second)
 
 		// create a consumer
-		consumer := eventsStream.AddSubscriber()
-		eventsStream.Subscribe(consumer, eventsTopic)
-
-		// create a Ping actor
-		opts := []pidOption{
-			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
-			withEventsStream(eventsStream),
-		}
-
-		ports := dynaport.Get(1)
+		consumer, err := actorSystem.Subscribe()
+		require.NoError(t, err)
 
 		// create actor1
 		actor1 := &exchanger{}
-		actorPath1 := address.New("Exchange1", "sys", "host", ports[0])
-		pid1, err := newPID(ctx, actorPath1, actor1, opts...)
-
+		pid1, err := actorSystem.Spawn(ctx, "Exchange1", actor1)
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
 
@@ -1230,38 +1251,36 @@ func TestReceiveContext(t *testing.T) {
 				// shutdown the consumer
 				consumer.Shutdown()
 				context.Shutdown()
+				assert.NoError(t, actorSystem.Stop(ctx))
 			},
 		)
 	})
 	t.Run("With Unhandled with a sender", func(t *testing.T) {
 		ctx := context.TODO()
-		// create the deadletter stream
-		eventsStream := eventstream.New()
+		ports := dynaport.Get(1)
+
+		actorSystem, err := NewActorSystem("sys",
+			WithRemoting("127.0.0.1", int32(ports[0])),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NoError(t, actorSystem.Start(ctx))
+
+		lib.Pause(time.Second)
 
 		// create a consumer
-		consumer := eventsStream.AddSubscriber()
-		eventsStream.Subscribe(consumer, eventsTopic)
-
-		// create a Ping actor
-		opts := []pidOption{
-			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
-			withEventsStream(eventsStream),
-		}
-
-		ports := dynaport.Get(1)
+		consumer, err := actorSystem.Subscribe()
+		require.NoError(t, err)
 
 		// create actor1
 		actor1 := &exchanger{}
-		actorPath1 := address.New("Exchange1", "sys", "host", ports[0])
-		pid1, err := newPID(ctx, actorPath1, actor1, opts...)
+		pid1, err := actorSystem.Spawn(ctx, "Exchange1", actor1)
 
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
 
 		actor2 := &exchanger{}
-		actorPath2 := address.New("Exchange2", "sys", "host", ports[0])
-		pid2, err := newPID(ctx, actorPath2, actor2, opts...)
+		pid2, err := actorSystem.Spawn(ctx, "Exchange2", actor2)
 
 		send := new(testpb.TestSend)
 		// create an instance of receive context
@@ -1294,7 +1313,7 @@ func TestReceiveContext(t *testing.T) {
 		require.NoError(t, msg.UnmarshalTo(actual))
 		require.True(t, proto.Equal(send, actual))
 		require.Equal(t, deadletter.GetReason(), ErrUnhandled.Error())
-		assert.True(t, proto.Equal(deadletter.GetSender(), actorPath2.Address))
+		assert.True(t, proto.Equal(deadletter.GetSender(), pid2.Address().Address))
 
 		assert.EqualValues(t, 1, len(consumer.Topics()))
 
@@ -1304,31 +1323,30 @@ func TestReceiveContext(t *testing.T) {
 				// shutdown the consumer
 				consumer.Shutdown()
 				context.Shutdown()
+				assert.NoError(t, actorSystem.Stop(ctx))
 			},
 		)
 	})
 	t.Run("With Unhandled with system messages", func(t *testing.T) {
 		ctx := context.TODO()
-		// create the deadletter stream
-		eventsStream := eventstream.New()
+		ports := dynaport.Get(1)
+
+		actorSystem, err := NewActorSystem("sys",
+			WithRemoting("127.0.0.1", int32(ports[0])),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NoError(t, actorSystem.Start(ctx))
+
+		lib.Pause(time.Second)
 
 		// create a consumer
-		consumer := eventsStream.AddSubscriber()
-		eventsStream.Subscribe(consumer, eventsTopic)
-
-		// create a Ping actor
-		opts := []pidOption{
-			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
-			withEventsStream(eventsStream),
-		}
-
-		ports := dynaport.Get(1)
+		consumer, err := actorSystem.Subscribe()
+		require.NoError(t, err)
 
 		// create actor1
 		actor1 := &exchanger{}
-		actorPath1 := address.New("Exchange1", "sys", "host", ports[0])
-		pid1, err := newPID(ctx, actorPath1, actor1, opts...)
+		pid1, err := actorSystem.Spawn(ctx, "Exchange1", actor1)
 
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
@@ -1366,23 +1384,26 @@ func TestReceiveContext(t *testing.T) {
 				// shutdown the consumer
 				consumer.Shutdown()
 				context.Shutdown()
+				assert.NoError(t, actorSystem.Stop(ctx))
 			},
 		)
 	})
 	t.Run("With successful BatchTell", func(t *testing.T) {
 		ctx := context.TODO()
-		// create a Ping actor
-		opts := []pidOption{
-			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
-		}
-
 		ports := dynaport.Get(1)
+
+		actorSystem, err := NewActorSystem("sys",
+			WithRemoting("127.0.0.1", int32(ports[0])),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NoError(t, actorSystem.Start(ctx))
+
+		lib.Pause(time.Second)
 
 		// create actor1
 		actor1 := &exchanger{}
-		actorPath1 := address.New("Exchange1", "sys", "host", ports[0])
-		pid1, err := newPID(ctx, actorPath1, actor1, opts...)
+		pid1, err := actorSystem.Spawn(ctx, "Exchange1", actor1)
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
 
@@ -1396,8 +1417,7 @@ func TestReceiveContext(t *testing.T) {
 
 		// create actor2
 		actor2 := &exchanger{}
-		actorPath2 := address.New("Exchange2", "sys", "host", ports[0])
-		pid2, err := newPID(ctx, actorPath2, actor2, opts...)
+		pid2, err := actorSystem.Spawn(ctx, "Exchange2", actor2)
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
 
@@ -1407,21 +1427,25 @@ func TestReceiveContext(t *testing.T) {
 		lib.Pause(time.Second)
 		assert.NoError(t, pid1.Shutdown(ctx))
 		assert.NoError(t, pid2.Shutdown(ctx))
+		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 	t.Run("With successful BatchTell as a Tell", func(t *testing.T) {
 		ctx := context.TODO()
-		// create a Ping actor
-		opts := []pidOption{
-			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
-		}
-
 		ports := dynaport.Get(1)
+
+		actorSystem, err := NewActorSystem("sys",
+			WithRemoting("127.0.0.1", int32(ports[0])),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NoError(t, actorSystem.Start(ctx))
+
+		lib.Pause(time.Second)
 
 		// create actor1
 		actor1 := &exchanger{}
-		actorPath1 := address.New("Exchange1", "sys", "host", ports[0])
-		pid1, err := newPID(ctx, actorPath1, actor1, opts...)
+
+		pid1, err := actorSystem.Spawn(ctx, "Exchange1", actor1)
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
 
@@ -1435,8 +1459,7 @@ func TestReceiveContext(t *testing.T) {
 
 		// create actor2
 		actor2 := &exchanger{}
-		actorPath2 := address.New("Exchange2", "sys", "host", ports[0])
-		pid2, err := newPID(ctx, actorPath2, actor2, opts...)
+		pid2, err := actorSystem.Spawn(ctx, "Exchange2", actor2)
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
 
@@ -1446,21 +1469,24 @@ func TestReceiveContext(t *testing.T) {
 		lib.Pause(time.Second)
 		assert.NoError(t, pid1.Shutdown(ctx))
 		assert.NoError(t, pid2.Shutdown(ctx))
+		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 	t.Run("With failed BatchTell", func(t *testing.T) {
 		ctx := context.TODO()
-		// create a Ping actor
-		opts := []pidOption{
-			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
-		}
-
 		ports := dynaport.Get(1)
+
+		actorSystem, err := NewActorSystem("sys",
+			WithRemoting("127.0.0.1", int32(ports[0])),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NoError(t, actorSystem.Start(ctx))
+
+		lib.Pause(time.Second)
 
 		// create actor1
 		actor1 := &exchanger{}
-		actorPath1 := address.New("Exchange1", "sys", "host", ports[0])
-		pid1, err := newPID(ctx, actorPath1, actor1, opts...)
+		pid1, err := actorSystem.Spawn(ctx, "Exchange1", actor1)
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
 
@@ -1474,8 +1500,7 @@ func TestReceiveContext(t *testing.T) {
 
 		// create actor2
 		actor2 := &exchanger{}
-		actorPath2 := address.New("Exchange2", "sys", "host", ports[0])
-		pid2, err := newPID(ctx, actorPath2, actor2, opts...)
+		pid2, err := actorSystem.Spawn(ctx, "Exchange2", actor2)
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
 
@@ -1488,21 +1513,24 @@ func TestReceiveContext(t *testing.T) {
 
 		lib.Pause(time.Second)
 		assert.NoError(t, pid1.Shutdown(ctx))
+		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 	t.Run("With successful BatchAsk", func(t *testing.T) {
 		ctx := context.TODO()
-		// create a Ping actor
-		opts := []pidOption{
-			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
-		}
-
 		ports := dynaport.Get(1)
+
+		actorSystem, err := NewActorSystem("sys",
+			WithRemoting("127.0.0.1", int32(ports[0])),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NoError(t, actorSystem.Start(ctx))
+
+		lib.Pause(time.Second)
 
 		// create actor1
 		actor1 := &exchanger{}
-		actorPath1 := address.New("Exchange1", "sys", "host", ports[0])
-		pid1, err := newPID(ctx, actorPath1, actor1, opts...)
+		pid1, err := actorSystem.Spawn(ctx, "Exchange1", actor1)
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
 
@@ -1516,8 +1544,7 @@ func TestReceiveContext(t *testing.T) {
 
 		// create actor2
 		actor2 := &exchanger{}
-		actorPath2 := address.New("Exchange2", "sys", "host", ports[0])
-		pid2, err := newPID(ctx, actorPath2, actor2, opts...)
+		pid2, err := actorSystem.Spawn(ctx, "Exchange2", actor2)
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
 
@@ -1532,21 +1559,25 @@ func TestReceiveContext(t *testing.T) {
 		lib.Pause(time.Second)
 		assert.NoError(t, pid1.Shutdown(ctx))
 		assert.NoError(t, pid2.Shutdown(ctx))
+		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 	t.Run("With failed BatchAsk", func(t *testing.T) {
 		ctx := context.TODO()
-		// create a Ping actor
-		opts := []pidOption{
-			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
-		}
-
 		ports := dynaport.Get(1)
+
+		actorSystem, err := NewActorSystem("sys",
+			WithRemoting("127.0.0.1", int32(ports[0])),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NoError(t, actorSystem.Start(ctx))
+
+		lib.Pause(time.Second)
 
 		// create actor1
 		actor1 := &exchanger{}
-		actorPath1 := address.New("Exchange1", "sys", "host", ports[0])
-		pid1, err := newPID(ctx, actorPath1, actor1, opts...)
+
+		pid1, err := actorSystem.Spawn(ctx, "Exchange1", actor1)
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
 
@@ -1560,8 +1591,7 @@ func TestReceiveContext(t *testing.T) {
 
 		// create actor2
 		actor2 := &exchanger{}
-		actorPath2 := address.New("Exchange2", "sys", "host", ports[0])
-		pid2, err := newPID(ctx, actorPath2, actor2, opts...)
+		pid2, err := actorSystem.Spawn(ctx, "Exchange2", actor2)
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
 
@@ -1574,6 +1604,7 @@ func TestReceiveContext(t *testing.T) {
 
 		lib.Pause(time.Second)
 		assert.NoError(t, pid1.Shutdown(ctx))
+		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 	t.Run("With successful RemoteBatchTell", func(t *testing.T) {
 		// create the context
@@ -1770,16 +1801,8 @@ func TestReceiveContext(t *testing.T) {
 		actorName2 := "Exchange2"
 
 		// create actor1
-		ports := dynaport.Get(1)
 		actor1 := &exchanger{}
-		actorPath1 := address.New("Exchange1", "sys", "host", ports[0])
-		pid1, err := newPID(
-			ctx,
-			actorPath1,
-			actor1,
-			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
-		)
+		pid1, err := sys.Spawn(ctx, "Exchange1", actor1)
 
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
@@ -1898,17 +1921,8 @@ func TestReceiveContext(t *testing.T) {
 		actorName2 := "Exchange2"
 
 		// create actor1
-		ports := dynaport.Get(1)
 		actor1 := &exchanger{}
-		actorPath1 := address.New("Exchange1", "sys", "host", ports[0])
-		pid1, err := newPID(
-			ctx,
-			actorPath1,
-			actor1,
-			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
-		)
-
+		pid1, err := sys.Spawn(ctx, "Exchange1", actor1)
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
 
@@ -1966,17 +1980,10 @@ func TestReceiveContext(t *testing.T) {
 		actorName2 := "Exchange2"
 
 		// create actor1
-		ports := dynaport.Get(1)
 		actor1 := &exchanger{}
-		actorPath1 := address.New("Exchange1", "sys", "host", ports[0])
-		pid1, err := newPID(
-			ctx,
-			actorPath1,
-			actor1,
-			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
-		)
-
+		pid1, err := sys.Spawn(ctx, "Exchange1", actor1)
+		require.NoError(t, err)
+		require.NotNil(t, pid1)
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
 
@@ -2022,21 +2029,12 @@ func TestReceiveContext(t *testing.T) {
 		err = sys.Start(ctx)
 		assert.NoError(t, err)
 
-		// create an exchanger two
+		// create an exchanger 2
 		actorName2 := "Exchange2"
 
 		// create actor1
 		actor1 := &exchanger{}
-		ports := dynaport.Get(1)
-		actorPath1 := address.New("Exchange1", "sys", "host", ports[0])
-		pid1, err := newPID(
-			ctx,
-			actorPath1,
-			actor1,
-			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
-		)
-
+		pid1, err := sys.Spawn(ctx, "Exchange1", actor1)
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
 
@@ -2062,25 +2060,27 @@ func TestReceiveContext(t *testing.T) {
 	t.Run("With successful PipeTo", func(t *testing.T) {
 		askTimeout := time.Minute
 		ctx := context.TODO()
-
-		opts := []pidOption{
-			withInitMaxRetries(1),
-			withPassivationDisabled(),
-			withCustomLogger(log.DiscardLogger),
-		}
-
 		ports := dynaport.Get(1)
+
+		actorSystem, err := NewActorSystem("sys",
+			WithRemoting("127.0.0.1", int32(ports[0])),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NoError(t, actorSystem.Start(ctx))
+
+		lib.Pause(time.Second)
+
 		// create actor1
 		actor1 := &exchanger{}
-		actorPath1 := address.New("Exchange1", "sys", "host", ports[0])
-		pid1, err := newPID(ctx, actorPath1, actor1, opts...)
+		pid1, err := actorSystem.Spawn(ctx, "Exchange1", actor1)
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
 
 		// create actor2
 		actor2 := &exchanger{}
-		actorPath2 := address.New("Exchange2", "sys", "host", ports[0])
-		pid2, err := newPID(ctx, actorPath2, actor2, opts...)
+
+		pid2, err := actorSystem.Spawn(ctx, "Exchange2", actor2)
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
 
@@ -2123,29 +2123,32 @@ func TestReceiveContext(t *testing.T) {
 		lib.Pause(time.Second)
 		assert.NoError(t, pid1.Shutdown(ctx))
 		assert.NoError(t, pid2.Shutdown(ctx))
+		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 	t.Run("With failed PipeTo", func(t *testing.T) {
 		ctx := context.TODO()
-
-		opts := []pidOption{
-			withInitMaxRetries(1),
-			withPassivationDisabled(),
-			withCustomLogger(log.DiscardLogger),
-		}
-
 		ports := dynaport.Get(1)
+
+		actorSystem, err := NewActorSystem("sys",
+			WithRemoting("127.0.0.1", int32(ports[0])),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NoError(t, actorSystem.Start(ctx))
+
+		lib.Pause(time.Second)
 
 		// create actor1
 		actor1 := &exchanger{}
-		actorPath1 := address.New("Exchange1", "sys", "host", ports[0])
-		pid1, err := newPID(ctx, actorPath1, actor1, opts...)
+
+		pid1, err := actorSystem.Spawn(ctx, "Exchange1", actor1)
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
 
 		// create actor2
 		actor2 := &exchanger{}
-		actorPath2 := address.New("Exchange2", "sys", "host", ports[0])
-		pid2, err := newPID(ctx, actorPath2, actor2, opts...)
+
+		pid2, err := actorSystem.Spawn(ctx, "Exchange2", actor2)
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
 
@@ -2167,6 +2170,7 @@ func TestReceiveContext(t *testing.T) {
 		require.Error(t, messageContext.getError())
 		assert.NoError(t, pid1.Shutdown(ctx))
 		assert.NoError(t, pid2.Shutdown(ctx))
+		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 	t.Run("With successful SendAsync command", func(t *testing.T) {
 		ctx := context.Background()
@@ -2335,24 +2339,27 @@ func TestReceiveContext(t *testing.T) {
 	})
 	t.Run("With Stash when stash not set", func(t *testing.T) {
 		ctx := context.TODO()
-		// create an actor
-		opts := []pidOption{
-			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
-		}
-
 		ports := dynaport.Get(1)
+
+		actorSystem, err := NewActorSystem("sys",
+			WithRemoting("127.0.0.1", int32(ports[0])),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NoError(t, actorSystem.Start(ctx))
+
+		lib.Pause(time.Second)
+
 		// create the actor path
-		actor := &stasQA{}
-		actorPath := address.New("stasQA", "sys", "host", ports[0])
-		pid, err := newPID(ctx, actorPath, actor, opts...)
+		actor := &stashQA{}
+		pid, err := actorSystem.Spawn(ctx, "stashQA", actor)
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 
 		// wait for the actor to properly start
 		lib.Pause(5 * time.Millisecond)
 
-		// create a receive context
+		// create a receiveContext
 		receiveContext := &ReceiveContext{
 			ctx:     ctx,
 			message: new(testpb.TestSend),
@@ -2366,27 +2373,32 @@ func TestReceiveContext(t *testing.T) {
 		assert.EqualError(t, err, ErrStashBufferNotSet.Error())
 		err = pid.Shutdown(ctx)
 		assert.NoError(t, err)
+		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 	t.Run("With Unstash when stash not set", func(t *testing.T) {
 		ctx := context.TODO()
-		// create an actor
-		opts := []pidOption{
-			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
-		}
-
 		ports := dynaport.Get(1)
+
+		actorSystem, err := NewActorSystem("sys",
+			WithRemoting("127.0.0.1", int32(ports[0])),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NoError(t, actorSystem.Start(ctx))
+
+		lib.Pause(time.Second)
+
 		// create the actor path
-		actor := &stasQA{}
-		actorPath := address.New("stasQA", "sys", "host", ports[0])
-		pid, err := newPID(ctx, actorPath, actor, opts...)
+		actor := &stashQA{}
+
+		pid, err := actorSystem.Spawn(ctx, "stashQA", actor)
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 
 		// wait for the actor to properly start
 		lib.Pause(5 * time.Millisecond)
 
-		// create a receive context
+		// create a receiveContext
 		receiveContext := &ReceiveContext{
 			ctx:     ctx,
 			message: new(testpb.TestSend),
@@ -2400,20 +2412,25 @@ func TestReceiveContext(t *testing.T) {
 		assert.EqualError(t, err, ErrStashBufferNotSet.Error())
 		err = pid.Shutdown(ctx)
 		assert.NoError(t, err)
+		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 	t.Run("With UnstashAll when stash not set", func(t *testing.T) {
 		ctx := context.TODO()
-		// create an actor
-		opts := []pidOption{
-			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
-		}
-
 		ports := dynaport.Get(1)
+
+		actorSystem, err := NewActorSystem("sys",
+			WithRemoting("127.0.0.1", int32(ports[0])),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NoError(t, actorSystem.Start(ctx))
+
+		lib.Pause(time.Second)
+
 		// create the actor path
-		actor := &stasQA{}
-		actorPath := address.New("stasQA", "sys", "host", ports[0])
-		pid, err := newPID(ctx, actorPath, actor, opts...)
+		actor := &stashQA{}
+
+		pid, err := actorSystem.Spawn(ctx, "stashQA", actor)
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 
@@ -2434,6 +2451,7 @@ func TestReceiveContext(t *testing.T) {
 		assert.EqualError(t, err, ErrStashBufferNotSet.Error())
 		err = pid.Shutdown(ctx)
 		assert.NoError(t, err)
+		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 	t.Run("With successful RemoteForward", func(t *testing.T) {
 		ctx := context.TODO()
@@ -2546,6 +2564,9 @@ func TestReceiveContext(t *testing.T) {
 		// let us shutdown the rest
 		require.NoError(t, pidA.Shutdown(ctx))
 		require.NoError(t, pidB.Shutdown(ctx))
+
+		assert.NoError(t, actorSystem.Stop(ctx))
+		assert.NoError(t, actorSystem2.Stop(ctx))
 	})
 	t.Run("With successful RemoteForward case 2", func(t *testing.T) {
 		ctx := context.TODO()
@@ -2600,6 +2621,8 @@ func TestReceiveContext(t *testing.T) {
 		// let us shutdown the rest
 		require.NoError(t, pidA.Shutdown(ctx))
 		require.NoError(t, pidB.Shutdown(ctx))
+		assert.NoError(t, actorSystem.Stop(ctx))
+		assert.NoError(t, actorSystem2.Stop(ctx))
 	})
 	t.Run("With successful ForwardTo", func(t *testing.T) {
 		// create a context
@@ -2659,6 +2682,7 @@ func TestReceiveContext(t *testing.T) {
 		// let us shutdown the rest
 		require.NoError(t, actorSystem.Stop(ctx))
 		require.NoError(t, actorSystem2.Stop(ctx))
+		srv.Shutdown()
 	})
 	t.Run("With failed ForwardTo", func(t *testing.T) {
 		// create a context
@@ -2716,5 +2740,6 @@ func TestReceiveContext(t *testing.T) {
 		// let us shutdown the rest
 		require.NoError(t, actorSystem.Stop(ctx))
 		require.NoError(t, actorSystem2.Stop(ctx))
+		srv.Shutdown()
 	})
 }

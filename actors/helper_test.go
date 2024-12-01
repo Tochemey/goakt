@@ -242,13 +242,13 @@ func (e *exchanger) PostStop(context.Context) error {
 
 var _ Actor = &exchanger{}
 
-type stasQA struct{}
+type stashQA struct{}
 
-func (x *stasQA) PreStart(context.Context) error {
+func (x *stashQA) PreStart(context.Context) error {
 	return nil
 }
 
-func (x *stasQA) Receive(ctx *ReceiveContext) {
+func (x *stashQA) Receive(ctx *ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *goaktpb.PostStart:
 	case *testspb.TestStash:
@@ -260,7 +260,7 @@ func (x *stasQA) Receive(ctx *ReceiveContext) {
 	}
 }
 
-func (x *stasQA) Ready(ctx *ReceiveContext) {
+func (x *stashQA) Ready(ctx *ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *goaktpb.PostStart:
 	case *testspb.TestStash:
@@ -276,11 +276,11 @@ func (x *stasQA) Ready(ctx *ReceiveContext) {
 	}
 }
 
-func (x *stasQA) PostStop(context.Context) error {
+func (x *stashQA) PostStop(context.Context) error {
 	return nil
 }
 
-var _ Actor = &stasQA{}
+var _ Actor = &stashQA{}
 
 type preStartQA struct{}
 
@@ -464,6 +464,7 @@ func startClusterSystem(t *testing.T, serverAddr string) (ActorSystem, discovery
 		WithPassivationDisabled(),
 		WithLogger(logger),
 		WithRemoting(host, int32(remotingPort)),
+		WithJanitorInterval(time.Minute),
 		WithPeerStateLoopInterval(500*time.Millisecond),
 		WithCluster(
 			NewClusterConfig().
