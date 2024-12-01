@@ -556,10 +556,10 @@ func (x *actorSystem) ReSpawn(ctx context.Context, name string) (*PID, error) {
 			return nil, fmt.Errorf("failed to restart actor=%s: %w", actorAddress.String(), err)
 		}
 
-		if err := x.actors.AddNode(parent, pid); err != nil {
-			return nil, err
-		}
-
+		// no need to handle the error here because the only time this method
+		// returns an error if when the parent does not exist which was taken care of in the
+		// lines above
+		_ = x.actors.AddNode(parent, pid)
 		x.actors.AddWatcher(pid, x.supervisor)
 		return pid, nil
 	}
