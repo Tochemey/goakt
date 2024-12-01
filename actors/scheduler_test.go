@@ -204,7 +204,7 @@ func TestScheduler(t *testing.T) {
 
 		remoting := NewRemoting()
 		// get the address of the actor
-		addr, err := remoting.RemoteLookup(ctx, host, remotingPort, actorName)
+		addr, err := remoting.RemoteLookup(ctx, newActorSystem.Host(), int(newActorSystem.Port()), actorName)
 		require.NoError(t, err)
 
 		// send a message to the actor after 100 ms
@@ -264,7 +264,7 @@ func TestScheduler(t *testing.T) {
 
 		remoting := NewRemoting()
 		// get the address of the actor
-		addr, err := remoting.RemoteLookup(ctx, host, remotingPort, actorName)
+		addr, err := remoting.RemoteLookup(ctx, newActorSystem.Host(), int(newActorSystem.Port()), actorName)
 		require.NoError(t, err)
 
 		// send a message to the actor after 100 ms
@@ -441,7 +441,7 @@ func TestScheduler(t *testing.T) {
 
 		remoting := NewRemoting()
 		// get the address of the actor
-		addr, err := remoting.RemoteLookup(ctx, host, remotingPort, actorName)
+		addr, err := remoting.RemoteLookup(ctx, newActorSystem.Host(), int(newActorSystem.Port()), actorName)
 		require.NoError(t, err)
 
 		// send a message to the actor after 100 ms
@@ -494,7 +494,7 @@ func TestScheduler(t *testing.T) {
 
 		remoting := NewRemoting()
 		// get the address of the actor
-		addr, err := remoting.RemoteLookup(ctx, host, remotingPort, actorName)
+		addr, err := remoting.RemoteLookup(ctx, newActorSystem.Host(), int(newActorSystem.Port()), actorName)
 		require.NoError(t, err)
 
 		// send a message to the actor after 100 ms
@@ -546,7 +546,7 @@ func TestScheduler(t *testing.T) {
 
 		remoting := NewRemoting()
 		// get the address of the actor
-		addr, err := remoting.RemoteLookup(ctx, host, remotingPort, actorName)
+		addr, err := remoting.RemoteLookup(ctx, newActorSystem.Host(), int(newActorSystem.Port()), actorName)
 		require.NoError(t, err)
 
 		// send a message to the actor after 100 ms
@@ -738,7 +738,7 @@ func TestScheduler(t *testing.T) {
 
 		remoting := NewRemoting()
 		// get the address of the actor
-		addr, err := remoting.RemoteLookup(ctx, host, remotingPort, actorName)
+		addr, err := remoting.RemoteLookup(ctx, newActorSystem.Host(), int(newActorSystem.Port()), actorName)
 		require.NoError(t, err)
 
 		// send a message to the actor after 100 ms
@@ -802,7 +802,7 @@ func TestScheduler(t *testing.T) {
 
 		remoting := NewRemoting()
 		// get the address of the actor
-		addr, err := remoting.RemoteLookup(ctx, host, remotingPort, actorName)
+		addr, err := remoting.RemoteLookup(ctx, newActorSystem.Host(), int(newActorSystem.Port()), actorName)
 		require.NoError(t, err)
 
 		// send a message to the actor after 100 ms
@@ -851,7 +851,7 @@ func TestScheduler(t *testing.T) {
 
 		remoting := NewRemoting()
 		// get the address of the actor
-		addr, err := remoting.RemoteLookup(ctx, host, remotingPort, actorName)
+		addr, err := remoting.RemoteLookup(ctx, newActorSystem.Host(), int(newActorSystem.Port()), actorName)
 		require.NoError(t, err)
 
 		require.NoError(t, newActorSystem.Kill(ctx, actorName))
