@@ -55,6 +55,7 @@ import (
 	"github.com/tochemey/goakt/v2/internal/eventstream"
 	"github.com/tochemey/goakt/v2/internal/internalpb"
 	"github.com/tochemey/goakt/v2/internal/internalpb/internalpbconnect"
+	"github.com/tochemey/goakt/v2/internal/tcp"
 	"github.com/tochemey/goakt/v2/internal/types"
 	"github.com/tochemey/goakt/v2/log"
 )
@@ -136,6 +137,12 @@ type ActorSystem interface {
 	Deregister(ctx context.Context, actor Actor) error
 	// Logger returns the logger sets when creating the actor system
 	Logger() log.Logger
+	// Host returns the actor system node host address
+	// This is the bind address for remote communication
+	Host() string
+	// Port returns the actor system node port.
+	// This is the bind port for remote communication
+	Port() int32
 	// handleRemoteAsk handles a synchronous message to another actor and expect a response.
 	// This block until a response is received or timed out.
 	handleRemoteAsk(ctx context.Context, to *PID, message proto.Message, timeout time.Duration) (response proto.Message, err error)
@@ -304,6 +311,24 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		withSchedulerRemoting(NewRemoting()))
 
 	return system, nil
+}
+
+// Host returns the actor system node host address
+// This is the bind address for remote communication
+func (x *actorSystem) Host() string {
+	x.locker.Lock()
+	host := x.host
+	x.locker.Unlock()
+	return host
+}
+
+// Port returns the actor system node port.
+// This is the bind port for remote communication
+func (x *actorSystem) Port() int32 {
+	x.locker.Lock()
+	port := x.port
+	x.locker.Unlock()
+	return port
 }
 
 // Logger returns the logger sets when creating the actor system
@@ -1509,22 +1534,7 @@ func (x *actorSystem) getCluster() cluster.Interface {
 
 // reservedName returns reserved actor's name
 func (x *actorSystem) reservedName(nameType nameType) string {
-	if x.remotingEnabled.Load() {
-		return fmt.Sprintf(
-			"%s%s%s-%d-%d",
-			systemNames[nameType],
-			strings.ToTitle(x.name),
-			x.host,
-			x.port,
-			time.Now().UnixNano(),
-		)
-	}
-	return fmt.Sprintf(
-		"%s%s-%d",
-		systemNames[nameType],
-		strings.ToTitle(x.name),
-		time.Now().UnixNano(),
-	)
+	return systemNames[nameType]
 }
 
 // actorAddress returns the actor path provided the actor name
@@ -1580,18 +1590,13 @@ func (x *actorSystem) nodeLeftStateFromEvent(event *cluster.Event) (*internalpb.
 
 // setHostPort sets the host and port
 func (x *actorSystem) setHostPort() error {
+	var err error
 	// combine host and port into an hostPort string
-	hostPort := fmt.Sprintf("%s:%d", x.host, x.port)
-
-	// attempt to resolve the hostPort
-	resolvedAddr, err := net.ResolveTCPAddr("tcp", hostPort)
+	hostPort := net.JoinHostPort(x.host, strconv.Itoa(int(x.port)))
+	x.host, err = tcp.GetBindIP(hostPort)
 	if err != nil {
-		return fmt.Errorf("failed to resolve hostPort: %w", err)
+		return err
 	}
-
-	// if it's an IP address, update the host to the resolved IP
-	x.host = resolvedAddr.IP.String()
-	x.port = int32(resolvedAddr.Port)
 	return nil
 }
 

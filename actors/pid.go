@@ -352,7 +352,7 @@ func (pid *PID) Restart(ctx context.Context) error {
 		return ErrUndefinedActor
 	}
 
-	pid.logger.Debugf("restarting actor=(%s)", pid.address.String())
+	pid.logger.Debugf("restarting actor=(%s)", pid.Name())
 
 	if pid.IsRunning() {
 		if err := pid.Shutdown(ctx); err != nil {
@@ -394,6 +394,7 @@ func (pid *PID) Restart(ctx context.Context) error {
 		)
 	}
 
+	pid.logger.Debugf("actor=(%s) successfully restarted..:)", pid.Name())
 	return nil
 }
 
@@ -983,10 +984,10 @@ func (pid *PID) RemoteReSpawn(ctx context.Context, host string, port int, name s
 // that can be configured. All child actors will be gracefully shutdown.
 func (pid *PID) Shutdown(ctx context.Context) error {
 	pid.stopLocker.Lock()
-	pid.logger.Infof("shutdown process has started for actor=(%s)...", pid.ID())
+	pid.logger.Infof("shutdown process has started for actor=(%s)...", pid.Name())
 
 	if !pid.started.Load() {
-		pid.logger.Infof("actor=%s is offline. Maybe it has been passivated or stopped already", pid.Address().String())
+		pid.logger.Infof("actor=%s is offline. Maybe it has been passivated or stopped already", pid.Name())
 		pid.stopLocker.Unlock()
 		return nil
 	}
@@ -998,7 +999,7 @@ func (pid *PID) Shutdown(ctx context.Context) error {
 	}
 
 	if err := pid.doStop(ctx); err != nil {
-		pid.logger.Errorf("actor=(%s) failed to cleanly stop", pid.ID())
+		pid.logger.Errorf("actor=(%s) failed to cleanly stop", pid.Name())
 		pid.stopLocker.Unlock()
 		return err
 	}
@@ -1013,7 +1014,7 @@ func (pid *PID) Shutdown(ctx context.Context) error {
 	}
 
 	pid.stopLocker.Unlock()
-	pid.logger.Infof("actor=%s successfully shutdown", pid.ID())
+	pid.logger.Infof("actor=%s successfully shutdown", pid.Name())
 	return nil
 }
 
@@ -1146,7 +1147,7 @@ func (pid *PID) recovery(received *ReceiveContext) {
 // init initializes the given actor and init processing messages
 // when the initialization failed the actor will not be started
 func (pid *PID) init(ctx context.Context) error {
-	pid.logger.Infof("initialization process has started for %s...", pid.ID())
+	pid.logger.Infof("initialization process has started for %s...", pid.Name())
 
 	cancelCtx, cancel := context.WithTimeout(ctx, pid.initTimeout.Load())
 	// create a new retrier that will try a maximum of `initMaxRetries` times, with
@@ -1159,7 +1160,7 @@ func (pid *PID) init(ctx context.Context) error {
 	}
 
 	pid.started.Store(true)
-	pid.logger.Infof("initialization process successfully completed for %s.", pid.ID())
+	pid.logger.Infof("initialization process successfully completed for %s.", pid.Name())
 
 	if pid.eventsStream != nil {
 		pid.eventsStream.Publish(
@@ -1189,10 +1190,10 @@ func (pid *PID) reset() {
 // freeWatchers releases all the actors watching this actor
 func (pid *PID) freeWatchers(ctx context.Context) error {
 	logger := pid.logger
-	logger.Debugf("%s freeing all watcher actors...", pid.ID())
+	logger.Debugf("%s freeing all watcher actors...", pid.Name())
 	pnode, ok := pid.ActorSystem().tree().GetNode(pid.ID())
 	if !ok {
-		pid.logger.Debugf("%s node not found in the actors tree", pid.ID())
+		pid.logger.Debugf("%s node not found in the actors tree", pid.Name())
 		return nil
 	}
 
@@ -1208,35 +1209,35 @@ func (pid *PID) freeWatchers(ctx context.Context) error {
 
 				wid := watcher.GetValue()
 				if wid.IsRunning() {
-					logger.Debugf("watcher=(%s) releasing watched=(%s)", watcher.ID, pid.ID())
+					logger.Debugf("watcher=(%s) releasing watched=(%s)", wid.Name(), pid.Name())
 					if err := pid.Tell(ctx, wid, terminated); err != nil {
 						return err
 					}
 
 					wid.UnWatch(pid)
-					logger.Debugf("watcher=(%s) released watched=(%s)", watcher.ID, pid.ID())
+					logger.Debugf("watcher=(%s) released watched=(%s)", wid.Name(), pid.Name())
 				}
 				return nil
 			})
 		}
 		if err := eg.Wait(); err != nil {
-			logger.Errorf("watcher=(%s) failed to free all watcher error: %v", pid.ID(), err)
+			logger.Errorf("watcher=(%s) failed to free all watcher error: %v", pid.Name(), err)
 			return err
 		}
-		logger.Debugf("%s successfully frees all watcher actors...", pid.ID())
+		logger.Debugf("%s successfully frees all watcher actors...", pid.Name())
 		return nil
 	}
-	logger.Debugf("%s does not have any watcher actors", pid.ID())
+	logger.Debugf("%s does not have any watcher actors", pid.Name())
 	return nil
 }
 
 // freeWatchees releases all actors that have been watched by this actor
 func (pid *PID) freeWatchees() error {
 	logger := pid.logger
-	logger.Debugf("%s freeing all watched actors...", pid.ID())
+	logger.Debugf("%s freeing all watched actors...", pid.Name())
 	pnode, ok := pid.ActorSystem().tree().GetNode(pid.ID())
 	if !ok {
-		pid.logger.Debugf("%s node not found in the actors tree", pid.ID())
+		pid.logger.Debugf("%s node not found in the actors tree", pid.Name())
 		return nil
 	}
 
@@ -1247,38 +1248,38 @@ func (pid *PID) freeWatchees() error {
 			watched := watched
 			wid := watched.GetValue()
 			eg.Go(func() error {
-				logger.Debugf("watcher=(%s) unwatching actor=(%s)", pid.ID(), watched.ID)
+				logger.Debugf("watcher=(%s) unwatching actor=(%s)", pid.Name(), wid.Name())
 				pid.UnWatch(wid)
-				logger.Debugf("watcher=(%s) successfully unwatch actor=(%s)", pid.ID(), watched.ID)
+				logger.Debugf("watcher=(%s) successfully unwatch actor=(%s)", pid.Name(), wid.Name())
 				return nil
 			})
 		}
 		if err := eg.Wait(); err != nil {
-			logger.Errorf("watcher=(%s) failed to unwatch actors: %v", pid.ID(), err)
+			logger.Errorf("watcher=(%s) failed to unwatch actors: %v", pid.Name(), err)
 			return err
 		}
-		logger.Debugf("%s successfully unwatch all watched actors...", pid.ID())
+		logger.Debugf("%s successfully unwatch all watched actors...", pid.Name())
 		return nil
 	}
-	logger.Debugf("%s does not have any watched actors", pid.ID())
+	logger.Debugf("%s does not have any watched actors", pid.Name())
 	return nil
 }
 
 // freeChildren releases all child actors
 func (pid *PID) freeChildren(ctx context.Context) error {
 	logger := pid.logger
-	logger.Debugf("%s freeing all descendant actors...", pid.ID())
+	logger.Debugf("%s freeing all descendant actors...", pid.Name())
 
 	tree := pid.ActorSystem().tree()
 	pnode, ok := tree.GetNode(pid.ID())
 	if !ok {
-		pid.logger.Debugf("%s node not found in the actors tree", pid.ID())
+		pid.logger.Debugf("%s node not found in the actors tree", pid.Name())
 		return nil
 	}
 
 	descendants, ok := tree.Descendants(pid)
 	if !ok {
-		pid.logger.Debugf("%s does not have any children", pid.ID())
+		pid.logger.Debugf("%s does not have any children", pid.Name())
 		return nil
 	}
 
@@ -1288,27 +1289,27 @@ func (pid *PID) freeChildren(ctx context.Context) error {
 		child := descendant.GetValue()
 		index := index
 		eg.Go(func() error {
-			logger.Debugf("parent=(%s) disowning descendant=(%s)", pid.ID(), child.ID())
+			logger.Debugf("parent=(%s) disowning descendant=(%s)", pid.Name(), child.Name())
 
 			pid.UnWatch(child)
 			pnode.Descendants.Delete(index)
 
 			if err := child.Shutdown(ctx); err != nil {
 				errwrap := fmt.Errorf(
-					"parent=(%s) failed to disown descendant=(%s): %w", pid.ID(), child.ID(),
+					"parent=(%s) failed to disown descendant=(%s): %w", pid.Name(), child.Name(),
 					err,
 				)
 				return errwrap
 			}
-			logger.Debugf("parent=(%s) successfully disown descendant=(%s)", pid.ID(), child.ID())
+			logger.Debugf("parent=(%s) successfully disown descendant=(%s)", pid.Name(), child.Name())
 			return nil
 		})
 	}
 	if err := eg.Wait(); err != nil {
-		logger.Errorf("parent=(%s) failed to free all descendant actors: %v", pid.ID(), err)
+		logger.Errorf("parent=(%s) failed to free all descendant actors: %v", pid.Name(), err)
 		return err
 	}
-	logger.Debugf("%s successfully free all descendant actors...", pid.ID())
+	logger.Debugf("%s successfully free all descendant actors...", pid.Name())
 	return nil
 }
 
@@ -1341,16 +1342,16 @@ func (pid *PID) passivationLoop() {
 	ticker.Stop()
 
 	if pid.stopping.Load() {
-		pid.logger.Infof("Actor=%s is stopping. No need to passivate", pid.Address().String())
+		pid.logger.Infof("Actor=%s is stopping. No need to passivate", pid.Name())
 		return
 	}
 
-	pid.logger.Infof("Passivation mode has been triggered for actor=%s...", pid.Address().String())
+	pid.logger.Infof("Passivation mode has been triggered for actor=%s...", pid.Name())
 
 	ctx := context.Background()
 	if err := pid.doStop(ctx); err != nil {
 		// TODO: rethink properly about PostStop error handling
-		pid.logger.Errorf("failed to passivate actor=(%s): reason=(%v)", pid.Address().String(), err)
+		pid.logger.Errorf("failed to passivate actor=(%s): reason=(%v)", pid.Name(), err)
 		return
 	}
 
@@ -1362,7 +1363,7 @@ func (pid *PID) passivationLoop() {
 		pid.eventsStream.Publish(eventsTopic, event)
 	}
 
-	pid.logger.Infof("Actor=%s successfully passivated", pid.Address().String())
+	pid.logger.Infof("Actor=%s successfully passivated", pid.Name())
 }
 
 // setBehavior is a utility function that helps set the actor behavior
@@ -1400,7 +1401,7 @@ func (pid *PID) doStop(ctx context.Context) error {
 	// TODO: just signal stash processing done and ignore the messages or process them
 	if pid.stashBox != nil {
 		if err := pid.unstashAll(); err != nil {
-			pid.logger.Errorf("actor=(%s) failed to unstash messages", pid.Address().String())
+			pid.logger.Errorf("actor=(%s) failed to unstash messages", pid.Name())
 			pid.started.Store(false)
 			return err
 		}
@@ -1437,7 +1438,7 @@ func (pid *PID) doStop(ctx context.Context) error {
 	}
 
 	pid.started.Store(false)
-	pid.logger.Infof("post shutdown process is on going for actor=%s...", pid.Address().String())
+	pid.logger.Infof("post shutdown process is on going for actor=%s...", pid.Name())
 	pid.reset()
 	return pid.actor.PostStop(ctx)
 }
@@ -1536,7 +1537,7 @@ func (pid *PID) handleCompletion(ctx context.Context, completion *taskCompletion
 	// make sure that the receiver is still alive
 	to := completion.Receiver
 	if !to.IsRunning() {
-		pid.logger.Errorf("unable to pipe message to actor=(%s): not started", to.Address().String())
+		pid.logger.Errorf("unable to pipe message to actor=(%s): not started", to.Name())
 		return
 	}
 
@@ -1556,7 +1557,7 @@ func (pid *PID) handleFaultyChild(msg *internalpb.HandleFault) {
 		cid := descendant.GetValue()
 		if cid.ID() == msg.GetActorId() {
 			message := msg.GetMessage()
-			pid.logger.Errorf("child actor=(%s) is failing: Err=%s", cid.ID(), message)
+			pid.logger.Errorf("child actor=(%s) is failing: Err=%s", cid.Name(), message)
 			switch directive := cid.supervisorDirective.(type) {
 			case *StopDirective:
 				pid.handleStopDirective(cid)

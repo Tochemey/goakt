@@ -24,7 +24,12 @@
 
 package tcp
 
-import "net"
+import (
+	"fmt"
+	"net"
+
+	"github.com/hashicorp/go-sockaddr"
+)
 
 // GetHostPort returns the actual ip address and port from a given address
 func GetHostPort(address string) (string, int, error) {
@@ -35,4 +40,40 @@ func GetHostPort(address string) (string, int, error) {
 	}
 
 	return addr.IP.String(), addr.Port, nil
+}
+
+// GetBindIP tries to find an appropriate bindIP to bind and propagate.
+func GetBindIP(address string) (string, error) {
+	bindIP, _, err := GetHostPort(address)
+	if err != nil {
+		return "", fmt.Errorf("invalid address: %w", err)
+	}
+
+	if bindIP == "0.0.0.0" {
+		// if we're not bound to a specific IP, let's use a suitable private IP address.
+		ipStr, err := sockaddr.GetPrivateIP()
+		if err != nil {
+			return "", fmt.Errorf("failed to get private interface addresses: %w", err)
+		}
+
+		// if we could not find a private address, we need to expand our search to a public
+		// ip address
+		if ipStr == "" {
+			ipStr, err = sockaddr.GetPublicIP()
+			if err != nil {
+				return "", fmt.Errorf("failed to get public interface addresses: %w", err)
+			}
+		}
+
+		if ipStr == "" {
+			return "", fmt.Errorf("no private IP address found, and explicit IP not provided")
+		}
+
+		parsed := net.ParseIP(ipStr)
+		if parsed == nil {
+			return "", fmt.Errorf("failed to parse private IP address: %q", ipStr)
+		}
+		bindIP = parsed.String()
+	}
+	return bindIP, nil
 }
