@@ -1289,6 +1289,54 @@ func TestSpawnChild(t *testing.T) {
 		lib.Pause(time.Second)
 		assert.NoError(t, actorSystem.Stop(ctx))
 	})
+	t.Run("With empty children when actor is not running or does not exist", func(t *testing.T) {
+		ctx := context.TODO()
+		host := "127.0.0.1"
+		ports := dynaport.Get(1)
+
+		actorSystem, err := NewActorSystem("testSys",
+			WithRemoting(host, int32(ports[0])),
+			WithPassivationDisabled(),
+			WithJanitorInterval(100*time.Millisecond),
+			WithLogger(log.DefaultLogger))
+
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+
+		lib.Pause(time.Second)
+
+		// create the parent actor
+		parent, err := actorSystem.Spawn(ctx, "Parent", newTestSupervisor())
+		require.NoError(t, err)
+		assert.NotNil(t, parent)
+
+		lib.Pause(time.Second)
+
+		// create the child actor
+		child, err := parent.SpawnChild(ctx, "SpawnChild", newTestSupervised())
+		assert.NoError(t, err)
+		assert.NotNil(t, child)
+
+		lib.Pause(time.Second)
+
+		require.Len(t, parent.Children(), 1)
+
+		// stop the child actor
+		require.NoError(t, child.Shutdown(ctx))
+
+		lib.Pause(time.Second)
+		require.False(t, child.IsRunning())
+		require.Empty(t, parent.Children())
+
+		// stop the parent actor
+		require.NoError(t, parent.Shutdown(ctx))
+		lib.Pause(time.Second)
+
+		require.Empty(t, parent.Children())
+		assert.NoError(t, actorSystem.Stop(ctx))
+	})
 	t.Run("With starting child actor with a different mailbox", func(t *testing.T) {
 		ctx := context.TODO()
 		host := "127.0.0.1"

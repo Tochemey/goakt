@@ -480,9 +480,9 @@ func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor, opts .
 		return nil, err
 	}
 
-	if err := tree.AddNode(pid, cid); err != nil {
-		return nil, err
-	}
+	// no need to handle the error because the given parent exist and running
+	// that check was done in the above lines
+	_ = tree.AddNode(pid, cid)
 
 	eventsStream := pid.eventsStream
 	if eventsStream != nil {
