@@ -1210,10 +1210,8 @@ func (pid *PID) freeWatchers(ctx context.Context) error {
 				wid := watcher.GetValue()
 				if wid.IsRunning() {
 					logger.Debugf("watcher=(%s) releasing watched=(%s)", wid.Name(), pid.Name())
-					if err := pid.Tell(ctx, wid, terminated); err != nil {
-						return err
-					}
-
+					// ignore error here because the watcher is running
+					_ = pid.Tell(ctx, wid, terminated)
 					wid.UnWatch(pid)
 					logger.Debugf("watcher=(%s) released watched=(%s)", wid.Name(), pid.Name())
 				}
@@ -1277,39 +1275,36 @@ func (pid *PID) freeChildren(ctx context.Context) error {
 		return nil
 	}
 
-	descendants, ok := tree.Descendants(pid)
-	if !ok {
-		pid.logger.Debugf("%s does not have any children", pid.Name())
-		return nil
-	}
+	if descendants, ok := tree.Descendants(pid); ok {
+		eg, ctx := errgroup.WithContext(ctx)
+		for index, descendant := range descendants {
+			descendant := descendant
+			child := descendant.GetValue()
+			index := index
+			eg.Go(func() error {
+				logger.Debugf("parent=(%s) disowning descendant=(%s)", pid.Name(), child.Name())
 
-	eg, ctx := errgroup.WithContext(ctx)
-	for index, descendant := range descendants {
-		descendant := descendant
-		child := descendant.GetValue()
-		index := index
-		eg.Go(func() error {
-			logger.Debugf("parent=(%s) disowning descendant=(%s)", pid.Name(), child.Name())
+				pid.UnWatch(child)
+				pnode.Descendants.Delete(index)
 
-			pid.UnWatch(child)
-			pnode.Descendants.Delete(index)
-
-			if err := child.Shutdown(ctx); err != nil {
-				errwrap := fmt.Errorf(
-					"parent=(%s) failed to disown descendant=(%s): %w", pid.Name(), child.Name(),
-					err,
-				)
-				return errwrap
-			}
-			logger.Debugf("parent=(%s) successfully disown descendant=(%s)", pid.Name(), child.Name())
-			return nil
-		})
+				if err := child.Shutdown(ctx); err != nil {
+					errwrap := fmt.Errorf(
+						"parent=(%s) failed to disown descendant=(%s): %w", pid.Name(), child.Name(),
+						err,
+					)
+					return errwrap
+				}
+				logger.Debugf("parent=(%s) successfully disown descendant=(%s)", pid.Name(), child.Name())
+				return nil
+			})
+		}
+		if err := eg.Wait(); err != nil {
+			logger.Errorf("parent=(%s) failed to free all descendant actors: %v", pid.Name(), err)
+			return err
+		}
+		logger.Debugf("%s successfully free all descendant actors...", pid.Name())
 	}
-	if err := eg.Wait(); err != nil {
-		logger.Errorf("parent=(%s) failed to free all descendant actors: %v", pid.Name(), err)
-		return err
-	}
-	logger.Debugf("%s successfully free all descendant actors...", pid.Name())
+	pid.logger.Debugf("%s does not have any children", pid.Name())
 	return nil
 }
 
@@ -1411,6 +1406,7 @@ func (pid *PID) doStop(ctx context.Context) error {
 	pid.supervisionStopSignal <- types.Unit{}
 	pid.receiveStopSignal <- types.Unit{}
 
+	// TODO: revisit this part of the code
 	// move remaining messages in the mailbox to deadletter queue
 	// any subscription to the actor system can handle them.
 	// if pid.mailbox.Len() > 0 {
@@ -1548,27 +1544,24 @@ func (pid *PID) handleCompletion(ctx context.Context, completion *taskCompletion
 // handleFaultyChild watches for child actor's failure and act based upon the supervisory strategy
 func (pid *PID) handleFaultyChild(msg *internalpb.HandleFault) {
 	tree := pid.ActorSystem().tree()
-	descendants, ok := tree.Descendants(pid)
-	if !ok {
-		return
-	}
-
-	for _, descendant := range descendants {
-		cid := descendant.GetValue()
-		if cid.ID() == msg.GetActorId() {
-			message := msg.GetMessage()
-			pid.logger.Errorf("child actor=(%s) is failing: Err=%s", cid.Name(), message)
-			switch directive := cid.supervisorDirective.(type) {
-			case *StopDirective:
-				pid.handleStopDirective(cid)
-			case *RestartDirective:
-				pid.handleRestartDirective(cid, directive.MaxNumRetries(), directive.Timeout())
-			case *ResumeDirective:
-				// pass
-			default:
-				pid.handleStopDirective(cid)
+	if descendants, ok := tree.Descendants(pid); ok {
+		for _, descendant := range descendants {
+			cid := descendant.GetValue()
+			if cid.ID() == msg.GetActorId() {
+				message := msg.GetMessage()
+				pid.logger.Errorf("child actor=(%s) is failing: Err=%s", cid.Name(), message)
+				switch directive := cid.supervisorDirective.(type) {
+				case *StopDirective:
+					pid.handleStopDirective(cid)
+				case *RestartDirective:
+					pid.handleRestartDirective(cid, directive.MaxNumRetries(), directive.Timeout())
+				case *ResumeDirective:
+					// pass
+				default:
+					pid.handleStopDirective(cid)
+				}
+				return
 			}
-			return
 		}
 	}
 }
