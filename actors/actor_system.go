@@ -463,10 +463,7 @@ func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor, opts 
 	}
 
 	// add the given actor to the tree and supervise it
-	if err := x.actors.AddNode(NoSender, pid); err != nil {
-		return nil, err
-	}
-
+	_ = x.actors.AddNode(NoSender, pid)
 	x.actors.AddWatcher(pid, x.supervisor)
 	x.broadcastActor(pid)
 	return pid, nil
@@ -495,10 +492,7 @@ func (x *actorSystem) SpawnNamedFromFunc(ctx context.Context, name string, recei
 		return nil, err
 	}
 
-	if err := x.actors.AddNode(NoSender, pid); err != nil {
-		return nil, err
-	}
-
+	_ = x.actors.AddNode(NoSender, pid)
 	x.actors.AddWatcher(pid, x.supervisor)
 	x.broadcastActor(pid)
 	return pid, nil
