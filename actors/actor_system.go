@@ -1589,18 +1589,9 @@ func (x *actorSystem) setHostPort() error {
 		return fmt.Errorf("failed to resolve hostPort: %w", err)
 	}
 
-	// check if the original host is a DNS name or IP
-	switch {
-	case net.ParseIP(x.host) == nil:
-		// if it's a DNS name, keep the original host
-		// Only update the port from the resolved address
-		x.port = int32(resolvedAddr.Port)
-	default:
-		// if it's an IP address, update the host to the resolved IP
-		x.host = resolvedAddr.IP.String()
-		x.port = int32(resolvedAddr.Port)
-	}
-
+	// if it's an IP address, update the host to the resolved IP
+	x.host = resolvedAddr.IP.String()
+	x.port = int32(resolvedAddr.Port)
 	return nil
 }
 
