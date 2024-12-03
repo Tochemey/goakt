@@ -191,12 +191,12 @@ func BenchmarkActor(b *testing.B) {
 		var counter int64
 		b.ResetTimer()
 		b.ReportAllocs()
-		var messageCounter atomic.Int64
+		var priorityCounter atomic.Int64
 		b.RunParallel(func(pb *testing.PB) {
 			for pb.Next() {
-				messageCounter.Add(1)
+				priorityCounter.Add(1)
 				priorityMessage := &benchmarkpb.BenchPriorityMailbox{
-					Priority: messageCounter.Load(),
+					Priority: priorityCounter.Load(),
 				}
 				err := sender.Tell(ctx, receiver, priorityMessage)
 				if err != nil {

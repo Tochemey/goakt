@@ -27,6 +27,7 @@ package actors
 import (
 	hp "container/heap"
 	"sync"
+	"sync/atomic"
 
 	"google.golang.org/protobuf/proto"
 )
@@ -75,8 +76,9 @@ func (h *heap) Swap(i, j int) {
 // UnboundedPriorityMailBox is a Priority Queue (FIFO)
 // It implements a binary heap (using the standard library container/heap)
 type UnboundedPriorityMailBox struct {
-	heap *heap
-	lock *sync.RWMutex
+	heap   *heap
+	lock   *sync.RWMutex
+	length int64
 }
 
 // enforce compilation error
@@ -103,6 +105,7 @@ func (q *UnboundedPriorityMailBox) Enqueue(msg *ReceiveContext) error {
 	q.lock.Lock()
 	hp.Push(q.heap, msg)
 	q.lock.Unlock()
+	atomic.AddInt64(&q.length, 1)
 	return nil
 }
 
@@ -116,6 +119,7 @@ func (q *UnboundedPriorityMailBox) Dequeue() (msg *ReceiveContext) {
 	q.lock.Lock()
 	msg = hp.Pop(q.heap).(*ReceiveContext)
 	q.lock.Unlock()
+	atomic.AddInt64(&q.length, -1)
 	return msg
 }
 
@@ -126,8 +130,5 @@ func (q *UnboundedPriorityMailBox) IsEmpty() bool {
 
 // Len returns mailbox length
 func (q *UnboundedPriorityMailBox) Len() int64 {
-	q.lock.RLock()
-	length := int64(len(q.heap.items))
-	q.lock.RUnlock()
-	return length
+	return atomic.LoadInt64(&q.length)
 }
