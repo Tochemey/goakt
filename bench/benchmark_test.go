@@ -30,6 +30,8 @@ import (
 	"testing"
 	"time"
 
+	"google.golang.org/protobuf/proto"
+
 	"github.com/tochemey/goakt/v2/actors"
 	"github.com/tochemey/goakt/v2/bench/benchmarkpb"
 	"github.com/tochemey/goakt/v2/internal/lib"
@@ -148,6 +150,55 @@ func BenchmarkActor(b *testing.B) {
 		b.RunParallel(func(pb *testing.PB) {
 			for pb.Next() {
 				err := sender.Tell(ctx, receiver, new(benchmarkpb.BenchTell))
+				if err != nil {
+					b.Fatal(err)
+				}
+				atomic.AddInt64(&counter, 1)
+			}
+		})
+		b.StopTimer()
+		messagesPerSec := float64(atomic.LoadInt64(&counter)) / b.Elapsed().Seconds()
+		b.ReportMetric(messagesPerSec, "messages/sec")
+		_ = actorSystem.Stop(ctx)
+	})
+	b.Run("Tell(priority mailbox)", func(b *testing.B) {
+		ctx := context.TODO()
+
+		priorityFunc := func(msg1, msg2 proto.Message) bool {
+			p1 := msg1.(*benchmarkpb.BenchPriorityMailbox)
+			p2 := msg2.(*benchmarkpb.BenchPriorityMailbox)
+			return p1.Priority > p2.Priority
+		}
+
+		// create the actor system
+		actorSystem, _ := actors.NewActorSystem("bench",
+			actors.WithLogger(log.DiscardLogger),
+			actors.WithActorInitMaxRetries(1),
+			actors.WithSupervisorDirective(actors.NewStopDirective()))
+
+		// start the actor system
+		_ = actorSystem.Start(ctx)
+
+		// wait for system to start properly
+		lib.Pause(1 * time.Second)
+
+		// create the actors
+		sender, _ := actorSystem.Spawn(ctx, "sender", new(Benchmarker), actors.WithMailbox(actors.NewUnboundedPriorityMailBox(priorityFunc)))
+		receiver, _ := actorSystem.Spawn(ctx, "receiver", new(Benchmarker), actors.WithMailbox(actors.NewUnboundedPriorityMailBox(priorityFunc)))
+
+		// wait for actors to start properly
+		lib.Pause(1 * time.Second)
+		var counter int64
+		b.ResetTimer()
+		b.ReportAllocs()
+		var messageCounter atomic.Int64
+		b.RunParallel(func(pb *testing.PB) {
+			for pb.Next() {
+				messageCounter.Add(1)
+				priorityMessage := &benchmarkpb.BenchPriorityMailbox{
+					Priority: messageCounter.Load(),
+				}
+				err := sender.Tell(ctx, receiver, priorityMessage)
 				if err != nil {
 					b.Fatal(err)
 				}

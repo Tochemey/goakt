@@ -10,3 +10,7 @@ message BenchResponse {}
 
 message Ping {}
 message Pong {}
+message BenchPriorityMailbox {
+  // Specifies the message priority
+  int64 priority = 1;
+}
