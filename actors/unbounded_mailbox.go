@@ -67,7 +67,7 @@ func (m *UnboundedMailbox) Enqueue(value *ReceiveContext) error {
 }
 
 // Dequeue takes the mail from the mailbox
-// Returns nil if the queue is empty. Can be used in a single consumer (goroutine) only.
+// Returns nil if the mailbox is empty. Can be used in a single consumer (goroutine) only.
 func (m *UnboundedMailbox) Dequeue() *ReceiveContext {
 	next := (*node)(atomic.LoadPointer((*unsafe.Pointer)(unsafe.Pointer(&m.tail.next))))
 	if next == nil {
@@ -81,12 +81,12 @@ func (m *UnboundedMailbox) Dequeue() *ReceiveContext {
 	return value
 }
 
-// Len returns queue length
+// Len returns mailbox length
 func (m *UnboundedMailbox) Len() int64 {
 	return atomic.LoadInt64(&m.length)
 }
 
-// IsEmpty returns true when the queue is empty
+// IsEmpty returns true when the mailbox is empty
 func (m *UnboundedMailbox) IsEmpty() bool {
 	return atomic.LoadInt64(&m.length) == 0
 }

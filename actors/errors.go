@@ -89,6 +89,8 @@ var (
 	ErrInvalidMessage = func(err error) error { return fmt.Errorf("invalid remote message: %w", err) }
 	// ErrInvalidTimeout is returned when a given timeout is negative or zero
 	ErrInvalidTimeout = errors.New("invalid timeout")
+	// ErrPriorityMessageRequired is returned when a non-priority message is used in a priority mailbox
+	ErrPriorityMessageRequired = errors.New("priority message type is required")
 )
 
 // eof returns true if the given error is an EOF error

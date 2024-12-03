@@ -59,6 +59,8 @@ func (f spawnOption) Apply(c *spawnConfig) {
 }
 
 // WithMailbox sets the mailbox to use when starting the given actor
+// Care should be taken when using a specific mailbox for a given actor on how to handle
+// messages particularly when it comes to priority mailbox
 func WithMailbox(mailbox Mailbox) SpawnOption {
 	return spawnOption(func(config *spawnConfig) {
 		config.mailbox = mailbox

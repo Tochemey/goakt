@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package testpb;
 
+import "google/protobuf/any.proto";
+
 option go_package = "github.com/tochemey/goakt/v2/test/data;testpb";
 
 message TestReply {}
@@ -76,3 +78,10 @@ message Count {
 
 message RemoteForward {}
 message ClusterForward {}
+
+message PriorityMessage {
+  // Specifies the actual message
+  google.protobuf.Any message = 1;
+  // Specifies the message priority
+  int64 priority = 2;
+}

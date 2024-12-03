@@ -45,6 +45,7 @@ func (p *Benchmarker) Receive(ctx *actors.ReceiveContext) {
 	case *benchmarkpb.BenchTell:
 	case *benchmarkpb.BenchRequest:
 		ctx.Response(&benchmarkpb.BenchResponse{})
+	case *benchmarkpb.BenchPriorityMailbox:
 	default:
 		ctx.Unhandled()
 	}

@@ -218,6 +218,7 @@ GoAkt comes with the following mailboxes built-in:
 
 - [`UnboundedMailbox`](./actors/unbounded_mailbox.go): this is the default mailbox. It is implemented using the lock-free Multi-Producer-Single-Consumer Queue.
 - [`BoundedMailbox`](./actors/bounded_mailbox.go): this is a thread-safe mailbox implemented using the Ring-Buffer Queue. When the mailbox is full any new message is sent to the deadletter queue. Setting a reasonable capacity for the queue can enhance throughput.
+- [`UnboundedPriorityMailbox`](./actors/unbounded_priority_mailbox.go): this is thread-safe mailbox using the standard library container/heap. At the moment the performance of is this mailbox is not comparable to the two other built-in mailboxes.
 
 ### Events Stream
 
