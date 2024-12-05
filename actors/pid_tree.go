@@ -186,8 +186,9 @@ func (t *pidTree) DeleteNode(pid *PID) {
 	if ancestors, ok := t.parents.Load(pid.ID()); ok && len(ancestors.([]string)) > 0 {
 		parentID := ancestors.([]string)[0]
 		if parent, found := t.GetNode(parentID); found {
+			children := filterOutChild(parent.Descendants, pid.ID())
 			parent.Descendants.Reset()
-			parent.Descendants.AppendMany(filterOutChild(parent.Descendants, pid.ID())...)
+			parent.Descendants.AppendMany(children.Items()...)
 		}
 	}
 
@@ -269,14 +270,14 @@ func (t *pidTree) updateAncestors(parentID, childID string) {
 }
 
 // filterOutChild removes the node with the given ID from the Children slice.
-func filterOutChild(children *slice.ThreadSafe[*pidNode], childID string) []*pidNode {
+func filterOutChild(children *slice.ThreadSafe[*pidNode], childID string) *slice.ThreadSafe[*pidNode] {
 	for i, child := range children.Items() {
 		if child.ID == childID {
 			children.Delete(i)
-			return children.Items()
+			return children
 		}
 	}
-	return children.Items()
+	return children
 }
 
 // collectDescendants collects all the descendants and grand children
