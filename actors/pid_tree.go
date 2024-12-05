@@ -172,11 +172,14 @@ func (t *pidTree) Descendants(pid *PID) ([]*pidNode, bool) {
 		return nil, false
 	}
 
+	mu := sync.Mutex{}
 	var descendants []*pidNode
 	var collectDescendants func(n *pidNode)
 	collectDescendants = func(n *pidNode) {
 		for _, child := range n.Descendants.Items() {
+			mu.Lock()
 			descendants = append(descendants, child)
+			mu.Unlock()
 			collectDescendants(child) // recurse through the children
 		}
 	}
@@ -192,12 +195,15 @@ func (t *pidTree) DeleteNode(pid *PID) {
 		return
 	}
 
+	mu := sync.Mutex{}
 	// remove the node from its parent's Children slice
 	if ancestors, ok := t.parents.Load(pid.ID()); ok && len(ancestors.([]string)) > 0 {
+		mu.Lock()
 		parentID := ancestors.([]string)[0]
 		if parent, found := t.GetNode(parentID); found {
 			parent.Descendants = filterOutChild(parent.Descendants, pid.ID())
 		}
+		mu.Unlock()
 	}
 
 	// recursive function to delete a node and its descendants
