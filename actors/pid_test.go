@@ -940,6 +940,8 @@ func TestMessaging(t *testing.T) {
 
 		err = Tell(ctx, pid1, new(testpb.TestBye))
 		require.NoError(t, err)
+		lib.Pause(time.Second)
+
 		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 	t.Run("With Tell when not ready", func(t *testing.T) {
