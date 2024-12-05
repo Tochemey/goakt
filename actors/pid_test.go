@@ -1245,7 +1245,7 @@ func TestSpawnChild(t *testing.T) {
 		actorSystem, err := NewActorSystem("testSys",
 			WithRemoting(host, int32(ports[0])),
 			WithPassivationDisabled(),
-			WithLogger(log.DefaultLogger))
+			WithLogger(log.DiscardLogger))
 
 		require.NoError(t, err)
 		require.NotNil(t, actorSystem)

@@ -172,20 +172,7 @@ func (t *pidTree) Descendants(pid *PID) ([]*pidNode, bool) {
 		return nil, false
 	}
 
-	mu := sync.Mutex{}
-	var descendants []*pidNode
-	var collectDescendants func(n *pidNode)
-	collectDescendants = func(n *pidNode) {
-		for _, child := range n.Descendants.Items() {
-			mu.Lock()
-			descendants = append(descendants, child)
-			mu.Unlock()
-			collectDescendants(child) // recurse through the children
-		}
-	}
-
-	collectDescendants(node)
-	return descendants, true
+	return collectDescendants(node), true
 }
 
 // DeleteNode deletes a node and all its descendants
@@ -195,15 +182,13 @@ func (t *pidTree) DeleteNode(pid *PID) {
 		return
 	}
 
-	mu := sync.Mutex{}
 	// remove the node from its parent's Children slice
 	if ancestors, ok := t.parents.Load(pid.ID()); ok && len(ancestors.([]string)) > 0 {
-		mu.Lock()
 		parentID := ancestors.([]string)[0]
 		if parent, found := t.GetNode(parentID); found {
-			parent.Descendants = filterOutChild(parent.Descendants, pid.ID())
+			parent.Descendants.Reset()
+			parent.Descendants.AppendMany(filterOutChild(parent.Descendants, pid.ID())...)
 		}
-		mu.Unlock()
 	}
 
 	// recursive function to delete a node and its descendants
@@ -284,12 +269,28 @@ func (t *pidTree) updateAncestors(parentID, childID string) {
 }
 
 // filterOutChild removes the node with the given ID from the Children slice.
-func filterOutChild(children *slice.ThreadSafe[*pidNode], childID string) *slice.ThreadSafe[*pidNode] {
+func filterOutChild(children *slice.ThreadSafe[*pidNode], childID string) []*pidNode {
 	for i, child := range children.Items() {
 		if child.ID == childID {
 			children.Delete(i)
-			return children
+			return children.Items()
 		}
 	}
-	return children
+	return children.Items()
+}
+
+// collectDescendants collects all the descendants and grand children
+func collectDescendants(node *pidNode) []*pidNode {
+	output := slice.NewThreadSafe[*pidNode]()
+
+	var collectRecursive func(*pidNode)
+	collectRecursive = func(currentNode *pidNode) {
+		for _, child := range currentNode.Descendants.Items() {
+			output.Append(child)
+			collectRecursive(child)
+		}
+	}
+
+	collectRecursive(node)
+	return output.Items()
 }

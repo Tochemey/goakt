@@ -54,6 +54,13 @@ func (cs *ThreadSafe[T]) Append(item T) {
 	cs.mu.Unlock()
 }
 
+// AppendMany adds many items to the concurrent slice
+func (cs *ThreadSafe[T]) AppendMany(item ...T) {
+	cs.mu.Lock()
+	cs.data = append(cs.data, item...)
+	cs.mu.Unlock()
+}
+
 // Get returns the slice item at the given index
 func (cs *ThreadSafe[T]) Get(index int) (item T) {
 	cs.mu.RLock()
