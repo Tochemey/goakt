@@ -32,6 +32,7 @@ import (
 	"github.com/tochemey/goakt/v2/goaktpb"
 	"github.com/tochemey/goakt/v2/internal/internalpb"
 	"github.com/tochemey/goakt/v2/internal/slice"
+	"github.com/tochemey/goakt/v2/log"
 )
 
 // rebalancer is a system actor that helps rebalance cluster
@@ -40,6 +41,7 @@ type rebalancer struct {
 	reflection *reflection
 	remoting   *Remoting
 	pid        *PID
+	logger     log.Logger
 }
 
 // enforce compilation error
@@ -53,17 +55,18 @@ func newRebalancer(reflection *reflection) *rebalancer {
 }
 
 // PreStart pre-starts the actor.
-// nolint
-func (r *rebalancer) PreStart(ctx context.Context) error {
+func (r *rebalancer) PreStart(context.Context) error {
 	return nil
 }
 
-// Receive handles messages sent to the router
+// Receive handles messages sent to the rebalancer
 func (r *rebalancer) Receive(ctx *ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *goaktpb.PostStart:
 		r.pid = ctx.Self()
 		r.remoting = NewRemoting()
+		r.logger = ctx.Logger()
+		r.logger.Infof("%s started successfully", r.pid.Name())
 		ctx.Become(r.Rebalance)
 	default:
 		ctx.Unhandled()
@@ -151,9 +154,9 @@ func (r *rebalancer) Rebalance(ctx *ReceiveContext) {
 }
 
 // PostStop is executed when the actor is shutting down.
-// nolint
-func (r *rebalancer) PostStop(ctx context.Context) error {
+func (r *rebalancer) PostStop(context.Context) error {
 	r.remoting.Close()
+	r.logger.Infof("%s stopped successfully", r.pid.Name())
 	return nil
 }
 

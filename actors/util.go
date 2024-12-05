@@ -53,9 +53,12 @@ const (
 type nameType int
 
 const (
-	supervisorType nameType = iota
-	routerType
+	routerType nameType = iota
 	rebalancerType
+	rootGuardianType
+	userGuardianType
+	systemGuardianType
+	janitorType
 )
 
 var (
@@ -65,8 +68,11 @@ var (
 	DefaultSupervisoryStrategy = NewStopDirective()
 
 	systemNames = map[nameType]string{
-		supervisorType: "GoAktSupervisor",
-		routerType:     "GoAktRouter",
-		rebalancerType: "GoAktRebalancer",
+		routerType:         "GoAktRouter",
+		rebalancerType:     "GoAktRebalancer",
+		rootGuardianType:   "GoAktRootGuardian",
+		userGuardianType:   "GoAktUserGuardian",
+		systemGuardianType: "GoAktSystemGuardian",
+		janitorType:        "GoAktJanitor",
 	}
 )

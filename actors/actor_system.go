@@ -150,8 +150,6 @@ type ActorSystem interface {
 	handleRemoteTell(ctx context.Context, to *PID, message proto.Message) error
 	// setActor sets actor in the actor system actors registry
 	broadcastActor(actor *PID)
-	// supervisor return the system supervisor
-	getSupervisor() *PID
 	// getPeerStateFromCache returns the peer state from the cache
 	getPeerStateFromCache(address string) (*internalpb.PeerState, error)
 	// reservedName returns reserved actor's name
@@ -160,6 +158,11 @@ type ActorSystem interface {
 	getCluster() cluster.Interface
 	// tree returns the actors tree
 	tree() *pidTree
+
+	getRootGuardian() *PID
+	getSystemGuardian() *PID
+	getUserGuardian() *PID
+	getJanitor() *PID
 }
 
 // ActorSystem represent a collection of actors on a given node
@@ -240,8 +243,11 @@ type actorSystem struct {
 	clusterConfig          *ClusterConfig
 	rebalancingChan        chan *cluster.Event
 
-	supervisor *PID
-	rebalancer *PID
+	rebalancer     *PID
+	rootGuardian   *PID
+	userGuardian   *PID
+	systemGuardian *PID
+	janitor        *PID
 }
 
 // enforce compilation error when all methods of the ActorSystem interface are not implemented
@@ -463,8 +469,8 @@ func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor, opts 
 	}
 
 	// add the given actor to the tree and supervise it
-	_ = x.actors.AddNode(NoSender, pid)
-	x.actors.AddWatcher(pid, x.supervisor)
+	_ = x.actors.AddNode(x.userGuardian, pid)
+	x.actors.AddWatcher(pid, x.janitor)
 	x.broadcastActor(pid)
 	return pid, nil
 }
@@ -492,8 +498,8 @@ func (x *actorSystem) SpawnNamedFromFunc(ctx context.Context, name string, recei
 		return nil, err
 	}
 
-	_ = x.actors.AddNode(NoSender, pid)
-	x.actors.AddWatcher(pid, x.supervisor)
+	_ = x.actors.AddNode(x.userGuardian, pid)
+	x.actors.AddWatcher(pid, x.janitor)
 	x.broadcastActor(pid)
 	return pid, nil
 }
@@ -554,7 +560,7 @@ func (x *actorSystem) ReSpawn(ctx context.Context, name string) (*PID, error) {
 		// returns an error if when the parent does not exist which was taken care of in the
 		// lines above
 		_ = x.actors.AddNode(parent, pid)
-		x.actors.AddWatcher(pid, x.supervisor)
+		x.actors.AddWatcher(pid, x.janitor)
 		return pid, nil
 	}
 
@@ -703,8 +709,11 @@ func (x *actorSystem) Start(ctx context.Context) error {
 	x.started.Store(true)
 	if err := errorschain.
 		New(errorschain.ReturnFirst()).
-		AddError(x.spawnSupervisor(ctx)).
+		AddError(x.spawnRootGuardian(ctx)).
+		AddError(x.spawnSystemGuardian(ctx)).
+		AddError(x.spawnUserGuardian(ctx)).
 		AddError(x.spawnRebalancer(ctx)).
+		AddError(x.spawnJanitor(ctx)).
 		AddError(x.enableRemoting(ctx)).
 		AddError(x.enableClustering(ctx)).
 		Error(); err != nil {
@@ -714,7 +723,6 @@ func (x *actorSystem) Start(ctx context.Context) error {
 	}
 
 	x.scheduler.Start(ctx)
-	go x.janitor()
 
 	x.logger.Infof("%s started..:)", x.name)
 	return nil
@@ -767,24 +775,13 @@ func (x *actorSystem) Stop(ctx context.Context) error {
 		close(x.rebalancingChan)
 	}
 
-	// stop the supervisor actor
-	if err := x.getSupervisor().Shutdown(ctx); err != nil {
+	if err := x.getRootGuardian().Shutdown(ctx); err != nil {
 		x.reset()
 		x.logger.Errorf("%s failed to shutdown cleanly: %w", x.name, err)
 		return err
 	}
 
-	// remove the supervisor from the actors list
-	x.actors.DeleteNode(x.supervisor)
-
-	// shutdown all actors in the system
-	for _, actor := range x.Actors() {
-		if err := actor.Shutdown(ctx); err != nil {
-			x.reset()
-			x.logger.Errorf("%s failed to shutdown cleanly: %w", x.name, err)
-			return err
-		}
-	}
+	x.actors.DeleteNode(x.getRootGuardian())
 
 	x.reset()
 	x.logger.Infof("%s shuts down successfully", x.name)
@@ -1116,12 +1113,36 @@ func (x *actorSystem) handleRemoteTell(ctx context.Context, to *PID, message pro
 	return Tell(ctx, to, message)
 }
 
-// getSupervisor return the system supervisor
-func (x *actorSystem) getSupervisor() *PID {
+// getRootGuardian returns the system root guardian
+func (x *actorSystem) getRootGuardian() *PID {
 	x.locker.Lock()
-	supervisor := x.supervisor
+	rootGuardian := x.rootGuardian
 	x.locker.Unlock()
-	return supervisor
+	return rootGuardian
+}
+
+// getUserGuardian returns the user guardian
+func (x *actorSystem) getUserGuardian() *PID {
+	x.locker.Lock()
+	userGuardian := x.userGuardian
+	x.locker.Unlock()
+	return userGuardian
+}
+
+// getSystemGuardian returns the system guardian
+func (x *actorSystem) getSystemGuardian() *PID {
+	x.locker.Lock()
+	systemGuardian := x.systemGuardian
+	x.locker.Unlock()
+	return systemGuardian
+}
+
+// getJanitor returns the system janitor
+func (x *actorSystem) getJanitor() *PID {
+	x.locker.Lock()
+	janitor := x.janitor
+	x.locker.Unlock()
+	return janitor
 }
 
 // getPeerStateFromCache returns the peer state from the cache
@@ -1264,40 +1285,6 @@ func (x *actorSystem) reset() {
 	x.actors.Reset()
 }
 
-// janitor time to time removes dead actors from the system
-// that helps free non-utilized resources
-func (x *actorSystem) janitor() {
-	x.logger.Info("janitor has started...")
-	ticker := time.NewTicker(x.janitorInterval)
-	tickerStopSig := make(chan types.Unit, 1)
-	go func() {
-		for {
-			select {
-			case <-ticker.C:
-				for _, actor := range x.Actors() {
-					if !actor.IsRunning() {
-						x.logger.Infof("janitor removing actor=%s from system", actor.ID())
-						x.actors.DeleteNode(actor)
-						if x.InCluster() {
-							if err := x.cluster.RemoveActor(context.Background(), actor.Address().Name()); err != nil {
-								x.logger.Error(err.Error())
-								// TODO: stop or continue
-							}
-						}
-					}
-				}
-			case <-x.stopGC:
-				tickerStopSig <- types.Unit{}
-				return
-			}
-		}
-	}()
-
-	<-tickerStopSig
-	ticker.Stop()
-	x.logger.Info("janitor has stopped...")
-}
-
 // replicationLoop publishes newly created actor into the cluster when cluster is enabled
 func (x *actorSystem) replicationLoop() {
 	for actor := range x.actorsChan {
@@ -1416,7 +1403,7 @@ func (x *actorSystem) rebalancingLoop() {
 			}
 
 			message := &internalpb.Rebalance{PeerState: peerState}
-			if err := x.supervisor.Tell(ctx, x.rebalancer, message); err != nil {
+			if err := x.systemGuardian.Tell(ctx, x.rebalancer, message); err != nil {
 				x.logger.Error(err)
 			}
 		}
@@ -1594,18 +1581,69 @@ func (x *actorSystem) setHostPort() error {
 	return nil
 }
 
-// spawnSupervisor creates the system supervisor
-func (x *actorSystem) spawnSupervisor(ctx context.Context) error {
+// spawnRootGuardian creates the root guardian
+func (x *actorSystem) spawnRootGuardian(ctx context.Context) error {
 	var err error
-	actorName := x.reservedName(supervisorType)
-	x.supervisor, err = x.configPID(ctx, actorName, newSupervisor())
+	actorName := x.reservedName(rootGuardianType)
+	x.rootGuardian, err = x.configPID(ctx, actorName, newRootGuardian())
 	if err != nil {
-		return fmt.Errorf("actor=%s failed to start system supervisor: %w", actorName, err)
+		return fmt.Errorf("actor=%s failed to start root guardian: %w", actorName, err)
 	}
 
-	// set the supervisor in the tree
-	_ = x.actors.AddNode(NoSender, x.supervisor)
-	x.broadcastActor(x.supervisor)
+	// rootGuardian is the root node of the actors tree
+	_ = x.actors.AddNode(NoSender, x.rootGuardian)
+	return nil
+}
+
+// spawnSystemGuardian creates the system guardian
+func (x *actorSystem) spawnSystemGuardian(ctx context.Context) error {
+	var err error
+	actorName := x.reservedName(systemGuardianType)
+	x.systemGuardian, err = x.configPID(ctx,
+		actorName,
+		newSystemGuardian(),
+		WithSupervisor(NewStopDirective()))
+	if err != nil {
+		return fmt.Errorf("actor=%s failed to start system guardian: %w", actorName, err)
+	}
+
+	// systemGuardian is a child actor of the rootGuardian actor
+	_ = x.actors.AddNode(x.rootGuardian, x.systemGuardian)
+	return nil
+}
+
+// spawnUserGuardian creates the user guardian
+func (x *actorSystem) spawnUserGuardian(ctx context.Context) error {
+	var err error
+	actorName := x.reservedName(userGuardianType)
+	x.userGuardian, err = x.configPID(ctx,
+		actorName,
+		newUserGuardian(),
+		WithSupervisor(NewStopDirective()))
+	if err != nil {
+		return fmt.Errorf("actor=%s failed to start user guardian: %w", actorName, err)
+	}
+
+	// userGuardian is a child actor of the rootGuardian actor
+	_ = x.actors.AddNode(x.rootGuardian, x.userGuardian)
+	return nil
+}
+
+// spawnRebalancer creates the cluster rebalancer
+func (x *actorSystem) spawnJanitor(ctx context.Context) error {
+	var err error
+	actorName := x.reservedName(janitorType)
+	x.janitor, err = x.configPID(ctx,
+		actorName,
+		newJanitor(),
+		WithSupervisor(NewResumeDirective()),
+	)
+	if err != nil {
+		return fmt.Errorf("actor=%s failed to start the janitor: %w", actorName, err)
+	}
+
+	// the janitor is a child actor of the system guardian
+	_ = x.actors.AddNode(x.systemGuardian, x.janitor)
 	return nil
 }
 
@@ -1622,9 +1660,8 @@ func (x *actorSystem) spawnRebalancer(ctx context.Context) error {
 		return fmt.Errorf("actor=%s failed to start cluster rebalancer: %w", actorName, err)
 	}
 
-	// set the balancer in the tree with the supervisor as its parent
-	_ = x.actors.AddNode(x.supervisor, x.rebalancer)
-	x.broadcastActor(x.rebalancer)
+	// the rebalancer is a child actor of the system guardian
+	_ = x.actors.AddNode(x.systemGuardian, x.rebalancer)
 	return nil
 }
 
