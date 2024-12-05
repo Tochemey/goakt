@@ -483,6 +483,7 @@ func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor, opts .
 	// no need to handle the error because the given parent exist and running
 	// that check was done in the above lines
 	_ = tree.AddNode(pid, cid)
+	tree.AddWatcher(cid, pid.ActorSystem().getJanitor())
 
 	eventsStream := pid.eventsStream
 	if eventsStream != nil {
@@ -1225,7 +1226,7 @@ func (pid *PID) freeWatchers(ctx context.Context) error {
 		logger.Debugf("%s successfully frees all watcher actors...", pid.Name())
 		return nil
 	}
-	logger.Debugf("%s does not have any watcher actors", pid.Name())
+	logger.Debugf("%s does not have any watcher actors. Maybe already freed.", pid.Name())
 	return nil
 }
 
@@ -1259,7 +1260,7 @@ func (pid *PID) freeWatchees() error {
 		logger.Debugf("%s successfully unwatch all watched actors...", pid.Name())
 		return nil
 	}
-	logger.Debugf("%s does not have any watched actors", pid.Name())
+	logger.Debugf("%s does not have any watched actors. Maybe already freed.", pid.Name())
 	return nil
 }
 
@@ -1275,7 +1276,7 @@ func (pid *PID) freeChildren(ctx context.Context) error {
 		return nil
 	}
 
-	if descendants, ok := tree.Descendants(pid); ok {
+	if descendants, ok := tree.Descendants(pid); ok && len(descendants) > 0 {
 		eg, ctx := errgroup.WithContext(ctx)
 		for index, descendant := range descendants {
 			descendant := descendant
@@ -1304,7 +1305,7 @@ func (pid *PID) freeChildren(ctx context.Context) error {
 		}
 		logger.Debugf("%s successfully free all descendant actors...", pid.Name())
 	}
-	pid.logger.Debugf("%s does not have any children", pid.Name())
+	pid.logger.Debugf("%s does not have any children. Maybe already freed.", pid.Name())
 	return nil
 }
 
@@ -1426,8 +1427,18 @@ func (pid *PID) doStop(ctx context.Context) error {
 		New(errorschain.ReturnFirst()).
 		AddError(pid.freeWatchees()).
 		AddError(pid.freeChildren(ctx)).
-		AddError(pid.freeWatchers(ctx)).
 		Error(); err != nil {
+		pid.started.Store(false)
+		pid.reset()
+		return err
+	}
+
+	// run the PostStop hook and let watchers know
+	// you are terminated
+	if err := errorschain.
+		New(errorschain.ReturnFirst()).
+		AddError(pid.actor.PostStop(ctx)).
+		AddError(pid.freeWatchers(ctx)).Error(); err != nil {
 		pid.started.Store(false)
 		pid.reset()
 		return err
@@ -1436,7 +1447,7 @@ func (pid *PID) doStop(ctx context.Context) error {
 	pid.started.Store(false)
 	pid.logger.Infof("post shutdown process is on going for actor=%s...", pid.Name())
 	pid.reset()
-	return pid.actor.PostStop(ctx)
+	return nil
 }
 
 // supervisionLoop send error to watchers

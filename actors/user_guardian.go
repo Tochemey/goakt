@@ -31,49 +31,45 @@ import (
 	"github.com/tochemey/goakt/v2/log"
 )
 
-// supervisor is an actor which roles is to handle
-// escalation failure
-type supervisor struct {
+// userGuardian defines the main system actor that is the ancestor
+// of user created actors in the system.
+// When the userGuardian for any reason gets terminated, the actor system will be automatically removed
+// from the actors tree
+type userGuardian struct {
+	pid    *PID
 	logger log.Logger
-	system ActorSystem
 }
 
 // enforce compilation error
-var _ Actor = (*supervisor)(nil)
+var _ Actor = (*userGuardian)(nil)
 
-// newSupervisor creates an instance of a supervisorQA
-func newSupervisor() *supervisor {
-	return &supervisor{}
+// newUserGuardian creates an instance of userGuardian
+func newUserGuardian() *userGuardian {
+	return &userGuardian{}
 }
 
-func (s *supervisor) PreStart(context.Context) error {
+// PreStart is the pre-start hook
+func (g *userGuardian) PreStart(context.Context) error {
 	return nil
 }
 
-func (s *supervisor) Receive(ctx *ReceiveContext) {
+// Receive handles messages
+func (g *userGuardian) Receive(ctx *ReceiveContext) {
 	switch msg := ctx.Message().(type) {
 	case *goaktpb.PostStart:
-		s.system = ctx.ActorSystem()
-		s.logger = ctx.Logger()
-		s.logger.Info("system supervisor successfully started")
+		g.pid = ctx.Self()
+		g.logger = ctx.Logger()
+		g.logger.Infof("%s started successfully", g.pid.Name())
 	case *goaktpb.Terminated:
-		actorID := msg.GetActorId()
-		if actorID == s.system.reservedName(rebalancerType) {
-			// rebalancer is dead which means either there is an issue during the cluster topology changes
-			// log a message error and stop the actor system
-			s.logger.Warn("%s rebalancer is down. %s is going to shutdown. Kindly check logs and fix any potential issue with the cluster",
-				s.system.Name(),
-				s.system.Name())
-
-			// blindly shutdown the actor system. No need to check any error
-			_ = s.system.Stop(context.WithoutCancel(ctx.Context()))
-		}
+		g.logger.Debugf("%s received a terminated actor=(%s)", g.pid.Name(), msg.GetActorId())
+		// pass
 	default:
 		ctx.Unhandled()
 	}
 }
 
-func (s *supervisor) PostStop(context.Context) error {
-	s.logger.Info("system supervisor stopped")
+// PostStop is the post-stop hook
+func (g *userGuardian) PostStop(context.Context) error {
+	g.logger.Infof("%s stopped successfully", g.pid.Name())
 	return nil
 }

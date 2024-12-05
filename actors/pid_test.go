@@ -1298,7 +1298,7 @@ func TestSpawnChild(t *testing.T) {
 			WithRemoting(host, int32(ports[0])),
 			WithPassivationDisabled(),
 			WithJanitorInterval(100*time.Millisecond),
-			WithLogger(log.DefaultLogger))
+			WithLogger(log.DiscardLogger))
 
 		require.NoError(t, err)
 		require.NotNil(t, actorSystem)

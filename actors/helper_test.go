@@ -115,6 +115,8 @@ func (p *supervisorQA) Receive(ctx *ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *goaktpb.PostStart:
 	case *testspb.TestSend:
+	case *goaktpb.Terminated:
+		// pass
 	default:
 		panic(ErrUnhandled)
 	}
