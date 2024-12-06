@@ -266,7 +266,7 @@ func (pid *PID) Parent() *PID {
 	return parentNode.GetValue()
 }
 
-// Children returns the list of all the direct childrenMap of the given actor
+// Children returns the list of all the direct descendants of the given actor
 // Only alive actors are included in the list or an empty list is returned
 func (pid *PID) Children() []*PID {
 	pid.fieldsLocker.RLock()
@@ -346,13 +346,28 @@ func (pid *PID) Address() *address.Address {
 }
 
 // Restart restarts the actor.
-// During restart all messages that are in the mailbox and not yet processed will be ignored
+// During restart all messages that are in the mailbox and not yet processed will be ignored.
+// Only the direct alive children of the given actor will be shudown and respawned with their initial state.
+// Bear in mind that restarting an actor will reinitialize the actor to initial state.
 func (pid *PID) Restart(ctx context.Context) error {
 	if pid == nil || pid.Address() == nil {
 		return ErrUndefinedActor
 	}
 
 	pid.logger.Debugf("restarting actor=(%s)", pid.Name())
+	actorSystem := pid.ActorSystem()
+	tree := actorSystem.tree()
+	janitor := actorSystem.getJanitor()
+
+	// prepare the child actors to respawn
+	// because during the restart process they will be gone
+	// from the system and need to be restarted. Only direct children that are alive
+	children := pid.Children()
+	// get the parent node of the actor
+	parent := NoSender
+	if pnode, ok := tree.Parent(pid); ok {
+		parent = pnode.GetValue()
+	}
 
 	if pid.IsRunning() {
 		if err := pid.Shutdown(ctx); err != nil {
@@ -381,6 +396,36 @@ func (pid *PID) Restart(ctx context.Context) error {
 	pid.supervisionLoop()
 	if pid.passivateAfter.Load() > 0 {
 		go pid.passivationLoop()
+	}
+
+	// re-add the actor back to the actors tree
+	// no need to handle the error here because the only time this method
+	// returns an error if when the parent does not exist which was taken care of in the
+	// lines above
+	_ = tree.AddNode(parent, pid)
+	tree.AddWatcher(pid, janitor)
+
+	// restart all the previous children
+	eg, ctx := errgroup.WithContext(ctx)
+	for _, child := range children {
+		child := child
+		eg.Go(func() error {
+			if err := child.Restart(ctx); err != nil {
+				return err
+			}
+
+			// re-add the child back to the tree
+			// since these calls are idempotent
+			_ = tree.AddNode(pid, child)
+			tree.AddWatcher(child, janitor)
+			return nil
+		})
+	}
+
+	// wait for the child actor to spawn
+	if err := eg.Wait(); err != nil {
+		// TODO: should we just stop the restarted actor altogether when fail to start his previous children
+		return err
 	}
 
 	pid.restartCount.Inc()
@@ -1304,6 +1349,7 @@ func (pid *PID) freeChildren(ctx context.Context) error {
 			return err
 		}
 		logger.Debugf("%s successfully free all descendant actors...", pid.Name())
+		return nil
 	}
 	pid.logger.Debugf("%s does not have any children. Maybe already freed.", pid.Name())
 	return nil

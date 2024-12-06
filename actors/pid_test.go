@@ -354,6 +354,68 @@ func TestRestart(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NoError(t, actorSystem.Stop(ctx))
 	})
+	t.Run("With restart an actor and its children", func(t *testing.T) {
+		ctx := context.TODO()
+		host := "127.0.0.1"
+		ports := dynaport.Get(1)
+
+		actorSystem, err := NewActorSystem("testSys",
+			WithRemoting(host, int32(ports[0])),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+
+		lib.Pause(time.Second)
+
+		pid, err := actorSystem.Spawn(ctx, "test", newActor())
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+
+		lib.Pause(time.Second)
+
+		cid, err := pid.SpawnChild(ctx, "child", newActor())
+		require.NoError(t, err)
+		require.NotNil(t, cid)
+		lib.Pause(500 * time.Millisecond)
+
+		gcid, err := cid.SpawnChild(ctx, "grandchild", newActor())
+		require.NoError(t, err)
+		require.NotNil(t, gcid)
+		lib.Pause(500 * time.Millisecond)
+
+		require.EqualValues(t, 1, pid.ChildrenCount())
+
+		// let us send 10 public to the actor
+		count := 10
+		for i := 0; i < count; i++ {
+			err := Tell(ctx, pid, new(testpb.TestSend))
+			require.NoError(t, err)
+		}
+
+		// restart the actor
+		err = pid.Restart(ctx)
+		require.NoError(t, err)
+		require.True(t, pid.IsRunning())
+
+		lib.Pause(time.Second)
+
+		require.EqualValues(t, 1, pid.RestartCount())
+		require.EqualValues(t, 1, pid.ChildrenCount())
+
+		// let us send 10 public to the actor
+		for i := 0; i < count; i++ {
+			err = Tell(ctx, pid, new(testpb.TestSend))
+			assert.NoError(t, err)
+		}
+
+		// stop the actor
+		err = pid.Shutdown(ctx)
+		assert.NoError(t, err)
+		assert.NoError(t, actorSystem.Stop(ctx))
+	})
 	t.Run("With restart an actor with PreStart failure", func(t *testing.T) {
 		ctx := context.TODO()
 		host := "127.0.0.1"
@@ -2302,7 +2364,6 @@ func TestRemoteStop(t *testing.T) {
 		})
 	})
 }
-
 func TestEquals(t *testing.T) {
 	t.Run("case 1", func(t *testing.T) {
 		ctx := context.TODO()
