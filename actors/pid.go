@@ -349,6 +349,7 @@ func (pid *PID) Address() *address.Address {
 // During restart all messages that are in the mailbox and not yet processed will be ignored.
 // Only the direct alive children of the given actor will be shudown and respawned with their initial state.
 // Bear in mind that restarting an actor will reinitialize the actor to initial state.
+// In case any of the direct child restart fails the given actor will not be started at all
 func (pid *PID) Restart(ctx context.Context) error {
 	if pid == nil || pid.Address() == nil {
 		return ErrUndefinedActor
@@ -392,12 +393,6 @@ func (pid *PID) Restart(ctx context.Context) error {
 		return err
 	}
 
-	pid.receiveLoop()
-	pid.supervisionLoop()
-	if pid.passivateAfter.Load() > 0 {
-		go pid.passivationLoop()
-	}
-
 	// re-add the actor back to the actors tree
 	// no need to handle the error here because the only time this method
 	// returns an error if when the parent does not exist which was taken care of in the
@@ -424,8 +419,16 @@ func (pid *PID) Restart(ctx context.Context) error {
 
 	// wait for the child actor to spawn
 	if err := eg.Wait(); err != nil {
-		// TODO: should we just stop the restarted actor altogether when fail to start his previous children
-		return err
+		// disable messages processing
+		pid.stopping.Store(true)
+		pid.started.Store(false)
+		return fmt.Errorf("actor=(%s) failed to restart: %w", pid.Name(), err)
+	}
+
+	pid.receiveLoop()
+	pid.supervisionLoop()
+	if pid.passivateAfter.Load() > 0 {
+		go pid.passivationLoop()
 	}
 
 	pid.restartCount.Inc()

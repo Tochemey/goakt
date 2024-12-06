@@ -85,6 +85,10 @@ type ActorSystem interface {
 	// Kill stops a given actor in the system
 	Kill(ctx context.Context, name string) error
 	// ReSpawn recreates a given actor in the system
+	// During restart all messages that are in the mailbox and not yet processed will be ignored.
+	// Only the direct alive children of the given actor will be shudown and respawned with their initial state.
+	// Bear in mind that restarting an actor will reinitialize the actor to initial state.
+	// In case any of the direct child restart fails the given actor will not be started at all.
 	ReSpawn(ctx context.Context, name string) (*PID, error)
 	// NumActors returns the total number of active actors in the system
 	NumActors() uint64
@@ -537,6 +541,10 @@ func (x *actorSystem) Kill(ctx context.Context, name string) error {
 }
 
 // ReSpawn recreates a given actor in the system
+// During restart all messages that are in the mailbox and not yet processed will be ignored.
+// Only the direct alive children of the given actor will be shudown and respawned with their initial state.
+// Bear in mind that restarting an actor will reinitialize the actor to initial state.
+// In case any of the direct child restart fails the given actor will not be started at all.
 func (x *actorSystem) ReSpawn(ctx context.Context, name string) (*PID, error) {
 	if !x.started.Load() {
 		return nil, ErrActorSystemNotStarted

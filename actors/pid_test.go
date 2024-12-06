@@ -503,6 +503,44 @@ func TestRestart(t *testing.T) {
 		assert.False(t, pid.IsRunning())
 		assert.NoError(t, actorSystem.Stop(ctx))
 	})
+	t.Run("With restart an actor and its children failure", func(t *testing.T) {
+		ctx := context.TODO()
+		host := "127.0.0.1"
+		ports := dynaport.Get(1)
+
+		actorSystem, err := NewActorSystem("testSys",
+			WithRemoting(host, int32(ports[0])),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+
+		lib.Pause(time.Second)
+
+		pid, err := actorSystem.Spawn(ctx, "test", newActor())
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+
+		lib.Pause(time.Second)
+
+		cid, err := pid.SpawnChild(ctx, "child", newRestart())
+		require.NoError(t, err)
+		require.NotNil(t, cid)
+		lib.Pause(500 * time.Millisecond)
+
+		require.EqualValues(t, 1, pid.ChildrenCount())
+
+		lib.Pause(time.Second)
+
+		// restart the actor
+		err = pid.Restart(ctx)
+		require.Error(t, err)
+		require.False(t, pid.IsRunning())
+
+		assert.NoError(t, actorSystem.Stop(ctx))
+	})
 }
 func TestSupervisorStrategy(t *testing.T) {
 	t.Run("With stop as supervisor directive", func(t *testing.T) {
