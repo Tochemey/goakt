@@ -26,7 +26,11 @@ package actors
 
 import (
 	"time"
+
+	"github.com/tochemey/goakt/v2/internal/timer"
 )
+
+type nameType int
 
 const (
 	// DefaultPassivationTimeout defines the default passivation timeout
@@ -48,11 +52,7 @@ const (
 
 	systemNamePrefix = "GoAkt"
 	routeeNamePrefix = "GoAktRoutee"
-)
 
-type nameType int
-
-const (
 	routerType nameType = iota
 	rebalancerType
 	rootGuardianType
@@ -66,6 +66,7 @@ var (
 	NoSender *PID
 	// DefaultSupervisoryStrategy defines the default supervisory strategy
 	DefaultSupervisoryStrategy = NewStopDirective()
+	timers                     = timer.NewPool()
 
 	systemNames = map[nameType]string{
 		routerType:         "GoAktRouter",

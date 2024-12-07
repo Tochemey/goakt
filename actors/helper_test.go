@@ -61,7 +61,7 @@ func newActor() *actorQA {
 }
 
 // Init initialize the actor. This function can be used to set up some database connections
-// or some sort of initialization before the actor init processing public
+// or some sort of initialization before the actor init processing message
 func (p *actorQA) PreStart(context.Context) error {
 	return nil
 }

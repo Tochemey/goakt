@@ -29,6 +29,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -59,8 +60,8 @@ type processingState int32
 const (
 	// idle means there are no messages to process
 	idle processingState = iota
-	// processing means the PID is processing messages
-	processing
+	// busy means the PID is processing messages
+	busy
 )
 
 // taskCompletion is used to track completions' taskCompletion
@@ -135,13 +136,12 @@ type PID struct {
 	supervisionChan       chan error
 	supervisionStopSignal chan types.Unit
 
-	receiveSignal     chan types.Unit
-	receiveStopSignal chan types.Unit
-
 	// atomic flag indicating whether the actor is processing messages
-	processingMessages atomic.Int32
+	processing atomic.Int32
 
 	remoting *Remoting
+
+	goScheduler *goScheduler
 }
 
 // newPID creates a new pid
@@ -174,9 +174,8 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 		processingTimeLocker:  new(sync.Mutex),
 		supervisionChan:       make(chan error, 1),
 		supervisionStopSignal: make(chan types.Unit, 1),
-		receiveSignal:         make(chan types.Unit, 1),
-		receiveStopSignal:     make(chan types.Unit, 1),
 		remoting:              NewRemoting(),
+		goScheduler:           newGoScheduler(300),
 	}
 
 	pid.initMaxRetries.Store(DefaultInitMaxRetries)
@@ -185,6 +184,7 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 	pid.stopping.Store(false)
 	pid.passivateAfter.Store(DefaultPassivationTimeout)
 	pid.initTimeout.Store(DefaultInitTimeout)
+	pid.processing.Store(int32(idle))
 
 	for _, opt := range opts {
 		opt(pid)
@@ -198,13 +198,12 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 		return nil, err
 	}
 
-	pid.receiveLoop()
 	pid.supervisionLoop()
 	if pid.passivateAfter.Load() > 0 {
 		go pid.passivationLoop()
 	}
 
-	receiveContext := contextFromPool()
+	receiveContext := getContext()
 	receiveContext.build(ctx, NoSender, pid, new(goaktpb.PostStart), true)
 	pid.doReceive(receiveContext)
 
@@ -425,7 +424,7 @@ func (pid *PID) Restart(ctx context.Context) error {
 		return fmt.Errorf("actor=(%s) failed to restart: %w", pid.Name(), err)
 	}
 
-	pid.receiveLoop()
+	pid.processing.Store(int32(idle))
 	pid.supervisionLoop()
 	if pid.passivateAfter.Load() > 0 {
 		go pid.passivationLoop()
@@ -591,16 +590,20 @@ func (pid *PID) Ask(ctx context.Context, to *PID, message proto.Message, timeout
 		return nil, ErrInvalidTimeout
 	}
 
-	receiveContext := contextFromPool()
+	receiveContext := getContext()
 	receiveContext.build(ctx, pid, to, message, false)
 	to.doReceive(receiveContext)
 
+	timer := timers.Get(timeout)
+
 	select {
 	case result := <-receiveContext.response:
+		timers.Put(timer)
 		return result, nil
-	case <-time.After(timeout):
+	case <-timer.C:
 		err = ErrRequestTimeout
 		pid.toDeadletterQueue(receiveContext, err)
+		timers.Put(timer)
 		return nil, err
 	}
 }
@@ -611,7 +614,7 @@ func (pid *PID) Tell(ctx context.Context, to *PID, message proto.Message) error 
 		return ErrDead
 	}
 
-	receiveContext := contextFromPool()
+	receiveContext := getContext()
 	receiveContext.build(ctx, pid, to, message, true)
 
 	to.doReceive(receiveContext)
@@ -1117,60 +1120,58 @@ func (pid *PID) doReceive(receiveCtx *ReceiveContext) {
 		// push the message as a deadletter
 		pid.toDeadletterQueue(receiveCtx, err)
 	}
-	pid.signalMessage()
+	pid.schedule()
 }
 
-// signal that a message has arrived and wake up the actor if needed
-func (pid *PID) signalMessage() {
+// schedule  schedules that a message has arrived and wake up the
+// message processing loop
+func (pid *PID) schedule() {
 	// only signal if the actor is not already processing messages
-	if pid.processingMessages.CompareAndSwap(int32(idle), int32(processing)) {
-		select {
-		case pid.receiveSignal <- types.Unit{}:
-		default:
-		}
+	if pid.processing.CompareAndSwap(int32(idle), int32(busy)) {
+		pid.goScheduler.Schedule(pid.receiveLoop)
 	}
 }
 
 // receiveLoop extracts every message from the actor mailbox
 // and pass it to the appropriate behavior for handling
 func (pid *PID) receiveLoop() {
-	go func() {
-		for {
-			select {
-			case <-pid.receiveStopSignal:
-				return
-			case <-pid.receiveSignal:
-				var received *ReceiveContext
-				if received != nil {
-					returnToPool(received)
-					received = nil
-				}
+	var received *ReceiveContext
+	counter, throughput := 0, pid.goScheduler.Throughput()
+	for {
+		if counter > throughput {
+			counter = 0
+			runtime.Gosched()
+		}
 
-				// Process all messages in the queue one by one
-				for {
-					received = pid.mailbox.Dequeue()
-					if received == nil {
-						// If no more messages, stop processing
-						pid.processingMessages.Store(int32(idle))
-						// Check if new messages were added in the meantime and restart processing
-						if !pid.mailbox.IsEmpty() && pid.processingMessages.CompareAndSwap(int32(idle), int32(processing)) {
-							continue
-						}
-						break
-					}
-					// Process the message
-					switch msg := received.Message().(type) {
-					case *goaktpb.PoisonPill:
-						_ = pid.Shutdown(received.Context())
-					case *internalpb.HandleFault:
-						pid.handleFaultyChild(msg)
-					default:
-						pid.handleReceived(received)
-					}
-				}
+		counter++
+		if received != nil {
+			releaseContext(received)
+			received = nil
+		}
+
+		if received = pid.mailbox.Dequeue(); received != nil {
+			// Process the message
+			switch msg := received.Message().(type) {
+			case *goaktpb.PoisonPill:
+				_ = pid.Shutdown(received.Context())
+			case *internalpb.HandleFault:
+				pid.handleFaultyChild(msg)
+			default:
+				pid.handleReceived(received)
 			}
 		}
-	}()
+
+		// If no more messages, change busy state to idle
+		if !pid.processing.CompareAndSwap(int32(busy), int32(idle)) {
+			return
+		}
+
+		// Check if new messages were added in the meantime and restart processing
+		if !pid.mailbox.IsEmpty() && pid.processing.CompareAndSwap(int32(idle), int32(busy)) {
+			continue
+		}
+		return
+	}
 }
 
 // handleReceived picks the right behavior and processes the message
@@ -1454,7 +1455,6 @@ func (pid *PID) doStop(ctx context.Context) error {
 
 	// stop processing messages
 	pid.supervisionStopSignal <- types.Unit{}
-	pid.receiveStopSignal <- types.Unit{}
 
 	// TODO: revisit this part of the code
 	// move remaining messages in the mailbox to deadletter queue
