@@ -27,7 +27,7 @@ package actors
 // goScheduler is a custom go routines scheduler
 // this will help schedule actors message busy
 type goScheduler struct {
-	throughtput int
+	throughput int
 }
 
 // Schedule schedules a function in a go routine to be executed
@@ -35,12 +35,12 @@ func (s *goScheduler) Schedule(fn func()) {
 	go fn()
 }
 
-// Throughput returns the scheduler throughtput
+// Throughput returns the scheduler throughput
 func (s *goScheduler) Throughput() int {
-	return s.throughtput
+	return s.throughput
 }
 
 // newGoScheduler creates an instance of goScheduler
 func newGoScheduler(capacity int) *goScheduler {
-	return &goScheduler{throughtput: capacity}
+	return &goScheduler{throughput: capacity}
 }
