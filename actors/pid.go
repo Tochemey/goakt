@@ -594,12 +594,16 @@ func (pid *PID) Ask(ctx context.Context, to *PID, message proto.Message, timeout
 	receiveContext.build(ctx, pid, to, message, false)
 	to.doReceive(receiveContext)
 
+	timer := timers.Get(timeout)
+
 	select {
 	case result := <-receiveContext.response:
+		timers.Put(timer)
 		return result, nil
-	case <-time.After(timeout):
+	case <-timer.C:
 		err = ErrRequestTimeout
 		pid.toDeadletterQueue(receiveContext, err)
+		timers.Put(timer)
 		return nil, err
 	}
 }
