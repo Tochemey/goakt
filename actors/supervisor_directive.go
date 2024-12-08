@@ -31,7 +31,7 @@ type SupervisorDirective interface {
 	isSupervisorDirective()
 }
 
-// StopDirective defines the supervisorQA stop directive
+// StopDirective defines the supervisor stop directive
 type StopDirective struct{}
 
 // NewStopDirective creates an instance of StopDirective
@@ -41,7 +41,7 @@ func NewStopDirective() *StopDirective {
 
 func (*StopDirective) isSupervisorDirective() {}
 
-// ResumeDirective defines the supervisorQA resume directive
+// ResumeDirective defines the supervisor resume directive
 // This ignores the failure and process the next message, instead
 type ResumeDirective struct{}
 
@@ -52,7 +52,7 @@ func NewResumeDirective() *ResumeDirective {
 
 func (*ResumeDirective) isSupervisorDirective() {}
 
-// RestartDirective defines supervisorQA restart directive
+// RestartDirective defines supervisor restart directive
 type RestartDirective struct {
 	// Specifies the maximum number of retries
 	// When reaching this number the faulty actor is stopped

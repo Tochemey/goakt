@@ -28,9 +28,8 @@ package actors
 type spawnConfig struct {
 	// mailbox defines the mailbox to use when spawning the actor
 	mailbox Mailbox
-	// supervisorDirective defines the supervisor directive to set
-	// when spawning the actor
-	supervisorDirective SupervisorDirective
+	// defines the supervisor strategies to apply
+	supervisorStrategies []*SupervisorStrategy
 }
 
 // newSpawnConfig creates an instance of spawnConfig
@@ -67,10 +66,10 @@ func WithMailbox(mailbox Mailbox) SpawnOption {
 	})
 }
 
-// WithSupervisor sets the supervisor directive
-// when starting the given actor.
-func WithSupervisor(directive SupervisorDirective) SpawnOption {
+// WithSupervisorStrategies defines the supervisor strategies to apply when the given actor fails
+// or panics during its messages processing
+func WithSupervisorStrategies(supervisorStrategies ...*SupervisorStrategy) SpawnOption {
 	return spawnOption(func(config *spawnConfig) {
-		config.supervisorDirective = directive
+		config.supervisorStrategies = supervisorStrategies
 	})
 }

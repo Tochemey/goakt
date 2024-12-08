@@ -200,8 +200,6 @@ type actorSystem struct {
 	// Specifies the actors initialization timeout
 	// The default value is 1s
 	actorInitTimeout time.Duration
-	// Specifies the supervisor strategy
-	supervisorDirective SupervisorDirective
 
 	// Specifies whether remoting is enabled.
 	// This allows to handle remote messaging
@@ -273,7 +271,6 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		logger:                 log.New(log.ErrorLevel, os.Stderr),
 		expireActorAfter:       DefaultPassivationTimeout,
 		actorInitMaxRetries:    DefaultInitMaxRetries,
-		supervisorDirective:    DefaultSupervisoryStrategy,
 		locker:                 sync.Mutex{},
 		shutdownTimeout:        DefaultShutdownTimeout,
 		stashEnabled:           false,
@@ -1478,12 +1475,9 @@ func (x *actorSystem) configPID(ctx context.Context, name string, actor Actor, o
 		pidOpts = append(pidOpts, withMailbox(spawnConfig.mailbox))
 	}
 
-	// set the supervisor directive
-	if spawnConfig.supervisorDirective != nil {
-		pidOpts = append(pidOpts, withSupervisorDirective(spawnConfig.supervisorDirective))
-	} else {
-		// use the system-wide supervisor directive
-		pidOpts = append(pidOpts, withSupervisorDirective(x.supervisorDirective))
+	// set the supervisor strategies when defined
+	if len(spawnConfig.supervisorStrategies) != 0 {
+		pidOpts = append(pidOpts, withSupervisorStrategies(spawnConfig.supervisorStrategies...))
 	}
 
 	// enable stash
@@ -1610,7 +1604,10 @@ func (x *actorSystem) spawnSystemGuardian(ctx context.Context) error {
 	x.systemGuardian, err = x.configPID(ctx,
 		actorName,
 		newSystemGuardian(),
-		WithSupervisor(NewStopDirective()))
+		WithSupervisorStrategies(
+			NewSupervisorStrategy(PanicError{}, NewStopDirective()),
+		),
+	)
 	if err != nil {
 		return fmt.Errorf("actor=%s failed to start system guardian: %w", actorName, err)
 	}
@@ -1627,7 +1624,9 @@ func (x *actorSystem) spawnUserGuardian(ctx context.Context) error {
 	x.userGuardian, err = x.configPID(ctx,
 		actorName,
 		newUserGuardian(),
-		WithSupervisor(NewStopDirective()))
+		WithSupervisorStrategies(
+			NewSupervisorStrategy(PanicError{}, NewStopDirective()),
+		))
 	if err != nil {
 		return fmt.Errorf("actor=%s failed to start user guardian: %w", actorName, err)
 	}
@@ -1644,7 +1643,9 @@ func (x *actorSystem) spawnJanitor(ctx context.Context) error {
 	x.janitor, err = x.configPID(ctx,
 		actorName,
 		newJanitor(),
-		WithSupervisor(NewResumeDirective()),
+		WithSupervisorStrategies(
+			NewSupervisorStrategy(PanicError{}, NewResumeDirective()),
+		),
 	)
 	if err != nil {
 		return fmt.Errorf("actor=%s failed to start the janitor: %w", actorName, err)
@@ -1662,7 +1663,9 @@ func (x *actorSystem) spawnRebalancer(ctx context.Context) error {
 	x.rebalancer, err = x.configPID(ctx,
 		actorName,
 		newRebalancer(x.reflection),
-		WithSupervisor(NewResumeDirective()),
+		WithSupervisorStrategies(
+			NewSupervisorStrategy(PanicError{}, NewResumeDirective()),
+		),
 	)
 	if err != nil {
 		return fmt.Errorf("actor=%s failed to start cluster rebalancer: %w", actorName, err)

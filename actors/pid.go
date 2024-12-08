@@ -132,7 +132,7 @@ type PID struct {
 	processedCount *atomic.Int64
 
 	// supervisor strategy
-	supervisorDirective   SupervisorDirective
+	supervisorStrategies  *strategiesMap
 	supervisionChan       chan error
 	supervisionStopSignal chan types.Unit
 
@@ -161,7 +161,6 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 		latestReceiveTime:     atomic.Time{},
 		haltPassivationLnr:    make(chan types.Unit, 1),
 		logger:                log.New(log.ErrorLevel, os.Stderr),
-		supervisorDirective:   DefaultSupervisoryStrategy,
 		address:               address,
 		fieldsLocker:          new(sync.RWMutex),
 		stopLocker:            new(sync.Mutex),
@@ -176,6 +175,7 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 		supervisionStopSignal: make(chan types.Unit, 1),
 		remoting:              NewRemoting(),
 		goScheduler:           newGoScheduler(300),
+		supervisorStrategies:  newStrategiesMap(),
 	}
 
 	pid.initMaxRetries.Store(DefaultInitMaxRetries)
@@ -185,6 +185,9 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 	pid.passivateAfter.Store(DefaultPassivationTimeout)
 	pid.initTimeout.Store(DefaultInitTimeout)
 	pid.processing.Store(int32(idle))
+
+	// set default strategies mappings
+	pid.supervisorStrategies.Put(NewSupervisorStrategy(new(PanicError), NewStopDirective()))
 
 	for _, opt := range opts {
 		opt(pid)
@@ -500,12 +503,9 @@ func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor, opts .
 		pidOptions = append(pidOptions, withMailbox(spawnConfig.mailbox))
 	}
 
-	// set the supervisor directive defines in the spawn options
-	// otherwise fallback to the parent supervisor stragetgy directive
-	if spawnConfig.supervisorDirective != nil {
-		pidOptions = append(pidOptions, withSupervisorDirective(spawnConfig.supervisorDirective))
-	} else {
-		pidOptions = append(pidOptions, withSupervisorDirective(pid.supervisorDirective))
+	// set the supervisor strategies when defined
+	if len(spawnConfig.supervisorStrategies) != 0 {
+		pidOptions = append(pidOptions, withSupervisorStrategies(spawnConfig.supervisorStrategies...))
 	}
 
 	// disable passivation for system actor
@@ -1187,7 +1187,30 @@ func (pid *PID) handleReceived(received *ReceiveContext) {
 // recovery is called upon after message is processed
 func (pid *PID) recovery(received *ReceiveContext) {
 	if r := recover(); r != nil {
-		pid.supervisionChan <- fmt.Errorf("%s", r)
+		switch err, ok := r.(error); {
+		case ok:
+			var pe *PanicError
+			if errors.As(err, &pe) {
+				// in case PanicError is sent just forward it
+				pid.supervisionChan <- pe
+				return
+			}
+
+			// this is a normal error just wrap it with some stack trace
+			// for rich logging purpose
+			pc, fn, line, _ := runtime.Caller(2)
+			pid.supervisionChan <- NewPanicError(
+				fmt.Errorf("%w at %s[%s:%d]", err, runtime.FuncForPC(pc).Name(), fn, line),
+			)
+
+		default:
+			// we have no idea what panic it is. Enrich it with some stack trace for rich
+			// logging purpose
+			pc, fn, line, _ := runtime.Caller(2)
+			pid.supervisionChan <- NewPanicError(
+				fmt.Errorf("%#v at %s[%s:%d]", r, runtime.FuncForPC(pc).Name(), fn, line),
+			)
+		}
 		return
 	}
 	// no panic or recommended way to handle error
@@ -1235,6 +1258,7 @@ func (pid *PID) reset() {
 	pid.behaviorStack.Reset()
 	pid.processedCount.Store(0)
 	pid.stopping.Store(false)
+	pid.supervisorStrategies.Reset()
 }
 
 // freeWatchers releases all the actors watching this actor
@@ -1519,11 +1543,46 @@ func (pid *PID) notifyParent(err error) {
 		return
 	}
 
+	// check my supervisor strategies based upon the error type
+	strategy, ok := pid.supervisorStrategies.Get(err)
+	if !ok {
+		pid.logger.Debugf("no supervisor directive found for error: %s", errorType(err))
+		// no supervisor strategy found no-op
+		// business as usual
+		return
+	}
+
+	msg := &internalpb.HandleFault{
+		ActorId: pid.ID(),
+		Message: err.Error(),
+	}
+
+	directive := strategy.Directive()
+	switch d := directive.(type) {
+	case *StopDirective:
+		msg.Directive = &internalpb.HandleFault_Stop{
+			Stop: new(internalpb.StopDirective),
+		}
+	case *RestartDirective:
+		msg.Directive = &internalpb.HandleFault_Restart{
+			Restart: &internalpb.RestartDirective{
+				MaxRetries: d.maxNumRetries,
+				Timeout:    int64(d.timeout),
+			},
+		}
+	case *ResumeDirective:
+		msg.Directive = &internalpb.HandleFault_Resume{
+			Resume: &internalpb.ResumeDirective{},
+		}
+	default:
+		// no supervisor strategy found no-op
+		// business as usual
+		pid.logger.Debugf("unknown directive: %T found for error: %s", d, errorType(err))
+		return
+	}
+
 	if parent := pid.Parent(); parent != nil && !parent.Equals(NoSender) {
-		_ = pid.Tell(context.Background(), parent, &internalpb.HandleFault{
-			ActorId: pid.ID(),
-			Message: err.Error(),
-		})
+		_ = pid.Tell(context.Background(), parent, msg)
 	}
 }
 
@@ -1609,13 +1668,14 @@ func (pid *PID) handleFaultyChild(msg *internalpb.HandleFault) {
 			cid := descendant.GetValue()
 			if cid.ID() == msg.GetActorId() {
 				message := msg.GetMessage()
+				directive := msg.GetDirective()
 				pid.logger.Errorf("child actor=(%s) is failing: Err=%s", cid.Name(), message)
-				switch directive := cid.supervisorDirective.(type) {
-				case *StopDirective:
+				switch d := directive.(type) {
+				case *internalpb.HandleFault_Stop:
 					pid.handleStopDirective(cid)
-				case *RestartDirective:
-					pid.handleRestartDirective(cid, directive.MaxNumRetries(), directive.Timeout())
-				case *ResumeDirective:
+				case *internalpb.HandleFault_Restart:
+					pid.handleRestartDirective(cid, d.Restart.GetMaxRetries(), time.Duration(d.Restart.GetTimeout()))
+				case *internalpb.HandleFault_Resume:
 					// pass
 				default:
 					pid.handleStopDirective(cid)

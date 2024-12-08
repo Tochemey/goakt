@@ -36,7 +36,6 @@ import (
 )
 
 func TestOption(t *testing.T) {
-	resumeDirective := NewResumeDirective()
 	var atomicTrue atomic.Bool
 	atomicTrue.Store(true)
 	clusterConfig := NewClusterConfig()
@@ -66,11 +65,6 @@ func TestOption(t *testing.T) {
 			name:     "WithPassivationDisabled",
 			option:   WithPassivationDisabled(),
 			expected: actorSystem{expireActorAfter: -1},
-		},
-		{
-			name:     "WithSupervisorDirective",
-			option:   WithSupervisorDirective(resumeDirective),
-			expected: actorSystem{supervisorDirective: resumeDirective},
 		},
 		{
 			name:     "WithRemoting",

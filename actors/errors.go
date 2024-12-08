@@ -97,3 +97,22 @@ var (
 func eof(err error) bool {
 	return err != nil && (errors.Is(err, io.EOF) || errors.Unwrap(err) == io.EOF)
 }
+
+// PanicError defines the panic error
+// wrapping the underlying error
+type PanicError struct {
+	err error
+}
+
+// enforce compilation error
+var _ error = (*PanicError)(nil)
+
+// NewPanicError creates an instance of PanicError
+func NewPanicError(err error) PanicError {
+	return PanicError{err}
+}
+
+// Error implements the standard error interface
+func (e PanicError) Error() string {
+	return fmt.Sprintf("panic: %v", e.err)
+}

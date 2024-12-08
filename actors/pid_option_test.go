@@ -36,8 +36,10 @@ import (
 )
 
 func TestPIDOptions(t *testing.T) {
-	resumeDirective := NewResumeDirective()
 	mailbox := NewUnboundedMailbox()
+	strategy := NewSupervisorStrategy(PanicError{}, NewResumeDirective())
+	strategies := newStrategiesMap()
+	strategies.Put(strategy)
 	var (
 		atomicDuration   atomic.Duration
 		atomicInt        atomic.Int32
@@ -73,9 +75,9 @@ func TestPIDOptions(t *testing.T) {
 			expected: &PID{logger: log.DefaultLogger},
 		},
 		{
-			name:     "WithSupervisorStrategy",
-			option:   withSupervisorDirective(resumeDirective),
-			expected: &PID{supervisorDirective: resumeDirective},
+			name:     "WithSupervisorStrategies",
+			option:   withSupervisorStrategies(strategy),
+			expected: &PID{supervisorStrategies: strategies},
 		},
 		{
 			name:     "WithPassivationDisabled",
