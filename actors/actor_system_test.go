@@ -176,7 +176,15 @@ func TestActorSystem(t *testing.T) {
 			WithPassivationDisabled(),
 			WithLogger(logger),
 			WithRemoting(host, int32(remotingPort)),
-			WithClustering(provider, 9, 1, gossipPort, clusterPort, new(actorQA)),
+			WithCluster(
+				NewClusterConfig().
+					WithKinds(new(actorQA)).
+					WithPartitionCount(9).
+					WithReplicaCount(1).
+					WithPeersPort(clusterPort).
+					WithMinimumPeersQuorum(1).
+					WithDiscoveryPort(gossipPort).
+					WithDiscovery(provider)),
 		)
 		require.NoError(t, err)
 
@@ -998,7 +1006,15 @@ func TestActorSystem(t *testing.T) {
 			WithExpireActorAfter(passivateAfter),
 			WithLogger(logger),
 			WithRemoting(host, int32(remotingPort)),
-			WithClustering(provider, 9, 1, gossipPort, clusterPort, new(actorQA)),
+			WithCluster(
+				NewClusterConfig().
+					WithKinds(new(actorQA)).
+					WithPartitionCount(9).
+					WithReplicaCount(1).
+					WithPeersPort(clusterPort).
+					WithMinimumPeersQuorum(1).
+					WithDiscoveryPort(gossipPort).
+					WithDiscovery(provider)),
 		)
 		require.NoError(t, err)
 
@@ -1215,7 +1231,15 @@ func TestActorSystem(t *testing.T) {
 			WithPassivationDisabled(),
 			WithLogger(logger),
 			WithRemoting(host, int32(remotingPort)),
-			WithClustering(provider, 9, 1, gossipPort, clusterPort, new(actorQA)),
+			WithCluster(
+				NewClusterConfig().
+					WithKinds(new(actorQA)).
+					WithPartitionCount(9).
+					WithReplicaCount(1).
+					WithPeersPort(clusterPort).
+					WithMinimumPeersQuorum(1).
+					WithDiscoveryPort(gossipPort).
+					WithDiscovery(provider)),
 		)
 		require.NoError(t, err)
 
@@ -1466,7 +1490,15 @@ func TestActorSystem(t *testing.T) {
 			WithPassivationDisabled(),
 			WithLogger(logger),
 			WithRemoting(host, int32(remotingPort)),
-			WithClustering(provider, 9, 1, gossipPort, clusterPort, new(exchanger)),
+			WithCluster(
+				NewClusterConfig().
+					WithKinds(new(exchanger)).
+					WithPartitionCount(9).
+					WithReplicaCount(1).
+					WithPeersPort(clusterPort).
+					WithMinimumPeersQuorum(1).
+					WithDiscoveryPort(gossipPort).
+					WithDiscovery(provider)),
 		)
 		require.NoError(t, err)
 

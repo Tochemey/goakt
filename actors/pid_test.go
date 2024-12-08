@@ -565,7 +565,8 @@ func TestSupervisorStrategy(t *testing.T) {
 		assert.NotNil(t, parent)
 
 		// create the child actor
-		child, err := parent.SpawnChild(ctx, "SpawnChild", newTestSupervised(), WithSupervisor(NewStopDirective()))
+		stopStrategy := NewSupervisorStrategy(PanicError{}, NewStopDirective())
+		child, err := parent.SpawnChild(ctx, "SpawnChild", newTestSupervised(), WithSupervisorStrategies(stopStrategy))
 		assert.NoError(t, err)
 		assert.NotNil(t, child)
 		assert.Equal(t, parent.ID(), child.Parent().ID())
@@ -627,7 +628,7 @@ func TestSupervisorStrategy(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NoError(t, actorSystem.Stop(ctx))
 	})
-	t.Run("With default strategy with child actor shutdown failure", func(t *testing.T) {
+	t.Run("With undefined directive no-op", func(t *testing.T) {
 		ctx := context.TODO()
 		host := "127.0.0.1"
 		ports := dynaport.Get(1)
@@ -644,12 +645,13 @@ func TestSupervisorStrategy(t *testing.T) {
 
 		lib.Pause(time.Second)
 
-		parent, err := actorSystem.Spawn(ctx, "test", newTestSupervisor(), WithSupervisor(new(unhandledSupervisorDirective)))
+		parent, err := actorSystem.Spawn(ctx, "test", newTestSupervisor())
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
 
 		// create the child actor
-		child, err := parent.SpawnChild(ctx, "SpawnChild", &postStopQA{})
+		fakeStrategy := NewSupervisorStrategy(PanicError{}, new(unhandledSupervisorDirective))
+		child, err := parent.SpawnChild(ctx, "SpawnChild", newTestSupervised(), WithSupervisorStrategies(fakeStrategy))
 		assert.NoError(t, err)
 		assert.NotNil(t, child)
 
@@ -663,8 +665,55 @@ func TestSupervisorStrategy(t *testing.T) {
 		lib.Pause(time.Second)
 
 		// assert the actor state
-		assert.False(t, child.IsRunning())
-		assert.Len(t, parent.Children(), 0)
+		assert.True(t, child.IsRunning())
+		assert.Len(t, parent.Children(), 1)
+
+		//stop the actor
+		err = parent.Shutdown(ctx)
+		assert.NoError(t, err)
+		assert.NoError(t, actorSystem.Stop(ctx))
+	})
+	t.Run("With directive not found no-op", func(t *testing.T) {
+		ctx := context.TODO()
+		host := "127.0.0.1"
+		ports := dynaport.Get(1)
+
+		actorSystem, err := NewActorSystem("testSys",
+			WithRemoting(host, int32(ports[0])),
+			WithPassivationDisabled(),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+
+		lib.Pause(time.Second)
+
+		parent, err := actorSystem.Spawn(ctx, "test", newTestSupervisor())
+		require.NoError(t, err)
+		assert.NotNil(t, parent)
+
+		// create the child actor
+		child, err := parent.SpawnChild(ctx, "SpawnChild", newTestSupervised())
+		assert.NoError(t, err)
+		assert.NotNil(t, child)
+
+		lib.Pause(time.Second)
+
+		// just for the sake of the test we remove the default directive
+		child.supervisorStrategies = newStrategiesMap()
+
+		assert.Len(t, parent.Children(), 1)
+		// send a message to the actor which result in panic
+		assert.NoError(t, Tell(ctx, child, new(testpb.TestPanic)))
+
+		// wait for the child to properly shutdown
+		lib.Pause(time.Second)
+
+		// assert the actor state
+		assert.True(t, child.IsRunning())
+		assert.Len(t, parent.Children(), 1)
 
 		//stop the actor
 		err = parent.Shutdown(ctx)
@@ -688,13 +737,14 @@ func TestSupervisorStrategy(t *testing.T) {
 
 		lib.Pause(time.Second)
 
-		parent, err := actorSystem.Spawn(ctx, "test", newTestSupervisor(), WithSupervisor(DefaultSupervisoryStrategy))
+		parent, err := actorSystem.Spawn(ctx, "test", newTestSupervisor())
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
 
 		// create the child actor
-		child, err := parent.SpawnChild(ctx, "SpawnChild", &postStopQA{})
+		stopStrategy := NewSupervisorStrategy(PanicError{}, DefaultSupervisoryStrategy)
+		child, err := parent.SpawnChild(ctx, "SpawnChild", &postStopQA{}, WithSupervisorStrategies(stopStrategy))
 		assert.NoError(t, err)
 		assert.NotNil(t, child)
 
@@ -733,12 +783,13 @@ func TestSupervisorStrategy(t *testing.T) {
 
 		lib.Pause(time.Second)
 
-		parent, err := actorSystem.Spawn(ctx, "test", newTestSupervisor(), WithSupervisor(NewRestartDirective()))
+		parent, err := actorSystem.Spawn(ctx, "test", newTestSupervisor())
 		require.NoError(t, err)
 		require.NotNil(t, parent)
 
 		// create the child actor
-		child, err := parent.SpawnChild(ctx, "SpawnChild", newTestSupervised())
+		restartStrategy := NewSupervisorStrategy(PanicError{}, NewRestartDirective())
+		child, err := parent.SpawnChild(ctx, "SpawnChild", newTestSupervised(), WithSupervisorStrategies(restartStrategy))
 		require.NoError(t, err)
 		require.NotNil(t, child)
 
@@ -822,12 +873,13 @@ func TestSupervisorStrategy(t *testing.T) {
 
 		lib.Pause(time.Second)
 
-		parent, err := actorSystem.Spawn(ctx, "test", newTestSupervisor(), WithSupervisor(NewResumeDirective()))
+		parent, err := actorSystem.Spawn(ctx, "test", newTestSupervisor())
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
 
 		// create the child actor
-		child, err := parent.SpawnChild(ctx, "SpawnChild", newTestSupervised())
+		resumeStrategy := NewSupervisorStrategy(PanicError{}, NewResumeDirective())
+		child, err := parent.SpawnChild(ctx, "SpawnChild", newTestSupervised(), WithSupervisorStrategies(resumeStrategy))
 		assert.NoError(t, err)
 		assert.NotNil(t, child)
 
@@ -874,12 +926,13 @@ func TestSupervisorStrategy(t *testing.T) {
 		restart := NewRestartDirective()
 		restart.WithLimit(2, time.Minute)
 
-		parent, err := actorSystem.Spawn(ctx, "test", newTestSupervisor(), WithSupervisor(restart))
+		parent, err := actorSystem.Spawn(ctx, "test", newTestSupervisor())
 		require.NoError(t, err)
 		require.NotNil(t, parent)
 
 		// create the child actor
-		child, err := parent.SpawnChild(ctx, "SpawnChild", newTestSupervised())
+		restartStrategy := NewSupervisorStrategy(PanicError{}, restart)
+		child, err := parent.SpawnChild(ctx, "SpawnChild", newTestSupervised(), WithSupervisorStrategies(restartStrategy))
 		require.NoError(t, err)
 		require.NotNil(t, child)
 
@@ -893,8 +946,7 @@ func TestSupervisorStrategy(t *testing.T) {
 		// assert the actor state
 		require.True(t, child.IsRunning())
 
-		// TODO: fix the child relationship supervisor mode
-		// require.Len(t, parent.Children(), 1)
+		require.Len(t, parent.Children(), 1)
 
 		//stop the actor
 		err = parent.Shutdown(ctx)
