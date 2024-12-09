@@ -12,4 +12,31 @@ message HandleFault {
   string actor_id = 1;
   // Specifies the message
   string message = 2;
+  // Specifies the directive
+  oneof directive {
+    StopDirective stop = 3;
+    ResumeDirective resume = 4;
+    RestartDirective restart = 5;
+    EscalateDirective escalate = 6;
+  }
+}
+
+// StopDirective defines the supervisor stop directive
+message StopDirective {}
+
+// ResumeDirective defines the supervisor resume directive
+// This ignores the failure and process the next message, instead
+message ResumeDirective {}
+
+// EscalateDirective defines the supervisor escalation directive
+// It escalates the failure to the next parent in the hierarchy, thereby failing itself
+message EscalateDirective {}
+
+// RestartDirective defines supervisor restart directive
+message RestartDirective {
+  // Specifies the maximum number of retries
+  // When reaching this number the faulty actor is stopped
+  uint32 max_retries = 1;
+  // Specifies the time range to restart the faulty actor
+  int64 timeout = 2;
 }

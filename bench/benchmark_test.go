@@ -47,8 +47,7 @@ func BenchmarkActor(b *testing.B) {
 		// create the actor system
 		actorSystem, _ := actors.NewActorSystem("bench",
 			actors.WithLogger(log.DiscardLogger),
-			actors.WithActorInitMaxRetries(1),
-			actors.WithSupervisorDirective(actors.NewStopDirective()))
+			actors.WithActorInitMaxRetries(1))
 
 		// start the actor system
 		_ = actorSystem.Start(ctx)
@@ -91,8 +90,7 @@ func BenchmarkActor(b *testing.B) {
 		// create the actor system
 		actorSystem, _ := actors.NewActorSystem("bench",
 			actors.WithLogger(log.DiscardLogger),
-			actors.WithActorInitMaxRetries(1),
-			actors.WithSupervisorDirective(actors.NewStopDirective()))
+			actors.WithActorInitMaxRetries(1))
 
 		// start the actor system
 		_ = actorSystem.Start(ctx)
@@ -129,8 +127,7 @@ func BenchmarkActor(b *testing.B) {
 		// create the actor system
 		actorSystem, _ := actors.NewActorSystem("bench",
 			actors.WithLogger(log.DiscardLogger),
-			actors.WithActorInitMaxRetries(1),
-			actors.WithSupervisorDirective(actors.NewStopDirective()))
+			actors.WithActorInitMaxRetries(1))
 
 		// start the actor system
 		_ = actorSystem.Start(ctx)
@@ -173,8 +170,7 @@ func BenchmarkActor(b *testing.B) {
 		// create the actor system
 		actorSystem, _ := actors.NewActorSystem("bench",
 			actors.WithLogger(log.DiscardLogger),
-			actors.WithActorInitMaxRetries(1),
-			actors.WithSupervisorDirective(actors.NewStopDirective()))
+			actors.WithActorInitMaxRetries(1))
 
 		// start the actor system
 		_ = actorSystem.Start(ctx)
@@ -216,8 +212,7 @@ func BenchmarkActor(b *testing.B) {
 		// create the actor system
 		actorSystem, _ := actors.NewActorSystem("bench",
 			actors.WithLogger(log.DiscardLogger),
-			actors.WithActorInitMaxRetries(1),
-			actors.WithSupervisorDirective(actors.NewStopDirective()))
+			actors.WithActorInitMaxRetries(1))
 
 		// start the actor system
 		_ = actorSystem.Start(ctx)
@@ -296,8 +291,7 @@ func BenchmarkActor(b *testing.B) {
 		// create the actor system
 		actorSystem, _ := actors.NewActorSystem("bench",
 			actors.WithLogger(log.DiscardLogger),
-			actors.WithActorInitMaxRetries(1),
-			actors.WithSupervisorDirective(actors.NewStopDirective()))
+			actors.WithActorInitMaxRetries(1))
 
 		// start the actor system
 		_ = actorSystem.Start(ctx)

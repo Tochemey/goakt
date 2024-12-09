@@ -27,7 +27,6 @@ package actors
 import (
 	"time"
 
-	"github.com/tochemey/goakt/v2/discovery"
 	"github.com/tochemey/goakt/v2/hash"
 	"github.com/tochemey/goakt/v2/log"
 )
@@ -85,16 +84,6 @@ func WithPassivationDisabled() Option {
 	)
 }
 
-// WithSupervisorDirective sets the supervisor strategy directive
-// that will be globally used when there is no supervisor directive sets
-func WithSupervisorDirective(directive SupervisorDirective) Option {
-	return OptionFunc(
-		func(a *actorSystem) {
-			a.supervisorDirective = directive
-		},
-	)
-}
-
 // WithRemoting enables remoting on the actor system
 func WithRemoting(host string, port int32) Option {
 	return OptionFunc(
@@ -102,29 +91,6 @@ func WithRemoting(host string, port int32) Option {
 			a.remotingEnabled.Store(true)
 			a.port = port
 			a.host = host
-		},
-	)
-}
-
-// WithClustering enables the cluster mode.
-// Deprecated: use rather WithCluster which offers a fluent api to set cluster configuration
-func WithClustering(provider discovery.Provider, partitionCount uint64, minimumPeersQuorum uint16, discoveryPort, peersPort int, kinds ...Actor) Option {
-	return OptionFunc(
-		func(a *actorSystem) {
-			a.clusterEnabled.Store(true)
-			replicaCount := 2
-			if minimumPeersQuorum < 2 {
-				replicaCount = 1
-			}
-
-			a.clusterConfig = NewClusterConfig().
-				WithDiscovery(provider).
-				WithPartitionCount(partitionCount).
-				WithDiscoveryPort(discoveryPort).
-				WithPeersPort(peersPort).
-				WithMinimumPeersQuorum(uint32(minimumPeersQuorum)).
-				WithReplicaCount(uint32(replicaCount)).
-				WithKinds(kinds...)
 		},
 	)
 }
