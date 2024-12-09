@@ -584,7 +584,7 @@ func TestSupervisorStrategy(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NoError(t, actorSystem.Stop(ctx))
 	})
-	t.Run("With the default supervisor directive", func(t *testing.T) {
+	t.Run("With the default supervisor directives", func(t *testing.T) {
 		ctx := context.TODO()
 		host := "127.0.0.1"
 		ports := dynaport.Get(1)
@@ -628,7 +628,7 @@ func TestSupervisorStrategy(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NoError(t, actorSystem.Stop(ctx))
 	})
-	t.Run("With undefined directive no-op", func(t *testing.T) {
+	t.Run("With undefined directive suspends actor", func(t *testing.T) {
 		ctx := context.TODO()
 		host := "127.0.0.1"
 		ports := dynaport.Get(1)
@@ -647,33 +647,37 @@ func TestSupervisorStrategy(t *testing.T) {
 
 		parent, err := actorSystem.Spawn(ctx, "test", newTestSupervisor())
 		require.NoError(t, err)
-		assert.NotNil(t, parent)
+		require.NotNil(t, parent)
 
 		// create the child actor
 		fakeStrategy := NewSupervisorStrategy(PanicError{}, new(unhandledSupervisorDirective))
 		child, err := parent.SpawnChild(ctx, "SpawnChild", newTestSupervised(), WithSupervisorStrategies(fakeStrategy))
-		assert.NoError(t, err)
-		assert.NotNil(t, child)
+		require.NoError(t, err)
+		require.NotNil(t, child)
 
 		lib.Pause(time.Second)
 
-		assert.Len(t, parent.Children(), 1)
+		require.Len(t, parent.Children(), 1)
 		// send a test panic message to the actor
-		assert.NoError(t, Tell(ctx, child, new(testpb.TestPanic)))
+		require.NoError(t, Tell(ctx, child, new(testpb.TestPanic)))
 
 		// wait for the child to properly shutdown
 		lib.Pause(time.Second)
 
 		// assert the actor state
-		assert.True(t, child.IsRunning())
-		assert.Len(t, parent.Children(), 1)
+		require.False(t, child.IsRunning())
+		require.True(t, child.IsSuspended())
+		require.Len(t, parent.Children(), 0)
+
+		// trying sending a message to the actor will return an error
+		require.Error(t, Tell(ctx, child, new(testpb.TestSend)))
 
 		//stop the actor
 		err = parent.Shutdown(ctx)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		assert.NoError(t, actorSystem.Stop(ctx))
 	})
-	t.Run("With directive not found no-op", func(t *testing.T) {
+	t.Run("With directive not found suspends actor", func(t *testing.T) {
 		ctx := context.TODO()
 		host := "127.0.0.1"
 		ports := dynaport.Get(1)
@@ -692,28 +696,29 @@ func TestSupervisorStrategy(t *testing.T) {
 
 		parent, err := actorSystem.Spawn(ctx, "test", newTestSupervisor())
 		require.NoError(t, err)
-		assert.NotNil(t, parent)
+		require.NotNil(t, parent)
 
 		// create the child actor
 		child, err := parent.SpawnChild(ctx, "SpawnChild", newTestSupervised())
-		assert.NoError(t, err)
-		assert.NotNil(t, child)
+		require.NoError(t, err)
+		require.NotNil(t, child)
 
 		lib.Pause(time.Second)
 
 		// just for the sake of the test we remove the default directive
 		child.supervisorStrategies = newStrategiesMap()
 
-		assert.Len(t, parent.Children(), 1)
+		require.Len(t, parent.Children(), 1)
 		// send a message to the actor which result in panic
-		assert.NoError(t, Tell(ctx, child, new(testpb.TestPanic)))
+		require.NoError(t, Tell(ctx, child, new(testpb.TestPanic)))
 
 		// wait for the child to properly shutdown
 		lib.Pause(time.Second)
 
 		// assert the actor state
-		assert.True(t, child.IsRunning())
-		assert.Len(t, parent.Children(), 1)
+		require.False(t, child.IsRunning())
+		require.True(t, child.IsSuspended())
+		require.Len(t, parent.Children(), 0)
 
 		//stop the actor
 		err = parent.Shutdown(ctx)

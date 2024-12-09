@@ -50,9 +50,10 @@ func NewResumeDirective() *ResumeDirective {
 	return new(ResumeDirective)
 }
 
+// implements the SupervisorDirective
 func (*ResumeDirective) isSupervisorDirective() {}
 
-// RestartDirective defines supervisor restart directive
+// RestartDirective defines the supervisor restart directive
 type RestartDirective struct {
 	// Specifies the maximum number of retries
 	// When reaching this number the faulty actor is stopped
@@ -85,4 +86,5 @@ func (x *RestartDirective) WithLimit(maxNumRetries uint32, timeout time.Duration
 	x.timeout = timeout
 }
 
+// implements the SupervisorDirective
 func (*RestartDirective) isSupervisorDirective() {}

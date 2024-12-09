@@ -26,8 +26,15 @@ package actors
 
 import (
 	"reflect"
+	"runtime"
 	"sync"
 )
+
+// DefaultSupervisorStrategies defines the default supervisor strategies
+var DefaultSupervisorStrategies = []*SupervisorStrategy{
+	NewSupervisorStrategy(PanicError{}, NewStopDirective()),
+	NewSupervisorStrategy(&runtime.PanicNilError{}, NewStopDirective()),
+}
 
 // SupervisorStrategy defines the rules to apply to a faulty actor
 // during message processing

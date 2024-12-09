@@ -152,14 +152,22 @@ When cluster mode is enabled, passivated actors are removed from the entire clus
 ### Supervision
 
 In GoAkt, supervision allows to define the various strategies to apply when a given actor is faulty.
-The supervisory strategy to adopt is set during the creation of the actor system.
+**_The supervisory strategies to adopt are to be set during the creation of the actor_**. One can set as many as he/she wants supervisor strategies based upon various error types using the `SpawnOption` method `WithSupervisorStrategies`.
+To create a supervisor strategy one needs to call the `NewSupervisorStrategy` function and pass _the error type_ and the corresponding _directive_.
+GoAkt comes bundled with the following default supervisor strategies that can be overriden when creating an actor: 
+- `NewSupervisorStrategy(PanicError{}, NewStopDirective())`: this will stop the faulty actor in case of panic.
+- `NewSupervisorStrategy(&runtime.PanicNilError{}, NewStopDirective())`: this will stop the faulty actor for nil panic error
+
+Note: GoAkt will suspend a faulty actor when there is no supervisor strategy set in place for the corresponding error type. Once can check the state of the actor using the `IsSuspended` method on the `PID`.
+A suspended actor can be restarted or shutdown, however it cannot handle any messages sent to it.
+
 In GoAkt each child actor is treated separately. There is no concept of one-for-one and one-for-all strategies.
 The following directives are supported:
 - [`Restart`](./actors/supervisor_directive.go): to restart the child actor. One can control how the restart is done using the following options: - `maxNumRetries`: defines the maximum of restart attempts - `timeout`: how to attempt restarting the faulty actor.
-- [`Stop`](./actors/supervisor_directive.go): to stop the child actor which is the default one
+- [`Stop`](./actors/supervisor_directive.go): to stop the child actor which is the default one as long as its descendants.
 - [`Resume`](./actors/supervisor_directive.go): ignores the failure and process the next message, instead.
 
-With the `Restart` directive, every child actor of the faulty is stopped and garbage-collected when the given parent is restarted. This helps avoid resources leaking.
+With the `Restart` directive, only the direct alive children of the given actor will be shudown and respawned with their initial state.
 There are only two scenarios where an actor can supervise another actor:
 - It watches the given actor via the `Watch` method. With this method the parent actor can also listen to the `Terminated` message to decide what happens next to the child actor.
 - The actor to be supervised is a child of the given actor.

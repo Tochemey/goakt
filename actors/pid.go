@@ -81,8 +81,9 @@ type PID struct {
 	address *address.Address
 
 	// helps determine whether the actor should handle messages or not.
-	started  atomic.Bool
-	stopping atomic.Bool
+	started   atomic.Bool
+	stopping  atomic.Bool
+	suspended atomic.Bool
 
 	latestReceiveTime     atomic.Time
 	latestReceiveDuration atomic.Duration
@@ -182,12 +183,15 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 	pid.latestReceiveDuration.Store(0)
 	pid.started.Store(false)
 	pid.stopping.Store(false)
+	pid.suspended.Store(false)
 	pid.passivateAfter.Store(DefaultPassivationTimeout)
 	pid.initTimeout.Store(DefaultInitTimeout)
 	pid.processing.Store(int32(idle))
 
 	// set default strategies mappings
-	pid.supervisorStrategies.Put(NewSupervisorStrategy(new(PanicError), NewStopDirective()))
+	for _, strategy := range DefaultSupervisorStrategies {
+		pid.supervisorStrategies.Put(strategy)
+	}
 
 	for _, opt := range opts {
 		opt(pid)
@@ -328,7 +332,13 @@ func (pid *PID) Stop(ctx context.Context, cid *PID) error {
 // IsRunning returns true when the actor is alive ready to process messages and false
 // when the actor is stopped or not started at all
 func (pid *PID) IsRunning() bool {
-	return pid.started.Load()
+	return pid.started.Load() && !pid.suspended.Load()
+}
+
+// IsSuspended returns true when the actor is suspended
+// A suspended actor is a faulty actor
+func (pid *PID) IsSuspended() bool {
+	return pid.suspended.Load()
 }
 
 // ActorSystem returns the actor system
@@ -428,6 +438,7 @@ func (pid *PID) Restart(ctx context.Context) error {
 	}
 
 	pid.processing.Store(int32(idle))
+	pid.suspended.Store(false)
 	pid.supervisionLoop()
 	if pid.passivateAfter.Load() > 0 {
 		go pid.passivationLoop()
@@ -1258,6 +1269,7 @@ func (pid *PID) reset() {
 	pid.behaviorStack.Reset()
 	pid.processedCount.Store(0)
 	pid.stopping.Store(false)
+	pid.suspended.Store(false)
 	pid.supervisorStrategies.Reset()
 }
 
@@ -1518,7 +1530,7 @@ func (pid *PID) doStop(ctx context.Context) error {
 	}
 
 	pid.started.Store(false)
-	pid.logger.Infof("post shutdown process is on going for actor=%s...", pid.Name())
+	pid.logger.Infof("shutdown process completed for actor=%s...", pid.Name())
 	pid.reset()
 	return nil
 }
@@ -1547,6 +1559,7 @@ func (pid *PID) notifyParent(err error) {
 	strategy, ok := pid.supervisorStrategies.Get(err)
 	if !ok {
 		pid.logger.Debugf("no supervisor directive found for error: %s", errorType(err))
+		pid.suspended.Store(true)
 		// no supervisor strategy found no-op
 		// business as usual
 		return
@@ -1578,6 +1591,7 @@ func (pid *PID) notifyParent(err error) {
 		// no supervisor strategy found no-op
 		// business as usual
 		pid.logger.Debugf("unknown directive: %T found for error: %s", d, errorType(err))
+		pid.suspended.Store(true)
 		return
 	}
 
