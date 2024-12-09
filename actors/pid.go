@@ -361,7 +361,7 @@ func (pid *PID) Address() *address.Address {
 // During restart all messages that are in the mailbox and not yet processed will be ignored.
 // Only the direct alive children of the given actor will be shudown and respawned with their initial state.
 // Bear in mind that restarting an actor will reinitialize the actor to initial state.
-// In case any of the direct child restart fails the given actor will not be started at all
+// In case any of the direct child restart fails the given actor will not be started at all.
 func (pid *PID) Restart(ctx context.Context) error {
 	if pid == nil || pid.Address() == nil {
 		return ErrUndefinedActor
@@ -1424,11 +1424,11 @@ func (pid *PID) passivationLoop() {
 	ticker.Stop()
 
 	if pid.stopping.Load() {
-		pid.logger.Infof("Actor=%s is stopping. No need to passivate", pid.Name())
+		pid.logger.Infof("actor=%s is stopping. No need to passivate", pid.Name())
 		return
 	}
 
-	pid.logger.Infof("Passivation mode has been triggered for actor=%s...", pid.Name())
+	pid.logger.Infof("passivation mode has been triggered for actor=%s...", pid.Name())
 
 	ctx := context.Background()
 	if err := pid.doStop(ctx); err != nil {
@@ -1445,7 +1445,7 @@ func (pid *PID) passivationLoop() {
 		pid.eventsStream.Publish(eventsTopic, event)
 	}
 
-	pid.logger.Infof("Actor=%s successfully passivated", pid.Name())
+	pid.logger.Infof("actor=%s successfully passivated", pid.Name())
 }
 
 // setBehavior is a utility function that helps set the actor behavior
@@ -1489,20 +1489,8 @@ func (pid *PID) doStop(ctx context.Context) error {
 		}
 	}
 
-	// stop processing messages
+	// stop supervisor loop
 	pid.supervisionStopSignal <- types.Unit{}
-
-	// TODO: revisit this part of the code
-	// move remaining messages in the mailbox to deadletter queue
-	// any subscription to the actor system can handle them.
-	// if pid.mailbox.Len() > 0 {
-	// 	pid.logger.Debugf("actor=(%s) mailbox is not empty. remaining messages will be sent to the deadletter queue", pid.Address().String())
-	// 	for !pid.mailbox.IsEmpty() {
-	// 		if dequeued := pid.mailbox.Dequeue(); dequeued != nil {
-	// 			pid.toDeadletterQueue(dequeued, ErrUnhandled)
-	// 		}
-	// 	}
-	// }
 
 	if pid.remoting != nil {
 		pid.remoting.Close()
@@ -1560,8 +1548,6 @@ func (pid *PID) notifyParent(err error) {
 	if !ok {
 		pid.logger.Debugf("no supervisor directive found for error: %s", errorType(err))
 		pid.suspended.Store(true)
-		// no supervisor strategy found no-op
-		// business as usual
 		return
 	}
 
@@ -1588,8 +1574,6 @@ func (pid *PID) notifyParent(err error) {
 			Resume: &internalpb.ResumeDirective{},
 		}
 	default:
-		// no supervisor strategy found no-op
-		// business as usual
 		pid.logger.Debugf("unknown directive: %T found for error: %s", d, errorType(err))
 		pid.suspended.Store(true)
 		return
