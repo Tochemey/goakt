@@ -340,6 +340,9 @@ func TestRestart(t *testing.T) {
 		// restart the actor
 		err = pid.Restart(ctx)
 		assert.NoError(t, err)
+
+		lib.Pause(time.Second)
+
 		assert.True(t, pid.IsRunning())
 
 		assert.EqualValues(t, 1, pid.RestartCount())
