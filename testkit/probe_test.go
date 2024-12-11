@@ -47,14 +47,14 @@ func TestTestProbe(t *testing.T) {
 		testkit := New(ctx, t, WithLogging(log.ErrorLevel))
 
 		// create the actor
-		pinger := testkit.Spawn(ctx, "pinger", &pinger{})
+		testkit.Spawn(ctx, "pinger", &pinger{})
 		// create the test probe
 		probe := testkit.NewProbe(ctx)
 
 		// create the message to expect
 		msg := new(testpb.Pong)
 		// send a message to the actor to be tested
-		probe.Send(pinger, new(testpb.Ping))
+		probe.Send("pinger", new(testpb.Ping))
 
 		probe.ExpectMessage(msg)
 		probe.ExpectNoMessage()
@@ -71,14 +71,14 @@ func TestTestProbe(t *testing.T) {
 		testkit := New(ctx, t, WithLogging(log.ErrorLevel))
 
 		// create the actor
-		pinger := testkit.Spawn(ctx, "pinger", &pinger{})
+		testkit.Spawn(ctx, "pinger", &pinger{})
 		// create the test probe
 		probe := testkit.NewProbe(ctx)
 		// create the message to send
 		msg := new(testpb.Pong)
 
 		// send a message to the actor to be tested
-		probe.Send(pinger, new(testpb.Ping))
+		probe.Send("pinger", new(testpb.Ping))
 
 		actual := probe.ExpectAnyMessage()
 		require.Equal(t, prototext.Format(msg), prototext.Format(actual))
@@ -96,16 +96,16 @@ func TestTestProbe(t *testing.T) {
 		testkit := New(ctx, t, WithLogging(log.ErrorLevel))
 
 		// create the actor
-		pinger := testkit.Spawn(ctx, "pinger", &pinger{})
+		testkit.Spawn(ctx, "pinger", &pinger{})
 		// create the test probe
 		probe := testkit.NewProbe(ctx)
 		// create the message to send
 		msg := new(testpb.Pong)
 		// send a message to the actor to be tested
-		probe.Send(pinger, new(testpb.Ping))
+		probe.Send("pinger", new(testpb.Ping))
 
 		probe.ExpectMessage(msg)
-		require.Equal(t, pinger.Address().String(), probe.Sender().Address().String())
+		require.Equal(t, "pinger", probe.Sender().Name())
 		probe.ExpectNoMessage()
 
 		t.Cleanup(func() {
@@ -120,13 +120,13 @@ func TestTestProbe(t *testing.T) {
 		testkit := New(ctx, t)
 
 		// create the actor
-		pinger := testkit.Spawn(ctx, "pinger", &pinger{})
+		testkit.Spawn(ctx, "pinger", &pinger{})
 		// create the test probe
 		probe := testkit.NewProbe(ctx)
 		// create the message to send
 		msg := new(testpb.Pong)
 		// send a message to the actor to be tested
-		probe.Send(pinger, new(testpb.Ping))
+		probe.Send("pinger", new(testpb.Ping))
 
 		probe.ExpectMessageOfType(msg.ProtoReflect().Type())
 		probe.ExpectNoMessage()
@@ -143,7 +143,7 @@ func TestTestProbe(t *testing.T) {
 		testkit := New(ctx, t)
 
 		// create the actor
-		pinger := testkit.Spawn(ctx, "pinger", &pinger{})
+		testkit.Spawn(ctx, "pinger", &pinger{})
 		// create the test probe
 		probe := testkit.NewProbe(ctx)
 
@@ -151,7 +151,7 @@ func TestTestProbe(t *testing.T) {
 		msg := new(testpb.Pong)
 		// send a message to the actor to be tested
 		duration := time.Second
-		probe.Send(pinger, &testpb.Wait{Duration: uint64(duration)})
+		probe.Send("pinger", &testpb.Wait{Duration: uint64(duration)})
 
 		probe.ExpectMessageWithin(2*time.Second, msg)
 		probe.ExpectNoMessage()
@@ -168,7 +168,7 @@ func TestTestProbe(t *testing.T) {
 		testkit := New(ctx, t)
 
 		// create the actor
-		pinger := testkit.Spawn(ctx, "pinger", &pinger{})
+		testkit.Spawn(ctx, "pinger", &pinger{})
 		// create the test probe
 		probe := testkit.NewProbe(ctx)
 
@@ -176,9 +176,30 @@ func TestTestProbe(t *testing.T) {
 		msg := new(testpb.Pong)
 		// send a message to the actor to be tested
 		duration := time.Second
-		probe.Send(pinger, &testpb.Wait{Duration: uint64(duration)})
+		probe.Send("pinger", &testpb.Wait{Duration: uint64(duration)})
 
 		probe.ExpectMessageOfTypeWithin(2*time.Second, msg.ProtoReflect().Type())
+		probe.ExpectNoMessage()
+
+		t.Cleanup(func() {
+			probe.Stop()
+			testkit.Shutdown(ctx)
+		})
+	})
+	t.Run("Assert SendSync", func(t *testing.T) {
+		// create a test context
+		ctx := context.TODO()
+		// create a test kit
+		testkit := New(ctx, t, WithLogging(log.ErrorLevel))
+
+		// create the actor
+		testkit.Spawn(ctx, "pinger", &pinger{})
+		// create the test probe
+		probe := testkit.NewProbe(ctx)
+
+		// send a message to the actor to be tested
+		probe.SendSync("pinger", new(testpb.TestReply), time.Second)
+		probe.ExpectMessage(new(testpb.Reply))
 		probe.ExpectNoMessage()
 
 		t.Cleanup(func() {
@@ -198,7 +219,9 @@ func (t pinger) PreStart(_ context.Context) error {
 func (t pinger) Receive(ctx *actors.ReceiveContext) {
 	switch x := ctx.Message().(type) {
 	case *testpb.Ping:
-		_ = ctx.Self().Tell(ctx.Context(), ctx.Sender(), new(testpb.Pong))
+		ctx.Tell(ctx.Sender(), new(testpb.Pong))
+	case *testpb.TestReply:
+		ctx.Response(new(testpb.Reply))
 	case *testpb.Wait:
 		// delay for a while before sending the reply
 		wg := sync.WaitGroup{}
@@ -210,7 +233,7 @@ func (t pinger) Receive(ctx *actors.ReceiveContext) {
 		// block until timer is up
 		wg.Wait()
 		// reply the sender
-		_ = ctx.Self().Tell(ctx.Context(), ctx.Sender(), new(testpb.Pong))
+		ctx.Tell(ctx.Sender(), new(testpb.Pong))
 	}
 }
 

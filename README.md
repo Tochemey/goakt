@@ -370,7 +370,7 @@ To test that an actor receive and respond to messages one will have to:
 1. Create an instance of the testkit: `testkit := New(ctx, t)` where `ctx` is a go context and `t` the instance of `*testing.T`. This can be done in setup before the run of each test.
 2. Create the instance of the actor under test. Example: `pinger := testkit.Spawn(ctx, "pinger", &pinger{})`
 3. Create an instance of test probe: `probe := testkit.NewProbe(ctx)` where `ctx` is a go context. One can set some [options](./testkit/option.go)
-4. Use the probe to send a message to the actor under test. Example: `probe.Send(pinger, new(testpb.Ping))`
+4. Use the probe to send a message to the actor under test. Example: `probe.Send(pinger, new(testpb.Ping))` for _a Tell assertion_ and `probe.SendSync(pinger, new(testpb.Ping), time.Second)` for _an Ask assertion_.
 5. Assert that the actor under test has received the message and responded as expected using the probe methods:
 
 - `ExpectMessage(message proto.Message)`: asserts that the message received from the test actor is the expected one

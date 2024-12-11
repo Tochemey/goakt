@@ -72,15 +72,13 @@ func New(ctx context.Context, t *testing.T, opts ...Option) *TestKit {
 }
 
 // Spawn create an actor
-func (k *TestKit) Spawn(ctx context.Context, name string, actor actors.Actor) *actors.PID {
+func (k *TestKit) Spawn(ctx context.Context, name string, actor actors.Actor) {
 	// create and instance of actor
-	pid, err := k.actorSystem.Spawn(ctx, name, actor)
+	_, err := k.actorSystem.Spawn(ctx, name, actor)
 	// handle the error
 	if err != nil {
 		k.kt.Fatal(err.Error())
 	}
-	// return the created actor id
-	return pid
 }
 
 // NewProbe create a test probe

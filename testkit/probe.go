@@ -37,7 +37,7 @@ import (
 
 	"github.com/tochemey/goakt/v2/actors"
 	"github.com/tochemey/goakt/v2/goaktpb"
-	"github.com/tochemey/goakt/v2/internal/lib"
+	"github.com/tochemey/goakt/v2/internal/timer"
 )
 
 const (
@@ -62,8 +62,12 @@ type Probe interface {
 	ExpectMessageOfType(messageType protoreflect.MessageType)
 	// ExpectMessageOfTypeWithin asserts the expectation of a given message type within a time duration
 	ExpectMessageOfTypeWithin(duration time.Duration, messageType protoreflect.MessageType)
-	// Send sends a message to an actor and also provides probe's test actor PID as sender.
-	Send(to *actors.PID, message proto.Message)
+	// Send sends a message to the actor to be tested.
+	// This method is only used when one to assert that the actor to be tested is able to respond when a Tell message is sent.
+	Send(actorName string, message proto.Message)
+	// SendSync sends a message to the actor to be tested and expect a response within a time duration.
+	// This method is only used when one to assert that the actor to be tested is able to respond when an Ask message is sent.
+	SendSync(actorName string, message proto.Message, timeout time.Duration)
 	// Sender returns the sender of last received message.
 	Sender() *actors.PID
 	// PID returns the pid of the test actor
@@ -121,6 +125,7 @@ type probe struct {
 	lastSender     *actors.PID
 	messageQueue   chan message
 	defaultTimeout time.Duration
+	timers         *timer.Pool
 }
 
 // ensure that probe implements Probe
@@ -144,6 +149,7 @@ func newProbe(ctx context.Context, actorSystem actors.ActorSystem, t *testing.T)
 		pid:            pid,
 		messageQueue:   msgQueue,
 		defaultTimeout: DefaultTimeout,
+		timers:         timer.NewPool(),
 	}, nil
 }
 
@@ -182,10 +188,25 @@ func (x *probe) ExpectAnyMessageWithin(duration time.Duration) proto.Message {
 	return x.expectAnyMessage(duration)
 }
 
-// Send sends a message to the given actor
-func (x *probe) Send(to *actors.PID, message proto.Message) {
-	err := x.pid.Tell(x.testCtx, to, message)
+// Send sends a message to the actor to be tested.
+// This method is only used when one to assert that the actor to be tested is able to respond when a Tell message is sent.
+func (x *probe) Send(actorName string, message proto.Message) {
+	to, err := x.pid.ActorSystem().LocalActor(actorName)
 	require.NoError(x.pt, err)
+	require.NoError(x.pt, x.pid.Tell(x.testCtx, to, message))
+}
+
+// SendSync sends a message to the actor to be tested and expect a response within a time duration.
+// This method is only used when one to assert that the actor to be tested is able to respond when an Ask message is sent.
+func (x *probe) SendSync(actorName string, msg proto.Message, timeout time.Duration) {
+	to, err := x.pid.ActorSystem().LocalActor(actorName)
+	require.NoError(x.pt, err)
+	received, err := x.pid.Ask(x.testCtx, to, msg, timeout)
+	require.NoError(x.pt, err)
+	x.messageQueue <- message{
+		sender:  to,
+		payload: received,
+	}
 }
 
 // Sender returns the last sender
@@ -208,17 +229,12 @@ func (x *probe) Stop() {
 
 // receiveOne receives one message within a maximum time duration
 func (x *probe) receiveOne(max time.Duration) proto.Message {
-	timeout := make(chan bool, 1)
-
-	// wait for max duration to expire
-	go func() {
-		lib.Pause(max)
-		timeout <- true
-	}()
+	timer := x.timers.Get(max)
 
 	select {
 	// attempt to read some message from the message queue
 	case m, ok := <-x.messageQueue:
+		x.timers.Put(timer)
 		// nothing found
 		if !ok {
 			return nil
@@ -230,7 +246,8 @@ func (x *probe) receiveOne(max time.Duration) proto.Message {
 			x.lastSender = m.sender
 		}
 		return m.payload
-	case <-timeout:
+	case <-timer.C:
+		x.timers.Put(timer)
 		return nil
 	}
 }
