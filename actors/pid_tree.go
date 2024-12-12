@@ -71,7 +71,7 @@ func (t *pidTree) AddNode(parent, child *PID) error {
 	)
 	// validate parent node existence
 	if !parent.Equals(NoSender) {
-		parentNode, ok = t.getNode(parent.ID())
+		parentNode, ok = t.GetNode(parent.ID())
 		if !ok || parentNode == nil {
 			return fmt.Errorf("parent node=(%s) does not exist", parent.ID())
 		}
@@ -79,10 +79,7 @@ func (t *pidTree) AddNode(parent, child *PID) error {
 
 	// create a new node from the pool
 	newNode := t.nodePool.Get().(*pidNode)
-	newNode.ID = child.ID()
-	newNode.Descendants.Reset()
-	newNode.Watchers.Reset()
-	newNode.Watchees.Reset()
+	t.resetNode(newNode, child.ID())
 
 	// create a pidValue using the pool and set its data
 	val := t.valuePool.Get().(*pidValue)
@@ -108,13 +105,9 @@ func (t *pidTree) AddNode(parent, child *PID) error {
 // before watching because this call will do nothing when the watcher and the watched node do not exist in
 // the tree
 func (t *pidTree) AddWatcher(node, watcher *PID) {
-	currentNode, ok := t.getNode(node.ID())
-	if !ok || currentNode == nil {
-		return
-	}
-
-	watcherNode, ok := t.getNode(watcher.ID())
-	if !ok {
+	currentNode, currentOk := t.GetNode(node.ID())
+	watcherNode, watcherOk := t.GetNode(watcher.ID())
+	if !currentOk || !watcherOk || currentNode == nil {
 		return
 	}
 
@@ -131,7 +124,7 @@ func (t *pidTree) Ancestors(pid *PID) ([]*pidNode, bool) {
 
 	var ancestors []*pidNode
 	for _, ancestorID := range ancestorIDs {
-		if ancestor, ok := t.getNode(ancestorID); ok {
+		if ancestor, ok := t.GetNode(ancestorID); ok {
 			ancestors = append(ancestors, ancestor)
 		}
 	}
@@ -140,29 +133,17 @@ func (t *pidTree) Ancestors(pid *PID) ([]*pidNode, bool) {
 
 // Parent returns a given PID direct parent
 func (t *pidTree) Parent(pid *PID) (*pidNode, bool) {
-	ancestors, ok := t.getAncestors(pid.ID())
-	if ok && len(ancestors) > 0 {
-		return t.getNode(ancestors[0])
-	}
-	return nil, false
+	return t.ancestorAt(pid, 0)
 }
 
 // GrandParent retrieves the grandparent of a node
 func (t *pidTree) GrandParent(pid *PID) (*pidNode, bool) {
-	ancestors, ok := t.getAncestors(pid.ID())
-	if ok && len(ancestors) > 1 {
-		return t.getNode(ancestors[1])
-	}
-	return nil, false
+	return t.ancestorAt(pid, 1)
 }
 
 // GreatGrandParent retrieves the great-grand-parent of a node
 func (t *pidTree) GreatGrandParent(pid *PID) (*pidNode, bool) {
-	ancestors, ok := t.getAncestors(pid.ID())
-	if ok && len(ancestors) > 2 {
-		return t.getNode(ancestors[2])
-	}
-	return nil, false
+	return t.ancestorAt(pid, 2)
 }
 
 // Descendants retrieves all descendants of the node with the given ID.
@@ -177,7 +158,7 @@ func (t *pidTree) Descendants(pid *PID) ([]*pidNode, bool) {
 
 // DeleteNode deletes a node and all its descendants
 func (t *pidTree) DeleteNode(pid *PID) {
-	node, ok := t.getNode(pid.ID())
+	node, ok := t.GetNode(pid.ID())
 	if !ok {
 		return
 	}
@@ -211,7 +192,12 @@ func (t *pidTree) DeleteNode(pid *PID) {
 
 // GetNode retrieves a node by its ID
 func (t *pidTree) GetNode(id string) (*pidNode, bool) {
-	return t.getNode(id)
+	value, ok := t.nodes.Load(id)
+	if !ok {
+		return nil, false
+	}
+	node, ok := value.(*pidNode)
+	return node, ok
 }
 
 // Nodes retrieves all nodes in the tree efficiently
@@ -235,14 +221,6 @@ func (t *pidTree) Reset() {
 	t.nodes.Reset()   // Reset nodes map
 	t.parents.Reset() // Reset parents map
 	t.size.Store(0)
-}
-
-// getNode is a helper to get a node from sync.Map
-func (t *pidTree) getNode(id string) (*pidNode, bool) {
-	if value, ok := t.nodes.Load(id); ok {
-		return value.(*pidNode), true
-	}
-	return nil, false
 }
 
 // getAncestors returns the list of ancestor nodes
@@ -294,4 +272,20 @@ func collectDescendants(node *pidNode) []*pidNode {
 
 	collectRecursive(node)
 	return output.Items()
+}
+
+// ancestorAt retrieves the ancestor at the specified level (0 for parent, 1 for grandparent, etc.)
+func (t *pidTree) ancestorAt(pid *PID, level int) (*pidNode, bool) {
+	ancestors, ok := t.getAncestors(pid.ID())
+	if ok && len(ancestors) > level {
+		return t.GetNode(ancestors[level])
+	}
+	return nil, false
+}
+
+func (t *pidTree) resetNode(node *pidNode, id string) {
+	node.ID = id
+	node.Descendants.Reset()
+	node.Watchees.Reset()
+	node.Watchers.Reset()
 }
