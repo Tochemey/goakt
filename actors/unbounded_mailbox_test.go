@@ -50,6 +50,7 @@ func TestUnboundedMailbox(t *testing.T) {
 	assert.Equal(t, in1, out1)
 	assert.Equal(t, in2, out2)
 	assert.True(t, mailbox.IsEmpty())
+	mailbox.Dispose()
 }
 
 func TestUnboundedMailboxOneProducer(t *testing.T) {

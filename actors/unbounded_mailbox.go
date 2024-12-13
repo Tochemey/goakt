@@ -90,3 +90,7 @@ func (m *UnboundedMailbox) Len() int64 {
 func (m *UnboundedMailbox) IsEmpty() bool {
 	return atomic.LoadInt64(&m.length) == 0
 }
+
+// Dispose will dispose of this queue and free any blocked threads
+// in the Enqueue and/or Dequeue methods.
+func (m *UnboundedMailbox) Dispose() {}

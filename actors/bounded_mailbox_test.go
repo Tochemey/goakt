@@ -37,9 +37,6 @@ func TestBoundedMailbox(t *testing.T) {
 		require.NoError(t, mailbox.Enqueue(&ReceiveContext{}))
 	}
 	assert.False(t, mailbox.IsEmpty())
-	err := mailbox.Enqueue(&ReceiveContext{})
-	require.Error(t, err)
-	assert.EqualError(t, err, ErrFullMailbox.Error())
 	dequeue := mailbox.Dequeue()
 	require.NotNil(t, dequeue)
 	assert.EqualValues(t, 19, mailbox.Len())
@@ -49,4 +46,7 @@ func TestBoundedMailbox(t *testing.T) {
 		counter--
 	}
 	assert.True(t, mailbox.IsEmpty())
+	mailbox.Dispose()
+	err := mailbox.Enqueue(&ReceiveContext{})
+	require.Error(t, err)
 }

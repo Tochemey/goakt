@@ -1271,6 +1271,7 @@ func (pid *PID) reset() {
 	pid.stopping.Store(false)
 	pid.suspended.Store(false)
 	pid.supervisorStrategies.Reset()
+	pid.mailbox.Dispose()
 }
 
 // freeWatchers releases all the actors watching this actor

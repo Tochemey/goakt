@@ -36,4 +36,7 @@ type Mailbox interface {
 	IsEmpty() bool
 	// Len returns the size of the mailbox
 	Len() int64
+	// Dispose will dispose of this queue and free any blocked threads
+	// in the Enqueue and/or Dequeue methods.
+	Dispose()
 }

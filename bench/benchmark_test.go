@@ -324,4 +324,43 @@ func BenchmarkActor(b *testing.B) {
 
 		_ = actorSystem.Stop(ctx)
 	})
+	b.Run("Ask(bounded mailbox)", func(b *testing.B) {
+		ctx := context.TODO()
+
+		// create the actor system
+		actorSystem, _ := actors.NewActorSystem("bench",
+			actors.WithLogger(log.DiscardLogger),
+			actors.WithActorInitMaxRetries(1))
+
+		// start the actor system
+		_ = actorSystem.Start(ctx)
+
+		// wait for system to start properly
+		lib.Pause(1 * time.Second)
+
+		// create the actors
+		sender, _ := actorSystem.Spawn(ctx, "sender", new(Benchmarker), actors.WithMailbox(actors.NewBoundedMailbox(b.N)))
+		receiver, _ := actorSystem.Spawn(ctx, "receiver", new(Benchmarker), actors.WithMailbox(actors.NewBoundedMailbox(b.N)))
+
+		// wait for actors to start properly
+		lib.Pause(1 * time.Second)
+
+		var counter int64
+		b.ResetTimer()
+		b.ReportAllocs()
+		b.RunParallel(func(pb *testing.PB) {
+			for pb.Next() {
+				if _, err := sender.Ask(ctx, receiver, new(benchmarkpb.BenchRequest), receivingTimeout); err != nil {
+					b.Fatal(err)
+				}
+				atomic.AddInt64(&counter, 1)
+			}
+		})
+		b.StopTimer()
+
+		messagesPerSec := float64(atomic.LoadInt64(&counter)) / b.Elapsed().Seconds()
+		b.ReportMetric(messagesPerSec, "messages/sec")
+
+		_ = actorSystem.Stop(ctx)
+	})
 }

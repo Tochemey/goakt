@@ -25,17 +25,13 @@
 package actors
 
 import (
-	"sync"
+	gods "github.com/Workiva/go-datastructures/queue"
 )
 
 // BoundedMailbox defines a bounded mailbox using ring buffer queue
 // This mailbox is thread-safe
 type BoundedMailbox struct {
-	buffer     []*ReceiveContext
-	head, tail int
-	len, cap   int
-	full       bool
-	lock       *sync.Mutex
+	underlying *gods.RingBuffer
 }
 
 // enforce compilation error
@@ -44,66 +40,38 @@ var _ Mailbox = (*BoundedMailbox)(nil)
 // NewBoundedMailbox creates a new instance BoundedMailbox
 func NewBoundedMailbox(cap int) *BoundedMailbox {
 	return &BoundedMailbox{
-		buffer: make([]*ReceiveContext, cap),
-		head:   0,
-		tail:   0,
-		len:    0,
-		cap:    cap,
-		lock:   new(sync.Mutex),
+		underlying: gods.NewRingBuffer(uint64(cap)),
 	}
 }
 
 // Enqueue places the given value in the mailbox
 // This will return an error when the mailbox is full
 func (mailbox *BoundedMailbox) Enqueue(msg *ReceiveContext) error {
-	if mailbox.isFull() {
-		return ErrFullMailbox
-	}
-
-	mailbox.lock.Lock()
-	mailbox.buffer[mailbox.tail] = msg
-	mailbox.tail = (mailbox.tail + 1) % mailbox.cap
-	mailbox.len++
-	mailbox.full = mailbox.head == mailbox.tail
-	mailbox.lock.Unlock()
-	return nil
+	return mailbox.underlying.Put(msg)
 }
 
 // Dequeue takes the mail from the mailbox
 // It returns nil when the mailbox is empty
 func (mailbox *BoundedMailbox) Dequeue() (msg *ReceiveContext) {
-	if mailbox.IsEmpty() {
-		return nil
+	if mailbox.underlying.Len() > 0 {
+		item, _ := mailbox.underlying.Get()
+		return item.(*ReceiveContext)
 	}
-
-	mailbox.lock.Lock()
-	item := mailbox.buffer[mailbox.head]
-	mailbox.full = false
-	mailbox.head = (mailbox.head + 1) % mailbox.cap
-	mailbox.len--
-	mailbox.lock.Unlock()
-	return item
+	return nil
 }
 
 // IsEmpty returns true when the mailbox is empty
 func (mailbox *BoundedMailbox) IsEmpty() bool {
-	mailbox.lock.Lock()
-	empty := mailbox.head == mailbox.tail && !mailbox.full
-	mailbox.lock.Unlock()
-	return empty
+	return mailbox.underlying.Len() == 0
 }
 
 // Len returns queue length
 func (mailbox *BoundedMailbox) Len() int64 {
-	mailbox.lock.Lock()
-	length := mailbox.len
-	mailbox.lock.Unlock()
-	return int64(length)
+	return int64(mailbox.underlying.Len())
 }
 
-func (mailbox *BoundedMailbox) isFull() bool {
-	mailbox.lock.Lock()
-	full := mailbox.full
-	mailbox.lock.Unlock()
-	return full
+// Dispose will dispose of this queue and free any blocked threads
+// in the Enqueue and/or Dequeue methods.
+func (mailbox *BoundedMailbox) Dispose() {
+	mailbox.underlying.Dispose()
 }
