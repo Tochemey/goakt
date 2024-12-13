@@ -100,4 +100,4 @@ protogen:
     SAVE ARTIFACT gen/goakt AS LOCAL goaktpb
     SAVE ARTIFACT gen/test AS LOCAL  test/data/testpb
     SAVE ARTIFACT gen/internal AS LOCAL internal/internalpb
-    SAVE ARTIFACT gen/benchmark AS LOCAL bench/benchmarkpb
+    SAVE ARTIFACT gen/benchmark AS LOCAL bench/benchpb

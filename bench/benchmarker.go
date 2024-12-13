@@ -28,7 +28,7 @@ import (
 	"context"
 
 	"github.com/tochemey/goakt/v2/actors"
-	"github.com/tochemey/goakt/v2/bench/benchmarkpb"
+	"github.com/tochemey/goakt/v2/bench/benchpb"
 	"github.com/tochemey/goakt/v2/goaktpb"
 )
 
@@ -42,10 +42,10 @@ func (p *Benchmarker) PreStart(context.Context) error {
 func (p *Benchmarker) Receive(ctx *actors.ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *goaktpb.PostStart:
-	case *benchmarkpb.BenchTell:
-	case *benchmarkpb.BenchRequest:
-		ctx.Response(&benchmarkpb.BenchResponse{})
-	case *benchmarkpb.BenchPriorityMailbox:
+	case *benchpb.BenchTell:
+	case *benchpb.BenchRequest:
+		ctx.Response(&benchpb.BenchResponse{})
+	case *benchpb.BenchPriorityMailbox:
 	default:
 		ctx.Unhandled()
 	}

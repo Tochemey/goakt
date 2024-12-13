@@ -33,7 +33,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/tochemey/goakt/v2/actors"
-	"github.com/tochemey/goakt/v2/bench/benchmarkpb"
+	"github.com/tochemey/goakt/v2/bench/benchpb"
 	"github.com/tochemey/goakt/v2/internal/lib"
 	"github.com/tochemey/goakt/v2/log"
 )
@@ -69,7 +69,7 @@ func BenchmarkActor(b *testing.B) {
 		b.ReportAllocs()
 		b.RunParallel(func(pb *testing.PB) {
 			for pb.Next() {
-				if err := actors.Tell(ctx, pid, new(benchmarkpb.BenchTell)); err != nil {
+				if err := actors.Tell(ctx, pid, new(benchpb.BenchTell)); err != nil {
 					b.Fatal(err)
 				}
 				atomic.AddInt64(&counter, 1)
@@ -109,7 +109,7 @@ func BenchmarkActor(b *testing.B) {
 		b.ReportAllocs()
 		b.RunParallel(func(pb *testing.PB) {
 			for pb.Next() {
-				err := sender.Tell(ctx, receiver, new(benchmarkpb.BenchTell))
+				err := sender.Tell(ctx, receiver, new(benchpb.BenchTell))
 				if err != nil {
 					b.Fatal(err)
 				}
@@ -146,7 +146,7 @@ func BenchmarkActor(b *testing.B) {
 		b.ReportAllocs()
 		b.RunParallel(func(pb *testing.PB) {
 			for pb.Next() {
-				err := sender.Tell(ctx, receiver, new(benchmarkpb.BenchTell))
+				err := sender.Tell(ctx, receiver, new(benchpb.BenchTell))
 				if err != nil {
 					b.Fatal(err)
 				}
@@ -162,8 +162,8 @@ func BenchmarkActor(b *testing.B) {
 		ctx := context.TODO()
 
 		priorityFunc := func(msg1, msg2 proto.Message) bool {
-			p1 := msg1.(*benchmarkpb.BenchPriorityMailbox)
-			p2 := msg2.(*benchmarkpb.BenchPriorityMailbox)
+			p1 := msg1.(*benchpb.BenchPriorityMailbox)
+			p2 := msg2.(*benchpb.BenchPriorityMailbox)
 			return p1.Priority > p2.Priority
 		}
 
@@ -191,7 +191,7 @@ func BenchmarkActor(b *testing.B) {
 		b.RunParallel(func(pb *testing.PB) {
 			for pb.Next() {
 				priorityCounter.Add(1)
-				priorityMessage := &benchmarkpb.BenchPriorityMailbox{
+				priorityMessage := &benchpb.BenchPriorityMailbox{
 					Priority: priorityCounter.Load(),
 				}
 				err := sender.Tell(ctx, receiver, priorityMessage)
@@ -231,7 +231,7 @@ func BenchmarkActor(b *testing.B) {
 		b.ReportAllocs()
 		b.RunParallel(func(pb *testing.PB) {
 			for pb.Next() {
-				if err := sender.SendAsync(ctx, receiver.Name(), new(benchmarkpb.BenchTell)); err != nil {
+				if err := sender.SendAsync(ctx, receiver.Name(), new(benchpb.BenchTell)); err != nil {
 					b.Fatal(err)
 				}
 				atomic.AddInt64(&counter, 1)
@@ -271,7 +271,7 @@ func BenchmarkActor(b *testing.B) {
 		b.ReportAllocs()
 		b.RunParallel(func(pb *testing.PB) {
 			for pb.Next() {
-				if _, err := actors.Ask(ctx, pid, new(benchmarkpb.BenchRequest), receivingTimeout); err != nil {
+				if _, err := actors.Ask(ctx, pid, new(benchpb.BenchRequest), receivingTimeout); err != nil {
 					b.Fatal(err)
 				}
 				atomic.AddInt64(&counter, 1)
@@ -311,7 +311,7 @@ func BenchmarkActor(b *testing.B) {
 		b.ReportAllocs()
 		b.RunParallel(func(pb *testing.PB) {
 			for pb.Next() {
-				if _, err := sender.Ask(ctx, receiver, new(benchmarkpb.BenchRequest), receivingTimeout); err != nil {
+				if _, err := sender.Ask(ctx, receiver, new(benchpb.BenchRequest), receivingTimeout); err != nil {
 					b.Fatal(err)
 				}
 				atomic.AddInt64(&counter, 1)
@@ -350,7 +350,7 @@ func BenchmarkActor(b *testing.B) {
 		b.ReportAllocs()
 		b.RunParallel(func(pb *testing.PB) {
 			for pb.Next() {
-				if _, err := sender.Ask(ctx, receiver, new(benchmarkpb.BenchRequest), receivingTimeout); err != nil {
+				if _, err := sender.Ask(ctx, receiver, new(benchpb.BenchRequest), receivingTimeout); err != nil {
 					b.Fatal(err)
 				}
 				atomic.AddInt64(&counter, 1)
