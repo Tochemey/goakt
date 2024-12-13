@@ -143,6 +143,7 @@ type PID struct {
 	remoting *Remoting
 
 	goScheduler *goScheduler
+	startedAt   *atomic.Int64
 }
 
 // newPID creates a new pid
@@ -177,6 +178,7 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 		remoting:              NewRemoting(),
 		goScheduler:           newGoScheduler(300),
 		supervisorStrategies:  newStrategiesMap(),
+		startedAt:             atomic.NewInt64(0),
 	}
 
 	pid.initMaxRetries.Store(DefaultInitMaxRetries)
@@ -214,7 +216,16 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 	receiveContext.build(ctx, NoSender, pid, new(goaktpb.PostStart), true)
 	pid.doReceive(receiveContext)
 
+	pid.startedAt.Store(time.Now().Unix())
 	return pid, nil
+}
+
+// Uptime returns the number of seconds since the actor started
+func (pid *PID) Uptime() int64 {
+	if pid.IsRunning() {
+		return time.Now().Unix() - pid.startedAt.Load()
+	}
+	return 0
 }
 
 // ID is a convenient method that returns the actor unique identifier
@@ -1268,6 +1279,8 @@ func (pid *PID) reset() {
 	pid.initTimeout.Store(DefaultInitTimeout)
 	pid.behaviorStack.Reset()
 	pid.processedCount.Store(0)
+	pid.restartCount.Store(0)
+	pid.startedAt.Store(0)
 	pid.stopping.Store(false)
 	pid.suspended.Store(false)
 	pid.supervisorStrategies.Reset()

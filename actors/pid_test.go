@@ -283,11 +283,16 @@ func TestRestart(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, pid)
 
+		lib.Pause(time.Second)
+
+		assert.NotZero(t, pid.Uptime())
+
 		// stop the actor
 		err = pid.Shutdown(ctx)
 		assert.NoError(t, err)
 
 		lib.Pause(time.Second)
+		assert.Zero(t, pid.Uptime())
 
 		// let us send a message to the actor
 		err = Tell(ctx, pid, new(testpb.TestSend))
@@ -298,6 +303,7 @@ func TestRestart(t *testing.T) {
 		err = pid.Restart(ctx)
 		assert.NoError(t, err)
 		assert.True(t, pid.IsRunning())
+		assert.NotZero(t, pid.Uptime())
 		// let us send 10 public to the actor
 		count := 10
 		for i := 0; i < count; i++ {

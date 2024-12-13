@@ -147,6 +147,8 @@ type ActorSystem interface {
 	// Port returns the actor system node port.
 	// This is the bind port for remote communication
 	Port() int32
+	// Uptime returns the number of seconds since the actor system started
+	Uptime() int64
 	// handleRemoteAsk handles a synchronous message to another actor and expect a response.
 	// This block until a response is received or timed out.
 	handleRemoteAsk(ctx context.Context, to *PID, message proto.Message, timeout time.Duration) (response proto.Message, err error)
@@ -250,6 +252,7 @@ type actorSystem struct {
 	userGuardian   *PID
 	systemGuardian *PID
 	janitor        *PID
+	startedAt      *atomic.Int64
 }
 
 // enforce compilation error when all methods of the ActorSystem interface are not implemented
@@ -287,6 +290,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		port:                   0,
 		host:                   "127.0.0.1",
 		actors:                 newTree(),
+		startedAt:              atomic.NewInt64(0),
 	}
 
 	system.started.Store(false)
@@ -318,6 +322,14 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		withSchedulerRemoting(NewRemoting()))
 
 	return system, nil
+}
+
+// Uptime returns the number of seconds since the actor system started
+func (x *actorSystem) Uptime() int64 {
+	if x.started.Load() {
+		return time.Now().Unix() - x.startedAt.Load()
+	}
+	return 0
 }
 
 // Host returns the actor system node host address
@@ -728,7 +740,7 @@ func (x *actorSystem) Start(ctx context.Context) error {
 	}
 
 	x.scheduler.Start(ctx)
-
+	x.startedAt.Store(time.Now().Unix())
 	x.logger.Infof("%s started..:)", x.name)
 	return nil
 }

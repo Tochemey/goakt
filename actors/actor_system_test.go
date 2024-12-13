@@ -79,6 +79,7 @@ func TestActorSystem(t *testing.T) {
 		assert.Error(t, err)
 		assert.EqualError(t, err, ErrActorSystemNotStarted.Error())
 		assert.Nil(t, actorRef)
+		assert.Zero(t, sys.Uptime())
 	})
 	t.Run("With Spawn an actor when started", func(t *testing.T) {
 		ctx := context.TODO()
@@ -94,6 +95,8 @@ func TestActorSystem(t *testing.T) {
 		actorRef, err := sys.Spawn(ctx, "Test", actor)
 		assert.NoError(t, err)
 		assert.NotNil(t, actorRef)
+
+		assert.NotZero(t, sys.Uptime())
 
 		// stop the actor after some time
 		lib.Pause(time.Second)
