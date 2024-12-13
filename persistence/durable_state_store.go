@@ -27,15 +27,30 @@ package persistence
 import (
 	"context"
 
-	"github.com/tochemey/goakt/v2/internal/internalpb"
+	"google.golang.org/protobuf/proto"
 )
 
-// StateStore defines the API to interact with the durable state store
-type StateStore interface {
+// DurableState represents the persistence durable state
+type DurableState struct {
+	// ActorID specifies the actor id
+	ActorID string
+	// State specifies the actor state
+	State proto.Message
+	// Version specifies the state version number
+	Version uint64
+	// TimestampMilli specifies the timestamp in millisecond
+	TimestampMilli uint64
+}
+
+// DurableStateStore defines the API to interact with the durable state store
+type DurableStateStore interface {
+	// Ping verifies a connection to durable state store, establishing a connection if necessary.
+	Ping(ctx context.Context) error
 	// PersistDurableState persists the durable state onto the durable state store.
 	// Only the latest state is persisted on to the data store. The implementor of this interface
-	// need to make sure that the actorID is properly indexed depending upon the chosen storage for fast query
-	PersistDurableState(ctx context.Context, durableState internalpb.DurableState) error
+	// need to make sure that the actorID is properly indexed depending upon the chosen storage for fast query.
+	// The implementation of this method should be idempotent.
+	PersistDurableState(ctx context.Context, durableState *DurableState) error
 	// GetDurableState returns the persisted durable state for a given actor provided the actor id
-	GetDurableState(ctx context.Context, actorID string) (*internalpb.DurableState, error)
+	GetDurableState(ctx context.Context, actorID string) (*DurableState, error)
 }

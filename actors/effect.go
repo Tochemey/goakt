@@ -24,10 +24,6 @@
 
 package actors
 
-import (
-	"google.golang.org/protobuf/proto"
-)
-
 // Effect directive defines what state, if any, to persist
 type Effect interface {
 	isEffect()
@@ -38,7 +34,7 @@ type Effect interface {
 // In case of an existing persistence id, the record will be updated.
 // Otherwise, persist will fail.
 type PersistEffect struct {
-	state     proto.Message
+	state     *DurableState
 	actorName string
 }
 
@@ -46,85 +42,96 @@ type PersistEffect struct {
 // If it’s a new persistence id, the record will be inserted.
 // In case of an existing persistence id, the record will be updated.
 // Otherwise, persist will fail.
-func NewPersistEffect(resultingState proto.Message) *PersistEffect {
+func NewPersistEffect(resultingState *DurableState) *PersistEffect {
 	return &PersistEffect{
 		state: resultingState,
 	}
 }
 
-// ThenForward sets the actor that will receive the resulting state when it
-// has been successfully persisted
+// ThenForward sets the recipient of the resulting state.
+// The command handler needs to call this method to set a potential recipient of the new actor state.
+// Only the actual state will be sent to the recipient without the latest version number
 func (effect *PersistEffect) ThenForward(actorName string) *PersistEffect {
 	effect.actorName = actorName
 	return effect
 }
 
-// State returns the resultingState to persist
-func (effect *PersistEffect) State() proto.Message {
+// DurableState returns the durable state to persist
+func (effect *PersistEffect) DurableState() *DurableState {
 	return effect.state
 }
 
-// Recipient returns the actor that will receive the resultingState after it has been persisted
+// ActorName returns the recipient that will receive the resultingState after it has been persisted
 // One need to set the pid using the ThenForward during the instantiation of the
 // PersistEffect
-func (effect *PersistEffect) Recipient() string {
+func (effect *PersistEffect) ActorName() string {
 	return effect.actorName
 }
 
 // implements Effect
 func (effect *PersistEffect) isEffect() {}
 
-// deleteEffect directive will delete the state by setting it to the empty state
+// DeleteEffect directive will delete the state by setting it to the empty state
 // and the revision number will be incremented by 1.
-type deleteEffect struct{}
+type DeleteEffect struct{}
 
 // NewDeleteEffect creates an instance of delete effect
 func NewDeleteEffect() Effect {
-	return &deleteEffect{}
+	return &DeleteEffect{}
 }
 
 // implements Effect
-func (effect *deleteEffect) isEffect() {}
+func (effect *DeleteEffect) isEffect() {}
 
-// stopEffect directive stop the stateful actor
-type stopEffect struct{}
+// StopEffect directive stop the stateful statefulEngine
+type StopEffect struct{}
 
 // implements Effect
-func (s *stopEffect) isEffect() {
+func (s *StopEffect) isEffect() {
 }
 
 // NewStopEffect creates an instance of the stop effect.
-// Stop Effect will stop the statefull actor.
+// Stop Effect will stop the statefull statefulEngine.
 func NewStopEffect() Effect {
-	return new(stopEffect)
+	return new(StopEffect)
 }
 
-// readOnlyEffect will not persist any state
-type readOnlyEffect struct {
+// ReadOnlyEffect will not persist any state
+type ReadOnlyEffect struct {
 }
 
 // NewReadOnlyEffect creates and returns a new Effect instance
 // that enforces a read-only behavior, ensuring no state is persisted.
 func NewReadOnlyEffect() Effect {
-	return &readOnlyEffect{}
+	return &ReadOnlyEffect{}
 }
 
 // implements Effect
-func (effect *readOnlyEffect) isEffect() {}
+func (effect *ReadOnlyEffect) isEffect() {}
 
-type forwardEffect struct {
-	state     proto.Message
+type ForwardEffect struct {
+	state     *DurableState
 	actorName string
 }
 
 // implements Effect
-func (r *forwardEffect) isEffect() {}
+func (r *ForwardEffect) isEffect() {}
 
 // NewForwardEffect creates a new forwardEffect with the provided state and recipient.
 // This effect will send the resulting state the recipient without persisting it.
-func NewForwardEffect(state proto.Message, actorName string) Effect {
-	return &forwardEffect{
+func NewForwardEffect(state *DurableState, actorName string) Effect {
+	return &ForwardEffect{
 		state:     state,
 		actorName: actorName,
 	}
+}
+
+// ActorName returns the recipient of the resulting state
+func (effect *ForwardEffect) ActorName() string {
+	return effect.actorName
+}
+
+// DurableState returns the durable state to persist
+func (effect *ForwardEffect) DurableState() *DurableState {
+	return effect.state
 }
