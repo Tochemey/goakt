@@ -69,6 +69,7 @@ func TestUnboundedPriorityMailBox(t *testing.T) {
 		require.True(t, ok)
 		require.EqualValues(t, 1, msg.GetPriority())
 		require.True(t, mailbox.IsEmpty())
+		mailbox.Dispose()
 	})
 	t.Run("With lowest priority mailbox", func(t *testing.T) {
 		priorityFunc := func(msg1, msg2 proto.Message) bool {
