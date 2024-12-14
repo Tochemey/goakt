@@ -252,7 +252,7 @@ func (pid *PID) Equals(to *PID) bool {
 	return strings.EqualFold(pid.ID(), to.ID())
 }
 
-// Actor returns the underlying Actor
+// Actor returns the handler Actor
 func (pid *PID) Actor() Actor {
 	return pid.actor
 }

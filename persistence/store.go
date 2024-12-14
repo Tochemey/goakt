@@ -30,27 +30,27 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// DurableState represents the persistence durable state
-type DurableState struct {
+// State represents the persistence durable state
+type State struct {
 	// ActorID specifies the actor id
 	ActorID string
-	// State specifies the actor state
-	State proto.Message
+	// ActorState specifies the actor state
+	ActorState proto.Message
 	// Version specifies the state version number
 	Version uint64
 	// TimestampMilli specifies the timestamp in millisecond
 	TimestampMilli uint64
 }
 
-// DurableStateStore defines the API to interact with the durable state store
-type DurableStateStore interface {
+// Store defines the API to interact with the durable state store
+type Store interface {
 	// Ping verifies a connection to durable state store, establishing a connection if necessary.
 	Ping(ctx context.Context) error
-	// PersistDurableState persists the durable state onto the durable state store.
+	// PersistState persists the durable state onto the durable state store.
 	// Only the latest state is persisted on to the data store. The implementor of this interface
 	// need to make sure that the actorID is properly indexed depending upon the chosen storage for fast query.
 	// The implementation of this method should be idempotent.
-	PersistDurableState(ctx context.Context, durableState *DurableState) error
-	// GetDurableState returns the persisted durable state for a given actor provided the actor id
-	GetDurableState(ctx context.Context, actorID string) (*DurableState, error)
+	PersistState(ctx context.Context, durableState *State) error
+	// GetState returns the persisted durable state for a given actor provided the actor id
+	GetState(ctx context.Context, actorID string) (*State, error)
 }

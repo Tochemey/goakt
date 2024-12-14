@@ -74,7 +74,7 @@ func TestActorSystem(t *testing.T) {
 	t.Run("With Spawn an actor when not System started", func(t *testing.T) {
 		ctx := context.TODO()
 		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
-		actor := newActor()
+		actor := newMockActor()
 		actorRef, err := sys.Spawn(ctx, "Test", actor)
 		assert.Error(t, err)
 		assert.EqualError(t, err, ErrActorSystemNotStarted.Error())
@@ -91,7 +91,7 @@ func TestActorSystem(t *testing.T) {
 
 		lib.Pause(time.Second)
 
-		actor := newActor()
+		actor := newMockActor()
 		actorRef, err := sys.Spawn(ctx, "Test", actor)
 		assert.NoError(t, err)
 		assert.NotNil(t, actorRef)
@@ -111,7 +111,7 @@ func TestActorSystem(t *testing.T) {
 		err := sys.Start(ctx)
 		require.NoError(t, err)
 
-		actor := newActor()
+		actor := newMockActor()
 		actorRef, err := sys.Spawn(ctx, "$omeN@me", actor)
 		require.Error(t, err)
 		assert.EqualError(t, err, "must contain only word characters (i.e. [a-zA-Z0-9] plus non-leading '-' or '_')")
@@ -135,7 +135,7 @@ func TestActorSystem(t *testing.T) {
 		err := sys.Start(ctx)
 		assert.NoError(t, err)
 
-		actor := newActor()
+		actor := newMockActor()
 		ref1, err := sys.Spawn(ctx, "Test", actor)
 		assert.NoError(t, err)
 		assert.NotNil(t, ref1)
@@ -181,7 +181,7 @@ func TestActorSystem(t *testing.T) {
 			WithRemoting(host, int32(remotingPort)),
 			WithCluster(
 				NewClusterConfig().
-					WithKinds(new(actorQA)).
+					WithKinds(new(mockActor)).
 					WithPartitionCount(9).
 					WithReplicaCount(1).
 					WithPeersPort(clusterPort).
@@ -207,7 +207,7 @@ func TestActorSystem(t *testing.T) {
 
 		// create an actor
 		actorName := uuid.NewString()
-		actor := newActor()
+		actor := newMockActor()
 		actorRef, err := newActorSystem.Spawn(ctx, actorName, actor)
 		assert.NoError(t, err)
 		assert.NotNil(t, actorRef)
@@ -309,7 +309,7 @@ func TestActorSystem(t *testing.T) {
 		assert.NoError(t, err)
 
 		actorName := "actorQA"
-		actor := newActor()
+		actor := newMockActor()
 		actorRef, err := sys.Spawn(ctx, actorName, actor)
 		assert.NoError(t, err)
 		assert.NotNil(t, actorRef)
@@ -832,7 +832,7 @@ func TestActorSystem(t *testing.T) {
 		lib.Pause(time.Second)
 
 		actorName := "HousekeeperActor"
-		actorHandler := newActor()
+		actorHandler := newMockActor()
 		actorRef, err := sys.Spawn(ctx, actorName, actorHandler)
 		assert.NoError(t, err)
 		require.NotNil(t, actorRef)
@@ -889,7 +889,7 @@ func TestActorSystem(t *testing.T) {
 		err := sys.Start(ctx)
 		assert.NoError(t, err)
 
-		actor := &postStopQA{}
+		actor := &mockPostStopActor{}
 		actorRef, err := sys.Spawn(ctx, "Test", actor)
 		assert.NoError(t, err)
 		assert.NotNil(t, actorRef)
@@ -920,7 +920,7 @@ func TestActorSystem(t *testing.T) {
 		require.NotNil(t, consumer)
 
 		// create the black hole actor
-		actor := &unhandledQA{}
+		actor := &mockUnhandledMessageActor{}
 		actorRef, err := sys.Spawn(ctx, "unhandledQA", actor)
 		assert.NoError(t, err)
 		assert.NotNil(t, actorRef)
@@ -1011,7 +1011,7 @@ func TestActorSystem(t *testing.T) {
 			WithRemoting(host, int32(remotingPort)),
 			WithCluster(
 				NewClusterConfig().
-					WithKinds(new(actorQA)).
+					WithKinds(new(mockActor)).
 					WithPartitionCount(9).
 					WithReplicaCount(1).
 					WithPeersPort(clusterPort).
@@ -1037,7 +1037,7 @@ func TestActorSystem(t *testing.T) {
 
 		// create an actor
 		actorName := uuid.NewString()
-		actor := newActor()
+		actor := newMockActor()
 		actorRef, err := newActorSystem.Spawn(ctx, actorName, actor)
 		assert.NoError(t, err)
 		assert.NotNil(t, actorRef)
@@ -1236,7 +1236,7 @@ func TestActorSystem(t *testing.T) {
 			WithRemoting(host, int32(remotingPort)),
 			WithCluster(
 				NewClusterConfig().
-					WithKinds(new(actorQA)).
+					WithKinds(new(mockActor)).
 					WithPartitionCount(9).
 					WithReplicaCount(1).
 					WithPeersPort(clusterPort).
@@ -1570,7 +1570,7 @@ func TestActorSystem(t *testing.T) {
 		lib.Pause(time.Second)
 
 		// create the black hole actor
-		actor := newActor()
+		actor := newMockActor()
 		pid, err := actorSystem.Spawn(ctx, "test", actor, WithMailbox(NewBoundedMailbox(10)))
 		assert.NoError(t, err)
 		assert.NotNil(t, pid)

@@ -91,6 +91,9 @@ var (
 	ErrInvalidTimeout = errors.New("invalid timeout")
 	// ErrPriorityMessageRequired is returned when a non-priority message is used in a priority mailbox
 	ErrPriorityMessageRequired = errors.New("priority message type is required")
+
+	// errSuspended is a system error used to suspend actors
+	errSuspended = func(err error) error { return fmt.Errorf("suspended %w", err) }
 )
 
 // eof returns true if the given error is an EOF error
@@ -99,7 +102,7 @@ func eof(err error) bool {
 }
 
 // PanicError defines the panic error
-// wrapping the underlying error
+// wrapping the handler error
 type PanicError struct {
 	err error
 }

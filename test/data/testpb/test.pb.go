@@ -1314,6 +1314,330 @@ func (x *PriorityMessage) GetPriority() int64 {
 	return 0
 }
 
+type TestState struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	FailToPersist bool `protobuf:"varint,1,opt,name=fail_to_persist,json=failToPersist,proto3" json:"fail_to_persist,omitempty"`
+}
+
+func (x *TestState) Reset() {
+	*x = TestState{}
+	mi := &file_test_test_proto_msgTypes[32]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TestState) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TestState) ProtoMessage() {}
+
+func (x *TestState) ProtoReflect() protoreflect.Message {
+	mi := &file_test_test_proto_msgTypes[32]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TestState.ProtoReflect.Descriptor instead.
+func (*TestState) Descriptor() ([]byte, []int) {
+	return file_test_test_proto_rawDescGZIP(), []int{32}
+}
+
+func (x *TestState) GetFailToPersist() bool {
+	if x != nil {
+		return x.FailToPersist
+	}
+	return false
+}
+
+type TestStateCommandResponse struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+}
+
+func (x *TestStateCommandResponse) Reset() {
+	*x = TestStateCommandResponse{}
+	mi := &file_test_test_proto_msgTypes[33]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TestStateCommandResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TestStateCommandResponse) ProtoMessage() {}
+
+func (x *TestStateCommandResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_test_test_proto_msgTypes[33]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TestStateCommandResponse.ProtoReflect.Descriptor instead.
+func (*TestStateCommandResponse) Descriptor() ([]byte, []int) {
+	return file_test_test_proto_rawDescGZIP(), []int{33}
+}
+
+type TestStateCommandResponseWithInvalidVersion struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+}
+
+func (x *TestStateCommandResponseWithInvalidVersion) Reset() {
+	*x = TestStateCommandResponseWithInvalidVersion{}
+	mi := &file_test_test_proto_msgTypes[34]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TestStateCommandResponseWithInvalidVersion) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TestStateCommandResponseWithInvalidVersion) ProtoMessage() {}
+
+func (x *TestStateCommandResponseWithInvalidVersion) ProtoReflect() protoreflect.Message {
+	mi := &file_test_test_proto_msgTypes[34]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TestStateCommandResponseWithInvalidVersion.ProtoReflect.Descriptor instead.
+func (*TestStateCommandResponseWithInvalidVersion) Descriptor() ([]byte, []int) {
+	return file_test_test_proto_rawDescGZIP(), []int{34}
+}
+
+type TestStateCommandResponseWithPersistenceFailure struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+}
+
+func (x *TestStateCommandResponseWithPersistenceFailure) Reset() {
+	*x = TestStateCommandResponseWithPersistenceFailure{}
+	mi := &file_test_test_proto_msgTypes[35]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TestStateCommandResponseWithPersistenceFailure) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TestStateCommandResponseWithPersistenceFailure) ProtoMessage() {}
+
+func (x *TestStateCommandResponseWithPersistenceFailure) ProtoReflect() protoreflect.Message {
+	mi := &file_test_test_proto_msgTypes[35]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TestStateCommandResponseWithPersistenceFailure.ProtoReflect.Descriptor instead.
+func (*TestStateCommandResponseWithPersistenceFailure) Descriptor() ([]byte, []int) {
+	return file_test_test_proto_rawDescGZIP(), []int{35}
+}
+
+type TestStateCommandResponseWithForward struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	Recipient string `protobuf:"bytes,1,opt,name=recipient,proto3" json:"recipient,omitempty"`
+}
+
+func (x *TestStateCommandResponseWithForward) Reset() {
+	*x = TestStateCommandResponseWithForward{}
+	mi := &file_test_test_proto_msgTypes[36]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TestStateCommandResponseWithForward) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TestStateCommandResponseWithForward) ProtoMessage() {}
+
+func (x *TestStateCommandResponseWithForward) ProtoReflect() protoreflect.Message {
+	mi := &file_test_test_proto_msgTypes[36]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TestStateCommandResponseWithForward.ProtoReflect.Descriptor instead.
+func (*TestStateCommandResponseWithForward) Descriptor() ([]byte, []int) {
+	return file_test_test_proto_rawDescGZIP(), []int{36}
+}
+
+func (x *TestStateCommandResponseWithForward) GetRecipient() string {
+	if x != nil {
+		return x.Recipient
+	}
+	return ""
+}
+
+type TestNoStateCommandResponse struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+}
+
+func (x *TestNoStateCommandResponse) Reset() {
+	*x = TestNoStateCommandResponse{}
+	mi := &file_test_test_proto_msgTypes[37]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TestNoStateCommandResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TestNoStateCommandResponse) ProtoMessage() {}
+
+func (x *TestNoStateCommandResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_test_test_proto_msgTypes[37]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TestNoStateCommandResponse.ProtoReflect.Descriptor instead.
+func (*TestNoStateCommandResponse) Descriptor() ([]byte, []int) {
+	return file_test_test_proto_rawDescGZIP(), []int{37}
+}
+
+type TestForwardCommandResponse struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	Recipient string `protobuf:"bytes,1,opt,name=recipient,proto3" json:"recipient,omitempty"`
+}
+
+func (x *TestForwardCommandResponse) Reset() {
+	*x = TestForwardCommandResponse{}
+	mi := &file_test_test_proto_msgTypes[38]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TestForwardCommandResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TestForwardCommandResponse) ProtoMessage() {}
+
+func (x *TestForwardCommandResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_test_test_proto_msgTypes[38]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TestForwardCommandResponse.ProtoReflect.Descriptor instead.
+func (*TestForwardCommandResponse) Descriptor() ([]byte, []int) {
+	return file_test_test_proto_rawDescGZIP(), []int{38}
+}
+
+func (x *TestForwardCommandResponse) GetRecipient() string {
+	if x != nil {
+		return x.Recipient
+	}
+	return ""
+}
+
+type TestErrorCommandResponse struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	ErrorMessage string `protobuf:"bytes,1,opt,name=error_message,json=errorMessage,proto3" json:"error_message,omitempty"`
+}
+
+func (x *TestErrorCommandResponse) Reset() {
+	*x = TestErrorCommandResponse{}
+	mi := &file_test_test_proto_msgTypes[39]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TestErrorCommandResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TestErrorCommandResponse) ProtoMessage() {}
+
+func (x *TestErrorCommandResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_test_test_proto_msgTypes[39]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TestErrorCommandResponse.ProtoReflect.Descriptor instead.
+func (*TestErrorCommandResponse) Descriptor() ([]byte, []int) {
+	return file_test_test_proto_rawDescGZIP(), []int{39}
+}
+
+func (x *TestErrorCommandResponse) GetErrorMessage() string {
+	if x != nil {
+		return x.ErrorMessage
+	}
+	return ""
+}
+
 var File_test_test_proto protoreflect.FileDescriptor
 
 var file_test_test_proto_rawDesc = []byte{
@@ -1380,16 +1704,41 @@ var file_test_test_proto_rawDesc = []byte{
 	0x2e, 0x67, 0x6f, 0x6f, 0x67, 0x6c, 0x65, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x62, 0x75, 0x66,
 	0x2e, 0x41, 0x6e, 0x79, 0x52, 0x07, 0x6d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x12, 0x1a, 0x0a,
 	0x08, 0x70, 0x72, 0x69, 0x6f, 0x72, 0x69, 0x74, 0x79, 0x18, 0x02, 0x20, 0x01, 0x28, 0x03, 0x52,
-	0x08, 0x70, 0x72, 0x69, 0x6f, 0x72, 0x69, 0x74, 0x79, 0x42, 0x80, 0x01, 0x0a, 0x0a, 0x63, 0x6f,
-	0x6d, 0x2e, 0x74, 0x65, 0x73, 0x74, 0x70, 0x62, 0x42, 0x09, 0x54, 0x65, 0x73, 0x74, 0x50, 0x72,
-	0x6f, 0x74, 0x6f, 0x48, 0x02, 0x50, 0x01, 0x5a, 0x2d, 0x67, 0x69, 0x74, 0x68, 0x75, 0x62, 0x2e,
-	0x63, 0x6f, 0x6d, 0x2f, 0x74, 0x6f, 0x63, 0x68, 0x65, 0x6d, 0x65, 0x79, 0x2f, 0x67, 0x6f, 0x61,
-	0x6b, 0x74, 0x2f, 0x76, 0x32, 0x2f, 0x74, 0x65, 0x73, 0x74, 0x2f, 0x64, 0x61, 0x74, 0x61, 0x3b,
-	0x74, 0x65, 0x73, 0x74, 0x70, 0x62, 0xa2, 0x02, 0x03, 0x54, 0x58, 0x58, 0xaa, 0x02, 0x06, 0x54,
-	0x65, 0x73, 0x74, 0x70, 0x62, 0xca, 0x02, 0x06, 0x54, 0x65, 0x73, 0x74, 0x70, 0x62, 0xe2, 0x02,
-	0x12, 0x54, 0x65, 0x73, 0x74, 0x70, 0x62, 0x5c, 0x47, 0x50, 0x42, 0x4d, 0x65, 0x74, 0x61, 0x64,
-	0x61, 0x74, 0x61, 0xea, 0x02, 0x06, 0x54, 0x65, 0x73, 0x74, 0x70, 0x62, 0x62, 0x06, 0x70, 0x72,
-	0x6f, 0x74, 0x6f, 0x33,
+	0x08, 0x70, 0x72, 0x69, 0x6f, 0x72, 0x69, 0x74, 0x79, 0x22, 0x33, 0x0a, 0x09, 0x54, 0x65, 0x73,
+	0x74, 0x53, 0x74, 0x61, 0x74, 0x65, 0x12, 0x26, 0x0a, 0x0f, 0x66, 0x61, 0x69, 0x6c, 0x5f, 0x74,
+	0x6f, 0x5f, 0x70, 0x65, 0x72, 0x73, 0x69, 0x73, 0x74, 0x18, 0x01, 0x20, 0x01, 0x28, 0x08, 0x52,
+	0x0d, 0x66, 0x61, 0x69, 0x6c, 0x54, 0x6f, 0x50, 0x65, 0x72, 0x73, 0x69, 0x73, 0x74, 0x22, 0x1a,
+	0x0a, 0x18, 0x54, 0x65, 0x73, 0x74, 0x53, 0x74, 0x61, 0x74, 0x65, 0x43, 0x6f, 0x6d, 0x6d, 0x61,
+	0x6e, 0x64, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x22, 0x2c, 0x0a, 0x2a, 0x54, 0x65,
+	0x73, 0x74, 0x53, 0x74, 0x61, 0x74, 0x65, 0x43, 0x6f, 0x6d, 0x6d, 0x61, 0x6e, 0x64, 0x52, 0x65,
+	0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x57, 0x69, 0x74, 0x68, 0x49, 0x6e, 0x76, 0x61, 0x6c, 0x69,
+	0x64, 0x56, 0x65, 0x72, 0x73, 0x69, 0x6f, 0x6e, 0x22, 0x30, 0x0a, 0x2e, 0x54, 0x65, 0x73, 0x74,
+	0x53, 0x74, 0x61, 0x74, 0x65, 0x43, 0x6f, 0x6d, 0x6d, 0x61, 0x6e, 0x64, 0x52, 0x65, 0x73, 0x70,
+	0x6f, 0x6e, 0x73, 0x65, 0x57, 0x69, 0x74, 0x68, 0x50, 0x65, 0x72, 0x73, 0x69, 0x73, 0x74, 0x65,
+	0x6e, 0x63, 0x65, 0x46, 0x61, 0x69, 0x6c, 0x75, 0x72, 0x65, 0x22, 0x43, 0x0a, 0x23, 0x54, 0x65,
+	0x73, 0x74, 0x53, 0x74, 0x61, 0x74, 0x65, 0x43, 0x6f, 0x6d, 0x6d, 0x61, 0x6e, 0x64, 0x52, 0x65,
+	0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x57, 0x69, 0x74, 0x68, 0x46, 0x6f, 0x72, 0x77, 0x61, 0x72,
+	0x64, 0x12, 0x1c, 0x0a, 0x09, 0x72, 0x65, 0x63, 0x69, 0x70, 0x69, 0x65, 0x6e, 0x74, 0x18, 0x01,
+	0x20, 0x01, 0x28, 0x09, 0x52, 0x09, 0x72, 0x65, 0x63, 0x69, 0x70, 0x69, 0x65, 0x6e, 0x74, 0x22,
+	0x1c, 0x0a, 0x1a, 0x54, 0x65, 0x73, 0x74, 0x4e, 0x6f, 0x53, 0x74, 0x61, 0x74, 0x65, 0x43, 0x6f,
+	0x6d, 0x6d, 0x61, 0x6e, 0x64, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x22, 0x3a, 0x0a,
+	0x1a, 0x54, 0x65, 0x73, 0x74, 0x46, 0x6f, 0x72, 0x77, 0x61, 0x72, 0x64, 0x43, 0x6f, 0x6d, 0x6d,
+	0x61, 0x6e, 0x64, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x12, 0x1c, 0x0a, 0x09, 0x72,
+	0x65, 0x63, 0x69, 0x70, 0x69, 0x65, 0x6e, 0x74, 0x18, 0x01, 0x20, 0x01, 0x28, 0x09, 0x52, 0x09,
+	0x72, 0x65, 0x63, 0x69, 0x70, 0x69, 0x65, 0x6e, 0x74, 0x22, 0x3f, 0x0a, 0x18, 0x54, 0x65, 0x73,
+	0x74, 0x45, 0x72, 0x72, 0x6f, 0x72, 0x43, 0x6f, 0x6d, 0x6d, 0x61, 0x6e, 0x64, 0x52, 0x65, 0x73,
+	0x70, 0x6f, 0x6e, 0x73, 0x65, 0x12, 0x23, 0x0a, 0x0d, 0x65, 0x72, 0x72, 0x6f, 0x72, 0x5f, 0x6d,
+	0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x18, 0x01, 0x20, 0x01, 0x28, 0x09, 0x52, 0x0c, 0x65, 0x72,
+	0x72, 0x6f, 0x72, 0x4d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x42, 0x80, 0x01, 0x0a, 0x0a, 0x63,
+	0x6f, 0x6d, 0x2e, 0x74, 0x65, 0x73, 0x74, 0x70, 0x62, 0x42, 0x09, 0x54, 0x65, 0x73, 0x74, 0x50,
+	0x72, 0x6f, 0x74, 0x6f, 0x48, 0x02, 0x50, 0x01, 0x5a, 0x2d, 0x67, 0x69, 0x74, 0x68, 0x75, 0x62,
+	0x2e, 0x63, 0x6f, 0x6d, 0x2f, 0x74, 0x6f, 0x63, 0x68, 0x65, 0x6d, 0x65, 0x79, 0x2f, 0x67, 0x6f,
+	0x61, 0x6b, 0x74, 0x2f, 0x76, 0x32, 0x2f, 0x74, 0x65, 0x73, 0x74, 0x2f, 0x64, 0x61, 0x74, 0x61,
+	0x3b, 0x74, 0x65, 0x73, 0x74, 0x70, 0x62, 0xa2, 0x02, 0x03, 0x54, 0x58, 0x58, 0xaa, 0x02, 0x06,
+	0x54, 0x65, 0x73, 0x74, 0x70, 0x62, 0xca, 0x02, 0x06, 0x54, 0x65, 0x73, 0x74, 0x70, 0x62, 0xe2,
+	0x02, 0x12, 0x54, 0x65, 0x73, 0x74, 0x70, 0x62, 0x5c, 0x47, 0x50, 0x42, 0x4d, 0x65, 0x74, 0x61,
+	0x64, 0x61, 0x74, 0x61, 0xea, 0x02, 0x06, 0x54, 0x65, 0x73, 0x74, 0x70, 0x62, 0x62, 0x06, 0x70,
+	0x72, 0x6f, 0x74, 0x6f, 0x33,
 }
 
 var (
@@ -1404,44 +1753,52 @@ func file_test_test_proto_rawDescGZIP() []byte {
 	return file_test_test_proto_rawDescData
 }
 
-var file_test_test_proto_msgTypes = make([]protoimpl.MessageInfo, 32)
+var file_test_test_proto_msgTypes = make([]protoimpl.MessageInfo, 40)
 var file_test_test_proto_goTypes = []any{
-	(*TestReply)(nil),        // 0: testpb.TestReply
-	(*TestPanic)(nil),        // 1: testpb.TestPanic
-	(*TestTimeout)(nil),      // 2: testpb.TestTimeout
-	(*Reply)(nil),            // 3: testpb.Reply
-	(*TestSend)(nil),         // 4: testpb.TestSend
-	(*TestRemoteSend)(nil),   // 5: testpb.TestRemoteSend
-	(*Account)(nil),          // 6: testpb.Account
-	(*CreateAccount)(nil),    // 7: testpb.CreateAccount
-	(*CreditAccount)(nil),    // 8: testpb.CreditAccount
-	(*AccountCreated)(nil),   // 9: testpb.AccountCreated
-	(*AccountCredited)(nil),  // 10: testpb.AccountCredited
-	(*DebitAccount)(nil),     // 11: testpb.DebitAccount
-	(*AccountDebited)(nil),   // 12: testpb.AccountDebited
-	(*TestLogin)(nil),        // 13: testpb.TestLogin
-	(*TestLoginSuccess)(nil), // 14: testpb.TestLoginSuccess
-	(*TestReadiness)(nil),    // 15: testpb.TestReadiness
-	(*TestReady)(nil),        // 16: testpb.TestReady
-	(*TestBye)(nil),          // 17: testpb.TestBye
-	(*TestStash)(nil),        // 18: testpb.TestStash
-	(*TestUnstash)(nil),      // 19: testpb.TestUnstash
-	(*TestUnstashAll)(nil),   // 20: testpb.TestUnstashAll
-	(*Ping)(nil),             // 21: testpb.Ping
-	(*Pong)(nil),             // 22: testpb.Pong
-	(*Wait)(nil),             // 23: testpb.Wait
-	(*RunTask)(nil),          // 24: testpb.RunTask
-	(*TaskComplete)(nil),     // 25: testpb.TaskComplete
-	(*DoLog)(nil),            // 26: testpb.DoLog
-	(*GetCount)(nil),         // 27: testpb.GetCount
-	(*Count)(nil),            // 28: testpb.Count
-	(*RemoteForward)(nil),    // 29: testpb.RemoteForward
-	(*ClusterForward)(nil),   // 30: testpb.ClusterForward
-	(*PriorityMessage)(nil),  // 31: testpb.PriorityMessage
-	(*anypb.Any)(nil),        // 32: google.protobuf.Any
+	(*TestReply)(nil),                // 0: testpb.TestReply
+	(*TestPanic)(nil),                // 1: testpb.TestPanic
+	(*TestTimeout)(nil),              // 2: testpb.TestTimeout
+	(*Reply)(nil),                    // 3: testpb.Reply
+	(*TestSend)(nil),                 // 4: testpb.TestSend
+	(*TestRemoteSend)(nil),           // 5: testpb.TestRemoteSend
+	(*Account)(nil),                  // 6: testpb.Account
+	(*CreateAccount)(nil),            // 7: testpb.CreateAccount
+	(*CreditAccount)(nil),            // 8: testpb.CreditAccount
+	(*AccountCreated)(nil),           // 9: testpb.AccountCreated
+	(*AccountCredited)(nil),          // 10: testpb.AccountCredited
+	(*DebitAccount)(nil),             // 11: testpb.DebitAccount
+	(*AccountDebited)(nil),           // 12: testpb.AccountDebited
+	(*TestLogin)(nil),                // 13: testpb.TestLogin
+	(*TestLoginSuccess)(nil),         // 14: testpb.TestLoginSuccess
+	(*TestReadiness)(nil),            // 15: testpb.TestReadiness
+	(*TestReady)(nil),                // 16: testpb.TestReady
+	(*TestBye)(nil),                  // 17: testpb.TestBye
+	(*TestStash)(nil),                // 18: testpb.TestStash
+	(*TestUnstash)(nil),              // 19: testpb.TestUnstash
+	(*TestUnstashAll)(nil),           // 20: testpb.TestUnstashAll
+	(*Ping)(nil),                     // 21: testpb.Ping
+	(*Pong)(nil),                     // 22: testpb.Pong
+	(*Wait)(nil),                     // 23: testpb.Wait
+	(*RunTask)(nil),                  // 24: testpb.RunTask
+	(*TaskComplete)(nil),             // 25: testpb.TaskComplete
+	(*DoLog)(nil),                    // 26: testpb.DoLog
+	(*GetCount)(nil),                 // 27: testpb.GetCount
+	(*Count)(nil),                    // 28: testpb.Count
+	(*RemoteForward)(nil),            // 29: testpb.RemoteForward
+	(*ClusterForward)(nil),           // 30: testpb.ClusterForward
+	(*PriorityMessage)(nil),          // 31: testpb.PriorityMessage
+	(*TestState)(nil),                // 32: testpb.TestState
+	(*TestStateCommandResponse)(nil), // 33: testpb.TestStateCommandResponse
+	(*TestStateCommandResponseWithInvalidVersion)(nil),     // 34: testpb.TestStateCommandResponseWithInvalidVersion
+	(*TestStateCommandResponseWithPersistenceFailure)(nil), // 35: testpb.TestStateCommandResponseWithPersistenceFailure
+	(*TestStateCommandResponseWithForward)(nil),            // 36: testpb.TestStateCommandResponseWithForward
+	(*TestNoStateCommandResponse)(nil),                     // 37: testpb.TestNoStateCommandResponse
+	(*TestForwardCommandResponse)(nil),                     // 38: testpb.TestForwardCommandResponse
+	(*TestErrorCommandResponse)(nil),                       // 39: testpb.TestErrorCommandResponse
+	(*anypb.Any)(nil),                                      // 40: google.protobuf.Any
 }
 var file_test_test_proto_depIdxs = []int32{
-	32, // 0: testpb.PriorityMessage.message:type_name -> google.protobuf.Any
+	40, // 0: testpb.PriorityMessage.message:type_name -> google.protobuf.Any
 	1,  // [1:1] is the sub-list for method output_type
 	1,  // [1:1] is the sub-list for method input_type
 	1,  // [1:1] is the sub-list for extension type_name
@@ -1460,7 +1817,7 @@ func file_test_test_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: file_test_test_proto_rawDesc,
 			NumEnums:      0,
-			NumMessages:   32,
+			NumMessages:   40,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

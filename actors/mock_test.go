@@ -38,41 +38,43 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/travisjeffery/go-dynaport"
 	"go.uber.org/atomic"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/tochemey/goakt/v2/discovery"
 	"github.com/tochemey/goakt/v2/discovery/nats"
 	"github.com/tochemey/goakt/v2/goaktpb"
 	"github.com/tochemey/goakt/v2/internal/lib"
 	"github.com/tochemey/goakt/v2/log"
+	"github.com/tochemey/goakt/v2/persistence"
 	"github.com/tochemey/goakt/v2/test/data/testpb"
 	testspb "github.com/tochemey/goakt/v2/test/data/testpb"
 )
 
-// actorQA is an actor that helps run various test scenarios
-type actorQA struct {
+// mockActor is an actor that helps run various test scenarios
+type mockActor struct {
 }
 
 // enforce compilation error
-var _ Actor = (*actorQA)(nil)
+var _ Actor = (*mockActor)(nil)
 
-// newActor creates a actorQA
-func newActor() *actorQA {
-	return &actorQA{}
+// newMockActor creates a testActor
+func newMockActor() *mockActor {
+	return &mockActor{}
 }
 
 // Init initialize the actor. This function can be used to set up some database connections
 // or some sort of initialization before the actor init processing message
-func (p *actorQA) PreStart(context.Context) error {
+func (p *mockActor) PreStart(context.Context) error {
 	return nil
 }
 
 // Shutdown gracefully shuts down the given actor
-func (p *actorQA) PostStop(context.Context) error {
+func (p *mockActor) PostStop(context.Context) error {
 	return nil
 }
 
 // Receive processes any message dropped into the actor mailbox without a reply
-func (p *actorQA) Receive(ctx *ReceiveContext) {
+func (p *mockActor) Receive(ctx *ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *goaktpb.PostStart:
 	case *testspb.TestSend:
@@ -95,23 +97,23 @@ func (p *actorQA) Receive(ctx *ReceiveContext) {
 	}
 }
 
-// supervisorQA is an actor that monitors another actor
+// mockSupervisor is an actor that monitors another actor
 // and reacts to its failure.
-type supervisorQA struct{}
+type mockSupervisor struct{}
 
 // enforce compilation error
-var _ Actor = (*supervisorQA)(nil)
+var _ Actor = (*mockSupervisor)(nil)
 
-// newTestSupervisor creates an instance of supervisorQA
-func newTestSupervisor() *supervisorQA {
-	return &supervisorQA{}
+// newMockSupervisor creates an instance of mockSupervisor
+func newMockSupervisor() *mockSupervisor {
+	return &mockSupervisor{}
 }
 
-func (p *supervisorQA) PreStart(context.Context) error {
+func (p *mockSupervisor) PreStart(context.Context) error {
 	return nil
 }
 
-func (p *supervisorQA) Receive(ctx *ReceiveContext) {
+func (p *mockSupervisor) Receive(ctx *ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *goaktpb.PostStart:
 	case *testspb.TestSend:
@@ -122,26 +124,26 @@ func (p *supervisorQA) Receive(ctx *ReceiveContext) {
 	}
 }
 
-func (p *supervisorQA) PostStop(context.Context) error {
+func (p *mockSupervisor) PostStop(context.Context) error {
 	return nil
 }
 
-// supervisedQA is an actor that is monitored
-type supervisedQA struct{}
+// mockSupervisee is an actor that is monitored
+type mockSupervisee struct{}
 
 // enforce compilation error
-var _ Actor = (*supervisedQA)(nil)
+var _ Actor = (*mockSupervisee)(nil)
 
-// newTestSupervised creates an instance of supervisedQA
-func newTestSupervised() *supervisedQA {
-	return &supervisedQA{}
+// newMockSupervisee creates an instance of mockSupervisee
+func newMockSupervisee() *mockSupervisee {
+	return &mockSupervisee{}
 }
 
-func (x *supervisedQA) PreStart(context.Context) error {
+func (x *mockSupervisee) PreStart(context.Context) error {
 	return nil
 }
 
-func (x *supervisedQA) Receive(ctx *ReceiveContext) {
+func (x *mockSupervisee) Receive(ctx *ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *goaktpb.PostStart:
 	case *testspb.TestSend:
@@ -154,25 +156,25 @@ func (x *supervisedQA) Receive(ctx *ReceiveContext) {
 	}
 }
 
-func (x *supervisedQA) PostStop(context.Context) error {
+func (x *mockSupervisee) PostStop(context.Context) error {
 	return nil
 }
 
-// behaviorQA is used to test the actor behavior
-type behaviorQA struct{}
+// mockBehaviorActor is used to test the actor commandHandler
+type mockBehaviorActor struct{}
 
 // enforce compilation error
-var _ Actor = &behaviorQA{}
+var _ Actor = &mockBehaviorActor{}
 
-func (x *behaviorQA) PreStart(_ context.Context) error {
+func (x *mockBehaviorActor) PreStart(_ context.Context) error {
 	return nil
 }
 
-func (x *behaviorQA) PostStop(_ context.Context) error {
+func (x *mockBehaviorActor) PostStop(_ context.Context) error {
 	return nil
 }
 
-func (x *behaviorQA) Receive(ctx *ReceiveContext) {
+func (x *mockBehaviorActor) Receive(ctx *ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *goaktpb.PostStart:
 	case *testspb.TestLogin:
@@ -184,8 +186,8 @@ func (x *behaviorQA) Receive(ctx *ReceiveContext) {
 	}
 }
 
-// Authenticated behavior is executed when the actor receive the TestAuth message
-func (x *behaviorQA) Authenticated(ctx *ReceiveContext) {
+// Authenticated commandHandler is executed when the actor receive the TestAuth message
+func (x *mockBehaviorActor) Authenticated(ctx *ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *testspb.TestReadiness:
 		ctx.Response(new(testspb.TestReady))
@@ -193,7 +195,7 @@ func (x *behaviorQA) Authenticated(ctx *ReceiveContext) {
 	}
 }
 
-func (x *behaviorQA) CreditAccount(ctx *ReceiveContext) {
+func (x *mockBehaviorActor) CreditAccount(ctx *ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *testspb.CreditAccount:
 		ctx.Response(new(testspb.AccountCredited))
@@ -203,7 +205,7 @@ func (x *behaviorQA) CreditAccount(ctx *ReceiveContext) {
 	}
 }
 
-func (x *behaviorQA) DebitAccount(ctx *ReceiveContext) {
+func (x *mockBehaviorActor) DebitAccount(ctx *ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *testspb.DebitAccount:
 		ctx.Response(new(testspb.AccountDebited))
@@ -244,13 +246,13 @@ func (e *exchanger) PostStop(context.Context) error {
 
 var _ Actor = &exchanger{}
 
-type stashQA struct{}
+type mockStasher struct{}
 
-func (x *stashQA) PreStart(context.Context) error {
+func (x *mockStasher) PreStart(context.Context) error {
 	return nil
 }
 
-func (x *stashQA) Receive(ctx *ReceiveContext) {
+func (x *mockStasher) Receive(ctx *ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *goaktpb.PostStart:
 	case *testspb.TestStash:
@@ -262,7 +264,7 @@ func (x *stashQA) Receive(ctx *ReceiveContext) {
 	}
 }
 
-func (x *stashQA) Ready(ctx *ReceiveContext) {
+func (x *mockStasher) Ready(ctx *ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *goaktpb.PostStart:
 	case *testspb.TestStash:
@@ -278,33 +280,33 @@ func (x *stashQA) Ready(ctx *ReceiveContext) {
 	}
 }
 
-func (x *stashQA) PostStop(context.Context) error {
+func (x *mockStasher) PostStop(context.Context) error {
 	return nil
 }
 
-var _ Actor = &stashQA{}
+var _ Actor = &mockStasher{}
 
-type preStartQA struct{}
+type mockPreStartActor struct{}
 
-func (x *preStartQA) PreStart(context.Context) error {
+func (x *mockPreStartActor) PreStart(context.Context) error {
 	return errors.New("failed")
 }
 
-func (x *preStartQA) Receive(*ReceiveContext) {}
+func (x *mockPreStartActor) Receive(*ReceiveContext) {}
 
-func (x *preStartQA) PostStop(context.Context) error {
+func (x *mockPreStartActor) PostStop(context.Context) error {
 	return nil
 }
 
-var _ Actor = &preStartQA{}
+var _ Actor = &mockPreStartActor{}
 
-type postStopQA struct{}
+type mockPostStopActor struct{}
 
-func (x *postStopQA) PreStart(context.Context) error {
+func (x *mockPostStopActor) PreStart(context.Context) error {
 	return nil
 }
 
-func (x *postStopQA) Receive(ctx *ReceiveContext) {
+func (x *mockPostStopActor) Receive(ctx *ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *goaktpb.PostStart:
 	case *testspb.TestSend:
@@ -313,21 +315,21 @@ func (x *postStopQA) Receive(ctx *ReceiveContext) {
 	}
 }
 
-func (x *postStopQA) PostStop(context.Context) error {
+func (x *mockPostStopActor) PostStop(context.Context) error {
 	return errors.New("failed")
 }
 
-var _ Actor = &postStopQA{}
+var _ Actor = &mockPostStopActor{}
 
-type restartQA struct {
+type mockRestartActor struct {
 	counter *atomic.Int64
 }
 
-func newRestart() *restartQA {
-	return &restartQA{counter: atomic.NewInt64(0)}
+func newRestart() *mockRestartActor {
+	return &mockRestartActor{counter: atomic.NewInt64(0)}
 }
 
-func (x *restartQA) PreStart(context.Context) error {
+func (x *mockRestartActor) PreStart(context.Context) error {
 	// increment counter
 	x.counter.Inc()
 	// error when counter is greater than 1
@@ -337,65 +339,66 @@ func (x *restartQA) PreStart(context.Context) error {
 	return nil
 }
 
-func (x *restartQA) Receive(*ReceiveContext) {
+func (x *mockRestartActor) Receive(*ReceiveContext) {
 }
 
-func (x *restartQA) PostStop(context.Context) error {
+func (x *mockRestartActor) PostStop(context.Context) error {
 	return nil
 }
 
-var _ Actor = &restartQA{}
+var _ Actor = &mockRestartActor{}
 
-type forwardQA struct {
+type mockForwardActor struct {
 	actorRef  *PID
 	remoteRef *PID
 }
 
-func (x *forwardQA) PreStart(context.Context) error {
+func (x *mockForwardActor) PreStart(context.Context) error {
 	return nil
 }
 
-func (x *forwardQA) Receive(ctx *ReceiveContext) {
+func (x *mockForwardActor) Receive(ctx *ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *goaktpb.PostStart:
 	case *testspb.TestBye:
 		ctx.Forward(x.actorRef)
 	case *testspb.RemoteForward:
 		ctx.RemoteForward(x.remoteRef.Address())
+	case *testspb.TestState:
 	}
 }
 
-func (x *forwardQA) PostStop(context.Context) error {
+func (x *mockForwardActor) PostStop(context.Context) error {
 	return nil
 }
 
-type remoteQA struct {
+type mockRemoteActor struct {
 }
 
-func (x *remoteQA) PreStart(context.Context) error {
+func (x *mockRemoteActor) PreStart(context.Context) error {
 	return nil
 }
 
-func (x *remoteQA) Receive(ctx *ReceiveContext) {
+func (x *mockRemoteActor) Receive(ctx *ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *testspb.RemoteForward:
 		ctx.Shutdown()
 	}
 }
 
-func (x *remoteQA) PostStop(context.Context) error {
+func (x *mockRemoteActor) PostStop(context.Context) error {
 	return nil
 }
 
-type unhandledQA struct{}
+type mockUnhandledMessageActor struct{}
 
-var _ Actor = &unhandledQA{}
+var _ Actor = &mockUnhandledMessageActor{}
 
-func (d *unhandledQA) PreStart(context.Context) error {
+func (d *mockUnhandledMessageActor) PreStart(context.Context) error {
 	return nil
 }
 
-func (d *unhandledQA) Receive(ctx *ReceiveContext) {
+func (d *mockUnhandledMessageActor) Receive(ctx *ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *goaktpb.PostStart:
 		// pass
@@ -404,7 +407,7 @@ func (d *unhandledQA) Receive(ctx *ReceiveContext) {
 	}
 }
 
-func (d *unhandledQA) PostStop(context.Context) error {
+func (d *mockUnhandledMessageActor) PostStop(context.Context) error {
 	return nil
 }
 
@@ -470,7 +473,7 @@ func startClusterSystem(t *testing.T, serverAddr string) (ActorSystem, discovery
 		WithPeerStateLoopInterval(500*time.Millisecond),
 		WithCluster(
 			NewClusterConfig().
-				WithKinds(new(actorQA)).
+				WithKinds(new(mockActor)).
 				WithPartitionCount(10).
 				WithReplicaCount(1).
 				WithPeersPort(clusterPort).
@@ -490,23 +493,23 @@ func startClusterSystem(t *testing.T, serverAddr string) (ActorSystem, discovery
 	return system, provider
 }
 
-type unhandledSupervisorDirective struct{}
+type unsupportedSupervisorDirective struct{}
 
-func (x unhandledSupervisorDirective) isSupervisorDirective() {}
+func (x unsupportedSupervisorDirective) isSupervisorDirective() {}
 
-type routerQA struct {
+type mockRouter struct {
 	counter int
 	logger  log.Logger
 }
 
-var _ Actor = (*routerQA)(nil)
+var _ Actor = (*mockRouter)(nil)
 
-func (x *routerQA) PreStart(context.Context) error {
+func (x *mockRouter) PreStart(context.Context) error {
 	x.logger = log.DiscardLogger
 	return nil
 }
 
-func (x *routerQA) Receive(ctx *ReceiveContext) {
+func (x *mockRouter) Receive(ctx *ReceiveContext) {
 	switch msg := ctx.Message().(type) {
 	case *testpb.DoLog:
 		x.counter++
@@ -519,7 +522,7 @@ func (x *routerQA) Receive(ctx *ReceiveContext) {
 	}
 }
 
-func (x *routerQA) PostStop(context.Context) error {
+func (x *mockRouter) PostStop(context.Context) error {
 	return nil
 }
 
@@ -540,19 +543,84 @@ func extractMessage(bytes []byte) (string, error) {
 	return "", nil
 }
 
-func extractLevel(bytes []byte) (string, error) {
-	// a map container to decode the JSON structure into
-	c := make(map[string]json.RawMessage)
+type mockStateStore struct {
+	mu    *sync.RWMutex
+	cache map[string]*persistence.State
+}
 
-	// unmarshal JSON
-	if err := json.Unmarshal(bytes, &c); err != nil {
-		return "", err
-	}
-	for k, v := range c {
-		if k == "level" {
-			return strconv.Unquote(string(v))
-		}
-	}
+var _ persistence.Store = (*mockStateStore)(nil)
 
-	return "", nil
+func newMockStateStore() *mockStateStore {
+	return &mockStateStore{
+		mu:    &sync.RWMutex{},
+		cache: make(map[string]*persistence.State),
+	}
+}
+
+func (t *mockStateStore) Ping(ctx context.Context) error {
+	return nil
+}
+
+func (t *mockStateStore) PersistState(ctx context.Context, durableState *persistence.State) error {
+	t.mu.Lock()
+	t.cache[durableState.ActorID] = durableState
+	t.mu.Unlock()
+	return nil
+}
+
+func (t *mockStateStore) GetState(ctx context.Context, actorID string) (*persistence.State, error) {
+	t.mu.RLock()
+	state := t.cache[actorID]
+	t.mu.RUnlock()
+	return state, nil
+}
+
+type mockPersistentActor struct {
+}
+
+var _ PersistentActor = (*mockPersistentActor)(nil)
+
+func newMockPersistentActor() *mockPersistentActor {
+	return &mockPersistentActor{}
+}
+
+func (m *mockPersistentActor) EmptyState() proto.Message {
+	return new(testspb.TestState)
+}
+
+func (m *mockPersistentActor) PreStart(ctx context.Context) error {
+	return nil
+}
+
+func (m *mockPersistentActor) PostStop(ctx context.Context) error {
+	return nil
+}
+
+func (m *mockPersistentActor) Receive(ctx *PersistentContext) *PersistentResponse {
+	switch cmd := ctx.Command().(type) {
+	case *testspb.TestStateCommandResponse:
+		newVersion := ctx.CurrentState().Version() + 1
+		actorState := new(testspb.TestState)
+		return NewPersistentResponse().
+			WithState(NewPersistentState(actorState, newVersion))
+
+	case *testspb.TestStateCommandResponseWithForward:
+		newVersion := ctx.CurrentState().Version() + 1
+		actorState := new(testspb.TestState)
+		return NewPersistentResponse().
+			WithState(NewPersistentState(actorState, newVersion)).
+			WithForwardTo(cmd.GetRecipient())
+
+	case *testspb.TestNoStateCommandResponse:
+		return NewPersistentResponse()
+
+	case *testspb.TestForwardCommandResponse:
+		return NewPersistentResponse().WithForwardTo(cmd.GetRecipient())
+
+	case *testspb.TestErrorCommandResponse:
+		return NewPersistentResponse().WithError(errors.New(cmd.GetErrorMessage()))
+
+	default:
+		return NewPersistentResponse()
+	}
 }

@@ -69,7 +69,7 @@ func withSchedulerRemoting(remoting *Remoting) schedulerOption {
 type scheduler struct {
 	// helps lock concurrent access
 	mu sync.Mutex
-	// underlying Scheduler
+	// handler Scheduler
 	quartzScheduler quartz.Scheduler
 	// states whether the quartzScheduler has started or not
 	started *atomic.Bool
@@ -97,7 +97,7 @@ func newScheduler(logger log.Logger, stopTimeout time.Duration, opts ...schedule
 		opt(scheduler)
 	}
 
-	// disable the underlying scheduler logger
+	// disable the handler scheduler logger
 	quartzlogger.SetDefault(quartzlogger.NewSimpleLogger(nil, quartzlogger.LevelOff))
 	// return the instance of the scheduler
 	return scheduler

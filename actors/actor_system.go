@@ -58,6 +58,7 @@ import (
 	"github.com/tochemey/goakt/v2/internal/tcp"
 	"github.com/tochemey/goakt/v2/internal/types"
 	"github.com/tochemey/goakt/v2/log"
+	"github.com/tochemey/goakt/v2/persistence"
 )
 
 // ActorSystem defines the contract of an actor system
@@ -82,12 +83,15 @@ type ActorSystem interface {
 	// A router is a special type of actor that helps distribute messages of the same type over a set of actors, so that messages can be processed in parallel.
 	// A single actor will only process one message at a time.
 	SpawnRouter(ctx context.Context, poolSize int, routeesKind Actor, opts ...RouterOption) (*PID, error)
+	// SpawnPersistentActor creates a persistent actor. This is a special kind of actor that persists and recover its versioned full state into a durable
+	// store. PersistentActor aside these particular characteristics are like any other actor in GoAkt.
+	SpawnPersistentActor(ctx context.Context, name string, actor PersistentActor, persistentStore persistence.Store, opts ...SpawnOption) (*PID, error)
 	// Kill stops a given actor in the system
 	Kill(ctx context.Context, name string) error
 	// ReSpawn recreates a given actor in the system
 	// During restart all messages that are in the mailbox and not yet processed will be ignored.
-	// Only the direct alive children of the given actor will be shudown and respawned with their initial state.
-	// Bear in mind that restarting an actor will reinitialize the actor to initial state.
+	// Only the direct alive children of the given actor will be shudown and respawned with their initial actorState.
+	// Bear in mind that restarting an actor will reinitialize the actor to initial actorState.
 	// In case any of the direct child restart fails the given actor will not be started at all.
 	ReSpawn(ctx context.Context, name string) (*PID, error)
 	// NumActors returns the total number of active actors in the system
@@ -506,7 +510,7 @@ func (x *actorSystem) SpawnNamedFromFunc(ctx context.Context, name string, recei
 
 	config := newFuncConfig(opts...)
 	actor := newFuncActor(name, receiveFunc, config)
-	pid, err := x.configPID(ctx, name, actor, WithMailbox(config.mailbox))
+	pid, err := x.configPID(ctx, name, actor, WithMailbox(config.mailbox), WithSupervisorStrategies(config.supervisorStrategies...))
 	if err != nil {
 		return nil, err
 	}
@@ -529,6 +533,36 @@ func (x *actorSystem) SpawnRouter(ctx context.Context, poolSize int, routeesKind
 	router := newRouter(poolSize, routeesKind, x.logger, opts...)
 	routerName := x.reservedName(routerType)
 	return x.Spawn(ctx, routerName, router)
+}
+
+// SpawnPersistentActor creates a persistent actor. This is a special kind of actor that persists and recover its versioned full state into a durable
+// store. PersistentActor aside these particular characteristics are like any other actor in GoAkt.
+func (x *actorSystem) SpawnPersistentActor(ctx context.Context, name string, actor PersistentActor, persistentStore persistence.Store, opts ...SpawnOption) (*PID, error) {
+	if !x.started.Load() {
+		return nil, ErrActorSystemNotStarted
+	}
+
+	actorAddress := x.actorAddress(name)
+	pidNode, exist := x.actors.GetNode(actorAddress.String())
+	if exist {
+		pid := pidNode.GetValue()
+		if pid.IsRunning() {
+			return pid, nil
+		}
+	}
+
+	persistentID := actorAddress.String()
+	persistentActor := newPersistentActor(persistentID, persistentStore, actor)
+	pid, err := x.configPID(ctx, name, persistentActor, opts...)
+	if err != nil {
+		return nil, err
+	}
+
+	// add the given actor to the tree and supervise it
+	_ = x.actors.AddNode(x.userGuardian, pid)
+	x.actors.AddWatcher(pid, x.janitor)
+	x.broadcastActor(pid)
+	return pid, nil
 }
 
 // Kill stops a given actor in the system

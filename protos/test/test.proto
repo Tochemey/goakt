@@ -85,3 +85,26 @@ message PriorityMessage {
   // Specifies the message priority
   int64 priority = 2;
 }
+
+message TestState {
+  bool fail_to_persist = 1;
+}
+
+message TestStateCommandResponse {}
+
+message TestStateCommandResponseWithInvalidVersion {}
+
+message TestStateCommandResponseWithPersistenceFailure {}
+
+message TestStateCommandResponseWithForward {
+  string recipient = 1;
+}
+message TestNoStateCommandResponse {}
+
+message TestForwardCommandResponse {
+  string recipient = 1;
+}
+
+message TestErrorCommandResponse {
+  string error_message = 1;
+}

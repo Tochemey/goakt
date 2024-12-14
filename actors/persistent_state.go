@@ -24,45 +24,29 @@
 
 package actors
 
-import (
-	"sync/atomic"
+import "google.golang.org/protobuf/proto"
 
-	"github.com/tochemey/goakt/v2/internal/slice"
-)
-
-// pidValue represents the data stored in each
-// node of the actors Tree
-type pidValue struct {
-	data *PID
+type PersistentState struct {
+	// state specifies the durable state actor
+	state proto.Message
+	// version specifies the prior version of the durable state actor.
+	version uint64
 }
 
-// newPidValue creates an instance of pidValue
-func newPidValue(data *PID) *pidValue {
-	return &pidValue{data: data}
+// NewPersistentState creates an instance of State
+func NewPersistentState(state proto.Message, version uint64) *PersistentState {
+	return &PersistentState{
+		state:   state,
+		version: version,
+	}
 }
 
-// Value returns the actual pidValue value
-func (v *pidValue) Value() *PID {
-	return v.data
+// Version returns the version of the durable state actor
+func (s *PersistentState) Version() uint64 {
+	return s.version
 }
 
-// pidNode represents a single actor node
-// in the actors Tree
-type pidNode struct {
-	ID          string
-	value       atomic.Pointer[pidValue]
-	Descendants *slice.ThreadSafe[*pidNode]
-	Watchers    *slice.ThreadSafe[*pidNode]
-	Watchees    *slice.ThreadSafe[*pidNode]
-}
-
-// SetValue sets a node value
-func (x *pidNode) SetValue(v *pidValue) {
-	x.value.Store(v)
-}
-
-// GetValue returns the handler value of the node
-func (x *pidNode) GetValue() *PID {
-	v := x.value.Load()
-	return v.Value()
+// ActorState returns the handler state of the actor
+func (s *PersistentState) ActorState() proto.Message {
+	return s.state
 }

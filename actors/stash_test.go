@@ -56,7 +56,7 @@ func TestStash(t *testing.T) {
 		lib.Pause(time.Second)
 
 		// create the actor path
-		actor := &stashQA{}
+		actor := &mockStasher{}
 		pid, err := actorSystem.Spawn(ctx, "Stash", actor)
 		require.NoError(t, err)
 		require.NotNil(t, pid)
@@ -130,7 +130,7 @@ func TestStash(t *testing.T) {
 		lib.Pause(time.Second)
 
 		// create the actor path
-		actor := &stashQA{}
+		actor := &mockStasher{}
 		pid, err := actorSystem.Spawn(ctx, "Stash", actor)
 		require.NoError(t, err)
 		require.NotNil(t, pid)
@@ -163,7 +163,7 @@ func TestStash(t *testing.T) {
 		lib.Pause(time.Second)
 
 		// create the actor path
-		actor := &stashQA{}
+		actor := &mockStasher{}
 		pid, err := actorSystem.Spawn(ctx, "Stash", actor)
 		require.NoError(t, err)
 		require.NotNil(t, pid)
@@ -201,7 +201,7 @@ func TestStash(t *testing.T) {
 		lib.Pause(time.Second)
 
 		// create the actor path
-		actor := &stashQA{}
+		actor := &mockStasher{}
 		pid, err := actorSystem.Spawn(ctx, "Stash", actor)
 		require.NoError(t, err)
 		require.NotNil(t, pid)
