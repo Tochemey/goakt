@@ -557,18 +557,18 @@ func newMockStateStore() *mockStateStore {
 	}
 }
 
-func (t *mockStateStore) Ping(ctx context.Context) error {
+func (t *mockStateStore) Ping(context.Context) error {
 	return nil
 }
 
-func (t *mockStateStore) PersistState(ctx context.Context, durableState *persistence.State) error {
+func (t *mockStateStore) PersistState(_ context.Context, durableState *persistence.State) error {
 	t.mu.Lock()
 	t.cache[durableState.ActorID] = durableState
 	t.mu.Unlock()
 	return nil
 }
 
-func (t *mockStateStore) GetState(ctx context.Context, actorID string) (*persistence.State, error) {
+func (t *mockStateStore) GetState(_ context.Context, actorID string) (*persistence.State, error) {
 	t.mu.RLock()
 	state := t.cache[actorID]
 	t.mu.RUnlock()
@@ -588,11 +588,11 @@ func (m *mockPersistentActor) EmptyState() proto.Message {
 	return new(testspb.TestState)
 }
 
-func (m *mockPersistentActor) PreStart(ctx context.Context) error {
+func (m *mockPersistentActor) PreStart(context.Context) error {
 	return nil
 }
 
-func (m *mockPersistentActor) PostStop(ctx context.Context) error {
+func (m *mockPersistentActor) PostStop(context.Context) error {
 	return nil
 }
 
