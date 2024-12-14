@@ -65,7 +65,7 @@ type Actor interface {
 //
 // PersistentActor contrary to normal actor during a restart procedure will attempt to recover its state whenever available from the durable state.
 // During a normal shutdown process, it will persist its current state to the durable store prior to shutting down.
-// This behavior help maintain some consistency accross the actor state evolution.
+// This behavior help maintain some consistency across the actor state evolution.
 //
 // Note: PersistentActor aside these particular characteristics are like any other actor in GoAkt.
 type PersistentActor interface {
