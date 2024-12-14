@@ -223,6 +223,52 @@ func TestPersistentActor(t *testing.T) {
 
 		assert.NoError(t, actorSystem.Stop(ctx))
 	})
+	t.Run("With PersistResponse wrong versioning requirement suspends the actor", func(t *testing.T) {
+		ctx := context.TODO()
+		ports := dynaport.Get(1)
+		actorSystem, err := NewActorSystem("sys",
+			WithRemoting("127.0.0.1", int32(ports[0])),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NoError(t, actorSystem.Start(ctx))
+
+		lib.Pause(time.Second)
+
+		durableStore := newMockStateStore()
+		mockPersistentActor := newMockPersistentActor()
+		actorName := "mockPersistentActor"
+		pid, err := actorSystem.SpawnPersistentActor(ctx, actorName, mockPersistentActor, durableStore)
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+		lib.Pause(time.Second)
+
+		actor := &mockForwardActor{}
+		to, err := actorSystem.Spawn(ctx, "forwarder", actor)
+		require.NoError(t, err)
+		require.NotNil(t, to)
+		lib.Pause(time.Second)
+
+		// test state command response
+		actorState, err := durableStore.GetState(ctx, pid.ID())
+		require.NoError(t, err)
+		require.NotNil(t, actorState)
+		require.Zero(t, actorState.Version)
+
+		// let us persist some state
+		require.NoError(t, to.Tell(ctx, pid, &testpb.TestStateCommandResponseWithInvalidVersion{}))
+		lib.Pause(time.Second)
+
+		actorState, err = durableStore.GetState(ctx, pid.ID())
+		require.NoError(t, err)
+		require.NotNil(t, actorState)
+		require.Zero(t, actorState.Version)
+		require.Equal(t, pid.ID(), actorState.ActorID)
+
+		require.True(t, pid.IsSuspended())
+
+		assert.NoError(t, actorSystem.Stop(ctx))
+	})
 	t.Run("With ForwardResponse", func(t *testing.T) {
 		ctx := context.TODO()
 		ports := dynaport.Get(1)
