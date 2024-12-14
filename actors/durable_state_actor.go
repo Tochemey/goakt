@@ -37,6 +37,128 @@ import (
 	"github.com/tochemey/goakt/v2/persistence"
 )
 
+// CommandResponse defines the command response type
+type CommandResponse interface {
+	isResponse()
+}
+
+// StateCommandResponse defines the command response type
+// with the durable state actor to persist
+type StateCommandResponse struct {
+	state     *DurableState
+	actorName string
+}
+
+// NewStateCommandResponse creates an instance of StateCommandResponse.
+func NewStateCommandResponse(resultingState *DurableState) *StateCommandResponse {
+	return &StateCommandResponse{
+		state: resultingState,
+	}
+}
+
+// Forward sets the recipient of the resulting state.
+// The command handler needs to call this method to set a potential recipient of the new actor state.
+// Only the actual state will be sent to the recipient without the latest version number
+func (r *StateCommandResponse) Forward(actorName string) *StateCommandResponse {
+	r.actorName = actorName
+	return r
+}
+
+// DurableState returns the durable state to persist
+func (r *StateCommandResponse) DurableState() *DurableState {
+	return r.state
+}
+
+// ActorName returns the recipient that will receive the resultingState after it has been persisted
+// One need to set the pid using the Forward during the instantiation of the
+// StateCommandResponse
+func (r *StateCommandResponse) ActorName() string {
+	return r.actorName
+}
+
+// implements CommandResponse
+func (r *StateCommandResponse) isResponse() {}
+
+// DeleteStateCommandResponse defines the delete command state response.
+// With this response the current actor state is set to the actor
+// empty state with the version incremented by 1.
+type DeleteStateCommandResponse struct{}
+
+// NewDeleteStateCommandResponse creates an instance of delete effect
+func NewDeleteStateCommandResponse() CommandResponse {
+	return &DeleteStateCommandResponse{}
+}
+
+// implements CommandResponse
+func (r *DeleteStateCommandResponse) isResponse() {}
+
+// StopCommandResponse defines the stop response command
+// With this command response the durable state actor is stopped
+type StopCommandResponse struct{}
+
+// implements CommandResponse
+func (s *StopCommandResponse) isResponse() {
+}
+
+// NewStopCommandResponse creates an instance of StopCommandResponse.
+func NewStopCommandResponse() CommandResponse {
+	return new(StopCommandResponse)
+}
+
+// NoStateCommandResponse will not persist any state
+type NoStateCommandResponse struct {
+}
+
+// NewNoStateCommandResponse creates an instance of NoStateCommandResponse
+// With this command response not state is persisted
+func NewNoStateCommandResponse() CommandResponse {
+	return &NoStateCommandResponse{}
+}
+
+// implements CommandResponse
+func (r *NoStateCommandResponse) isResponse() {}
+
+// ForwardStateCommandResponse is used to forward the
+// actor state to the given actor
+type ForwardStateCommandResponse struct {
+	actorName string
+}
+
+// implements CommandResponse
+func (r *ForwardStateCommandResponse) isResponse() {}
+
+// NewForwardStateCommandResponse creates a new forwardEffect with the provided state and recipient.
+// This effect will send the resulting state the recipient without persisting it.
+func NewForwardStateCommandResponse(actorName string) CommandResponse {
+	return &ForwardStateCommandResponse{
+		actorName: actorName,
+	}
+}
+
+// ActorName returns the recipient of the resulting state
+func (r *ForwardStateCommandResponse) ActorName() string {
+	return r.actorName
+}
+
+// ErrorCommandResponse is returned when the command processing
+// has failed
+type ErrorCommandResponse struct {
+	err error
+}
+
+// NewErrorCommandResponse creates an instance of CommandResponse
+func NewErrorCommandResponse(err error) CommandResponse {
+	return &ErrorCommandResponse{err: err}
+}
+
+// Error returns the actual error
+func (r *ErrorCommandResponse) Error() error {
+	return r.err
+}
+
+// implements CommandResponse
+func (r *ErrorCommandResponse) isResponse() {}
+
 // DurableState defines the durable state
 // sent when handling a given command.
 type DurableState struct {
@@ -69,32 +191,6 @@ type Command proto.Message
 
 // ActorState defines the durable state actor state
 type ActorState proto.Message
-
-// DurableStateBehavior defines the interface of a durable state actor / entity behavior to store the full state after processing each command.
-// The current state is always stored in the durable state store. Since only the latest state is stored, there is no history of changes.
-// The durable state actor engine would read that state and store it in memory. After processing of the command is finished, the new state will be stored in the durable state store.
-// The processing of the next command will not start until the state has been successfully stored in the durable state store.
-type DurableStateBehavior interface {
-	// EmptyState returns the durable state actor empty state
-	EmptyState() ActorState
-	// PreStartHook pre-starts the actor. This function can be used to set up some database connections
-	// or some sort of initialization before the actor start processing messages
-	// when the initialization failed the actor will not be started.
-	// Use this function to set any fields that will be needed before the actor starts.
-	// This hook helps set the default values needed by any fields of the actor.
-	PreStartHook(ctx context.Context) error
-	// PostStopHook is executed when the actor is shutting down.
-	// The execution happens when every message that have not been processed yet will be processed before the actor shutdowns
-	// This help free-up resources
-	PostStopHook(ctx context.Context) error
-	// Handle helps handle commands received by the durable state actor. The command handlers define how to handle each incoming command,
-	// which validations must be applied, and finally, whether a resulting state will be persisted depending upon the StatefulEffect
-	// They encode the business rules of your durable state actor and act as a guardian of the actor consistency.
-	// The command handler must first validate that the incoming command can be applied to the current model state.
-	//  Any decision should be solely based on the data passed in the command and the state of the Behavior.
-	// In case of successful validation and processing , the new state will be stored in the durable store depending upon the StatefulEffect response
-	Handle(ctx context.Context, command Command, priorState *DurableState) (Effect, error)
-}
 
 type durableStateActor struct {
 	behavior     DurableStateBehavior
@@ -132,73 +228,21 @@ func (s *durableStateActor) Receive(ctx *ReceiveContext) {
 		s.pid = ctx.Self()
 		s.logger = ctx.Logger()
 	default:
-		logger := s.logger
 		command := Command(ctx.Message())
-		effect, err := s.behavior.Handle(ctx.Context(), command, s.currentState)
-		if err != nil {
-			logger.Errorf("%s failed to process command: %s: %v", s.pid.Name(), command.ProtoReflect().Descriptor().FullName(), err)
-			ctx.Err(err)
-			return
-		}
-
-		// TODO refactor the implementation
-		switch ef := effect.(type) {
-		case *PersistEffect:
-			durableState := ef.DurableState()
-			// incoming version must be current version + 1
-			shouldPersist := (durableState.Version() - s.currentState.Version()) == 1
-			if !shouldPersist {
-				// TODO: fail the whole effect
-			}
-
-			// persist the state
-			toPersist := &persistence.DurableState{
-				ActorID:        s.pid.ID(),
-				State:          durableState.ActorState(),
-				Version:        durableState.Version(),
-				TimestampMilli: uint64(time.Now().UnixMilli()),
-			}
-
-			// persist the state onto the durable state store
-			if err := s.stateStore.PersistDurableState(ctx.Context(), toPersist); err != nil {
-				// TODO: fail the whole effect
-			}
-
-			if ef.ActorName() != "" {
-				goctx := context.WithoutCancel(ctx.Context())
-				if err := s.pid.SendAsync(goctx, ef.ActorName(), durableState.ActorState()); err != nil {
-					// TODO: handle the failure
-				}
-			}
-
-		case *ReadOnlyEffect:
-			// pass
-		case *DeleteEffect:
-			// persist the state
-			toPersist := &persistence.DurableState{
-				ActorID:        s.pid.ID(),
-				State:          s.behavior.EmptyState(),
-				Version:        s.currentState.Version() + 1,
-				TimestampMilli: uint64(time.Now().UnixMilli()),
-			}
-
-			// persist the state onto the durable state store
-			if err := s.stateStore.PersistDurableState(ctx.Context(), toPersist); err != nil {
-				// TODO: fail the whole effect
-			}
-
-		case *ForwardEffect:
-			// update the current state
-			s.currentState = ef.DurableState()
-			// then forward the actual state the recipient
-			goctx := context.WithoutCancel(ctx.Context())
-			if err := s.pid.SendAsync(goctx, ef.ActorName(), s.currentState.ActorState()); err != nil {
-				// TODO: handle the failure
-			}
-
-		case *StopEffect:
-			ctx.Shutdown()
-
+		commandResponse := s.behavior.Handle(ctx.Context(), command, s.currentState)
+		switch response := commandResponse.(type) {
+		case *StateCommandResponse:
+			s.handleStateCommandResponse(ctx, response)
+		case *NoStateCommandResponse:
+			s.handleNoStateCommandResponse()
+		case *DeleteStateCommandResponse:
+			s.handleDeleteStateCommandResponse(ctx)
+		case *ForwardStateCommandResponse:
+			s.handleForwardStateCommandResponse(ctx, response)
+		case *StopCommandResponse:
+			s.handleStopCommandResponse(ctx)
+		case *ErrorCommandResponse:
+			s.handleErrorCommandResponse(ctx, command, response)
 		default:
 		}
 	}
@@ -231,5 +275,94 @@ func (s *durableStateActor) restoreState(ctx context.Context) error {
 	}
 
 	s.currentState = NewDurableState(s.behavior.EmptyState(), 0)
+	return nil
+}
+
+// handleStateCommandResponse handles StateCommandResponse
+func (s *durableStateActor) handleStateCommandResponse(ctx *ReceiveContext, commandResponse *StateCommandResponse) {
+	s.currentState = commandResponse.DurableState()
+	if err := errorschain.
+		New(errorschain.ReturnFirst()).
+		AddError(s.validateStateCommandResponse(commandResponse)).
+		AddError(s.persistState(ctx.Context())).
+		AddError(s.forwardTo(ctx.Context(), commandResponse.ActorName())).
+		Error(); err != nil {
+		s.logger.Errorf("%s failed handle StateCommandResponse: %v", s.pid.ID(), err)
+		ctx.Err(fmt.Errorf("%s failed handle StateCommandResponse: %v", s.pid.ID(), err))
+	}
+}
+
+// handleDeleteStateCommandResponse handles the DeleteStateCommandResponse
+func (s *durableStateActor) handleDeleteStateCommandResponse(ctx *ReceiveContext) {
+	s.currentState = NewDurableState(
+		s.behavior.EmptyState(),
+		s.currentState.Version()+1,
+	)
+	// persist the state onto the durable state store
+	if err := s.persistState(ctx.Context()); err != nil {
+		s.logger.Errorf("%s failed handle DeleteStateCommandResponse: %v", s.pid.ID(), err)
+		ctx.Err(fmt.Errorf("%s failed handle DeleteStateCommandResponse: %v", s.pid.ID(), err))
+		return
+	}
+}
+
+// handleForwardStateCommandResponse handles ForwardStateCommandResponse
+func (s *durableStateActor) handleForwardStateCommandResponse(ctx *ReceiveContext, commandResponse *ForwardStateCommandResponse) {
+	if err := s.forwardTo(ctx.Context(), commandResponse.ActorName()); err != nil {
+		s.logger.Errorf("%s failed handle ForwardStateCommandResponse: %v", s.pid.ID(), err)
+		ctx.Err(fmt.Errorf("%s failed handle ForwardStateCommandResponse: %v", s.pid.ID(), err))
+		return
+	}
+}
+
+// handleStopCommandResponse handles  StopCommandResponse
+func (s *durableStateActor) handleStopCommandResponse(ctx *ReceiveContext) {
+	ctx.Shutdown()
+}
+
+// handleNoStateCommandResponse handles NoStateCommandResponse
+func (s *durableStateActor) handleNoStateCommandResponse() {
+	// pass
+}
+
+// handleErrorCommandResponse handles ErrorCommandResponse
+func (s *durableStateActor) handleErrorCommandResponse(ctx *ReceiveContext, command Command, commandResponse *ErrorCommandResponse) {
+	s.logger.Errorf("%s failed to process command: %s: %v",
+		s.pid.Name(),
+		command.ProtoReflect().Descriptor().FullName(),
+		commandResponse.Error())
+
+	ctx.Err(commandResponse.Error())
+}
+
+// forwardTo forward the actor state to the provided actor name
+func (s *durableStateActor) forwardTo(ctx context.Context, actorName string) error {
+	if actorName != "" {
+		return s.pid.SendAsync(ctx, actorName, s.currentState.ActorState())
+	}
+	return nil
+}
+
+// persistState persist the actor durable state
+func (s *durableStateActor) persistState(ctx context.Context) error {
+	return s.stateStore.PersistDurableState(ctx, &persistence.DurableState{
+		ActorID:        s.pid.ID(),
+		State:          s.currentState.ActorState(),
+		Version:        s.currentState.Version(),
+		TimestampMilli: uint64(time.Now().UnixMilli()),
+	})
+}
+
+// validateStateCommandResponse validates the StateCommandResponse
+func (s *durableStateActor) validateStateCommandResponse(commandResponse *StateCommandResponse) error {
+	durableState := commandResponse.DurableState()
+	// incoming version must be current version + 1
+	isValid := (durableState.Version() - s.currentState.Version()) == 1
+	if !isValid {
+		return fmt.Errorf("%s received version=(%d) while current version is (%d)",
+			s.pid.Name(),
+			durableState.Version(),
+			s.currentState.Version())
+	}
 	return nil
 }
