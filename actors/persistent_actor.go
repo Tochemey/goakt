@@ -93,26 +93,26 @@ func (s *persistentActor) Receive(ctx *ReceiveContext) {
 			persistentContext.remoteSender = ctx.RemoteSender()
 		}
 
-		// pass it to the handler
-		commandResponse := s.handler.Receive(persistentContext)
+		// pass it to the Receive handler
+		response := s.handler.Receive(persistentContext)
 		// send a suspension error back to the system
-		if commandResponse == nil {
+		if response == nil {
 			ctx.Err(errSuspended(errors.New("failed to process command")))
 			return
 		}
 
 		switch {
-		case commandResponse.Error() != nil:
+		case response.Error() != nil:
 			s.logger.Errorf("%s failed to process command: %s: %v",
 				s.pid.Name(),
 				command.ProtoReflect().Descriptor().FullName(),
-				commandResponse.Error())
-			ctx.Err(commandResponse.Error())
+				response.Error())
+			ctx.Err(response.Error())
 
-		case commandResponse.State() != nil:
+		case response.State() != nil:
 			chain := errorschain.
 				New(errorschain.ReturnFirst()).
-				AddError(s.checkAndSetPreconditions(commandResponse)).
+				AddError(s.checkAndSetPreconditions(response)).
 				AddError(s.persistState(ctx.Context()))
 
 			if err := chain.Error(); err != nil {
@@ -122,16 +122,16 @@ func (s *persistentActor) Receive(ctx *ReceiveContext) {
 			}
 
 			// in case we have some forwardTo
-			if commandResponse.ForwardTo() != nil {
-				forwardTo := commandResponse.ForwardTo()
+			if response.ForwardTo() != nil {
+				forwardTo := response.ForwardTo()
 				if err := s.forwardTo(ctx.Context(), *forwardTo); err != nil {
 					s.logger.Errorf("%s failed forward state to:%s : %v", s.pid.ID(), *forwardTo, err)
 					ctx.Err(fmt.Errorf("%s failed forward state to:%s : %v", s.pid.ID(), *forwardTo, err))
 				}
 			}
 
-		case commandResponse.ForwardTo() != nil:
-			forwardTo := commandResponse.ForwardTo()
+		case response.ForwardTo() != nil:
+			forwardTo := response.ForwardTo()
 			if err := s.forwardTo(ctx.Context(), *forwardTo); err != nil {
 				s.logger.Errorf("%s failed forward state to:%s : %v", s.pid.ID(), *forwardTo, err)
 				ctx.Err(fmt.Errorf("%s failed forward state to:%s : %v", s.pid.ID(), *forwardTo, err))

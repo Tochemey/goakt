@@ -73,12 +73,3 @@ func (pctx *PersistentContext) RemoteSender() *address.Address {
 func (pctx *PersistentContext) Command() proto.Message {
 	return pctx.command
 }
-
-// reset resets the fields of ReceiveContext
-func (pctx *PersistentContext) reset() {
-	var pid *PID
-	pctx.currentState = nil
-	pctx.command = nil
-	pctx.self = pid
-	pctx.sender = pid
-}
