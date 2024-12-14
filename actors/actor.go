@@ -83,14 +83,11 @@ type PersistentActor interface {
 	// This help free-up resources
 	PostStop(ctx context.Context) error
 	// Receive processes every command sent to the persistent actor. One needs to use the command and the currentState sent to produce a command response.
-	// Every command sent to the persistent actor expects a response within a timeframe that must be defined when creating the persistent actor.
-	// When a command response is not received within the given time period the persistent actor will be put in a suspended state.
-	// Remember that a suspended actor can be either restarted or killed.
-	// Ths defines how to handle each incoming command,
-	// which validations must be applied, and finally, whether a resulting state will be persisted depending upon the PersistentResponse.
+	// This defines how to handle each incoming command, which validations must be applied, and finally, whether a resulting state will be persisted depending upon the PersistentResponse.
 	// They encode the business rules of your durable state actor and act as a guardian of the actor consistency.
 	// The command handler must first validate that the incoming command can be applied to the current model state.
 	// Any decision should be solely based on the data passed in the command and the state of the PersistentContext.
 	// In case of successful validation and processing , the new state will be stored in the durable store depending upon the PersistentResponse response.
+	// The actor state will be updated with the one in the PersistentResponse only if the version number of the incoming state is 1 more than the already existing state. Otherwise, the actor will be suspended.
 	Receive(ctx *PersistentContext) *PersistentResponse
 }
