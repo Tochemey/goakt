@@ -416,12 +416,14 @@ func (pid *PID) Restart(ctx context.Context) error {
 		return err
 	}
 
-	// re-add the actor back to the actors tree
-	// no need to handle the error here because the only time this method
-	// returns an error if when the parent does not exist which was taken care of in the
-	// lines above
-	_ = tree.AddNode(parent, pid)
-	tree.AddWatcher(pid, janitor)
+	if !pid.IsSuspended() {
+		// re-add the actor back to the actors tree
+		// no need to handle the error here because the only time this method
+		// returns an error if when the parent does not exist which was taken care of in the
+		// lines above
+		_ = tree.AddNode(parent, pid)
+		tree.AddWatcher(pid, janitor)
+	}
 
 	// restart all the previous children
 	eg, ctx := errgroup.WithContext(ctx)
@@ -432,10 +434,12 @@ func (pid *PID) Restart(ctx context.Context) error {
 				return err
 			}
 
-			// re-add the child back to the tree
-			// since these calls are idempotent
-			_ = tree.AddNode(pid, child)
-			tree.AddWatcher(child, janitor)
+			if !child.IsSuspended() {
+				// re-add the child back to the tree
+				// since these calls are idempotent
+				_ = tree.AddNode(pid, child)
+				tree.AddWatcher(child, janitor)
+			}
 			return nil
 		})
 	}
@@ -1437,8 +1441,8 @@ func (pid *PID) passivationLoop() {
 	<-tickerStopSig
 	ticker.Stop()
 
-	if pid.stopping.Load() {
-		pid.logger.Infof("actor=%s is stopping. No need to passivate", pid.Name())
+	if pid.stopping.Load() || pid.suspended.Load() {
+		pid.logger.Infof("actor=%s is stopping or maybe suspended. No need to passivate", pid.Name())
 		return
 	}
 
