@@ -71,7 +71,7 @@ func TestRemoteTell(t *testing.T) {
 
 		// create a test actor
 		actorName := "test"
-		actor := newActor()
+		actor := newMockActor()
 		actorRef, err := sys.Spawn(ctx, actorName, actor)
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
@@ -125,7 +125,7 @@ func TestRemoteTell(t *testing.T) {
 
 		// create a test actor
 		actorName := "test"
-		actor := newActor()
+		actor := newMockActor()
 		actorRef, err := sys.Spawn(ctx, actorName, actor)
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
@@ -174,7 +174,7 @@ func TestRemoteTell(t *testing.T) {
 
 		// create a test actor
 		actorName := "test"
-		actor := newActor()
+		actor := newMockActor()
 		actorRef, err := sys.Spawn(ctx, actorName, actor)
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
@@ -231,7 +231,7 @@ func TestRemoteTell(t *testing.T) {
 
 		// create a test actor
 		actorName := "test"
-		actor := newActor()
+		actor := newMockActor()
 		actorRef, err := sys.Spawn(ctx, actorName, actor)
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
@@ -288,7 +288,7 @@ func TestRemoteTell(t *testing.T) {
 
 		// create a test actor
 		actorName := "test"
-		actor := newActor()
+		actor := newMockActor()
 		actorRef, err := sys.Spawn(ctx, actorName, actor)
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
@@ -348,7 +348,7 @@ func TestRemoteTell(t *testing.T) {
 
 		// create a test actor
 		actorName := "test"
-		actor := newActor()
+		actor := newMockActor()
 		actorRef, err := sys.Spawn(ctx, actorName, actor)
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
@@ -405,7 +405,7 @@ func TestRemoteTell(t *testing.T) {
 
 		// create a test actor
 		actorName := "test"
-		actor := newActor()
+		actor := newMockActor()
 		actorRef, err := sys.Spawn(ctx, actorName, actor)
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
@@ -461,7 +461,7 @@ func TestRemoteTell(t *testing.T) {
 
 		// create a test actor
 		actorName := "test"
-		actor := newActor()
+		actor := newMockActor()
 		actorRef, err := sys.Spawn(ctx, actorName, actor)
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
@@ -519,7 +519,7 @@ func TestRemoteTell(t *testing.T) {
 
 		// create a test actor
 		actorName := "test"
-		actor := newActor()
+		actor := newMockActor()
 		actorRef, err := sys.Spawn(ctx, actorName, actor)
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
@@ -580,7 +580,7 @@ func TestRemoteAsk(t *testing.T) {
 
 			// create a test actor
 			actorName := "test"
-			actor := newActor()
+			actor := newMockActor()
 			actorRef, err := sys.Spawn(ctx, actorName, actor)
 			require.NoError(t, err)
 			assert.NotNil(t, actorRef)
@@ -644,7 +644,7 @@ func TestRemoteAsk(t *testing.T) {
 
 			// create a test actor
 			actorName := "test"
-			actor := newActor()
+			actor := newMockActor()
 			actorRef, err := sys.Spawn(ctx, actorName, actor)
 			require.NoError(t, err)
 			assert.NotNil(t, actorRef)
@@ -697,7 +697,7 @@ func TestRemoteAsk(t *testing.T) {
 
 			// create a test actor
 			actorName := "test"
-			actor := newActor()
+			actor := newMockActor()
 			actorRef, err := sys.Spawn(ctx, actorName, actor)
 			require.NoError(t, err)
 			assert.NotNil(t, actorRef)
@@ -759,7 +759,7 @@ func TestRemoteAsk(t *testing.T) {
 
 			// create a test actor
 			actorName := "test"
-			actor := newActor()
+			actor := newMockActor()
 			actorRef, err := sys.Spawn(ctx, actorName, actor)
 			require.NoError(t, err)
 			assert.NotNil(t, actorRef)
@@ -819,7 +819,7 @@ func TestRemoteAsk(t *testing.T) {
 
 			// create a test actor
 			actorName := "test"
-			actor := newActor()
+			actor := newMockActor()
 			actorRef, err := sys.Spawn(ctx, actorName, actor)
 			require.NoError(t, err)
 			assert.NotNil(t, actorRef)
@@ -884,7 +884,7 @@ func TestRemoteAsk(t *testing.T) {
 
 			// create a test actor
 			actorName := "test"
-			actor := newActor()
+			actor := newMockActor()
 			actorRef, err := sys.Spawn(ctx, actorName, actor)
 			require.NoError(t, err)
 			assert.NotNil(t, actorRef)
@@ -946,7 +946,7 @@ func TestRemoteAsk(t *testing.T) {
 
 			// create a test actor
 			actorName := "test"
-			actor := newActor()
+			actor := newMockActor()
 			actorRef, err := sys.Spawn(ctx, actorName, actor)
 			require.NoError(t, err)
 			assert.NotNil(t, actorRef)
@@ -1010,7 +1010,7 @@ func TestRemoteAsk(t *testing.T) {
 
 			// create a test actor
 			actorName := "test"
-			actor := newActor()
+			actor := newMockActor()
 			actorRef, err := sys.Spawn(ctx, actorName, actor)
 			require.NoError(t, err)
 			assert.NotNil(t, actorRef)
@@ -1072,7 +1072,7 @@ func TestRemoteAsk(t *testing.T) {
 
 			// create a test actor
 			actorName := "test"
-			actor := newActor()
+			actor := newMockActor()
 			actorRef, err := sys.Spawn(ctx, actorName, actor)
 			require.NoError(t, err)
 			assert.NotNil(t, actorRef)
@@ -1230,7 +1230,7 @@ func TestAPIRemoteReSpawn(t *testing.T) {
 
 			// create a test actor
 			actorName := "test"
-			actor := newActor()
+			actor := newMockActor()
 			actorRef, err := sys.Spawn(ctx, actorName, actor)
 			require.NoError(t, err)
 			assert.NotNil(t, actorRef)
@@ -1332,7 +1332,7 @@ func TestAPIRemoteStop(t *testing.T) {
 
 			// create a test actor
 			actorName := "test"
-			actor := newActor()
+			actor := newMockActor()
 			actorRef, err := sys.Spawn(ctx, actorName, actor)
 			require.NoError(t, err)
 			assert.NotNil(t, actorRef)

@@ -53,33 +53,33 @@ message TestStash {}
 message TestUnstash {}
 message TestUnstashAll {}
 
-message Ping {}
-message Pong {}
+message TestPing {}
+message TestPong {}
 
-message Wait {
+message TestWait {
   uint64 duration = 1;
 }
 
-message RunTask {
+message TestRunTask {
   uint64 duration = 1;
 }
 
 message TaskComplete {}
 
-message DoLog {
+message TestLog {
   string text = 1;
 }
 
-message GetCount {}
+message TestGetCount {}
 
-message Count {
+message TestCount {
   int32 value = 1;
 }
 
-message RemoteForward {}
-message ClusterForward {}
+message TestRemoteForward {}
+message TestClusterForward {}
 
-message PriorityMessage {
+message TestMessage {
   // Specifies the actual message
   google.protobuf.Any message = 1;
   // Specifies the message priority
