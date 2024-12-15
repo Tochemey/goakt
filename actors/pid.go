@@ -416,12 +416,14 @@ func (pid *PID) Restart(ctx context.Context) error {
 		return err
 	}
 
-	// re-add the actor back to the actors tree
+	// re-add the actor back to the actors tree if the given actor is not in suspension mode
 	// no need to handle the error here because the only time this method
 	// returns an error if when the parent does not exist which was taken care of in the
 	// lines above
-	_ = tree.AddNode(parent, pid)
-	tree.AddWatcher(pid, janitor)
+	if !pid.IsSuspended() {
+		_ = tree.AddNode(parent, pid)
+		tree.AddWatcher(pid, janitor)
+	}
 
 	// restart all the previous children
 	eg, ctx := errgroup.WithContext(ctx)
@@ -432,10 +434,12 @@ func (pid *PID) Restart(ctx context.Context) error {
 				return err
 			}
 
-			// re-add the child back to the tree
+			// re-add the child back to the tree if child actor is not in suspension mode
 			// since these calls are idempotent
-			_ = tree.AddNode(pid, child)
-			tree.AddWatcher(child, janitor)
+			if !child.IsSuspended() {
+				_ = tree.AddNode(pid, child)
+				tree.AddWatcher(child, janitor)
+			}
 			return nil
 		})
 	}

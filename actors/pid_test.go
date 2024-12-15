@@ -967,6 +967,62 @@ func TestSupervisorStrategy(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NoError(t, actorSystem.Stop(ctx))
 	})
+	t.Run("With suspended actor restarted", func(t *testing.T) {
+		ctx := context.TODO()
+		host := "127.0.0.1"
+		ports := dynaport.Get(1)
+
+		actorSystem, err := NewActorSystem("testSys",
+			WithRemoting(host, int32(ports[0])),
+			WithPassivationDisabled(),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+
+		lib.Pause(time.Second)
+
+		parent, err := actorSystem.Spawn(ctx, "test", newMockSupervisorActor())
+		require.NoError(t, err)
+		require.NotNil(t, parent)
+
+		// create the child actor
+		child, err := parent.SpawnChild(ctx, "SpawnChild", newMockSupervisedActor())
+		require.NoError(t, err)
+		require.NotNil(t, child)
+
+		lib.Pause(time.Second)
+
+		// just for the sake of the test we remove the default directive
+		child.supervisorStrategies = newStrategiesMap()
+
+		require.Len(t, parent.Children(), 1)
+		// send a message to the actor which result in panic
+		require.NoError(t, Tell(ctx, child, new(testpb.TestPanic)))
+
+		// wait for the child to properly shutdown
+		lib.Pause(time.Second)
+
+		// assert the actor state
+		require.False(t, child.IsRunning())
+		require.True(t, child.IsSuspended())
+		require.Len(t, parent.Children(), 0)
+
+		// restart the actor
+		require.NoError(t, child.Restart(ctx))
+		// wait for  a while
+		lib.Pause(time.Second)
+		require.True(t, child.IsRunning())
+		require.False(t, child.IsSuspended())
+		require.Len(t, parent.Children(), 1)
+
+		//stop the actor
+		err = parent.Shutdown(ctx)
+		assert.NoError(t, err)
+		assert.NoError(t, actorSystem.Stop(ctx))
+	})
 }
 func TestMessaging(t *testing.T) {
 	t.Run("With happy", func(t *testing.T) {
