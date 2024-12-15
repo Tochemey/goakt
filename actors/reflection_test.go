@@ -36,13 +36,13 @@ import (
 func TestReflection(t *testing.T) {
 	t.Run("With ActorFrom happy path", func(t *testing.T) {
 		newRegistry := types.NewRegistry()
-		actor := newActor()
+		actor := newMockActor()
 		newRegistry.Register(actor)
 		reflection := newReflection(newRegistry)
-		actual, err := reflection.ActorFrom("actors.actorQA")
+		actual, err := reflection.ActorFrom("actors.mockActor")
 		assert.NoError(t, err)
 		assert.NotNil(t, actual)
-		assert.IsType(t, new(actorQA), actual)
+		assert.IsType(t, new(mockActor), actual)
 	})
 	t.Run("With ActorFrom actor not found", func(t *testing.T) {
 		newRegistry := types.NewRegistry()

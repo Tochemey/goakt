@@ -57,7 +57,7 @@ func TestRouter(t *testing.T) {
 
 		lib.Pause(time.Second)
 
-		routeesKind := new(routerQA)
+		routeesKind := new(mockRouterActor)
 		poolSize := 2
 		routingStrategy := FanOutRouting
 		router, err := system.SpawnRouter(ctx, poolSize, routeesKind, WithRoutingStrategy(routingStrategy))
@@ -67,7 +67,7 @@ func TestRouter(t *testing.T) {
 		lib.Pause(time.Second)
 
 		// send a broadcast message to the router
-		message, _ := anypb.New(&testpb.DoLog{Text: "msg"})
+		message, _ := anypb.New(&testpb.TestLog{Text: "msg"})
 		err = Tell(ctx, router, &goaktpb.Broadcast{Message: message})
 		require.NoError(t, err)
 
@@ -85,14 +85,14 @@ func TestRouter(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, workerTwoRef)
 
-		expected := &testpb.Count{Value: 2}
+		expected := &testpb.TestCount{Value: 2}
 
-		reply, err := Ask(ctx, workerOneRef, new(testpb.GetCount), time.Minute)
+		reply, err := Ask(ctx, workerOneRef, new(testpb.TestGetCount), time.Minute)
 		require.NoError(t, err)
 		require.NotNil(t, reply)
 		assert.True(t, proto.Equal(expected, reply))
 
-		reply, err = Ask(ctx, workerTwoRef, new(testpb.GetCount), time.Minute)
+		reply, err = Ask(ctx, workerTwoRef, new(testpb.TestGetCount), time.Minute)
 		require.NoError(t, err)
 		require.NotNil(t, reply)
 		assert.True(t, proto.Equal(expected, reply))
@@ -116,7 +116,7 @@ func TestRouter(t *testing.T) {
 
 		lib.Pause(time.Second)
 
-		routeesKind := new(routerQA)
+		routeesKind := new(mockRouterActor)
 		poolSize := 2
 		routingStrategy := FanOutRouting
 		router, err := system.SpawnRouter(ctx, poolSize, routeesKind, WithRoutingStrategy(routingStrategy))
@@ -133,7 +133,7 @@ func TestRouter(t *testing.T) {
 		require.NoError(t, system.Kill(ctx, workerTwoName))
 
 		// send a broadcast message to the router
-		message, _ := anypb.New(&testpb.DoLog{Text: "msg"})
+		message, _ := anypb.New(&testpb.TestLog{Text: "msg"})
 		err = Tell(ctx, router, &goaktpb.Broadcast{Message: message})
 		require.NoError(t, err)
 
@@ -163,7 +163,7 @@ func TestRouter(t *testing.T) {
 
 		lib.Pause(time.Second)
 
-		routeesKind := new(routerQA)
+		routeesKind := new(mockRouterActor)
 		poolSize := 1
 		routingStrategy := RoundRobinRouting
 		router, err := system.SpawnRouter(ctx, poolSize, routeesKind, WithRoutingStrategy(routingStrategy))
@@ -173,7 +173,7 @@ func TestRouter(t *testing.T) {
 		lib.Pause(time.Second)
 
 		// send a broadcast message to the router
-		message, _ := anypb.New(&testpb.DoLog{Text: "msg"})
+		message, _ := anypb.New(&testpb.TestLog{Text: "msg"})
 		err = Tell(ctx, router, &goaktpb.Broadcast{Message: message})
 		require.NoError(t, err)
 
@@ -186,9 +186,9 @@ func TestRouter(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, workerOneRef)
 
-		expected := &testpb.Count{Value: 2}
+		expected := &testpb.TestCount{Value: 2}
 
-		reply, err := Ask(ctx, workerOneRef, new(testpb.GetCount), time.Minute)
+		reply, err := Ask(ctx, workerOneRef, new(testpb.TestGetCount), time.Minute)
 		require.NoError(t, err)
 		require.NotNil(t, reply)
 		assert.True(t, proto.Equal(expected, reply))
@@ -218,7 +218,7 @@ func TestRouter(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, consumer)
 
-		routeesKind := new(routerQA)
+		routeesKind := new(mockRouterActor)
 		poolSize := 1
 		routingStrategy := RoundRobinRouting
 		router, err := system.SpawnRouter(ctx, poolSize, routeesKind, WithRoutingStrategy(routingStrategy))
@@ -236,7 +236,7 @@ func TestRouter(t *testing.T) {
 		lib.Pause(time.Second)
 
 		// send a broadcast message to the router
-		message, _ := anypb.New(&testpb.DoLog{Text: "msg"})
+		message, _ := anypb.New(&testpb.TestLog{Text: "msg"})
 		err = Tell(ctx, router, &goaktpb.Broadcast{Message: message})
 		require.NoError(t, err)
 
@@ -274,7 +274,7 @@ func TestRouter(t *testing.T) {
 
 		lib.Pause(time.Second)
 
-		routeesKind := new(routerQA)
+		routeesKind := new(mockRouterActor)
 		poolSize := 1
 		routingStrategy := RandomRouting
 		router, err := system.SpawnRouter(ctx, poolSize, routeesKind, WithRoutingStrategy(routingStrategy))
@@ -284,7 +284,7 @@ func TestRouter(t *testing.T) {
 		lib.Pause(time.Second)
 
 		// send a broadcast message to the router
-		message, _ := anypb.New(&testpb.DoLog{Text: "msg"})
+		message, _ := anypb.New(&testpb.TestLog{Text: "msg"})
 		err = Tell(ctx, router, &goaktpb.Broadcast{Message: message})
 		require.NoError(t, err)
 
@@ -297,9 +297,9 @@ func TestRouter(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, workerOneRef)
 
-		expected := &testpb.Count{Value: 2}
+		expected := &testpb.TestCount{Value: 2}
 
-		reply, err := Ask(ctx, workerOneRef, new(testpb.GetCount), time.Minute)
+		reply, err := Ask(ctx, workerOneRef, new(testpb.TestGetCount), time.Minute)
 		require.NoError(t, err)
 		require.NotNil(t, reply)
 		assert.True(t, proto.Equal(expected, reply))

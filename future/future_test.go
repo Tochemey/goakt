@@ -48,15 +48,15 @@ func TestWaitOnResult(t *testing.T) {
 		wg.Done()
 	}()
 
-	executor <- new(testpb.Ping)
+	executor <- new(testpb.TestPing)
 	wg.Wait()
 
 	assert.Nil(t, result.Failure())
-	assert.True(t, proto.Equal(new(testpb.Ping), result.Success()))
+	assert.True(t, proto.Equal(new(testpb.TestPing), result.Success()))
 
 	// ensure we don't get paused on the next iteration.
 	result = f.Result()
-	assert.True(t, proto.Equal(new(testpb.Ping), result.Success()))
+	assert.True(t, proto.Equal(new(testpb.TestPing), result.Success()))
 	assert.Nil(t, result.Failure())
 }
 
@@ -74,7 +74,7 @@ func TestHasResult(t *testing.T) {
 			wg.Done()
 		}()
 
-		executor <- new(testpb.Ping)
+		executor <- new(testpb.TestPing)
 		wg.Wait()
 
 		assert.True(t, f.HasResult())
@@ -93,7 +93,7 @@ func TestHasResult(t *testing.T) {
 			wg.Done()
 		}()
 
-		executor <- new(testpb.Ping)
+		executor <- new(testpb.TestPing)
 		wg.Wait()
 
 		assert.True(t, f.HasResult())
@@ -139,7 +139,7 @@ func BenchmarkFuture(b *testing.B) {
 			wg.Done()
 		}()
 
-		executor <- new(testpb.Ping)
+		executor <- new(testpb.TestPing)
 		wg.Wait()
 	}
 }
@@ -159,7 +159,7 @@ func BenchmarkFutureWithContext(b *testing.B) {
 			wg.Done()
 		}()
 
-		executor <- new(testpb.Ping)
+		executor <- new(testpb.TestPing)
 		wg.Wait()
 	}
 }
