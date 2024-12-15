@@ -1755,6 +1755,4 @@ func (pid *PID) suspend() {
 	if pid.passivateAfter.Load() > 0 {
 		pid.haltPassivationLnr <- types.Unit{}
 	}
-	// stop supervisor loop
-	pid.supervisionStopSignal <- types.Unit{}
 }
