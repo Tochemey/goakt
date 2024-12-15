@@ -736,6 +736,8 @@ func TestScheduler(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
+		lib.Pause(time.Second)
+
 		remoting := NewRemoting()
 		// get the address of the actor
 		addr, err := remoting.RemoteLookup(ctx, newActorSystem.Host(), int(newActorSystem.Port()), actorName)
