@@ -1240,9 +1240,7 @@ func (pid *PID) recovery(received *ReceiveContext) {
 		return
 	}
 	// no panic or recommended way to handle error
-	if !pid.suspended.Load() {
-		pid.supervisionChan <- received.getError()
-	}
+	pid.supervisionChan <- received.getError()
 }
 
 // init initializes the given actor and init processing messages
@@ -1757,6 +1755,8 @@ func (pid *PID) suspend() {
 	if pid.passivateAfter.Load() > 0 {
 		pid.haltPassivationLnr <- types.Unit{}
 	}
+	// stop processing messages
+	pid.processing.CompareAndSwap(int32(busy), int32(idle))
 	// stop the supervisor loop
 	pid.supervisionStopSignal <- types.Unit{}
 }
