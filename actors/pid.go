@@ -1140,6 +1140,9 @@ func (pid *PID) Logger() log.Logger {
 // doReceive pushes a given message to the actor mailbox
 // and signals the receiveLoop to process it
 func (pid *PID) doReceive(receiveCtx *ReceiveContext) {
+	if pid.suspended.Load() {
+		return
+	}
 	if err := pid.mailbox.Enqueue(receiveCtx); err != nil {
 		// add a warning log because the mailbox is full and do nothing
 		pid.logger.Warn(err)
@@ -1755,8 +1758,6 @@ func (pid *PID) suspend() {
 	if pid.passivateAfter.Load() > 0 {
 		pid.haltPassivationLnr <- types.Unit{}
 	}
-	// stop processing messages
-	pid.processing.CompareAndSwap(int32(busy), int32(idle))
 	// stop the supervisor loop
 	pid.supervisionStopSignal <- types.Unit{}
 }
