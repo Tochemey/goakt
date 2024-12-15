@@ -1754,10 +1754,6 @@ func (pid *PID) childAddress(name string) *address.Address {
 func (pid *PID) suspend() {
 	pid.logger.Infof("%s going into suspension mode", pid.Name())
 	pid.suspended.Store(true)
-	// stop the passivation loop
-	if pid.passivateAfter.Load() > 0 {
-		pid.haltPassivationLnr <- types.Unit{}
-	}
 	// stop the supervisor loop
 	pid.supervisionStopSignal <- types.Unit{}
 }
