@@ -1240,7 +1240,9 @@ func (pid *PID) recovery(received *ReceiveContext) {
 		return
 	}
 	// no panic or recommended way to handle error
-	pid.supervisionChan <- received.getError()
+	if !pid.suspended.Load() {
+		pid.supervisionChan <- received.getError()
+	}
 }
 
 // init initializes the given actor and init processing messages
@@ -1498,7 +1500,6 @@ func (pid *PID) unsetBehaviorStacked() {
 
 // doStop stops the actor
 func (pid *PID) doStop(ctx context.Context) error {
-	// TODO: just signal stash processing done and ignore the messages or process them
 	if pid.stashBox != nil {
 		if err := pid.unstashAll(); err != nil {
 			pid.logger.Errorf("actor=(%s) failed to unstash messages", pid.Name())
@@ -1752,4 +1753,10 @@ func (pid *PID) childAddress(name string) *address.Address {
 func (pid *PID) suspend() {
 	pid.logger.Infof("%s going into suspension mode", pid.Name())
 	pid.suspended.Store(true)
+	// stop the passivation loop
+	if pid.passivateAfter.Load() > 0 {
+		pid.haltPassivationLnr <- types.Unit{}
+	}
+	// stop the supervisor loop
+	pid.supervisionStopSignal <- types.Unit{}
 }
