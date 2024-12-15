@@ -49,9 +49,9 @@ func newTree() *pidTree {
 		nodePool: &sync.Pool{
 			New: func() any {
 				return &pidNode{
-					Descendants: slice.NewThreadSafe[*pidNode](),
-					Watchees:    slice.NewThreadSafe[*pidNode](),
-					Watchers:    slice.NewThreadSafe[*pidNode](),
+					Descendants: slice.New[*pidNode](),
+					Watchees:    slice.New[*pidNode](),
+					Watchers:    slice.New[*pidNode](),
 				}
 			},
 		},
@@ -248,7 +248,7 @@ func (t *pidTree) updateAncestors(parentID, childID string) {
 }
 
 // filterOutChild removes the node with the given ID from the Children slice.
-func filterOutChild(children *slice.ThreadSafe[*pidNode], childID string) *slice.ThreadSafe[*pidNode] {
+func filterOutChild(children *slice.Slice[*pidNode], childID string) *slice.Slice[*pidNode] {
 	for i, child := range children.Items() {
 		if child.ID == childID {
 			children.Delete(i)
@@ -260,7 +260,7 @@ func filterOutChild(children *slice.ThreadSafe[*pidNode], childID string) *slice
 
 // collectDescendants collects all the descendants and grand children
 func collectDescendants(node *pidNode) []*pidNode {
-	output := slice.NewThreadSafe[*pidNode]()
+	output := slice.New[*pidNode]()
 
 	var collectRecursive func(*pidNode)
 	collectRecursive = func(currentNode *pidNode) {

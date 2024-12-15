@@ -51,9 +51,9 @@ func (v *pidValue) Value() *PID {
 type pidNode struct {
 	ID          string
 	value       atomic.Pointer[pidValue]
-	Descendants *slice.ThreadSafe[*pidNode]
-	Watchers    *slice.ThreadSafe[*pidNode]
-	Watchees    *slice.ThreadSafe[*pidNode]
+	Descendants *slice.Slice[*pidNode]
+	Watchers    *slice.Slice[*pidNode]
+	Watchees    *slice.Slice[*pidNode]
 }
 
 // SetValue sets a node value
