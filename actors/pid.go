@@ -1752,7 +1752,4 @@ func (pid *PID) childAddress(name string) *address.Address {
 func (pid *PID) suspend() {
 	pid.logger.Infof("%s going into suspension mode", pid.Name())
 	pid.suspended.Store(true)
-	if pid.passivateAfter.Load() > 0 {
-		pid.haltPassivationLnr <- types.Unit{}
-	}
 }
