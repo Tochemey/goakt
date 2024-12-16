@@ -1565,7 +1565,7 @@ func (pid *PID) notifyParent(err error) {
 	strategy, ok := pid.supervisorStrategies.Get(err)
 	if !ok {
 		pid.logger.Debugf("no supervisor directive found for error: %s", errorType(err))
-		pid.suspend()
+		pid.suspend(err.Error())
 		return
 	}
 
@@ -1593,7 +1593,7 @@ func (pid *PID) notifyParent(err error) {
 		}
 	default:
 		pid.logger.Debugf("unknown directive: %T found for error: %s", d, errorType(err))
-		pid.suspend()
+		pid.suspend(err.Error())
 		return
 	}
 
@@ -1749,11 +1749,17 @@ func (pid *PID) childAddress(name string) *address.Address {
 }
 
 // suspend puts the actor in a suspension mode.
-func (pid *PID) suspend() {
+func (pid *PID) suspend(reason string) {
 	pid.logger.Infof("%s going into suspension mode", pid.Name())
 	pid.suspended.Store(true)
 	// stop passivation loop
 	pid.haltPassivationLnr <- types.Unit{}
 	// stop the supervisor loop
 	pid.supervisionStopSignal <- types.Unit{}
+	// publish an event to the events stream
+	pid.eventsStream.Publish(eventsTopic, &goaktpb.ActorSuspended{
+		Address:     pid.Address().Address,
+		SuspendedAt: timestamppb.Now(),
+		Reason:      reason,
+	})
 }

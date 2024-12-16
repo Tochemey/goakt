@@ -241,7 +241,8 @@ The subscription methods can be found on the `ActorSystem` interface.
 - [`ActorStopped`](./protos/goakt/goakt.proto): emitted when an actor has stopped
 - [`ActorPassivated`](./protos/goakt/goakt.proto): emitted when an actor is passivated
 - [`ActorChildCreated`](./protos/goakt/goakt.proto): emitted when a child actor is created
-- [`ActorRestarted`](./protos/goakt/events/v1/events.proto): emitted when an actor has restarted
+- [`ActorRestarted`](./protos/goakt/goakt.proto): emitted when an actor has restarted
+- [`ActorSuspended`](./protos/goakt/goakt.proto): emitted when an actor has been suspended
 - [`NodeJoined`](./protos/goakt/goakt.proto): cluster event emitted when a node joins the cluster. This only happens when cluster mode is enabled
 - [`NodeLeft`](./protos/goakt/goakt.proto): cluster event emitted when a node leaves the cluster. This only happens when cluster mode is enabled
 - [`Deadletter`](./protos/goakt/goakt.proto): emitted when a message cannot be delivered or that were not handled by a given actor.

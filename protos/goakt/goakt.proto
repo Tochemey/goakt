@@ -76,8 +76,18 @@ message ActorChildCreated {
 message ActorRestarted {
   // Specifies the actor address
   Address address = 1;
-  // Specifies the stop time
+  // Specifies the restarted time
   google.protobuf.Timestamp restarted_at = 2;
+}
+
+// ActorSuspended defines the actor suspended event
+message ActorSuspended {
+  // Specifies the actor address
+  Address address = 1;
+  // Specifies the suspended time
+  google.protobuf.Timestamp suspended_at = 2;
+  // Specifies the suspension reason
+  string reason = 3;
 }
 
 // NodeJoined defines the node joined event
