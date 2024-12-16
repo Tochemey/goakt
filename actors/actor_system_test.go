@@ -235,7 +235,7 @@ func TestActorSystem(t *testing.T) {
 
 		// get the actor partition
 		partition := newActorSystem.GetPartition(actorName)
-		assert.GreaterOrEqual(t, partition, uint64(0))
+		assert.GreaterOrEqual(t, partition, 0)
 
 		// assert actor not found
 		actorName = "some-actor"
