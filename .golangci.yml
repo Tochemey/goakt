@@ -50,6 +50,10 @@ issues:
 
 
 linters-settings:
+  gosec:
+    excludes:
+      # Flags for potentially-unsafe casting of ints, similar problem to globally-disabled G103
+      - G115
   misspell:
     locale: US
     ignore-words:
@@ -60,7 +64,7 @@ linters-settings:
     template: |-
       # MIT License
 
-      # Copyright (c) 2022-2024 Tochemey
+      # Copyright (c) 2022-2024 Arsene Tochemey Gandote
 
       # Permission is hereby granted, free of charge, to any person obtaining a copy
       # of this software and associated documentation files (the "Software"), to deal

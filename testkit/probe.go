@@ -228,13 +228,13 @@ func (x *probe) Stop() {
 }
 
 // receiveOne receives one message within a maximum time duration
-func (x *probe) receiveOne(max time.Duration) proto.Message {
-	timer := x.timers.Get(max)
+func (x *probe) receiveOne(duration time.Duration) proto.Message {
+	t := x.timers.Get(duration)
 
 	select {
 	// attempt to read some message from the message queue
 	case m, ok := <-x.messageQueue:
-		x.timers.Put(timer)
+		x.timers.Put(t)
 		// nothing found
 		if !ok {
 			return nil
@@ -246,41 +246,41 @@ func (x *probe) receiveOne(max time.Duration) proto.Message {
 			x.lastSender = m.sender
 		}
 		return m.payload
-	case <-timer.C:
-		x.timers.Put(timer)
+	case <-t.C:
+		x.timers.Put(t)
 		return nil
 	}
 }
 
 // expectMessage assert the expectation of a message within a maximum time duration
-func (x *probe) expectMessage(max time.Duration, message proto.Message) {
+func (x *probe) expectMessage(duration time.Duration, message proto.Message) {
 	// receive one message
-	received := x.receiveOne(max)
+	received := x.receiveOne(duration)
 	// let us assert the received message
-	require.NotNil(x.pt, received, fmt.Sprintf("timeout (%v) during expectMessage while waiting for %v", max, message))
+	require.NotNil(x.pt, received, fmt.Sprintf("timeout (%v) during expectMessage while waiting for %v", duration, message))
 	require.Equal(x.pt, prototext.Format(message), prototext.Format(received), fmt.Sprintf("expected %v, found %v", message, received))
 }
 
 // expectNoMessage asserts that no message is expected
-func (x *probe) expectNoMessage(max time.Duration) {
+func (x *probe) expectNoMessage(duration time.Duration) {
 	// receive one message
-	received := x.receiveOne(max)
+	received := x.receiveOne(duration)
 	require.Nil(x.pt, received, fmt.Sprintf("received unexpected message %v", received))
 }
 
 // expectedAnyMessage asserts that any message is expected
-func (x *probe) expectAnyMessage(max time.Duration) proto.Message {
+func (x *probe) expectAnyMessage(duration time.Duration) proto.Message {
 	// receive one message
-	received := x.receiveOne(max)
-	require.NotNil(x.pt, received, fmt.Sprintf("timeout (%v) during expectAnyMessage while waiting", max))
+	received := x.receiveOne(duration)
+	require.NotNil(x.pt, received, fmt.Sprintf("timeout (%v) during expectAnyMessage while waiting", duration))
 	return received
 }
 
 // expectMessageOfType asserts that a message of a given type is expected within a maximum time duration
-func (x *probe) expectMessageOfType(max time.Duration, messageType protoreflect.MessageType) proto.Message {
+func (x *probe) expectMessageOfType(duration time.Duration, messageType protoreflect.MessageType) proto.Message {
 	// receive one message
-	received := x.receiveOne(max)
-	require.NotNil(x.pt, received, fmt.Sprintf("timeout (%v) , during expectAnyMessage while waiting", max))
+	received := x.receiveOne(duration)
+	require.NotNil(x.pt, received, fmt.Sprintf("timeout (%v) , during expectAnyMessage while waiting", duration))
 
 	// assert the message type
 	expectedType := received.ProtoReflect().Type() == messageType

@@ -42,9 +42,9 @@ func withPassivationAfter(duration time.Duration) pidOption {
 }
 
 // withInitMaxRetries sets the number of times to retry an actor init process
-func withInitMaxRetries(max int) pidOption {
+func withInitMaxRetries(value int) pidOption {
 	return func(pid *PID) {
-		pid.initMaxRetries.Store(int32(max))
+		pid.initMaxRetries.Store(int32(value))
 	}
 }
 

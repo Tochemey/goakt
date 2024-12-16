@@ -17,7 +17,7 @@ func (_m *Provider) EXPECT() *Provider_Expecter {
 	return &Provider_Expecter{mock: &_m.Mock}
 }
 
-// Close provides a mock function with given fields:
+// Close provides a mock function with no fields
 func (_m *Provider) Close() error {
 	ret := _m.Called()
 
@@ -62,7 +62,7 @@ func (_c *Provider_Close_Call) RunAndReturn(run func() error) *Provider_Close_Ca
 	return _c
 }
 
-// Deregister provides a mock function with given fields:
+// Deregister provides a mock function with no fields
 func (_m *Provider) Deregister() error {
 	ret := _m.Called()
 
@@ -107,7 +107,7 @@ func (_c *Provider_Deregister_Call) RunAndReturn(run func() error) *Provider_Der
 	return _c
 }
 
-// DiscoverPeers provides a mock function with given fields:
+// DiscoverPeers provides a mock function with no fields
 func (_m *Provider) DiscoverPeers() ([]string, error) {
 	ret := _m.Called()
 
@@ -164,7 +164,7 @@ func (_c *Provider_DiscoverPeers_Call) RunAndReturn(run func() ([]string, error)
 	return _c
 }
 
-// ID provides a mock function with given fields:
+// ID provides a mock function with no fields
 func (_m *Provider) ID() string {
 	ret := _m.Called()
 
@@ -209,7 +209,7 @@ func (_c *Provider_ID_Call) RunAndReturn(run func() string) *Provider_ID_Call {
 	return _c
 }
 
-// Initialize provides a mock function with given fields:
+// Initialize provides a mock function with no fields
 func (_m *Provider) Initialize() error {
 	ret := _m.Called()
 
@@ -254,7 +254,7 @@ func (_c *Provider_Initialize_Call) RunAndReturn(run func() error) *Provider_Ini
 	return _c
 }
 
-// Register provides a mock function with given fields:
+// Register provides a mock function with no fields
 func (_m *Provider) Register() error {
 	ret := _m.Called()
 

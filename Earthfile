@@ -1,6 +1,6 @@
 VERSION 0.8
 
-FROM golang:1.22.5-alpine
+FROM golang:1.23-alpine
 
 # install gcc dependencies into alpine for CGO
 RUN apk --no-cache add git ca-certificates gcc musl-dev libc-dev binutils-gold curl openssh
@@ -15,7 +15,7 @@ RUN go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
 RUN export PATH="$PATH:$(go env GOPATH)/bin"
 
 # install buf from source
-RUN GO111MODULE=on GOBIN=/usr/local/bin go install github.com/bufbuild/buf/cmd/buf@v1.36.0
+RUN GO111MODULE=on GOBIN=/usr/local/bin go install github.com/bufbuild/buf/cmd/buf@v1.47.2
 
 # install the various tools to generate connect-go
 RUN go install github.com/fullstorydev/grpcurl/cmd/grpcurl@latest
@@ -23,13 +23,13 @@ RUN go install connectrpc.com/connect/cmd/protoc-gen-connect-go@latest
 
 # install linter
 # binary will be $(go env GOPATH)/bin/golangci-lint
-RUN curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.60.1
+RUN curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.62.2
 RUN ls -la $(which golangci-lint)
 
 RUN go install github.com/ory/go-acc@latest
 
 # install vektra/mockery
-RUN go install github.com/vektra/mockery/v2@v2.43.2
+RUN go install github.com/vektra/mockery/v2@v2.50.0
 
 
 test:

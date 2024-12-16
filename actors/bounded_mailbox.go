@@ -38,9 +38,9 @@ type BoundedMailbox struct {
 var _ Mailbox = (*BoundedMailbox)(nil)
 
 // NewBoundedMailbox creates a new instance BoundedMailbox
-func NewBoundedMailbox(cap int) *BoundedMailbox {
+func NewBoundedMailbox(capacity int) *BoundedMailbox {
 	return &BoundedMailbox{
-		underlying: gods.NewRingBuffer(uint64(cap)),
+		underlying: gods.NewRingBuffer(uint64(capacity)),
 	}
 }
 

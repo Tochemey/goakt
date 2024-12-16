@@ -24,7 +24,7 @@ func (_m *Interface) EXPECT() *Interface_Expecter {
 	return &Interface_Expecter{mock: &_m.Mock}
 }
 
-// Events provides a mock function with given fields:
+// Events provides a mock function with no fields
 func (_m *Interface) Events() <-chan *internalcluster.Event {
 	ret := _m.Called()
 

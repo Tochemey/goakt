@@ -67,10 +67,10 @@ func WithLogger(logger log.Logger) Option {
 }
 
 // WithActorInitMaxRetries sets the number of times to retry an actor init process
-func WithActorInitMaxRetries(max int) Option {
+func WithActorInitMaxRetries(value int) Option {
 	return OptionFunc(
 		func(a *actorSystem) {
-			a.actorInitMaxRetries = max
+			a.actorInitMaxRetries = value
 		},
 	)
 }
