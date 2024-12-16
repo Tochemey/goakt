@@ -984,6 +984,10 @@ func TestSupervisorStrategy(t *testing.T) {
 
 		lib.Pause(time.Second)
 
+		subscriber, err := actorSystem.Subscribe()
+		require.NoError(t, err)
+		require.NotNil(t, subscriber)
+
 		parent, err := actorSystem.Spawn(ctx, "test", newMockSupervisorActor())
 		require.NoError(t, err)
 		require.NotNil(t, parent)
@@ -1009,6 +1013,25 @@ func TestSupervisorStrategy(t *testing.T) {
 		require.False(t, child.IsRunning())
 		require.True(t, child.IsSuspended())
 		require.Len(t, parent.Children(), 0)
+
+		var suspendedEvent *goaktpb.ActorSuspended
+		for message := range subscriber.Iterator() {
+			payload := message.Payload()
+			// only listening to suspended actors
+			event, ok := payload.(*goaktpb.ActorSuspended)
+			if ok {
+				suspendedEvent = event
+				break
+			}
+		}
+
+		require.NotNil(t, suspendedEvent)
+		require.False(t, proto.Equal(suspendedEvent, new(goaktpb.ActorSuspended)))
+		require.Equal(t, child.Name(), suspendedEvent.GetAddress().GetName())
+
+		// unsubscribe the consumer
+		err = actorSystem.Unsubscribe(subscriber)
+		require.NoError(t, err)
 
 		// restart the actor
 		require.NoError(t, child.Restart(ctx))

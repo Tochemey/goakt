@@ -108,7 +108,8 @@ type ActorSystem interface {
 	InCluster() bool
 	// GetPartition returns the partition where a given actor is located
 	GetPartition(actorName string) uint64
-	// Subscribe creates an event subscriber.
+	// Subscribe creates an event subscriber to consume events from the actor system.
+	// Remember to use the Unsubscribe method to avoid resource leakage.
 	Subscribe() (eventstream.Subscriber, error)
 	// Unsubscribe unsubscribes a subscriber.
 	Unsubscribe(subscriber eventstream.Subscriber) error
@@ -422,7 +423,8 @@ func (x *actorSystem) RemoteScheduleWithCron(ctx context.Context, message proto.
 	return x.scheduler.RemoteScheduleWithCron(ctx, message, address, cronExpression)
 }
 
-// Subscribe help receive dead letters whenever there are available
+// Subscribe creates an event subscriber to consume events from the actor system.
+// Remember to use the Unsubscribe method to avoid resource leakage.
 func (x *actorSystem) Subscribe() (eventstream.Subscriber, error) {
 	if !x.started.Load() {
 		return nil, ErrActorSystemNotStarted
