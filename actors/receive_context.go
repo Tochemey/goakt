@@ -389,7 +389,7 @@ func (rctx *ReceiveContext) RemoteForward(to *address.Address) {
 // Unhandled is used to handle unhandled messages instead of throwing error
 func (rctx *ReceiveContext) Unhandled() {
 	me := rctx.self
-	me.toDeadletterQueue(rctx, ErrUnhandled)
+	me.toDeadletters(rctx, ErrUnhandled)
 }
 
 // RemoteReSpawn restarts an actor on a remote node.

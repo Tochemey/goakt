@@ -54,7 +54,7 @@ func Ask(ctx context.Context, to *PID, message proto.Message, timeout time.Durat
 		return
 	case <-time.After(timeout):
 		err = ErrRequestTimeout
-		to.toDeadletterQueue(receiveContext, err)
+		to.toDeadletters(receiveContext, err)
 		return
 	}
 }

@@ -32,6 +32,7 @@ import (
 	nethttp "net/http"
 	"os"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -170,6 +171,7 @@ type ActorSystem interface {
 	getSystemGuardian() *PID
 	getUserGuardian() *PID
 	getJanitor() *PID
+	getDeadletters() *PID
 }
 
 // ActorSystem represent a collection of actors on a given node
@@ -253,6 +255,7 @@ type actorSystem struct {
 	userGuardian   *PID
 	systemGuardian *PID
 	janitor        *PID
+	deadletters    *PID
 	startedAt      *atomic.Int64
 }
 
@@ -733,6 +736,7 @@ func (x *actorSystem) Start(ctx context.Context) error {
 		AddError(x.spawnUserGuardian(ctx)).
 		AddError(x.spawnRebalancer(ctx)).
 		AddError(x.spawnJanitor(ctx)).
+		AddError(x.spawnDeadletters(ctx)).
 		AddError(x.enableRemoting(ctx)).
 		AddError(x.enableClustering(ctx)).
 		Error(); err != nil {
@@ -1162,6 +1166,14 @@ func (x *actorSystem) getJanitor() *PID {
 	janitor := x.janitor
 	x.locker.Unlock()
 	return janitor
+}
+
+// getDeadletters returns the system deadletters actor
+func (x *actorSystem) getDeadletters() *PID {
+	x.locker.Lock()
+	deadletters := x.deadletters
+	x.locker.Unlock()
+	return deadletters
 }
 
 // getPeerStateFromCache returns the peer state from the cache
@@ -1687,6 +1699,27 @@ func (x *actorSystem) spawnRebalancer(ctx context.Context) error {
 
 	// the rebalancer is a child actor of the system guardian
 	_ = x.actors.AddNode(x.systemGuardian, x.rebalancer)
+	return nil
+}
+
+// spawnDeadletters creates the deadletters synthetic actor
+func (x *actorSystem) spawnDeadletters(ctx context.Context) error {
+	var err error
+	actorName := x.reservedName(deadletters)
+	x.deadletters, err = x.configPID(ctx,
+		actorName,
+		newDeadLetters(),
+		WithSupervisorStrategies(
+			NewSupervisorStrategy(PanicError{}, NewResumeDirective()),
+			NewSupervisorStrategy(&runtime.PanicNilError{}, NewResumeDirective()),
+		),
+	)
+	if err != nil {
+		return fmt.Errorf("actor=%s failed to start deadletters: %w", actorName, err)
+	}
+
+	// the deadletters is a child actor of the system guardian
+	_ = x.actors.AddNode(x.systemGuardian, x.deadletters)
 	return nil
 }
 
