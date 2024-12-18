@@ -59,6 +59,7 @@ const (
 	userGuardianType
 	systemGuardianType
 	janitorType
+	deadletters
 )
 
 var (
@@ -75,5 +76,6 @@ var (
 		userGuardianType:   "GoAktUserGuardian",
 		systemGuardianType: "GoAktSystemGuardian",
 		janitorType:        "GoAktJanitor",
+		deadletters:        "GoAktDeadletters",
 	}
 )
