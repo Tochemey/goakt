@@ -26,7 +26,6 @@ package actors
 
 import (
 	"context"
-	"sync"
 
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
@@ -49,9 +48,6 @@ type deadLetters struct {
 	// necessary for metrics
 	counter     *atomic.Int64
 	countersMap map[string]*atomic.Int64
-
-	// this is purposefully needed for PreStart and PostStop hooks only
-	mux *sync.Mutex
 }
 
 // enforce the implementation of the Actor interface
@@ -63,18 +59,12 @@ func newDeadLetters() *deadLetters {
 	return &deadLetters{
 		lettersMap:  make(map[string][]byte),
 		countersMap: make(map[string]*atomic.Int64),
-		mux:         &sync.Mutex{},
 		counter:     counter,
 	}
 }
 
 // PreStart pre-starts the deadletter actor
 func (d *deadLetters) PreStart(context.Context) error {
-	d.mux.Lock()
-	d.lettersMap = make(map[string][]byte)
-	d.countersMap = make(map[string]*atomic.Int64)
-	d.counter.Store(0)
-	d.mux.Unlock()
 	return nil
 }
 
@@ -100,11 +90,6 @@ func (d *deadLetters) Receive(ctx *ReceiveContext) {
 // PostStop handles post procedures
 func (d *deadLetters) PostStop(context.Context) error {
 	d.logger.Infof("%s stopped successfully", d.pid.Name())
-	d.mux.Lock()
-	d.lettersMap = make(map[string][]byte)
-	d.countersMap = make(map[string]*atomic.Int64)
-	d.counter.Store(0)
-	d.mux.Unlock()
 	return nil
 }
 
@@ -112,6 +97,9 @@ func (d *deadLetters) init(ctx *ReceiveContext) {
 	d.eventsStream = ctx.Self().eventsStream
 	d.logger = ctx.Logger()
 	d.pid = ctx.Self()
+	d.lettersMap = make(map[string][]byte)
+	d.countersMap = make(map[string]*atomic.Int64)
+	d.counter.Store(0)
 	d.logger.Infof("%s started successfully", d.pid.Name())
 }
 
