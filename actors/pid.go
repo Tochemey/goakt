@@ -628,7 +628,7 @@ func (pid *PID) Ask(ctx context.Context, to *PID, message proto.Message, timeout
 		return result, nil
 	case <-timer.C:
 		err = ErrRequestTimeout
-		pid.toDeadletterQueue(receiveContext, err)
+		pid.toDeadletters(receiveContext, err)
 		timers.Put(timer)
 		return nil, err
 	}
@@ -1144,7 +1144,7 @@ func (pid *PID) doReceive(receiveCtx *ReceiveContext) {
 		// add a warning log because the mailbox is full and do nothing
 		pid.logger.Warn(err)
 		// push the message as a deadletter
-		pid.toDeadletterQueue(receiveCtx, err)
+		pid.toDeadletters(receiveCtx, err)
 	}
 	pid.schedule()
 }
@@ -1602,8 +1602,8 @@ func (pid *PID) notifyParent(err error) {
 	}
 }
 
-// toDeadletterQueue sends message to deadletter queue
-func (pid *PID) toDeadletterQueue(receiveCtx *ReceiveContext, err error) {
+// toDeadletters sends message to deadletters synthetic actor
+func (pid *PID) toDeadletters(receiveCtx *ReceiveContext, err error) {
 	// the message is lost
 	if pid.eventsStream == nil {
 		return
@@ -1618,20 +1618,24 @@ func (pid *PID) toDeadletterQueue(receiveCtx *ReceiveContext, err error) {
 	}
 
 	msg, _ := anypb.New(receiveCtx.Message())
-	var senderAddr *goaktpb.Address
+	var sender *goaktpb.Address
 	if receiveCtx.Sender() != nil || receiveCtx.Sender() != NoSender {
-		senderAddr = receiveCtx.Sender().Address().Address
+		sender = receiveCtx.Sender().Address().Address
 	}
 
-	pid.eventsStream.Publish(
-		eventsTopic, &goaktpb.Deadletter{
-			Sender:   senderAddr,
-			Receiver: pid.Address().Address,
-			Message:  msg,
-			SendTime: timestamppb.Now(),
-			Reason:   err.Error(),
-		},
-	)
+	// get the deadletters synthetic actor and send a message to it
+	receiver := pid.Address().Address
+	deadletters := pid.ActorSystem().getDeadletters()
+	_ = pid.Tell(context.Background(),
+		deadletters,
+		&internalpb.EmitDeadletter{
+			Deadletter: &goaktpb.Deadletter{
+				Sender:   sender,
+				Receiver: receiver,
+				Message:  msg,
+				SendTime: timestamppb.Now(),
+				Reason:   err.Error(),
+			}})
 }
 
 // handleCompletion processes a long-started task and pipe the result to

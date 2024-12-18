@@ -1,0 +1,24 @@
+syntax = "proto3";
+
+package internalpb;
+
+import "goakt/goakt.proto";
+
+option go_package = "github.com/tochemey/goakt/v2/internal/internalpb;internalpb";
+
+message GetDeadletters {}
+
+message EmitDeadletter {
+  // Specifies the deadletter to emit
+  goaktpb.Deadletter deadletter = 1;
+}
+
+message GetDeadlettersCount {
+  // optional for a specific actor
+  optional string actor_id = 1;
+}
+
+message DeadlettersCount {
+  // Specifies the total count
+  int64 total_count = 1;
+}
