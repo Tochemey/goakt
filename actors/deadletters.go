@@ -63,6 +63,7 @@ func newDeadLetters() *deadLetters {
 	return &deadLetters{
 		lettersMap:  make(map[string][]byte),
 		countersMap: make(map[string]*atomic.Int64),
+		mux:         &sync.Mutex{},
 		counter:     counter,
 	}
 }
