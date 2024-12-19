@@ -1444,6 +1444,7 @@ func (x *actorSystem) peersStateLoop() {
 func (x *actorSystem) rebalancingLoop() {
 	for event := range x.rebalancingChan {
 		if x.InCluster() {
+			x.logger.Infof("%s starts rebalancing...", x.Name())
 			// get peer state
 			peerState, err := x.nodeLeftStateFromEvent(event)
 			if err != nil {
