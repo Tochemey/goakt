@@ -782,7 +782,25 @@ func (x *actorSystem) Stop(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, x.shutdownTimeout)
 	defer cancel()
 
-	if err := x.getRootGuardian().Shutdown(ctx); err != nil {
+	// shutdown all actors in the system
+	for _, actor := range x.Actors() {
+		if err := actor.Shutdown(ctx); err != nil {
+			x.reset()
+			x.logger.Errorf("%s failed to shutdown cleanly: %w", x.name, err)
+			return err
+		}
+	}
+
+	// shutdown the system actors
+	err := errorschain.
+		New(errorschain.ReturnFirst()).
+		AddError(x.janitor.Shutdown(ctx)).
+		AddError(x.rebalancer.Shutdown(ctx)).
+		AddError(x.deadletters.Shutdown(ctx)).
+		AddError(x.getRootGuardian().Shutdown(ctx)).
+		Error()
+
+	if err != nil {
 		x.reset()
 		x.logger.Errorf("%s failed to shutdown cleanly: %w", x.name, err)
 		return err
