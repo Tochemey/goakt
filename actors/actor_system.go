@@ -803,11 +803,13 @@ func (x *actorSystem) Stop(ctx context.Context) error {
 		if err := errorschain.
 			New(errorschain.ReturnFirst()).
 			AddError(x.cleanupCluster(ctx, actorNames)).
-			AddError(x.cluster.Stop(ctx)).Error(); err != nil {
+			AddError(x.cluster.Stop(ctx)).
+			Error(); err != nil {
 			x.reset()
 			x.logger.Errorf("%s failed to shutdown cleanly: %w", x.name, err)
 			return err
 		}
+
 		close(x.actorsChan)
 		x.clusterSyncStopSig <- types.Unit{}
 		x.clusterEnabled.Store(false)
@@ -1766,15 +1768,19 @@ func (x *actorSystem) checkSpawnPreconditions(ctx context.Context, actorName str
 
 // cleanupCluster cleans up the cluster
 func (x *actorSystem) cleanupCluster(ctx context.Context, actorNames []string) error {
-	cl := x.cluster
+	eg, ctx := errgroup.WithContext(ctx)
 	for _, actorName := range actorNames {
-		if err := cl.RemoveActor(context.WithoutCancel(ctx), actorName); err != nil {
-			logger.Errorf("failed to remove [actor=%s] from cl: %v", actorName, err)
-			return err
-		}
-		logger.Infof("[actor=%s] removed from system", actorName)
+		actorName := actorName
+		eg.Go(func() error {
+			if err := x.cluster.RemoveActor(ctx, actorName); err != nil {
+				logger.Errorf("failed to remove [actor=%s] from cluster: %v", actorName, err)
+				return err
+			}
+			logger.Infof("[actor=%s] removed from cluster", actorName)
+			return nil
+		})
 	}
-	return nil
+	return eg.Wait()
 }
 
 func isReservedName(name string) bool {
