@@ -94,13 +94,12 @@ func TestRebalancing(t *testing.T) {
 		// Wait for cluster rebalancing
 		lib.Pause(time.Minute)
 
-		// let us access some of the node2 actors from node 1 and  node 3
-		actorName := "Node2-Actor-1"
-
 		sender, err := node1.LocalActor("Node1-Actor-1")
 		require.NoError(t, err)
 		require.NotNil(t, sender)
 
+		// let us access some of the node2 actors from node 1 and  node 3
+		actorName := "Node2-Actor-1"
 		err = sender.SendAsync(ctx, actorName, new(testpb.TestSend))
 		require.NoError(t, err)
 
