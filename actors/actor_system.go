@@ -40,6 +40,7 @@ import (
 
 	"connectrpc.com/connect"
 	"github.com/google/uuid"
+	"github.com/reugn/go-quartz/logger"
 	"go.uber.org/atomic"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
@@ -782,30 +783,16 @@ func (x *actorSystem) Stop(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, x.shutdownTimeout)
 	defer cancel()
 
-	// shutdown all actors in the system
+	var actorNames []string
 	for _, actor := range x.Actors() {
-		if err := actor.Shutdown(ctx); err != nil {
-			x.reset()
-			x.logger.Errorf("%s failed to shutdown cleanly: %w", x.name, err)
-			return err
-		}
+		actorNames = append(actorNames, actor.Name())
 	}
 
-	// shutdown the system actors
-	err := errorschain.
-		New(errorschain.ReturnFirst()).
-		AddError(x.janitor.Shutdown(ctx)).
-		AddError(x.rebalancer.Shutdown(ctx)).
-		AddError(x.deadletters.Shutdown(ctx)).
-		AddError(x.getRootGuardian().Shutdown(ctx)).
-		Error()
-
-	if err != nil {
+	if err := x.getRootGuardian().Shutdown(ctx); err != nil {
 		x.reset()
 		x.logger.Errorf("%s failed to shutdown cleanly: %w", x.name, err)
 		return err
 	}
-
 	x.actors.DeleteNode(x.getRootGuardian())
 
 	if x.eventsStream != nil {
@@ -813,7 +800,10 @@ func (x *actorSystem) Stop(ctx context.Context) error {
 	}
 
 	if x.clusterEnabled.Load() {
-		if err := x.cluster.Stop(ctx); err != nil {
+		if err := errorschain.
+			New(errorschain.ReturnFirst()).
+			AddError(x.cleanupCluster(ctx, actorNames)).
+			AddError(x.cluster.Stop(ctx)).Error(); err != nil {
 			x.reset()
 			x.logger.Errorf("%s failed to shutdown cleanly: %w", x.name, err)
 			return err
@@ -1771,6 +1761,19 @@ func (x *actorSystem) checkSpawnPreconditions(ctx context.Context, actorName str
 		}
 	}
 
+	return nil
+}
+
+// cleanupCluster cleans up the cluster
+func (x *actorSystem) cleanupCluster(ctx context.Context, actorNames []string) error {
+	cl := x.cluster
+	for _, actorName := range actorNames {
+		if err := cl.RemoveActor(context.WithoutCancel(ctx), actorName); err != nil {
+			logger.Errorf("failed to remove [actor=%s] from cl: %v", actorName, err)
+			return err
+		}
+		logger.Infof("[actor=%s] removed from system", actorName)
+	}
 	return nil
 }
 
