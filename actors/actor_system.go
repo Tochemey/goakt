@@ -1706,7 +1706,7 @@ func (x *actorSystem) spawnJanitor(ctx context.Context) error {
 		actorName,
 		newJanitor(),
 		WithSupervisorStrategies(
-			NewSupervisorStrategy(PanicError{}, NewResumeDirective()),
+			NewSupervisorStrategy(PanicError{}, NewRestartDirective()),
 		),
 	)
 	if err != nil {
@@ -1726,7 +1726,7 @@ func (x *actorSystem) spawnRebalancer(ctx context.Context) error {
 		actorName,
 		newRebalancer(x.reflection),
 		WithSupervisorStrategies(
-			NewSupervisorStrategy(PanicError{}, NewResumeDirective()),
+			NewSupervisorStrategy(PanicError{}, NewRestartDirective()),
 		),
 	)
 	if err != nil {
