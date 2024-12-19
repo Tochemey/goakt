@@ -146,8 +146,12 @@ func (r *rebalancer) Rebalance(ctx *ReceiveContext) {
 
 		if err := eg.Wait(); err != nil {
 			logger.Errorf("cluster rebalancing failed: %v", err)
+			// TODO: TBD
 			ctx.Shutdown()
 		}
+
+		// done
+		r.pid.ActorSystem().completeRebalancing()
 	default:
 		ctx.Unhandled()
 	}

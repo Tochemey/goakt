@@ -49,7 +49,6 @@ import (
 	"github.com/tochemey/goakt/v2/goaktpb"
 	"github.com/tochemey/goakt/v2/hash"
 	"github.com/tochemey/goakt/v2/internal/internalpb"
-	"github.com/tochemey/goakt/v2/internal/types"
 	"github.com/tochemey/goakt/v2/log"
 )
 
@@ -149,10 +148,10 @@ type Engine struct {
 	readTimeout     time.Duration
 	shutdownTimeout time.Duration
 
-	events             chan *Event
-	pubSub             *redis.PubSub
-	messagesChan       <-chan *redis.Message
-	messagesReaderChan chan types.Unit
+	events       chan *Event
+	eventsLock   *sync.Mutex
+	pubSub       *redis.PubSub
+	messagesChan <-chan *redis.Message
 
 	// specifies the node state
 	peerState *internalpb.PeerState
@@ -175,7 +174,7 @@ func NewEngine(name string, disco discovery.Provider, host *discovery.Node, opts
 		hasher:             hash.DefaultHasher(),
 		pubSub:             nil,
 		events:             make(chan *Event, 20),
-		messagesReaderChan: make(chan types.Unit, 1),
+		eventsLock:         &sync.Mutex{},
 		messagesChan:       make(chan *redis.Message, 1),
 		minimumPeersQuorum: 1,
 		replicaCount:       1,
@@ -317,9 +316,6 @@ func (n *Engine) Stop(ctx context.Context) error {
 
 	// close the events queue
 	close(n.events)
-
-	// signal we are stopping listening to events
-	n.messagesReaderChan <- types.Unit{}
 
 	logger.Infof("GoAkt cluster Node=(%s) successfully stopped.", n.name)
 	return nil
@@ -591,72 +587,64 @@ func (n *Engine) Peers(ctx context.Context) ([]*Peer, error) {
 // consume reads to the underlying cluster events
 // and emit the event
 func (n *Engine) consume() {
-	for {
-		select {
-		case <-n.messagesReaderChan:
-			return
-		case message, ok := <-n.messagesChan:
-			if !ok {
-				return
-			}
-			payload := message.Payload
-			var event map[string]any
-			if err := json.Unmarshal([]byte(payload), &event); err != nil {
-				n.logger.Errorf("failed to unmarshal cluster event: %v", err)
+	for message := range n.messagesChan {
+		payload := message.Payload
+		var event map[string]any
+		if err := json.Unmarshal([]byte(payload), &event); err != nil {
+			n.logger.Errorf("failed to unmarshal cluster event: %v", err)
+			// TODO: should we continue or not
+			continue
+		}
+
+		kind := event["kind"]
+		switch kind {
+		case events.KindNodeJoinEvent:
+			nodeJoined := new(events.NodeJoinEvent)
+			if err := json.Unmarshal([]byte(payload), &nodeJoined); err != nil {
+				n.logger.Errorf("failed to unmarshal node join cluster event: %v", err)
 				// TODO: should we continue or not
 				continue
 			}
 
-			kind := event["kind"]
-			switch kind {
-			case events.KindNodeJoinEvent:
-				nodeJoined := new(events.NodeJoinEvent)
-				if err := json.Unmarshal([]byte(payload), &nodeJoined); err != nil {
-					n.logger.Errorf("failed to unmarshal node join cluster event: %v", err)
-					// TODO: should we continue or not
-					continue
-				}
-
-				if n.node.PeersAddress() == nodeJoined.NodeJoin {
-					n.logger.Debug("skipping self")
-					continue
-				}
-
-				// TODO: need to cross check this calculation
-				timeMilli := nodeJoined.Timestamp / int64(1e6)
-				event := &goaktpb.NodeJoined{
-					Address:   nodeJoined.NodeJoin,
-					Timestamp: timestamppb.New(time.UnixMilli(timeMilli)),
-				}
-
-				n.logger.Debugf("%s received (%s) cluster event:[addr=(%s)]", n.name, kind, event.GetAddress())
-
-				payload, _ := anypb.New(event)
-				n.events <- &Event{payload, NodeJoined}
-
-			case events.KindNodeLeftEvent:
-				nodeLeft := new(events.NodeLeftEvent)
-				if err := json.Unmarshal([]byte(payload), &nodeLeft); err != nil {
-					n.logger.Errorf("failed to unmarshal node left cluster event: %v", err)
-					// TODO: should we continue or not
-					continue
-				}
-
-				// TODO: need to cross check this calculation
-				timeMilli := nodeLeft.Timestamp / int64(1e6)
-
-				event := &goaktpb.NodeLeft{
-					Address:   nodeLeft.NodeLeft,
-					Timestamp: timestamppb.New(time.UnixMilli(timeMilli)),
-				}
-
-				n.logger.Debugf("%s received (%s) cluster event:[addr=(%s)]", n.name, kind, event.GetAddress())
-
-				payload, _ := anypb.New(event)
-				n.events <- &Event{payload, NodeLeft}
-			default:
-				// skip
+			if n.node.PeersAddress() == nodeJoined.NodeJoin {
+				n.logger.Debug("skipping self")
+				continue
 			}
+
+			// TODO: need to cross check this calculation
+			timeMilli := nodeJoined.Timestamp / int64(1e6)
+			event := &goaktpb.NodeJoined{
+				Address:   nodeJoined.NodeJoin,
+				Timestamp: timestamppb.New(time.UnixMilli(timeMilli)),
+			}
+
+			n.logger.Debugf("%s received (%s) cluster event:[addr=(%s)]", n.name, kind, event.GetAddress())
+
+			payload, _ := anypb.New(event)
+			n.events <- &Event{payload, NodeJoined}
+
+		case events.KindNodeLeftEvent:
+			nodeLeft := new(events.NodeLeftEvent)
+			if err := json.Unmarshal([]byte(payload), &nodeLeft); err != nil {
+				n.logger.Errorf("failed to unmarshal node left cluster event: %v", err)
+				// TODO: should we continue or not
+				continue
+			}
+
+			// TODO: need to cross check this calculation
+			timeMilli := nodeLeft.Timestamp / int64(1e6)
+
+			event := &goaktpb.NodeLeft{
+				Address:   nodeLeft.NodeLeft,
+				Timestamp: timestamppb.New(time.UnixMilli(timeMilli)),
+			}
+
+			n.logger.Debugf("%s received (%s) cluster event:[addr=(%s)]", n.name, kind, event.GetAddress())
+
+			payload, _ := anypb.New(event)
+			n.events <- &Event{payload, NodeLeft}
+		default:
+			// skip
 		}
 	}
 }

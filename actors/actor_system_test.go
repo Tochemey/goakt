@@ -1599,4 +1599,42 @@ func TestActorSystem(t *testing.T) {
 			},
 		)
 	})
+	t.Run("With Spawn an actor already exist in cluster mode", func(t *testing.T) {
+		// create a context
+		ctx := context.TODO()
+		// start the NATS server
+		srv := startNatsServer(t)
+
+		// create and start system cluster
+		node1, sd1 := startClusterSystem(t, srv.Addr().String())
+		peerAddress1 := node1.PeerAddress()
+		require.NotEmpty(t, peerAddress1)
+
+		// create and start system cluster
+		node2, sd2 := startClusterSystem(t, srv.Addr().String())
+		peerAddress2 := node2.PeerAddress()
+		require.NotEmpty(t, peerAddress2)
+
+		lib.Pause(time.Second)
+
+		// create an actor on node1
+		actor := newMockActor()
+		actorName := "actorID"
+		_, err := node1.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+
+		lib.Pause(200 * time.Millisecond)
+
+		_, err = node2.Spawn(ctx, actorName, actor)
+		require.Error(t, err)
+		require.Equal(t, ErrActorAlreadyExists(actorName).Error(), err.Error())
+
+		// free resource
+		require.NoError(t, node2.Stop(ctx))
+		assert.NoError(t, node1.Stop(ctx))
+		assert.NoError(t, sd2.Close())
+		assert.NoError(t, sd1.Close())
+		// shutdown the nats server gracefully
+		srv.Shutdown()
+	})
 }

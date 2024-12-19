@@ -75,6 +75,7 @@ func (j *janitor) Receive(ctx *ReceiveContext) {
 			if clusterEnabled {
 				if err := cluster.RemoveActor(context.WithoutCancel(ctx.Context()), node.GetValue().Name()); err != nil {
 					logger.Errorf("failed to remove [actor=%s] from cluster: %v", actorID, err)
+					return
 				}
 			}
 
@@ -82,7 +83,7 @@ func (j *janitor) Receive(ctx *ReceiveContext) {
 			return
 		}
 
-		logger.Infof("%s could not locate resource [actor=%s] in system", j.pid.Name(), actorID)
+		logger.Infof("%s could not locate resource [actor=%s] in system. Maybe already released", j.pid.Name(), actorID)
 	default:
 		ctx.Unhandled()
 	}

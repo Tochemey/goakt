@@ -40,6 +40,7 @@ import (
 
 	"connectrpc.com/connect"
 	"github.com/google/uuid"
+	"github.com/reugn/go-quartz/logger"
 	"go.uber.org/atomic"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
@@ -167,6 +168,7 @@ type ActorSystem interface {
 	// tree returns the actors tree
 	tree() *pidTree
 
+	completeRebalancing()
 	getRootGuardian() *PID
 	getSystemGuardian() *PID
 	getUserGuardian() *PID
@@ -177,9 +179,6 @@ type ActorSystem interface {
 // ActorSystem represent a collection of actors on a given node
 // Only a single instance of the ActorSystem can be created on a given node
 type actorSystem struct {
-	internalpbconnect.UnimplementedRemotingServiceHandler
-	internalpbconnect.UnimplementedClusterServiceHandler
-
 	// hold the actors tree in the system
 	actors *pidTree
 
@@ -257,11 +256,16 @@ type actorSystem struct {
 	janitor        *PID
 	deadletters    *PID
 	startedAt      *atomic.Int64
+	rebalancing    *atomic.Bool
 }
 
-// enforce compilation error when all methods of the ActorSystem interface are not implemented
-// by the struct actorSystem
-var _ ActorSystem = (*actorSystem)(nil)
+var (
+	// enforce compilation error when all methods of the ActorSystem interface are not implemented
+	// by the struct actorSystem
+	_ ActorSystem                              = (*actorSystem)(nil)
+	_ internalpbconnect.RemotingServiceHandler = (*actorSystem)(nil)
+	_ internalpbconnect.ClusterServiceHandler  = (*actorSystem)(nil)
+)
 
 // NewActorSystem creates an instance of ActorSystem
 func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
@@ -295,6 +299,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		host:                   "127.0.0.1",
 		actors:                 newTree(),
 		startedAt:              atomic.NewInt64(0),
+		rebalancing:            atomic.NewBool(false),
 	}
 
 	system.started.Store(false)
@@ -472,6 +477,11 @@ func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor, opts 
 		return nil, ErrActorSystemNotStarted
 	}
 
+	// check some preconditions
+	if err := x.checkSpawnPreconditions(ctx, name, actor); err != nil {
+		return nil, err
+	}
+
 	actorAddress := x.actorAddress(name)
 	pidNode, exist := x.actors.GetNode(actorAddress.String())
 	if exist {
@@ -500,6 +510,14 @@ func (x *actorSystem) SpawnNamedFromFunc(ctx context.Context, name string, recei
 		return nil, ErrActorSystemNotStarted
 	}
 
+	config := newFuncConfig(opts...)
+	actor := newFuncActor(name, receiveFunc, config)
+
+	// check some preconditions
+	if err := x.checkSpawnPreconditions(ctx, name, actor); err != nil {
+		return nil, err
+	}
+
 	actorAddress := x.actorAddress(name)
 	pidNode, exist := x.actors.GetNode(actorAddress.String())
 	if exist {
@@ -509,8 +527,6 @@ func (x *actorSystem) SpawnNamedFromFunc(ctx context.Context, name string, recei
 		}
 	}
 
-	config := newFuncConfig(opts...)
-	actor := newFuncActor(name, receiveFunc, config)
 	pid, err := x.configPID(ctx, name, actor, WithMailbox(config.mailbox))
 	if err != nil {
 		return nil, err
@@ -728,6 +744,7 @@ func (x *actorSystem) RemoteActor(ctx context.Context, actorName string) (addr *
 
 // Start starts the actor system
 func (x *actorSystem) Start(ctx context.Context) error {
+	x.logger.Infof("%s actor system starting..", x.name)
 	x.started.Store(true)
 	if err := errorschain.
 		New(errorschain.ReturnFirst()).
@@ -747,7 +764,7 @@ func (x *actorSystem) Start(ctx context.Context) error {
 
 	x.scheduler.Start(ctx)
 	x.startedAt.Store(time.Now().Unix())
-	x.logger.Infof("%s started..:)", x.name)
+	x.logger.Infof("%s actor system successfully started..:)", x.name)
 	return nil
 }
 
@@ -766,12 +783,41 @@ func (x *actorSystem) Stop(ctx context.Context) error {
 	x.started.Store(false)
 	x.scheduler.Stop(ctx)
 
+	ctx, cancel := context.WithTimeout(ctx, x.shutdownTimeout)
+	defer cancel()
+
+	var actorNames []string
+	for _, actor := range x.Actors() {
+		actorNames = append(actorNames, actor.Name())
+	}
+
+	if err := x.getRootGuardian().Shutdown(ctx); err != nil {
+		x.reset()
+		x.logger.Errorf("%s failed to shutdown cleanly: %w", x.name, err)
+		return err
+	}
+	x.actors.DeleteNode(x.getRootGuardian())
+
 	if x.eventsStream != nil {
 		x.eventsStream.Shutdown()
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, x.shutdownTimeout)
-	defer cancel()
+	if x.clusterEnabled.Load() {
+		if err := errorschain.
+			New(errorschain.ReturnFirst()).
+			AddError(x.cleanupCluster(ctx, actorNames)).
+			AddError(x.cluster.Stop(ctx)).
+			Error(); err != nil {
+			x.reset()
+			x.logger.Errorf("%s failed to shutdown cleanly: %w", x.name, err)
+			return err
+		}
+
+		close(x.actorsChan)
+		x.clusterSyncStopSig <- types.Unit{}
+		x.clusterEnabled.Store(false)
+		close(x.rebalancingChan)
+	}
 
 	if x.remotingEnabled.Load() {
 		x.remoting.Close()
@@ -785,26 +831,6 @@ func (x *actorSystem) Stop(ctx context.Context) error {
 		x.server = nil
 		x.listener = nil
 	}
-
-	if x.clusterEnabled.Load() {
-		if err := x.cluster.Stop(ctx); err != nil {
-			x.reset()
-			x.logger.Errorf("%s failed to shutdown cleanly: %w", x.name, err)
-			return err
-		}
-		close(x.actorsChan)
-		x.clusterSyncStopSig <- types.Unit{}
-		x.clusterEnabled.Store(false)
-		close(x.rebalancingChan)
-	}
-
-	if err := x.getRootGuardian().Shutdown(ctx); err != nil {
-		x.reset()
-		x.logger.Errorf("%s failed to shutdown cleanly: %w", x.name, err)
-		return err
-	}
-
-	x.actors.DeleteNode(x.getRootGuardian())
 
 	x.reset()
 	x.logger.Infof("%s shuts down successfully", x.name)
@@ -1176,6 +1202,10 @@ func (x *actorSystem) getDeadletters() *PID {
 	return deadletters
 }
 
+func (x *actorSystem) completeRebalancing() {
+	x.rebalancing.Store(false)
+}
+
 // getPeerStateFromCache returns the peer state from the cache
 func (x *actorSystem) getPeerStateFromCache(address string) (*internalpb.PeerState, error) {
 	x.locker.Lock()
@@ -1433,6 +1463,12 @@ func (x *actorSystem) rebalancingLoop() {
 				continue
 			}
 
+			if x.rebalancing.Load() {
+				x.logger.Debugf("%s on %s rebalancing already ongoing...", x.Name(), x.clusterNode.PeersAddress())
+				continue
+			}
+			x.logger.Infof("%s on %s starting rebalancing...", x.Name(), x.clusterNode.PeersAddress())
+			x.rebalancing.Store(true)
 			message := &internalpb.Rebalance{PeerState: peerState}
 			if err := x.systemGuardian.Tell(ctx, x.rebalancer, message); err != nil {
 				x.logger.Error(err)
@@ -1721,6 +1757,43 @@ func (x *actorSystem) spawnDeadletters(ctx context.Context) error {
 	// the deadletters is a child actor of the system guardian
 	_ = x.actors.AddNode(x.systemGuardian, x.deadletters)
 	return nil
+}
+
+// checkSpawnPreconditions make sure before an actor is created some pre-conditions are checks
+func (x *actorSystem) checkSpawnPreconditions(ctx context.Context, actorName string, kind Actor) error {
+	// check the existence of the actor given the kind prior to creating it
+	if x.clusterEnabled.Load() {
+		existed, err := x.cluster.GetActor(ctx, actorName)
+		if err != nil {
+			if errors.Is(err, cluster.ErrActorNotFound) {
+				return nil
+			}
+			return err
+		}
+
+		if existed.GetActorType() == types.TypeName(kind) {
+			return ErrActorAlreadyExists(actorName)
+		}
+	}
+
+	return nil
+}
+
+// cleanupCluster cleans up the cluster
+func (x *actorSystem) cleanupCluster(ctx context.Context, actorNames []string) error {
+	eg, ctx := errgroup.WithContext(ctx)
+	for _, actorName := range actorNames {
+		actorName := actorName
+		eg.Go(func() error {
+			if err := x.cluster.RemoveActor(ctx, actorName); err != nil {
+				logger.Errorf("failed to remove [actor=%s] from cluster: %v", actorName, err)
+				return err
+			}
+			logger.Infof("[actor=%s] removed from cluster", actorName)
+			return nil
+		})
+	}
+	return eg.Wait()
 }
 
 func isReservedName(name string) bool {

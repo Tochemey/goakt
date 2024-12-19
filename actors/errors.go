@@ -91,6 +91,8 @@ var (
 	ErrInvalidTimeout = errors.New("invalid timeout")
 	// ErrPriorityMessageRequired is returned when a non-priority message is used in a priority mailbox
 	ErrPriorityMessageRequired = errors.New("priority message type is required")
+	// ErrActorAlreadyExists is returned when trying to create the same actor more than once
+	ErrActorAlreadyExists = func(actorName string) error { return fmt.Errorf("actor=(%s) already exists", actorName) }
 )
 
 // eof returns true if the given error is an EOF error
