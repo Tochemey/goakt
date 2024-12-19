@@ -168,6 +168,7 @@ type ActorSystem interface {
 	// tree returns the actors tree
 	tree() *pidTree
 
+	completeRebalancing()
 	getRootGuardian() *PID
 	getSystemGuardian() *PID
 	getUserGuardian() *PID
@@ -255,6 +256,7 @@ type actorSystem struct {
 	janitor        *PID
 	deadletters    *PID
 	startedAt      *atomic.Int64
+	rebalancing    *atomic.Bool
 }
 
 var (
@@ -297,6 +299,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		host:                   "127.0.0.1",
 		actors:                 newTree(),
 		startedAt:              atomic.NewInt64(0),
+		rebalancing:            atomic.NewBool(false),
 	}
 
 	system.started.Store(false)
@@ -1199,6 +1202,10 @@ func (x *actorSystem) getDeadletters() *PID {
 	return deadletters
 }
 
+func (x *actorSystem) completeRebalancing() {
+	x.rebalancing.Store(false)
+}
+
 // getPeerStateFromCache returns the peer state from the cache
 func (x *actorSystem) getPeerStateFromCache(address string) (*internalpb.PeerState, error) {
 	x.locker.Lock()
@@ -1444,7 +1451,7 @@ func (x *actorSystem) peersStateLoop() {
 func (x *actorSystem) rebalancingLoop() {
 	for event := range x.rebalancingChan {
 		if x.InCluster() {
-			x.logger.Infof("%s starts rebalancing...", x.Name())
+			x.logger.Infof("%s on %s starts rebalancing...", x.Name(), x.clusterNode.PeersAddress())
 			// get peer state
 			peerState, err := x.nodeLeftStateFromEvent(event)
 			if err != nil {
@@ -1454,9 +1461,16 @@ func (x *actorSystem) rebalancingLoop() {
 
 			ctx := context.Background()
 			if !x.shouldRebalance(ctx, peerState) {
+				x.logger.Debugf("%s on %s not entitled to perform rebalancing", x.Name(), x.clusterNode.PeersAddress())
 				continue
 			}
 
+			if x.rebalancing.Load() {
+				x.logger.Debugf("%s on %s rebalancing ongoing...", x.Name(), x.clusterNode.PeersAddress())
+				continue
+			}
+
+			x.rebalancing.Store(true)
 			message := &internalpb.Rebalance{PeerState: peerState}
 			if err := x.systemGuardian.Tell(ctx, x.rebalancer, message); err != nil {
 				x.logger.Error(err)

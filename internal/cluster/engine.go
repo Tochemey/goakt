@@ -149,6 +149,7 @@ type Engine struct {
 	shutdownTimeout time.Duration
 
 	events       chan *Event
+	eventsLock   *sync.Mutex
 	pubSub       *redis.PubSub
 	messagesChan <-chan *redis.Message
 
@@ -173,6 +174,7 @@ func NewEngine(name string, disco discovery.Provider, host *discovery.Node, opts
 		hasher:             hash.DefaultHasher(),
 		pubSub:             nil,
 		events:             make(chan *Event, 20),
+		eventsLock:         &sync.Mutex{},
 		messagesChan:       make(chan *redis.Message, 1),
 		minimumPeersQuorum: 1,
 		replicaCount:       1,

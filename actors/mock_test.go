@@ -431,7 +431,7 @@ func startNatsServer(t *testing.T) *natsserver.Server {
 
 func startClusterSystem(t *testing.T, serverAddr string) (ActorSystem, discovery.Provider) {
 	ctx := context.TODO()
-	logger := log.DiscardLogger
+	logger := log.DefaultLogger
 
 	// generate the ports for the single startNode
 	nodePorts := dynaport.Get(3)
