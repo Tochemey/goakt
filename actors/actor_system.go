@@ -1458,17 +1458,12 @@ func (x *actorSystem) rebalancingLoop() {
 				continue
 			}
 
-			if peerState == nil || proto.Equal(peerState, new(internalpb.PeerState)) {
+			ctx := context.Background()
+			if !x.shouldRebalance(ctx, peerState) {
 				continue
 			}
 
 			x.logger.Infof("%s on %s starts rebalancing...", x.Name(), x.clusterNode.PeersAddress())
-			ctx := context.Background()
-			if !x.shouldRebalance(ctx, peerState) {
-				x.logger.Debugf("%s on %s not entitled to perform rebalancing", x.Name(), x.clusterNode.PeersAddress())
-				continue
-			}
-
 			if x.rebalancing.Load() {
 				x.logger.Debugf("%s on %s rebalancing ongoing...", x.Name(), x.clusterNode.PeersAddress())
 				continue
