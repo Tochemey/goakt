@@ -744,7 +744,7 @@ func (x *actorSystem) RemoteActor(ctx context.Context, actorName string) (addr *
 
 // Start starts the actor system
 func (x *actorSystem) Start(ctx context.Context) error {
-	x.logger.Infof("%s starting..", x.name)
+	x.logger.Infof("%s actor system starting..", x.name)
 	x.started.Store(true)
 	if err := errorschain.
 		New(errorschain.ReturnFirst()).
@@ -764,7 +764,7 @@ func (x *actorSystem) Start(ctx context.Context) error {
 
 	x.scheduler.Start(ctx)
 	x.startedAt.Store(time.Now().Unix())
-	x.logger.Infof("%s successfully started..:)", x.name)
+	x.logger.Infof("%s actor system successfully started..:)", x.name)
 	return nil
 }
 

@@ -1246,7 +1246,7 @@ func (pid *PID) recovery(received *ReceiveContext) {
 // init initializes the given actor and init processing messages
 // when the initialization failed the actor will not be started
 func (pid *PID) init(ctx context.Context) error {
-	pid.logger.Infof("initialization process has started for %s...", pid.Name())
+	pid.logger.Infof("%s starting...", pid.Name())
 
 	cancelCtx, cancel := context.WithTimeout(ctx, pid.initTimeout.Load())
 	// create a new retrier that will try a maximum of `initMaxRetries` times, with
@@ -1259,7 +1259,7 @@ func (pid *PID) init(ctx context.Context) error {
 	}
 
 	pid.started.Store(true)
-	pid.logger.Infof("initialization process successfully completed for %s.", pid.Name())
+	pid.logger.Infof("%s successfully started for %s.", pid.Name())
 
 	if pid.eventsStream != nil {
 		pid.eventsStream.Publish(
