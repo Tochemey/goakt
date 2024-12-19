@@ -1463,12 +1463,11 @@ func (x *actorSystem) rebalancingLoop() {
 				continue
 			}
 
-			x.logger.Infof("%s on %s starts rebalancing...", x.Name(), x.clusterNode.PeersAddress())
 			if x.rebalancing.Load() {
-				x.logger.Debugf("%s on %s rebalancing ongoing...", x.Name(), x.clusterNode.PeersAddress())
+				x.logger.Debugf("%s on %s rebalancing already ongoing...", x.Name(), x.clusterNode.PeersAddress())
 				continue
 			}
-
+			x.logger.Infof("%s on %s starting rebalancing...", x.Name(), x.clusterNode.PeersAddress())
 			x.rebalancing.Store(true)
 			message := &internalpb.Rebalance{PeerState: peerState}
 			if err := x.systemGuardian.Tell(ctx, x.rebalancer, message); err != nil {
