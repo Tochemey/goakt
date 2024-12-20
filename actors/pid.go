@@ -1259,7 +1259,7 @@ func (pid *PID) init(ctx context.Context) error {
 	}
 
 	pid.started.Store(true)
-	pid.logger.Infof("%s successfully started for %s.", pid.Name())
+	pid.logger.Infof("%s successfully started.", pid.Name())
 
 	if pid.eventsStream != nil {
 		pid.eventsStream.Publish(
