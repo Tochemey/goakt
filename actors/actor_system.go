@@ -57,6 +57,7 @@ import (
 	"github.com/tochemey/goakt/v2/internal/eventstream"
 	"github.com/tochemey/goakt/v2/internal/internalpb"
 	"github.com/tochemey/goakt/v2/internal/internalpb/internalpbconnect"
+	"github.com/tochemey/goakt/v2/internal/osutil"
 	"github.com/tochemey/goakt/v2/internal/tcp"
 	"github.com/tochemey/goakt/v2/internal/types"
 	"github.com/tochemey/goakt/v2/log"
@@ -68,7 +69,8 @@ type ActorSystem interface {
 	Name() string
 	// Actors returns the list of Actors that are alive in the actor system
 	Actors() []*PID
-	// Start starts the actor system
+	// Start initializes the actor system and listens for OS signals to gracefully shut it down.
+	// This ensures a clean shutdown of the actor system in the event of an unexpected system termination.
 	Start(ctx context.Context) error
 	// Stop stops the actor system
 	Stop(ctx context.Context) error
@@ -152,6 +154,8 @@ type ActorSystem interface {
 	Port() int32
 	// Uptime returns the number of seconds since the actor system started
 	Uptime() int64
+	// Running returns true when the actor system is running
+	Running() bool
 	// handleRemoteAsk handles a synchronous message to another actor and expect a response.
 	// This block until a response is received or timed out.
 	handleRemoteAsk(ctx context.Context, to *PID, message proto.Message, timeout time.Duration) (response proto.Message, err error)
@@ -331,6 +335,11 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		withSchedulerRemoting(NewRemoting()))
 
 	return system, nil
+}
+
+// Running returns true when the actor system is running
+func (x *actorSystem) Running() bool {
+	return x.started.Load()
 }
 
 // Uptime returns the number of seconds since the actor system started
@@ -742,7 +751,8 @@ func (x *actorSystem) RemoteActor(ctx context.Context, actorName string) (addr *
 	return address.From(actor.GetActorAddress()), nil
 }
 
-// Start starts the actor system
+// Start initializes the actor system and listens for OS signals to gracefully shut it down.
+// This ensures a clean shutdown of the actor system in the event of an unexpected system termination.
 func (x *actorSystem) Start(ctx context.Context) error {
 	x.logger.Infof("%s actor system starting..", x.name)
 	x.started.Store(true)
@@ -764,6 +774,15 @@ func (x *actorSystem) Start(ctx context.Context) error {
 
 	x.scheduler.Start(ctx)
 	x.startedAt.Store(time.Now().Unix())
+
+	// register for os signals
+	osutil.RegisterExitHook(func() error {
+		return x.Stop(ctx)
+	})
+
+	// handle the os signal
+	osutil.HandleSignals(x.logger)
+
 	x.logger.Infof("%s actor system successfully started..:)", x.name)
 	return nil
 }
