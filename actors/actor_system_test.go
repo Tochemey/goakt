@@ -1642,6 +1642,10 @@ func TestActorSystem(t *testing.T) {
 		srv.Shutdown()
 	})
 	t.Run("With os interrupt", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip()
+		}
+
 		ctx := context.TODO()
 		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
 

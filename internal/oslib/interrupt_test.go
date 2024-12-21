@@ -40,6 +40,10 @@ import (
 
 func TestHandleInterrupts(t *testing.T) {
 	t.Run("With signals", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip()
+		}
+
 		// let us send some signals
 		signals := []syscall.Signal{
 			syscall.SIGINT,
