@@ -1684,4 +1684,30 @@ func TestActorSystem(t *testing.T) {
 		require.False(t, sys.Running())
 		assert.Zero(t, sys.Uptime())
 	})
+	t.Run("With CoordinatedShutdown failure", func(t *testing.T) {
+		ctx := context.TODO()
+		shutdownHook := func(context.Context) error { return errors.New("shutdown failure") }
+
+		sys, _ := NewActorSystem("testSys",
+			WithCoordinatedShutdown(shutdownHook),
+			WithLogger(log.DiscardLogger))
+
+		// start the actor system
+		err := sys.Start(ctx)
+		assert.NoError(t, err)
+
+		lib.Pause(time.Second)
+
+		actor := newMockActor()
+		actorRef, err := sys.Spawn(ctx, "Test", actor)
+		assert.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		assert.NotZero(t, sys.Uptime())
+
+		// stop the actor after some time
+		lib.Pause(time.Second)
+		err = sys.Stop(ctx)
+		assert.Error(t, err)
+	})
 }

@@ -25,6 +25,7 @@
 package actors
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -107,11 +108,20 @@ func TestOption(t *testing.T) {
 			expected: actorSystem{janitorInterval: 2. * time.Second},
 		},
 	}
+
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			var cfg actorSystem
-			tc.option.Apply(&cfg)
-			assert.Equal(t, tc.expected, cfg)
+			var system actorSystem
+			tc.option.Apply(&system)
+			assert.Equal(t, tc.expected, system)
 		})
 	}
+}
+
+func TestWithCoordinatedShutdown(t *testing.T) {
+	system := new(actorSystem)
+	shutdownHook := func(context.Context) error { return nil }
+	opt := WithCoordinatedShutdown(shutdownHook)
+	opt.Apply(system)
+	assert.EqualValues(t, 1, len(system.shutdownHooks))
 }

@@ -263,6 +263,7 @@ type actorSystem struct {
 	deadletters    *PID
 	startedAt      *atomic.Int64
 	rebalancing    *atomic.Bool
+	shutdownHooks  []ShutdownHook
 }
 
 var (
@@ -307,6 +308,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		startedAt:              atomic.NewInt64(0),
 		rebalancing:            atomic.NewBool(false),
 		stopOsInterruptsLrn:    make(chan types.Unit, 1),
+		shutdownHooks:          make([]ShutdownHook, 0),
 	}
 
 	system.started.Store(false)
@@ -1313,6 +1315,14 @@ func (x *actorSystem) shutdown(ctx context.Context) error {
 
 	x.started.Store(false)
 	x.scheduler.Stop(ctx)
+
+	// run the various shutdown hooks
+	for _, hook := range x.shutdownHooks {
+		if err := hook(ctx); err != nil {
+			x.reset()
+			return err
+		}
+	}
 
 	ctx, cancel := context.WithTimeout(ctx, x.shutdownTimeout)
 	defer cancel()
