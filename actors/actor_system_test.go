@@ -1647,7 +1647,9 @@ func TestActorSystem(t *testing.T) {
 		}
 
 		ctx := context.TODO()
-		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		sys, _ := NewActorSystem("testSys",
+			WithShutdownTimeout(500*time.Millisecond),
+			WithLogger(log.DiscardLogger))
 
 		// start the actor system
 		err := sys.Start(ctx)

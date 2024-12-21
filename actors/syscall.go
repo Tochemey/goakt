@@ -22,69 +22,53 @@
  * SOFTWARE.
  */
 
-package oslib
+package actors
 
 import (
+	"context"
 	"os"
 	"os/signal"
 	"runtime"
-	"sync"
 	"syscall"
+	"time"
 
-	"github.com/tochemey/goakt/v2/internal/types"
-	"github.com/tochemey/goakt/v2/log"
+	"github.com/tochemey/goakt/v2/internal/lib"
 )
 
-var (
-	interruptLocker sync.Mutex
-	hookLocker      sync.Mutex
-	shutdownHook    ShutdownHook
-)
-
-// ShutdownHook is executed on receiving SIGTERM or SIGINT signal.
-type ShutdownHook func() error
-
-// RegisterShutdownHook registers the ExistHook in a thread-safe manner
-func RegisterShutdownHook(hook ShutdownHook) {
-	hookLocker.Lock()
-	shutdownHook = hook
-	hookLocker.Unlock()
-}
-
-// HandleInterrupts handles os SIGINT or SIGTERM interrupts
-func HandleInterrupts(logger log.Logger, cancel <-chan types.Unit) {
+// handleSignals handles os SIGINT or SIGTERM interrupts
+func (x *actorSystem) handleSignals(ctx context.Context) {
 	notifier := make(chan os.Signal, 1)
 	signal.Notify(notifier, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
-		select {
-		case sig := <-notifier:
-			hookLocker.Lock()
-			hook := shutdownHook
-			hookLocker.Unlock()
+		sig := <-notifier
+		// lock the exit process call
+		x.syscallLocker.Lock()
+		x.logger.Infof("received an interrupt signal (%s) to shutdown", sig.String())
+		x.stopping.Store(true)
 
-			// lock the exit process call
-			interruptLocker.Lock()
-			logger.Infof("received an OS signal (%s) to shutdown", sig.String())
+		// start the shutdown process and wait for some time
+		if err := x.shutdown(ctx); err != nil {
+			x.logger.Error(err)
+		}
 
-			if err := hook(); err != nil {
-				logger.Error(err)
-			}
+		// wait for the shutdown to complete properly
+		// if given that period the system cannot properly shut down then
+		// we do have an issue
+		lib.Pause(x.shutdownTimeout + time.Second)
 
-			signal.Stop(notifier)
-			pid := os.Getpid()
-			if pid == 1 {
-				os.Exit(0)
-			}
+		signal.Stop(notifier)
+		pid := os.Getpid()
+		// make sure if it is unix init process to exit
+		if pid == 1 {
+			os.Exit(0)
+		}
 
-			process, _ := os.FindProcess(pid)
-			switch {
-			case runtime.GOOS == "windows":
-				_ = process.Kill()
-			default:
-				_ = process.Signal(sig.(syscall.Signal))
-			}
-		case <-cancel:
-			return
+		process, _ := os.FindProcess(pid)
+		switch {
+		case runtime.GOOS == "windows":
+			_ = process.Kill()
+		default:
+			_ = process.Signal(sig.(syscall.Signal))
 		}
 	}()
 }

@@ -57,7 +57,6 @@ import (
 	"github.com/tochemey/goakt/v2/internal/eventstream"
 	"github.com/tochemey/goakt/v2/internal/internalpb"
 	"github.com/tochemey/goakt/v2/internal/internalpb/internalpbconnect"
-	"github.com/tochemey/goakt/v2/internal/oslib"
 	"github.com/tochemey/goakt/v2/internal/tcp"
 	"github.com/tochemey/goakt/v2/internal/types"
 	"github.com/tochemey/goakt/v2/log"
@@ -237,9 +236,8 @@ type actorSystem struct {
 	// specifies the stash capacity
 	stashEnabled bool
 
-	stopGC              chan types.Unit
-	stopOsInterruptsLrn chan types.Unit
-	janitorInterval     time.Duration
+	stopGC          chan types.Unit
+	janitorInterval time.Duration
 
 	// specifies the events stream
 	eventsStream *eventstream.EventsStream
@@ -264,6 +262,8 @@ type actorSystem struct {
 	startedAt      *atomic.Int64
 	rebalancing    *atomic.Bool
 	shutdownHooks  []ShutdownHook
+	stopping       *atomic.Bool
+	syscallLocker  *sync.Mutex
 }
 
 var (
@@ -307,8 +307,9 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		actors:                 newTree(),
 		startedAt:              atomic.NewInt64(0),
 		rebalancing:            atomic.NewBool(false),
-		stopOsInterruptsLrn:    make(chan types.Unit, 1),
 		shutdownHooks:          make([]ShutdownHook, 0),
+		stopping:               atomic.NewBool(false),
+		syscallLocker:          &sync.Mutex{},
 	}
 
 	system.started.Store(false)
@@ -779,7 +780,7 @@ func (x *actorSystem) Start(ctx context.Context) error {
 
 	x.scheduler.Start(ctx)
 	x.startedAt.Store(time.Now().Unix())
-	x.handleInterrupts(ctx)
+	x.handleSignals(ctx)
 	x.logger.Infof("%s actor system successfully started..:)", x.name)
 	return nil
 }
@@ -787,8 +788,9 @@ func (x *actorSystem) Start(ctx context.Context) error {
 // Stop stops the actor system and does not terminate the program.
 // One needs to explicitly call os.Exit to terminate the program.
 func (x *actorSystem) Stop(ctx context.Context) error {
-	x.stopOsInterruptsLrn <- types.Unit{}
-	close(x.stopOsInterruptsLrn)
+	if x.stopping.Load() {
+		return nil
+	}
 	return x.shutdown(ctx)
 }
 
@@ -1303,8 +1305,6 @@ func (x *actorSystem) reset() {
 
 // shutdown stops the actor system
 func (x *actorSystem) shutdown(ctx context.Context) error {
-	x.logger.Infof("%s shutting down...", x.name)
-
 	// make sure the actor system has started
 	if !x.started.Load() {
 		return ErrActorSystemNotStarted
@@ -1826,20 +1826,6 @@ func (x *actorSystem) cleanupCluster(ctx context.Context, actorNames []string) e
 		})
 	}
 	return eg.Wait()
-}
-
-func (x *actorSystem) handleInterrupts(ctx context.Context) {
-	// register for shutdown hook
-	oslib.RegisterShutdownHook(func() error {
-		if err := x.shutdown(ctx); err != nil {
-			return err
-		}
-		x.stopOsInterruptsLrn <- types.Unit{}
-		close(x.stopOsInterruptsLrn)
-		return nil
-	})
-	// handle the os interrupts
-	oslib.HandleInterrupts(x.logger, x.stopOsInterruptsLrn)
 }
 
 func isReservedName(name string) bool {

@@ -543,7 +543,7 @@ func waitForSignals(t *testing.T, ch <-chan os.Signal, sig os.Signal) {
 	select {
 	case s := <-ch:
 		require.Equal(t, s, sig)
-	case <-time.After(1 * time.Second):
+	case <-time.After(2 * time.Second):
 		t.Fatalf("timeout waiting for %v", sig)
 	}
 }
