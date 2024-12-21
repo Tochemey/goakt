@@ -30,45 +30,53 @@ import (
 	"sync"
 	"syscall"
 
+	"github.com/tochemey/goakt/v2/internal/types"
 	"github.com/tochemey/goakt/v2/log"
 )
 
-var signalMu, regMu sync.Mutex
-var exitHook ExitHook
+var (
+	signalLocker sync.Mutex
+	hookLocker   sync.Mutex
+	exitHook     ExitHook
+)
 
 // ExitHook is executed on receiving SIGTERM or SIGINT signal.
 type ExitHook func() error
 
 // RegisterExitHook registers the ExistHook in a thread-safe manner
 func RegisterExitHook(hook ExitHook) {
-	regMu.Lock()
+	hookLocker.Lock()
 	exitHook = hook
-	regMu.Unlock()
+	hookLocker.Unlock()
 }
 
 // HandleSignals handles os SIGINT or SIGTERM signals
-func HandleSignals(logger log.Logger) {
+func HandleSignals(logger log.Logger, cancel <-chan types.Unit) {
 	notifier := make(chan os.Signal, 1)
 	signal.Notify(notifier, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
-		sig := <-notifier
-		regMu.Lock()
-		hook := exitHook
-		regMu.Unlock()
+		select {
+		case sig := <-notifier:
+			hookLocker.Lock()
+			hook := exitHook
+			hookLocker.Unlock()
 
-		// lock the exit process call
-		signalMu.Lock()
-		logger.Infof("received an OS signal (%s) to shutdown", sig.String())
+			// lock the exit process call
+			signalLocker.Lock()
+			logger.Infof("received an OS signal (%s) to shutdown", sig.String())
 
-		if err := hook(); err != nil {
-			logger.Error(err)
+			if err := hook(); err != nil {
+				logger.Error(err)
+			}
+
+			signal.Stop(notifier)
+			osid := syscall.Getpid()
+			if osid == 1 {
+				os.Exit(0)
+			}
+			_ = syscall.Kill(osid, sig.(syscall.Signal))
+		case <-cancel:
+			return
 		}
-
-		signal.Stop(notifier)
-		osid := syscall.Getpid()
-		if osid == 1 {
-			os.Exit(0)
-		}
-		_ = syscall.Kill(osid, sig.(syscall.Signal))
 	}()
 }

@@ -237,6 +237,7 @@ type actorSystem struct {
 	stashEnabled bool
 
 	stopGC          chan types.Unit
+	cancelChan      chan types.Unit
 	janitorInterval time.Duration
 
 	// specifies the events stream
@@ -304,6 +305,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		actors:                 newTree(),
 		startedAt:              atomic.NewInt64(0),
 		rebalancing:            atomic.NewBool(false),
+		cancelChan:             make(chan types.Unit, 1),
 	}
 
 	system.started.Store(false)
@@ -777,11 +779,11 @@ func (x *actorSystem) Start(ctx context.Context) error {
 
 	// register for os signals
 	osutil.RegisterExitHook(func() error {
-		return x.Stop(ctx)
+		return x.shutdown(ctx)
 	})
 
 	// handle the os signal
-	osutil.HandleSignals(x.logger)
+	osutil.HandleSignals(x.logger, x.cancelChan)
 
 	x.logger.Infof("%s actor system successfully started..:)", x.name)
 	return nil
@@ -789,71 +791,9 @@ func (x *actorSystem) Start(ctx context.Context) error {
 
 // Stop stops the actor system
 func (x *actorSystem) Stop(ctx context.Context) error {
-	x.logger.Infof("%s shutting down...", x.name)
-
-	// make sure the actor system has started
-	if !x.started.Load() {
-		return ErrActorSystemNotStarted
-	}
-
-	x.stopGC <- types.Unit{}
-	x.logger.Infof("%s is shutting down..:)", x.name)
-
-	x.started.Store(false)
-	x.scheduler.Stop(ctx)
-
-	ctx, cancel := context.WithTimeout(ctx, x.shutdownTimeout)
-	defer cancel()
-
-	var actorNames []string
-	for _, actor := range x.Actors() {
-		actorNames = append(actorNames, actor.Name())
-	}
-
-	if err := x.getRootGuardian().Shutdown(ctx); err != nil {
-		x.reset()
-		x.logger.Errorf("%s failed to shutdown cleanly: %w", x.name, err)
-		return err
-	}
-	x.actors.DeleteNode(x.getRootGuardian())
-
-	if x.eventsStream != nil {
-		x.eventsStream.Shutdown()
-	}
-
-	if x.clusterEnabled.Load() {
-		if err := errorschain.
-			New(errorschain.ReturnFirst()).
-			AddError(x.cleanupCluster(ctx, actorNames)).
-			AddError(x.cluster.Stop(ctx)).
-			Error(); err != nil {
-			x.reset()
-			x.logger.Errorf("%s failed to shutdown cleanly: %w", x.name, err)
-			return err
-		}
-
-		close(x.actorsChan)
-		x.clusterSyncStopSig <- types.Unit{}
-		x.clusterEnabled.Store(false)
-		close(x.rebalancingChan)
-	}
-
-	if x.remotingEnabled.Load() {
-		x.remoting.Close()
-		if err := x.shutdownHTTPServer(ctx); err != nil {
-			x.reset()
-			x.logger.Errorf("%s failed to shutdown: %w", x.name, err)
-			return err
-		}
-
-		x.remotingEnabled.Store(false)
-		x.server = nil
-		x.listener = nil
-	}
-
-	x.reset()
-	x.logger.Infof("%s shuts down successfully", x.name)
-	return nil
+	x.cancelChan <- types.Unit{}
+	close(x.cancelChan)
+	return x.shutdown(ctx)
 }
 
 // RemoteLookup for an actor on a remote host.
@@ -1363,6 +1303,75 @@ func (x *actorSystem) enableRemoting(ctx context.Context) error {
 // reset the actor system
 func (x *actorSystem) reset() {
 	x.actors.Reset()
+}
+
+// shutdown shutdown the actor system
+func (x *actorSystem) shutdown(ctx context.Context) error {
+	x.logger.Infof("%s shutting down...", x.name)
+
+	// make sure the actor system has started
+	if !x.started.Load() {
+		return ErrActorSystemNotStarted
+	}
+
+	x.stopGC <- types.Unit{}
+	x.logger.Infof("%s is shutting down..:)", x.name)
+
+	x.started.Store(false)
+	x.scheduler.Stop(ctx)
+
+	ctx, cancel := context.WithTimeout(ctx, x.shutdownTimeout)
+	defer cancel()
+
+	var actorNames []string
+	for _, actor := range x.Actors() {
+		actorNames = append(actorNames, actor.Name())
+	}
+
+	if err := x.getRootGuardian().Shutdown(ctx); err != nil {
+		x.reset()
+		x.logger.Errorf("%s failed to shutdown cleanly: %w", x.name, err)
+		return err
+	}
+	x.actors.DeleteNode(x.getRootGuardian())
+
+	if x.eventsStream != nil {
+		x.eventsStream.Shutdown()
+	}
+
+	if x.clusterEnabled.Load() {
+		if err := errorschain.
+			New(errorschain.ReturnFirst()).
+			AddError(x.cleanupCluster(ctx, actorNames)).
+			AddError(x.cluster.Stop(ctx)).
+			Error(); err != nil {
+			x.reset()
+			x.logger.Errorf("%s failed to shutdown cleanly: %w", x.name, err)
+			return err
+		}
+
+		close(x.actorsChan)
+		x.clusterSyncStopSig <- types.Unit{}
+		x.clusterEnabled.Store(false)
+		close(x.rebalancingChan)
+	}
+
+	if x.remotingEnabled.Load() {
+		x.remoting.Close()
+		if err := x.shutdownHTTPServer(ctx); err != nil {
+			x.reset()
+			x.logger.Errorf("%s failed to shutdown: %w", x.name, err)
+			return err
+		}
+
+		x.remotingEnabled.Store(false)
+		x.server = nil
+		x.listener = nil
+	}
+
+	x.reset()
+	x.logger.Infof("%s shuts down successfully", x.name)
+	return nil
 }
 
 // replicationLoop publishes newly created actor into the cluster when cluster is enabled

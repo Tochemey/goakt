@@ -33,38 +33,47 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/tochemey/goakt/v2/internal/types"
 	"github.com/tochemey/goakt/v2/log"
 )
 
 func TestHandleSignals(t *testing.T) {
-	// let us send some signals
-	signals := []syscall.Signal{
-		syscall.SIGINT,
-		syscall.SIGTERM,
-	}
+	t.Run("With signals", func(t *testing.T) {
 
-	for _, sig := range signals {
-		callCount := 0
-		RegisterExitHook(func() error {
-			callCount++
-			return nil
-		})
+		// let us send some signals
+		signals := []syscall.Signal{
+			syscall.SIGINT,
+			syscall.SIGTERM,
+		}
 
-		sigCh := make(chan os.Signal, 2)
-		signal.Notify(sigCh, sig)
+		for _, sig := range signals {
+			callCount := 0
+			RegisterExitHook(func() error {
+				callCount++
+				return nil
+			})
 
-		HandleSignals(log.DefaultLogger)
-		err := syscall.Kill(syscall.Getpid(), sig)
-		require.NoError(t, err)
+			sigCh := make(chan os.Signal, 2)
+			signal.Notify(sigCh, sig)
 
-		// two signals are expected to be received
-		waitForSignals(t, sigCh, sig)
-		waitForSignals(t, sigCh, sig)
+			HandleSignals(log.DiscardLogger, nil)
+			err := syscall.Kill(syscall.Getpid(), sig)
+			require.NoError(t, err)
 
-		require.EqualValues(t, 1, callCount)
-		exitHook = nil
-		signalMu.Unlock()
-	}
+			// two signals are expected to be received
+			waitForSignals(t, sigCh, sig)
+			waitForSignals(t, sigCh, sig)
+
+			require.EqualValues(t, 1, callCount)
+			exitHook = nil
+			signalLocker.Unlock()
+		}
+	})
+	t.Run("With cancellation", func(t *testing.T) {
+		cancelCh := make(chan types.Unit, 1)
+		HandleSignals(log.DiscardLogger, cancelCh)
+		close(cancelCh)
+	})
 }
 
 func waitForSignals(t *testing.T, ch <-chan os.Signal, sig os.Signal) {
