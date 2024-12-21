@@ -27,6 +27,7 @@ package oslib
 import (
 	"os"
 	"os/signal"
+	"runtime"
 	"sync"
 	"syscall"
 
@@ -35,9 +36,9 @@ import (
 )
 
 var (
-	signalLocker sync.Mutex
-	hookLocker   sync.Mutex
-	shutdownHook ShutdownHook
+	interruptLocker sync.Mutex
+	hookLocker      sync.Mutex
+	shutdownHook    ShutdownHook
 )
 
 // ShutdownHook is executed on receiving SIGTERM or SIGINT signal.
@@ -62,7 +63,7 @@ func HandleInterrupts(logger log.Logger, cancel <-chan types.Unit) {
 			hookLocker.Unlock()
 
 			// lock the exit process call
-			signalLocker.Lock()
+			interruptLocker.Lock()
 			logger.Infof("received an OS signal (%s) to shutdown", sig.String())
 
 			if err := hook(); err != nil {
@@ -70,11 +71,18 @@ func HandleInterrupts(logger log.Logger, cancel <-chan types.Unit) {
 			}
 
 			signal.Stop(notifier)
-			osid := syscall.Getpid()
-			if osid == 1 {
+			pid := os.Getpid()
+			if pid == 1 {
 				os.Exit(0)
 			}
-			_ = syscall.Kill(osid, sig.(syscall.Signal))
+
+			process, _ := os.FindProcess(pid)
+			switch {
+			case runtime.GOOS == "windows":
+				_ = process.Kill()
+			default:
+				_ = process.Signal(sig.(syscall.Signal))
+			}
 		case <-cancel:
 			return
 		}

@@ -27,6 +27,7 @@ package oslib
 import (
 	"os"
 	"os/signal"
+	"runtime"
 	"syscall"
 	"testing"
 	"time"
@@ -55,9 +56,17 @@ func TestHandleInterrupts(t *testing.T) {
 			sigCh := make(chan os.Signal, 2)
 			signal.Notify(sigCh, sig)
 
-			HandleInterrupts(log.DiscardLogger, nil)
-			err := syscall.Kill(syscall.Getpid(), sig)
+			HandleInterrupts(log.DefaultLogger, nil)
+			process, err := os.FindProcess(syscall.Getpid())
 			require.NoError(t, err)
+			switch {
+			case runtime.GOOS == "windows":
+				err = process.Kill()
+				require.NoError(t, err)
+			default:
+				err = process.Signal(sig)
+				require.NoError(t, err)
+			}
 
 			// two signals are expected to be received
 			waitForSignals(t, sigCh, sig)
@@ -65,7 +74,7 @@ func TestHandleInterrupts(t *testing.T) {
 
 			require.EqualValues(t, 1, callCount)
 			shutdownHook = nil
-			signalLocker.Unlock()
+			interruptLocker.Unlock()
 		}
 	})
 	t.Run("With cancellation", func(t *testing.T) { // nolint

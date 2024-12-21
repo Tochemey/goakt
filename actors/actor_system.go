@@ -69,10 +69,11 @@ type ActorSystem interface {
 	Name() string
 	// Actors returns the list of Actors that are alive in the actor system
 	Actors() []*PID
-	// Start initializes the actor system and listens for OS signals to gracefully shut it down.
+	// Start initializes the actor system and listens for OS signals to gracefully shut it down and terminate the program.
 	// This ensures a clean shutdown of the actor system in the event of an unexpected system termination.
 	Start(ctx context.Context) error
-	// Stop stops the actor system
+	// Stop stops the actor system and does not terminate the program.
+	// One needs to explicitly call os.Exit to terminate the program.
 	Stop(ctx context.Context) error
 	// Spawn creates an actor in the system and starts it
 	Spawn(ctx context.Context, name string, actor Actor, opts ...SpawnOption) (*PID, error)
@@ -753,7 +754,7 @@ func (x *actorSystem) RemoteActor(ctx context.Context, actorName string) (addr *
 	return address.From(actor.GetActorAddress()), nil
 }
 
-// Start initializes the actor system and listens for OS signals to gracefully shut it down.
+// Start initializes the actor system and listens for OS signals to gracefully shut it down and terminate the program.
 // This ensures a clean shutdown of the actor system in the event of an unexpected system termination.
 func (x *actorSystem) Start(ctx context.Context) error {
 	x.logger.Infof("%s actor system starting on %s/%s..", x.name, runtime.GOOS, runtime.GOARCH)
@@ -781,7 +782,8 @@ func (x *actorSystem) Start(ctx context.Context) error {
 	return nil
 }
 
-// Stop stops the actor system
+// Stop stops the actor system and does not terminate the program.
+// One needs to explicitly call os.Exit to terminate the program.
 func (x *actorSystem) Stop(ctx context.Context) error {
 	x.cancelChan <- types.Unit{}
 	close(x.cancelChan)
