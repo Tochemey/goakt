@@ -1299,7 +1299,7 @@ func (x *actorSystem) reset() {
 	x.actors.Reset()
 }
 
-// shutdown shutdown the actor system
+// shutdown stops the actor system
 func (x *actorSystem) shutdown(ctx context.Context) error {
 	x.logger.Infof("%s shutting down...", x.name)
 
