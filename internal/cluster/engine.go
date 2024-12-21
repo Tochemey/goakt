@@ -315,7 +315,9 @@ func (n *Engine) Stop(ctx context.Context) error {
 	}
 
 	// close the events queue
+	n.eventsLock.Lock()
 	close(n.events)
+	n.eventsLock.Unlock()
 
 	logger.Infof("GoAkt cluster Node=(%s) successfully stopped.", n.name)
 	return nil
