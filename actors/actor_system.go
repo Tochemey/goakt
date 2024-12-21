@@ -1831,7 +1831,12 @@ func (x *actorSystem) cleanupCluster(ctx context.Context, actorNames []string) e
 func (x *actorSystem) handleInterrupts(ctx context.Context) {
 	// register for shutdown hook
 	oslib.RegisterShutdownHook(func() error {
-		return x.shutdown(ctx)
+		if err := x.shutdown(ctx); err != nil {
+			return err
+		}
+		x.stopOsInterruptsLrn <- types.Unit{}
+		close(x.stopOsInterruptsLrn)
+		return nil
 	})
 	// handle the os interrupts
 	oslib.HandleInterrupts(x.logger, x.stopOsInterruptsLrn)
