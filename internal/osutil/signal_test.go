@@ -27,7 +27,6 @@ package osutil
 import (
 	"os"
 	"os/signal"
-	"runtime"
 	"syscall"
 	"testing"
 	"time"
@@ -40,9 +39,6 @@ import (
 
 func TestHandleSignals(t *testing.T) {
 	t.Run("With signals", func(t *testing.T) {
-		if runtime.GOOS == "windows" {
-			t.Skip("Skipping on windows")
-		}
 		// let us send some signals
 		signals := []syscall.Signal{
 			syscall.SIGINT,
