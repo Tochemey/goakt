@@ -29,6 +29,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"runtime"
 	"strconv"
 	"syscall"
 	"testing"
@@ -1661,8 +1662,16 @@ func TestActorSystem(t *testing.T) {
 		sigCh := make(chan os.Signal, 2)
 		signal.Notify(sigCh, sig)
 
-		err = syscall.Kill(syscall.Getpid(), sig)
+		process, err := os.FindProcess(syscall.Getpid())
 		require.NoError(t, err)
+		switch {
+		case runtime.GOOS == "windows":
+			err = process.Kill()
+			require.NoError(t, err)
+		default:
+			err = process.Signal(sig)
+			require.NoError(t, err)
+		}
 
 		// two signals are expected to be received
 		waitForSignals(t, sigCh, sig)
