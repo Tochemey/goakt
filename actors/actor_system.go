@@ -756,7 +756,7 @@ func (x *actorSystem) RemoteActor(ctx context.Context, actorName string) (addr *
 // Start initializes the actor system and listens for OS signals to gracefully shut it down.
 // This ensures a clean shutdown of the actor system in the event of an unexpected system termination.
 func (x *actorSystem) Start(ctx context.Context) error {
-	x.logger.Infof("%s actor system starting..", x.name)
+	x.logger.Infof("%s actor system starting on %s/%s..", x.name, runtime.GOOS, runtime.GOARCH)
 	x.started.Store(true)
 	if err := errorschain.
 		New(errorschain.ReturnFirst()).
@@ -776,15 +776,7 @@ func (x *actorSystem) Start(ctx context.Context) error {
 
 	x.scheduler.Start(ctx)
 	x.startedAt.Store(time.Now().Unix())
-
-	// register for os signals
-	osutil.RegisterExitHook(func() error {
-		return x.shutdown(ctx)
-	})
-
-	// handle the os signal
-	osutil.HandleSignals(x.logger, x.cancelChan)
-
+	x.handlePlatformSignals(ctx)
 	x.logger.Infof("%s actor system successfully started..:)", x.name)
 	return nil
 }
@@ -1822,6 +1814,19 @@ func (x *actorSystem) cleanupCluster(ctx context.Context, actorNames []string) e
 		})
 	}
 	return eg.Wait()
+}
+
+func (x *actorSystem) handlePlatformSignals(ctx context.Context) {
+	if runtime.GOOS == "windows" {
+		return
+	}
+
+	// register for os signals
+	osutil.RegisterExitHook(func() error {
+		return x.shutdown(ctx)
+	})
+	// handle the os signal
+	osutil.HandleSignals(x.logger, x.cancelChan)
 }
 
 func isReservedName(name string) bool {

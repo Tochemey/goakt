@@ -29,6 +29,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"runtime"
 	"strconv"
 	"syscall"
 	"testing"
@@ -1641,8 +1642,10 @@ func TestActorSystem(t *testing.T) {
 		srv.Shutdown()
 	})
 	t.Run("With os signal", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("Skipping on windows")
+		}
 		ctx := context.TODO()
-
 		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
 
 		// start the actor system

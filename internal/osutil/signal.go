@@ -27,7 +27,6 @@ package osutil
 import (
 	"os"
 	"os/signal"
-	"runtime"
 	"sync"
 	"syscall"
 
@@ -71,13 +70,11 @@ func HandleSignals(logger log.Logger, cancel <-chan types.Unit) {
 			}
 
 			signal.Stop(notifier)
-			if runtime.GOOS != "windows" {
-				osid := syscall.Getpid()
-				if osid == 1 {
-					os.Exit(0)
-				}
-				_ = syscall.Kill(osid, sig.(syscall.Signal))
+			osid := syscall.Getpid()
+			if osid == 1 {
+				os.Exit(0)
 			}
+			_ = syscall.Kill(osid, sig.(syscall.Signal))
 		case <-cancel:
 			return
 		}
