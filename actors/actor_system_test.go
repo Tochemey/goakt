@@ -1649,7 +1649,7 @@ func TestActorSystem(t *testing.T) {
 		ctx := context.TODO()
 		sys, _ := NewActorSystem("testSys",
 			WithShutdownTimeout(500*time.Millisecond),
-			WithLogger(log.DiscardLogger))
+			WithLogger(log.DefaultLogger))
 
 		// start the actor system
 		err := sys.Start(ctx)
@@ -1664,7 +1664,7 @@ func TestActorSystem(t *testing.T) {
 
 		assert.NotZero(t, sys.Uptime())
 
-		sig := syscall.SIGINT
+		sig := syscall.SIGTERM
 		sigCh := make(chan os.Signal, 2)
 		signal.Notify(sigCh, sig)
 

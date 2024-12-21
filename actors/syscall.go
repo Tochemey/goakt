@@ -41,8 +41,6 @@ func (x *actorSystem) handleSignals(ctx context.Context) {
 	signal.Notify(notifier, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		sig := <-notifier
-		// lock the exit process call
-		x.syscallLocker.Lock()
 		x.logger.Infof("received an interrupt signal (%s) to shutdown", sig.String())
 		x.stopping.Store(true)
 

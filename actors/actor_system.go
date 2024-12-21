@@ -263,7 +263,6 @@ type actorSystem struct {
 	rebalancing    *atomic.Bool
 	shutdownHooks  []ShutdownHook
 	stopping       *atomic.Bool
-	syscallLocker  *sync.Mutex
 }
 
 var (
@@ -309,7 +308,6 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		rebalancing:            atomic.NewBool(false),
 		shutdownHooks:          make([]ShutdownHook, 0),
 		stopping:               atomic.NewBool(false),
-		syscallLocker:          &sync.Mutex{},
 	}
 
 	system.started.Store(false)
