@@ -25,11 +25,16 @@
 package actors
 
 import (
+	"context"
 	"time"
 
 	"github.com/tochemey/goakt/v2/hash"
 	"github.com/tochemey/goakt/v2/log"
 )
+
+// ShutdownHook defines the shutdown hook to be executed alongside the
+// termination of the actor system
+type ShutdownHook func(ctx context.Context) error
 
 // Option is the interface that applies a configuration option.
 type Option interface {
@@ -160,4 +165,14 @@ func WithJanitorInterval(interval time.Duration) Option {
 			system.janitorInterval = interval
 		},
 	)
+}
+
+// WithCoordinatedShutdown registers internal and user-defined tasks to be executed during the shutdown process.
+// The defined tasks will be executed in the same order of insertion.
+// Any failure will halt the shutdown process when one directly call the Stop method
+// of the actor system. On the other hand their failure will not halt any system triggered shutdown.
+func WithCoordinatedShutdown(hooks ...ShutdownHook) Option {
+	return OptionFunc(func(system *actorSystem) {
+		system.shutdownHooks = append(system.shutdownHooks, hooks...)
+	})
 }

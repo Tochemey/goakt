@@ -27,7 +27,11 @@ package actors
 import (
 	"context"
 	"net"
+	"os"
+	"os/signal"
+	"runtime"
 	"strconv"
+	"syscall"
 	"testing"
 	"time"
 
@@ -1636,5 +1640,74 @@ func TestActorSystem(t *testing.T) {
 		assert.NoError(t, sd1.Close())
 		// shutdown the nats server gracefully
 		srv.Shutdown()
+	})
+	t.Run("With os interrupt", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip()
+		}
+
+		ctx := context.TODO()
+		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+
+		// start the actor system
+		err := sys.Start(ctx)
+		assert.NoError(t, err)
+
+		lib.Pause(time.Second)
+
+		actor := newMockActor()
+		actorRef, err := sys.Spawn(ctx, "Test", actor)
+		assert.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		assert.NotZero(t, sys.Uptime())
+
+		sig := syscall.SIGINT
+		sigCh := make(chan os.Signal, 2)
+		signal.Notify(sigCh, sig)
+
+		process, err := os.FindProcess(syscall.Getpid())
+		require.NoError(t, err)
+		switch {
+		case runtime.GOOS == "windows":
+			err = process.Kill()
+			require.NoError(t, err)
+		default:
+			err = process.Signal(sig)
+			require.NoError(t, err)
+		}
+
+		// two signals are expected to be received
+		waitForSignals(t, sigCh, sig)
+		waitForSignals(t, sigCh, sig)
+
+		require.False(t, sys.Running())
+		assert.Zero(t, sys.Uptime())
+	})
+	t.Run("With CoordinatedShutdown failure", func(t *testing.T) {
+		ctx := context.TODO()
+		shutdownHook := func(context.Context) error { return errors.New("shutdown failure") }
+
+		sys, _ := NewActorSystem("testSys",
+			WithCoordinatedShutdown(shutdownHook),
+			WithLogger(log.DiscardLogger))
+
+		// start the actor system
+		err := sys.Start(ctx)
+		assert.NoError(t, err)
+
+		lib.Pause(time.Second)
+
+		actor := newMockActor()
+		actorRef, err := sys.Spawn(ctx, "Test", actor)
+		assert.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		assert.NotZero(t, sys.Uptime())
+
+		// stop the actor after some time
+		lib.Pause(time.Second)
+		err = sys.Stop(ctx)
+		assert.Error(t, err)
 	})
 }

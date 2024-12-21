@@ -57,6 +57,7 @@ import (
 	"github.com/tochemey/goakt/v2/internal/eventstream"
 	"github.com/tochemey/goakt/v2/internal/internalpb"
 	"github.com/tochemey/goakt/v2/internal/internalpb/internalpbconnect"
+	"github.com/tochemey/goakt/v2/internal/oslib"
 	"github.com/tochemey/goakt/v2/internal/tcp"
 	"github.com/tochemey/goakt/v2/internal/types"
 	"github.com/tochemey/goakt/v2/log"
@@ -68,9 +69,11 @@ type ActorSystem interface {
 	Name() string
 	// Actors returns the list of Actors that are alive in the actor system
 	Actors() []*PID
-	// Start starts the actor system
+	// Start initializes the actor system and listens for OS signals to gracefully shut it down and terminate the program.
+	// This ensures a clean shutdown of the actor system in the event of an unexpected system termination.
 	Start(ctx context.Context) error
-	// Stop stops the actor system
+	// Stop stops the actor system and does not terminate the program.
+	// One needs to explicitly call os.Exit to terminate the program.
 	Stop(ctx context.Context) error
 	// Spawn creates an actor in the system and starts it
 	Spawn(ctx context.Context, name string, actor Actor, opts ...SpawnOption) (*PID, error)
@@ -152,6 +155,8 @@ type ActorSystem interface {
 	Port() int32
 	// Uptime returns the number of seconds since the actor system started
 	Uptime() int64
+	// Running returns true when the actor system is running
+	Running() bool
 	// handleRemoteAsk handles a synchronous message to another actor and expect a response.
 	// This block until a response is received or timed out.
 	handleRemoteAsk(ctx context.Context, to *PID, message proto.Message, timeout time.Duration) (response proto.Message, err error)
@@ -232,8 +237,9 @@ type actorSystem struct {
 	// specifies the stash capacity
 	stashEnabled bool
 
-	stopGC          chan types.Unit
-	janitorInterval time.Duration
+	stopGC              chan types.Unit
+	stopOsInterruptsLrn chan types.Unit
+	janitorInterval     time.Duration
 
 	// specifies the events stream
 	eventsStream *eventstream.EventsStream
@@ -257,6 +263,7 @@ type actorSystem struct {
 	deadletters    *PID
 	startedAt      *atomic.Int64
 	rebalancing    *atomic.Bool
+	shutdownHooks  []ShutdownHook
 }
 
 var (
@@ -300,6 +307,8 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		actors:                 newTree(),
 		startedAt:              atomic.NewInt64(0),
 		rebalancing:            atomic.NewBool(false),
+		stopOsInterruptsLrn:    make(chan types.Unit, 1),
+		shutdownHooks:          make([]ShutdownHook, 0),
 	}
 
 	system.started.Store(false)
@@ -331,6 +340,11 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		withSchedulerRemoting(NewRemoting()))
 
 	return system, nil
+}
+
+// Running returns true when the actor system is running
+func (x *actorSystem) Running() bool {
+	return x.started.Load()
 }
 
 // Uptime returns the number of seconds since the actor system started
@@ -742,9 +756,10 @@ func (x *actorSystem) RemoteActor(ctx context.Context, actorName string) (addr *
 	return address.From(actor.GetActorAddress()), nil
 }
 
-// Start starts the actor system
+// Start initializes the actor system and listens for OS signals to gracefully shut it down and terminate the program.
+// This ensures a clean shutdown of the actor system in the event of an unexpected system termination.
 func (x *actorSystem) Start(ctx context.Context) error {
-	x.logger.Infof("%s actor system starting..", x.name)
+	x.logger.Infof("%s actor system starting on %s/%s..", x.name, runtime.GOOS, runtime.GOARCH)
 	x.started.Store(true)
 	if err := errorschain.
 		New(errorschain.ReturnFirst()).
@@ -764,77 +779,17 @@ func (x *actorSystem) Start(ctx context.Context) error {
 
 	x.scheduler.Start(ctx)
 	x.startedAt.Store(time.Now().Unix())
+	x.handleInterrupts(ctx)
 	x.logger.Infof("%s actor system successfully started..:)", x.name)
 	return nil
 }
 
-// Stop stops the actor system
+// Stop stops the actor system and does not terminate the program.
+// One needs to explicitly call os.Exit to terminate the program.
 func (x *actorSystem) Stop(ctx context.Context) error {
-	x.logger.Infof("%s shutting down...", x.name)
-
-	// make sure the actor system has started
-	if !x.started.Load() {
-		return ErrActorSystemNotStarted
-	}
-
-	x.stopGC <- types.Unit{}
-	x.logger.Infof("%s is shutting down..:)", x.name)
-
-	x.started.Store(false)
-	x.scheduler.Stop(ctx)
-
-	ctx, cancel := context.WithTimeout(ctx, x.shutdownTimeout)
-	defer cancel()
-
-	var actorNames []string
-	for _, actor := range x.Actors() {
-		actorNames = append(actorNames, actor.Name())
-	}
-
-	if err := x.getRootGuardian().Shutdown(ctx); err != nil {
-		x.reset()
-		x.logger.Errorf("%s failed to shutdown cleanly: %w", x.name, err)
-		return err
-	}
-	x.actors.DeleteNode(x.getRootGuardian())
-
-	if x.eventsStream != nil {
-		x.eventsStream.Shutdown()
-	}
-
-	if x.clusterEnabled.Load() {
-		if err := errorschain.
-			New(errorschain.ReturnFirst()).
-			AddError(x.cleanupCluster(ctx, actorNames)).
-			AddError(x.cluster.Stop(ctx)).
-			Error(); err != nil {
-			x.reset()
-			x.logger.Errorf("%s failed to shutdown cleanly: %w", x.name, err)
-			return err
-		}
-
-		close(x.actorsChan)
-		x.clusterSyncStopSig <- types.Unit{}
-		x.clusterEnabled.Store(false)
-		close(x.rebalancingChan)
-	}
-
-	if x.remotingEnabled.Load() {
-		x.remoting.Close()
-		if err := x.shutdownHTTPServer(ctx); err != nil {
-			x.reset()
-			x.logger.Errorf("%s failed to shutdown: %w", x.name, err)
-			return err
-		}
-
-		x.remotingEnabled.Store(false)
-		x.server = nil
-		x.listener = nil
-	}
-
-	x.reset()
-	x.logger.Infof("%s shuts down successfully", x.name)
-	return nil
+	x.stopOsInterruptsLrn <- types.Unit{}
+	close(x.stopOsInterruptsLrn)
+	return x.shutdown(ctx)
 }
 
 // RemoteLookup for an actor on a remote host.
@@ -1346,6 +1301,83 @@ func (x *actorSystem) reset() {
 	x.actors.Reset()
 }
 
+// shutdown stops the actor system
+func (x *actorSystem) shutdown(ctx context.Context) error {
+	x.logger.Infof("%s shutting down...", x.name)
+
+	// make sure the actor system has started
+	if !x.started.Load() {
+		return ErrActorSystemNotStarted
+	}
+
+	x.stopGC <- types.Unit{}
+	x.logger.Infof("%s is shutting down..:)", x.name)
+
+	x.started.Store(false)
+	x.scheduler.Stop(ctx)
+
+	// run the various shutdown hooks
+	for _, hook := range x.shutdownHooks {
+		if err := hook(ctx); err != nil {
+			x.reset()
+			return err
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, x.shutdownTimeout)
+	defer cancel()
+
+	var actorNames []string
+	for _, actor := range x.Actors() {
+		actorNames = append(actorNames, actor.Name())
+	}
+
+	if err := x.getRootGuardian().Shutdown(ctx); err != nil {
+		x.reset()
+		x.logger.Errorf("%s failed to shutdown cleanly: %w", x.name, err)
+		return err
+	}
+	x.actors.DeleteNode(x.getRootGuardian())
+
+	if x.eventsStream != nil {
+		x.eventsStream.Shutdown()
+	}
+
+	if x.clusterEnabled.Load() {
+		if err := errorschain.
+			New(errorschain.ReturnFirst()).
+			AddError(x.cleanupCluster(ctx, actorNames)).
+			AddError(x.cluster.Stop(ctx)).
+			Error(); err != nil {
+			x.reset()
+			x.logger.Errorf("%s failed to shutdown cleanly: %w", x.name, err)
+			return err
+		}
+
+		close(x.actorsChan)
+		x.clusterSyncStopSig <- types.Unit{}
+		x.clusterEnabled.Store(false)
+		close(x.rebalancingChan)
+	}
+
+	if x.remotingEnabled.Load() {
+		x.remoting.Close()
+		if err := x.shutdownHTTPServer(ctx); err != nil {
+			x.reset()
+			x.logger.Errorf("%s failed to shutdown: %w", x.name, err)
+			return err
+		}
+
+		x.remotingEnabled.Store(false)
+		x.server = nil
+		x.listener = nil
+	}
+
+	x.reset()
+	x.logger.Infof("%s shuts down successfully", x.name)
+	return nil
+}
+
 // replicationLoop publishes newly created actor into the cluster when cluster is enabled
 func (x *actorSystem) replicationLoop() {
 	for actor := range x.actorsChan {
@@ -1794,6 +1826,15 @@ func (x *actorSystem) cleanupCluster(ctx context.Context, actorNames []string) e
 		})
 	}
 	return eg.Wait()
+}
+
+func (x *actorSystem) handleInterrupts(ctx context.Context) {
+	// register for shutdown hook
+	oslib.RegisterShutdownHook(func() error {
+		return x.shutdown(ctx)
+	})
+	// handle the os interrupts
+	oslib.HandleInterrupts(x.logger, x.stopOsInterruptsLrn)
 }
 
 func isReservedName(name string) bool {

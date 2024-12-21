@@ -621,7 +621,9 @@ func (n *Engine) consume() {
 			n.logger.Debugf("%s received (%s) cluster event:[addr=(%s)]", n.name, kind, event.GetAddress())
 
 			payload, _ := anypb.New(event)
+			n.eventsLock.Lock()
 			n.events <- &Event{payload, NodeJoined}
+			n.eventsLock.Unlock()
 
 		case events.KindNodeLeftEvent:
 			nodeLeft := new(events.NodeLeftEvent)
@@ -642,7 +644,9 @@ func (n *Engine) consume() {
 			n.logger.Debugf("%s received (%s) cluster event:[addr=(%s)]", n.name, kind, event.GetAddress())
 
 			payload, _ := anypb.New(event)
+			n.eventsLock.Lock()
 			n.events <- &Event{payload, NodeLeft}
+			n.eventsLock.Unlock()
 		default:
 			// skip
 		}
