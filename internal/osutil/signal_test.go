@@ -39,7 +39,6 @@ import (
 
 func TestHandleSignals(t *testing.T) {
 	t.Run("With signals", func(t *testing.T) {
-
 		// let us send some signals
 		signals := []syscall.Signal{
 			syscall.SIGINT,
@@ -69,7 +68,7 @@ func TestHandleSignals(t *testing.T) {
 			signalLocker.Unlock()
 		}
 	})
-	t.Run("With cancellation", func(t *testing.T) {
+	t.Run("With cancellation", func(t *testing.T) { // nolint
 		cancelCh := make(chan types.Unit, 1)
 		HandleSignals(log.DiscardLogger, cancelCh)
 		close(cancelCh)
