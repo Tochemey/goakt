@@ -22,7 +22,7 @@
  * SOFTWARE.
  */
 
-package osutil
+package oslib
 
 import (
 	"os"
@@ -37,7 +37,7 @@ import (
 	"github.com/tochemey/goakt/v2/log"
 )
 
-func TestHandleSignals(t *testing.T) {
+func TestHandleInterrupts(t *testing.T) {
 	t.Run("With signals", func(t *testing.T) {
 		// let us send some signals
 		signals := []syscall.Signal{
@@ -47,7 +47,7 @@ func TestHandleSignals(t *testing.T) {
 
 		for _, sig := range signals {
 			callCount := 0
-			RegisterExitHook(func() error {
+			RegisterShutdownHook(func() error {
 				callCount++
 				return nil
 			})
@@ -55,7 +55,7 @@ func TestHandleSignals(t *testing.T) {
 			sigCh := make(chan os.Signal, 2)
 			signal.Notify(sigCh, sig)
 
-			HandleSignals(log.DiscardLogger, nil)
+			HandleInterrupts(log.DiscardLogger, nil)
 			err := syscall.Kill(syscall.Getpid(), sig)
 			require.NoError(t, err)
 
@@ -64,13 +64,13 @@ func TestHandleSignals(t *testing.T) {
 			waitForSignals(t, sigCh, sig)
 
 			require.EqualValues(t, 1, callCount)
-			exitHook = nil
+			shutdownHook = nil
 			signalLocker.Unlock()
 		}
 	})
 	t.Run("With cancellation", func(t *testing.T) { // nolint
 		cancelCh := make(chan types.Unit, 1)
-		HandleSignals(log.DiscardLogger, cancelCh)
+		HandleInterrupts(log.DiscardLogger, cancelCh)
 		close(cancelCh)
 	})
 }

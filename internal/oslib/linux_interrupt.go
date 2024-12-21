@@ -22,7 +22,7 @@
  * SOFTWARE.
  */
 
-package osutil
+package oslib
 
 import (
 	"os"
@@ -37,28 +37,28 @@ import (
 var (
 	signalLocker sync.Mutex
 	hookLocker   sync.Mutex
-	exitHook     ExitHook
+	shutdownHook ShutdownHook
 )
 
-// ExitHook is executed on receiving SIGTERM or SIGINT signal.
-type ExitHook func() error
+// ShutdownHook is executed on receiving SIGTERM or SIGINT signal.
+type ShutdownHook func() error
 
-// RegisterExitHook registers the ExistHook in a thread-safe manner
-func RegisterExitHook(hook ExitHook) {
+// RegisterShutdownHook registers the ExistHook in a thread-safe manner
+func RegisterShutdownHook(hook ShutdownHook) {
 	hookLocker.Lock()
-	exitHook = hook
+	shutdownHook = hook
 	hookLocker.Unlock()
 }
 
-// HandleSignals handles os SIGINT or SIGTERM signals
-func HandleSignals(logger log.Logger, cancel <-chan types.Unit) {
+// HandleInterrupts handles os SIGINT or SIGTERM interrupts
+func HandleInterrupts(logger log.Logger, cancel <-chan types.Unit) {
 	notifier := make(chan os.Signal, 1)
 	signal.Notify(notifier, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		select {
 		case sig := <-notifier:
 			hookLocker.Lock()
-			hook := exitHook
+			hook := shutdownHook
 			hookLocker.Unlock()
 
 			// lock the exit process call

@@ -57,7 +57,7 @@ import (
 	"github.com/tochemey/goakt/v2/internal/eventstream"
 	"github.com/tochemey/goakt/v2/internal/internalpb"
 	"github.com/tochemey/goakt/v2/internal/internalpb/internalpbconnect"
-	"github.com/tochemey/goakt/v2/internal/osutil"
+	"github.com/tochemey/goakt/v2/internal/oslib"
 	"github.com/tochemey/goakt/v2/internal/tcp"
 	"github.com/tochemey/goakt/v2/internal/types"
 	"github.com/tochemey/goakt/v2/log"
@@ -776,7 +776,7 @@ func (x *actorSystem) Start(ctx context.Context) error {
 
 	x.scheduler.Start(ctx)
 	x.startedAt.Store(time.Now().Unix())
-	x.handlePlatformSignals(ctx)
+	x.handleInterrupts(ctx)
 	x.logger.Infof("%s actor system successfully started..:)", x.name)
 	return nil
 }
@@ -1816,17 +1816,13 @@ func (x *actorSystem) cleanupCluster(ctx context.Context, actorNames []string) e
 	return eg.Wait()
 }
 
-func (x *actorSystem) handlePlatformSignals(ctx context.Context) {
-	if runtime.GOOS == "windows" {
-		return
-	}
-
-	// register for os signals
-	osutil.RegisterExitHook(func() error {
+func (x *actorSystem) handleInterrupts(ctx context.Context) {
+	// register for shutdown hook
+	oslib.RegisterShutdownHook(func() error {
 		return x.shutdown(ctx)
 	})
-	// handle the os signal
-	osutil.HandleSignals(x.logger, x.cancelChan)
+	// handle the os interrupts
+	oslib.HandleInterrupts(x.logger, x.cancelChan)
 }
 
 func isReservedName(name string) bool {
