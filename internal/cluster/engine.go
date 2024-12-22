@@ -267,19 +267,24 @@ func (n *Engine) Start(ctx context.Context) error {
 
 	n.dmap = newDMap
 
-	// create a subscriber to consume to cluster events
-	ps, err := n.client.NewPubSub(olric.ToAddress(n.node.PeersAddress()))
-	if err != nil {
-		logger.Error(fmt.Errorf("failed to start the cluster Engine on node=(%s): %w", n.name, err))
-		return n.server.Shutdown(ctx)
-	}
-
 	// set the peer state
 	n.peerState = &internalpb.PeerState{
 		Host:         n.node.Host,
 		RemotingPort: int32(n.node.RemotingPort),
 		PeersPort:    int32(n.node.PeersPort),
 		Actors:       []*internalpb.ActorRef{},
+	}
+
+	if err := n.initializeState(ctx); err != nil {
+		logger.Error(fmt.Errorf("failed to start the cluster Engine on node=(%s): %w", n.name, err))
+		return n.server.Shutdown(ctx)
+	}
+
+	// create a subscriber to consume to cluster events
+	ps, err := n.client.NewPubSub(olric.ToAddress(n.node.PeersAddress()))
+	if err != nil {
+		logger.Error(fmt.Errorf("failed to start the cluster Engine on node=(%s): %w", n.name, err))
+		return n.server.Shutdown(ctx)
 	}
 
 	n.pubSub = ps.Subscribe(ctx, events.ClusterEventsChannel)
@@ -715,4 +720,10 @@ func (n *Engine) buildConfig() *config.Config {
 	}
 
 	return conf
+}
+
+// initializeState sets the node state in the cluster after boot
+func (n *Engine) initializeState(ctx context.Context) error {
+	encoded, _ := proto.Marshal(n.peerState)
+	return n.dmap.Put(ctx, n.node.PeersAddress(), encoded)
 }

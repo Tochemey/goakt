@@ -1531,10 +1531,11 @@ func (x *actorSystem) processPeerState(ctx context.Context, peer *cluster.Peer) 
 	x.logger.Infof("processing peer sync:(%s)", peerAddress)
 	peerState, err := x.cluster.GetState(ctx, peerAddress)
 	if err != nil {
-		if !errors.Is(err, cluster.ErrPeerSyncNotFound) {
-			x.logger.Error(err)
-			return err
+		if errors.Is(err, cluster.ErrPeerSyncNotFound) {
+			return nil
 		}
+		x.logger.Error(err)
+		return err
 	}
 
 	x.logger.Debugf("peer (%s) actors count (%d)", peerAddress, len(peerState.GetActors()))
