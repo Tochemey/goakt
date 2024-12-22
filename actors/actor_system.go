@@ -1508,6 +1508,7 @@ func (x *actorSystem) rebalancingLoop() {
 			continue
 		}
 
+		x.rebalancing.Store(true)
 		message := &internalpb.Rebalance{PeerState: peerState}
 		if err := x.systemGuardian.Tell(ctx, x.rebalancer, message); err != nil {
 			x.logger.Error(err)
