@@ -157,8 +157,8 @@ type Engine struct {
 	// specifies the node state
 	peerState *internalpb.PeerState
 
-	joinEventNodes goset.Set[events.NodeJoinEvent]
-	leftEventNodes goset.Set[events.NodeLeftEvent]
+	joinEventNodes goset.Set[string]
+	leftEventNodes goset.Set[string]
 }
 
 // enforce compilation error
@@ -183,8 +183,8 @@ func NewEngine(name string, disco discovery.Provider, host *discovery.Node, opts
 		minimumPeersQuorum: 1,
 		replicaCount:       1,
 		Mutex:              new(sync.Mutex),
-		joinEventNodes:     goset.NewSet[events.NodeJoinEvent](),
-		leftEventNodes:     goset.NewSet[events.NodeLeftEvent](),
+		joinEventNodes:     goset.NewSet[string](),
+		leftEventNodes:     goset.NewSet[string](),
 	}
 	// apply the various options
 	for _, opt := range opts {
@@ -627,7 +627,7 @@ func (n *Engine) consume() {
 				continue
 			}
 
-			if n.joinEventNodes.Contains(*nodeJoined) {
+			if n.joinEventNodes.Contains(nodeJoined.NodeJoin) {
 				n.eventsLock.Unlock()
 				continue
 			}
@@ -653,7 +653,7 @@ func (n *Engine) consume() {
 				continue
 			}
 
-			if n.leftEventNodes.Contains(*nodeLeft) {
+			if n.leftEventNodes.Contains(nodeLeft.NodeLeft) {
 				n.eventsLock.Unlock()
 				continue
 			}
