@@ -1757,6 +1757,7 @@ func (x *actorSystem) spawnRebalancer(ctx context.Context) error {
 		newRebalancer(x.reflection),
 		WithSupervisorStrategies(
 			NewSupervisorStrategy(PanicError{}, NewRestartDirective()),
+			NewSupervisorStrategy(&runtime.PanicNilError{}, NewRestartDirective()),
 		),
 	)
 	if err != nil {

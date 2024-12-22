@@ -31,8 +31,6 @@ import (
 	"runtime"
 	"syscall"
 	"time"
-
-	"github.com/tochemey/goakt/v2/internal/lib"
 )
 
 // handleSignals handles os SIGINT or SIGTERM interrupts
@@ -52,7 +50,7 @@ func (x *actorSystem) handleSignals(ctx context.Context) {
 		// wait for the shutdown to complete properly
 		// if given that period the system cannot properly shut down then
 		// we do have an issue
-		lib.Pause(x.shutdownTimeout + time.Second)
+		time.Sleep(x.shutdownTimeout + time.Second)
 
 		signal.Stop(notifier)
 		pid := os.Getpid()
