@@ -68,8 +68,9 @@ type ActorSystem interface {
 	Name() string
 	// Actors returns the list of Actors that are alive in the actor system
 	Actors() []*PID
-	// Start initializes the actor system and listens for OS signals to gracefully shut it down and terminate the program.
-	// This ensures a clean shutdown of the actor system in the event of an unexpected system termination.
+	// Start initializes the actor system.
+	// To guarantee a clean shutdown during unexpected system terminations,
+	// developers must handle SIGTERM and SIGINT signals appropriately and invoke Stop.
 	Start(ctx context.Context) error
 	// Stop stops the actor system and does not terminate the program.
 	// One needs to explicitly call os.Exit to terminate the program.
@@ -262,7 +263,6 @@ type actorSystem struct {
 	startedAt      *atomic.Int64
 	rebalancing    *atomic.Bool
 	shutdownHooks  []ShutdownHook
-	stopping       *atomic.Bool
 }
 
 var (
@@ -307,7 +307,6 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		startedAt:              atomic.NewInt64(0),
 		rebalancing:            atomic.NewBool(false),
 		shutdownHooks:          make([]ShutdownHook, 0),
-		stopping:               atomic.NewBool(false),
 	}
 
 	system.started.Store(false)
@@ -755,8 +754,9 @@ func (x *actorSystem) RemoteActor(ctx context.Context, actorName string) (addr *
 	return address.From(actor.GetActorAddress()), nil
 }
 
-// Start initializes the actor system and listens for OS signals to gracefully shut it down and terminate the program.
-// This ensures a clean shutdown of the actor system in the event of an unexpected system termination.
+// Start initializes the actor system.
+// To guarantee a clean shutdown during unexpected system terminations,
+// developers must handle SIGTERM and SIGINT signals appropriately and invoke Stop.
 func (x *actorSystem) Start(ctx context.Context) error {
 	x.logger.Infof("%s actor system starting on %s/%s..", x.name, runtime.GOOS, runtime.GOARCH)
 	x.started.Store(true)
@@ -778,7 +778,6 @@ func (x *actorSystem) Start(ctx context.Context) error {
 
 	x.scheduler.Start(ctx)
 	x.startedAt.Store(time.Now().Unix())
-	x.handleSignals(ctx)
 	x.logger.Infof("%s actor system successfully started..:)", x.name)
 	return nil
 }
@@ -786,9 +785,6 @@ func (x *actorSystem) Start(ctx context.Context) error {
 // Stop stops the actor system and does not terminate the program.
 // One needs to explicitly call os.Exit to terminate the program.
 func (x *actorSystem) Stop(ctx context.Context) error {
-	if x.stopping.Load() {
-		return nil
-	}
 	return x.shutdown(ctx)
 }
 
