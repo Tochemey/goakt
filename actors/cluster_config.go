@@ -174,6 +174,5 @@ func (x *ClusterConfig) Validate() error {
 		AddAssertion(x.writeQuorum > 0, "cluster writeQuorum is invalid").
 		AddAssertion(x.readQuorum > 0, "cluster readQuorum is invalid").
 		AddAssertion(x.writeQuorum+x.readQuorum >= x.replicaCount, "consistency quorums violated. The basic formula is W + R >= N(replicas count)").
-		AddAssertion(x.replicaCount <= x.minimumPeersQuorum, "replica count should be less or equal to minimum peers quorum").
 		Validate()
 }
