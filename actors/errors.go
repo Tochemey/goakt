@@ -118,3 +118,16 @@ func NewPanicError(err error) PanicError {
 func (e PanicError) Error() string {
 	return fmt.Sprintf("panic: %v", e.err)
 }
+
+type rebalancingError struct {
+	err error
+}
+
+// creates an instance of rebalancingError
+func newRebalancingError(err error) rebalancingError {
+	return rebalancingError{err}
+}
+
+func (e rebalancingError) Error() string {
+	return fmt.Errorf("rebalancer: %w", e.err).Error()
+}

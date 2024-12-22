@@ -28,6 +28,7 @@ import (
 	"context"
 
 	"github.com/tochemey/goakt/v2/goaktpb"
+	"github.com/tochemey/goakt/v2/internal/internalpb"
 	"github.com/tochemey/goakt/v2/log"
 )
 
@@ -60,6 +61,9 @@ func (g *systemGuardian) Receive(ctx *ReceiveContext) {
 		g.pid = ctx.Self()
 		g.logger = ctx.Logger()
 		g.logger.Infof("%s started successfully", g.pid.Name())
+	case *internalpb.RebalanceComplete:
+		g.pid.ActorSystem().completeRebalancing()
+		g.pid.ActorSystem().removePeerStateFromCache(msg.GetPeerAddress())
 	case *goaktpb.Terminated:
 		actorID := msg.GetActorId()
 		system := ctx.ActorSystem()

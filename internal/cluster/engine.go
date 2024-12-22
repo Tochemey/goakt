@@ -173,7 +173,7 @@ func NewEngine(name string, disco discovery.Provider, host *discovery.Node, opts
 		shutdownTimeout:    3 * time.Second,
 		hasher:             hash.DefaultHasher(),
 		pubSub:             nil,
-		events:             make(chan *Event, 20),
+		events:             make(chan *Event, 256),
 		eventsLock:         &sync.Mutex{},
 		messagesChan:       make(chan *redis.Message, 1),
 		minimumPeersQuorum: 1,
@@ -601,52 +601,50 @@ func (n *Engine) consume() {
 		kind := event["kind"]
 		switch kind {
 		case events.KindNodeJoinEvent:
+			n.eventsLock.Lock()
 			nodeJoined := new(events.NodeJoinEvent)
 			if err := json.Unmarshal([]byte(payload), &nodeJoined); err != nil {
 				n.logger.Errorf("failed to unmarshal node join cluster event: %v", err)
 				// TODO: should we continue or not
+				n.eventsLock.Unlock()
 				continue
 			}
 
 			if n.node.PeersAddress() == nodeJoined.NodeJoin {
 				n.logger.Debug("skipping self")
+				n.eventsLock.Unlock()
 				continue
 			}
 
-			// TODO: need to cross check this calculation
 			timeMilli := nodeJoined.Timestamp / int64(1e6)
 			event := &goaktpb.NodeJoined{
 				Address:   nodeJoined.NodeJoin,
 				Timestamp: timestamppb.New(time.UnixMilli(timeMilli)),
 			}
 
-			n.logger.Debugf("%s received (%s) cluster event:[addr=(%s)]", n.name, kind, event.GetAddress())
-
+			n.logger.Debugf("%s received (%s):[addr=(%s)] cluster event", n.name, kind, event.GetAddress())
 			payload, _ := anypb.New(event)
-			n.eventsLock.Lock()
 			n.events <- &Event{payload, NodeJoined}
 			n.eventsLock.Unlock()
 
 		case events.KindNodeLeftEvent:
+			n.eventsLock.Lock()
 			nodeLeft := new(events.NodeLeftEvent)
 			if err := json.Unmarshal([]byte(payload), &nodeLeft); err != nil {
 				n.logger.Errorf("failed to unmarshal node left cluster event: %v", err)
 				// TODO: should we continue or not
+				n.eventsLock.Unlock()
 				continue
 			}
 
-			// TODO: need to cross check this calculation
 			timeMilli := nodeLeft.Timestamp / int64(1e6)
-
 			event := &goaktpb.NodeLeft{
 				Address:   nodeLeft.NodeLeft,
 				Timestamp: timestamppb.New(time.UnixMilli(timeMilli)),
 			}
 
-			n.logger.Debugf("%s received (%s) cluster event:[addr=(%s)]", n.name, kind, event.GetAddress())
-
+			n.logger.Debugf("%s received (%s):[addr=(%s)] cluster event", n.name, kind, event.GetAddress())
 			payload, _ := anypb.New(event)
-			n.eventsLock.Lock()
 			n.events <- &Event{payload, NodeLeft}
 			n.eventsLock.Unlock()
 		default:
