@@ -258,15 +258,16 @@ type actorSystem struct {
 	rebalancingQueue       chan *internalpb.PeerState
 	leftNodesInflight      goset.Set[string]
 
-	rebalancer     *PID
-	rootGuardian   *PID
-	userGuardian   *PID
-	systemGuardian *PID
-	janitor        *PID
-	deadletters    *PID
-	startedAt      *atomic.Int64
-	rebalancing    *atomic.Bool
-	shutdownHooks  []ShutdownHook
+	rebalancer      *PID
+	rootGuardian    *PID
+	userGuardian    *PID
+	systemGuardian  *PID
+	janitor         *PID
+	deadletters     *PID
+	startedAt       *atomic.Int64
+	rebalancing     *atomic.Bool
+	rebalanceLocker *sync.Mutex
+	shutdownHooks   []ShutdownHook
 }
 
 var (
@@ -312,6 +313,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		rebalancing:            atomic.NewBool(false),
 		shutdownHooks:          make([]ShutdownHook, 0),
 		leftNodesInflight:      goset.NewSet[string](),
+		rebalanceLocker:        &sync.Mutex{},
 	}
 
 	system.started.Store(false)
@@ -1361,7 +1363,9 @@ func (x *actorSystem) shutdown(ctx context.Context) error {
 		x.clusterSyncStopSig <- types.Unit{}
 		x.clusterEnabled.Store(false)
 		x.rebalancing.Store(false)
+		x.rebalanceLocker.Lock()
 		close(x.rebalancingQueue)
+		x.rebalanceLocker.Unlock()
 	}
 
 	if x.remotingEnabled.Load() {
@@ -1421,7 +1425,9 @@ func (x *actorSystem) clusterEventsLoop() {
 
 					x.leftNodesInflight.Add(nodeLeft.GetAddress())
 					if peerState, ok := x.peersCache.get(nodeLeft.GetAddress()); ok {
+						x.rebalanceLocker.Lock()
 						x.rebalancingQueue <- peerState
+						x.rebalanceLocker.Unlock()
 					}
 				}
 			}
