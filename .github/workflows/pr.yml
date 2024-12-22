@@ -16,10 +16,7 @@ concurrency:
 
 jobs:
   build:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ ubuntu-latest, windows-latest, macos-latest ]
+    runs-on: ubuntu-latest
     env:
       FORCE_COLOR: 1
     steps:
