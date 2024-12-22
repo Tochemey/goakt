@@ -1651,18 +1651,6 @@ func (x *actorSystem) configureServer(ctx context.Context, mux *nethttp.ServeMux
 	return nil
 }
 
-// nodeLeftStateFromEvent returns the node left state from the cluster event
-func (x *actorSystem) nodeLeftStateFromEvent(event *cluster.Event) (*internalpb.PeerState, error) {
-	if event.Type != cluster.NodeLeft {
-		return nil, nil
-	}
-	nodeLeft := new(goaktpb.NodeLeft)
-	if err := event.Payload.UnmarshalTo(nodeLeft); err != nil {
-		return nil, err
-	}
-	return x.getPeerStateFromCache(nodeLeft.GetAddress())
-}
-
 // setHostPort sets the host and port
 func (x *actorSystem) setHostPort() error {
 	var err error
@@ -1759,6 +1747,8 @@ func (x *actorSystem) spawnRebalancer(ctx context.Context) error {
 			NewSupervisorStrategy(PanicError{}, NewRestartDirective()),
 			NewSupervisorStrategy(&runtime.PanicNilError{}, NewRestartDirective()),
 			NewSupervisorStrategy(rebalancingError{}, NewRestartDirective()),
+			NewSupervisorStrategy(InternalError{}, NewResumeDirective()),
+			NewSupervisorStrategy(SpawnError{}, NewResumeDirective()),
 		),
 	)
 	if err != nil {
