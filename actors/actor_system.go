@@ -39,7 +39,6 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
-	gods "github.com/Workiva/go-datastructures/queue"
 	goset "github.com/deckarep/golang-set/v2"
 	"github.com/google/uuid"
 	"github.com/reugn/go-quartz/logger"
@@ -256,7 +255,7 @@ type actorSystem struct {
 	peersStateLoopInterval time.Duration
 	peersCache             *peersCache
 	clusterConfig          *ClusterConfig
-	rebalancingQueue       *gods.RingBuffer
+	rebalancingQueue       chan *internalpb.PeerState
 	leftNodesInflight      goset.Set[string]
 
 	rebalancer     *PID
@@ -1249,7 +1248,7 @@ func (x *actorSystem) enableClustering(ctx context.Context) error {
 	x.locker.Lock()
 	x.cluster = clusterEngine
 	x.clusterEventsChan = clusterEngine.Events()
-	x.rebalancingQueue = gods.NewRingBuffer(256)
+	x.rebalancingQueue = make(chan *internalpb.PeerState, 1)
 	for _, kind := range x.clusterConfig.Kinds() {
 		x.registry.Register(kind)
 		x.logger.Infof("cluster kind=(%s) registered", types.TypeName(kind))
@@ -1362,7 +1361,7 @@ func (x *actorSystem) shutdown(ctx context.Context) error {
 		x.clusterSyncStopSig <- types.Unit{}
 		x.clusterEnabled.Store(false)
 		x.rebalancing.Store(false)
-		x.rebalancingQueue.Dispose()
+		close(x.rebalancingQueue)
 	}
 
 	if x.remotingEnabled.Load() {
@@ -1422,7 +1421,7 @@ func (x *actorSystem) clusterEventsLoop() {
 
 					x.leftNodesInflight.Add(nodeLeft.GetAddress())
 					if peerState, ok := x.peersCache.get(nodeLeft.GetAddress()); ok {
-						_ = x.rebalancingQueue.Put(peerState)
+						x.rebalancingQueue <- peerState
 					}
 				}
 			}
@@ -1498,18 +1497,14 @@ func (x *actorSystem) peersStateLoop() {
 
 // rebalancingLoop help perform cluster rebalancing
 func (x *actorSystem) rebalancingLoop() {
-	for {
-		item, err := x.rebalancingQueue.Get()
-		if err != nil {
-			x.logger.Errorf("%s rebalancing loop failed: %v", x.name, err)
-			return
+	for peerState := range x.rebalancingQueue {
+		ctx := context.Background()
+		if !x.shouldRebalance(ctx, peerState) {
+			continue
 		}
 
-		ctx := context.Background()
-		peerState := item.(*internalpb.PeerState)
-		if !x.shouldRebalance(ctx, peerState) {
-			// free up the cpu before the next iteration
-			runtime.Gosched()
+		if x.rebalancing.Load() {
+			x.rebalancingQueue <- peerState
 			continue
 		}
 
@@ -1518,38 +1513,12 @@ func (x *actorSystem) rebalancingLoop() {
 			x.logger.Error(err)
 		}
 	}
-
-	//for event := range x.rebalancingQueue {
-	//	if x.InCluster() {
-	//		if x.rebalancing.Load() {
-	//			x.logger.Debugf("%s on %s rebalancing already ongoing...", x.Name(), x.clusterNode.PeersAddress())
-	//			continue
-	//		}
-	//
-	//		// get peer state
-	//		peerState, err := x.nodeLeftStateFromEvent(event)
-	//		if err != nil {
-	//			x.logger.Error(err)
-	//			continue
-	//		}
-	//
-	//		ctx := context.Background()
-	//		if !x.shouldRebalance(ctx, peerState) {
-	//			continue
-	//		}
-	//		x.logger.Infof("%s on %s starting rebalancing...", x.Name(), x.clusterNode.PeersAddress())
-	//		x.rebalancing.Store(true)
-	//		message := &internalpb.Rebalance{PeerState: peerState}
-	//		if err := x.systemGuardian.Tell(ctx, x.rebalancer, message); err != nil {
-	//			x.logger.Error(err)
-	//		}
-	//	}
-	//}
 }
 
 // shouldRebalance returns true when the current can perform the cluster rebalancing
 func (x *actorSystem) shouldRebalance(ctx context.Context, peerState *internalpb.PeerState) bool {
 	return !(peerState == nil ||
+		!x.InCluster() ||
 		proto.Equal(peerState, new(internalpb.PeerState)) ||
 		len(peerState.GetActors()) == 0 ||
 		!x.cluster.IsLeader(ctx))
@@ -1557,15 +1526,14 @@ func (x *actorSystem) shouldRebalance(ctx context.Context, peerState *internalpb
 
 // processPeerState processes a given peer synchronization record.
 func (x *actorSystem) processPeerState(ctx context.Context, peer *cluster.Peer) error {
-	peerAddress := net.JoinHostPort(peer.Host, strconv.Itoa(peer.Port))
+	peerAddress := net.JoinHostPort(peer.Host, strconv.Itoa(peer.PeersPort))
 	x.logger.Infof("processing peer sync:(%s)", peerAddress)
 	peerState, err := x.cluster.GetState(ctx, peerAddress)
 	if err != nil {
-		if errors.Is(err, cluster.ErrPeerSyncNotFound) {
-			return nil
+		if !errors.Is(err, cluster.ErrPeerSyncNotFound) {
+			x.logger.Error(err)
+			return err
 		}
-		x.logger.Error(err)
-		return err
 	}
 
 	x.logger.Debugf("peer (%s) actors count (%d)", peerAddress, len(peerState.GetActors()))

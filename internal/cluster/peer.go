@@ -33,8 +33,8 @@ import (
 type Peer struct {
 	// Host represents the peer address.
 	Host string
-	// Port represents the peer port
-	Port int
+	// PeersPort represents the peer port
+	PeersPort int
 	// Coordinator states that the given peer is the leader not.
 	// A peer is a coordinator when it is the oldest node in the cluster
 	Coordinator bool
@@ -42,5 +42,5 @@ type Peer struct {
 
 // PeerAddress returns address the node's peers will use to connect to
 func (peer Peer) PeerAddress() string {
-	return net.JoinHostPort(peer.Host, strconv.Itoa(peer.Port))
+	return net.JoinHostPort(peer.Host, strconv.Itoa(peer.PeersPort))
 }

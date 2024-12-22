@@ -39,6 +39,7 @@ import (
 	"github.com/buraksezer/olric/config"
 	"github.com/buraksezer/olric/events"
 	"github.com/buraksezer/olric/hasher"
+	goset "github.com/deckarep/golang-set/v2"
 	"github.com/redis/go-redis/v9"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
@@ -155,6 +156,9 @@ type Engine struct {
 
 	// specifies the node state
 	peerState *internalpb.PeerState
+
+	joinEventNodes goset.Set[events.NodeJoinEvent]
+	leftEventNodes goset.Set[events.NodeLeftEvent]
 }
 
 // enforce compilation error
@@ -179,6 +183,8 @@ func NewEngine(name string, disco discovery.Provider, host *discovery.Node, opts
 		minimumPeersQuorum: 1,
 		replicaCount:       1,
 		Mutex:              new(sync.Mutex),
+		joinEventNodes:     goset.NewSet[events.NodeJoinEvent](),
+		leftEventNodes:     goset.NewSet[events.NodeLeftEvent](),
 	}
 	// apply the various options
 	for _, opt := range opts {
@@ -580,7 +586,7 @@ func (n *Engine) Peers(ctx context.Context) ([]*Peer, error) {
 			n.logger.Debugf("node=(%s) has found peer=(%s)", n.node.PeersAddress(), member.Name)
 			peerHost, port, _ := net.SplitHostPort(member.Name)
 			peerPort, _ := strconv.Atoi(port)
-			peers = append(peers, &Peer{Host: peerHost, Port: peerPort, Coordinator: member.Coordinator})
+			peers = append(peers, &Peer{Host: peerHost, PeersPort: peerPort, Coordinator: member.Coordinator})
 		}
 	}
 	return peers, nil
@@ -616,6 +622,11 @@ func (n *Engine) consume() {
 				continue
 			}
 
+			if n.joinEventNodes.Contains(*nodeJoined) {
+				n.eventsLock.Unlock()
+				continue
+			}
+
 			timeMilli := nodeJoined.Timestamp / int64(1e6)
 			event := &goaktpb.NodeJoined{
 				Address:   nodeJoined.NodeJoin,
@@ -633,6 +644,11 @@ func (n *Engine) consume() {
 			if err := json.Unmarshal([]byte(payload), &nodeLeft); err != nil {
 				n.logger.Errorf("failed to unmarshal node left cluster event: %v", err)
 				// TODO: should we continue or not
+				n.eventsLock.Unlock()
+				continue
+			}
+
+			if n.leftEventNodes.Contains(*nodeLeft) {
 				n.eventsLock.Unlock()
 				continue
 			}

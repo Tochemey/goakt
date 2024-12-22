@@ -71,7 +71,7 @@ func NewDiscovery(config *Config, opts ...Option) *Discovery {
 		initialized: atomic.NewBool(false),
 		registered:  atomic.NewBool(false),
 		config:      config,
-		logger:      log.DefaultLogger,
+		logger:      log.DiscardLogger,
 	}
 
 	// apply the various options
