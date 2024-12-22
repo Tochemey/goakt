@@ -632,6 +632,7 @@ func (n *Engine) consume() {
 				continue
 			}
 
+			n.joinEventNodes.Add(nodeJoined.NodeJoin)
 			timeMilli := nodeJoined.Timestamp / int64(1e6)
 			event := &goaktpb.NodeJoined{
 				Address:   nodeJoined.NodeJoin,
@@ -658,6 +659,7 @@ func (n *Engine) consume() {
 				continue
 			}
 
+			n.leftEventNodes.Add(nodeLeft.NodeLeft)
 			timeMilli := nodeLeft.Timestamp / int64(1e6)
 			event := &goaktpb.NodeLeft{
 				Address:   nodeLeft.NodeLeft,
