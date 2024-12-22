@@ -40,6 +40,8 @@ type ClusterConfig struct {
 	partitionCount     uint64
 	minimumPeersQuorum uint32
 	replicaCount       uint32
+	writeQuorum        uint32
+	readQuorum         uint32
 	discoveryPort      int
 	peersPort          int
 	kinds              []Actor
@@ -53,7 +55,9 @@ func NewClusterConfig() *ClusterConfig {
 	return &ClusterConfig{
 		kinds:              defaultKinds,
 		minimumPeersQuorum: 1,
-		replicaCount:       2,
+		writeQuorum:        1,
+		readQuorum:         1,
+		replicaCount:       1,
 	}
 }
 
@@ -134,6 +138,28 @@ func (x *ClusterConfig) Kinds() []Actor {
 	return x.kinds
 }
 
+// WriteQuorum returns the write quorum
+func (x *ClusterConfig) WriteQuorum() uint32 {
+	return x.writeQuorum
+}
+
+// ReadQuorum returns the read quorum
+func (x *ClusterConfig) ReadQuorum() uint32 {
+	return x.readQuorum
+}
+
+// WithWriteQuorum sets the write quorum
+func (x *ClusterConfig) WithWriteQuorum(count uint32) *ClusterConfig {
+	x.writeQuorum = count
+	return x
+}
+
+// WithReadQuorum sets the read quorum
+func (x *ClusterConfig) WithReadQuorum(count uint32) *ClusterConfig {
+	x.readQuorum = count
+	return x
+}
+
 // Validate validates the cluster config
 func (x *ClusterConfig) Validate() error {
 	return validation.
@@ -144,7 +170,10 @@ func (x *ClusterConfig) Validate() error {
 		AddAssertion(x.discoveryPort > 0, "gossip port is invalid").
 		AddAssertion(x.peersPort > 0, "peers port is invalid").
 		AddAssertion(len(x.kinds) > 1, "actor kinds are not defined").
-		AddAssertion(x.replicaCount > 0, "actor replicaCount is invalid").
+		AddAssertion(x.replicaCount > 0, "cluster replicaCount is invalid").
+		AddAssertion(x.writeQuorum > 0, "cluster writeQuorum is invalid").
+		AddAssertion(x.readQuorum > 0, "cluster readQuorum is invalid").
+		AddAssertion(x.writeQuorum+x.readQuorum >= x.replicaCount, "consistency quorums violated. The basic formula is W + R >= N(replicas count)").
 		AddAssertion(x.replicaCount <= x.minimumPeersQuorum, "replica count should be less or equal to minimum peers quorum").
 		Validate()
 }

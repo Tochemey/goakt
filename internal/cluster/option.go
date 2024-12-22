@@ -104,3 +104,17 @@ func WithReplicaCount(count uint32) Option {
 		eng.replicaCount = count
 	})
 }
+
+// WithWriteQuorum sets the write quorum
+func WithWriteQuorum(count uint32) Option {
+	return OptionFunc(func(eng *Engine) {
+		eng.writeQuorum = count
+	})
+}
+
+// WithReadQuorum sets the read quorum
+func WithReadQuorum(count uint32) Option {
+	return OptionFunc(func(eng *Engine) {
+		eng.readQuorum = count
+	})
+}

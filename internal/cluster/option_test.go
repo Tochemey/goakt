@@ -81,6 +81,16 @@ func TestOptions(t *testing.T) {
 			option:   WithMinimumPeersQuorum(3),
 			expected: Engine{minimumPeersQuorum: 3},
 		},
+		{
+			name:     "WithWriteQuorum",
+			option:   WithWriteQuorum(3),
+			expected: Engine{writeQuorum: 3},
+		},
+		{
+			name:     "WithReadQuorum",
+			option:   WithReadQuorum(3),
+			expected: Engine{readQuorum: 3},
+		},
 	}
 
 	for _, tc := range testCases {

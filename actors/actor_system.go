@@ -1223,6 +1223,8 @@ func (x *actorSystem) enableClustering(ctx context.Context) error {
 		cluster.WithPartitionsCount(x.clusterConfig.PartitionCount()),
 		cluster.WithHasher(x.partitionHasher),
 		cluster.WithMinimumPeersQuorum(x.clusterConfig.MinimumPeersQuorum()),
+		cluster.WithWriteQuorum(x.clusterConfig.WriteQuorum()),
+		cluster.WithReadQuorum(x.clusterConfig.ReadQuorum()),
 		cluster.WithReplicaCount(x.clusterConfig.ReplicaCount()),
 	)
 	if err != nil {

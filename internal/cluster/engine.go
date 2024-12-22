@@ -120,6 +120,8 @@ type Engine struct {
 	// the default values is 1
 	minimumPeersQuorum uint32
 	replicaCount       uint32
+	writeQuorum        uint32
+	readQuorum         uint32
 
 	// specifies the logger
 	logger log.Logger
@@ -182,6 +184,8 @@ func NewEngine(name string, disco discovery.Provider, host *discovery.Node, opts
 		messagesChan:       make(chan *redis.Message, 1),
 		minimumPeersQuorum: 1,
 		replicaCount:       1,
+		writeQuorum:        1,
+		readQuorum:         1,
 		Mutex:              new(sync.Mutex),
 		joinEventNodes:     goset.NewSet[string](),
 		leftEventNodes:     goset.NewSet[string](),
@@ -697,8 +701,8 @@ func (n *Engine) buildConfig() *config.Config {
 		BindPort:                   n.node.PeersPort,
 		ReadRepair:                 true,
 		ReplicaCount:               int(n.replicaCount),
-		WriteQuorum:                config.DefaultWriteQuorum,
-		ReadQuorum:                 config.DefaultReadQuorum,
+		WriteQuorum:                int(n.writeQuorum),
+		ReadQuorum:                 int(n.readQuorum),
 		MemberCountQuorum:          int32(n.minimumPeersQuorum),
 		Peers:                      []string{},
 		DMaps:                      &config.DMaps{},
