@@ -162,11 +162,13 @@ type rebalancingError struct {
 	err error
 }
 
+var _ error = (*rebalancingError)(nil)
+
 // creates an instance of rebalancingError
 func newRebalancingError(err error) rebalancingError {
 	return rebalancingError{err}
 }
 
 func (e rebalancingError) Error() string {
-	return fmt.Errorf("rebalancer: %w", e.err).Error()
+	return fmt.Errorf("rebalancing: %w", e.err).Error()
 }

@@ -1510,7 +1510,9 @@ func (x *actorSystem) rebalancingLoop() {
 		}
 
 		if x.rebalancing.Load() {
+			x.rebalanceLocker.Lock()
 			x.rebalancingQueue <- peerState
+			x.rebalanceLocker.Unlock()
 			continue
 		}
 
