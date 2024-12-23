@@ -321,6 +321,11 @@ To use the stashing feature, call the following methods on the [ReceiveContext](
   in the same order they arrived. The stash buffer will be empty after processing all messages, unless an exception is
   thrown or messages are stashed while unstashing.
 
+### Coordinated Shutdown
+
+GoAkt provides a mechanism to execute user-defined tasks during the shutdown of the actor system. One can use the option `WithCoordinatedShutdown`
+when creating the actor system. The tasks are executed in the order they have been set. Any failure will halt the shutdown process.
+
 ### Remoting
 
 [Remoting](./actors/remoting.go) allows remote actors to communicate. The underlying technology is gRPC. To enable remoting just use the `WithRemoting` option when
