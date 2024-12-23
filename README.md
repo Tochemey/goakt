@@ -40,6 +40,7 @@ Also, check reference section at the end of the post for more material regarding
     - [Cron Expression Format](#cron-expression-format)
     - [Note](#note)
   - [Stashing](#stashing)
+  - [Coordinated Shutdown](#coordinated-shutdown)
   - [Remoting](#remoting)
   - [Cluster](#cluster)
   - [Observability](#observability)
