@@ -36,6 +36,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/travisjeffery/go-dynaport"
+	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/tochemey/goakt/v2/address"
@@ -1636,5 +1637,66 @@ func TestActorSystem(t *testing.T) {
 		assert.NoError(t, sd1.Close())
 		// shutdown the nats server gracefully
 		srv.Shutdown()
+	})
+	t.Run("With CoordinatedShutdown failure", func(t *testing.T) {
+		ctx := context.TODO()
+		shutdownHook := func(context.Context) error { return errors.New("shutdown failure") }
+
+		sys, _ := NewActorSystem("testSys",
+			WithCoordinatedShutdown(shutdownHook),
+			WithLogger(log.DiscardLogger))
+
+		// start the actor system
+		err := sys.Start(ctx)
+		assert.NoError(t, err)
+
+		lib.Pause(time.Second)
+
+		actor := newMockActor()
+		actorRef, err := sys.Spawn(ctx, "Test", actor)
+		assert.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		assert.NotZero(t, sys.Uptime())
+
+		// stop the actor after some time
+		lib.Pause(time.Second)
+		err = sys.Stop(ctx)
+		assert.Error(t, err)
+	})
+	t.Run("With CoordinatedShutdown", func(t *testing.T) {
+		ctx := context.TODO()
+		counter := atomic.NewInt32(0)
+		shutdownHook := func(context.Context) error {
+			counter.Add(1)
+			return nil
+		}
+
+		sys, _ := NewActorSystem("testSys",
+			WithCoordinatedShutdown(shutdownHook, shutdownHook),
+			WithLogger(log.DiscardLogger))
+
+		// start the actor system
+		err := sys.Start(ctx)
+		assert.NoError(t, err)
+
+		lib.Pause(time.Second)
+
+		actor := newMockActor()
+		actorRef, err := sys.Spawn(ctx, "Test", actor)
+		assert.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		assert.NotZero(t, sys.Uptime())
+
+		// stop the actor after some time
+		lib.Pause(time.Second)
+		err = sys.Stop(ctx)
+		require.NoError(t, err)
+
+		lib.Pause(time.Second)
+
+		assert.Zero(t, sys.Uptime())
+		require.EqualValues(t, 2, counter.Load())
 	})
 }

@@ -34,3 +34,8 @@ message Rebalance {
   // Specifies the peer state
   PeerState peer_state = 1;
 }
+
+message RebalanceComplete {
+  // Specifies the peer address
+  string peer_address = 1;
+}

@@ -118,3 +118,57 @@ func NewPanicError(err error) PanicError {
 func (e PanicError) Error() string {
 	return fmt.Sprintf("panic: %v", e.err)
 }
+
+// InternalError defines an error that is explicit to the application
+type InternalError struct {
+	err error
+}
+
+// enforce compilation error
+var _ error = (*InternalError)(nil)
+
+// NewInternalError returns an intance of InternalError
+func NewInternalError(err error) InternalError {
+	return InternalError{
+		err: fmt.Errorf("internal error: %w", err),
+	}
+}
+
+// Error implements the standard error interface
+func (i InternalError) Error() string {
+	return i.err.Error()
+}
+
+// SpawnError defines an error when re/creating an actor
+type SpawnError struct {
+	err error
+}
+
+var _ error = (*SpawnError)(nil)
+
+// NewSpawnError returns an instance of SpawnError
+func NewSpawnError(err error) SpawnError {
+	return SpawnError{
+		err: fmt.Errorf("spawn error: %w", err),
+	}
+}
+
+// Error implements the standard error interface
+func (s SpawnError) Error() string {
+	return s.err.Error()
+}
+
+type rebalancingError struct {
+	err error
+}
+
+var _ error = (*rebalancingError)(nil)
+
+// creates an instance of rebalancingError
+func newRebalancingError(err error) rebalancingError {
+	return rebalancingError{err}
+}
+
+func (e rebalancingError) Error() string {
+	return fmt.Errorf("rebalancing: %w", e.err).Error()
+}

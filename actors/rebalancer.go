@@ -26,6 +26,9 @@ package actors
 
 import (
 	"context"
+	"errors"
+	"net"
+	"strconv"
 
 	"golang.org/x/sync/errgroup"
 
@@ -83,7 +86,7 @@ func (r *rebalancer) Rebalance(ctx *ReceiveContext) {
 		// grab all our active peers
 		peers, err := r.pid.ActorSystem().getCluster().Peers(rctx)
 		if err != nil {
-			ctx.Err(err)
+			ctx.Err(NewInternalError(err))
 			return
 		}
 
@@ -94,17 +97,10 @@ func (r *rebalancer) Rebalance(ctx *ReceiveContext) {
 		if len(leaderShares) > 0 {
 			eg.Go(func() error {
 				for _, actor := range leaderShares {
-					if isReservedName(actor.GetActorAddress().GetName()) {
-						continue
-					}
-
-					iactor, err := r.reflection.ActorFrom(actor.GetActorType())
-					if err != nil {
-						return err
-					}
-
-					if _, err = r.pid.ActorSystem().Spawn(egCtx, actor.GetActorAddress().GetName(), iactor); err != nil {
-						return err
+					if !isReservedName(actor.GetActorAddress().GetName()) {
+						if err := r.recreateLocally(egCtx, actor); err != nil {
+							return NewSpawnError(err)
+						}
 					}
 				}
 				return nil
@@ -120,24 +116,32 @@ func (r *rebalancer) Rebalance(ctx *ReceiveContext) {
 			for i := 1; i < len(peersShares); i++ {
 				actors := peersShares[i]
 				peer := peers[i-1]
+				peerFound := true
 				peerState, err := r.pid.ActorSystem().getPeerStateFromCache(peer.PeerAddress())
-				if err != nil {
-					return err
+				if errors.Is(err, ErrPeerNotFound) {
+					logger.Warnf("peer=(%s) not found in local cache", peer.PeerAddress())
+					peerFound = false
 				}
 
 				for _, actor := range actors {
 					// never redistribute system actors
-					if isReservedName(actor.GetActorAddress().GetName()) {
-						continue
-					}
+					if !isReservedName(actor.GetActorAddress().GetName()) {
+						if !peerFound {
+							err := r.recreateLocally(egCtx, actor)
+							if err == nil {
+								continue
+							}
+							return NewSpawnError(err)
+						}
 
-					if err := r.remoting.RemoteSpawn(egCtx,
-						peerState.GetHost(),
-						int(peerState.GetRemotingPort()),
-						actor.GetActorAddress().GetName(),
-						actor.GetActorType()); err != nil {
-						logger.Error(err)
-						return err
+						if err := r.remoting.RemoteSpawn(egCtx,
+							peerState.GetHost(),
+							int(peerState.GetRemotingPort()),
+							actor.GetActorAddress().GetName(),
+							actor.GetActorType()); err != nil {
+							logger.Error(err)
+							return NewSpawnError(err)
+						}
 					}
 				}
 			}
@@ -149,8 +153,10 @@ func (r *rebalancer) Rebalance(ctx *ReceiveContext) {
 			ctx.Err(err)
 		}
 
-		// done
-		r.pid.ActorSystem().completeRebalancing()
+		ctx.Tell(ctx.Sender(), &internalpb.RebalanceComplete{
+			PeerAddress: net.JoinHostPort(peerState.GetHost(), strconv.Itoa(int(peerState.GetPeersPort()))),
+		})
+
 	default:
 		ctx.Unhandled()
 	}
@@ -186,4 +192,14 @@ func (r *rebalancer) computeRebalancing(totalPeers int, nodeLeftState *internalp
 	}
 
 	return leaderShares, chunks
+}
+
+// recreateLocally recreates the actor
+func (r *rebalancer) recreateLocally(ctx context.Context, actor *internalpb.ActorRef) error {
+	iactor, err := r.reflection.ActorFrom(actor.GetActorType())
+	if err != nil {
+		return err
+	}
+	_, err = r.pid.ActorSystem().Spawn(ctx, actor.GetActorAddress().GetName(), iactor)
+	return err
 }

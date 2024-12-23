@@ -22,25 +22,55 @@
  * SOFTWARE.
  */
 
-package cluster
+package actors
 
 import (
 	"net"
 	"strconv"
+	"sync"
+
+	"github.com/tochemey/goakt/v2/internal/internalpb"
 )
 
-// Peer defines the peer info
-type Peer struct {
-	// Host represents the peer address.
-	Host string
-	// PeersPort represents the peer port
-	PeersPort int
-	// Coordinator states that the given peer is the leader not.
-	// A peer is a coordinator when it is the oldest node in the cluster
-	Coordinator bool
+type peersCache struct {
+	*sync.RWMutex
+	cache map[string]*internalpb.PeerState
 }
 
-// PeerAddress returns address the node's peers will use to connect to
-func (peer Peer) PeerAddress() string {
-	return net.JoinHostPort(peer.Host, strconv.Itoa(peer.PeersPort))
+// newPeerCache creates an instance of peersCache
+func newPeerCache() *peersCache {
+	return &peersCache{
+		RWMutex: &sync.RWMutex{},
+		cache:   make(map[string]*internalpb.PeerState),
+	}
+}
+
+// set adds a peer to the cache
+func (c *peersCache) set(peer *internalpb.PeerState) {
+	peerAddress := net.JoinHostPort(peer.GetHost(), strconv.Itoa(int(peer.GetPeersPort())))
+	c.Lock()
+	c.cache[peerAddress] = peer
+	c.Unlock()
+}
+
+// get retrieve a peer from the cache
+func (c *peersCache) get(peerAddress string) (*internalpb.PeerState, bool) {
+	c.RLock()
+	peer, ok := c.cache[peerAddress]
+	c.RUnlock()
+	return peer, ok
+}
+
+// remove deletes a peer from the cache
+func (c *peersCache) remove(peerAddress string) {
+	c.Lock()
+	delete(c.cache, peerAddress)
+	c.Unlock()
+}
+
+// reset resets the cache
+func (c *peersCache) reset() {
+	c.Lock()
+	c.cache = make(map[string]*internalpb.PeerState)
+	c.Unlock()
 }

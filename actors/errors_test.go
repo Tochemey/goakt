@@ -22,25 +22,25 @@
  * SOFTWARE.
  */
 
-package cluster
+package actors
 
 import (
-	"net"
-	"strconv"
+	"errors"
+	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
-// Peer defines the peer info
-type Peer struct {
-	// Host represents the peer address.
-	Host string
-	// PeersPort represents the peer port
-	PeersPort int
-	// Coordinator states that the given peer is the leader not.
-	// A peer is a coordinator when it is the oldest node in the cluster
-	Coordinator bool
-}
+func TestErrors(t *testing.T) {
+	internalErr := NewInternalError(errors.New("something went wrong"))
+	require.Error(t, internalErr)
+	require.EqualError(t, internalErr, "internal error: something went wrong")
 
-// PeerAddress returns address the node's peers will use to connect to
-func (peer Peer) PeerAddress() string {
-	return net.JoinHostPort(peer.Host, strconv.Itoa(peer.PeersPort))
+	spawnErr := NewSpawnError(errors.New("something went wrong"))
+	require.Error(t, spawnErr)
+	require.EqualError(t, spawnErr, "spawn error: something went wrong")
+
+	rebalancingErr := newRebalancingError(errors.New("something went wrong"))
+	require.Error(t, rebalancingErr)
+	require.EqualError(t, rebalancingErr, "rebalancing: something went wrong")
 }

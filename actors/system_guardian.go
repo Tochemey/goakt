@@ -28,6 +28,7 @@ import (
 	"context"
 
 	"github.com/tochemey/goakt/v2/goaktpb"
+	"github.com/tochemey/goakt/v2/internal/internalpb"
 	"github.com/tochemey/goakt/v2/log"
 )
 
@@ -57,9 +58,9 @@ func (g *systemGuardian) PreStart(context.Context) error {
 func (g *systemGuardian) Receive(ctx *ReceiveContext) {
 	switch msg := ctx.Message().(type) {
 	case *goaktpb.PostStart:
-		g.pid = ctx.Self()
-		g.logger = ctx.Logger()
-		g.logger.Infof("%s started successfully", g.pid.Name())
+		g.initialize(ctx)
+	case *internalpb.RebalanceComplete:
+		g.completeRebalancing(msg)
 	case *goaktpb.Terminated:
 		actorID := msg.GetActorId()
 		system := ctx.ActorSystem()
@@ -83,4 +84,22 @@ func (g *systemGuardian) Receive(ctx *ReceiveContext) {
 func (g *systemGuardian) PostStop(context.Context) error {
 	g.logger.Infof("%s stopped successfully", g.pid.Name())
 	return nil
+}
+
+// initialize sets the actor up
+func (g *systemGuardian) initialize(ctx *ReceiveContext) {
+	g.pid = ctx.Self()
+	g.logger = ctx.Logger()
+	g.logger.Infof("%s started successfully", g.pid.Name())
+}
+
+// completeRebalancing wraps up the rebalancing of dead node in the cluster
+func (g *systemGuardian) completeRebalancing(msg *internalpb.RebalanceComplete) {
+	g.logger.Infof("%s completing rebalancing", g.pid.Name())
+	g.pid.ActorSystem().completeRebalancing()
+	g.logger.Infof("%s rebalancing successfully completed", g.pid.Name())
+
+	g.logger.Infof("%s removing dead peer=(%s) from cache", g.pid.Name(), msg.GetPeerAddress())
+	g.pid.ActorSystem().removePeerStateFromCache(msg.GetPeerAddress())
+	g.logger.Infof("%s dead peer=(%s) successfully removed from cache", g.pid.Name(), msg.GetPeerAddress())
 }

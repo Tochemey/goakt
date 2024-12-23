@@ -361,7 +361,7 @@ L:
 	peers, err := node1.Peers(context.TODO())
 	require.NoError(t, err)
 	require.Len(t, peers, 1)
-	require.Equal(t, node2Addr, net.JoinHostPort(peers[0].Host, strconv.Itoa(peers[0].Port)))
+	require.Equal(t, node2Addr, net.JoinHostPort(peers[0].Host, strconv.Itoa(peers[0].PeersPort)))
 
 	// wait for some time
 	lib.Pause(time.Second)

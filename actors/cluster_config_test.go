@@ -45,6 +45,8 @@ func TestClusterConfig(t *testing.T) {
 			WithPeersPort(3222).
 			WithMinimumPeersQuorum(1).
 			WithReplicaCount(1).
+			WithWriteQuorum(1).
+			WithReadQuorum(1).
 			WithPartitionCount(3).
 			WithDiscovery(disco)
 
@@ -53,6 +55,8 @@ func TestClusterConfig(t *testing.T) {
 		assert.EqualValues(t, 3222, config.PeersPort())
 		assert.EqualValues(t, 1, config.MinimumPeersQuorum())
 		assert.EqualValues(t, 1, config.ReplicaCount())
+		assert.EqualValues(t, 1, config.ReadQuorum())
+		assert.EqualValues(t, 1, config.WriteQuorum())
 		assert.EqualValues(t, 3, config.PartitionCount())
 		assert.True(t, disco == config.Discovery())
 		assert.Len(t, config.Kinds(), 3)

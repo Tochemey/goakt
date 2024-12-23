@@ -30,6 +30,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"os"
 	"slices"
 	"strconv"
 	"sync"
@@ -39,6 +40,7 @@ import (
 	"github.com/buraksezer/olric/config"
 	"github.com/buraksezer/olric/events"
 	"github.com/buraksezer/olric/hasher"
+	goset "github.com/deckarep/golang-set/v2"
 	"github.com/redis/go-redis/v9"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
@@ -119,6 +121,8 @@ type Engine struct {
 	// the default values is 1
 	minimumPeersQuorum uint32
 	replicaCount       uint32
+	writeQuorum        uint32
+	readQuorum         uint32
 
 	// specifies the logger
 	logger log.Logger
@@ -155,6 +159,9 @@ type Engine struct {
 
 	// specifies the node state
 	peerState *internalpb.PeerState
+
+	joinedNodesFilter goset.Set[string]
+	leftNodesFilter   goset.Set[string]
 }
 
 // enforce compilation error
@@ -164,8 +171,8 @@ var _ Interface = (*Engine)(nil)
 func NewEngine(name string, disco discovery.Provider, host *discovery.Node, opts ...Option) (*Engine, error) {
 	// create an instance of the Node
 	engine := &Engine{
-		partitionsCount:    20,
-		logger:             log.DefaultLogger,
+		partitionsCount:    271,
+		logger:             log.New(log.ErrorLevel, os.Stderr),
 		name:               name,
 		discoveryProvider:  disco,
 		writeTimeout:       time.Second,
@@ -173,12 +180,16 @@ func NewEngine(name string, disco discovery.Provider, host *discovery.Node, opts
 		shutdownTimeout:    3 * time.Second,
 		hasher:             hash.DefaultHasher(),
 		pubSub:             nil,
-		events:             make(chan *Event, 20),
+		events:             make(chan *Event, 256),
 		eventsLock:         &sync.Mutex{},
 		messagesChan:       make(chan *redis.Message, 1),
 		minimumPeersQuorum: 1,
 		replicaCount:       1,
+		writeQuorum:        1,
+		readQuorum:         1,
 		Mutex:              new(sync.Mutex),
+		joinedNodesFilter:  goset.NewSet[string](),
+		leftNodesFilter:    goset.NewSet[string](),
 	}
 	// apply the various options
 	for _, opt := range opts {
@@ -261,19 +272,24 @@ func (n *Engine) Start(ctx context.Context) error {
 
 	n.dmap = newDMap
 
-	// create a subscriber to consume to cluster events
-	ps, err := n.client.NewPubSub(olric.ToAddress(n.node.PeersAddress()))
-	if err != nil {
-		logger.Error(fmt.Errorf("failed to start the cluster Engine on node=(%s): %w", n.name, err))
-		return n.server.Shutdown(ctx)
-	}
-
 	// set the peer state
 	n.peerState = &internalpb.PeerState{
 		Host:         n.node.Host,
 		RemotingPort: int32(n.node.RemotingPort),
 		PeersPort:    int32(n.node.PeersPort),
 		Actors:       []*internalpb.ActorRef{},
+	}
+
+	if err := n.initializeState(ctx); err != nil {
+		logger.Error(fmt.Errorf("failed to start the cluster Engine on node=(%s): %w", n.name, err))
+		return n.server.Shutdown(ctx)
+	}
+
+	// create a subscriber to consume to cluster events
+	ps, err := n.client.NewPubSub(olric.ToAddress(n.node.PeersAddress()))
+	if err != nil {
+		logger.Error(fmt.Errorf("failed to start the cluster Engine on node=(%s): %w", n.name, err))
+		return n.server.Shutdown(ctx)
 	}
 
 	n.pubSub = ps.Subscribe(ctx, events.ClusterEventsChannel)
@@ -315,7 +331,9 @@ func (n *Engine) Stop(ctx context.Context) error {
 	}
 
 	// close the events queue
+	n.eventsLock.Lock()
 	close(n.events)
+	n.eventsLock.Unlock()
 
 	logger.Infof("GoAkt cluster Node=(%s) successfully stopped.", n.name)
 	return nil
@@ -578,7 +596,7 @@ func (n *Engine) Peers(ctx context.Context) ([]*Peer, error) {
 			n.logger.Debugf("node=(%s) has found peer=(%s)", n.node.PeersAddress(), member.Name)
 			peerHost, port, _ := net.SplitHostPort(member.Name)
 			peerPort, _ := strconv.Atoi(port)
-			peers = append(peers, &Peer{Host: peerHost, Port: peerPort, Coordinator: member.Coordinator})
+			peers = append(peers, &Peer{Host: peerHost, PeersPort: peerPort, Coordinator: member.Coordinator})
 		}
 	}
 	return peers, nil
@@ -599,50 +617,64 @@ func (n *Engine) consume() {
 		kind := event["kind"]
 		switch kind {
 		case events.KindNodeJoinEvent:
+			n.eventsLock.Lock()
 			nodeJoined := new(events.NodeJoinEvent)
 			if err := json.Unmarshal([]byte(payload), &nodeJoined); err != nil {
 				n.logger.Errorf("failed to unmarshal node join cluster event: %v", err)
 				// TODO: should we continue or not
+				n.eventsLock.Unlock()
 				continue
 			}
 
 			if n.node.PeersAddress() == nodeJoined.NodeJoin {
 				n.logger.Debug("skipping self")
+				n.eventsLock.Unlock()
 				continue
 			}
 
-			// TODO: need to cross check this calculation
+			if n.joinedNodesFilter.Contains(nodeJoined.NodeJoin) {
+				n.eventsLock.Unlock()
+				continue
+			}
+
+			n.joinedNodesFilter.Add(nodeJoined.NodeJoin)
 			timeMilli := nodeJoined.Timestamp / int64(1e6)
 			event := &goaktpb.NodeJoined{
 				Address:   nodeJoined.NodeJoin,
 				Timestamp: timestamppb.New(time.UnixMilli(timeMilli)),
 			}
 
-			n.logger.Debugf("%s received (%s) cluster event:[addr=(%s)]", n.name, kind, event.GetAddress())
-
+			n.logger.Debugf("%s received (%s):[addr=(%s)] cluster event", n.name, kind, event.GetAddress())
 			payload, _ := anypb.New(event)
 			n.events <- &Event{payload, NodeJoined}
+			n.eventsLock.Unlock()
 
 		case events.KindNodeLeftEvent:
+			n.eventsLock.Lock()
 			nodeLeft := new(events.NodeLeftEvent)
 			if err := json.Unmarshal([]byte(payload), &nodeLeft); err != nil {
 				n.logger.Errorf("failed to unmarshal node left cluster event: %v", err)
 				// TODO: should we continue or not
+				n.eventsLock.Unlock()
 				continue
 			}
 
-			// TODO: need to cross check this calculation
-			timeMilli := nodeLeft.Timestamp / int64(1e6)
+			if n.leftNodesFilter.Contains(nodeLeft.NodeLeft) {
+				n.eventsLock.Unlock()
+				continue
+			}
 
+			n.leftNodesFilter.Add(nodeLeft.NodeLeft)
+			timeMilli := nodeLeft.Timestamp / int64(1e6)
 			event := &goaktpb.NodeLeft{
 				Address:   nodeLeft.NodeLeft,
 				Timestamp: timestamppb.New(time.UnixMilli(timeMilli)),
 			}
 
-			n.logger.Debugf("%s received (%s) cluster event:[addr=(%s)]", n.name, kind, event.GetAddress())
-
+			n.logger.Debugf("%s received (%s):[addr=(%s)] cluster event", n.name, kind, event.GetAddress())
 			payload, _ := anypb.New(event)
 			n.events <- &Event{payload, NodeLeft}
+			n.eventsLock.Unlock()
 		default:
 			// skip
 		}
@@ -670,8 +702,8 @@ func (n *Engine) buildConfig() *config.Config {
 		BindPort:                   n.node.PeersPort,
 		ReadRepair:                 true,
 		ReplicaCount:               int(n.replicaCount),
-		WriteQuorum:                config.DefaultWriteQuorum,
-		ReadQuorum:                 config.DefaultReadQuorum,
+		WriteQuorum:                int(n.writeQuorum),
+		ReadQuorum:                 int(n.readQuorum),
 		MemberCountQuorum:          int32(n.minimumPeersQuorum),
 		Peers:                      []string{},
 		DMaps:                      &config.DMaps{},
@@ -695,4 +727,10 @@ func (n *Engine) buildConfig() *config.Config {
 	}
 
 	return conf
+}
+
+// initializeState sets the node state in the cluster after boot
+func (n *Engine) initializeState(ctx context.Context) error {
+	encoded, _ := proto.Marshal(n.peerState)
+	return n.dmap.Put(ctx, n.node.PeersAddress(), encoded)
 }

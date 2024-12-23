@@ -40,6 +40,8 @@ type ClusterConfig struct {
 	partitionCount     uint64
 	minimumPeersQuorum uint32
 	replicaCount       uint32
+	writeQuorum        uint32
+	readQuorum         uint32
 	discoveryPort      int
 	peersPort          int
 	kinds              []Actor
@@ -53,11 +55,16 @@ func NewClusterConfig() *ClusterConfig {
 	return &ClusterConfig{
 		kinds:              defaultKinds,
 		minimumPeersQuorum: 1,
-		replicaCount:       2,
+		writeQuorum:        1,
+		readQuorum:         1,
+		replicaCount:       1,
+		partitionCount:     271,
 	}
 }
 
 // WithPartitionCount sets the cluster config partition count
+// Partition cound should be a prime number.
+// ref: https://medium.com/swlh/why-should-the-length-of-your-hash-table-be-a-prime-number-760ec65a75d1
 func (x *ClusterConfig) WithPartitionCount(count uint64) *ClusterConfig {
 	x.partitionCount = count
 	return x
@@ -94,6 +101,7 @@ func (x *ClusterConfig) WithPeersPort(peersPort int) *ClusterConfig {
 }
 
 // WithReplicaCount sets the cluster replica count.
+// Note: set this field means you have some advanced knowledge on quorum-based replica control
 func (x *ClusterConfig) WithReplicaCount(count uint32) *ClusterConfig {
 	x.replicaCount = count
 	return x
@@ -134,6 +142,32 @@ func (x *ClusterConfig) Kinds() []Actor {
 	return x.kinds
 }
 
+// WriteQuorum returns the write quorum
+func (x *ClusterConfig) WriteQuorum() uint32 {
+	return x.writeQuorum
+}
+
+// ReadQuorum returns the read quorum
+func (x *ClusterConfig) ReadQuorum() uint32 {
+	return x.readQuorum
+}
+
+// WithWriteQuorum sets the write quorum
+// Note: set this field means you have some advanced knowledge on quorum-based replica control
+// The default value should be sufficient for most use cases
+func (x *ClusterConfig) WithWriteQuorum(count uint32) *ClusterConfig {
+	x.writeQuorum = count
+	return x
+}
+
+// WithReadQuorum sets the read quorum
+// Note: set this field means you have some advanced knowledge on quorum-based replica control
+// The default value should be sufficient for most use cases
+func (x *ClusterConfig) WithReadQuorum(count uint32) *ClusterConfig {
+	x.readQuorum = count
+	return x
+}
+
 // Validate validates the cluster config
 func (x *ClusterConfig) Validate() error {
 	return validation.
@@ -144,7 +178,8 @@ func (x *ClusterConfig) Validate() error {
 		AddAssertion(x.discoveryPort > 0, "gossip port is invalid").
 		AddAssertion(x.peersPort > 0, "peers port is invalid").
 		AddAssertion(len(x.kinds) > 1, "actor kinds are not defined").
-		AddAssertion(x.replicaCount > 0, "actor replicaCount is invalid").
-		AddAssertion(x.replicaCount <= x.minimumPeersQuorum, "replica count should be less or equal to minimum peers quorum").
+		AddAssertion(x.replicaCount >= 1, "cluster replicaCount is invalid").
+		AddAssertion(x.writeQuorum >= 1, "cluster writeQuorum is invalid").
+		AddAssertion(x.readQuorum >= 1, "cluster readQuorum is invalid").
 		Validate()
 }

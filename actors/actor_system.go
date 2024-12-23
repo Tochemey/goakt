@@ -39,6 +39,7 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
+	goset "github.com/deckarep/golang-set/v2"
 	"github.com/google/uuid"
 	"github.com/reugn/go-quartz/logger"
 	"go.uber.org/atomic"
@@ -68,9 +69,12 @@ type ActorSystem interface {
 	Name() string
 	// Actors returns the list of Actors that are alive in the actor system
 	Actors() []*PID
-	// Start starts the actor system
+	// Start initializes the actor system.
+	// To guarantee a clean shutdown during unexpected system terminations,
+	// developers must handle SIGTERM and SIGINT signals appropriately and invoke Stop.
 	Start(ctx context.Context) error
-	// Stop stops the actor system
+	// Stop stops the actor system and does not terminate the program.
+	// One needs to explicitly call os.Exit to terminate the program.
 	Stop(ctx context.Context) error
 	// Spawn creates an actor in the system and starts it
 	Spawn(ctx context.Context, name string, actor Actor, opts ...SpawnOption) (*PID, error)
@@ -152,6 +156,8 @@ type ActorSystem interface {
 	Port() int32
 	// Uptime returns the number of seconds since the actor system started
 	Uptime() int64
+	// Running returns true when the actor system is running
+	Running() bool
 	// handleRemoteAsk handles a synchronous message to another actor and expect a response.
 	// This block until a response is received or timed out.
 	handleRemoteAsk(ctx context.Context, to *PID, message proto.Message, timeout time.Duration) (response proto.Message, err error)
@@ -161,6 +167,8 @@ type ActorSystem interface {
 	broadcastActor(actor *PID)
 	// getPeerStateFromCache returns the peer state from the cache
 	getPeerStateFromCache(address string) (*internalpb.PeerState, error)
+	// removePeerStateFromCache removes the peer state from the cache
+	removePeerStateFromCache(address string)
 	// reservedName returns reserved actor's name
 	reservedName(nameType nameType) string
 	// getCluster returns the cluster engine
@@ -221,8 +229,8 @@ type actorSystem struct {
 	clusterEnabled atomic.Bool
 	// cluster mode
 	cluster            cluster.Interface
-	actorsChan         chan *internalpb.ActorRef
-	clusterEventsChan  <-chan *cluster.Event
+	wireActorsQueue    chan *internalpb.ActorRef
+	eventsQueue        <-chan *cluster.Event
 	clusterSyncStopSig chan types.Unit
 	partitionHasher    hash.Hasher
 	clusterNode        *discovery.Node
@@ -245,18 +253,21 @@ type actorSystem struct {
 	reflection *reflection
 
 	peersStateLoopInterval time.Duration
-	peersCache             *sync.Map
+	peersCache             *peersCache
 	clusterConfig          *ClusterConfig
-	rebalancingChan        chan *cluster.Event
+	rebalancingQueue       chan *internalpb.PeerState
+	nodesInprocess         goset.Set[string]
 
-	rebalancer     *PID
-	rootGuardian   *PID
-	userGuardian   *PID
-	systemGuardian *PID
-	janitor        *PID
-	deadletters    *PID
-	startedAt      *atomic.Int64
-	rebalancing    *atomic.Bool
+	rebalancer      *PID
+	rootGuardian    *PID
+	userGuardian    *PID
+	systemGuardian  *PID
+	janitor         *PID
+	deadletters     *PID
+	startedAt       *atomic.Int64
+	rebalancing     *atomic.Bool
+	rebalanceLocker *sync.Mutex
+	shutdownHooks   []ShutdownHook
 }
 
 var (
@@ -277,7 +288,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 	}
 
 	system := &actorSystem{
-		actorsChan:             make(chan *internalpb.ActorRef, 10),
+		wireActorsQueue:        make(chan *internalpb.ActorRef, 10),
 		name:                   name,
 		logger:                 log.New(log.ErrorLevel, os.Stderr),
 		expireActorAfter:       DefaultPassivationTimeout,
@@ -290,16 +301,19 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		eventsStream:           eventstream.New(),
 		partitionHasher:        hash.DefaultHasher(),
 		actorInitTimeout:       DefaultInitTimeout,
-		clusterEventsChan:      make(chan *cluster.Event, 1),
+		eventsQueue:            make(chan *cluster.Event, 1),
 		registry:               types.NewRegistry(),
 		clusterSyncStopSig:     make(chan types.Unit, 1),
-		peersCache:             &sync.Map{},
+		peersCache:             newPeerCache(),
 		peersStateLoopInterval: DefaultPeerStateLoopInterval,
 		port:                   0,
 		host:                   "127.0.0.1",
 		actors:                 newTree(),
 		startedAt:              atomic.NewInt64(0),
 		rebalancing:            atomic.NewBool(false),
+		shutdownHooks:          make([]ShutdownHook, 0),
+		nodesInprocess:         goset.NewSet[string](),
+		rebalanceLocker:        &sync.Mutex{},
 	}
 
 	system.started.Store(false)
@@ -331,6 +345,11 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		withSchedulerRemoting(NewRemoting()))
 
 	return system, nil
+}
+
+// Running returns true when the actor system is running
+func (x *actorSystem) Running() bool {
+	return x.started.Load()
 }
 
 // Uptime returns the number of seconds since the actor system started
@@ -742,9 +761,11 @@ func (x *actorSystem) RemoteActor(ctx context.Context, actorName string) (addr *
 	return address.From(actor.GetActorAddress()), nil
 }
 
-// Start starts the actor system
+// Start initializes the actor system.
+// To guarantee a clean shutdown during unexpected system terminations,
+// developers must handle SIGTERM and SIGINT signals appropriately and invoke Stop.
 func (x *actorSystem) Start(ctx context.Context) error {
-	x.logger.Infof("%s actor system starting..", x.name)
+	x.logger.Infof("%s actor system starting on %s/%s..", x.name, runtime.GOOS, runtime.GOARCH)
 	x.started.Store(true)
 	if err := errorschain.
 		New(errorschain.ReturnFirst()).
@@ -768,73 +789,10 @@ func (x *actorSystem) Start(ctx context.Context) error {
 	return nil
 }
 
-// Stop stops the actor system
+// Stop stops the actor system and does not terminate the program.
+// One needs to explicitly call os.Exit to terminate the program.
 func (x *actorSystem) Stop(ctx context.Context) error {
-	x.logger.Infof("%s shutting down...", x.name)
-
-	// make sure the actor system has started
-	if !x.started.Load() {
-		return ErrActorSystemNotStarted
-	}
-
-	x.stopGC <- types.Unit{}
-	x.logger.Infof("%s is shutting down..:)", x.name)
-
-	x.started.Store(false)
-	x.scheduler.Stop(ctx)
-
-	ctx, cancel := context.WithTimeout(ctx, x.shutdownTimeout)
-	defer cancel()
-
-	var actorNames []string
-	for _, actor := range x.Actors() {
-		actorNames = append(actorNames, actor.Name())
-	}
-
-	if err := x.getRootGuardian().Shutdown(ctx); err != nil {
-		x.reset()
-		x.logger.Errorf("%s failed to shutdown cleanly: %w", x.name, err)
-		return err
-	}
-	x.actors.DeleteNode(x.getRootGuardian())
-
-	if x.eventsStream != nil {
-		x.eventsStream.Shutdown()
-	}
-
-	if x.clusterEnabled.Load() {
-		if err := errorschain.
-			New(errorschain.ReturnFirst()).
-			AddError(x.cleanupCluster(ctx, actorNames)).
-			AddError(x.cluster.Stop(ctx)).
-			Error(); err != nil {
-			x.reset()
-			x.logger.Errorf("%s failed to shutdown cleanly: %w", x.name, err)
-			return err
-		}
-
-		close(x.actorsChan)
-		x.clusterSyncStopSig <- types.Unit{}
-		x.clusterEnabled.Store(false)
-		close(x.rebalancingChan)
-	}
-
-	if x.remotingEnabled.Load() {
-		x.remoting.Close()
-		if err := x.shutdownHTTPServer(ctx); err != nil {
-			x.reset()
-			x.logger.Errorf("%s failed to shutdown: %w", x.name, err)
-			return err
-		}
-
-		x.remotingEnabled.Store(false)
-		x.server = nil
-		x.listener = nil
-	}
-
-	x.reset()
-	x.logger.Infof("%s shuts down successfully", x.name)
-	return nil
+	return x.shutdown(ctx)
 }
 
 // RemoteLookup for an actor on a remote host.
@@ -1206,18 +1164,21 @@ func (x *actorSystem) completeRebalancing() {
 	x.rebalancing.Store(false)
 }
 
+// removePeerStateFromCache removes the peer state from the cache
+func (x *actorSystem) removePeerStateFromCache(address string) {
+	x.locker.Lock()
+	x.peersCache.remove(address)
+	x.nodesInprocess.Remove(address)
+	x.locker.Unlock()
+}
+
 // getPeerStateFromCache returns the peer state from the cache
 func (x *actorSystem) getPeerStateFromCache(address string) (*internalpb.PeerState, error) {
 	x.locker.Lock()
-	value, ok := x.peersCache.Load(address)
+	peerState, ok := x.peersCache.get(address)
 	x.locker.Unlock()
 	if !ok {
 		return nil, ErrPeerNotFound
-	}
-
-	peerState := new(internalpb.PeerState)
-	if err := proto.Unmarshal(value.([]byte), peerState); err != nil {
-		return nil, err
 	}
 	return peerState, nil
 }
@@ -1225,7 +1186,7 @@ func (x *actorSystem) getPeerStateFromCache(address string) (*internalpb.PeerSta
 // broadcastActor broadcast the newly (re)spawned actor into the cluster
 func (x *actorSystem) broadcastActor(actor *PID) {
 	if x.clusterEnabled.Load() {
-		x.actorsChan <- &internalpb.ActorRef{
+		x.wireActorsQueue <- &internalpb.ActorRef{
 			ActorAddress: actor.Address().Address,
 			ActorType:    types.TypeName(actor.Actor()),
 		}
@@ -1262,6 +1223,8 @@ func (x *actorSystem) enableClustering(ctx context.Context) error {
 		cluster.WithPartitionsCount(x.clusterConfig.PartitionCount()),
 		cluster.WithHasher(x.partitionHasher),
 		cluster.WithMinimumPeersQuorum(x.clusterConfig.MinimumPeersQuorum()),
+		cluster.WithWriteQuorum(x.clusterConfig.WriteQuorum()),
+		cluster.WithReadQuorum(x.clusterConfig.ReadQuorum()),
 		cluster.WithReplicaCount(x.clusterConfig.ReplicaCount()),
 	)
 	if err != nil {
@@ -1288,8 +1251,8 @@ func (x *actorSystem) enableClustering(ctx context.Context) error {
 
 	x.locker.Lock()
 	x.cluster = clusterEngine
-	x.clusterEventsChan = clusterEngine.Events()
-	x.rebalancingChan = make(chan *cluster.Event, 1)
+	x.eventsQueue = clusterEngine.Events()
+	x.rebalancingQueue = make(chan *internalpb.PeerState, 1)
 	for _, kind := range x.clusterConfig.Kinds() {
 		x.registry.Register(kind)
 		x.logger.Infof("cluster kind=(%s) registered", types.TypeName(kind))
@@ -1344,11 +1307,90 @@ func (x *actorSystem) enableRemoting(ctx context.Context) error {
 // reset the actor system
 func (x *actorSystem) reset() {
 	x.actors.Reset()
+	x.peersCache.reset()
+}
+
+// shutdown stops the actor system
+func (x *actorSystem) shutdown(ctx context.Context) error {
+	// make sure the actor system has started
+	if !x.started.Load() {
+		return ErrActorSystemNotStarted
+	}
+
+	x.stopGC <- types.Unit{}
+	x.logger.Infof("%s is shutting down..:)", x.name)
+
+	x.started.Store(false)
+	x.scheduler.Stop(ctx)
+
+	// run the various shutdown hooks
+	for _, hook := range x.shutdownHooks {
+		if err := hook(ctx); err != nil {
+			x.reset()
+			return err
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, x.shutdownTimeout)
+	defer cancel()
+
+	var actorNames []string
+	for _, actor := range x.Actors() {
+		actorNames = append(actorNames, actor.Name())
+	}
+
+	if err := x.getRootGuardian().Shutdown(ctx); err != nil {
+		x.reset()
+		x.logger.Errorf("%s failed to shutdown cleanly: %w", x.name, err)
+		return err
+	}
+	x.actors.DeleteNode(x.getRootGuardian())
+
+	if x.eventsStream != nil {
+		x.eventsStream.Shutdown()
+	}
+
+	if x.clusterEnabled.Load() {
+		if err := errorschain.
+			New(errorschain.ReturnFirst()).
+			AddError(x.cleanupCluster(ctx, actorNames)).
+			AddError(x.cluster.Stop(ctx)).
+			Error(); err != nil {
+			x.reset()
+			x.logger.Errorf("%s failed to shutdown cleanly: %w", x.name, err)
+			return err
+		}
+
+		close(x.wireActorsQueue)
+		x.clusterSyncStopSig <- types.Unit{}
+		x.clusterEnabled.Store(false)
+		x.rebalancing.Store(false)
+		x.rebalanceLocker.Lock()
+		close(x.rebalancingQueue)
+		x.rebalanceLocker.Unlock()
+	}
+
+	if x.remotingEnabled.Load() {
+		x.remoting.Close()
+		if err := x.shutdownHTTPServer(ctx); err != nil {
+			x.reset()
+			x.logger.Errorf("%s failed to shutdown: %w", x.name, err)
+			return err
+		}
+
+		x.remotingEnabled.Store(false)
+		x.server = nil
+		x.listener = nil
+	}
+
+	x.reset()
+	x.logger.Infof("%s shuts down successfully", x.name)
+	return nil
 }
 
 // replicationLoop publishes newly created actor into the cluster when cluster is enabled
 func (x *actorSystem) replicationLoop() {
-	for actor := range x.actorsChan {
+	for actor := range x.wireActorsQueue {
 		// never replicate system actors because there are specific to the
 		// started node
 		if isReservedName(actor.GetActorAddress().GetName()) {
@@ -1365,7 +1407,7 @@ func (x *actorSystem) replicationLoop() {
 
 // clusterEventsLoop listens to cluster events and send them to the event streams
 func (x *actorSystem) clusterEventsLoop() {
-	for event := range x.clusterEventsChan {
+	for event := range x.eventsQueue {
 		if x.InCluster() {
 			if event != nil && event.Payload != nil {
 				// push the event to the event stream
@@ -1375,7 +1417,21 @@ func (x *actorSystem) clusterEventsLoop() {
 					x.eventsStream.Publish(eventsTopic, message)
 					x.logger.Debugf("cluster event=(%s) successfully published by node=(%s)", event.Type, x.name)
 				}
-				x.rebalancingChan <- event
+
+				if event.Type == cluster.NodeLeft {
+					nodeLeft := new(goaktpb.NodeLeft)
+					_ = event.Payload.UnmarshalTo(nodeLeft)
+					if x.nodesInprocess.Contains(nodeLeft.GetAddress()) {
+						continue
+					}
+
+					x.nodesInprocess.Add(nodeLeft.GetAddress())
+					if peerState, ok := x.peersCache.get(nodeLeft.GetAddress()); ok {
+						x.rebalanceLocker.Lock()
+						x.rebalancingQueue <- peerState
+						x.rebalanceLocker.Unlock()
+					}
+				}
 			}
 		}
 	}
@@ -1449,30 +1505,23 @@ func (x *actorSystem) peersStateLoop() {
 
 // rebalancingLoop help perform cluster rebalancing
 func (x *actorSystem) rebalancingLoop() {
-	for event := range x.rebalancingChan {
-		if x.InCluster() {
-			// get peer state
-			peerState, err := x.nodeLeftStateFromEvent(event)
-			if err != nil {
-				x.logger.Error(err)
-				continue
-			}
+	for peerState := range x.rebalancingQueue {
+		ctx := context.Background()
+		if !x.shouldRebalance(ctx, peerState) {
+			continue
+		}
 
-			ctx := context.Background()
-			if !x.shouldRebalance(ctx, peerState) {
-				continue
-			}
+		if x.rebalancing.Load() {
+			x.rebalanceLocker.Lock()
+			x.rebalancingQueue <- peerState
+			x.rebalanceLocker.Unlock()
+			continue
+		}
 
-			if x.rebalancing.Load() {
-				x.logger.Debugf("%s on %s rebalancing already ongoing...", x.Name(), x.clusterNode.PeersAddress())
-				continue
-			}
-			x.logger.Infof("%s on %s starting rebalancing...", x.Name(), x.clusterNode.PeersAddress())
-			x.rebalancing.Store(true)
-			message := &internalpb.Rebalance{PeerState: peerState}
-			if err := x.systemGuardian.Tell(ctx, x.rebalancer, message); err != nil {
-				x.logger.Error(err)
-			}
+		x.rebalancing.Store(true)
+		message := &internalpb.Rebalance{PeerState: peerState}
+		if err := x.systemGuardian.Tell(ctx, x.rebalancer, message); err != nil {
+			x.logger.Error(err)
 		}
 	}
 }
@@ -1480,6 +1529,7 @@ func (x *actorSystem) rebalancingLoop() {
 // shouldRebalance returns true when the current can perform the cluster rebalancing
 func (x *actorSystem) shouldRebalance(ctx context.Context, peerState *internalpb.PeerState) bool {
 	return !(peerState == nil ||
+		!x.InCluster() ||
 		proto.Equal(peerState, new(internalpb.PeerState)) ||
 		len(peerState.GetActors()) == 0 ||
 		!x.cluster.IsLeader(ctx))
@@ -1487,8 +1537,7 @@ func (x *actorSystem) shouldRebalance(ctx context.Context, peerState *internalpb
 
 // processPeerState processes a given peer synchronization record.
 func (x *actorSystem) processPeerState(ctx context.Context, peer *cluster.Peer) error {
-	peerAddress := net.JoinHostPort(peer.Host, strconv.Itoa(peer.Port))
-
+	peerAddress := net.JoinHostPort(peer.Host, strconv.Itoa(peer.PeersPort))
 	x.logger.Infof("processing peer sync:(%s)", peerAddress)
 	peerState, err := x.cluster.GetState(ctx, peerAddress)
 	if err != nil {
@@ -1500,15 +1549,7 @@ func (x *actorSystem) processPeerState(ctx context.Context, peer *cluster.Peer) 
 	}
 
 	x.logger.Debugf("peer (%s) actors count (%d)", peerAddress, len(peerState.GetActors()))
-
-	// no need to handle the error
-	bytea, err := proto.Marshal(peerState)
-	if err != nil {
-		x.logger.Error(err)
-		return err
-	}
-
-	x.peersCache.Store(peerAddress, bytea)
+	x.peersCache.set(peerState)
 	x.logger.Infof("peer sync(%s) successfully processed", peerAddress)
 	return nil
 }
@@ -1620,19 +1661,6 @@ func (x *actorSystem) configureServer(ctx context.Context, mux *nethttp.ServeMux
 	return nil
 }
 
-// nodeLeftStateFromEvent returns the node left state from the cluster event
-func (x *actorSystem) nodeLeftStateFromEvent(event *cluster.Event) (*internalpb.PeerState, error) {
-	if event.Type != cluster.NodeLeft {
-		return nil, nil
-	}
-	nodeLeft := new(goaktpb.NodeLeft)
-	if err := event.Payload.UnmarshalTo(nodeLeft); err != nil {
-		return nil, err
-	}
-
-	return x.getPeerStateFromCache(nodeLeft.GetAddress())
-}
-
 // setHostPort sets the host and port
 func (x *actorSystem) setHostPort() error {
 	var err error
@@ -1727,6 +1755,10 @@ func (x *actorSystem) spawnRebalancer(ctx context.Context) error {
 		newRebalancer(x.reflection),
 		WithSupervisorStrategies(
 			NewSupervisorStrategy(PanicError{}, NewRestartDirective()),
+			NewSupervisorStrategy(&runtime.PanicNilError{}, NewRestartDirective()),
+			NewSupervisorStrategy(rebalancingError{}, NewRestartDirective()),
+			NewSupervisorStrategy(InternalError{}, NewResumeDirective()),
+			NewSupervisorStrategy(SpawnError{}, NewResumeDirective()),
 		),
 	)
 	if err != nil {
