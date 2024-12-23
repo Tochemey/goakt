@@ -5,7 +5,7 @@ go 1.22.0
 require (
 	connectrpc.com/connect v1.17.0
 	github.com/Workiva/go-datastructures v1.1.5
-	github.com/buraksezer/olric v0.5.6-0.20240925183822-6ca0e20256e0
+	github.com/buraksezer/olric v0.5.7
 	github.com/deckarep/golang-set/v2 v2.7.0
 	github.com/flowchartsman/retry v1.2.0
 	github.com/google/uuid v1.6.0
@@ -24,7 +24,7 @@ require (
 	go.uber.org/zap v1.27.0
 	golang.org/x/net v0.33.0
 	golang.org/x/sync v0.10.0
-	google.golang.org/protobuf v1.36.0
+	google.golang.org/protobuf v1.36.1
 	k8s.io/api v0.31.4
 	k8s.io/apimachinery v0.31.4
 	k8s.io/client-go v0.31.4
