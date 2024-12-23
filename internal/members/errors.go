@@ -22,48 +22,19 @@
  * SOFTWARE.
  */
 
-package http
+package members
 
-import (
-	"context"
-	"net/http"
-	"testing"
-	"time"
+import "github.com/pkg/errors"
 
-	"github.com/stretchr/testify/assert"
-	"github.com/travisjeffery/go-dynaport"
-	"golang.org/x/net/http2"
+var (
+	// ErrActorNotFound is returned when an actor is not found
+	ErrActorNotFound = errors.New("actor not found")
+	// ErrPeerSyncNotFound is returned when a peerSync record is not found
+	ErrPeerSyncNotFound = errors.New("peerSync record not found")
+	// ErrKeyNotFound is returned when a key is not found
+	ErrKeyNotFound = errors.New("key not found")
+	// ErrKeyAlreadyExists is returned when the key already exists in the cluster
+	ErrKeyAlreadyExists = errors.New("key already exists")
+	// ErrActorAlreadyExists is returned when the actor already exists in the cluster
+	ErrActorAlreadyExists = errors.New("actor already exists")
 )
-
-func TestNewClient(t *testing.T) {
-	cl := NewClient()
-	assert.IsType(t, new(http.Client), cl)
-	assert.IsType(t, new(http2.Transport), cl.Transport)
-	tr := cl.Transport.(*http2.Transport)
-	assert.True(t, tr.AllowHTTP)
-	assert.Equal(t, 30*time.Second, tr.PingTimeout)
-	assert.Equal(t, 30*time.Second, tr.ReadIdleTimeout)
-}
-
-func TestNewServer(t *testing.T) {
-	host := "127.0.0.1"
-	port := dynaport.Get(1)[0]
-	mux := http.NewServeMux()
-	ctx := context.TODO()
-
-	server := NewServer(ctx, host, port, mux)
-	assert.NotNil(t, server)
-	assert.IsType(t, new(http.Server), server)
-}
-
-func TestURL(t *testing.T) {
-	host := "127.0.0.1"
-	port := 123
-
-	url := URL(host, port)
-	assert.Equal(t, "http://127.0.0.1:123", url)
-
-	endpoint := "127.0.0.1:123"
-	actual := HostAndPortURL(endpoint)
-	assert.Equal(t, "http://127.0.0.1:123", actual)
-}

@@ -94,3 +94,8 @@ func NewServer(ctx context.Context, host string, port int, mux *http.ServeMux) *
 func URL(host string, port int) string {
 	return fmt.Sprintf("http://%s", net.JoinHostPort(host, strconv.Itoa(port)))
 }
+
+// HostAndPortURL creates an http connection address based upon the endpoint
+func HostAndPortURL(endpoint string) string {
+	return fmt.Sprintf("http://%s", endpoint)
+}

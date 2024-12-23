@@ -22,48 +22,51 @@
  * SOFTWARE.
  */
 
-package http
+package members
 
 import (
-	"context"
-	"net/http"
-	"testing"
+	"net"
+	"strconv"
 	"time"
 
-	"github.com/stretchr/testify/assert"
-	"github.com/travisjeffery/go-dynaport"
-	"golang.org/x/net/http2"
+	"google.golang.org/protobuf/proto"
+
+	"github.com/tochemey/goakt/v2/internal/internalpb"
 )
 
-func TestNewClient(t *testing.T) {
-	cl := NewClient()
-	assert.IsType(t, new(http.Client), cl)
-	assert.IsType(t, new(http2.Transport), cl.Transport)
-	tr := cl.Transport.(*http2.Transport)
-	assert.True(t, tr.AllowHTTP)
-	assert.Equal(t, 30*time.Second, tr.PingTimeout)
-	assert.Equal(t, 30*time.Second, tr.ReadIdleTimeout)
+// Member specifies the cluster member
+type Member struct {
+	Name          string
+	Host          string
+	Port          uint32
+	DiscoveryPort uint32
+	RemotingPort  uint32
+	CreatedAt     time.Time
 }
 
-func TestNewServer(t *testing.T) {
-	host := "127.0.0.1"
-	port := dynaport.Get(1)[0]
-	mux := http.NewServeMux()
-	ctx := context.TODO()
-
-	server := NewServer(ctx, host, port, mux)
-	assert.NotNil(t, server)
-	assert.IsType(t, new(http.Server), server)
+// PeerAddress returns address the node's peers will use to connect to
+func (m *Member) PeerAddress() string {
+	return net.JoinHostPort(m.Host, strconv.Itoa(int(m.Port)))
 }
 
-func TestURL(t *testing.T) {
-	host := "127.0.0.1"
-	port := 123
+// DiscoveryAddress returns the member discoveryAddress
+func (m *Member) DiscoveryAddress() string {
+	return net.JoinHostPort(m.Host, strconv.Itoa(int(m.DiscoveryPort)))
+}
 
-	url := URL(host, port)
-	assert.Equal(t, "http://127.0.0.1:123", url)
-
-	endpoint := "127.0.0.1:123"
-	actual := HostAndPortURL(endpoint)
-	assert.Equal(t, "http://127.0.0.1:123", actual)
+// memberFromMeta returns a Member record from
+// a node metadata
+func memberFromMeta(meta []byte) (*Member, error) {
+	nodeMeta := new(internalpb.PeerMeta)
+	if err := proto.Unmarshal(meta, nodeMeta); err != nil {
+		return nil, err
+	}
+	return &Member{
+		Name:          nodeMeta.GetName(),
+		Host:          nodeMeta.GetHost(),
+		Port:          nodeMeta.GetPort(),
+		DiscoveryPort: nodeMeta.GetDiscoveryPort(),
+		RemotingPort:  nodeMeta.GetRemotingPort(),
+		CreatedAt:     nodeMeta.GetCreationTime().AsTime(),
+	}, nil
 }

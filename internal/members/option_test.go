@@ -22,48 +22,60 @@
  * SOFTWARE.
  */
 
-package http
+package members
 
 import (
-	"context"
-	"net/http"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/travisjeffery/go-dynaport"
-	"golang.org/x/net/http2"
+
+	"github.com/tochemey/goakt/v2/log"
 )
 
-func TestNewClient(t *testing.T) {
-	cl := NewClient()
-	assert.IsType(t, new(http.Client), cl)
-	assert.IsType(t, new(http2.Transport), cl.Transport)
-	tr := cl.Transport.(*http2.Transport)
-	assert.True(t, tr.AllowHTTP)
-	assert.Equal(t, 30*time.Second, tr.PingTimeout)
-	assert.Equal(t, 30*time.Second, tr.ReadIdleTimeout)
-}
+func TestOptions(t *testing.T) {
+	testCases := []struct {
+		name     string
+		option   Option
+		expected Server
+	}{
+		{
+			name:     "WithLogger",
+			option:   WithLogger(log.DefaultLogger),
+			expected: Server{logger: log.DefaultLogger},
+		},
+		{
+			name:     "WithMaxJoinAttempts",
+			option:   WithMaxJoinAttempts(2),
+			expected: Server{maxJoinAttempts: 2},
+		},
+		{
+			name:     "WithShutdownTimeout",
+			option:   WithShutdownTimeout(2 * time.Minute),
+			expected: Server{shutdownTimeout: 2 * time.Minute},
+		},
+		{
+			name:     "WithJoinTimeout",
+			option:   WithJoinTimeout(2 * time.Minute),
+			expected: Server{joinTimeout: 2 * time.Minute},
+		},
+		{
+			name:     "WithJoinRetryInterval",
+			option:   WithJoinRetryInterval(2 * time.Minute),
+			expected: Server{joinRetryInterval: 2 * time.Minute},
+		},
+		{
+			name:     "WithReplicationInterval",
+			option:   WithReplicationInterval(2 * time.Minute),
+			expected: Server{replicationInterval: 2 * time.Minute},
+		},
+	}
 
-func TestNewServer(t *testing.T) {
-	host := "127.0.0.1"
-	port := dynaport.Get(1)[0]
-	mux := http.NewServeMux()
-	ctx := context.TODO()
-
-	server := NewServer(ctx, host, port, mux)
-	assert.NotNil(t, server)
-	assert.IsType(t, new(http.Server), server)
-}
-
-func TestURL(t *testing.T) {
-	host := "127.0.0.1"
-	port := 123
-
-	url := URL(host, port)
-	assert.Equal(t, "http://127.0.0.1:123", url)
-
-	endpoint := "127.0.0.1:123"
-	actual := HostAndPortURL(endpoint)
-	assert.Equal(t, "http://127.0.0.1:123", actual)
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			var server Server
+			tc.option.Apply(&server)
+			assert.Equal(t, tc.expected, server)
+		})
+	}
 }

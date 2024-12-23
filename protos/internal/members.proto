@@ -1,0 +1,64 @@
+syntax = "proto3";
+
+package internalpb;
+
+import "google/protobuf/timestamp.proto";
+import "internal/peers.proto";
+
+option go_package = "github.com/tochemey/goakt/v2/internal/internalpb;internalpb";
+
+// MembersService is used to interact with the cluster internal
+service MembersService {
+  // RemoveActor removes an actor from the cluster
+  rpc RemoveActor(RemoveActorRequest) returns (RemoveActorResponse);
+  // RemoveKey removes a key from the cluster
+  rpc RemoveKey(RemoveKeyRequest) returns (RemoveKeyResponse);
+}
+
+message RemoveActorRequest {
+  // Specifies the peer address
+  string peer_address = 1;
+  // Specifies the actor name
+  string actor_name = 2;
+  // Specifies the actor kind
+  string actor_kind = 3;
+}
+
+message RemoveActorResponse {}
+
+message RemoveKeyRequest {
+  // Specifies the peer address
+  string peer_address = 1;
+  // Specifies the key
+  string key = 2;
+}
+
+message RemoveKeyResponse {}
+
+// PeerMeta defines the peer metadata
+message PeerMeta {
+  // Specifies the node name
+  string name = 1;
+  // Specifies the node host
+  string host = 2;
+  // Specifies the node port
+  uint32 port = 3;
+  // Specifies the node discovery port
+  uint32 discovery_port = 4;
+  // Specifies the node remoting port
+  uint32 remoting_port = 5;
+  // Specifies the creation time
+  google.protobuf.Timestamp creation_time = 6;
+}
+
+message LocalState {
+  // Specifies the peer state
+  internalpb.PeerState peer_state = 1;
+  // Specifies the job keys
+  repeated string job_keys = 2;
+}
+
+message RemoteStates {
+  // Specifies the states
+  map<string, LocalState> states = 1;
+}

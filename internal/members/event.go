@@ -22,48 +22,37 @@
  * SOFTWARE.
  */
 
-package http
+package members
 
 import (
-	"context"
-	"net/http"
-	"testing"
+	"fmt"
 	"time"
-
-	"github.com/stretchr/testify/assert"
-	"github.com/travisjeffery/go-dynaport"
-	"golang.org/x/net/http2"
 )
 
-func TestNewClient(t *testing.T) {
-	cl := NewClient()
-	assert.IsType(t, new(http.Client), cl)
-	assert.IsType(t, new(http2.Transport), cl.Transport)
-	tr := cl.Transport.(*http2.Transport)
-	assert.True(t, tr.AllowHTTP)
-	assert.Equal(t, 30*time.Second, tr.PingTimeout)
-	assert.Equal(t, 30*time.Second, tr.ReadIdleTimeout)
+type EventType int
+
+const (
+	NodeJoined EventType = iota
+	NodeLeft
+	NodeDead
+)
+
+func (et EventType) String() string {
+	switch et {
+	case NodeJoined:
+		return "NodeJoined"
+	case NodeLeft:
+		return "NodeLeft"
+	case NodeDead:
+		return "NodeDead"
+	default:
+		return fmt.Sprintf("%d", int(et))
+	}
 }
 
-func TestNewServer(t *testing.T) {
-	host := "127.0.0.1"
-	port := dynaport.Get(1)[0]
-	mux := http.NewServeMux()
-	ctx := context.TODO()
-
-	server := NewServer(ctx, host, port, mux)
-	assert.NotNil(t, server)
-	assert.IsType(t, new(http.Server), server)
-}
-
-func TestURL(t *testing.T) {
-	host := "127.0.0.1"
-	port := 123
-
-	url := URL(host, port)
-	assert.Equal(t, "http://127.0.0.1:123", url)
-
-	endpoint := "127.0.0.1:123"
-	actual := HostAndPortURL(endpoint)
-	assert.Equal(t, "http://127.0.0.1:123", actual)
+// Event defines the cluster event
+type Event struct {
+	Member *Member
+	Time   time.Time
+	Type   EventType
 }
