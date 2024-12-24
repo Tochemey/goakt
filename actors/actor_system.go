@@ -421,14 +421,14 @@ func (x *actorSystem) Start(ctx context.Context) error {
 	x.started.Store(true)
 	if err := errorschain.
 		New(errorschain.ReturnFirst()).
+		AddError(x.enableRemoting(ctx)).
+		AddError(x.enableClustering(ctx)).
 		AddError(x.spawnRootGuardian(ctx)).
 		AddError(x.spawnSystemGuardian(ctx)).
 		AddError(x.spawnUserGuardian(ctx)).
 		AddError(x.spawnRebalancer(ctx)).
 		AddError(x.spawnJanitor(ctx)).
 		AddError(x.spawnDeadletters(ctx)).
-		AddError(x.enableRemoting(ctx)).
-		AddError(x.enableClustering(ctx)).
 		Error(); err != nil {
 		// reset the start
 		x.started.Store(false)
@@ -1800,7 +1800,8 @@ func (x *actorSystem) spawnJanitor(ctx context.Context) error {
 		actorName,
 		newJanitor(),
 		WithSupervisorStrategies(
-			NewSupervisorStrategy(PanicError{}, NewRestartDirective()),
+			NewSupervisorStrategy(PanicError{}, NewStopDirective()),
+			NewSupervisorStrategy(InternalError{}, NewStopDirective()),
 		),
 	)
 	if err != nil {

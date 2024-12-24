@@ -1239,8 +1239,9 @@ func (pid *PID) recovery(received *ReceiveContext) {
 		}
 		return
 	}
-	// no panic or recommended way to handle error
-	pid.supervisionChan <- received.getError()
+	if err := received.getError(); err != nil {
+		pid.supervisionChan <- err
+	}
 }
 
 // init initializes the given actor and init processing messages

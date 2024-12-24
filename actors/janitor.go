@@ -27,15 +27,21 @@ package actors
 import (
 	"context"
 
+	"github.com/reugn/go-quartz/logger"
+
 	"github.com/tochemey/goakt/v2/goaktpb"
+	"github.com/tochemey/goakt/v2/internal/cluster"
 	"github.com/tochemey/goakt/v2/log"
 )
 
 // janitor removes dead actors from the system
 // that helps free non-utilized resources
 type janitor struct {
-	pid    *PID
-	logger log.Logger
+	pid            *PID
+	logger         log.Logger
+	tree           *pidTree
+	cluster        cluster.Interface
+	clusterEnabled bool
 }
 
 // enforce compilation error
@@ -47,50 +53,53 @@ func newJanitor() *janitor {
 }
 
 // PreStart is the pre-start hook
-func (j *janitor) PreStart(context.Context) error {
+func (x *janitor) PreStart(context.Context) error {
 	return nil
 }
 
 // Receive handle message received
-func (j *janitor) Receive(ctx *ReceiveContext) {
+func (x *janitor) Receive(ctx *ReceiveContext) {
 	switch msg := ctx.Message().(type) {
 	case *goaktpb.PostStart:
-		j.pid = ctx.Self()
-		j.logger = ctx.Logger()
-		j.logger.Infof("%s started successfully", j.pid.Name())
-
+		x.handlePostStart(ctx)
 	case *goaktpb.Terminated:
-		actorID := msg.GetActorId()
-		system := ctx.ActorSystem()
-		tree := system.tree()
-		clusterEnabled := system.InCluster()
-		cluster := system.getCluster()
-		logger := j.logger
-
-		logger.Infof("%s freeing resource [actor=%s] from system", j.pid.Name(), actorID)
-
-		// remove node from the actors tree
-		if node, ok := tree.GetNode(actorID); ok {
-			tree.DeleteNode(node.GetValue())
-			if clusterEnabled {
-				if err := cluster.RemoveActor(context.WithoutCancel(ctx.Context()), node.GetValue().Name()); err != nil {
-					logger.Errorf("failed to remove [actor=%s] from cluster: %v", actorID, err)
-					return
-				}
-			}
-
-			logger.Infof("%s successfully free resource [actor=%s] from system", j.pid.Name(), actorID)
-			return
-		}
-
-		logger.Infof("%s could not locate resource [actor=%s] in system. Maybe already released", j.pid.Name(), actorID)
+		ctx.Err(x.handleTerminated(ctx.Context(), msg))
 	default:
 		ctx.Unhandled()
 	}
 }
 
 // PostStop is executed when the actor is shutting down.
-func (j *janitor) PostStop(context.Context) error {
-	j.logger.Infof("%s stopped successfully", j.pid.Name())
+func (x *janitor) PostStop(context.Context) error {
+	x.logger.Infof("%s stopped successfully", x.pid.Name())
+	return nil
+}
+
+// handlePostStart handles PostStart message
+func (x *janitor) handlePostStart(ctx *ReceiveContext) {
+	x.pid = ctx.Self()
+	x.logger = ctx.Logger()
+	x.tree = ctx.ActorSystem().tree()
+	x.cluster = ctx.ActorSystem().getCluster()
+	x.clusterEnabled = ctx.ActorSystem().InCluster()
+	x.logger.Infof("%s started successfully", x.pid.Name())
+}
+
+// handleTerminated handles Terminated message
+func (x *janitor) handleTerminated(ctx context.Context, msg *goaktpb.Terminated) error {
+	actorID := msg.GetActorId()
+	x.logger.Infof("%s freeing resource [actor=%s] from system", x.pid.Name(), actorID)
+	if node, ok := x.tree.GetNode(actorID); ok {
+		x.tree.DeleteNode(node.GetValue())
+		if x.clusterEnabled {
+			if err := x.cluster.RemoveActor(context.WithoutCancel(ctx), node.GetValue().Name()); err != nil {
+				x.logger.Errorf("%s failed to remove [actor=%s] from cluster: %v", x.pid.Name(), actorID, err)
+				return err
+			}
+		}
+		logger.Infof("%s successfully free resource [actor=%s] from system", x.pid.Name(), actorID)
+		return nil
+	}
+	logger.Infof("%s could not locate resource [actor=%s] in system. Maybe already freed.", x.pid.Name(), actorID)
 	return nil
 }

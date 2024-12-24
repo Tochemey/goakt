@@ -49,19 +49,19 @@ func newUserGuardian() *userGuardian {
 }
 
 // PreStart is the pre-start hook
-func (g *userGuardian) PreStart(context.Context) error {
+func (x *userGuardian) PreStart(context.Context) error {
 	return nil
 }
 
 // Receive handles messages
-func (g *userGuardian) Receive(ctx *ReceiveContext) {
+func (x *userGuardian) Receive(ctx *ReceiveContext) {
 	switch msg := ctx.Message().(type) {
 	case *goaktpb.PostStart:
-		g.pid = ctx.Self()
-		g.logger = ctx.Logger()
-		g.logger.Infof("%s started successfully", g.pid.Name())
+		x.pid = ctx.Self()
+		x.logger = ctx.Logger()
+		x.logger.Infof("%s started successfully", x.pid.Name())
 	case *goaktpb.Terminated:
-		g.logger.Debugf("%s received a terminated actor=(%s)", g.pid.Name(), msg.GetActorId())
+		x.logger.Debugf("%s received a terminated actor=(%s)", x.pid.Name(), msg.GetActorId())
 		// pass
 	default:
 		ctx.Unhandled()
@@ -69,7 +69,7 @@ func (g *userGuardian) Receive(ctx *ReceiveContext) {
 }
 
 // PostStop is the post-stop hook
-func (g *userGuardian) PostStop(context.Context) error {
-	g.logger.Infof("%s stopped successfully", g.pid.Name())
+func (x *userGuardian) PostStop(context.Context) error {
+	x.logger.Infof("%s stopped successfully", x.pid.Name())
 	return nil
 }

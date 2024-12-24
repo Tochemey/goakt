@@ -28,19 +28,19 @@ import (
 	"sync"
 )
 
-// ThreadSafe type that can be safely shared between goroutines.
-type ThreadSafe[T any] struct {
+// Safe type that can be safely shared between goroutines.
+type Safe[T any] struct {
 	data []T
 	mu   sync.RWMutex
 }
 
-// NewThreadSafe creates a new lock-free thread-safe slice.
-func NewThreadSafe[T any]() *ThreadSafe[T] {
-	return &ThreadSafe[T]{data: []T{}}
+// NewSafe creates a new lock-free thread-safe slice.
+func NewSafe[T any]() *Safe[T] {
+	return &Safe[T]{data: []T{}}
 }
 
 // Len returns the number of items
-func (cs *ThreadSafe[T]) Len() int {
+func (cs *Safe[T]) Len() int {
 	cs.mu.RLock()
 	l := len(cs.data)
 	cs.mu.RUnlock()
@@ -48,21 +48,21 @@ func (cs *ThreadSafe[T]) Len() int {
 }
 
 // Append adds an item to the concurrent slice.
-func (cs *ThreadSafe[T]) Append(item T) {
+func (cs *Safe[T]) Append(item T) {
 	cs.mu.Lock()
 	cs.data = append(cs.data, item)
 	cs.mu.Unlock()
 }
 
 // AppendMany adds many items to the concurrent slice
-func (cs *ThreadSafe[T]) AppendMany(item ...T) {
+func (cs *Safe[T]) AppendMany(item ...T) {
 	cs.mu.Lock()
 	cs.data = append(cs.data, item...)
 	cs.mu.Unlock()
 }
 
 // Get returns the slice item at the given index
-func (cs *ThreadSafe[T]) Get(index int) (item T) {
+func (cs *Safe[T]) Get(index int) (item T) {
 	cs.mu.RLock()
 	if index < 0 || index >= len(cs.data) {
 		var zero T
@@ -74,7 +74,7 @@ func (cs *ThreadSafe[T]) Get(index int) (item T) {
 }
 
 // Delete an item from the slice
-func (cs *ThreadSafe[T]) Delete(index int) {
+func (cs *Safe[T]) Delete(index int) {
 	cs.mu.Lock()
 	if index < 0 || index >= len(cs.data) {
 		cs.mu.Unlock()
@@ -85,7 +85,7 @@ func (cs *ThreadSafe[T]) Delete(index int) {
 }
 
 // Items returns the list of items
-func (cs *ThreadSafe[T]) Items() []T {
+func (cs *Safe[T]) Items() []T {
 	cs.mu.RLock()
 	dataCopy := make([]T, len(cs.data))
 	copy(dataCopy, cs.data)
@@ -94,7 +94,7 @@ func (cs *ThreadSafe[T]) Items() []T {
 }
 
 // Reset resets the slice
-func (cs *ThreadSafe[T]) Reset() {
+func (cs *Safe[T]) Reset() {
 	cs.mu.Lock()
 	cs.data = []T{}
 	cs.mu.Unlock()
