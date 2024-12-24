@@ -40,6 +40,7 @@ Also, check reference section at the end of the post for more material regarding
     - [Cron Expression Format](#cron-expression-format)
     - [Note](#note)
   - [Stashing](#stashing)
+  - [Coordinated Shutdown](#coordinated-shutdown)
   - [Remoting](#remoting)
   - [Cluster](#cluster)
   - [Observability](#observability)
@@ -157,10 +158,13 @@ In GoAkt, supervision allows to define the various strategies to apply when a gi
 To create a supervisor strategy one needs to call the `NewSupervisorStrategy` function and pass _the error type_ and the corresponding _directive_.
 GoAkt comes bundled with the following default supervisor strategies that can be overriden when creating an actor: 
 - `NewSupervisorStrategy(PanicError{}, NewStopDirective())`: this will stop the faulty actor in case of panic.
-- `NewSupervisorStrategy(&runtime.PanicNilError{}, NewStopDirective())`: this will stop the faulty actor for nil panic error
+- `NewSupervisorStrategy(&runtime.PanicNilError{}, NewStopDirective())`: this will stop the faulty actor for nil panic error.
 
 Note: GoAkt will suspend a faulty actor when there is no supervisor strategy set in place for the corresponding error type. Once can check the state of the actor using the `IsSuspended` method on the `PID`.
-A suspended actor can be restarted or shutdown, however it cannot handle any messages sent to it.
+A suspended actor can be restarted or shutdown, however it cannot handle any messages sent to it. There are buit-in error types one can use:
+- `PanicError`: to wrap up an error instead of using the go standard _panic_.
+- `InternalError`: it is a wrapper around an error that can categorize internal.
+- `SpawnError`: it is used to throw an actor creation error.
 
 In GoAkt each child actor is treated separately. There is no concept of one-for-one and one-for-all strategies.
 The following directives are supported:
@@ -317,6 +321,11 @@ To use the stashing feature, call the following methods on the [ReceiveContext](
 - `UnstashAll()` - unstashes all messages from the stash buffer and prepends in the mailbox. Messages will be processed
   in the same order they arrived. The stash buffer will be empty after processing all messages, unless an exception is
   thrown or messages are stashed while unstashing.
+
+### Coordinated Shutdown
+
+GoAkt provides a mechanism to execute user-defined tasks during the shutdown of the actor system. One can use the option `WithCoordinatedShutdown`
+when creating the actor system. The tasks are executed in the order they have been set. Any failure will halt the shutdown process.
 
 ### Remoting
 

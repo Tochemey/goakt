@@ -30,6 +30,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"os"
 	"slices"
 	"strconv"
 	"sync"
@@ -159,8 +160,8 @@ type Engine struct {
 	// specifies the node state
 	peerState *internalpb.PeerState
 
-	joinEventNodes goset.Set[string]
-	leftEventNodes goset.Set[string]
+	joinedNodesFilter goset.Set[string]
+	leftNodesFilter   goset.Set[string]
 }
 
 // enforce compilation error
@@ -170,8 +171,8 @@ var _ Interface = (*Engine)(nil)
 func NewEngine(name string, disco discovery.Provider, host *discovery.Node, opts ...Option) (*Engine, error) {
 	// create an instance of the Node
 	engine := &Engine{
-		partitionsCount:    20,
-		logger:             log.DefaultLogger,
+		partitionsCount:    271,
+		logger:             log.New(log.ErrorLevel, os.Stderr),
 		name:               name,
 		discoveryProvider:  disco,
 		writeTimeout:       time.Second,
@@ -187,8 +188,8 @@ func NewEngine(name string, disco discovery.Provider, host *discovery.Node, opts
 		writeQuorum:        1,
 		readQuorum:         1,
 		Mutex:              new(sync.Mutex),
-		joinEventNodes:     goset.NewSet[string](),
-		leftEventNodes:     goset.NewSet[string](),
+		joinedNodesFilter:  goset.NewSet[string](),
+		leftNodesFilter:    goset.NewSet[string](),
 	}
 	// apply the various options
 	for _, opt := range opts {
@@ -631,12 +632,12 @@ func (n *Engine) consume() {
 				continue
 			}
 
-			if n.joinEventNodes.Contains(nodeJoined.NodeJoin) {
+			if n.joinedNodesFilter.Contains(nodeJoined.NodeJoin) {
 				n.eventsLock.Unlock()
 				continue
 			}
 
-			n.joinEventNodes.Add(nodeJoined.NodeJoin)
+			n.joinedNodesFilter.Add(nodeJoined.NodeJoin)
 			timeMilli := nodeJoined.Timestamp / int64(1e6)
 			event := &goaktpb.NodeJoined{
 				Address:   nodeJoined.NodeJoin,
@@ -658,12 +659,12 @@ func (n *Engine) consume() {
 				continue
 			}
 
-			if n.leftEventNodes.Contains(nodeLeft.NodeLeft) {
+			if n.leftNodesFilter.Contains(nodeLeft.NodeLeft) {
 				n.eventsLock.Unlock()
 				continue
 			}
 
-			n.leftEventNodes.Add(nodeLeft.NodeLeft)
+			n.leftNodesFilter.Add(nodeLeft.NodeLeft)
 			timeMilli := nodeLeft.Timestamp / int64(1e6)
 			event := &goaktpb.NodeLeft{
 				Address:   nodeLeft.NodeLeft,

@@ -31,11 +31,13 @@ import (
 	"net"
 	nethttp "net/http"
 	"os"
+	"os/signal"
 	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"connectrpc.com/connect"
@@ -158,6 +160,13 @@ type ActorSystem interface {
 	Uptime() int64
 	// Running returns true when the actor system is running
 	Running() bool
+	// Run starts the actor system, blocks on the signals channel, and then
+	// gracefully shuts the application down.
+	// It's designed to make typical applications simple to run.
+	// All of Run's functionality is implemented in terms of the exported
+	// Start and Stop methods. Applications with more specialized needs
+	// can use those methods directly instead of relying on Run.
+	Run(ctx context.Context, startHook func(ctx context.Context) error, stopHook func(ctx context.Context) error)
 	// handleRemoteAsk handles a synchronous message to another actor and expect a response.
 	// This block until a response is received or timed out.
 	handleRemoteAsk(ctx context.Context, to *PID, message proto.Message, timeout time.Duration) (response proto.Message, err error)
@@ -229,8 +238,8 @@ type actorSystem struct {
 	clusterEnabled atomic.Bool
 	// cluster mode
 	cluster            cluster.Interface
-	actorsChan         chan *internalpb.ActorRef
-	clusterEventsChan  <-chan *cluster.Event
+	wireActorsQueue    chan *internalpb.ActorRef
+	eventsQueue        <-chan *cluster.Event
 	clusterSyncStopSig chan types.Unit
 	partitionHasher    hash.Hasher
 	clusterNode        *discovery.Node
@@ -256,7 +265,7 @@ type actorSystem struct {
 	peersCache             *peersCache
 	clusterConfig          *ClusterConfig
 	rebalancingQueue       chan *internalpb.PeerState
-	leftNodesInflight      goset.Set[string]
+	nodesInprocess         goset.Set[string]
 
 	rebalancer      *PID
 	rootGuardian    *PID
@@ -288,7 +297,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 	}
 
 	system := &actorSystem{
-		actorsChan:             make(chan *internalpb.ActorRef, 10),
+		wireActorsQueue:        make(chan *internalpb.ActorRef, 10),
 		name:                   name,
 		logger:                 log.New(log.ErrorLevel, os.Stderr),
 		expireActorAfter:       DefaultPassivationTimeout,
@@ -301,7 +310,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		eventsStream:           eventstream.New(),
 		partitionHasher:        hash.DefaultHasher(),
 		actorInitTimeout:       DefaultInitTimeout,
-		clusterEventsChan:      make(chan *cluster.Event, 1),
+		eventsQueue:            make(chan *cluster.Event, 1),
 		registry:               types.NewRegistry(),
 		clusterSyncStopSig:     make(chan types.Unit, 1),
 		peersCache:             newPeerCache(),
@@ -312,7 +321,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		startedAt:              atomic.NewInt64(0),
 		rebalancing:            atomic.NewBool(false),
 		shutdownHooks:          make([]ShutdownHook, 0),
-		leftNodesInflight:      goset.NewSet[string](),
+		nodesInprocess:         goset.NewSet[string](),
 		rebalanceLocker:        &sync.Mutex{},
 	}
 
@@ -345,6 +354,97 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		withSchedulerRemoting(NewRemoting()))
 
 	return system, nil
+}
+
+// Run starts the actor system, blocks on the signals channel, and then
+// gracefully shuts the application down and terminate the running processing.
+// It's designed to make typical applications simple to run.
+// The minimal GoAkt application looks like this:
+//
+//	NewActorSystem(name, opts).Run(ctx, startHook, stopHook)
+//
+// All of Run's functionality is implemented in terms of the exported
+// Start and Stop methods. Applications with more specialized needs
+// can use those methods directly instead of relying on Run.
+func (x *actorSystem) Run(ctx context.Context, startHook func(ctx context.Context) error, stophook func(ctx context.Context) error) {
+	if err := errorschain.
+		New(errorschain.ReturnFirst()).
+		AddError(startHook(ctx)).
+		AddError(x.Start(ctx)).
+		Error(); err != nil {
+		x.logger.Fatal(err)
+		os.Exit(1)
+		return
+	}
+
+	// wait for interruption/termination
+	notifier := make(chan os.Signal, 1)
+	done := make(chan types.Unit, 1)
+	signal.Notify(notifier, syscall.SIGINT, syscall.SIGTERM)
+	// wait for a shutdown signal, and then shutdown
+	go func() {
+		sig := <-notifier
+		x.logger.Infof("received an interrupt signal (%s) to shutdown", sig.String())
+
+		if err := errorschain.
+			New(errorschain.ReturnFirst()).
+			AddError(stophook(ctx)).
+			AddError(x.Stop(ctx)).
+			Error(); err != nil {
+			x.logger.Fatal(err)
+		}
+
+		signal.Stop(notifier)
+		done <- types.Unit{}
+	}()
+	<-done
+	pid := os.Getpid()
+	// make sure if it is unix init process to exit
+	if pid == 1 {
+		os.Exit(0)
+	}
+
+	process, _ := os.FindProcess(pid)
+	switch {
+	case runtime.GOOS == "windows":
+		_ = process.Kill()
+	default:
+		_ = process.Signal(syscall.SIGTERM)
+	}
+}
+
+// Start initializes the actor system.
+// To guarantee a clean shutdown during unexpected system terminations,
+// developers must handle SIGTERM and SIGINT signals appropriately and invoke Stop.
+func (x *actorSystem) Start(ctx context.Context) error {
+	x.logger.Infof("%s actor system starting on %s/%s..", x.name, runtime.GOOS, runtime.GOARCH)
+	x.started.Store(true)
+	if err := errorschain.
+		New(errorschain.ReturnFirst()).
+		AddError(x.spawnRootGuardian(ctx)).
+		AddError(x.spawnSystemGuardian(ctx)).
+		AddError(x.spawnUserGuardian(ctx)).
+		AddError(x.spawnRebalancer(ctx)).
+		AddError(x.spawnJanitor(ctx)).
+		AddError(x.spawnDeadletters(ctx)).
+		AddError(x.enableRemoting(ctx)).
+		AddError(x.enableClustering(ctx)).
+		Error(); err != nil {
+		// reset the start
+		x.started.Store(false)
+		return err
+	}
+
+	x.scheduler.Start(ctx)
+	x.startedAt.Store(time.Now().Unix())
+	x.logger.Infof("%s actor system successfully started..:)", x.name)
+	return nil
+}
+
+// Stop stops the actor system and does not terminate the program.
+// One needs to explicitly call os.Exit to terminate the program.
+func (x *actorSystem) Stop(ctx context.Context) error {
+	return x.shutdown(ctx)
 }
 
 // Running returns true when the actor system is running
@@ -761,40 +861,6 @@ func (x *actorSystem) RemoteActor(ctx context.Context, actorName string) (addr *
 	return address.From(actor.GetActorAddress()), nil
 }
 
-// Start initializes the actor system.
-// To guarantee a clean shutdown during unexpected system terminations,
-// developers must handle SIGTERM and SIGINT signals appropriately and invoke Stop.
-func (x *actorSystem) Start(ctx context.Context) error {
-	x.logger.Infof("%s actor system starting on %s/%s..", x.name, runtime.GOOS, runtime.GOARCH)
-	x.started.Store(true)
-	if err := errorschain.
-		New(errorschain.ReturnFirst()).
-		AddError(x.spawnRootGuardian(ctx)).
-		AddError(x.spawnSystemGuardian(ctx)).
-		AddError(x.spawnUserGuardian(ctx)).
-		AddError(x.spawnRebalancer(ctx)).
-		AddError(x.spawnJanitor(ctx)).
-		AddError(x.spawnDeadletters(ctx)).
-		AddError(x.enableRemoting(ctx)).
-		AddError(x.enableClustering(ctx)).
-		Error(); err != nil {
-		// reset the start
-		x.started.Store(false)
-		return err
-	}
-
-	x.scheduler.Start(ctx)
-	x.startedAt.Store(time.Now().Unix())
-	x.logger.Infof("%s actor system successfully started..:)", x.name)
-	return nil
-}
-
-// Stop stops the actor system and does not terminate the program.
-// One needs to explicitly call os.Exit to terminate the program.
-func (x *actorSystem) Stop(ctx context.Context) error {
-	return x.shutdown(ctx)
-}
-
 // RemoteLookup for an actor on a remote host.
 func (x *actorSystem) RemoteLookup(ctx context.Context, request *connect.Request[internalpb.RemoteLookupRequest]) (*connect.Response[internalpb.RemoteLookupResponse], error) {
 	logger := x.logger
@@ -1168,7 +1234,7 @@ func (x *actorSystem) completeRebalancing() {
 func (x *actorSystem) removePeerStateFromCache(address string) {
 	x.locker.Lock()
 	x.peersCache.remove(address)
-	x.leftNodesInflight.Remove(address)
+	x.nodesInprocess.Remove(address)
 	x.locker.Unlock()
 }
 
@@ -1186,7 +1252,7 @@ func (x *actorSystem) getPeerStateFromCache(address string) (*internalpb.PeerSta
 // broadcastActor broadcast the newly (re)spawned actor into the cluster
 func (x *actorSystem) broadcastActor(actor *PID) {
 	if x.clusterEnabled.Load() {
-		x.actorsChan <- &internalpb.ActorRef{
+		x.wireActorsQueue <- &internalpb.ActorRef{
 			ActorAddress: actor.Address().Address,
 			ActorType:    types.TypeName(actor.Actor()),
 		}
@@ -1251,7 +1317,7 @@ func (x *actorSystem) enableClustering(ctx context.Context) error {
 
 	x.locker.Lock()
 	x.cluster = clusterEngine
-	x.clusterEventsChan = clusterEngine.Events()
+	x.eventsQueue = clusterEngine.Events()
 	x.rebalancingQueue = make(chan *internalpb.PeerState, 1)
 	for _, kind := range x.clusterConfig.Kinds() {
 		x.registry.Register(kind)
@@ -1361,7 +1427,7 @@ func (x *actorSystem) shutdown(ctx context.Context) error {
 			return err
 		}
 
-		close(x.actorsChan)
+		close(x.wireActorsQueue)
 		x.clusterSyncStopSig <- types.Unit{}
 		x.clusterEnabled.Store(false)
 		x.rebalancing.Store(false)
@@ -1390,7 +1456,7 @@ func (x *actorSystem) shutdown(ctx context.Context) error {
 
 // replicationLoop publishes newly created actor into the cluster when cluster is enabled
 func (x *actorSystem) replicationLoop() {
-	for actor := range x.actorsChan {
+	for actor := range x.wireActorsQueue {
 		// never replicate system actors because there are specific to the
 		// started node
 		if isReservedName(actor.GetActorAddress().GetName()) {
@@ -1407,7 +1473,7 @@ func (x *actorSystem) replicationLoop() {
 
 // clusterEventsLoop listens to cluster events and send them to the event streams
 func (x *actorSystem) clusterEventsLoop() {
-	for event := range x.clusterEventsChan {
+	for event := range x.eventsQueue {
 		if x.InCluster() {
 			if event != nil && event.Payload != nil {
 				// push the event to the event stream
@@ -1421,11 +1487,11 @@ func (x *actorSystem) clusterEventsLoop() {
 				if event.Type == cluster.NodeLeft {
 					nodeLeft := new(goaktpb.NodeLeft)
 					_ = event.Payload.UnmarshalTo(nodeLeft)
-					if x.leftNodesInflight.Contains(nodeLeft.GetAddress()) {
+					if x.nodesInprocess.Contains(nodeLeft.GetAddress()) {
 						continue
 					}
 
-					x.leftNodesInflight.Add(nodeLeft.GetAddress())
+					x.nodesInprocess.Add(nodeLeft.GetAddress())
 					if peerState, ok := x.peersCache.get(nodeLeft.GetAddress()); ok {
 						x.rebalanceLocker.Lock()
 						x.rebalancingQueue <- peerState

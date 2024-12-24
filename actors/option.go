@@ -169,8 +169,7 @@ func WithJanitorInterval(interval time.Duration) Option {
 
 // WithCoordinatedShutdown registers internal and user-defined tasks to be executed during the shutdown process.
 // The defined tasks will be executed in the same order of insertion.
-// Any failure will halt the shutdown process when one directly call the Stop method
-// of the actor system. On the other hand their failure will not halt any system triggered shutdown.
+// Any failure will halt the shutdown process.
 func WithCoordinatedShutdown(hooks ...ShutdownHook) Option {
 	return OptionFunc(func(system *actorSystem) {
 		system.shutdownHooks = append(system.shutdownHooks, hooks...)
