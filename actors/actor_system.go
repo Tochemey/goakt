@@ -166,7 +166,7 @@ type ActorSystem interface {
 	// All of Run's functionality is implemented in terms of the exported
 	// Start and Stop methods. Applications with more specialized needs
 	// can use those methods directly instead of relying on Run.
-	Run(ctx context.Context, hooks ...func() error)
+	Run(ctx context.Context, startHook func(ctx context.Context) error, stopHook func(ctx context.Context) error)
 	// handleRemoteAsk handles a synchronous message to another actor and expect a response.
 	// This block until a response is received or timed out.
 	handleRemoteAsk(ctx context.Context, to *PID, message proto.Message, timeout time.Duration) (response proto.Message, err error)
@@ -361,13 +361,17 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 // It's designed to make typical applications simple to run.
 // The minimal GoAkt application looks like this:
 //
-//	NewActorSystem(name).Run(ctx)
+//	NewActorSystem(name, opts).Run(ctx, startHook, stopHook)
 //
 // All of Run's functionality is implemented in terms of the exported
 // Start and Stop methods. Applications with more specialized needs
 // can use those methods directly instead of relying on Run.
-func (x *actorSystem) Run(ctx context.Context, hooks ...func() error) {
-	if err := x.Start(ctx); err != nil {
+func (x *actorSystem) Run(ctx context.Context, startHook func(ctx context.Context) error, stophook func(ctx context.Context) error) {
+	if err := errorschain.
+		New(errorschain.ReturnFirst()).
+		AddError(startHook(ctx)).
+		AddError(x.Start(ctx)).
+		Error(); err != nil {
 		x.logger.Fatal(err)
 		os.Exit(1)
 		return
@@ -381,14 +385,10 @@ func (x *actorSystem) Run(ctx context.Context, hooks ...func() error) {
 	go func() {
 		sig := <-notifier
 		x.logger.Infof("received an interrupt signal (%s) to shutdown", sig.String())
-		errs := make([]error, len(hooks))
-		for i, hook := range hooks {
-			errs[i] = hook()
-		}
 
 		if err := errorschain.
 			New(errorschain.ReturnFirst()).
-			AddErrors(errs...).
+			AddError(stophook(ctx)).
 			AddError(x.Stop(ctx)).
 			Error(); err != nil {
 			x.logger.Fatal(err)
