@@ -163,8 +163,8 @@ GoAkt comes bundled with the following default supervisor strategies that can be
 Note: GoAkt will suspend a faulty actor when there is no supervisor strategy set in place for the corresponding error type. Once can check the state of the actor using the `IsSuspended` method on the `PID`.
 A suspended actor can be restarted or shutdown, however it cannot handle any messages sent to it. There are buit-in error types one can use:
 - `PanicError`: to wrap up an error instead of using the go standard _panic_.
-- `InternalError`: it is a wrapper around an error that can categorize internal.
-- `SpawnError`: it is used to throw an actor creation error.
+- `InternalError`: it is a wrapper around an error that can be categorized as internal.
+- `SpawnError`: recommended when the creation of an actor failed.
 
 In GoAkt each child actor is treated separately. There is no concept of one-for-one and one-for-all strategies.
 The following directives are supported:

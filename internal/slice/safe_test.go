@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (c) 2022-2024  Arsene Tochemey Gandote
+ * Copyright (c) 2022-2025  Arsene Tochemey Gandote
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -32,7 +32,7 @@ import (
 
 func TestSlice(t *testing.T) {
 	// create a concurrent slice of integer
-	sl := NewThreadSafe[int]()
+	sl := NewSafe[int]()
 
 	// add some items
 	sl.Append(2)

@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (c) 2022-2024  Arsene Tochemey Gandote
+ * Copyright (c) 2022-2025  Arsene Tochemey Gandote
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -39,6 +39,7 @@ import (
 type systemGuardian struct {
 	pid    *PID
 	logger log.Logger
+	system ActorSystem
 }
 
 // enforce compilation error
@@ -50,56 +51,60 @@ func newSystemGuardian() *systemGuardian {
 }
 
 // PreStart is the pre-start hook
-func (g *systemGuardian) PreStart(context.Context) error {
+func (x *systemGuardian) PreStart(context.Context) error {
 	return nil
 }
 
 // Receive handle message
-func (g *systemGuardian) Receive(ctx *ReceiveContext) {
+func (x *systemGuardian) Receive(ctx *ReceiveContext) {
 	switch msg := ctx.Message().(type) {
 	case *goaktpb.PostStart:
-		g.initialize(ctx)
+		x.handlePostStart(ctx)
 	case *internalpb.RebalanceComplete:
-		g.completeRebalancing(msg)
+		x.completeRebalancing(msg)
 	case *goaktpb.Terminated:
-		actorID := msg.GetActorId()
-		system := ctx.ActorSystem()
-		systemName := system.Name()
-		if actorID == system.reservedName(rebalancerType) {
-			// rebalancer is dead which means either there is an issue during the cluster topology changes
-			// log a message error and stop the actor system
-			g.logger.Warn("%s rebalancer is down. %s is going to shutdown. Kindly check logs and fix any potential issue with the cluster",
-				systemName,
-				systemName)
-
-			// blindly shutdown the actor system. No need to check any error
-			_ = system.Stop(context.WithoutCancel(ctx.Context()))
-		}
+		x.handleTerminated(ctx.Context(), msg)
 	default:
 		ctx.Unhandled()
 	}
 }
 
 // PostStop is the post-stop hook
-func (g *systemGuardian) PostStop(context.Context) error {
-	g.logger.Infof("%s stopped successfully", g.pid.Name())
+func (x *systemGuardian) PostStop(context.Context) error {
+	x.logger.Infof("%s stopped successfully", x.pid.Name())
 	return nil
 }
 
-// initialize sets the actor up
-func (g *systemGuardian) initialize(ctx *ReceiveContext) {
-	g.pid = ctx.Self()
-	g.logger = ctx.Logger()
-	g.logger.Infof("%s started successfully", g.pid.Name())
+// handlePostStart sets the actor up
+func (x *systemGuardian) handlePostStart(ctx *ReceiveContext) {
+	x.pid = ctx.Self()
+	x.logger = ctx.Logger()
+	x.system = ctx.ActorSystem()
+	x.logger.Infof("%s started successfully", x.pid.Name())
+}
+
+// handleTerminated handles Terminated message
+func (x *systemGuardian) handleTerminated(ctx context.Context, msg *goaktpb.Terminated) {
+	actorID := msg.GetActorId()
+	systemName := x.system.Name()
+	if isReservedName(actorID) {
+		// log a message error and stop the actor system
+		x.logger.Warnf("%s is down. %s is going to shutdown. Kindly check logs and fix any potential issue with the cluster",
+			actorID,
+			systemName)
+
+		// blindly shutdown the actor system. No need to check any error
+		_ = x.system.Stop(context.WithoutCancel(ctx))
+	}
 }
 
 // completeRebalancing wraps up the rebalancing of dead node in the cluster
-func (g *systemGuardian) completeRebalancing(msg *internalpb.RebalanceComplete) {
-	g.logger.Infof("%s completing rebalancing", g.pid.Name())
-	g.pid.ActorSystem().completeRebalancing()
-	g.logger.Infof("%s rebalancing successfully completed", g.pid.Name())
+func (x *systemGuardian) completeRebalancing(msg *internalpb.RebalanceComplete) {
+	x.logger.Infof("%s completing rebalancing", x.pid.Name())
+	x.pid.ActorSystem().completeRebalancing()
+	x.logger.Infof("%s rebalancing successfully completed", x.pid.Name())
 
-	g.logger.Infof("%s removing dead peer=(%s) from cache", g.pid.Name(), msg.GetPeerAddress())
-	g.pid.ActorSystem().removePeerStateFromCache(msg.GetPeerAddress())
-	g.logger.Infof("%s dead peer=(%s) successfully removed from cache", g.pid.Name(), msg.GetPeerAddress())
+	x.logger.Infof("%s removing dead peer=(%s) from cache", x.pid.Name(), msg.GetPeerAddress())
+	x.pid.ActorSystem().removePeerStateFromCache(msg.GetPeerAddress())
+	x.logger.Infof("%s dead peer=(%s) successfully removed from cache", x.pid.Name(), msg.GetPeerAddress())
 }

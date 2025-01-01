@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (c) 2022-2024  Arsene Tochemey Gandote
+ * Copyright (c) 2022-2025  Arsene Tochemey Gandote
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -49,9 +49,9 @@ func newTree() *pidTree {
 		nodePool: &sync.Pool{
 			New: func() any {
 				return &pidNode{
-					Descendants: slice.NewThreadSafe[*pidNode](),
-					Watchees:    slice.NewThreadSafe[*pidNode](),
-					Watchers:    slice.NewThreadSafe[*pidNode](),
+					Descendants: slice.NewSafe[*pidNode](),
+					Watchees:    slice.NewSafe[*pidNode](),
+					Watchers:    slice.NewSafe[*pidNode](),
 				}
 			},
 		},
@@ -248,7 +248,7 @@ func (t *pidTree) updateAncestors(parentID, childID string) {
 }
 
 // filterOutChild removes the node with the given ID from the Children slice.
-func filterOutChild(children *slice.ThreadSafe[*pidNode], childID string) *slice.ThreadSafe[*pidNode] {
+func filterOutChild(children *slice.Safe[*pidNode], childID string) *slice.Safe[*pidNode] {
 	for i, child := range children.Items() {
 		if child.ID == childID {
 			children.Delete(i)
@@ -260,7 +260,7 @@ func filterOutChild(children *slice.ThreadSafe[*pidNode], childID string) *slice
 
 // collectDescendants collects all the descendants and grand children
 func collectDescendants(node *pidNode) []*pidNode {
-	output := slice.NewThreadSafe[*pidNode]()
+	output := slice.NewSafe[*pidNode]()
 
 	var collectRecursive func(*pidNode)
 	collectRecursive = func(currentNode *pidNode) {

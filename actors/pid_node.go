@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (c) 2022-2024  Arsene Tochemey Gandote
+ * Copyright (c) 2022-2025  Arsene Tochemey Gandote
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -51,9 +51,9 @@ func (v *pidValue) Value() *PID {
 type pidNode struct {
 	ID          string
 	value       atomic.Pointer[pidValue]
-	Descendants *slice.ThreadSafe[*pidNode]
-	Watchers    *slice.ThreadSafe[*pidNode]
-	Watchees    *slice.ThreadSafe[*pidNode]
+	Descendants *slice.Safe[*pidNode]
+	Watchers    *slice.Safe[*pidNode]
+	Watchees    *slice.Safe[*pidNode]
 }
 
 // SetValue sets a node value

@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (c) 2022-2024  Arsene Tochemey Gandote
+ * Copyright (c) 2022-2025  Arsene Tochemey Gandote
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -64,21 +64,21 @@ func newDeadLetters() *deadLetters {
 }
 
 // PreStart pre-starts the deadletter actor
-func (d *deadLetters) PreStart(context.Context) error {
+func (x *deadLetters) PreStart(context.Context) error {
 	return nil
 }
 
 // Receive handles messages
-func (d *deadLetters) Receive(ctx *ReceiveContext) {
+func (x *deadLetters) Receive(ctx *ReceiveContext) {
 	switch msg := ctx.Message().(type) {
 	case *goaktpb.PostStart:
-		d.init(ctx)
+		x.handlePostStart(ctx)
 	case *internalpb.EmitDeadletter:
-		d.handle(msg.GetDeadletter())
+		x.handleDeadletter(msg.GetDeadletter())
 	case *internalpb.GetDeadletters:
-		d.letters()
+		x.handleGetDeadletters()
 	case *internalpb.GetDeadlettersCount:
-		count := d.count(msg)
+		count := x.count(msg)
 		ctx.Response(&internalpb.DeadlettersCount{
 			TotalCount: count,
 		})
@@ -88,57 +88,57 @@ func (d *deadLetters) Receive(ctx *ReceiveContext) {
 }
 
 // PostStop handles post procedures
-func (d *deadLetters) PostStop(context.Context) error {
-	d.logger.Infof("%s stopped successfully", d.pid.Name())
+func (x *deadLetters) PostStop(context.Context) error {
+	x.logger.Infof("%s stopped successfully", x.pid.Name())
 	return nil
 }
 
-func (d *deadLetters) init(ctx *ReceiveContext) {
-	d.eventsStream = ctx.Self().eventsStream
-	d.logger = ctx.Logger()
-	d.pid = ctx.Self()
-	d.lettersMap = make(map[string][]byte)
-	d.countersMap = make(map[string]*atomic.Int64)
-	d.counter.Store(0)
-	d.logger.Infof("%s started successfully", d.pid.Name())
+func (x *deadLetters) handlePostStart(ctx *ReceiveContext) {
+	x.eventsStream = ctx.Self().eventsStream
+	x.logger = ctx.Logger()
+	x.pid = ctx.Self()
+	x.lettersMap = make(map[string][]byte)
+	x.countersMap = make(map[string]*atomic.Int64)
+	x.counter.Store(0)
+	x.logger.Infof("%s started successfully", x.pid.Name())
 }
 
-func (d *deadLetters) handle(msg *goaktpb.Deadletter) {
+func (x *deadLetters) handleDeadletter(msg *goaktpb.Deadletter) {
 	// increment the counter
-	d.counter.Inc()
+	x.counter.Inc()
 	// publish the deadletter message to the event stream
-	d.eventsStream.Publish(eventsTopic, msg)
+	x.eventsStream.Publish(eventsTopic, msg)
 
 	// lettersMap the message for future query
 	id := address.From(msg.GetReceiver()).String()
 	bytea, _ := proto.Marshal(msg)
-	d.lettersMap[id] = bytea
-	if counter, ok := d.countersMap[id]; ok {
+	x.lettersMap[id] = bytea
+	if counter, ok := x.countersMap[id]; ok {
 		counter.Inc()
 		return
 	}
 	counter := atomic.NewInt64(1)
-	d.countersMap[id] = counter
+	x.countersMap[id] = counter
 }
 
-// letters pushes the actor state back to the stream
-func (d *deadLetters) letters() {
-	for id := range d.lettersMap {
-		if value, ok := d.lettersMap[id]; ok {
+// handleGetDeadletters pushes the actor state back to the stream
+func (x *deadLetters) handleGetDeadletters() {
+	for id := range x.lettersMap {
+		if value, ok := x.lettersMap[id]; ok {
 			msg := new(goaktpb.Deadletter)
 			_ = proto.Unmarshal(value, msg)
-			d.eventsStream.Publish(eventsTopic, msg)
+			x.eventsStream.Publish(eventsTopic, msg)
 		}
 	}
 }
 
 // count returns the deadletter count
-func (d *deadLetters) count(msg *internalpb.GetDeadlettersCount) int64 {
+func (x *deadLetters) count(msg *internalpb.GetDeadlettersCount) int64 {
 	if msg.ActorId != nil {
-		if counter, ok := d.countersMap[msg.GetActorId()]; ok {
+		if counter, ok := x.countersMap[msg.GetActorId()]; ok {
 			return counter.Load()
 		}
 		return 0
 	}
-	return d.counter.Load()
+	return x.counter.Load()
 }
