@@ -1,7 +1,7 @@
 ---
 name: Performance issue report
 about: Create a report to help us improve
-title: ''
+title: "perf: "
 labels: performance
 assignees: Tochemey
 
