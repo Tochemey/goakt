@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (c) 2022-2024  Arsene Tochemey Gandote
+ * Copyright (c) 2022-2025  Arsene Tochemey Gandote
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -343,7 +343,7 @@ func (pid *PID) Stop(ctx context.Context, cid *PID) error {
 // IsRunning returns true when the actor is alive ready to process messages and false
 // when the actor is stopped or not started at all
 func (pid *PID) IsRunning() bool {
-	return pid.started.Load() && !pid.suspended.Load()
+	return pid != nil && pid.started.Load() && !pid.suspended.Load()
 }
 
 // IsSuspended returns true when the actor is suspended

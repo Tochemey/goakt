@@ -22,28 +22,16 @@
  * SOFTWARE.
  */
 
-package eventstream
+package actors
 
-// Message defines the stream message
-type Message struct {
-	topic   string
-	payload any
-}
+import (
+	"testing"
 
-// Topic returns the message topic
-func (m Message) Topic() string {
-	return m.topic
-}
+	"github.com/stretchr/testify/assert"
+)
 
-// Payload returns the message payload
-func (m Message) Payload() any {
-	return m.payload
-}
-
-// NewMessage creates an instance of Stream Message
-func NewMessage(topic string, payload any) *Message {
-	return &Message{
-		topic:   topic,
-		payload: payload,
-	}
+func TestNoSender(t *testing.T) {
+	noSender := NoSender
+	assert.Nil(t, noSender)
+	assert.False(t, noSender.IsRunning())
 }
