@@ -53,8 +53,48 @@ import (
 	"github.com/tochemey/goakt/v2/log"
 )
 
+// IServer defines the members server interface
+type IServer interface {
+	// Start starts the cluster engine
+	Start(ctx context.Context) error
+	// Stop stops the cluster engine
+	Stop(ctx context.Context) error
+	// PutActor sets the given actor on the localState of the node and let the replicator
+	// pushes to the rest of the cluster
+	PutActor(actor *internalpb.ActorRef) error
+	// GetActor fetches an actor from the cluster
+	GetActor(actorName string) (*internalpb.ActorRef, error)
+	// SetSchedulerJobKey sets a given key to the cluster
+	SetSchedulerJobKey(key string) error
+	// SchedulerJobKeyExists checks the existence of a given key
+	SchedulerJobKeyExists(key string) bool
+	// UnsetSchedulerJobKey unsets the already set given key in the cluster
+	UnsetSchedulerJobKey(ctx context.Context, key string) error
+	// DeleteActor removes a given actor from the cluster.
+	// An actor is removed from the cluster when this actor has been passivated.
+	DeleteActor(ctx context.Context, actorName string) error
+	// Peers returns a channel containing the list of peers at a given time
+	Peers() ([]*Member, error)
+	// Leader returns the eldest member of the cluster
+	// Leadership here is based upon node time creation
+	Leader() (*Member, error)
+	// Whoami returns the node member data
+	Whoami() *Member
+	// GetState fetches a given peer state
+	GetState(peerAddress string) (*internalpb.PeerState, error)
+	// IsLeader states whether the given cluster node is a leader or not at a given
+	// point in time in the cluster
+	IsLeader() (bool, error)
+	// Events returns a channel where cluster events are published
+	Events() <-chan *Event
+	// Address returns the node host:port address
+	Address() string
+	// Actors returns the list of actors in the cluster
+	Actors() []*internalpb.ActorRef
+}
+
 type Server struct {
-	delegate *delegate
+	delegate *memberDelegate
 
 	meta            *internalpb.PeerMeta
 	memberConfig    *memberlist.Config
@@ -130,8 +170,8 @@ func NewServer(name string, provider discovery.Provider, node *discovery.Node, o
 		opt.Apply(server)
 	}
 
-	// set the server delegate
-	server.delegate = newDelegate(meta, peerState, server.logger)
+	// set the server memberDelegate
+	server.delegate = newMemberDelegate(meta, peerState, server.logger)
 
 	// create the memberlist config
 	mconfig := memberlist.DefaultLANConfig()
@@ -219,6 +259,14 @@ func (s *Server) Stop(ctx context.Context) error {
 	return nil
 }
 
+// Actors returns the list of actors in the cluster
+func (s *Server) Actors() []*internalpb.ActorRef {
+	s.mu.Lock()
+	actors := s.delegate.Actors()
+	s.mu.Unlock()
+	return actors
+}
+
 // Peers returns the list of peers
 func (s *Server) Peers() ([]*Member, error) {
 	s.peersLock.Lock()
@@ -299,13 +347,13 @@ func (s *Server) PutActor(actor *internalpb.ActorRef) error {
 	s.logger.Infof("%s replicating actor=[%s/%s] in the cluster", s.node.PeersAddress(), name, kind)
 	s.mu.RLock()
 	// first attempt to get the actor
-	actual, _, err := s.delegate.GetActor(name, kind)
+	actual, err := s.delegate.GetActor(name)
 	switch {
 	case errors.Is(err, ErrActorNotFound):
 		s.mu.RUnlock()
 	default:
-		if actual != nil && !proto.Equal(actual, new(internalpb.ActorRef)) {
-			s.logger.Warnf("%s cannot duplicate actor=[%s/%s] in the cluster", s.node.PeersAddress(), name, kind)
+		if actual != nil && !proto.Equal(actual, new(internalpb.MemberActor)) {
+			s.logger.Warnf("%s actor=[%s] already exists in the cluster with kind=[%s]", s.node.PeersAddress(), name, actual.GetActorRef().GetActorType())
 			s.mu.RUnlock()
 			return ErrActorAlreadyExists
 		}
@@ -320,15 +368,17 @@ func (s *Server) PutActor(actor *internalpb.ActorRef) error {
 }
 
 // GetActor fetches an actor from the cluster
-func (s *Server) GetActor(actorName, actorKind string) (*internalpb.ActorRef, error) {
+func (s *Server) GetActor(actorName string) (*internalpb.ActorRef, error) {
 	s.mu.RLock()
 	s.logger.Infof("[%s] retrieving actor (%s) from the cluster", s.node.PeersAddress(), actorName)
-	actor, _, err := s.delegate.GetActor(actorName, actorKind)
+	memberActor, err := s.delegate.GetActor(actorName)
 	if err != nil {
 		s.logger.Warnf("[%s] could not find actor=%s the cluster", s.node.PeersAddress(), actorName)
 		s.mu.RUnlock()
 		return nil, err
 	}
+
+	actor := memberActor.GetActorRef()
 	s.logger.Infof("[%s] successfully retrieved from the cluster actor (%s)", s.node.PeersAddress(), actor.GetActorAddress().GetName())
 	s.mu.RUnlock()
 	return actor, nil
@@ -345,7 +395,7 @@ func (s *Server) SetSchedulerJobKey(key string) error {
 		s.mu.RUnlock()
 	default:
 		if actual != nil {
-			s.logger.Warnf("%s cannot duplicate key=%s in the cluster", s.node.PeersAddress(), key)
+			s.logger.Warnf("%s key=%s already exists in the cluster", s.node.PeersAddress(), key)
 			s.mu.RUnlock()
 			return ErrKeyAlreadyExists
 		}
@@ -418,11 +468,11 @@ func (s *Server) UnsetSchedulerJobKey(ctx context.Context, key string) error {
 
 // DeleteActor removes a given actor from the cluster.
 // An actor is removed from the cluster when this actor has been passivated.
-func (s *Server) DeleteActor(ctx context.Context, actorName, actorKind string) error {
+func (s *Server) DeleteActor(ctx context.Context, actorName string) error {
 	s.logger.Infof("%s removing actor (%s) from cluster", s.node.PeersAddress(), actorName)
 	s.mu.RLock()
 	// first attempt to get the actor
-	actor, owner, err := s.delegate.GetActor(actorName, actorKind)
+	actor, err := s.delegate.GetActor(actorName)
 	if err != nil {
 		s.logger.Warnf("[%s] could not find actor=%s the cluster", s.node.PeersAddress(), actorName)
 		s.mu.RUnlock()
@@ -432,29 +482,29 @@ func (s *Server) DeleteActor(ctx context.Context, actorName, actorKind string) e
 	s.mu.RUnlock()
 	s.mu.Lock()
 
-	if owner == s.node.PeersAddress() {
-		s.delegate.DeleteActor(actorName, actorKind)
+	if actor.GetMemberAddress() == s.node.PeersAddress() {
+		s.delegate.DeleteActor(actorName)
 		s.logger.Infof("%s successfully removed actor (%s) from the cluster", s.node.PeersAddress(), actorName)
 		s.mu.Unlock()
 		return nil
 	}
 
-	s.logger.Infof("%s requesting %s to remove actor (%s) from cluster", s.node.PeersAddress(), owner, actorName)
+	s.logger.Infof("%s requesting %s to remove actor (%s) from cluster", s.node.PeersAddress(), actor.GetMemberAddress(), actorName)
 	request := connect.NewRequest(&internalpb.RemoveActorRequest{
-		PeerAddress: owner,
-		ActorName:   actor.GetActorAddress().GetName(),
-		ActorKind:   actor.GetActorType(),
+		PeerAddress: actor.GetMemberAddress(),
+		ActorName:   actor.GetActorRef().GetActorAddress().GetName(),
+		ActorKind:   actor.GetActorRef().GetActorType(),
 	})
 
-	service := internalpbconnect.NewMembersServiceClient(s.httpClient, http.HostAndPortURL(owner))
+	service := internalpbconnect.NewMembersServiceClient(s.httpClient, http.HostAndPortURL(actor.GetMemberAddress()))
 	_, err = service.RemoveActor(ctx, request)
 	if err != nil {
-		s.logger.Errorf("[%s] failed to remove actor=(%s) record from cluster via %s: %v", s.node.PeersAddress(), actorName, owner, err)
+		s.logger.Errorf("[%s] failed to remove actor=(%s) record from cluster via %s: %v", s.node.PeersAddress(), actorName, actor.GetMemberAddress(), err)
 		s.mu.Lock()
 		return err
 	}
 
-	s.logger.Infof("%s successfully removed actor (%s) from the cluster via %s", s.node.PeersAddress(), actorName, owner)
+	s.logger.Infof("%s successfully removed actor (%s) from the cluster via %s", s.node.PeersAddress(), actorName, actor.GetMemberAddress())
 	s.mu.Unlock()
 	return nil
 }
@@ -505,7 +555,7 @@ func (s *Server) RemoveActor(ctx context.Context, request *connect.Request[inter
 	}
 
 	s.logger.Infof("%s deleting actor=[%s/%s] from the cluster", s.node.PeersAddress(), actorName, actorKind)
-	if err := s.DeleteActor(ctx, actorName, actorKind); err != nil {
+	if err := s.DeleteActor(ctx, actorName); err != nil {
 		s.logger.Error(fmt.Errorf("failed to delete actor=[%s/%s] record from cluster: %w", actorName, actorKind, err))
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}

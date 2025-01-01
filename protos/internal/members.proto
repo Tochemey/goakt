@@ -3,6 +3,7 @@ syntax = "proto3";
 package internalpb;
 
 import "google/protobuf/timestamp.proto";
+import "internal/actor.proto";
 import "internal/peers.proto";
 
 option go_package = "github.com/tochemey/goakt/v2/internal/internalpb;internalpb";
@@ -61,4 +62,11 @@ message LocalState {
 message RemoteStates {
   // Specifies the states
   map<string, LocalState> states = 1;
+}
+
+message MemberActor {
+  // Specifies the member addres
+  string member_address = 1;
+  // Specifies the actor
+  internalpb.ActorRef actor_ref = 2;
 }

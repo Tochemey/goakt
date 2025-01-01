@@ -38,7 +38,29 @@ import (
 	"github.com/tochemey/goakt/v2/log"
 )
 
-type delegate struct {
+type delegate interface {
+	// PutActor sets the actor into the member delegate local state and via
+	// a push/pull replicate it to the other nodes in the cluster
+	// An actor is unique on a membrer node as well as in the cluster irrespective of its kind
+	PutActor(actor *internalpb.ActorRef)
+	// PutJobKey sets a scheduler job key that will be replicated via push/pull to the other nodes in the
+	// cluster
+	PutJobKey(key string)
+	// GetActor returns the given actor and its member address provided the actor name.
+	// Remember that an actor name is unique on a node and in the cluster irrespective of its kind
+	GetActor(actorName string) (*internalpb.MemberActor, error)
+	// GetJobKey returns a specific job key and the member address that owns the key
+	GetJobKey(key string) (*string, string, error)
+	// DeleteActor removes a given actor from the cluster
+	DeleteActor(actorName string)
+	// DeleteJobKey removes a scheduler job key from the cluster
+	DeleteJobKey(key string) error
+	GetState(peerAddress string) (*internalpb.PeerState, error)
+	// Actors returns the list of Actors in the cluster
+	Actors() []*internalpb.ActorRef
+}
+
+type memberDelegate struct {
 	sync.RWMutex
 	meta         *internalpb.PeerMeta
 	localState   *internalpb.LocalState
@@ -47,11 +69,14 @@ type delegate struct {
 	nodeAddress  string
 }
 
-// enforce compilation error
-var _ memberlist.Delegate = (*delegate)(nil)
+var (
+	// enforce compilation error
+	_ memberlist.Delegate = (*memberDelegate)(nil)
+	_ delegate            = (*memberDelegate)(nil)
+)
 
-func newDelegate(meta *internalpb.PeerMeta, peerState *internalpb.PeerState, logger log.Logger) *delegate {
-	return &delegate{
+func newMemberDelegate(meta *internalpb.PeerMeta, peerState *internalpb.PeerState, logger log.Logger) *memberDelegate {
+	return &memberDelegate{
 		meta: meta,
 		localState: &internalpb.LocalState{
 			PeerState: peerState,
@@ -69,7 +94,7 @@ func newDelegate(meta *internalpb.PeerMeta, peerState *internalpb.PeerState, log
 // when broadcasting an alive message. It's length is limited to
 // the given byte size. This metadata is available in the Node structure.
 // nolint
-func (x *delegate) NodeMeta(limit int) []byte {
+func (x *memberDelegate) NodeMeta(limit int) []byte {
 	x.Lock()
 	// no need to check the error
 	bytea, _ := proto.Marshal(x.meta)
@@ -82,7 +107,7 @@ func (x *delegate) NodeMeta(limit int) []byte {
 // so would block the entire UDP packet receive loop. Additionally, the byte
 // slice may be modified after the call returns, so it should be copied if needed
 // nolint
-func (x *delegate) NotifyMsg(bytes []byte) {
+func (x *memberDelegate) NotifyMsg(bytes []byte) {
 }
 
 // GetBroadcasts is called when user data messages can be broadcast.
@@ -92,7 +117,7 @@ func (x *delegate) NotifyMsg(bytes []byte) {
 // the limit. Care should be taken that this method does not block,
 // since doing so would block the entire UDP packet receive loop.
 // nolint
-func (x *delegate) GetBroadcasts(overhead, limit int) [][]byte {
+func (x *memberDelegate) GetBroadcasts(overhead, limit int) [][]byte {
 	return nil
 }
 
@@ -101,7 +126,7 @@ func (x *delegate) GetBroadcasts(overhead, limit int) [][]byte {
 // data can be sent here. See MergeRemoteState as well. The `join`
 // boolean indicates this is for a join instead of a push/pull.
 // nolint
-func (x *delegate) LocalState(join bool) []byte {
+func (x *memberDelegate) LocalState(join bool) []byte {
 	x.Lock()
 	bytea, _ := proto.Marshal(x.localState)
 	x.Unlock()
@@ -109,11 +134,11 @@ func (x *delegate) LocalState(join bool) []byte {
 }
 
 // MergeRemoteState is invoked after a TCP Push/Pull. This is the
-// delegate received from the remote side and is the result of the
+// memberDelegate received from the remote side and is the result of the
 // remote side's LocalState call. The 'join'
 // boolean indicates this is for a join instead of a push/pull.
 // nolint
-func (x *delegate) MergeRemoteState(buf []byte, join bool) {
+func (x *memberDelegate) MergeRemoteState(buf []byte, join bool) {
 	x.Lock()
 	localState := new(internalpb.LocalState)
 	_ = proto.Unmarshal(buf, localState)
@@ -125,7 +150,7 @@ func (x *delegate) MergeRemoteState(buf []byte, join bool) {
 }
 
 // PutActor puts an actor to the localState that will be replicated to the rest of the cluster
-func (x *delegate) PutActor(actor *internalpb.ActorRef) {
+func (x *memberDelegate) PutActor(actor *internalpb.ActorRef) {
 	x.Lock()
 	peerState := x.localState.GetPeerState()
 	actors := peerState.GetActors()
@@ -144,7 +169,7 @@ func (x *delegate) PutActor(actor *internalpb.ActorRef) {
 }
 
 // PutJobKey puts a job key in the localState that will be replicated to the rest of the cluster
-func (x *delegate) PutJobKey(key string) {
+func (x *memberDelegate) PutJobKey(key string) {
 	x.Lock()
 	keys := x.localState.GetJobKeys()
 	set := goset.NewSet(keys...)
@@ -155,43 +180,47 @@ func (x *delegate) PutJobKey(key string) {
 
 // GetActor retrieves an actor either from the localState or from the remote states
 // Returns the actor or an actor not found error
-func (x *delegate) GetActor(actorName, actorKind string) (*internalpb.ActorRef, string, error) {
-	x.Lock()
-	owner := net.JoinHostPort(x.localState.GetPeerState().GetHost(), strconv.Itoa(int(x.localState.GetPeerState().GetPeersPort())))
+func (x *memberDelegate) GetActor(actorName string) (*internalpb.MemberActor, error) {
+	x.RLock()
+	memberAddress := net.JoinHostPort(x.localState.GetPeerState().GetHost(), strconv.Itoa(int(x.localState.GetPeerState().GetPeersPort())))
 	actors := x.localState.GetPeerState().GetActors()
 	for _, actor := range actors {
 		name := actor.GetActorAddress().GetName()
-		kind := actor.GetActorType()
-		if actorName == name && actorKind == kind {
-			x.Unlock()
-			return actor, owner, nil
+		if actorName == name {
+			x.RUnlock()
+			return &internalpb.MemberActor{
+				MemberAddress: memberAddress,
+				ActorRef:      actor,
+			}, nil
 		}
 	}
 
 	for _, localState := range x.remoteStates.GetStates() {
-		owner := net.JoinHostPort(localState.GetPeerState().GetHost(), strconv.Itoa(int(localState.GetPeerState().GetPeersPort())))
+		memberAddress := net.JoinHostPort(localState.GetPeerState().GetHost(), strconv.Itoa(int(localState.GetPeerState().GetPeersPort())))
 		actors := localState.GetPeerState().GetActors()
 		for _, actor := range actors {
 			name := actor.GetActorAddress().GetName()
-			kind := actor.GetActorType()
-			if actorName == name && actorKind == kind {
-				x.Unlock()
-				return actor, owner, nil
+			if actorName == name {
+				x.RUnlock()
+				return &internalpb.MemberActor{
+					MemberAddress: memberAddress,
+					ActorRef:      actor,
+				}, nil
 			}
 		}
 	}
-	x.Unlock()
-	return nil, "", ErrActorNotFound
+	x.RUnlock()
+	return nil, ErrActorNotFound
 }
 
 // GetJobKey retrieves a job key from the localState or from the remote states.
 // Returns the key reference or a key not found error
-func (x *delegate) GetJobKey(key string) (*string, string, error) {
-	x.Lock()
+func (x *memberDelegate) GetJobKey(key string) (*string, string, error) {
+	x.RLock()
 	owner := net.JoinHostPort(x.localState.GetPeerState().GetHost(), strconv.Itoa(int(x.localState.GetPeerState().GetPeersPort())))
 	keys := x.localState.GetJobKeys()
 	if slices.Contains(keys, key) {
-		x.Unlock()
+		x.RUnlock()
 		return &key, owner, nil
 	}
 
@@ -199,21 +228,20 @@ func (x *delegate) GetJobKey(key string) (*string, string, error) {
 		owner := net.JoinHostPort(localState.GetPeerState().GetHost(), strconv.Itoa(int(localState.GetPeerState().GetPeersPort())))
 		keys := localState.GetJobKeys()
 		if slices.Contains(keys, key) {
-			x.Unlock()
+			x.RUnlock()
 			return &key, owner, nil
 		}
 	}
-	x.Unlock()
+	x.RUnlock()
 	return nil, "", ErrKeyNotFound
 }
 
 // DeleteActor removes an actor from the localState
-func (x *delegate) DeleteActor(actorName, actorKind string) {
+func (x *memberDelegate) DeleteActor(actorName string) {
 	x.Lock()
 	for index, actor := range x.localState.GetPeerState().GetActors() {
-		kind := actor.GetActorType()
 		name := actor.GetActorAddress().GetName()
-		if kind == actorKind && name == actorName {
+		if name == actorName {
 			x.localState.GetPeerState().Actors = append(x.localState.GetPeerState().GetActors()[:index], x.localState.GetPeerState().GetActors()[index+1:]...)
 			x.Unlock()
 			return
@@ -223,7 +251,7 @@ func (x *delegate) DeleteActor(actorName, actorKind string) {
 }
 
 // DeleteJobKey removes a job key from the localState
-func (x *delegate) DeleteJobKey(key string) error {
+func (x *memberDelegate) DeleteJobKey(key string) error {
 	x.Lock()
 	keys := x.localState.GetJobKeys()
 	set := goset.NewSet(keys...)
@@ -237,12 +265,12 @@ func (x *delegate) DeleteJobKey(key string) error {
 }
 
 // GetState returns the peer state
-func (x *delegate) GetState(peerAddress string) (*internalpb.PeerState, error) {
-	x.Lock()
+func (x *memberDelegate) GetState(peerAddress string) (*internalpb.PeerState, error) {
+	x.RLock()
 	peerState := x.localState.GetPeerState()
 	id := net.JoinHostPort(peerState.GetHost(), strconv.Itoa(int(peerState.GetPeersPort())))
 	if id == peerAddress {
-		x.Unlock()
+		x.RUnlock()
 		return peerState, nil
 	}
 
@@ -250,11 +278,35 @@ func (x *delegate) GetState(peerAddress string) (*internalpb.PeerState, error) {
 		peerState := localState.GetPeerState()
 		id := net.JoinHostPort(peerState.GetHost(), strconv.Itoa(int(peerState.GetPeersPort())))
 		if id == peerAddress {
-			x.Unlock()
+			x.RUnlock()
 			return peerState, nil
 		}
 	}
 
-	x.Unlock()
+	x.RUnlock()
 	return nil, ErrPeerSyncNotFound
+}
+
+// Actors returns the list of actors in the cluster at a given point in time
+func (x *memberDelegate) Actors() []*internalpb.ActorRef {
+	x.RLock()
+	tracked := make(map[string]struct{})
+	var actors []*internalpb.ActorRef
+	for _, actor := range x.localState.GetPeerState().GetActors() {
+		if _, ok := tracked[actor.GetActorAddress().GetName()]; !ok {
+			actors = append(actors, actor)
+			tracked[actor.GetActorAddress().GetName()] = struct{}{}
+		}
+	}
+
+	for _, localState := range x.remoteStates.GetStates() {
+		for _, actor := range localState.GetPeerState().GetActors() {
+			if _, ok := tracked[actor.GetActorAddress().GetName()]; !ok {
+				actors = append(actors, actor)
+				tracked[actor.GetActorAddress().GetName()] = struct{}{}
+			}
+		}
+	}
+	x.RUnlock()
+	return actors
 }

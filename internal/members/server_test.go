@@ -130,6 +130,60 @@ L2:
 	srv.Shutdown()
 }
 
+func TestMembersSingleNode(t *testing.T) {
+	ctx := context.Background()
+
+	// start the NATS server
+	srv := startNatsServer(t)
+
+	// create a cluster node1
+	node, sd := startServer(t, "node1", srv.Addr().String())
+	require.NotNil(t, node)
+	require.NotNil(t, sd)
+
+	// create an actor on node2
+	actorName := "node2-actor1"
+	actorKind := "actorKind"
+	actor := &internalpb.ActorRef{
+		ActorAddress: &goaktpb.Address{Name: actorName},
+		ActorType:    actorKind,
+	}
+	err := node.PutActor(actor)
+	require.NoError(t, err)
+
+	// attempt to create the same actor from any node will fail
+	anotherActorWithSameName := &internalpb.ActorRef{
+		ActorAddress: &goaktpb.Address{Name: actorName},
+		ActorType:    "anotherKind",
+	}
+	err = node.PutActor(anotherActorWithSameName)
+	require.Error(t, err)
+	require.EqualError(t, err, ErrActorAlreadyExists.Error())
+
+	actual, err := node.GetActor(actorName)
+	require.NoError(t, err)
+	require.NotNil(t, actual)
+	require.True(t, proto.Equal(actor, actual))
+
+	key := "jobKey"
+	err = node.SetSchedulerJobKey(key)
+	require.NoError(t, err)
+
+	exist := node.SchedulerJobKeyExists(key)
+	require.True(t, exist)
+
+	err = node.SetSchedulerJobKey(key)
+	require.Error(t, err)
+	require.EqualError(t, err, ErrKeyAlreadyExists.Error())
+
+	exist = node.SchedulerJobKeyExists(key)
+	require.True(t, exist)
+
+	require.NoError(t, node.Stop(ctx))
+	require.NoError(t, sd.Close())
+	srv.Shutdown()
+}
+
 func TestMembers(t *testing.T) {
 	ctx := context.Background()
 
@@ -165,17 +219,21 @@ func TestMembers(t *testing.T) {
 	lib.Pause(2 * time.Second)
 
 	// attempt to create the same actor from any node will fail
-	err = node3.PutActor(actor)
+	anotherActorWithSameName := &internalpb.ActorRef{
+		ActorAddress: &goaktpb.Address{Name: actorName},
+		ActorType:    "anotherKind",
+	}
+	err = node3.PutActor(anotherActorWithSameName)
 	require.Error(t, err)
 	require.EqualError(t, err, ErrActorAlreadyExists.Error())
 
 	// get the actor from node1 and node3
-	actual, err := node1.GetActor(actorName, actorKind)
+	actual, err := node1.GetActor(actorName)
 	require.NoError(t, err)
 	require.NotNil(t, actual)
 	require.True(t, proto.Equal(actor, actual))
 
-	actual, err = node3.GetActor(actorName, actorKind)
+	actual, err = node3.GetActor(actorName)
 	require.NoError(t, err)
 	require.NotNil(t, actual)
 	require.True(t, proto.Equal(actor, actual))
@@ -200,12 +258,12 @@ func TestMembers(t *testing.T) {
 	require.True(t, exist)
 
 	// remove the actor created on node2 using node1
-	err = node1.DeleteActor(ctx, actorName, actorKind)
+	err = node1.DeleteActor(ctx, actorName)
 	require.NoError(t, err)
 
 	// wait for replication
 	lib.Pause(time.Second)
-	_, err = node3.GetActor(actorName, actorKind)
+	_, err = node3.GetActor(actorName)
 	require.Error(t, err)
 	require.EqualError(t, err, ErrActorNotFound.Error())
 
@@ -244,6 +302,8 @@ func startNatsServer(t *testing.T) *natsserver.Server {
 func startServer(t *testing.T, nodeName, serverAddr string) (*Server, discovery.Provider) {
 	// create a context
 	ctx := context.TODO()
+
+	logger := log.DefaultLogger
 
 	// generate the ports for the single startNode
 	nodePorts := dynaport.Get(3)
@@ -286,7 +346,7 @@ func startServer(t *testing.T, nodeName, serverAddr string) (*Server, discovery.
 		WithJoinTimeout(time.Second),
 		WithShutdownTimeout(time.Second),
 		WithReplicationInterval(500*time.Millisecond),
-		WithLogger(log.DefaultLogger))
+		WithLogger(logger))
 
 	require.NoError(t, err)
 	require.NotNil(t, server)
