@@ -22,39 +22,37 @@
  * SOFTWARE.
  */
 
-package discovery
+package peers
 
 import (
 	"fmt"
-	"net"
-	"strconv"
+	"time"
 )
 
-// Node represents a discovered Node
-type Node struct {
-	// Name specifies the discovered node's Name
-	Name string
-	// Host specifies the discovered node's Host
-	Host string
-	// DiscoveryPort
-	DiscoveryPort int
-	// PeersPort
-	PeersPort int
-	// RemotingPort
-	RemotingPort int
+type EventType int
+
+const (
+	NodeJoined EventType = iota
+	NodeLeft
+	NodeDead
+)
+
+func (et EventType) String() string {
+	switch et {
+	case NodeJoined:
+		return "NodeJoined"
+	case NodeLeft:
+		return "NodeLeft"
+	case NodeDead:
+		return "NodeDead"
+	default:
+		return fmt.Sprintf("%d", int(et))
+	}
 }
 
-// PeersAddress returns address the node's peers will use to connect to
-func (n *Node) PeersAddress() string {
-	return net.JoinHostPort(n.Host, strconv.Itoa(n.PeersPort))
-}
-
-// DiscoveryAddress returns the node discovery address
-func (n *Node) DiscoveryAddress() string {
-	return net.JoinHostPort(n.Host, strconv.Itoa(n.DiscoveryPort))
-}
-
-// String returns the printable representation of Node
-func (n *Node) String() string {
-	return fmt.Sprintf("[host=%s gossip=%d peers=%d remoting=%d]", n.Host, n.DiscoveryPort, n.PeersPort, n.RemotingPort)
+// Event defines the cluster event
+type Event struct {
+	Peer *Peer
+	Time time.Time
+	Type EventType
 }

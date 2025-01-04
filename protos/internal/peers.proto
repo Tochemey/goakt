@@ -2,9 +2,31 @@ syntax = "proto3";
 
 package internalpb;
 
+import "google/protobuf/timestamp.proto";
 import "internal/actor.proto";
 
 option go_package = "github.com/tochemey/goakt/v2/internal/internalpb;internalpb";
+
+// PeersService defines the service used by cluster peers to
+// perform peer-to-peer cluster communication
+service PeersService {
+  // PutPeerState pushes the given peer state the remote peer to keep.
+  // The remote upon receiving the request will persist the peer state into its peers cache
+  rpc PutPeerState(PutPeerStateRequest) returns (PutPeerStateResponse);
+  // DeletePeerState is sent to remote peers to remove from their peers cache the given
+  // peer state. Only the leader of the cluster sends such request to the rest of the cluster
+  rpc DeletePeerState(DeletePeerStateRequest) returns (DeletePeerStateResponse);
+  // DeleteActor deletes a given actor for a given peer from the cluster.
+  // Whenever an actor is stopped the node owning it will remove it from its list and inform the rest of the cluster
+  // via this api to remove the given actor from their peers cache
+  rpc DeleteActor(DeleteActorRequest) returns (DeleteActorResponse);
+  // PutJobKeys sets a job keys for a given peer in the cluster
+  // Each peer in the cluster has a local copy of the mapping between peer and their job keys
+  rpc PutJobKeys(PutJobKeysRequest) returns (PutJobKeysResponse);
+  // DeleteJobKey removes a given job key for a given peer from the cluster.
+  // Each peer will remove the given job key for the corresponding peer from their local cache
+  rpc DeleteJobKey(DeleteJobKeyRequest) returns (DeleteJobKeyResponse);
+}
 
 // PeersSync is used to share a created/ restarted actor
 // on a given node to his peers when cluster is enabled
@@ -39,3 +61,64 @@ message RebalanceComplete {
   // Specifies the peer address
   string peer_address = 1;
 }
+
+message PeerMeta {
+  // Specifies the node name
+  string name = 1;
+  // Specifies the node host
+  string host = 2;
+  // Specifies the node port
+  uint32 port = 3;
+  // Specifies the node discovery port
+  uint32 discovery_port = 4;
+  // Specifies the node remoting port
+  uint32 remoting_port = 5;
+  // Specifies the creation time
+  google.protobuf.Timestamp creation_time = 6;
+}
+
+message PutPeerStateRequest {
+  // Specifies the peer address
+  string peer_address = 1;
+  // Specifies the peer state
+  PeerState peer_state = 2;
+}
+
+message PutPeerStateResponse {
+  // Specifies the acknowledgement
+  bool ack = 1;
+}
+
+message DeletePeerStateRequest {
+  // Specifies the peer address
+  string peer_address = 1;
+}
+
+message DeletePeerStateResponse {}
+
+message DeleteActorRequest {
+  // Specifies the peer address
+  string peer_address = 1;
+  // Specifies the actor
+  ActorRef actor_ref = 2;
+}
+
+message DeleteActorResponse {}
+
+message PutJobKeysRequest {
+  // Specifies the peer address
+  string peer_address = 1;
+  // Specifies the job keys
+  repeated string job_keys = 2;
+}
+
+message PutJobKeysResponse {}
+
+message DeleteJobKeyRequest {
+  // Specifies the peer address
+  string peer_address = 1;
+  // Specifies the job key
+  string job_key = 2;
+}
+
+message DeleteJobKeyResponse {}

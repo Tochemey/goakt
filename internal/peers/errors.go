@@ -22,39 +22,22 @@
  * SOFTWARE.
  */
 
-package discovery
+package peers
 
-import (
-	"fmt"
-	"net"
-	"strconv"
+import "errors"
+
+var (
+	// ErrActorNotFound is returned when an actor is not found
+	ErrActorNotFound = errors.New("actor not found")
+	// ErrPeerSyncNotFound is returned when a peerSync record is not found
+	ErrPeerSyncNotFound = errors.New("peerSync record not found")
+	// ErrKeyNotFound is returned when a key is not found
+	ErrKeyNotFound = errors.New("key not found")
+	// ErrKeyAlreadyExists is returned when the key already exists in the cluster
+	ErrKeyAlreadyExists = errors.New("key already exists")
+	// ErrActorAlreadyExists is returned when the actor already exists in the cluster
+	ErrActorAlreadyExists = errors.New("actor already exists")
+	// ErrPeersServiceNotStarted is returned when attempting to access the peer service
+	// while it has stopped
+	ErrPeersServiceNotStarted = errors.New("peers service not started")
 )
-
-// Node represents a discovered Node
-type Node struct {
-	// Name specifies the discovered node's Name
-	Name string
-	// Host specifies the discovered node's Host
-	Host string
-	// DiscoveryPort
-	DiscoveryPort int
-	// PeersPort
-	PeersPort int
-	// RemotingPort
-	RemotingPort int
-}
-
-// PeersAddress returns address the node's peers will use to connect to
-func (n *Node) PeersAddress() string {
-	return net.JoinHostPort(n.Host, strconv.Itoa(n.PeersPort))
-}
-
-// DiscoveryAddress returns the node discovery address
-func (n *Node) DiscoveryAddress() string {
-	return net.JoinHostPort(n.Host, strconv.Itoa(n.DiscoveryPort))
-}
-
-// String returns the printable representation of Node
-func (n *Node) String() string {
-	return fmt.Sprintf("[host=%s gossip=%d peers=%d remoting=%d]", n.Host, n.DiscoveryPort, n.PeersPort, n.RemotingPort)
-}
