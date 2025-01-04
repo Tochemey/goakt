@@ -93,7 +93,7 @@ type IService interface {
 	// PutJobKey broadcasts the given job key to the list the node's peers
 	PutJobKey(ctx context.Context, jobKey string) error
 	// GetJobKey fetches a given job key from the cluster
-	GetJobKey(ctx context.Context, jobKey string) (*string, error)
+	GetJobKey(jobKey string) (*string, error)
 	// RemoveJobKey removes a given job key from the cluster
 	RemoveJobKey(ctx context.Context, jobKey string) error
 }
@@ -660,7 +660,7 @@ func (s *Service) PutJobKey(ctx context.Context, jobKey string) error {
 }
 
 // GetJobKey fetches a given job key from the cluster
-func (s *Service) GetJobKey(ctx context.Context, jobKey string) (*string, error) {
+func (s *Service) GetJobKey(jobKey string) (*string, error) {
 	if !s.started.Load() {
 		return nil, ErrPeersServiceNotStarted
 	}

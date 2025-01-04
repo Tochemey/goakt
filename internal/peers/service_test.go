@@ -362,13 +362,124 @@ func TestCluster(t *testing.T) {
 		require.NoError(t, sd3.Close())
 		srv.Shutdown()
 	})
+	t.Run("With JobKeys replication", func(t *testing.T) {
+		ctx := context.Background()
+
+		// start the NATS server
+		srv := startNatsServer(t)
+
+		// create a cluster node1
+		node1, sd1 := startService(t, srv.Addr().String())
+		require.NotNil(t, node1)
+		require.NotNil(t, sd1)
+
+		// create a cluster node2
+		node2, sd2 := startService(t, srv.Addr().String())
+		require.NotNil(t, node2)
+		require.NotNil(t, sd2)
+
+		// create a cluster node3
+		node3, sd3 := startService(t, srv.Addr().String())
+		require.NotNil(t, node3)
+		require.NotNil(t, sd3)
+
+		jobKey := "job-key"
+		err := node2.PutJobKey(ctx, jobKey)
+		require.NoError(t, err)
+
+		// wait for replication
+		lib.Pause(500 * time.Millisecond)
+
+		// get the job key from node1 and node3
+		actual, err := node1.GetJobKey(jobKey)
+		require.NoError(t, err)
+		require.NotNil(t, actual)
+		require.Equal(t, jobKey, *actual)
+
+		actual, err = node3.GetJobKey(jobKey)
+		require.NoError(t, err)
+		require.NotNil(t, actual)
+		require.Equal(t, jobKey, *actual)
+
+		require.NoError(t, node1.Stop(ctx))
+		require.NoError(t, node2.Stop(ctx))
+		require.NoError(t, node3.Stop(ctx))
+		require.NoError(t, sd1.Close())
+		require.NoError(t, sd2.Close())
+		require.NoError(t, sd3.Close())
+		srv.Shutdown()
+	})
+	t.Run("With JobKeys deletion", func(t *testing.T) {
+		ctx := context.Background()
+
+		// start the NATS server
+		srv := startNatsServer(t)
+
+		// create a cluster node1
+		node1, sd1 := startService(t, srv.Addr().String())
+		require.NotNil(t, node1)
+		require.NotNil(t, sd1)
+
+		// create a cluster node2
+		node2, sd2 := startService(t, srv.Addr().String())
+		require.NotNil(t, node2)
+		require.NotNil(t, sd2)
+
+		// create a cluster node3
+		node3, sd3 := startService(t, srv.Addr().String())
+		require.NotNil(t, node3)
+		require.NotNil(t, sd3)
+
+		jobKey := "job-key"
+		err := node2.PutJobKey(ctx, jobKey)
+		require.NoError(t, err)
+
+		// wait for replication
+		lib.Pause(500 * time.Millisecond)
+
+		// get the job key from node1 and node3
+		actual, err := node1.GetJobKey(jobKey)
+		require.NoError(t, err)
+		require.NotNil(t, actual)
+		require.Equal(t, jobKey, *actual)
+
+		actual, err = node3.GetJobKey(jobKey)
+		require.NoError(t, err)
+		require.NotNil(t, actual)
+		require.Equal(t, jobKey, *actual)
+
+		// let us remove the job key
+		err = node2.RemoveJobKey(ctx, jobKey)
+		require.NoError(t, err)
+
+		lib.Pause(500 * time.Millisecond)
+
+		// get the job key from node1 and node3
+		actual, err = node1.GetJobKey(jobKey)
+		require.Error(t, err)
+		require.Nil(t, actual)
+		require.EqualError(t, err, ErrKeyNotFound.Error())
+
+		actual, err = node3.GetJobKey(jobKey)
+		require.Error(t, err)
+		require.Nil(t, actual)
+		require.EqualError(t, err, ErrKeyNotFound.Error())
+
+		require.NoError(t, node1.Stop(ctx))
+		require.NoError(t, node2.Stop(ctx))
+		require.NoError(t, node3.Stop(ctx))
+		require.NoError(t, sd1.Close())
+		require.NoError(t, sd2.Close())
+		require.NoError(t, sd3.Close())
+		srv.Shutdown()
+	})
 }
 
 func startService(t *testing.T, serverAddr string) (*Service, discovery.Provider) {
 	// create a context
 	ctx := context.TODO()
 
-	logger := log.DefaultLogger
+	logger := log.DiscardLogger
 
 	// generate the ports for the single startNode
 	nodePorts := dynaport.Get(3)
