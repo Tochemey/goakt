@@ -538,7 +538,7 @@ func (s *Service) GetActor(actorName string) (*internalpb.ActorRef, error) {
 	}
 
 	s.localOpsLock.RLock()
-	s.logger.Infof("[%s] retrieving actor (%s) from the cluster", s.node.String(), actorName)
+	s.logger.Infof("(%s) retrieving actor (%s) from the cluster", s.node.String(), actorName)
 	actors := s.localState.GetActors()
 	for _, actor := range actors {
 		name := actor.GetActorAddress().GetName()
@@ -561,7 +561,7 @@ func (s *Service) GetActor(actorName string) (*internalpb.ActorRef, error) {
 		}
 	}
 
-	s.logger.Warnf("[%s] could not find actor=%s the cluster", s.node.String(), actorName)
+	s.logger.Warnf("(%s) could not find actor=%s the cluster", s.node.String(), actorName)
 	s.localOpsLock.RUnlock()
 	return nil, ErrActorNotFound
 }

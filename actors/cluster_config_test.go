@@ -26,6 +26,7 @@ package actors
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -43,21 +44,19 @@ func TestClusterConfig(t *testing.T) {
 			WithKinds(kinds...).
 			WithDiscoveryPort(3220).
 			WithPeersPort(3222).
-			WithMinimumPeersQuorum(1).
-			WithReplicaCount(1).
-			WithWriteQuorum(1).
-			WithReadQuorum(1).
-			WithPartitionCount(3).
+			WithJoinTimeout(10 * time.Second).
+			WithJoinRetryInterval(1 * time.Second).
+			WithBroadcastTimeout(time.Second).
+			WithBroadcastRetryInterval(100 * time.Millisecond).
 			WithDiscovery(disco)
 
 		require.NoError(t, config.Validate())
 		assert.EqualValues(t, 3220, config.DiscoveryPort())
 		assert.EqualValues(t, 3222, config.PeersPort())
-		assert.EqualValues(t, 1, config.MinimumPeersQuorum())
-		assert.EqualValues(t, 1, config.ReplicaCount())
-		assert.EqualValues(t, 1, config.ReadQuorum())
-		assert.EqualValues(t, 1, config.WriteQuorum())
-		assert.EqualValues(t, 3, config.PartitionCount())
+		assert.Exactly(t, time.Second, config.BroadcastTimeout())
+		assert.Exactly(t, 100*time.Millisecond, config.BroadcastRetryInterval())
+		assert.Exactly(t, 10*time.Second, config.JoinTimeout())
+		assert.Exactly(t, time.Second, config.JoinRetryInterval())
 		assert.True(t, disco == config.Discovery())
 		assert.Len(t, config.Kinds(), 3)
 	})
@@ -67,9 +66,7 @@ func TestClusterConfig(t *testing.T) {
 			WithKinds(new(exchanger), new(mockActor)).
 			WithDiscoveryPort(3220).
 			WithPeersPort(3222).
-			WithMinimumPeersQuorum(1).
-			WithReplicaCount(1).
-			WithPartitionCount(0). // invalid partition count
+			WithBroadcastTimeout(0).
 			WithDiscovery(new(testkit.Provider))
 
 		assert.Error(t, config.Validate())

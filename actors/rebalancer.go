@@ -91,6 +91,7 @@ func (r *rebalancer) Rebalance(ctx *ReceiveContext) {
 		leaderShares, peersShares := r.computeRebalancing(len(peers)+1, actors)
 		eg, egCtx := errgroup.WithContext(rctx)
 		logger := r.pid.Logger()
+		logger.Debugf("%s received %d actors to redeploy", r.pid.Name(), len(actors))
 
 		if len(leaderShares) > 0 {
 			eg.Go(func() error {
@@ -132,6 +133,7 @@ func (r *rebalancer) Rebalance(ctx *ReceiveContext) {
 							return NewSpawnError(err)
 						}
 
+						logger.Debugf("redeploying actor=(%s) on peer=(%s)", actor.GetActorAddress().GetName(), peer.String())
 						if err := r.remoting.RemoteSpawn(egCtx,
 							peerState.GetHost(),
 							int(peerState.GetRemotingPort()),
@@ -196,6 +198,8 @@ func (r *rebalancer) recreateLocally(ctx context.Context, actor *internalpb.Acto
 	if err != nil {
 		return err
 	}
+
+	r.logger.Debugf("redeploying actor locally: %s", actor.GetActorAddress().GetName())
 	_, err = r.pid.ActorSystem().Spawn(ctx, actor.GetActorAddress().GetName(), iactor)
 	return err
 }

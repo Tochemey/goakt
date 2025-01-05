@@ -183,10 +183,7 @@ func TestActorSystem(t *testing.T) {
 			WithCluster(
 				NewClusterConfig().
 					WithKinds(new(mockActor)).
-					WithPartitionCount(9).
-					WithReplicaCount(1).
 					WithPeersPort(clusterPort).
-					WithMinimumPeersQuorum(1).
 					WithDiscoveryPort(gossipPort).
 					WithDiscovery(provider)),
 		)
@@ -1013,10 +1010,7 @@ func TestActorSystem(t *testing.T) {
 			WithCluster(
 				NewClusterConfig().
 					WithKinds(new(mockActor)).
-					WithPartitionCount(9).
-					WithReplicaCount(1).
 					WithPeersPort(clusterPort).
-					WithMinimumPeersQuorum(1).
 					WithDiscoveryPort(gossipPort).
 					WithDiscovery(provider)),
 		)
@@ -1238,10 +1232,7 @@ func TestActorSystem(t *testing.T) {
 			WithCluster(
 				NewClusterConfig().
 					WithKinds(new(mockActor)).
-					WithPartitionCount(9).
-					WithReplicaCount(1).
 					WithPeersPort(clusterPort).
-					WithMinimumPeersQuorum(1).
 					WithDiscoveryPort(gossipPort).
 					WithDiscovery(provider)),
 		)
@@ -1497,10 +1488,7 @@ func TestActorSystem(t *testing.T) {
 			WithCluster(
 				NewClusterConfig().
 					WithKinds(new(exchanger)).
-					WithPartitionCount(9).
-					WithReplicaCount(1).
 					WithPeersPort(clusterPort).
-					WithMinimumPeersQuorum(1).
 					WithDiscoveryPort(gossipPort).
 					WithDiscovery(provider)),
 		)

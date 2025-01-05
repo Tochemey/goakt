@@ -42,7 +42,6 @@ import (
 
 	"connectrpc.com/connect"
 	"github.com/google/uuid"
-	"github.com/reugn/go-quartz/logger"
 	"go.uber.org/atomic"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
@@ -1254,22 +1253,15 @@ func (x *actorSystem) enableClustering(ctx context.Context) error {
 		RemotingPort:  int(x.port),
 	}
 
-	//clusterEngine, err := cluster.NewEngine(
-	//	x.Name(),
-	//	x.clusterConfig.Discovery(),
-	//	x.clusterNode,
-	//	cluster.WithLogger(x.logger),
-	//	cluster.WithPartitionsCount(x.clusterConfig.PartitionCount()),
-	//	cluster.WithHasher(x.partitionHasher),
-	//	cluster.WithMinimumPeersQuorum(x.clusterConfig.MinimumPeersQuorum()),
-	//	cluster.WithWriteQuorum(x.clusterConfig.WriteQuorum()),
-	//	cluster.WithReadQuorum(x.clusterConfig.ReadQuorum()),
-	//	cluster.WithReplicaCount(x.clusterConfig.ReplicaCount()),
-	//)
 	peersService, err := peers.NewService(
 		x.clusterConfig.Discovery(),
 		x.clusterNode,
+		peers.WithBroadcastTimeout(x.clusterConfig.BroadcastTimeout()),
+		peers.WithBroadcastRetryInterval(x.clusterConfig.BroadcastRetryInterval()),
+		peers.WithJoinRetryInterval(x.clusterConfig.JoinRetryInterval()),
+		peers.WithJoinTimeout(x.clusterConfig.JoinTimeout()),
 		peers.WithLogger(x.logger))
+
 	if err != nil {
 		x.logger.Errorf("failed to initialize cluster engine: %v", err)
 		return err
@@ -1304,7 +1296,6 @@ func (x *actorSystem) enableClustering(ctx context.Context) error {
 
 	go x.clusterEventsLoop()
 	go x.replicationLoop()
-	// go x.peersStateLoop()
 	go x.rebalancingLoop()
 
 	x.logger.Info("clustering enabled...:)")
@@ -1592,7 +1583,8 @@ func (x *actorSystem) rebalancingLoop() {
 		}
 
 		x.rebalancing.Store(true)
-		message := &internalpb.Rebalance{Actors: peerState.GetActors()}
+		actors := peerState.GetActors()
+		message := &internalpb.Rebalance{Actors: actors}
 		peerAddress := net.JoinHostPort(peerState.GetHost(), strconv.Itoa(int(peerState.GetPeersPort())))
 
 		if err := errorschain.
@@ -1897,23 +1889,6 @@ func (x *actorSystem) checkSpawnPreconditions(ctx context.Context, actorName str
 	}
 
 	return nil
-}
-
-// cleanupCluster cleans up the cluster
-func (x *actorSystem) cleanupCluster(ctx context.Context, actorNames []string) error {
-	eg, ctx := errgroup.WithContext(ctx)
-	for _, actorName := range actorNames {
-		actorName := actorName
-		eg.Go(func() error {
-			if err := x.cluster.RemoveActor(ctx, actorName); err != nil {
-				logger.Errorf("failed to remove [actor=%s] from cluster: %v", actorName, err)
-				return err
-			}
-			logger.Infof("[actor=%s] removed from cluster", actorName)
-			return nil
-		})
-	}
-	return eg.Wait()
 }
 
 func isReservedName(name string) bool {

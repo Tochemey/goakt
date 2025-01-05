@@ -468,10 +468,7 @@ func startClusterSystem(t *testing.T, serverAddr string) (ActorSystem, discovery
 		WithCluster(
 			NewClusterConfig().
 				WithKinds(new(mockActor)).
-				WithPartitionCount(10).
-				WithReplicaCount(1).
 				WithPeersPort(clusterPort).
-				WithMinimumPeersQuorum(1).
 				WithDiscoveryPort(gossipPort).
 				WithDiscovery(provider)),
 	)

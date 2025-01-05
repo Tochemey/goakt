@@ -25,6 +25,8 @@
 package actors
 
 import (
+	"time"
+
 	"github.com/tochemey/goakt/v2/discovery"
 	"github.com/tochemey/goakt/v2/internal/validation"
 )
@@ -36,15 +38,15 @@ var defaultKinds = []Actor{
 
 // ClusterConfig defines the cluster mode settings
 type ClusterConfig struct {
-	discovery          discovery.Provider
-	partitionCount     uint64
-	minimumPeersQuorum uint32
-	replicaCount       uint32
-	writeQuorum        uint32
-	readQuorum         uint32
-	discoveryPort      int
-	peersPort          int
-	kinds              []Actor
+	discovery     discovery.Provider
+	discoveryPort int
+	peersPort     int
+	kinds         []Actor
+
+	joinRetryInterval      time.Duration
+	joinTimeout            time.Duration
+	broadcastRetryInterval time.Duration
+	broadcastTimeout       time.Duration
 }
 
 // enforce compilation error
@@ -53,26 +55,35 @@ var _ validation.Validator = (*ClusterConfig)(nil)
 // NewClusterConfig creates an instance of ClusterConfig
 func NewClusterConfig() *ClusterConfig {
 	return &ClusterConfig{
-		kinds:              defaultKinds,
-		minimumPeersQuorum: 1,
-		writeQuorum:        1,
-		readQuorum:         1,
-		replicaCount:       1,
-		partitionCount:     271,
+		kinds:                  defaultKinds,
+		joinRetryInterval:      100 * time.Millisecond,
+		joinTimeout:            time.Second,
+		broadcastRetryInterval: 200 * time.Millisecond,
+		broadcastTimeout:       time.Second,
 	}
 }
 
-// WithPartitionCount sets the cluster config partition count
-// Partition cound should be a prime number.
-// ref: https://medium.com/swlh/why-should-the-length-of-your-hash-table-be-a-prime-number-760ec65a75d1
-func (x *ClusterConfig) WithPartitionCount(count uint64) *ClusterConfig {
-	x.partitionCount = count
+// WithJoinRetryInterval defines the time gap between attempts to join an existing cluster.
+func (x *ClusterConfig) WithJoinRetryInterval(interval time.Duration) *ClusterConfig {
+	x.joinRetryInterval = interval
 	return x
 }
 
-// WithMinimumPeersQuorum sets the cluster config minimum peers quorum
-func (x *ClusterConfig) WithMinimumPeersQuorum(minimumQuorum uint32) *ClusterConfig {
-	x.minimumPeersQuorum = minimumQuorum
+// WithJoinTimeout defines how long cluster join attempts should last before quitting.
+func (x *ClusterConfig) WithJoinTimeout(timeout time.Duration) *ClusterConfig {
+	x.joinTimeout = timeout
+	return x
+}
+
+// WithBroadcastRetryInterval defines the time gap between attempts to broadcast a message to the cluster.
+func (x *ClusterConfig) WithBroadcastRetryInterval(interval time.Duration) *ClusterConfig {
+	x.broadcastRetryInterval = interval
+	return x
+}
+
+// WithBroadcastTimeout defines how long a broadcast attempt should last before quitting.
+func (x *ClusterConfig) WithBroadcastTimeout(timeout time.Duration) *ClusterConfig {
+	x.broadcastTimeout = timeout
 	return x
 }
 
@@ -100,31 +111,31 @@ func (x *ClusterConfig) WithPeersPort(peersPort int) *ClusterConfig {
 	return x
 }
 
-// WithReplicaCount sets the cluster replica count.
-// Note: set this field means you have some advanced knowledge on quorum-based replica control
-func (x *ClusterConfig) WithReplicaCount(count uint32) *ClusterConfig {
-	x.replicaCount = count
-	return x
+// JoinRetryInterval is the time gap between attempts to join an existing
+// cluster.
+func (x *ClusterConfig) JoinRetryInterval() time.Duration {
+	return x.joinRetryInterval
 }
 
-// ReplicaCount returns the replica count.
-func (x *ClusterConfig) ReplicaCount() uint32 {
-	return x.replicaCount
+// JoinTimeout is the join timeout
+func (x *ClusterConfig) JoinTimeout() time.Duration {
+	return x.joinTimeout
+}
+
+// BroadcastRetryInterval is time gap between attempts to broadcast a message to the cluster.
+// BroadcastRetryInterval is used to by each node when communicating with their peer in the cluster
+func (x *ClusterConfig) BroadcastRetryInterval() time.Duration {
+	return x.broadcastRetryInterval
+}
+
+// BroadcastTimeout is the broadcast timeout
+func (x *ClusterConfig) BroadcastTimeout() time.Duration {
+	return x.broadcastTimeout
 }
 
 // Discovery returns the discovery provider
 func (x *ClusterConfig) Discovery() discovery.Provider {
 	return x.discovery
-}
-
-// PartitionCount returns the partition count
-func (x *ClusterConfig) PartitionCount() uint64 {
-	return x.partitionCount
-}
-
-// MinimumPeersQuorum returns the minimum peers quorum
-func (x *ClusterConfig) MinimumPeersQuorum() uint32 {
-	return x.minimumPeersQuorum
 }
 
 // DiscoveryPort returns the discovery port
@@ -142,44 +153,19 @@ func (x *ClusterConfig) Kinds() []Actor {
 	return x.kinds
 }
 
-// WriteQuorum returns the write quorum
-func (x *ClusterConfig) WriteQuorum() uint32 {
-	return x.writeQuorum
-}
-
-// ReadQuorum returns the read quorum
-func (x *ClusterConfig) ReadQuorum() uint32 {
-	return x.readQuorum
-}
-
-// WithWriteQuorum sets the write quorum
-// Note: set this field means you have some advanced knowledge on quorum-based replica control
-// The default value should be sufficient for most use cases
-func (x *ClusterConfig) WithWriteQuorum(count uint32) *ClusterConfig {
-	x.writeQuorum = count
-	return x
-}
-
-// WithReadQuorum sets the read quorum
-// Note: set this field means you have some advanced knowledge on quorum-based replica control
-// The default value should be sufficient for most use cases
-func (x *ClusterConfig) WithReadQuorum(count uint32) *ClusterConfig {
-	x.readQuorum = count
-	return x
-}
-
 // Validate validates the cluster config
 func (x *ClusterConfig) Validate() error {
 	return validation.
 		New(validation.AllErrors()).
 		AddAssertion(x.discovery != nil, "discovery provider is not set").
-		AddAssertion(x.partitionCount > 0, "partition count need to greater than zero").
-		AddAssertion(x.minimumPeersQuorum >= 1, "minimum peers quorum must be at least one").
 		AddAssertion(x.discoveryPort > 0, "gossip port is invalid").
 		AddAssertion(x.peersPort > 0, "peers port is invalid").
+		AddAssertion(x.joinTimeout > 0, "invalid join timeout").
+		AddAssertion(x.joinRetryInterval > 0, "invalid join retry interval").
+		AddAssertion(x.joinTimeout > x.joinRetryInterval, "join timeout should be greater than join retry interval").
+		AddAssertion(x.broadcastTimeout > 0, "invalid broadcast timeout").
+		AddAssertion(x.broadcastRetryInterval > 0, "invalid broadcast retry interval").
+		AddAssertion(x.broadcastTimeout > x.broadcastRetryInterval, "broadcast timeout should be greater than broadcast retry interval").
 		AddAssertion(len(x.kinds) > 1, "actor kinds are not defined").
-		AddAssertion(x.replicaCount >= 1, "cluster replicaCount is invalid").
-		AddAssertion(x.writeQuorum >= 1, "cluster writeQuorum is invalid").
-		AddAssertion(x.readQuorum >= 1, "cluster readQuorum is invalid").
 		Validate()
 }
