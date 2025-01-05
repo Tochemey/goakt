@@ -27,8 +27,6 @@ package actors
 import (
 	"context"
 	"errors"
-	"net"
-	"strconv"
 
 	"golang.org/x/sync/errgroup"
 
@@ -81,16 +79,16 @@ func (r *rebalancer) Rebalance(ctx *ReceiveContext) {
 	switch msg := ctx.Message().(type) {
 	case *internalpb.Rebalance:
 		rctx := context.WithoutCancel(ctx.Context())
-		peerState := msg.GetPeerState()
+		actors := msg.GetActors()
 
 		// grab all our active peers
-		peers, err := r.pid.ActorSystem().getCluster().Peers(rctx)
+		peers, err := r.pid.ActorSystem().getCluster().Peers()
 		if err != nil {
 			ctx.Err(NewInternalError(err))
 			return
 		}
 
-		leaderShares, peersShares := r.computeRebalancing(len(peers)+1, peerState)
+		leaderShares, peersShares := r.computeRebalancing(len(peers)+1, actors)
 		eg, egCtx := errgroup.WithContext(rctx)
 		logger := r.pid.Logger()
 
@@ -117,7 +115,7 @@ func (r *rebalancer) Rebalance(ctx *ReceiveContext) {
 				actors := peersShares[i]
 				peer := peers[i-1]
 				peerFound := true
-				peerState, err := r.pid.ActorSystem().getPeerStateFromCache(peer.PeerAddress())
+				peerState, err := r.pid.ActorSystem().getCluster().GetPeerState(peer.PeerAddress())
 				if errors.Is(err, ErrPeerNotFound) {
 					logger.Warnf("peer=(%s) not found in local cache", peer.PeerAddress())
 					peerFound = false
@@ -153,9 +151,7 @@ func (r *rebalancer) Rebalance(ctx *ReceiveContext) {
 			ctx.Err(err)
 		}
 
-		ctx.Tell(ctx.Sender(), &internalpb.RebalanceComplete{
-			PeerAddress: net.JoinHostPort(peerState.GetHost(), strconv.Itoa(int(peerState.GetPeersPort()))),
-		})
+		ctx.Tell(ctx.Sender(), &internalpb.RebalanceComplete{})
 
 	default:
 		ctx.Unhandled()
@@ -170,21 +166,21 @@ func (r *rebalancer) PostStop(context.Context) error {
 }
 
 // computeRebalancing build the list of actors to create on the leader node and the peers in the cluster
-func (r *rebalancer) computeRebalancing(totalPeers int, nodeLeftState *internalpb.PeerState) (leaderShares []*internalpb.ActorRef, peersShares [][]*internalpb.ActorRef) {
+func (r *rebalancer) computeRebalancing(totalPeers int, actors []*internalpb.ActorRef) (leaderShares []*internalpb.ActorRef, peersShares [][]*internalpb.ActorRef) {
 	var (
 		chunks      [][]*internalpb.ActorRef
-		actorsCount = len(nodeLeftState.GetActors())
+		actorsCount = len(actors)
 	)
 
 	// distribute actors amongst the peers with the leader taking the heavy load
 	switch {
 	case actorsCount < totalPeers:
-		leaderShares = nodeLeftState.GetActors()
+		leaderShares = actors
 	default:
 		quotient := actorsCount / totalPeers
 		remainder := actorsCount % totalPeers
-		leaderShares = nodeLeftState.GetActors()[:remainder]
-		chunks = slice.Chunk[*internalpb.ActorRef](nodeLeftState.GetActors()[remainder:], quotient)
+		leaderShares = actors[:remainder]
+		chunks = slice.Chunk[*internalpb.ActorRef](actors[remainder:], quotient)
 	}
 
 	if len(chunks) > 0 {

@@ -92,7 +92,7 @@ func TestRebalancing(t *testing.T) {
 		require.NoError(t, sd2.Close())
 
 		// Wait for cluster rebalancing
-		lib.Pause(time.Minute)
+		lib.Pause(time.Second)
 
 		sender, err := node1.LocalActor("Node1-Actor-1")
 		require.NoError(t, err)

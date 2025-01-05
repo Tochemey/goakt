@@ -149,14 +149,14 @@ func WithActorInitTimeout(timeout time.Duration) Option {
 	)
 }
 
-// WithPeerStateLoopInterval sets the peer state loop interval
-func WithPeerStateLoopInterval(interval time.Duration) Option {
-	return OptionFunc(
-		func(system *actorSystem) {
-			system.peersStateLoopInterval = interval
-		},
-	)
-}
+//// WithPeerStateLoopInterval sets the peer state loop interval
+//func WithPeerStateLoopInterval(interval time.Duration) Option {
+//	return OptionFunc(
+//		func(system *actorSystem) {
+//			system.peersStateLoopInterval = interval
+//		},
+//	)
+//}
 
 // WithJanitorInterval sets the janitor interval
 func WithJanitorInterval(interval time.Duration) Option {

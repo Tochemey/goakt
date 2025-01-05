@@ -122,8 +122,8 @@ type Service struct {
 	stopEventsListener chan types.Unit
 	eventsLock         *sync.Mutex
 	peersLock          *sync.Mutex
-	eventsChan         chan *Event
-	nodesJoined        chan *Peer
+	eventsQueue        chan *Event
+	joinedQueue        chan *Peer
 
 	broadcastRetryInterval time.Duration
 	broadcastTimeout       time.Duration
@@ -180,8 +180,8 @@ func NewService(provider discovery.Provider, node *discovery.Node, opts ...Optio
 		shutdownTimeout:        3 * time.Second,
 		eventsLock:             &sync.Mutex{},
 		peersLock:              &sync.Mutex{},
-		eventsChan:             make(chan *Event, 1),
-		nodesJoined:            make(chan *Peer, 1),
+		eventsQueue:            make(chan *Event, 1),
+		joinedQueue:            make(chan *Peer, 1),
 		broadcastRetryInterval: 200 * time.Millisecond,
 		broadcastTimeout:       time.Second,
 		httpClient:             http.NewClient(),
@@ -265,7 +265,7 @@ func (s *Service) Stop(ctx context.Context) error {
 
 	// stop the events and replication loop
 	close(s.stopEventsListener)
-	close(s.nodesJoined)
+	close(s.joinedQueue)
 	s.httpClient.CloseIdleConnections()
 	s.peersCache.reset()
 
@@ -323,7 +323,7 @@ func (s *Service) DeletePeerState(_ context.Context, request *connect.Request[in
 }
 
 // PutJobKeys handles the put job key request
-func (s *Service) PutJobKeys(ctx context.Context, request *connect.Request[internalpb.PutJobKeysRequest]) (*connect.Response[internalpb.PutJobKeysResponse], error) {
+func (s *Service) PutJobKeys(_ context.Context, request *connect.Request[internalpb.PutJobKeysRequest]) (*connect.Response[internalpb.PutJobKeysResponse], error) {
 	s.peersLock.Lock()
 
 	peerAddress := request.Msg.GetPeerAddress()
@@ -342,7 +342,7 @@ func (s *Service) PutJobKeys(ctx context.Context, request *connect.Request[inter
 }
 
 // DeleteJobKey handles the delete job key request
-func (s *Service) DeleteJobKey(ctx context.Context, request *connect.Request[internalpb.DeleteJobKeyRequest]) (*connect.Response[internalpb.DeleteJobKeyResponse], error) {
+func (s *Service) DeleteJobKey(_ context.Context, request *connect.Request[internalpb.DeleteJobKeyRequest]) (*connect.Response[internalpb.DeleteJobKeyResponse], error) {
 	s.peersLock.Lock()
 
 	peerAddress := request.Msg.GetPeerAddress()
@@ -366,7 +366,7 @@ func (s *Service) DeleteJobKey(ctx context.Context, request *connect.Request[int
 }
 
 // DeleteActor handles the delete actor request from a remote peer
-func (s *Service) DeleteActor(ctx context.Context, request *connect.Request[internalpb.DeleteActorRequest]) (*connect.Response[internalpb.DeleteActorResponse], error) {
+func (s *Service) DeleteActor(_ context.Context, request *connect.Request[internalpb.DeleteActorRequest]) (*connect.Response[internalpb.DeleteActorResponse], error) {
 	s.peersLock.Lock()
 	defer s.peersLock.Unlock()
 
@@ -436,11 +436,11 @@ func (s *Service) GetPeerState(peerAddress string) (*internalpb.PeerState, error
 
 	peerState, ok := s.peersCache.get(peerAddress)
 	if !ok {
-		s.logger.Warnf("[%s] has not found peer=(%s) sync record", s.node.String(), peerAddress)
+		s.logger.Warnf("(%s) has not found peer=(%s) sync record", s.node.String(), peerAddress)
 		return nil, ErrPeerSyncNotFound
 	}
 
-	s.logger.Infof("[%s] successfully retrieved peer (%s) sync record", s.node.String(), peerAddress)
+	s.logger.Infof("(%s) successfully retrieved peer (%s) sync record", s.node.String(), peerAddress)
 	return peerState, nil
 }
 
@@ -544,7 +544,7 @@ func (s *Service) GetActor(actorName string) (*internalpb.ActorRef, error) {
 		name := actor.GetActorAddress().GetName()
 		if actorName == name {
 			s.localOpsLock.RUnlock()
-			s.logger.Infof("[%s] successfully retrieved from the cluster actor (%s)", s.node.String(), actor.GetActorAddress().GetName())
+			s.logger.Infof("(%s) successfully retrieved from the cluster actor (%s)", s.node.String(), actor.GetActorAddress().GetName())
 			return actor, nil
 		}
 	}
@@ -555,7 +555,7 @@ func (s *Service) GetActor(actorName string) (*internalpb.ActorRef, error) {
 			name := actor.GetActorAddress().GetName()
 			if actorName == name {
 				s.localOpsLock.RUnlock()
-				s.logger.Infof("[%s] successfully retrieved from the cluster actor (%s)", s.node.String(), actor.GetActorAddress().GetName())
+				s.logger.Infof("(%s) successfully retrieved from the cluster actor (%s)", s.node.String(), actor.GetActorAddress().GetName())
 				return actor, nil
 			}
 		}
@@ -826,7 +826,7 @@ func (s *Service) IsLeader() (bool, error) {
 // Events returns a channel where cluster events are published
 func (s *Service) Events() <-chan *Event {
 	s.eventsLock.Lock()
-	ch := s.eventsChan
+	ch := s.eventsQueue
 	s.eventsLock.Unlock()
 	return ch
 }
@@ -871,7 +871,7 @@ func (s *Service) join(ctx context.Context) error {
 
 // handleJoinedPeers handles peers that join the existing cluster
 func (s *Service) handleJoinedPeers() {
-	for peer := range s.nodesJoined {
+	for peer := range s.joinedQueue {
 		s.logger.Infof("%s pushing peer state to joined peer=%s", s.node.String(), peer.String())
 
 		if err := errorschain.New(errorschain.ReturnFirst()).
@@ -931,7 +931,7 @@ func (s *Service) eventsListener(eventsCh chan memberlist.NodeEvent) {
 				eventType,
 				peer.String())
 
-			s.eventsChan <- &Event{
+			s.eventsQueue <- &Event{
 				Peer: peer,
 				Time: time.Now().UTC(),
 				Type: eventType,
@@ -939,13 +939,13 @@ func (s *Service) eventsListener(eventsCh chan memberlist.NodeEvent) {
 
 			// push peer to queue of th peers that has joined the cluster
 			if eventType == NodeJoined {
-				s.nodesJoined <- peer
+				s.joinedQueue <- peer
 			}
 
 			s.eventsLock.Unlock()
 		case <-s.stopEventsListener:
 			// finish listening to cluster events
-			close(s.eventsChan)
+			close(s.eventsQueue)
 			return
 		}
 	}

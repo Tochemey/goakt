@@ -92,13 +92,16 @@ L:
 	require.True(t, event.Type == NodeJoined)
 	actualAddr := event.Peer.PeerAddress()
 	require.Equal(t, node2.Address(), actualAddr)
+
 	peers, err := node1.Peers()
 	require.NoError(t, err)
 	require.Len(t, peers, 1)
 	require.Equal(t, node2.Address(), peers[0].PeerAddress())
+
 	me := node1.Whoami()
 	require.NotNil(t, me)
 	require.Equal(t, node1.Address(), me.PeerAddress())
+
 	leader, err := node2.Leader()
 	require.NoError(t, err)
 	require.NotNil(t, leader)

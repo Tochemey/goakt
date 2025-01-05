@@ -30,7 +30,7 @@ import (
 	"github.com/reugn/go-quartz/logger"
 
 	"github.com/tochemey/goakt/v2/goaktpb"
-	"github.com/tochemey/goakt/v2/internal/cluster"
+	"github.com/tochemey/goakt/v2/internal/peers"
 	"github.com/tochemey/goakt/v2/log"
 )
 
@@ -40,7 +40,7 @@ type janitor struct {
 	pid            *PID
 	logger         log.Logger
 	tree           *pidTree
-	cluster        cluster.Interface
+	cluster        peers.IService
 	clusterEnabled bool
 }
 

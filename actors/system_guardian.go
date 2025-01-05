@@ -61,7 +61,7 @@ func (x *systemGuardian) Receive(ctx *ReceiveContext) {
 	case *goaktpb.PostStart:
 		x.handlePostStart(ctx)
 	case *internalpb.RebalanceComplete:
-		x.completeRebalancing(msg)
+		x.completeRebalancing(ctx.Context(), msg)
 	case *goaktpb.Terminated:
 		x.handleTerminated(ctx.Context(), msg)
 	default:
@@ -99,12 +99,8 @@ func (x *systemGuardian) handleTerminated(ctx context.Context, msg *goaktpb.Term
 }
 
 // completeRebalancing wraps up the rebalancing of dead node in the cluster
-func (x *systemGuardian) completeRebalancing(msg *internalpb.RebalanceComplete) {
+func (x *systemGuardian) completeRebalancing(ctx context.Context, msg *internalpb.RebalanceComplete) {
 	x.logger.Infof("%s completing rebalancing", x.pid.Name())
 	x.pid.ActorSystem().completeRebalancing()
 	x.logger.Infof("%s rebalancing successfully completed", x.pid.Name())
-
-	x.logger.Infof("%s removing dead peer=(%s) from cache", x.pid.Name(), msg.GetPeerAddress())
-	x.pid.ActorSystem().removePeerStateFromCache(msg.GetPeerAddress())
-	x.logger.Infof("%s dead peer=(%s) successfully removed from cache", x.pid.Name(), msg.GetPeerAddress())
 }

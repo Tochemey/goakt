@@ -40,7 +40,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/tochemey/goakt/v2/address"
-	"github.com/tochemey/goakt/v2/internal/cluster"
+	"github.com/tochemey/goakt/v2/internal/peers"
 	"github.com/tochemey/goakt/v2/log"
 )
 
@@ -51,7 +51,7 @@ var errSkipJobScheduling = errors.New("skip job scheduling")
 type schedulerOption func(scheduler *scheduler)
 
 // withCluster set the scheduler cluster
-func withSchedulerCluster(cluster cluster.Interface) schedulerOption {
+func withSchedulerCluster(cluster peers.IService) schedulerOption {
 	return func(scheduler *scheduler) {
 		scheduler.cluster = cluster
 	}
@@ -77,7 +77,7 @@ type scheduler struct {
 	logger log.Logger
 	// define the shutdown timeout
 	stopTimeout time.Duration
-	cluster     cluster.Interface
+	cluster     peers.IService
 	remoting    *Remoting
 }
 
@@ -346,14 +346,14 @@ func (x *scheduler) RemoteScheduleWithCron(ctx context.Context, message proto.Me
 func (x *scheduler) distributeJobKeyOrNot(ctx context.Context, job *quartz.JobDetail) error {
 	jobKey := job.JobKey().String()
 	if x.cluster != nil {
-		ok, err := x.cluster.SchedulerJobKeyExists(ctx, jobKey)
+		actual, err := x.cluster.GetJobKey(jobKey)
 		if err != nil {
 			return err
 		}
-		if ok {
+		if actual == nil {
 			return errSkipJobScheduling
 		}
-		if err := x.cluster.SetSchedulerJobKey(ctx, jobKey); err != nil {
+		if err := x.cluster.PutJobKey(ctx, jobKey); err != nil {
 			return err
 		}
 	}

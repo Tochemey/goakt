@@ -97,11 +97,11 @@ func TestOption(t *testing.T) {
 			option:   WithCluster(clusterConfig),
 			expected: actorSystem{clusterEnabled: atomicTrue, clusterConfig: clusterConfig},
 		},
-		{
-			name:     "WithPeerStateLoopInterval",
-			option:   WithPeerStateLoopInterval(2 * time.Second),
-			expected: actorSystem{peersStateLoopInterval: 2. * time.Second},
-		},
+		//{
+		//	name:     "WithPeerStateLoopInterval",
+		//	option:   WithPeerStateLoopInterval(2 * time.Second),
+		//	expected: actorSystem{peersStateLoopInterval: 2. * time.Second},
+		//},
 		{
 			name:     "WithGCInterval",
 			option:   WithJanitorInterval(2 * time.Second),

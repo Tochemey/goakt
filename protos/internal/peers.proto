@@ -53,14 +53,11 @@ message PeerState {
 }
 
 message Rebalance {
-  // Specifies the peer state
-  PeerState peer_state = 1;
+  // Specifies the list of actors
+  repeated ActorRef actors = 1;
 }
 
-message RebalanceComplete {
-  // Specifies the peer address
-  string peer_address = 1;
-}
+message RebalanceComplete {}
 
 message PeerMeta {
   // Specifies the node name
