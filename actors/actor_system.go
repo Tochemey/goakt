@@ -1494,9 +1494,8 @@ func (x *actorSystem) clusterEventsLoop() {
 					x.logger.Debugf("(%s) about to rebalance peer (%s)", x.clusterNode.String(), peer.String())
 					peerState, err := x.cluster.GetPeerState(peer.PeerAddress())
 					if err != nil {
-						x.logger.Error(err)
-						// TODO: maybe panic
-						continue
+						x.logger.Panic(fmt.Errorf("%s failed to rebalance peer %s: %w", x.clusterNode.String(), peer.PeerAddress(), err))
+						return
 					}
 
 					x.rebalanceLocker.Lock()
@@ -1578,7 +1577,7 @@ func (x *actorSystem) clusterEventsLoop() {
 func (x *actorSystem) rebalancingLoop() {
 	for peerState := range x.rebalancingQueue {
 		ctx := context.Background()
-		if !x.shouldRebalance(ctx, peerState) {
+		if !x.shouldRebalance(peerState) {
 			x.logger.Debugf("(%s) cannot proceed with rebalancing. Not the leader node", x.clusterNode.String())
 			continue
 		}
@@ -1599,20 +1598,23 @@ func (x *actorSystem) rebalancingLoop() {
 		if err := errorschain.
 			New(errorschain.ReturnFirst()).
 			AddError(x.cluster.RemovePeerState(ctx, peerAddress)).
-			AddError(x.systemGuardian.Tell(ctx, x.rebalancer, message)).Error(); err != nil {
-			x.logger.Error(err)
+			AddError(x.systemGuardian.Tell(ctx, x.rebalancer, message)).
+			Error(); err != nil {
+			x.logger.Panic(fmt.Errorf("%s failed to rebalance peer %s: %w", x.clusterNode.String(), peerAddress, err))
+			return
 		}
 	}
 }
 
 // shouldRebalance returns true when the current can perform the cluster rebalancing
-func (x *actorSystem) shouldRebalance(ctx context.Context, peerState *internalpb.PeerState) bool {
-	// TODO: handle error
+// this call will panic when we are not able to accesss the cluster leadership
+func (x *actorSystem) shouldRebalance(peerState *internalpb.PeerState) bool {
 	isLeader, err := x.cluster.IsLeader()
 	if err != nil {
-		panic(err)
+		x.logger.Panic(fmt.Errorf("%s: cluster leadership role check failed %w", x.clusterNode.String(), err))
 		return false
 	}
+
 	return !(peerState == nil ||
 		!x.InCluster() ||
 		proto.Equal(peerState, new(internalpb.PeerState)) ||
