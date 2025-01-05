@@ -304,9 +304,9 @@ func (s *Service) PutPeerState(_ context.Context, request *connect.Request[inter
 	peerState := request.Msg.GetPeerState()
 	peerAddress := request.Msg.GetPeerAddress()
 
-	s.logger.Infof("%s handling peer=(%s) state", s.node.String(), peerAddress)
+	s.logger.Infof("node=(%s) handling peer=(%s) state", s.node.String(), peerAddress)
 	s.peersCache.set(peerAddress, peerState)
-	s.logger.Infof("%s successfully handled peer=(%s) state", s.node.String(), peerAddress)
+	s.logger.Infof("node=(%s) successfully handled peer=(%s) state", s.node.String(), peerAddress)
 	return connect.NewResponse(&internalpb.PutPeerStateResponse{Ack: true}), nil
 }
 
@@ -316,9 +316,9 @@ func (s *Service) DeletePeerState(_ context.Context, request *connect.Request[in
 	defer s.peersLock.Unlock()
 
 	peerAddress := request.Msg.GetPeerAddress()
-	s.logger.Infof("%s handling peer=(%s) state deletion", s.node.String(), peerAddress)
+	s.logger.Infof("node=(%s) handling peer=(%s) state deletion", s.node.String(), peerAddress)
 	s.peersCache.remove(peerAddress)
-	s.logger.Infof("%s successfully deleted peer=(%s) state", s.node.String(), peerAddress)
+	s.logger.Infof("node=(%s) successfully deleted peer=(%s) state", s.node.String(), peerAddress)
 	return connect.NewResponse(new(internalpb.DeletePeerStateResponse)), nil
 }
 
@@ -329,7 +329,7 @@ func (s *Service) PutJobKeys(_ context.Context, request *connect.Request[interna
 	peerAddress := request.Msg.GetPeerAddress()
 	jobKeys := request.Msg.GetJobKeys()
 
-	s.logger.Infof("%s handling peer=(%s) job keys", s.node.String(), peerAddress)
+	s.logger.Infof("node=(%s) handling peer=(%s) job keys", s.node.String(), peerAddress)
 
 	s.peerJobKeysLock.Lock()
 	s.peersJobKeys[peerAddress] = jobKeys
@@ -348,7 +348,7 @@ func (s *Service) DeleteJobKey(_ context.Context, request *connect.Request[inter
 	peerAddress := request.Msg.GetPeerAddress()
 	jobKey := request.Msg.GetJobKey()
 
-	s.logger.Infof("%s handling peer=(%s) jobkey=(%s) deletion", s.node.String(), peerAddress, jobKey)
+	s.logger.Infof("node=(%s) handling peer=(%s) jobkey=(%s) deletion", s.node.String(), peerAddress, jobKey)
 
 	s.peerJobKeysLock.Lock()
 	jobKeys := s.peersJobKeys[peerAddress]
@@ -436,11 +436,11 @@ func (s *Service) GetPeerState(peerAddress string) (*internalpb.PeerState, error
 
 	peerState, ok := s.peersCache.get(peerAddress)
 	if !ok {
-		s.logger.Warnf("(%s) has not found peer=(%s) sync record", s.node.String(), peerAddress)
+		s.logger.Warnf("node=(%s) has not found peer=(%s) sync record", s.node.String(), peerAddress)
 		return nil, ErrPeerSyncNotFound
 	}
 
-	s.logger.Infof("(%s) successfully retrieved peer (%s) sync record", s.node.String(), peerAddress)
+	s.logger.Infof("node=(%s) successfully retrieved peer (%s) sync record", s.node.String(), peerAddress)
 	return peerState, nil
 }
 
@@ -455,10 +455,10 @@ func (s *Service) RemovePeerState(ctx context.Context, peerAddress string) error
 	s.peersCache.remove(peerAddress)
 
 	// notify the rest of the cluster to clear their peersCache from this vilain
-	s.logger.Infof("%s removing peer=(%s) from cluster", s.node.String(), peerAddress)
+	s.logger.Infof("node=(%s) removing peer=(%s) from cluster", s.node.String(), peerAddress)
 	peers, err := s.Peers()
 	if err != nil {
-		s.logger.Error(fmt.Errorf("%s failed to get peers: %w", s.node.String(), err))
+		s.logger.Error(fmt.Errorf("node=(%s) failed to get peers: %w", s.node.String(), err))
 		return err
 	}
 
@@ -476,9 +476,9 @@ func (s *Service) RemovePeerState(ctx context.Context, peerAddress string) error
 				}))
 
 				if err != nil {
-					s.logger.Error(fmt.Errorf("%s failed to remove peer=%s state from its peersCache: %w", peer.String(), peerAddress, err))
+					s.logger.Error(fmt.Errorf("node=(%s) failed to remove peer=%s state from its peersCache: %w", peer.String(), peerAddress, err))
 				}
-				s.logger.Infof("%s successfully remove peer=%s state from its peersCache", peer.String(), peerAddress)
+				s.logger.Infof("node=(%s) successfully remove peer=%s state from its peersCache", peer.String(), peerAddress)
 				return nil
 			})
 		}
@@ -497,10 +497,10 @@ func (s *Service) PutActor(ctx context.Context, actor *internalpb.ActorRef) erro
 	name := actor.GetActorAddress().GetName()
 	kind := actor.GetActorType()
 
-	s.logger.Infof("%s replicating actor=[%s/%s] in the cluster", s.node.String(), name, kind)
+	s.logger.Infof("node=(%s) replicating actor=[%s/%s] in the cluster", s.node.String(), name, kind)
 	peers, err := s.Peers()
 	if err != nil {
-		s.logger.Error(fmt.Errorf("%s failed to get peers: %w", s.node.String(), err))
+		s.logger.Error(fmt.Errorf("node=(%s) failed to get peers: %w", s.node.String(), err))
 		return err
 	}
 
@@ -515,14 +515,14 @@ func (s *Service) PutActor(ctx context.Context, actor *internalpb.ActorRef) erro
 		for _, peer := range peers {
 			peer := peer
 			eg.Go(func() error {
-				s.logger.Infof("%s pushing peer state to peer=%s", s.node.String(), peer.PeerAddress())
+				s.logger.Infof("node=(%s) pushing peer state to peer=%s", s.node.String(), peer.PeerAddress())
 
 				if err := s.broadcastState(ctx, peer); err != nil {
-					s.logger.Error(fmt.Errorf("%s failed to push peer state to peer=%s: %w", s.node.String(), peer.PeerAddress(), err))
+					s.logger.Error(fmt.Errorf("node=(%s) failed to push peer state to peer=%s: %w", s.node.String(), peer.PeerAddress(), err))
 					return err
 				}
 
-				s.logger.Infof("%s successfully pushed peer state to peer=%s", s.node.String(), peer.PeerAddress())
+				s.logger.Infof("node=(%s) successfully pushed peer state to peer=%s", s.node.String(), peer.PeerAddress())
 				return nil
 			})
 		}
@@ -538,13 +538,13 @@ func (s *Service) GetActor(actorName string) (*internalpb.ActorRef, error) {
 	}
 
 	s.localOpsLock.RLock()
-	s.logger.Infof("(%s) retrieving actor (%s) from the cluster", s.node.String(), actorName)
+	s.logger.Infof("node=(%s) retrieving actor (%s) from the cluster", s.node.String(), actorName)
 	actors := s.localState.GetActors()
 	for _, actor := range actors {
 		name := actor.GetActorAddress().GetName()
 		if actorName == name {
 			s.localOpsLock.RUnlock()
-			s.logger.Infof("(%s) successfully retrieved from the cluster actor (%s)", s.node.String(), actor.GetActorAddress().GetName())
+			s.logger.Infof("node=(%s) successfully retrieved from the cluster actor (%s)", s.node.String(), actor.GetActorAddress().GetName())
 			return actor, nil
 		}
 	}
@@ -555,13 +555,13 @@ func (s *Service) GetActor(actorName string) (*internalpb.ActorRef, error) {
 			name := actor.GetActorAddress().GetName()
 			if actorName == name {
 				s.localOpsLock.RUnlock()
-				s.logger.Infof("(%s) successfully retrieved from the cluster actor (%s)", s.node.String(), actor.GetActorAddress().GetName())
+				s.logger.Infof("node=(%s) successfully retrieved from the cluster actor (%s)", s.node.String(), actor.GetActorAddress().GetName())
 				return actor, nil
 			}
 		}
 	}
 
-	s.logger.Warnf("(%s) could not find actor=%s the cluster", s.node.String(), actorName)
+	s.logger.Warnf("node=(%s) could not find actor=%s the cluster", s.node.String(), actorName)
 	s.localOpsLock.RUnlock()
 	return nil, ErrActorNotFound
 }
@@ -590,10 +590,10 @@ func (s *Service) RemoveActor(ctx context.Context, actorName string) error {
 		s.localState.Actors = append(s.localState.GetActors()[:index], s.localState.GetActors()[index+1:]...)
 
 		// secondly replicate the state to the rest of the cluster
-		s.logger.Infof("%s replicating state in the cluster", s.node.String())
+		s.logger.Infof("node=(%s) replicating state in the cluster", s.node.String())
 		peers, err := s.Peers()
 		if err != nil {
-			s.logger.Error(fmt.Errorf("%s failed to get peers: %w", s.node.String(), err))
+			s.logger.Error(fmt.Errorf("node=(%s) failed to get peers: %w", s.node.String(), err))
 			return err
 		}
 
@@ -602,14 +602,14 @@ func (s *Service) RemoveActor(ctx context.Context, actorName string) error {
 			for _, peer := range peers {
 				peer := peer
 				eg.Go(func() error {
-					s.logger.Infof("%s pushing peer state to peer=%s", s.node.String(), peer.PeerAddress())
+					s.logger.Infof("node=(%s) pushing peer state to peer=%s", s.node.String(), peer.PeerAddress())
 
 					if err := s.broadcastState(ctx, peer); err != nil {
-						s.logger.Error(fmt.Errorf("%s failed to push peer state to peer=%s: %w", s.node.String(), peer.PeerAddress(), err))
+						s.logger.Error(fmt.Errorf("node=(%s) failed to push peer state to peer=%s: %w", s.node.String(), peer.PeerAddress(), err))
 						return err
 					}
 
-					s.logger.Infof("%s successfully pushed peer state to peer=%s", s.node.String(), peer.PeerAddress())
+					s.logger.Infof("node=(%s) successfully pushed peer state to peer=%s", s.node.String(), peer.PeerAddress())
 					return nil
 				})
 			}
@@ -625,10 +625,10 @@ func (s *Service) PutJobKey(ctx context.Context, jobKey string) error {
 		return ErrPeersServiceNotStarted
 	}
 
-	s.logger.Infof("%s replicating jobkey=(%s) in the cluster", s.node.String(), jobKey)
+	s.logger.Infof("node=(%s) replicating jobkey=(%s) in the cluster", s.node.String(), jobKey)
 	peers, err := s.Peers()
 	if err != nil {
-		s.logger.Error(fmt.Errorf("%s failed to get peers: %w", s.node.String(), err))
+		s.logger.Error(fmt.Errorf("node=(%s) failed to get peers: %w", s.node.String(), err))
 		return err
 	}
 
@@ -643,14 +643,14 @@ func (s *Service) PutJobKey(ctx context.Context, jobKey string) error {
 		for _, peer := range peers {
 			peer := peer
 			eg.Go(func() error {
-				s.logger.Infof("%s pushing peer job keys to peer=%s", s.node.String(), peer.PeerAddress())
+				s.logger.Infof("node=(%s) pushing peer job keys to peer=%s", s.node.String(), peer.PeerAddress())
 
 				if err := s.broadcastJobKeys(ctx, peer); err != nil {
-					s.logger.Error(fmt.Errorf("%s failed to push peer job keys to peer=%s: %w", s.node.String(), peer.PeerAddress(), err))
+					s.logger.Error(fmt.Errorf("node=(%s) failed to push peer job keys to peer=%s: %w", s.node.String(), peer.PeerAddress(), err))
 					return err
 				}
 
-				s.logger.Infof("%s successfully pushed peer job keys to peer=%s", s.node.String(), peer.PeerAddress())
+				s.logger.Infof("node=(%s) successfully pushed peer job keys to peer=%s", s.node.String(), peer.PeerAddress())
 				return nil
 			})
 		}
@@ -666,10 +666,10 @@ func (s *Service) GetJobKey(jobKey string) (*string, error) {
 	}
 
 	s.localOpsLock.RLock()
-	s.logger.Infof("[%s] retrieving jobkey=(%s) from the cluster", s.node.String(), jobKey)
+	s.logger.Infof("node=(%s) retrieving jobkey=(%s) from the cluster", s.node.String(), jobKey)
 	jobKeys := s.localJobKeys
 	if jobKeys.Contains(jobKey) {
-		s.logger.Infof("[%s] successfully retrieved from the cluster jobkey=(%s)", s.node.String(), jobKey)
+		s.logger.Infof("node=(%s) successfully retrieved from the cluster jobkey=(%s)", s.node.String(), jobKey)
 		s.localOpsLock.RUnlock()
 		return &jobKey, nil
 	}
@@ -677,14 +677,14 @@ func (s *Service) GetJobKey(jobKey string) (*string, error) {
 	s.peerJobKeysLock.RLock()
 	for _, keys := range s.peersJobKeys {
 		if slices.Contains(keys, jobKey) {
-			s.logger.Infof("[%s] successfully retrieved from the cluster jobkey=(%s)", s.node.String(), jobKey)
+			s.logger.Infof("node=(%s) successfully retrieved from the cluster jobkey=(%s)", s.node.String(), jobKey)
 			s.peerJobKeysLock.RUnlock()
 			s.localOpsLock.RUnlock()
 			return &jobKey, nil
 		}
 	}
 
-	s.logger.Warnf("[%s] could not find jobkey=%s the cluster", s.node.String(), jobKey)
+	s.logger.Warnf("node=(%s) could not find jobkey=%s the cluster", s.node.String(), jobKey)
 	s.peerJobKeysLock.RUnlock()
 	s.localOpsLock.RUnlock()
 	return nil, ErrKeyNotFound
@@ -703,10 +703,10 @@ func (s *Service) RemoveJobKey(ctx context.Context, jobKey string) error {
 		// first remove the given actor from the local state
 		s.localJobKeys.Remove(jobKey)
 		// secondly replicate the state to the rest of the cluster
-		s.logger.Infof("%s replicating job keys in the cluster", s.node.String())
+		s.logger.Infof("node=(%s) replicating job keys in the cluster", s.node.String())
 		peers, err := s.Peers()
 		if err != nil {
-			s.logger.Error(fmt.Errorf("%s failed to get peers: %w", s.node.String(), err))
+			s.logger.Error(fmt.Errorf("node=(%s) failed to get peers: %w", s.node.String(), err))
 			return err
 		}
 
@@ -715,14 +715,14 @@ func (s *Service) RemoveJobKey(ctx context.Context, jobKey string) error {
 			for _, peer := range peers {
 				peer := peer
 				eg.Go(func() error {
-					s.logger.Infof("%s pushing peer job keys to peer=%s", s.node.String(), peer.PeerAddress())
+					s.logger.Infof("node=(%s) pushing peer job keys to peer=%s", s.node.String(), peer.PeerAddress())
 
 					if err := s.broadcastJobKeys(ctx, peer); err != nil {
-						s.logger.Error(fmt.Errorf("%s failed to push peer job keys to peer=%s: %w", s.node.String(), peer.PeerAddress(), err))
+						s.logger.Error(fmt.Errorf("node=(%s) failed to push peer job keys to peer=%s: %w", s.node.String(), peer.PeerAddress(), err))
 						return err
 					}
 
-					s.logger.Infof("%s successfully pushed peer job keys to peer=%s", s.node.String(), peer.PeerAddress())
+					s.logger.Infof("node=(%s) successfully pushed peer job keys to peer=%s", s.node.String(), peer.PeerAddress())
 					return nil
 				})
 			}
@@ -926,7 +926,7 @@ func (s *Service) eventsListener(eventsCh chan memberlist.NodeEvent) {
 
 			// send the event to the event channels
 			s.eventsLock.Lock()
-			s.logger.Debugf("%s received (%s) from %s cluster event",
+			s.logger.Debugf("node=(%s) received (%s) from %s cluster event",
 				s.node.String(),
 				eventType,
 				peer.String())
