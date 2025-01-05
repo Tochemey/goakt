@@ -26,6 +26,7 @@ package actors
 
 import (
 	"context"
+	"errors"
 
 	"github.com/reugn/go-quartz/logger"
 
@@ -91,8 +92,20 @@ func (x *janitor) handleTerminated(ctx context.Context, msg *goaktpb.Terminated)
 	x.logger.Infof("%s freeing resource [actor=%s] from system", x.pid.Name(), actorID)
 	if node, ok := x.tree.GetNode(actorID); ok {
 		x.tree.DeleteNode(node.GetValue())
+
 		if x.clusterEnabled {
-			if err := x.cluster.RemoveActor(context.WithoutCancel(ctx), node.GetValue().Name()); err != nil {
+			// first make sure the actor is still in the cluster
+			actor, err := x.cluster.GetActor(node.GetValue().Name())
+			if err != nil {
+				if errors.Is(err, peers.ErrActorNotFound) {
+					logger.Warnf("%s could not locate resource [actor=%s] in system. Maybe already removed from cluster.", x.pid.Name(), actorID)
+					return nil
+				}
+				x.logger.Errorf("%s failed to remove [actor=%s] from cluster: %v", x.pid.Name(), actorID, err)
+				return err
+			}
+
+			if err := x.cluster.RemoveActor(context.WithoutCancel(ctx), actor.GetActorAddress().GetName()); err != nil {
 				x.logger.Errorf("%s failed to remove [actor=%s] from cluster: %v", x.pid.Name(), actorID, err)
 				return err
 			}

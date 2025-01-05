@@ -576,46 +576,49 @@ func (s *Service) RemoveActor(ctx context.Context, actorName string) error {
 	s.localOpsLock.Lock()
 	defer s.localOpsLock.Unlock()
 
-	index := -1
-	for i, actor := range s.localState.GetActors() {
+	s.logger.Debugf("node=(%s) removing actor=%s", s.node.String(), actorName)
+	for index, actor := range s.localState.GetActors() {
 		name := actor.GetActorAddress().GetName()
 		if actorName == name {
-			index = i
-			break
-		}
-	}
-
-	if index >= 0 {
-		// first remove the given actor from the local state
-		s.localState.Actors = append(s.localState.GetActors()[:index], s.localState.GetActors()[index+1:]...)
-
-		// secondly replicate the state to the rest of the cluster
-		s.logger.Infof("node=(%s) replicating state in the cluster", s.node.String())
-		peers, err := s.Peers()
-		if err != nil {
-			s.logger.Error(fmt.Errorf("node=(%s) failed to get peers: %w", s.node.String(), err))
-			return err
-		}
-
-		if len(peers) > 0 {
-			eg, ctx := errgroup.WithContext(ctx)
-			for _, peer := range peers {
-				peer := peer
-				eg.Go(func() error {
-					s.logger.Infof("node=(%s) pushing peer state to peer=%s", s.node.String(), peer.PeerAddress())
-
-					if err := s.broadcastState(ctx, peer); err != nil {
-						s.logger.Error(fmt.Errorf("node=(%s) failed to push peer state to peer=%s: %w", s.node.String(), peer.PeerAddress(), err))
-						return err
-					}
-
-					s.logger.Infof("node=(%s) successfully pushed peer state to peer=%s", s.node.String(), peer.PeerAddress())
-					return nil
-				})
+			s.logger.Debugf("node=(%s) found actor=%s to remove", s.node.String(), actorName)
+			// first remove the given actor from the local state
+			s.localState.Actors = append(s.localState.GetActors()[:index], s.localState.GetActors()[index+1:]...)
+			// secondly replicate the state to the rest of the cluster
+			s.logger.Infof("node=(%s) replicating state in the cluster", s.node.String())
+			peers, err := s.Peers()
+			if err != nil {
+				s.logger.Error(fmt.Errorf("node=(%s) failed to get peers: %w", s.node.String(), err))
+				return err
 			}
-			return eg.Wait()
+
+			if len(peers) > 0 {
+				eg, ctx := errgroup.WithContext(ctx)
+				for _, peer := range peers {
+					peer := peer
+					eg.Go(func() error {
+						s.logger.Infof("node=(%s) pushing peer state to peer=%s", s.node.String(), peer.PeerAddress())
+
+						if err := s.broadcastState(ctx, peer); err != nil {
+							s.logger.Error(fmt.Errorf("node=(%s) failed to push peer state to peer=%s: %w", s.node.String(), peer.PeerAddress(), err))
+							return err
+						}
+
+						s.logger.Infof("node=(%s) successfully pushed peer state to peer=%s", s.node.String(), peer.PeerAddress())
+						return nil
+					})
+				}
+
+				if err := eg.Wait(); err != nil {
+					s.logger.Errorf("node=(%s) failed to remove actor=%s: %v", s.node.String(), actorName, err)
+					return err
+				}
+
+				s.logger.Debugf("node=(%s) remove actor=%s successfully", s.node.String(), actorName)
+				return nil
+			}
 		}
 	}
+
 	return ErrActorNotFound
 }
 

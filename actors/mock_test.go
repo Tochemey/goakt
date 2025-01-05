@@ -465,6 +465,7 @@ func startClusterSystem(t *testing.T, serverAddr string) (ActorSystem, discovery
 		WithLogger(logger),
 		WithRemoting(host, int32(remotingPort)),
 		WithJanitorInterval(time.Minute),
+		WithShutdownTimeout(time.Minute),
 		WithCluster(
 			NewClusterConfig().
 				WithKinds(new(mockActor)).
