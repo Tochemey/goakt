@@ -54,7 +54,6 @@ import (
 	"github.com/tochemey/goakt/v2/discovery"
 	"github.com/tochemey/goakt/v2/goaktpb"
 	"github.com/tochemey/goakt/v2/hash"
-	"github.com/tochemey/goakt/v2/internal/cluster"
 	"github.com/tochemey/goakt/v2/internal/errorschain"
 	"github.com/tochemey/goakt/v2/internal/eventstream"
 	"github.com/tochemey/goakt/v2/internal/internalpb"
@@ -114,8 +113,6 @@ type ActorSystem interface {
 	ActorOf(ctx context.Context, actorName string) (addr *address.Address, pid *PID, err error)
 	// InCluster states whether the actor system has started within a cluster of nodes
 	InCluster() bool
-	// GetPartition returns the partition where a given actor is located
-	GetPartition(actorName string) int
 	// Subscribe creates an event subscriber to consume events from the actor system.
 	// Remember to use the Unsubscribe method to avoid resource leakage.
 	Subscribe() (eventstream.Subscriber, error)
@@ -558,16 +555,6 @@ func (x *actorSystem) Unsubscribe(subscriber eventstream.Subscriber) error {
 	return nil
 }
 
-// GetPartition returns the partition where a given actor is located
-func (x *actorSystem) GetPartition(actorName string) int {
-	if !x.InCluster() {
-		// TODO: maybe add a partitioner function
-		return 0
-	}
-	//return x.cluster.GetPartition(actorName)
-	return 0
-}
-
 // InCluster states whether the actor system is started within a cluster of nodes
 func (x *actorSystem) InCluster() bool {
 	return x.clusterEnabled.Load() && x.cluster != nil
@@ -747,6 +734,7 @@ func (x *actorSystem) PeerAddress() string {
 // When cluster mode is activated, the PID will be nil.
 // When remoting is enabled this method will return and error
 // An actor not found error is return when the actor is not found.
+// nolint
 func (x *actorSystem) ActorOf(ctx context.Context, actorName string) (addr *address.Address, pid *PID, err error) {
 	x.locker.Lock()
 
@@ -767,7 +755,7 @@ func (x *actorSystem) ActorOf(ctx context.Context, actorName string) (addr *addr
 	if x.clusterEnabled.Load() {
 		actor, err := x.cluster.GetActor(actorName)
 		if err != nil {
-			if errors.Is(err, cluster.ErrActorNotFound) {
+			if errors.Is(err, peers.ErrActorNotFound) {
 				x.logger.Infof("actor=%s not found", actorName)
 				x.locker.Unlock()
 				return nil, nil, ErrActorNotFound(actorName)
@@ -816,6 +804,7 @@ func (x *actorSystem) LocalActor(actorName string) (*PID, error) {
 // RemoteActor returns the address of a remote actor when cluster is enabled
 // When the cluster mode is not enabled an actor not found error will be returned
 // One can always check whether cluster is enabled before calling this method or just use the ActorOf method.
+// nolint
 func (x *actorSystem) RemoteActor(ctx context.Context, actorName string) (addr *address.Address, err error) {
 	x.locker.Lock()
 
@@ -832,7 +821,7 @@ func (x *actorSystem) RemoteActor(ctx context.Context, actorName string) (addr *
 
 	actor, err := x.cluster.GetActor(actorName)
 	if err != nil {
-		if errors.Is(err, cluster.ErrActorNotFound) {
+		if errors.Is(err, peers.ErrActorNotFound) {
 			x.logger.Infof("actor=%s not found", actorName)
 			x.locker.Unlock()
 			return nil, ErrActorNotFound(actorName)
@@ -847,7 +836,7 @@ func (x *actorSystem) RemoteActor(ctx context.Context, actorName string) (addr *
 }
 
 // RemoteLookup for an actor on a remote host.
-func (x *actorSystem) RemoteLookup(ctx context.Context, request *connect.Request[internalpb.RemoteLookupRequest]) (*connect.Response[internalpb.RemoteLookupResponse], error) {
+func (x *actorSystem) RemoteLookup(_ context.Context, request *connect.Request[internalpb.RemoteLookupRequest]) (*connect.Response[internalpb.RemoteLookupResponse], error) {
 	logger := x.logger
 	msg := request.Msg
 
@@ -864,7 +853,7 @@ func (x *actorSystem) RemoteLookup(ctx context.Context, request *connect.Request
 		actorName := msg.GetName()
 		actor, err := x.cluster.GetActor(actorName)
 		if err != nil {
-			if errors.Is(err, cluster.ErrActorNotFound) {
+			if errors.Is(err, peers.ErrActorNotFound) {
 				logger.Error(ErrAddressNotFound(actorName).Error())
 				return nil, ErrAddressNotFound(actorName)
 			}
@@ -1591,7 +1580,7 @@ func (x *actorSystem) rebalancingLoop() {
 }
 
 // shouldRebalance returns true when the current can perform the cluster rebalancing
-// this call will panic when we are not able to accesss the cluster leadership
+// this call will panic when we are not able to access the cluster leadership
 func (x *actorSystem) shouldRebalance() bool {
 	isLeader, err := x.cluster.IsLeader()
 	if err != nil {
@@ -1600,25 +1589,6 @@ func (x *actorSystem) shouldRebalance() bool {
 	}
 	return !(!x.InCluster() || !isLeader)
 }
-
-// processPeerState processes a given peer synchronization record.
-//func (x *actorSystem) processPeerState(ctx context.Context, peer *cluster.Peer) error {
-//	peerAddress := net.JoinHostPort(peer.Host, strconv.Itoa(peer.PeersPort))
-//	x.logger.Infof("processing peer sync:(%s)", peerAddress)
-//	peerState, err := x.cluster.GetState(ctx, peerAddress)
-//	if err != nil {
-//		if errors.Is(err, cluster.ErrPeerSyncNotFound) {
-//			return nil
-//		}
-//		x.logger.Error(err)
-//		return err
-//	}
-//
-//	x.logger.Debugf("peer (%s) actors count (%d)", peerAddress, len(peerState.GetActors()))
-//	x.peersCache.set(peerState)
-//	x.logger.Infof("peer sync(%s) successfully processed", peerAddress)
-//	return nil
-//}
 
 // configPID constructs a PID provided the actor name and the actor kind
 // this is a utility function used when spawning actors

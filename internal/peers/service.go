@@ -237,6 +237,8 @@ func (s *Service) Start(ctx context.Context) error {
 	s.localOpsLock.Lock()
 	defer s.localOpsLock.Unlock()
 
+	s.logger.Infof("%s starting peers service with %s discovery provider", s.node.String(), s.provider.ID())
+
 	if err := errorschain.
 		New(errorschain.ReturnFirst()).
 		AddError(s.provider.Initialize()).
@@ -351,7 +353,7 @@ func (s *Service) PutRedeployment(_ context.Context, request *connect.Request[in
 }
 
 // DeleteRedeployment handles the delete redeployment request
-func (s *Service) DeleteRedeployment(ctx context.Context, request *connect.Request[internalpb.DeleteRedeploymentRequest]) (*connect.Response[internalpb.DeleteRedeploymentResponse], error) {
+func (s *Service) DeleteRedeployment(_ context.Context, request *connect.Request[internalpb.DeleteRedeploymentRequest]) (*connect.Response[internalpb.DeleteRedeploymentResponse], error) {
 	s.redeploymentLock.Lock()
 	peerAddress := request.Msg.GetPeerAddress()
 	s.logger.Infof("node=(%s) handling peer=(%s) redeployment deletion", s.node.String(), peerAddress)

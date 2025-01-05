@@ -231,10 +231,6 @@ func TestActorSystem(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, reply)
 
-		// get the actor partition
-		partition := newActorSystem.GetPartition(actorName)
-		assert.GreaterOrEqual(t, partition, 0)
-
 		// assert actor not found
 		actorName = "some-actor"
 		addr, pid, err := newActorSystem.ActorOf(ctx, actorName)
@@ -868,9 +864,6 @@ func TestActorSystem(t *testing.T) {
 
 		// wait for the system to properly start
 		lib.Pause(time.Second)
-
-		partition := sys.GetPartition("some-actor")
-		assert.Zero(t, partition)
 
 		t.Cleanup(
 			func() {

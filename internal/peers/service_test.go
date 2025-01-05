@@ -297,7 +297,6 @@ func TestCluster(t *testing.T) {
 		require.NoError(t, sd2.Close())
 		require.NoError(t, sd3.Close())
 		srv.Shutdown()
-
 	})
 	t.Run("With actor deletion", func(t *testing.T) {
 		ctx := context.Background()
