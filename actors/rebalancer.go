@@ -154,7 +154,9 @@ func (r *rebalancer) Rebalance(ctx *ReceiveContext) {
 			ctx.Err(err)
 		}
 
-		ctx.Tell(ctx.Sender(), &internalpb.RebalanceComplete{})
+		ctx.Tell(ctx.Sender(), &internalpb.RebalanceComplete{
+			PeerAddress: msg.GetPeerAddress(),
+		})
 
 	default:
 		ctx.Unhandled()

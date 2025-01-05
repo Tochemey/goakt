@@ -780,10 +780,7 @@ func startNode(t *testing.T, logger log.Logger, nodeName, serverAddr string) (sy
 		WithKinds(new(testActor)).
 		WithDiscovery(natsProvider).
 		WithPeersPort(peersPort).
-		WithDiscoveryPort(gossipPort).
-		WithReplicaCount(1).
-		WithMinimumPeersQuorum(1).
-		WithPartitionCount(10)
+		WithDiscoveryPort(gossipPort)
 
 	// create the actor system
 	system, err := actors.NewActorSystem(
@@ -791,7 +788,6 @@ func startNode(t *testing.T, logger log.Logger, nodeName, serverAddr string) (sy
 		actors.WithPassivationDisabled(),
 		actors.WithLogger(logger),
 		actors.WithRemoting(host, int32(remotePort)),
-		actors.WithPeerStateLoopInterval(100*time.Millisecond),
 		actors.WithCluster(clusterConfig),
 	)
 

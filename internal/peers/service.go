@@ -96,6 +96,15 @@ type IService interface {
 	GetJobKey(jobKey string) (*string, error)
 	// RemoveJobKey removes a given job key from the cluster
 	RemoveJobKey(ctx context.Context, jobKey string) error
+	// RemovePeerRedeployment removes a given peer redeployment cached data
+	// This action is only performed by the Leader node is the cluster
+	RemovePeerRedeployment(ctx context.Context, peerAddress string) error
+	// GetPeerRedeployment returns the list of actors to redeploy for the given
+	// peer. This call is only made when the given peer is shutting down and cluster mode is enabled
+	GetPeerRedeployment(peerAddress string) []*internalpb.ActorRef
+	// PutPeerRedeployment broadcasts to the rest of the cluster the actors that need to be redeployed
+	// This request is only executed when the given node is leaving the cluster and have some live actors
+	PutPeerRedeployment(ctx context.Context, actors []*internalpb.ActorRef) error
 }
 
 type Service struct {
@@ -135,6 +144,9 @@ type Service struct {
 	localJobKeys    goset.Set[string]
 	peersJobKeys    map[string][]string
 	peerJobKeysLock *sync.RWMutex
+
+	redeploymentLock  *sync.RWMutex
+	redeploymentCache map[string][]*internalpb.ActorRef
 }
 
 var (
@@ -190,6 +202,8 @@ func NewService(provider discovery.Provider, node *discovery.Node, opts ...Optio
 		localJobKeys:           goset.NewSet[string](),
 		peersJobKeys:           make(map[string][]string),
 		peerJobKeysLock:        &sync.RWMutex{},
+		redeploymentLock:       &sync.RWMutex{},
+		redeploymentCache:      make(map[string][]*internalpb.ActorRef),
 	}
 
 	// apply the various options
@@ -322,22 +336,42 @@ func (s *Service) DeletePeerState(_ context.Context, request *connect.Request[in
 	return connect.NewResponse(new(internalpb.DeletePeerStateResponse)), nil
 }
 
+// PutRedeployment handles the redeployment request
+func (s *Service) PutRedeployment(_ context.Context, request *connect.Request[internalpb.PutRedeploymentRequest]) (*connect.Response[internalpb.PutRedeploymentResponse], error) {
+	s.redeploymentLock.Lock()
+	peerAddress := request.Msg.GetPeerAddress()
+	actors := request.Msg.GetActors()
+
+	s.logger.Infof("node=(%s) caching peer=(%s) actors=%d redeployment", s.node.String(), peerAddress, len(actors))
+	s.redeploymentCache[peerAddress] = actors
+	s.logger.Infof("%s successfully cached peer=(%s) actors=%d redeployment", s.node.String(), peerAddress, len(actors))
+	s.redeploymentLock.Unlock()
+
+	return connect.NewResponse(new(internalpb.PutRedeploymentResponse)), nil
+}
+
+// DeleteRedeployment handles the delete redeployment request
+func (s *Service) DeleteRedeployment(ctx context.Context, request *connect.Request[internalpb.DeleteRedeploymentRequest]) (*connect.Response[internalpb.DeleteRedeploymentResponse], error) {
+	s.redeploymentLock.Lock()
+	peerAddress := request.Msg.GetPeerAddress()
+	s.logger.Infof("node=(%s) handling peer=(%s) redeployment deletion", s.node.String(), peerAddress)
+	delete(s.redeploymentCache, peerAddress)
+	s.logger.Infof("%s successfully handled peer=(%s) redeployment deletion", s.node.String(), peerAddress)
+	s.redeploymentLock.Unlock()
+	return connect.NewResponse(new(internalpb.DeleteRedeploymentResponse)), nil
+}
+
 // PutJobKeys handles the put job key request
 func (s *Service) PutJobKeys(_ context.Context, request *connect.Request[internalpb.PutJobKeysRequest]) (*connect.Response[internalpb.PutJobKeysResponse], error) {
 	s.peersLock.Lock()
-
+	s.peerJobKeysLock.Lock()
 	peerAddress := request.Msg.GetPeerAddress()
 	jobKeys := request.Msg.GetJobKeys()
-
 	s.logger.Infof("node=(%s) handling peer=(%s) job keys", s.node.String(), peerAddress)
-
-	s.peerJobKeysLock.Lock()
 	s.peersJobKeys[peerAddress] = jobKeys
-	s.peerJobKeysLock.Unlock()
-
-	s.peersLock.Unlock()
-
 	s.logger.Infof("%s successfully handled peer=(%s) job keys", s.node.String(), peerAddress)
+	s.peerJobKeysLock.Unlock()
+	s.peersLock.Unlock()
 	return connect.NewResponse(new(internalpb.PutJobKeysResponse)), nil
 }
 
@@ -395,6 +429,107 @@ func (s *Service) DeleteActor(_ context.Context, request *connect.Request[intern
 	}
 	s.logger.Infof("%s successfully delete peer=(%s) actor=(%s/%s)", s.node.String(), peerAddress, name, kind)
 	return connect.NewResponse(new(internalpb.DeleteActorResponse)), nil
+}
+
+// GetPeerRedeployment returns the list of actors to redeploy for the given
+// peer. This call is only made when the given peer is shutting down and cluster mode is enabled
+func (s *Service) GetPeerRedeployment(peerAddress string) []*internalpb.ActorRef {
+	s.redeploymentLock.RLock()
+	s.logger.Infof("node=(%s) fetching peer=(%s) redeployment", s.node.String(), peerAddress)
+	actors := s.redeploymentCache[peerAddress]
+	s.logger.Infof("node=(%s) peer=(%s) actors=%d for redeployment fetched", s.node.String(), peerAddress, len(actors))
+	s.redeploymentLock.RUnlock()
+	return actors
+}
+
+// RemovePeerRedeployment removes a given peer redeployment cached data
+// This action is only performed by the Leader node is the cluster
+func (s *Service) RemovePeerRedeployment(ctx context.Context, peerAddress string) error {
+	if !s.started.Load() {
+		return ErrPeersServiceNotStarted
+	}
+
+	s.redeploymentLock.Lock()
+	delete(s.redeploymentCache, peerAddress)
+	s.redeploymentLock.Unlock()
+
+	// notify the rest of the cluster to clear their peersCache from this vilain
+	s.logger.Infof("node=(%s) removing peer=(%s) redeployment", s.node.String(), peerAddress)
+	peers, err := s.Peers()
+	if err != nil {
+		s.logger.Error(fmt.Errorf("node=(%s) failed to get peers: %w", s.node.String(), err))
+		return err
+	}
+
+	s.localOpsLock.Lock()
+	defer s.localOpsLock.Unlock()
+
+	if len(peers) > 0 {
+		eg, ctx := errgroup.WithContext(ctx)
+		for _, peer := range peers {
+			peer := peer
+			eg.Go(func() error {
+				client := internalpbconnect.NewPeersServiceClient(s.httpClient, http.URL(peer.Host, int(peer.Port)))
+				_, err = client.DeleteRedeployment(ctx, connect.NewRequest(&internalpb.DeleteRedeploymentRequest{
+					PeerAddress: peerAddress,
+				}))
+
+				if err != nil {
+					s.logger.Error(fmt.Errorf("node=(%s) failed to remove peer=%s redeployment: %w", peer.String(), peerAddress, err))
+				}
+				s.logger.Infof("node=(%s) successfully remove peer=%s redeployment", peer.String(), peerAddress)
+				return nil
+			})
+		}
+
+		return eg.Wait()
+	}
+	return nil
+}
+
+// PutPeerRedeployment broadcasts to the rest of the cluster the actors that need to be redeployed
+// This request is only executed when the given node is leaving the cluster and have some live actors
+func (s *Service) PutPeerRedeployment(ctx context.Context, actors []*internalpb.ActorRef) error {
+	s.logger.Infof("node=(%s) broadcasting redeployment request to peers", s.node.String())
+	peers, err := s.Peers()
+	if err != nil {
+		s.logger.Error(fmt.Errorf("node=(%s) failed to get peers: %w", s.node.String(), err))
+		return err
+	}
+
+	s.localOpsLock.Lock()
+	defer s.localOpsLock.Unlock()
+
+	if len(peers) > 0 {
+		eg, ctx := errgroup.WithContext(ctx)
+		for _, peer := range peers {
+			peer := peer
+			eg.Go(func() error {
+				s.logger.Infof("node=(%s) broadcasting redeployment request to peer=%s", s.node.String(), peer.PeerAddress())
+				ctx, cancel := context.WithTimeout(ctx, s.broadcastTimeout)
+				defer cancel()
+				retrier := retry.NewRetrier(s.broadcastMaxRetries, s.broadcastRetryInterval, s.broadcastRetryInterval)
+				err := retrier.RunContext(ctx, func(ctx context.Context) error {
+					client := internalpbconnect.NewPeersServiceClient(s.httpClient, http.URL(peer.Host, int(peer.Port)))
+					_, err := client.PutRedeployment(ctx, connect.NewRequest(&internalpb.PutRedeploymentRequest{
+						PeerAddress: s.node.PeersAddress(),
+						Actors:      actors,
+					}))
+					return err
+				})
+
+				if err != nil {
+					s.logger.Error(fmt.Errorf("node=(%s) failed to broadcast redeployment to peer=%s: %w", s.node.String(), peer.PeerAddress(), err))
+					return err
+				}
+
+				s.logger.Infof("node=(%s) successfully broadcasted redeployment peer=%s", s.node.String(), peer.PeerAddress())
+				return nil
+			})
+		}
+		return eg.Wait()
+	}
+	return nil
 }
 
 // Actors returns the list of actors in the cluster
@@ -476,9 +611,9 @@ func (s *Service) RemovePeerState(ctx context.Context, peerAddress string) error
 				}))
 
 				if err != nil {
-					s.logger.Error(fmt.Errorf("node=(%s) failed to remove peer=%s state from its peersCache: %w", peer.String(), peerAddress, err))
+					s.logger.Error(fmt.Errorf("node=(%s) failed to remove peer=%s state: %w", peer.String(), peerAddress, err))
 				}
-				s.logger.Infof("node=(%s) successfully remove peer=%s state from its peersCache", peer.String(), peerAddress)
+				s.logger.Infof("node=(%s) successfully remove peer=%s state", peer.String(), peerAddress)
 				return nil
 			})
 		}
@@ -619,7 +754,7 @@ func (s *Service) RemoveActor(ctx context.Context, actorName string) error {
 		}
 	}
 
-	return ErrActorNotFound
+	return nil
 }
 
 // PutJobKey broadcasts the given job key to the list the node's peers
@@ -733,7 +868,7 @@ func (s *Service) RemoveJobKey(ctx context.Context, jobKey string) error {
 		}
 	}
 
-	return ErrKeyNotFound
+	return nil
 }
 
 // Peers returns the list of peers

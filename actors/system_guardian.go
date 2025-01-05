@@ -103,4 +103,7 @@ func (x *systemGuardian) completeRebalancing(ctx context.Context, msg *internalp
 	x.logger.Infof("%s completing rebalancing", x.pid.Name())
 	x.pid.ActorSystem().completeRebalancing()
 	x.logger.Infof("%s rebalancing successfully completed", x.pid.Name())
+	x.logger.Infof("%s removing dead peer=(%s) from cache", x.pid.Name(), msg.GetPeerAddress())
+	_ = x.pid.ActorSystem().getCluster().RemovePeerRedeployment(ctx, msg.GetPeerAddress())
+	x.logger.Infof("%s dead peer=(%s) successfully removed from cache", x.pid.Name(), msg.GetPeerAddress())
 }

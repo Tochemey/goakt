@@ -47,16 +47,24 @@ const (
 	// PeersServiceDeleteJobKeyProcedure is the fully-qualified name of the PeersService's DeleteJobKey
 	// RPC.
 	PeersServiceDeleteJobKeyProcedure = "/internalpb.PeersService/DeleteJobKey"
+	// PeersServicePutRedeploymentProcedure is the fully-qualified name of the PeersService's
+	// PutRedeployment RPC.
+	PeersServicePutRedeploymentProcedure = "/internalpb.PeersService/PutRedeployment"
+	// PeersServiceDeleteRedeploymentProcedure is the fully-qualified name of the PeersService's
+	// DeleteRedeployment RPC.
+	PeersServiceDeleteRedeploymentProcedure = "/internalpb.PeersService/DeleteRedeployment"
 )
 
 // These variables are the protoreflect.Descriptor objects for the RPCs defined in this package.
 var (
-	peersServiceServiceDescriptor               = internalpb.File_internal_peers_proto.Services().ByName("PeersService")
-	peersServicePutPeerStateMethodDescriptor    = peersServiceServiceDescriptor.Methods().ByName("PutPeerState")
-	peersServiceDeletePeerStateMethodDescriptor = peersServiceServiceDescriptor.Methods().ByName("DeletePeerState")
-	peersServiceDeleteActorMethodDescriptor     = peersServiceServiceDescriptor.Methods().ByName("DeleteActor")
-	peersServicePutJobKeysMethodDescriptor      = peersServiceServiceDescriptor.Methods().ByName("PutJobKeys")
-	peersServiceDeleteJobKeyMethodDescriptor    = peersServiceServiceDescriptor.Methods().ByName("DeleteJobKey")
+	peersServiceServiceDescriptor                  = internalpb.File_internal_peers_proto.Services().ByName("PeersService")
+	peersServicePutPeerStateMethodDescriptor       = peersServiceServiceDescriptor.Methods().ByName("PutPeerState")
+	peersServiceDeletePeerStateMethodDescriptor    = peersServiceServiceDescriptor.Methods().ByName("DeletePeerState")
+	peersServiceDeleteActorMethodDescriptor        = peersServiceServiceDescriptor.Methods().ByName("DeleteActor")
+	peersServicePutJobKeysMethodDescriptor         = peersServiceServiceDescriptor.Methods().ByName("PutJobKeys")
+	peersServiceDeleteJobKeyMethodDescriptor       = peersServiceServiceDescriptor.Methods().ByName("DeleteJobKey")
+	peersServicePutRedeploymentMethodDescriptor    = peersServiceServiceDescriptor.Methods().ByName("PutRedeployment")
+	peersServiceDeleteRedeploymentMethodDescriptor = peersServiceServiceDescriptor.Methods().ByName("DeleteRedeployment")
 )
 
 // PeersServiceClient is a client for the internalpb.PeersService service.
@@ -77,6 +85,12 @@ type PeersServiceClient interface {
 	// DeleteJobKey removes a given job key for a given peer from the cluster.
 	// Each peer will remove the given job key for the corresponding peer from their local cache
 	DeleteJobKey(context.Context, *connect.Request[internalpb.DeleteJobKeyRequest]) (*connect.Response[internalpb.DeleteJobKeyResponse], error)
+	// PutRedeployment is used by a cluster node that is terminating to notify its peers to redeploy
+	// its actors that are alive during its termination
+	PutRedeployment(context.Context, *connect.Request[internalpb.PutRedeploymentRequest]) (*connect.Response[internalpb.PutRedeploymentResponse], error)
+	// DeleteRedeployment is used the by the cluster leader after rebalancing is complete to ask the remaining
+	// of the cluster nodes to remove from their local cache the redeployment data of the left node
+	DeleteRedeployment(context.Context, *connect.Request[internalpb.DeleteRedeploymentRequest]) (*connect.Response[internalpb.DeleteRedeploymentResponse], error)
 }
 
 // NewPeersServiceClient constructs a client for the internalpb.PeersService service. By default, it
@@ -119,16 +133,30 @@ func NewPeersServiceClient(httpClient connect.HTTPClient, baseURL string, opts .
 			connect.WithSchema(peersServiceDeleteJobKeyMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
+		putRedeployment: connect.NewClient[internalpb.PutRedeploymentRequest, internalpb.PutRedeploymentResponse](
+			httpClient,
+			baseURL+PeersServicePutRedeploymentProcedure,
+			connect.WithSchema(peersServicePutRedeploymentMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
+		deleteRedeployment: connect.NewClient[internalpb.DeleteRedeploymentRequest, internalpb.DeleteRedeploymentResponse](
+			httpClient,
+			baseURL+PeersServiceDeleteRedeploymentProcedure,
+			connect.WithSchema(peersServiceDeleteRedeploymentMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // peersServiceClient implements PeersServiceClient.
 type peersServiceClient struct {
-	putPeerState    *connect.Client[internalpb.PutPeerStateRequest, internalpb.PutPeerStateResponse]
-	deletePeerState *connect.Client[internalpb.DeletePeerStateRequest, internalpb.DeletePeerStateResponse]
-	deleteActor     *connect.Client[internalpb.DeleteActorRequest, internalpb.DeleteActorResponse]
-	putJobKeys      *connect.Client[internalpb.PutJobKeysRequest, internalpb.PutJobKeysResponse]
-	deleteJobKey    *connect.Client[internalpb.DeleteJobKeyRequest, internalpb.DeleteJobKeyResponse]
+	putPeerState       *connect.Client[internalpb.PutPeerStateRequest, internalpb.PutPeerStateResponse]
+	deletePeerState    *connect.Client[internalpb.DeletePeerStateRequest, internalpb.DeletePeerStateResponse]
+	deleteActor        *connect.Client[internalpb.DeleteActorRequest, internalpb.DeleteActorResponse]
+	putJobKeys         *connect.Client[internalpb.PutJobKeysRequest, internalpb.PutJobKeysResponse]
+	deleteJobKey       *connect.Client[internalpb.DeleteJobKeyRequest, internalpb.DeleteJobKeyResponse]
+	putRedeployment    *connect.Client[internalpb.PutRedeploymentRequest, internalpb.PutRedeploymentResponse]
+	deleteRedeployment *connect.Client[internalpb.DeleteRedeploymentRequest, internalpb.DeleteRedeploymentResponse]
 }
 
 // PutPeerState calls internalpb.PeersService.PutPeerState.
@@ -156,6 +184,16 @@ func (c *peersServiceClient) DeleteJobKey(ctx context.Context, req *connect.Requ
 	return c.deleteJobKey.CallUnary(ctx, req)
 }
 
+// PutRedeployment calls internalpb.PeersService.PutRedeployment.
+func (c *peersServiceClient) PutRedeployment(ctx context.Context, req *connect.Request[internalpb.PutRedeploymentRequest]) (*connect.Response[internalpb.PutRedeploymentResponse], error) {
+	return c.putRedeployment.CallUnary(ctx, req)
+}
+
+// DeleteRedeployment calls internalpb.PeersService.DeleteRedeployment.
+func (c *peersServiceClient) DeleteRedeployment(ctx context.Context, req *connect.Request[internalpb.DeleteRedeploymentRequest]) (*connect.Response[internalpb.DeleteRedeploymentResponse], error) {
+	return c.deleteRedeployment.CallUnary(ctx, req)
+}
+
 // PeersServiceHandler is an implementation of the internalpb.PeersService service.
 type PeersServiceHandler interface {
 	// PutPeerState pushes the given peer state the remote peer to keep.
@@ -174,6 +212,12 @@ type PeersServiceHandler interface {
 	// DeleteJobKey removes a given job key for a given peer from the cluster.
 	// Each peer will remove the given job key for the corresponding peer from their local cache
 	DeleteJobKey(context.Context, *connect.Request[internalpb.DeleteJobKeyRequest]) (*connect.Response[internalpb.DeleteJobKeyResponse], error)
+	// PutRedeployment is used by a cluster node that is terminating to notify its peers to redeploy
+	// its actors that are alive during its termination
+	PutRedeployment(context.Context, *connect.Request[internalpb.PutRedeploymentRequest]) (*connect.Response[internalpb.PutRedeploymentResponse], error)
+	// DeleteRedeployment is used the by the cluster leader after rebalancing is complete to ask the remaining
+	// of the cluster nodes to remove from their local cache the redeployment data of the left node
+	DeleteRedeployment(context.Context, *connect.Request[internalpb.DeleteRedeploymentRequest]) (*connect.Response[internalpb.DeleteRedeploymentResponse], error)
 }
 
 // NewPeersServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -212,6 +256,18 @@ func NewPeersServiceHandler(svc PeersServiceHandler, opts ...connect.HandlerOpti
 		connect.WithSchema(peersServiceDeleteJobKeyMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
+	peersServicePutRedeploymentHandler := connect.NewUnaryHandler(
+		PeersServicePutRedeploymentProcedure,
+		svc.PutRedeployment,
+		connect.WithSchema(peersServicePutRedeploymentMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
+	peersServiceDeleteRedeploymentHandler := connect.NewUnaryHandler(
+		PeersServiceDeleteRedeploymentProcedure,
+		svc.DeleteRedeployment,
+		connect.WithSchema(peersServiceDeleteRedeploymentMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/internalpb.PeersService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case PeersServicePutPeerStateProcedure:
@@ -224,6 +280,10 @@ func NewPeersServiceHandler(svc PeersServiceHandler, opts ...connect.HandlerOpti
 			peersServicePutJobKeysHandler.ServeHTTP(w, r)
 		case PeersServiceDeleteJobKeyProcedure:
 			peersServiceDeleteJobKeyHandler.ServeHTTP(w, r)
+		case PeersServicePutRedeploymentProcedure:
+			peersServicePutRedeploymentHandler.ServeHTTP(w, r)
+		case PeersServiceDeleteRedeploymentProcedure:
+			peersServiceDeleteRedeploymentHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -251,4 +311,12 @@ func (UnimplementedPeersServiceHandler) PutJobKeys(context.Context, *connect.Req
 
 func (UnimplementedPeersServiceHandler) DeleteJobKey(context.Context, *connect.Request[internalpb.DeleteJobKeyRequest]) (*connect.Response[internalpb.DeleteJobKeyResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("internalpb.PeersService.DeleteJobKey is not implemented"))
+}
+
+func (UnimplementedPeersServiceHandler) PutRedeployment(context.Context, *connect.Request[internalpb.PutRedeploymentRequest]) (*connect.Response[internalpb.PutRedeploymentResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("internalpb.PeersService.PutRedeployment is not implemented"))
+}
+
+func (UnimplementedPeersServiceHandler) DeleteRedeployment(context.Context, *connect.Request[internalpb.DeleteRedeploymentRequest]) (*connect.Response[internalpb.DeleteRedeploymentResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("internalpb.PeersService.DeleteRedeployment is not implemented"))
 }

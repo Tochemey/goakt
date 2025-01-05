@@ -27,7 +27,9 @@ package actors
 import (
 	"time"
 
+	"github.com/tochemey/goakt/v2/internal/internalpb"
 	"github.com/tochemey/goakt/v2/internal/timer"
+	"github.com/tochemey/goakt/v2/internal/types"
 )
 
 type nameType int
@@ -79,3 +81,11 @@ var (
 		deadletters:        "GoAktDeadletters",
 	}
 )
+
+// toActorRef converts a PID to an actorRef
+func toActorRef(pid *PID) *internalpb.ActorRef {
+	return &internalpb.ActorRef{
+		ActorAddress: pid.Address().Address,
+		ActorType:    types.TypeName(pid.Actor()),
+	}
+}

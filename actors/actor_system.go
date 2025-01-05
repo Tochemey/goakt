@@ -257,7 +257,7 @@ type actorSystem struct {
 	reflection *reflection
 
 	clusterConfig    *ClusterConfig
-	rebalancingQueue chan *internalpb.PeerState
+	rebalancingQueue chan *internalpb.Rebalance
 
 	rebalancer      *PID
 	rootGuardian    *PID
@@ -585,7 +585,7 @@ func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor, opts 
 	}
 
 	// check some preconditions
-	if err := x.checkSpawnPreconditions(ctx, name, actor); err != nil {
+	if err := x.checkSpawnPreconditions(name, actor); err != nil {
 		return nil, err
 	}
 
@@ -620,7 +620,7 @@ func (x *actorSystem) SpawnNamedFromFunc(ctx context.Context, name string, recei
 	actor := newFuncActor(name, receiveFunc, config)
 
 	// check some preconditions
-	if err := x.checkSpawnPreconditions(ctx, name, actor); err != nil {
+	if err := x.checkSpawnPreconditions(name, actor); err != nil {
 		return nil, err
 	}
 
@@ -1210,10 +1210,7 @@ func (x *actorSystem) completeRebalancing() {
 // broadcastActor broadcast the newly (re)spawned actor into the cluster
 func (x *actorSystem) broadcastActor(actor *PID) {
 	if x.clusterEnabled.Load() {
-		x.wireActorsQueue <- &internalpb.ActorRef{
-			ActorAddress: actor.Address().Address,
-			ActorType:    types.TypeName(actor.Actor()),
-		}
+		x.wireActorsQueue <- toActorRef(actor)
 	}
 }
 
@@ -1273,7 +1270,7 @@ func (x *actorSystem) enableClustering(ctx context.Context) error {
 	x.locker.Lock()
 	x.cluster = peersService
 	x.eventsQueue = peersService.Events()
-	x.rebalancingQueue = make(chan *internalpb.PeerState, 1)
+	x.rebalancingQueue = make(chan *internalpb.Rebalance, 1)
 	for _, kind := range x.clusterConfig.Kinds() {
 		x.registry.Register(kind)
 		x.logger.Infof("cluster kind=(%s) registered", types.TypeName(kind))
@@ -1353,6 +1350,15 @@ func (x *actorSystem) shutdown(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, x.shutdownTimeout)
 	defer cancel()
 
+	// signal possible redeployment
+	if x.clusterEnabled.Load() {
+		if err := x.signalRedeployment(ctx); err != nil {
+			x.reset()
+			x.logger.Errorf("%s failed to shutdown cleanly: %w", x.name, err)
+			return err
+		}
+	}
+
 	// shutdown all actors in the system
 	eg, actorCtx := errgroup.WithContext(ctx)
 	for _, actor := range x.Actors() {
@@ -1379,15 +1385,14 @@ func (x *actorSystem) shutdown(ctx context.Context) error {
 	// delete the root guardian node
 	x.actors.DeleteNode(x.getRootGuardian())
 
+	// shutdown event stream
 	if x.eventsStream != nil {
 		x.eventsStream.Shutdown()
 	}
 
+	// stop the cluster engine
 	if x.clusterEnabled.Load() {
-		if err := errorschain.
-			New(errorschain.ReturnFirst()).
-			AddError(x.cluster.Stop(ctx)).
-			Error(); err != nil {
+		if err := x.cluster.Stop(ctx); err != nil {
 			x.reset()
 			x.logger.Errorf("%s failed to shutdown cleanly: %w", x.name, err)
 			return err
@@ -1402,6 +1407,7 @@ func (x *actorSystem) shutdown(ctx context.Context) error {
 		x.rebalanceLocker.Unlock()
 	}
 
+	// shutdown remoting
 	if x.remotingEnabled.Load() {
 		x.remoting.Close()
 		if err := x.shutdownHTTPServer(ctx); err != nil {
@@ -1469,14 +1475,17 @@ func (x *actorSystem) clusterEventsLoop() {
 
 				if eventType == peers.NodeLeft {
 					x.logger.Debugf("(%s) about to rebalance peer (%s)", x.clusterNode.String(), peer.String())
-					peerState, err := x.cluster.GetPeerState(peer.PeerAddress())
-					if err != nil {
-						x.logger.Panic(fmt.Errorf("%s failed to rebalance peer %s: %w", x.clusterNode.String(), peer.PeerAddress(), err))
-						return
+					actors := x.cluster.GetPeerRedeployment(peer.PeerAddress())
+					if len(actors) == 0 {
+						x.logger.Debugf("(%s) found no actors for peer=(%s) to rebalance", x.clusterNode.String(), peer.String())
+						continue
 					}
 
 					x.rebalanceLocker.Lock()
-					x.rebalancingQueue <- peerState
+					x.rebalancingQueue <- &internalpb.Rebalance{
+						PeerAddress: peer.PeerAddress(),
+						Actors:      actors,
+					}
 					x.rebalanceLocker.Unlock()
 				}
 			}
@@ -1552,16 +1561,16 @@ func (x *actorSystem) clusterEventsLoop() {
 
 // rebalancingLoop help perform cluster rebalancing
 func (x *actorSystem) rebalancingLoop() {
-	for peerState := range x.rebalancingQueue {
+	for rebalance := range x.rebalancingQueue {
 		ctx := context.Background()
-		if !x.shouldRebalance(peerState) {
+		if !x.shouldRebalance() {
 			x.logger.Debugf("(%s) cannot proceed with rebalancing. Not the leader node", x.clusterNode.String())
 			continue
 		}
 
 		if x.rebalancing.Load() {
 			x.rebalanceLocker.Lock()
-			x.rebalancingQueue <- peerState
+			x.rebalancingQueue <- rebalance
 			x.rebalanceLocker.Unlock()
 
 			x.logger.Debugf("(%s) an existing rebalancing inflight", x.clusterNode.String())
@@ -1569,16 +1578,13 @@ func (x *actorSystem) rebalancingLoop() {
 		}
 
 		x.rebalancing.Store(true)
-		actors := peerState.GetActors()
-		message := &internalpb.Rebalance{Actors: actors}
-		peerAddress := net.JoinHostPort(peerState.GetHost(), strconv.Itoa(int(peerState.GetPeersPort())))
 
 		if err := errorschain.
 			New(errorschain.ReturnFirst()).
-			AddError(x.cluster.RemovePeerState(ctx, peerAddress)).
-			AddError(x.systemGuardian.Tell(ctx, x.rebalancer, message)).
+			AddError(x.cluster.RemovePeerState(ctx, rebalance.GetPeerAddress())).
+			AddError(x.systemGuardian.Tell(ctx, x.rebalancer, rebalance)).
 			Error(); err != nil {
-			x.logger.Panic(fmt.Errorf("%s failed to rebalance peer %s: %w", x.clusterNode.String(), peerAddress, err))
+			x.logger.Panic(fmt.Errorf("%s failed to rebalance peer %s: %w", x.clusterNode.String(), rebalance.GetPeerAddress(), err))
 			return
 		}
 	}
@@ -1586,18 +1592,13 @@ func (x *actorSystem) rebalancingLoop() {
 
 // shouldRebalance returns true when the current can perform the cluster rebalancing
 // this call will panic when we are not able to accesss the cluster leadership
-func (x *actorSystem) shouldRebalance(peerState *internalpb.PeerState) bool {
+func (x *actorSystem) shouldRebalance() bool {
 	isLeader, err := x.cluster.IsLeader()
 	if err != nil {
 		x.logger.Panic(fmt.Errorf("%s: cluster leadership role check failed %w", x.clusterNode.String(), err))
 		return false
 	}
-
-	return !(peerState == nil ||
-		!x.InCluster() ||
-		proto.Equal(peerState, new(internalpb.PeerState)) ||
-		len(peerState.GetActors()) == 0 ||
-		!isLeader)
+	return !(!x.InCluster() || !isLeader)
 }
 
 // processPeerState processes a given peer synchronization record.
@@ -1837,7 +1838,7 @@ func (x *actorSystem) spawnDeadletters(ctx context.Context) error {
 }
 
 // checkSpawnPreconditions make sure before an actor is created some pre-conditions are checks
-func (x *actorSystem) checkSpawnPreconditions(ctx context.Context, actorName string, kind Actor) error {
+func (x *actorSystem) checkSpawnPreconditions(actorName string, kind Actor) error {
 	// check the existence of the actor given the kind prior to creating it
 	if x.clusterEnabled.Load() {
 		existed, err := x.cluster.GetActor(actorName)
@@ -1853,6 +1854,19 @@ func (x *actorSystem) checkSpawnPreconditions(ctx context.Context, actorName str
 		}
 	}
 
+	return nil
+}
+
+// signalRedeployment sends a signal to the rest of the cluster for a potential redeployment
+func (x *actorSystem) signalRedeployment(ctx context.Context) error {
+	actorRefs := make([]*internalpb.ActorRef, len(x.Actors()))
+	for index, actor := range x.Actors() {
+		actorRefs[index] = toActorRef(actor)
+	}
+
+	if len(actorRefs) > 0 {
+		return x.cluster.PutPeerRedeployment(ctx, actorRefs)
+	}
 	return nil
 }
 

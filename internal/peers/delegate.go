@@ -49,7 +49,7 @@ func newDelegate(meta *internalpb.PeerMeta) *delegate {
 	}
 }
 
-// NodeMeta is used to retrieve peerMeta-data about the current node
+// NodeMeta is used to retrieve meta-data about the current node
 // when broadcasting an alive message. It's length is limited to
 // the given byte size. This metadata is available in the Node structure.
 // nolint

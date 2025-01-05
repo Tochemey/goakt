@@ -26,6 +26,12 @@ service PeersService {
   // DeleteJobKey removes a given job key for a given peer from the cluster.
   // Each peer will remove the given job key for the corresponding peer from their local cache
   rpc DeleteJobKey(DeleteJobKeyRequest) returns (DeleteJobKeyResponse);
+  // PutRedeployment is used by a cluster node that is terminating to notify its peers to redeploy
+  // its actors that are alive during its termination
+  rpc PutRedeployment(PutRedeploymentRequest) returns (PutRedeploymentResponse);
+  // DeleteRedeployment is used the by the cluster leader after rebalancing is complete to ask the remaining
+  // of the cluster nodes to remove from their local cache the redeployment data of the left node
+  rpc DeleteRedeployment(DeleteRedeploymentRequest) returns (DeleteRedeploymentResponse);
 }
 
 // PeersSync is used to share a created/ restarted actor
@@ -53,11 +59,16 @@ message PeerState {
 }
 
 message Rebalance {
+  // Specifies the peer address
+  string peer_address = 1;
   // Specifies the list of actors
-  repeated ActorRef actors = 1;
+  repeated ActorRef actors = 2;
 }
 
-message RebalanceComplete {}
+message RebalanceComplete {
+  // Specifies the peer address
+  string peer_address = 1;
+}
 
 message PeerMeta {
   // Specifies the node name
@@ -119,3 +130,19 @@ message DeleteJobKeyRequest {
 }
 
 message DeleteJobKeyResponse {}
+
+message PutRedeploymentRequest {
+  // Specifies the peer address
+  string peer_address = 1;
+  // Specifies the list of actors
+  repeated ActorRef actors = 2;
+}
+
+message PutRedeploymentResponse {}
+
+message DeleteRedeploymentRequest {
+  // Specifies the peer address
+  string peer_address = 1;
+}
+
+message DeleteRedeploymentResponse {}
