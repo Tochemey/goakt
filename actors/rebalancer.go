@@ -81,6 +81,9 @@ func (r *rebalancer) Rebalance(ctx *ReceiveContext) {
 		rctx := context.WithoutCancel(ctx.Context())
 		actors := msg.GetActors()
 
+		logger := r.pid.Logger()
+		logger.Debugf("%s received %d actors to redeploy", r.pid.Name(), len(actors))
+
 		// grab all our active peers
 		peers, err := r.pid.ActorSystem().getCluster().Peers()
 		if err != nil {
@@ -90,8 +93,6 @@ func (r *rebalancer) Rebalance(ctx *ReceiveContext) {
 
 		leaderShares, peersShares := r.computeRebalancing(len(peers)+1, actors)
 		eg, egCtx := errgroup.WithContext(rctx)
-		logger := r.pid.Logger()
-		logger.Debugf("%s received %d actors to redeploy", r.pid.Name(), len(actors))
 
 		if len(leaderShares) > 0 {
 			eg.Go(func() error {

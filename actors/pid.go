@@ -381,7 +381,6 @@ func (pid *PID) Restart(ctx context.Context) error {
 	pid.logger.Debugf("restarting actor=(%s)", pid.Name())
 	actorSystem := pid.ActorSystem()
 	tree := actorSystem.tree()
-	janitor := actorSystem.getJanitor()
 
 	// prepare the child actors to respawn
 	// because during the restart process they will be gone
@@ -422,7 +421,6 @@ func (pid *PID) Restart(ctx context.Context) error {
 		// returns an error if when the parent does not exist which was taken care of in the
 		// lines above
 		_ = tree.AddNode(parent, pid)
-		tree.AddWatcher(pid, janitor)
 	}
 
 	// restart all the previous children
@@ -438,7 +436,6 @@ func (pid *PID) Restart(ctx context.Context) error {
 				// re-add the child back to the tree
 				// since these calls are idempotent
 				_ = tree.AddNode(pid, child)
-				tree.AddWatcher(child, janitor)
 			}
 			return nil
 		})
@@ -556,7 +553,6 @@ func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor, opts .
 	// no need to handle the error because the given parent exist and running
 	// that check was done in the above lines
 	_ = tree.AddNode(pid, cid)
-	tree.AddWatcher(cid, pid.ActorSystem().getJanitor())
 
 	eventsStream := pid.eventsStream
 	if eventsStream != nil {
@@ -1414,6 +1410,30 @@ func (pid *PID) freeChildren(ctx context.Context) error {
 	return nil
 }
 
+// releaseNode releases the actor tree and the cluster space
+func (pid *PID) releaseNode(ctx context.Context) error {
+	logger := pid.logger
+	logger.Debugf("%s freeing the actors tree...", pid.Name())
+	// remove self from the tree node and the cluster
+	// if cluster is enabled
+	system := pid.ActorSystem()
+	system.tree().DeleteNode(pid)
+
+	if system.InCluster() {
+		if !isReservedName(pid.Name()) {
+			logger.Debugf("%s releasing cluster space", pid.Name())
+			if err := system.getCluster().RemoveActor(ctx, pid.Name()); err != nil {
+				logger.Errorf("failed to release cluster space: %v", err)
+				return err
+			}
+			logger.Debugf("%s successfully released cluster space", pid.Name())
+		}
+	}
+
+	logger.Debugf("%s freed actors tree", pid.Name())
+	return nil
+}
+
 // passivationLoop checks whether the actor is processing public or not.
 // when the actor is idle, it automatically shuts down to free resources
 func (pid *PID) passivationLoop() {
@@ -1530,7 +1550,9 @@ func (pid *PID) doStop(ctx context.Context) error {
 	if err := errorschain.
 		New(errorschain.ReturnFirst()).
 		AddError(pid.actor.PostStop(ctx)).
-		AddError(pid.freeWatchers(ctx)).Error(); err != nil {
+		AddError(pid.freeWatchers(ctx)).
+		AddError(pid.releaseNode(ctx)).
+		Error(); err != nil {
 		pid.started.Store(false)
 		pid.reset()
 		return err
