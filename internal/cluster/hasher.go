@@ -25,7 +25,7 @@
 package cluster
 
 import (
-	"github.com/buraksezer/olric/hasher"
+	"github.com/tochemey/olric/hasher"
 
 	"github.com/tochemey/goakt/v2/hash"
 )
