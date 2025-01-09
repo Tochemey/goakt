@@ -1062,14 +1062,9 @@ func TestActorSystem(t *testing.T) {
 
 		// stop the actor after some time
 		lib.Pause(time.Second)
-
-		t.Cleanup(
-			func() {
-				err = newActorSystem.Stop(ctx)
-				assert.NoError(t, err)
-				provider.AssertExpectations(t)
-			},
-		)
+		err = newActorSystem.Stop(ctx)
+		assert.NoError(t, err)
+		provider.AssertExpectations(t)
 	})
 	t.Run("With cluster events subscription", func(t *testing.T) {
 		// create a context
@@ -1143,15 +1138,11 @@ func TestActorSystem(t *testing.T) {
 
 		require.NoError(t, cl2.Unsubscribe(subscriber2))
 
-		t.Cleanup(
-			func() {
-				assert.NoError(t, cl2.Stop(ctx))
-				// stop the discovery engines
-				assert.NoError(t, sd2.Close())
-				// shutdown the nats server gracefully
-				srv.Shutdown()
-			},
-		)
+		assert.NoError(t, cl2.Stop(ctx))
+		// stop the discovery engines
+		assert.NoError(t, sd2.Close())
+		// shutdown the nats server gracefully
+		srv.Shutdown()
 	})
 	t.Run("With PeerAddress empty when cluster not enabled", func(t *testing.T) {
 		ctx := context.TODO()
@@ -1698,5 +1689,53 @@ func TestActorSystem(t *testing.T) {
 
 		assert.Zero(t, sys.Uptime())
 		require.EqualValues(t, 2, counter.Load())
+	})
+	t.Run("With ActorRefs", func(t *testing.T) {
+		// create a context
+		ctx := context.TODO()
+		// start the NATS server
+		srv := startNatsServer(t)
+
+		// create and start system cluster
+		node1, sd1 := startClusterSystem(t, srv.Addr().String())
+		peerAddress1 := node1.PeerAddress()
+		require.NotEmpty(t, peerAddress1)
+
+		// create and start system cluster
+		node2, sd2 := startClusterSystem(t, srv.Addr().String())
+		peerAddress2 := node2.PeerAddress()
+		require.NotEmpty(t, peerAddress2)
+
+		// create and start system cluster
+		node3, sd3 := startClusterSystem(t, srv.Addr().String())
+		require.NotNil(t, node3)
+		require.NotNil(t, sd3)
+
+		lib.Pause(time.Second)
+
+		// create an actor on node1
+		actor := newMockActor()
+		actorName := "actorID"
+		_, err := node1.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+
+		lib.Pause(200 * time.Millisecond)
+
+		_, err = node2.Spawn(ctx, actorName, actor)
+		require.Error(t, err)
+		require.Equal(t, ErrActorAlreadyExists(actorName).Error(), err.Error())
+
+		actors := node3.ActorRefs(ctx, time.Second)
+		require.Len(t, actors, 1)
+
+		// free resource
+		require.NoError(t, node2.Stop(ctx))
+		require.NoError(t, node1.Stop(ctx))
+		require.NoError(t, node3.Stop(ctx))
+		require.NoError(t, sd1.Close())
+		require.NoError(t, sd2.Close())
+		require.NoError(t, sd3.Close())
+		// shutdown the nats server gracefully
+		srv.Shutdown()
 	})
 }

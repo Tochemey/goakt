@@ -315,6 +315,8 @@ func TestSingleNode(t *testing.T) {
 }
 
 func TestMultipleNodes(t *testing.T) {
+	ctx := context.TODO()
+
 	// start the NATS server
 	srv := startNatsServer(t)
 
@@ -325,10 +327,18 @@ func TestMultipleNodes(t *testing.T) {
 	// wait for the node to start properly
 	lib.Pause(2 * time.Second)
 
-	// create a cluster node1
+	// create a cluster node2
 	node2, sd2 := startEngine(t, "node2", srv.Addr().String())
 	require.NotNil(t, node2)
 	node2Addr := node2.node.PeersAddress()
+
+	// wait for the node to start properly
+	lib.Pause(time.Second)
+
+	// create a cluster node3
+	node3, sd3 := startEngine(t, "node3", srv.Addr().String())
+	require.NotNil(t, node3)
+	require.NotNil(t, sd3)
 
 	// wait for the node to start properly
 	lib.Pause(time.Second)
@@ -350,7 +360,7 @@ L:
 	}
 
 	require.NotEmpty(t, events)
-	require.Len(t, events, 1)
+	require.Len(t, events, 2)
 	event := events[0]
 	msg, err := event.Payload.UnmarshalNew()
 	require.NoError(t, err)
@@ -358,16 +368,69 @@ L:
 	require.True(t, ok)
 	require.NotNil(t, nodeJoined)
 	require.Equal(t, node2Addr, nodeJoined.GetAddress())
-	peers, err := node1.Peers(context.TODO())
+	peers, err := node1.Peers(ctx)
 	require.NoError(t, err)
-	require.Len(t, peers, 1)
+	require.Len(t, peers, 2)
 	require.Equal(t, node2Addr, net.JoinHostPort(peers[0].Host, strconv.Itoa(peers[0].PeersPort)))
 
 	// wait for some time
 	lib.Pause(time.Second)
 
+	// create some actors
+	actorName := uuid.NewString()
+	actor := &internalpb.ActorRef{
+		ActorAddress: &goaktpb.Address{
+			Name: actorName,
+		},
+		ActorType: "actorKind",
+	}
+
+	// put an actor
+	err = node2.PutActor(ctx, actor)
+	require.NoError(t, err)
+
+	// wait for some time
+	lib.Pause(time.Second)
+
+	// get the actor from node1 and node3
+	actual, err := node1.GetActor(ctx, actorName)
+	require.NoError(t, err)
+	require.NotNil(t, actual)
+	require.True(t, proto.Equal(actor, actual))
+
+	actual, err = node3.GetActor(ctx, actorName)
+	require.NoError(t, err)
+	require.NotNil(t, actual)
+	require.True(t, proto.Equal(actor, actual))
+
+	// put another actor
+	actorName2 := uuid.NewString()
+	actor2 := &internalpb.ActorRef{
+		ActorAddress: &goaktpb.Address{
+			Name: actorName2,
+		},
+		ActorType: "actorKind",
+	}
+	err = node1.PutActor(ctx, actor2)
+	require.NoError(t, err)
+
+	// wait for some time
+	lib.Pause(time.Second)
+
+	actors, err := node1.Actors(ctx, time.Second)
+	require.NoError(t, err)
+	require.Len(t, actors, 2)
+
+	actors, err = node3.Actors(ctx, time.Second)
+	require.NoError(t, err)
+	require.Len(t, actors, 2)
+
+	actors, err = node2.Actors(ctx, time.Second)
+	require.NoError(t, err)
+	require.Len(t, actors, 2)
+
 	// stop the second node
-	require.NoError(t, node2.Stop(context.TODO()))
+	require.NoError(t, node2.Stop(ctx))
 	// wait for the event to propagate properly
 	lib.Pause(time.Second)
 
@@ -397,12 +460,12 @@ L2:
 	require.NotNil(t, nodeLeft)
 	require.Equal(t, node2Addr, nodeLeft.GetAddress())
 
-	t.Cleanup(func() {
-		require.NoError(t, node1.Stop(context.TODO()))
-		require.NoError(t, sd1.Close())
-		require.NoError(t, sd2.Close())
-		srv.Shutdown()
-	})
+	require.NoError(t, node1.Stop(ctx))
+	require.NoError(t, node3.Stop(ctx))
+	require.NoError(t, sd1.Close())
+	require.NoError(t, sd2.Close())
+	require.NoError(t, sd3.Close())
+	srv.Shutdown()
 }
 
 func startNatsServer(t *testing.T) *natsserver.Server {

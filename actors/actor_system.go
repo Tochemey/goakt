@@ -69,8 +69,16 @@ import (
 type ActorSystem interface {
 	// Name returns the actor system name
 	Name() string
-	// Actors returns the list of Actors that are alive in the actor system
+	// Actors returns the list of Actors that are alive on a given running node.
+	// This does not account for the total number of actors in the cluster
 	Actors() []*PID
+	// ActorRefs retrieves a list of active actors, including both local actors
+	// and, when cluster mode is enabled, actors across the cluster. Use this
+	// method cautiously, as the scanning process may impact system performance.
+	// If the cluster request fails, only locally active actors will be returned.
+	// The timeout parameter defines the maximum duration for cluster-based requests
+	// before they are terminated.
+	ActorRefs(ctx context.Context, timeout time.Duration) []ActorRef
 	// Start initializes the actor system.
 	// To guarantee a clean shutdown during unexpected system terminations,
 	// developers must handle SIGTERM and SIGINT signals appropriately and invoke Stop.
@@ -98,7 +106,8 @@ type ActorSystem interface {
 	// Bear in mind that restarting an actor will reinitialize the actor to initial state.
 	// In case any of the direct child restart fails the given actor will not be started at all.
 	ReSpawn(ctx context.Context, name string) (*PID, error)
-	// NumActors returns the total number of active actors in the system
+	// NumActors returns the total number of active actors on a given running node.
+	// This does not account for the total number of actors in the cluster
 	NumActors() uint64
 	// LocalActor returns the reference of a local actor.
 	// A local actor is an actor that reside on the same node where the given actor system has started
@@ -585,7 +594,8 @@ func (x *actorSystem) InCluster() bool {
 	return x.clusterEnabled.Load() && x.cluster != nil
 }
 
-// NumActors returns the total number of active actors in the system
+// NumActors returns the total number of active actors on a given running node.
+// This does not account for the total number of actors in the cluster
 func (x *actorSystem) NumActors() uint64 {
 	return uint64(len(x.Actors()))
 }
@@ -732,7 +742,8 @@ func (x *actorSystem) Name() string {
 	return name
 }
 
-// Actors returns the list of Actors that are alive in the actor system
+// Actors returns the list of Actors that are alive on a given running node.
+// This does not account for the total number of actors in the cluster
 func (x *actorSystem) Actors() []*PID {
 	x.locker.Lock()
 	pidNodes := x.actors.Nodes()
@@ -745,6 +756,35 @@ func (x *actorSystem) Actors() []*PID {
 		}
 	}
 	return actors
+}
+
+// ActorRefs retrieves a list of active actors, including both local actors
+// and, when cluster mode is enabled, actors across the cluster. Use this
+// method cautiously, as the scanning process may impact system performance.
+// If the cluster request fails, only locally active actors will be returned.
+// The timeout parameter defines the maximum duration for cluster-based requests
+// before they are terminated.
+func (x *actorSystem) ActorRefs(ctx context.Context, timeout time.Duration) []ActorRef {
+	pids := x.Actors()
+	actorRefs := make([]ActorRef, len(pids))
+	uniques := make(map[string]types.Unit)
+	for index, pid := range pids {
+		actorRefs[index] = fromPID(pid)
+		uniques[pid.Address().String()] = types.Unit{}
+	}
+
+	if x.InCluster() {
+		if actors, err := x.getCluster().Actors(ctx, timeout); err == nil {
+			for _, actor := range actors {
+				actorRef := fromActorRef(actor)
+				if _, ok := uniques[actorRef.Address().String()]; !ok {
+					actorRefs = append(actorRefs, actorRef)
+				}
+			}
+		}
+	}
+
+	return actorRefs
 }
 
 // PeerAddress returns the actor system address known in the cluster. That address is used by other nodes to communicate with the actor system.

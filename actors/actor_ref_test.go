@@ -22,22 +22,47 @@
  * SOFTWARE.
  */
 
-package cluster
+package actors
 
 import (
-	"github.com/tochemey/olric/hasher"
+	"sync"
+	"testing"
 
-	"github.com/tochemey/goakt/v2/hash"
+	"github.com/stretchr/testify/require"
+
+	"github.com/tochemey/goakt/v2/address"
+	"github.com/tochemey/goakt/v2/internal/internalpb"
+	"github.com/tochemey/goakt/v2/internal/types"
 )
 
-type hasherWrapper struct {
-	hasher hash.Hasher
-}
+func TestActorRef(t *testing.T) {
+	t.Run("With Equals", func(t *testing.T) {
+		addr := address.New("name", "system", "host", 1234)
+		actorRef := fromActorRef(&internalpb.ActorRef{
+			ActorAddress: addr.Address,
+			ActorType:    "kind",
+		})
 
-// enforce compilation error
-var _ hasher.Hasher = (*hasherWrapper)(nil)
+		newActorRef := fromActorRef(&internalpb.ActorRef{
+			ActorAddress: addr.Address,
+			ActorType:    "kind",
+		})
 
-// Sum64 implementation
-func (x hasherWrapper) Sum64(key []byte) uint64 {
-	return x.hasher.HashCode(key)
+		require.Equal(t, "name", actorRef.Name())
+		require.Equal(t, "kind", actorRef.Kind())
+		require.True(t, addr.Equals(actorRef.Address()))
+		require.True(t, newActorRef.Equals(actorRef))
+	})
+	t.Run("From PID", func(t *testing.T) {
+		addr := address.New("name", "system", "host", 1234)
+		actor := newMockActor()
+		pid := &PID{
+			address:      addr,
+			actor:        actor,
+			fieldsLocker: &sync.RWMutex{},
+		}
+		actorRef := fromPID(pid)
+		require.Equal(t, "name", actorRef.Name())
+		require.Equal(t, types.TypeName(actor), actorRef.Kind())
+	})
 }
