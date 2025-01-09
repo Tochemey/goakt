@@ -25,12 +25,14 @@
 package actors
 
 import (
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/tochemey/goakt/v2/address"
 	"github.com/tochemey/goakt/v2/internal/internalpb"
+	"github.com/tochemey/goakt/v2/internal/types"
 )
 
 func TestActorRef(t *testing.T) {
@@ -50,5 +52,17 @@ func TestActorRef(t *testing.T) {
 		require.Equal(t, "kind", actorRef.Kind())
 		require.True(t, addr.Equals(actorRef.Address()))
 		require.True(t, newActorRef.Equals(actorRef))
+	})
+	t.Run("From PID", func(t *testing.T) {
+		addr := address.New("name", "system", "host", 1234)
+		actor := newMockActor()
+		pid := &PID{
+			address:      addr,
+			actor:        actor,
+			fieldsLocker: &sync.RWMutex{},
+		}
+		actorRef := fromPID(pid)
+		require.Equal(t, "name", actorRef.Name())
+		require.Equal(t, types.TypeName(actor), actorRef.Kind())
 	})
 }
