@@ -3,7 +3,7 @@ module github.com/tochemey/goakt/v2
 go 1.22.0
 
 require (
-	connectrpc.com/connect v1.18.0
+	connectrpc.com/connect v1.18.1
 	github.com/Workiva/go-datastructures v1.1.5
 	github.com/deckarep/golang-set/v2 v2.7.0
 	github.com/flowchartsman/retry v1.2.0
