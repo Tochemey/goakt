@@ -67,6 +67,9 @@ import (
 
 // ActorSystem defines the contract of an actor system
 type ActorSystem interface {
+	// Metric returns the actor system metric.
+	// The metric does not include any cluster data
+	Metric(ctx context.Context) *Metric
 	// Name returns the actor system name
 	Name() string
 	// Actors returns the list of Actors that are alive on a given running node.
@@ -286,6 +289,9 @@ type actorSystem struct {
 	rebalancing     *atomic.Bool
 	rebalanceLocker *sync.Mutex
 	shutdownHooks   []ShutdownHook
+
+	actorsCounter      *atomic.Uint64
+	deadlettersCounter *atomic.Uint64
 }
 
 var (
@@ -332,6 +338,8 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		shutdownHooks:          make([]ShutdownHook, 0),
 		nodesInprocess:         goset.NewSet[string](),
 		rebalanceLocker:        &sync.Mutex{},
+		actorsCounter:          atomic.NewUint64(0),
+		deadlettersCounter:     atomic.NewUint64(0),
 	}
 
 	system.started.Store(false)
@@ -454,6 +462,20 @@ func (x *actorSystem) Start(ctx context.Context) error {
 // One needs to explicitly call os.Exit to terminate the program.
 func (x *actorSystem) Stop(ctx context.Context) error {
 	return x.shutdown(ctx)
+}
+
+// Metrics returns the actor system metrics.
+// The metrics does not include any cluster data
+func (x *actorSystem) Metric(ctx context.Context) *Metric {
+	if x.started.Load() {
+		x.getSetDeadlettersCount(ctx)
+		return &Metric{
+			deadlettersCount: int64(x.deadlettersCounter.Load()),
+			actorsCount:      int64(x.actorsCounter.Load()),
+			uptime:           x.Uptime(),
+		}
+	}
+	return nil
 }
 
 // Running returns true when the actor system is running
@@ -597,7 +619,7 @@ func (x *actorSystem) InCluster() bool {
 // NumActors returns the total number of active actors on a given running node.
 // This does not account for the total number of actors in the cluster
 func (x *actorSystem) NumActors() uint64 {
-	return uint64(len(x.Actors()))
+	return x.actorsCounter.Load()
 }
 
 // Spawn creates or returns the instance of a given actor in the system
@@ -625,6 +647,7 @@ func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor, opts 
 		return nil, err
 	}
 
+	x.actorsCounter.Inc()
 	// add the given actor to the tree and supervise it
 	_ = x.actors.AddNode(x.userGuardian, pid)
 	x.actors.AddWatcher(pid, x.janitor)
@@ -661,6 +684,7 @@ func (x *actorSystem) SpawnNamedFromFunc(ctx context.Context, name string, recei
 		return nil, err
 	}
 
+	x.actorsCounter.Inc()
 	_ = x.actors.AddNode(x.userGuardian, pid)
 	x.actors.AddWatcher(pid, x.janitor)
 	x.broadcastActor(pid)
@@ -691,8 +715,8 @@ func (x *actorSystem) Kill(ctx context.Context, name string) error {
 	pidNode, exist := x.actors.GetNode(actorAddress.String())
 	if exist {
 		pid := pidNode.GetValue()
-		// stop the given actor. No need to record error in the span context
-		// because the shutdown method is taking care of that
+		// decrement the actors count since we are stopping the actor
+		x.actorsCounter.Dec()
 		return pid.Shutdown(ctx)
 	}
 
@@ -1226,7 +1250,7 @@ func (x *actorSystem) handleRemoteTell(ctx context.Context, to *PID, message pro
 	return Tell(ctx, to, message)
 }
 
-// getRootGuardian returns the system root guardian
+// getRootGuardian returns the system rootGuardian guardian
 func (x *actorSystem) getRootGuardian() *PID {
 	x.locker.Lock()
 	rootGuardian := x.rootGuardian
@@ -1779,16 +1803,16 @@ func (x *actorSystem) setHostPort() error {
 	return nil
 }
 
-// spawnRootGuardian creates the root guardian
+// spawnRootGuardian creates the rootGuardian guardian
 func (x *actorSystem) spawnRootGuardian(ctx context.Context) error {
 	var err error
 	actorName := x.reservedName(rootGuardianType)
 	x.rootGuardian, err = x.configPID(ctx, actorName, newRootGuardian())
 	if err != nil {
-		return fmt.Errorf("actor=%s failed to start root guardian: %w", actorName, err)
+		return fmt.Errorf("actor=%s failed to start rootGuardian guardian: %w", actorName, err)
 	}
 
-	// rootGuardian is the root node of the actors tree
+	// rootGuardian is the rootGuardian node of the actors tree
 	_ = x.actors.AddNode(NoSender, x.rootGuardian)
 	return nil
 }
@@ -1880,7 +1904,7 @@ func (x *actorSystem) spawnRebalancer(ctx context.Context) error {
 // spawnDeadletters creates the deadletters synthetic actor
 func (x *actorSystem) spawnDeadletters(ctx context.Context) error {
 	var err error
-	actorName := x.reservedName(deadletters)
+	actorName := x.reservedName(deadlettersType)
 	x.deadletters, err = x.configPID(ctx,
 		actorName,
 		newDeadLetters(),
@@ -1933,6 +1957,25 @@ func (x *actorSystem) cleanupCluster(ctx context.Context, actorNames []string) e
 		})
 	}
 	return eg.Wait()
+}
+
+// getSetDeadlettersCount gets and sets the deadletter count
+func (x *actorSystem) getSetDeadlettersCount(ctx context.Context) {
+	var (
+		to      = x.getDeadletters()
+		from    = x.getSystemGuardian()
+		message = new(internalpb.GetDeadlettersCount)
+	)
+	if to.IsRunning() {
+		// ask the deadletter actor for the count
+		// using the default ask timeout
+		// note: no need to check for error because this call is internal
+		message, _ := from.Ask(ctx, to, message, DefaultAskTimeout)
+		// cast the response received from the deadletters
+		deadlettersCount := message.(*internalpb.DeadlettersCount)
+		// set the counter
+		x.deadlettersCounter.Store(uint64(deadlettersCount.GetTotalCount()))
+	}
 }
 
 func isReservedName(name string) bool {

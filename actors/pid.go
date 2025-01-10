@@ -220,6 +220,32 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 	return pid, nil
 }
 
+// Metric returns the actor system metrics.
+// The metric does not include any cluster data
+func (pid *PID) Metric(ctx context.Context) *ActorMetric {
+	if pid.IsRunning() {
+		var (
+			uptime                  = pid.Uptime()
+			latestProcessedDuration = pid.LatestProcessedDuration()
+			childrenCount           = pid.ChildrenCount()
+			deadlettersCount        = pid.getDeadlettersCount(ctx)
+			restartCount            = pid.RestartCount()
+			processedCount          = pid.ProcessedCount() - 1 // 1 because of the PostStart message
+			stashSize               = pid.StashSize()
+		)
+		return &ActorMetric{
+			deadlettersCount:        uint64(deadlettersCount),
+			childrenCount:           uint64(childrenCount),
+			uptime:                  uptime,
+			latestProcessedDuration: latestProcessedDuration,
+			restartCount:            uint64(restartCount),
+			processedCount:          uint64(processedCount),
+			stashSize:               stashSize,
+		}
+	}
+	return nil
+}
+
 // Uptime returns the number of seconds since the actor started
 func (pid *PID) Uptime() int64 {
 	if pid.IsRunning() {
@@ -1767,4 +1793,26 @@ func (pid *PID) suspend(reason string) {
 		SuspendedAt: timestamppb.Now(),
 		Reason:      reason,
 	})
+}
+
+// getDeadlettersCount gets deadletters
+func (pid *PID) getDeadlettersCount(ctx context.Context) int64 {
+	var (
+		name    = pid.Name()
+		to      = pid.ActorSystem().getDeadletters()
+		from    = pid.ActorSystem().getSystemGuardian()
+		message = &internalpb.GetDeadlettersCount{
+			ActorId: &name,
+		}
+	)
+	if to.IsRunning() {
+		// ask the deadletter actor for the count
+		// using the default ask timeout
+		// note: no need to check for error because this call is internal
+		message, _ := from.Ask(ctx, to, message, DefaultAskTimeout)
+		// cast the response received from the deadletters
+		deadlettersCount := message.(*internalpb.DeadlettersCount)
+		return deadlettersCount.GetTotalCount()
+	}
+	return 0
 }

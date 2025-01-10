@@ -79,6 +79,7 @@ func TestActorSystem(t *testing.T) {
 		actorRef, err := sys.Spawn(ctx, "Test", actor)
 		assert.Error(t, err)
 		assert.EqualError(t, err, ErrActorSystemNotStarted.Error())
+		assert.Nil(t, sys.Metric(ctx))
 		assert.Nil(t, actorRef)
 		assert.Zero(t, sys.Uptime())
 	})
@@ -952,12 +953,14 @@ func TestActorSystem(t *testing.T) {
 		err = sys.Unsubscribe(consumer)
 		require.NoError(t, err)
 
-		t.Cleanup(
-			func() {
-				err = sys.Stop(ctx)
-				assert.NoError(t, err)
-			},
-		)
+		metric := sys.Metric(ctx)
+		require.NotNil(t, metric)
+		require.EqualValues(t, 1, metric.ActorsCount())
+		require.EqualValues(t, 5, metric.DeadlettersCount())
+		require.NotZero(t, metric.Uptime())
+
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
 	})
 	t.Run("With deadletters subscription when not started", func(t *testing.T) {
 		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
@@ -1738,4 +1741,5 @@ func TestActorSystem(t *testing.T) {
 		// shutdown the nats server gracefully
 		srv.Shutdown()
 	})
+	t.Run("With Metrics", func(t *testing.T) {})
 }
