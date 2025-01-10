@@ -72,6 +72,8 @@ func TestReceive(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, pid)
 
+		lib.Pause(time.Second)
+
 		// let us send 10 messages to the actor
 		count := 10
 		for i := 0; i < count; i++ {
