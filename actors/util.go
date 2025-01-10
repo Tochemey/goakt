@@ -43,6 +43,8 @@ const (
 	DefaultInitTimeout = time.Second
 	// DefaultPeerStateLoopInterval defines the default peer state loop interval
 	DefaultPeerStateLoopInterval = 10 * time.Second
+	// DefaultAskTimeout defines the default ask timeout
+	DefaultAskTimeout = 5 * time.Second
 
 	// DefaultJanitorInterval defines the default GC interval
 	// This helps cleanup dead actors from the given actor system
@@ -59,7 +61,7 @@ const (
 	userGuardianType
 	systemGuardianType
 	janitorType
-	deadletters
+	deadlettersType
 )
 
 var (
@@ -76,6 +78,6 @@ var (
 		userGuardianType:   "GoAktUserGuardian",
 		systemGuardianType: "GoAktSystemGuardian",
 		janitorType:        "GoAktJanitor",
-		deadletters:        "GoAktDeadletters",
+		deadlettersType:    "GoAktDeadletters",
 	}
 )

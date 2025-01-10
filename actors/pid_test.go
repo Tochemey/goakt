@@ -72,6 +72,8 @@ func TestReceive(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, pid)
 
+		lib.Pause(time.Second)
+
 		// let us send 10 messages to the actor
 		count := 10
 		for i := 0; i < count; i++ {
@@ -89,6 +91,16 @@ func TestReceive(t *testing.T) {
 		assert.Zero(t, pid.ChildrenCount())
 		assert.NotZero(t, pid.LatestProcessedDuration())
 		assert.EqualValues(t, 10, pid.ProcessedCount()-1) // 1 because of the PostStart message
+		metric := pid.Metric(ctx)
+		require.NotNil(t, metric)
+		assert.NotZero(t, metric.LatestProcessedDuration())
+		assert.Zero(t, metric.ChidrenCount())
+		assert.EqualValues(t, 10, metric.ProcessedCount())
+		assert.NotZero(t, metric.Uptime())
+		assert.Zero(t, metric.RestartCount())
+		assert.Zero(t, metric.StashSize())
+		assert.Zero(t, metric.DeadlettersCount())
+
 		// stop the actor
 		err = pid.Shutdown(ctx)
 		assert.NoError(t, err)
@@ -1514,6 +1526,8 @@ func TestSpawnChild(t *testing.T) {
 		lib.Pause(time.Second)
 
 		require.Len(t, parent.Children(), 1)
+		metric := parent.Metric(ctx)
+		require.EqualValues(t, 1, metric.ChidrenCount())
 
 		// stop the child actor
 		require.NoError(t, child.Shutdown(ctx))
