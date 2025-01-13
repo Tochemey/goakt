@@ -1831,13 +1831,17 @@ func (x *actorSystem) configureServer(ctx context.Context, mux *nethttp.ServeMux
 		x.server.TLSConfig = x.tlsServerConfig
 		x.server.Handler = mux
 		x.listener = tls.NewListener(listener, x.tlsServerConfig)
-		return http2.ConfigureServer(x.server, &http2.Server{IdleTimeout: 1200 * time.Second})
+		return http2.ConfigureServer(x.server, &http2.Server{
+			IdleTimeout:      1200 * time.Second,
+			MaxReadFrameSize: 32 << 10, // Increase the frame size limit, e.g., 32KB
+		})
 	}
 
 	// http/2 server with h2c (HTTP/2 Cleartext).
 	x.server = httpServer
 	x.server.Handler = h2c.NewHandler(mux, &http2.Server{
-		IdleTimeout: 1200 * time.Second,
+		IdleTimeout:      1200 * time.Second,
+		MaxReadFrameSize: 32 << 10, // Increase the frame size limit, e.g., 32KB
 	})
 	x.listener = listener
 	return nil
