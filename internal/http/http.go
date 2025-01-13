@@ -94,3 +94,8 @@ func NewServer(ctx context.Context, host string, port int, mux *http.ServeMux) *
 func URL(host string, port int) string {
 	return fmt.Sprintf("http://%s", net.JoinHostPort(host, strconv.Itoa(port)))
 }
+
+// URLs create a secured http connection address
+func URLs(host string, port int) string {
+	return fmt.Sprintf("https://%s", net.JoinHostPort(host, strconv.Itoa(port)))
+}

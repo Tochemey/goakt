@@ -63,3 +63,11 @@ func TestURL(t *testing.T) {
 	url := URL(host, port)
 	assert.Equal(t, "http://127.0.0.1:123", url)
 }
+
+func TestURLs(t *testing.T) {
+	host := "127.0.0.1"
+	port := 123
+
+	url := URLs(host, port)
+	assert.Equal(t, "https://127.0.0.1:123", url)
+}
