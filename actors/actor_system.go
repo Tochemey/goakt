@@ -26,6 +26,7 @@ package actors
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"net"
@@ -243,8 +244,10 @@ type actorSystem struct {
 	// Specifies the remoting host
 	host string
 	// Specifies the remoting server
-	server   *nethttp.Server
-	listener net.Listener
+	server      *nethttp.Server
+	listener    net.Listener
+	tlsServer   *nethttp.Server
+	tlsListener net.Listener
 
 	// cluster settings
 	clusterEnabled atomic.Bool
@@ -292,6 +295,9 @@ type actorSystem struct {
 
 	actorsCounter      *atomic.Uint64
 	deadlettersCounter *atomic.Uint64
+
+	tlsClientConfig *tls.Config
+	tlsServerConfig *tls.Config
 }
 
 var (
@@ -365,10 +371,13 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		}
 	}
 
-	system.scheduler = newScheduler(system.logger,
-		system.shutdownTimeout,
-		withSchedulerCluster(system.cluster),
-		withSchedulerRemoting(NewRemoting()))
+	// perform some quick validations on the TLS configurations
+	if (system.tlsServerConfig == nil) != (system.tlsClientConfig == nil) {
+		return nil, ErrInvalidTLSConfiguration
+	}
+
+	// append the right protocols to the TLS settings
+	system.ensureTLSProtos()
 
 	return system, nil
 }
@@ -452,7 +461,7 @@ func (x *actorSystem) Start(ctx context.Context) error {
 		return err
 	}
 
-	x.scheduler.Start(ctx)
+	x.startMessagesScheduler(ctx)
 	x.startedAt.Store(time.Now().Unix())
 	x.logger.Infof("%s actor system successfully started..:)", x.name)
 	return nil
@@ -1356,6 +1365,7 @@ func (x *actorSystem) enableClustering(ctx context.Context) error {
 		cluster.WithWriteQuorum(x.clusterConfig.WriteQuorum()),
 		cluster.WithReadQuorum(x.clusterConfig.ReadQuorum()),
 		cluster.WithReplicaCount(x.clusterConfig.ReplicaCount()),
+		cluster.WithTLS(x.tlsServerConfig, x.tlsClientConfig),
 	)
 	if err != nil {
 		x.logger.Errorf("failed to initialize cluster engine: %v", err)
@@ -1429,9 +1439,45 @@ func (x *actorSystem) enableRemoting(ctx context.Context) error {
 		}
 	}()
 
-	x.remoting = NewRemoting()
+	// configure remoting
+	x.setRemoting()
 	x.logger.Info("remoting enabled...:)")
 	return nil
+}
+
+// setRemoting sets the remoting service
+func (x *actorSystem) setRemoting() {
+	if x.tlsClientConfig != nil {
+		x.remoting = NewRemoting(WithRemotingTLS(x.tlsClientConfig))
+		return
+	}
+	x.remoting = NewRemoting()
+}
+
+// startMessagesScheduler starts the messages scheduler
+func (x *actorSystem) startMessagesScheduler(ctx context.Context) {
+	// set the scheduler
+	x.scheduler = newScheduler(x.logger,
+		x.shutdownTimeout,
+		withSchedulerCluster(x.cluster),
+		withSchedulerRemoting(x.remoting))
+	// start the scheduler
+	x.scheduler.Start(ctx)
+}
+
+func (x *actorSystem) ensureTLSProtos() {
+	// ensure that the required protocols are set for the TLS
+	toAdd := []string{"h2", "http/1.1"}
+
+	// server application protocols setting
+	protos := goset.NewSet[string](x.tlsServerConfig.NextProtos...)
+	protos.Append(toAdd...)
+	x.tlsServerConfig.NextProtos = protos.ToSlice()
+
+	// client application protocols setting
+	protos = goset.NewSet[string](x.tlsClientConfig.NextProtos...)
+	protos.Append(toAdd...)
+	x.tlsClientConfig.NextProtos = protos.ToSlice()
 }
 
 // reset the actor system
@@ -1700,6 +1746,7 @@ func (x *actorSystem) configPID(ctx context.Context, name string, actor Actor, o
 		withActorSystem(x),
 		withEventsStream(x.eventsStream),
 		withInitTimeout(x.actorInitTimeout),
+		withRemoting(x.remoting),
 	}
 
 	spawnConfig := newSpawnConfig(opts...)
@@ -1760,11 +1807,17 @@ func (x *actorSystem) actorAddress(name string) *address.Address {
 
 // startHTTPServer starts the appropriate http server
 func (x *actorSystem) startHTTPServer() error {
+	if x.tlsServerConfig != nil {
+		return x.tlsServer.Serve(x.tlsListener)
+	}
 	return x.server.Serve(x.listener)
 }
 
 // shutdownHTTPServer stops the appropriate http server
 func (x *actorSystem) shutdownHTTPServer(ctx context.Context) error {
+	if x.tlsServerConfig != nil {
+		return x.tlsServer.Shutdown(ctx)
+	}
 	return x.server.Shutdown(ctx)
 }
 
@@ -1776,6 +1829,14 @@ func (x *actorSystem) configureServer(ctx context.Context, mux *nethttp.ServeMux
 	lnr, err := net.Listen("tcp", hostPort)
 	if err != nil {
 		return err
+	}
+
+	// set the http TLS server
+	if x.tlsServerConfig != nil {
+		x.tlsServer = httpServer
+		x.tlsServer.Handler = mux
+		x.tlsListener = tls.NewListener(lnr, x.tlsServerConfig)
+		return nil
 	}
 
 	// set the http server

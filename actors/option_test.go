@@ -26,6 +26,7 @@ package actors
 
 import (
 	"context"
+	"crypto/tls"
 	"testing"
 	"time"
 
@@ -41,7 +42,7 @@ func TestOption(t *testing.T) {
 	atomicTrue.Store(true)
 	clusterConfig := NewClusterConfig()
 	hasher := hash.DefaultHasher()
-
+	tlsConfig := &tls.Config{}
 	testCases := []struct {
 		name     string
 		option   Option
@@ -106,6 +107,11 @@ func TestOption(t *testing.T) {
 			name:     "WithGCInterval",
 			option:   WithJanitorInterval(2 * time.Second),
 			expected: actorSystem{janitorInterval: 2. * time.Second},
+		},
+		{
+			name:     "WithTLS",
+			option:   WithTLS(tlsConfig, tlsConfig),
+			expected: actorSystem{tlsServerConfig: tlsConfig, tlsClientConfig: tlsConfig},
 		},
 	}
 

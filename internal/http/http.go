@@ -58,6 +58,25 @@ func NewClient() *http.Client {
 	}
 }
 
+// NewTLSClient creates a secured http client
+func NewTLSClient(tlsConfig *tls.Config) *http.Client {
+	return &http.Client{
+		// Most RPC servers don't use HTTP redirects
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+		Transport: &http2.Transport{
+			TLSClientConfig: tlsConfig,
+			AllowHTTP:       true,
+			DialTLSContext: func(_ context.Context, network, addr string, _ *tls.Config) (net.Conn, error) {
+				return tls.Dial(network, addr, tlsConfig)
+			},
+			PingTimeout:     30 * time.Second,
+			ReadIdleTimeout: 30 * time.Second,
+		},
+	}
+}
+
 // NewServer returns an instance of an http server
 func NewServer(ctx context.Context, host string, port int, mux *http.ServeMux) *http.Server {
 	// TODO revisit the timeouts

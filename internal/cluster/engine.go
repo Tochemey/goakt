@@ -170,8 +170,8 @@ type Engine struct {
 	nodeJoinedEventsFilter goset.Set[string]
 	nodeLeftEventsFilter   goset.Set[string]
 
-	clientTLS *tls.Config
-	serverTLS *tls.Config
+	tlsClientConfig *tls.Config
+	tlsServerConfig *tls.Config
 }
 
 // enforce compilation error
@@ -207,7 +207,7 @@ func NewEngine(name string, disco discovery.Provider, host *discovery.Node, opts
 	}
 
 	// perform some quick validations
-	if (engine.serverTLS == nil) != (engine.clientTLS == nil) {
+	if (engine.tlsServerConfig == nil) != (engine.tlsClientConfig == nil) {
 		return nil, ErrInvalidTLSConfiguration
 	}
 
@@ -789,13 +789,13 @@ func (x *Engine) buildConfig() (*config.Config, error) {
 	}
 
 	// Set TLS configuration accordingly
-	if x.serverTLS != nil && x.clientTLS != nil {
+	if x.tlsServerConfig != nil && x.tlsClientConfig != nil {
 		// set the server TLS config
-		conf.TlsConfig = x.serverTLS
+		conf.TlsConfig = x.tlsServerConfig
 
 		// create a client configuration that will be used by the
 		// embedded client calls
-		client := &config.Client{TLSConfig: x.clientTLS}
+		client := &config.Client{TLSConfig: x.tlsClientConfig}
 		// sanitize client configuration
 		if err := client.Sanitize(); err != nil {
 			return nil, fmt.Errorf("failed to sanitize client config: %v", err)

@@ -96,7 +96,7 @@ func TestOptions(t *testing.T) {
 		{
 			name:     "WithTLS",
 			option:   WithTLS(tlsConfig, tlsConfig),
-			expected: Engine{serverTLS: tlsConfig, clientTLS: tlsConfig},
+			expected: Engine{tlsServerConfig: tlsConfig, tlsClientConfig: tlsConfig},
 		},
 	}
 

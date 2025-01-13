@@ -26,6 +26,7 @@ package actors
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	nethttp "net/http"
 	"strings"
@@ -42,10 +43,28 @@ import (
 	"github.com/tochemey/goakt/v2/internal/internalpb/internalpbconnect"
 )
 
+// RemotingOption sets the remoting option
+type RemotingOption func(*Remoting)
+
+// WithRemotingTLS configures the remoting system to use a secure connection
+// for communication with the specified remote node. This requires a TLS
+// client configuration to enable secure interactions with the remote actor system.
+//
+// Ensure that the remote actor system is configured with TLS enabled and
+// capable of completing a successful handshake. It is recommended that both
+// systems share the same root Certificate Authority (CA) for mutual trust and
+// secure communication.
+func WithRemotingTLS(tlsConfig *tls.Config) RemotingOption {
+	return func(r *Remoting) {
+		r.tlsConfig = tlsConfig
+	}
+}
+
 // Remoting defines the Remoting APIs
 // This requires Remoting is enabled on the connected actor system
 type Remoting struct {
-	client *nethttp.Client
+	client    *nethttp.Client
+	tlsConfig *tls.Config
 }
 
 // NewRemoting creates an instance Remoting with an insecure connection. To use a secure connection
@@ -54,10 +73,19 @@ type Remoting struct {
 // Make sure to call Close to free up resources otherwise you may be leaking socket connections
 //
 // One can also override the remoting option when calling any of the method for custom one.
-func NewRemoting() *Remoting {
+func NewRemoting(opts ...RemotingOption) *Remoting {
 	r := &Remoting{
 		client: http.NewClient(),
 	}
+
+	for _, opt := range opts {
+		opt(r)
+	}
+
+	if r.tlsConfig != nil {
+		r.client = http.NewTLSClient(r.tlsConfig)
+	}
+
 	return r
 }
 
