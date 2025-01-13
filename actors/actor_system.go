@@ -1466,18 +1466,20 @@ func (x *actorSystem) startMessagesScheduler(ctx context.Context) {
 }
 
 func (x *actorSystem) ensureTLSProtos() {
-	// ensure that the required protocols are set for the TLS
-	toAdd := []string{"h2", "http/1.1"}
+	if x.tlsServerConfig != nil && x.tlsClientConfig != nil {
+		// ensure that the required protocols are set for the TLS
+		toAdd := []string{"h2", "http/1.1"}
 
-	// server application protocols setting
-	protos := goset.NewSet[string](x.tlsServerConfig.NextProtos...)
-	protos.Append(toAdd...)
-	x.tlsServerConfig.NextProtos = protos.ToSlice()
+		// server application protocols setting
+		protos := goset.NewSet[string](x.tlsServerConfig.NextProtos...)
+		protos.Append(toAdd...)
+		x.tlsServerConfig.NextProtos = protos.ToSlice()
 
-	// client application protocols setting
-	protos = goset.NewSet[string](x.tlsClientConfig.NextProtos...)
-	protos.Append(toAdd...)
-	x.tlsClientConfig.NextProtos = protos.ToSlice()
+		// client application protocols setting
+		protos = goset.NewSet[string](x.tlsClientConfig.NextProtos...)
+		protos.Append(toAdd...)
+		x.tlsClientConfig.NextProtos = protos.ToSlice()
+	}
 }
 
 // reset the actor system
@@ -1944,7 +1946,7 @@ func (x *actorSystem) spawnRebalancer(ctx context.Context) error {
 	actorName := x.reservedName(rebalancerType)
 	x.rebalancer, err = x.configPID(ctx,
 		actorName,
-		newRebalancer(x.reflection),
+		newRebalancer(x.reflection, x.remoting),
 		WithSupervisorStrategies(
 			NewSupervisorStrategy(PanicError{}, NewRestartDirective()),
 			NewSupervisorStrategy(&runtime.PanicNilError{}, NewRestartDirective()),
