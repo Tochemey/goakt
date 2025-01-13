@@ -244,8 +244,8 @@ github.com/tidwall/match v1.1.1/go.mod h1:eRSPERbgtNPcGhD8UCthc6PmLEQXEWd3PRB5JT
 github.com/tidwall/redcon v1.6.2 h1:5qfvrrybgtO85jnhSravmkZyC0D+7WstbfCs3MmPhow=
 github.com/tidwall/redcon v1.6.2/go.mod h1:p5Wbsgeyi2VSTBWOcA5vRXrOb9arFTcU2+ZzFjqV75Y=
 github.com/tinylib/msgp v1.1.5/go.mod h1:eQsjooMTnV42mHu917E26IogZ2930nFyBQdofk10Udg=
-github.com/tochemey/olric v0.1.1 h1:f/eXaB01x+E5f60PoKEwhia70hgbutz9zmmXaTOEiDc=
-github.com/tochemey/olric v0.1.1/go.mod h1:x0Q6soq7bk0rWSDFPzE4fA8a5m+MnWxHRHZzg/ywg0M=
+github.com/tochemey/olric v0.1.2-0.20250113121802-36ab86212cba h1:E6zoEwD+z17XyXgTQOIczS2S1t9Reb9oXDHz/6+VeTo=
+github.com/tochemey/olric v0.1.2-0.20250113121802-36ab86212cba/go.mod h1:x0Q6soq7bk0rWSDFPzE4fA8a5m+MnWxHRHZzg/ywg0M=
 github.com/travisjeffery/go-dynaport v1.0.0 h1:m/qqf5AHgB96CMMSworIPyo1i7NZueRsnwdzdCJ8Ajw=
 github.com/travisjeffery/go-dynaport v1.0.0/go.mod h1:0LHuDS4QAx+mAc4ri3WkQdavgVoBIZ7cE9ob17KIAJk=
 github.com/ttacon/chalk v0.0.0-20160626202418-22c06c80ed31/go.mod h1:onvgF043R+lC5RZ8IT9rBXDaEDnpnw/Cl+HFiw+v/7Q=

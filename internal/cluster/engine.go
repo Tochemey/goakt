@@ -26,6 +26,7 @@ package cluster
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -168,6 +169,9 @@ type Engine struct {
 
 	nodeJoinedEventsFilter goset.Set[string]
 	nodeLeftEventsFilter   goset.Set[string]
+
+	clientTLS *tls.Config
+	serverTLS *tls.Config
 }
 
 // enforce compilation error
@@ -202,6 +206,11 @@ func NewEngine(name string, disco discovery.Provider, host *discovery.Node, opts
 		opt.Apply(engine)
 	}
 
+	// perform some quick validations
+	if (engine.serverTLS == nil) != (engine.clientTLS == nil) {
+		return nil, ErrInvalidTLSConfiguration
+	}
+
 	// set the node startNode
 	engine.node = host
 
@@ -214,7 +223,12 @@ func (x *Engine) Start(ctx context.Context) error {
 
 	logger.Infof("Starting GoAkt cluster Engine service on node=(%s)....🤔", x.node.PeersAddress())
 
-	conf := x.buildConfig()
+	conf, err := x.buildConfig()
+	if err != nil {
+		logger.Errorf("failed to build the cluster Engine configuration.💥: %v", err)
+		return err
+	}
+
 	conf.Hasher = &hasherWrapper{x.hasher}
 
 	m, err := config.NewMemberlistConfig("lan")
@@ -735,7 +749,7 @@ func (x *Engine) consume() {
 }
 
 // buildConfig builds the Node configuration
-func (x *Engine) buildConfig() *config.Config {
+func (x *Engine) buildConfig() (*config.Config, error) {
 	// define the log level
 	logLevel := "INFO"
 	switch x.logger.LogLevel() {
@@ -774,12 +788,29 @@ func (x *Engine) buildConfig() *config.Config {
 		TriggerBalancerInterval:    config.DefaultTriggerBalancerInterval,
 	}
 
+	// Set TLS configuration accordingly
+	if x.serverTLS != nil && x.clientTLS != nil {
+		// set the server TLS config
+		conf.TlsConfig = x.serverTLS
+
+		// create a client configuration that will be used by the
+		// embedded client calls
+		client := &config.Client{TLSConfig: x.clientTLS}
+		// sanitize client configuration
+		if err := client.Sanitize(); err != nil {
+			return nil, fmt.Errorf("failed to sanitize client config: %v", err)
+		}
+
+		// set the client configuration
+		conf.Client = client
+	}
+
 	// set verbosity when debug is enabled
 	if x.logger.LogLevel() == log.DebugLevel {
 		conf.LogVerbosity = config.DefaultLogVerbosity
 	}
 
-	return conf
+	return conf, nil
 }
 
 // initializeState sets the node state in the cluster after boot

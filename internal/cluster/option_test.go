@@ -25,6 +25,7 @@
 package cluster
 
 import (
+	"crypto/tls"
 	"testing"
 	"time"
 
@@ -36,6 +37,7 @@ import (
 
 func TestOptions(t *testing.T) {
 	mockHasher := new(testkit.Hasher)
+	tlsConfig := &tls.Config{}
 	testCases := []struct {
 		name     string
 		option   Option
@@ -90,6 +92,11 @@ func TestOptions(t *testing.T) {
 			name:     "WithReadQuorum",
 			option:   WithReadQuorum(3),
 			expected: Engine{readQuorum: 3},
+		},
+		{
+			name:     "WithTLS",
+			option:   WithTLS(tlsConfig, tlsConfig),
+			expected: Engine{serverTLS: tlsConfig, clientTLS: tlsConfig},
 		},
 	}
 
