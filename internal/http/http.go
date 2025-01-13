@@ -68,9 +68,8 @@ func NewTLSClient(tlsConfig *tls.Config) *http.Client {
 		},
 		Transport: &http2.Transport{
 			TLSClientConfig: tlsConfig,
-			AllowHTTP:       false,
-			DialTLSContext: func(_ context.Context, network, addr string, _ *tls.Config) (net.Conn, error) {
-				return tls.Dial(network, addr, tlsConfig)
+			DialTLSContext: func(_ context.Context, network, addr string, config *tls.Config) (net.Conn, error) {
+				return tls.Dial(network, addr, config)
 			},
 			PingTimeout:     30 * time.Second,
 			ReadIdleTimeout: 30 * time.Second,

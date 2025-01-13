@@ -384,6 +384,10 @@ func (r *Remoting) Close() {
 // serviceClient returns a Remoting service client instance
 func (r *Remoting) serviceClient(host string, port int) internalpbconnect.RemotingServiceClient {
 	endpoint := http.URL(host, port)
+	if r.tlsConfig != nil {
+		endpoint = http.URLs(host, port)
+	}
+
 	return internalpbconnect.NewRemotingServiceClient(
 		r.client,
 		endpoint,

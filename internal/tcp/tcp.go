@@ -27,6 +27,7 @@ package tcp
 import (
 	"fmt"
 	"net"
+	"time"
 
 	"github.com/hashicorp/go-sockaddr"
 )
@@ -76,4 +77,32 @@ func GetBindIP(address string) (string, error) {
 		bindIP = parsed.String()
 	}
 	return bindIP, nil
+}
+
+// KeepAliveListener sets TCP keep-alive timeouts on accepted
+// connections. It's used by Serve so that dead TCP connections eventually
+// go away.
+type KeepAliveListener struct {
+	*net.TCPListener
+}
+
+func (ln KeepAliveListener) Accept() (c net.Conn, err error) {
+	if c, err = ln.AcceptTCP(); err != nil {
+		return
+	} else if err = c.(*net.TCPConn).SetKeepAlive(true); err != nil {
+		return
+	}
+	// Ignore error from setting the KeepAlivePeriod as some systems, such as
+	// OpenBSD, do not support setting TCP_USER_TIMEOUT on IPPROTO_TCP
+	_ = c.(*net.TCPConn).SetKeepAlivePeriod(3 * time.Minute)
+	return
+}
+
+// NewKeepAliveListener creates an instance of KeepAliveListener
+func NewKeepAliveListener(address string) (*KeepAliveListener, error) {
+	listener, err := net.Listen("tcp", address)
+	if err != nil {
+		return nil, err
+	}
+	return &KeepAliveListener{listener.(*net.TCPListener)}, nil
 }

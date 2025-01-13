@@ -144,6 +144,9 @@ func (n *Node) HTTPEndPoint() string {
 	host, p, _ := net.SplitHostPort(n.address)
 	port, _ := strconv.Atoi(p)
 	n.mutex.Unlock()
+	if n.tlsConfig != nil {
+		return http.URLs(host, port)
+	}
 	return http.URL(host, port)
 }
 

@@ -244,10 +244,8 @@ type actorSystem struct {
 	// Specifies the remoting host
 	host string
 	// Specifies the remoting server
-	server      *nethttp.Server
-	listener    net.Listener
-	tlsServer   *nethttp.Server
-	tlsListener net.Listener
+	server   *nethttp.Server
+	listener net.Listener
 
 	// cluster settings
 	clusterEnabled atomic.Bool
@@ -1810,17 +1808,11 @@ func (x *actorSystem) actorAddress(name string) *address.Address {
 
 // startHTTPServer starts the appropriate http server
 func (x *actorSystem) startHTTPServer() error {
-	if x.tlsServerConfig != nil {
-		return x.tlsServer.Serve(x.tlsListener)
-	}
 	return x.server.Serve(x.listener)
 }
 
 // shutdownHTTPServer stops the appropriate http server
 func (x *actorSystem) shutdownHTTPServer(ctx context.Context) error {
-	if x.tlsServerConfig != nil {
-		return x.tlsServer.Shutdown(ctx)
-	}
 	return x.server.Shutdown(ctx)
 }
 
@@ -1828,36 +1820,26 @@ func (x *actorSystem) shutdownHTTPServer(ctx context.Context) error {
 func (x *actorSystem) configureServer(ctx context.Context, mux *nethttp.ServeMux) error {
 	hostPort := net.JoinHostPort(x.host, strconv.Itoa(int(x.port)))
 	httpServer := getServer(ctx, hostPort)
-	// create a tcp listener
-	lnr, err := net.Listen("tcp", hostPort)
+	listener, err := tcp.NewKeepAliveListener(httpServer.Addr)
 	if err != nil {
 		return err
 	}
 
 	// set the http TLS server
 	if x.tlsServerConfig != nil {
-		x.tlsServer = httpServer
-		x.tlsServer.Handler = h2c.NewHandler(
-			mux,
-			&http2.Server{
-				IdleTimeout: 1200 * time.Second,
-			},
-		)
-		x.tlsListener = tls.NewListener(lnr, x.tlsServerConfig)
-		return nil
+		x.server = httpServer
+		x.server.TLSConfig = x.tlsServerConfig
+		x.server.Handler = mux
+		x.listener = tls.NewListener(listener, x.tlsServerConfig)
+		return http2.ConfigureServer(x.server, &http2.Server{IdleTimeout: 1200 * time.Second})
 	}
 
-	// set the http server
+	// http/2 server with h2c (HTTP/2 Cleartext).
 	x.server = httpServer
-	// For gRPC clients, it's convenient to support HTTP/2 without TLS.
-	x.server.Handler = h2c.NewHandler(
-		mux,
-		&http2.Server{
-			IdleTimeout: 1200 * time.Second,
-		},
-	)
-	// set the non-secure http server
-	x.listener = lnr
+	x.server.Handler = h2c.NewHandler(mux, &http2.Server{
+		IdleTimeout: 1200 * time.Second,
+	})
+	x.listener = listener
 	return nil
 }
 
