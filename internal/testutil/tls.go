@@ -85,6 +85,10 @@ func GetClientTLSConfig(t *testing.T, root *CertRoot) *tls.Config {
 		Certificates: []tls.Certificate{certificate},
 		RootCAs:      certPool,
 		MinVersion:   tls.VersionTLS13,
+		CipherSuites: []uint16{
+			tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+			tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+		},
 		CurvePreferences: []tls.CurveID{
 			tls.CurveP521,
 			tls.CurveP384,
@@ -108,6 +112,10 @@ func GetServerTLSConfig(t *testing.T, root *CertRoot) *tls.Config {
 		ClientAuth:   tls.RequireAndVerifyClientCert,
 		ClientCAs:    certPool,
 		MinVersion:   tls.VersionTLS13,
+		CipherSuites: []uint16{
+			tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+			tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+		},
 		CurvePreferences: []tls.CurveID{
 			tls.CurveP521,
 			tls.CurveP384,

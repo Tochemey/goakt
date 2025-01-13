@@ -37,6 +37,7 @@ import (
 
 func TestOptions(t *testing.T) {
 	mockHasher := new(testkit.Hasher)
+	// nolint
 	tlsConfig := &tls.Config{}
 	testCases := []struct {
 		name     string
