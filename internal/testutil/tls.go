@@ -28,7 +28,7 @@ import (
 	"crypto"
 	"crypto/rand"
 	"crypto/rsa"
-	"crypto/sha1"
+	"crypto/sha1" // nolint
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
@@ -267,6 +267,7 @@ func calculateSubjectKeyIdentifier(t *testing.T, pubKey crypto.PublicKey) []byte
 		t.Fatal(err)
 	}
 
+	// nolint
 	skid := sha1.Sum(spki.SubjectPublicKey.Bytes)
 	return skid[:]
 }

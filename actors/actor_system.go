@@ -1413,6 +1413,7 @@ func (x *actorSystem) enableRemoting(ctx context.Context) error {
 	if !x.remotingEnabled.Load() {
 		return nil
 	}
+
 	x.logger.Info("enabling remoting...")
 	remotingServicePath, remotingServiceHandler := internalpbconnect.NewRemotingServiceHandler(x)
 	clusterServicePath, clusterServiceHandler := internalpbconnect.NewClusterServiceHandler(x)
@@ -1942,25 +1943,27 @@ func (x *actorSystem) spawnJanitor(ctx context.Context) error {
 
 // spawnRebalancer creates the cluster rebalancer
 func (x *actorSystem) spawnRebalancer(ctx context.Context) error {
-	var err error
-	actorName := x.reservedName(rebalancerType)
-	x.rebalancer, err = x.configPID(ctx,
-		actorName,
-		newRebalancer(x.reflection, x.remoting),
-		WithSupervisorStrategies(
-			NewSupervisorStrategy(PanicError{}, NewRestartDirective()),
-			NewSupervisorStrategy(&runtime.PanicNilError{}, NewRestartDirective()),
-			NewSupervisorStrategy(rebalancingError{}, NewRestartDirective()),
-			NewSupervisorStrategy(InternalError{}, NewResumeDirective()),
-			NewSupervisorStrategy(SpawnError{}, NewResumeDirective()),
-		),
-	)
-	if err != nil {
-		return fmt.Errorf("actor=%s failed to start cluster rebalancer: %w", actorName, err)
-	}
+	if x.clusterEnabled.Load() {
+		var err error
+		actorName := x.reservedName(rebalancerType)
+		x.rebalancer, err = x.configPID(ctx,
+			actorName,
+			newRebalancer(x.reflection, x.remoting),
+			WithSupervisorStrategies(
+				NewSupervisorStrategy(PanicError{}, NewRestartDirective()),
+				NewSupervisorStrategy(&runtime.PanicNilError{}, NewRestartDirective()),
+				NewSupervisorStrategy(rebalancingError{}, NewRestartDirective()),
+				NewSupervisorStrategy(InternalError{}, NewResumeDirective()),
+				NewSupervisorStrategy(SpawnError{}, NewResumeDirective()),
+			),
+		)
+		if err != nil {
+			return fmt.Errorf("actor=%s failed to start cluster rebalancer: %w", actorName, err)
+		}
 
-	// the rebalancer is a child actor of the system guardian
-	_ = x.actors.AddNode(x.systemGuardian, x.rebalancer)
+		// the rebalancer is a child actor of the system guardian
+		_ = x.actors.AddNode(x.systemGuardian, x.rebalancer)
+	}
 	return nil
 }
 

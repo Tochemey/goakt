@@ -42,6 +42,7 @@ func TestOption(t *testing.T) {
 	atomicTrue.Store(true)
 	clusterConfig := NewClusterConfig()
 	hasher := hash.DefaultHasher()
+	// nolint
 	tlsConfig := &tls.Config{}
 	testCases := []struct {
 		name     string
