@@ -1837,7 +1837,12 @@ func (x *actorSystem) configureServer(ctx context.Context, mux *nethttp.ServeMux
 	// set the http TLS server
 	if x.tlsServerConfig != nil {
 		x.tlsServer = httpServer
-		x.tlsServer.Handler = mux
+		x.tlsServer.Handler = h2c.NewHandler(
+			mux,
+			&http2.Server{
+				IdleTimeout: 1200 * time.Second,
+			},
+		)
 		x.tlsListener = tls.NewListener(lnr, x.tlsServerConfig)
 		return nil
 	}
@@ -1846,7 +1851,8 @@ func (x *actorSystem) configureServer(ctx context.Context, mux *nethttp.ServeMux
 	x.server = httpServer
 	// For gRPC clients, it's convenient to support HTTP/2 without TLS.
 	x.server.Handler = h2c.NewHandler(
-		mux, &http2.Server{
+		mux,
+		&http2.Server{
 			IdleTimeout: 1200 * time.Second,
 		},
 	)

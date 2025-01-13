@@ -45,7 +45,8 @@ func NewClient() *http.Client {
 			return http.ErrUseLastResponse
 		},
 		Transport: &http2.Transport{
-			AllowHTTP: true,
+			TLSClientConfig: nil,
+			AllowHTTP:       true,
 			DialTLSContext: func(_ context.Context, network, addr string, _ *tls.Config) (net.Conn, error) {
 				// If you're also using this client for non-h2c traffic, you may want to
 				// delegate to tls.Dial if the network isn't TCP or the addr isn't in an
@@ -67,7 +68,7 @@ func NewTLSClient(tlsConfig *tls.Config) *http.Client {
 		},
 		Transport: &http2.Transport{
 			TLSClientConfig: tlsConfig,
-			AllowHTTP:       true,
+			AllowHTTP:       false,
 			DialTLSContext: func(_ context.Context, network, addr string, _ *tls.Config) (net.Conn, error) {
 				return tls.Dial(network, addr, tlsConfig)
 			},
