@@ -1825,24 +1825,25 @@ func (x *actorSystem) configureServer(ctx context.Context, mux *nethttp.ServeMux
 		return err
 	}
 
+	// Configure HTTP/2 with performance tuning
+	http2Server := &http2.Server{
+		MaxConcurrentStreams: 1000,               // Allow up to 1000 concurrent streams
+		MaxReadFrameSize:     10 << 20,           // 10 MB max frame size
+		IdleTimeout:          1200 * time.Second, // Timeout for idle connections
+	}
+
 	// set the http TLS server
 	if x.tlsServerConfig != nil {
 		x.server = httpServer
 		x.server.TLSConfig = x.tlsServerConfig
 		x.server.Handler = mux
 		x.listener = tls.NewListener(listener, x.tlsServerConfig)
-		return http2.ConfigureServer(x.server, &http2.Server{
-			IdleTimeout:      1200 * time.Second,
-			MaxReadFrameSize: 32 << 10, // Increase the frame size limit, e.g., 32KB
-		})
+		return http2.ConfigureServer(x.server, http2Server)
 	}
 
 	// http/2 server with h2c (HTTP/2 Cleartext).
 	x.server = httpServer
-	x.server.Handler = h2c.NewHandler(mux, &http2.Server{
-		IdleTimeout:      1200 * time.Second,
-		MaxReadFrameSize: 32 << 10, // Increase the frame size limit, e.g., 32KB
-	})
+	x.server.Handler = h2c.NewHandler(mux, http2Server)
 	x.listener = listener
 	return nil
 }
