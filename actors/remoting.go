@@ -392,5 +392,6 @@ func (r *Remoting) serviceClient(host string, port int) internalpbconnect.Remoti
 		r.client,
 		endpoint,
 		connect.WithGRPC(),
+		connect.WithSendGzip(),
 	)
 }
