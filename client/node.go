@@ -25,6 +25,7 @@
 package client
 
 import (
+	"crypto/tls"
 	"net"
 	nethttp "net/http"
 	"strconv"
@@ -44,14 +45,29 @@ func WithWeight(weight float64) NodeOption {
 	}
 }
 
+// WithTLS configures the node to use a secure connection
+// for communication with the specified remote node. This requires a TLS
+// client configuration to enable secure interactions with the remote actor system.
+//
+// Ensure that the actor cluster is configured with TLS enabled and
+// capable of completing a successful handshake. It is recommended that both
+// systems share the same root Certificate Authority (CA) for mutual trust and
+// secure communication.
+func WithTLS(config *tls.Config) NodeOption {
+	return func(n *Node) {
+		n.tlsConfig = config
+	}
+}
+
 // Node represents the node in the cluster
 type Node struct {
 	address string
 	weight  float64
 	mutex   *sync.Mutex
 
-	client   *nethttp.Client
-	remoting *actors.Remoting
+	client    *nethttp.Client
+	remoting  *actors.Remoting
+	tlsConfig *tls.Config
 }
 
 // NewNode creates an instance of Node
@@ -65,6 +81,11 @@ func NewNode(address string, opts ...NodeOption) *Node {
 	}
 	for _, opt := range opts {
 		opt(node)
+	}
+
+	if node.tlsConfig != nil {
+		node.client = http.NewTLSClient(node.tlsConfig)
+		node.remoting = actors.NewRemoting(actors.WithRemotingTLS(node.tlsConfig))
 	}
 
 	return node
@@ -123,6 +144,9 @@ func (n *Node) HTTPEndPoint() string {
 	host, p, _ := net.SplitHostPort(n.address)
 	port, _ := strconv.Atoi(p)
 	n.mutex.Unlock()
+	if n.tlsConfig != nil {
+		return http.URLs(host, port)
+	}
 	return http.URL(host, port)
 }
 

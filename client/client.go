@@ -111,6 +111,8 @@ func (x *Client) Kinds(ctx context.Context) ([]string, error) {
 	service := internalpbconnect.NewClusterServiceClient(
 		node.HTTPClient(),
 		node.HTTPEndPoint(),
+		connect.WithGRPC(),
+		connect.WithSendGzip(),
 	)
 
 	response, err := service.GetKinds(
@@ -295,6 +297,8 @@ func getNodeMetric(ctx context.Context, node *Node) (int, bool, error) {
 	service := internalpbconnect.NewClusterServiceClient(
 		node.HTTPClient(),
 		node.HTTPEndPoint(),
+		connect.WithGRPC(),
+		connect.WithSendGzip(),
 	)
 
 	response, err := service.GetNodeMetric(ctx, connect.NewRequest(&internalpb.GetNodeMetricRequest{NodeAddress: node.Address()}))

@@ -25,10 +25,10 @@
 package cluster
 
 import (
+	"errors"
 	golog "log"
 	"strings"
 
-	"github.com/pkg/errors"
 	"github.com/tochemey/olric/pkg/service_discovery"
 
 	"github.com/tochemey/goakt/v2/discovery"

@@ -26,6 +26,7 @@ package mdns
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"strconv"
 	"sync"
@@ -33,7 +34,6 @@ import (
 
 	goset "github.com/deckarep/golang-set/v2"
 	"github.com/grandcat/zeroconf"
-	"github.com/pkg/errors"
 	"go.uber.org/atomic"
 
 	"github.com/tochemey/goakt/v2/discovery"
@@ -97,7 +97,7 @@ func (d *Discovery) Register() error {
 
 	res, err := zeroconf.NewResolver(nil)
 	if err != nil {
-		return errors.Wrap(err, "failed to instantiate the mDNS discovery provider")
+		return fmt.Errorf("failed to instantiate the mDNS discovery provider: %w", err)
 	}
 
 	d.resolver = res

@@ -26,6 +26,7 @@ package actors
 
 import (
 	"context"
+	"crypto/tls"
 	"time"
 
 	"github.com/tochemey/goakt/v2/hash"
@@ -173,5 +174,19 @@ func WithJanitorInterval(interval time.Duration) Option {
 func WithCoordinatedShutdown(hooks ...ShutdownHook) Option {
 	return OptionFunc(func(system *actorSystem) {
 		system.shutdownHooks = append(system.shutdownHooks, hooks...)
+	})
+}
+
+// WithTLS configures TLS settings for both the Server and Client.
+// Ensure that both the Server and Client are configured with the same
+// root Certificate Authority (CA) to enable successful handshake and
+// mutual authentication.
+//
+// In cluster mode, all nodes must share the same root CA to establish
+// secure communication and complete handshakes successfully.
+func WithTLS(serverConfig, clientConfig *tls.Config) Option {
+	return OptionFunc(func(system *actorSystem) {
+		system.tlsServerConfig = serverConfig
+		system.tlsClientConfig = clientConfig
 	})
 }

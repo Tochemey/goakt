@@ -44,6 +44,7 @@ import (
 	"github.com/tochemey/goakt/v2/goaktpb"
 	"github.com/tochemey/goakt/v2/internal/internalpb"
 	"github.com/tochemey/goakt/v2/internal/lib"
+	"github.com/tochemey/goakt/v2/internal/testutil"
 	"github.com/tochemey/goakt/v2/log"
 	testkit "github.com/tochemey/goakt/v2/mocks/discovery"
 )
@@ -315,157 +316,314 @@ func TestSingleNode(t *testing.T) {
 }
 
 func TestMultipleNodes(t *testing.T) {
-	ctx := context.TODO()
+	t.Run("Without TLS", func(t *testing.T) {
+		ctx := context.TODO()
 
-	// start the NATS server
-	srv := startNatsServer(t)
+		// start the NATS server
+		srv := startNatsServer(t)
 
-	// create a cluster node1
-	node1, sd1 := startEngine(t, "node1", srv.Addr().String())
-	require.NotNil(t, node1)
+		// create a cluster node1
+		node1, sd1 := startEngine(t, "node1", srv.Addr().String())
+		require.NotNil(t, node1)
 
-	// wait for the node to start properly
-	lib.Pause(2 * time.Second)
+		// wait for the node to start properly
+		lib.Pause(2 * time.Second)
 
-	// create a cluster node2
-	node2, sd2 := startEngine(t, "node2", srv.Addr().String())
-	require.NotNil(t, node2)
-	node2Addr := node2.node.PeersAddress()
+		// create a cluster node2
+		node2, sd2 := startEngine(t, "node2", srv.Addr().String())
+		require.NotNil(t, node2)
+		node2Addr := node2.node.PeersAddress()
 
-	// wait for the node to start properly
-	lib.Pause(time.Second)
+		// wait for the node to start properly
+		lib.Pause(time.Second)
 
-	// create a cluster node3
-	node3, sd3 := startEngine(t, "node3", srv.Addr().String())
-	require.NotNil(t, node3)
-	require.NotNil(t, sd3)
+		// create a cluster node3
+		node3, sd3 := startEngine(t, "node3", srv.Addr().String())
+		require.NotNil(t, node3)
+		require.NotNil(t, sd3)
 
-	// wait for the node to start properly
-	lib.Pause(time.Second)
+		// wait for the node to start properly
+		lib.Pause(time.Second)
 
-	// assert the node joined cluster event
-	var events []*Event
+		// assert the node joined cluster event
+		var events []*Event
 
-	// define an events reader loop and read events for some time
-L:
-	for {
-		select {
-		case event, ok := <-node1.Events():
-			if ok {
-				events = append(events, event)
+		// define an events reader loop and read events for some time
+	L:
+		for {
+			select {
+			case event, ok := <-node1.Events():
+				if ok {
+					events = append(events, event)
+				}
+			case <-time.After(time.Second):
+				break L
 			}
-		case <-time.After(time.Second):
-			break L
 		}
-	}
 
-	require.NotEmpty(t, events)
-	require.Len(t, events, 2)
-	event := events[0]
-	msg, err := event.Payload.UnmarshalNew()
-	require.NoError(t, err)
-	nodeJoined, ok := msg.(*goaktpb.NodeJoined)
-	require.True(t, ok)
-	require.NotNil(t, nodeJoined)
-	require.Equal(t, node2Addr, nodeJoined.GetAddress())
-	peers, err := node1.Peers(ctx)
-	require.NoError(t, err)
-	require.Len(t, peers, 2)
-	require.Equal(t, node2Addr, net.JoinHostPort(peers[0].Host, strconv.Itoa(peers[0].PeersPort)))
+		require.NotEmpty(t, events)
+		require.Len(t, events, 2)
+		event := events[0]
+		msg, err := event.Payload.UnmarshalNew()
+		require.NoError(t, err)
+		nodeJoined, ok := msg.(*goaktpb.NodeJoined)
+		require.True(t, ok)
+		require.NotNil(t, nodeJoined)
+		require.Equal(t, node2Addr, nodeJoined.GetAddress())
+		peers, err := node1.Peers(ctx)
+		require.NoError(t, err)
+		require.Len(t, peers, 2)
+		require.Equal(t, node2Addr, net.JoinHostPort(peers[0].Host, strconv.Itoa(peers[0].PeersPort)))
 
-	// wait for some time
-	lib.Pause(time.Second)
+		// wait for some time
+		lib.Pause(time.Second)
 
-	// create some actors
-	actorName := uuid.NewString()
-	actor := &internalpb.ActorRef{
-		ActorAddress: &goaktpb.Address{
-			Name: actorName,
-		},
-		ActorType: "actorKind",
-	}
+		// create some actors
+		actorName := uuid.NewString()
+		actor := &internalpb.ActorRef{
+			ActorAddress: &goaktpb.Address{
+				Name: actorName,
+			},
+			ActorType: "actorKind",
+		}
 
-	// put an actor
-	err = node2.PutActor(ctx, actor)
-	require.NoError(t, err)
+		// put an actor
+		err = node2.PutActor(ctx, actor)
+		require.NoError(t, err)
 
-	// wait for some time
-	lib.Pause(time.Second)
+		// wait for some time
+		lib.Pause(time.Second)
 
-	// get the actor from node1 and node3
-	actual, err := node1.GetActor(ctx, actorName)
-	require.NoError(t, err)
-	require.NotNil(t, actual)
-	require.True(t, proto.Equal(actor, actual))
+		// get the actor from node1 and node3
+		actual, err := node1.GetActor(ctx, actorName)
+		require.NoError(t, err)
+		require.NotNil(t, actual)
+		require.True(t, proto.Equal(actor, actual))
 
-	actual, err = node3.GetActor(ctx, actorName)
-	require.NoError(t, err)
-	require.NotNil(t, actual)
-	require.True(t, proto.Equal(actor, actual))
+		actual, err = node3.GetActor(ctx, actorName)
+		require.NoError(t, err)
+		require.NotNil(t, actual)
+		require.True(t, proto.Equal(actor, actual))
 
-	// put another actor
-	actorName2 := uuid.NewString()
-	actor2 := &internalpb.ActorRef{
-		ActorAddress: &goaktpb.Address{
-			Name: actorName2,
-		},
-		ActorType: "actorKind",
-	}
-	err = node1.PutActor(ctx, actor2)
-	require.NoError(t, err)
+		// put another actor
+		actorName2 := uuid.NewString()
+		actor2 := &internalpb.ActorRef{
+			ActorAddress: &goaktpb.Address{
+				Name: actorName2,
+			},
+			ActorType: "actorKind",
+		}
+		err = node1.PutActor(ctx, actor2)
+		require.NoError(t, err)
 
-	// wait for some time
-	lib.Pause(time.Second)
+		// wait for some time
+		lib.Pause(time.Second)
 
-	actors, err := node1.Actors(ctx, time.Second)
-	require.NoError(t, err)
-	require.Len(t, actors, 2)
+		actors, err := node1.Actors(ctx, time.Second)
+		require.NoError(t, err)
+		require.Len(t, actors, 2)
 
-	actors, err = node3.Actors(ctx, time.Second)
-	require.NoError(t, err)
-	require.Len(t, actors, 2)
+		actors, err = node3.Actors(ctx, time.Second)
+		require.NoError(t, err)
+		require.Len(t, actors, 2)
 
-	actors, err = node2.Actors(ctx, time.Second)
-	require.NoError(t, err)
-	require.Len(t, actors, 2)
+		actors, err = node2.Actors(ctx, time.Second)
+		require.NoError(t, err)
+		require.Len(t, actors, 2)
 
-	// stop the second node
-	require.NoError(t, node2.Stop(ctx))
-	// wait for the event to propagate properly
-	lib.Pause(time.Second)
+		// stop the second node
+		require.NoError(t, node2.Stop(ctx))
+		// wait for the event to propagate properly
+		lib.Pause(time.Second)
 
-	// reset the slice
-	events = []*Event{}
+		// reset the slice
+		events = []*Event{}
 
-	// define an events reader loop and read events for some time
-L2:
-	for {
-		select {
-		case event, ok := <-node1.Events():
-			if ok {
-				events = append(events, event)
+		// define an events reader loop and read events for some time
+	L2:
+		for {
+			select {
+			case event, ok := <-node1.Events():
+				if ok {
+					events = append(events, event)
+				}
+			case <-time.After(time.Second):
+				break L2
 			}
-		case <-time.After(time.Second):
-			break L2
 		}
-	}
 
-	require.NotEmpty(t, events)
-	require.Len(t, events, 1)
-	event = events[0]
-	msg, err = event.Payload.UnmarshalNew()
-	require.NoError(t, err)
-	nodeLeft, ok := msg.(*goaktpb.NodeLeft)
-	require.True(t, ok)
-	require.NotNil(t, nodeLeft)
-	require.Equal(t, node2Addr, nodeLeft.GetAddress())
+		require.NotEmpty(t, events)
+		require.Len(t, events, 1)
+		event = events[0]
+		msg, err = event.Payload.UnmarshalNew()
+		require.NoError(t, err)
+		nodeLeft, ok := msg.(*goaktpb.NodeLeft)
+		require.True(t, ok)
+		require.NotNil(t, nodeLeft)
+		require.Equal(t, node2Addr, nodeLeft.GetAddress())
 
-	require.NoError(t, node1.Stop(ctx))
-	require.NoError(t, node3.Stop(ctx))
-	require.NoError(t, sd1.Close())
-	require.NoError(t, sd2.Close())
-	require.NoError(t, sd3.Close())
-	srv.Shutdown()
+		require.NoError(t, node1.Stop(ctx))
+		require.NoError(t, node3.Stop(ctx))
+		require.NoError(t, sd1.Close())
+		require.NoError(t, sd2.Close())
+		require.NoError(t, sd3.Close())
+		srv.Shutdown()
+	})
+	t.Run("With TLS", func(t *testing.T) {
+		ctx := context.TODO()
+
+		rootCert := testutil.NewCertRoot(t)
+
+		// start the NATS server
+		srv := startNatsServer(t)
+
+		// create a cluster node1
+		node1, sd1 := startEngineWithTLS(t, "node1", srv.Addr().String(), rootCert)
+		require.NotNil(t, node1)
+
+		// wait for the node to start properly
+		lib.Pause(2 * time.Second)
+
+		// create a cluster node2
+		node2, sd2 := startEngineWithTLS(t, "node2", srv.Addr().String(), rootCert)
+		require.NotNil(t, node2)
+		node2Addr := node2.node.PeersAddress()
+
+		// wait for the node to start properly
+		lib.Pause(time.Second)
+
+		// create a cluster node3
+		node3, sd3 := startEngineWithTLS(t, "node3", srv.Addr().String(), rootCert)
+		require.NotNil(t, node3)
+		require.NotNil(t, sd3)
+
+		// wait for the node to start properly
+		lib.Pause(time.Second)
+
+		// assert the node joined cluster event
+		var events []*Event
+
+		// define an events reader loop and read events for some time
+	L:
+		for {
+			select {
+			case event, ok := <-node1.Events():
+				if ok {
+					events = append(events, event)
+				}
+			case <-time.After(time.Second):
+				break L
+			}
+		}
+
+		require.NotEmpty(t, events)
+		require.Len(t, events, 2)
+		event := events[0]
+		msg, err := event.Payload.UnmarshalNew()
+		require.NoError(t, err)
+		nodeJoined, ok := msg.(*goaktpb.NodeJoined)
+		require.True(t, ok)
+		require.NotNil(t, nodeJoined)
+		require.Equal(t, node2Addr, nodeJoined.GetAddress())
+		peers, err := node1.Peers(ctx)
+		require.NoError(t, err)
+		require.Len(t, peers, 2)
+		require.Equal(t, node2Addr, net.JoinHostPort(peers[0].Host, strconv.Itoa(peers[0].PeersPort)))
+
+		// wait for some time
+		lib.Pause(time.Second)
+
+		// create some actors
+		actorName := uuid.NewString()
+		actor := &internalpb.ActorRef{
+			ActorAddress: &goaktpb.Address{
+				Name: actorName,
+			},
+			ActorType: "actorKind",
+		}
+
+		// put an actor
+		err = node2.PutActor(ctx, actor)
+		require.NoError(t, err)
+
+		// wait for some time
+		lib.Pause(time.Second)
+
+		// get the actor from node1 and node3
+		actual, err := node1.GetActor(ctx, actorName)
+		require.NoError(t, err)
+		require.NotNil(t, actual)
+		require.True(t, proto.Equal(actor, actual))
+
+		actual, err = node3.GetActor(ctx, actorName)
+		require.NoError(t, err)
+		require.NotNil(t, actual)
+		require.True(t, proto.Equal(actor, actual))
+
+		// put another actor
+		actorName2 := uuid.NewString()
+		actor2 := &internalpb.ActorRef{
+			ActorAddress: &goaktpb.Address{
+				Name: actorName2,
+			},
+			ActorType: "actorKind",
+		}
+		err = node1.PutActor(ctx, actor2)
+		require.NoError(t, err)
+
+		// wait for some time
+		lib.Pause(time.Second)
+
+		actors, err := node1.Actors(ctx, time.Second)
+		require.NoError(t, err)
+		require.Len(t, actors, 2)
+
+		actors, err = node3.Actors(ctx, time.Second)
+		require.NoError(t, err)
+		require.Len(t, actors, 2)
+
+		actors, err = node2.Actors(ctx, time.Second)
+		require.NoError(t, err)
+		require.Len(t, actors, 2)
+
+		// stop the second node
+		require.NoError(t, node2.Stop(ctx))
+		// wait for the event to propagate properly
+		lib.Pause(time.Second)
+
+		// reset the slice
+		events = []*Event{}
+
+		// define an events reader loop and read events for some time
+	L2:
+		for {
+			select {
+			case event, ok := <-node1.Events():
+				if ok {
+					events = append(events, event)
+				}
+			case <-time.After(time.Second):
+				break L2
+			}
+		}
+
+		require.NotEmpty(t, events)
+		require.Len(t, events, 1)
+		event = events[0]
+		msg, err = event.Payload.UnmarshalNew()
+		require.NoError(t, err)
+		nodeLeft, ok := msg.(*goaktpb.NodeLeft)
+		require.True(t, ok)
+		require.NotNil(t, nodeLeft)
+		require.Equal(t, node2Addr, nodeLeft.GetAddress())
+
+		require.NoError(t, node1.Stop(ctx))
+		require.NoError(t, node3.Stop(ctx))
+		require.NoError(t, sd1.Close())
+		require.NoError(t, sd2.Close())
+		require.NoError(t, sd3.Close())
+		srv.Shutdown()
+	})
 }
 
 func startNatsServer(t *testing.T) *natsserver.Server {
@@ -531,6 +689,62 @@ func startEngine(t *testing.T, nodeName, serverAddr string) (*Engine, discovery.
 
 	// create the startNode
 	engine, err := NewEngine(nodeName, provider, &hostNode, WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NotNil(t, engine)
+
+	// start the node
+	require.NoError(t, engine.Start(ctx))
+
+	// return the cluster startNode
+	return engine, provider
+}
+
+func startEngineWithTLS(t *testing.T, nodeName, serverAddr string, rootCert *testutil.CertRoot) (*Engine, discovery.Provider) {
+	// create a context
+	ctx := context.TODO()
+
+	// generate the ports for the single startNode
+	nodePorts := dynaport.Get(3)
+	gossipPort := nodePorts[0]
+	clusterPort := nodePorts[1]
+	remotingPort := nodePorts[2]
+
+	// create a Cluster startNode
+	host := "127.0.0.1"
+	// create the various config option
+	applicationName := "accounts"
+	actorSystemName := "testSystem"
+	natsSubject := "some-subject"
+
+	// create the config
+	config := nats.Config{
+		ApplicationName: applicationName,
+		ActorSystemName: actorSystemName,
+		NatsServer:      fmt.Sprintf("nats://%s", serverAddr),
+		NatsSubject:     natsSubject,
+		Host:            host,
+		DiscoveryPort:   gossipPort,
+	}
+
+	hostNode := discovery.Node{
+		Name:          host,
+		Host:          host,
+		DiscoveryPort: gossipPort,
+		PeersPort:     clusterPort,
+		RemotingPort:  remotingPort,
+	}
+
+	// create the instance of provider
+	provider := nats.NewDiscovery(&config)
+
+	// create the server TLS config
+	serverTLSConfig := testutil.GetServerTLSConfig(t, rootCert)
+	clientTLSConfig := testutil.GetClientTLSConfig(t, rootCert)
+
+	// create the startNode
+	engine, err := NewEngine(nodeName, provider, &hostNode,
+		WithTLS(serverTLSConfig, clientTLSConfig),
+		WithLogger(log.DiscardLogger))
 	require.NoError(t, err)
 	require.NotNil(t, engine)
 

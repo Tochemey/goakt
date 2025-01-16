@@ -26,6 +26,7 @@ package actors
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"net"
@@ -292,6 +293,9 @@ type actorSystem struct {
 
 	actorsCounter      *atomic.Uint64
 	deadlettersCounter *atomic.Uint64
+
+	tlsClientConfig *tls.Config
+	tlsServerConfig *tls.Config
 }
 
 var (
@@ -365,10 +369,13 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		}
 	}
 
-	system.scheduler = newScheduler(system.logger,
-		system.shutdownTimeout,
-		withSchedulerCluster(system.cluster),
-		withSchedulerRemoting(NewRemoting()))
+	// perform some quick validations on the TLS configurations
+	if (system.tlsServerConfig == nil) != (system.tlsClientConfig == nil) {
+		return nil, ErrInvalidTLSConfiguration
+	}
+
+	// append the right protocols to the TLS settings
+	system.ensureTLSProtos()
 
 	return system, nil
 }
@@ -452,7 +459,7 @@ func (x *actorSystem) Start(ctx context.Context) error {
 		return err
 	}
 
-	x.scheduler.Start(ctx)
+	x.startMessagesScheduler(ctx)
 	x.startedAt.Store(time.Now().Unix())
 	x.logger.Infof("%s actor system successfully started..:)", x.name)
 	return nil
@@ -1356,6 +1363,7 @@ func (x *actorSystem) enableClustering(ctx context.Context) error {
 		cluster.WithWriteQuorum(x.clusterConfig.WriteQuorum()),
 		cluster.WithReadQuorum(x.clusterConfig.ReadQuorum()),
 		cluster.WithReplicaCount(x.clusterConfig.ReplicaCount()),
+		cluster.WithTLS(x.tlsServerConfig, x.tlsClientConfig),
 	)
 	if err != nil {
 		x.logger.Errorf("failed to initialize cluster engine: %v", err)
@@ -1403,6 +1411,7 @@ func (x *actorSystem) enableRemoting(ctx context.Context) error {
 	if !x.remotingEnabled.Load() {
 		return nil
 	}
+
 	x.logger.Info("enabling remoting...")
 	remotingServicePath, remotingServiceHandler := internalpbconnect.NewRemotingServiceHandler(x)
 	clusterServicePath, clusterServiceHandler := internalpbconnect.NewClusterServiceHandler(x)
@@ -1429,9 +1438,47 @@ func (x *actorSystem) enableRemoting(ctx context.Context) error {
 		}
 	}()
 
-	x.remoting = NewRemoting()
+	// configure remoting
+	x.setRemoting()
 	x.logger.Info("remoting enabled...:)")
 	return nil
+}
+
+// setRemoting sets the remoting service
+func (x *actorSystem) setRemoting() {
+	if x.tlsClientConfig != nil {
+		x.remoting = NewRemoting(WithRemotingTLS(x.tlsClientConfig))
+		return
+	}
+	x.remoting = NewRemoting()
+}
+
+// startMessagesScheduler starts the messages scheduler
+func (x *actorSystem) startMessagesScheduler(ctx context.Context) {
+	// set the scheduler
+	x.scheduler = newScheduler(x.logger,
+		x.shutdownTimeout,
+		withSchedulerCluster(x.cluster),
+		withSchedulerRemoting(x.remoting))
+	// start the scheduler
+	x.scheduler.Start(ctx)
+}
+
+func (x *actorSystem) ensureTLSProtos() {
+	if x.tlsServerConfig != nil && x.tlsClientConfig != nil {
+		// ensure that the required protocols are set for the TLS
+		toAdd := []string{"h2", "http/1.1"}
+
+		// server application protocols setting
+		protos := goset.NewSet[string](x.tlsServerConfig.NextProtos...)
+		protos.Append(toAdd...)
+		x.tlsServerConfig.NextProtos = protos.ToSlice()
+
+		// client application protocols setting
+		protos = goset.NewSet[string](x.tlsClientConfig.NextProtos...)
+		protos.Append(toAdd...)
+		x.tlsClientConfig.NextProtos = protos.ToSlice()
+	}
 }
 
 // reset the actor system
@@ -1700,6 +1747,7 @@ func (x *actorSystem) configPID(ctx context.Context, name string, actor Actor, o
 		withActorSystem(x),
 		withEventsStream(x.eventsStream),
 		withInitTimeout(x.actorInitTimeout),
+		withRemoting(x.remoting),
 	}
 
 	spawnConfig := newSpawnConfig(opts...)
@@ -1772,22 +1820,31 @@ func (x *actorSystem) shutdownHTTPServer(ctx context.Context) error {
 func (x *actorSystem) configureServer(ctx context.Context, mux *nethttp.ServeMux) error {
 	hostPort := net.JoinHostPort(x.host, strconv.Itoa(int(x.port)))
 	httpServer := getServer(ctx, hostPort)
-	// create a tcp listener
-	lnr, err := net.Listen("tcp", hostPort)
+	listener, err := tcp.NewKeepAliveListener(httpServer.Addr)
 	if err != nil {
 		return err
 	}
 
-	// set the http server
+	// Configure HTTP/2 with performance tuning
+	http2Server := &http2.Server{
+		MaxConcurrentStreams: 1000,               // Allow up to 1000 concurrent streams
+		MaxReadFrameSize:     10 << 20,           // 10 MB max frame size
+		IdleTimeout:          1200 * time.Second, // Timeout for idle connections
+	}
+
+	// set the http TLS server
+	if x.tlsServerConfig != nil {
+		x.server = httpServer
+		x.server.TLSConfig = x.tlsServerConfig
+		x.server.Handler = mux
+		x.listener = tls.NewListener(listener, x.tlsServerConfig)
+		return http2.ConfigureServer(x.server, http2Server)
+	}
+
+	// http/2 server with h2c (HTTP/2 Cleartext).
 	x.server = httpServer
-	// For gRPC clients, it's convenient to support HTTP/2 without TLS.
-	x.server.Handler = h2c.NewHandler(
-		mux, &http2.Server{
-			IdleTimeout: 1200 * time.Second,
-		},
-	)
-	// set the non-secure http server
-	x.listener = lnr
+	x.server.Handler = h2c.NewHandler(mux, http2Server)
+	x.listener = listener
 	return nil
 }
 
@@ -1879,25 +1936,27 @@ func (x *actorSystem) spawnJanitor(ctx context.Context) error {
 
 // spawnRebalancer creates the cluster rebalancer
 func (x *actorSystem) spawnRebalancer(ctx context.Context) error {
-	var err error
-	actorName := x.reservedName(rebalancerType)
-	x.rebalancer, err = x.configPID(ctx,
-		actorName,
-		newRebalancer(x.reflection),
-		WithSupervisorStrategies(
-			NewSupervisorStrategy(PanicError{}, NewRestartDirective()),
-			NewSupervisorStrategy(&runtime.PanicNilError{}, NewRestartDirective()),
-			NewSupervisorStrategy(rebalancingError{}, NewRestartDirective()),
-			NewSupervisorStrategy(InternalError{}, NewResumeDirective()),
-			NewSupervisorStrategy(SpawnError{}, NewResumeDirective()),
-		),
-	)
-	if err != nil {
-		return fmt.Errorf("actor=%s failed to start cluster rebalancer: %w", actorName, err)
-	}
+	if x.clusterEnabled.Load() {
+		var err error
+		actorName := x.reservedName(rebalancerType)
+		x.rebalancer, err = x.configPID(ctx,
+			actorName,
+			newRebalancer(x.reflection, x.remoting),
+			WithSupervisorStrategies(
+				NewSupervisorStrategy(PanicError{}, NewRestartDirective()),
+				NewSupervisorStrategy(&runtime.PanicNilError{}, NewRestartDirective()),
+				NewSupervisorStrategy(rebalancingError{}, NewRestartDirective()),
+				NewSupervisorStrategy(InternalError{}, NewResumeDirective()),
+				NewSupervisorStrategy(SpawnError{}, NewResumeDirective()),
+			),
+		)
+		if err != nil {
+			return fmt.Errorf("actor=%s failed to start cluster rebalancer: %w", actorName, err)
+		}
 
-	// the rebalancer is a child actor of the system guardian
-	_ = x.actors.AddNode(x.systemGuardian, x.rebalancer)
+		// the rebalancer is a child actor of the system guardian
+		_ = x.actors.AddNode(x.systemGuardian, x.rebalancer)
+	}
 	return nil
 }
 

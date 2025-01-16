@@ -22,19 +22,36 @@
  * SOFTWARE.
  */
 
-package discovery
+package client
 
-import "errors"
+import (
+	"fmt"
+	"net"
+	"strconv"
+	"testing"
 
-var (
-	// ErrAlreadyInitialized is used when attempting to re-initialize the discovery provider
-	ErrAlreadyInitialized = errors.New("provider already initialized")
-	// ErrNotInitialized is used when the provider is not initialized
-	ErrNotInitialized = errors.New("provider not initialized")
-	// ErrAlreadyRegistered is used when attempting to re-register the provider
-	ErrAlreadyRegistered = errors.New("provider already registered")
-	// ErrNotRegistered is used when attempting to de-register the provider
-	ErrNotRegistered = errors.New("provider is not registered")
-	// ErrInvalidConfig is used when the discovery provider configuration is invalid
-	ErrInvalidConfig = errors.New("invalid discovery provider configuration")
+	"github.com/stretchr/testify/require"
+	"github.com/travisjeffery/go-dynaport"
+
+	"github.com/tochemey/goakt/v2/internal/testutil"
 )
+
+func TestNode(t *testing.T) {
+	ports := dynaport.Get(1)
+	address := net.JoinHostPort("127.0.0.1", strconv.Itoa(ports[0]))
+	rootCert := testutil.NewCertRoot(t)
+	clientConfig := testutil.GetClientTLSConfig(t, rootCert)
+
+	node := NewNode(address, WithWeight(10), WithTLS(clientConfig))
+	require.NotNil(t, node)
+	require.Equal(t, address, node.Address())
+	require.Exactly(t, float64(10), node.Weight())
+	require.NoError(t, node.Validate())
+	require.NotNil(t, node.HTTPClient())
+	require.Equal(t, fmt.Sprintf("https://%s", address), node.HTTPEndPoint())
+	require.NotNil(t, node.Remoting())
+	host, port := node.HostAndPort()
+	require.Equal(t, "127.0.0.1", host)
+	require.Equal(t, ports[0], port)
+	node.Free()
+}

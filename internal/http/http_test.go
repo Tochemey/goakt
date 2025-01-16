@@ -25,13 +25,11 @@
 package http
 
 import (
-	"context"
 	"net/http"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/travisjeffery/go-dynaport"
 	"golang.org/x/net/http2"
 )
 
@@ -45,21 +43,18 @@ func TestNewClient(t *testing.T) {
 	assert.Equal(t, 30*time.Second, tr.ReadIdleTimeout)
 }
 
-func TestNewServer(t *testing.T) {
-	host := "127.0.0.1"
-	port := dynaport.Get(1)[0]
-	mux := http.NewServeMux()
-	ctx := context.TODO()
-
-	server := NewServer(ctx, host, port, mux)
-	assert.NotNil(t, server)
-	assert.IsType(t, new(http.Server), server)
-}
-
 func TestURL(t *testing.T) {
 	host := "127.0.0.1"
 	port := 123
 
 	url := URL(host, port)
 	assert.Equal(t, "http://127.0.0.1:123", url)
+}
+
+func TestURLs(t *testing.T) {
+	host := "127.0.0.1"
+	port := 123
+
+	url := URLs(host, port)
+	assert.Equal(t, "https://127.0.0.1:123", url)
 }

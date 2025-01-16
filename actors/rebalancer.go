@@ -51,9 +51,10 @@ type rebalancer struct {
 var _ Actor = (*rebalancer)(nil)
 
 // newRebalancer creates an instance of rebalancer
-func newRebalancer(reflection *reflection) *rebalancer {
+func newRebalancer(reflection *reflection, remoting *Remoting) *rebalancer {
 	return &rebalancer{
 		reflection: reflection,
+		remoting:   remoting,
 	}
 }
 
@@ -67,7 +68,6 @@ func (r *rebalancer) Receive(ctx *ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *goaktpb.PostStart:
 		r.pid = ctx.Self()
-		r.remoting = NewRemoting()
 		r.logger = ctx.Logger()
 		r.logger.Infof("%s started successfully", r.pid.Name())
 		ctx.Become(r.Rebalance)

@@ -27,6 +27,7 @@ package actors
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"sync"
@@ -34,7 +35,6 @@ import (
 	"time"
 
 	natsserver "github.com/nats-io/nats-server/v2/server"
-	"github.com/pkg/errors"
 	"github.com/stretchr/testify/require"
 	"github.com/travisjeffery/go-dynaport"
 	"go.uber.org/atomic"
@@ -43,6 +43,7 @@ import (
 	"github.com/tochemey/goakt/v2/discovery/nats"
 	"github.com/tochemey/goakt/v2/goaktpb"
 	"github.com/tochemey/goakt/v2/internal/lib"
+	"github.com/tochemey/goakt/v2/internal/testutil"
 	"github.com/tochemey/goakt/v2/log"
 	"github.com/tochemey/goakt/v2/test/data/testpb"
 	testspb "github.com/tochemey/goakt/v2/test/data/testpb"
@@ -429,13 +430,27 @@ func startNatsServer(t *testing.T) *natsserver.Server {
 	return serv
 }
 
-func startClusterSystem(t *testing.T, serverAddr string) (ActorSystem, discovery.Provider) {
+type testClusterConfig struct {
+	tlsEnabled bool
+	rootCert   *testutil.CertRoot
+}
+
+type testClusterOption func(*testClusterConfig)
+
+func withTSL(rootCert *testutil.CertRoot) testClusterOption {
+	return func(tc *testClusterConfig) {
+		tc.tlsEnabled = true
+		tc.rootCert = rootCert
+	}
+}
+
+func startClusterSystem(t *testing.T, serverAddr string, opts ...testClusterOption) (ActorSystem, discovery.Provider) {
 	ctx := context.TODO()
 	logger := log.DiscardLogger
 
 	// generate the ports for the single startNode
 	nodePorts := dynaport.Get(3)
-	gossipPort := nodePorts[0]
+	discoveryPort := nodePorts[0]
 	clusterPort := nodePorts[1]
 	remotingPort := nodePorts[2]
 
@@ -452,30 +467,43 @@ func startClusterSystem(t *testing.T, serverAddr string) (ActorSystem, discovery
 		NatsServer:      fmt.Sprintf("nats://%s", serverAddr),
 		NatsSubject:     natsSubject,
 		Host:            host,
-		DiscoveryPort:   gossipPort,
+		DiscoveryPort:   discoveryPort,
 	}
 
 	// create the instance of provider
 	provider := nats.NewDiscovery(&config, nats.WithLogger(log.DiscardLogger))
 
-	// create the actor system
-	system, err := NewActorSystem(
-		actorSystemName,
+	// create the actor system options
+	options := []Option{
 		WithPassivationDisabled(),
 		WithLogger(logger),
 		WithRemoting(host, int32(remotingPort)),
 		WithJanitorInterval(time.Minute),
-		WithPeerStateLoopInterval(500*time.Millisecond),
+		WithPeerStateLoopInterval(500 * time.Millisecond),
 		WithCluster(
 			NewClusterConfig().
 				WithKinds(new(mockActor)).
-				WithPartitionCount(10).
+				WithPartitionCount(7).
 				WithReplicaCount(1).
 				WithPeersPort(clusterPort).
 				WithMinimumPeersQuorum(1).
-				WithDiscoveryPort(gossipPort).
+				WithDiscoveryPort(discoveryPort).
 				WithDiscovery(provider)),
-	)
+	}
+
+	cfg := &testClusterConfig{}
+	for _, opt := range opts {
+		opt(cfg)
+	}
+
+	if cfg.tlsEnabled {
+		serverConfig := testutil.GetServerTLSConfig(t, cfg.rootCert)
+		clientConfig := testutil.GetClientTLSConfig(t, cfg.rootCert)
+		options = append(options, WithTLS(serverConfig, clientConfig))
+	}
+
+	// create the actor system
+	system, err := NewActorSystem(actorSystemName, options...)
 
 	require.NotNil(t, system)
 	require.NoError(t, err)
