@@ -46,7 +46,7 @@ Also, check reference section at the end of the post for more material regarding
   - [Observability](#observability)
     - [Metrics](#metrics)
     - [Logging](#logging)
-  - [Security](#encryption-and-mtls)
+  - [TLS Support](#tls-support)
   - [Testkit](#testkit)
 - [API](#api)
 - [Client](#client)
@@ -367,10 +367,10 @@ The following methods have been implemented to help push some metrics to any obs
 
 A simple logging interface to allow custom logger to be implemented instead of using the default logger.
 
-### Encryption and mTLS
+### TLS Support
 
-GoAkt does not support at the moment any form of data encryption or TLS to prevent any form of mitm attack. This feature may come in the future.
-At the moment, I will recommend a GoAkt-based application should be deployed behind a vpc or using a service mesh like Linkerd or Istio which offers great mTLS support when it comes to service communucation.
+GoAkt does support TLS in its latest commit hash. When running in cluster mode, all nodes are required to have the same root certificate authority for
+a successful handshake.
 
 ### Testkit
 
