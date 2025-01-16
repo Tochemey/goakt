@@ -25,10 +25,10 @@
 package cluster
 
 import (
+	"errors"
 	"fmt"
 	"testing"
 
-	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/travisjeffery/go-dynaport"
 

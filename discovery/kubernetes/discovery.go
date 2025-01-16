@@ -26,12 +26,12 @@ package kubernetes
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"strconv"
 	"sync"
 
 	goset "github.com/deckarep/golang-set/v2"
-	"github.com/pkg/errors"
 	"go.uber.org/atomic"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -98,12 +98,12 @@ func (d *Discovery) Register() error {
 
 	config, err := rest.InClusterConfig()
 	if err != nil {
-		return errors.Wrap(err, "failed to get the in-cluster config of the kubernetes provider")
+		return fmt.Errorf("failed to get the in-cluster config of the kubernetes provider: %w", err)
 	}
 
 	client, err := kubernetes.NewForConfig(config)
 	if err != nil {
-		return errors.Wrap(err, "failed to create the kubernetes client api")
+		return fmt.Errorf("failed to create the kubernetes client api: %w", err)
 	}
 
 	d.client = client

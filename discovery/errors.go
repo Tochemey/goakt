@@ -24,7 +24,7 @@
 
 package discovery
 
-import "github.com/pkg/errors"
+import "errors"
 
 var (
 	// ErrAlreadyInitialized is used when attempting to re-initialize the discovery provider
