@@ -361,12 +361,14 @@ GoAkt offers out of the box features that can help track, monitor and measure th
 GoAkt comes bundled with the following metrics:
 
 ##### Actor System Metric
+The `Metric` method on the [actor system](./actors/actor_system.go) will provide the following counters:
 
 - Total Number of actors in the system at a given point time
 - Total Number of deadletters
 -  The number of seconds since the actor system started
 
 ##### PID metric
+The `Metric` method on the [PID](./actors/pid.go) will provide the following counters:
 
 - Total Number of children at a given point in time
 - Total Number of messages stashed at a given point in time
