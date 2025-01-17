@@ -366,7 +366,7 @@ GoAkt comes bundled with the following metrics:
 - Total Number of deadletters
 -  The number of seconds since the actor system started
 
-##### [PID metric](https://github.com/Tochemey/goakt/blob/main/actors/pid.go#L225)
+##### PID metric
 
 - Total Number of children at a given point in time
 - Total Number of messages stashed at a given point in time
