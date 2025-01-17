@@ -45,6 +45,8 @@ Also, check reference section at the end of the post for more material regarding
   - [Cluster](#cluster)
   - [Observability](#observability)
     - [Metrics](#metrics)
+      - [Actor System](#actor-system-metric)
+      - [PID](#pid-metric)
     - [Logging](#logging)
   - [TLS Support](#tls-support)
   - [Testkit](#testkit)
@@ -356,12 +358,22 @@ GoAkt offers out of the box features that can help track, monitor and measure th
 
 #### Metrics
 
-The following methods have been implemented to help push some metrics to any observability tool:
-  - Total Number of children at a given point in time [PID](./actors/pid.go)
-  - Number of messages stashed at a given point in time [PID](./actors/pid.go)
-  - Number of Restarts at a given point in time [PID](./actors/pid.go)
-  - Latest message received processing duration in milliseconds [PID](./actors/pid.go)
-  - Total Number of Actors at a given point in time [ActorSystem](./actors/actor_system.go)
+GoAkt comes bundled with the following metrics:
+
+##### Actor System Metric
+
+- Total Number of actors in the system at a given point time
+- Total Number of deadletters
+-  The number of seconds since the actor system started
+
+##### [PID metric](https://github.com/Tochemey/goakt/blob/main/actors/pid.go#L225)
+
+- Total Number of children at a given point in time
+- Total Number of messages stashed at a given point in time
+- Total Number of Restarts at a given point in time
+- Last message received processing duration in milliseconds
+- Total Number of deadletters
+- The number of seconds since the actor started
 
 #### Logging
 
