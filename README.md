@@ -373,7 +373,7 @@ GoAkt now supports TLS in its latest commit. When running in cluster mode, all n
 TLS can be enabled when creating the actor system by using the option `WithTLS` method. This method allows you to configure both the TLS server and client settings.
 
 The client configuration is essential for enabling secure communication between nodes, particularly in remoting and cluster modes. 
-By using WithTLS, you can ensure that all inter-node communication is encrypted and authenticated, enhancing the security of your GoAkt cluster.
+By using `WithTLS`, you can ensure that all inter-node communication is encrypted and authenticated, enhancing the security of your GoAkt cluster.
 
 ### Testkit
 
