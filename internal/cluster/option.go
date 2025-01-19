@@ -129,3 +129,10 @@ func WithTLS(serverConfig, clientConfig *tls.Config) Option {
 		eng.tlsServerConfig = serverConfig
 	})
 }
+
+// WithStorageSize sets the cluster table storage size
+func WithStorageSize(size uint64) Option {
+	return OptionFunc(func(eng *Engine) {
+		eng.storageSize = size
+	})
+}

@@ -32,14 +32,14 @@ import (
 	"github.com/tochemey/goakt/v2/goaktpb"
 )
 
-type Benchmarker struct {
+type Actor struct {
 }
 
-func (p *Benchmarker) PreStart(context.Context) error {
+func (p *Actor) PreStart(context.Context) error {
 	return nil
 }
 
-func (p *Benchmarker) Receive(ctx *actors.ReceiveContext) {
+func (p *Actor) Receive(ctx *actors.ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *goaktpb.PostStart:
 	case *benchpb.BenchTell:
@@ -51,6 +51,6 @@ func (p *Benchmarker) Receive(ctx *actors.ReceiveContext) {
 	}
 }
 
-func (p *Benchmarker) PostStop(context.Context) error {
+func (p *Actor) PostStop(context.Context) error {
 	return nil
 }
