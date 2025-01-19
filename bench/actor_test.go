@@ -56,7 +56,7 @@ func BenchmarkActor(b *testing.B) {
 		lib.Pause(1 * time.Second)
 
 		// define the benchmark actor
-		actor := &Benchmarker{}
+		actor := &Actor{}
 
 		// create the actor ref
 		pid, _ := actorSystem.Spawn(ctx, "test", actor)
@@ -99,8 +99,8 @@ func BenchmarkActor(b *testing.B) {
 		lib.Pause(1 * time.Second)
 
 		// create the actors
-		sender, _ := actorSystem.Spawn(ctx, "sender", new(Benchmarker))
-		receiver, _ := actorSystem.Spawn(ctx, "receiver", new(Benchmarker))
+		sender, _ := actorSystem.Spawn(ctx, "sender", new(Actor))
+		receiver, _ := actorSystem.Spawn(ctx, "receiver", new(Actor))
 
 		// wait for actors to start properly
 		lib.Pause(1 * time.Second)
@@ -136,8 +136,8 @@ func BenchmarkActor(b *testing.B) {
 		lib.Pause(1 * time.Second)
 
 		// create the actors
-		sender, _ := actorSystem.Spawn(ctx, "sender", new(Benchmarker), actors.WithMailbox(actors.NewBoundedMailbox(b.N)))
-		receiver, _ := actorSystem.Spawn(ctx, "receiver", new(Benchmarker), actors.WithMailbox(actors.NewBoundedMailbox(b.N)))
+		sender, _ := actorSystem.Spawn(ctx, "sender", new(Actor), actors.WithMailbox(actors.NewBoundedMailbox(b.N)))
+		receiver, _ := actorSystem.Spawn(ctx, "receiver", new(Actor), actors.WithMailbox(actors.NewBoundedMailbox(b.N)))
 
 		// wait for actors to start properly
 		lib.Pause(1 * time.Second)
@@ -179,8 +179,8 @@ func BenchmarkActor(b *testing.B) {
 		lib.Pause(1 * time.Second)
 
 		// create the actors
-		sender, _ := actorSystem.Spawn(ctx, "sender", new(Benchmarker), actors.WithMailbox(actors.NewUnboundedPriorityMailBox(priorityFunc)))
-		receiver, _ := actorSystem.Spawn(ctx, "receiver", new(Benchmarker), actors.WithMailbox(actors.NewUnboundedPriorityMailBox(priorityFunc)))
+		sender, _ := actorSystem.Spawn(ctx, "sender", new(Actor), actors.WithMailbox(actors.NewUnboundedPriorityMailBox(priorityFunc)))
+		receiver, _ := actorSystem.Spawn(ctx, "receiver", new(Actor), actors.WithMailbox(actors.NewUnboundedPriorityMailBox(priorityFunc)))
 
 		// wait for actors to start properly
 		lib.Pause(1 * time.Second)
@@ -221,8 +221,8 @@ func BenchmarkActor(b *testing.B) {
 		lib.Pause(1 * time.Second)
 
 		// create the actors
-		sender, _ := actorSystem.Spawn(ctx, "sender", new(Benchmarker))
-		receiver, _ := actorSystem.Spawn(ctx, "receiver", new(Benchmarker))
+		sender, _ := actorSystem.Spawn(ctx, "sender", new(Actor))
+		receiver, _ := actorSystem.Spawn(ctx, "receiver", new(Actor))
 
 		// wait for actors to start properly
 		lib.Pause(1 * time.Second)
@@ -259,7 +259,7 @@ func BenchmarkActor(b *testing.B) {
 		lib.Pause(1 * time.Second)
 
 		// define the benchmark actor
-		actor := &Benchmarker{}
+		actor := &Actor{}
 
 		// create the actor ref
 		pid, _ := actorSystem.Spawn(ctx, "test", actor)
@@ -300,8 +300,8 @@ func BenchmarkActor(b *testing.B) {
 		lib.Pause(1 * time.Second)
 
 		// create the actors
-		sender, _ := actorSystem.Spawn(ctx, "sender", new(Benchmarker))
-		receiver, _ := actorSystem.Spawn(ctx, "receiver", new(Benchmarker))
+		sender, _ := actorSystem.Spawn(ctx, "sender", new(Actor))
+		receiver, _ := actorSystem.Spawn(ctx, "receiver", new(Actor))
 
 		// wait for actors to start properly
 		lib.Pause(1 * time.Second)
@@ -339,8 +339,8 @@ func BenchmarkActor(b *testing.B) {
 		lib.Pause(1 * time.Second)
 
 		// create the actors
-		sender, _ := actorSystem.Spawn(ctx, "sender", new(Benchmarker), actors.WithMailbox(actors.NewBoundedMailbox(b.N)))
-		receiver, _ := actorSystem.Spawn(ctx, "receiver", new(Benchmarker), actors.WithMailbox(actors.NewBoundedMailbox(b.N)))
+		sender, _ := actorSystem.Spawn(ctx, "sender", new(Actor), actors.WithMailbox(actors.NewBoundedMailbox(b.N)))
+		receiver, _ := actorSystem.Spawn(ctx, "receiver", new(Actor), actors.WithMailbox(actors.NewBoundedMailbox(b.N)))
 
 		// wait for actors to start properly
 		lib.Pause(1 * time.Second)

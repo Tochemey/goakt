@@ -39,6 +39,7 @@ func TestOptions(t *testing.T) {
 	mockHasher := new(testkit.Hasher)
 	// nolint
 	tlsConfig := &tls.Config{}
+	size := uint64(1 * MB)
 	testCases := []struct {
 		name     string
 		option   Option
@@ -98,6 +99,11 @@ func TestOptions(t *testing.T) {
 			name:     "WithTLS",
 			option:   WithTLS(tlsConfig, tlsConfig),
 			expected: Engine{tlsServerConfig: tlsConfig, tlsClientConfig: tlsConfig},
+		},
+		{
+			name:     "WithStorageSize",
+			option:   WithStorageSize(size),
+			expected: Engine{storageSize: size},
 		},
 	}
 

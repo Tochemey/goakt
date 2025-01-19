@@ -43,6 +43,7 @@ import (
 	"github.com/tochemey/olric/config"
 	"github.com/tochemey/olric/events"
 	"github.com/tochemey/olric/hasher"
+	"github.com/tochemey/olric/pkg/storage"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
@@ -54,6 +55,8 @@ import (
 	"github.com/tochemey/goakt/v2/internal/internalpb"
 	"github.com/tochemey/goakt/v2/log"
 )
+
+const MB = 1 << 20 // 1 MB = 2^20 bytes
 
 type EventType int
 
@@ -142,9 +145,10 @@ type Engine struct {
 	// this help set and fetch data from the Node
 	client olric.Client
 
-	actorsMap  olric.DMap
-	statesMap  olric.DMap
-	jobKeysMap olric.DMap
+	actorsMap   olric.DMap
+	statesMap   olric.DMap
+	jobKeysMap  olric.DMap
+	storageSize uint64
 
 	// specifies the discovery node
 	node *discovery.Node
@@ -187,7 +191,7 @@ func NewEngine(name string, disco discovery.Provider, host *discovery.Node, opts
 		discoveryProvider:      disco,
 		writeTimeout:           time.Second,
 		readTimeout:            time.Second,
-		shutdownTimeout:        3 * time.Second,
+		shutdownTimeout:        3 * time.Minute,
 		hasher:                 hash.DefaultHasher(),
 		pubSub:                 nil,
 		events:                 make(chan *Event, 256),
@@ -200,6 +204,7 @@ func NewEngine(name string, disco discovery.Provider, host *discovery.Node, opts
 		Mutex:                  new(sync.Mutex),
 		nodeJoinedEventsFilter: goset.NewSet[string](),
 		nodeLeftEventsFilter:   goset.NewSet[string](),
+		storageSize:            10 * MB,
 	}
 	// apply the various options
 	for _, opt := range opts {
@@ -763,17 +768,25 @@ func (x *Engine) buildConfig() (*config.Config, error) {
 		// pass
 	}
 
+	// set the cluster storage tableSize
+	options := storage.NewConfig(nil)
+	options.Add("tableSize", x.storageSize)
+
 	// create the config and return it
 	conf := &config.Config{
-		BindAddr:                   x.node.Host,
-		BindPort:                   x.node.PeersPort,
-		ReadRepair:                 true,
-		ReplicaCount:               int(x.replicaCount),
-		WriteQuorum:                int(x.writeQuorum),
-		ReadQuorum:                 int(x.readQuorum),
-		MemberCountQuorum:          int32(x.minimumPeersQuorum),
-		Peers:                      []string{},
-		DMaps:                      &config.DMaps{},
+		BindAddr:          x.node.Host,
+		BindPort:          x.node.PeersPort,
+		ReadRepair:        true,
+		ReplicaCount:      int(x.replicaCount),
+		WriteQuorum:       int(x.writeQuorum),
+		ReadQuorum:        int(x.readQuorum),
+		MemberCountQuorum: int32(x.minimumPeersQuorum),
+		Peers:             []string{},
+		DMaps: &config.DMaps{
+			Engine: &config.Engine{
+				Config: options.ToMap(),
+			},
+		},
 		KeepAlivePeriod:            config.DefaultKeepAlivePeriod,
 		PartitionCount:             x.partitionsCount,
 		BootstrapTimeout:           config.DefaultBootstrapTimeout,
