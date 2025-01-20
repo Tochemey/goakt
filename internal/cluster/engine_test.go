@@ -313,6 +313,70 @@ func TestSingleNode(t *testing.T) {
 		require.NoError(t, cluster.Stop(ctx))
 		provider.AssertExpectations(t)
 	})
+	t.Run("With NotRunning error", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+
+		// generate the ports for the single startNode
+		nodePorts := dynaport.Get(3)
+		gossipPort := nodePorts[0]
+		clusterPort := nodePorts[1]
+		remotingPort := nodePorts[2]
+
+		// mock the discovery provider
+		provider := new(testkit.Provider)
+
+		// create a Node startNode
+		host := "127.0.0.1"
+
+		hostNode := discovery.Node{
+			Name:          host,
+			Host:          host,
+			DiscoveryPort: gossipPort,
+			PeersPort:     clusterPort,
+			RemotingPort:  remotingPort,
+		}
+
+		logger := log.DiscardLogger
+		cluster, err := NewEngine("test", provider, &hostNode, WithLogger(logger))
+		require.NotNil(t, cluster)
+		require.NoError(t, err)
+
+		err = cluster.PutActor(ctx, new(internalpb.ActorRef))
+		require.Error(t, err)
+		require.EqualError(t, err, ErrEngineNotRunning.Error())
+
+		_, err = cluster.GetActor(ctx, "actorName")
+		require.Error(t, err)
+		require.EqualError(t, err, ErrEngineNotRunning.Error())
+
+		_, err = cluster.GetState(ctx, "peerAddress")
+		require.Error(t, err)
+		require.EqualError(t, err, ErrEngineNotRunning.Error())
+
+		_, err = cluster.Peers(ctx)
+		require.Error(t, err)
+		require.EqualError(t, err, ErrEngineNotRunning.Error())
+
+		err = cluster.RemoveActor(ctx, "actorName")
+		require.Error(t, err)
+		require.EqualError(t, err, ErrEngineNotRunning.Error())
+
+		err = cluster.SetSchedulerJobKey(ctx, "key")
+		require.Error(t, err)
+		require.EqualError(t, err, ErrEngineNotRunning.Error())
+
+		err = cluster.UnsetSchedulerJobKey(ctx, "key")
+		require.Error(t, err)
+		require.EqualError(t, err, ErrEngineNotRunning.Error())
+
+		partition := cluster.GetPartition("actorName")
+		require.NotZero(t, partition)
+		require.EqualValues(t, -1, partition)
+
+		// stop the startNode
+		require.NoError(t, cluster.Stop(ctx))
+	})
 }
 
 func TestMultipleNodes(t *testing.T) {
