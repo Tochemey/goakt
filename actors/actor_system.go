@@ -1623,46 +1623,44 @@ func (x *actorSystem) peersStateLoop() {
 		for {
 			select {
 			case <-ticker.C:
+				// stop ticking and close
+				if !x.started.Load() {
+					tickerStopSig <- types.Unit{}
+					return
+				}
+
 				eg, ctx := errgroup.WithContext(context.Background())
-
 				peersChan := make(chan *cluster.Peer)
+				eg.Go(func() error {
+					defer close(peersChan)
+					peers, err := x.cluster.Peers(ctx)
+					if err != nil {
+						return err
+					}
 
-				eg.Go(
-					func() error {
-						defer close(peersChan)
-						peers, err := x.cluster.Peers(ctx)
-						if err != nil {
+					for _, peer := range peers {
+						select {
+						case peersChan <- peer:
+						case <-ctx.Done():
+							return ctx.Err()
+						}
+					}
+					return nil
+				})
+				eg.Go(func() error {
+					for peer := range peersChan {
+						if err := x.processPeerState(ctx, peer); err != nil {
 							return err
 						}
-
-						for _, peer := range peers {
-							select {
-							case peersChan <- peer:
-							case <-ctx.Done():
-								return ctx.Err()
-							}
+						select {
+						case <-ctx.Done():
+							return ctx.Err()
+						default:
+							// pass
 						}
-						return nil
-					},
-				)
-
-				eg.Go(
-					func() error {
-						for peer := range peersChan {
-							if err := x.processPeerState(ctx, peer); err != nil {
-								return err
-							}
-							select {
-							case <-ctx.Done():
-								return ctx.Err()
-							default:
-								// pass
-							}
-						}
-						return nil
-					},
-				)
-
+					}
+					return nil
+				})
 				if err := eg.Wait(); err != nil {
 					x.logger.Error(err)
 					// TODO: stop or panic
