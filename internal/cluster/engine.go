@@ -350,7 +350,7 @@ func (x *Engine) Start(ctx context.Context) error {
 func (x *Engine) Stop(ctx context.Context) error {
 	// check whether it is running
 	// if not running just return
-	if !x.running.Load() {
+	if !x.IsRunning() {
 		return nil
 	}
 
@@ -401,7 +401,7 @@ func (x *Engine) IsRunning() bool {
 // point in time in the cluster
 func (x *Engine) IsLeader(ctx context.Context) bool {
 	// return false when not running
-	if !x.running.Load() {
+	if !x.IsRunning() {
 		return false
 	}
 
@@ -421,7 +421,7 @@ func (x *Engine) IsLeader(ctx context.Context) bool {
 // Actors returns all actors in the cluster at any given time
 func (x *Engine) Actors(ctx context.Context, timeout time.Duration) ([]*internalpb.ActorRef, error) {
 	// return an error when the engine is not running
-	if !x.running.Load() {
+	if !x.IsRunning() {
 		return nil, ErrEngineNotRunning
 	}
 
@@ -460,7 +460,7 @@ func (x *Engine) Actors(ctx context.Context, timeout time.Duration) ([]*internal
 // PutActor pushes to the cluster the peer sync request
 func (x *Engine) PutActor(ctx context.Context, actor *internalpb.ActorRef) error {
 	// return an error when the engine is not running
-	if !x.running.Load() {
+	if !x.IsRunning() {
 		return ErrEngineNotRunning
 	}
 
@@ -515,7 +515,7 @@ func (x *Engine) PutActor(ctx context.Context, actor *internalpb.ActorRef) error
 // GetState fetches a given peer state
 func (x *Engine) GetState(ctx context.Context, peerAddress string) (*internalpb.PeerState, error) {
 	// return an error when the engine is not running
-	if !x.running.Load() {
+	if !x.IsRunning() {
 		return nil, ErrEngineNotRunning
 	}
 
@@ -558,7 +558,7 @@ func (x *Engine) GetState(ctx context.Context, peerAddress string) (*internalpb.
 // GetActor fetches an actor from the Node
 func (x *Engine) GetActor(ctx context.Context, actorName string) (*internalpb.ActorRef, error) {
 	// return an error when the engine is not running
-	if !x.running.Load() {
+	if !x.IsRunning() {
 		return nil, ErrEngineNotRunning
 	}
 
@@ -602,7 +602,7 @@ func (x *Engine) GetActor(ctx context.Context, actorName string) (*internalpb.Ac
 // An actor is removed from the cluster when this actor has been passivated.
 func (x *Engine) RemoveActor(ctx context.Context, actorName string) error {
 	// return an error when the engine is not running
-	if !x.running.Load() {
+	if !x.IsRunning() {
 		return ErrEngineNotRunning
 	}
 
@@ -625,7 +625,7 @@ func (x *Engine) RemoveActor(ctx context.Context, actorName string) error {
 // SetSchedulerJobKey sets a given key to the cluster
 func (x *Engine) SetSchedulerJobKey(ctx context.Context, key string) error {
 	// return an error when the engine is not running
-	if !x.running.Load() {
+	if !x.IsRunning() {
 		return ErrEngineNotRunning
 	}
 
@@ -651,7 +651,7 @@ func (x *Engine) SetSchedulerJobKey(ctx context.Context, key string) error {
 // SchedulerJobKeyExists checks the existence of a given key
 func (x *Engine) SchedulerJobKeyExists(ctx context.Context, key string) (bool, error) {
 	// return an error when the engine is not running
-	if !x.running.Load() {
+	if !x.IsRunning() {
 		return false, ErrEngineNotRunning
 	}
 
@@ -681,7 +681,7 @@ func (x *Engine) SchedulerJobKeyExists(ctx context.Context, key string) (bool, e
 // UnsetSchedulerJobKey unsets the already set given key in the cluster
 func (x *Engine) UnsetSchedulerJobKey(ctx context.Context, key string) error {
 	// return an error when the engine is not running
-	if !x.running.Load() {
+	if !x.IsRunning() {
 		return ErrEngineNotRunning
 	}
 
@@ -704,7 +704,7 @@ func (x *Engine) UnsetSchedulerJobKey(ctx context.Context, key string) error {
 // GetPartition returns the partition where a given actor is stored
 func (x *Engine) GetPartition(actorName string) int {
 	// return -1 when the engine is not running
-	if !x.running.Load() {
+	if !x.IsRunning() {
 		return -1
 	}
 
@@ -723,7 +723,7 @@ func (x *Engine) Events() <-chan *Event {
 // Peers returns a channel containing the list of peers at a given time
 func (x *Engine) Peers(ctx context.Context) ([]*Peer, error) {
 	// return an error when the engine is not running
-	if !x.running.Load() {
+	if !x.IsRunning() {
 		return nil, ErrEngineNotRunning
 	}
 
