@@ -1827,7 +1827,7 @@ func (x *actorSystem) configureServer(ctx context.Context, mux *nethttp.ServeMux
 	// Configure HTTP/2 with performance tuning
 	http2Server := &http2.Server{
 		MaxConcurrentStreams: 1000,               // Allow up to 1000 concurrent streams
-		MaxReadFrameSize:     10 * size.MB,       // 10 MB max frame size
+		MaxReadFrameSize:     16 * size.MB,       // 16 MB max frame size
 		IdleTimeout:          1200 * time.Second, // Timeout for idle connections
 	}
 
