@@ -2,8 +2,6 @@ syntax = "proto3";
 
 package internalpb;
 
-import "internal/actor.proto";
-
 option go_package = "github.com/tochemey/goakt/v2/internal/internalpb;internalpb";
 
 message PeerState {
