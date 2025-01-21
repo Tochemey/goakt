@@ -32,7 +32,6 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -44,6 +43,7 @@ import (
 	"github.com/tochemey/olric/events"
 	"github.com/tochemey/olric/hasher"
 	"github.com/tochemey/olric/pkg/storage"
+	"go.uber.org/atomic"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
@@ -52,11 +52,11 @@ import (
 	"github.com/tochemey/goakt/v2/discovery"
 	"github.com/tochemey/goakt/v2/goaktpb"
 	"github.com/tochemey/goakt/v2/hash"
+	"github.com/tochemey/goakt/v2/internal/errorschain"
 	"github.com/tochemey/goakt/v2/internal/internalpb"
+	"github.com/tochemey/goakt/v2/internal/size"
 	"github.com/tochemey/goakt/v2/log"
 )
-
-const MB = 1 << 20 // 1 MB = 2^20 bytes
 
 type EventType int
 
@@ -117,13 +117,15 @@ type Interface interface {
 	IsLeader(ctx context.Context) bool
 	// Actors returns all actors in the cluster at any given time
 	Actors(ctx context.Context, timeout time.Duration) ([]*internalpb.ActorRef, error)
+	// IsRunning returns true when the cluster engine is running
+	IsRunning() bool
 }
 
 // Engine represents the Engine
 type Engine struct {
 	*sync.Mutex
 	// specifies the total number of partitions
-	// the default values is 20
+	// the default values is 271
 	partitionsCount uint64
 
 	// specifies the minimum number of cluster members
@@ -176,6 +178,8 @@ type Engine struct {
 
 	tlsClientConfig *tls.Config
 	tlsServerConfig *tls.Config
+
+	running *atomic.Bool
 }
 
 // enforce compilation error
@@ -204,7 +208,8 @@ func NewEngine(name string, disco discovery.Provider, host *discovery.Node, opts
 		Mutex:                  new(sync.Mutex),
 		nodeJoinedEventsFilter: goset.NewSet[string](),
 		nodeLeftEventsFilter:   goset.NewSet[string](),
-		storageSize:            10 * MB,
+		storageSize:            20 * size.MB,
+		running:                atomic.NewBool(false),
 	}
 	// apply the various options
 	for _, opt := range opts {
@@ -315,7 +320,7 @@ func (x *Engine) Start(ctx context.Context) error {
 		Host:         x.node.Host,
 		RemotingPort: int32(x.node.RemotingPort),
 		PeersPort:    int32(x.node.PeersPort),
-		Actors:       []*internalpb.ActorRef{},
+		Actors:       map[string]string{},
 	}
 
 	if err := x.initializeState(ctx); err != nil {
@@ -334,12 +339,19 @@ func (x *Engine) Start(ctx context.Context) error {
 	x.messages = x.pubSub.Channel()
 	go x.consume()
 
+	x.running.Store(true)
 	logger.Infof("GoAkt cluster Engine=(%s) successfully started.", x.name)
 	return nil
 }
 
 // Stop stops the Engine gracefully
 func (x *Engine) Stop(ctx context.Context) error {
+	// check whether it is running
+	// if not running just return
+	if !x.IsRunning() {
+		return nil
+	}
+
 	// create a cancellation context of 1 second timeout
 	ctx, cancelFn := context.WithTimeout(ctx, x.shutdownTimeout)
 	defer cancelFn()
@@ -350,20 +362,18 @@ func (x *Engine) Stop(ctx context.Context) error {
 	// add some logging information
 	logger.Infof("Stopping GoAkt cluster Node=(%s)....🤔", x.name)
 
+	// create an errors chain to pipeline the shutdown processes
+	chain := errorschain.
+		New(errorschain.ReturnFirst()).
+		AddError(x.pubSub.Close()).
+		AddError(x.actorsMap.Destroy(ctx)).
+		AddError(x.statesMap.Destroy(ctx)).
+		AddError(x.jobKeysMap.Destroy(ctx)).
+		AddError(x.client.Close(ctx)).
+		AddError(x.server.Shutdown(ctx))
+
 	// close the events listener
-	if err := x.pubSub.Close(); err != nil {
-		logger.Errorf("failed to stop the cluster Engine on node=(%s): %w", x.node.PeersAddress(), err)
-		return err
-	}
-
-	// close the Node client
-	if err := x.client.Close(ctx); err != nil {
-		logger.Errorf("failed to stop the cluster Engine on node=(%s): %w", x.node.PeersAddress(), err)
-		return err
-	}
-
-	// let us stop the server
-	if err := x.server.Shutdown(ctx); err != nil {
+	if err := chain.Error(); err != nil {
 		logger.Errorf("failed to stop the cluster Engine on node=(%s): %w", x.node.PeersAddress(), err)
 		return err
 	}
@@ -377,9 +387,22 @@ func (x *Engine) Stop(ctx context.Context) error {
 	return nil
 }
 
+// IsRunning returns true when the cluster engine is running
+func (x *Engine) IsRunning() bool {
+	x.Lock()
+	running := x.running.Load()
+	x.Unlock()
+	return running
+}
+
 // IsLeader states whether the given cluster node is a leader or not at a given
 // point in time in the cluster
 func (x *Engine) IsLeader(ctx context.Context) bool {
+	// return false when not running
+	if !x.IsRunning() {
+		return false
+	}
+
 	x.Lock()
 	defer x.Unlock()
 	client := x.client
@@ -395,6 +418,11 @@ func (x *Engine) IsLeader(ctx context.Context) bool {
 
 // Actors returns all actors in the cluster at any given time
 func (x *Engine) Actors(ctx context.Context, timeout time.Duration) ([]*internalpb.ActorRef, error) {
+	// return an error when the engine is not running
+	if !x.IsRunning() {
+		return nil, ErrEngineNotRunning
+	}
+
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
@@ -429,6 +457,11 @@ func (x *Engine) Actors(ctx context.Context, timeout time.Duration) ([]*internal
 
 // PutActor pushes to the cluster the peer sync request
 func (x *Engine) PutActor(ctx context.Context, actor *internalpb.ActorRef) error {
+	// return an error when the engine is not running
+	if !x.IsRunning() {
+		return ErrEngineNotRunning
+	}
+
 	ctx, cancelFn := context.WithTimeout(ctx, x.writeTimeout)
 	defer cancelFn()
 
@@ -437,48 +470,48 @@ func (x *Engine) PutActor(ctx context.Context, actor *internalpb.ActorRef) error
 
 	logger := x.logger
 
-	logger.Infof("synchronization peer (%s)", x.node.PeersAddress())
+	logger.Infof("(%s) synchronization...", x.node.PeersAddress())
 
 	eg, ctx := errgroup.WithContext(ctx)
 	eg.SetLimit(2)
 
 	eg.Go(func() error {
 		encoded, _ := encode(actor)
-		if err := x.actorsMap.Put(ctx, actor.GetActorAddress().GetName(), encoded); err != nil {
-			return fmt.Errorf("failed to sync actor=(%s) of peer=(%s): %v", actor.GetActorAddress().GetName(), x.node.PeersAddress(), err)
+		key := actor.GetActorAddress().GetName()
+		if err := x.actorsMap.Put(ctx, key, encoded); err != nil {
+			return fmt.Errorf("(%s) failed to sync actor=(%s): %v", x.node.PeersAddress(), actor.GetActorAddress().GetName(), err)
 		}
-
 		return nil
 	})
 
 	eg.Go(func() error {
-		// append to the existing list
-		actors := append(x.peerState.GetActors(), actor)
-		// remove duplicates
-		compacted := slices.CompactFunc(actors, func(actor *internalpb.ActorRef, actor2 *internalpb.ActorRef) bool {
-			return proto.Equal(actor, actor2)
-		})
+		actors := x.peerState.GetActors()
+		actors[actor.GetActorAddress().GetName()] = actor.GetActorType()
+		x.peerState.Actors = actors
 
-		x.peerState.Actors = compacted
-		encoded, _ := proto.Marshal(x.peerState)
-		if err := x.statesMap.Put(ctx, x.node.PeersAddress(), encoded); err != nil {
-			return fmt.Errorf("failed to sync peer=(%s) request: %v", x.node.PeersAddress(), err)
+		bytea, _ := proto.Marshal(x.peerState)
+		if err := x.statesMap.Put(ctx, x.node.PeersAddress(), bytea); err != nil {
+			return fmt.Errorf("(%s) failed to sync state: %v", x.node.PeersAddress(), err)
 		}
-
 		return nil
 	})
 
 	if err := eg.Wait(); err != nil {
-		logger.Errorf("failed to synchronize peer=(%s): %v", x.node.PeersAddress(), err)
+		logger.Errorf("(%s) synchronization failed: %v", x.node.PeersAddress(), err)
 		return err
 	}
 
-	logger.Infof("peer (%s) successfully synchronized in the cluster", x.node.PeersAddress())
+	logger.Infof("(%s) successfully synchronized in the cluster", x.node.PeersAddress())
 	return nil
 }
 
 // GetState fetches a given peer state
 func (x *Engine) GetState(ctx context.Context, peerAddress string) (*internalpb.PeerState, error) {
+	// return an error when the engine is not running
+	if !x.IsRunning() {
+		return nil, ErrEngineNotRunning
+	}
+
 	ctx, cancelFn := context.WithTimeout(ctx, x.readTimeout)
 	defer cancelFn()
 
@@ -495,28 +528,33 @@ func (x *Engine) GetState(ctx context.Context, peerAddress string) (*internalpb.
 			return nil, ErrPeerSyncNotFound
 		}
 
-		logger.Errorf("[%s] failed to find peer=(%s) sync record: %v", x.node.PeersAddress(), peerAddress, err)
+		logger.Errorf("(%s) failed to find peer=(%s) sync record: %v", x.node.PeersAddress(), peerAddress, err)
 		return nil, err
 	}
 
 	bytea, err := resp.Byte()
 	if err != nil {
-		logger.Errorf("[%s] failed to read peer=(%s) sync record: %v", x.node.PeersAddress(), peerAddress, err)
+		logger.Errorf("(%s) failed to read peer=(%s) sync record: %v", x.node.PeersAddress(), peerAddress, err)
 		return nil, err
 	}
 
 	peerState := new(internalpb.PeerState)
 	if err := proto.Unmarshal(bytea, peerState); err != nil {
-		logger.Errorf("[%s] failed to decode peer=(%s) sync record: %v", x.node.PeersAddress(), peerAddress, err)
+		logger.Errorf("(%s) failed to decode peer=(%s) sync record: %v", x.node.PeersAddress(), peerAddress, err)
 		return nil, err
 	}
 
-	logger.Infof("[%s] successfully retrieved peer (%s) sync record .🎉", x.node.PeersAddress(), peerAddress)
+	logger.Infof("(%s) successfully retrieved peer (%s) sync record .🎉", x.node.PeersAddress(), peerAddress)
 	return peerState, nil
 }
 
 // GetActor fetches an actor from the Node
 func (x *Engine) GetActor(ctx context.Context, actorName string) (*internalpb.ActorRef, error) {
+	// return an error when the engine is not running
+	if !x.IsRunning() {
+		return nil, ErrEngineNotRunning
+	}
+
 	ctx, cancelFn := context.WithTimeout(ctx, x.readTimeout)
 	defer cancelFn()
 
@@ -525,37 +563,42 @@ func (x *Engine) GetActor(ctx context.Context, actorName string) (*internalpb.Ac
 
 	logger := x.logger
 
-	logger.Infof("[%s] retrieving actor (%s) from the cluster", x.node.PeersAddress(), actorName)
+	logger.Infof("(%s) retrieving actor (%s) from the cluster", x.node.PeersAddress(), actorName)
 
 	resp, err := x.actorsMap.Get(ctx, actorName)
 	if err != nil {
 		if errors.Is(err, olric.ErrKeyNotFound) {
-			logger.Warnf("[%s] could not find actor=%s the cluster", x.node.PeersAddress(), actorName)
+			logger.Warnf("(%s) could not find actor=%s the cluster", x.node.PeersAddress(), actorName)
 			return nil, ErrActorNotFound
 		}
-		logger.Errorf("[%s] failed to get actor=(%s) record from the cluster: %v", x.node.PeersAddress(), actorName, err)
+		logger.Errorf("(%s) failed to get actor=(%s) record from the cluster: %v", x.node.PeersAddress(), actorName, err)
 		return nil, err
 	}
 
 	bytea, err := resp.Byte()
 	if err != nil {
-		logger.Errorf("[%s] failed to read actor=(%s) record: %v", x.node.PeersAddress(), actorName, err)
+		logger.Errorf("(%s) failed to read actor=(%s) record: %v", x.node.PeersAddress(), actorName, err)
 		return nil, err
 	}
 
 	actor, err := decode(bytea)
 	if err != nil {
-		logger.Errorf("[%s] failed to decode actor=(%s) record: %v", x.node.PeersAddress(), actorName, err)
+		logger.Errorf("(%s) failed to decode actor=(%s) record: %v", x.node.PeersAddress(), actorName, err)
 		return nil, err
 	}
 
-	logger.Infof("[%s] successfully retrieved from the cluster actor (%s)", x.node.PeersAddress(), actor.GetActorAddress().GetName())
+	logger.Infof("(%s) successfully retrieved from the cluster actor (%s)", x.node.PeersAddress(), actor.GetActorAddress().GetName())
 	return actor, nil
 }
 
 // RemoveActor removes a given actor from the cluster.
 // An actor is removed from the cluster when this actor has been passivated.
 func (x *Engine) RemoveActor(ctx context.Context, actorName string) error {
+	// return an error when the engine is not running
+	if !x.IsRunning() {
+		return ErrEngineNotRunning
+	}
+
 	logger := x.logger
 	x.Lock()
 	defer x.Unlock()
@@ -564,7 +607,7 @@ func (x *Engine) RemoveActor(ctx context.Context, actorName string) error {
 
 	_, err := x.actorsMap.Delete(ctx, actorName)
 	if err != nil {
-		logger.Errorf("[%s] failed to remove actor=(%s) record from cluster: %v", x.node.PeersAddress(), actorName, err)
+		logger.Errorf("(%s) failed to remove actor=(%s) record from cluster: %v", x.node.PeersAddress(), actorName, err)
 		return err
 	}
 
@@ -574,6 +617,11 @@ func (x *Engine) RemoveActor(ctx context.Context, actorName string) error {
 
 // SetSchedulerJobKey sets a given key to the cluster
 func (x *Engine) SetSchedulerJobKey(ctx context.Context, key string) error {
+	// return an error when the engine is not running
+	if !x.IsRunning() {
+		return ErrEngineNotRunning
+	}
+
 	ctx, cancelFn := context.WithTimeout(ctx, x.writeTimeout)
 	defer cancelFn()
 
@@ -595,6 +643,11 @@ func (x *Engine) SetSchedulerJobKey(ctx context.Context, key string) error {
 
 // SchedulerJobKeyExists checks the existence of a given key
 func (x *Engine) SchedulerJobKeyExists(ctx context.Context, key string) (bool, error) {
+	// return an error when the engine is not running
+	if !x.IsRunning() {
+		return false, ErrEngineNotRunning
+	}
+
 	ctx, cancelFn := context.WithTimeout(ctx, x.readTimeout)
 	defer cancelFn()
 
@@ -620,6 +673,11 @@ func (x *Engine) SchedulerJobKeyExists(ctx context.Context, key string) (bool, e
 
 // UnsetSchedulerJobKey unsets the already set given key in the cluster
 func (x *Engine) UnsetSchedulerJobKey(ctx context.Context, key string) error {
+	// return an error when the engine is not running
+	if !x.IsRunning() {
+		return ErrEngineNotRunning
+	}
+
 	logger := x.logger
 
 	x.Lock()
@@ -638,6 +696,11 @@ func (x *Engine) UnsetSchedulerJobKey(ctx context.Context, key string) error {
 
 // GetPartition returns the partition where a given actor is stored
 func (x *Engine) GetPartition(actorName string) int {
+	// return -1 when the engine is not running
+	if !x.IsRunning() {
+		return -1
+	}
+
 	key := []byte(actorName)
 	hkey := x.hasher.HashCode(key)
 	partition := int(hkey % x.partitionsCount)
@@ -652,6 +715,11 @@ func (x *Engine) Events() <-chan *Event {
 
 // Peers returns a channel containing the list of peers at a given time
 func (x *Engine) Peers(ctx context.Context) ([]*Peer, error) {
+	// return an error when the engine is not running
+	if !x.IsRunning() {
+		return nil, ErrEngineNotRunning
+	}
+
 	x.Lock()
 	defer x.Unlock()
 	client := x.client

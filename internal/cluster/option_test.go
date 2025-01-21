@@ -31,6 +31,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
+	"github.com/tochemey/goakt/v2/internal/size"
 	"github.com/tochemey/goakt/v2/log"
 	testkit "github.com/tochemey/goakt/v2/mocks/hash"
 )
@@ -39,7 +40,7 @@ func TestOptions(t *testing.T) {
 	mockHasher := new(testkit.Hasher)
 	// nolint
 	tlsConfig := &tls.Config{}
-	size := uint64(1 * MB)
+	size := uint64(1 * size.MB)
 	testCases := []struct {
 		name     string
 		option   Option

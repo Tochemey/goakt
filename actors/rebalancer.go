@@ -38,6 +38,11 @@ import (
 	"github.com/tochemey/goakt/v2/log"
 )
 
+type toRebalance struct {
+	name string
+	kind string
+}
+
 // rebalancer is a system actor that helps rebalance cluster
 // when the cluster topology changes
 type rebalancer struct {
@@ -97,7 +102,7 @@ func (r *rebalancer) Rebalance(ctx *ReceiveContext) {
 		if len(leaderShares) > 0 {
 			eg.Go(func() error {
 				for _, actor := range leaderShares {
-					if !isReservedName(actor.GetActorAddress().GetName()) {
+					if !isReservedName(actor.name) {
 						if err := r.recreateLocally(egCtx, actor); err != nil {
 							return NewSpawnError(err)
 						}
@@ -125,7 +130,7 @@ func (r *rebalancer) Rebalance(ctx *ReceiveContext) {
 
 				for _, actor := range actors {
 					// never redistribute system actors
-					if !isReservedName(actor.GetActorAddress().GetName()) {
+					if !isReservedName(actor.name) {
 						if !peerFound {
 							err := r.recreateLocally(egCtx, actor)
 							if err == nil {
@@ -137,8 +142,8 @@ func (r *rebalancer) Rebalance(ctx *ReceiveContext) {
 						if err := r.remoting.RemoteSpawn(egCtx,
 							peerState.GetHost(),
 							int(peerState.GetRemotingPort()),
-							actor.GetActorAddress().GetName(),
-							actor.GetActorType()); err != nil {
+							actor.name,
+							actor.kind); err != nil {
 							logger.Error(err)
 							return NewSpawnError(err)
 						}
@@ -170,21 +175,35 @@ func (r *rebalancer) PostStop(context.Context) error {
 }
 
 // computeRebalancing build the list of actors to create on the leader node and the peers in the cluster
-func (r *rebalancer) computeRebalancing(totalPeers int, nodeLeftState *internalpb.PeerState) (leaderShares []*internalpb.ActorRef, peersShares [][]*internalpb.ActorRef) {
+func (r *rebalancer) computeRebalancing(totalPeers int, nodeLeftState *internalpb.PeerState) (leaderShares []*toRebalance, peersShares [][]*toRebalance) {
 	var (
-		chunks      [][]*internalpb.ActorRef
+		chunks      [][]*toRebalance
 		actorsCount = len(nodeLeftState.GetActors())
+		actors      = nodeLeftState.GetActors()
 	)
 
 	// distribute actors amongst the peers with the leader taking the heavy load
 	switch {
 	case actorsCount < totalPeers:
-		leaderShares = nodeLeftState.GetActors()
+		for name, kind := range actors {
+			leaderShares = append(leaderShares, &toRebalance{
+				name: name,
+				kind: kind,
+			})
+		}
 	default:
+		toRebalances := make([]*toRebalance, 0, actorsCount)
+		for name, kind := range actors {
+			toRebalances = append(toRebalances, &toRebalance{
+				name: name,
+				kind: kind,
+			})
+		}
+
 		quotient := actorsCount / totalPeers
 		remainder := actorsCount % totalPeers
-		leaderShares = nodeLeftState.GetActors()[:remainder]
-		chunks = slice.Chunk[*internalpb.ActorRef](nodeLeftState.GetActors()[remainder:], quotient)
+		leaderShares = toRebalances[:remainder]
+		chunks = slice.Chunk[*toRebalance](toRebalances[remainder:], quotient)
 	}
 
 	if len(chunks) > 0 {
@@ -195,11 +214,11 @@ func (r *rebalancer) computeRebalancing(totalPeers int, nodeLeftState *internalp
 }
 
 // recreateLocally recreates the actor
-func (r *rebalancer) recreateLocally(ctx context.Context, actor *internalpb.ActorRef) error {
-	iactor, err := r.reflection.ActorFrom(actor.GetActorType())
+func (r *rebalancer) recreateLocally(ctx context.Context, actor *toRebalance) error {
+	iactor, err := r.reflection.ActorFrom(actor.kind)
 	if err != nil {
 		return err
 	}
-	_, err = r.pid.ActorSystem().Spawn(ctx, actor.GetActorAddress().GetName(), iactor)
+	_, err = r.pid.ActorSystem().Spawn(ctx, actor.name, iactor)
 	return err
 }

@@ -22,17 +22,9 @@
  * SOFTWARE.
  */
 
-package cluster
+package size
 
-import "errors"
-
-var (
-	// ErrActorNotFound is return when an actor is not found
-	ErrActorNotFound = errors.New("actor not found")
-	// ErrPeerSyncNotFound is returned when a peerSync record is not found
-	ErrPeerSyncNotFound = errors.New("peerSync record not found")
-	// ErrInvalidTLSConfiguration is returned whent the TLS configuration is not properly set
-	ErrInvalidTLSConfiguration = errors.New("TLS configuration is invalid")
-	// ErrEngineNotRunning is returned when the cluster engine is not running
-	ErrEngineNotRunning = errors.New("engine is not running")
-)
+const KB = 1 << 10 // 1 KB = 1024 bytes
+const MB = 1 << 20 // 1 MB = 2^20 bytes = 1048576 bytes
+const GB = 1 << 30 // 1 GB = 2^30 bytes = 1073741824 bytes
+const TB = 1 << 40 // 1 TB = 2^40 bytes = 1099511627776 bytes

@@ -25,6 +25,7 @@
 package address
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -107,6 +108,12 @@ func TestAddress(t *testing.T) {
 		bytea := []byte("some")
 		actual := new(Address)
 		err := actual.UnmarshalBinary(bytea)
+		assert.Error(t, err)
+	})
+
+	t.Run("With actor name too long", func(t *testing.T) {
+		addr := New(strings.Repeat("a", 256), "system", "host", 1234)
+		err := addr.Validate()
 		assert.Error(t, err)
 	})
 }
