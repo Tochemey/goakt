@@ -53,17 +53,6 @@ const (
 	RemotingServiceRemoteSpawnProcedure = "/internalpb.RemotingService/RemoteSpawn"
 )
 
-// These variables are the protoreflect.Descriptor objects for the RPCs defined in this package.
-var (
-	remotingServiceServiceDescriptor             = internalpb.File_internal_remoting_proto.Services().ByName("RemotingService")
-	remotingServiceRemoteAskMethodDescriptor     = remotingServiceServiceDescriptor.Methods().ByName("RemoteAsk")
-	remotingServiceRemoteTellMethodDescriptor    = remotingServiceServiceDescriptor.Methods().ByName("RemoteTell")
-	remotingServiceRemoteLookupMethodDescriptor  = remotingServiceServiceDescriptor.Methods().ByName("RemoteLookup")
-	remotingServiceRemoteReSpawnMethodDescriptor = remotingServiceServiceDescriptor.Methods().ByName("RemoteReSpawn")
-	remotingServiceRemoteStopMethodDescriptor    = remotingServiceServiceDescriptor.Methods().ByName("RemoteStop")
-	remotingServiceRemoteSpawnMethodDescriptor   = remotingServiceServiceDescriptor.Methods().ByName("RemoteSpawn")
-)
-
 // RemotingServiceClient is a client for the internalpb.RemotingService service.
 type RemotingServiceClient interface {
 	// RemoteAsk is used to send a message to an actor remotely and expect a response immediately.
@@ -90,41 +79,42 @@ type RemotingServiceClient interface {
 // http://api.acme.com or https://acme.com/grpc).
 func NewRemotingServiceClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) RemotingServiceClient {
 	baseURL = strings.TrimRight(baseURL, "/")
+	remotingServiceMethods := internalpb.File_internal_remoting_proto.Services().ByName("RemotingService").Methods()
 	return &remotingServiceClient{
 		remoteAsk: connect.NewClient[internalpb.RemoteAskRequest, internalpb.RemoteAskResponse](
 			httpClient,
 			baseURL+RemotingServiceRemoteAskProcedure,
-			connect.WithSchema(remotingServiceRemoteAskMethodDescriptor),
+			connect.WithSchema(remotingServiceMethods.ByName("RemoteAsk")),
 			connect.WithClientOptions(opts...),
 		),
 		remoteTell: connect.NewClient[internalpb.RemoteTellRequest, internalpb.RemoteTellResponse](
 			httpClient,
 			baseURL+RemotingServiceRemoteTellProcedure,
-			connect.WithSchema(remotingServiceRemoteTellMethodDescriptor),
+			connect.WithSchema(remotingServiceMethods.ByName("RemoteTell")),
 			connect.WithClientOptions(opts...),
 		),
 		remoteLookup: connect.NewClient[internalpb.RemoteLookupRequest, internalpb.RemoteLookupResponse](
 			httpClient,
 			baseURL+RemotingServiceRemoteLookupProcedure,
-			connect.WithSchema(remotingServiceRemoteLookupMethodDescriptor),
+			connect.WithSchema(remotingServiceMethods.ByName("RemoteLookup")),
 			connect.WithClientOptions(opts...),
 		),
 		remoteReSpawn: connect.NewClient[internalpb.RemoteReSpawnRequest, internalpb.RemoteReSpawnResponse](
 			httpClient,
 			baseURL+RemotingServiceRemoteReSpawnProcedure,
-			connect.WithSchema(remotingServiceRemoteReSpawnMethodDescriptor),
+			connect.WithSchema(remotingServiceMethods.ByName("RemoteReSpawn")),
 			connect.WithClientOptions(opts...),
 		),
 		remoteStop: connect.NewClient[internalpb.RemoteStopRequest, internalpb.RemoteStopResponse](
 			httpClient,
 			baseURL+RemotingServiceRemoteStopProcedure,
-			connect.WithSchema(remotingServiceRemoteStopMethodDescriptor),
+			connect.WithSchema(remotingServiceMethods.ByName("RemoteStop")),
 			connect.WithClientOptions(opts...),
 		),
 		remoteSpawn: connect.NewClient[internalpb.RemoteSpawnRequest, internalpb.RemoteSpawnResponse](
 			httpClient,
 			baseURL+RemotingServiceRemoteSpawnProcedure,
-			connect.WithSchema(remotingServiceRemoteSpawnMethodDescriptor),
+			connect.WithSchema(remotingServiceMethods.ByName("RemoteSpawn")),
 			connect.WithClientOptions(opts...),
 		),
 	}
@@ -193,40 +183,41 @@ type RemotingServiceHandler interface {
 // By default, handlers support the Connect, gRPC, and gRPC-Web protocols with the binary Protobuf
 // and JSON codecs. They also support gzip compression.
 func NewRemotingServiceHandler(svc RemotingServiceHandler, opts ...connect.HandlerOption) (string, http.Handler) {
+	remotingServiceMethods := internalpb.File_internal_remoting_proto.Services().ByName("RemotingService").Methods()
 	remotingServiceRemoteAskHandler := connect.NewBidiStreamHandler(
 		RemotingServiceRemoteAskProcedure,
 		svc.RemoteAsk,
-		connect.WithSchema(remotingServiceRemoteAskMethodDescriptor),
+		connect.WithSchema(remotingServiceMethods.ByName("RemoteAsk")),
 		connect.WithHandlerOptions(opts...),
 	)
 	remotingServiceRemoteTellHandler := connect.NewClientStreamHandler(
 		RemotingServiceRemoteTellProcedure,
 		svc.RemoteTell,
-		connect.WithSchema(remotingServiceRemoteTellMethodDescriptor),
+		connect.WithSchema(remotingServiceMethods.ByName("RemoteTell")),
 		connect.WithHandlerOptions(opts...),
 	)
 	remotingServiceRemoteLookupHandler := connect.NewUnaryHandler(
 		RemotingServiceRemoteLookupProcedure,
 		svc.RemoteLookup,
-		connect.WithSchema(remotingServiceRemoteLookupMethodDescriptor),
+		connect.WithSchema(remotingServiceMethods.ByName("RemoteLookup")),
 		connect.WithHandlerOptions(opts...),
 	)
 	remotingServiceRemoteReSpawnHandler := connect.NewUnaryHandler(
 		RemotingServiceRemoteReSpawnProcedure,
 		svc.RemoteReSpawn,
-		connect.WithSchema(remotingServiceRemoteReSpawnMethodDescriptor),
+		connect.WithSchema(remotingServiceMethods.ByName("RemoteReSpawn")),
 		connect.WithHandlerOptions(opts...),
 	)
 	remotingServiceRemoteStopHandler := connect.NewUnaryHandler(
 		RemotingServiceRemoteStopProcedure,
 		svc.RemoteStop,
-		connect.WithSchema(remotingServiceRemoteStopMethodDescriptor),
+		connect.WithSchema(remotingServiceMethods.ByName("RemoteStop")),
 		connect.WithHandlerOptions(opts...),
 	)
 	remotingServiceRemoteSpawnHandler := connect.NewUnaryHandler(
 		RemotingServiceRemoteSpawnProcedure,
 		svc.RemoteSpawn,
-		connect.WithSchema(remotingServiceRemoteSpawnMethodDescriptor),
+		connect.WithSchema(remotingServiceMethods.ByName("RemoteSpawn")),
 		connect.WithHandlerOptions(opts...),
 	)
 	return "/internalpb.RemotingService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

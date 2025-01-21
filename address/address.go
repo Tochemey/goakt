@@ -204,6 +204,7 @@ func (a *Address) Validate() error {
 		AddValidator(validation.NewTCPAddressValidator(net.JoinHostPort(a.GetHost(), strconv.Itoa(int(a.GetPort()))))).
 		AddValidator(validation.NewEmptyStringValidator("system", a.GetSystem())).
 		AddValidator(validation.NewEmptyStringValidator("name", a.GetName())).
+		AddAssertion(len(a.GetName()) <= 255, "actor name is too long").
 		AddValidator(validation.NewPatternValidator(pattern, a.GetSystem(), customErr)).
 		AddValidator(validation.NewPatternValidator(pattern, strings.TrimSpace(a.GetName()), customErr)).
 		AddAssertion(a.Address != nil, "address is required").

@@ -6,19 +6,6 @@ import "internal/actor.proto";
 
 option go_package = "github.com/tochemey/goakt/v2/internal/internalpb;internalpb";
 
-// PeersSync is used to share a created/ restarted actor
-// on a given node to his peers when cluster is enabled
-message PeersSync {
-  // Specifies the peer host
-  string host = 1;
-  // Specifies the remoting port
-  int32 remoting_port = 2;
-  // Specifies the remoting host
-  int32 peers_port = 3;
-  // Specifies the wire actor
-  ActorRef actor = 4;
-}
-
 message PeerState {
   // Specifies the peer host
   string host = 1;
@@ -27,7 +14,8 @@ message PeerState {
   // Specifies the remoting host
   int32 peers_port = 3;
   // Specifies the list of actors
-  repeated ActorRef actors = 4;
+  // actorName -> actorKind
+  map<string, string> actors = 4;
 }
 
 message Rebalance {

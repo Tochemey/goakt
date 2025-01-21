@@ -32,7 +32,6 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -322,7 +321,7 @@ func (x *Engine) Start(ctx context.Context) error {
 		Host:         x.node.Host,
 		RemotingPort: int32(x.node.RemotingPort),
 		PeersPort:    int32(x.node.PeersPort),
-		Actors:       []*internalpb.ActorRef{},
+		Actors:       map[string]string{},
 	}
 
 	if err := x.initializeState(ctx); err != nil {
@@ -472,43 +471,38 @@ func (x *Engine) PutActor(ctx context.Context, actor *internalpb.ActorRef) error
 
 	logger := x.logger
 
-	logger.Infof("synchronization peer (%s)", x.node.PeersAddress())
+	logger.Infof("(%s) synchronization...", x.node.PeersAddress())
 
 	eg, ctx := errgroup.WithContext(ctx)
 	eg.SetLimit(2)
 
 	eg.Go(func() error {
 		encoded, _ := encode(actor)
-		if err := x.actorsMap.Put(ctx, actor.GetActorAddress().GetName(), encoded); err != nil {
-			return fmt.Errorf("failed to sync actor=(%s) of peer=(%s): %v", actor.GetActorAddress().GetName(), x.node.PeersAddress(), err)
+		key := actor.GetActorAddress().GetName()
+		if err := x.actorsMap.Put(ctx, key, encoded); err != nil {
+			return fmt.Errorf("(%s) failed to sync actor=(%s): %v", x.node.PeersAddress(), actor.GetActorAddress().GetName(), err)
 		}
-
 		return nil
 	})
 
 	eg.Go(func() error {
-		// append to the existing list
-		actors := append(x.peerState.GetActors(), actor)
-		// remove duplicates
-		compacted := slices.CompactFunc(actors, func(actor *internalpb.ActorRef, actor2 *internalpb.ActorRef) bool {
-			return proto.Equal(actor, actor2)
-		})
+		actors := x.peerState.GetActors()
+		actors[actor.GetActorAddress().GetName()] = actor.GetActorType()
+		x.peerState.Actors = actors
 
-		x.peerState.Actors = compacted
-		encoded, _ := proto.Marshal(x.peerState)
-		if err := x.statesMap.Put(ctx, x.node.PeersAddress(), encoded); err != nil {
-			return fmt.Errorf("failed to sync peer=(%s) request: %v", x.node.PeersAddress(), err)
+		bytea, _ := proto.Marshal(x.peerState)
+		if err := x.statesMap.Put(ctx, x.node.PeersAddress(), bytea); err != nil {
+			return fmt.Errorf("(%s) failed to sync state: %v", x.node.PeersAddress(), err)
 		}
-
 		return nil
 	})
 
 	if err := eg.Wait(); err != nil {
-		logger.Errorf("failed to synchronize peer=(%s): %v", x.node.PeersAddress(), err)
+		logger.Errorf("(%s) synchronization failed: %v", x.node.PeersAddress(), err)
 		return err
 	}
 
-	logger.Infof("peer (%s) successfully synchronized in the cluster", x.node.PeersAddress())
+	logger.Infof("(%s) successfully synchronized in the cluster", x.node.PeersAddress())
 	return nil
 }
 
@@ -535,23 +529,23 @@ func (x *Engine) GetState(ctx context.Context, peerAddress string) (*internalpb.
 			return nil, ErrPeerSyncNotFound
 		}
 
-		logger.Errorf("[%s] failed to find peer=(%s) sync record: %v", x.node.PeersAddress(), peerAddress, err)
+		logger.Errorf("(%s) failed to find peer=(%s) sync record: %v", x.node.PeersAddress(), peerAddress, err)
 		return nil, err
 	}
 
 	bytea, err := resp.Byte()
 	if err != nil {
-		logger.Errorf("[%s] failed to read peer=(%s) sync record: %v", x.node.PeersAddress(), peerAddress, err)
+		logger.Errorf("(%s) failed to read peer=(%s) sync record: %v", x.node.PeersAddress(), peerAddress, err)
 		return nil, err
 	}
 
 	peerState := new(internalpb.PeerState)
 	if err := proto.Unmarshal(bytea, peerState); err != nil {
-		logger.Errorf("[%s] failed to decode peer=(%s) sync record: %v", x.node.PeersAddress(), peerAddress, err)
+		logger.Errorf("(%s) failed to decode peer=(%s) sync record: %v", x.node.PeersAddress(), peerAddress, err)
 		return nil, err
 	}
 
-	logger.Infof("[%s] successfully retrieved peer (%s) sync record .🎉", x.node.PeersAddress(), peerAddress)
+	logger.Infof("(%s) successfully retrieved peer (%s) sync record .🎉", x.node.PeersAddress(), peerAddress)
 	return peerState, nil
 }
 
@@ -570,31 +564,31 @@ func (x *Engine) GetActor(ctx context.Context, actorName string) (*internalpb.Ac
 
 	logger := x.logger
 
-	logger.Infof("[%s] retrieving actor (%s) from the cluster", x.node.PeersAddress(), actorName)
+	logger.Infof("(%s) retrieving actor (%s) from the cluster", x.node.PeersAddress(), actorName)
 
 	resp, err := x.actorsMap.Get(ctx, actorName)
 	if err != nil {
 		if errors.Is(err, olric.ErrKeyNotFound) {
-			logger.Warnf("[%s] could not find actor=%s the cluster", x.node.PeersAddress(), actorName)
+			logger.Warnf("(%s) could not find actor=%s the cluster", x.node.PeersAddress(), actorName)
 			return nil, ErrActorNotFound
 		}
-		logger.Errorf("[%s] failed to get actor=(%s) record from the cluster: %v", x.node.PeersAddress(), actorName, err)
+		logger.Errorf("(%s) failed to get actor=(%s) record from the cluster: %v", x.node.PeersAddress(), actorName, err)
 		return nil, err
 	}
 
 	bytea, err := resp.Byte()
 	if err != nil {
-		logger.Errorf("[%s] failed to read actor=(%s) record: %v", x.node.PeersAddress(), actorName, err)
+		logger.Errorf("(%s) failed to read actor=(%s) record: %v", x.node.PeersAddress(), actorName, err)
 		return nil, err
 	}
 
 	actor, err := decode(bytea)
 	if err != nil {
-		logger.Errorf("[%s] failed to decode actor=(%s) record: %v", x.node.PeersAddress(), actorName, err)
+		logger.Errorf("(%s) failed to decode actor=(%s) record: %v", x.node.PeersAddress(), actorName, err)
 		return nil, err
 	}
 
-	logger.Infof("[%s] successfully retrieved from the cluster actor (%s)", x.node.PeersAddress(), actor.GetActorAddress().GetName())
+	logger.Infof("(%s) successfully retrieved from the cluster actor (%s)", x.node.PeersAddress(), actor.GetActorAddress().GetName())
 	return actor, nil
 }
 
@@ -614,7 +608,7 @@ func (x *Engine) RemoveActor(ctx context.Context, actorName string) error {
 
 	_, err := x.actorsMap.Delete(ctx, actorName)
 	if err != nil {
-		logger.Errorf("[%s] failed to remove actor=(%s) record from cluster: %v", x.node.PeersAddress(), actorName, err)
+		logger.Errorf("(%s) failed to remove actor=(%s) record from cluster: %v", x.node.PeersAddress(), actorName, err)
 		return err
 	}
 

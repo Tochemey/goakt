@@ -40,13 +40,6 @@ const (
 	ClusterServiceGetKindsProcedure = "/internalpb.ClusterService/GetKinds"
 )
 
-// These variables are the protoreflect.Descriptor objects for the RPCs defined in this package.
-var (
-	clusterServiceServiceDescriptor             = internalpb.File_internal_cluster_proto.Services().ByName("ClusterService")
-	clusterServiceGetNodeMetricMethodDescriptor = clusterServiceServiceDescriptor.Methods().ByName("GetNodeMetric")
-	clusterServiceGetKindsMethodDescriptor      = clusterServiceServiceDescriptor.Methods().ByName("GetKinds")
-)
-
 // ClusterServiceClient is a client for the internalpb.ClusterService service.
 type ClusterServiceClient interface {
 	// GetNodeMetric returns the node metric
@@ -64,17 +57,18 @@ type ClusterServiceClient interface {
 // http://api.acme.com or https://acme.com/grpc).
 func NewClusterServiceClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) ClusterServiceClient {
 	baseURL = strings.TrimRight(baseURL, "/")
+	clusterServiceMethods := internalpb.File_internal_cluster_proto.Services().ByName("ClusterService").Methods()
 	return &clusterServiceClient{
 		getNodeMetric: connect.NewClient[internalpb.GetNodeMetricRequest, internalpb.GetNodeMetricResponse](
 			httpClient,
 			baseURL+ClusterServiceGetNodeMetricProcedure,
-			connect.WithSchema(clusterServiceGetNodeMetricMethodDescriptor),
+			connect.WithSchema(clusterServiceMethods.ByName("GetNodeMetric")),
 			connect.WithClientOptions(opts...),
 		),
 		getKinds: connect.NewClient[internalpb.GetKindsRequest, internalpb.GetKindsResponse](
 			httpClient,
 			baseURL+ClusterServiceGetKindsProcedure,
-			connect.WithSchema(clusterServiceGetKindsMethodDescriptor),
+			connect.WithSchema(clusterServiceMethods.ByName("GetKinds")),
 			connect.WithClientOptions(opts...),
 		),
 	}
@@ -110,16 +104,17 @@ type ClusterServiceHandler interface {
 // By default, handlers support the Connect, gRPC, and gRPC-Web protocols with the binary Protobuf
 // and JSON codecs. They also support gzip compression.
 func NewClusterServiceHandler(svc ClusterServiceHandler, opts ...connect.HandlerOption) (string, http.Handler) {
+	clusterServiceMethods := internalpb.File_internal_cluster_proto.Services().ByName("ClusterService").Methods()
 	clusterServiceGetNodeMetricHandler := connect.NewUnaryHandler(
 		ClusterServiceGetNodeMetricProcedure,
 		svc.GetNodeMetric,
-		connect.WithSchema(clusterServiceGetNodeMetricMethodDescriptor),
+		connect.WithSchema(clusterServiceMethods.ByName("GetNodeMetric")),
 		connect.WithHandlerOptions(opts...),
 	)
 	clusterServiceGetKindsHandler := connect.NewUnaryHandler(
 		ClusterServiceGetKindsProcedure,
 		svc.GetKinds,
-		connect.WithSchema(clusterServiceGetKindsMethodDescriptor),
+		connect.WithSchema(clusterServiceMethods.ByName("GetKinds")),
 		connect.WithHandlerOptions(opts...),
 	)
 	return "/internalpb.ClusterService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
