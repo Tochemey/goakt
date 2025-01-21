@@ -61,6 +61,7 @@ import (
 	"github.com/tochemey/goakt/v2/internal/eventstream"
 	"github.com/tochemey/goakt/v2/internal/internalpb"
 	"github.com/tochemey/goakt/v2/internal/internalpb/internalpbconnect"
+	"github.com/tochemey/goakt/v2/internal/size"
 	"github.com/tochemey/goakt/v2/internal/tcp"
 	"github.com/tochemey/goakt/v2/internal/types"
 	"github.com/tochemey/goakt/v2/log"
@@ -1826,7 +1827,7 @@ func (x *actorSystem) configureServer(ctx context.Context, mux *nethttp.ServeMux
 	// Configure HTTP/2 with performance tuning
 	http2Server := &http2.Server{
 		MaxConcurrentStreams: 1000,               // Allow up to 1000 concurrent streams
-		MaxReadFrameSize:     10 << 20,           // 10 MB max frame size
+		MaxReadFrameSize:     10 * size.MB,       // 10 MB max frame size
 		IdleTimeout:          1200 * time.Second, // Timeout for idle connections
 	}
 

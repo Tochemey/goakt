@@ -54,10 +54,9 @@ import (
 	"github.com/tochemey/goakt/v2/hash"
 	"github.com/tochemey/goakt/v2/internal/errorschain"
 	"github.com/tochemey/goakt/v2/internal/internalpb"
+	"github.com/tochemey/goakt/v2/internal/size"
 	"github.com/tochemey/goakt/v2/log"
 )
-
-const MB = 1 << 20 // 1 MB = 2^20 bytes
 
 type EventType int
 
@@ -209,7 +208,7 @@ func NewEngine(name string, disco discovery.Provider, host *discovery.Node, opts
 		Mutex:                  new(sync.Mutex),
 		nodeJoinedEventsFilter: goset.NewSet[string](),
 		nodeLeftEventsFilter:   goset.NewSet[string](),
-		storageSize:            10 * MB,
+		storageSize:            20 * size.MB,
 		running:                atomic.NewBool(false),
 	}
 	// apply the various options
