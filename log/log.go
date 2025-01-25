@@ -139,7 +139,13 @@ func New(level Level, writers ...io.Writer) *Log {
 		)
 	}
 	// get the zap Log
-	zapLogger := zap.New(core, zap.AddCaller(), zap.AddCallerSkip(1))
+	zapLogger := zap.New(core,
+		zap.AddCaller(),
+		zap.AddCallerSkip(1),
+		zap.AddStacktrace(zapcore.PanicLevel),
+		zap.AddStacktrace(zapcore.ErrorLevel),
+		zap.AddStacktrace(zapcore.FatalLevel))
+
 	// set the global logger
 	zap.ReplaceGlobals(zapLogger)
 	// create the instance of Log and returns it
