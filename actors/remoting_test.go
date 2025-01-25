@@ -569,7 +569,10 @@ func TestRemoteTell(t *testing.T) {
 			WithLogger(logger),
 			WithPassivationDisabled(),
 			WithRemoting(host, int32(remotingPort)),
-			WithTLS(serverConfig, clientConfig),
+			WithTLS(&TLSInfo{
+				ClientConfig: clientConfig,
+				ServerConfig: serverConfig,
+			}),
 		)
 		// assert there are no error
 		require.NoError(t, err)
@@ -1161,7 +1164,10 @@ func TestRemoteAsk(t *testing.T) {
 		// create the actor system
 		sys, err := NewActorSystem(
 			"test",
-			WithTLS(serverConfig, clientConfig),
+			WithTLS(&TLSInfo{
+				ClientConfig: clientConfig,
+				ServerConfig: serverConfig,
+			}),
 			WithLogger(logger),
 			WithPassivationDisabled(),
 			WithRemoting(host, int32(remotingPort)),
@@ -1278,7 +1284,10 @@ func TestRemotingLookup(t *testing.T) {
 			WithLogger(logger),
 			WithPassivationDisabled(),
 			WithRemoting(host, int32(remotingPort)),
-			WithTLS(serverConfig, clientConfig),
+			WithTLS(&TLSInfo{
+				ClientConfig: clientConfig,
+				ServerConfig: serverConfig,
+			}),
 		)
 		// assert there are no error
 		require.NoError(t, err)
@@ -1423,7 +1432,10 @@ func TestRemotingReSpawn(t *testing.T) {
 			WithLogger(logger),
 			WithPassivationDisabled(),
 			WithRemoting(host, int32(remotingPort)),
-			WithTLS(serverConfig, clientConfig),
+			WithTLS(&TLSInfo{
+				ClientConfig: clientConfig,
+				ServerConfig: serverConfig,
+			}),
 		)
 		// assert there are no error
 		require.NoError(t, err)
@@ -1575,7 +1587,10 @@ func TestRemotingStop(t *testing.T) {
 			WithLogger(logger),
 			WithPassivationDisabled(),
 			WithRemoting(host, int32(remotingPort)),
-			WithTLS(serverConfig, clientConfig),
+			WithTLS(&TLSInfo{
+				ClientConfig: clientConfig,
+				ServerConfig: serverConfig,
+			}),
 		)
 		// assert there are no error
 		require.NoError(t, err)
@@ -1779,7 +1794,10 @@ func TestRemotingSpawn(t *testing.T) {
 			WithLogger(logger),
 			WithPassivationDisabled(),
 			WithRemoting(host, int32(remotingPort)),
-			WithTLS(serverConfig, clientConfig),
+			WithTLS(&TLSInfo{
+				ClientConfig: clientConfig,
+				ServerConfig: serverConfig,
+			}),
 		)
 		// assert there are no error
 		require.NoError(t, err)

@@ -44,6 +44,10 @@ func TestOption(t *testing.T) {
 	hasher := hash.DefaultHasher()
 	// nolint
 	tlsConfig := &tls.Config{}
+	tlsInfo := &TLSInfo{
+		ClientConfig: tlsConfig,
+		ServerConfig: tlsConfig,
+	}
 	testCases := []struct {
 		name     string
 		option   Option
@@ -111,7 +115,7 @@ func TestOption(t *testing.T) {
 		},
 		{
 			name:     "WithTLS",
-			option:   WithTLS(tlsConfig, tlsConfig),
+			option:   WithTLS(tlsInfo),
 			expected: actorSystem{tlsServerConfig: tlsConfig, tlsClientConfig: tlsConfig},
 		},
 	}

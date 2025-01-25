@@ -499,7 +499,10 @@ func startClusterSystem(t *testing.T, serverAddr string, opts ...testClusterOpti
 	if cfg.tlsEnabled {
 		serverConfig := testutil.GetServerTLSConfig(t, cfg.rootCert)
 		clientConfig := testutil.GetClientTLSConfig(t, cfg.rootCert)
-		options = append(options, WithTLS(serverConfig, clientConfig))
+		options = append(options, WithTLS(&TLSInfo{
+			ClientConfig: clientConfig,
+			ServerConfig: serverConfig,
+		}))
 	}
 
 	// create the actor system

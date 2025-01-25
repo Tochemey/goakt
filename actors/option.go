@@ -26,7 +26,6 @@ package actors
 
 import (
 	"context"
-	"crypto/tls"
 	"time"
 
 	"github.com/tochemey/goakt/v2/hash"
@@ -184,9 +183,9 @@ func WithCoordinatedShutdown(hooks ...ShutdownHook) Option {
 //
 // In cluster mode, all nodes must share the same root CA to establish
 // secure communication and complete handshakes successfully.
-func WithTLS(serverConfig, clientConfig *tls.Config) Option {
+func WithTLS(tlsInfo *TLSInfo) Option {
 	return OptionFunc(func(system *actorSystem) {
-		system.tlsServerConfig = serverConfig
-		system.tlsClientConfig = clientConfig
+		system.tlsServerConfig = tlsInfo.ServerConfig
+		system.tlsClientConfig = tlsInfo.ClientConfig
 	})
 }

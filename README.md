@@ -383,7 +383,7 @@ A simple logging interface to allow custom logger to be implemented instead of u
 
 ### TLS Support
 
-GoAkt now supports TLS in its latest commit. When running in cluster mode, all nodes must share the same root Certificate Authority (CA) to ensure a successful handshake. 
+GoAkt now supports TLS. When running in cluster mode, all nodes must share the same root Certificate Authority (CA) to ensure a successful handshake. 
 TLS can be enabled when creating the actor system by using the option `WithTLS` method. This method allows you to configure both the TLS server and client settings.
 
 The client configuration is essential for enabling secure communication between nodes, particularly in remoting and cluster modes. 
