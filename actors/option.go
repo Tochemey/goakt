@@ -29,7 +29,9 @@ import (
 	"time"
 
 	"github.com/tochemey/goakt/v2/hash"
+	"github.com/tochemey/goakt/v2/internal/size"
 	"github.com/tochemey/goakt/v2/log"
+	"github.com/tochemey/goakt/v2/remote"
 )
 
 // ShutdownHook defines the shutdown hook to be executed alongside the
@@ -90,14 +92,22 @@ func WithPassivationDisabled() Option {
 }
 
 // WithRemoting enables remoting on the actor system
+// Deprecated: use WithRemote which provides better remoting configuration and optimization
 func WithRemoting(host string, port int32) Option {
 	return OptionFunc(
 		func(a *actorSystem) {
 			a.remotingEnabled.Store(true)
-			a.port = port
-			a.host = host
+			a.remoteConfig = remote.NewConfig(host, int(port), 16*size.MB)
 		},
 	)
+}
+
+// WithRemote enables remoting on the actor system
+func WithRemote(config *remote.Config) Option {
+	return OptionFunc(func(a *actorSystem) {
+		a.remotingEnabled.Store(true)
+		a.remoteConfig = config
+	})
 }
 
 // WithCluster enables the cluster mode

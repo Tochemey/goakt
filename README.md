@@ -331,7 +331,7 @@ when creating the actor system. The tasks are executed in the order they have be
 
 ### Remoting
 
-[Remoting](./actors/remoting.go) allows remote actors to communicate. The underlying technology is gRPC. To enable remoting just use the `WithRemoting` option when
+[Remoting](./actors/remoting.go) allows remote actors to communicate. The underlying technology is gRPC. To enable remoting just use the `WithRemote` option when
 creating the actor system. See actor system [options](./actors/option.go). These are the following remoting features available:
 
 - `RemoteTell`: to send a fire-and-forget message to an actor remotely
