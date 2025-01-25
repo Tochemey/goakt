@@ -46,6 +46,19 @@ func TestConfig(t *testing.T) {
 		assert.Exactly(t, "127.0.0.1", config.BindAddr())
 		assert.Exactly(t, 0, config.BindPort())
 	})
+	t.Run("With config", func(t *testing.T) {
+		config := NewConfig("127.0.0.1", 8080, 16*size.MB,
+			WithReadIdleTimeout(10*time.Second),
+			WithWriteTimeout(10*time.Second))
+		require.NoError(t, config.Validate())
+		require.NoError(t, config.Sanitize())
+		assert.EqualValues(t, 16*size.MB, config.MaxFrameSize())
+		assert.Exactly(t, 10*time.Second, config.WriteTimeout())
+		assert.Exactly(t, 10*time.Second, config.ReadIdleTimeout())
+		assert.Exactly(t, 1200*time.Second, config.IdleTimeout())
+		assert.Exactly(t, "127.0.0.1", config.BindAddr())
+		assert.Exactly(t, 8080, config.BindPort())
+	})
 	t.Run("With invalid framesize", func(t *testing.T) {
 		config := NewConfig("127.0.0.1", 8080, 20*size.MB)
 		err := config.Validate()
