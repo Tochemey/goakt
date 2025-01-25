@@ -35,6 +35,7 @@ import (
 
 	"github.com/tochemey/goakt/v2/hash"
 	"github.com/tochemey/goakt/v2/log"
+	"github.com/tochemey/goakt/v2/remote"
 )
 
 func TestOption(t *testing.T) {
@@ -48,6 +49,9 @@ func TestOption(t *testing.T) {
 		ClientConfig: tlsConfig,
 		ServerConfig: tlsConfig,
 	}
+
+	remoteConfig := remote.DefaultConfig()
+
 	testCases := []struct {
 		name     string
 		option   Option
@@ -72,11 +76,6 @@ func TestOption(t *testing.T) {
 			name:     "WithPassivationDisabled",
 			option:   WithPassivationDisabled(),
 			expected: actorSystem{expireActorAfter: -1},
-		},
-		{
-			name:     "WithRemoting",
-			option:   WithRemoting("localhost", 3100),
-			expected: actorSystem{remotingEnabled: atomicTrue, port: 3100, host: "localhost"},
 		},
 		{
 			name:     "WithShutdownTimeout",
@@ -117,6 +116,11 @@ func TestOption(t *testing.T) {
 			name:     "WithTLS",
 			option:   WithTLS(tlsInfo),
 			expected: actorSystem{tlsServerConfig: tlsConfig, tlsClientConfig: tlsConfig},
+		},
+		{
+			name:     "WithRemote",
+			option:   WithRemote(remoteConfig),
+			expected: actorSystem{remotingEnabled: atomicTrue, remoteConfig: remoteConfig},
 		},
 	}
 

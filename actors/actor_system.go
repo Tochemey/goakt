@@ -61,10 +61,10 @@ import (
 	"github.com/tochemey/goakt/v2/internal/eventstream"
 	"github.com/tochemey/goakt/v2/internal/internalpb"
 	"github.com/tochemey/goakt/v2/internal/internalpb/internalpbconnect"
-	"github.com/tochemey/goakt/v2/internal/size"
 	"github.com/tochemey/goakt/v2/internal/tcp"
 	"github.com/tochemey/goakt/v2/internal/types"
 	"github.com/tochemey/goakt/v2/log"
+	"github.com/tochemey/goakt/v2/remote"
 )
 
 // ActorSystem defines the contract of an actor system
@@ -169,7 +169,7 @@ type ActorSystem interface {
 	Host() string
 	// Port returns the actor system node port.
 	// This is the bind port for remote communication
-	Port() int32
+	Port() int
 	// Uptime returns the number of seconds since the actor system started
 	Uptime() int64
 	// Running returns true when the actor system is running
@@ -240,13 +240,10 @@ type actorSystem struct {
 	// This allows to handle remote messaging
 	remotingEnabled atomic.Bool
 	remoting        *Remoting
-	// Specifies the remoting port
-	port int32
-	// Specifies the remoting host
-	host string
 	// Specifies the remoting server
-	server   *nethttp.Server
-	listener net.Listener
+	server       *nethttp.Server
+	listener     net.Listener
+	remoteConfig *remote.Config
 
 	// cluster settings
 	clusterEnabled atomic.Bool
@@ -335,8 +332,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		clusterSyncStopSig:     make(chan types.Unit, 1),
 		peersCache:             newPeerCache(),
 		peersStateLoopInterval: DefaultPeerStateLoopInterval,
-		port:                   0,
-		host:                   "127.0.0.1",
+		remoteConfig:           remote.DefaultConfig(),
 		actors:                 newTree(),
 		startedAt:              atomic.NewInt64(0),
 		rebalancing:            atomic.NewBool(false),
@@ -358,8 +354,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		opt.Apply(system)
 	}
 
-	// set the host and port
-	if err := system.setHostPort(); err != nil {
+	if err := system.remoteConfig.Sanitize(); err != nil {
 		return nil, err
 	}
 
@@ -503,16 +498,16 @@ func (x *actorSystem) Uptime() int64 {
 // This is the bind address for remote communication
 func (x *actorSystem) Host() string {
 	x.locker.Lock()
-	host := x.host
+	host := x.remoteConfig.BindAddr()
 	x.locker.Unlock()
 	return host
 }
 
 // Port returns the actor system node port.
 // This is the bind port for remote communication
-func (x *actorSystem) Port() int32 {
+func (x *actorSystem) Port() int {
 	x.locker.Lock()
-	port := x.port
+	port := x.remoteConfig.BindPort()
 	x.locker.Unlock()
 	return port
 }
@@ -942,7 +937,7 @@ func (x *actorSystem) RemoteLookup(ctx context.Context, request *connect.Request
 		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrRemotingDisabled)
 	}
 
-	remoteAddr := fmt.Sprintf("%s:%d", x.host, x.port)
+	remoteAddr := fmt.Sprintf("%s:%d", x.remoteConfig.BindAddr(), x.remoteConfig.BindPort())
 	if remoteAddr != net.JoinHostPort(msg.GetHost(), strconv.Itoa(int(msg.GetPort()))) {
 		return nil, connect.NewError(connect.CodeInvalidArgument, ErrInvalidHost)
 	}
@@ -1004,7 +999,7 @@ func (x *actorSystem) RemoteAsk(ctx context.Context, stream *connect.BidiStream[
 		receiver := message.GetReceiver()
 		name := receiver.GetName()
 
-		remoteAddr := fmt.Sprintf("%s:%d", x.host, x.port)
+		remoteAddr := fmt.Sprintf("%s:%d", x.remoteConfig.BindAddr(), x.remoteConfig.BindPort())
 		if remoteAddr != net.JoinHostPort(receiver.GetHost(), strconv.Itoa(int(receiver.GetPort()))) {
 			return connect.NewError(connect.CodeInvalidArgument, ErrInvalidHost)
 		}
@@ -1107,7 +1102,7 @@ func (x *actorSystem) RemoteReSpawn(ctx context.Context, request *connect.Reques
 		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrRemotingDisabled)
 	}
 
-	remoteAddr := fmt.Sprintf("%s:%d", x.host, x.port)
+	remoteAddr := fmt.Sprintf("%s:%d", x.remoteConfig.BindAddr(), x.remoteConfig.BindPort())
 	if remoteAddr != net.JoinHostPort(msg.GetHost(), strconv.Itoa(int(msg.GetPort()))) {
 		return nil, connect.NewError(connect.CodeInvalidArgument, ErrInvalidHost)
 	}
@@ -1146,7 +1141,7 @@ func (x *actorSystem) RemoteStop(ctx context.Context, request *connect.Request[i
 		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrRemotingDisabled)
 	}
 
-	remoteAddr := fmt.Sprintf("%s:%d", x.host, x.port)
+	remoteAddr := fmt.Sprintf("%s:%d", x.remoteConfig.BindAddr(), x.remoteConfig.BindPort())
 	if remoteAddr != net.JoinHostPort(msg.GetHost(), strconv.Itoa(int(msg.GetPort()))) {
 		return nil, connect.NewError(connect.CodeInvalidArgument, ErrInvalidHost)
 	}
@@ -1175,7 +1170,7 @@ func (x *actorSystem) RemoteSpawn(ctx context.Context, request *connect.Request[
 		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrRemotingDisabled)
 	}
 
-	remoteAddr := fmt.Sprintf("%s:%d", x.host, x.port)
+	remoteAddr := fmt.Sprintf("%s:%d", x.remoteConfig.BindAddr(), x.remoteConfig.BindPort())
 	if remoteAddr != net.JoinHostPort(msg.GetHost(), strconv.Itoa(int(msg.GetPort()))) {
 		return nil, connect.NewError(connect.CodeInvalidArgument, ErrInvalidHost)
 	}
@@ -1211,7 +1206,7 @@ func (x *actorSystem) GetNodeMetric(_ context.Context, request *connect.Request[
 
 	req := request.Msg
 
-	remoteAddr := fmt.Sprintf("%s:%d", x.host, x.port)
+	remoteAddr := fmt.Sprintf("%s:%d", x.remoteConfig.BindAddr(), x.remoteConfig.BindPort())
 	if remoteAddr != req.GetNodeAddress() {
 		return nil, connect.NewError(connect.CodeInvalidArgument, ErrInvalidHost)
 	}
@@ -1232,7 +1227,7 @@ func (x *actorSystem) GetKinds(_ context.Context, request *connect.Request[inter
 	}
 
 	req := request.Msg
-	remoteAddr := fmt.Sprintf("%s:%d", x.host, x.port)
+	remoteAddr := fmt.Sprintf("%s:%d", x.remoteConfig.BindAddr(), x.remoteConfig.BindPort())
 
 	// routine check
 	if remoteAddr != req.GetNodeAddress() {
@@ -1347,10 +1342,10 @@ func (x *actorSystem) enableClustering(ctx context.Context) error {
 
 	x.clusterNode = &discovery.Node{
 		Name:          x.Name(),
-		Host:          x.host,
+		Host:          x.remoteConfig.BindAddr(),
 		DiscoveryPort: x.clusterConfig.DiscoveryPort(),
 		PeersPort:     x.clusterConfig.PeersPort(),
-		RemotingPort:  int(x.port),
+		RemotingPort:  x.remoteConfig.BindPort(),
 	}
 
 	clusterEngine, err := cluster.NewEngine(
@@ -1802,7 +1797,7 @@ func (x *actorSystem) reservedName(nameType nameType) string {
 
 // actorAddress returns the actor path provided the actor name
 func (x *actorSystem) actorAddress(name string) *address.Address {
-	return address.New(name, x.name, x.host, int(x.port))
+	return address.New(name, x.name, x.remoteConfig.BindAddr(), x.remoteConfig.BindPort())
 }
 
 // startHTTPServer starts the appropriate http server
@@ -1817,7 +1812,7 @@ func (x *actorSystem) shutdownHTTPServer(ctx context.Context) error {
 
 // configureServer configure the various http server and listeners based upon the various settings
 func (x *actorSystem) configureServer(ctx context.Context, mux *nethttp.ServeMux) error {
-	hostPort := net.JoinHostPort(x.host, strconv.Itoa(int(x.port)))
+	hostPort := net.JoinHostPort(x.remoteConfig.BindAddr(), strconv.Itoa(x.remoteConfig.BindPort()))
 	httpServer := getServer(ctx, hostPort)
 	listener, err := tcp.NewKeepAliveListener(httpServer.Addr)
 	if err != nil {
@@ -1826,9 +1821,11 @@ func (x *actorSystem) configureServer(ctx context.Context, mux *nethttp.ServeMux
 
 	// Configure HTTP/2 with performance tuning
 	http2Server := &http2.Server{
-		MaxConcurrentStreams: 1000,               // Allow up to 1000 concurrent streams
-		MaxReadFrameSize:     16 * size.MB,       // 16 MB max frame size
-		IdleTimeout:          1200 * time.Second, // Timeout for idle connections
+		MaxConcurrentStreams: 1000, // Allow up to 1000 concurrent streams
+		MaxReadFrameSize:     x.remoteConfig.MaxFrameSize(),
+		IdleTimeout:          x.remoteConfig.IdleTimeout(),
+		WriteByteTimeout:     x.remoteConfig.WriteTimeout(),
+		ReadIdleTimeout:      x.remoteConfig.ReadIdleTimeout(),
 	}
 
 	// set the http TLS server
@@ -1844,18 +1841,6 @@ func (x *actorSystem) configureServer(ctx context.Context, mux *nethttp.ServeMux
 	x.server = httpServer
 	x.server.Handler = h2c.NewHandler(mux, http2Server)
 	x.listener = listener
-	return nil
-}
-
-// setHostPort sets the host and port
-func (x *actorSystem) setHostPort() error {
-	var err error
-	// combine host and port into an hostPort string
-	hostPort := net.JoinHostPort(x.host, strconv.Itoa(int(x.port)))
-	x.host, err = tcp.GetBindIP(hostPort)
-	if err != nil {
-		return err
-	}
 	return nil
 }
 
