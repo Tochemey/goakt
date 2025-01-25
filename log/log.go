@@ -29,6 +29,7 @@ import (
 	"io"
 	golog "log"
 	"os"
+	"time"
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -53,8 +54,36 @@ var _ Logger = &Log{}
 // New creates an instance of Log
 func New(level Level, writers ...io.Writer) *Log {
 	// create the zap Log configuration
-	cfg := zap.NewProductionConfig()
-	cfg.EncoderConfig.EncodeTime = zapcore.RFC3339TimeEncoder
+	cfg := zap.Config{
+		Development: false,
+		Sampling: &zap.SamplingConfig{
+			Initial:    100,
+			Thereafter: 100,
+		},
+		Encoding: "json",
+		// copied from "zap.NewProductionEncoderConfig" with some updates
+		EncoderConfig: zapcore.EncoderConfig{
+			TimeKey:       "ts",
+			LevelKey:      "level",
+			NameKey:       "logger",
+			CallerKey:     "caller",
+			MessageKey:    "msg",
+			StacktraceKey: "stacktrace",
+			LineEnding:    zapcore.DefaultLineEnding,
+			EncodeLevel:   zapcore.LowercaseLevelEncoder,
+
+			// Custom EncodeTime function to ensure we match format and precision of historic capnslog timestamps
+			EncodeTime: func(t time.Time, enc zapcore.PrimitiveArrayEncoder) {
+				enc.AppendString(t.Format("2006-01-02T15:04:05.000000Z0700"))
+			},
+
+			EncodeDuration: zapcore.StringDurationEncoder,
+			EncodeCaller:   zapcore.ShortCallerEncoder,
+		},
+		OutputPaths:      []string{"stderr"},
+		ErrorOutputPaths: []string{"stderr"},
+	}
+
 	// create the zap log core
 	var core zapcore.Core
 
@@ -110,7 +139,7 @@ func New(level Level, writers ...io.Writer) *Log {
 		)
 	}
 	// get the zap Log
-	zapLogger := zap.New(core)
+	zapLogger := zap.New(core, zap.AddCaller(), zap.AddCallerSkip(1))
 	// set the global logger
 	zap.ReplaceGlobals(zapLogger)
 	// create the instance of Log and returns it
@@ -122,78 +151,66 @@ func New(level Level, writers ...io.Writer) *Log {
 
 // Debug starts a message with debug level
 func (l *Log) Debug(v ...any) {
-	defer l.logger.Sync()
-	l.logger.Debug(fmt.Sprint(v...))
+	l.logger.Sugar().Debug(fmt.Sprint(v...))
 }
 
 // Debugf starts a message with debug level
 func (l *Log) Debugf(format string, v ...any) {
-	defer l.logger.Sync()
-	l.logger.Debug(fmt.Sprintf(format, v...))
+	l.logger.Sugar().Debug(fmt.Sprintf(format, v...))
 }
 
 // Panic starts a new message with panic level. The panic() function
 // is called which stops the ordinary flow of a goroutine.
 func (l *Log) Panic(v ...any) {
-	defer l.logger.Sync()
-	l.logger.Panic(fmt.Sprint(v...))
+	l.logger.Sugar().Panic(fmt.Sprint(v...))
 }
 
 // Panicf starts a new message with panic level. The panic() function
 // is called which stops the ordinary flow of a goroutine.
 func (l *Log) Panicf(format string, v ...any) {
-	defer l.logger.Sync()
-	l.logger.Panic(fmt.Sprintf(format, v...))
+	l.logger.Sugar().Panic(fmt.Sprintf(format, v...))
 }
 
 // Fatal starts a new message with fatal level. The os.Exit(1) function
 // is called which terminates the program immediately.
 func (l *Log) Fatal(v ...any) {
-	defer l.logger.Sync()
-	l.logger.Fatal(fmt.Sprint(v...))
+	l.logger.Sugar().Fatal(fmt.Sprint(v...))
 }
 
 // Fatalf starts a new message with fatal level. The os.Exit(1) function
 // is called which terminates the program immediately.
 func (l *Log) Fatalf(format string, v ...any) {
-	defer l.logger.Sync()
-	l.logger.Fatal(fmt.Sprintf(format, v...))
+	l.logger.Sugar().Fatal(fmt.Sprintf(format, v...))
 }
 
 // Error starts a new message with error level.
 func (l *Log) Error(v ...any) {
-	defer l.logger.Sync()
-	l.logger.Error(fmt.Sprint(v...))
+	l.logger.Sugar().Error(fmt.Sprint(v...))
 }
 
 // Errorf starts a new message with error level.
 func (l *Log) Errorf(format string, v ...any) {
-	defer l.logger.Sync()
-	l.logger.Error(fmt.Sprintf(format, v...))
+	l.logger.Sugar().Error(fmt.Sprintf(format, v...))
 }
 
 // Warn starts a new message with warn level
 func (l *Log) Warn(v ...any) {
-	defer l.logger.Sync()
-	l.logger.Warn(fmt.Sprint(v...))
+	l.logger.Sugar().Warn(fmt.Sprint(v...))
 }
 
 // Warnf starts a new message with warn level
 func (l *Log) Warnf(format string, v ...any) {
-	defer l.logger.Sync()
-	l.logger.Warn(fmt.Sprintf(format, v...))
+	l.logger.Sugar().Warn(fmt.Sprintf(format, v...))
 }
 
 // Info starts a message with info level
 func (l *Log) Info(v ...any) {
-	defer l.logger.Sync()
-	l.logger.Info(fmt.Sprint(v...))
+	l.logger.Sugar().Info(fmt.Sprint(v...))
 }
 
 // Infof starts a message with info level
 func (l *Log) Infof(format string, v ...any) {
-	defer l.logger.Sync()
-	l.logger.Info(fmt.Sprintf(format, v...))
+	l.logger.Sugar().Info(fmt.Sprintf(format, v...))
 }
 
 // LogLevel returns the log level that is used
