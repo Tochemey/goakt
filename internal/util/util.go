@@ -22,7 +22,7 @@
  * SOFTWARE.
  */
 
-package lib
+package util
 
 import (
 	"log"

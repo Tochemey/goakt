@@ -34,7 +34,7 @@ import (
 
 	"github.com/tochemey/goakt/v2/goaktpb"
 	"github.com/tochemey/goakt/v2/internal/internalpb"
-	"github.com/tochemey/goakt/v2/internal/lib"
+	"github.com/tochemey/goakt/v2/internal/util"
 	"github.com/tochemey/goakt/v2/log"
 	"github.com/tochemey/goakt/v2/test/data/testpb"
 )
@@ -49,7 +49,7 @@ func TestDeadletters(t *testing.T) {
 		assert.NoError(t, err)
 
 		// wait for complete start
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// create a deadletter subscriber
 		consumer, err := sys.Subscribe()
@@ -63,14 +63,14 @@ func TestDeadletters(t *testing.T) {
 		assert.NotNil(t, actorRef)
 
 		// wait a while
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// every message sent to the actor will result in deadletters
 		for i := 0; i < 5; i++ {
 			require.NoError(t, Tell(ctx, actorRef, new(testpb.TestSend)))
 		}
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		var items []*goaktpb.Deadletter
 		for message := range consumer.Iterator() {
@@ -110,7 +110,7 @@ func TestDeadletters(t *testing.T) {
 		assert.NoError(t, err)
 
 		// wait for complete start
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// create a deadletter subscriber
 		consumer, err := sys.Subscribe()
@@ -124,14 +124,14 @@ func TestDeadletters(t *testing.T) {
 		assert.NotNil(t, actorRef)
 
 		// wait a while
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// every message sent to the actor will result in deadletters
 		for i := 0; i < 5; i++ {
 			require.NoError(t, Tell(ctx, actorRef, new(testpb.TestSend)))
 		}
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		var items []*goaktpb.Deadletter
 		for message := range consumer.Iterator() {

@@ -103,8 +103,8 @@ func TestOptions(t *testing.T) {
 		},
 		{
 			name:     "WithStorageSize",
-			option:   WithStorageSize(size),
-			expected: Engine{storageSize: size},
+			option:   WithKVStoreSize(size),
+			expected: Engine{kvStoreSize: size},
 		},
 	}
 

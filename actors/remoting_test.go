@@ -37,8 +37,8 @@ import (
 
 	"github.com/tochemey/goakt/v2/address"
 	"github.com/tochemey/goakt/v2/goaktpb"
-	"github.com/tochemey/goakt/v2/internal/lib"
 	"github.com/tochemey/goakt/v2/internal/testutil"
+	"github.com/tochemey/goakt/v2/internal/util"
 	"github.com/tochemey/goakt/v2/log"
 	"github.com/tochemey/goakt/v2/test/data/testpb"
 )
@@ -68,7 +68,7 @@ func TestRemoteTell(t *testing.T) {
 		err = sys.Start(ctx)
 		assert.NoError(t, err)
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// create a test actor
 		actorName := "test"
@@ -92,7 +92,7 @@ func TestRemoteTell(t *testing.T) {
 		}
 
 		// stop the actor after some time
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		remoting.Close()
 		err = sys.Stop(ctx)
@@ -122,7 +122,7 @@ func TestRemoteTell(t *testing.T) {
 		err = sys.Start(ctx)
 		assert.NoError(t, err)
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// create a test actor
 		actorName := "test"
@@ -141,7 +141,7 @@ func TestRemoteTell(t *testing.T) {
 		require.Error(t, err)
 
 		// stop the actor after some time
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		remoting.Close()
 		err = sys.Stop(ctx)
@@ -171,7 +171,7 @@ func TestRemoteTell(t *testing.T) {
 		err = sys.Start(ctx)
 		assert.NoError(t, err)
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// create a test actor
 		actorName := "test"
@@ -198,7 +198,7 @@ func TestRemoteTell(t *testing.T) {
 		require.Error(t, err)
 
 		// stop the actor after some time
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		remoting.Close()
 		err = sys.Stop(ctx)
@@ -228,7 +228,7 @@ func TestRemoteTell(t *testing.T) {
 		err = sys.Start(ctx)
 		assert.NoError(t, err)
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// create a test actor
 		actorName := "test"
@@ -255,7 +255,7 @@ func TestRemoteTell(t *testing.T) {
 		require.EqualError(t, err, "failed_precondition: remoting is not enabled")
 
 		// stop the actor after some time
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		remoting.Close()
 		err = sys.Stop(ctx)
@@ -285,7 +285,7 @@ func TestRemoteTell(t *testing.T) {
 		err = sys.Start(ctx)
 		assert.NoError(t, err)
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// create a test actor
 		actorName := "test"
@@ -311,11 +311,11 @@ func TestRemoteTell(t *testing.T) {
 		require.NoError(t, err)
 
 		// wait for processing to complete on the actor side
-		lib.Pause(500 * time.Millisecond)
+		util.Pause(500 * time.Millisecond)
 		require.EqualValues(t, 10, actorRef.ProcessedCount()-1)
 
 		// stop the actor after some time
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		remoting.Close()
 		err = sys.Stop(ctx)
@@ -345,7 +345,7 @@ func TestRemoteTell(t *testing.T) {
 		err = sys.Start(ctx)
 		assert.NoError(t, err)
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// create a test actor
 		actorName := "test"
@@ -372,7 +372,7 @@ func TestRemoteTell(t *testing.T) {
 		require.Error(t, err)
 
 		// stop the actor after some time
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		remoting.Close()
 		err = sys.Stop(ctx)
@@ -402,7 +402,7 @@ func TestRemoteTell(t *testing.T) {
 		err = sys.Start(ctx)
 		assert.NoError(t, err)
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// create a test actor
 		actorName := "test"
@@ -428,7 +428,7 @@ func TestRemoteTell(t *testing.T) {
 		require.EqualError(t, err, "failed_precondition: remoting is not enabled")
 
 		// stop the actor after some time
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		remoting.Close()
 		err = sys.Stop(ctx)
@@ -458,7 +458,7 @@ func TestRemoteTell(t *testing.T) {
 		err = sys.Start(ctx)
 		assert.NoError(t, err)
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// create a test actor
 		actorName := "test"
@@ -474,7 +474,7 @@ func TestRemoteTell(t *testing.T) {
 
 		// stop the actor when wait for cleanup to take place
 		require.NoError(t, actorRef.Shutdown(ctx))
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		from := address.NoSender()
 		// create a message to send to the test actor
@@ -486,7 +486,7 @@ func TestRemoteTell(t *testing.T) {
 		require.Contains(t, err.Error(), "not found")
 
 		// stop the actor after some time
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		remoting.Close()
 		err = sys.Stop(ctx)
@@ -516,7 +516,7 @@ func TestRemoteTell(t *testing.T) {
 		err = sys.Start(ctx)
 		assert.NoError(t, err)
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// create a test actor
 		actorName := "test"
@@ -532,7 +532,7 @@ func TestRemoteTell(t *testing.T) {
 
 		// stop the actor when wait for cleanup to take place
 		require.NoError(t, actorRef.Shutdown(ctx))
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		from := address.NoSender()
 		// create a message to send to the test actor
@@ -544,7 +544,7 @@ func TestRemoteTell(t *testing.T) {
 		require.Contains(t, err.Error(), "not found")
 
 		// stop the actor after some time
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		err = sys.Stop(ctx)
 		assert.NoError(t, err)
@@ -582,7 +582,7 @@ func TestRemoteTell(t *testing.T) {
 		err = sys.Start(ctx)
 		assert.NoError(t, err)
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// create a test actor
 		actorName := "test"
@@ -606,7 +606,7 @@ func TestRemoteTell(t *testing.T) {
 		}
 
 		// stop the actor after some time
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		remoting.Close()
 		err = sys.Stop(ctx)
@@ -639,7 +639,7 @@ func TestRemoteAsk(t *testing.T) {
 		err = sys.Start(ctx)
 		assert.NoError(t, err)
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// create a test actor
 		actorName := "test"
@@ -671,7 +671,7 @@ func TestRemoteAsk(t *testing.T) {
 		assert.True(t, proto.Equal(expected, actual))
 
 		// stop the actor after some time
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		remoting.Close()
 		err = sys.Stop(ctx)
@@ -701,7 +701,7 @@ func TestRemoteAsk(t *testing.T) {
 		err = sys.Start(ctx)
 		assert.NoError(t, err)
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// create a test actor
 		actorName := "test"
@@ -723,7 +723,7 @@ func TestRemoteAsk(t *testing.T) {
 		require.Nil(t, reply)
 
 		// stop the actor after some time
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		err = sys.Stop(ctx)
 		assert.NoError(t, err)
@@ -752,7 +752,7 @@ func TestRemoteAsk(t *testing.T) {
 		err = sys.Start(ctx)
 		assert.NoError(t, err)
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// create a test actor
 		actorName := "test"
@@ -780,7 +780,7 @@ func TestRemoteAsk(t *testing.T) {
 		require.Nil(t, reply)
 
 		// stop the actor after some time
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 		remoting.Close()
 		t.Cleanup(
 			func() {
@@ -812,7 +812,7 @@ func TestRemoteAsk(t *testing.T) {
 		err = sys.Start(ctx)
 		assert.NoError(t, err)
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// create a test actor
 		actorName := "test"
@@ -841,7 +841,7 @@ func TestRemoteAsk(t *testing.T) {
 		require.Nil(t, reply)
 
 		// stop the actor after some time
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		err = sys.Stop(ctx)
 		assert.NoError(t, err)
@@ -870,7 +870,7 @@ func TestRemoteAsk(t *testing.T) {
 		err = sys.Start(ctx)
 		assert.NoError(t, err)
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// create a test actor
 		actorName := "test"
@@ -903,7 +903,7 @@ func TestRemoteAsk(t *testing.T) {
 		assert.True(t, proto.Equal(expected, actual))
 
 		// stop the actor after some time
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		remoting.Close()
 		err = sys.Stop(ctx)
@@ -933,7 +933,7 @@ func TestRemoteAsk(t *testing.T) {
 		err = sys.Start(ctx)
 		assert.NoError(t, err)
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// create a test actor
 		actorName := "test"
@@ -962,7 +962,7 @@ func TestRemoteAsk(t *testing.T) {
 
 		remoting.Close()
 		// stop the actor after some time
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 		t.Cleanup(
 			func() {
 				assert.NoError(t, sys.Stop(ctx))
@@ -993,7 +993,7 @@ func TestRemoteAsk(t *testing.T) {
 		err = sys.Start(ctx)
 		assert.NoError(t, err)
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// create a test actor
 		actorName := "test"
@@ -1022,7 +1022,7 @@ func TestRemoteAsk(t *testing.T) {
 		require.Nil(t, reply)
 
 		// stop the actor after some time
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 		remoting.Close()
 		t.Cleanup(
 			func() {
@@ -1055,7 +1055,7 @@ func TestRemoteAsk(t *testing.T) {
 		err = sys.Start(ctx)
 		assert.NoError(t, err)
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// create a test actor
 		actorName := "test"
@@ -1072,7 +1072,7 @@ func TestRemoteAsk(t *testing.T) {
 
 		// stop the actor when wait for cleanup to take place
 		require.NoError(t, actorRef.Shutdown(ctx))
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// create a message to send to the test actor
 		message := new(testpb.TestReply)
@@ -1084,7 +1084,7 @@ func TestRemoteAsk(t *testing.T) {
 		require.Nil(t, reply)
 
 		// stop the actor after some time
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		remoting.Close()
 		err = sys.Stop(ctx)
@@ -1115,7 +1115,7 @@ func TestRemoteAsk(t *testing.T) {
 		err = sys.Start(ctx)
 		assert.NoError(t, err)
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// create a test actor
 		actorName := "test"
@@ -1131,7 +1131,7 @@ func TestRemoteAsk(t *testing.T) {
 
 		// stop the actor when wait for cleanup to take place
 		require.NoError(t, actorRef.Shutdown(ctx))
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		from := address.NoSender()
 		// create a message to send to the test actor
@@ -1144,7 +1144,7 @@ func TestRemoteAsk(t *testing.T) {
 		require.Nil(t, reply)
 
 		// stop the actor after some time
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		err = sys.Stop(ctx)
 		assert.NoError(t, err)
@@ -1181,7 +1181,7 @@ func TestRemoteAsk(t *testing.T) {
 		err = sys.Start(ctx)
 		assert.NoError(t, err)
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// create a test actor
 		actorName := "test"
@@ -1213,7 +1213,7 @@ func TestRemoteAsk(t *testing.T) {
 		assert.True(t, proto.Equal(expected, actual))
 
 		// stop the actor after some time
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		remoting.Close()
 		err = sys.Stop(ctx)
@@ -1246,7 +1246,7 @@ func TestRemotingLookup(t *testing.T) {
 		err = sys.Start(ctx)
 		assert.NoError(t, err)
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// let us disable remoting
 		actorsSystem := sys.(*actorSystem)
@@ -1299,7 +1299,7 @@ func TestRemotingLookup(t *testing.T) {
 		err = sys.Start(ctx)
 		assert.NoError(t, err)
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// let us disable remoting
 		actorsSystem := sys.(*actorSystem)
@@ -1346,7 +1346,7 @@ func TestRemotingReSpawn(t *testing.T) {
 		err = sys.Start(ctx)
 		assert.NoError(t, err)
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// let us disable remoting
 		actorsSystem := sys.(*actorSystem)
@@ -1390,7 +1390,7 @@ func TestRemotingReSpawn(t *testing.T) {
 		err = sys.Start(ctx)
 		assert.NoError(t, err)
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// create a test actor
 		actorName := "test"
@@ -1410,7 +1410,7 @@ func TestRemotingReSpawn(t *testing.T) {
 		assert.EqualValues(t, 1, pid.restartCount.Load())
 
 		// stop the actor after some time
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		remoting.Close()
 		err = sys.Stop(ctx)
@@ -1448,7 +1448,7 @@ func TestRemotingReSpawn(t *testing.T) {
 		err = sys.Start(ctx)
 		assert.NoError(t, err)
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// let us disable remoting
 		actorsSystem := sys.(*actorSystem)
@@ -1495,7 +1495,7 @@ func TestRemotingStop(t *testing.T) {
 		err = sys.Start(ctx)
 		assert.NoError(t, err)
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// let us disable remoting
 		actorsSystem := sys.(*actorSystem)
@@ -1540,7 +1540,7 @@ func TestRemotingStop(t *testing.T) {
 		err = sys.Start(ctx)
 		assert.NoError(t, err)
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// create a test actor
 		actorName := "test"
@@ -1559,12 +1559,12 @@ func TestRemotingStop(t *testing.T) {
 		err = remoting.RemoteStop(ctx, sys.Host(), int(sys.Port()), actorName)
 		require.NoError(t, err)
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		assert.Empty(t, sys.Actors())
 
 		// stop the actor after some time
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		remoting.Close()
 		err = sys.Stop(ctx)
@@ -1604,7 +1604,7 @@ func TestRemotingStop(t *testing.T) {
 		err = sys.Start(ctx)
 		assert.NoError(t, err)
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// let us disable remoting
 		actorsSystem := sys.(*actorSystem)
