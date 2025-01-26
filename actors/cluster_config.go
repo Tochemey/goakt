@@ -26,6 +26,7 @@ package actors
 
 import (
 	"github.com/tochemey/goakt/v2/discovery"
+	"github.com/tochemey/goakt/v2/internal/size"
 	"github.com/tochemey/goakt/v2/internal/validation"
 )
 
@@ -45,6 +46,7 @@ type ClusterConfig struct {
 	discoveryPort      int
 	peersPort          int
 	kinds              []Actor
+	storageSize        uint64
 }
 
 // enforce compilation error
@@ -59,6 +61,7 @@ func NewClusterConfig() *ClusterConfig {
 		readQuorum:         1,
 		replicaCount:       1,
 		partitionCount:     271,
+		storageSize:        20 * size.MB,
 	}
 }
 
@@ -166,6 +169,18 @@ func (x *ClusterConfig) WithWriteQuorum(count uint32) *ClusterConfig {
 func (x *ClusterConfig) WithReadQuorum(count uint32) *ClusterConfig {
 	x.readQuorum = count
 	return x
+}
+
+// WithStorageSize sets the cluster in-memory storage size
+// The default values is 20MB
+func (x *ClusterConfig) WithStorageSize(size uint64) *ClusterConfig {
+	x.storageSize = size
+	return x
+}
+
+// StorageSize returns the cluster storage size
+func (x *ClusterConfig) StorageSize() uint64 {
+	return x.storageSize
 }
 
 // Validate validates the cluster config

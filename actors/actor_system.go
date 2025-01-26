@@ -1360,6 +1360,7 @@ func (x *actorSystem) enableClustering(ctx context.Context) error {
 		cluster.WithReadQuorum(x.clusterConfig.ReadQuorum()),
 		cluster.WithReplicaCount(x.clusterConfig.ReplicaCount()),
 		cluster.WithTLS(x.tlsServerConfig, x.tlsClientConfig),
+		cluster.WithStorageSize(x.clusterConfig.StorageSize()),
 	)
 	if err != nil {
 		x.logger.Errorf("failed to initialize cluster engine: %v", err)

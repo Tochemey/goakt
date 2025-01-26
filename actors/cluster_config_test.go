@@ -30,6 +30,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/tochemey/goakt/v2/internal/size"
 	testkit "github.com/tochemey/goakt/v2/mocks/discovery"
 )
 
@@ -48,6 +49,7 @@ func TestClusterConfig(t *testing.T) {
 			WithWriteQuorum(1).
 			WithReadQuorum(1).
 			WithPartitionCount(3).
+			WithStorageSize(10 * size.MB).
 			WithDiscovery(disco)
 
 		require.NoError(t, config.Validate())
@@ -58,6 +60,7 @@ func TestClusterConfig(t *testing.T) {
 		assert.EqualValues(t, 1, config.ReadQuorum())
 		assert.EqualValues(t, 1, config.WriteQuorum())
 		assert.EqualValues(t, 3, config.PartitionCount())
+		assert.Exactly(t, uint64(10*size.MB), config.StorageSize())
 		assert.True(t, disco == config.Discovery())
 		assert.Len(t, config.Kinds(), 3)
 	})
