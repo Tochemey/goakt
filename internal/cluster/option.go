@@ -130,9 +130,9 @@ func WithTLS(serverConfig, clientConfig *tls.Config) Option {
 	})
 }
 
-// WithStorageSize sets the cluster table storage size
-func WithStorageSize(size uint64) Option {
+// WithKVStoreSize sets the cluster table storage size
+func WithKVStoreSize(size uint64) Option {
 	return OptionFunc(func(eng *Engine) {
-		eng.storageSize = size
+		eng.kvStoreSize = size
 	})
 }

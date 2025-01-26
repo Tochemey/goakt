@@ -37,7 +37,7 @@ import (
 
 	"github.com/tochemey/goakt/v2/address"
 	"github.com/tochemey/goakt/v2/goaktpb"
-	"github.com/tochemey/goakt/v2/internal/lib"
+	"github.com/tochemey/goakt/v2/internal/util"
 	"github.com/tochemey/goakt/v2/log"
 	"github.com/tochemey/goakt/v2/test/data/testpb"
 	testspb "github.com/tochemey/goakt/v2/test/data/testpb"
@@ -57,7 +57,7 @@ func TestReceiveContext(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, actorSystem.Start(ctx))
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		pid, err := actorSystem.Spawn(ctx, "User", actor)
 		require.NoError(t, err)
@@ -103,7 +103,7 @@ func TestReceiveContext(t *testing.T) {
 		err = Tell(ctx, pid, new(testpb.TestBye))
 		require.NoError(t, err)
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 		assert.False(t, pid.IsRunning())
 		assert.NoError(t, actorSystem.Stop(ctx))
 	})
@@ -118,7 +118,7 @@ func TestReceiveContext(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, actorSystem.Start(ctx))
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// create actor1
 		actor1 := &exchanger{}
@@ -143,7 +143,7 @@ func TestReceiveContext(t *testing.T) {
 		context.Tell(pid2, new(testpb.TestSend))
 		require.NoError(t, context.getError())
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 	t.Run("With failed Tell", func(t *testing.T) {
@@ -157,7 +157,7 @@ func TestReceiveContext(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, actorSystem.Start(ctx))
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// create actor1
 		actor1 := &exchanger{}
@@ -180,12 +180,12 @@ func TestReceiveContext(t *testing.T) {
 		require.NotNil(t, pid2)
 
 		// wait a while and shutdown actor2
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 		assert.NoError(t, pid2.Shutdown(ctx))
 		context.Tell(pid2, new(testpb.TestSend))
 		require.Error(t, context.getError())
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 	t.Run("With successful Ask command", func(t *testing.T) {
@@ -198,7 +198,7 @@ func TestReceiveContext(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, actorSystem.Start(ctx))
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// create actor1
 		actor1 := &exchanger{}
@@ -225,7 +225,7 @@ func TestReceiveContext(t *testing.T) {
 		expected := new(testpb.Reply)
 		assert.True(t, proto.Equal(expected, reply))
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 	t.Run("With failed Ask", func(t *testing.T) {
@@ -238,7 +238,7 @@ func TestReceiveContext(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, actorSystem.Start(ctx))
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// create actor1
 		actor1 := &exchanger{}
@@ -261,13 +261,13 @@ func TestReceiveContext(t *testing.T) {
 		require.NotNil(t, pid2)
 
 		// wait a while and shutdown actor2
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 		assert.NoError(t, pid2.Shutdown(ctx))
 
 		context.Ask(pid2, new(testpb.TestReply), time.Minute)
 		require.Error(t, context.getError())
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 	t.Run("With successful RemoteAsk", func(t *testing.T) {
@@ -322,7 +322,7 @@ func TestReceiveContext(t *testing.T) {
 		require.NotNil(t, reply)
 		require.True(t, reply.MessageIs(new(testpb.Reply)))
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		t.Cleanup(
 			func() {
@@ -382,7 +382,7 @@ func TestReceiveContext(t *testing.T) {
 			},
 		), new(testpb.TestReply), time.Minute)
 		require.Error(t, context.getError())
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		t.Cleanup(
 			func() {
@@ -431,7 +431,7 @@ func TestReceiveContext(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, sys2.Start(ctx))
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		pid1, err := sys2.Spawn(ctx, "Exchange1", actor1)
 		require.NoError(t, err)
@@ -450,7 +450,7 @@ func TestReceiveContext(t *testing.T) {
 		// send the message to t exchanger actor one using remote messaging
 		context.RemoteTell(address.From(addr1), new(testpb.TestRemoteSend))
 		require.NoError(t, context.getError())
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		t.Cleanup(
 			func() {
@@ -493,7 +493,7 @@ func TestReceiveContext(t *testing.T) {
 		sys2, err := NewActorSystem("sys", WithLogger(logger), WithRemoting(host, int32(ports[0])))
 		require.NoError(t, err)
 		require.NoError(t, sys2.Start(ctx))
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		pid1, err := sys2.Spawn(ctx, "Exchange1", actor1)
 		require.NoError(t, err)
@@ -517,7 +517,7 @@ func TestReceiveContext(t *testing.T) {
 			},
 		), new(testpb.TestRemoteSend))
 		require.Error(t, context.getError())
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		t.Cleanup(
 			func() {
@@ -560,7 +560,7 @@ func TestReceiveContext(t *testing.T) {
 		sys2, err := NewActorSystem("sys", WithLogger(logger), WithRemoting(host, int32(ports[0])))
 		require.NoError(t, err)
 		require.NoError(t, sys2.Start(ctx))
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		pid1, err := sys2.Spawn(ctx, "Exchange1", actor1)
 		require.NoError(t, err)
@@ -576,7 +576,7 @@ func TestReceiveContext(t *testing.T) {
 
 		require.Nil(t, context.RemoteLookup(host, remotingPort, actorName2))
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		t.Cleanup(
 			func() {
@@ -619,7 +619,7 @@ func TestReceiveContext(t *testing.T) {
 		sys2, err := NewActorSystem("sys", WithLogger(logger), WithRemoting(host, int32(ports[0])))
 		require.NoError(t, err)
 		require.NoError(t, sys2.Start(ctx))
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		pid1, err := sys2.Spawn(ctx, "Exchange1", actor1)
 		require.NoError(t, err)
@@ -637,7 +637,7 @@ func TestReceiveContext(t *testing.T) {
 		}
 		context.RemoteLookup(host, remotingPort, actorName2)
 		require.Error(t, context.getError())
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		t.Cleanup(
 			func() {
@@ -657,7 +657,7 @@ func TestReceiveContext(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, actorSystem.Start(ctx))
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// create actor1
 		actor1 := &exchanger{}
@@ -688,14 +688,14 @@ func TestReceiveContext(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, actorSystem.Start(ctx))
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// create the parent actor
 		parent, err := actorSystem.Spawn(ctx, "Parent", newMockSupervisorActor())
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// create an instance of receive receiveCtx
 		receiveCtx := &ReceiveContext{
@@ -733,14 +733,14 @@ func TestReceiveContext(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, actorSystem.Start(ctx))
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// create the parent actor
 		parent, err := actorSystem.Spawn(ctx, "Parent", newMockSupervisorActor())
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
@@ -772,7 +772,7 @@ func TestReceiveContext(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, actorSystem.Start(ctx))
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// create the parent actor
 		parent, err := actorSystem.Spawn(ctx, "Parent", newMockSupervisorActor())
@@ -815,7 +815,7 @@ func TestReceiveContext(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, actorSystem.Start(ctx))
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// create the parent actor
 		parent, err := actorSystem.Spawn(ctx, "Parent", newMockSupervisorActor())
@@ -859,7 +859,7 @@ func TestReceiveContext(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, actorSystem.Start(ctx))
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 		parent, err := actorSystem.Spawn(ctx, "Parent", newMockSupervisorActor())
 
 		require.NoError(t, err)
@@ -882,7 +882,7 @@ func TestReceiveContext(t *testing.T) {
 		// stop the child actor
 		context.Stop(child)
 		require.NoError(t, context.getError())
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 		assert.Empty(t, context.Children())
 		t.Cleanup(
 			func() {
@@ -901,7 +901,7 @@ func TestReceiveContext(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, actorSystem.Start(ctx))
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		parent, err := actorSystem.Spawn(ctx, "Parent", newMockSupervisorActor())
 
@@ -925,11 +925,11 @@ func TestReceiveContext(t *testing.T) {
 		// let us stop the child actor
 		require.NoError(t, child.Shutdown(ctx))
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		assert.Empty(t, context.Children())
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 		assert.Empty(t, context.Children())
 		t.Cleanup(
 			func() {
@@ -948,7 +948,7 @@ func TestReceiveContext(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, actorSystem.Start(ctx))
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		parent, err := actorSystem.Spawn(ctx, "Parent", newMockSupervisorActor())
 
@@ -963,7 +963,7 @@ func TestReceiveContext(t *testing.T) {
 			self:    parent,
 		}
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 		// stop the child actor
 		context.Stop(NoSender)
 		require.Error(t, context.getError())
@@ -984,7 +984,7 @@ func TestReceiveContext(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, actorSystem.Start(ctx))
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		parent, err := actorSystem.Spawn(ctx, "Parent", newMockSupervisorActor())
 
@@ -1004,11 +1004,11 @@ func TestReceiveContext(t *testing.T) {
 		assert.NotNil(t, child)
 		assert.Len(t, context.Children(), 1)
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		context.Shutdown()
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// stop the child actor
 		context.Stop(child)
@@ -1025,7 +1025,7 @@ func TestReceiveContext(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, actorSystem.Start(ctx))
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		parent, err := actorSystem.Spawn(ctx, "Parent", newMockSupervisorActor())
 		require.NoError(t, err)
@@ -1072,7 +1072,7 @@ func TestReceiveContext(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, actorSystem.Start(ctx))
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		parent, err := actorSystem.Spawn(ctx, "Parent", newMockSupervisorActor())
 
@@ -1098,7 +1098,7 @@ func TestReceiveContext(t *testing.T) {
 		// stop the child actor
 		context.Stop(child)
 		require.Error(t, context.getError())
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 		assert.Empty(t, context.Children())
 		t.Cleanup(
 			func() {
@@ -1117,7 +1117,7 @@ func TestReceiveContext(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, actorSystem.Start(ctx))
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// create actor1
 		actor1 := &mockPostStopActor{}
@@ -1148,7 +1148,7 @@ func TestReceiveContext(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, actorSystem.Start(ctx))
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// create actorA
 		actorA := &exchanger{}
@@ -1178,7 +1178,7 @@ func TestReceiveContext(t *testing.T) {
 		require.NoError(t, err)
 
 		// wait for the async call to properly complete
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 		require.True(t, pidA.IsRunning())
 		require.True(t, pidB.IsRunning())
 		require.False(t, pidC.IsRunning())
@@ -1198,7 +1198,7 @@ func TestReceiveContext(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, actorSystem.Start(ctx))
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// create a consumer
 		consumer, err := actorSystem.Subscribe()
@@ -1223,7 +1223,7 @@ func TestReceiveContext(t *testing.T) {
 		context.Unhandled()
 
 		// wait for messages to be published
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		var items []*goaktpb.Deadletter
 		for message := range consumer.Iterator() {
@@ -1266,7 +1266,7 @@ func TestReceiveContext(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, actorSystem.Start(ctx))
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// create a consumer
 		consumer, err := actorSystem.Subscribe()
@@ -1295,7 +1295,7 @@ func TestReceiveContext(t *testing.T) {
 		context.Unhandled()
 
 		// wait for messages to be published
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		var items []*goaktpb.Deadletter
 		for message := range consumer.Iterator() {
@@ -1338,7 +1338,7 @@ func TestReceiveContext(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, actorSystem.Start(ctx))
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// create a consumer
 		consumer, err := actorSystem.Subscribe()
@@ -1363,7 +1363,7 @@ func TestReceiveContext(t *testing.T) {
 		context.Unhandled()
 
 		// wait for messages to be published
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		var items []*goaktpb.Deadletter
 		for message := range consumer.Iterator() {
@@ -1399,7 +1399,7 @@ func TestReceiveContext(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, actorSystem.Start(ctx))
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// create actor1
 		actor1 := &exchanger{}
@@ -1424,7 +1424,7 @@ func TestReceiveContext(t *testing.T) {
 		context.BatchTell(pid2, new(testpb.TestSend), new(testpb.TestSend))
 		require.NoError(t, context.getError())
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 		assert.NoError(t, pid1.Shutdown(ctx))
 		assert.NoError(t, pid2.Shutdown(ctx))
 		assert.NoError(t, actorSystem.Stop(ctx))
@@ -1440,7 +1440,7 @@ func TestReceiveContext(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, actorSystem.Start(ctx))
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// create actor1
 		actor1 := &exchanger{}
@@ -1466,7 +1466,7 @@ func TestReceiveContext(t *testing.T) {
 		context.BatchTell(pid2, new(testpb.TestSend))
 		require.NoError(t, context.getError())
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 		assert.NoError(t, pid1.Shutdown(ctx))
 		assert.NoError(t, pid2.Shutdown(ctx))
 		assert.NoError(t, actorSystem.Stop(ctx))
@@ -1482,7 +1482,7 @@ func TestReceiveContext(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, actorSystem.Start(ctx))
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// create actor1
 		actor1 := &exchanger{}
@@ -1505,13 +1505,13 @@ func TestReceiveContext(t *testing.T) {
 		require.NotNil(t, pid2)
 
 		// wait a while and shutdown actor2
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 		assert.NoError(t, pid2.Shutdown(ctx))
 
 		context.BatchTell(pid2, new(testpb.TestSend), new(testpb.TestSend))
 		require.Error(t, context.getError())
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 		assert.NoError(t, pid1.Shutdown(ctx))
 		assert.NoError(t, actorSystem.Stop(ctx))
 	})
@@ -1526,7 +1526,7 @@ func TestReceiveContext(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, actorSystem.Start(ctx))
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// create actor1
 		actor1 := &exchanger{}
@@ -1556,7 +1556,7 @@ func TestReceiveContext(t *testing.T) {
 			assert.True(t, proto.Equal(expected, reply))
 		}
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 		assert.NoError(t, pid1.Shutdown(ctx))
 		assert.NoError(t, pid2.Shutdown(ctx))
 		assert.NoError(t, actorSystem.Stop(ctx))
@@ -1572,7 +1572,7 @@ func TestReceiveContext(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, actorSystem.Start(ctx))
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// create actor1
 		actor1 := &exchanger{}
@@ -1596,13 +1596,13 @@ func TestReceiveContext(t *testing.T) {
 		require.NotNil(t, pid2)
 
 		// wait a while and shutdown actor2
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 		assert.NoError(t, pid2.Shutdown(ctx))
 
 		context.BatchAsk(pid2, []proto.Message{new(testpb.TestReply), new(testpb.TestReply)}, time.Minute)
 		require.Error(t, context.getError())
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 		assert.NoError(t, pid1.Shutdown(ctx))
 		assert.NoError(t, actorSystem.Stop(ctx))
 	})
@@ -1651,10 +1651,10 @@ func TestReceiveContext(t *testing.T) {
 		context.RemoteBatchTell(address.From(testerAddr), messages)
 		require.NoError(t, context.getError())
 		// wait for processing to complete on the actor side
-		lib.Pause(500 * time.Millisecond)
+		util.Pause(500 * time.Millisecond)
 		require.EqualValues(t, 3, testerRef.ProcessedCount()-1)
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		t.Cleanup(
 			func() {
@@ -1708,7 +1708,7 @@ func TestReceiveContext(t *testing.T) {
 		replies := context.RemoteBatchAsk(address.From(testerAddr), messages, time.Minute)
 		require.NoError(t, context.getError())
 		require.Len(t, replies, 3)
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		t.Cleanup(
 			func() {
@@ -1825,7 +1825,7 @@ func TestReceiveContext(t *testing.T) {
 			},
 		), []proto.Message{new(testpb.TestRemoteSend)})
 		require.Error(t, context.getError())
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		t.Cleanup(
 			func() {
@@ -1884,7 +1884,7 @@ func TestReceiveContext(t *testing.T) {
 		require.Error(t, err)
 		assert.EqualError(t, err, ErrRemotingDisabled.Error())
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		t.Cleanup(
 			func() {
@@ -1943,7 +1943,7 @@ func TestReceiveContext(t *testing.T) {
 			},
 		), []proto.Message{new(testpb.TestReply)}, time.Minute)
 		require.Error(t, context.getError())
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		t.Cleanup(
 			func() {
@@ -1997,7 +1997,7 @@ func TestReceiveContext(t *testing.T) {
 
 		context.RemoteReSpawn(host, remotingPort, actorName2)
 		require.NoError(t, context.getError())
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		t.Cleanup(
 			func() {
@@ -2048,7 +2048,7 @@ func TestReceiveContext(t *testing.T) {
 
 		context.RemoteReSpawn(host, remotingPort, actorName2)
 		require.Error(t, context.getError())
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		t.Cleanup(
 			func() {
@@ -2069,7 +2069,7 @@ func TestReceiveContext(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, actorSystem.Start(ctx))
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// create actor1
 		actor1 := &exchanger{}
@@ -2084,7 +2084,7 @@ func TestReceiveContext(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// zero message received by both actors
 		require.Zero(t, pid1.ProcessedCount()-1)
@@ -2109,7 +2109,7 @@ func TestReceiveContext(t *testing.T) {
 			_, _ = Ask(ctx, pid1, new(testpb.TestReply), askTimeout)
 			_, _ = Ask(ctx, pid1, new(testpb.TestReply), askTimeout)
 			_, _ = Ask(ctx, pid1, new(testpb.TestReply), askTimeout)
-			lib.Pause(time.Second)
+			util.Pause(time.Second)
 			wg.Done()
 		}()
 
@@ -2120,7 +2120,7 @@ func TestReceiveContext(t *testing.T) {
 		require.EqualValues(t, 3, pid1.ProcessedCount()-1)
 		require.EqualValues(t, 1, pid2.ProcessedCount()-1)
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 		assert.NoError(t, pid1.Shutdown(ctx))
 		assert.NoError(t, pid2.Shutdown(ctx))
 		assert.NoError(t, actorSystem.Stop(ctx))
@@ -2136,7 +2136,7 @@ func TestReceiveContext(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, actorSystem.Start(ctx))
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// create actor1
 		actor1 := &exchanger{}
@@ -2152,7 +2152,7 @@ func TestReceiveContext(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// zero message received by both actors
 		require.Zero(t, pid1.ProcessedCount()-1)
@@ -2180,7 +2180,7 @@ func TestReceiveContext(t *testing.T) {
 		err := actorSystem.Start(ctx)
 		assert.NoError(t, err)
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// create actor1
 		actor1 := &exchanger{}
@@ -2219,7 +2219,7 @@ func TestReceiveContext(t *testing.T) {
 		err := actorSystem.Start(ctx)
 		assert.NoError(t, err)
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// create actor1
 		actor1 := &exchanger{}
@@ -2242,7 +2242,7 @@ func TestReceiveContext(t *testing.T) {
 		require.NotNil(t, pid2)
 
 		// wait a while and shutdown actor2
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 		assert.NoError(t, pid2.Shutdown(ctx))
 		context.SendAsync(pid2.Name(), new(testpb.TestSend))
 		require.Error(t, context.getError())
@@ -2261,7 +2261,7 @@ func TestReceiveContext(t *testing.T) {
 		err := actorSystem.Start(ctx)
 		assert.NoError(t, err)
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// create actor1
 		actor1 := &exchanger{}
@@ -2302,7 +2302,7 @@ func TestReceiveContext(t *testing.T) {
 		err := actorSystem.Start(ctx)
 		assert.NoError(t, err)
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// create actor1
 		actor1 := &exchanger{}
@@ -2325,7 +2325,7 @@ func TestReceiveContext(t *testing.T) {
 		require.NotNil(t, pid2)
 
 		// wait a while and shutdown actor2
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 		assert.NoError(t, pid2.Shutdown(ctx))
 
 		context.SendSync(pid2.Name(), new(testpb.TestReply), time.Minute)
@@ -2348,7 +2348,7 @@ func TestReceiveContext(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, actorSystem.Start(ctx))
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// create the actor path
 		actor := &mockStashActor{}
@@ -2357,7 +2357,7 @@ func TestReceiveContext(t *testing.T) {
 		require.NotNil(t, pid)
 
 		// wait for the actor to properly start
-		lib.Pause(5 * time.Millisecond)
+		util.Pause(5 * time.Millisecond)
 
 		// create a receiveContext
 		receiveContext := &ReceiveContext{
@@ -2386,7 +2386,7 @@ func TestReceiveContext(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, actorSystem.Start(ctx))
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// create the actor path
 		actor := &mockStashActor{}
@@ -2396,7 +2396,7 @@ func TestReceiveContext(t *testing.T) {
 		require.NotNil(t, pid)
 
 		// wait for the actor to properly start
-		lib.Pause(5 * time.Millisecond)
+		util.Pause(5 * time.Millisecond)
 
 		// create a receiveContext
 		receiveContext := &ReceiveContext{
@@ -2425,7 +2425,7 @@ func TestReceiveContext(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, actorSystem.Start(ctx))
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// create the actor path
 		actor := &mockStashActor{}
@@ -2435,7 +2435,7 @@ func TestReceiveContext(t *testing.T) {
 		require.NotNil(t, pid)
 
 		// wait for the actor to properly start
-		lib.Pause(5 * time.Millisecond)
+		util.Pause(5 * time.Millisecond)
 
 		// create a receive context
 		receiveContext := &ReceiveContext{
@@ -2498,7 +2498,7 @@ func TestReceiveContext(t *testing.T) {
 		require.NoError(t, err)
 
 		// wait for the async call to properly complete
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 		require.True(t, pidA.IsRunning())
 		require.True(t, pidB.IsRunning())
 		require.False(t, pidC.IsRunning())
@@ -2613,7 +2613,7 @@ func TestReceiveContext(t *testing.T) {
 		require.NoError(t, err)
 
 		// wait for the async call to properly complete
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 		require.True(t, pidA.IsRunning())
 		require.True(t, pidB.IsRunning())
 		require.False(t, pidC.IsRunning())
@@ -2673,7 +2673,7 @@ func TestReceiveContext(t *testing.T) {
 		require.NoError(t, context.getError())
 
 		// wait for the async call to properly complete
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		require.True(t, pidA.IsRunning())
 		require.True(t, pidB.IsRunning())
@@ -2735,7 +2735,7 @@ func TestReceiveContext(t *testing.T) {
 		require.Error(t, context.getError())
 
 		// wait for the async call to properly complete
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// let us shutdown the rest
 		require.NoError(t, actorSystem.Stop(ctx))

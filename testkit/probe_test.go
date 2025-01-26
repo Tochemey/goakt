@@ -34,7 +34,7 @@ import (
 	"google.golang.org/protobuf/encoding/prototext"
 
 	"github.com/tochemey/goakt/v2/actors"
-	"github.com/tochemey/goakt/v2/internal/lib"
+	"github.com/tochemey/goakt/v2/internal/util"
 	"github.com/tochemey/goakt/v2/log"
 	"github.com/tochemey/goakt/v2/test/data/testpb"
 )
@@ -227,7 +227,7 @@ func (t pinger) Receive(ctx *actors.ReceiveContext) {
 		wg := sync.WaitGroup{}
 		wg.Add(1)
 		go func() {
-			lib.Pause(time.Duration(x.Duration))
+			util.Pause(time.Duration(x.Duration))
 			wg.Done()
 		}()
 		// block until timer is up

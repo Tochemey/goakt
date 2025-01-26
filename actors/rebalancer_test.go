@@ -33,8 +33,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/tochemey/goakt/v2/internal/lib"
 	"github.com/tochemey/goakt/v2/internal/testutil"
+	"github.com/tochemey/goakt/v2/internal/util"
 	"github.com/tochemey/goakt/v2/test/data/testpb"
 )
 
@@ -68,7 +68,7 @@ func TestRebalancing(t *testing.T) {
 			require.NotNil(t, pid)
 		}
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		for j := 1; j <= 4; j++ {
 			actorName := fmt.Sprintf("Node2-Actor-%d", j)
@@ -77,7 +77,7 @@ func TestRebalancing(t *testing.T) {
 			require.NotNil(t, pid)
 		}
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		for j := 1; j <= 4; j++ {
 			actorName := fmt.Sprintf("Node3-Actor-%d", j)
@@ -86,14 +86,14 @@ func TestRebalancing(t *testing.T) {
 			require.NotNil(t, pid)
 		}
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// take down node2
 		require.NoError(t, node2.Stop(ctx))
 		require.NoError(t, sd2.Close())
 
 		// Wait for cluster rebalancing
-		lib.Pause(time.Minute)
+		util.Pause(time.Minute)
 
 		sender, err := node1.LocalActor("Node1-Actor-1")
 		require.NoError(t, err)
@@ -144,7 +144,7 @@ func TestRebalancing(t *testing.T) {
 			require.NotNil(t, pid)
 		}
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		for j := 1; j <= 4; j++ {
 			actorName := fmt.Sprintf("Node2-Actor-%d", j)
@@ -153,7 +153,7 @@ func TestRebalancing(t *testing.T) {
 			require.NotNil(t, pid)
 		}
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		for j := 1; j <= 4; j++ {
 			actorName := fmt.Sprintf("Node3-Actor-%d", j)
@@ -162,14 +162,14 @@ func TestRebalancing(t *testing.T) {
 			require.NotNil(t, pid)
 		}
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// take down node2
 		require.NoError(t, node2.Stop(ctx))
 		require.NoError(t, sd2.Close())
 
 		// Wait for cluster rebalancing
-		lib.Pause(time.Minute)
+		util.Pause(time.Minute)
 
 		sender, err := node1.LocalActor("Node1-Actor-1")
 		require.NoError(t, err)

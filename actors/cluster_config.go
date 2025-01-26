@@ -46,7 +46,7 @@ type ClusterConfig struct {
 	discoveryPort      int
 	peersPort          int
 	kinds              []Actor
-	storageSize        uint64
+	kvStoreSize        uint64
 }
 
 // enforce compilation error
@@ -61,7 +61,7 @@ func NewClusterConfig() *ClusterConfig {
 		readQuorum:         1,
 		replicaCount:       1,
 		partitionCount:     271,
-		storageSize:        20 * size.MB,
+		kvStoreSize:        20 * size.MB,
 	}
 }
 
@@ -171,16 +171,16 @@ func (x *ClusterConfig) WithReadQuorum(count uint32) *ClusterConfig {
 	return x
 }
 
-// WithStorageSize sets the cluster in-memory storage size
+// WithKVStoreSize sets the key/value in-memory storage size
 // The default values is 20MB
-func (x *ClusterConfig) WithStorageSize(size uint64) *ClusterConfig {
-	x.storageSize = size
+func (x *ClusterConfig) WithKVStoreSize(size uint64) *ClusterConfig {
+	x.kvStoreSize = size
 	return x
 }
 
-// StorageSize returns the cluster storage size
-func (x *ClusterConfig) StorageSize() uint64 {
-	return x.storageSize
+// KVStoreSize returns the cluster storage size
+func (x *ClusterConfig) KVStoreSize() uint64 {
+	return x.kvStoreSize
 }
 
 // Validate validates the cluster config

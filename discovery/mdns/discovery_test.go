@@ -34,7 +34,7 @@ import (
 	"go.uber.org/atomic"
 
 	"github.com/tochemey/goakt/v2/discovery"
-	"github.com/tochemey/goakt/v2/internal/lib"
+	"github.com/tochemey/goakt/v2/internal/util"
 )
 
 func TestDiscovery(t *testing.T) {
@@ -119,10 +119,10 @@ func TestDiscovery(t *testing.T) {
 		require.NoError(t, provider.Initialize())
 		require.NoError(t, provider.Register())
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 		require.True(t, provider.initialized.Load())
 		require.NoError(t, provider.Deregister())
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 		assert.False(t, provider.initialized.Load())
 	})
 	t.Run("With Register when already registered", func(t *testing.T) {
@@ -144,13 +144,13 @@ func TestDiscovery(t *testing.T) {
 		require.NoError(t, provider.Initialize())
 		require.NoError(t, provider.Register())
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 		require.True(t, provider.initialized.Load())
 		err := provider.Register()
 		require.Error(t, err)
 		require.EqualError(t, err, discovery.ErrAlreadyRegistered.Error())
 		require.NoError(t, provider.Deregister())
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 		assert.False(t, provider.initialized.Load())
 	})
 	t.Run("With Deregister", func(t *testing.T) {
@@ -217,7 +217,7 @@ func TestDiscovery(t *testing.T) {
 		require.NoError(t, provider.Register())
 
 		// wait for registration to be completed
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 		require.True(t, provider.initialized.Load())
 
 		// discover peers
@@ -252,7 +252,7 @@ func TestDiscovery(t *testing.T) {
 		require.NoError(t, provider.Register())
 
 		// wait for registration to be completed
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 		require.True(t, provider.initialized.Load())
 
 		// discover peers

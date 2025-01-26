@@ -49,7 +49,7 @@ func TestClusterConfig(t *testing.T) {
 			WithWriteQuorum(1).
 			WithReadQuorum(1).
 			WithPartitionCount(3).
-			WithStorageSize(10 * size.MB).
+			WithKVStoreSize(10 * size.MB).
 			WithDiscovery(disco)
 
 		require.NoError(t, config.Validate())
@@ -60,7 +60,7 @@ func TestClusterConfig(t *testing.T) {
 		assert.EqualValues(t, 1, config.ReadQuorum())
 		assert.EqualValues(t, 1, config.WriteQuorum())
 		assert.EqualValues(t, 3, config.PartitionCount())
-		assert.Exactly(t, uint64(10*size.MB), config.StorageSize())
+		assert.Exactly(t, uint64(10*size.MB), config.KVStoreSize())
 		assert.True(t, disco == config.Discovery())
 		assert.Len(t, config.Kinds(), 3)
 	})

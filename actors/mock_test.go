@@ -42,8 +42,8 @@ import (
 	"github.com/tochemey/goakt/v2/discovery"
 	"github.com/tochemey/goakt/v2/discovery/nats"
 	"github.com/tochemey/goakt/v2/goaktpb"
-	"github.com/tochemey/goakt/v2/internal/lib"
 	"github.com/tochemey/goakt/v2/internal/testutil"
+	"github.com/tochemey/goakt/v2/internal/util"
 	"github.com/tochemey/goakt/v2/log"
 	"github.com/tochemey/goakt/v2/test/data/testpb"
 	testspb "github.com/tochemey/goakt/v2/test/data/testpb"
@@ -86,7 +86,7 @@ func (p *mockActor) Receive(ctx *ReceiveContext) {
 		wg := sync.WaitGroup{}
 		wg.Add(1)
 		go func() {
-			lib.Pause(receivingDelay)
+			util.Pause(receivingDelay)
 			wg.Done()
 		}()
 		// block until timer is up
@@ -513,7 +513,7 @@ func startClusterSystem(t *testing.T, serverAddr string, opts ...testClusterOpti
 
 	// start the node
 	require.NoError(t, system.Start(ctx))
-	lib.Pause(2 * time.Second)
+	util.Pause(2 * time.Second)
 
 	// return the cluster startNode
 	return system, provider

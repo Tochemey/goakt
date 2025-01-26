@@ -150,7 +150,7 @@ type Engine struct {
 	actorsMap   olric.DMap
 	statesMap   olric.DMap
 	jobKeysMap  olric.DMap
-	storageSize uint64
+	kvStoreSize uint64
 
 	// specifies the discovery node
 	node *discovery.Node
@@ -208,7 +208,7 @@ func NewEngine(name string, disco discovery.Provider, host *discovery.Node, opts
 		Mutex:                  new(sync.Mutex),
 		nodeJoinedEventsFilter: goset.NewSet[string](),
 		nodeLeftEventsFilter:   goset.NewSet[string](),
-		storageSize:            20 * size.MB,
+		kvStoreSize:            20 * size.MB,
 		running:                atomic.NewBool(false),
 	}
 	// apply the various options
@@ -838,7 +838,7 @@ func (x *Engine) buildConfig() (*config.Config, error) {
 
 	// set the cluster storage tableSize
 	options := storage.NewConfig(nil)
-	options.Add("tableSize", x.storageSize)
+	options.Add("tableSize", x.kvStoreSize)
 
 	// create the config and return it
 	conf := &config.Config{

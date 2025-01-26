@@ -34,7 +34,7 @@ import (
 	"github.com/travisjeffery/go-dynaport"
 
 	"github.com/tochemey/goakt/v2/address"
-	"github.com/tochemey/goakt/v2/internal/lib"
+	"github.com/tochemey/goakt/v2/internal/util"
 	"github.com/tochemey/goakt/v2/log"
 	"github.com/tochemey/goakt/v2/test/data/testpb"
 )
@@ -58,7 +58,7 @@ func TestScheduler(t *testing.T) {
 		err = newActorSystem.Start(ctx)
 		assert.NoError(t, err)
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// create a test actor
 		actorName := "test"
@@ -67,14 +67,14 @@ func TestScheduler(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// send a message to the actor after 100 ms
 		message := new(testpb.TestSend)
 		err = newActorSystem.ScheduleOnce(ctx, message, actorRef, 100*time.Millisecond)
 		require.NoError(t, err)
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 		typedSystem := newActorSystem.(*actorSystem)
 		keys, err := typedSystem.scheduler.quartzScheduler.GetJobKeys()
 		require.NoError(t, err)
@@ -104,7 +104,7 @@ func TestScheduler(t *testing.T) {
 		err = newActorSystem.Start(ctx)
 		assert.NoError(t, err)
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// create a test actor
 		actorName := "test"
@@ -113,7 +113,7 @@ func TestScheduler(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 		require.NoError(t, newActorSystem.Kill(ctx, actorName))
 
 		// send a message to the actor after 100 ms
@@ -121,7 +121,7 @@ func TestScheduler(t *testing.T) {
 		err = newActorSystem.ScheduleOnce(ctx, message, actorRef, 100*time.Millisecond)
 		require.NoError(t, err)
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 		typedSystem := newActorSystem.(*actorSystem)
 		keys, err := typedSystem.scheduler.quartzScheduler.GetJobKeys()
 		require.NoError(t, err)
@@ -151,7 +151,7 @@ func TestScheduler(t *testing.T) {
 		err = newActorSystem.Start(ctx)
 		assert.NoError(t, err)
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		scheduler := newActorSystem.(*actorSystem).scheduler
 		scheduler.Stop(ctx)
@@ -193,7 +193,7 @@ func TestScheduler(t *testing.T) {
 		err = newActorSystem.Start(ctx)
 		assert.NoError(t, err)
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// create a test actor
 		actorName := "test"
@@ -212,7 +212,7 @@ func TestScheduler(t *testing.T) {
 		err = newActorSystem.RemoteScheduleOnce(ctx, message, addr, 100*time.Millisecond)
 		require.NoError(t, err)
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 		typedSystem := newActorSystem.(*actorSystem)
 		// for test purpose only
 		keys, err := typedSystem.scheduler.quartzScheduler.GetJobKeys()
@@ -249,7 +249,7 @@ func TestScheduler(t *testing.T) {
 		err = newActorSystem.Start(ctx)
 		assert.NoError(t, err)
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// test purpose only
 		typedSystem := newActorSystem.(*actorSystem)
@@ -295,7 +295,7 @@ func TestScheduler(t *testing.T) {
 		err = newActorSystem.Start(ctx)
 		assert.NoError(t, err)
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// create a test actor
 		actorName := "test"
@@ -304,7 +304,7 @@ func TestScheduler(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// send a message to the actor after 100 ms
 		message := new(testpb.TestSend)
@@ -314,7 +314,7 @@ func TestScheduler(t *testing.T) {
 		require.NoError(t, err)
 
 		// wait for two seconds
-		lib.Pause(2 * time.Second)
+		util.Pause(2 * time.Second)
 		assert.EqualValues(t, 2, actorRef.ProcessedCount()-1)
 
 		// stop the actor
@@ -339,7 +339,7 @@ func TestScheduler(t *testing.T) {
 		err = newActorSystem.Start(ctx)
 		assert.NoError(t, err)
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// create a test actor
 		actorName := "test"
@@ -348,7 +348,7 @@ func TestScheduler(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// send a message to the actor after 100 ms
 		message := new(testpb.TestSend)
@@ -379,7 +379,7 @@ func TestScheduler(t *testing.T) {
 		err = newActorSystem.Start(ctx)
 		assert.NoError(t, err)
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// test purpose only
 		typedSystem := newActorSystem.(*actorSystem)
@@ -392,7 +392,7 @@ func TestScheduler(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// send a message to the actor after 100 ms
 		message := new(testpb.TestSend)
@@ -430,7 +430,7 @@ func TestScheduler(t *testing.T) {
 		err = newActorSystem.Start(ctx)
 		assert.NoError(t, err)
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// create a test actor
 		actorName := "test"
@@ -452,7 +452,7 @@ func TestScheduler(t *testing.T) {
 		require.NoError(t, err)
 
 		// wait for two seconds
-		lib.Pause(2 * time.Second)
+		util.Pause(2 * time.Second)
 		assert.EqualValues(t, 2, actorRef.ProcessedCount()-1)
 
 		// stop the actor
@@ -483,7 +483,7 @@ func TestScheduler(t *testing.T) {
 		err = newActorSystem.Start(ctx)
 		assert.NoError(t, err)
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// create a test actor
 		actorName := "test"
@@ -532,7 +532,7 @@ func TestScheduler(t *testing.T) {
 		err = newActorSystem.Start(ctx)
 		assert.NoError(t, err)
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 		// test purpose only
 		typedSystem := newActorSystem.(*actorSystem)
 		typedSystem.scheduler.Stop(ctx)
@@ -579,7 +579,7 @@ func TestScheduler(t *testing.T) {
 		err = newActorSystem.Start(ctx)
 		assert.NoError(t, err)
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// create a test actor
 		actorName := "test"
@@ -588,14 +588,14 @@ func TestScheduler(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// send a message to the actor after one second
 		message := new(testpb.TestSend)
 		err = newActorSystem.Schedule(ctx, message, actorRef, time.Second)
 		require.NoError(t, err)
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		typedSystem := newActorSystem.(*actorSystem)
 		keys, err := typedSystem.scheduler.quartzScheduler.GetJobKeys()
@@ -603,7 +603,7 @@ func TestScheduler(t *testing.T) {
 		require.NotEmpty(t, keys)
 		require.Len(t, keys, 1)
 
-		lib.Pause(500 * time.Millisecond)
+		util.Pause(500 * time.Millisecond)
 		require.EqualValues(t, 1, actorRef.ProcessedCount()-1)
 
 		// stop the actor
@@ -629,7 +629,7 @@ func TestScheduler(t *testing.T) {
 		err = newActorSystem.Start(ctx)
 		assert.NoError(t, err)
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// create a test actor
 		actorName := "test"
@@ -638,7 +638,7 @@ func TestScheduler(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 		require.NoError(t, newActorSystem.Kill(ctx, actorName))
 
 		// send a message to the actor after one second
@@ -646,7 +646,7 @@ func TestScheduler(t *testing.T) {
 		err = newActorSystem.Schedule(ctx, message, actorRef, time.Second)
 		require.NoError(t, err)
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		typedSystem := newActorSystem.(*actorSystem)
 		keys, err := typedSystem.scheduler.quartzScheduler.GetJobKeys()
@@ -654,7 +654,7 @@ func TestScheduler(t *testing.T) {
 		require.NotEmpty(t, keys)
 		require.Len(t, keys, 1)
 
-		lib.Pause(500 * time.Millisecond)
+		util.Pause(500 * time.Millisecond)
 		require.EqualValues(t, 0, actorRef.ProcessedCount())
 
 		// stop the actor
@@ -679,7 +679,7 @@ func TestScheduler(t *testing.T) {
 		err = newActorSystem.Start(ctx)
 		assert.NoError(t, err)
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 		// test purpose only
 		typedSystem := newActorSystem.(*actorSystem)
 		typedSystem.scheduler.Stop(ctx)
@@ -691,7 +691,7 @@ func TestScheduler(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// send a message to the actor after one second
 		message := new(testpb.TestSend)
@@ -727,7 +727,7 @@ func TestScheduler(t *testing.T) {
 		err = newActorSystem.Start(ctx)
 		assert.NoError(t, err)
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// create a test actor
 		actorName := "test"
@@ -746,7 +746,7 @@ func TestScheduler(t *testing.T) {
 		err = newActorSystem.RemoteSchedule(ctx, message, addr, time.Second)
 		require.NoError(t, err)
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		typedSystem := newActorSystem.(*actorSystem)
 		keys, err := typedSystem.scheduler.quartzScheduler.GetJobKeys()
@@ -754,9 +754,9 @@ func TestScheduler(t *testing.T) {
 		require.NotEmpty(t, keys)
 		require.Len(t, keys, 1)
 
-		lib.Pause(500 * time.Millisecond)
+		util.Pause(500 * time.Millisecond)
 		require.EqualValues(t, 1, actorRef.ProcessedCount()-1)
-		lib.Pause(800 * time.Millisecond)
+		util.Pause(800 * time.Millisecond)
 		require.EqualValues(t, 2, actorRef.ProcessedCount()-1)
 
 		// stop the actor
@@ -787,7 +787,7 @@ func TestScheduler(t *testing.T) {
 		err = newActorSystem.Start(ctx)
 		assert.NoError(t, err)
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// test purpose only
 		typedSystem := newActorSystem.(*actorSystem)
@@ -840,7 +840,7 @@ func TestScheduler(t *testing.T) {
 		err = newActorSystem.Start(ctx)
 		assert.NoError(t, err)
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// create a test actor
 		actorName := "test"
@@ -855,14 +855,14 @@ func TestScheduler(t *testing.T) {
 		require.NoError(t, err)
 
 		require.NoError(t, newActorSystem.Kill(ctx, actorName))
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		// send a message to the actor after 100 ms
 		message := new(testpb.TestSend)
 		err = newActorSystem.RemoteSchedule(ctx, message, addr, time.Second)
 		require.NoError(t, err)
 
-		lib.Pause(time.Second)
+		util.Pause(time.Second)
 
 		typedSystem := newActorSystem.(*actorSystem)
 		keys, err := typedSystem.scheduler.quartzScheduler.GetJobKeys()
@@ -870,7 +870,7 @@ func TestScheduler(t *testing.T) {
 		require.NotEmpty(t, keys)
 		require.Len(t, keys, 1)
 
-		lib.Pause(500 * time.Millisecond)
+		util.Pause(500 * time.Millisecond)
 		require.Zero(t, actorRef.ProcessedCount())
 
 		// stop the actor
