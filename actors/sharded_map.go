@@ -26,10 +26,11 @@ package actors
 
 import (
 	"hash/fnv"
+	"runtime"
 	"sync"
 )
 
-const numShards = 64
+const maxShards = 64
 
 // Shard defines a Shard
 type shard struct {
@@ -43,6 +44,7 @@ type shardedMap []*shard
 
 // newShardedMap creates an instance of ShardedMap
 func newShardedMap() shardedMap {
+	numShards := calculateNumShards()
 	shards := make([]*shard, numShards)
 	for i := range numShards {
 		shards[i] = &shard{
@@ -110,4 +112,13 @@ func fnv64(key string) uint64 {
 	hash := fnv.New64()
 	_, _ = hash.Write([]byte(key))
 	return hash.Sum64()
+}
+
+// calculateNumShards returns the total number of shards to use
+func calculateNumShards() uint64 {
+	optimalShards := runtime.NumCPU() * 4
+	if optimalShards > maxShards {
+		return uint64(maxShards)
+	}
+	return uint64(optimalShards)
 }
