@@ -36,11 +36,6 @@ type pidValue struct {
 	data *PID
 }
 
-// newPidValue creates an instance of pidValue
-func newPidValue(data *PID) *pidValue {
-	return &pidValue{data: data}
-}
-
 // Value returns the actual pidValue value
 func (v *pidValue) Value() *PID {
 	return v.data
