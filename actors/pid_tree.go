@@ -229,9 +229,10 @@ func (t *pidTree) addChild(parent *pidNode, child *pidNode) {
 
 // updateAncestors updates the parent/ancestor relationships.
 func (t *pidTree) updateAncestors(parentID, childID string) {
-	if ancestors, ok := t.ancestors(parentID); ok {
+	switch ancestors, ok := t.ancestors(parentID); {
+	case ok:
 		t.parents.Store(childID, append([]string{parentID}, ancestors...))
-	} else {
+	default:
 		t.parents.Store(childID, []string{parentID})
 	}
 }
@@ -251,15 +252,15 @@ func filterOutChild(children *slice.Safe[*pidNode], childID string) *slice.Safe[
 func collectDescendants(node *pidNode) []*pidNode {
 	output := slice.NewSafe[*pidNode]()
 
-	var collectRecursive func(*pidNode)
-	collectRecursive = func(currentNode *pidNode) {
+	var recursive func(*pidNode)
+	recursive = func(currentNode *pidNode) {
 		for _, child := range currentNode.Descendants.Items() {
 			output.Append(child)
-			collectRecursive(child)
+			recursive(child)
 		}
 	}
 
-	collectRecursive(node)
+	recursive(node)
 	return output.Items()
 }
 
