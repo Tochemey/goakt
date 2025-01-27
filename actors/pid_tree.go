@@ -34,8 +34,8 @@ import (
 
 // pidTree represents the entire actors Tree structure
 type pidTree struct {
-	nodes     *shardedMap
-	parents   *shardedMap
+	nodes     shardedMap
+	parents   shardedMap
 	nodePool  *sync.Pool
 	valuePool *sync.Pool
 	size      atomic.Int64
@@ -117,7 +117,7 @@ func (t *pidTree) AddWatcher(node, watcher *PID) {
 
 // Ancestors retrieves all ancestors nodes of a given node
 func (t *pidTree) Ancestors(pid *PID) ([]*pidNode, bool) {
-	ancestorIDs, ok := t.getAncestors(pid.ID())
+	ancestorIDs, ok := t.ancestors(pid.ID())
 	if !ok {
 		return nil, false
 	}
@@ -131,19 +131,9 @@ func (t *pidTree) Ancestors(pid *PID) ([]*pidNode, bool) {
 	return ancestors, true
 }
 
-// Parent returns a given PID direct parent
-func (t *pidTree) Parent(pid *PID) (*pidNode, bool) {
-	return t.ancestorAt(pid, 0)
-}
-
-// GrandParent retrieves the grandparent of a node
-func (t *pidTree) GrandParent(pid *PID) (*pidNode, bool) {
-	return t.ancestorAt(pid, 1)
-}
-
-// GreatGrandParent retrieves the great-grand-parent of a node
-func (t *pidTree) GreatGrandParent(pid *PID) (*pidNode, bool) {
-	return t.ancestorAt(pid, 2)
+// ParentAt returns a given PID direct parent
+func (t *pidTree) ParentAt(pid *PID, level int) (*pidNode, bool) {
+	return t.ancestorAt(pid, level)
 }
 
 // Descendants retrieves all descendants of the node with the given ID.
@@ -203,10 +193,9 @@ func (t *pidTree) GetNode(id string) (*pidNode, bool) {
 // Nodes retrieves all nodes in the tree efficiently
 func (t *pidTree) Nodes() []*pidNode {
 	var nodes []*pidNode
-	t.nodes.Range(func(_, value any) bool {
+	t.nodes.Range(func(_, value any) {
 		node := value.(*pidNode)
 		nodes = append(nodes, node)
-		return true
 	})
 	return nodes
 }
@@ -223,8 +212,8 @@ func (t *pidTree) Reset() {
 	t.size.Store(0)
 }
 
-// getAncestors returns the list of ancestor nodes
-func (t *pidTree) getAncestors(id string) ([]string, bool) {
+// ancestors returns the list of ancestor nodes
+func (t *pidTree) ancestors(id string) ([]string, bool) {
 	if value, ok := t.parents.Load(id); ok {
 		return value.([]string), true
 	}
@@ -240,7 +229,7 @@ func (t *pidTree) addChild(parent *pidNode, child *pidNode) {
 
 // updateAncestors updates the parent/ancestor relationships.
 func (t *pidTree) updateAncestors(parentID, childID string) {
-	if ancestors, ok := t.getAncestors(parentID); ok {
+	if ancestors, ok := t.ancestors(parentID); ok {
 		t.parents.Store(childID, append([]string{parentID}, ancestors...))
 	} else {
 		t.parents.Store(childID, []string{parentID})
@@ -276,7 +265,7 @@ func collectDescendants(node *pidNode) []*pidNode {
 
 // ancestorAt retrieves the ancestor at the specified level (0 for parent, 1 for grandparent, etc.)
 func (t *pidTree) ancestorAt(pid *PID, level int) (*pidNode, bool) {
-	ancestors, ok := t.getAncestors(pid.ID())
+	ancestors, ok := t.ancestors(pid.ID())
 	if ok && len(ancestors) > level {
 		return t.GetNode(ancestors[level])
 	}

@@ -302,7 +302,7 @@ func (pid *PID) Child(name string) (*PID, error) {
 // Parent returns the parent of this PID
 func (pid *PID) Parent() *PID {
 	tree := pid.ActorSystem().tree()
-	parentNode, ok := tree.Parent(pid)
+	parentNode, ok := tree.ParentAt(pid, 0)
 	if !ok {
 		return nil
 	}
@@ -415,7 +415,7 @@ func (pid *PID) Restart(ctx context.Context) error {
 	children := pid.Children()
 	// get the parent node of the actor
 	parent := NoSender
-	if pnode, ok := tree.Parent(pid); ok {
+	if pnode, ok := tree.ParentAt(pid, 0); ok {
 		parent = pnode.GetValue()
 	}
 

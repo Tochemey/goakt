@@ -742,7 +742,7 @@ func (x *actorSystem) ReSpawn(ctx context.Context, name string) (*PID, error) {
 		pid := pidNode.GetValue()
 
 		parent := NoSender
-		if parentNode, ok := x.actors.Parent(pid); ok {
+		if parentNode, ok := x.actors.ParentAt(pid, 0); ok {
 			parent = parentNode.GetValue()
 		}
 
@@ -1116,7 +1116,7 @@ func (x *actorSystem) RemoteReSpawn(ctx context.Context, request *connect.Reques
 
 	pid := pidNode.GetValue()
 	parent := NoSender
-	if parentNode, ok := x.actors.Parent(pid); ok {
+	if parentNode, ok := x.actors.ParentAt(pid, 0); ok {
 		parent = parentNode.GetValue()
 	}
 
