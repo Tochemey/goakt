@@ -34,6 +34,27 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestDefaultLogger(t *testing.T) {
+	// create a bytes buffer that implements an io.Writer
+	buffer := new(bytes.Buffer)
+	// create an instance of Log with a fake level value
+	logger := New(7, buffer)
+
+	require.Equal(t, DebugLevel, logger.LogLevel())
+
+	// assert Debug log
+	logger.Debug("test debug")
+	expected := "test debug"
+	actual, err := extractMessage(buffer.Bytes())
+	require.NoError(t, err)
+	require.Equal(t, expected, actual)
+
+	lvl, err := extractLevel(buffer.Bytes())
+	require.NoError(t, err)
+	require.Equal(t, DebugLevel.String(), lvl)
+	require.Equal(t, DebugLevel, logger.LogLevel())
+}
+
 func TestDebug(t *testing.T) {
 	t.Run("With Debug log level", func(t *testing.T) {
 		// create a bytes buffer that implements an io.Writer
@@ -67,7 +88,7 @@ func TestDebug(t *testing.T) {
 		require.Equal(t, DebugLevel.String(), lvl)
 		require.Equal(t, DebugLevel, logger.LogLevel())
 	})
-	t.Run("With Info log level", func(t *testing.T) {
+	t.Run("When info log is enabled show nothing", func(t *testing.T) {
 		// create a bytes buffer that implements an io.Writer
 		buffer := new(bytes.Buffer)
 		// create an instance of Log
@@ -76,11 +97,20 @@ func TestDebug(t *testing.T) {
 		logger.Debug("test debug")
 		require.Empty(t, buffer.String())
 	})
-	t.Run("With Error log level", func(t *testing.T) {
+	t.Run("When error log is enabled show nothing", func(t *testing.T) {
 		// create a bytes buffer that implements an io.Writer
 		buffer := new(bytes.Buffer)
 		// create an instance of Log
 		logger := New(ErrorLevel, buffer)
+		// assert Debug log
+		logger.Debug("test debug")
+		require.Empty(t, buffer.String())
+	})
+	t.Run("When fatal log is enabled show nothing", func(t *testing.T) {
+		// create a bytes buffer that implements an io.Writer
+		buffer := new(bytes.Buffer)
+		// create an instance of Log
+		logger := New(FatalLevel, buffer)
 		// assert Debug log
 		logger.Debug("test debug")
 		require.Empty(t, buffer.String())
@@ -240,7 +270,7 @@ func TestError(t *testing.T) {
 		// create a bytes buffer that implements an io.Writer
 		buffer := new(bytes.Buffer)
 		// create an instance of Log
-		logger := New(InfoLevel, buffer)
+		logger := New(ErrorLevel, buffer)
 		// assert Debug log
 		logger.Error("test debug")
 		expected := "test debug"
@@ -250,25 +280,9 @@ func TestError(t *testing.T) {
 
 		lvl, err := extractLevel(buffer.Bytes())
 		require.NoError(t, err)
-		require.Equal(t, ErrorLevel.String(), lvl)
-		require.Equal(t, InfoLevel, logger.LogLevel())
-
-		// reset the buffer
-		buffer.Reset()
-		// assert Debug log
-		name := "world"
-		logger.Errorf("hello %s", name)
-		actual, err = extractMessage(buffer.Bytes())
-		require.NoError(t, err)
-		expected = "hello world"
-		require.Equal(t, expected, actual)
-
-		lvl, err = extractLevel(buffer.Bytes())
-		require.NoError(t, err)
-		require.Equal(t, ErrorLevel.String(), lvl)
-		require.Equal(t, InfoLevel, logger.LogLevel())
+		require.Equal(t, logger.LogLevel().String(), lvl)
 	})
-	t.Run("With the Debug log level", func(t *testing.T) {
+	t.Run("When debug log is enabled", func(t *testing.T) {
 		// create a bytes buffer that implements an io.Writer
 		buffer := new(bytes.Buffer)
 		// create an instance of Log
@@ -300,7 +314,7 @@ func TestError(t *testing.T) {
 		require.Equal(t, ErrorLevel.String(), lvl)
 		require.Equal(t, DebugLevel, logger.LogLevel())
 	})
-	t.Run("With the Info log level", func(t *testing.T) {
+	t.Run("When info log is enabled", func(t *testing.T) {
 		// create a bytes buffer that implements an io.Writer
 		buffer := new(bytes.Buffer)
 		// create an instance of Log
@@ -332,7 +346,7 @@ func TestError(t *testing.T) {
 		require.Equal(t, ErrorLevel.String(), lvl)
 		require.Equal(t, InfoLevel, logger.LogLevel())
 	})
-	t.Run("With the Warn log level", func(t *testing.T) {
+	t.Run("When warning log is enabled", func(t *testing.T) {
 		// create a bytes buffer that implements an io.Writer
 		buffer := new(bytes.Buffer)
 		// create an instance of Log
@@ -366,14 +380,32 @@ func TestError(t *testing.T) {
 	})
 }
 
+func TestLogOutput(t *testing.T) {
+	// create a bytes buffer that implements an io.Writer
+	buffer := new(bytes.Buffer)
+	// create an instance of Log
+	logger := New(InfoLevel, buffer)
+	outputs := logger.LogOutput()
+	require.NotEmpty(t, outputs)
+	require.Len(t, outputs, 1)
+	output := outputs[0]
+	require.IsType(t, buffer, output)
+}
+
 func TestPanic(t *testing.T) {
 	// create a bytes buffer that implements an io.Writer
 	buffer := new(bytes.Buffer)
 	// create an instance of Log
 	logger := New(PanicLevel, buffer)
+	require.Equal(t, PanicLevel.String(), logger.LogLevel())
 	// assert Debug log
 	assert.Panics(t, func() {
 		logger.Panic("test debug")
+	})
+	// assert Debug log
+	assert.Panics(t, func() {
+		msg := "test debug"
+		logger.Panicf("%s", msg)
 	})
 }
 
