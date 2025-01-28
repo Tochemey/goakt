@@ -397,7 +397,7 @@ func TestPanic(t *testing.T) {
 	buffer := new(bytes.Buffer)
 	// create an instance of Log
 	logger := New(PanicLevel, buffer)
-	require.Equal(t, PanicLevel.String(), logger.LogLevel())
+	require.Equal(t, PanicLevel, logger.LogLevel())
 	// assert Debug log
 	assert.Panics(t, func() {
 		logger.Panic("test debug")
