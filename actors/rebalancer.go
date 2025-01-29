@@ -112,50 +112,50 @@ func (r *rebalancer) Rebalance(ctx *ReceiveContext) {
 			})
 		}
 
-		// defensive programming
-		if len(peersShares) == 0 {
-			return
-		}
+		if len(peersShares) > 0 {
+			eg.Go(func() error {
+				for i := 1; i < len(peersShares); i++ {
+					actors := peersShares[i]
+					peer := peers[i-1]
+					peerFound := true
+					peerState, err := r.pid.ActorSystem().getPeerStateFromCache(peer.PeerAddress())
+					if errors.Is(err, ErrPeerNotFound) {
+						logger.Warnf("peer=(%s) not found in local cache", peer.PeerAddress())
+						peerFound = false
+					}
 
-		eg.Go(func() error {
-			for i := 1; i < len(peersShares); i++ {
-				actors := peersShares[i]
-				peer := peers[i-1]
-				peerFound := true
-				peerState, err := r.pid.ActorSystem().getPeerStateFromCache(peer.PeerAddress())
-				if errors.Is(err, ErrPeerNotFound) {
-					logger.Warnf("peer=(%s) not found in local cache", peer.PeerAddress())
-					peerFound = false
-				}
-
-				for _, actor := range actors {
-					// never redistribute system actors
-					if !isReservedName(actor.name) {
-						if !peerFound {
-							err := r.recreateLocally(egCtx, actor)
-							if err == nil {
-								continue
+					for _, actor := range actors {
+						// never redistribute system actors
+						if !isReservedName(actor.name) {
+							if !peerFound {
+								err := r.recreateLocally(egCtx, actor)
+								if err == nil {
+									continue
+								}
+								return NewSpawnError(err)
 							}
-							return NewSpawnError(err)
-						}
 
-						if err := r.remoting.RemoteSpawn(egCtx,
-							peerState.GetHost(),
-							int(peerState.GetRemotingPort()),
-							actor.name,
-							actor.kind); err != nil {
-							logger.Error(err)
-							return NewSpawnError(err)
+							if err := r.remoting.RemoteSpawn(egCtx,
+								peerState.GetHost(),
+								int(peerState.GetRemotingPort()),
+								actor.name,
+								actor.kind); err != nil {
+								logger.Error(err)
+								return NewSpawnError(err)
+							}
 						}
 					}
 				}
-			}
-			return nil
-		})
+				return nil
+			})
+		}
 
-		if err := eg.Wait(); err != nil {
-			logger.Errorf("cluster rebalancing failed: %v", err)
-			ctx.Err(err)
+		// only block when there are go routines running
+		if len(leaderShares) > 0 || len(peersShares) > 0 {
+			if err := eg.Wait(); err != nil {
+				logger.Errorf("cluster rebalancing failed: %v", err)
+				ctx.Err(err)
+			}
 		}
 
 		ctx.Tell(ctx.Sender(), &internalpb.RebalanceComplete{
