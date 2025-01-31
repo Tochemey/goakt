@@ -25,12 +25,12 @@
 package skiplist
 
 import (
-	"math/rand"
+	"math/rand/v2"
 	"time"
 	"unsafe"
 
 	"github.com/tochemey/goakt/v2/internal/internalpb"
-	"github.com/tochemey/goakt/v2/internal/lsm/types"
+	"github.com/tochemey/goakt/v2/internal/logsm/types"
 )
 
 const _head = "HEAD"
@@ -50,11 +50,12 @@ type Element struct {
 }
 
 func New(maxLevel int, probability float64) *SkipList {
+	seed := uint64(time.Now().UnixNano())
 	return &SkipList{
 		maxLevel:    maxLevel,
 		probability: probability,
 		level:       1,
-		rand:        rand.New(rand.NewSource(time.Now().UnixNano())),
+		rand:        rand.New(rand.NewPCG(seed, seed>>32)), //nolint:gosec
 		size:        0,
 		head: &Element{
 			Entry: &internalpb.Entry{

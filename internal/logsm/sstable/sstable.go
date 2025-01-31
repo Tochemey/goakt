@@ -43,7 +43,7 @@ type Block struct {
 	Length uint64
 }
 
-func Build(entries []*internalpb.Entry, dataBlockSize, level int) (Index, []byte) {
+func Build(entries []*internalpb.Entry, dataBlockSize, level int) (Index, []byte, error) {
 	buf := bufferpool.Pool.Get()
 	defer bufferpool.Pool.Put(buf)
 
@@ -73,7 +73,7 @@ func Build(entries []*internalpb.Entry, dataBlockSize, level int) (Index, []byte
 	for _, block := range dataBlocks {
 		dataBytes, err := block.Encode()
 		if err != nil {
-			panic(err)
+			return Index{}, nil, err
 		}
 		length := uint64(len(dataBytes))
 		indexBlock.Entries = append(indexBlock.Entries, IndexEntry{
@@ -88,7 +88,7 @@ func Build(entries []*internalpb.Entry, dataBlockSize, level int) (Index, []byte
 
 		// write data blocks
 		if _, err = buf.Write(dataBytes); err != nil {
-			panic(err)
+			return Index{}, nil, err
 		}
 	}
 	indexBlock.DataBlock = Block{
@@ -103,27 +103,27 @@ func Build(entries []*internalpb.Entry, dataBlockSize, level int) (Index, []byte
 	}
 	metaBytes, err := metaBlock.Encode()
 	if err != nil {
-		panic(err)
+		return Index{}, nil, err
 	}
 	metaOffset := offset
 	metaLength := uint64(len(metaBytes))
 
 	// write meta block
 	if _, err = buf.Write(metaBytes); err != nil {
-		panic(err)
+		return Index{}, nil, err
 	}
 
 	// build footer
 	indexBytes, err := indexBlock.Encode()
 	if err != nil {
-		panic(err)
+		return Index{}, nil, err
 	}
 	indexOffset := metaOffset + metaLength
 	indexLength := uint64(len(indexBytes))
 
 	// write index block
 	if _, err = buf.Write(indexBytes); err != nil {
-		panic(err)
+		return Index{}, nil, err
 	}
 
 	footer := Footer{
@@ -139,13 +139,13 @@ func Build(entries []*internalpb.Entry, dataBlockSize, level int) (Index, []byte
 	}
 	footerBytes, err := footer.Encode()
 	if err != nil {
-		panic(err)
+		return Index{}, nil, err
 	}
 
 	// write footer
 	if _, err = buf.Write(footerBytes); err != nil {
-		panic(err)
+		return Index{}, nil, err
 	}
 
-	return indexBlock, buf.Bytes()
+	return indexBlock, buf.Bytes(), nil
 }

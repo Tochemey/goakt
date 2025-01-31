@@ -22,7 +22,7 @@
  * SOFTWARE.
  */
 
-package compaction
+package levelstore
 
 import (
 	"container/list"
@@ -33,44 +33,48 @@ import (
 	"slices"
 	"sync"
 
-	"github.com/bits-and-blooms/bloom/v3"
-
 	"github.com/tochemey/goakt/v2/internal/internalpb"
-	"github.com/tochemey/goakt/v2/internal/lsm/merger"
-	"github.com/tochemey/goakt/v2/internal/lsm/sstable"
-	"github.com/tochemey/goakt/v2/internal/lsm/tool"
-	"github.com/tochemey/goakt/v2/internal/lsm/types"
+	"github.com/tochemey/goakt/v2/internal/logsm/bloom"
+	"github.com/tochemey/goakt/v2/internal/logsm/merger"
+	"github.com/tochemey/goakt/v2/internal/logsm/sstable"
+	"github.com/tochemey/goakt/v2/internal/logsm/types"
+	"github.com/tochemey/goakt/v2/internal/logsm/util"
+	"github.com/tochemey/goakt/v2/log"
 )
 
 type Table struct {
 	// list index of table within a level
 	levelIndex int
 	// bloom filter
-	filter *bloom.BloomFilter
+	filter *bloom.Filter
 	// index of data blocks in this sstable
 	dataBlockIndex sstable.Index
 }
 
-type Compaction struct {
-	mu            sync.Mutex
+type Store struct {
+	mu            *sync.Mutex
 	dir           string
 	l0TargetNum   int
 	ratio         int
 	dataBlockSize int
 	// list.Element: table
 	levels []*list.List
+
+	logger log.Logger
 }
 
-func New(dir string, l0TargetNum, ratio, blockSize int) *Compaction {
-	return &Compaction{
+func New(dir string, l0TargetNum, ratio, blockSize int, logger log.Logger) *Store {
+	return &Store{
 		dir:           dir,
 		l0TargetNum:   l0TargetNum,
 		ratio:         ratio,
 		dataBlockSize: blockSize,
+		logger:        logger,
+		mu:            new(sync.Mutex),
 	}
 }
 
-func (x *Compaction) Recover() error {
+func (x *Store) Recover() error {
 	x.mu.Lock()
 	defer x.mu.Unlock()
 
@@ -154,7 +158,7 @@ func (x *Compaction) Recover() error {
 			return fmt.Errorf("failed to decode data block: %w", err)
 		}
 
-		bf := bloom.NewWithEstimates(uint(len(dataBlock.Entries)), 0.01)
+		bf := bloom.New(len(dataBlock.Entries), 0.01)
 
 		for len(x.levels) <= level {
 			x.levels = append(x.levels, list.New())
@@ -171,7 +175,7 @@ func (x *Compaction) Recover() error {
 	return nil
 }
 
-func (x *Compaction) Search(key types.Key) (*internalpb.Entry, bool) {
+func (x *Store) Search(key types.Key) (*internalpb.Entry, bool) {
 	x.mu.Lock()
 	defer x.mu.Unlock()
 
@@ -184,7 +188,7 @@ func (x *Compaction) Search(key types.Key) (*internalpb.Entry, bool) {
 			th := e.Value.(Table)
 
 			// search bloom filter
-			if !th.filter.Test([]byte(key)) {
+			if !th.filter.Contains(key) {
 				// not in this sstable, search next one
 				continue
 			}
@@ -207,7 +211,7 @@ func (x *Compaction) Search(key types.Key) (*internalpb.Entry, bool) {
 	return nil, false
 }
 
-func (x *Compaction) Scan(start, end types.Key) []*internalpb.Entry {
+func (x *Store) Scan(start, end types.Key) []*internalpb.Entry {
 	x.mu.Lock()
 	defer x.mu.Unlock()
 
@@ -240,14 +244,17 @@ func (x *Compaction) Scan(start, end types.Key) []*internalpb.Entry {
 	return merger.Merge(entriesList...)
 }
 
-func (x *Compaction) FlushToL0(kvs []*internalpb.Entry) error {
+func (x *Store) FlushToL0(kvs []*internalpb.Entry) error {
 	x.mu.Lock()
 	defer x.mu.Unlock()
 
 	// new and build bloom filter
-	bf := bloom.NewWithEstimates(uint(len(kvs)), 0.01)
+	bf := bloom.Build(kvs)
 	// build sstable
-	dataBlockIndex, tableBytes := sstable.Build(kvs, x.dataBlockSize, 0)
+	dataBlockIndex, tableBytes, err := sstable.Build(kvs, x.dataBlockSize, 0)
+	if err != nil {
+		return err
+	}
 
 	// lazy init
 	if len(x.levels) == 0 {
@@ -269,80 +276,91 @@ func (x *Compaction) FlushToL0(kvs []*internalpb.Entry) error {
 	if err != nil {
 		return err
 	}
+
 	defer func() {
 		if err = fd.Close(); err != nil {
-			// TODO: add a logger
+			x.logger.Fatalf("failed to close file %s: %w", x.fileName(0, th.levelIndex), err)
 		}
 	}()
 
 	// write sstable
 	_, err = fd.Write(tableBytes)
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return err
 }
 
-func (x *Compaction) CheckAndCompact() {
+func (x *Store) CheckAndCompact() error {
 	x.mu.Lock()
 	defer x.mu.Unlock()
 
 	for i, tables := range x.levels {
-		if tables.Len() > x.l0TargetNum*tool.Pow(x.ratio, i) {
+		if tables.Len() > x.l0TargetNum*util.Pow(x.ratio, i) {
 			if i == 0 {
-				x.compactL0()
+				if err := x.compactL0(); err != nil {
+					return err
+				}
 				continue
 			}
-			x.compactLN(i)
+
+			if err := x.compactLN(i); err != nil {
+				return err
+			}
 		}
 	}
+	return nil
 }
 
-func (x *Compaction) fetch(level, idx int, handle sstable.Block) sstable.Data {
+func (x *Store) fetch(level, idx int, handle sstable.Block) (sstable.Data, error) {
 	filename := x.fileName(level, idx)
 	fd, err := os.Open(filename)
 	if err != nil {
-		panic(fmt.Errorf("failed to open sstable %s: %w", filename, err))
+		return sstable.Data{}, fmt.Errorf("failed to open sstable %s: %w", filename, err)
 	}
+
 	defer func() {
 		if err = fd.Close(); err != nil {
-			// TODO: add logger
-			//lm.logger.Errorf("failed to close file: %v", err)
+			x.logger.Fatalf("failed to close sstable %s: %w", filename, err)
 		}
 	}()
 
 	_, err = fd.Seek(int64(handle.Offset), io.SeekStart)
 	if err != nil {
-		panic(fmt.Errorf("failed to seek sstable %s: %w", filename, err))
+		return sstable.Data{}, fmt.Errorf("failed to seek sstable %s: %w", filename, err)
 	}
 
 	data := make([]byte, handle.Length)
 	_, err = fd.Read(data)
 	if err != nil {
-		panic(fmt.Errorf("failed to read sstable %s: %w", filename, err))
+		return sstable.Data{}, fmt.Errorf("failed to read sstable %s: %w", filename, err)
 	}
 
 	var dataBlock sstable.Data
 	if err = dataBlock.Decode(data); err != nil {
-		panic(fmt.Errorf("failed to decode sstable data block %s: %w", filename, err))
+		return sstable.Data{}, fmt.Errorf("failed to decode sstable data block %s: %w", filename, err)
 	}
 
-	return dataBlock
+	return dataBlock, nil
 }
 
-func (x *Compaction) fetchAndSearch(key types.Key, level, idx int, handle sstable.Block) (*internalpb.Entry, bool) {
-	dataBlock := x.fetch(level, idx, handle)
+func (x *Store) fetchAndSearch(key types.Key, level, idx int, handle sstable.Block) (*internalpb.Entry, bool) {
+	dataBlock, err := x.fetch(level, idx, handle)
+	if err != nil {
+		x.logger.Errorf("failed to fetch and search %s: %w", x.fileName(level, idx), err)
+		return nil, false
+	}
 	return dataBlock.Search(key)
 }
 
-func (x *Compaction) fetchAndScan(start, end types.Key, level, idx int, handle sstable.Block) []*internalpb.Entry {
-	dataBlock := x.fetch(level, idx, handle)
+func (x *Store) fetchAndScan(start, end types.Key, level, idx int, handle sstable.Block) []*internalpb.Entry {
+	dataBlock, err := x.fetch(level, idx, handle)
+	if err != nil {
+		x.logger.Errorf("failed to fetch and scan %s: %w", x.fileName(level, idx), err)
+		return nil
+	}
 	return dataBlock.Scan(start, end)
 }
 
 // L0 -> L1
-func (x *Compaction) compactL0() {
+func (x *Store) compactL0() error {
 	// lazy init
 	if len(x.levels)-1 < 1 {
 		x.levels = append(x.levels, list.New())
@@ -363,13 +381,19 @@ func (x *Compaction) compactL0() {
 	// L1 data block entries
 	for _, tb := range l1Tables {
 		th := tb.Value.(Table)
-		dataBlock := x.fetch(1, th.levelIndex, th.dataBlockIndex.DataBlock)
+		dataBlock, err := x.fetch(1, th.levelIndex, th.dataBlockIndex.DataBlock)
+		if err != nil {
+			return err
+		}
 		dataBlockList = append(dataBlockList, dataBlock.Entries)
 	}
 	// L0 data block entries
 	for _, tb := range l0Tables {
 		th := tb.Value.(Table)
-		dataBlock := x.fetch(0, th.levelIndex, th.dataBlockIndex.DataBlock)
+		dataBlock, err := x.fetch(0, th.levelIndex, th.dataBlockIndex.DataBlock)
+		if err != nil {
+			return err
+		}
 		dataBlockList = append(dataBlockList, dataBlock.Entries)
 	}
 
@@ -377,9 +401,12 @@ func (x *Compaction) compactL0() {
 	mergedEntries := merger.Merge(dataBlockList...)
 
 	// build new bloom filter
-	bf := bloom.NewWithEstimates(uint(len(mergedEntries)), 0.01)
+	bf := bloom.Build(mergedEntries)
 	// build new sstable
-	dataBlockIndex, tableBytes := sstable.Build(mergedEntries, x.dataBlockSize, 1)
+	dataBlockIndex, tableBytes, err := sstable.Build(mergedEntries, x.dataBlockSize, 1)
+	if err != nil {
+		return err
+	}
 
 	// table handle
 	th := Table{
@@ -404,36 +431,35 @@ func (x *Compaction) compactL0() {
 	// delete old sstables from L0
 	for _, e := range l0Tables {
 		if err := os.Remove(x.fileName(0, e.Value.(Table).levelIndex)); err != nil {
-			panic(fmt.Errorf("failed to remove %w", err))
+			return fmt.Errorf("failed to remove %w", err)
 		}
 	}
 
 	// delete old sstables from L1
 	for _, e := range l1Tables {
 		if err := os.Remove(x.fileName(1, e.Value.(Table).levelIndex)); err != nil {
-			panic(fmt.Errorf("failed to remove %w", err))
+			return fmt.Errorf("failed to remove %w", err)
 		}
 	}
 
 	// write new sstable
 	fd, err := os.OpenFile(x.fileName(1, th.levelIndex), os.O_CREATE|os.O_RDWR|os.O_TRUNC, 0600)
 	if err != nil {
-		panic(fmt.Errorf("failed to open sstable %w", err))
+		return fmt.Errorf("failed to open sstable %w", err)
 	}
+
 	defer func() {
 		if err = fd.Close(); err != nil {
-			// TODO: add some logger
+			x.logger.Fatal(err)
 		}
 	}()
 
 	_, err = fd.Write(tableBytes)
-	if err != nil {
-		panic(fmt.Errorf("failed to write sstable %w", err))
-	}
+	return err
 }
 
 // LN -> LN+1
-func (x *Compaction) compactLN(n int) {
+func (x *Store) compactLN(n int) error {
 	// lazy init
 	if len(x.levels)-1 < n+1 {
 		x.levels = append(x.levels, list.New())
@@ -450,21 +476,30 @@ func (x *Compaction) compactLN(n int) {
 	// LN+1 data block entries
 	for _, tb := range ln1Tables {
 		th := tb.Value.(Table)
-		dataBlockLN1 := x.fetch(n+1, th.levelIndex, th.dataBlockIndex.DataBlock)
+		dataBlockLN1, err := x.fetch(n+1, th.levelIndex, th.dataBlockIndex.DataBlock)
+		if err != nil {
+			return err
+		}
 		dataBlockList = append(dataBlockList, dataBlockLN1.Entries)
 	}
 
 	// LN data block entries
-	dataBlockLN := x.fetch(n, lnTable.Value.(Table).levelIndex, lnTable.Value.(Table).dataBlockIndex.DataBlock)
+	dataBlockLN, err := x.fetch(n, lnTable.Value.(Table).levelIndex, lnTable.Value.(Table).dataBlockIndex.DataBlock)
+	if err != nil {
+		return err
+	}
 	dataBlockList = append(dataBlockList, dataBlockLN.Entries)
 
 	// merge sstables
 	mergedEntries := merger.Merge(dataBlockList...)
 
 	// build new bloom filter
-	bf := bloom.NewWithEstimates(uint(len(mergedEntries)), 0.01)
+	bf := bloom.Build(mergedEntries)
 	// build new sstable
-	dataBlockIndex, tableBytes := sstable.Build(mergedEntries, x.dataBlockSize, n+1)
+	dataBlockIndex, tableBytes, err := sstable.Build(mergedEntries, x.dataBlockSize, n+1)
+	if err != nil {
+		return err
+	}
 
 	// table handle
 	th := Table{
@@ -486,34 +521,33 @@ func (x *Compaction) compactLN(n int) {
 
 	// delete old sstables from LN
 	if err := os.Remove(x.fileName(n, lnTable.Value.(Table).levelIndex)); err != nil {
-		panic(fmt.Errorf("failed to remove old sstable %w", err))
+		return fmt.Errorf("failed to remove old sstable %w", err)
 	}
+
 	// delete old sstables from LN+1
 	for _, e := range ln1Tables {
 		if err := os.Remove(x.fileName(n+1, e.Value.(Table).levelIndex)); err != nil {
-			panic(fmt.Errorf("failed to remove old sstable %w", err))
+			return fmt.Errorf("failed to remove old sstable %w", err)
 		}
 	}
 
 	// write new sstable
 	fd, err := os.OpenFile(x.fileName(n+1, th.levelIndex), os.O_CREATE|os.O_RDWR|os.O_TRUNC, 0600)
 	if err != nil {
-		panic(fmt.Errorf("failed to open sstable %w", err))
+		return fmt.Errorf("failed to open sstable %w", err)
 	}
 
 	defer func() {
 		if err = fd.Close(); err != nil {
-			panic(fmt.Errorf("failed to close sstable %w", err))
+			x.logger.Fatal(fmt.Errorf("failed to close sstable %w", err))
 		}
 	}()
 
 	_, err = fd.Write(tableBytes)
-	if err != nil {
-		panic(fmt.Errorf("failed to write sstable %w", err))
-	}
+	return err
 }
 
-func (x *Compaction) overlapL0() []*list.Element {
+func (x *Store) overlapL0() []*list.Element {
 	frontIndex := x.levels[0].Front().Value.(Table).dataBlockIndex
 
 	startKey := frontIndex.Entries[0].StartKey
@@ -522,7 +556,7 @@ func (x *Compaction) overlapL0() []*list.Element {
 	return x.overlapLN(0, startKey, endKey)
 }
 
-func (x *Compaction) overlapLN(level int, start, end string) []*list.Element {
+func (x *Store) overlapLN(level int, start, end string) []*list.Element {
 	// check if LN+1 is not initialized
 	if x.levels[level].Len() == 0 {
 		return nil
@@ -541,13 +575,13 @@ func (x *Compaction) overlapLN(level int, start, end string) []*list.Element {
 	return overlaps
 }
 
-func (x *Compaction) fileName(level, idx int) string {
+func (x *Store) fileName(level, idx int) string {
 	return path.Join(x.dir, fmt.Sprintf("%d-%d.db", level, idx))
 }
 
 // if no elements in this level, return -1
 // else return max level idx
-func (x *Compaction) maxLevelIdx(level int) int {
+func (x *Store) maxLevelIdx(level int) int {
 	res := -1
 	for e := x.levels[level].Front(); e != nil; e = e.Next() {
 		levelIdx := e.Value.(Table).levelIndex

@@ -22,9 +22,43 @@
  * SOFTWARE.
  */
 
-package types
+package util
 
-type (
-	Key   = string
-	Value = []byte
+import (
+	"io"
+
+	"github.com/klauspost/compress/s2"
 )
+
+func CommonPrefixLength(a, b string) int {
+	n := min(len(a), len(b))
+	var i int
+	for i < n && a[i] == b[i] {
+		i++
+	}
+	return i
+}
+
+func Pow(x, n int) int {
+	res := 1
+	for range n {
+		res *= x
+	}
+	return res
+}
+
+func Compress(src io.Reader, dst io.Writer) error {
+	enc := s2.NewWriter(dst)
+	_, err := io.Copy(enc, src)
+	if err != nil {
+		_ = enc.Close()
+		return err
+	}
+	return enc.Close()
+}
+
+func Decompress(src io.Reader, dst io.Writer) error {
+	dec := s2.NewReader(src)
+	_, err := io.Copy(dst, dec)
+	return err
+}

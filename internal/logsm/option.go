@@ -22,55 +22,69 @@
  * SOFTWARE.
  */
 
-package lsm
+package logsm
 
 import "github.com/tochemey/goakt/v2/log"
 
 type Option interface {
-	Apply(*LSMTree)
+	Apply(*LogSM)
 }
 
 // enforce compilation error
 var _ Option = OptionFunc(nil)
 
 // OptionFunc implements the Option interface.
-type OptionFunc func(*LSMTree)
+type OptionFunc func(*LogSM)
 
-func (f OptionFunc) Apply(t *LSMTree) {
+func (f OptionFunc) Apply(t *LogSM) {
 	f(t)
 }
 
 // WithSkipListMaxLevel sets the custom SkipList max level
 func WithSkipListMaxLevel(maxLevel int) Option {
-	return OptionFunc(func(l *LSMTree) {
+	return OptionFunc(func(l *LogSM) {
 		l.maxLevel = maxLevel
 	})
 }
 
 // WithProbability sets the custom SkipList probability
 func WithProbability(probability float64) Option {
-	return OptionFunc(func(l *LSMTree) {
+	return OptionFunc(func(l *LogSM) {
 		l.probability = probability
 	})
 }
 
 // WithMemTableSizeThreshold sets the custom MemTable size threshold
 func WithMemTableSizeThreshold(threshold int) Option {
-	return OptionFunc(func(l *LSMTree) {
+	return OptionFunc(func(l *LogSM) {
 		l.memTableSizeThreshold = threshold
 	})
 }
 
 // WithDataBlockByteThreshold sets the custom data block byte threshold
 func WithDataBlockByteThreshold(threshold int) Option {
-	return OptionFunc(func(l *LSMTree) {
+	return OptionFunc(func(l *LogSM) {
 		l.datablockByteThreshold = threshold
 	})
 }
 
 // WithLogger sets a custom logger
 func WithLogger(logger log.Logger) Option {
-	return OptionFunc(func(l *LSMTree) {
+	return OptionFunc(func(l *LogSM) {
 		l.logger = logger
+	})
+}
+
+// WithL0TargetNum sets a custom L0 target number
+func WithL0TargetNum(num int) Option {
+	return OptionFunc(func(l *LogSM) {
+		l.l0TargetNum = num
+	})
+}
+
+// WithLevelRatio sets a custom level ratio
+func WithLevelRatio(ratio int) Option {
+	return OptionFunc(func(l *LogSM) {
+		l.levelRatio = ratio
 	})
 }

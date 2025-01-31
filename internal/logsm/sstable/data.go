@@ -30,8 +30,8 @@ import (
 
 	"github.com/tochemey/goakt/v2/internal/bufferpool"
 	"github.com/tochemey/goakt/v2/internal/internalpb"
-	"github.com/tochemey/goakt/v2/internal/lsm/tool"
-	"github.com/tochemey/goakt/v2/internal/lsm/types"
+	"github.com/tochemey/goakt/v2/internal/logsm/types"
+	"github.com/tochemey/goakt/v2/internal/logsm/util"
 )
 
 // Data Block
@@ -88,7 +88,7 @@ func (d *Data) Encode() ([]byte, error) {
 
 	var prevKey string
 	for _, entry := range d.Entries {
-		lcp := tool.CommonPrefixLength(entry.Key, prevKey)
+		lcp := util.CommonPrefixLength(entry.Key, prevKey)
 		suffix := entry.Key[lcp:]
 
 		// lcp
@@ -129,7 +129,7 @@ func (d *Data) Encode() ([]byte, error) {
 	compressed := bufferpool.Pool.Get()
 	defer bufferpool.Pool.Put(compressed)
 
-	if err := tool.Compress(buf, compressed); err != nil {
+	if err := util.Compress(buf, compressed); err != nil {
 		return nil, err
 	}
 	return compressed.Bytes(), nil
@@ -139,7 +139,7 @@ func (d *Data) Decode(data []byte) error {
 	buf := bufferpool.Pool.Get()
 	defer bufferpool.Pool.Put(buf)
 
-	if err := tool.Decompress(bytes.NewReader(data), buf); err != nil {
+	if err := util.Decompress(bytes.NewReader(data), buf); err != nil {
 		return err
 	}
 

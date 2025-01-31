@@ -22,20 +22,22 @@
  * SOFTWARE.
  */
 
-package compaction
+package levelstore
 
 import (
 	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/tochemey/goakt/v2/internal/internalpb"
+	"github.com/tochemey/goakt/v2/log"
 )
 
 func TestSearch(t *testing.T) {
 	dir := t.TempDir()
-	lm := New(dir, 4, 10, 4096)
+	lm := New(dir, 4, 10, 4096, log.DefaultLogger)
 
 	kvs := []*internalpb.Entry{
 		{Key: "key1", Value: []byte("value1")},
@@ -47,17 +49,17 @@ func TestSearch(t *testing.T) {
 	}
 
 	err := lm.FlushToL0(kvs)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	entry, found := lm.Search("key1")
-	assert.True(t, found)
-	assert.Equal(t, "key1", entry.Key)
-	assert.Equal(t, []byte("value1"), entry.Value)
+	require.True(t, found)
+	assert.Equal(t, "key1", entry.GetKey())
+	assert.Equal(t, []byte("value1"), entry.GetValue())
 
 	entry, found = lm.Search("key5")
 	assert.True(t, found)
-	assert.Equal(t, "key5", entry.Key)
-	assert.Equal(t, []byte("value5"), entry.Value)
+	assert.Equal(t, "key5", entry.GetKey())
+	assert.Equal(t, []byte("value5"), entry.GetValue())
 	assert.True(t, entry.Tombstone)
 
 	entry, found = lm.Search("key7")
@@ -67,7 +69,7 @@ func TestSearch(t *testing.T) {
 
 func TestManagerScan(t *testing.T) {
 	dir := t.TempDir()
-	lm := New(dir, 4, 10, 4096)
+	lm := New(dir, 4, 10, 4096, log.DefaultLogger)
 
 	kvs := []*internalpb.Entry{
 		{Key: "key1", Value: []byte("value1")},
@@ -97,7 +99,7 @@ func TestManagerScan(t *testing.T) {
 }
 
 func TestCompact(t *testing.T) {
-	lm := New(t.TempDir(), 1, 2, 500)
+	lm := New(t.TempDir(), 1, 2, 500, log.DefaultLogger)
 
 	// First flush: key100-key200
 	kvs1 := make([]*internalpb.Entry, 0)
@@ -111,7 +113,8 @@ func TestCompact(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Perform compaction
-	lm.CheckAndCompact()
+	err = lm.CheckAndCompact()
+	require.NoError(t, err)
 
 	// Second flush: key150-key300
 	kvs2 := make([]*internalpb.Entry, 0)

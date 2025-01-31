@@ -33,9 +33,9 @@ import (
 	"sync"
 
 	"github.com/tochemey/goakt/v2/internal/internalpb"
-	"github.com/tochemey/goakt/v2/internal/lsm/skiplist"
-	"github.com/tochemey/goakt/v2/internal/lsm/types"
-	"github.com/tochemey/goakt/v2/internal/lsm/wal"
+	"github.com/tochemey/goakt/v2/internal/logsm/skiplist"
+	"github.com/tochemey/goakt/v2/internal/logsm/types"
+	"github.com/tochemey/goakt/v2/internal/logsm/wal"
 )
 
 type MemTable struct {
@@ -44,6 +44,11 @@ type MemTable struct {
 	wal      *wal.WAL
 	dir      string
 	readOnly bool
+}
+
+// Wal returns the memtable WAL
+func (mt *MemTable) Wal() *wal.WAL {
+	return mt.wal
 }
 
 func New(dir string, maxLevel int, probability float64) *MemTable {
@@ -138,4 +143,36 @@ func (mt *MemTable) All() []*internalpb.Entry {
 	mt.mu.RLock()
 	defer mt.mu.RUnlock()
 	return mt.skiplist.All()
+}
+
+func (mt *MemTable) Size() int {
+	mt.mu.RLock()
+	defer mt.mu.RUnlock()
+	return mt.skiplist.Size()
+}
+
+func (mt *MemTable) Freeze() {
+	mt.mu.Lock()
+	defer mt.mu.Unlock()
+
+	if err := mt.wal.Close(); err != nil {
+		panic(err)
+	}
+	mt.readOnly = true
+}
+
+func (mt *MemTable) Reset() *MemTable {
+	mt.mu.Lock()
+	defer mt.mu.Unlock()
+
+	l, err := mt.wal.Reset()
+	if err != nil {
+		panic(err)
+	}
+	return &MemTable{
+		skiplist: mt.skiplist.Reset(),
+		wal:      l,
+		dir:      mt.dir,
+		readOnly: false,
+	}
 }

@@ -22,43 +22,47 @@
  * SOFTWARE.
  */
 
-package tool
+package bloom
 
 import (
-	"io"
+	"strconv"
+	"testing"
 
-	"github.com/klauspost/compress/s2"
+	"github.com/stretchr/testify/assert"
 )
 
-func CommonPrefixLength(a, b string) int {
-	n := min(len(a), len(b))
-	var i int
-	for i < n && a[i] == b[i] {
-		i++
+func TestNoFalseNegatives(t *testing.T) {
+	n := 1000
+	p := 0.01
+	bf := New(n, p)
+
+	for i := 0; i < n; i++ {
+		bf.Add(strconv.Itoa(i))
 	}
-	return i
+
+	for i := 0; i < n; i++ {
+		assert.True(t, bf.Contains(strconv.Itoa(i)), "Expected Bloom Filter to contain '%d', but it did not", i)
+	}
 }
 
-func Pow(x, n int) int {
-	res := 1
-	for range n {
-		res *= x
-	}
-	return res
-}
+func TestFalsePositiveRate(t *testing.T) {
+	n := 1000
+	p := 0.01
+	bf := New(n, p)
 
-func Compress(src io.Reader, dst io.Writer) error {
-	enc := s2.NewWriter(dst)
-	_, err := io.Copy(enc, src)
-	if err != nil {
-		_ = enc.Close()
-		return err
+	for i := 0; i < n; i++ {
+		bf.Add(strconv.Itoa(i))
 	}
-	return enc.Close()
-}
 
-func Decompress(src io.Reader, dst io.Writer) error {
-	dec := s2.NewReader(src)
-	_, err := io.Copy(dst, dec)
-	return err
+	falsePositives := 0
+	testSize := 10000
+
+	for i := n; i < n+testSize; i++ {
+		if bf.Contains(strconv.Itoa(i)) {
+			falsePositives++
+		}
+	}
+
+	actualP := float64(falsePositives) / float64(testSize)
+	t.Log(actualP)
 }
