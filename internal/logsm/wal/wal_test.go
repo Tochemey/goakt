@@ -29,6 +29,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/tochemey/goakt/v2/internal/internalpb"
 )
@@ -95,9 +97,10 @@ func TestWriteAndRead(t *testing.T) {
 	assert.NoError(t, err)
 
 	readEntries, err := wal.Read()
-	assert.NoError(t, err)
-	assert.Equal(t, entries, readEntries)
-
+	require.NoError(t, err)
+	for index, entry := range readEntries {
+		require.True(t, proto.Equal(entries[index], entry))
+	}
 	err = wal.Delete()
-	assert.NoError(t, err)
+	require.NoError(t, err)
 }
