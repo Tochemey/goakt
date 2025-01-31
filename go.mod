@@ -5,11 +5,14 @@ go 1.22.0
 require (
 	connectrpc.com/connect v1.18.1
 	github.com/Workiva/go-datastructures v1.1.5
+	github.com/bits-and-blooms/bloom/v3 v3.7.0
 	github.com/deckarep/golang-set/v2 v2.7.0
 	github.com/flowchartsman/retry v1.2.0
 	github.com/google/uuid v1.6.0
 	github.com/grandcat/zeroconf v1.0.0
 	github.com/hashicorp/go-sockaddr v1.0.7
+	github.com/huandu/skiplist v1.2.1
+	github.com/klauspost/compress v1.17.11
 	github.com/nats-io/nats-server/v2 v2.10.25
 	github.com/nats-io/nats.go v1.38.0
 	github.com/redis/go-redis/v9 v9.7.0
@@ -61,7 +64,6 @@ require (
 	github.com/hashicorp/memberlist v0.5.3 // indirect
 	github.com/josharian/intern v1.0.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
-	github.com/klauspost/compress v1.17.11 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.9 // indirect
 	github.com/mailru/easyjson v0.9.0 // indirect
 	github.com/miekg/dns v1.1.63 // indirect
