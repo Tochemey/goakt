@@ -10,10 +10,12 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/grandcat/zeroconf v1.0.0
 	github.com/hashicorp/go-sockaddr v1.0.7
+	github.com/klauspost/compress v1.17.11
 	github.com/nats-io/nats-server/v2 v2.10.25
 	github.com/nats-io/nats.go v1.38.0
 	github.com/redis/go-redis/v9 v9.7.0
 	github.com/reugn/go-quartz v0.13.0
+	github.com/spaolacci/murmur3 v1.1.0
 	github.com/stretchr/testify v1.10.0
 	github.com/tochemey/olric v0.2.0-alpha
 	github.com/travisjeffery/go-dynaport v1.0.0
@@ -61,7 +63,6 @@ require (
 	github.com/hashicorp/memberlist v0.5.3 // indirect
 	github.com/josharian/intern v1.0.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
-	github.com/klauspost/compress v1.17.11 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.9 // indirect
 	github.com/mailru/easyjson v0.9.0 // indirect
 	github.com/miekg/dns v1.1.63 // indirect

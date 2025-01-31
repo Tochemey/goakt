@@ -1,0 +1,11 @@
+syntax = "proto3";
+
+package internalpb;
+
+option go_package = "github.com/tochemey/goakt/v2/internal/internalpb;internalpb";
+
+message Entry {
+  string key = 1;
+  bytes value = 2;
+  bool tombstone = 3;
+}
