@@ -29,7 +29,6 @@ import (
 	"time"
 
 	"github.com/tochemey/goakt/v2/hash"
-	"github.com/tochemey/goakt/v2/internal/size"
 	"github.com/tochemey/goakt/v2/log"
 	"github.com/tochemey/goakt/v2/remote"
 )
@@ -97,7 +96,7 @@ func WithRemoting(host string, port int32) Option {
 	return OptionFunc(
 		func(a *actorSystem) {
 			a.remotingEnabled.Store(true)
-			a.remoteConfig = remote.NewConfig(host, int(port), 16*size.MB)
+			a.remoteConfig = remote.NewConfig(host, int(port))
 		},
 	)
 }

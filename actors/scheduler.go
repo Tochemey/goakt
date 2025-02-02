@@ -115,6 +115,10 @@ func (x *scheduler) Start(ctx context.Context) {
 
 // Stop stops the scheduler
 func (x *scheduler) Stop(ctx context.Context) {
+	if !x.started.Load() {
+		return
+	}
+
 	x.logger.Info("stopping messages scheduler...")
 	x.mu.Lock()
 	defer x.mu.Unlock()

@@ -449,9 +449,11 @@ func (x *actorSystem) Start(ctx context.Context) error {
 		AddError(x.spawnJanitor(ctx)).
 		AddError(x.spawnDeadletters(ctx)).
 		Error(); err != nil {
-		// reset the start
-		x.started.Store(false)
-		return err
+		return errorschain.
+			New(errorschain.ReturnAll()).
+			AddError(err).
+			AddError(x.shutdown(ctx)).
+			Error()
 	}
 
 	x.startMessagesScheduler(ctx)
@@ -1342,12 +1344,14 @@ func (x *actorSystem) enableClustering(ctx context.Context) error {
 
 	if !x.remotingEnabled.Load() {
 		x.logger.Error("clustering needs remoting to be enabled")
+		x.locker.Unlock()
 		return errors.New("clustering needs remoting to be enabled")
 	}
 
 	clusterStore, err := newClusterStore(x.clusterConfig.WAL(), x.logger)
 	if err != nil {
 		x.logger.Errorf("failed to initialize peers cache: %v", err)
+		x.locker.Unlock()
 		return err
 	}
 
@@ -1376,12 +1380,14 @@ func (x *actorSystem) enableClustering(ctx context.Context) error {
 	)
 	if err != nil {
 		x.logger.Errorf("failed to initialize cluster engine: %v", err)
+		x.locker.Unlock()
 		return err
 	}
 
 	x.logger.Info("starting cluster engine...")
 	if err := clusterEngine.Start(ctx); err != nil {
 		x.logger.Errorf("failed to start cluster engine: %v", err)
+		x.locker.Unlock()
 		return err
 	}
 
@@ -1505,7 +1511,9 @@ func (x *actorSystem) shutdown(ctx context.Context) error {
 	x.logger.Infof("%s is shutting down..:)", x.name)
 
 	x.started.Store(false)
-	x.scheduler.Stop(ctx)
+	if x.scheduler != nil {
+		x.scheduler.Stop(ctx)
+	}
 
 	// run the various shutdown hooks
 	for _, hook := range x.shutdownHooks {
@@ -1534,38 +1542,13 @@ func (x *actorSystem) shutdown(ctx context.Context) error {
 		x.eventsStream.Shutdown()
 	}
 
-	if x.clusterEnabled.Load() {
-		if err := errorschain.
-			New(errorschain.ReturnFirst()).
-			AddError(x.cleanupCluster(ctx, actorNames)).
-			AddError(x.cluster.Stop(ctx)).
-			Error(); err != nil {
-			x.reset()
-			x.logger.Errorf("%s failed to shutdown cleanly: %w", x.name, err)
-			return err
-		}
-
-		close(x.wireActorsQueue)
-		x.clusterSyncStopSig <- types.Unit{}
-		x.clusterEnabled.Store(false)
-		x.rebalancing.Store(false)
-		x.rebalanceLocker.Lock()
-		close(x.rebalancingQueue)
-		x.rebalanceLocker.Unlock()
-		x.clusterStore.close()
-	}
-
-	if x.remotingEnabled.Load() {
-		x.remoting.Close()
-		if err := x.shutdownHTTPServer(ctx); err != nil {
-			x.reset()
-			x.logger.Errorf("%s failed to shutdown: %w", x.name, err)
-			return err
-		}
-
-		x.remotingEnabled.Store(false)
-		x.server = nil
-		x.listener = nil
+	if err := errorschain.
+		New(errorschain.ReturnFirst()).
+		AddError(x.shutdownCluster(ctx, actorNames)).
+		AddError(x.shutdownRemoting(ctx)).
+		Error(); err != nil {
+		x.logger.Errorf("%s failed to shutdown: %w", x.name, err)
+		return err
 	}
 
 	x.reset()
@@ -2043,6 +2026,61 @@ func (x *actorSystem) getSetDeadlettersCount(ctx context.Context) {
 		// set the counter
 		x.deadlettersCounter.Store(uint64(deadlettersCount.GetTotalCount()))
 	}
+}
+
+func (x *actorSystem) shutdownCluster(ctx context.Context, actorNames []string) error {
+	if x.clusterEnabled.Load() {
+		if x.cluster != nil {
+			if err := errorschain.
+				New(errorschain.ReturnFirst()).
+				AddError(x.cleanupCluster(ctx, actorNames)).
+				AddError(x.cluster.Stop(ctx)).
+				Error(); err != nil {
+				x.reset()
+				x.logger.Errorf("%s failed to shutdown cleanly: %w", x.name, err)
+				return err
+			}
+		}
+
+		if x.wireActorsQueue != nil {
+			close(x.wireActorsQueue)
+		}
+
+		x.clusterSyncStopSig <- types.Unit{}
+		x.clusterEnabled.Store(false)
+		x.rebalancing.Store(false)
+		x.rebalanceLocker.Lock()
+
+		if x.rebalancingQueue != nil {
+			close(x.rebalancingQueue)
+		}
+
+		x.rebalanceLocker.Unlock()
+		if x.clusterStore != nil {
+			x.clusterStore.close()
+		}
+	}
+	return nil
+}
+
+func (x *actorSystem) shutdownRemoting(ctx context.Context) error {
+	if x.remotingEnabled.Load() {
+		if x.remoting != nil {
+			x.remoting.Close()
+		}
+
+		if x.server != nil {
+			if err := x.shutdownHTTPServer(ctx); err != nil {
+				x.reset()
+				x.logger.Errorf("%s failed to shutdown: %w", x.name, err)
+				return err
+			}
+			x.remotingEnabled.Store(false)
+			x.server = nil
+			x.listener = nil
+		}
+	}
+	return nil
 }
 
 func isReservedName(name string) bool {

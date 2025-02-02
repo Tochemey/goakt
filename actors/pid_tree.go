@@ -192,6 +192,9 @@ func (t *pidTree) GetNode(id string) (*pidNode, bool) {
 
 // Nodes retrieves all nodes in the tree efficiently
 func (t *pidTree) Nodes() []*pidNode {
+	if t.Size() == 0 {
+		return nil
+	}
 	var nodes []*pidNode
 	t.nodes.Range(func(_, value any) {
 		node := value.(*pidNode)

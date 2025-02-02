@@ -85,8 +85,8 @@ type LogSM struct {
 // Open the log
 func Open(dir string, opts ...Option) (*LogSM, error) {
 	storage := &LogSM{
-		maxLevel:               9,
-		probability:            5,
+		maxLevel:               32,
+		probability:            0.5,
 		memTableSizeThreshold:  20 * size.MB,
 		immutableBuffer:        10,
 		datablockByteThreshold: 4 * size.KB,
