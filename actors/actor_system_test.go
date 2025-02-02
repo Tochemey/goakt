@@ -29,6 +29,7 @@ import (
 	"errors"
 	"net"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -1780,5 +1781,67 @@ func TestActorSystem(t *testing.T) {
 		// start the actor system
 		err = newActorSystem.Start(ctx)
 		require.Error(t, err)
+	})
+	t.Run("With Spawn with custom passivation", func(t *testing.T) {
+		ctx := context.TODO()
+		actorSystem, _ := NewActorSystem("testSys",
+			WithLogger(log.DiscardLogger),
+			WithPassivationDisabled())
+
+		require.NoError(t, actorSystem.Start(ctx))
+
+		util.Pause(time.Second)
+
+		// create the actor path
+		pid, err := actorSystem.Spawn(ctx, "test", newMockActor(),
+			WithPassivateAfter(passivateAfter))
+		require.NoError(t, err)
+		assert.NotNil(t, pid)
+
+		// let us sleep for some time to make the actor idle
+		wg := sync.WaitGroup{}
+		wg.Add(1)
+		go func() {
+			util.Pause(receivingDelay)
+			wg.Done()
+		}()
+		// block until timer is up
+		wg.Wait()
+		// let us send a message to the actor
+		err = Tell(ctx, pid, new(testpb.TestSend))
+		assert.Error(t, err)
+		assert.EqualError(t, err, ErrDead.Error())
+		assert.NoError(t, actorSystem.Stop(ctx))
+	})
+	t.Run("With Spawn with long lived", func(t *testing.T) {
+		ctx := context.TODO()
+		actorSystem, _ := NewActorSystem("testSys",
+			WithLogger(log.DiscardLogger),
+			WithExpireActorAfter(passivateAfter))
+
+		require.NoError(t, actorSystem.Start(ctx))
+
+		util.Pause(time.Second)
+
+		// create the actor path
+		pid, err := actorSystem.Spawn(ctx, "test", newMockActor(),
+			WithLongLived())
+		require.NoError(t, err)
+		assert.NotNil(t, pid)
+
+		// let us sleep for some time to make the actor idle
+		wg := sync.WaitGroup{}
+		wg.Add(1)
+		go func() {
+			util.Pause(receivingDelay)
+			wg.Done()
+		}()
+		// block until timer is up
+		wg.Wait()
+		// let us send a message to the actor
+		err = Tell(ctx, pid, new(testpb.TestSend))
+		assert.NoError(t, err)
+		assert.True(t, pid.IsRunning())
+		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 }

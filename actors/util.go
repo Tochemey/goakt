@@ -65,6 +65,8 @@ const (
 )
 
 var (
+	// 1<<63-1 nanoseconds equals about 292 years, which isn't truly "forever" but is the longest valid time.Duration value in Golang.
+	longLived time.Duration = 1<<63 - 1
 	// NoSender means that there is no sender
 	NoSender *PID
 	// DefaultSupervisoryStrategy defines the default supervisory strategy

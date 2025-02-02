@@ -53,8 +53,11 @@ func (f OptionFunc) Apply(c *actorSystem) {
 	f(c)
 }
 
-// WithExpireActorAfter sets the actor expiry duration.
-// After such duration an idle actor will be expired and removed from the actor system
+// WithExpireActorAfter sets a custom duration after which an idle actor
+// will be passivated. Passivation allows the actor system to free up
+// resources by stopping actors that have been inactive for the specified
+// duration. If the actor receives a message before this timeout,
+// the passivation timer is reset.
 func WithExpireActorAfter(duration time.Duration) Option {
 	return OptionFunc(
 		func(a *actorSystem) {
