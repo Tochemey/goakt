@@ -118,7 +118,7 @@ func (r *rebalancer) Rebalance(ctx *ReceiveContext) {
 					actors := peersShares[i]
 					peer := peers[i-1]
 					peerFound := true
-					peerState, err := r.pid.ActorSystem().getPeerStateFromCache(peer.PeerAddress())
+					peerState, err := r.pid.ActorSystem().getPeerStateFromStore(peer.PeerAddress())
 					if errors.Is(err, ErrPeerNotFound) {
 						logger.Warnf("peer=(%s) not found in local cache", peer.PeerAddress())
 						peerFound = false

@@ -47,9 +47,9 @@ type Config struct {
 var _ validation.Validator = (*Config)(nil)
 
 // NewConfig creates an instance of remote config
-func NewConfig(host string, port int, maxFrameSize uint32, opts ...Option) *Config {
+func NewConfig(host string, port int, opts ...Option) *Config {
 	cfg := &Config{
-		maxFrameSize:    maxFrameSize,
+		maxFrameSize:    16 * size.MB,
 		writeTimeout:    10 * time.Second,
 		readIdleTimeout: 10 * time.Second,
 		idleTimeout:     1200 * time.Second,

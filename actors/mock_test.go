@@ -486,6 +486,7 @@ func startClusterSystem(t *testing.T, serverAddr string, opts ...testClusterOpti
 				WithPartitionCount(7).
 				WithReplicaCount(1).
 				WithPeersPort(clusterPort).
+				WithWAL(t.TempDir()).
 				WithMinimumPeersQuorum(1).
 				WithDiscoveryPort(discoveryPort).
 				WithDiscovery(provider)),

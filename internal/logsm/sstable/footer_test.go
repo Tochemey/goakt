@@ -22,55 +22,47 @@
  * SOFTWARE.
  */
 
-package actors
+package sstable
 
 import (
-	"net"
-	"strconv"
-	"sync"
+	"testing"
 
-	"github.com/tochemey/goakt/v2/internal/internalpb"
+	"github.com/stretchr/testify/assert"
 )
 
-type peersCache struct {
-	*sync.RWMutex
-	cache map[string]*internalpb.PeerState
-}
-
-// newPeerCache creates an instance of peersCache
-func newPeerCache() *peersCache {
-	return &peersCache{
-		RWMutex: &sync.RWMutex{},
-		cache:   make(map[string]*internalpb.PeerState),
+func TestFooterEncodeDecode(t *testing.T) {
+	footer := &Footer{
+		MetaBlock:  Block{Offset: 123, Length: 456},
+		IndexBlock: Block{Offset: 789, Length: 1011},
+		Magic:      _magic,
 	}
+
+	encoded, err := footer.Encode()
+	assert.NoError(t, err)
+	assert.NotNil(t, encoded)
+
+	decodedFooter := &Footer{}
+	err = decodedFooter.Decode(encoded)
+	assert.NoError(t, err)
+
+	assert.Equal(t, footer.MetaBlock, decodedFooter.MetaBlock)
+	assert.Equal(t, footer.IndexBlock, decodedFooter.IndexBlock)
+	assert.Equal(t, footer.Magic, decodedFooter.Magic)
 }
 
-// set adds a peer to the cache
-func (c *peersCache) set(peer *internalpb.PeerState) {
-	peerAddress := net.JoinHostPort(peer.GetHost(), strconv.Itoa(int(peer.GetPeersPort())))
-	c.Lock()
-	c.cache[peerAddress] = peer
-	c.Unlock()
-}
+func TestFooterInvalidMagic(t *testing.T) {
+	footer := &Footer{
+		MetaBlock:  Block{Offset: 123, Length: 456},
+		IndexBlock: Block{Offset: 789, Length: 1011},
+		Magic:      0x1234567890abcdef, // Invalid magic number
+	}
 
-// get retrieve a peer from the cache
-func (c *peersCache) get(peerAddress string) (*internalpb.PeerState, bool) {
-	c.RLock()
-	peer, ok := c.cache[peerAddress]
-	c.RUnlock()
-	return peer, ok
-}
+	encoded, err := footer.Encode()
+	assert.NoError(t, err)
+	assert.NotNil(t, encoded)
 
-// remove deletes a peer from the cache
-func (c *peersCache) remove(peerAddress string) {
-	c.Lock()
-	delete(c.cache, peerAddress)
-	c.Unlock()
-}
-
-// reset resets the cache
-func (c *peersCache) reset() {
-	c.Lock()
-	c.cache = make(map[string]*internalpb.PeerState)
-	c.Unlock()
+	decodedFooter := &Footer{}
+	err = decodedFooter.Decode(encoded)
+	assert.Error(t, err)
+	assert.Equal(t, ErrInvalidMagic, err)
 }

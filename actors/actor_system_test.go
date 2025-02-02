@@ -44,6 +44,7 @@ import (
 	"github.com/tochemey/goakt/v2/internal/util"
 	"github.com/tochemey/goakt/v2/log"
 	testkit "github.com/tochemey/goakt/v2/mocks/discovery"
+	"github.com/tochemey/goakt/v2/remote"
 	"github.com/tochemey/goakt/v2/test/data/testpb"
 )
 
@@ -189,6 +190,7 @@ func TestActorSystem(t *testing.T) {
 					WithPeersPort(clusterPort).
 					WithMinimumPeersQuorum(1).
 					WithDiscoveryPort(gossipPort).
+					WithWAL(t.TempDir()).
 					WithDiscovery(provider)),
 		)
 		require.NoError(t, err)
@@ -1019,6 +1021,7 @@ func TestActorSystem(t *testing.T) {
 					WithPartitionCount(9).
 					WithReplicaCount(1).
 					WithPeersPort(clusterPort).
+					WithWAL(t.TempDir()).
 					WithMinimumPeersQuorum(1).
 					WithDiscoveryPort(gossipPort).
 					WithDiscovery(provider)),
@@ -1235,6 +1238,7 @@ func TestActorSystem(t *testing.T) {
 					WithPartitionCount(9).
 					WithReplicaCount(1).
 					WithPeersPort(clusterPort).
+					WithWAL(t.TempDir()).
 					WithMinimumPeersQuorum(1).
 					WithDiscoveryPort(gossipPort).
 					WithDiscovery(provider)),
@@ -1494,6 +1498,7 @@ func TestActorSystem(t *testing.T) {
 					WithPartitionCount(9).
 					WithReplicaCount(1).
 					WithPeersPort(clusterPort).
+					WithWAL(t.TempDir()).
 					WithMinimumPeersQuorum(1).
 					WithDiscoveryPort(gossipPort).
 					WithDiscovery(provider)),
@@ -1741,5 +1746,39 @@ func TestActorSystem(t *testing.T) {
 		// shutdown the nats server gracefully
 		srv.Shutdown()
 	})
-	t.Run("With Metrics", func(t *testing.T) {})
+	t.Run("With invalid cluster WAL", func(t *testing.T) {
+		ctx := context.TODO()
+		nodePorts := dynaport.Get(3)
+		gossipPort := nodePorts[0]
+		clusterPort := nodePorts[1]
+		remotingPort := nodePorts[2]
+
+		logger := log.DiscardLogger
+		host := "127.0.0.1"
+
+		remoteConfig := remote.NewConfig(host, remotingPort)
+		// mock the discovery provider
+		provider := new(testkit.Provider)
+		newActorSystem, err := NewActorSystem(
+			"test",
+			WithPassivationDisabled(),
+			WithLogger(logger),
+			WithRemote(remoteConfig),
+			WithCluster(
+				NewClusterConfig().
+					WithKinds(new(mockActor)).
+					WithPartitionCount(9).
+					WithReplicaCount(1).
+					WithPeersPort(clusterPort).
+					WithMinimumPeersQuorum(1).
+					WithDiscoveryPort(gossipPort).
+					WithWAL("fake").
+					WithDiscovery(provider)),
+		)
+		require.NoError(t, err)
+
+		// start the actor system
+		err = newActorSystem.Start(ctx)
+		require.Error(t, err)
+	})
 }

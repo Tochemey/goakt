@@ -47,9 +47,7 @@ func TestConfig(t *testing.T) {
 		assert.Exactly(t, 0, config.BindPort())
 	})
 	t.Run("With config", func(t *testing.T) {
-		config := NewConfig("127.0.0.1", 8080, 16*size.MB,
-			WithReadIdleTimeout(10*time.Second),
-			WithWriteTimeout(10*time.Second))
+		config := NewConfig("127.0.0.1", 8080, WithReadIdleTimeout(10*time.Second), WithWriteTimeout(10*time.Second))
 		require.NoError(t, config.Validate())
 		require.NoError(t, config.Sanitize())
 		assert.EqualValues(t, 16*size.MB, config.MaxFrameSize())
@@ -60,13 +58,13 @@ func TestConfig(t *testing.T) {
 		assert.Exactly(t, 8080, config.BindPort())
 	})
 	t.Run("With invalid framesize", func(t *testing.T) {
-		config := NewConfig("127.0.0.1", 8080, 20*size.MB)
+		config := NewConfig("127.0.0.1", 8080, WithMaxFrameSize(20*size.MB))
 		err := config.Validate()
 		require.Error(t, err)
 		assert.EqualError(t, err, "maxFrameSize must be between 16KB and 16MB")
 	})
 	t.Run("With invalid bindAddr", func(t *testing.T) {
-		config := NewConfig("invalid@adrr", 8080, 20*size.MB)
+		config := NewConfig("invalid@adrr", 8080, WithMaxFrameSize(20*size.MB))
 		err := config.Sanitize()
 		require.Error(t, err)
 	})
