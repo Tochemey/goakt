@@ -25,6 +25,9 @@
 package actors
 
 import (
+	"os"
+	"path/filepath"
+
 	"github.com/tochemey/goakt/v2/discovery"
 	"github.com/tochemey/goakt/v2/internal/size"
 	"github.com/tochemey/goakt/v2/internal/validation"
@@ -55,6 +58,9 @@ var _ validation.Validator = (*ClusterConfig)(nil)
 
 // NewClusterConfig creates an instance of ClusterConfig
 func NewClusterConfig() *ClusterConfig {
+	// grab the user homedir dir
+	homedir, _ := os.UserHomeDir()
+
 	return &ClusterConfig{
 		kinds:              defaultKinds,
 		minimumPeersQuorum: 1,
@@ -63,7 +69,7 @@ func NewClusterConfig() *ClusterConfig {
 		replicaCount:       1,
 		partitionCount:     271,
 		kvStoreSize:        20 * size.MB,
-		wal:                "/var/goakt.data",
+		wal:                filepath.Join(homedir, "goakt", "data"),
 	}
 }
 
