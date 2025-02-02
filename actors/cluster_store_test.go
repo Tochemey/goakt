@@ -42,6 +42,7 @@ func TestClusterStore(t *testing.T) {
 		store, err := newClusterStore(dir, logger)
 		require.NoError(t, err)
 		require.NotNil(t, store)
+		store.close()
 	})
 
 	t.Run("Open when directory does not exist", func(t *testing.T) {
@@ -50,7 +51,6 @@ func TestClusterStore(t *testing.T) {
 		store, err := newClusterStore(dir, logger)
 		require.Error(t, err)
 		require.Nil(t, store)
-		store.close()
 	})
 
 	t.Run("SetAndGet", func(t *testing.T) {
