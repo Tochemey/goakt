@@ -24,12 +24,20 @@
 
 package actors
 
+import (
+	"time"
+)
+
 // spawnConfig defines the configuration to apply when creating an actor
 type spawnConfig struct {
 	// mailbox defines the mailbox to use when spawning the actor
 	mailbox Mailbox
 	// defines the supervisor strategies to apply
 	supervisorStrategies []*SupervisorStrategy
+	// specifies at what point in time to passivate the actor.
+	// when the actor is passivated it is stopped which means it does not consume
+	// any further resources like memory and cpu. The default value is 120 seconds
+	passivateAfter *time.Duration
 }
 
 // newSpawnConfig creates an instance of spawnConfig
@@ -71,5 +79,26 @@ func WithMailbox(mailbox Mailbox) SpawnOption {
 func WithSupervisorStrategies(supervisorStrategies ...*SupervisorStrategy) SpawnOption {
 	return spawnOption(func(config *spawnConfig) {
 		config.supervisorStrategies = supervisorStrategies
+	})
+}
+
+// WithPassivateAfter sets a custom duration after which an idle actor
+// will be passivated. Passivation allows the actor system to free up
+// resources by stopping actors that have been inactive for the specified
+// duration. If the actor receives a message before this timeout,
+// the passivation timer is reset.
+func WithPassivateAfter(after time.Duration) SpawnOption {
+	return spawnOption(func(config *spawnConfig) {
+		config.passivateAfter = &after
+	})
+}
+
+// WithLongLived ensures that the given actor, once created, will persist
+// for the entire lifespan of the running actor system. Unlike short-lived
+// actors that may be restarted or garbage-collected, a long-lived actor
+// remains active until the actor system itself shuts down.
+func WithLongLived() SpawnOption {
+	return spawnOption(func(config *spawnConfig) {
+		config.passivateAfter = &longLived
 	})
 }

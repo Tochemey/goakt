@@ -1767,11 +1767,22 @@ func (x *actorSystem) configPID(ctx context.Context, name string, actor Actor, o
 		pidOpts = append(pidOpts, withStash())
 	}
 
-	// disable passivation for system actor
-	if isReservedName(name) {
+	switch {
+	case isReservedName(name):
+		// disable passivation for system actor
 		pidOpts = append(pidOpts, withPassivationDisabled())
-	} else {
-		pidOpts = append(pidOpts, withPassivationAfter(x.expireActorAfter))
+	default:
+		switch {
+		case spawnConfig.passivateAfter == nil:
+			// use system-wide passivation settings
+			pidOpts = append(pidOpts, withPassivationAfter(x.expireActorAfter))
+		case *spawnConfig.passivateAfter != longLived:
+			// use custom passivation setting
+			pidOpts = append(pidOpts, withPassivationAfter(*spawnConfig.passivateAfter))
+		default:
+			// live forever :)
+			pidOpts = append(pidOpts, withPassivationDisabled())
+		}
 	}
 
 	pid, err := newPID(

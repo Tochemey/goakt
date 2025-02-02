@@ -26,20 +26,40 @@ package actors
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
 
 func TestSpawnOption(t *testing.T) {
-	mailbox := NewUnboundedMailbox()
-	config := &spawnConfig{}
-	option := WithMailbox(mailbox)
-	option.Apply(config)
-	require.Equal(t, &spawnConfig{mailbox: mailbox}, config)
-	strategy := NewSupervisorStrategy(PanicError{}, NewStopDirective())
-	option = WithSupervisorStrategies(strategy)
-	option.Apply(config)
-	require.Equal(t, &spawnConfig{mailbox: mailbox, supervisorStrategies: []*SupervisorStrategy{strategy}}, config)
+	t.Run("spawn option with mailbox", func(t *testing.T) {
+		mailbox := NewUnboundedMailbox()
+		config := &spawnConfig{}
+		option := WithMailbox(mailbox)
+		option.Apply(config)
+		require.Equal(t, &spawnConfig{mailbox: mailbox}, config)
+	})
+	t.Run("spawn option with supervisor strategy", func(t *testing.T) {
+		config := &spawnConfig{}
+		strategy := NewSupervisorStrategy(PanicError{}, NewStopDirective())
+		option := WithSupervisorStrategies(strategy)
+		option.Apply(config)
+		require.Equal(t, &spawnConfig{supervisorStrategies: []*SupervisorStrategy{strategy}}, config)
+	})
+	t.Run("spawn option with passivation after", func(t *testing.T) {
+		config := &spawnConfig{}
+		second := time.Second
+		option := WithPassivateAfter(second)
+		option.Apply(config)
+		require.Equal(t, &spawnConfig{passivateAfter: &second}, config)
+	})
+
+	t.Run("spawn option with long-lived", func(t *testing.T) {
+		config := &spawnConfig{}
+		option := WithLongLived()
+		option.Apply(config)
+		require.Equal(t, &spawnConfig{passivateAfter: &longLived}, config)
+	})
 }
 
 func TestNewSpawnConfig(t *testing.T) {
