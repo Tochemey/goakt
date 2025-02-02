@@ -1776,7 +1776,7 @@ func (x *actorSystem) configPID(ctx context.Context, name string, actor Actor, o
 		case spawnConfig.passivateAfter == nil:
 			// use system-wide passivation settings
 			pidOpts = append(pidOpts, withPassivationAfter(x.expireActorAfter))
-		case *spawnConfig.passivateAfter != longLived:
+		case *spawnConfig.passivateAfter < longLived:
 			// use custom passivation setting
 			pidOpts = append(pidOpts, withPassivationAfter(*spawnConfig.passivateAfter))
 		default:
