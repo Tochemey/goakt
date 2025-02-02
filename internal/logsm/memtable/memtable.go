@@ -51,17 +51,17 @@ func (mt *MemTable) Wal() *wal.WAL {
 	return mt.wal
 }
 
-func New(dir string, maxLevel int, probability float64) *MemTable {
+func New(dir string, maxLevel int, probability float64) (*MemTable, error) {
 	l, err := wal.Create(dir)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 	return &MemTable{
 		skiplist: skiplist.New(maxLevel, probability),
 		wal:      l,
 		dir:      dir,
 		readOnly: false,
-	}
+	}, nil
 }
 
 func (mt *MemTable) Recover() error {

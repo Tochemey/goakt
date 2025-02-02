@@ -47,6 +47,7 @@ type ClusterConfig struct {
 	peersPort          int
 	kinds              []Actor
 	kvStoreSize        uint64
+	wal                string
 }
 
 // enforce compilation error
@@ -62,6 +63,7 @@ func NewClusterConfig() *ClusterConfig {
 		replicaCount:       1,
 		partitionCount:     271,
 		kvStoreSize:        20 * size.MB,
+		wal:                "/var/goakt.data",
 	}
 }
 
@@ -110,6 +112,18 @@ func (x *ClusterConfig) WithReplicaCount(count uint32) *ClusterConfig {
 	return x
 }
 
+// WriteQuorum returns the write quorum
+func (x *ClusterConfig) WriteQuorum() uint32 {
+	return x.writeQuorum
+}
+
+// WithWAL sets a custom WAL directory.
+// GoAkt is required to have the permission to create this directory.
+func (x *ClusterConfig) WithWAL(dir string) *ClusterConfig {
+	x.wal = dir
+	return x
+}
+
 // ReplicaCount returns the replica count.
 func (x *ClusterConfig) ReplicaCount() uint32 {
 	return x.replicaCount
@@ -145,11 +159,6 @@ func (x *ClusterConfig) Kinds() []Actor {
 	return x.kinds
 }
 
-// WriteQuorum returns the write quorum
-func (x *ClusterConfig) WriteQuorum() uint32 {
-	return x.writeQuorum
-}
-
 // ReadQuorum returns the read quorum
 func (x *ClusterConfig) ReadQuorum() uint32 {
 	return x.readQuorum
@@ -183,10 +192,16 @@ func (x *ClusterConfig) KVStoreSize() uint64 {
 	return x.kvStoreSize
 }
 
+// WAL returns the WAL directory
+func (x *ClusterConfig) WAL() string {
+	return x.wal
+}
+
 // Validate validates the cluster config
 func (x *ClusterConfig) Validate() error {
 	return validation.
 		New(validation.AllErrors()).
+		AddValidator(validation.NewEmptyStringValidator(x.wal, "WAL directory is required")).
 		AddAssertion(x.discovery != nil, "discovery provider is not set").
 		AddAssertion(x.partitionCount > 0, "partition count need to greater than zero").
 		AddAssertion(x.minimumPeersQuorum >= 1, "minimum peers quorum must be at least one").

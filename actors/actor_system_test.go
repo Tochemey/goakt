@@ -189,6 +189,7 @@ func TestActorSystem(t *testing.T) {
 					WithPeersPort(clusterPort).
 					WithMinimumPeersQuorum(1).
 					WithDiscoveryPort(gossipPort).
+					WithWAL(t.TempDir()).
 					WithDiscovery(provider)),
 		)
 		require.NoError(t, err)
@@ -1019,6 +1020,7 @@ func TestActorSystem(t *testing.T) {
 					WithPartitionCount(9).
 					WithReplicaCount(1).
 					WithPeersPort(clusterPort).
+					WithWAL(t.TempDir()).
 					WithMinimumPeersQuorum(1).
 					WithDiscoveryPort(gossipPort).
 					WithDiscovery(provider)),
@@ -1235,6 +1237,7 @@ func TestActorSystem(t *testing.T) {
 					WithPartitionCount(9).
 					WithReplicaCount(1).
 					WithPeersPort(clusterPort).
+					WithWAL(t.TempDir()).
 					WithMinimumPeersQuorum(1).
 					WithDiscoveryPort(gossipPort).
 					WithDiscovery(provider)),
@@ -1494,6 +1497,7 @@ func TestActorSystem(t *testing.T) {
 					WithPartitionCount(9).
 					WithReplicaCount(1).
 					WithPeersPort(clusterPort).
+					WithWAL(t.TempDir()).
 					WithMinimumPeersQuorum(1).
 					WithDiscoveryPort(gossipPort).
 					WithDiscovery(provider)),

@@ -36,11 +36,13 @@ import (
 
 func TestMemtable(t *testing.T) {
 	dir := t.TempDir()
-	mt := New(dir, 4, 0.5)
+	mt, err := New(dir, 4, 0.5)
+	require.NoError(t, err)
+	require.NotNil(t, mt)
 
 	entry := &internalpb.Entry{Key: "key1", Value: []byte("value1"), Tombstone: false}
 
-	err := mt.Set(entry)
+	err = mt.Set(entry)
 	require.NoError(t, err)
 	gotValue, ok := mt.Get(entry.Key)
 	require.True(t, ok)

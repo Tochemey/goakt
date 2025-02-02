@@ -783,7 +783,8 @@ func startNode(t *testing.T, logger log.Logger, nodeName, serverAddr string) (sy
 		WithDiscoveryPort(gossipPort).
 		WithReplicaCount(1).
 		WithMinimumPeersQuorum(1).
-		WithPartitionCount(10)
+		WithPartitionCount(10).
+		WithWAL(t.TempDir())
 
 	// create the actor system
 	system, err := actors.NewActorSystem(

@@ -105,7 +105,12 @@ func Open(dir string, opts ...Option) (*LogSM, error) {
 		opt.Apply(storage)
 	}
 
-	storage.memtable = memtable.New(dir, storage.maxLevel, storage.probability)
+	var err error
+	storage.memtable, err = memtable.New(dir, storage.maxLevel, storage.probability)
+	if err != nil {
+		return nil, err
+	}
+
 	storage.levelsStorage = levelstore.New(dir, storage.l0TargetNum, storage.levelRatio, storage.datablockByteThreshold, storage.logger)
 
 	if err := errorschain.
