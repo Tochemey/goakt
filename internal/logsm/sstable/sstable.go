@@ -59,7 +59,7 @@ func Build(entries []*internalpb.Entry, dataBlockSize, level int) (Index, []byte
 			currSize = 0
 		}
 		// key, value, tombstone byte sizes
-		entrySize := len(entry.Key) + len(entry.Value) + 1
+		entrySize := len(entry.GetKey()) + len(entry.GetValue()) + 1
 		currSize += entrySize
 		data.Entries = append(data.Entries, entry)
 	}
@@ -77,8 +77,8 @@ func Build(entries []*internalpb.Entry, dataBlockSize, level int) (Index, []byte
 		}
 		length := uint64(len(dataBytes))
 		indexBlock.Entries = append(indexBlock.Entries, IndexEntry{
-			StartKey: block.Entries[0].Key,
-			EndKey:   block.Entries[len(block.Entries)-1].Key,
+			StartKey: block.Entries[0].GetKey(),
+			EndKey:   block.Entries[len(block.Entries)-1].GetKey(),
 			DataHandle: Block{
 				Offset: offset,
 				Length: length,

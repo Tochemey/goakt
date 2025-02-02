@@ -43,9 +43,9 @@ func (d *Data) Search(key types.Key) (*internalpb.Entry, bool) {
 	low, high := 0, len(d.Entries)-1
 	for low <= high {
 		mid := low + ((high - low) >> 1)
-		if d.Entries[mid].Key < key {
+		if d.Entries[mid].GetKey() < key {
 			low = mid + 1
-		} else if d.Entries[mid].Key > key {
+		} else if d.Entries[mid].GetKey() > key {
 			high = mid - 1
 		} else {
 			return d.Entries[mid], true
@@ -63,8 +63,8 @@ func (d *Data) Scan(start, end types.Key) []*internalpb.Entry {
 	var mid int
 	for low <= high {
 		mid = low + ((high - low) >> 1)
-		if d.Entries[mid].Key >= start {
-			if mid == 0 || d.Entries[mid-1].Key < start {
+		if d.Entries[mid].GetKey() >= start {
+			if mid == 0 || d.Entries[mid-1].GetKey() < start {
 				// used as return
 				found = true
 				break
@@ -75,7 +75,7 @@ func (d *Data) Scan(start, end types.Key) []*internalpb.Entry {
 		}
 	}
 
-	for i := mid; i < len(d.Entries) && d.Entries[i].Key < end && found; i++ {
+	for i := mid; i < len(d.Entries) && d.Entries[i].GetKey() < end && found; i++ {
 		res = append(res, d.Entries[i])
 	}
 
@@ -88,8 +88,8 @@ func (d *Data) Encode() ([]byte, error) {
 
 	var prevKey string
 	for _, entry := range d.Entries {
-		lcp := util.CommonPrefixLength(entry.Key, prevKey)
-		suffix := entry.Key[lcp:]
+		lcp := util.CommonPrefixLength(entry.GetKey(), prevKey)
+		suffix := entry.GetKey()[lcp:]
 
 		// lcp
 		if err := binary.Write(buf, binary.LittleEndian, uint16(lcp)); err != nil {
