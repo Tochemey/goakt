@@ -1813,6 +1813,120 @@ func TestSpawnChild(t *testing.T) {
 		util.Pause(time.Second)
 		assert.NoError(t, actorSystem.Stop(ctx))
 	})
+	t.Run("With starting child actor with a custom passivation setting", func(t *testing.T) {
+		ctx := context.TODO()
+		host := "127.0.0.1"
+		ports := dynaport.Get(1)
+
+		actorSystem, err := NewActorSystem("testSys",
+			WithRemoting(host, int32(ports[0])),
+			WithPassivationDisabled(),
+			WithJanitorInterval(time.Minute),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+
+		util.Pause(time.Second)
+
+		// create the parent actor
+		parent, err := actorSystem.Spawn(ctx, "Parent", newMockSupervisorActor())
+
+		require.NoError(t, err)
+		assert.NotNil(t, parent)
+
+		// create the child actor
+		child, err := parent.SpawnChild(ctx, "child",
+			newMockSupervisedActor(),
+			WithMailbox(NewBoundedMailbox(20)),
+			WithPassivateAfter(2*time.Second))
+
+		util.Pause(time.Second)
+
+		assert.NoError(t, err)
+		assert.NotNil(t, child)
+		util.Pause(time.Second)
+		assert.Len(t, parent.Children(), 1)
+
+		// let us sleep for some time to make the actor idle
+		wg := sync.WaitGroup{}
+		wg.Add(1)
+		go func() {
+			util.Pause(2 * time.Second)
+			wg.Done()
+		}()
+		// block until timer is up
+		wg.Wait()
+
+		err = Tell(ctx, child, new(testpb.TestSend))
+		assert.Error(t, err)
+		assert.EqualError(t, err, ErrDead.Error())
+
+		//stop the actor
+		err = parent.Shutdown(ctx)
+		assert.NoError(t, err)
+		util.Pause(time.Second)
+		assert.NoError(t, actorSystem.Stop(ctx))
+	})
+	t.Run("With starting child actor with long lived", func(t *testing.T) {
+		ctx := context.TODO()
+		host := "127.0.0.1"
+		ports := dynaport.Get(1)
+
+		actorSystem, err := NewActorSystem("testSys",
+			WithRemoting(host, int32(ports[0])),
+			WithExpireActorAfter(time.Second),
+			WithJanitorInterval(time.Minute),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+
+		util.Pause(time.Second)
+
+		// create the parent actor
+		parent, err := actorSystem.Spawn(ctx, "Parent", newMockSupervisorActor(), WithLongLived())
+
+		require.NoError(t, err)
+		assert.NotNil(t, parent)
+
+		// create the child actor
+		child, err := parent.SpawnChild(ctx, "child",
+			newMockSupervisedActor(),
+			WithMailbox(NewBoundedMailbox(20)),
+			WithLongLived())
+
+		util.Pause(time.Second)
+
+		assert.NoError(t, err)
+		assert.NotNil(t, child)
+		util.Pause(time.Second)
+		assert.Len(t, parent.Children(), 1)
+
+		// let us sleep for some time to make the actor idle
+		wg := sync.WaitGroup{}
+		wg.Add(1)
+		go func() {
+			util.Pause(time.Second)
+			wg.Done()
+		}()
+		// block until timer is up
+		wg.Wait()
+
+		err = Tell(ctx, child, new(testpb.TestSend))
+		assert.NoError(t, err)
+		assert.True(t, child.IsRunning())
+
+		//stop the actor
+		err = parent.Shutdown(ctx)
+		assert.NoError(t, err)
+		util.Pause(time.Second)
+		assert.NoError(t, actorSystem.Stop(ctx))
+	})
 }
 func TestPoisonPill(t *testing.T) {
 	ctx := context.TODO()

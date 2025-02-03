@@ -561,10 +561,21 @@ func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor, opts .
 	}
 
 	// disable passivation for system actor
-	if isReservedName(name) {
+	switch {
+	case isReservedName(name):
 		pidOptions = append(pidOptions, withPassivationDisabled())
-	} else {
-		pidOptions = append(pidOptions, withPassivationAfter(pid.passivateAfter.Load()))
+	default:
+		switch {
+		case spawnConfig.passivateAfter == nil:
+			// use system-wide passivation settings
+			pidOptions = append(pidOptions, withPassivationAfter(pid.passivateAfter.Load()))
+		case *spawnConfig.passivateAfter < longLived:
+			// use custom passivation setting
+			pidOptions = append(pidOptions, withPassivationAfter(*spawnConfig.passivateAfter))
+		default:
+			// live forever :)
+			pidOptions = append(pidOptions, withPassivationDisabled())
+		}
 	}
 
 	// create the child PID
