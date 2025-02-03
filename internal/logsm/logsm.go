@@ -26,6 +26,7 @@ package logsm
 
 import (
 	"container/list"
+	"fmt"
 	"os"
 	"slices"
 	"sync"
@@ -105,6 +106,11 @@ func Open(dir string, opts ...Option) (*LogSM, error) {
 		opt.Apply(storage)
 	}
 
+	// create the directory first
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create WAL directory: %w", err)
+	}
+
 	var err error
 	storage.memtable, err = memtable.New(dir, storage.maxLevel, storage.probability)
 	if err != nil {
@@ -115,7 +121,6 @@ func Open(dir string, opts ...Option) (*LogSM, error) {
 
 	if err := errorschain.
 		New(errorschain.ReturnFirst()).
-		AddError(os.MkdirAll(dir, 0755)).
 		AddError(storage.memtable.Recover()).
 		AddError(storage.levelsStorage.Recover()).
 		Error(); err != nil {
