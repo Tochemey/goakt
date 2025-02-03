@@ -4,10 +4,10 @@ coverage:
     patch:
       default:
         target: 80%
-  project:
-    default:
-      target: 80%    # the required coverage value
-      threshold: 1%  # the leniency in hitting the target
+    project:
+      default:
+        target: 80%    # the required coverage value
+        base: auto
 ignore:
   - "^goakt.pb.*"
   - "test"
