@@ -567,13 +567,13 @@ func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor, opts .
 	default:
 		switch {
 		case spawnConfig.passivateAfter == nil:
-			// use system-wide passivation settings
+			// use the parent passivation settings
 			pidOptions = append(pidOptions, withPassivationAfter(pid.passivateAfter.Load()))
 		case *spawnConfig.passivateAfter < longLived:
 			// use custom passivation setting
 			pidOptions = append(pidOptions, withPassivationAfter(*spawnConfig.passivateAfter))
 		default:
-			// live forever :)
+			// the only time the actor will stop is when its parent stop
 			pidOptions = append(pidOptions, withPassivationDisabled())
 		}
 	}
