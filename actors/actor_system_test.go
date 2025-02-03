@@ -1773,7 +1773,7 @@ func TestActorSystem(t *testing.T) {
 					WithPeersPort(clusterPort).
 					WithMinimumPeersQuorum(1).
 					WithDiscoveryPort(gossipPort).
-					WithWAL("fake").
+					WithWAL("/").
 					WithDiscovery(provider)),
 		)
 		require.NoError(t, err)
