@@ -45,8 +45,8 @@ func TestClusterStore(t *testing.T) {
 		store.close()
 	})
 
-	t.Run("Open when directory does not exist", func(t *testing.T) {
-		dir := "fake"
+	t.Run("Open when directory is invalid", func(t *testing.T) {
+		dir := "/"
 		logger := log.DiscardLogger
 		store, err := newClusterStore(dir, logger)
 		require.Error(t, err)
