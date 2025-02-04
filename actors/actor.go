@@ -28,24 +28,20 @@ import (
 	"context"
 )
 
-// Actor represents the Actor interface
-// This will be implemented by any user who wants to create an actor
-// Any implementation must immutable which means all fields must be private(unexported).
-// Only make use the PreStart hook to set the initial values.
+// Actor defines the interface for an actor in the system.
+// Any struct implementing this interface must be immutable, meaning all fields should be private (unexported).
+// Use the PreStart hook to initialize any required fields or resources.
 type Actor interface {
-	// PreStart pre-starts the actor. This function can be used to set up some database connections
-	// or some sort of initialization before the actor start processing messages
-	// when the initialization failed the actor will not be started.
-	// Use this function to set any fields that will be needed before the actor starts.
-	// This hook helps set the default values needed by any fields of the actor.
+	// PreStart is called before the actor starts processing messages.
+	// It can be used for initialization tasks such as setting up database connections or other dependencies.
+	// If this function returns an error, the actor will not start.
 	PreStart(ctx context.Context) error
-	// Receive processes any message dropped into the actor mailbox.
-	// The receiver of any message can either reply to the sender of the message with a new message or reply to the message synchronously
-	// by config the reply of the message. The latter approach is often used when an external service is communicating to the actor.
-	// One thing to know is that actor can communicate synchronously as well, just that will hinder the performance of the system.
+	// Receive handles messages delivered to the actor's mailbox.
+	// The actor can respond to messages asynchronously by sending a reply or synchronously by configuring the reply within the message.
+	// While synchronous communication is possible, it can impact system performance and should be used with caution.
 	Receive(ctx *ReceiveContext)
-	// PostStop is executed when the actor is shutting down.
-	// The execution happens when every message that have not been processed yet will be processed before the actor shutdowns
-	// This help free-up resources
+	// PostStop is called when the actor is shutting down.
+	// It ensures that any remaining messages in the mailbox are processed before termination.
+	// Use this hook to release resources, close connections, or perform cleanup tasks.
 	PostStop(ctx context.Context) error
 }

@@ -27,8 +27,6 @@ package actors
 import (
 	"context"
 
-	"github.com/reugn/go-quartz/logger"
-
 	"github.com/tochemey/goakt/v2/goaktpb"
 	"github.com/tochemey/goakt/v2/internal/cluster"
 	"github.com/tochemey/goakt/v2/log"
@@ -97,9 +95,9 @@ func (x *janitor) handleTerminated(ctx context.Context, msg *goaktpb.Terminated)
 				return err
 			}
 		}
-		logger.Infof("%s successfully free resource [actor=%s] from system", x.pid.Name(), actorID)
+		x.logger.Infof("%s successfully free resource [actor=%s] from system", x.pid.Name(), actorID)
 		return nil
 	}
-	logger.Infof("%s could not locate resource [actor=%s] in system. Maybe already freed.", x.pid.Name(), actorID)
+	x.logger.Infof("%s could not locate resource [actor=%s] in system. Maybe already freed.", x.pid.Name(), actorID)
 	return nil
 }

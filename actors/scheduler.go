@@ -83,11 +83,14 @@ type scheduler struct {
 
 // newScheduler creates an instance of scheduler
 func newScheduler(logger log.Logger, stopTimeout time.Duration, opts ...schedulerOption) *scheduler {
+	// create an instance of quartz scheduler with logger off
+	quartzScheduler, _ := quartz.NewStdScheduler(quartz.WithLogger(quartzlogger.NewSimpleLogger(nil, quartzlogger.LevelOff)))
+
 	// create an instance of scheduler
 	scheduler := &scheduler{
 		mu:              sync.Mutex{},
 		started:         atomic.NewBool(false),
-		quartzScheduler: quartz.NewStdScheduler(),
+		quartzScheduler: quartzScheduler,
 		logger:          logger,
 		stopTimeout:     stopTimeout,
 	}
@@ -97,8 +100,6 @@ func newScheduler(logger log.Logger, stopTimeout time.Duration, opts ...schedule
 		opt(scheduler)
 	}
 
-	// disable the underlying scheduler logger
-	quartzlogger.SetDefault(quartzlogger.NewSimpleLogger(nil, quartzlogger.LevelOff))
 	// return the instance of the scheduler
 	return scheduler
 }

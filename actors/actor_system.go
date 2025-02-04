@@ -44,7 +44,6 @@ import (
 	"connectrpc.com/connect"
 	goset "github.com/deckarep/golang-set/v2"
 	"github.com/google/uuid"
-	"github.com/reugn/go-quartz/logger"
 	"go.uber.org/atomic"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
@@ -2010,10 +2009,10 @@ func (x *actorSystem) cleanupCluster(ctx context.Context, actorNames []string) e
 		actorName := actorName
 		eg.Go(func() error {
 			if err := x.cluster.RemoveActor(ctx, actorName); err != nil {
-				logger.Errorf("failed to remove [actor=%s] from cluster: %v", actorName, err)
+				x.logger.Errorf("failed to remove [actor=%s] from cluster: %v", actorName, err)
 				return err
 			}
-			logger.Infof("[actor=%s] removed from cluster", actorName)
+			x.logger.Infof("[actor=%s] removed from cluster", actorName)
 			return nil
 		})
 	}
