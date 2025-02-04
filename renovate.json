@@ -48,6 +48,11 @@
       "datasourceTemplate": "github-releases"
     }
   ],
+  "ignoreDeps": [
+    "k8s.io/api",
+    "k8s.io/apimachinery",
+    "k8s.io/client-go"
+  ],
   "packageRules": [
     {
       "matchPackageNames": [
