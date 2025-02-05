@@ -146,12 +146,14 @@ The fundamental building blocks of GoAkt are actors.
 
 ### Passivation
 
-Actors can be passivated when they are idle after some period of time. Passivated actors are removed from the actor system to free-up resources.
+Actors can be passivated when they are idle after some period of time. Passivated actors(including descendants) are removed from the actor system to free-up resources.
 When cluster mode is enabled, passivated actors are removed from the entire cluster. To bring back such actors to live, one needs to
 `Spawn` them again. By default, all actors are passivated and the passivation time is `two minutes`.
 
 - To enable passivation use the actor system option `WithExpireActorAfter(duration time.Duration)` when creating the actor system. See actor system [options](./actors/option.go).
 - To disable passivation use the actor system option `WithPassivationDisabled` when creating the actor system. See actor system [options](./actors/option.go).
+- One can also enable passivation during the creation of an actor by using the `SpawnOption` `WithPassivateAfter`. This will override the system-wide passivation setting. 
+  For a long-lived actor, during its creation one can use the `SpawnOption` `WithLongLived`.
 
 ### Supervision
 
