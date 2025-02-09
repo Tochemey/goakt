@@ -83,19 +83,14 @@ type Remoting struct {
 //
 // One can also override the remoting option when calling any of the method for custom one.
 func NewRemoting(opts ...RemotingOption) *Remoting {
-	r := &Remoting{
-		client:       http.NewClient(),
-		maxFrameSize: 16 * size.MB,
-	}
-
+	r := &Remoting{maxFrameSize: 16 * size.MB}
 	for _, opt := range opts {
 		opt(r)
 	}
-
+	r.client = http.NewClient(uint32(r.maxFrameSize))
 	if r.tlsConfig != nil {
 		r.client = http.NewTLSClient(r.tlsConfig, uint32(r.maxFrameSize)) // nolint
 	}
-
 	return r
 }
 

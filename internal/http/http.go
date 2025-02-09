@@ -34,12 +34,10 @@ import (
 	"time"
 
 	"golang.org/x/net/http2"
-
-	"github.com/tochemey/goakt/v2/internal/size"
 )
 
 // NewClient creates a http client use h2c
-func NewClient() *http.Client {
+func NewClient(maxReadFrameSize uint32) *http.Client {
 	return &http.Client{
 		// Most RPC servers don't use HTTP redirects
 		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
@@ -48,7 +46,7 @@ func NewClient() *http.Client {
 		Transport: &http2.Transport{
 			TLSClientConfig:    nil,
 			AllowHTTP:          true,
-			MaxReadFrameSize:   16 * size.MB,
+			MaxReadFrameSize:   maxReadFrameSize,
 			DisableCompression: false,
 			DialTLSContext: func(_ context.Context, network, addr string, _ *tls.Config) (net.Conn, error) {
 				// If you're also using this client for non-h2c traffic, you may want to
@@ -65,7 +63,7 @@ func NewClient() *http.Client {
 // NewTLSClient creates a http.Client that will use HTTP/2 when available,
 // and falls back to HTTP/1.1 otherwise.
 // nolint
-func NewTLSClient(clientTLS *tls.Config, maxFrameSize uint32) *http.Client {
+func NewTLSClient(clientTLS *tls.Config, maxReadFrameSize uint32) *http.Client {
 	// Ensure the TLS configuration advertises both HTTP/2 and HTTP/1.1 via ALPN.
 	if clientTLS.NextProtos == nil {
 		clientTLS.NextProtos = []string{"h2", "http/1.1"}
@@ -74,7 +72,7 @@ func NewTLSClient(clientTLS *tls.Config, maxFrameSize uint32) *http.Client {
 	// Create a custom HTTP/2 transport with your desired settings.
 	h2Transport := &http2.Transport{
 		DisableCompression: false,
-		MaxReadFrameSize:   maxFrameSize,
+		MaxReadFrameSize:   maxReadFrameSize,
 		// Reuse the same TLS config.
 		TLSClientConfig: clientTLS,
 		// Set any HTTP/2-specific options.

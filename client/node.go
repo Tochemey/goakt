@@ -72,11 +72,13 @@ type Node struct {
 }
 
 // NewNode creates an instance of Node
+// nolint
 func NewNode(address string, opts ...NodeOption) *Node {
+	maxFrameSize := 16 * size.MB
 	node := &Node{
 		address:  address,
 		mutex:    &sync.Mutex{},
-		client:   http.NewClient(),
+		client:   http.NewClient(uint32(maxFrameSize)),
 		remoting: actors.NewRemoting(),
 		weight:   0,
 	}
@@ -85,7 +87,7 @@ func NewNode(address string, opts ...NodeOption) *Node {
 	}
 
 	if node.tlsConfig != nil {
-		node.client = http.NewTLSClient(node.tlsConfig, 16*size.MB)
+		node.client = http.NewTLSClient(node.tlsConfig, uint32(maxFrameSize))
 		node.remoting = actors.NewRemoting(actors.WithRemotingTLS(node.tlsConfig))
 	}
 
