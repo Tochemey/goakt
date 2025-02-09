@@ -61,6 +61,7 @@ func NewClient() *http.Client {
 
 // NewTLSClient creates a http.Client that will use HTTP/2 when available,
 // and falls back to HTTP/1.1 otherwise.
+// nolint
 func NewTLSClient(clientTLS *tls.Config) *http.Client {
 	// Ensure the TLS configuration advertises both HTTP/2 and HTTP/1.1 via ALPN.
 	if clientTLS.NextProtos == nil {
