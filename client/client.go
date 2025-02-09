@@ -113,8 +113,8 @@ func (x *Client) Kinds(ctx context.Context) ([]string, error) {
 		node.HTTPClient(),
 		node.HTTPEndPoint(),
 		connect.WithGRPC(),
-		connect.WithSendMaxBytes(16*size.MB),
-		connect.WithReadMaxBytes(16*size.MB),
+		connect.WithSendMaxBytes(node.Remoting().MaxReadFrameSize()),
+		connect.WithReadMaxBytes(node.Remoting().MaxReadFrameSize()),
 		connect.WithSendGzip(),
 	)
 

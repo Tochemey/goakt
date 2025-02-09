@@ -41,7 +41,6 @@ import (
 	"github.com/tochemey/goakt/v3/internal/http"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/internalpb/internalpbconnect"
-	"github.com/tochemey/goakt/v3/internal/size"
 )
 
 // RemotingOption sets the remoting option
@@ -57,23 +56,23 @@ type RemotingOption func(*Remoting)
 // secure communication.
 func WithRemotingTLS(tlsConfig *tls.Config) RemotingOption {
 	return func(r *Remoting) {
-		r.tlsConfig = tlsConfig
+		r.clientTLS = tlsConfig
 	}
 }
 
-// WithMaxFameSize sets both the maximum framesize to send and receive
-func WithMaxFameSize(size int) RemotingOption {
+// WithRemotingMaxReadFameSize sets both the maximum framesize to send and receive
+func WithRemotingMaxReadFameSize(size int) RemotingOption {
 	return func(r *Remoting) {
-		r.maxFrameSize = size
+		r.maxReadFrameSize = size
 	}
 }
 
 // Remoting defines the Remoting APIs
 // This requires Remoting is enabled on the connected actor system
 type Remoting struct {
-	client       *nethttp.Client
-	tlsConfig    *tls.Config
-	maxFrameSize int
+	client           *nethttp.Client
+	clientTLS        *tls.Config
+	maxReadFrameSize int
 }
 
 // NewRemoting creates an instance Remoting with an insecure connection. To use a secure connection
@@ -83,13 +82,18 @@ type Remoting struct {
 //
 // One can also override the remoting option when calling any of the method for custom one.
 func NewRemoting(opts ...RemotingOption) *Remoting {
-	r := &Remoting{maxFrameSize: 16 * size.MB}
+	r := &Remoting{
+		maxReadFrameSize: DefaultMaxReadFrameSize,
+	}
+
+	// apply the options
 	for _, opt := range opts {
 		opt(r)
 	}
-	r.client = http.NewClient(uint32(r.maxFrameSize))
-	if r.tlsConfig != nil {
-		r.client = http.NewTLSClient(r.tlsConfig, uint32(r.maxFrameSize)) // nolint
+
+	r.client = http.NewClient(uint32(DefaultMaxReadFrameSize))
+	if r.clientTLS != nil {
+		r.client = http.NewTLSClient(r.clientTLS, uint32(r.maxReadFrameSize)) // nolint
 	}
 	return r
 }
@@ -381,6 +385,16 @@ func (r *Remoting) RemoteStop(ctx context.Context, host string, port int, name s
 	return nil
 }
 
+// HTTPClient returns the underlying http client
+func (r *Remoting) HTTPClient() *nethttp.Client {
+	return r.client
+}
+
+// MaxReadFrameSize returns the read max framesize
+func (r *Remoting) MaxReadFrameSize() int {
+	return r.maxReadFrameSize
+}
+
 // Close closes the serviceClient connection
 func (r *Remoting) Close() {
 	r.client.CloseIdleConnections()
@@ -389,7 +403,7 @@ func (r *Remoting) Close() {
 // serviceClient returns a Remoting service client instance
 func (r *Remoting) serviceClient(host string, port int) internalpbconnect.RemotingServiceClient {
 	endpoint := http.URL(host, port)
-	if r.tlsConfig != nil {
+	if r.clientTLS != nil {
 		endpoint = http.URLs(host, port)
 	}
 
@@ -397,8 +411,8 @@ func (r *Remoting) serviceClient(host string, port int) internalpbconnect.Remoti
 		r.client,
 		endpoint,
 		connect.WithGRPC(),
-		connect.WithSendMaxBytes(r.maxFrameSize),
-		connect.WithReadMaxBytes(r.maxFrameSize),
+		connect.WithSendMaxBytes(r.maxReadFrameSize),
+		connect.WithReadMaxBytes(r.maxReadFrameSize),
 		connect.WithSendGzip(),
 	)
 }

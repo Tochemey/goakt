@@ -1462,11 +1462,11 @@ func (x *actorSystem) setRemoting() {
 	if x.clientTLS != nil {
 		x.remoting = NewRemoting(
 			WithRemotingTLS(x.clientTLS),
-			WithMaxFameSize(int(x.remoteConfig.MaxFrameSize())), // nolint
+			WithRemotingMaxReadFameSize(int(x.remoteConfig.MaxFrameSize())), // nolint
 		)
 		return
 	}
-	x.remoting = NewRemoting()
+	x.remoting = NewRemoting(WithRemotingMaxReadFameSize(int(x.remoteConfig.MaxFrameSize())))
 }
 
 // startMessagesScheduler starts the messages scheduler

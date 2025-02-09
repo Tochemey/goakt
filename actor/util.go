@@ -27,6 +27,7 @@ package actors
 import (
 	"time"
 
+	"github.com/tochemey/goakt/v3/internal/size"
 	"github.com/tochemey/goakt/v3/internal/timer"
 )
 
@@ -45,6 +46,8 @@ const (
 	DefaultPeerStateLoopInterval = 10 * time.Second
 	// DefaultAskTimeout defines the default ask timeout
 	DefaultAskTimeout = 5 * time.Second
+	// DefaultMaxReadFrameSize defines the default HTTP maximum read frame size
+	DefaultMaxReadFrameSize = 16 * size.MB
 
 	// DefaultJanitorInterval defines the default GC interval
 	// This helps cleanup dead actors from the given actor system

@@ -74,21 +74,28 @@ type Node struct {
 // NewNode creates an instance of Node
 // nolint
 func NewNode(address string, opts ...NodeOption) *Node {
-	maxFrameSize := 16 * size.MB
+	remoting := actors.NewRemoting(actors.WithRemotingMaxReadFameSize(16 * size.MB))
 	node := &Node{
 		address:  address,
 		mutex:    &sync.Mutex{},
-		client:   http.NewClient(uint32(maxFrameSize)),
-		remoting: actors.NewRemoting(),
+		client:   remoting.HTTPClient(),
+		remoting: remoting,
 		weight:   0,
 	}
+
 	for _, opt := range opts {
 		opt(node)
 	}
 
 	if node.tlsConfig != nil {
-		node.client = http.NewTLSClient(node.tlsConfig, uint32(maxFrameSize))
-		node.remoting = actors.NewRemoting(actors.WithRemotingTLS(node.tlsConfig))
+		// overwrite the remoting
+		node.remoting = actors.NewRemoting(
+			actors.WithRemotingMaxReadFameSize(16*size.MB),
+			actors.WithRemotingTLS(node.tlsConfig),
+		)
+
+		// reset the client
+		node.client = remoting.HTTPClient()
 	}
 
 	return node

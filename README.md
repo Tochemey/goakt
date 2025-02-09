@@ -150,7 +150,7 @@ Actors can be passivated when they are idle after some period of time. Passivate
 When cluster mode is enabled, passivated actors are removed from the entire cluster. To bring back such actors to live, one needs to
 `Spawn` them again. By default, all actors are passivated and the passivation time is `two minutes`.
 
-- To enable passivation use the actor system option `WithExpireActorAfter(duration time.Duration)` when creating the actor system. See actor system [options](actor/option.go).
+- To enable passivation use the actor system option `WithPassivation(duration time.Duration)` when creating the actor system. See actor system [options](actor/option.go).
 - To disable passivation use the actor system option `WithPassivationDisabled` when creating the actor system. See actor system [options](actor/option.go).
 - One can also enable passivation during the creation of an actor by using the `SpawnOption` `WithPassivateAfter`. This will override the system-wide passivation setting. 
   For a long-lived actor, during its creation one can use the `SpawnOption` `WithLongLived`.

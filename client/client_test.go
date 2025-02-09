@@ -745,7 +745,7 @@ func startNode(t *testing.T, logger log.Logger, nodeName, serverAddr string) (sy
 
 	// generate the ports for the single startNode
 	nodePorts := dynaport.Get(3)
-	gossipPort := nodePorts[0]
+	discoveryPort := nodePorts[0]
 	peersPort := nodePorts[1]
 	remotePort := nodePorts[2]
 
@@ -762,13 +762,13 @@ func startNode(t *testing.T, logger log.Logger, nodeName, serverAddr string) (sy
 		NatsServer:      fmt.Sprintf("nats://%s", serverAddr),
 		NatsSubject:     natsSubject,
 		Host:            host,
-		DiscoveryPort:   gossipPort,
+		DiscoveryPort:   discoveryPort,
 	}
 
 	hostNode := discovery.Node{
 		Name:          nodeName,
 		Host:          host,
-		DiscoveryPort: gossipPort,
+		DiscoveryPort: discoveryPort,
 		PeersPort:     peersPort,
 		RemotingPort:  remotePort,
 	}
@@ -781,10 +781,10 @@ func startNode(t *testing.T, logger log.Logger, nodeName, serverAddr string) (sy
 		WithKinds(new(testActor)).
 		WithDiscovery(natsProvider).
 		WithPeersPort(peersPort).
-		WithDiscoveryPort(gossipPort).
+		WithDiscoveryPort(discoveryPort).
 		WithReplicaCount(1).
 		WithMinimumPeersQuorum(1).
-		WithPartitionCount(10).
+		WithPartitionCount(7).
 		WithWAL(t.TempDir())
 
 	// create the actor system
@@ -792,7 +792,7 @@ func startNode(t *testing.T, logger log.Logger, nodeName, serverAddr string) (sy
 		actorSystemName,
 		actors.WithPassivationDisabled(),
 		actors.WithLogger(logger),
-		actors.WithRemote(remote.NewConfig(host, remotingPort)),
+		actors.WithRemote(remote.NewConfig(host, remotePort)),
 		actors.WithPeerStateLoopInterval(100*time.Millisecond),
 		actors.WithCluster(clusterConfig),
 	)
