@@ -38,6 +38,7 @@ import (
 	"github.com/tochemey/goakt/v2/internal/errorschain"
 	"github.com/tochemey/goakt/v2/internal/internalpb"
 	"github.com/tochemey/goakt/v2/internal/internalpb/internalpbconnect"
+	"github.com/tochemey/goakt/v2/internal/size"
 	"github.com/tochemey/goakt/v2/internal/types"
 	"github.com/tochemey/goakt/v2/internal/validation"
 )
@@ -112,6 +113,8 @@ func (x *Client) Kinds(ctx context.Context) ([]string, error) {
 		node.HTTPClient(),
 		node.HTTPEndPoint(),
 		connect.WithGRPC(),
+		connect.WithSendMaxBytes(16*size.MB),
+		connect.WithReadMaxBytes(16*size.MB),
 		connect.WithSendGzip(),
 	)
 
@@ -298,6 +301,8 @@ func getNodeMetric(ctx context.Context, node *Node) (int, bool, error) {
 		node.HTTPClient(),
 		node.HTTPEndPoint(),
 		connect.WithGRPC(),
+		connect.WithSendMaxBytes(16*size.MB),
+		connect.WithReadMaxBytes(16*size.MB),
 		connect.WithSendGzip(),
 	)
 

@@ -33,6 +33,7 @@ import (
 
 	"github.com/tochemey/goakt/v2/actors"
 	"github.com/tochemey/goakt/v2/internal/http"
+	"github.com/tochemey/goakt/v2/internal/size"
 	"github.com/tochemey/goakt/v2/internal/validation"
 )
 
@@ -84,7 +85,7 @@ func NewNode(address string, opts ...NodeOption) *Node {
 	}
 
 	if node.tlsConfig != nil {
-		node.client = http.NewTLSClient(node.tlsConfig)
+		node.client = http.NewTLSClient(node.tlsConfig, 16*size.MB)
 		node.remoting = actors.NewRemoting(actors.WithRemotingTLS(node.tlsConfig))
 	}
 

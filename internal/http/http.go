@@ -65,7 +65,7 @@ func NewClient() *http.Client {
 // NewTLSClient creates a http.Client that will use HTTP/2 when available,
 // and falls back to HTTP/1.1 otherwise.
 // nolint
-func NewTLSClient(clientTLS *tls.Config) *http.Client {
+func NewTLSClient(clientTLS *tls.Config, maxFrameSize uint32) *http.Client {
 	// Ensure the TLS configuration advertises both HTTP/2 and HTTP/1.1 via ALPN.
 	if clientTLS.NextProtos == nil {
 		clientTLS.NextProtos = []string{"h2", "http/1.1"}
@@ -74,7 +74,7 @@ func NewTLSClient(clientTLS *tls.Config) *http.Client {
 	// Create a custom HTTP/2 transport with your desired settings.
 	h2Transport := &http2.Transport{
 		DisableCompression: false,
-		MaxReadFrameSize:   16 * size.MB,
+		MaxReadFrameSize:   maxFrameSize,
 		// Reuse the same TLS config.
 		TLSClientConfig: clientTLS,
 		// Set any HTTP/2-specific options.

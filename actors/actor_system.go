@@ -1460,7 +1460,10 @@ func (x *actorSystem) enableRemoting(ctx context.Context) error {
 // setRemoting sets the remoting service
 func (x *actorSystem) setRemoting() {
 	if x.tlsClientConfig != nil {
-		x.remoting = NewRemoting(WithRemotingTLS(x.tlsClientConfig))
+		x.remoting = NewRemoting(
+			WithRemotingTLS(x.tlsClientConfig),
+			WithMaxFameSize(int(x.remoteConfig.MaxFrameSize())), // nolint
+		)
 		return
 	}
 	x.remoting = NewRemoting()

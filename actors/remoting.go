@@ -41,6 +41,7 @@ import (
 	"github.com/tochemey/goakt/v2/internal/http"
 	"github.com/tochemey/goakt/v2/internal/internalpb"
 	"github.com/tochemey/goakt/v2/internal/internalpb/internalpbconnect"
+	"github.com/tochemey/goakt/v2/internal/size"
 )
 
 // RemotingOption sets the remoting option
@@ -60,11 +61,19 @@ func WithRemotingTLS(tlsConfig *tls.Config) RemotingOption {
 	}
 }
 
+// WithMaxFameSize sets both the maximum framesize to send and receive
+func WithMaxFameSize(size int) RemotingOption {
+	return func(r *Remoting) {
+		r.maxFrameSize = size
+	}
+}
+
 // Remoting defines the Remoting APIs
 // This requires Remoting is enabled on the connected actor system
 type Remoting struct {
-	client    *nethttp.Client
-	tlsConfig *tls.Config
+	client       *nethttp.Client
+	tlsConfig    *tls.Config
+	maxFrameSize int
 }
 
 // NewRemoting creates an instance Remoting with an insecure connection. To use a secure connection
@@ -75,7 +84,8 @@ type Remoting struct {
 // One can also override the remoting option when calling any of the method for custom one.
 func NewRemoting(opts ...RemotingOption) *Remoting {
 	r := &Remoting{
-		client: http.NewClient(),
+		client:       http.NewClient(),
+		maxFrameSize: 16 * size.MB,
 	}
 
 	for _, opt := range opts {
@@ -83,7 +93,7 @@ func NewRemoting(opts ...RemotingOption) *Remoting {
 	}
 
 	if r.tlsConfig != nil {
-		r.client = http.NewTLSClient(r.tlsConfig)
+		r.client = http.NewTLSClient(r.tlsConfig, uint32(r.maxFrameSize)) // nolint
 	}
 
 	return r
@@ -392,6 +402,8 @@ func (r *Remoting) serviceClient(host string, port int) internalpbconnect.Remoti
 		r.client,
 		endpoint,
 		connect.WithGRPC(),
+		connect.WithSendMaxBytes(r.maxFrameSize),
+		connect.WithReadMaxBytes(r.maxFrameSize),
 		connect.WithSendGzip(),
 	)
 }
