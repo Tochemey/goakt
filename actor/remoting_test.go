@@ -1804,7 +1804,7 @@ func TestRemotingSpawn(t *testing.T) {
 			},
 		)
 	})
-	t.Run("When TLS enabbled", func(t *testing.T) {
+	t.Run("When TLS enabled", func(t *testing.T) {
 		// create the context
 		ctx := context.TODO()
 
