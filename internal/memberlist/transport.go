@@ -95,6 +95,9 @@ func NewTCPTransport(config TCPTransportConfig) (*TCPTransport, error) {
 	port := config.BindPort
 	for _, addr := range config.BindAddrs {
 		ip := net.ParseIP(addr)
+		if ip == nil {
+			return nil, fmt.Errorf("invalid address: %s", addr)
+		}
 
 		tcpAddr := &net.TCPAddr{IP: ip, Port: port}
 
