@@ -31,6 +31,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -163,7 +164,7 @@ func TestTCPTransport(t *testing.T) {
 		require.NoError(t, err)
 
 		util.Pause(time.Second)
-		require.Len(t, cluster.delegates[1].Msgs, 1)
+		require.Len(t, cluster.delegates[1].Messages(), 1)
 	})
 	t.Run("SendReliable", func(t *testing.T) {
 		cluster, cleanup := makeCluster(t)
@@ -174,7 +175,7 @@ func TestTCPTransport(t *testing.T) {
 		require.NoError(t, err)
 
 		util.Pause(time.Second)
-		require.Len(t, cluster.delegates[1].Msgs, 1)
+		require.Len(t, cluster.delegates[1].Messages(), 1)
 	})
 }
 
@@ -278,7 +279,8 @@ type mockCluster struct {
 }
 
 type delegate struct {
-	Msgs [][]byte
+	sync.Mutex
+	messages [][]byte
 }
 
 // nolint
@@ -288,7 +290,15 @@ func (d *delegate) NodeMeta(limit int) []byte {
 
 // nolint
 func (d *delegate) NotifyMsg(m []byte) {
-	d.Msgs = append(d.Msgs, m)
+	d.Lock()
+	defer d.Unlock()
+	d.messages = append(d.messages, m)
+}
+
+func (d *delegate) Messages() [][]byte {
+	d.Lock()
+	defer d.Unlock()
+	return d.messages
 }
 
 // nolint
