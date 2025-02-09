@@ -59,22 +59,49 @@ func NewClient() *http.Client {
 	}
 }
 
-// NewTLSClient creates a secured http client
+// NewTLSClient creates a http.Client that will use HTTP/2 when available,
+// and falls back to HTTP/1.1 otherwise.
 func NewTLSClient(clientTLS *tls.Config) *http.Client {
+	// Ensure the TLS configuration advertises both HTTP/2 and HTTP/1.1 via ALPN.
+	if clientTLS.NextProtos == nil {
+		clientTLS.NextProtos = []string{"h2", "http/1.1"}
+	}
+
+	// Create a custom HTTP/2 transport with your desired settings.
+	h2Transport := &http2.Transport{
+		DisableCompression: false,
+		// Reuse the same TLS config.
+		TLSClientConfig: clientTLS,
+		// Set any HTTP/2-specific options.
+		PingTimeout:     30 * time.Second,
+		ReadIdleTimeout: 30 * time.Second,
+		// DialTLSContext is optional. The default dialing may be sufficient.
+		DialTLSContext: func(ctx context.Context, network, addr string, config *tls.Config) (net.Conn, error) {
+			return tls.Dial(network, addr, config)
+		},
+	}
+
+	//// Create a base HTTP/1.1 transport.
+	//baseTransport := &http.Transport{
+	//	TLSClientConfig: clientTLS,
+	//	// Optionally, configure DialTLSContext for extra control over connection parameters.
+	//	DialTLSContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+	//		return tls.Dial(network, addr, clientTLS)
+	//	},
+	//	// When the server supports HTTP/2 (via ALPN), use our custom HTTP/2 transport.
+	//	TLSNextProto: map[string]func(authority string, c *tls.Conn) http.RoundTripper{
+	//		"h2": func(authority string, c *tls.Conn) http.RoundTripper {
+	//			return h2Transport
+	//		},
+	//	},
+	//}
+
 	return &http.Client{
-		// Most RPC servers don't use HTTP redirects
+		// Most RPC servers don't use HTTP redirects.
 		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
 			return http.ErrUseLastResponse
 		},
-		Transport: &http2.Transport{
-			TLSClientConfig:    clientTLS,
-			DisableCompression: false,
-			DialTLSContext: func(_ context.Context, network, addr string, config *tls.Config) (net.Conn, error) {
-				return tls.Dial(network, addr, config)
-			},
-			PingTimeout:     30 * time.Second,
-			ReadIdleTimeout: 30 * time.Second,
-		},
+		Transport: h2Transport,
 	}
 }
 

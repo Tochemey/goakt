@@ -25,6 +25,7 @@
 package client
 
 import (
+	"crypto/tls"
 	"fmt"
 	"net"
 	"strconv"
@@ -39,7 +40,11 @@ func TestNode(t *testing.T) {
 	ports := dynaport.Get(1)
 	address := net.JoinHostPort("127.0.0.1", strconv.Itoa(ports[0]))
 	// AutoGenerate TLS certs
-	conf := autotls.Config{AutoTLS: true}
+	conf := autotls.Config{
+		AutoTLS:            true,
+		ClientAuth:         tls.RequireAndVerifyClientCert,
+		InsecureSkipVerify: false,
+	}
 	require.NoError(t, autotls.Setup(&conf))
 
 	node := NewNode(address, WithWeight(10), WithTLS(conf.ClientTLS))

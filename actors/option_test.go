@@ -46,8 +46,8 @@ func TestOption(t *testing.T) {
 	// nolint
 	tlsConfig := &tls.Config{}
 	tlsInfo := &TLSInfo{
-		ClientConfig: tlsConfig,
-		ServerConfig: tlsConfig,
+		ClientTLS: tlsConfig,
+		ServerTLS: tlsConfig,
 	}
 
 	remoteConfig := remote.DefaultConfig()

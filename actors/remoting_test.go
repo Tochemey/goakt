@@ -26,6 +26,7 @@ package actors
 
 import (
 	"context"
+	"crypto/tls"
 	"testing"
 	"time"
 
@@ -555,7 +556,11 @@ func TestRemoteTell(t *testing.T) {
 		// create the context
 		ctx := context.TODO()
 		// AutoGenerate TLS certs
-		conf := autotls.Config{AutoTLS: true}
+		conf := autotls.Config{
+			AutoTLS:            true,
+			ClientAuth:         tls.RequireAndVerifyClientCert,
+			InsecureSkipVerify: false,
+		}
 		require.NoError(t, autotls.Setup(&conf))
 
 		// define the logger to use
@@ -574,8 +579,8 @@ func TestRemoteTell(t *testing.T) {
 			WithPassivationDisabled(),
 			WithRemote(remoteConfig),
 			WithTLS(&TLSInfo{
-				ClientConfig: conf.ClientTLS,
-				ServerConfig: conf.ServerTLS,
+				ClientTLS: conf.ClientTLS,
+				ServerTLS: conf.ServerTLS,
 			}),
 		)
 		// assert there are no error
@@ -1156,7 +1161,11 @@ func TestRemoteAsk(t *testing.T) {
 		// create the context
 		ctx := context.TODO()
 		// AutoGenerate TLS certs
-		conf := autotls.Config{AutoTLS: true}
+		conf := autotls.Config{
+			AutoTLS:            true,
+			ClientAuth:         tls.RequireAndVerifyClientCert,
+			InsecureSkipVerify: false,
+		}
 		require.NoError(t, autotls.Setup(&conf))
 
 		serverConfig := conf.ServerTLS
@@ -1172,8 +1181,8 @@ func TestRemoteAsk(t *testing.T) {
 		sys, err := NewActorSystem(
 			"test",
 			WithTLS(&TLSInfo{
-				ClientConfig: clientConfig,
-				ServerConfig: serverConfig,
+				ClientTLS: clientConfig,
+				ServerTLS: serverConfig,
 			}),
 			WithLogger(logger),
 			WithPassivationDisabled(),
@@ -1275,7 +1284,11 @@ func TestRemotingLookup(t *testing.T) {
 		// create the context
 		ctx := context.TODO()
 		// AutoGenerate TLS certs
-		conf := autotls.Config{AutoTLS: true}
+		conf := autotls.Config{
+			AutoTLS:            true,
+			ClientAuth:         tls.RequireAndVerifyClientCert,
+			InsecureSkipVerify: false,
+		}
 		require.NoError(t, autotls.Setup(&conf))
 
 		// define the logger to use
@@ -1292,8 +1305,8 @@ func TestRemotingLookup(t *testing.T) {
 			WithPassivationDisabled(),
 			WithRemoting(host, int32(remotingPort)),
 			WithTLS(&TLSInfo{
-				ClientConfig: conf.ClientTLS,
-				ServerConfig: conf.ServerTLS,
+				ClientTLS: conf.ClientTLS,
+				ServerTLS: conf.ServerTLS,
 			}),
 		)
 		// assert there are no error
@@ -1424,7 +1437,11 @@ func TestRemotingReSpawn(t *testing.T) {
 		// create the context
 		ctx := context.TODO()
 		// AutoGenerate TLS certs
-		conf := autotls.Config{AutoTLS: true}
+		conf := autotls.Config{
+			AutoTLS:            true,
+			ClientAuth:         tls.RequireAndVerifyClientCert,
+			InsecureSkipVerify: false,
+		}
 		require.NoError(t, autotls.Setup(&conf))
 
 		// define the logger to use
@@ -1441,8 +1458,8 @@ func TestRemotingReSpawn(t *testing.T) {
 			WithPassivationDisabled(),
 			WithRemoting(host, int32(remotingPort)),
 			WithTLS(&TLSInfo{
-				ClientConfig: conf.ClientTLS,
-				ServerConfig: conf.ServerTLS,
+				ClientTLS: conf.ClientTLS,
+				ServerTLS: conf.ServerTLS,
 			}),
 		)
 		// assert there are no error
@@ -1579,7 +1596,11 @@ func TestRemotingStop(t *testing.T) {
 		ctx := context.TODO()
 
 		// AutoGenerate TLS certs
-		conf := autotls.Config{AutoTLS: true}
+		conf := autotls.Config{
+			AutoTLS:            true,
+			ClientAuth:         tls.RequireAndVerifyClientCert,
+			InsecureSkipVerify: false,
+		}
 		require.NoError(t, autotls.Setup(&conf))
 
 		// define the logger to use
@@ -1596,8 +1617,8 @@ func TestRemotingStop(t *testing.T) {
 			WithPassivationDisabled(),
 			WithRemoting(host, int32(remotingPort)),
 			WithTLS(&TLSInfo{
-				ClientConfig: conf.ClientTLS,
-				ServerConfig: conf.ServerTLS,
+				ClientTLS: conf.ClientTLS,
+				ServerTLS: conf.ServerTLS,
 			}),
 		)
 		// assert there are no error
@@ -1788,7 +1809,11 @@ func TestRemotingSpawn(t *testing.T) {
 		ctx := context.TODO()
 
 		// AutoGenerate TLS certs
-		conf := autotls.Config{AutoTLS: true}
+		conf := autotls.Config{
+			AutoTLS:            true,
+			ClientAuth:         tls.RequireAndVerifyClientCert,
+			InsecureSkipVerify: false,
+		}
 		require.NoError(t, autotls.Setup(&conf))
 
 		// define the logger to use
@@ -1805,8 +1830,8 @@ func TestRemotingSpawn(t *testing.T) {
 			WithPassivationDisabled(),
 			WithRemoting(host, int32(remotingPort)),
 			WithTLS(&TLSInfo{
-				ClientConfig: conf.ClientTLS,
-				ServerConfig: conf.ServerTLS,
+				ClientTLS: conf.ClientTLS,
+				ServerTLS: conf.ServerTLS,
 			}),
 		)
 		// assert there are no error

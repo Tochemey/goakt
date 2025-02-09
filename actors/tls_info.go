@@ -31,8 +31,8 @@ import "crypto/tls"
 // root Certificate Authority (CA) to enable successful handshake and
 // mutual authentication.
 type TLSInfo struct {
-	// ClientConfig defines the client TLS config
-	ClientConfig *tls.Config
-	// ServerConfig defines the server TLS config
-	ServerConfig *tls.Config
+	// ClientTLS defines the client TLS config
+	ClientTLS *tls.Config
+	// ServerTLS defines the server TLS config
+	ServerTLS *tls.Config
 }

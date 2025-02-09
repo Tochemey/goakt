@@ -197,7 +197,7 @@ func WithCoordinatedShutdown(hooks ...ShutdownHook) Option {
 // secure communication and complete handshakes successfully.
 func WithTLS(tlsInfo *TLSInfo) Option {
 	return OptionFunc(func(system *actorSystem) {
-		system.serverTLS = tlsInfo.ServerConfig
-		system.tlsClientConfig = tlsInfo.ClientConfig
+		system.serverTLS = tlsInfo.ServerTLS
+		system.tlsClientConfig = tlsInfo.ClientTLS
 	})
 }

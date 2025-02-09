@@ -500,8 +500,8 @@ func startClusterSystem(t *testing.T, serverAddr string, opts ...testClusterOpti
 
 	if cfg.tlsEnabled {
 		options = append(options, WithTLS(&TLSInfo{
-			ClientConfig: cfg.conf.ClientTLS,
-			ServerConfig: cfg.conf.ServerTLS,
+			ClientTLS: cfg.conf.ClientTLS,
+			ServerTLS: cfg.conf.ServerTLS,
 		}))
 	}
 

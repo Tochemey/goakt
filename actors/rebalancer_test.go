@@ -26,6 +26,7 @@ package actors
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"testing"
 	"time"
@@ -119,7 +120,11 @@ func TestRebalancing(t *testing.T) {
 		srv := startNatsServer(t)
 
 		// AutoGenerate TLS certs
-		conf := autotls.Config{AutoTLS: true}
+		conf := autotls.Config{
+			AutoTLS:            true,
+			ClientAuth:         tls.RequireAndVerifyClientCert,
+			InsecureSkipVerify: false,
+		}
 		require.NoError(t, autotls.Setup(&conf))
 
 		// create and start system cluster

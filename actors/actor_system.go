@@ -1847,6 +1847,11 @@ func (x *actorSystem) configureServer(ctx context.Context, mux *nethttp.ServeMux
 
 	// set the http TLS server
 	if x.serverTLS != nil {
+		// Ensure the TLS configuration advertises both HTTP/2 and HTTP/1.1 via ALPN.
+		if x.serverTLS.NextProtos == nil {
+			x.serverTLS.NextProtos = []string{"h2", "http/1.1"}
+		}
+
 		x.server = httpServer
 		x.server.TLSConfig = x.serverTLS
 		x.server.Handler = mux
