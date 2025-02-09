@@ -291,8 +291,8 @@ type actorSystem struct {
 	actorsCounter      *atomic.Uint64
 	deadlettersCounter *atomic.Uint64
 
-	tlsClientConfig *tls.Config
-	serverTLS       *tls.Config
+	clientTLS *tls.Config
+	serverTLS *tls.Config
 }
 
 var (
@@ -364,7 +364,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 	}
 
 	// perform some quick validations on the TLS configurations
-	if (system.serverTLS == nil) != (system.tlsClientConfig == nil) {
+	if (system.serverTLS == nil) != (system.clientTLS == nil) {
 		return nil, ErrInvalidTLSConfiguration
 	}
 
@@ -1374,7 +1374,7 @@ func (x *actorSystem) enableClustering(ctx context.Context) error {
 		cluster.WithWriteQuorum(x.clusterConfig.WriteQuorum()),
 		cluster.WithReadQuorum(x.clusterConfig.ReadQuorum()),
 		cluster.WithReplicaCount(x.clusterConfig.ReplicaCount()),
-		cluster.WithTLS(x.serverTLS, x.tlsClientConfig),
+		cluster.WithTLS(x.serverTLS, x.clientTLS),
 		cluster.WithKVStoreSize(x.clusterConfig.KVStoreSize()),
 	)
 	if err != nil {
@@ -1459,9 +1459,9 @@ func (x *actorSystem) enableRemoting(ctx context.Context) error {
 
 // setRemoting sets the remoting service
 func (x *actorSystem) setRemoting() {
-	if x.tlsClientConfig != nil {
+	if x.clientTLS != nil {
 		x.remoting = NewRemoting(
-			WithRemotingTLS(x.tlsClientConfig),
+			WithRemotingTLS(x.clientTLS),
 			WithMaxFameSize(int(x.remoteConfig.MaxFrameSize())), // nolint
 		)
 		return
@@ -1481,7 +1481,7 @@ func (x *actorSystem) startMessagesScheduler(ctx context.Context) {
 }
 
 func (x *actorSystem) ensureTLSProtos() {
-	if x.serverTLS != nil && x.tlsClientConfig != nil {
+	if x.serverTLS != nil && x.clientTLS != nil {
 		// ensure that the required protocols are set for the TLS
 		toAdd := []string{"h2", "http/1.1"}
 
@@ -1491,9 +1491,9 @@ func (x *actorSystem) ensureTLSProtos() {
 		x.serverTLS.NextProtos = protos.ToSlice()
 
 		// client application protocols setting
-		protos = goset.NewSet[string](x.tlsClientConfig.NextProtos...)
+		protos = goset.NewSet[string](x.clientTLS.NextProtos...)
 		protos.Append(toAdd...)
-		x.tlsClientConfig.NextProtos = protos.ToSlice()
+		x.clientTLS.NextProtos = protos.ToSlice()
 	}
 }
 
@@ -1850,11 +1850,6 @@ func (x *actorSystem) configureServer(ctx context.Context, mux *nethttp.ServeMux
 
 	// set the http TLS server
 	if x.serverTLS != nil {
-		// Ensure the TLS configuration advertises both HTTP/2 and HTTP/1.1 via ALPN.
-		if x.serverTLS.NextProtos == nil {
-			x.serverTLS.NextProtos = []string{"h2", "http/1.1"}
-		}
-
 		x.server = httpServer
 		x.server.TLSConfig = x.serverTLS
 		x.server.Handler = mux

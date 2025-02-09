@@ -198,6 +198,6 @@ func WithCoordinatedShutdown(hooks ...ShutdownHook) Option {
 func WithTLS(tlsInfo *TLSInfo) Option {
 	return OptionFunc(func(system *actorSystem) {
 		system.serverTLS = tlsInfo.ServerTLS
-		system.tlsClientConfig = tlsInfo.ClientTLS
+		system.clientTLS = tlsInfo.ClientTLS
 	})
 }
