@@ -33,6 +33,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/kapetan-io/tackle/autotls"
 	natsserver "github.com/nats-io/nats-server/v2/server"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -43,7 +44,6 @@ import (
 	"github.com/tochemey/goakt/v2/discovery/nats"
 	"github.com/tochemey/goakt/v2/goaktpb"
 	"github.com/tochemey/goakt/v2/internal/internalpb"
-	"github.com/tochemey/goakt/v2/internal/testutil"
 	"github.com/tochemey/goakt/v2/internal/util"
 	"github.com/tochemey/goakt/v2/log"
 	testkit "github.com/tochemey/goakt/v2/mocks/discovery"
@@ -535,21 +535,22 @@ func TestMultipleNodes(t *testing.T) {
 	})
 	t.Run("With TLS", func(t *testing.T) {
 		ctx := context.TODO()
-
-		rootCert := testutil.NewCertRoot(t)
+		// AutoGenerate TLS certs
+		conf := autotls.Config{AutoTLS: true}
+		require.NoError(t, autotls.Setup(&conf))
 
 		// start the NATS server
 		srv := startNatsServer(t)
 
 		// create a cluster node1
-		node1, sd1 := startEngineWithTLS(t, "node1", srv.Addr().String(), rootCert)
+		node1, sd1 := startEngineWithTLS(t, "node1", srv.Addr().String(), conf)
 		require.NotNil(t, node1)
 
 		// wait for the node to start properly
 		util.Pause(2 * time.Second)
 
 		// create a cluster node2
-		node2, sd2 := startEngineWithTLS(t, "node2", srv.Addr().String(), rootCert)
+		node2, sd2 := startEngineWithTLS(t, "node2", srv.Addr().String(), conf)
 		require.NotNil(t, node2)
 		node2Addr := node2.node.PeersAddress()
 
@@ -557,7 +558,7 @@ func TestMultipleNodes(t *testing.T) {
 		util.Pause(time.Second)
 
 		// create a cluster node3
-		node3, sd3 := startEngineWithTLS(t, "node3", srv.Addr().String(), rootCert)
+		node3, sd3 := startEngineWithTLS(t, "node3", srv.Addr().String(), conf)
 		require.NotNil(t, node3)
 		require.NotNil(t, sd3)
 
@@ -763,7 +764,7 @@ func startEngine(t *testing.T, nodeName, serverAddr string) (*Engine, discovery.
 	return engine, provider
 }
 
-func startEngineWithTLS(t *testing.T, nodeName, serverAddr string, rootCert *testutil.CertRoot) (*Engine, discovery.Provider) {
+func startEngineWithTLS(t *testing.T, nodeName, serverAddr string, conf autotls.Config) (*Engine, discovery.Provider) {
 	// create a context
 	ctx := context.TODO()
 
@@ -801,13 +802,9 @@ func startEngineWithTLS(t *testing.T, nodeName, serverAddr string, rootCert *tes
 	// create the instance of provider
 	provider := nats.NewDiscovery(&config)
 
-	// create the server TLS config
-	serverTLSConfig := testutil.GetServerTLSConfig(t, rootCert)
-	clientTLSConfig := testutil.GetClientTLSConfig(t, rootCert)
-
 	// create the startNode
 	engine, err := NewEngine(nodeName, provider, &hostNode,
-		WithTLS(serverTLSConfig, clientTLSConfig),
+		WithTLS(conf.ServerTLS, conf.ClientTLS),
 		WithLogger(log.DiscardLogger))
 	require.NoError(t, err)
 	require.NotNil(t, engine)

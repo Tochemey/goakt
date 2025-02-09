@@ -60,14 +60,14 @@ func NewClient() *http.Client {
 }
 
 // NewTLSClient creates a secured http client
-func NewTLSClient(tlsConfig *tls.Config) *http.Client {
+func NewTLSClient(clientTLS *tls.Config) *http.Client {
 	return &http.Client{
 		// Most RPC servers don't use HTTP redirects
 		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
 			return http.ErrUseLastResponse
 		},
 		Transport: &http2.Transport{
-			TLSClientConfig:    tlsConfig,
+			TLSClientConfig:    clientTLS,
 			DisableCompression: false,
 			DialTLSContext: func(_ context.Context, network, addr string, config *tls.Config) (net.Conn, error) {
 				return tls.Dial(network, addr, config)

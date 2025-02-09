@@ -115,7 +115,7 @@ func TestOption(t *testing.T) {
 		{
 			name:     "WithTLS",
 			option:   WithTLS(tlsInfo),
-			expected: actorSystem{tlsServerConfig: tlsConfig, tlsClientConfig: tlsConfig},
+			expected: actorSystem{serverTLS: tlsConfig, tlsClientConfig: tlsConfig},
 		},
 		{
 			name:     "WithRemote",

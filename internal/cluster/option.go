@@ -125,8 +125,8 @@ func WithReadQuorum(count uint32) Option {
 // root CA for successful handshake and authentication
 func WithTLS(serverConfig, clientConfig *tls.Config) Option {
 	return OptionFunc(func(eng *Engine) {
-		eng.tlsClientConfig = clientConfig
-		eng.tlsServerConfig = serverConfig
+		eng.clientTLS = clientConfig
+		eng.serverTLS = serverConfig
 	})
 }
 

@@ -22,36 +22,24 @@
  * SOFTWARE.
  */
 
-package client
+package memberlist
 
-import (
-	"fmt"
-	"net"
-	"strconv"
-	"testing"
+type messageType uint8
 
-	"github.com/kapetan-io/tackle/autotls"
-	"github.com/stretchr/testify/require"
-	"github.com/travisjeffery/go-dynaport"
+const (
+	_ messageType = iota // don't use 0
+	packet
+	stream
 )
 
-func TestNode(t *testing.T) {
-	ports := dynaport.Get(1)
-	address := net.JoinHostPort("127.0.0.1", strconv.Itoa(ports[0]))
-	// AutoGenerate TLS certs
-	conf := autotls.Config{AutoTLS: true}
-	require.NoError(t, autotls.Setup(&conf))
+const zeroZeroZeroZero = "0.0.0.0"
 
-	node := NewNode(address, WithWeight(10), WithTLS(conf.ClientTLS))
-	require.NotNil(t, node)
-	require.Equal(t, address, node.Address())
-	require.Exactly(t, float64(10), node.Weight())
-	require.NoError(t, node.Validate())
-	require.NotNil(t, node.HTTPClient())
-	require.Equal(t, fmt.Sprintf("https://%s", address), node.HTTPEndPoint())
-	require.NotNil(t, node.Remoting())
-	host, port := node.HostAndPort()
-	require.Equal(t, "127.0.0.1", host)
-	require.Equal(t, ports[0], port)
-	node.Free()
+type addr string
+
+func (a addr) Network() string {
+	return "tcp"
+}
+
+func (a addr) String() string {
+	return string(a)
 }

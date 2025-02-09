@@ -22,36 +22,31 @@
  * SOFTWARE.
  */
 
-package client
+package memberlist
 
 import (
-	"fmt"
-	"net"
-	"strconv"
-	"testing"
+	"crypto/tls"
+	"time"
 
-	"github.com/kapetan-io/tackle/autotls"
-	"github.com/stretchr/testify/require"
-	"github.com/travisjeffery/go-dynaport"
+	"github.com/tochemey/goakt/v2/log"
 )
 
-func TestNode(t *testing.T) {
-	ports := dynaport.Get(1)
-	address := net.JoinHostPort("127.0.0.1", strconv.Itoa(ports[0]))
-	// AutoGenerate TLS certs
-	conf := autotls.Config{AutoTLS: true}
-	require.NoError(t, autotls.Setup(&conf))
+// TCPTransportConfig is used to configure a net transport.
+type TCPTransportConfig struct {
+	// BindAddrs is a list of addresses to bind to for both TCP and UDP
+	// communications.
+	BindAddrs []string
 
-	node := NewNode(address, WithWeight(10), WithTLS(conf.ClientTLS))
-	require.NotNil(t, node)
-	require.Equal(t, address, node.Address())
-	require.Exactly(t, float64(10), node.Weight())
-	require.NoError(t, node.Validate())
-	require.NotNil(t, node.HTTPClient())
-	require.Equal(t, fmt.Sprintf("https://%s", address), node.HTTPEndPoint())
-	require.NotNil(t, node.Remoting())
-	host, port := node.HostAndPort()
-	require.Equal(t, "127.0.0.1", host)
-	require.Equal(t, ports[0], port)
-	node.Free()
+	// BindPort is the port to listen on, for each address above.
+	BindPort int
+
+	PacketDialTimeout  time.Duration
+	PacketWriteTimeout time.Duration
+
+	// Logger is a logger for operator messages.
+	Logger log.Logger
+
+	TLSEnabled   bool
+	TLS          *tls.Config
+	DebugEnabled bool
 }

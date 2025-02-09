@@ -54,6 +54,7 @@ import (
 	"github.com/tochemey/goakt/v2/hash"
 	"github.com/tochemey/goakt/v2/internal/errorschain"
 	"github.com/tochemey/goakt/v2/internal/internalpb"
+	"github.com/tochemey/goakt/v2/internal/memberlist"
 	"github.com/tochemey/goakt/v2/internal/size"
 	"github.com/tochemey/goakt/v2/log"
 )
@@ -176,8 +177,8 @@ type Engine struct {
 	nodeJoinedEventsFilter goset.Set[string]
 	nodeLeftEventsFilter   goset.Set[string]
 
-	tlsClientConfig *tls.Config
-	tlsServerConfig *tls.Config
+	clientTLS *tls.Config
+	serverTLS *tls.Config
 
 	running *atomic.Bool
 }
@@ -217,7 +218,7 @@ func NewEngine(name string, disco discovery.Provider, host *discovery.Node, opts
 	}
 
 	// perform some quick validations
-	if (engine.tlsServerConfig == nil) != (engine.tlsClientConfig == nil) {
+	if (engine.serverTLS == nil) != (engine.clientTLS == nil) {
 		return nil, ErrInvalidTLSConfiguration
 	}
 
@@ -241,6 +242,26 @@ func (x *Engine) Start(ctx context.Context) error {
 
 	conf.Hasher = &hasherWrapper{x.hasher}
 
+	mtConfig := memberlist.TCPTransportConfig{
+		BindAddrs:          []string{x.node.Host},
+		BindPort:           x.node.DiscoveryPort,
+		PacketDialTimeout:  5 * time.Second,
+		PacketWriteTimeout: 5 * time.Second,
+		Logger:             x.logger,
+		DebugEnabled:       false,
+	}
+
+	if x.serverTLS != nil {
+		mtConfig.TLSEnabled = true
+		mtConfig.TLS = x.serverTLS
+	}
+
+	transport, err := memberlist.NewTCPTransport(mtConfig)
+	if err != nil {
+		x.logger.Errorf("Failed to create memberlist TCP transport: %v", err)
+		return err
+	}
+
 	m, err := config.NewMemberlistConfig("lan")
 	if err != nil {
 		logger.Errorf("failed to configure the cluster Engine members list.💥: %v", err)
@@ -252,6 +273,7 @@ func (x *Engine) Start(ctx context.Context) error {
 	m.BindPort = x.node.DiscoveryPort
 	m.AdvertisePort = x.node.DiscoveryPort
 	m.AdvertiseAddr = x.node.Host
+	m.Transport = transport
 	conf.MemberlistConfig = m
 
 	// set the discovery provider
@@ -870,13 +892,13 @@ func (x *Engine) buildConfig() (*config.Config, error) {
 	}
 
 	// Set TLS configuration accordingly
-	if x.tlsServerConfig != nil && x.tlsClientConfig != nil {
+	if x.serverTLS != nil && x.clientTLS != nil {
 		// set the server TLS config
-		conf.TlsConfig = x.tlsServerConfig
+		conf.TlsConfig = x.serverTLS
 
 		// create a client configuration that will be used by the
 		// embedded client calls
-		client := &config.Client{TLSConfig: x.tlsClientConfig}
+		client := &config.Client{TLSConfig: x.clientTLS}
 		// sanitize client configuration
 		if err := client.Sanitize(); err != nil {
 			return nil, fmt.Errorf("failed to sanitize client config: %v", err)

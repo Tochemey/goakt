@@ -39,10 +39,11 @@ import (
 	"github.com/travisjeffery/go-dynaport"
 	"go.uber.org/atomic"
 
+	"github.com/kapetan-io/tackle/autotls"
+
 	"github.com/tochemey/goakt/v2/discovery"
 	"github.com/tochemey/goakt/v2/discovery/nats"
 	"github.com/tochemey/goakt/v2/goaktpb"
-	"github.com/tochemey/goakt/v2/internal/testutil"
 	"github.com/tochemey/goakt/v2/internal/util"
 	"github.com/tochemey/goakt/v2/log"
 	"github.com/tochemey/goakt/v2/test/data/testpb"
@@ -432,15 +433,15 @@ func startNatsServer(t *testing.T) *natsserver.Server {
 
 type testClusterConfig struct {
 	tlsEnabled bool
-	rootCert   *testutil.CertRoot
+	conf       autotls.Config
 }
 
 type testClusterOption func(*testClusterConfig)
 
-func withTSL(rootCert *testutil.CertRoot) testClusterOption {
+func withTSL(conf autotls.Config) testClusterOption {
 	return func(tc *testClusterConfig) {
 		tc.tlsEnabled = true
-		tc.rootCert = rootCert
+		tc.conf = conf
 	}
 }
 
@@ -498,11 +499,9 @@ func startClusterSystem(t *testing.T, serverAddr string, opts ...testClusterOpti
 	}
 
 	if cfg.tlsEnabled {
-		serverConfig := testutil.GetServerTLSConfig(t, cfg.rootCert)
-		clientConfig := testutil.GetClientTLSConfig(t, cfg.rootCert)
 		options = append(options, WithTLS(&TLSInfo{
-			ClientConfig: clientConfig,
-			ServerConfig: serverConfig,
+			ClientConfig: cfg.conf.ClientTLS,
+			ServerConfig: cfg.conf.ServerTLS,
 		}))
 	}
 

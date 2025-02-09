@@ -30,10 +30,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kapetan-io/tackle/autotls"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/tochemey/goakt/v2/internal/testutil"
 	"github.com/tochemey/goakt/v2/internal/util"
 	"github.com/tochemey/goakt/v2/test/data/testpb"
 )
@@ -113,26 +113,27 @@ func TestRebalancing(t *testing.T) {
 		})
 	})
 	t.Run("With successful actors redeployment when TLS enabled", func(t *testing.T) {
-		t.Skip("Skipping it. Flaky test...")
 		// create a context
 		ctx := context.TODO()
 		// start the NATS server
 		srv := startNatsServer(t)
 
-		rootCert := testutil.NewCertRoot(t)
+		// AutoGenerate TLS certs
+		conf := autotls.Config{AutoTLS: true}
+		require.NoError(t, autotls.Setup(&conf))
 
 		// create and start system cluster
-		node1, sd1 := startClusterSystem(t, srv.Addr().String(), withTSL(rootCert))
+		node1, sd1 := startClusterSystem(t, srv.Addr().String(), withTSL(conf))
 		require.NotNil(t, node1)
 		require.NotNil(t, sd1)
 
 		// create and start system cluster
-		node2, sd2 := startClusterSystem(t, srv.Addr().String(), withTSL(rootCert))
+		node2, sd2 := startClusterSystem(t, srv.Addr().String(), withTSL(conf))
 		require.NotNil(t, node2)
 		require.NotNil(t, sd2)
 
 		// create and start system cluster
-		node3, sd3 := startClusterSystem(t, srv.Addr().String(), withTSL(rootCert))
+		node3, sd3 := startClusterSystem(t, srv.Addr().String(), withTSL(conf))
 		require.NotNil(t, node3)
 		require.NotNil(t, sd3)
 

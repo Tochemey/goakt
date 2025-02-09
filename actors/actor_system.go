@@ -292,7 +292,7 @@ type actorSystem struct {
 	deadlettersCounter *atomic.Uint64
 
 	tlsClientConfig *tls.Config
-	tlsServerConfig *tls.Config
+	serverTLS       *tls.Config
 }
 
 var (
@@ -364,7 +364,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 	}
 
 	// perform some quick validations on the TLS configurations
-	if (system.tlsServerConfig == nil) != (system.tlsClientConfig == nil) {
+	if (system.serverTLS == nil) != (system.tlsClientConfig == nil) {
 		return nil, ErrInvalidTLSConfiguration
 	}
 
@@ -1374,7 +1374,7 @@ func (x *actorSystem) enableClustering(ctx context.Context) error {
 		cluster.WithWriteQuorum(x.clusterConfig.WriteQuorum()),
 		cluster.WithReadQuorum(x.clusterConfig.ReadQuorum()),
 		cluster.WithReplicaCount(x.clusterConfig.ReplicaCount()),
-		cluster.WithTLS(x.tlsServerConfig, x.tlsClientConfig),
+		cluster.WithTLS(x.serverTLS, x.tlsClientConfig),
 		cluster.WithKVStoreSize(x.clusterConfig.KVStoreSize()),
 	)
 	if err != nil {
@@ -1478,14 +1478,14 @@ func (x *actorSystem) startMessagesScheduler(ctx context.Context) {
 }
 
 func (x *actorSystem) ensureTLSProtos() {
-	if x.tlsServerConfig != nil && x.tlsClientConfig != nil {
+	if x.serverTLS != nil && x.tlsClientConfig != nil {
 		// ensure that the required protocols are set for the TLS
 		toAdd := []string{"h2", "http/1.1"}
 
 		// server application protocols setting
-		protos := goset.NewSet[string](x.tlsServerConfig.NextProtos...)
+		protos := goset.NewSet[string](x.serverTLS.NextProtos...)
 		protos.Append(toAdd...)
-		x.tlsServerConfig.NextProtos = protos.ToSlice()
+		x.serverTLS.NextProtos = protos.ToSlice()
 
 		// client application protocols setting
 		protos = goset.NewSet[string](x.tlsClientConfig.NextProtos...)
@@ -1846,11 +1846,11 @@ func (x *actorSystem) configureServer(ctx context.Context, mux *nethttp.ServeMux
 	}
 
 	// set the http TLS server
-	if x.tlsServerConfig != nil {
+	if x.serverTLS != nil {
 		x.server = httpServer
-		x.server.TLSConfig = x.tlsServerConfig
+		x.server.TLSConfig = x.serverTLS
 		x.server.Handler = mux
-		x.listener = tls.NewListener(listener, x.tlsServerConfig)
+		x.listener = tls.NewListener(listener, x.serverTLS)
 		return http2.ConfigureServer(x.server, http2Server)
 	}
 
