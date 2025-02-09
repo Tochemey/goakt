@@ -34,6 +34,8 @@ import (
 	"time"
 
 	"golang.org/x/net/http2"
+
+	"github.com/tochemey/goakt/v2/internal/size"
 )
 
 // NewClient creates a http client use h2c
@@ -46,6 +48,7 @@ func NewClient() *http.Client {
 		Transport: &http2.Transport{
 			TLSClientConfig:    nil,
 			AllowHTTP:          true,
+			MaxReadFrameSize:   16 * size.MB,
 			DisableCompression: false,
 			DialTLSContext: func(_ context.Context, network, addr string, _ *tls.Config) (net.Conn, error) {
 				// If you're also using this client for non-h2c traffic, you may want to
@@ -71,6 +74,7 @@ func NewTLSClient(clientTLS *tls.Config) *http.Client {
 	// Create a custom HTTP/2 transport with your desired settings.
 	h2Transport := &http2.Transport{
 		DisableCompression: false,
+		MaxReadFrameSize:   16 * size.MB,
 		// Reuse the same TLS config.
 		TLSClientConfig: clientTLS,
 		// Set any HTTP/2-specific options.
@@ -81,21 +85,6 @@ func NewTLSClient(clientTLS *tls.Config) *http.Client {
 			return tls.Dial(network, addr, config)
 		},
 	}
-
-	//// Create a base HTTP/1.1 transport.
-	//baseTransport := &http.Transport{
-	//	TLSClientConfig: clientTLS,
-	//	// Optionally, configure DialTLSContext for extra control over connection parameters.
-	//	DialTLSContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-	//		return tls.Dial(network, addr, clientTLS)
-	//	},
-	//	// When the server supports HTTP/2 (via ALPN), use our custom HTTP/2 transport.
-	//	TLSNextProto: map[string]func(authority string, c *tls.Conn) http.RoundTripper{
-	//		"h2": func(authority string, c *tls.Conn) http.RoundTripper {
-	//			return h2Transport
-	//		},
-	//	},
-	//}
 
 	return &http.Client{
 		// Most RPC servers don't use HTTP redirects.

@@ -19,7 +19,7 @@ require (
 	github.com/reugn/go-quartz v0.14.0
 	github.com/spaolacci/murmur3 v1.1.0
 	github.com/stretchr/testify v1.10.0
-	github.com/tochemey/olric v0.2.0-alpha
+	github.com/tochemey/olric v0.2.0
 	github.com/travisjeffery/go-dynaport v1.0.0
 	github.com/zeebo/xxh3 v1.0.2
 	go.uber.org/atomic v1.11.0

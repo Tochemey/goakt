@@ -893,8 +893,11 @@ func (x *Engine) buildConfig() (*config.Config, error) {
 
 	// Set TLS configuration accordingly
 	if x.serverTLS != nil && x.clientTLS != nil {
-		// set the server TLS config
-		conf.TlsConfig = x.serverTLS
+		// set the server TLS info
+		conf.TLSInfo = &config.TLSInfo{
+			ClientTLS: x.clientTLS,
+			ServerTLS: x.serverTLS,
+		}
 
 		// create a client configuration that will be used by the
 		// embedded client calls
