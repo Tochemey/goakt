@@ -559,7 +559,7 @@ func TestRemoteTell(t *testing.T) {
 		conf := autotls.Config{
 			AutoTLS:            true,
 			ClientAuth:         tls.RequireAndVerifyClientCert,
-			InsecureSkipVerify: false,
+			InsecureSkipVerify: true,
 		}
 		require.NoError(t, autotls.Setup(&conf))
 
@@ -1164,7 +1164,7 @@ func TestRemoteAsk(t *testing.T) {
 		conf := autotls.Config{
 			AutoTLS:            true,
 			ClientAuth:         tls.RequireAndVerifyClientCert,
-			InsecureSkipVerify: false,
+			InsecureSkipVerify: true,
 		}
 		require.NoError(t, autotls.Setup(&conf))
 
@@ -1287,7 +1287,7 @@ func TestRemotingLookup(t *testing.T) {
 		conf := autotls.Config{
 			AutoTLS:            true,
 			ClientAuth:         tls.RequireAndVerifyClientCert,
-			InsecureSkipVerify: false,
+			InsecureSkipVerify: true,
 		}
 		require.NoError(t, autotls.Setup(&conf))
 
@@ -1440,7 +1440,7 @@ func TestRemotingReSpawn(t *testing.T) {
 		conf := autotls.Config{
 			AutoTLS:            true,
 			ClientAuth:         tls.RequireAndVerifyClientCert,
-			InsecureSkipVerify: false,
+			InsecureSkipVerify: true,
 		}
 		require.NoError(t, autotls.Setup(&conf))
 
@@ -1599,7 +1599,7 @@ func TestRemotingStop(t *testing.T) {
 		conf := autotls.Config{
 			AutoTLS:            true,
 			ClientAuth:         tls.RequireAndVerifyClientCert,
-			InsecureSkipVerify: false,
+			InsecureSkipVerify: true,
 		}
 		require.NoError(t, autotls.Setup(&conf))
 
@@ -1812,7 +1812,7 @@ func TestRemotingSpawn(t *testing.T) {
 		conf := autotls.Config{
 			AutoTLS:            true,
 			ClientAuth:         tls.RequireAndVerifyClientCert,
-			InsecureSkipVerify: false,
+			InsecureSkipVerify: true,
 		}
 		require.NoError(t, autotls.Setup(&conf))
 

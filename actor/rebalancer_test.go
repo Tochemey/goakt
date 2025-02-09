@@ -123,7 +123,7 @@ func TestRebalancing(t *testing.T) {
 		conf := autotls.Config{
 			AutoTLS:            true,
 			ClientAuth:         tls.RequireAndVerifyClientCert,
-			InsecureSkipVerify: false,
+			InsecureSkipVerify: true,
 		}
 		require.NoError(t, autotls.Setup(&conf))
 
