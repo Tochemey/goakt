@@ -32,10 +32,10 @@ import (
 	"slices"
 	"sync"
 
-	"github.com/tochemey/goakt/v2/internal/internalpb"
-	"github.com/tochemey/goakt/v2/internal/logsm/skiplist"
-	"github.com/tochemey/goakt/v2/internal/logsm/types"
-	"github.com/tochemey/goakt/v2/internal/logsm/wal"
+	"github.com/tochemey/goakt/v3/internal/internalpb"
+	"github.com/tochemey/goakt/v3/internal/logsm/skiplist"
+	"github.com/tochemey/goakt/v3/internal/logsm/types"
+	"github.com/tochemey/goakt/v3/internal/logsm/wal"
 )
 
 type MemTable struct {

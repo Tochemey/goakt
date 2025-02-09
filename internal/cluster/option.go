@@ -28,8 +28,8 @@ import (
 	"crypto/tls"
 	"time"
 
-	"github.com/tochemey/goakt/v2/hash"
-	"github.com/tochemey/goakt/v2/log"
+	"github.com/tochemey/goakt/v3/hash"
+	"github.com/tochemey/goakt/v3/log"
 )
 
 // Option is the interface that applies a configuration option.

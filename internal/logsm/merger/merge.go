@@ -29,7 +29,7 @@ import (
 	"container/heap"
 	"slices"
 
-	"github.com/tochemey/goakt/v2/internal/internalpb"
+	"github.com/tochemey/goakt/v3/internal/internalpb"
 )
 
 func Merge(lists ...[]*internalpb.Entry) []*internalpb.Entry {

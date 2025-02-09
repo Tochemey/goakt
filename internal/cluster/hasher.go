@@ -27,7 +27,7 @@ package cluster
 import (
 	"github.com/tochemey/olric/hasher"
 
-	"github.com/tochemey/goakt/v2/hash"
+	"github.com/tochemey/goakt/v3/hash"
 )
 
 type hasherWrapper struct {

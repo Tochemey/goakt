@@ -120,22 +120,22 @@ The fundamental building blocks of GoAkt are actors.
   mechanisms.
 - They can be stateful and stateless depending upon the system to build.
 - Every actor in GoAkt:
-  - has a process id [`PID`](./actors/pid.go). Via the process id any allowable action can be executed by the
+  - has a process id [`PID`](actor/pid.go). Via the process id any allowable action can be executed by the
     actor.
-  - has a lifecycle via the following methods: [`PreStart`](./actors/actor.go), [`PostStop`](./actors/actor.go). 
+  - has a lifecycle via the following methods: [`PreStart`](actor/actor.go), [`PostStop`](actor/actor.go). 
       - `PreStart` hook is used to initialise actor state. It is like the actor constructor.
       - `PostStop` hook is used to clean up resources used by the Actor. It is like the actor destructor.
     It means it can live and die like any other process.
-  - handles and responds to messages via the method [`Receive`](./actors/actor.go). While handling messages it
+  - handles and responds to messages via the method [`Receive`](actor/actor.go). While handling messages it
     can:
-  - create other (child) actors via their process id [`PID`](./actors/pid.go) `SpawnChild` method
+  - create other (child) actors via their process id [`PID`](actor/pid.go) `SpawnChild` method
   - send messages to other actors locally or remotely via their process
-    id [`PID`](./actors/pid.go) `Ask`, `RemoteAsk`(request/response
+    id [`PID`](actor/pid.go) `Ask`, `RemoteAsk`(request/response
     fashion) and `Tell`, `RemoteTell`(fire-and-forget fashion) methods
-  - stop (child) actors via their process id [`PID`](./actors/pid.go)
-  - watch/unwatch (child) actors via their process id [`PID`](./actors/pid.go) `Watch` and `UnWatch` methods
+  - stop (child) actors via their process id [`PID`](actor/pid.go)
+  - watch/unwatch (child) actors via their process id [`PID`](actor/pid.go) `Watch` and `UnWatch` methods
   - supervise the failure behavior of (child) actors. 
-  - remotely lookup for an actor on another node via their process id [`PID`](./actors/pid.go) `RemoteLookup`.
+  - remotely lookup for an actor on another node via their process id [`PID`](actor/pid.go) `RemoteLookup`.
     This
     allows it to send messages remotely via `RemoteAsk` or `RemoteTell` methods
   - stash/unstash messages. See [Stashing](#stashing)
@@ -150,8 +150,8 @@ Actors can be passivated when they are idle after some period of time. Passivate
 When cluster mode is enabled, passivated actors are removed from the entire cluster. To bring back such actors to live, one needs to
 `Spawn` them again. By default, all actors are passivated and the passivation time is `two minutes`.
 
-- To enable passivation use the actor system option `WithExpireActorAfter(duration time.Duration)` when creating the actor system. See actor system [options](./actors/option.go).
-- To disable passivation use the actor system option `WithPassivationDisabled` when creating the actor system. See actor system [options](./actors/option.go).
+- To enable passivation use the actor system option `WithExpireActorAfter(duration time.Duration)` when creating the actor system. See actor system [options](actor/option.go).
+- To disable passivation use the actor system option `WithPassivationDisabled` when creating the actor system. See actor system [options](actor/option.go).
 - One can also enable passivation during the creation of an actor by using the `SpawnOption` `WithPassivateAfter`. This will override the system-wide passivation setting. 
   For a long-lived actor, during its creation one can use the `SpawnOption` `WithLongLived`.
 
@@ -172,9 +172,9 @@ A suspended actor can be restarted or shutdown, however it cannot handle any mes
 
 In GoAkt each child actor is treated separately. There is no concept of one-for-one and one-for-all strategies.
 The following directives are supported:
-- [`Restart`](./actors/supervisor_directive.go): to restart the child actor. One can control how the restart is done using the following options: - `maxNumRetries`: defines the maximum of restart attempts - `timeout`: how to attempt restarting the faulty actor.
-- [`Stop`](./actors/supervisor_directive.go): to stop the child actor which is the default one as long as its descendants.
-- [`Resume`](./actors/supervisor_directive.go): ignores the failure and process the next message, instead.
+- [`Restart`](actor/supervisor_directive.go): to restart the child actor. One can control how the restart is done using the following options: - `maxNumRetries`: defines the maximum of restart attempts - `timeout`: how to attempt restarting the faulty actor.
+- [`Stop`](actor/supervisor_directive.go): to stop the child actor which is the default one as long as its descendants.
+- [`Resume`](actor/supervisor_directive.go): ignores the failure and process the next message, instead.
 
 With the `Restart` directive, only the direct alive children of the given actor will be shudown and respawned with their initial state.
 There are only two scenarios where an actor can supervise another actor:
@@ -186,7 +186,7 @@ There are only two scenarios where an actor can supervise another actor:
 Without an actor system, it is not possible to create actors in GoAkt. Only a single actor system
 is recommended to be created per application when using GoAkt. At the moment the single instance is not enforced in GoAkt, this simple implementation is left to the discretion of the developer. To
 create an actor system one just need to use
-the [`NewActorSystem`](./actors/actor_system.go) method with the various [Options](./actors/option.go). GoAkt
+the [`NewActorSystem`](actor/actor_system.go) method with the various [Options](actor/option.go). GoAkt
 ActorSystem has the following characteristics:
 
 - Actors lifecycle management (Spawn, Kill, ReSpawn)
@@ -204,7 +204,7 @@ behavior will take effect for all subsequent messages until the behavior is chan
 continue processing with the existing behavior. You can use [Stashing](#stashing) to reprocess the current
 message with the new behavior.
 
-To change the behavior, call the following methods on the [ReceiveContext interface](./actors/context.go) when handling a message:
+To change the behavior, call the following methods on the [ReceiveContext interface](actor/context.go) when handling a message:
 
 - `Become` - switches the current behavior of the actor to a new behavior.
 - `UnBecome` - resets the actor behavior to the default one which is the Actor.Receive method.
@@ -225,17 +225,17 @@ GoAkt comes shipped with the following routing strategies:
 - `Random`: This strategy randomly picks a routee in its set of routees and send the message to it.
 - `Round-Robin`: This strategy sends messages to its routee in a round-robin way. For n messages sent through the router, each actor is forwarded one message.
 
-A router a just like any other actor that can be spawned. To spawn router just call the [ActorSystem](./actors/actor_system.go) `SpawnRouter` method.
+A router a just like any other actor that can be spawned. To spawn router just call the [ActorSystem](actor/actor_system.go) `SpawnRouter` method.
 Router as well as their routees are not passivated.
 
 ### Mailbox
 
-Once can implement a custom mailbox. See [Mailbox](./actors/mailbox.go).
+Once can implement a custom mailbox. See [Mailbox](actor/mailbox.go).
 GoAkt comes with the following mailboxes built-in:
 
-- [`UnboundedMailbox`](./actors/unbounded_mailbox.go): this is the default mailbox. It is implemented using the lock-free Multi-Producer-Single-Consumer Queue.
-- [`BoundedMailbox`](./actors/bounded_mailbox.go): this is a thread-safe mailbox implemented using the Ring-Buffer Queue. When the mailbox is full any new message is sent to the deadletter queue. Setting a reasonable capacity for the queue can enhance throughput.
-- [`UnboundedPriorityMailbox`](./actors/unbounded_priority_mailbox.go): this is thread-safe mailbox using the standard library container/heap. At the moment the performance of is this mailbox is not comparable to the two other built-in mailboxes.
+- [`UnboundedMailbox`](actor/unbounded_mailbox.go): this is the default mailbox. It is implemented using the lock-free Multi-Producer-Single-Consumer Queue.
+- [`BoundedMailbox`](actor/bounded_mailbox.go): this is a thread-safe mailbox implemented using the Ring-Buffer Queue. When the mailbox is full any new message is sent to the deadletter queue. Setting a reasonable capacity for the queue can enhance throughput.
+- [`UnboundedPriorityMailbox`](actor/unbounded_priority_mailbox.go): this is thread-safe mailbox using the standard library container/heap. At the moment the performance of is this mailbox is not comparable to the two other built-in mailboxes.
 
 ### Events Stream
 
@@ -276,11 +276,11 @@ The choice of protobuf is due to easy serialization over wire and strong schema 
 - `BatchAsk` - send a bulk of messages to an actor and expect responses for each message sent within a time period. Messages are processed one after the other in the other they were sent.
   This help return the response of each message in the same order that message was sent. This method hinders performance drastically when the number of messages to sent is high.
   Kindly use this method with caution.
-- `PipeTo` - send the successful result of a future(long-running task) to self or a given actor. This can be achieved from the [`PID`](./actors/pid.go) as well as from the [ReceiveContext](./actors/context.go)
+- `PipeTo` - send the successful result of a future(long-running task) to self or a given actor. This can be achieved from the [`PID`](actor/pid.go) as well as from the [ReceiveContext](actor/context.go)
 
 ### Scheduler
 
-You can schedule sending messages to actor that will be acted upon in the future. To achieve that you can use the following methods on the [Actor System](./actors/actor_system.go):
+You can schedule sending messages to actor that will be acted upon in the future. To achieve that you can use the following methods on the [Actor System](actor/actor_system.go):
 
 - `ScheduleOnce` - will send the given message to a local actor _**once**_ after a given interval
 - `Schedule` - will send the given message to a local actor at a given interval
@@ -318,7 +318,7 @@ not a requirement.
 
 It’s recommended to avoid stashing too many messages to avoid too much memory usage. If you try to stash more
 messages than the capacity the actor will panic.
-To use the stashing feature, call the following methods on the [ReceiveContext](./actors/context.go) when handling a message:
+To use the stashing feature, call the following methods on the [ReceiveContext](actor/context.go) when handling a message:
 
 - `Stash()` - adds the current message to the stash buffer.
 - `Unstash()` - unstashes the oldest message in the stash and prepends to the stash buffer.
@@ -333,8 +333,8 @@ when creating the actor system. The tasks are executed in the order they have be
 
 ### Remoting
 
-[Remoting](./actors/remoting.go) allows remote actors to communicate. The underlying technology is gRPC. To enable remoting just use the `WithRemote` option when
-creating the actor system. See actor system [options](./actors/option.go). These are the following remoting features available:
+[Remoting](actor/remoting.go) allows remote actors to communicate. The underlying technology is gRPC. To enable remoting just use the `WithRemote` option when
+creating the actor system. See actor system [options](actor/option.go). These are the following remoting features available:
 
 - `RemoteTell`: to send a fire-and-forget message to an actor remotely
 - `RemoteAsk`: to send a request/response type of message to a remote actor
@@ -343,10 +343,10 @@ creating the actor system. See actor system [options](./actors/option.go). These
 - `RemoteLookup`: to lookup for an actor on a remote host
 - `RemoteReSpawn`: to restarts an actor on a remote machine
 - `RemoteStop`: to stop an actor on a remote machine
-- `RemoteSpawn`: to start an actor on a remote machine. The given actor implementation must be registered using the [`Register`](./actors/actor_system.go) method of the actor system on the remote machine for this call to succeed.
+- `RemoteSpawn`: to start an actor on a remote machine. The given actor implementation must be registered using the [`Register`](actor/actor_system.go) method of the actor system on the remote machine for this call to succeed.
 - `RemoteForward`: to pass a message from one actor to the actor by preserving the initial sender of the message.
 
-These methods can be found as well as on the [PID](./actors/pid.go) which is the actor reference when an actor is created.
+These methods can be found as well as on the [PID](actor/pid.go) which is the actor reference when an actor is created.
 
 ### Cluster
 
@@ -363,14 +363,14 @@ GoAkt offers out of the box features that can help track, monitor and measure th
 GoAkt comes bundled with the following metrics:
 
 ##### Actor System Metric
-The `Metric` method on the [actor system](./actors/actor_system.go) will provide the following counters:
+The `Metric` method on the [actor system](actor/actor_system.go) will provide the following counters:
 
 - Total Number of actors in the system at a given point time
 - Total Number of deadletters
 -  The number of seconds since the actor system started
 
 ##### PID metric
-The `Metric` method on the [PID](./actors/pid.go) will provide the following counters:
+The `Metric` method on the [PID](actor/pid.go) will provide the following counters:
 
 - Total Number of children at a given point in time
 - Total Number of messages stashed at a given point in time
@@ -417,20 +417,20 @@ To help implement unit tests in GoAkt-based applications. See [Testkit](./testki
 
 ## API
 
-The [API](./actors/api.go) interface helps interact with a GoAkt actor system as kind of client. The following features are available:
+The [API](actor/api.go) interface helps interact with a GoAkt actor system as kind of client. The following features are available:
 
 - `Tell`: to send a message to an actor in a fire-and-forget manner.
 - `Ask`: to send a message to an actor and expect a response within a given timeout.
 - `BatchAsk`: to send a batch of requests to an actore remotely and expect responses back for each request.
 - `BatchTell`: to send a batch of fire-and-forget messages to an actor remotely.
-- `RemoteTell`: to send a fire-and-forget message to an actor remotely using the [Remoting](./actors/remoting.go) API.
-- `RemoteAsk`: to send a request/response type of message to a remote actor using the [Remoting](./actors/remoting.go) API.
-- `RemoteBatchTell`: to send a fire-and-forget bulk of messages to a remote actor using the [Remoting](./actors/remoting.go) API.
-- `RemoteBatchAsk`: to send a bulk messages to a remote actor with replies using the [Remoting](./actors/remoting.go) API.
-- `RemoteLookup`: to lookup for an actor on a remote host using the [Remoting](./actors/remoting.go) API.
-- `RemoteReSpawn`: to restarts an actor on a remote machine using the [Remoting](./actors/remoting.go) API.
-- `RemoteStop`: to stop an actor on a remote machine using the [Remoting](./actors/remoting.go) API.
-- `RemoteSpawn`: to start an actor on a remote machine using the [Remoting](./actors/remoting.go) API. The given actor implementation must be registered using the [`Register`](./actors/actor_system.go) method of the actor system on the remote machine for this call to succeed.
+- `RemoteTell`: to send a fire-and-forget message to an actor remotely using the [Remoting](actor/remoting.go) API.
+- `RemoteAsk`: to send a request/response type of message to a remote actor using the [Remoting](actor/remoting.go) API.
+- `RemoteBatchTell`: to send a fire-and-forget bulk of messages to a remote actor using the [Remoting](actor/remoting.go) API.
+- `RemoteBatchAsk`: to send a bulk messages to a remote actor with replies using the [Remoting](actor/remoting.go) API.
+- `RemoteLookup`: to lookup for an actor on a remote host using the [Remoting](actor/remoting.go) API.
+- `RemoteReSpawn`: to restarts an actor on a remote machine using the [Remoting](actor/remoting.go) API.
+- `RemoteStop`: to stop an actor on a remote machine using the [Remoting](actor/remoting.go) API.
+- `RemoteSpawn`: to start an actor on a remote machine using the [Remoting](actor/remoting.go) API. The given actor implementation must be registered using the [`Register`](actor/actor_system.go) method of the actor system on the remote machine for this call to succeed.
 
 ## Client
 
@@ -462,7 +462,7 @@ The cluster engine depends upon the [discovery](./discovery/provider.go) mechani
 Under the hood, it leverages [Olric](https://github.com/buraksezer/olric)
 to scale out and guarantee performant, reliable persistence, simple scalability, partitioning (sharding), and
 re-balancing out-of-the-box. _**It requires remoting to be enabled**_. One can implement a custom hasher for the partitioning using
-the [Hasher](./hash/hasher.go) interface and the `Actor System` [option](./actors/option.go) to set it. The default hasher uses the `XXH3 algorithm`.
+the [Hasher](./hash/hasher.go) interface and the `Actor System` [option](actor/option.go) to set it. The default hasher uses the `XXH3 algorithm`.
 
 At the moment the following providers are implemented:
 

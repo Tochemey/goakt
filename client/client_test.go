@@ -36,14 +36,15 @@ import (
 	"github.com/travisjeffery/go-dynaport"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/tochemey/goakt/v2/actors"
-	"github.com/tochemey/goakt/v2/discovery"
-	"github.com/tochemey/goakt/v2/discovery/nats"
-	"github.com/tochemey/goakt/v2/goaktpb"
-	"github.com/tochemey/goakt/v2/internal/util"
-	"github.com/tochemey/goakt/v2/log"
-	"github.com/tochemey/goakt/v2/test/data/testpb"
-	testspb "github.com/tochemey/goakt/v2/test/data/testpb"
+	actors "github.com/tochemey/goakt/v3/actor"
+	"github.com/tochemey/goakt/v3/discovery"
+	"github.com/tochemey/goakt/v3/discovery/nats"
+	"github.com/tochemey/goakt/v3/goaktpb"
+	"github.com/tochemey/goakt/v3/internal/util"
+	"github.com/tochemey/goakt/v3/log"
+	"github.com/tochemey/goakt/v3/remote"
+	"github.com/tochemey/goakt/v3/test/data/testpb"
+	testspb "github.com/tochemey/goakt/v3/test/data/testpb"
 )
 
 func TestClient(t *testing.T) {
@@ -791,7 +792,7 @@ func startNode(t *testing.T, logger log.Logger, nodeName, serverAddr string) (sy
 		actorSystemName,
 		actors.WithPassivationDisabled(),
 		actors.WithLogger(logger),
-		actors.WithRemoting(host, int32(remotePort)),
+		actors.WithRemote(remote.NewConfig(host, remotingPort)),
 		actors.WithPeerStateLoopInterval(100*time.Millisecond),
 		actors.WithCluster(clusterConfig),
 	)

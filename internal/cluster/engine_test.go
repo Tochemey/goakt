@@ -40,13 +40,13 @@ import (
 	"github.com/travisjeffery/go-dynaport"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/tochemey/goakt/v2/discovery"
-	"github.com/tochemey/goakt/v2/discovery/nats"
-	"github.com/tochemey/goakt/v2/goaktpb"
-	"github.com/tochemey/goakt/v2/internal/internalpb"
-	"github.com/tochemey/goakt/v2/internal/util"
-	"github.com/tochemey/goakt/v2/log"
-	testkit "github.com/tochemey/goakt/v2/mocks/discovery"
+	"github.com/tochemey/goakt/v3/discovery"
+	"github.com/tochemey/goakt/v3/discovery/nats"
+	"github.com/tochemey/goakt/v3/goaktpb"
+	"github.com/tochemey/goakt/v3/internal/internalpb"
+	"github.com/tochemey/goakt/v3/internal/util"
+	"github.com/tochemey/goakt/v3/log"
+	testkit "github.com/tochemey/goakt/v3/mocks/discovery"
 )
 
 func TestSingleNode(t *testing.T) {

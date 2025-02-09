@@ -25,7 +25,7 @@
 package merger
 
 import (
-	"github.com/tochemey/goakt/v2/internal/internalpb"
+	"github.com/tochemey/goakt/v3/internal/internalpb"
 )
 
 type Element struct {

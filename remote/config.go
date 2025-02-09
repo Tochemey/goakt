@@ -29,9 +29,9 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/tochemey/goakt/v2/internal/size"
-	"github.com/tochemey/goakt/v2/internal/tcp"
-	"github.com/tochemey/goakt/v2/internal/validation"
+	"github.com/tochemey/goakt/v3/internal/size"
+	"github.com/tochemey/goakt/v3/internal/tcp"
+	"github.com/tochemey/goakt/v3/internal/validation"
 )
 
 // Config defines the remote config

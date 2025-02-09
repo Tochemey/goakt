@@ -28,9 +28,9 @@ import (
 	"bytes"
 	"encoding/binary"
 
-	"github.com/tochemey/goakt/v2/internal/bufferpool"
-	"github.com/tochemey/goakt/v2/internal/logsm/types"
-	"github.com/tochemey/goakt/v2/internal/logsm/util"
+	"github.com/tochemey/goakt/v3/internal/bufferpool"
+	"github.com/tochemey/goakt/v3/internal/logsm/types"
+	"github.com/tochemey/goakt/v3/internal/logsm/util"
 )
 
 // IndexEntry include index of a sstable data block

@@ -27,7 +27,7 @@ package cluster
 import (
 	"google.golang.org/protobuf/proto"
 
-	"github.com/tochemey/goakt/v2/internal/internalpb"
+	"github.com/tochemey/goakt/v3/internal/internalpb"
 )
 
 // encode marshals a wire actor into a byte array

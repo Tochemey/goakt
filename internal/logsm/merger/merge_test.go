@@ -29,7 +29,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/tochemey/goakt/v2/internal/internalpb"
+	"github.com/tochemey/goakt/v3/internal/internalpb"
 )
 
 func TestMerge(t *testing.T) {

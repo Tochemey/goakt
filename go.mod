@@ -1,4 +1,4 @@
-module github.com/tochemey/goakt/v2
+module github.com/tochemey/goakt/v3
 
 go 1.23.0
 

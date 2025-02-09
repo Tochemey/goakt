@@ -31,7 +31,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/tochemey/goakt/v2/internal/size"
+	"github.com/tochemey/goakt/v3/internal/size"
 )
 
 func TestConfig(t *testing.T) {

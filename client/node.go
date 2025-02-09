@@ -31,10 +31,10 @@ import (
 	"strconv"
 	"sync"
 
-	"github.com/tochemey/goakt/v2/actors"
-	"github.com/tochemey/goakt/v2/internal/http"
-	"github.com/tochemey/goakt/v2/internal/size"
-	"github.com/tochemey/goakt/v2/internal/validation"
+	actors "github.com/tochemey/goakt/v3/actor"
+	"github.com/tochemey/goakt/v3/internal/http"
+	"github.com/tochemey/goakt/v3/internal/size"
+	"github.com/tochemey/goakt/v3/internal/validation"
 )
 
 type NodeOption func(*Node)

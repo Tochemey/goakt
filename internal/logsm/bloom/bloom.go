@@ -30,7 +30,7 @@ import (
 
 	"github.com/spaolacci/murmur3"
 
-	"github.com/tochemey/goakt/v2/internal/internalpb"
+	"github.com/tochemey/goakt/v3/internal/internalpb"
 )
 
 const _defaultP = 0.01

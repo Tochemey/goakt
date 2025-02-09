@@ -36,7 +36,7 @@ import (
 	"github.com/grandcat/zeroconf"
 	"go.uber.org/atomic"
 
-	"github.com/tochemey/goakt/v2/discovery"
+	"github.com/tochemey/goakt/v3/discovery"
 )
 
 // Discovery defines the mDNS discovery provider

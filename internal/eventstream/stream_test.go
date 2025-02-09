@@ -31,7 +31,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/tochemey/goakt/v2/internal/util"
+	"github.com/tochemey/goakt/v3/internal/util"
 )
 
 func TestBroker(t *testing.T) {

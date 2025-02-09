@@ -34,7 +34,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/tochemey/goakt/v2/test/data/testpb"
+	"github.com/tochemey/goakt/v3/test/data/testpb"
 )
 
 func TestWaitOnResult(t *testing.T) {

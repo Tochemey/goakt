@@ -49,14 +49,14 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	"github.com/tochemey/goakt/v2/discovery"
-	"github.com/tochemey/goakt/v2/goaktpb"
-	"github.com/tochemey/goakt/v2/hash"
-	"github.com/tochemey/goakt/v2/internal/errorschain"
-	"github.com/tochemey/goakt/v2/internal/internalpb"
-	"github.com/tochemey/goakt/v2/internal/memberlist"
-	"github.com/tochemey/goakt/v2/internal/size"
-	"github.com/tochemey/goakt/v2/log"
+	"github.com/tochemey/goakt/v3/discovery"
+	"github.com/tochemey/goakt/v3/goaktpb"
+	"github.com/tochemey/goakt/v3/hash"
+	"github.com/tochemey/goakt/v3/internal/errorschain"
+	"github.com/tochemey/goakt/v3/internal/internalpb"
+	"github.com/tochemey/goakt/v3/internal/memberlist"
+	"github.com/tochemey/goakt/v3/internal/size"
+	"github.com/tochemey/goakt/v3/log"
 )
 
 type EventType int

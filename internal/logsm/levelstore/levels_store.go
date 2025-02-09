@@ -33,13 +33,13 @@ import (
 	"slices"
 	"sync"
 
-	"github.com/tochemey/goakt/v2/internal/internalpb"
-	"github.com/tochemey/goakt/v2/internal/logsm/bloom"
-	"github.com/tochemey/goakt/v2/internal/logsm/merger"
-	"github.com/tochemey/goakt/v2/internal/logsm/sstable"
-	"github.com/tochemey/goakt/v2/internal/logsm/types"
-	"github.com/tochemey/goakt/v2/internal/logsm/util"
-	"github.com/tochemey/goakt/v2/log"
+	"github.com/tochemey/goakt/v3/internal/internalpb"
+	"github.com/tochemey/goakt/v3/internal/logsm/bloom"
+	"github.com/tochemey/goakt/v3/internal/logsm/merger"
+	"github.com/tochemey/goakt/v3/internal/logsm/sstable"
+	"github.com/tochemey/goakt/v3/internal/logsm/types"
+	"github.com/tochemey/goakt/v3/internal/logsm/util"
+	"github.com/tochemey/goakt/v3/log"
 )
 
 type Table struct {

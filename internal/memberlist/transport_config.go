@@ -28,7 +28,7 @@ import (
 	"crypto/tls"
 	"time"
 
-	"github.com/tochemey/goakt/v2/log"
+	"github.com/tochemey/goakt/v3/log"
 )
 
 // TCPTransportConfig is used to configure a net transport.

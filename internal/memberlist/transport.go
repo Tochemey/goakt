@@ -40,7 +40,7 @@ import (
 	"github.com/hashicorp/go-sockaddr"
 	"github.com/hashicorp/memberlist"
 
-	"github.com/tochemey/goakt/v2/log"
+	"github.com/tochemey/goakt/v3/log"
 )
 
 // TCPTransport is a memberlist.Transport implementation that uses TCP for both packet and stream

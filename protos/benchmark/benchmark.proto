@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package benchpb;
 
-option go_package = "github.com/tochemey/goakt/v2/bench/benchpb;benchpb";
+option go_package = "github.com/tochemey/goakt/v3/bench/benchpb;benchpb";
 
 message BenchTell {}
 message BenchRequest {}

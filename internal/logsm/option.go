@@ -24,7 +24,7 @@
 
 package logsm
 
-import "github.com/tochemey/goakt/v2/log"
+import "github.com/tochemey/goakt/v3/log"
 
 type Option interface {
 	Apply(*LogSM)

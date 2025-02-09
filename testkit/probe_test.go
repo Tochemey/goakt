@@ -33,10 +33,10 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/encoding/prototext"
 
-	"github.com/tochemey/goakt/v2/actors"
-	"github.com/tochemey/goakt/v2/internal/util"
-	"github.com/tochemey/goakt/v2/log"
-	"github.com/tochemey/goakt/v2/test/data/testpb"
+	actors "github.com/tochemey/goakt/v3/actor"
+	"github.com/tochemey/goakt/v3/internal/util"
+	"github.com/tochemey/goakt/v3/log"
+	"github.com/tochemey/goakt/v3/test/data/testpb"
 )
 
 func TestTestProbe(t *testing.T) {
