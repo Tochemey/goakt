@@ -1690,7 +1690,7 @@ func (pid *PID) handleCompletion(ctx context.Context, completion *taskCompletion
 	}
 
 	// wrap the provided completion task into a future that can help run the task
-	f := future.NewWithContext(ctx, completion.Task)
+	f := future.WithContext(ctx, completion.Task)
 	var wg sync.WaitGroup
 	var result *future.Result
 

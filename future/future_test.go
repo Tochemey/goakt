@@ -82,7 +82,7 @@ func TestHasResult(t *testing.T) {
 	t.Run("With context set", func(t *testing.T) {
 		ctx := context.TODO()
 		executor := make(chan proto.Message)
-		f := NewWithContext(ctx, executor)
+		f := WithContext(ctx, executor)
 
 		assert.False(t, f.HasResult())
 
@@ -114,7 +114,7 @@ func TestTimeout(t *testing.T) {
 func TestContextCancelation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.TODO())
 	executor := make(chan proto.Message)
-	f := NewWithContext(ctx, executor)
+	f := WithContext(ctx, executor)
 	cancel()
 
 	result := f.Result()
@@ -153,7 +153,7 @@ func BenchmarkFutureWithContext(b *testing.B) {
 
 	for i := 0; i < b.N; i++ {
 		wg.Add(1)
-		f := NewWithContext(ctx, executor)
+		f := WithContext(ctx, executor)
 		go func() {
 			f.Result()
 			wg.Done()
