@@ -1459,6 +1459,7 @@ func (pid *PID) passivationLoop() {
 	pid.logger.Info("start the passivation listener...")
 	pid.logger.Infof("passivation timeout is (%s)", pid.passivateAfter.Load().String())
 	ticker := ticker.New(pid.passivateAfter.Load())
+	ticker.Start()
 	tickerStopSig := make(chan types.Unit, 1)
 
 	// start ticking
