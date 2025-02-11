@@ -425,6 +425,7 @@ func (pid *PID) Restart(ctx context.Context) error {
 			return err
 		}
 		ticker := ticker.New(10 * time.Millisecond)
+		ticker.Start()
 		tickerStopSig := make(chan types.Unit, 1)
 		go func() {
 			for range ticker.Ticks {

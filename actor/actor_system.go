@@ -1625,6 +1625,7 @@ func (x *actorSystem) clusterEventsLoop() {
 func (x *actorSystem) peersStateLoop() {
 	x.logger.Info("peers state synchronization has started...")
 	ticker := ticker.New(x.peersStateLoopInterval)
+	ticker.Start()
 	tickerStopSig := make(chan types.Unit, 1)
 	go func() {
 		for {
