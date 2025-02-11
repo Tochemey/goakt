@@ -61,6 +61,7 @@ import (
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/internalpb/internalpbconnect"
 	"github.com/tochemey/goakt/v3/internal/tcp"
+	"github.com/tochemey/goakt/v3/internal/ticker"
 	"github.com/tochemey/goakt/v3/internal/types"
 	"github.com/tochemey/goakt/v3/log"
 	"github.com/tochemey/goakt/v3/remote"
@@ -1623,12 +1624,12 @@ func (x *actorSystem) clusterEventsLoop() {
 // peersStateLoop fetches the cluster peers' PeerState and update the node clusterStore
 func (x *actorSystem) peersStateLoop() {
 	x.logger.Info("peers state synchronization has started...")
-	ticker := time.NewTicker(x.peersStateLoopInterval)
+	ticker := ticker.New(x.peersStateLoopInterval)
 	tickerStopSig := make(chan types.Unit, 1)
 	go func() {
 		for {
 			select {
-			case <-ticker.C:
+			case <-ticker.Ticks:
 				// stop ticking and close
 				if !x.started.Load() {
 					tickerStopSig <- types.Unit{}

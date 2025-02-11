@@ -28,12 +28,12 @@ import (
 	"context"
 
 	"go.uber.org/atomic"
-	"google.golang.org/protobuf/proto"
 
 	"github.com/tochemey/goakt/v3/address"
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/eventstream"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
+	"github.com/tochemey/goakt/v3/internal/syncmap"
 	"github.com/tochemey/goakt/v3/log"
 )
 
@@ -42,12 +42,10 @@ import (
 type deadLetter struct {
 	eventsStream *eventstream.EventsStream
 	pid          *PID
-	lettersMap   map[string][]byte
 	logger       log.Logger
-
-	// necessary for metrics
-	counter     *atomic.Int64
-	countersMap map[string]*atomic.Int64
+	counter      *atomic.Int64
+	letters      *syncmap.SyncMap[string, *goaktpb.Deadletter]
+	counters     *syncmap.SyncMap[string, *atomic.Int64]
 }
 
 // enforce the implementation of the Actor interface
@@ -57,9 +55,9 @@ var _ Actor = (*deadLetter)(nil)
 func newDeadLetter() *deadLetter {
 	counter := atomic.NewInt64(0)
 	return &deadLetter{
-		lettersMap:  make(map[string][]byte),
-		countersMap: make(map[string]*atomic.Int64),
-		counter:     counter,
+		letters:  syncmap.New[string, *goaktpb.Deadletter](),
+		counters: syncmap.New[string, *atomic.Int64](),
+		counter:  counter,
 	}
 }
 
@@ -97,8 +95,8 @@ func (x *deadLetter) handlePostStart(ctx *ReceiveContext) {
 	x.eventsStream = ctx.Self().eventsStream
 	x.logger = ctx.Logger()
 	x.pid = ctx.Self()
-	x.lettersMap = make(map[string][]byte)
-	x.countersMap = make(map[string]*atomic.Int64)
+	x.letters = syncmap.New[string, *goaktpb.Deadletter]()
+	x.counters = syncmap.New[string, *atomic.Int64]()
 	x.counter.Store(0)
 	x.logger.Infof("%s started successfully", x.pid.Name())
 }
@@ -109,33 +107,29 @@ func (x *deadLetter) handleDeadletter(msg *goaktpb.Deadletter) {
 	// publish the deadletter message to the event stream
 	x.eventsStream.Publish(eventsTopic, msg)
 
-	// lettersMap the message for future query
+	// letters the message for future query
 	id := address.From(msg.GetReceiver()).String()
-	bytea, _ := proto.Marshal(msg)
-	x.lettersMap[id] = bytea
-	if counter, ok := x.countersMap[id]; ok {
+	x.letters.Set(id, msg)
+	if counter, ok := x.counters.Get(id); ok {
 		counter.Inc()
 		return
 	}
+
 	counter := atomic.NewInt64(1)
-	x.countersMap[id] = counter
+	x.counters.Set(id, counter)
 }
 
 // handleGetDeadletters pushes the actor state back to the stream
 func (x *deadLetter) handleGetDeadletters() {
-	for id := range x.lettersMap {
-		if value, ok := x.lettersMap[id]; ok {
-			msg := new(goaktpb.Deadletter)
-			_ = proto.Unmarshal(value, msg)
-			x.eventsStream.Publish(eventsTopic, msg)
-		}
-	}
+	x.letters.Range(func(_ string, deadletter *goaktpb.Deadletter) {
+		x.eventsStream.Publish(eventsTopic, deadletter)
+	})
 }
 
 // count returns the deadletter count
 func (x *deadLetter) count(msg *internalpb.GetDeadlettersCount) int64 {
 	if msg.ActorId != nil {
-		if counter, ok := x.countersMap[msg.GetActorId()]; ok {
+		if counter, ok := x.counters.Get(msg.GetActorId()); ok {
 			return counter.Load()
 		}
 		return 0

@@ -49,6 +49,7 @@ import (
 	"github.com/tochemey/goakt/v3/internal/errorschain"
 	"github.com/tochemey/goakt/v3/internal/eventstream"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
+	"github.com/tochemey/goakt/v3/internal/ticker"
 	"github.com/tochemey/goakt/v3/internal/types"
 	"github.com/tochemey/goakt/v3/log"
 )
@@ -423,10 +424,10 @@ func (pid *PID) Restart(ctx context.Context) error {
 		if err := pid.Shutdown(ctx); err != nil {
 			return err
 		}
-		ticker := time.NewTicker(10 * time.Millisecond)
+		ticker := ticker.New(10 * time.Millisecond)
 		tickerStopSig := make(chan types.Unit, 1)
 		go func() {
-			for range ticker.C {
+			for range ticker.Ticks {
 				if !pid.IsRunning() {
 					tickerStopSig <- types.Unit{}
 					return
@@ -1456,14 +1457,14 @@ func (pid *PID) freeChildren(ctx context.Context) error {
 func (pid *PID) passivationLoop() {
 	pid.logger.Info("start the passivation listener...")
 	pid.logger.Infof("passivation timeout is (%s)", pid.passivateAfter.Load().String())
-	ticker := time.NewTicker(pid.passivateAfter.Load())
+	ticker := ticker.New(pid.passivateAfter.Load())
 	tickerStopSig := make(chan types.Unit, 1)
 
 	// start ticking
 	go func() {
 		for {
 			select {
-			case <-ticker.C:
+			case <-ticker.Ticks:
 				idleTime := time.Since(pid.latestReceiveTime.Load())
 				if idleTime >= pid.passivateAfter.Load() {
 					tickerStopSig <- types.Unit{}

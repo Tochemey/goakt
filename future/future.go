@@ -33,6 +33,8 @@ import (
 	"time"
 
 	"google.golang.org/protobuf/proto"
+
+	"github.com/tochemey/goakt/v3/internal/ticker"
 )
 
 // ErrTimeout is returned when the future has timed out
@@ -131,12 +133,12 @@ func (f *Future) setResult(success proto.Message, err error) {
 // waitTimeout waits for the result or times out
 func waitTimeout(f *Future, ch Task, timeout time.Duration, wg *sync.WaitGroup) {
 	wg.Done()
-	t := time.NewTimer(timeout)
+	t := ticker.New(timeout)
 	select {
 	case success := <-ch:
 		f.setResult(success, nil)
 		t.Stop()
-	case <-t.C:
+	case <-t.Ticks:
 		var _nil proto.Message
 		f.setResult(_nil, ErrTimeout(timeout))
 	}

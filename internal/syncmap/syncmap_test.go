@@ -22,42 +22,66 @@
  * SOFTWARE.
  */
 
-package actors
+package syncmap
 
 import (
-	"sync/atomic"
+	"slices"
+	"testing"
 
-	"github.com/tochemey/goakt/v3/internal/slice"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-// pidValue represents the data stored in each
-// node of the actors Tree
-type pidValue struct {
-	data *PID
+func TestNewAndSet(t *testing.T) {
+	sm := New[int, string]()
+	sm.Set(1, "one")
+	sm.Set(2, "two")
+	assert.Exactly(t, 2, sm.Len())
 }
 
-// Value returns the actual pidValue value
-func (v *pidValue) Value() *PID {
-	return v.data
+func TestGet(t *testing.T) {
+	sm := New[int, string]()
+	sm.Set(1, "one")
+
+	val, ok := sm.Get(1)
+	require.True(t, ok)
+	require.Equal(t, "one", val)
+
+	_, ok = sm.Get(2)
+	require.False(t, ok)
 }
 
-// pidNode represents a single actor node
-// in the actors Tree
-type pidNode struct {
-	ID          string
-	value       atomic.Pointer[pidValue]
-	Descendants *slice.SyncSlice[*pidNode]
-	Watchers    *slice.SyncSlice[*pidNode]
-	Watchees    *slice.SyncSlice[*pidNode]
+func TestDelete(t *testing.T) {
+	sm := New[int, string]()
+	sm.Set(1, "one")
+	sm.Delete(1)
+	_, ok := sm.Get(1)
+	require.False(t, ok)
+	sm.Delete(2) // just make sure this doesn't panic
 }
 
-// SetValue sets a node value
-func (x *pidNode) SetValue(v *pidValue) {
-	x.value.Store(v)
+func TestLen(t *testing.T) {
+	sm := New[int, string]()
+	sm.Set(1, "one")
+	sm.Set(2, "two")
+	sm.Set(3, "three")
+	sm.Delete(2)
+	assert.Exactly(t, 2, sm.Len())
 }
 
-// GetValue returns the underlying value of the node
-func (x *pidNode) GetValue() *PID {
-	v := x.value.Load()
-	return v.Value()
+func TestForEach(t *testing.T) {
+	sm := New[int, string]()
+	sm.Set(1, "one")
+	sm.Set(2, "two")
+
+	keys := make([]int, 0)
+	sm.Range(func(k int, v string) { // nolint
+		keys = append(keys, k)
+	})
+
+	assert.Exactly(t, 2, len(keys))
+	// Check if keys 1 and 2 are present
+	if !slices.Contains(keys, 1) || !slices.Contains(keys, 2) {
+		t.Errorf("Expected keys 1 and 2, got %v", keys)
+	}
 }

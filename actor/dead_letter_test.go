@@ -39,7 +39,7 @@ import (
 	"github.com/tochemey/goakt/v3/test/data/testpb"
 )
 
-func TestDeadletters(t *testing.T) {
+func TestDeadletter(t *testing.T) {
 	t.Run("With GetDeadlettersCount", func(t *testing.T) {
 		ctx := context.TODO()
 		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
