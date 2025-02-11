@@ -36,14 +36,15 @@ import (
 	"github.com/travisjeffery/go-dynaport"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/tochemey/goakt/v2/actors"
-	"github.com/tochemey/goakt/v2/discovery"
-	"github.com/tochemey/goakt/v2/discovery/nats"
-	"github.com/tochemey/goakt/v2/goaktpb"
-	"github.com/tochemey/goakt/v2/internal/util"
-	"github.com/tochemey/goakt/v2/log"
-	"github.com/tochemey/goakt/v2/test/data/testpb"
-	testspb "github.com/tochemey/goakt/v2/test/data/testpb"
+	actors "github.com/tochemey/goakt/v3/actor"
+	"github.com/tochemey/goakt/v3/discovery"
+	"github.com/tochemey/goakt/v3/discovery/nats"
+	"github.com/tochemey/goakt/v3/goaktpb"
+	"github.com/tochemey/goakt/v3/internal/util"
+	"github.com/tochemey/goakt/v3/log"
+	"github.com/tochemey/goakt/v3/remote"
+	"github.com/tochemey/goakt/v3/test/data/testpb"
+	testspb "github.com/tochemey/goakt/v3/test/data/testpb"
 )
 
 func TestClient(t *testing.T) {
@@ -744,7 +745,7 @@ func startNode(t *testing.T, logger log.Logger, nodeName, serverAddr string) (sy
 
 	// generate the ports for the single startNode
 	nodePorts := dynaport.Get(3)
-	gossipPort := nodePorts[0]
+	discoveryPort := nodePorts[0]
 	peersPort := nodePorts[1]
 	remotePort := nodePorts[2]
 
@@ -761,13 +762,13 @@ func startNode(t *testing.T, logger log.Logger, nodeName, serverAddr string) (sy
 		NatsServer:      fmt.Sprintf("nats://%s", serverAddr),
 		NatsSubject:     natsSubject,
 		Host:            host,
-		DiscoveryPort:   gossipPort,
+		DiscoveryPort:   discoveryPort,
 	}
 
 	hostNode := discovery.Node{
 		Name:          nodeName,
 		Host:          host,
-		DiscoveryPort: gossipPort,
+		DiscoveryPort: discoveryPort,
 		PeersPort:     peersPort,
 		RemotingPort:  remotePort,
 	}
@@ -780,10 +781,10 @@ func startNode(t *testing.T, logger log.Logger, nodeName, serverAddr string) (sy
 		WithKinds(new(testActor)).
 		WithDiscovery(natsProvider).
 		WithPeersPort(peersPort).
-		WithDiscoveryPort(gossipPort).
+		WithDiscoveryPort(discoveryPort).
 		WithReplicaCount(1).
 		WithMinimumPeersQuorum(1).
-		WithPartitionCount(10).
+		WithPartitionCount(7).
 		WithWAL(t.TempDir())
 
 	// create the actor system
@@ -791,7 +792,7 @@ func startNode(t *testing.T, logger log.Logger, nodeName, serverAddr string) (sy
 		actorSystemName,
 		actors.WithPassivationDisabled(),
 		actors.WithLogger(logger),
-		actors.WithRemoting(host, int32(remotePort)),
+		actors.WithRemote(remote.NewConfig(host, remotePort)),
 		actors.WithPeerStateLoopInterval(100*time.Millisecond),
 		actors.WithCluster(clusterConfig),
 	)

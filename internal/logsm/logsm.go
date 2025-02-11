@@ -32,15 +32,15 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/tochemey/goakt/v2/internal/errorschain"
-	"github.com/tochemey/goakt/v2/internal/internalpb"
-	"github.com/tochemey/goakt/v2/internal/logsm/levelstore"
-	"github.com/tochemey/goakt/v2/internal/logsm/memtable"
-	"github.com/tochemey/goakt/v2/internal/logsm/merger"
-	stypes "github.com/tochemey/goakt/v2/internal/logsm/types"
-	"github.com/tochemey/goakt/v2/internal/size"
-	"github.com/tochemey/goakt/v2/internal/types"
-	"github.com/tochemey/goakt/v2/log"
+	"github.com/tochemey/goakt/v3/internal/errorschain"
+	"github.com/tochemey/goakt/v3/internal/internalpb"
+	"github.com/tochemey/goakt/v3/internal/logsm/levelstore"
+	"github.com/tochemey/goakt/v3/internal/logsm/memtable"
+	"github.com/tochemey/goakt/v3/internal/logsm/merger"
+	stypes "github.com/tochemey/goakt/v3/internal/logsm/types"
+	"github.com/tochemey/goakt/v3/internal/size"
+	"github.com/tochemey/goakt/v3/internal/types"
+	"github.com/tochemey/goakt/v3/log"
 )
 
 type State uint32

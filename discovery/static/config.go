@@ -25,7 +25,7 @@
 package static
 
 import (
-	"github.com/tochemey/goakt/v2/internal/validation"
+	"github.com/tochemey/goakt/v3/internal/validation"
 )
 
 // Config represents the static discovery provider configuration

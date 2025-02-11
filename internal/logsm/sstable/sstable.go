@@ -27,8 +27,8 @@ package sstable
 import (
 	"time"
 
-	"github.com/tochemey/goakt/v2/internal/bufferpool"
-	"github.com/tochemey/goakt/v2/internal/internalpb"
+	"github.com/tochemey/goakt/v3/internal/bufferpool"
+	"github.com/tochemey/goakt/v3/internal/internalpb"
 )
 
 type SSTable struct {

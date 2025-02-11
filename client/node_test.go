@@ -25,24 +25,29 @@
 package client
 
 import (
+	"crypto/tls"
 	"fmt"
 	"net"
 	"strconv"
 	"testing"
 
+	"github.com/kapetan-io/tackle/autotls"
 	"github.com/stretchr/testify/require"
 	"github.com/travisjeffery/go-dynaport"
-
-	"github.com/tochemey/goakt/v2/internal/testutil"
 )
 
 func TestNode(t *testing.T) {
 	ports := dynaport.Get(1)
 	address := net.JoinHostPort("127.0.0.1", strconv.Itoa(ports[0]))
-	rootCert := testutil.NewCertRoot(t)
-	clientConfig := testutil.GetClientTLSConfig(t, rootCert)
+	// AutoGenerate TLS certs
+	conf := autotls.Config{
+		AutoTLS:            true,
+		ClientAuth:         tls.RequireAndVerifyClientCert,
+		InsecureSkipVerify: false,
+	}
+	require.NoError(t, autotls.Setup(&conf))
 
-	node := NewNode(address, WithWeight(10), WithTLS(clientConfig))
+	node := NewNode(address, WithWeight(10), WithTLS(conf.ClientTLS))
 	require.NotNil(t, node)
 	require.Equal(t, address, node.Address())
 	require.Exactly(t, float64(10), node.Weight())

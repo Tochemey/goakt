@@ -29,8 +29,8 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/tochemey/goakt/v2/internal/internalpb"
-	"github.com/tochemey/goakt/v2/internal/logsm/types"
+	"github.com/tochemey/goakt/v3/internal/internalpb"
+	"github.com/tochemey/goakt/v3/internal/logsm/types"
 )
 
 const _head = "HEAD"

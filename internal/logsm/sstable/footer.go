@@ -29,7 +29,7 @@ import (
 	"encoding/binary"
 	"errors"
 
-	"github.com/tochemey/goakt/v2/internal/bufferpool"
+	"github.com/tochemey/goakt/v3/internal/bufferpool"
 )
 
 const _magic uint64 = 0x5bc2aa5766250562

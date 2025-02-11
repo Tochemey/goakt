@@ -4,7 +4,7 @@ package testpb;
 
 import "google/protobuf/any.proto";
 
-option go_package = "github.com/tochemey/goakt/v2/test/data;testpb";
+option go_package = "github.com/tochemey/goakt/v3/test/data;testpb";
 
 message TestReply {}
 message TestPanic {}

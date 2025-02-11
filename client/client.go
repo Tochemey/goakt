@@ -32,14 +32,16 @@ import (
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/tochemey/goakt/v2/actors"
-	"github.com/tochemey/goakt/v2/address"
-	"github.com/tochemey/goakt/v2/goaktpb"
-	"github.com/tochemey/goakt/v2/internal/errorschain"
-	"github.com/tochemey/goakt/v2/internal/internalpb"
-	"github.com/tochemey/goakt/v2/internal/internalpb/internalpbconnect"
-	"github.com/tochemey/goakt/v2/internal/types"
-	"github.com/tochemey/goakt/v2/internal/validation"
+	actors "github.com/tochemey/goakt/v3/actor"
+	"github.com/tochemey/goakt/v3/address"
+	"github.com/tochemey/goakt/v3/goaktpb"
+	"github.com/tochemey/goakt/v3/internal/errorschain"
+	"github.com/tochemey/goakt/v3/internal/internalpb"
+	"github.com/tochemey/goakt/v3/internal/internalpb/internalpbconnect"
+	"github.com/tochemey/goakt/v3/internal/size"
+	"github.com/tochemey/goakt/v3/internal/ticker"
+	"github.com/tochemey/goakt/v3/internal/types"
+	"github.com/tochemey/goakt/v3/internal/validation"
 )
 
 // Client connects to af Go-Akt nodes.
@@ -112,6 +114,8 @@ func (x *Client) Kinds(ctx context.Context) ([]string, error) {
 		node.HTTPClient(),
 		node.HTTPEndPoint(),
 		connect.WithGRPC(),
+		connect.WithSendMaxBytes(node.Remoting().MaxReadFrameSize()),
+		connect.WithReadMaxBytes(node.Remoting().MaxReadFrameSize()),
 		connect.WithSendGzip(),
 	)
 
@@ -258,12 +262,12 @@ func (x *Client) updateNodes(ctx context.Context) error {
 
 // refreshNodesLoop refreshes the nodes
 func (x *Client) refreshNodesLoop() {
-	ticker := time.NewTicker(x.refreshInterval)
+	ticker := ticker.New(x.refreshInterval)
 	tickerStopSig := make(chan types.Unit, 1)
 	go func() {
 		for {
 			select {
-			case <-ticker.C:
+			case <-ticker.Ticks:
 				if err := x.updateNodes(context.Background()); err != nil {
 					// TODO: is it good to panic?
 					panic(err)
@@ -298,6 +302,8 @@ func getNodeMetric(ctx context.Context, node *Node) (int, bool, error) {
 		node.HTTPClient(),
 		node.HTTPEndPoint(),
 		connect.WithGRPC(),
+		connect.WithSendMaxBytes(16*size.MB),
+		connect.WithReadMaxBytes(16*size.MB),
 		connect.WithSendGzip(),
 	)
 

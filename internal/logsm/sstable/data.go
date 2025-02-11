@@ -28,10 +28,10 @@ import (
 	"bytes"
 	"encoding/binary"
 
-	"github.com/tochemey/goakt/v2/internal/bufferpool"
-	"github.com/tochemey/goakt/v2/internal/internalpb"
-	"github.com/tochemey/goakt/v2/internal/logsm/types"
-	"github.com/tochemey/goakt/v2/internal/logsm/util"
+	"github.com/tochemey/goakt/v3/internal/bufferpool"
+	"github.com/tochemey/goakt/v3/internal/internalpb"
+	"github.com/tochemey/goakt/v3/internal/logsm/types"
+	"github.com/tochemey/goakt/v3/internal/logsm/util"
 )
 
 // Data Block

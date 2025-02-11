@@ -31,10 +31,12 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"golang.org/x/net/http2"
+
+	"github.com/tochemey/goakt/v3/internal/size"
 )
 
 func TestNewClient(t *testing.T) {
-	cl := NewClient()
+	cl := NewClient(16 * size.KB)
 	assert.IsType(t, new(http.Client), cl)
 	assert.IsType(t, new(http2.Transport), cl.Transport)
 	tr := cl.Transport.(*http2.Transport)

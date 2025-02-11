@@ -29,8 +29,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tochemey/goakt/v2/actors"
-	"github.com/tochemey/goakt/v2/log"
+	actors "github.com/tochemey/goakt/v3/actor"
+	"github.com/tochemey/goakt/v3/log"
 )
 
 // TestKit defines actor test kit

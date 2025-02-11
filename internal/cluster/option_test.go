@@ -31,9 +31,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/tochemey/goakt/v2/internal/size"
-	"github.com/tochemey/goakt/v2/log"
-	testkit "github.com/tochemey/goakt/v2/mocks/hash"
+	"github.com/tochemey/goakt/v3/internal/size"
+	"github.com/tochemey/goakt/v3/log"
+	testkit "github.com/tochemey/goakt/v3/mocks/hash"
 )
 
 func TestOptions(t *testing.T) {
@@ -99,7 +99,7 @@ func TestOptions(t *testing.T) {
 		{
 			name:     "WithTLS",
 			option:   WithTLS(tlsConfig, tlsConfig),
-			expected: Engine{tlsServerConfig: tlsConfig, tlsClientConfig: tlsConfig},
+			expected: Engine{serverTLS: tlsConfig, clientTLS: tlsConfig},
 		},
 		{
 			name:     "WithStorageSize",

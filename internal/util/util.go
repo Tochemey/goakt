@@ -27,7 +27,7 @@ package util
 import (
 	"time"
 
-	"github.com/tochemey/goakt/v2/internal/types"
+	"github.com/tochemey/goakt/v3/internal/types"
 )
 
 // Pause pauses the running process for some time period

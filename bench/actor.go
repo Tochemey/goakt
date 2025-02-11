@@ -27,9 +27,9 @@ package bench
 import (
 	"context"
 
-	"github.com/tochemey/goakt/v2/actors"
-	"github.com/tochemey/goakt/v2/bench/benchpb"
-	"github.com/tochemey/goakt/v2/goaktpb"
+	actors "github.com/tochemey/goakt/v3/actor"
+	"github.com/tochemey/goakt/v3/bench/benchpb"
+	"github.com/tochemey/goakt/v3/goaktpb"
 )
 
 type Actor struct {

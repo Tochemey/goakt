@@ -32,7 +32,7 @@ import (
 	goset "github.com/deckarep/golang-set/v2"
 	"go.uber.org/atomic"
 
-	"github.com/tochemey/goakt/v2/discovery"
+	"github.com/tochemey/goakt/v3/discovery"
 )
 
 const (

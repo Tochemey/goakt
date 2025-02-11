@@ -38,32 +38,29 @@ import (
 // ErrTimeout is returned when the future has timed out
 var ErrTimeout = func(duration time.Duration) error { return fmt.Errorf(`timeout after %f seconds`, duration.Seconds()) }
 
-// Task defines the successful outcome of a long-running task
+// Task represents a long-running asynchronous operation that produces a single result.
+//
+// It is defined as a receive-only channel of proto.Message, ensuring that
+// consumers can only read from it. Once the task completes, it sends exactly
+// one result, which represents the successful outcome of the operation.
+//
+// This allows for efficient, non-blocking handling of asynchronous tasks
+// while ensuring that only one result is ever produced.
 type Task <-chan proto.Message
 
-// Result defines the future result.
-// It holds both the success and error result
-type Result struct {
-	success proto.Message
-	failure error
-}
-
-// Success returns the future success result
-func (x *Result) Success() proto.Message {
-	return x.success
-}
-
-// Failure returns the future error result
-func (x *Result) Failure() error {
-	return x.failure
-}
-
-// Future represents an object that can be used to perform asynchronous
-// tasks.  The constructor of the future will complete it, and listeners
-// will block on Result until a result is received.  This is different
-// from a channel in that the future is only completed once, and anyone
-// listening on the future will get the result, regardless of the number
-// of listeners.
+// Future represents a single-assignment, read-many synchronization primitive
+// for handling asynchronous task execution.
+//
+// A Future is created in an incomplete state and is completed once with a result.
+// Multiple listeners can wait on the Future by calling Result, which blocks
+// until the Future is resolved.
+//
+// Unlike channels, a Future guarantees that:
+//   - It is completed only once.
+//   - All listeners receive the same result, regardless of when they start listening.
+//
+// This makes Future useful for scenarios where a single computation result
+// needs to be propagated to multiple consumers efficiently.
 type Future struct {
 	triggered bool // because result can technically be nil and still be valid
 	result    *Result
@@ -71,7 +68,21 @@ type Future struct {
 	wg        sync.WaitGroup
 }
 
-// New creates an instance of Future that will time out when the timeout is hit
+// New creates a Future to execute the given Task asynchronously with a specified timeout.
+//
+// The provided Task will be executed in the background, and the resulting Future
+// can be used to retrieve the task's outcome. If the task does not complete
+// within the specified timeout, the Future will be completed with an error.
+//
+// Parameters:
+//   - task: The Task to be executed asynchronously.
+//   - timeout: The maximum duration to wait for task completion before timing out.
+//
+// Returns:
+//   - A pointer to a Future that can be used to retrieve the result of the task.
+//
+// This function ensures that listeners on the returned Future will receive
+// the task's result once available, or an error if the execution exceeds the timeout.
 func New(task Task, timeout time.Duration) *Future {
 	f := new(Future)
 	f.wg.Add(1)
@@ -82,9 +93,23 @@ func New(task Task, timeout time.Duration) *Future {
 	return f
 }
 
-// NewWithContext creates an instance of Future with a context.
-// The future will time out when the given context is canceled before the response is received
-func NewWithContext(ctx context.Context, task Task) *Future {
+// WithContext creates a Future that executes the given Task asynchronously,
+// respecting the provided context for cancellation.
+//
+// If the context is canceled before the Task completes, the Future will be
+// completed with an error. Otherwise, the Future will store the Task's result
+// once it becomes available.
+//
+// Parameters:
+//   - ctx: The context that controls the lifetime of the Future. If canceled, the Future fails.
+//   - task: The Task to be executed asynchronously.
+//
+// Returns:
+//   - A pointer to a Future that can be used to retrieve the result of the task.
+//
+// This function ensures that listeners on the returned Future will either receive
+// the Task's result or an error if the context is canceled before completion.
+func WithContext(ctx context.Context, task Task) *Future {
 	f := new(Future)
 	f.wg.Add(1)
 	var wg sync.WaitGroup
@@ -94,8 +119,13 @@ func NewWithContext(ctx context.Context, task Task) *Future {
 	return f
 }
 
-// Result will immediately fetch the result if it exists
-// or wait on the result until it is ready.
+// Result represents the outcome of a completed Future.
+//
+// It encapsulates both the success and failure states, ensuring that
+// a Future can communicate either a valid result or an error.
+//
+// If the task succeeds, Success returns the result, and Failure returns nil.
+// If the task fails, Failure returns the error, and Success returns nil.
 func (f *Future) Result() *Result {
 	f.lock.Lock()
 	if f.triggered {

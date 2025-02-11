@@ -28,7 +28,7 @@ import (
 	"bytes"
 	"encoding/binary"
 
-	"github.com/tochemey/goakt/v2/internal/bufferpool"
+	"github.com/tochemey/goakt/v3/internal/bufferpool"
 )
 
 // Meta Block
