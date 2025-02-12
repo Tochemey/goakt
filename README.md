@@ -18,26 +18,26 @@ across a cluster of computers.
 If you are not familiar with the actor model, the blog post from Brian Storti [here](https://www.brianstorti.com/the-actor-model/) is an excellent and short introduction to the actor model.
 Also, check reference section at the end of the post for more material regarding actor model.
 
-## Installation
+## 💻 Installation
 ```shell
 go get github.com/tochemey/goakt/v3
 ```
-## Documentation
+## 📚 Documentation
 
 The complete Documentation can be found [here](https://tochemey.gitbook.io/goakt)
 
-## Examples
+## 📝 Examples
 
 Kindly check out the [examples](https://github.com/Tochemey/goakt-examples)' repository.
 
-## Community
+## 🌍 Community
 
 You can join these groups and chat to discuss and ask GoAkt related questions on:
 
 [![GitHub Discussions](https://img.shields.io/github/discussions/Tochemey/goakt)](https://github.com/Tochemey/goakt/discussions)
 [![GitHub Issues or Pull Requests](https://img.shields.io/github/issues/Tochemey/goakt)](https://github.com/Tochemey/goakt/issues)
 
-## Contribution
+## 🤲 Contribution
 
 Contributions are welcome!
 The project adheres to [Semantic Versioning](https://semver.org)
@@ -58,7 +58,7 @@ Prior to submitting a [pull request](https://help.github.com/articles/using-pull
 earthly +test
 ```
 
-## Benchmark
+## 📊 Benchmark
 
 One can run the benchmark test from the [bench package](./bench):
 
