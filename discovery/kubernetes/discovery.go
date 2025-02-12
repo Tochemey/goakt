@@ -28,6 +28,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"slices"
 	"strconv"
 	"sync"
 
@@ -38,7 +39,6 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
-	"k8s.io/utils/strings/slices"
 
 	"github.com/tochemey/goakt/v3/discovery"
 )
