@@ -4,6 +4,11 @@ package internalpb;
 
 option go_package = "github.com/tochemey/goakt/v3/internal/internalpb;internalpb";
 
+enum Strategy {
+  STRATEGY_ONE_FOR_ONE = 0;
+  STRATEGY_ONE_FOR_ALL = 1;
+}
+
 // HandleFault message is sent by a child
 // actor to its parent when it is panicking or returning an error
 // while processing message
@@ -19,6 +24,8 @@ message HandleFault {
     RestartDirective restart = 5;
     EscalateDirective escalate = 6;
   }
+  // Specifies the strategy
+  Strategy strategy = 7;
 }
 
 // StopDirective defines the supervisor stop directive

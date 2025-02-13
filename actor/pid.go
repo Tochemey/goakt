@@ -134,7 +134,7 @@ type PID struct {
 	processedCount *atomic.Int64
 
 	// supervisor strategy
-	supervisorStrategies  *strategiesMap
+	supervisor            *Supervisor
 	supervisionChan       chan error
 	supervisionStopSignal chan types.Unit
 
@@ -178,7 +178,7 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 		supervisionStopSignal: make(chan types.Unit, 1),
 		remoting:              NewRemoting(),
 		goScheduler:           newGoScheduler(300),
-		supervisorStrategies:  newStrategiesMap(),
+		supervisor:            NewSupervisor(),
 		startedAt:             atomic.NewInt64(0),
 	}
 
@@ -190,11 +190,6 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 	pid.passivateAfter.Store(DefaultPassivationTimeout)
 	pid.initTimeout.Store(DefaultInitTimeout)
 	pid.processing.Store(int32(idle))
-
-	// set default strategies mappings
-	for _, strategy := range DefaultSupervisorStrategies {
-		pid.supervisorStrategies.Put(strategy)
-	}
 
 	for _, opt := range opts {
 		opt(pid)
@@ -558,8 +553,8 @@ func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor, opts .
 	}
 
 	// set the supervisor strategies when defined
-	if len(spawnConfig.supervisorStrategies) != 0 {
-		pidOptions = append(pidOptions, withSupervisorStrategies(spawnConfig.supervisorStrategies...))
+	if spawnConfig.supervisor != nil {
+		pidOptions = append(pidOptions, withSupervisor(spawnConfig.supervisor))
 	}
 
 	// disable passivation for system actor
@@ -1220,7 +1215,7 @@ func (pid *PID) receiveLoop() {
 			case *goaktpb.PoisonPill:
 				_ = pid.Shutdown(received.Context())
 			case *internalpb.HandleFault:
-				pid.handleFaultyChild(msg)
+				pid.handleFaultyChild(received.Sender(), msg)
 			default:
 				pid.handleReceived(received)
 			}
@@ -1327,7 +1322,7 @@ func (pid *PID) reset() {
 	pid.startedAt.Store(0)
 	pid.stopping.Store(false)
 	pid.suspended.Store(false)
-	pid.supervisorStrategies.Reset()
+	pid.supervisor.Reset()
 	pid.mailbox.Dispose()
 }
 
@@ -1602,8 +1597,7 @@ func (pid *PID) notifyParent(err error) {
 		return
 	}
 
-	// check my supervisor strategies based upon the error type
-	strategy, ok := pid.supervisorStrategies.Get(err)
+	directive, ok := pid.supervisor.Directive(err)
 	if !ok {
 		pid.logger.Debugf("no supervisor directive found for error: %s", errorType(err))
 		pid.suspend(err.Error())
@@ -1615,27 +1609,35 @@ func (pid *PID) notifyParent(err error) {
 		Message: err.Error(),
 	}
 
-	directive := strategy.Directive()
-	switch d := directive.(type) {
-	case *StopDirective:
+	switch directive {
+	case StopDirective:
 		msg.Directive = &internalpb.HandleFault_Stop{
 			Stop: new(internalpb.StopDirective),
 		}
-	case *RestartDirective:
+	case RestartDirective:
 		msg.Directive = &internalpb.HandleFault_Restart{
 			Restart: &internalpb.RestartDirective{
-				MaxRetries: d.maxNumRetries,
-				Timeout:    int64(d.timeout),
+				MaxRetries: pid.supervisor.MaxRetries(),
+				Timeout:    int64(pid.supervisor.Timeout()),
 			},
 		}
-	case *ResumeDirective:
+	case ResumeDirective:
 		msg.Directive = &internalpb.HandleFault_Resume{
 			Resume: &internalpb.ResumeDirective{},
 		}
 	default:
-		pid.logger.Debugf("unknown directive: %T found for error: %s", d, errorType(err))
+		pid.logger.Debugf("unknown directive: %T found for error: %s", directive, errorType(err))
 		pid.suspend(err.Error())
 		return
+	}
+
+	switch pid.supervisor.Strategy() {
+	case OneForOneStrategy:
+		msg.Strategy = internalpb.Strategy_STRATEGY_ONE_FOR_ONE
+	case OneForAllStrategy:
+		msg.Strategy = internalpb.Strategy_STRATEGY_ONE_FOR_ALL
+	default:
+		msg.Strategy = internalpb.Strategy_STRATEGY_ONE_FOR_ONE
 	}
 
 	if parent := pid.Parent(); parent != nil && !parent.Equals(NoSender) {
@@ -1722,65 +1724,108 @@ func (pid *PID) handleCompletion(ctx context.Context, completion *taskCompletion
 }
 
 // handleFaultyChild watches for child actor's failure and act based upon the supervisory strategy
-func (pid *PID) handleFaultyChild(msg *internalpb.HandleFault) {
+func (pid *PID) handleFaultyChild(cid *PID, msg *internalpb.HandleFault) {
+	if cid.ID() == msg.GetActorId() {
+		message := msg.GetMessage()
+		directive := msg.GetDirective()
+		includeSiblings := msg.GetStrategy() == internalpb.Strategy_STRATEGY_ONE_FOR_ALL
+
+		pid.logger.Errorf("child actor=(%s) is failing: Err=%s", cid.Name(), message)
+
+		switch d := directive.(type) {
+		case *internalpb.HandleFault_Stop:
+			pid.handleStopDirective(cid, includeSiblings)
+		case *internalpb.HandleFault_Restart:
+			pid.handleRestartDirective(cid,
+				d.Restart.GetMaxRetries(),
+				time.Duration(d.Restart.GetTimeout()),
+				includeSiblings)
+		case *internalpb.HandleFault_Resume:
+			// pass
+		default:
+			pid.handleStopDirective(cid, includeSiblings)
+		}
+		return
+	}
+}
+
+// handleStopDirective handles the Behavior stop directive
+func (pid *PID) handleStopDirective(cid *PID, includeSiblings bool) {
+	ctx := context.Background()
 	tree := pid.ActorSystem().tree()
-	if descendants, ok := tree.Descendants(pid); ok {
-		for _, descendant := range descendants {
-			cid := descendant.GetValue()
-			if cid.ID() == msg.GetActorId() {
-				message := msg.GetMessage()
-				directive := msg.GetDirective()
-				pid.logger.Errorf("child actor=(%s) is failing: Err=%s", cid.Name(), message)
-				switch d := directive.(type) {
-				case *internalpb.HandleFault_Stop:
-					pid.handleStopDirective(cid)
-				case *internalpb.HandleFault_Restart:
-					pid.handleRestartDirective(cid, d.Restart.GetMaxRetries(), time.Duration(d.Restart.GetTimeout()))
-				case *internalpb.HandleFault_Resume:
-					// pass
-				default:
-					pid.handleStopDirective(cid)
-				}
-				return
+	pids := []*PID{cid}
+
+	if includeSiblings {
+		if siblings, ok := tree.Siblings(cid); ok {
+			for _, sibling := range siblings {
+				pids = append(pids, sibling.GetValue())
 			}
 		}
 	}
-}
 
-// handleStopDirective handles the Supervisor stop directive
-func (pid *PID) handleStopDirective(cid *PID) {
-	pid.UnWatch(cid)
-	tree := pid.ActorSystem().tree()
-	if err := cid.Shutdown(context.Background()); err != nil {
-		// this can enter into some infinite loop if we panic
-		// since we are just shutting down the actor we can just log the error
-		// TODO: rethink properly about PostStop error handling
-		pid.logger.Error(err)
+	eg, ctx := errgroup.WithContext(ctx)
+	for _, spid := range pids {
+		spid := spid
+		eg.Go(func() error {
+			pid.UnWatch(spid)
+			if err := spid.Shutdown(ctx); err != nil {
+				// just log the error and suspend the given sibling
+				pid.logger.Error(fmt.Errorf("failed to shutdown actor=(%s): %w", spid.Name(), err))
+				// we need to suspend the actor since its shutdown is the result of
+				// one of its faulty siblings
+				spid.suspend(err.Error())
+				// no need to return an error
+				return nil
+			}
+			// remove the sibling tree node
+			tree.DeleteNode(spid)
+			return nil
+		})
 	}
 
-	tree.DeleteNode(cid)
+	// no error to handle
+	_ = eg.Wait()
 }
 
-// handleRestartDirective handles the Supervisor restart directive
-func (pid *PID) handleRestartDirective(cid *PID, maxRetries uint32, timeout time.Duration) {
-	pid.UnWatch(cid)
-
+// handleRestartDirective handles the Behavior restart directive
+func (pid *PID) handleRestartDirective(cid *PID, maxRetries uint32, timeout time.Duration, includeSiblings bool) {
 	ctx := context.Background()
-	var err error
-	if maxRetries == 0 || timeout <= 0 {
-		err = cid.Restart(ctx)
-	} else {
-		// TODO: handle the initial delay
-		retrier := retry.NewRetrier(int(maxRetries), 100*time.Millisecond, timeout)
-		err = retrier.RunContext(ctx, cid.Restart)
+	tree := pid.ActorSystem().tree()
+	pids := []*PID{cid}
+
+	if includeSiblings {
+		if siblings, ok := tree.Siblings(cid); ok {
+			for _, sibling := range siblings {
+				pids = append(pids, sibling.GetValue())
+			}
+		}
 	}
 
-	if err != nil {
-		pid.logger.Error(err)
-		if err := cid.Shutdown(ctx); err != nil {
-			pid.logger.Error(err)
-		}
-		return
+	eg, ctx := errgroup.WithContext(ctx)
+	for _, spid := range pids {
+		spid := spid
+		eg.Go(func() error {
+			pid.UnWatch(spid)
+			var err error
+
+			switch {
+			case maxRetries == 0 || timeout <= 0:
+				err = spid.Restart(ctx)
+			default:
+				retrier := retry.NewRetrier(int(maxRetries), timeout, timeout)
+				err = retrier.RunContext(ctx, cid.Restart)
+			}
+
+			if err != nil {
+				pid.logger.Error(err)
+				if err := spid.Shutdown(ctx); err != nil {
+					pid.logger.Error(err)
+					// we need to suspend the actor since it is faulty
+					spid.suspend(err.Error())
+				}
+			}
+			return nil
+		})
 	}
 }
 

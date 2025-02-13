@@ -28,19 +28,19 @@ import (
 	"sync"
 )
 
-// SyncSlice type that can be safely shared between goroutines.
-type SyncSlice[T any] struct {
+// Sync type that can be safely shared between goroutines.
+type Sync[T any] struct {
 	data []T
 	mu   sync.RWMutex
 }
 
 // NewSync creates a new lock-free thread-safe slice.
-func NewSync[T any]() *SyncSlice[T] {
-	return &SyncSlice[T]{data: []T{}}
+func NewSync[T any]() *Sync[T] {
+	return &Sync[T]{data: []T{}}
 }
 
 // Len returns the number of items
-func (cs *SyncSlice[T]) Len() int {
+func (cs *Sync[T]) Len() int {
 	cs.mu.RLock()
 	l := len(cs.data)
 	cs.mu.RUnlock()
@@ -48,21 +48,21 @@ func (cs *SyncSlice[T]) Len() int {
 }
 
 // Append adds an item to the concurrent slice.
-func (cs *SyncSlice[T]) Append(item T) {
+func (cs *Sync[T]) Append(item T) {
 	cs.mu.Lock()
 	cs.data = append(cs.data, item)
 	cs.mu.Unlock()
 }
 
 // AppendMany adds many items to the concurrent slice
-func (cs *SyncSlice[T]) AppendMany(item ...T) {
+func (cs *Sync[T]) AppendMany(item ...T) {
 	cs.mu.Lock()
 	cs.data = append(cs.data, item...)
 	cs.mu.Unlock()
 }
 
 // Get returns the slice item at the given index
-func (cs *SyncSlice[T]) Get(index int) (item T) {
+func (cs *Sync[T]) Get(index int) (item T) {
 	cs.mu.RLock()
 	if index < 0 || index >= len(cs.data) {
 		var zero T
@@ -74,7 +74,7 @@ func (cs *SyncSlice[T]) Get(index int) (item T) {
 }
 
 // Delete an item from the slice
-func (cs *SyncSlice[T]) Delete(index int) {
+func (cs *Sync[T]) Delete(index int) {
 	cs.mu.Lock()
 	if index < 0 || index >= len(cs.data) {
 		cs.mu.Unlock()
@@ -85,7 +85,7 @@ func (cs *SyncSlice[T]) Delete(index int) {
 }
 
 // Items returns the list of items
-func (cs *SyncSlice[T]) Items() []T {
+func (cs *Sync[T]) Items() []T {
 	cs.mu.RLock()
 	dataCopy := make([]T, len(cs.data))
 	copy(dataCopy, cs.data)
@@ -94,7 +94,7 @@ func (cs *SyncSlice[T]) Items() []T {
 }
 
 // Reset resets the slice
-func (cs *SyncSlice[T]) Reset() {
+func (cs *Sync[T]) Reset() {
 	cs.mu.Lock()
 	cs.data = []T{}
 	cs.mu.Unlock()

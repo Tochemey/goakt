@@ -25,6 +25,7 @@
 package actors
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -39,6 +40,7 @@ type pidTree struct {
 	nodePool  *sync.Pool
 	valuePool *sync.Pool
 	size      atomic.Int64
+	rootNode  *pidNode
 }
 
 // newTree creates a new instance of the actors Tree
@@ -64,49 +66,62 @@ func newTree() *pidTree {
 }
 
 // AddNode adds a new node to the tree under a given parent
-func (t *pidTree) AddNode(parent, child *PID) error {
+// The first node that is created without a parent becomes the defacto root node
+func (x *pidTree) AddNode(parent, child *PID) error {
 	var (
 		parentNode *pidNode
 		ok         bool
 	)
+
+	// check whether the node to be added is a root node
+	if parent == nil && x.rootNode != nil {
+		return errors.New("root node already set")
+	}
+
 	// validate parent node existence
-	if !parent.Equals(NoSender) {
-		parentNode, ok = t.GetNode(parent.ID())
+	if parent != nil && !parent.Equals(NoSender) {
+		parentNode, ok = x.GetNode(parent.ID())
 		if !ok || parentNode == nil {
 			return fmt.Errorf("parent node=(%s) does not exist", parent.ID())
 		}
 	}
 
 	// create a new node from the pool
-	newNode := t.nodePool.Get().(*pidNode)
-	t.resetNode(newNode, child.ID())
+	newNode := x.nodePool.Get().(*pidNode)
+	x.resetNode(newNode, child.ID())
 
 	// create a pidValue using the pool and set its data
-	val := t.valuePool.Get().(*pidValue)
+	val := x.valuePool.Get().(*pidValue)
 	val.data = child
 
 	// store the value atomically in the node
 	newNode.SetValue(val)
 
 	// store the node in the tree
-	t.nodes.Store(child.ID(), newNode)
+	x.nodes.Store(child.ID(), newNode)
 
 	// when parentNode is defined
 	if parentNode != nil {
-		t.addChild(parentNode, newNode)
-		t.updateAncestors(parent.ID(), child.ID())
+		x.addChild(parentNode, newNode)
+		x.updateAncestors(parent.ID(), child.ID())
 	}
 
-	t.size.Add(1)
+	// only set the root node when parent is nil
+	if parentNode == nil {
+		// set the given node as root node
+		x.rootNode = newNode
+	}
+
+	x.size.Add(1)
 	return nil
 }
 
 // AddWatcher adds a watcher to the given node. Make sure to check the existence of both PID
 // before watching because this call will do nothing when the watcher and the watched node do not exist in
 // the tree
-func (t *pidTree) AddWatcher(node, watcher *PID) {
-	currentNode, currentOk := t.GetNode(node.ID())
-	watcherNode, watcherOk := t.GetNode(watcher.ID())
+func (x *pidTree) AddWatcher(node, watcher *PID) {
+	currentNode, currentOk := x.GetNode(node.ID())
+	watcherNode, watcherOk := x.GetNode(watcher.ID())
 	if !currentOk || !watcherOk || currentNode == nil {
 		return
 	}
@@ -116,15 +131,15 @@ func (t *pidTree) AddWatcher(node, watcher *PID) {
 }
 
 // Ancestors retrieves all ancestors nodes of a given node
-func (t *pidTree) Ancestors(pid *PID) ([]*pidNode, bool) {
-	ancestorIDs, ok := t.ancestors(pid.ID())
+func (x *pidTree) Ancestors(pid *PID) ([]*pidNode, bool) {
+	ancestorIDs, ok := x.ancestors(pid.ID())
 	if !ok {
 		return nil, false
 	}
 
 	var ancestors []*pidNode
 	for _, ancestorID := range ancestorIDs {
-		if ancestor, ok := t.GetNode(ancestorID); ok {
+		if ancestor, ok := x.GetNode(ancestorID); ok {
 			ancestors = append(ancestors, ancestor)
 		}
 	}
@@ -132,13 +147,13 @@ func (t *pidTree) Ancestors(pid *PID) ([]*pidNode, bool) {
 }
 
 // ParentAt returns a given PID direct parent
-func (t *pidTree) ParentAt(pid *PID, level int) (*pidNode, bool) {
-	return t.ancestorAt(pid, level)
+func (x *pidTree) ParentAt(pid *PID, level int) (*pidNode, bool) {
+	return x.ancestorAt(pid, level)
 }
 
 // Descendants retrieves all descendants of the node with the given ID.
-func (t *pidTree) Descendants(pid *PID) ([]*pidNode, bool) {
-	node, ok := t.GetNode(pid.ID())
+func (x *pidTree) Descendants(pid *PID) ([]*pidNode, bool) {
+	node, ok := x.GetNode(pid.ID())
 	if !ok {
 		return nil, false
 	}
@@ -146,17 +161,43 @@ func (t *pidTree) Descendants(pid *PID) ([]*pidNode, bool) {
 	return collectDescendants(node), true
 }
 
+// Siblings returns a slice of pidNode that are the siblings of the given node.
+// If the node is the root (i.e. has no parent), it returns an empty slice.
+// It returns (siblings, true) on success, or (nil, false) if an error occur
+func (x *pidTree) Siblings(pid *PID) ([]*pidNode, bool) {
+	// get the direct parent of the given node
+	parentNode, ok := x.ParentAt(pid, 0)
+	if !ok {
+		return nil, false
+	}
+
+	// defensive programming
+	if parentNode == nil {
+		return nil, false
+	}
+
+	// here we are only fetching the first level children
+	children := parentNode.Descendants.Items()
+	var siblings []*pidNode
+	for _, child := range children {
+		if !child.GetValue().Equals(pid) {
+			siblings = append(siblings, child)
+		}
+	}
+	return siblings, true
+}
+
 // DeleteNode deletes a node and all its descendants
-func (t *pidTree) DeleteNode(pid *PID) {
-	node, ok := t.GetNode(pid.ID())
+func (x *pidTree) DeleteNode(pid *PID) {
+	node, ok := x.GetNode(pid.ID())
 	if !ok {
 		return
 	}
 
 	// remove the node from its parent's Children slice
-	if ancestors, ok := t.parents.Load(pid.ID()); ok && len(ancestors.([]string)) > 0 {
+	if ancestors, ok := x.parents.Load(pid.ID()); ok && len(ancestors.([]string)) > 0 {
 		parentID := ancestors.([]string)[0]
-		if parent, found := t.GetNode(parentID); found {
+		if parent, found := x.GetNode(parentID); found {
 			children := filterOutChild(parent.Descendants, pid.ID())
 			parent.Descendants.Reset()
 			parent.Descendants.AppendMany(children.Items()...)
@@ -171,18 +212,18 @@ func (t *pidTree) DeleteNode(pid *PID) {
 			deleteChildren(child)
 		}
 		// delete node from maps and pool
-		t.nodes.Delete(n.ID)
-		t.parents.Delete(n.ID)
-		t.nodePool.Put(n)
-		t.size.Add(-1)
+		x.nodes.Delete(n.ID)
+		x.parents.Delete(n.ID)
+		x.nodePool.Put(n)
+		x.size.Add(-1)
 	}
 
 	deleteChildren(node)
 }
 
 // GetNode retrieves a node by its ID
-func (t *pidTree) GetNode(id string) (*pidNode, bool) {
-	value, ok := t.nodes.Load(id)
+func (x *pidTree) GetNode(id string) (*pidNode, bool) {
+	value, ok := x.nodes.Load(id)
 	if !ok {
 		return nil, false
 	}
@@ -191,12 +232,12 @@ func (t *pidTree) GetNode(id string) (*pidNode, bool) {
 }
 
 // Nodes retrieves all nodes in the tree efficiently
-func (t *pidTree) Nodes() []*pidNode {
-	if t.Size() == 0 {
+func (x *pidTree) Nodes() []*pidNode {
+	if x.Size() == 0 {
 		return nil
 	}
 	var nodes []*pidNode
-	t.nodes.Range(func(_, value any) {
+	x.nodes.Range(func(_, value any) {
 		node := value.(*pidNode)
 		nodes = append(nodes, node)
 	})
@@ -204,44 +245,44 @@ func (t *pidTree) Nodes() []*pidNode {
 }
 
 // Size returns the current number of nodes in the tree
-func (t *pidTree) Size() int64 {
-	return t.size.Load()
+func (x *pidTree) Size() int64 {
+	return x.size.Load()
 }
 
 // Reset clears all nodes and parents, resetting the tree to an empty state
-func (t *pidTree) Reset() {
-	t.nodes.Reset()   // Reset nodes map
-	t.parents.Reset() // Reset parents map
-	t.size.Store(0)
+func (x *pidTree) Reset() {
+	x.nodes.Reset()   // Reset nodes map
+	x.parents.Reset() // Reset parents map
+	x.size.Store(0)
 }
 
 // ancestors returns the list of ancestor nodes
-func (t *pidTree) ancestors(id string) ([]string, bool) {
-	if value, ok := t.parents.Load(id); ok {
+func (x *pidTree) ancestors(id string) ([]string, bool) {
+	if value, ok := x.parents.Load(id); ok {
 		return value.([]string), true
 	}
 	return nil, false
 }
 
 // addChild safely appends a child to a parent's Children slice using atomic operations.
-func (t *pidTree) addChild(parent *pidNode, child *pidNode) {
+func (x *pidTree) addChild(parent *pidNode, child *pidNode) {
 	parent.Descendants.Append(child)
 	parent.Watchees.Append(child)
 	child.Watchers.Append(parent)
 }
 
 // updateAncestors updates the parent/ancestor relationships.
-func (t *pidTree) updateAncestors(parentID, childID string) {
-	switch ancestors, ok := t.ancestors(parentID); {
+func (x *pidTree) updateAncestors(parentID, childID string) {
+	switch ancestors, ok := x.ancestors(parentID); {
 	case ok:
-		t.parents.Store(childID, append([]string{parentID}, ancestors...))
+		x.parents.Store(childID, append([]string{parentID}, ancestors...))
 	default:
-		t.parents.Store(childID, []string{parentID})
+		x.parents.Store(childID, []string{parentID})
 	}
 }
 
 // filterOutChild removes the node with the given ID from the Children slice.
-func filterOutChild(children *slice.SyncSlice[*pidNode], childID string) *slice.SyncSlice[*pidNode] {
+func filterOutChild(children *slice.Sync[*pidNode], childID string) *slice.Sync[*pidNode] {
 	for i, child := range children.Items() {
 		if child.ID == childID {
 			children.Delete(i)
@@ -268,15 +309,15 @@ func collectDescendants(node *pidNode) []*pidNode {
 }
 
 // ancestorAt retrieves the ancestor at the specified level (0 for parent, 1 for grandparent, etc.)
-func (t *pidTree) ancestorAt(pid *PID, level int) (*pidNode, bool) {
-	ancestors, ok := t.ancestors(pid.ID())
+func (x *pidTree) ancestorAt(pid *PID, level int) (*pidNode, bool) {
+	ancestors, ok := x.ancestors(pid.ID())
 	if ok && len(ancestors) > level {
-		return t.GetNode(ancestors[level])
+		return x.GetNode(ancestors[level])
 	}
 	return nil, false
 }
 
-func (t *pidTree) resetNode(node *pidNode, id string) {
+func (x *pidTree) resetNode(node *pidNode, id string) {
 	node.ID = id
 	node.Descendants.Reset()
 	node.Watchees.Reset()

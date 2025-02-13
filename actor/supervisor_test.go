@@ -25,39 +25,35 @@
 package actors
 
 import (
-	"sync/atomic"
+	"testing"
+	"time"
 
-	"github.com/tochemey/goakt/v3/internal/slice"
+	"github.com/stretchr/testify/assert"
 )
 
-// pidValue represents the data stored in each
-// node of the actors Tree
-type pidValue struct {
-	data *PID
-}
+func TestSupervisorOption(t *testing.T) {
+	testCases := []struct {
+		name     string
+		option   SupervisorOption
+		expected *Supervisor
+	}{
+		{
+			name:     "WithStrategy",
+			option:   WithStrategy(OneForAllStrategy),
+			expected: &Supervisor{strategy: OneForAllStrategy},
+		},
+		{
+			name:     "WithRetry",
+			option:   WithRetry(2, time.Second),
+			expected: &Supervisor{timeout: time.Second, maxRetries: 2},
+		},
+	}
 
-// Value returns the actual pidValue value
-func (v *pidValue) Value() *PID {
-	return v.data
-}
-
-// pidNode represents a single actor node
-// in the actors Tree
-type pidNode struct {
-	ID          string
-	value       atomic.Pointer[pidValue]
-	Descendants *slice.Sync[*pidNode]
-	Watchers    *slice.Sync[*pidNode]
-	Watchees    *slice.Sync[*pidNode]
-}
-
-// SetValue sets a node value
-func (x *pidNode) SetValue(v *pidValue) {
-	x.value.Store(v)
-}
-
-// GetValue returns the underlying value of the node
-func (x *pidNode) GetValue() *PID {
-	v := x.value.Load()
-	return v.Value()
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			supervisor := &Supervisor{}
+			tc.option(supervisor)
+			assert.Equal(t, tc.expected, supervisor)
+		})
+	}
 }

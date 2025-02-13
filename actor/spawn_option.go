@@ -32,8 +32,8 @@ import (
 type spawnConfig struct {
 	// mailbox defines the mailbox to use when spawning the actor
 	mailbox Mailbox
-	// defines the supervisor strategies to apply
-	supervisorStrategies []*SupervisorStrategy
+	// defines the supervisor
+	supervisor *Supervisor
 	// specifies at what point in time to passivate the actor.
 	// when the actor is passivated it is stopped which means it does not consume
 	// any further resources like memory and cpu. The default value is 120 seconds
@@ -74,11 +74,19 @@ func WithMailbox(mailbox Mailbox) SpawnOption {
 	})
 }
 
-// WithSupervisorStrategies defines the supervisor strategies to apply when the given actor fails
-// or panics during its messages processing
-func WithSupervisorStrategies(supervisorStrategies ...*SupervisorStrategy) SpawnOption {
+// WithSupervisor sets the supervisor to apply when the actor fails
+// or panics during message processing. The specified supervisor behavior determines how failures
+// are handled, such as restarting, stopping, or resuming the actor.
+//
+// Parameters:
+//   - supervisor: A pointer to a `Supervisor` that defines
+//     the failure-handling policy for the actor.
+//
+// Returns:
+//   - A `SpawnOption` that applies the given supervisor strategy when spawning an actor.
+func WithSupervisor(supervisor *Supervisor) SpawnOption {
 	return spawnOption(func(config *spawnConfig) {
-		config.supervisorStrategies = supervisorStrategies
+		config.supervisor = supervisor
 	})
 }
 
