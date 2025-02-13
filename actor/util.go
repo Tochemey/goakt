@@ -73,8 +73,8 @@ var (
 	// NoSender means that there is no sender
 	NoSender *PID
 	// DefaultSupervisorDirective defines the default supervisory strategy directive
-	DefaultSupervisorDirective Directive = StopDirective
-	timers                               = timer.NewPool()
+	DefaultSupervisorDirective = StopDirective
+	timers                     = timer.NewPool()
 
 	systemNames = map[nameType]string{
 		routerType:         "GoAktRouter",
