@@ -44,8 +44,8 @@ type deadLetter struct {
 	pid          *PID
 	logger       log.Logger
 	counter      *atomic.Int64
-	letters      *syncmap.SyncMap[string, *goaktpb.Deadletter]
-	counters     *syncmap.SyncMap[string, *atomic.Int64]
+	letters      *syncmap.Map[string, *goaktpb.Deadletter]
+	counters     *syncmap.Map[string, *atomic.Int64]
 }
 
 // enforce the implementation of the Actor interface

@@ -62,16 +62,10 @@ func withActorSystem(sys ActorSystem) pidOption {
 	}
 }
 
-// withSupervisorStrategies defines the supervisor strategies
-func withSupervisorStrategies(strategies ...*SupervisorStrategy) pidOption {
+// withSupervisor defines the supervisor
+func withSupervisor(supervisor *Supervisor) pidOption {
 	return func(pid *PID) {
-		if pid.supervisorStrategies == nil {
-			pid.supervisorStrategies = newStrategiesMap()
-		}
-
-		for _, strategy := range strategies {
-			pid.supervisorStrategies.Put(strategy)
-		}
+		pid.supervisor = supervisor
 	}
 }
 

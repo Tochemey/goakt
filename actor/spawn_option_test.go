@@ -41,10 +41,10 @@ func TestSpawnOption(t *testing.T) {
 	})
 	t.Run("spawn option with supervisor strategy", func(t *testing.T) {
 		config := &spawnConfig{}
-		strategy := NewSupervisorStrategy(PanicError{}, NewStopDirective())
-		option := WithSupervisorStrategies(strategy)
+		supervisor := NewSupervisor(WithStrategy(OneForOneStrategy))
+		option := WithSupervisor(supervisor)
 		option.Apply(config)
-		require.Equal(t, &spawnConfig{supervisorStrategies: []*SupervisorStrategy{strategy}}, config)
+		require.Equal(t, &spawnConfig{supervisor: supervisor}, config)
 	})
 	t.Run("spawn option with passivation after", func(t *testing.T) {
 		config := &spawnConfig{}

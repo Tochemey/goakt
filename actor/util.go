@@ -72,8 +72,8 @@ var (
 	longLived time.Duration = 1<<63 - 1
 	// NoSender means that there is no sender
 	NoSender *PID
-	// DefaultSupervisoryStrategy defines the default supervisory strategy
-	DefaultSupervisoryStrategy = NewStopDirective()
+	// DefaultSupervisorDirective defines the default supervisory strategy directive
+	DefaultSupervisorDirective = StopDirective
 	timers                     = timer.NewPool()
 
 	systemNames = map[nameType]string{

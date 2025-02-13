@@ -520,10 +520,6 @@ func startClusterSystem(t *testing.T, serverAddr string, opts ...testClusterOpti
 	return system, provider
 }
 
-type unhandledSupervisorDirective struct{}
-
-func (x unhandledSupervisorDirective) isSupervisorDirective() {}
-
 type mockRouterActor struct {
 	counter int
 	logger  log.Logger

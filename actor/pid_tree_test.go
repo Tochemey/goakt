@@ -46,12 +46,14 @@ func TestTree(t *testing.T) {
 
 	tree := newTree()
 
+	// create pid0 as the root node
 	require.NoError(t, tree.AddNode(NoSender, pid0)) // pid0 has no parent
-	require.NoError(t, tree.AddNode(NoSender, pid1)) // pid1 has no parent
-	require.NoError(t, tree.AddNode(pid0, pid2))     // pid0 is parent of pid2
-	require.NoError(t, tree.AddNode(pid1, pid3))     // pid1 is parent of pid3
-	require.Error(t, tree.AddNode(pid4, pid5))       // this will error because pid4 does not exist on the tree
-	require.NoError(t, tree.AddNode(pid3, pid4))     // pid3 is parent of pid4
+
+	require.NoError(t, tree.AddNode(pid0, pid1)) // pid1 has pid0 as parent
+	require.NoError(t, tree.AddNode(pid0, pid2)) // pid0 is parent of pid2
+	require.NoError(t, tree.AddNode(pid1, pid3)) // pid1 is parent of pid3
+	require.Error(t, tree.AddNode(pid4, pid5))   // this will error because pid4 does not exist on the tree
+	require.NoError(t, tree.AddNode(pid3, pid4)) // pid3 is parent of pid4
 
 	tree.AddWatcher(pid3, pid0)
 	tree.AddWatcher(pid4, pid5)
@@ -59,7 +61,7 @@ func TestTree(t *testing.T) {
 	pid4Ancestors, ok := tree.Ancestors(pid4)
 	require.True(t, ok)
 	require.NotEmpty(t, pid4Ancestors)
-	require.Len(t, pid4Ancestors, 2)
+	require.Len(t, pid4Ancestors, 3)
 	pid4Parent, ok := tree.ParentAt(pid4, 0)
 	require.True(t, ok)
 	require.NotNil(t, pid4Parent)
@@ -68,8 +70,16 @@ func TestTree(t *testing.T) {
 	require.True(t, ok)
 	require.True(t, pid4GParent.GetValue().Equals(pid1))
 	pid4GGParent, ok := tree.ParentAt(pid4, 2)
-	require.False(t, ok)
-	require.Nil(t, pid4GGParent)
+	require.True(t, ok)
+	require.NotNil(t, pid4GGParent)
+
+	// grab the siblings of pid2
+	siblings, ok := tree.Siblings(pid2)
+	require.True(t, ok)
+	require.NotEmpty(t, siblings)
+	require.Len(t, siblings, 1)
+	sibling := siblings[0]
+	require.True(t, sibling.GetValue().Equals(pid1))
 
 	require.EqualValues(t, 5, tree.Size())
 
