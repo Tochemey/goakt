@@ -22,7 +22,7 @@
  * SOFTWARE.
  */
 
-package collection
+package queue
 
 import "testing"
 

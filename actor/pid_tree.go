@@ -30,7 +30,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/tochemey/goakt/v3/internal/slice"
+	"github.com/tochemey/goakt/v3/internal/collection/slice"
 )
 
 // pidTree represents the entire actors Tree structure
@@ -51,9 +51,9 @@ func newTree() *pidTree {
 		nodePool: &sync.Pool{
 			New: func() any {
 				return &pidNode{
-					Descendants: slice.NewSync[*pidNode](),
-					Watchees:    slice.NewSync[*pidNode](),
-					Watchers:    slice.NewSync[*pidNode](),
+					Descendants: slice.New[*pidNode](),
+					Watchees:    slice.New[*pidNode](),
+					Watchers:    slice.New[*pidNode](),
 				}
 			},
 		},
@@ -282,7 +282,7 @@ func (x *pidTree) updateAncestors(parentID, childID string) {
 }
 
 // filterOutChild removes the node with the given ID from the Children slice.
-func filterOutChild(children *slice.Sync[*pidNode], childID string) *slice.Sync[*pidNode] {
+func filterOutChild(children *slice.Slice[*pidNode], childID string) *slice.Slice[*pidNode] {
 	for i, child := range children.Items() {
 		if child.ID == childID {
 			children.Delete(i)
@@ -294,7 +294,7 @@ func filterOutChild(children *slice.Sync[*pidNode], childID string) *slice.Sync[
 
 // collectDescendants collects all the descendants and grand children
 func collectDescendants(node *pidNode) []*pidNode {
-	output := slice.NewSync[*pidNode]()
+	output := slice.New[*pidNode]()
 
 	var recursive func(*pidNode)
 	recursive = func(currentNode *pidNode) {

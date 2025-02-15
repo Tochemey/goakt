@@ -27,7 +27,7 @@ package actors
 import (
 	"sync/atomic"
 
-	"github.com/tochemey/goakt/v3/internal/slice"
+	"github.com/tochemey/goakt/v3/internal/collection/slice"
 )
 
 // pidValue represents the data stored in each
@@ -46,9 +46,9 @@ func (v *pidValue) Value() *PID {
 type pidNode struct {
 	ID          string
 	value       atomic.Pointer[pidValue]
-	Descendants *slice.Sync[*pidNode]
-	Watchers    *slice.Sync[*pidNode]
-	Watchees    *slice.Sync[*pidNode]
+	Descendants *slice.Slice[*pidNode]
+	Watchers    *slice.Slice[*pidNode]
+	Watchees    *slice.Slice[*pidNode]
 }
 
 // SetValue sets a node value

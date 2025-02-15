@@ -33,8 +33,8 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/tochemey/goakt/v3/goaktpb"
+	"github.com/tochemey/goakt/v3/internal/collection/slice"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
-	"github.com/tochemey/goakt/v3/internal/slice"
 	"github.com/tochemey/goakt/v3/log"
 )
 

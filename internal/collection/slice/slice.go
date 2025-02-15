@@ -28,74 +28,74 @@ import (
 	"sync"
 )
 
-// Sync type that can be safely shared between goroutines.
-type Sync[T any] struct {
+// Slice type that can be safely shared between goroutines.
+type Slice[T any] struct {
 	data []T
 	mu   sync.RWMutex
 }
 
-// NewSync creates a new lock-free thread-safe slice.
-func NewSync[T any]() *Sync[T] {
-	return &Sync[T]{data: []T{}}
+// New creates a new lock-free thread-safe slice.
+func New[T any]() *Slice[T] {
+	return &Slice[T]{data: []T{}}
 }
 
 // Len returns the number of items
-func (cs *Sync[T]) Len() int {
-	cs.mu.RLock()
-	l := len(cs.data)
-	cs.mu.RUnlock()
+func (x *Slice[T]) Len() int {
+	x.mu.RLock()
+	l := len(x.data)
+	x.mu.RUnlock()
 	return l
 }
 
 // Append adds an item to the concurrent slice.
-func (cs *Sync[T]) Append(item T) {
-	cs.mu.Lock()
-	cs.data = append(cs.data, item)
-	cs.mu.Unlock()
+func (x *Slice[T]) Append(item T) {
+	x.mu.Lock()
+	x.data = append(x.data, item)
+	x.mu.Unlock()
 }
 
 // AppendMany adds many items to the concurrent slice
-func (cs *Sync[T]) AppendMany(item ...T) {
-	cs.mu.Lock()
-	cs.data = append(cs.data, item...)
-	cs.mu.Unlock()
+func (x *Slice[T]) AppendMany(item ...T) {
+	x.mu.Lock()
+	x.data = append(x.data, item...)
+	x.mu.Unlock()
 }
 
 // Get returns the slice item at the given index
-func (cs *Sync[T]) Get(index int) (item T) {
-	cs.mu.RLock()
-	if index < 0 || index >= len(cs.data) {
+func (x *Slice[T]) Get(index int) (item T) {
+	x.mu.RLock()
+	if index < 0 || index >= len(x.data) {
 		var zero T
-		cs.mu.RUnlock()
+		x.mu.RUnlock()
 		return zero
 	}
-	cs.mu.RUnlock()
-	return cs.data[index]
+	x.mu.RUnlock()
+	return x.data[index]
 }
 
 // Delete an item from the slice
-func (cs *Sync[T]) Delete(index int) {
-	cs.mu.Lock()
-	if index < 0 || index >= len(cs.data) {
-		cs.mu.Unlock()
+func (x *Slice[T]) Delete(index int) {
+	x.mu.Lock()
+	if index < 0 || index >= len(x.data) {
+		x.mu.Unlock()
 		return
 	}
-	cs.data = append(cs.data[:index], cs.data[index+1:]...)
-	cs.mu.Unlock()
+	x.data = append(x.data[:index], x.data[index+1:]...)
+	x.mu.Unlock()
 }
 
 // Items returns the list of items
-func (cs *Sync[T]) Items() []T {
-	cs.mu.RLock()
-	dataCopy := make([]T, len(cs.data))
-	copy(dataCopy, cs.data)
-	cs.mu.RUnlock()
+func (x *Slice[T]) Items() []T {
+	x.mu.RLock()
+	dataCopy := make([]T, len(x.data))
+	copy(dataCopy, x.data)
+	x.mu.RUnlock()
 	return dataCopy
 }
 
 // Reset resets the slice
-func (cs *Sync[T]) Reset() {
-	cs.mu.Lock()
-	cs.data = []T{}
-	cs.mu.Unlock()
+func (x *Slice[T]) Reset() {
+	x.mu.Lock()
+	x.data = []T{}
+	x.mu.Unlock()
 }

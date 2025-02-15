@@ -30,7 +30,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tochemey/goakt/v3/internal/syncmap"
+	"github.com/tochemey/goakt/v3/internal/collection/syncmap"
 )
 
 // Strategy represents the type of supervision strategy used by an actor's supervisor.
