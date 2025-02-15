@@ -51,7 +51,11 @@
   "ignoreDeps": [
     "k8s.io/api",
     "k8s.io/apimachinery",
-    "k8s.io/client-go"
+    "k8s.io/client-go",
+    "k8s.io/kube-openapi",
+    "sigs.k8s.io/json",
+    "sigs.k8s.io/structured-merge-diff/v4",
+    "k8s.io/utils"
   ],
   "packageRules": [
     {
