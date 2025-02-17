@@ -129,13 +129,15 @@ func (d *Discovery) Initialize() error {
 	// create a new instance of retrier that will try a maximum of five times, with
 	// an initial delay of 100 ms and a maximum delay of opts.ReconnectWait
 	retrier := retry.NewRetrier(d.config.MaxJoinAttempts, 100*time.Millisecond, opts.ReconnectWait)
-	err = retrier.Run(func() error {
+	if err = retrier.Run(func() error {
 		connection, err = opts.Connect()
 		if err != nil {
 			return err
 		}
 		return nil
-	})
+	}); err != nil {
+		return err
+	}
 
 	// create the NATs connection
 	d.connection = connection
