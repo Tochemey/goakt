@@ -127,8 +127,8 @@ func (d *Discovery) Initialize() error {
 
 	// let us connect using an exponential backoff mechanism
 	// create a new instance of retrier that will try a maximum of five times, with
-	// an initial delay of 100 ms and a maximum delay of opts.ReconnectWait
-	retrier := retry.NewRetrier(d.config.MaxJoinAttempts, 100*time.Millisecond, opts.ReconnectWait)
+	// an initial delay and a maximum delay of opts.ReconnectWait
+	retrier := retry.NewRetrier(d.config.MaxJoinAttempts, opts.ReconnectWait, opts.ReconnectWait)
 	if err = retrier.Run(func() error {
 		connection, err = opts.Connect()
 		if err != nil {
