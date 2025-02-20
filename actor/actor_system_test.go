@@ -723,12 +723,8 @@ func TestActorSystem(t *testing.T) {
 		// stop the actor after some time
 		util.Pause(time.Second)
 
-		t.Cleanup(
-			func() {
-				err = newActorSystem.Stop(ctx)
-				assert.NoError(t, err)
-			},
-		)
+		err = newActorSystem.Stop(ctx)
+		require.NoError(t, err)
 	})
 	t.Run("With LocalActor", func(t *testing.T) {
 		ctx := context.TODO()

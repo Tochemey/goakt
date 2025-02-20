@@ -668,7 +668,8 @@ func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor, opts 
 
 	x.actorsCounter.Inc()
 	// add the given actor to the tree and supervise it
-	_ = x.actors.AddNode(x.userGuardian, pid)
+	guardian := x.getUserGuardian()
+	_ = x.actors.AddNode(guardian, pid)
 	x.actors.AddWatcher(pid, x.deathWatch)
 	x.broadcastActor(pid, false)
 	return pid, nil
@@ -743,12 +744,6 @@ func (x *actorSystem) SpawnSingleton(ctx context.Context, name string, actor Act
 		return ErrClusterDisabled
 	}
 
-	// create the actor as the child actor of the singleton manager
-	singletonManager := x.getSingletonManager()
-	if singletonManager == nil {
-		return ErrClusterDisabled
-	}
-
 	cl := x.getCluster()
 
 	// only create the singleton actor on the oldest node in the cluster
@@ -759,15 +754,6 @@ func (x *actorSystem) SpawnSingleton(ctx context.Context, name string, actor Act
 	// check some preconditions
 	if err := x.checkSpawnPreconditions(ctx, name, actor, true); err != nil {
 		return err
-	}
-
-	actorAddress := x.actorAddress(name)
-	pidNode, exist := x.actors.GetNode(actorAddress.String())
-	if exist {
-		pid := pidNode.GetValue()
-		if pid.IsRunning() {
-			return nil
-		}
 	}
 
 	pid, err := x.configPID(ctx, name, actor,

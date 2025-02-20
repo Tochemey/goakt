@@ -26,12 +26,16 @@ package actors
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"github.com/travisjeffery/go-dynaport"
 
 	"github.com/tochemey/goakt/v3/internal/util"
+	"github.com/tochemey/goakt/v3/log"
+	"github.com/tochemey/goakt/v3/remote"
 )
 
 func TestSingletonActor(t *testing.T) {
@@ -76,5 +80,84 @@ func TestSingletonActor(t *testing.T) {
 		require.NoError(t, sd2.Close())
 		// shutdown the nats server gracefully
 		srv.Shutdown()
+	})
+	t.Run("With Singleton Actor when cluster is not enabled returns error", func(t *testing.T) {
+		ctx := context.TODO()
+		remotingPort := dynaport.Get(1)[0]
+
+		logger := log.DiscardLogger
+		host := "127.0.0.1"
+
+		newActorSystem, err := NewActorSystem(
+			"test",
+			WithPassivationDisabled(),
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+		)
+		require.NoError(t, err)
+
+		// start the actor system
+		err = newActorSystem.Start(ctx)
+		require.NoError(t, err)
+
+		util.Pause(time.Second)
+
+		// create a singleton actor
+		actor := newMockActor()
+		actorName := "actorID"
+		// create a singleton actor
+		err = newActorSystem.SpawnSingleton(ctx, actorName, actor)
+		require.Error(t, err)
+		require.EqualError(t, err, ErrClusterDisabled.Error())
+
+		err = newActorSystem.Stop(ctx)
+		require.NoError(t, err)
+	})
+	t.Run("With Singleton Actor when creating actor fails returns error", func(t *testing.T) {
+		// create a context
+		ctx := context.TODO()
+		// start the NATS server
+		srv := startNatsServer(t)
+
+		cl1, sd1 := startClusterSystem(t, srv.Addr().String())
+		require.NotNil(t, cl1)
+		require.NotNil(t, sd1)
+
+		// create a singleton actor
+		actor := newMockActor()
+		actorName := strings.Repeat("a", 256)
+		err := cl1.SpawnSingleton(ctx, actorName, actor)
+		require.Error(t, err)
+
+		// free resources
+		require.NoError(t, cl1.Stop(ctx))
+		require.NoError(t, sd1.Close())
+		// shutdown the nats server gracefully
+		srv.Shutdown()
+	})
+	t.Run("With Singleton Actor when not started returns error", func(t *testing.T) {
+		ctx := context.TODO()
+		remotingPort := dynaport.Get(1)[0]
+
+		logger := log.DiscardLogger
+		host := "127.0.0.1"
+
+		newActorSystem, err := NewActorSystem(
+			"test",
+			WithPassivationDisabled(),
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+		)
+		require.NoError(t, err)
+
+		require.False(t, newActorSystem.Running())
+
+		// create a singleton actor
+		actor := newMockActor()
+		actorName := "actorID"
+		// create a singleton actor
+		err = newActorSystem.SpawnSingleton(ctx, actorName, actor)
+		require.Error(t, err)
+		require.EqualError(t, err, ErrActorSystemNotStarted.Error())
 	})
 }
