@@ -63,6 +63,6 @@ func TestActorRef(t *testing.T) {
 		}
 		actorRef := fromPID(pid)
 		require.Equal(t, "name", actorRef.Name())
-		require.Equal(t, types.TypeName(actor), actorRef.Kind())
+		require.Equal(t, types.Name(actor), actorRef.Kind())
 	})
 }

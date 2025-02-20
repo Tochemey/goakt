@@ -58,7 +58,7 @@ func newClusterSingletonManager() Actor {
 }
 
 // PreStart implements the pre-start hook.
-func (x *clusterSingletonManager) PreStart(ctx context.Context) error {
+func (x *clusterSingletonManager) PreStart(context.Context) error {
 	return nil
 }
 
@@ -73,7 +73,7 @@ func (x *clusterSingletonManager) Receive(ctx *ReceiveContext) {
 }
 
 // PostStop implements the post-stop hook.
-func (x *clusterSingletonManager) PostStop(ctx context.Context) error {
+func (x *clusterSingletonManager) PostStop(context.Context) error {
 	x.logger.Infof("%s stopped successfully", x.pid.Name())
 	return nil
 }
@@ -136,7 +136,7 @@ func (x *actorSystem) spawnSingletonOnLeader(ctx context.Context, cl cluster.Int
 
 	// TODO: instead of using the cache add a method in the cluster to fetch peer info
 	if leader == nil {
-		return fmt.Errorf("failed to spawn singleton actor: no leader found")
+		return ErrLeaderNotFound
 	}
 
 	var peerState *internalpb.PeerState
@@ -161,7 +161,7 @@ func (x *actorSystem) spawnSingletonOnLeader(ctx context.Context, cl cluster.Int
 	}
 
 	var (
-		actorType = types.TypeName(actor)
+		actorType = types.Name(actor)
 		host      = peerState.GetHost()
 		port      = int(peerState.GetRemotingPort())
 	)

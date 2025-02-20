@@ -97,6 +97,8 @@ var (
 	ErrInvalidTLSConfiguration = errors.New("TLS configuration is invalid")
 	// ErrSingletonAlreadyExists is returned when a given singleton actor type already exists
 	ErrSingletonAlreadyExists = errors.New("singleton already exists")
+	// ErrLeaderNotFound is returned when the cluster oldest node(leader) is not found
+	ErrLeaderNotFound = errors.New("leader is not found")
 )
 
 // eof returns true if the given error is an EOF error

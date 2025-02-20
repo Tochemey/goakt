@@ -749,11 +749,11 @@ func (x *actorSystem) SpawnSingleton(ctx context.Context, name string, actor Act
 		return ErrClusterDisabled
 	}
 
-	cluster := x.getCluster()
+	cl := x.getCluster()
 
 	// only create the singleton actor on the oldest node in the cluster
-	if !cluster.IsLeader(ctx) {
-		return x.spawnSingletonOnLeader(ctx, cluster, name, actor)
+	if !cl.IsLeader(ctx) {
+		return x.spawnSingletonOnLeader(ctx, cl, name, actor)
 	}
 
 	// check some preconditions
@@ -1327,7 +1327,7 @@ func (x *actorSystem) GetKinds(_ context.Context, request *connect.Request[inter
 
 	kinds := make([]string, len(x.clusterConfig.Kinds()))
 	for i, kind := range x.clusterConfig.Kinds() {
-		kinds[i] = types.TypeName(kind)
+		kinds[i] = types.Name(kind)
 	}
 
 	return connect.NewResponse(&internalpb.GetKindsResponse{Kinds: kinds}), nil
@@ -1424,7 +1424,7 @@ func (x *actorSystem) broadcastActor(actor *PID, singleton bool) {
 	if x.clusterEnabled.Load() {
 		x.wireActorsQueue <- &internalpb.ActorRef{
 			ActorAddress: actor.Address().Address,
-			ActorType:    types.TypeName(actor.Actor()),
+			ActorType:    types.Name(actor.Actor()),
 			IsSingleton:  singleton,
 		}
 	}
@@ -1506,7 +1506,7 @@ func (x *actorSystem) enableClustering(ctx context.Context) error {
 	x.rebalancingQueue = make(chan *internalpb.PeerState, 1)
 	for _, kind := range x.clusterConfig.Kinds() {
 		x.registry.Register(kind)
-		x.logger.Infof("cluster kind=(%s) registered", types.TypeName(kind))
+		x.logger.Infof("cluster kind=(%s) registered", types.Name(kind))
 	}
 	x.locker.Unlock()
 
@@ -2105,7 +2105,7 @@ func (x *actorSystem) checkSpawnPreconditions(ctx context.Context, actorName str
 		// a singleton actor must only have one instance at a given time of its kind
 		// in the whole cluster
 		if singleton {
-			id, err := x.cluster.LookupKind(ctx, types.TypeName(kind))
+			id, err := x.cluster.LookupKind(ctx, types.Name(kind))
 			if err != nil {
 				return err
 			}
@@ -2127,7 +2127,7 @@ func (x *actorSystem) checkSpawnPreconditions(ctx context.Context, actorName str
 			return err
 		}
 
-		if existed.GetActorType() == types.TypeName(kind) {
+		if existed.GetActorType() == types.Name(kind) {
 			return ErrActorAlreadyExists(actorName)
 		}
 	}

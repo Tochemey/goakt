@@ -195,4 +195,51 @@ func TestRebalancing(t *testing.T) {
 			srv.Shutdown()
 		})
 	})
+	t.Run("With singleton actor redeployment", func(t *testing.T) {
+		// create a context
+		ctx := context.TODO()
+		// start the NATS server
+		srv := startNatsServer(t)
+
+		// create and start system cluster
+		node1, sd1 := startClusterSystem(t, srv.Addr().String())
+		require.NotNil(t, node1)
+		require.NotNil(t, sd1)
+
+		// create and start system cluster
+		node2, sd2 := startClusterSystem(t, srv.Addr().String())
+		require.NotNil(t, node2)
+		require.NotNil(t, sd2)
+
+		// create and start system cluster
+		node3, sd3 := startClusterSystem(t, srv.Addr().String())
+		require.NotNil(t, node3)
+		require.NotNil(t, sd3)
+
+		// create a singleton actor
+		err := node1.SpawnSingleton(ctx, "actorName", newMockActor())
+		require.NoError(t, err)
+
+		util.Pause(time.Second)
+
+		// take down node1 since it is the first node created in the cluster
+		require.NoError(t, node1.Stop(ctx))
+		require.NoError(t, sd1.Close())
+
+		// Wait for cluster rebalancing
+		util.Pause(time.Minute)
+
+		// We know node2 is the next leader inline when the node1 goes down
+		pid, err := node2.LocalActor("actorName")
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+
+		t.Cleanup(func() {
+			assert.NoError(t, node2.Stop(ctx))
+			assert.NoError(t, node3.Stop(ctx))
+			assert.NoError(t, sd2.Close())
+			assert.NoError(t, sd3.Close())
+			srv.Shutdown()
+		})
+	})
 }

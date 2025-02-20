@@ -62,12 +62,12 @@ func NewRegistry() Registry {
 
 // Deregister removes the registered object from the registry
 func (x *registry) Deregister(v any) {
-	x.m.Delete(TypeName(v))
+	x.m.Delete(Name(v))
 }
 
 // Exists return true when a given object is in the registry
 func (x *registry) Exists(v any) bool {
-	_, ok := x.m.Get(TypeName(v))
+	_, ok := x.m.Get(Name(v))
 	return ok
 }
 
@@ -83,13 +83,13 @@ func (x *registry) TypesMap() map[string]reflect.Type {
 // Register an object
 func (x *registry) Register(v any) {
 	rtype := reflectType(v)
-	name := TypeName(v)
+	name := Name(v)
 	x.m.Set(name, rtype)
 }
 
 // Type returns the type of object
 func (x *registry) Type(v any) (reflect.Type, bool) {
-	return x.m.Get(TypeName(v))
+	return x.m.Get(Name(v))
 }
 
 // TypeOf returns the type of object name
@@ -109,8 +109,8 @@ func reflectType(v any) reflect.Type {
 	return rtype
 }
 
-// TypeName returns the name of a given object
-func TypeName(v any) string {
+// Name returns the name of a given object
+func Name(v any) string {
 	return lowTrim(reflectType(v).String())
 }
 

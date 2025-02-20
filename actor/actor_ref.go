@@ -82,7 +82,7 @@ func fromActorRef(actorRef *internalpb.ActorRef) ActorRef {
 func fromPID(pid *PID) ActorRef {
 	return ActorRef{
 		name:    pid.Name(),
-		kind:    types.TypeName(pid.Actor()),
+		kind:    types.Name(pid.Actor()),
 		address: pid.Address(),
 	}
 }

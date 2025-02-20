@@ -522,6 +522,7 @@ func (x *Engine) PutActor(ctx context.Context, actor *internalpb.ActorRef) error
 				Error(); err != nil {
 				return fmt.Errorf("(%s) failed to sync actor=(%s): %v", x.node.PeersAddress(), actor.GetActorAddress().GetName(), err)
 			}
+			return nil
 		}
 
 		if err := x.actorsMap.Put(ctx, key, encoded); err != nil {
