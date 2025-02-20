@@ -105,13 +105,11 @@ func TestRebalancing(t *testing.T) {
 		err = sender.SendAsync(ctx, actorName, new(testpb.TestSend))
 		require.NoError(t, err)
 
-		t.Cleanup(func() {
-			assert.NoError(t, node1.Stop(ctx))
-			assert.NoError(t, node3.Stop(ctx))
-			assert.NoError(t, sd1.Close())
-			assert.NoError(t, sd3.Close())
-			srv.Shutdown()
-		})
+		assert.NoError(t, node1.Stop(ctx))
+		assert.NoError(t, node3.Stop(ctx))
+		assert.NoError(t, sd1.Close())
+		assert.NoError(t, sd3.Close())
+		srv.Shutdown()
 	})
 	t.Run("With successful actors redeployment when TLS enabled", func(t *testing.T) {
 		t.SkipNow()
