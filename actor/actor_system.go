@@ -105,13 +105,13 @@ type ActorSystem interface {
 	SpawnRouter(ctx context.Context, poolSize int, routeesKind Actor, opts ...RouterOption) (*PID, error)
 	// SpawnSingleton creates a singleton actor in the system.
 	// A singleton actor is instantiated only once within the system when cluster mode is disabled.
+	// A singleton actor is created with the default supervisor strategy and directive.
+	// A singleton actor once created lives througout the lifetime of the given actor system.
 	//
 	// In cluster mode, the actor acts as a cluster singleton—meaning only one instance exists across the entire cluster.
 	// The cluster singleton is automatically started on the oldest node in the cluster.
-	// If the oldest node fails, the singleton is restarted on the next oldest node.
+	// If the oldest node leaves the cluster, the singleton is restarted on the new oldest node.
 	// This is useful for managing shared resources or coordinating tasks that should be handled by a single actor.
-	//
-	// The singleton is stopped when the actor system terminates.
 	SpawnSingleton(ctx context.Context, name string, actor Actor) error
 	// Kill stops a given actor in the system
 	Kill(ctx context.Context, name string) error
