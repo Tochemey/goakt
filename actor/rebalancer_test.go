@@ -225,10 +225,8 @@ func TestRebalancing(t *testing.T) {
 		require.NoError(t, sd1.Close())
 
 		require.Eventually(t, func() bool {
-			if _, _, err := node2.ActorOf(ctx, "actorName"); err != nil {
-				return false
-			}
-			return true
+			_, _, err := node2.ActorOf(ctx, "actorName")
+			return err != nil
 		}, 2*time.Minute, time.Second)
 
 		assert.NoError(t, node2.Stop(ctx))
