@@ -106,7 +106,7 @@ type ActorSystem interface {
 	// SpawnSingleton creates a singleton actor in the system.
 	// A singleton actor is instantiated only once within the system when cluster mode is disabled.
 	// A singleton actor is created with the default supervisor strategy and directive.
-	// A singleton actor once created lives througout the lifetime of the given actor system.
+	// A singleton actor once created lives throughout the lifetime of the given actor system.
 	//
 	// In cluster mode, the actor acts as a cluster singleton—meaning only one instance exists across the entire cluster.
 	// The cluster singleton is automatically started on the oldest node in the cluster.
@@ -726,7 +726,7 @@ func (x *actorSystem) SpawnRouter(ctx context.Context, poolSize int, routeesKind
 // SpawnSingleton creates a singleton actor in the system.
 // A singleton actor is instantiated only once within the system when cluster mode is disabled.
 // A singleton actor is created with the default supervisor strategy and directive.
-// A singleton actor once created lives througout the lifetime of the given actor system.
+// A singleton actor once created lives throughout the lifetime of the given actor system.
 //
 // In cluster mode, the actor acts as a cluster singleton—meaning only one instance exists across the entire cluster.
 // The cluster singleton is automatically started on the oldest node in the cluster.
