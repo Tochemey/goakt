@@ -104,11 +104,12 @@ type ActorSystem interface {
 	// A single actor will only process one message at a time.
 	SpawnRouter(ctx context.Context, poolSize int, routeesKind Actor, opts ...RouterOption) (*PID, error)
 	// SpawnSingleton creates a singleton actor in the system.
-	// A singleton actor is instantiated only once within the system when cluster mode is disabled.
+	//
+	// A singleton actor is instantiated when cluster mode is enabled.
+	// A singleton actor like any other actor is created only once within the system and in the cluster.
 	// A singleton actor is created with the default supervisor strategy and directive.
 	// A singleton actor once created lives throughout the lifetime of the given actor system.
 	//
-	// In cluster mode, the actor acts as a cluster singleton—meaning only one instance exists across the entire cluster.
 	// The cluster singleton is automatically started on the oldest node in the cluster.
 	// If the oldest node leaves the cluster, the singleton is restarted on the new oldest node.
 	// This is useful for managing shared resources or coordinating tasks that should be handled by a single actor.
@@ -724,11 +725,12 @@ func (x *actorSystem) SpawnRouter(ctx context.Context, poolSize int, routeesKind
 }
 
 // SpawnSingleton creates a singleton actor in the system.
-// A singleton actor is instantiated only once within the system when cluster mode is disabled.
+//
+// A singleton actor is instantiated when cluster mode is enabled.
+// A singleton actor like any other actor is created only once within the system and in the cluster.
 // A singleton actor is created with the default supervisor strategy and directive.
 // A singleton actor once created lives throughout the lifetime of the given actor system.
 //
-// In cluster mode, the actor acts as a cluster singleton—meaning only one instance exists across the entire cluster.
 // The cluster singleton is automatically started on the oldest node in the cluster.
 // If the oldest node leaves the cluster, the singleton is restarted on the new oldest node.
 // This is useful for managing shared resources or coordinating tasks that should be handled by a single actor.
