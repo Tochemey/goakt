@@ -96,9 +96,8 @@ func (x *actorSystem) spawnSingletonManager(ctx context.Context) error {
 		return nil
 	}
 
-	var err error
 	actorName := x.reservedName(singletonManagerType)
-	x.singletonManager, err = x.configPID(ctx,
+	x.singletonManager, _ = x.configPID(ctx,
 		actorName,
 		newClusterSingletonManager(),
 		WithSupervisor(
@@ -110,9 +109,6 @@ func (x *actorSystem) spawnSingletonManager(ctx context.Context) error {
 			),
 		),
 	)
-	if err != nil {
-		return fmt.Errorf("actor=%s failed to start cluster singleton manager: %w", actorName, err)
-	}
 
 	// the singletonManager is a child actor of the system guardian
 	_ = x.actors.AddNode(x.systemGuardian, x.singletonManager)
