@@ -103,6 +103,16 @@ type ActorSystem interface {
 	// A router is a special type of actor that helps distribute messages of the same type over a set of actors, so that messages can be processed in parallel.
 	// A single actor will only process one message at a time.
 	SpawnRouter(ctx context.Context, poolSize int, routeesKind Actor, opts ...RouterOption) (*PID, error)
+	// SpawnSingleton creates a singleton actor in the system.
+	// A singleton actor is instantiated only once within the system when cluster mode is disabled.
+	//
+	// In cluster mode, the actor acts as a cluster singleton—meaning only one instance exists across the entire cluster.
+	// The cluster singleton is automatically started on the oldest node in the cluster.
+	// If the oldest node fails, the singleton is restarted on the next oldest node.
+	// This is useful for managing shared resources or coordinating tasks that should be handled by a single actor.
+	//
+	// The singleton is stopped when the actor system terminates.
+	SpawnSingleton(ctx context.Context, name string, actor Actor) error
 	// Kill stops a given actor in the system
 	Kill(ctx context.Context, name string) error
 	// ReSpawn recreates a given actor in the system
@@ -186,8 +196,8 @@ type ActorSystem interface {
 	handleRemoteAsk(ctx context.Context, to *PID, message proto.Message, timeout time.Duration) (response proto.Message, err error)
 	// handleRemoteTell handles an asynchronous message to an actor
 	handleRemoteTell(ctx context.Context, to *PID, message proto.Message) error
-	// setActor sets actor in the actor system actors registry
-	broadcastActor(actor *PID)
+	// broadcastActor sets actor in the actor system actors registry
+	broadcastActor(actor *PID, singleton bool)
 	// getPeerStateFromStore returns the peer state from the cluster store
 	getPeerStateFromStore(address string) (*internalpb.PeerState, error)
 	// removePeerStateFromStore removes the peer state from the cluster store
@@ -205,6 +215,7 @@ type ActorSystem interface {
 	getUserGuardian() *PID
 	getDeathWatch() *PID
 	getDeadletter() *PID
+	getSingletonManager() *PID
 }
 
 // ActorSystem represent a collection of actors on a given node
@@ -278,12 +289,14 @@ type actorSystem struct {
 	rebalancingQueue       chan *internalpb.PeerState
 	rebalancedNodes        goset.Set[string]
 
-	rebalancer      *PID
-	rootGuardian    *PID
-	userGuardian    *PID
-	systemGuardian  *PID
-	deathWatch      *PID
-	deadletters     *PID
+	rebalancer       *PID
+	rootGuardian     *PID
+	userGuardian     *PID
+	systemGuardian   *PID
+	deathWatch       *PID
+	deadletters      *PID
+	singletonManager *PID
+
 	startedAt       *atomic.Int64
 	rebalancing     *atomic.Bool
 	rebalanceLocker *sync.Mutex
@@ -446,8 +459,9 @@ func (x *actorSystem) Start(ctx context.Context) error {
 		AddError(x.spawnSystemGuardian(ctx)).
 		AddError(x.spawnUserGuardian(ctx)).
 		AddError(x.spawnRebalancer(ctx)).
-		AddError(x.spawnJanitor(ctx)).
+		AddError(x.spawnDeathWatch(ctx)).
 		AddError(x.spawnDeadletter(ctx)).
+		AddError(x.spawnSingletonManager(ctx)).
 		Error(); err != nil {
 		return errorschain.
 			New(errorschain.ReturnAll()).
@@ -655,7 +669,7 @@ func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor, opts 
 	// add the given actor to the tree and supervise it
 	_ = x.actors.AddNode(x.userGuardian, pid)
 	x.actors.AddWatcher(pid, x.deathWatch)
-	x.broadcastActor(pid)
+	x.broadcastActor(pid, false)
 	return pid, nil
 }
 
@@ -691,7 +705,7 @@ func (x *actorSystem) SpawnNamedFromFunc(ctx context.Context, name string, recei
 	x.actorsCounter.Inc()
 	_ = x.actors.AddNode(x.userGuardian, pid)
 	x.actors.AddWatcher(pid, x.deathWatch)
-	x.broadcastActor(pid)
+	x.broadcastActor(pid, false)
 	return pid, nil
 }
 
@@ -707,6 +721,73 @@ func (x *actorSystem) SpawnRouter(ctx context.Context, poolSize int, routeesKind
 	router := newRouter(poolSize, routeesKind, x.logger, opts...)
 	routerName := x.reservedName(routerType)
 	return x.Spawn(ctx, routerName, router)
+}
+
+// SpawnSingleton creates a singleton actor in the system.
+// A singleton actor is instantiated only once within the system when cluster mode is disabled.
+// A singleton actor is created with the default supervisor strategy and directive.
+// A singleton actor once created lives througout the lifetime of the given actor system.
+//
+// In cluster mode, the actor acts as a cluster singleton—meaning only one instance exists across the entire cluster.
+// The cluster singleton is automatically started on the oldest node in the cluster.
+// If the oldest node leaves the cluster, the singleton is restarted on the new oldest node.
+// This is useful for managing shared resources or coordinating tasks that should be handled by a single actor.
+func (x *actorSystem) SpawnSingleton(ctx context.Context, name string, actor Actor) error {
+	if !x.started.Load() {
+		return ErrActorSystemNotStarted
+	}
+
+	if !x.InCluster() {
+		return ErrClusterDisabled
+	}
+
+	// create the actor as the child actor of the singleton manager
+	singletonManager := x.getSingletonManager()
+	if singletonManager == nil {
+		return ErrClusterDisabled
+	}
+
+	cluster := x.getCluster()
+
+	// only create the singleton actor on the oldest node in the cluster
+	if !cluster.IsLeader(ctx) {
+		return x.spawnSingletonOnLeader(ctx, cluster, name, actor)
+	}
+
+	// check some preconditions
+	if err := x.checkSpawnPreconditions(ctx, name, actor); err != nil {
+		return err
+	}
+
+	actorAddress := x.actorAddress(name)
+	pidNode, exist := x.actors.GetNode(actorAddress.String())
+	if exist {
+		pid := pidNode.GetValue()
+		if pid.IsRunning() {
+			return nil
+		}
+	}
+
+	pid, err := x.configPID(ctx, name, actor,
+		WithLongLived(),
+		WithSupervisor(
+			NewSupervisor(
+				WithStrategy(OneForOneStrategy),
+				WithDirective(PanicError{}, StopDirective),
+				WithDirective(InternalError{}, StopDirective),
+				WithDirective(&runtime.PanicNilError{}, StopDirective),
+			),
+		))
+	if err != nil {
+		return err
+	}
+
+	x.actorsCounter.Inc()
+	// add the given actor to the tree and supervise it
+	_ = x.actors.AddNode(x.singletonManager, pid)
+	x.actors.AddWatcher(pid, x.deathWatch)
+	x.broadcastActor(pid, true)
+	return nil
 }
 
 // Kill stops a given actor in the system
@@ -1190,6 +1271,13 @@ func (x *actorSystem) RemoteSpawn(ctx context.Context, request *connect.Request[
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 
+	if msg.GetIsSingleton() {
+		if err := x.SpawnSingleton(ctx, msg.GetActorName(), actor); err != nil {
+			logger.Errorf("failed to create actor=(%s) on [host=%s, port=%d]: reason: (%v)", msg.GetActorName(), msg.GetHost(), msg.GetPort(), err)
+			return nil, connect.NewError(connect.CodeInternal, err)
+		}
+	}
+
 	if _, err = x.Spawn(ctx, msg.GetActorName(), actor); err != nil {
 		logger.Errorf("failed to create actor=(%s) on [host=%s, port=%d]: reason: (%v)", msg.GetActorName(), msg.GetHost(), msg.GetPort(), err)
 		return nil, connect.NewError(connect.CodeInternal, err)
@@ -1294,6 +1382,14 @@ func (x *actorSystem) getDeadletter() *PID {
 	return deadletters
 }
 
+// getSingletonManager returns the system singleton manager
+func (x *actorSystem) getSingletonManager() *PID {
+	x.locker.Lock()
+	singletonManager := x.singletonManager
+	x.locker.Unlock()
+	return singletonManager
+}
+
 func (x *actorSystem) completeRebalancing() {
 	x.rebalancing.Store(false)
 }
@@ -1322,11 +1418,12 @@ func (x *actorSystem) getPeerStateFromStore(address string) (*internalpb.PeerSta
 }
 
 // broadcastActor broadcast the newly (re)spawned actor into the cluster
-func (x *actorSystem) broadcastActor(actor *PID) {
+func (x *actorSystem) broadcastActor(actor *PID, singleton bool) {
 	if x.clusterEnabled.Load() {
 		x.wireActorsQueue <- &internalpb.ActorRef{
 			ActorAddress: actor.Address().Address,
 			ActorType:    types.TypeName(actor.Actor()),
+			IsSingleton:  singleton,
 		}
 	}
 }
@@ -1915,8 +2012,8 @@ func (x *actorSystem) spawnUserGuardian(ctx context.Context) error {
 	return nil
 }
 
-// spawnRebalancer creates the cluster rebalancer
-func (x *actorSystem) spawnJanitor(ctx context.Context) error {
+// spawnDeathWatch creates the deathWatch actor
+func (x *actorSystem) spawnDeathWatch(ctx context.Context) error {
 	var err error
 	actorName := x.reservedName(deathWatchType)
 

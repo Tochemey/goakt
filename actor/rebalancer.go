@@ -39,8 +39,9 @@ import (
 )
 
 type toRebalance struct {
-	name string
-	kind string
+	name        string
+	kind        string
+	isSingleton bool
 }
 
 // rebalancer is a system actor that helps rebalance cluster
@@ -102,8 +103,9 @@ func (r *rebalancer) Rebalance(ctx *ReceiveContext) {
 		if len(leaderShares) > 0 {
 			eg.Go(func() error {
 				for _, actor := range leaderShares {
+					// never redistribute system actors
 					if !isReservedName(actor.name) {
-						if err := r.recreateLocally(egCtx, actor); err != nil {
+						if err := r.recreateLocally(egCtx, actor, true); err != nil {
 							return NewSpawnError(err)
 						}
 					}
@@ -125,10 +127,10 @@ func (r *rebalancer) Rebalance(ctx *ReceiveContext) {
 					}
 
 					for _, actor := range actors {
-						// never redistribute system actors
-						if !isReservedName(actor.name) {
+						// never redistribute system actors and singleton actors
+						if !isReservedName(actor.name) && !actor.isSingleton {
 							if !peerFound {
-								err := r.recreateLocally(egCtx, actor)
+								err := r.recreateLocally(egCtx, actor, false)
 								if err == nil {
 									continue
 								}
@@ -139,7 +141,8 @@ func (r *rebalancer) Rebalance(ctx *ReceiveContext) {
 								peerState.GetHost(),
 								int(peerState.GetRemotingPort()),
 								actor.name,
-								actor.kind); err != nil {
+								actor.kind,
+								false); err != nil {
 								logger.Error(err)
 								return NewSpawnError(err)
 							}
@@ -176,36 +179,41 @@ func (r *rebalancer) PostStop(context.Context) error {
 
 // computeRebalancing build the list of actors to create on the leader node and the peers in the cluster
 func (r *rebalancer) computeRebalancing(totalPeers int, nodeLeftState *internalpb.PeerState) (leaderShares []*toRebalance, peersShares [][]*toRebalance) {
-	var (
-		chunks      [][]*toRebalance
-		actorsCount = len(nodeLeftState.GetActors())
-		actors      = nodeLeftState.GetActors()
-	)
+	actors := nodeLeftState.GetActors()
+	actorsCount := len(actors)
 
-	// distribute actors amongst the peers with the leader taking the heavy load
-	switch {
-	case actorsCount < totalPeers:
-		for name, kind := range actors {
-			leaderShares = append(leaderShares, &toRebalance{
-				name: name,
-				kind: kind,
-			})
-		}
-	default:
-		toRebalances := make([]*toRebalance, 0, actorsCount)
-		for name, kind := range actors {
-			toRebalances = append(toRebalances, &toRebalance{
-				name: name,
-				kind: kind,
-			})
-		}
-
-		quotient := actorsCount / totalPeers
-		remainder := actorsCount % totalPeers
-		leaderShares = toRebalances[:remainder]
-		chunks = slice.Chunk[*toRebalance](toRebalances[remainder:], quotient)
+	// Collect all actors to be rebalanced
+	toRebalances := make([]*toRebalance, 0, actorsCount)
+	for name, actorProps := range actors {
+		toRebalances = append(toRebalances, &toRebalance{
+			name:        name,
+			kind:        actorProps.GetActorType(),
+			isSingleton: actorProps.GetIsSingleton(),
+		})
 	}
 
+	// Separate singleton actors to be assigned to the leader
+	leaderShares = slice.Filter(toRebalances, func(actor *toRebalance) bool {
+		return actor.isSingleton
+	})
+
+	// Remove singleton actors from the list
+	toRebalances = slice.Filter(toRebalances, func(actor *toRebalance) bool {
+		return !actor.isSingleton
+	})
+
+	// Distribute remaining actors among peers
+	actorsCount = len(toRebalances)
+	quotient := actorsCount / totalPeers
+	remainder := actorsCount % totalPeers
+
+	// Assign remainder actors to the leader
+	leaderShares = append(leaderShares, toRebalances[:remainder]...)
+
+	// Chunk the remaining actors for peers
+	chunks := slice.Chunk(toRebalances[remainder:], quotient)
+
+	// Ensure leader takes the first chunk
 	if len(chunks) > 0 {
 		leaderShares = append(leaderShares, chunks[0]...)
 	}
@@ -214,11 +222,17 @@ func (r *rebalancer) computeRebalancing(totalPeers int, nodeLeftState *internalp
 }
 
 // recreateLocally recreates the actor
-func (r *rebalancer) recreateLocally(ctx context.Context, actor *toRebalance) error {
+func (r *rebalancer) recreateLocally(ctx context.Context, actor *toRebalance, enforceSingleton bool) error {
 	iactor, err := r.reflection.ActorFrom(actor.kind)
 	if err != nil {
 		return err
 	}
+
+	if enforceSingleton && actor.isSingleton {
+		// spawn the singleton actor
+		return r.pid.ActorSystem().SpawnSingleton(ctx, actor.name, iactor)
+	}
+
 	_, err = r.pid.ActorSystem().Spawn(ctx, actor.name, iactor)
 	return err
 }

@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package internalpb;
 
+import "internal/actor.proto";
+
 option go_package = "github.com/tochemey/goakt/v3/internal/internalpb;internalpb";
 
 message PeerState {
@@ -12,8 +14,8 @@ message PeerState {
   // Specifies the remoting host
   int32 peers_port = 3;
   // Specifies the list of actors
-  // actorName -> actorKind
-  map<string, string> actors = 4;
+  // actorName -> ActorProps
+  map<string, ActorProps> actors = 4;
 }
 
 message Rebalance {

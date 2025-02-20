@@ -315,14 +315,15 @@ func (r *Remoting) RemoteBatchAsk(ctx context.Context, from, to *address.Address
 }
 
 // RemoteSpawn creates an actor on a remote node. The given actor needs to be registered on the remote node using the Register method of ActorSystem
-func (r *Remoting) RemoteSpawn(ctx context.Context, host string, port int, name, actorType string) error {
+func (r *Remoting) RemoteSpawn(ctx context.Context, host string, port int, name, actorType string, singleton bool) error {
 	remoteClient := r.serviceClient(host, port)
 	request := connect.NewRequest(
 		&internalpb.RemoteSpawnRequest{
-			Host:      host,
-			Port:      int32(port),
-			ActorName: name,
-			ActorType: actorType,
+			Host:        host,
+			Port:        int32(port),
+			ActorName:   name,
+			ActorType:   actorType,
+			IsSingleton: singleton,
 		},
 	)
 

@@ -65,6 +65,7 @@ const (
 	systemGuardianType
 	deathWatchType
 	deadletterType
+	singletonManagerType
 )
 
 var (
@@ -77,12 +78,13 @@ var (
 	timers                     = timer.NewPool()
 
 	systemNames = map[nameType]string{
-		routerType:         "GoAktRouter",
-		rebalancerType:     "GoAktRebalancer",
-		rootGuardianType:   "GoAktRootGuardian",
-		userGuardianType:   "GoAktUserGuardian",
-		systemGuardianType: "GoAktSystemGuardian",
-		deathWatchType:     "GoAktDeathWatch",
-		deadletterType:     "GoAktDeadletter",
+		routerType:           "GoAktRouter",
+		rebalancerType:       "GoAktRebalancer",
+		rootGuardianType:     "GoAktRootGuardian",
+		userGuardianType:     "GoAktUserGuardian",
+		systemGuardianType:   "GoAktSystemGuardian",
+		deathWatchType:       "GoAktDeathWatch",
+		deadletterType:       "GoAktDeadletter",
+		singletonManagerType: "GoAktSingletonManager",
 	}
 )

@@ -1696,7 +1696,7 @@ func TestRemotingSpawn(t *testing.T) {
 		require.NoError(t, err)
 
 		// spawn the remote actor
-		err = remoting.RemoteSpawn(ctx, host, remotingPort, actorName, "actors.exchanger")
+		err = remoting.RemoteSpawn(ctx, host, remotingPort, actorName, "actors.exchanger", false)
 		require.NoError(t, err)
 
 		// re-fetching the address of the actor should return not nil address after start
@@ -1761,7 +1761,7 @@ func TestRemotingSpawn(t *testing.T) {
 		require.Nil(t, addr)
 
 		// spawn the remote actor
-		err = remoting.RemoteSpawn(ctx, sys.Host(), int(sys.Port()), actorName, "actors.exchanger")
+		err = remoting.RemoteSpawn(ctx, sys.Host(), int(sys.Port()), actorName, "actors.exchanger", false)
 		require.Error(t, err)
 		assert.EqualError(t, err, ErrTypeNotRegistered.Error())
 
@@ -1799,7 +1799,7 @@ func TestRemotingSpawn(t *testing.T) {
 		actorName := uuid.NewString()
 		remoting := NewRemoting()
 		// spawn the remote actor
-		err = remoting.RemoteSpawn(ctx, host, remotingPort, actorName, "actors.exchanger")
+		err = remoting.RemoteSpawn(ctx, host, remotingPort, actorName, "actors.exchanger", false)
 		require.Error(t, err)
 
 		t.Cleanup(
@@ -1862,7 +1862,7 @@ func TestRemotingSpawn(t *testing.T) {
 		require.NoError(t, err)
 
 		// spawn the remote actor
-		err = remoting.RemoteSpawn(ctx, host, remotingPort, actorName, "actors.exchanger")
+		err = remoting.RemoteSpawn(ctx, host, remotingPort, actorName, "actors.exchanger", false)
 		require.NoError(t, err)
 
 		// re-fetching the address of the actor should return not nil address after start

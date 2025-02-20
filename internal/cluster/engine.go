@@ -342,7 +342,7 @@ func (x *Engine) Start(ctx context.Context) error {
 		Host:         x.node.Host,
 		RemotingPort: int32(x.node.RemotingPort),
 		PeersPort:    int32(x.node.PeersPort),
-		Actors:       map[string]string{},
+		Actors:       map[string]*internalpb.ActorProps{},
 	}
 
 	if err := x.initializeState(ctx); err != nil {
@@ -508,7 +508,12 @@ func (x *Engine) PutActor(ctx context.Context, actor *internalpb.ActorRef) error
 
 	eg.Go(func() error {
 		actors := x.peerState.GetActors()
-		actors[actor.GetActorAddress().GetName()] = actor.GetActorType()
+		actorName := actor.GetActorAddress().GetName()
+		actors[actorName] = &internalpb.ActorProps{
+			ActorName:   actorName,
+			ActorType:   actor.GetActorType(),
+			IsSingleton: actor.GetIsSingleton(),
+		}
 		x.peerState.Actors = actors
 
 		bytea, _ := proto.Marshal(x.peerState)

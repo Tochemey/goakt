@@ -102,3 +102,21 @@ func (s *Map[K, V]) Range(f func(K, V)) {
 		f(k, v)
 	}
 }
+
+// Values returns the values in the Map
+func (s *Map[K, V]) Values() []V {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	values := make([]V, 0, len(s.data))
+	for _, v := range s.data {
+		values = append(values, v)
+	}
+	return values
+}
+
+// Reset clears all key-value pairs from the Map.
+func (s *Map[K, V]) Reset() {
+	s.mu.Lock()
+	clear(s.data)
+	s.mu.Unlock()
+}

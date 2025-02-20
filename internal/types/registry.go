@@ -27,7 +27,8 @@ package types
 import (
 	"reflect"
 	"strings"
-	"sync"
+
+	"github.com/tochemey/goakt/v3/internal/collection/syncmap"
 )
 
 // Registry defines the types registry interface
@@ -47,8 +48,7 @@ type Registry interface {
 }
 
 type registry struct {
-	mu       *sync.RWMutex
-	typesMap map[string]reflect.Type
+	m *syncmap.Map[string, reflect.Type]
 }
 
 var _ Registry = (*registry)(nil)
@@ -56,57 +56,45 @@ var _ Registry = (*registry)(nil)
 // NewRegistry creates a new types registry
 func NewRegistry() Registry {
 	return &registry{
-		mu:       &sync.RWMutex{},
-		typesMap: make(map[string]reflect.Type),
+		m: syncmap.New[string, reflect.Type](),
 	}
 }
 
 // Deregister removes the registered object from the registry
-func (r *registry) Deregister(v any) {
-	r.mu.Lock()
-	delete(r.typesMap, TypeName(v))
-	r.mu.Unlock()
+func (x *registry) Deregister(v any) {
+	x.m.Delete(TypeName(v))
 }
 
 // Exists return true when a given object is in the registry
-func (r *registry) Exists(v any) bool {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	_, ok := r.typesMap[TypeName(v)]
+func (x *registry) Exists(v any) bool {
+	_, ok := x.m.Get(TypeName(v))
 	return ok
 }
 
 // TypesMap returns the list of registered at any point in time
-func (r *registry) TypesMap() map[string]reflect.Type {
-	r.mu.Lock()
-	out := r.typesMap
-	r.mu.Unlock()
+func (x *registry) TypesMap() map[string]reflect.Type {
+	var out map[string]reflect.Type
+	x.m.Range(func(s string, r reflect.Type) {
+		out[s] = r
+	})
 	return out
 }
 
 // Register an object
-func (r *registry) Register(v any) {
+func (x *registry) Register(v any) {
 	rtype := reflectType(v)
 	name := TypeName(v)
-	r.mu.Lock()
-	r.typesMap[name] = rtype
-	r.mu.Unlock()
+	x.m.Set(name, rtype)
 }
 
 // Type returns the type of object
-func (r *registry) Type(v any) (reflect.Type, bool) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	out, ok := r.typesMap[TypeName(v)]
-	return out, ok
+func (x *registry) Type(v any) (reflect.Type, bool) {
+	return x.m.Get(TypeName(v))
 }
 
 // TypeOf returns the type of object name
-func (r *registry) TypeOf(name string) (reflect.Type, bool) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	out, ok := r.typesMap[lowTrim(name)]
-	return out, ok
+func (x *registry) TypeOf(name string) (reflect.Type, bool) {
+	return x.m.Get(lowTrim(name))
 }
 
 // reflectType returns the runtime type of object

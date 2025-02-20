@@ -604,7 +604,7 @@ func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor, opts .
 	}
 
 	// set the actor in the given actor system registry
-	pid.ActorSystem().broadcastActor(cid)
+	pid.ActorSystem().broadcastActor(cid, false)
 	return cid, nil
 }
 

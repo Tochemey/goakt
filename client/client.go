@@ -133,12 +133,12 @@ func (x *Client) Kinds(ctx context.Context) ([]string, error) {
 }
 
 // Spawn creates an actor provided the actor name.
-func (x *Client) Spawn(ctx context.Context, actor *Actor) (err error) {
+func (x *Client) Spawn(ctx context.Context, actor *Actor, singleton bool) (err error) {
 	x.locker.Lock()
 	node := nextNode(x.balancer)
 	x.locker.Unlock()
 	remoteHost, remotePort := node.HostAndPort()
-	return node.Remoting().RemoteSpawn(ctx, remoteHost, remotePort, actor.Name(), actor.Kind())
+	return node.Remoting().RemoteSpawn(ctx, remoteHost, remotePort, actor.Name(), actor.Kind(), singleton)
 }
 
 // SpawnWithBalancer creates an actor provided the actor name and the balancer strategy
@@ -149,7 +149,7 @@ func (x *Client) SpawnWithBalancer(ctx context.Context, actor *Actor, strategy B
 	node := nextNode(balancer)
 	remoteHost, remotePort := node.HostAndPort()
 	x.locker.Unlock()
-	return node.Remoting().RemoteSpawn(ctx, remoteHost, remotePort, actor.Name(), actor.Kind())
+	return node.Remoting().RemoteSpawn(ctx, remoteHost, remotePort, actor.Name(), actor.Kind(), false)
 }
 
 // ReSpawn restarts a given actor
