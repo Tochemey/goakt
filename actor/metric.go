@@ -28,7 +28,7 @@ import "time"
 
 // Metric defines the actor system metric
 type Metric struct {
-	// DeadlettersCount returns the total number of deadletters
+	// DeadlettersCount returns the total number of deadletter
 	deadlettersCount int64
 	// ActorsCount returns the total number of actors in the system
 	actorsCount int64
@@ -36,7 +36,7 @@ type Metric struct {
 	uptime int64
 }
 
-// DeadlettersCount returns the total number of deadletters
+// DeadlettersCount returns the total number of deadletter
 func (m Metric) DeadlettersCount() int64 {
 	return m.deadlettersCount
 }
@@ -54,7 +54,7 @@ func (m Metric) Uptime() int64 {
 
 // ActorMetric defines actor specific metrics
 type ActorMetric struct {
-	// DeadlettersCount returns the total number of deadletters
+	// DeadlettersCount returns the total number of deadletter
 	deadlettersCount uint64
 	// ActorsCount returns the total number of child actor given a specific PID
 	childrenCount uint64
@@ -80,7 +80,7 @@ func (x ActorMetric) RestartCount() uint64 {
 	return x.restartCount
 }
 
-// DeadlettersCount returns the total number of deadletters
+// DeadlettersCount returns the total number of deadletter
 func (x ActorMetric) DeadlettersCount() uint64 {
 	return x.deadlettersCount
 }

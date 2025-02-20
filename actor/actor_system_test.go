@@ -425,7 +425,7 @@ func TestActorSystem(t *testing.T) {
 		var items []*goaktpb.ActorRestarted
 		for message := range consumer.Iterator() {
 			payload := message.Payload()
-			// only listening to deadletters
+			// only listening to deadletter
 			restarted, ok := payload.(*goaktpb.ActorRestarted)
 			if ok {
 				items = append(items, restarted)
@@ -908,7 +908,7 @@ func TestActorSystem(t *testing.T) {
 			},
 		)
 	})
-	t.Run("With deadletters subscription ", func(t *testing.T) {
+	t.Run("With deadletter subscription ", func(t *testing.T) {
 		ctx := context.TODO()
 		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
 
@@ -933,7 +933,7 @@ func TestActorSystem(t *testing.T) {
 		// wait a while
 		util.Pause(time.Second)
 
-		// every message sent to the actor will result in deadletters
+		// every message sent to the actor will result in deadletter
 		for i := 0; i < 5; i++ {
 			require.NoError(t, Tell(ctx, actorRef, new(testpb.TestSend)))
 		}
@@ -943,7 +943,7 @@ func TestActorSystem(t *testing.T) {
 		var items []*goaktpb.Deadletter
 		for message := range consumer.Iterator() {
 			payload := message.Payload()
-			// only listening to deadletters
+			// only listening to deadletter
 			deadletter, ok := payload.(*goaktpb.Deadletter)
 			if ok {
 				items = append(items, deadletter)
@@ -965,7 +965,7 @@ func TestActorSystem(t *testing.T) {
 		err = sys.Stop(ctx)
 		assert.NoError(t, err)
 	})
-	t.Run("With deadletters subscription when not started", func(t *testing.T) {
+	t.Run("With deadletter subscription when not started", func(t *testing.T) {
 		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
 
 		// create a deadletter subscriber
@@ -973,7 +973,7 @@ func TestActorSystem(t *testing.T) {
 		require.Error(t, err)
 		require.Nil(t, consumer)
 	})
-	t.Run("With deadletters unsubscription when not started", func(t *testing.T) {
+	t.Run("With deadletter unsubscription when not started", func(t *testing.T) {
 		ctx := context.TODO()
 		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
 
@@ -1581,7 +1581,7 @@ func TestActorSystem(t *testing.T) {
 		assert.EqualValues(t, 1, pid.ProcessedCount())
 		require.True(t, pid.IsRunning())
 
-		// every message sent to the actor will result in deadletters
+		// every message sent to the actor will result in deadletter
 		counter := 0
 		for i := 1; i <= 5; i++ {
 			require.NoError(t, Tell(ctx, pid, new(testpb.TestSend)))

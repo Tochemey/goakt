@@ -152,7 +152,7 @@ func (x *router) broadcast(ctx *ReceiveContext) {
 	routees, proceed := x.availableRoutees()
 	if !proceed {
 		x.logger.Warn("no routees available. stopping.... Bye")
-		// push message to deadletters
+		// push message to deadletter
 		ctx.Unhandled()
 		// shutdown
 		ctx.Shutdown()

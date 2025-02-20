@@ -295,7 +295,7 @@ type actorSystem struct {
 	userGuardian     *PID
 	systemGuardian   *PID
 	deathWatch       *PID
-	deadletters      *PID
+	deadletter       *PID
 	singletonManager *PID
 
 	startedAt       *atomic.Int64
@@ -648,7 +648,7 @@ func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor, opts 
 	}
 
 	// check some preconditions
-	if err := x.checkSpawnPreconditions(ctx, name, actor); err != nil {
+	if err := x.checkSpawnPreconditions(ctx, name, actor, false); err != nil {
 		return nil, err
 	}
 
@@ -685,7 +685,7 @@ func (x *actorSystem) SpawnNamedFromFunc(ctx context.Context, name string, recei
 	actor := newFuncActor(name, receiveFunc, config)
 
 	// check some preconditions
-	if err := x.checkSpawnPreconditions(ctx, name, actor); err != nil {
+	if err := x.checkSpawnPreconditions(ctx, name, actor, false); err != nil {
 		return nil, err
 	}
 
@@ -757,7 +757,7 @@ func (x *actorSystem) SpawnSingleton(ctx context.Context, name string, actor Act
 	}
 
 	// check some preconditions
-	if err := x.checkSpawnPreconditions(ctx, name, actor); err != nil {
+	if err := x.checkSpawnPreconditions(ctx, name, actor, true); err != nil {
 		return err
 	}
 
@@ -1376,10 +1376,10 @@ func (x *actorSystem) getDeathWatch() *PID {
 	return janitor
 }
 
-// getDeadletters returns the system deadletters actor
+// getDeadletters returns the system deadletter actor
 func (x *actorSystem) getDeadletter() *PID {
 	x.locker.Lock()
-	deadletters := x.deadletters
+	deadletters := x.deadletter
 	x.locker.Unlock()
 	return deadletters
 }
@@ -1830,7 +1830,10 @@ func (x *actorSystem) processPeerState(ctx context.Context, peer *cluster.Peer) 
 	}
 
 	x.logger.Debugf("peer (%s) actors count (%d)", peerAddress, len(peerState.GetActors()))
-	x.clusterStore.set(peerState)
+	if err := x.clusterStore.set(peerState); err != nil {
+		x.logger.Error(err)
+		return err
+	}
 	x.logger.Infof("peer sync(%s) successfully processed", peerAddress)
 	return nil
 }
@@ -2071,11 +2074,11 @@ func (x *actorSystem) spawnRebalancer(ctx context.Context) error {
 	return nil
 }
 
-// spawnDeadletter creates the deadletters synthetic actor
+// spawnDeadletter creates the deadletter synthetic actor
 func (x *actorSystem) spawnDeadletter(ctx context.Context) error {
 	var err error
 	actorName := x.reservedName(deadletterType)
-	x.deadletters, err = x.configPID(ctx,
+	x.deadletter, err = x.configPID(ctx,
 		actorName,
 		newDeadLetter(),
 		WithSupervisor(
@@ -2087,18 +2090,35 @@ func (x *actorSystem) spawnDeadletter(ctx context.Context) error {
 		),
 	)
 	if err != nil {
-		return fmt.Errorf("actor=%s failed to start deadletters: %w", actorName, err)
+		return fmt.Errorf("actor=%s failed to start deadletter: %w", actorName, err)
 	}
 
-	// the deadletters is a child actor of the system guardian
-	_ = x.actors.AddNode(x.systemGuardian, x.deadletters)
+	// the deadletter is a child actor of the system guardian
+	_ = x.actors.AddNode(x.systemGuardian, x.deadletter)
 	return nil
 }
 
 // checkSpawnPreconditions make sure before an actor is created some pre-conditions are checks
-func (x *actorSystem) checkSpawnPreconditions(ctx context.Context, actorName string, kind Actor) error {
+func (x *actorSystem) checkSpawnPreconditions(ctx context.Context, actorName string, kind Actor, singleton bool) error {
 	// check the existence of the actor given the kind prior to creating it
 	if x.clusterEnabled.Load() {
+		// a singleton actor must only have one instance at a given time of its kind
+		// in the whole cluster
+		if singleton {
+			id, err := x.cluster.LookupKind(ctx, types.TypeName(kind))
+			if err != nil {
+				return err
+			}
+
+			if id != "" {
+				return ErrSingletonAlreadyExists
+			}
+
+			return nil
+		}
+
+		// here we make sure in cluster mode that the given actor is uniquely created
+		// by checking both its kind and identifier
 		existed, err := x.cluster.GetActor(ctx, actorName)
 		if err != nil {
 			if errors.Is(err, cluster.ErrActorNotFound) {
@@ -2144,7 +2164,7 @@ func (x *actorSystem) getSetDeadlettersCount(ctx context.Context) {
 		// using the default ask timeout
 		// note: no need to check for error because this call is internal
 		message, _ := from.Ask(ctx, to, message, DefaultAskTimeout)
-		// cast the response received from the deadletters
+		// cast the response received from the deadletter
 		deadlettersCount := message.(*internalpb.DeadlettersCount)
 		// set the counter
 		x.deadlettersCounter.Store(uint64(deadlettersCount.GetTotalCount()))

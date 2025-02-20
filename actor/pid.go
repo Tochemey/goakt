@@ -1645,7 +1645,7 @@ func (pid *PID) notifyParent(err error) {
 	}
 }
 
-// toDeadletters sends message to deadletters synthetic actor
+// toDeadletters sends message to deadletter synthetic actor
 func (pid *PID) toDeadletters(receiveCtx *ReceiveContext, err error) {
 	// the message is lost
 	if pid.eventsStream == nil {
@@ -1666,11 +1666,11 @@ func (pid *PID) toDeadletters(receiveCtx *ReceiveContext, err error) {
 		sender = receiveCtx.Sender().Address().Address
 	}
 
-	// get the deadletters synthetic actor and send a message to it
+	// get the deadletter synthetic actor and send a message to it
 	receiver := pid.Address().Address
-	deadletters := pid.ActorSystem().getDeadletter()
+	deadletter := pid.ActorSystem().getDeadletter()
 	_ = pid.Tell(context.Background(),
-		deadletters,
+		deadletter,
 		&internalpb.EmitDeadletter{
 			Deadletter: &goaktpb.Deadletter{
 				Sender:   sender,
@@ -1854,7 +1854,7 @@ func (pid *PID) suspend(reason string) {
 	})
 }
 
-// getDeadlettersCount gets deadletters
+// getDeadlettersCount gets deadletter
 func (pid *PID) getDeadlettersCount(ctx context.Context) int64 {
 	var (
 		name    = pid.Name()
@@ -1869,7 +1869,7 @@ func (pid *PID) getDeadlettersCount(ctx context.Context) int64 {
 		// using the default ask timeout
 		// note: no need to check for error because this call is internal
 		message, _ := from.Ask(ctx, to, message, DefaultAskTimeout)
-		// cast the response received from the deadletters
+		// cast the response received from the deadletter
 		deadlettersCount := message.(*internalpb.DeadlettersCount)
 		return deadlettersCount.GetTotalCount()
 	}

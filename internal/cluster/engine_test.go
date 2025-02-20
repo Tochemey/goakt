@@ -194,7 +194,7 @@ func TestSingleNode(t *testing.T) {
 		// mock the discovery provider
 		provider := new(testkit.Provider)
 
-		provider.EXPECT().ID().Return("testDisco")
+		provider.EXPECT().ID().Return("id")
 		provider.EXPECT().Initialize().Return(nil)
 		provider.EXPECT().Register().Return(nil)
 		provider.EXPECT().Deregister().Return(nil)
@@ -376,6 +376,82 @@ func TestSingleNode(t *testing.T) {
 
 		// stop the startNode
 		require.NoError(t, cluster.Stop(ctx))
+	})
+	t.Run("With Put/RemoveKind and LookupKind", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+
+		// generate the ports for the single startNode
+		nodePorts := dynaport.Get(3)
+		discoveryPort := nodePorts[0]
+		clusterPort := nodePorts[1]
+		remotingPort := nodePorts[2]
+
+		// define discovered addresses
+		addrs := []string{
+			fmt.Sprintf("127.0.0.1:%d", discoveryPort),
+		}
+
+		// mock the discovery provider
+		provider := new(testkit.Provider)
+
+		provider.EXPECT().ID().Return("id")
+		provider.EXPECT().Initialize().Return(nil)
+		provider.EXPECT().Register().Return(nil)
+		provider.EXPECT().Deregister().Return(nil)
+		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
+		provider.EXPECT().Close().Return(nil)
+
+		// create a Node startNode
+		host := "127.0.0.1"
+		hostNode := discovery.Node{
+			Name:          host,
+			Host:          host,
+			DiscoveryPort: discoveryPort,
+			PeersPort:     clusterPort,
+			RemotingPort:  remotingPort,
+		}
+
+		cluster, err := NewEngine("test", provider, &hostNode, WithLogger(log.DiscardLogger))
+		require.NotNil(t, cluster)
+		require.NoError(t, err)
+
+		// start the Node startNode
+		err = cluster.Start(ctx)
+		require.NoError(t, err)
+
+		// create an actor
+		actorName := uuid.NewString()
+		actorKind := "kind"
+		actor := &internalpb.ActorRef{
+			ActorAddress: &goaktpb.Address{Name: actorName},
+			ActorType:    actorKind,
+			IsSingleton:  true,
+		}
+
+		// replicate the actor in the Node
+		err = cluster.PutActor(ctx, actor)
+		require.NoError(t, err)
+
+		actual, err := cluster.LookupKind(ctx, actorKind)
+		require.NoError(t, err)
+		require.NotEmpty(t, actual)
+
+		// remove the kind
+		err = cluster.RemoveKind(ctx, actorKind)
+		require.NoError(t, err)
+
+		// check the kind existence
+		actual, err = cluster.LookupKind(ctx, actorKind)
+		require.NoError(t, err)
+		require.Empty(t, actual)
+
+		//  shutdown the Node startNode
+		util.Pause(time.Second)
+
+		// stop the startNode
+		require.NoError(t, cluster.Stop(ctx))
+		provider.AssertExpectations(t)
 	})
 }
 

@@ -1223,7 +1223,7 @@ func TestReceiveContext(t *testing.T) {
 			self:    pid1,
 		}
 
-		// calling unhandled will push the current message to deadletters
+		// calling unhandled will push the current message to deadletter
 		context.Unhandled()
 
 		// wait for messages to be published
@@ -1295,7 +1295,7 @@ func TestReceiveContext(t *testing.T) {
 			self:    pid1,
 		}
 
-		// calling unhandled will push the current message to deadletters
+		// calling unhandled will push the current message to deadletter
 		context.Unhandled()
 
 		// wait for messages to be published
@@ -1363,7 +1363,7 @@ func TestReceiveContext(t *testing.T) {
 			self:    pid1,
 		}
 
-		// calling unhandled will push the current message to deadletters
+		// calling unhandled will push the current message to deadletter
 		context.Unhandled()
 
 		// wait for messages to be published
