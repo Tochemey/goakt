@@ -143,7 +143,7 @@ func (x *actorSystem) spawnSingletonOnLeader(ctx context.Context, cl cluster.Int
 
 	// this is expected to be quick
 	retrier := retry.NewRetrier(3, 100*time.Millisecond, 300*time.Millisecond)
-	err = retrier.RunContext(ctx, func(ctx context.Context) error {
+	err = retrier.RunContext(ctx, func(context.Context) error {
 		peerState, err = x.getPeerStateFromStore(leader.PeerAddress())
 		if err != nil {
 			if errors.Is(err, ErrPeerNotFound) {
