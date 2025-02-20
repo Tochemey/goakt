@@ -26,11 +26,16 @@ package actors
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"runtime"
+	"time"
+
+	"github.com/flowchartsman/retry"
 
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/cluster"
+	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/types"
 	"github.com/tochemey/goakt/v3/log"
 )
@@ -134,9 +139,24 @@ func (x *actorSystem) spawnSingletonOnLeader(ctx context.Context, cl cluster.Int
 		return fmt.Errorf("failed to spawn singleton actor: no leader found")
 	}
 
-	peerState, err := x.getPeerStateFromStore(leader.PeerAddress())
+	var peerState *internalpb.PeerState
+
+	// this is expected to be quick
+	retrier := retry.NewRetrier(3, 100*time.Millisecond, 300*time.Millisecond)
+	err = retrier.RunContext(ctx, func(ctx context.Context) error {
+		peerState, err = x.getPeerStateFromStore(leader.PeerAddress())
+		if err != nil {
+			if errors.Is(err, ErrPeerNotFound) {
+				return err
+			}
+
+			// here we stop the retry because there is an error
+			return retry.Stop(err)
+		}
+		return nil
+	})
+
 	if err != nil {
-		// TODO: maybe retry one more time if error not found
 		return fmt.Errorf("failed to spawn singleton actor: %w", err)
 	}
 

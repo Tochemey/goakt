@@ -73,7 +73,7 @@ func (x *registry) Exists(v any) bool {
 
 // TypesMap returns the list of registered at any point in time
 func (x *registry) TypesMap() map[string]reflect.Type {
-	var out map[string]reflect.Type
+	out := make(map[string]reflect.Type)
 	x.m.Range(func(s string, r reflect.Type) {
 		out[s] = r
 	})

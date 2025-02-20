@@ -45,6 +45,7 @@ func TestRegistry(t *testing.T) {
 		registry := NewRegistry()
 		// create an instance of an object
 		obj := new(testStruct)
+
 		// register that actor
 		registry.Register(obj)
 		_, ok := registry.Type(obj)
