@@ -222,12 +222,14 @@ func TestRebalancing(t *testing.T) {
 
 		// take down node1 since it is the first node created in the cluster
 		require.NoError(t, node1.Stop(ctx))
-		util.Pause(time.Minute)
 		require.NoError(t, sd1.Close())
-		util.Pause(time.Minute)
 
-		_, _, err = node2.ActorOf(ctx, "actorName")
-		require.NoError(t, err)
+		require.Eventually(t, func() bool {
+			if _, _, err := node2.ActorOf(ctx, "actorName"); err != nil {
+				return false
+			}
+			return true
+		}, 2*time.Minute, time.Second)
 
 		assert.NoError(t, node2.Stop(ctx))
 		assert.NoError(t, node3.Stop(ctx))
