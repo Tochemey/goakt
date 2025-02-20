@@ -132,10 +132,10 @@ type ActorSystem interface {
 	// When the cluster mode is not enabled an actor not found error will be returned
 	// One can always check whether cluster is enabled before calling this method or just use the ActorOf method.
 	RemoteActor(ctx context.Context, actorName string) (addr *address.Address, err error)
-	// ActorOf returns an existing actor in the local system or in the cluster when clustering is enabled
-	// When cluster mode is activated, the PID will be nil.
-	// When remoting is enabled this method will return and error
-	// An actor not found error is return when the actor is not found.
+	// ActorOf retrieves an existing actor within the local system or across the cluster if clustering is enabled.
+	//
+	// If the actor is found locally, its PID is returned. If the actor resides on a remote host, its address is returned.
+	// If the actor is not found, an error of type "actor not found" is returned.
 	ActorOf(ctx context.Context, actorName string) (addr *address.Address, pid *PID, err error)
 	// InCluster states whether the actor system has started within a cluster of nodes
 	InCluster() bool
@@ -909,10 +909,10 @@ func (x *actorSystem) PeerAddress() string {
 	return ""
 }
 
-// ActorOf returns an existing actor in the local system or in the cluster when clustering is enabled
-// When cluster mode is activated, the PID will be nil.
-// When remoting is enabled this method will return and error
-// An actor not found error is return when the actor is not found.
+// ActorOf retrieves an existing actor within the local system or across the cluster if clustering is enabled.
+//
+// If the actor is found locally, its PID is returned. If the actor resides on a remote host, its address is returned.
+// If the actor is not found, an error of type "actor not found" is returned.
 func (x *actorSystem) ActorOf(ctx context.Context, actorName string) (addr *address.Address, pid *PID, err error) {
 	x.locker.Lock()
 

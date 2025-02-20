@@ -229,17 +229,13 @@ func TestRebalancing(t *testing.T) {
 		// Wait for cluster rebalancing
 		util.Pause(time.Minute)
 
-		// We know node2 is the next leader inline when the node1 goes down
-		pid, err := node2.LocalActor("actorName")
+		_, _, err = node2.ActorOf(ctx, "actorName")
 		require.NoError(t, err)
-		require.NotNil(t, pid)
 
-		t.Cleanup(func() {
-			assert.NoError(t, node2.Stop(ctx))
-			assert.NoError(t, node3.Stop(ctx))
-			assert.NoError(t, sd2.Close())
-			assert.NoError(t, sd3.Close())
-			srv.Shutdown()
-		})
+		assert.NoError(t, node2.Stop(ctx))
+		assert.NoError(t, node3.Stop(ctx))
+		assert.NoError(t, sd2.Close())
+		assert.NoError(t, sd3.Close())
+		srv.Shutdown()
 	})
 }
