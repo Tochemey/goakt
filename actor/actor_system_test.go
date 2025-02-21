@@ -26,6 +26,7 @@ package actors
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"net"
 	"strconv"
@@ -1380,12 +1381,8 @@ func TestActorSystem(t *testing.T) {
 		err = sys.Register(ctx, &exchanger{})
 		require.NoError(t, err)
 
-		t.Cleanup(
-			func() {
-				err = sys.Stop(ctx)
-				assert.NoError(t, err)
-			},
-		)
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
 	})
 	t.Run("With Register when actor system not started", func(t *testing.T) {
 		ctx := context.TODO()
@@ -1839,5 +1836,63 @@ func TestActorSystem(t *testing.T) {
 		assert.NoError(t, err)
 		assert.True(t, pid.IsRunning())
 		assert.NoError(t, actorSystem.Stop(ctx))
+	})
+	t.Run("With invalid remote config address", func(t *testing.T) {
+		remotingPort := dynaport.Get(1)[0]
+
+		logger := log.DiscardLogger
+		host := "256.256.256.256"
+
+		newActorSystem, err := NewActorSystem(
+			"test",
+			WithPassivationDisabled(),
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort, remote.WithWriteTimeout(-1))),
+		)
+		require.Error(t, err)
+		require.Nil(t, newActorSystem)
+	})
+	t.Run("With invalid cluster config", func(t *testing.T) {
+		logger := log.DiscardLogger
+		host := "127.0.0.1"
+
+		// mock the discovery provider
+		provider := new(testkit.Provider)
+		newActorSystem, err := NewActorSystem(
+			"test",
+			WithPassivation(passivateAfter),
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, 2222)),
+			WithCluster(
+				NewClusterConfig().
+					WithKinds(new(mockActor)).
+					WithPartitionCount(0).
+					WithReplicaCount(1).
+					WithPeersPort(-1).
+					WithWAL(t.TempDir()).
+					WithMinimumPeersQuorum(1).
+					WithDiscoveryPort(-1).
+					WithDiscovery(provider)),
+		)
+		require.Error(t, err)
+		require.Nil(t, newActorSystem)
+	})
+	t.Run("With invalid TLS config", func(t *testing.T) {
+		logger := log.DiscardLogger
+		host := "127.0.0.1"
+
+		newActorSystem, err := NewActorSystem(
+			"test",
+			WithPassivation(passivateAfter),
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, 2222)),
+			WithTLS(&TLSInfo{
+				ClientTLS: &tls.Config{InsecureSkipVerify: true}, // nolint
+				ServerTLS: nil,
+			}),
+		)
+		require.Error(t, err)
+		require.ErrorIs(t, err, ErrInvalidTLSConfiguration)
+		require.Nil(t, newActorSystem)
 	})
 }

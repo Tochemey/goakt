@@ -64,7 +64,7 @@ func TestConfig(t *testing.T) {
 		assert.EqualError(t, err, "maxFrameSize must be between 16KB and 16MB")
 	})
 	t.Run("With invalid bindAddr", func(t *testing.T) {
-		config := NewConfig("invalid@adrr", 8080, WithMaxFrameSize(20*size.MB))
+		config := NewConfig("256.256.256.256", 8080, WithMaxFrameSize(20*size.MB))
 		err := config.Sanitize()
 		require.Error(t, err)
 	})
