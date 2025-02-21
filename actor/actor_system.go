@@ -1268,7 +1268,12 @@ func (x *actorSystem) RemoteSpawn(ctx context.Context, request *connect.Request[
 		}
 	}
 
-	if _, err = x.Spawn(ctx, msg.GetActorName(), actor); err != nil {
+	var opts []SpawnOption
+	if !msg.GetRelocatable() {
+		opts = append(opts, WithRelocationDisabled())
+	}
+
+	if _, err = x.Spawn(ctx, msg.GetActorName(), actor, opts...); err != nil {
 		logger.Errorf("failed to create actor=(%s) on [host=%s, port=%d]: reason: (%v)", msg.GetActorName(), msg.GetHost(), msg.GetPort(), err)
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
@@ -1862,7 +1867,7 @@ func (x *actorSystem) configPID(ctx context.Context, name string, actor Actor, o
 		pidOpts = append(pidOpts, asSingleton())
 	}
 
-	if spawnConfig.disableRelocation {
+	if !spawnConfig.relocatable {
 		pidOpts = append(pidOpts, withRelocationDisabled())
 	}
 

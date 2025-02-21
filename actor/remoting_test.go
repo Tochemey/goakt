@@ -1696,7 +1696,13 @@ func TestRemotingSpawn(t *testing.T) {
 		require.NoError(t, err)
 
 		// spawn the remote actor
-		err = remoting.RemoteSpawn(ctx, host, remotingPort, actorName, "actors.exchanger", false)
+		request := &remote.SpawnRequest{
+			Name:        actorName,
+			Kind:        "actors.exchanger",
+			Singleton:   false,
+			Relocatable: false,
+		}
+		err = remoting.RemoteSpawn(ctx, host, remotingPort, request)
 		require.NoError(t, err)
 
 		// re-fetching the address of the actor should return not nil address after start
@@ -1761,7 +1767,13 @@ func TestRemotingSpawn(t *testing.T) {
 		require.Nil(t, addr)
 
 		// spawn the remote actor
-		err = remoting.RemoteSpawn(ctx, sys.Host(), int(sys.Port()), actorName, "actors.exchanger", false)
+		request := &remote.SpawnRequest{
+			Name:        actorName,
+			Kind:        "actors.exchanger",
+			Singleton:   false,
+			Relocatable: false,
+		}
+		err = remoting.RemoteSpawn(ctx, sys.Host(), int(sys.Port()), request)
 		require.Error(t, err)
 		assert.EqualError(t, err, ErrTypeNotRegistered.Error())
 
@@ -1799,7 +1811,13 @@ func TestRemotingSpawn(t *testing.T) {
 		actorName := uuid.NewString()
 		remoting := NewRemoting()
 		// spawn the remote actor
-		err = remoting.RemoteSpawn(ctx, host, remotingPort, actorName, "actors.exchanger", false)
+		request := &remote.SpawnRequest{
+			Name:        actorName,
+			Kind:        "actors.exchanger",
+			Singleton:   false,
+			Relocatable: false,
+		}
+		err = remoting.RemoteSpawn(ctx, host, remotingPort, request)
 		require.Error(t, err)
 
 		t.Cleanup(
@@ -1862,7 +1880,13 @@ func TestRemotingSpawn(t *testing.T) {
 		require.NoError(t, err)
 
 		// spawn the remote actor
-		err = remoting.RemoteSpawn(ctx, host, remotingPort, actorName, "actors.exchanger", false)
+		request := &remote.SpawnRequest{
+			Name:        actorName,
+			Kind:        "actors.exchanger",
+			Singleton:   false,
+			Relocatable: false,
+		}
+		err = remoting.RemoteSpawn(ctx, host, remotingPort, request)
 		require.NoError(t, err)
 
 		// re-fetching the address of the actor should return not nil address after start
@@ -1892,5 +1916,57 @@ func TestRemotingSpawn(t *testing.T) {
 				assert.NoError(t, err)
 			},
 		)
+	})
+	t.Run("When request is invalid", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// generate the remoting port
+		ports := dynaport.Get(1)
+		remotingPort := ports[0]
+		host := "127.0.0.1"
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithPassivationDisabled(),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		// create an actor implementation and register it
+		actor := &exchanger{}
+		actorName := uuid.NewString()
+
+		remoting := NewRemoting()
+		// fetching the address of the that actor should return nil address
+		addr, err := remoting.RemoteLookup(ctx, sys.Host(), int(sys.Port()), actorName)
+		require.NoError(t, err)
+		require.Nil(t, addr)
+
+		// register the actor
+		err = sys.Register(ctx, actor)
+		require.NoError(t, err)
+
+		// spawn the remote actor
+		request := &remote.SpawnRequest{
+			Name:        "",
+			Kind:        "actors.exchanger",
+			Singleton:   false,
+			Relocatable: false,
+		}
+		err = remoting.RemoteSpawn(ctx, host, remotingPort, request)
+		require.Error(t, err)
+
+		remoting.Close()
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
 	})
 }

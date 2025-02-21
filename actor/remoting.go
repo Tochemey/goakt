@@ -28,6 +28,7 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
+	"fmt"
 	nethttp "net/http"
 	"strings"
 	"time"
@@ -41,6 +42,7 @@ import (
 	"github.com/tochemey/goakt/v3/internal/http"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/internalpb/internalpbconnect"
+	"github.com/tochemey/goakt/v3/remote"
 )
 
 // RemotingOption sets the remoting option
@@ -315,15 +317,21 @@ func (r *Remoting) RemoteBatchAsk(ctx context.Context, from, to *address.Address
 }
 
 // RemoteSpawn creates an actor on a remote node. The given actor needs to be registered on the remote node using the Register method of ActorSystem
-func (r *Remoting) RemoteSpawn(ctx context.Context, host string, port int, name, actorType string, singleton bool) error {
+func (r *Remoting) RemoteSpawn(ctx context.Context, host string, port int, spawnRequest *remote.SpawnRequest) error {
+	if err := spawnRequest.Validate(); err != nil {
+		return fmt.Errorf("invalid spawn option: %w", err)
+	}
+
+	spawnRequest.Sanitize()
 	remoteClient := r.serviceClient(host, port)
 	request := connect.NewRequest(
 		&internalpb.RemoteSpawnRequest{
 			Host:        host,
 			Port:        int32(port),
-			ActorName:   name,
-			ActorType:   actorType,
-			IsSingleton: singleton,
+			ActorName:   spawnRequest.Name,
+			ActorType:   spawnRequest.Kind,
+			IsSingleton: spawnRequest.Singleton,
+			Relocatable: spawnRequest.Relocatable,
 		},
 	)
 

@@ -38,6 +38,7 @@ import (
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/types"
 	"github.com/tochemey/goakt/v3/log"
+	"github.com/tochemey/goakt/v3/remote"
 )
 
 // clusterSingletonManager is a system actor that manages the lifecycle of singleton actors
@@ -162,5 +163,9 @@ func (x *actorSystem) spawnSingletonOnLeader(ctx context.Context, cl cluster.Int
 		port      = int(peerState.GetRemotingPort())
 	)
 
-	return x.remoting.RemoteSpawn(ctx, host, port, name, actorType, true)
+	return x.remoting.RemoteSpawn(ctx, host, port, &remote.SpawnRequest{
+		Name:      name,
+		Kind:      actorType,
+		Singleton: true,
+	})
 }

@@ -113,6 +113,8 @@ message RemoteSpawnRequest {
   string actor_type = 4;
   // Specifies if the actor is a singleton
   bool is_singleton = 5;
+  // Specifies if the actor is relocatable
+  bool relocatable = 6;
 }
 
 message RemoteSpawnResponse {}

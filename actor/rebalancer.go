@@ -36,6 +36,7 @@ import (
 	"github.com/tochemey/goakt/v3/internal/collection/slice"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/log"
+	"github.com/tochemey/goakt/v3/remote"
 )
 
 // rebalancer is a system actor that helps rebalance cluster
@@ -134,10 +135,15 @@ func (r *rebalancer) Rebalance(ctx *ReceiveContext) {
 							if actor.GetRelocatable() {
 								host := peerState.GetHost()
 								port := int(peerState.GetRemotingPort())
-								actorName := actor.GetActorName()
-								actorType := actor.GetActorType()
 
-								if err := r.remoting.RemoteSpawn(egCtx, host, port, actorName, actorType, false); err != nil {
+								spawnRequest := &remote.SpawnRequest{
+									Name:        actor.GetActorName(),
+									Kind:        actor.GetActorType(),
+									Singleton:   false,
+									Relocatable: true,
+								}
+
+								if err := r.remoting.RemoteSpawn(egCtx, host, port, spawnRequest); err != nil {
 									logger.Error(err)
 									return NewSpawnError(err)
 								}

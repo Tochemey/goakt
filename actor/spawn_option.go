@@ -40,13 +40,17 @@ type spawnConfig struct {
 	passivateAfter *time.Duration
 	// specifies if the actor is a singleton
 	asSingleton bool
-	// specifies if the actor should be rebalanced
-	disableRelocation bool
+	// specifies if the actor should be relocated
+	relocatable bool
 }
 
 // newSpawnConfig creates an instance of spawnConfig
 func newSpawnConfig(opts ...SpawnOption) *spawnConfig {
-	config := new(spawnConfig)
+	config := &spawnConfig{
+		relocatable: true,
+		asSingleton: false,
+	}
+
 	for _, opt := range opts {
 		opt.Apply(config)
 	}
@@ -124,7 +128,7 @@ func WithLongLived() SpawnOption {
 // cannot be easily replicated.
 func WithRelocationDisabled() SpawnOption {
 	return spawnOption(func(config *spawnConfig) {
-		config.disableRelocation = true
+		config.relocatable = false
 	})
 }
 

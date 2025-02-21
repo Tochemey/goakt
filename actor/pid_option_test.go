@@ -44,6 +44,7 @@ func TestPIDOptions(t *testing.T) {
 		negativeDuration atomic.Duration
 		atomicUint64     atomic.Uint64
 		atomicTrue       atomic.Bool
+		atomicFalse      atomic.Bool
 	)
 	negativeDuration.Store(-1)
 	atomicInt.Store(5)
@@ -51,6 +52,7 @@ func TestPIDOptions(t *testing.T) {
 	atomicUint64.Store(10)
 	eventsStream := eventstream.New()
 	atomicTrue.Store(true)
+	atomicFalse.Store(false)
 
 	testCases := []struct {
 		name     string
@@ -107,7 +109,7 @@ func TestPIDOptions(t *testing.T) {
 		{
 			name:     "withRelocationDisabled",
 			option:   withRelocationDisabled(),
-			expected: &PID{disableRelocation: atomicTrue},
+			expected: &PID{relocatable: atomicFalse},
 		},
 	}
 	for _, tc := range testCases {
