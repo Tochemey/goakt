@@ -683,7 +683,7 @@ func (x *Engine) RemoveKind(ctx context.Context, kind string) error {
 
 	_, err := x.actorKindsMap.Delete(ctx, kind)
 	if err != nil {
-		logger.Errorf("(%s) failed to remove actor  kind=(%s) record from cluster: %v", x.node.PeersAddress(), kind, err)
+		logger.Errorf("(%s) failed to remove actor kind=(%s) record from cluster: %v", x.node.PeersAddress(), kind, err)
 		return err
 	}
 

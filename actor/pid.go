@@ -145,6 +145,7 @@ type PID struct {
 
 	goScheduler *goScheduler
 	startedAt   *atomic.Int64
+	isSingleton atomic.Bool
 }
 
 // newPID creates a new pid
@@ -184,6 +185,7 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 
 	pid.initMaxRetries.Store(DefaultInitMaxRetries)
 	pid.latestReceiveDuration.Store(0)
+	pid.isSingleton.Store(false)
 	pid.started.Store(false)
 	pid.stopping.Store(false)
 	pid.suspended.Store(false)
@@ -372,6 +374,11 @@ func (pid *PID) IsRunning() bool {
 // A suspended actor is a faulty actor
 func (pid *PID) IsSuspended() bool {
 	return pid.suspended.Load()
+}
+
+// IsSingleton returns true when the actor is a singleton
+func (pid *PID) IsSingleton() bool {
+	return pid.isSingleton.Load()
 }
 
 // ActorSystem returns the actor system
@@ -1324,6 +1331,7 @@ func (pid *PID) reset() {
 	pid.suspended.Store(false)
 	pid.supervisor.Reset()
 	pid.mailbox.Dispose()
+	pid.isSingleton.Store(false)
 }
 
 // freeWatchers releases all the actors watching this actor

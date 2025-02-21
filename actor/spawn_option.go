@@ -38,6 +38,8 @@ type spawnConfig struct {
 	// when the actor is passivated it is stopped which means it does not consume
 	// any further resources like memory and cpu. The default value is 120 seconds
 	passivateAfter *time.Duration
+	// specifies if the actor is a singleton
+	asSingleton bool
 }
 
 // newSpawnConfig creates an instance of spawnConfig
@@ -108,5 +110,13 @@ func WithPassivateAfter(after time.Duration) SpawnOption {
 func WithLongLived() SpawnOption {
 	return spawnOption(func(config *spawnConfig) {
 		config.passivateAfter = &longLived
+	})
+}
+
+// withSingleton ensures that the actor is a singleton.
+// This is an internal method to set the singleton flag
+func withSingleton() SpawnOption {
+	return spawnOption(func(config *spawnConfig) {
+		config.asSingleton = true
 	})
 }

@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (c) 2022-2025  Arsene Tochemey Gandote
+ * Copyright (c2) 2022-2025  Arsene Tochemey Gandote
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -758,6 +758,7 @@ func (x *actorSystem) SpawnSingleton(ctx context.Context, name string, actor Act
 
 	pid, err := x.configPID(ctx, name, actor,
 		WithLongLived(),
+		withSingleton(),
 		WithSupervisor(
 			NewSupervisor(
 				WithStrategy(OneForOneStrategy),
@@ -1614,9 +1615,9 @@ func (x *actorSystem) shutdown(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, x.shutdownTimeout)
 	defer cancel()
 
-	var actorNames []string
+	var actorRefs []ActorRef
 	for _, actor := range x.Actors() {
-		actorNames = append(actorNames, actor.Name())
+		actorRefs = append(actorRefs, fromPID(actor))
 	}
 
 	if err := x.getRootGuardian().Shutdown(ctx); err != nil {
@@ -1632,7 +1633,7 @@ func (x *actorSystem) shutdown(ctx context.Context) error {
 
 	if err := errorschain.
 		New(errorschain.ReturnFirst()).
-		AddError(x.shutdownCluster(ctx, actorNames)).
+		AddError(x.shutdownCluster(ctx, actorRefs)).
 		AddError(x.shutdownRemoting(ctx)).
 		Error(); err != nil {
 		x.logger.Errorf("%s failed to shutdown: %w", x.name, err)
@@ -1852,6 +1853,11 @@ func (x *actorSystem) configPID(ctx context.Context, name string, actor Actor, o
 	// set the supervisor strategies when defined
 	if spawnConfig.supervisor != nil {
 		pidOpts = append(pidOpts, withSupervisor(spawnConfig.supervisor))
+	}
+
+	// define the actor as singleton when necessary
+	if spawnConfig.asSingleton {
+		pidOpts = append(pidOpts, asSingleton())
 	}
 
 	// enable stash
@@ -2122,11 +2128,32 @@ func (x *actorSystem) checkSpawnPreconditions(ctx context.Context, actorName str
 }
 
 // cleanupCluster cleans up the cluster
-func (x *actorSystem) cleanupCluster(ctx context.Context, actorNames []string) error {
+func (x *actorSystem) cleanupCluster(ctx context.Context, actorRefs []ActorRef) error {
 	eg, ctx := errgroup.WithContext(ctx)
-	for _, actorName := range actorNames {
-		actorName := actorName
+
+	// Remove singleton actors from the cluster
+	if x.cluster.IsLeader(ctx) {
+		for _, actorRef := range actorRefs {
+			if actorRef.IsSingleton() {
+				actorRef := actorRef
+				eg.Go(func() error {
+					kind := actorRef.Kind()
+					if err := x.cluster.RemoveKind(ctx, kind); err != nil {
+						x.logger.Errorf("failed to remove [actor kind=%s] from cluster: %v", kind, err)
+						return err
+					}
+					x.logger.Infof("[actor kind=%s] removed from cluster", kind)
+					return nil
+				})
+			}
+		}
+	}
+
+	// Remove all actors from the cluster
+	for _, actorRef := range actorRefs {
+		actorRef := actorRef
 		eg.Go(func() error {
+			actorName := actorRef.Name()
 			if err := x.cluster.RemoveActor(ctx, actorName); err != nil {
 				x.logger.Errorf("failed to remove [actor=%s] from cluster: %v", actorName, err)
 				return err
@@ -2135,6 +2162,7 @@ func (x *actorSystem) cleanupCluster(ctx context.Context, actorNames []string) e
 			return nil
 		})
 	}
+
 	return eg.Wait()
 }
 
@@ -2157,12 +2185,12 @@ func (x *actorSystem) getSetDeadlettersCount(ctx context.Context) {
 	}
 }
 
-func (x *actorSystem) shutdownCluster(ctx context.Context, actorNames []string) error {
+func (x *actorSystem) shutdownCluster(ctx context.Context, actorRefs []ActorRef) error {
 	if x.clusterEnabled.Load() {
 		if x.cluster != nil {
 			if err := errorschain.
 				New(errorschain.ReturnFirst()).
-				AddError(x.cleanupCluster(ctx, actorNames)).
+				AddError(x.cleanupCluster(ctx, actorRefs)).
 				AddError(x.cluster.Stop(ctx)).
 				Error(); err != nil {
 				x.reset()

@@ -97,6 +97,13 @@ func TestPIDOptions(t *testing.T) {
 			option:   withMailbox(mailbox),
 			expected: &PID{mailbox: mailbox},
 		},
+		{
+			name:   "AsSingleton",
+			option: asSingleton(),
+			expected: &PID{
+				isSingleton: atomicTrue,
+			},
+		},
 	}
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {

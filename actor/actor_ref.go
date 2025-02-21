@@ -42,6 +42,9 @@ import (
 //
 //   - Address: The actor address. One can use the address with Remoting to
 //     interact with the actor by sending messages.
+//
+//   - IsSingleton: The actor is a singleton
+//     if the actor is a singleton then the actor is created once in the cluster
 type ActorRef struct {
 	// name defines the actor Name
 	name string
@@ -49,6 +52,8 @@ type ActorRef struct {
 	kind string
 	// address defines the actor address
 	address *address.Address
+	// isSingleton defines if the actor is a singleton
+	isSingleton bool
 }
 
 // Name represents the actor given name
@@ -66,6 +71,12 @@ func (x ActorRef) Address() *address.Address {
 	return x.address
 }
 
+// IsSingleton returns true if the actor is a singleton
+// otherwise it returns false when the actor is not a singleton or cluster is not enabled
+func (x ActorRef) IsSingleton() bool {
+	return x.isSingleton
+}
+
 // Equals is a convenient method to compare two ActorRef
 func (x ActorRef) Equals(actor ActorRef) bool {
 	return x.address.Equals(actor.address)
@@ -73,16 +84,18 @@ func (x ActorRef) Equals(actor ActorRef) bool {
 
 func fromActorRef(actorRef *internalpb.ActorRef) ActorRef {
 	return ActorRef{
-		name:    actorRef.GetActorAddress().GetName(),
-		kind:    actorRef.GetActorType(),
-		address: address.From(actorRef.GetActorAddress()),
+		name:        actorRef.GetActorAddress().GetName(),
+		kind:        actorRef.GetActorType(),
+		address:     address.From(actorRef.GetActorAddress()),
+		isSingleton: actorRef.GetIsSingleton(),
 	}
 }
 
 func fromPID(pid *PID) ActorRef {
 	return ActorRef{
-		name:    pid.Name(),
-		kind:    types.Name(pid.Actor()),
-		address: pid.Address(),
+		name:        pid.Name(),
+		kind:        types.Name(pid.Actor()),
+		address:     pid.Address(),
+		isSingleton: pid.IsSingleton(),
 	}
 }
