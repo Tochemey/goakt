@@ -94,12 +94,8 @@ func TestDeadletter(t *testing.T) {
 		err = sys.Unsubscribe(consumer)
 		require.NoError(t, err)
 
-		t.Cleanup(
-			func() {
-				err = sys.Stop(ctx)
-				assert.NoError(t, err)
-			},
-		)
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
 	})
 	t.Run("With GetDeadletters", func(t *testing.T) {
 		ctx := context.TODO()
@@ -161,11 +157,7 @@ func TestDeadletter(t *testing.T) {
 		err = sys.Unsubscribe(consumer)
 		require.NoError(t, err)
 
-		t.Cleanup(
-			func() {
-				err = sys.Stop(ctx)
-				assert.NoError(t, err)
-			},
-		)
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
 	})
 }
