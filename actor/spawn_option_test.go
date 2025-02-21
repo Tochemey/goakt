@@ -59,12 +59,17 @@ func TestSpawnOption(t *testing.T) {
 		option.Apply(config)
 		require.Equal(t, &spawnConfig{passivateAfter: &longLived}, config)
 	})
-
 	t.Run("spawn option with singleton", func(t *testing.T) {
 		config := &spawnConfig{}
 		option := withSingleton()
 		option.Apply(config)
 		require.Equal(t, &spawnConfig{asSingleton: true}, config)
+	})
+	t.Run("spawn option with relocation disabled", func(t *testing.T) {
+		config := &spawnConfig{}
+		option := WithRelocationDisabled()
+		option.Apply(config)
+		require.Equal(t, &spawnConfig{relocatable: false}, config)
 	})
 }
 

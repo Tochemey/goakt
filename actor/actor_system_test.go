@@ -1522,7 +1522,13 @@ func TestActorSystem(t *testing.T) {
 		require.Nil(t, addr)
 
 		// spawn the remote actor
-		err = remoting.RemoteSpawn(ctx, host, remotingPort, actorName, "actors.exchanger", false)
+		request := &remote.SpawnRequest{
+			Name:        actorName,
+			Kind:        "actors.exchanger",
+			Singleton:   false,
+			Relocatable: true,
+		}
+		err = remoting.RemoteSpawn(ctx, host, remotingPort, request)
 		require.NoError(t, err)
 
 		// re-fetching the address of the actor should return not nil address after start

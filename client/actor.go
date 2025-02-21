@@ -28,6 +28,7 @@ package client
 type Actor struct {
 	name string // Name defines the actor name. This will be unique in the Client
 	kind string // Kind specifies the actor kind.
+
 }
 
 // NewActor creates an instance of Actor

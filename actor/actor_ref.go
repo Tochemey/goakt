@@ -54,6 +54,7 @@ type ActorRef struct {
 	address *address.Address
 	// isSingleton defines if the actor is a singleton
 	isSingleton bool
+	relocatable bool
 }
 
 // Name represents the actor given name
@@ -77,6 +78,15 @@ func (x ActorRef) IsSingleton() bool {
 	return x.isSingleton
 }
 
+// IsRelocatable determines whether the actor can be relocated to another node if its host node shuts down unexpectedly.
+// By default, actors are relocatable to ensure system resilience and high availability.
+// However, this behavior can be disabled during the actor's creation using the WithRelocationDisabled option.
+//
+// Returns true if relocation is allowed, and false if relocation is disabled.
+func (x ActorRef) IsRelocatable() bool {
+	return x.relocatable
+}
+
 // Equals is a convenient method to compare two ActorRef
 func (x ActorRef) Equals(actor ActorRef) bool {
 	return x.address.Equals(actor.address)
@@ -88,6 +98,7 @@ func fromActorRef(actorRef *internalpb.ActorRef) ActorRef {
 		kind:        actorRef.GetActorType(),
 		address:     address.From(actorRef.GetActorAddress()),
 		isSingleton: actorRef.GetIsSingleton(),
+		relocatable: actorRef.GetRelocatable(),
 	}
 }
 
@@ -97,5 +108,6 @@ func fromPID(pid *PID) ActorRef {
 		kind:        types.Name(pid.Actor()),
 		address:     pid.Address(),
 		isSingleton: pid.IsSingleton(),
+		relocatable: pid.IsRelocatable(),
 	}
 }

@@ -42,6 +42,7 @@ import (
 	"github.com/tochemey/goakt/v3/internal/ticker"
 	"github.com/tochemey/goakt/v3/internal/types"
 	"github.com/tochemey/goakt/v3/internal/validation"
+	"github.com/tochemey/goakt/v3/remote"
 )
 
 // Client connects to af Go-Akt nodes.
@@ -133,23 +134,35 @@ func (x *Client) Kinds(ctx context.Context) ([]string, error) {
 }
 
 // Spawn creates an actor provided the actor name.
-func (x *Client) Spawn(ctx context.Context, actor *Actor, singleton bool) (err error) {
+func (x *Client) Spawn(ctx context.Context, actor *Actor, singleton, relocatable bool) (err error) {
 	x.locker.Lock()
 	node := nextNode(x.balancer)
 	x.locker.Unlock()
 	remoteHost, remotePort := node.HostAndPort()
-	return node.Remoting().RemoteSpawn(ctx, remoteHost, remotePort, actor.Name(), actor.Kind(), singleton)
+	spawnRequest := &remote.SpawnRequest{
+		Name:        actor.Name(),
+		Kind:        actor.Kind(),
+		Singleton:   singleton,
+		Relocatable: relocatable,
+	}
+	return node.Remoting().RemoteSpawn(ctx, remoteHost, remotePort, spawnRequest)
 }
 
 // SpawnWithBalancer creates an actor provided the actor name and the balancer strategy
-func (x *Client) SpawnWithBalancer(ctx context.Context, actor *Actor, strategy BalancerStrategy) (err error) {
+func (x *Client) SpawnWithBalancer(ctx context.Context, actor *Actor, singleton, relocatable bool, strategy BalancerStrategy) (err error) {
 	x.locker.Lock()
 	balancer := getBalancer(strategy)
 	balancer.Set(x.nodes...)
 	node := nextNode(balancer)
 	remoteHost, remotePort := node.HostAndPort()
 	x.locker.Unlock()
-	return node.Remoting().RemoteSpawn(ctx, remoteHost, remotePort, actor.Name(), actor.Kind(), false)
+	spawnRequest := &remote.SpawnRequest{
+		Name:        actor.Name(),
+		Kind:        actor.Kind(),
+		Singleton:   singleton,
+		Relocatable: relocatable,
+	}
+	return node.Remoting().RemoteSpawn(ctx, remoteHost, remotePort, spawnRequest)
 }
 
 // ReSpawn restarts a given actor

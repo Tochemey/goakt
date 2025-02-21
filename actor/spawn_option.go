@@ -40,11 +40,17 @@ type spawnConfig struct {
 	passivateAfter *time.Duration
 	// specifies if the actor is a singleton
 	asSingleton bool
+	// specifies if the actor should be relocated
+	relocatable bool
 }
 
 // newSpawnConfig creates an instance of spawnConfig
 func newSpawnConfig(opts ...SpawnOption) *spawnConfig {
-	config := new(spawnConfig)
+	config := &spawnConfig{
+		relocatable: true,
+		asSingleton: false,
+	}
+
 	for _, opt := range opts {
 		opt.Apply(config)
 	}
@@ -110,6 +116,19 @@ func WithPassivateAfter(after time.Duration) SpawnOption {
 func WithLongLived() SpawnOption {
 	return spawnOption(func(config *spawnConfig) {
 		config.passivateAfter = &longLived
+	})
+}
+
+// WithRelocationDisabled prevents the actor from being relocated to another node when cluster mode is active
+// and its host node shuts down unexpectedly. By default, actors are relocatable to support system resilience
+// and maintain high availability by automatically redeploying them on healthy nodes.
+//
+// Use this option when you need strict control over an actor's lifecycle and want to ensure that the actor
+// is not redeployed after a node failure, such as for actors with node-specific state or dependencies that
+// cannot be easily replicated.
+func WithRelocationDisabled() SpawnOption {
+	return spawnOption(func(config *spawnConfig) {
+		config.relocatable = false
 	})
 }
 

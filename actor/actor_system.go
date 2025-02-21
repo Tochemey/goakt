@@ -198,7 +198,7 @@ type ActorSystem interface {
 	// handleRemoteTell handles an asynchronous message to an actor
 	handleRemoteTell(ctx context.Context, to *PID, message proto.Message) error
 	// broadcastActor sets actor in the actor system actors registry
-	broadcastActor(actor *PID, singleton bool)
+	broadcastActor(actor *PID)
 	// getPeerStateFromStore returns the peer state from the cluster store
 	getPeerStateFromStore(address string) (*internalpb.PeerState, error)
 	// removePeerStateFromStore removes the peer state from the cluster store
@@ -671,7 +671,7 @@ func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor, opts 
 	guardian := x.getUserGuardian()
 	_ = x.actors.AddNode(guardian, pid)
 	x.actors.AddWatcher(pid, x.deathWatch)
-	x.broadcastActor(pid, false)
+	x.broadcastActor(pid)
 	return pid, nil
 }
 
@@ -707,7 +707,7 @@ func (x *actorSystem) SpawnNamedFromFunc(ctx context.Context, name string, recei
 	x.actorsCounter.Inc()
 	_ = x.actors.AddNode(x.userGuardian, pid)
 	x.actors.AddWatcher(pid, x.deathWatch)
-	x.broadcastActor(pid, false)
+	x.broadcastActor(pid)
 	return pid, nil
 }
 
@@ -731,9 +731,10 @@ func (x *actorSystem) SpawnRouter(ctx context.Context, poolSize int, routeesKind
 // A singleton actor like any other actor is created only once within the system and in the cluster.
 // A singleton actor is created with the default supervisor strategy and directive.
 // A singleton actor once created lives throughout the lifetime of the given actor system.
+// One cannot create a child actor for a singleton actor.
 //
 // The cluster singleton is automatically started on the oldest node in the cluster.
-// If the oldest node leaves the cluster, the singleton is restarted on the new oldest node.
+// When the oldest node leaves the cluster unexpectedly, the singleton is restarted on the new oldest node.
 // This is useful for managing shared resources or coordinating tasks that should be handled by a single actor.
 func (x *actorSystem) SpawnSingleton(ctx context.Context, name string, actor Actor) error {
 	if !x.started.Load() {
@@ -775,7 +776,7 @@ func (x *actorSystem) SpawnSingleton(ctx context.Context, name string, actor Act
 	// add the given actor to the tree and supervise it
 	_ = x.actors.AddNode(x.singletonManager, pid)
 	x.actors.AddWatcher(pid, x.deathWatch)
-	x.broadcastActor(pid, true)
+	x.broadcastActor(pid)
 	return nil
 }
 
@@ -1267,7 +1268,12 @@ func (x *actorSystem) RemoteSpawn(ctx context.Context, request *connect.Request[
 		}
 	}
 
-	if _, err = x.Spawn(ctx, msg.GetActorName(), actor); err != nil {
+	var opts []SpawnOption
+	if !msg.GetRelocatable() {
+		opts = append(opts, WithRelocationDisabled())
+	}
+
+	if _, err = x.Spawn(ctx, msg.GetActorName(), actor, opts...); err != nil {
 		logger.Errorf("failed to create actor=(%s) on [host=%s, port=%d]: reason: (%v)", msg.GetActorName(), msg.GetHost(), msg.GetPort(), err)
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
@@ -1407,12 +1413,13 @@ func (x *actorSystem) getPeerStateFromStore(address string) (*internalpb.PeerSta
 }
 
 // broadcastActor broadcast the newly (re)spawned actor into the cluster
-func (x *actorSystem) broadcastActor(actor *PID, singleton bool) {
+func (x *actorSystem) broadcastActor(actor *PID) {
 	if x.clusterEnabled.Load() {
 		x.wireActorsQueue <- &internalpb.ActorRef{
 			ActorAddress: actor.Address().Address,
 			ActorType:    types.Name(actor.Actor()),
-			IsSingleton:  singleton,
+			IsSingleton:  actor.IsSingleton(),
+			Relocatable:  actor.IsRelocatable(),
 		}
 	}
 }
@@ -1858,6 +1865,10 @@ func (x *actorSystem) configPID(ctx context.Context, name string, actor Actor, o
 	// define the actor as singleton when necessary
 	if spawnConfig.asSingleton {
 		pidOpts = append(pidOpts, asSingleton())
+	}
+
+	if !spawnConfig.relocatable {
+		pidOpts = append(pidOpts, withRelocationDisabled())
 	}
 
 	// enable stash

@@ -36,6 +36,7 @@ import (
 	"github.com/tochemey/goakt/v3/internal/collection/slice"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/log"
+	"github.com/tochemey/goakt/v3/remote"
 )
 
 // rebalancer is a system actor that helps rebalance cluster
@@ -131,14 +132,21 @@ func (r *rebalancer) Rebalance(ctx *ReceiveContext) {
 								return NewSpawnError(err)
 							}
 
-							if err := r.remoting.RemoteSpawn(egCtx,
-								peerState.GetHost(),
-								int(peerState.GetRemotingPort()),
-								actor.GetActorName(),
-								actor.GetActorType(),
-								false); err != nil {
-								logger.Error(err)
-								return NewSpawnError(err)
+							if actor.GetRelocatable() {
+								host := peerState.GetHost()
+								port := int(peerState.GetRemotingPort())
+
+								spawnRequest := &remote.SpawnRequest{
+									Name:        actor.GetActorName(),
+									Kind:        actor.GetActorType(),
+									Singleton:   false,
+									Relocatable: true,
+								}
+
+								if err := r.remoting.RemoteSpawn(egCtx, host, port, spawnRequest); err != nil {
+									logger.Error(err)
+									return NewSpawnError(err)
+								}
 							}
 						}
 					}
@@ -221,6 +229,10 @@ func (r *rebalancer) recreateLocally(ctx context.Context, actor *internalpb.Acto
 	if enforceSingleton && actor.GetIsSingleton() {
 		// spawn the singleton actor
 		return r.pid.ActorSystem().SpawnSingleton(ctx, actor.GetActorName(), iactor)
+	}
+
+	if !actor.GetRelocatable() {
+		return nil
 	}
 
 	_, err = r.pid.ActorSystem().Spawn(ctx, actor.GetActorName(), iactor)

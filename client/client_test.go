@@ -93,7 +93,7 @@ func TestClient(t *testing.T) {
 		require.ElementsMatch(t, expected, kinds)
 		actor := NewActor("client.testactor").WithName("actorName")
 
-		err = client.Spawn(ctx, actor, false)
+		err = client.Spawn(ctx, actor, false, true)
 		require.NoError(t, err)
 
 		util.Pause(time.Second)
@@ -177,7 +177,7 @@ func TestClient(t *testing.T) {
 		require.ElementsMatch(t, expected, kinds)
 		actor := NewActor("client.testactor").WithName("actorName")
 
-		err = client.Spawn(ctx, actor, false)
+		err = client.Spawn(ctx, actor, false, true)
 		require.NoError(t, err)
 
 		util.Pause(time.Second)
@@ -263,7 +263,7 @@ func TestClient(t *testing.T) {
 		require.ElementsMatch(t, expected, kinds)
 		actor := NewActor("client.testactor").WithName("actorName")
 
-		err = client.Spawn(ctx, actor, false)
+		err = client.Spawn(ctx, actor, false, true)
 		require.NoError(t, err)
 
 		util.Pause(time.Second)
@@ -345,7 +345,7 @@ func TestClient(t *testing.T) {
 		require.ElementsMatch(t, expected, kinds)
 		actor := NewActor("client.testactor").WithName("actorName")
 
-		err = client.Spawn(ctx, actor, false)
+		err = client.Spawn(ctx, actor, false, true)
 		require.NoError(t, err)
 
 		util.Pause(time.Second)
@@ -428,7 +428,7 @@ func TestClient(t *testing.T) {
 		require.ElementsMatch(t, expected, kinds)
 		actor := NewActor("client.testactor").WithName("actorName")
 
-		err = client.SpawnWithBalancer(ctx, actor, RandomStrategy)
+		err = client.SpawnWithBalancer(ctx, actor, false, true, RandomStrategy)
 		require.NoError(t, err)
 
 		util.Pause(time.Second)
@@ -510,7 +510,7 @@ func TestClient(t *testing.T) {
 		require.ElementsMatch(t, expected, kinds)
 		actor := NewActor("client.testactor").WithName("actorName")
 
-		err = client.Spawn(ctx, actor, false)
+		err = client.Spawn(ctx, actor, false, true)
 		require.NoError(t, err)
 
 		util.Pause(time.Second)
@@ -597,7 +597,7 @@ func TestClient(t *testing.T) {
 		require.ElementsMatch(t, expected, kinds)
 		actor := NewActor("client.testactor").WithName("actorName")
 
-		err = client.Spawn(ctx, actor, false)
+		err = client.Spawn(ctx, actor, false, true)
 		require.NoError(t, err)
 
 		util.Pause(time.Second)
@@ -684,7 +684,7 @@ func TestClient(t *testing.T) {
 		require.ElementsMatch(t, expected, kinds)
 		actor := NewActor("client.testactor").WithName("actorName")
 
-		err = client.Spawn(ctx, actor, false)
+		err = client.Spawn(ctx, actor, false, true)
 		require.NoError(t, err)
 
 		util.Pause(time.Second)

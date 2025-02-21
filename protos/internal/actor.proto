@@ -14,6 +14,8 @@ message ActorRef {
   string actor_type = 2;
   // Specifies if the actor is a singleton
   bool is_singleton = 3;
+  // Specifies if the actor is disabled for relocation
+  bool relocatable = 4;
 }
 
 // ActorProps defines the properties of an actor
@@ -25,4 +27,6 @@ message ActorProps {
   string actor_type = 2;
   // Specifies if the actor is a singleton
   bool is_singleton = 3;
+  // Specifies if the actor is disabled for relocation
+  bool relocatable = 4;
 }
