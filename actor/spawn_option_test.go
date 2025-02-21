@@ -69,7 +69,7 @@ func TestSpawnOption(t *testing.T) {
 		config := &spawnConfig{}
 		option := WithRelocationDisabled()
 		option.Apply(config)
-		require.Equal(t, &spawnConfig{relocatable: true}, config)
+		require.Equal(t, &spawnConfig{relocatable: false}, config)
 	})
 }
 

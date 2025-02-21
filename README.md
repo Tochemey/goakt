@@ -30,6 +30,10 @@ The complete Documentation can be found [here](https://tochemey.gitbook.io/goakt
 
 Kindly check out the [examples](https://github.com/Tochemey/goakt-examples)' repository.
 
+## 💪 Support
+
+GoAkt is free and open source. If you need priority support on complex topics or request new features, please consider [sponsorship](https://github.com/sponsors/Tochemey).
+
 ## 🌍 Community
 
 You can join these groups and chat to discuss and ask GoAkt related questions on:
