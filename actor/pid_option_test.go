@@ -104,6 +104,11 @@ func TestPIDOptions(t *testing.T) {
 				isSingleton: atomicTrue,
 			},
 		},
+		{
+			name:     "withRelocationDisabled",
+			option:   withRelocationDisabled(),
+			expected: &PID{disableRelocation: atomicTrue},
+		},
 	}
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
