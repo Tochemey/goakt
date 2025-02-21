@@ -143,9 +143,10 @@ type PID struct {
 
 	remoting *Remoting
 
-	goScheduler *goScheduler
-	startedAt   *atomic.Int64
-	isSingleton atomic.Bool
+	goScheduler       *goScheduler
+	startedAt         *atomic.Int64
+	isSingleton       atomic.Bool
+	disableRelocation atomic.Bool
 }
 
 // newPID creates a new pid
@@ -192,6 +193,7 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 	pid.passivateAfter.Store(DefaultPassivationTimeout)
 	pid.initTimeout.Store(DefaultInitTimeout)
 	pid.processing.Store(int32(idle))
+	pid.disableRelocation.Store(false)
 
 	for _, opt := range opts {
 		opt(pid)
@@ -376,9 +378,27 @@ func (pid *PID) IsSuspended() bool {
 	return pid.suspended.Load()
 }
 
-// IsSingleton returns true when the actor is a singleton
+// IsSingleton returns true when the actor is a singleton.
+//
+// A singleton actor is instantiated when cluster mode is enabled.
+// A singleton actor like any other actor is created only once within the system and in the cluster.
+// A singleton actor is created with the default supervisor strategy and directive.
+// A singleton actor once created lives throughout the lifetime of the given actor system.
+//
+// The singleton actor is created on the oldest node in the cluster.
+// When the oldest node leaves the cluster unexpectedly, the singleton is restarted on the new oldest node.
+// This is useful for managing shared resources or coordinating tasks that should be handled by a single actor.
 func (pid *PID) IsSingleton() bool {
 	return pid.isSingleton.Load()
+}
+
+// IsRelocatable determines whether the actor can be relocated to another node if its host node shuts down unexpectedly.
+// By default, actors are relocatable to ensure system resilience and high availability.
+// However, this behavior can be disabled during the actor's creation using the WithRelocationDisabled option.
+//
+// Returns true if relocation is allowed, and false if relocation is disabled.
+func (pid *PID) IsRelocatable() bool {
+	return !pid.disableRelocation.Load()
 }
 
 // ActorSystem returns the actor system
@@ -564,6 +584,11 @@ func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor, opts .
 		pidOptions = append(pidOptions, withSupervisor(spawnConfig.supervisor))
 	}
 
+	// set the relocation flag
+	if spawnConfig.disableRelocation {
+		pidOptions = append(pidOptions, withRelocationDisabled())
+	}
+
 	// disable passivation for system actor
 	switch {
 	case isReservedName(name):
@@ -611,7 +636,7 @@ func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor, opts .
 	}
 
 	// set the actor in the given actor system registry
-	pid.ActorSystem().broadcastActor(cid, false)
+	pid.ActorSystem().broadcastActor(cid)
 	return cid, nil
 }
 
@@ -1332,6 +1357,7 @@ func (pid *PID) reset() {
 	pid.supervisor.Reset()
 	pid.mailbox.Dispose()
 	pid.isSingleton.Store(false)
+	pid.disableRelocation.Store(false)
 }
 
 // freeWatchers releases all the actors watching this actor

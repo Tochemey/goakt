@@ -131,14 +131,16 @@ func (r *rebalancer) Rebalance(ctx *ReceiveContext) {
 								return NewSpawnError(err)
 							}
 
-							if err := r.remoting.RemoteSpawn(egCtx,
-								peerState.GetHost(),
-								int(peerState.GetRemotingPort()),
-								actor.GetActorName(),
-								actor.GetActorType(),
-								false); err != nil {
-								logger.Error(err)
-								return NewSpawnError(err)
+							if actor.GetRelocatable() {
+								host := peerState.GetHost()
+								port := int(peerState.GetRemotingPort())
+								actorName := actor.GetActorName()
+								actorType := actor.GetActorType()
+
+								if err := r.remoting.RemoteSpawn(egCtx, host, port, actorName, actorType, false); err != nil {
+									logger.Error(err)
+									return NewSpawnError(err)
+								}
 							}
 						}
 					}
@@ -221,6 +223,10 @@ func (r *rebalancer) recreateLocally(ctx context.Context, actor *internalpb.Acto
 	if enforceSingleton && actor.GetIsSingleton() {
 		// spawn the singleton actor
 		return r.pid.ActorSystem().SpawnSingleton(ctx, actor.GetActorName(), iactor)
+	}
+
+	if !actor.GetRelocatable() {
+		return nil
 	}
 
 	_, err = r.pid.ActorSystem().Spawn(ctx, actor.GetActorName(), iactor)

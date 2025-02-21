@@ -117,3 +117,10 @@ func asSingleton() pidOption {
 		pid.isSingleton.Store(true)
 	}
 }
+
+// withRelocationDisabled disables the actor relocation
+func withRelocationDisabled() pidOption {
+	return func(pid *PID) {
+		pid.disableRelocation.Store(true)
+	}
+}

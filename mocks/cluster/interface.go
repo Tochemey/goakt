@@ -387,6 +387,63 @@ func (_c *Interface_IsRunning_Call) RunAndReturn(run func() bool) *Interface_IsR
 	return _c
 }
 
+// LookupKind provides a mock function with given fields: ctx, kind
+func (_m *Interface) LookupKind(ctx context.Context, kind string) (string, error) {
+	ret := _m.Called(ctx, kind)
+
+	if len(ret) == 0 {
+		panic("no return value specified for LookupKind")
+	}
+
+	var r0 string
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string) (string, error)); ok {
+		return rf(ctx, kind)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string) string); ok {
+		r0 = rf(ctx, kind)
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = rf(ctx, kind)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// Interface_LookupKind_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'LookupKind'
+type Interface_LookupKind_Call struct {
+	*mock.Call
+}
+
+// LookupKind is a helper method to define mock.On call
+//   - ctx context.Context
+//   - kind string
+func (_e *Interface_Expecter) LookupKind(ctx interface{}, kind interface{}) *Interface_LookupKind_Call {
+	return &Interface_LookupKind_Call{Call: _e.mock.On("LookupKind", ctx, kind)}
+}
+
+func (_c *Interface_LookupKind_Call) Run(run func(ctx context.Context, kind string)) *Interface_LookupKind_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *Interface_LookupKind_Call) Return(_a0 string, _a1 error) *Interface_LookupKind_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *Interface_LookupKind_Call) RunAndReturn(run func(context.Context, string) (string, error)) *Interface_LookupKind_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Peers provides a mock function with given fields: ctx
 func (_m *Interface) Peers(ctx context.Context) ([]*internalcluster.Peer, error) {
 	ret := _m.Called(ctx)
@@ -535,6 +592,53 @@ func (_c *Interface_RemoveActor_Call) Return(_a0 error) *Interface_RemoveActor_C
 }
 
 func (_c *Interface_RemoveActor_Call) RunAndReturn(run func(context.Context, string) error) *Interface_RemoveActor_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// RemoveKind provides a mock function with given fields: ctx, kind
+func (_m *Interface) RemoveKind(ctx context.Context, kind string) error {
+	ret := _m.Called(ctx, kind)
+
+	if len(ret) == 0 {
+		panic("no return value specified for RemoveKind")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, string) error); ok {
+		r0 = rf(ctx, kind)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// Interface_RemoveKind_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemoveKind'
+type Interface_RemoveKind_Call struct {
+	*mock.Call
+}
+
+// RemoveKind is a helper method to define mock.On call
+//   - ctx context.Context
+//   - kind string
+func (_e *Interface_Expecter) RemoveKind(ctx interface{}, kind interface{}) *Interface_RemoveKind_Call {
+	return &Interface_RemoveKind_Call{Call: _e.mock.On("RemoveKind", ctx, kind)}
+}
+
+func (_c *Interface_RemoveKind_Call) Run(run func(ctx context.Context, kind string)) *Interface_RemoveKind_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *Interface_RemoveKind_Call) Return(_a0 error) *Interface_RemoveKind_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *Interface_RemoveKind_Call) RunAndReturn(run func(context.Context, string) error) *Interface_RemoveKind_Call {
 	_c.Call.Return(run)
 	return _c
 }
