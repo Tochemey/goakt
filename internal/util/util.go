@@ -26,16 +26,9 @@ package util
 
 import (
 	"time"
-
-	"github.com/tochemey/goakt/v3/internal/types"
 )
 
 // Pause pauses the running process for some time period
 func Pause(duration time.Duration) {
-	stopCh := make(chan types.Unit, 1)
-	timer := time.AfterFunc(duration, func() {
-		stopCh <- types.Unit{}
-	})
-	<-stopCh
-	timer.Stop()
+	time.Sleep(duration)
 }

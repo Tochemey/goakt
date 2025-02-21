@@ -65,7 +65,7 @@ func TestDeadletter(t *testing.T) {
 		// wait a while
 		util.Pause(time.Second)
 
-		// every message sent to the actor will result in deadletters
+		// every message sent to the actor will result in deadletter
 		for i := 0; i < 5; i++ {
 			require.NoError(t, Tell(ctx, actorRef, new(testpb.TestSend)))
 		}
@@ -75,7 +75,7 @@ func TestDeadletter(t *testing.T) {
 		var items []*goaktpb.Deadletter
 		for message := range consumer.Iterator() {
 			payload := message.Payload()
-			// only listening to deadletters
+			// only listening to deadletter
 			deadletter, ok := payload.(*goaktpb.Deadletter)
 			if ok {
 				items = append(items, deadletter)
@@ -94,12 +94,8 @@ func TestDeadletter(t *testing.T) {
 		err = sys.Unsubscribe(consumer)
 		require.NoError(t, err)
 
-		t.Cleanup(
-			func() {
-				err = sys.Stop(ctx)
-				assert.NoError(t, err)
-			},
-		)
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
 	})
 	t.Run("With GetDeadletters", func(t *testing.T) {
 		ctx := context.TODO()
@@ -126,7 +122,7 @@ func TestDeadletter(t *testing.T) {
 		// wait a while
 		util.Pause(time.Second)
 
-		// every message sent to the actor will result in deadletters
+		// every message sent to the actor will result in deadletter
 		for i := 0; i < 5; i++ {
 			require.NoError(t, Tell(ctx, actorRef, new(testpb.TestSend)))
 		}
@@ -136,7 +132,7 @@ func TestDeadletter(t *testing.T) {
 		var items []*goaktpb.Deadletter
 		for message := range consumer.Iterator() {
 			payload := message.Payload()
-			// only listening to deadletters
+			// only listening to deadletter
 			deadletter, ok := payload.(*goaktpb.Deadletter)
 			if ok {
 				items = append(items, deadletter)
@@ -149,7 +145,7 @@ func TestDeadletter(t *testing.T) {
 
 		for message := range consumer.Iterator() {
 			payload := message.Payload()
-			// only listening to deadletters
+			// only listening to deadletter
 			deadletter, ok := payload.(*goaktpb.Deadletter)
 			if ok {
 				items = append(items, deadletter)
@@ -161,11 +157,7 @@ func TestDeadletter(t *testing.T) {
 		err = sys.Unsubscribe(consumer)
 		require.NoError(t, err)
 
-		t.Cleanup(
-			func() {
-				err = sys.Stop(ctx)
-				assert.NoError(t, err)
-			},
-		)
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
 	})
 }

@@ -37,7 +37,7 @@ import (
 	"github.com/tochemey/goakt/v3/log"
 )
 
-// deadletters is a synthetic actor that houses all deadletter
+// deadletter is a synthetic actor that houses all deadletter
 // in GoAkt deadletter are messages that have not been handled
 type deadLetter struct {
 	eventsStream *eventstream.EventsStream

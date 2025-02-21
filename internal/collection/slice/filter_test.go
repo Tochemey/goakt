@@ -22,47 +22,21 @@
  * SOFTWARE.
  */
 
-package actors
+package slice
 
 import (
-	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
-
-	"github.com/tochemey/goakt/v3/address"
-	"github.com/tochemey/goakt/v3/internal/internalpb"
-	"github.com/tochemey/goakt/v3/internal/types"
 )
 
-func TestActorRef(t *testing.T) {
-	t.Run("With Equals", func(t *testing.T) {
-		addr := address.New("name", "system", "host", 1234)
-		actorRef := fromActorRef(&internalpb.ActorRef{
-			ActorAddress: addr.Address,
-			ActorType:    "kind",
-		})
-
-		newActorRef := fromActorRef(&internalpb.ActorRef{
-			ActorAddress: addr.Address,
-			ActorType:    "kind",
-		})
-
-		require.Equal(t, "name", actorRef.Name())
-		require.Equal(t, "kind", actorRef.Kind())
-		require.True(t, addr.Equals(actorRef.Address()))
-		require.True(t, newActorRef.Equals(actorRef))
+func TestFilter(t *testing.T) {
+	slice := []int{1, 2, 3, 4, 5, 6, 7, 8, 9}
+	result := Filter(slice, func(v int) bool {
+		return v%2 == 0
 	})
-	t.Run("From PID", func(t *testing.T) {
-		addr := address.New("name", "system", "host", 1234)
-		actor := newMockActor()
-		pid := &PID{
-			address:      addr,
-			actor:        actor,
-			fieldsLocker: &sync.RWMutex{},
-		}
-		actorRef := fromPID(pid)
-		require.Equal(t, "name", actorRef.Name())
-		require.Equal(t, types.Name(actor), actorRef.Kind())
-	})
+
+	expected := []int{2, 4, 6, 8}
+	require.Len(t, result, 4)
+	require.ElementsMatch(t, expected, result)
 }

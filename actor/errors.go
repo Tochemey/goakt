@@ -93,8 +93,12 @@ var (
 	ErrPriorityMessageRequired = errors.New("priority message type is required")
 	// ErrActorAlreadyExists is returned when trying to create the same actor more than once
 	ErrActorAlreadyExists = func(actorName string) error { return fmt.Errorf("actor=(%s) already exists", actorName) }
-	// ErrInvalidTLSConfiguration is returned whent the TLS configuration is not properly set
+	// ErrInvalidTLSConfiguration is returned when the TLS configuration is not properly set
 	ErrInvalidTLSConfiguration = errors.New("TLS configuration is invalid")
+	// ErrSingletonAlreadyExists is returned when a given singleton actor type already exists
+	ErrSingletonAlreadyExists = errors.New("singleton already exists")
+	// ErrLeaderNotFound is returned when the cluster oldest node(leader) is not found
+	ErrLeaderNotFound = errors.New("leader is not found")
 )
 
 // eof returns true if the given error is an EOF error

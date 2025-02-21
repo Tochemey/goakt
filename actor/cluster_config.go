@@ -73,8 +73,8 @@ func NewClusterConfig() *ClusterConfig {
 	}
 }
 
-// WithPartitionCount sets the cluster config partition count
-// Partition cound should be a prime number.
+// WithPartitionCount sets the cluster config partition count.
+// Partition count should be a prime number.
 // ref: https://medium.com/swlh/why-should-the-length-of-your-hash-table-be-a-prime-number-760ec65a75d1
 func (x *ClusterConfig) WithPartitionCount(count uint64) *ClusterConfig {
 	x.partitionCount = count

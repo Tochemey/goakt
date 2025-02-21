@@ -111,6 +111,10 @@ message RemoteSpawnRequest {
   string actor_name = 3;
   // Specifies the actor type
   string actor_type = 4;
+  // Specifies if the actor is a singleton
+  bool is_singleton = 5;
 }
 
 message RemoteSpawnResponse {}
+
+message SpawnOption {}

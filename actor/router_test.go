@@ -246,7 +246,7 @@ func TestRouter(t *testing.T) {
 		var items []*goaktpb.Deadletter
 		for message := range consumer.Iterator() {
 			payload := message.Payload()
-			// only listening to deadletters
+			// only listening to deadletter
 			deadletter, ok := payload.(*goaktpb.Deadletter)
 			if ok {
 				items = append(items, deadletter)

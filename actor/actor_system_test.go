@@ -26,6 +26,7 @@ package actors
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"net"
 	"strconv"
@@ -425,7 +426,7 @@ func TestActorSystem(t *testing.T) {
 		var items []*goaktpb.ActorRestarted
 		for message := range consumer.Iterator() {
 			payload := message.Payload()
-			// only listening to deadletters
+			// only listening to deadletter
 			restarted, ok := payload.(*goaktpb.ActorRestarted)
 			if ok {
 				items = append(items, restarted)
@@ -723,12 +724,8 @@ func TestActorSystem(t *testing.T) {
 		// stop the actor after some time
 		util.Pause(time.Second)
 
-		t.Cleanup(
-			func() {
-				err = newActorSystem.Stop(ctx)
-				assert.NoError(t, err)
-			},
-		)
+		err = newActorSystem.Stop(ctx)
+		require.NoError(t, err)
 	})
 	t.Run("With LocalActor", func(t *testing.T) {
 		ctx := context.TODO()
@@ -908,7 +905,7 @@ func TestActorSystem(t *testing.T) {
 			},
 		)
 	})
-	t.Run("With deadletters subscription ", func(t *testing.T) {
+	t.Run("With deadletter subscription ", func(t *testing.T) {
 		ctx := context.TODO()
 		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
 
@@ -933,7 +930,7 @@ func TestActorSystem(t *testing.T) {
 		// wait a while
 		util.Pause(time.Second)
 
-		// every message sent to the actor will result in deadletters
+		// every message sent to the actor will result in deadletter
 		for i := 0; i < 5; i++ {
 			require.NoError(t, Tell(ctx, actorRef, new(testpb.TestSend)))
 		}
@@ -943,7 +940,7 @@ func TestActorSystem(t *testing.T) {
 		var items []*goaktpb.Deadletter
 		for message := range consumer.Iterator() {
 			payload := message.Payload()
-			// only listening to deadletters
+			// only listening to deadletter
 			deadletter, ok := payload.(*goaktpb.Deadletter)
 			if ok {
 				items = append(items, deadletter)
@@ -965,7 +962,7 @@ func TestActorSystem(t *testing.T) {
 		err = sys.Stop(ctx)
 		assert.NoError(t, err)
 	})
-	t.Run("With deadletters subscription when not started", func(t *testing.T) {
+	t.Run("With deadletter subscription when not started", func(t *testing.T) {
 		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
 
 		// create a deadletter subscriber
@@ -973,7 +970,7 @@ func TestActorSystem(t *testing.T) {
 		require.Error(t, err)
 		require.Nil(t, consumer)
 	})
-	t.Run("With deadletters unsubscription when not started", func(t *testing.T) {
+	t.Run("With deadletter unsubscription when not started", func(t *testing.T) {
 		ctx := context.TODO()
 		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
 
@@ -1384,12 +1381,8 @@ func TestActorSystem(t *testing.T) {
 		err = sys.Register(ctx, &exchanger{})
 		require.NoError(t, err)
 
-		t.Cleanup(
-			func() {
-				err = sys.Stop(ctx)
-				assert.NoError(t, err)
-			},
-		)
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
 	})
 	t.Run("With Register when actor system not started", func(t *testing.T) {
 		ctx := context.TODO()
@@ -1529,7 +1522,7 @@ func TestActorSystem(t *testing.T) {
 		require.Nil(t, addr)
 
 		// spawn the remote actor
-		err = remoting.RemoteSpawn(ctx, host, remotingPort, actorName, "actors.exchanger")
+		err = remoting.RemoteSpawn(ctx, host, remotingPort, actorName, "actors.exchanger", false)
 		require.NoError(t, err)
 
 		// re-fetching the address of the actor should return not nil address after start
@@ -1581,7 +1574,7 @@ func TestActorSystem(t *testing.T) {
 		assert.EqualValues(t, 1, pid.ProcessedCount())
 		require.True(t, pid.IsRunning())
 
-		// every message sent to the actor will result in deadletters
+		// every message sent to the actor will result in deadletter
 		counter := 0
 		for i := 1; i <= 5; i++ {
 			require.NoError(t, Tell(ctx, pid, new(testpb.TestSend)))
@@ -1843,5 +1836,63 @@ func TestActorSystem(t *testing.T) {
 		assert.NoError(t, err)
 		assert.True(t, pid.IsRunning())
 		assert.NoError(t, actorSystem.Stop(ctx))
+	})
+	t.Run("With invalid remote config address", func(t *testing.T) {
+		remotingPort := dynaport.Get(1)[0]
+
+		logger := log.DiscardLogger
+		host := "256.256.256.256"
+
+		newActorSystem, err := NewActorSystem(
+			"test",
+			WithPassivationDisabled(),
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort, remote.WithWriteTimeout(-1))),
+		)
+		require.Error(t, err)
+		require.Nil(t, newActorSystem)
+	})
+	t.Run("With invalid cluster config", func(t *testing.T) {
+		logger := log.DiscardLogger
+		host := "127.0.0.1"
+
+		// mock the discovery provider
+		provider := new(testkit.Provider)
+		newActorSystem, err := NewActorSystem(
+			"test",
+			WithPassivation(passivateAfter),
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, 2222)),
+			WithCluster(
+				NewClusterConfig().
+					WithKinds(new(mockActor)).
+					WithPartitionCount(0).
+					WithReplicaCount(1).
+					WithPeersPort(-1).
+					WithWAL(t.TempDir()).
+					WithMinimumPeersQuorum(1).
+					WithDiscoveryPort(-1).
+					WithDiscovery(provider)),
+		)
+		require.Error(t, err)
+		require.Nil(t, newActorSystem)
+	})
+	t.Run("With invalid TLS config", func(t *testing.T) {
+		logger := log.DiscardLogger
+		host := "127.0.0.1"
+
+		newActorSystem, err := NewActorSystem(
+			"test",
+			WithPassivation(passivateAfter),
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, 2222)),
+			WithTLS(&TLSInfo{
+				ClientTLS: &tls.Config{InsecureSkipVerify: true}, // nolint
+				ServerTLS: nil,
+			}),
+		)
+		require.Error(t, err)
+		require.ErrorIs(t, err, ErrInvalidTLSConfiguration)
+		require.Nil(t, newActorSystem)
 	})
 }

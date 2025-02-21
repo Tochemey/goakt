@@ -64,9 +64,10 @@ type EventType int
 const (
 	NodeJoined EventType = iota
 	NodeLeft
-	actorsMap  = "actors"
-	statesMap  = "states"
-	jobKeysMap = "jobKeys"
+	actorsMap     = "actors"
+	statesMap     = "states"
+	jobKeysMap    = "jobKeys"
+	actorKindsMap = "actorKinds"
 )
 
 func (x EventType) String() string {
@@ -102,11 +103,17 @@ type Interface interface {
 	SetSchedulerJobKey(ctx context.Context, key string) error
 	// SchedulerJobKeyExists checks the existence of a given key
 	SchedulerJobKeyExists(ctx context.Context, key string) (bool, error)
+	// LookupKind checks the existence of a given actor kind in the cluster
+	// This function is mainly used when creating a singleton actor
+	LookupKind(ctx context.Context, kind string) (string, error)
 	// UnsetSchedulerJobKey unsets the already set given key in the cluster
 	UnsetSchedulerJobKey(ctx context.Context, key string) error
 	// RemoveActor removes a given actor from the cluster.
 	// An actor is removed from the cluster when this actor has been passivated.
 	RemoveActor(ctx context.Context, actorName string) error
+	// RemoveKind removes a given actor from the cluster
+	// when the node where the kind is created shuts down
+	RemoveKind(ctx context.Context, kind string) error
 	// Events returns a channel where cluster events are published
 	Events() <-chan *Event
 	// Peers returns a channel containing the list of peers at a given time
@@ -148,10 +155,11 @@ type Engine struct {
 	// this help set and fetch data from the Node
 	client olric.Client
 
-	actorsMap   olric.DMap
-	statesMap   olric.DMap
-	jobKeysMap  olric.DMap
-	kvStoreSize uint64
+	actorsMap     olric.DMap
+	statesMap     olric.DMap
+	jobKeysMap    olric.DMap
+	actorKindsMap olric.DMap
+	kvStoreSize   uint64
 
 	// specifies the discovery node
 	node *discovery.Node
@@ -337,12 +345,18 @@ func (x *Engine) Start(ctx context.Context) error {
 		return x.server.Shutdown(ctx)
 	}
 
+	x.actorKindsMap, err = x.client.NewDMap(actorKindsMap)
+	if err != nil {
+		logger.Error(fmt.Errorf("failed to start the cluster Engine on node=(%s): %w", x.name, err))
+		return x.server.Shutdown(ctx)
+	}
+
 	// set the peer state
 	x.peerState = &internalpb.PeerState{
 		Host:         x.node.Host,
 		RemotingPort: int32(x.node.RemotingPort),
 		PeersPort:    int32(x.node.PeersPort),
-		Actors:       map[string]string{},
+		Actors:       map[string]*internalpb.ActorProps{},
 	}
 
 	if err := x.initializeState(ctx); err != nil {
@@ -500,6 +514,17 @@ func (x *Engine) PutActor(ctx context.Context, actor *internalpb.ActorRef) error
 	eg.Go(func() error {
 		encoded, _ := encode(actor)
 		key := actor.GetActorAddress().GetName()
+		if actor.GetIsSingleton() {
+			if err := errorschain.
+				New(errorschain.ReturnFirst()).
+				AddError(x.actorsMap.Put(ctx, key, encoded)).
+				AddError(x.actorKindsMap.Put(ctx, actor.GetActorType(), key)).
+				Error(); err != nil {
+				return fmt.Errorf("(%s) failed to sync actor=(%s): %v", x.node.PeersAddress(), actor.GetActorAddress().GetName(), err)
+			}
+			return nil
+		}
+
 		if err := x.actorsMap.Put(ctx, key, encoded); err != nil {
 			return fmt.Errorf("(%s) failed to sync actor=(%s): %v", x.node.PeersAddress(), actor.GetActorAddress().GetName(), err)
 		}
@@ -508,7 +533,12 @@ func (x *Engine) PutActor(ctx context.Context, actor *internalpb.ActorRef) error
 
 	eg.Go(func() error {
 		actors := x.peerState.GetActors()
-		actors[actor.GetActorAddress().GetName()] = actor.GetActorType()
+		actorName := actor.GetActorAddress().GetName()
+		actors[actorName] = &internalpb.ActorProps{
+			ActorName:   actorName,
+			ActorType:   actor.GetActorType(),
+			IsSingleton: actor.GetIsSingleton(),
+		}
 		x.peerState.Actors = actors
 
 		bytea, _ := proto.Marshal(x.peerState)
@@ -637,6 +667,30 @@ func (x *Engine) RemoveActor(ctx context.Context, actorName string) error {
 	return nil
 }
 
+// RemoveKind removes a given actor from the cluster
+// when the node where the kind is created shuts down
+func (x *Engine) RemoveKind(ctx context.Context, kind string) error {
+	// return an error when the engine is not running
+	if !x.IsRunning() {
+		return ErrEngineNotRunning
+	}
+
+	logger := x.logger
+	x.Lock()
+	defer x.Unlock()
+
+	logger.Infof("removing actor kind (%s) from cluster", kind)
+
+	_, err := x.actorKindsMap.Delete(ctx, kind)
+	if err != nil {
+		logger.Errorf("(%s) failed to remove actor kind=(%s) record from cluster: %v", x.node.PeersAddress(), kind, err)
+		return err
+	}
+
+	logger.Infof("actor kind (%s) successfully removed from the cluster", kind)
+	return nil
+}
+
 // SetSchedulerJobKey sets a given key to the cluster
 func (x *Engine) SetSchedulerJobKey(ctx context.Context, key string) error {
 	// return an error when the engine is not running
@@ -661,6 +715,37 @@ func (x *Engine) SetSchedulerJobKey(ctx context.Context, key string) error {
 
 	logger.Infof("key (%s) successfully replicated", key)
 	return nil
+}
+
+// LookupKind checks the existence of a given actor kind in the cluster
+// This function is mainly used when creating a singleton actor
+func (x *Engine) LookupKind(ctx context.Context, kind string) (string, error) {
+	// return an error when the engine is not running
+	if !x.IsRunning() {
+		return "", ErrEngineNotRunning
+	}
+
+	ctx, cancelFn := context.WithTimeout(ctx, x.readTimeout)
+	defer cancelFn()
+
+	x.Lock()
+	defer x.Unlock()
+
+	logger := x.logger
+
+	logger.Infof("checking actor kind (%s) existence in the cluster", kind)
+
+	resp, err := x.actorKindsMap.Get(ctx, kind)
+	if err != nil {
+		if errors.Is(err, olric.ErrKeyNotFound) {
+			logger.Warnf("actor kind=%s is not found in the cluster", kind)
+			return "", nil
+		}
+
+		logger.Errorf("[%s] failed to check actor kind (%s) existence: %v", x.node.PeersAddress(), kind, err)
+		return "", err
+	}
+	return resp.String()
 }
 
 // SchedulerJobKeyExists checks the existence of a given key

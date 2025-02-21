@@ -145,6 +145,7 @@ type PID struct {
 
 	goScheduler *goScheduler
 	startedAt   *atomic.Int64
+	isSingleton atomic.Bool
 }
 
 // newPID creates a new pid
@@ -184,6 +185,7 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 
 	pid.initMaxRetries.Store(DefaultInitMaxRetries)
 	pid.latestReceiveDuration.Store(0)
+	pid.isSingleton.Store(false)
 	pid.started.Store(false)
 	pid.stopping.Store(false)
 	pid.suspended.Store(false)
@@ -372,6 +374,11 @@ func (pid *PID) IsRunning() bool {
 // A suspended actor is a faulty actor
 func (pid *PID) IsSuspended() bool {
 	return pid.suspended.Load()
+}
+
+// IsSingleton returns true when the actor is a singleton
+func (pid *PID) IsSingleton() bool {
+	return pid.isSingleton.Load()
 }
 
 // ActorSystem returns the actor system
@@ -604,7 +611,7 @@ func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor, opts .
 	}
 
 	// set the actor in the given actor system registry
-	pid.ActorSystem().broadcastActor(cid)
+	pid.ActorSystem().broadcastActor(cid, false)
 	return cid, nil
 }
 
@@ -1324,6 +1331,7 @@ func (pid *PID) reset() {
 	pid.suspended.Store(false)
 	pid.supervisor.Reset()
 	pid.mailbox.Dispose()
+	pid.isSingleton.Store(false)
 }
 
 // freeWatchers releases all the actors watching this actor
@@ -1645,7 +1653,7 @@ func (pid *PID) notifyParent(err error) {
 	}
 }
 
-// toDeadletters sends message to deadletters synthetic actor
+// toDeadletters sends message to deadletter synthetic actor
 func (pid *PID) toDeadletters(receiveCtx *ReceiveContext, err error) {
 	// the message is lost
 	if pid.eventsStream == nil {
@@ -1666,11 +1674,11 @@ func (pid *PID) toDeadletters(receiveCtx *ReceiveContext, err error) {
 		sender = receiveCtx.Sender().Address().Address
 	}
 
-	// get the deadletters synthetic actor and send a message to it
+	// get the deadletter synthetic actor and send a message to it
 	receiver := pid.Address().Address
-	deadletters := pid.ActorSystem().getDeadletter()
+	deadletter := pid.ActorSystem().getDeadletter()
 	_ = pid.Tell(context.Background(),
-		deadletters,
+		deadletter,
 		&internalpb.EmitDeadletter{
 			Deadletter: &goaktpb.Deadletter{
 				Sender:   sender,
@@ -1854,7 +1862,7 @@ func (pid *PID) suspend(reason string) {
 	})
 }
 
-// getDeadlettersCount gets deadletters
+// getDeadlettersCount gets deadletter
 func (pid *PID) getDeadlettersCount(ctx context.Context) int64 {
 	var (
 		name    = pid.Name()
@@ -1869,7 +1877,7 @@ func (pid *PID) getDeadlettersCount(ctx context.Context) int64 {
 		// using the default ask timeout
 		// note: no need to check for error because this call is internal
 		message, _ := from.Ask(ctx, to, message, DefaultAskTimeout)
-		// cast the response received from the deadletters
+		// cast the response received from the deadletter
 		deadlettersCount := message.(*internalpb.DeadlettersCount)
 		return deadlettersCount.GetTotalCount()
 	}

@@ -110,3 +110,10 @@ func withRemoting(remoting *Remoting) pidOption {
 		pid.remoting = remoting
 	}
 }
+
+// asSingleton set the actor as singleton
+func asSingleton() pidOption {
+	return func(pid *PID) {
+		pid.isSingleton.Store(true)
+	}
+}
