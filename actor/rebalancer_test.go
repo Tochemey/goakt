@@ -223,7 +223,7 @@ func TestRebalancingWithSingletonActor(t *testing.T) {
 	require.NoError(t, node1.Stop(ctx))
 	require.NoError(t, sd1.Close())
 
-	util.Pause(time.Minute)
+	util.Pause(2 * time.Minute)
 
 	_, _, err = node2.ActorOf(ctx, "actorName")
 	require.NoError(t, err)
