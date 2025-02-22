@@ -22,7 +22,7 @@
  * SOFTWARE.
  */
 
-package actors
+package cluster
 
 import (
 	"testing"
@@ -39,16 +39,16 @@ func TestClusterStore(t *testing.T) {
 	t.Run("Open when directory exists", func(t *testing.T) {
 		dir := t.TempDir()
 		logger := log.DiscardLogger
-		store, err := newClusterStore(dir, logger)
+		store, err := NewStore(dir, logger)
 		require.NoError(t, err)
 		require.NotNil(t, store)
-		store.close()
+		store.Close()
 	})
 
 	t.Run("Open when directory is invalid", func(t *testing.T) {
 		dir := "/"
 		logger := log.DiscardLogger
-		store, err := newClusterStore(dir, logger)
+		store, err := NewStore(dir, logger)
 		require.Error(t, err)
 		require.Nil(t, store)
 	})
@@ -56,7 +56,7 @@ func TestClusterStore(t *testing.T) {
 	t.Run("SetAndGet", func(t *testing.T) {
 		dir := t.TempDir()
 		logger := log.DiscardLogger
-		store, err := newClusterStore(dir, logger)
+		store, err := NewStore(dir, logger)
 		require.NoError(t, err)
 		require.NotNil(t, store)
 
@@ -68,33 +68,33 @@ func TestClusterStore(t *testing.T) {
 		}
 
 		// Set successful
-		err = store.set(peerState)
+		err = store.PersistPeerState(peerState)
 		require.NoError(t, err)
 
 		// Get found
 		key := "127.0.0.1:2281"
-		actual, ok := store.get(key)
+		actual, ok := store.GetPeerState(key)
 		require.True(t, ok)
 		assert.True(t, proto.Equal(peerState, actual))
 
 		// Get not found
-		_, ok = store.get("127.0.0.1:2282")
+		_, ok = store.GetPeerState("127.0.0.1:2282")
 		require.False(t, ok)
 
 		// Get unmarshalling failed
 		// Assume that wrong bytes array in kept in the LogSM
 		err = store.store.Set(key, []byte("hello"))
 		require.NoError(t, err)
-		_, ok = store.get(key)
+		_, ok = store.GetPeerState(key)
 		require.False(t, ok)
 
-		store.close()
+		store.Close()
 	})
 
 	t.Run("Remove", func(t *testing.T) {
 		dir := t.TempDir()
 		logger := log.DiscardLogger
-		store, err := newClusterStore(dir, logger)
+		store, err := NewStore(dir, logger)
 		require.NoError(t, err)
 		require.NotNil(t, store)
 
@@ -106,22 +106,22 @@ func TestClusterStore(t *testing.T) {
 		}
 
 		// Set successful
-		err = store.set(peerState)
+		err = store.PersistPeerState(peerState)
 		require.NoError(t, err)
 
 		// Get found
 		key := "127.0.0.1:2281"
-		actual, ok := store.get(key)
+		actual, ok := store.GetPeerState(key)
 		require.True(t, ok)
 		assert.True(t, proto.Equal(peerState, actual))
 
 		// Remove
-		err = store.remove(key)
+		err = store.DeletePeerState(key)
 		require.NoError(t, err)
 
-		_, ok = store.get(key)
+		_, ok = store.GetPeerState(key)
 		require.False(t, ok)
 
-		store.close()
+		store.Close()
 	})
 }

@@ -22,7 +22,7 @@
  * SOFTWARE.
  */
 
-package actors
+package cluster
 
 import (
 	"net"
@@ -36,14 +36,14 @@ import (
 	"github.com/tochemey/goakt/v3/log"
 )
 
-type clusterStore struct {
+type Store struct {
 	store  *logsm.LogSM
 	logger log.Logger
 }
 
-// newClusterStore creates an instance of clusterStore
+// NewStore creates an instance of Store
 // TODO: add custom options. At the moment the default should be enough
-func newClusterStore(dir string, logger log.Logger) (*clusterStore, error) {
+func NewStore(dir string, logger log.Logger) (*Store, error) {
 	store, err := logsm.Open(dir,
 		logsm.WithLogger(logger),
 		logsm.WithL0TargetNum(5),
@@ -58,21 +58,21 @@ func newClusterStore(dir string, logger log.Logger) (*clusterStore, error) {
 		return nil, err
 	}
 
-	return &clusterStore{
+	return &Store{
 		store:  store,
 		logger: logger,
 	}, nil
 }
 
-// set adds a peer to the cache
-func (s *clusterStore) set(peer *internalpb.PeerState) error {
+// PersistPeerState adds a peer to the cache
+func (s *Store) PersistPeerState(peer *internalpb.PeerState) error {
 	peerAddress := net.JoinHostPort(peer.GetHost(), strconv.Itoa(int(peer.GetPeersPort())))
 	value, _ := proto.Marshal(peer)
 	return s.store.Set(peerAddress, value)
 }
 
-// get retrieve a peer from the cache
-func (s *clusterStore) get(peerAddress string) (*internalpb.PeerState, bool) {
+// GetPeerState retrieve a peer from the cache
+func (s *Store) GetPeerState(peerAddress string) (*internalpb.PeerState, bool) {
 	value, ok := s.store.Get(peerAddress)
 	if !ok {
 		return nil, false
@@ -89,12 +89,12 @@ func (s *clusterStore) get(peerAddress string) (*internalpb.PeerState, bool) {
 	return peer, ok
 }
 
-// remove deletes a peer from the cache
-func (s *clusterStore) remove(peerAddress string) error {
+// DeletePeerState deletes a peer from the cache
+func (s *Store) DeletePeerState(peerAddress string) error {
 	return s.store.Delete(peerAddress)
 }
 
-// close resets the cache
-func (s *clusterStore) close() {
+// Close resets the cache
+func (s *Store) Close() {
 	s.store.Close()
 }

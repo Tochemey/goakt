@@ -49,7 +49,7 @@ type ClusterConfig struct {
 	discoveryPort      int
 	peersPort          int
 	kinds              []Actor
-	kvStoreSize        uint64
+	tableSize          uint64
 	wal                string
 }
 
@@ -68,7 +68,7 @@ func NewClusterConfig() *ClusterConfig {
 		readQuorum:         1,
 		replicaCount:       1,
 		partitionCount:     271,
-		kvStoreSize:        20 * size.MB,
+		tableSize:          20 * size.MB,
 		wal:                filepath.Join(homedir, "goakt", "data"),
 	}
 }
@@ -186,16 +186,16 @@ func (x *ClusterConfig) WithReadQuorum(count uint32) *ClusterConfig {
 	return x
 }
 
-// WithKVStoreSize sets the key/value in-memory storage size
+// WithTableSize sets the key/value in-memory storage size
 // The default values is 20MB
-func (x *ClusterConfig) WithKVStoreSize(size uint64) *ClusterConfig {
-	x.kvStoreSize = size
+func (x *ClusterConfig) WithTableSize(size uint64) *ClusterConfig {
+	x.tableSize = size
 	return x
 }
 
-// KVStoreSize returns the cluster storage size
-func (x *ClusterConfig) KVStoreSize() uint64 {
-	return x.kvStoreSize
+// TableSize returns the cluster storage size
+func (x *ClusterConfig) TableSize() uint64 {
+	return x.tableSize
 }
 
 // WAL returns the WAL directory

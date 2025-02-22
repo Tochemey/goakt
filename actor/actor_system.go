@@ -285,7 +285,7 @@ type actorSystem struct {
 	reflection *reflection
 
 	peersStateLoopInterval time.Duration
-	clusterStore           *clusterStore
+	clusterStore           *cluster.Store
 	clusterConfig          *ClusterConfig
 	rebalancingQueue       chan *internalpb.PeerState
 	rebalancedNodes        goset.Set[string]
@@ -1392,7 +1392,7 @@ func (x *actorSystem) completeRebalancing() {
 // removePeerStateFromStore removes the peer state from the cluster store
 func (x *actorSystem) removePeerStateFromStore(address string) error {
 	x.locker.Lock()
-	if err := x.clusterStore.remove(address); err != nil {
+	if err := x.clusterStore.DeletePeerState(address); err != nil {
 		x.locker.Unlock()
 		return err
 	}
@@ -1404,7 +1404,7 @@ func (x *actorSystem) removePeerStateFromStore(address string) error {
 // getPeerStateFromStore returns the peer state from the cluster store
 func (x *actorSystem) getPeerStateFromStore(address string) (*internalpb.PeerState, error) {
 	x.locker.Lock()
-	peerState, ok := x.clusterStore.get(address)
+	peerState, ok := x.clusterStore.GetPeerState(address)
 	x.locker.Unlock()
 	if !ok {
 		return nil, ErrPeerNotFound
@@ -1441,7 +1441,7 @@ func (x *actorSystem) enableClustering(ctx context.Context) error {
 		return errors.New("clustering needs remoting to be enabled")
 	}
 
-	clusterStore, err := newClusterStore(x.clusterConfig.WAL(), x.logger)
+	clusterStore, err := cluster.NewStore(x.clusterConfig.WAL(), x.logger)
 	if err != nil {
 		x.logger.Errorf("failed to initialize peers cache: %v", err)
 		x.locker.Unlock()
@@ -1469,7 +1469,7 @@ func (x *actorSystem) enableClustering(ctx context.Context) error {
 		cluster.WithReadQuorum(x.clusterConfig.ReadQuorum()),
 		cluster.WithReplicaCount(x.clusterConfig.ReplicaCount()),
 		cluster.WithTLS(x.serverTLS, x.clientTLS),
-		cluster.WithKVStoreSize(x.clusterConfig.KVStoreSize()),
+		cluster.WithTableSize(x.clusterConfig.TableSize()),
 	)
 	if err != nil {
 		x.logger.Errorf("failed to initialize cluster engine: %v", err)
@@ -1692,7 +1692,7 @@ func (x *actorSystem) clusterEventsLoop() {
 					// only leader can start rebalancing. Just remove from the peer state from your cluster state
 					// to free up resources
 					if !x.cluster.IsLeader(ctx) {
-						if err := x.clusterStore.remove(nodeLeft.GetAddress()); err != nil {
+						if err := x.clusterStore.DeletePeerState(nodeLeft.GetAddress()); err != nil {
 							x.logger.Errorf("%s failed to remove left node=(%s) from cluster store: %w", x.name, nodeLeft.GetAddress(), err)
 						}
 						continue
@@ -1703,7 +1703,7 @@ func (x *actorSystem) clusterEventsLoop() {
 					}
 
 					x.rebalancedNodes.Add(nodeLeft.GetAddress())
-					if peerState, ok := x.clusterStore.get(nodeLeft.GetAddress()); ok {
+					if peerState, ok := x.clusterStore.GetPeerState(nodeLeft.GetAddress()); ok {
 						x.rebalanceLocker.Lock()
 						x.rebalancingQueue <- peerState
 						x.rebalanceLocker.Unlock()
@@ -1714,7 +1714,7 @@ func (x *actorSystem) clusterEventsLoop() {
 	}
 }
 
-// peersStateLoop fetches the cluster peers' PeerState and update the node clusterStore
+// peersStateLoop fetches the cluster peers' PeerState and update the node Store
 func (x *actorSystem) peersStateLoop() {
 	x.logger.Info("peers state synchronization has started...")
 	ticker := ticker.New(x.peersStateLoopInterval)
@@ -1824,7 +1824,7 @@ func (x *actorSystem) processPeerState(ctx context.Context, peer *cluster.Peer) 
 	}
 
 	x.logger.Debugf("peer (%s) actors count (%d)", peerAddress, len(peerState.GetActors()))
-	if err := x.clusterStore.set(peerState); err != nil {
+	if err := x.clusterStore.PersistPeerState(peerState); err != nil {
 		x.logger.Error(err)
 		return err
 	}
@@ -2225,7 +2225,7 @@ func (x *actorSystem) shutdownCluster(ctx context.Context, actorRefs []ActorRef)
 
 		x.rebalanceLocker.Unlock()
 		if x.clusterStore != nil {
-			x.clusterStore.close()
+			x.clusterStore.Close()
 		}
 	}
 	return nil
