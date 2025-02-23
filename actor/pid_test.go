@@ -3709,3 +3709,39 @@ func TestLogger(t *testing.T) {
 		buffer.Reset()
 	})
 }
+func TestDeadletterCountMetric(t *testing.T) {
+	ctx := context.TODO()
+	sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+
+	// start the actor system
+	err := sys.Start(ctx)
+	assert.NoError(t, err)
+
+	// wait for complete start
+	util.Pause(time.Second)
+
+	// create the black hole actor
+	actor := &mockUnhandledMessageActor{}
+	actorName := "actorName"
+	actorRef, err := sys.Spawn(ctx, actorName, actor)
+	assert.NoError(t, err)
+	assert.NotNil(t, actorRef)
+
+	// wait a while
+	util.Pause(time.Second)
+
+	// every message sent to the actor will result in deadletter
+	for i := 0; i < 5; i++ {
+		require.NoError(t, Tell(ctx, actorRef, new(testpb.TestSend)))
+	}
+
+	util.Pause(time.Second)
+
+	metric := actorRef.Metric(ctx)
+	require.NotNil(t, metric)
+
+	require.EqualValues(t, 5, metric.DeadlettersCount())
+
+	err = sys.Stop(ctx)
+	assert.NoError(t, err)
+}

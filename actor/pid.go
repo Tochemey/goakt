@@ -1891,7 +1891,7 @@ func (pid *PID) suspend(reason string) {
 // getDeadlettersCount gets deadletter
 func (pid *PID) getDeadlettersCount(ctx context.Context) int64 {
 	var (
-		name    = pid.Name()
+		name    = pid.ID()
 		to      = pid.ActorSystem().getDeadletter()
 		from    = pid.ActorSystem().getSystemGuardian()
 		message = &internalpb.GetDeadlettersCount{
