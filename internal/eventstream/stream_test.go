@@ -55,9 +55,7 @@ func TestBroker(t *testing.T) {
 		broker.Subscribe(cons, "t3")
 		assert.Zero(t, broker.SubscribersCount("t3"))
 
-		t.Cleanup(func() {
-			broker.Shutdown()
-		})
+		broker.Shutdown()
 	})
 	t.Run("With Unsubscription", func(t *testing.T) {
 		broker := New()
@@ -69,12 +67,19 @@ func TestBroker(t *testing.T) {
 		broker.Subscribe(cons, "t1")
 		broker.Subscribe(cons, "t2")
 
-		require.EqualValues(t, 1, broker.SubscribersCount("t1"))
+		sub2 := broker.AddSubscriber()
+		require.NotNil(t, sub2)
+		broker.Subscribe(sub2, "t1")
+
+		require.EqualValues(t, 2, broker.SubscribersCount("t1"))
 		require.EqualValues(t, 1, broker.SubscribersCount("t2"))
+
+		sub2.Shutdown()
 
 		// unsubscribe the consumer
 		broker.Unsubscribe(cons, "t1")
-		assert.Zero(t, broker.SubscribersCount("t1"))
+		broker.Unsubscribe(sub2, "t1")
+		require.Zero(t, broker.SubscribersCount("t1"))
 		require.EqualValues(t, 1, broker.SubscribersCount("t2"))
 
 		broker.Subscribe(cons, "t3")
@@ -85,9 +90,7 @@ func TestBroker(t *testing.T) {
 		broker.Subscribe(cons, "t4")
 		assert.Zero(t, broker.SubscribersCount("t4"))
 
-		t.Cleanup(func() {
-			broker.Shutdown()
-		})
+		broker.Shutdown()
 	})
 	t.Run("With Publication", func(t *testing.T) {
 		broker := New()
@@ -98,8 +101,14 @@ func TestBroker(t *testing.T) {
 		broker.Subscribe(cons, "t1")
 		broker.Subscribe(cons, "t2")
 
-		require.EqualValues(t, 1, broker.SubscribersCount("t1"))
+		sub2 := broker.AddSubscriber()
+		require.NotNil(t, sub2)
+		broker.Subscribe(sub2, "t1")
+
+		require.EqualValues(t, 2, broker.SubscribersCount("t1"))
 		require.EqualValues(t, 1, broker.SubscribersCount("t2"))
+
+		sub2.Shutdown()
 
 		broker.Publish("t1", "hi")
 		broker.Publish("t2", "hello")
@@ -108,15 +117,16 @@ func TestBroker(t *testing.T) {
 
 		var messages []*Message
 		for message := range cons.Iterator() {
+			require.NotNil(t, message)
+			require.NotNil(t, message.Topic())
+			require.NotNil(t, message.Payload())
 			messages = append(messages, message)
 		}
 
 		assert.Len(t, messages, 2)
 		assert.Len(t, cons.Topics(), 2)
 
-		t.Cleanup(func() {
-			broker.Shutdown()
-		})
+		broker.Shutdown()
 	})
 	t.Run("With Broadcast", func(t *testing.T) {
 		broker := New()
@@ -127,8 +137,14 @@ func TestBroker(t *testing.T) {
 		broker.Subscribe(cons, "t1")
 		broker.Subscribe(cons, "t2")
 
-		require.EqualValues(t, 1, broker.SubscribersCount("t1"))
+		sub2 := broker.AddSubscriber()
+		require.NotNil(t, sub2)
+		broker.Subscribe(sub2, "t1")
+
+		require.EqualValues(t, 2, broker.SubscribersCount("t1"))
 		require.EqualValues(t, 1, broker.SubscribersCount("t2"))
+
+		sub2.Shutdown()
 
 		broker.Broadcast("hi", []string{"t1", "t2"})
 
