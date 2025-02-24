@@ -127,7 +127,7 @@ type PID struct {
 	stashLocker *sync.Mutex
 
 	// define an events stream
-	eventsStream *eventstream.EventsStream
+	eventsStream eventstream.Stream
 
 	// set the metrics settings
 	restartCount   *atomic.Int64

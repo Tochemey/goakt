@@ -91,7 +91,7 @@ func withMailbox(box Mailbox) pidOption {
 }
 
 // withEventsStream set the events stream
-func withEventsStream(stream *eventstream.EventsStream) pidOption {
+func withEventsStream(stream eventstream.Stream) pidOption {
 	return func(pid *PID) {
 		pid.eventsStream = stream
 	}

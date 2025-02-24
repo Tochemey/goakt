@@ -276,7 +276,7 @@ type actorSystem struct {
 	janitorInterval time.Duration
 
 	// specifies the events stream
-	eventsStream *eventstream.EventsStream
+	eventsStream eventstream.Stream
 
 	// specifies the message scheduler
 	scheduler *scheduler
@@ -1639,7 +1639,7 @@ func (x *actorSystem) shutdown(ctx context.Context) error {
 	x.actors.DeleteNode(x.getRootGuardian())
 
 	if x.eventsStream != nil {
-		x.eventsStream.Shutdown()
+		x.eventsStream.Close()
 	}
 
 	if err := errorschain.

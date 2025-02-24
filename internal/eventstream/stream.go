@@ -31,6 +31,25 @@ import (
 // Subscribers defines the map of subscribers
 type Subscribers map[string]Subscriber
 
+type Stream interface {
+	// AddSubscriber adds a subscriber
+	AddSubscriber() Subscriber
+	// RemoveSubscriber removes a subscriber
+	RemoveSubscriber(sub Subscriber)
+	// SubscribersCount returns the number of subscribers for a given topic
+	SubscribersCount(topic string) int
+	// Subscribe subscribes a subscriber to a topic
+	Subscribe(sub Subscriber, topic string)
+	// Unsubscribe removes a subscriber from a topic
+	Unsubscribe(sub Subscriber, topic string)
+	// Publish publishes a message to a topic
+	Publish(topic string, msg any)
+	// Broadcast notifies all subscribers of a given topic of a new message
+	Broadcast(msg any, topics []string)
+	// Close closes the stream
+	Close()
+}
+
 // EventsStream defines the stream broker
 type EventsStream struct {
 	subs   Subscribers
@@ -38,8 +57,11 @@ type EventsStream struct {
 	mu     sync.Mutex
 }
 
+// enforce a compilation error
+var _ Stream = (*EventsStream)(nil)
+
 // New creates an instance of EventsStream
-func New() *EventsStream {
+func New() Stream {
 	return &EventsStream{
 		subs:   Subscribers{},
 		topics: map[string]Subscribers{},
@@ -50,9 +72,9 @@ func New() *EventsStream {
 // AddSubscriber adds a subscriber
 func (b *EventsStream) AddSubscriber() Subscriber {
 	b.mu.Lock()
+	defer b.mu.Unlock()
 	c := newSubscriber()
 	b.subs[c.ID()] = c
-	b.mu.Unlock()
 	return c
 }
 
@@ -80,8 +102,7 @@ func (b *EventsStream) Broadcast(msg any, topics []string) {
 			if !consumer.Active() {
 				continue
 			}
-			m := NewMessage(topic, msg)
-			go consumer.signal(m)
+			go consumer.signal(NewMessage(topic, msg))
 		}
 	}
 }
@@ -90,9 +111,8 @@ func (b *EventsStream) Broadcast(msg any, topics []string) {
 func (b *EventsStream) SubscribersCount(topic string) int {
 	// get total subscribers subscribed to given topic.
 	b.mu.Lock()
-	count := len(b.topics[topic])
-	b.mu.Unlock()
-	return count
+	defer b.mu.Unlock()
+	return len(b.topics[topic])
 }
 
 // Subscribe subscribes a subscriber to a topic
@@ -115,14 +135,8 @@ func (b *EventsStream) Subscribe(sub Subscriber, topic string) {
 
 // Unsubscribe removes a subscriber from a topic
 func (b *EventsStream) Unsubscribe(sub Subscriber, topic string) {
-	// unsubscribe to given topic
 	b.mu.Lock()
 	defer b.mu.Unlock()
-
-	// only unsubscribe active subscriber
-	if !sub.Active() {
-		return
-	}
 
 	delete(b.topics[topic], sub.ID())
 	sub.unsubscribe(topic)
@@ -138,13 +152,12 @@ func (b *EventsStream) Publish(topic string, msg any) {
 		if !consumer.Active() {
 			continue
 		}
-		m := NewMessage(topic, msg)
-		go consumer.signal(m)
+		go consumer.signal(NewMessage(topic, msg))
 	}
 }
 
-// Shutdown shutdowns the broker
-func (b *EventsStream) Shutdown() {
+// Close closes the stream
+func (b *EventsStream) Close() {
 	// acquire the lock
 	b.mu.Lock()
 	// release the lock once done
@@ -156,12 +169,4 @@ func (b *EventsStream) Shutdown() {
 	}
 	b.subs = Subscribers{}
 	b.topics = map[string]Subscribers{}
-}
-
-// Subscribers returns the list of subscribers
-func (b *EventsStream) Subscribers() Subscribers {
-	b.mu.Lock()
-	subs := b.subs
-	b.mu.Unlock()
-	return subs
 }

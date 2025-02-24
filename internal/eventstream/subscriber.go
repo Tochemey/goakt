@@ -35,14 +35,14 @@ import (
 
 // Subscriber defines the Subscriber Interface
 type Subscriber interface {
+	ID() string
+	Active() bool
 	Topics() []string
 	Iterator() chan *Message
 	Shutdown()
 	signal(message *Message)
 	subscribe(topic string)
 	unsubscribe(topic string)
-	Active() bool
-	ID() string
 }
 
 // subscriber defines the subscriber
