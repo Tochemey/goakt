@@ -606,8 +606,10 @@ func (x *actorSystem) Subscribe() (eventstream.Subscriber, error) {
 	if !x.started.Load() {
 		return nil, ErrActorSystemNotStarted
 	}
+	x.locker.Lock()
 	subscriber := x.eventsStream.AddSubscriber()
 	x.eventsStream.Subscribe(subscriber, eventsTopic)
+	x.locker.Unlock()
 	return subscriber, nil
 }
 
@@ -616,8 +618,10 @@ func (x *actorSystem) Unsubscribe(subscriber eventstream.Subscriber) error {
 	if !x.started.Load() {
 		return ErrActorSystemNotStarted
 	}
+	x.locker.Lock()
 	x.eventsStream.Unsubscribe(subscriber, eventsTopic)
 	x.eventsStream.RemoveSubscriber(subscriber)
+	x.locker.Unlock()
 	return nil
 }
 
