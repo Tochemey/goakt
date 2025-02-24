@@ -40,7 +40,7 @@ import (
 // deadletter is a synthetic actor that houses all deadletter
 // in GoAkt deadletter are messages that have not been handled
 type deadLetter struct {
-	eventsStream *eventstream.EventsStream
+	eventsStream eventstream.Stream
 	pid          *PID
 	logger       log.Logger
 	counter      *atomic.Int64
