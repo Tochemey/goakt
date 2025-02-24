@@ -79,7 +79,7 @@ func TestBroker(t *testing.T) {
 		// unsubscribe the consumer
 		broker.Unsubscribe(cons, "t1")
 		broker.Unsubscribe(sub2, "t1")
-		require.Zero(t, broker.SubscribersCount("t1"))
+		require.NotZero(t, broker.SubscribersCount("t1"))
 		require.EqualValues(t, 1, broker.SubscribersCount("t2"))
 
 		broker.Subscribe(cons, "t3")

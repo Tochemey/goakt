@@ -120,14 +120,12 @@ func (b *EventsStream) Unsubscribe(sub Subscriber, topic string) {
 	defer b.mu.Unlock()
 
 	// only unsubscribe active subscriber
-	if sub.Active() {
-		sub.unsubscribe(topic)
+	if !sub.Active() {
+		return
 	}
 
 	delete(b.topics[topic], sub.ID())
-	if len(b.topics[topic]) == 0 {
-		delete(b.topics, topic)
-	}
+	sub.unsubscribe(topic)
 }
 
 // Publish publishes a message to a topic
