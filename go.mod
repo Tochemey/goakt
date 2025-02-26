@@ -13,7 +13,7 @@ require (
 	github.com/hashicorp/memberlist v0.5.3
 	github.com/kapetan-io/tackle v0.11.0
 	github.com/klauspost/compress v1.18.0
-	github.com/nats-io/nats-server/v2 v2.10.25
+	github.com/nats-io/nats-server/v2 v2.10.26
 	github.com/nats-io/nats.go v1.39.1
 	github.com/redis/go-redis/v9 v9.7.1
 	github.com/reugn/go-quartz v0.14.0
