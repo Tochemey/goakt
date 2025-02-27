@@ -68,7 +68,7 @@ import (
 )
 
 // ActorSystem defines the contract of an actor system
-type ActorSystem interface { //nolint
+type ActorSystem interface { //nolint:revive
 	// Metric returns the actor system metric.
 	// The metric does not include any cluster data
 	Metric(ctx context.Context) *Metric

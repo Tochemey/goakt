@@ -53,7 +53,7 @@ func (m Metric) Uptime() int64 {
 }
 
 // ActorMetric defines actor specific metrics
-type ActorMetric struct { // nolint
+type ActorMetric struct { //nolint:revive
 	// DeadlettersCount returns the total number of deadletter
 	deadlettersCount uint64
 	// ActorsCount returns the total number of child actor given a specific PID

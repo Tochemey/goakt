@@ -45,7 +45,7 @@ import (
 //
 //   - IsSingleton: The actor is a singleton
 //     if the actor is a singleton then the actor is created once in the cluster
-type ActorRef struct { // nolint
+type ActorRef struct { //nolint:revive
 	// name defines the actor Name
 	name string
 	// kind defines the actor kind
