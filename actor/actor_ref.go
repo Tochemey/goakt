@@ -22,7 +22,7 @@
  * SOFTWARE.
  */
 
-package actors
+package actor
 
 import (
 	"github.com/tochemey/goakt/v3/address"
