@@ -86,7 +86,7 @@ func TestClient(t *testing.T) {
 		require.Len(t, kinds, 2)
 
 		expected := []string{
-			"actors.funcactor",
+			"actor.funcactor",
 			"client.testactor",
 		}
 
@@ -170,7 +170,7 @@ func TestClient(t *testing.T) {
 		require.Len(t, kinds, 2)
 
 		expected := []string{
-			"actors.funcactor",
+			"actor.funcactor",
 			"client.testactor",
 		}
 
@@ -256,7 +256,7 @@ func TestClient(t *testing.T) {
 		require.Len(t, kinds, 2)
 
 		expected := []string{
-			"actors.funcactor",
+			"actor.funcactor",
 			"client.testactor",
 		}
 
@@ -338,7 +338,7 @@ func TestClient(t *testing.T) {
 		require.Len(t, kinds, 2)
 
 		expected := []string{
-			"actors.funcactor",
+			"actor.funcactor",
 			"client.testactor",
 		}
 
@@ -421,7 +421,7 @@ func TestClient(t *testing.T) {
 		require.Len(t, kinds, 2)
 
 		expected := []string{
-			"actors.funcactor",
+			"actor.funcactor",
 			"client.testactor",
 		}
 
@@ -503,7 +503,7 @@ func TestClient(t *testing.T) {
 		require.Len(t, kinds, 2)
 
 		expected := []string{
-			"actors.funcactor",
+			"actor.funcactor",
 			"client.testactor",
 		}
 
@@ -590,7 +590,7 @@ func TestClient(t *testing.T) {
 		require.Len(t, kinds, 2)
 
 		expected := []string{
-			"actors.funcactor",
+			"actor.funcactor",
 			"client.testactor",
 		}
 
@@ -677,7 +677,7 @@ func TestClient(t *testing.T) {
 		require.Len(t, kinds, 2)
 
 		expected := []string{
-			"actors.funcactor",
+			"actor.funcactor",
 			"client.testactor",
 		}
 
