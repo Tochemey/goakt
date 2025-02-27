@@ -178,3 +178,15 @@ func newRebalancingError(err error) rebalancingError {
 func (e rebalancingError) Error() string {
 	return fmt.Errorf("rebalancing: %w", e.err).Error()
 }
+
+// anyError defines the any error type
+// this is used to represent any error when handling the supervisor directive
+type anyError struct{}
+
+// interface guard
+var _ error = (*anyError)(nil)
+
+// Error implements error.
+func (a *anyError) Error() string {
+	return "*"
+}

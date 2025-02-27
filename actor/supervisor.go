@@ -126,6 +126,27 @@ func WithRetry(maxRetries uint32, timeout time.Duration) SupervisorOption {
 	}
 }
 
+// WithAnyErrorDirective sets the directive to apply to any error
+//
+// Use WithAnyErrorDirective to apply a given directive to any error that occurs during message processing.
+// This option is useful when you want to handle all errors uniformly, regardless of their type.
+//
+// Parameters:
+//   - directive: The directive to apply to any error
+//
+// Example Usage:
+//
+//	supervisor := NewSupervisor(
+//	    WithAnyErrorDirective(DirectiveRestart),
+//	)
+func WithAnyErrorDirective(directive Directive) SupervisorOption {
+	return func(s *Supervisor) {
+		s.Lock()
+		s.directives.Set(errorType(new(anyError)), directive)
+		s.Unlock()
+	}
+}
+
 // Supervisor defines the supervisor behavior rules applied to a faulty actor during message processing.
 //
 // A supervision behavior determines how a supervisor responds when a child actor encounters an error.

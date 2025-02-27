@@ -1180,6 +1180,46 @@ func TestSupervisorStrategy(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NoError(t, actorSystem.Stop(ctx))
 	})
+	t.Run("With any error directive", func(t *testing.T) {
+		ctx := context.TODO()
+		host := "127.0.0.1"
+		ports := dynaport.Get(1)
+
+		actorSystem, err := NewActorSystem("testSys",
+			WithRemote(remote.NewConfig(host, ports[0])),
+			WithPassivation(10*time.Minute),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+
+		util.Pause(time.Second)
+
+		parent, err := actorSystem.Spawn(ctx, "test", newMockSupervisorActor())
+		require.NoError(t, err)
+		require.NotNil(t, parent)
+
+		// create the child actor
+		stopStrategy := NewSupervisor(WithAnyErrorDirective(StopDirective))
+
+		child, err := parent.SpawnChild(ctx, "SpawnChild", newMockSupervisedActor(), WithSupervisor(stopStrategy))
+		require.NoError(t, err)
+		require.NotNil(t, child)
+		require.Equal(t, parent.ID(), child.Parent().ID())
+
+		require.Len(t, parent.Children(), 1)
+		require.NoError(t, Tell(ctx, child, new(testpb.TestPanic)))
+
+		util.Pause(time.Second)
+		require.Zero(t, parent.ChildrenCount())
+
+		//stop the actor
+		err = parent.Shutdown(ctx)
+		assert.NoError(t, err)
+		assert.NoError(t, actorSystem.Stop(ctx))
+	})
 }
 func TestMessaging(t *testing.T) {
 	t.Run("With happy", func(t *testing.T) {
