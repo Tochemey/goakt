@@ -22,7 +22,7 @@
  * SOFTWARE.
  */
 
-package actors
+package actor
 
 // goScheduler is a custom go routines scheduler
 // this will help schedule actors message processing

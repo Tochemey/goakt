@@ -22,7 +22,7 @@
  * SOFTWARE.
  */
 
-package actors
+package actor
 
 import (
 	"context"
@@ -1631,11 +1631,17 @@ func (pid *PID) notifyParent(err error) {
 		return
 	}
 
+	// find a directive for the given error or check whether there
+	// is a directive for any error type
 	directive, ok := pid.supervisor.Directive(err)
 	if !ok {
-		pid.logger.Debugf("no supervisor directive found for error: %s", errorType(err))
-		pid.suspend(err.Error())
-		return
+		// let us check whether we have all errors directive
+		directive, ok = pid.supervisor.Directive(new(anyError))
+		if !ok {
+			pid.logger.Debugf("no supervisor directive found for error: %s", errorType(err))
+			pid.suspend(err.Error())
+			return
+		}
 	}
 
 	msg := &internalpb.HandleFault{

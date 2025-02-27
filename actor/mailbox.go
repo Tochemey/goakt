@@ -22,7 +22,7 @@
  * SOFTWARE.
  */
 
-package actors
+package actor
 
 // Mailbox defines the actor mailbox.
 // Any implementation should be a thread-safe FIFO

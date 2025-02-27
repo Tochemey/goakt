@@ -22,13 +22,14 @@
  * SOFTWARE.
  */
 
-package actors
+package actor
 
 import (
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestSupervisorOption(t *testing.T) {
@@ -56,4 +57,18 @@ func TestSupervisorOption(t *testing.T) {
 			assert.Equal(t, tc.expected, supervisor)
 		})
 	}
+}
+
+func TestSupervisorWithAnyError(t *testing.T) {
+	supervisor := NewSupervisor(WithAnyErrorDirective(RestartDirective))
+	directive, ok := supervisor.Directive(new(anyError))
+	require.True(t, ok)
+	require.Exactly(t, RestartDirective, directive)
+}
+
+func TestSupervisorWithDirective(t *testing.T) {
+	supervisor := NewSupervisor(WithDirective(&InternalError{}, RestartDirective))
+	directive, ok := supervisor.Directive(&InternalError{})
+	require.True(t, ok)
+	require.Exactly(t, RestartDirective, directive)
 }

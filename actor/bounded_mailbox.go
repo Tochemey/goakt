@@ -22,7 +22,7 @@
  * SOFTWARE.
  */
 
-package actors
+package actor
 
 import (
 	gods "github.com/Workiva/go-datastructures/queue"

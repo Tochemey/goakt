@@ -22,7 +22,7 @@
  * SOFTWARE.
  */
 
-package actors
+package actor
 
 import "errors"
 
