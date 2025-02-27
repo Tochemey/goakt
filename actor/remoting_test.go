@@ -39,10 +39,9 @@ import (
 
 	"github.com/tochemey/goakt/v3/address"
 	"github.com/tochemey/goakt/v3/goaktpb"
-	"github.com/tochemey/goakt/v3/remote"
-
 	"github.com/tochemey/goakt/v3/internal/util"
 	"github.com/tochemey/goakt/v3/log"
+	"github.com/tochemey/goakt/v3/remote"
 	"github.com/tochemey/goakt/v3/test/data/testpb"
 )
 
@@ -1698,7 +1697,7 @@ func TestRemotingSpawn(t *testing.T) {
 		// spawn the remote actor
 		request := &remote.SpawnRequest{
 			Name:        actorName,
-			Kind:        "actors.exchanger",
+			Kind:        "actor.exchanger",
 			Singleton:   false,
 			Relocatable: false,
 		}
@@ -1769,7 +1768,7 @@ func TestRemotingSpawn(t *testing.T) {
 		// spawn the remote actor
 		request := &remote.SpawnRequest{
 			Name:        actorName,
-			Kind:        "actors.exchanger",
+			Kind:        "actor.exchanger",
 			Singleton:   false,
 			Relocatable: false,
 		}
@@ -1813,7 +1812,7 @@ func TestRemotingSpawn(t *testing.T) {
 		// spawn the remote actor
 		request := &remote.SpawnRequest{
 			Name:        actorName,
-			Kind:        "actors.exchanger",
+			Kind:        "actor.exchanger",
 			Singleton:   false,
 			Relocatable: false,
 		}
@@ -1882,7 +1881,7 @@ func TestRemotingSpawn(t *testing.T) {
 		// spawn the remote actor
 		request := &remote.SpawnRequest{
 			Name:        actorName,
-			Kind:        "actors.exchanger",
+			Kind:        "actor.exchanger",
 			Singleton:   false,
 			Relocatable: false,
 		}
@@ -1958,7 +1957,7 @@ func TestRemotingSpawn(t *testing.T) {
 		// spawn the remote actor
 		request := &remote.SpawnRequest{
 			Name:        "",
-			Kind:        "actors.exchanger",
+			Kind:        "actor.exchanger",
 			Singleton:   false,
 			Relocatable: false,
 		}

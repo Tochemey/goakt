@@ -1524,7 +1524,7 @@ func TestActorSystem(t *testing.T) {
 		// spawn the remote actor
 		request := &remote.SpawnRequest{
 			Name:        actorName,
-			Kind:        "actors.exchanger",
+			Kind:        "actor.exchanger",
 			Singleton:   false,
 			Relocatable: true,
 		}

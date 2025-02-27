@@ -2912,7 +2912,7 @@ func TestRemoteSpawn(t *testing.T) {
 		require.NoError(t, err)
 
 		// spawn the remote actor
-		err = pid.RemoteSpawn(ctx, host, remotingPort, actorName, "actors.exchanger")
+		err = pid.RemoteSpawn(ctx, host, remotingPort, actorName, "actor.exchanger")
 		require.NoError(t, err)
 
 		// re-fetching the address of the actor should return not nil address after start
@@ -3070,7 +3070,7 @@ func TestRemoteSpawn(t *testing.T) {
 		pid.remoting = nil
 
 		// spawn the remote actor
-		err = pid.RemoteSpawn(ctx, host, remotingPort, actorName, "actors.exchanger")
+		err = pid.RemoteSpawn(ctx, host, remotingPort, actorName, "actor.exchanger")
 		require.Error(t, err)
 		assert.EqualError(t, err, ErrRemotingDisabled.Error())
 
