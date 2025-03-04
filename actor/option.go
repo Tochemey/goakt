@@ -190,3 +190,15 @@ func WithTLS(tlsInfo *TLSInfo) Option {
 		system.clientTLS = tlsInfo.ClientTLS
 	})
 }
+
+// WithPubSub enables the pubsub mode.
+// The pubsub mode is only available in cluster mode.
+// The pubsub mode allows actors to subscribe to topics and receive messages
+// published to the topics.
+func WithPubSub() Option {
+	return OptionFunc(func(system *actorSystem) {
+		if system.clusterEnabled.Load() {
+			system.pubsubEnabled.Store(true)
+		}
+	})
+}

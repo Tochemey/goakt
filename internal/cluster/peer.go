@@ -38,6 +38,8 @@ type Peer struct {
 	// Coordinator states that the given peer is the leader not.
 	// A peer is a coordinator when it is the oldest node in the cluster
 	Coordinator bool
+	// RemotingPort
+	RemotingPort int
 }
 
 // PeerAddress returns address the node's peers will use to connect to

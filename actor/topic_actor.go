@@ -1,0 +1,312 @@
+/*
+ * MIT License
+ *
+ * Copyright (c) 2022-2025  Arsene Tochemey Gandote
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+
+package actor
+
+import (
+	"context"
+	"sync"
+
+	"github.com/tochemey/goakt/v3/goaktpb"
+	"github.com/tochemey/goakt/v3/internal/cluster"
+	"github.com/tochemey/goakt/v3/internal/collection/syncmap"
+	"github.com/tochemey/goakt/v3/internal/internalpb"
+	"github.com/tochemey/goakt/v3/internal/types"
+	"github.com/tochemey/goakt/v3/log"
+)
+
+// processedID is a struct that holds the track id of a message
+type processedID struct {
+	senderID  string
+	topic     string
+	messageID string
+}
+
+// topicActor is a system actor that manages a registry of actors that subscribe to topics.
+// This actor must be started when cluster mode is enabled in all nodes before any actor subscribes
+type topicActor struct {
+	pid *PID
+	// subscribers holds the list of all subscribers
+	subscribers *syncmap.Map[string, *PID]
+	// topics holds the list of all topics and their subscribers
+	topics    *syncmap.Map[string, *syncmap.Map[string, *PID]]
+	processed *syncmap.Map[processedID, types.Unit]
+	logger    log.Logger
+
+	cluster     cluster.Interface
+	actorSystem ActorSystem
+	remoting    *Remoting
+}
+
+// ensure clusterPubSub implements the Actor interface
+var _ Actor = (*topicActor)(nil)
+
+// newTopicActor creates a new cluster pubsub mediator.
+func newTopicActor(remoting *Remoting) Actor {
+	return &topicActor{
+		subscribers: syncmap.New[string, *PID](),
+		topics:      syncmap.New[string, *syncmap.Map[string, *PID]](),
+		processed:   syncmap.New[processedID, types.Unit](),
+		remoting:    remoting,
+	}
+}
+
+// PreStart is called before the actor starts
+func (x *topicActor) PreStart(context.Context) error {
+	x.subscribers.Reset()
+	x.topics.Reset()
+	x.processed.Reset()
+	return nil
+}
+
+// Receive is called to process the message
+func (x *topicActor) Receive(ctx *ReceiveContext) {
+	switch ctx.Message().(type) {
+	case *goaktpb.PostStart:
+		x.handlePostStart(ctx)
+	case *goaktpb.Subscribe:
+		x.handleSubscribe(ctx)
+	case *goaktpb.Unsubscribe:
+		x.handleUnsubscribe(ctx)
+	case *goaktpb.Publish:
+		x.handlePublish(ctx)
+	case *internalpb.Disseminate:
+		x.handleDisseminate(ctx)
+	default:
+		ctx.Unhandled()
+	}
+}
+
+// PostStop is called when the actor is stopped
+func (x *topicActor) PostStop(context.Context) error {
+	x.subscribers.Reset()
+	x.topics.Reset()
+	x.processed.Reset()
+	x.logger.Infof("%s stopped successfully", x.pid.Name())
+	return nil
+}
+
+// handlePublish handles Publish message
+func (x *topicActor) handlePublish(ctx *ReceiveContext) {
+	if publish, ok := ctx.Message().(*goaktpb.Publish); ok {
+		topic := publish.GetTopic()
+		message := publish.GetMessage()
+		messageID := publish.GetId()
+		senderID := ctx.Sender().ID()
+
+		id := processedID{
+			senderID:  senderID,
+			topic:     topic,
+			messageID: messageID,
+		}
+
+		// we don't want to process the same message twice
+		if _, ok := x.processed.Get(id); ok {
+			return
+		}
+
+		// mark the message as processed
+		x.processed.Set(id, types.Unit{})
+
+		cctx := context.WithoutCancel(ctx.Context())
+		peers, err := x.cluster.Peers(cctx)
+		if err != nil {
+			ctx.Err(NewInternalError(err))
+			return
+		}
+
+		type remotePeer struct {
+			host string
+			port int
+		}
+
+		// build the list of remote peers
+		var remotePeers []remotePeer
+		for _, peer := range peers {
+			remotePeers = append(remotePeers, remotePeer{
+				host: peer.Host,
+				port: peer.RemotingPort,
+			})
+		}
+
+		var wg sync.WaitGroup
+		actorName := x.actorSystem.reservedName(clusterPubSubType)
+
+		// send the message to all local subscribers
+		if subscribers, ok := x.topics.Get(topic); ok && subscribers.Len() != 0 {
+			for _, subscriber := range subscribers.Values() {
+				subscriber := subscriber
+				if subscriber.IsRunning() {
+					wg.Add(1)
+					go func(subscriber *PID) {
+						defer wg.Done()
+						if err := x.pid.Tell(cctx, subscriber, message); err != nil {
+							x.logger.Warnf("failed to publish message to local actor %s: %s",
+								subscriber.Name(), err.Error())
+						}
+					}(subscriber)
+				}
+			}
+		}
+
+		// TODO: figure out a way not to duplicate messages
+		// send the message to all remote subscribers
+		if len(remotePeers) > 0 {
+			for _, peer := range remotePeers {
+				peer := peer
+				wg.Add(1)
+				go func(peer remotePeer) {
+					defer wg.Done()
+					to, err := x.remoting.RemoteLookup(cctx, peer.host, peer.port, actorName)
+					if err != nil {
+						x.logger.Warnf("failed to lookup actor %s on remote=[host=%s, port=%d]: %s",
+							actorName, peer.host, peer.port, err.Error())
+						return
+					}
+
+					toSend := &internalpb.Disseminate{
+						Id:      messageID,
+						Topic:   topic,
+						Message: message,
+					}
+
+					from := x.pid.Address()
+					if err := x.remoting.RemoteTell(cctx, from, to, toSend); err != nil {
+						x.logger.Warnf("failed to publish message to actor %s on remote=[host=%s, port=%d]: %s",
+							actorName, peer.host, peer.port, err.Error())
+					}
+				}(peer)
+			}
+		}
+
+		// wait for all messages to be sent to all subscribers
+		wg.Wait()
+	}
+}
+
+// handleUnsubscribe handles Unsubscribe message
+func (x *topicActor) handleUnsubscribe(ctx *ReceiveContext) {
+	sender := ctx.Sender()
+	if message, ok := ctx.Message().(*goaktpb.Unsubscribe); ok {
+		topic := message.GetTopic()
+		if subscribers, ok := x.topics.Get(topic); ok {
+			subscribers.Delete(sender.ID())
+		}
+	}
+}
+
+// handleSubscribe handles Subscribe message
+func (x *topicActor) handleSubscribe(ctx *ReceiveContext) {
+	sender := ctx.Sender()
+	if message, ok := ctx.Message().(*goaktpb.Subscribe); ok && sender.IsRunning() {
+		topic := message.GetTopic()
+		// check if the topic exists
+		if subscribers, ok := x.topics.Get(topic); ok && subscribers.Len() != 0 {
+			subscribers.Set(sender.ID(), sender)
+			return
+		}
+
+		// here the topic does not exist
+		subscribers := syncmap.New[string, *PID]()
+		subscribers.Set(sender.ID(), sender)
+		x.topics.Set(topic, subscribers)
+	}
+}
+
+// handlePostStart handles PostStart message
+func (x *topicActor) handlePostStart(ctx *ReceiveContext) {
+	x.pid = ctx.Self()
+	x.logger = ctx.Logger()
+	x.cluster = ctx.ActorSystem().getCluster()
+	x.actorSystem = ctx.ActorSystem()
+	x.logger.Infof("%s started successfully", x.pid.Name())
+}
+
+// handleDisseminate sends a cluster pubsub message to the local
+// subscribers of the given message topic.
+// Disseminate message is sent by a remote clusterPubSub mediator.
+// If we already processed the message we discard it.
+func (x *topicActor) handleDisseminate(ctx *ReceiveContext) {
+	if disseminate, ok := ctx.Message().(*internalpb.Disseminate); ok {
+		topic := disseminate.GetTopic()
+		message := disseminate.GetMessage()
+		messageID := disseminate.GetId()
+		senderID := ctx.Sender().ID()
+
+		id := processedID{
+			senderID:  senderID,
+			topic:     topic,
+			messageID: messageID,
+		}
+
+		// we don't want to process the same message twice
+		if _, ok := x.processed.Get(id); ok {
+			return
+		}
+
+		cctx := context.WithoutCancel(ctx.Context())
+		// send the message to all local subscribers
+		if subscribers, ok := x.topics.Get(topic); ok && subscribers.Len() != 0 {
+			var wg sync.WaitGroup
+			for _, subscriber := range subscribers.Values() {
+				subscriber := subscriber
+				if subscriber.IsRunning() {
+					wg.Add(1)
+					go func(subscriber *PID) {
+						defer wg.Done()
+						if err := x.pid.Tell(cctx, subscriber, message); err != nil {
+							x.logger.Warnf("failed to publish message to local actor %s: %s", subscriber.Name(), err.Error())
+						}
+					}(subscriber)
+				}
+			}
+			// wait for all messages to be sent to all subscribers
+			wg.Wait()
+		}
+	}
+}
+
+// spawnTopicActor spawns a new topic actor
+func (x *actorSystem) spawnTopicActor(ctx context.Context) error {
+	// only start the singleton manager when clustering is enabled
+	if !x.pubsubEnabled.Load() {
+		return nil
+	}
+
+	actorName := x.reservedName(clusterPubSubType)
+	x.topicActor, _ = x.configPID(ctx,
+		actorName,
+		newTopicActor(x.remoting),
+		WithSupervisor(
+			NewSupervisor(
+				WithStrategy(OneForOneStrategy),
+				WithAnyErrorDirective(RestartDirective),
+			),
+		),
+	)
+
+	// the clusterPubSub is a child actor of the system guardian
+	_ = x.actors.AddNode(x.systemGuardian, x.topicActor)
+	return nil
+}

@@ -30,9 +30,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net"
 	"os"
-	"strconv"
 	"sync"
 	"time"
 
@@ -842,9 +840,15 @@ func (x *Engine) Peers(ctx context.Context) ([]*Peer, error) {
 	for _, member := range members {
 		if member.Name != x.node.PeersAddress() {
 			x.logger.Debugf("node=(%s) has found peer=(%s)", x.node.PeersAddress(), member.Name)
-			peerHost, port, _ := net.SplitHostPort(member.Name)
-			peerPort, _ := strconv.Atoi(port)
-			peers = append(peers, &Peer{Host: peerHost, PeersPort: peerPort, Coordinator: member.Coordinator})
+			node := new(discovery.Node)
+			// unmarshal the member meta information
+			_ = json.Unmarshal([]byte(member.Meta), node)
+			peers = append(peers, &Peer{
+				Host:         node.Host,
+				PeersPort:    node.PeersPort,
+				Coordinator:  member.Coordinator,
+				RemotingPort: node.RemotingPort,
+			})
 		}
 	}
 	return peers, nil
@@ -944,6 +948,10 @@ func (x *Engine) buildConfig() (*config.Config, error) {
 		// pass
 	}
 
+	// serialize the node information as json and pass it as node meta
+	jsonbytes, _ := json.Marshal(x.node)
+	meta := string(jsonbytes)
+
 	// set the cluster storage tableSize
 	options := storage.NewConfig(nil)
 	options.Add("tableSize", x.tableSize)
@@ -975,6 +983,7 @@ func (x *Engine) buildConfig() (*config.Config, error) {
 		EnableClusterEventsChannel: true,
 		Hasher:                     hasher.NewDefaultHasher(),
 		TriggerBalancerInterval:    config.DefaultTriggerBalancerInterval,
+		MemberMeta:                 meta,
 	}
 
 	// Set TLS configuration accordingly

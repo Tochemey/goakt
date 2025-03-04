@@ -26,16 +26,10 @@ package actor
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"runtime"
-	"time"
-
-	"github.com/flowchartsman/retry"
 
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/cluster"
-	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/types"
 	"github.com/tochemey/goakt/v3/log"
 	"github.com/tochemey/goakt/v3/remote"
@@ -104,9 +98,7 @@ func (x *actorSystem) spawnSingletonManager(ctx context.Context) error {
 		WithSupervisor(
 			NewSupervisor(
 				WithStrategy(OneForOneStrategy),
-				WithDirective(PanicError{}, RestartDirective),
-				WithDirective(InternalError{}, RestartDirective),
-				WithDirective(&runtime.PanicNilError{}, RestartDirective),
+				WithAnyErrorDirective(RestartDirective),
 			),
 		),
 	)
@@ -131,36 +123,14 @@ func (x *actorSystem) spawnSingletonOnLeader(ctx context.Context, cl cluster.Int
 		}
 	}
 
-	// TODO: instead of using the cache add a method in the cluster to fetch peer info
 	if leader == nil {
 		return ErrLeaderNotFound
 	}
 
-	var peerState *internalpb.PeerState
-
-	// this is expected to be quick
-	retrier := retry.NewRetrier(3, 100*time.Millisecond, 300*time.Millisecond)
-	err = retrier.RunContext(ctx, func(_ context.Context) error {
-		peerState, err = x.getPeerStateFromStore(leader.PeerAddress())
-		if err != nil {
-			if errors.Is(err, ErrPeerNotFound) {
-				return err
-			}
-
-			// here we stop the retry because there is an error
-			return retry.Stop(err)
-		}
-		return nil
-	})
-
-	if err != nil {
-		return fmt.Errorf("failed to spawn singleton actor: %w", err)
-	}
-
 	var (
 		actorType = types.Name(actor)
-		host      = peerState.GetHost()
-		port      = int(peerState.GetRemotingPort())
+		host      = leader.Host
+		port      = leader.RemotingPort
 	)
 
 	return x.remoting.RemoteSpawn(ctx, host, port, &remote.SpawnRequest{

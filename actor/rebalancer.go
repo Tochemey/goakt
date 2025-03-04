@@ -26,7 +26,6 @@ package actor
 
 import (
 	"context"
-	"errors"
 	"net"
 	"strconv"
 
@@ -114,27 +113,13 @@ func (r *rebalancer) Rebalance(ctx *ReceiveContext) {
 				for i := 1; i < len(peersShares); i++ {
 					actors := peersShares[i]
 					peer := peers[i-1]
-					peerFound := true
-					peerState, err := r.pid.ActorSystem().getPeerStateFromStore(peer.PeerAddress())
-					if errors.Is(err, ErrPeerNotFound) {
-						logger.Warnf("peer=(%s) not found in local cache", peer.PeerAddress())
-						peerFound = false
-					}
 
 					for _, actor := range actors {
 						// never redistribute system actors and singleton actors
 						if !isReservedName(actor.GetActorName()) && !actor.GetIsSingleton() {
-							if !peerFound {
-								err := r.recreateLocally(egCtx, actor, false)
-								if err == nil {
-									continue
-								}
-								return NewSpawnError(err)
-							}
-
 							if actor.GetRelocatable() {
-								host := peerState.GetHost()
-								port := int(peerState.GetRemotingPort())
+								remoteHost := peer.Host
+								remotingPort := peer.RemotingPort
 
 								spawnRequest := &remote.SpawnRequest{
 									Name:        actor.GetActorName(),
@@ -143,7 +128,7 @@ func (r *rebalancer) Rebalance(ctx *ReceiveContext) {
 									Relocatable: true,
 								}
 
-								if err := r.remoting.RemoteSpawn(egCtx, host, port, spawnRequest); err != nil {
+								if err := r.remoting.RemoteSpawn(egCtx, remoteHost, remotingPort, spawnRequest); err != nil {
 									logger.Error(err)
 									return NewSpawnError(err)
 								}

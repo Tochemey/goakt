@@ -192,6 +192,11 @@ type ActorSystem interface { //nolint:revive
 	// Start and Stop methods. Applications with more specialized needs
 	// can use those methods directly instead of relying on Run.
 	Run(ctx context.Context, startHook func(ctx context.Context) error, stopHook func(ctx context.Context) error)
+	//  TopicActor returns the topic actor. The topic actor is a system actor that manages a registry of actors that subscribe to topics.
+	// This actor must be started when cluster mode is enabled in all nodes before any actor subscribes.
+	// Messages published to a topic on other cluster nodes will be sent between the nodes once per active topic actor that has any local subscribers.
+	// To be able to use the topic actor, one need to start the actor system with the WithCluster and WithPubSub options.
+	TopicActor() *PID
 	// handleRemoteAsk handles a synchronous message to another actor and expect a response.
 	// This block until a response is received or timed out.
 	handleRemoteAsk(ctx context.Context, to *PID, message proto.Message, timeout time.Duration) (response proto.Message, err error)
@@ -297,6 +302,7 @@ type actorSystem struct {
 	deathWatch       *PID
 	deadletter       *PID
 	singletonManager *PID
+	topicActor       *PID
 
 	startedAt       *atomic.Int64
 	rebalancing     *atomic.Bool
@@ -306,8 +312,9 @@ type actorSystem struct {
 	actorsCounter      *atomic.Uint64
 	deadlettersCounter *atomic.Uint64
 
-	clientTLS *tls.Config
-	serverTLS *tls.Config
+	clientTLS     *tls.Config
+	serverTLS     *tls.Config
+	pubsubEnabled *atomic.Bool
 }
 
 var (
@@ -354,6 +361,8 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		rebalanceLocker:        &sync.Mutex{},
 		actorsCounter:          atomic.NewUint64(0),
 		deadlettersCounter:     atomic.NewUint64(0),
+		pubsubEnabled:          atomic.NewBool(false),
+		topicActor:             NoSender,
 	}
 
 	system.started.Store(false)
@@ -463,6 +472,7 @@ func (x *actorSystem) Start(ctx context.Context) error {
 		AddError(x.spawnDeathWatch(ctx)).
 		AddError(x.spawnDeadletter(ctx)).
 		AddError(x.spawnSingletonManager(ctx)).
+		AddError(x.spawnTopicActor(ctx)).
 		Error(); err != nil {
 		return errorschain.
 			New(errorschain.ReturnAll()).
@@ -1389,6 +1399,14 @@ func (x *actorSystem) getSingletonManager() *PID {
 	return singletonManager
 }
 
+// TopicActor returns the cluster pub/sub mediator
+func (x *actorSystem) TopicActor() *PID {
+	x.locker.Lock()
+	mediator := x.topicActor
+	x.locker.Unlock()
+	return mediator
+}
+
 func (x *actorSystem) completeRebalancing() {
 	x.rebalancing.Store(false)
 }
@@ -2091,8 +2109,7 @@ func (x *actorSystem) spawnDeadletter(ctx context.Context) error {
 		WithSupervisor(
 			NewSupervisor(
 				WithStrategy(OneForOneStrategy),
-				WithDirective(PanicError{}, ResumeDirective),
-				WithDirective(&runtime.PanicNilError{}, ResumeDirective),
+				WithAnyErrorDirective(ResumeDirective),
 			),
 		),
 	)
@@ -2221,6 +2238,7 @@ func (x *actorSystem) shutdownCluster(ctx context.Context, actorRefs []ActorRef)
 		x.clusterSyncStopSig <- types.Unit{}
 		x.clusterEnabled.Store(false)
 		x.rebalancing.Store(false)
+		x.pubsubEnabled.Store(false)
 		x.rebalanceLocker.Lock()
 
 		if x.rebalancingQueue != nil {
