@@ -314,7 +314,7 @@ type actorSystem struct {
 
 	clientTLS     *tls.Config
 	serverTLS     *tls.Config
-	pubsubEnabled *atomic.Bool
+	pubsubEnabled atomic.Bool
 }
 
 var (
@@ -361,13 +361,13 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		rebalanceLocker:        &sync.Mutex{},
 		actorsCounter:          atomic.NewUint64(0),
 		deadlettersCounter:     atomic.NewUint64(0),
-		pubsubEnabled:          atomic.NewBool(false),
 		topicActor:             NoSender,
 	}
 
 	system.started.Store(false)
 	system.remotingEnabled.Store(false)
 	system.clusterEnabled.Store(false)
+	system.pubsubEnabled.Store(false)
 
 	system.reflection = newReflection(system.registry)
 

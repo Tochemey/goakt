@@ -59,7 +59,7 @@ type topicActor struct {
 	remoting    *Remoting
 }
 
-// ensure clusterPubSub implements the Actor interface
+// ensure topic actor implements the Actor interface
 var _ Actor = (*topicActor)(nil)
 
 // newTopicActor creates a new cluster pubsub mediator.
@@ -151,7 +151,7 @@ func (x *topicActor) handlePublish(ctx *ReceiveContext) {
 		}
 
 		var wg sync.WaitGroup
-		actorName := x.actorSystem.reservedName(clusterPubSubType)
+		actorName := x.actorSystem.reservedName(topicActorType)
 
 		// send the message to all local subscribers
 		if subscribers, ok := x.topics.Get(topic); ok && subscribers.Len() != 0 {
@@ -170,7 +170,6 @@ func (x *topicActor) handlePublish(ctx *ReceiveContext) {
 			}
 		}
 
-		// TODO: figure out a way not to duplicate messages
 		// send the message to all remote subscribers
 		if len(remotePeers) > 0 {
 			for _, peer := range remotePeers {
@@ -212,6 +211,7 @@ func (x *topicActor) handleUnsubscribe(ctx *ReceiveContext) {
 		topic := message.GetTopic()
 		if subscribers, ok := x.topics.Get(topic); ok {
 			subscribers.Delete(sender.ID())
+			ctx.Tell(sender, &goaktpb.UnsubscribeAck{Topic: topic})
 		}
 	}
 }
@@ -224,6 +224,7 @@ func (x *topicActor) handleSubscribe(ctx *ReceiveContext) {
 		// check if the topic exists
 		if subscribers, ok := x.topics.Get(topic); ok && subscribers.Len() != 0 {
 			subscribers.Set(sender.ID(), sender)
+			ctx.Tell(sender, &goaktpb.SubscribeAck{Topic: topic})
 			return
 		}
 
@@ -231,6 +232,7 @@ func (x *topicActor) handleSubscribe(ctx *ReceiveContext) {
 		subscribers := syncmap.New[string, *PID]()
 		subscribers.Set(sender.ID(), sender)
 		x.topics.Set(topic, subscribers)
+		ctx.Tell(sender, &goaktpb.SubscribeAck{Topic: topic})
 	}
 }
 
@@ -245,7 +247,7 @@ func (x *topicActor) handlePostStart(ctx *ReceiveContext) {
 
 // handleDisseminate sends a cluster pubsub message to the local
 // subscribers of the given message topic.
-// Disseminate message is sent by a remote clusterPubSub mediator.
+// Disseminate message is sent by another TopicActor.
 // If we already processed the message we discard it.
 func (x *topicActor) handleDisseminate(ctx *ReceiveContext) {
 	if disseminate, ok := ctx.Message().(*internalpb.Disseminate); ok {
@@ -294,7 +296,7 @@ func (x *actorSystem) spawnTopicActor(ctx context.Context) error {
 		return nil
 	}
 
-	actorName := x.reservedName(clusterPubSubType)
+	actorName := x.reservedName(topicActorType)
 	x.topicActor, _ = x.configPID(ctx,
 		actorName,
 		newTopicActor(x.remoting),
@@ -306,7 +308,7 @@ func (x *actorSystem) spawnTopicActor(ctx context.Context) error {
 		),
 	)
 
-	// the clusterPubSub is a child actor of the system guardian
+	// the topic actor is a child actor of the system guardian
 	_ = x.actors.AddNode(x.systemGuardian, x.topicActor)
 	return nil
 }

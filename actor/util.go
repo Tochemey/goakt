@@ -66,7 +66,7 @@ const (
 	deathWatchType
 	deadletterType
 	singletonManagerType
-	clusterPubSubType
+	topicActorType
 )
 
 var (
@@ -87,6 +87,6 @@ var (
 		deathWatchType:       "GoAktDeathWatch",
 		deadletterType:       "GoAktDeadletter",
 		singletonManagerType: "GoAktSingletonManager",
-		clusterPubSubType:    "GoAktClusterPubSub",
+		topicActorType:       "GoAktTopicActor",
 	}
 )
