@@ -153,6 +153,8 @@ func (x *topicActor) handlePublish(ctx *ReceiveContext) {
 		var wg sync.WaitGroup
 		actorName := x.actorSystem.reservedName(topicActorType)
 
+		// this will be sent to the local subscribers
+		msg, _ := message.UnmarshalNew()
 		// send the message to all local subscribers
 		if subscribers, ok := x.topics.Get(topic); ok && subscribers.Len() != 0 {
 			for _, subscriber := range subscribers.Values() {
@@ -161,7 +163,7 @@ func (x *topicActor) handlePublish(ctx *ReceiveContext) {
 					wg.Add(1)
 					go func(subscriber *PID) {
 						defer wg.Done()
-						if err := x.pid.Tell(cctx, subscriber, message); err != nil {
+						if err := x.pid.Tell(cctx, subscriber, msg); err != nil {
 							x.logger.Warnf("failed to publish message to local actor %s: %s",
 								subscriber.Name(), err.Error())
 						}
@@ -195,6 +197,10 @@ func (x *topicActor) handlePublish(ctx *ReceiveContext) {
 						x.logger.Warnf("failed to publish message to actor %s on remote=[host=%s, port=%d]: %s",
 							actorName, peer.host, peer.port, err.Error())
 					}
+
+					x.logger.Debugf("successfully published message to actor %s on remote=[host=%s, port=%d]",
+						actorName, peer.host, peer.port)
+
 				}(peer)
 			}
 		}
@@ -252,9 +258,9 @@ func (x *topicActor) handlePostStart(ctx *ReceiveContext) {
 func (x *topicActor) handleDisseminate(ctx *ReceiveContext) {
 	if disseminate, ok := ctx.Message().(*internalpb.Disseminate); ok {
 		topic := disseminate.GetTopic()
-		message := disseminate.GetMessage()
+		message, _ := disseminate.GetMessage().UnmarshalNew()
 		messageID := disseminate.GetId()
-		senderID := ctx.Sender().ID()
+		senderID := ctx.RemoteSender().ID()
 
 		id := processedID{
 			senderID:  senderID,

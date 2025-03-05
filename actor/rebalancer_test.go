@@ -46,17 +46,17 @@ func TestRebalancing(t *testing.T) {
 	srv := startNatsServer(t)
 
 	// create and start system cluster
-	node1, sd1 := startClusterSystem(t, srv.Addr().String())
+	node1, sd1 := testCluster(t, srv.Addr().String())
 	require.NotNil(t, node1)
 	require.NotNil(t, sd1)
 
 	// create and start system cluster
-	node2, sd2 := startClusterSystem(t, srv.Addr().String())
+	node2, sd2 := testCluster(t, srv.Addr().String())
 	require.NotNil(t, node2)
 	require.NotNil(t, sd2)
 
 	// create and start system cluster
-	node3, sd3 := startClusterSystem(t, srv.Addr().String())
+	node3, sd3 := testCluster(t, srv.Addr().String())
 	require.NotNil(t, node3)
 	require.NotNil(t, sd3)
 
@@ -127,17 +127,17 @@ func TestRebalancingWithTLSEnabled(t *testing.T) {
 	require.NoError(t, autotls.Setup(&conf))
 
 	// create and start system cluster
-	node1, sd1 := startClusterSystem(t, srv.Addr().String(), withTSL(conf))
+	node1, sd1 := testCluster(t, srv.Addr().String(), withTestTSL(conf))
 	require.NotNil(t, node1)
 	require.NotNil(t, sd1)
 
 	// create and start system cluster
-	node2, sd2 := startClusterSystem(t, srv.Addr().String(), withTSL(conf))
+	node2, sd2 := testCluster(t, srv.Addr().String(), withTestTSL(conf))
 	require.NotNil(t, node2)
 	require.NotNil(t, sd2)
 
 	// create and start system cluster
-	node3, sd3 := startClusterSystem(t, srv.Addr().String(), withTSL(conf))
+	node3, sd3 := testCluster(t, srv.Addr().String(), withTestTSL(conf))
 	require.NotNil(t, node3)
 	require.NotNil(t, sd3)
 
@@ -199,17 +199,17 @@ func TestRebalancingWithSingletonActor(t *testing.T) {
 	srv := startNatsServer(t)
 
 	// create and start system cluster
-	node1, sd1 := startClusterSystem(t, srv.Addr().String())
+	node1, sd1 := testCluster(t, srv.Addr().String())
 	require.NotNil(t, node1)
 	require.NotNil(t, sd1)
 
 	// create and start system cluster
-	node2, sd2 := startClusterSystem(t, srv.Addr().String())
+	node2, sd2 := testCluster(t, srv.Addr().String())
 	require.NotNil(t, node2)
 	require.NotNil(t, sd2)
 
 	// create and start system cluster
-	node3, sd3 := startClusterSystem(t, srv.Addr().String())
+	node3, sd3 := testCluster(t, srv.Addr().String())
 	require.NotNil(t, node3)
 	require.NotNil(t, sd3)
 
@@ -242,17 +242,17 @@ func TestRebalancingWithRelocationDisabled(t *testing.T) {
 	srv := startNatsServer(t)
 
 	// create and start system cluster
-	node1, sd1 := startClusterSystem(t, srv.Addr().String())
+	node1, sd1 := testCluster(t, srv.Addr().String())
 	require.NotNil(t, node1)
 	require.NotNil(t, sd1)
 
 	// create and start system cluster
-	node2, sd2 := startClusterSystem(t, srv.Addr().String())
+	node2, sd2 := testCluster(t, srv.Addr().String())
 	require.NotNil(t, node2)
 	require.NotNil(t, sd2)
 
 	// create and start system cluster
-	node3, sd3 := startClusterSystem(t, srv.Addr().String())
+	node3, sd3 := testCluster(t, srv.Addr().String())
 	require.NotNil(t, node3)
 	require.NotNil(t, sd3)
 

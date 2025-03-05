@@ -1028,8 +1028,8 @@ func (x *actorSystem) RemoteLookup(ctx context.Context, request *connect.Request
 		return nil, connect.NewError(connect.CodeInvalidArgument, ErrInvalidHost)
 	}
 
-	if x.clusterEnabled.Load() {
-		actorName := msg.GetName()
+	actorName := msg.GetName()
+	if !isReservedName(actorName) && x.clusterEnabled.Load() {
 		actor, err := x.cluster.GetActor(ctx, actorName)
 		if err != nil {
 			if errors.Is(err, cluster.ErrActorNotFound) {
@@ -1042,7 +1042,7 @@ func (x *actorSystem) RemoteLookup(ctx context.Context, request *connect.Request
 		return connect.NewResponse(&internalpb.RemoteLookupResponse{Address: actor.GetActorAddress()}), nil
 	}
 
-	addr := address.New(msg.GetName(), x.Name(), msg.GetHost(), int(msg.GetPort()))
+	addr := address.New(actorName, x.Name(), msg.GetHost(), int(msg.GetPort()))
 	pidNode, exist := x.actors.GetNode(addr.String())
 	if !exist {
 		logger.Error(ErrAddressNotFound(addr.String()).Error())

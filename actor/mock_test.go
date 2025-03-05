@@ -34,12 +34,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kapetan-io/tackle/autotls"
 	natsserver "github.com/nats-io/nats-server/v2/server"
 	"github.com/stretchr/testify/require"
 	"github.com/travisjeffery/go-dynaport"
 	"go.uber.org/atomic"
-
-	"github.com/kapetan-io/tackle/autotls"
 
 	"github.com/tochemey/goakt/v3/discovery"
 	"github.com/tochemey/goakt/v3/discovery/nats"
@@ -50,6 +49,37 @@ import (
 	"github.com/tochemey/goakt/v3/test/data/testpb"
 	testspb "github.com/tochemey/goakt/v3/test/data/testpb"
 )
+
+type mockSubscriber struct {
+	counter *atomic.Int64
+}
+
+var _ Actor = &mockSubscriber{}
+
+func newMockSubscriber() *mockSubscriber {
+	return &mockSubscriber{
+		counter: atomic.NewInt64(0),
+	}
+}
+
+func (x *mockSubscriber) PreStart(context.Context) error {
+	return nil
+}
+
+func (x *mockSubscriber) Receive(ctx *ReceiveContext) {
+	switch ctx.Message().(type) {
+	case *goaktpb.SubscribeAck:
+		x.counter.Inc()
+	case *testpb.TestCount:
+		x.counter.Inc()
+	case *goaktpb.UnsubscribeAck:
+		x.counter.Dec()
+	}
+}
+
+func (x *mockSubscriber) PostStop(context.Context) error {
+	return nil
+}
 
 // mockActor is an actor that helps run various test scenarios
 type mockActor struct {
@@ -433,20 +463,27 @@ func startNatsServer(t *testing.T) *natsserver.Server {
 }
 
 type testClusterConfig struct {
-	tlsEnabled bool
-	conf       autotls.Config
+	tlsEnabled    bool
+	conf          autotls.Config
+	pubsubEnabled bool
 }
 
 type testClusterOption func(*testClusterConfig)
 
-func withTSL(conf autotls.Config) testClusterOption {
+func withTestTSL(conf autotls.Config) testClusterOption {
 	return func(tc *testClusterConfig) {
 		tc.tlsEnabled = true
 		tc.conf = conf
 	}
 }
 
-func startClusterSystem(t *testing.T, serverAddr string, opts ...testClusterOption) (ActorSystem, discovery.Provider) {
+func withTestPubSub() testClusterOption {
+	return func(tc *testClusterConfig) {
+		tc.pubsubEnabled = true
+	}
+}
+
+func testCluster(t *testing.T, serverAddr string, opts ...testClusterOption) (ActorSystem, discovery.Provider) {
 	ctx := context.TODO()
 	logger := log.DiscardLogger
 
@@ -497,6 +534,10 @@ func startClusterSystem(t *testing.T, serverAddr string, opts ...testClusterOpti
 	cfg := &testClusterConfig{}
 	for _, opt := range opts {
 		opt(cfg)
+	}
+
+	if cfg.pubsubEnabled {
+		options = append(options, WithPubSub())
 	}
 
 	if cfg.tlsEnabled {

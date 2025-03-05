@@ -392,7 +392,6 @@ func TestActorSystem(t *testing.T) {
 		err := sys.Start(ctx)
 		assert.NoError(t, err)
 
-		// create a deadletter subscriber
 		consumer, err := sys.Subscribe()
 		require.NoError(t, err)
 		require.NotNil(t, consumer)
@@ -426,7 +425,6 @@ func TestActorSystem(t *testing.T) {
 		var items []*goaktpb.ActorRestarted
 		for message := range consumer.Iterator() {
 			payload := message.Payload()
-			// only listening to deadletter
 			restarted, ok := payload.(*goaktpb.ActorRestarted)
 			if ok {
 				items = append(items, restarted)
@@ -1077,7 +1075,7 @@ func TestActorSystem(t *testing.T) {
 		srv := startNatsServer(t)
 
 		// create and start system cluster
-		cl1, sd1 := startClusterSystem(t, srv.Addr().String())
+		cl1, sd1 := testCluster(t, srv.Addr().String())
 		peerAddress1 := cl1.PeerAddress()
 		require.NotEmpty(t, peerAddress1)
 
@@ -1087,7 +1085,7 @@ func TestActorSystem(t *testing.T) {
 		require.NotNil(t, subscriber1)
 
 		// create and start system cluster
-		cl2, sd2 := startClusterSystem(t, srv.Addr().String())
+		cl2, sd2 := testCluster(t, srv.Addr().String())
 		peerAddress2 := cl2.PeerAddress()
 		require.NotEmpty(t, peerAddress2)
 
@@ -1580,7 +1578,6 @@ func TestActorSystem(t *testing.T) {
 		assert.EqualValues(t, 1, pid.ProcessedCount())
 		require.True(t, pid.IsRunning())
 
-		// every message sent to the actor will result in deadletter
 		counter := 0
 		for i := 1; i <= 5; i++ {
 			require.NoError(t, Tell(ctx, pid, new(testpb.TestSend)))
@@ -1592,12 +1589,8 @@ func TestActorSystem(t *testing.T) {
 		assert.EqualValues(t, counter, pid.ProcessedCount()-1)
 		require.NoError(t, err)
 
-		t.Cleanup(
-			func() {
-				err = actorSystem.Stop(ctx)
-				assert.NoError(t, err)
-			},
-		)
+		err = actorSystem.Stop(ctx)
+		assert.NoError(t, err)
 	})
 	t.Run("With Spawn an actor already exist in cluster mode", func(t *testing.T) {
 		// create a context
@@ -1606,12 +1599,12 @@ func TestActorSystem(t *testing.T) {
 		srv := startNatsServer(t)
 
 		// create and start system cluster
-		node1, sd1 := startClusterSystem(t, srv.Addr().String())
+		node1, sd1 := testCluster(t, srv.Addr().String())
 		peerAddress1 := node1.PeerAddress()
 		require.NotEmpty(t, peerAddress1)
 
 		// create and start system cluster
-		node2, sd2 := startClusterSystem(t, srv.Addr().String())
+		node2, sd2 := testCluster(t, srv.Addr().String())
 		peerAddress2 := node2.PeerAddress()
 		require.NotEmpty(t, peerAddress2)
 
@@ -1705,17 +1698,17 @@ func TestActorSystem(t *testing.T) {
 		srv := startNatsServer(t)
 
 		// create and start system cluster
-		node1, sd1 := startClusterSystem(t, srv.Addr().String())
+		node1, sd1 := testCluster(t, srv.Addr().String())
 		peerAddress1 := node1.PeerAddress()
 		require.NotEmpty(t, peerAddress1)
 
 		// create and start system cluster
-		node2, sd2 := startClusterSystem(t, srv.Addr().String())
+		node2, sd2 := testCluster(t, srv.Addr().String())
 		peerAddress2 := node2.PeerAddress()
 		require.NotEmpty(t, peerAddress2)
 
 		// create and start system cluster
-		node3, sd3 := startClusterSystem(t, srv.Addr().String())
+		node3, sd3 := testCluster(t, srv.Addr().String())
 		require.NotNil(t, node3)
 		require.NotNil(t, sd3)
 
