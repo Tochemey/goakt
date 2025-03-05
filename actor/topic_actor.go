@@ -55,8 +55,6 @@ type processedID struct {
 // This actor must be started when cluster mode is enabled in all nodes before any actor subscribes
 type topicActor struct {
 	pid *PID
-	// subscribers holds the list of all subscribers
-	subscribers *syncmap.Map[string, *PID]
 	// topics holds the list of all topics and their subscribers
 	topics    *syncmap.Map[string, *syncmap.Map[string, *PID]]
 	processed *syncmap.Map[processedID, types.Unit]
@@ -73,16 +71,14 @@ var _ Actor = (*topicActor)(nil)
 // newTopicActor creates a new cluster pubsub mediator.
 func newTopicActor(remoting *Remoting) Actor {
 	return &topicActor{
-		subscribers: syncmap.New[string, *PID](),
-		topics:      syncmap.New[string, *syncmap.Map[string, *PID]](),
-		processed:   syncmap.New[processedID, types.Unit](),
-		remoting:    remoting,
+		topics:    syncmap.New[string, *syncmap.Map[string, *PID]](),
+		processed: syncmap.New[processedID, types.Unit](),
+		remoting:  remoting,
 	}
 }
 
 // PreStart is called before the actor starts
 func (x *topicActor) PreStart(context.Context) error {
-	x.subscribers.Reset()
 	x.topics.Reset()
 	x.processed.Reset()
 	return nil
@@ -108,7 +104,6 @@ func (x *topicActor) Receive(ctx *ReceiveContext) {
 
 // PostStop is called when the actor is stopped
 func (x *topicActor) PostStop(context.Context) error {
-	x.subscribers.Reset()
 	x.topics.Reset()
 	x.processed.Reset()
 	x.logger.Infof("%s stopped successfully", x.pid.Name())
@@ -199,7 +194,6 @@ func (x *topicActor) sendToLocalSubscribers(cctx context.Context, topic string, 
 			} else {
 				// remove the subscriber if it does not exist
 				subscribers.Delete(subscriber.ID())
-				x.subscribers.Delete(subscriber.ID())
 			}
 		}
 	}
@@ -320,7 +314,6 @@ func (x *topicActor) handleDisseminate(ctx *ReceiveContext) {
 				} else {
 					// remove the subscriber if it does not exist
 					subscribers.Delete(subscriber.ID())
-					x.subscribers.Delete(subscriber.ID())
 				}
 			}
 			// wait for all messages to be sent to all subscribers
