@@ -44,8 +44,8 @@ type remotePeer struct {
 	port int
 }
 
-// processedID is a struct that holds the track id of a message
-type processedID struct {
+// key is a struct that holds the track id of a message
+type key struct {
 	senderID  string
 	topic     string
 	messageID string
@@ -57,7 +57,7 @@ type topicActor struct {
 	pid *PID
 	// topics holds the list of all topics and their subscribers
 	topics    *syncmap.Map[string, *syncmap.Map[string, *PID]]
-	processed *syncmap.Map[processedID, types.Unit]
+	processed *syncmap.Map[key, types.Unit]
 	logger    log.Logger
 
 	cluster     cluster.Interface
@@ -72,7 +72,7 @@ var _ Actor = (*topicActor)(nil)
 func newTopicActor(remoting *Remoting) Actor {
 	return &topicActor{
 		topics:    syncmap.New[string, *syncmap.Map[string, *PID]](),
-		processed: syncmap.New[processedID, types.Unit](),
+		processed: syncmap.New[key, types.Unit](),
 		remoting:  remoting,
 	}
 }
@@ -118,7 +118,7 @@ func (x *topicActor) handlePublish(ctx *ReceiveContext) {
 		messageID := publish.GetId()
 		senderID := ctx.Sender().ID()
 
-		id := processedID{
+		id := key{
 			senderID:  senderID,
 			topic:     topic,
 			messageID: messageID,
@@ -284,7 +284,7 @@ func (x *topicActor) handleDisseminate(ctx *ReceiveContext) {
 		messageID := disseminate.GetId()
 		senderID := ctx.RemoteSender().ID()
 
-		id := processedID{
+		id := key{
 			senderID:  senderID,
 			topic:     topic,
 			messageID: messageID,
