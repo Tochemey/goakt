@@ -28,6 +28,9 @@ import (
 	"context"
 	"sync"
 
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/anypb"
+
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/cluster"
 	"github.com/tochemey/goakt/v3/internal/collection/syncmap"
@@ -35,6 +38,11 @@ import (
 	"github.com/tochemey/goakt/v3/internal/types"
 	"github.com/tochemey/goakt/v3/log"
 )
+
+type remotePeer struct {
+	host string
+	port int
+}
 
 // processedID is a struct that holds the track id of a message
 type processedID struct {
@@ -136,76 +144,97 @@ func (x *topicActor) handlePublish(ctx *ReceiveContext) {
 			return
 		}
 
-		type remotePeer struct {
-			host string
-			port int
-		}
-
-		// build the list of remote peers
-		var remotePeers []remotePeer
-		for _, peer := range peers {
-			remotePeers = append(remotePeers, remotePeer{
-				host: peer.Host,
-				port: peer.RemotingPort,
-			})
-		}
-
+		remotePeers := x.buildRemotePeers(peers)
 		var wg sync.WaitGroup
 		actorName := x.actorSystem.reservedName(topicActorType)
 
 		// this will be sent to the local subscribers
 		msg, _ := message.UnmarshalNew()
-		// send the message to all local subscribers
-		if subscribers, ok := x.topics.Get(topic); ok && subscribers.Len() != 0 {
-			for _, subscriber := range subscribers.Values() {
-				subscriber := subscriber
-				if subscriber.IsRunning() {
-					wg.Add(1)
-					go func(subscriber *PID) {
-						defer wg.Done()
-						if err := x.pid.Tell(cctx, subscriber, msg); err != nil {
-							x.logger.Warnf("failed to publish message to local actor %s: %s",
-								subscriber.Name(), err.Error())
-						}
-					}(subscriber)
-				}
-			}
-		}
 
-		// send the message to all remote subscribers
-		if len(remotePeers) > 0 {
-			for _, peer := range remotePeers {
-				peer := peer
-				wg.Add(1)
-				go func(peer remotePeer) {
-					defer wg.Done()
-					to, err := x.remoting.RemoteLookup(cctx, peer.host, peer.port, actorName)
-					if err != nil {
-						x.logger.Warnf("failed to lookup actor %s on remote=[host=%s, port=%d]: %s",
-							actorName, peer.host, peer.port, err.Error())
-						return
-					}
+		// send the message to all local subscribers in a separate goroutine
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			x.sendToLocalSubscribers(cctx, topic, msg, &wg)
+		}()
 
-					toSend := &internalpb.Disseminate{
-						Id:      messageID,
-						Topic:   topic,
-						Message: message,
-					}
-
-					from := x.pid.Address()
-					if err := x.remoting.RemoteTell(cctx, from, to, toSend); err != nil {
-						x.logger.Warnf("failed to publish message to actor %s on remote=[host=%s, port=%d]: %s",
-							actorName, peer.host, peer.port, err.Error())
-					}
-
-					x.logger.Debugf("successfully published message to actor %s on remote=[host=%s, port=%d]",
-						actorName, peer.host, peer.port)
-				}(peer)
-			}
-		}
+		// send the message to all remote subscribers in a separate goroutine
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			x.sendToRemoteSubscribers(cctx, remotePeers, actorName, messageID, topic, message, &wg)
+		}()
 
 		// wait for all messages to be sent to all subscribers
 		wg.Wait()
+	}
+}
+
+func (x *topicActor) buildRemotePeers(peers []*cluster.Peer) []remotePeer {
+	var remotePeers []remotePeer
+	for _, peer := range peers {
+		remotePeers = append(remotePeers, remotePeer{
+			host: peer.Host,
+			port: peer.RemotingPort,
+		})
+	}
+	return remotePeers
+}
+
+func (x *topicActor) sendToLocalSubscribers(cctx context.Context, topic string, msg proto.Message, wg *sync.WaitGroup) {
+	if subscribers, ok := x.topics.Get(topic); ok && subscribers.Len() != 0 {
+		for _, subscriber := range subscribers.Values() {
+			subscriber := subscriber
+			// make sure subscriber does exist
+			_, ok := x.actorSystem.tree().GetNode(subscriber.ID())
+			if ok && subscriber.IsRunning() {
+				wg.Add(1)
+				go func(subscriber *PID) {
+					defer wg.Done()
+					if err := x.pid.Tell(cctx, subscriber, msg); err != nil {
+						x.logger.Warnf("failed to publish message to local actor %s: %s",
+							subscriber.Name(), err.Error())
+					}
+				}(subscriber)
+			} else {
+				// remove the subscriber if it does not exist
+				subscribers.Delete(subscriber.ID())
+				x.subscribers.Delete(subscriber.ID())
+			}
+		}
+	}
+}
+
+func (x *topicActor) sendToRemoteSubscribers(cctx context.Context, remotePeers []remotePeer, actorName, messageID, topic string, message *anypb.Any, wg *sync.WaitGroup) {
+	if len(remotePeers) > 0 {
+		for _, peer := range remotePeers {
+			peer := peer
+			wg.Add(1)
+			go func(peer remotePeer) {
+				defer wg.Done()
+				to, err := x.remoting.RemoteLookup(cctx, peer.host, peer.port, actorName)
+				if err != nil {
+					x.logger.Warnf("failed to lookup actor %s on remote=[host=%s, port=%d]: %s",
+						actorName, peer.host, peer.port, err.Error())
+					return
+				}
+
+				toSend := &internalpb.Disseminate{
+					Id:      messageID,
+					Topic:   topic,
+					Message: message,
+				}
+
+				from := x.pid.Address()
+				if err := x.remoting.RemoteTell(cctx, from, to, toSend); err != nil {
+					x.logger.Warnf("failed to publish message to actor %s on remote=[host=%s, port=%d]: %s",
+						actorName, peer.host, peer.port, err.Error())
+				}
+
+				x.logger.Debugf("successfully published message to actor %s on remote=[host=%s, port=%d]",
+					actorName, peer.host, peer.port)
+			}(peer)
+		}
 	}
 }
 
@@ -278,7 +307,9 @@ func (x *topicActor) handleDisseminate(ctx *ReceiveContext) {
 			var wg sync.WaitGroup
 			for _, subscriber := range subscribers.Values() {
 				subscriber := subscriber
-				if subscriber.IsRunning() {
+				// make sure subcriber does exist
+				_, ok := x.actorSystem.tree().GetNode(subscriber.ID())
+				if ok && subscriber.IsRunning() {
 					wg.Add(1)
 					go func(subscriber *PID) {
 						defer wg.Done()
@@ -286,6 +317,10 @@ func (x *topicActor) handleDisseminate(ctx *ReceiveContext) {
 							x.logger.Warnf("failed to publish message to local actor %s: %s", subscriber.Name(), err.Error())
 						}
 					}(subscriber)
+				} else {
+					// remove the subscriber if it does not exist
+					subscribers.Delete(subscriber.ID())
+					x.subscribers.Delete(subscriber.ID())
 				}
 			}
 			// wait for all messages to be sent to all subscribers
