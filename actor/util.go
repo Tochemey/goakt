@@ -66,6 +66,7 @@ const (
 	deathWatchType
 	deadletterType
 	singletonManagerType
+	topicActorType
 )
 
 var (
@@ -86,5 +87,6 @@ var (
 		deathWatchType:       "GoAktDeathWatch",
 		deadletterType:       "GoAktDeadletter",
 		singletonManagerType: "GoAktSingletonManager",
+		topicActorType:       "GoAktTopicActor",
 	}
 )

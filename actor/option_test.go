@@ -140,3 +140,11 @@ func TestWithCoordinatedShutdown(t *testing.T) {
 	opt.Apply(system)
 	assert.EqualValues(t, 1, len(system.shutdownHooks))
 }
+
+func TestWithPubSub(t *testing.T) {
+	system := new(actorSystem)
+	system.clusterEnabled.Store(true)
+	opt := WithPubSub()
+	opt.Apply(system)
+	assert.True(t, system.pubsubEnabled.Load())
+}

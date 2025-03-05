@@ -824,6 +824,263 @@ func (x *Broadcast) GetMessage() *anypb.Any {
 	return nil
 }
 
+// Subscribe is used to subscribe to a topic by an actor
+// The actor will receive an acknoledgement message
+// when the subscription is successful
+type Subscribe struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Specifies the topic to subscribe to
+	Topic         string `protobuf:"bytes,1,opt,name=topic,proto3" json:"topic,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Subscribe) Reset() {
+	*x = Subscribe{}
+	mi := &file_goakt_goakt_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Subscribe) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Subscribe) ProtoMessage() {}
+
+func (x *Subscribe) ProtoReflect() protoreflect.Message {
+	mi := &file_goakt_goakt_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Subscribe.ProtoReflect.Descriptor instead.
+func (*Subscribe) Descriptor() ([]byte, []int) {
+	return file_goakt_goakt_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *Subscribe) GetTopic() string {
+	if x != nil {
+		return x.Topic
+	}
+	return ""
+}
+
+// Unsubscribe is used to unsubscribe from a topic by an actor
+// The actor will receive an acknoledgement message
+// when the unsubscription is successful
+type Unsubscribe struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Specifies the topic to unsubscribe from
+	Topic         string `protobuf:"bytes,1,opt,name=topic,proto3" json:"topic,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Unsubscribe) Reset() {
+	*x = Unsubscribe{}
+	mi := &file_goakt_goakt_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Unsubscribe) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Unsubscribe) ProtoMessage() {}
+
+func (x *Unsubscribe) ProtoReflect() protoreflect.Message {
+	mi := &file_goakt_goakt_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Unsubscribe.ProtoReflect.Descriptor instead.
+func (*Unsubscribe) Descriptor() ([]byte, []int) {
+	return file_goakt_goakt_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *Unsubscribe) GetTopic() string {
+	if x != nil {
+		return x.Topic
+	}
+	return ""
+}
+
+// SubscribeAck is used to acknowledge a successful subscription
+// to a topic by an actor
+type SubscribeAck struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Specifies the topic that was subscribed to
+	Topic         string `protobuf:"bytes,1,opt,name=topic,proto3" json:"topic,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SubscribeAck) Reset() {
+	*x = SubscribeAck{}
+	mi := &file_goakt_goakt_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SubscribeAck) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SubscribeAck) ProtoMessage() {}
+
+func (x *SubscribeAck) ProtoReflect() protoreflect.Message {
+	mi := &file_goakt_goakt_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SubscribeAck.ProtoReflect.Descriptor instead.
+func (*SubscribeAck) Descriptor() ([]byte, []int) {
+	return file_goakt_goakt_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *SubscribeAck) GetTopic() string {
+	if x != nil {
+		return x.Topic
+	}
+	return ""
+}
+
+// UnsubscribeAck is used to acknowledge a successful unsubscription
+// from a topic by an actor
+type UnsubscribeAck struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Specifies the topic that was unsubscribed from
+	Topic         string `protobuf:"bytes,1,opt,name=topic,proto3" json:"topic,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UnsubscribeAck) Reset() {
+	*x = UnsubscribeAck{}
+	mi := &file_goakt_goakt_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UnsubscribeAck) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UnsubscribeAck) ProtoMessage() {}
+
+func (x *UnsubscribeAck) ProtoReflect() protoreflect.Message {
+	mi := &file_goakt_goakt_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UnsubscribeAck.ProtoReflect.Descriptor instead.
+func (*UnsubscribeAck) Descriptor() ([]byte, []int) {
+	return file_goakt_goakt_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *UnsubscribeAck) GetTopic() string {
+	if x != nil {
+		return x.Topic
+	}
+	return ""
+}
+
+// Publish is used to send a message to a topic
+// by the clusterPubSub mediator actor. The message
+// will be broadcasted to all actors that are subscribed
+// to the topic in the cluster.
+type Publish struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Specifies the message unique id
+	Id string `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	// Specifies the topic
+	Topic string `protobuf:"bytes,2,opt,name=topic,proto3" json:"topic,omitempty"`
+	// Specifies the message
+	Message       *anypb.Any `protobuf:"bytes,3,opt,name=message,proto3" json:"message,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Publish) Reset() {
+	*x = Publish{}
+	mi := &file_goakt_goakt_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Publish) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Publish) ProtoMessage() {}
+
+func (x *Publish) ProtoReflect() protoreflect.Message {
+	mi := &file_goakt_goakt_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Publish.ProtoReflect.Descriptor instead.
+func (*Publish) Descriptor() ([]byte, []int) {
+	return file_goakt_goakt_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *Publish) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *Publish) GetTopic() string {
+	if x != nil {
+		return x.Topic
+	}
+	return ""
+}
+
+func (x *Publish) GetMessage() *anypb.Any {
+	if x != nil {
+		return x.Message
+	}
+	return nil
+}
+
 var File_goakt_goakt_proto protoreflect.FileDescriptor
 
 var file_goakt_goakt_proto_rawDesc = string([]byte{
@@ -927,16 +1184,31 @@ var file_goakt_goakt_proto_rawDesc = string([]byte{
 	0x64, 0x63, 0x61, 0x73, 0x74, 0x12, 0x2e, 0x0a, 0x07, 0x6d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65,
 	0x18, 0x01, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x14, 0x2e, 0x67, 0x6f, 0x6f, 0x67, 0x6c, 0x65, 0x2e,
 	0x70, 0x72, 0x6f, 0x74, 0x6f, 0x62, 0x75, 0x66, 0x2e, 0x41, 0x6e, 0x79, 0x52, 0x07, 0x6d, 0x65,
-	0x73, 0x73, 0x61, 0x67, 0x65, 0x42, 0x85, 0x01, 0x0a, 0x0b, 0x63, 0x6f, 0x6d, 0x2e, 0x67, 0x6f,
-	0x61, 0x6b, 0x74, 0x70, 0x62, 0x42, 0x0a, 0x47, 0x6f, 0x61, 0x6b, 0x74, 0x50, 0x72, 0x6f, 0x74,
-	0x6f, 0x48, 0x02, 0x50, 0x01, 0x5a, 0x2c, 0x67, 0x69, 0x74, 0x68, 0x75, 0x62, 0x2e, 0x63, 0x6f,
-	0x6d, 0x2f, 0x74, 0x6f, 0x63, 0x68, 0x65, 0x6d, 0x65, 0x79, 0x2f, 0x67, 0x6f, 0x61, 0x6b, 0x74,
-	0x2f, 0x76, 0x33, 0x2f, 0x67, 0x6f, 0x61, 0x6b, 0x74, 0x70, 0x62, 0x3b, 0x67, 0x6f, 0x61, 0x6b,
-	0x74, 0x70, 0x62, 0xa2, 0x02, 0x03, 0x47, 0x58, 0x58, 0xaa, 0x02, 0x07, 0x47, 0x6f, 0x61, 0x6b,
-	0x74, 0x70, 0x62, 0xca, 0x02, 0x07, 0x47, 0x6f, 0x61, 0x6b, 0x74, 0x70, 0x62, 0xe2, 0x02, 0x13,
-	0x47, 0x6f, 0x61, 0x6b, 0x74, 0x70, 0x62, 0x5c, 0x47, 0x50, 0x42, 0x4d, 0x65, 0x74, 0x61, 0x64,
-	0x61, 0x74, 0x61, 0xea, 0x02, 0x07, 0x47, 0x6f, 0x61, 0x6b, 0x74, 0x70, 0x62, 0x62, 0x06, 0x70,
-	0x72, 0x6f, 0x74, 0x6f, 0x33,
+	0x73, 0x73, 0x61, 0x67, 0x65, 0x22, 0x21, 0x0a, 0x09, 0x53, 0x75, 0x62, 0x73, 0x63, 0x72, 0x69,
+	0x62, 0x65, 0x12, 0x14, 0x0a, 0x05, 0x74, 0x6f, 0x70, 0x69, 0x63, 0x18, 0x01, 0x20, 0x01, 0x28,
+	0x09, 0x52, 0x05, 0x74, 0x6f, 0x70, 0x69, 0x63, 0x22, 0x23, 0x0a, 0x0b, 0x55, 0x6e, 0x73, 0x75,
+	0x62, 0x73, 0x63, 0x72, 0x69, 0x62, 0x65, 0x12, 0x14, 0x0a, 0x05, 0x74, 0x6f, 0x70, 0x69, 0x63,
+	0x18, 0x01, 0x20, 0x01, 0x28, 0x09, 0x52, 0x05, 0x74, 0x6f, 0x70, 0x69, 0x63, 0x22, 0x24, 0x0a,
+	0x0c, 0x53, 0x75, 0x62, 0x73, 0x63, 0x72, 0x69, 0x62, 0x65, 0x41, 0x63, 0x6b, 0x12, 0x14, 0x0a,
+	0x05, 0x74, 0x6f, 0x70, 0x69, 0x63, 0x18, 0x01, 0x20, 0x01, 0x28, 0x09, 0x52, 0x05, 0x74, 0x6f,
+	0x70, 0x69, 0x63, 0x22, 0x26, 0x0a, 0x0e, 0x55, 0x6e, 0x73, 0x75, 0x62, 0x73, 0x63, 0x72, 0x69,
+	0x62, 0x65, 0x41, 0x63, 0x6b, 0x12, 0x14, 0x0a, 0x05, 0x74, 0x6f, 0x70, 0x69, 0x63, 0x18, 0x01,
+	0x20, 0x01, 0x28, 0x09, 0x52, 0x05, 0x74, 0x6f, 0x70, 0x69, 0x63, 0x22, 0x5f, 0x0a, 0x07, 0x50,
+	0x75, 0x62, 0x6c, 0x69, 0x73, 0x68, 0x12, 0x0e, 0x0a, 0x02, 0x69, 0x64, 0x18, 0x01, 0x20, 0x01,
+	0x28, 0x09, 0x52, 0x02, 0x69, 0x64, 0x12, 0x14, 0x0a, 0x05, 0x74, 0x6f, 0x70, 0x69, 0x63, 0x18,
+	0x02, 0x20, 0x01, 0x28, 0x09, 0x52, 0x05, 0x74, 0x6f, 0x70, 0x69, 0x63, 0x12, 0x2e, 0x0a, 0x07,
+	0x6d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x18, 0x03, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x14, 0x2e,
+	0x67, 0x6f, 0x6f, 0x67, 0x6c, 0x65, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x62, 0x75, 0x66, 0x2e,
+	0x41, 0x6e, 0x79, 0x52, 0x07, 0x6d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x42, 0x85, 0x01, 0x0a,
+	0x0b, 0x63, 0x6f, 0x6d, 0x2e, 0x67, 0x6f, 0x61, 0x6b, 0x74, 0x70, 0x62, 0x42, 0x0a, 0x47, 0x6f,
+	0x61, 0x6b, 0x74, 0x50, 0x72, 0x6f, 0x74, 0x6f, 0x48, 0x02, 0x50, 0x01, 0x5a, 0x2c, 0x67, 0x69,
+	0x74, 0x68, 0x75, 0x62, 0x2e, 0x63, 0x6f, 0x6d, 0x2f, 0x74, 0x6f, 0x63, 0x68, 0x65, 0x6d, 0x65,
+	0x79, 0x2f, 0x67, 0x6f, 0x61, 0x6b, 0x74, 0x2f, 0x76, 0x33, 0x2f, 0x67, 0x6f, 0x61, 0x6b, 0x74,
+	0x70, 0x62, 0x3b, 0x67, 0x6f, 0x61, 0x6b, 0x74, 0x70, 0x62, 0xa2, 0x02, 0x03, 0x47, 0x58, 0x58,
+	0xaa, 0x02, 0x07, 0x47, 0x6f, 0x61, 0x6b, 0x74, 0x70, 0x62, 0xca, 0x02, 0x07, 0x47, 0x6f, 0x61,
+	0x6b, 0x74, 0x70, 0x62, 0xe2, 0x02, 0x13, 0x47, 0x6f, 0x61, 0x6b, 0x74, 0x70, 0x62, 0x5c, 0x47,
+	0x50, 0x42, 0x4d, 0x65, 0x74, 0x61, 0x64, 0x61, 0x74, 0x61, 0xea, 0x02, 0x07, 0x47, 0x6f, 0x61,
+	0x6b, 0x74, 0x70, 0x62, 0x62, 0x06, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x33,
 })
 
 var (
@@ -951,7 +1223,7 @@ func file_goakt_goakt_proto_rawDescGZIP() []byte {
 	return file_goakt_goakt_proto_rawDescData
 }
 
-var file_goakt_goakt_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
+var file_goakt_goakt_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
 var file_goakt_goakt_proto_goTypes = []any{
 	(*Address)(nil),               // 0: goaktpb.Address
 	(*Deadletter)(nil),            // 1: goaktpb.Deadletter
@@ -967,36 +1239,42 @@ var file_goakt_goakt_proto_goTypes = []any{
 	(*PoisonPill)(nil),            // 11: goaktpb.PoisonPill
 	(*PostStart)(nil),             // 12: goaktpb.PostStart
 	(*Broadcast)(nil),             // 13: goaktpb.Broadcast
-	(*anypb.Any)(nil),             // 14: google.protobuf.Any
-	(*timestamppb.Timestamp)(nil), // 15: google.protobuf.Timestamp
+	(*Subscribe)(nil),             // 14: goaktpb.Subscribe
+	(*Unsubscribe)(nil),           // 15: goaktpb.Unsubscribe
+	(*SubscribeAck)(nil),          // 16: goaktpb.SubscribeAck
+	(*UnsubscribeAck)(nil),        // 17: goaktpb.UnsubscribeAck
+	(*Publish)(nil),               // 18: goaktpb.Publish
+	(*anypb.Any)(nil),             // 19: google.protobuf.Any
+	(*timestamppb.Timestamp)(nil), // 20: google.protobuf.Timestamp
 }
 var file_goakt_goakt_proto_depIdxs = []int32{
 	0,  // 0: goaktpb.Address.parent:type_name -> goaktpb.Address
 	0,  // 1: goaktpb.Deadletter.sender:type_name -> goaktpb.Address
 	0,  // 2: goaktpb.Deadletter.receiver:type_name -> goaktpb.Address
-	14, // 3: goaktpb.Deadletter.message:type_name -> google.protobuf.Any
-	15, // 4: goaktpb.Deadletter.send_time:type_name -> google.protobuf.Timestamp
+	19, // 3: goaktpb.Deadletter.message:type_name -> google.protobuf.Any
+	20, // 4: goaktpb.Deadletter.send_time:type_name -> google.protobuf.Timestamp
 	0,  // 5: goaktpb.ActorStarted.address:type_name -> goaktpb.Address
-	15, // 6: goaktpb.ActorStarted.started_at:type_name -> google.protobuf.Timestamp
+	20, // 6: goaktpb.ActorStarted.started_at:type_name -> google.protobuf.Timestamp
 	0,  // 7: goaktpb.ActorStopped.address:type_name -> goaktpb.Address
-	15, // 8: goaktpb.ActorStopped.stopped_at:type_name -> google.protobuf.Timestamp
+	20, // 8: goaktpb.ActorStopped.stopped_at:type_name -> google.protobuf.Timestamp
 	0,  // 9: goaktpb.ActorPassivated.address:type_name -> goaktpb.Address
-	15, // 10: goaktpb.ActorPassivated.passivated_at:type_name -> google.protobuf.Timestamp
+	20, // 10: goaktpb.ActorPassivated.passivated_at:type_name -> google.protobuf.Timestamp
 	0,  // 11: goaktpb.ActorChildCreated.address:type_name -> goaktpb.Address
 	0,  // 12: goaktpb.ActorChildCreated.parent:type_name -> goaktpb.Address
-	15, // 13: goaktpb.ActorChildCreated.created_at:type_name -> google.protobuf.Timestamp
+	20, // 13: goaktpb.ActorChildCreated.created_at:type_name -> google.protobuf.Timestamp
 	0,  // 14: goaktpb.ActorRestarted.address:type_name -> goaktpb.Address
-	15, // 15: goaktpb.ActorRestarted.restarted_at:type_name -> google.protobuf.Timestamp
+	20, // 15: goaktpb.ActorRestarted.restarted_at:type_name -> google.protobuf.Timestamp
 	0,  // 16: goaktpb.ActorSuspended.address:type_name -> goaktpb.Address
-	15, // 17: goaktpb.ActorSuspended.suspended_at:type_name -> google.protobuf.Timestamp
-	15, // 18: goaktpb.NodeJoined.timestamp:type_name -> google.protobuf.Timestamp
-	15, // 19: goaktpb.NodeLeft.timestamp:type_name -> google.protobuf.Timestamp
-	14, // 20: goaktpb.Broadcast.message:type_name -> google.protobuf.Any
-	21, // [21:21] is the sub-list for method output_type
-	21, // [21:21] is the sub-list for method input_type
-	21, // [21:21] is the sub-list for extension type_name
-	21, // [21:21] is the sub-list for extension extendee
-	0,  // [0:21] is the sub-list for field type_name
+	20, // 17: goaktpb.ActorSuspended.suspended_at:type_name -> google.protobuf.Timestamp
+	20, // 18: goaktpb.NodeJoined.timestamp:type_name -> google.protobuf.Timestamp
+	20, // 19: goaktpb.NodeLeft.timestamp:type_name -> google.protobuf.Timestamp
+	19, // 20: goaktpb.Broadcast.message:type_name -> google.protobuf.Any
+	19, // 21: goaktpb.Publish.message:type_name -> google.protobuf.Any
+	22, // [22:22] is the sub-list for method output_type
+	22, // [22:22] is the sub-list for method input_type
+	22, // [22:22] is the sub-list for extension type_name
+	22, // [22:22] is the sub-list for extension extendee
+	0,  // [0:22] is the sub-list for field type_name
 }
 
 func init() { file_goakt_goakt_proto_init() }
@@ -1010,7 +1288,7 @@ func file_goakt_goakt_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_goakt_goakt_proto_rawDesc), len(file_goakt_goakt_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   14,
+			NumMessages:   19,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

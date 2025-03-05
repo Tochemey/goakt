@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package internalpb;
 
+import "google/protobuf/any.proto";
+
 option go_package = "github.com/tochemey/goakt/v3/internal/internalpb;internalpb";
 
 // ClusterService is used to interact with the cluster internal
@@ -32,4 +34,13 @@ message GetKindsRequest {
 message GetKindsResponse {
   // Specifies the list of kinds
   repeated string kinds = 1;
+}
+
+message Disseminate {
+  // Specifies the message unique id
+  string id = 1;
+  // Specifies the topic
+  string topic = 2;
+  // Specifies the message
+  google.protobuf.Any message = 3;
 }

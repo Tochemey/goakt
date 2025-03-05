@@ -126,3 +126,46 @@ message Broadcast {
   // Specifies the actual message
   google.protobuf.Any message = 1;
 }
+
+// Subscribe is used to subscribe to a topic by an actor
+// The actor will receive an acknoledgement message
+// when the subscription is successful
+message Subscribe {
+  // Specifies the topic to subscribe to
+  string topic = 1;
+}
+
+// Unsubscribe is used to unsubscribe from a topic by an actor
+// The actor will receive an acknoledgement message
+// when the unsubscription is successful
+message Unsubscribe {
+  // Specifies the topic to unsubscribe from
+  string topic = 1;
+}
+
+// SubscribeAck is used to acknowledge a successful subscription
+// to a topic by an actor
+message SubscribeAck {
+  // Specifies the topic that was subscribed to
+  string topic = 1;
+}
+
+// UnsubscribeAck is used to acknowledge a successful unsubscription
+// from a topic by an actor
+message UnsubscribeAck {
+  // Specifies the topic that was unsubscribed from
+  string topic = 1;
+}
+
+// Publish is used to send a message to a topic
+// by the clusterPubSub mediator actor. The message
+// will be broadcasted to all actors that are subscribed
+// to the topic in the cluster.
+message Publish {
+  // Specifies the message unique id
+  string id = 1;
+  // Specifies the topic
+  string topic = 2;
+  // Specifies the message
+  google.protobuf.Any message = 3;
+}
