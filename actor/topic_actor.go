@@ -200,7 +200,6 @@ func (x *topicActor) handlePublish(ctx *ReceiveContext) {
 
 					x.logger.Debugf("successfully published message to actor %s on remote=[host=%s, port=%d]",
 						actorName, peer.host, peer.port)
-
 				}(peer)
 			}
 		}
