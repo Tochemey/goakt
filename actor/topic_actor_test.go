@@ -98,6 +98,15 @@ func TestTopicActor(t *testing.T) {
 		// make sure we receive the subscribe ack message
 		require.EqualValues(t, 1, actor3.Metric(ctx).ProcessedCount())
 
+		// subscribe to the topic
+		err = actor1.Tell(ctx, cl1.TopicActor(), &goaktpb.Unsubscribe{Topic: topic})
+		require.NoError(t, err)
+
+		util.Pause(time.Second)
+
+		// make sure we receive the subscribe ack message
+		require.EqualValues(t, 2, actor1.Metric(ctx).ProcessedCount())
+
 		require.NoError(t, cl1.Stop(ctx))
 		require.NoError(t, cl2.Stop(ctx))
 		require.NoError(t, cl3.Stop(ctx))
