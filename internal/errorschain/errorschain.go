@@ -51,25 +51,64 @@ func New(opts ...ChainOption) *Chain {
 
 // AddError add an error to the chain
 func (c *Chain) AddError(err error) *Chain {
-	c.errs = append(c.errs, err)
+	if c.returnFirst {
+		if len(c.errs) == 0 {
+			if err != nil {
+				c.errs = append(c.errs, err)
+				return c
+			}
+		}
+		return c
+	}
+
+	if err != nil {
+		c.errs = append(c.errs, err)
+		return c
+	}
+
 	return c
 }
 
-// AddErrors add a slice of errors to the chain. Remember the slice order does matter here
-func (c *Chain) AddErrors(errs ...error) *Chain {
-	c.errs = append(c.errs, errs...)
+// AddErrorFn add an error to the chain
+func (c *Chain) AddErrorFn(fn func() error) *Chain {
+	if c.returnFirst {
+		if len(c.errs) == 0 {
+			if err := fn(); err != nil {
+				c.errs = append(c.errs, err)
+				return c
+			}
+		}
+		return c
+	}
+
+	if err := fn(); err != nil {
+		c.errs = append(c.errs, err)
+		return c
+	}
+
+	return c
+}
+
+// AddErrorFns add a slice of error functions to the chain. Remember the slice order does matter here
+func (c *Chain) AddErrorFns(fn ...func() error) *Chain {
+	for _, f := range fn {
+		c = c.AddErrorFn(f)
+	}
 	return c
 }
 
 // Error returns the error
 func (c *Chain) Error() error {
+	if c.returnFirst {
+		if len(c.errs) == 0 {
+			return nil
+		}
+		return c.errs[0]
+	}
+
 	var err error
 	for _, v := range c.errs {
 		if v != nil {
-			if c.returnFirst {
-				// just return the error
-				return v
-			}
 			// append error to the violations
 			err = multierr.Append(err, v)
 		}

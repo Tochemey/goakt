@@ -463,21 +463,21 @@ func (x *actorSystem) Start(ctx context.Context) error {
 	x.started.Store(true)
 	if err := errorschain.
 		New(errorschain.ReturnFirst()).
-		AddError(x.enableRemoting(ctx)).
-		AddError(x.enableClustering(ctx)).
-		AddError(x.spawnRootGuardian(ctx)).
-		AddError(x.spawnSystemGuardian(ctx)).
-		AddError(x.spawnUserGuardian(ctx)).
-		AddError(x.spawnRebalancer(ctx)).
-		AddError(x.spawnDeathWatch(ctx)).
-		AddError(x.spawnDeadletter(ctx)).
-		AddError(x.spawnSingletonManager(ctx)).
-		AddError(x.spawnTopicActor(ctx)).
+		AddErrorFn(func() error { return x.enableRemoting(ctx) }).
+		AddErrorFn(func() error { return x.enableClustering(ctx) }).
+		AddErrorFn(func() error { return x.spawnRootGuardian(ctx) }).
+		AddErrorFn(func() error { return x.spawnSystemGuardian(ctx) }).
+		AddErrorFn(func() error { return x.spawnUserGuardian(ctx) }).
+		AddErrorFn(func() error { return x.spawnRebalancer(ctx) }).
+		AddErrorFn(func() error { return x.spawnDeathWatch(ctx) }).
+		AddErrorFn(func() error { return x.spawnDeadletter(ctx) }).
+		AddErrorFn(func() error { return x.spawnSingletonManager(ctx) }).
+		AddErrorFn(func() error { return x.spawnTopicActor(ctx) }).
 		Error(); err != nil {
 		return errorschain.
 			New(errorschain.ReturnAll()).
-			AddError(err).
-			AddError(x.shutdown(ctx)).
+			AddErrorFn(func() error { return err }).
+			AddErrorFn(func() error { return x.shutdown(ctx) }).
 			Error()
 	}
 
@@ -1649,12 +1649,14 @@ func (x *actorSystem) shutdown(ctx context.Context) error {
 		actorRefs = append(actorRefs, fromPID(actor))
 	}
 
-	if err := x.getRootGuardian().Shutdown(ctx); err != nil {
-		x.reset()
-		x.logger.Errorf("%s failed to shutdown cleanly: %w", x.name, err)
-		return err
+	if x.getRootGuardian() != nil {
+		if err := x.getRootGuardian().Shutdown(ctx); err != nil {
+			x.reset()
+			x.logger.Errorf("%s failed to shutdown cleanly: %w", x.name, err)
+			return err
+		}
+		x.actors.DeleteNode(x.getRootGuardian())
 	}
-	x.actors.DeleteNode(x.getRootGuardian())
 
 	if x.eventsStream != nil {
 		x.eventsStream.Close()
@@ -1662,8 +1664,8 @@ func (x *actorSystem) shutdown(ctx context.Context) error {
 
 	if err := errorschain.
 		New(errorschain.ReturnFirst()).
-		AddError(x.shutdownCluster(ctx, actorRefs)).
-		AddError(x.shutdownRemoting(ctx)).
+		AddErrorFn(func() error { return x.shutdownCluster(ctx, actorRefs) }).
+		AddErrorFn(func() error { return x.shutdownRemoting(ctx) }).
 		Error(); err != nil {
 		x.logger.Errorf("%s failed to shutdown: %w", x.name, err)
 		return err
@@ -2222,8 +2224,8 @@ func (x *actorSystem) shutdownCluster(ctx context.Context, actorRefs []ActorRef)
 		if x.cluster != nil {
 			if err := errorschain.
 				New(errorschain.ReturnFirst()).
-				AddError(x.cleanupCluster(ctx, actorRefs)).
-				AddError(x.cluster.Stop(ctx)).
+				AddErrorFn(func() error { return x.cleanupCluster(ctx, actorRefs) }).
+				AddErrorFn(func() error { return x.cluster.Stop(ctx) }).
 				Error(); err != nil {
 				x.reset()
 				x.logger.Errorf("%s failed to shutdown cleanly: %w", x.name, err)
