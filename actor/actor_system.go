@@ -476,8 +476,8 @@ func (x *actorSystem) Start(ctx context.Context) error {
 		Error(); err != nil {
 		return errorschain.
 			New(errorschain.ReturnAll()).
-			AddError(err).
-			AddError(x.shutdown(ctx)).
+			AddErrorFn(func() error { return err }).
+			AddErrorFn(func() error { return x.shutdown(ctx) }).
 			Error()
 	}
 
@@ -1649,12 +1649,14 @@ func (x *actorSystem) shutdown(ctx context.Context) error {
 		actorRefs = append(actorRefs, fromPID(actor))
 	}
 
-	if err := x.getRootGuardian().Shutdown(ctx); err != nil {
-		x.reset()
-		x.logger.Errorf("%s failed to shutdown cleanly: %w", x.name, err)
-		return err
+	if x.getRootGuardian() != nil {
+		if err := x.getRootGuardian().Shutdown(ctx); err != nil {
+			x.reset()
+			x.logger.Errorf("%s failed to shutdown cleanly: %w", x.name, err)
+			return err
+		}
+		x.actors.DeleteNode(x.getRootGuardian())
 	}
-	x.actors.DeleteNode(x.getRootGuardian())
 
 	if x.eventsStream != nil {
 		x.eventsStream.Close()
