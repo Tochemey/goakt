@@ -65,8 +65,8 @@ type Client struct {
 func New(ctx context.Context, nodes []*Node, opts ...Option) (*Client, error) {
 	if err := errorschain.
 		New(errorschain.ReturnFirst()).
-		AddError(validateNodes(nodes)).
-		AddError(setNodesMetric(ctx, nodes)).
+		AddErrorFn(func() error { return validateNodes(nodes) }).
+		AddErrorFn(func() error { return setNodesMetric(ctx, nodes) }).
 		Error(); err != nil {
 		return nil, err
 	}
@@ -337,19 +337,20 @@ func getNodeMetric(ctx context.Context, node *Node) (int, bool, error) {
 
 // validateNodes validate the incoming nodes
 func validateNodes(nodes []*Node) error {
-	errs := make([]error, len(nodes))
-	for index, node := range nodes {
-		errs[index] = node.Validate()
-	}
+	var errFns []func() error
+	errFns = append(errFns, func() error {
+		return validation.
+			New(validation.FailFast()).
+			AddAssertion(len(nodes) != 0, "nodes are required").
+			Validate()
+	})
 
+	for _, node := range nodes {
+		errFns = append(errFns, func() error { return node.Validate() })
+	}
 	return errorschain.
 		New(errorschain.ReturnFirst()).
-		AddError(
-			validation.
-				New(validation.FailFast()).
-				AddAssertion(len(nodes) != 0, "nodes are required").Validate(),
-		).
-		AddErrors(errs...).
+		AddErrorFns(errFns...).
 		Error()
 }
 

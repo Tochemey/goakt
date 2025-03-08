@@ -43,11 +43,11 @@ import (
 	"github.com/tochemey/goakt/v3/log"
 )
 
-// TCPTransport is a memberlist.Transport implementation that uses TCP for both packet and stream
+// Transport is a memberlist.Transport implementation that uses TCP for both packet and stream
 // operations ("packet" and "stream" are terms used by memberlist).
 // It uses a new TCP connections for each operation. There is no connection reuse.
-type TCPTransport struct {
-	config       TCPTransportConfig
+type Transport struct {
+	config       TransportConfig
 	logger       log.Logger
 	packetCh     chan *memberlist.Packet
 	connCh       chan net.Conn
@@ -61,18 +61,18 @@ type TCPTransport struct {
 	advertiseAddr string
 }
 
-var _ memberlist.NodeAwareTransport = (*TCPTransport)(nil)
+var _ memberlist.NodeAwareTransport = (*Transport)(nil)
 
-// NewTCPTransport returns new tcp-based transport with the given configuration. On
+// NewTransport returns new tcp-based transport with the given configuration. On
 // success all the network listeners will be created and listening.
-func NewTCPTransport(config TCPTransportConfig) (*TCPTransport, error) {
+func NewTransport(config TransportConfig) (*Transport, error) {
 	if len(config.BindAddrs) == 0 {
 		config.BindAddrs = []string{zeroZeroZeroZero}
 	}
 
 	// Build out the new transport.
 	var ok bool
-	t := TCPTransport{
+	t := Transport{
 		config:   config,
 		logger:   log.New(log.InfoLevel, os.Stdout),
 		packetCh: make(chan *memberlist.Packet),
@@ -137,7 +137,7 @@ func NewTCPTransport(config TCPTransportConfig) (*TCPTransport, error) {
 
 // GetAutoBindPort returns the bind port that was automatically given by the
 // kernel, if a bind port of 0 was given.
-func (t *TCPTransport) GetAutoBindPort() int {
+func (t *Transport) GetAutoBindPort() int {
 	// We made sure there's at least one TCP listener, and that one's
 	// port was applied to all the others for the dynamic bind case.
 	return t.tcpListeners[0].Addr().(*net.TCPAddr).Port
@@ -147,7 +147,7 @@ func (t *TCPTransport) GetAutoBindPort() int {
 // might be empty) and returns the desired IP and port to advertise to
 // the rest of the cluster.
 // (Copied from memberlist' net_transport.go)
-func (t *TCPTransport) FinalAdvertiseAddr(ip string, port int) (net.IP, int, error) {
+func (t *Transport) FinalAdvertiseAddr(ip string, port int) (net.IP, int, error) {
 	var advertiseAddr net.IP
 	var advertisePort int
 	switch {
@@ -191,7 +191,7 @@ func (t *TCPTransport) FinalAdvertiseAddr(ip string, port int) (net.IP, int, err
 
 // WriteTo is a packet-oriented interface that fires off the given
 // payload to the given address.
-func (t *TCPTransport) WriteTo(b []byte, addr string) (time.Time, error) {
+func (t *Transport) WriteTo(b []byte, addr string) (time.Time, error) {
 	err := t.writeTo(b, addr)
 	if err != nil {
 		logger := t.logger
@@ -210,7 +210,7 @@ func (t *TCPTransport) WriteTo(b []byte, addr string) (time.Time, error) {
 	return time.Now(), nil
 }
 
-func (t *TCPTransport) writeTo(b []byte, addr string) error {
+func (t *Transport) writeTo(b []byte, addr string) error {
 	// Open connection, write packet header and data, data hash, close. Simple.
 	c, err := t.getConnection(addr, t.config.PacketDialTimeout)
 	if err != nil {
@@ -287,23 +287,23 @@ func (t *TCPTransport) writeTo(b []byte, addr string) error {
 	return nil
 }
 
-func (t *TCPTransport) WriteToAddress(b []byte, addr memberlist.Address) (time.Time, error) {
+func (t *Transport) WriteToAddress(b []byte, addr memberlist.Address) (time.Time, error) {
 	return t.WriteTo(b, addr.Addr)
 }
 
-func (t *TCPTransport) DialAddressTimeout(addr memberlist.Address, timeout time.Duration) (net.Conn, error) {
+func (t *Transport) DialAddressTimeout(addr memberlist.Address, timeout time.Duration) (net.Conn, error) {
 	return t.DialTimeout(addr.Addr, timeout)
 }
 
 // PacketCh returns a channel that can be read to receive incoming
 // packets from other peers.
-func (t *TCPTransport) PacketCh() <-chan *memberlist.Packet {
+func (t *Transport) PacketCh() <-chan *memberlist.Packet {
 	return t.packetCh
 }
 
 // DialTimeout is used to create a connection that allows memberlist to perform
 // two-way communication with a peer.
-func (t *TCPTransport) DialTimeout(addr string, timeout time.Duration) (net.Conn, error) {
+func (t *Transport) DialTimeout(addr string, timeout time.Duration) (net.Conn, error) {
 	c, err := t.getConnection(addr, timeout)
 
 	if err != nil {
@@ -321,13 +321,13 @@ func (t *TCPTransport) DialTimeout(addr string, timeout time.Duration) (net.Conn
 
 // StreamCh returns a channel that can be read to handle incoming stream
 // connections from other peers.
-func (t *TCPTransport) StreamCh() <-chan net.Conn {
+func (t *Transport) StreamCh() <-chan net.Conn {
 	return t.connCh
 }
 
 // Shutdown is called when memberlist is shutting down; this gives the
 // transport a chance to clean up any listeners.
-func (t *TCPTransport) Shutdown() error {
+func (t *Transport) Shutdown() error {
 	// This will avoid log spam about errors when we shut down.
 	t.shutdown.Store(1)
 
@@ -345,7 +345,7 @@ func (t *TCPTransport) Shutdown() error {
 // and spawns new go routine to handle each connection. This transport uses TCP connections
 // for both packet sending and streams.
 // (copied from Memberlist net_transport.go)
-func (t *TCPTransport) tcpListen(tcpLn net.Listener) {
+func (t *Transport) tcpListen(tcpLn net.Listener) {
 	defer t.wg.Done()
 
 	// baseDelay is the initial delay after an AcceptTCP() error before attempting again
@@ -386,14 +386,14 @@ func (t *TCPTransport) tcpListen(tcpLn net.Listener) {
 	}
 }
 
-func (t *TCPTransport) debugLogger() log.Logger {
+func (t *Transport) debugLogger() log.Logger {
 	if t.config.DebugEnabled {
 		return log.DefaultLogger
 	}
 	return log.DiscardLogger
 }
 
-func (t *TCPTransport) handleConnection(conn net.Conn) {
+func (t *Transport) handleConnection(conn net.Conn) {
 	t.debugLogger().Debugf("New connection: %s", conn.RemoteAddr())
 
 	closeConn := true
@@ -462,20 +462,20 @@ func (t *TCPTransport) handleConnection(conn net.Conn) {
 	}
 }
 
-func (t *TCPTransport) setAdvertisedAddr(advertiseAddr net.IP, advertisePort int) {
+func (t *Transport) setAdvertisedAddr(advertiseAddr net.IP, advertisePort int) {
 	t.advertiseMu.Lock()
 	defer t.advertiseMu.Unlock()
 	addr := net.TCPAddr{IP: advertiseAddr, Port: advertisePort}
 	t.advertiseAddr = addr.String()
 }
 
-func (t *TCPTransport) getAdvertisedAddr() string {
+func (t *Transport) getAdvertisedAddr() string {
 	t.advertiseMu.RLock()
 	defer t.advertiseMu.RUnlock()
 	return t.advertiseAddr
 }
 
-func (t *TCPTransport) getConnection(addr string, timeout time.Duration) (net.Conn, error) {
+func (t *Transport) getConnection(addr string, timeout time.Duration) (net.Conn, error) {
 	if t.config.TLSEnabled {
 		return tls.DialWithDialer(&net.Dialer{Timeout: timeout}, "tcp", addr, t.tlsConfig)
 	}

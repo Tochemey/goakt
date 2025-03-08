@@ -248,21 +248,16 @@ func (x *Engine) Start(ctx context.Context) error {
 
 	conf.Hasher = &hasherWrapper{x.hasher}
 
-	mtConfig := memberlist.TCPTransportConfig{
+	transport, err := memberlist.NewTransport(memberlist.TransportConfig{
 		BindAddrs:          []string{x.node.Host},
 		BindPort:           x.node.DiscoveryPort,
 		PacketDialTimeout:  5 * time.Second,
 		PacketWriteTimeout: 5 * time.Second,
 		Logger:             x.logger,
 		DebugEnabled:       false,
-	}
-
-	if x.serverTLS != nil {
-		mtConfig.TLSEnabled = true
-		mtConfig.TLS = x.serverTLS
-	}
-
-	transport, err := memberlist.NewTCPTransport(mtConfig)
+		TLSEnabled:         x.serverTLS != nil,
+		TLS:                x.serverTLS,
+	})
 	if err != nil {
 		x.logger.Errorf("Failed to create memberlist TCP transport: %v", err)
 		return err
@@ -396,15 +391,16 @@ func (x *Engine) Stop(ctx context.Context) error {
 	// add some logging information
 	logger.Infof("Stopping GoAkt cluster Node=(%s)....🤔", x.name)
 
+	x.running.Store(false)
 	// create an errors chain to pipeline the shutdown processes
 	chain := errorschain.
 		New(errorschain.ReturnFirst()).
-		AddError(x.pubSub.Close()).
-		AddError(x.actorsMap.Destroy(ctx)).
-		AddError(x.statesMap.Destroy(ctx)).
-		AddError(x.jobKeysMap.Destroy(ctx)).
-		AddError(x.client.Close(ctx)).
-		AddError(x.server.Shutdown(ctx))
+		AddErrorFn(func() error { return x.pubSub.Close() }).
+		AddErrorFn(func() error { return x.actorsMap.Destroy(ctx) }).
+		AddErrorFn(func() error { return x.statesMap.Destroy(ctx) }).
+		AddErrorFn(func() error { return x.jobKeysMap.Destroy(ctx) }).
+		AddErrorFn(func() error { return x.client.Close(ctx) }).
+		AddErrorFn(func() error { return x.server.Shutdown(ctx) })
 
 	// close the events listener
 	if err := chain.Error(); err != nil {
@@ -515,8 +511,8 @@ func (x *Engine) PutActor(ctx context.Context, actor *internalpb.ActorRef) error
 		if actor.GetIsSingleton() {
 			if err := errorschain.
 				New(errorschain.ReturnFirst()).
-				AddError(x.actorsMap.Put(ctx, key, encoded)).
-				AddError(x.actorKindsMap.Put(ctx, actor.GetActorType(), key)).
+				AddErrorFn(func() error { return x.actorsMap.Put(ctx, key, encoded) }).
+				AddErrorFn(func() error { return x.actorKindsMap.Put(ctx, actor.GetActorType(), key) }).
 				Error(); err != nil {
 				return fmt.Errorf("(%s) failed to sync actor=(%s): %v", x.node.PeersAddress(), actor.GetActorAddress().GetName(), err)
 			}
