@@ -463,16 +463,16 @@ func (x *actorSystem) Start(ctx context.Context) error {
 	x.started.Store(true)
 	if err := errorschain.
 		New(errorschain.ReturnFirst()).
-		AddError(x.enableRemoting(ctx)).
-		AddError(x.enableClustering(ctx)).
-		AddError(x.spawnRootGuardian(ctx)).
-		AddError(x.spawnSystemGuardian(ctx)).
-		AddError(x.spawnUserGuardian(ctx)).
-		AddError(x.spawnRebalancer(ctx)).
-		AddError(x.spawnDeathWatch(ctx)).
-		AddError(x.spawnDeadletter(ctx)).
-		AddError(x.spawnSingletonManager(ctx)).
-		AddError(x.spawnTopicActor(ctx)).
+		AddErrorFn(func() error { return x.enableRemoting(ctx) }).
+		AddErrorFn(func() error { return x.enableClustering(ctx) }).
+		AddErrorFn(func() error { return x.spawnRootGuardian(ctx) }).
+		AddErrorFn(func() error { return x.spawnSystemGuardian(ctx) }).
+		AddErrorFn(func() error { return x.spawnUserGuardian(ctx) }).
+		AddErrorFn(func() error { return x.spawnRebalancer(ctx) }).
+		AddErrorFn(func() error { return x.spawnDeathWatch(ctx) }).
+		AddErrorFn(func() error { return x.spawnDeadletter(ctx) }).
+		AddErrorFn(func() error { return x.spawnSingletonManager(ctx) }).
+		AddErrorFn(func() error { return x.spawnTopicActor(ctx) }).
 		Error(); err != nil {
 		return errorschain.
 			New(errorschain.ReturnAll()).
@@ -750,7 +750,7 @@ func (x *actorSystem) SpawnRouter(ctx context.Context, poolSize int, routeesKind
 // The cluster singleton is automatically started on the oldest node in the cluster.
 // When the oldest node leaves the cluster unexpectedly, the singleton is restarted on the new oldest node.
 // This is useful for managing shared resources or coordinating tasks that should be handled by a single actor.
-func (x *actorSystem) SpawnSingleton(ctx context.Context, name string, actor Actor) error {
+func (x *actorSystem) SpawnSingleton(ctx context.Context, actorName string, actor Actor) error {
 	if !x.started.Load() {
 		return ErrActorSystemNotStarted
 	}
@@ -763,23 +763,21 @@ func (x *actorSystem) SpawnSingleton(ctx context.Context, name string, actor Act
 
 	// only create the singleton actor on the oldest node in the cluster
 	if !cl.IsLeader(ctx) {
-		return x.spawnSingletonOnLeader(ctx, cl, name, actor)
+		return x.spawnSingletonOnLeader(ctx, cl, actorName, actor)
 	}
 
 	// check some preconditions
-	if err := x.checkSpawnPreconditions(ctx, name, actor, true); err != nil {
+	if err := x.checkSpawnPreconditions(ctx, actorName, actor, true); err != nil {
 		return err
 	}
 
-	pid, err := x.configPID(ctx, name, actor,
+	pid, err := x.configPID(ctx, actorName, actor,
 		WithLongLived(),
 		withSingleton(),
 		WithSupervisor(
 			NewSupervisor(
 				WithStrategy(OneForOneStrategy),
-				WithDirective(PanicError{}, StopDirective),
-				WithDirective(InternalError{}, StopDirective),
-				WithDirective(&runtime.PanicNilError{}, StopDirective),
+				WithAnyErrorDirective(StopDirective),
 			),
 		))
 	if err != nil {
@@ -1435,13 +1433,13 @@ func (x *actorSystem) getPeerStateFromStore(address string) (*internalpb.PeerSta
 }
 
 // broadcastActor broadcast the newly (re)spawned actor into the cluster
-func (x *actorSystem) broadcastActor(actor *PID) {
+func (x *actorSystem) broadcastActor(pid *PID) {
 	if x.clusterEnabled.Load() {
 		x.wireActorsQueue <- &internalpb.ActorRef{
-			ActorAddress: actor.Address().Address,
-			ActorType:    types.Name(actor.Actor()),
-			IsSingleton:  actor.IsSingleton(),
-			Relocatable:  actor.IsRelocatable(),
+			ActorAddress: pid.Address().Address,
+			ActorType:    types.Name(pid.Actor()),
+			IsSingleton:  pid.IsSingleton(),
+			Relocatable:  pid.IsRelocatable(),
 		}
 	}
 }
@@ -1602,12 +1600,12 @@ func (x *actorSystem) ensureTLSProtos() {
 		toAdd := []string{"h2", "http/1.1"}
 
 		// server application protocols setting
-		protos := goset.NewSet[string](x.serverTLS.NextProtos...)
+		protos := goset.NewSet(x.serverTLS.NextProtos...)
 		protos.Append(toAdd...)
 		x.serverTLS.NextProtos = protos.ToSlice()
 
 		// client application protocols setting
-		protos = goset.NewSet[string](x.clientTLS.NextProtos...)
+		protos = goset.NewSet(x.clientTLS.NextProtos...)
 		protos.Append(toAdd...)
 		x.clientTLS.NextProtos = protos.ToSlice()
 	}
@@ -1662,8 +1660,8 @@ func (x *actorSystem) shutdown(ctx context.Context) error {
 
 	if err := errorschain.
 		New(errorschain.ReturnFirst()).
-		AddError(x.shutdownCluster(ctx, actorRefs)).
-		AddError(x.shutdownRemoting(ctx)).
+		AddErrorFn(func() error { return x.shutdownCluster(ctx, actorRefs) }).
+		AddErrorFn(func() error { return x.shutdownRemoting(ctx) }).
 		Error(); err != nil {
 		x.logger.Errorf("%s failed to shutdown: %w", x.name, err)
 		return err
@@ -2123,13 +2121,13 @@ func (x *actorSystem) spawnDeadletter(ctx context.Context) error {
 }
 
 // checkSpawnPreconditions make sure before an actor is created some pre-conditions are checks
-func (x *actorSystem) checkSpawnPreconditions(ctx context.Context, actorName string, kind Actor, singleton bool) error {
+func (x *actorSystem) checkSpawnPreconditions(ctx context.Context, actorName string, actor Actor, singleton bool) error {
 	// check the existence of the actor given the kind prior to creating it
 	if x.clusterEnabled.Load() {
 		// a singleton actor must only have one instance at a given time of its kind
 		// in the whole cluster
 		if singleton {
-			id, err := x.cluster.LookupKind(ctx, types.Name(kind))
+			id, err := x.cluster.LookupKind(ctx, types.Name(actor))
 			if err != nil {
 				return err
 			}
@@ -2151,7 +2149,7 @@ func (x *actorSystem) checkSpawnPreconditions(ctx context.Context, actorName str
 			return err
 		}
 
-		if existed.GetActorType() == types.Name(kind) {
+		if existed.GetActorType() == types.Name(actor) {
 			return ErrActorAlreadyExists(actorName)
 		}
 	}
@@ -2222,8 +2220,8 @@ func (x *actorSystem) shutdownCluster(ctx context.Context, actorRefs []ActorRef)
 		if x.cluster != nil {
 			if err := errorschain.
 				New(errorschain.ReturnFirst()).
-				AddError(x.cleanupCluster(ctx, actorRefs)).
-				AddError(x.cluster.Stop(ctx)).
+				AddErrorFn(func() error { return x.cleanupCluster(ctx, actorRefs) }).
+				AddErrorFn(func() error { return x.cluster.Stop(ctx) }).
 				Error(); err != nil {
 				x.reset()
 				x.logger.Errorf("%s failed to shutdown cleanly: %w", x.name, err)

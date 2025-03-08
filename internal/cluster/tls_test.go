@@ -22,24 +22,25 @@
  * SOFTWARE.
  */
 
-package memberlist
+package cluster
 
-type messageType uint8
+import (
+	"testing"
 
-const (
-	_ messageType = iota // don't use 0
-	packet
-	stream
+	"github.com/stretchr/testify/require"
 )
 
-const zeroZeroZeroZero = "0.0.0.0"
+func TestTLS(t *testing.T) {
+	t.Run("With NewTLS", func(t *testing.T) {
+		tls := NewTLS(nil, nil)
+		require.NotNil(t, tls)
+		require.Nil(t, tls.Server())
+		require.Nil(t, tls.Client())
+	})
 
-type addr string
-
-func (a addr) Network() string {
-	return "tcp"
-}
-
-func (a addr) String() string {
-	return string(a)
+	t.Run("With nil", func(t *testing.T) {
+		var tls *TLS
+		require.Nil(t, tls.Server())
+		require.Nil(t, tls.Client())
+	})
 }

@@ -38,8 +38,6 @@ import (
 
 func TestOptions(t *testing.T) {
 	mockHasher := new(testkit.Hasher)
-	// nolint
-	tlsConfig := &tls.Config{}
 	size := uint64(1 * size.MB)
 	testCases := []struct {
 		name     string
@@ -97,11 +95,6 @@ func TestOptions(t *testing.T) {
 			expected: Engine{readQuorum: 3},
 		},
 		{
-			name:     "WithTLS",
-			option:   WithTLS(tlsConfig, tlsConfig),
-			expected: Engine{serverTLS: tlsConfig, clientTLS: tlsConfig},
-		},
-		{
 			name:     "WithStorageSize",
 			option:   WithTableSize(size),
 			expected: Engine{tableSize: size},
@@ -115,4 +108,14 @@ func TestOptions(t *testing.T) {
 			assert.Equal(t, tc.expected, cl)
 		})
 	}
+}
+
+func TestTLSOption(t *testing.T) {
+	// nolint
+	tlsConfig := &tls.Config{}
+	option := WithTLS(tlsConfig, tlsConfig)
+	var cl Engine
+	option.Apply(&cl)
+	assert.Equal(t, tlsConfig, cl.tls.Server())
+	assert.Equal(t, tlsConfig, cl.tls.Client())
 }

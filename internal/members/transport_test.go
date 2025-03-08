@@ -22,7 +22,7 @@
  * SOFTWARE.
  */
 
-package memberlist
+package members
 
 import (
 	"crypto/tls"
@@ -46,13 +46,13 @@ import (
 
 func TestTCPTransport(t *testing.T) {
 	t.Run("NewTCPTransport with empty config", func(t *testing.T) {
-		transport, err := NewTCPTransport(TCPTransportConfig{})
+		transport, err := NewTransport(Config{})
 		require.NoError(t, err)
 		require.NotNil(t, transport)
 		assert.NoError(t, transport.Shutdown())
 	})
 	t.Run("NewTCPTransport failed with invalid address", func(t *testing.T) {
-		transport, err := NewTCPTransport(TCPTransportConfig{
+		transport, err := NewTransport(Config{
 			BindAddrs: []string{"127.0.0.0.0.1"},
 		})
 		require.Error(t, err)
@@ -61,14 +61,14 @@ func TestTCPTransport(t *testing.T) {
 	t.Run("NewTCPTransport already listening on port", func(t *testing.T) {
 		host := "127.0.0.1"
 		ports := dynaport.Get(1)
-		transport, err := NewTCPTransport(TCPTransportConfig{
+		transport, err := NewTransport(Config{
 			BindAddrs: []string{host},
 			BindPort:  ports[0],
 		})
 		require.NoError(t, err)
 		require.NotNil(t, transport)
 
-		transport2, err := NewTCPTransport(TCPTransportConfig{
+		transport2, err := NewTransport(Config{
 			BindAddrs: []string{host},
 			BindPort:  ports[0],
 		})
@@ -83,7 +83,7 @@ func TestTCPTransport(t *testing.T) {
 		// AutoGenerate TLS certs
 		conf := autotls.Config{AutoTLS: true}
 		require.NoError(t, autotls.Setup(&conf))
-		transport, err := NewTCPTransport(TCPTransportConfig{
+		transport, err := NewTransport(Config{
 			BindAddrs:  []string{host},
 			BindPort:   ports[0],
 			TLSEnabled: true,
@@ -95,7 +95,7 @@ func TestTCPTransport(t *testing.T) {
 	})
 	t.Run("With GetAutoBindPort", func(t *testing.T) {
 		host := "127.0.0.1"
-		transport, err := NewTCPTransport(TCPTransportConfig{
+		transport, err := NewTransport(Config{
 			BindAddrs: []string{host},
 			BindPort:  0,
 		})
@@ -108,7 +108,7 @@ func TestTCPTransport(t *testing.T) {
 	})
 	t.Run("With FinalAdvertiseAddr", func(t *testing.T) {
 		host := "127.0.0.1"
-		transport, err := NewTCPTransport(TCPTransportConfig{
+		transport, err := NewTransport(Config{
 			BindAddrs: []string{host},
 			BindPort:  0,
 		})
@@ -124,7 +124,7 @@ func TestTCPTransport(t *testing.T) {
 	})
 	t.Run("With FinalAdvertiseAddr with empty address", func(t *testing.T) {
 		host := "127.0.0.1"
-		transport, err := NewTCPTransport(TCPTransportConfig{
+		transport, err := NewTransport(Config{
 			BindAddrs: []string{host},
 			BindPort:  0,
 		})
@@ -141,7 +141,7 @@ func TestTCPTransport(t *testing.T) {
 
 	t.Run("With FinalAdvertiseAddr with invalid address", func(t *testing.T) {
 		host := "127.0.0.1"
-		transport, err := NewTCPTransport(TCPTransportConfig{
+		transport, err := NewTransport(Config{
 			BindAddrs: []string{host},
 			BindPort:  0,
 		})
@@ -217,7 +217,7 @@ func newNode(t *testing.T, name string, delegate memberlist.Delegate) *memberlis
 	// TODO: fix TLS verification
 	conf := autotls.Config{
 		AutoTLS:            true,
-		ClientAuth:         tls.NoClientCert,
+		ClientAuth:         tls.RequireAndVerifyClientCert,
 		InsecureSkipVerify: false,
 	}
 
@@ -231,7 +231,7 @@ func newNode(t *testing.T, name string, delegate memberlist.Delegate) *memberlis
 	mconf.BindAddr = "127.0.0.1"
 	mconf.Logger = log.New(os.Stderr, name+": ", log.LstdFlags)
 
-	tConfig := TCPTransportConfig{
+	tConfig := Config{
 		BindAddrs:  []string{mconf.BindAddr},
 		BindPort:   mconf.BindPort,
 		TLS:        conf.ServerTLS,
@@ -239,11 +239,11 @@ func newNode(t *testing.T, name string, delegate memberlist.Delegate) *memberlis
 	}
 
 	// implement some poor mechanism here
-	retry := func(limit int) (*TCPTransport, error) {
+	retry := func(limit int) (*Transport, error) {
 		var err error
 		for try := 0; try < limit; try++ {
-			var transport *TCPTransport
-			if transport, err = NewTCPTransport(tConfig); err == nil {
+			var transport *Transport
+			if transport, err = NewTransport(tConfig); err == nil {
 				return transport, nil
 			}
 			if strings.Contains(err.Error(), "address already in use") {
