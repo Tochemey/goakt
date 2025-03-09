@@ -1455,5 +1455,4 @@ func TestScheduler(t *testing.T) {
 		require.ErrorIs(t, err, assert.AnError)
 		clusterMock.AssertExpectations(t)
 	})
-
 }
