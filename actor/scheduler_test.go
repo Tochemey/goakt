@@ -31,6 +31,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/reugn/go-quartz/quartz"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/travisjeffery/go-dynaport"
@@ -38,6 +39,7 @@ import (
 	"github.com/tochemey/goakt/v3/address"
 	"github.com/tochemey/goakt/v3/internal/util"
 	"github.com/tochemey/goakt/v3/log"
+	clustermocks "github.com/tochemey/goakt/v3/mocks/cluster"
 	testkit "github.com/tochemey/goakt/v3/mocks/discovery"
 	"github.com/tochemey/goakt/v3/remote"
 	"github.com/tochemey/goakt/v3/test/data/testpb"
@@ -1413,4 +1415,45 @@ func TestScheduler(t *testing.T) {
 		assert.NoError(t, err)
 		provider.AssertExpectations(t)
 	})
+	t.Run("With distributeJobKeyOrNot returns error when SchedulerJobKeyExists returns error", func(t *testing.T) {
+		ctx := context.TODO()
+		logger := log.DiscardLogger
+		jobDetails := quartz.NewJobDetail(nil, quartz.NewJobKey("test"))
+		clusterMock := new(clustermocks.Interface)
+		clusterMock.EXPECT().SchedulerJobKeyExists(ctx, jobDetails.JobKey().String()).Return(false, assert.AnError)
+
+		scheduler := newScheduler(logger, time.Second, withSchedulerCluster(clusterMock))
+		err := scheduler.distributeJobKeyOrNot(ctx, jobDetails)
+		require.Error(t, err)
+		clusterMock.AssertExpectations(t)
+	})
+	t.Run("With distributeJobKeyOrNot job skipping", func(t *testing.T) {
+		ctx := context.TODO()
+		logger := log.DiscardLogger
+		jobDetails := quartz.NewJobDetail(nil, quartz.NewJobKey("test"))
+		clusterMock := new(clustermocks.Interface)
+		clusterMock.EXPECT().SchedulerJobKeyExists(ctx, jobDetails.JobKey().String()).Return(true, nil)
+
+		scheduler := newScheduler(logger, time.Second, withSchedulerCluster(clusterMock))
+		err := scheduler.distributeJobKeyOrNot(ctx, jobDetails)
+		require.Error(t, err)
+		require.ErrorIs(t, err, errSkipJobScheduling)
+		clusterMock.AssertExpectations(t)
+	})
+	t.Run("With distributeJobKeyOrNot failure when replicating job failed", func(t *testing.T) {
+		ctx := context.TODO()
+		logger := log.DiscardLogger
+		jobDetails := quartz.NewJobDetail(nil, quartz.NewJobKey("test"))
+		jobKey := jobDetails.JobKey().String()
+		clusterMock := new(clustermocks.Interface)
+		clusterMock.EXPECT().SchedulerJobKeyExists(ctx, jobKey).Return(false, nil)
+		clusterMock.EXPECT().SetSchedulerJobKey(ctx, jobKey).Return(assert.AnError)
+
+		scheduler := newScheduler(logger, time.Second, withSchedulerCluster(clusterMock))
+		err := scheduler.distributeJobKeyOrNot(ctx, jobDetails)
+		require.Error(t, err)
+		require.ErrorIs(t, err, assert.AnError)
+		clusterMock.AssertExpectations(t)
+	})
+
 }
