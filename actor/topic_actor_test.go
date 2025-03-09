@@ -254,6 +254,7 @@ func TestTopicActor(t *testing.T) {
 
 		require.Len(t, items, 1)
 
+		consumer.Shutdown()
 		require.NoError(t, cl1.Stop(ctx))
 		require.NoError(t, sd1.Close())
 		srv.Shutdown()

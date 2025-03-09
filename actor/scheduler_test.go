@@ -26,6 +26,8 @@ package actor
 
 import (
 	"context"
+	"net"
+	"strconv"
 	"testing"
 	"time"
 
@@ -36,6 +38,7 @@ import (
 	"github.com/tochemey/goakt/v3/address"
 	"github.com/tochemey/goakt/v3/internal/util"
 	"github.com/tochemey/goakt/v3/log"
+	testkit "github.com/tochemey/goakt/v3/mocks/discovery"
 	"github.com/tochemey/goakt/v3/remote"
 	"github.com/tochemey/goakt/v3/test/data/testpb"
 )
@@ -85,6 +88,80 @@ func TestScheduler(t *testing.T) {
 		// stop the actor
 		err = newActorSystem.Stop(ctx)
 		assert.NoError(t, err)
+	})
+	t.Run("With ScheduleOnce when cluster is enabled", func(t *testing.T) {
+		ctx := context.TODO()
+		nodePorts := dynaport.Get(3)
+		discoveryPort := nodePorts[0]
+		clusterPort := nodePorts[1]
+		remotingPort := nodePorts[2]
+
+		logger := log.DiscardLogger
+		host := "127.0.0.1"
+
+		// define discovered addresses
+		addrs := []string{
+			net.JoinHostPort(host, strconv.Itoa(discoveryPort)),
+		}
+
+		// mock the discovery provider
+		provider := new(testkit.Provider)
+		newActorSystem, err := NewActorSystem(
+			"test",
+			WithPassivationDisabled(),
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+			WithCluster(
+				NewClusterConfig().
+					WithKinds(new(mockActor)).
+					WithPartitionCount(9).
+					WithReplicaCount(1).
+					WithPeersPort(clusterPort).
+					WithMinimumPeersQuorum(1).
+					WithDiscoveryPort(discoveryPort).
+					WithWAL(t.TempDir()).
+					WithDiscovery(provider)),
+		)
+		require.NoError(t, err)
+
+		provider.EXPECT().ID().Return("testDisco")
+		provider.EXPECT().Initialize().Return(nil)
+		provider.EXPECT().Register().Return(nil)
+		provider.EXPECT().Deregister().Return(nil)
+		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
+		provider.EXPECT().Close().Return(nil)
+
+		// start the actor system
+		err = newActorSystem.Start(ctx)
+		require.NoError(t, err)
+
+		util.Pause(time.Second)
+
+		// create a test actor
+		actorName := "test"
+		actor := newMockActor()
+		actorRef, err := newActorSystem.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		util.Pause(time.Second)
+
+		// send a message to the actor after 100 ms
+		message := new(testpb.TestSend)
+		err = newActorSystem.ScheduleOnce(ctx, message, actorRef, 100*time.Millisecond)
+		require.NoError(t, err)
+
+		util.Pause(time.Second)
+		typedSystem := newActorSystem.(*actorSystem)
+		keys, err := typedSystem.scheduler.quartzScheduler.GetJobKeys()
+		require.NoError(t, err)
+		assert.Empty(t, keys)
+		assert.EqualValues(t, 1, actorRef.ProcessedCount()-1)
+
+		// stop the actor
+		err = newActorSystem.Stop(ctx)
+		require.NoError(t, err)
+		provider.AssertExpectations(t)
 	})
 	t.Run("With ScheduleOnce when actor not started", func(t *testing.T) {
 		// create the context
@@ -226,6 +303,85 @@ func TestScheduler(t *testing.T) {
 		err = newActorSystem.Stop(ctx)
 		assert.NoError(t, err)
 	})
+	t.Run("With RemoteScheduleOnce when cluster is enabled", func(t *testing.T) {
+		ctx := context.TODO()
+		nodePorts := dynaport.Get(3)
+		discoveryPort := nodePorts[0]
+		clusterPort := nodePorts[1]
+		remotingPort := nodePorts[2]
+
+		logger := log.DiscardLogger
+		host := "127.0.0.1"
+
+		// define discovered addresses
+		addrs := []string{
+			net.JoinHostPort(host, strconv.Itoa(discoveryPort)),
+		}
+
+		// mock the discovery provider
+		provider := new(testkit.Provider)
+		newActorSystem, err := NewActorSystem(
+			"test",
+			WithPassivationDisabled(),
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+			WithCluster(
+				NewClusterConfig().
+					WithKinds(new(mockActor)).
+					WithPartitionCount(9).
+					WithReplicaCount(1).
+					WithPeersPort(clusterPort).
+					WithMinimumPeersQuorum(1).
+					WithDiscoveryPort(discoveryPort).
+					WithWAL(t.TempDir()).
+					WithDiscovery(provider)),
+		)
+		require.NoError(t, err)
+
+		provider.EXPECT().ID().Return("nats")
+		provider.EXPECT().Initialize().Return(nil)
+		provider.EXPECT().Register().Return(nil)
+		provider.EXPECT().Deregister().Return(nil)
+		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
+		provider.EXPECT().Close().Return(nil)
+
+		// start the actor system
+		err = newActorSystem.Start(ctx)
+		require.NoError(t, err)
+
+		util.Pause(time.Second)
+
+		// create a test actor
+		actorName := "test"
+		actor := newMockActor()
+		actorRef, err := newActorSystem.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		remoting := NewRemoting()
+		// get the address of the actor
+		addr, err := remoting.RemoteLookup(ctx, newActorSystem.Host(), int(newActorSystem.Port()), actorName)
+		require.NoError(t, err)
+
+		// send a message to the actor after 100 ms
+		message := new(testpb.TestSend)
+		err = newActorSystem.RemoteScheduleOnce(ctx, message, addr, 100*time.Millisecond)
+		require.NoError(t, err)
+
+		util.Pause(time.Second)
+		typedSystem := newActorSystem.(*actorSystem)
+		// for test purpose only
+		keys, err := typedSystem.scheduler.quartzScheduler.GetJobKeys()
+		require.NoError(t, err)
+		assert.Empty(t, keys)
+		assert.EqualValues(t, 1, actorRef.ProcessedCount()-1)
+
+		remoting.Close()
+		// stop the actor
+		err = newActorSystem.Stop(ctx)
+		assert.NoError(t, err)
+		provider.AssertExpectations(t)
+	})
 	t.Run("With RemoteScheduleOnce with scheduler not started", func(t *testing.T) {
 		// create the context
 		ctx := context.TODO()
@@ -321,6 +477,79 @@ func TestScheduler(t *testing.T) {
 		// stop the actor
 		err = newActorSystem.Stop(ctx)
 		assert.NoError(t, err)
+	})
+	t.Run("With ScheduleWithCron when cluster is enabled", func(t *testing.T) {
+		ctx := context.TODO()
+		nodePorts := dynaport.Get(3)
+		discoveryPort := nodePorts[0]
+		clusterPort := nodePorts[1]
+		remotingPort := nodePorts[2]
+
+		logger := log.DiscardLogger
+		host := "127.0.0.1"
+
+		// define discovered addresses
+		addrs := []string{
+			net.JoinHostPort(host, strconv.Itoa(discoveryPort)),
+		}
+
+		// mock the discovery provider
+		provider := new(testkit.Provider)
+		newActorSystem, err := NewActorSystem(
+			"test",
+			WithPassivationDisabled(),
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+			WithCluster(
+				NewClusterConfig().
+					WithKinds(new(mockActor)).
+					WithPartitionCount(9).
+					WithReplicaCount(1).
+					WithPeersPort(clusterPort).
+					WithMinimumPeersQuorum(1).
+					WithDiscoveryPort(discoveryPort).
+					WithWAL(t.TempDir()).
+					WithDiscovery(provider)),
+		)
+		require.NoError(t, err)
+
+		provider.EXPECT().ID().Return("testDisco")
+		provider.EXPECT().Initialize().Return(nil)
+		provider.EXPECT().Register().Return(nil)
+		provider.EXPECT().Deregister().Return(nil)
+		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
+		provider.EXPECT().Close().Return(nil)
+
+		// start the actor system
+		err = newActorSystem.Start(ctx)
+		require.NoError(t, err)
+
+		util.Pause(time.Second)
+
+		// create a test actor
+		actorName := "test"
+		actor := newMockActor()
+		actorRef, err := newActorSystem.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		util.Pause(time.Second)
+
+		// send a message to the actor after 100 ms
+		message := new(testpb.TestSend)
+		// set cron expression to run every second
+		const expr = "* * * ? * *"
+		err = newActorSystem.ScheduleWithCron(ctx, message, actorRef, expr)
+		require.NoError(t, err)
+
+		// wait for two seconds
+		util.Pause(2 * time.Second)
+		assert.EqualValues(t, 2, actorRef.ProcessedCount()-1)
+
+		// stop the actor
+		err = newActorSystem.Stop(ctx)
+		assert.NoError(t, err)
+		provider.AssertExpectations(t)
 	})
 	t.Run("With ScheduleWithCron with invalid cron length", func(t *testing.T) {
 		// create the context
@@ -459,6 +688,82 @@ func TestScheduler(t *testing.T) {
 		// stop the actor
 		err = newActorSystem.Stop(ctx)
 		assert.NoError(t, err)
+	})
+	t.Run("With RemoteScheduleWithCron when cluster is enabled", func(t *testing.T) {
+		ctx := context.TODO()
+		nodePorts := dynaport.Get(3)
+		discoveryPort := nodePorts[0]
+		clusterPort := nodePorts[1]
+		remotingPort := nodePorts[2]
+
+		logger := log.DiscardLogger
+		host := "127.0.0.1"
+
+		// define discovered addresses
+		addrs := []string{
+			net.JoinHostPort(host, strconv.Itoa(discoveryPort)),
+		}
+
+		// mock the discovery provider
+		provider := new(testkit.Provider)
+		newActorSystem, err := NewActorSystem(
+			"test",
+			WithPassivationDisabled(),
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+			WithCluster(
+				NewClusterConfig().
+					WithKinds(new(mockActor)).
+					WithPartitionCount(9).
+					WithReplicaCount(1).
+					WithPeersPort(clusterPort).
+					WithMinimumPeersQuorum(1).
+					WithDiscoveryPort(discoveryPort).
+					WithWAL(t.TempDir()).
+					WithDiscovery(provider)),
+		)
+		require.NoError(t, err)
+
+		provider.EXPECT().ID().Return("testDisco")
+		provider.EXPECT().Initialize().Return(nil)
+		provider.EXPECT().Register().Return(nil)
+		provider.EXPECT().Deregister().Return(nil)
+		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
+		provider.EXPECT().Close().Return(nil)
+
+		// start the actor system
+		err = newActorSystem.Start(ctx)
+		require.NoError(t, err)
+
+		util.Pause(time.Second)
+
+		// create a test actor
+		actorName := "test"
+		actor := newMockActor()
+		actorRef, err := newActorSystem.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		remoting := NewRemoting()
+		// get the address of the actor
+		addr, err := remoting.RemoteLookup(ctx, newActorSystem.Host(), int(newActorSystem.Port()), actorName)
+		require.NoError(t, err)
+
+		// send a message to the actor after 100 ms
+		message := new(testpb.TestSend)
+		// set cron expression to run every second
+		const expr = "* * * ? * *"
+		err = newActorSystem.RemoteScheduleWithCron(ctx, message, addr, expr)
+		require.NoError(t, err)
+
+		// wait for two seconds
+		util.Pause(2 * time.Second)
+		assert.EqualValues(t, 2, actorRef.ProcessedCount()-1)
+
+		// stop the actor
+		err = newActorSystem.Stop(ctx)
+		assert.NoError(t, err)
+		provider.AssertExpectations(t)
 	})
 	t.Run("With RemoteScheduleWithCron with invalid cron expression", func(t *testing.T) {
 		// create the context
@@ -610,6 +915,84 @@ func TestScheduler(t *testing.T) {
 		// stop the actor
 		err = newActorSystem.Stop(ctx)
 		assert.NoError(t, err)
+	})
+	t.Run("With Schedule when cluster is enabled", func(t *testing.T) {
+		ctx := context.TODO()
+		nodePorts := dynaport.Get(3)
+		discoveryPort := nodePorts[0]
+		clusterPort := nodePorts[1]
+		remotingPort := nodePorts[2]
+
+		logger := log.DiscardLogger
+		host := "127.0.0.1"
+
+		// define discovered addresses
+		addrs := []string{
+			net.JoinHostPort(host, strconv.Itoa(discoveryPort)),
+		}
+
+		// mock the discovery provider
+		provider := new(testkit.Provider)
+		newActorSystem, err := NewActorSystem(
+			"test",
+			WithPassivationDisabled(),
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+			WithCluster(
+				NewClusterConfig().
+					WithKinds(new(mockActor)).
+					WithPartitionCount(9).
+					WithReplicaCount(1).
+					WithPeersPort(clusterPort).
+					WithMinimumPeersQuorum(1).
+					WithDiscoveryPort(discoveryPort).
+					WithWAL(t.TempDir()).
+					WithDiscovery(provider)),
+		)
+		require.NoError(t, err)
+
+		provider.EXPECT().ID().Return("testDisco")
+		provider.EXPECT().Initialize().Return(nil)
+		provider.EXPECT().Register().Return(nil)
+		provider.EXPECT().Deregister().Return(nil)
+		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
+		provider.EXPECT().Close().Return(nil)
+
+		// start the actor system
+		err = newActorSystem.Start(ctx)
+		require.NoError(t, err)
+
+		util.Pause(time.Second)
+
+		// create a test actor
+		actorName := "test"
+		actor := newMockActor()
+		actorRef, err := newActorSystem.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		util.Pause(time.Second)
+
+		// send a message to the actor after one second
+		message := new(testpb.TestSend)
+		err = newActorSystem.Schedule(ctx, message, actorRef, time.Second)
+		require.NoError(t, err)
+
+		util.Pause(time.Second)
+
+		typedSystem := newActorSystem.(*actorSystem)
+		keys, err := typedSystem.scheduler.quartzScheduler.GetJobKeys()
+		require.NoError(t, err)
+		require.NotEmpty(t, keys)
+		require.Len(t, keys, 1)
+
+		util.Pause(500 * time.Millisecond)
+		require.EqualValues(t, 1, actorRef.ProcessedCount()-1)
+
+		// stop the actor
+		err = newActorSystem.Stop(ctx)
+		assert.NoError(t, err)
+		provider.AssertExpectations(t)
 	})
 	t.Run("With Schedule when actor not started", func(t *testing.T) {
 		// create the context
@@ -946,5 +1329,88 @@ func TestScheduler(t *testing.T) {
 		require.Error(t, err)
 		assert.EqualError(t, err, ErrRemotingDisabled.Error())
 		scheduler.Stop(ctx)
+	})
+	t.Run("With RemoteSchedule when cluster is enabled", func(t *testing.T) {
+		ctx := context.TODO()
+		nodePorts := dynaport.Get(3)
+		discoveryPort := nodePorts[0]
+		clusterPort := nodePorts[1]
+		remotingPort := nodePorts[2]
+
+		logger := log.DiscardLogger
+		host := "127.0.0.1"
+
+		// define discovered addresses
+		addrs := []string{
+			net.JoinHostPort(host, strconv.Itoa(discoveryPort)),
+		}
+
+		// mock the discovery provider
+		provider := new(testkit.Provider)
+		newActorSystem, err := NewActorSystem(
+			"test",
+			WithPassivationDisabled(),
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+			WithCluster(
+				NewClusterConfig().
+					WithKinds(new(mockActor)).
+					WithPartitionCount(9).
+					WithReplicaCount(1).
+					WithPeersPort(clusterPort).
+					WithMinimumPeersQuorum(1).
+					WithDiscoveryPort(discoveryPort).
+					WithWAL(t.TempDir()).
+					WithDiscovery(provider)),
+		)
+		require.NoError(t, err)
+
+		provider.EXPECT().ID().Return("testDisco")
+		provider.EXPECT().Initialize().Return(nil)
+		provider.EXPECT().Register().Return(nil)
+		provider.EXPECT().Deregister().Return(nil)
+		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
+		provider.EXPECT().Close().Return(nil)
+
+		// start the actor system
+		err = newActorSystem.Start(ctx)
+		require.NoError(t, err)
+
+		util.Pause(time.Second)
+
+		// create a test actor
+		actorName := "test"
+		actor := newMockActor()
+		actorRef, err := newActorSystem.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		remoting := NewRemoting()
+		// get the address of the actor
+		addr, err := remoting.RemoteLookup(ctx, newActorSystem.Host(), int(newActorSystem.Port()), actorName)
+		require.NoError(t, err)
+
+		// send a message to the actor after 100 ms
+		message := new(testpb.TestSend)
+		err = newActorSystem.RemoteSchedule(ctx, message, addr, time.Second)
+		require.NoError(t, err)
+
+		util.Pause(time.Second)
+
+		typedSystem := newActorSystem.(*actorSystem)
+		keys, err := typedSystem.scheduler.quartzScheduler.GetJobKeys()
+		require.NoError(t, err)
+		require.NotEmpty(t, keys)
+		require.Len(t, keys, 1)
+
+		util.Pause(500 * time.Millisecond)
+		require.EqualValues(t, 1, actorRef.ProcessedCount()-1)
+		util.Pause(800 * time.Millisecond)
+		require.EqualValues(t, 2, actorRef.ProcessedCount()-1)
+
+		// stop the actor
+		err = newActorSystem.Stop(ctx)
+		assert.NoError(t, err)
+		provider.AssertExpectations(t)
 	})
 }

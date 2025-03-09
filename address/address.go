@@ -210,3 +210,44 @@ func (a *Address) Validate() error {
 		AddAssertion(a.Address != nil, "address is required").
 		Validate()
 }
+
+// Parse parses a given address string and returns an instance of Address
+// or an error if the address is not valid
+func Parse(addr string) (*Address, error) {
+	if addr == "" {
+		return nil, errors.New("address is required")
+	}
+	parts := strings.Split(addr, "://")
+	if len(parts) != 2 {
+		return nil, errors.New("address format is invalid")
+	}
+
+	if parts[0] != protocol {
+		return nil, errors.New("address protocol is not supported")
+	}
+
+	addr = parts[1]
+	addrParts := strings.Split(addr, "@")
+	if len(addrParts) != 2 {
+		return nil, errors.New("address format is invalid")
+	}
+	system := addrParts[0]
+	addr = addrParts[1]
+	hostPortParts := strings.Split(addr, "/")
+	if len(hostPortParts) != 2 {
+		return nil, errors.New("address format is invalid")
+	}
+	hostPort := hostPortParts[0]
+	name := hostPortParts[1]
+	hostPortParts = strings.Split(hostPort, ":")
+	if len(hostPortParts) != 2 {
+		return nil, errors.New("address format is invalid")
+	}
+	host := hostPortParts[0]
+	portStr := hostPortParts[1]
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		return nil, err
+	}
+	return New(name, system, host, port), nil
+}

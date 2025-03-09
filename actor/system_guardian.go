@@ -27,6 +27,7 @@ package actor
 import (
 	"context"
 
+	"github.com/tochemey/goakt/v3/address"
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/log"
@@ -88,7 +89,9 @@ func (x *systemGuardian) handlePostStart(ctx *ReceiveContext) {
 func (x *systemGuardian) handleTerminated(ctx context.Context, msg *goaktpb.Terminated) {
 	actorID := msg.GetActorId()
 	systemName := x.system.Name()
-	if isReservedName(actorID) {
+	addr, _ := address.Parse(actorID)
+	actorName := addr.Name()
+	if isReservedName(actorName) {
 		// log a message error and stop the actor system
 		x.logger.Warnf("%s is down. %s is going to shutdown. Kindly check logs and fix any potential issue with the cluster",
 			actorID,

@@ -260,13 +260,9 @@ func TestActorSystem(t *testing.T) {
 		util.Pause(time.Second)
 
 		remoting.Close()
-		t.Cleanup(
-			func() {
-				err = newActorSystem.Stop(ctx)
-				assert.NoError(t, err)
-				provider.AssertExpectations(t)
-			},
-		)
+		err = newActorSystem.Stop(ctx)
+		assert.NoError(t, err)
+		provider.AssertExpectations(t)
 	})
 	t.Run("With remoting enabled", func(t *testing.T) {
 		ctx := context.TODO()
