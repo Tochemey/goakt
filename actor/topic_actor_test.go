@@ -116,7 +116,7 @@ func TestTopicActor(t *testing.T) {
 		require.NoError(t, sd3.Close())
 		srv.Shutdown()
 	})
-	t.Run("With Publish", func(t *testing.T) {
+	t.Run("With happy path Publish", func(t *testing.T) {
 		// create a context
 		ctx := context.TODO()
 		// start the NATS server

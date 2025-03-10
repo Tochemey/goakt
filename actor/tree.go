@@ -167,12 +167,7 @@ func (x *tree) descendants(pid *PID) ([]*treeNode, bool) {
 func (x *tree) siblings(pid *PID) ([]*treeNode, bool) {
 	// get the direct parent of the given node
 	parentNode, ok := x.parentAt(pid, 0)
-	if !ok {
-		return nil, false
-	}
-
-	// defensive programming
-	if parentNode == nil {
+	if !ok || parentNode == nil {
 		return nil, false
 	}
 
