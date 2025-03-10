@@ -37,7 +37,7 @@ import (
 type deathWatch struct {
 	pid            *PID
 	logger         log.Logger
-	tree           *pidTree
+	tree           *tree
 	cluster        cluster.Interface
 	clusterEnabled bool
 }
@@ -87,12 +87,12 @@ func (x *deathWatch) handlePostStart(ctx *ReceiveContext) {
 func (x *deathWatch) handleTerminated(ctx context.Context, msg *goaktpb.Terminated) error {
 	actorID := msg.GetActorId()
 	x.logger.Infof("%s freeing resource [actor=%s] from system", x.pid.Name(), actorID)
-	if node, ok := x.tree.GetNode(actorID); ok {
-		x.tree.DeleteNode(node.GetValue())
+	if node, ok := x.tree.node(actorID); ok {
+		x.tree.deleteNode(node.value())
 		if x.clusterEnabled {
-			if err := x.cluster.RemoveActor(context.WithoutCancel(ctx), node.GetValue().Name()); err != nil {
+			if err := x.cluster.RemoveActor(context.WithoutCancel(ctx), node.value().Name()); err != nil {
 				x.logger.Errorf("%s failed to remove [actor=%s] from cluster: %v", x.pid.Name(), actorID, err)
-				return err
+				return NewInternalError(err)
 			}
 		}
 		x.logger.Infof("%s successfully free resource [actor=%s] from system", x.pid.Name(), actorID)

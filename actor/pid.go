@@ -290,8 +290,8 @@ func (pid *PID) Child(name string) (*PID, error) {
 	}
 
 	childAddress := pid.childAddress(name)
-	if cidNode, ok := pid.system.tree().GetNode(childAddress.String()); ok {
-		cid := cidNode.GetValue()
+	if cidNode, ok := pid.system.tree().node(childAddress.String()); ok {
+		cid := cidNode.value()
 		if cid.IsRunning() {
 			return cid, nil
 		}
@@ -302,11 +302,11 @@ func (pid *PID) Child(name string) (*PID, error) {
 // Parent returns the parent of this PID
 func (pid *PID) Parent() *PID {
 	tree := pid.ActorSystem().tree()
-	parentNode, ok := tree.ParentAt(pid, 0)
+	parentNode, ok := tree.parentAt(pid, 0)
 	if !ok {
 		return nil
 	}
-	return parentNode.GetValue()
+	return parentNode.value()
 }
 
 // Children returns the list of all the direct descendants of the given actor
@@ -314,7 +314,7 @@ func (pid *PID) Parent() *PID {
 func (pid *PID) Children() []*PID {
 	pid.fieldsLocker.RLock()
 	tree := pid.ActorSystem().tree()
-	pnode, ok := tree.GetNode(pid.ID())
+	pnode, ok := tree.node(pid.ID())
 	if !ok {
 		pid.fieldsLocker.RUnlock()
 		return nil
@@ -323,7 +323,7 @@ func (pid *PID) Children() []*PID {
 	descendants := pnode.Descendants.Items()
 	cids := make([]*PID, 0, len(descendants))
 	for _, cnode := range descendants {
-		cid := cnode.GetValue()
+		cid := cnode.value()
 		if cid.IsRunning() {
 			cids = append(cids, cid)
 		}
@@ -350,14 +350,14 @@ func (pid *PID) Stop(ctx context.Context, cid *PID) error {
 
 	pid.fieldsLocker.RLock()
 	tree := pid.system.tree()
-	if _, ok := tree.GetNode(cid.Address().String()); ok {
+	if _, ok := tree.node(cid.Address().String()); ok {
 		if err := cid.Shutdown(ctx); err != nil {
 			pid.fieldsLocker.RUnlock()
 			return err
 		}
 
 		// remove the node from the tree
-		tree.DeleteNode(cid)
+		tree.deleteNode(cid)
 		pid.fieldsLocker.RUnlock()
 		return nil
 	}
@@ -438,8 +438,8 @@ func (pid *PID) Restart(ctx context.Context) error {
 	children := pid.Children()
 	// get the parent node of the actor
 	parent := NoSender
-	if pnode, ok := tree.ParentAt(pid, 0); ok {
-		parent = pnode.GetValue()
+	if pnode, ok := tree.parentAt(pid, 0); ok {
+		parent = pnode.value()
 	}
 
 	if pid.IsRunning() {
@@ -471,8 +471,8 @@ func (pid *PID) Restart(ctx context.Context) error {
 		// no need to handle the error here because the only time this method
 		// returns an error if when the parent does not exist which was taken care of in the
 		// lines above
-		_ = tree.AddNode(parent, pid)
-		tree.AddWatcher(pid, janitor)
+		_ = tree.addNode(parent, pid)
+		tree.addWatcher(pid, janitor)
 	}
 
 	// restart all the previous children
@@ -487,8 +487,8 @@ func (pid *PID) Restart(ctx context.Context) error {
 			if !child.IsSuspended() {
 				// re-add the child back to the tree
 				// since these calls are idempotent
-				_ = tree.AddNode(pid, child)
-				tree.AddWatcher(child, janitor)
+				_ = tree.addNode(pid, child)
+				tree.addWatcher(child, janitor)
 			}
 			return nil
 		})
@@ -557,8 +557,8 @@ func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor, opts .
 
 	childAddress := pid.childAddress(name)
 	tree := pid.system.tree()
-	if cnode, ok := tree.GetNode(childAddress.String()); ok {
-		cid := cnode.GetValue()
+	if cnode, ok := tree.node(childAddress.String()); ok {
+		cid := cnode.value()
 		if cid.IsRunning() {
 			return cid, nil
 		}
@@ -621,8 +621,8 @@ func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor, opts .
 
 	// no need to handle the error because the given parent exist and running
 	// that check was done in the above lines
-	_ = tree.AddNode(pid, cid)
-	tree.AddWatcher(cid, pid.ActorSystem().getDeathWatch())
+	_ = tree.addNode(pid, cid)
+	tree.addWatcher(cid, pid.ActorSystem().getDeathWatch())
 
 	eventsStream := pid.eventsStream
 	if eventsStream != nil {
@@ -1164,31 +1164,31 @@ func (pid *PID) Shutdown(ctx context.Context) error {
 
 // Watch watches a given actor for a Terminated message when the watched actor shutdown
 func (pid *PID) Watch(cid *PID) {
-	pid.ActorSystem().tree().AddWatcher(pid, cid)
+	pid.ActorSystem().tree().addWatcher(pid, cid)
 }
 
 // UnWatch stops watching a given actor
 func (pid *PID) UnWatch(cid *PID) {
 	tree := pid.ActorSystem().tree()
-	pnode, ok := tree.GetNode(pid.ID())
+	pnode, ok := tree.node(pid.ID())
 	if !ok {
 		return
 	}
 
-	cnode, ok := tree.GetNode(cid.ID())
+	cnode, ok := tree.node(cid.ID())
 	if !ok {
 		return
 	}
 
 	for index, watchee := range pnode.Watchees.Items() {
-		if watchee.GetValue().Equals(cid) {
+		if watchee.value().Equals(cid) {
 			pnode.Watchees.Delete(index)
 			break
 		}
 	}
 
 	for index, watcher := range cnode.Watchers.Items() {
-		if watcher.GetValue().Equals(pid) {
+		if watcher.value().Equals(pid) {
 			cnode.Watchers.Delete(index)
 			break
 		}
@@ -1364,7 +1364,7 @@ func (pid *PID) reset() {
 func (pid *PID) freeWatchers(ctx context.Context) error {
 	logger := pid.logger
 	logger.Debugf("%s freeing all watcher actors...", pid.Name())
-	pnode, ok := pid.ActorSystem().tree().GetNode(pid.ID())
+	pnode, ok := pid.ActorSystem().tree().node(pid.ID())
 	if !ok {
 		pid.logger.Debugf("%s node not found in the actors tree", pid.Name())
 		return nil
@@ -1380,7 +1380,7 @@ func (pid *PID) freeWatchers(ctx context.Context) error {
 					ActorId: pid.ID(),
 				}
 
-				wid := watcher.GetValue()
+				wid := watcher.value()
 				if wid.IsRunning() {
 					logger.Debugf("watcher=(%s) releasing watched=(%s)", wid.Name(), pid.Name())
 					// ignore error here because the watcher is running
@@ -1406,7 +1406,7 @@ func (pid *PID) freeWatchers(ctx context.Context) error {
 func (pid *PID) freeWatchees() error {
 	logger := pid.logger
 	logger.Debugf("%s freeing all watched actors...", pid.Name())
-	pnode, ok := pid.ActorSystem().tree().GetNode(pid.ID())
+	pnode, ok := pid.ActorSystem().tree().node(pid.ID())
 	if !ok {
 		pid.logger.Debugf("%s node not found in the actors tree", pid.Name())
 		return nil
@@ -1417,7 +1417,7 @@ func (pid *PID) freeWatchees() error {
 		eg := new(errgroup.Group)
 		for _, watched := range pnode.Watchees.Items() {
 			watched := watched
-			wid := watched.GetValue()
+			wid := watched.value()
 			eg.Go(func() error {
 				logger.Debugf("watcher=(%s) unwatching actor=(%s)", pid.Name(), wid.Name())
 				pid.UnWatch(wid)
@@ -1442,17 +1442,17 @@ func (pid *PID) freeChildren(ctx context.Context) error {
 	logger.Debugf("%s freeing all descendant actors...", pid.Name())
 
 	tree := pid.ActorSystem().tree()
-	pnode, ok := tree.GetNode(pid.ID())
+	pnode, ok := tree.node(pid.ID())
 	if !ok {
 		pid.logger.Debugf("%s node not found in the actors tree", pid.Name())
 		return nil
 	}
 
-	if descendants, ok := tree.Descendants(pid); ok && len(descendants) > 0 {
+	if descendants, ok := tree.descendants(pid); ok && len(descendants) > 0 {
 		eg, ctx := errgroup.WithContext(ctx)
 		for index, descendant := range descendants {
 			descendant := descendant
-			child := descendant.GetValue()
+			child := descendant.value()
 			index := index
 			eg.Go(func() error {
 				logger.Debugf("parent=(%s) disowning descendant=(%s)", pid.Name(), child.Name())
@@ -1586,8 +1586,8 @@ func (pid *PID) doStop(ctx context.Context) error {
 
 	if err := errorschain.
 		New(errorschain.ReturnFirst()).
-		AddError(pid.freeWatchees()).
-		AddError(pid.freeChildren(ctx)).
+		AddErrorFn(func() error { return pid.freeWatchees() }).
+		AddErrorFn(func() error { return pid.freeChildren(ctx) }).
 		Error(); err != nil {
 		pid.started.Store(false)
 		pid.reset()
@@ -1598,8 +1598,9 @@ func (pid *PID) doStop(ctx context.Context) error {
 	// you are terminated
 	if err := errorschain.
 		New(errorschain.ReturnFirst()).
-		AddError(pid.actor.PostStop(ctx)).
-		AddError(pid.freeWatchers(ctx)).Error(); err != nil {
+		AddErrorFn(func() error { return pid.actor.PostStop(ctx) }).
+		AddErrorFn(func() error { return pid.freeWatchers(ctx) }).
+		Error(); err != nil {
 		pid.started.Store(false)
 		pid.reset()
 		return err
@@ -1681,6 +1682,13 @@ func (pid *PID) notifyParent(err error) {
 	}
 
 	if parent := pid.Parent(); parent != nil && !parent.Equals(NoSender) {
+		pid.logger.Warnf("%s child actor=(%s) is failing: Err=%s", pid.Name(), parent.Name(), msg.GetMessage())
+		pid.logger.Infof("%s activates [strategy=%s, directive=%s] for failing child actor=(%s)",
+			parent.Name(),
+			pid.supervisor.Strategy(),
+			directive,
+			pid.Name())
+
 		_ = pid.Tell(context.Background(), parent, msg)
 	}
 }
@@ -1766,11 +1774,8 @@ func (pid *PID) handleCompletion(ctx context.Context, completion *taskCompletion
 // handleFaultyChild watches for child actor's failure and act based upon the supervisory strategy
 func (pid *PID) handleFaultyChild(cid *PID, msg *internalpb.HandleFault) {
 	if cid.ID() == msg.GetActorId() {
-		message := msg.GetMessage()
 		directive := msg.GetDirective()
 		includeSiblings := msg.GetStrategy() == internalpb.Strategy_STRATEGY_ONE_FOR_ALL
-
-		pid.logger.Errorf("child actor=(%s) is failing: Err=%s", cid.Name(), message)
 
 		switch d := directive.(type) {
 		case *internalpb.HandleFault_Stop:
@@ -1796,9 +1801,9 @@ func (pid *PID) handleStopDirective(cid *PID, includeSiblings bool) {
 	pids := []*PID{cid}
 
 	if includeSiblings {
-		if siblings, ok := tree.Siblings(cid); ok {
+		if siblings, ok := tree.siblings(cid); ok {
 			for _, sibling := range siblings {
-				pids = append(pids, sibling.GetValue())
+				pids = append(pids, sibling.value())
 			}
 		}
 	}
@@ -1807,23 +1812,19 @@ func (pid *PID) handleStopDirective(cid *PID, includeSiblings bool) {
 	for _, spid := range pids {
 		spid := spid
 		eg.Go(func() error {
-			pid.UnWatch(spid)
+			// TODO: revisit this
+			//pid.UnWatch(spid)
 			if err := spid.Shutdown(ctx); err != nil {
-				// just log the error and suspend the given sibling
 				pid.logger.Error(fmt.Errorf("failed to shutdown actor=(%s): %w", spid.Name(), err))
 				// we need to suspend the actor since its shutdown is the result of
 				// one of its faulty siblings
 				spid.suspend(err.Error())
-				// no need to return an error
 				return nil
 			}
-			// remove the sibling tree node
-			tree.DeleteNode(spid)
+			tree.deleteNode(spid)
 			return nil
 		})
 	}
-
-	// no error to handle
 	_ = eg.Wait()
 }
 
@@ -1834,9 +1835,9 @@ func (pid *PID) handleRestartDirective(cid *PID, maxRetries uint32, timeout time
 	pids := []*PID{cid}
 
 	if includeSiblings {
-		if siblings, ok := tree.Siblings(cid); ok {
+		if siblings, ok := tree.siblings(cid); ok {
 			for _, sibling := range siblings {
-				pids = append(pids, sibling.GetValue())
+				pids = append(pids, sibling.value())
 			}
 		}
 	}

@@ -104,7 +104,7 @@ func (x *actorSystem) spawnSingletonManager(ctx context.Context) error {
 	)
 
 	// the singletonManager is a child actor of the system guardian
-	_ = x.actors.AddNode(x.systemGuardian, x.singletonManager)
+	_ = x.actors.addNode(x.systemGuardian, x.singletonManager)
 	return nil
 }
 

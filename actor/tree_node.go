@@ -30,34 +30,34 @@ import (
 	"github.com/tochemey/goakt/v3/internal/collection/slice"
 )
 
-// pidValue represents the data stored in each
+// value represents the data stored in each
 // node of the actors Tree
-type pidValue struct {
-	data *PID
+type value struct {
+	_data *PID
 }
 
-// Value returns the actual pidValue value
-func (v *pidValue) Value() *PID {
-	return v.data
+// data returns the actual value value
+func (v *value) data() *PID {
+	return v._data
 }
 
-// pidNode represents a single actor node
+// treeNode represents a single actor node
 // in the actors Tree
-type pidNode struct {
+type treeNode struct {
 	ID          string
-	value       atomic.Pointer[pidValue]
-	Descendants *slice.Slice[*pidNode]
-	Watchers    *slice.Slice[*pidNode]
-	Watchees    *slice.Slice[*pidNode]
+	_value      atomic.Pointer[value]
+	Descendants *slice.Slice[*treeNode]
+	Watchers    *slice.Slice[*treeNode]
+	Watchees    *slice.Slice[*treeNode]
 }
 
-// SetValue sets a node value
-func (x *pidNode) SetValue(v *pidValue) {
-	x.value.Store(v)
+// setValue sets a node value
+func (x *treeNode) setValue(v *value) {
+	x._value.Store(v)
 }
 
-// GetValue returns the underlying value of the node
-func (x *pidNode) GetValue() *PID {
-	v := x.value.Load()
-	return v.Value()
+// value returns the underlying value of the node
+func (x *treeNode) value() *PID {
+	v := x._value.Load()
+	return v.data()
 }

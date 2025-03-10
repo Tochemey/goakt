@@ -59,6 +59,18 @@ const (
 	OneForAllStrategy
 )
 
+// String returns the string representation of the strategy
+func (s Strategy) String() string {
+	switch s {
+	case OneForOneStrategy:
+		return "OneForOne"
+	case OneForAllStrategy:
+		return "OneForAll"
+	default:
+		return ""
+	}
+}
+
 // Directive defines the supervisor directive
 //
 // It represents the action that a supervisor can take when a child actor fails or panics
@@ -84,6 +96,20 @@ const (
 	// the actor's internal state.
 	RestartDirective
 )
+
+// String returns the string representation of the directive
+func (d Directive) String() string {
+	switch d {
+	case StopDirective:
+		return "Stop"
+	case ResumeDirective:
+		return "Resume"
+	case RestartDirective:
+		return "Restart"
+	default:
+		return ""
+	}
+}
 
 // SupervisorOption defines the various options to apply to a given Supervisor
 type SupervisorOption func(*Supervisor)

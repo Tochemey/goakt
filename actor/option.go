@@ -182,7 +182,7 @@ func WithCoordinatedShutdown(hooks ...ShutdownHook) Option {
 // root Certificate Authority (CA) to enable successful handshake and
 // mutual authentication.
 //
-// In cluster mode, all nodes must share the same root CA to establish
+// In cluster mode, all nodesMap must share the same root CA to establish
 // secure communication and complete handshakes successfully.
 func WithTLS(tlsInfo *TLSInfo) Option {
 	return OptionFunc(func(system *actorSystem) {

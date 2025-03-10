@@ -52,7 +52,7 @@ type key struct {
 }
 
 // topicActor is a system actor that manages a registry of actors that subscribe to topics.
-// This actor must be started when cluster mode is enabled in all nodes before any actor subscribes
+// This actor must be started when cluster mode is enabled in all nodesMap before any actor subscribes
 type topicActor struct {
 	pid *PID
 	// topics holds the list of all topics and their subscribers
@@ -181,7 +181,7 @@ func (x *topicActor) sendToLocalSubscribers(cctx context.Context, topic string, 
 		for _, subscriber := range subscribers.Values() {
 			subscriber := subscriber
 			// make sure subscriber does exist
-			_, ok := x.actorSystem.tree().GetNode(subscriber.ID())
+			_, ok := x.actorSystem.tree().node(subscriber.ID())
 			if ok && subscriber.IsRunning() {
 				wg.Add(1)
 				go func(subscriber *PID) {
@@ -302,7 +302,7 @@ func (x *topicActor) handleDisseminate(ctx *ReceiveContext) {
 			for _, subscriber := range subscribers.Values() {
 				subscriber := subscriber
 				// make sure subcriber does exist
-				_, ok := x.actorSystem.tree().GetNode(subscriber.ID())
+				_, ok := x.actorSystem.tree().node(subscriber.ID())
 				if ok && subscriber.IsRunning() {
 					wg.Add(1)
 					go func(subscriber *PID) {
@@ -342,6 +342,6 @@ func (x *actorSystem) spawnTopicActor(ctx context.Context) error {
 	)
 
 	// the topic actor is a child actor of the system guardian
-	_ = x.actors.AddNode(x.systemGuardian, x.topicActor)
+	_ = x.actors.addNode(x.systemGuardian, x.topicActor)
 	return nil
 }

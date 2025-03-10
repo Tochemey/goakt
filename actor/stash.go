@@ -57,14 +57,10 @@ func (pid *PID) unstashAll() error {
 
 	pid.stashLocker.Lock()
 	for !pid.stashBox.IsEmpty() {
-		received := pid.stashBox.Dequeue()
-		if received == nil {
-			pid.stashLocker.Unlock()
-			return errors.New("stash buffer may be closed")
+		if received := pid.stashBox.Dequeue(); received != nil {
+			pid.doReceive(received)
 		}
-		pid.doReceive(received)
 	}
-
 	pid.stashLocker.Unlock()
 	return nil
 }

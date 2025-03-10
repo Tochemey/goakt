@@ -121,7 +121,7 @@ func WithLongLived() SpawnOption {
 
 // WithRelocationDisabled prevents the actor from being relocated to another node when cluster mode is active
 // and its host node shuts down unexpectedly. By default, actors are relocatable to support system resilience
-// and maintain high availability by automatically redeploying them on healthy nodes.
+// and maintain high availability by automatically redeploying them on healthy nodesMap.
 //
 // Use this option when you need strict control over an actor's lifecycle and want to ensure that the actor
 // is not redeployed after a node failure, such as for actors with node-specific state or dependencies that
