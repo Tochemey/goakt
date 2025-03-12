@@ -22,164 +22,151 @@
  * SOFTWARE.
  */
 
-// Package future
-// Most of the code here has been copied from (https://github.com/Workiva/go-datastructures) with a slight modification
 package future
 
 import (
 	"context"
-	"fmt"
 	"sync"
-	"time"
 
 	"google.golang.org/protobuf/proto"
 )
 
-// ErrTimeout is returned when the future has timed out
-var ErrTimeout = func(duration time.Duration) error { return fmt.Errorf(`timeout after %f seconds`, duration.Seconds()) }
+// Future represents a value which may or may not currently be available,
+// but will be available at some point, or an error if that value could
+// not be made available.
+type Future interface {
+	// Await blocks until the Future is completed or context is canceled and
+	// returns either a result or an error.
+	Await(context.Context) (proto.Message, error)
 
-// Task represents a long-running asynchronous operation that produces a single result.
-//
-// It is defined as a receive-only channel of proto.Message, ensuring that
-// consumers can only read from it. Once the task completes, it sends exactly
-// one result, which represents the successful outcome of the operation.
-//
-// This allows for efficient, non-blocking handling of asynchronous tasks
-// while ensuring that only one result is ever produced.
-type Task <-chan proto.Message
-
-// Future represents a single-assignment, read-many synchronization primitive
-// for handling asynchronous task execution.
-//
-// A Future is created in an incomplete state and is completed once with a result.
-// Multiple listeners can wait on the Future by calling Result, which blocks
-// until the Future is resolved.
-//
-// Unlike channels, a Future guarantees that:
-//   - It is completed only once.
-//   - All listeners receive the same result, regardless of when they start listening.
-//
-// This makes Future useful for scenarios where a single computation result
-// needs to be propagated to multiple consumers efficiently.
-type Future struct {
-	triggered bool // because result can technically be nil and still be valid
-	result    *Result
-	lock      sync.Mutex
-	wg        sync.WaitGroup
+	// complete completes the Future with either a value or an error.
+	// It is used by [completable] internally.
+	complete(proto.Message, error)
 }
 
-// New creates a Future to execute the given Task asynchronously with a specified timeout.
-//
-// The provided Task will be executed in the background, and the resulting Future
-// can be used to retrieve the task's outcome. If the task does not complete
-// within the specified timeout, the Future will be completed with an error.
-//
-// Parameters:
-//   - task: The Task to be executed asynchronously.
-//   - timeout: The maximum duration to wait for task completion before timing out.
-//
-// Returns:
-//   - A pointer to a Future that can be used to retrieve the result of the task.
-//
-// This function ensures that listeners on the returned Future will receive
-// the task's result once available, or an error if the execution exceeds the timeout.
-func New(task Task, timeout time.Duration) *Future {
-	f := new(Future)
-	f.wg.Add(1)
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go waitTimeout(f, task, timeout, &wg)
-	wg.Wait()
-	return f
+// New returns a new Task associated with the specified function.
+// It starts executing the task using a goroutine. It returns a
+// Future which can be used to retrieve the result or error of the
+// task when it is completed.
+func New(fn func() (proto.Message, error)) Future {
+	comp := newCompletable()
+	go func() {
+		result, err := fn()
+		switch {
+		case err == nil:
+			comp.Success(result)
+		default:
+			comp.Failure(err)
+		}
+	}()
+	return comp.Future()
 }
 
-// WithContext creates a Future that executes the given Task asynchronously,
-// respecting the provided context for cancellation.
-//
-// If the context is canceled before the Task completes, the Future will be
-// completed with an error. Otherwise, the Future will store the Task's result
-// once it becomes available.
-//
-// Parameters:
-//   - ctx: The context that controls the lifetime of the Future. If canceled, the Future fails.
-//   - task: The Task to be executed asynchronously.
-//
-// Returns:
-//   - A pointer to a Future that can be used to retrieve the result of the task.
-//
-// This function ensures that listeners on the returned Future will either receive
-// the Task's result or an error if the context is canceled before completion.
-func WithContext(ctx context.Context, task Task) *Future {
-	f := new(Future)
-	f.wg.Add(1)
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go wait(ctx, f, task, &wg)
-	wg.Wait()
-	return f
+// future implements the Future interface.
+type future struct {
+	acceptOnce   sync.Once
+	completeOnce sync.Once
+	done         chan any
+	value        proto.Message
+	err          error
 }
 
-// Result represents the outcome of a completed Future.
-//
-// It encapsulates both the success and failure states, ensuring that
-// a Future can communicate either a valid result or an error.
-//
-// If the task succeeds, Success returns the result, and Failure returns nil.
-// If the task fails, Failure returns the error, and Success returns nil.
-func (f *Future) Result() *Result {
-	f.lock.Lock()
-	if f.triggered {
-		f.lock.Unlock()
-		return f.result
-	}
-	f.lock.Unlock()
+// Verify future satisfies the Future interface.
+var _ Future = (*future)(nil)
 
-	f.wg.Wait()
-	return f.result
-}
-
-// HasResult will return true iff the result exists
-func (f *Future) HasResult() bool {
-	f.lock.Lock()
-	hasResult := f.triggered
-	f.lock.Unlock()
-	return hasResult
-}
-
-// setResult sets the completed future result
-func (f *Future) setResult(success proto.Message, err error) {
-	f.lock.Lock()
-	f.triggered = true
-	f.result = &Result{
-		success: success,
-		failure: err,
-	}
-	f.lock.Unlock()
-	f.wg.Done()
-}
-
-// waitTimeout waits for the result or times out
-func waitTimeout(f *Future, ch Task, timeout time.Duration, wg *sync.WaitGroup) {
-	wg.Done()
-	t := time.NewTimer(timeout)
-	select {
-	case success := <-ch:
-		f.setResult(success, nil)
-		t.Stop()
-	case <-t.C:
-		var _nil proto.Message
-		f.setResult(_nil, ErrTimeout(timeout))
+// newFuture returns a new Future.
+func newFuture() Future {
+	return &future{
+		done: make(chan any, 1),
 	}
 }
 
-// wait waits for the result until the provided context is canceled
-func wait(ctx context.Context, f *Future, ch Task, wg *sync.WaitGroup) {
-	wg.Done()
-	select {
-	case success := <-ch:
-		f.setResult(success, nil)
-	case <-ctx.Done():
-		var _nil proto.Message
-		f.setResult(_nil, ctx.Err())
+// wait blocks once, until the Future result is available or until
+// the context is canceled.
+func (x *future) wait(ctx context.Context) {
+	x.acceptOnce.Do(func() {
+		select {
+		case result := <-x.done:
+			x.setResult(result)
+		case <-ctx.Done():
+			x.setResult(ctx.Err())
+		}
+	})
+}
+
+// setResult assigns a value to the Future instance.
+func (x *future) setResult(result any) {
+	switch value := result.(type) {
+	case error:
+		x.err = value
+	default:
+		x.value = value.(proto.Message)
 	}
+}
+
+// Await blocks until the Future is completed or context is canceled and
+// returns either a result or an error.
+func (x *future) Await(ctx context.Context) (proto.Message, error) {
+	x.wait(ctx)
+	return x.value, x.err
+}
+
+// complete completes the Future with either a value or an error.
+func (x *future) complete(value proto.Message, err error) {
+	x.completeOnce.Do(func() {
+		if err != nil {
+			x.done <- err
+		} else {
+			x.done <- value
+		}
+	})
+}
+
+// completable represents a writable, single-assignment container,
+// which completes a Future.
+type completable interface {
+	// Success completes the underlying Future with a value.
+	Success(proto.Message)
+
+	// Failure fails the underlying Future with an error.
+	Failure(error)
+
+	// Future returns the underlying Future.
+	Future() Future
+}
+
+// completer implements the completable interface.
+type completer struct {
+	once   sync.Once
+	future Future
+}
+
+// Verify completer satisfies the completable interface.
+var _ completable = (*completer)(nil)
+
+// newCompletable returns a new completable.
+func newCompletable() completable {
+	return &completer{
+		future: newFuture(),
+	}
+}
+
+// Success completes the underlying Future with a given value.
+func (p *completer) Success(value proto.Message) {
+	p.once.Do(func() {
+		p.future.complete(value, nil)
+	})
+}
+
+// Failure fails the underlying Future with a given error.
+func (p *completer) Failure(err error) {
+	p.once.Do(func() {
+		var zero proto.Message
+		p.future.complete(zero, err)
+	})
+}
+
+// Future returns the underlying Future.
+func (p *completer) Future() Future {
+	return p.future
 }

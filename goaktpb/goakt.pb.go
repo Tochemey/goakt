@@ -1081,6 +1081,43 @@ func (x *Publish) GetMessage() *anypb.Any {
 	return nil
 }
 
+// NoMessage is used to indicate that no message was sent
+type NoMessage struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *NoMessage) Reset() {
+	*x = NoMessage{}
+	mi := &file_goakt_goakt_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *NoMessage) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NoMessage) ProtoMessage() {}
+
+func (x *NoMessage) ProtoReflect() protoreflect.Message {
+	mi := &file_goakt_goakt_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NoMessage.ProtoReflect.Descriptor instead.
+func (*NoMessage) Descriptor() ([]byte, []int) {
+	return file_goakt_goakt_proto_rawDescGZIP(), []int{19}
+}
+
 var File_goakt_goakt_proto protoreflect.FileDescriptor
 
 var file_goakt_goakt_proto_rawDesc = string([]byte{
@@ -1199,16 +1236,17 @@ var file_goakt_goakt_proto_rawDesc = string([]byte{
 	0x02, 0x20, 0x01, 0x28, 0x09, 0x52, 0x05, 0x74, 0x6f, 0x70, 0x69, 0x63, 0x12, 0x2e, 0x0a, 0x07,
 	0x6d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x18, 0x03, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x14, 0x2e,
 	0x67, 0x6f, 0x6f, 0x67, 0x6c, 0x65, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x62, 0x75, 0x66, 0x2e,
-	0x41, 0x6e, 0x79, 0x52, 0x07, 0x6d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x42, 0x85, 0x01, 0x0a,
-	0x0b, 0x63, 0x6f, 0x6d, 0x2e, 0x67, 0x6f, 0x61, 0x6b, 0x74, 0x70, 0x62, 0x42, 0x0a, 0x47, 0x6f,
-	0x61, 0x6b, 0x74, 0x50, 0x72, 0x6f, 0x74, 0x6f, 0x48, 0x02, 0x50, 0x01, 0x5a, 0x2c, 0x67, 0x69,
-	0x74, 0x68, 0x75, 0x62, 0x2e, 0x63, 0x6f, 0x6d, 0x2f, 0x74, 0x6f, 0x63, 0x68, 0x65, 0x6d, 0x65,
-	0x79, 0x2f, 0x67, 0x6f, 0x61, 0x6b, 0x74, 0x2f, 0x76, 0x33, 0x2f, 0x67, 0x6f, 0x61, 0x6b, 0x74,
-	0x70, 0x62, 0x3b, 0x67, 0x6f, 0x61, 0x6b, 0x74, 0x70, 0x62, 0xa2, 0x02, 0x03, 0x47, 0x58, 0x58,
-	0xaa, 0x02, 0x07, 0x47, 0x6f, 0x61, 0x6b, 0x74, 0x70, 0x62, 0xca, 0x02, 0x07, 0x47, 0x6f, 0x61,
-	0x6b, 0x74, 0x70, 0x62, 0xe2, 0x02, 0x13, 0x47, 0x6f, 0x61, 0x6b, 0x74, 0x70, 0x62, 0x5c, 0x47,
-	0x50, 0x42, 0x4d, 0x65, 0x74, 0x61, 0x64, 0x61, 0x74, 0x61, 0xea, 0x02, 0x07, 0x47, 0x6f, 0x61,
-	0x6b, 0x74, 0x70, 0x62, 0x62, 0x06, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x33,
+	0x41, 0x6e, 0x79, 0x52, 0x07, 0x6d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x22, 0x0b, 0x0a, 0x09,
+	0x4e, 0x6f, 0x4d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x42, 0x85, 0x01, 0x0a, 0x0b, 0x63, 0x6f,
+	0x6d, 0x2e, 0x67, 0x6f, 0x61, 0x6b, 0x74, 0x70, 0x62, 0x42, 0x0a, 0x47, 0x6f, 0x61, 0x6b, 0x74,
+	0x50, 0x72, 0x6f, 0x74, 0x6f, 0x48, 0x02, 0x50, 0x01, 0x5a, 0x2c, 0x67, 0x69, 0x74, 0x68, 0x75,
+	0x62, 0x2e, 0x63, 0x6f, 0x6d, 0x2f, 0x74, 0x6f, 0x63, 0x68, 0x65, 0x6d, 0x65, 0x79, 0x2f, 0x67,
+	0x6f, 0x61, 0x6b, 0x74, 0x2f, 0x76, 0x33, 0x2f, 0x67, 0x6f, 0x61, 0x6b, 0x74, 0x70, 0x62, 0x3b,
+	0x67, 0x6f, 0x61, 0x6b, 0x74, 0x70, 0x62, 0xa2, 0x02, 0x03, 0x47, 0x58, 0x58, 0xaa, 0x02, 0x07,
+	0x47, 0x6f, 0x61, 0x6b, 0x74, 0x70, 0x62, 0xca, 0x02, 0x07, 0x47, 0x6f, 0x61, 0x6b, 0x74, 0x70,
+	0x62, 0xe2, 0x02, 0x13, 0x47, 0x6f, 0x61, 0x6b, 0x74, 0x70, 0x62, 0x5c, 0x47, 0x50, 0x42, 0x4d,
+	0x65, 0x74, 0x61, 0x64, 0x61, 0x74, 0x61, 0xea, 0x02, 0x07, 0x47, 0x6f, 0x61, 0x6b, 0x74, 0x70,
+	0x62, 0x62, 0x06, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x33,
 })
 
 var (
@@ -1223,7 +1261,7 @@ func file_goakt_goakt_proto_rawDescGZIP() []byte {
 	return file_goakt_goakt_proto_rawDescData
 }
 
-var file_goakt_goakt_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
+var file_goakt_goakt_proto_msgTypes = make([]protoimpl.MessageInfo, 20)
 var file_goakt_goakt_proto_goTypes = []any{
 	(*Address)(nil),               // 0: goaktpb.Address
 	(*Deadletter)(nil),            // 1: goaktpb.Deadletter
@@ -1244,32 +1282,33 @@ var file_goakt_goakt_proto_goTypes = []any{
 	(*SubscribeAck)(nil),          // 16: goaktpb.SubscribeAck
 	(*UnsubscribeAck)(nil),        // 17: goaktpb.UnsubscribeAck
 	(*Publish)(nil),               // 18: goaktpb.Publish
-	(*anypb.Any)(nil),             // 19: google.protobuf.Any
-	(*timestamppb.Timestamp)(nil), // 20: google.protobuf.Timestamp
+	(*NoMessage)(nil),             // 19: goaktpb.NoMessage
+	(*anypb.Any)(nil),             // 20: google.protobuf.Any
+	(*timestamppb.Timestamp)(nil), // 21: google.protobuf.Timestamp
 }
 var file_goakt_goakt_proto_depIdxs = []int32{
 	0,  // 0: goaktpb.Address.parent:type_name -> goaktpb.Address
 	0,  // 1: goaktpb.Deadletter.sender:type_name -> goaktpb.Address
 	0,  // 2: goaktpb.Deadletter.receiver:type_name -> goaktpb.Address
-	19, // 3: goaktpb.Deadletter.message:type_name -> google.protobuf.Any
-	20, // 4: goaktpb.Deadletter.send_time:type_name -> google.protobuf.Timestamp
+	20, // 3: goaktpb.Deadletter.message:type_name -> google.protobuf.Any
+	21, // 4: goaktpb.Deadletter.send_time:type_name -> google.protobuf.Timestamp
 	0,  // 5: goaktpb.ActorStarted.address:type_name -> goaktpb.Address
-	20, // 6: goaktpb.ActorStarted.started_at:type_name -> google.protobuf.Timestamp
+	21, // 6: goaktpb.ActorStarted.started_at:type_name -> google.protobuf.Timestamp
 	0,  // 7: goaktpb.ActorStopped.address:type_name -> goaktpb.Address
-	20, // 8: goaktpb.ActorStopped.stopped_at:type_name -> google.protobuf.Timestamp
+	21, // 8: goaktpb.ActorStopped.stopped_at:type_name -> google.protobuf.Timestamp
 	0,  // 9: goaktpb.ActorPassivated.address:type_name -> goaktpb.Address
-	20, // 10: goaktpb.ActorPassivated.passivated_at:type_name -> google.protobuf.Timestamp
+	21, // 10: goaktpb.ActorPassivated.passivated_at:type_name -> google.protobuf.Timestamp
 	0,  // 11: goaktpb.ActorChildCreated.address:type_name -> goaktpb.Address
 	0,  // 12: goaktpb.ActorChildCreated.parent:type_name -> goaktpb.Address
-	20, // 13: goaktpb.ActorChildCreated.created_at:type_name -> google.protobuf.Timestamp
+	21, // 13: goaktpb.ActorChildCreated.created_at:type_name -> google.protobuf.Timestamp
 	0,  // 14: goaktpb.ActorRestarted.address:type_name -> goaktpb.Address
-	20, // 15: goaktpb.ActorRestarted.restarted_at:type_name -> google.protobuf.Timestamp
+	21, // 15: goaktpb.ActorRestarted.restarted_at:type_name -> google.protobuf.Timestamp
 	0,  // 16: goaktpb.ActorSuspended.address:type_name -> goaktpb.Address
-	20, // 17: goaktpb.ActorSuspended.suspended_at:type_name -> google.protobuf.Timestamp
-	20, // 18: goaktpb.NodeJoined.timestamp:type_name -> google.protobuf.Timestamp
-	20, // 19: goaktpb.NodeLeft.timestamp:type_name -> google.protobuf.Timestamp
-	19, // 20: goaktpb.Broadcast.message:type_name -> google.protobuf.Any
-	19, // 21: goaktpb.Publish.message:type_name -> google.protobuf.Any
+	21, // 17: goaktpb.ActorSuspended.suspended_at:type_name -> google.protobuf.Timestamp
+	21, // 18: goaktpb.NodeJoined.timestamp:type_name -> google.protobuf.Timestamp
+	21, // 19: goaktpb.NodeLeft.timestamp:type_name -> google.protobuf.Timestamp
+	20, // 20: goaktpb.Broadcast.message:type_name -> google.protobuf.Any
+	20, // 21: goaktpb.Publish.message:type_name -> google.protobuf.Any
 	22, // [22:22] is the sub-list for method output_type
 	22, // [22:22] is the sub-list for method input_type
 	22, // [22:22] is the sub-list for extension type_name
@@ -1288,7 +1327,7 @@ func file_goakt_goakt_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_goakt_goakt_proto_rawDesc), len(file_goakt_goakt_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   19,
+			NumMessages:   20,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

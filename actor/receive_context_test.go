@@ -2102,7 +2102,11 @@ func TestReceiveContext(t *testing.T) {
 			self:    pid1,
 		}
 
-		task := make(chan proto.Message)
+		task := func() (proto.Message, error) {
+			// simulate a long-running task
+			util.Pause(500 * time.Millisecond)
+			return new(testspb.TaskComplete), nil
+		}
 		messageContext.PipeTo(pid2, task)
 
 		var wg sync.WaitGroup
@@ -2117,8 +2121,6 @@ func TestReceiveContext(t *testing.T) {
 			wg.Done()
 		}()
 
-		// now we complete the Task
-		task <- new(testspb.TaskComplete)
 		wg.Wait()
 
 		require.EqualValues(t, 3, pid1.ProcessedCount()-1)
@@ -2129,7 +2131,7 @@ func TestReceiveContext(t *testing.T) {
 		assert.NoError(t, pid2.Shutdown(ctx))
 		assert.NoError(t, actorSystem.Stop(ctx))
 	})
-	t.Run("With failed PipeTo", func(t *testing.T) {
+	t.Run("With failed PipeTo: no task defined", func(t *testing.T) {
 		ctx := context.TODO()
 		ports := dynaport.Get(1)
 
@@ -2172,6 +2174,78 @@ func TestReceiveContext(t *testing.T) {
 
 		messageContext.PipeTo(pid2, nil)
 		require.Error(t, messageContext.getError())
+		assert.NoError(t, pid1.Shutdown(ctx))
+		assert.NoError(t, pid2.Shutdown(ctx))
+		assert.NoError(t, actorSystem.Stop(ctx))
+	})
+	t.Run("With failed PipeTo: task returns an error", func(t *testing.T) {
+		ctx := context.TODO()
+		ports := dynaport.Get(1)
+
+		actorSystem, err := NewActorSystem("sys",
+			WithRemote(remote.NewConfig("127.0.0.1", ports[0])),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NoError(t, actorSystem.Start(ctx))
+
+		util.Pause(time.Second)
+
+		// create a deadletter subscriber
+		consumer, err := actorSystem.Subscribe()
+		require.NoError(t, err)
+		require.NotNil(t, consumer)
+
+		// create actor1
+		actor1 := &exchanger{}
+
+		pid1, err := actorSystem.Spawn(ctx, "Exchange1", actor1)
+		require.NoError(t, err)
+		require.NotNil(t, pid1)
+
+		// create actor2
+		actor2 := &exchanger{}
+
+		pid2, err := actorSystem.Spawn(ctx, "Exchange2", actor2)
+		require.NoError(t, err)
+		require.NotNil(t, pid2)
+
+		util.Pause(time.Second)
+
+		// zero message received by both actors
+		require.Zero(t, pid1.ProcessedCount()-1)
+		require.Zero(t, pid2.ProcessedCount()-1)
+
+		task := func() (proto.Message, error) {
+			// simulate a long-running task
+			util.Pause(500 * time.Millisecond)
+			return nil, assert.AnError
+		}
+
+		// create an instance of receive context
+		messageContext := &ReceiveContext{
+			ctx:     ctx,
+			message: new(testpb.TaskComplete),
+			sender:  NoSender,
+			self:    pid1,
+		}
+
+		messageContext.PipeTo(pid2, task)
+
+		util.Pause(time.Second)
+
+		var items []*goaktpb.Deadletter
+		for message := range consumer.Iterator() {
+			payload := message.Payload()
+			// only listening to deadletter
+			deadletter, ok := payload.(*goaktpb.Deadletter)
+			if ok {
+				items = append(items, deadletter)
+			}
+		}
+
+		require.Len(t, items, 1)
+
 		assert.NoError(t, pid1.Shutdown(ctx))
 		assert.NoError(t, pid2.Shutdown(ctx))
 		assert.NoError(t, actorSystem.Stop(ctx))

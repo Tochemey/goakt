@@ -26,140 +26,66 @@ package future
 
 import (
 	"context"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/tochemey/goakt/v3/internal/util"
 	"github.com/tochemey/goakt/v3/test/data/testpb"
 )
 
-func TestWaitOnResult(t *testing.T) {
-	executor := make(chan proto.Message)
-	f := New(executor, time.Duration(30*time.Minute))
-	var result *Result
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		result = f.Result()
-		wg.Done()
-	}()
-
-	executor <- new(testpb.TestPing)
-	wg.Wait()
-
-	assert.Nil(t, result.Failure())
-	assert.True(t, proto.Equal(new(testpb.TestPing), result.Success()))
-
-	// ensure we don't get paused on the next iteration.
-	result = f.Result()
-	assert.True(t, proto.Equal(new(testpb.TestPing), result.Success()))
-	assert.Nil(t, result.Failure())
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m)
 }
 
-func TestHasResult(t *testing.T) {
-	t.Run("With timeout set", func(t *testing.T) {
-		executor := make(chan proto.Message)
-		f := New(executor, time.Duration(30*time.Minute))
+func TestFuture(t *testing.T) {
+	t.Run("With timeout", func(t *testing.T) {
+		future := New(func() (proto.Message, error) {
+			// simulate a long-running task
+			util.Pause(100 * time.Millisecond)
+			return nil, nil
+		})
 
-		assert.False(t, f.HasResult())
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+		defer cancel()
 
-		var wg sync.WaitGroup
-		wg.Add(1)
-		go func() {
-			f.Result()
-			wg.Done()
-		}()
-
-		executor <- new(testpb.TestPing)
-		wg.Wait()
-
-		assert.True(t, f.HasResult())
+		result, err := future.Await(ctx)
+		require.Error(t, err)
+		require.Nil(t, result)
+		require.ErrorIs(t, err, context.DeadlineExceeded)
 	})
-	t.Run("With context set", func(t *testing.T) {
-		ctx := context.TODO()
-		executor := make(chan proto.Message)
-		f := WithContext(ctx, executor)
+	t.Run("With success", func(t *testing.T) {
+		expected := new(testpb.TestPing)
+		future := New(func() (proto.Message, error) {
+			// simulate a long-running task
+			util.Pause(10 * time.Millisecond)
+			return expected, nil
+		})
 
-		assert.False(t, f.HasResult())
+		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+		defer cancel()
 
-		var wg sync.WaitGroup
-		wg.Add(1)
-		go func() {
-			f.Result()
-			wg.Done()
-		}()
-
-		executor <- new(testpb.TestPing)
-		wg.Wait()
-
-		assert.True(t, f.HasResult())
+		result, err := future.Await(ctx)
+		require.NoError(t, err)
+		require.True(t, proto.Equal(expected, result))
 	})
-}
+	t.Run("With failure", func(t *testing.T) {
+		future := New(func() (proto.Message, error) {
+			// simulate a long-running task
+			util.Pause(10 * time.Millisecond)
+			return nil, assert.AnError
+		})
 
-func TestTimeout(t *testing.T) {
-	executor := make(chan proto.Message)
-	f := New(executor, time.Duration(0))
+		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+		defer cancel()
 
-	result := f.Result()
-
-	require.NotNil(t, result)
-	assert.Nil(t, result.Success())
-	assert.NotNil(t, result.Failure())
-}
-
-func TestContextCancelation(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.TODO())
-	executor := make(chan proto.Message)
-	f := WithContext(ctx, executor)
-	cancel()
-
-	result := f.Result()
-
-	require.NotNil(t, result)
-	assert.Nil(t, result.Success())
-	assert.NotNil(t, result.Failure())
-}
-
-func BenchmarkFuture(b *testing.B) {
-	executor := make(chan proto.Message)
-	timeout := time.Duration(30 * time.Minute)
-	var wg sync.WaitGroup
-
-	b.ResetTimer()
-
-	for i := 0; i < b.N; i++ {
-		wg.Add(1)
-		f := New(executor, timeout)
-		go func() {
-			f.Result()
-			wg.Done()
-		}()
-
-		executor <- new(testpb.TestPing)
-		wg.Wait()
-	}
-}
-
-func BenchmarkFutureWithContext(b *testing.B) {
-	executor := make(chan proto.Message)
-	ctx := context.TODO()
-	var wg sync.WaitGroup
-
-	b.ResetTimer()
-
-	for i := 0; i < b.N; i++ {
-		wg.Add(1)
-		f := WithContext(ctx, executor)
-		go func() {
-			f.Result()
-			wg.Done()
-		}()
-
-		executor <- new(testpb.TestPing)
-		wg.Wait()
-	}
+		result, err := future.Await(ctx)
+		require.Error(t, err)
+		require.ErrorIs(t, err, assert.AnError)
+		require.Nil(t, result)
+	})
 }

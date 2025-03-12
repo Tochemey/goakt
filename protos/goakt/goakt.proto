@@ -169,3 +169,6 @@ message Publish {
   // Specifies the message
   google.protobuf.Any message = 3;
 }
+
+// NoMessage is used to indicate that no message was sent
+message NoMessage {}

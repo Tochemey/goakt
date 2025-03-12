@@ -69,7 +69,7 @@ const (
 // to pipe the result to the appropriate PID
 type taskCompletion struct {
 	Receiver *PID
-	Task     future.Task
+	Task     func() (proto.Message, error)
 }
 
 // PID specifies an actor unique process
@@ -652,7 +652,7 @@ func (pid *PID) StashSize() uint64 {
 // The successful result of the task will be put onto the provided actor mailbox.
 // This is useful when interacting with external services.
 // It’s common that you would like to use the value of the response in the actor when the long-started task is completed
-func (pid *PID) PipeTo(ctx context.Context, to *PID, task future.Task) error {
+func (pid *PID) PipeTo(ctx context.Context, to *PID, task func() (proto.Message, error)) error {
 	if task == nil {
 		return ErrUndefinedTask
 	}
@@ -1708,21 +1708,28 @@ func (pid *PID) toDeadletters(receiveCtx *ReceiveContext, err error) {
 		// pass through
 	}
 
-	msg, _ := anypb.New(receiveCtx.Message())
-	var sender *goaktpb.Address
+	sender := &address.Address{}
 	if receiveCtx.Sender() != nil || receiveCtx.Sender() != NoSender {
-		sender = receiveCtx.Sender().Address().Address
+		sender = receiveCtx.Sender().Address()
 	}
 
-	// get the deadletter synthetic actor and send a message to it
-	receiver := pid.Address().Address
+	ctx := context.WithoutCancel(receiveCtx.Context())
+	receiver := pid.Address()
+	pid.sendToDeadletter(ctx, sender, receiver, receiveCtx.Message(), err)
+}
+
+// sendToDeadletter sends a message to the deadletter actor
+func (pid *PID) sendToDeadletter(ctx context.Context, from, to *address.Address, message proto.Message, err error) {
 	deadletter := pid.ActorSystem().getDeadletter()
-	_ = pid.Tell(context.Background(),
+	msg, _ := anypb.New(message)
+
+	// send the message to the deadletter actor
+	_ = pid.Tell(ctx,
 		deadletter,
 		&internalpb.EmitDeadletter{
 			Deadletter: &goaktpb.Deadletter{
-				Sender:   sender,
-				Receiver: receiver,
+				Sender:   from.Address,
+				Receiver: to.Address,
 				Message:  msg,
 				SendTime: timestamppb.Now(),
 				Reason:   err.Error(),
@@ -1742,21 +1749,13 @@ func (pid *PID) handleCompletion(ctx context.Context, completion *taskCompletion
 	}
 
 	// wrap the provided completion task into a future that can help run the task
-	f := future.WithContext(ctx, completion.Task)
-	var wg sync.WaitGroup
-	var result *future.Result
-
-	// wait for a potential result or timeout
-	wg.Add(1)
-	go func() {
-		result = f.Result()
-		wg.Done()
-	}()
-	wg.Wait()
-
+	fut := future.New(completion.Task)
+	result, err := fut.Await(ctx)
 	// logger the error when the task returns an error
-	if err := result.Failure(); err != nil {
+	// and send the message to the deadletter actor
+	if err != nil {
 		pid.logger.Error(err)
+		pid.sendToDeadletter(context.Background(), pid.Address(), pid.Address(), new(goaktpb.NoMessage), err)
 		return
 	}
 
@@ -1767,7 +1766,7 @@ func (pid *PID) handleCompletion(ctx context.Context, completion *taskCompletion
 		return
 	}
 
-	messageContext := newReceiveContext(ctx, pid, to, result.Success())
+	messageContext := newReceiveContext(ctx, pid, to, result)
 	to.doReceive(messageContext)
 }
 
