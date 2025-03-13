@@ -32,8 +32,40 @@ import (
 )
 
 // Future represents a value which may or may not currently be available,
-// but will be available at some point, or an error if that value could
-// not be made available.
+// but will be available at some point in the future, or an error if that value
+// could not be made available. It provides a way to handle asynchronous
+// computations and their results.
+//
+// The Future interface provides two main methods:
+//
+// 1. Await(ctx context.Context) (proto.Message, error):
+//   - This method blocks until the Future is completed or the provided context
+//     is canceled. It returns either the result of the computation or an error
+//     if the computation failed or the context was canceled.
+//
+// 2. complete(value proto.Message, err error):
+//   - This method completes the Future with either a value or an error. It is
+//     used internally by the completable to set the result of the computation.
+//
+// Example usage:
+//
+//	task := func() (proto.Message, error) {
+//	    // Perform some long-running computation
+//	    result := &MyProtoMessage{...}
+//	    return result, nil
+//	}
+//
+//	future := future.New(task)
+//
+//	ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
+//	defer cancel()
+//
+//	result, err := future.Await(ctx)
+//	if err != nil {
+//	    log.Fatalf("Failed to get result: %v", err)
+//	}
+//
+//	log.Printf("Received result: %v", result)
 type Future interface {
 	// Await blocks until the Future is completed or context is canceled and
 	// returns either a result or an error.
@@ -44,14 +76,37 @@ type Future interface {
 	complete(proto.Message, error)
 }
 
-// New returns a new Task associated with the specified function.
-// It starts executing the task using a goroutine. It returns a
-// Future which can be used to retrieve the result or error of the
-// task when it is completed.
-func New(fn func() (proto.Message, error)) Future {
+// New creates a new Future that executes the given long-running task.
+// The task is a function that returns a proto.Message and an error.
+// The Future is completed with the value returned by the task or failed with the error.
+//
+// The task is executed asynchronously in a separate goroutine. The Future can be
+// awaited using the Await method, which will block until the task is completed
+// or the provided context is canceled.
+//
+// Example usage:
+//
+//	task := func() (proto.Message, error) {
+//	    // Perform some long-running computation
+//	    result := &MyProtoMessage{...}
+//	    return result, nil
+//	}
+//
+//	future := future.New(task)
+//
+//	ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
+//	defer cancel()
+//
+//	result, err := future.Await(ctx)
+//	if err != nil {
+//	    log.Fatalf("Failed to get result: %v", err)
+//	}
+//
+//	log.Printf("Received result: %v", result)
+func New(task func() (proto.Message, error)) Future {
 	comp := newCompletable()
 	go func() {
-		result, err := fn()
+		result, err := task()
 		switch {
 		case err == nil:
 			comp.Success(result)
