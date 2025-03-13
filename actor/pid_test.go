@@ -3148,7 +3148,12 @@ func TestPipeTo(t *testing.T) {
 		require.Zero(t, pid1.ProcessedCount()-1)
 		require.Zero(t, pid2.ProcessedCount()-1)
 
-		task := make(chan proto.Message)
+		task := func() (proto.Message, error) {
+			// simulate a long-running task
+			util.Pause(time.Second)
+			return new(testspb.TaskComplete), nil
+		}
+
 		err = pid1.PipeTo(ctx, pid2, task)
 		require.NoError(t, err)
 
@@ -3163,9 +3168,6 @@ func TestPipeTo(t *testing.T) {
 			util.Pause(time.Second)
 			wg.Done()
 		}()
-
-		// now we complete the Task
-		task <- new(testspb.TaskComplete)
 		wg.Wait()
 
 		util.Pause(time.Second)
@@ -3179,7 +3181,7 @@ func TestPipeTo(t *testing.T) {
 		util.Pause(time.Second)
 		assert.NoError(t, actorSystem.Stop(ctx))
 	})
-	t.Run("With is a dead actor: case 1", func(t *testing.T) {
+	t.Run("With is a dead actor", func(t *testing.T) {
 		ctx := context.TODO()
 		host := "127.0.0.1"
 		ports := dynaport.Get(1)
@@ -3211,7 +3213,12 @@ func TestPipeTo(t *testing.T) {
 		util.Pause(time.Second)
 		assert.NoError(t, pid2.Shutdown(ctx))
 
-		task := make(chan proto.Message)
+		task := func() (proto.Message, error) {
+			// simulate a long-running task
+			util.Pause(time.Second)
+			return new(testspb.TaskComplete), nil
+		}
+
 		err = pid1.PipeTo(ctx, pid2, task)
 		require.Error(t, err)
 		assert.EqualError(t, err, ErrDead.Error())
@@ -3219,64 +3226,6 @@ func TestPipeTo(t *testing.T) {
 		util.Pause(time.Second)
 		assert.NoError(t, pid1.Shutdown(ctx))
 		util.Pause(time.Second)
-		assert.NoError(t, actorSystem.Stop(ctx))
-	})
-	t.Run("With is a dead actor: case 2", func(t *testing.T) {
-		askTimeout := time.Minute
-		ctx := context.TODO()
-		ports := dynaport.Get(1)
-		actorSystem, err := NewActorSystem("sys",
-			WithActorInitMaxRetries(1),
-			WithLogger(log.DiscardLogger),
-			WithRemote(remote.NewConfig("127.0.0.1", ports[0])),
-			WithPassivationDisabled())
-
-		require.NoError(t, actorSystem.Start(ctx))
-		util.Pause(time.Second)
-
-		// create actor1
-		pid1, err := actorSystem.Spawn(ctx, "Exchange1", &exchanger{})
-		require.NoError(t, err)
-		require.NotNil(t, pid1)
-
-		// create actor2
-		pid2, err := actorSystem.Spawn(ctx, "Exchange2", &exchanger{})
-		require.NoError(t, err)
-		require.NotNil(t, pid2)
-
-		util.Pause(time.Second)
-
-		// zero message received by both actors
-		require.Zero(t, pid1.ProcessedCount()-1)
-		require.Zero(t, pid2.ProcessedCount()-1)
-
-		task := make(chan proto.Message)
-		err = pid1.PipeTo(ctx, pid2, task)
-		require.NoError(t, err)
-
-		var wg sync.WaitGroup
-		wg.Add(1)
-		go func() {
-			_, _ = Ask(ctx, pid1, new(testpb.TestReply), askTimeout)
-			_, _ = Ask(ctx, pid1, new(testpb.TestReply), askTimeout)
-			_, _ = Ask(ctx, pid1, new(testpb.TestReply), askTimeout)
-
-			task <- new(testspb.TaskComplete)
-
-			util.Pause(time.Second)
-
-			close(task)
-			wg.Done()
-		}()
-		wg.Wait()
-
-		require.EqualValues(t, 3, pid1.ProcessedCount()-1)
-		require.NotZero(t, pid2.ProcessedCount())
-
-		_ = Tell(ctx, pid2, new(testpb.TestBye))
-		util.Pause(2 * time.Second)
-		require.Zero(t, pid2.ProcessedCount())
-
 		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 	t.Run("With undefined task", func(t *testing.T) {
@@ -3323,7 +3272,7 @@ func TestPipeTo(t *testing.T) {
 		util.Pause(time.Second)
 		assert.NoError(t, actorSystem.Stop(ctx))
 	})
-	t.Run("With failed task", func(t *testing.T) {
+	t.Run("With failed task result in deadletter", func(t *testing.T) {
 		askTimeout := time.Minute
 		ctx := context.TODO()
 		host := "127.0.0.1"
@@ -3342,6 +3291,11 @@ func TestPipeTo(t *testing.T) {
 
 		util.Pause(time.Second)
 
+		// create a deadletter subscriber
+		consumer, err := actorSystem.Subscribe()
+		require.NoError(t, err)
+		require.NotNil(t, consumer)
+
 		// create actor1
 		pid1, err := actorSystem.Spawn(ctx, "Exchange1", &exchanger{})
 		require.NoError(t, err)
@@ -3358,7 +3312,11 @@ func TestPipeTo(t *testing.T) {
 		require.Zero(t, pid1.ProcessedCount()-1)
 		require.Zero(t, pid2.ProcessedCount()-1)
 
-		task := make(chan proto.Message)
+		task := func() (proto.Message, error) {
+			// simulate a long-running task
+			util.Pause(time.Second)
+			return nil, assert.AnError
+		}
 
 		cancelCtx, cancel := context.WithCancel(ctx)
 		err = pid1.PipeTo(cancelCtx, pid2, task)
@@ -3385,6 +3343,18 @@ func TestPipeTo(t *testing.T) {
 
 		// no message piped to the actor
 		require.Zero(t, pid2.ProcessedCount()-1)
+
+		var items []*goaktpb.Deadletter
+		for message := range consumer.Iterator() {
+			payload := message.Payload()
+			// only listening to deadletter
+			deadletter, ok := payload.(*goaktpb.Deadletter)
+			if ok {
+				items = append(items, deadletter)
+			}
+		}
+
+		require.Len(t, items, 1)
 
 		util.Pause(time.Second)
 		assert.NoError(t, pid1.Shutdown(ctx))
