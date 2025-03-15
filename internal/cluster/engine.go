@@ -985,14 +985,14 @@ func (x *Engine) buildConfig() (*config.Config, error) {
 	// Set TLS configuration accordingly
 	if x.serverTLS != nil && x.clientTLS != nil {
 		// set the server TLS info
-		conf.TLSInfo = &config.TLSInfo{
-			ClientTLS: x.clientTLS,
-			ServerTLS: x.serverTLS,
+		conf.TLS = &config.TLS{
+			Client: x.clientTLS,
+			Server: x.serverTLS,
 		}
 
 		// create a client configuration that will be used by the
 		// embedded client calls
-		client := &config.Client{TLSConfig: x.clientTLS}
+		client := &config.Client{TLS: x.clientTLS}
 		// sanitize client configuration
 		if err := client.Sanitize(); err != nil {
 			return nil, fmt.Errorf("failed to sanitize client config: %v", err)
