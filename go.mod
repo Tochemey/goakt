@@ -5,7 +5,7 @@ go 1.23.0
 require (
 	connectrpc.com/connect v1.18.1
 	github.com/Workiva/go-datastructures v1.1.5
-	github.com/deckarep/golang-set/v2 v2.7.0
+	github.com/deckarep/golang-set/v2 v2.8.0
 	github.com/flowchartsman/retry v1.2.0
 	github.com/google/uuid v1.6.0
 	github.com/grandcat/zeroconf v1.0.0
