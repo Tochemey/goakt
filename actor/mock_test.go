@@ -47,7 +47,6 @@ import (
 	"github.com/tochemey/goakt/v3/log"
 	"github.com/tochemey/goakt/v3/remote"
 	"github.com/tochemey/goakt/v3/test/data/testpb"
-	testspb "github.com/tochemey/goakt/v3/test/data/testpb"
 )
 
 type mockSubscriber struct {
@@ -108,12 +107,12 @@ func (p *mockActor) PostStop(context.Context) error {
 func (p *mockActor) Receive(ctx *ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *goaktpb.PostStart:
-	case *testspb.TestSend:
-	case *testspb.TestPanic:
+	case *testpb.TestSend:
+	case *testpb.TestPanic:
 		panic("Boom")
-	case *testspb.TestReply:
-		ctx.Response(&testspb.Reply{Content: "received message"})
-	case *testspb.TestTimeout:
+	case *testpb.TestReply:
+		ctx.Response(&testpb.Reply{Content: "received message"})
+	case *testpb.TestTimeout:
 		// delay for a while before sending the reply
 		wg := sync.WaitGroup{}
 		wg.Add(1)
@@ -147,7 +146,7 @@ func (p *mockSupervisorActor) PreStart(context.Context) error {
 func (p *mockSupervisorActor) Receive(ctx *ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *goaktpb.PostStart:
-	case *testspb.TestSend:
+	case *testpb.TestSend:
 	case *goaktpb.Terminated:
 		// pass
 	default:
@@ -177,11 +176,13 @@ func (x *mockSupervisedActor) PreStart(context.Context) error {
 func (x *mockSupervisedActor) Receive(ctx *ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *goaktpb.PostStart:
-	case *testspb.TestSend:
-	case *testspb.TestReply:
-		ctx.Response(new(testspb.Reply))
-	case *testspb.TestPanic:
+	case *testpb.TestSend:
+	case *testpb.TestReply:
+		ctx.Response(new(testpb.Reply))
+	case *testpb.TestPanic:
 		panic("panicked")
+	case *testpb.TestPanicError:
+		panic(errors.New("panicked"))
 	default:
 		panic(ErrUnhandled)
 	}
@@ -208,11 +209,11 @@ func (x *mockBehaviorActor) PostStop(_ context.Context) error {
 func (x *mockBehaviorActor) Receive(ctx *ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *goaktpb.PostStart:
-	case *testspb.TestLogin:
-		ctx.Response(new(testspb.TestLoginSuccess))
+	case *testpb.TestLogin:
+		ctx.Response(new(testpb.TestLoginSuccess))
 		ctx.Become(x.Authenticated)
-	case *testspb.CreateAccount:
-		ctx.Response(new(testspb.AccountCreated))
+	case *testpb.CreateAccount:
+		ctx.Response(new(testpb.AccountCreated))
 		ctx.BecomeStacked(x.CreditAccount)
 	}
 }
@@ -220,26 +221,26 @@ func (x *mockBehaviorActor) Receive(ctx *ReceiveContext) {
 // Authenticated behavior is executed when the actor receive the TestAuth message
 func (x *mockBehaviorActor) Authenticated(ctx *ReceiveContext) {
 	switch ctx.Message().(type) {
-	case *testspb.TestReadiness:
-		ctx.Response(new(testspb.TestReady))
+	case *testpb.TestReadiness:
+		ctx.Response(new(testpb.TestReady))
 		ctx.UnBecome()
 	}
 }
 
 func (x *mockBehaviorActor) CreditAccount(ctx *ReceiveContext) {
 	switch ctx.Message().(type) {
-	case *testspb.CreditAccount:
-		ctx.Response(new(testspb.AccountCredited))
+	case *testpb.CreditAccount:
+		ctx.Response(new(testpb.AccountCredited))
 		ctx.BecomeStacked(x.DebitAccount)
-	case *testspb.TestBye:
+	case *testpb.TestBye:
 		_ = ctx.Self().Shutdown(ctx.Context())
 	}
 }
 
 func (x *mockBehaviorActor) DebitAccount(ctx *ReceiveContext) {
 	switch ctx.Message().(type) {
-	case *testspb.DebitAccount:
-		ctx.Response(new(testspb.AccountDebited))
+	case *testpb.DebitAccount:
+		ctx.Response(new(testpb.AccountDebited))
 		ctx.UnBecomeStacked()
 	}
 }
@@ -257,14 +258,14 @@ func (e *exchanger) Receive(ctx *ReceiveContext) {
 	switch message.(type) {
 	case *goaktpb.PostStart:
 		e.id = ctx.Self().ID()
-	case *testspb.TestSend:
-		ctx.Tell(ctx.Sender(), new(testspb.TestSend))
-	case *testspb.TaskComplete:
-	case *testspb.TestReply:
-		ctx.Response(new(testspb.Reply))
-	case *testspb.TestRemoteSend:
-		ctx.RemoteTell(ctx.RemoteSender(), new(testspb.TestBye))
-	case *testspb.TestBye:
+	case *testpb.TestSend:
+		ctx.Tell(ctx.Sender(), new(testpb.TestSend))
+	case *testpb.TaskComplete:
+	case *testpb.TestReply:
+		ctx.Response(new(testpb.Reply))
+	case *testpb.TestRemoteSend:
+		ctx.RemoteTell(ctx.RemoteSender(), new(testpb.TestBye))
+	case *testpb.TestBye:
 		ctx.Shutdown()
 	}
 }
@@ -284,11 +285,11 @@ func (x *mockStashActor) PreStart(context.Context) error {
 func (x *mockStashActor) Receive(ctx *ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *goaktpb.PostStart:
-	case *testspb.TestStash:
+	case *testpb.TestStash:
 		ctx.Become(x.Ready)
 		ctx.Stash()
-	case *testspb.TestLogin:
-	case *testspb.TestBye:
+	case *testpb.TestLogin:
+	case *testpb.TestBye:
 		ctx.Shutdown()
 	}
 }
@@ -296,15 +297,15 @@ func (x *mockStashActor) Receive(ctx *ReceiveContext) {
 func (x *mockStashActor) Ready(ctx *ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *goaktpb.PostStart:
-	case *testspb.TestStash:
-	case *testspb.TestLogin:
+	case *testpb.TestStash:
+	case *testpb.TestLogin:
 		ctx.Stash()
-	case *testspb.TestSend:
+	case *testpb.TestSend:
 		// do nothing
-	case *testspb.TestUnstashAll:
+	case *testpb.TestUnstashAll:
 		ctx.UnBecome()
 		ctx.UnstashAll()
-	case *testspb.TestUnstash:
+	case *testpb.TestUnstash:
 		ctx.Unstash()
 	}
 }
@@ -338,8 +339,8 @@ func (x *mockPostStopActor) PreStart(context.Context) error {
 func (x *mockPostStopActor) Receive(ctx *ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *goaktpb.PostStart:
-	case *testspb.TestSend:
-	case *testspb.TestPanic:
+	case *testpb.TestSend:
+	case *testpb.TestPanic:
 		panic("panicked")
 	}
 }
@@ -389,9 +390,9 @@ func (x *mockForwardActor) PreStart(context.Context) error {
 func (x *mockForwardActor) Receive(ctx *ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *goaktpb.PostStart:
-	case *testspb.TestBye:
+	case *testpb.TestBye:
 		ctx.Forward(x.actorRef)
-	case *testspb.TestRemoteForward:
+	case *testpb.TestRemoteForward:
 		ctx.RemoteForward(x.remoteRef.Address())
 	}
 }
@@ -409,7 +410,7 @@ func (x *mockRemoteActor) PreStart(context.Context) error {
 
 func (x *mockRemoteActor) Receive(ctx *ReceiveContext) {
 	switch ctx.Message().(type) {
-	case *testspb.TestRemoteForward:
+	case *testpb.TestRemoteForward:
 		ctx.Shutdown()
 	}
 }

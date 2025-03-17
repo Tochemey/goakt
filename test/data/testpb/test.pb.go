@@ -94,6 +94,42 @@ func (*TestPanic) Descriptor() ([]byte, []int) {
 	return file_test_test_proto_rawDescGZIP(), []int{1}
 }
 
+type TestPanicError struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TestPanicError) Reset() {
+	*x = TestPanicError{}
+	mi := &file_test_test_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TestPanicError) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TestPanicError) ProtoMessage() {}
+
+func (x *TestPanicError) ProtoReflect() protoreflect.Message {
+	mi := &file_test_test_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TestPanicError.ProtoReflect.Descriptor instead.
+func (*TestPanicError) Descriptor() ([]byte, []int) {
+	return file_test_test_proto_rawDescGZIP(), []int{2}
+}
+
 type TestTimeout struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -102,7 +138,7 @@ type TestTimeout struct {
 
 func (x *TestTimeout) Reset() {
 	*x = TestTimeout{}
-	mi := &file_test_test_proto_msgTypes[2]
+	mi := &file_test_test_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -114,7 +150,7 @@ func (x *TestTimeout) String() string {
 func (*TestTimeout) ProtoMessage() {}
 
 func (x *TestTimeout) ProtoReflect() protoreflect.Message {
-	mi := &file_test_test_proto_msgTypes[2]
+	mi := &file_test_test_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -127,7 +163,7 @@ func (x *TestTimeout) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TestTimeout.ProtoReflect.Descriptor instead.
 func (*TestTimeout) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{2}
+	return file_test_test_proto_rawDescGZIP(), []int{3}
 }
 
 type Reply struct {
@@ -139,7 +175,7 @@ type Reply struct {
 
 func (x *Reply) Reset() {
 	*x = Reply{}
-	mi := &file_test_test_proto_msgTypes[3]
+	mi := &file_test_test_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -151,7 +187,7 @@ func (x *Reply) String() string {
 func (*Reply) ProtoMessage() {}
 
 func (x *Reply) ProtoReflect() protoreflect.Message {
-	mi := &file_test_test_proto_msgTypes[3]
+	mi := &file_test_test_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -164,7 +200,7 @@ func (x *Reply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Reply.ProtoReflect.Descriptor instead.
 func (*Reply) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{3}
+	return file_test_test_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *Reply) GetContent() string {
@@ -182,7 +218,7 @@ type TestSend struct {
 
 func (x *TestSend) Reset() {
 	*x = TestSend{}
-	mi := &file_test_test_proto_msgTypes[4]
+	mi := &file_test_test_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -194,7 +230,7 @@ func (x *TestSend) String() string {
 func (*TestSend) ProtoMessage() {}
 
 func (x *TestSend) ProtoReflect() protoreflect.Message {
-	mi := &file_test_test_proto_msgTypes[4]
+	mi := &file_test_test_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -207,7 +243,7 @@ func (x *TestSend) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TestSend.ProtoReflect.Descriptor instead.
 func (*TestSend) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{4}
+	return file_test_test_proto_rawDescGZIP(), []int{5}
 }
 
 type TestRemoteSend struct {
@@ -218,7 +254,7 @@ type TestRemoteSend struct {
 
 func (x *TestRemoteSend) Reset() {
 	*x = TestRemoteSend{}
-	mi := &file_test_test_proto_msgTypes[5]
+	mi := &file_test_test_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -230,7 +266,7 @@ func (x *TestRemoteSend) String() string {
 func (*TestRemoteSend) ProtoMessage() {}
 
 func (x *TestRemoteSend) ProtoReflect() protoreflect.Message {
-	mi := &file_test_test_proto_msgTypes[5]
+	mi := &file_test_test_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -243,7 +279,7 @@ func (x *TestRemoteSend) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TestRemoteSend.ProtoReflect.Descriptor instead.
 func (*TestRemoteSend) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{5}
+	return file_test_test_proto_rawDescGZIP(), []int{6}
 }
 
 type Account struct {
@@ -256,7 +292,7 @@ type Account struct {
 
 func (x *Account) Reset() {
 	*x = Account{}
-	mi := &file_test_test_proto_msgTypes[6]
+	mi := &file_test_test_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -268,7 +304,7 @@ func (x *Account) String() string {
 func (*Account) ProtoMessage() {}
 
 func (x *Account) ProtoReflect() protoreflect.Message {
-	mi := &file_test_test_proto_msgTypes[6]
+	mi := &file_test_test_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -281,7 +317,7 @@ func (x *Account) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Account.ProtoReflect.Descriptor instead.
 func (*Account) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{6}
+	return file_test_test_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *Account) GetAccountId() string {
@@ -307,7 +343,7 @@ type CreateAccount struct {
 
 func (x *CreateAccount) Reset() {
 	*x = CreateAccount{}
-	mi := &file_test_test_proto_msgTypes[7]
+	mi := &file_test_test_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -319,7 +355,7 @@ func (x *CreateAccount) String() string {
 func (*CreateAccount) ProtoMessage() {}
 
 func (x *CreateAccount) ProtoReflect() protoreflect.Message {
-	mi := &file_test_test_proto_msgTypes[7]
+	mi := &file_test_test_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -332,7 +368,7 @@ func (x *CreateAccount) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateAccount.ProtoReflect.Descriptor instead.
 func (*CreateAccount) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{7}
+	return file_test_test_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *CreateAccount) GetAccountBalance() float64 {
@@ -352,7 +388,7 @@ type CreditAccount struct {
 
 func (x *CreditAccount) Reset() {
 	*x = CreditAccount{}
-	mi := &file_test_test_proto_msgTypes[8]
+	mi := &file_test_test_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -364,7 +400,7 @@ func (x *CreditAccount) String() string {
 func (*CreditAccount) ProtoMessage() {}
 
 func (x *CreditAccount) ProtoReflect() protoreflect.Message {
-	mi := &file_test_test_proto_msgTypes[8]
+	mi := &file_test_test_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -377,7 +413,7 @@ func (x *CreditAccount) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreditAccount.ProtoReflect.Descriptor instead.
 func (*CreditAccount) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{8}
+	return file_test_test_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *CreditAccount) GetAccountId() string {
@@ -404,7 +440,7 @@ type AccountCreated struct {
 
 func (x *AccountCreated) Reset() {
 	*x = AccountCreated{}
-	mi := &file_test_test_proto_msgTypes[9]
+	mi := &file_test_test_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -416,7 +452,7 @@ func (x *AccountCreated) String() string {
 func (*AccountCreated) ProtoMessage() {}
 
 func (x *AccountCreated) ProtoReflect() protoreflect.Message {
-	mi := &file_test_test_proto_msgTypes[9]
+	mi := &file_test_test_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -429,7 +465,7 @@ func (x *AccountCreated) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AccountCreated.ProtoReflect.Descriptor instead.
 func (*AccountCreated) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{9}
+	return file_test_test_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *AccountCreated) GetAccountId() string {
@@ -456,7 +492,7 @@ type AccountCredited struct {
 
 func (x *AccountCredited) Reset() {
 	*x = AccountCredited{}
-	mi := &file_test_test_proto_msgTypes[10]
+	mi := &file_test_test_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -468,7 +504,7 @@ func (x *AccountCredited) String() string {
 func (*AccountCredited) ProtoMessage() {}
 
 func (x *AccountCredited) ProtoReflect() protoreflect.Message {
-	mi := &file_test_test_proto_msgTypes[10]
+	mi := &file_test_test_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -481,7 +517,7 @@ func (x *AccountCredited) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AccountCredited.ProtoReflect.Descriptor instead.
 func (*AccountCredited) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{10}
+	return file_test_test_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *AccountCredited) GetAccountId() string {
@@ -506,7 +542,7 @@ type DebitAccount struct {
 
 func (x *DebitAccount) Reset() {
 	*x = DebitAccount{}
-	mi := &file_test_test_proto_msgTypes[11]
+	mi := &file_test_test_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -518,7 +554,7 @@ func (x *DebitAccount) String() string {
 func (*DebitAccount) ProtoMessage() {}
 
 func (x *DebitAccount) ProtoReflect() protoreflect.Message {
-	mi := &file_test_test_proto_msgTypes[11]
+	mi := &file_test_test_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -531,7 +567,7 @@ func (x *DebitAccount) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DebitAccount.ProtoReflect.Descriptor instead.
 func (*DebitAccount) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{11}
+	return file_test_test_proto_rawDescGZIP(), []int{12}
 }
 
 type AccountDebited struct {
@@ -542,7 +578,7 @@ type AccountDebited struct {
 
 func (x *AccountDebited) Reset() {
 	*x = AccountDebited{}
-	mi := &file_test_test_proto_msgTypes[12]
+	mi := &file_test_test_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -554,7 +590,7 @@ func (x *AccountDebited) String() string {
 func (*AccountDebited) ProtoMessage() {}
 
 func (x *AccountDebited) ProtoReflect() protoreflect.Message {
-	mi := &file_test_test_proto_msgTypes[12]
+	mi := &file_test_test_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -567,7 +603,7 @@ func (x *AccountDebited) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AccountDebited.ProtoReflect.Descriptor instead.
 func (*AccountDebited) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{12}
+	return file_test_test_proto_rawDescGZIP(), []int{13}
 }
 
 type TestLogin struct {
@@ -578,7 +614,7 @@ type TestLogin struct {
 
 func (x *TestLogin) Reset() {
 	*x = TestLogin{}
-	mi := &file_test_test_proto_msgTypes[13]
+	mi := &file_test_test_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -590,7 +626,7 @@ func (x *TestLogin) String() string {
 func (*TestLogin) ProtoMessage() {}
 
 func (x *TestLogin) ProtoReflect() protoreflect.Message {
-	mi := &file_test_test_proto_msgTypes[13]
+	mi := &file_test_test_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -603,7 +639,7 @@ func (x *TestLogin) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TestLogin.ProtoReflect.Descriptor instead.
 func (*TestLogin) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{13}
+	return file_test_test_proto_rawDescGZIP(), []int{14}
 }
 
 type TestLoginSuccess struct {
@@ -614,7 +650,7 @@ type TestLoginSuccess struct {
 
 func (x *TestLoginSuccess) Reset() {
 	*x = TestLoginSuccess{}
-	mi := &file_test_test_proto_msgTypes[14]
+	mi := &file_test_test_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -626,7 +662,7 @@ func (x *TestLoginSuccess) String() string {
 func (*TestLoginSuccess) ProtoMessage() {}
 
 func (x *TestLoginSuccess) ProtoReflect() protoreflect.Message {
-	mi := &file_test_test_proto_msgTypes[14]
+	mi := &file_test_test_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -639,7 +675,7 @@ func (x *TestLoginSuccess) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TestLoginSuccess.ProtoReflect.Descriptor instead.
 func (*TestLoginSuccess) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{14}
+	return file_test_test_proto_rawDescGZIP(), []int{15}
 }
 
 type TestReadiness struct {
@@ -650,7 +686,7 @@ type TestReadiness struct {
 
 func (x *TestReadiness) Reset() {
 	*x = TestReadiness{}
-	mi := &file_test_test_proto_msgTypes[15]
+	mi := &file_test_test_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -662,7 +698,7 @@ func (x *TestReadiness) String() string {
 func (*TestReadiness) ProtoMessage() {}
 
 func (x *TestReadiness) ProtoReflect() protoreflect.Message {
-	mi := &file_test_test_proto_msgTypes[15]
+	mi := &file_test_test_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -675,7 +711,7 @@ func (x *TestReadiness) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TestReadiness.ProtoReflect.Descriptor instead.
 func (*TestReadiness) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{15}
+	return file_test_test_proto_rawDescGZIP(), []int{16}
 }
 
 type TestReady struct {
@@ -686,7 +722,7 @@ type TestReady struct {
 
 func (x *TestReady) Reset() {
 	*x = TestReady{}
-	mi := &file_test_test_proto_msgTypes[16]
+	mi := &file_test_test_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -698,7 +734,7 @@ func (x *TestReady) String() string {
 func (*TestReady) ProtoMessage() {}
 
 func (x *TestReady) ProtoReflect() protoreflect.Message {
-	mi := &file_test_test_proto_msgTypes[16]
+	mi := &file_test_test_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -711,7 +747,7 @@ func (x *TestReady) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TestReady.ProtoReflect.Descriptor instead.
 func (*TestReady) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{16}
+	return file_test_test_proto_rawDescGZIP(), []int{17}
 }
 
 type TestBye struct {
@@ -722,7 +758,7 @@ type TestBye struct {
 
 func (x *TestBye) Reset() {
 	*x = TestBye{}
-	mi := &file_test_test_proto_msgTypes[17]
+	mi := &file_test_test_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -734,7 +770,7 @@ func (x *TestBye) String() string {
 func (*TestBye) ProtoMessage() {}
 
 func (x *TestBye) ProtoReflect() protoreflect.Message {
-	mi := &file_test_test_proto_msgTypes[17]
+	mi := &file_test_test_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -747,7 +783,7 @@ func (x *TestBye) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TestBye.ProtoReflect.Descriptor instead.
 func (*TestBye) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{17}
+	return file_test_test_proto_rawDescGZIP(), []int{18}
 }
 
 type TestStash struct {
@@ -758,7 +794,7 @@ type TestStash struct {
 
 func (x *TestStash) Reset() {
 	*x = TestStash{}
-	mi := &file_test_test_proto_msgTypes[18]
+	mi := &file_test_test_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -770,7 +806,7 @@ func (x *TestStash) String() string {
 func (*TestStash) ProtoMessage() {}
 
 func (x *TestStash) ProtoReflect() protoreflect.Message {
-	mi := &file_test_test_proto_msgTypes[18]
+	mi := &file_test_test_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -783,7 +819,7 @@ func (x *TestStash) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TestStash.ProtoReflect.Descriptor instead.
 func (*TestStash) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{18}
+	return file_test_test_proto_rawDescGZIP(), []int{19}
 }
 
 type TestUnstash struct {
@@ -794,7 +830,7 @@ type TestUnstash struct {
 
 func (x *TestUnstash) Reset() {
 	*x = TestUnstash{}
-	mi := &file_test_test_proto_msgTypes[19]
+	mi := &file_test_test_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -806,7 +842,7 @@ func (x *TestUnstash) String() string {
 func (*TestUnstash) ProtoMessage() {}
 
 func (x *TestUnstash) ProtoReflect() protoreflect.Message {
-	mi := &file_test_test_proto_msgTypes[19]
+	mi := &file_test_test_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -819,7 +855,7 @@ func (x *TestUnstash) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TestUnstash.ProtoReflect.Descriptor instead.
 func (*TestUnstash) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{19}
+	return file_test_test_proto_rawDescGZIP(), []int{20}
 }
 
 type TestUnstashAll struct {
@@ -830,7 +866,7 @@ type TestUnstashAll struct {
 
 func (x *TestUnstashAll) Reset() {
 	*x = TestUnstashAll{}
-	mi := &file_test_test_proto_msgTypes[20]
+	mi := &file_test_test_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -842,7 +878,7 @@ func (x *TestUnstashAll) String() string {
 func (*TestUnstashAll) ProtoMessage() {}
 
 func (x *TestUnstashAll) ProtoReflect() protoreflect.Message {
-	mi := &file_test_test_proto_msgTypes[20]
+	mi := &file_test_test_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -855,7 +891,7 @@ func (x *TestUnstashAll) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TestUnstashAll.ProtoReflect.Descriptor instead.
 func (*TestUnstashAll) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{20}
+	return file_test_test_proto_rawDescGZIP(), []int{21}
 }
 
 type TestPing struct {
@@ -866,7 +902,7 @@ type TestPing struct {
 
 func (x *TestPing) Reset() {
 	*x = TestPing{}
-	mi := &file_test_test_proto_msgTypes[21]
+	mi := &file_test_test_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -878,7 +914,7 @@ func (x *TestPing) String() string {
 func (*TestPing) ProtoMessage() {}
 
 func (x *TestPing) ProtoReflect() protoreflect.Message {
-	mi := &file_test_test_proto_msgTypes[21]
+	mi := &file_test_test_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -891,7 +927,7 @@ func (x *TestPing) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TestPing.ProtoReflect.Descriptor instead.
 func (*TestPing) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{21}
+	return file_test_test_proto_rawDescGZIP(), []int{22}
 }
 
 type TestPong struct {
@@ -902,7 +938,7 @@ type TestPong struct {
 
 func (x *TestPong) Reset() {
 	*x = TestPong{}
-	mi := &file_test_test_proto_msgTypes[22]
+	mi := &file_test_test_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -914,7 +950,7 @@ func (x *TestPong) String() string {
 func (*TestPong) ProtoMessage() {}
 
 func (x *TestPong) ProtoReflect() protoreflect.Message {
-	mi := &file_test_test_proto_msgTypes[22]
+	mi := &file_test_test_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -927,7 +963,7 @@ func (x *TestPong) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TestPong.ProtoReflect.Descriptor instead.
 func (*TestPong) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{22}
+	return file_test_test_proto_rawDescGZIP(), []int{23}
 }
 
 type TestWait struct {
@@ -939,7 +975,7 @@ type TestWait struct {
 
 func (x *TestWait) Reset() {
 	*x = TestWait{}
-	mi := &file_test_test_proto_msgTypes[23]
+	mi := &file_test_test_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -951,7 +987,7 @@ func (x *TestWait) String() string {
 func (*TestWait) ProtoMessage() {}
 
 func (x *TestWait) ProtoReflect() protoreflect.Message {
-	mi := &file_test_test_proto_msgTypes[23]
+	mi := &file_test_test_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -964,7 +1000,7 @@ func (x *TestWait) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TestWait.ProtoReflect.Descriptor instead.
 func (*TestWait) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{23}
+	return file_test_test_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *TestWait) GetDuration() uint64 {
@@ -983,7 +1019,7 @@ type TestRunTask struct {
 
 func (x *TestRunTask) Reset() {
 	*x = TestRunTask{}
-	mi := &file_test_test_proto_msgTypes[24]
+	mi := &file_test_test_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -995,7 +1031,7 @@ func (x *TestRunTask) String() string {
 func (*TestRunTask) ProtoMessage() {}
 
 func (x *TestRunTask) ProtoReflect() protoreflect.Message {
-	mi := &file_test_test_proto_msgTypes[24]
+	mi := &file_test_test_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1008,7 +1044,7 @@ func (x *TestRunTask) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TestRunTask.ProtoReflect.Descriptor instead.
 func (*TestRunTask) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{24}
+	return file_test_test_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *TestRunTask) GetDuration() uint64 {
@@ -1026,7 +1062,7 @@ type TaskComplete struct {
 
 func (x *TaskComplete) Reset() {
 	*x = TaskComplete{}
-	mi := &file_test_test_proto_msgTypes[25]
+	mi := &file_test_test_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1038,7 +1074,7 @@ func (x *TaskComplete) String() string {
 func (*TaskComplete) ProtoMessage() {}
 
 func (x *TaskComplete) ProtoReflect() protoreflect.Message {
-	mi := &file_test_test_proto_msgTypes[25]
+	mi := &file_test_test_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1051,7 +1087,7 @@ func (x *TaskComplete) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskComplete.ProtoReflect.Descriptor instead.
 func (*TaskComplete) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{25}
+	return file_test_test_proto_rawDescGZIP(), []int{26}
 }
 
 type TestLog struct {
@@ -1063,7 +1099,7 @@ type TestLog struct {
 
 func (x *TestLog) Reset() {
 	*x = TestLog{}
-	mi := &file_test_test_proto_msgTypes[26]
+	mi := &file_test_test_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1075,7 +1111,7 @@ func (x *TestLog) String() string {
 func (*TestLog) ProtoMessage() {}
 
 func (x *TestLog) ProtoReflect() protoreflect.Message {
-	mi := &file_test_test_proto_msgTypes[26]
+	mi := &file_test_test_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1088,7 +1124,7 @@ func (x *TestLog) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TestLog.ProtoReflect.Descriptor instead.
 func (*TestLog) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{26}
+	return file_test_test_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *TestLog) GetText() string {
@@ -1106,7 +1142,7 @@ type TestGetCount struct {
 
 func (x *TestGetCount) Reset() {
 	*x = TestGetCount{}
-	mi := &file_test_test_proto_msgTypes[27]
+	mi := &file_test_test_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1118,7 +1154,7 @@ func (x *TestGetCount) String() string {
 func (*TestGetCount) ProtoMessage() {}
 
 func (x *TestGetCount) ProtoReflect() protoreflect.Message {
-	mi := &file_test_test_proto_msgTypes[27]
+	mi := &file_test_test_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1131,7 +1167,7 @@ func (x *TestGetCount) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TestGetCount.ProtoReflect.Descriptor instead.
 func (*TestGetCount) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{27}
+	return file_test_test_proto_rawDescGZIP(), []int{28}
 }
 
 type TestCount struct {
@@ -1143,7 +1179,7 @@ type TestCount struct {
 
 func (x *TestCount) Reset() {
 	*x = TestCount{}
-	mi := &file_test_test_proto_msgTypes[28]
+	mi := &file_test_test_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1155,7 +1191,7 @@ func (x *TestCount) String() string {
 func (*TestCount) ProtoMessage() {}
 
 func (x *TestCount) ProtoReflect() protoreflect.Message {
-	mi := &file_test_test_proto_msgTypes[28]
+	mi := &file_test_test_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1168,7 +1204,7 @@ func (x *TestCount) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TestCount.ProtoReflect.Descriptor instead.
 func (*TestCount) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{28}
+	return file_test_test_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *TestCount) GetValue() int32 {
@@ -1186,7 +1222,7 @@ type TestRemoteForward struct {
 
 func (x *TestRemoteForward) Reset() {
 	*x = TestRemoteForward{}
-	mi := &file_test_test_proto_msgTypes[29]
+	mi := &file_test_test_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1198,7 +1234,7 @@ func (x *TestRemoteForward) String() string {
 func (*TestRemoteForward) ProtoMessage() {}
 
 func (x *TestRemoteForward) ProtoReflect() protoreflect.Message {
-	mi := &file_test_test_proto_msgTypes[29]
+	mi := &file_test_test_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1211,7 +1247,7 @@ func (x *TestRemoteForward) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TestRemoteForward.ProtoReflect.Descriptor instead.
 func (*TestRemoteForward) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{29}
+	return file_test_test_proto_rawDescGZIP(), []int{30}
 }
 
 type TestClusterForward struct {
@@ -1222,7 +1258,7 @@ type TestClusterForward struct {
 
 func (x *TestClusterForward) Reset() {
 	*x = TestClusterForward{}
-	mi := &file_test_test_proto_msgTypes[30]
+	mi := &file_test_test_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1234,7 +1270,7 @@ func (x *TestClusterForward) String() string {
 func (*TestClusterForward) ProtoMessage() {}
 
 func (x *TestClusterForward) ProtoReflect() protoreflect.Message {
-	mi := &file_test_test_proto_msgTypes[30]
+	mi := &file_test_test_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1247,7 +1283,7 @@ func (x *TestClusterForward) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TestClusterForward.ProtoReflect.Descriptor instead.
 func (*TestClusterForward) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{30}
+	return file_test_test_proto_rawDescGZIP(), []int{31}
 }
 
 type TestMessage struct {
@@ -1262,7 +1298,7 @@ type TestMessage struct {
 
 func (x *TestMessage) Reset() {
 	*x = TestMessage{}
-	mi := &file_test_test_proto_msgTypes[31]
+	mi := &file_test_test_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1274,7 +1310,7 @@ func (x *TestMessage) String() string {
 func (*TestMessage) ProtoMessage() {}
 
 func (x *TestMessage) ProtoReflect() protoreflect.Message {
-	mi := &file_test_test_proto_msgTypes[31]
+	mi := &file_test_test_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1287,7 +1323,7 @@ func (x *TestMessage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TestMessage.ProtoReflect.Descriptor instead.
 func (*TestMessage) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{31}
+	return file_test_test_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *TestMessage) GetMessage() *anypb.Any {
@@ -1311,77 +1347,78 @@ var file_test_test_proto_rawDesc = string([]byte{
 	0x6f, 0x12, 0x06, 0x74, 0x65, 0x73, 0x74, 0x70, 0x62, 0x1a, 0x19, 0x67, 0x6f, 0x6f, 0x67, 0x6c,
 	0x65, 0x2f, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x62, 0x75, 0x66, 0x2f, 0x61, 0x6e, 0x79, 0x2e, 0x70,
 	0x72, 0x6f, 0x74, 0x6f, 0x22, 0x0b, 0x0a, 0x09, 0x54, 0x65, 0x73, 0x74, 0x52, 0x65, 0x70, 0x6c,
-	0x79, 0x22, 0x0b, 0x0a, 0x09, 0x54, 0x65, 0x73, 0x74, 0x50, 0x61, 0x6e, 0x69, 0x63, 0x22, 0x0d,
-	0x0a, 0x0b, 0x54, 0x65, 0x73, 0x74, 0x54, 0x69, 0x6d, 0x65, 0x6f, 0x75, 0x74, 0x22, 0x21, 0x0a,
-	0x05, 0x52, 0x65, 0x70, 0x6c, 0x79, 0x12, 0x18, 0x0a, 0x07, 0x63, 0x6f, 0x6e, 0x74, 0x65, 0x6e,
-	0x74, 0x18, 0x01, 0x20, 0x01, 0x28, 0x09, 0x52, 0x07, 0x63, 0x6f, 0x6e, 0x74, 0x65, 0x6e, 0x74,
-	0x22, 0x0a, 0x0a, 0x08, 0x54, 0x65, 0x73, 0x74, 0x53, 0x65, 0x6e, 0x64, 0x22, 0x10, 0x0a, 0x0e,
-	0x54, 0x65, 0x73, 0x74, 0x52, 0x65, 0x6d, 0x6f, 0x74, 0x65, 0x53, 0x65, 0x6e, 0x64, 0x22, 0x51,
-	0x0a, 0x07, 0x41, 0x63, 0x63, 0x6f, 0x75, 0x6e, 0x74, 0x12, 0x1d, 0x0a, 0x0a, 0x61, 0x63, 0x63,
+	0x79, 0x22, 0x0b, 0x0a, 0x09, 0x54, 0x65, 0x73, 0x74, 0x50, 0x61, 0x6e, 0x69, 0x63, 0x22, 0x10,
+	0x0a, 0x0e, 0x54, 0x65, 0x73, 0x74, 0x50, 0x61, 0x6e, 0x69, 0x63, 0x45, 0x72, 0x72, 0x6f, 0x72,
+	0x22, 0x0d, 0x0a, 0x0b, 0x54, 0x65, 0x73, 0x74, 0x54, 0x69, 0x6d, 0x65, 0x6f, 0x75, 0x74, 0x22,
+	0x21, 0x0a, 0x05, 0x52, 0x65, 0x70, 0x6c, 0x79, 0x12, 0x18, 0x0a, 0x07, 0x63, 0x6f, 0x6e, 0x74,
+	0x65, 0x6e, 0x74, 0x18, 0x01, 0x20, 0x01, 0x28, 0x09, 0x52, 0x07, 0x63, 0x6f, 0x6e, 0x74, 0x65,
+	0x6e, 0x74, 0x22, 0x0a, 0x0a, 0x08, 0x54, 0x65, 0x73, 0x74, 0x53, 0x65, 0x6e, 0x64, 0x22, 0x10,
+	0x0a, 0x0e, 0x54, 0x65, 0x73, 0x74, 0x52, 0x65, 0x6d, 0x6f, 0x74, 0x65, 0x53, 0x65, 0x6e, 0x64,
+	0x22, 0x51, 0x0a, 0x07, 0x41, 0x63, 0x63, 0x6f, 0x75, 0x6e, 0x74, 0x12, 0x1d, 0x0a, 0x0a, 0x61,
+	0x63, 0x63, 0x6f, 0x75, 0x6e, 0x74, 0x5f, 0x69, 0x64, 0x18, 0x01, 0x20, 0x01, 0x28, 0x09, 0x52,
+	0x09, 0x61, 0x63, 0x63, 0x6f, 0x75, 0x6e, 0x74, 0x49, 0x64, 0x12, 0x27, 0x0a, 0x0f, 0x61, 0x63,
+	0x63, 0x6f, 0x75, 0x6e, 0x74, 0x5f, 0x62, 0x61, 0x6c, 0x61, 0x6e, 0x63, 0x65, 0x18, 0x02, 0x20,
+	0x01, 0x28, 0x01, 0x52, 0x0e, 0x61, 0x63, 0x63, 0x6f, 0x75, 0x6e, 0x74, 0x42, 0x61, 0x6c, 0x61,
+	0x6e, 0x63, 0x65, 0x22, 0x38, 0x0a, 0x0d, 0x43, 0x72, 0x65, 0x61, 0x74, 0x65, 0x41, 0x63, 0x63,
+	0x6f, 0x75, 0x6e, 0x74, 0x12, 0x27, 0x0a, 0x0f, 0x61, 0x63, 0x63, 0x6f, 0x75, 0x6e, 0x74, 0x5f,
+	0x62, 0x61, 0x6c, 0x61, 0x6e, 0x63, 0x65, 0x18, 0x02, 0x20, 0x01, 0x28, 0x01, 0x52, 0x0e, 0x61,
+	0x63, 0x63, 0x6f, 0x75, 0x6e, 0x74, 0x42, 0x61, 0x6c, 0x61, 0x6e, 0x63, 0x65, 0x22, 0x48, 0x0a,
+	0x0d, 0x43, 0x72, 0x65, 0x64, 0x69, 0x74, 0x41, 0x63, 0x63, 0x6f, 0x75, 0x6e, 0x74, 0x12, 0x1d,
+	0x0a, 0x0a, 0x61, 0x63, 0x63, 0x6f, 0x75, 0x6e, 0x74, 0x5f, 0x69, 0x64, 0x18, 0x01, 0x20, 0x01,
+	0x28, 0x09, 0x52, 0x09, 0x61, 0x63, 0x63, 0x6f, 0x75, 0x6e, 0x74, 0x49, 0x64, 0x12, 0x18, 0x0a,
+	0x07, 0x62, 0x61, 0x6c, 0x61, 0x6e, 0x63, 0x65, 0x18, 0x02, 0x20, 0x01, 0x28, 0x01, 0x52, 0x07,
+	0x62, 0x61, 0x6c, 0x61, 0x6e, 0x63, 0x65, 0x22, 0x58, 0x0a, 0x0e, 0x41, 0x63, 0x63, 0x6f, 0x75,
+	0x6e, 0x74, 0x43, 0x72, 0x65, 0x61, 0x74, 0x65, 0x64, 0x12, 0x1d, 0x0a, 0x0a, 0x61, 0x63, 0x63,
 	0x6f, 0x75, 0x6e, 0x74, 0x5f, 0x69, 0x64, 0x18, 0x01, 0x20, 0x01, 0x28, 0x09, 0x52, 0x09, 0x61,
 	0x63, 0x63, 0x6f, 0x75, 0x6e, 0x74, 0x49, 0x64, 0x12, 0x27, 0x0a, 0x0f, 0x61, 0x63, 0x63, 0x6f,
 	0x75, 0x6e, 0x74, 0x5f, 0x62, 0x61, 0x6c, 0x61, 0x6e, 0x63, 0x65, 0x18, 0x02, 0x20, 0x01, 0x28,
 	0x01, 0x52, 0x0e, 0x61, 0x63, 0x63, 0x6f, 0x75, 0x6e, 0x74, 0x42, 0x61, 0x6c, 0x61, 0x6e, 0x63,
-	0x65, 0x22, 0x38, 0x0a, 0x0d, 0x43, 0x72, 0x65, 0x61, 0x74, 0x65, 0x41, 0x63, 0x63, 0x6f, 0x75,
-	0x6e, 0x74, 0x12, 0x27, 0x0a, 0x0f, 0x61, 0x63, 0x63, 0x6f, 0x75, 0x6e, 0x74, 0x5f, 0x62, 0x61,
-	0x6c, 0x61, 0x6e, 0x63, 0x65, 0x18, 0x02, 0x20, 0x01, 0x28, 0x01, 0x52, 0x0e, 0x61, 0x63, 0x63,
-	0x6f, 0x75, 0x6e, 0x74, 0x42, 0x61, 0x6c, 0x61, 0x6e, 0x63, 0x65, 0x22, 0x48, 0x0a, 0x0d, 0x43,
-	0x72, 0x65, 0x64, 0x69, 0x74, 0x41, 0x63, 0x63, 0x6f, 0x75, 0x6e, 0x74, 0x12, 0x1d, 0x0a, 0x0a,
-	0x61, 0x63, 0x63, 0x6f, 0x75, 0x6e, 0x74, 0x5f, 0x69, 0x64, 0x18, 0x01, 0x20, 0x01, 0x28, 0x09,
-	0x52, 0x09, 0x61, 0x63, 0x63, 0x6f, 0x75, 0x6e, 0x74, 0x49, 0x64, 0x12, 0x18, 0x0a, 0x07, 0x62,
-	0x61, 0x6c, 0x61, 0x6e, 0x63, 0x65, 0x18, 0x02, 0x20, 0x01, 0x28, 0x01, 0x52, 0x07, 0x62, 0x61,
-	0x6c, 0x61, 0x6e, 0x63, 0x65, 0x22, 0x58, 0x0a, 0x0e, 0x41, 0x63, 0x63, 0x6f, 0x75, 0x6e, 0x74,
-	0x43, 0x72, 0x65, 0x61, 0x74, 0x65, 0x64, 0x12, 0x1d, 0x0a, 0x0a, 0x61, 0x63, 0x63, 0x6f, 0x75,
-	0x6e, 0x74, 0x5f, 0x69, 0x64, 0x18, 0x01, 0x20, 0x01, 0x28, 0x09, 0x52, 0x09, 0x61, 0x63, 0x63,
-	0x6f, 0x75, 0x6e, 0x74, 0x49, 0x64, 0x12, 0x27, 0x0a, 0x0f, 0x61, 0x63, 0x63, 0x6f, 0x75, 0x6e,
-	0x74, 0x5f, 0x62, 0x61, 0x6c, 0x61, 0x6e, 0x63, 0x65, 0x18, 0x02, 0x20, 0x01, 0x28, 0x01, 0x52,
-	0x0e, 0x61, 0x63, 0x63, 0x6f, 0x75, 0x6e, 0x74, 0x42, 0x61, 0x6c, 0x61, 0x6e, 0x63, 0x65, 0x22,
-	0x59, 0x0a, 0x0f, 0x41, 0x63, 0x63, 0x6f, 0x75, 0x6e, 0x74, 0x43, 0x72, 0x65, 0x64, 0x69, 0x74,
-	0x65, 0x64, 0x12, 0x1d, 0x0a, 0x0a, 0x61, 0x63, 0x63, 0x6f, 0x75, 0x6e, 0x74, 0x5f, 0x69, 0x64,
-	0x18, 0x01, 0x20, 0x01, 0x28, 0x09, 0x52, 0x09, 0x61, 0x63, 0x63, 0x6f, 0x75, 0x6e, 0x74, 0x49,
-	0x64, 0x12, 0x27, 0x0a, 0x0f, 0x61, 0x63, 0x63, 0x6f, 0x75, 0x6e, 0x74, 0x5f, 0x62, 0x61, 0x6c,
-	0x61, 0x6e, 0x63, 0x65, 0x18, 0x02, 0x20, 0x01, 0x28, 0x01, 0x52, 0x0e, 0x61, 0x63, 0x63, 0x6f,
-	0x75, 0x6e, 0x74, 0x42, 0x61, 0x6c, 0x61, 0x6e, 0x63, 0x65, 0x22, 0x0e, 0x0a, 0x0c, 0x44, 0x65,
-	0x62, 0x69, 0x74, 0x41, 0x63, 0x63, 0x6f, 0x75, 0x6e, 0x74, 0x22, 0x10, 0x0a, 0x0e, 0x41, 0x63,
-	0x63, 0x6f, 0x75, 0x6e, 0x74, 0x44, 0x65, 0x62, 0x69, 0x74, 0x65, 0x64, 0x22, 0x0b, 0x0a, 0x09,
-	0x54, 0x65, 0x73, 0x74, 0x4c, 0x6f, 0x67, 0x69, 0x6e, 0x22, 0x12, 0x0a, 0x10, 0x54, 0x65, 0x73,
-	0x74, 0x4c, 0x6f, 0x67, 0x69, 0x6e, 0x53, 0x75, 0x63, 0x63, 0x65, 0x73, 0x73, 0x22, 0x0f, 0x0a,
-	0x0d, 0x54, 0x65, 0x73, 0x74, 0x52, 0x65, 0x61, 0x64, 0x69, 0x6e, 0x65, 0x73, 0x73, 0x22, 0x0b,
-	0x0a, 0x09, 0x54, 0x65, 0x73, 0x74, 0x52, 0x65, 0x61, 0x64, 0x79, 0x22, 0x09, 0x0a, 0x07, 0x54,
-	0x65, 0x73, 0x74, 0x42, 0x79, 0x65, 0x22, 0x0b, 0x0a, 0x09, 0x54, 0x65, 0x73, 0x74, 0x53, 0x74,
-	0x61, 0x73, 0x68, 0x22, 0x0d, 0x0a, 0x0b, 0x54, 0x65, 0x73, 0x74, 0x55, 0x6e, 0x73, 0x74, 0x61,
-	0x73, 0x68, 0x22, 0x10, 0x0a, 0x0e, 0x54, 0x65, 0x73, 0x74, 0x55, 0x6e, 0x73, 0x74, 0x61, 0x73,
-	0x68, 0x41, 0x6c, 0x6c, 0x22, 0x0a, 0x0a, 0x08, 0x54, 0x65, 0x73, 0x74, 0x50, 0x69, 0x6e, 0x67,
-	0x22, 0x0a, 0x0a, 0x08, 0x54, 0x65, 0x73, 0x74, 0x50, 0x6f, 0x6e, 0x67, 0x22, 0x26, 0x0a, 0x08,
-	0x54, 0x65, 0x73, 0x74, 0x57, 0x61, 0x69, 0x74, 0x12, 0x1a, 0x0a, 0x08, 0x64, 0x75, 0x72, 0x61,
-	0x74, 0x69, 0x6f, 0x6e, 0x18, 0x01, 0x20, 0x01, 0x28, 0x04, 0x52, 0x08, 0x64, 0x75, 0x72, 0x61,
-	0x74, 0x69, 0x6f, 0x6e, 0x22, 0x29, 0x0a, 0x0b, 0x54, 0x65, 0x73, 0x74, 0x52, 0x75, 0x6e, 0x54,
-	0x61, 0x73, 0x6b, 0x12, 0x1a, 0x0a, 0x08, 0x64, 0x75, 0x72, 0x61, 0x74, 0x69, 0x6f, 0x6e, 0x18,
-	0x01, 0x20, 0x01, 0x28, 0x04, 0x52, 0x08, 0x64, 0x75, 0x72, 0x61, 0x74, 0x69, 0x6f, 0x6e, 0x22,
-	0x0e, 0x0a, 0x0c, 0x54, 0x61, 0x73, 0x6b, 0x43, 0x6f, 0x6d, 0x70, 0x6c, 0x65, 0x74, 0x65, 0x22,
-	0x1d, 0x0a, 0x07, 0x54, 0x65, 0x73, 0x74, 0x4c, 0x6f, 0x67, 0x12, 0x12, 0x0a, 0x04, 0x74, 0x65,
-	0x78, 0x74, 0x18, 0x01, 0x20, 0x01, 0x28, 0x09, 0x52, 0x04, 0x74, 0x65, 0x78, 0x74, 0x22, 0x0e,
-	0x0a, 0x0c, 0x54, 0x65, 0x73, 0x74, 0x47, 0x65, 0x74, 0x43, 0x6f, 0x75, 0x6e, 0x74, 0x22, 0x21,
-	0x0a, 0x09, 0x54, 0x65, 0x73, 0x74, 0x43, 0x6f, 0x75, 0x6e, 0x74, 0x12, 0x14, 0x0a, 0x05, 0x76,
-	0x61, 0x6c, 0x75, 0x65, 0x18, 0x01, 0x20, 0x01, 0x28, 0x05, 0x52, 0x05, 0x76, 0x61, 0x6c, 0x75,
-	0x65, 0x22, 0x13, 0x0a, 0x11, 0x54, 0x65, 0x73, 0x74, 0x52, 0x65, 0x6d, 0x6f, 0x74, 0x65, 0x46,
-	0x6f, 0x72, 0x77, 0x61, 0x72, 0x64, 0x22, 0x14, 0x0a, 0x12, 0x54, 0x65, 0x73, 0x74, 0x43, 0x6c,
-	0x75, 0x73, 0x74, 0x65, 0x72, 0x46, 0x6f, 0x72, 0x77, 0x61, 0x72, 0x64, 0x22, 0x59, 0x0a, 0x0b,
-	0x54, 0x65, 0x73, 0x74, 0x4d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x12, 0x2e, 0x0a, 0x07, 0x6d,
-	0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x14, 0x2e, 0x67,
-	0x6f, 0x6f, 0x67, 0x6c, 0x65, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x62, 0x75, 0x66, 0x2e, 0x41,
-	0x6e, 0x79, 0x52, 0x07, 0x6d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x12, 0x1a, 0x0a, 0x08, 0x70,
-	0x72, 0x69, 0x6f, 0x72, 0x69, 0x74, 0x79, 0x18, 0x02, 0x20, 0x01, 0x28, 0x03, 0x52, 0x08, 0x70,
-	0x72, 0x69, 0x6f, 0x72, 0x69, 0x74, 0x79, 0x42, 0x80, 0x01, 0x0a, 0x0a, 0x63, 0x6f, 0x6d, 0x2e,
-	0x74, 0x65, 0x73, 0x74, 0x70, 0x62, 0x42, 0x09, 0x54, 0x65, 0x73, 0x74, 0x50, 0x72, 0x6f, 0x74,
-	0x6f, 0x48, 0x02, 0x50, 0x01, 0x5a, 0x2d, 0x67, 0x69, 0x74, 0x68, 0x75, 0x62, 0x2e, 0x63, 0x6f,
-	0x6d, 0x2f, 0x74, 0x6f, 0x63, 0x68, 0x65, 0x6d, 0x65, 0x79, 0x2f, 0x67, 0x6f, 0x61, 0x6b, 0x74,
-	0x2f, 0x76, 0x33, 0x2f, 0x74, 0x65, 0x73, 0x74, 0x2f, 0x64, 0x61, 0x74, 0x61, 0x3b, 0x74, 0x65,
-	0x73, 0x74, 0x70, 0x62, 0xa2, 0x02, 0x03, 0x54, 0x58, 0x58, 0xaa, 0x02, 0x06, 0x54, 0x65, 0x73,
-	0x74, 0x70, 0x62, 0xca, 0x02, 0x06, 0x54, 0x65, 0x73, 0x74, 0x70, 0x62, 0xe2, 0x02, 0x12, 0x54,
-	0x65, 0x73, 0x74, 0x70, 0x62, 0x5c, 0x47, 0x50, 0x42, 0x4d, 0x65, 0x74, 0x61, 0x64, 0x61, 0x74,
-	0x61, 0xea, 0x02, 0x06, 0x54, 0x65, 0x73, 0x74, 0x70, 0x62, 0x62, 0x06, 0x70, 0x72, 0x6f, 0x74,
-	0x6f, 0x33,
+	0x65, 0x22, 0x59, 0x0a, 0x0f, 0x41, 0x63, 0x63, 0x6f, 0x75, 0x6e, 0x74, 0x43, 0x72, 0x65, 0x64,
+	0x69, 0x74, 0x65, 0x64, 0x12, 0x1d, 0x0a, 0x0a, 0x61, 0x63, 0x63, 0x6f, 0x75, 0x6e, 0x74, 0x5f,
+	0x69, 0x64, 0x18, 0x01, 0x20, 0x01, 0x28, 0x09, 0x52, 0x09, 0x61, 0x63, 0x63, 0x6f, 0x75, 0x6e,
+	0x74, 0x49, 0x64, 0x12, 0x27, 0x0a, 0x0f, 0x61, 0x63, 0x63, 0x6f, 0x75, 0x6e, 0x74, 0x5f, 0x62,
+	0x61, 0x6c, 0x61, 0x6e, 0x63, 0x65, 0x18, 0x02, 0x20, 0x01, 0x28, 0x01, 0x52, 0x0e, 0x61, 0x63,
+	0x63, 0x6f, 0x75, 0x6e, 0x74, 0x42, 0x61, 0x6c, 0x61, 0x6e, 0x63, 0x65, 0x22, 0x0e, 0x0a, 0x0c,
+	0x44, 0x65, 0x62, 0x69, 0x74, 0x41, 0x63, 0x63, 0x6f, 0x75, 0x6e, 0x74, 0x22, 0x10, 0x0a, 0x0e,
+	0x41, 0x63, 0x63, 0x6f, 0x75, 0x6e, 0x74, 0x44, 0x65, 0x62, 0x69, 0x74, 0x65, 0x64, 0x22, 0x0b,
+	0x0a, 0x09, 0x54, 0x65, 0x73, 0x74, 0x4c, 0x6f, 0x67, 0x69, 0x6e, 0x22, 0x12, 0x0a, 0x10, 0x54,
+	0x65, 0x73, 0x74, 0x4c, 0x6f, 0x67, 0x69, 0x6e, 0x53, 0x75, 0x63, 0x63, 0x65, 0x73, 0x73, 0x22,
+	0x0f, 0x0a, 0x0d, 0x54, 0x65, 0x73, 0x74, 0x52, 0x65, 0x61, 0x64, 0x69, 0x6e, 0x65, 0x73, 0x73,
+	0x22, 0x0b, 0x0a, 0x09, 0x54, 0x65, 0x73, 0x74, 0x52, 0x65, 0x61, 0x64, 0x79, 0x22, 0x09, 0x0a,
+	0x07, 0x54, 0x65, 0x73, 0x74, 0x42, 0x79, 0x65, 0x22, 0x0b, 0x0a, 0x09, 0x54, 0x65, 0x73, 0x74,
+	0x53, 0x74, 0x61, 0x73, 0x68, 0x22, 0x0d, 0x0a, 0x0b, 0x54, 0x65, 0x73, 0x74, 0x55, 0x6e, 0x73,
+	0x74, 0x61, 0x73, 0x68, 0x22, 0x10, 0x0a, 0x0e, 0x54, 0x65, 0x73, 0x74, 0x55, 0x6e, 0x73, 0x74,
+	0x61, 0x73, 0x68, 0x41, 0x6c, 0x6c, 0x22, 0x0a, 0x0a, 0x08, 0x54, 0x65, 0x73, 0x74, 0x50, 0x69,
+	0x6e, 0x67, 0x22, 0x0a, 0x0a, 0x08, 0x54, 0x65, 0x73, 0x74, 0x50, 0x6f, 0x6e, 0x67, 0x22, 0x26,
+	0x0a, 0x08, 0x54, 0x65, 0x73, 0x74, 0x57, 0x61, 0x69, 0x74, 0x12, 0x1a, 0x0a, 0x08, 0x64, 0x75,
+	0x72, 0x61, 0x74, 0x69, 0x6f, 0x6e, 0x18, 0x01, 0x20, 0x01, 0x28, 0x04, 0x52, 0x08, 0x64, 0x75,
+	0x72, 0x61, 0x74, 0x69, 0x6f, 0x6e, 0x22, 0x29, 0x0a, 0x0b, 0x54, 0x65, 0x73, 0x74, 0x52, 0x75,
+	0x6e, 0x54, 0x61, 0x73, 0x6b, 0x12, 0x1a, 0x0a, 0x08, 0x64, 0x75, 0x72, 0x61, 0x74, 0x69, 0x6f,
+	0x6e, 0x18, 0x01, 0x20, 0x01, 0x28, 0x04, 0x52, 0x08, 0x64, 0x75, 0x72, 0x61, 0x74, 0x69, 0x6f,
+	0x6e, 0x22, 0x0e, 0x0a, 0x0c, 0x54, 0x61, 0x73, 0x6b, 0x43, 0x6f, 0x6d, 0x70, 0x6c, 0x65, 0x74,
+	0x65, 0x22, 0x1d, 0x0a, 0x07, 0x54, 0x65, 0x73, 0x74, 0x4c, 0x6f, 0x67, 0x12, 0x12, 0x0a, 0x04,
+	0x74, 0x65, 0x78, 0x74, 0x18, 0x01, 0x20, 0x01, 0x28, 0x09, 0x52, 0x04, 0x74, 0x65, 0x78, 0x74,
+	0x22, 0x0e, 0x0a, 0x0c, 0x54, 0x65, 0x73, 0x74, 0x47, 0x65, 0x74, 0x43, 0x6f, 0x75, 0x6e, 0x74,
+	0x22, 0x21, 0x0a, 0x09, 0x54, 0x65, 0x73, 0x74, 0x43, 0x6f, 0x75, 0x6e, 0x74, 0x12, 0x14, 0x0a,
+	0x05, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x18, 0x01, 0x20, 0x01, 0x28, 0x05, 0x52, 0x05, 0x76, 0x61,
+	0x6c, 0x75, 0x65, 0x22, 0x13, 0x0a, 0x11, 0x54, 0x65, 0x73, 0x74, 0x52, 0x65, 0x6d, 0x6f, 0x74,
+	0x65, 0x46, 0x6f, 0x72, 0x77, 0x61, 0x72, 0x64, 0x22, 0x14, 0x0a, 0x12, 0x54, 0x65, 0x73, 0x74,
+	0x43, 0x6c, 0x75, 0x73, 0x74, 0x65, 0x72, 0x46, 0x6f, 0x72, 0x77, 0x61, 0x72, 0x64, 0x22, 0x59,
+	0x0a, 0x0b, 0x54, 0x65, 0x73, 0x74, 0x4d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x12, 0x2e, 0x0a,
+	0x07, 0x6d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x14,
+	0x2e, 0x67, 0x6f, 0x6f, 0x67, 0x6c, 0x65, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x62, 0x75, 0x66,
+	0x2e, 0x41, 0x6e, 0x79, 0x52, 0x07, 0x6d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x12, 0x1a, 0x0a,
+	0x08, 0x70, 0x72, 0x69, 0x6f, 0x72, 0x69, 0x74, 0x79, 0x18, 0x02, 0x20, 0x01, 0x28, 0x03, 0x52,
+	0x08, 0x70, 0x72, 0x69, 0x6f, 0x72, 0x69, 0x74, 0x79, 0x42, 0x80, 0x01, 0x0a, 0x0a, 0x63, 0x6f,
+	0x6d, 0x2e, 0x74, 0x65, 0x73, 0x74, 0x70, 0x62, 0x42, 0x09, 0x54, 0x65, 0x73, 0x74, 0x50, 0x72,
+	0x6f, 0x74, 0x6f, 0x48, 0x02, 0x50, 0x01, 0x5a, 0x2d, 0x67, 0x69, 0x74, 0x68, 0x75, 0x62, 0x2e,
+	0x63, 0x6f, 0x6d, 0x2f, 0x74, 0x6f, 0x63, 0x68, 0x65, 0x6d, 0x65, 0x79, 0x2f, 0x67, 0x6f, 0x61,
+	0x6b, 0x74, 0x2f, 0x76, 0x33, 0x2f, 0x74, 0x65, 0x73, 0x74, 0x2f, 0x64, 0x61, 0x74, 0x61, 0x3b,
+	0x74, 0x65, 0x73, 0x74, 0x70, 0x62, 0xa2, 0x02, 0x03, 0x54, 0x58, 0x58, 0xaa, 0x02, 0x06, 0x54,
+	0x65, 0x73, 0x74, 0x70, 0x62, 0xca, 0x02, 0x06, 0x54, 0x65, 0x73, 0x74, 0x70, 0x62, 0xe2, 0x02,
+	0x12, 0x54, 0x65, 0x73, 0x74, 0x70, 0x62, 0x5c, 0x47, 0x50, 0x42, 0x4d, 0x65, 0x74, 0x61, 0x64,
+	0x61, 0x74, 0x61, 0xea, 0x02, 0x06, 0x54, 0x65, 0x73, 0x74, 0x70, 0x62, 0x62, 0x06, 0x70, 0x72,
+	0x6f, 0x74, 0x6f, 0x33,
 })
 
 var (
@@ -1396,44 +1433,45 @@ func file_test_test_proto_rawDescGZIP() []byte {
 	return file_test_test_proto_rawDescData
 }
 
-var file_test_test_proto_msgTypes = make([]protoimpl.MessageInfo, 32)
+var file_test_test_proto_msgTypes = make([]protoimpl.MessageInfo, 33)
 var file_test_test_proto_goTypes = []any{
 	(*TestReply)(nil),          // 0: testpb.TestReply
 	(*TestPanic)(nil),          // 1: testpb.TestPanic
-	(*TestTimeout)(nil),        // 2: testpb.TestTimeout
-	(*Reply)(nil),              // 3: testpb.Reply
-	(*TestSend)(nil),           // 4: testpb.TestSend
-	(*TestRemoteSend)(nil),     // 5: testpb.TestRemoteSend
-	(*Account)(nil),            // 6: testpb.Account
-	(*CreateAccount)(nil),      // 7: testpb.CreateAccount
-	(*CreditAccount)(nil),      // 8: testpb.CreditAccount
-	(*AccountCreated)(nil),     // 9: testpb.AccountCreated
-	(*AccountCredited)(nil),    // 10: testpb.AccountCredited
-	(*DebitAccount)(nil),       // 11: testpb.DebitAccount
-	(*AccountDebited)(nil),     // 12: testpb.AccountDebited
-	(*TestLogin)(nil),          // 13: testpb.TestLogin
-	(*TestLoginSuccess)(nil),   // 14: testpb.TestLoginSuccess
-	(*TestReadiness)(nil),      // 15: testpb.TestReadiness
-	(*TestReady)(nil),          // 16: testpb.TestReady
-	(*TestBye)(nil),            // 17: testpb.TestBye
-	(*TestStash)(nil),          // 18: testpb.TestStash
-	(*TestUnstash)(nil),        // 19: testpb.TestUnstash
-	(*TestUnstashAll)(nil),     // 20: testpb.TestUnstashAll
-	(*TestPing)(nil),           // 21: testpb.TestPing
-	(*TestPong)(nil),           // 22: testpb.TestPong
-	(*TestWait)(nil),           // 23: testpb.TestWait
-	(*TestRunTask)(nil),        // 24: testpb.TestRunTask
-	(*TaskComplete)(nil),       // 25: testpb.TaskComplete
-	(*TestLog)(nil),            // 26: testpb.TestLog
-	(*TestGetCount)(nil),       // 27: testpb.TestGetCount
-	(*TestCount)(nil),          // 28: testpb.TestCount
-	(*TestRemoteForward)(nil),  // 29: testpb.TestRemoteForward
-	(*TestClusterForward)(nil), // 30: testpb.TestClusterForward
-	(*TestMessage)(nil),        // 31: testpb.TestMessage
-	(*anypb.Any)(nil),          // 32: google.protobuf.Any
+	(*TestPanicError)(nil),     // 2: testpb.TestPanicError
+	(*TestTimeout)(nil),        // 3: testpb.TestTimeout
+	(*Reply)(nil),              // 4: testpb.Reply
+	(*TestSend)(nil),           // 5: testpb.TestSend
+	(*TestRemoteSend)(nil),     // 6: testpb.TestRemoteSend
+	(*Account)(nil),            // 7: testpb.Account
+	(*CreateAccount)(nil),      // 8: testpb.CreateAccount
+	(*CreditAccount)(nil),      // 9: testpb.CreditAccount
+	(*AccountCreated)(nil),     // 10: testpb.AccountCreated
+	(*AccountCredited)(nil),    // 11: testpb.AccountCredited
+	(*DebitAccount)(nil),       // 12: testpb.DebitAccount
+	(*AccountDebited)(nil),     // 13: testpb.AccountDebited
+	(*TestLogin)(nil),          // 14: testpb.TestLogin
+	(*TestLoginSuccess)(nil),   // 15: testpb.TestLoginSuccess
+	(*TestReadiness)(nil),      // 16: testpb.TestReadiness
+	(*TestReady)(nil),          // 17: testpb.TestReady
+	(*TestBye)(nil),            // 18: testpb.TestBye
+	(*TestStash)(nil),          // 19: testpb.TestStash
+	(*TestUnstash)(nil),        // 20: testpb.TestUnstash
+	(*TestUnstashAll)(nil),     // 21: testpb.TestUnstashAll
+	(*TestPing)(nil),           // 22: testpb.TestPing
+	(*TestPong)(nil),           // 23: testpb.TestPong
+	(*TestWait)(nil),           // 24: testpb.TestWait
+	(*TestRunTask)(nil),        // 25: testpb.TestRunTask
+	(*TaskComplete)(nil),       // 26: testpb.TaskComplete
+	(*TestLog)(nil),            // 27: testpb.TestLog
+	(*TestGetCount)(nil),       // 28: testpb.TestGetCount
+	(*TestCount)(nil),          // 29: testpb.TestCount
+	(*TestRemoteForward)(nil),  // 30: testpb.TestRemoteForward
+	(*TestClusterForward)(nil), // 31: testpb.TestClusterForward
+	(*TestMessage)(nil),        // 32: testpb.TestMessage
+	(*anypb.Any)(nil),          // 33: google.protobuf.Any
 }
 var file_test_test_proto_depIdxs = []int32{
-	32, // 0: testpb.TestMessage.message:type_name -> google.protobuf.Any
+	33, // 0: testpb.TestMessage.message:type_name -> google.protobuf.Any
 	1,  // [1:1] is the sub-list for method output_type
 	1,  // [1:1] is the sub-list for method input_type
 	1,  // [1:1] is the sub-list for extension type_name
@@ -1452,7 +1490,7 @@ func file_test_test_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_test_test_proto_rawDesc), len(file_test_test_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   32,
+			NumMessages:   33,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

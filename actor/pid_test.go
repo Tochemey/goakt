@@ -44,7 +44,6 @@ import (
 	"github.com/tochemey/goakt/v3/log"
 	"github.com/tochemey/goakt/v3/remote"
 	"github.com/tochemey/goakt/v3/test/data/testpb"
-	testspb "github.com/tochemey/goakt/v3/test/data/testpb"
 )
 
 const (
@@ -78,7 +77,7 @@ func TestReceive(t *testing.T) {
 
 		// let us send 10 messages to the actor
 		count := 10
-		for i := 0; i < count; i++ {
+		for range count {
 			receiveContext := &ReceiveContext{
 				ctx:     ctx,
 				message: new(testpb.TestSend),
@@ -658,7 +657,7 @@ func TestSupervisorStrategy(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NoError(t, actorSystem.Stop(ctx))
 	})
-	t.Run("With the default supervisor directives", func(t *testing.T) {
+	t.Run("With the default supervisor directives: generic panic", func(t *testing.T) {
 		ctx := context.TODO()
 		host := "127.0.0.1"
 		ports := dynaport.Get(1)
@@ -689,6 +688,50 @@ func TestSupervisorStrategy(t *testing.T) {
 		require.Len(t, parent.Children(), 1)
 		// send a test panic message to the actor
 		require.NoError(t, Tell(ctx, child, new(testpb.TestPanic)))
+
+		// wait for the child to properly shutdown
+		util.Pause(time.Second)
+
+		// assert the actor state
+		require.False(t, child.IsRunning())
+		require.Len(t, parent.Children(), 0)
+
+		//stop the actor
+		err = parent.Shutdown(ctx)
+		assert.NoError(t, err)
+		assert.NoError(t, actorSystem.Stop(ctx))
+	})
+	t.Run("With the default supervisor directives: panic with error", func(t *testing.T) {
+		ctx := context.TODO()
+		host := "127.0.0.1"
+		ports := dynaport.Get(1)
+
+		actorSystem, err := NewActorSystem("testSys",
+			WithRemote(remote.NewConfig(host, ports[0])),
+			WithPassivationDisabled(),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+
+		util.Pause(time.Second)
+
+		parent, err := actorSystem.Spawn(ctx, "test", newMockSupervisorActor())
+		require.NoError(t, err)
+		require.NotNil(t, parent)
+
+		// create the child actor
+		child, err := parent.SpawnChild(ctx, "SpawnChild", newMockSupervisedActor())
+		require.NoError(t, err)
+		require.NotNil(t, child)
+
+		util.Pause(time.Second)
+
+		require.Len(t, parent.Children(), 1)
+		// send a test panic message to the actor
+		require.NoError(t, Tell(ctx, child, new(testpb.TestPanicError)))
 
 		// wait for the child to properly shutdown
 		util.Pause(time.Second)
@@ -3151,7 +3194,7 @@ func TestPipeTo(t *testing.T) {
 		task := func() (proto.Message, error) {
 			// simulate a long-running task
 			util.Pause(time.Second)
-			return new(testspb.TaskComplete), nil
+			return new(testpb.TaskComplete), nil
 		}
 
 		err = pid1.PipeTo(ctx, pid2, task)
@@ -3216,7 +3259,7 @@ func TestPipeTo(t *testing.T) {
 		task := func() (proto.Message, error) {
 			// simulate a long-running task
 			util.Pause(time.Second)
-			return new(testspb.TaskComplete), nil
+			return new(testpb.TaskComplete), nil
 		}
 
 		err = pid1.PipeTo(ctx, pid2, task)
@@ -3754,4 +3797,131 @@ func TestDeadletterCountMetric(t *testing.T) {
 
 	err = sys.Stop(ctx)
 	assert.NoError(t, err)
+}
+func TestWatch(t *testing.T) {
+	ctx := context.TODO()
+	host := "127.0.0.1"
+	ports := dynaport.Get(1)
+
+	actorSystem, err := NewActorSystem("testSys",
+		WithRemote(remote.NewConfig(host, ports[0])),
+		WithPassivationDisabled(),
+		WithJanitorInterval(time.Minute),
+		WithLogger(log.DiscardLogger))
+
+	require.NoError(t, err)
+	require.NotNil(t, actorSystem)
+
+	require.NoError(t, actorSystem.Start(ctx))
+
+	util.Pause(time.Second)
+
+	// create the actor ref
+	pid, err := actorSystem.Spawn(ctx, "actor", newMockActor())
+	require.NoError(t, err)
+	require.NotNil(t, pid)
+	require.True(t, pid.IsRunning())
+
+	// create another actor ref
+	pid2, err := actorSystem.Spawn(ctx, "actor2", newMockActor())
+	require.NoError(t, err)
+	require.NotNil(t, pid2)
+	require.True(t, pid2.IsRunning())
+
+	// let pid watch pid2
+	pid.Watch(pid2)
+	pnode, ok := pid2.ActorSystem().tree().node(pid2.ID())
+	require.True(t, ok)
+	watchers := pnode.Watchers
+
+	found := false
+	for _, watcher := range watchers.Items() {
+		if watcher.value().Equals(pid) {
+			found = true
+			break
+		}
+	}
+
+	require.True(t, found)
+	util.Pause(time.Second)
+	assert.NoError(t, actorSystem.Stop(ctx))
+}
+func TestUnWatchWithInexistentNode(t *testing.T) {
+	ctx := context.TODO()
+	host := "127.0.0.1"
+	ports := dynaport.Get(1)
+
+	actorSystem, err := NewActorSystem("testSys",
+		WithRemote(remote.NewConfig(host, ports[0])),
+		WithPassivationDisabled(),
+		WithJanitorInterval(time.Minute),
+		WithLogger(log.DiscardLogger))
+
+	require.NoError(t, err)
+	require.NotNil(t, actorSystem)
+
+	require.NoError(t, actorSystem.Start(ctx))
+
+	util.Pause(time.Second)
+
+	// create the actor ref
+	pid, err := actorSystem.Spawn(ctx, "actor", newMockActor())
+	require.NoError(t, err)
+	require.NotNil(t, pid)
+	require.True(t, pid.IsRunning())
+
+	childPath := address.New("child", "sys", "127.0.0.1", ports[0])
+	cid, err := newPID(
+		ctx, childPath,
+		newMockSupervisorActor(),
+		withInitMaxRetries(1),
+		withActorSystem(actorSystem),
+		withCustomLogger(log.DiscardLogger),
+	)
+	require.NoError(t, err)
+	require.NotNil(t, cid)
+	// this node does not exist in the actors tree
+	pnode, ok := pid.ActorSystem().tree().node(cid.ID())
+	require.False(t, ok)
+	require.Nil(t, pnode)
+
+	// this call will result in no-op
+	cid.UnWatch(pid)
+
+	util.Pause(time.Second)
+	require.NoError(t, cid.Shutdown(ctx))
+	require.NoError(t, actorSystem.Stop(ctx))
+}
+func TestParentWithInexistenceNodeReturnsNil(t *testing.T) {
+	ctx := context.TODO()
+	host := "127.0.0.1"
+	ports := dynaport.Get(1)
+
+	actorSystem, err := NewActorSystem("testSys",
+		WithRemote(remote.NewConfig(host, ports[0])),
+		WithPassivationDisabled(),
+		WithJanitorInterval(time.Minute),
+		WithLogger(log.DiscardLogger))
+
+	require.NoError(t, err)
+	require.NotNil(t, actorSystem)
+
+	require.NoError(t, actorSystem.Start(ctx))
+
+	util.Pause(time.Second)
+
+	childPath := address.New("child", "sys", "127.0.0.1", ports[0])
+	cid, err := newPID(
+		ctx, childPath,
+		newMockSupervisorActor(),
+		withInitMaxRetries(1),
+		withActorSystem(actorSystem),
+		withCustomLogger(log.DiscardLogger),
+	)
+	require.NoError(t, err)
+	require.NotNil(t, cid)
+	parent := cid.Parent()
+	require.Nil(t, parent)
+	require.NoError(t, cid.Shutdown(ctx))
+	require.NoError(t, actorSystem.Stop(ctx))
 }

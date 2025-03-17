@@ -41,7 +41,6 @@ import (
 	"github.com/tochemey/goakt/v3/log"
 	"github.com/tochemey/goakt/v3/remote"
 	"github.com/tochemey/goakt/v3/test/data/testpb"
-	testspb "github.com/tochemey/goakt/v3/test/data/testpb"
 )
 
 func TestReceiveContext(t *testing.T) {
@@ -2105,7 +2104,7 @@ func TestReceiveContext(t *testing.T) {
 		task := func() (proto.Message, error) {
 			// simulate a long-running task
 			util.Pause(500 * time.Millisecond)
-			return new(testspb.TaskComplete), nil
+			return new(testpb.TaskComplete), nil
 		}
 		messageContext.PipeTo(pid2, task)
 
@@ -2822,5 +2821,70 @@ func TestReceiveContext(t *testing.T) {
 		require.NoError(t, actorSystem.Stop(ctx))
 		require.NoError(t, actorSystem2.Stop(ctx))
 		srv.Shutdown()
+	})
+	t.Run("With Watch/UnWatch", func(t *testing.T) {
+		ctx := context.TODO()
+		ports := dynaport.Get(1)
+
+		actorSystem, err := NewActorSystem("sys",
+			WithRemote(remote.NewConfig("127.0.0.1", ports[0])),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NoError(t, actorSystem.Start(ctx))
+
+		util.Pause(time.Second)
+
+		// create actor1
+		actor1 := &exchanger{}
+		pid1, err := actorSystem.Spawn(ctx, "Exchange1", actor1)
+		require.NoError(t, err)
+		require.NotNil(t, pid1)
+
+		// create an instance of receive context
+		context := &ReceiveContext{
+			ctx:     ctx,
+			message: new(testpb.TestSend),
+			sender:  NoSender,
+			self:    pid1,
+		}
+
+		// create actor2
+		actor2 := &exchanger{}
+		pid2, err := actorSystem.Spawn(ctx, "Exchange2", actor2)
+		require.NoError(t, err)
+		require.NotNil(t, pid2)
+
+		// watch actor2
+		context.Watch(pid2)
+
+		pnode, ok := pid2.ActorSystem().tree().node(pid2.ID())
+		require.True(t, ok)
+		watchers := pnode.Watchers
+
+		found := false
+		for _, watcher := range watchers.Items() {
+			if watcher.value().Equals(pid1) {
+				found = true
+				break
+			}
+		}
+
+		require.True(t, found)
+
+		// reset the found
+		found = false
+		// unwatch actor2
+		context.UnWatch(pid2)
+		for _, watcher := range watchers.Items() {
+			if watcher.value().Equals(pid1) {
+				found = true
+				break
+			}
+		}
+
+		require.False(t, found)
+		util.Pause(time.Second)
+		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 }

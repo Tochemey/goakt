@@ -1164,7 +1164,7 @@ func (pid *PID) Shutdown(ctx context.Context) error {
 
 // Watch watches a given actor for a Terminated message when the watched actor shutdown
 func (pid *PID) Watch(cid *PID) {
-	pid.ActorSystem().tree().addWatcher(pid, cid)
+	pid.ActorSystem().tree().addWatcher(cid, pid)
 }
 
 // UnWatch stops watching a given actor
@@ -1316,9 +1316,7 @@ func (pid *PID) init(ctx context.Context) error {
 	pid.logger.Infof("%s starting...", pid.Name())
 
 	cancelCtx, cancel := context.WithTimeout(ctx, pid.initTimeout.Load())
-	// create a new retrier that will try a maximum of `initMaxRetries` times, with
-	// an initial delay of 100 ms and a maximum delay of 1 second
-	retrier := retry.NewRetrier(int(pid.initMaxRetries.Load()), 100*time.Millisecond, time.Second)
+	retrier := retry.NewRetrier(int(pid.initMaxRetries.Load()), time.Millisecond, pid.initTimeout.Load())
 	if err := retrier.RunContext(cancelCtx, pid.actor.PreStart); err != nil {
 		e := ErrInitFailure(err)
 		cancel()
@@ -1391,10 +1389,8 @@ func (pid *PID) freeWatchers(ctx context.Context) error {
 				return nil
 			})
 		}
-		if err := eg.Wait(); err != nil {
-			logger.Errorf("watcher=(%s) failed to free all watcher error: %v", pid.Name(), err)
-			return err
-		}
+		// no need to handle the error because the go routines will always return nil
+		_ = eg.Wait()
 		logger.Debugf("%s successfully frees all watcher actors...", pid.Name())
 		return nil
 	}
@@ -1425,10 +1421,8 @@ func (pid *PID) freeWatchees() error {
 				return nil
 			})
 		}
-		if err := eg.Wait(); err != nil {
-			logger.Errorf("watcher=(%s) failed to unwatch actors: %v", pid.Name(), err)
-			return err
-		}
+		// no need to handle the error because the go routines will always return nil
+		_ = eg.Wait()
 		logger.Debugf("%s successfully unwatch all watched actors...", pid.Name())
 		return nil
 	}
