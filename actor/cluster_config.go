@@ -191,11 +191,6 @@ func (x *ClusterConfig) TableSize() uint64 {
 	return x.tableSize
 }
 
-// WAL returns the WAL directory
-func (x *ClusterConfig) WAL() string {
-	return x.wal
-}
-
 // Validate validates the cluster config
 func (x *ClusterConfig) Validate() error {
 	return validation.

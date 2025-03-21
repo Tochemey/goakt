@@ -41,8 +41,6 @@ func TestClusterConfig(t *testing.T) {
 		tester := new(mockActor)
 		kinds := []Actor{tester, exchanger}
 
-		tempdir := t.TempDir()
-
 		config := NewClusterConfig().
 			WithKinds(kinds...).
 			WithDiscoveryPort(3220).
@@ -64,7 +62,6 @@ func TestClusterConfig(t *testing.T) {
 		assert.EqualValues(t, 1, config.WriteQuorum())
 		assert.EqualValues(t, 3, config.PartitionCount())
 		assert.Exactly(t, uint64(10*size.MB), config.TableSize())
-		assert.Exactly(t, tempdir, config.WAL())
 		assert.True(t, disco == config.Discovery())
 		assert.Len(t, config.Kinds(), 3)
 	})
