@@ -526,7 +526,6 @@ func testCluster(t *testing.T, serverAddr string, opts ...testClusterOption) (Ac
 				WithPartitionCount(7).
 				WithReplicaCount(1).
 				WithPeersPort(clusterPort).
-				WithWAL(t.TempDir()).
 				WithMinimumPeersQuorum(1).
 				WithDiscoveryPort(discoveryPort).
 				WithDiscovery(provider)),

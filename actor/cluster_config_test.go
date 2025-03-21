@@ -53,7 +53,6 @@ func TestClusterConfig(t *testing.T) {
 			WithReadQuorum(1).
 			WithPartitionCount(3).
 			WithTableSize(10 * size.MB).
-			WithWAL(tempdir).
 			WithDiscovery(disco)
 
 		require.NoError(t, config.Validate())

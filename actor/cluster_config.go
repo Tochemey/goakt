@@ -123,13 +123,6 @@ func (x *ClusterConfig) WriteQuorum() uint32 {
 	return x.writeQuorum
 }
 
-// WithWAL sets a custom WAL directory.
-// GoAkt is required to have the permission to create this directory.
-func (x *ClusterConfig) WithWAL(dir string) *ClusterConfig {
-	x.wal = dir
-	return x
-}
-
 // ReplicaCount returns the replica count.
 func (x *ClusterConfig) ReplicaCount() uint32 {
 	return x.replicaCount
