@@ -1463,7 +1463,7 @@ func (x *actorSystem) enableClustering(ctx context.Context) error {
 		return errors.New("clustering needs remoting to be enabled")
 	}
 
-	clusterStore, err := cluster.NewStore(x.clusterConfig.WAL(), x.logger)
+	clusterStore, err := cluster.NewStore(x.logger)
 	if err != nil {
 		x.logger.Errorf("failed to initialize peers cache: %v", err)
 		x.locker.Unlock()
@@ -1602,12 +1602,12 @@ func (x *actorSystem) ensureTLSProtos() {
 		toAdd := []string{"h2", "http/1.1"}
 
 		// server application protocols setting
-		protos := goset.NewSet[string](x.serverTLS.NextProtos...)
+		protos := goset.NewSet(x.serverTLS.NextProtos...)
 		protos.Append(toAdd...)
 		x.serverTLS.NextProtos = protos.ToSlice()
 
 		// client application protocols setting
-		protos = goset.NewSet[string](x.clientTLS.NextProtos...)
+		protos = goset.NewSet(x.clientTLS.NextProtos...)
 		protos.Append(toAdd...)
 		x.clientTLS.NextProtos = protos.ToSlice()
 	}
@@ -2248,7 +2248,7 @@ func (x *actorSystem) shutdownCluster(ctx context.Context, actorRefs []ActorRef)
 
 		x.rebalanceLocker.Unlock()
 		if x.clusterStore != nil {
-			x.clusterStore.Close()
+			return x.clusterStore.Close()
 		}
 	}
 	return nil

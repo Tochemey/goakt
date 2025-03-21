@@ -27,6 +27,7 @@ package cluster
 import (
 	"testing"
 
+	"github.com/dgraph-io/badger/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
@@ -36,27 +37,9 @@ import (
 )
 
 func TestClusterStore(t *testing.T) {
-	t.Run("Open when directory exists", func(t *testing.T) {
-		dir := t.TempDir()
-		logger := log.DiscardLogger
-		store, err := NewStore(dir, logger)
-		require.NoError(t, err)
-		require.NotNil(t, store)
-		store.Close()
-	})
-
-	t.Run("Open when directory is invalid", func(t *testing.T) {
-		dir := "/"
-		logger := log.DiscardLogger
-		store, err := NewStore(dir, logger)
-		require.Error(t, err)
-		require.Nil(t, store)
-	})
-
 	t.Run("SetAndGet", func(t *testing.T) {
-		dir := t.TempDir()
 		logger := log.DiscardLogger
-		store, err := NewStore(dir, logger)
+		store, err := NewStore(logger)
 		require.NoError(t, err)
 		require.NotNil(t, store)
 
@@ -82,19 +65,23 @@ func TestClusterStore(t *testing.T) {
 		require.False(t, ok)
 
 		// Get unmarshalling failed
-		// Assume that wrong bytes array in kept in the LogSM
-		err = store.store.Set(key, []byte("hello"))
+		// Assume that wrong bytes array in kept in the store
+		err = store.db.Update(func(txn *badger.Txn) error {
+			err := txn.Set([]byte(key), []byte("hello"))
+			return err
+		})
+
 		require.NoError(t, err)
 		_, ok = store.GetPeerState(key)
 		require.False(t, ok)
 
-		store.Close()
+		err = store.Close()
+		require.NoError(t, err)
 	})
 
 	t.Run("Remove", func(t *testing.T) {
-		dir := t.TempDir()
 		logger := log.DiscardLogger
-		store, err := NewStore(dir, logger)
+		store, err := NewStore(logger)
 		require.NoError(t, err)
 		require.NotNil(t, store)
 
@@ -122,6 +109,7 @@ func TestClusterStore(t *testing.T) {
 		_, ok = store.GetPeerState(key)
 		require.False(t, ok)
 
-		store.Close()
+		err = store.Close()
+		require.NoError(t, err)
 	})
 }
