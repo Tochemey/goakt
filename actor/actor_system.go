@@ -64,6 +64,7 @@ import (
 	"github.com/tochemey/goakt/v3/internal/ticker"
 	"github.com/tochemey/goakt/v3/internal/types"
 	"github.com/tochemey/goakt/v3/log"
+	"github.com/tochemey/goakt/v3/memory"
 	"github.com/tochemey/goakt/v3/remote"
 )
 
@@ -498,10 +499,18 @@ func (x *actorSystem) Stop(ctx context.Context) error {
 func (x *actorSystem) Metric(ctx context.Context) *Metric {
 	if x.started.Load() {
 		x.getSetDeadlettersCount(ctx)
+		// we ignore the error here
+		memSize, _ := memory.Size()
+		memAvail, _ := memory.Free()
+		memUsed := memory.Used()
+
 		return &Metric{
 			deadlettersCount: int64(x.deadlettersCounter.Load()),
 			actorsCount:      int64(x.actorsCounter.Load()),
 			uptime:           x.Uptime(),
+			memSize:          memSize,
+			memAvail:         memAvail,
+			memUsed:          memUsed,
 		}
 	}
 	return nil

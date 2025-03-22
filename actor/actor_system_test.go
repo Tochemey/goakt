@@ -1850,4 +1850,65 @@ func TestActorSystem(t *testing.T) {
 		require.ErrorIs(t, err, ErrInvalidTLSConfiguration)
 		require.Nil(t, newActorSystem)
 	})
+	t.Run("With Metric ", func(t *testing.T) {
+		ctx := context.TODO()
+		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+
+		// start the actor system
+		err := sys.Start(ctx)
+		assert.NoError(t, err)
+
+		// wait for complete start
+		util.Pause(time.Second)
+
+		// create a deadletter subscriber
+		consumer, err := sys.Subscribe()
+		require.NoError(t, err)
+		require.NotNil(t, consumer)
+
+		// create the black hole actor
+		actor := &mockUnhandledMessageActor{}
+		actorRef, err := sys.Spawn(ctx, "unhandledQA", actor)
+		assert.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		// wait a while
+		util.Pause(time.Second)
+
+		// every message sent to the actor will result in deadletter
+		for i := 0; i < 5; i++ {
+			require.NoError(t, Tell(ctx, actorRef, new(testpb.TestSend)))
+		}
+
+		util.Pause(time.Second)
+
+		var items []*goaktpb.Deadletter
+		for message := range consumer.Iterator() {
+			payload := message.Payload()
+			// only listening to deadletter
+			deadletter, ok := payload.(*goaktpb.Deadletter)
+			if ok {
+				items = append(items, deadletter)
+			}
+		}
+
+		require.Len(t, items, 5)
+
+		// unsubscribe the consumer
+		err = sys.Unsubscribe(consumer)
+		require.NoError(t, err)
+
+		metric := sys.Metric(ctx)
+		require.NotNil(t, metric)
+		require.EqualValues(t, 1, metric.ActorsCount())
+		require.EqualValues(t, 5, metric.DeadlettersCount())
+		require.NotZero(t, metric.Uptime())
+		require.NotZero(t, metric.MemorySize())
+		require.NotZero(t, metric.MemoryUsed())
+		require.NotZero(t, metric.MemoryAvailable())
+
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
+	})
+
 }
