@@ -34,6 +34,27 @@ type Metric struct {
 	actorsCount int64
 	// Uptime returns the number of seconds since the actor/system started
 	uptime int64
+	// memSize returns the total memory of the system in bytes
+	memSize uint64
+	// memAvail returns the free memory of the system in bytes
+	memAvail uint64
+	// memUsed returns the used memory of the system in bytes
+	memUsed uint64
+}
+
+// MemoryUsed returns the used memory of the system in bytes
+func (m Metric) MemoryUsed() uint64 {
+	return m.memUsed
+}
+
+// MemorySize returns the total memory of the system in bytes
+func (m Metric) MemorySize() uint64 {
+	return m.memSize
+}
+
+// MemoryAvailable returns the free memory of the system in bytes
+func (m Metric) MemoryAvailable() uint64 {
+	return m.memAvail
 }
 
 // DeadlettersCount returns the total number of deadletter
@@ -55,18 +76,19 @@ func (m Metric) Uptime() int64 {
 // ActorMetric defines actor specific metrics
 type ActorMetric struct { //nolint:revive
 	// DeadlettersCount returns the total number of deadletter
+	// deadlettersCount returns the total number of deadletter
 	deadlettersCount uint64
-	// ActorsCount returns the total number of child actor given a specific PID
+	// childrenCount returns the total number of child actor given a specific PID
 	childrenCount uint64
-	// Uptime returns the number of seconds since the actor/system started
+	// uptime returns the number of seconds since the actor/system started
 	uptime int64
-	// LastProcessingDuration returns the duration of the latest message processed
+	// lastProcessingDuration returns the duration of the latest message processed
 	latestProcessedDuration time.Duration
-	// RestartCount returns the total number of re-starts by the given PID
+	// restartCount returns the total number of re-starts by the given PID
 	restartCount uint64
-	// ProcessedCount returns the total number of messages processed at a given time
+	// processedCount returns the total number of messages processed at a given time
 	processedCount uint64
-	// StashSize returns the stash size at a given time
+	// stashSize returns the stash size at a given time
 	stashSize uint64
 }
 
