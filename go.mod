@@ -14,7 +14,7 @@ require (
 	github.com/hashicorp/memberlist v0.5.3
 	github.com/kapetan-io/tackle v0.11.0
 	github.com/nats-io/nats-server/v2 v2.11.0
-	github.com/nats-io/nats.go v1.39.1
+	github.com/nats-io/nats.go v1.40.1
 	github.com/redis/go-redis/v9 v9.7.3
 	github.com/reugn/go-quartz v0.14.0
 	github.com/stretchr/testify v1.10.0
@@ -27,7 +27,7 @@ require (
 	go.uber.org/zap v1.27.0
 	golang.org/x/net v0.37.0
 	golang.org/x/sync v0.12.0
-	google.golang.org/protobuf v1.36.5
+	google.golang.org/protobuf v1.36.6
 	k8s.io/api v0.32.3
 	k8s.io/apimachinery v0.32.3
 	k8s.io/client-go v0.32.3
