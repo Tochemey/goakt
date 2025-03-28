@@ -35,10 +35,10 @@ import (
 	actors "github.com/tochemey/goakt/v3/actor"
 	"github.com/tochemey/goakt/v3/address"
 	"github.com/tochemey/goakt/v3/goaktpb"
-	"github.com/tochemey/goakt/v3/internal/compression"
 	"github.com/tochemey/goakt/v3/internal/errorschain"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/internalpb/internalpbconnect"
+	"github.com/tochemey/goakt/v3/internal/size"
 	"github.com/tochemey/goakt/v3/internal/ticker"
 	"github.com/tochemey/goakt/v3/internal/types"
 	"github.com/tochemey/goakt/v3/internal/validation"
@@ -111,7 +111,15 @@ func (x *Client) Kinds(ctx context.Context) ([]string, error) {
 	defer x.locker.Unlock()
 
 	node := nextNode(x.balancer)
-	service := getClusterServiceClient(node)
+	service := internalpbconnect.NewClusterServiceClient(
+		node.HTTPClient(),
+		node.HTTPEndPoint(),
+		connect.WithGRPC(),
+		connect.WithSendMaxBytes(node.Remoting().MaxReadFrameSize()),
+		connect.WithReadMaxBytes(node.Remoting().MaxReadFrameSize()),
+		connect.WithSendGzip(),
+	)
+
 	response, err := service.GetKinds(
 		ctx, connect.NewRequest(
 			&internalpb.GetKindsRequest{
@@ -301,24 +309,17 @@ func getBalancer(strategy BalancerStrategy) Balancer {
 	}
 }
 
-func getClusterServiceClient(node *Node) internalpbconnect.ClusterServiceClient {
-	return internalpbconnect.NewClusterServiceClient(
+// getNodeMetric pings a given node and get the node metric info and
+func getNodeMetric(ctx context.Context, node *Node) (int, bool, error) {
+	service := internalpbconnect.NewClusterServiceClient(
 		node.HTTPClient(),
 		node.HTTPEndPoint(),
 		connect.WithGRPC(),
-		connect.WithSendMaxBytes(node.Remoting().MaxReadFrameSize()),
-		connect.WithReadMaxBytes(node.Remoting().MaxReadFrameSize()),
-		connect.WithAcceptCompression(
-			compression.Zstd,
-			compression.NewZstdDecompressor,
-			compression.NewZstdCompressor),
-		connect.WithSendCompression(compression.Zstd),
+		connect.WithSendMaxBytes(16*size.MB),
+		connect.WithReadMaxBytes(16*size.MB),
+		connect.WithSendGzip(),
 	)
-}
 
-// getNodeMetric pings a given node and get the node metric info and
-func getNodeMetric(ctx context.Context, node *Node) (int, bool, error) {
-	service := getClusterServiceClient(node)
 	response, err := service.GetNodeMetric(ctx, connect.NewRequest(&internalpb.GetNodeMetricRequest{NodeAddress: node.Address()}))
 	if err != nil {
 		code := connect.CodeOf(err)
