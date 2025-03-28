@@ -36,7 +36,7 @@ import (
 
 func TestClusterConfig(t *testing.T) {
 	t.Run("With happy path", func(t *testing.T) {
-		disco := new(testkit.Provider)
+		provider := new(testkit.Provider)
 		exchanger := new(exchanger)
 		tester := new(mockActor)
 		kinds := []Actor{tester, exchanger}
@@ -51,7 +51,7 @@ func TestClusterConfig(t *testing.T) {
 			WithReadQuorum(1).
 			WithPartitionCount(3).
 			WithTableSize(10 * size.MB).
-			WithDiscovery(disco)
+			WithDiscovery(provider)
 
 		require.NoError(t, config.Validate())
 		assert.EqualValues(t, 3220, config.DiscoveryPort())
@@ -62,7 +62,7 @@ func TestClusterConfig(t *testing.T) {
 		assert.EqualValues(t, 1, config.WriteQuorum())
 		assert.EqualValues(t, 3, config.PartitionCount())
 		assert.Exactly(t, uint64(10*size.MB), config.TableSize())
-		assert.True(t, disco == config.Discovery())
+		assert.True(t, provider == config.Discovery())
 		assert.Len(t, config.Kinds(), 3)
 	})
 

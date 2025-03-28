@@ -25,9 +25,6 @@
 package actor
 
 import (
-	"os"
-	"path/filepath"
-
 	"github.com/tochemey/goakt/v3/discovery"
 	"github.com/tochemey/goakt/v3/internal/size"
 	"github.com/tochemey/goakt/v3/internal/validation"
@@ -50,7 +47,6 @@ type ClusterConfig struct {
 	peersPort          int
 	kinds              []Actor
 	tableSize          uint64
-	wal                string
 }
 
 // enforce compilation error
@@ -58,9 +54,6 @@ var _ validation.Validator = (*ClusterConfig)(nil)
 
 // NewClusterConfig creates an instance of ClusterConfig
 func NewClusterConfig() *ClusterConfig {
-	// grab the user homedir dir
-	homedir, _ := os.UserHomeDir()
-
 	return &ClusterConfig{
 		kinds:              defaultKinds,
 		minimumPeersQuorum: 1,
@@ -69,7 +62,6 @@ func NewClusterConfig() *ClusterConfig {
 		replicaCount:       1,
 		partitionCount:     271,
 		tableSize:          20 * size.MB,
-		wal:                filepath.Join(homedir, "goakt", "data"),
 	}
 }
 
@@ -195,11 +187,10 @@ func (x *ClusterConfig) TableSize() uint64 {
 func (x *ClusterConfig) Validate() error {
 	return validation.
 		New(validation.AllErrors()).
-		AddValidator(validation.NewEmptyStringValidator(x.wal, "WAL directory is required")).
 		AddAssertion(x.discovery != nil, "discovery provider is not set").
 		AddAssertion(x.partitionCount > 0, "partition count need to greater than zero").
 		AddAssertion(x.minimumPeersQuorum >= 1, "minimum peers quorum must be at least one").
-		AddAssertion(x.discoveryPort > 0, "gossip port is invalid").
+		AddAssertion(x.discoveryPort > 0, "discovery port is invalid").
 		AddAssertion(x.peersPort > 0, "peers port is invalid").
 		AddAssertion(len(x.kinds) > 1, "actor kinds are not defined").
 		AddAssertion(x.replicaCount >= 1, "cluster replicaCount is invalid").
