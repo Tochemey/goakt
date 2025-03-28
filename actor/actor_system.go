@@ -56,6 +56,7 @@ import (
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/hash"
 	"github.com/tochemey/goakt/v3/internal/cluster"
+	"github.com/tochemey/goakt/v3/internal/compression"
 	"github.com/tochemey/goakt/v3/internal/errorschain"
 	"github.com/tochemey/goakt/v3/internal/eventstream"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
@@ -1551,8 +1552,19 @@ func (x *actorSystem) enableRemoting(ctx context.Context) error {
 	}
 
 	x.logger.Info("enabling remoting...")
-	remotingServicePath, remotingServiceHandler := internalpbconnect.NewRemotingServiceHandler(x)
-	clusterServicePath, clusterServiceHandler := internalpbconnect.NewClusterServiceHandler(x)
+
+	remotingServicePath, remotingServiceHandler := internalpbconnect.NewRemotingServiceHandler(x,
+		connect.WithCompression(
+			compression.Zstd,
+			compression.NewZstdDecompressor,
+			compression.NewZstdCompressor,
+		))
+
+	clusterServicePath, clusterServiceHandler := internalpbconnect.NewClusterServiceHandler(x, connect.WithCompression(
+		compression.Zstd,
+		compression.NewZstdDecompressor,
+		compression.NewZstdCompressor,
+	))
 
 	mux := nethttp.NewServeMux()
 	mux.Handle(remotingServicePath, remotingServiceHandler)
