@@ -39,7 +39,6 @@ import (
 	"google.golang.org/protobuf/types/known/durationpb"
 
 	"github.com/tochemey/goakt/v3/address"
-	"github.com/tochemey/goakt/v3/internal/compression"
 	"github.com/tochemey/goakt/v3/internal/http"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/internalpb/internalpbconnect"
@@ -423,10 +422,6 @@ func (r *Remoting) serviceClient(host string, port int) internalpbconnect.Remoti
 		connect.WithGRPC(),
 		connect.WithSendMaxBytes(r.maxReadFrameSize),
 		connect.WithReadMaxBytes(r.maxReadFrameSize),
-		connect.WithAcceptCompression(
-			compression.Zstd,
-			compression.NewZstdDecompressor,
-			compression.NewZstdCompressor),
-		connect.WithSendCompression(compression.Zstd),
+		connect.WithSendGzip(),
 	)
 }
