@@ -1273,7 +1273,6 @@ func TestMessaging(t *testing.T) {
 		actorSystem, err := NewActorSystem("testSys",
 			WithRemote(remote.NewConfig(host, ports[0])),
 			WithPassivationDisabled(),
-			WithJanitorInterval(time.Minute),
 			WithLogger(log.DiscardLogger))
 
 		require.NoError(t, err)
@@ -1366,7 +1365,6 @@ func TestMessaging(t *testing.T) {
 		actorSystem, err := NewActorSystem("testSys",
 			WithRemote(remote.NewConfig(host, ports[0])),
 			WithPassivationDisabled(),
-			WithJanitorInterval(time.Minute),
 			WithLogger(log.DiscardLogger))
 
 		require.NoError(t, err)
@@ -1414,7 +1412,6 @@ func TestMessaging(t *testing.T) {
 		actorSystem, err := NewActorSystem("testSys",
 			WithRemote(remote.NewConfig(host, ports[0])),
 			WithPassivationDisabled(),
-			WithJanitorInterval(time.Minute),
 			WithLogger(log.DiscardLogger))
 
 		require.NoError(t, err)
@@ -1459,7 +1456,6 @@ func TestMessaging(t *testing.T) {
 		actorSystem, err := NewActorSystem("testSys",
 			WithRemote(remote.NewConfig(host, ports[0])),
 			WithPassivationDisabled(),
-			WithJanitorInterval(time.Minute),
 			WithLogger(log.DiscardLogger))
 
 		require.NoError(t, err)
@@ -1641,7 +1637,6 @@ func TestActorHandle(t *testing.T) {
 	actorSystem, err := NewActorSystem("testSys",
 		WithRemote(remote.NewConfig(host, ports[0])),
 		WithPassivationDisabled(),
-		WithJanitorInterval(time.Minute),
 		WithLogger(log.DiscardLogger))
 
 	require.NoError(t, err)
@@ -1675,7 +1670,6 @@ func TestPIDActorSystem(t *testing.T) {
 	actorSystem, err := NewActorSystem("testSys",
 		WithRemote(remote.NewConfig(host, ports[0])),
 		WithPassivationDisabled(),
-		WithJanitorInterval(time.Minute),
 		WithLogger(log.DiscardLogger))
 
 	require.NoError(t, err)
@@ -1763,7 +1757,6 @@ func TestSpawnChild(t *testing.T) {
 		actorSystem, err := NewActorSystem("testSys",
 			WithRemote(remote.NewConfig(host, ports[0])),
 			WithPassivationDisabled(),
-			WithJanitorInterval(100*time.Millisecond),
 			WithLogger(log.DiscardLogger))
 
 		require.NoError(t, err)
@@ -1811,7 +1804,6 @@ func TestSpawnChild(t *testing.T) {
 		actorSystem, err := NewActorSystem("testSys",
 			WithRemote(remote.NewConfig(host, ports[0])),
 			WithPassivationDisabled(),
-			WithJanitorInterval(time.Minute),
 			WithLogger(log.DiscardLogger))
 
 		require.NoError(t, err)
@@ -1850,7 +1842,6 @@ func TestSpawnChild(t *testing.T) {
 		actorSystem, err := NewActorSystem("testSys",
 			WithRemote(remote.NewConfig(host, ports[0])),
 			WithPassivationDisabled(),
-			WithJanitorInterval(time.Minute),
 			WithLogger(log.DiscardLogger))
 
 		require.NoError(t, err)
@@ -1896,7 +1887,6 @@ func TestSpawnChild(t *testing.T) {
 		actorSystem, err := NewActorSystem("testSys",
 			WithRemote(remote.NewConfig(host, ports[0])),
 			WithPassivationDisabled(),
-			WithJanitorInterval(time.Minute),
 			WithLogger(log.DiscardLogger))
 
 		require.NoError(t, err)
@@ -1931,7 +1921,6 @@ func TestSpawnChild(t *testing.T) {
 		actorSystem, err := NewActorSystem("testSys",
 			WithRemote(remote.NewConfig(host, ports[0])),
 			WithPassivationDisabled(),
-			WithJanitorInterval(time.Minute),
 			WithLogger(log.DiscardLogger))
 
 		require.NoError(t, err)
@@ -1967,7 +1956,6 @@ func TestSpawnChild(t *testing.T) {
 		actorSystem, err := NewActorSystem("testSys",
 			WithRemote(remote.NewConfig(host, ports[0])),
 			WithPassivationDisabled(),
-			WithJanitorInterval(time.Minute),
 			WithLogger(log.DiscardLogger))
 
 		require.NoError(t, err)
@@ -2026,7 +2014,6 @@ func TestSpawnChild(t *testing.T) {
 		actorSystem, err := NewActorSystem("testSys",
 			WithRemote(remote.NewConfig(host, ports[0])),
 			WithPassivationDisabled(),
-			WithJanitorInterval(time.Minute),
 			WithLogger(log.DiscardLogger))
 
 		require.NoError(t, err)
@@ -2083,7 +2070,6 @@ func TestSpawnChild(t *testing.T) {
 		actorSystem, err := NewActorSystem("testSys",
 			WithRemote(remote.NewConfig(host, ports[0])),
 			WithPassivation(time.Second),
-			WithJanitorInterval(time.Minute),
 			WithLogger(log.DiscardLogger))
 
 		require.NoError(t, err)
@@ -2141,7 +2127,6 @@ func TestPoisonPill(t *testing.T) {
 	actorSystem, err := NewActorSystem("testSys",
 		WithRemote(remote.NewConfig(host, ports[0])),
 		WithPassivationDisabled(),
-		WithJanitorInterval(time.Minute),
 		WithLogger(log.DiscardLogger))
 
 	require.NoError(t, err)
@@ -2328,7 +2313,6 @@ func TestFailedPostStop(t *testing.T) {
 	actorSystem, err := NewActorSystem("testSys",
 		WithRemote(remote.NewConfig(host, ports[0])),
 		WithPassivationDisabled(),
-		WithJanitorInterval(time.Minute),
 		WithLogger(log.DiscardLogger))
 
 	require.NoError(t, err)
@@ -2356,7 +2340,6 @@ func TestShutdown(t *testing.T) {
 		actorSystem, err := NewActorSystem("testSys",
 			WithRemote(remote.NewConfig(host, ports[0])),
 			WithPassivationDisabled(),
-			WithJanitorInterval(time.Minute),
 			WithLogger(log.DiscardLogger))
 
 		require.NoError(t, err)
@@ -2392,7 +2375,6 @@ func TestBatchTell(t *testing.T) {
 		actorSystem, err := NewActorSystem("testSys",
 			WithRemote(remote.NewConfig(host, ports[0])),
 			WithPassivationDisabled(),
-			WithJanitorInterval(time.Minute),
 			WithLogger(log.DiscardLogger))
 
 		require.NoError(t, err)
@@ -2428,7 +2410,6 @@ func TestBatchTell(t *testing.T) {
 		actorSystem, err := NewActorSystem("testSys",
 			WithRemote(remote.NewConfig(host, ports[0])),
 			WithPassivationDisabled(),
-			WithJanitorInterval(time.Minute),
 			WithLogger(log.DiscardLogger))
 
 		require.NoError(t, err)
@@ -2464,7 +2445,6 @@ func TestBatchTell(t *testing.T) {
 		actorSystem, err := NewActorSystem("testSys",
 			WithRemote(remote.NewConfig(host, ports[0])),
 			WithPassivationDisabled(),
-			WithJanitorInterval(time.Minute),
 			WithLogger(log.DiscardLogger))
 
 		require.NoError(t, err)
@@ -2497,7 +2477,6 @@ func TestBatchAsk(t *testing.T) {
 		actorSystem, err := NewActorSystem("testSys",
 			WithRemote(remote.NewConfig(host, ports[0])),
 			WithPassivationDisabled(),
-			WithJanitorInterval(time.Minute),
 			WithLogger(log.DiscardLogger))
 
 		require.NoError(t, err)
@@ -2537,7 +2516,6 @@ func TestBatchAsk(t *testing.T) {
 		actorSystem, err := NewActorSystem("testSys",
 			WithRemote(remote.NewConfig(host, ports[0])),
 			WithPassivationDisabled(),
-			WithJanitorInterval(time.Minute),
 			WithLogger(log.DiscardLogger))
 
 		require.NoError(t, err)
@@ -2572,7 +2550,6 @@ func TestBatchAsk(t *testing.T) {
 		actorSystem, err := NewActorSystem("testSys",
 			WithRemote(remote.NewConfig(host, ports[0])),
 			WithPassivationDisabled(),
-			WithJanitorInterval(time.Minute),
 			WithLogger(log.DiscardLogger))
 
 		require.NoError(t, err)
@@ -2733,7 +2710,6 @@ func TestRemoteStop(t *testing.T) {
 		sys, err := NewActorSystem("test",
 			WithLogger(logger),
 			WithPassivationDisabled(),
-			WithJanitorInterval(time.Minute),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 		)
 		// assert there are no error
@@ -2773,7 +2749,6 @@ func TestRemoteStop(t *testing.T) {
 		sys, err := NewActorSystem("test",
 			WithLogger(logger),
 			WithPassivationDisabled(),
-			WithJanitorInterval(time.Minute),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 		)
 		// assert there are no error
@@ -2926,7 +2901,6 @@ func TestRemoteSpawn(t *testing.T) {
 		sys, err := NewActorSystem("test",
 			WithLogger(logger),
 			WithPassivationDisabled(),
-			WithJanitorInterval(time.Minute),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 		)
 		// assert there are no error
@@ -3131,7 +3105,6 @@ func TestName(t *testing.T) {
 	actorSystem, err := NewActorSystem("testSys",
 		WithRemote(remote.NewConfig(host, ports[0])),
 		WithPassivationDisabled(),
-		WithJanitorInterval(time.Minute),
 		WithLogger(log.DiscardLogger))
 
 	require.NoError(t, err)
@@ -3166,7 +3139,6 @@ func TestPipeTo(t *testing.T) {
 		actorSystem, err := NewActorSystem("testSys",
 			WithRemote(remote.NewConfig(host, ports[0])),
 			WithPassivationDisabled(),
-			WithJanitorInterval(time.Minute),
 			WithLogger(log.DiscardLogger))
 
 		require.NoError(t, err)
@@ -3232,7 +3204,6 @@ func TestPipeTo(t *testing.T) {
 		actorSystem, err := NewActorSystem("testSys",
 			WithRemote(remote.NewConfig(host, ports[0])),
 			WithPassivationDisabled(),
-			WithJanitorInterval(time.Minute),
 			WithLogger(log.DiscardLogger))
 
 		require.NoError(t, err)
@@ -3279,7 +3250,6 @@ func TestPipeTo(t *testing.T) {
 		actorSystem, err := NewActorSystem("testSys",
 			WithRemote(remote.NewConfig(host, ports[0])),
 			WithPassivationDisabled(),
-			WithJanitorInterval(time.Minute),
 			WithLogger(log.DiscardLogger))
 
 		require.NoError(t, err)
@@ -3324,7 +3294,6 @@ func TestPipeTo(t *testing.T) {
 		actorSystem, err := NewActorSystem("testSys",
 			WithRemote(remote.NewConfig(host, ports[0])),
 			WithPassivationDisabled(),
-			WithJanitorInterval(time.Minute),
 			WithLogger(log.DiscardLogger))
 
 		require.NoError(t, err)
@@ -3440,7 +3409,6 @@ func TestSendAsync(t *testing.T) {
 	t.Run("With dead Sender", func(t *testing.T) {
 		ctx := context.Background()
 		actorSystem, _ := NewActorSystem("testSys",
-			WithJanitorInterval(time.Minute),
 			WithLogger(log.DiscardLogger))
 
 		// start the actor system
@@ -3549,7 +3517,7 @@ func TestSendAsync(t *testing.T) {
 func TestSendSync(t *testing.T) {
 	t.Run("With local actor", func(t *testing.T) {
 		ctx := context.Background()
-		actorSystem, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger), WithJanitorInterval(time.Minute))
+		actorSystem, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
 
 		// start the actor system
 		err := actorSystem.Start(ctx)
@@ -3581,7 +3549,7 @@ func TestSendSync(t *testing.T) {
 	})
 	t.Run("With dead Sender", func(t *testing.T) {
 		ctx := context.Background()
-		actorSystem, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger), WithJanitorInterval(time.Minute))
+		actorSystem, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
 
 		// start the actor system
 		err := actorSystem.Start(ctx)
@@ -3699,7 +3667,6 @@ func TestStopChild(t *testing.T) {
 		actorSystem, err := NewActorSystem("testSys",
 			WithRemote(remote.NewConfig(host, ports[0])),
 			WithPassivationDisabled(),
-			WithJanitorInterval(time.Minute),
 			WithLogger(log.DiscardLogger))
 
 		require.NoError(t, err)
@@ -3806,7 +3773,6 @@ func TestWatch(t *testing.T) {
 	actorSystem, err := NewActorSystem("testSys",
 		WithRemote(remote.NewConfig(host, ports[0])),
 		WithPassivationDisabled(),
-		WithJanitorInterval(time.Minute),
 		WithLogger(log.DiscardLogger))
 
 	require.NoError(t, err)
@@ -3854,7 +3820,6 @@ func TestUnWatchWithInexistentNode(t *testing.T) {
 	actorSystem, err := NewActorSystem("testSys",
 		WithRemote(remote.NewConfig(host, ports[0])),
 		WithPassivationDisabled(),
-		WithJanitorInterval(time.Minute),
 		WithLogger(log.DiscardLogger))
 
 	require.NoError(t, err)
@@ -3900,7 +3865,6 @@ func TestParentWithInexistenceNodeReturnsNil(t *testing.T) {
 	actorSystem, err := NewActorSystem("testSys",
 		WithRemote(remote.NewConfig(host, ports[0])),
 		WithPassivationDisabled(),
-		WithJanitorInterval(time.Minute),
 		WithLogger(log.DiscardLogger))
 
 	require.NoError(t, err)

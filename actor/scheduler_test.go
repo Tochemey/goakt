@@ -173,7 +173,6 @@ func TestScheduler(t *testing.T) {
 		newActorSystem, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithJanitorInterval(time.Minute),
 			WithPassivationDisabled(),
 		)
 		// assert there are no error
@@ -220,7 +219,6 @@ func TestScheduler(t *testing.T) {
 		newActorSystem, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithJanitorInterval(time.Minute),
 			WithPassivationDisabled(),
 		)
 		// assert there are no error
@@ -1000,7 +998,6 @@ func TestScheduler(t *testing.T) {
 		newActorSystem, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithJanitorInterval(time.Minute),
 			WithPassivationDisabled(),
 		)
 		// assert there are no error
@@ -1211,7 +1208,6 @@ func TestScheduler(t *testing.T) {
 			"test",
 			WithLogger(logger),
 			WithPassivationDisabled(),
-			WithJanitorInterval(time.Minute),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 		)
 		// assert there are no error

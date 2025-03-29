@@ -159,15 +159,6 @@ func WithPeerStateLoopInterval(interval time.Duration) Option {
 	)
 }
 
-// WithJanitorInterval sets the deathWatch interval
-func WithJanitorInterval(interval time.Duration) Option {
-	return OptionFunc(
-		func(system *actorSystem) {
-			system.janitorInterval = interval
-		},
-	)
-}
-
 // WithCoordinatedShutdown registers internal and user-defined tasks to be executed during the shutdown process.
 // The defined tasks will be executed in the same order of insertion.
 // Any failure will halt the shutdown process.

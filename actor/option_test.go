@@ -108,11 +108,6 @@ func TestOption(t *testing.T) {
 			expected: actorSystem{peersStateLoopInterval: 2. * time.Second},
 		},
 		{
-			name:     "WithGCInterval",
-			option:   WithJanitorInterval(2 * time.Second),
-			expected: actorSystem{janitorInterval: 2. * time.Second},
-		},
-		{
 			name:     "WithTLS",
 			option:   WithTLS(tlsInfo),
 			expected: actorSystem{serverTLS: tlsConfig, clientTLS: tlsConfig},

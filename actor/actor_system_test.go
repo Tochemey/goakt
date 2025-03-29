@@ -1162,7 +1162,6 @@ func TestActorSystem(t *testing.T) {
 			"test",
 			WithPassivationDisabled(),
 			WithLogger(logger),
-			WithJanitorInterval(time.Minute),
 			WithRemote(remote.NewConfig(host, ports[0])))
 
 		require.NoError(t, err)

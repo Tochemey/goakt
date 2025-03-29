@@ -278,8 +278,7 @@ type actorSystem struct {
 	// specifies the stash capacity
 	stashEnabled bool
 
-	stopGC          chan types.Unit
-	janitorInterval time.Duration
+	stopGC chan types.Unit
 
 	// specifies the events stream
 	eventsStream eventstream.Stream
@@ -345,7 +344,6 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		shutdownTimeout:        DefaultShutdownTimeout,
 		stashEnabled:           false,
 		stopGC:                 make(chan types.Unit, 1),
-		janitorInterval:        DefaultJanitorInterval,
 		eventsStream:           eventstream.New(),
 		partitionHasher:        hash.DefaultHasher(),
 		actorInitTimeout:       DefaultInitTimeout,

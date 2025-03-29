@@ -518,7 +518,6 @@ func testCluster(t *testing.T, serverAddr string, opts ...testClusterOption) (Ac
 		WithPassivationDisabled(),
 		WithLogger(logger),
 		WithRemote(remote.NewConfig(host, remotingPort)),
-		WithJanitorInterval(time.Minute),
 		WithPeerStateLoopInterval(500 * time.Millisecond),
 		WithCluster(
 			NewClusterConfig().

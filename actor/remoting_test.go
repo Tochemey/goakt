@@ -1053,7 +1053,6 @@ func TestRemoteAsk(t *testing.T) {
 			"test",
 			WithLogger(logger),
 			WithPassivationDisabled(),
-			WithJanitorInterval(30*time.Millisecond),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 		)
 		// assert there are no error
@@ -1113,7 +1112,6 @@ func TestRemoteAsk(t *testing.T) {
 			"test",
 			WithLogger(logger),
 			WithPassivationDisabled(),
-			WithJanitorInterval(30*time.Millisecond),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 		)
 		// assert there are no error
