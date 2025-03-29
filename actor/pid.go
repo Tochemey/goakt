@@ -792,7 +792,7 @@ func (pid *PID) RemoteLookup(ctx context.Context, host string, port int, name st
 		return nil, ErrRemotingDisabled
 	}
 
-	remoteClient := pid.remoting.serviceClient(host, port)
+	remoteClient := pid.remoting.remotingServiceClient(host, port)
 	request := connect.NewRequest(
 		&internalpb.RemoteLookupRequest{
 			Host: host,
@@ -824,7 +824,7 @@ func (pid *PID) RemoteTell(ctx context.Context, to *address.Address, message pro
 		return err
 	}
 
-	remoteService := pid.remoting.serviceClient(to.GetHost(), int(to.GetPort()))
+	remoteService := pid.remoting.remotingServiceClient(to.GetHost(), int(to.GetPort()))
 
 	request := &internalpb.RemoteTellRequest{
 		RemoteMessage: &internalpb.RemoteMessage{
@@ -873,7 +873,7 @@ func (pid *PID) RemoteAsk(ctx context.Context, to *address.Address, message prot
 		return nil, err
 	}
 
-	remoteService := pid.remoting.serviceClient(to.GetHost(), int(to.GetPort()))
+	remoteService := pid.remoting.remotingServiceClient(to.GetHost(), int(to.GetPort()))
 
 	senderAddress := pid.Address()
 
@@ -952,7 +952,7 @@ func (pid *PID) RemoteBatchTell(ctx context.Context, to *address.Address, messag
 		)
 	}
 
-	remoteService := pid.remoting.serviceClient(to.GetHost(), int(to.GetPort()))
+	remoteService := pid.remoting.remotingServiceClient(to.GetHost(), int(to.GetPort()))
 
 	stream := remoteService.RemoteTell(ctx)
 	for _, request := range requests {
@@ -1002,7 +1002,7 @@ func (pid *PID) RemoteBatchAsk(ctx context.Context, to *address.Address, message
 		)
 	}
 
-	remoteService := pid.remoting.serviceClient(to.GetHost(), int(to.GetPort()))
+	remoteService := pid.remoting.remotingServiceClient(to.GetHost(), int(to.GetPort()))
 	stream := remoteService.RemoteAsk(ctx)
 	errc := make(chan error, 1)
 
@@ -1048,7 +1048,7 @@ func (pid *PID) RemoteStop(ctx context.Context, host string, port int, name stri
 		return ErrRemotingDisabled
 	}
 
-	remoteService := pid.remoting.serviceClient(host, port)
+	remoteService := pid.remoting.remotingServiceClient(host, port)
 	request := connect.NewRequest(
 		&internalpb.RemoteStopRequest{
 			Host: host,
@@ -1073,7 +1073,7 @@ func (pid *PID) RemoteSpawn(ctx context.Context, host string, port int, name, ac
 		return ErrRemotingDisabled
 	}
 
-	remoteService := pid.remoting.serviceClient(host, port)
+	remoteService := pid.remoting.remotingServiceClient(host, port)
 	request := connect.NewRequest(
 		&internalpb.RemoteSpawnRequest{
 			Host:      host,
@@ -1104,7 +1104,7 @@ func (pid *PID) RemoteReSpawn(ctx context.Context, host string, port int, name s
 		return ErrRemotingDisabled
 	}
 
-	remoteService := pid.remoting.serviceClient(host, port)
+	remoteService := pid.remoting.remotingServiceClient(host, port)
 	request := connect.NewRequest(
 		&internalpb.RemoteReSpawnRequest{
 			Host: host,
