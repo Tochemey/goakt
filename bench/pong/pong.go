@@ -94,7 +94,7 @@ func NewPong() *Pong {
 	return &Pong{}
 }
 
-func (act *Pong) PreStart(ctx context.Context) error {
+func (act *Pong) PreStart(context.Context) error {
 	return nil
 }
 
