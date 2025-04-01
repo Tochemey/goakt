@@ -292,10 +292,8 @@ func clusterClient(node *Node) internalpbconnect.ClusterServiceClient {
 	return internalpbconnect.NewClusterServiceClient(
 		node.HTTPClient(),
 		node.HTTPEndPoint(),
-		connect.WithGRPC(),
 		connect.WithSendMaxBytes(node.Remoting().MaxReadFrameSize()),
 		connect.WithReadMaxBytes(node.Remoting().MaxReadFrameSize()),
-		connect.WithSendGzip(),
 	)
 }
 

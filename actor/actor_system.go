@@ -410,8 +410,8 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 func (x *actorSystem) Run(ctx context.Context, startHook func(ctx context.Context) error, stophook func(ctx context.Context) error) {
 	if err := errorschain.
 		New(errorschain.ReturnFirst()).
-		AddError(startHook(ctx)).
-		AddError(x.Start(ctx)).
+		AddErrorFn(func() error { return startHook(ctx) }).
+		AddErrorFn(func() error { return x.Start(ctx) }).
 		Error(); err != nil {
 		x.logger.Fatal(err)
 		os.Exit(1)
@@ -429,8 +429,8 @@ func (x *actorSystem) Run(ctx context.Context, startHook func(ctx context.Contex
 
 		if err := errorschain.
 			New(errorschain.ReturnFirst()).
-			AddError(stophook(ctx)).
-			AddError(x.Stop(ctx)).
+			AddErrorFn(func() error { return stophook(ctx) }).
+			AddErrorFn(func() error { return x.Stop(ctx) }).
 			Error(); err != nil {
 			x.logger.Fatal(err)
 		}

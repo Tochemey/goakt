@@ -419,9 +419,7 @@ func (r *Remoting) remotingServiceClient(host string, port int) internalpbconnec
 	return internalpbconnect.NewRemotingServiceClient(
 		r.client,
 		endpoint,
-		connect.WithGRPC(),
 		connect.WithSendMaxBytes(r.maxReadFrameSize),
 		connect.WithReadMaxBytes(r.maxReadFrameSize),
-		connect.WithSendGzip(),
 	)
 }
