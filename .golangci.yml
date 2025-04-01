@@ -1,85 +1,80 @@
-# See https://golangci-lint.run/usage/configuration/
+version: "2"
 run:
-  # The default concurrency value is the number of available CPU.
   concurrency: 4
-  # Timeout for analysis, e.g. 30s, 5m.
-  # Default: 1m
-  timeout: 5m
-  # Exit code when at least one issue was found.
-  # Default: 1
   issues-exit-code: 2
-  # Include test files or not.
-  # Default: true
   tests: true
-
 output:
-  print-issued-lines: true
-  print-linter-name: true
-  uniq-by-line: false
   path-prefix: ""
-  sort-results: true
-
 linters:
-  disable-all: true
+  default: none
   enable:
-    - misspell
-    - goimports
-    - revive
-    - gofmt
-    - whitespace
-    - gosec
-    - gosimple
     - gocyclo
+    - gosec
+    - misspell
+    - revive
+    - staticcheck
+    - whitespace
+  settings:
+    goheader:
+      template: |-
+        # MIT License
 
+        # Copyright (c) 2022-2024 Arsene Tochemey Gandote
 
-issues:
-  exclude-rules:
-    # helpers in tests often (rightfully) pass a *testing.T as their first argument
-    - path: _test\.go
-      text: "context.Context should be the first parameter of a function"
-      linters:
-        - revive
-    # Yes, they are, but it's okay in a test
-    - path: _test\.go
-      text: "exported func.*returns unexported type.*which can be annoying to use"
-      linters:
-        - revive
-  exclude-dirs-use-default: true
-  exclude-dirs:
-    - mocks
+        # Permission is hereby granted, free of charge, to any person obtaining a copy
+        # of this software and associated documentation files (the "Software"), to deal
+        # in the Software without restriction, including without limitation the rights
+        # to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+        # copies of the Software, and to permit persons to whom the Software is
+        # furnished to do so, subject to the following conditions:
 
+        # The above copyright notice and this permission notice shall be included in all
+        # copies or substantial portions of the Software.
 
-linters-settings:
-  gosec:
-    excludes:
-      # Flags for potentially-unsafe casting of ints, similar problem to globally-disabled G103
-      - G115
-  misspell:
-    locale: US
-    ignore-words:
-      - cancelled
-      - behaviour
-
-  goheader:
-    template: |-
-      # MIT License
-
-      # Copyright (c) 2022-2024 Arsene Tochemey Gandote
-
-      # Permission is hereby granted, free of charge, to any person obtaining a copy
-      # of this software and associated documentation files (the "Software"), to deal
-      # in the Software without restriction, including without limitation the rights
-      # to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-      # copies of the Software, and to permit persons to whom the Software is
-      # furnished to do so, subject to the following conditions:
-
-      # The above copyright notice and this permission notice shall be included in all
-      # copies or substantial portions of the Software.
-
-      # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-      # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-      # FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-      # AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-      # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-      # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-      # SOFTWARE.
+        # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+        # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+        # FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+        # AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+        # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+        # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+        # SOFTWARE.
+    gosec:
+      excludes:
+        - G115
+    misspell:
+      locale: US
+      ignore-rules:
+        - cancelled
+        - behaviour
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - linters:
+          - revive
+        path: _test\.go
+        text: context.Context should be the first parameter of a function
+      - linters:
+          - revive
+        path: _test\.go
+        text: exported func.*returns unexported type.*which can be annoying to use
+    paths:
+      - mocks
+      - third_party$
+      - builtin$
+      - examples$
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  exclusions:
+    generated: lax
+    paths:
+      - mocks
+      - third_party$
+      - builtin$
+      - examples$
