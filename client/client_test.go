@@ -43,8 +43,7 @@ import (
 	"github.com/tochemey/goakt/v3/internal/util"
 	"github.com/tochemey/goakt/v3/log"
 	"github.com/tochemey/goakt/v3/remote"
-	"github.com/tochemey/goakt/v3/test/data/testpb"
-	testspb "github.com/tochemey/goakt/v3/test/data/testpb"
+	testpb "github.com/tochemey/goakt/v3/test/data/testpb"
 )
 
 func TestClient(t *testing.T) {
@@ -99,7 +98,7 @@ func TestClient(t *testing.T) {
 		util.Pause(time.Second)
 
 		// send a message
-		reply, err := client.Ask(ctx, actor, new(testspb.TestReply), time.Minute)
+		reply, err := client.Ask(ctx, actor, new(testpb.TestReply), time.Minute)
 		require.NoError(t, err)
 		require.NotNil(t, reply)
 		expectedReply := &testpb.Reply{Content: "received message"}
@@ -107,7 +106,7 @@ func TestClient(t *testing.T) {
 
 		util.Pause(time.Second)
 
-		err = client.Tell(ctx, actor, new(testspb.TestSend))
+		err = client.Tell(ctx, actor, new(testpb.TestSend))
 		require.NoError(t, err)
 
 		err = client.Stop(ctx, actor)
@@ -183,7 +182,7 @@ func TestClient(t *testing.T) {
 		util.Pause(time.Second)
 
 		// send a message
-		reply, err := client.Ask(ctx, actor, new(testspb.TestReply), time.Minute)
+		reply, err := client.Ask(ctx, actor, new(testpb.TestReply), time.Minute)
 		require.NoError(t, err)
 		require.NotNil(t, reply)
 		expectedReply := &testpb.Reply{Content: "received message"}
@@ -191,7 +190,7 @@ func TestClient(t *testing.T) {
 
 		util.Pause(time.Second)
 
-		err = client.Tell(ctx, actor, new(testspb.TestSend))
+		err = client.Tell(ctx, actor, new(testpb.TestSend))
 		require.NoError(t, err)
 
 		err = client.Stop(ctx, actor)
@@ -269,7 +268,7 @@ func TestClient(t *testing.T) {
 		util.Pause(time.Second)
 
 		// send a message
-		reply, err := client.Ask(ctx, actor, new(testspb.TestReply), time.Minute)
+		reply, err := client.Ask(ctx, actor, new(testpb.TestReply), time.Minute)
 		require.NoError(t, err)
 		require.NotNil(t, reply)
 		expectedReply := &testpb.Reply{Content: "received message"}
@@ -277,7 +276,7 @@ func TestClient(t *testing.T) {
 
 		util.Pause(time.Second)
 
-		err = client.Tell(ctx, actor, new(testspb.TestSend))
+		err = client.Tell(ctx, actor, new(testpb.TestSend))
 		require.NoError(t, err)
 
 		err = client.Stop(ctx, actor)
@@ -351,7 +350,7 @@ func TestClient(t *testing.T) {
 		util.Pause(time.Second)
 
 		// send a message
-		reply, err := client.Ask(ctx, actor, new(testspb.TestReply), time.Minute)
+		reply, err := client.Ask(ctx, actor, new(testpb.TestReply), time.Minute)
 		require.NoError(t, err)
 		require.NotNil(t, reply)
 		expectedReply := &testpb.Reply{Content: "received message"}
@@ -359,7 +358,7 @@ func TestClient(t *testing.T) {
 
 		util.Pause(time.Second)
 
-		err = client.Tell(ctx, actor, new(testspb.TestSend))
+		err = client.Tell(ctx, actor, new(testpb.TestSend))
 		require.NoError(t, err)
 
 		err = client.Stop(ctx, actor)
@@ -434,7 +433,7 @@ func TestClient(t *testing.T) {
 		util.Pause(time.Second)
 
 		// send a message
-		reply, err := client.Ask(ctx, actor, new(testspb.TestReply), time.Minute)
+		reply, err := client.Ask(ctx, actor, new(testpb.TestReply), time.Minute)
 		require.NoError(t, err)
 		require.NotNil(t, reply)
 		expectedReply := &testpb.Reply{Content: "received message"}
@@ -442,7 +441,7 @@ func TestClient(t *testing.T) {
 
 		util.Pause(time.Second)
 
-		err = client.Tell(ctx, actor, new(testspb.TestSend))
+		err = client.Tell(ctx, actor, new(testpb.TestSend))
 		require.NoError(t, err)
 
 		err = client.Stop(ctx, actor)
@@ -516,7 +515,7 @@ func TestClient(t *testing.T) {
 		util.Pause(time.Second)
 
 		// send a message
-		reply, err := client.Ask(ctx, actor, new(testspb.TestReply), time.Minute)
+		reply, err := client.Ask(ctx, actor, new(testpb.TestReply), time.Minute)
 		require.NoError(t, err)
 		require.NotNil(t, reply)
 		expectedReply := &testpb.Reply{Content: "received message"}
@@ -524,7 +523,7 @@ func TestClient(t *testing.T) {
 
 		util.Pause(time.Second)
 
-		err = client.Tell(ctx, actor, new(testspb.TestSend))
+		err = client.Tell(ctx, actor, new(testpb.TestSend))
 		require.NoError(t, err)
 
 		err = client.ReSpawn(ctx, actor)
@@ -603,7 +602,7 @@ func TestClient(t *testing.T) {
 		util.Pause(time.Second)
 
 		// send a message
-		reply, err := client.Ask(ctx, actor, new(testspb.TestReply), time.Minute)
+		reply, err := client.Ask(ctx, actor, new(testpb.TestReply), time.Minute)
 		require.NoError(t, err)
 		require.NotNil(t, reply)
 		expectedReply := &testpb.Reply{Content: "received message"}
@@ -611,7 +610,7 @@ func TestClient(t *testing.T) {
 
 		util.Pause(time.Second)
 
-		err = client.Tell(ctx, actor, new(testspb.TestSend))
+		err = client.Tell(ctx, actor, new(testpb.TestSend))
 		require.NoError(t, err)
 
 		util.Pause(time.Second)
@@ -841,10 +840,10 @@ func (p *testActor) Receive(ctx *actors.ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *goaktpb.PostStart:
 		p.logger.Info("post start")
-	case *testspb.TestSend:
-	case *testspb.TestReply:
+	case *testpb.TestSend:
+	case *testpb.TestReply:
 		p.logger.Info("received a test reply message...")
-		ctx.Response(&testspb.Reply{Content: "received message"})
+		ctx.Response(&testpb.Reply{Content: "received message"})
 	default:
 		ctx.Unhandled()
 	}

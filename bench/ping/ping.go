@@ -31,7 +31,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/tochemey/goakt/v3/actor"
 	goakt "github.com/tochemey/goakt/v3/actor"
 	"github.com/tochemey/goakt/v3/address"
 	"github.com/tochemey/goakt/v3/goaktpb"
@@ -98,7 +97,7 @@ type Ping struct {
 	start     time.Time
 }
 
-var _ actor.Actor = (*Ping)(nil)
+var _ goakt.Actor = (*Ping)(nil)
 
 func NewPing(totalScore int) *Ping {
 	return &Ping{

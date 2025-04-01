@@ -107,10 +107,9 @@ func New(task func() (proto.Message, error)) Future {
 	comp := newCompletable()
 	go func() {
 		result, err := task()
-		switch {
-		case err == nil:
+		if err == nil {
 			comp.Success(result)
-		default:
+		} else {
 			comp.Failure(err)
 		}
 	}()

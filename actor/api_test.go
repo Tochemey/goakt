@@ -80,6 +80,7 @@ func TestAsk(t *testing.T) {
 			assert.True(t, proto.Equal(expected, reply))
 
 			err = sys.Stop(ctx)
+			require.NoError(t, err)
 		},
 	)
 	t.Run(
@@ -124,6 +125,7 @@ func TestAsk(t *testing.T) {
 			assert.Nil(t, reply)
 
 			err = sys.Stop(ctx)
+			require.NoError(t, err)
 		},
 	)
 	t.Run(
@@ -164,6 +166,7 @@ func TestAsk(t *testing.T) {
 			assert.Nil(t, reply)
 
 			err = sys.Stop(ctx)
+			require.NoError(t, err)
 		},
 	)
 	t.Run(
@@ -207,6 +210,7 @@ func TestAsk(t *testing.T) {
 			assert.Nil(t, reply)
 
 			err = sys.Stop(ctx)
+			require.NoError(t, err)
 		},
 	)
 	t.Run(
@@ -252,6 +256,7 @@ func TestAsk(t *testing.T) {
 			}
 
 			err = sys.Stop(ctx)
+			require.NoError(t, err)
 		},
 	)
 	t.Run(
@@ -295,6 +300,7 @@ func TestAsk(t *testing.T) {
 			util.Pause(time.Second)
 
 			err = sys.Stop(ctx)
+			require.NoError(t, err)
 		},
 	)
 	t.Run(
@@ -336,6 +342,7 @@ func TestAsk(t *testing.T) {
 			assert.Empty(t, replies)
 
 			err = sys.Stop(ctx)
+			require.NoError(t, err)
 		},
 	)
 }
@@ -426,6 +433,7 @@ func TestTell(t *testing.T) {
 			assert.EqualError(t, err, ErrDead.Error())
 
 			err = sys.Stop(ctx)
+			require.NoError(t, err)
 		},
 	)
 	t.Run(
@@ -465,6 +473,7 @@ func TestTell(t *testing.T) {
 			require.Error(t, err)
 
 			err = sys.Stop(ctx)
+			require.NoError(t, err)
 		},
 	)
 	t.Run(

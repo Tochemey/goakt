@@ -1835,10 +1835,10 @@ func (x *actorSystem) rebalancingLoop() {
 
 // shouldRebalance returns true when the current node can perform the cluster rebalancing
 func (x *actorSystem) shouldRebalance(peerState *internalpb.PeerState) bool {
-	return !(peerState == nil ||
-		!x.InCluster() ||
-		proto.Equal(peerState, new(internalpb.PeerState)) ||
-		len(peerState.GetActors()) == 0)
+	return peerState != nil &&
+		x.InCluster() &&
+		!proto.Equal(peerState, new(internalpb.PeerState)) &&
+		len(peerState.GetActors()) != 0
 }
 
 // processPeerState processes a given peer synchronization record.
