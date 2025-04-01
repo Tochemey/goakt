@@ -27,11 +27,7 @@ package slice
 // Chunk helps chunk a slice into equal size
 func Chunk[T any](slice []T, chunkSize int) [][]T {
 	var chunks [][]T
-	for {
-		if len(slice) == 0 {
-			break
-		}
-
+	for len(slice) != 0 {
 		// required to avoid slicing method beyond slice capacity
 		if len(slice) < chunkSize {
 			chunkSize = len(slice)

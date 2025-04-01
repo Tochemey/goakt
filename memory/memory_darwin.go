@@ -55,7 +55,7 @@ func Free() (uint64, error) {
 	}
 
 	pageSizeRegex := regexp.MustCompile("page size of ([0-9]*) bytes")
-	freePagesRegex := regexp.MustCompile("Pages free: *([0-9]*)\\.")
+	freePagesRegex := regexp.MustCompile(`Pages free: *([0-9]*)\.`)
 
 	matches := pageSizeRegex.FindSubmatchIndex(outBytes)
 	pageSize := uint64(4096)

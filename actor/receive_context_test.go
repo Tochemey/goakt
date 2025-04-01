@@ -1283,6 +1283,7 @@ func TestReceiveContext(t *testing.T) {
 		require.NotNil(t, pid1)
 
 		actor2 := &exchanger{}
+		// nolint
 		pid2, err := actorSystem.Spawn(ctx, "Exchange2", actor2)
 
 		send := new(testpb.TestSend)
@@ -1320,15 +1321,11 @@ func TestReceiveContext(t *testing.T) {
 
 		assert.EqualValues(t, 1, len(consumer.Topics()))
 
-		t.Cleanup(
-			func() {
-				require.NoError(t, pid2.Shutdown(ctx))
-				// shutdown the consumer
-				consumer.Shutdown()
-				context.Shutdown()
-				assert.NoError(t, actorSystem.Stop(ctx))
-			},
-		)
+		require.NoError(t, pid2.Shutdown(ctx))
+		// shutdown the consumer
+		consumer.Shutdown()
+		context.Shutdown()
+		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 	t.Run("With Unhandled with system messages", func(t *testing.T) {
 		ctx := context.TODO()

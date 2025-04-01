@@ -446,8 +446,8 @@ func (x *actorSystem) Run(ctx context.Context, startHook func(ctx context.Contex
 	}
 
 	process, _ := os.FindProcess(pid)
-	switch {
-	case runtime.GOOS == "windows":
+	switch runtime.GOOS {
+	case "windows":
 		_ = process.Kill()
 	default:
 		_ = process.Signal(syscall.SIGTERM)
