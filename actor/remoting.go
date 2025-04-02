@@ -144,8 +144,8 @@ func (r *Remoting) RemoteAsk(ctx context.Context, from, to *address.Address, mes
 	}
 
 	remoteClient := r.remotingServiceClient(to.GetHost(), int(to.GetPort()))
-	stream := remoteClient.RemoteAsk(ctx)
 	eg, ctx := errgroup.WithContext(ctx)
+	stream := remoteClient.RemoteAsk(ctx)
 
 	eg.Go(func() error {
 		request := &internalpb.RemoteAskRequest{
@@ -250,8 +250,8 @@ func (r *Remoting) RemoteBatchTell(ctx context.Context, from, to *address.Addres
 // RemoteBatchAsk sends bulk messages to an actor with responses expected
 func (r *Remoting) RemoteBatchAsk(ctx context.Context, from, to *address.Address, messages []proto.Message, timeout time.Duration) (responses []*anypb.Any, err error) {
 	remoteClient := r.remotingServiceClient(to.GetHost(), int(to.GetPort()))
-	stream := remoteClient.RemoteAsk(ctx)
 	eg, ctx := errgroup.WithContext(ctx)
+	stream := remoteClient.RemoteAsk(ctx)
 
 	eg.Go(func() error {
 		for _, message := range messages {
