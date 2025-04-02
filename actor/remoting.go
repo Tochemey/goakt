@@ -34,6 +34,7 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
+	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/durationpb"
@@ -143,45 +144,42 @@ func (r *Remoting) RemoteAsk(ctx context.Context, from, to *address.Address, mes
 	}
 
 	remoteClient := r.remotingServiceClient(to.GetHost(), int(to.GetPort()))
-	request := &internalpb.RemoteAskRequest{
-		RemoteMessage: &internalpb.RemoteMessage{
-			Sender:   from.Address,
-			Receiver: to.Address,
-			Message:  marshaled,
-		},
-		Timeout: durationpb.New(timeout),
-	}
 	stream := remoteClient.RemoteAsk(ctx)
-	errc := make(chan error, 1)
+	eg, ctx := errgroup.WithContext(ctx)
 
-	go func() {
-		defer close(errc)
+	eg.Go(func() error {
+		request := &internalpb.RemoteAskRequest{
+			RemoteMessage: &internalpb.RemoteMessage{
+				Sender:   from.Address,
+				Receiver: to.Address,
+				Message:  marshaled,
+			},
+			Timeout: durationpb.New(timeout),
+		}
+
+		if err := stream.Send(request); err != nil {
+			if !eof(err) {
+				return err
+			}
+		}
+		return stream.CloseRequest()
+	})
+
+	eg.Go(func() error {
 		for {
 			resp, err := stream.Receive()
 			if err != nil {
-				errc <- err
-				return
+				if !eof(err) {
+					return err
+				}
+				break
 			}
-
 			response = resp.GetMessage()
 		}
-	}()
+		return stream.CloseResponse()
+	})
 
-	err = stream.Send(request)
-	if err != nil {
-		return nil, err
-	}
-
-	if err := stream.CloseRequest(); err != nil {
-		return nil, err
-	}
-
-	err = <-errc
-	if eof(err) {
-		return response, nil
-	}
-
-	if err != nil {
+	if err := eg.Wait(); err != nil {
 		return nil, err
 	}
 
@@ -213,37 +211,31 @@ func (r *Remoting) RemoteLookup(ctx context.Context, host string, port int, name
 
 // RemoteBatchTell sends bulk asynchronous messages to an actor
 func (r *Remoting) RemoteBatchTell(ctx context.Context, from, to *address.Address, messages []proto.Message) error {
-	var requests []*internalpb.RemoteTellRequest
-	for _, message := range messages {
-		packed, err := anypb.New(message)
-		if err != nil {
-			return ErrInvalidMessage(err)
-		}
+	remoteClient := r.remotingServiceClient(to.GetHost(), int(to.GetPort()))
+	stream := remoteClient.RemoteTell(ctx)
 
-		requests = append(
-			requests, &internalpb.RemoteTellRequest{
+	for _, message := range messages {
+		if message != nil {
+			packed, _ := anypb.New(message)
+			request := &internalpb.RemoteTellRequest{
 				RemoteMessage: &internalpb.RemoteMessage{
 					Sender:   from.Address,
 					Receiver: to.Address,
 					Message:  packed,
 				},
-			},
-		)
-	}
+			}
 
-	remoteClient := r.remotingServiceClient(to.GetHost(), int(to.GetPort()))
-	stream := remoteClient.RemoteTell(ctx)
-	for _, request := range requests {
-		err := stream.Send(request)
-		if eof(err) {
-			if _, err := stream.CloseAndReceive(); err != nil {
+			err := stream.Send(request)
+			if eof(err) {
+				if _, err := stream.CloseAndReceive(); err != nil {
+					return err
+				}
+				return nil
+			}
+
+			if err != nil {
 				return err
 			}
-			return nil
-		}
-
-		if err != nil {
-			return err
 		}
 	}
 
@@ -257,59 +249,51 @@ func (r *Remoting) RemoteBatchTell(ctx context.Context, from, to *address.Addres
 
 // RemoteBatchAsk sends bulk messages to an actor with responses expected
 func (r *Remoting) RemoteBatchAsk(ctx context.Context, from, to *address.Address, messages []proto.Message, timeout time.Duration) (responses []*anypb.Any, err error) {
-	var requests []*internalpb.RemoteAskRequest
-	for _, message := range messages {
-		packed, err := anypb.New(message)
-		if err != nil {
-			return nil, ErrInvalidMessage(err)
-		}
+	remoteClient := r.remotingServiceClient(to.GetHost(), int(to.GetPort()))
+	stream := remoteClient.RemoteAsk(ctx)
+	eg, ctx := errgroup.WithContext(ctx)
 
-		requests = append(
-			requests, &internalpb.RemoteAskRequest{
+	eg.Go(func() error {
+		for _, message := range messages {
+			packed, err := anypb.New(message)
+			if err != nil {
+				return ErrInvalidMessage(err)
+			}
+
+			request := &internalpb.RemoteAskRequest{
 				RemoteMessage: &internalpb.RemoteMessage{
 					Sender:   from.Address,
 					Receiver: to.Address,
 					Message:  packed,
 				},
 				Timeout: durationpb.New(timeout),
-			},
-		)
-	}
+			}
 
-	remoteClient := r.remotingServiceClient(to.GetHost(), int(to.GetPort()))
-	stream := remoteClient.RemoteAsk(ctx)
-	errc := make(chan error, 1)
+			if err := stream.Send(request); err != nil {
+				// TODO: check if the error is EOF should we break the loop
+				if !eof(err) {
+					return err
+				}
+			}
+		}
+		return stream.CloseRequest()
+	})
 
-	go func() {
-		defer close(errc)
+	eg.Go(func() error {
 		for {
 			resp, err := stream.Receive()
 			if err != nil {
-				errc <- err
-				return
+				if !eof(err) {
+					return err
+				}
+				break
 			}
-
 			responses = append(responses, resp.GetMessage())
 		}
-	}()
+		return stream.CloseResponse()
+	})
 
-	for _, request := range requests {
-		err := stream.Send(request)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	if err := stream.CloseRequest(); err != nil {
-		return nil, err
-	}
-
-	err = <-errc
-	if eof(err) {
-		return responses, nil
-	}
-
-	if err != nil {
+	if err := eg.Wait(); err != nil {
 		return nil, err
 	}
 

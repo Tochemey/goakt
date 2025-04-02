@@ -63,9 +63,11 @@ func main() {
 	// wait for the actor system to be ready
 	time.Sleep(time.Second)
 
+	expected := 1_000_000
+
 	// create an actor
 	_, _ = actorSystem.Spawn(ctx, "Pong",
-		NewPong(),
+		NewPong(expected),
 		goakt.WithSupervisor(
 			goakt.NewSupervisor(
 				goakt.WithAnyErrorDirective(goakt.ResumeDirective),
@@ -84,14 +86,17 @@ func main() {
 }
 
 type Pong struct {
-	count int
-	start time.Time
+	count    int
+	start    time.Time
+	expected int
 }
 
 var _ goakt.Actor = (*Pong)(nil)
 
-func NewPong() *Pong {
-	return &Pong{}
+func NewPong(expected int) *Pong {
+	return &Pong{
+		expected: expected,
+	}
 }
 
 func (act *Pong) PreStart(context.Context) error {
@@ -101,15 +106,15 @@ func (act *Pong) PreStart(context.Context) error {
 func (act *Pong) Receive(ctx *goakt.ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *goaktpb.PostStart:
-	case *testpb.TestBye:
-		ctx.Logger().Infof("completed processing message: %d", act.count)
-		ctx.Logger().Infof("total time taken: %s", time.Since(act.start))
 	case *testpb.TestPing:
 		if act.count == 0 {
 			act.start = time.Now()
 		}
 		act.count++
-		ctx.RemoteTell(ctx.RemoteSender(), new(testpb.TestPong))
+		if act.count >= act.expected {
+			ctx.Logger().Infof("completed processing message: %d in %s", act.count, time.Since(act.start))
+			return
+		}
 	default:
 		ctx.Unhandled()
 	}
