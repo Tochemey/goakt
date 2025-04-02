@@ -30,7 +30,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	nethttp "net/http"
+	stdhttp "net/http"
 	"os"
 	"os/signal"
 	"regexp"
@@ -259,7 +259,7 @@ type actorSystem struct {
 	remotingEnabled atomic.Bool
 	remoting        *Remoting
 	// Specifies the remoting server
-	server       *nethttp.Server
+	server       *stdhttp.Server
 	listener     net.Listener
 	remoteConfig *remote.Config
 
@@ -1552,7 +1552,7 @@ func (x *actorSystem) enableRemoting(ctx context.Context) error {
 	remotingServicePath, remotingServiceHandler := internalpbconnect.NewRemotingServiceHandler(x)
 	clusterServicePath, clusterServiceHandler := internalpbconnect.NewClusterServiceHandler(x)
 
-	mux := nethttp.NewServeMux()
+	mux := stdhttp.NewServeMux()
 	mux.Handle(remotingServicePath, remotingServiceHandler)
 	mux.Handle(clusterServicePath, clusterServiceHandler)
 
@@ -1568,7 +1568,7 @@ func (x *actorSystem) enableRemoting(ctx context.Context) error {
 
 	go func() {
 		if err := x.startHTTPServer(); err != nil {
-			if !errors.Is(err, nethttp.ErrServerClosed) {
+			if !errors.Is(err, stdhttp.ErrServerClosed) {
 				x.logger.Panic(fmt.Errorf("failed to start remoting service: %w", err))
 			}
 		}
@@ -1969,7 +1969,7 @@ func (x *actorSystem) shutdownHTTPServer(ctx context.Context) error {
 }
 
 // configureServer configure the various http server and listeners based upon the various settings
-func (x *actorSystem) configureServer(ctx context.Context, mux *nethttp.ServeMux) error {
+func (x *actorSystem) configureServer(ctx context.Context, mux *stdhttp.ServeMux) error {
 	hostPort := net.JoinHostPort(x.remoteConfig.BindAddr(), strconv.Itoa(x.remoteConfig.BindPort()))
 	httpServer := getServer(ctx, hostPort)
 	listener, err := tcp.NewKeepAliveListener(httpServer.Addr)
@@ -2286,22 +2286,14 @@ func isReservedName(name string) bool {
 }
 
 // getServer creates an instance of http server
-func getServer(ctx context.Context, address string) *nethttp.Server {
-	return &nethttp.Server{
-		Addr: address,
-		// The maximum duration for reading the entire request, including the body.
-		// It’s implemented in net/http by calling SetReadDeadline immediately after Accept
-		// ReadTimeout := handler_timeout + ReadHeaderTimeout + wiggle_room
-		ReadTimeout: 3 * time.Second,
-		// ReadHeaderTimeout is the amount of time allowed to read request headers
+func getServer(ctx context.Context, address string) *stdhttp.Server {
+	return &stdhttp.Server{
+		Addr:              address,
+		ReadTimeout:       5 * time.Minute,
 		ReadHeaderTimeout: time.Second,
-		// WriteTimeout is the maximum duration before timing out writes of the response.
-		// It is reset whenever a new request’s header is read.
-		// This effectively covers the lifetime of the ServeHTTP handler stack
-		WriteTimeout: time.Second,
-		// IdleTimeout is the maximum amount of time to wait for the next request when keep-alive are enabled.
-		// If IdleTimeout is zero, the value of ReadTimeout is used. Not relevant to request timeouts
-		IdleTimeout: 1200 * time.Second,
+		WriteTimeout:      5 * time.Minute,
+		IdleTimeout:       1200 * time.Second,
+		MaxHeaderBytes:    8 * 1024, // 8KiB
 		BaseContext: func(_ net.Listener) context.Context {
 			return ctx
 		},

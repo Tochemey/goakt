@@ -31,6 +31,8 @@ import (
 	"syscall"
 	"time"
 
+	"google.golang.org/protobuf/proto"
+
 	goakt "github.com/tochemey/goakt/v3/actor"
 	"github.com/tochemey/goakt/v3/address"
 	"github.com/tochemey/goakt/v3/goaktpb"
@@ -65,7 +67,7 @@ func main() {
 	time.Sleep(time.Second)
 
 	// create an actor
-	toSend := 10000
+	toSend := 1_000_000
 
 	pid, _ := actorSystem.Spawn(ctx, "Ping", NewPing(toSend),
 		goakt.WithSupervisor(
@@ -95,6 +97,8 @@ type Ping struct {
 	threshold int
 	count     int
 	start     time.Time
+
+	toSend []proto.Message
 }
 
 var _ goakt.Actor = (*Ping)(nil)
@@ -106,6 +110,10 @@ func NewPing(totalScore int) *Ping {
 }
 
 func (act *Ping) PreStart(context.Context) error {
+	act.toSend = make([]proto.Message, act.threshold)
+	for i := range act.threshold {
+		act.toSend[i] = new(testpb.TestPing)
+	}
 	return nil
 }
 
@@ -116,16 +124,8 @@ func (act *Ping) Receive(ctx *goakt.ReceiveContext) {
 		remoteAddr := ctx.RemoteLookup(host, 50052, "Pong")
 		to := address.From(remoteAddr)
 		act.start = time.Now()
-		ctx.RemoteTell(to, new(testpb.TestPing))
-	case *testpb.TestPong:
-		act.count++
-		if act.count >= act.threshold {
-			ctx.RemoteTell(ctx.RemoteSender(), new(testpb.TestBye))
-			ctx.Logger().Infof("completed processing message: %d", act.count)
-			ctx.Logger().Infof("total time taken: %s", time.Since(act.start))
-			return
-		}
-		ctx.RemoteTell(ctx.RemoteSender(), new(testpb.TestPing))
+		ctx.RemoteBatchTell(to, act.toSend)
+		ctx.Logger().Infof("sent %d messages to %s in %s", act.threshold, to.String(), time.Since(act.start))
 	default:
 		ctx.Unhandled()
 	}
