@@ -4,6 +4,10 @@ on:
   workflow_dispatch:
   schedule:
     - cron: '0 12 * * *'
+permissions:
+  contents: write # only for delete-branch option
+  issues: write
+  pull-requests: write
 
 jobs:
   Stale:
@@ -15,30 +19,15 @@ jobs:
         uses: actions/checkout@v4
       - name: Stale
         id: stale
-        uses: sonia-corporation/stale@2.5.0
+        uses: actions/stale@v9
         with:
-          pull-request-stale-label: stale-label
-          pull-request-days-before-stale: 14
-          pull-request-days-before-close: 10
-          pull-request-ignore-all-assignees: true
-          pull-request-delete-branch-after-close: true
-          pull-request-stale-comment: |
-            This pull is inactive since 14 days!
-            If there is no activity, it will be closed in two weeks.
-            
-            You should take one of the following actions:
-            - Manually close this PR if it is no longer relevant
-            - Push new commits or comment if you have more information to share
-          issue-stale-label: inactive
-          issue-ignore-all-assignees: true
-          issue-days-before-stale: 14
-          issue-days-before-close: 10
-          issue-stale-comment: |
-            This issue is inactive since 14 days!
-            If there is no activity, it will be closed in two weeks.
-            
-            You should take one of the following actions:
-            - Manually close this issue if it is no longer relevant
-            - Comment if you have more information to share
-          issue-add-labels-after-close: |
-            closed-due-to-inactivity
+          stale-issue-message: 'This issue is stale because it has been open 14 days with no activity. Remove stale label or comment or this will be closed in 5 days.'
+          stale-pr-message: 'This PR is stale because it has been open 14 days with no activity. Remove stale label or comment or this will be closed in 10 days.'
+          close-issue-message: 'This issue was closed because it has been stalled for 5 days with no activity.'
+          close-pr-message: 'This PR was closed because it has been stalled for 10 days with no activity.'
+          days-before-issue-stale: 14
+          days-before-pr-stale: 14
+          days-before-issue-close: 5
+          days-before-pr-close: 10
+          stale-pr-label: 'stale-label'
+          stale-issue-label: 'stale-label'

@@ -55,7 +55,9 @@ func (mailbox *BoundedMailbox) Enqueue(msg *ReceiveContext) error {
 func (mailbox *BoundedMailbox) Dequeue() (msg *ReceiveContext) {
 	if mailbox.underlying.Len() > 0 {
 		item, _ := mailbox.underlying.Get()
-		return item.(*ReceiveContext)
+		if v, ok := item.(*ReceiveContext); ok {
+			return v
+		}
 	}
 	return nil
 }

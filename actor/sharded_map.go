@@ -30,7 +30,7 @@ import (
 	"sync"
 )
 
-const maxShards = 64
+const maxShards = 128
 
 // Shard defines a Shard
 type shard struct {
