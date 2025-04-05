@@ -63,6 +63,7 @@ import (
 	"github.com/tochemey/goakt/v3/internal/tcp"
 	"github.com/tochemey/goakt/v3/internal/ticker"
 	"github.com/tochemey/goakt/v3/internal/types"
+	"github.com/tochemey/goakt/v3/internal/workerpool"
 	"github.com/tochemey/goakt/v3/log"
 	"github.com/tochemey/goakt/v3/memory"
 	"github.com/tochemey/goakt/v3/remote"
@@ -223,6 +224,7 @@ type ActorSystem interface { //nolint:revive
 	getDeathWatch() *PID
 	getDeadletter() *PID
 	getSingletonManager() *PID
+	getWorkerPool() *workerpool.WorkerPool
 }
 
 // ActorSystem represent a collection of actors on a given node
@@ -315,6 +317,7 @@ type actorSystem struct {
 	clientTLS     *tls.Config
 	serverTLS     *tls.Config
 	pubsubEnabled atomic.Bool
+	workerPool    *workerpool.WorkerPool
 }
 
 var (
@@ -361,6 +364,10 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		actorsCounter:          atomic.NewUint64(0),
 		deadlettersCounter:     atomic.NewUint64(0),
 		topicActor:             NoSender,
+		workerPool: workerpool.New(
+			workerpool.WithNumShards(runtime.GOMAXPROCS(0)),
+			workerpool.WithPassivateAfter(5*time.Second),
+		),
 	}
 
 	system.started.Store(false)
@@ -460,6 +467,7 @@ func (x *actorSystem) Run(ctx context.Context, startHook func(ctx context.Contex
 func (x *actorSystem) Start(ctx context.Context) error {
 	x.logger.Infof("%s actor system starting on %s/%s..", x.name, runtime.GOOS, runtime.GOARCH)
 	x.started.Store(true)
+	x.workerPool.Start()
 	if err := errorschain.
 		New(errorschain.ReturnFirst()).
 		AddErrorFn(func() error { return x.enableRemoting(ctx) }).
@@ -473,6 +481,7 @@ func (x *actorSystem) Start(ctx context.Context) error {
 		AddErrorFn(func() error { return x.spawnSingletonManager(ctx) }).
 		AddErrorFn(func() error { return x.spawnTopicActor(ctx) }).
 		Error(); err != nil {
+		x.workerPool.Stop()
 		return errorschain.
 			New(errorschain.ReturnAll()).
 			AddErrorFn(func() error { return err }).
@@ -1398,6 +1407,14 @@ func (x *actorSystem) getDeadletter() *PID {
 	return deadletters
 }
 
+// getWorkerPool returns the system worker pool
+func (x *actorSystem) getWorkerPool() *workerpool.WorkerPool {
+	x.locker.Lock()
+	workerPool := x.workerPool
+	x.locker.Unlock()
+	return workerPool
+}
+
 // getSingletonManager returns the system singleton manager
 func (x *actorSystem) getSingletonManager() *PID {
 	x.locker.Lock()
@@ -1678,6 +1695,7 @@ func (x *actorSystem) shutdown(ctx context.Context) error {
 		return err
 	}
 
+	x.workerPool.Stop()
 	x.reset()
 	x.logger.Infof("%s shuts down successfully", x.name)
 	return nil
@@ -1880,6 +1898,7 @@ func (x *actorSystem) configPID(ctx context.Context, name string, actor Actor, o
 		withEventsStream(x.eventsStream),
 		withInitTimeout(x.actorInitTimeout),
 		withRemoting(x.remoting),
+		withWorkerPool(x.workerPool),
 	}
 
 	spawnConfig := newSpawnConfig(opts...)

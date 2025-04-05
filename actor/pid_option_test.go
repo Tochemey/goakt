@@ -32,6 +32,7 @@ import (
 	"go.uber.org/atomic"
 
 	"github.com/tochemey/goakt/v3/internal/eventstream"
+	"github.com/tochemey/goakt/v3/internal/workerpool"
 	"github.com/tochemey/goakt/v3/log"
 )
 
@@ -53,6 +54,7 @@ func TestPIDOptions(t *testing.T) {
 	eventsStream := eventstream.New()
 	atomicTrue.Store(true)
 	atomicFalse.Store(false)
+	workerPool := workerpool.New()
 
 	testCases := []struct {
 		name     string
@@ -110,6 +112,11 @@ func TestPIDOptions(t *testing.T) {
 			name:     "withRelocationDisabled",
 			option:   withRelocationDisabled(),
 			expected: &PID{relocatable: atomicFalse},
+		},
+		{
+			name:     "WithWorkerPool",
+			option:   withWorkerPool(workerPool),
+			expected: &PID{workerPool: workerPool},
 		},
 	}
 	for _, tc := range testCases {

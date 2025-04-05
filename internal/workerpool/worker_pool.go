@@ -150,12 +150,15 @@ func (wp *WorkerPool) Stop() {
 }
 
 func (wp *WorkerPool) SubmitWork(task func()) {
+	wp.mutex.Lock()
 	if !wp.started {
+		wp.mutex.Unlock()
 		return
 	}
 
 	shard := wp.shards[randInt()%wp.numShards]
 	shard.acquireWorker(task)
+	wp.mutex.Unlock()
 }
 
 func (shard *poolShard) acquireWorker(task func()) (worker *Worker) {
@@ -307,7 +310,6 @@ func (sm64 *splitMix64) Uint64() uint64 {
 	z = (z ^ (z >> 30)) * uint64(0xBF58476D1CE4E5B9)
 	z = (z ^ (z >> 27)) * uint64(0x94D049BB133111EB)
 	return z ^ (z >> 31)
-
 }
 
 func (sm64 *splitMix64) Int63() int64 {
