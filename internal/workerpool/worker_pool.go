@@ -237,7 +237,9 @@ func (wp *WorkerPool) cleanup() {
 		wp.mutex.Unlock()
 		now := time.Now()
 		for i := range wp.numShards {
+			wp.mutex.Lock()
 			shard := wp.shards[i]
+			wp.mutex.Unlock()
 
 			shard.locker.Lock()
 			idleWorkers := shard.idleWorkers
