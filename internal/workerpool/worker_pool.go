@@ -167,21 +167,19 @@ func (wp *WorkerPool) SubmitWork(task func()) {
 func (shard *poolShard) acquireWorker(task func()) (worker *Worker) {
 	shard.locker.Lock()
 	worker = shard.idleWorker1
-	shard.locker.Unlock()
 	if worker != nil && atomic.CompareAndSwapPointer((*unsafe.Pointer)(unsafe.Pointer(&shard.idleWorker1)), unsafe.Pointer(worker), nil) {
 		worker.workChan <- task
+		shard.locker.Unlock()
 		return worker
 	}
 
-	shard.locker.Lock()
 	worker = shard.idleWorker2
-	shard.locker.Unlock()
 	if worker != nil && atomic.CompareAndSwapPointer((*unsafe.Pointer)(unsafe.Pointer(&shard.idleWorker2)), unsafe.Pointer(worker), nil) {
 		worker.workChan <- task
+		shard.locker.Unlock()
 		return worker
 	}
 
-	shard.locker.Lock()
 	length := len(shard.idleWorkers)
 	if length > 0 {
 		worker = shard.idleWorkers[length-1]
@@ -203,13 +201,17 @@ func (shard *poolShard) acquireWorker(task func()) (worker *Worker) {
 
 func (shard *poolShard) setWorkerIdle(worker *Worker) bool {
 	worker.lastUsed = time.Now()
-
+	shard.locker.Lock()
 	if shard.idleWorker2 == nil && atomic.CompareAndSwapPointer((*unsafe.Pointer)(unsafe.Pointer(&shard.idleWorker2)), nil, unsafe.Pointer(worker)) {
+		shard.locker.Unlock()
 		return true
 	}
+
 	if shard.idleWorker1 == nil && atomic.CompareAndSwapPointer((*unsafe.Pointer)(unsafe.Pointer(&shard.idleWorker1)), nil, unsafe.Pointer(worker)) {
+		shard.locker.Unlock()
 		return true
 	}
+	shard.locker.Unlock()
 
 	worker.shard.locker.Lock()
 	if !worker.shard.stopped {
