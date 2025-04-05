@@ -41,7 +41,7 @@ type WorkerPool struct {
 	passivateAfter time.Duration
 	numShards      int
 	shards         []*poolShard
-	mutex          spinLocker
+	mutex          *spinLocker
 	started        bool
 	stopped        bool
 	_              [56]byte
@@ -78,7 +78,7 @@ type poolShard struct {
 	idleWorkers []*Worker
 	idleWorker1 *Worker
 	idleWorker2 *Worker
-	locker      spinLocker
+	locker      *spinLocker
 	stopped     bool
 }
 
@@ -87,6 +87,7 @@ func New(opts ...Option) *WorkerPool {
 	wp := &WorkerPool{
 		passivateAfter: time.Second,
 		numShards:      1,
+		mutex:          &spinLocker{},
 	}
 
 	for _, opt := range opts {
@@ -105,7 +106,8 @@ func (wp *WorkerPool) Start() {
 	if !wp.started {
 		for range wp.numShards {
 			shard := &poolShard{
-				wp: wp,
+				wp:     wp,
+				locker: &spinLocker{},
 				workers: sync.Pool{
 					New: func() any {
 						return &Worker{
@@ -158,8 +160,8 @@ func (wp *WorkerPool) SubmitWork(task func()) {
 	}
 
 	shard := wp.shards[randInt()%wp.numShards]
-	shard.acquireWorker(task)
 	wp.mutex.Unlock()
+	shard.acquireWorker(task)
 }
 
 func (shard *poolShard) acquireWorker(task func()) (worker *Worker) {
