@@ -223,15 +223,18 @@ func (shard *poolShard) setWorkerIdle(worker *Worker) bool {
 
 func (wp *WorkerPool) cleanup() {
 	var workers []*Worker
-	ticker := ticker.New(wp.passivateAfter)
-	defer ticker.Stop()
+	tk := ticker.New(wp.passivateAfter)
+	defer tk.Stop()
 
-	ticker.Start()
-	for range ticker.Ticks {
+	tk.Start()
+	for range tk.Ticks {
+		wp.mutex.Lock()
 		if wp.stopped {
+			wp.mutex.Unlock()
 			return
 		}
 
+		wp.mutex.Unlock()
 		now := time.Now()
 		for i := range wp.numShards {
 			shard := wp.shards[i]
