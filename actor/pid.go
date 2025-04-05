@@ -51,6 +51,7 @@ import (
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/ticker"
 	"github.com/tochemey/goakt/v3/internal/types"
+	"github.com/tochemey/goakt/v3/internal/workerpool"
 	"github.com/tochemey/goakt/v3/log"
 )
 
@@ -115,9 +116,8 @@ type PID struct {
 
 	// various lockers to protect the PID fields
 	// in a concurrent environment
-	fieldsLocker         *sync.RWMutex
-	stopLocker           *sync.Mutex
-	processingTimeLocker *sync.Mutex
+	fieldsLocker *sync.RWMutex
+	stopLocker   *sync.Mutex
 
 	// specifies the actor behavior stack
 	behaviorStack *behaviorStack
@@ -143,7 +143,7 @@ type PID struct {
 
 	remoting *Remoting
 
-	goScheduler *goScheduler
+	workerPool  *workerpool.WorkerPool
 	startedAt   *atomic.Int64
 	isSingleton atomic.Bool
 	relocatable atomic.Bool
@@ -175,11 +175,9 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 		eventsStream:          nil,
 		restartCount:          atomic.NewInt64(0),
 		processedCount:        atomic.NewInt64(0),
-		processingTimeLocker:  new(sync.Mutex),
 		supervisionChan:       make(chan error, 1),
 		supervisionStopSignal: make(chan types.Unit, 1),
 		remoting:              NewRemoting(),
-		goScheduler:           newGoScheduler(300),
 		supervisor:            NewSupervisor(),
 		startedAt:             atomic.NewInt64(0),
 	}
@@ -572,6 +570,7 @@ func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor, opts .
 		withEventsStream(pid.eventsStream),
 		withInitTimeout(pid.initTimeout.Load()),
 		withRemoting(pid.remoting),
+		withWorkerPool(pid.workerPool),
 	}
 
 	spawnConfig := newSpawnConfig(opts...)
@@ -1220,7 +1219,7 @@ func (pid *PID) doReceive(receiveCtx *ReceiveContext) {
 func (pid *PID) schedule() {
 	// only signal if the actor is not already processing messages
 	if pid.processing.CompareAndSwap(int32(idle), int32(busy)) {
-		pid.goScheduler.Schedule(pid.receiveLoop)
+		pid.workerPool.SubmitWork(pid.receiveLoop)
 	}
 }
 
@@ -1228,17 +1227,9 @@ func (pid *PID) schedule() {
 // and pass it to the appropriate behavior for handling
 func (pid *PID) receiveLoop() {
 	var received *ReceiveContext
-	counter, throughput := 0, pid.goScheduler.Throughput()
 	for {
-		if counter > throughput {
-			counter = 0
-			runtime.Gosched()
-		}
-
-		counter++
 		if received != nil {
 			releaseContext(received)
-			received = nil
 		}
 
 		if received = pid.mailbox.Dequeue(); received != nil {
@@ -1253,7 +1244,7 @@ func (pid *PID) receiveLoop() {
 			}
 		}
 
-		// If no more messages, change busy state to idle
+		// if no more messages, change busy state to idle
 		if !pid.processing.CompareAndSwap(int32(busy), int32(idle)) {
 			return
 		}

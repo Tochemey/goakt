@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (c) 2022-2025  Arsene Tochemey Gandote
+ * Copyright (c) 2022-2025 Arsene Tochemey Gandote
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -22,26 +22,39 @@
  * SOFTWARE.
  */
 
-package actor
+package workerpool
 
-// goScheduler is a custom go routines scheduler
-// this will help schedule actors message processing
-type goScheduler struct {
-	throughput int
+import "time"
+
+// Option is the interface that applies a WorkerPool option.
+type Option interface {
+	// Apply sets the Option value of a WorkerPool.
+	Apply(pool *WorkerPool)
 }
 
-// Schedule schedules a function in a go routine to be executed
-func (s *goScheduler) Schedule(fn func()) {
-	go fn()
+var _ Option = OptionFunc(nil)
+
+// OptionFunc implements the Option interface.
+type OptionFunc func(pool *WorkerPool)
+
+// Apply applies the Node's option
+func (f OptionFunc) Apply(pool *WorkerPool) {
+	f(pool)
 }
 
-// Throughput returns the scheduler throughput
-// The throughput helps yield back control to other go routines
-func (s *goScheduler) Throughput() int {
-	return s.throughput
+// WithPassivateAfter sets the passivate after duration
+func WithPassivateAfter(d time.Duration) Option {
+	return OptionFunc(func(pool *WorkerPool) {
+		pool.passivateAfter = d
+	})
 }
 
-// newGoScheduler creates an instance of goScheduler
-func newGoScheduler(capacity int) *goScheduler {
-	return &goScheduler{throughput: capacity}
+// WithNumShards sets the number of shards
+func WithNumShards(numShards int) Option {
+	return OptionFunc(func(pool *WorkerPool) {
+		if numShards > maxShards {
+			numShards = maxShards
+		}
+		pool.numShards = numShards
+	})
 }
