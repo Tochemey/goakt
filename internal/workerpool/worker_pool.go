@@ -217,8 +217,9 @@ func (shard *poolShard) setWorkerIdle(worker *Worker) bool {
 	if !worker.shard.stopped {
 		worker.shard.idleWorkers = append(worker.shard.idleWorkers, worker)
 	}
+	stopped := worker.shard.stopped
 	worker.shard.locker.Unlock()
-	return !worker.shard.stopped
+	return !stopped
 }
 
 func (wp *WorkerPool) cleanup() {
