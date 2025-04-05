@@ -165,13 +165,17 @@ func (wp *WorkerPool) SubmitWork(task func()) {
 }
 
 func (shard *poolShard) acquireWorker(task func()) (worker *Worker) {
+	shard.locker.Lock()
 	worker = shard.idleWorker1
+	shard.locker.Unlock()
 	if worker != nil && atomic.CompareAndSwapPointer((*unsafe.Pointer)(unsafe.Pointer(&shard.idleWorker1)), unsafe.Pointer(worker), nil) {
 		worker.workChan <- task
 		return worker
 	}
 
+	shard.locker.Lock()
 	worker = shard.idleWorker2
+	shard.locker.Unlock()
 	if worker != nil && atomic.CompareAndSwapPointer((*unsafe.Pointer)(unsafe.Pointer(&shard.idleWorker2)), unsafe.Pointer(worker), nil) {
 		worker.workChan <- task
 		return worker
