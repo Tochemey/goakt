@@ -26,13 +26,11 @@ package actor
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"net"
-	"strconv"
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/reugn/go-quartz/job"
 	quartzlogger "github.com/reugn/go-quartz/logger"
 	"github.com/reugn/go-quartz/quartz"
@@ -40,24 +38,14 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/tochemey/goakt/v3/address"
-	"github.com/tochemey/goakt/v3/internal/cluster"
 	"github.com/tochemey/goakt/v3/log"
 )
-
-var errSkipJobScheduling = errors.New("skip job scheduling")
 
 // schedulerOption represents the scheduler option
 // to set custom settings
 type schedulerOption func(scheduler *scheduler)
 
-// withCluster set the scheduler cluster
-func withSchedulerCluster(cluster cluster.Interface) schedulerOption {
-	return func(scheduler *scheduler) {
-		scheduler.cluster = cluster
-	}
-}
-
-// withSchedulerTls sets the TLS setting
+// withSchedulerRemoting sets the scheduler remoting
 func withSchedulerRemoting(remoting *Remoting) schedulerOption {
 	return func(scheduler *scheduler) {
 		scheduler.remoting = remoting
@@ -77,7 +65,6 @@ type scheduler struct {
 	logger log.Logger
 	// define the shutdown timeout
 	stopTimeout time.Duration
-	cluster     cluster.Interface
 	remoting    *Remoting
 }
 
@@ -137,7 +124,7 @@ func (x *scheduler) Stop(ctx context.Context) {
 // ScheduleOnce schedules a message that will be delivered to the receiver actor
 // This will send the given message to the actor after the given interval specified.
 // The message will be sent once
-func (x *scheduler) ScheduleOnce(ctx context.Context, message proto.Message, pid *PID, interval time.Duration) error {
+func (x *scheduler) ScheduleOnce(message proto.Message, pid *PID, interval time.Duration) error {
 	x.mu.Lock()
 	defer x.mu.Unlock()
 
@@ -154,19 +141,13 @@ func (x *scheduler) ScheduleOnce(ctx context.Context, message proto.Message, pid
 		},
 	)
 
-	jobDetails := quartz.NewJobDetail(job, quartz.NewJobKey(pid.Address().String()))
-	if err := x.distributeJobKeyOrNot(ctx, jobDetails); err != nil {
-		if errors.Is(err, errSkipJobScheduling) {
-			return nil
-		}
-		return err
-	}
-
-	return x.quartzScheduler.ScheduleJob(jobDetails, quartz.NewRunOnceTrigger(interval))
+	key := newJobKey()
+	detail := quartz.NewJobDetail(job, quartz.NewJobKey(key))
+	return x.quartzScheduler.ScheduleJob(detail, quartz.NewRunOnceTrigger(interval))
 }
 
 // Schedule schedules a message that will be delivered to the receiving actor using the given interval specified
-func (x *scheduler) Schedule(ctx context.Context, message proto.Message, pid *PID, interval time.Duration) error {
+func (x *scheduler) Schedule(message proto.Message, pid *PID, interval time.Duration) error {
 	x.mu.Lock()
 	defer x.mu.Unlock()
 
@@ -183,19 +164,13 @@ func (x *scheduler) Schedule(ctx context.Context, message proto.Message, pid *PI
 		},
 	)
 
-	jobDetails := quartz.NewJobDetail(job, quartz.NewJobKey(pid.Address().String()))
-	if err := x.distributeJobKeyOrNot(ctx, jobDetails); err != nil {
-		if errors.Is(err, errSkipJobScheduling) {
-			return nil
-		}
-		return err
-	}
-
-	return x.quartzScheduler.ScheduleJob(jobDetails, quartz.NewSimpleTrigger(interval))
+	key := newJobKey()
+	detail := quartz.NewJobDetail(job, quartz.NewJobKey(key))
+	return x.quartzScheduler.ScheduleJob(detail, quartz.NewSimpleTrigger(interval))
 }
 
 // ScheduleWithCron schedules a message to be sent to an actor in the future using a cron expression.
-func (x *scheduler) ScheduleWithCron(ctx context.Context, message proto.Message, pid *PID, cronExpression string) error {
+func (x *scheduler) ScheduleWithCron(message proto.Message, pid *PID, cronExpression string) error {
 	x.mu.Lock()
 	defer x.mu.Unlock()
 	if !x.started.Load() {
@@ -211,14 +186,8 @@ func (x *scheduler) ScheduleWithCron(ctx context.Context, message proto.Message,
 		},
 	)
 
-	jobDetails := quartz.NewJobDetail(job, quartz.NewJobKey(pid.Address().String()))
-	if err := x.distributeJobKeyOrNot(ctx, jobDetails); err != nil {
-		if errors.Is(err, errSkipJobScheduling) {
-			return nil
-		}
-		return err
-	}
-
+	key := newJobKey()
+	detail := quartz.NewJobDetail(job, quartz.NewJobKey(key))
 	location := time.Now().Location()
 	trigger, err := quartz.NewCronTriggerWithLoc(cronExpression, location)
 	if err != nil {
@@ -226,14 +195,14 @@ func (x *scheduler) ScheduleWithCron(ctx context.Context, message proto.Message,
 		return err
 	}
 
-	return x.quartzScheduler.ScheduleJob(jobDetails, trigger)
+	return x.quartzScheduler.ScheduleJob(detail, trigger)
 }
 
 // RemoteScheduleOnce schedules a message to be sent to a remote actor in the future.
 // This requires remoting to be enabled on the actor system.
 // This will send the given message to the actor after the given interval specified
 // The message will be sent once
-func (x *scheduler) RemoteScheduleOnce(ctx context.Context, message proto.Message, to *address.Address, interval time.Duration) error {
+func (x *scheduler) RemoteScheduleOnce(message proto.Message, to *address.Address, interval time.Duration) error {
 	x.mu.Lock()
 	defer x.mu.Unlock()
 
@@ -255,22 +224,16 @@ func (x *scheduler) RemoteScheduleOnce(ctx context.Context, message proto.Messag
 		},
 	)
 
-	key := fmt.Sprintf("%s@%s", to.GetName(), net.JoinHostPort(to.GetHost(), strconv.Itoa(int(to.GetPort()))))
-	jobDetails := quartz.NewJobDetail(job, quartz.NewJobKey(key))
-	if err := x.distributeJobKeyOrNot(ctx, jobDetails); err != nil {
-		if errors.Is(err, errSkipJobScheduling) {
-			return nil
-		}
-		return err
-	}
+	key := newJobKey()
+	detail := quartz.NewJobDetail(job, quartz.NewJobKey(key))
 	// schedule the job
-	return x.quartzScheduler.ScheduleJob(jobDetails, quartz.NewRunOnceTrigger(interval))
+	return x.quartzScheduler.ScheduleJob(detail, quartz.NewRunOnceTrigger(interval))
 }
 
 // RemoteSchedule schedules a message to be sent to a remote actor in the future.
 // This requires remoting to be enabled on the actor system.
 // This will send the given message to the actor at the given interval specified
-func (x *scheduler) RemoteSchedule(ctx context.Context, message proto.Message, to *address.Address, interval time.Duration) error {
+func (x *scheduler) RemoteSchedule(message proto.Message, to *address.Address, interval time.Duration) error {
 	x.mu.Lock()
 	defer x.mu.Unlock()
 
@@ -292,20 +255,14 @@ func (x *scheduler) RemoteSchedule(ctx context.Context, message proto.Message, t
 		},
 	)
 
-	key := fmt.Sprintf("%s@%s", to.GetName(), net.JoinHostPort(to.GetHost(), strconv.Itoa(int(to.GetPort()))))
-	jobDetails := quartz.NewJobDetail(job, quartz.NewJobKey(key))
-	if err := x.distributeJobKeyOrNot(ctx, jobDetails); err != nil {
-		if errors.Is(err, errSkipJobScheduling) {
-			return nil
-		}
-		return err
-	}
+	key := newJobKey()
+	detail := quartz.NewJobDetail(job, quartz.NewJobKey(key))
 	// schedule the job
-	return x.quartzScheduler.ScheduleJob(jobDetails, quartz.NewSimpleTrigger(interval))
+	return x.quartzScheduler.ScheduleJob(detail, quartz.NewSimpleTrigger(interval))
 }
 
 // RemoteScheduleWithCron schedules a message to be sent to an actor in the future using a cron expression.
-func (x *scheduler) RemoteScheduleWithCron(ctx context.Context, message proto.Message, to *address.Address, cronExpression string) error {
+func (x *scheduler) RemoteScheduleWithCron(message proto.Message, to *address.Address, cronExpression string) error {
 	x.mu.Lock()
 	defer x.mu.Unlock()
 
@@ -327,16 +284,8 @@ func (x *scheduler) RemoteScheduleWithCron(ctx context.Context, message proto.Me
 		},
 	)
 
-	key := fmt.Sprintf("%s@%s", to.GetName(), net.JoinHostPort(to.GetHost(), strconv.Itoa(int(to.GetPort()))))
-	jobDetails := quartz.NewJobDetail(job, quartz.NewJobKey(key))
-
-	if err := x.distributeJobKeyOrNot(ctx, jobDetails); err != nil {
-		if errors.Is(err, errSkipJobScheduling) {
-			return nil
-		}
-		return err
-	}
-
+	key := newJobKey()
+	detail := quartz.NewJobDetail(job, quartz.NewJobKey(key))
 	location := time.Now().Location()
 	trigger, err := quartz.NewCronTriggerWithLoc(cronExpression, location)
 	if err != nil {
@@ -344,23 +293,10 @@ func (x *scheduler) RemoteScheduleWithCron(ctx context.Context, message proto.Me
 		return err
 	}
 
-	return x.quartzScheduler.ScheduleJob(jobDetails, trigger)
+	return x.quartzScheduler.ScheduleJob(detail, trigger)
 }
 
-// distributeJobKeyOrNot distribute the job key when it does not exist or skip it
-func (x *scheduler) distributeJobKeyOrNot(ctx context.Context, job *quartz.JobDetail) error {
-	jobKey := job.JobKey().String()
-	if x.cluster != nil {
-		ok, err := x.cluster.SchedulerJobKeyExists(ctx, jobKey)
-		if err != nil {
-			return err
-		}
-		if ok {
-			return errSkipJobScheduling
-		}
-		if err := x.cluster.SetSchedulerJobKey(ctx, jobKey); err != nil {
-			return err
-		}
-	}
-	return nil
+// newJobKey creates a new job key
+func newJobKey() string {
+	return uuid.NewString()
 }

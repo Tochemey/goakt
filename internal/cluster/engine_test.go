@@ -176,73 +176,6 @@ func TestSingleNode(t *testing.T) {
 		require.NoError(t, cluster.Stop(ctx))
 		provider.AssertExpectations(t)
 	})
-	t.Run("With Set/UnsetKey and KeyExists", func(t *testing.T) {
-		// create the context
-		ctx := context.TODO()
-
-		// generate the ports for the single startNode
-		nodePorts := dynaport.Get(3)
-		gossipPort := nodePorts[0]
-		clusterPort := nodePorts[1]
-		remotingPort := nodePorts[2]
-
-		// define discovered addresses
-		addrs := []string{
-			fmt.Sprintf("127.0.0.1:%d", gossipPort),
-		}
-
-		// mock the discovery provider
-		provider := new(testkit.Provider)
-
-		provider.EXPECT().ID().Return("id")
-		provider.EXPECT().Initialize().Return(nil)
-		provider.EXPECT().Register().Return(nil)
-		provider.EXPECT().Deregister().Return(nil)
-		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
-		provider.EXPECT().Close().Return(nil)
-
-		// create a Node startNode
-		host := "127.0.0.1"
-		hostNode := discovery.Node{
-			Name:          host,
-			Host:          host,
-			DiscoveryPort: gossipPort,
-			PeersPort:     clusterPort,
-			RemotingPort:  remotingPort,
-		}
-
-		cluster, err := NewEngine("test", provider, &hostNode, WithLogger(log.DiscardLogger))
-		require.NotNil(t, cluster)
-		require.NoError(t, err)
-
-		// start the Node startNode
-		err = cluster.Start(ctx)
-		require.NoError(t, err)
-
-		// set key
-		key := "my-key"
-		require.NoError(t, cluster.SetSchedulerJobKey(ctx, key))
-
-		isSet, err := cluster.SchedulerJobKeyExists(ctx, key)
-		require.NoError(t, err)
-		assert.True(t, isSet)
-
-		// unset the key
-		err = cluster.UnsetSchedulerJobKey(ctx, key)
-		require.NoError(t, err)
-
-		// check the key existence
-		isSet, err = cluster.SchedulerJobKeyExists(ctx, key)
-		require.NoError(t, err)
-		assert.False(t, isSet)
-
-		//  shutdown the Node startNode
-		util.Pause(time.Second)
-
-		// stop the startNode
-		require.NoError(t, cluster.Stop(ctx))
-		provider.AssertExpectations(t)
-	})
 	t.Run("With RemoveActor", func(t *testing.T) {
 		// create the context
 		ctx := context.TODO()
@@ -359,14 +292,6 @@ func TestSingleNode(t *testing.T) {
 		require.EqualError(t, err, ErrEngineNotRunning.Error())
 
 		err = cluster.RemoveActor(ctx, "actorName")
-		require.Error(t, err)
-		require.EqualError(t, err, ErrEngineNotRunning.Error())
-
-		err = cluster.SetSchedulerJobKey(ctx, "key")
-		require.Error(t, err)
-		require.EqualError(t, err, ErrEngineNotRunning.Error())
-
-		err = cluster.UnsetSchedulerJobKey(ctx, "key")
 		require.Error(t, err)
 		require.EqualError(t, err, ErrEngineNotRunning.Error())
 

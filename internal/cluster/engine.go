@@ -97,15 +97,9 @@ type Interface interface {
 	GetActor(ctx context.Context, actorName string) (*internalpb.ActorRef, error)
 	// GetPartition returns the partition where a given actor is stored
 	GetPartition(actorName string) int
-	// SetSchedulerJobKey sets a given key to the cluster
-	SetSchedulerJobKey(ctx context.Context, key string) error
-	// SchedulerJobKeyExists checks the existence of a given key
-	SchedulerJobKeyExists(ctx context.Context, key string) (bool, error)
 	// LookupKind checks the existence of a given actor kind in the cluster
 	// This function is mainly used when creating a singleton actor
 	LookupKind(ctx context.Context, kind string) (string, error)
-	// UnsetSchedulerJobKey unsets the already set given key in the cluster
-	UnsetSchedulerJobKey(ctx context.Context, key string) error
 	// RemoveActor removes a given actor from the cluster.
 	// An actor is removed from the cluster when this actor has been passivated.
 	RemoveActor(ctx context.Context, actorName string) error
@@ -686,32 +680,6 @@ func (x *Engine) RemoveKind(ctx context.Context, kind string) error {
 	return nil
 }
 
-// SetSchedulerJobKey sets a given key to the cluster
-func (x *Engine) SetSchedulerJobKey(ctx context.Context, key string) error {
-	// return an error when the engine is not running
-	if !x.IsRunning() {
-		return ErrEngineNotRunning
-	}
-
-	ctx, cancelFn := context.WithTimeout(ctx, x.writeTimeout)
-	defer cancelFn()
-
-	x.Lock()
-	defer x.Unlock()
-
-	logger := x.logger
-
-	logger.Infof("replicating key (%s)", key)
-
-	if err := x.jobKeysMap.Put(ctx, key, true); err != nil {
-		logger.Errorf("failed to replicate scheduler job key (%s): %v", key, err)
-		return err
-	}
-
-	logger.Infof("key (%s) successfully replicated", key)
-	return nil
-}
-
 // LookupKind checks the existence of a given actor kind in the cluster
 // This function is mainly used when creating a singleton actor
 func (x *Engine) LookupKind(ctx context.Context, kind string) (string, error) {
@@ -741,59 +709,6 @@ func (x *Engine) LookupKind(ctx context.Context, kind string) (string, error) {
 		return "", err
 	}
 	return resp.String()
-}
-
-// SchedulerJobKeyExists checks the existence of a given key
-func (x *Engine) SchedulerJobKeyExists(ctx context.Context, key string) (bool, error) {
-	// return an error when the engine is not running
-	if !x.IsRunning() {
-		return false, ErrEngineNotRunning
-	}
-
-	ctx, cancelFn := context.WithTimeout(ctx, x.readTimeout)
-	defer cancelFn()
-
-	x.Lock()
-	defer x.Unlock()
-
-	logger := x.logger
-
-	logger.Infof("checking key (%s) existence in the cluster", key)
-
-	resp, err := x.jobKeysMap.Get(ctx, key)
-	if err != nil {
-		if errors.Is(err, olric.ErrKeyNotFound) {
-			logger.Warnf("key=%s is not found in the cluster", key)
-			return false, nil
-		}
-
-		logger.Errorf("[%s] failed to check scheduler job key (%s) existence: %v", x.node.PeersAddress(), key, err)
-		return false, err
-	}
-	return resp.Bool()
-}
-
-// UnsetSchedulerJobKey unsets the already set given key in the cluster
-func (x *Engine) UnsetSchedulerJobKey(ctx context.Context, key string) error {
-	// return an error when the engine is not running
-	if !x.IsRunning() {
-		return ErrEngineNotRunning
-	}
-
-	logger := x.logger
-
-	x.Lock()
-	defer x.Unlock()
-
-	logger.Infof("unsetting key (%s)", key)
-
-	if _, err := x.jobKeysMap.Delete(ctx, key); err != nil {
-		logger.Errorf("failed to unset scheduler job key (%s): %v", key, err)
-		return err
-	}
-
-	logger.Infof("key (%s) successfully unset", key)
-	return nil
 }
 
 // GetPartition returns the partition where a given actor is stored
