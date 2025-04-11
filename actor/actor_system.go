@@ -44,6 +44,7 @@ import (
 	"connectrpc.com/connect"
 	goset "github.com/deckarep/golang-set/v2"
 	"github.com/google/uuid"
+	"go.akshayshah.org/connectproto"
 	"go.uber.org/atomic"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
@@ -1562,8 +1563,15 @@ func (x *actorSystem) enableRemoting(ctx context.Context) error {
 	}
 
 	x.logger.Info("enabling remoting...")
-	remotingServicePath, remotingServiceHandler := internalpbconnect.NewRemotingServiceHandler(x)
-	clusterServicePath, clusterServiceHandler := internalpbconnect.NewClusterServiceHandler(x)
+	opts := []connect.HandlerOption{
+		// Add an option that customizes protobuf marshalling/unmarshalling behavior
+		connectproto.WithBinary(
+			proto.MarshalOptions{},
+			proto.UnmarshalOptions{DiscardUnknown: true},
+		),
+	}
+	remotingServicePath, remotingServiceHandler := internalpbconnect.NewRemotingServiceHandler(x, opts...)
+	clusterServicePath, clusterServiceHandler := internalpbconnect.NewClusterServiceHandler(x, opts...)
 
 	mux := stdhttp.NewServeMux()
 	mux.Handle(remotingServicePath, remotingServiceHandler)

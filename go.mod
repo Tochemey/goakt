@@ -21,6 +21,7 @@ require (
 	github.com/tochemey/olric v0.2.2
 	github.com/travisjeffery/go-dynaport v1.0.0
 	github.com/zeebo/xxh3 v1.0.2
+	go.akshayshah.org/connectproto v0.6.0
 	go.uber.org/atomic v1.11.0
 	go.uber.org/goleak v1.3.0
 	go.uber.org/multierr v1.11.0
