@@ -295,7 +295,6 @@ func clusterClient(node *Node) internalpbconnect.ClusterServiceClient {
 		node.HTTPEndPoint(),
 		connect.WithSendMaxBytes(node.Remoting().MaxReadFrameSize()),
 		connect.WithReadMaxBytes(node.Remoting().MaxReadFrameSize()),
-		// Add an option that customizes protobuf marshalling/unmarshalling behavior
 		connectproto.WithBinary(
 			proto.MarshalOptions{},
 			proto.UnmarshalOptions{DiscardUnknown: true},

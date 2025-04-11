@@ -1564,7 +1564,6 @@ func (x *actorSystem) enableRemoting(ctx context.Context) error {
 
 	x.logger.Info("enabling remoting...")
 	opts := []connect.HandlerOption{
-		// Add an option that customizes protobuf marshalling/unmarshalling behavior
 		connectproto.WithBinary(
 			proto.MarshalOptions{},
 			proto.UnmarshalOptions{DiscardUnknown: true},
