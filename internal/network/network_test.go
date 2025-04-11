@@ -22,7 +22,7 @@
  * SOFTWARE.
  */
 
-package tcp
+package network
 
 import (
 	"testing"
