@@ -58,7 +58,7 @@ func TestDeadletter(t *testing.T) {
 
 		// create the black hole actor
 		actor := &mockUnhandledMessageActor{}
-		actorRef, err := sys.Spawn(ctx, "unhandledQA", actor)
+		actorRef, err := sys.Spawn(ctx, "actor", actor)
 		assert.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
@@ -156,7 +156,7 @@ func TestDeadletter(t *testing.T) {
 
 		// create the black hole actor
 		actor := &mockUnhandledMessageActor{}
-		actorRef, err := sys.Spawn(ctx, "unhandledQA", actor)
+		actorRef, err := sys.Spawn(ctx, "actor", actor)
 		assert.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
@@ -164,7 +164,7 @@ func TestDeadletter(t *testing.T) {
 		util.Pause(time.Second)
 
 		// every message sent to the actor will result in deadletter
-		for i := 0; i < 5; i++ {
+		for range 5 {
 			require.NoError(t, Tell(ctx, actorRef, new(testpb.TestSend)))
 		}
 
@@ -181,8 +181,13 @@ func TestDeadletter(t *testing.T) {
 		}
 
 		require.Len(t, items, 5)
+		// let us empty the item list
+		items = []*goaktpb.Deadletter{}
+
 		err = Tell(ctx, sys.getDeadletter(), &internalpb.GetDeadletters{})
 		require.NoError(t, err)
+
+		util.Pause(time.Second)
 
 		for message := range consumer.Iterator() {
 			payload := message.Payload()
@@ -192,7 +197,7 @@ func TestDeadletter(t *testing.T) {
 				items = append(items, deadletter)
 			}
 		}
-		require.Len(t, items, 5)
+		require.Len(t, items, 1)
 
 		// unsubscribe the consumer
 		err = sys.Unsubscribe(consumer)
