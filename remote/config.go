@@ -29,8 +29,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/tochemey/goakt/v3/internal/network"
 	"github.com/tochemey/goakt/v3/internal/size"
-	"github.com/tochemey/goakt/v3/internal/tcp"
 	"github.com/tochemey/goakt/v3/internal/validation"
 )
 
@@ -122,7 +122,7 @@ func (x *Config) Sanitize() error {
 	var err error
 	// combine host and port into an hostPort string
 	hostPort := net.JoinHostPort(x.bindAddr, strconv.Itoa(int(x.bindPort)))
-	x.bindAddr, err = tcp.GetBindIP(hostPort)
+	x.bindAddr, err = network.GetBindIP(hostPort)
 	if err != nil {
 		return err
 	}

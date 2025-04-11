@@ -34,6 +34,7 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
+	"go.akshayshah.org/connectproto"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
@@ -405,5 +406,9 @@ func (r *Remoting) remotingServiceClient(host string, port int) internalpbconnec
 		endpoint,
 		connect.WithSendMaxBytes(r.maxReadFrameSize),
 		connect.WithReadMaxBytes(r.maxReadFrameSize),
+		connectproto.WithBinary(
+			proto.MarshalOptions{},
+			proto.UnmarshalOptions{DiscardUnknown: true},
+		),
 	)
 }

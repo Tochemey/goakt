@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
+	"go.akshayshah.org/connectproto"
 	"google.golang.org/protobuf/proto"
 
 	actors "github.com/tochemey/goakt/v3/actor"
@@ -294,6 +295,10 @@ func clusterClient(node *Node) internalpbconnect.ClusterServiceClient {
 		node.HTTPEndPoint(),
 		connect.WithSendMaxBytes(node.Remoting().MaxReadFrameSize()),
 		connect.WithReadMaxBytes(node.Remoting().MaxReadFrameSize()),
+		connectproto.WithBinary(
+			proto.MarshalOptions{},
+			proto.UnmarshalOptions{DiscardUnknown: true},
+		),
 	)
 }
 

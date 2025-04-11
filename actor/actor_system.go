@@ -44,6 +44,7 @@ import (
 	"connectrpc.com/connect"
 	goset "github.com/deckarep/golang-set/v2"
 	"github.com/google/uuid"
+	"go.akshayshah.org/connectproto"
 	"go.uber.org/atomic"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
@@ -60,7 +61,7 @@ import (
 	"github.com/tochemey/goakt/v3/internal/eventstream"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/internalpb/internalpbconnect"
-	"github.com/tochemey/goakt/v3/internal/tcp"
+	"github.com/tochemey/goakt/v3/internal/network"
 	"github.com/tochemey/goakt/v3/internal/ticker"
 	"github.com/tochemey/goakt/v3/internal/types"
 	"github.com/tochemey/goakt/v3/internal/workerpool"
@@ -365,7 +366,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		deadlettersCounter:     atomic.NewUint64(0),
 		topicActor:             NoSender,
 		workerPool: workerpool.New(
-			workerpool.WithNumShards(runtime.GOMAXPROCS(0)),
+			workerpool.WithNumShards(2*runtime.GOMAXPROCS(0)),
 			workerpool.WithPassivateAfter(5*time.Second),
 		),
 	}
@@ -1099,14 +1100,13 @@ func (x *actorSystem) RemoteAsk(ctx context.Context, stream *connect.BidiStream[
 
 		message := request.GetRemoteMessage()
 		receiver := message.GetReceiver()
-		name := receiver.GetName()
 
 		remoteAddr := fmt.Sprintf("%s:%d", x.remoteConfig.BindAddr(), x.remoteConfig.BindPort())
 		if remoteAddr != net.JoinHostPort(receiver.GetHost(), strconv.Itoa(int(receiver.GetPort()))) {
 			return connect.NewError(connect.CodeInvalidArgument, ErrInvalidHost)
 		}
 
-		addr := x.actorAddress(name)
+		addr := address.From(receiver)
 		pidNode, exist := x.actors.node(addr.String())
 		if !exist {
 			logger.Error(ErrAddressNotFound(addr.String()).Error())
@@ -1143,49 +1143,46 @@ func (x *actorSystem) RemoteTell(ctx context.Context, stream *connect.ClientStre
 
 	requestc := make(chan *internalpb.RemoteTellRequest, 1)
 	eg, ctx := errgroup.WithContext(ctx)
-	eg.SetLimit(2)
 
-	eg.Go(
-		func() error {
-			defer close(requestc)
-			for stream.Receive() {
-				select {
-				case requestc <- stream.Msg():
-				case <-ctx.Done():
-					logger.Error(ctx.Err())
-					return connect.NewError(connect.CodeCanceled, ctx.Err())
-				}
+	eg.Go(func() error {
+		for stream.Receive() {
+			select {
+			case requestc <- stream.Msg():
+			case <-ctx.Done():
+				logger.Error(ctx.Err())
+				close(requestc)
+				return connect.NewError(connect.CodeCanceled, ctx.Err())
+			}
+		}
+
+		if err := stream.Err(); err != nil {
+			logger.Error(err)
+			close(requestc)
+			return connect.NewError(connect.CodeUnknown, err)
+		}
+
+		close(requestc)
+		return nil
+	})
+
+	eg.Go(func() error {
+		for request := range requestc {
+			receiver := request.GetRemoteMessage().GetReceiver()
+			addr := address.From(receiver)
+			pidNode, exist := x.actors.node(addr.String())
+			if !exist {
+				logger.Error(ErrAddressNotFound(addr.String()).Error())
+				return ErrAddressNotFound(addr.String())
 			}
 
-			if err := stream.Err(); err != nil {
-				logger.Error(err)
-				return connect.NewError(connect.CodeUnknown, err)
+			pid := pidNode.value()
+			if err := x.handleRemoteTell(ctx, pid, request.GetRemoteMessage()); err != nil {
+				logger.Error(ErrRemoteSendFailure(err))
+				return ErrRemoteSendFailure(err)
 			}
-
-			return nil
-		},
-	)
-
-	eg.Go(
-		func() error {
-			for request := range requestc {
-				receiver := request.GetRemoteMessage().GetReceiver()
-				addr := address.New(receiver.GetName(), x.Name(), receiver.GetHost(), int(receiver.GetPort()))
-				pidNode, exist := x.actors.node(addr.String())
-				if !exist {
-					logger.Error(ErrAddressNotFound(addr.String()).Error())
-					return ErrAddressNotFound(addr.String())
-				}
-
-				pid := pidNode.value()
-				if err := x.handleRemoteTell(ctx, pid, request.GetRemoteMessage()); err != nil {
-					logger.Error(ErrRemoteSendFailure(err))
-					return ErrRemoteSendFailure(err)
-				}
-			}
-			return nil
-		},
-	)
+		}
+		return nil
+	})
 
 	if err := eg.Wait(); err != nil {
 		return nil, err
@@ -1566,8 +1563,14 @@ func (x *actorSystem) enableRemoting(ctx context.Context) error {
 	}
 
 	x.logger.Info("enabling remoting...")
-	remotingServicePath, remotingServiceHandler := internalpbconnect.NewRemotingServiceHandler(x)
-	clusterServicePath, clusterServiceHandler := internalpbconnect.NewClusterServiceHandler(x)
+	opts := []connect.HandlerOption{
+		connectproto.WithBinary(
+			proto.MarshalOptions{},
+			proto.UnmarshalOptions{DiscardUnknown: true},
+		),
+	}
+	remotingServicePath, remotingServiceHandler := internalpbconnect.NewRemotingServiceHandler(x, opts...)
+	clusterServicePath, clusterServiceHandler := internalpbconnect.NewClusterServiceHandler(x, opts...)
 
 	mux := stdhttp.NewServeMux()
 	mux.Handle(remotingServicePath, remotingServiceHandler)
@@ -1990,7 +1993,7 @@ func (x *actorSystem) shutdownHTTPServer(ctx context.Context) error {
 func (x *actorSystem) configureServer(ctx context.Context, mux *stdhttp.ServeMux) error {
 	hostPort := net.JoinHostPort(x.remoteConfig.BindAddr(), strconv.Itoa(x.remoteConfig.BindPort()))
 	httpServer := getServer(ctx, hostPort)
-	listener, err := tcp.NewKeepAliveListener(httpServer.Addr)
+	listener, err := network.NewKeepAliveListener(httpServer.Addr)
 	if err != nil {
 		return err
 	}
