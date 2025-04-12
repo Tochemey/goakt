@@ -84,7 +84,7 @@ func BenchmarkActor(b *testing.B) {
 		_ = pid.Shutdown(ctx)
 		_ = actorSystem.Stop(ctx)
 	})
-	b.Run("Tell(default mailbox)", func(b *testing.B) {
+	b.Run("Tell(actor-2-actor)", func(b *testing.B) {
 		ctx := context.TODO()
 
 		// create the actor system
@@ -285,7 +285,7 @@ func BenchmarkActor(b *testing.B) {
 		_ = pid.Shutdown(ctx)
 		_ = actorSystem.Stop(ctx)
 	})
-	b.Run("Ask(default mailbox)", func(b *testing.B) {
+	b.Run("Ask(actor-2-actor)", func(b *testing.B) {
 		ctx := context.TODO()
 
 		// create the actor system

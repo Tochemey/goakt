@@ -42,17 +42,24 @@ import (
 )
 
 type Store struct {
-	db      *badger.DB
-	logger  log.Logger
-	stopSig chan types.Unit
+	db       *badger.DB
+	logger   log.Logger
+	stopSig  chan types.Unit
+	inmemory bool
 }
 
 // NewStore creates an instance of Store
-func NewStore(logger log.Logger) (*Store, error) {
+func NewStore(logger log.Logger, dir *string) (*Store, error) {
 	dbOpts := badger.
 		DefaultOptions("").
 		WithInMemory(true).
 		WithLogger(nil)
+
+	if dir != nil {
+		dbOpts = badger.
+			DefaultOptions(*dir).
+			WithLogger(nil)
+	}
 
 	// open the database
 	db, err := badger.Open(dbOpts)
@@ -62,13 +69,16 @@ func NewStore(logger log.Logger) (*Store, error) {
 
 	// create the store instance
 	s := &Store{
-		db:      db,
-		logger:  logger,
-		stopSig: make(chan types.Unit, 1),
+		db:       db,
+		logger:   logger,
+		stopSig:  make(chan types.Unit, 1),
+		inmemory: dir == nil,
 	}
 
-	// run the garbage collector
-	s.runGC()
+	// run the garbage collector when not running in memory
+	if !s.inmemory {
+		s.runGC()
+	}
 
 	return s, nil
 }

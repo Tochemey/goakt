@@ -40,6 +40,7 @@ func TestClusterConfig(t *testing.T) {
 		exchanger := new(exchanger)
 		tester := new(mockActor)
 		kinds := []Actor{tester, exchanger}
+		tempdir := t.TempDir()
 
 		config := NewClusterConfig().
 			WithKinds(kinds...).
@@ -51,6 +52,7 @@ func TestClusterConfig(t *testing.T) {
 			WithReadQuorum(1).
 			WithPartitionCount(3).
 			WithTableSize(10 * size.MB).
+			WithWAL(tempdir).
 			WithDiscovery(provider)
 
 		require.NoError(t, config.Validate())
@@ -61,6 +63,9 @@ func TestClusterConfig(t *testing.T) {
 		assert.EqualValues(t, 1, config.ReadQuorum())
 		assert.EqualValues(t, 1, config.WriteQuorum())
 		assert.EqualValues(t, 3, config.PartitionCount())
+		wal := config.WAL()
+		assert.NotNil(t, wal)
+		assert.Exactly(t, tempdir, *wal)
 		assert.Exactly(t, uint64(10*size.MB), config.TableSize())
 		assert.True(t, provider == config.Discovery())
 		assert.Len(t, config.Kinds(), 3)
