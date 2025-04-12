@@ -366,7 +366,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		deadlettersCounter:     atomic.NewUint64(0),
 		topicActor:             NoSender,
 		workerPool: workerpool.New(
-			workerpool.WithNumShards(2*runtime.GOMAXPROCS(0)),
+			workerpool.WithNumShards(128),
 			workerpool.WithPassivateAfter(5*time.Second),
 		),
 	}

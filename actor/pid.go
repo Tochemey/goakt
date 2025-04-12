@@ -57,11 +57,10 @@ import (
 
 // specifies the state in which the PID is
 // regarding message processing
-type processingState int32
 
 const (
 	// idle means there are no messages to process
-	idle processingState = iota
+	idle int32 = iota
 	// busy means the PID is processing messages
 	busy
 )
@@ -1218,7 +1217,7 @@ func (pid *PID) doReceive(receiveCtx *ReceiveContext) {
 // message processing loop
 func (pid *PID) schedule() {
 	// only signal if the actor is not already processing messages
-	if pid.processing.CompareAndSwap(int32(idle), int32(busy)) {
+	if pid.processing.CompareAndSwap(idle, busy) {
 		pid.workerPool.SubmitWork(pid.receiveLoop)
 	}
 }
@@ -1245,12 +1244,12 @@ func (pid *PID) receiveLoop() {
 		}
 
 		// if no more messages, change busy state to idle
-		if !pid.processing.CompareAndSwap(int32(busy), int32(idle)) {
+		if !pid.processing.CompareAndSwap(busy, idle) {
 			return
 		}
 
 		// Check if new messages were added in the meantime and restart processing
-		if !pid.mailbox.IsEmpty() && pid.processing.CompareAndSwap(int32(idle), int32(busy)) {
+		if !pid.mailbox.IsEmpty() && pid.processing.CompareAndSwap(idle, busy) {
 			continue
 		}
 		return
