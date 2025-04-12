@@ -39,7 +39,8 @@ import (
 func TestClusterStore(t *testing.T) {
 	t.Run("SetAndGet", func(t *testing.T) {
 		logger := log.DiscardLogger
-		store, err := NewStore(logger)
+		wal := t.TempDir()
+		store, err := NewStore(logger, &wal)
 		require.NoError(t, err)
 		require.NotNil(t, store)
 
@@ -81,7 +82,7 @@ func TestClusterStore(t *testing.T) {
 
 	t.Run("Remove", func(t *testing.T) {
 		logger := log.DiscardLogger
-		store, err := NewStore(logger)
+		store, err := NewStore(logger, nil)
 		require.NoError(t, err)
 		require.NotNil(t, store)
 

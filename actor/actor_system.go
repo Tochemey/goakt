@@ -1484,7 +1484,7 @@ func (x *actorSystem) enableClustering(ctx context.Context) error {
 		return errors.New("clustering needs remoting to be enabled")
 	}
 
-	clusterStore, err := cluster.NewStore(x.logger)
+	clusterStore, err := cluster.NewStore(x.logger, x.clusterConfig.WAL())
 	if err != nil {
 		x.logger.Errorf("failed to initialize peers cache: %v", err)
 		x.locker.Unlock()
