@@ -367,7 +367,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		topicActor:             NoSender,
 		workerPool: workerpool.New(
 			workerpool.WithNumShards(128),
-			workerpool.WithPassivateAfter(5*time.Second),
+			workerpool.WithPassivateAfter(time.Second),
 		),
 	}
 
