@@ -169,7 +169,7 @@ func (wp *WorkerPool) Start() {
 	if !wp.started.Load() {
 		// Pre-allocate the slice to avoid resizing
 		wp.shards = make([]*poolShard, wp.numShards)
-		for i := 0; i < wp.numShards; i++ {
+		for i := range wp.numShards {
 			shard := &poolShard{
 				wp: wp,
 				workers: sync.Pool{
@@ -202,7 +202,7 @@ func (wp *WorkerPool) Stop() {
 
 	// Only run shutdown logic once
 	if !wp.stopped.Swap(true) {
-		for i := 0; i < wp.numShards; i++ {
+		for i := range wp.numShards {
 			shard := wp.shards[i]
 			shard.mu.Lock()
 			shard.stopped.Store(true)
@@ -367,7 +367,7 @@ func (wp *WorkerPool) cleanup() {
 		cutoffTime := now - wp.passivateAfter.Nanoseconds()
 
 		// Process each shard
-		for i := 0; i < wp.numShards; i++ {
+		for i := range wp.numShards {
 			shard := wp.shards[i]
 
 			// Skip if shard is stopped
