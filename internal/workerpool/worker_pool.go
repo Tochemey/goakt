@@ -198,44 +198,52 @@ func (wp *WorkerPool) Start() {
 // and preventing new task submissions.
 func (wp *WorkerPool) Stop() {
 	wp.mutex.Lock()
-	wp.stopCleanupSig <- types.Unit{} // Signal cleanup goroutine to stop
 	if !wp.started.Load() {
 		wp.mutex.Unlock()
 		return
 	}
 
-	// Only run shutdown logic once
-	if !wp.stopped.Swap(true) {
-		for i := range wp.numShards {
-			shard := wp.shards[i]
-			shard.mu.Lock()
-			shard.stopped.Store(true)
-
-			// Close all workers in the idle slice
-			for j := range shard.idleWorkers {
-				worker := shard.idleWorkers[j]
-				if !worker.isDeleted.Swap(true) {
-					worker.state.Store(workerStateClosed)
-					close(worker.workChan)
-				}
-				shard.idleWorkers[j] = nil // Help GC
-			}
-			shard.idleWorkers = shard.idleWorkers[:0]
-
-			// Close fast path workers
-			if w1 := shard.idleWorker1.Swap(nil); w1 != nil && !w1.isDeleted.Swap(true) {
-				w1.state.Store(workerStateClosed)
-				close(w1.workChan)
-			}
-
-			if w2 := shard.idleWorker2.Swap(nil); w2 != nil && !w2.isDeleted.Swap(true) {
-				w2.state.Store(workerStateClosed)
-				close(w2.workChan)
-			}
-
-			shard.mu.Unlock()
-		}
+	if wp.stopped.Load() {
+		wp.mutex.Unlock()
+		return
 	}
+
+	// Signal cleanup goroutine to stop
+	wp.stopCleanupSig <- types.Unit{}
+	// Mark the pool as stopped
+	wp.stopped.Store(true)
+
+	// Only run shutdown logic once
+	for i := range wp.numShards {
+		shard := wp.shards[i]
+		shard.mu.Lock()
+		shard.stopped.Store(true)
+
+		// Close all workers in the idle slice
+		for j := range shard.idleWorkers {
+			worker := shard.idleWorkers[j]
+			if !worker.isDeleted.Swap(true) {
+				worker.state.Store(workerStateClosed)
+				close(worker.workChan)
+			}
+			shard.idleWorkers[j] = nil // Help GC
+		}
+		shard.idleWorkers = shard.idleWorkers[:0]
+
+		// Close fast path workers
+		if w1 := shard.idleWorker1.Swap(nil); w1 != nil && !w1.isDeleted.Swap(true) {
+			w1.state.Store(workerStateClosed)
+			close(w1.workChan)
+		}
+
+		if w2 := shard.idleWorker2.Swap(nil); w2 != nil && !w2.isDeleted.Swap(true) {
+			w2.state.Store(workerStateClosed)
+			close(w2.workChan)
+		}
+
+		shard.mu.Unlock()
+	}
+
 	wp.mutex.Unlock()
 }
 
@@ -370,11 +378,6 @@ func (wp *WorkerPool) cleanup() {
 				ticker.Stop()
 				return
 			case <-ticker.Ticks:
-				if wp.stopped.Load() {
-					ticker.Stop()
-					return
-				}
-
 				now := time.Now().UnixNano()
 				cutoffTime := now - wp.passivateAfter.Nanoseconds()
 

@@ -60,5 +60,16 @@ func TestWorkerPool(t *testing.T) {
 
 		// Stop the pool to free up resources
 		pool.Stop()
+
+		// already stopped
+		pool.Stop()
+		pool.Stop()
+	})
+	t.Run("When not started", func(t *testing.T) {
+		pool := New()
+		require.NotNil(t, pool)
+		require.False(t, pool.started.Load())
+		pool.Stop()
+		require.False(t, pool.stopped.Load())
 	})
 }
