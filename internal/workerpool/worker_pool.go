@@ -35,6 +35,7 @@ import (
 
 	"github.com/tochemey/goakt/v3/internal/bufferpool"
 	"github.com/tochemey/goakt/v3/internal/ticker"
+	"github.com/tochemey/goakt/v3/internal/types"
 )
 
 const (
@@ -83,13 +84,14 @@ func WithNumShards(numShards int) Option {
 // WorkerPool manages a pool of workers across multiple shards for efficient
 // concurrent task execution.
 type WorkerPool struct {
-	passivateAfter time.Duration // Duration after which idle workers are cleaned up
-	numShards      int           // Number of shards to distribute work across
-	shards         []*poolShard  // Shards containing workers
-	mutex          sync.RWMutex  // Mutex for pool-wide operations
-	started        atomic.Bool   // Flag indicating if the pool has been started
-	stopped        atomic.Bool   // Flag indicating if the pool has been stopped
-	spawnedWorkers atomic.Uint64 // Counter for tracking total active workers
+	passivateAfter time.Duration   // Duration after which idle workers are cleaned up
+	numShards      int             // Number of shards to distribute work across
+	shards         []*poolShard    // Shards containing workers
+	mutex          sync.RWMutex    // Mutex for pool-wide operations
+	started        atomic.Bool     // Flag indicating if the pool has been started
+	stopped        atomic.Bool     // Flag indicating if the pool has been stopped
+	spawnedWorkers atomic.Uint64   // Counter for tracking total active workers
+	stopCleanupSig chan types.Unit // Channel to signal cleanup goroutine to stop
 }
 
 // Worker represents a goroutine that executes submitted tasks.
@@ -140,6 +142,7 @@ func New(opts ...Option) *WorkerPool {
 	wp := &WorkerPool{
 		passivateAfter: time.Second, // Default cleanup interval
 		numShards:      1,           // Default to single shard
+		stopCleanupSig: make(chan types.Unit, 1),
 	}
 
 	// Apply provided options
@@ -195,6 +198,7 @@ func (wp *WorkerPool) Start() {
 // and preventing new task submissions.
 func (wp *WorkerPool) Stop() {
 	wp.mutex.Lock()
+	wp.stopCleanupSig <- types.Unit{} // Signal cleanup goroutine to stop
 	if !wp.started.Load() {
 		wp.mutex.Unlock()
 		return
@@ -358,89 +362,96 @@ func (wp *WorkerPool) cleanup() {
 	ticker := ticker.New(wp.passivateAfter)
 	// Start the ticker for periodic cleanup
 	ticker.Start()
-	// Ensure ticker is stopped when cleanup exits
-	defer ticker.Stop()
 
-	for range ticker.Ticks {
-		if wp.stopped.Load() {
-			return
+	go func() {
+		for {
+			select {
+			case <-wp.stopCleanupSig:
+				ticker.Stop()
+				return
+			case <-ticker.Ticks:
+				if wp.stopped.Load() {
+					ticker.Stop()
+					return
+				}
+
+				now := time.Now().UnixNano()
+				cutoffTime := now - wp.passivateAfter.Nanoseconds()
+
+				// Process each shard
+				for i := range wp.numShards {
+					shard := wp.shards[i]
+
+					// Skip if shard is stopped
+					if shard.stopped.Load() {
+						continue
+					}
+
+					shard.mu.Lock()
+					length := len(shard.idleWorkers)
+
+					// Only clean up if we have a significant number of idle workers
+					if length <= 400 {
+						shard.mu.Unlock()
+						continue
+					}
+
+					// Binary search to find workers to clean up
+					// Find the first worker that's older than passivateAfter
+					start := 0
+					end := length - 1
+					pos := length
+
+					for start <= end {
+						mid := start + (end-start)/2
+						if shard.idleWorkers[mid].lastUsed.Load() < cutoffTime {
+							pos = mid
+							end = mid - 1
+						} else {
+							start = mid + 1
+						}
+					}
+
+					// No old workers
+					if pos >= length {
+						shard.mu.Unlock()
+						continue
+					}
+
+					// Collect workers to clean up
+					cleanupCount := length - pos
+					if cleanupCount > 0 {
+						// Resize workers slice if needed
+						if cap(workers) < cleanupCount {
+							workers = make([]*Worker, cleanupCount)
+						} else {
+							workers = workers[:cleanupCount]
+						}
+
+						// Copy workers to clean up
+						copy(workers, shard.idleWorkers[pos:])
+
+						// Trim the idle workers slice
+						for j := pos; j < length; j++ {
+							shard.idleWorkers[j] = nil // Help GC
+						}
+						shard.idleWorkers = shard.idleWorkers[:pos]
+					}
+					shard.mu.Unlock()
+
+					// Close worker channels outside of lock
+					for j := range workers {
+						// Mark as deleted first to prevent races
+						if !workers[j].isDeleted.Swap(true) {
+							workers[j].state.Store(workerStateClosed)
+							close(workers[j].workChan)
+						}
+						workers[j] = nil // Help GC
+					}
+				}
+			}
 		}
-
-		now := time.Now().UnixNano()
-		cutoffTime := now - wp.passivateAfter.Nanoseconds()
-
-		// Process each shard
-		for i := range wp.numShards {
-			shard := wp.shards[i]
-
-			// Skip if shard is stopped
-			if shard.stopped.Load() {
-				continue
-			}
-
-			shard.mu.Lock()
-			length := len(shard.idleWorkers)
-
-			// Only clean up if we have a significant number of idle workers
-			if length <= 400 {
-				shard.mu.Unlock()
-				continue
-			}
-
-			// Binary search to find workers to clean up
-			// Find the first worker that's older than passivateAfter
-			start := 0
-			end := length - 1
-			pos := length
-
-			for start <= end {
-				mid := start + (end-start)/2
-				if shard.idleWorkers[mid].lastUsed.Load() < cutoffTime {
-					pos = mid
-					end = mid - 1
-				} else {
-					start = mid + 1
-				}
-			}
-
-			// No old workers
-			if pos >= length {
-				shard.mu.Unlock()
-				continue
-			}
-
-			// Collect workers to clean up
-			cleanupCount := length - pos
-			if cleanupCount > 0 {
-				// Resize workers slice if needed
-				if cap(workers) < cleanupCount {
-					workers = make([]*Worker, cleanupCount)
-				} else {
-					workers = workers[:cleanupCount]
-				}
-
-				// Copy workers to clean up
-				copy(workers, shard.idleWorkers[pos:])
-
-				// Trim the idle workers slice
-				for j := pos; j < length; j++ {
-					shard.idleWorkers[j] = nil // Help GC
-				}
-				shard.idleWorkers = shard.idleWorkers[:pos]
-			}
-			shard.mu.Unlock()
-
-			// Close worker channels outside of lock
-			for j := range workers {
-				// Mark as deleted first to prevent races
-				if !workers[j].isDeleted.Swap(true) {
-					workers[j].state.Store(workerStateClosed)
-					close(workers[j].workChan)
-				}
-				workers[j] = nil // Help GC
-			}
-		}
-	}
+	}()
 }
 
 // fastRand returns a random uint32 using thread-local random number generators
