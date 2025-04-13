@@ -356,6 +356,9 @@ func (shard *poolShard) setWorkerIdle(worker *Worker) bool {
 func (wp *WorkerPool) cleanup() {
 	var workers []*Worker
 	ticker := ticker.New(wp.passivateAfter)
+	// Start the ticker for periodic cleanup
+	ticker.Start()
+	// Ensure ticker is stopped when cleanup exits
 	defer ticker.Stop()
 
 	for range ticker.Ticks {
