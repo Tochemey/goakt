@@ -29,7 +29,7 @@ const (
 type RemoteAskRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Specifies the remote message to send
-	RemoteMessage *RemoteMessage `protobuf:"bytes,1,opt,name=remote_message,json=remoteMessage,proto3" json:"remote_message,omitempty"`
+	RemoteMessages []*RemoteMessage `protobuf:"bytes,1,rep,name=remote_messages,json=remoteMessages,proto3" json:"remote_messages,omitempty"`
 	// Specifies the timeout(how long to wait for a reply)
 	Timeout       *durationpb.Duration `protobuf:"bytes,2,opt,name=timeout,proto3" json:"timeout,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -66,9 +66,9 @@ func (*RemoteAskRequest) Descriptor() ([]byte, []int) {
 	return file_internal_remoting_proto_rawDescGZIP(), []int{0}
 }
 
-func (x *RemoteAskRequest) GetRemoteMessage() *RemoteMessage {
+func (x *RemoteAskRequest) GetRemoteMessages() []*RemoteMessage {
 	if x != nil {
-		return x.RemoteMessage
+		return x.RemoteMessages
 	}
 	return nil
 }
@@ -84,7 +84,7 @@ type RemoteAskResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Specifies the message to send to the actor
 	// Any proto message is allowed to be sent
-	Message       *anypb.Any `protobuf:"bytes,1,opt,name=message,proto3" json:"message,omitempty"`
+	Messages      []*anypb.Any `protobuf:"bytes,1,rep,name=messages,proto3" json:"messages,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -119,9 +119,9 @@ func (*RemoteAskResponse) Descriptor() ([]byte, []int) {
 	return file_internal_remoting_proto_rawDescGZIP(), []int{1}
 }
 
-func (x *RemoteAskResponse) GetMessage() *anypb.Any {
+func (x *RemoteAskResponse) GetMessages() []*anypb.Any {
 	if x != nil {
-		return x.Message
+		return x.Messages
 	}
 	return nil
 }
@@ -130,9 +130,9 @@ func (x *RemoteAskResponse) GetMessage() *anypb.Any {
 type RemoteTellRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Specifies the remote message to send
-	RemoteMessage *RemoteMessage `protobuf:"bytes,1,opt,name=remote_message,json=remoteMessage,proto3" json:"remote_message,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	RemoteMessages []*RemoteMessage `protobuf:"bytes,1,rep,name=remote_messages,json=remoteMessages,proto3" json:"remote_messages,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *RemoteTellRequest) Reset() {
@@ -165,9 +165,9 @@ func (*RemoteTellRequest) Descriptor() ([]byte, []int) {
 	return file_internal_remoting_proto_rawDescGZIP(), []int{2}
 }
 
-func (x *RemoteTellRequest) GetRemoteMessage() *RemoteMessage {
+func (x *RemoteTellRequest) GetRemoteMessages() []*RemoteMessage {
 	if x != nil {
-		return x.RemoteMessage
+		return x.RemoteMessages
 	}
 	return nil
 }
@@ -747,14 +747,14 @@ var File_internal_remoting_proto protoreflect.FileDescriptor
 const file_internal_remoting_proto_rawDesc = "" +
 	"\n" +
 	"\x17internal/remoting.proto\x12\n" +
-	"internalpb\x1a\x11goakt/goakt.proto\x1a\x19google/protobuf/any.proto\x1a\x1egoogle/protobuf/duration.proto\"\x89\x01\n" +
-	"\x10RemoteAskRequest\x12@\n" +
-	"\x0eremote_message\x18\x01 \x01(\v2\x19.internalpb.RemoteMessageR\rremoteMessage\x123\n" +
-	"\atimeout\x18\x02 \x01(\v2\x19.google.protobuf.DurationR\atimeout\"C\n" +
-	"\x11RemoteAskResponse\x12.\n" +
-	"\amessage\x18\x01 \x01(\v2\x14.google.protobuf.AnyR\amessage\"U\n" +
-	"\x11RemoteTellRequest\x12@\n" +
-	"\x0eremote_message\x18\x01 \x01(\v2\x19.internalpb.RemoteMessageR\rremoteMessage\"\x14\n" +
+	"internalpb\x1a\x11goakt/goakt.proto\x1a\x19google/protobuf/any.proto\x1a\x1egoogle/protobuf/duration.proto\"\x8b\x01\n" +
+	"\x10RemoteAskRequest\x12B\n" +
+	"\x0fremote_messages\x18\x01 \x03(\v2\x19.internalpb.RemoteMessageR\x0eremoteMessages\x123\n" +
+	"\atimeout\x18\x02 \x01(\v2\x19.google.protobuf.DurationR\atimeout\"E\n" +
+	"\x11RemoteAskResponse\x120\n" +
+	"\bmessages\x18\x01 \x03(\v2\x14.google.protobuf.AnyR\bmessages\"W\n" +
+	"\x11RemoteTellRequest\x12B\n" +
+	"\x0fremote_messages\x18\x01 \x03(\v2\x19.internalpb.RemoteMessageR\x0eremoteMessages\"\x14\n" +
 	"\x12RemoteTellResponse\"Q\n" +
 	"\x13RemoteLookupRequest\x12\x12\n" +
 	"\x04host\x18\x01 \x01(\tR\x04host\x12\x12\n" +
@@ -786,11 +786,11 @@ const file_internal_remoting_proto_rawDesc = "" +
 	"\fis_singleton\x18\x05 \x01(\bR\visSingleton\x12 \n" +
 	"\vrelocatable\x18\x06 \x01(\bR\vrelocatable\"\x15\n" +
 	"\x13RemoteSpawnResponse\"\r\n" +
-	"\vSpawnOption2\xf4\x03\n" +
-	"\x0fRemotingService\x12L\n" +
-	"\tRemoteAsk\x12\x1c.internalpb.RemoteAskRequest\x1a\x1d.internalpb.RemoteAskResponse(\x010\x01\x12M\n" +
+	"\vSpawnOption2\xee\x03\n" +
+	"\x0fRemotingService\x12H\n" +
+	"\tRemoteAsk\x12\x1c.internalpb.RemoteAskRequest\x1a\x1d.internalpb.RemoteAskResponse\x12K\n" +
 	"\n" +
-	"RemoteTell\x12\x1d.internalpb.RemoteTellRequest\x1a\x1e.internalpb.RemoteTellResponse(\x01\x12Q\n" +
+	"RemoteTell\x12\x1d.internalpb.RemoteTellRequest\x1a\x1e.internalpb.RemoteTellResponse\x12Q\n" +
 	"\fRemoteLookup\x12\x1f.internalpb.RemoteLookupRequest\x1a .internalpb.RemoteLookupResponse\x12T\n" +
 	"\rRemoteReSpawn\x12 .internalpb.RemoteReSpawnRequest\x1a!.internalpb.RemoteReSpawnResponse\x12K\n" +
 	"\n" +
@@ -834,10 +834,10 @@ var file_internal_remoting_proto_goTypes = []any{
 	(*goaktpb.Address)(nil),       // 16: goaktpb.Address
 }
 var file_internal_remoting_proto_depIdxs = []int32{
-	6,  // 0: internalpb.RemoteAskRequest.remote_message:type_name -> internalpb.RemoteMessage
+	6,  // 0: internalpb.RemoteAskRequest.remote_messages:type_name -> internalpb.RemoteMessage
 	14, // 1: internalpb.RemoteAskRequest.timeout:type_name -> google.protobuf.Duration
-	15, // 2: internalpb.RemoteAskResponse.message:type_name -> google.protobuf.Any
-	6,  // 3: internalpb.RemoteTellRequest.remote_message:type_name -> internalpb.RemoteMessage
+	15, // 2: internalpb.RemoteAskResponse.messages:type_name -> google.protobuf.Any
+	6,  // 3: internalpb.RemoteTellRequest.remote_messages:type_name -> internalpb.RemoteMessage
 	16, // 4: internalpb.RemoteLookupResponse.address:type_name -> goaktpb.Address
 	16, // 5: internalpb.RemoteMessage.sender:type_name -> goaktpb.Address
 	16, // 6: internalpb.RemoteMessage.receiver:type_name -> goaktpb.Address

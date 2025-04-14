@@ -823,30 +823,19 @@ func (pid *PID) RemoteTell(ctx context.Context, to *address.Address, message pro
 	}
 
 	remoteService := pid.remoting.remotingServiceClient(to.GetHost(), int(to.GetPort()))
-
-	request := &internalpb.RemoteTellRequest{
-		RemoteMessage: &internalpb.RemoteMessage{
-			Sender:   pid.Address().Address,
-			Receiver: to.Address,
-			Message:  marshaled,
+	request := connect.NewRequest(&internalpb.RemoteTellRequest{
+		RemoteMessages: []*internalpb.RemoteMessage{
+			{
+				Sender:   pid.Address().Address,
+				Receiver: to.Address,
+				Message:  marshaled,
+			},
 		},
-	}
+	})
 
 	pid.logger.Debugf("sending a message to remote=(%s:%d)", to.GetHost(), to.GetPort())
-	stream := remoteService.RemoteTell(ctx)
-	if err := stream.Send(request); err != nil {
-		if eof(err) {
-			if _, err := stream.CloseAndReceive(); err != nil {
-				return err
-			}
-			return nil
-		}
-		fmtErr := fmt.Errorf("failed to send message to remote=(%s:%d): %w", to.GetHost(), to.GetPort(), err)
-		pid.logger.Error(fmtErr)
-		return fmtErr
-	}
-
-	if _, err := stream.CloseAndReceive(); err != nil {
+	_, err = remoteService.RemoteTell(ctx, request)
+	if err != nil {
 		fmtErr := fmt.Errorf("failed to send message to remote=(%s:%d): %w", to.GetHost(), to.GetPort(), err)
 		pid.logger.Error(fmtErr)
 		return fmtErr
@@ -872,50 +861,27 @@ func (pid *PID) RemoteAsk(ctx context.Context, to *address.Address, message prot
 	}
 
 	remoteService := pid.remoting.remotingServiceClient(to.GetHost(), int(to.GetPort()))
-
-	senderAddress := pid.Address()
-
-	request := &internalpb.RemoteAskRequest{
-		RemoteMessage: &internalpb.RemoteMessage{
-			Sender:   senderAddress.Address,
-			Receiver: to.Address,
-			Message:  marshaled,
+	request := connect.NewRequest(&internalpb.RemoteAskRequest{
+		RemoteMessages: []*internalpb.RemoteMessage{
+			{
+				Sender:   pid.Address().Address,
+				Receiver: to.Address,
+				Message:  marshaled,
+			},
 		},
 		Timeout: durationpb.New(timeout),
+	})
+
+	resp, err := remoteService.RemoteAsk(ctx, request)
+	if err != nil {
+		return nil, err
 	}
 
-	stream := remoteService.RemoteAsk(ctx)
-	errc := make(chan error, 1)
-
-	go func() {
-		defer close(errc)
-		for {
-			resp, err := stream.Receive()
-			if err != nil {
-				errc <- err
-				return
-			}
-
-			response = resp.GetMessage()
+	if resp != nil {
+		for _, msg := range resp.Msg.GetMessages() {
+			response = msg
+			break
 		}
-	}()
-
-	err = stream.Send(request)
-	if err != nil {
-		return nil, err
-	}
-
-	if err := stream.CloseRequest(); err != nil {
-		return nil, err
-	}
-
-	err = <-errc
-	if eof(err) {
-		return response, nil
-	}
-
-	if err != nil {
-		return nil, err
 	}
 
 	return
@@ -928,49 +894,25 @@ func (pid *PID) RemoteBatchTell(ctx context.Context, to *address.Address, messag
 		return ErrRemotingDisabled
 	}
 
-	if len(messages) == 1 {
-		return pid.RemoteTell(ctx, to, messages[0])
-	}
-
-	var requests []*internalpb.RemoteTellRequest
+	remoteMessages := make([]*internalpb.RemoteMessage, 0, len(messages))
 	for _, message := range messages {
 		packed, err := anypb.New(message)
 		if err != nil {
 			return ErrInvalidRemoteMessage(err)
 		}
 
-		requests = append(
-			requests, &internalpb.RemoteTellRequest{
-				RemoteMessage: &internalpb.RemoteMessage{
-					Sender:   pid.Address().Address,
-					Receiver: to.Address,
-					Message:  packed,
-				},
-			},
-		)
+		remoteMessages = append(remoteMessages, &internalpb.RemoteMessage{
+			Sender:   pid.Address().Address,
+			Receiver: to.Address,
+			Message:  packed,
+		})
 	}
 
 	remoteService := pid.remoting.remotingServiceClient(to.GetHost(), int(to.GetPort()))
-
-	stream := remoteService.RemoteTell(ctx)
-	for _, request := range requests {
-		if err := stream.Send(request); err != nil {
-			if eof(err) {
-				if _, err := stream.CloseAndReceive(); err != nil {
-					return err
-				}
-				return nil
-			}
-			return err
-		}
-	}
-
-	// close the connection
-	if _, err := stream.CloseAndReceive(); err != nil {
-		return err
-	}
-
-	return nil
+	_, err := remoteService.RemoteTell(ctx, connect.NewRequest(&internalpb.RemoteTellRequest{
+		RemoteMessages: remoteMessages,
+	}))
+	return err
 }
 
 // RemoteBatchAsk sends a synchronous bunch of messages to a remote actor and expect responses in the same order as the messages.
@@ -981,60 +923,33 @@ func (pid *PID) RemoteBatchAsk(ctx context.Context, to *address.Address, message
 		return nil, ErrRemotingDisabled
 	}
 
-	var requests []*internalpb.RemoteAskRequest
+	remoteMessages := make([]*internalpb.RemoteMessage, 0, len(messages))
 	for _, message := range messages {
 		packed, err := anypb.New(message)
 		if err != nil {
 			return nil, ErrInvalidRemoteMessage(err)
 		}
 
-		requests = append(
-			requests, &internalpb.RemoteAskRequest{
-				RemoteMessage: &internalpb.RemoteMessage{
-					Sender:   pid.Address().Address,
-					Receiver: to.Address,
-					Message:  packed,
-				},
-				Timeout: durationpb.New(timeout),
-			},
-		)
+		remoteMessages = append(
+			remoteMessages, &internalpb.RemoteMessage{
+				Sender:   pid.Address().Address,
+				Receiver: to.Address,
+				Message:  packed,
+			})
 	}
 
 	remoteService := pid.remoting.remotingServiceClient(to.GetHost(), int(to.GetPort()))
-	stream := remoteService.RemoteAsk(ctx)
-	errc := make(chan error, 1)
-
-	go func() {
-		defer close(errc)
-		for {
-			resp, err := stream.Receive()
-			if err != nil {
-				errc <- err
-				return
-			}
-
-			responses = append(responses, resp.GetMessage())
-		}
-	}()
-
-	for _, request := range requests {
-		err := stream.Send(request)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	if err := stream.CloseRequest(); err != nil {
-		return nil, err
-	}
-
-	err = <-errc
-	if eof(err) {
-		return responses, nil
-	}
+	resp, err := remoteService.RemoteAsk(ctx, connect.NewRequest(&internalpb.RemoteAskRequest{
+		RemoteMessages: remoteMessages,
+		Timeout:        durationpb.New(timeout),
+	}))
 
 	if err != nil {
 		return nil, err
+	}
+
+	if resp != nil {
+		responses = append(responses, resp.Msg.GetMessages()...)
 	}
 
 	return

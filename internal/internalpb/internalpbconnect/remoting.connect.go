@@ -56,10 +56,10 @@ const (
 // RemotingServiceClient is a client for the internalpb.RemotingService service.
 type RemotingServiceClient interface {
 	// RemoteAsk is used to send a message to an actor remotely and expect a response immediately.
-	RemoteAsk(context.Context) *connect.BidiStreamForClient[internalpb.RemoteAskRequest, internalpb.RemoteAskResponse]
+	RemoteAsk(context.Context, *connect.Request[internalpb.RemoteAskRequest]) (*connect.Response[internalpb.RemoteAskResponse], error)
 	// RemoteTell is used to send a message to a remote actor
 	// The actor on the other line can reply to the sender by using the Sender in the message
-	RemoteTell(context.Context) *connect.ClientStreamForClient[internalpb.RemoteTellRequest, internalpb.RemoteTellResponse]
+	RemoteTell(context.Context, *connect.Request[internalpb.RemoteTellRequest]) (*connect.Response[internalpb.RemoteTellResponse], error)
 	// Lookup for an actor on a remote host.
 	RemoteLookup(context.Context, *connect.Request[internalpb.RemoteLookupRequest]) (*connect.Response[internalpb.RemoteLookupResponse], error)
 	// RemoteReSpawn restarts an actor on a remote machine
@@ -131,13 +131,13 @@ type remotingServiceClient struct {
 }
 
 // RemoteAsk calls internalpb.RemotingService.RemoteAsk.
-func (c *remotingServiceClient) RemoteAsk(ctx context.Context) *connect.BidiStreamForClient[internalpb.RemoteAskRequest, internalpb.RemoteAskResponse] {
-	return c.remoteAsk.CallBidiStream(ctx)
+func (c *remotingServiceClient) RemoteAsk(ctx context.Context, req *connect.Request[internalpb.RemoteAskRequest]) (*connect.Response[internalpb.RemoteAskResponse], error) {
+	return c.remoteAsk.CallUnary(ctx, req)
 }
 
 // RemoteTell calls internalpb.RemotingService.RemoteTell.
-func (c *remotingServiceClient) RemoteTell(ctx context.Context) *connect.ClientStreamForClient[internalpb.RemoteTellRequest, internalpb.RemoteTellResponse] {
-	return c.remoteTell.CallClientStream(ctx)
+func (c *remotingServiceClient) RemoteTell(ctx context.Context, req *connect.Request[internalpb.RemoteTellRequest]) (*connect.Response[internalpb.RemoteTellResponse], error) {
+	return c.remoteTell.CallUnary(ctx, req)
 }
 
 // RemoteLookup calls internalpb.RemotingService.RemoteLookup.
@@ -163,10 +163,10 @@ func (c *remotingServiceClient) RemoteSpawn(ctx context.Context, req *connect.Re
 // RemotingServiceHandler is an implementation of the internalpb.RemotingService service.
 type RemotingServiceHandler interface {
 	// RemoteAsk is used to send a message to an actor remotely and expect a response immediately.
-	RemoteAsk(context.Context, *connect.BidiStream[internalpb.RemoteAskRequest, internalpb.RemoteAskResponse]) error
+	RemoteAsk(context.Context, *connect.Request[internalpb.RemoteAskRequest]) (*connect.Response[internalpb.RemoteAskResponse], error)
 	// RemoteTell is used to send a message to a remote actor
 	// The actor on the other line can reply to the sender by using the Sender in the message
-	RemoteTell(context.Context, *connect.ClientStream[internalpb.RemoteTellRequest]) (*connect.Response[internalpb.RemoteTellResponse], error)
+	RemoteTell(context.Context, *connect.Request[internalpb.RemoteTellRequest]) (*connect.Response[internalpb.RemoteTellResponse], error)
 	// Lookup for an actor on a remote host.
 	RemoteLookup(context.Context, *connect.Request[internalpb.RemoteLookupRequest]) (*connect.Response[internalpb.RemoteLookupResponse], error)
 	// RemoteReSpawn restarts an actor on a remote machine
@@ -184,13 +184,13 @@ type RemotingServiceHandler interface {
 // and JSON codecs. They also support gzip compression.
 func NewRemotingServiceHandler(svc RemotingServiceHandler, opts ...connect.HandlerOption) (string, http.Handler) {
 	remotingServiceMethods := internalpb.File_internal_remoting_proto.Services().ByName("RemotingService").Methods()
-	remotingServiceRemoteAskHandler := connect.NewBidiStreamHandler(
+	remotingServiceRemoteAskHandler := connect.NewUnaryHandler(
 		RemotingServiceRemoteAskProcedure,
 		svc.RemoteAsk,
 		connect.WithSchema(remotingServiceMethods.ByName("RemoteAsk")),
 		connect.WithHandlerOptions(opts...),
 	)
-	remotingServiceRemoteTellHandler := connect.NewClientStreamHandler(
+	remotingServiceRemoteTellHandler := connect.NewUnaryHandler(
 		RemotingServiceRemoteTellProcedure,
 		svc.RemoteTell,
 		connect.WithSchema(remotingServiceMethods.ByName("RemoteTell")),
@@ -243,11 +243,11 @@ func NewRemotingServiceHandler(svc RemotingServiceHandler, opts ...connect.Handl
 // UnimplementedRemotingServiceHandler returns CodeUnimplemented from all methods.
 type UnimplementedRemotingServiceHandler struct{}
 
-func (UnimplementedRemotingServiceHandler) RemoteAsk(context.Context, *connect.BidiStream[internalpb.RemoteAskRequest, internalpb.RemoteAskResponse]) error {
-	return connect.NewError(connect.CodeUnimplemented, errors.New("internalpb.RemotingService.RemoteAsk is not implemented"))
+func (UnimplementedRemotingServiceHandler) RemoteAsk(context.Context, *connect.Request[internalpb.RemoteAskRequest]) (*connect.Response[internalpb.RemoteAskResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("internalpb.RemotingService.RemoteAsk is not implemented"))
 }
 
-func (UnimplementedRemotingServiceHandler) RemoteTell(context.Context, *connect.ClientStream[internalpb.RemoteTellRequest]) (*connect.Response[internalpb.RemoteTellResponse], error) {
+func (UnimplementedRemotingServiceHandler) RemoteTell(context.Context, *connect.Request[internalpb.RemoteTellRequest]) (*connect.Response[internalpb.RemoteTellResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("internalpb.RemotingService.RemoteTell is not implemented"))
 }
 

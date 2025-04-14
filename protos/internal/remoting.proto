@@ -17,10 +17,10 @@ option go_package = "github.com/tochemey/goakt/v3/internal/internalpb;internalpb
 // - stop actor remotely
 service RemotingService {
   // RemoteAsk is used to send a message to an actor remotely and expect a response immediately.
-  rpc RemoteAsk(stream RemoteAskRequest) returns (stream RemoteAskResponse);
+  rpc RemoteAsk(RemoteAskRequest) returns (RemoteAskResponse);
   // RemoteTell is used to send a message to a remote actor
   // The actor on the other line can reply to the sender by using the Sender in the message
-  rpc RemoteTell(stream RemoteTellRequest) returns (RemoteTellResponse);
+  rpc RemoteTell(RemoteTellRequest) returns (RemoteTellResponse);
   // Lookup for an actor on a remote host.
   rpc RemoteLookup(RemoteLookupRequest) returns (RemoteLookupResponse);
   // RemoteReSpawn restarts an actor on a remote machine
@@ -35,7 +35,7 @@ service RemotingService {
 // immediately.
 message RemoteAskRequest {
   // Specifies the remote message to send
-  RemoteMessage remote_message = 1;
+  repeated RemoteMessage remote_messages = 1;
   // Specifies the timeout(how long to wait for a reply)
   google.protobuf.Duration timeout = 2;
 }
@@ -43,13 +43,13 @@ message RemoteAskRequest {
 message RemoteAskResponse {
   // Specifies the message to send to the actor
   // Any proto message is allowed to be sent
-  google.protobuf.Any message = 1;
+  repeated google.protobuf.Any messages = 1;
 }
 
 // RemoteTell is used to send a message to an actor remotely
 message RemoteTellRequest {
   // Specifies the remote message to send
-  RemoteMessage remote_message = 1;
+  repeated RemoteMessage remote_messages = 1;
 }
 
 message RemoteTellResponse {}
