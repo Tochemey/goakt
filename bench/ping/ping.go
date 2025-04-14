@@ -52,12 +52,23 @@ func main() {
 	// use the address default log. real-life implement the log interface`
 	logger := log.New(log.DebugLevel, os.Stdout)
 
+	total := 1_000_000
+	messageSize := 0
+	toSend := make([]proto.Message, total)
+	for i := range total {
+		message := new(testpb.TestPing)
+		messageSize += proto.Size(message)
+		toSend[i] = message
+	}
+
 	// create the actor system. kindly in real-life application handle the error
 	actorSystem, _ := goakt.NewActorSystem(
 		"RemotingBenchmark",
 		goakt.WithPassivationDisabled(),
 		goakt.WithLogger(logger),
-		goakt.WithRemote(remote.NewConfig(host, port)),
+		goakt.WithRemote(remote.NewConfig(host, port,
+			remote.WithMaxFrameSize(uint32(messageSize)),
+		)),
 	)
 
 	// start the actor system
@@ -67,7 +78,6 @@ func main() {
 	time.Sleep(time.Second)
 
 	// create an actor
-	toSend := 1_000_000
 
 	pid, _ := actorSystem.Spawn(ctx, "Ping", NewPing(toSend),
 		goakt.WithSupervisor(
@@ -94,26 +104,21 @@ func main() {
 }
 
 type Ping struct {
-	threshold int
-	count     int
-	start     time.Time
+	count int
+	start time.Time
 
 	toSend []proto.Message
 }
 
 var _ goakt.Actor = (*Ping)(nil)
 
-func NewPing(totalScore int) *Ping {
+func NewPing(toSend []proto.Message) *Ping {
 	return &Ping{
-		threshold: totalScore,
+		toSend: toSend,
 	}
 }
 
 func (act *Ping) PreStart(context.Context) error {
-	act.toSend = make([]proto.Message, act.threshold)
-	for i := range act.threshold {
-		act.toSend[i] = new(testpb.TestPing)
-	}
 	return nil
 }
 
@@ -125,7 +130,7 @@ func (act *Ping) Receive(ctx *goakt.ReceiveContext) {
 		to := address.From(remoteAddr)
 		act.start = time.Now()
 		ctx.RemoteBatchTell(to, act.toSend)
-		ctx.Logger().Infof("sent %d messages to %s in %s", act.threshold, to.String(), time.Since(act.start))
+		ctx.Logger().Infof("sent %d messages to %s in %s", len(act.toSend), to.String(), time.Since(act.start))
 	default:
 		ctx.Unhandled()
 	}

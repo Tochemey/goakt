@@ -31,6 +31,8 @@ import (
 	"syscall"
 	"time"
 
+	"google.golang.org/protobuf/proto"
+
 	goakt "github.com/tochemey/goakt/v3/actor"
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/log"
@@ -49,21 +51,27 @@ func main() {
 	// use the address default log. real-life implement the log interface`
 	logger := log.New(log.DebugLevel, os.Stdout)
 
+	expected := 1_000_000
+	messageSize := 0
+	for range expected {
+		message := new(testpb.TestPing)
+		messageSize += proto.Size(message)
+	}
+
 	// create the actor system. kindly in real-life application handle the error
 	actorSystem, _ := goakt.NewActorSystem(
 		"RemotingBenchmark",
 		goakt.WithPassivationDisabled(),
 		goakt.WithLogger(logger),
 		goakt.WithActorInitMaxRetries(3),
-		goakt.WithRemote(remote.NewConfig(host, port)))
+		goakt.WithRemote(remote.NewConfig(host, port,
+			remote.WithMaxFrameSize(uint32(messageSize)))))
 
 	// start the actor system
 	_ = actorSystem.Start(ctx)
 
 	// wait for the actor system to be ready
 	time.Sleep(time.Second)
-
-	expected := 1_000_000
 
 	// create an actor
 	_, _ = actorSystem.Spawn(ctx, "Pong",

@@ -1073,119 +1073,72 @@ func (x *actorSystem) RemoteLookup(ctx context.Context, request *connect.Request
 // RemoteAsk is used to send a message to an actor remotely and expect a response
 // immediately. With this type of message the receiver cannot communicate back to Sender
 // except reply the message with a response. This one-way communication
-func (x *actorSystem) RemoteAsk(ctx context.Context, stream *connect.BidiStream[internalpb.RemoteAskRequest, internalpb.RemoteAskResponse]) error {
-	logger := x.logger
-
-	if !x.remotingEnabled.Load() {
-		return connect.NewError(connect.CodeFailedPrecondition, ErrRemotingDisabled)
-	}
-
-	for {
-		switch err := ctx.Err(); {
-		case errors.Is(err, context.Canceled):
-			return connect.NewError(connect.CodeCanceled, err)
-		case errors.Is(err, context.DeadlineExceeded):
-			return connect.NewError(connect.CodeDeadlineExceeded, err)
-		}
-
-		request, err := stream.Receive()
-		if eof(err) {
-			return nil
-		}
-
-		if err != nil {
-			logger.Error(err)
-			return connect.NewError(connect.CodeUnknown, err)
-		}
-
-		message := request.GetRemoteMessage()
-		receiver := message.GetReceiver()
-
-		remoteAddr := fmt.Sprintf("%s:%d", x.remoteConfig.BindAddr(), x.remoteConfig.BindPort())
-		if remoteAddr != net.JoinHostPort(receiver.GetHost(), strconv.Itoa(int(receiver.GetPort()))) {
-			return connect.NewError(connect.CodeInvalidArgument, ErrInvalidHost)
-		}
-
-		addr := address.From(receiver)
-		pidNode, exist := x.actors.node(addr.String())
-		if !exist {
-			logger.Error(ErrAddressNotFound(addr.String()).Error())
-			return ErrAddressNotFound(addr.String())
-		}
-
-		timeout := x.askTimeout
-		if request.GetTimeout() != nil {
-			timeout = request.GetTimeout().AsDuration()
-		}
-
-		pid := pidNode.value()
-		reply, err := x.handleRemoteAsk(ctx, pid, message, timeout)
-		if err != nil {
-			logger.Error(ErrRemoteSendFailure(err).Error())
-			return ErrRemoteSendFailure(err)
-		}
-
-		marshaled, _ := anypb.New(reply)
-		response := &internalpb.RemoteAskResponse{Message: marshaled}
-		if err := stream.Send(response); err != nil {
-			return connect.NewError(connect.CodeUnknown, err)
-		}
-	}
-}
-
-// RemoteTell is used to send a message to an actor remotely by another actor
-func (x *actorSystem) RemoteTell(ctx context.Context, stream *connect.ClientStream[internalpb.RemoteTellRequest]) (*connect.Response[internalpb.RemoteTellResponse], error) {
+func (x *actorSystem) RemoteAsk(ctx context.Context, request *connect.Request[internalpb.RemoteAskRequest]) (*connect.Response[internalpb.RemoteAskResponse], error) {
 	logger := x.logger
 
 	if !x.remotingEnabled.Load() {
 		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrRemotingDisabled)
 	}
 
-	requestc := make(chan *internalpb.RemoteTellRequest, 1)
-	eg, ctx := errgroup.WithContext(ctx)
+	req := request.Msg
+	timeout := x.askTimeout
+	if req.GetTimeout() != nil {
+		timeout = req.GetTimeout().AsDuration()
+	}
 
-	eg.Go(func() error {
-		for stream.Receive() {
-			select {
-			case requestc <- stream.Msg():
-			case <-ctx.Done():
-				logger.Error(ctx.Err())
-				close(requestc)
-				return connect.NewError(connect.CodeCanceled, ctx.Err())
-			}
+	responses := make([]*anypb.Any, 0, len(req.GetRemoteMessages()))
+	for _, message := range req.GetRemoteMessages() {
+		receiver := message.GetReceiver()
+
+		remoteAddr := fmt.Sprintf("%s:%d", x.remoteConfig.BindAddr(), x.remoteConfig.BindPort())
+		if remoteAddr != net.JoinHostPort(receiver.GetHost(), strconv.Itoa(int(receiver.GetPort()))) {
+			return nil, connect.NewError(connect.CodeInvalidArgument, ErrInvalidHost)
 		}
 
-		if err := stream.Err(); err != nil {
-			logger.Error(err)
-			close(requestc)
-			return connect.NewError(connect.CodeUnknown, err)
+		addr := address.From(receiver)
+		pidNode, exist := x.actors.node(addr.String())
+		if !exist {
+			logger.Error(ErrAddressNotFound(addr.String()).Error())
+			return nil, ErrAddressNotFound(addr.String())
 		}
 
-		close(requestc)
-		return nil
-	})
-
-	eg.Go(func() error {
-		for request := range requestc {
-			receiver := request.GetRemoteMessage().GetReceiver()
-			addr := address.From(receiver)
-			pidNode, exist := x.actors.node(addr.String())
-			if !exist {
-				logger.Error(ErrAddressNotFound(addr.String()).Error())
-				return ErrAddressNotFound(addr.String())
-			}
-
-			pid := pidNode.value()
-			if err := x.handleRemoteTell(ctx, pid, request.GetRemoteMessage()); err != nil {
-				logger.Error(ErrRemoteSendFailure(err))
-				return ErrRemoteSendFailure(err)
-			}
+		pid := pidNode.value()
+		reply, err := x.handleRemoteAsk(ctx, pid, message, timeout)
+		if err != nil {
+			logger.Error(ErrRemoteSendFailure(err).Error())
+			return nil, ErrRemoteSendFailure(err)
 		}
-		return nil
-	})
 
-	if err := eg.Wait(); err != nil {
-		return nil, err
+		marshaled, _ := anypb.New(reply)
+		responses = append(responses, marshaled)
+	}
+
+	return connect.NewResponse(&internalpb.RemoteAskResponse{Messages: responses}), nil
+}
+
+// RemoteTell is used to send a message to an actor remotely by another actor
+func (x *actorSystem) RemoteTell(ctx context.Context, request *connect.Request[internalpb.RemoteTellRequest]) (*connect.Response[internalpb.RemoteTellResponse], error) {
+	logger := x.logger
+
+	if !x.remotingEnabled.Load() {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrRemotingDisabled)
+	}
+
+	req := request.Msg
+	for _, message := range req.GetRemoteMessages() {
+		receiver := message.GetReceiver()
+		addr := address.From(receiver)
+		pidNode, exist := x.actors.node(addr.String())
+		if !exist {
+			logger.Error(ErrAddressNotFound(addr.String()).Error())
+			return nil, ErrAddressNotFound(addr.String())
+		}
+
+		pid := pidNode.value()
+		if err := x.handleRemoteTell(ctx, pid, message); err != nil {
+			logger.Error(ErrRemoteSendFailure(err))
+			return nil, ErrRemoteSendFailure(err)
+		}
 	}
 
 	return connect.NewResponse(new(internalpb.RemoteTellResponse)), nil
