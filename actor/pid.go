@@ -825,7 +825,7 @@ func (pid *PID) RemoteTell(ctx context.Context, to *address.Address, message pro
 	remoteService := pid.remoting.remotingServiceClient(to.GetHost(), int(to.GetPort()))
 	request := connect.NewRequest(&internalpb.RemoteTellRequest{
 		RemoteMessages: []*internalpb.RemoteMessage{
-			&internalpb.RemoteMessage{
+			{
 				Sender:   pid.Address().Address,
 				Receiver: to.Address,
 				Message:  marshaled,
@@ -863,7 +863,7 @@ func (pid *PID) RemoteAsk(ctx context.Context, to *address.Address, message prot
 	remoteService := pid.remoting.remotingServiceClient(to.GetHost(), int(to.GetPort()))
 	request := connect.NewRequest(&internalpb.RemoteAskRequest{
 		RemoteMessages: []*internalpb.RemoteMessage{
-			&internalpb.RemoteMessage{
+			{
 				Sender:   pid.Address().Address,
 				Receiver: to.Address,
 				Message:  marshaled,
@@ -949,10 +949,7 @@ func (pid *PID) RemoteBatchAsk(ctx context.Context, to *address.Address, message
 	}
 
 	if resp != nil {
-		responses = make([]*anypb.Any, 0, len(resp.Msg.GetMessages()))
-		for _, message := range resp.Msg.GetMessages() {
-			responses = append(responses, message)
-		}
+		responses = append(responses, resp.Msg.GetMessages()...)
 	}
 
 	return
