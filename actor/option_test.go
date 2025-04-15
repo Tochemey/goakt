@@ -40,6 +40,8 @@ import (
 
 func TestOption(t *testing.T) {
 	var atomicTrue atomic.Bool
+	var atomicFalse atomic.Bool
+	atomicFalse.Store(false)
 	atomicTrue.Store(true)
 	clusterConfig := NewClusterConfig()
 	hasher := hash.DefaultHasher()
@@ -116,6 +118,11 @@ func TestOption(t *testing.T) {
 			name:     "WithRemote",
 			option:   WithRemote(remoteConfig),
 			expected: actorSystem{remotingEnabled: atomicTrue, remoteConfig: remoteConfig},
+		},
+		{
+			name:     "WithoutRelocation",
+			option:   WithoutRelocation(),
+			expected: actorSystem{enableRelocation: atomicFalse},
 		},
 	}
 
