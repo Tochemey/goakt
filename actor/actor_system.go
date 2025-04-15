@@ -315,10 +315,11 @@ type actorSystem struct {
 	actorsCounter      *atomic.Uint64
 	deadlettersCounter *atomic.Uint64
 
-	clientTLS     *tls.Config
-	serverTLS     *tls.Config
-	pubsubEnabled atomic.Bool
-	workerPool    *workerpool.WorkerPool
+	clientTLS        *tls.Config
+	serverTLS        *tls.Config
+	pubsubEnabled    atomic.Bool
+	workerPool       *workerpool.WorkerPool
+	enableRelocation atomic.Bool
 }
 
 var (
@@ -371,6 +372,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		),
 	}
 
+	system.enableRelocation.Store(true)
 	system.started.Store(false)
 	system.remotingEnabled.Store(false)
 	system.clusterEnabled.Store(false)
@@ -1437,14 +1439,18 @@ func (x *actorSystem) enableClustering(ctx context.Context) error {
 		return errors.New("clustering needs remoting to be enabled")
 	}
 
-	clusterStore, err := cluster.NewStore(x.logger, x.clusterConfig.WAL())
-	if err != nil {
-		x.logger.Errorf("failed to initialize peers cache: %v", err)
-		x.locker.Unlock()
-		return err
+	// only start the cluster store when relocation is enabled
+	if x.enableRelocation.Load() {
+		clusterStore, err := cluster.NewStore(x.logger, x.clusterConfig.WAL())
+		if err != nil {
+			x.logger.Errorf("failed to initialize peers cache: %v", err)
+			x.locker.Unlock()
+			return err
+		}
+
+		x.clusterStore = clusterStore
 	}
 
-	x.clusterStore = clusterStore
 	x.clusterNode = &discovery.Node{
 		Name:          x.name,
 		Host:          x.remoteConfig.BindAddr(),
@@ -1502,8 +1508,12 @@ func (x *actorSystem) enableClustering(ctx context.Context) error {
 
 	go x.clusterEventsLoop()
 	go x.replicationLoop()
-	go x.peersStateLoop()
-	go x.rebalancingLoop()
+
+	// start the various relocation loops when relocation is enabled
+	if x.enableRelocation.Load() {
+		go x.peersStateLoop()
+		go x.rebalancingLoop()
+	}
 
 	x.logger.Info("clustering enabled...:)")
 	return nil
@@ -1686,7 +1696,7 @@ func (x *actorSystem) clusterEventsLoop() {
 					x.logger.Debugf("cluster event=(%s) successfully published by node=(%s)", event.Type, x.name)
 				}
 
-				if event.Type == cluster.NodeLeft {
+				if event.Type == cluster.NodeLeft && x.enableRelocation.Load() {
 					nodeLeft := new(goaktpb.NodeLeft)
 					_ = event.Payload.UnmarshalTo(nodeLeft)
 
@@ -2052,7 +2062,7 @@ func (x *actorSystem) spawnDeathWatch(ctx context.Context) error {
 
 // spawnRebalancer creates the cluster rebalancer
 func (x *actorSystem) spawnRebalancer(ctx context.Context) error {
-	if x.clusterEnabled.Load() {
+	if x.clusterEnabled.Load() && x.enableRelocation.Load() {
 		var err error
 		actorName := x.reservedName(rebalancerType)
 
@@ -2228,7 +2238,7 @@ func (x *actorSystem) shutdownCluster(ctx context.Context, actorRefs []ActorRef)
 		}
 
 		x.rebalanceLocker.Unlock()
-		if x.clusterStore != nil {
+		if x.clusterStore != nil && x.enableRelocation.Load() {
 			return x.clusterStore.Close()
 		}
 	}

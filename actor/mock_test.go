@@ -464,9 +464,10 @@ func startNatsServer(t *testing.T) *natsserver.Server {
 }
 
 type testClusterConfig struct {
-	tlsEnabled    bool
-	conf          autotls.Config
-	pubsubEnabled bool
+	tlsEnabled        bool
+	conf              autotls.Config
+	pubsubEnabled     bool
+	relocationEnabled bool
 }
 
 type testClusterOption func(*testClusterConfig)
@@ -481,6 +482,12 @@ func withTestTSL(conf autotls.Config) testClusterOption {
 func withTestPubSub() testClusterOption {
 	return func(tc *testClusterConfig) {
 		tc.pubsubEnabled = true
+	}
+}
+
+func withoutTestRelocation() testClusterOption {
+	return func(tc *testClusterConfig) {
+		tc.relocationEnabled = false
 	}
 }
 
@@ -530,7 +537,11 @@ func testCluster(t *testing.T, serverAddr string, opts ...testClusterOption) (Ac
 				WithDiscovery(provider)),
 	}
 
-	cfg := &testClusterConfig{}
+	cfg := &testClusterConfig{
+		tlsEnabled:        false,
+		pubsubEnabled:     false,
+		relocationEnabled: true,
+	}
 	for _, opt := range opts {
 		opt(cfg)
 	}
@@ -544,6 +555,10 @@ func testCluster(t *testing.T, serverAddr string, opts ...testClusterOption) (Ac
 			ClientTLS: cfg.conf.ClientTLS,
 			ServerTLS: cfg.conf.ServerTLS,
 		}))
+	}
+
+	if !cfg.relocationEnabled {
+		options = append(options, WithoutRelocation())
 	}
 
 	// create the actor system

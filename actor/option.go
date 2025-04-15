@@ -193,3 +193,20 @@ func WithPubSub() Option {
 		}
 	})
 }
+
+// WithoutRelocation returns an Option that disables actor relocation in the cluster.
+//
+// When this option is set, the actor system will not attempt to relocate actors
+// from a node that leaves the cluster. This applies even if individual actors
+// are configured to support relocation.
+//
+// Instead of migrating to a healthy node, actors hosted on the departing node
+// will be terminated, and any associated in-memory state will be lost permanently.
+//
+// This is useful in scenarios where actor state is ephemeral, externally managed,
+// or where graceful degradation is preferred over relocation overhead.
+func WithoutRelocation() Option {
+	return OptionFunc(func(system *actorSystem) {
+		system.enableRelocation.Store(false)
+	})
+}
