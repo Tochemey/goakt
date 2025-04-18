@@ -53,6 +53,7 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/reflect/protoregistry"
 	"google.golang.org/protobuf/types/known/anypb"
+	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/tochemey/goakt/v3/address"
 	"github.com/tochemey/goakt/v3/discovery"
@@ -130,16 +131,6 @@ type ActorSystem interface { //nolint:revive
 	// If the oldest node leaves the cluster, the singleton is restarted on the new oldest node.
 	// This is useful for managing shared resources or coordinating tasks that should be handled by a single actor.
 	SpawnSingleton(ctx context.Context, name string, actor Actor) error
-	// SpawnEntity creates and starts a new persistent actor (entity) within the actor system.
-	//
-	// Entities are specialized actors that retain a durable state across restarts using snapshot-based persistence.
-	// This function registers the actor with the system under the provided name and applies any optional
-	// spawn configurations (e.g., custom mailbox, supervision strategy).
-	//
-	// The provided actor must implement the Actor interface and should be designed to restore its state
-	// from snapshots during initialization. If the actor is not stateful or does not require persistence,
-	// consider using Spawn instead.
-	SpawnEntity(ctx context.Context, entityID string, actor Actor, initialState proto.Message, opts ...SpawnOption) (*PID, error)
 	// Kill stops a given actor in the system
 	Kill(ctx context.Context, name string) error
 	// ReSpawn recreates a given actor in the system
@@ -347,8 +338,8 @@ type actorSystem struct {
 	workerPool       *workerpool.WorkerPool
 	enableRelocation atomic.Bool
 
-	enablePersistence atomic.Bool
-	stateReadWriter   StateReadWriter
+	persistenceEnabled atomic.Bool
+	stateReadWriter    StateReadWriter
 }
 
 var (
@@ -401,7 +392,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		),
 	}
 
-	system.enablePersistence.Store(false)
+	system.persistenceEnabled.Store(false)
 	system.enableRelocation.Store(true)
 	system.started.Store(false)
 	system.remotingEnabled.Store(false)
@@ -724,7 +715,7 @@ func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor, opts 
 		}
 	}
 
-	pid, err := x.configPID(ctx, name, actor, nil, opts...)
+	pid, err := x.configPID(ctx, name, actor, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -762,7 +753,7 @@ func (x *actorSystem) SpawnNamedFromFunc(ctx context.Context, name string, recei
 		}
 	}
 
-	pid, err := x.configPID(ctx, name, actor, nil, WithMailbox(config.mailbox))
+	pid, err := x.configPID(ctx, name, actor, WithMailbox(config.mailbox))
 	if err != nil {
 		return nil, err
 	}
@@ -820,7 +811,7 @@ func (x *actorSystem) SpawnSingleton(ctx context.Context, name string, actor Act
 		return err
 	}
 
-	pid, err := x.configPID(ctx, name, actor, nil, WithLongLived(), withSingleton(), WithSupervisor(
+	pid, err := x.configPID(ctx, name, actor, WithLongLived(), withSingleton(), WithSupervisor(
 		NewSupervisor(
 			WithStrategy(OneForOneStrategy),
 			WithDirective(PanicError{}, StopDirective),
@@ -838,48 +829,6 @@ func (x *actorSystem) SpawnSingleton(ctx context.Context, name string, actor Act
 	x.actors.addWatcher(pid, x.deathWatch)
 	x.broadcastActor(pid)
 	return nil
-}
-
-// SpawnEntity creates and starts a new persistent actor (entity) within the actor system.
-//
-// Entities are specialized actors that retain a durable state across restarts using snapshot-based persistence.
-// This function registers the actor with the system under the provided name and applies any optional
-// spawn configurations (e.g., custom mailbox, supervision strategy).
-//
-// The provided actor must implement the Actor interface and should be designed to restore its state
-// from snapshots during initialization. If the actor is not stateful or does not require persistence,
-// consider using Spawn instead.
-func (x *actorSystem) SpawnEntity(ctx context.Context, entityID string, actor Actor, initialState proto.Message, opts ...SpawnOption) (*PID, error) {
-	if !x.started.Load() {
-		return nil, ErrActorSystemNotStarted
-	}
-
-	// check some preconditions
-	if err := x.checkSpawnPreconditions(ctx, entityID, types.Name(actor), false); err != nil {
-		return nil, err
-	}
-
-	actorAddress := x.actorAddress(entityID)
-	pidNode, exist := x.actors.node(actorAddress.String())
-	if exist {
-		pid := pidNode.value()
-		if pid.IsRunning() {
-			return pid, nil
-		}
-	}
-
-	pid, err := x.configPID(ctx, entityID, nil, initialState, opts...)
-	if err != nil {
-		return nil, err
-	}
-
-	x.actorsCounter.Inc()
-	// add the given actor to the tree and supervise it
-	guardian := x.getUserGuardian()
-	_ = x.actors.addNode(guardian, pid)
-	x.actors.addWatcher(pid, x.deathWatch)
-	x.broadcastActor(pid)
-	return pid, nil
 }
 
 // Kill stops a given actor in the system
@@ -1336,10 +1285,7 @@ func (x *actorSystem) RemoteSpawn(ctx context.Context, request *connect.Request[
 		}
 
 		initialState := initialStateType.New().Interface()
-		if _, err = x.SpawnEntity(ctx, msg.GetActorName(), actor, initialState, opts...); err != nil {
-			logger.Errorf("failed to create actor=(%s) on [host=%s, port=%d]: reason: (%v)", msg.GetActorName(), msg.GetHost(), msg.GetPort(), err)
-			return nil, connect.NewError(connect.CodeInternal, err)
-		}
+		opts = append(opts, WithInitialState(initialState))
 	}
 
 	// spawn a normal(a.k.a stateful) actor
@@ -1713,6 +1659,7 @@ func (x *actorSystem) ensureTLSProtos() {
 // reset the actor system
 func (x *actorSystem) reset() {
 	x.actors.reset()
+	x.persistenceEnabled.Store(false)
 }
 
 // shutdown stops the actor system
@@ -1956,7 +1903,7 @@ func (x *actorSystem) processPeerState(ctx context.Context, peer *cluster.Peer) 
 
 // configPID constructs a PID provided the actor name and the actor kind
 // this is a utility function used when spawning actors
-func (x *actorSystem) configPID(ctx context.Context, name string, actor Actor, initialState proto.Message, opts ...SpawnOption) (*PID, error) {
+func (x *actorSystem) configPID(ctx context.Context, name string, actor Actor, opts ...SpawnOption) (*PID, error) {
 	addr := x.actorAddress(name)
 	if err := addr.Validate(); err != nil {
 		return nil, err
@@ -2017,10 +1964,11 @@ func (x *actorSystem) configPID(ctx context.Context, name string, actor Actor, i
 		}
 	}
 
-	if x.enablePersistence.Load() {
+	if x.persistenceEnabled.Load() &&
+		!proto.Equal(spawnConfig.initialState, new(emptypb.Empty)) {
 		pidOpts = append(pidOpts,
 			withStateReadWriter(x.stateReadWriter),
-			withPersistence(initialState),
+			withInitialState(spawnConfig.initialState),
 		)
 	}
 
@@ -2044,7 +1992,7 @@ func (x *actorSystem) tree() *tree {
 
 // isPersistenceEnabled returns true when persistence is enabled
 func (x *actorSystem) isPersistenceEnabled() bool {
-	return x.enablePersistence.Load()
+	return x.persistenceEnabled.Load()
 }
 
 // getCluster returns the cluster engine
@@ -2110,7 +2058,7 @@ func (x *actorSystem) configureServer(ctx context.Context, mux *stdhttp.ServeMux
 func (x *actorSystem) spawnRootGuardian(ctx context.Context) error {
 	var err error
 	actorName := x.reservedName(rootGuardianType)
-	x.rootGuardian, err = x.configPID(ctx, actorName, newRootGuardian(), nil)
+	x.rootGuardian, err = x.configPID(ctx, actorName, newRootGuardian())
 	if err != nil {
 		return fmt.Errorf("actor=%s failed to start rootGuardian guardian: %w", actorName, err)
 	}
@@ -2125,7 +2073,7 @@ func (x *actorSystem) spawnSystemGuardian(ctx context.Context) error {
 	var err error
 	actorName := x.reservedName(systemGuardianType)
 
-	x.systemGuardian, err = x.configPID(ctx, actorName, newSystemGuardian(), nil, WithSupervisor(NewSupervisor()))
+	x.systemGuardian, err = x.configPID(ctx, actorName, newSystemGuardian(), WithSupervisor(NewSupervisor()))
 	if err != nil {
 		return fmt.Errorf("actor=%s failed to start system guardian: %w", actorName, err)
 	}
@@ -2139,7 +2087,7 @@ func (x *actorSystem) spawnSystemGuardian(ctx context.Context) error {
 func (x *actorSystem) spawnUserGuardian(ctx context.Context) error {
 	var err error
 	actorName := x.reservedName(userGuardianType)
-	x.userGuardian, err = x.configPID(ctx, actorName, newUserGuardian(), nil, WithSupervisor(NewSupervisor()))
+	x.userGuardian, err = x.configPID(ctx, actorName, newUserGuardian(), WithSupervisor(NewSupervisor()))
 	if err != nil {
 		return fmt.Errorf("actor=%s failed to start user guardian: %w", actorName, err)
 	}
@@ -2160,7 +2108,7 @@ func (x *actorSystem) spawnDeathWatch(ctx context.Context) error {
 		WithAnyErrorDirective(StopDirective),
 	)
 
-	x.deathWatch, err = x.configPID(ctx, actorName, newDeathWatch(), nil, WithSupervisor(supervisor))
+	x.deathWatch, err = x.configPID(ctx, actorName, newDeathWatch(), WithSupervisor(supervisor))
 	if err != nil {
 		return fmt.Errorf("actor=%s failed to start the deathWatch: %w", actorName, err)
 	}
@@ -2186,7 +2134,7 @@ func (x *actorSystem) spawnRebalancer(ctx context.Context) error {
 			WithDirective(SpawnError{}, ResumeDirective),
 		)
 
-		x.rebalancer, err = x.configPID(ctx, actorName, newRebalancer(x.reflection, x.remoting), nil, WithSupervisor(supervisor))
+		x.rebalancer, err = x.configPID(ctx, actorName, newRebalancer(x.reflection, x.remoting), WithSupervisor(supervisor))
 		if err != nil {
 			return fmt.Errorf("actor=%s failed to start cluster rebalancer: %w", actorName, err)
 		}
@@ -2201,7 +2149,7 @@ func (x *actorSystem) spawnRebalancer(ctx context.Context) error {
 func (x *actorSystem) spawnDeadletter(ctx context.Context) error {
 	var err error
 	actorName := x.reservedName(deadletterType)
-	x.deadletter, err = x.configPID(ctx, actorName, newDeadLetter(), nil, WithSupervisor(
+	x.deadletter, err = x.configPID(ctx, actorName, newDeadLetter(), WithSupervisor(
 		NewSupervisor(
 			WithStrategy(OneForOneStrategy),
 			WithAnyErrorDirective(ResumeDirective),

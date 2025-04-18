@@ -229,6 +229,6 @@ func WithoutRelocation() Option {
 func WithPersistence(readWriter StateReadWriter) Option {
 	return OptionFunc(func(system *actorSystem) {
 		system.stateReadWriter = readWriter
-		system.enablePersistence.Store(true)
+		system.persistenceEnabled.Store(true)
 	})
 }

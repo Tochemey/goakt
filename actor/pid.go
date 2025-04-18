@@ -41,6 +41,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/durationpb"
+	"google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/tochemey/goakt/v3/address"
@@ -560,8 +561,23 @@ func (pid *PID) LatestProcessedDuration() time.Duration {
 	return pid.latestReceiveDuration.Load()
 }
 
-// SpawnChild creates a child actor and starts watching it for error
-// When the given child actor already exists, its PID will only be returned
+// SpawnChild creates and starts a new child actor under the current actor's context,
+// and begins monitoring it for errors.
+//
+// If a child actor with the given name already exists, its PID will be returned instead
+// of spawning a new instance. This ensures idempotent child creation within the same parent.
+//
+// The child actor must implement the Actor interface. Unlike persistent entities,
+// child actors created using this function are ephemeral and do not retain state across restarts.
+//
+// Parameters:
+//   - name: The unique name of the child actor within its parent.
+//   - actor: An instance implementing the Actor interface.
+//   - opts: Optional SpawnOptions to customize actor behavior (e.g., mailbox, dispatcher).
+//
+// Returns:
+//   - PID: A pointer to the created or existing child actor's process ID.
+//   - error: An error if the actor could not be started.
 func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor, opts ...SpawnOption) (*PID, error) {
 	if !pid.IsRunning() {
 		return nil, ErrDead
@@ -602,7 +618,12 @@ func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor, opts .
 		pidOptions = append(pidOptions, withRelocationDisabled())
 	}
 
-	// disable passivation for system actor
+	// make the actor a persistent actor
+	if !proto.Equal(spawnConfig.initialState, new(emptypb.Empty)) {
+		pidOptions = append(pidOptions, withInitialState(spawnConfig.initialState))
+	}
+
+	// disable passivation for a system actor
 	switch {
 	case isReservedName(name):
 		pidOptions = append(pidOptions, withPassivationDisabled())
@@ -618,124 +639,6 @@ func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor, opts .
 			// the only time the actor will stop is when its parent stop
 			pidOptions = append(pidOptions, withPassivationDisabled())
 		}
-	}
-
-	// create the child PID
-	cid, err := newPID(
-		ctx,
-		childAddress,
-		actor,
-		pidOptions...,
-	)
-
-	if err != nil {
-		return nil, err
-	}
-
-	// no need to handle the error because the given parent exist and running
-	// that check was done in the above lines
-	_ = tree.addNode(pid, cid)
-	tree.addWatcher(cid, pid.ActorSystem().getDeathWatch())
-
-	eventsStream := pid.eventsStream
-	if eventsStream != nil {
-		eventsStream.Publish(
-			eventsTopic, &goaktpb.ActorChildCreated{
-				Address:   cid.Address().Address,
-				CreatedAt: timestamppb.Now(),
-				Parent:    pid.Address().Address,
-			},
-		)
-	}
-
-	// set the actor in the given actor system registry
-	pid.ActorSystem().broadcastActor(cid)
-	return cid, nil
-}
-
-// SpawnEntity creates and starts a new persistent child actor (entity) within the actor system
-// and begins monitoring it for errors.
-//
-// This operation is only supported if persistence is enabled on the actor system. Entities are
-// specialized actors designed to maintain a durable state across restarts using snapshot-based
-// persistence. The spawned actor will be registered under the given name, and any optional
-// spawn configurations (e.g., custom mailbox, dispatcher, supervision strategy) will be applied.
-//
-// The actor must implement the Actor interface and be capable of restoring its state from a snapshot
-// during initialization. This is essential for consistent recovery after crashes or redeployments.
-//
-// If the actor does not require state persistence, use SpawnChild instead.
-//
-// Parameters:
-//   - name: The unique name of the entity within the actor system.
-//   - actor: An instance implementing the Actor interface, designed for stateful behavior.
-//   - opts: Optional SpawnOptions to configure the actor's runtime behavior.
-//
-// Returns:
-//   - PID: A pointer to the newly created actor's process ID.
-//   - Error: An error if the actor system is not configured for persistence or the entity could not be started.
-func (pid *PID) SpawnEntity(ctx context.Context, entityID string, actor Actor, initialState proto.Message, opts ...SpawnOption) (*PID, error) {
-	if !pid.IsRunning() {
-		return nil, ErrDead
-	}
-
-	// entity cannot be spawned with a reserved name. That is any name starting with GoAkt
-	if isReservedName(entityID) {
-		return nil, ErrReservedName
-	}
-
-	childAddress := pid.childAddress(entityID)
-	tree := pid.system.tree()
-	if cnode, ok := tree.node(childAddress.String()); ok {
-		cid := cnode.value()
-		if cid.IsRunning() {
-			return cid, nil
-		}
-	}
-
-	// create the child actor options child inherits parent's options
-	pidOptions := []pidOption{
-		withInitMaxRetries(int(pid.initMaxRetries.Load())),
-		withCustomLogger(pid.logger),
-		withActorSystem(pid.system),
-		withEventsStream(pid.eventsStream),
-		withInitTimeout(pid.initTimeout.Load()),
-		withRemoting(pid.remoting),
-		withWorkerPool(pid.workerPool),
-	}
-
-	if pid.system.isPersistenceEnabled() {
-		pidOptions = append(pidOptions,
-			withStateReadWriter(pid.system.getStateReaderWriter()),
-			withPersistence(initialState),
-		)
-	}
-
-	spawnConfig := newSpawnConfig(opts...)
-	if spawnConfig.mailbox != nil {
-		pidOptions = append(pidOptions, withMailbox(spawnConfig.mailbox))
-	}
-
-	// set the supervisor strategies when defined
-	if spawnConfig.supervisor != nil {
-		pidOptions = append(pidOptions, withSupervisor(spawnConfig.supervisor))
-	}
-
-	// set the relocation flag
-	if spawnConfig.relocatable {
-		pidOptions = append(pidOptions, withRelocationDisabled())
-	}
-
-	switch {
-	case spawnConfig.passivateAfter == nil:
-		// use the parent passivation settings
-		pidOptions = append(pidOptions, withPassivationAfter(pid.passivateAfter.Load()))
-	case *spawnConfig.passivateAfter < longLived:
-		// use custom passivation setting
-		pidOptions = append(pidOptions, withPassivationAfter(*spawnConfig.passivateAfter))
-	default:
-		// the only time the actor will stop is when its parent stops
-		pidOptions = append(pidOptions, withPassivationDisabled())
 	}
 
 	// create the child PID

@@ -221,18 +221,17 @@ func (r *rebalancer) recreateLocally(ctx context.Context, props *internalpb.Acto
 		return nil
 	}
 
-	// TODO: tackle spawn options
-
+	// TODO: enhance the spawn options
+	var spawnOpts []SpawnOption
 	if props.GetIsEntity() {
 		initialStateType, err := protoregistry.GlobalTypes.FindMessageByName(protoreflect.FullName(props.GetInitialStateType()))
 		if err != nil {
 			return err
 		}
 		initialState := initialStateType.New().Interface()
-		_, err = r.pid.ActorSystem().SpawnEntity(ctx, props.GetActorName(), actor, initialState)
-		return err
+		spawnOpts = append(spawnOpts, WithInitialState(initialState))
 	}
 
-	_, err = r.pid.ActorSystem().Spawn(ctx, props.GetActorName(), actor)
+	_, err = r.pid.ActorSystem().Spawn(ctx, props.GetActorName(), actor, spawnOpts...)
 	return err
 }

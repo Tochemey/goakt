@@ -26,6 +26,9 @@ package actor
 
 import (
 	"time"
+
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 // spawnConfig defines the configuration to apply when creating an actor
@@ -42,6 +45,8 @@ type spawnConfig struct {
 	asSingleton bool
 	// specifies if the actor should be relocated
 	relocatable bool
+	// specifies the actor initial state
+	initialState proto.Message
 }
 
 // newSpawnConfig creates an instance of spawnConfig
@@ -53,6 +58,7 @@ func newSpawnConfig(opts ...SpawnOption) *spawnConfig {
 			WithStrategy(OneForOneStrategy),
 			WithAnyErrorDirective(ResumeDirective),
 		),
+		initialState: new(emptypb.Empty),
 	}
 
 	for _, opt := range opts {
@@ -133,6 +139,23 @@ func WithLongLived() SpawnOption {
 func WithRelocationDisabled() SpawnOption {
 	return spawnOption(func(config *spawnConfig) {
 		config.relocatable = false
+	})
+}
+
+// WithInitialState sets the initial state for the actor during the spawning process.
+//
+// This option is typically used when spawning a persistent actor (entity) that requires
+// a predefined state at startup, such as when restoring from a snapshot or initializing
+// with domain defaults. The provided state must be a protocol buffer message representing
+// the actor's domain model.
+//
+// If the actor system supports persistence, this state will be treated as the baseline
+// until a snapshot is persisted.
+//
+// Should be passed to SpawnEntity or other compatible spawn functions as a SpawnOption.
+func WithInitialState(state proto.Message) SpawnOption {
+	return spawnOption(func(config *spawnConfig) {
+		config.initialState = state
 	})
 }
 

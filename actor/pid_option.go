@@ -37,8 +37,8 @@ import (
 // pidOption represents the pid
 type pidOption func(pid *PID)
 
-// withPersistence states that the given PID is a persistent actor
-func withPersistence(initialState proto.Message) pidOption {
+// withInitialState states that the given PID is a persistent actor
+func withInitialState(initialState proto.Message) pidOption {
 	return func(pid *PID) {
 		pid.isPersistent.Store(true)
 		pid.currentState = initialState

@@ -92,7 +92,7 @@ func (x *actorSystem) spawnSingletonManager(ctx context.Context) error {
 	}
 
 	actorName := x.reservedName(singletonManagerType)
-	x.singletonManager, _ = x.configPID(ctx, actorName, newClusterSingletonManager(), nil, WithSupervisor(
+	x.singletonManager, _ = x.configPID(ctx, actorName, newClusterSingletonManager(), WithSupervisor(
 		NewSupervisor(
 			WithStrategy(OneForOneStrategy),
 			WithAnyErrorDirective(RestartDirective),
