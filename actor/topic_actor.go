@@ -330,12 +330,16 @@ func (x *actorSystem) spawnTopicActor(ctx context.Context) error {
 	}
 
 	actorName := x.reservedName(topicActorType)
-	x.topicActor, _ = x.configPID(ctx, actorName, newTopicActor(x.remoting), nil, WithSupervisor(
-		NewSupervisor(
-			WithStrategy(OneForOneStrategy),
-			WithAnyErrorDirective(RestartDirective),
+	x.topicActor, _ = x.configPID(ctx,
+		actorName,
+		newTopicActor(x.remoting),
+		WithSupervisor(
+			NewSupervisor(
+				WithStrategy(OneForOneStrategy),
+				WithAnyErrorDirective(RestartDirective),
+			),
 		),
-	))
+	)
 
 	// the topic actor is a child actor of the system guardian
 	_ = x.actors.addNode(x.systemGuardian, x.topicActor)

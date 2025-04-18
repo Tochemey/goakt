@@ -29,15 +29,18 @@ import (
 	"testing"
 	"time"
 
+	"google.golang.org/protobuf/proto"
+
 	actors "github.com/tochemey/goakt/v3/actor"
 	"github.com/tochemey/goakt/v3/log"
 )
 
 // TestKit defines actor test kit
 type TestKit struct {
-	actorSystem actors.ActorSystem
-	kt          *testing.T
-	logger      log.Logger
+	actorSystem     actors.ActorSystem
+	kt              *testing.T
+	logger          log.Logger
+	stateReadWriter actors.StateReadWriter
 }
 
 // New creates an instance of TestKit
@@ -51,13 +54,21 @@ func New(ctx context.Context, t *testing.T, opts ...Option) *TestKit {
 	for _, opt := range opts {
 		opt.Apply(testkit)
 	}
-	// create an actor system
-	system, err := actors.NewActorSystem(
-		"testkit",
+
+	options := []actors.Option{
 		actors.WithPassivationDisabled(),
 		actors.WithLogger(testkit.logger),
 		actors.WithActorInitTimeout(time.Second),
-		actors.WithActorInitMaxRetries(5))
+		actors.WithActorInitMaxRetries(5),
+	}
+
+	if testkit.stateReadWriter != nil {
+		options = append(options, actors.WithPersistence(testkit.stateReadWriter))
+	}
+
+	// create an actor system
+	system, err := actors.NewActorSystem(
+		"testkit", options...)
 	if err != nil {
 		t.Fatal(err.Error())
 	}
@@ -71,10 +82,20 @@ func New(ctx context.Context, t *testing.T, opts ...Option) *TestKit {
 	return testkit
 }
 
-// Spawn create an actor
+// Spawn creates an actor
 func (k *TestKit) Spawn(ctx context.Context, name string, actor actors.Actor) {
-	// create and instance of actor
+	// create and instance of an actor
 	_, err := k.actorSystem.Spawn(ctx, name, actor)
+	// handle the error
+	if err != nil {
+		k.kt.Fatal(err.Error())
+	}
+}
+
+// SpawnWithPersistence creates an actor with persistence
+func (k *TestKit) SpawnWithPersistence(ctx context.Context, name string, actor actors.Actor, initialState proto.Message) {
+	// create and instance of an actor
+	_, err := k.actorSystem.Spawn(ctx, name, actor, actors.WithInitialState(initialState))
 	// handle the error
 	if err != nil {
 		k.kt.Fatal(err.Error())

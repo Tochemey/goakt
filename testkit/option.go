@@ -52,3 +52,10 @@ func WithLogging(level log.Level) Option {
 		kit.logger = log.New(level, os.Stderr)
 	})
 }
+
+// WithPersistence enables persistence for the Testkit
+func WithPersistence() Option {
+	return OptionFunc(func(kit *TestKit) {
+		kit.stateReadWriter = NewStateReadWriter()
+	})
+}
