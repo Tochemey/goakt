@@ -414,6 +414,14 @@ func (pid *PID) IsPersistent() bool {
 	return pid.isPersistent.Load()
 }
 
+// PassivationTime returns the given actor's passivation time
+func (pid *PID) PassivationTime() time.Duration {
+	pid.fieldsLocker.RLock()
+	duration := pid.passivateAfter.Load()
+	pid.fieldsLocker.RUnlock()
+	return duration
+}
+
 // ActorSystem returns the actor system
 func (pid *PID) ActorSystem() ActorSystem {
 	pid.fieldsLocker.RLock()
@@ -1895,10 +1903,10 @@ func (pid *PID) newState(state proto.Message) error {
 	return nil
 }
 
-// getCurrentState returns the current state and version
+// getCurrentState returns the current state
 func (pid *PID) getCurrentState() (state proto.Message) {
-	pid.fieldsLocker.Lock()
+	pid.fieldsLocker.RLock()
 	currentState := pid.currentState
-	pid.fieldsLocker.Unlock()
+	pid.fieldsLocker.RUnlock()
 	return currentState
 }

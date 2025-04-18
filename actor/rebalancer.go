@@ -221,8 +221,10 @@ func (r *rebalancer) recreateLocally(ctx context.Context, props *internalpb.Acto
 		return nil
 	}
 
-	// TODO: enhance the spawn options
-	var spawnOpts []SpawnOption
+	spawnOpts := []SpawnOption{
+		WithPassivateAfter(props.GetPassivateAfter().AsDuration()),
+	}
+
 	if props.GetIsEntity() {
 		initialStateType, err := protoregistry.GlobalTypes.FindMessageByName(protoreflect.FullName(props.GetInitialStateType()))
 		if err != nil {

@@ -53,6 +53,7 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/reflect/protoregistry"
 	"google.golang.org/protobuf/types/known/anypb"
+	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/tochemey/goakt/v3/address"
@@ -1472,6 +1473,7 @@ func (x *actorSystem) broadcastActor(actor *PID) {
 			Relocatable:      actor.IsRelocatable(),
 			IsEntity:         isEntity,
 			InitialStateType: initialStateType,
+			PassivateAfter:   durationpb.New(actor.PassivationTime()),
 		}
 	}
 }

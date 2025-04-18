@@ -529,6 +529,7 @@ func (x *Engine) PutActor(ctx context.Context, actor *internalpb.ActorRef) error
 			Relocatable:      actor.GetRelocatable(),
 			IsEntity:         actor.GetIsEntity(),
 			InitialStateType: actor.InitialStateType,
+			PassivateAfter:   actor.PassivateAfter,
 		}
 		x.peerState.Actors = actors
 
