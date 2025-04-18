@@ -28,20 +28,54 @@ import (
 	"context"
 )
 
-// Actor defines the interface for an actor in the system.
-// Any struct implementing this interface must be immutable, meaning all fields should be private (unexported).
-// Use the PreStart hook to initialize any required fields or resources.
+// Actor defines the core interface for an actor in the system's concurrency model.
+//
+// Actors are lightweight, isolated units of computation that communicate exclusively
+// via message passing. Each actor has its own mailbox and processes messages sequentially,
+// ensuring thread safety without requiring explicit synchronization.
+//
+// Structs implementing this interface must be **immutable**—all fields should be private (unexported)
+// and initialized via the `PreStart` hook. This immutability guarantees safe concurrent access
+// and avoids race conditions.
+//
+// The lifecycle of an actor follows three main phases:
+//  1. PreStart – Setup logic before message handling begins
+//  2. Receive – Core message handling loop
+//  3. PostStop – Cleanup logic after the actor is stopped
+//
+// Actors are typically managed by a runtime system or actor framework that handles
+// their scheduling, supervision, restarts, and message delivery.
 type Actor interface {
-	// PreStart is called before the actor starts processing messages.
-	// It can be used for initialization tasks such as setting up database connections or other dependencies.
-	// If this function returns an error, the actor will not start.
+	// PreStart is invoked once before the actor begins processing any messages.
+	//
+	// Use this hook to perform one-time setup operations such as:
+	//   - Initializing internal state or caches
+	//   - Establishing connections to external services (e.g., databases, APIs)
+	//   - Registering the actor with discovery mechanisms or registries
+	//
+	// If an error is returned, the actor will fail to start and will not process messages.
+	// The actor runtime may choose to restart or escalate the failure depending on its supervision strategy.
 	PreStart(ctx context.Context) error
-	// Receive handles messages delivered to the actor's mailbox.
-	// The actor can respond to messages asynchronously by sending a reply or synchronously by configuring the reply within the message.
-	// While synchronous communication is possible, it can impact system performance and should be used with caution.
+
+	// Receive handles all messages sent to the actor's mailbox.
+	//
+	// This method is the primary entry point for processing messages. It is invoked
+	// sequentially per actor instance and may:
+	//   - Send replies to other actors
+	//   - Forward or delegate messages
+	//   - Spawn child actors for further processing
+	//
+	// Message handling should be efficient and non-blocking. Long-running or blocking
+	// operations should be offloaded to separate goroutines to preserve system responsiveness.
 	Receive(ctx *ReceiveContext)
-	// PostStop is called when the actor is shutting down.
-	// It ensures that any remaining messages in the mailbox are processed before termination.
-	// Use this hook to release resources, close connections, or perform cleanup tasks.
+
+	// PostStop is invoked after the actor has processed its final message and is about to terminate.
+	//
+	// Use this hook to perform cleanup tasks such as:
+	//   - Flushing buffers or committing final state
+	//   - Closing network connections or file handles
+	//   - Unsubscribing from event streams or deregistering from discovery systems
+	//
+	// This method is guaranteed to be called once, even if `PreStart` failed or `Receive` panicked.
 	PostStop(ctx context.Context) error
 }

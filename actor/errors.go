@@ -99,6 +99,10 @@ var (
 	ErrSingletonAlreadyExists = errors.New("singleton already exists")
 	// ErrLeaderNotFound is returned when the cluster oldest node(leader) is not found
 	ErrLeaderNotFound = errors.New("leader is not found")
+	// ErrInvalidStateType indicates that the provided state type is invalid or unsupported.
+	ErrInvalidStateType = errors.New("invalid state type")
+	// ErrReservedName indicates that the specified name is reserved and cannot be used. Names starting with "GoAkt" are reserved.
+	ErrReservedName = errors.New("name is reserved. Names starting with \"GoAkt\" are reserved")
 )
 
 // eof returns true if the given error is an EOF error
@@ -133,7 +137,7 @@ type InternalError struct {
 // enforce compilation error
 var _ error = (*InternalError)(nil)
 
-// NewInternalError returns an intance of InternalError
+// NewInternalError returns an instance of InternalError
 func NewInternalError(err error) InternalError {
 	return InternalError{
 		err: fmt.Errorf("internal error: %w", err),
@@ -161,6 +165,24 @@ func NewSpawnError(err error) SpawnError {
 
 // Error implements the standard error interface
 func (s SpawnError) Error() string {
+	return s.err.Error()
+}
+
+type RuntimeError struct {
+	err error
+}
+
+var _ error = (*RuntimeError)(nil)
+
+// NewRuntimeError creates a new instance of RuntimeError by wrapping the provided error.
+func NewRuntimeError(err error) RuntimeError {
+	return RuntimeError{
+		err: err,
+	}
+}
+
+// Error implements the standard error interface
+func (s RuntimeError) Error() string {
 	return s.err.Error()
 }
 

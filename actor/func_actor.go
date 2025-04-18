@@ -92,8 +92,8 @@ func WithFuncMailbox(mailbox Mailbox) FuncOption {
 	})
 }
 
-// funcActor is an actor that only handles messages
-type funcActor struct {
+// FuncActor is an actor that only handles messages
+type FuncActor struct {
 	pid         *PID
 	id          string
 	receiveFunc ReceiveFunc
@@ -101,9 +101,9 @@ type funcActor struct {
 }
 
 // newFuncActor creates an instance of funcActor
-func newFuncActor(id string, receiveFunc ReceiveFunc, config *funcConfig) *funcActor {
+func newFuncActor(id string, receiveFunc ReceiveFunc, config *funcConfig) *FuncActor {
 	// create the actor instance
-	actor := &funcActor{
+	actor := &FuncActor{
 		receiveFunc: receiveFunc,
 		id:          id,
 		config:      config,
@@ -112,10 +112,10 @@ func newFuncActor(id string, receiveFunc ReceiveFunc, config *funcConfig) *funcA
 }
 
 // enforce compilation error
-var _ Actor = (*funcActor)(nil)
+var _ Actor = (*FuncActor)(nil)
 
 // PreStart pre-starts the actor.
-func (x *funcActor) PreStart(ctx context.Context) error {
+func (x *FuncActor) PreStart(ctx context.Context) error {
 	// check whether the pre-start hook is set and call it
 	preStart := x.config.preStart
 	if preStart != nil {
@@ -125,7 +125,7 @@ func (x *funcActor) PreStart(ctx context.Context) error {
 }
 
 // Receive processes any message dropped into the actor mailbox.
-func (x *funcActor) Receive(ctx *ReceiveContext) {
+func (x *FuncActor) Receive(ctx *ReceiveContext) {
 	switch m := ctx.Message().(type) {
 	case *goaktpb.PostStart:
 		x.pid = ctx.Self()
@@ -138,7 +138,7 @@ func (x *funcActor) Receive(ctx *ReceiveContext) {
 }
 
 // PostStop is executed when the actor is shutting down.
-func (x *funcActor) PostStop(ctx context.Context) error {
+func (x *FuncActor) PostStop(ctx context.Context) error {
 	// check whether the post-stop hook is set and call it
 	postStop := x.config.postStop
 	if postStop != nil {

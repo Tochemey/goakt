@@ -1015,7 +1015,7 @@ func (x *UnsubscribeAck) GetTopic() string {
 }
 
 // Publish is used to send a message to a topic
-// by the clusterPubSub mediator actor. The message
+// by the TopicActor. The message
 // will be broadcasted to all actors that are subscribed
 // to the topic in the cluster.
 type Publish struct {

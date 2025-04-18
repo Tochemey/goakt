@@ -92,16 +92,12 @@ func (x *actorSystem) spawnSingletonManager(ctx context.Context) error {
 	}
 
 	actorName := x.reservedName(singletonManagerType)
-	x.singletonManager, _ = x.configPID(ctx,
-		actorName,
-		newClusterSingletonManager(),
-		WithSupervisor(
-			NewSupervisor(
-				WithStrategy(OneForOneStrategy),
-				WithAnyErrorDirective(RestartDirective),
-			),
+	x.singletonManager, _ = x.configPID(ctx, actorName, newClusterSingletonManager(), nil, WithSupervisor(
+		NewSupervisor(
+			WithStrategy(OneForOneStrategy),
+			WithAnyErrorDirective(RestartDirective),
 		),
-	)
+	))
 
 	// the singletonManager is a child actor of the system guardian
 	_ = x.actors.addNode(x.systemGuardian, x.singletonManager)

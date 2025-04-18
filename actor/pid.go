@@ -75,8 +75,11 @@ type taskCompletion struct {
 // PID specifies an actor unique process
 // With the PID one can send a ReceiveContext to the actor
 type PID struct {
-	// specifies the message processor
-	actor Actor
+	actor        Actor
+	isPersistent atomic.Bool
+
+	currentState    proto.Message
+	stateReadWriter StateReadWriter
 
 	// specifies the actor address
 	address *address.Address
@@ -189,8 +192,9 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 	pid.suspended.Store(false)
 	pid.passivateAfter.Store(DefaultPassivationTimeout)
 	pid.initTimeout.Store(DefaultInitTimeout)
-	pid.processing.Store(int32(idle))
+	pid.processing.Store(idle)
 	pid.relocatable.Store(true)
+	pid.isPersistent.Store(false)
 
 	for _, opt := range opts {
 		opt(pid)
@@ -363,7 +367,7 @@ func (pid *PID) Stop(ctx context.Context, cid *PID) error {
 	return ErrActorNotFound(cid.Address().String())
 }
 
-// IsRunning returns true when the actor is alive ready to process messages and false
+// IsRunning returns true when the actor is alive ready-to-process messages and false
 // when the actor is stopped or not started at all
 func (pid *PID) IsRunning() bool {
 	return pid != nil && pid.started.Load() && !pid.suspended.Load()
@@ -396,6 +400,17 @@ func (pid *PID) IsSingleton() bool {
 // Returns true if relocation is allowed, and false if relocation is disabled.
 func (pid *PID) IsRelocatable() bool {
 	return pid.relocatable.Load()
+}
+
+// IsPersistent indicates whether the actor associated with this PID
+// is a persistent actor.
+//
+// A persistent actor typically maintains state across restarts by
+// leveraging event sourcing or snapshotting mechanisms.
+//
+// Returns true if the actor is persistent, false otherwise.
+func (pid *PID) IsPersistent() bool {
+	return pid.isPersistent.Load()
 }
 
 // ActorSystem returns the actor system
@@ -545,8 +560,8 @@ func (pid *PID) LatestProcessedDuration() time.Duration {
 	return pid.latestReceiveDuration.Load()
 }
 
-// SpawnChild creates a child actor and start watching it for error
-// When the given child actor already exists its PID will only be returned
+// SpawnChild creates a child actor and starts watching it for error
+// When the given child actor already exists, its PID will only be returned
 func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor, opts ...SpawnOption) (*PID, error) {
 	if !pid.IsRunning() {
 		return nil, ErrDead
@@ -603,6 +618,124 @@ func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor, opts .
 			// the only time the actor will stop is when its parent stop
 			pidOptions = append(pidOptions, withPassivationDisabled())
 		}
+	}
+
+	// create the child PID
+	cid, err := newPID(
+		ctx,
+		childAddress,
+		actor,
+		pidOptions...,
+	)
+
+	if err != nil {
+		return nil, err
+	}
+
+	// no need to handle the error because the given parent exist and running
+	// that check was done in the above lines
+	_ = tree.addNode(pid, cid)
+	tree.addWatcher(cid, pid.ActorSystem().getDeathWatch())
+
+	eventsStream := pid.eventsStream
+	if eventsStream != nil {
+		eventsStream.Publish(
+			eventsTopic, &goaktpb.ActorChildCreated{
+				Address:   cid.Address().Address,
+				CreatedAt: timestamppb.Now(),
+				Parent:    pid.Address().Address,
+			},
+		)
+	}
+
+	// set the actor in the given actor system registry
+	pid.ActorSystem().broadcastActor(cid)
+	return cid, nil
+}
+
+// SpawnEntity creates and starts a new persistent child actor (entity) within the actor system
+// and begins monitoring it for errors.
+//
+// This operation is only supported if persistence is enabled on the actor system. Entities are
+// specialized actors designed to maintain a durable state across restarts using snapshot-based
+// persistence. The spawned actor will be registered under the given name, and any optional
+// spawn configurations (e.g., custom mailbox, dispatcher, supervision strategy) will be applied.
+//
+// The actor must implement the Actor interface and be capable of restoring its state from a snapshot
+// during initialization. This is essential for consistent recovery after crashes or redeployments.
+//
+// If the actor does not require state persistence, use SpawnChild instead.
+//
+// Parameters:
+//   - name: The unique name of the entity within the actor system.
+//   - actor: An instance implementing the Actor interface, designed for stateful behavior.
+//   - opts: Optional SpawnOptions to configure the actor's runtime behavior.
+//
+// Returns:
+//   - PID: A pointer to the newly created actor's process ID.
+//   - Error: An error if the actor system is not configured for persistence or the entity could not be started.
+func (pid *PID) SpawnEntity(ctx context.Context, entityID string, actor Actor, initialState proto.Message, opts ...SpawnOption) (*PID, error) {
+	if !pid.IsRunning() {
+		return nil, ErrDead
+	}
+
+	// entity cannot be spawned with a reserved name. That is any name starting with GoAkt
+	if isReservedName(entityID) {
+		return nil, ErrReservedName
+	}
+
+	childAddress := pid.childAddress(entityID)
+	tree := pid.system.tree()
+	if cnode, ok := tree.node(childAddress.String()); ok {
+		cid := cnode.value()
+		if cid.IsRunning() {
+			return cid, nil
+		}
+	}
+
+	// create the child actor options child inherits parent's options
+	pidOptions := []pidOption{
+		withInitMaxRetries(int(pid.initMaxRetries.Load())),
+		withCustomLogger(pid.logger),
+		withActorSystem(pid.system),
+		withEventsStream(pid.eventsStream),
+		withInitTimeout(pid.initTimeout.Load()),
+		withRemoting(pid.remoting),
+		withWorkerPool(pid.workerPool),
+	}
+
+	if pid.system.isPersistenceEnabled() {
+		pidOptions = append(pidOptions,
+			withStateReadWriter(pid.system.getStateReaderWriter()),
+			withPersistence(initialState),
+		)
+	}
+
+	spawnConfig := newSpawnConfig(opts...)
+	if spawnConfig.mailbox != nil {
+		pidOptions = append(pidOptions, withMailbox(spawnConfig.mailbox))
+	}
+
+	// set the supervisor strategies when defined
+	if spawnConfig.supervisor != nil {
+		pidOptions = append(pidOptions, withSupervisor(spawnConfig.supervisor))
+	}
+
+	// set the relocation flag
+	if spawnConfig.relocatable {
+		pidOptions = append(pidOptions, withRelocationDisabled())
+	}
+
+	switch {
+	case spawnConfig.passivateAfter == nil:
+		// use the parent passivation settings
+		pidOptions = append(pidOptions, withPassivationAfter(pid.passivateAfter.Load()))
+	case *spawnConfig.passivateAfter < longLived:
+		// use custom passivation setting
+		pidOptions = append(pidOptions, withPassivationAfter(*spawnConfig.passivateAfter))
+	default:
+		// the only time the actor will stop is when its parent stops
+		pidOptions = append(pidOptions, withPassivationDisabled())
 	}
 
 	// create the child PID
@@ -1222,7 +1355,14 @@ func (pid *PID) init(ctx context.Context) error {
 
 	cancelCtx, cancel := context.WithTimeout(ctx, pid.initTimeout.Load())
 	retrier := retry.NewRetrier(int(pid.initMaxRetries.Load()), time.Millisecond, pid.initTimeout.Load())
-	if err := retrier.RunContext(cancelCtx, pid.actor.PreStart); err != nil {
+
+	err := errorschain.
+		New(errorschain.ReturnFirst()).
+		AddErrorFn(func() error { return retrier.RunContext(cancelCtx, pid.actor.PreStart) }).
+		AddErrorFn(func() error { return retrier.RunContext(cancelCtx, pid.recoverSnapshot) }).
+		Error()
+
+	if err != nil {
 		e := ErrInitFailure(err)
 		cancel()
 		return e
@@ -1261,6 +1401,7 @@ func (pid *PID) reset() {
 	pid.mailbox.Dispose()
 	pid.isSingleton.Store(false)
 	pid.relocatable.Store(true)
+	pid.isPersistent.Store(false)
 }
 
 // freeWatchers releases all the actors watching this actor
@@ -1443,7 +1584,7 @@ func (pid *PID) setBehavior(behavior Behavior) {
 	pid.fieldsLocker.Unlock()
 }
 
-// resetBehavior is a utility function resets the actor behavior
+// resetBehavior is a utility function resetting the actor behavior
 func (pid *PID) resetBehavior() {
 	pid.fieldsLocker.Lock()
 	pid.behaviorStack.Push(pid.actor.Receive)
@@ -1497,6 +1638,12 @@ func (pid *PID) doStop(ctx context.Context) error {
 	// you are terminated
 	if err := errorschain.
 		New(errorschain.ReturnFirst()).
+		AddErrorFn(func() error {
+			if pid.isPersistent.Load() {
+				return pid.stateReadWriter.WriteState(ctx, pid.Name(), pid.currentState)
+			}
+			return nil
+		}).
 		AddErrorFn(func() error { return pid.actor.PostStop(ctx) }).
 		AddErrorFn(func() error { return pid.freeWatchers(ctx) }).
 		Error(); err != nil {
@@ -1813,4 +1960,42 @@ func (pid *PID) getDeadlettersCount(ctx context.Context) int64 {
 		return deadlettersCount.GetTotalCount()
 	}
 	return 0
+}
+
+// recoverSnapshot reset the persistent actor to the latest state in case there is one
+// this is vital when the entity actor is restarting.
+func (pid *PID) recoverSnapshot(ctx context.Context) error {
+	if pid.isPersistent.Load() {
+		snapshot, err := pid.stateReadWriter.GetState(ctx, pid.Name())
+		if err != nil {
+			return fmt.Errorf("failed to get the latest state snapshot: %w", err)
+		}
+
+		if snapshot != nil {
+			pid.currentState = snapshot
+		}
+	}
+
+	return nil
+}
+
+// newState sets the persistent actor current state
+func (pid *PID) newState(state proto.Message) error {
+	pid.fieldsLocker.Lock()
+	// make sure the new state and the current state is of the same type
+	if state.ProtoReflect().Descriptor().FullName() != pid.currentState.ProtoReflect().Descriptor().FullName() {
+		return ErrInvalidStateType
+	}
+
+	pid.currentState = state
+	pid.fieldsLocker.Unlock()
+	return nil
+}
+
+// getCurrentState returns the current state and version
+func (pid *PID) getCurrentState() (state proto.Message) {
+	pid.fieldsLocker.Lock()
+	currentState := pid.currentState
+	pid.fieldsLocker.Unlock()
+	return currentState
 }

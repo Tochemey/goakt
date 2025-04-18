@@ -32,3 +32,8 @@ import (
 func Pause(duration time.Duration) {
 	time.Sleep(duration)
 }
+
+// Pointer returns a pointer to the given value of any type T.
+func Pointer[T any](v T) *T {
+	return &v
+}

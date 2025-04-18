@@ -10,6 +10,7 @@ import (
 	goaktpb "github.com/tochemey/goakt/v3/goaktpb"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	_ "google.golang.org/protobuf/types/known/anypb"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
@@ -32,9 +33,13 @@ type ActorRef struct {
 	// Specifies if the actor is a singleton
 	IsSingleton bool `protobuf:"varint,3,opt,name=is_singleton,json=isSingleton,proto3" json:"is_singleton,omitempty"`
 	// Specifies if the actor is disabled for relocation
-	Relocatable   bool `protobuf:"varint,4,opt,name=relocatable,proto3" json:"relocatable,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Relocatable bool `protobuf:"varint,4,opt,name=relocatable,proto3" json:"relocatable,omitempty"`
+	// Specifies whether actor is an entity
+	IsEntity bool `protobuf:"varint,5,opt,name=is_entity,json=isEntity,proto3" json:"is_entity,omitempty"`
+	// Specifies the initial actor state if it is an entity
+	InitialStateType *string `protobuf:"bytes,6,opt,name=initial_state_type,json=initialStateType,proto3,oneof" json:"initial_state_type,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *ActorRef) Reset() {
@@ -95,6 +100,20 @@ func (x *ActorRef) GetRelocatable() bool {
 	return false
 }
 
+func (x *ActorRef) GetIsEntity() bool {
+	if x != nil {
+		return x.IsEntity
+	}
+	return false
+}
+
+func (x *ActorRef) GetInitialStateType() string {
+	if x != nil && x.InitialStateType != nil {
+		return *x.InitialStateType
+	}
+	return ""
+}
+
 // ActorProps defines the properties of an actor
 // that can be used to spawn an actor remotely.
 type ActorProps struct {
@@ -106,9 +125,13 @@ type ActorProps struct {
 	// Specifies if the actor is a singleton
 	IsSingleton bool `protobuf:"varint,3,opt,name=is_singleton,json=isSingleton,proto3" json:"is_singleton,omitempty"`
 	// Specifies if the actor is disabled for relocation
-	Relocatable   bool `protobuf:"varint,4,opt,name=relocatable,proto3" json:"relocatable,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Relocatable bool `protobuf:"varint,4,opt,name=relocatable,proto3" json:"relocatable,omitempty"`
+	// Specifies whether actor is an entity
+	IsEntity bool `protobuf:"varint,5,opt,name=is_entity,json=isEntity,proto3" json:"is_entity,omitempty"`
+	// Specifies the initial actor state if it is an entity
+	InitialStateType *string `protobuf:"bytes,6,opt,name=initial_state_type,json=initialStateType,proto3,oneof" json:"initial_state_type,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *ActorProps) Reset() {
@@ -169,18 +192,35 @@ func (x *ActorProps) GetRelocatable() bool {
 	return false
 }
 
+func (x *ActorProps) GetIsEntity() bool {
+	if x != nil {
+		return x.IsEntity
+	}
+	return false
+}
+
+func (x *ActorProps) GetInitialStateType() string {
+	if x != nil && x.InitialStateType != nil {
+		return *x.InitialStateType
+	}
+	return ""
+}
+
 var File_internal_actor_proto protoreflect.FileDescriptor
 
 const file_internal_actor_proto_rawDesc = "" +
 	"\n" +
 	"\x14internal/actor.proto\x12\n" +
-	"internalpb\x1a\x11goakt/goakt.proto\"\xa5\x01\n" +
+	"internalpb\x1a\x11goakt/goakt.proto\x1a\x19google/protobuf/any.proto\"\x8c\x02\n" +
 	"\bActorRef\x125\n" +
 	"\ractor_address\x18\x01 \x01(\v2\x10.goaktpb.AddressR\factorAddress\x12\x1d\n" +
 	"\n" +
 	"actor_type\x18\x02 \x01(\tR\tactorType\x12!\n" +
 	"\fis_singleton\x18\x03 \x01(\bR\visSingleton\x12 \n" +
-	"\vrelocatable\x18\x04 \x01(\bR\vrelocatable\"\x8f\x01\n" +
+	"\vrelocatable\x18\x04 \x01(\bR\vrelocatable\x12\x1b\n" +
+	"\tis_entity\x18\x05 \x01(\bR\bisEntity\x121\n" +
+	"\x12initial_state_type\x18\x06 \x01(\tH\x00R\x10initialStateType\x88\x01\x01B\x15\n" +
+	"\x13_initial_state_type\"\xf6\x01\n" +
 	"\n" +
 	"ActorProps\x12\x1d\n" +
 	"\n" +
@@ -188,7 +228,10 @@ const file_internal_actor_proto_rawDesc = "" +
 	"\n" +
 	"actor_type\x18\x02 \x01(\tR\tactorType\x12!\n" +
 	"\fis_singleton\x18\x03 \x01(\bR\visSingleton\x12 \n" +
-	"\vrelocatable\x18\x04 \x01(\bR\vrelocatableB\xa3\x01\n" +
+	"\vrelocatable\x18\x04 \x01(\bR\vrelocatable\x12\x1b\n" +
+	"\tis_entity\x18\x05 \x01(\bR\bisEntity\x121\n" +
+	"\x12initial_state_type\x18\x06 \x01(\tH\x00R\x10initialStateType\x88\x01\x01B\x15\n" +
+	"\x13_initial_state_typeB\xa3\x01\n" +
 	"\x0ecom.internalpbB\n" +
 	"ActorProtoH\x02P\x01Z;github.com/tochemey/goakt/v3/internal/internalpb;internalpb\xa2\x02\x03IXX\xaa\x02\n" +
 	"Internalpb\xca\x02\n" +
@@ -227,6 +270,8 @@ func file_internal_actor_proto_init() {
 	if File_internal_actor_proto != nil {
 		return
 	}
+	file_internal_actor_proto_msgTypes[0].OneofWrappers = []any{}
+	file_internal_actor_proto_msgTypes[1].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

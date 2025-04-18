@@ -593,9 +593,13 @@ type RemoteSpawnRequest struct {
 	// Specifies if the actor is a singleton
 	IsSingleton bool `protobuf:"varint,5,opt,name=is_singleton,json=isSingleton,proto3" json:"is_singleton,omitempty"`
 	// Specifies if the actor is relocatable
-	Relocatable   bool `protobuf:"varint,6,opt,name=relocatable,proto3" json:"relocatable,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Relocatable bool `protobuf:"varint,6,opt,name=relocatable,proto3" json:"relocatable,omitempty"`
+	// Specifies whether actor is an entity
+	IsEntity bool `protobuf:"varint,7,opt,name=is_entity,json=isEntity,proto3" json:"is_entity,omitempty"`
+	// Specifies the initial actor state if it is an entity
+	InitialStateType *string `protobuf:"bytes,8,opt,name=initial_state_type,json=initialStateType,proto3,oneof" json:"initial_state_type,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *RemoteSpawnRequest) Reset() {
@@ -668,6 +672,20 @@ func (x *RemoteSpawnRequest) GetRelocatable() bool {
 		return x.Relocatable
 	}
 	return false
+}
+
+func (x *RemoteSpawnRequest) GetIsEntity() bool {
+	if x != nil {
+		return x.IsEntity
+	}
+	return false
+}
+
+func (x *RemoteSpawnRequest) GetInitialStateType() string {
+	if x != nil && x.InitialStateType != nil {
+		return *x.InitialStateType
+	}
+	return ""
 }
 
 type RemoteSpawnResponse struct {
@@ -775,7 +793,7 @@ const file_internal_remoting_proto_rawDesc = "" +
 	"\x04host\x18\x01 \x01(\tR\x04host\x12\x12\n" +
 	"\x04port\x18\x02 \x01(\x05R\x04port\x12\x12\n" +
 	"\x04name\x18\x03 \x01(\tR\x04name\"\x14\n" +
-	"\x12RemoteStopResponse\"\xbf\x01\n" +
+	"\x12RemoteStopResponse\"\xa6\x02\n" +
 	"\x12RemoteSpawnRequest\x12\x12\n" +
 	"\x04host\x18\x01 \x01(\tR\x04host\x12\x12\n" +
 	"\x04port\x18\x02 \x01(\x05R\x04port\x12\x1d\n" +
@@ -784,7 +802,10 @@ const file_internal_remoting_proto_rawDesc = "" +
 	"\n" +
 	"actor_type\x18\x04 \x01(\tR\tactorType\x12!\n" +
 	"\fis_singleton\x18\x05 \x01(\bR\visSingleton\x12 \n" +
-	"\vrelocatable\x18\x06 \x01(\bR\vrelocatable\"\x15\n" +
+	"\vrelocatable\x18\x06 \x01(\bR\vrelocatable\x12\x1b\n" +
+	"\tis_entity\x18\a \x01(\bR\bisEntity\x121\n" +
+	"\x12initial_state_type\x18\b \x01(\tH\x00R\x10initialStateType\x88\x01\x01B\x15\n" +
+	"\x13_initial_state_type\"\x15\n" +
 	"\x13RemoteSpawnResponse\"\r\n" +
 	"\vSpawnOption2\xee\x03\n" +
 	"\x0fRemotingService\x12H\n" +
@@ -866,6 +887,7 @@ func file_internal_remoting_proto_init() {
 	if File_internal_remoting_proto != nil {
 		return
 	}
+	file_internal_remoting_proto_msgTypes[11].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

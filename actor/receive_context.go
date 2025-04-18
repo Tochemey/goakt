@@ -55,7 +55,7 @@ func releaseContext(receiveContext *ReceiveContext) {
 	pool.Put(receiveContext)
 }
 
-// ReceiveContext is the context that is used by the actor to receive messages
+// ReceiveContext is the context used by the actor to receive messages
 type ReceiveContext struct {
 	ctx          context.Context
 	message      proto.Message
@@ -101,6 +101,33 @@ func (rctx *ReceiveContext) RemoteSender() *address.Address {
 // Message is the actual message sent
 func (rctx *ReceiveContext) Message() proto.Message {
 	return rctx.message
+}
+
+// CurrentState returns the actor's current state that can be persisted.
+//
+// This method should be called during message processing to access the actor's
+// existing state. It is particularly useful for performing data validation or
+// business rule checks before transitioning to a new state using the NewState method.
+//
+// This method is only applicable to persistent actors. If the actor is not persistent
+// or has not yet initialized any state, this method returns nil.
+func (rctx *ReceiveContext) CurrentState() (state proto.Message) {
+	return rctx.self.getCurrentState()
+}
+
+// NewState sets a new state for the actor to be persisted.
+//
+// Call this method during message processing to transition the actor to a new state.
+// The new state will be persisted after the current message is fully processed.
+// It should be used in conjunction with business logic that validates or computes the new state.
+//
+// This method is only applicable to persistent actors. It has no effect if the actor is not persistent.
+func (rctx *ReceiveContext) NewState(state proto.Message) {
+	if rctx.self.IsPersistent() {
+		if err := rctx.self.newState(state); err != nil {
+			rctx.Err(NewRuntimeError(err))
+		}
+	}
 }
 
 // BecomeStacked sets a new behavior to the actor.

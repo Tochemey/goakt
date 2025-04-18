@@ -210,3 +210,25 @@ func WithoutRelocation() Option {
 		system.enableRelocation.Store(false)
 	})
 }
+
+// WithPersistence sets the persistence provider used for storing and retrieving actor snapshots.
+//
+// This option enables snapshot-based state persistence for all PersistentActor instances within
+// the actor system. The provided StateReadWriter is responsible for reading and writing
+// serialized snapshots to an external data store (e.g., database, file system, cloud storage).
+//
+// Enabling this option activates durability features such as crash recovery, state handoff,
+// and long-term retention of actor state.
+//
+// Example:
+//
+//	provider := NewPostgresStateReadWriter(db)
+//	system := NewActorSystem(
+//	    WithPersistence(provider),
+//	)
+func WithPersistence(readWriter StateReadWriter) Option {
+	return OptionFunc(func(system *actorSystem) {
+		system.stateReadWriter = readWriter
+		system.enablePersistence.Store(true)
+	})
+}

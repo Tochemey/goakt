@@ -30,6 +30,8 @@ import (
 	"strconv"
 
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/protobuf/reflect/protoreflect"
+	"google.golang.org/protobuf/reflect/protoregistry"
 
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/collection/slice"
@@ -205,21 +207,32 @@ func (r *rebalancer) computeRebalancing(totalPeers int, nodeLeftState *internalp
 }
 
 // recreateLocally recreates the actor
-func (r *rebalancer) recreateLocally(ctx context.Context, actor *internalpb.ActorProps, enforceSingleton bool) error {
-	iactor, err := r.reflection.ActorFrom(actor.GetActorType())
+func (r *rebalancer) recreateLocally(ctx context.Context, props *internalpb.ActorProps, enforceSingleton bool) error {
+	actor, err := r.reflection.ActorFrom(props.GetActorType())
 	if err != nil {
 		return err
 	}
 
-	if enforceSingleton && actor.GetIsSingleton() {
-		// spawn the singleton actor
-		return r.pid.ActorSystem().SpawnSingleton(ctx, actor.GetActorName(), iactor)
+	if enforceSingleton && props.GetIsSingleton() {
+		return r.pid.ActorSystem().SpawnSingleton(ctx, props.GetActorName(), actor)
 	}
 
-	if !actor.GetRelocatable() {
+	if !props.GetRelocatable() {
 		return nil
 	}
 
-	_, err = r.pid.ActorSystem().Spawn(ctx, actor.GetActorName(), iactor)
+	// TODO: tackle spawn options
+
+	if props.GetIsEntity() {
+		initialStateType, err := protoregistry.GlobalTypes.FindMessageByName(protoreflect.FullName(props.GetInitialStateType()))
+		if err != nil {
+			return err
+		}
+		initialState := initialStateType.New().Interface()
+		_, err = r.pid.ActorSystem().SpawnEntity(ctx, props.GetActorName(), actor, initialState)
+		return err
+	}
+
+	_, err = r.pid.ActorSystem().Spawn(ctx, props.GetActorName(), actor)
 	return err
 }

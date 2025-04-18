@@ -47,8 +47,8 @@ func (r *reflection) ActorFrom(key string) (actor Actor, err error) {
 		return nil, ErrTypeNotRegistered
 	}
 
-	iActor := reflect.TypeOf((*Actor)(nil)).Elem()
-	isActor := rtype.Implements(iActor) || reflect.PointerTo(rtype).Implements(iActor)
+	iface := reflect.TypeOf((*Actor)(nil)).Elem()
+	isActor := rtype.Implements(iface) || reflect.PointerTo(rtype).Implements(iface)
 
 	if !isActor {
 		return nil, ErrInstanceNotAnActor

@@ -115,6 +115,10 @@ message RemoteSpawnRequest {
   bool is_singleton = 5;
   // Specifies if the actor is relocatable
   bool relocatable = 6;
+  // Specifies whether actor is an entity
+  bool is_entity = 7;
+  // Specifies the initial actor state if it is an entity
+  optional string initial_state_type = 8;
 }
 
 message RemoteSpawnResponse {}

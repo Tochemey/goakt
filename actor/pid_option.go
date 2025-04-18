@@ -27,6 +27,8 @@ package actor
 import (
 	"time"
 
+	"google.golang.org/protobuf/proto"
+
 	"github.com/tochemey/goakt/v3/internal/eventstream"
 	"github.com/tochemey/goakt/v3/internal/workerpool"
 	"github.com/tochemey/goakt/v3/log"
@@ -34,6 +36,21 @@ import (
 
 // pidOption represents the pid
 type pidOption func(pid *PID)
+
+// withPersistence states that the given PID is a persistent actor
+func withPersistence(initialState proto.Message) pidOption {
+	return func(pid *PID) {
+		pid.isPersistent.Store(true)
+		pid.currentState = initialState
+	}
+}
+
+// withStateReadWriter sets the state read/writer
+func withStateReadWriter(stateReadWriter StateReadWriter) pidOption {
+	return func(pid *PID) {
+		pid.stateReadWriter = stateReadWriter
+	}
+}
 
 // withPassivationAfter sets the actor passivation time
 func withPassivationAfter(duration time.Duration) pidOption {
