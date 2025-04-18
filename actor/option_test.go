@@ -45,6 +45,7 @@ func TestOption(t *testing.T) {
 	atomicTrue.Store(true)
 	clusterConfig := NewClusterConfig()
 	hasher := hash.DefaultHasher()
+	stateReadWriter := newMockStateReaderWriter()
 	// nolint
 	tlsConfig := &tls.Config{}
 	tlsInfo := &TLSInfo{
@@ -123,6 +124,11 @@ func TestOption(t *testing.T) {
 			name:     "WithoutRelocation",
 			option:   WithoutRelocation(),
 			expected: actorSystem{enableRelocation: atomicFalse},
+		},
+		{
+			name:     "WithPersistence",
+			option:   WithPersistence(stateReadWriter),
+			expected: actorSystem{persistenceEnabled: atomicTrue, stateReadWriter: stateReadWriter},
 		},
 	}
 

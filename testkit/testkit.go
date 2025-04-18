@@ -29,8 +29,6 @@ import (
 	"testing"
 	"time"
 
-	"google.golang.org/protobuf/proto"
-
 	actors "github.com/tochemey/goakt/v3/actor"
 	"github.com/tochemey/goakt/v3/log"
 )
@@ -38,7 +36,7 @@ import (
 // TestKit defines actor test kit
 type TestKit struct {
 	actorSystem     actors.ActorSystem
-	kt              *testing.T
+	tt              *testing.T
 	logger          log.Logger
 	stateReadWriter actors.StateReadWriter
 }
@@ -47,7 +45,7 @@ type TestKit struct {
 func New(ctx context.Context, t *testing.T, opts ...Option) *TestKit {
 	// create the testkit instance
 	testkit := &TestKit{
-		kt:     t,
+		tt:     t,
 		logger: log.DiscardLogger,
 	}
 	// apply the various options
@@ -82,33 +80,33 @@ func New(ctx context.Context, t *testing.T, opts ...Option) *TestKit {
 	return testkit
 }
 
-// Spawn creates an actor
-func (k *TestKit) Spawn(ctx context.Context, name string, actor actors.Actor) {
-	// create and instance of an actor
-	_, err := k.actorSystem.Spawn(ctx, name, actor)
-	// handle the error
-	if err != nil {
-		k.kt.Fatal(err.Error())
+// Spawn creates a test actor
+func (k *TestKit) Spawn(ctx context.Context, name string, actor actors.Actor, opts ...SpawnOption) {
+	config := new(spawnConfig)
+	for _, opt := range opts {
+		opt.Apply(config)
 	}
-}
 
-// SpawnWithPersistence creates an actor with persistence
-func (k *TestKit) SpawnWithPersistence(ctx context.Context, name string, actor actors.Actor, initialState proto.Message) {
+	var options []actors.SpawnOption
+	if config.initialState != nil {
+		options = append(options, actors.WithInitialState(config.initialState))
+	}
+
 	// create and instance of an actor
-	_, err := k.actorSystem.Spawn(ctx, name, actor, actors.WithInitialState(initialState))
+	_, err := k.actorSystem.Spawn(ctx, name, actor, options...)
 	// handle the error
 	if err != nil {
-		k.kt.Fatal(err.Error())
+		k.tt.Fatal(err.Error())
 	}
 }
 
 // NewProbe create a test probe
 func (k *TestKit) NewProbe(ctx context.Context) Probe {
 	// create an instance of TestProbe
-	testProbe, err := newProbe(ctx, k.actorSystem, k.kt)
+	testProbe, err := newProbe(ctx, k.actorSystem, k.tt)
 	// handle the error
 	if err != nil {
-		k.kt.Fatal(err.Error())
+		k.tt.Fatal(err.Error())
 	}
 
 	// return the created test probe
@@ -118,6 +116,6 @@ func (k *TestKit) NewProbe(ctx context.Context) Probe {
 // Shutdown stops the test kit
 func (k *TestKit) Shutdown(ctx context.Context) {
 	if err := k.actorSystem.Stop(ctx); err != nil {
-		k.kt.Fatal(err.Error())
+		k.tt.Fatal(err.Error())
 	}
 }

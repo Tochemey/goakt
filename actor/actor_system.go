@@ -109,7 +109,27 @@ type ActorSystem interface { //nolint:revive
 	// Stop stops the actor system and does not terminate the program.
 	// One needs to explicitly call os.Exit to terminate the program.
 	Stop(ctx context.Context) error
-	// Spawn creates an actor in the system and starts it
+	// Spawn creates and starts a new top-level actor within the actor system.
+	//
+	// The actor will be registered under the specified name and will operate independently
+	// of any parent actor. This makes it suitable for root actors, supervisors, or system-level components.
+	//
+	// The provided actor must implement the Actor interface and will immediately begin
+	// processing messages after being started. Optional SpawnOptions can be used to customize
+	// aspects of the actor's configuration, such as mailbox size, dispatcher, initial state,
+	// or supervision strategy.
+	//
+	// If an actor with the same name already exists in the system, this function will return an error.
+	//
+	// Parameters:
+	//   - ctx:   A context for lifecycle control and cancellation propagation.
+	//   - name:  A globally unique name for the actor within the system.
+	//   - actor: An instance implementing the Actor interface.
+	//   - opts:  Optional SpawnOptions to customize the actor's runtime behavior.
+	//
+	// Returns:
+	//   - *PID:  A pointer to the newly created actor’s process ID.
+	//   - error: An error if actor creation fails or the name is already taken.
 	Spawn(ctx context.Context, name string, actor Actor, opts ...SpawnOption) (*PID, error)
 	// SpawnFromFunc creates an actor with the given receive function. One can set the PreStart and PostStop lifecycle hooks
 	// in the given optional options
@@ -696,7 +716,27 @@ func (x *actorSystem) NumActors() uint64 {
 	return x.actorsCounter.Load()
 }
 
-// Spawn creates or returns the instance of a given actor in the system
+// Spawn creates and starts a new top-level actor within the actor system.
+//
+// The actor will be registered under the specified name and will operate independently
+// of any parent actor. This makes it suitable for root actors, supervisors, or system-level components.
+//
+// The provided actor must implement the Actor interface and will immediately begin
+// processing messages after being started. Optional SpawnOptions can be used to customize
+// aspects of the actor's configuration, such as mailbox size, dispatcher, initial state,
+// or supervision strategy.
+//
+// If an actor with the same name already exists in the system, this function will return an error.
+//
+// Parameters:
+//   - ctx:   A context for lifecycle control and cancellation propagation.
+//   - name:  A globally unique name for the actor within the system.
+//   - actor: An instance implementing the Actor interface.
+//   - opts:  Optional SpawnOptions to customize the actor's runtime behavior.
+//
+// Returns:
+//   - *PID:  A pointer to the newly created actor’s process ID.
+//   - error: An error if actor creation fails or the name is already taken.
 func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor, opts ...SpawnOption) (*PID, error) {
 	if !x.started.Load() {
 		return nil, ErrActorSystemNotStarted

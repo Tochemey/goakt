@@ -60,7 +60,7 @@ func NewStateReadWriter() actor.StateReadWriter {
 //   - persistenceID: Globally unique identifier for the actor.
 //   - state: The actor's current state to persist.
 func (s *StateReadWriter) WriteState(ctx context.Context, persistenceID string, state proto.Message) error {
-	ctx, cancel := context.WithTimeout(ctx, time.Second)
+	_, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()
 	s.db.Set(persistenceID, state)
 	return nil
@@ -78,7 +78,7 @@ func (s *StateReadWriter) WriteState(ctx context.Context, persistenceID string, 
 //   - state: The last persisted actor state, or nil if none exists.
 //   - err: An error if retrieval fails.
 func (s *StateReadWriter) GetState(ctx context.Context, persistenceID string) (proto.Message, error) {
-	ctx, cancel := context.WithTimeout(ctx, time.Second)
+	_, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()
 	if val, ok := s.db.Get(persistenceID); ok {
 		return val, nil

@@ -34,11 +34,14 @@ import (
 	"github.com/tochemey/goakt/v3/internal/eventstream"
 	"github.com/tochemey/goakt/v3/internal/workerpool"
 	"github.com/tochemey/goakt/v3/log"
+	"github.com/tochemey/goakt/v3/test/data/testpb"
 )
 
 func TestPIDOptions(t *testing.T) {
 	mailbox := NewUnboundedMailbox()
 	supervisor := NewSupervisor(WithStrategy(OneForAllStrategy))
+	initialState := new(testpb.Account)
+	stateReadWriter := newMockStateReaderWriter()
 	var (
 		atomicDuration   atomic.Duration
 		atomicInt        atomic.Int32
@@ -117,6 +120,19 @@ func TestPIDOptions(t *testing.T) {
 			name:     "WithWorkerPool",
 			option:   withWorkerPool(workerPool),
 			expected: &PID{workerPool: workerPool},
+		},
+		{
+			name:   "WithInitialState",
+			option: withInitialState(initialState),
+			expected: &PID{
+				isPersistent: atomicTrue,
+				currentState: initialState,
+			},
+		},
+		{
+			name:     "WithStateReadWriter",
+			option:   withStateReadWriter(stateReadWriter),
+			expected: &PID{stateReadWriter: stateReadWriter},
 		},
 	}
 	for _, tc := range testCases {
