@@ -49,6 +49,10 @@ func newSpawnConfig(opts ...SpawnOption) *spawnConfig {
 	config := &spawnConfig{
 		relocatable: true,
 		asSingleton: false,
+		supervisor: NewSupervisor(
+			WithStrategy(OneForOneStrategy),
+			WithAnyErrorDirective(ResumeDirective),
+		),
 	}
 
 	for _, opt := range opts {

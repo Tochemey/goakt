@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/atomic"
 
 	"github.com/tochemey/goakt/v3/hash"
@@ -149,4 +150,12 @@ func TestWithPubSub(t *testing.T) {
 	opt := WithPubSub()
 	opt.Apply(system)
 	assert.True(t, system.pubsubEnabled.Load())
+}
+
+func TestWithExtensions(t *testing.T) {
+	ext := new(mockExtension)
+	system := new(actorSystem)
+	opt := WithExtensions(ext)
+	opt.Apply(system)
+	require.NotEmpty(t, system.extensions)
 }

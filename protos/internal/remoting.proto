@@ -115,6 +115,8 @@ message RemoteSpawnRequest {
   bool is_singleton = 5;
   // Specifies if the actor is relocatable
   bool relocatable = 6;
+  // Specifies the passivation time
+  google.protobuf.Duration passivate_after = 7;
 }
 
 message RemoteSpawnResponse {}

@@ -28,7 +28,9 @@ import (
 	"context"
 	"time"
 
+	"github.com/tochemey/goakt/v3/extension"
 	"github.com/tochemey/goakt/v3/hash"
+	"github.com/tochemey/goakt/v3/internal/collection/syncmap"
 	"github.com/tochemey/goakt/v3/log"
 	"github.com/tochemey/goakt/v3/remote"
 )
@@ -208,5 +210,40 @@ func WithPubSub() Option {
 func WithoutRelocation() Option {
 	return OptionFunc(func(system *actorSystem) {
 		system.enableRelocation.Store(false)
+	})
+}
+
+// WithExtensions registers one or more Extensions with the ActorSystem during initialization.
+//
+// This function allows you to inject pluggable components that implement the Extension interface,
+// enabling additional functionality such as event sourcing, metrics collection, or tracing.
+//
+// Registered extensions will be accessible from any actor's message context, allowing them
+// to be used transparently across the system.
+//
+// Example:
+//
+//	system := NewActorSystem(
+//	    WithExtensions(
+//	        NewEventSourcingExtension(),
+//	        NewMetricsExtension(),
+//	    ),
+//	)
+//
+// Each extension must have a unique ID to avoid collisions in the system registry.
+//
+// Parameters:
+//   - extensions: One or more Extension instances to be registered.
+//
+// Returns:
+//   - Option: A configuration option used when constructing the ActorSystem.
+func WithExtensions(extensions ...extension.Extension) Option {
+	return OptionFunc(func(system *actorSystem) {
+		if system.extensions == nil {
+			system.extensions = syncmap.New[string, extension.Extension]()
+		}
+		for _, ext := range extensions {
+			system.extensions.Set(ext.ID(), ext)
+		}
 	})
 }

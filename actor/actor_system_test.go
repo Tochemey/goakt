@@ -29,6 +29,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"net"
+	"reflect"
 	"strconv"
 	"sync"
 	"testing"
@@ -1192,12 +1193,8 @@ func TestActorSystem(t *testing.T) {
 		require.NotNil(t, newInstance)
 		require.True(t, newInstance.Equals(actorRef))
 
-		t.Cleanup(
-			func() {
-				err = newActorSystem.Stop(ctx)
-				assert.NoError(t, err)
-			},
-		)
+		err = newActorSystem.Stop(ctx)
+		assert.NoError(t, err)
 	})
 	t.Run("With SpawnFromFunc (cluster/remote enabled)", func(t *testing.T) {
 		ctx := context.TODO()
@@ -1849,7 +1846,7 @@ func TestActorSystem(t *testing.T) {
 		require.ErrorIs(t, err, ErrInvalidTLSConfiguration)
 		require.Nil(t, newActorSystem)
 	})
-	t.Run("With Metric ", func(t *testing.T) {
+	t.Run("With Metric", func(t *testing.T) {
 		ctx := context.TODO()
 		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
 
@@ -1943,5 +1940,17 @@ func TestActorSystem(t *testing.T) {
 		// start the actor system
 		err = newActorSystem.Start(ctx)
 		require.Error(t, err)
+	})
+	t.Run("With Extension", func(t *testing.T) {
+		ext := new(mockExtension)
+		actorSystem, err := NewActorSystem("testSys", WithExtensions(ext))
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+		extensions := actorSystem.Extensions()
+		require.NotNil(t, extensions)
+		require.Len(t, extensions, 1)
+		extension := actorSystem.Extension(ext.ID())
+		require.NotNil(t, extension)
+		require.True(t, reflect.DeepEqual(extension, ext))
 	})
 }

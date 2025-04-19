@@ -42,6 +42,7 @@ import (
 
 	"github.com/tochemey/goakt/v3/discovery"
 	"github.com/tochemey/goakt/v3/discovery/nats"
+	"github.com/tochemey/goakt/v3/extension"
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/util"
 	"github.com/tochemey/goakt/v3/log"
@@ -620,3 +621,11 @@ func extractMessage(bytes []byte) (string, error) {
 
 	return "", nil
 }
+
+type mockExtension struct{}
+
+func (m mockExtension) ID() string {
+	return "mock"
+}
+
+var _ extension.Extension = (*mockExtension)(nil)

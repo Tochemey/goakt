@@ -33,6 +33,7 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/tochemey/goakt/v3/address"
+	"github.com/tochemey/goakt/v3/extension"
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/log"
 )
@@ -431,6 +432,36 @@ func (rctx *ReceiveContext) UnWatch(cid *PID) {
 // ActorSystem returns the actor system
 func (rctx *ReceiveContext) ActorSystem() ActorSystem {
 	return rctx.self.ActorSystem()
+}
+
+// Extensions returns a slice of all extensions registered within the ActorSystem
+// associated with the current ReceiveContext.
+//
+// This allows system-level introspection or iteration over all available extensions.
+// It can be useful for message processing.
+//
+// Returns:
+//   - []extension.Extension: All registered extensions in the ActorSystem.
+func (rctx *ReceiveContext) Extensions() []extension.Extension {
+	return rctx.self.ActorSystem().Extensions()
+}
+
+// Extension retrieves a specific extension registered in the ActorSystem by its unique ID.
+//
+// This allows actors to access shared functionality injected into the system, such as
+// event sourcing, metrics, tracing, or custom application services, directly from the message context.
+//
+// Example:
+//
+//	logger := rctx.Extension("extensionID").(MyExtension)
+//
+// Parameters:
+//   - extensionID: A unique string identifier used when the extension was registered.
+//
+// Returns:
+//   - extension.Extension: The corresponding extension if found, or nil otherwise.
+func (rctx *ReceiveContext) Extension(extensionID string) extension.Extension {
+	return rctx.self.ActorSystem().Extension(extensionID)
 }
 
 // getError returns any error during message processing

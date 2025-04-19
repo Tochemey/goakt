@@ -10,6 +10,7 @@ import (
 	goaktpb "github.com/tochemey/goakt/v3/goaktpb"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	durationpb "google.golang.org/protobuf/types/known/durationpb"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
@@ -32,9 +33,11 @@ type ActorRef struct {
 	// Specifies if the actor is a singleton
 	IsSingleton bool `protobuf:"varint,3,opt,name=is_singleton,json=isSingleton,proto3" json:"is_singleton,omitempty"`
 	// Specifies if the actor is disabled for relocation
-	Relocatable   bool `protobuf:"varint,4,opt,name=relocatable,proto3" json:"relocatable,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Relocatable bool `protobuf:"varint,4,opt,name=relocatable,proto3" json:"relocatable,omitempty"`
+	// Specifies the passivation time
+	PassivateAfter *durationpb.Duration `protobuf:"bytes,5,opt,name=passivate_after,json=passivateAfter,proto3" json:"passivate_after,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *ActorRef) Reset() {
@@ -95,6 +98,13 @@ func (x *ActorRef) GetRelocatable() bool {
 	return false
 }
 
+func (x *ActorRef) GetPassivateAfter() *durationpb.Duration {
+	if x != nil {
+		return x.PassivateAfter
+	}
+	return nil
+}
+
 // ActorProps defines the properties of an actor
 // that can be used to spawn an actor remotely.
 type ActorProps struct {
@@ -106,9 +116,11 @@ type ActorProps struct {
 	// Specifies if the actor is a singleton
 	IsSingleton bool `protobuf:"varint,3,opt,name=is_singleton,json=isSingleton,proto3" json:"is_singleton,omitempty"`
 	// Specifies if the actor is disabled for relocation
-	Relocatable   bool `protobuf:"varint,4,opt,name=relocatable,proto3" json:"relocatable,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Relocatable bool `protobuf:"varint,4,opt,name=relocatable,proto3" json:"relocatable,omitempty"`
+	// Specifies the passivation time
+	PassivateAfter *durationpb.Duration `protobuf:"bytes,5,opt,name=passivate_after,json=passivateAfter,proto3" json:"passivate_after,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *ActorProps) Reset() {
@@ -169,18 +181,26 @@ func (x *ActorProps) GetRelocatable() bool {
 	return false
 }
 
+func (x *ActorProps) GetPassivateAfter() *durationpb.Duration {
+	if x != nil {
+		return x.PassivateAfter
+	}
+	return nil
+}
+
 var File_internal_actor_proto protoreflect.FileDescriptor
 
 const file_internal_actor_proto_rawDesc = "" +
 	"\n" +
 	"\x14internal/actor.proto\x12\n" +
-	"internalpb\x1a\x11goakt/goakt.proto\"\xa5\x01\n" +
+	"internalpb\x1a\x11goakt/goakt.proto\x1a\x1egoogle/protobuf/duration.proto\"\xe9\x01\n" +
 	"\bActorRef\x125\n" +
 	"\ractor_address\x18\x01 \x01(\v2\x10.goaktpb.AddressR\factorAddress\x12\x1d\n" +
 	"\n" +
 	"actor_type\x18\x02 \x01(\tR\tactorType\x12!\n" +
 	"\fis_singleton\x18\x03 \x01(\bR\visSingleton\x12 \n" +
-	"\vrelocatable\x18\x04 \x01(\bR\vrelocatable\"\x8f\x01\n" +
+	"\vrelocatable\x18\x04 \x01(\bR\vrelocatable\x12B\n" +
+	"\x0fpassivate_after\x18\x05 \x01(\v2\x19.google.protobuf.DurationR\x0epassivateAfter\"\xd3\x01\n" +
 	"\n" +
 	"ActorProps\x12\x1d\n" +
 	"\n" +
@@ -188,7 +208,8 @@ const file_internal_actor_proto_rawDesc = "" +
 	"\n" +
 	"actor_type\x18\x02 \x01(\tR\tactorType\x12!\n" +
 	"\fis_singleton\x18\x03 \x01(\bR\visSingleton\x12 \n" +
-	"\vrelocatable\x18\x04 \x01(\bR\vrelocatableB\xa3\x01\n" +
+	"\vrelocatable\x18\x04 \x01(\bR\vrelocatable\x12B\n" +
+	"\x0fpassivate_after\x18\x05 \x01(\v2\x19.google.protobuf.DurationR\x0epassivateAfterB\xa3\x01\n" +
 	"\x0ecom.internalpbB\n" +
 	"ActorProtoH\x02P\x01Z;github.com/tochemey/goakt/v3/internal/internalpb;internalpb\xa2\x02\x03IXX\xaa\x02\n" +
 	"Internalpb\xca\x02\n" +
@@ -209,17 +230,20 @@ func file_internal_actor_proto_rawDescGZIP() []byte {
 
 var file_internal_actor_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
 var file_internal_actor_proto_goTypes = []any{
-	(*ActorRef)(nil),        // 0: internalpb.ActorRef
-	(*ActorProps)(nil),      // 1: internalpb.ActorProps
-	(*goaktpb.Address)(nil), // 2: goaktpb.Address
+	(*ActorRef)(nil),            // 0: internalpb.ActorRef
+	(*ActorProps)(nil),          // 1: internalpb.ActorProps
+	(*goaktpb.Address)(nil),     // 2: goaktpb.Address
+	(*durationpb.Duration)(nil), // 3: google.protobuf.Duration
 }
 var file_internal_actor_proto_depIdxs = []int32{
 	2, // 0: internalpb.ActorRef.actor_address:type_name -> goaktpb.Address
-	1, // [1:1] is the sub-list for method output_type
-	1, // [1:1] is the sub-list for method input_type
-	1, // [1:1] is the sub-list for extension type_name
-	1, // [1:1] is the sub-list for extension extendee
-	0, // [0:1] is the sub-list for field type_name
+	3, // 1: internalpb.ActorRef.passivate_after:type_name -> google.protobuf.Duration
+	3, // 2: internalpb.ActorProps.passivate_after:type_name -> google.protobuf.Duration
+	3, // [3:3] is the sub-list for method output_type
+	3, // [3:3] is the sub-list for method input_type
+	3, // [3:3] is the sub-list for extension type_name
+	3, // [3:3] is the sub-list for extension extendee
+	0, // [0:3] is the sub-list for field type_name
 }
 
 func init() { file_internal_actor_proto_init() }

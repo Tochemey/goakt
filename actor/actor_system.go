@@ -51,12 +51,15 @@ import (
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
+	"google.golang.org/protobuf/types/known/durationpb"
 
 	"github.com/tochemey/goakt/v3/address"
 	"github.com/tochemey/goakt/v3/discovery"
+	"github.com/tochemey/goakt/v3/extension"
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/hash"
 	"github.com/tochemey/goakt/v3/internal/cluster"
+	"github.com/tochemey/goakt/v3/internal/collection/syncmap"
 	"github.com/tochemey/goakt/v3/internal/errorschain"
 	"github.com/tochemey/goakt/v3/internal/eventstream"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
@@ -184,7 +187,7 @@ type ActorSystem interface { //nolint:revive
 	// Port returns the actor system node port.
 	// This is the bind port for remote communication
 	Port() int
-	// Uptime returns the number of seconds since the actor system started
+	// Uptime is the number of seconds since the actor system started
 	Uptime() int64
 	// Running returns true when the actor system is running
 	Running() bool
@@ -200,6 +203,25 @@ type ActorSystem interface { //nolint:revive
 	// Messages published to a topic on other cluster nodes will be sent between the nodesMap once per active topic actor that has any local subscribers.
 	// To be able to use the topic actor, one need to start the actor system with the WithCluster and WithPubSub options.
 	TopicActor() *PID
+	// Extensions returns a slice of all registered extensions in the ActorSystem.
+	//
+	// This allows system-level introspection or iteration over all available extensions.
+	// It can be useful for diagnostics, monitoring, or applying configuration across all extensions.
+	//
+	// Returns:
+	//   - []extension.Extension: A list of all registered extensions.
+	Extensions() []extension.Extension
+	// Extension retrieves a specific registered extension by its unique ID.
+	//
+	// This method allows actors or system components to access a specific Extension
+	// instance that was previously registered using WithExtensions.
+	//
+	// Parameters:
+	//   - extensionID: The unique identifier of the extension to retrieve.
+	//
+	// Returns:
+	//   - extension.Extension: The registered extension with the given ID, or nil if not found.
+	Extension(extensionID string) extension.Extension
 	// handleRemoteAsk handles a synchronous message to another actor and expect a response.
 	// This block until a response is received or timed out.
 	handleRemoteAsk(ctx context.Context, to *PID, message proto.Message, timeout time.Duration) (response proto.Message, err error)
@@ -320,6 +342,7 @@ type actorSystem struct {
 	pubsubEnabled    atomic.Bool
 	workerPool       *workerpool.WorkerPool
 	enableRelocation atomic.Bool
+	extensions       *syncmap.Map[string, extension.Extension]
 }
 
 var (
@@ -370,6 +393,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 			workerpool.WithNumShards(128),
 			workerpool.WithPassivateAfter(time.Second),
 		),
+		extensions: syncmap.New[string, extension.Extension](),
 	}
 
 	system.enableRelocation.Store(true)
@@ -1250,7 +1274,10 @@ func (x *actorSystem) RemoteSpawn(ctx context.Context, request *connect.Request[
 		}
 	}
 
-	var opts []SpawnOption
+	opts := []SpawnOption{
+		WithPassivateAfter(msg.GetPassivateAfter().AsDuration()),
+	}
+
 	if !msg.GetRelocatable() {
 		opts = append(opts, WithRelocationDisabled())
 	}
@@ -1383,6 +1410,34 @@ func (x *actorSystem) TopicActor() *PID {
 	return mediator
 }
 
+// Extensions returns a slice of all registered extensions in the ActorSystem.
+//
+// This allows system-level introspection or iteration over all available extensions.
+// It can be useful for diagnostics, monitoring, or applying configuration across all extensions.
+//
+// Returns:
+//   - []extension.Extension: A list of all registered extensions.
+func (x *actorSystem) Extensions() []extension.Extension {
+	return x.extensions.Values()
+}
+
+// Extension retrieves a specific registered extension by its unique ID.
+//
+// This method allows actors or system components to access a specific Extension
+// instance that was previously registered using WithExtensions.
+//
+// Parameters:
+//   - extensionID: The unique identifier of the extension to retrieve.
+//
+// Returns:
+//   - extension.Extension: The registered extension with the given ID, or nil if not found.
+func (x *actorSystem) Extension(extensionID string) extension.Extension {
+	if ext, ok := x.extensions.Get(extensionID); ok {
+		return ext
+	}
+	return nil
+}
+
 func (x *actorSystem) completeRebalancing() {
 	x.rebalancing.Store(false)
 }
@@ -1414,10 +1469,11 @@ func (x *actorSystem) getPeerStateFromStore(address string) (*internalpb.PeerSta
 func (x *actorSystem) broadcastActor(actor *PID) {
 	if x.clusterEnabled.Load() {
 		x.wireActorsQueue <- &internalpb.ActorRef{
-			ActorAddress: actor.Address().Address,
-			ActorType:    types.Name(actor.Actor()),
-			IsSingleton:  actor.IsSingleton(),
-			Relocatable:  actor.IsRelocatable(),
+			ActorAddress:   actor.Address().Address,
+			ActorType:      types.Name(actor.Actor()),
+			IsSingleton:    actor.IsSingleton(),
+			Relocatable:    actor.IsRelocatable(),
+			PassivateAfter: durationpb.New(actor.PassivationTime()),
 		}
 	}
 }
@@ -1604,6 +1660,7 @@ func (x *actorSystem) ensureTLSProtos() {
 
 // reset the actor system
 func (x *actorSystem) reset() {
+	x.extensions.Reset()
 	x.actors.reset()
 }
 

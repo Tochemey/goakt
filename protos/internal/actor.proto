@@ -3,6 +3,7 @@ syntax = "proto3";
 package internalpb;
 
 import "goakt/goakt.proto";
+import "google/protobuf/duration.proto";
 
 option go_package = "github.com/tochemey/goakt/v3/internal/internalpb;internalpb";
 
@@ -16,6 +17,8 @@ message ActorRef {
   bool is_singleton = 3;
   // Specifies if the actor is disabled for relocation
   bool relocatable = 4;
+  // Specifies the passivation time
+  google.protobuf.Duration passivate_after = 5;
 }
 
 // ActorProps defines the properties of an actor
@@ -29,4 +32,6 @@ message ActorProps {
   bool is_singleton = 3;
   // Specifies if the actor is disabled for relocation
   bool relocatable = 4;
+  // Specifies the passivation time
+  google.protobuf.Duration passivate_after = 5;
 }
