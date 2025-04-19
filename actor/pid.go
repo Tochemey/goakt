@@ -209,9 +209,7 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 		go pid.passivationLoop()
 	}
 
-	receiveContext := getContext()
-	receiveContext.build(ctx, NoSender, pid, new(goaktpb.PostStart), true)
-	pid.doReceive(receiveContext)
+	pid.fireSystemMessage(ctx, new(goaktpb.PostStart))
 
 	pid.startedAt.Store(time.Now().Unix())
 	return pid, nil
@@ -396,6 +394,14 @@ func (pid *PID) IsSingleton() bool {
 // Returns true if relocation is allowed, and false if relocation is disabled.
 func (pid *PID) IsRelocatable() bool {
 	return pid.relocatable.Load()
+}
+
+// PassivationTime returns the given actor's passivation time
+func (pid *PID) PassivationTime() time.Duration {
+	pid.fieldsLocker.RLock()
+	duration := pid.passivateAfter.Load()
+	pid.fieldsLocker.RUnlock()
+	return duration
 }
 
 // ActorSystem returns the actor system
@@ -1813,4 +1819,11 @@ func (pid *PID) getDeadlettersCount(ctx context.Context) int64 {
 		return deadlettersCount.GetTotalCount()
 	}
 	return 0
+}
+
+// fireSystemMessage sends a system-level message to the specified PID by creating a receive context and invoking the message handling logic.
+func (pid *PID) fireSystemMessage(ctx context.Context, message proto.Message) {
+	receiveContext := getContext()
+	receiveContext.build(ctx, NoSender, pid, message, true)
+	pid.doReceive(receiveContext)
 }

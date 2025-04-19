@@ -205,21 +205,25 @@ func (r *rebalancer) computeRebalancing(totalPeers int, nodeLeftState *internalp
 }
 
 // recreateLocally recreates the actor
-func (r *rebalancer) recreateLocally(ctx context.Context, actor *internalpb.ActorProps, enforceSingleton bool) error {
-	iactor, err := r.reflection.ActorFrom(actor.GetActorType())
+func (r *rebalancer) recreateLocally(ctx context.Context, props *internalpb.ActorProps, enforceSingleton bool) error {
+	actor, err := r.reflection.ActorFrom(props.GetActorType())
 	if err != nil {
 		return err
 	}
 
-	if enforceSingleton && actor.GetIsSingleton() {
+	if enforceSingleton && props.GetIsSingleton() {
 		// spawn the singleton actor
-		return r.pid.ActorSystem().SpawnSingleton(ctx, actor.GetActorName(), iactor)
+		return r.pid.ActorSystem().SpawnSingleton(ctx, props.GetActorName(), actor)
 	}
 
-	if !actor.GetRelocatable() {
+	if !props.GetRelocatable() {
 		return nil
 	}
 
-	_, err = r.pid.ActorSystem().Spawn(ctx, actor.GetActorName(), iactor)
+	spawnOpts := []SpawnOption{
+		WithPassivateAfter(props.GetPassivateAfter().AsDuration()),
+	}
+
+	_, err = r.pid.ActorSystem().Spawn(ctx, props.GetActorName(), actor, spawnOpts...)
 	return err
 }

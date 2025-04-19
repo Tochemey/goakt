@@ -2887,4 +2887,41 @@ func TestReceiveContext(t *testing.T) {
 		util.Pause(time.Second)
 		assert.NoError(t, actorSystem.Stop(ctx))
 	})
+	t.Run("With extensions", func(t *testing.T) {
+		ctx := context.TODO()
+		ports := dynaport.Get(1)
+
+		actorSystem, err := NewActorSystem("sys",
+			WithRemote(remote.NewConfig("127.0.0.1", ports[0])),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NoError(t, actorSystem.Start(ctx))
+
+		util.Pause(time.Second)
+
+		// create actor1
+		actor1 := &exchanger{}
+		pid1, err := actorSystem.Spawn(ctx, "Exchange1", actor1)
+		require.NoError(t, err)
+		require.NotNil(t, pid1)
+
+		// create an instance of receive context
+		context := &ReceiveContext{
+			ctx:     ctx,
+			message: new(testpb.TestSend),
+			sender:  NoSender,
+			self:    pid1,
+		}
+
+		extensions := context.Extensions()
+		require.NotNil(t, extensions)
+		require.Empty(t, extensions)
+
+		extension := context.Extension("test")
+		require.Nil(t, extension)
+
+		util.Pause(time.Second)
+		assert.NoError(t, actorSystem.Stop(ctx))
+	})
 }
