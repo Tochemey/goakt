@@ -389,11 +389,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		actorsCounter:          atomic.NewUint64(0),
 		deadlettersCounter:     atomic.NewUint64(0),
 		topicActor:             NoSender,
-		workerPool: workerpool.New(
-			workerpool.WithNumShards(128),
-			workerpool.WithPassivateAfter(time.Second),
-		),
-		extensions: syncmap.New[string, extension.Extension](),
+		extensions:             syncmap.New[string, extension.Extension](),
 	}
 
 	system.enableRelocation.Store(true)
@@ -408,6 +404,13 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 	for _, opt := range opts {
 		opt.Apply(system)
 	}
+
+	// set the worker pool
+	system.workerPool = workerpool.New(
+		workerpool.WithPoolSize(128),
+		workerpool.WithPassivateAfter(time.Second),
+		workerpool.WithLogger(system.logger),
+	)
 
 	if err := system.remoteConfig.Sanitize(); err != nil {
 		return nil, err
@@ -494,9 +497,9 @@ func (x *actorSystem) Run(ctx context.Context, startHook func(ctx context.Contex
 func (x *actorSystem) Start(ctx context.Context) error {
 	x.logger.Infof("%s actor system starting on %s/%s..", x.name, runtime.GOOS, runtime.GOARCH)
 	x.started.Store(true)
-	x.workerPool.Start()
 	if err := errorschain.
 		New(errorschain.ReturnFirst()).
+		AddErrorFn(x.workerPool.Start).
 		AddErrorFn(func() error { return x.enableRemoting(ctx) }).
 		AddErrorFn(func() error { return x.enableClustering(ctx) }).
 		AddErrorFn(func() error { return x.spawnRootGuardian(ctx) }).

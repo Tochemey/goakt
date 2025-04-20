@@ -27,26 +27,22 @@
 package workerpool
 
 import (
-	"crypto/rand"
-	"encoding/binary"
+	"errors"
+	"os"
 	"sync"
-	"sync/atomic"
 	"time"
 
-	"github.com/tochemey/goakt/v3/internal/bufferpool"
-	"github.com/tochemey/goakt/v3/internal/ticker"
-	"github.com/tochemey/goakt/v3/internal/types"
+	"github.com/panjf2000/ants/v2"
+
+	"github.com/tochemey/goakt/v3/log"
 )
 
 const (
-	// Maximum number of shards supported by the worker pool
-	maxShards = 128
-
-	// Worker states
-	workerStateIdle    int32 = 0 // Worker is idle and available for work
-	workerStateWorking int32 = 1 // Worker is currently executing a task
-	workerStateClosed  int32 = 2 // Worker has been closed and should not be used
+	maxPoolSize = 300
 )
+
+// ErrPoolClosed will be returned when submitting task to a closed pool.
+var ErrPoolClosed = errors.New("this pool has been closed")
 
 // Option is the interface that applies a WorkerPool option.
 type Option interface {
@@ -71,413 +67,120 @@ func WithPassivateAfter(d time.Duration) Option {
 	})
 }
 
-// WithNumShards sets the number of shards
-func WithNumShards(numShards int) Option {
+// WithPoolSize sets the pool size
+func WithPoolSize(size int) Option {
 	return OptionFunc(func(pool *WorkerPool) {
-		if numShards > maxShards {
-			numShards = maxShards
+		if size > maxPoolSize {
+			size = maxPoolSize
 		}
-		pool.numShards = numShards
+		pool.poolSize = size
+	})
+}
+
+// WithLogger sets the actor system custom log
+func WithLogger(logger log.Logger) Option {
+	return OptionFunc(func(pool *WorkerPool) {
+		pool.logger = logger
 	})
 }
 
 // WorkerPool manages a pool of workers across multiple shards for efficient
 // concurrent task execution.
 type WorkerPool struct {
-	passivateAfter time.Duration   // Duration after which idle workers are cleaned up
-	numShards      int             // Number of shards to distribute work across
-	shards         []*poolShard    // Shards containing workers
-	mutex          sync.RWMutex    // Mutex for pool-wide operations
-	started        atomic.Bool     // Flag indicating if the pool has been started
-	stopped        atomic.Bool     // Flag indicating if the pool has been stopped
-	spawnedWorkers atomic.Uint64   // Counter for tracking total active workers
-	stopCleanupSig chan types.Unit // Channel to signal cleanup goroutine to stop
-}
-
-// Worker represents a goroutine that executes submitted tasks.
-type Worker struct {
-	workChan  chan func()  // Channel for receiving work
-	shard     *poolShard   // Reference to the shard this worker belongs to
-	lastUsed  atomic.Int64 // Timestamp of last use (UnixNano)
-	isDeleted atomic.Bool  // Flag indicating if worker has been marked for deletion
-	state     atomic.Int32 // Current state of the worker (idle, working, closed)
-}
-
-// poolShard represents a subdivision of the worker pool that manages a subset
-// of workers to reduce contention.
-type poolShard struct {
-	wp          *WorkerPool            // Reference to parent worker pool
-	workers     sync.Pool              // Pool for worker object reuse
-	idleWorkers []*Worker              // Slice of idle workers (slow path)
-	idleWorker1 atomic.Pointer[Worker] // Fast path worker 1
-	idleWorker2 atomic.Pointer[Worker] // Fast path worker 2
-	mu          sync.Mutex             // Mutex for shard operations
-	stopped     atomic.Bool            // Flag indicating if shard has been stopped
-}
-
-// doWork is the main worker goroutine function that processes incoming tasks.
-func (worker *Worker) doWork() {
-	shard := worker.shard
-	wp := shard.wp
-	wp.spawnedWorkers.Add(1)
-
-	for work := range worker.workChan {
-		// Execute the task
-		work()
-		// Mark worker as idle and make it available for more work
-		worker.state.Store(workerStateIdle)
-		if !shard.setWorkerIdle(worker) {
-			break
-		}
-	}
-
-	// When worker exits, decrement counter and return to pool
-	wp.spawnedWorkers.Add(^uint64(0)) // Decrement by 1
-	shard.workers.Put(worker)
+	pool           *ants.Pool
+	poolSize       int
+	passivateAfter time.Duration
+	logger         log.Logger
+	once           sync.Once
 }
 
 // New creates a new worker pool with the given options.
 func New(opts ...Option) *WorkerPool {
 	wp := &WorkerPool{
-		passivateAfter: time.Second, // Default cleanup interval
-		numShards:      1,           // Default to single shard
-		stopCleanupSig: make(chan types.Unit, 1),
+		poolSize:       maxPoolSize,
+		passivateAfter: time.Second,
+		logger:         log.New(log.ErrorLevel, os.Stderr),
 	}
-
 	// Apply provided options
 	for _, opt := range opts {
 		opt.Apply(wp)
 	}
 
-	// Ensure numShards is within bounds
-	if wp.numShards < 1 {
-		wp.numShards = 1
-	} else if wp.numShards > maxShards {
-		wp.numShards = maxShards
-	}
-
 	return wp
 }
 
-// GetSpawnedWorkers returns the current count of active workers.
-func (wp *WorkerPool) GetSpawnedWorkers() int {
-	return int(wp.spawnedWorkers.Load())
-}
-
-// Start initializes the worker pool and begins the cleanup routine.
-// It's safe to call Start multiple times.
-func (wp *WorkerPool) Start() {
-	wp.mutex.Lock()
-	if !wp.started.Load() {
-		// Pre-allocate the slice to avoid resizing
-		wp.shards = make([]*poolShard, wp.numShards)
-		for i := range wp.numShards {
-			shard := &poolShard{
-				wp: wp,
-				workers: sync.Pool{
-					New: func() any {
-						return &Worker{
-							workChan: make(chan func()),
-						}
-					},
-				},
-				// Pre-allocate with capacity to avoid frequent resizing
-				idleWorkers: make([]*Worker, 0, 2048),
-			}
-			wp.shards[i] = shard
-		}
-
-		wp.started.Store(true)
-		go wp.cleanup() // Start cleanup goroutine
+// Start initializes the worker pool
+func (wp *WorkerPool) Start() error {
+	pool, err := ants.NewPool(wp.poolSize,
+		ants.WithExpiryDuration(wp.passivateAfter),
+		ants.WithLogger(newLogger(wp.logger)),
+	)
+	if err != nil {
+		return err
 	}
-	wp.mutex.Unlock()
+	wp.pool = pool
+	return nil
 }
 
 // Stop gracefully shuts down the worker pool by closing all worker channels
 // and preventing new task submissions.
 func (wp *WorkerPool) Stop() {
-	wp.mutex.Lock()
-	if !wp.started.Load() {
-		wp.mutex.Unlock()
-		return
-	}
-
-	if wp.stopped.Load() {
-		wp.mutex.Unlock()
-		return
-	}
-
-	// Signal cleanup goroutine to stop
-	wp.stopCleanupSig <- types.Unit{}
-	// Mark the pool as stopped
-	wp.stopped.Store(true)
-
-	// Only run shutdown logic once
-	for i := range wp.numShards {
-		shard := wp.shards[i]
-		shard.mu.Lock()
-		shard.stopped.Store(true)
-
-		// Close all workers in the idle slice
-		for j := range shard.idleWorkers {
-			worker := shard.idleWorkers[j]
-			if !worker.isDeleted.Swap(true) {
-				worker.state.Store(workerStateClosed)
-				close(worker.workChan)
-			}
-			shard.idleWorkers[j] = nil // Help GC
-		}
-		shard.idleWorkers = shard.idleWorkers[:0]
-
-		// Close fast path workers
-		if w1 := shard.idleWorker1.Swap(nil); w1 != nil && !w1.isDeleted.Swap(true) {
-			w1.state.Store(workerStateClosed)
-			close(w1.workChan)
-		}
-
-		if w2 := shard.idleWorker2.Swap(nil); w2 != nil && !w2.isDeleted.Swap(true) {
-			w2.state.Store(workerStateClosed)
-			close(w2.workChan)
-		}
-
-		shard.mu.Unlock()
-	}
-
-	wp.mutex.Unlock()
+	wp.once.Do(func() {
+		wp.pool.Release()
+	})
 }
 
 // SubmitWork submits a task to be executed by an available worker.
 // If the pool has not been started, the task will be discarded.
 func (wp *WorkerPool) SubmitWork(task func()) {
-	// Use RLock for better concurrency on the read path
-	wp.mutex.RLock()
-	if !wp.started.Load() || wp.stopped.Load() {
-		wp.mutex.RUnlock()
-		return
+	if !wp.pool.IsClosed() {
+		_ = wp.pool.Submit(task)
 	}
-
-	// Select a shard using fast thread-local random
-	shardIndex := fastRand() % uint32(wp.numShards)
-	shard := wp.shards[shardIndex]
-	wp.mutex.RUnlock()
-
-	// Hand off the task to the selected shard
-	shard.acquireWorker(task)
 }
 
-// acquireWorker gets an available worker or creates a new one and
-// submits the task to it.
-func (shard *poolShard) acquireWorker(task func()) (worker *Worker) {
-	// Fast path: try to use cached idle workers without locking
-	if w := shard.idleWorker1.Swap(nil); w != nil {
-		// Verify a worker is still valid before sending work
-		if !w.isDeleted.Load() && w.state.CompareAndSwap(workerStateIdle, workerStateWorking) {
-			w.workChan <- task
-			return w
-		}
-		// Worker was already deleted or in the wrong state
-		if !w.isDeleted.Load() {
-			shard.setWorkerIdle(w) // Put it back
-		}
-	}
-
-	if w := shard.idleWorker2.Swap(nil); w != nil {
-		if !w.isDeleted.Load() && w.state.CompareAndSwap(workerStateIdle, workerStateWorking) {
-			w.workChan <- task
-			return w
-		}
-		if !w.isDeleted.Load() {
-			shard.setWorkerIdle(w)
-		}
-	}
-
-	// Slow path: take a lock and check the idle workers slice
-	shard.mu.Lock()
-
-	// Exit early if shard is stopped
-	if shard.stopped.Load() {
-		shard.mu.Unlock()
-		return nil
-	}
-
-	length := len(shard.idleWorkers)
-	if length > 0 {
-		worker = shard.idleWorkers[length-1]
-		shard.idleWorkers[length-1] = nil // Help GC
-		shard.idleWorkers = shard.idleWorkers[:length-1]
-		shard.mu.Unlock()
-
-		// Verify worker is still valid
-		if !worker.isDeleted.Load() && worker.state.CompareAndSwap(workerStateIdle, workerStateWorking) {
-			worker.workChan <- task
-			return worker
-		}
-		return nil
-	}
-	shard.mu.Unlock()
-
-	// Create a new worker if needed
-	worker = shard.workers.Get().(*Worker)
-	worker.shard = shard
-	if worker.workChan == nil {
-		worker.workChan = make(chan func())
-	}
-	worker.state.Store(workerStateWorking)
-	worker.isDeleted.Store(false)
-	go worker.doWork()
-	worker.workChan <- task
-	return worker
+// logger implements the ants.Logger interface by delegating log messages
+// to a provided structured logger (log.Logger) with support for log levels.
+//
+// It maps the ants.Logger Printf calls to the appropriate log level methods
+// based on the current log level of the underlying logger.
+//
+// This allows integration of ants' internal logging with a custom logging
+// system that supports different log levels.
+//
+// Example:
+//
+//	l := newLogger(myCustomLogger)
+//	pool, _ := ants.NewPool(10, ants.WithLogger(l))
+type logger struct {
+	lg log.Logger
 }
 
-// setWorkerIdle marks a worker as idle and makes it available for future tasks.
-// Returns false if the worker's shard has been stopped.
-func (shard *poolShard) setWorkerIdle(worker *Worker) bool {
-	// Update last used timestamp
-	worker.lastUsed.Store(time.Now().UnixNano())
+// Ensure logger implements the ants.Logger interface at compile time.
+var _ ants.Logger = (*logger)(nil)
 
-	// Exit early if shard is stopped
-	if shard.stopped.Load() {
-		return false
-	}
-
-	// Fast path: try to store in atomic pointers first
-	if shard.idleWorker1.CompareAndSwap(nil, worker) {
-		return true
-	}
-
-	if shard.idleWorker2.CompareAndSwap(nil, worker) {
-		return true
-	}
-
-	// Slow path: add to slice with lock
-	shard.mu.Lock()
-	if shard.stopped.Load() {
-		shard.mu.Unlock()
-		return false
-	}
-
-	shard.idleWorkers = append(shard.idleWorkers, worker)
-	shard.mu.Unlock()
-	return true
+// newLogger creates a new ants-compatible logger using the given log.Logger.
+func newLogger(lg log.Logger) *logger {
+	return &logger{lg: lg}
 }
 
-// cleanup periodically checks for and removes idle workers
-// that haven't been used for longer than passivateAfter.
-func (wp *WorkerPool) cleanup() {
-	var workers []*Worker
-	ticker := ticker.New(wp.passivateAfter)
-	// Start the ticker for periodic cleanup
-	ticker.Start()
-
-	go func() {
-		for {
-			select {
-			case <-wp.stopCleanupSig:
-				ticker.Stop()
-				return
-			case <-ticker.Ticks:
-				now := time.Now().UnixNano()
-				cutoffTime := now - wp.passivateAfter.Nanoseconds()
-
-				// Process each shard
-				for i := range wp.numShards {
-					shard := wp.shards[i]
-
-					// Skip if shard is stopped
-					if shard.stopped.Load() {
-						continue
-					}
-
-					shard.mu.Lock()
-					length := len(shard.idleWorkers)
-
-					// Only clean up if we have a significant number of idle workers
-					if length <= 400 {
-						shard.mu.Unlock()
-						continue
-					}
-
-					// Binary search to find workers to clean up
-					// Find the first worker that's older than passivateAfter
-					start := 0
-					end := length - 1
-					pos := length
-
-					for start <= end {
-						mid := start + (end-start)/2
-						if shard.idleWorkers[mid].lastUsed.Load() < cutoffTime {
-							pos = mid
-							end = mid - 1
-						} else {
-							start = mid + 1
-						}
-					}
-
-					// No old workers
-					if pos >= length {
-						shard.mu.Unlock()
-						continue
-					}
-
-					// Collect workers to clean up
-					cleanupCount := length - pos
-					if cleanupCount > 0 {
-						// Resize workers slice if needed
-						if cap(workers) < cleanupCount {
-							workers = make([]*Worker, cleanupCount)
-						} else {
-							workers = workers[:cleanupCount]
-						}
-
-						// Copy workers to clean up
-						copy(workers, shard.idleWorkers[pos:])
-
-						// Trim the idle workers slice
-						for j := pos; j < length; j++ {
-							shard.idleWorkers[j] = nil // Help GC
-						}
-						shard.idleWorkers = shard.idleWorkers[:pos]
-					}
-					shard.mu.Unlock()
-
-					// Close worker channels outside of lock
-					for j := range workers {
-						// Mark as deleted first to prevent races
-						if !workers[j].isDeleted.Swap(true) {
-							workers[j].state.Store(workerStateClosed)
-							close(workers[j].workChan)
-						}
-						workers[j] = nil // Help GC
-					}
-				}
-			}
-		}
-	}()
-}
-
-// fastRand returns a random uint32 using thread-local random number generators
-// to avoid contention.
-func fastRand() uint32 {
-	// Get buffer from pool
-	buf := bufferpool.Pool.Get()
-	defer bufferpool.Pool.Put(buf)
-
-	// Ensure buffer has capacity for 4 bytes
-	buf.Grow(4)
-	b := buf.Bytes()[:0] // Get the underlying slice, but with zero length
-
-	// Create a properly sized slice that uses the buffer's capacity
-	data := append(b, make([]byte, 4)...)
-
-	// Read secure random bytes
-	n, err := rand.Read(data)
-
-	// Verify we got all the bytes we needed
-	if err != nil || n != 4 {
-		// Fallback in the extremely unlikely case of failure
-		return uint32(time.Now().UnixNano())
+// Printf implements the ants.Logger interface. It routes the formatted log message
+// to the appropriate log level method of the underlying log.Logger based on its
+// current log level.
+func (l logger) Printf(format string, args ...any) {
+	switch l.lg.LogLevel() {
+	case log.DebugLevel:
+		l.lg.Debugf(format, args...)
+	case log.ErrorLevel:
+		l.lg.Errorf(format, args...)
+	case log.InfoLevel:
+		l.lg.Infof(format, args...)
+	case log.WarningLevel:
+		l.lg.Warnf(format, args...)
+	case log.PanicLevel:
+		l.lg.Panicf(format, args...)
+	case log.FatalLevel:
+		l.lg.Fatalf(format, args...)
+	default:
+		l.lg.Debugf(format, args...)
 	}
-
-	// Convert bytes to uint32
-	return binary.LittleEndian.Uint32(data)
 }
