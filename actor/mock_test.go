@@ -686,12 +686,12 @@ func newMockEntity() *mockEntity {
 }
 
 // PreStart implements Actor.
-func (m *mockEntity) PreStart(ctx context.Context) error {
+func (m *mockEntity) PreStart(context.Context) error {
 	return nil
 }
 
 // PostStop implements Actor.
-func (m *mockEntity) PostStop(ctx context.Context) error {
+func (m *mockEntity) PostStop(context.Context) error {
 	return m.stateStore.WriteState(m.persistenceID, m.currentState)
 }
 
