@@ -124,7 +124,6 @@ func (worker *Worker) doWork() {
 	for work := range worker.workChan {
 		// Execute the task
 		work()
-
 		// Mark worker as idle and make it available for more work
 		worker.state.Store(workerStateIdle)
 		if !shard.setWorkerIdle(worker) {
@@ -262,7 +261,7 @@ func (wp *WorkerPool) SubmitWork(task func()) {
 	shard := wp.shards[shardIndex]
 	wp.mutex.RUnlock()
 
-	// Hand off task to the selected shard
+	// Hand off the task to the selected shard
 	shard.acquireWorker(task)
 }
 
@@ -271,12 +270,12 @@ func (wp *WorkerPool) SubmitWork(task func()) {
 func (shard *poolShard) acquireWorker(task func()) (worker *Worker) {
 	// Fast path: try to use cached idle workers without locking
 	if w := shard.idleWorker1.Swap(nil); w != nil {
-		// Verify worker is still valid before sending work
+		// Verify a worker is still valid before sending work
 		if !w.isDeleted.Load() && w.state.CompareAndSwap(workerStateIdle, workerStateWorking) {
 			w.workChan <- task
 			return w
 		}
-		// Worker was already deleted or in wrong state
+		// Worker was already deleted or in the wrong state
 		if !w.isDeleted.Load() {
 			shard.setWorkerIdle(w) // Put it back
 		}
@@ -317,7 +316,7 @@ func (shard *poolShard) acquireWorker(task func()) (worker *Worker) {
 	}
 	shard.mu.Unlock()
 
-	// Create new worker if needed
+	// Create a new worker if needed
 	worker = shard.workers.Get().(*Worker)
 	worker.shard = shard
 	if worker.workChan == nil {
@@ -326,7 +325,6 @@ func (shard *poolShard) acquireWorker(task func()) (worker *Worker) {
 	worker.state.Store(workerStateWorking)
 	worker.isDeleted.Store(false)
 	go worker.doWork()
-
 	worker.workChan <- task
 	return worker
 }

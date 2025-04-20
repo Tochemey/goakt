@@ -82,7 +82,7 @@ type PID struct {
 	address *address.Address
 
 	// helps determine whether the actor should handle messages or not.
-	started   atomic.Bool
+	running   atomic.Bool
 	stopping  atomic.Bool
 	suspended atomic.Bool
 
@@ -184,7 +184,7 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 	pid.initMaxRetries.Store(DefaultInitMaxRetries)
 	pid.latestReceiveDuration.Store(0)
 	pid.isSingleton.Store(false)
-	pid.started.Store(false)
+	pid.running.Store(false)
 	pid.stopping.Store(false)
 	pid.suspended.Store(false)
 	pid.passivateAfter.Store(DefaultPassivationTimeout)
@@ -364,7 +364,7 @@ func (pid *PID) Stop(ctx context.Context, cid *PID) error {
 // IsRunning returns true when the actor is alive ready to process messages and false
 // when the actor is stopped or not started at all
 func (pid *PID) IsRunning() bool {
-	return pid != nil && pid.started.Load() && !pid.suspended.Load()
+	return pid != nil && pid.running.Load() && !pid.suspended.Load()
 }
 
 // IsSuspended returns true when the actor is suspended
@@ -501,7 +501,7 @@ func (pid *PID) Restart(ctx context.Context) error {
 	if err := eg.Wait(); err != nil {
 		// disable messages processing
 		pid.stopping.Store(true)
-		pid.started.Store(false)
+		pid.running.Store(false)
 		return fmt.Errorf("actor=(%s) failed to restart: %w", pid.Name(), err)
 	}
 
@@ -1049,7 +1049,7 @@ func (pid *PID) Shutdown(ctx context.Context) error {
 	pid.stopLocker.Lock()
 	pid.logger.Infof("shutdown process has started for actor=(%s)...", pid.Name())
 
-	if !pid.started.Load() {
+	if !pid.running.Load() {
 		pid.logger.Infof("actor=%s is offline. Maybe it has been passivated or stopped already", pid.Name())
 		pid.stopLocker.Unlock()
 		return nil
@@ -1138,7 +1138,7 @@ func (pid *PID) doReceive(receiveCtx *ReceiveContext) {
 // message processing loop
 func (pid *PID) schedule() {
 	// only signal if the actor is not already processing messages
-	if pid.processing.CompareAndSwap(idle, busy) {
+	if pid.IsRunning() && pid.processing.CompareAndSwap(idle, busy) {
 		pid.workerPool.SubmitWork(pid.receiveLoop)
 	}
 }
@@ -1234,7 +1234,7 @@ func (pid *PID) init(ctx context.Context) error {
 		return e
 	}
 
-	pid.started.Store(true)
+	pid.running.Store(true)
 	pid.logger.Infof("%s successfully started.", pid.Name())
 
 	if pid.eventsStream != nil {
@@ -1477,7 +1477,7 @@ func (pid *PID) doStop(ctx context.Context) error {
 	if pid.stashBox != nil {
 		if err := pid.unstashAll(); err != nil {
 			pid.logger.Errorf("actor=(%s) failed to unstash messages", pid.Name())
-			pid.started.Store(false)
+			pid.running.Store(false)
 			return err
 		}
 	}
@@ -1494,7 +1494,7 @@ func (pid *PID) doStop(ctx context.Context) error {
 		AddErrorFn(func() error { return pid.freeWatchees() }).
 		AddErrorFn(func() error { return pid.freeChildren(ctx) }).
 		Error(); err != nil {
-		pid.started.Store(false)
+		pid.running.Store(false)
 		pid.reset()
 		return err
 	}
@@ -1506,12 +1506,12 @@ func (pid *PID) doStop(ctx context.Context) error {
 		AddErrorFn(func() error { return pid.actor.PostStop(ctx) }).
 		AddErrorFn(func() error { return pid.freeWatchers(ctx) }).
 		Error(); err != nil {
-		pid.started.Store(false)
+		pid.running.Store(false)
 		pid.reset()
 		return err
 	}
 
-	pid.started.Store(false)
+	pid.running.Store(false)
 	pid.logger.Infof("shutdown process completed for actor=%s...", pid.Name())
 	pid.reset()
 	return nil

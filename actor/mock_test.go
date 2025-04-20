@@ -654,7 +654,7 @@ func newMockExtension() *mockExtension {
 	}
 }
 
-func (m mockExtension) ID() string {
+func (m *mockExtension) ID() string {
 	return "mockStateStore"
 }
 
@@ -675,7 +675,7 @@ func (m *mockExtension) WriteState(persistenceID string, state *testpb.Account) 
 
 type mockEntity struct {
 	persistenceID string
-	currentState  *testpb.Account
+	currentState  *atomic.Pointer[testpb.Account]
 	stateStore    mockStateStore
 }
 
@@ -692,7 +692,7 @@ func (m *mockEntity) PreStart(context.Context) error {
 
 // PostStop implements Actor.
 func (m *mockEntity) PostStop(context.Context) error {
-	return m.stateStore.WriteState(m.persistenceID, m.currentState)
+	return m.stateStore.WriteState(m.persistenceID, m.currentState.Load())
 }
 
 // Receive implements Actor.
@@ -700,7 +700,7 @@ func (m *mockEntity) Receive(ctx *ReceiveContext) {
 	switch received := ctx.Message().(type) {
 	case *goaktpb.PostStart:
 		m.persistenceID = ctx.Self().Name()
-		m.currentState = new(testpb.Account)
+		m.currentState = atomic.NewPointer[testpb.Account](new(testpb.Account))
 		m.stateStore = ctx.Extension("mockStateStore").(mockStateStore)
 		// recover state from state store
 		if err := m.recoverFromStore(); err != nil {
@@ -710,29 +710,37 @@ func (m *mockEntity) Receive(ctx *ReceiveContext) {
 	case *testpb.CreateAccount:
 		// TODO: in production extra validation will be needed.
 		balance := received.GetAccountBalance()
-		m.currentState.AccountBalance = m.currentState.GetAccountBalance() + balance
+		newBalance := m.currentState.Load().GetAccountBalance() + balance
+		m.currentState.Store(&testpb.Account{
+			AccountId:      m.persistenceID,
+			AccountBalance: newBalance,
+		})
 		// persist the actor state
-		if err := m.stateStore.WriteState(m.persistenceID, m.currentState); err != nil {
+		if err := m.stateStore.WriteState(m.persistenceID, m.currentState.Load()); err != nil {
 			ctx.Err(err)
 			return
 		}
 		// here we are dealing with Ask which is the appropriate pattern for external applications that need
 		// response immediately
-		ctx.Response(m.currentState)
+		ctx.Response(m.currentState.Load())
 	case *testpb.CreditAccount:
 		// TODO: in production extra validation will be needed.
 		balance := received.GetBalance()
-		m.currentState.AccountBalance = m.currentState.GetAccountBalance() + balance
+		newBalance := m.currentState.Load().GetAccountBalance() + balance
+		m.currentState.Store(&testpb.Account{
+			AccountId:      m.persistenceID,
+			AccountBalance: newBalance,
+		})
 		// persist the actor state
-		if err := m.stateStore.WriteState(m.persistenceID, m.currentState); err != nil {
+		if err := m.stateStore.WriteState(m.persistenceID, m.currentState.Load()); err != nil {
 			ctx.Err(err)
 			return
 		}
 		// here we are dealing with Ask which is the appropriate pattern for external applications that need
 		// response immediately
-		ctx.Response(m.currentState)
+		ctx.Response(m.currentState.Load())
 	case *testpb.GetAccount:
-		ctx.Response(m.currentState)
+		ctx.Response(m.currentState.Load())
 	default:
 		ctx.Unhandled()
 	}
@@ -745,7 +753,7 @@ func (m *mockEntity) recoverFromStore() error {
 	}
 
 	if latestState != nil {
-		m.currentState = latestState
+		m.currentState.Store(latestState)
 	}
 
 	return nil
