@@ -38,7 +38,7 @@ import (
 )
 
 const (
-	maxPoolSize = 300
+	MaxPoolSize = 5e4
 )
 
 // ErrPoolClosed will be returned when submitting task to a closed pool.
@@ -70,8 +70,8 @@ func WithPassivateAfter(d time.Duration) Option {
 // WithPoolSize sets the pool size
 func WithPoolSize(size int) Option {
 	return OptionFunc(func(pool *WorkerPool) {
-		if size > maxPoolSize {
-			size = maxPoolSize
+		if size > MaxPoolSize {
+			size = MaxPoolSize
 		}
 		pool.poolSize = size
 	})
@@ -97,7 +97,7 @@ type WorkerPool struct {
 // New creates a new worker pool with the given options.
 func New(opts ...Option) *WorkerPool {
 	wp := &WorkerPool{
-		poolSize:       maxPoolSize,
+		poolSize:       MaxPoolSize,
 		passivateAfter: time.Second,
 		logger:         log.New(log.ErrorLevel, os.Stderr),
 	}
