@@ -32,7 +32,7 @@ import (
 
 // defaultKinds defines the default system kinds
 var defaultKinds = []Actor{
-	new(funcActor),
+	new(FuncActor),
 }
 
 // ClusterConfig defines the cluster mode settings
