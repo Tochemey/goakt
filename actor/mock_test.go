@@ -469,6 +469,7 @@ type testClusterConfig struct {
 	conf              autotls.Config
 	pubsubEnabled     bool
 	relocationEnabled bool
+	extension         extension.Extension
 }
 
 type testClusterOption func(*testClusterConfig)
@@ -489,6 +490,12 @@ func withTestPubSub() testClusterOption {
 func withoutTestRelocation() testClusterOption {
 	return func(tc *testClusterConfig) {
 		tc.relocationEnabled = false
+	}
+}
+
+func withMockExtension(ext extension.Extension) testClusterOption {
+	return func(tcc *testClusterConfig) {
+		tcc.extension = ext
 	}
 }
 
@@ -529,7 +536,10 @@ func testCluster(t *testing.T, serverAddr string, opts ...testClusterOption) (Ac
 		WithPeerStateLoopInterval(500 * time.Millisecond),
 		WithCluster(
 			NewClusterConfig().
-				WithKinds(new(mockActor)).
+				WithKinds(
+					new(mockActor),
+					new(mockEntity),
+				).
 				WithPartitionCount(7).
 				WithReplicaCount(1).
 				WithPeersPort(clusterPort).
@@ -560,6 +570,10 @@ func testCluster(t *testing.T, serverAddr string, opts ...testClusterOption) (Ac
 
 	if !cfg.relocationEnabled {
 		options = append(options, WithoutRelocation())
+	}
+
+	if cfg.extension != nil {
+		options = append(options, WithExtensions(cfg.extension))
 	}
 
 	// create the actor system
@@ -622,10 +636,117 @@ func extractMessage(bytes []byte) (string, error) {
 	return "", nil
 }
 
-type mockExtension struct{}
-
-func (m mockExtension) ID() string {
-	return "mock"
+type mockStateStore interface {
+	extension.Extension
+	WriteState(persistenceID string, state *testpb.Account) error
+	GetLatestState(persistenceID string) (*testpb.Account, error)
 }
 
-var _ extension.Extension = (*mockExtension)(nil)
+type mockExtension struct {
+	db *sync.Map
+}
+
+var _ mockStateStore = (*mockExtension)(nil)
+
+func newMockExtension() *mockExtension {
+	return &mockExtension{
+		db: &sync.Map{},
+	}
+}
+
+func (m mockExtension) ID() string {
+	return "mockStateStore"
+}
+
+// GetLatestState implements mockStateStore.
+func (m *mockExtension) GetLatestState(persistenceID string) (*testpb.Account, error) {
+	value, ok := m.db.Load(persistenceID)
+	if !ok {
+		return new(testpb.Account), nil
+	}
+	return value.(*testpb.Account), nil
+}
+
+// WriteState implements mockStateStore.
+func (m *mockExtension) WriteState(persistenceID string, state *testpb.Account) error {
+	m.db.Store(persistenceID, state)
+	return nil
+}
+
+type mockEntity struct {
+	persistenceID string
+	currentState  *testpb.Account
+	stateStore    mockStateStore
+}
+
+var _ Actor = (*mockEntity)(nil)
+
+func newMockEntity() *mockEntity {
+	return &mockEntity{}
+}
+
+// PreStart implements Actor.
+func (m *mockEntity) PreStart(ctx context.Context) error {
+	return nil
+}
+
+// PostStop implements Actor.
+func (m *mockEntity) PostStop(ctx context.Context) error {
+	return m.stateStore.WriteState(m.persistenceID, m.currentState)
+}
+
+// Receive implements Actor.
+func (m *mockEntity) Receive(ctx *ReceiveContext) {
+	switch received := ctx.Message().(type) {
+	case *goaktpb.PostStart:
+		m.persistenceID = ctx.Self().Name()
+		m.currentState = new(testpb.Account)
+		m.stateStore = ctx.Extension("mockStateStore").(mockStateStore)
+		// recover state from state store
+		if err := m.recoverFromStore(); err != nil {
+			ctx.Err(err)
+			return
+		}
+	case *testpb.CreateAccount:
+		// TODO: in production extra validation will be needed.
+		balance := received.GetAccountBalance()
+		m.currentState.AccountBalance = m.currentState.GetAccountBalance() + balance
+		// persist the actor state
+		if err := m.stateStore.WriteState(m.persistenceID, m.currentState); err != nil {
+			ctx.Err(err)
+			return
+		}
+		// here we are dealing with Ask which is the appropriate pattern for external applications that need
+		// response immediately
+		ctx.Response(m.currentState)
+	case *testpb.CreditAccount:
+		// TODO: in production extra validation will be needed.
+		balance := received.GetBalance()
+		m.currentState.AccountBalance = m.currentState.GetAccountBalance() + balance
+		// persist the actor state
+		if err := m.stateStore.WriteState(m.persistenceID, m.currentState); err != nil {
+			ctx.Err(err)
+			return
+		}
+		// here we are dealing with Ask which is the appropriate pattern for external applications that need
+		// response immediately
+		ctx.Response(m.currentState)
+	case *testpb.GetAccount:
+		ctx.Response(m.currentState)
+	default:
+		ctx.Unhandled()
+	}
+}
+
+func (m *mockEntity) recoverFromStore() error {
+	latestState, err := m.stateStore.GetLatestState(m.persistenceID)
+	if err != nil {
+		return fmt.Errorf("failed to get the latest state: %w", err)
+	}
+
+	if latestState != nil {
+		m.currentState = latestState
+	}
+
+	return nil
+}

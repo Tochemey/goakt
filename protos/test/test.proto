@@ -44,6 +44,10 @@ message AccountCredited {
 message DebitAccount {}
 message AccountDebited {}
 
+message GetAccount {
+  string account_id = 1;
+}
+
 message TestLogin {}
 message TestLoginSuccess {}
 message TestReadiness {}

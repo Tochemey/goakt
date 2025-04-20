@@ -380,3 +380,101 @@ func TestRebalancingWithoutRelocation(t *testing.T) {
 	assert.NoError(t, sd3.Close())
 	srv.Shutdown()
 }
+
+func TestRebalancingWithPersistenceExtension(t *testing.T) {
+	// create a context
+	ctx := context.TODO()
+	// start the NATS server
+	srv := startNatsServer(t)
+
+	// create the state store extension
+	stateStoreExtension := newMockExtension()
+
+	// create and start system cluster
+	node1, sd1 := testCluster(t, srv.Addr().String(), withMockExtension(stateStoreExtension))
+	require.NotNil(t, node1)
+	require.NotNil(t, sd1)
+
+	// create and start system cluster
+	node2, sd2 := testCluster(t, srv.Addr().String(), withMockExtension(stateStoreExtension))
+	require.NotNil(t, node2)
+	require.NotNil(t, sd2)
+
+	// create and start system cluster
+	node3, sd3 := testCluster(t, srv.Addr().String(), withMockExtension(stateStoreExtension))
+	require.NotNil(t, node3)
+	require.NotNil(t, sd3)
+
+	// let us create 4 entities on each node
+	for j := 1; j <= 4; j++ {
+		entityID := fmt.Sprintf("node1-entity-%d", j)
+		pid, err := node1.Spawn(ctx, entityID, newMockEntity())
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+
+		command := &testpb.CreateAccount{
+			AccountBalance: 500.00,
+		}
+		_, err = Ask(ctx, pid, command, time.Minute)
+		require.NoError(t, err)
+	}
+
+	util.Pause(time.Second)
+
+	for j := 1; j <= 4; j++ {
+		entityID := fmt.Sprintf("node2-entity-%d", j)
+		pid, err := node2.Spawn(ctx, entityID, newMockEntity())
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+
+		command := &testpb.CreateAccount{
+			AccountBalance: 600.00,
+		}
+		_, err = Ask(ctx, pid, command, time.Minute)
+		require.NoError(t, err)
+	}
+
+	util.Pause(time.Second)
+
+	for j := 1; j <= 4; j++ {
+		entityID := fmt.Sprintf("node3-entity-%d", j)
+		pid, err := node3.Spawn(ctx, entityID, newMockEntity())
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+
+		command := &testpb.CreateAccount{
+			AccountBalance: 700.00,
+		}
+		_, err = Ask(ctx, pid, command, time.Minute)
+		require.NoError(t, err)
+	}
+
+	util.Pause(time.Second)
+
+	// take down node2
+	require.NoError(t, node2.Stop(ctx))
+	require.NoError(t, sd2.Close())
+
+	// Wait for cluster rebalancing
+	util.Pause(time.Minute)
+
+	sender, err := node1.LocalActor("node1-entity-1")
+	require.NoError(t, err)
+	require.NotNil(t, sender)
+
+	// let us access some of the node2 actors from node 1
+	entityID := "node2-entity-1"
+	response, err := sender.SendSync(ctx, entityID, new(testpb.GetAccount), time.Minute)
+	require.NoError(t, err)
+	account, ok := response.(*testpb.Account)
+	require.True(t, ok)
+
+	// the balance when creating that entity is 600
+	require.EqualValues(t, 600, account.GetAccountBalance())
+
+	assert.NoError(t, node1.Stop(ctx))
+	assert.NoError(t, node3.Stop(ctx))
+	assert.NoError(t, sd1.Close())
+	assert.NoError(t, sd3.Close())
+	srv.Shutdown()
+}
