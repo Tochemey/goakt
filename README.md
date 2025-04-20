@@ -10,15 +10,15 @@
 ![GitHub Created At](https://img.shields.io/github/created-at/Tochemey/goakt)
 
 
-Distributed [Go](https://go.dev/) actor framework to build reactive and distributed system in golang using
-_**protocol buffers as actor messages**_.
+Distributed [Go](https://go.dev/) actor framework to build a reactive and distributed system in golang using
+_**protocol buffers**_ as actor messages.
 
 GoAkt is highly scalable and available when running in cluster mode. It comes with the necessary features require to
 build a distributed actor-based system without sacrificing performance and reliability. With GoAkt, you can instantly create a fast, scalable, distributed system
 across a cluster of computers.
 
 If you are not familiar with the actor model, the blog post from Brian Storti [here](https://www.brianstorti.com/the-actor-model/) is an excellent and short introduction to the actor model.
-Also, check reference section at the end of the post for more material regarding actor model.
+Also, check the reference section at the end of the post for more material regarding the actor model.
 
 ## 💻 Installation
 ```shell
@@ -50,7 +50,7 @@ The project adheres to [Semantic Versioning](https://semver.org)
 and [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/).
 This repo uses [Earthly](https://earthly.dev/get-earthly).
 
-To contribute please:
+To contribute, please:
 
 - Fork the repository
 - Create a feature branch
