@@ -1,21 +1,22 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
-    "config:base"
+    "config:recommended"
   ],
   "constraints": {
     "go": "1.21"
   },
   "enabledManagers": [
-    "regex",
+    "custom.regex",
     "github-actions",
     "gomod"
   ],
   "postUpdateOptions": [
     "gomodTidy"
   ],
-  "regexManagers": [
+  "customManagers": [
     {
+      "customType": "regex",
       "fileMatch": [
         ".github/renovate.json5$"
       ],
@@ -27,6 +28,7 @@
       "versioningTemplate": "npm"
     },
     {
+      "customType": "regex",
       "fileMatch": [
         "Earthfile$"
       ],
@@ -37,6 +39,7 @@
       "datasourceTemplate": "docker"
     },
     {
+      "customType": "regex",
       "fileMatch": [
         ".github/workflows/build.yml$",
         ".github/workflows/pr.yml$"
@@ -63,7 +66,7 @@
         "go",
         "golang"
       ],
-      "separateMinorPatch": "true"
+      "separateMinorPatch": true
     },
     {
       "matchPackageNames": [
