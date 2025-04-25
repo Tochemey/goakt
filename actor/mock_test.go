@@ -30,6 +30,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -757,4 +758,20 @@ func (m *mockEntity) recoverFromStore() error {
 	}
 
 	return nil
+}
+
+type invalidExtensionIDLength struct{}
+
+var _ extension.Extension = (*invalidExtensionIDLength)(nil)
+
+func (x *invalidExtensionIDLength) ID() string {
+	return strings.Repeat("a", 300)
+}
+
+type invalidExtensionID struct{}
+
+var _ extension.Extension = (*invalidExtensionID)(nil)
+
+func (x *invalidExtensionID) ID() string {
+	return "$omeN@me"
 }
