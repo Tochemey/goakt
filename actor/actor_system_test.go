@@ -1953,4 +1953,18 @@ func TestActorSystem(t *testing.T) {
 		require.NotNil(t, extension)
 		require.True(t, reflect.DeepEqual(extension, ext))
 	})
+	t.Run("With invalid Extension ID length", func(t *testing.T) {
+		ext := new(invalidExtensionIDLength)
+		actorSystem, err := NewActorSystem("testSys", WithExtensions(ext))
+		require.Error(t, err)
+		require.Nil(t, actorSystem)
+		require.ErrorContains(t, err, "invalid extension ID")
+	})
+	t.Run("With invalid Extension ID", func(t *testing.T) {
+		ext := new(invalidExtensionID)
+		actorSystem, err := NewActorSystem("testSys", WithExtensions(ext))
+		require.Error(t, err)
+		require.Nil(t, actorSystem)
+		require.ErrorContains(t, err, "invalid extension ID")
+	})
 }

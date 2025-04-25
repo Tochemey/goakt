@@ -67,6 +67,7 @@ import (
 	"github.com/tochemey/goakt/v3/internal/network"
 	"github.com/tochemey/goakt/v3/internal/ticker"
 	"github.com/tochemey/goakt/v3/internal/types"
+	"github.com/tochemey/goakt/v3/internal/validation"
 	"github.com/tochemey/goakt/v3/internal/workerpool"
 	"github.com/tochemey/goakt/v3/log"
 	"github.com/tochemey/goakt/v3/memory"
@@ -411,6 +412,13 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		workerpool.WithPassivateAfter(time.Second),
 		workerpool.WithLogger(system.logger),
 	)
+
+	// validate extensions when defined
+	if system.extensions.Len() > 0 {
+		if err := system.validateExtensions(); err != nil {
+			return nil, err
+		}
+	}
 
 	if err := system.remoteConfig.Sanitize(); err != nil {
 		return nil, err
@@ -1659,6 +1667,24 @@ func (x *actorSystem) ensureTLSProtos() {
 		protos.Append(toAdd...)
 		x.clientTLS.NextProtos = protos.ToSlice()
 	}
+}
+
+// validateExtensions validates extensions
+func (x *actorSystem) validateExtensions() error {
+	for _, ext := range x.extensions.Values() {
+		if ext != nil {
+			if len(ext.ID()) < 1 || len(ext.ID()) > 255 {
+				return fmt.Errorf("invalid extension ID: %s", ext.ID())
+			}
+			if err := validation.
+				NewPatternValidator("^[a-zA-Z0-9][a-zA-Z0-9-_]*$", ext.ID(),
+					fmt.Errorf("invalid extension ID: %s", ext.ID())).
+				Validate(); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // reset the actor system
