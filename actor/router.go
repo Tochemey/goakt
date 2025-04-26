@@ -25,7 +25,6 @@
 package actor
 
 import (
-	"context"
 	"fmt"
 	"math/rand/v2"
 	"reflect"
@@ -101,7 +100,7 @@ func newRouter(poolSize int, routeesKind Actor, loggger log.Logger, opts ...Rout
 }
 
 // PreStart pre-starts the actor.
-func (x *router) PreStart(context.Context) error {
+func (x *router) PreStart(*Context) error {
 	x.logger.Info("starting the router...")
 	return nil
 }
@@ -118,7 +117,7 @@ func (x *router) Receive(ctx *ReceiveContext) {
 }
 
 // PostStop is executed when the actor is shutting down.
-func (x *router) PostStop(context.Context) error {
+func (x *router) PostStop(*Context) error {
 	x.logger.Info("router stopped")
 	return nil
 }

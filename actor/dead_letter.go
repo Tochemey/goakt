@@ -25,8 +25,6 @@
 package actor
 
 import (
-	"context"
-
 	"go.uber.org/atomic"
 
 	"github.com/tochemey/goakt/v3/address"
@@ -62,7 +60,7 @@ func newDeadLetter() *deadLetter {
 }
 
 // PreStart pre-starts the deadletter actor
-func (x *deadLetter) PreStart(context.Context) error {
+func (x *deadLetter) PreStart(*Context) error {
 	return nil
 }
 
@@ -86,7 +84,7 @@ func (x *deadLetter) Receive(ctx *ReceiveContext) {
 }
 
 // PostStop handles post procedures
-func (x *deadLetter) PostStop(context.Context) error {
+func (x *deadLetter) PostStop(*Context) error {
 	x.logger.Infof("%s stopped successfully", x.pid.Name())
 	return nil
 }

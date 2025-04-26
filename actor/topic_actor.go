@@ -78,7 +78,7 @@ func newTopicActor(remoting *Remoting) Actor {
 }
 
 // PreStart is called before the actor starts
-func (x *topicActor) PreStart(context.Context) error {
+func (x *topicActor) PreStart(*Context) error {
 	x.topics.Reset()
 	x.processed.Reset()
 	return nil
@@ -103,7 +103,7 @@ func (x *topicActor) Receive(ctx *ReceiveContext) {
 }
 
 // PostStop is called when the actor is stopped
-func (x *topicActor) PostStop(context.Context) error {
+func (x *topicActor) PostStop(*Context) error {
 	x.topics.Reset()
 	x.processed.Reset()
 	x.logger.Infof("%s stopped successfully", x.pid.Name())

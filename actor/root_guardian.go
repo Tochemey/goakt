@@ -25,8 +25,6 @@
 package actor
 
 import (
-	"context"
-
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/log"
 )
@@ -48,7 +46,7 @@ func newRootGuardian() *rootGuardian {
 }
 
 // PreStart pre-starts the actor.
-func (r *rootGuardian) PreStart(context.Context) error {
+func (r *rootGuardian) PreStart(*Context) error {
 	return nil
 }
 
@@ -68,7 +66,7 @@ func (r *rootGuardian) Receive(ctx *ReceiveContext) {
 }
 
 // PostStop is executed when the actor is shutting down.
-func (r *rootGuardian) PostStop(context.Context) error {
+func (r *rootGuardian) PostStop(*Context) error {
 	r.logger.Infof("%s stopped successfully", r.pid.Name())
 	return nil
 }

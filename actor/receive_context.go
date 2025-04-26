@@ -56,7 +56,26 @@ func releaseContext(receiveContext *ReceiveContext) {
 	pool.Put(receiveContext)
 }
 
-// ReceiveContext is the context that is used by the actor to receive messages
+// ReceiveContext provides contextual information and operations
+// available to an actor when it is processing a message.
+//
+// It typically carries metadata about the incoming message,
+// offers control over the actor's lifecycle (e.g., stopping itself),
+// and gives access to messaging operations like sending a response,
+// forwarding the message, or spawning child actors.
+//
+// Implementations of ReceiveContext allow the actor's behavior
+// to be more declarative and consistent with the Actor Model.
+//
+// Example usage:
+//
+//	func (a *MyActor) Receive(ctx *actor.ReceiveContext) {
+//	    msg := ctx.Message()
+//	    switch msg := msg.(type) {
+//	    case *MyMessage:
+//	        ctx.Respond(&MyResponse{})
+//	    }
+//	}
 type ReceiveContext struct {
 	ctx          context.Context
 	message      proto.Message

@@ -52,7 +52,7 @@ func newSystemGuardian() *systemGuardian {
 }
 
 // PreStart is the pre-start hook
-func (x *systemGuardian) PreStart(context.Context) error {
+func (x *systemGuardian) PreStart(*Context) error {
 	return nil
 }
 
@@ -72,7 +72,7 @@ func (x *systemGuardian) Receive(ctx *ReceiveContext) {
 }
 
 // PostStop is the post-stop hook
-func (x *systemGuardian) PostStop(context.Context) error {
+func (x *systemGuardian) PostStop(*Context) error {
 	x.logger.Infof("%s stopped successfully", x.pid.Name())
 	return nil
 }

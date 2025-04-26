@@ -449,11 +449,11 @@ func (pid *PID) Restart(ctx context.Context) error {
 		if err := pid.Shutdown(ctx); err != nil {
 			return err
 		}
-		ticker := ticker.New(10 * time.Millisecond)
-		ticker.Start()
+		tk := ticker.New(10 * time.Millisecond)
+		tk.Start()
 		tickerStopSig := make(chan types.Unit, 1)
 		go func() {
-			for range ticker.Ticks {
+			for range tk.Ticks {
 				if !pid.IsRunning() {
 					tickerStopSig <- types.Unit{}
 					return
@@ -461,7 +461,7 @@ func (pid *PID) Restart(ctx context.Context) error {
 			}
 		}()
 		<-tickerStopSig
-		ticker.Stop()
+		tk.Stop()
 	}
 
 	pid.resetBehavior()
@@ -1226,9 +1226,14 @@ func (pid *PID) recovery(received *ReceiveContext) {
 func (pid *PID) init(ctx context.Context) error {
 	pid.logger.Infof("%s starting...", pid.Name())
 
-	cancelCtx, cancel := context.WithTimeout(ctx, pid.initTimeout.Load())
+	initContext := newContext(ctx, pid.Name(), pid.system)
+
+	cctx, cancel := context.WithTimeout(ctx, pid.initTimeout.Load())
 	retrier := retry.NewRetrier(int(pid.initMaxRetries.Load()), time.Millisecond, pid.initTimeout.Load())
-	if err := retrier.RunContext(cancelCtx, pid.actor.PreStart); err != nil {
+
+	if err := retrier.RunContext(cctx, func(_ context.Context) error {
+		return pid.actor.PreStart(initContext)
+	}); err != nil {
 		e := ErrInitFailure(err)
 		cancel()
 		return e
@@ -1392,15 +1397,15 @@ func (pid *PID) freeChildren(ctx context.Context) error {
 func (pid *PID) passivationLoop() {
 	pid.logger.Info("start the passivation listener...")
 	pid.logger.Infof("passivation timeout is (%s)", pid.passivateAfter.Load().String())
-	ticker := ticker.New(pid.passivateAfter.Load())
-	ticker.Start()
+	tk := ticker.New(pid.passivateAfter.Load())
+	tk.Start()
 	tickerStopSig := make(chan types.Unit, 1)
 
 	// start ticking
 	go func() {
 		for {
 			select {
-			case <-ticker.Ticks:
+			case <-tk.Ticks:
 				idleTime := time.Since(pid.latestReceiveTime.Load())
 				if idleTime >= pid.passivateAfter.Load() {
 					tickerStopSig <- types.Unit{}
@@ -1414,7 +1419,7 @@ func (pid *PID) passivationLoop() {
 	}()
 
 	<-tickerStopSig
-	ticker.Stop()
+	tk.Stop()
 
 	if pid.stopping.Load() || pid.suspended.Load() {
 		pid.logger.Infof("actor=%s is stopping or maybe suspended. No need to passivate", pid.Name())
@@ -1499,11 +1504,13 @@ func (pid *PID) doStop(ctx context.Context) error {
 		return err
 	}
 
+	stopContext := newContext(ctx, pid.Name(), pid.system)
+
 	// run the PostStop hook and let watchers know
 	// you are terminated
 	if err := errorschain.
 		New(errorschain.ReturnFirst()).
-		AddErrorFn(func() error { return pid.actor.PostStop(ctx) }).
+		AddErrorFn(func() error { return pid.actor.PostStop(stopContext) }).
 		AddErrorFn(func() error { return pid.freeWatchers(ctx) }).
 		Error(); err != nil {
 		pid.running.Store(false)

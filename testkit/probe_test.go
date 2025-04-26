@@ -212,7 +212,7 @@ func TestTestProbe(t *testing.T) {
 type pinger struct {
 }
 
-func (t pinger) PreStart(_ context.Context) error {
+func (t pinger) PreStart(_ *actors.Context) error {
 	return nil
 }
 
@@ -237,7 +237,7 @@ func (t pinger) Receive(ctx *actors.ReceiveContext) {
 	}
 }
 
-func (t pinger) PostStop(_ context.Context) error {
+func (t pinger) PostStop(_ *actors.Context) error {
 	return nil
 }
 

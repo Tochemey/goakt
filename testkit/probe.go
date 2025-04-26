@@ -89,7 +89,7 @@ type probeActor struct {
 var _ actors.Actor = &probeActor{}
 
 // PreStart is called before the actor starts
-func (x *probeActor) PreStart(_ context.Context) error {
+func (x *probeActor) PreStart(_ *actors.Context) error {
 	return nil
 }
 
@@ -111,7 +111,7 @@ func (x *probeActor) Receive(ctx *actors.ReceiveContext) {
 }
 
 // PostStop handles stop routines
-func (x *probeActor) PostStop(_ context.Context) error {
+func (x *probeActor) PostStop(_ *actors.Context) error {
 	return nil
 }
 
