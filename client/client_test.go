@@ -818,14 +818,14 @@ var _ actors.Actor = (*testActor)(nil)
 
 // Init initialize the actor. This function can be used to set up some database connections
 // or some sort of initialization before the actor init processing public
-func (p *testActor) PreStart(context.Context) error {
+func (p *testActor) PreStart(*actors.Context) error {
 	p.logger = log.DiscardLogger
 	p.logger.Info("pre start")
 	return nil
 }
 
 // Shutdown gracefully shuts down the given actor
-func (p *testActor) PostStop(context.Context) error {
+func (p *testActor) PostStop(*actors.Context) error {
 	p.logger.Info("post stop")
 	return nil
 }

@@ -24,10 +24,6 @@
 
 package actor
 
-import (
-	"context"
-)
-
 // Actor defines the interface that all actors in the system must implement.
 //
 // Actors are lightweight, concurrent, and isolated units of computation that
@@ -46,7 +42,7 @@ import (
 // **Supervision and Fault Tolerance**
 // If an actor fails during message processing, its supervisor can decide how to handle the failure
 // (e.g., restart, stop, escalate). If state recovery is needed (e.g., for persistent actors), it must
-// be explicitly handled inside Receive, typically in response to a PostStart system message.
+// be explicitly handled inside the PreStart hook.
 //
 // **Clustering and Remoting**
 // In a distributed deployment, actors can be remotely spawned, communicated with across nodes.
@@ -56,12 +52,9 @@ type Actor interface {
 	// PreStart is called once before the actor starts processing messages.
 	//
 	// Use this method to initialize dependencies such as database clients,
-	// caches, or external service connections. If PreStart returns an error,
+	// caches, or external service connections and persistent state recovery. If PreStart returns an error,
 	// the actor will not be started, and the failure will be handled by its supervisor.
-	//
-	// Important: Persistent actors should not attempt recovery here. Instead,
-	// listen for the PostStart system message inside Receive to trigger recovery logic.
-	PreStart(ctx context.Context) error
+	PreStart(ctx *Context) error
 
 	// Receive handles all messages sent to the actor's mailbox.
 	//
@@ -89,5 +82,5 @@ type Actor interface {
 	//
 	// Note: If PostStop returns an error, the error is logged but does not prevent the actor
 	// from being stopped. Keep PostStop logic fast and resilient to avoid delaying system shutdowns.
-	PostStop(ctx context.Context) error
+	PostStop(ctx *Context) error
 }

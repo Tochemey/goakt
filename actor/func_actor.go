@@ -115,11 +115,11 @@ func newFuncActor(id string, receiveFunc ReceiveFunc, config *funcConfig) *FuncA
 var _ Actor = (*FuncActor)(nil)
 
 // PreStart pre-starts the actor.
-func (x *FuncActor) PreStart(ctx context.Context) error {
+func (x *FuncActor) PreStart(ctx *Context) error {
 	// check whether the pre-start hook is set and call it
 	preStart := x.config.preStart
 	if preStart != nil {
-		return preStart(ctx)
+		return preStart(ctx.Context())
 	}
 	return nil
 }
@@ -138,11 +138,11 @@ func (x *FuncActor) Receive(ctx *ReceiveContext) {
 }
 
 // PostStop is executed when the actor is shutting down.
-func (x *FuncActor) PostStop(ctx context.Context) error {
+func (x *FuncActor) PostStop(ctx *Context) error {
 	// check whether the post-stop hook is set and call it
 	postStop := x.config.postStop
 	if postStop != nil {
-		return postStop(ctx)
+		return postStop(ctx.Context())
 	}
 	return nil
 }

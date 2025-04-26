@@ -53,7 +53,7 @@ func newClusterSingletonManager() Actor {
 }
 
 // PreStart implements the pre-start hook.
-func (x *clusterSingletonManager) PreStart(context.Context) error {
+func (x *clusterSingletonManager) PreStart(*Context) error {
 	return nil
 }
 
@@ -68,7 +68,7 @@ func (x *clusterSingletonManager) Receive(ctx *ReceiveContext) {
 }
 
 // PostStop implements the post-stop hook.
-func (x *clusterSingletonManager) PostStop(context.Context) error {
+func (x *clusterSingletonManager) PostStop(*Context) error {
 	x.logger.Infof("%s stopped successfully", x.pid.Name())
 	return nil
 }

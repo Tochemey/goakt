@@ -51,7 +51,7 @@ func newDeathWatch() *deathWatch {
 }
 
 // PreStart is the pre-start hook
-func (x *deathWatch) PreStart(context.Context) error {
+func (x *deathWatch) PreStart(*Context) error {
 	return nil
 }
 
@@ -68,7 +68,7 @@ func (x *deathWatch) Receive(ctx *ReceiveContext) {
 }
 
 // PostStop is executed when the actor is shutting down.
-func (x *deathWatch) PostStop(context.Context) error {
+func (x *deathWatch) PostStop(*Context) error {
 	x.logger.Infof("%s stopped successfully", x.pid.Name())
 	return nil
 }

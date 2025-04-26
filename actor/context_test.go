@@ -22,33 +22,38 @@
  * SOFTWARE.
  */
 
-package bench
+package actor
 
 import (
-	actors "github.com/tochemey/goakt/v3/actor"
-	"github.com/tochemey/goakt/v3/bench/benchpb"
-	"github.com/tochemey/goakt/v3/goaktpb"
+	"context"
+	"testing"
+
+	"github.com/stretchr/testify/require"
+
+	"github.com/tochemey/goakt/v3/log"
 )
 
-type Actor struct {
-}
+func TestContext(t *testing.T) {
+	ctx := context.Background()
 
-func (p *Actor) PreStart(*actors.Context) error {
-	return nil
-}
+	actorSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NotNil(t, actorSystem)
 
-func (p *Actor) Receive(ctx *actors.ReceiveContext) {
-	switch ctx.Message().(type) {
-	case *goaktpb.PostStart:
-	case *benchpb.BenchTell:
-	case *benchpb.BenchRequest:
-		ctx.Response(&benchpb.BenchResponse{})
-	case *benchpb.BenchPriorityMailbox:
-	default:
-		ctx.Unhandled()
-	}
-}
+	c := newContext(ctx, "name", actorSystem)
+	require.NotNil(t, c.ActorSystem())
+	require.Equal(t, "testSys", c.ActorSystem().Name())
+	require.Empty(t, c.ActorSystem().Actors())
+	require.NotNil(t, c.ActorSystem().Logger())
+	require.Empty(t, c.Extensions())
+	require.Nil(t, c.Extension("extensionID"))
 
-func (p *Actor) PostStop(*actors.Context) error {
-	return nil
+	dl, ok := c.Context().Deadline()
+	require.False(t, ok)
+	require.Zero(t, dl)
+	require.Equal(t, "name", c.ActorName())
+
+	done := c.Context().Done()
+	require.Nil(t, done)
+	require.NoError(t, c.Context().Err())
 }

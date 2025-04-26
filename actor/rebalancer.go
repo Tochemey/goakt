@@ -59,7 +59,7 @@ func newRebalancer(reflection *reflection, remoting *Remoting) *rebalancer {
 }
 
 // PreStart pre-starts the actor.
-func (r *rebalancer) PreStart(context.Context) error {
+func (r *rebalancer) PreStart(*Context) error {
 	return nil
 }
 
@@ -158,7 +158,7 @@ func (r *rebalancer) Rebalance(ctx *ReceiveContext) {
 }
 
 // PostStop is executed when the actor is shutting down.
-func (r *rebalancer) PostStop(context.Context) error {
+func (r *rebalancer) PostStop(*Context) error {
 	r.remoting.Close()
 	r.logger.Infof("%s stopped successfully", r.pid.Name())
 	return nil

@@ -25,8 +25,6 @@
 package actor
 
 import (
-	"context"
-
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/log"
 )
@@ -49,7 +47,7 @@ func newUserGuardian() *userGuardian {
 }
 
 // PreStart is the pre-start hook
-func (x *userGuardian) PreStart(context.Context) error {
+func (x *userGuardian) PreStart(*Context) error {
 	return nil
 }
 
@@ -69,7 +67,7 @@ func (x *userGuardian) Receive(ctx *ReceiveContext) {
 }
 
 // PostStop is the post-stop hook
-func (x *userGuardian) PostStop(context.Context) error {
+func (x *userGuardian) PostStop(*Context) error {
 	x.logger.Infof("%s stopped successfully", x.pid.Name())
 	return nil
 }
