@@ -42,7 +42,7 @@ package actor
 // **Supervision and Fault Tolerance**
 // If an actor fails during message processing, its supervisor can decide how to handle the failure
 // (e.g., restart, stop, escalate). If state recovery is needed (e.g., for persistent actors), it must
-// be explicitly handled inside the PreStart hook, typically in response to a PostStart system message.
+// be explicitly handled inside the PreStart hook.
 //
 // **Clustering and Remoting**
 // In a distributed deployment, actors can be remotely spawned, communicated with across nodes.
