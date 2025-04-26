@@ -45,6 +45,8 @@ func TestContext(t *testing.T) {
 	require.Equal(t, "testSys", c.ActorSystem().Name())
 	require.Empty(t, c.ActorSystem().Actors())
 	require.NotNil(t, c.ActorSystem().Logger())
+	require.Empty(t, c.Extensions())
+	require.Nil(t, c.Extension("extensionID"))
 
 	dl, ok := c.Context().Deadline()
 	require.False(t, ok)
