@@ -596,8 +596,12 @@ type RemoteSpawnRequest struct {
 	Relocatable bool `protobuf:"varint,6,opt,name=relocatable,proto3" json:"relocatable,omitempty"`
 	// Specifies the passivation time
 	PassivateAfter *durationpb.Duration `protobuf:"bytes,7,opt,name=passivate_after,json=passivateAfter,proto3" json:"passivate_after,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// Specifies the dependencies
+	Dependencies []*Dependency `protobuf:"bytes,8,rep,name=dependencies,proto3" json:"dependencies,omitempty"`
+	// States whether the actor will require a stash buffer
+	EnableStash   bool `protobuf:"varint,9,opt,name=enable_stash,json=enableStash,proto3" json:"enable_stash,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *RemoteSpawnRequest) Reset() {
@@ -679,6 +683,20 @@ func (x *RemoteSpawnRequest) GetPassivateAfter() *durationpb.Duration {
 	return nil
 }
 
+func (x *RemoteSpawnRequest) GetDependencies() []*Dependency {
+	if x != nil {
+		return x.Dependencies
+	}
+	return nil
+}
+
+func (x *RemoteSpawnRequest) GetEnableStash() bool {
+	if x != nil {
+		return x.EnableStash
+	}
+	return false
+}
+
 type RemoteSpawnResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -756,7 +774,7 @@ var File_internal_remoting_proto protoreflect.FileDescriptor
 const file_internal_remoting_proto_rawDesc = "" +
 	"\n" +
 	"\x17internal/remoting.proto\x12\n" +
-	"internalpb\x1a\x11goakt/goakt.proto\x1a\x19google/protobuf/any.proto\x1a\x1egoogle/protobuf/duration.proto\"\x8b\x01\n" +
+	"internalpb\x1a\x11goakt/goakt.proto\x1a\x19google/protobuf/any.proto\x1a\x1egoogle/protobuf/duration.proto\x1a\x19internal/dependency.proto\"\x8b\x01\n" +
 	"\x10RemoteAskRequest\x12B\n" +
 	"\x0fremote_messages\x18\x01 \x03(\v2\x19.internalpb.RemoteMessageR\x0eremoteMessages\x123\n" +
 	"\atimeout\x18\x02 \x01(\v2\x19.google.protobuf.DurationR\atimeout\"E\n" +
@@ -784,7 +802,7 @@ const file_internal_remoting_proto_rawDesc = "" +
 	"\x04host\x18\x01 \x01(\tR\x04host\x12\x12\n" +
 	"\x04port\x18\x02 \x01(\x05R\x04port\x12\x12\n" +
 	"\x04name\x18\x03 \x01(\tR\x04name\"\x14\n" +
-	"\x12RemoteStopResponse\"\x83\x02\n" +
+	"\x12RemoteStopResponse\"\xe2\x02\n" +
 	"\x12RemoteSpawnRequest\x12\x12\n" +
 	"\x04host\x18\x01 \x01(\tR\x04host\x12\x12\n" +
 	"\x04port\x18\x02 \x01(\x05R\x04port\x12\x1d\n" +
@@ -794,7 +812,9 @@ const file_internal_remoting_proto_rawDesc = "" +
 	"actor_type\x18\x04 \x01(\tR\tactorType\x12!\n" +
 	"\fis_singleton\x18\x05 \x01(\bR\visSingleton\x12 \n" +
 	"\vrelocatable\x18\x06 \x01(\bR\vrelocatable\x12B\n" +
-	"\x0fpassivate_after\x18\a \x01(\v2\x19.google.protobuf.DurationR\x0epassivateAfter\"\x15\n" +
+	"\x0fpassivate_after\x18\a \x01(\v2\x19.google.protobuf.DurationR\x0epassivateAfter\x12:\n" +
+	"\fdependencies\x18\b \x03(\v2\x16.internalpb.DependencyR\fdependencies\x12!\n" +
+	"\fenable_stash\x18\t \x01(\bR\venableStash\"\x15\n" +
 	"\x13RemoteSpawnResponse\"\r\n" +
 	"\vSpawnOption2\xee\x03\n" +
 	"\x0fRemotingService\x12H\n" +
@@ -842,6 +862,7 @@ var file_internal_remoting_proto_goTypes = []any{
 	(*durationpb.Duration)(nil),   // 14: google.protobuf.Duration
 	(*anypb.Any)(nil),             // 15: google.protobuf.Any
 	(*goaktpb.Address)(nil),       // 16: goaktpb.Address
+	(*Dependency)(nil),            // 17: internalpb.Dependency
 }
 var file_internal_remoting_proto_depIdxs = []int32{
 	6,  // 0: internalpb.RemoteAskRequest.remote_messages:type_name -> internalpb.RemoteMessage
@@ -853,23 +874,24 @@ var file_internal_remoting_proto_depIdxs = []int32{
 	16, // 6: internalpb.RemoteMessage.receiver:type_name -> goaktpb.Address
 	15, // 7: internalpb.RemoteMessage.message:type_name -> google.protobuf.Any
 	14, // 8: internalpb.RemoteSpawnRequest.passivate_after:type_name -> google.protobuf.Duration
-	0,  // 9: internalpb.RemotingService.RemoteAsk:input_type -> internalpb.RemoteAskRequest
-	2,  // 10: internalpb.RemotingService.RemoteTell:input_type -> internalpb.RemoteTellRequest
-	4,  // 11: internalpb.RemotingService.RemoteLookup:input_type -> internalpb.RemoteLookupRequest
-	7,  // 12: internalpb.RemotingService.RemoteReSpawn:input_type -> internalpb.RemoteReSpawnRequest
-	9,  // 13: internalpb.RemotingService.RemoteStop:input_type -> internalpb.RemoteStopRequest
-	11, // 14: internalpb.RemotingService.RemoteSpawn:input_type -> internalpb.RemoteSpawnRequest
-	1,  // 15: internalpb.RemotingService.RemoteAsk:output_type -> internalpb.RemoteAskResponse
-	3,  // 16: internalpb.RemotingService.RemoteTell:output_type -> internalpb.RemoteTellResponse
-	5,  // 17: internalpb.RemotingService.RemoteLookup:output_type -> internalpb.RemoteLookupResponse
-	8,  // 18: internalpb.RemotingService.RemoteReSpawn:output_type -> internalpb.RemoteReSpawnResponse
-	10, // 19: internalpb.RemotingService.RemoteStop:output_type -> internalpb.RemoteStopResponse
-	12, // 20: internalpb.RemotingService.RemoteSpawn:output_type -> internalpb.RemoteSpawnResponse
-	15, // [15:21] is the sub-list for method output_type
-	9,  // [9:15] is the sub-list for method input_type
-	9,  // [9:9] is the sub-list for extension type_name
-	9,  // [9:9] is the sub-list for extension extendee
-	0,  // [0:9] is the sub-list for field type_name
+	17, // 9: internalpb.RemoteSpawnRequest.dependencies:type_name -> internalpb.Dependency
+	0,  // 10: internalpb.RemotingService.RemoteAsk:input_type -> internalpb.RemoteAskRequest
+	2,  // 11: internalpb.RemotingService.RemoteTell:input_type -> internalpb.RemoteTellRequest
+	4,  // 12: internalpb.RemotingService.RemoteLookup:input_type -> internalpb.RemoteLookupRequest
+	7,  // 13: internalpb.RemotingService.RemoteReSpawn:input_type -> internalpb.RemoteReSpawnRequest
+	9,  // 14: internalpb.RemotingService.RemoteStop:input_type -> internalpb.RemoteStopRequest
+	11, // 15: internalpb.RemotingService.RemoteSpawn:input_type -> internalpb.RemoteSpawnRequest
+	1,  // 16: internalpb.RemotingService.RemoteAsk:output_type -> internalpb.RemoteAskResponse
+	3,  // 17: internalpb.RemotingService.RemoteTell:output_type -> internalpb.RemoteTellResponse
+	5,  // 18: internalpb.RemotingService.RemoteLookup:output_type -> internalpb.RemoteLookupResponse
+	8,  // 19: internalpb.RemotingService.RemoteReSpawn:output_type -> internalpb.RemoteReSpawnResponse
+	10, // 20: internalpb.RemotingService.RemoteStop:output_type -> internalpb.RemoteStopResponse
+	12, // 21: internalpb.RemotingService.RemoteSpawn:output_type -> internalpb.RemoteSpawnResponse
+	16, // [16:22] is the sub-list for method output_type
+	10, // [10:16] is the sub-list for method input_type
+	10, // [10:10] is the sub-list for extension type_name
+	10, // [10:10] is the sub-list for extension extendee
+	0,  // [0:10] is the sub-list for field type_name
 }
 
 func init() { file_internal_remoting_proto_init() }
@@ -877,6 +899,7 @@ func file_internal_remoting_proto_init() {
 	if File_internal_remoting_proto != nil {
 		return
 	}
+	file_internal_dependency_proto_init()
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

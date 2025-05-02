@@ -99,6 +99,10 @@ var (
 	ErrSingletonAlreadyExists = errors.New("singleton already exists")
 	// ErrLeaderNotFound is returned when the cluster oldest node(leader) is not found
 	ErrLeaderNotFound = errors.New("leader is not found")
+	// ErrDependencyTypeNotRegistered is returned when a given cluster-aware dependency is not registered
+	ErrDependencyTypeNotRegistered = errors.New("dependency type is not registered")
+	// ErrInstanceNotDependency is returned when we failed to create the instance of a dependency
+	ErrInstanceNotDependency = errors.New("failed to create instance. Reason: instance does not implement the Dependency interface")
 )
 
 // eof returns true if the given error is an EOF error

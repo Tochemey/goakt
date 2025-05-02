@@ -36,8 +36,12 @@ type ActorRef struct {
 	Relocatable bool `protobuf:"varint,4,opt,name=relocatable,proto3" json:"relocatable,omitempty"`
 	// Specifies the passivation time
 	PassivateAfter *durationpb.Duration `protobuf:"bytes,5,opt,name=passivate_after,json=passivateAfter,proto3" json:"passivate_after,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// Specifies the dependencies
+	Dependencies []*Dependency `protobuf:"bytes,6,rep,name=dependencies,proto3" json:"dependencies,omitempty"`
+	// States whether the actor will require a stash buffer
+	EnableStash   bool `protobuf:"varint,7,opt,name=enable_stash,json=enableStash,proto3" json:"enable_stash,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ActorRef) Reset() {
@@ -105,6 +109,20 @@ func (x *ActorRef) GetPassivateAfter() *durationpb.Duration {
 	return nil
 }
 
+func (x *ActorRef) GetDependencies() []*Dependency {
+	if x != nil {
+		return x.Dependencies
+	}
+	return nil
+}
+
+func (x *ActorRef) GetEnableStash() bool {
+	if x != nil {
+		return x.EnableStash
+	}
+	return false
+}
+
 // ActorProps defines the properties of an actor
 // that can be used to spawn an actor remotely.
 type ActorProps struct {
@@ -119,8 +137,12 @@ type ActorProps struct {
 	Relocatable bool `protobuf:"varint,4,opt,name=relocatable,proto3" json:"relocatable,omitempty"`
 	// Specifies the passivation time
 	PassivateAfter *durationpb.Duration `protobuf:"bytes,5,opt,name=passivate_after,json=passivateAfter,proto3" json:"passivate_after,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// Specifies the dependencies
+	Dependencies []*Dependency `protobuf:"bytes,6,rep,name=dependencies,proto3" json:"dependencies,omitempty"`
+	// States whether the actor will require a stash buffer
+	EnableStash   bool `protobuf:"varint,7,opt,name=enable_stash,json=enableStash,proto3" json:"enable_stash,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ActorProps) Reset() {
@@ -188,19 +210,35 @@ func (x *ActorProps) GetPassivateAfter() *durationpb.Duration {
 	return nil
 }
 
+func (x *ActorProps) GetDependencies() []*Dependency {
+	if x != nil {
+		return x.Dependencies
+	}
+	return nil
+}
+
+func (x *ActorProps) GetEnableStash() bool {
+	if x != nil {
+		return x.EnableStash
+	}
+	return false
+}
+
 var File_internal_actor_proto protoreflect.FileDescriptor
 
 const file_internal_actor_proto_rawDesc = "" +
 	"\n" +
 	"\x14internal/actor.proto\x12\n" +
-	"internalpb\x1a\x11goakt/goakt.proto\x1a\x1egoogle/protobuf/duration.proto\"\xe9\x01\n" +
+	"internalpb\x1a\x11goakt/goakt.proto\x1a\x1egoogle/protobuf/duration.proto\x1a\x19internal/dependency.proto\"\xc8\x02\n" +
 	"\bActorRef\x125\n" +
 	"\ractor_address\x18\x01 \x01(\v2\x10.goaktpb.AddressR\factorAddress\x12\x1d\n" +
 	"\n" +
 	"actor_type\x18\x02 \x01(\tR\tactorType\x12!\n" +
 	"\fis_singleton\x18\x03 \x01(\bR\visSingleton\x12 \n" +
 	"\vrelocatable\x18\x04 \x01(\bR\vrelocatable\x12B\n" +
-	"\x0fpassivate_after\x18\x05 \x01(\v2\x19.google.protobuf.DurationR\x0epassivateAfter\"\xd3\x01\n" +
+	"\x0fpassivate_after\x18\x05 \x01(\v2\x19.google.protobuf.DurationR\x0epassivateAfter\x12:\n" +
+	"\fdependencies\x18\x06 \x03(\v2\x16.internalpb.DependencyR\fdependencies\x12!\n" +
+	"\fenable_stash\x18\a \x01(\bR\venableStash\"\xb2\x02\n" +
 	"\n" +
 	"ActorProps\x12\x1d\n" +
 	"\n" +
@@ -209,7 +247,9 @@ const file_internal_actor_proto_rawDesc = "" +
 	"actor_type\x18\x02 \x01(\tR\tactorType\x12!\n" +
 	"\fis_singleton\x18\x03 \x01(\bR\visSingleton\x12 \n" +
 	"\vrelocatable\x18\x04 \x01(\bR\vrelocatable\x12B\n" +
-	"\x0fpassivate_after\x18\x05 \x01(\v2\x19.google.protobuf.DurationR\x0epassivateAfterB\xa3\x01\n" +
+	"\x0fpassivate_after\x18\x05 \x01(\v2\x19.google.protobuf.DurationR\x0epassivateAfter\x12:\n" +
+	"\fdependencies\x18\x06 \x03(\v2\x16.internalpb.DependencyR\fdependencies\x12!\n" +
+	"\fenable_stash\x18\a \x01(\bR\venableStashB\xa3\x01\n" +
 	"\x0ecom.internalpbB\n" +
 	"ActorProtoH\x02P\x01Z;github.com/tochemey/goakt/v3/internal/internalpb;internalpb\xa2\x02\x03IXX\xaa\x02\n" +
 	"Internalpb\xca\x02\n" +
@@ -234,16 +274,19 @@ var file_internal_actor_proto_goTypes = []any{
 	(*ActorProps)(nil),          // 1: internalpb.ActorProps
 	(*goaktpb.Address)(nil),     // 2: goaktpb.Address
 	(*durationpb.Duration)(nil), // 3: google.protobuf.Duration
+	(*Dependency)(nil),          // 4: internalpb.Dependency
 }
 var file_internal_actor_proto_depIdxs = []int32{
 	2, // 0: internalpb.ActorRef.actor_address:type_name -> goaktpb.Address
 	3, // 1: internalpb.ActorRef.passivate_after:type_name -> google.protobuf.Duration
-	3, // 2: internalpb.ActorProps.passivate_after:type_name -> google.protobuf.Duration
-	3, // [3:3] is the sub-list for method output_type
-	3, // [3:3] is the sub-list for method input_type
-	3, // [3:3] is the sub-list for extension type_name
-	3, // [3:3] is the sub-list for extension extendee
-	0, // [0:3] is the sub-list for field type_name
+	4, // 2: internalpb.ActorRef.dependencies:type_name -> internalpb.Dependency
+	3, // 3: internalpb.ActorProps.passivate_after:type_name -> google.protobuf.Duration
+	4, // 4: internalpb.ActorProps.dependencies:type_name -> internalpb.Dependency
+	5, // [5:5] is the sub-list for method output_type
+	5, // [5:5] is the sub-list for method input_type
+	5, // [5:5] is the sub-list for extension type_name
+	5, // [5:5] is the sub-list for extension extendee
+	0, // [0:5] is the sub-list for field type_name
 }
 
 func init() { file_internal_actor_proto_init() }
@@ -251,6 +294,7 @@ func file_internal_actor_proto_init() {
 	if File_internal_actor_proto != nil {
 		return
 	}
+	file_internal_dependency_proto_init()
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

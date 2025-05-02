@@ -41,20 +41,18 @@ import (
 // rebalancer is a system actor that helps rebalance cluster
 // when the cluster topology changes
 type rebalancer struct {
-	reflection *reflection
-	remoting   *Remoting
-	pid        *PID
-	logger     log.Logger
+	remoting *Remoting
+	pid      *PID
+	logger   log.Logger
 }
 
 // enforce compilation error
 var _ Actor = (*rebalancer)(nil)
 
 // newRebalancer creates an instance of rebalancer
-func newRebalancer(reflection *reflection, remoting *Remoting) *rebalancer {
+func newRebalancer(remoting *Remoting) *rebalancer {
 	return &rebalancer{
-		reflection: reflection,
-		remoting:   remoting,
+		remoting: remoting,
 	}
 }
 
@@ -206,7 +204,7 @@ func (r *rebalancer) computeRebalancing(totalPeers int, nodeLeftState *internalp
 
 // recreateLocally recreates the actor
 func (r *rebalancer) recreateLocally(ctx context.Context, props *internalpb.ActorProps, enforceSingleton bool) error {
-	actor, err := r.reflection.ActorFrom(props.GetActorType())
+	actor, err := r.pid.ActorSystem().getReflection().NewActor(props.GetActorType())
 	if err != nil {
 		return err
 	}
@@ -222,6 +220,18 @@ func (r *rebalancer) recreateLocally(ctx context.Context, props *internalpb.Acto
 
 	spawnOpts := []SpawnOption{
 		WithPassivateAfter(props.GetPassivateAfter().AsDuration()),
+	}
+
+	if props.GetEnableStash() {
+		spawnOpts = append(spawnOpts, WithStashing())
+	}
+
+	if len(props.GetDependencies()) > 0 {
+		dependencies, err := r.pid.ActorSystem().getReflection().ReflectDependencies(props.GetDependencies())
+		if err != nil {
+			return err
+		}
+		spawnOpts = append(spawnOpts, WithDependencies(dependencies...))
 	}
 
 	_, err = r.pid.ActorSystem().Spawn(ctx, props.GetActorName(), actor, spawnOpts...)

@@ -13,10 +13,10 @@ require (
 	github.com/hashicorp/go-sockaddr v1.0.7
 	github.com/hashicorp/memberlist v0.5.3
 	github.com/kapetan-io/tackle v0.11.0
-	github.com/nats-io/nats-server/v2 v2.11.2
-	github.com/nats-io/nats.go v1.41.2
+	github.com/nats-io/nats-server/v2 v2.11.3
+	github.com/nats-io/nats.go v1.42.0
 	github.com/panjf2000/ants/v2 v2.11.3
-	github.com/redis/go-redis/v9 v9.7.3
+	github.com/redis/go-redis/v9 v9.8.0
 	github.com/reugn/go-quartz v0.14.0
 	github.com/stretchr/testify v1.10.0
 	github.com/tochemey/olric v0.2.2
@@ -59,7 +59,7 @@ require (
 	github.com/google/flatbuffers v25.2.10+incompatible // indirect
 	github.com/google/gnostic-models v0.6.9 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
-	github.com/google/go-tpm v0.9.3 // indirect
+	github.com/google/go-tpm v0.9.4 // indirect
 	github.com/google/gofuzz v1.2.0 // indirect
 	github.com/hashicorp/errwrap v1.1.0 // indirect
 	github.com/hashicorp/go-immutable-radix v1.3.1 // indirect

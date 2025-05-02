@@ -1,0 +1,18 @@
+syntax = "proto3";
+
+package internalpb;
+
+option go_package = "github.com/tochemey/goakt/v3/internal/internalpb;internalpb";
+
+// Dependency represents a single actor dependency definition.
+//
+// This message is used to capture all the necessary metadata and initialization
+// details required to recreate a dependency instance during the actor's lifecycle.
+message Dependency {
+  // Specifies the dependency ID
+  string id = 1;
+  // Specifies the dependency type name
+  string type_name = 2;
+  // The serialized binary data representing the Dependency's value.
+  bytes bytea = 3;
+}

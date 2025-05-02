@@ -27,6 +27,7 @@ package actor
 import (
 	"reflect"
 
+	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/types"
 )
 
@@ -40,17 +41,15 @@ func newReflection(registry types.Registry) *reflection {
 	return &reflection{registry: registry}
 }
 
-// ActorFrom creates a new instance of Actor from its FQN
-func (r *reflection) ActorFrom(key string) (actor Actor, err error) {
-	rtype, ok := r.registry.TypeOf(key)
+// NewActor creates a new instance of Actor from its FQN
+func (r *reflection) NewActor(typeName string) (actor Actor, err error) {
+	rtype, ok := r.registry.TypeOf(typeName)
 	if !ok {
 		return nil, ErrTypeNotRegistered
 	}
 
-	iActor := reflect.TypeOf((*Actor)(nil)).Elem()
-	isActor := rtype.Implements(iActor) || reflect.PointerTo(rtype).Implements(iActor)
-
-	if !isActor {
+	elem := reflect.TypeOf((*Actor)(nil)).Elem()
+	if ok := rtype.Implements(elem) || reflect.PointerTo(rtype).Implements(elem); !ok {
 		return nil, ErrInstanceNotAnActor
 	}
 
@@ -59,4 +58,43 @@ func (r *reflection) ActorFrom(key string) (actor Actor, err error) {
 		return nil, ErrInvalidInstance
 	}
 	return instance.Interface().(Actor), nil
+}
+
+// NewDependency creates a new instance of Dependency from its type name and bytes array
+func (r *reflection) NewDependency(typeName string, bytea []byte) (Dependency, error) {
+	dept, ok := r.registry.TypeOf(typeName)
+	if !ok {
+		return nil, ErrDependencyTypeNotRegistered
+	}
+
+	elem := reflect.TypeOf((*Dependency)(nil)).Elem()
+	if ok := dept.Implements(elem) || reflect.PointerTo(dept).Implements(elem); !ok {
+		return nil, ErrInstanceNotDependency
+	}
+
+	instance := reflect.New(dept)
+	if !instance.IsValid() {
+		return nil, ErrInvalidInstance
+	}
+
+	if dependency, ok := instance.Interface().(Dependency); ok {
+		if err := dependency.UnmarshalBinary(bytea); err != nil {
+			return nil, err
+		}
+		return dependency, nil
+	}
+	return nil, ErrInvalidInstance
+}
+
+// ReflectDependencies reflects the dependencies
+func (r *reflection) ReflectDependencies(dependencies []*internalpb.Dependency) ([]Dependency, error) {
+	deps := make([]Dependency, 0, len(dependencies))
+	for _, dep := range dependencies {
+		dependency, err := r.NewDependency(dep.GetTypeName(), dep.GetBytea())
+		if err != nil {
+			return nil, err
+		}
+		deps = append(deps, dependency)
+	}
+	return deps, nil
 }

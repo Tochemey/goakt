@@ -223,6 +223,16 @@ type ActorSystem interface { //nolint:revive
 	// Returns:
 	//   - extension.Extension: The registered extension with the given ID, or nil if not found.
 	Extension(extensionID string) extension.Extension
+	// RegisterDependencies registers dependencies with the ActorSystem.
+	// These dependencies will be injected into actors that require external resources
+	// (e.g., services, clients, or repositories) when they are spawned.
+	//
+	// This is particularly important in distributed systems where actors might need
+	// to be redeployed automatically to a different node if their current host fails
+	// or leaves the cluster unexpectedly. By registering the dependencies here,
+	// the cluster runtime ensures that the redeployed actor has access to the same
+	// necessary dependencies as before.
+	RegisterDependencies(dependencies ...Dependency) error
 	// handleRemoteAsk handles a synchronous message to another actor and expect a response.
 	// This block until a response is received or timed out.
 	handleRemoteAsk(ctx context.Context, to *PID, message proto.Message, timeout time.Duration) (response proto.Message, err error)
@@ -249,6 +259,7 @@ type ActorSystem interface { //nolint:revive
 	getDeadletter() *PID
 	getSingletonManager() *PID
 	getWorkerPool() *workerpool.WorkerPool
+	getReflection() *reflection
 }
 
 // ActorSystem represent a collection of actors on a given node
@@ -301,8 +312,6 @@ type actorSystem struct {
 
 	// help protect some the fields to set
 	locker sync.Mutex
-	// specifies the stash capacity
-	stashEnabled bool
 
 	stopGC chan types.Unit
 
@@ -371,7 +380,6 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		actorInitMaxRetries:    DefaultInitMaxRetries,
 		locker:                 sync.Mutex{},
 		shutdownTimeout:        DefaultShutdownTimeout,
-		stashEnabled:           false,
 		stopGC:                 make(chan types.Unit, 1),
 		eventsStream:           eventstream.New(),
 		partitionHasher:        hash.DefaultHasher(),
@@ -1264,7 +1272,7 @@ func (x *actorSystem) RemoteSpawn(ctx context.Context, request *connect.Request[
 		return nil, connect.NewError(connect.CodeInvalidArgument, ErrInvalidHost)
 	}
 
-	actor, err := x.reflection.ActorFrom(msg.GetActorType())
+	actor, err := x.reflection.NewActor(msg.GetActorType())
 	if err != nil {
 		logger.Errorf(
 			"failed to create actor=[(%s) of type (%s)] on [host=%s, port=%d]: reason: (%v)",
@@ -1291,6 +1299,20 @@ func (x *actorSystem) RemoteSpawn(ctx context.Context, request *connect.Request[
 
 	if !msg.GetRelocatable() {
 		opts = append(opts, WithRelocationDisabled())
+	}
+
+	if msg.GetEnableStash() {
+		opts = append(opts, WithStashing())
+	}
+
+	// set the dependencies if any
+	if len(msg.GetDependencies()) > 0 {
+		dependencies, err := x.reflection.ReflectDependencies(msg.GetDependencies())
+		if err != nil {
+			logger.Errorf("failed to create actor=(%s) on [host=%s, port=%d]: reason: (%v)", msg.GetActorName(), msg.GetHost(), msg.GetPort(), err)
+			return nil, connect.NewError(connect.CodeInternal, err)
+		}
+		opts = append(opts, WithDependencies(dependencies...))
 	}
 
 	if _, err = x.Spawn(ctx, msg.GetActorName(), actor, opts...); err != nil {
@@ -1344,6 +1366,66 @@ func (x *actorSystem) GetKinds(_ context.Context, request *connect.Request[inter
 	}
 
 	return connect.NewResponse(&internalpb.GetKindsResponse{Kinds: kinds}), nil
+}
+
+// TopicActor returns the cluster pub/sub mediator
+func (x *actorSystem) TopicActor() *PID {
+	x.locker.Lock()
+	mediator := x.topicActor
+	x.locker.Unlock()
+	return mediator
+}
+
+// Extensions returns a slice of all registered extensions in the ActorSystem.
+//
+// This allows system-level introspection or iteration over all available extensions.
+// It can be useful for diagnostics, monitoring, or applying configuration across all extensions.
+//
+// Returns:
+//   - []extension.Extension: A list of all registered extensions.
+func (x *actorSystem) Extensions() []extension.Extension {
+	return x.extensions.Values()
+}
+
+// Extension retrieves a specific registered extension by its unique ID.
+//
+// This method allows actors or system components to access a specific Extension
+// instance that was previously registered using WithExtensions.
+//
+// Parameters:
+//   - extensionID: The unique identifier of the extension to retrieve.
+//
+// Returns:
+//   - extension.Extension: The registered extension with the given ID, or nil if not found.
+func (x *actorSystem) Extension(extensionID string) extension.Extension {
+	if ext, ok := x.extensions.Get(extensionID); ok {
+		return ext
+	}
+	return nil
+}
+
+// RegisterDependencies registers dependencies with the ActorSystem.
+// These dependencies will be injected into actors that require external resources
+// (e.g., services, clients, or repositories) when they are spawned.
+//
+// This is particularly important in distributed systems where actors might need
+// to be redeployed automatically to a different node if their current host fails
+// or leaves the cluster unexpectedly. By registering the dependencies here,
+// the cluster runtime ensures that the redeployed actor has access to the same
+// necessary dependencies as before.
+func (x *actorSystem) RegisterDependencies(dependencies ...Dependency) error {
+	x.locker.Lock()
+
+	if !x.started.Load() {
+		x.locker.Unlock()
+		return ErrActorSystemNotStarted
+	}
+
+	for _, dependency := range dependencies {
+		x.registry.Register(dependency)
+	}
+	x.locker.Unlock()
+	return nil
 }
 
 // handleRemoteAsk handles a synchronous message to another actor and expect a response.
@@ -1405,48 +1487,19 @@ func (x *actorSystem) getWorkerPool() *workerpool.WorkerPool {
 	return workerPool
 }
 
+// getReflection returns the system reflection
+func (x *actorSystem) getReflection() *reflection {
+	x.locker.Lock()
+	defer x.locker.Unlock()
+	return x.reflection
+}
+
 // getSingletonManager returns the system singleton manager
 func (x *actorSystem) getSingletonManager() *PID {
 	x.locker.Lock()
 	singletonManager := x.singletonManager
 	x.locker.Unlock()
 	return singletonManager
-}
-
-// TopicActor returns the cluster pub/sub mediator
-func (x *actorSystem) TopicActor() *PID {
-	x.locker.Lock()
-	mediator := x.topicActor
-	x.locker.Unlock()
-	return mediator
-}
-
-// Extensions returns a slice of all registered extensions in the ActorSystem.
-//
-// This allows system-level introspection or iteration over all available extensions.
-// It can be useful for diagnostics, monitoring, or applying configuration across all extensions.
-//
-// Returns:
-//   - []extension.Extension: A list of all registered extensions.
-func (x *actorSystem) Extensions() []extension.Extension {
-	return x.extensions.Values()
-}
-
-// Extension retrieves a specific registered extension by its unique ID.
-//
-// This method allows actors or system components to access a specific Extension
-// instance that was previously registered using WithExtensions.
-//
-// Parameters:
-//   - extensionID: The unique identifier of the extension to retrieve.
-//
-// Returns:
-//   - extension.Extension: The registered extension with the given ID, or nil if not found.
-func (x *actorSystem) Extension(extensionID string) extension.Extension {
-	if ext, ok := x.extensions.Get(extensionID); ok {
-		return ext
-	}
-	return nil
 }
 
 func (x *actorSystem) completeRebalancing() {
@@ -1479,12 +1532,27 @@ func (x *actorSystem) getPeerStateFromStore(address string) (*internalpb.PeerSta
 // broadcastActor broadcast the newly (re)spawned actor into the cluster
 func (x *actorSystem) broadcastActor(actor *PID) {
 	if x.clusterEnabled.Load() {
+		var dependencies []*internalpb.Dependency
+		for _, dependency := range actor.Dependencies() {
+			bytea, err := dependency.MarshalBinary()
+			if err != nil {
+				// TODO
+			}
+
+			dependencies = append(dependencies, &internalpb.Dependency{
+				Id:       dependency.ID(),
+				TypeName: types.Name(dependency),
+				Bytea:    bytea,
+			})
+		}
+
 		x.wireActorsQueue <- &internalpb.ActorRef{
 			ActorAddress:   actor.Address().Address,
 			ActorType:      types.Name(actor.Actor()),
 			IsSingleton:    actor.IsSingleton(),
 			Relocatable:    actor.IsRelocatable(),
 			PassivateAfter: durationpb.New(actor.PassivationTime()),
+			Dependencies:   dependencies,
 		}
 	}
 }
@@ -1973,8 +2041,16 @@ func (x *actorSystem) configPID(ctx context.Context, name string, actor Actor, o
 	}
 
 	// enable stash
-	if x.stashEnabled {
+	if spawnConfig.enableStash {
 		pidOpts = append(pidOpts, withStash())
+	}
+
+	// set the dependencies when defined
+	if spawnConfig.dependencies != nil {
+		for _, dependency := range spawnConfig.dependencies {
+			x.registry.Register(dependency)
+		}
+		pidOpts = append(pidOpts, withDependencies(spawnConfig.dependencies...))
 	}
 
 	switch {
@@ -2164,7 +2240,7 @@ func (x *actorSystem) spawnRebalancer(ctx context.Context) error {
 
 		x.rebalancer, err = x.configPID(ctx,
 			actorName,
-			newRebalancer(x.reflection, x.remoting),
+			newRebalancer(x.remoting),
 			WithSupervisor(supervisor),
 		)
 		if err != nil {
