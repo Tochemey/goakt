@@ -470,6 +470,7 @@ type testClusterConfig struct {
 	pubsubEnabled     bool
 	relocationEnabled bool
 	extension         extension.Extension
+	dependency        Dependency
 }
 
 type testClusterOption func(*testClusterConfig)
@@ -496,6 +497,12 @@ func withoutTestRelocation() testClusterOption {
 func withMockExtension(ext extension.Extension) testClusterOption {
 	return func(tcc *testClusterConfig) {
 		tcc.extension = ext
+	}
+}
+
+func withMockDependency(dep Dependency) testClusterOption {
+	return func(tcc *testClusterConfig) {
+		tcc.dependency = dep
 	}
 }
 
@@ -581,6 +588,10 @@ func testCluster(t *testing.T, serverAddr string, opts ...testClusterOption) (Ac
 
 	require.NotNil(t, system)
 	require.NoError(t, err)
+
+	if cfg.dependency != nil {
+		require.NoError(t, system.RegisterDependencies(cfg.dependency))
+	}
 
 	// start the node
 	require.NoError(t, system.Start(ctx))

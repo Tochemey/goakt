@@ -26,6 +26,8 @@ package actor
 
 import (
 	"time"
+
+	"github.com/tochemey/goakt/v3/internal/validation"
 )
 
 // spawnConfig defines the configuration to apply when creating an actor
@@ -46,6 +48,19 @@ type spawnConfig struct {
 	dependencies []Dependency
 	// specifies whether that actor should be have stash buffer
 	enableStash bool
+}
+
+var _ validation.Validator = (*spawnConfig)(nil)
+
+func (s *spawnConfig) Validate() error {
+	for _, dependency := range s.dependencies {
+		if dependency != nil {
+			if err := validation.NewIDValidator(dependency.ID()).Validate(); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // newSpawnConfig creates an instance of spawnConfig

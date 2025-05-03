@@ -239,7 +239,7 @@ type ActorSystem interface { //nolint:revive
 	// handleRemoteTell handles an asynchronous message to an actor
 	handleRemoteTell(ctx context.Context, to *PID, message proto.Message) error
 	// broadcastActor sets actor in the actor system actors registry
-	broadcastActor(actor *PID)
+	broadcastActor(actor *PID) error
 	// getPeerStateFromStore returns the peer state from the cluster store
 	getPeerStateFromStore(address string) (*internalpb.PeerState, error)
 	// removePeerStateFromStore removes the peer state from the cluster store
@@ -747,8 +747,7 @@ func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor, opts 
 	guardian := x.getUserGuardian()
 	_ = x.actors.addNode(guardian, pid)
 	x.actors.addWatcher(pid, x.deathWatch)
-	x.broadcastActor(pid)
-	return pid, nil
+	return pid, x.broadcastActor(pid)
 }
 
 // SpawnNamedFromFunc creates an actor with the given receive function and provided name. One can set the PreStart and PostStop lifecycle hooks
@@ -783,8 +782,7 @@ func (x *actorSystem) SpawnNamedFromFunc(ctx context.Context, name string, recei
 	x.actorsCounter.Inc()
 	_ = x.actors.addNode(x.userGuardian, pid)
 	x.actors.addWatcher(pid, x.deathWatch)
-	x.broadcastActor(pid)
-	return pid, nil
+	return pid, x.broadcastActor(pid)
 }
 
 // SpawnFromFunc creates an actor with the given receive function.
@@ -852,8 +850,7 @@ func (x *actorSystem) SpawnSingleton(ctx context.Context, name string, actor Act
 	// add the given actor to the tree and supervise it
 	_ = x.actors.addNode(x.singletonManager, pid)
 	x.actors.addWatcher(pid, x.deathWatch)
-	x.broadcastActor(pid)
-	return nil
+	return x.broadcastActor(pid)
 }
 
 // Kill stops a given actor in the system
@@ -1421,6 +1418,11 @@ func (x *actorSystem) RegisterDependencies(dependencies ...Dependency) error {
 		return ErrActorSystemNotStarted
 	}
 
+	if err := x.validateDependencies(dependencies...); err != nil {
+		x.locker.Unlock()
+		return err
+	}
+
 	for _, dependency := range dependencies {
 		x.registry.Register(dependency)
 	}
@@ -1530,13 +1532,13 @@ func (x *actorSystem) getPeerStateFromStore(address string) (*internalpb.PeerSta
 }
 
 // broadcastActor broadcast the newly (re)spawned actor into the cluster
-func (x *actorSystem) broadcastActor(actor *PID) {
+func (x *actorSystem) broadcastActor(actor *PID) error {
 	if x.clusterEnabled.Load() {
 		var dependencies []*internalpb.Dependency
 		for _, dependency := range actor.Dependencies() {
 			bytea, err := dependency.MarshalBinary()
 			if err != nil {
-				// TODO
+				return err
 			}
 
 			dependencies = append(dependencies, &internalpb.Dependency{
@@ -1555,6 +1557,7 @@ func (x *actorSystem) broadcastActor(actor *PID) {
 			Dependencies:   dependencies,
 		}
 	}
+	return nil
 }
 
 // enableClustering enables clustering. When clustering is enabled remoting is also enabled to facilitate remote
@@ -1741,13 +1744,19 @@ func (x *actorSystem) ensureTLSProtos() {
 func (x *actorSystem) validateExtensions() error {
 	for _, ext := range x.extensions.Values() {
 		if ext != nil {
-			if len(ext.ID()) < 1 || len(ext.ID()) > 255 {
-				return fmt.Errorf("invalid extension ID: %s", ext.ID())
+			if err := validation.NewIDValidator(ext.ID()).Validate(); err != nil {
+				return err
 			}
-			if err := validation.
-				NewPatternValidator("^[a-zA-Z0-9][a-zA-Z0-9-_]*$", ext.ID(),
-					fmt.Errorf("invalid extension ID: %s", ext.ID())).
-				Validate(); err != nil {
+		}
+	}
+	return nil
+}
+
+// validateDependencies validates dependencies
+func (x *actorSystem) validateDependencies(dependencies ...Dependency) error {
+	for _, dependency := range dependencies {
+		if dependency != nil {
+			if err := validation.NewIDValidator(dependency.ID()).Validate(); err != nil {
 				return err
 			}
 		}
@@ -1947,7 +1956,7 @@ func (x *actorSystem) peersStateLoop() {
 	x.logger.Info("peers state synchronization has stopped...")
 }
 
-// rebalancingLoop help perform cluster rebalancing
+// rebalancingLoop helps perform cluster rebalancing
 func (x *actorSystem) rebalancingLoop() {
 	for peerState := range x.rebalancingQueue {
 		ctx := context.Background()
@@ -2021,6 +2030,11 @@ func (x *actorSystem) configPID(ctx context.Context, name string, actor Actor, o
 	}
 
 	spawnConfig := newSpawnConfig(opts...)
+
+	if err := spawnConfig.Validate(); err != nil {
+		return nil, err
+	}
+
 	// set the mailbox option
 	if spawnConfig.mailbox != nil {
 		pidOpts = append(pidOpts, withMailbox(spawnConfig.mailbox))
@@ -2094,7 +2108,7 @@ func (x *actorSystem) getCluster() cluster.Interface {
 	return x.cluster
 }
 
-// reservedName returns reserved actor's name
+// reservedName returns the reserved actor's name
 func (x *actorSystem) reservedName(nameType nameType) string {
 	return systemNames[nameType]
 }

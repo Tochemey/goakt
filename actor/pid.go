@@ -596,7 +596,7 @@ func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor, opts .
 		}
 	}
 
-	// create the child actor options child inherit parent's options
+	// create the child actor options child inherits parent's options
 	pidOptions := []pidOption{
 		withInitMaxRetries(int(pid.initMaxRetries.Load())),
 		withCustomLogger(pid.logger),
@@ -608,6 +608,10 @@ func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor, opts .
 	}
 
 	spawnConfig := newSpawnConfig(opts...)
+	if err := spawnConfig.Validate(); err != nil {
+		return nil, err
+	}
+
 	if spawnConfig.mailbox != nil {
 		pidOptions = append(pidOptions, withMailbox(spawnConfig.mailbox))
 	}
@@ -680,8 +684,7 @@ func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor, opts .
 	}
 
 	// set the actor in the given actor system registry
-	pid.ActorSystem().broadcastActor(cid)
-	return cid, nil
+	return cid, pid.ActorSystem().broadcastActor(cid)
 }
 
 // StashSize returns the stash buffer size
