@@ -1546,6 +1546,7 @@ func (x *actorSystem) broadcastActor(pid *PID) error {
 			Relocatable:    pid.IsRelocatable(),
 			PassivateAfter: durationpb.New(pid.PassivationTime()),
 			Dependencies:   dependencies,
+			EnableStash:    pid.stashBox != nil,
 		}
 	}
 	return nil
