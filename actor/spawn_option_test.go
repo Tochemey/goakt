@@ -84,3 +84,21 @@ func TestNewSpawnConfig(t *testing.T) {
 	require.NotNil(t, config)
 	require.Nil(t, config.mailbox)
 }
+
+func TestSpawnConfigWithDependencies(t *testing.T) {
+	t.Run("With valid dependency", func(t *testing.T) {
+		config := &spawnConfig{}
+		dependency := dependencyMock("id", "user", "email")
+		option := WithDependencies(dependency)
+		option.Apply(config)
+		require.Equal(t, &spawnConfig{dependencies: []Dependency{dependency}}, config)
+	})
+	t.Run("With dependencies validation", func(t *testing.T) {
+		config := &spawnConfig{}
+		dependency := dependencyMock("$omeN@me", "user", "email")
+		option := WithDependencies(dependency)
+		option.Apply(config)
+		err := config.Validate()
+		require.Error(t, err)
+	})
+}

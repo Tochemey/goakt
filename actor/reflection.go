@@ -86,8 +86,8 @@ func (r *reflection) NewDependency(typeName string, bytea []byte) (Dependency, e
 	return nil, ErrInvalidInstance
 }
 
-// ReflectDependencies reflects the dependencies
-func (r *reflection) ReflectDependencies(dependencies []*internalpb.Dependency) ([]Dependency, error) {
+// DependenciesFromProtobuf reflects the dependencies defined in the protobuf
+func (r *reflection) DependenciesFromProtobuf(dependencies ...*internalpb.Dependency) ([]Dependency, error) {
 	deps := make([]Dependency, 0, len(dependencies))
 	for _, dep := range dependencies {
 		dependency, err := r.NewDependency(dep.GetTypeName(), dep.GetBytea())

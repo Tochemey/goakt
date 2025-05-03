@@ -227,7 +227,7 @@ func (r *rebalancer) recreateLocally(ctx context.Context, props *internalpb.Acto
 	}
 
 	if len(props.GetDependencies()) > 0 {
-		dependencies, err := r.pid.ActorSystem().getReflection().ReflectDependencies(props.GetDependencies())
+		dependencies, err := r.pid.ActorSystem().getReflection().DependenciesFromProtobuf(props.GetDependencies()...)
 		if err != nil {
 			return err
 		}
