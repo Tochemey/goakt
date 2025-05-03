@@ -22,7 +22,7 @@
  * SOFTWARE.
  */
 
-package actor
+package extension
 
 import (
 	"encoding"

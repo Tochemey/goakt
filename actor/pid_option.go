@@ -27,6 +27,7 @@ package actor
 import (
 	"time"
 
+	"github.com/tochemey/goakt/v3/extension"
 	"github.com/tochemey/goakt/v3/internal/collection/syncmap"
 	"github.com/tochemey/goakt/v3/internal/eventstream"
 	"github.com/tochemey/goakt/v3/internal/workerpool"
@@ -136,10 +137,10 @@ func withRelocationDisabled() pidOption {
 
 // withDependencies configures an actor's PID with specified external dependencies.
 // It takes a variadic list of Dependency interfaces to associate with the actor.
-func withDependencies(dependencies ...Dependency) pidOption {
+func withDependencies(dependencies ...extension.Dependency) pidOption {
 	return func(pid *PID) {
 		if pid.dependencies == nil {
-			pid.dependencies = syncmap.New[string, Dependency]()
+			pid.dependencies = syncmap.New[string, extension.Dependency]()
 		}
 		for _, dependency := range dependencies {
 			pid.dependencies.Set(dependency.ID(), dependency)

@@ -44,6 +44,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/tochemey/goakt/v3/address"
+	"github.com/tochemey/goakt/v3/extension"
 	"github.com/tochemey/goakt/v3/future"
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/collection/syncmap"
@@ -149,7 +150,7 @@ type PID struct {
 	relocatable atomic.Bool
 
 	// the list of dependencies
-	dependencies *syncmap.Map[string, Dependency]
+	dependencies *syncmap.Map[string, extension.Dependency]
 }
 
 // newPID creates a new pid
@@ -183,7 +184,7 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 		remoting:              NewRemoting(),
 		supervisor:            NewSupervisor(),
 		startedAt:             atomic.NewInt64(0),
-		dependencies:          syncmap.New[string, Dependency](),
+		dependencies:          syncmap.New[string, extension.Dependency](),
 	}
 
 	pid.initMaxRetries.Store(DefaultInitMaxRetries)
@@ -231,13 +232,13 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 // an actor needs to introspect its environment.
 //
 // Returns: A slice of Dependency instances associated with this PID.
-func (pid *PID) Dependencies() []Dependency {
+func (pid *PID) Dependencies() []extension.Dependency {
 	return pid.dependencies.Values()
 }
 
 // Dependency retrieves a single dependency by its unique identifier from the PID's
 // registered dependencies.
-func (pid *PID) Dependency(dependencyID string) Dependency {
+func (pid *PID) Dependency(dependencyID string) extension.Dependency {
 	if dependency, ok := pid.dependencies.Get(dependencyID); ok {
 		return dependency
 	}

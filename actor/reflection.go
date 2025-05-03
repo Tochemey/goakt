@@ -27,6 +27,7 @@ package actor
 import (
 	"reflect"
 
+	"github.com/tochemey/goakt/v3/extension"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/types"
 )
@@ -61,13 +62,13 @@ func (r *reflection) NewActor(typeName string) (actor Actor, err error) {
 }
 
 // NewDependency creates a new instance of Dependency from its type name and bytes array
-func (r *reflection) NewDependency(typeName string, bytea []byte) (Dependency, error) {
+func (r *reflection) NewDependency(typeName string, bytea []byte) (extension.Dependency, error) {
 	dept, ok := r.registry.TypeOf(typeName)
 	if !ok {
 		return nil, ErrDependencyTypeNotRegistered
 	}
 
-	elem := reflect.TypeOf((*Dependency)(nil)).Elem()
+	elem := reflect.TypeOf((*extension.Dependency)(nil)).Elem()
 	if ok := dept.Implements(elem) || reflect.PointerTo(dept).Implements(elem); !ok {
 		return nil, ErrInstanceNotDependency
 	}
@@ -77,7 +78,7 @@ func (r *reflection) NewDependency(typeName string, bytea []byte) (Dependency, e
 		return nil, ErrInvalidInstance
 	}
 
-	if dependency, ok := instance.Interface().(Dependency); ok {
+	if dependency, ok := instance.Interface().(extension.Dependency); ok {
 		if err := dependency.UnmarshalBinary(bytea); err != nil {
 			return nil, err
 		}
@@ -87,8 +88,8 @@ func (r *reflection) NewDependency(typeName string, bytea []byte) (Dependency, e
 }
 
 // DependenciesFromProtobuf reflects the dependencies defined in the protobuf
-func (r *reflection) DependenciesFromProtobuf(dependencies ...*internalpb.Dependency) ([]Dependency, error) {
-	deps := make([]Dependency, 0, len(dependencies))
+func (r *reflection) DependenciesFromProtobuf(dependencies ...*internalpb.Dependency) ([]extension.Dependency, error) {
+	deps := make([]extension.Dependency, 0, len(dependencies))
 	for _, dep := range dependencies {
 		dependency, err := r.NewDependency(dep.GetTypeName(), dep.GetBytea())
 		if err != nil {

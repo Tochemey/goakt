@@ -27,8 +27,11 @@ package actor
 import (
 	"time"
 
+	"github.com/tochemey/goakt/v3/extension"
+	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/size"
 	"github.com/tochemey/goakt/v3/internal/timer"
+	"github.com/tochemey/goakt/v3/internal/types"
 )
 
 type nameType int
@@ -86,3 +89,22 @@ var (
 		topicActorType:       "GoAktTopicActor",
 	}
 )
+
+// encodeDependencies transforms a list of dependencies into their serialized protobuf representations.
+// Returns a slice of internalpb.Dependency or an error if serialization fails.
+func encodeDependencies(dependencies ...extension.Dependency) ([]*internalpb.Dependency, error) {
+	var output []*internalpb.Dependency
+	for _, dependency := range dependencies {
+		bytea, err := dependency.MarshalBinary()
+		if err != nil {
+			return nil, err
+		}
+
+		output = append(output, &internalpb.Dependency{
+			Id:       dependency.ID(),
+			TypeName: types.Name(dependency),
+			Bytea:    bytea,
+		})
+	}
+	return output, nil
+}

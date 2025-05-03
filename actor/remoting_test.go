@@ -38,9 +38,11 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/tochemey/goakt/v3/address"
+	"github.com/tochemey/goakt/v3/extension"
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/util"
 	"github.com/tochemey/goakt/v3/log"
+	extmocks "github.com/tochemey/goakt/v3/mocks/extension"
 	"github.com/tochemey/goakt/v3/remote"
 	"github.com/tochemey/goakt/v3/test/data/testpb"
 )
@@ -1678,6 +1680,11 @@ func TestRemotingSpawn(t *testing.T) {
 		err = sys.Start(ctx)
 		assert.NoError(t, err)
 
+		// register dependencies
+		dependency := dependencyMock("test", "test", "test")
+		err = sys.RegisterDependencies(dependency)
+		require.NoError(t, err)
+
 		// create an actor implementation and register it
 		actor := &exchanger{}
 		actorName := uuid.NewString()
@@ -1694,10 +1701,12 @@ func TestRemotingSpawn(t *testing.T) {
 
 		// spawn the remote actor
 		request := &remote.SpawnRequest{
-			Name:        actorName,
-			Kind:        "actor.exchanger",
-			Singleton:   false,
-			Relocatable: false,
+			Name:           actorName,
+			Kind:           "actor.exchanger",
+			Singleton:      false,
+			Relocatable:    false,
+			EnableStashing: false,
+			Dependencies:   []extension.Dependency{dependency},
 		}
 		err = remoting.RemoteSpawn(ctx, host, remotingPort, request)
 		require.NoError(t, err)
@@ -1729,6 +1738,128 @@ func TestRemotingSpawn(t *testing.T) {
 				assert.NoError(t, err)
 			},
 		)
+	})
+	t.Run("With invalid dependency", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// generate the remoting port
+		ports := dynaport.Get(1)
+		remotingPort := ports[0]
+		host := "127.0.0.1"
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithPassivationDisabled(),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		// register dependencies
+		dependency := dependencyMock("test", "test", "test")
+		err = sys.RegisterDependencies(dependency)
+		require.NoError(t, err)
+
+		// create an actor implementation and register it
+		actor := &exchanger{}
+		actorName := uuid.NewString()
+
+		remoting := NewRemoting()
+		// fetching the address of the that actor should return nil address
+		addr, err := remoting.RemoteLookup(ctx, sys.Host(), int(sys.Port()), actorName)
+		require.NoError(t, err)
+		require.Nil(t, addr)
+
+		// register the actor
+		err = sys.Register(ctx, actor)
+		require.NoError(t, err)
+
+		// spawn the remote actor
+		request := &remote.SpawnRequest{
+			Name:           actorName,
+			Kind:           "actor.exchanger",
+			Singleton:      false,
+			Relocatable:    false,
+			EnableStashing: false,
+			Dependencies:   []extension.Dependency{new(mockDependency)},
+		}
+		err = remoting.RemoteSpawn(ctx, host, remotingPort, request)
+		require.Error(t, err)
+
+		remoting.Close()
+		err = sys.Stop(ctx)
+		require.NoError(t, err)
+	})
+	t.Run("With dependency marshaling failure", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// generate the remoting port
+		ports := dynaport.Get(1)
+		remotingPort := ports[0]
+		host := "127.0.0.1"
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithPassivationDisabled(),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		// register dependencies
+		dependency := extmocks.NewDependency(t)
+		dependency.EXPECT().ID().Return("id")
+		dependency.EXPECT().MarshalBinary().Return(nil, assert.AnError)
+
+		err = sys.RegisterDependencies(dependency)
+		require.NoError(t, err)
+
+		// create an actor implementation and register it
+		actor := &exchanger{}
+		actorName := uuid.NewString()
+
+		remoting := NewRemoting()
+		// fetching the address of the that actor should return nil address
+		addr, err := remoting.RemoteLookup(ctx, sys.Host(), int(sys.Port()), actorName)
+		require.NoError(t, err)
+		require.Nil(t, addr)
+
+		// register the actor
+		err = sys.Register(ctx, actor)
+		require.NoError(t, err)
+
+		// spawn the remote actor
+		request := &remote.SpawnRequest{
+			Name:           actorName,
+			Kind:           "actor.exchanger",
+			Singleton:      false,
+			Relocatable:    false,
+			EnableStashing: false,
+			Dependencies:   []extension.Dependency{dependency},
+		}
+		err = remoting.RemoteSpawn(ctx, host, remotingPort, request)
+		require.Error(t, err)
+
+		remoting.Close()
+		err = sys.Stop(ctx)
+		require.NoError(t, err)
+		dependency.AssertExpectations(t)
 	})
 	t.Run("When actor not registered", func(t *testing.T) {
 		// create the context

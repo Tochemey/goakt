@@ -31,6 +31,7 @@ import (
 	"net"
 	"reflect"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -47,6 +48,7 @@ import (
 	"github.com/tochemey/goakt/v3/internal/util"
 	"github.com/tochemey/goakt/v3/log"
 	testkit "github.com/tochemey/goakt/v3/mocks/discovery"
+	extmocks "github.com/tochemey/goakt/v3/mocks/extension"
 	"github.com/tochemey/goakt/v3/remote"
 	"github.com/tochemey/goakt/v3/test/data/testpb"
 )
@@ -1954,15 +1956,19 @@ func TestActorSystem(t *testing.T) {
 		require.True(t, reflect.DeepEqual(extension, ext))
 	})
 	t.Run("With invalid Extension ID length", func(t *testing.T) {
-		ext := new(invalidExtensionIDLength)
+		ext := extmocks.NewExtension(t)
+		ext.EXPECT().ID().Return(strings.Repeat("a", 300))
 		actorSystem, err := NewActorSystem("testSys", WithExtensions(ext))
 		require.Error(t, err)
 		require.Nil(t, actorSystem)
+		ext.AssertExpectations(t)
 	})
 	t.Run("With invalid Extension ID", func(t *testing.T) {
-		ext := new(invalidExtensionID)
+		ext := extmocks.NewExtension(t)
+		ext.EXPECT().ID().Return("$omeN@me")
 		actorSystem, err := NewActorSystem("testSys", WithExtensions(ext))
 		require.Error(t, err)
 		require.Nil(t, actorSystem)
+		ext.AssertExpectations(t)
 	})
 }

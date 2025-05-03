@@ -26,7 +26,9 @@ package remote
 
 import (
 	"strings"
+	"time"
 
+	"github.com/tochemey/goakt/v3/extension"
 	"github.com/tochemey/goakt/v3/internal/validation"
 )
 
@@ -53,17 +55,67 @@ type SpawnRequest struct {
 	// Setting this to false ensures that the actor will not be redeployed after a node failure,
 	// which may be necessary for actors with node-specific dependencies or state.
 	Relocatable bool
+
+	// PassivateAfter sets a custom duration after which an idle actor
+	// will be passivated. Passivation allows the actor system to free up
+	// resources by stopping actors that have been inactive for the specified
+	// duration. If the actor receives a message before this timeout,
+	// the passivation timer is reset.
+	PassivateAfter time.Duration
+
+	// Dependencies define the list of dependencies that injects the given dependencies into
+	// the actor during its initialization.
+	//
+	// This allows you to configure an actor with one or more dependencies,
+	// such as services, clients, or configuration objects it needs to function.
+	// These dependencies will be made available to the actor when it is spawned,
+	// enabling better modularity and testability.
+	Dependencies []extension.Dependency
+
+	// EnableStashing enables stashing and sets the stash buffer for the actor, allowing it to temporarily store
+	// incoming messages that cannot be immediately processed. This is particularly useful
+	// in scenarios where the actor must delay handling certain messages—for example,
+	// during initialization, while awaiting external resources, or transitioning between states.
+	//
+	// By stashing messages, the actor can defer processing until it enters a stable or ready state,
+	// at which point the buffered messages can be retrieved and handled in a controlled sequence.
+	// This helps maintain a clean and predictable message flow without dropping or prematurely
+	// processing input.
+	//
+	// Use WithStashing when spawning the actor to activate this capability. By default, the stash
+	// buffer is disabled.
+	//
+	// ⚠️ Note: The stash buffer is *not* a substitute for robust message handling or proper
+	// supervision strategies. Misuse may lead to unbounded memory growth if messages are
+	// stashed but never unstashed. Always ensure the actor eventually processes or discards
+	// stashed messages to avoid leaks or state inconsistencies.
+	//
+	// When used correctly, the stash buffer is a powerful tool for managing transient states
+	// and preserving actor responsiveness while maintaining orderly message handling.
+	EnableStashing bool
 }
 
+// _ ensures that SpawnRequest implements the validation.Validator interface at compile time.
 var _ validation.Validator = (*SpawnRequest)(nil)
 
 // Validate validates the SpawnRequest
 func (s *SpawnRequest) Validate() error {
-	return validation.
+	if err := validation.
 		New(validation.FailFast()).
 		AddValidator(validation.NewEmptyStringValidator("Name", s.Name)).
 		AddValidator(validation.NewEmptyStringValidator("Kind", s.Kind)).
-		Validate()
+		Validate(); err != nil {
+		return err
+	}
+
+	if len(s.Dependencies) > 0 {
+		for _, dependency := range s.Dependencies {
+			if err := validation.NewIDValidator(dependency.ID()).Validate(); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // Sanitize sanitizes the request

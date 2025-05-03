@@ -27,6 +27,7 @@ package actor
 import (
 	"time"
 
+	"github.com/tochemey/goakt/v3/extension"
 	"github.com/tochemey/goakt/v3/internal/validation"
 )
 
@@ -45,8 +46,8 @@ type spawnConfig struct {
 	// specifies if the actor should be relocated
 	relocatable bool
 	// specifies the list of dependencies
-	dependencies []Dependency
-	// specifies whether that actor should be have stash buffer
+	dependencies []extension.Dependency
+	// specifies whether that actor should be having stash buffer
 	enableStash bool
 }
 
@@ -73,7 +74,7 @@ func newSpawnConfig(opts ...SpawnOption) *spawnConfig {
 			WithStrategy(OneForOneStrategy),
 			WithAnyErrorDirective(ResumeDirective),
 		),
-		dependencies: make([]Dependency, 0),
+		dependencies: make([]extension.Dependency, 0),
 	}
 
 	for _, opt := range opts {
@@ -168,7 +169,7 @@ func WithRelocationDisabled() SpawnOption {
 // Parameters: dependencies - a variadic list of objects implementing the Dependency interface.
 //
 // Returns: A SpawnOption that sets the actor's dependencies in the internal spawn configuration.
-func WithDependencies(dependencies ...Dependency) SpawnOption {
+func WithDependencies(dependencies ...extension.Dependency) SpawnOption {
 	return spawnOption(func(config *spawnConfig) {
 		config.dependencies = dependencies
 	})

@@ -232,7 +232,7 @@ type ActorSystem interface { //nolint:revive
 	// or leaves the cluster unexpectedly. By registering the dependencies here,
 	// the cluster runtime ensures that the redeployed actor has access to the same
 	// necessary dependencies as before.
-	RegisterDependencies(dependencies ...Dependency) error
+	RegisterDependencies(dependencies ...extension.Dependency) error
 	// handleRemoteAsk handles a synchronous message to another actor and expect a response.
 	// This block until a response is received or timed out.
 	handleRemoteAsk(ctx context.Context, to *PID, message proto.Message, timeout time.Duration) (response proto.Message, err error)
@@ -1410,7 +1410,7 @@ func (x *actorSystem) Extension(extensionID string) extension.Extension {
 // or leaves the cluster unexpectedly. By registering the dependencies here,
 // the cluster runtime ensures that the redeployed actor has access to the same
 // necessary dependencies as before.
-func (x *actorSystem) RegisterDependencies(dependencies ...Dependency) error {
+func (x *actorSystem) RegisterDependencies(dependencies ...extension.Dependency) error {
 	x.locker.Lock()
 
 	if !x.started.Load() {
@@ -1532,28 +1532,19 @@ func (x *actorSystem) getPeerStateFromStore(address string) (*internalpb.PeerSta
 }
 
 // broadcastActor broadcast the newly (re)spawned actor into the cluster
-func (x *actorSystem) broadcastActor(actor *PID) error {
+func (x *actorSystem) broadcastActor(pid *PID) error {
 	if x.clusterEnabled.Load() {
-		var dependencies []*internalpb.Dependency
-		for _, dependency := range actor.Dependencies() {
-			bytea, err := dependency.MarshalBinary()
-			if err != nil {
-				return err
-			}
-
-			dependencies = append(dependencies, &internalpb.Dependency{
-				Id:       dependency.ID(),
-				TypeName: types.Name(dependency),
-				Bytea:    bytea,
-			})
+		dependencies, err := encodeDependencies(pid.Dependencies()...)
+		if err != nil {
+			return err
 		}
 
 		x.wireActorsQueue <- &internalpb.ActorRef{
-			ActorAddress:   actor.Address().Address,
-			ActorType:      types.Name(actor.Actor()),
-			IsSingleton:    actor.IsSingleton(),
-			Relocatable:    actor.IsRelocatable(),
-			PassivateAfter: durationpb.New(actor.PassivationTime()),
+			ActorAddress:   pid.Address().Address,
+			ActorType:      types.Name(pid.Actor()),
+			IsSingleton:    pid.IsSingleton(),
+			Relocatable:    pid.IsRelocatable(),
+			PassivateAfter: durationpb.New(pid.PassivationTime()),
 			Dependencies:   dependencies,
 		}
 	}
@@ -1753,7 +1744,7 @@ func (x *actorSystem) validateExtensions() error {
 }
 
 // validateDependencies validates dependencies
-func (x *actorSystem) validateDependencies(dependencies ...Dependency) error {
+func (x *actorSystem) validateDependencies(dependencies ...extension.Dependency) error {
 	for _, dependency := range dependencies {
 		if dependency != nil {
 			if err := validation.NewIDValidator(dependency.ID()).Validate(); err != nil {

@@ -29,6 +29,8 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/tochemey/goakt/v3/extension"
 )
 
 func TestSpawnOption(t *testing.T) {
@@ -91,7 +93,7 @@ func TestSpawnConfigWithDependencies(t *testing.T) {
 		dependency := dependencyMock("id", "user", "email")
 		option := WithDependencies(dependency)
 		option.Apply(config)
-		require.Equal(t, &spawnConfig{dependencies: []Dependency{dependency}}, config)
+		require.Equal(t, &spawnConfig{dependencies: []extension.Dependency{dependency}}, config)
 	})
 	t.Run("With dependencies validation", func(t *testing.T) {
 		config := &spawnConfig{}
