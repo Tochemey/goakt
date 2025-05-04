@@ -45,17 +45,17 @@ func TestRebalancing(t *testing.T) {
 	// start the NATS server
 	srv := startNatsServer(t)
 
-	// create and start system cluster
+	// create and start a system cluster
 	node1, sd1 := testCluster(t, srv.Addr().String())
 	require.NotNil(t, node1)
 	require.NotNil(t, sd1)
 
-	// create and start system cluster
+	// create and start a system cluster
 	node2, sd2 := testCluster(t, srv.Addr().String())
 	require.NotNil(t, node2)
 	require.NotNil(t, sd2)
 
-	// create and start system cluster
+	// create and start a system cluster
 	node3, sd3 := testCluster(t, srv.Addr().String())
 	require.NotNil(t, node3)
 	require.NotNil(t, sd3)
@@ -307,23 +307,23 @@ func TestRebalancingWithActorRelocationDisabled(t *testing.T) {
 	srv.Shutdown()
 }
 
-func TestRebalancingWithoutRelocation(t *testing.T) {
+func TestRebalancingWithSystemRelocationDisabled(t *testing.T) {
 	// create a context
 	ctx := context.TODO()
 	// start the NATS server
 	srv := startNatsServer(t)
 
-	// create and start system cluster
+	// create and start a system cluster
 	node1, sd1 := testCluster(t, srv.Addr().String(), withoutTestRelocation())
 	require.NotNil(t, node1)
 	require.NotNil(t, sd1)
 
-	// create and start system cluster
+	// create and start a system cluster
 	node2, sd2 := testCluster(t, srv.Addr().String(), withoutTestRelocation())
 	require.NotNil(t, node2)
 	require.NotNil(t, sd2)
 
-	// create and start system cluster
+	// create and start a system cluster
 	node3, sd3 := testCluster(t, srv.Addr().String(), withoutTestRelocation())
 	require.NotNil(t, node3)
 	require.NotNil(t, sd3)
@@ -381,7 +381,7 @@ func TestRebalancingWithoutRelocation(t *testing.T) {
 	srv.Shutdown()
 }
 
-func TestRebalancingWithPersistenceExtension(t *testing.T) {
+func TestRebalancingWithExtension(t *testing.T) {
 	// create a context
 	ctx := context.TODO()
 	// start the NATS server
@@ -390,17 +390,17 @@ func TestRebalancingWithPersistenceExtension(t *testing.T) {
 	// create the state store extension
 	stateStoreExtension := newMockExtension()
 
-	// create and start system cluster
+	// create and start a system cluster
 	node1, sd1 := testCluster(t, srv.Addr().String(), withMockExtension(stateStoreExtension))
 	require.NotNil(t, node1)
 	require.NotNil(t, sd1)
 
-	// create and start system cluster
+	// create and start a system cluster
 	node2, sd2 := testCluster(t, srv.Addr().String(), withMockExtension(stateStoreExtension))
 	require.NotNil(t, node2)
 	require.NotNil(t, sd2)
 
-	// create and start system cluster
+	// create and start a system cluster
 	node3, sd3 := testCluster(t, srv.Addr().String(), withMockExtension(stateStoreExtension))
 	require.NotNil(t, node3)
 	require.NotNil(t, sd3)
@@ -476,5 +476,78 @@ func TestRebalancingWithPersistenceExtension(t *testing.T) {
 	assert.NoError(t, node3.Stop(ctx))
 	assert.NoError(t, sd1.Close())
 	assert.NoError(t, sd3.Close())
+	srv.Shutdown()
+}
+
+func TestRebalancingWithDependency(t *testing.T) {
+	// create a context
+	ctx := context.TODO()
+	// start the NATS server
+	srv := startNatsServer(t)
+
+	// create and start a system cluster
+	node1, sd1 := testCluster(t, srv.Addr().String())
+	require.NotNil(t, node1)
+	require.NotNil(t, sd1)
+
+	// create and start a system cluster
+	node2, sd2 := testCluster(t, srv.Addr().String())
+	require.NotNil(t, node2)
+	require.NotNil(t, sd2)
+
+	dependencyID := "dependency"
+	// let us create 4 actors on each node
+	for j := 1; j <= 4; j++ {
+		entityID := fmt.Sprintf("node1-actor-%d", j)
+		// create the dependency
+		dependency := dependencyMock(dependencyID, entityID, "email")
+		pid, err := node1.Spawn(ctx, entityID, newMockActor(), WithDependencies(dependency))
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+	}
+
+	util.Pause(time.Second)
+
+	for j := 1; j <= 4; j++ {
+		entityID := fmt.Sprintf("node2-actor-%d", j)
+		// create the dependency
+		dependency := dependencyMock(dependencyID, entityID, "email")
+		pid, err := node2.Spawn(ctx, entityID, newMockActor(), WithDependencies(dependency))
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+	}
+
+	util.Pause(time.Second)
+
+	// take down node2
+	require.NoError(t, node2.Stop(ctx))
+	require.NoError(t, sd2.Close())
+
+	// Wait for cluster rebalancing
+	util.Pause(time.Minute)
+
+	sender, err := node1.LocalActor("node1-actor-1")
+	require.NoError(t, err)
+	require.NotNil(t, sender)
+
+	// let us access some of the node2 actors from node 1 and node 3
+	actorName := "node2-actor-1"
+
+	// we know the actor will be on node 1
+	pid, err := node1.LocalActor(actorName)
+	require.NoError(t, err)
+	require.NotNil(t, pid)
+	actual := pid.Dependencies()
+	require.NotNil(t, actual)
+	require.Len(t, actual, 1)
+
+	dep := pid.Dependency(dependencyID)
+	require.NotNil(t, dep)
+	mockdep := dep.(*mockDependency)
+	require.Equal(t, actorName, mockdep.Username)
+	require.Equal(t, "email", mockdep.Email)
+
+	assert.NoError(t, node1.Stop(ctx))
+	assert.NoError(t, sd1.Close())
 	srv.Shutdown()
 }

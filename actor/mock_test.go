@@ -30,7 +30,6 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -470,6 +469,7 @@ type testClusterConfig struct {
 	pubsubEnabled     bool
 	relocationEnabled bool
 	extension         extension.Extension
+	dependency        extension.Dependency
 }
 
 type testClusterOption func(*testClusterConfig)
@@ -496,6 +496,12 @@ func withoutTestRelocation() testClusterOption {
 func withMockExtension(ext extension.Extension) testClusterOption {
 	return func(tcc *testClusterConfig) {
 		tcc.extension = ext
+	}
+}
+
+func withMockDependency(dep extension.Dependency) testClusterOption {
+	return func(tcc *testClusterConfig) {
+		tcc.dependency = dep
 	}
 }
 
@@ -581,6 +587,10 @@ func testCluster(t *testing.T, serverAddr string, opts ...testClusterOption) (Ac
 
 	require.NotNil(t, system)
 	require.NoError(t, err)
+
+	if cfg.dependency != nil {
+		require.NoError(t, system.Inject(cfg.dependency))
+	}
 
 	// start the node
 	require.NoError(t, system.Start(ctx))
@@ -755,18 +765,56 @@ func (m *mockEntity) recoverFromStore() error {
 	return nil
 }
 
-type invalidExtensionIDLength struct{}
-
-var _ extension.Extension = (*invalidExtensionIDLength)(nil)
-
-func (x *invalidExtensionIDLength) ID() string {
-	return strings.Repeat("a", 300)
+type mockDependency struct {
+	id       string
+	Username string
+	Email    string
 }
 
-type invalidExtensionID struct{}
+var _ extension.Dependency = (*mockDependency)(nil)
 
-var _ extension.Extension = (*invalidExtensionID)(nil)
+func dependencyMock(id, userName, email string) *mockDependency {
+	return &mockDependency{
+		id:       id,
+		Username: userName,
+		Email:    email,
+	}
+}
 
-func (x *invalidExtensionID) ID() string {
-	return "$omeN@me"
+func (x *mockDependency) MarshalBinary() (data []byte, err error) {
+	// create a serializable struct that includes all fields
+	serializable := struct {
+		ID       string `json:"id"`
+		Username string `json:"Username"`
+		Email    string `json:"Email"`
+	}{
+		ID:       x.id,
+		Username: x.Username,
+		Email:    x.Email,
+	}
+
+	return json.Marshal(serializable)
+}
+
+func (x *mockDependency) UnmarshalBinary(data []byte) error {
+	serializable := struct {
+		ID       string `json:"id"`
+		Username string `json:"Username"`
+		Email    string `json:"Email"`
+	}{}
+
+	if err := json.Unmarshal(data, &serializable); err != nil {
+		return err
+	}
+
+	// Update the dependency fields
+	x.id = serializable.ID
+	x.Username = serializable.Username
+	x.Email = serializable.Email
+
+	return nil
+}
+
+func (x *mockDependency) ID() string {
+	return x.id
 }

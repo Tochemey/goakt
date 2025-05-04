@@ -4,6 +4,7 @@ package internalpb;
 
 import "goakt/goakt.proto";
 import "google/protobuf/duration.proto";
+import "internal/dependency.proto";
 
 option go_package = "github.com/tochemey/goakt/v3/internal/internalpb;internalpb";
 
@@ -19,6 +20,10 @@ message ActorRef {
   bool relocatable = 4;
   // Specifies the passivation time
   google.protobuf.Duration passivate_after = 5;
+  // Specifies the dependencies
+  repeated internalpb.Dependency dependencies = 6;
+  //  States whether the actor will require a stash buffer
+  bool enable_stash = 7;
 }
 
 // ActorProps defines the properties of an actor
@@ -34,4 +39,8 @@ message ActorProps {
   bool relocatable = 4;
   // Specifies the passivation time
   google.protobuf.Duration passivate_after = 5;
+  // Specifies the dependencies
+  repeated internalpb.Dependency dependencies = 6;
+  //  States whether the actor will require a stash buffer
+  bool enable_stash = 7;
 }

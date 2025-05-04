@@ -125,15 +125,6 @@ func WithShutdownTimeout(timeout time.Duration) Option {
 	)
 }
 
-// WithStash sets the stash buffer size
-func WithStash() Option {
-	return OptionFunc(
-		func(a *actorSystem) {
-			a.stashEnabled = true
-		},
-	)
-}
-
 // WithPartitionHasher sets the partition hasher.
 func WithPartitionHasher(hasher hash.Hasher) Option {
 	return OptionFunc(

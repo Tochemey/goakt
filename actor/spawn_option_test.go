@@ -29,6 +29,8 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/tochemey/goakt/v3/extension"
 )
 
 func TestSpawnOption(t *testing.T) {
@@ -71,10 +73,34 @@ func TestSpawnOption(t *testing.T) {
 		option.Apply(config)
 		require.Equal(t, &spawnConfig{relocatable: false}, config)
 	})
+	t.Run("spawn option with stashing", func(t *testing.T) {
+		config := &spawnConfig{}
+		option := WithStashing()
+		option.Apply(config)
+		require.Equal(t, &spawnConfig{enableStash: true}, config)
+	})
 }
 
 func TestNewSpawnConfig(t *testing.T) {
 	config := newSpawnConfig()
 	require.NotNil(t, config)
 	require.Nil(t, config.mailbox)
+}
+
+func TestSpawnConfigWithDependencies(t *testing.T) {
+	t.Run("With valid dependency", func(t *testing.T) {
+		config := &spawnConfig{}
+		dependency := dependencyMock("id", "user", "email")
+		option := WithDependencies(dependency)
+		option.Apply(config)
+		require.Equal(t, &spawnConfig{dependencies: []extension.Dependency{dependency}}, config)
+	})
+	t.Run("With dependencies validation", func(t *testing.T) {
+		config := &spawnConfig{}
+		dependency := dependencyMock("$omeN@me", "user", "email")
+		option := WithDependencies(dependency)
+		option.Apply(config)
+		err := config.Validate()
+		require.Error(t, err)
+	})
 }

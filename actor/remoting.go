@@ -243,15 +243,31 @@ func (r *Remoting) RemoteSpawn(ctx context.Context, host string, port int, spawn
 	}
 
 	spawnRequest.Sanitize()
+
+	var (
+		dependencies []*internalpb.Dependency
+		err          error
+	)
+
+	if len(spawnRequest.Dependencies) > 0 {
+		dependencies, err = encodeDependencies(spawnRequest.Dependencies...)
+		if err != nil {
+			return err
+		}
+	}
+
 	remoteClient := r.remotingServiceClient(host, port)
 	request := connect.NewRequest(
 		&internalpb.RemoteSpawnRequest{
-			Host:        host,
-			Port:        int32(port),
-			ActorName:   spawnRequest.Name,
-			ActorType:   spawnRequest.Kind,
-			IsSingleton: spawnRequest.Singleton,
-			Relocatable: spawnRequest.Relocatable,
+			Host:           host,
+			Port:           int32(port),
+			ActorName:      spawnRequest.Name,
+			ActorType:      spawnRequest.Kind,
+			IsSingleton:    spawnRequest.Singleton,
+			Relocatable:    spawnRequest.Relocatable,
+			PassivateAfter: durationpb.New(spawnRequest.PassivateAfter),
+			Dependencies:   dependencies,
+			EnableStash:    spawnRequest.EnableStashing,
 		},
 	)
 

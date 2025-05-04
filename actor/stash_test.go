@@ -47,7 +47,6 @@ func TestStash(t *testing.T) {
 
 		actorSystem, err := NewActorSystem("testSys",
 			WithRemote(remote.NewConfig(host, ports[0])),
-			WithStash(),
 			WithLogger(log.DiscardLogger))
 		require.NoError(t, err)
 		require.NotNil(t, actorSystem)
@@ -56,9 +55,9 @@ func TestStash(t *testing.T) {
 
 		util.Pause(time.Second)
 
-		// create the actor path
+		// create the actor pathx
 		actor := &mockStashActor{}
-		pid, err := actorSystem.Spawn(ctx, "Stash", actor)
+		pid, err := actorSystem.Spawn(ctx, "Stash", actor, WithStashing())
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 
@@ -74,7 +73,7 @@ func TestStash(t *testing.T) {
 		require.EqualValues(t, 1, pid.StashSize())
 
 		// at this stage any message sent to the actor is stashed
-		for i := 0; i < 5; i++ {
+		for range 5 {
 			assert.NoError(t, Tell(ctx, pid, new(testpb.TestSend)))
 		}
 
@@ -192,7 +191,6 @@ func TestStash(t *testing.T) {
 
 		actorSystem, err := NewActorSystem("testSys",
 			WithRemote(remote.NewConfig(host, ports[0])),
-			WithStash(),
 			WithLogger(log.DiscardLogger))
 		require.NoError(t, err)
 		require.NotNil(t, actorSystem)
@@ -203,7 +201,7 @@ func TestStash(t *testing.T) {
 
 		// create the actor path
 		actor := &mockStashActor{}
-		pid, err := actorSystem.Spawn(ctx, "Stash", actor)
+		pid, err := actorSystem.Spawn(ctx, "Stash", actor, WithStashing())
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 

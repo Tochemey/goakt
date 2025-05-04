@@ -25,10 +25,12 @@
 package actor
 
 import (
+	"reflect"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/atomic"
 
 	"github.com/tochemey/goakt/v3/internal/eventstream"
@@ -126,4 +128,14 @@ func TestPIDOptions(t *testing.T) {
 			assert.Equal(t, tc.expected, pid)
 		})
 	}
+}
+
+func TestWithDependencies(t *testing.T) {
+	pid := &PID{}
+	dependency := dependencyMock("id", "user", "email")
+	option := withDependencies(dependency)
+	option(pid)
+	require.NotEmpty(t, pid.Dependencies())
+	actual := pid.Dependency("id")
+	require.True(t, reflect.DeepEqual(actual, dependency))
 }

@@ -31,6 +31,7 @@ import (
 	"net"
 	"reflect"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -47,6 +48,7 @@ import (
 	"github.com/tochemey/goakt/v3/internal/util"
 	"github.com/tochemey/goakt/v3/log"
 	testkit "github.com/tochemey/goakt/v3/mocks/discovery"
+	extmocks "github.com/tochemey/goakt/v3/mocks/extension"
 	"github.com/tochemey/goakt/v3/remote"
 	"github.com/tochemey/goakt/v3/test/data/testpb"
 )
@@ -1369,7 +1371,7 @@ func TestActorSystem(t *testing.T) {
 		require.NoError(t, err)
 
 		err = sys.Stop(ctx)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 	})
 	t.Run("With Register when actor system not started", func(t *testing.T) {
 		ctx := context.TODO()
@@ -1389,12 +1391,8 @@ func TestActorSystem(t *testing.T) {
 		require.Error(t, err)
 		assert.EqualError(t, err, ErrActorSystemNotStarted.Error())
 
-		t.Cleanup(
-			func() {
-				err = sys.Stop(ctx)
-				assert.Error(t, err)
-			},
-		)
+		err = sys.Stop(ctx)
+		require.Error(t, err)
 	})
 	t.Run("With happy path Deregister", func(t *testing.T) {
 		ctx := context.TODO()
@@ -1954,17 +1952,64 @@ func TestActorSystem(t *testing.T) {
 		require.True(t, reflect.DeepEqual(extension, ext))
 	})
 	t.Run("With invalid Extension ID length", func(t *testing.T) {
-		ext := new(invalidExtensionIDLength)
+		ext := extmocks.NewExtension(t)
+		ext.EXPECT().ID().Return(strings.Repeat("a", 300))
 		actorSystem, err := NewActorSystem("testSys", WithExtensions(ext))
 		require.Error(t, err)
 		require.Nil(t, actorSystem)
-		require.ErrorContains(t, err, "invalid extension ID")
+		ext.AssertExpectations(t)
 	})
 	t.Run("With invalid Extension ID", func(t *testing.T) {
-		ext := new(invalidExtensionID)
+		ext := extmocks.NewExtension(t)
+		ext.EXPECT().ID().Return("$omeN@me")
 		actorSystem, err := NewActorSystem("testSys", WithExtensions(ext))
 		require.Error(t, err)
 		require.Nil(t, actorSystem)
-		require.ErrorContains(t, err, "invalid extension ID")
+		ext.AssertExpectations(t)
+	})
+	t.Run("With Inject when actor system not started", func(t *testing.T) {
+		ctx := context.TODO()
+		logger := log.DiscardLogger
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithPassivationDisabled(),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// register the actor
+		err = sys.Inject(extmocks.NewDependency(t))
+		require.Error(t, err)
+		assert.EqualError(t, err, ErrActorSystemNotStarted.Error())
+
+		err = sys.Stop(ctx)
+		require.Error(t, err)
+	})
+	t.Run("With happy path Inject", func(t *testing.T) {
+		ctx := context.TODO()
+		logger := log.DiscardLogger
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithPassivationDisabled(),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		// register the actor
+		err = sys.Inject(extmocks.NewDependency(t))
+		require.NoError(t, err)
+
+		err = sys.Stop(ctx)
+		require.NoError(t, err)
 	})
 }

@@ -44,8 +44,10 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/tochemey/goakt/v3/address"
+	"github.com/tochemey/goakt/v3/extension"
 	"github.com/tochemey/goakt/v3/future"
 	"github.com/tochemey/goakt/v3/goaktpb"
+	"github.com/tochemey/goakt/v3/internal/collection/syncmap"
 	"github.com/tochemey/goakt/v3/internal/errorschain"
 	"github.com/tochemey/goakt/v3/internal/eventstream"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
@@ -146,6 +148,9 @@ type PID struct {
 	startedAt   *atomic.Int64
 	isSingleton atomic.Bool
 	relocatable atomic.Bool
+
+	// the list of dependencies
+	dependencies *syncmap.Map[string, extension.Dependency]
 }
 
 // newPID creates a new pid
@@ -179,6 +184,7 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 		remoting:              NewRemoting(),
 		supervisor:            NewSupervisor(),
 		startedAt:             atomic.NewInt64(0),
+		dependencies:          syncmap.New[string, extension.Dependency](),
 	}
 
 	pid.initMaxRetries.Store(DefaultInitMaxRetries)
@@ -213,6 +219,30 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 
 	pid.startedAt.Store(time.Now().Unix())
 	return pid, nil
+}
+
+// Dependencies returns a slice containing all dependencies currently registered
+// within the PID's local context.
+//
+// These dependencies are typically injected at actor initialization (via SpawnOptions)
+// and made accessible during the actor's lifecycle. They can include services, clients,
+// or any resources that the actor requires to operate.
+//
+// This method is useful for diagnostic tools, dynamic inspection, or cases where
+// an actor needs to introspect its environment.
+//
+// Returns: A slice of Dependency instances associated with this PID.
+func (pid *PID) Dependencies() []extension.Dependency {
+	return pid.dependencies.Values()
+}
+
+// Dependency retrieves a single dependency by its unique identifier from the PID's
+// registered dependencies.
+func (pid *PID) Dependency(dependencyID string) extension.Dependency {
+	if dependency, ok := pid.dependencies.Get(dependencyID); ok {
+		return dependency
+	}
+	return nil
 }
 
 // Metric returns the actor system metrics.
@@ -567,7 +597,7 @@ func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor, opts .
 		}
 	}
 
-	// create the child actor options child inherit parent's options
+	// create the child actor options child inherits parent's options
 	pidOptions := []pidOption{
 		withInitMaxRetries(int(pid.initMaxRetries.Load())),
 		withCustomLogger(pid.logger),
@@ -579,6 +609,10 @@ func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor, opts .
 	}
 
 	spawnConfig := newSpawnConfig(opts...)
+	if err := spawnConfig.Validate(); err != nil {
+		return nil, err
+	}
+
 	if spawnConfig.mailbox != nil {
 		pidOptions = append(pidOptions, withMailbox(spawnConfig.mailbox))
 	}
@@ -593,7 +627,18 @@ func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor, opts .
 		pidOptions = append(pidOptions, withRelocationDisabled())
 	}
 
-	// disable passivation for system actor
+	// enable stash
+	if spawnConfig.enableStash {
+		pidOptions = append(pidOptions, withStash())
+	}
+
+	// set the dependencies when defined
+	if spawnConfig.dependencies != nil {
+		_ = pid.ActorSystem().Inject(spawnConfig.dependencies...)
+		pidOptions = append(pidOptions, withDependencies(spawnConfig.dependencies...))
+	}
+
+	// disable passivation for a system actor
 	switch {
 	case isReservedName(name):
 		pidOptions = append(pidOptions, withPassivationDisabled())
@@ -640,8 +685,7 @@ func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor, opts .
 	}
 
 	// set the actor in the given actor system registry
-	pid.ActorSystem().broadcastActor(cid)
-	return cid, nil
+	return cid, pid.ActorSystem().broadcastActor(cid)
 }
 
 // StashSize returns the stash buffer size
@@ -1272,6 +1316,7 @@ func (pid *PID) reset() {
 	pid.mailbox.Dispose()
 	pid.isSingleton.Store(false)
 	pid.relocatable.Store(true)
+	pid.dependencies.Reset()
 }
 
 // freeWatchers releases all the actors watching this actor

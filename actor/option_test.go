@@ -86,11 +86,6 @@ func TestOption(t *testing.T) {
 			expected: actorSystem{shutdownTimeout: 2. * time.Second},
 		},
 		{
-			name:     "WithStash",
-			option:   WithStash(),
-			expected: actorSystem{stashEnabled: true},
-		},
-		{
 			name:     "WithPartitionHasher",
 			option:   WithPartitionHasher(hasher),
 			expected: actorSystem{partitionHasher: hasher},

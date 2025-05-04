@@ -63,6 +63,8 @@ mock:
     RUN mockery  --dir hash --name Hasher --keeptree --exported=true --with-expecter=true --inpackage=true --disable-version-string=true --output ./mocks/hash --case snake
     RUN mockery  --dir discovery --name Provider --keeptree --exported=true --with-expecter=true --inpackage=true --disable-version-string=true --output ./mocks/discovery --case snake
     RUN mockery  --dir internal/cluster --name Interface --keeptree --exported=true --with-expecter=true --inpackage=true --disable-version-string=true --output ./mocks/cluster --case snake
+    RUN mockery  --dir extension --name Dependency --keeptree --exported=true --with-expecter=true --inpackage=true --disable-version-string=true --output ./mocks/extension --case snake
+    RUN mockery  --dir extension --name Extension --keeptree --exported=true --with-expecter=true --inpackage=true --disable-version-string=true --output ./mocks/extension --case snake
 
     SAVE ARTIFACT ./mocks mocks AS LOCAL mocks
 

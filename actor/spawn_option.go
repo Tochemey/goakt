@@ -26,6 +26,9 @@ package actor
 
 import (
 	"time"
+
+	"github.com/tochemey/goakt/v3/extension"
+	"github.com/tochemey/goakt/v3/internal/validation"
 )
 
 // spawnConfig defines the configuration to apply when creating an actor
@@ -42,6 +45,23 @@ type spawnConfig struct {
 	asSingleton bool
 	// specifies if the actor should be relocated
 	relocatable bool
+	// specifies the list of dependencies
+	dependencies []extension.Dependency
+	// specifies whether that actor should be having stash buffer
+	enableStash bool
+}
+
+var _ validation.Validator = (*spawnConfig)(nil)
+
+func (s *spawnConfig) Validate() error {
+	for _, dependency := range s.dependencies {
+		if dependency != nil {
+			if err := validation.NewIDValidator(dependency.ID()).Validate(); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // newSpawnConfig creates an instance of spawnConfig
@@ -49,10 +69,12 @@ func newSpawnConfig(opts ...SpawnOption) *spawnConfig {
 	config := &spawnConfig{
 		relocatable: true,
 		asSingleton: false,
+		enableStash: false,
 		supervisor: NewSupervisor(
 			WithStrategy(OneForOneStrategy),
 			WithAnyErrorDirective(ResumeDirective),
 		),
+		dependencies: make([]extension.Dependency, 0),
 	}
 
 	for _, opt := range opts {
@@ -133,6 +155,49 @@ func WithLongLived() SpawnOption {
 func WithRelocationDisabled() SpawnOption {
 	return spawnOption(func(config *spawnConfig) {
 		config.relocatable = false
+	})
+}
+
+// WithDependencies returns a SpawnOption that injects the given dependencies into
+// the actor during its initialization.
+//
+// This function allows you to configure an actor with one or more dependencies,
+// such as services, clients, or configuration objects it needs to function.
+// These dependencies will be made available to the actor when it is spawned,
+// enabling better modularity and testability.
+//
+// Parameters: dependencies - a variadic list of objects implementing the Dependency interface.
+//
+// Returns: A SpawnOption that sets the actor's dependencies in the internal spawn configuration.
+func WithDependencies(dependencies ...extension.Dependency) SpawnOption {
+	return spawnOption(func(config *spawnConfig) {
+		config.dependencies = dependencies
+	})
+}
+
+// WithStashing enables stashing and sets the stash buffer for the actor, allowing it to temporarily store
+// incoming messages that cannot be immediately processed. This is particularly useful
+// in scenarios where the actor must delay handling certain messages—for example,
+// during initialization, while awaiting external resources, or transitioning between states.
+//
+// By stashing messages, the actor can defer processing until it enters a stable or ready state,
+// at which point the buffered messages can be retrieved and handled in a controlled sequence.
+// This helps maintain a clean and predictable message flow without dropping or prematurely
+// processing input.
+//
+// Use WithStashing when spawning the actor to activate this capability. By default, the stash
+// buffer is disabled.
+//
+// ⚠️ Note: The stash buffer is *not* a substitute for robust message handling or proper
+// supervision strategies. Misuse may lead to unbounded memory growth if messages are
+// stashed but never unstashed. Always ensure the actor eventually processes or discards
+// stashed messages to avoid leaks or state inconsistencies.
+//
+// When used correctly, the stash buffer is a powerful tool for managing transient states
+// and preserving actor responsiveness while maintaining orderly message handling.
+func WithStashing() SpawnOption {
+	return spawnOption(func(config *spawnConfig) {
+		config.enableStash = true
 	})
 }
 
