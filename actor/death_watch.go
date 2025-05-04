@@ -55,7 +55,7 @@ func (x *deathWatch) PreStart(*Context) error {
 	return nil
 }
 
-// Receive handle message received
+// Receive a handle message received
 func (x *deathWatch) Receive(ctx *ReceiveContext) {
 	switch msg := ctx.Message().(type) {
 	case *goaktpb.PostStart:

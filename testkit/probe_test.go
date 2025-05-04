@@ -34,6 +34,7 @@ import (
 	"google.golang.org/protobuf/encoding/prototext"
 
 	actors "github.com/tochemey/goakt/v3/actor"
+	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/util"
 	"github.com/tochemey/goakt/v3/log"
 	"github.com/tochemey/goakt/v3/test/data/testpb"
@@ -59,10 +60,8 @@ func TestTestProbe(t *testing.T) {
 		probe.ExpectMessage(msg)
 		probe.ExpectNoMessage()
 
-		t.Cleanup(func() {
-			probe.Stop()
-			testkit.Shutdown(ctx)
-		})
+		probe.Stop()
+		testkit.Shutdown(ctx)
 	})
 	t.Run("Assert any message received", func(t *testing.T) {
 		// create a test context
@@ -84,10 +83,8 @@ func TestTestProbe(t *testing.T) {
 		require.Equal(t, prototext.Format(msg), prototext.Format(actual))
 		probe.ExpectNoMessage()
 
-		t.Cleanup(func() {
-			probe.Stop()
-			testkit.Shutdown(ctx)
-		})
+		probe.Stop()
+		testkit.Shutdown(ctx)
 	})
 	t.Run("Assert sender", func(t *testing.T) {
 		// create a test context
@@ -108,10 +105,8 @@ func TestTestProbe(t *testing.T) {
 		require.Equal(t, "pinger", probe.Sender().Name())
 		probe.ExpectNoMessage()
 
-		t.Cleanup(func() {
-			probe.Stop()
-			testkit.Shutdown(ctx)
-		})
+		probe.Stop()
+		testkit.Shutdown(ctx)
 	})
 	t.Run("Assert message type", func(t *testing.T) {
 		// create a test context
@@ -131,10 +126,8 @@ func TestTestProbe(t *testing.T) {
 		probe.ExpectMessageOfType(msg.ProtoReflect().Type())
 		probe.ExpectNoMessage()
 
-		t.Cleanup(func() {
-			probe.Stop()
-			testkit.Shutdown(ctx)
-		})
+		probe.Stop()
+		testkit.Shutdown(ctx)
 	})
 	t.Run("Assert message received within a time period", func(t *testing.T) {
 		// create a test context
@@ -156,10 +149,8 @@ func TestTestProbe(t *testing.T) {
 		probe.ExpectMessageWithin(2*time.Second, msg)
 		probe.ExpectNoMessage()
 
-		t.Cleanup(func() {
-			probe.Stop()
-			testkit.Shutdown(ctx)
-		})
+		probe.Stop()
+		testkit.Shutdown(ctx)
 	})
 	t.Run("Assert message type within a time period", func(t *testing.T) {
 		// create a test context
@@ -181,10 +172,8 @@ func TestTestProbe(t *testing.T) {
 		probe.ExpectMessageOfTypeWithin(2*time.Second, msg.ProtoReflect().Type())
 		probe.ExpectNoMessage()
 
-		t.Cleanup(func() {
-			probe.Stop()
-			testkit.Shutdown(ctx)
-		})
+		probe.Stop()
+		testkit.Shutdown(ctx)
 	})
 	t.Run("Assert SendSync", func(t *testing.T) {
 		// create a test context
@@ -202,10 +191,30 @@ func TestTestProbe(t *testing.T) {
 		probe.ExpectMessage(new(testpb.Reply))
 		probe.ExpectNoMessage()
 
-		t.Cleanup(func() {
-			probe.Stop()
-			testkit.Shutdown(ctx)
-		})
+		probe.Stop()
+		testkit.Shutdown(ctx)
+	})
+	t.Run("Assert Watch", func(t *testing.T) {
+		// create a test context
+		ctx := context.TODO()
+		// create a test kit
+		testkit := New(ctx, t, WithLogging(log.ErrorLevel))
+
+		// create the actor
+		testkit.Spawn(ctx, "pinger", &pinger{})
+		// create the test probe
+		probe := testkit.NewProbe(ctx)
+
+		// watch the actor
+		probe.Watch("pinger")
+
+		// kill the actor
+		probe.Send("pinger", new(goaktpb.PoisonPill))
+		probe.ExpectTerminated("pinger")
+		probe.ExpectNoMessage()
+
+		probe.Stop()
+		testkit.Shutdown(ctx)
 	})
 }
 

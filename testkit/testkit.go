@@ -81,6 +81,23 @@ func (k *TestKit) Spawn(ctx context.Context, name string, actor actors.Actor) {
 	}
 }
 
+// SpawnChild creates a child actor for an existing actor that is the parent
+func (k *TestKit) SpawnChild(ctx context.Context, childName, parentName string, actor actors.Actor) {
+	// locate the parent actor
+	parent, err := k.actorSystem.LocalActor(parentName)
+	// handle the error
+	if err != nil {
+		k.kt.Fatal(err.Error())
+	}
+
+	// spawn the child actor
+	_, err = parent.SpawnChild(ctx, childName, actor)
+	// handle the error
+	if err != nil {
+		k.kt.Fatal(err.Error())
+	}
+}
+
 // NewProbe create a test probe
 func (k *TestKit) NewProbe(ctx context.Context) Probe {
 	// create an instance of TestProbe
