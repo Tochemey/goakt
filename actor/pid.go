@@ -634,7 +634,7 @@ func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor, opts .
 
 	// set the dependencies when defined
 	if spawnConfig.dependencies != nil {
-		_ = pid.ActorSystem().RegisterDependencies(spawnConfig.dependencies...)
+		_ = pid.ActorSystem().Inject(spawnConfig.dependencies...)
 		pidOptions = append(pidOptions, withDependencies(spawnConfig.dependencies...))
 	}
 

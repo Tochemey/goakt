@@ -223,16 +223,21 @@ type ActorSystem interface { //nolint:revive
 	// Returns:
 	//   - extension.Extension: The registered extension with the given ID, or nil if not found.
 	Extension(extensionID string) extension.Extension
-	// RegisterDependencies registers dependencies with the ActorSystem.
-	// These dependencies will be injected into actors that require external resources
-	// (e.g., services, clients, or repositories) when they are spawned.
+	// Inject provides a way to register shared dependencies with the ActorSystem.
 	//
-	// This is particularly important in distributed systems where actors might need
-	// to be redeployed automatically to a different node if their current host fails
-	// or leaves the cluster unexpectedly. By registering the dependencies here,
-	// the cluster runtime ensures that the redeployed actor has access to the same
-	// necessary dependencies as before.
-	RegisterDependencies(dependencies ...extension.Dependency) error
+	// These dependencies — such as clients, services, or repositories — will be injected
+	// into actors that declare them as required when using SpawnOptions.
+	//
+	// This mechanism ensures actors are provisioned consistently with the resources they
+	// depend on, even when they're relocated (e.g., during failover or rescheduling in a
+	// distributed cluster environment).
+	//
+	// Actors can retrieve these dependencies via their context, enabling decoupled,
+	// testable, and runtime-injected configurations.
+	//
+	// Returns an error if any dependency registration fails or if there's a conflict
+	// with already registered dependencies.
+	Inject(dependencies ...extension.Dependency) error
 	// handleRemoteAsk handles a synchronous message to another actor and expect a response.
 	// This block until a response is received or timed out.
 	handleRemoteAsk(ctx context.Context, to *PID, message proto.Message, timeout time.Duration) (response proto.Message, err error)
@@ -1401,26 +1406,26 @@ func (x *actorSystem) Extension(extensionID string) extension.Extension {
 	return nil
 }
 
-// RegisterDependencies registers dependencies with the ActorSystem.
-// These dependencies will be injected into actors that require external resources
-// (e.g., services, clients, or repositories) when they are spawned.
+// Inject provides a way to register shared dependencies with the ActorSystem.
 //
-// This is particularly important in distributed systems where actors might need
-// to be redeployed automatically to a different node if their current host fails
-// or leaves the cluster unexpectedly. By registering the dependencies here,
-// the cluster runtime ensures that the redeployed actor has access to the same
-// necessary dependencies as before.
-func (x *actorSystem) RegisterDependencies(dependencies ...extension.Dependency) error {
+// These dependencies — such as clients, services, or repositories — will be injected
+// into actors that declare them as required when using SpawnOptions.
+//
+// This mechanism ensures actors are provisioned consistently with the resources they
+// depend on, even when they're relocated (e.g., during failover or rescheduling in a
+// distributed cluster environment).
+//
+// Actors can retrieve these dependencies via their context, enabling decoupled,
+// testable, and runtime-injected configurations.
+//
+// Returns an error if any dependency registration fails or if there's a conflict
+// with already registered dependencies.
+func (x *actorSystem) Inject(dependencies ...extension.Dependency) error {
 	x.locker.Lock()
 
 	if !x.started.Load() {
 		x.locker.Unlock()
 		return ErrActorSystemNotStarted
-	}
-
-	if err := x.validateDependencies(dependencies...); err != nil {
-		x.locker.Unlock()
-		return err
 	}
 
 	for _, dependency := range dependencies {
@@ -1737,18 +1742,6 @@ func (x *actorSystem) validateExtensions() error {
 	for _, ext := range x.extensions.Values() {
 		if ext != nil {
 			if err := validation.NewIDValidator(ext.ID()).Validate(); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
-// validateDependencies validates dependencies
-func (x *actorSystem) validateDependencies(dependencies ...extension.Dependency) error {
-	for _, dependency := range dependencies {
-		if dependency != nil {
-			if err := validation.NewIDValidator(dependency.ID()).Validate(); err != nil {
 				return err
 			}
 		}

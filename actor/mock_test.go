@@ -589,7 +589,7 @@ func testCluster(t *testing.T, serverAddr string, opts ...testClusterOption) (Ac
 	require.NoError(t, err)
 
 	if cfg.dependency != nil {
-		require.NoError(t, system.RegisterDependencies(cfg.dependency))
+		require.NoError(t, system.Inject(cfg.dependency))
 	}
 
 	// start the node

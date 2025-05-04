@@ -1682,7 +1682,7 @@ func TestRemotingSpawn(t *testing.T) {
 
 		// register dependencies
 		dependency := dependencyMock("test", "test", "test")
-		err = sys.RegisterDependencies(dependency)
+		err = sys.Inject(dependency)
 		require.NoError(t, err)
 
 		// create an actor implementation and register it
@@ -1765,7 +1765,7 @@ func TestRemotingSpawn(t *testing.T) {
 
 		// register dependencies
 		dependency := dependencyMock("test", "test", "test")
-		err = sys.RegisterDependencies(dependency)
+		err = sys.Inject(dependency)
 		require.NoError(t, err)
 
 		// create an actor implementation and register it
@@ -1827,7 +1827,7 @@ func TestRemotingSpawn(t *testing.T) {
 		dependency.EXPECT().ID().Return("id")
 		dependency.EXPECT().MarshalBinary().Return(nil, assert.AnError)
 
-		err = sys.RegisterDependencies(dependency)
+		err = sys.Inject(dependency)
 		require.NoError(t, err)
 
 		// create an actor implementation and register it
