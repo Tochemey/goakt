@@ -495,11 +495,12 @@ func TestRebalancingWithDependency(t *testing.T) {
 	require.NotNil(t, node2)
 	require.NotNil(t, sd2)
 
+	dependencyID := "dependency"
 	// let us create 4 actors on each node
 	for j := 1; j <= 4; j++ {
 		entityID := fmt.Sprintf("node1-actor-%d", j)
 		// create the dependency
-		dependency := dependencyMock(entityID, "userName", "email")
+		dependency := dependencyMock(dependencyID, entityID, "email")
 		pid, err := node1.Spawn(ctx, entityID, newMockActor(), WithDependencies(dependency))
 		require.NoError(t, err)
 		require.NotNil(t, pid)
@@ -510,7 +511,7 @@ func TestRebalancingWithDependency(t *testing.T) {
 	for j := 1; j <= 4; j++ {
 		entityID := fmt.Sprintf("node2-actor-%d", j)
 		// create the dependency
-		dependency := dependencyMock(entityID, "userName", "email")
+		dependency := dependencyMock(dependencyID, entityID, "email")
 		pid, err := node2.Spawn(ctx, entityID, newMockActor(), WithDependencies(dependency))
 		require.NoError(t, err)
 		require.NotNil(t, pid)
@@ -536,11 +537,14 @@ func TestRebalancingWithDependency(t *testing.T) {
 	pid, err := node1.LocalActor(actorName)
 	require.NoError(t, err)
 	require.NotNil(t, pid)
+	actual := pid.Dependencies()
+	require.NotNil(t, actual)
+	require.Len(t, actual, 1)
 
-	dep := pid.Dependency(actorName)
+	dep := pid.Dependency(dependencyID)
 	require.NotNil(t, dep)
 	mockdep := dep.(*mockDependency)
-	require.Equal(t, "userName", mockdep.Username)
+	require.Equal(t, actorName, mockdep.Username)
 	require.Equal(t, "email", mockdep.Email)
 
 	assert.NoError(t, node1.Stop(ctx))
