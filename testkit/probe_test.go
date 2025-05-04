@@ -194,7 +194,7 @@ func TestTestProbe(t *testing.T) {
 		probe.Stop()
 		testkit.Shutdown(ctx)
 	})
-	t.Run("Assert Watch", func(t *testing.T) {
+	t.Run("Assert WatchNamed", func(t *testing.T) {
 		// create a test context
 		ctx := context.TODO()
 		// create a test kit
@@ -206,7 +206,7 @@ func TestTestProbe(t *testing.T) {
 		probe := testkit.NewProbe(ctx)
 
 		// watch the actor
-		probe.Watch("pinger")
+		probe.WatchNamed("pinger")
 
 		// kill the actor
 		probe.Send("pinger", new(goaktpb.PoisonPill))
@@ -216,7 +216,6 @@ func TestTestProbe(t *testing.T) {
 		probe.Stop()
 		testkit.Shutdown(ctx)
 	})
-
 	t.Run("Assert SpawnChild", func(t *testing.T) {
 		// create a test context
 		ctx := context.TODO()
@@ -235,6 +234,36 @@ func TestTestProbe(t *testing.T) {
 		// send a message to the actor to be tested
 		probe.SendSync("child", new(testpb.TestReply), time.Second)
 		probe.ExpectMessage(new(testpb.Reply))
+		probe.ExpectNoMessage()
+
+		probe.Stop()
+		testkit.Shutdown(ctx)
+	})
+	t.Run("Assert Watch", func(t *testing.T) {
+		// create a test context
+		ctx := context.TODO()
+		// create a test kit
+		testkit := New(ctx, t, WithLogging(log.ErrorLevel))
+
+		// create the actor outside the test kit
+		pid, err := testkit.ActorSystem().Spawn(ctx, "pinger", &pinger{})
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+
+		// create the test probe
+		probe := testkit.NewProbe(ctx)
+
+		// watch the actor
+		probe.Watch(pid)
+
+		// shutdown the actor
+		err = pid.Shutdown(ctx)
+		require.NoError(t, err)
+
+		// wait for the actor to be terminated
+		util.Pause(time.Second)
+
+		probe.ExpectTerminated(pid.Name())
 		probe.ExpectNoMessage()
 
 		probe.Stop()

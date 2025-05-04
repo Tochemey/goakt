@@ -98,16 +98,29 @@ type Probe interface {
 	// in test scenarios where the tested actor expects a sender reference.
 	PID() *actors.PID
 
-	// Watch subscribes the probe to termination notifications for the specified actor.
+	// WatchNamed subscribes the probe to termination notifications for the specified actor given its name.
 	// Once the watched actor stops or crashes, the probe will receive a Terminated message.
 	//
 	// This is useful for asserting that an actor shuts down as expected during the test.
 	//
 	// Example usage:
-	//   probe.Watch("worker-actor")
+	//   probe.WatchNamed("worker-actor")
 	//   // perform actions that should lead to actor termination
 	//   probe.ExpectTerminated("worker-actor")
-	Watch(actorName string)
+	WatchNamed(actorName string)
+
+	// Watch subscribes the probe to termination notifications for the specified actor PID.
+	// When the watched actor stops—either gracefully or due to failure—the probe will
+	// receive a Terminated message containing the PID of the terminated actor.
+	//
+	// This method is typically used to assert that an actor under test shuts down as expected.
+	//
+	// Example usage:
+	//   workerPID := system.Spawn(workerProps)
+	//   probe.Watch(workerPID)
+	//   // trigger actor shutdown
+	//   probe.ExpectTerminated(workerPID.Name())
+	Watch(pid *actors.PID)
 
 	// Stop stops the probe actor and releases any associated resources.
 	// This should be called at the end of a test to clean up the probe.
@@ -277,20 +290,36 @@ func (x *probe) PID() *actors.PID {
 	return x.pid
 }
 
-// Watch subscribes the probe to termination notifications for the specified actor.
+// WatchNamed subscribes the probe to termination notifications for the specified actor given its name.
 // Once the watched actor stops or crashes, the probe will receive a Terminated message.
 //
 // This is useful for asserting that an actor shuts down as expected during the test.
 //
 // Example usage:
 //
-//	probe.Watch("worker-actor")
+//	probe.WatchNamed("worker-actor")
 //	// perform actions that should lead to actor termination
 //	probe.ExpectTerminated("worker-actor")
-func (x *probe) Watch(actorName string) {
+func (x *probe) WatchNamed(actorName string) {
 	to, err := x.pid.ActorSystem().LocalActor(actorName)
 	require.NoError(x.testingT, err)
 	x.pid.Watch(to)
+}
+
+// Watch subscribes the probe to termination notifications for the specified actor PID.
+// When the watched actor stops—either gracefully or due to failure—the probe will
+// receive a Terminated message containing the PID of the terminated actor.
+//
+// This method is typically used to assert that an actor under test shuts down as expected.
+//
+// Example usage:
+//
+//	workerPID := system.Spawn(workerProps)
+//	probe.Watch(workerPID)
+//	// trigger actor shutdown
+//	probe.ExpectTerminated(workerPID.Name())
+func (x *probe) Watch(pid *actors.PID) {
+	x.pid.Watch(pid)
 }
 
 // Stop stops the probe actor and releases any associated resources.

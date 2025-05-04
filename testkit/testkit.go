@@ -71,9 +71,14 @@ func New(ctx context.Context, t *testing.T, opts ...Option) *TestKit {
 	return testkit
 }
 
-// Spawn create an actor
+// ActorSystem returns the testkit actor system
+func (k *TestKit) ActorSystem() actors.ActorSystem {
+	return k.actorSystem
+}
+
+// Spawn creates an actor
 func (k *TestKit) Spawn(ctx context.Context, name string, actor actors.Actor) {
-	// create and instance of actor
+	// create and instance of an actor
 	_, err := k.actorSystem.Spawn(ctx, name, actor)
 	// handle the error
 	if err != nil {
