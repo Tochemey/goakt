@@ -71,10 +71,32 @@ func New(ctx context.Context, t *testing.T, opts ...Option) *TestKit {
 	return testkit
 }
 
-// Spawn create an actor
+// ActorSystem returns the testkit actor system
+func (k *TestKit) ActorSystem() actors.ActorSystem {
+	return k.actorSystem
+}
+
+// Spawn creates an actor
 func (k *TestKit) Spawn(ctx context.Context, name string, actor actors.Actor) {
-	// create and instance of actor
+	// create and instance of an actor
 	_, err := k.actorSystem.Spawn(ctx, name, actor)
+	// handle the error
+	if err != nil {
+		k.kt.Fatal(err.Error())
+	}
+}
+
+// SpawnChild creates a child actor for an existing actor that is the parent
+func (k *TestKit) SpawnChild(ctx context.Context, childName, parentName string, actor actors.Actor) {
+	// locate the parent actor
+	parent, err := k.actorSystem.LocalActor(parentName)
+	// handle the error
+	if err != nil {
+		k.kt.Fatal(err.Error())
+	}
+
+	// spawn the child actor
+	_, err = parent.SpawnChild(ctx, childName, actor)
 	// handle the error
 	if err != nil {
 		k.kt.Fatal(err.Error())
