@@ -116,7 +116,7 @@ type Probe interface {
 	// This method is typically used to assert that an actor under test shuts down as expected.
 	//
 	// Example usage:
-	//   workerPID := system.Spawn(workerProps)
+	//   workerPID, _ := system.Spawn(....)
 	//   probe.Watch(workerPID)
 	//   // trigger actor shutdown
 	//   probe.ExpectTerminated(workerPID.Name())
