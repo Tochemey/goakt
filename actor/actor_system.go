@@ -235,8 +235,7 @@ type ActorSystem interface { //nolint:revive
 	// Actors can retrieve these dependencies via their context, enabling decoupled,
 	// testable, and runtime-injected configurations.
 	//
-	// Returns an error if any dependency registration fails or if there's a conflict
-	// with already registered dependencies.
+	// Returns an error if the actor system has not started.
 	Inject(dependencies ...extension.Dependency) error
 	// handleRemoteAsk handles a synchronous message to another actor and expect a response.
 	// This block until a response is received or timed out.
@@ -1418,8 +1417,7 @@ func (x *actorSystem) Extension(extensionID string) extension.Extension {
 // Actors can retrieve these dependencies via their context, enabling decoupled,
 // testable, and runtime-injected configurations.
 //
-// Returns an error if any dependency registration fails or if there's a conflict
-// with already registered dependencies.
+// Returns an error if the actor system has not started.
 func (x *actorSystem) Inject(dependencies ...extension.Dependency) error {
 	x.locker.Lock()
 
