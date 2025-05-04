@@ -216,6 +216,30 @@ func TestTestProbe(t *testing.T) {
 		probe.Stop()
 		testkit.Shutdown(ctx)
 	})
+
+	t.Run("Assert SpawnChild", func(t *testing.T) {
+		// create a test context
+		ctx := context.TODO()
+		// create a test kit
+		testkit := New(ctx, t, WithLogging(log.ErrorLevel))
+
+		// create the actor
+		testkit.Spawn(ctx, "pinger", &pinger{})
+
+		// create the child actor
+		testkit.SpawnChild(ctx, "child", "pinger", &pinger{})
+
+		// create the test probe
+		probe := testkit.NewProbe(ctx)
+
+		// send a message to the actor to be tested
+		probe.SendSync("child", new(testpb.TestReply), time.Second)
+		probe.ExpectMessage(new(testpb.Reply))
+		probe.ExpectNoMessage()
+
+		probe.Stop()
+		testkit.Shutdown(ctx)
+	})
 }
 
 type pinger struct {
