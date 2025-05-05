@@ -43,19 +43,21 @@ import (
 // A Context is guaranteed to be available during the actor’s initialization phase
 // and should be treated as immutable.
 type Context struct {
-	ctx         context.Context
-	actorSystem ActorSystem
-	actorName   string
+	ctx          context.Context
+	actorSystem  ActorSystem
+	actorName    string
+	dependencies []extension.Dependency
 }
 
 // newContext creates and returns a new Context instance.
 //
 // It wraps the provided context.Context and associates it with the specified ActorSystem.
-func newContext(ctx context.Context, actorName string, actorSystem ActorSystem) *Context {
+func newContext(ctx context.Context, actorName string, actorSystem ActorSystem, dependencies ...extension.Dependency) *Context {
 	return &Context{
-		ctx:         ctx,
-		actorSystem: actorSystem,
-		actorName:   actorName,
+		ctx:          ctx,
+		actorSystem:  actorSystem,
+		actorName:    actorName,
+		dependencies: dependencies,
 	}
 }
 
@@ -111,4 +113,19 @@ func (x *Context) Extension(extensionID string) extension.Extension {
 // identification, logging, monitoring, and message routing purposes.
 func (x *Context) ActorName() string {
 	return x.actorName
+}
+
+// Dependencies returns a slice containing all dependencies currently registered
+// within the PID's local context.
+//
+// These dependencies are typically injected at actor initialization (via SpawnOptions)
+// and made accessible during the actor's lifecycle. They can include services, clients,
+// or any resources that the actor requires to operate.
+//
+// This method is useful for diagnostic tools, dynamic inspection, or cases where
+// an actor needs to introspect its environment.
+//
+// Returns: A slice of Dependency instances associated with this PID.
+func (x *Context) Dependencies() []extension.Dependency {
+	return x.dependencies
 }

@@ -1270,7 +1270,7 @@ func (pid *PID) recovery(received *ReceiveContext) {
 func (pid *PID) init(ctx context.Context) error {
 	pid.logger.Infof("%s starting...", pid.Name())
 
-	initContext := newContext(ctx, pid.Name(), pid.system)
+	initContext := newContext(ctx, pid.Name(), pid.system, pid.Dependencies()...)
 
 	cctx, cancel := context.WithTimeout(ctx, pid.initTimeout.Load())
 	retrier := retry.NewRetrier(int(pid.initMaxRetries.Load()), time.Millisecond, pid.initTimeout.Load())
@@ -1549,7 +1549,7 @@ func (pid *PID) doStop(ctx context.Context) error {
 		return err
 	}
 
-	stopContext := newContext(ctx, pid.Name(), pid.system)
+	stopContext := newContext(ctx, pid.Name(), pid.system, pid.Dependencies()...)
 
 	// run the PostStop hook and let watchers know
 	// you are terminated
