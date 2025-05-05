@@ -1749,6 +1749,7 @@ func (x *actorSystem) validateExtensions() error {
 
 // reset the actor system
 func (x *actorSystem) reset() {
+	x.workerPool.Stop()
 	x.extensions.Reset()
 	x.actors.reset()
 }
@@ -1802,11 +1803,11 @@ func (x *actorSystem) shutdown(ctx context.Context) error {
 		AddErrorFn(func() error { return x.shutdownCluster(ctx, actorRefs) }).
 		AddErrorFn(func() error { return x.shutdownRemoting(ctx) }).
 		Error(); err != nil {
+		x.reset()
 		x.logger.Errorf("%s failed to shutdown: %w", x.name, err)
 		return err
 	}
 
-	x.workerPool.Stop()
 	x.reset()
 	x.logger.Infof("%s shuts down successfully", x.name)
 	return nil
