@@ -72,7 +72,7 @@ func Size() (uint64, error) {
 func Free() (uint64, error) {
 	kernel32, err := syscall.LoadDLL("kernel32.dll")
 	if err != nil {
-		return 0
+		return 0, err
 	}
 
 	globalMemoryStatusEx, err := kernel32.FindProc("GlobalMemoryStatusEx")
