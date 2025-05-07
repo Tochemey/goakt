@@ -16,7 +16,11 @@ concurrency:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    strategy:
+        fail-fast: false
+        matrix:
+          os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     env:
       FORCE_COLOR: 1
     steps:
@@ -24,7 +28,6 @@ jobs:
         with:
           submodules: false
           fetch-depth: 0
-      - uses: wagoid/commitlint-github-action@v6
       - uses: actions/setup-go@v5
         with:
           go-version: '1.23.0'
@@ -38,7 +41,7 @@ jobs:
           go install github.com/ory/go-acc@latest
       - name: Run tests
         run: |
-          go-acc ./... -o coverage.out --ignore goaktpb,mocks,internal/internalpb,bench -- -mod=vendor -timeout 0 -race -v
+          go-acc ./... -o coverage.out --ignore goaktpb,mocks,internal/internalpb,bench -- -mod=vendor -p 1 -timeout 0 -race -v
       - uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -46,7 +49,11 @@ jobs:
           fail_ci_if_error: false
           verbose: true
   lint:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
