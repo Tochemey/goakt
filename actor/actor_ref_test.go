@@ -38,14 +38,14 @@ import (
 func TestActorRef(t *testing.T) {
 	t.Run("With Equals", func(t *testing.T) {
 		addr := address.New("name", "system", "host", 1234)
-		actorRef := fromActorRef(&internalpb.ActorRef{
-			ActorAddress: addr.Address,
-			ActorType:    "kind",
+		actorRef := fromActorRef(&internalpb.Actor{
+			Address: addr.Address,
+			Type:    "kind",
 		})
 
-		newActorRef := fromActorRef(&internalpb.ActorRef{
-			ActorAddress: addr.Address,
-			ActorType:    "kind",
+		newActorRef := fromActorRef(&internalpb.Actor{
+			Address: addr.Address,
+			Type:    "kind",
 		})
 
 		require.Equal(t, "name", actorRef.Name())
