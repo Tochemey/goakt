@@ -106,16 +106,26 @@ message NodeLeft {
   google.protobuf.Timestamp timestamp = 2;
 }
 
-// Terminated is used to notify watching actors
-// of the shutdown of its child actor.
+// Terminated is a lifecycle notification message sent to all actors
+// that are watching a given actor when it has stopped or been terminated.
+//
+// This message allows supervising or dependent actors to react to the shutdown
+// of the actor they were observing—for example, by cleaning up resources,
+// restarting the actor, or triggering failover behavior.
 message Terminated {
-  // Specifies the terminated actor
+  // The unique identifier of the actor that has been terminated.
   string actor_id = 1;
 }
 
-// PoisonPill is sent the stop an actor.
-// It is enqueued as ordinary messages.
-// It will be handled after messages that were already queued in the mailbox.
+// PoisonPill is a special control message used to gracefully stop an actor.
+//
+// When an actor receives a PoisonPill, it will initiate a controlled shutdown sequence.
+// The PoisonPill is enqueued in the actor's mailbox like any other message, meaning:
+// - It will not interrupt message processing.
+// - It will only be handled after all previously enqueued messages are processed.
+//
+// This allows the actor to finish processing in-flight work before termination,
+// ensuring clean shutdown semantics without abrupt interruptions.
 message PoisonPill {}
 
 // PostStart is used when an actor has successfully started
@@ -172,3 +182,28 @@ message Publish {
 
 // NoMessage is used to indicate that no message was sent
 message NoMessage {}
+
+// Mayday is a system-level message used in actor-based systems to notify a parent actor
+// that one of its child actors has encountered a critical failure or unhandled condition.
+// This message is automatically sent when the Escalate supervision directive is invoked,
+// indicating that the issue cannot be handled at the child level.
+//
+// The child actor is suspended, and the parent actor is expected to take appropriate action.
+// Upon receiving a Mayday, the parent actor can decide how to handle the failure,
+// such as restarting the child, stopping it, escalating further, or applying custom recovery logic.
+message Mayday {
+  // The unique identifier of the child actor that experienced the failure.
+  string actor_id = 1;
+
+  // The original message that triggered the failure. This is useful for debugging
+  // or retrying the operation once the issue is resolved.
+  google.protobuf.Any message = 2;
+
+  // A human-readable explanation of the failure, typically extracted from the exception
+  // or error condition that led to the escalation.
+  string reason = 3;
+
+  // The UTC timestamp indicating when the Mayday event occurred. This helps in correlating
+  // logs or monitoring data for incident analysis and resolution timelines.
+  google.protobuf.Timestamp timestamp = 4;
+}

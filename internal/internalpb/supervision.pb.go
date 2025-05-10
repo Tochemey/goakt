@@ -9,6 +9,8 @@ package internalpb
 import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	anypb "google.golang.org/protobuf/types/known/anypb"
+	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
@@ -67,10 +69,10 @@ func (Strategy) EnumDescriptor() ([]byte, []int) {
 	return file_internal_supervision_proto_rawDescGZIP(), []int{0}
 }
 
-// Mayday message is sent by a child
+// Down message is sent by a child
 // actor to its parent when it is panicking or returning an error
 // while processing messages
-type Mayday struct {
+type Down struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Specifies the actor id
 	ActorId string `protobuf:"bytes,1,opt,name=actor_id,json=actorId,proto3" json:"actor_id,omitempty"`
@@ -80,31 +82,35 @@ type Mayday struct {
 	//
 	// Types that are valid to be assigned to Directive:
 	//
-	//	*Mayday_Stop
-	//	*Mayday_Resume
-	//	*Mayday_Restart
-	//	*Mayday_Escalate
-	Directive isMayday_Directive `protobuf_oneof:"directive"`
+	//	*Down_Stop
+	//	*Down_Resume
+	//	*Down_Restart
+	//	*Down_Escalate
+	Directive isDown_Directive `protobuf_oneof:"directive"`
 	// Specifies the strategy
-	Strategy      Strategy `protobuf:"varint,7,opt,name=strategy,proto3,enum=internalpb.Strategy" json:"strategy,omitempty"`
+	Strategy Strategy `protobuf:"varint,7,opt,name=strategy,proto3,enum=internalpb.Strategy" json:"strategy,omitempty"`
+	// Specifies the message that triggered the failure
+	Message *anypb.Any `protobuf:"bytes,8,opt,name=message,proto3" json:"message,omitempty"`
+	// Specifies when the error occurred
+	Timestamp     *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *Mayday) Reset() {
-	*x = Mayday{}
+func (x *Down) Reset() {
+	*x = Down{}
 	mi := &file_internal_supervision_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *Mayday) String() string {
+func (x *Down) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*Mayday) ProtoMessage() {}
+func (*Down) ProtoMessage() {}
 
-func (x *Mayday) ProtoReflect() protoreflect.Message {
+func (x *Down) ProtoReflect() protoreflect.Message {
 	mi := &file_internal_supervision_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -116,102 +122,116 @@ func (x *Mayday) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use Mayday.ProtoReflect.Descriptor instead.
-func (*Mayday) Descriptor() ([]byte, []int) {
+// Deprecated: Use Down.ProtoReflect.Descriptor instead.
+func (*Down) Descriptor() ([]byte, []int) {
 	return file_internal_supervision_proto_rawDescGZIP(), []int{0}
 }
 
-func (x *Mayday) GetActorId() string {
+func (x *Down) GetActorId() string {
 	if x != nil {
 		return x.ActorId
 	}
 	return ""
 }
 
-func (x *Mayday) GetErrorMessage() string {
+func (x *Down) GetErrorMessage() string {
 	if x != nil {
 		return x.ErrorMessage
 	}
 	return ""
 }
 
-func (x *Mayday) GetDirective() isMayday_Directive {
+func (x *Down) GetDirective() isDown_Directive {
 	if x != nil {
 		return x.Directive
 	}
 	return nil
 }
 
-func (x *Mayday) GetStop() *StopDirective {
+func (x *Down) GetStop() *StopDirective {
 	if x != nil {
-		if x, ok := x.Directive.(*Mayday_Stop); ok {
+		if x, ok := x.Directive.(*Down_Stop); ok {
 			return x.Stop
 		}
 	}
 	return nil
 }
 
-func (x *Mayday) GetResume() *ResumeDirective {
+func (x *Down) GetResume() *ResumeDirective {
 	if x != nil {
-		if x, ok := x.Directive.(*Mayday_Resume); ok {
+		if x, ok := x.Directive.(*Down_Resume); ok {
 			return x.Resume
 		}
 	}
 	return nil
 }
 
-func (x *Mayday) GetRestart() *RestartDirective {
+func (x *Down) GetRestart() *RestartDirective {
 	if x != nil {
-		if x, ok := x.Directive.(*Mayday_Restart); ok {
+		if x, ok := x.Directive.(*Down_Restart); ok {
 			return x.Restart
 		}
 	}
 	return nil
 }
 
-func (x *Mayday) GetEscalate() *EscalateDirective {
+func (x *Down) GetEscalate() *EscalateDirective {
 	if x != nil {
-		if x, ok := x.Directive.(*Mayday_Escalate); ok {
+		if x, ok := x.Directive.(*Down_Escalate); ok {
 			return x.Escalate
 		}
 	}
 	return nil
 }
 
-func (x *Mayday) GetStrategy() Strategy {
+func (x *Down) GetStrategy() Strategy {
 	if x != nil {
 		return x.Strategy
 	}
 	return Strategy_STRATEGY_ONE_FOR_ONE
 }
 
-type isMayday_Directive interface {
-	isMayday_Directive()
+func (x *Down) GetMessage() *anypb.Any {
+	if x != nil {
+		return x.Message
+	}
+	return nil
 }
 
-type Mayday_Stop struct {
+func (x *Down) GetTimestamp() *timestamppb.Timestamp {
+	if x != nil {
+		return x.Timestamp
+	}
+	return nil
+}
+
+type isDown_Directive interface {
+	isDown_Directive()
+}
+
+type Down_Stop struct {
 	Stop *StopDirective `protobuf:"bytes,3,opt,name=stop,proto3,oneof"`
 }
 
-type Mayday_Resume struct {
+type Down_Resume struct {
 	Resume *ResumeDirective `protobuf:"bytes,4,opt,name=resume,proto3,oneof"`
 }
 
-type Mayday_Restart struct {
+type Down_Restart struct {
 	Restart *RestartDirective `protobuf:"bytes,5,opt,name=restart,proto3,oneof"`
 }
 
-type Mayday_Escalate struct {
+type Down_Escalate struct {
 	Escalate *EscalateDirective `protobuf:"bytes,6,opt,name=escalate,proto3,oneof"`
 }
 
-func (*Mayday_Stop) isMayday_Directive() {}
+func (*Down_Stop) isDown_Directive() {}
 
-func (*Mayday_Resume) isMayday_Directive() {}
+func (*Down_Resume) isDown_Directive() {}
 
-func (*Mayday_Restart) isMayday_Directive() {}
+func (*Down_Restart) isDown_Directive() {}
 
-func (*Mayday_Escalate) isMayday_Directive() {}
+func (*Down_Escalate) isDown_Directive() {}
 
 // StopDirective defines the supervisor stop directive
 type StopDirective struct {
@@ -387,15 +407,17 @@ var File_internal_supervision_proto protoreflect.FileDescriptor
 const file_internal_supervision_proto_rawDesc = "" +
 	"\n" +
 	"\x1ainternal/supervision.proto\x12\n" +
-	"internalpb\"\xe6\x02\n" +
-	"\x06Mayday\x12\x19\n" +
+	"internalpb\x1a\x19google/protobuf/any.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xce\x03\n" +
+	"\x04Down\x12\x19\n" +
 	"\bactor_id\x18\x01 \x01(\tR\aactorId\x12#\n" +
 	"\rerror_message\x18\x02 \x01(\tR\ferrorMessage\x12/\n" +
 	"\x04stop\x18\x03 \x01(\v2\x19.internalpb.StopDirectiveH\x00R\x04stop\x125\n" +
 	"\x06resume\x18\x04 \x01(\v2\x1b.internalpb.ResumeDirectiveH\x00R\x06resume\x128\n" +
 	"\arestart\x18\x05 \x01(\v2\x1c.internalpb.RestartDirectiveH\x00R\arestart\x12;\n" +
 	"\bescalate\x18\x06 \x01(\v2\x1d.internalpb.EscalateDirectiveH\x00R\bescalate\x120\n" +
-	"\bstrategy\x18\a \x01(\x0e2\x14.internalpb.StrategyR\bstrategyB\v\n" +
+	"\bstrategy\x18\a \x01(\x0e2\x14.internalpb.StrategyR\bstrategy\x12.\n" +
+	"\amessage\x18\b \x01(\v2\x14.google.protobuf.AnyR\amessage\x128\n" +
+	"\ttimestamp\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\ttimestampB\v\n" +
 	"\tdirective\"\x0f\n" +
 	"\rStopDirective\"\x11\n" +
 	"\x0fResumeDirective\"\x13\n" +
@@ -427,24 +449,28 @@ func file_internal_supervision_proto_rawDescGZIP() []byte {
 var file_internal_supervision_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
 var file_internal_supervision_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
 var file_internal_supervision_proto_goTypes = []any{
-	(Strategy)(0),             // 0: internalpb.Strategy
-	(*Mayday)(nil),            // 1: internalpb.Mayday
-	(*StopDirective)(nil),     // 2: internalpb.StopDirective
-	(*ResumeDirective)(nil),   // 3: internalpb.ResumeDirective
-	(*EscalateDirective)(nil), // 4: internalpb.EscalateDirective
-	(*RestartDirective)(nil),  // 5: internalpb.RestartDirective
+	(Strategy)(0),                 // 0: internalpb.Strategy
+	(*Down)(nil),                  // 1: internalpb.Down
+	(*StopDirective)(nil),         // 2: internalpb.StopDirective
+	(*ResumeDirective)(nil),       // 3: internalpb.ResumeDirective
+	(*EscalateDirective)(nil),     // 4: internalpb.EscalateDirective
+	(*RestartDirective)(nil),      // 5: internalpb.RestartDirective
+	(*anypb.Any)(nil),             // 6: google.protobuf.Any
+	(*timestamppb.Timestamp)(nil), // 7: google.protobuf.Timestamp
 }
 var file_internal_supervision_proto_depIdxs = []int32{
-	2, // 0: internalpb.Mayday.stop:type_name -> internalpb.StopDirective
-	3, // 1: internalpb.Mayday.resume:type_name -> internalpb.ResumeDirective
-	5, // 2: internalpb.Mayday.restart:type_name -> internalpb.RestartDirective
-	4, // 3: internalpb.Mayday.escalate:type_name -> internalpb.EscalateDirective
-	0, // 4: internalpb.Mayday.strategy:type_name -> internalpb.Strategy
-	5, // [5:5] is the sub-list for method output_type
-	5, // [5:5] is the sub-list for method input_type
-	5, // [5:5] is the sub-list for extension type_name
-	5, // [5:5] is the sub-list for extension extendee
-	0, // [0:5] is the sub-list for field type_name
+	2, // 0: internalpb.Down.stop:type_name -> internalpb.StopDirective
+	3, // 1: internalpb.Down.resume:type_name -> internalpb.ResumeDirective
+	5, // 2: internalpb.Down.restart:type_name -> internalpb.RestartDirective
+	4, // 3: internalpb.Down.escalate:type_name -> internalpb.EscalateDirective
+	0, // 4: internalpb.Down.strategy:type_name -> internalpb.Strategy
+	6, // 5: internalpb.Down.message:type_name -> google.protobuf.Any
+	7, // 6: internalpb.Down.timestamp:type_name -> google.protobuf.Timestamp
+	7, // [7:7] is the sub-list for method output_type
+	7, // [7:7] is the sub-list for method input_type
+	7, // [7:7] is the sub-list for extension type_name
+	7, // [7:7] is the sub-list for extension extendee
+	0, // [0:7] is the sub-list for field type_name
 }
 
 func init() { file_internal_supervision_proto_init() }
@@ -453,10 +479,10 @@ func file_internal_supervision_proto_init() {
 		return
 	}
 	file_internal_supervision_proto_msgTypes[0].OneofWrappers = []any{
-		(*Mayday_Stop)(nil),
-		(*Mayday_Resume)(nil),
-		(*Mayday_Restart)(nil),
-		(*Mayday_Escalate)(nil),
+		(*Down_Stop)(nil),
+		(*Down_Resume)(nil),
+		(*Down_Restart)(nil),
+		(*Down_Escalate)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
