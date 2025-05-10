@@ -655,11 +655,15 @@ func (x *NodeLeft) GetTimestamp() *timestamppb.Timestamp {
 	return nil
 }
 
-// Terminated is used to notify watching actors
-// of the shutdown of its child actor.
+// Terminated is a lifecycle notification message sent to all actors
+// that are watching a given actor when it has stopped or been terminated.
+//
+// This message allows supervising or dependent actors to react to the shutdown
+// of the actor they were observing—for example, by cleaning up resources,
+// restarting the actor, or triggering failover behavior.
 type Terminated struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the terminated actor
+	// The unique identifier of the actor that has been terminated.
 	ActorId       string `protobuf:"bytes,1,opt,name=actor_id,json=actorId,proto3" json:"actor_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -702,9 +706,15 @@ func (x *Terminated) GetActorId() string {
 	return ""
 }
 
-// PoisonPill is sent the stop an actor.
-// It is enqueued as ordinary messages.
-// It will be handled after messages that were already queued in the mailbox.
+// PoisonPill is a special control message used to gracefully stop an actor.
+//
+// When an actor receives a PoisonPill, it will initiate a controlled shutdown sequence.
+// The PoisonPill is enqueued in the actor's mailbox like any other message, meaning:
+// - It will not interrupt message processing.
+// - It will only be handled after all previously enqueued messages are processed.
+//
+// This allows the actor to finish processing in-flight work before termination,
+// ensuring clean shutdown semantics without abrupt interruptions.
 type PoisonPill struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -1118,6 +1128,80 @@ func (*NoMessage) Descriptor() ([]byte, []int) {
 	return file_goakt_goakt_proto_rawDescGZIP(), []int{19}
 }
 
+// Mayday is a system-level message used in actor-based systems to notify a parent actor
+// that one of its child actors has encountered a critical failure or unhandled condition.
+// This message is automatically sent when the Escalate supervision directive is invoked,
+// indicating that the issue cannot be handled at the child level.
+//
+// The child actor is suspended, and the parent actor is expected to take appropriate action.
+// Upon receiving a Mayday, the parent actor can decide how to handle the failure,
+// such as restarting the child, stopping it, escalating further, or applying custom recovery logic.
+type Mayday struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The original message that triggered the failure. This is useful for debugging
+	// or retrying the operation once the issue is resolved.
+	Message *anypb.Any `protobuf:"bytes,1,opt,name=message,proto3" json:"message,omitempty"`
+	// A human-readable explanation of the failure, typically extracted from the exception
+	// or error condition that led to the escalation.
+	Reason string `protobuf:"bytes,2,opt,name=reason,proto3" json:"reason,omitempty"`
+	// The UTC timestamp indicating when the Mayday event occurred. This helps in correlating
+	// logs or monitoring data for incident analysis and resolution timelines.
+	Timestamp     *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Mayday) Reset() {
+	*x = Mayday{}
+	mi := &file_goakt_goakt_proto_msgTypes[20]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Mayday) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Mayday) ProtoMessage() {}
+
+func (x *Mayday) ProtoReflect() protoreflect.Message {
+	mi := &file_goakt_goakt_proto_msgTypes[20]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Mayday.ProtoReflect.Descriptor instead.
+func (*Mayday) Descriptor() ([]byte, []int) {
+	return file_goakt_goakt_proto_rawDescGZIP(), []int{20}
+}
+
+func (x *Mayday) GetMessage() *anypb.Any {
+	if x != nil {
+		return x.Message
+	}
+	return nil
+}
+
+func (x *Mayday) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
+func (x *Mayday) GetTimestamp() *timestamppb.Timestamp {
+	if x != nil {
+		return x.Timestamp
+	}
+	return nil
+}
+
 var File_goakt_goakt_proto protoreflect.FileDescriptor
 
 const file_goakt_goakt_proto_rawDesc = "" +
@@ -1187,7 +1271,11 @@ const file_goakt_goakt_proto_rawDesc = "" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x14\n" +
 	"\x05topic\x18\x02 \x01(\tR\x05topic\x12.\n" +
 	"\amessage\x18\x03 \x01(\v2\x14.google.protobuf.AnyR\amessage\"\v\n" +
-	"\tNoMessageB\x85\x01\n" +
+	"\tNoMessage\"\x8a\x01\n" +
+	"\x06Mayday\x12.\n" +
+	"\amessage\x18\x01 \x01(\v2\x14.google.protobuf.AnyR\amessage\x12\x16\n" +
+	"\x06reason\x18\x02 \x01(\tR\x06reason\x128\n" +
+	"\ttimestamp\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\ttimestampB\x85\x01\n" +
 	"\vcom.goaktpbB\n" +
 	"GoaktProtoH\x02P\x01Z,github.com/tochemey/goakt/v3/goaktpb;goaktpb\xa2\x02\x03GXX\xaa\x02\aGoaktpb\xca\x02\aGoaktpb\xe2\x02\x13Goaktpb\\GPBMetadata\xea\x02\aGoaktpbb\x06proto3"
 
@@ -1203,7 +1291,7 @@ func file_goakt_goakt_proto_rawDescGZIP() []byte {
 	return file_goakt_goakt_proto_rawDescData
 }
 
-var file_goakt_goakt_proto_msgTypes = make([]protoimpl.MessageInfo, 20)
+var file_goakt_goakt_proto_msgTypes = make([]protoimpl.MessageInfo, 21)
 var file_goakt_goakt_proto_goTypes = []any{
 	(*Address)(nil),               // 0: goaktpb.Address
 	(*Deadletter)(nil),            // 1: goaktpb.Deadletter
@@ -1225,37 +1313,40 @@ var file_goakt_goakt_proto_goTypes = []any{
 	(*UnsubscribeAck)(nil),        // 17: goaktpb.UnsubscribeAck
 	(*Publish)(nil),               // 18: goaktpb.Publish
 	(*NoMessage)(nil),             // 19: goaktpb.NoMessage
-	(*anypb.Any)(nil),             // 20: google.protobuf.Any
-	(*timestamppb.Timestamp)(nil), // 21: google.protobuf.Timestamp
+	(*Mayday)(nil),                // 20: goaktpb.Mayday
+	(*anypb.Any)(nil),             // 21: google.protobuf.Any
+	(*timestamppb.Timestamp)(nil), // 22: google.protobuf.Timestamp
 }
 var file_goakt_goakt_proto_depIdxs = []int32{
 	0,  // 0: goaktpb.Address.parent:type_name -> goaktpb.Address
 	0,  // 1: goaktpb.Deadletter.sender:type_name -> goaktpb.Address
 	0,  // 2: goaktpb.Deadletter.receiver:type_name -> goaktpb.Address
-	20, // 3: goaktpb.Deadletter.message:type_name -> google.protobuf.Any
-	21, // 4: goaktpb.Deadletter.send_time:type_name -> google.protobuf.Timestamp
+	21, // 3: goaktpb.Deadletter.message:type_name -> google.protobuf.Any
+	22, // 4: goaktpb.Deadletter.send_time:type_name -> google.protobuf.Timestamp
 	0,  // 5: goaktpb.ActorStarted.address:type_name -> goaktpb.Address
-	21, // 6: goaktpb.ActorStarted.started_at:type_name -> google.protobuf.Timestamp
+	22, // 6: goaktpb.ActorStarted.started_at:type_name -> google.protobuf.Timestamp
 	0,  // 7: goaktpb.ActorStopped.address:type_name -> goaktpb.Address
-	21, // 8: goaktpb.ActorStopped.stopped_at:type_name -> google.protobuf.Timestamp
+	22, // 8: goaktpb.ActorStopped.stopped_at:type_name -> google.protobuf.Timestamp
 	0,  // 9: goaktpb.ActorPassivated.address:type_name -> goaktpb.Address
-	21, // 10: goaktpb.ActorPassivated.passivated_at:type_name -> google.protobuf.Timestamp
+	22, // 10: goaktpb.ActorPassivated.passivated_at:type_name -> google.protobuf.Timestamp
 	0,  // 11: goaktpb.ActorChildCreated.address:type_name -> goaktpb.Address
 	0,  // 12: goaktpb.ActorChildCreated.parent:type_name -> goaktpb.Address
-	21, // 13: goaktpb.ActorChildCreated.created_at:type_name -> google.protobuf.Timestamp
+	22, // 13: goaktpb.ActorChildCreated.created_at:type_name -> google.protobuf.Timestamp
 	0,  // 14: goaktpb.ActorRestarted.address:type_name -> goaktpb.Address
-	21, // 15: goaktpb.ActorRestarted.restarted_at:type_name -> google.protobuf.Timestamp
+	22, // 15: goaktpb.ActorRestarted.restarted_at:type_name -> google.protobuf.Timestamp
 	0,  // 16: goaktpb.ActorSuspended.address:type_name -> goaktpb.Address
-	21, // 17: goaktpb.ActorSuspended.suspended_at:type_name -> google.protobuf.Timestamp
-	21, // 18: goaktpb.NodeJoined.timestamp:type_name -> google.protobuf.Timestamp
-	21, // 19: goaktpb.NodeLeft.timestamp:type_name -> google.protobuf.Timestamp
-	20, // 20: goaktpb.Broadcast.message:type_name -> google.protobuf.Any
-	20, // 21: goaktpb.Publish.message:type_name -> google.protobuf.Any
-	22, // [22:22] is the sub-list for method output_type
-	22, // [22:22] is the sub-list for method input_type
-	22, // [22:22] is the sub-list for extension type_name
-	22, // [22:22] is the sub-list for extension extendee
-	0,  // [0:22] is the sub-list for field type_name
+	22, // 17: goaktpb.ActorSuspended.suspended_at:type_name -> google.protobuf.Timestamp
+	22, // 18: goaktpb.NodeJoined.timestamp:type_name -> google.protobuf.Timestamp
+	22, // 19: goaktpb.NodeLeft.timestamp:type_name -> google.protobuf.Timestamp
+	21, // 20: goaktpb.Broadcast.message:type_name -> google.protobuf.Any
+	21, // 21: goaktpb.Publish.message:type_name -> google.protobuf.Any
+	21, // 22: goaktpb.Mayday.message:type_name -> google.protobuf.Any
+	22, // 23: goaktpb.Mayday.timestamp:type_name -> google.protobuf.Timestamp
+	24, // [24:24] is the sub-list for method output_type
+	24, // [24:24] is the sub-list for method input_type
+	24, // [24:24] is the sub-list for extension type_name
+	24, // [24:24] is the sub-list for extension extendee
+	0,  // [0:24] is the sub-list for field type_name
 }
 
 func init() { file_goakt_goakt_proto_init() }
@@ -1269,7 +1360,7 @@ func file_goakt_goakt_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_goakt_goakt_proto_rawDesc), len(file_goakt_goakt_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   20,
+			NumMessages:   21,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

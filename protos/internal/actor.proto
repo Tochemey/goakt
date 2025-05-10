@@ -8,31 +8,12 @@ import "internal/dependency.proto";
 
 option go_package = "github.com/tochemey/goakt/v3/internal/internalpb;internalpb";
 
-// ActorRef represents the actor information on the wire.
-message ActorRef {
+// Actor represents the actor information on the wire.
+message Actor {
   // Specifies the actor address
-  goaktpb.Address actor_address = 1;
+  goaktpb.Address address = 1;
   // Specifies the actor type
-  string actor_type = 2;
-  // Specifies if the actor is a singleton
-  bool is_singleton = 3;
-  // Specifies if the actor is disabled for relocation
-  bool relocatable = 4;
-  // Specifies the passivation time
-  google.protobuf.Duration passivate_after = 5;
-  // Specifies the dependencies
-  repeated internalpb.Dependency dependencies = 6;
-  //  States whether the actor will require a stash buffer
-  bool enable_stash = 7;
-}
-
-// ActorProps defines the properties of an actor
-// that can be used to spawn an actor remotely.
-message ActorProps {
-  // Specifies the actor name.
-  string actor_name = 1;
-  // Specifies the actor type
-  string actor_type = 2;
+  string type = 2;
   // Specifies if the actor is a singleton
   bool is_singleton = 3;
   // Specifies if the actor is disabled for relocation

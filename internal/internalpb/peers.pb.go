@@ -30,8 +30,8 @@ type PeerState struct {
 	// Specifies the remoting host
 	PeersPort int32 `protobuf:"varint,3,opt,name=peers_port,json=peersPort,proto3" json:"peers_port,omitempty"`
 	// Specifies the list of actors
-	// actorName -> ActorProps
-	Actors        map[string]*ActorProps `protobuf:"bytes,4,rep,name=actors,proto3" json:"actors,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	// actorName -> Actor
+	Actors        map[string]*Actor `protobuf:"bytes,4,rep,name=actors,proto3" json:"actors,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -87,7 +87,7 @@ func (x *PeerState) GetPeersPort() int32 {
 	return 0
 }
 
-func (x *PeerState) GetActors() map[string]*ActorProps {
+func (x *PeerState) GetActors() map[string]*Actor {
 	if x != nil {
 		return x.Actors
 	}
@@ -189,16 +189,16 @@ var File_internal_peers_proto protoreflect.FileDescriptor
 const file_internal_peers_proto_rawDesc = "" +
 	"\n" +
 	"\x14internal/peers.proto\x12\n" +
-	"internalpb\x1a\x14internal/actor.proto\"\xf1\x01\n" +
+	"internalpb\x1a\x14internal/actor.proto\"\xec\x01\n" +
 	"\tPeerState\x12\x12\n" +
 	"\x04host\x18\x01 \x01(\tR\x04host\x12#\n" +
 	"\rremoting_port\x18\x02 \x01(\x05R\fremotingPort\x12\x1d\n" +
 	"\n" +
 	"peers_port\x18\x03 \x01(\x05R\tpeersPort\x129\n" +
-	"\x06actors\x18\x04 \x03(\v2!.internalpb.PeerState.ActorsEntryR\x06actors\x1aQ\n" +
+	"\x06actors\x18\x04 \x03(\v2!.internalpb.PeerState.ActorsEntryR\x06actors\x1aL\n" +
 	"\vActorsEntry\x12\x10\n" +
-	"\x03key\x18\x01 \x01(\tR\x03key\x12,\n" +
-	"\x05value\x18\x02 \x01(\v2\x16.internalpb.ActorPropsR\x05value:\x028\x01\"A\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12'\n" +
+	"\x05value\x18\x02 \x01(\v2\x11.internalpb.ActorR\x05value:\x028\x01\"A\n" +
 	"\tRebalance\x124\n" +
 	"\n" +
 	"peer_state\x18\x01 \x01(\v2\x15.internalpb.PeerStateR\tpeerState\"6\n" +
@@ -228,12 +228,12 @@ var file_internal_peers_proto_goTypes = []any{
 	(*Rebalance)(nil),         // 1: internalpb.Rebalance
 	(*RebalanceComplete)(nil), // 2: internalpb.RebalanceComplete
 	nil,                       // 3: internalpb.PeerState.ActorsEntry
-	(*ActorProps)(nil),        // 4: internalpb.ActorProps
+	(*Actor)(nil),             // 4: internalpb.Actor
 }
 var file_internal_peers_proto_depIdxs = []int32{
 	3, // 0: internalpb.PeerState.actors:type_name -> internalpb.PeerState.ActorsEntry
 	0, // 1: internalpb.Rebalance.peer_state:type_name -> internalpb.PeerState
-	4, // 2: internalpb.PeerState.ActorsEntry.value:type_name -> internalpb.ActorProps
+	4, // 2: internalpb.PeerState.ActorsEntry.value:type_name -> internalpb.Actor
 	3, // [3:3] is the sub-list for method output_type
 	3, // [3:3] is the sub-list for method input_type
 	3, // [3:3] is the sub-list for extension type_name

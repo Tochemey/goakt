@@ -30,6 +30,9 @@ import (
 	"sync"
 	"time"
 
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/timestamppb"
+
 	"github.com/tochemey/goakt/v3/internal/collection/syncmap"
 )
 
@@ -95,6 +98,11 @@ const (
 	// Restarting involves stopping the current instance and creating a new one, effectively resetting
 	// the actor's internal state.
 	RestartDirective
+
+	// EscalateDirective indicates that when an actor fails, the supervisor should escalate the failure
+	// to its parent supervisor. This directive is used when the failure is severe and requires
+	// intervention at a higher level in the actor hierarchy.
+	EscalateDirective
 )
 
 // String returns the string representation of the directive
@@ -106,6 +114,8 @@ func (d Directive) String() string {
 		return "Resume"
 	case RestartDirective:
 		return "Restart"
+	case EscalateDirective:
+		return "Escalate"
 	default:
 		return ""
 	}
@@ -269,4 +279,28 @@ func errorType(err error) string {
 	}
 
 	return rtype.String()
+}
+
+type supervisionSignal struct {
+	err       error
+	msg       proto.Message
+	timestamp *timestamppb.Timestamp
+}
+
+func newSupervisionSignal(err error, msg proto.Message) *supervisionSignal {
+	return &supervisionSignal{
+		err:       err,
+		msg:       msg,
+		timestamp: timestamppb.Now(),
+	}
+}
+
+func (s *supervisionSignal) Err() error {
+	return s.err
+}
+func (s *supervisionSignal) Msg() proto.Message {
+	return s.msg
+}
+func (s *supervisionSignal) Timestamp() *timestamppb.Timestamp {
+	return s.timestamp
 }

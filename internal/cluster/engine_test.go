@@ -151,7 +151,7 @@ func TestSingleNode(t *testing.T) {
 
 		// create an actor
 		actorName := uuid.NewString()
-		actor := &internalpb.ActorRef{ActorAddress: &goaktpb.Address{Name: actorName}}
+		actor := &internalpb.Actor{Address: &goaktpb.Address{Name: actorName}}
 
 		// replicate the actor in the Node
 		err = cluster.PutActor(ctx, actor)
@@ -222,7 +222,7 @@ func TestSingleNode(t *testing.T) {
 
 		// create an actor
 		actorName := uuid.NewString()
-		actor := &internalpb.ActorRef{ActorAddress: &goaktpb.Address{Name: actorName}}
+		actor := &internalpb.Actor{Address: &goaktpb.Address{Name: actorName}}
 		// replicate the actor in the Node
 		err = cluster.PutActor(ctx, actor)
 		require.NoError(t, err)
@@ -275,7 +275,7 @@ func TestSingleNode(t *testing.T) {
 		require.NotNil(t, cluster)
 		require.NoError(t, err)
 
-		err = cluster.PutActor(ctx, new(internalpb.ActorRef))
+		err = cluster.PutActor(ctx, new(internalpb.Actor))
 		require.Error(t, err)
 		require.EqualError(t, err, ErrEngineNotRunning.Error())
 
@@ -348,10 +348,10 @@ func TestSingleNode(t *testing.T) {
 		// create an actor
 		actorName := uuid.NewString()
 		actorKind := "kind"
-		actor := &internalpb.ActorRef{
-			ActorAddress: &goaktpb.Address{Name: actorName},
-			ActorType:    actorKind,
-			IsSingleton:  true,
+		actor := &internalpb.Actor{
+			Address:     &goaktpb.Address{Name: actorName},
+			Type:        actorKind,
+			IsSingleton: true,
 		}
 
 		// replicate the actor in the Node
@@ -445,11 +445,11 @@ func TestMultipleNodes(t *testing.T) {
 
 		// create some actors
 		actorName := uuid.NewString()
-		actor := &internalpb.ActorRef{
-			ActorAddress: &goaktpb.Address{
+		actor := &internalpb.Actor{
+			Address: &goaktpb.Address{
 				Name: actorName,
 			},
-			ActorType: "actorKind",
+			Type: "actorKind",
 		}
 
 		// put an actor
@@ -472,11 +472,11 @@ func TestMultipleNodes(t *testing.T) {
 
 		// put another actor
 		actorName2 := uuid.NewString()
-		actor2 := &internalpb.ActorRef{
-			ActorAddress: &goaktpb.Address{
+		actor2 := &internalpb.Actor{
+			Address: &goaktpb.Address{
 				Name: actorName2,
 			},
-			ActorType: "actorKind",
+			Type: "actorKind",
 		}
 		err = node1.PutActor(ctx, actor2)
 		require.NoError(t, err)
@@ -601,11 +601,11 @@ func TestMultipleNodes(t *testing.T) {
 
 		// create some actors
 		actorName := uuid.NewString()
-		actor := &internalpb.ActorRef{
-			ActorAddress: &goaktpb.Address{
+		actor := &internalpb.Actor{
+			Address: &goaktpb.Address{
 				Name: actorName,
 			},
-			ActorType: "actorKind",
+			Type: "actorKind",
 		}
 
 		// put an actor
@@ -628,11 +628,11 @@ func TestMultipleNodes(t *testing.T) {
 
 		// put another actor
 		actorName2 := uuid.NewString()
-		actor2 := &internalpb.ActorRef{
-			ActorAddress: &goaktpb.Address{
+		actor2 := &internalpb.Actor{
+			Address: &goaktpb.Address{
 				Name: actorName2,
 			},
-			ActorType: "actorKind",
+			Type: "actorKind",
 		}
 		err = node1.PutActor(ctx, actor2)
 		require.NoError(t, err)

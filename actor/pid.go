@@ -136,7 +136,7 @@ type PID struct {
 
 	// supervisor strategy
 	supervisor            *Supervisor
-	supervisionChan       chan error
+	supervisionChan       chan *supervisionSignal
 	supervisionStopSignal chan types.Unit
 
 	// atomic flag indicating whether the actor is processing messages
@@ -179,7 +179,7 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 		eventsStream:          nil,
 		restartCount:          atomic.NewInt64(0),
 		processedCount:        atomic.NewInt64(0),
-		supervisionChan:       make(chan error, 1),
+		supervisionChan:       make(chan *supervisionSignal, 1),
 		supervisionStopSignal: make(chan types.Unit, 1),
 		remoting:              NewRemoting(),
 		supervisor:            NewSupervisor(),
@@ -1201,8 +1201,8 @@ func (pid *PID) receiveLoop() {
 			switch msg := received.Message().(type) {
 			case *goaktpb.PoisonPill:
 				_ = pid.Shutdown(received.Context())
-			case *internalpb.HandleFault:
-				pid.handleFaultyChild(received.Sender(), msg)
+			case *internalpb.Down:
+				pid.handleFailure(received.Sender(), msg)
 			default:
 				pid.handleReceived(received)
 			}
@@ -1239,29 +1239,31 @@ func (pid *PID) recovery(received *ReceiveContext) {
 			var pe *PanicError
 			if errors.As(err, &pe) {
 				// in case PanicError is sent just forward it
-				pid.supervisionChan <- pe
+				pid.supervisionChan <- newSupervisionSignal(pe, received.Message())
 				return
 			}
 
 			// this is a normal error just wrap it with some stack trace
 			// for rich logging purpose
 			pc, fn, line, _ := runtime.Caller(2)
-			pid.supervisionChan <- NewPanicError(
-				fmt.Errorf("%w at %s[%s:%d]", err, runtime.FuncForPC(pc).Name(), fn, line),
-			)
+			pid.supervisionChan <- newSupervisionSignal(
+				NewPanicError(
+					fmt.Errorf("%w at %s[%s:%d]", err, runtime.FuncForPC(pc).Name(), fn, line),
+				), received.Message())
 
 		default:
 			// we have no idea what panic it is. Enrich it with some stack trace for rich
 			// logging purpose
 			pc, fn, line, _ := runtime.Caller(2)
-			pid.supervisionChan <- NewPanicError(
-				fmt.Errorf("%#v at %s[%s:%d]", r, runtime.FuncForPC(pc).Name(), fn, line),
-			)
+			pid.supervisionChan <- newSupervisionSignal(
+				NewPanicError(
+					fmt.Errorf("%#v at %s[%s:%d]", r, runtime.FuncForPC(pc).Name(), fn, line),
+				), received.Message())
 		}
 		return
 	}
 	if err := received.getError(); err != nil {
-		pid.supervisionChan <- err
+		pid.supervisionChan <- newSupervisionSignal(err, received.Message())
 	}
 }
 
@@ -1574,8 +1576,8 @@ func (pid *PID) supervisionLoop() {
 	go func() {
 		for {
 			select {
-			case err := <-pid.supervisionChan:
-				pid.notifyParent(err)
+			case signal := <-pid.supervisionChan:
+				pid.notifyParent(signal)
 			case <-pid.supervisionStopSignal:
 				return
 			}
@@ -1584,48 +1586,56 @@ func (pid *PID) supervisionLoop() {
 }
 
 // notifyParent sends a notification to the parent actor
-func (pid *PID) notifyParent(err error) {
-	if err == nil || errors.Is(err, ErrDead) {
+func (pid *PID) notifyParent(signal *supervisionSignal) {
+	if signal == nil || errors.Is(signal.Err(), ErrDead) {
 		return
 	}
 
 	// find a directive for the given error or check whether there
 	// is a directive for any error type
-	directive, ok := pid.supervisor.Directive(err)
+	directive, ok := pid.supervisor.Directive(signal.Err())
 	if !ok {
 		// let us check whether we have all errors directive
 		directive, ok = pid.supervisor.Directive(new(anyError))
 		if !ok {
-			pid.logger.Debugf("no supervisor directive found for error: %s", errorType(err))
-			pid.suspend(err.Error())
+			pid.logger.Debugf("no supervisor directive found for error: %s", errorType(signal.Err()))
+			pid.suspend(signal.Err().Error())
 			return
 		}
 	}
 
-	msg := &internalpb.HandleFault{
-		ActorId: pid.ID(),
-		Message: err.Error(),
+	// create the message to send to the parent
+	actual, _ := anypb.New(signal.Msg())
+	msg := &internalpb.Down{
+		ActorId:      pid.ID(),
+		ErrorMessage: signal.Err().Error(),
+		Message:      actual,
+		Timestamp:    signal.Timestamp(),
 	}
 
 	switch directive {
 	case StopDirective:
-		msg.Directive = &internalpb.HandleFault_Stop{
+		msg.Directive = &internalpb.Down_Stop{
 			Stop: new(internalpb.StopDirective),
 		}
 	case RestartDirective:
-		msg.Directive = &internalpb.HandleFault_Restart{
+		msg.Directive = &internalpb.Down_Restart{
 			Restart: &internalpb.RestartDirective{
 				MaxRetries: pid.supervisor.MaxRetries(),
 				Timeout:    int64(pid.supervisor.Timeout()),
 			},
 		}
 	case ResumeDirective:
-		msg.Directive = &internalpb.HandleFault_Resume{
+		msg.Directive = &internalpb.Down_Resume{
 			Resume: &internalpb.ResumeDirective{},
 		}
+	case EscalateDirective:
+		msg.Directive = &internalpb.Down_Escalate{
+			Escalate: &internalpb.EscalateDirective{},
+		}
 	default:
-		pid.logger.Debugf("unknown directive: %T found for error: %s", directive, errorType(err))
-		pid.suspend(err.Error())
+		pid.logger.Debugf("unknown directive: %T found for error: %s", directive, errorType(signal.Err()))
+		pid.suspend(signal.Err().Error())
 		return
 	}
 
@@ -1639,7 +1649,7 @@ func (pid *PID) notifyParent(err error) {
 	}
 
 	if parent := pid.Parent(); parent != nil && !parent.Equals(NoSender) {
-		pid.logger.Warnf("%s child actor=(%s) is failing: Err=%s", pid.Name(), parent.Name(), msg.GetMessage())
+		pid.logger.Warnf("%s child actor=(%s) is failing: Err=%s", pid.Name(), parent.Name(), msg.GetErrorMessage())
 		pid.logger.Infof("%s activates [strategy=%s, directive=%s] for failing child actor=(%s)",
 			parent.Name(),
 			pid.supervisor.Strategy(),
@@ -1727,22 +1737,30 @@ func (pid *PID) handleCompletion(ctx context.Context, completion *taskCompletion
 	to.doReceive(messageContext)
 }
 
-// handleFaultyChild watches for child actor's failure and act based upon the supervisory strategy
-func (pid *PID) handleFaultyChild(cid *PID, msg *internalpb.HandleFault) {
+// handleFailure watches for child actor's failure and act based upon the supervisory strategy
+func (pid *PID) handleFailure(cid *PID, msg *internalpb.Down) {
 	if cid.ID() == msg.GetActorId() {
 		directive := msg.GetDirective()
 		includeSiblings := msg.GetStrategy() == internalpb.Strategy_STRATEGY_ONE_FOR_ALL
 
 		switch d := directive.(type) {
-		case *internalpb.HandleFault_Stop:
+		case *internalpb.Down_Stop:
 			pid.handleStopDirective(cid, includeSiblings)
-		case *internalpb.HandleFault_Restart:
+		case *internalpb.Down_Restart:
 			pid.handleRestartDirective(cid,
 				d.Restart.GetMaxRetries(),
 				time.Duration(d.Restart.GetTimeout()),
 				includeSiblings)
-		case *internalpb.HandleFault_Resume:
-			// pass
+		case *internalpb.Down_Resume:
+		// pass
+		case *internalpb.Down_Escalate:
+			// forward the message to the parent and suspend the actor
+			_ = cid.Tell(context.Background(), pid, &goaktpb.Mayday{
+				Reason:    msg.GetErrorMessage(),
+				Message:   msg.GetMessage(),
+				Timestamp: msg.GetTimestamp(),
+			})
+			cid.suspend(msg.GetErrorMessage())
 		default:
 			pid.handleStopDirective(cid, includeSiblings)
 		}

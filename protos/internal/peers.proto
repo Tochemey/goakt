@@ -14,8 +14,8 @@ message PeerState {
   // Specifies the remoting host
   int32 peers_port = 3;
   // Specifies the list of actors
-  // actorName -> ActorProps
-  map<string, ActorProps> actors = 4;
+  // actorName -> Actor
+  map<string, internalpb.Actor> actors = 4;
 }
 
 message Rebalance {

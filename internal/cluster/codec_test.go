@@ -39,8 +39,8 @@ import (
 func TestCodec(t *testing.T) {
 	t.Run("With happy path", func(t *testing.T) {
 		// create an instance of wire actor
-		actor := &internalpb.ActorRef{
-			ActorAddress: &goaktpb.Address{
+		actor := &internalpb.Actor{
+			Address: &goaktpb.Address{
 				Host: "127.0.0.1",
 				Port: 2345,
 				Name: "account-1",

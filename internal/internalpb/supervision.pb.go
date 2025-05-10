@@ -9,6 +9,8 @@ package internalpb
 import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	anypb "google.golang.org/protobuf/types/known/anypb"
+	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
@@ -67,44 +69,48 @@ func (Strategy) EnumDescriptor() ([]byte, []int) {
 	return file_internal_supervision_proto_rawDescGZIP(), []int{0}
 }
 
-// HandleFault message is sent by a child
+// Down message is sent by a child
 // actor to its parent when it is panicking or returning an error
-// while processing message
-type HandleFault struct {
+// while processing messages
+type Down struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Specifies the actor id
 	ActorId string `protobuf:"bytes,1,opt,name=actor_id,json=actorId,proto3" json:"actor_id,omitempty"`
-	// Specifies the message
-	Message string `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	// Specifies the error message
+	ErrorMessage string `protobuf:"bytes,2,opt,name=error_message,json=errorMessage,proto3" json:"error_message,omitempty"`
 	// Specifies the directive
 	//
 	// Types that are valid to be assigned to Directive:
 	//
-	//	*HandleFault_Stop
-	//	*HandleFault_Resume
-	//	*HandleFault_Restart
-	//	*HandleFault_Escalate
-	Directive isHandleFault_Directive `protobuf_oneof:"directive"`
+	//	*Down_Stop
+	//	*Down_Resume
+	//	*Down_Restart
+	//	*Down_Escalate
+	Directive isDown_Directive `protobuf_oneof:"directive"`
 	// Specifies the strategy
-	Strategy      Strategy `protobuf:"varint,7,opt,name=strategy,proto3,enum=internalpb.Strategy" json:"strategy,omitempty"`
+	Strategy Strategy `protobuf:"varint,7,opt,name=strategy,proto3,enum=internalpb.Strategy" json:"strategy,omitempty"`
+	// Specifies the message that triggered the failure
+	Message *anypb.Any `protobuf:"bytes,8,opt,name=message,proto3" json:"message,omitempty"`
+	// Specifies when the error occurred
+	Timestamp     *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *HandleFault) Reset() {
-	*x = HandleFault{}
+func (x *Down) Reset() {
+	*x = Down{}
 	mi := &file_internal_supervision_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *HandleFault) String() string {
+func (x *Down) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*HandleFault) ProtoMessage() {}
+func (*Down) ProtoMessage() {}
 
-func (x *HandleFault) ProtoReflect() protoreflect.Message {
+func (x *Down) ProtoReflect() protoreflect.Message {
 	mi := &file_internal_supervision_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -116,102 +122,116 @@ func (x *HandleFault) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use HandleFault.ProtoReflect.Descriptor instead.
-func (*HandleFault) Descriptor() ([]byte, []int) {
+// Deprecated: Use Down.ProtoReflect.Descriptor instead.
+func (*Down) Descriptor() ([]byte, []int) {
 	return file_internal_supervision_proto_rawDescGZIP(), []int{0}
 }
 
-func (x *HandleFault) GetActorId() string {
+func (x *Down) GetActorId() string {
 	if x != nil {
 		return x.ActorId
 	}
 	return ""
 }
 
-func (x *HandleFault) GetMessage() string {
+func (x *Down) GetErrorMessage() string {
 	if x != nil {
-		return x.Message
+		return x.ErrorMessage
 	}
 	return ""
 }
 
-func (x *HandleFault) GetDirective() isHandleFault_Directive {
+func (x *Down) GetDirective() isDown_Directive {
 	if x != nil {
 		return x.Directive
 	}
 	return nil
 }
 
-func (x *HandleFault) GetStop() *StopDirective {
+func (x *Down) GetStop() *StopDirective {
 	if x != nil {
-		if x, ok := x.Directive.(*HandleFault_Stop); ok {
+		if x, ok := x.Directive.(*Down_Stop); ok {
 			return x.Stop
 		}
 	}
 	return nil
 }
 
-func (x *HandleFault) GetResume() *ResumeDirective {
+func (x *Down) GetResume() *ResumeDirective {
 	if x != nil {
-		if x, ok := x.Directive.(*HandleFault_Resume); ok {
+		if x, ok := x.Directive.(*Down_Resume); ok {
 			return x.Resume
 		}
 	}
 	return nil
 }
 
-func (x *HandleFault) GetRestart() *RestartDirective {
+func (x *Down) GetRestart() *RestartDirective {
 	if x != nil {
-		if x, ok := x.Directive.(*HandleFault_Restart); ok {
+		if x, ok := x.Directive.(*Down_Restart); ok {
 			return x.Restart
 		}
 	}
 	return nil
 }
 
-func (x *HandleFault) GetEscalate() *EscalateDirective {
+func (x *Down) GetEscalate() *EscalateDirective {
 	if x != nil {
-		if x, ok := x.Directive.(*HandleFault_Escalate); ok {
+		if x, ok := x.Directive.(*Down_Escalate); ok {
 			return x.Escalate
 		}
 	}
 	return nil
 }
 
-func (x *HandleFault) GetStrategy() Strategy {
+func (x *Down) GetStrategy() Strategy {
 	if x != nil {
 		return x.Strategy
 	}
 	return Strategy_STRATEGY_ONE_FOR_ONE
 }
 
-type isHandleFault_Directive interface {
-	isHandleFault_Directive()
+func (x *Down) GetMessage() *anypb.Any {
+	if x != nil {
+		return x.Message
+	}
+	return nil
 }
 
-type HandleFault_Stop struct {
+func (x *Down) GetTimestamp() *timestamppb.Timestamp {
+	if x != nil {
+		return x.Timestamp
+	}
+	return nil
+}
+
+type isDown_Directive interface {
+	isDown_Directive()
+}
+
+type Down_Stop struct {
 	Stop *StopDirective `protobuf:"bytes,3,opt,name=stop,proto3,oneof"`
 }
 
-type HandleFault_Resume struct {
+type Down_Resume struct {
 	Resume *ResumeDirective `protobuf:"bytes,4,opt,name=resume,proto3,oneof"`
 }
 
-type HandleFault_Restart struct {
+type Down_Restart struct {
 	Restart *RestartDirective `protobuf:"bytes,5,opt,name=restart,proto3,oneof"`
 }
 
-type HandleFault_Escalate struct {
+type Down_Escalate struct {
 	Escalate *EscalateDirective `protobuf:"bytes,6,opt,name=escalate,proto3,oneof"`
 }
 
-func (*HandleFault_Stop) isHandleFault_Directive() {}
+func (*Down_Stop) isDown_Directive() {}
 
-func (*HandleFault_Resume) isHandleFault_Directive() {}
+func (*Down_Resume) isDown_Directive() {}
 
-func (*HandleFault_Restart) isHandleFault_Directive() {}
+func (*Down_Restart) isDown_Directive() {}
 
-func (*HandleFault_Escalate) isHandleFault_Directive() {}
+func (*Down_Escalate) isDown_Directive() {}
 
 // StopDirective defines the supervisor stop directive
 type StopDirective struct {
@@ -251,7 +271,7 @@ func (*StopDirective) Descriptor() ([]byte, []int) {
 }
 
 // ResumeDirective defines the supervisor resume directive
-// This ignores the failure and process the next message, instead
+// This ignores the failure and processes the next message, instead
 type ResumeDirective struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -329,8 +349,8 @@ func (*EscalateDirective) Descriptor() ([]byte, []int) {
 // RestartDirective defines supervisor restart directive
 type RestartDirective struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the maximum number of retries
-	// When reaching this number the faulty actor is stopped
+	// Specifies the maximum number of retries;
+	// When reaching this number, the faulty actor is stopped
 	MaxRetries uint32 `protobuf:"varint,1,opt,name=max_retries,json=maxRetries,proto3" json:"max_retries,omitempty"`
 	// Specifies the time range to restart the faulty actor
 	Timeout       int64 `protobuf:"varint,2,opt,name=timeout,proto3" json:"timeout,omitempty"`
@@ -387,15 +407,17 @@ var File_internal_supervision_proto protoreflect.FileDescriptor
 const file_internal_supervision_proto_rawDesc = "" +
 	"\n" +
 	"\x1ainternal/supervision.proto\x12\n" +
-	"internalpb\"\xe0\x02\n" +
-	"\vHandleFault\x12\x19\n" +
-	"\bactor_id\x18\x01 \x01(\tR\aactorId\x12\x18\n" +
-	"\amessage\x18\x02 \x01(\tR\amessage\x12/\n" +
+	"internalpb\x1a\x19google/protobuf/any.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xce\x03\n" +
+	"\x04Down\x12\x19\n" +
+	"\bactor_id\x18\x01 \x01(\tR\aactorId\x12#\n" +
+	"\rerror_message\x18\x02 \x01(\tR\ferrorMessage\x12/\n" +
 	"\x04stop\x18\x03 \x01(\v2\x19.internalpb.StopDirectiveH\x00R\x04stop\x125\n" +
 	"\x06resume\x18\x04 \x01(\v2\x1b.internalpb.ResumeDirectiveH\x00R\x06resume\x128\n" +
 	"\arestart\x18\x05 \x01(\v2\x1c.internalpb.RestartDirectiveH\x00R\arestart\x12;\n" +
 	"\bescalate\x18\x06 \x01(\v2\x1d.internalpb.EscalateDirectiveH\x00R\bescalate\x120\n" +
-	"\bstrategy\x18\a \x01(\x0e2\x14.internalpb.StrategyR\bstrategyB\v\n" +
+	"\bstrategy\x18\a \x01(\x0e2\x14.internalpb.StrategyR\bstrategy\x12.\n" +
+	"\amessage\x18\b \x01(\v2\x14.google.protobuf.AnyR\amessage\x128\n" +
+	"\ttimestamp\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\ttimestampB\v\n" +
 	"\tdirective\"\x0f\n" +
 	"\rStopDirective\"\x11\n" +
 	"\x0fResumeDirective\"\x13\n" +
@@ -427,24 +449,28 @@ func file_internal_supervision_proto_rawDescGZIP() []byte {
 var file_internal_supervision_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
 var file_internal_supervision_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
 var file_internal_supervision_proto_goTypes = []any{
-	(Strategy)(0),             // 0: internalpb.Strategy
-	(*HandleFault)(nil),       // 1: internalpb.HandleFault
-	(*StopDirective)(nil),     // 2: internalpb.StopDirective
-	(*ResumeDirective)(nil),   // 3: internalpb.ResumeDirective
-	(*EscalateDirective)(nil), // 4: internalpb.EscalateDirective
-	(*RestartDirective)(nil),  // 5: internalpb.RestartDirective
+	(Strategy)(0),                 // 0: internalpb.Strategy
+	(*Down)(nil),                  // 1: internalpb.Down
+	(*StopDirective)(nil),         // 2: internalpb.StopDirective
+	(*ResumeDirective)(nil),       // 3: internalpb.ResumeDirective
+	(*EscalateDirective)(nil),     // 4: internalpb.EscalateDirective
+	(*RestartDirective)(nil),      // 5: internalpb.RestartDirective
+	(*anypb.Any)(nil),             // 6: google.protobuf.Any
+	(*timestamppb.Timestamp)(nil), // 7: google.protobuf.Timestamp
 }
 var file_internal_supervision_proto_depIdxs = []int32{
-	2, // 0: internalpb.HandleFault.stop:type_name -> internalpb.StopDirective
-	3, // 1: internalpb.HandleFault.resume:type_name -> internalpb.ResumeDirective
-	5, // 2: internalpb.HandleFault.restart:type_name -> internalpb.RestartDirective
-	4, // 3: internalpb.HandleFault.escalate:type_name -> internalpb.EscalateDirective
-	0, // 4: internalpb.HandleFault.strategy:type_name -> internalpb.Strategy
-	5, // [5:5] is the sub-list for method output_type
-	5, // [5:5] is the sub-list for method input_type
-	5, // [5:5] is the sub-list for extension type_name
-	5, // [5:5] is the sub-list for extension extendee
-	0, // [0:5] is the sub-list for field type_name
+	2, // 0: internalpb.Down.stop:type_name -> internalpb.StopDirective
+	3, // 1: internalpb.Down.resume:type_name -> internalpb.ResumeDirective
+	5, // 2: internalpb.Down.restart:type_name -> internalpb.RestartDirective
+	4, // 3: internalpb.Down.escalate:type_name -> internalpb.EscalateDirective
+	0, // 4: internalpb.Down.strategy:type_name -> internalpb.Strategy
+	6, // 5: internalpb.Down.message:type_name -> google.protobuf.Any
+	7, // 6: internalpb.Down.timestamp:type_name -> google.protobuf.Timestamp
+	7, // [7:7] is the sub-list for method output_type
+	7, // [7:7] is the sub-list for method input_type
+	7, // [7:7] is the sub-list for extension type_name
+	7, // [7:7] is the sub-list for extension extendee
+	0, // [0:7] is the sub-list for field type_name
 }
 
 func init() { file_internal_supervision_proto_init() }
@@ -453,10 +479,10 @@ func file_internal_supervision_proto_init() {
 		return
 	}
 	file_internal_supervision_proto_msgTypes[0].OneofWrappers = []any{
-		(*HandleFault_Stop)(nil),
-		(*HandleFault_Resume)(nil),
-		(*HandleFault_Restart)(nil),
-		(*HandleFault_Escalate)(nil),
+		(*Down_Stop)(nil),
+		(*Down_Resume)(nil),
+		(*Down_Restart)(nil),
+		(*Down_Escalate)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{

@@ -1263,6 +1263,49 @@ func TestSupervisorStrategy(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NoError(t, actorSystem.Stop(ctx))
 	})
+	t.Run("With escalation as supervisor strategy", func(t *testing.T) {
+		ctx := context.TODO()
+		host := "127.0.0.1"
+		ports := dynaport.Get(1)
+
+		actorSystem, err := NewActorSystem("testSys",
+			WithRemote(remote.NewConfig(host, ports[0])),
+			WithPassivationDisabled(),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+
+		util.Pause(time.Second)
+
+		parent, err := actorSystem.Spawn(ctx, "test", newEscalationSupervisor())
+		require.NoError(t, err)
+		require.NotNil(t, parent)
+
+		// create the child actor
+		escalationStrategy := NewSupervisor(WithDirective(PanicError{}, EscalateDirective))
+		child, err := parent.SpawnChild(ctx, "SpawnChild", newMockSupervisedActor(), WithSupervisor(escalationStrategy))
+		require.NoError(t, err)
+		require.NotNil(t, child)
+
+		require.Len(t, parent.Children(), 1)
+		// send a test panic message to the actor
+		require.NoError(t, Tell(ctx, child, new(testpb.TestPanic)))
+
+		// wait for the child to properly shutdown
+		util.Pause(time.Second)
+
+		// assert the actor state
+		require.False(t, child.IsRunning())
+		require.Len(t, parent.Children(), 0)
+
+		//stop the actor
+		err = parent.Shutdown(ctx)
+		require.NoError(t, err)
+		require.NoError(t, actorSystem.Stop(ctx))
+	})
 }
 func TestMessaging(t *testing.T) {
 	t.Run("With happy", func(t *testing.T) {

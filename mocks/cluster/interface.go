@@ -27,23 +27,23 @@ func (_m *Interface) EXPECT() *Interface_Expecter {
 }
 
 // Actors provides a mock function with given fields: ctx, timeout
-func (_m *Interface) Actors(ctx context.Context, timeout time.Duration) ([]*internalpb.ActorRef, error) {
+func (_m *Interface) Actors(ctx context.Context, timeout time.Duration) ([]*internalpb.Actor, error) {
 	ret := _m.Called(ctx, timeout)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Actors")
 	}
 
-	var r0 []*internalpb.ActorRef
+	var r0 []*internalpb.Actor
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, time.Duration) ([]*internalpb.ActorRef, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, time.Duration) ([]*internalpb.Actor, error)); ok {
 		return rf(ctx, timeout)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, time.Duration) []*internalpb.ActorRef); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, time.Duration) []*internalpb.Actor); ok {
 		r0 = rf(ctx, timeout)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).([]*internalpb.ActorRef)
+			r0 = ret.Get(0).([]*internalpb.Actor)
 		}
 	}
 
@@ -75,12 +75,12 @@ func (_c *Interface_Actors_Call) Run(run func(ctx context.Context, timeout time.
 	return _c
 }
 
-func (_c *Interface_Actors_Call) Return(_a0 []*internalpb.ActorRef, _a1 error) *Interface_Actors_Call {
+func (_c *Interface_Actors_Call) Return(_a0 []*internalpb.Actor, _a1 error) *Interface_Actors_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *Interface_Actors_Call) RunAndReturn(run func(context.Context, time.Duration) ([]*internalpb.ActorRef, error)) *Interface_Actors_Call {
+func (_c *Interface_Actors_Call) RunAndReturn(run func(context.Context, time.Duration) ([]*internalpb.Actor, error)) *Interface_Actors_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -133,23 +133,23 @@ func (_c *Interface_Events_Call) RunAndReturn(run func() <-chan *internalcluster
 }
 
 // GetActor provides a mock function with given fields: ctx, actorName
-func (_m *Interface) GetActor(ctx context.Context, actorName string) (*internalpb.ActorRef, error) {
+func (_m *Interface) GetActor(ctx context.Context, actorName string) (*internalpb.Actor, error) {
 	ret := _m.Called(ctx, actorName)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetActor")
 	}
 
-	var r0 *internalpb.ActorRef
+	var r0 *internalpb.Actor
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, string) (*internalpb.ActorRef, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, string) (*internalpb.Actor, error)); ok {
 		return rf(ctx, actorName)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, string) *internalpb.ActorRef); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, string) *internalpb.Actor); ok {
 		r0 = rf(ctx, actorName)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*internalpb.ActorRef)
+			r0 = ret.Get(0).(*internalpb.Actor)
 		}
 	}
 
@@ -181,12 +181,12 @@ func (_c *Interface_GetActor_Call) Run(run func(ctx context.Context, actorName s
 	return _c
 }
 
-func (_c *Interface_GetActor_Call) Return(_a0 *internalpb.ActorRef, _a1 error) *Interface_GetActor_Call {
+func (_c *Interface_GetActor_Call) Return(_a0 *internalpb.Actor, _a1 error) *Interface_GetActor_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *Interface_GetActor_Call) RunAndReturn(run func(context.Context, string) (*internalpb.ActorRef, error)) *Interface_GetActor_Call {
+func (_c *Interface_GetActor_Call) RunAndReturn(run func(context.Context, string) (*internalpb.Actor, error)) *Interface_GetActor_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -503,7 +503,7 @@ func (_c *Interface_Peers_Call) RunAndReturn(run func(context.Context) ([]*inter
 }
 
 // PutActor provides a mock function with given fields: ctx, actor
-func (_m *Interface) PutActor(ctx context.Context, actor *internalpb.ActorRef) error {
+func (_m *Interface) PutActor(ctx context.Context, actor *internalpb.Actor) error {
 	ret := _m.Called(ctx, actor)
 
 	if len(ret) == 0 {
@@ -511,7 +511,7 @@ func (_m *Interface) PutActor(ctx context.Context, actor *internalpb.ActorRef) e
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.ActorRef) error); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.Actor) error); ok {
 		r0 = rf(ctx, actor)
 	} else {
 		r0 = ret.Error(0)
@@ -527,14 +527,14 @@ type Interface_PutActor_Call struct {
 
 // PutActor is a helper method to define mock.On call
 //   - ctx context.Context
-//   - actor *internalpb.ActorRef
+//   - actor *internalpb.Actor
 func (_e *Interface_Expecter) PutActor(ctx interface{}, actor interface{}) *Interface_PutActor_Call {
 	return &Interface_PutActor_Call{Call: _e.mock.On("PutActor", ctx, actor)}
 }
 
-func (_c *Interface_PutActor_Call) Run(run func(ctx context.Context, actor *internalpb.ActorRef)) *Interface_PutActor_Call {
+func (_c *Interface_PutActor_Call) Run(run func(ctx context.Context, actor *internalpb.Actor)) *Interface_PutActor_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*internalpb.ActorRef))
+		run(args[0].(context.Context), args[1].(*internalpb.Actor))
 	})
 	return _c
 }
@@ -544,7 +544,7 @@ func (_c *Interface_PutActor_Call) Return(_a0 error) *Interface_PutActor_Call {
 	return _c
 }
 
-func (_c *Interface_PutActor_Call) RunAndReturn(run func(context.Context, *internalpb.ActorRef) error) *Interface_PutActor_Call {
+func (_c *Interface_PutActor_Call) RunAndReturn(run func(context.Context, *internalpb.Actor) error) *Interface_PutActor_Call {
 	_c.Call.Return(run)
 	return _c
 }
