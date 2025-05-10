@@ -1755,15 +1755,12 @@ func (pid *PID) handleFailure(cid *PID, msg *internalpb.Down) {
 		// pass
 		case *internalpb.Down_Escalate:
 			// forward the message to the parent and suspend the actor
-			if err := cid.Tell(context.Background(), pid, &goaktpb.Mayday{
-				ActorId:   cid.ID(),
+			_ = cid.Tell(context.Background(), pid, &goaktpb.Mayday{
 				Reason:    msg.GetErrorMessage(),
 				Message:   msg.GetMessage(),
 				Timestamp: msg.GetTimestamp(),
-			}); err == nil {
-				cid.suspend(msg.GetErrorMessage())
-			}
-
+			})
+			cid.suspend(msg.GetErrorMessage())
 		default:
 			pid.handleStopDirective(cid, includeSiblings)
 		}

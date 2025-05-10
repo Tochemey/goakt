@@ -1133,21 +1133,20 @@ func (*NoMessage) Descriptor() ([]byte, []int) {
 // This message is automatically sent when the Escalate supervision directive is invoked,
 // indicating that the issue cannot be handled at the child level.
 //
+// The child actor is suspended, and the parent actor is expected to take appropriate action.
 // Upon receiving a Mayday, the parent actor can decide how to handle the failure,
 // such as restarting the child, stopping it, escalating further, or applying custom recovery logic.
 type Mayday struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The unique identifier of the child actor that experienced the failure.
-	ActorId string `protobuf:"bytes,1,opt,name=actor_id,json=actorId,proto3" json:"actor_id,omitempty"`
 	// The original message that triggered the failure. This is useful for debugging
 	// or retrying the operation once the issue is resolved.
-	Message *anypb.Any `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	Message *anypb.Any `protobuf:"bytes,1,opt,name=message,proto3" json:"message,omitempty"`
 	// A human-readable explanation of the failure, typically extracted from the exception
 	// or error condition that led to the escalation.
-	Reason string `protobuf:"bytes,3,opt,name=reason,proto3" json:"reason,omitempty"`
+	Reason string `protobuf:"bytes,2,opt,name=reason,proto3" json:"reason,omitempty"`
 	// The UTC timestamp indicating when the Mayday event occurred. This helps in correlating
 	// logs or monitoring data for incident analysis and resolution timelines.
-	Timestamp     *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
+	Timestamp     *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1180,13 +1179,6 @@ func (x *Mayday) ProtoReflect() protoreflect.Message {
 // Deprecated: Use Mayday.ProtoReflect.Descriptor instead.
 func (*Mayday) Descriptor() ([]byte, []int) {
 	return file_goakt_goakt_proto_rawDescGZIP(), []int{20}
-}
-
-func (x *Mayday) GetActorId() string {
-	if x != nil {
-		return x.ActorId
-	}
-	return ""
 }
 
 func (x *Mayday) GetMessage() *anypb.Any {
@@ -1279,12 +1271,11 @@ const file_goakt_goakt_proto_rawDesc = "" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x14\n" +
 	"\x05topic\x18\x02 \x01(\tR\x05topic\x12.\n" +
 	"\amessage\x18\x03 \x01(\v2\x14.google.protobuf.AnyR\amessage\"\v\n" +
-	"\tNoMessage\"\xa5\x01\n" +
-	"\x06Mayday\x12\x19\n" +
-	"\bactor_id\x18\x01 \x01(\tR\aactorId\x12.\n" +
-	"\amessage\x18\x02 \x01(\v2\x14.google.protobuf.AnyR\amessage\x12\x16\n" +
-	"\x06reason\x18\x03 \x01(\tR\x06reason\x128\n" +
-	"\ttimestamp\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\ttimestampB\x85\x01\n" +
+	"\tNoMessage\"\x8a\x01\n" +
+	"\x06Mayday\x12.\n" +
+	"\amessage\x18\x01 \x01(\v2\x14.google.protobuf.AnyR\amessage\x12\x16\n" +
+	"\x06reason\x18\x02 \x01(\tR\x06reason\x128\n" +
+	"\ttimestamp\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\ttimestampB\x85\x01\n" +
 	"\vcom.goaktpbB\n" +
 	"GoaktProtoH\x02P\x01Z,github.com/tochemey/goakt/v3/goaktpb;goaktpb\xa2\x02\x03GXX\xaa\x02\aGoaktpb\xca\x02\aGoaktpb\xe2\x02\x13Goaktpb\\GPBMetadata\xea\x02\aGoaktpbb\x06proto3"
 
