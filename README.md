@@ -6,7 +6,7 @@
 ![GitHub Tag](https://img.shields.io/github/v/tag/Tochemey/goakt)
 [![Go Report Card](https://goreportcard.com/badge/github.com/tochemey/goakt)](https://goreportcard.com/report/github.com/tochemey/goakt)
 [![codecov](https://codecov.io/gh/Tochemey/goakt/graph/badge.svg?token=J0p9MzwSRH)](https://codecov.io/gh/Tochemey/goakt)
-[![GitHub go.mod Go version](https://badges.chse.dev/github/go-mod/go-version/Tochemey/goakt)](https://go.dev/doc/install)
+[![GitHub go.mod Go version](https://img.shields.io/github/go-mod/go-version/Tochemey/goakt)](https://go.dev/doc/install)
 ![GitHub Created At](https://img.shields.io/github/created-at/Tochemey/goakt)
 
 
@@ -24,6 +24,8 @@ Also, check the reference section at the end of the post for more material regar
 ```shell
 go get github.com/tochemey/goakt/v3
 ```
+> GoAkt requires Golang version `1.23.0` or higher.
+
 ## 📚 Documentation
 
 The complete Documentation can be found [here](https://tochemey.gitbook.io/goakt)
