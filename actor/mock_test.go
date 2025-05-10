@@ -818,3 +818,32 @@ func (x *mockDependency) UnmarshalBinary(data []byte) error {
 func (x *mockDependency) ID() string {
 	return x.id
 }
+
+type escalationSupervisor struct{}
+
+var _ Actor = (*escalationSupervisor)(nil)
+
+func newEscalationSupervisor() *escalationSupervisor {
+	return &escalationSupervisor{}
+}
+
+// PreStart implements Actor.
+func (e *escalationSupervisor) PreStart(*Context) error {
+	return nil
+}
+
+// Receive implements Actor.
+func (e *escalationSupervisor) Receive(ctx *ReceiveContext) {
+	switch ctx.Message().(type) {
+	case *goaktpb.PostStart:
+	case *goaktpb.Mayday:
+		ctx.Stop(ctx.Sender())
+	default:
+		ctx.Unhandled()
+	}
+}
+
+// PostStop implements Actor.
+func (e *escalationSupervisor) PostStop(*Context) error {
+	return nil
+}
