@@ -92,9 +92,9 @@ type Interface interface {
 	// Stop stops the cluster engine
 	Stop(ctx context.Context) error
 	// PutActor replicates onto the Node the metadata of an actor
-	PutActor(ctx context.Context, actor *internalpb.ActorRef) error
+	PutActor(ctx context.Context, actor *internalpb.Actor) error
 	// GetActor fetches an actor from the Node
-	GetActor(ctx context.Context, actorName string) (*internalpb.ActorRef, error)
+	GetActor(ctx context.Context, actorName string) (*internalpb.Actor, error)
 	// GetPartition returns the partition where a given actor is stored
 	GetPartition(actorName string) int
 	// LookupKind checks the existence of a given actor kind in the cluster
@@ -116,7 +116,7 @@ type Interface interface {
 	// point in time in the cluster
 	IsLeader(ctx context.Context) bool
 	// Actors returns all actors in the cluster at any given time
-	Actors(ctx context.Context, timeout time.Duration) ([]*internalpb.ActorRef, error)
+	Actors(ctx context.Context, timeout time.Duration) ([]*internalpb.Actor, error)
 	// IsRunning returns true when the cluster engine is running
 	IsRunning() bool
 }
@@ -343,7 +343,7 @@ func (x *Engine) Start(ctx context.Context) error {
 		Host:         x.node.Host,
 		RemotingPort: int32(x.node.RemotingPort),
 		PeersPort:    int32(x.node.PeersPort),
-		Actors:       map[string]*internalpb.ActorProps{},
+		Actors:       map[string]*internalpb.Actor{},
 	}
 
 	if err := x.initializeState(ctx); err != nil {
@@ -441,7 +441,7 @@ func (x *Engine) IsLeader(ctx context.Context) bool {
 }
 
 // Actors returns all actors in the cluster at any given time
-func (x *Engine) Actors(ctx context.Context, timeout time.Duration) ([]*internalpb.ActorRef, error) {
+func (x *Engine) Actors(ctx context.Context, timeout time.Duration) ([]*internalpb.Actor, error) {
 	// return an error when the engine is not running
 	if !x.IsRunning() {
 		return nil, ErrEngineNotRunning
@@ -462,7 +462,7 @@ func (x *Engine) Actors(ctx context.Context, timeout time.Duration) ([]*internal
 		return nil, err
 	}
 
-	var actors []*internalpb.ActorRef
+	var actors []*internalpb.Actor
 	for scanner.Next() {
 		actorName := scanner.Key()
 		resp, _ := x.actorsMap.Get(ctx, actorName)
@@ -480,7 +480,7 @@ func (x *Engine) Actors(ctx context.Context, timeout time.Duration) ([]*internal
 }
 
 // PutActor pushes to the cluster the peer sync request
-func (x *Engine) PutActor(ctx context.Context, actor *internalpb.ActorRef) error {
+func (x *Engine) PutActor(ctx context.Context, actor *internalpb.Actor) error {
 	// return an error when the engine is not running
 	if !x.IsRunning() {
 		return ErrEngineNotRunning
@@ -501,31 +501,30 @@ func (x *Engine) PutActor(ctx context.Context, actor *internalpb.ActorRef) error
 
 	eg.Go(func() error {
 		encoded, _ := encode(actor)
-		key := actor.GetActorAddress().GetName()
+		key := actor.GetAddress().GetName()
 		if actor.GetIsSingleton() {
 			if err := errorschain.
 				New(errorschain.ReturnFirst()).
 				AddErrorFn(func() error { return x.actorsMap.Put(ctx, key, encoded) }).
-				AddErrorFn(func() error { return x.actorKindsMap.Put(ctx, actor.GetActorType(), key) }).
+				AddErrorFn(func() error { return x.actorKindsMap.Put(ctx, actor.GetType(), key) }).
 				Error(); err != nil {
-				return fmt.Errorf("(%s) failed to sync actor=(%s): %v", x.node.PeersAddress(), actor.GetActorAddress().GetName(), err)
+				return fmt.Errorf("(%s) failed to sync actor=(%s): %v", x.node.PeersAddress(), actor.GetAddress().GetName(), err)
 			}
 			return nil
 		}
 
 		if err := x.actorsMap.Put(ctx, key, encoded); err != nil {
-			return fmt.Errorf("(%s) failed to sync actor=(%s): %v", x.node.PeersAddress(), actor.GetActorAddress().GetName(), err)
+			return fmt.Errorf("(%s) failed to sync actor=(%s): %v", x.node.PeersAddress(), actor.GetAddress().GetName(), err)
 		}
 		return nil
 	})
 
 	eg.Go(func() error {
 		actors := x.peerState.GetActors()
-		actorName := actor.GetActorAddress().GetName()
-
-		actors[actorName] = &internalpb.ActorProps{
-			ActorName:      actorName,
-			ActorType:      actor.GetActorType(),
+		actorName := actor.GetAddress().GetName()
+		actors[actorName] = &internalpb.Actor{
+			Address:        actor.GetAddress(),
+			Type:           actor.GetType(),
 			IsSingleton:    actor.GetIsSingleton(),
 			Relocatable:    actor.GetRelocatable(),
 			PassivateAfter: actor.PassivateAfter,
@@ -594,7 +593,7 @@ func (x *Engine) GetState(ctx context.Context, peerAddress string) (*internalpb.
 }
 
 // GetActor fetches an actor from the Node
-func (x *Engine) GetActor(ctx context.Context, actorName string) (*internalpb.ActorRef, error) {
+func (x *Engine) GetActor(ctx context.Context, actorName string) (*internalpb.Actor, error) {
 	// return an error when the engine is not running
 	if !x.IsRunning() {
 		return nil, ErrEngineNotRunning
@@ -632,7 +631,7 @@ func (x *Engine) GetActor(ctx context.Context, actorName string) (*internalpb.Ac
 		return nil, err
 	}
 
-	logger.Infof("(%s) successfully retrieved from the cluster actor (%s)", x.node.PeersAddress(), actor.GetActorAddress().GetName())
+	logger.Infof("(%s) successfully retrieved from the cluster actor (%s)", x.node.PeersAddress(), actor.GetAddress().GetName())
 	return actor, nil
 }
 

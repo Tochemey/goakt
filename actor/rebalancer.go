@@ -96,7 +96,7 @@ func (r *rebalancer) Rebalance(ctx *ReceiveContext) {
 			eg.Go(func() error {
 				for _, actor := range leaderShares {
 					// never redistribute system actors
-					if !isReservedName(actor.GetActorName()) {
+					if !isReservedName(actor.GetAddress().GetName()) {
 						if err := r.recreateLocally(egCtx, actor, true); err != nil {
 							return NewSpawnError(err)
 						}
@@ -114,14 +114,14 @@ func (r *rebalancer) Rebalance(ctx *ReceiveContext) {
 
 					for _, actor := range actors {
 						// never redistribute system actors and singleton actors
-						if !isReservedName(actor.GetActorName()) && !actor.GetIsSingleton() {
+						if !isReservedName(actor.GetAddress().GetName()) && !actor.GetIsSingleton() {
 							if actor.GetRelocatable() {
 								remoteHost := peer.Host
 								remotingPort := peer.RemotingPort
 
 								spawnRequest := &remote.SpawnRequest{
-									Name:        actor.GetActorName(),
-									Kind:        actor.GetActorType(),
+									Name:        actor.GetAddress().GetName(),
+									Kind:        actor.GetType(),
 									Singleton:   false,
 									Relocatable: true,
 								}
@@ -163,23 +163,23 @@ func (r *rebalancer) PostStop(*Context) error {
 }
 
 // computeRebalancing build the list of actors to create on the leader node and the peers in the cluster
-func (r *rebalancer) computeRebalancing(totalPeers int, nodeLeftState *internalpb.PeerState) (leaderShares []*internalpb.ActorProps, peersShares [][]*internalpb.ActorProps) {
+func (r *rebalancer) computeRebalancing(totalPeers int, nodeLeftState *internalpb.PeerState) (leaderShares []*internalpb.Actor, peersShares [][]*internalpb.Actor) {
 	actors := nodeLeftState.GetActors()
 	actorsCount := len(actors)
 
 	// Collect all actors to be rebalanced
-	toRebalances := make([]*internalpb.ActorProps, 0, actorsCount)
+	toRebalances := make([]*internalpb.Actor, 0, actorsCount)
 	for _, actorProps := range actors {
 		toRebalances = append(toRebalances, actorProps)
 	}
 
 	// Separate singleton actors to be assigned to the leader
-	leaderShares = slice.Filter(toRebalances, func(actor *internalpb.ActorProps) bool {
+	leaderShares = slice.Filter(toRebalances, func(actor *internalpb.Actor) bool {
 		return actor.GetIsSingleton()
 	})
 
 	// Remove singleton actors from the list
-	toRebalances = slice.Filter(toRebalances, func(actor *internalpb.ActorProps) bool {
+	toRebalances = slice.Filter(toRebalances, func(actor *internalpb.Actor) bool {
 		return !actor.GetIsSingleton()
 	})
 
@@ -203,15 +203,15 @@ func (r *rebalancer) computeRebalancing(totalPeers int, nodeLeftState *internalp
 }
 
 // recreateLocally recreates the actor
-func (r *rebalancer) recreateLocally(ctx context.Context, props *internalpb.ActorProps, enforceSingleton bool) error {
-	actor, err := r.pid.ActorSystem().getReflection().NewActor(props.GetActorType())
+func (r *rebalancer) recreateLocally(ctx context.Context, props *internalpb.Actor, enforceSingleton bool) error {
+	actor, err := r.pid.ActorSystem().getReflection().NewActor(props.GetType())
 	if err != nil {
 		return err
 	}
 
 	if enforceSingleton && props.GetIsSingleton() {
 		// spawn the singleton actor
-		return r.pid.ActorSystem().SpawnSingleton(ctx, props.GetActorName(), actor)
+		return r.pid.ActorSystem().SpawnSingleton(ctx, props.GetAddress().GetName(), actor)
 	}
 
 	if !props.GetRelocatable() {
@@ -234,6 +234,6 @@ func (r *rebalancer) recreateLocally(ctx context.Context, props *internalpb.Acto
 		spawnOpts = append(spawnOpts, WithDependencies(dependencies...))
 	}
 
-	_, err = r.pid.ActorSystem().Spawn(ctx, props.GetActorName(), actor, spawnOpts...)
+	_, err = r.pid.ActorSystem().Spawn(ctx, props.GetAddress().GetName(), actor, spawnOpts...)
 	return err
 }

@@ -308,7 +308,7 @@ type actorSystem struct {
 	clusterEnabled atomic.Bool
 	// cluster mode
 	cluster            cluster.Interface
-	wireActorsQueue    chan *internalpb.ActorRef
+	wireActorsQueue    chan *internalpb.Actor
 	eventsQueue        <-chan *cluster.Event
 	clusterSyncStopSig chan types.Unit
 	partitionHasher    hash.Hasher
@@ -377,7 +377,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 	}
 
 	system := &actorSystem{
-		wireActorsQueue:        make(chan *internalpb.ActorRef, 10),
+		wireActorsQueue:        make(chan *internalpb.Actor, 10),
 		name:                   name,
 		logger:                 log.New(log.ErrorLevel, os.Stderr),
 		passivationAfter:       DefaultPassivationTimeout,
@@ -1009,7 +1009,7 @@ func (x *actorSystem) ActorOf(ctx context.Context, actorName string) (addr *addr
 		}
 
 		x.locker.Unlock()
-		return address.From(actor.GetActorAddress()), nil, nil
+		return address.From(actor.GetAddress()), nil, nil
 	}
 
 	if x.remotingEnabled.Load() {
@@ -1074,7 +1074,7 @@ func (x *actorSystem) RemoteActor(ctx context.Context, actorName string) (addr *
 	}
 
 	x.locker.Unlock()
-	return address.From(actor.GetActorAddress()), nil
+	return address.From(actor.GetAddress()), nil
 }
 
 // RemoteLookup for an actor on a remote host.
@@ -1102,7 +1102,7 @@ func (x *actorSystem) RemoteLookup(ctx context.Context, request *connect.Request
 
 			return nil, connect.NewError(connect.CodeInternal, err)
 		}
-		return connect.NewResponse(&internalpb.RemoteLookupResponse{Address: actor.GetActorAddress()}), nil
+		return connect.NewResponse(&internalpb.RemoteLookupResponse{Address: actor.GetAddress()}), nil
 	}
 
 	addr := address.New(actorName, x.Name(), msg.GetHost(), int(msg.GetPort()))
@@ -1542,9 +1542,9 @@ func (x *actorSystem) broadcastActor(pid *PID) error {
 			return err
 		}
 
-		x.wireActorsQueue <- &internalpb.ActorRef{
-			ActorAddress:   pid.Address().Address,
-			ActorType:      types.Name(pid.Actor()),
+		x.wireActorsQueue <- &internalpb.Actor{
+			Address:        pid.Address().Address,
+			Type:           types.Name(pid.Actor()),
 			IsSingleton:    pid.IsSingleton(),
 			Relocatable:    pid.IsRelocatable(),
 			PassivateAfter: durationpb.New(pid.PassivationTime()),
@@ -1818,7 +1818,7 @@ func (x *actorSystem) replicationLoop() {
 	for actor := range x.wireActorsQueue {
 		// never replicate system actors because there are specific to the
 		// started node
-		if isReservedName(actor.GetActorAddress().GetName()) {
+		if isReservedName(actor.GetAddress().GetName()) {
 			continue
 		}
 		if x.InCluster() {
@@ -2303,7 +2303,7 @@ func (x *actorSystem) checkSpawnPreconditions(ctx context.Context, actorName str
 			return err
 		}
 
-		if existed.GetActorType() == types.Name(kind) {
+		if existed.GetType() == types.Name(kind) {
 			return ErrActorAlreadyExists(actorName)
 		}
 	}

@@ -23,13 +23,13 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-// ActorRef represents the actor information on the wire.
-type ActorRef struct {
+// Actor represents the actor information on the wire.
+type Actor struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Specifies the actor address
-	ActorAddress *goaktpb.Address `protobuf:"bytes,1,opt,name=actor_address,json=actorAddress,proto3" json:"actor_address,omitempty"`
+	Address *goaktpb.Address `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
 	// Specifies the actor type
-	ActorType string `protobuf:"bytes,2,opt,name=actor_type,json=actorType,proto3" json:"actor_type,omitempty"`
+	Type string `protobuf:"bytes,2,opt,name=type,proto3" json:"type,omitempty"`
 	// Specifies if the actor is a singleton
 	IsSingleton bool `protobuf:"varint,3,opt,name=is_singleton,json=isSingleton,proto3" json:"is_singleton,omitempty"`
 	// Specifies if the actor is disabled for relocation
@@ -44,20 +44,20 @@ type ActorRef struct {
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *ActorRef) Reset() {
-	*x = ActorRef{}
+func (x *Actor) Reset() {
+	*x = Actor{}
 	mi := &file_internal_actor_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *ActorRef) String() string {
+func (x *Actor) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*ActorRef) ProtoMessage() {}
+func (*Actor) ProtoMessage() {}
 
-func (x *ActorRef) ProtoReflect() protoreflect.Message {
+func (x *Actor) ProtoReflect() protoreflect.Message {
 	mi := &file_internal_actor_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -69,155 +69,54 @@ func (x *ActorRef) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use ActorRef.ProtoReflect.Descriptor instead.
-func (*ActorRef) Descriptor() ([]byte, []int) {
+// Deprecated: Use Actor.ProtoReflect.Descriptor instead.
+func (*Actor) Descriptor() ([]byte, []int) {
 	return file_internal_actor_proto_rawDescGZIP(), []int{0}
 }
 
-func (x *ActorRef) GetActorAddress() *goaktpb.Address {
+func (x *Actor) GetAddress() *goaktpb.Address {
 	if x != nil {
-		return x.ActorAddress
+		return x.Address
 	}
 	return nil
 }
 
-func (x *ActorRef) GetActorType() string {
+func (x *Actor) GetType() string {
 	if x != nil {
-		return x.ActorType
+		return x.Type
 	}
 	return ""
 }
 
-func (x *ActorRef) GetIsSingleton() bool {
+func (x *Actor) GetIsSingleton() bool {
 	if x != nil {
 		return x.IsSingleton
 	}
 	return false
 }
 
-func (x *ActorRef) GetRelocatable() bool {
+func (x *Actor) GetRelocatable() bool {
 	if x != nil {
 		return x.Relocatable
 	}
 	return false
 }
 
-func (x *ActorRef) GetPassivateAfter() *durationpb.Duration {
+func (x *Actor) GetPassivateAfter() *durationpb.Duration {
 	if x != nil {
 		return x.PassivateAfter
 	}
 	return nil
 }
 
-func (x *ActorRef) GetDependencies() []*Dependency {
+func (x *Actor) GetDependencies() []*Dependency {
 	if x != nil {
 		return x.Dependencies
 	}
 	return nil
 }
 
-func (x *ActorRef) GetEnableStash() bool {
-	if x != nil {
-		return x.EnableStash
-	}
-	return false
-}
-
-// ActorProps defines the properties of an actor
-// that can be used to spawn an actor remotely.
-type ActorProps struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the actor name.
-	ActorName string `protobuf:"bytes,1,opt,name=actor_name,json=actorName,proto3" json:"actor_name,omitempty"`
-	// Specifies the actor type
-	ActorType string `protobuf:"bytes,2,opt,name=actor_type,json=actorType,proto3" json:"actor_type,omitempty"`
-	// Specifies if the actor is a singleton
-	IsSingleton bool `protobuf:"varint,3,opt,name=is_singleton,json=isSingleton,proto3" json:"is_singleton,omitempty"`
-	// Specifies if the actor is disabled for relocation
-	Relocatable bool `protobuf:"varint,4,opt,name=relocatable,proto3" json:"relocatable,omitempty"`
-	// Specifies the passivation time
-	PassivateAfter *durationpb.Duration `protobuf:"bytes,5,opt,name=passivate_after,json=passivateAfter,proto3" json:"passivate_after,omitempty"`
-	// Specifies the dependencies
-	Dependencies []*Dependency `protobuf:"bytes,6,rep,name=dependencies,proto3" json:"dependencies,omitempty"`
-	// States whether the actor will require a stash buffer
-	EnableStash   bool `protobuf:"varint,7,opt,name=enable_stash,json=enableStash,proto3" json:"enable_stash,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *ActorProps) Reset() {
-	*x = ActorProps{}
-	mi := &file_internal_actor_proto_msgTypes[1]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *ActorProps) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*ActorProps) ProtoMessage() {}
-
-func (x *ActorProps) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_actor_proto_msgTypes[1]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use ActorProps.ProtoReflect.Descriptor instead.
-func (*ActorProps) Descriptor() ([]byte, []int) {
-	return file_internal_actor_proto_rawDescGZIP(), []int{1}
-}
-
-func (x *ActorProps) GetActorName() string {
-	if x != nil {
-		return x.ActorName
-	}
-	return ""
-}
-
-func (x *ActorProps) GetActorType() string {
-	if x != nil {
-		return x.ActorType
-	}
-	return ""
-}
-
-func (x *ActorProps) GetIsSingleton() bool {
-	if x != nil {
-		return x.IsSingleton
-	}
-	return false
-}
-
-func (x *ActorProps) GetRelocatable() bool {
-	if x != nil {
-		return x.Relocatable
-	}
-	return false
-}
-
-func (x *ActorProps) GetPassivateAfter() *durationpb.Duration {
-	if x != nil {
-		return x.PassivateAfter
-	}
-	return nil
-}
-
-func (x *ActorProps) GetDependencies() []*Dependency {
-	if x != nil {
-		return x.Dependencies
-	}
-	return nil
-}
-
-func (x *ActorProps) GetEnableStash() bool {
+func (x *Actor) GetEnableStash() bool {
 	if x != nil {
 		return x.EnableStash
 	}
@@ -229,22 +128,10 @@ var File_internal_actor_proto protoreflect.FileDescriptor
 const file_internal_actor_proto_rawDesc = "" +
 	"\n" +
 	"\x14internal/actor.proto\x12\n" +
-	"internalpb\x1a\x11goakt/goakt.proto\x1a\x1egoogle/protobuf/duration.proto\x1a\x19internal/dependency.proto\"\xc8\x02\n" +
-	"\bActorRef\x125\n" +
-	"\ractor_address\x18\x01 \x01(\v2\x10.goaktpb.AddressR\factorAddress\x12\x1d\n" +
-	"\n" +
-	"actor_type\x18\x02 \x01(\tR\tactorType\x12!\n" +
-	"\fis_singleton\x18\x03 \x01(\bR\visSingleton\x12 \n" +
-	"\vrelocatable\x18\x04 \x01(\bR\vrelocatable\x12B\n" +
-	"\x0fpassivate_after\x18\x05 \x01(\v2\x19.google.protobuf.DurationR\x0epassivateAfter\x12:\n" +
-	"\fdependencies\x18\x06 \x03(\v2\x16.internalpb.DependencyR\fdependencies\x12!\n" +
-	"\fenable_stash\x18\a \x01(\bR\venableStash\"\xb2\x02\n" +
-	"\n" +
-	"ActorProps\x12\x1d\n" +
-	"\n" +
-	"actor_name\x18\x01 \x01(\tR\tactorName\x12\x1d\n" +
-	"\n" +
-	"actor_type\x18\x02 \x01(\tR\tactorType\x12!\n" +
+	"internalpb\x1a\x11goakt/goakt.proto\x1a\x1egoogle/protobuf/duration.proto\x1a\x19internal/dependency.proto\"\xaf\x02\n" +
+	"\x05Actor\x12*\n" +
+	"\aaddress\x18\x01 \x01(\v2\x10.goaktpb.AddressR\aaddress\x12\x12\n" +
+	"\x04type\x18\x02 \x01(\tR\x04type\x12!\n" +
 	"\fis_singleton\x18\x03 \x01(\bR\visSingleton\x12 \n" +
 	"\vrelocatable\x18\x04 \x01(\bR\vrelocatable\x12B\n" +
 	"\x0fpassivate_after\x18\x05 \x01(\v2\x19.google.protobuf.DurationR\x0epassivateAfter\x12:\n" +
@@ -268,25 +155,22 @@ func file_internal_actor_proto_rawDescGZIP() []byte {
 	return file_internal_actor_proto_rawDescData
 }
 
-var file_internal_actor_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
+var file_internal_actor_proto_msgTypes = make([]protoimpl.MessageInfo, 1)
 var file_internal_actor_proto_goTypes = []any{
-	(*ActorRef)(nil),            // 0: internalpb.ActorRef
-	(*ActorProps)(nil),          // 1: internalpb.ActorProps
-	(*goaktpb.Address)(nil),     // 2: goaktpb.Address
-	(*durationpb.Duration)(nil), // 3: google.protobuf.Duration
-	(*Dependency)(nil),          // 4: internalpb.Dependency
+	(*Actor)(nil),               // 0: internalpb.Actor
+	(*goaktpb.Address)(nil),     // 1: goaktpb.Address
+	(*durationpb.Duration)(nil), // 2: google.protobuf.Duration
+	(*Dependency)(nil),          // 3: internalpb.Dependency
 }
 var file_internal_actor_proto_depIdxs = []int32{
-	2, // 0: internalpb.ActorRef.actor_address:type_name -> goaktpb.Address
-	3, // 1: internalpb.ActorRef.passivate_after:type_name -> google.protobuf.Duration
-	4, // 2: internalpb.ActorRef.dependencies:type_name -> internalpb.Dependency
-	3, // 3: internalpb.ActorProps.passivate_after:type_name -> google.protobuf.Duration
-	4, // 4: internalpb.ActorProps.dependencies:type_name -> internalpb.Dependency
-	5, // [5:5] is the sub-list for method output_type
-	5, // [5:5] is the sub-list for method input_type
-	5, // [5:5] is the sub-list for extension type_name
-	5, // [5:5] is the sub-list for extension extendee
-	0, // [0:5] is the sub-list for field type_name
+	1, // 0: internalpb.Actor.address:type_name -> goaktpb.Address
+	2, // 1: internalpb.Actor.passivate_after:type_name -> google.protobuf.Duration
+	3, // 2: internalpb.Actor.dependencies:type_name -> internalpb.Dependency
+	3, // [3:3] is the sub-list for method output_type
+	3, // [3:3] is the sub-list for method input_type
+	3, // [3:3] is the sub-list for extension type_name
+	3, // [3:3] is the sub-list for extension extendee
+	0, // [0:3] is the sub-list for field type_name
 }
 
 func init() { file_internal_actor_proto_init() }
@@ -301,7 +185,7 @@ func file_internal_actor_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_internal_actor_proto_rawDesc), len(file_internal_actor_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   2,
+			NumMessages:   1,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

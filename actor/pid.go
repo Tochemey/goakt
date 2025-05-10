@@ -1201,7 +1201,7 @@ func (pid *PID) receiveLoop() {
 			switch msg := received.Message().(type) {
 			case *goaktpb.PoisonPill:
 				_ = pid.Shutdown(received.Context())
-			case *internalpb.HandleFault:
+			case *internalpb.Mayday:
 				pid.handleFaultyChild(received.Sender(), msg)
 			default:
 				pid.handleReceived(received)
@@ -1602,25 +1602,25 @@ func (pid *PID) notifyParent(err error) {
 		}
 	}
 
-	msg := &internalpb.HandleFault{
-		ActorId: pid.ID(),
-		Message: err.Error(),
+	msg := &internalpb.Mayday{
+		ActorId:      pid.ID(),
+		ErrorMessage: err.Error(),
 	}
 
 	switch directive {
 	case StopDirective:
-		msg.Directive = &internalpb.HandleFault_Stop{
+		msg.Directive = &internalpb.Mayday_Stop{
 			Stop: new(internalpb.StopDirective),
 		}
 	case RestartDirective:
-		msg.Directive = &internalpb.HandleFault_Restart{
+		msg.Directive = &internalpb.Mayday_Restart{
 			Restart: &internalpb.RestartDirective{
 				MaxRetries: pid.supervisor.MaxRetries(),
 				Timeout:    int64(pid.supervisor.Timeout()),
 			},
 		}
 	case ResumeDirective:
-		msg.Directive = &internalpb.HandleFault_Resume{
+		msg.Directive = &internalpb.Mayday_Resume{
 			Resume: &internalpb.ResumeDirective{},
 		}
 	default:
@@ -1639,7 +1639,7 @@ func (pid *PID) notifyParent(err error) {
 	}
 
 	if parent := pid.Parent(); parent != nil && !parent.Equals(NoSender) {
-		pid.logger.Warnf("%s child actor=(%s) is failing: Err=%s", pid.Name(), parent.Name(), msg.GetMessage())
+		pid.logger.Warnf("%s child actor=(%s) is failing: Err=%s", pid.Name(), parent.Name(), msg.GetErrorMessage())
 		pid.logger.Infof("%s activates [strategy=%s, directive=%s] for failing child actor=(%s)",
 			parent.Name(),
 			pid.supervisor.Strategy(),
@@ -1728,20 +1728,20 @@ func (pid *PID) handleCompletion(ctx context.Context, completion *taskCompletion
 }
 
 // handleFaultyChild watches for child actor's failure and act based upon the supervisory strategy
-func (pid *PID) handleFaultyChild(cid *PID, msg *internalpb.HandleFault) {
+func (pid *PID) handleFaultyChild(cid *PID, msg *internalpb.Mayday) {
 	if cid.ID() == msg.GetActorId() {
 		directive := msg.GetDirective()
 		includeSiblings := msg.GetStrategy() == internalpb.Strategy_STRATEGY_ONE_FOR_ALL
 
 		switch d := directive.(type) {
-		case *internalpb.HandleFault_Stop:
+		case *internalpb.Mayday_Stop:
 			pid.handleStopDirective(cid, includeSiblings)
-		case *internalpb.HandleFault_Restart:
+		case *internalpb.Mayday_Restart:
 			pid.handleRestartDirective(cid,
 				d.Restart.GetMaxRetries(),
 				time.Duration(d.Restart.GetTimeout()),
 				includeSiblings)
-		case *internalpb.HandleFault_Resume:
+		case *internalpb.Mayday_Resume:
 			// pass
 		default:
 			pid.handleStopDirective(cid, includeSiblings)

@@ -67,44 +67,44 @@ func (Strategy) EnumDescriptor() ([]byte, []int) {
 	return file_internal_supervision_proto_rawDescGZIP(), []int{0}
 }
 
-// HandleFault message is sent by a child
+// Mayday message is sent by a child
 // actor to its parent when it is panicking or returning an error
-// while processing message
-type HandleFault struct {
+// while processing messages
+type Mayday struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Specifies the actor id
 	ActorId string `protobuf:"bytes,1,opt,name=actor_id,json=actorId,proto3" json:"actor_id,omitempty"`
-	// Specifies the message
-	Message string `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	// Specifies the error message
+	ErrorMessage string `protobuf:"bytes,2,opt,name=error_message,json=errorMessage,proto3" json:"error_message,omitempty"`
 	// Specifies the directive
 	//
 	// Types that are valid to be assigned to Directive:
 	//
-	//	*HandleFault_Stop
-	//	*HandleFault_Resume
-	//	*HandleFault_Restart
-	//	*HandleFault_Escalate
-	Directive isHandleFault_Directive `protobuf_oneof:"directive"`
+	//	*Mayday_Stop
+	//	*Mayday_Resume
+	//	*Mayday_Restart
+	//	*Mayday_Escalate
+	Directive isMayday_Directive `protobuf_oneof:"directive"`
 	// Specifies the strategy
 	Strategy      Strategy `protobuf:"varint,7,opt,name=strategy,proto3,enum=internalpb.Strategy" json:"strategy,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *HandleFault) Reset() {
-	*x = HandleFault{}
+func (x *Mayday) Reset() {
+	*x = Mayday{}
 	mi := &file_internal_supervision_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *HandleFault) String() string {
+func (x *Mayday) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*HandleFault) ProtoMessage() {}
+func (*Mayday) ProtoMessage() {}
 
-func (x *HandleFault) ProtoReflect() protoreflect.Message {
+func (x *Mayday) ProtoReflect() protoreflect.Message {
 	mi := &file_internal_supervision_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -116,102 +116,102 @@ func (x *HandleFault) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use HandleFault.ProtoReflect.Descriptor instead.
-func (*HandleFault) Descriptor() ([]byte, []int) {
+// Deprecated: Use Mayday.ProtoReflect.Descriptor instead.
+func (*Mayday) Descriptor() ([]byte, []int) {
 	return file_internal_supervision_proto_rawDescGZIP(), []int{0}
 }
 
-func (x *HandleFault) GetActorId() string {
+func (x *Mayday) GetActorId() string {
 	if x != nil {
 		return x.ActorId
 	}
 	return ""
 }
 
-func (x *HandleFault) GetMessage() string {
+func (x *Mayday) GetErrorMessage() string {
 	if x != nil {
-		return x.Message
+		return x.ErrorMessage
 	}
 	return ""
 }
 
-func (x *HandleFault) GetDirective() isHandleFault_Directive {
+func (x *Mayday) GetDirective() isMayday_Directive {
 	if x != nil {
 		return x.Directive
 	}
 	return nil
 }
 
-func (x *HandleFault) GetStop() *StopDirective {
+func (x *Mayday) GetStop() *StopDirective {
 	if x != nil {
-		if x, ok := x.Directive.(*HandleFault_Stop); ok {
+		if x, ok := x.Directive.(*Mayday_Stop); ok {
 			return x.Stop
 		}
 	}
 	return nil
 }
 
-func (x *HandleFault) GetResume() *ResumeDirective {
+func (x *Mayday) GetResume() *ResumeDirective {
 	if x != nil {
-		if x, ok := x.Directive.(*HandleFault_Resume); ok {
+		if x, ok := x.Directive.(*Mayday_Resume); ok {
 			return x.Resume
 		}
 	}
 	return nil
 }
 
-func (x *HandleFault) GetRestart() *RestartDirective {
+func (x *Mayday) GetRestart() *RestartDirective {
 	if x != nil {
-		if x, ok := x.Directive.(*HandleFault_Restart); ok {
+		if x, ok := x.Directive.(*Mayday_Restart); ok {
 			return x.Restart
 		}
 	}
 	return nil
 }
 
-func (x *HandleFault) GetEscalate() *EscalateDirective {
+func (x *Mayday) GetEscalate() *EscalateDirective {
 	if x != nil {
-		if x, ok := x.Directive.(*HandleFault_Escalate); ok {
+		if x, ok := x.Directive.(*Mayday_Escalate); ok {
 			return x.Escalate
 		}
 	}
 	return nil
 }
 
-func (x *HandleFault) GetStrategy() Strategy {
+func (x *Mayday) GetStrategy() Strategy {
 	if x != nil {
 		return x.Strategy
 	}
 	return Strategy_STRATEGY_ONE_FOR_ONE
 }
 
-type isHandleFault_Directive interface {
-	isHandleFault_Directive()
+type isMayday_Directive interface {
+	isMayday_Directive()
 }
 
-type HandleFault_Stop struct {
+type Mayday_Stop struct {
 	Stop *StopDirective `protobuf:"bytes,3,opt,name=stop,proto3,oneof"`
 }
 
-type HandleFault_Resume struct {
+type Mayday_Resume struct {
 	Resume *ResumeDirective `protobuf:"bytes,4,opt,name=resume,proto3,oneof"`
 }
 
-type HandleFault_Restart struct {
+type Mayday_Restart struct {
 	Restart *RestartDirective `protobuf:"bytes,5,opt,name=restart,proto3,oneof"`
 }
 
-type HandleFault_Escalate struct {
+type Mayday_Escalate struct {
 	Escalate *EscalateDirective `protobuf:"bytes,6,opt,name=escalate,proto3,oneof"`
 }
 
-func (*HandleFault_Stop) isHandleFault_Directive() {}
+func (*Mayday_Stop) isMayday_Directive() {}
 
-func (*HandleFault_Resume) isHandleFault_Directive() {}
+func (*Mayday_Resume) isMayday_Directive() {}
 
-func (*HandleFault_Restart) isHandleFault_Directive() {}
+func (*Mayday_Restart) isMayday_Directive() {}
 
-func (*HandleFault_Escalate) isHandleFault_Directive() {}
+func (*Mayday_Escalate) isMayday_Directive() {}
 
 // StopDirective defines the supervisor stop directive
 type StopDirective struct {
@@ -251,7 +251,7 @@ func (*StopDirective) Descriptor() ([]byte, []int) {
 }
 
 // ResumeDirective defines the supervisor resume directive
-// This ignores the failure and process the next message, instead
+// This ignores the failure and processes the next message, instead
 type ResumeDirective struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -329,8 +329,8 @@ func (*EscalateDirective) Descriptor() ([]byte, []int) {
 // RestartDirective defines supervisor restart directive
 type RestartDirective struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the maximum number of retries
-	// When reaching this number the faulty actor is stopped
+	// Specifies the maximum number of retries;
+	// When reaching this number, the faulty actor is stopped
 	MaxRetries uint32 `protobuf:"varint,1,opt,name=max_retries,json=maxRetries,proto3" json:"max_retries,omitempty"`
 	// Specifies the time range to restart the faulty actor
 	Timeout       int64 `protobuf:"varint,2,opt,name=timeout,proto3" json:"timeout,omitempty"`
@@ -387,10 +387,10 @@ var File_internal_supervision_proto protoreflect.FileDescriptor
 const file_internal_supervision_proto_rawDesc = "" +
 	"\n" +
 	"\x1ainternal/supervision.proto\x12\n" +
-	"internalpb\"\xe0\x02\n" +
-	"\vHandleFault\x12\x19\n" +
-	"\bactor_id\x18\x01 \x01(\tR\aactorId\x12\x18\n" +
-	"\amessage\x18\x02 \x01(\tR\amessage\x12/\n" +
+	"internalpb\"\xe6\x02\n" +
+	"\x06Mayday\x12\x19\n" +
+	"\bactor_id\x18\x01 \x01(\tR\aactorId\x12#\n" +
+	"\rerror_message\x18\x02 \x01(\tR\ferrorMessage\x12/\n" +
 	"\x04stop\x18\x03 \x01(\v2\x19.internalpb.StopDirectiveH\x00R\x04stop\x125\n" +
 	"\x06resume\x18\x04 \x01(\v2\x1b.internalpb.ResumeDirectiveH\x00R\x06resume\x128\n" +
 	"\arestart\x18\x05 \x01(\v2\x1c.internalpb.RestartDirectiveH\x00R\arestart\x12;\n" +
@@ -428,18 +428,18 @@ var file_internal_supervision_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
 var file_internal_supervision_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
 var file_internal_supervision_proto_goTypes = []any{
 	(Strategy)(0),             // 0: internalpb.Strategy
-	(*HandleFault)(nil),       // 1: internalpb.HandleFault
+	(*Mayday)(nil),            // 1: internalpb.Mayday
 	(*StopDirective)(nil),     // 2: internalpb.StopDirective
 	(*ResumeDirective)(nil),   // 3: internalpb.ResumeDirective
 	(*EscalateDirective)(nil), // 4: internalpb.EscalateDirective
 	(*RestartDirective)(nil),  // 5: internalpb.RestartDirective
 }
 var file_internal_supervision_proto_depIdxs = []int32{
-	2, // 0: internalpb.HandleFault.stop:type_name -> internalpb.StopDirective
-	3, // 1: internalpb.HandleFault.resume:type_name -> internalpb.ResumeDirective
-	5, // 2: internalpb.HandleFault.restart:type_name -> internalpb.RestartDirective
-	4, // 3: internalpb.HandleFault.escalate:type_name -> internalpb.EscalateDirective
-	0, // 4: internalpb.HandleFault.strategy:type_name -> internalpb.Strategy
+	2, // 0: internalpb.Mayday.stop:type_name -> internalpb.StopDirective
+	3, // 1: internalpb.Mayday.resume:type_name -> internalpb.ResumeDirective
+	5, // 2: internalpb.Mayday.restart:type_name -> internalpb.RestartDirective
+	4, // 3: internalpb.Mayday.escalate:type_name -> internalpb.EscalateDirective
+	0, // 4: internalpb.Mayday.strategy:type_name -> internalpb.Strategy
 	5, // [5:5] is the sub-list for method output_type
 	5, // [5:5] is the sub-list for method input_type
 	5, // [5:5] is the sub-list for extension type_name
@@ -453,10 +453,10 @@ func file_internal_supervision_proto_init() {
 		return
 	}
 	file_internal_supervision_proto_msgTypes[0].OneofWrappers = []any{
-		(*HandleFault_Stop)(nil),
-		(*HandleFault_Resume)(nil),
-		(*HandleFault_Restart)(nil),
-		(*HandleFault_Escalate)(nil),
+		(*Mayday_Stop)(nil),
+		(*Mayday_Resume)(nil),
+		(*Mayday_Restart)(nil),
+		(*Mayday_Escalate)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{

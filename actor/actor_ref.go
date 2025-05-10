@@ -92,11 +92,11 @@ func (x ActorRef) Equals(actor ActorRef) bool {
 	return x.address.Equals(actor.address)
 }
 
-func fromActorRef(actorRef *internalpb.ActorRef) ActorRef {
+func fromActorRef(actorRef *internalpb.Actor) ActorRef {
 	return ActorRef{
-		name:        actorRef.GetActorAddress().GetName(),
-		kind:        actorRef.GetActorType(),
-		address:     address.From(actorRef.GetActorAddress()),
+		name:        actorRef.GetAddress().GetName(),
+		kind:        actorRef.GetType(),
+		address:     address.From(actorRef.GetAddress()),
 		isSingleton: actorRef.GetIsSingleton(),
 		relocatable: actorRef.GetRelocatable(),
 	}
