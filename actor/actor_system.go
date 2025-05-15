@@ -1325,6 +1325,34 @@ func (x *actorSystem) RemoteSpawn(ctx context.Context, request *connect.Request[
 	return connect.NewResponse(new(internalpb.RemoteSpawnResponse)), nil
 }
 
+// RemoteReinstate handles the remoteReinstate call
+func (x *actorSystem) RemoteReinstate(_ context.Context, request *connect.Request[internalpb.RemoteReinstateRequest]) (*connect.Response[internalpb.RemoteReinstateResponse], error) {
+	logger := x.logger
+
+	msg := request.Msg
+
+	if !x.remotingEnabled.Load() {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrRemotingDisabled)
+	}
+
+	remoteAddr := fmt.Sprintf("%s:%d", x.remoteConfig.BindAddr(), x.remoteConfig.BindPort())
+	if remoteAddr != net.JoinHostPort(msg.GetHost(), strconv.Itoa(int(msg.GetPort()))) {
+		return nil, connect.NewError(connect.CodeInvalidArgument, ErrInvalidHost)
+	}
+
+	actorAddress := address.New(msg.GetName(), x.Name(), msg.GetHost(), int(msg.GetPort()))
+	pidNode, exist := x.actors.node(actorAddress.String())
+	if !exist {
+		logger.Error(ErrAddressNotFound(actorAddress.String()).Error())
+		return nil, ErrAddressNotFound(actorAddress.String())
+	}
+
+	pid := pidNode.value()
+	pid.doReinstate()
+
+	return connect.NewResponse(new(internalpb.RemoteReinstateResponse)), nil
+}
+
 // GetNodeMetric handles the GetNodeMetric request send the given node
 func (x *actorSystem) GetNodeMetric(_ context.Context, request *connect.Request[internalpb.GetNodeMetricRequest]) (*connect.Response[internalpb.GetNodeMetricResponse], error) {
 	if !x.clusterEnabled.Load() {

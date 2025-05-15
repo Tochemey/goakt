@@ -330,6 +330,28 @@ func (r *Remoting) RemoteStop(ctx context.Context, host string, port int, name s
 	return nil
 }
 
+// RemoteReinstate reinstates an actor on a remote node.
+func (r *Remoting) RemoteReinstate(ctx context.Context, host string, port int, name string) error {
+	remoteClient := r.remotingServiceClient(host, port)
+	request := connect.NewRequest(
+		&internalpb.RemoteReinstateRequest{
+			Host: host,
+			Port: int32(port),
+			Name: name,
+		},
+	)
+
+	if _, err := remoteClient.RemoteReinstate(ctx, request); err != nil {
+		code := connect.CodeOf(err)
+		if code == connect.CodeNotFound {
+			return nil
+		}
+		return err
+	}
+
+	return nil
+}
+
 // HTTPClient returns the underlying http client
 func (r *Remoting) HTTPClient() *nethttp.Client {
 	return r.client

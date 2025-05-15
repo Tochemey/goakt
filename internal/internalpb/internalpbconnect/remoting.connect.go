@@ -51,6 +51,9 @@ const (
 	// RemotingServiceRemoteSpawnProcedure is the fully-qualified name of the RemotingService's
 	// RemoteSpawn RPC.
 	RemotingServiceRemoteSpawnProcedure = "/internalpb.RemotingService/RemoteSpawn"
+	// RemotingServiceRemoteReinstateProcedure is the fully-qualified name of the RemotingService's
+	// RemoteReinstate RPC.
+	RemotingServiceRemoteReinstateProcedure = "/internalpb.RemotingService/RemoteReinstate"
 )
 
 // RemotingServiceClient is a client for the internalpb.RemotingService service.
@@ -68,6 +71,8 @@ type RemotingServiceClient interface {
 	RemoteStop(context.Context, *connect.Request[internalpb.RemoteStopRequest]) (*connect.Response[internalpb.RemoteStopResponse], error)
 	// RemoteSpawn starts an actor on a remote machine
 	RemoteSpawn(context.Context, *connect.Request[internalpb.RemoteSpawnRequest]) (*connect.Response[internalpb.RemoteSpawnResponse], error)
+	// RemoteReinstate reinstates an actor on a remote machine
+	RemoteReinstate(context.Context, *connect.Request[internalpb.RemoteReinstateRequest]) (*connect.Response[internalpb.RemoteReinstateResponse], error)
 }
 
 // NewRemotingServiceClient constructs a client for the internalpb.RemotingService service. By
@@ -117,17 +122,24 @@ func NewRemotingServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 			connect.WithSchema(remotingServiceMethods.ByName("RemoteSpawn")),
 			connect.WithClientOptions(opts...),
 		),
+		remoteReinstate: connect.NewClient[internalpb.RemoteReinstateRequest, internalpb.RemoteReinstateResponse](
+			httpClient,
+			baseURL+RemotingServiceRemoteReinstateProcedure,
+			connect.WithSchema(remotingServiceMethods.ByName("RemoteReinstate")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // remotingServiceClient implements RemotingServiceClient.
 type remotingServiceClient struct {
-	remoteAsk     *connect.Client[internalpb.RemoteAskRequest, internalpb.RemoteAskResponse]
-	remoteTell    *connect.Client[internalpb.RemoteTellRequest, internalpb.RemoteTellResponse]
-	remoteLookup  *connect.Client[internalpb.RemoteLookupRequest, internalpb.RemoteLookupResponse]
-	remoteReSpawn *connect.Client[internalpb.RemoteReSpawnRequest, internalpb.RemoteReSpawnResponse]
-	remoteStop    *connect.Client[internalpb.RemoteStopRequest, internalpb.RemoteStopResponse]
-	remoteSpawn   *connect.Client[internalpb.RemoteSpawnRequest, internalpb.RemoteSpawnResponse]
+	remoteAsk       *connect.Client[internalpb.RemoteAskRequest, internalpb.RemoteAskResponse]
+	remoteTell      *connect.Client[internalpb.RemoteTellRequest, internalpb.RemoteTellResponse]
+	remoteLookup    *connect.Client[internalpb.RemoteLookupRequest, internalpb.RemoteLookupResponse]
+	remoteReSpawn   *connect.Client[internalpb.RemoteReSpawnRequest, internalpb.RemoteReSpawnResponse]
+	remoteStop      *connect.Client[internalpb.RemoteStopRequest, internalpb.RemoteStopResponse]
+	remoteSpawn     *connect.Client[internalpb.RemoteSpawnRequest, internalpb.RemoteSpawnResponse]
+	remoteReinstate *connect.Client[internalpb.RemoteReinstateRequest, internalpb.RemoteReinstateResponse]
 }
 
 // RemoteAsk calls internalpb.RemotingService.RemoteAsk.
@@ -160,6 +172,11 @@ func (c *remotingServiceClient) RemoteSpawn(ctx context.Context, req *connect.Re
 	return c.remoteSpawn.CallUnary(ctx, req)
 }
 
+// RemoteReinstate calls internalpb.RemotingService.RemoteReinstate.
+func (c *remotingServiceClient) RemoteReinstate(ctx context.Context, req *connect.Request[internalpb.RemoteReinstateRequest]) (*connect.Response[internalpb.RemoteReinstateResponse], error) {
+	return c.remoteReinstate.CallUnary(ctx, req)
+}
+
 // RemotingServiceHandler is an implementation of the internalpb.RemotingService service.
 type RemotingServiceHandler interface {
 	// RemoteAsk is used to send a message to an actor remotely and expect a response immediately.
@@ -175,6 +192,8 @@ type RemotingServiceHandler interface {
 	RemoteStop(context.Context, *connect.Request[internalpb.RemoteStopRequest]) (*connect.Response[internalpb.RemoteStopResponse], error)
 	// RemoteSpawn starts an actor on a remote machine
 	RemoteSpawn(context.Context, *connect.Request[internalpb.RemoteSpawnRequest]) (*connect.Response[internalpb.RemoteSpawnResponse], error)
+	// RemoteReinstate reinstates an actor on a remote machine
+	RemoteReinstate(context.Context, *connect.Request[internalpb.RemoteReinstateRequest]) (*connect.Response[internalpb.RemoteReinstateResponse], error)
 }
 
 // NewRemotingServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -220,6 +239,12 @@ func NewRemotingServiceHandler(svc RemotingServiceHandler, opts ...connect.Handl
 		connect.WithSchema(remotingServiceMethods.ByName("RemoteSpawn")),
 		connect.WithHandlerOptions(opts...),
 	)
+	remotingServiceRemoteReinstateHandler := connect.NewUnaryHandler(
+		RemotingServiceRemoteReinstateProcedure,
+		svc.RemoteReinstate,
+		connect.WithSchema(remotingServiceMethods.ByName("RemoteReinstate")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/internalpb.RemotingService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case RemotingServiceRemoteAskProcedure:
@@ -234,6 +259,8 @@ func NewRemotingServiceHandler(svc RemotingServiceHandler, opts ...connect.Handl
 			remotingServiceRemoteStopHandler.ServeHTTP(w, r)
 		case RemotingServiceRemoteSpawnProcedure:
 			remotingServiceRemoteSpawnHandler.ServeHTTP(w, r)
+		case RemotingServiceRemoteReinstateProcedure:
+			remotingServiceRemoteReinstateHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -265,4 +292,8 @@ func (UnimplementedRemotingServiceHandler) RemoteStop(context.Context, *connect.
 
 func (UnimplementedRemotingServiceHandler) RemoteSpawn(context.Context, *connect.Request[internalpb.RemoteSpawnRequest]) (*connect.Response[internalpb.RemoteSpawnResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("internalpb.RemotingService.RemoteSpawn is not implemented"))
+}
+
+func (UnimplementedRemotingServiceHandler) RemoteReinstate(context.Context, *connect.Request[internalpb.RemoteReinstateRequest]) (*connect.Response[internalpb.RemoteReinstateResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("internalpb.RemotingService.RemoteReinstate is not implemented"))
 }

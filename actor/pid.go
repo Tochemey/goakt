@@ -76,6 +76,7 @@ type taskCompletion struct {
 
 // PID specifies an actor unique process
 // With the PID one can send a ReceiveContext to the actor
+// PID helps to identify the actor in the local actor system
 type PID struct {
 	// specifies the message processor
 	actor Actor
@@ -686,6 +687,106 @@ func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor, opts .
 
 	// set the actor in the given actor system registry
 	return cid, pid.ActorSystem().broadcastActor(cid)
+}
+
+// Reinstate brings a previously suspended actor back into an active state.
+//
+// This method is used to reinstate an actor identified by its PID (`cid`)—for example,
+// one that was suspended due to a fault, error, or supervision policy. Once reinstated,
+// the actor resumes processing messages from its mailbox, retaining its internal state
+// as it was prior to suspension.
+//
+// This can be invoked by a supervisor, system actor, or administrative service to
+// recover from transient failures or to manually resume paused actors.
+//
+// Parameters:
+//   - cid: The PID of the actor to be reinstated.
+//
+// Returns:
+//   - error: If the actor does not exist, or cannot be reinstated due to internal errors.
+//
+// Example usage:
+//
+//	err := supervisorPID.Reinstate(suspendedActorPID)
+//	if err != nil {
+//	    log.Printf("Reinstate failed: %v", err)
+//	}
+//
+// See also: PID.ReinstateNamed for name-based reinstatement.
+func (pid *PID) Reinstate(cid *PID) error {
+	if !pid.IsRunning() {
+		return ErrDead
+	}
+
+	if cid.Equals(NoSender) {
+		return ErrUndefinedActor
+	}
+
+	// this call is necessary because the reference to the actor may have been
+	// kept elsewhere and the actor may have been stopped and removed from the system
+	actual, err := pid.ActorSystem().LocalActor(cid.Name())
+	if err != nil {
+		return err
+	}
+
+	if !actual.Equals(cid) {
+		return ErrActorNotFound(cid.Name())
+	}
+
+	if !cid.IsSuspended() || cid.IsRunning() {
+		return nil
+	}
+
+	cid.doReinstate()
+	return nil
+}
+
+// ReinstateNamed attempts to reinstate a previously suspended actor by its registered name.
+//
+// This is useful when the actor is addressed through a global or system-wide registry
+// and its PID is not directly available. The method looks up the actor by name and,
+// if found in a suspended state, transitions it back to active, allowing it to resume
+// processing messages from its mailbox as if it had never been suspended. This method should be used
+// when cluster mode is enabled.
+//
+// Typical use cases include supervisory systems, administrative tooling, or
+// health-check-driven recovery mechanisms.
+//
+// Parameters:
+//   - ctx: Standard context for cancellation, timeout, or deadlines.
+//   - actorName: The globally or locally registered name of the actor to reinstate.
+//
+// Returns:
+//   - error: If the actor does not exist, or cannot be reinstated due to internal errors.
+//
+// Example usage:
+//
+//	err := supervisorPID.ReinstateNamed(ctx, "payment-processor-42")
+//	if err != nil {
+//	    log.Printf("Failed to reinstate actor: %v", err)
+//	}
+//
+// See also: PID.Reinstate for direct PID-based reinstatement.
+func (pid *PID) ReinstateNamed(ctx context.Context, actorName string) error {
+	if !pid.IsRunning() {
+		return ErrDead
+	}
+
+	addr, cid, err := pid.ActorSystem().ActorOf(ctx, actorName)
+	if err != nil {
+		return err
+	}
+
+	if !cid.Equals(NoSender) {
+		if !cid.IsSuspended() || cid.IsRunning() {
+			return nil
+		}
+
+		cid.doReinstate()
+		return nil
+	}
+
+	return pid.remoting.RemoteReinstate(ctx, addr.Host(), addr.Port(), actorName)
 }
 
 // StashSize returns the stash buffer size
@@ -1896,4 +1997,22 @@ func (pid *PID) fireSystemMessage(ctx context.Context, message proto.Message) {
 	receiveContext := getContext()
 	receiveContext.build(ctx, NoSender, pid, message, true)
 	pid.doReceive(receiveContext)
+}
+
+func (pid *PID) doReinstate() {
+	pid.logger.Infof("%s has been reinstated", pid.Name())
+	pid.suspended.Store(false)
+
+	// resume the supervisor loop
+	pid.supervisionLoop()
+	// resume passivation loop
+	if pid.passivateAfter.Load() > 0 {
+		go pid.passivationLoop()
+	}
+
+	// publish an event to the events stream
+	pid.eventsStream.Publish(eventsTopic, &goaktpb.ActorReinstated{
+		Address:      pid.Address().Address,
+		ReinstatedAt: timestamppb.Now(),
+	})
 }

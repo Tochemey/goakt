@@ -320,7 +320,7 @@ func (rctx *ReceiveContext) Spawn(name string, actor Actor, opts ...SpawnOption)
 	return pid
 }
 
-// Children returns the list of all the children of the given actor
+// Children return the list of all the children of the given actor
 func (rctx *ReceiveContext) Children() []*PID {
 	return rctx.self.Children()
 }
@@ -481,6 +481,40 @@ func (rctx *ReceiveContext) Extensions() []extension.Extension {
 //   - extension.Extension: The corresponding extension if found, or nil otherwise.
 func (rctx *ReceiveContext) Extension(extensionID string) extension.Extension {
 	return rctx.self.ActorSystem().Extension(extensionID)
+}
+
+// Reinstate brings a previously suspended actor back into an active state.
+//
+// This method is used to reinstate an actor identified by its PID (`cid`)—for example,
+// one that was suspended due to a fault, error, or supervision policy. Once reinstated,
+// the actor resumes processing messages from its mailbox, retaining its internal state
+// as it was prior to suspension.
+//
+// This can be invoked by a supervisor, system actor, or administrative service to
+// recover from transient failures or to manually resume paused actors.
+func (rctx *ReceiveContext) Reinstate(cid *PID) {
+	recipient := rctx.self
+	if err := recipient.Reinstate(cid); err != nil {
+		rctx.Err(err)
+	}
+}
+
+// ReinstateNamed attempts to reinstate a previously suspended actor by its registered name.
+//
+// This is useful when the actor is addressed through a global or system-wide registry
+// and its PID is not directly available. The method looks up the actor by name and,
+// if found in a suspended state, transitions it back to active, allowing it to resume
+// processing messages from its mailbox as if it had never been suspended. This method should be used
+// when cluster mode is enabled.
+//
+// Typical use cases include supervisory systems, administrative tooling, or
+// health-check-driven recovery mechanisms.
+func (rctx *ReceiveContext) ReinstateNamed(actorName string) {
+	recipient := rctx.self
+	ctx := context.WithoutCancel(rctx.ctx)
+	if err := recipient.ReinstateNamed(ctx, actorName); err != nil {
+		rctx.Err(err)
+	}
 }
 
 // getError returns any error during message processing

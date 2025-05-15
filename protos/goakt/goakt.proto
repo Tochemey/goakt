@@ -90,6 +90,14 @@ message ActorSuspended {
   string reason = 3;
 }
 
+// ActorReinstated is triggered when an actor is reinstated
+message ActorReinstated {
+  // Specifies the actor address
+  Address address = 1;
+  // Specifies the reinstated time
+  google.protobuf.Timestamp reinstated_at = 2;
+}
+
 // NodeJoined defines the node joined event
 message NodeJoined {
   // Specifies the node address
