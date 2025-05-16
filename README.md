@@ -24,7 +24,6 @@ Also, check the reference section at the end of the post for more material regar
 ```shell
 go get github.com/tochemey/goakt/v3
 ```
-> GoAkt requires Golang version `1.23.0` or higher.
 
 ## 📚 Documentation
 

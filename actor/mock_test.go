@@ -847,3 +847,44 @@ func (e *escalationSupervisor) Receive(ctx *ReceiveContext) {
 func (e *escalationSupervisor) PostStop(*Context) error {
 	return nil
 }
+
+type reinstateSupervisor struct{}
+
+var _ Actor = (*reinstateSupervisor)(nil)
+
+func newReinstateSupervisor() *reinstateSupervisor {
+	return &reinstateSupervisor{}
+}
+
+// PostStop implements Actor.
+func (r *reinstateSupervisor) PostStop(*Context) error {
+	return nil
+}
+
+// PreStart implements Actor.
+func (r *reinstateSupervisor) PreStart(*Context) error {
+	return nil
+}
+
+// Receive implements Actor.
+func (r *reinstateSupervisor) Receive(ctx *ReceiveContext) {
+	switch ctx.Message().(type) {
+	case *goaktpb.PostStart:
+	case *goaktpb.Mayday:
+		actorName := ctx.Sender().Name()
+
+		if actorName == "reinstate" {
+			ctx.Reinstate(ctx.Sender())
+			return
+		}
+
+		if actorName == "reinstateNamed" {
+			ctx.ReinstateNamed(actorName)
+			return
+		}
+
+		ctx.Stop(ctx.Sender())
+	default:
+		ctx.Unhandled()
+	}
+}

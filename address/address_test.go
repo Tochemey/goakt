@@ -42,7 +42,7 @@ func TestAddress(t *testing.T) {
 		assert.EqualValues(t, 1234, addr.Port())
 		assert.NotEmpty(t, addr.ID())
 		assert.NotNil(t, addr.Parent())
-		assert.True(t, proto.Equal(addr.Parent(), nilAddress))
+		assert.True(t, proto.Equal(addr.Parent(), zeroAddress))
 		assert.Equal(t, expected, addr.String())
 	})
 
