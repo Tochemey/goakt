@@ -729,6 +729,7 @@ func (pid *PID) Reinstate(cid *PID) error {
 		return err
 	}
 
+	// this is a rare case when the local actor is not the same as the one
 	if !actual.Equals(cid) {
 		return ErrActorNotFound(cid.Name())
 	}

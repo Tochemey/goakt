@@ -988,10 +988,10 @@ func (x *actorSystem) ActorOf(ctx context.Context, actorName string) (addr *addr
 
 	// first check whether the actor exist locally
 	actorAddress := x.actorAddress(actorName)
-	if lpidNode, ok := x.actors.node(actorAddress.String()); ok {
+	if pidnode, ok := x.actors.node(actorAddress.String()); ok {
 		x.locker.Unlock()
-		lpid := lpidNode.value()
-		return lpid.Address(), lpid, nil
+		pid := pidnode.value()
+		return pid.Address(), pid, nil
 	}
 
 	// check in the cluster
@@ -1033,10 +1033,10 @@ func (x *actorSystem) LocalActor(actorName string) (*PID, error) {
 	}
 
 	actorAddress := x.actorAddress(actorName)
-	if lpidNode, ok := x.actors.node(actorAddress.String()); ok {
+	if pidnode, ok := x.actors.node(actorAddress.String()); ok {
 		x.locker.Unlock()
-		lpid := lpidNode.value()
-		return lpid, nil
+		pid := pidnode.value()
+		return pid, nil
 	}
 
 	x.logger.Infof("actor=%s not found", actorName)

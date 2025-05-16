@@ -2098,3 +2098,102 @@ func TestRemotingSpawn(t *testing.T) {
 		assert.NoError(t, err)
 	})
 }
+
+func TestRemotingReinstate(t *testing.T) {
+	t.Run("When remoting is not enabled", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// generate the remoting port
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "0.0.0.0"
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithPassivationDisabled(),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		util.Pause(time.Second)
+
+		// let us disable remoting
+		actorsSystem := sys.(*actorSystem)
+		actorsSystem.remotingEnabled.Store(false)
+
+		remoting := NewRemoting()
+		// create a test actor
+		actorName := "test"
+
+		err = remoting.RemoteReinstate(ctx, sys.Host(), int(sys.Port()), actorName)
+		require.Error(t, err)
+		require.EqualError(t, err, "failed_precondition: remoting is not enabled")
+
+		remoting.Close()
+		require.NoError(t, sys.Stop(ctx))
+	})
+	t.Run("When remoting is enabled", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// generate the remoting port
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "0.0.0.0"
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithPassivationDisabled(),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		require.NoError(t, err)
+
+		util.Pause(time.Second)
+
+		// create a test actor
+		actorName := "test"
+		actor := newMockActor()
+		pid, err := sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+
+		util.Pause(time.Second)
+
+		// suspend the actor
+		pid.suspend("test")
+
+		require.False(t, pid.IsRunning())
+		require.True(t, pid.IsSuspended())
+
+		remoting := NewRemoting()
+
+		err = remoting.RemoteReinstate(ctx, sys.Host(), int(sys.Port()), actorName)
+		require.NoError(t, err)
+
+		util.Pause(time.Second)
+
+		require.True(t, pid.IsRunning())
+		require.False(t, pid.IsSuspended())
+
+		remoting.Close()
+		err = sys.Stop(ctx)
+		require.NoError(t, err)
+	})
+}

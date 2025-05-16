@@ -2364,12 +2364,7 @@ func TestReceiveContext(t *testing.T) {
 		require.NotNil(t, reply)
 		expected := new(testpb.Reply)
 		assert.True(t, proto.Equal(expected, reply))
-
-		t.Cleanup(
-			func() {
-				assert.NoError(t, actorSystem.Stop(ctx))
-			},
-		)
+		require.NoError(t, actorSystem.Stop(ctx))
 	})
 	t.Run("With failed SendSync", func(t *testing.T) {
 		ctx := context.Background()
@@ -2924,4 +2919,146 @@ func TestReceiveContext(t *testing.T) {
 		util.Pause(time.Second)
 		assert.NoError(t, actorSystem.Stop(ctx))
 	})
+
+	t.Run("With successful Reinstate", func(t *testing.T) {
+		ctx := context.Background()
+		actorSystem, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+
+		// start the actor system
+		err := actorSystem.Start(ctx)
+		assert.NoError(t, err)
+
+		util.Pause(time.Second)
+
+		// create actor1
+		actor1 := &exchanger{}
+		pid1, err := actorSystem.Spawn(ctx, "Exchange1", actor1)
+		require.NoError(t, err)
+		require.NotNil(t, pid1)
+
+		// create an instance of receive context
+		context := &ReceiveContext{
+			ctx:     ctx,
+			message: new(testpb.TestSend),
+			sender:  NoSender,
+			self:    pid1,
+		}
+
+		// create actor2
+		actor2 := &exchanger{}
+		pid2, err := actorSystem.Spawn(ctx, "Exchange2", actor2)
+		require.NoError(t, err)
+		require.NotNil(t, pid2)
+
+		// suspend actor2
+		pid2.suspend("test")
+		require.True(t, pid2.IsSuspended())
+		require.False(t, pid2.IsRunning())
+
+		// reinstate actor2
+		context.Reinstate(pid2)
+		require.NoError(t, context.getError())
+		require.True(t, pid2.IsRunning())
+		require.False(t, pid2.IsSuspended())
+
+		require.NoError(t, actorSystem.Stop(ctx))
+	})
+
+	t.Run("With failed Reinstate", func(t *testing.T) {
+		ctx := context.Background()
+		actorSystem, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+
+		// start the actor system
+		err := actorSystem.Start(ctx)
+		assert.NoError(t, err)
+
+		util.Pause(time.Second)
+
+		// create actor1
+		actor1 := &exchanger{}
+		pid1, err := actorSystem.Spawn(ctx, "Exchange1", actor1)
+		require.NoError(t, err)
+		require.NotNil(t, pid1)
+
+		// create an instance of receive context
+		context := &ReceiveContext{
+			ctx:     ctx,
+			message: new(testpb.TestSend),
+			sender:  NoSender,
+			self:    pid1,
+		}
+
+		// create actor2
+		actor2 := &exchanger{}
+		pid2, err := actorSystem.Spawn(ctx, "Exchange2", actor2)
+		require.NoError(t, err)
+		require.NotNil(t, pid2)
+
+		// stop actor2
+		err = pid2.Shutdown(ctx)
+
+		util.Pause(time.Second)
+		require.False(t, pid2.IsRunning())
+
+		// reinstate actor2
+		context.Reinstate(pid2)
+		require.Error(t, context.getError())
+
+		require.NoError(t, actorSystem.Stop(ctx))
+	})
+	t.Run("With successful ReinstateNamed", func(t *testing.T) {
+		// create a context
+		ctx := context.TODO()
+		// start the NATS server
+		srv := startNatsServer(t)
+
+		// create and start system cluster
+		actorSystem, provider1 := testCluster(t, srv.Addr().String())
+		require.NotNil(t, actorSystem)
+		require.NotNil(t, provider1)
+
+		// create and start system cluster
+		actorSystem2, provider2 := testCluster(t, srv.Addr().String())
+		require.NotNil(t, actorSystem2)
+		require.NotNil(t, provider2)
+
+		// create actorA
+		pidA, err := actorSystem.Spawn(ctx, "ExchangeA", &exchanger{})
+		require.NoError(t, err)
+		require.NotNil(t, pidA)
+
+		// create actorB
+		pidB, err := actorSystem2.Spawn(ctx, "ExchangeC", &mockRemoteActor{})
+		require.NoError(t, err)
+		require.NotNil(t, pidB)
+
+		// create an instance of receive context
+		context := &ReceiveContext{
+			ctx:     ctx,
+			message: new(testpb.TestSend),
+			sender:  NoSender,
+			self:    pidA,
+		}
+
+		// suspend actorB
+		pidB.suspend("test")
+		require.True(t, pidB.IsSuspended())
+		require.False(t, pidB.IsRunning())
+
+		// reinstate actorB
+		context.ReinstateNamed("ExchangeC")
+
+		// wait for the async call to properly complete
+		util.Pause(time.Second)
+
+		require.NoError(t, context.getError())
+		require.True(t, pidB.IsRunning())
+		require.False(t, pidB.IsSuspended())
+
+		// let us shutdown the rest
+		require.NoError(t, actorSystem.Stop(ctx))
+		require.NoError(t, actorSystem2.Stop(ctx))
+		srv.Shutdown()
+	})
+
 }

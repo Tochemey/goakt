@@ -27,6 +27,8 @@ package actor
 import (
 	"bytes"
 	"context"
+	"net"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -42,6 +44,7 @@ import (
 	"github.com/tochemey/goakt/v3/internal/collection/syncmap"
 	"github.com/tochemey/goakt/v3/internal/util"
 	"github.com/tochemey/goakt/v3/log"
+	testkit "github.com/tochemey/goakt/v3/mocks/discovery"
 	"github.com/tochemey/goakt/v3/remote"
 	"github.com/tochemey/goakt/v3/test/data/testpb"
 )
@@ -1300,6 +1303,50 @@ func TestSupervisorStrategy(t *testing.T) {
 		// assert the actor state
 		require.False(t, child.IsRunning())
 		require.Len(t, parent.Children(), 0)
+
+		//stop the actor
+		err = parent.Shutdown(ctx)
+		require.NoError(t, err)
+		require.NoError(t, actorSystem.Stop(ctx))
+	})
+
+	t.Run("With reinstate", func(t *testing.T) {
+		ctx := context.TODO()
+		host := "127.0.0.1"
+		ports := dynaport.Get(1)
+
+		actorSystem, err := NewActorSystem("testSys",
+			WithRemote(remote.NewConfig(host, ports[0])),
+			WithPassivationDisabled(),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+
+		util.Pause(time.Second)
+
+		parent, err := actorSystem.Spawn(ctx, "supervisor", newReinstateSupervisor())
+		require.NoError(t, err)
+		require.NotNil(t, parent)
+
+		// create the child actor
+		escalationStrategy := NewSupervisor(WithDirective(PanicError{}, EscalateDirective))
+		child, err := parent.SpawnChild(ctx, "reinstate", newMockSupervisedActor(), WithSupervisor(escalationStrategy))
+		require.NoError(t, err)
+		require.NotNil(t, child)
+
+		require.Len(t, parent.Children(), 1)
+		// send a test panic message to the actor
+		require.NoError(t, Tell(ctx, child, new(testpb.TestPanic)))
+
+		// wait for the child to properly shutdown
+		util.Pause(time.Second)
+
+		// assert the actor state
+		require.True(t, child.IsRunning())
+		require.Len(t, parent.Children(), 1)
 
 		//stop the actor
 		err = parent.Shutdown(ctx)
@@ -3936,4 +3983,423 @@ func TestParentWithInexistenceNodeReturnsNil(t *testing.T) {
 	require.Nil(t, parent)
 	require.NoError(t, cid.Shutdown(ctx))
 	require.NoError(t, actorSystem.Stop(ctx))
+}
+
+func TestReinstate(t *testing.T) {
+	t.Run("When PID is not started", func(t *testing.T) {
+		ctx := context.TODO()
+		host := "127.0.0.1"
+		ports := dynaport.Get(1)
+
+		actorSystem, err := NewActorSystem("testSys",
+			WithRemote(remote.NewConfig(host, ports[0])),
+			WithPassivationDisabled(),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+
+		util.Pause(time.Second)
+
+		// create the actor ref
+		pid, err := actorSystem.Spawn(ctx, "actor", newMockActor())
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+		require.True(t, pid.IsRunning())
+
+		// create another actor ref
+		pid2, err := actorSystem.Spawn(ctx, "actor2", newMockActor())
+		require.NoError(t, err)
+		require.NotNil(t, pid2)
+		require.True(t, pid2.IsRunning())
+
+		// let us stop both actors
+		require.NoError(t, pid.Shutdown(ctx))
+		require.NoError(t, pid2.Shutdown(ctx))
+
+		util.Pause(time.Second)
+
+		// let us reinstate the actor pid2
+		err = pid.Reinstate(pid2)
+		require.Error(t, err)
+		require.ErrorIs(t, err, ErrDead)
+
+		util.Pause(time.Second)
+		require.NoError(t, actorSystem.Stop(ctx))
+	})
+	t.Run("When actor is not defined", func(t *testing.T) {
+		ctx := context.TODO()
+		host := "127.0.0.1"
+		ports := dynaport.Get(1)
+
+		actorSystem, err := NewActorSystem("testSys",
+			WithRemote(remote.NewConfig(host, ports[0])),
+			WithPassivationDisabled(),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+
+		util.Pause(time.Second)
+
+		// create the actor ref
+		pid, err := actorSystem.Spawn(ctx, "actor", newMockActor())
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+		require.True(t, pid.IsRunning())
+
+		util.Pause(time.Second)
+
+		err = pid.Reinstate(NoSender)
+		require.Error(t, err)
+		require.ErrorIs(t, err, ErrUndefinedActor)
+
+		util.Pause(time.Second)
+		require.NoError(t, actorSystem.Stop(ctx))
+	})
+	t.Run("When actor not found", func(t *testing.T) {
+		ctx := context.TODO()
+		host := "127.0.0.1"
+		ports := dynaport.Get(1)
+
+		actorSystem, err := NewActorSystem("testSys",
+			WithRemote(remote.NewConfig(host, ports[0])),
+			WithPassivationDisabled(),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+
+		util.Pause(time.Second)
+
+		// create the actor ref
+		pid, err := actorSystem.Spawn(ctx, "actor", newMockActor())
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+		require.True(t, pid.IsRunning())
+
+		// create another actor ref
+		pid2, err := actorSystem.Spawn(ctx, "actor2", newMockActor())
+		require.NoError(t, err)
+		require.NotNil(t, pid2)
+		require.True(t, pid2.IsRunning())
+
+		require.NoError(t, pid2.Shutdown(ctx))
+
+		util.Pause(time.Second)
+
+		// let us reinstate the actor pid2
+		err = pid.Reinstate(pid2)
+		require.Error(t, err)
+
+		util.Pause(time.Second)
+		require.NoError(t, actorSystem.Stop(ctx))
+	})
+	t.Run("When PID is already running", func(t *testing.T) {
+		ctx := context.TODO()
+		host := "127.0.0.1"
+		ports := dynaport.Get(1)
+
+		actorSystem, err := NewActorSystem("testSys",
+			WithRemote(remote.NewConfig(host, ports[0])),
+			WithPassivationDisabled(),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+
+		util.Pause(time.Second)
+
+		// create the actor ref
+		pid, err := actorSystem.Spawn(ctx, "actor", newMockActor())
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+		require.True(t, pid.IsRunning())
+
+		// create another actor ref
+		pid2, err := actorSystem.Spawn(ctx, "actor2", newMockActor())
+		require.NoError(t, err)
+		require.NotNil(t, pid2)
+		require.True(t, pid2.IsRunning())
+
+		// let us reinstate the actor pid2
+		err = pid.Reinstate(pid2)
+		require.NoError(t, err)
+
+		util.Pause(time.Second)
+		require.NoError(t, actorSystem.Stop(ctx))
+	})
+}
+
+func TestReinstateNamed(t *testing.T) {
+	t.Run("When PID is not started", func(t *testing.T) {
+		ctx := context.TODO()
+		host := "127.0.0.1"
+		ports := dynaport.Get(1)
+
+		actorSystem, err := NewActorSystem("testSys",
+			WithRemote(remote.NewConfig(host, ports[0])),
+			WithPassivationDisabled(),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+
+		util.Pause(time.Second)
+
+		// create the actor ref
+		pid, err := actorSystem.Spawn(ctx, "actor", newMockActor())
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+		require.True(t, pid.IsRunning())
+
+		// create another actor ref
+		pid2, err := actorSystem.Spawn(ctx, "actor2", newMockActor())
+		require.NoError(t, err)
+		require.NotNil(t, pid2)
+		require.True(t, pid2.IsRunning())
+
+		// let us stop both actors
+		require.NoError(t, pid.Shutdown(ctx))
+		require.NoError(t, pid2.Shutdown(ctx))
+
+		util.Pause(time.Second)
+
+		// let us reinstate the actor pid2
+		err = pid.ReinstateNamed(ctx, pid2.Name())
+		require.Error(t, err)
+		require.ErrorIs(t, err, ErrDead)
+
+		util.Pause(time.Second)
+		require.NoError(t, actorSystem.Stop(ctx))
+	})
+	t.Run("When actor not found", func(t *testing.T) {
+		ctx := context.TODO()
+		nodePorts := dynaport.Get(3)
+		gossipPort := nodePorts[0]
+		clusterPort := nodePorts[1]
+		remotingPort := nodePorts[2]
+
+		logger := log.DiscardLogger
+		host := "127.0.0.1"
+
+		// define discovered addresses
+		addrs := []string{
+			net.JoinHostPort(host, strconv.Itoa(gossipPort)),
+		}
+
+		// mock the discovery provider
+		provider := new(testkit.Provider)
+		newActorSystem, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+			WithCluster(
+				NewClusterConfig().
+					WithKinds(new(mockActor)).
+					WithPartitionCount(9).
+					WithReplicaCount(1).
+					WithPeersPort(clusterPort).
+					WithMinimumPeersQuorum(1).
+					WithDiscoveryPort(gossipPort).
+					WithDiscovery(provider)),
+		)
+		require.NoError(t, err)
+
+		provider.EXPECT().ID().Return("testDisco")
+		provider.EXPECT().Initialize().Return(nil)
+		provider.EXPECT().Register().Return(nil)
+		provider.EXPECT().Deregister().Return(nil)
+		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
+		provider.EXPECT().Close().Return(nil)
+
+		// start the actor system
+		err = newActorSystem.Start(ctx)
+		require.NoError(t, err)
+
+		// wait for the cluster to start
+		util.Pause(time.Second)
+
+		// create an actor
+		ref, err := newActorSystem.Spawn(ctx, "ref0", newMockActor(), WithLongLived())
+		assert.NoError(t, err)
+		assert.NotNil(t, ref)
+
+		util.Pause(time.Second)
+
+		ref1, err := newActorSystem.Spawn(ctx, "ref1", newMockActor(), WithPassivateAfter(passivateAfter))
+		assert.NoError(t, err)
+		assert.NotNil(t, ref1)
+
+		util.Pause(time.Second)
+
+		err = ref.ReinstateNamed(ctx, "ref1")
+		require.Error(t, err)
+		require.EqualError(t, err, ErrActorNotFound("ref1").Error())
+
+		// stop the actor after some time
+		util.Pause(time.Second)
+		err = newActorSystem.Stop(ctx)
+		assert.NoError(t, err)
+		provider.AssertExpectations(t)
+	})
+	t.Run("When happy path", func(t *testing.T) {
+		ctx := context.TODO()
+		nodePorts := dynaport.Get(3)
+		gossipPort := nodePorts[0]
+		clusterPort := nodePorts[1]
+		remotingPort := nodePorts[2]
+
+		logger := log.DiscardLogger
+		host := "127.0.0.1"
+
+		// define discovered addresses
+		addrs := []string{
+			net.JoinHostPort(host, strconv.Itoa(gossipPort)),
+		}
+
+		// mock the discovery provider
+		provider := new(testkit.Provider)
+		newActorSystem, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+			WithCluster(
+				NewClusterConfig().
+					WithKinds(new(mockActor)).
+					WithPartitionCount(9).
+					WithReplicaCount(1).
+					WithPeersPort(clusterPort).
+					WithMinimumPeersQuorum(1).
+					WithDiscoveryPort(gossipPort).
+					WithDiscovery(provider)),
+		)
+		require.NoError(t, err)
+
+		provider.EXPECT().ID().Return("testDisco")
+		provider.EXPECT().Initialize().Return(nil)
+		provider.EXPECT().Register().Return(nil)
+		provider.EXPECT().Deregister().Return(nil)
+		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
+		provider.EXPECT().Close().Return(nil)
+
+		// start the actor system
+		err = newActorSystem.Start(ctx)
+		require.NoError(t, err)
+
+		// wait for the cluster to start
+		util.Pause(time.Second)
+
+		// create an actor
+		ref, err := newActorSystem.Spawn(ctx, "ref0", newMockActor(), WithLongLived())
+		assert.NoError(t, err)
+		assert.NotNil(t, ref)
+
+		util.Pause(time.Second)
+
+		ref1, err := newActorSystem.Spawn(ctx, "ref1", newMockActor(), WithLongLived())
+		assert.NoError(t, err)
+		assert.NotNil(t, ref1)
+
+		util.Pause(time.Second)
+
+		ref1.suspend("test")
+		util.Pause(time.Second)
+
+		err = ref.ReinstateNamed(ctx, "ref1")
+		require.NoError(t, err)
+
+		util.Pause(time.Second)
+		// check if the actor is running
+		require.True(t, ref1.IsRunning())
+
+		// stop the actor after some time
+		util.Pause(time.Second)
+		err = newActorSystem.Stop(ctx)
+		assert.NoError(t, err)
+		provider.AssertExpectations(t)
+	})
+	t.Run("When actor is already running", func(t *testing.T) {
+		ctx := context.TODO()
+		nodePorts := dynaport.Get(3)
+		gossipPort := nodePorts[0]
+		clusterPort := nodePorts[1]
+		remotingPort := nodePorts[2]
+
+		logger := log.DiscardLogger
+		host := "127.0.0.1"
+
+		// define discovered addresses
+		addrs := []string{
+			net.JoinHostPort(host, strconv.Itoa(gossipPort)),
+		}
+
+		// mock the discovery provider
+		provider := new(testkit.Provider)
+		newActorSystem, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+			WithCluster(
+				NewClusterConfig().
+					WithKinds(new(mockActor)).
+					WithPartitionCount(9).
+					WithReplicaCount(1).
+					WithPeersPort(clusterPort).
+					WithMinimumPeersQuorum(1).
+					WithDiscoveryPort(gossipPort).
+					WithDiscovery(provider)),
+		)
+		require.NoError(t, err)
+
+		provider.EXPECT().ID().Return("test")
+		provider.EXPECT().Initialize().Return(nil)
+		provider.EXPECT().Register().Return(nil)
+		provider.EXPECT().Deregister().Return(nil)
+		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
+		provider.EXPECT().Close().Return(nil)
+
+		// start the actor system
+		err = newActorSystem.Start(ctx)
+		require.NoError(t, err)
+
+		// wait for the cluster to start
+		util.Pause(time.Second)
+
+		// create an actor
+		ref, err := newActorSystem.Spawn(ctx, "ref0", newMockActor(), WithLongLived())
+		assert.NoError(t, err)
+		assert.NotNil(t, ref)
+
+		util.Pause(time.Second)
+
+		ref1, err := newActorSystem.Spawn(ctx, "ref1", newMockActor(), WithLongLived())
+		assert.NoError(t, err)
+		assert.NotNil(t, ref1)
+
+		util.Pause(time.Second)
+
+		err = ref.ReinstateNamed(ctx, "ref1")
+		require.NoError(t, err)
+
+		util.Pause(time.Second)
+		// check if the actor is running
+		require.True(t, ref1.IsRunning())
+
+		// stop the actor after some time
+		util.Pause(time.Second)
+		err = newActorSystem.Stop(ctx)
+		assert.NoError(t, err)
+		provider.AssertExpectations(t)
+	})
 }
