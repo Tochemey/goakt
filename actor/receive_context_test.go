@@ -2996,6 +2996,7 @@ func TestReceiveContext(t *testing.T) {
 
 		// stop actor2
 		err = pid2.Shutdown(ctx)
+		require.NoError(t, err)
 
 		util.Pause(time.Second)
 		require.False(t, pid2.IsRunning())
