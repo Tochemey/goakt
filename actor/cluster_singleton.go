@@ -95,6 +95,8 @@ func (x *actorSystem) spawnSingletonManager(ctx context.Context) error {
 	x.singletonManager, _ = x.configPID(ctx,
 		actorName,
 		newClusterSingletonManager(),
+		asSystem(),
+		WithLongLived(),
 		WithSupervisor(
 			NewSupervisor(
 				WithStrategy(OneForOneStrategy),

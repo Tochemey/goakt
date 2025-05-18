@@ -106,9 +106,20 @@ type ActorSystem interface { //nolint:revive
 	// SpawnNamedFromFunc creates an actor with the given receive function and provided name. One can set the PreStart and PostStop lifecycle hooks
 	// in the given optional options
 	SpawnNamedFromFunc(ctx context.Context, name string, receiveFunc ReceiveFunc, opts ...FuncOption) (*PID, error)
-	// SpawnRouter creates a new router. One can additionally set the router options.
-	// A router is a special type of actor that helps distribute messages of the same type over a set of actors, so that messages can be processed in parallel.
-	// A single actor will only process one message at a time.
+	// SpawnRouter creates and initializes a new router actor with the specified options.
+	//
+	// A router is a special type of actor designed to distribute messages of the same type
+	// across a group of routee actors. This enables concurrent message processing and improves
+	// throughput by leveraging multiple actors in parallel.
+	//
+	// Each individual actor in the group (a "routee") processes only one message at a time,
+	// preserving the actor model’s single-threaded execution semantics.
+	//
+	// Note: Routers are **not** redeployable. If the host node of a router leaves the cluster
+	// or crashes, the router and its routees will not be automatically re-spawned elsewhere.
+	//
+	// Use routers when you need to fan out work across multiple workers while preserving
+	// the isolation and safety guarantees of the actor model.
 	SpawnRouter(ctx context.Context, poolSize int, routeesKind Actor, opts ...RouterOption) (*PID, error)
 	// SpawnSingleton creates a singleton actor in the system.
 	//
@@ -264,6 +275,8 @@ type ActorSystem interface { //nolint:revive
 	getSingletonManager() *PID
 	getWorkerPool() *workerpool.WorkerPool
 	getReflection() *reflection
+	// internally used
+	findRoutee(routeeName string) (*PID, bool)
 }
 
 // ActorSystem represent a collection of actors on a given node
@@ -794,13 +807,29 @@ func (x *actorSystem) SpawnFromFunc(ctx context.Context, receiveFunc ReceiveFunc
 	return x.SpawnNamedFromFunc(ctx, uuid.NewString(), receiveFunc, opts...)
 }
 
-// SpawnRouter creates a new router. One can additionally set the router options.
-// A router is a special type of actor that helps distribute messages of the same type over a set of actors, so that messages can be processed in parallel.
-// A single actor will only process one message at a time.
+// SpawnRouter creates and initializes a new router actor with the specified options.
+//
+// A router is a special type of actor designed to distribute messages of the same type
+// across a group of routee actors. This enables concurrent message processing and improves
+// throughput by leveraging multiple actors in parallel.
+//
+// Each individual actor in the group (a "routee") processes only one message at a time,
+// preserving the actor model’s single-threaded execution semantics.
+//
+// Note: Routers are **not** redeployable. If the host node of a router leaves the cluster
+// or crashes, the router and its routees will not be automatically re-spawned elsewhere.
+//
+// Use routers when you need to fan out work across multiple workers while preserving
+// the isolation and safety guarantees of the actor model.
 func (x *actorSystem) SpawnRouter(ctx context.Context, poolSize int, routeesKind Actor, opts ...RouterOption) (*PID, error) {
 	router := newRouter(poolSize, routeesKind, x.logger, opts...)
 	routerName := x.reservedName(routerType)
-	return x.Spawn(ctx, routerName, router)
+	return x.Spawn(ctx, routerName, router,
+		WithRelocationDisabled(),
+		asSystem(),
+		WithSupervisor(
+			NewSupervisor(WithAnyErrorDirective(ResumeDirective)),
+		))
 }
 
 // SpawnSingleton creates a singleton actor in the system.
@@ -863,6 +892,11 @@ func (x *actorSystem) Kill(ctx context.Context, name string) error {
 		return ErrActorSystemNotStarted
 	}
 
+	// user should not query system actors
+	if isReservedName(name) {
+		return ErrActorNotFound(name)
+	}
+
 	actorAddress := x.actorAddress(name)
 	pidNode, exist := x.actors.node(actorAddress.String())
 	if exist {
@@ -883,6 +917,11 @@ func (x *actorSystem) Kill(ctx context.Context, name string) error {
 func (x *actorSystem) ReSpawn(ctx context.Context, name string) (*PID, error) {
 	if !x.started.Load() {
 		return nil, ErrActorSystemNotStarted
+	}
+
+	// user should not query system actors
+	if isReservedName(name) {
+		return nil, ErrActorNotFound(name)
 	}
 
 	actorAddress := x.actorAddress(name)
@@ -986,6 +1025,12 @@ func (x *actorSystem) ActorOf(ctx context.Context, actorName string) (addr *addr
 		return nil, nil, ErrActorSystemNotStarted
 	}
 
+	// user should not query system actors
+	if isReservedName(actorName) {
+		x.locker.Unlock()
+		return nil, nil, ErrActorNotFound(actorName)
+	}
+
 	// first check whether the actor exist locally
 	actorAddress := x.actorAddress(actorName)
 	if pidnode, ok := x.actors.node(actorAddress.String()); ok {
@@ -1032,6 +1077,12 @@ func (x *actorSystem) LocalActor(actorName string) (*PID, error) {
 		return nil, ErrActorSystemNotStarted
 	}
 
+	// user should not query system actors
+	if isReservedName(actorName) {
+		x.locker.Unlock()
+		return nil, ErrActorNotFound(actorName)
+	}
+
 	actorAddress := x.actorAddress(actorName)
 	if pidnode, ok := x.actors.node(actorAddress.String()); ok {
 		x.locker.Unlock()
@@ -1054,6 +1105,12 @@ func (x *actorSystem) RemoteActor(ctx context.Context, actorName string) (addr *
 		e := ErrActorSystemNotStarted
 		x.locker.Unlock()
 		return nil, e
+	}
+
+	// user should not query system actors
+	if isReservedName(actorName) {
+		x.locker.Unlock()
+		return nil, ErrActorNotFound(actorName)
 	}
 
 	if x.cluster == nil {
@@ -1205,6 +1262,11 @@ func (x *actorSystem) RemoteReSpawn(ctx context.Context, request *connect.Reques
 		return nil, connect.NewError(connect.CodeInvalidArgument, ErrInvalidHost)
 	}
 
+	// make sure we don't interfere with system actors.
+	if isReservedName(msg.GetName()) {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrActorNotFound(msg.GetName()))
+	}
+
 	actorAddress := address.New(msg.GetName(), x.Name(), msg.GetHost(), int(msg.GetPort()))
 	pidNode, exist := x.actors.node(actorAddress.String())
 	if !exist {
@@ -1244,6 +1306,11 @@ func (x *actorSystem) RemoteStop(ctx context.Context, request *connect.Request[i
 		return nil, connect.NewError(connect.CodeInvalidArgument, ErrInvalidHost)
 	}
 
+	// make sure we don't interfere with system actors.
+	if isReservedName(msg.GetName()) {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrActorNotFound(msg.GetName()))
+	}
+
 	actorAddress := address.New(msg.GetName(), x.Name(), msg.GetHost(), int(msg.GetPort()))
 	pidNode, exist := x.actors.node(actorAddress.String())
 	if !exist {
@@ -1271,6 +1338,11 @@ func (x *actorSystem) RemoteSpawn(ctx context.Context, request *connect.Request[
 	remoteAddr := fmt.Sprintf("%s:%d", x.remoteConfig.BindAddr(), x.remoteConfig.BindPort())
 	if remoteAddr != net.JoinHostPort(msg.GetHost(), strconv.Itoa(int(msg.GetPort()))) {
 		return nil, connect.NewError(connect.CodeInvalidArgument, ErrInvalidHost)
+	}
+
+	// make sure we don't interfere with system actors.
+	if isReservedName(msg.GetActorName()) {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrActorNotFound(msg.GetActorName()))
 	}
 
 	actor, err := x.reflection.NewActor(msg.GetActorType())
@@ -1338,6 +1410,11 @@ func (x *actorSystem) RemoteReinstate(_ context.Context, request *connect.Reques
 	remoteAddr := fmt.Sprintf("%s:%d", x.remoteConfig.BindAddr(), x.remoteConfig.BindPort())
 	if remoteAddr != net.JoinHostPort(msg.GetHost(), strconv.Itoa(int(msg.GetPort()))) {
 		return nil, connect.NewError(connect.CodeInvalidArgument, ErrInvalidHost)
+	}
+
+	// make sure we don't interfere with system actors.
+	if isReservedName(msg.GetName()) {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrActorNotFound(msg.GetName()))
 	}
 
 	actorAddress := address.New(msg.GetName(), x.Name(), msg.GetHost(), int(msg.GetPort()))
@@ -1525,6 +1602,19 @@ func (x *actorSystem) getReflection() *reflection {
 	x.locker.Lock()
 	defer x.locker.Unlock()
 	return x.reflection
+}
+
+// findRoutee searches for a routee by its name within the actor system and returns its PID if found or an error otherwise.
+func (x *actorSystem) findRoutee(routeeName string) (*PID, bool) {
+	x.locker.Lock()
+	actorAddress := x.actorAddress(routeeName)
+	if pidnode, ok := x.actors.node(actorAddress.String()); ok {
+		x.locker.Unlock()
+		pid := pidnode.value()
+		return pid, true
+	}
+	x.locker.Lock()
+	return nil, false
 }
 
 // getSingletonManager returns the system singleton manager
@@ -2024,6 +2114,19 @@ func (x *actorSystem) processPeerState(ctx context.Context, peer *cluster.Peer) 
 // configPID constructs a PID provided the actor name and the actor kind
 // this is a utility function used when spawning actors
 func (x *actorSystem) configPID(ctx context.Context, name string, actor Actor, opts ...SpawnOption) (*PID, error) {
+	spawnConfig := newSpawnConfig(opts...)
+	if err := spawnConfig.Validate(); err != nil {
+		return nil, err
+	}
+
+	if !spawnConfig.isSystem {
+		// you should not create a system-based actor or
+		// use the system actor naming convention pattern
+		if isReservedName(name) {
+			return nil, ErrReservedName
+		}
+	}
+
 	addr := x.actorAddress(name)
 	if err := addr.Validate(); err != nil {
 		return nil, err
@@ -2040,8 +2143,6 @@ func (x *actorSystem) configPID(ctx context.Context, name string, actor Actor, o
 		withRemoting(x.remoting),
 		withWorkerPool(x.workerPool),
 	}
-
-	spawnConfig := newSpawnConfig(opts...)
 
 	if err := spawnConfig.Validate(); err != nil {
 		return nil, err
@@ -2080,20 +2181,14 @@ func (x *actorSystem) configPID(ctx context.Context, name string, actor Actor, o
 	}
 
 	switch {
-	case isReservedName(name):
-		// disable passivation for system actor
+	case spawnConfig.isSystem:
 		pidOpts = append(pidOpts, withPassivationDisabled())
 	default:
 		switch {
-		case spawnConfig.passivateAfter == nil:
-			// use system-wide passivation settings
-			pidOpts = append(pidOpts, withPassivationAfter(x.passivationAfter))
-		case *spawnConfig.passivateAfter < longLived:
-			// use custom passivation setting
+		case spawnConfig.passivateAfter != nil:
 			pidOpts = append(pidOpts, withPassivationAfter(*spawnConfig.passivateAfter))
 		default:
-			// live forever :)
-			pidOpts = append(pidOpts, withPassivationDisabled())
+			pidOpts = append(pidOpts, withPassivationAfter(x.passivationAfter))
 		}
 	}
 
@@ -2178,7 +2273,7 @@ func (x *actorSystem) configureServer(ctx context.Context, mux *stdhttp.ServeMux
 func (x *actorSystem) spawnRootGuardian(ctx context.Context) error {
 	var err error
 	actorName := x.reservedName(rootGuardianType)
-	x.rootGuardian, err = x.configPID(ctx, actorName, newRootGuardian())
+	x.rootGuardian, err = x.configPID(ctx, actorName, newRootGuardian(), asSystem(), WithLongLived())
 	if err != nil {
 		return fmt.Errorf("actor=%s failed to start rootGuardian guardian: %w", actorName, err)
 	}
@@ -2196,6 +2291,8 @@ func (x *actorSystem) spawnSystemGuardian(ctx context.Context) error {
 	x.systemGuardian, err = x.configPID(ctx,
 		actorName,
 		newSystemGuardian(),
+		asSystem(),
+		WithLongLived(),
 		WithSupervisor(NewSupervisor()))
 	if err != nil {
 		return fmt.Errorf("actor=%s failed to start system guardian: %w", actorName, err)
@@ -2213,6 +2310,8 @@ func (x *actorSystem) spawnUserGuardian(ctx context.Context) error {
 	x.userGuardian, err = x.configPID(ctx,
 		actorName,
 		newUserGuardian(),
+		asSystem(),
+		WithLongLived(),
 		WithSupervisor(NewSupervisor()))
 	if err != nil {
 		return fmt.Errorf("actor=%s failed to start user guardian: %w", actorName, err)
@@ -2237,6 +2336,8 @@ func (x *actorSystem) spawnDeathWatch(ctx context.Context) error {
 	x.deathWatch, err = x.configPID(ctx,
 		actorName,
 		newDeathWatch(),
+		asSystem(),
+		WithLongLived(),
 		WithSupervisor(supervisor),
 	)
 	if err != nil {
@@ -2267,6 +2368,8 @@ func (x *actorSystem) spawnRebalancer(ctx context.Context) error {
 		x.rebalancer, err = x.configPID(ctx,
 			actorName,
 			newRebalancer(x.remoting),
+			asSystem(),
+			WithLongLived(),
 			WithSupervisor(supervisor),
 		)
 		if err != nil {
@@ -2286,6 +2389,8 @@ func (x *actorSystem) spawnDeadletter(ctx context.Context) error {
 	x.deadletter, err = x.configPID(ctx,
 		actorName,
 		newDeadLetter(),
+		asSystem(),
+		WithLongLived(),
 		WithSupervisor(
 			NewSupervisor(
 				WithStrategy(OneForOneStrategy),

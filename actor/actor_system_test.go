@@ -832,7 +832,7 @@ func TestActorSystem(t *testing.T) {
 		actorName := "HousekeeperActor"
 		actorHandler := newMockActor()
 		actorRef, err := sys.Spawn(ctx, actorName, actorHandler)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		require.NotNil(t, actorRef)
 
 		// wait for the actor to properly start
@@ -2008,6 +2008,148 @@ func TestActorSystem(t *testing.T) {
 		// register the actor
 		err = sys.Inject(extmocks.NewDependency(t))
 		require.NoError(t, err)
+
+		err = sys.Stop(ctx)
+		require.NoError(t, err)
+	})
+	t.Run("With ActorOf failure when it is a reserved name", func(t *testing.T) {
+		ctx := context.TODO()
+		logger := log.DiscardLogger
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithPassivationDisabled(),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		util.Pause(time.Second)
+
+		name := "GoAktXYZ"
+		addr, pid, err := sys.ActorOf(ctx, name)
+		require.Error(t, err)
+		require.EqualError(t, err, ErrActorNotFound(name).Error())
+		require.Nil(t, addr)
+		require.Nil(t, pid)
+
+		err = sys.Stop(ctx)
+		require.NoError(t, err)
+	})
+	t.Run("With Kill failure when it is a reserved name", func(t *testing.T) {
+		ctx := context.TODO()
+		logger := log.DiscardLogger
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithPassivationDisabled(),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		util.Pause(time.Second)
+
+		name := "GoAktXYZ"
+		err = sys.Kill(ctx, name)
+		require.Error(t, err)
+		require.EqualError(t, err, ErrActorNotFound(name).Error())
+
+		err = sys.Stop(ctx)
+		require.NoError(t, err)
+	})
+	t.Run("With ReSpawn failure when it is a reserved name", func(t *testing.T) {
+		ctx := context.TODO()
+		logger := log.DiscardLogger
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithPassivationDisabled(),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		util.Pause(time.Second)
+
+		name := "GoAktXYZ"
+		pid, err := sys.ReSpawn(ctx, name)
+		require.Error(t, err)
+		require.EqualError(t, err, ErrActorNotFound(name).Error())
+		require.Nil(t, pid)
+
+		err = sys.Stop(ctx)
+		require.NoError(t, err)
+	})
+
+	t.Run("With LocalActor failure when it is a reserved name", func(t *testing.T) {
+		ctx := context.TODO()
+		logger := log.DiscardLogger
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithPassivationDisabled(),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		util.Pause(time.Second)
+
+		name := "GoAktXYZ"
+		pid, err := sys.LocalActor(name)
+		require.Error(t, err)
+		require.EqualError(t, err, ErrActorNotFound(name).Error())
+		require.Nil(t, pid)
+
+		err = sys.Stop(ctx)
+		require.NoError(t, err)
+	})
+
+	t.Run("With RemoteActor failure when it is a reserved name", func(t *testing.T) {
+		ctx := context.TODO()
+		logger := log.DiscardLogger
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithPassivationDisabled(),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		util.Pause(time.Second)
+
+		name := "GoAktXYZ"
+		addr, err := sys.RemoteActor(ctx, name)
+		require.Error(t, err)
+		require.EqualError(t, err, ErrActorNotFound(name).Error())
+		require.Nil(t, addr)
 
 		err = sys.Stop(ctx)
 		require.NoError(t, err)

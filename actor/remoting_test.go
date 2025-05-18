@@ -1492,6 +1492,44 @@ func TestRemotingReSpawn(t *testing.T) {
 			},
 		)
 	})
+	t.Run("When actor name is reserved", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// generate the remoting port
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "0.0.0.0"
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithPassivationDisabled(),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		util.Pause(time.Second)
+
+		// create a test actor
+		actorName := "GoAktXYZ"
+		remoting := NewRemoting()
+		// get the address of the actor
+		err = remoting.RemoteReSpawn(ctx, sys.Host(), int(sys.Port()), actorName)
+		require.Error(t, err)
+		require.EqualError(t, err, "failed_precondition: actor=GoAktXYZ not found")
+
+		remoting.Close()
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
+	})
 }
 
 func TestRemotingStop(t *testing.T) {
@@ -1652,6 +1690,46 @@ func TestRemotingStop(t *testing.T) {
 				assert.NoError(t, sys.Stop(ctx))
 			},
 		)
+	})
+	t.Run("When actor name is reserved", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// generate the remoting port
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "0.0.0.0"
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithPassivationDisabled(),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		util.Pause(time.Second)
+
+		// create a test actor
+		actorName := "GoAktXYZ"
+		remoting := NewRemoting()
+
+		// get the address of the actor
+		err = remoting.RemoteStop(ctx, sys.Host(), int(sys.Port()), actorName)
+		require.Error(t, err)
+		require.EqualError(t, err, "failed_precondition: actor=GoAktXYZ not found")
+
+		util.Pause(time.Second)
+		remoting.Close()
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
 	})
 }
 
@@ -2097,6 +2175,55 @@ func TestRemotingSpawn(t *testing.T) {
 		err = sys.Stop(ctx)
 		assert.NoError(t, err)
 	})
+	t.Run("When actor name is reserved", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// generate the remoting port
+		ports := dynaport.Get(1)
+		remotingPort := ports[0]
+		host := "127.0.0.1"
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithPassivationDisabled(),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		// register dependencies
+		dependency := dependencyMock("test", "test", "test")
+		err = sys.Inject(dependency)
+		require.NoError(t, err)
+
+		actorName := "GoAktXYZ"
+
+		remoting := NewRemoting()
+		// spawn the remote actor
+		request := &remote.SpawnRequest{
+			Name:           actorName,
+			Kind:           "actor.exchanger",
+			Singleton:      false,
+			Relocatable:    false,
+			EnableStashing: false,
+			Dependencies:   []extension.Dependency{dependency},
+		}
+		err = remoting.RemoteSpawn(ctx, host, remotingPort, request)
+		require.Error(t, err)
+		require.EqualError(t, err, "failed_precondition: actor=GoAktXYZ not found")
+
+		remoting.Close()
+		err = sys.Stop(ctx)
+		require.NoError(t, err)
+	})
 }
 
 func TestRemotingReinstate(t *testing.T) {
@@ -2191,6 +2318,44 @@ func TestRemotingReinstate(t *testing.T) {
 
 		require.True(t, pid.IsRunning())
 		require.False(t, pid.IsSuspended())
+
+		remoting.Close()
+		err = sys.Stop(ctx)
+		require.NoError(t, err)
+	})
+	t.Run("When actor name is reserved", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// generate the remoting port
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "0.0.0.0"
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithPassivationDisabled(),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		require.NoError(t, err)
+
+		util.Pause(time.Second)
+
+		// create a test actor
+		actorName := "GoAktXYZ"
+		remoting := NewRemoting()
+
+		err = remoting.RemoteReinstate(ctx, sys.Host(), int(sys.Port()), actorName)
+		require.Error(t, err)
+		require.EqualError(t, err, "failed_precondition: actor=GoAktXYZ not found")
 
 		remoting.Close()
 		err = sys.Stop(ctx)

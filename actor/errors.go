@@ -69,8 +69,8 @@ var (
 	ErrInitFailure = func(err error) error { return fmt.Errorf("failed to initialize: %w", err) }
 	// ErrActorSystemNotStarted is returned when the actor is not started while accessing the features of the actor system
 	ErrActorSystemNotStarted = errors.New("actor system has not started yet")
-	// ErrLocalAddress is returned when a remote address is used instead of a local address
-	ErrLocalAddress = errors.New("address is a local address")
+	// ErrReservedName is returned when the actor name is reserved
+	ErrReservedName = errors.New("actor name is a reserved")
 	// ErrInstanceNotAnActor is returned when we failed to create the instance of an actor
 	ErrInstanceNotAnActor = errors.New("failed to create instance. Reason: instance does not implement the Actor interface")
 	// ErrTypeNotRegistered is returned when a given actor is not registered
@@ -81,16 +81,12 @@ var (
 	ErrUndefinedTask = errors.New("task is not defined")
 	// ErrInvalidHost is returned when a request is sent to an invalid host
 	ErrInvalidHost = errors.New("invalid host")
-	// ErrFullMailbox is returned when the mailbox is full
-	ErrFullMailbox = errors.New("mailbox is full")
 	// ErrSchedulerNotStarted is returned when the scheduler has not started
 	ErrSchedulerNotStarted = errors.New("scheduler has not started")
 	// ErrInvalidMessage is returned when an invalid remote message is sent
 	ErrInvalidMessage = func(err error) error { return fmt.Errorf("invalid remote message: %w", err) }
 	// ErrInvalidTimeout is returned when a given timeout is negative or zero
 	ErrInvalidTimeout = errors.New("invalid timeout")
-	// ErrPriorityMessageRequired is returned when a non-priority message is used in a priority mailbox
-	ErrPriorityMessageRequired = errors.New("priority message type is required")
 	// ErrActorAlreadyExists is returned when trying to create the same actor more than once
 	ErrActorAlreadyExists = func(actorName string) error { return fmt.Errorf("actor=(%s) already exists", actorName) }
 	// ErrInvalidTLSConfiguration is returned when the TLS configuration is not properly set

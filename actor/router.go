@@ -128,7 +128,13 @@ func (x *router) postStart(ctx *ReceiveContext) {
 	for i := 0; i < x.poolSize; i++ {
 		routeeName := routeeName(ctx.Self().Name(), i)
 		actor := reflect.New(x.routeesKind).Interface().(Actor)
-		routee := ctx.Spawn(routeeName, actor)
+		routee := ctx.Spawn(routeeName, actor,
+			asSystem(),
+			WithRelocationDisabled(),
+			WithLongLived(),
+			WithSupervisor(
+				NewSupervisor(WithAnyErrorDirective(StopDirective)),
+			))
 		x.routeesMap[routee.ID()] = routee
 	}
 	ctx.Become(x.broadcast)

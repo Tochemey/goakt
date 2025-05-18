@@ -77,12 +77,12 @@ func TestRouter(t *testing.T) {
 		workerOneName := fmt.Sprintf("GoAktRoutee-%s-%d", router.Name(), 0)
 		workerTwoName := fmt.Sprintf("GoAktRoutee-%s-%d", router.Name(), 1)
 
-		workerOneRef, err := system.LocalActor(workerOneName)
-		require.NoError(t, err)
+		workerOneRef, ok := system.findRoutee(workerOneName)
+		require.True(t, ok)
 		require.NotNil(t, workerOneRef)
 
-		workerTwoRef, err := system.LocalActor(workerTwoName)
-		require.NoError(t, err)
+		workerTwoRef, ok := system.findRoutee(workerTwoName)
+		require.True(t, ok)
 		require.NotNil(t, workerTwoRef)
 
 		expected := &testpb.TestCount{Value: 2}
@@ -129,8 +129,16 @@ func TestRouter(t *testing.T) {
 		workerOneName := fmt.Sprintf("GoAktRoutee-%s-%d", router.Name(), 0)
 		workerTwoName := fmt.Sprintf("GoAktRoutee-%s-%d", router.Name(), 1)
 
-		require.NoError(t, system.Kill(ctx, workerOneName))
-		require.NoError(t, system.Kill(ctx, workerTwoName))
+		workerOneRef, ok := system.findRoutee(workerOneName)
+		require.True(t, ok)
+		require.NotNil(t, workerOneRef)
+
+		workerTwoRef, ok := system.findRoutee(workerTwoName)
+		require.True(t, ok)
+		require.NotNil(t, workerTwoRef)
+
+		require.NoError(t, workerOneRef.Shutdown(ctx))
+		require.NoError(t, workerTwoRef.Shutdown(ctx))
 
 		// send a broadcast message to the router
 		message, _ := anypb.New(&testpb.TestLog{Text: "msg"})
@@ -182,8 +190,8 @@ func TestRouter(t *testing.T) {
 		// this is just for tests purpose
 		workerName := fmt.Sprintf("GoAktRoutee-%s-%d", router.Name(), 0)
 
-		workerOneRef, err := system.LocalActor(workerName)
-		require.NoError(t, err)
+		workerOneRef, ok := system.findRoutee(workerName)
+		require.True(t, ok)
 		require.NotNil(t, workerOneRef)
 
 		expected := &testpb.TestCount{Value: 2}
@@ -230,7 +238,11 @@ func TestRouter(t *testing.T) {
 
 		// this is just for tests purpose
 		workerName := fmt.Sprintf("GoAktRoutee-%s-%d", router.Name(), 0)
-		err = system.Kill(ctx, workerName)
+		workerOneRef, ok := system.findRoutee(workerName)
+		require.True(t, ok)
+		require.NotNil(t, workerOneRef)
+
+		err = workerOneRef.Shutdown(ctx)
 		require.NoError(t, err)
 
 		util.Pause(time.Second)
@@ -293,8 +305,8 @@ func TestRouter(t *testing.T) {
 		// this is just for tests purpose
 		workerName := fmt.Sprintf("GoAktRoutee-%s-%d", router.Name(), 0)
 
-		workerOneRef, err := system.LocalActor(workerName)
-		require.NoError(t, err)
+		workerOneRef, ok := system.findRoutee(workerName)
+		require.True(t, ok)
 		require.NotNil(t, workerOneRef)
 
 		expected := &testpb.TestCount{Value: 2}
