@@ -333,6 +333,8 @@ func (x *actorSystem) spawnTopicActor(ctx context.Context) error {
 	x.topicActor, _ = x.configPID(ctx,
 		actorName,
 		newTopicActor(x.remoting),
+		asSystem(),
+		WithLongLived(),
 		WithSupervisor(
 			NewSupervisor(
 				WithStrategy(OneForOneStrategy),

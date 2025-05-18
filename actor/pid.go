@@ -589,6 +589,19 @@ func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor, opts .
 		return nil, ErrDead
 	}
 
+	spawnConfig := newSpawnConfig(opts...)
+	if err := spawnConfig.Validate(); err != nil {
+		return nil, err
+	}
+
+	if !spawnConfig.isSystem {
+		// you should not create a system-based actor or
+		// use the system actor naming convention pattern
+		if isReservedName(name) {
+			return nil, ErrReservedName
+		}
+	}
+
 	childAddress := pid.childAddress(name)
 	tree := pid.system.tree()
 	if cnode, ok := tree.node(childAddress.String()); ok {
@@ -609,11 +622,6 @@ func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor, opts .
 		withWorkerPool(pid.workerPool),
 	}
 
-	spawnConfig := newSpawnConfig(opts...)
-	if err := spawnConfig.Validate(); err != nil {
-		return nil, err
-	}
-
 	if spawnConfig.mailbox != nil {
 		pidOptions = append(pidOptions, withMailbox(spawnConfig.mailbox))
 	}
@@ -624,7 +632,7 @@ func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor, opts .
 	}
 
 	// set the relocation flag
-	if spawnConfig.relocatable {
+	if !spawnConfig.relocatable {
 		pidOptions = append(pidOptions, withRelocationDisabled())
 	}
 
@@ -639,9 +647,8 @@ func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor, opts .
 		pidOptions = append(pidOptions, withDependencies(spawnConfig.dependencies...))
 	}
 
-	// disable passivation for a system actor
 	switch {
-	case isReservedName(name):
+	case spawnConfig.isSystem:
 		pidOptions = append(pidOptions, withPassivationDisabled())
 	default:
 		switch {

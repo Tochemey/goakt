@@ -49,6 +49,8 @@ type spawnConfig struct {
 	dependencies []extension.Dependency
 	// specifies whether that actor should be having stash buffer
 	enableStash bool
+	// specifies whether the given actor is a system actor
+	isSystem bool
 }
 
 var _ validation.Validator = (*spawnConfig)(nil)
@@ -70,6 +72,7 @@ func newSpawnConfig(opts ...SpawnOption) *spawnConfig {
 		relocatable: true,
 		asSingleton: false,
 		enableStash: false,
+		isSystem:    false,
 		supervisor: NewSupervisor(
 			WithStrategy(OneForOneStrategy),
 			WithAnyErrorDirective(ResumeDirective),
@@ -206,5 +209,13 @@ func WithStashing() SpawnOption {
 func withSingleton() SpawnOption {
 	return spawnOption(func(config *spawnConfig) {
 		config.asSingleton = true
+	})
+}
+
+// asSystem states that the given actor is a system actor;
+// this is used internally to spawn system-based actors
+func asSystem() SpawnOption {
+	return spawnOption(func(config *spawnConfig) {
+		config.isSystem = true
 	})
 }
