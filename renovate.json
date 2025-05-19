@@ -17,8 +17,8 @@
   "customManagers": [
     {
       "customType": "regex",
-      "fileMatch": [
-        ".github/renovate.json5$"
+      "managerFilePatterns": [
+        "/.github/renovate.json5$/"
       ],
       "matchStrings": [
         "constraints: {(\\s*\\n\\s*)\"go\":\\s*\"(?<currentValue>.*?)\""
@@ -29,8 +29,8 @@
     },
     {
       "customType": "regex",
-      "fileMatch": [
-        "Earthfile$"
+      "managerFilePatterns": [
+        "/Earthfile$/"
       ],
       "matchStrings": [
         "FROM tochemey/docker-go:(?<currentValue>.*?)\\n"
@@ -40,9 +40,9 @@
     },
     {
       "customType": "regex",
-      "fileMatch": [
-        ".github/workflows/build.yml$",
-        ".github/workflows/pr.yml$"
+      "managerFilePatterns": [
+        "/.github/workflows/build.yml$/",
+        "/.github/workflows/pr.yml$/"
       ],
       "matchStrings": [
         "version: (?<currentValue>.*?)\\n"
