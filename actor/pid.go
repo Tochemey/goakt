@@ -503,7 +503,12 @@ func (pid *PID) Restart(ctx context.Context) error {
 	if !pid.IsSuspended() {
 		// re-add the actor back to the actor tree and cluster
 		if err := errorschain.New(errorschain.ReturnFirst()).
-			AddErrorFn(func() error { return tree.addNode(parent, pid) }).
+			AddErrorFn(func() error {
+				if !parent.Equals(NoSender) {
+					return tree.addNode(parent, pid)
+				}
+				return nil
+			}).
 			AddErrorFn(func() error { tree.addWatcher(pid, deathWatch); return nil }).
 			AddErrorFn(func() error { return actorSystem.broadcastActor(pid) }).
 			Error(); err != nil {
