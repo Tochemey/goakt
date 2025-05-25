@@ -24,7 +24,8 @@
 
 package client
 
-// Actor defines a given actor name and kind
+// Actor defines a given actor name and kind.
+// Kind is a string representation of the type within its package (e.g pkg/User)
 type Actor struct {
 	name string // Name defines the actor name. This will be unique in the Client
 	kind string // Kind specifies the actor kind.
