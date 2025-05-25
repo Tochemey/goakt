@@ -464,7 +464,7 @@ func (pid *PID) Restart(ctx context.Context) error {
 	pid.logger.Debugf("restarting actor=(%s)", pid.Name())
 	actorSystem := pid.ActorSystem()
 	tree := actorSystem.tree()
-	janitor := actorSystem.getDeathWatch()
+	deathWatch := actorSystem.getDeathWatch()
 
 	// prepare the child actors to respawn
 	// because during the restart process they will be gone
@@ -501,12 +501,14 @@ func (pid *PID) Restart(ctx context.Context) error {
 	}
 
 	if !pid.IsSuspended() {
-		// re-add the actor back to the actors tree
-		// no need to handle the error here because the only time this method
-		// returns an error if when the parent does not exist which was taken care of in the
-		// lines above
-		_ = tree.addNode(parent, pid)
-		tree.addWatcher(pid, janitor)
+		// re-add the actor back to the actor tree and cluster
+		if err := errorschain.New(errorschain.ReturnFirst()).
+			AddErrorFn(func() error { return tree.addNode(parent, pid) }).
+			AddErrorFn(func() error { tree.addWatcher(pid, deathWatch); return nil }).
+			AddErrorFn(func() error { return actorSystem.broadcastActor(pid) }).
+			Error(); err != nil {
+			return err
+		}
 	}
 
 	// restart all the previous children
@@ -519,10 +521,15 @@ func (pid *PID) Restart(ctx context.Context) error {
 			}
 
 			if !child.IsSuspended() {
-				// re-add the child back to the tree
+				// re-add the child back to the tree and cluster
 				// since these calls are idempotent
-				_ = tree.addNode(pid, child)
-				tree.addWatcher(child, janitor)
+				if err := errorschain.New(errorschain.ReturnFirst()).
+					AddErrorFn(func() error { return tree.addNode(pid, child) }).
+					AddErrorFn(func() error { tree.addWatcher(child, deathWatch); return nil }).
+					AddErrorFn(func() error { return actorSystem.broadcastActor(child) }).
+					Error(); err != nil {
+					return err
+				}
 			}
 			return nil
 		})
@@ -536,7 +543,7 @@ func (pid *PID) Restart(ctx context.Context) error {
 		return fmt.Errorf("actor=(%s) failed to restart: %w", pid.Name(), err)
 	}
 
-	pid.processing.Store(int32(idle))
+	pid.processing.Store(idle)
 	pid.suspended.Store(false)
 	pid.supervisionLoop()
 	if pid.passivateAfter.Load() > 0 {

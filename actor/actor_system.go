@@ -928,22 +928,10 @@ func (x *actorSystem) ReSpawn(ctx context.Context, name string) (*PID, error) {
 	node, exist := x.actors.node(actorAddress.String())
 	if exist {
 		pid := node.value()
-
-		parent := NoSender
-		if parentNode, ok := x.actors.parentAt(pid, 0); ok {
-			parent = parentNode.value()
-		}
-
 		if err := pid.Restart(ctx); err != nil {
 			return nil, fmt.Errorf("failed to restart actor=%s: %w", actorAddress.String(), err)
 		}
-
-		// no need to handle the error here because the only time this method
-		// returns an error if when the parent does not exist which was taken care of in the
-		// lines above
-		_ = x.actors.addNode(parent, pid)
-		x.actors.addWatcher(pid, x.deathWatch)
-		return pid, x.broadcastActor(pid)
+		return pid, nil
 	}
 
 	return nil, ErrActorNotFound(actorAddress.String())
@@ -1275,21 +1263,8 @@ func (x *actorSystem) RemoteReSpawn(ctx context.Context, request *connect.Reques
 	}
 
 	pid := node.value()
-	parent := NoSender
-	if parentNode, ok := x.actors.parentAt(pid, 0); ok {
-		parent = parentNode.value()
-	}
-
 	if err := pid.Restart(ctx); err != nil {
 		return nil, fmt.Errorf("failed to restart actor=%s: %w", actorAddress.String(), err)
-	}
-
-	if err := errorschain.New(errorschain.ReturnFirst()).
-		AddErrorFn(func() error { return x.actors.addNode(parent, pid) }).
-		AddErrorFn(func() error { x.actors.addWatcher(pid, x.deathWatch); return nil }).
-		AddErrorFn(func() error { return x.broadcastActor(pid) }).
-		Error(); err != nil {
-		return nil, err
 	}
 
 	return connect.NewResponse(new(internalpb.RemoteReSpawnResponse)), nil
