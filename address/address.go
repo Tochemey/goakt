@@ -173,7 +173,10 @@ func (a *Address) HostPort() string {
 
 // Equals is used to compare two addresses
 func (a *Address) Equals(x *Address) bool {
-	return a.GetId() == x.GetId() && a.String() == x.String()
+	if a == nil || x == nil {
+		return false
+	}
+	return proto.Equal(a.Address, x.Address)
 }
 
 // MarshalBinary encodes the receiver into a binary form and returns the result.

@@ -382,7 +382,7 @@ func TestClient(t *testing.T) {
 			},
 		)
 	})
-	t.Run("With SpawnWithBalancer", func(t *testing.T) {
+	t.Run("With SpawnBalanced", func(t *testing.T) {
 		ctx := context.TODO()
 
 		logger := log.DiscardLogger
@@ -427,7 +427,7 @@ func TestClient(t *testing.T) {
 		require.ElementsMatch(t, expected, kinds)
 		actor := NewActor("client.testactor").WithName("actorName")
 
-		err = client.SpawnWithBalancer(ctx, actor, false, true, RandomStrategy)
+		err = client.SpawnBalanced(ctx, actor, false, true, RandomStrategy)
 		require.NoError(t, err)
 
 		util.Pause(time.Second)
@@ -530,6 +530,12 @@ func TestClient(t *testing.T) {
 		require.NoError(t, err)
 
 		util.Pause(time.Second)
+
+		reply, err = client.Ask(ctx, actor, new(testpb.TestReply), time.Minute)
+		require.NoError(t, err)
+		require.NotNil(t, reply)
+		expectedReply = &testpb.Reply{Content: "received message"}
+		assert.True(t, proto.Equal(expectedReply, reply))
 
 		err = client.Stop(ctx, actor)
 		require.NoError(t, err)

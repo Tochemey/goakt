@@ -35,7 +35,6 @@ import (
 
 	actors "github.com/tochemey/goakt/v3/actor"
 	"github.com/tochemey/goakt/v3/address"
-	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/errorschain"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/internalpb/internalpbconnect"
@@ -45,9 +44,20 @@ import (
 	"github.com/tochemey/goakt/v3/remote"
 )
 
-// Client connects to af Go-Akt nodes.
-// This client can only be used when remoting is enabled on the various nodes.
-// The client is only used against a Go-Akt cluster
+// Client provides connectivity to Go-Akt actor system nodes within a cluster.
+//
+// The Client enables remote communication with Go-Akt nodes and requires remoting
+// to be enabled on all target nodes in the cluster. It is specifically designed
+// for interacting with Go-Akt clusters and handles the underlying networking,
+// serialization, and actor addressing concerns.
+//
+// Key capabilities:
+//   - Remote actor discovery and communication
+//   - Cluster topology awareness
+//   - Connection pooling and management
+//   - Message routing and delivery
+//
+// Thread safety: Client is safe for concurrent use by multiple goroutines.
 type Client struct {
 	nodes           []*Node
 	locker          *sync.Mutex
@@ -57,11 +67,26 @@ type Client struct {
 	refreshInterval time.Duration
 }
 
-// New creates an instance of Client. The provided nodes are the cluster nodes.
-// A node is the form of host:port where host and port represents the remoting host
-// and remoting port of the nodes. The nodes list will be load balanced based upon the load-balancing
-// strategy defined by default round-robin will be used.
-// An instance of the Client can be reused and it is thread safe.
+// New creates and initializes a new Client instance for interacting with a cluster of nodes.
+//
+// The provided `nodes` parameter defines the initial list of cluster nodes, where each node
+// is specified as `host:port` representing the remoting host and port of the actor system.
+//
+// By default, the client uses a round-robin load-balancing strategy to distribute actor-related
+// operations across the provided nodes. This behavior can be customized via optional parameters.
+//
+// Parameters:
+//   - ctx: Context for initialization and potential cancellation.
+//   - nodes: A slice of pointers to Node, each representing a cluster node.
+//   - opts: Optional configuration values (e.g., custom balancer).
+//
+// Returns:
+//   - *Client: A thread-safe client instance that can be reused across goroutines.
+//   - error: An error if client initialization fails (e.g., invalid nodes, config issues).
+//
+// Note:
+//   - The returned Client is safe for concurrent use.
+//   - Nodes are assumed to be reachable and running a compatible actor runtime.
 func New(ctx context.Context, nodes []*Node, opts ...Option) (*Client, error) {
 	if err := errorschain.
 		New(errorschain.ReturnFirst()).
@@ -84,7 +109,7 @@ func New(ctx context.Context, nodes []*Node, opts ...Option) (*Client, error) {
 	cl.balancer = getBalancer(cl.strategy)
 	cl.nodes = nodes
 	cl.balancer.Set(cl.nodes...)
-	// only refresh addresses when refresh interval is set
+	// only refresh addresses when a refresh interval is set
 	if cl.refreshInterval > 0 {
 		cl.closeSignal = make(chan types.Unit, 1)
 		go cl.refreshNodesLoop()
@@ -105,7 +130,17 @@ func (x *Client) Close() {
 	x.locker.Unlock()
 }
 
-// Kinds returns the list of all the Client kinds registered
+// Kinds returns the list of all actor kinds currently registered in the cluster.
+//
+// Actor kinds represent the different types or categories of actors that
+// are available for spawning or interaction within the cluster.
+//
+// Parameters:
+//   - ctx: Context used for cancellation and timeout control.
+//
+// Returns:
+//   - []string: A slice of strings representing the registered actor kinds.
+//   - Error: An error if the request to retrieve kinds fails.
 func (x *Client) Kinds(ctx context.Context) ([]string, error) {
 	x.locker.Lock()
 	defer x.locker.Unlock()
@@ -126,23 +161,63 @@ func (x *Client) Kinds(ctx context.Context) ([]string, error) {
 	return response.Msg.GetKinds(), nil
 }
 
-// Spawn creates an actor provided the actor name.
+// Spawn creates and starts an actor using the default balancing strategy.
+//
+// This method initializes the provided actor and places it on an available node
+// using the default balancing strategy configured in the Client. It supports
+// singleton enforcement and relocatability.
+//
+// Parameters:
+//   - ctx: Context for cancellation and timeout control.
+//   - actor: A pointer to the Actor instance to be spawned.
+//   - singleton: If true, ensures only one instance of the actor exists across the system.
+//   - relocatable: If true, allows the actor to be relocated to another node if needed.
+//
+// Returns:
+//   - err: An error if actor creation or placement fails.
+//
+// Note:
+//   - If you require custom balancing logic, use SpawnBalanced instead.
 func (x *Client) Spawn(ctx context.Context, actor *Actor, singleton, relocatable bool) (err error) {
 	x.locker.Lock()
 	node := nextNode(x.balancer)
 	x.locker.Unlock()
 	remoteHost, remotePort := node.HostAndPort()
-	spawnRequest := &remote.SpawnRequest{
-		Name:        actor.Name(),
-		Kind:        actor.Kind(),
-		Singleton:   singleton,
-		Relocatable: relocatable,
-	}
-	return node.Remoting().RemoteSpawn(ctx, remoteHost, remotePort, spawnRequest)
+	return node.Remoting().RemoteSpawn(ctx,
+		remoteHost,
+		remotePort,
+		&remote.SpawnRequest{
+			Name:        actor.Name(),
+			Kind:        actor.Kind(),
+			Singleton:   singleton,
+			Relocatable: relocatable,
+		})
 }
 
-// SpawnWithBalancer creates an actor provided the actor name and the balancer strategy
-func (x *Client) SpawnWithBalancer(ctx context.Context, actor *Actor, singleton, relocatable bool, strategy BalancerStrategy) (err error) {
+// SpawnBalanced creates and starts an actor with the specified balancing strategy.
+//
+// This method spawns the given actor across a cluster or local node using a
+// provided `BalancerStrategy` to determine optimal placement. It supports
+// singleton enforcement and relocatability of the actor.
+//
+// Parameters:
+//   - ctx: Context used for cancellation and timeout control.
+//   - actor: A pointer to the Actor instance to be spawned.
+//   - singleton: If true, ensures only one instance of the actor exists across the system.
+//   - relocatable: If true, allows the actor to be relocated by the balancer when necessary.
+//   - strategy: Defines the balancing strategy (e.g., round-robin, least-loaded) to use
+//     for actor placement.
+//
+// Returns:
+//   - err: Non-nil if spawning the actor fails (e.g., invalid actor, placement error, etc.)
+//
+// Example:
+//
+//	err := client.SpawnBalanced(ctx, myActor, true, false, RoundRobinStrategy)
+//	if err != nil {
+//	    log.Fatalf("Failed to spawn actor: %v", err)
+//	}
+func (x *Client) SpawnBalanced(ctx context.Context, actor *Actor, singleton, relocatable bool, strategy BalancerStrategy) (err error) {
 	x.locker.Lock()
 	balancer := getBalancer(strategy)
 	balancer.Set(x.nodes...)
@@ -158,30 +233,68 @@ func (x *Client) SpawnWithBalancer(ctx context.Context, actor *Actor, singleton,
 	return node.Remoting().RemoteSpawn(ctx, remoteHost, remotePort, spawnRequest)
 }
 
-// ReSpawn restarts a given actor
+// ReSpawn restarts a previously spawned actor.
+//
+// This method stops the given actor (if running) and starts a new instance of it,
+// preserving its identity. It is typically used in scenarios where the actor has
+// failed or needs to be re-initialized due to updated state or configuration.
+//
+// Parameters:
+//   - ctx: Context used for cancellation and timeout control.
+//   - actor: A pointer to the Actor instance to be restarted.
+//
+// Returns:
+//   - err: An error if the actor could not be stopped, restarted, or re-registered.
+//
+// Note:
+//   - ReSpawn does not guarantee preservation of the in-memory state unless the actor
+//     is designed to persist and recover it (e.g., via snapshotting or event sourcing).
 func (x *Client) ReSpawn(ctx context.Context, actor *Actor) (err error) {
 	x.locker.Lock()
 	node := nextNode(x.balancer)
 	x.locker.Unlock()
 	remoteHost, remotePort := node.HostAndPort()
-	return node.Remoting().RemoteReSpawn(ctx, remoteHost, remotePort, actor.Name())
+	remoting := node.Remoting()
+
+	addr, err := remoting.RemoteLookup(ctx, remoteHost, remotePort, actor.Name())
+	if err != nil {
+		return err
+	}
+
+	if addr.Equals(address.NoSender()) {
+		return nil
+	}
+
+	return remoting.RemoteReSpawn(ctx, addr.GetHost(), int(addr.GetPort()), actor.Name())
 }
 
-// Tell sends a message to a given actor provided the actor name.
-// If the given actor does not exist it will be created automatically when
-// Client mode is enabled
+// Tell sends a message to the specified actor.
+//
+// This method delivers the given protobuf message to the target actor. If the actor
+// is not currently running or registered in the system, a NOT_FOUND error is returned.
+//
+// Parameters:
+//   - ctx: Context used for cancellation and timeout control.
+//   - actor: A pointer to the target Actor instance, used to locate the actor by name.
+//   - Message: A protobuf message to send to the actor. This must be a valid, serializable message.
+//
+// Returns:
+//   - error: Returns nil on success. Returns a NOT_FOUND error if the actor is not available.
+//
+// Note:
+//   - This method is asynchronous; it does not wait for a response.
+//   - For request-response patterns, consider using `Ask` instead of `Tell`.
 func (x *Client) Tell(ctx context.Context, actor *Actor, message proto.Message) error {
 	x.locker.Lock()
 	node := nextNode(x.balancer)
 	x.locker.Unlock()
 	remoteHost, remotePort := node.HostAndPort()
 
-	// lookup the actor address
 	to, err := node.Remoting().RemoteLookup(ctx, remoteHost, remotePort, actor.Name())
 	if err != nil {
 		return err
 	}
-	// no address found
+
 	if to.Equals(address.NoSender()) {
 		return actors.ErrActorNotFound(actor.Name())
 	}
@@ -190,23 +303,41 @@ func (x *Client) Tell(ctx context.Context, actor *Actor, message proto.Message) 
 	return node.remoting.RemoteTell(ctx, from, to, message)
 }
 
-// Ask sends a message to a given actor provided the actor name and expects a response.
-// If the given actor does not exist it will be created automatically when
-// Client mode is enabled. This will block until a response is received or timed out.
+// Ask sends a message to the specified actor and waits for a response.
+//
+// This method sends a protobuf message to the given actor and blocks until a reply is received
+// or the timeout is reached. It is intended for request-response communication patterns.
+//
+// Parameters:
+//   - ctx: Context used for cancellation and deadline control.
+//   - actor: A pointer to the target Actor instance, used to locate the actor by name.
+//   - message: A protobuf message to send to the actor. This must be a valid, serializable message.
+//   - timeout: The maximum duration to wait for a response from the actor.
+//
+// Returns:
+//   - reply: The protobuf message returned by the actor.
+//   - err: Returns an error if the actor is not found, if the timeout is exceeded,
+//     or if message delivery or handling fails.
+//
+// Note:
+//   - If the actor does not exist or is unreachable, a NOT_FOUND error is returned.
+//   - Ensure the actor is designed to handle the incoming message and reply appropriately.
+//   - For fire-and-forget messaging, use `Tell` instead of `Ask`.
 func (x *Client) Ask(ctx context.Context, actor *Actor, message proto.Message, timeout time.Duration) (reply proto.Message, err error) {
 	x.locker.Lock()
 	node := nextNode(x.balancer)
 	x.locker.Unlock()
 	remoteHost, remotePort := node.HostAndPort()
-	// lookup the actor address
+
 	to, err := node.Remoting().RemoteLookup(ctx, remoteHost, remotePort, actor.Name())
 	if err != nil {
 		return nil, err
 	}
-	// no address found
+
 	if to.Equals(address.NoSender()) {
 		return nil, actors.ErrActorNotFound(actor.Name())
 	}
+
 	from := address.NoSender()
 	response, err := node.Remoting().RemoteAsk(ctx, from, to, message, timeout)
 	if err != nil {
@@ -215,31 +346,109 @@ func (x *Client) Ask(ctx context.Context, actor *Actor, message proto.Message, t
 	return response.UnmarshalNew()
 }
 
-// Stop stops or kills a given actor in the Client
+// Stop gracefully stops or forcefully terminates the specified actor.
+//
+// This method instructs the Client to stop the given actor, releasing any resources
+// associated with it. Depending on the actor’s design and internal state, it may
+// perform cleanup logic before termination.
+//
+// Parameters:
+//   - ctx: Context used for cancellation and timeout control.
+//   - actor: A pointer to the Actor instance to be stopped.
+//
+// Returns:
+//   - error: Returns an error if the actor could not be found, or if stopping it fails.
+//
+// Note:
+//   - If the actor is not running or found, no error is returned.
+//   - Graceful shutdown behavior depends on the actor implementation (e.g., handling termination signals).
 func (x *Client) Stop(ctx context.Context, actor *Actor) error {
 	x.locker.Lock()
 	node := nextNode(x.balancer)
 	x.locker.Unlock()
 	remoteHost, remotePort := node.HostAndPort()
-	return node.Remoting().RemoteStop(ctx, remoteHost, remotePort, actor.Name())
+	remoting := node.Remoting()
+
+	addr, err := remoting.RemoteLookup(ctx, remoteHost, remotePort, actor.Name())
+	if err != nil {
+		return err
+	}
+
+	if addr.Equals(address.NoSender()) {
+		return nil
+	}
+
+	return remoting.RemoteStop(ctx, addr.GetHost(), int(addr.GetPort()), actor.Name())
 }
 
-// Whereis finds and returns the address of a given actor
+// Whereis looks up the location of the specified actor and returns its address.
+//
+// This method queries the system to find the current network or logical address
+// of the given actor. It can be used to inspect actor placement or route messages manually.
+//
+// Parameters:
+//   - ctx: Context used for cancellation and timeout control.
+//   - actor: A pointer to the Actor instance whose address is being queried.
+//
+// Returns:
+//   - *address.Address: The resolved address of the actor if found.
+//   - error: Returns a NOT_FOUND error if the actor does not exist or is not currently registered.
+//
+// Note:
+//   - This method does not send a message or interact with the actor directly.
+//   - Use this for diagnostic, routing, or debugging purposes.
 func (x *Client) Whereis(ctx context.Context, actor *Actor) (*address.Address, error) {
 	x.locker.Lock()
 	node := nextNode(x.balancer)
 	x.locker.Unlock()
 	remoteHost, remotePort := node.HostAndPort()
-	// lookup the actor address
-	address, err := node.remoting.RemoteLookup(ctx, remoteHost, remotePort, actor.Name())
+	addr, err := node.remoting.RemoteLookup(ctx, remoteHost, remotePort, actor.Name())
 	if err != nil {
 		return nil, err
 	}
-	// no address found
-	if address == nil || proto.Equal(address, new(goaktpb.Address)) {
+
+	if addr.Equals(address.NoSender()) {
 		return nil, actors.ErrActorNotFound(actor.Name())
 	}
-	return address, nil
+
+	return addr, nil
+}
+
+// Reinstate transitions a previously suspended actor back to an active state.
+//
+// Upon reinstatement, the actor resumes processing incoming messages from its mailbox,
+// continuing with the internal state it held before suspension.
+//
+// Important notes:
+//   - The actor’s state is preserved; no state reset occurs during reinstatement.
+//   - Messages processing resumed after reinstatement.
+//   - If the actor cannot be reinstated (e.g., if it no longer exists or is in a terminal state),
+//     an error will be returned.
+//   - Reinstate should be used cautiously in distributed systems to avoid race conditions or
+//     inconsistent actor states.
+//
+// Parameters:
+//   - ctx: Context for cancellation and deadlines.
+//   - actor: Pointer to the Actor instance to be reinstated.
+//
+// Returns:
+//   - error: Non-nil if the operation fails due to invalid state, internal issues. In case the actor is not found it will return no error.
+func (x *Client) Reinstate(ctx context.Context, actor *Actor) error {
+	x.locker.Lock()
+	node := nextNode(x.balancer)
+	x.locker.Unlock()
+	remoteHost, remotePort := node.HostAndPort()
+
+	addr, err := node.Remoting().RemoteLookup(ctx, remoteHost, remotePort, actor.Name())
+	if err != nil {
+		return err
+	}
+
+	if addr.Equals(address.NoSender()) {
+		return nil
+	}
+
+	return node.Remoting().RemoteReinstate(ctx, addr.GetHost(), int(addr.GetPort()), actor.Name())
 }
 
 // nextNode returns the next node host and port

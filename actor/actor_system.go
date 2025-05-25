@@ -925,9 +925,9 @@ func (x *actorSystem) ReSpawn(ctx context.Context, name string) (*PID, error) {
 	}
 
 	actorAddress := x.actorAddress(name)
-	pidNode, exist := x.actors.node(actorAddress.String())
+	node, exist := x.actors.node(actorAddress.String())
 	if exist {
-		pid := pidNode.value()
+		pid := node.value()
 
 		parent := NoSender
 		if parentNode, ok := x.actors.parentAt(pid, 0); ok {
@@ -943,7 +943,7 @@ func (x *actorSystem) ReSpawn(ctx context.Context, name string) (*PID, error) {
 		// lines above
 		_ = x.actors.addNode(parent, pid)
 		x.actors.addWatcher(pid, x.deathWatch)
-		return pid, nil
+		return pid, x.broadcastActor(pid)
 	}
 
 	return nil, ErrActorNotFound(actorAddress.String())
@@ -961,11 +961,11 @@ func (x *actorSystem) Name() string {
 // This does not account for the total number of actors in the cluster
 func (x *actorSystem) Actors() []*PID {
 	x.locker.Lock()
-	pidNodes := x.actors.nodes()
+	nodes := x.actors.nodes()
 	x.locker.Unlock()
-	actors := make([]*PID, 0, len(pidNodes))
-	for _, pidNode := range pidNodes {
-		pid := pidNode.value()
+	actors := make([]*PID, 0, len(nodes))
+	for _, node := range nodes {
+		pid := node.value()
 		if !isReservedName(pid.Name()) {
 			actors = append(actors, pid)
 		}
@@ -1268,13 +1268,13 @@ func (x *actorSystem) RemoteReSpawn(ctx context.Context, request *connect.Reques
 	}
 
 	actorAddress := address.New(msg.GetName(), x.Name(), msg.GetHost(), int(msg.GetPort()))
-	pidNode, exist := x.actors.node(actorAddress.String())
+	node, exist := x.actors.node(actorAddress.String())
 	if !exist {
 		logger.Error(ErrAddressNotFound(actorAddress.String()).Error())
 		return nil, ErrAddressNotFound(actorAddress.String())
 	}
 
-	pid := pidNode.value()
+	pid := node.value()
 	parent := NoSender
 	if parentNode, ok := x.actors.parentAt(pid, 0); ok {
 		parent = parentNode.value()
@@ -1284,7 +1284,11 @@ func (x *actorSystem) RemoteReSpawn(ctx context.Context, request *connect.Reques
 		return nil, fmt.Errorf("failed to restart actor=%s: %w", actorAddress.String(), err)
 	}
 
-	if err := x.actors.addNode(parent, pid); err != nil {
+	if err := errorschain.New(errorschain.ReturnFirst()).
+		AddErrorFn(func() error { return x.actors.addNode(parent, pid) }).
+		AddErrorFn(func() error { x.actors.addWatcher(pid, x.deathWatch); return nil }).
+		AddErrorFn(func() error { return x.broadcastActor(pid) }).
+		Error(); err != nil {
 		return nil, err
 	}
 

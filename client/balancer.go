@@ -24,16 +24,25 @@
 
 package client
 
-// BalancerStrategy defines the Client weight balancer strategy
+// BalancerStrategy defines the strategy used by the Client to determine
+// how to distribute actors across available nodes.
+//
+// These strategies are used to influence actor placement when spawning
+// with balancing enabled, allowing for flexible and optimized load distribution.
 type BalancerStrategy int
 
 const (
-	// RoundRobinStrategy uses the round-robin algorithm to determine the appropriate node
+	// RoundRobinStrategy distributes actors evenly across nodes by cycling
+	// through the available nodes in a round-robin fashion.
 	RoundRobinStrategy BalancerStrategy = iota
-	// RandomStrategy uses the random algorithm to determine the appropriate node
+
+	// RandomStrategy selects a node at random from the pool of available nodes.
+	// This strategy can help achieve quick distribution without maintaining state.
 	RandomStrategy
-	// LeastLoadStrategy choses among a pool of nodes the node that has the less weight
-	// at the time of the execution
+
+	// LeastLoadStrategy selects the node with the lowest current weight or load
+	// at the time of actor placement. This strategy aims to optimize resource
+	// utilization by placing actors on underutilized nodes.
 	LeastLoadStrategy
 )
 

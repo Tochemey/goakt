@@ -172,7 +172,7 @@ func (r *Remoting) RemoteLookup(ctx context.Context, host string, port int, name
 	if err != nil {
 		code := connect.CodeOf(err)
 		if code == connect.CodeNotFound {
-			return nil, nil
+			return address.NoSender(), nil
 		}
 		return nil, err
 	}

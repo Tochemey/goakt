@@ -624,7 +624,7 @@ func TestActorSystem(t *testing.T) {
 		actorName := "some-actor"
 		addr, err := remoting.RemoteLookup(ctx, host, remotingPort, actorName)
 		require.NoError(t, err)
-		require.Nil(t, addr)
+		require.True(t, addr.Equals(address.NoSender()))
 
 		// attempt to send a message will fail
 		addr = address.From(
@@ -1503,7 +1503,7 @@ func TestActorSystem(t *testing.T) {
 		// fetching the address of the that actor should return nil address
 		addr, err := remoting.RemoteLookup(ctx, host, remotingPort, actorName)
 		require.NoError(t, err)
-		require.Nil(t, addr)
+		require.True(t, addr.Equals(address.NoSender()))
 
 		// spawn the remote actor
 		request := &remote.SpawnRequest{

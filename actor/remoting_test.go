@@ -1771,7 +1771,7 @@ func TestRemotingSpawn(t *testing.T) {
 		// fetching the address of the that actor should return nil address
 		addr, err := remoting.RemoteLookup(ctx, sys.Host(), int(sys.Port()), actorName)
 		require.NoError(t, err)
-		require.Nil(t, addr)
+		require.True(t, addr.Equals(address.NoSender()))
 
 		// register the actor
 		err = sys.Register(ctx, actor)
@@ -1854,7 +1854,7 @@ func TestRemotingSpawn(t *testing.T) {
 		// fetching the address of the that actor should return nil address
 		addr, err := remoting.RemoteLookup(ctx, sys.Host(), int(sys.Port()), actorName)
 		require.NoError(t, err)
-		require.Nil(t, addr)
+		require.True(t, addr.Equals(address.NoSender()))
 
 		// register the actor
 		err = sys.Register(ctx, actor)
@@ -1916,7 +1916,7 @@ func TestRemotingSpawn(t *testing.T) {
 		// fetching the address of the that actor should return nil address
 		addr, err := remoting.RemoteLookup(ctx, sys.Host(), int(sys.Port()), actorName)
 		require.NoError(t, err)
-		require.Nil(t, addr)
+		require.True(t, addr.Equals(address.NoSender()))
 
 		// register the actor
 		err = sys.Register(ctx, actor)
@@ -1970,7 +1970,7 @@ func TestRemotingSpawn(t *testing.T) {
 		// fetching the address of the that actor should return nil address
 		addr, err := remoting.RemoteLookup(ctx, sys.Host(), int(sys.Port()), actorName)
 		require.NoError(t, err)
-		require.Nil(t, addr)
+		require.True(t, addr.Equals(address.NoSender()))
 
 		// spawn the remote actor
 		request := &remote.SpawnRequest{
@@ -2155,7 +2155,7 @@ func TestRemotingSpawn(t *testing.T) {
 		// fetching the address of the that actor should return nil address
 		addr, err := remoting.RemoteLookup(ctx, sys.Host(), int(sys.Port()), actorName)
 		require.NoError(t, err)
-		require.Nil(t, addr)
+		require.True(t, addr.Equals(address.NoSender()))
 
 		// register the actor
 		err = sys.Register(ctx, actor)
