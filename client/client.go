@@ -289,8 +289,9 @@ func (x *Client) Tell(ctx context.Context, actor *Actor, message proto.Message) 
 	node := nextNode(x.balancer)
 	x.locker.Unlock()
 	remoteHost, remotePort := node.HostAndPort()
+	remoting := node.Remoting()
 
-	to, err := node.Remoting().RemoteLookup(ctx, remoteHost, remotePort, actor.Name())
+	to, err := remoting.RemoteLookup(ctx, remoteHost, remotePort, actor.Name())
 	if err != nil {
 		return err
 	}
@@ -300,7 +301,7 @@ func (x *Client) Tell(ctx context.Context, actor *Actor, message proto.Message) 
 	}
 
 	from := address.NoSender()
-	return node.remoting.RemoteTell(ctx, from, to, message)
+	return remoting.RemoteTell(ctx, from, to, message)
 }
 
 // Ask sends a message to the specified actor and waits for a response.
@@ -328,8 +329,9 @@ func (x *Client) Ask(ctx context.Context, actor *Actor, message proto.Message, t
 	node := nextNode(x.balancer)
 	x.locker.Unlock()
 	remoteHost, remotePort := node.HostAndPort()
+	remoting := node.Remoting()
 
-	to, err := node.Remoting().RemoteLookup(ctx, remoteHost, remotePort, actor.Name())
+	to, err := remoting.RemoteLookup(ctx, remoteHost, remotePort, actor.Name())
 	if err != nil {
 		return nil, err
 	}
@@ -339,7 +341,7 @@ func (x *Client) Ask(ctx context.Context, actor *Actor, message proto.Message, t
 	}
 
 	from := address.NoSender()
-	response, err := node.Remoting().RemoteAsk(ctx, from, to, message, timeout)
+	response, err := remoting.RemoteAsk(ctx, from, to, message, timeout)
 	if err != nil {
 		return nil, err
 	}
@@ -402,7 +404,7 @@ func (x *Client) Whereis(ctx context.Context, actor *Actor) (*address.Address, e
 	node := nextNode(x.balancer)
 	x.locker.Unlock()
 	remoteHost, remotePort := node.HostAndPort()
-	addr, err := node.remoting.RemoteLookup(ctx, remoteHost, remotePort, actor.Name())
+	addr, err := node.Remoting().RemoteLookup(ctx, remoteHost, remotePort, actor.Name())
 	if err != nil {
 		return nil, err
 	}
@@ -438,8 +440,9 @@ func (x *Client) Reinstate(ctx context.Context, actor *Actor) error {
 	node := nextNode(x.balancer)
 	x.locker.Unlock()
 	remoteHost, remotePort := node.HostAndPort()
+	remoting := node.Remoting()
 
-	addr, err := node.Remoting().RemoteLookup(ctx, remoteHost, remotePort, actor.Name())
+	addr, err := remoting.RemoteLookup(ctx, remoteHost, remotePort, actor.Name())
 	if err != nil {
 		return err
 	}
@@ -448,7 +451,7 @@ func (x *Client) Reinstate(ctx context.Context, actor *Actor) error {
 		return nil
 	}
 
-	return node.Remoting().RemoteReinstate(ctx, addr.GetHost(), int(addr.GetPort()), actor.Name())
+	return remoting.RemoteReinstate(ctx, addr.GetHost(), int(addr.GetPort()), actor.Name())
 }
 
 // nextNode returns the next node host and port
