@@ -718,6 +718,324 @@ func TestClient(t *testing.T) {
 				util.Pause(time.Second)
 			})
 	})
+	t.Run("With Ask when actor not found", func(t *testing.T) {
+		ctx := context.TODO()
+
+		logger := log.DiscardLogger
+
+		// start the NATS server
+		srv := startNatsServer(t)
+		addr := srv.Addr().String()
+
+		sys1, node1Host, node1Port, sd1 := startNode(t, logger, "node1", addr)
+		sys2, node2Host, node2Port, sd2 := startNode(t, logger, "node2", addr)
+		sys3, node3Host, node3Port, sd3 := startNode(t, logger, "node3", addr)
+
+		// wait for a proper and clean setup of the cluster
+		util.Pause(time.Second)
+
+		addresses := []string{
+			fmt.Sprintf("%s:%d", node1Host, node1Port),
+			fmt.Sprintf("%s:%d", node2Host, node2Port),
+			fmt.Sprintf("%s:%d", node3Host, node3Port),
+		}
+
+		nodes := make([]*Node, len(addresses))
+		for i, addr := range addresses {
+			nodes[i] = NewNode(addr)
+		}
+
+		client, err := New(ctx, nodes)
+		require.NoError(t, err)
+		require.NotNil(t, client)
+
+		actor := NewActor("client.testactor").WithName("actorName")
+
+		// send a message
+		reply, err := client.Ask(ctx, actor, new(testpb.TestReply), time.Minute)
+		require.Error(t, err)
+		require.EqualError(t, err, actors.ErrActorNotFound(actor.Name()).Error())
+		require.Nil(t, reply)
+
+		err = client.Stop(ctx, actor)
+		require.NoError(t, err)
+
+		client.Close()
+
+		require.NoError(t, sys1.Stop(ctx))
+		require.NoError(t, sys2.Stop(ctx))
+		require.NoError(t, sys3.Stop(ctx))
+
+		require.NoError(t, sd1.Close())
+		require.NoError(t, sd2.Close())
+		require.NoError(t, sd3.Close())
+
+		srv.Shutdown()
+		util.Pause(time.Second)
+	})
+	t.Run("With Tell when actor not found", func(t *testing.T) {
+		ctx := context.TODO()
+
+		logger := log.DiscardLogger
+
+		// start the NATS server
+		srv := startNatsServer(t)
+		addr := srv.Addr().String()
+
+		sys1, node1Host, node1Port, sd1 := startNode(t, logger, "node1", addr)
+		sys2, node2Host, node2Port, sd2 := startNode(t, logger, "node2", addr)
+		sys3, node3Host, node3Port, sd3 := startNode(t, logger, "node3", addr)
+
+		// wait for a proper and clean setup of the cluster
+		util.Pause(time.Second)
+
+		addresses := []string{
+			fmt.Sprintf("%s:%d", node1Host, node1Port),
+			fmt.Sprintf("%s:%d", node2Host, node2Port),
+			fmt.Sprintf("%s:%d", node3Host, node3Port),
+		}
+
+		nodes := make([]*Node, len(addresses))
+		for i, addr := range addresses {
+			nodes[i] = NewNode(addr)
+		}
+
+		client, err := New(ctx, nodes)
+		require.NoError(t, err)
+		require.NotNil(t, client)
+
+		actor := NewActor("client.testactor").WithName("actorName")
+
+		// send a message
+		err = client.Tell(ctx, actor, new(testpb.TestReply))
+		require.Error(t, err)
+		require.EqualError(t, err, actors.ErrActorNotFound(actor.Name()).Error())
+
+		err = client.Stop(ctx, actor)
+		require.NoError(t, err)
+
+		client.Close()
+
+		require.NoError(t, sys1.Stop(ctx))
+		require.NoError(t, sys2.Stop(ctx))
+		require.NoError(t, sys3.Stop(ctx))
+
+		require.NoError(t, sd1.Close())
+		require.NoError(t, sd2.Close())
+		require.NoError(t, sd3.Close())
+
+		srv.Shutdown()
+		util.Pause(time.Second)
+	})
+	t.Run("With Stop when actor not found returns no error", func(t *testing.T) {
+		ctx := context.TODO()
+
+		logger := log.DiscardLogger
+
+		// start the NATS server
+		srv := startNatsServer(t)
+		addr := srv.Addr().String()
+
+		sys1, node1Host, node1Port, sd1 := startNode(t, logger, "node1", addr)
+		sys2, node2Host, node2Port, sd2 := startNode(t, logger, "node2", addr)
+		sys3, node3Host, node3Port, sd3 := startNode(t, logger, "node3", addr)
+
+		// wait for a proper and clean setup of the cluster
+		util.Pause(time.Second)
+
+		addresses := []string{
+			fmt.Sprintf("%s:%d", node1Host, node1Port),
+			fmt.Sprintf("%s:%d", node2Host, node2Port),
+			fmt.Sprintf("%s:%d", node3Host, node3Port),
+		}
+
+		nodes := make([]*Node, len(addresses))
+		for i, addr := range addresses {
+			nodes[i] = NewNode(addr)
+		}
+
+		client, err := New(ctx, nodes)
+		require.NoError(t, err)
+		require.NotNil(t, client)
+
+		actor := NewActor("client.testactor").WithName("actorName")
+
+		err = client.Stop(ctx, actor)
+		require.NoError(t, err)
+
+		client.Close()
+
+		require.NoError(t, sys1.Stop(ctx))
+		require.NoError(t, sys2.Stop(ctx))
+		require.NoError(t, sys3.Stop(ctx))
+
+		require.NoError(t, sd1.Close())
+		require.NoError(t, sd2.Close())
+		require.NoError(t, sd3.Close())
+
+		srv.Shutdown()
+		util.Pause(time.Second)
+	})
+	t.Run("With Whereis when actor not found", func(t *testing.T) {
+		ctx := context.TODO()
+
+		logger := log.DiscardLogger
+
+		// start the NATS server
+		srv := startNatsServer(t)
+		addr := srv.Addr().String()
+
+		sys1, node1Host, node1Port, sd1 := startNode(t, logger, "node1", addr)
+		sys2, node2Host, node2Port, sd2 := startNode(t, logger, "node2", addr)
+		sys3, node3Host, node3Port, sd3 := startNode(t, logger, "node3", addr)
+
+		// wait for a proper and clean setup of the cluster
+		util.Pause(time.Second)
+
+		addresses := []string{
+			fmt.Sprintf("%s:%d", node1Host, node1Port),
+			fmt.Sprintf("%s:%d", node2Host, node2Port),
+			fmt.Sprintf("%s:%d", node3Host, node3Port),
+		}
+
+		nodes := make([]*Node, len(addresses))
+		for i, addr := range addresses {
+			nodes[i] = NewNode(addr)
+		}
+
+		client, err := New(ctx, nodes)
+		require.NoError(t, err)
+		require.NotNil(t, client)
+
+		actor := NewActor("client.testactor").WithName("actorName")
+		whereis, err := client.Whereis(ctx, actor)
+		require.Error(t, err)
+		require.Nil(t, whereis)
+
+		err = client.Stop(ctx, actor)
+		require.NoError(t, err)
+
+		client.Close()
+
+		require.NoError(t, sys1.Stop(ctx))
+		require.NoError(t, sys2.Stop(ctx))
+		require.NoError(t, sys3.Stop(ctx))
+
+		require.NoError(t, sd1.Close())
+		require.NoError(t, sd2.Close())
+		require.NoError(t, sd3.Close())
+
+		srv.Shutdown()
+		util.Pause(time.Second)
+	})
+	t.Run("With Reinstate when actor not found returns no error", func(t *testing.T) {
+		ctx := context.TODO()
+
+		logger := log.DiscardLogger
+
+		// start the NATS server
+		srv := startNatsServer(t)
+		addr := srv.Addr().String()
+
+		sys1, node1Host, node1Port, sd1 := startNode(t, logger, "node1", addr)
+		sys2, node2Host, node2Port, sd2 := startNode(t, logger, "node2", addr)
+		sys3, node3Host, node3Port, sd3 := startNode(t, logger, "node3", addr)
+
+		// wait for a proper and clean setup of the cluster
+		util.Pause(time.Second)
+
+		addresses := []string{
+			fmt.Sprintf("%s:%d", node1Host, node1Port),
+			fmt.Sprintf("%s:%d", node2Host, node2Port),
+			fmt.Sprintf("%s:%d", node3Host, node3Port),
+		}
+
+		nodes := make([]*Node, len(addresses))
+		for i, addr := range addresses {
+			nodes[i] = NewNode(addr)
+		}
+
+		client, err := New(ctx, nodes)
+		require.NoError(t, err)
+		require.NotNil(t, client)
+
+		actor := NewActor("client.testactor").WithName("actorName")
+		err = client.Reinstate(ctx, actor)
+		require.NoError(t, err)
+
+		err = client.Stop(ctx, actor)
+		require.NoError(t, err)
+
+		client.Close()
+
+		require.NoError(t, sys1.Stop(ctx))
+		require.NoError(t, sys2.Stop(ctx))
+		require.NoError(t, sys3.Stop(ctx))
+
+		require.NoError(t, sd1.Close())
+		require.NoError(t, sd2.Close())
+		require.NoError(t, sd3.Close())
+
+		srv.Shutdown()
+		util.Pause(time.Second)
+	})
+	t.Run("With Reinstate", func(t *testing.T) {
+		ctx := context.TODO()
+
+		logger := log.DiscardLogger
+
+		// start the NATS server
+		srv := startNatsServer(t)
+		addr := srv.Addr().String()
+
+		sys1, node1Host, node1Port, sd1 := startNode(t, logger, "node1", addr)
+		sys2, node2Host, node2Port, sd2 := startNode(t, logger, "node2", addr)
+		sys3, node3Host, node3Port, sd3 := startNode(t, logger, "node3", addr)
+
+		// wait for a proper and clean setup of the cluster
+		util.Pause(time.Second)
+
+		addresses := []string{
+			fmt.Sprintf("%s:%d", node1Host, node1Port),
+			fmt.Sprintf("%s:%d", node2Host, node2Port),
+			fmt.Sprintf("%s:%d", node3Host, node3Port),
+		}
+
+		nodes := make([]*Node, len(addresses))
+		for i, addr := range addresses {
+			nodes[i] = NewNode(addr)
+		}
+
+		client, err := New(ctx, nodes)
+		require.NoError(t, err)
+		require.NotNil(t, client)
+
+		actor := NewActor("client.testactor").WithName("actorName")
+
+		err = client.Spawn(ctx, actor, false, true)
+		require.NoError(t, err)
+
+		util.Pause(time.Second)
+
+		err = client.Reinstate(ctx, actor)
+		require.NoError(t, err)
+
+		err = client.Stop(ctx, actor)
+		require.NoError(t, err)
+
+		client.Close()
+
+		require.NoError(t, sys1.Stop(ctx))
+		require.NoError(t, sys2.Stop(ctx))
+		require.NoError(t, sys3.Stop(ctx))
+
+		require.NoError(t, sd1.Close())
+		require.NoError(t, sd2.Close())
+		require.NoError(t, sd3.Close())
+
+		srv.Shutdown()
+		util.Pause(time.Second)
+	})
 }
 
 func startNatsServer(t *testing.T) *natsserver.Server {
