@@ -29,14 +29,19 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
 	actors "github.com/tochemey/goakt/v3/actor"
+	"github.com/tochemey/goakt/v3/extension"
+	"github.com/tochemey/goakt/v3/internal/eventstream"
 	"github.com/tochemey/goakt/v3/log"
 )
 
 // TestKit defines actor test kit
 type TestKit struct {
 	actorSystem actors.ActorSystem
-	kt          *testing.T
+	extensions  []extension.Extension
+	gt          *testing.T
 	logger      log.Logger
 }
 
@@ -44,7 +49,7 @@ type TestKit struct {
 func New(ctx context.Context, t *testing.T, opts ...Option) *TestKit {
 	// create the testkit instance
 	testkit := &TestKit{
-		kt:     t,
+		gt:     t,
 		logger: log.DiscardLogger,
 	}
 	// apply the various options
@@ -54,6 +59,7 @@ func New(ctx context.Context, t *testing.T, opts ...Option) *TestKit {
 	// create an actor system
 	system, err := actors.NewActorSystem(
 		"testkit",
+		actors.WithExtensions(testkit.extensions...),
 		actors.WithPassivationDisabled(),
 		actors.WithLogger(testkit.logger),
 		actors.WithActorInitTimeout(time.Second),
@@ -72,53 +78,48 @@ func New(ctx context.Context, t *testing.T, opts ...Option) *TestKit {
 }
 
 // ActorSystem returns the testkit actor system
-func (k *TestKit) ActorSystem() actors.ActorSystem {
-	return k.actorSystem
+func (x *TestKit) ActorSystem() actors.ActorSystem {
+	return x.actorSystem
 }
 
 // Spawn creates an actor
-func (k *TestKit) Spawn(ctx context.Context, name string, actor actors.Actor) {
+func (x *TestKit) Spawn(ctx context.Context, name string, actor actors.Actor) {
 	// create and instance of an actor
-	_, err := k.actorSystem.Spawn(ctx, name, actor)
-	// handle the error
-	if err != nil {
-		k.kt.Fatal(err.Error())
-	}
+	_, err := x.actorSystem.Spawn(ctx, name, actor)
+	require.NoError(x.gt, err)
 }
 
 // SpawnChild creates a child actor for an existing actor that is the parent
-func (k *TestKit) SpawnChild(ctx context.Context, childName, parentName string, actor actors.Actor) {
-	// locate the parent actor
-	parent, err := k.actorSystem.LocalActor(parentName)
-	// handle the error
-	if err != nil {
-		k.kt.Fatal(err.Error())
-	}
-
-	// spawn the child actor
+func (x *TestKit) SpawnChild(ctx context.Context, childName, parentName string, actor actors.Actor) {
+	parent, err := x.actorSystem.LocalActor(parentName)
+	require.NoError(x.gt, err)
 	_, err = parent.SpawnChild(ctx, childName, actor)
-	// handle the error
-	if err != nil {
-		k.kt.Fatal(err.Error())
-	}
+	require.NoError(x.gt, err)
+}
+
+// Subscribe creates an event subscriber to consume events from the actor system.
+// This is useful for testing event-driven behavior in actors, allowing you to
+// listen for events such as actor creation, termination, cluster events, or deadletters.
+// It unsubscribes automatically when the test completes to prevent memory leaks.
+func (x *TestKit) Subscribe() eventstream.Subscriber {
+	subscriber, err := x.actorSystem.Subscribe()
+	require.NoError(x.gt, err)
+	x.gt.Cleanup(func() {
+		require.NoError(x.gt, x.actorSystem.Unsubscribe(subscriber))
+	})
+	return subscriber
 }
 
 // NewProbe create a test probe
-func (k *TestKit) NewProbe(ctx context.Context) Probe {
-	// create an instance of TestProbe
-	testProbe, err := newProbe(ctx, k.actorSystem, k.kt)
-	// handle the error
-	if err != nil {
-		k.kt.Fatal(err.Error())
-	}
-
-	// return the created test probe
+func (x *TestKit) NewProbe(ctx context.Context) Probe {
+	testProbe, err := newProbe(ctx, x.actorSystem, x.gt)
+	require.NoError(x.gt, err)
 	return testProbe
 }
 
 // Shutdown stops the test kit
-func (k *TestKit) Shutdown(ctx context.Context) {
-	if err := k.actorSystem.Stop(ctx); err != nil {
-		k.kt.Fatal(err.Error())
+func (x *TestKit) Shutdown(ctx context.Context) {
+	if err := x.actorSystem.Stop(ctx); err != nil {
+		x.gt.Fatal(err.Error())
 	}
 }

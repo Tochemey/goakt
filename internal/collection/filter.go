@@ -22,18 +22,15 @@
  * SOFTWARE.
  */
 
-package slice
+package collection
 
-// Chunk helps chunk a slice into equal size
-func Chunk[T any](slice []T, chunkSize int) [][]T {
-	var chunks [][]T
-	for len(slice) != 0 {
-		// required to avoid slicing method beyond slice capacity
-		if len(slice) < chunkSize {
-			chunkSize = len(slice)
+// Filter returns a new slice containing elements from the input slice that satisfy the predicate.
+func Filter[T any](slice []T, predicate func(T) bool) []T {
+	var result []T
+	for _, v := range slice {
+		if predicate(v) {
+			result = append(result, v)
 		}
-		chunks = append(chunks, slice[0:chunkSize])
-		slice = slice[chunkSize:]
 	}
-	return chunks
+	return result
 }

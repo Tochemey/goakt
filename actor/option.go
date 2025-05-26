@@ -30,7 +30,7 @@ import (
 
 	"github.com/tochemey/goakt/v3/extension"
 	"github.com/tochemey/goakt/v3/hash"
-	"github.com/tochemey/goakt/v3/internal/collection/syncmap"
+	"github.com/tochemey/goakt/v3/internal/collection"
 	"github.com/tochemey/goakt/v3/log"
 	"github.com/tochemey/goakt/v3/remote"
 )
@@ -231,7 +231,7 @@ func WithoutRelocation() Option {
 func WithExtensions(extensions ...extension.Extension) Option {
 	return OptionFunc(func(system *actorSystem) {
 		if system.extensions == nil {
-			system.extensions = syncmap.New[string, extension.Extension]()
+			system.extensions = collection.NewMap[string, extension.Extension]()
 		}
 		for _, ext := range extensions {
 			system.extensions.Set(ext.ID(), ext)

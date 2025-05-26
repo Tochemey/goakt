@@ -22,15 +22,21 @@
  * SOFTWARE.
  */
 
-package slice
+package collection
 
-// Filter returns a new slice containing elements from the input slice that satisfy the predicate.
-func Filter[T any](slice []T, predicate func(T) bool) []T {
-	var result []T
-	for _, v := range slice {
-		if predicate(v) {
-			result = append(result, v)
-		}
-	}
-	return result
+import (
+	"testing"
+
+	"github.com/stretchr/testify/require"
+)
+
+func TestFilter(t *testing.T) {
+	slice := []int{1, 2, 3, 4, 5, 6, 7, 8, 9}
+	result := Filter(slice, func(v int) bool {
+		return v%2 == 0
+	})
+
+	expected := []int{2, 4, 6, 8}
+	require.Len(t, result, 4)
+	require.ElementsMatch(t, expected, result)
 }

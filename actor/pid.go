@@ -47,7 +47,7 @@ import (
 	"github.com/tochemey/goakt/v3/extension"
 	"github.com/tochemey/goakt/v3/future"
 	"github.com/tochemey/goakt/v3/goaktpb"
-	"github.com/tochemey/goakt/v3/internal/collection/syncmap"
+	"github.com/tochemey/goakt/v3/internal/collection"
 	"github.com/tochemey/goakt/v3/internal/errorschain"
 	"github.com/tochemey/goakt/v3/internal/eventstream"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
@@ -151,7 +151,7 @@ type PID struct {
 	relocatable atomic.Bool
 
 	// the list of dependencies
-	dependencies *syncmap.Map[string, extension.Dependency]
+	dependencies *collection.Map[string, extension.Dependency]
 }
 
 // newPID creates a new pid
@@ -185,7 +185,7 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 		remoting:              NewRemoting(),
 		supervisor:            NewSupervisor(),
 		startedAt:             atomic.NewInt64(0),
-		dependencies:          syncmap.New[string, extension.Dependency](),
+		dependencies:          collection.NewMap[string, extension.Dependency](),
 	}
 
 	pid.initMaxRetries.Store(DefaultInitMaxRetries)

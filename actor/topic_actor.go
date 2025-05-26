@@ -33,7 +33,7 @@ import (
 
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/cluster"
-	"github.com/tochemey/goakt/v3/internal/collection/syncmap"
+	"github.com/tochemey/goakt/v3/internal/collection"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/types"
 	"github.com/tochemey/goakt/v3/log"
@@ -56,8 +56,8 @@ type key struct {
 type topicActor struct {
 	pid *PID
 	// topics holds the list of all topics and their subscribers
-	topics    *syncmap.Map[string, *syncmap.Map[string, *PID]]
-	processed *syncmap.Map[key, types.Unit]
+	topics    *collection.Map[string, *collection.Map[string, *PID]]
+	processed *collection.Map[key, types.Unit]
 	logger    log.Logger
 
 	cluster     cluster.Interface
@@ -71,8 +71,8 @@ var _ Actor = (*topicActor)(nil)
 // newTopicActor creates a new cluster pubsub mediator.
 func newTopicActor(remoting *Remoting) Actor {
 	return &topicActor{
-		topics:    syncmap.New[string, *syncmap.Map[string, *PID]](),
-		processed: syncmap.New[key, types.Unit](),
+		topics:    collection.NewMap[string, *collection.Map[string, *PID]](),
+		processed: collection.NewMap[key, types.Unit](),
 		remoting:  remoting,
 	}
 }
@@ -257,7 +257,7 @@ func (x *topicActor) handleSubscribe(ctx *ReceiveContext) {
 		}
 
 		// here the topic does not exist
-		subscribers := syncmap.New[string, *PID]()
+		subscribers := collection.NewMap[string, *PID]()
 		subscribers.Set(sender.ID(), sender)
 		x.topics.Set(topic, subscribers)
 		ctx.Tell(sender, &goaktpb.SubscribeAck{Topic: topic})

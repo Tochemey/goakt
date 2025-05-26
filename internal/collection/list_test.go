@@ -22,7 +22,7 @@
  * SOFTWARE.
  */
 
-package slice
+package collection
 
 import (
 	"testing"
@@ -30,9 +30,9 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestSlice(t *testing.T) {
+func TestList(t *testing.T) {
 	// create a concurrent slice of integer
-	sl := New[int]()
+	sl := NewList[int]()
 
 	// add some items
 	sl.Append(2)
@@ -52,4 +52,9 @@ func TestSlice(t *testing.T) {
 	assert.Zero(t, sl.Get(4))
 	sl.Reset()
 	assert.Zero(t, sl.Len())
+	sl.AppendMany(1, 2, 3, 4, 5)
+	assert.EqualValues(t, 5, sl.Len())
+
+	// deleting an item that does not exist should not panic
+	sl.Delete(10)
 }

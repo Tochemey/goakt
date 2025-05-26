@@ -22,41 +22,18 @@
  * SOFTWARE.
  */
 
-package testkit
+package collection
 
-import (
-	"os"
-
-	"github.com/tochemey/goakt/v3/extension"
-	"github.com/tochemey/goakt/v3/log"
-)
-
-// Option is the interface that applies a Testkit option.
-type Option interface {
-	// Apply sets the Option value of a config.
-	Apply(kit *TestKit)
-}
-
-// enforce compilation error
-var _ Option = OptionFunc(nil)
-
-// OptionFunc implements the Option interface.
-type OptionFunc func(kit *TestKit)
-
-func (f OptionFunc) Apply(kit *TestKit) {
-	f(kit)
-}
-
-// WithLogging sets the Testkit logger
-func WithLogging(level log.Level) Option {
-	return OptionFunc(func(kit *TestKit) {
-		kit.logger = log.New(level, os.Stderr)
-	})
-}
-
-// WithExtensions adds extensions to the TestKit.
-func WithExtensions(extensions ...extension.Extension) Option {
-	return OptionFunc(func(kit *TestKit) {
-		kit.extensions = append(kit.extensions, extensions...)
-	})
+// Chunkify helps chunk a slice into equal size
+func Chunkify[T any](slice []T, chunkSize int) [][]T {
+	var chunks [][]T
+	for len(slice) != 0 {
+		// required to avoid slicing method beyond slice capacity
+		if len(slice) < chunkSize {
+			chunkSize = len(slice)
+		}
+		chunks = append(chunks, slice[0:chunkSize])
+		slice = slice[chunkSize:]
+	}
+	return chunks
 }

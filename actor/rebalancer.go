@@ -32,7 +32,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/tochemey/goakt/v3/goaktpb"
-	"github.com/tochemey/goakt/v3/internal/collection/slice"
+	"github.com/tochemey/goakt/v3/internal/collection"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/log"
 	"github.com/tochemey/goakt/v3/remote"
@@ -174,12 +174,12 @@ func (r *rebalancer) computeRebalancing(totalPeers int, nodeLeftState *internalp
 	}
 
 	// Separate singleton actors to be assigned to the leader
-	leaderShares = slice.Filter(toRebalances, func(actor *internalpb.Actor) bool {
+	leaderShares = collection.Filter(toRebalances, func(actor *internalpb.Actor) bool {
 		return actor.GetIsSingleton()
 	})
 
 	// Remove singleton actors from the list
-	toRebalances = slice.Filter(toRebalances, func(actor *internalpb.Actor) bool {
+	toRebalances = collection.Filter(toRebalances, func(actor *internalpb.Actor) bool {
 		return !actor.GetIsSingleton()
 	})
 
@@ -192,7 +192,7 @@ func (r *rebalancer) computeRebalancing(totalPeers int, nodeLeftState *internalp
 	leaderShares = append(leaderShares, toRebalances[:remainder]...)
 
 	// Chunk the remaining actors for peers
-	chunks := slice.Chunk(toRebalances[remainder:], quotient)
+	chunks := collection.Chunkify(toRebalances[remainder:], quotient)
 
 	// Ensure leader takes the first chunk
 	if len(chunks) > 0 {

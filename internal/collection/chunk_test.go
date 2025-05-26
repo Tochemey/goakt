@@ -22,21 +22,52 @@
  * SOFTWARE.
  */
 
-package slice
+package collection
 
 import (
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func TestFilter(t *testing.T) {
-	slice := []int{1, 2, 3, 4, 5, 6, 7, 8, 9}
-	result := Filter(slice, func(v int) bool {
-		return v%2 == 0
+func TestChunk(t *testing.T) {
+	t.Run("With empty slice", func(t *testing.T) {
+		var items []int
+		chunkSize := 2
+		chunks := Chunkify(items, chunkSize)
+		require.Empty(t, chunks)
 	})
+	t.Run("With chunk size a dividend of total number of items", func(t *testing.T) {
+		items := []int{2, 7, 9, 4, 6, 10}
+		chunkSize := 2
+		chunks := Chunkify(items, chunkSize)
+		expected := [][]int{
+			{2, 7},
+			{9, 4},
+			{6, 10},
+		}
 
-	expected := []int{2, 4, 6, 8}
-	require.Len(t, result, 4)
-	require.ElementsMatch(t, expected, result)
+		require.EqualValues(t, len(expected), len(chunks))
+		require.ElementsMatch(t, expected[0], chunks[0])
+		require.ElementsMatch(t, expected[1], chunks[1])
+		assert.ElementsMatch(t, expected[2], chunks[2])
+	})
+	t.Run("With chunk size not a dividend of total number of items", func(t *testing.T) {
+		items := []int{2, 7, 9, 4, 6, 10, 11}
+		chunkSize := 2
+		chunks := Chunkify(items, chunkSize)
+		expected := [][]int{
+			{2, 7},
+			{9, 4},
+			{6, 10},
+			{11},
+		}
+
+		require.EqualValues(t, len(expected), len(chunks))
+		require.ElementsMatch(t, expected[0], chunks[0])
+		require.ElementsMatch(t, expected[1], chunks[1])
+		require.ElementsMatch(t, expected[2], chunks[2])
+		assert.ElementsMatch(t, expected[3], chunks[3])
+	})
 }

@@ -41,7 +41,7 @@ import (
 
 	"github.com/tochemey/goakt/v3/address"
 	"github.com/tochemey/goakt/v3/goaktpb"
-	"github.com/tochemey/goakt/v3/internal/collection/syncmap"
+	"github.com/tochemey/goakt/v3/internal/collection"
 	"github.com/tochemey/goakt/v3/internal/util"
 	"github.com/tochemey/goakt/v3/log"
 	testkit "github.com/tochemey/goakt/v3/mocks/discovery"
@@ -831,7 +831,7 @@ func TestSupervisorStrategy(t *testing.T) {
 			strategy:   OneForOneStrategy,
 			maxRetries: 0,
 			timeout:    0,
-			directives: syncmap.New[string, Directive](),
+			directives: collection.NewMap[string, Directive](),
 		}
 
 		require.Len(t, parent.Children(), 1)
@@ -1179,7 +1179,7 @@ func TestSupervisorStrategy(t *testing.T) {
 			strategy:   OneForOneStrategy,
 			maxRetries: 0,
 			timeout:    0,
-			directives: syncmap.New[string, Directive](),
+			directives: collection.NewMap[string, Directive](),
 		}
 
 		require.Len(t, parent.Children(), 1)

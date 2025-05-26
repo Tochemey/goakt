@@ -25,7 +25,7 @@
 package eventstream
 
 import (
-	"github.com/tochemey/goakt/v3/internal/collection/syncmap"
+	"github.com/tochemey/goakt/v3/internal/collection"
 )
 
 type Stream interface {
@@ -49,8 +49,8 @@ type Stream interface {
 
 // EventsStream defines the stream broker
 type EventsStream struct {
-	subscribers *syncmap.Map[string, Subscriber]
-	topics      *syncmap.Map[string, *syncmap.Map[string, Subscriber]]
+	subscribers *collection.Map[string, Subscriber]
+	topics      *collection.Map[string, *collection.Map[string, Subscriber]]
 }
 
 // enforce a compilation error
@@ -59,8 +59,8 @@ var _ Stream = (*EventsStream)(nil)
 // New creates an instance of EventsStream
 func New() Stream {
 	return &EventsStream{
-		subscribers: syncmap.New[string, Subscriber](),
-		topics:      syncmap.New[string, *syncmap.Map[string, Subscriber]](),
+		subscribers: collection.NewMap[string, Subscriber](),
+		topics:      collection.NewMap[string, *collection.Map[string, Subscriber]](),
 	}
 }
 
@@ -119,7 +119,7 @@ func (b *EventsStream) Subscribe(subscriber Subscriber, topic string) {
 	}
 
 	// here the topic does not exist
-	subscribers := syncmap.New[string, Subscriber]()
+	subscribers := collection.NewMap[string, Subscriber]()
 	subscribers.Set(subscriber.ID(), subscriber)
 	b.topics.Set(topic, subscribers)
 }

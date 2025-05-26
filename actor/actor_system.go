@@ -59,7 +59,7 @@ import (
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/hash"
 	"github.com/tochemey/goakt/v3/internal/cluster"
-	"github.com/tochemey/goakt/v3/internal/collection/syncmap"
+	"github.com/tochemey/goakt/v3/internal/collection"
 	"github.com/tochemey/goakt/v3/internal/errorschain"
 	"github.com/tochemey/goakt/v3/internal/eventstream"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
@@ -211,8 +211,8 @@ type ActorSystem interface { //nolint:revive
 	// can use those methods directly instead of relying on Run.
 	Run(ctx context.Context, startHook func(ctx context.Context) error, stopHook func(ctx context.Context) error)
 	// TopicActor returns the topic actor. The topic actor is a system actor that manages a registry of actors that subscribe to topics.
-	// This actor must be started when cluster mode is enabled in all nodesMap before any actor subscribes.
-	// Messages published to a topic on other cluster nodes will be sent between the nodesMap once per active topic actor that has any local subscribers.
+	// This actor must be started when cluster mode is enabled in all nodes before any actor subscribes.
+	// Messages published to a topic on other cluster nodes will be sent between the nodes once per active topic actor that has any local subscribers.
 	// To be able to use the topic actor, one need to start the actor system with the WithCluster and WithPubSub options.
 	TopicActor() *PID
 	// Extensions returns a slice of all registered extensions in the ActorSystem.
@@ -369,7 +369,7 @@ type actorSystem struct {
 	pubsubEnabled    atomic.Bool
 	workerPool       *workerpool.WorkerPool
 	enableRelocation atomic.Bool
-	extensions       *syncmap.Map[string, extension.Extension]
+	extensions       *collection.Map[string, extension.Extension]
 }
 
 var (
@@ -415,7 +415,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		actorsCounter:          atomic.NewUint64(0),
 		deadlettersCounter:     atomic.NewUint64(0),
 		topicActor:             NoSender,
-		extensions:             syncmap.New[string, extension.Extension](),
+		extensions:             collection.NewMap[string, extension.Extension](),
 	}
 
 	system.enableRelocation.Store(true)
@@ -528,6 +528,11 @@ func (x *actorSystem) Run(ctx context.Context, startHook func(ctx context.Contex
 // To guarantee a clean shutdown during unexpected system terminations,
 // developers must handle SIGTERM and SIGINT signals appropriately and invoke Stop.
 func (x *actorSystem) Start(ctx context.Context) error {
+	// make sure we don't start the actor system twice
+	if x.started.Load() {
+		return ErrActorSystemAlreadyStarted
+	}
+
 	x.logger.Infof("%s actor system starting on %s/%s..", x.name, runtime.GOOS, runtime.GOARCH)
 	x.started.Store(true)
 	if err := errorschain.
