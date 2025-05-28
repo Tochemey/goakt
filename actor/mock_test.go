@@ -499,12 +499,6 @@ func withMockExtension(ext extension.Extension) testClusterOption {
 	}
 }
 
-func withMockDependency(dep extension.Dependency) testClusterOption {
-	return func(tcc *testClusterConfig) {
-		tcc.dependency = dep
-	}
-}
-
 func testCluster(t *testing.T, serverAddr string, opts ...testClusterOption) (ActorSystem, discovery.Provider) {
 	ctx := context.TODO()
 	logger := log.DiscardLogger

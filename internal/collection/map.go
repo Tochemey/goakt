@@ -22,7 +22,7 @@
  * SOFTWARE.
  */
 
-package syncmap
+package collection
 
 import "sync"
 
@@ -36,7 +36,7 @@ type Map[K comparable, V any] struct {
 	data map[K]V
 }
 
-// New creates and returns a new instance of Map.
+// NewMap creates and returns a new instance of Map.
 // It initializes the internal map for storing key-value pairs.
 //
 // Example usage:
@@ -44,7 +44,7 @@ type Map[K comparable, V any] struct {
 //	sm := New[string, int]()
 //	sm.Set("foo", 42)
 //	value, ok := sm.Get("foo")
-func New[K comparable, V any]() *Map[K, V] {
+func NewMap[K comparable, V any]() *Map[K, V] {
 	return &Map[K, V]{
 		data: make(map[K]V),
 	}

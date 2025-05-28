@@ -33,7 +33,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	"github.com/tochemey/goakt/v3/internal/collection/syncmap"
+	"github.com/tochemey/goakt/v3/internal/collection"
 )
 
 // Strategy represents the type of supervision strategy used by an actor's supervisor.
@@ -195,7 +195,7 @@ type Supervisor struct {
 	// Specifies the time range to restart the faulty actor
 	timeout time.Duration
 
-	directives *syncmap.Map[string, Directive]
+	directives *collection.Map[string, Directive]
 }
 
 // NewSupervisor creates a new instance of supervisor behavior for managing actor supervision.
@@ -215,7 +215,7 @@ func NewSupervisor(opts ...SupervisorOption) *Supervisor {
 	s := &Supervisor{
 		Mutex:      sync.Mutex{},
 		strategy:   OneForOneStrategy,
-		directives: syncmap.New[string, Directive](),
+		directives: collection.NewMap[string, Directive](),
 		maxRetries: 0,
 		timeout:    -1,
 	}
@@ -262,7 +262,7 @@ func (s *Supervisor) Timeout() time.Duration {
 func (s *Supervisor) Reset() {
 	s.Lock()
 	s.strategy = OneForAllStrategy
-	s.directives = syncmap.New[string, Directive]()
+	s.directives = collection.NewMap[string, Directive]()
 	s.Unlock()
 }
 

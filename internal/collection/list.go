@@ -22,25 +22,26 @@
  * SOFTWARE.
  */
 
-package slice
+package collection
 
 import (
+	"slices"
 	"sync"
 )
 
-// Slice type that can be safely shared between goroutines.
-type Slice[T any] struct {
+// List type that can be safely shared between goroutines.
+type List[T any] struct {
 	data []T
 	mu   sync.RWMutex
 }
 
-// New creates a new lock-free thread-safe slice.
-func New[T any]() *Slice[T] {
-	return &Slice[T]{data: []T{}}
+// NewList creates a new lock-free thread-safe slice.
+func NewList[T any]() *List[T] {
+	return &List[T]{data: []T{}}
 }
 
 // Len returns the number of items
-func (x *Slice[T]) Len() int {
+func (x *List[T]) Len() int {
 	x.mu.RLock()
 	l := len(x.data)
 	x.mu.RUnlock()
@@ -48,21 +49,21 @@ func (x *Slice[T]) Len() int {
 }
 
 // Append adds an item to the concurrent slice.
-func (x *Slice[T]) Append(item T) {
+func (x *List[T]) Append(item T) {
 	x.mu.Lock()
 	x.data = append(x.data, item)
 	x.mu.Unlock()
 }
 
 // AppendMany adds many items to the concurrent slice
-func (x *Slice[T]) AppendMany(item ...T) {
+func (x *List[T]) AppendMany(item ...T) {
 	x.mu.Lock()
 	x.data = append(x.data, item...)
 	x.mu.Unlock()
 }
 
 // Get returns the slice item at the given index
-func (x *Slice[T]) Get(index int) (item T) {
+func (x *List[T]) Get(index int) (item T) {
 	x.mu.RLock()
 	if index < 0 || index >= len(x.data) {
 		var zero T
@@ -74,18 +75,18 @@ func (x *Slice[T]) Get(index int) (item T) {
 }
 
 // Delete an item from the slice
-func (x *Slice[T]) Delete(index int) {
+func (x *List[T]) Delete(index int) {
 	x.mu.Lock()
 	if index < 0 || index >= len(x.data) {
 		x.mu.Unlock()
 		return
 	}
-	x.data = append(x.data[:index], x.data[index+1:]...)
+	x.data = slices.Delete(x.data, index, index+1)
 	x.mu.Unlock()
 }
 
 // Items returns the list of items
-func (x *Slice[T]) Items() []T {
+func (x *List[T]) Items() []T {
 	x.mu.RLock()
 	dataCopy := make([]T, len(x.data))
 	copy(dataCopy, x.data)
@@ -94,7 +95,7 @@ func (x *Slice[T]) Items() []T {
 }
 
 // Reset resets the slice
-func (x *Slice[T]) Reset() {
+func (x *List[T]) Reset() {
 	x.mu.Lock()
 	x.data = []T{}
 	x.mu.Unlock()

@@ -22,7 +22,7 @@
  * SOFTWARE.
  */
 
-package syncmap
+package collection
 
 import (
 	"slices"
@@ -33,14 +33,14 @@ import (
 )
 
 func TestNewAndSet(t *testing.T) {
-	sm := New[int, string]()
+	sm := NewMap[int, string]()
 	sm.Set(1, "one")
 	sm.Set(2, "two")
 	assert.Exactly(t, 2, sm.Len())
 }
 
 func TestGet(t *testing.T) {
-	sm := New[int, string]()
+	sm := NewMap[int, string]()
 	sm.Set(1, "one")
 
 	val, ok := sm.Get(1)
@@ -52,7 +52,7 @@ func TestGet(t *testing.T) {
 }
 
 func TestDelete(t *testing.T) {
-	sm := New[int, string]()
+	sm := NewMap[int, string]()
 	sm.Set(1, "one")
 	sm.Delete(1)
 	_, ok := sm.Get(1)
@@ -61,7 +61,7 @@ func TestDelete(t *testing.T) {
 }
 
 func TestLen(t *testing.T) {
-	sm := New[int, string]()
+	sm := NewMap[int, string]()
 	sm.Set(1, "one")
 	sm.Set(2, "two")
 	sm.Set(3, "three")
@@ -70,7 +70,7 @@ func TestLen(t *testing.T) {
 }
 
 func TestForEach(t *testing.T) {
-	sm := New[int, string]()
+	sm := NewMap[int, string]()
 	sm.Set(1, "one")
 	sm.Set(2, "two")
 

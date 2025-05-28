@@ -59,7 +59,7 @@ import (
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/hash"
 	"github.com/tochemey/goakt/v3/internal/cluster"
-	"github.com/tochemey/goakt/v3/internal/collection/syncmap"
+	"github.com/tochemey/goakt/v3/internal/collection"
 	"github.com/tochemey/goakt/v3/internal/errorschain"
 	"github.com/tochemey/goakt/v3/internal/eventstream"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
@@ -167,23 +167,23 @@ type ActorSystem interface { //nolint:revive
 	// ScheduleOnce schedules a message that will be delivered to the receiver actor
 	// This will send the given message to the actor after the given interval specified.
 	// The message will be sent once
-	ScheduleOnce(ctx context.Context, message proto.Message, pid *PID, interval time.Duration) error
+	ScheduleOnce(ctx context.Context, message proto.Message, pid *PID, interval time.Duration, opts ...SenderOption) error
 	// Schedule schedules a message that will be delivered to the receiver actor
 	// This will send the given message to the actor after the given interval specified.
-	Schedule(ctx context.Context, message proto.Message, pid *PID, interval time.Duration) error
+	Schedule(ctx context.Context, message proto.Message, pid *PID, interval time.Duration, opts ...SenderOption) error
 	// RemoteScheduleOnce schedules a message to be sent to a remote actor in the future.
 	// This requires remoting to be enabled on the actor system.
 	// This will send the given message to the actor after the given interval specified
 	// The message will be sent once
-	RemoteScheduleOnce(ctx context.Context, message proto.Message, address *address.Address, interval time.Duration) error
+	RemoteScheduleOnce(ctx context.Context, message proto.Message, address *address.Address, interval time.Duration, opts ...SenderOption) error
 	// RemoteSchedule schedules a message to be sent to a remote actor in the future.
 	// This requires remoting to be enabled on the actor system.
 	// This will send the given message to the actor after the given interval specified
-	RemoteSchedule(ctx context.Context, message proto.Message, address *address.Address, interval time.Duration) error
+	RemoteSchedule(ctx context.Context, message proto.Message, address *address.Address, interval time.Duration, opts ...SenderOption) error
 	// ScheduleWithCron schedules a message to be sent to an actor in the future using a cron expression.
-	ScheduleWithCron(ctx context.Context, message proto.Message, pid *PID, cronExpression string) error
+	ScheduleWithCron(ctx context.Context, message proto.Message, pid *PID, cronExpression string, opts ...SenderOption) error
 	// RemoteScheduleWithCron schedules a message to be sent to an actor in the future using a cron expression.
-	RemoteScheduleWithCron(ctx context.Context, message proto.Message, address *address.Address, cronExpression string) error
+	RemoteScheduleWithCron(ctx context.Context, message proto.Message, address *address.Address, cronExpression string, opts ...SenderOption) error
 	// PeerAddress returns the actor system address known in the cluster. That address is used by other nodes to communicate with the actor system.
 	// This address is empty when cluster mode is not activated
 	PeerAddress() string
@@ -211,8 +211,8 @@ type ActorSystem interface { //nolint:revive
 	// can use those methods directly instead of relying on Run.
 	Run(ctx context.Context, startHook func(ctx context.Context) error, stopHook func(ctx context.Context) error)
 	// TopicActor returns the topic actor. The topic actor is a system actor that manages a registry of actors that subscribe to topics.
-	// This actor must be started when cluster mode is enabled in all nodesMap before any actor subscribes.
-	// Messages published to a topic on other cluster nodes will be sent between the nodesMap once per active topic actor that has any local subscribers.
+	// This actor must be started when cluster mode is enabled in all nodes before any actor subscribes.
+	// Messages published to a topic on other cluster nodes will be sent between the nodes once per active topic actor that has any local subscribers.
 	// To be able to use the topic actor, one need to start the actor system with the WithCluster and WithPubSub options.
 	TopicActor() *PID
 	// Extensions returns a slice of all registered extensions in the ActorSystem.
@@ -369,7 +369,7 @@ type actorSystem struct {
 	pubsubEnabled    atomic.Bool
 	workerPool       *workerpool.WorkerPool
 	enableRelocation atomic.Bool
-	extensions       *syncmap.Map[string, extension.Extension]
+	extensions       *collection.Map[string, extension.Extension]
 }
 
 var (
@@ -415,7 +415,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		actorsCounter:          atomic.NewUint64(0),
 		deadlettersCounter:     atomic.NewUint64(0),
 		topicActor:             NoSender,
-		extensions:             syncmap.New[string, extension.Extension](),
+		extensions:             collection.NewMap[string, extension.Extension](),
 	}
 
 	system.enableRelocation.Store(true)
@@ -528,6 +528,11 @@ func (x *actorSystem) Run(ctx context.Context, startHook func(ctx context.Contex
 // To guarantee a clean shutdown during unexpected system terminations,
 // developers must handle SIGTERM and SIGINT signals appropriately and invoke Stop.
 func (x *actorSystem) Start(ctx context.Context) error {
+	// make sure we don't start the actor system twice
+	if x.started.Load() {
+		return ErrActorSystemAlreadyStarted
+	}
+
 	x.logger.Infof("%s actor system starting on %s/%s..", x.name, runtime.GOOS, runtime.GOARCH)
 	x.started.Store(true)
 	if err := errorschain.
@@ -653,40 +658,40 @@ func (x *actorSystem) Register(_ context.Context, actor Actor) error {
 
 // Schedule schedules a message that will be delivered to the receiver actor
 // This will send the given message to the actor at the given interval specified.
-func (x *actorSystem) Schedule(_ context.Context, message proto.Message, pid *PID, interval time.Duration) error {
-	return x.scheduler.Schedule(message, pid, interval)
+func (x *actorSystem) Schedule(_ context.Context, message proto.Message, pid *PID, interval time.Duration, opts ...SenderOption) error {
+	return x.scheduler.Schedule(message, pid, interval, opts...)
 }
 
 // RemoteSchedule schedules a message to be sent to a remote actor in the future.
 // This requires remoting to be enabled on the actor system.
 // This will send the given message to the actor at the given interval specified
-func (x *actorSystem) RemoteSchedule(_ context.Context, message proto.Message, address *address.Address, interval time.Duration) error {
-	return x.scheduler.RemoteSchedule(message, address, interval)
+func (x *actorSystem) RemoteSchedule(_ context.Context, message proto.Message, address *address.Address, interval time.Duration, opts ...SenderOption) error {
+	return x.scheduler.RemoteSchedule(message, address, interval, opts...)
 }
 
 // ScheduleOnce schedules a message that will be delivered to the receiver actor
 // This will send the given message to the actor after the given interval specified.
 // The message will be sent once
-func (x *actorSystem) ScheduleOnce(_ context.Context, message proto.Message, pid *PID, interval time.Duration) error {
-	return x.scheduler.ScheduleOnce(message, pid, interval)
+func (x *actorSystem) ScheduleOnce(_ context.Context, message proto.Message, pid *PID, interval time.Duration, opts ...SenderOption) error {
+	return x.scheduler.ScheduleOnce(message, pid, interval, opts...)
 }
 
 // RemoteScheduleOnce schedules a message to be sent to a remote actor in the future.
 // This requires remoting to be enabled on the actor system.
 // This will send the given message to the actor after the given interval specified
 // The message will be sent once
-func (x *actorSystem) RemoteScheduleOnce(_ context.Context, message proto.Message, address *address.Address, interval time.Duration) error {
-	return x.scheduler.RemoteScheduleOnce(message, address, interval)
+func (x *actorSystem) RemoteScheduleOnce(_ context.Context, message proto.Message, address *address.Address, interval time.Duration, opts ...SenderOption) error {
+	return x.scheduler.RemoteScheduleOnce(message, address, interval, opts...)
 }
 
 // ScheduleWithCron schedules a message to be sent to an actor in the future using a cron expression.
-func (x *actorSystem) ScheduleWithCron(_ context.Context, message proto.Message, pid *PID, cronExpression string) error {
-	return x.scheduler.ScheduleWithCron(message, pid, cronExpression)
+func (x *actorSystem) ScheduleWithCron(_ context.Context, message proto.Message, pid *PID, cronExpression string, opts ...SenderOption) error {
+	return x.scheduler.ScheduleWithCron(message, pid, cronExpression, opts...)
 }
 
 // RemoteScheduleWithCron schedules a message to be sent to an actor in the future using a cron expression.
-func (x *actorSystem) RemoteScheduleWithCron(_ context.Context, message proto.Message, address *address.Address, cronExpression string) error {
-	return x.scheduler.RemoteScheduleWithCron(message, address, cronExpression)
+func (x *actorSystem) RemoteScheduleWithCron(_ context.Context, message proto.Message, address *address.Address, cronExpression string, opts ...SenderOption) error {
+	return x.scheduler.RemoteScheduleWithCron(message, address, cronExpression, opts...)
 }
 
 // Subscribe creates an event subscriber to consume events from the actor system.

@@ -36,6 +36,7 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 
 	actors "github.com/tochemey/goakt/v3/actor"
+	"github.com/tochemey/goakt/v3/address"
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/timer"
 )
@@ -82,17 +83,58 @@ type Probe interface {
 	// This is useful when verifying actor shutdown behavior.
 	ExpectTerminated(actorName string)
 
-	// Send sends a message to the actor identified by name.
-	// This is typically used to test the actor's reaction to "Tell" messages (fire-and-forget).
+	// Send delivers a message to the actor identified by its registered name.
+	// This simulates a "Tell" pattern (fire-and-forget), where the sender does not expect a reply.
+	//
+	// This method is primarily used in test scenarios to validate how an actor handles incoming messages
+	// without waiting for a response. It is especially useful for verifying side effects or internal state changes
+	// triggered by the message.
+	//
+	// Parameters:
+	//   - actorName: the name of the target actor registered within the actor system.
+	//   - message: the protocol buffer message to send to the actor.
+	//
+	// Behavior:
+	//   - If the target actor does not exist, is unregistered, or is unreachable, the test will immediately fail.
+	//   - This method is designed for use with test probes and assumes that actor names are globally unique
+	//     or properly namespaced within the actor system.
+	//
+	// Notes:
+	//   - This is a convenience method for testing fire-and-forget scenarios.
+	//   - For request-response testing, consider using SendSync or SendSyncContext instead.
 	Send(actorName string, message proto.Message)
 
-	// SendSync sends a message to the target actor and waits for a response within the given timeout.
-	// This simulates an "Ask" pattern and is useful for testing request-reply behavior.
+	// SendSync sends a message to the specified actor and waits for a synchronous response within the given timeout duration.
+	// This method simulates the "Ask" pattern (request-response) and is primarily used in test scenarios to
+	// validate an actor's reply behavior and response correctness.
+	//
+	//
+	// Parameters:
+	//   - actorName: the registered name of the target actor to which the message should be sent.
+	//   - msg: the protocol buffer message to send to the actor.
+	//   - timeout: the duration to wait for a response before failing the test.
+	//
+	// Returns:
+	//   - The response as a proto.Message if the actor responds within the timeout period.
+	//   - The test will fail immediately if:
+	//       - The actor does not exist or is not reachable.
+	//       - The actor fails to respond within the timeout.
+	//       - An internal error occurs during the send or receive operation.
+	//
+	// Notes:
+	//   - This method is intended for use within testing frameworks via a test probe.
+	//   - Should not be used in production code as it couples testing and actor system internals.
 	SendSync(actorName string, message proto.Message, timeout time.Duration)
 
 	// Sender returns the PID (Process Identifier) of the sender of the last received message.
 	// This is useful when testing interactions involving message origins.
+	// When running the multi-node test, this will return a nil PID if the message was sent from a remote actor.
+	// In that case the remote sender can be retrieved using the SenderAddress() method.
 	Sender() *actors.PID
+
+	// SenderAddress returns the address of the sender of the last received message.
+	// This is useful when testing interactions involving message origins, especially in multi-node scenarios.
+	SenderAddress() *address.Address
 
 	// PID returns the PID of the probe itself, which can be used as the sender
 	// in test scenarios where the tested actor expects a sender reference.
@@ -128,8 +170,9 @@ type Probe interface {
 }
 
 type message struct {
-	sender  *actors.PID
-	payload proto.Message
+	sender        *actors.PID
+	senderAddress *address.Address
+	payload       proto.Message
 }
 
 type probeActor struct {
@@ -144,18 +187,18 @@ func (x *probeActor) PreStart(_ *actors.Context) error {
 	return nil
 }
 
-// Receive handle message received
+// Receive handles received messages for the probe actor.
 func (x *probeActor) Receive(ctx *actors.ReceiveContext) {
 	switch ctx.Message().(type) {
-	// skip system message
 	case *goaktpb.PoisonPill,
 		*goaktpb.PostStart:
 	// pass
 	default:
 		// any message received is pushed to the queue
 		x.messageQueue <- message{
-			sender:  ctx.Sender(),
-			payload: ctx.Message(),
+			sender:        ctx.Sender(),
+			payload:       ctx.Message(),
+			senderAddress: ctx.RemoteSender(),
 		}
 	}
 }
@@ -169,13 +212,14 @@ func (x *probeActor) PostStop(_ *actors.Context) error {
 type probe struct {
 	testingT *testing.T
 
-	testCtx        context.Context
-	pid            *actors.PID
-	lastMessage    proto.Message
-	lastSender     *actors.PID
-	messageQueue   chan message
-	defaultTimeout time.Duration
-	timers         *timer.Pool
+	testCtx           context.Context
+	pid               *actors.PID
+	lastMessage       proto.Message
+	lastSender        *actors.PID
+	lastSenderAddress *address.Address
+	messageQueue      chan message
+	defaultTimeout    time.Duration
+	timers            *timer.Pool
 }
 
 // ensure that probe implements Probe
@@ -257,24 +301,86 @@ func (x *probe) ExpectAnyMessageWithin(duration time.Duration) proto.Message {
 	return x.expectAnyMessage(duration)
 }
 
-// Send sends a message to the actor identified by name.
-// This is typically used to test the actor's reaction to "Tell" messages (fire-and-forget).
+// Send delivers a message to the actor identified by its registered name.
+// This simulates a "Tell" pattern (fire-and-forget), where the sender does not expect a reply.
+//
+// This method is primarily used in test scenarios to validate how an actor handles incoming messages
+// without waiting for a response. It is especially useful for verifying side effects or internal state changes
+// triggered by the message.
+//
+// Parameters:
+//   - actorName: the name of the target actor registered within the actor system.
+//   - message: the protocol buffer message to send to the actor.
+//
+// Behavior:
+//   - If the target actor does not exist, is unregistered, or is unreachable, the test will immediately fail.
+//   - This method is designed for use with test probes and assumes that actor names are globally unique
+//     or properly namespaced within the actor system.
+//
+// Notes:
+//   - This is a convenience method for testing fire-and-forget scenarios.
+//   - For request-response testing, consider using SendSync or SendSyncContext instead.
 func (x *probe) Send(actorName string, message proto.Message) {
+	if x.pid.ActorSystem().InCluster() {
+		err := x.pid.SendAsync(x.testCtx, actorName, message)
+		require.NoError(x.testingT, err)
+		return
+	}
+
 	to, err := x.pid.ActorSystem().LocalActor(actorName)
 	require.NoError(x.testingT, err)
 	require.NoError(x.testingT, x.pid.Tell(x.testCtx, to, message))
 }
 
-// SendSync sends a message to the target actor and waits for a response within the given timeout.
-// This simulates an "Ask" pattern and is useful for testing request-reply behavior.
+// SendSync sends a message to the specified actor and waits for a synchronous response within the given timeout duration.
+// This method simulates the "Ask" pattern (request-response) and is primarily used in test scenarios to
+// validate an actor's reply behavior and response correctness.
+//
+// Unlike SendContext, which uses a context for cancellation and timeout, SendSync directly relies on the provided
+// timeout value for awaiting a response.
+//
+// Parameters:
+//   - actorName: the registered name of the target actor to which the message should be sent.
+//   - msg: the protocol buffer message to send to the actor.
+//   - timeout: the duration to wait for a response before failing the test.
+//
+// Returns:
+//   - The response as a proto.Message if the actor responds within the timeout period.
+//   - The test will fail immediately if:
+//   - The actor does not exist or is not reachable.
+//   - The actor fails to respond within the timeout.
+//   - An internal error occurs during the send or receive operation.
+//
+// Notes:
+//   - This method is intended for use within testing frameworks via a test probe.
+//   - Should not be used in production code as it couples testing and actor system internals.
 func (x *probe) SendSync(actorName string, msg proto.Message, timeout time.Duration) {
-	to, err := x.pid.ActorSystem().LocalActor(actorName)
-	require.NoError(x.testingT, err)
-	received, err := x.pid.Ask(x.testCtx, to, msg, timeout)
-	require.NoError(x.testingT, err)
+	var (
+		received  proto.Message
+		err       error
+		to        *actors.PID
+		toAddress *address.Address
+	)
+
+	if x.pid.ActorSystem().InCluster() {
+		toAddress, err = x.pid.ActorSystem().RemoteActor(x.testCtx, actorName)
+		require.NoError(x.testingT, err)
+		require.NotNil(x.testingT, toAddress)
+		require.False(x.testingT, toAddress.Equals(address.NoSender()))
+		received, err = x.pid.SendSync(x.testCtx, actorName, msg, timeout)
+		require.NoError(x.testingT, err)
+	} else {
+		to, err = x.pid.ActorSystem().LocalActor(actorName)
+		require.NoError(x.testingT, err)
+		received, err = x.pid.Ask(x.testCtx, to, msg, timeout)
+		require.NoError(x.testingT, err)
+		toAddress = to.Address()
+	}
+
 	x.messageQueue <- message{
-		sender:  to,
-		payload: received,
+		sender:        to,
+		senderAddress: toAddress,
+		payload:       received,
 	}
 }
 
@@ -282,6 +388,12 @@ func (x *probe) SendSync(actorName string, msg proto.Message, timeout time.Durat
 // This is useful when testing interactions involving message origins.
 func (x *probe) Sender() *actors.PID {
 	return x.lastSender
+}
+
+// SenderAddress returns the address of the sender of the last received message.
+// This is useful when testing interactions involving message origins, especially in multi-node scenarios.
+func (x *probe) SenderAddress() *address.Address {
+	return x.lastSenderAddress
 }
 
 // PID returns the PID of the probe itself, which can be used as the sender
@@ -348,6 +460,7 @@ func (x *probe) receiveOne(duration time.Duration) proto.Message {
 		if m.payload != nil {
 			x.lastMessage = m.payload
 			x.lastSender = m.sender
+			x.lastSenderAddress = m.senderAddress
 		}
 		return m.payload
 	case <-t.C:
@@ -361,7 +474,7 @@ func (x *probe) expectMessage(duration time.Duration, message proto.Message) {
 	// receive one message
 	received := x.receiveOne(duration)
 	// let us assert the received message
-	require.NotNil(x.testingT, received, fmt.Sprintf("timeout (%v) during expectMessage while waiting for %v", duration, message))
+	require.NotNil(x.testingT, received, fmt.Sprintf("timeout (%v) during expectMessage while waiting for %v", duration, message.ProtoReflect().Descriptor().FullName()))
 	require.Equal(x.testingT, prototext.Format(message), prototext.Format(received), fmt.Sprintf("expected %v, found %v", message, received))
 }
 

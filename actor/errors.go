@@ -99,6 +99,8 @@ var (
 	ErrDependencyTypeNotRegistered = errors.New("dependency type is not registered")
 	// ErrInstanceNotDependency is returned when we failed to create the instance of a dependency
 	ErrInstanceNotDependency = errors.New("failed to create instance. Reason: instance does not implement the Dependency interface")
+	// ErrActorSystemAlreadyStarted is returned when the actor system has already started
+	ErrActorSystemAlreadyStarted = errors.New("actor system has already started")
 )
 
 // eof returns true if the given error is an EOF error

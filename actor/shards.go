@@ -38,12 +38,12 @@ type shard struct {
 	m map[string]any
 }
 
-// ShardedMap defines a concurrent map with sharding for
+// shards defines a concurrent map with sharding for
 // scalability
-type shardedMap []*shard
+type shards []*shard
 
-// newShardedMap creates an instance of ShardedMap
-func newShardedMap() shardedMap {
+// newShards creates an instance of shards
+func newShards() shards {
 	numShards := calculateNumShards()
 	shards := make([]*shard, numShards)
 	for i := range numShards {
@@ -55,7 +55,7 @@ func newShardedMap() shardedMap {
 }
 
 // Load returns the value of a given key
-func (s shardedMap) Load(key string) (any, bool) {
+func (s shards) Load(key string) (any, bool) {
 	shard := s.getShard(key)
 	shard.RLock()
 	val, ok := shard.m[key]
@@ -64,7 +64,7 @@ func (s shardedMap) Load(key string) (any, bool) {
 }
 
 // Store adds a key/value pair to the sharded map
-func (s shardedMap) Store(key string, value any) {
+func (s shards) Store(key string, value any) {
 	shard := s.getShard(key)
 	shard.Lock()
 	shard.m[key] = value
@@ -72,7 +72,7 @@ func (s shardedMap) Store(key string, value any) {
 }
 
 // Delete removes a given key from the sharded map
-func (s shardedMap) Delete(key string) {
+func (s shards) Delete(key string) {
 	shard := s.getShard(key)
 	shard.Lock()
 	delete(shard.m, key)
@@ -80,7 +80,7 @@ func (s shardedMap) Delete(key string) {
 }
 
 // Range given a function iterate over the sharded map
-func (s shardedMap) Range(f func(key, value any)) {
+func (s shards) Range(f func(key, value any)) {
 	for i := range s {
 		shard := s[i]
 		shard.RLock()
@@ -92,7 +92,7 @@ func (s shardedMap) Range(f func(key, value any)) {
 }
 
 // Reset resets the sharded map
-func (s shardedMap) Reset() {
+func (s shards) Reset() {
 	// Reset each Shard's map
 	for i := range s {
 		shard := s[i]
@@ -103,7 +103,7 @@ func (s shardedMap) Reset() {
 }
 
 // getShard returns the given Shard for a given key
-func (s shardedMap) getShard(key string) *shard {
+func (s shards) getShard(key string) *shard {
 	hash := fnv64(key) % uint64(len(s))
 	return s[int(hash)]
 }

@@ -27,7 +27,7 @@ package actor
 import (
 	"sync/atomic"
 
-	"github.com/tochemey/goakt/v3/internal/collection/slice"
+	"github.com/tochemey/goakt/v3/internal/collection"
 )
 
 // value represents the data stored in each
@@ -46,9 +46,9 @@ func (v *value) data() *PID {
 type treeNode struct {
 	ID          string
 	_value      atomic.Pointer[value]
-	Descendants *slice.Slice[*treeNode]
-	Watchers    *slice.Slice[*treeNode]
-	Watchees    *slice.Slice[*treeNode]
+	Descendants *collection.List[*treeNode]
+	Watchers    *collection.List[*treeNode]
+	Watchees    *collection.List[*treeNode]
 }
 
 // setValue sets a node value

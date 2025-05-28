@@ -28,7 +28,7 @@ import (
 	"time"
 
 	"github.com/tochemey/goakt/v3/extension"
-	"github.com/tochemey/goakt/v3/internal/collection/syncmap"
+	"github.com/tochemey/goakt/v3/internal/collection"
 	"github.com/tochemey/goakt/v3/internal/eventstream"
 	"github.com/tochemey/goakt/v3/internal/workerpool"
 	"github.com/tochemey/goakt/v3/log"
@@ -140,7 +140,7 @@ func withRelocationDisabled() pidOption {
 func withDependencies(dependencies ...extension.Dependency) pidOption {
 	return func(pid *PID) {
 		if pid.dependencies == nil {
-			pid.dependencies = syncmap.New[string, extension.Dependency]()
+			pid.dependencies = collection.NewMap[string, extension.Dependency]()
 		}
 		for _, dependency := range dependencies {
 			pid.dependencies.Set(dependency.ID(), dependency)

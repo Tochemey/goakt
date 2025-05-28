@@ -30,30 +30,30 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/tochemey/goakt/v3/internal/collection/slice"
+	"github.com/tochemey/goakt/v3/internal/collection"
 )
 
 // tree represents the entire actors Tree structure
 type tree struct {
-	nodesMap   shardedMap
-	parentsMap shardedMap
-	nodePool   *sync.Pool
-	valuePool  *sync.Pool
-	counter    atomic.Int64
-	rootNode   *treeNode
+	nodeShards   shards
+	parentShards shards
+	nodePool     *sync.Pool
+	valuePool    *sync.Pool
+	counter      atomic.Int64
+	rootNode     *treeNode
 }
 
 // newTree creates a new instance of the actors Tree
 func newTree() *tree {
 	return &tree{
-		nodesMap:   newShardedMap(),
-		parentsMap: newShardedMap(),
+		nodeShards:   newShards(),
+		parentShards: newShards(),
 		nodePool: &sync.Pool{
 			New: func() any {
 				return &treeNode{
-					Descendants: slice.New[*treeNode](),
-					Watchees:    slice.New[*treeNode](),
-					Watchers:    slice.New[*treeNode](),
+					Descendants: collection.NewList[*treeNode](),
+					Watchees:    collection.NewList[*treeNode](),
+					Watchers:    collection.NewList[*treeNode](),
 				}
 			},
 		},
@@ -98,7 +98,7 @@ func (x *tree) addNode(parent, child *PID) error {
 	newNode.setValue(val)
 
 	// store the node in the tree
-	x.nodesMap.Store(child.ID(), newNode)
+	x.nodeShards.Store(child.ID(), newNode)
 
 	// when parentNode is defined
 	if parentNode != nil {
@@ -190,7 +190,7 @@ func (x *tree) deleteNode(pid *PID) {
 	}
 
 	// remove the node from its parent's Children slice
-	if ancestors, ok := x.parentsMap.Load(pid.ID()); ok && len(ancestors.([]string)) > 0 {
+	if ancestors, ok := x.parentShards.Load(pid.ID()); ok && len(ancestors.([]string)) > 0 {
 		parentID := ancestors.([]string)[0]
 		if parent, found := x.node(parentID); found {
 			children := filterOutChild(parent.Descendants, pid.ID())
@@ -207,8 +207,8 @@ func (x *tree) deleteNode(pid *PID) {
 			deleteChildren(child)
 		}
 		// delete node from maps and pool
-		x.nodesMap.Delete(n.ID)
-		x.parentsMap.Delete(n.ID)
+		x.nodeShards.Delete(n.ID)
+		x.parentShards.Delete(n.ID)
 		x.nodePool.Put(n)
 		x.counter.Add(-1)
 	}
@@ -218,7 +218,7 @@ func (x *tree) deleteNode(pid *PID) {
 
 // node retrieves a node by its ID
 func (x *tree) node(id string) (*treeNode, bool) {
-	value, ok := x.nodesMap.Load(id)
+	value, ok := x.nodeShards.Load(id)
 	if !ok {
 		return nil, false
 	}
@@ -232,7 +232,7 @@ func (x *tree) nodes() []*treeNode {
 		return nil
 	}
 	var nodes []*treeNode
-	x.nodesMap.Range(func(_, value any) {
+	x.nodeShards.Range(func(_, value any) {
 		node := value.(*treeNode)
 		nodes = append(nodes, node)
 	})
@@ -246,14 +246,14 @@ func (x *tree) length() int64 {
 
 // reset clears all nodes and parents, resetting the tree to an empty state
 func (x *tree) reset() {
-	x.nodesMap.Reset()   // Reset nodesMap map
-	x.parentsMap.Reset() // Reset parents map
+	x.nodeShards.Reset()   // Reset nodesMap map
+	x.parentShards.Reset() // Reset parents map
 	x.counter.Store(0)
 }
 
 // ancestorIDs returns the list of ancestor nodesMap
 func (x *tree) ancestorIDs(id string) ([]string, bool) {
-	if value, ok := x.parentsMap.Load(id); ok {
+	if value, ok := x.parentShards.Load(id); ok {
 		return value.([]string), true
 	}
 	return nil, false
@@ -270,14 +270,14 @@ func (x *tree) addChild(parent *treeNode, child *treeNode) {
 func (x *tree) updateAncestors(parentID, childID string) {
 	switch ancestors, ok := x.ancestorIDs(parentID); {
 	case ok:
-		x.parentsMap.Store(childID, append([]string{parentID}, ancestors...))
+		x.parentShards.Store(childID, append([]string{parentID}, ancestors...))
 	default:
-		x.parentsMap.Store(childID, []string{parentID})
+		x.parentShards.Store(childID, []string{parentID})
 	}
 }
 
 // filterOutChild removes the node with the given ID from the Children slice.
-func filterOutChild(children *slice.Slice[*treeNode], childID string) *slice.Slice[*treeNode] {
+func filterOutChild(children *collection.List[*treeNode], childID string) *collection.List[*treeNode] {
 	for i, child := range children.Items() {
 		if child.ID == childID {
 			children.Delete(i)
@@ -289,7 +289,7 @@ func filterOutChild(children *slice.Slice[*treeNode], childID string) *slice.Sli
 
 // collectDescendants collects all the descendants and grand children
 func collectDescendants(node *treeNode) []*treeNode {
-	output := slice.New[*treeNode]()
+	output := collection.NewList[*treeNode]()
 
 	var recursive func(*treeNode)
 	recursive = func(currentNode *treeNode) {
