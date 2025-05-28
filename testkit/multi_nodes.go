@@ -258,6 +258,7 @@ func (m *MultiNodes) StartNode(ctx context.Context, name string) *TestNode {
 		nodeName:    name,
 		testingT:    m.gt,
 		created:     atomic.NewBool(true),
+		testCtx:     ctx,
 	}
 
 	m.nodes.Set(name, node)

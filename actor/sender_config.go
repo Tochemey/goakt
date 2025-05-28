@@ -26,46 +26,63 @@ package actor
 
 import "github.com/tochemey/goakt/v3/address"
 
-type schedulerContext struct {
-	sender *senderConfig
-}
-
 type senderConfig struct {
 	sender     *PID
 	senderAddr *address.Address
 }
 
-func newSenderConfig() *senderConfig {
-	return &senderConfig{
+// newSenderConfig creates and returns a new senderConfig instance using the provided SenderOption arguments.
+// Options are applied sequentially to configure the instance.
+func newSenderConfig(opts ...SenderOption) *senderConfig {
+	config := &senderConfig{
 		sender:     NoSender,
 		senderAddr: address.NoSender(),
 	}
+
+	for _, opt := range opts {
+		opt.Apply(config)
+	}
+	return config
 }
 
+// Sender retrieves and returns the associated sender PID from the senderConfig instance.
 func (s *senderConfig) Sender() *PID {
 	return s.sender
 }
 
+// SenderAddr retrieves and returns the sender's address from the senderConfig instance.
 func (s *senderConfig) SenderAddr() *address.Address {
 	return s.senderAddr
 }
 
-type SchedulerContextOption interface {
+// SenderOption defines an interface for applying configuration options to a senderConfig instance
+type SenderOption interface {
 	// Apply sets the Option value of a config.
-	Apply(*schedulerContext)
+	Apply(*senderConfig)
 }
 
 // enforce compilation error
-var _ SchedulerContextOption = SchedulerContextOptionFunc(nil)
+var _ SenderOption = SenderOptionFunc(nil)
 
-type SchedulerContextOptionFunc func(*schedulerContext)
+// SenderOptionFunc is a function type used to configure a senderConfig instance.
+// It implements the SenderOption interface by applying modifications to senderConfig.
+type SenderOptionFunc func(*senderConfig)
 
-func (f SchedulerContextOptionFunc) Apply(c *schedulerContext) {
+// Apply applies the SenderOptionFunc to the given senderConfig instance, modifying its fields as defined within the function.
+func (f SenderOptionFunc) Apply(c *senderConfig) {
 	f(c)
 }
 
-func WithSchedulerSender(sender *senderConfig) SchedulerContextOption {
-	return SchedulerContextOptionFunc(func(c *schedulerContext) {
+// WithSender returns a SenderOption that sets the sender.
+func WithSender(sender *PID) SenderOption {
+	return SenderOptionFunc(func(c *senderConfig) {
 		c.sender = sender
+	})
+}
+
+// WithSenderAddress sets the sender address and returns a SenderOption.
+func WithSenderAddress(addr *address.Address) SenderOption {
+	return SenderOptionFunc(func(c *senderConfig) {
+		c.senderAddr = addr
 	})
 }

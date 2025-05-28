@@ -474,7 +474,7 @@ func (x *probe) expectMessage(duration time.Duration, message proto.Message) {
 	// receive one message
 	received := x.receiveOne(duration)
 	// let us assert the received message
-	require.NotNil(x.testingT, received, fmt.Sprintf("timeout (%v) during expectMessage while waiting for %v", duration, message))
+	require.NotNil(x.testingT, received, fmt.Sprintf("timeout (%v) during expectMessage while waiting for %v", duration, message.ProtoReflect().Descriptor().FullName()))
 	require.Equal(x.testingT, prototext.Format(message), prototext.Format(received), fmt.Sprintf("expected %v, found %v", message, received))
 }
 

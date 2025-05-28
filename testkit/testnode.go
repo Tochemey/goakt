@@ -46,6 +46,7 @@ type TestNode struct {
 	nodeName    string             // The unique name of the test node.
 	testingT    *testing.T         // The testing context for reporting errors and assertions.
 	created     *atomic.Bool
+	testCtx     context.Context
 }
 
 // NodeName returns the name of the test node, which can be used for identification

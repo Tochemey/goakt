@@ -124,7 +124,7 @@ func (x *scheduler) Stop(ctx context.Context) {
 // ScheduleOnce schedules a message that will be delivered to the receiver actor
 // This will send the given message to the actor after the given interval specified.
 // The message will be sent once
-func (x *scheduler) ScheduleOnce(message proto.Message, pid *PID, interval time.Duration) error {
+func (x *scheduler) ScheduleOnce(message proto.Message, pid *PID, interval time.Duration, opts ...SenderOption) error {
 	x.mu.Lock()
 	defer x.mu.Unlock()
 
@@ -132,12 +132,18 @@ func (x *scheduler) ScheduleOnce(message proto.Message, pid *PID, interval time.
 		return ErrSchedulerNotStarted
 	}
 
+	senderConfig := newSenderConfig(opts...)
+	sender := senderConfig.Sender()
+
 	job := job.NewFunctionJob[bool](
 		func(ctx context.Context) (bool, error) {
-			if err := Tell(ctx, pid, message); err != nil {
-				return false, err
+			var err error
+			if !sender.Equals(NoSender) {
+				err = sender.Tell(ctx, pid, message)
+			} else {
+				err = Tell(ctx, pid, message)
 			}
-			return true, nil
+			return err == nil, err
 		},
 	)
 
@@ -147,7 +153,7 @@ func (x *scheduler) ScheduleOnce(message proto.Message, pid *PID, interval time.
 }
 
 // Schedule schedules a message that will be delivered to the receiving actor using the given interval specified
-func (x *scheduler) Schedule(message proto.Message, pid *PID, interval time.Duration) error {
+func (x *scheduler) Schedule(message proto.Message, pid *PID, interval time.Duration, opts ...SenderOption) error {
 	x.mu.Lock()
 	defer x.mu.Unlock()
 
@@ -155,12 +161,18 @@ func (x *scheduler) Schedule(message proto.Message, pid *PID, interval time.Dura
 		return ErrSchedulerNotStarted
 	}
 
+	senderConfig := newSenderConfig(opts...)
+	sender := senderConfig.Sender()
+
 	job := job.NewFunctionJob[bool](
 		func(ctx context.Context) (bool, error) {
-			if err := Tell(ctx, pid, message); err != nil {
-				return false, err
+			var err error
+			if !sender.Equals(NoSender) {
+				err = sender.Tell(ctx, pid, message)
+			} else {
+				err = Tell(ctx, pid, message)
 			}
-			return true, nil
+			return err == nil, err
 		},
 	)
 
@@ -170,19 +182,25 @@ func (x *scheduler) Schedule(message proto.Message, pid *PID, interval time.Dura
 }
 
 // ScheduleWithCron schedules a message to be sent to an actor in the future using a cron expression.
-func (x *scheduler) ScheduleWithCron(message proto.Message, pid *PID, cronExpression string) error {
+func (x *scheduler) ScheduleWithCron(message proto.Message, pid *PID, cronExpression string, opts ...SenderOption) error {
 	x.mu.Lock()
 	defer x.mu.Unlock()
 	if !x.started.Load() {
 		return ErrSchedulerNotStarted
 	}
 
+	senderConfig := newSenderConfig(opts...)
+	sender := senderConfig.Sender()
+
 	job := job.NewFunctionJob[bool](
 		func(ctx context.Context) (bool, error) {
-			if err := Tell(ctx, pid, message); err != nil {
-				return false, err
+			var err error
+			if !sender.Equals(NoSender) {
+				err = sender.Tell(ctx, pid, message)
+			} else {
+				err = Tell(ctx, pid, message)
 			}
-			return true, nil
+			return err == nil, err
 		},
 	)
 
@@ -202,7 +220,7 @@ func (x *scheduler) ScheduleWithCron(message proto.Message, pid *PID, cronExpres
 // This requires remoting to be enabled on the actor system.
 // This will send the given message to the actor after the given interval specified
 // The message will be sent once
-func (x *scheduler) RemoteScheduleOnce(message proto.Message, to *address.Address, interval time.Duration) error {
+func (x *scheduler) RemoteScheduleOnce(message proto.Message, to *address.Address, interval time.Duration, opts ...SenderOption) error {
 	x.mu.Lock()
 	defer x.mu.Unlock()
 
@@ -214,13 +232,12 @@ func (x *scheduler) RemoteScheduleOnce(message proto.Message, to *address.Addres
 		return ErrRemotingDisabled
 	}
 
+	senderConfig := newSenderConfig(opts...)
 	job := job.NewFunctionJob[bool](
 		func(ctx context.Context) (bool, error) {
-			from := address.NoSender()
-			if err := x.remoting.RemoteTell(ctx, from, to, message); err != nil {
-				return false, err
-			}
-			return true, nil
+			from := senderConfig.SenderAddr()
+			err := x.remoting.RemoteTell(ctx, from, to, message)
+			return err == nil, err
 		},
 	)
 
@@ -233,7 +250,7 @@ func (x *scheduler) RemoteScheduleOnce(message proto.Message, to *address.Addres
 // RemoteSchedule schedules a message to be sent to a remote actor in the future.
 // This requires remoting to be enabled on the actor system.
 // This will send the given message to the actor at the given interval specified
-func (x *scheduler) RemoteSchedule(message proto.Message, to *address.Address, interval time.Duration) error {
+func (x *scheduler) RemoteSchedule(message proto.Message, to *address.Address, interval time.Duration, opts ...SenderOption) error {
 	x.mu.Lock()
 	defer x.mu.Unlock()
 
@@ -245,13 +262,12 @@ func (x *scheduler) RemoteSchedule(message proto.Message, to *address.Address, i
 		return ErrRemotingDisabled
 	}
 
+	senderConfig := newSenderConfig(opts...)
 	job := job.NewFunctionJob[bool](
 		func(ctx context.Context) (bool, error) {
-			from := address.NoSender()
-			if err := x.remoting.RemoteTell(ctx, from, to, message); err != nil {
-				return false, err
-			}
-			return true, nil
+			from := senderConfig.SenderAddr()
+			err := x.remoting.RemoteTell(ctx, from, to, message)
+			return err == nil, err
 		},
 	)
 
@@ -262,7 +278,7 @@ func (x *scheduler) RemoteSchedule(message proto.Message, to *address.Address, i
 }
 
 // RemoteScheduleWithCron schedules a message to be sent to an actor in the future using a cron expression.
-func (x *scheduler) RemoteScheduleWithCron(message proto.Message, to *address.Address, cronExpression string) error {
+func (x *scheduler) RemoteScheduleWithCron(message proto.Message, to *address.Address, cronExpression string, opts ...SenderOption) error {
 	x.mu.Lock()
 	defer x.mu.Unlock()
 
@@ -274,13 +290,12 @@ func (x *scheduler) RemoteScheduleWithCron(message proto.Message, to *address.Ad
 		return ErrRemotingDisabled
 	}
 
+	senderConfig := newSenderConfig(opts...)
 	job := job.NewFunctionJob[bool](
 		func(ctx context.Context) (bool, error) {
-			from := address.NoSender()
-			if err := x.remoting.RemoteTell(ctx, from, to, message); err != nil {
-				return false, err
-			}
-			return true, nil
+			from := senderConfig.SenderAddr()
+			err := x.remoting.RemoteTell(ctx, from, to, message)
+			return err == nil, err
 		},
 	)
 
