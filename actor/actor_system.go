@@ -796,7 +796,7 @@ func (x *actorSystem) SpawnNamedFromFunc(ctx context.Context, name string, recei
 		}
 	}
 
-	pid, err := x.configPID(ctx, name, actor, WithMailbox(config.mailbox))
+	pid, err := x.configPID(ctx, name, actor, WithMailbox(config.mailbox), WithRelocationDisabled())
 	if err != nil {
 		return nil, err
 	}
