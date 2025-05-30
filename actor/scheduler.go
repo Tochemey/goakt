@@ -135,22 +135,15 @@ func (x *scheduler) Stop(ctx context.Context) {
 //   - message: The proto.Message to be sent.
 //   - pid: The PID of the actor that will receive the message.
 //   - delay: The duration to wait before delivering the message.
-//   - opts: Optional SenderOption values such as WithReference to control scheduling behavior.
+//   - opts: Optional ScheduleOption values such as WithReference to control scheduling behavior.
 //
 // Returns:
 //   - error: An error is returned if scheduling fails due to invalid input or internal errors.
 //
-// Example:
-//
-//	err := scheduler.ScheduleOnce(myMessage, targetPID, 5*time.Second, WithReference("reminder-456"))
-//	if err != nil {
-//	    log.Printf("Failed to schedule message: %v", err)
-//	}
-//
 // Note:
 //   - It's strongly recommended to set a unique reference ID using WithReference if you intend to cancel, pause, or resume the message later.
 //   - If no reference is set, an automatic one will be generated, which may not be easily retrievable.
-func (x *scheduler) ScheduleOnce(message proto.Message, pid *PID, delay time.Duration, opts ...SenderOption) error {
+func (x *scheduler) ScheduleOnce(message proto.Message, pid *PID, delay time.Duration, opts ...ScheduleOption) error {
 	x.mu.Lock()
 	defer x.mu.Unlock()
 
@@ -158,7 +151,7 @@ func (x *scheduler) ScheduleOnce(message proto.Message, pid *PID, delay time.Dur
 		return ErrSchedulerNotStarted
 	}
 
-	senderConfig := newSenderConfig(opts...)
+	senderConfig := newScheduleConfig(opts...)
 	sender := senderConfig.Sender()
 
 	job := job.NewFunctionJob(
@@ -190,23 +183,16 @@ func (x *scheduler) ScheduleOnce(message proto.Message, pid *PID, delay time.Dur
 //   - message: The proto.Message to be delivered at regular intervals.
 //   - pid: The PID of the actor that will receive the message.
 //   - interval: The time duration between each delivery of the message.
-//   - opts: Optional SenderOption values such as WithReference to control scheduling behavior.
+//   - opts: Optional ScheduleOption values such as WithReference to control scheduling behavior.
 //
 // Returns:
 //   - error: An error is returned if the message could not be scheduled due to invalid input or internal issues.
-//
-// Example:
-//
-//	err := scheduler.Schedule(heartbeatMsg, targetPID, 10*time.Second, WithReference("heartbeat-task"))
-//	if err != nil {
-//	    log.Printf("Failed to schedule recurring message: %v", err)
-//	}
 //
 // Note:
 //   - It's strongly recommended to set a unique reference ID using WithReference if you plan to cancel, pause, or resume the scheduled message.
 //   - If no reference is set, an automatic one will be generated internally, which may not be easily retrievable for later operations.
 //   - This function does not provide built-in delivery guarantees such as at-least-once or exactly-once semantics; ensure idempotency where needed.
-func (x *scheduler) Schedule(message proto.Message, pid *PID, interval time.Duration, opts ...SenderOption) error {
+func (x *scheduler) Schedule(message proto.Message, pid *PID, interval time.Duration, opts ...ScheduleOption) error {
 	x.mu.Lock()
 	defer x.mu.Unlock()
 
@@ -214,7 +200,7 @@ func (x *scheduler) Schedule(message proto.Message, pid *PID, interval time.Dura
 		return ErrSchedulerNotStarted
 	}
 
-	senderConfig := newSenderConfig(opts...)
+	senderConfig := newScheduleConfig(opts...)
 	sender := senderConfig.Sender()
 
 	job := job.NewFunctionJob(
@@ -246,30 +232,23 @@ func (x *scheduler) Schedule(message proto.Message, pid *PID, interval time.Dura
 //   - message: The proto.Message to be delivered.
 //   - pid: The PID of the actor that will receive the message.
 //   - cronExpression: A standard cron-formatted string (e.g., "0 */5 * * * *") representing the schedule.
-//   - opts: Optional SenderOption values such as WithReference to control scheduling behavior.
+//   - opts: Optional ScheduleOption values such as WithReference to control scheduling behavior.
 //
 // Returns:
 //   - error: An error is returned if the cron expression is invalid or if scheduling fails due to internal errors.
-//
-// Example:
-//
-//	err := scheduler.ScheduleWithCron(reportMsg, targetPID, "0 0 * * *", WithReference("daily-report-task"))
-//	if err != nil {
-//	    log.Printf("Failed to schedule cron-based message: %v", err)
-//	}
 //
 // Note:
 //   - It's strongly recommended to set a unique reference ID using WithReference if you plan to cancel, pause, or resume the scheduled message.
 //   - If no reference is set, an automatic one will be generated internally, which may not be easily retrievable for future operations.
 //   - The cron expression must follow the format supported by the scheduler (typically 6 or 5 fields depending on implementation).
-func (x *scheduler) ScheduleWithCron(message proto.Message, pid *PID, cronExpression string, opts ...SenderOption) error {
+func (x *scheduler) ScheduleWithCron(message proto.Message, pid *PID, cronExpression string, opts ...ScheduleOption) error {
 	x.mu.Lock()
 	defer x.mu.Unlock()
 	if !x.started.Load() {
 		return ErrSchedulerNotStarted
 	}
 
-	senderConfig := newSenderConfig(opts...)
+	senderConfig := newScheduleConfig(opts...)
 	sender := senderConfig.Sender()
 
 	job := job.NewFunctionJob(
@@ -308,23 +287,16 @@ func (x *scheduler) ScheduleWithCron(message proto.Message, pid *PID, cronExpres
 //   - message: The proto.Message to be delivered.
 //   - to: The address.Address of the remote actor that will receive the message.
 //   - delay: The time duration to wait before delivering the message.
-//   - opts: Optional SenderOption values such as WithReference to control scheduling behavior.
+//   - opts: Optional ScheduleOption values such as WithReference to control scheduling behavior.
 //
 // Returns:
 //   - error: An error is returned if remoting is not enabled, the target address is invalid, or scheduling fails.
-//
-// Example:
-//
-//	err := scheduler.RemoteScheduleOnce(myMsg, remoteAddr, 30*time.Second, WithReference("delayed-alert-789"))
-//	if err != nil {
-//	    log.Printf("Failed to schedule remote message: %v", err)
-//	}
 //
 // Note:
 //   - Remoting must be enabled in the actor system for this function to work.
 //   - It's strongly recommended to set a unique reference ID using WithReference if you plan to cancel, pause, or resume the message later.
 //   - If no reference is set, an automatic one will be generated internally, which may not be easily retrievable.
-func (x *scheduler) RemoteScheduleOnce(message proto.Message, to *address.Address, delay time.Duration, opts ...SenderOption) error {
+func (x *scheduler) RemoteScheduleOnce(message proto.Message, to *address.Address, delay time.Duration, opts ...ScheduleOption) error {
 	x.mu.Lock()
 	defer x.mu.Unlock()
 
@@ -336,7 +308,7 @@ func (x *scheduler) RemoteScheduleOnce(message proto.Message, to *address.Addres
 		return ErrRemotingDisabled
 	}
 
-	senderConfig := newSenderConfig(opts...)
+	senderConfig := newScheduleConfig(opts...)
 	from := senderConfig.SenderAddr()
 	job := job.NewFunctionJob(
 		func(ctx context.Context) (bool, error) {
@@ -364,23 +336,16 @@ func (x *scheduler) RemoteScheduleOnce(message proto.Message, to *address.Addres
 //   - message: The proto.Message to be delivered periodically.
 //   - to: The address.Address of the remote actor that will receive the message.
 //   - interval: The time duration between each message delivery.
-//   - opts: Optional SenderOption values such as WithReference to control scheduling behavior.
+//   - opts: Optional ScheduleOption values such as WithReference to control scheduling behavior.
 //
 // Returns:
 //   - error: An error is returned if remoting is not enabled, the target address is invalid, or scheduling fails.
-//
-// Example:
-//
-//	err := scheduler.RemoteSchedule(heartbeatMsg, remoteAddr, 15*time.Second, WithReference("remote-heartbeat"))
-//	if err != nil {
-//	    log.Printf("Failed to schedule remote recurring message: %v", err)
-//	}
 //
 // Note:
 //   - Remoting must be enabled in the actor system for this method to function correctly.
 //   - It's strongly recommended to set a unique reference ID using WithReference if you plan to cancel, pause, or resume the scheduled message.
 //   - If no reference is set, an automatic one will be generated internally, which may not be easily retrievable for later operations.
-func (x *scheduler) RemoteSchedule(message proto.Message, to *address.Address, interval time.Duration, opts ...SenderOption) error {
+func (x *scheduler) RemoteSchedule(message proto.Message, to *address.Address, interval time.Duration, opts ...ScheduleOption) error {
 	x.mu.Lock()
 	defer x.mu.Unlock()
 
@@ -392,7 +357,7 @@ func (x *scheduler) RemoteSchedule(message proto.Message, to *address.Address, i
 		return ErrRemotingDisabled
 	}
 
-	senderConfig := newSenderConfig(opts...)
+	senderConfig := newScheduleConfig(opts...)
 	from := senderConfig.SenderAddr()
 	job := job.NewFunctionJob(
 		func(ctx context.Context) (bool, error) {
@@ -420,24 +385,17 @@ func (x *scheduler) RemoteSchedule(message proto.Message, to *address.Address, i
 //   - message: The proto.Message to be delivered according to the cron schedule.
 //   - to: The address.Address of the remote actor that will receive the message.
 //   - cronExpression: A standard cron-formatted string defining the schedule (e.g., "0 0 * * *").
-//   - opts: Optional SenderOption values such as WithReference to control scheduling behavior.
+//   - opts: Optional ScheduleOption values such as WithReference to control scheduling behavior.
 //
 // Returns:
 //   - error: An error is returned if the cron expression is invalid, remoting is disabled, or scheduling fails.
-//
-// Example:
-//
-//	err := scheduler.RemoteScheduleWithCron(reportMsg, remoteAddr, "0 0 * * *", WithReference("remote-daily-report"))
-//	if err != nil {
-//	    log.Printf("Failed to schedule remote cron message: %v", err)
-//	}
 //
 // Note:
 //   - Remoting must be enabled in the actor system for this functionality.
 //   - It's strongly recommended to set a unique reference ID using WithReference if you intend to cancel, pause, or resume the scheduled message.
 //   - If no reference is set, an automatic one will be generated internally and may not be easily retrievable.
 //   - The cron expression must conform to the scheduler’s supported format (usually 5 or 6 fields).
-func (x *scheduler) RemoteScheduleWithCron(message proto.Message, to *address.Address, cronExpression string, opts ...SenderOption) error {
+func (x *scheduler) RemoteScheduleWithCron(message proto.Message, to *address.Address, cronExpression string, opts ...ScheduleOption) error {
 	x.mu.Lock()
 	defer x.mu.Unlock()
 
@@ -449,7 +407,7 @@ func (x *scheduler) RemoteScheduleWithCron(message proto.Message, to *address.Ad
 		return ErrRemotingDisabled
 	}
 
-	senderConfig := newSenderConfig(opts...)
+	senderConfig := newScheduleConfig(opts...)
 	from := senderConfig.SenderAddr()
 	job := job.NewFunctionJob(
 		func(ctx context.Context) (bool, error) {
@@ -496,37 +454,7 @@ func (x *scheduler) CancelSchedule(reference string) error {
 
 	jobKey, ok := x.scheduledKeys.Get(reference)
 	if !ok {
-		// no-op when the job key is not found
-		return nil
-	}
-
-	return x.quartzScheduler.DeleteJob(jobKey)
-}
-
-// CancelRemoteSchedule cancels a previously scheduled message intended for delivery to a remote actor.
-//
-// It attempts to locate and cancel the scheduled task associated with the specified message reference.
-// If the scheduled message cannot be found, has already been delivered, or was previously canceled, an error is returned.
-//
-// Parameters:
-//   - reference: The message reference previously used when scheduling the message
-//
-// Returns:
-//   - error: An error is returned if the scheduled message could not be found or canceled.
-func (x *scheduler) CancelRemoteSchedule(reference string) error {
-	x.mu.Lock()
-	defer x.mu.Unlock()
-
-	defer x.scheduledKeys.Delete(reference)
-
-	if !x.started.Load() {
-		return ErrSchedulerNotStarted
-	}
-
-	jobKey, ok := x.scheduledKeys.Get(reference)
-	if !ok {
-		// no-op when the job key is not found
-		return nil
+		return ErrScheduledReferenceNotFound
 	}
 
 	return x.quartzScheduler.DeleteJob(jobKey)
@@ -552,38 +480,7 @@ func (x *scheduler) PauseSchedule(reference string) error {
 
 	jobKey, ok := x.scheduledKeys.Get(reference)
 	if !ok {
-		// no-op when the job key is not found
-		return nil
-	}
-
-	return x.quartzScheduler.PauseJob(jobKey)
-}
-
-// PauseRemoteSchedule pauses a previously scheduled message that was set to be delivered to a remote actor.
-//
-// This function temporarily suspends the delivery of a scheduled message targeted at an actor located at a remote address.
-// It can be resumed later using a corresponding resume operation.
-// If the message has already been delivered, cannot be found, or is not eligible for pausing, an error is returned.
-//
-// Parameters:
-//   - reference: The message reference previously used when scheduling the message
-//   - receiver: The address.Address of the remote actor that was the intended recipient of the message.
-//   - sender: The address.Address of the actor that originally scheduled the message.
-//
-// Returns:
-//   - error: An error is returned if the scheduled message cannot be located, has already been delivered, or cannot be paused.
-func (x *scheduler) PauseRemoteSchedule(reference string) error {
-	x.mu.Lock()
-	defer x.mu.Unlock()
-
-	if !x.started.Load() {
-		return ErrSchedulerNotStarted
-	}
-
-	jobKey, ok := x.scheduledKeys.Get(reference)
-	if !ok {
-		// no-op when the job key is not found
-		return nil
+		return ErrScheduledReferenceNotFound
 	}
 
 	return x.quartzScheduler.PauseJob(jobKey)
@@ -609,8 +506,7 @@ func (x *scheduler) ResumeSchedule(reference string) error {
 
 	jobKey, ok := x.scheduledKeys.Get(reference)
 	if !ok {
-		// no-op when the job key is not found
-		return nil
+		return ErrScheduledReferenceNotFound
 	}
 
 	return x.quartzScheduler.ResumeJob(jobKey)

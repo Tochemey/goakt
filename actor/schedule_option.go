@@ -30,16 +30,16 @@ import (
 	"github.com/tochemey/goakt/v3/address"
 )
 
-type senderConfig struct {
+type scheduleConfig struct {
 	sender     *PID
 	senderAddr *address.Address
 	reference  string
 }
 
-// newSenderConfig creates and returns a new senderConfig instance using the provided SenderOption arguments.
+// newScheduleConfig creates and returns a new scheduleConfig instance using the provided ScheduleOption arguments.
 // Options are applied sequentially to configure the instance.
-func newSenderConfig(opts ...SenderOption) *senderConfig {
-	config := &senderConfig{
+func newScheduleConfig(opts ...ScheduleOption) *scheduleConfig {
+	config := &scheduleConfig{
 		sender:     NoSender,
 		senderAddr: address.NoSender(),
 		reference:  uuid.NewString(),
@@ -51,40 +51,40 @@ func newSenderConfig(opts ...SenderOption) *senderConfig {
 	return config
 }
 
-// Sender retrieves and returns the associated sender PID from the senderConfig instance.
-func (s *senderConfig) Sender() *PID {
+// Sender retrieves and returns the associated sender PID from the scheduleConfig instance.
+func (s *scheduleConfig) Sender() *PID {
 	return s.sender
 }
 
-// SenderAddr retrieves and returns the sender's address from the senderConfig instance.
-func (s *senderConfig) SenderAddr() *address.Address {
+// SenderAddr retrieves and returns the sender's address from the scheduleConfig instance.
+func (s *scheduleConfig) SenderAddr() *address.Address {
 	return s.senderAddr
 }
 
 // Reference returns the scheduled message reference.
-func (s *senderConfig) Reference() string {
+func (s *scheduleConfig) Reference() string {
 	return s.reference
 }
 
-// SenderOption defines an interface for applying configuration options to a senderConfig instance
-type SenderOption interface {
+// ScheduleOption defines an interface for applying configuration options to a scheduleConfig instance
+type ScheduleOption interface {
 	// Apply sets the Option value of a config.
-	Apply(*senderConfig)
+	Apply(*scheduleConfig)
 }
 
 // enforce compilation error
-var _ SenderOption = SenderOptionFunc(nil)
+var _ ScheduleOption = ScheduleOptionFunc(nil)
 
-// SenderOptionFunc is a function type used to configure a senderConfig instance.
-// It implements the SenderOption interface by applying modifications to senderConfig.
-type SenderOptionFunc func(*senderConfig)
+// ScheduleOptionFunc is a function type used to configure a scheduleConfig instance.
+// It implements the ScheduleOption interface by applying modifications to scheduleConfig.
+type ScheduleOptionFunc func(*scheduleConfig)
 
-// Apply applies the SenderOptionFunc to the given senderConfig instance, modifying its fields as defined within the function.
-func (f SenderOptionFunc) Apply(c *senderConfig) {
+// Apply applies the ScheduleOptionFunc to the given scheduleConfig instance, modifying its fields as defined within the function.
+func (f ScheduleOptionFunc) Apply(c *scheduleConfig) {
 	f(c)
 }
 
-// WithSender returns a SenderOption that explicitly sets the sender PID for a scheduled message.
+// WithSender returns a ScheduleOption that explicitly sets the sender PID for a scheduled message.
 //
 // This is useful when you want to associate the scheduled message with a specific sender (PID).
 //
@@ -92,14 +92,14 @@ func (f SenderOptionFunc) Apply(c *senderConfig) {
 //   - sender: The PID of the actor initiating the schedule.
 //
 // Returns:
-//   - SenderOption: An option that can be passed to the scheduler.
-func WithSender(sender *PID) SenderOption {
-	return SenderOptionFunc(func(c *senderConfig) {
+//   - ScheduleOption: An option that can be passed to the scheduler.
+func WithSender(sender *PID) ScheduleOption {
+	return ScheduleOptionFunc(func(c *scheduleConfig) {
 		c.sender = sender
 	})
 }
 
-// WithSenderAddress returns a SenderOption that explicitly sets the sender address for a scheduled message.
+// WithSenderAddress returns a ScheduleOption that explicitly sets the sender address for a scheduled message.
 //
 // This is typically used for remote scheduling scenarios where the sender is identified by an address
 // rather than a local PID. Setting the sender address ensures accurate tracking of the scheduled message,
@@ -109,9 +109,9 @@ func WithSender(sender *PID) SenderOption {
 //   - addr: The address.Address of the remote sender.
 //
 // Returns:
-//   - SenderOption: An option that can be passed to the scheduler.
-func WithSenderAddress(addr *address.Address) SenderOption {
-	return SenderOptionFunc(func(c *senderConfig) {
+//   - ScheduleOption: An option that can be passed to the scheduler.
+func WithSenderAddress(addr *address.Address) ScheduleOption {
+	return ScheduleOptionFunc(func(c *scheduleConfig) {
 		c.senderAddr = addr
 	})
 }
@@ -128,12 +128,12 @@ func WithSenderAddress(addr *address.Address) SenderOption {
 //   - referenceID: A user-defined unique identifier for the scheduled message.
 //
 // Returns:
-//   - SenderOption: An option that can be passed to the scheduler to associate the reference ID with the message.
+//   - ScheduleOption: An option that can be passed to the scheduler to associate the reference ID with the message.
 //
 // Note:
 //   - It's strongly recommended to set a reference ID if you plan to cancel, pause, or resume the message later.
-func WithReference(referenceID string) SenderOption {
-	return SenderOptionFunc(func(sc *senderConfig) {
+func WithReference(referenceID string) ScheduleOption {
+	return ScheduleOptionFunc(func(sc *scheduleConfig) {
 		sc.reference = referenceID
 	})
 }
