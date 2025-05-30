@@ -76,8 +76,16 @@ import (
 
 // ActorSystem defines the contract of an actor system
 type ActorSystem interface { //nolint:revive
-	// Metric returns the actor system metric.
-	// The metric does not include any cluster data
+	// Metric retrieves the current set of runtime metrics for the actor system.
+	//
+	// This includes local actor system metrics such as the number of actors,
+	// mailbox sizes, and message throughput. It does not include metrics
+	// from other nodes in a distributed or clustered environment.
+	//
+	// Use this method for monitoring and debugging purposes within a single node.
+	//
+	// The provided context can be used to control timeouts or cancellations
+	// of any background operations involved in collecting the metrics.
 	Metric(ctx context.Context) *Metric
 	// Name returns the actor system name
 	Name() string
@@ -164,26 +172,161 @@ type ActorSystem interface { //nolint:revive
 	Subscribe() (eventstream.Subscriber, error)
 	// Unsubscribe unsubscribes a subscriber.
 	Unsubscribe(subscriber eventstream.Subscriber) error
-	// ScheduleOnce schedules a message that will be delivered to the receiver actor
-	// This will send the given message to the actor after the given interval specified.
-	// The message will be sent once
-	ScheduleOnce(ctx context.Context, message proto.Message, pid *PID, interval time.Duration, opts ...SenderOption) error
-	// Schedule schedules a message that will be delivered to the receiver actor
-	// This will send the given message to the actor after the given interval specified.
-	Schedule(ctx context.Context, message proto.Message, pid *PID, interval time.Duration, opts ...SenderOption) error
-	// RemoteScheduleOnce schedules a message to be sent to a remote actor in the future.
-	// This requires remoting to be enabled on the actor system.
-	// This will send the given message to the actor after the given interval specified
-	// The message will be sent once
-	RemoteScheduleOnce(ctx context.Context, message proto.Message, address *address.Address, interval time.Duration, opts ...SenderOption) error
-	// RemoteSchedule schedules a message to be sent to a remote actor in the future.
-	// This requires remoting to be enabled on the actor system.
-	// This will send the given message to the actor after the given interval specified
-	RemoteSchedule(ctx context.Context, message proto.Message, address *address.Address, interval time.Duration, opts ...SenderOption) error
-	// ScheduleWithCron schedules a message to be sent to an actor in the future using a cron expression.
-	ScheduleWithCron(ctx context.Context, message proto.Message, pid *PID, cronExpression string, opts ...SenderOption) error
-	// RemoteScheduleWithCron schedules a message to be sent to an actor in the future using a cron expression.
-	RemoteScheduleWithCron(ctx context.Context, message proto.Message, address *address.Address, cronExpression string, opts ...SenderOption) error
+	// ScheduleOnce schedules a one-time delivery of a message to the specified actor (PID) after a given delay.
+	//
+	// The message will be sent exactly once to the target actor after the specified duration has elapsed.
+	// This is a fire-and-forget scheduling mechanism — once delivered, the message will not be retried or repeated.
+	//
+	// Parameters:
+	//	  - ctx: The context for managing cancellation and deadlines.
+	//   - message: The proto.Message to be sent.
+	//   - pid: The PID of the actor that will receive the message.
+	//   - delay: The duration to wait before delivering the message.
+	//   - opts: Optional ScheduleOption values such as WithReference to control scheduling behavior.
+	//
+	// Returns:
+	//   - error: An error is returned if scheduling fails due to invalid input or internal errors.
+	//
+	// Note:
+	//   - It's strongly recommended to set a unique reference ID using WithReference if you intend to cancel, pause, or resume the message later.
+	//   - If no reference is set, an automatic one will be generated, which may not be easily retrievable.
+	ScheduleOnce(ctx context.Context, message proto.Message, pid *PID, delay time.Duration, opts ...ScheduleOption) error
+	// Schedule schedules a recurring message to be delivered to the specified actor (PID) at a fixed interval.
+	//
+	// This function sets up a message to be sent repeatedly to the target actor, with each delivery occurring
+	// after the specified interval. The scheduling continues until explicitly canceled or if the actor is no longer available.
+	//
+	// Parameters:
+	//	  - ctx: The context for managing cancellation and deadlines.
+	//   - message: The proto.Message to be delivered at regular intervals.
+	//   - pid: The PID of the actor that will receive the message.
+	//   - interval: The time duration between each delivery of the message.
+	//   - opts: Optional ScheduleOption values such as WithReference to control scheduling behavior.
+	//
+	// Returns:
+	//   - error: An error is returned if the message could not be scheduled due to invalid input or internal issues.
+	//
+	// Note:
+	//   - It's strongly recommended to set a unique reference ID using WithReference if you plan to cancel, pause, or resume the scheduled message.
+	//   - If no reference is set, an automatic one will be generated internally, which may not be easily retrievable for later operations.
+	//   - This function does not provide built-in delivery guarantees such as at-least-once or exactly-once semantics; ensure idempotency where needed.
+	Schedule(ctx context.Context, message proto.Message, pid *PID, interval time.Duration, opts ...ScheduleOption) error
+	// RemoteScheduleOnce schedules a one-time delivery of a message to a remote actor after a specified delay.
+	//
+	// This method schedules a message to be sent to an actor located at a remote address once the given interval has elapsed.
+	// It requires that remoting is enabled in the actor system configuration.
+	//
+	// Parameters:
+	//	  - ctx: The context for managing cancellation and deadlines.
+	//   - message: The proto.Message to be delivered.
+	//   - receiver: The address.Address of the remote actor that will receive the message.
+	//   - delay: The time duration to wait before delivering the message.
+	//   - opts: Optional ScheduleOption values such as WithReference to control scheduling behavior.
+	//
+	// Returns:
+	//   - error: An error is returned if remoting is not enabled, the target address is invalid, or scheduling fails.
+	//
+	// Note:
+	//   - Remoting must be enabled in the actor system for this function to work.
+	//   - It's strongly recommended to set a unique reference ID using WithReference if you plan to cancel, pause, or resume the message later.
+	//   - If no reference is set, an automatic one will be generated internally, which may not be retrievable.
+	RemoteScheduleOnce(ctx context.Context, message proto.Message, receiver *address.Address, delay time.Duration, opts ...ScheduleOption) error
+	// RemoteSchedule schedules a recurring message to be sent to a remote actor at a specified interval.
+	//
+	// This method sends the given message repeatedly to the remote actor located at the specified address,
+	// with each delivery occurring after the configured time interval.
+	// Remoting must be enabled in the actor system for this functionality to work.
+	//
+	// Parameters:
+	//	  - ctx: The context for managing cancellation and deadlines.
+	//   - message: The proto.Message to be delivered periodically.
+	//   - receiver: The address.Address of the remote actor that will receive the message.
+	//   - interval: The time duration between each message delivery.
+	//   - opts: Optional ScheduleOption values such as WithReference to control scheduling behavior.
+	//
+	// Returns:
+	//   - error: An error is returned if remoting is not enabled, the target address is invalid, or scheduling fails.
+	//
+	// Note:
+	//   - Remoting must be enabled in the actor system for this method to function correctly.
+	//   - It's strongly recommended to set a unique reference ID using WithReference if you plan to cancel, pause, or resume the scheduled message.
+	//   - If no reference is set, an automatic one will be generated internally, which may not be easily retrievable for later operations.
+	RemoteSchedule(ctx context.Context, message proto.Message, receiver *address.Address, interval time.Duration, opts ...ScheduleOption) error
+	// ScheduleWithCron schedules a message to be delivered to the specified actor (PID) using a cron expression.
+	//
+	// This method enables flexible time-based scheduling using standard cron syntax, allowing you to specify complex recurring schedules.
+	// The message will be sent to the target actor according to the schedule defined by the cron expression.
+	//
+	// Parameters:
+	//	  - ctx: The context for managing cancellation and deadlines.
+	//   - message: The proto.Message to be delivered.
+	//   - pid: The PID of the actor that will receive the message.
+	//   - cronExpression: A standard cron-formatted string (e.g., "0 */5 * * * *") representing the schedule.
+	//   - opts: Optional ScheduleOption values such as WithReference to control scheduling behavior.
+	//
+	// Returns:
+	//   - error: An error is returned if the cron expression is invalid or if scheduling fails due to internal errors.
+	//
+	// Note:
+	//   - It's strongly recommended to set a unique reference ID using WithReference if you plan to cancel, pause, or resume the scheduled message.
+	//   - If no reference is set, an automatic one will be generated internally, which may not be easily retrievable for future operations.
+	//   - The cron expression must follow the format supported by the scheduler (typically 6 or 5 fields depending on implementation).
+	ScheduleWithCron(ctx context.Context, message proto.Message, pid *PID, cronExpression string, opts ...ScheduleOption) error
+	// RemoteScheduleWithCron schedules a message to be sent to a remote actor according to a cron expression.
+	//
+	// This method allows scheduling messages to remote actors using flexible cron-based timing,
+	// enabling complex recurring schedules for message delivery.
+	// Remoting must be enabled in the actor system for this method to work.
+	//
+	// Parameters:
+	//	  - ctx: The context for managing cancellation and deadlines.
+	//   - message: The proto.Message to be delivered according to the cron schedule.
+	//   - receiver: The address.Address of the remote actor that will receive the message.
+	//   - cronExpression: A standard cron-formatted string defining the schedule (e.g., "0 0 * * *").
+	//   - opts: Optional ScheduleOption values such as WithReference to control scheduling behavior.
+	//
+	// Returns:
+	//   - error: An error is returned if the cron expression is invalid, remoting is disabled, or scheduling fails.
+	//
+	// Note:
+	//   - Remoting must be enabled in the actor system for this functionality.
+	//   - It's strongly recommended to set a unique reference ID using WithReference if you intend to cancel, pause, or resume the scheduled message.
+	//   - If no reference is set, an automatic one will be generated internally and may not be easily retrievable.
+	//   - The cron expression must conform to the scheduler’s supported format (usually 5 or 6 fields).
+	RemoteScheduleWithCron(ctx context.Context, message proto.Message, receiver *address.Address, cronExpression string, opts ...ScheduleOption) error
+	// CancelSchedule cancels a previously scheduled message intended for delivery to a target actor (PID).
+	//
+	// It attempts to locate and cancel the scheduled task associated with the specified message reference.
+	// If the scheduled message cannot be found, has already been delivered, or was previously canceled, an error is returned.
+	//
+	// Parameters:
+	//   - reference: The message reference previously used when scheduling the message
+	//
+	// Returns:
+	//   - error: An error is returned if the scheduled message could not be found or canceled.
+	CancelSchedule(reference string) error
+	// PauseSchedule pauses a previously scheduled message that was set to be delivered to a target actor (PID).
+	//
+	// This function temporarily halts the delivery of the scheduled message. It can be resumed later using a corresponding resume mechanism,
+	// depending on the scheduler's capabilities. If the message has already been delivered or cannot be found, an error is returned.
+	//
+	// Parameters:
+	//   - reference: The message reference previously used when scheduling the message
+	//
+	// Returns:
+	//   - error: An error is returned if the scheduled message cannot be found, has already been delivered, or cannot be paused.
+	PauseSchedule(reference string) error
+	// ResumeSchedule resumes a previously paused scheduled message intended for delivery to a target actor (PID).
+	//
+	// This function reactivates a scheduled message that was previously paused, allowing it to continue toward delivery.
+	// If the message has already been delivered, canceled, or cannot be found, an error is returned.
+	//
+	// Parameters:
+	//   - reference: The message reference previously used when scheduling the message
+	//
+	// Returns:
+	//   - error: An error is returned if the scheduled message cannot be found, was never paused, has already been delivered, or cannot be resumed.
+	ResumeSchedule(reference string) error
 	// PeerAddress returns the actor system address known in the cluster. That address is used by other nodes to communicate with the actor system.
 	// This address is empty when cluster mode is not activated
 	PeerAddress() string
@@ -656,42 +799,186 @@ func (x *actorSystem) Register(_ context.Context, actor Actor) error {
 	return nil
 }
 
-// Schedule schedules a message that will be delivered to the receiver actor
-// This will send the given message to the actor at the given interval specified.
-func (x *actorSystem) Schedule(_ context.Context, message proto.Message, pid *PID, interval time.Duration, opts ...SenderOption) error {
+// Schedule schedules a recurring message to be delivered to the specified actor (PID) at a fixed interval.
+//
+// This function sets up a message to be sent repeatedly to the target actor, with each delivery occurring
+// after the specified interval. The scheduling continues until explicitly canceled or if the actor is no longer available.
+//
+// Parameters:
+//   - ctx: The context for managing cancellation and deadlines.
+//   - message: The proto.Message to be delivered at regular intervals.
+//   - pid: The PID of the actor that will receive the message.
+//   - interval: The time duration between each delivery of the message.
+//   - opts: Optional ScheduleOption values such as WithReference to control scheduling behavior.
+//
+// Returns:
+//   - error: An error is returned if the message could not be scheduled due to invalid input or internal issues.
+//
+// Note:
+//   - It's strongly recommended to set a unique reference ID using WithReference if you plan to cancel, pause, or resume the scheduled message.
+//   - If no reference is set, an automatic one will be generated internally, which may not be easily retrievable for later operations.
+//   - This function does not provide built-in delivery guarantees such as at-least-once or exactly-once semantics; ensure idempotency where needed.
+func (x *actorSystem) Schedule(_ context.Context, message proto.Message, pid *PID, interval time.Duration, opts ...ScheduleOption) error {
 	return x.scheduler.Schedule(message, pid, interval, opts...)
 }
 
-// RemoteSchedule schedules a message to be sent to a remote actor in the future.
-// This requires remoting to be enabled on the actor system.
-// This will send the given message to the actor at the given interval specified
-func (x *actorSystem) RemoteSchedule(_ context.Context, message proto.Message, address *address.Address, interval time.Duration, opts ...SenderOption) error {
-	return x.scheduler.RemoteSchedule(message, address, interval, opts...)
+// RemoteSchedule schedules a recurring message to be sent to a remote actor at a specified interval.
+//
+// This method sends the given message repeatedly to the remote actor located at the specified address,
+// with each delivery occurring after the configured time interval.
+// Remoting must be enabled in the actor system for this functionality to work.
+//
+// Parameters:
+//   - ctx: The context for managing cancellation and deadlines.
+//   - message: The proto.Message to be delivered periodically.
+//   - to: The address.Address of the remote actor that will receive the message.
+//   - interval: The time duration between each message delivery.
+//   - opts: Optional ScheduleOption values such as WithReference to control scheduling behavior.
+//
+// Returns:
+//   - error: An error is returned if remoting is not enabled, the target address is invalid, or scheduling fails.
+//
+// Note:
+//   - Remoting must be enabled in the actor system for this method to function correctly.
+//   - It's strongly recommended to set a unique reference ID using WithReference if you plan to cancel, pause, or resume the scheduled message.
+//   - If no reference is set, an automatic one will be generated internally, which may not be easily retrievable for later operations.
+func (x *actorSystem) RemoteSchedule(_ context.Context, message proto.Message, receiver *address.Address, interval time.Duration, opts ...ScheduleOption) error {
+	return x.scheduler.RemoteSchedule(message, receiver, interval, opts...)
 }
 
-// ScheduleOnce schedules a message that will be delivered to the receiver actor
-// This will send the given message to the actor after the given interval specified.
-// The message will be sent once
-func (x *actorSystem) ScheduleOnce(_ context.Context, message proto.Message, pid *PID, interval time.Duration, opts ...SenderOption) error {
+// ScheduleOnce schedules a one-time delivery of a message to the specified actor (PID) after a given delay.
+//
+// The message will be sent exactly once to the target actor after the specified duration has elapsed.
+// This is a fire-and-forget scheduling mechanism — once delivered, the message will not be retried or repeated.
+//
+// Parameters:
+//   - ctx: The context for managing cancellation and deadlines.
+//   - message: The proto.Message to be sent.
+//   - pid: The PID of the actor that will receive the message.
+//   - delay: The duration to wait before delivering the message.
+//   - opts: Optional ScheduleOption values such as WithReference to control scheduling behavior.
+//
+// Returns:
+//   - error: An error is returned if scheduling fails due to invalid input or internal errors.
+//
+// Note:
+//   - It's strongly recommended to set a unique reference ID using WithReference if you intend to cancel, pause, or resume the message later.
+//   - If no reference is set, an automatic one will be generated, which may not be easily retrievable.
+func (x *actorSystem) ScheduleOnce(_ context.Context, message proto.Message, pid *PID, interval time.Duration, opts ...ScheduleOption) error {
 	return x.scheduler.ScheduleOnce(message, pid, interval, opts...)
 }
 
-// RemoteScheduleOnce schedules a message to be sent to a remote actor in the future.
-// This requires remoting to be enabled on the actor system.
-// This will send the given message to the actor after the given interval specified
-// The message will be sent once
-func (x *actorSystem) RemoteScheduleOnce(_ context.Context, message proto.Message, address *address.Address, interval time.Duration, opts ...SenderOption) error {
-	return x.scheduler.RemoteScheduleOnce(message, address, interval, opts...)
+// RemoteScheduleOnce schedules a one-time delivery of a message to a remote actor after a specified delay.
+//
+// This method schedules a message to be sent to an actor located at a remote address once the given interval has elapsed.
+// It requires that remoting is enabled in the actor system configuration.
+//
+// Parameters:
+//   - ctx: The context for managing cancellation and deadlines.
+//   - message: The proto.Message to be delivered.
+//   - to: The address.Address of the remote actor that will receive the message.
+//   - delay: The time duration to wait before delivering the message.
+//   - opts: Optional ScheduleOption values such as WithReference to control scheduling behavior.
+//
+// Returns:
+//   - error: An error is returned if remoting is not enabled, the target address is invalid, or scheduling fails.
+//
+// Note:
+//   - Remoting must be enabled in the actor system for this function to work.
+//   - It's strongly recommended to set a unique reference ID using WithReference if you plan to cancel, pause, or resume the message later.
+//   - If no reference is set, an automatic one will be generated internally, which may not be retrievable.
+func (x *actorSystem) RemoteScheduleOnce(_ context.Context, message proto.Message, receiver *address.Address, interval time.Duration, opts ...ScheduleOption) error {
+	return x.scheduler.RemoteScheduleOnce(message, receiver, interval, opts...)
 }
 
-// ScheduleWithCron schedules a message to be sent to an actor in the future using a cron expression.
-func (x *actorSystem) ScheduleWithCron(_ context.Context, message proto.Message, pid *PID, cronExpression string, opts ...SenderOption) error {
+// ScheduleWithCron schedules a message to be delivered to the specified actor (PID) using a cron expression.
+//
+// This method enables flexible time-based scheduling using standard cron syntax, allowing you to specify complex recurring schedules.
+// The message will be sent to the target actor according to the schedule defined by the cron expression.
+//
+// Parameters:
+//   - ctx: The context for managing cancellation and deadlines.
+//   - message: The proto.Message to be delivered.
+//   - pid: The PID of the actor that will receive the message.
+//   - cronExpression: A standard cron-formatted string (e.g., "0 */5 * * * *") representing the schedule.
+//   - opts: Optional ScheduleOption values such as WithReference to control scheduling behavior.
+//
+// Returns:
+//   - error: An error is returned if the cron expression is invalid or if scheduling fails due to internal errors.
+//
+// Note:
+//   - It's strongly recommended to set a unique reference ID using WithReference if you plan to cancel, pause, or resume the scheduled message.
+//   - If no reference is set, an automatic one will be generated internally, which may not be easily retrievable for future operations.
+//   - The cron expression must follow the format supported by the scheduler (typically 6 or 5 fields depending on implementation).
+func (x *actorSystem) ScheduleWithCron(_ context.Context, message proto.Message, pid *PID, cronExpression string, opts ...ScheduleOption) error {
 	return x.scheduler.ScheduleWithCron(message, pid, cronExpression, opts...)
 }
 
-// RemoteScheduleWithCron schedules a message to be sent to an actor in the future using a cron expression.
-func (x *actorSystem) RemoteScheduleWithCron(_ context.Context, message proto.Message, address *address.Address, cronExpression string, opts ...SenderOption) error {
-	return x.scheduler.RemoteScheduleWithCron(message, address, cronExpression, opts...)
+// RemoteScheduleWithCron schedules a message to be sent to a remote actor according to a cron expression.
+//
+// This method allows scheduling messages to remote actors using flexible cron-based timing,
+// enabling complex recurring schedules for message delivery.
+// Remoting must be enabled in the actor system for this method to work.
+//
+// Parameters:
+//   - ctx: The context for managing cancellation and deadlines.
+//   - message: The proto.Message to be delivered according to the cron schedule.
+//   - to: The address.Address of the remote actor that will receive the message.
+//   - cronExpression: A standard cron-formatted string defining the schedule (e.g., "0 0 * * *").
+//   - opts: Optional ScheduleOption values such as WithReference to control scheduling behavior.
+//
+// Returns:
+//   - error: An error is returned if the cron expression is invalid, remoting is disabled, or scheduling fails.
+//
+// Note:
+//   - Remoting must be enabled in the actor system for this functionality.
+//   - It's strongly recommended to set a unique reference ID using WithReference if you intend to cancel, pause, or resume the scheduled message.
+//   - If no reference is set, an automatic one will be generated internally and may not be easily retrievable.
+//   - The cron expression must conform to the scheduler’s supported format (usually 5 or 6 fields).
+func (x *actorSystem) RemoteScheduleWithCron(_ context.Context, message proto.Message, receiver *address.Address, cronExpression string, opts ...ScheduleOption) error {
+	return x.scheduler.RemoteScheduleWithCron(message, receiver, cronExpression, opts...)
+}
+
+// CancelSchedule cancels a previously scheduled message intended for delivery to a target actor.
+//
+// It attempts to locate and cancel the scheduled task associated with the specified message reference.
+// If the scheduled message cannot be found, has already been delivered, or was previously canceled, an error is returned.
+//
+// Parameters:
+//   - reference: The message reference previously used when scheduling the message
+//
+// Returns:
+//   - error: An error is returned if the scheduled message could not be found or canceled.
+func (x *actorSystem) CancelSchedule(reference string) error {
+	return x.scheduler.CancelSchedule(reference)
+}
+
+// PauseSchedule pauses a previously scheduled message that was set to be delivered to a target actor.
+//
+// This function temporarily halts the delivery of the scheduled message. It can be resumed later using a corresponding resume mechanism,
+// depending on the scheduler's capabilities. If the message has already been delivered or cannot be found, an error is returned.
+//
+// Parameters:
+//   - reference: The message reference previously used when scheduling the message
+//
+// Returns:
+//   - error: An error is returned if the scheduled message cannot be found, has already been delivered, or cannot be paused.
+func (x *actorSystem) PauseSchedule(reference string) error {
+	return x.scheduler.PauseSchedule(reference)
+}
+
+// ResumeSchedule resumes a previously paused scheduled message intended for delivery to a target actor.
+//
+// This function reactivates a scheduled message that was previously paused, allowing it to continue toward delivery.
+// If the message has already been delivered, canceled, or cannot be found, an error is returned.
+//
+// Parameters:
+//   - reference: The message reference previously used when scheduling the message
+//
+// Returns:
+//   - error: An error is returned if the scheduled message cannot be found, was never paused, has already been delivered, or cannot be resumed.
+func (x *actorSystem) ResumeSchedule(reference string) error {
+	return x.scheduler.ResumeSchedule(reference)
 }
 
 // Subscribe creates an event subscriber to consume events from the actor system.

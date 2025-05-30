@@ -101,6 +101,8 @@ var (
 	ErrInstanceNotDependency = errors.New("failed to create instance. Reason: instance does not implement the Dependency interface")
 	// ErrActorSystemAlreadyStarted is returned when the actor system has already started
 	ErrActorSystemAlreadyStarted = errors.New("actor system has already started")
+	// ErrScheduledReferenceNotFound is returned when a scheduled reference cannot be found.
+	ErrScheduledReferenceNotFound = errors.New("scheduled reference not found")
 )
 
 // eof returns true if the given error is an EOF error

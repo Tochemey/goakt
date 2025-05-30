@@ -877,7 +877,7 @@ func TestScheduler(t *testing.T) {
 
 		// start the actor system
 		err = newActorSystem.Start(ctx)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 
 		util.Pause(time.Second)
 
@@ -886,7 +886,7 @@ func TestScheduler(t *testing.T) {
 		actor := newMockActor()
 		actorRef, err := newActorSystem.Spawn(ctx, actorName, actor)
 		require.NoError(t, err)
-		assert.NotNil(t, actorRef)
+		require.NotNil(t, actorRef)
 
 		util.Pause(time.Second)
 
@@ -908,7 +908,7 @@ func TestScheduler(t *testing.T) {
 
 		// stop the actor
 		err = newActorSystem.Stop(ctx)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 	})
 	t.Run("With Schedule when cluster is enabled", func(t *testing.T) {
 		ctx := context.TODO()
@@ -1402,5 +1402,260 @@ func TestScheduler(t *testing.T) {
 		err = newActorSystem.Stop(ctx)
 		assert.NoError(t, err)
 		provider.AssertExpectations(t)
+	})
+	t.Run("With Pause and Resume Schedule", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// create the actor system
+		actorSystem, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithPassivationDisabled(),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = actorSystem.Start(ctx)
+		require.NoError(t, err)
+
+		util.Pause(time.Second)
+
+		// create a test actor
+		actorName := "test"
+		actor := newMockActor()
+		actorRef, err := actorSystem.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		require.NotNil(t, actorRef)
+
+		util.Pause(time.Second)
+
+		message := new(testpb.TestSend)
+		err = actorSystem.Schedule(ctx, message, actorRef, 10*time.Millisecond, WithReference("reference"))
+		require.NoError(t, err)
+
+		util.Pause(55 * time.Millisecond)
+		require.EqualValues(t, 5, actorRef.ProcessedCount()-1)
+		require.NoError(t, actorSystem.PauseSchedule("reference"))
+
+		util.Pause(55 * time.Millisecond)
+		require.EqualValues(t, 5, actorRef.ProcessedCount()-1)
+
+		require.NoError(t, actorSystem.ResumeSchedule("reference"))
+		util.Pause(55 * time.Millisecond)
+		require.EqualValues(t, 10, actorRef.ProcessedCount()-1)
+
+		// stop the actor
+		err = actorSystem.Stop(ctx)
+		require.NoError(t, err)
+	})
+	t.Run("With PauseSchedule with scheduler not started", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// create the actor system
+		newActorSystem, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithPassivationDisabled(),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = newActorSystem.Start(ctx)
+		assert.NoError(t, err)
+
+		util.Pause(time.Second)
+		// test purpose only
+		typedSystem := newActorSystem.(*actorSystem)
+		typedSystem.scheduler.Stop(ctx)
+
+		// create a test actor
+		actorName := "test"
+		actor := newMockActor()
+		actorRef, err := newActorSystem.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		util.Pause(time.Second)
+
+		err = newActorSystem.PauseSchedule("reference")
+		require.Error(t, err)
+		assert.EqualError(t, err, ErrSchedulerNotStarted.Error())
+
+		// stop the actor
+		err = newActorSystem.Stop(ctx)
+		assert.NoError(t, err)
+	})
+	t.Run("With ResumeSchedule with scheduler not started", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// create the actor system
+		newActorSystem, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithPassivationDisabled(),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = newActorSystem.Start(ctx)
+		assert.NoError(t, err)
+
+		util.Pause(time.Second)
+		// test purpose only
+		typedSystem := newActorSystem.(*actorSystem)
+		typedSystem.scheduler.Stop(ctx)
+
+		// create a test actor
+		actorName := "test"
+		actor := newMockActor()
+		actorRef, err := newActorSystem.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		util.Pause(time.Second)
+
+		err = newActorSystem.ResumeSchedule("reference")
+		require.Error(t, err)
+		assert.EqualError(t, err, ErrSchedulerNotStarted.Error())
+
+		// stop the actor
+		err = newActorSystem.Stop(ctx)
+		assert.NoError(t, err)
+	})
+	t.Run("With Pause, Cancel and Resume Schedule with no reference found", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// create the actor system
+		actorSystem, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithPassivationDisabled(),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = actorSystem.Start(ctx)
+		require.NoError(t, err)
+
+		util.Pause(time.Second)
+
+		// create a test actor
+		actorName := "test"
+		actor := newMockActor()
+		actorRef, err := actorSystem.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		require.NotNil(t, actorRef)
+
+		util.Pause(time.Second)
+
+		require.ErrorIs(t, actorSystem.PauseSchedule("reference"), ErrScheduledReferenceNotFound)
+		require.ErrorIs(t, actorSystem.ResumeSchedule("reference"), ErrScheduledReferenceNotFound)
+		require.ErrorIs(t, actorSystem.CancelSchedule("reference"), ErrScheduledReferenceNotFound)
+
+		// stop the actor
+		err = actorSystem.Stop(ctx)
+		require.NoError(t, err)
+	})
+	t.Run("With CancelSchedule", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// create the actor system
+		system, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithPassivationDisabled(),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = system.Start(ctx)
+		require.NoError(t, err)
+
+		util.Pause(time.Second)
+
+		// create a test actor
+		actorName := "test"
+		actor := newMockActor()
+		actorRef, err := system.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		require.NotNil(t, actorRef)
+
+		util.Pause(time.Second)
+
+		message := new(testpb.TestSend)
+		err = system.Schedule(ctx, message, actorRef, 10*time.Millisecond, WithReference("reference"))
+		require.NoError(t, err)
+
+		util.Pause(55 * time.Millisecond)
+		require.EqualValues(t, 5, actorRef.ProcessedCount()-1)
+		require.NoError(t, system.CancelSchedule("reference"))
+
+		util.Pause(55 * time.Millisecond)
+		require.EqualValues(t, 5, actorRef.ProcessedCount()-1)
+
+		typedSystem := system.(*actorSystem)
+		keys, err := typedSystem.scheduler.quartzScheduler.GetJobKeys()
+		require.NoError(t, err)
+		require.Empty(t, keys)
+		require.Len(t, keys, 0)
+
+		// stop the actor
+		err = system.Stop(ctx)
+		require.NoError(t, err)
+	})
+	t.Run("With CancelSchedule with scheduler not started", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// create the actor system
+		newActorSystem, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithPassivationDisabled(),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = newActorSystem.Start(ctx)
+		assert.NoError(t, err)
+
+		util.Pause(time.Second)
+		// test purpose only
+		typedSystem := newActorSystem.(*actorSystem)
+		typedSystem.scheduler.Stop(ctx)
+
+		// create a test actor
+		actorName := "test"
+		actor := newMockActor()
+		actorRef, err := newActorSystem.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		util.Pause(time.Second)
+
+		err = newActorSystem.CancelSchedule("reference")
+		require.Error(t, err)
+		assert.EqualError(t, err, ErrSchedulerNotStarted.Error())
+
+		// stop the actor
+		err = newActorSystem.Stop(ctx)
+		assert.NoError(t, err)
 	})
 }
