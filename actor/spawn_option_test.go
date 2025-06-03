@@ -79,6 +79,12 @@ func TestSpawnOption(t *testing.T) {
 		option.Apply(config)
 		require.Equal(t, &spawnConfig{enableStash: true}, config)
 	})
+	t.Run("spawn option with placement", func(t *testing.T) {
+		config := &spawnConfig{}
+		option := WithPlacement(RoundRobin)
+		option.Apply(config)
+		require.Equal(t, &spawnConfig{placement: RoundRobin}, config)
+	})
 }
 
 func TestNewSpawnConfig(t *testing.T) {
