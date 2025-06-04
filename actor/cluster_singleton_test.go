@@ -108,7 +108,7 @@ func TestSingletonActor(t *testing.T) {
 		// create a singleton actor
 		err = newActorSystem.SpawnSingleton(ctx, actorName, actor)
 		require.Error(t, err)
-		require.EqualError(t, err, ErrClusterDisabled.Error())
+		require.ErrorIs(t, err, ErrClusterDisabled)
 
 		err = newActorSystem.Stop(ctx)
 		require.NoError(t, err)
@@ -158,6 +158,6 @@ func TestSingletonActor(t *testing.T) {
 		// create a singleton actor
 		err = newActorSystem.SpawnSingleton(ctx, actorName, actor)
 		require.Error(t, err)
-		require.EqualError(t, err, ErrActorSystemNotStarted.Error())
+		require.ErrorIs(t, err, ErrActorSystemNotStarted)
 	})
 }

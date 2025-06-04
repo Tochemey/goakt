@@ -1364,7 +1364,7 @@ func (x *actorSystem) Kill(ctx context.Context, name string) error {
 
 	// user should not query system actors
 	if isReservedName(name) {
-		return ErrActorNotFound(name)
+		return NewErrActorNotFound(name)
 	}
 
 	actorAddress := x.actorAddress(name)
@@ -1376,7 +1376,7 @@ func (x *actorSystem) Kill(ctx context.Context, name string) error {
 		return pid.Shutdown(ctx)
 	}
 
-	return ErrActorNotFound(actorAddress.String())
+	return NewErrActorNotFound(actorAddress.String())
 }
 
 // ReSpawn recreates a given actor in the system
@@ -1391,7 +1391,7 @@ func (x *actorSystem) ReSpawn(ctx context.Context, name string) (*PID, error) {
 
 	// user should not query system actors
 	if isReservedName(name) {
-		return nil, ErrActorNotFound(name)
+		return nil, NewErrActorNotFound(name)
 	}
 
 	actorAddress := x.actorAddress(name)
@@ -1404,7 +1404,7 @@ func (x *actorSystem) ReSpawn(ctx context.Context, name string) (*PID, error) {
 		return pid, nil
 	}
 
-	return nil, ErrActorNotFound(actorAddress.String())
+	return nil, NewErrActorNotFound(actorAddress.String())
 }
 
 // Name returns the actor system name
@@ -1486,7 +1486,7 @@ func (x *actorSystem) ActorOf(ctx context.Context, actorName string) (addr *addr
 	// user should not query system actors
 	if isReservedName(actorName) {
 		x.locker.Unlock()
-		return nil, nil, ErrActorNotFound(actorName)
+		return nil, nil, NewErrActorNotFound(actorName)
 	}
 
 	// first check whether the actor exist locally
@@ -1504,7 +1504,7 @@ func (x *actorSystem) ActorOf(ctx context.Context, actorName string) (addr *addr
 			if errors.Is(err, cluster.ErrActorNotFound) {
 				x.logger.Infof("actor=%s not found", actorName)
 				x.locker.Unlock()
-				return nil, nil, ErrActorNotFound(actorName)
+				return nil, nil, NewErrActorNotFound(actorName)
 			}
 
 			x.locker.Unlock()
@@ -1522,7 +1522,7 @@ func (x *actorSystem) ActorOf(ctx context.Context, actorName string) (addr *addr
 
 	x.logger.Infof("actor=%s not found", actorName)
 	x.locker.Unlock()
-	return nil, nil, ErrActorNotFound(actorName)
+	return nil, nil, NewErrActorNotFound(actorName)
 }
 
 // LocalActor returns the reference of a local actor.
@@ -1538,7 +1538,7 @@ func (x *actorSystem) LocalActor(actorName string) (*PID, error) {
 	// user should not query system actors
 	if isReservedName(actorName) {
 		x.locker.Unlock()
-		return nil, ErrActorNotFound(actorName)
+		return nil, NewErrActorNotFound(actorName)
 	}
 
 	actorAddress := x.actorAddress(actorName)
@@ -1550,7 +1550,7 @@ func (x *actorSystem) LocalActor(actorName string) (*PID, error) {
 
 	x.logger.Infof("actor=%s not found", actorName)
 	x.locker.Unlock()
-	return nil, ErrActorNotFound(actorName)
+	return nil, NewErrActorNotFound(actorName)
 }
 
 // RemoteActor returns the address of a remote actor when cluster is enabled
@@ -1568,7 +1568,7 @@ func (x *actorSystem) RemoteActor(ctx context.Context, actorName string) (addr *
 	// user should not query system actors
 	if isReservedName(actorName) {
 		x.locker.Unlock()
-		return nil, ErrActorNotFound(actorName)
+		return nil, NewErrActorNotFound(actorName)
 	}
 
 	if x.cluster == nil {
@@ -1581,7 +1581,7 @@ func (x *actorSystem) RemoteActor(ctx context.Context, actorName string) (addr *
 		if errors.Is(err, cluster.ErrActorNotFound) {
 			x.logger.Infof("actor=%s not found", actorName)
 			x.locker.Unlock()
-			return nil, ErrActorNotFound(actorName)
+			return nil, NewErrActorNotFound(actorName)
 		}
 
 		x.locker.Unlock()
@@ -1611,8 +1611,9 @@ func (x *actorSystem) RemoteLookup(ctx context.Context, request *connect.Request
 		actor, err := x.cluster.GetActor(ctx, actorName)
 		if err != nil {
 			if errors.Is(err, cluster.ErrActorNotFound) {
-				logger.Error(ErrAddressNotFound(actorName).Error())
-				return nil, ErrAddressNotFound(actorName)
+				err := NewErrAddressNotFound(actorName)
+				logger.Error(err.Error())
+				return nil, err
 			}
 
 			return nil, connect.NewError(connect.CodeInternal, err)
@@ -1623,8 +1624,9 @@ func (x *actorSystem) RemoteLookup(ctx context.Context, request *connect.Request
 	addr := address.New(actorName, x.Name(), msg.GetHost(), int(msg.GetPort()))
 	pidNode, exist := x.actors.node(addr.String())
 	if !exist {
-		logger.Error(ErrAddressNotFound(addr.String()).Error())
-		return nil, ErrAddressNotFound(addr.String())
+		err := NewErrAddressNotFound(addr.String())
+		logger.Error(err.Error())
+		return nil, err
 	}
 
 	pid := pidNode.value()
@@ -1659,15 +1661,17 @@ func (x *actorSystem) RemoteAsk(ctx context.Context, request *connect.Request[in
 		addr := address.From(receiver)
 		pidNode, exist := x.actors.node(addr.String())
 		if !exist {
-			logger.Error(ErrAddressNotFound(addr.String()).Error())
-			return nil, ErrAddressNotFound(addr.String())
+			err := NewErrAddressNotFound(addr.String())
+			logger.Error(err.Error())
+			return nil, err
 		}
 
 		pid := pidNode.value()
 		reply, err := x.handleRemoteAsk(ctx, pid, message, timeout)
 		if err != nil {
-			logger.Error(ErrRemoteSendFailure(err).Error())
-			return nil, ErrRemoteSendFailure(err)
+			err := NewErrRemoteSendFailure(err)
+			logger.Error(err.Error())
+			return nil, err
 		}
 
 		marshaled, _ := anypb.New(reply)
@@ -1691,14 +1695,16 @@ func (x *actorSystem) RemoteTell(ctx context.Context, request *connect.Request[i
 		addr := address.From(receiver)
 		pidNode, exist := x.actors.node(addr.String())
 		if !exist {
-			logger.Error(ErrAddressNotFound(addr.String()).Error())
-			return nil, ErrAddressNotFound(addr.String())
+			err := NewErrAddressNotFound(addr.String())
+			logger.Error(err)
+			return nil, err
 		}
 
 		pid := pidNode.value()
 		if err := x.handleRemoteTell(ctx, pid, message); err != nil {
-			logger.Error(ErrRemoteSendFailure(err))
-			return nil, ErrRemoteSendFailure(err)
+			err := NewErrRemoteSendFailure(err)
+			logger.Error(err)
+			return nil, err
 		}
 	}
 
@@ -1722,14 +1728,15 @@ func (x *actorSystem) RemoteReSpawn(ctx context.Context, request *connect.Reques
 
 	// make sure we don't interfere with system actors.
 	if isReservedName(msg.GetName()) {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrActorNotFound(msg.GetName()))
+		return nil, connect.NewError(connect.CodeFailedPrecondition, NewErrActorNotFound(msg.GetName()))
 	}
 
 	actorAddress := address.New(msg.GetName(), x.Name(), msg.GetHost(), int(msg.GetPort()))
 	node, exist := x.actors.node(actorAddress.String())
 	if !exist {
-		logger.Error(ErrAddressNotFound(actorAddress.String()).Error())
-		return nil, ErrAddressNotFound(actorAddress.String())
+		err := NewErrAddressNotFound(actorAddress.String())
+		logger.Error(err)
+		return nil, err
 	}
 
 	pid := node.value()
@@ -1757,14 +1764,15 @@ func (x *actorSystem) RemoteStop(ctx context.Context, request *connect.Request[i
 
 	// make sure we don't interfere with system actors.
 	if isReservedName(msg.GetName()) {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrActorNotFound(msg.GetName()))
+		return nil, connect.NewError(connect.CodeFailedPrecondition, NewErrActorNotFound(msg.GetName()))
 	}
 
 	actorAddress := address.New(msg.GetName(), x.Name(), msg.GetHost(), int(msg.GetPort()))
 	pidNode, exist := x.actors.node(actorAddress.String())
 	if !exist {
-		logger.Error(ErrAddressNotFound(actorAddress.String()).Error())
-		return nil, ErrAddressNotFound(actorAddress.String())
+		err := NewErrAddressNotFound(actorAddress.String())
+		logger.Error(err.Error())
+		return nil, err
 	}
 
 	pid := pidNode.value()
@@ -1791,7 +1799,7 @@ func (x *actorSystem) RemoteSpawn(ctx context.Context, request *connect.Request[
 
 	// make sure we don't interfere with system actors.
 	if isReservedName(msg.GetActorName()) {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrActorNotFound(msg.GetActorName()))
+		return nil, connect.NewError(connect.CodeFailedPrecondition, NewErrActorNotFound(msg.GetActorName()))
 	}
 
 	actor, err := x.reflection.NewActor(msg.GetActorType())
@@ -1863,17 +1871,18 @@ func (x *actorSystem) RemoteReinstate(_ context.Context, request *connect.Reques
 
 	// make sure we don't interfere with system actors.
 	if isReservedName(msg.GetName()) {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrActorNotFound(msg.GetName()))
+		return nil, connect.NewError(connect.CodeFailedPrecondition, NewErrActorNotFound(msg.GetName()))
 	}
 
 	actorAddress := address.New(msg.GetName(), x.Name(), msg.GetHost(), int(msg.GetPort()))
-	pidNode, exist := x.actors.node(actorAddress.String())
+	node, exist := x.actors.node(actorAddress.String())
 	if !exist {
-		logger.Error(ErrAddressNotFound(actorAddress.String()).Error())
-		return nil, ErrAddressNotFound(actorAddress.String())
+		err := NewErrAddressNotFound(actorAddress.String())
+		logger.Error(err.Error())
+		return nil, err
 	}
 
-	pid := pidNode.value()
+	pid := node.value()
 	pid.doReinstate()
 
 	return connect.NewResponse(new(internalpb.RemoteReinstateResponse)), nil
@@ -2887,7 +2896,7 @@ func (x *actorSystem) checkSpawnPreconditions(ctx context.Context, actorName str
 		}
 
 		if existed.GetType() == types.Name(kind) {
-			return ErrActorAlreadyExists(actorName)
+			return NewErrActorAlreadyExists(actorName)
 		}
 	}
 

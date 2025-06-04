@@ -58,7 +58,7 @@ func TestReflection(t *testing.T) {
 		reflection := newReflection(tl)
 		actual, err := reflection.NewActor("actor.fakeActor")
 		assert.Error(t, err)
-		assert.EqualError(t, err, ErrTypeNotRegistered.Error())
+		assert.ErrorIs(t, err, ErrTypeNotRegistered)
 		assert.Nil(t, actual)
 	})
 	t.Run("With NewActor actor interface not implemented", func(t *testing.T) {
@@ -68,7 +68,7 @@ func TestReflection(t *testing.T) {
 		reflection := newReflection(newRegistry)
 		actual, err := reflection.NewActor("actor.normalStruct")
 		assert.Error(t, err)
-		assert.EqualError(t, err, ErrInstanceNotAnActor.Error())
+		assert.ErrorIs(t, err, ErrInstanceNotAnActor)
 		assert.Nil(t, actual)
 	})
 	t.Run("With NewDependency happy path", func(t *testing.T) {
@@ -95,7 +95,7 @@ func TestReflection(t *testing.T) {
 		reflection := newReflection(newRegistry)
 		actual, err := reflection.NewDependency("actor.normalStruct", []byte{})
 		assert.Error(t, err)
-		assert.EqualError(t, err, ErrInstanceNotDependency.Error())
+		assert.ErrorIs(t, err, ErrInstanceNotDependency)
 		assert.Nil(t, actual)
 	})
 	t.Run("With unregistered dependency", func(t *testing.T) {
@@ -103,7 +103,7 @@ func TestReflection(t *testing.T) {
 		reflection := newReflection(tl)
 		actual, err := reflection.NewDependency("actor.fakeDependency", []byte{})
 		assert.Error(t, err)
-		assert.EqualError(t, err, ErrDependencyTypeNotRegistered.Error())
+		assert.ErrorIs(t, err, ErrDependencyTypeNotRegistered)
 		assert.Nil(t, actual)
 	})
 	t.Run("With NewDependency UnmarshalBinary failure", func(t *testing.T) {

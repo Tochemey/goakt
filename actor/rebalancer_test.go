@@ -372,7 +372,7 @@ func TestRebalancingWithSystemRelocationDisabled(t *testing.T) {
 	actorName = "Node2-Actor-1"
 	err = sender.SendAsync(ctx, actorName, new(testpb.TestSend))
 	require.Error(t, err)
-	require.EqualError(t, err, ErrActorNotFound(actorName).Error())
+	require.ErrorIs(t, err, ErrActorNotFound)
 
 	assert.NoError(t, node1.Stop(ctx))
 	assert.NoError(t, node3.Stop(ctx))
