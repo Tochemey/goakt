@@ -31,6 +31,30 @@ import (
 	"github.com/tochemey/goakt/v3/internal/validation"
 )
 
+// SpawnPlacement defines the algorithm used by the actor system to determine
+// where an actor should be spawned in a clustered environment.
+//
+// This strategy is only relevant when cluster mode is enabled.
+// It affects how actors are distributed across the nodes in the cluster.
+type SpawnPlacement int
+
+const (
+	// RoundRobin distributes actors evenly across nodes
+	// by cycling through the available nodes in a round-robin manner.
+	// This strategy provides balanced load distribution over time.
+	RoundRobin SpawnPlacement = iota
+
+	// Random selects a node at random from the available pool of nodes.
+	// This strategy is stateless and can help quickly spread actors across the cluster,
+	// but may result in uneven load distribution.
+	Random
+
+	// Local forces the actor to be spawned on the local node,
+	// regardless of the cluster configuration.
+	// Useful when locality is important (e.g., accessing local resources).
+	Local
+)
+
 // spawnConfig defines the configuration to apply when creating an actor
 type spawnConfig struct {
 	// mailbox defines the mailbox to use when spawning the actor
@@ -51,6 +75,8 @@ type spawnConfig struct {
 	enableStash bool
 	// specifies whether the given actor is a system actor
 	isSystem bool
+	// specifies the placement
+	placement SpawnPlacement
 }
 
 var _ validation.Validator = (*spawnConfig)(nil)
@@ -78,6 +104,7 @@ func newSpawnConfig(opts ...SpawnOption) *spawnConfig {
 			WithAnyErrorDirective(ResumeDirective),
 		),
 		dependencies: make([]extension.Dependency, 0),
+		placement:    RoundRobin,
 	}
 
 	for _, opt := range opts {
@@ -201,6 +228,33 @@ func WithDependencies(dependencies ...extension.Dependency) SpawnOption {
 func WithStashing() SpawnOption {
 	return spawnOption(func(config *spawnConfig) {
 		config.enableStash = true
+	})
+}
+
+// WithPlacement sets the placement strategy to be used when spawning an actor
+// in cluster mode via the SpawnOn function.
+//
+// This option determines how the actor system selects a target node for spawning
+// the actor across the cluster. Valid strategies include RoundRobin,
+// Random, and Local.
+//
+// Note: This option only has an effect when used with SpawnOn in a cluster-enabled
+// actor system. If cluster mode is disabled, the placement strategy is ignored
+// and the actor will be spawned locally.
+//
+// Example:
+//
+//	err := system.SpawnOn(ctx, "analytics-worker", NewWorkerActor(),
+//	    WithPlacement(RoundRobin))
+//
+// Parameters:
+//   - strategy: A SpawnPlacement value specifying how to distribute the actor.
+//
+// Returns:
+//   - SpawnOption: An option that can be passed to SpawnOn.
+func WithPlacement(strategy SpawnPlacement) SpawnOption {
+	return spawnOption(func(config *spawnConfig) {
+		config.placement = strategy
 	})
 }
 

@@ -29,6 +29,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"math/rand/v2"
 	"net"
 	stdhttp "net/http"
 	"os"
@@ -106,8 +107,68 @@ type ActorSystem interface { //nolint:revive
 	// Stop stops the actor system and does not terminate the program.
 	// One needs to explicitly call os.Exit to terminate the program.
 	Stop(ctx context.Context) error
-	// Spawn creates an actor in the system and starts it
+	// Spawn creates and starts a new actor in the local actor system.
+	//
+	// The actor will be registered under the given `name`, allowing other actors
+	// or components to send messages to it using the returned *PID. If an actor
+	// with the same name already exists in the local system, an error will be returned.
+	//
+	// Parameters:
+	//   - ctx: A context used to control cancellation and timeouts during the spawn process.
+	//   - name: A unique identifier for the actor within the local actor system.
+	//   - actor: An instance implementing the Actor interface, representing the behavior and lifecycle of the actor.
+	//   - opts: Optional SpawnOptions to customize the actor's behavior (e.g., dependency, mailbox, supervisor strategy).
+	//
+	// Returns:
+	//   - *PID: A pointer to the Process ID of the spawned actor, used for message passing.
+	//   - error: An error if the actor could not be spawned (e.g., name conflict, invalid configuration).
+	//
+	// Example:
+	//
+	//   pid, err := system.Spawn(ctx, "user-service", NewUserActor())
+	//   if err != nil {
+	//       log.Fatalf("Failed to spawn actor: %v", err)
+	//   }
+	//
+	// Note: Actors spawned using this method are confined to the local actor system.
+	// For distributed scenarios, use a SpawnOn mechanism if available.
 	Spawn(ctx context.Context, name string, actor Actor, opts ...SpawnOption) (*PID, error)
+	// SpawnOn creates and starts an actor, either locally or on a remote node,
+	// depending on the configuration of the actor system.
+	//
+	// In **cluster mode**, the actor may be spawned on any node in the cluster
+	// based on the specified placement strategy. Supported strategies include:
+	//   - RoundRobin: Distributes actors evenly across available nodes.
+	//   - Random: Choose a node at random.
+	//   - Local: Ensures that the actor is created on the local node.
+	//
+	// In **non-cluster mode**, the actor is created on the local actor system
+	// just like with the standard `Spawn` function.
+	//
+	// Unlike `Spawn`, `SpawnOn` does not return a PID immediately. To interact with
+	// the spawned actor, use the `ActorOf` method to resolve its PID after it has been
+	// successfully created.
+	//
+	// Parameters:
+	//   - ctx: A context used to control cancellation and timeouts during the spawn process.
+	//   - name: A globally unique name for the actor in the cluster.
+	//   - actor: An instance implementing the Actor interface.
+	//   - opts: Optional SpawnOptions, such as placement strategy or dependencies, mailbox, supervisor strategy.
+	//
+	// Returns:
+	//   - error: An error if the actor could not be spawned (e.g., name conflict,
+	//     network failure, or misconfiguration).
+	//
+	// Example:
+	//
+	//	err := system.SpawnOn(ctx, "cart-service", NewCartActor(),
+	//	    WithPlacementStrategy(ConsistentHash))
+	//	if err != nil {
+	//	    log.Fatalf("Failed to spawn actor: %v", err)
+	//	}
+	//
+	// Note: The created actor used the default mailbox set during the creation of the actor system.
+	SpawnOn(ctx context.Context, name string, actor Actor, opts ...SpawnOption) error
 	// SpawnFromFunc creates an actor with the given receive function. One can set the PreStart and PostStop lifecycle hooks
 	// in the given optional options
 	SpawnFromFunc(ctx context.Context, receiveFunc ReceiveFunc, opts ...FuncOption) (*PID, error)
@@ -513,6 +574,8 @@ type actorSystem struct {
 	workerPool       *workerpool.WorkerPool
 	enableRelocation atomic.Bool
 	extensions       *collection.Map[string, extension.Extension]
+
+	spawnOnNext *atomic.Uint32
 }
 
 var (
@@ -559,6 +622,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		deadlettersCounter:     atomic.NewUint64(0),
 		topicActor:             NoSender,
 		extensions:             collection.NewMap[string, extension.Extension](),
+		spawnOnNext:            atomic.NewUint32(0),
 	}
 
 	system.enableRelocation.Store(true)
@@ -1026,7 +1090,31 @@ func (x *actorSystem) NumActors() uint64 {
 	return x.actorsCounter.Load()
 }
 
-// Spawn creates or returns the instance of a given actor in the system
+// Spawn creates and starts a new actor in the local actor system.
+//
+// The actor will be registered under the given `name`, allowing other actors
+// or components to send messages to it using the returned *PID. If an actor
+// with the same name already exists in the local system, an error will be returned.
+//
+// Parameters:
+//   - ctx: A context used to control cancellation and timeouts during the spawn process.
+//   - name: A unique identifier for the actor within the local actor system.
+//   - actor: An instance implementing the Actor interface, representing the behavior and lifecycle of the actor.
+//   - opts: Optional SpawnOptions to customize the actor's behavior (e.g., dependency, mailbox, supervisor strategy).
+//
+// Returns:
+//   - *PID: A pointer to the Process ID of the spawned actor, used for message passing.
+//   - error: An error if the actor could not be spawned (e.g., name conflict, invalid configuration).
+//
+// Example:
+//
+//	pid, err := system.Spawn(ctx, "user-service", NewUserActor())
+//	if err != nil {
+//	    log.Fatalf("Failed to spawn actor: %v", err)
+//	}
+//
+// Note: Actors spawned using this method are confined to the local actor system.
+// For distributed scenarios, use a SpawnOn method.
 func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor, opts ...SpawnOption) (*PID, error) {
 	if !x.started.Load() {
 		return nil, ErrActorSystemNotStarted
@@ -1092,6 +1180,96 @@ func (x *actorSystem) SpawnNamedFromFunc(ctx context.Context, name string, recei
 	_ = x.actors.addNode(x.userGuardian, pid)
 	x.actors.addWatcher(pid, x.deathWatch)
 	return pid, x.broadcastActor(pid)
+}
+
+// SpawnOn creates and starts an actor, either locally or on a remote node,
+// depending on the configuration of the actor system.
+//
+// In **cluster mode**, the actor may be spawned on any node in the cluster
+// based on the specified placement strategy. Supported strategies include:
+//   - RoundRobin: Distributes actors evenly across available nodes.
+//   - Random: Choose a node at random.
+//   - Local: Ensures that the actor is created on the local node.
+//
+// In **non-cluster mode**, the actor is created on the local actor system
+// just like with the standard `Spawn` function.
+//
+// Unlike `Spawn`, `SpawnOn` does not return a PID immediately. To interact with
+// the spawned actor, use the `ActorOf` method to resolve its PID or Address after it has been
+// successfully created.
+//
+// Parameters:
+//   - ctx: A context used to control cancellation and timeouts during the spawn process.
+//   - name: A globally unique name for the actor in the cluster.
+//   - actor: An instance implementing the Actor interface.
+//   - opts: Optional SpawnOptions, such as placement strategy or dependencies, mailbox, supervisor strategy.
+//
+// Returns:
+//   - error: An error if the actor could not be spawned (e.g., name conflict,
+//     network failure, or misconfiguration).
+//
+// Example:
+//
+//	err := system.SpawnOn(ctx, "actor-1", NewCartActor(), WithPlacement(Random))
+//	if err != nil {
+//	    log.Fatalf("Failed to spawn actor: %v", err)
+//	}
+//
+// Note: The created actor used the default mailbox set during the creation of the actor system.
+func (x *actorSystem) SpawnOn(ctx context.Context, name string, actor Actor, opts ...SpawnOption) error {
+	if !x.started.Load() {
+		return ErrActorSystemNotStarted
+	}
+
+	// check some preconditions
+	if err := x.checkSpawnPreconditions(ctx, name, actor, false); err != nil {
+		return err
+	}
+
+	config := newSpawnConfig(opts...)
+	if !x.InCluster() || config.placement == Local {
+		_, err := x.Spawn(ctx, name, actor, opts...)
+		return err
+	}
+
+	peers, err := x.cluster.Peers(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to fetch cluster nodes: %w", err)
+	}
+
+	var peer *cluster.Peer
+	switch config.placement {
+	case Random:
+		peer = peers[rand.IntN(len(peers))] //nolint:gosec
+	case RoundRobin:
+		x.spawnOnNext.Inc()
+		n := x.spawnOnNext.Load()
+		peer = peers[(int(n)-1)%len(peers)]
+	default:
+		// pass
+	}
+
+	// spawn the actor on the local node
+	if peer == nil {
+		_, err := x.Spawn(ctx, name, actor, opts...)
+		return err
+	}
+
+	// set the passivation time
+	passivateAfter := x.passivationAfter
+	if config.passivateAfter != nil {
+		passivateAfter = *config.passivateAfter
+	}
+
+	return x.remoting.RemoteSpawn(ctx, peer.Host, peer.RemotingPort, &remote.SpawnRequest{
+		Name:           name,
+		Kind:           types.Name(actor),
+		Singleton:      false,
+		Relocatable:    config.relocatable,
+		PassivateAfter: passivateAfter,
+		Dependencies:   config.dependencies,
+		EnableStashing: config.enableStash,
+	})
 }
 
 // SpawnFromFunc creates an actor with the given receive function.
@@ -2141,6 +2319,7 @@ func (x *actorSystem) reset() {
 	x.workerPool.Stop()
 	x.extensions.Reset()
 	x.actors.reset()
+	x.spawnOnNext.Store(0)
 }
 
 // shutdown stops the actor system
