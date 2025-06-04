@@ -150,7 +150,7 @@ func NewErrAddressNotFound(addr string) error {
 
 // NewErrRemoteSendFailure wraps an error into an ErrRemoteSendFailure using internal server code.
 func NewErrRemoteSendFailure(err error) error {
-	return connect.NewError(connect.CodeInternal, fmt.Errorf("%w", err))
+	return connect.NewError(connect.CodeInternal, errors.Join(ErrRemoteSendFailure, err))
 }
 
 // NewErrActorAlreadyExists formats an ErrActorAlreadyExists for the given actor name.
