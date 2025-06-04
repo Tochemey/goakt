@@ -150,7 +150,7 @@ func TestRouter(t *testing.T) {
 		ref, err := system.LocalActor("routerQA-pool")
 		require.Error(t, err)
 		require.Nil(t, ref)
-		assert.EqualError(t, err, ErrActorNotFound("routerQA-pool").Error())
+		assert.ErrorIs(t, err, ErrActorNotFound)
 
 		t.Cleanup(func() {
 			assert.NoError(t, system.Stop(ctx))

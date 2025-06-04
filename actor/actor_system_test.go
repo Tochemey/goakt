@@ -70,13 +70,13 @@ func TestActorSystem(t *testing.T) {
 		sys, err := NewActorSystem("")
 		assert.Error(t, err)
 		assert.Nil(t, sys)
-		assert.EqualError(t, err, ErrNameRequired.Error())
+		require.ErrorIs(t, err, ErrNameRequired)
 	})
 	t.Run("With invalid actor system Name", func(t *testing.T) {
 		sys, err := NewActorSystem("$omeN@me")
 		assert.Error(t, err)
 		assert.Nil(t, sys)
-		assert.EqualError(t, err, ErrInvalidActorSystemName.Error())
+		require.ErrorIs(t, err, ErrInvalidActorSystemName)
 	})
 	t.Run("With Spawn an actor when not System started", func(t *testing.T) {
 		ctx := context.TODO()
@@ -84,7 +84,7 @@ func TestActorSystem(t *testing.T) {
 		actor := newMockActor()
 		actorRef, err := sys.Spawn(ctx, "Test", actor)
 		assert.Error(t, err)
-		assert.EqualError(t, err, ErrActorSystemNotStarted.Error())
+		assert.ErrorIs(t, err, ErrActorSystemNotStarted)
 		assert.Nil(t, sys.Metric(ctx))
 		assert.Nil(t, actorRef)
 		assert.Zero(t, sys.Uptime())
@@ -249,13 +249,13 @@ func TestActorSystem(t *testing.T) {
 		actorName = "some-actor"
 		addr, pid, err := newActorSystem.ActorOf(ctx, actorName)
 		require.Error(t, err)
-		require.EqualError(t, err, ErrActorNotFound(actorName).Error())
+		require.ErrorIs(t, err, ErrActorNotFound)
 		require.Nil(t, addr)
 		require.Nil(t, pid)
 
 		remoteAddr, err = newActorSystem.RemoteActor(ctx, actorName)
 		require.Error(t, err)
-		require.EqualError(t, err, ErrActorNotFound(actorName).Error())
+		require.ErrorIs(t, err, ErrActorNotFound)
 		require.Nil(t, remoteAddr)
 
 		// stop the actor after some time
@@ -293,7 +293,7 @@ func TestActorSystem(t *testing.T) {
 
 		addr, pid, err := newActorSystem.ActorOf(ctx, actorName)
 		require.Error(t, err)
-		require.EqualError(t, err, ErrMethodCallNotAllowed.Error())
+		require.ErrorIs(t, err, ErrMethodCallNotAllowed)
 		require.Nil(t, addr)
 		require.Nil(t, pid)
 
@@ -344,7 +344,7 @@ func TestActorSystem(t *testing.T) {
 		actorName := "notFound"
 		addr, pid, err := sys.ActorOf(ctx, actorName)
 		require.Error(t, err)
-		require.EqualError(t, err, ErrActorNotFound(actorName).Error())
+		require.ErrorIs(t, err, ErrActorNotFound)
 		require.Nil(t, pid)
 		require.Nil(t, addr)
 
@@ -378,7 +378,7 @@ func TestActorSystem(t *testing.T) {
 
 		addr, pid, err := newActorSystem.ActorOf(ctx, actorName)
 		require.Error(t, err)
-		require.EqualError(t, err, ErrActorSystemNotStarted.Error())
+		require.ErrorIs(t, err, ErrActorSystemNotStarted)
 		require.Nil(t, addr)
 		require.Nil(t, pid)
 	})
@@ -669,7 +669,7 @@ func TestActorSystem(t *testing.T) {
 		actorName := "some-actor"
 		remoteAddr, err := newActorSystem.RemoteActor(ctx, actorName)
 		require.Error(t, err)
-		require.EqualError(t, err, ErrActorSystemNotStarted.Error())
+		require.ErrorIs(t, err, ErrActorSystemNotStarted)
 		require.Nil(t, remoteAddr)
 	})
 	t.Run("With RemoteActor failure when system not started", func(t *testing.T) {
@@ -689,7 +689,7 @@ func TestActorSystem(t *testing.T) {
 
 		err = newActorSystem.Stop(ctx)
 		require.Error(t, err)
-		require.EqualError(t, err, ErrActorSystemNotStarted.Error())
+		require.ErrorIs(t, err, ErrActorSystemNotStarted)
 	})
 	t.Run("With RemoteActor failure when cluster is not enabled", func(t *testing.T) {
 		ctx := context.TODO()
@@ -714,7 +714,7 @@ func TestActorSystem(t *testing.T) {
 		actorName := "some-actor"
 		remoteAddr, err := newActorSystem.RemoteActor(ctx, actorName)
 		require.Error(t, err)
-		require.EqualError(t, err, ErrClusterDisabled.Error())
+		require.ErrorIs(t, err, ErrClusterDisabled)
 		require.Nil(t, remoteAddr)
 
 		// stop the actor after some time
@@ -766,7 +766,7 @@ func TestActorSystem(t *testing.T) {
 		ref, err := sys.LocalActor("some-name")
 		require.Error(t, err)
 		require.Nil(t, ref)
-		require.EqualError(t, err, ErrActorNotFound("some-name").Error())
+		require.ErrorIs(t, err, ErrActorNotFound)
 
 		// stop the actor after some time
 		util.Pause(time.Second)
@@ -787,7 +787,7 @@ func TestActorSystem(t *testing.T) {
 		// locate the actor
 		local, err := sys.LocalActor(actorName)
 		require.Error(t, err)
-		require.EqualError(t, err, ErrActorSystemNotStarted.Error())
+		require.ErrorIs(t, err, ErrActorSystemNotStarted)
 		require.Nil(t, local)
 	})
 	t.Run("With Kill an actor when not System started", func(t *testing.T) {
@@ -806,7 +806,7 @@ func TestActorSystem(t *testing.T) {
 		assert.NoError(t, err)
 		err = sys.Kill(ctx, "Test")
 		assert.Error(t, err)
-		assert.EqualError(t, err, "actor=goakt://testSys@127.0.0.1:0/Test not found")
+		assert.ErrorIs(t, err, ErrActorNotFound)
 		t.Cleanup(
 			func() {
 				err = sys.Stop(ctx)
@@ -842,7 +842,7 @@ func TestActorSystem(t *testing.T) {
 		ref, err := sys.LocalActor(actorName)
 		require.Error(t, err)
 		require.Nil(t, ref)
-		require.EqualError(t, err, ErrActorNotFound(actorName).Error())
+		require.ErrorIs(t, err, ErrActorNotFound)
 
 		// stop the actor after some time
 		util.Pause(time.Second)
@@ -1049,14 +1049,14 @@ func TestActorSystem(t *testing.T) {
 		// get the actor
 		addr, pid, err := newActorSystem.ActorOf(ctx, actorName)
 		require.Error(t, err)
-		require.EqualError(t, err, ErrActorNotFound(actorName).Error())
+		require.ErrorIs(t, err, ErrActorNotFound)
 		require.Nil(t, addr)
 		require.Nil(t, pid)
 
 		// use RemoteActor method and compare the results
 		remoteAddr, err := newActorSystem.RemoteActor(ctx, actorName)
 		require.Error(t, err)
-		require.EqualError(t, err, ErrActorNotFound(actorName).Error())
+		require.ErrorIs(t, err, ErrActorNotFound)
 		require.Nil(t, remoteAddr)
 
 		// stop the actor after some time
@@ -1346,7 +1346,7 @@ func TestActorSystem(t *testing.T) {
 
 		actorRef, err := sys.SpawnFromFunc(ctx, receiveFn, WithPreStart(preStart))
 		assert.Error(t, err)
-		assert.EqualError(t, err, ErrActorSystemNotStarted.Error())
+		assert.ErrorIs(t, err, ErrActorSystemNotStarted)
 		assert.Nil(t, actorRef)
 	})
 	t.Run("With happy path Register", func(t *testing.T) {
@@ -1389,7 +1389,7 @@ func TestActorSystem(t *testing.T) {
 		// register the actor
 		err = sys.Register(ctx, &exchanger{})
 		require.Error(t, err)
-		assert.EqualError(t, err, ErrActorSystemNotStarted.Error())
+		assert.ErrorIs(t, err, ErrActorSystemNotStarted)
 
 		err = sys.Stop(ctx)
 		require.Error(t, err)
@@ -1440,7 +1440,7 @@ func TestActorSystem(t *testing.T) {
 
 		err = sys.Deregister(ctx, &exchanger{})
 		require.Error(t, err)
-		assert.EqualError(t, err, ErrActorSystemNotStarted.Error())
+		assert.ErrorIs(t, err, ErrActorSystemNotStarted)
 
 		t.Cleanup(
 			func() {
@@ -1606,7 +1606,7 @@ func TestActorSystem(t *testing.T) {
 
 		_, err = node2.Spawn(ctx, actorName, actor)
 		require.Error(t, err)
-		require.Equal(t, ErrActorAlreadyExists(actorName).Error(), err.Error())
+		require.ErrorIs(t, err, ErrActorAlreadyExists)
 
 		// free resource
 		require.NoError(t, node2.Stop(ctx))
@@ -1710,7 +1710,7 @@ func TestActorSystem(t *testing.T) {
 
 		_, err = node2.Spawn(ctx, actorName, actor)
 		require.Error(t, err)
-		require.Equal(t, ErrActorAlreadyExists(actorName).Error(), err.Error())
+		require.ErrorIs(t, err, ErrActorAlreadyExists)
 
 		actors := node3.ActorRefs(ctx, time.Second)
 		require.Len(t, actors, 1)
@@ -1753,7 +1753,7 @@ func TestActorSystem(t *testing.T) {
 		// let us send a message to the actor
 		err = Tell(ctx, pid, new(testpb.TestSend))
 		assert.Error(t, err)
-		assert.EqualError(t, err, ErrDead.Error())
+		assert.ErrorIs(t, err, ErrDead)
 		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 	t.Run("With Spawn with long lived", func(t *testing.T) {
@@ -1983,7 +1983,7 @@ func TestActorSystem(t *testing.T) {
 		// register the actor
 		err = sys.Inject(extmocks.NewDependency(t))
 		require.Error(t, err)
-		assert.EqualError(t, err, ErrActorSystemNotStarted.Error())
+		assert.ErrorIs(t, err, ErrActorSystemNotStarted)
 
 		err = sys.Stop(ctx)
 		require.Error(t, err)
@@ -2034,7 +2034,7 @@ func TestActorSystem(t *testing.T) {
 		name := "GoAktXYZ"
 		addr, pid, err := sys.ActorOf(ctx, name)
 		require.Error(t, err)
-		require.EqualError(t, err, ErrActorNotFound(name).Error())
+		require.ErrorIs(t, err, ErrActorNotFound)
 		require.Nil(t, addr)
 		require.Nil(t, pid)
 
@@ -2063,7 +2063,7 @@ func TestActorSystem(t *testing.T) {
 		name := "GoAktXYZ"
 		err = sys.Kill(ctx, name)
 		require.Error(t, err)
-		require.EqualError(t, err, ErrActorNotFound(name).Error())
+		require.ErrorIs(t, err, ErrActorNotFound)
 
 		err = sys.Stop(ctx)
 		require.NoError(t, err)
@@ -2090,7 +2090,7 @@ func TestActorSystem(t *testing.T) {
 		name := "GoAktXYZ"
 		pid, err := sys.ReSpawn(ctx, name)
 		require.Error(t, err)
-		require.EqualError(t, err, ErrActorNotFound(name).Error())
+		require.ErrorIs(t, err, ErrActorNotFound)
 		require.Nil(t, pid)
 
 		err = sys.Stop(ctx)
@@ -2119,7 +2119,7 @@ func TestActorSystem(t *testing.T) {
 		name := "GoAktXYZ"
 		pid, err := sys.LocalActor(name)
 		require.Error(t, err)
-		require.EqualError(t, err, ErrActorNotFound(name).Error())
+		require.ErrorIs(t, err, ErrActorNotFound)
 		require.Nil(t, pid)
 
 		err = sys.Stop(ctx)
@@ -2148,7 +2148,7 @@ func TestActorSystem(t *testing.T) {
 		name := "GoAktXYZ"
 		addr, err := sys.RemoteActor(ctx, name)
 		require.Error(t, err)
-		require.EqualError(t, err, ErrActorNotFound(name).Error())
+		require.ErrorIs(t, err, ErrActorNotFound)
 		require.Nil(t, addr)
 
 		err = sys.Stop(ctx)
@@ -2192,7 +2192,7 @@ func TestActorSystem(t *testing.T) {
 		// either we can locate the actor or try to recreate it
 		_, err = node2.Spawn(ctx, actorName, actor)
 		require.Error(t, err)
-		require.Equal(t, ErrActorAlreadyExists(actorName).Error(), err.Error())
+		require.ErrorIs(t, err, ErrActorAlreadyExists)
 
 		// free resources
 		require.NoError(t, node2.Stop(ctx))
@@ -2244,7 +2244,7 @@ func TestActorSystem(t *testing.T) {
 		// either we can locate the actor or try to recreate it
 		_, err = node2.Spawn(ctx, actorName, actor)
 		require.Error(t, err)
-		require.Equal(t, ErrActorAlreadyExists(actorName).Error(), err.Error())
+		require.ErrorIs(t, err, ErrActorAlreadyExists)
 
 		// free resources
 		require.NoError(t, node2.Stop(ctx))
@@ -2296,7 +2296,7 @@ func TestActorSystem(t *testing.T) {
 		// either we can locate the actor or try to recreate it
 		_, err = node2.Spawn(ctx, actorName, actor)
 		require.Error(t, err)
-		require.Equal(t, ErrActorAlreadyExists(actorName).Error(), err.Error())
+		require.ErrorIs(t, err, ErrActorAlreadyExists)
 
 		// free resources
 		require.NoError(t, node2.Stop(ctx))

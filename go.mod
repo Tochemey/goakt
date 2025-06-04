@@ -14,7 +14,7 @@ require (
 	github.com/hashicorp/memberlist v0.5.3
 	github.com/kapetan-io/tackle v0.11.0
 	github.com/nats-io/nats-server/v2 v2.11.4
-	github.com/nats-io/nats.go v1.42.0
+	github.com/nats-io/nats.go v1.43.0
 	github.com/panjf2000/ants/v2 v2.11.3
 	github.com/redis/go-redis/v9 v9.9.0
 	github.com/reugn/go-quartz v0.14.0

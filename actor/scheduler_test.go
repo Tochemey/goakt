@@ -239,7 +239,7 @@ func TestScheduler(t *testing.T) {
 		message := new(testpb.TestSend)
 		err = scheduler.ScheduleOnce(message, pid, 100*time.Millisecond)
 		require.Error(t, err)
-		assert.EqualError(t, err, ErrSchedulerNotStarted.Error())
+		assert.ErrorIs(t, err, ErrSchedulerNotStarted)
 
 		err = pid.Shutdown(ctx)
 		assert.NoError(t, err)
@@ -424,7 +424,7 @@ func TestScheduler(t *testing.T) {
 		message := new(testpb.TestSend)
 		err = newActorSystem.RemoteScheduleOnce(ctx, message, addr, 100*time.Millisecond)
 		require.Error(t, err)
-		assert.EqualError(t, err, ErrSchedulerNotStarted.Error())
+		assert.ErrorIs(t, err, ErrSchedulerNotStarted)
 
 		// stop the actor
 		err = newActorSystem.Stop(ctx)
@@ -625,7 +625,7 @@ func TestScheduler(t *testing.T) {
 		const expr = "* * * ? * *"
 		err = newActorSystem.ScheduleWithCron(ctx, message, actorRef, expr)
 		require.Error(t, err)
-		assert.EqualError(t, err, ErrSchedulerNotStarted.Error())
+		assert.ErrorIs(t, err, ErrSchedulerNotStarted)
 
 		// stop the actor
 		err = newActorSystem.Stop(ctx)
@@ -855,7 +855,7 @@ func TestScheduler(t *testing.T) {
 		const expr = "* * * ? * *"
 		err = newActorSystem.RemoteScheduleWithCron(ctx, message, addr, expr)
 		require.Error(t, err)
-		assert.EqualError(t, err, ErrSchedulerNotStarted.Error())
+		assert.ErrorIs(t, err, ErrSchedulerNotStarted)
 
 		// stop the actor
 		err = newActorSystem.Stop(ctx)
@@ -1073,7 +1073,7 @@ func TestScheduler(t *testing.T) {
 		message := new(testpb.TestSend)
 		err = newActorSystem.Schedule(ctx, message, actorRef, time.Second)
 		require.Error(t, err)
-		assert.EqualError(t, err, ErrSchedulerNotStarted.Error())
+		assert.ErrorIs(t, err, ErrSchedulerNotStarted)
 
 		// stop the actor
 		err = newActorSystem.Stop(ctx)
@@ -1185,7 +1185,7 @@ func TestScheduler(t *testing.T) {
 		message := new(testpb.TestSend)
 		err = newActorSystem.RemoteSchedule(ctx, message, addr, 100*time.Millisecond)
 		require.Error(t, err)
-		assert.EqualError(t, err, ErrSchedulerNotStarted.Error())
+		assert.ErrorIs(t, err, ErrSchedulerNotStarted)
 
 		// stop the actor
 		err = newActorSystem.Stop(ctx)
@@ -1273,7 +1273,7 @@ func TestScheduler(t *testing.T) {
 		const expr = "* * * ? * *"
 		err := scheduler.RemoteScheduleWithCron(message, addr, expr)
 		require.Error(t, err)
-		assert.EqualError(t, err, ErrRemotingDisabled.Error())
+		assert.ErrorIs(t, err, ErrRemotingDisabled)
 
 		scheduler.Stop(ctx)
 	})
@@ -1296,7 +1296,7 @@ func TestScheduler(t *testing.T) {
 		message := new(testpb.TestSend)
 		err := scheduler.RemoteSchedule(message, addr, time.Second)
 		require.Error(t, err)
-		assert.EqualError(t, err, ErrRemotingDisabled.Error())
+		assert.ErrorIs(t, err, ErrRemotingDisabled)
 
 		scheduler.Stop(ctx)
 	})
@@ -1318,7 +1318,7 @@ func TestScheduler(t *testing.T) {
 		message := new(testpb.TestSend)
 		err := scheduler.RemoteScheduleOnce(message, addr, time.Second)
 		require.Error(t, err)
-		assert.EqualError(t, err, ErrRemotingDisabled.Error())
+		assert.ErrorIs(t, err, ErrRemotingDisabled)
 		scheduler.Stop(ctx)
 	})
 	t.Run("With RemoteSchedule when cluster is enabled", func(t *testing.T) {
@@ -1485,7 +1485,7 @@ func TestScheduler(t *testing.T) {
 
 		err = newActorSystem.PauseSchedule("reference")
 		require.Error(t, err)
-		assert.EqualError(t, err, ErrSchedulerNotStarted.Error())
+		assert.ErrorIs(t, err, ErrSchedulerNotStarted)
 
 		// stop the actor
 		err = newActorSystem.Stop(ctx)
@@ -1525,7 +1525,7 @@ func TestScheduler(t *testing.T) {
 
 		err = newActorSystem.ResumeSchedule("reference")
 		require.Error(t, err)
-		assert.EqualError(t, err, ErrSchedulerNotStarted.Error())
+		assert.ErrorIs(t, err, ErrSchedulerNotStarted)
 
 		// stop the actor
 		err = newActorSystem.Stop(ctx)
@@ -1652,7 +1652,7 @@ func TestScheduler(t *testing.T) {
 
 		err = newActorSystem.CancelSchedule("reference")
 		require.Error(t, err)
-		assert.EqualError(t, err, ErrSchedulerNotStarted.Error())
+		assert.ErrorIs(t, err, ErrSchedulerNotStarted)
 
 		// stop the actor
 		err = newActorSystem.Stop(ctx)

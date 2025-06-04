@@ -105,7 +105,7 @@ func NewRemoting(opts ...RemotingOption) *Remoting {
 func (r *Remoting) RemoteTell(ctx context.Context, from, to *address.Address, message proto.Message) error {
 	marshaled, err := anypb.New(message)
 	if err != nil {
-		return ErrInvalidMessage(err)
+		return NewErrInvalidMessage(err)
 	}
 
 	remoteClient := r.remotingServiceClient(to.GetHost(), int(to.GetPort()))
@@ -127,7 +127,7 @@ func (r *Remoting) RemoteTell(ctx context.Context, from, to *address.Address, me
 func (r *Remoting) RemoteAsk(ctx context.Context, from, to *address.Address, message proto.Message, timeout time.Duration) (response *anypb.Any, err error) {
 	marshaled, err := anypb.New(message)
 	if err != nil {
-		return nil, ErrInvalidMessage(err)
+		return nil, NewErrInvalidMessage(err)
 	}
 
 	remoteClient := r.remotingServiceClient(to.GetHost(), int(to.GetPort()))
@@ -210,7 +210,7 @@ func (r *Remoting) RemoteBatchAsk(ctx context.Context, from, to *address.Address
 		if message != nil {
 			packed, err := anypb.New(message)
 			if err != nil {
-				return nil, ErrInvalidMessage(err)
+				return nil, NewErrInvalidMessage(err)
 			}
 			remoteMessages = append(remoteMessages, &internalpb.RemoteMessage{
 				Sender:   from.Address,

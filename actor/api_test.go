@@ -121,7 +121,7 @@ func TestAsk(t *testing.T) {
 			reply, err := Ask(ctx, actorRef, message, replyTimeout)
 			// perform some assertions
 			require.Error(t, err)
-			assert.EqualError(t, err, ErrDead.Error())
+			assert.ErrorIs(t, err, ErrDead)
 			assert.Nil(t, reply)
 
 			err = sys.Stop(ctx)
@@ -162,7 +162,7 @@ func TestAsk(t *testing.T) {
 			reply, err := Ask(ctx, actorRef, message, replyTimeout)
 			// perform some assertions
 			require.Error(t, err)
-			assert.EqualError(t, err, ErrRequestTimeout.Error())
+			assert.ErrorIs(t, err, ErrRequestTimeout)
 			assert.Nil(t, reply)
 
 			err = sys.Stop(ctx)
@@ -292,7 +292,7 @@ func TestAsk(t *testing.T) {
 			replies, err := BatchAsk(ctx, actorRef, replyTimeout, new(testpb.TestTimeout), new(testpb.TestReply))
 			// perform some assertions
 			require.Error(t, err)
-			require.EqualError(t, err, ErrRequestTimeout.Error())
+			require.ErrorIs(t, err, ErrRequestTimeout)
 			assert.Empty(t, replies)
 
 			// stop the actor after some time
@@ -430,7 +430,7 @@ func TestTell(t *testing.T) {
 			err = Tell(ctx, actorRef, message)
 			// perform some assertions
 			require.Error(t, err)
-			assert.EqualError(t, err, ErrDead.Error())
+			require.ErrorIs(t, err, ErrDead)
 
 			err = sys.Stop(ctx)
 			require.NoError(t, err)
@@ -555,7 +555,7 @@ func TestTell(t *testing.T) {
 			err = BatchTell(ctx, actorRef, new(testpb.TestSend), new(testpb.TestSend))
 			// perform some assertions
 			require.Error(t, err)
-			require.EqualError(t, err, ErrDead.Error())
+			require.ErrorIs(t, err, ErrDead)
 
 			err = sys.Stop(ctx)
 			assert.NoError(t, err)

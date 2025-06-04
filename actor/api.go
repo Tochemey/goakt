@@ -109,7 +109,7 @@ func toReceiveContext(ctx context.Context, to *PID, message proto.Message, async
 	case *internalpb.RemoteMessage:
 		actual, err := msg.GetMessage().UnmarshalNew()
 		if err != nil {
-			return nil, ErrInvalidRemoteMessage(err)
+			return nil, NewErrInvalidRemoteMessage(err)
 		}
 		receiveContext := getContext()
 		receiveContext.build(ctx, NoSender, to, actual, async)

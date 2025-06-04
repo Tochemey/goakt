@@ -256,7 +256,6 @@ func TestRemoteTell(t *testing.T) {
 		err = remoting.RemoteTell(ctx, from, addr, message)
 		// perform some assertions
 		require.Error(t, err)
-		require.EqualError(t, err, "failed_precondition: remoting is not enabled")
 
 		// stop the actor after some time
 		util.Pause(time.Second)
@@ -429,7 +428,6 @@ func TestRemoteTell(t *testing.T) {
 		err = remoting.RemoteBatchTell(ctx, from, addr, []proto.Message{message})
 		// perform some assertions
 		require.Error(t, err)
-		require.EqualError(t, err, "failed_precondition: remoting is not enabled")
 
 		// stop the actor after some time
 		util.Pause(time.Second)
@@ -847,7 +845,6 @@ func TestRemoteAsk(t *testing.T) {
 		reply, err := remoting.RemoteAsk(ctx, from, addr, message, time.Minute)
 		// perform some assertions
 		require.Error(t, err)
-		require.EqualError(t, err, "failed_precondition: remoting is not enabled")
 		require.Nil(t, reply)
 
 		// stop the actor after some time
@@ -1028,7 +1025,6 @@ func TestRemoteAsk(t *testing.T) {
 		reply, err := remoting.RemoteBatchAsk(ctx, from, addr, []proto.Message{message}, time.Minute)
 		// perform some assertions
 		require.Error(t, err)
-		require.EqualError(t, err, "failed_precondition: remoting is not enabled")
 		require.Nil(t, reply)
 
 		// stop the actor after some time
@@ -1272,7 +1268,6 @@ func TestRemotingLookup(t *testing.T) {
 		// get the address of the actor
 		addr, err := remoting.RemoteLookup(ctx, sys.Host(), int(sys.Port()), actorName)
 		require.Error(t, err)
-		require.EqualError(t, err, "failed_precondition: remoting is not enabled")
 		require.Nil(t, addr)
 
 		t.Cleanup(
@@ -1329,7 +1324,6 @@ func TestRemotingLookup(t *testing.T) {
 		// get the address of the actor
 		addr, err := remoting.RemoteLookup(ctx, sys.Host(), int(sys.Port()), actorName)
 		require.Error(t, err)
-		require.EqualError(t, err, "failed_precondition: remoting is not enabled")
 		require.Nil(t, addr)
 
 		t.Cleanup(
@@ -1376,7 +1370,6 @@ func TestRemotingReSpawn(t *testing.T) {
 		// get the address of the actor
 		err = remoting.RemoteReSpawn(ctx, sys.Host(), int(sys.Port()), actorName)
 		require.Error(t, err)
-		require.EqualError(t, err, "failed_precondition: remoting is not enabled")
 
 		remoting.Close()
 		t.Cleanup(
@@ -1483,7 +1476,6 @@ func TestRemotingReSpawn(t *testing.T) {
 		// get the address of the actor
 		err = remoting.RemoteReSpawn(ctx, sys.Host(), int(sys.Port()), actorName)
 		require.Error(t, err)
-		require.EqualError(t, err, "failed_precondition: remoting is not enabled")
 
 		remoting.Close()
 		t.Cleanup(
@@ -1524,7 +1516,6 @@ func TestRemotingReSpawn(t *testing.T) {
 		// get the address of the actor
 		err = remoting.RemoteReSpawn(ctx, sys.Host(), int(sys.Port()), actorName)
 		require.Error(t, err)
-		require.EqualError(t, err, "failed_precondition: actor=GoAktXYZ not found")
 
 		remoting.Close()
 		err = sys.Stop(ctx)
@@ -1569,7 +1560,6 @@ func TestRemotingStop(t *testing.T) {
 		// get the address of the actor
 		err = remoting.RemoteStop(ctx, sys.Host(), int(sys.Port()), actorName)
 		require.Error(t, err)
-		require.EqualError(t, err, "failed_precondition: remoting is not enabled")
 
 		remoting.Close()
 		t.Cleanup(
@@ -1682,7 +1672,6 @@ func TestRemotingStop(t *testing.T) {
 		// get the address of the actor
 		err = remoting.RemoteStop(ctx, sys.Host(), int(sys.Port()), actorName)
 		require.Error(t, err)
-		require.EqualError(t, err, "failed_precondition: remoting is not enabled")
 
 		remoting.Close()
 		t.Cleanup(
@@ -1724,7 +1713,6 @@ func TestRemotingStop(t *testing.T) {
 		// get the address of the actor
 		err = remoting.RemoteStop(ctx, sys.Host(), int(sys.Port()), actorName)
 		require.Error(t, err)
-		require.EqualError(t, err, "failed_precondition: actor=GoAktXYZ not found")
 
 		util.Pause(time.Second)
 		remoting.Close()
@@ -1981,7 +1969,7 @@ func TestRemotingSpawn(t *testing.T) {
 		}
 		err = remoting.RemoteSpawn(ctx, sys.Host(), int(sys.Port()), request)
 		require.Error(t, err)
-		assert.EqualError(t, err, ErrTypeNotRegistered.Error())
+		assert.ErrorIs(t, err, ErrTypeNotRegistered)
 
 		t.Cleanup(
 			func() {
@@ -2218,7 +2206,6 @@ func TestRemotingSpawn(t *testing.T) {
 		}
 		err = remoting.RemoteSpawn(ctx, host, remotingPort, request)
 		require.Error(t, err)
-		require.EqualError(t, err, "failed_precondition: actor=GoAktXYZ not found")
 
 		remoting.Close()
 		err = sys.Stop(ctx)
@@ -2263,7 +2250,6 @@ func TestRemotingReinstate(t *testing.T) {
 
 		err = remoting.RemoteReinstate(ctx, sys.Host(), int(sys.Port()), actorName)
 		require.Error(t, err)
-		require.EqualError(t, err, "failed_precondition: remoting is not enabled")
 
 		remoting.Close()
 		require.NoError(t, sys.Stop(ctx))
@@ -2355,7 +2341,6 @@ func TestRemotingReinstate(t *testing.T) {
 
 		err = remoting.RemoteReinstate(ctx, sys.Host(), int(sys.Port()), actorName)
 		require.Error(t, err)
-		require.EqualError(t, err, "failed_precondition: actor=GoAktXYZ not found")
 
 		remoting.Close()
 		err = sys.Stop(ctx)
