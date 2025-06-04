@@ -1255,12 +1255,18 @@ func (x *actorSystem) SpawnOn(ctx context.Context, name string, actor Actor, opt
 		return err
 	}
 
+	// set the passivation time
+	passivateAfter := x.passivationAfter
+	if config.passivateAfter != nil {
+		passivateAfter = *config.passivateAfter
+	}
+
 	return x.remoting.RemoteSpawn(ctx, peer.Host, peer.RemotingPort, &remote.SpawnRequest{
 		Name:           name,
 		Kind:           types.Name(actor),
 		Singleton:      false,
 		Relocatable:    config.relocatable,
-		PassivateAfter: *config.passivateAfter,
+		PassivateAfter: passivateAfter,
 		Dependencies:   config.dependencies,
 		EnableStashing: config.enableStash,
 	})
