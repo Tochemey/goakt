@@ -133,13 +133,6 @@ func (x *topicActor) handlePublish(ctx *ReceiveContext) {
 		x.processed.Set(id, types.Unit{})
 
 		cctx := context.WithoutCancel(ctx.Context())
-		peers, err := x.cluster.Peers(cctx)
-		if err != nil {
-			ctx.Err(NewInternalError(err))
-			return
-		}
-
-		remotePeers := x.buildRemotePeers(peers)
 		var wg sync.WaitGroup
 		actorName := x.actorSystem.reservedName(topicActorType)
 
@@ -154,11 +147,22 @@ func (x *topicActor) handlePublish(ctx *ReceiveContext) {
 		}()
 
 		// send the message to all remote subscribers in a separate goroutine
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			x.sendToRemoteSubscribers(cctx, remotePeers, actorName, messageID, topic, message, &wg)
-		}()
+		// this can only be done if the actor system is clustered
+		if x.actorSystem.InCluster() {
+			peers, err := x.cluster.Peers(cctx)
+			if err != nil {
+				ctx.Err(NewInternalError(err))
+				return
+			}
+
+			remotePeers := x.buildRemotePeers(peers)
+
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				x.sendToRemoteSubscribers(cctx, remotePeers, actorName, messageID, topic, message, &wg)
+			}()
+		}
 
 		// wait for all messages to be sent to all subscribers
 		wg.Wait()
@@ -324,7 +328,7 @@ func (x *topicActor) handleDisseminate(ctx *ReceiveContext) {
 
 // spawnTopicActor spawns a new topic actor
 func (x *actorSystem) spawnTopicActor(ctx context.Context) error {
-	// only start the singleton manager when clustering is enabled
+	// only start the topic actor when pubsub is enabled
 	if !x.pubsubEnabled.Load() {
 		return nil
 	}

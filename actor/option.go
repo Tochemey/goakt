@@ -175,15 +175,25 @@ func WithTLS(tlsInfo *TLSInfo) Option {
 	})
 }
 
-// WithPubSub enables the pubsub mode.
-// The pubsub mode is only available in cluster mode.
-// The pubsub mode allows actors to subscribe to topics and receive messages
-// published to the topics.
+// WithPubSub enables the pub-sub (publish-subscribe) mode for the actor system.
+//
+// In pub-sub mode, actors can subscribe to one or more named topics and receive
+// messages that are published to those topics. This is useful for implementing
+// decoupled communication patterns where the publisher does not need to know
+// the identity or number of subscribers.
+//
+// When this option is applied during system initialization, internal mechanisms
+// for managing topic subscriptions and broadcasting messages to subscribers
+// will be activated.
+//
+// Example:
+//
+//	system := NewActorSystem(WithPubSub())
+//
+// Returns an Option that configures the actor system accordingly.
 func WithPubSub() Option {
 	return OptionFunc(func(system *actorSystem) {
-		if system.clusterEnabled.Load() {
-			system.pubsubEnabled.Store(true)
-		}
+		system.pubsubEnabled.Store(true)
 	})
 }
 
