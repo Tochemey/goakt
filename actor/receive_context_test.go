@@ -1767,7 +1767,7 @@ func TestReceiveContext(t *testing.T) {
 		err = context.getError()
 		require.Error(t, err)
 		require.Empty(t, replies)
-		assert.EqualError(t, err, ErrRemotingDisabled.Error())
+		assert.ErrorIs(t, err, ErrRemotingDisabled)
 
 		t.Cleanup(
 			func() {
@@ -1885,7 +1885,7 @@ func TestReceiveContext(t *testing.T) {
 		context.RemoteBatchTell(address.From(testerAddr), messages)
 		err = context.getError()
 		require.Error(t, err)
-		assert.EqualError(t, err, ErrRemotingDisabled.Error())
+		assert.ErrorIs(t, err, ErrRemotingDisabled)
 
 		util.Pause(time.Second)
 
@@ -2442,7 +2442,7 @@ func TestReceiveContext(t *testing.T) {
 		receiveContext.Stash()
 		err = receiveContext.getError()
 		require.Error(t, err)
-		assert.EqualError(t, err, ErrStashBufferNotSet.Error())
+		assert.ErrorIs(t, err, ErrStashBufferNotSet)
 		err = pid.Shutdown(ctx)
 		assert.NoError(t, err)
 		assert.NoError(t, actorSystem.Stop(ctx))
@@ -2481,7 +2481,7 @@ func TestReceiveContext(t *testing.T) {
 		receiveContext.Unstash()
 		err = receiveContext.getError()
 		require.Error(t, err)
-		assert.EqualError(t, err, ErrStashBufferNotSet.Error())
+		assert.ErrorIs(t, err, ErrStashBufferNotSet)
 		err = pid.Shutdown(ctx)
 		assert.NoError(t, err)
 		assert.NoError(t, actorSystem.Stop(ctx))
@@ -2520,7 +2520,7 @@ func TestReceiveContext(t *testing.T) {
 		receiveContext.UnstashAll()
 		err = receiveContext.getError()
 		require.Error(t, err)
-		assert.EqualError(t, err, ErrStashBufferNotSet.Error())
+		assert.ErrorIs(t, err, ErrStashBufferNotSet)
 		err = pid.Shutdown(ctx)
 		assert.NoError(t, err)
 		assert.NoError(t, actorSystem.Stop(ctx))

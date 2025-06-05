@@ -322,7 +322,7 @@ func (pid *PID) Child(name string) (*PID, error) {
 			return cid, nil
 		}
 	}
-	return nil, ErrActorNotFound(childAddress.String())
+	return nil, NewErrActorNotFound(childAddress.String())
 }
 
 // Parent returns the parent of this PID
@@ -371,7 +371,7 @@ func (pid *PID) Stop(ctx context.Context, cid *PID) error {
 	}
 
 	if !cid.IsRunning() {
-		return ErrActorNotFound(cid.Address().String())
+		return NewErrActorNotFound(cid.Address().String())
 	}
 
 	pid.fieldsLocker.RLock()
@@ -389,7 +389,7 @@ func (pid *PID) Stop(ctx context.Context, cid *PID) error {
 	}
 
 	pid.fieldsLocker.RUnlock()
-	return ErrActorNotFound(cid.Address().String())
+	return NewErrActorNotFound(cid.Address().String())
 }
 
 // IsRunning returns true when the actor is alive ready to process messages and false
@@ -750,7 +750,7 @@ func (pid *PID) Reinstate(cid *PID) error {
 
 	// this is a rare case when the local actor is not the same as the one
 	if !actual.Equals(cid) {
-		return ErrActorNotFound(cid.Name())
+		return NewErrActorNotFound(cid.Name())
 	}
 
 	if !cid.IsSuspended() || cid.IsRunning() {
@@ -1069,7 +1069,7 @@ func (pid *PID) RemoteBatchTell(ctx context.Context, to *address.Address, messag
 	for _, message := range messages {
 		packed, err := anypb.New(message)
 		if err != nil {
-			return ErrInvalidRemoteMessage(err)
+			return NewErrInvalidRemoteMessage(err)
 		}
 
 		remoteMessages = append(remoteMessages, &internalpb.RemoteMessage{
@@ -1098,7 +1098,7 @@ func (pid *PID) RemoteBatchAsk(ctx context.Context, to *address.Address, message
 	for _, message := range messages {
 		packed, err := anypb.New(message)
 		if err != nil {
-			return nil, ErrInvalidRemoteMessage(err)
+			return nil, NewErrInvalidRemoteMessage(err)
 		}
 
 		remoteMessages = append(
@@ -1401,7 +1401,7 @@ func (pid *PID) init(ctx context.Context) error {
 	if err := retrier.RunContext(cctx, func(_ context.Context) error {
 		return pid.actor.PreStart(initContext)
 	}); err != nil {
-		e := ErrInitFailure(err)
+		e := NewErrInitFailure(err)
 		cancel()
 		return e
 	}

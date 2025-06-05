@@ -754,7 +754,7 @@ func TestClient(t *testing.T) {
 		// send a message
 		reply, err := client.Ask(ctx, actor, new(testpb.TestReply), time.Minute)
 		require.Error(t, err)
-		require.EqualError(t, err, actors.ErrActorNotFound(actor.Name()).Error())
+		require.ErrorIs(t, err, actors.ErrActorNotFound)
 		require.Nil(t, reply)
 
 		err = client.Stop(ctx, actor)
@@ -809,7 +809,7 @@ func TestClient(t *testing.T) {
 		// send a message
 		err = client.Tell(ctx, actor, new(testpb.TestReply))
 		require.Error(t, err)
-		require.EqualError(t, err, actors.ErrActorNotFound(actor.Name()).Error())
+		require.ErrorIs(t, err, actors.ErrActorNotFound)
 
 		err = client.Stop(ctx, actor)
 		require.NoError(t, err)

@@ -297,7 +297,7 @@ func (x *Client) Tell(ctx context.Context, actor *Actor, message proto.Message) 
 	}
 
 	if to.Equals(address.NoSender()) {
-		return actors.ErrActorNotFound(actor.Name())
+		return actors.NewErrActorNotFound(actor.Name())
 	}
 
 	from := address.NoSender()
@@ -337,7 +337,7 @@ func (x *Client) Ask(ctx context.Context, actor *Actor, message proto.Message, t
 	}
 
 	if to.Equals(address.NoSender()) {
-		return nil, actors.ErrActorNotFound(actor.Name())
+		return nil, actors.NewErrActorNotFound(actor.Name())
 	}
 
 	from := address.NoSender()
@@ -410,7 +410,7 @@ func (x *Client) Whereis(ctx context.Context, actor *Actor) (*address.Address, e
 	}
 
 	if addr.Equals(address.NoSender()) {
-		return nil, actors.ErrActorNotFound(actor.Name())
+		return nil, actors.NewErrActorNotFound(actor.Name())
 	}
 
 	return addr, nil
