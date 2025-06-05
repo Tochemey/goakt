@@ -414,10 +414,24 @@ type ActorSystem interface { //nolint:revive
 	// Start and Stop methods. Applications with more specialized needs
 	// can use those methods directly instead of relying on Run.
 	Run(ctx context.Context, startHook func(ctx context.Context) error, stopHook func(ctx context.Context) error)
-	// TopicActor returns the topic actor. The topic actor is a system actor that manages a registry of actors that subscribe to topics.
-	// This actor must be started when cluster mode is enabled in all nodes before any actor subscribes.
-	// Messages published to a topic on other cluster nodes will be sent between the nodes once per active topic actor that has any local subscribers.
-	// To be able to use the topic actor, one need to start the actor system with the WithCluster and WithPubSub options.
+	// TopicActor returns the topic actor, a system-managed actor responsible for handling
+	// publish-subscribe (pub-sub) functionality within the actor system.
+	//
+	// The topic actor maintains a registry of subscribers (actors) per topic and ensures
+	// that messages published to a topic are delivered to all registered subscribers.
+	//
+	// Requirements:
+	//   - PubSub mode must be enabled via the WithPubSub() option when initializing the actor system.
+	//
+	// Cluster Behavior:
+	//   - In cluster mode, messages published to a topic on one node are forwarded to other nodes,
+	//     but only once per topic actor with active local subscribers. This ensures efficient message
+	//     propagation without redundant network traffic.
+	//
+	// Usage:
+	//   system := NewActorSystem(WithPubSub())
+	//
+	// Returns the actor reference for the topic actor.
 	TopicActor() *PID
 	// Extensions returns a slice of all registered extensions in the ActorSystem.
 	//
@@ -1932,7 +1946,25 @@ func (x *actorSystem) GetKinds(_ context.Context, request *connect.Request[inter
 	return connect.NewResponse(&internalpb.GetKindsResponse{Kinds: kinds}), nil
 }
 
-// TopicActor returns the cluster pub/sub mediator
+// TopicActor returns the topic actor, a system-managed actor responsible for handling
+// publish-subscribe (pub-sub) functionality within the actor system.
+//
+// The topic actor maintains a registry of subscribers (actors) per topic and ensures
+// that messages published to a topic are delivered to all registered subscribers.
+//
+// Requirements:
+//   - PubSub mode must be enabled via the WithPubSub() option when initializing the actor system.
+//
+// Cluster Behavior:
+//   - In cluster mode, messages published to a topic on one node are forwarded to other nodes,
+//     but only once per topic actor with active local subscribers. This ensures efficient message
+//     propagation without redundant network traffic.
+//
+// Usage:
+//
+//	system := NewActorSystem(WithPubSub())
+//
+// Returns the actor reference for the topic actor.
 func (x *actorSystem) TopicActor() *PID {
 	x.locker.Lock()
 	mediator := x.topicActor

@@ -141,7 +141,6 @@ func TestWithCoordinatedShutdown(t *testing.T) {
 
 func TestWithPubSub(t *testing.T) {
 	system := new(actorSystem)
-	system.clusterEnabled.Store(true)
 	opt := WithPubSub()
 	opt.Apply(system)
 	assert.True(t, system.pubsubEnabled.Load())

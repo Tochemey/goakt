@@ -29,11 +29,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/util"
+	"github.com/tochemey/goakt/v3/log"
 	"github.com/tochemey/goakt/v3/test/data/testpb"
 )
 
@@ -258,5 +260,90 @@ func TestTopicActor(t *testing.T) {
 		require.NoError(t, cl1.Stop(ctx))
 		require.NoError(t, sd1.Close())
 		srv.Shutdown()
+	})
+
+	t.Run("Without clustering", func(t *testing.T) {
+		ctx := context.Background()
+		actorSystem, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger), WithPubSub())
+
+		// start the actor system
+		err := actorSystem.Start(ctx)
+		assert.NoError(t, err)
+
+		// wait for the actor system to be ready
+		util.Pause(time.Second)
+
+		// start bunch of actors
+		actor1, err := actorSystem.Spawn(ctx, "actor1", newMockSubscriber(), WithLongLived())
+		require.NoError(t, err)
+		require.NotNil(t, actor1)
+
+		util.Pause(500 * time.Millisecond)
+
+		actor2, err := actorSystem.Spawn(ctx, "actor2", newMockSubscriber(), WithLongLived())
+		require.NoError(t, err)
+		require.NotNil(t, actor2)
+
+		util.Pause(500 * time.Millisecond)
+
+		actor3, err := actorSystem.Spawn(ctx, "actor3", newMockSubscriber(), WithLongLived())
+		require.NoError(t, err)
+		require.NotNil(t, actor3)
+
+		util.Pause(500 * time.Millisecond)
+
+		topic := "test-topic"
+
+		// let the various actors subscribe to the topic
+		err = actor1.Tell(ctx, actorSystem.TopicActor(), &goaktpb.Subscribe{Topic: topic})
+		require.NoError(t, err)
+		util.Pause(500 * time.Millisecond)
+
+		// make sure we receive the subscribe ack message
+		require.EqualValues(t, 1, actor1.Metric(ctx).ProcessedCount())
+		require.EqualValues(t, 1, actor1.Actor().(*mockSubscriber).counter.Load())
+
+		err = actor2.Tell(ctx, actorSystem.TopicActor(), &goaktpb.Subscribe{Topic: topic})
+		require.NoError(t, err)
+		util.Pause(500 * time.Millisecond)
+
+		// make sure we receive the subscribe ack message
+		require.EqualValues(t, 1, actor2.Metric(ctx).ProcessedCount())
+		require.EqualValues(t, 1, actor2.Actor().(*mockSubscriber).counter.Load())
+
+		err = actor3.Tell(ctx, actorSystem.TopicActor(), &goaktpb.Subscribe{Topic: topic})
+		require.NoError(t, err)
+		util.Pause(500 * time.Millisecond)
+
+		// make sure we receive the subscribe ack message
+		require.EqualValues(t, 1, actor3.Metric(ctx).ProcessedCount())
+		require.EqualValues(t, 1, actor3.Actor().(*mockSubscriber).counter.Load())
+
+		// create a publisher that will publish messages to the topi
+		publisher, err := actorSystem.Spawn(ctx, "publisher", newMockSubscriber())
+		require.NoError(t, err)
+		require.NotNil(t, publisher)
+
+		util.Pause(time.Second)
+
+		// publish a message
+		actual := new(testpb.TestCount)
+		transformed, _ := anypb.New(actual)
+		message := &goaktpb.Publish{
+			Id:      "messsage1",
+			Topic:   topic,
+			Message: transformed,
+		}
+		err = publisher.Tell(ctx, actorSystem.TopicActor(), message)
+		require.NoError(t, err)
+
+		util.Pause(time.Second)
+
+		// make sure we receive the subscribe ack message
+		require.EqualValues(t, 2, actor1.Actor().(*mockSubscriber).counter.Load())
+		require.EqualValues(t, 2, actor2.Actor().(*mockSubscriber).counter.Load())
+		require.EqualValues(t, 2, actor3.Actor().(*mockSubscriber).counter.Load())
+
+		require.NoError(t, actorSystem.Stop(ctx))
 	})
 }
