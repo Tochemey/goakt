@@ -3041,12 +3041,10 @@ func TestReceiveContext(t *testing.T) {
 			self:    pidA,
 		}
 
-		// suspend actorB
 		pidB.suspend("test")
 		require.True(t, pidB.IsSuspended())
 		require.False(t, pidB.IsRunning())
 
-		// reinstate actorB
 		context.ReinstateNamed("ExchangeC")
 
 		// wait for the async call to properly complete

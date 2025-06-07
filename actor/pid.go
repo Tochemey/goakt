@@ -1285,20 +1285,20 @@ func (pid *PID) Logger() log.Logger {
 // doReceive pushes a given message to the actor mailbox
 // and signals the receiveLoop to process it
 func (pid *PID) doReceive(receiveCtx *ReceiveContext) {
-	if err := pid.mailbox.Enqueue(receiveCtx); err != nil {
-		// add a warning log because the mailbox is full and do nothing
-		pid.logger.Warn(err)
-		// push the message as a deadletter
-		pid.toDeadletters(receiveCtx, err)
+	if pid.IsRunning() {
+		if err := pid.mailbox.Enqueue(receiveCtx); err != nil {
+			pid.logger.Warn(err)
+			pid.toDeadletters(receiveCtx, err)
+		}
+		pid.schedule()
 	}
-	pid.schedule()
 }
 
 // schedule  schedules that a message has arrived and wake up the
 // message processing loop
 func (pid *PID) schedule() {
 	// only signal if the actor is not already processing messages
-	if pid.IsRunning() && pid.processing.CompareAndSwap(idle, busy) {
+	if pid.processing.CompareAndSwap(idle, busy) {
 		pid.workerPool.SubmitWork(pid.receiveLoop)
 	}
 }
