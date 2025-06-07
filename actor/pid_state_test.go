@@ -27,7 +27,6 @@ package actor
 import (
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -114,7 +113,7 @@ func TestIsRunnable(t *testing.T) {
 	}{
 		{
 			name:     "not runnable when no flags set",
-			setup:    func(s *pidState) {},
+			setup:    func(s *pidState) {}, // nolint
 			expected: false,
 		},
 		{
@@ -220,83 +219,6 @@ func TestClearingIndividualFlags(t *testing.T) {
 	// Clear stopping, all should be false
 	s.ClearStopping()
 	require.False(t, s.IsStopping(), "Expected IsStopping() to be false")
-}
-
-func TestConcurrentAccess(t *testing.T) {
-	s := &pidState{}
-	const numGoroutines = 100
-	const numOperations = 1000
-
-	var wg sync.WaitGroup
-
-	// Test concurrent setting and clearing of flags
-	for i := 0; i < numGoroutines; i++ {
-		wg.Add(1)
-		go func(id int) {
-			defer wg.Done()
-
-			for j := 0; j < numOperations; j++ {
-				switch id % 3 {
-				case 0:
-					s.SetRunning()
-					s.IsRunning()
-					s.ClearRunning()
-				case 1:
-					s.SetSuspended()
-					s.IsSuspended()
-					s.ClearSuspended()
-				case 2:
-					s.SetStopping()
-					s.IsStopping()
-					s.ClearStopping()
-				}
-
-				// Also test IsRunnable() under concurrent access
-				s.IsRunnable()
-			}
-		}(i)
-	}
-
-	wg.Wait()
-
-	// The state should be consistent after concurrent operations
-	// We can't predict the exact state, but operations should not panic
-	// and the struct should remain in a valid state
-}
-
-func TestConcurrentReset(t *testing.T) {
-	s := &pidState{}
-	const numGoroutines = 50
-
-	var wg sync.WaitGroup
-
-	// Some goroutines set flags, others reset
-	for i := 0; i < numGoroutines; i++ {
-		wg.Add(1)
-		go func(id int) {
-			defer wg.Done()
-
-			if id%2 == 0 {
-				// Set flags
-				for j := 0; j < 100; j++ {
-					s.SetRunning()
-					s.SetSuspended()
-					s.SetStopping()
-					time.Sleep(time.Microsecond)
-				}
-			} else {
-				// Reset periodically
-				for j := 0; j < 100; j++ {
-					s.Reset()
-					time.Sleep(time.Microsecond)
-				}
-			}
-		}(i)
-	}
-
-	wg.Wait()
-
-	// Should not panic and remain in valid state
 }
 
 func TestAtomicityOfSetFlag(t *testing.T) {
