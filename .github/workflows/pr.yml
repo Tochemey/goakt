@@ -16,13 +16,15 @@ concurrency:
 
 jobs:
   build:
+    name: Tests on ${{ matrix.os }}
+    runs-on:
+      "${{ matrix.os == 'linux' && 'ubuntu-latest' || matrix.os == 'macos' &&
+      'macos-latest' || 'windows-latest' }}"
+
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
-    env:
-      FORCE_COLOR: 1
+        os: [linux, macos, windows]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -34,9 +36,20 @@ jobs:
           check-latest: true
           cache-dependency-path: "**/*.sum"
       - run: go version
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
       - name: Vendoring and Tidy
         run: go mod tidy && go mod vendor
       - name: Install dependencies
+        run: |
+          go mod download
+      - name: Install Ory go-acc dependency
         run: |
           go install github.com/ory/go-acc@latest
       - name: Run tests
@@ -49,11 +62,15 @@ jobs:
           fail_ci_if_error: false
           verbose: true
   lint:
+    name: Linter on ${{ matrix.os }}
+    runs-on:
+      "${{ matrix.os == 'linux' && 'ubuntu-latest' || matrix.os == 'macos' &&
+      'macos-latest' || 'windows-latest' }}"
+
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
+        os: [linux, macos, windows]
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
