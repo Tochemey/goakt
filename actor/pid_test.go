@@ -1309,7 +1309,6 @@ func TestSupervisorStrategy(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, actorSystem.Stop(ctx))
 	})
-
 	t.Run("With reinstate", func(t *testing.T) {
 		ctx := context.TODO()
 		host := "127.0.0.1"
@@ -3984,7 +3983,6 @@ func TestParentWithInexistenceNodeReturnsNil(t *testing.T) {
 	require.NoError(t, cid.Shutdown(ctx))
 	require.NoError(t, actorSystem.Stop(ctx))
 }
-
 func TestReinstate(t *testing.T) {
 	t.Run("When PID is not started", func(t *testing.T) {
 		ctx := context.TODO()
@@ -4138,7 +4136,6 @@ func TestReinstate(t *testing.T) {
 		require.NoError(t, actorSystem.Stop(ctx))
 	})
 }
-
 func TestReinstateNamed(t *testing.T) {
 	t.Run("When PID is not started", func(t *testing.T) {
 		ctx := context.TODO()

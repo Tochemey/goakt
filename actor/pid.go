@@ -84,11 +84,6 @@ type PID struct {
 	// specifies the actor address
 	address *address.Address
 
-	// helps determine whether the actor should handle messages or not.
-	running   atomic.Bool
-	stopping  atomic.Bool
-	suspended atomic.Bool
-
 	latestReceiveTime     atomic.Time
 	latestReceiveDuration atomic.Duration
 
@@ -152,6 +147,8 @@ type PID struct {
 
 	// the list of dependencies
 	dependencies *collection.Map[string, extension.Dependency]
+
+	processState *pidState
 }
 
 // newPID creates a new pid
@@ -186,14 +183,12 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 		supervisor:            NewSupervisor(),
 		startedAt:             atomic.NewInt64(0),
 		dependencies:          collection.NewMap[string, extension.Dependency](),
+		processState:          new(pidState),
 	}
 
 	pid.initMaxRetries.Store(DefaultInitMaxRetries)
 	pid.latestReceiveDuration.Store(0)
 	pid.isSingleton.Store(false)
-	pid.running.Store(false)
-	pid.stopping.Store(false)
-	pid.suspended.Store(false)
 	pid.passivateAfter.Store(DefaultPassivationTimeout)
 	pid.initTimeout.Store(DefaultInitTimeout)
 	pid.processing.Store(int32(idle))
@@ -395,13 +390,13 @@ func (pid *PID) Stop(ctx context.Context, cid *PID) error {
 // IsRunning returns true when the actor is alive ready to process messages and false
 // when the actor is stopped or not started at all
 func (pid *PID) IsRunning() bool {
-	return pid != nil && pid.running.Load() && !pid.suspended.Load() && !pid.stopping.Load()
+	return pid != nil && pid.processState.IsRunnable()
 }
 
 // IsSuspended returns true when the actor is suspended
 // A suspended actor is a faulty actor
 func (pid *PID) IsSuspended() bool {
-	return pid.suspended.Load()
+	return pid.processState.IsSuspended()
 }
 
 // IsSingleton returns true when the actor is a singleton.
@@ -543,13 +538,13 @@ func (pid *PID) Restart(ctx context.Context) error {
 	// wait for the child actor to spawn
 	if err := eg.Wait(); err != nil {
 		// disable messages processing
-		pid.stopping.Store(true)
-		pid.running.Store(false)
+		pid.processState.ClearRunning()
+		pid.processState.SetStopping()
 		return fmt.Errorf("actor=(%s) failed to restart: %w", pid.Name(), err)
 	}
 
 	pid.processing.Store(idle)
-	pid.suspended.Store(false)
+	pid.processState.ClearSuspended()
 	pid.supervisionLoop()
 	if pid.passivateAfter.Load() > 0 {
 		go pid.passivationLoop()
@@ -1214,13 +1209,13 @@ func (pid *PID) Shutdown(ctx context.Context) error {
 	pid.stopLocker.Lock()
 	pid.logger.Infof("shutdown process has started for actor=(%s)...", pid.Name())
 
-	if !pid.running.Load() {
+	if !pid.processState.IsRunning() {
 		pid.logger.Infof("actor=%s is offline. Maybe it has been passivated or stopped already", pid.Name())
 		pid.stopLocker.Unlock()
 		return nil
 	}
 
-	pid.stopping.Store(true)
+	pid.processState.SetStopping()
 	if pid.passivateAfter.Load() > 0 {
 		pid.logger.Debug("sending a signal to stop passivation listener....")
 		pid.haltPassivationLnr <- types.Unit{}
@@ -1406,7 +1401,7 @@ func (pid *PID) init(ctx context.Context) error {
 		return e
 	}
 
-	pid.running.Store(true)
+	pid.processState.SetRunning()
 	pid.logger.Infof("%s successfully started.", pid.Name())
 
 	if pid.eventsStream != nil {
@@ -1433,8 +1428,7 @@ func (pid *PID) reset() {
 	pid.processedCount.Store(0)
 	pid.restartCount.Store(0)
 	pid.startedAt.Store(0)
-	pid.stopping.Store(false)
-	pid.suspended.Store(false)
+	pid.processState.Reset()
 	pid.supervisor.Reset()
 	pid.mailbox.Dispose()
 	pid.isSingleton.Store(false)
@@ -1589,7 +1583,7 @@ func (pid *PID) passivationLoop() {
 	<-tickerStopSig
 	tk.Stop()
 
-	if pid.stopping.Load() || pid.suspended.Load() {
+	if pid.processState.IsStopping() || pid.processState.IsSuspended() {
 		pid.logger.Infof("actor=%s is stopping or maybe suspended. No need to passivate", pid.Name())
 		return
 	}
@@ -1650,7 +1644,7 @@ func (pid *PID) doStop(ctx context.Context) error {
 	if pid.stashBox != nil {
 		if err := pid.unstashAll(); err != nil {
 			pid.logger.Errorf("actor=(%s) failed to unstash messages", pid.Name())
-			pid.running.Store(false)
+			pid.processState.ClearRunning()
 			return err
 		}
 	}
@@ -1667,7 +1661,7 @@ func (pid *PID) doStop(ctx context.Context) error {
 		AddErrorFn(func() error { return pid.freeWatchees() }).
 		AddErrorFn(func() error { return pid.freeChildren(ctx) }).
 		Error(); err != nil {
-		pid.running.Store(false)
+		pid.processState.ClearRunning()
 		pid.reset()
 		return err
 	}
@@ -1681,12 +1675,12 @@ func (pid *PID) doStop(ctx context.Context) error {
 		AddErrorFn(func() error { return pid.actor.PostStop(stopContext) }).
 		AddErrorFn(func() error { return pid.freeWatchers(ctx) }).
 		Error(); err != nil {
-		pid.running.Store(false)
+		pid.processState.ClearRunning()
 		pid.reset()
 		return err
 	}
 
-	pid.running.Store(false)
+	pid.processState.ClearRunning()
 	pid.logger.Infof("shutdown process completed for actor=%s...", pid.Name())
 	pid.reset()
 	return nil
@@ -1977,7 +1971,7 @@ func (pid *PID) childAddress(name string) *address.Address {
 // suspend puts the actor in a suspension mode.
 func (pid *PID) suspend(reason string) {
 	pid.logger.Infof("%s going into suspension mode", pid.Name())
-	pid.suspended.Store(true)
+	pid.processState.SetSuspended()
 	// stop passivation loop
 	pid.haltPassivationLnr <- types.Unit{}
 	// stop the supervisor loop
@@ -2021,7 +2015,7 @@ func (pid *PID) fireSystemMessage(ctx context.Context, message proto.Message) {
 
 func (pid *PID) doReinstate() {
 	pid.logger.Infof("%s has been reinstated", pid.Name())
-	pid.suspended.Store(false)
+	pid.processState.ClearSuspended()
 
 	// resume the supervisor loop
 	pid.supervisionLoop()
