@@ -44,7 +44,7 @@ You can join these groups and chat to discuss and ask GoAkt related questions on
 [![GitHub Discussions](https://img.shields.io/github/discussions/Tochemey/goakt)](https://github.com/Tochemey/goakt/discussions)
 [![GitHub Issues or Pull Requests](https://img.shields.io/github/issues/Tochemey/goakt)](https://github.com/Tochemey/goakt/issues)
 
-## 🤝 Contributing
+## 🤝 Contribution
 
 We welcome contributions! Whether you're fixing a bug, adding a new feature, or improving documentation, your help is appreciated.
 
