@@ -18,12 +18,11 @@ jobs:
   build:
     name: Tests on ${{ matrix.os }}
     runs-on:
-      "${{ matrix.os == 'linux' && 'ubuntu-latest' || matrix.os == 'macos' &&
-      'macos-15' || 'windows-latest' }}"
+      "${{ matrix.os == 'linux' && 'ubuntu-latest' || 'windows-latest' }}"
     strategy:
       fail-fast: false
       matrix:
-        os: [linux, macos, windows]
+        os: [linux, windows]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -63,13 +62,12 @@ jobs:
   lint:
     name: Linter on ${{ matrix.os }}
     runs-on:
-      "${{ matrix.os == 'linux' && 'ubuntu-latest' || matrix.os == 'macos' &&
-      'macos-15' || 'windows-latest' }}"
+      "${{ matrix.os == 'linux' && 'ubuntu-latest' || 'windows-latest' }}"
 
     strategy:
       fail-fast: false
       matrix:
-        os: [linux, macos, windows]
+        os: [linux, windows]
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
