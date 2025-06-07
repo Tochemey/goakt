@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   build:
-    name: Build ${{ matrix.os }}
+    name: Run Tests on ${{ matrix.os }} 
     runs-on:
       "${{ matrix.os == 'linux' && 'warp-ubuntu-latest-x64-4x' || matrix.os == 'macos' &&
       'warp-macos-15-arm64-6x' || 'warp-windows-latest-x64-8x' }}"
@@ -62,11 +62,15 @@ jobs:
           fail_ci_if_error: false
           verbose: true
   lint:
+    name: Run Linter on ${{ matrix.os }}
+    runs-on:
+      "${{ matrix.os == 'linux' && 'warp-ubuntu-latest-x64-4x' || matrix.os == 'macos' &&
+      'warp-macos-15-arm64-6x' || 'warp-windows-latest-x64-8x' }}"
+
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
+        os: [linux, macos, windows]
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
