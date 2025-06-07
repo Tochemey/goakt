@@ -395,7 +395,7 @@ func (pid *PID) Stop(ctx context.Context, cid *PID) error {
 // IsRunning returns true when the actor is alive ready to process messages and false
 // when the actor is stopped or not started at all
 func (pid *PID) IsRunning() bool {
-	return pid != nil && pid.running.Load() && !pid.suspended.Load()
+	return pid != nil && pid.running.Load() && !pid.suspended.Load() && !pid.stopping.Load()
 }
 
 // IsSuspended returns true when the actor is suspended
@@ -1220,8 +1220,8 @@ func (pid *PID) Shutdown(ctx context.Context) error {
 		return nil
 	}
 
+	pid.stopping.Store(true)
 	if pid.passivateAfter.Load() > 0 {
-		pid.stopping.Store(true)
 		pid.logger.Debug("sending a signal to stop passivation listener....")
 		pid.haltPassivationLnr <- types.Unit{}
 	}
