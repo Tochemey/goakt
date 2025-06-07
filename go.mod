@@ -16,7 +16,7 @@ require (
 	github.com/nats-io/nats-server/v2 v2.11.4
 	github.com/nats-io/nats.go v1.43.0
 	github.com/panjf2000/ants/v2 v2.11.3
-	github.com/redis/go-redis/v9 v9.9.0
+	github.com/redis/go-redis/v9 v9.10.0
 	github.com/reugn/go-quartz v0.14.0
 	github.com/stretchr/testify v1.10.0
 	github.com/tochemey/olric v0.2.3
@@ -27,7 +27,7 @@ require (
 	go.uber.org/goleak v1.3.0
 	go.uber.org/multierr v1.11.0
 	go.uber.org/zap v1.27.0
-	golang.org/x/net v0.40.0
+	golang.org/x/net v0.41.0
 	golang.org/x/sync v0.15.0
 	google.golang.org/protobuf v1.36.6
 	k8s.io/api v0.33.1
