@@ -19,7 +19,7 @@ require (
 	github.com/redis/go-redis/v9 v9.10.0
 	github.com/reugn/go-quartz v0.14.0
 	github.com/stretchr/testify v1.10.0
-	github.com/tochemey/olric v0.2.4-0.20250607191538-f740447b2783
+	github.com/tochemey/olric v0.2.3
 	github.com/travisjeffery/go-dynaport v1.0.0
 	github.com/zeebo/xxh3 v1.0.2
 	go.akshayshah.org/connectproto v0.6.0
