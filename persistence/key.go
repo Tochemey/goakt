@@ -22,11 +22,11 @@
  * SOFTWARE.
  */
 
-package virtual
+package persistence
 
 // Key uniquely identifies the state of a virtual actor in the actor system.
 //
-// In a virtual actor model, each actor is uniquely identified by a combination
+// In an actor model, each actor is uniquely identified by a combination
 // of its kind (type) and a string-based identifier (actor ID). The Key interface
 // abstracts this concept, allowing the underlying implementation to define
 // how actor identity is represented, compared, and serialized.

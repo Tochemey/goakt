@@ -22,23 +22,89 @@
  * SOFTWARE.
  */
 
-package virtual
+package persistence
 
-// State represents a complete state entry stored in the state store.
+// State defines the contract for an actor's persisted state within the state store.
 //
-// State encapsulates both the data and metadata for a piece of actor state,
-// including versioning information for optimistic concurrency control and
-// lifecycle management through TTL support.
-type State struct {
-	// Key uniquely identifies this state record within the system
-	Key Key
+// This interface abstracts the data and metadata for a single actor instance, supporting
+// reliable persistence, retrieval, and optimistic concurrency control in the actor system.
+//
+// # Features
+//
+//   - Uniquely identified by a Key, which combines the actor's Kind (type) and ActorID.
+//   - Supports versioning for optimistic concurrency: each update increments the version,
+//     and conditional writes (Compare-And-Swap) prevent lost updates in concurrent scenarios.
+//   - Designed for serialization and deserialization for storage and network transmission.
+//
+// # Typical Usage
+//
+//  1. Retrieve the State from the store using its Key.
+//  2. Read or modify the state data as needed.
+//  3. Persist changes by writing the updated State back to the store, using the Version for concurrency checks.
+//  4. If the write fails due to a version mismatch, reload and retry as appropriate.
+//
+// Implementations must ensure that each actor instance maps to exactly one State entry and
+// that the Version is incremented on each successful write.
+type State interface {
+	// Key returns the unique identifier for this state record.
+	//
+	// The key combines the actor's Kind (type) and a unique ActorID,
+	// ensuring a one-to-one mapping between actor instances and state records.
+	Key() Key
 
-	// Value contains the serialized state data as raw bytes.
-	// The format and encoding are determined by the Serializer implementation.
-	Value []byte
+	// Version returns the current version of this state entry for optimistic concurrency control.
+	//
+	// Each successful write to the store should increment the version.
+	// When performing conditional updates, the store should compare the existing
+	// version with the provided one, rejecting the write if there's a mismatch.
+	// This protects against race conditions and lost updates in concurrent systems.
+	Version() int64
+}
 
-	// Version provides optimistic concurrency control through monotonically
-	// increasing version numbers. Each successful update increments the version.
-	// Used by CompareAndSwap operations to prevent lost updates.
-	Version int64
+// NoState is a sentinel implementation of the State interface representing the absence of persisted state.
+//
+// NoState is used for actors that do not require state persistence or when an actor's state
+// has not yet been initialized in the state store. It provides a valid, non-nil State object
+// with a unique Key and a Version of zero.
+//
+// # Usage
+//
+//   - Returned by state stores when no state exists for a given actor Key.
+//   - Used as a placeholder for stateless actors or for initialization scenarios.
+//   - Allows code to uniformly handle State without special nil checks.
+//
+// The Version method always returns zero, and NoState should never be persisted to the store.
+type NoState struct {
+	// key is the unique identifier for this state record.
+	key Key
+}
+
+// ensure NoState implements the State interface
+var _ State = (*NoState)(nil)
+
+// NewNoState creates a new NoState instance for the given key.
+func NewNoState(key Key) *NoState {
+	return &NoState{
+		key: key,
+	}
+}
+
+// Key returns the unique identifier for this state record.
+//
+// The key combines the actor's Kind (type) and a unique ActorID,
+// ensuring a one-to-one mapping between actor instances and state records.
+func (n *NoState) Key() Key {
+	return n.key
+}
+
+// Version returns the current version of this state entry for optimistic concurrency control.
+//
+// Each successful write to the store should increment the version.
+// When performing conditional updates, the store should compare the existing
+// version with the provided one, rejecting the write if there's a mismatch.
+// This protects against race conditions and lost updates in concurrent systems.
+//
+// For NoState, Version always returns zero.
+func (n *NoState) Version() int64 {
+	return 0 // NoState does not have a version, as it represents an absence of state.
 }

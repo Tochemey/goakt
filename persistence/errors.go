@@ -22,44 +22,54 @@
  * SOFTWARE.
  */
 
-package virtual
+package persistence
 
-import (
-	"errors"
-)
+import "errors"
 
-// Predefined error instances for common state store error conditions.
-// These can be used with errors.Is() for error type checking.
+// Predefined errors for standard state store failure conditions.
+//
+// These errors provide well-known failure modes for interacting with actor state
+// and can be used with errors.Is for reliable type checking. They are returned
+// by various operations in the StateStore interface depending on the storage semantics.
 var (
-	// ErrKeyNotFound indicates that a requested key does not exist in the state store.
-	// Returned by Get, Delete, and CompareAndSwap operations.
+	// ErrKeyNotFound indicates that the specified key does not exist in the state store.
 	//
-	// Example usage:
-	//   record, err := store.Load(ctx, key)
+	// Returned by operations like Load, Delete, or CompareAndSwap when the requested
+	// key is missing. This is not considered a fatal error and may indicate that
+	// initialization or conditional creation logic is required.
+	//
+	// Example:
+	//   state, err := store.Load(ctx, key)
 	//   if errors.Is(err, ErrKeyNotFound) {
-	//       // Handle missing key scenario
+	//       // key is not present, create new state
 	//   }
 	ErrKeyNotFound = errors.New("key not found")
 
 	// ErrVersionMismatch indicates that a CompareAndSwap operation failed
-	// because the current version doesn't match the expected version.
-	// This typically means another concurrent operation modified the state.
+	// because the version of the record in the store did not match the
+	// expected version supplied by the caller.
 	//
-	// Example usage:
-	//   _, err := store.CompareAndSwap(ctx, key, expectedVersion, newValue)
+	// This is used to implement optimistic concurrency control. It typically
+	// means another actor or process updated the state concurrently, and the
+	// operation should be retried after fetching the latest version.
+	//
+	// Example:
+	//   _, err := store.CompareAndSwap(ctx, key, old.Version, updatedValue)
 	//   if errors.Is(err, ErrVersionMismatch) {
-	//       // Retry with fresh version or handle conflict
+	//       // retry with latest version or apply conflict resolution
 	//   }
 	ErrVersionMismatch = errors.New("version mismatch")
 
-	// ErrKeyExists indicates that a create operation failed because the key
-	// already exists. Used by storage backends that distinguish between
-	// create and update operations.
+	// ErrKeyExists indicates that a create-only operation failed because the key
+	// already exists in the state store.
 	//
-	// Example usage:
-	//   err := store.Save(ctx, record)
+	// This is useful in backends that distinguish between insert and update paths,
+	// or when enforcing strict state creation semantics for new actors.
+	//
+	// Example:
+	//   err := store.Save(ctx, &State{Key: key, Value: data})
 	//   if errors.Is(err, ErrKeyExists) {
-	//       // Key already exists, maybe update instead
+	//       // handle duplicate creation, possibly switch to update
 	//   }
 	ErrKeyExists = errors.New("key already exists")
 )
