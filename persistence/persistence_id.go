@@ -24,20 +24,20 @@
 
 package persistence
 
-// Key uniquely identifies the state of a virtual actor in the actor system.
+// PersistenceID uniquely identifies a stateful actor within the actor system.
 //
-// In an actor model, each actor is uniquely identified by a combination
-// of its kind (type) and a string-based identifier (actor ID). The Key interface
-// abstracts this concept, allowing the underlying implementation to define
-// how actor identity is represented, compared, and serialized.
+// In the actor model, each actor is uniquely identified by a combination
+// of its kind (type) and a string-based entity identifier (EntityID). The PersistenceID
+// interface abstracts this concept, allowing implementations to define how actor identity
+// is represented, compared, and serialized.
 //
-// Implementations of this interface should ensure that two Keys with the same
-// Kind and ActorID are considered equal.
-type Key interface {
-	// ActorID returns the unique string identifier for the actor instance.
+// Implementations of this interface must ensure that two PersistenceIDs with the same
+// Kind and EntityID are considered equal.
+type PersistenceID interface { //nolint:revive
+	// EntityID returns the unique string identifier for the actor instance.
 	//
-	// This value typically distinguishes one actor from another within the same Kind.
-	ActorID() string
+	// This value distinguishes one actor from another within the same Kind.
+	EntityID() string
 
 	// Kind returns the actor's type or classification.
 	//
@@ -45,13 +45,13 @@ type Key interface {
 	// "UserActor", "OrderActor", etc.
 	Kind() string
 
-	// String returns a stable, human-readable representation of the key.
+	// String returns a stable, human-readable representation of the persistence ID.
 	//
 	// This method is useful for logging, diagnostics, and key serialization.
 	String() string
 
-	// Equal reports whether the current key and the provided key refer to the same actor.
+	// Equal reports whether the current persistence ID and the provided persistence ID refer to the same actor.
 	//
-	// Equality should be based on both Kind and ActorID.
-	Equal(other Key) bool
+	// Equality must be based on both Kind and EntityID.
+	Equal(other PersistenceID) bool
 }

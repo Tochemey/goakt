@@ -590,6 +590,8 @@ type actorSystem struct {
 	extensions       *collection.Map[string, extension.Extension]
 
 	spawnOnNext *atomic.Uint32
+
+	grains *collection.List[Grain]
 }
 
 var (
@@ -778,6 +780,7 @@ func (x *actorSystem) Start(ctx context.Context) error {
 			Error()
 	}
 
+	x.registerGrains()
 	x.startMessagesScheduler(ctx)
 	x.startedAt.Store(time.Now().Unix())
 	x.logger.Infof("%s actor system successfully started..:)", x.name)
@@ -3047,6 +3050,16 @@ func (x *actorSystem) shutdownRemoting(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+func (x *actorSystem) registerGrains() {
+	if x.grains != nil && x.grains.Len() > 0 {
+		x.logger.Info("Registering grains")
+		for _, grain := range x.grains.Items() {
+			x.registry.Register(grain)
+			x.logger.Infof("Grain kind=(%s) registered", types.Name(grain))
+		}
+	}
 }
 
 func isReservedName(name string) bool {

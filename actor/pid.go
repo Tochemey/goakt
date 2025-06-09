@@ -61,10 +61,10 @@ import (
 // regarding message processing
 
 const (
-	// idle means there are no messages to process
-	idle int32 = iota
-	// busy means the PID is processing messages
-	busy
+	// IDLE means there are no messages to process
+	IDLE int32 = iota
+	// BUSY means the PID is processing messages
+	BUSY
 )
 
 // taskCompletion is used to track completions' taskCompletion
@@ -191,7 +191,7 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 	pid.isSingleton.Store(false)
 	pid.passivateAfter.Store(DefaultPassivationTimeout)
 	pid.initTimeout.Store(DefaultInitTimeout)
-	pid.processing.Store(int32(idle))
+	pid.processing.Store(int32(IDLE))
 	pid.relocatable.Store(true)
 
 	for _, opt := range opts {
@@ -543,7 +543,7 @@ func (pid *PID) Restart(ctx context.Context) error {
 		return fmt.Errorf("actor=(%s) failed to restart: %w", pid.Name(), err)
 	}
 
-	pid.processing.Store(idle)
+	pid.processing.Store(IDLE)
 	pid.processState.ClearSuspended()
 	pid.supervisionLoop()
 	if pid.passivateAfter.Load() > 0 {
@@ -1298,7 +1298,7 @@ func (pid *PID) doReceive(receiveCtx *ReceiveContext) {
 // message processing loop
 func (pid *PID) schedule() {
 	// only signal if the actor is not already processing messages
-	if pid.processing.CompareAndSwap(idle, busy) {
+	if pid.processing.CompareAndSwap(IDLE, BUSY) {
 		pid.workerPool.SubmitWork(pid.receiveLoop)
 	}
 }
@@ -1325,12 +1325,12 @@ func (pid *PID) receiveLoop() {
 		}
 
 		// if no more messages, change busy state to idle
-		if !pid.processing.CompareAndSwap(busy, idle) {
+		if !pid.processing.CompareAndSwap(BUSY, IDLE) {
 			return
 		}
 
 		// Check if new messages were added in the meantime and restart processing
-		if !pid.mailbox.IsEmpty() && pid.processing.CompareAndSwap(idle, busy) {
+		if !pid.mailbox.IsEmpty() && pid.processing.CompareAndSwap(IDLE, BUSY) {
 			continue
 		}
 		return

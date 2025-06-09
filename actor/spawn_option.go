@@ -113,7 +113,7 @@ func newSpawnConfig(opts ...SpawnOption) *spawnConfig {
 	return config
 }
 
-// SpawnOption is the interface that applies to
+// SpawnOption is the interface that applies to an actor during spawning.
 type SpawnOption interface {
 	// Apply sets the Option value of a config.
 	Apply(config *spawnConfig)

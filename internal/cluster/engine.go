@@ -66,6 +66,7 @@ const (
 	statesMap     = "states"
 	jobKeysMap    = "jobKeys"
 	actorKindsMap = "actorKinds"
+	grainsMap     = "grains"
 )
 
 func (x EventType) String() string {
@@ -119,6 +120,10 @@ type Interface interface {
 	Actors(ctx context.Context, timeout time.Duration) ([]*internalpb.Actor, error)
 	// IsRunning returns true when the cluster engine is running
 	IsRunning() bool
+	// PutGrain replicates a Grain into the cluster
+	PutGrain(ctx context.Context, grain *internalpb.Grain) error
+	// GetGrain returns a Grain from the cluster
+	GetGrain(ctx context.Context, grainID string) (*internalpb.Grain, error)
 }
 
 // Engine represents the Engine
@@ -151,6 +156,7 @@ type Engine struct {
 	statesMap     olric.DMap
 	jobKeysMap    olric.DMap
 	actorKindsMap olric.DMap
+	grainsMap     olric.DMap
 	tableSize     uint64
 
 	// specifies the discovery node
@@ -314,26 +320,14 @@ func (x *Engine) Start(ctx context.Context) error {
 	x.client = x.server.NewEmbeddedClient()
 
 	// create the various maps
-	x.actorsMap, err = x.client.NewDMap(actorsMap)
-	if err != nil {
-		logger.Error(fmt.Errorf("failed to start the cluster Engine on node=(%s): %w", x.name, err))
-		return x.server.Shutdown(ctx)
-	}
-
-	x.statesMap, err = x.client.NewDMap(statesMap)
-	if err != nil {
-		logger.Error(fmt.Errorf("failed to start the cluster Engine on node=(%s): %w", x.name, err))
-		return x.server.Shutdown(ctx)
-	}
-
-	x.jobKeysMap, err = x.client.NewDMap(jobKeysMap)
-	if err != nil {
-		logger.Error(fmt.Errorf("failed to start the cluster Engine on node=(%s): %w", x.name, err))
-		return x.server.Shutdown(ctx)
-	}
-
-	x.actorKindsMap, err = x.client.NewDMap(actorKindsMap)
-	if err != nil {
+	if err := errorschain.
+		New(errorschain.ReturnFirst()).
+		AddErrorFn(func() error { x.actorsMap, err = x.client.NewDMap(actorsMap); return err }).
+		AddErrorFn(func() error { x.statesMap, err = x.client.NewDMap(statesMap); return err }).
+		AddErrorFn(func() error { x.jobKeysMap, err = x.client.NewDMap(jobKeysMap); return err }).
+		AddErrorFn(func() error { x.actorKindsMap, err = x.client.NewDMap(actorKindsMap); return err }).
+		AddErrorFn(func() error { x.grainsMap, err = x.client.NewDMap(grainsMap); return err }).
+		Error(); err != nil {
 		logger.Error(fmt.Errorf("failed to start the cluster Engine on node=(%s): %w", x.name, err))
 		return x.server.Shutdown(ctx)
 	}
@@ -502,11 +496,12 @@ func (x *Engine) PutActor(ctx context.Context, actor *internalpb.Actor) error {
 	eg.Go(func() error {
 		encoded, _ := encode(actor)
 		key := actor.GetAddress().GetName()
+		kind := actor.GetType()
 		if actor.GetIsSingleton() {
 			if err := errorschain.
 				New(errorschain.ReturnFirst()).
 				AddErrorFn(func() error { return x.actorsMap.Put(ctx, key, encoded) }).
-				AddErrorFn(func() error { return x.actorKindsMap.Put(ctx, actor.GetType(), key) }).
+				AddErrorFn(func() error { return x.actorKindsMap.Put(ctx, kind, kind) }).
 				Error(); err != nil {
 				return fmt.Errorf("(%s) failed to sync actor=(%s): %v", x.node.PeersAddress(), actor.GetAddress().GetName(), err)
 			}
@@ -633,6 +628,110 @@ func (x *Engine) GetActor(ctx context.Context, actorName string) (*internalpb.Ac
 
 	logger.Infof("(%s) successfully retrieved from the cluster actor (%s)", x.node.PeersAddress(), actor.GetAddress().GetName())
 	return actor, nil
+}
+
+// PutGrain replicates a Grain into the cluster
+func (x *Engine) PutGrain(ctx context.Context, grain *internalpb.Grain) error {
+	// return an error when the engine is not running
+	if !x.IsRunning() {
+		return ErrEngineNotRunning
+	}
+
+	ctx, cancelFn := context.WithTimeout(ctx, x.writeTimeout)
+	defer cancelFn()
+
+	x.Lock()
+	defer x.Unlock()
+
+	logger := x.logger
+
+	logger.Infof("(%s) synchronization...", x.node.PeersAddress())
+
+	eg, ctx := errgroup.WithContext(ctx)
+	eg.SetLimit(2)
+
+	kind := grain.GetGrainId().GetKind()
+	grainID := grain.GetGrainId().GetValue()
+
+	eg.Go(func() error {
+		encoded, _ := encodeGrain(grain)
+		if err := errorschain.
+			New(errorschain.ReturnFirst()).
+			AddErrorFn(func() error { return x.grainsMap.Put(ctx, grainID, encoded) }).
+			AddErrorFn(func() error { return x.actorKindsMap.Put(ctx, kind, kind) }).
+			Error(); err != nil {
+			return fmt.Errorf("(%s) failed to sync grain=(%s): %v", x.node.PeersAddress(), grainID, err)
+		}
+
+		return nil
+	})
+
+	eg.Go(func() error {
+		grains := x.peerState.GetGrains()
+		grains[grainID] = &internalpb.Grain{
+			GrainId:        grain.GetGrainId(),
+			PassivateAfter: grain.GetPassivateAfter(),
+			Dependencies:   grain.GetDependencies(),
+		}
+		x.peerState.Grains = grains
+
+		bytea, _ := proto.Marshal(x.peerState)
+		if err := x.statesMap.Put(ctx, x.node.PeersAddress(), bytea); err != nil {
+			return fmt.Errorf("(%s) failed to sync state: %v", x.node.PeersAddress(), err)
+		}
+		return nil
+	})
+
+	if err := eg.Wait(); err != nil {
+		logger.Errorf("(%s) synchronization failed: %v", x.node.PeersAddress(), err)
+		return err
+	}
+
+	logger.Infof("(%s) successfully synchronized in the cluster", x.node.PeersAddress())
+	return nil
+}
+
+// GetGrain returns a Grain from the cluster
+func (x *Engine) GetGrain(ctx context.Context, grainID string) (*internalpb.Grain, error) {
+	// return an error when the engine is not running
+	if !x.IsRunning() {
+		return nil, ErrEngineNotRunning
+	}
+
+	ctx, cancelFn := context.WithTimeout(ctx, x.readTimeout)
+	defer cancelFn()
+
+	x.Lock()
+	defer x.Unlock()
+
+	logger := x.logger
+
+	logger.Infof("(%s) retrieving grain (%s) from the cluster", x.node.PeersAddress(), grainID)
+
+	resp, err := x.grainsMap.Get(ctx, grainID)
+	if err != nil {
+		if errors.Is(err, olric.ErrKeyNotFound) {
+			logger.Warnf("(%s) could not find grain=%s the cluster", x.node.PeersAddress(), grainID)
+			return nil, ErrGrainNotFound
+		}
+		logger.Errorf("(%s) failed to get grain=(%s) record from the cluster: %v", x.node.PeersAddress(), grainID, err)
+		return nil, err
+	}
+
+	bytea, err := resp.Byte()
+	if err != nil {
+		logger.Errorf("(%s) failed to read grain=(%s) record: %v", x.node.PeersAddress(), grainID, err)
+		return nil, err
+	}
+
+	grain, err := decodeGrain(bytea)
+	if err != nil {
+		logger.Errorf("(%s) failed to decode grain=(%s) record: %v", x.node.PeersAddress(), grainID, err)
+		return nil, err
+	}
+
+	logger.Infof("(%s) successfully retrieved from the cluster grain (%s)", x.node.PeersAddress(), grain.GetGrainId().GetValue())
+	return grain, nil
 }
 
 // RemoveActor removes a given actor from the cluster.

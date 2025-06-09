@@ -99,3 +99,22 @@ func (r *reflection) DependenciesFromProtobuf(dependencies ...*internalpb.Depend
 	}
 	return deps, nil
 }
+
+// NewGrain creates a new instance of Grain from its FQN
+func (r *reflection) NewGrain(kind string) (grain Grain, err error) {
+	rtype, ok := r.registry.TypeOf(kind)
+	if !ok {
+		return nil, ErrTypeNotRegistered
+	}
+
+	elem := reflect.TypeOf((*Grain)(nil)).Elem()
+	if ok := rtype.Implements(elem) || reflect.PointerTo(rtype).Implements(elem); !ok {
+		return nil, ErrInstanceNotAnActor
+	}
+
+	instance := reflect.New(rtype)
+	if !instance.IsValid() {
+		return nil, ErrInvalidInstance
+	}
+	return instance.Interface().(Grain), nil
+}

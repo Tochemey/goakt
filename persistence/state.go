@@ -24,21 +24,23 @@
 
 package persistence
 
+import "encoding"
+
 // State defines the contract for an actor's persisted state within the state store.
 //
 // This interface abstracts the data and metadata for a single actor instance, supporting
 // reliable persistence, retrieval, and optimistic concurrency control in the actor system.
 //
-// # Features
+// Features:
 //
-//   - Uniquely identified by a Key, which combines the actor's Kind (type) and ActorID.
+//   - Uniquely identified by a Key, which combines the actor's Kind (type) and EntityID.
 //   - Supports versioning for optimistic concurrency: each update increments the version,
 //     and conditional writes (Compare-And-Swap) prevent lost updates in concurrent scenarios.
 //   - Designed for serialization and deserialization for storage and network transmission.
 //
-// # Typical Usage
+// Typical Usage:
 //
-//  1. Retrieve the State from the store using its Key.
+//  1. Retrieve the State from the store using its PersistenceID.
 //  2. Read or modify the state data as needed.
 //  3. Persist changes by writing the updated State back to the store, using the Version for concurrency checks.
 //  4. If the write fails due to a version mismatch, reload and retry as appropriate.
@@ -46,11 +48,13 @@ package persistence
 // Implementations must ensure that each actor instance maps to exactly one State entry and
 // that the Version is incremented on each successful write.
 type State interface {
-	// Key returns the unique identifier for this state record.
+	encoding.BinaryMarshaler
+	encoding.BinaryUnmarshaler
+	// PersistenceID returns the unique identifier for this state record.
 	//
-	// The key combines the actor's Kind (type) and a unique ActorID,
-	// ensuring a one-to-one mapping between actor instances and state records.
-	Key() Key
+	// The PersistenceID combines the actor's Kind (type) and a unique EntityID,
+	// ensuring a one-to-one mapping between actor instances and state snapshot records.
+	PersistenceID() PersistenceID
 
 	// Version returns the current version of this state entry for optimistic concurrency control.
 	//
@@ -61,9 +65,9 @@ type State interface {
 	Version() int64
 }
 
-// NoState is a sentinel implementation of the State interface representing the absence of persisted state.
+// EmptyState is a sentinel implementation of the State interface representing the absence of persisted state.
 //
-// NoState is used for actors that do not require state persistence or when an actor's state
+// EmptyState is used for actors that do not require state persistence or when an actor's state
 // has not yet been initialized in the state store. It provides a valid, non-nil State object
 // with a unique Key and a Version of zero.
 //
@@ -73,27 +77,27 @@ type State interface {
 //   - Used as a placeholder for stateless actors or for initialization scenarios.
 //   - Allows code to uniformly handle State without special nil checks.
 //
-// The Version method always returns zero, and NoState should never be persisted to the store.
-type NoState struct {
+// The Version method always returns zero, and EmptyState should never be persisted to the store.
+type EmptyState struct {
 	// key is the unique identifier for this state record.
-	key Key
+	key PersistenceID
 }
 
-// ensure NoState implements the State interface
-var _ State = (*NoState)(nil)
+// ensure EmptyState implements the State interface
+var _ State = (*EmptyState)(nil)
 
-// NewNoState creates a new NoState instance for the given key.
-func NewNoState(key Key) *NoState {
-	return &NoState{
+// NewEmptyState creates a new EmptyState instance for the given key.
+func NewEmptyState(key PersistenceID) *EmptyState {
+	return &EmptyState{
 		key: key,
 	}
 }
 
-// Key returns the unique identifier for this state record.
+// PersistenceID returns the unique identifier for this state record.
 //
 // The key combines the actor's Kind (type) and a unique ActorID,
 // ensuring a one-to-one mapping between actor instances and state records.
-func (n *NoState) Key() Key {
+func (n *EmptyState) PersistenceID() PersistenceID {
 	return n.key
 }
 
@@ -104,7 +108,15 @@ func (n *NoState) Key() Key {
 // version with the provided one, rejecting the write if there's a mismatch.
 // This protects against race conditions and lost updates in concurrent systems.
 //
-// For NoState, Version always returns zero.
-func (n *NoState) Version() int64 {
-	return 0 // NoState does not have a version, as it represents an absence of state.
+// For EmptyState, Version always returns zero.
+func (n *EmptyState) Version() int64 {
+	return 0 // EmptyState does not have a version, as it represents an absence of state.
+}
+
+func (n *EmptyState) MarshalBinary() (data []byte, err error) {
+	return []byte{}, nil
+}
+
+func (n *EmptyState) UnmarshalBinary(data []byte) error { //nolint:revive
+	return nil
 }

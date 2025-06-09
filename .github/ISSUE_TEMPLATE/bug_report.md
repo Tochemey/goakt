@@ -7,21 +7,35 @@ assignees: Tochemey
 
 ---
 
-**Bug description**
+## 🐞 Bug Report
+
+### 📋 Description
 A clear and concise description of what the bug is.
 
-**How to reproduce it?**
+---
+
+### 🔁 Steps to Reproduce
 Kindly provide all the steps to reproduce the bug.
 
-**Expected behavior**
+---
+
+### ✅ Expected Behavior
 A clear and concise description of what you expected to happen.
 
-**Screenshots**
+---
+
+### 🖼️ Screenshots
+
 If applicable, add screenshots to help explain your problem.
 
-**Library Version:**
- - Go-Akt version: [e.g. 2.1.0]
- - Go version: [e.g. 1.22]
+---
 
-**Additional context**
+### 📦 Library Details
+
+- **Go-Akt Version:** [e.g. 2.1.0]  
+- **Go Version:** [e.g. 1.22] 
+
+---
+
+### 💬 Additional Context
 Add any other context about the problem here.

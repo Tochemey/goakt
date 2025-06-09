@@ -136,6 +136,15 @@ var (
 
 	// ErrScheduledReferenceNotFound is returned when a reference to a scheduled job cannot be found.
 	ErrScheduledReferenceNotFound = errors.New("scheduled reference not found")
+
+	// ErrGrainActivationTimeout is returned when a Grain activation timed out
+	ErrGrainActivationTimeout = errors.New("grain activation timeout")
+
+	// ErrGrainActivationFailure is returned when Grain activation failed
+	ErrGrainActivationFailure = errors.New("grain activation failed")
+
+	// ErrGrainDeactivationFailure is returned when Grain deactivation failed
+	ErrGrainDeactivationFailure = errors.New("grain deactivation failed")
 )
 
 // NewErrActorNotFound formats an ErrActorNotFound with the given actor path.
@@ -171,6 +180,16 @@ func NewErrInvalidRemoteMessage(err error) error {
 // NewErrInitFailure wraps a base error with ErrInitFailure to indicate a startup failure.
 func NewErrInitFailure(err error) error {
 	return errors.Join(ErrInitFailure, err)
+}
+
+// NewErrGrainActivationFailure wraps a base error with ErrGrainActivationFailure to indicate a Grain activation failure
+func NewErrGrainActivationFailure(err error) error {
+	return errors.Join(ErrGrainActivationFailure, err)
+}
+
+// NewErrGrainDeactivationFailure wraps an error with ErrGrainDeactivationFailure to indicate a Grain deactivation failure
+func NewErrGrainDeactivationFailure(err error) error {
+	return errors.Join(ErrGrainDeactivationFailure, err)
 }
 
 // PanicError defines the panic error
