@@ -248,39 +248,3 @@ func WithExtensions(extensions ...extension.Extension) Option {
 		}
 	})
 }
-
-// WithGrains sets one or more Grain to be registered with the ActorSystem during startup.
-//
-// Grains(virtual actors) are specialized actors that implement the VirtualActor interface and participate in the actor system's lifecycle management and message delivery.
-//
-// # Persistence
-//
-// To enable state persistence for grains(virtual actors), you must configure a persistence.SnapshotStore in the ActorSystem using the extension.PersistenceExtension.
-// If no persistence.SnapshotStore is defined, all registered grains(virtual actors), will be stateless and their state will not be persisted across activations and deactivations.
-//
-// # Usage
-//
-// Call WithGrains when constructing your ActorSystem:
-//
-//	system := actor.NewActorSystem(
-//	    actor.WithGrains(
-//	        NewOrderActor(),
-//	        NewUserActor(),
-//	    ),
-//	)
-//
-// # Parameters
-//
-//   - grains: One or more Grain instances to be registered with the system.
-//
-// # Returns
-//
-//   - Option: A configuration option to be passed to NewActorSystem.
-func WithGrains(grains ...Grain) Option {
-	return OptionFunc(func(system *actorSystem) {
-		if system.grains == nil {
-			system.grains = collection.NewList[Grain]()
-		}
-		system.grains.AppendMany(grains...)
-	})
-}

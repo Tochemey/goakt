@@ -48,7 +48,7 @@ func releaseGrainRequest(request *GrainRequest) {
 }
 
 type GrainRequest struct {
-	sender   *GrainKey
+	sender   *Identity
 	message  proto.Message
 	response chan *GrainResponse
 	err      chan error
@@ -62,7 +62,7 @@ func (req *GrainRequest) Err() chan error {
 	return req.err
 }
 
-func (req *GrainRequest) Sender() *GrainKey {
+func (req *GrainRequest) Sender() *Identity {
 	return req.sender
 }
 
@@ -82,16 +82,14 @@ func (req *GrainRequest) setError(err error) {
 }
 
 func (req *GrainRequest) reset() {
-	var id *GrainKey
+	var id *Identity
 	req.message = nil
 	req.sender = id
 }
 
-func NewGrainRequest(sender *GrainKey, message proto.Message) *GrainRequest {
-	return &GrainRequest{
-		sender:   sender,
-		message:  message,
-		response: make(chan *GrainResponse, 1),
-		err:      make(chan error, 1),
-	}
+func (req *GrainRequest) build(sender *Identity, message proto.Message) {
+	req.sender = sender
+	req.message = message
+	req.response = make(chan *GrainResponse, 1)
+	req.err = make(chan error, 1)
 }

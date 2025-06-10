@@ -109,7 +109,7 @@ func (r *reflection) NewGrain(kind string) (grain Grain, err error) {
 
 	elem := reflect.TypeOf((*Grain)(nil)).Elem()
 	if ok := rtype.Implements(elem) || reflect.PointerTo(rtype).Implements(elem); !ok {
-		return nil, ErrInstanceNotAnActor
+		return nil, ErrInstanceNotAnGrain
 	}
 
 	instance := reflect.New(rtype)

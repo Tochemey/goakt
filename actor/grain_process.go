@@ -44,8 +44,8 @@ import (
 )
 
 type grainProcess struct {
-	grain Grain
-	key   *GrainKey
+	grain    Grain
+	identity *Identity
 
 	passivateAfter atomic.Duration
 	initMaxRetries atomic.Int32
@@ -74,57 +74,47 @@ type grainProcess struct {
 	processState *pidState
 }
 
-func newGrainProcess(name string, grain Grain, actorSystem ActorSystem, opts ...GrainOption) (*grainProcess, error) {
-	// create the grain id and validate
-	grainKey := newGrainKey(grain, name)
-	if err := grainKey.Validate(); err != nil {
-		return nil, err
-	}
-
-	gp := &grainProcess{
+func newGrainProcess(identity *Identity, grain Grain, actorSystem ActorSystem, opts ...GrainOption) *grainProcess {
+	process := &grainProcess{
 		grain:              grain,
-		key:                grainKey,
+		identity:           identity,
 		inbox:              newGrainInxbox(),
 		haltPassivationLnr: make(chan types.Unit, 1),
 		actorSystem:        actorSystem,
 		logger:             actorSystem.Logger(),
 		remoting:           NewRemoting(), // TODO: revisit this setting. We need to set it when cluster mode is enabled for Grains
-		workerPool: workerpool.New(
-			workerpool.WithPoolSize(300),
-			workerpool.WithPassivateAfter(time.Second),
-			workerpool.WithLogger(actorSystem.Logger()),
-		),
-		dependencies:      collection.NewMap[string, extension.Dependency](),
-		processState:      new(pidState),
-		latestReceiveTime: atomic.Time{},
+		workerPool:         actorSystem.getWorkerPool(),
+		dependencies:       collection.NewMap[string, extension.Dependency](),
+		processState:       new(pidState),
+		latestReceiveTime:  atomic.Time{},
 	}
 
-	gp.initMaxRetries.Store(DefaultInitMaxRetries)
-	gp.initTimeout.Store(DefaultInitTimeout)
-	gp.processing.Store(int32(IDLE))
-	gp.passivateAfter.Store(DefaultPassivationTimeout)
+	process.initMaxRetries.Store(DefaultInitMaxRetries)
+	process.initTimeout.Store(DefaultInitTimeout)
+	process.processing.Store(int32(IDLE))
+	process.passivateAfter.Store(DefaultPassivationTimeout)
 
 	// override the default values with custom one
 	config := newGrainConfig(opts...)
 	if config.PassivateAfter() != nil {
-		gp.passivateAfter.Store(*config.PassivateAfter())
+		process.passivateAfter.Store(*config.PassivateAfter())
 	}
 
 	if config.Dependencies() != nil {
 		for _, dep := range config.Dependencies() {
-			gp.dependencies.Set(dep.ID(), dep)
+			process.dependencies.Set(dep.ID(), dep)
 		}
 	}
 
-	return gp, nil
+	return process
 }
 
 // Activate activates the Grain
 func (proc *grainProcess) Activate(ctx context.Context) error {
 	logger := proc.logger
-	logger.Infof("activating Grain %s ...", proc.key.String())
+	logger.Infof("activating Grain %s ...", proc.identity.String())
 
-	grainContext := newGrainContext(ctx, proc.key, proc.actorSystem, proc.dependencies.Values()...)
+	grainContext := newGrainContext(ctx, proc.identity, proc.actorSystem, proc.dependencies.Values()...)
 	grainOptions := []GrainOption{
 		WithGrainDependencies(proc.dependencies.Values()...),
 		WithGrainPassivation(proc.passivateAfter.Load()),
@@ -147,16 +137,10 @@ func (proc *grainProcess) Activate(ctx context.Context) error {
 
 	if proc.processState.IsSuspended() {
 		proc.processState.ClearSuspended()
-		proc.workerPool.ReStart()
-	}
-
-	if err := proc.workerPool.Start(); err != nil {
-		cancel()
-		return NewErrGrainActivationFailure(err)
 	}
 
 	proc.processState.SetRunning()
-	proc.logger.Infof("Grain %s successfully activated.", proc.key.String())
+	proc.logger.Infof("Grain %s successfully activated.", proc.identity.String())
 	cancel()
 
 	// start the passivation loop
@@ -167,12 +151,12 @@ func (proc *grainProcess) Activate(ctx context.Context) error {
 // Deactivate deactivates the Grain
 func (proc *grainProcess) Deactivate(ctx context.Context) error {
 	logger := proc.logger
-	logger.Infof("deactivating Grain %s ...", proc.key.String())
+	logger.Infof("deactivating Grain %s ...", proc.identity.String())
 	if proc.remoting != nil {
 		proc.remoting.Close()
 	}
 
-	grainContext := newGrainContext(ctx, proc.key, proc.actorSystem, proc.dependencies.Values()...)
+	grainContext := newGrainContext(ctx, proc.identity, proc.actorSystem, proc.dependencies.Values()...)
 
 	// run the PostStop hook and let watchers know
 	// you are terminated
@@ -186,18 +170,17 @@ func (proc *grainProcess) Deactivate(ctx context.Context) error {
 	proc.processState.ClearRunning()
 	proc.processState.ClearStopping()
 	proc.processState.SetSuspended()
-	proc.workerPool.Stop()
-	proc.logger.Infof("Grain %s successfully deactivated.", proc.key.String())
+	proc.logger.Infof("Grain %s successfully deactivated.", proc.identity.String())
 
 	return nil
 }
 
 // Shutdown gracefully shuts down the given Grain
 func (proc *grainProcess) Shutdown(ctx context.Context) error {
-	proc.logger.Infof("shutdown process has started for Grain=(%s)...", proc.key.String())
+	proc.logger.Infof("shutdown process has started for Grain=(%s)...", proc.identity.String())
 
 	if !proc.processState.IsRunning() {
-		proc.logger.Infof("actor=%s is offline. Maybe it has been passivated or stopped already", proc.key.String())
+		proc.logger.Infof("actor=%s is offline. Maybe it has been passivated or stopped already", proc.identity.String())
 		return nil
 	}
 
@@ -207,11 +190,11 @@ func (proc *grainProcess) Shutdown(ctx context.Context) error {
 	}
 
 	if err := proc.Deactivate(ctx); err != nil {
-		proc.logger.Errorf("Grain (%s) failed to cleanly stop", proc.key.String())
+		proc.logger.Errorf("Grain (%s) failed to cleanly stop", proc.identity.String())
 		return err
 	}
 
-	proc.logger.Infof("Grain %s successfully shutdown", proc.key.String())
+	proc.logger.Infof("Grain %s successfully shutdown", proc.identity.String())
 	return nil
 }
 
@@ -244,8 +227,13 @@ func (proc *grainProcess) schedule() {
 // receiveLoop extracts every message from the actor mailbox
 // and pass it to the appropriate behavior for handling
 func (proc *grainProcess) receiveLoop() {
+	var request *GrainRequest
 	for {
-		if request := proc.inbox.Dequeue(); request != nil {
+		if request != nil {
+			releaseGrainRequest(request)
+		}
+
+		if request = proc.inbox.Dequeue(); request != nil {
 			// Process the message
 			switch request.Message().(type) {
 			case *goaktpb.PoisonPill:
@@ -338,18 +326,18 @@ func (proc *grainProcess) passivationLoop() {
 	<-tickerStopSig
 	tk.Stop()
 
-	proc.logger.Infof("passivation mode has been triggered for Grain=%s...", proc.key.String())
+	proc.logger.Infof("passivation mode has been triggered for Grain=%s...", proc.identity.String())
 
 	if proc.processState.IsStopping() || proc.processState.IsSuspended() {
-		proc.logger.Infof("Grain=%s is stopping or maybe already deactivated. No need to passivate", proc.key.String())
+		proc.logger.Infof("Grain=%s is stopping or maybe already deactivated. No need to passivate", proc.identity.String())
 		return
 	}
 
 	ctx := context.Background()
 	if err := proc.Deactivate(ctx); err != nil {
-		proc.logger.Errorf("failed to passivate Grain (%s): reason=(%v)", proc.key.String(), err)
+		proc.logger.Errorf("failed to passivate Grain (%s): reason=(%v)", proc.identity.String(), err)
 		return
 	}
 
-	proc.logger.Infof("Grain %s successfully passivated", proc.key.String())
+	proc.logger.Infof("Grain %s successfully passivated", proc.identity.String())
 }

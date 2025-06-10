@@ -26,14 +26,28 @@ package actor
 
 import "google.golang.org/protobuf/proto"
 
+// GrainResponse represents the response returned from a Grain after processing a request.
+//
+// It wraps a protobuf message that contains the actual response payload from the Grain.
+// Use the Message method to access the underlying proto.Message.
 type GrainResponse struct {
 	message proto.Message
 }
 
+// Message returns the underlying protobuf message contained in the GrainResponse.
+//
+// This method provides access to the actual response payload sent by the Grain.
 func (resp *GrainResponse) Message() proto.Message {
 	return resp.message
 }
 
+// NewGrainResponse creates a new GrainResponse with the given protobuf message.
+//
+// Parameters:
+//   - message: the proto.Message to wrap in the GrainResponse.
+//
+// Returns:
+//   - A pointer to a new GrainResponse containing the provided message.
 func NewGrainResponse(message proto.Message) *GrainResponse {
 	return &GrainResponse{
 		message: message,

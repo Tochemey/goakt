@@ -668,11 +668,7 @@ func (x *Engine) PutGrain(ctx context.Context, grain *internalpb.Grain) error {
 
 	eg.Go(func() error {
 		grains := x.peerState.GetGrains()
-		grains[grainID] = &internalpb.Grain{
-			GrainId:        grain.GetGrainId(),
-			PassivateAfter: grain.GetPassivateAfter(),
-			Dependencies:   grain.GetDependencies(),
-		}
+		grains[grainID] = grain
 		x.peerState.Grains = grains
 
 		bytea, _ := proto.Marshal(x.peerState)

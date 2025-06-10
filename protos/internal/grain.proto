@@ -2,9 +2,6 @@ syntax = "proto3";
 
 package internalpb;
 
-import "google/protobuf/duration.proto";
-import "internal/dependency.proto";
-
 option go_package = "github.com/tochemey/goakt/v3/internal/internalpb;internalpb";
 
 message GrainId {
@@ -17,6 +14,6 @@ message GrainId {
 // Grain represents the virtual actor information on the wire.
 message Grain {
   GrainId grain_id = 1;
-  google.protobuf.Duration passivate_after = 2;
-  repeated internalpb.Dependency dependencies = 3;
+  string host = 4;
+  int32 port = 5;
 }

@@ -466,6 +466,35 @@ type ActorSystem interface { //nolint:revive
 	//
 	// Returns an error if the actor system has not started.
 	Inject(dependencies ...extension.Dependency) error
+	// RegisterGrains registers Grains (virtual actors) after the actor system has started.
+	//
+	// Grains are virtual actors with automatic activation, deactivation, and location transparency.
+	// They can be registered and de-registered at runtime, enabling dynamic extension of the actor system.
+	//
+	// Registering a Grain makes it available for activation and message routing by the system.
+	// Returns an error if the actor system is not started.
+	RegisterGrains(grains ...Grain) error
+	// DeregisterGrains removes registered Grains (virtual actors) from the registry.
+	//
+	// Deregistering a Grain prevents it from being activated or messaged in the future.
+	// Returns an error if the actor system is not started.
+	DeregisterGrains(grains ...Grain) error
+	// MessageGrain sends a request message to a Grain identified by the given identity.
+	//
+	// This method locates or spawns the target Grain (either locally or in the cluster), sends the provided
+	// protobuf message, and waits for a response or error. The request timeout can be customized using
+	// the WithRequestTimeout GrainOption; otherwise, a default timeout is used.
+	//
+	// Parameters:
+	//   - ctx: context for cancellation and timeout control.
+	//   - identity: the unique identity string of the Grain.
+	//   - message: the protobuf message to send to the Grain.
+	//   - opts: optional GrainOptions to configure the Grain (e.g., dependencies, timeout).
+	//
+	// Returns:
+	//   - *GrainResponse: the response from the Grain, if successful.
+	//   - error: an error if the request fails, times out, or the system is not started.
+	MessageGrain(ctx context.Context, identity string, message proto.Message, opts ...GrainOption) (response proto.Message, err error)
 	// handleRemoteAsk handles a synchronous message to another actor and expect a response.
 	// This block until a response is received or timed out.
 	handleRemoteAsk(ctx context.Context, to *PID, message proto.Message, timeout time.Duration) (response proto.Message, err error)
@@ -590,8 +619,7 @@ type actorSystem struct {
 	extensions       *collection.Map[string, extension.Extension]
 
 	spawnOnNext *atomic.Uint32
-
-	grains *collection.List[Grain]
+	grains      *collection.Map[Identity, *grainProcess]
 }
 
 var (
@@ -639,6 +667,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		topicActor:             NoSender,
 		extensions:             collection.NewMap[string, extension.Extension](),
 		spawnOnNext:            atomic.NewUint32(0),
+		grains:                 collection.NewMap[Identity, *grainProcess](),
 	}
 
 	system.enableRelocation.Store(true)
@@ -780,7 +809,6 @@ func (x *actorSystem) Start(ctx context.Context) error {
 			Error()
 	}
 
-	x.registerGrains()
 	x.startMessagesScheduler(ctx)
 	x.startedAt.Store(time.Now().Unix())
 	x.logger.Infof("%s actor system successfully started..:)", x.name)
@@ -2031,6 +2059,45 @@ func (x *actorSystem) Inject(dependencies ...extension.Dependency) error {
 	return nil
 }
 
+// DeregisterGrains removes registered Grains (virtual actors) from the registry.
+//
+// Deregistering a Grain prevents it from being activated or messaged in the future.
+// Returns an error if the actor system is not started.
+func (x *actorSystem) DeregisterGrains(grains ...Grain) error {
+	x.locker.Lock()
+	defer x.locker.Unlock()
+
+	if !x.started.Load() {
+		return ErrActorSystemNotStarted
+	}
+
+	for _, grain := range grains {
+		x.registry.Deregister(grain)
+	}
+	return nil
+}
+
+// RegisterGrains registers Grains (virtual actors) after the actor system has started.
+//
+// Grains are virtual actors with automatic activation, deactivation, and location transparency.
+// They can be registered and de-registered at runtime, enabling dynamic extension of the actor system.
+//
+// Registering a Grain makes it available for activation and message routing by the system.
+// Returns an error if the actor system is not started.
+func (x *actorSystem) RegisterGrains(grains ...Grain) error {
+	x.locker.Lock()
+	defer x.locker.Unlock()
+
+	if !x.started.Load() {
+		return ErrActorSystemNotStarted
+	}
+
+	for _, grain := range grains {
+		x.registry.Register(grain)
+	}
+	return nil
+}
+
 // handleRemoteAsk handles a synchronous message to another actor and expect a response.
 // This block until a response is received or timed out.
 func (x *actorSystem) handleRemoteAsk(ctx context.Context, to *PID, message proto.Message, timeout time.Duration) (response proto.Message, err error) {
@@ -2364,6 +2431,7 @@ func (x *actorSystem) reset() {
 	x.extensions.Reset()
 	x.actors.reset()
 	x.spawnOnNext.Store(0)
+	x.grains.Reset()
 }
 
 // shutdown stops the actor system
@@ -3050,16 +3118,6 @@ func (x *actorSystem) shutdownRemoting(ctx context.Context) error {
 		}
 	}
 	return nil
-}
-
-func (x *actorSystem) registerGrains() {
-	if x.grains != nil && x.grains.Len() > 0 {
-		x.logger.Info("Registering grains")
-		for _, grain := range x.grains.Items() {
-			x.registry.Register(grain)
-			x.logger.Infof("Grain kind=(%s) registered", types.Name(grain))
-		}
-	}
 }
 
 func isReservedName(name string) bool {

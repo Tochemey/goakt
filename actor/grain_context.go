@@ -32,7 +32,7 @@ import (
 
 type GrainContext struct {
 	ctx          context.Context
-	self         *GrainKey
+	self         *Identity
 	actorSystem  ActorSystem
 	dependencies []extension.Dependency
 }
@@ -46,7 +46,7 @@ func (g *GrainContext) Context() context.Context {
 }
 
 // Self returns the unique identifier of the Grain instance.
-func (g *GrainContext) Self() *GrainKey {
+func (g *GrainContext) Self() *Identity {
 	return g.self
 }
 
@@ -104,7 +104,7 @@ func (g *GrainContext) Extension(extensionID string) extension.Extension {
 }
 
 // newGrainContext creates and returns a new GrainContext instance.
-func newGrainContext(ctx context.Context, self *GrainKey, actorSystem ActorSystem, dependencies ...extension.Dependency) *GrainContext {
+func newGrainContext(ctx context.Context, self *Identity, actorSystem ActorSystem, dependencies ...extension.Dependency) *GrainContext {
 	return &GrainContext{
 		ctx:          ctx,
 		self:         self,

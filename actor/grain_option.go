@@ -54,6 +54,10 @@ type grainConfig struct {
 	passivateAfter *time.Duration
 	// specifies the list of dependencies
 	dependencies []extension.Dependency
+	// specifies the request timeout
+	requestTimeout time.Duration
+	// specifies the request sender
+	sender *Identity
 }
 
 // Dependencies returns the list of dependencies
@@ -66,16 +70,17 @@ func (g *grainConfig) PassivateAfter() *time.Duration {
 	return g.passivateAfter
 }
 
-// newGrainConfig creates an instance of grainConfig
-func newGrainConfig(opts ...GrainOption) *grainConfig {
-	config := &grainConfig{
-		passivateAfter: nil,
-		dependencies:   make([]extension.Dependency, 0),
-	}
-	for _, opt := range opts {
-		opt.Apply(config)
-	}
-	return config
+// RequestTimeout returns the configured request timeout for the Grain.
+//
+// This value determines the maximum duration the Grain will wait for a request to complete.
+// If not explicitly set, it defaults to 5 minutes.
+func (g *grainConfig) RequestTimeout() time.Duration {
+	return g.requestTimeout
+}
+
+// RequestSender returns the sender of the request.
+func (g *grainConfig) RequestSender() *Identity {
+	return g.sender
 }
 
 // WithGrainPassivation sets a custom duration after which an idle Grain (virtual actor)
@@ -104,4 +109,52 @@ func WithGrainDependencies(dependencies ...extension.Dependency) GrainOption {
 	return grainOption(func(config *grainConfig) {
 		config.dependencies = dependencies
 	})
+}
+
+// WithRequestTimeout returns a GrainOption that sets the request timeout for the Grain.
+//
+// This option allows you to specify the maximum duration the Grain will wait for a request to complete.
+// If the provided timeout is less than or equal to zero, a default timeout of 5 minutes will be used.
+//
+// Parameters:
+//   - timeout: the duration to use as the request timeout.
+//
+// Returns:
+//   - A GrainOption that sets the grain's request timeout.
+func WithRequestTimeout(timeout time.Duration) GrainOption {
+	return grainOption(func(config *grainConfig) {
+		if timeout <= 0 {
+			timeout = 5 * time.Minute // default timeout
+		}
+		config.requestTimeout = timeout
+	})
+}
+
+// WithRequestSender returns a GrainOption that sets the sender for the Grain.
+// This option allows you to specify the Identity of the sender that will be used
+// when sending messages to the Grain. This is useful for tracking the origin of messages
+// and for implementing features like request tracing or logging.
+//
+// Parameters:
+//   - sender: a pointer to an Identity instance representing the sender of the Grain request.
+//
+// Returns:
+//   - A GrainOption that sets the grain's sender.
+func WithRequestSender(sender *Identity) GrainOption {
+	return grainOption(func(config *grainConfig) {
+		config.sender = sender
+	})
+}
+
+// newGrainConfig creates an instance of grainConfig
+func newGrainConfig(opts ...GrainOption) *grainConfig {
+	config := &grainConfig{
+		passivateAfter: nil,
+		dependencies:   make([]extension.Dependency, 0),
+		requestTimeout: 5 * time.Minute,
+	}
+	for _, opt := range opts {
+		opt.Apply(config)
+	}
+	return config
 }
