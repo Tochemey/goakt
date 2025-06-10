@@ -116,7 +116,11 @@ func (x *topicActor) handlePublish(ctx *ReceiveContext) {
 		topic := publish.GetTopic()
 		message := publish.GetMessage()
 		messageID := publish.GetId()
-		senderID := ctx.Sender().ID()
+
+		var senderID string
+		if sender := ctx.Sender(); sender != nil {
+			senderID = sender.ID()
+		}
 
 		id := key{
 			senderID:  senderID,
