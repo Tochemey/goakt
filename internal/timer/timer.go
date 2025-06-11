@@ -38,7 +38,7 @@ type Pool struct {
 func NewPool() *Pool {
 	return &Pool{
 		pool: sync.Pool{
-			New: func() interface{} {
+			New: func() any {
 				return time.NewTimer(5 * time.Second)
 			},
 		},

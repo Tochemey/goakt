@@ -148,7 +148,8 @@ type PID struct {
 	// the list of dependencies
 	dependencies *collection.Map[string, extension.Dependency]
 
-	processState *pidState
+	processState     *pidState
+	passivationTimer *time.Timer
 }
 
 // newPID creates a new pid
@@ -1344,6 +1345,9 @@ func (pid *PID) handleReceived(received *ReceiveContext) {
 		pid.latestReceiveTime.Store(time.Now())
 		pid.processedCount.Inc()
 		behavior(received)
+		if pid.passivationTimer != nil {
+			pid.passivationTimer.Reset(pid.passivateAfter.Load())
+		}
 	}
 }
 
@@ -1559,53 +1563,44 @@ func (pid *PID) freeChildren(ctx context.Context) error {
 func (pid *PID) passivationLoop() {
 	pid.logger.Info("start the passivation listener...")
 	pid.logger.Infof("passivation timeout is (%s)", pid.passivateAfter.Load().String())
-	tk := ticker.New(pid.passivateAfter.Load())
-	tk.Start()
-	tickerStopSig := make(chan types.Unit, 1)
+	timeout := pid.passivateAfter.Load()
+	pid.passivationTimer = time.NewTimer(timeout)
 
-	// start ticking
 	go func() {
 		for {
 			select {
-			case <-tk.Ticks:
-				idleTime := time.Since(pid.latestReceiveTime.Load())
-				if idleTime >= pid.passivateAfter.Load() {
-					tickerStopSig <- types.Unit{}
+			case <-pid.passivationTimer.C:
+				if pid.processState.IsStopping() || pid.processState.IsSuspended() {
+					pid.logger.Infof("actor=%s is stopping or maybe suspended. No need to passivate", pid.Name())
 					return
 				}
+
+				pid.logger.Infof("passivation mode has been triggered for actor=%s...", pid.Name())
+
+				ctx := context.Background()
+				if err := pid.doStop(ctx); err != nil {
+					// TODO: rethink properly about PostStop error handling
+					pid.logger.Errorf("failed to passivate actor=(%s): reason=(%v)", pid.Name(), err)
+					pid.passivationTimer.Stop()
+					return
+				}
+
+				if pid.eventsStream != nil {
+					event := &goaktpb.ActorPassivated{
+						Address:      pid.Address().Address,
+						PassivatedAt: timestamppb.Now(),
+					}
+					pid.eventsStream.Publish(eventsTopic, event)
+				}
+
+				pid.passivationTimer.Stop()
+				pid.logger.Infof("actor=%s successfully passivated", pid.Name())
 			case <-pid.haltPassivationLnr:
-				tickerStopSig <- types.Unit{}
+				pid.passivationTimer.Stop()
 				return
 			}
 		}
 	}()
-
-	<-tickerStopSig
-	tk.Stop()
-
-	if pid.processState.IsStopping() || pid.processState.IsSuspended() {
-		pid.logger.Infof("actor=%s is stopping or maybe suspended. No need to passivate", pid.Name())
-		return
-	}
-
-	pid.logger.Infof("passivation mode has been triggered for actor=%s...", pid.Name())
-
-	ctx := context.Background()
-	if err := pid.doStop(ctx); err != nil {
-		// TODO: rethink properly about PostStop error handling
-		pid.logger.Errorf("failed to passivate actor=(%s): reason=(%v)", pid.Name(), err)
-		return
-	}
-
-	if pid.eventsStream != nil {
-		event := &goaktpb.ActorPassivated{
-			Address:      pid.Address().Address,
-			PassivatedAt: timestamppb.Now(),
-		}
-		pid.eventsStream.Publish(eventsTopic, event)
-	}
-
-	pid.logger.Infof("actor=%s successfully passivated", pid.Name())
 }
 
 // setBehavior is a utility function that helps set the actor behavior
