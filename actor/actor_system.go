@@ -136,13 +136,13 @@ type ActorSystem interface { //nolint:revive
 	// SpawnOn creates and starts an actor, either locally or on a remote node,
 	// depending on the configuration of the actor system.
 	//
-	// In **cluster mode**, the actor may be spawned on any node in the cluster
+	// In cluster mode, the actor may be spawned on any node in the cluster
 	// based on the specified placement strategy. Supported strategies include:
 	//   - RoundRobin: Distributes actors evenly across available nodes.
 	//   - Random: Choose a node at random.
 	//   - Local: Ensures that the actor is created on the local node.
 	//
-	// In **non-cluster mode**, the actor is created on the local actor system
+	// In non-cluster mode, the actor is created on the local actor system
 	// just like with the standard `Spawn` function.
 	//
 	// Unlike `Spawn`, `SpawnOn` does not return a PID immediately. To interact with
@@ -1199,13 +1199,13 @@ func (x *actorSystem) SpawnNamedFromFunc(ctx context.Context, name string, recei
 // SpawnOn creates and starts an actor, either locally or on a remote node,
 // depending on the configuration of the actor system.
 //
-// In **cluster mode**, the actor may be spawned on any node in the cluster
+// In cluster mode, the actor may be spawned on any node in the cluster
 // based on the specified placement strategy. Supported strategies include:
 //   - RoundRobin: Distributes actors evenly across available nodes.
 //   - Random: Choose a node at random.
 //   - Local: Ensures that the actor is created on the local node.
 //
-// In **non-cluster mode**, the actor is created on the local actor system
+// In non-cluster mode, the actor is created on the local actor system
 // just like with the standard `Spawn` function.
 //
 // Unlike `Spawn`, `SpawnOn` does not return a PID immediately. To interact with
@@ -1252,15 +1252,18 @@ func (x *actorSystem) SpawnOn(ctx context.Context, name string, actor Actor, opt
 	}
 
 	var peer *cluster.Peer
-	switch config.placement {
-	case Random:
-		peer = peers[rand.IntN(len(peers))] //nolint:gosec
-	case RoundRobin:
-		x.spawnOnNext.Inc()
-		n := x.spawnOnNext.Load()
-		peer = peers[(int(n)-1)%len(peers)]
-	default:
-		// pass
+
+	if len(peers) > 1 {
+		switch config.placement {
+		case Random:
+			peer = peers[rand.IntN(len(peers))] //nolint:gosec
+		case RoundRobin:
+			x.spawnOnNext.Inc()
+			n := x.spawnOnNext.Load()
+			peer = peers[(int(n)-1)%len(peers)]
+		default:
+			// pass
+		}
 	}
 
 	// spawn the actor on the local node
