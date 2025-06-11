@@ -52,6 +52,7 @@ import (
 	"github.com/tochemey/goakt/v3/internal/eventstream"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/ticker"
+	"github.com/tochemey/goakt/v3/internal/timer"
 	"github.com/tochemey/goakt/v3/internal/types"
 	"github.com/tochemey/goakt/v3/internal/workerpool"
 	"github.com/tochemey/goakt/v3/log"
@@ -149,7 +150,7 @@ type PID struct {
 	dependencies *collection.Map[string, extension.Dependency]
 
 	processState     *pidState
-	passivationTimer *time.Timer
+	passivationTimer *timer.Timer
 }
 
 // newPID creates a new pid
@@ -203,12 +204,17 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 	behaviorStack.Push(pid.actor.Receive)
 	pid.behaviorStack = behaviorStack
 
+	// start the passivation timer with some fictitious value
+	pid.passivationTimer = timer.New(5 * time.Second)
+	pid.passivationTimer.Start()
+
 	if err := pid.init(ctx); err != nil {
 		return nil, err
 	}
 
 	pid.supervisionLoop()
 	if pid.passivateAfter.Load() > 0 {
+		pid.passivationTimer.Reset(pid.passivateAfter.Load())
 		go pid.passivationLoop()
 	}
 
@@ -548,6 +554,8 @@ func (pid *PID) Restart(ctx context.Context) error {
 	pid.processState.ClearSuspended()
 	pid.supervisionLoop()
 	if pid.passivateAfter.Load() > 0 {
+		pid.passivationTimer.Start()
+		pid.passivationTimer.Reset(pid.passivateAfter.Load())
 		go pid.passivationLoop()
 	}
 
@@ -857,7 +865,7 @@ func (pid *PID) Ask(ctx context.Context, to *PID, message proto.Message, timeout
 	case result := <-receiveContext.response:
 		timers.Put(timer)
 		return result, nil
-	case <-timer.C:
+	case <-timer.C():
 		err = ErrRequestTimeout
 		pid.toDeadletters(receiveContext, err)
 		timers.Put(timer)
@@ -1345,9 +1353,7 @@ func (pid *PID) handleReceived(received *ReceiveContext) {
 		pid.latestReceiveTime.Store(time.Now())
 		pid.processedCount.Inc()
 		behavior(received)
-		if pid.passivationTimer != nil {
-			pid.passivationTimer.Reset(pid.passivateAfter.Load())
-		}
+		pid.passivationTimer.Reset(pid.passivateAfter.Load())
 	}
 }
 
@@ -1563,13 +1569,10 @@ func (pid *PID) freeChildren(ctx context.Context) error {
 func (pid *PID) passivationLoop() {
 	pid.logger.Info("start the passivation listener...")
 	pid.logger.Infof("passivation timeout is (%s)", pid.passivateAfter.Load().String())
-	timeout := pid.passivateAfter.Load()
-	pid.passivationTimer = time.NewTimer(timeout)
-
 	go func() {
 		for {
 			select {
-			case <-pid.passivationTimer.C:
+			case <-pid.passivationTimer.C():
 				if pid.processState.IsStopping() || pid.processState.IsSuspended() {
 					pid.logger.Infof("actor=%s is stopping or maybe suspended. No need to passivate", pid.Name())
 					return
@@ -1581,7 +1584,6 @@ func (pid *PID) passivationLoop() {
 				if err := pid.doStop(ctx); err != nil {
 					// TODO: rethink properly about PostStop error handling
 					pid.logger.Errorf("failed to passivate actor=(%s): reason=(%v)", pid.Name(), err)
-					pid.passivationTimer.Stop()
 					return
 				}
 
@@ -1593,10 +1595,8 @@ func (pid *PID) passivationLoop() {
 					pid.eventsStream.Publish(eventsTopic, event)
 				}
 
-				pid.passivationTimer.Stop()
 				pid.logger.Infof("actor=%s successfully passivated", pid.Name())
 			case <-pid.haltPassivationLnr:
-				pid.passivationTimer.Stop()
 				return
 			}
 		}
@@ -1639,11 +1639,13 @@ func (pid *PID) doStop(ctx context.Context) error {
 	if pid.stashBox != nil {
 		if err := pid.unstashAll(); err != nil {
 			pid.logger.Errorf("actor=(%s) failed to unstash messages", pid.Name())
-			pid.processState.ClearRunning()
+			pid.reset()
 			return err
 		}
 	}
 
+	// shutdown the timer
+	pid.passivationTimer.Stop()
 	// stop supervisor loop
 	pid.supervisionStopSignal <- types.Unit{}
 
@@ -1656,7 +1658,6 @@ func (pid *PID) doStop(ctx context.Context) error {
 		AddErrorFn(func() error { return pid.freeWatchees() }).
 		AddErrorFn(func() error { return pid.freeChildren(ctx) }).
 		Error(); err != nil {
-		pid.processState.ClearRunning()
 		pid.reset()
 		return err
 	}
@@ -1670,7 +1671,6 @@ func (pid *PID) doStop(ctx context.Context) error {
 		AddErrorFn(func() error { return pid.actor.PostStop(stopContext) }).
 		AddErrorFn(func() error { return pid.freeWatchers(ctx) }).
 		Error(); err != nil {
-		pid.processState.ClearRunning()
 		pid.reset()
 		return err
 	}
@@ -2016,6 +2016,7 @@ func (pid *PID) doReinstate() {
 	pid.supervisionLoop()
 	// resume passivation loop
 	if pid.passivateAfter.Load() > 0 {
+		pid.passivationTimer.Reset(pid.passivateAfter.Load())
 		go pid.passivationLoop()
 	}
 

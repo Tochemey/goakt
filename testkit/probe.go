@@ -463,7 +463,7 @@ func (x *probe) receiveOne(duration time.Duration) proto.Message {
 			x.lastSenderAddress = m.senderAddress
 		}
 		return m.payload
-	case <-t.C:
+	case <-t.C():
 		x.timers.Put(t)
 		return nil
 	}
