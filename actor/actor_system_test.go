@@ -2096,7 +2096,6 @@ func TestActorSystem(t *testing.T) {
 		err = sys.Stop(ctx)
 		require.NoError(t, err)
 	})
-
 	t.Run("With LocalActor failure when it is a reserved name", func(t *testing.T) {
 		ctx := context.TODO()
 		logger := log.DiscardLogger
@@ -2125,7 +2124,6 @@ func TestActorSystem(t *testing.T) {
 		err = sys.Stop(ctx)
 		require.NoError(t, err)
 	})
-
 	t.Run("With RemoteActor failure when it is a reserved name", func(t *testing.T) {
 		ctx := context.TODO()
 		logger := log.DiscardLogger
@@ -2154,7 +2152,6 @@ func TestActorSystem(t *testing.T) {
 		err = sys.Stop(ctx)
 		require.NoError(t, err)
 	})
-
 	t.Run("SpawnOn happy path", func(t *testing.T) {
 		// create a context
 		ctx := context.TODO()
@@ -2206,7 +2203,6 @@ func TestActorSystem(t *testing.T) {
 		// shutdown the nats server gracefully
 		srv.Shutdown()
 	})
-
 	t.Run("SpawnOn with random placement", func(t *testing.T) {
 		// create a context
 		ctx := context.TODO()
@@ -2258,7 +2254,6 @@ func TestActorSystem(t *testing.T) {
 		// shutdown the nats server gracefully
 		srv.Shutdown()
 	})
-
 	t.Run("SpawnOn with local placement", func(t *testing.T) {
 		// create a context
 		ctx := context.TODO()
@@ -2306,6 +2301,31 @@ func TestActorSystem(t *testing.T) {
 		require.NoError(t, sd3.Close())
 		require.NoError(t, sd2.Close())
 		require.NoError(t, sd1.Close())
+
+		// shutdown the nats server gracefully
+		srv.Shutdown()
+	})
+	t.Run("SpawnOn with single node cluster", func(t *testing.T) {
+		// create a context
+		ctx := context.TODO()
+		// start the NATS server
+		srv := startNatsServer(t)
+
+		// create and start system cluster
+		node, sd := testCluster(t, srv.Addr().String())
+		peerAddress1 := node.PeerAddress()
+		require.NotEmpty(t, peerAddress1)
+		require.NotNil(t, sd)
+
+		// create an actor on node1
+		actor := newMockActor()
+		actorName := "actorID"
+		err := node.SpawnOn(ctx, actorName, actor)
+		require.NoError(t, err)
+
+		// free resources
+		require.NoError(t, node.Stop(ctx))
+		require.NoError(t, sd.Close())
 
 		// shutdown the nats server gracefully
 		srv.Shutdown()
