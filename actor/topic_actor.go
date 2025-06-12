@@ -86,7 +86,7 @@ func (x *topicActor) PreStart(*Context) error {
 
 // Receive is called to process the message
 func (x *topicActor) Receive(ctx *ReceiveContext) {
-	switch ctx.Message().(type) {
+	switch msg := ctx.Message().(type) {
 	case *goaktpb.PostStart:
 		x.handlePostStart(ctx)
 	case *goaktpb.Subscribe:
@@ -97,6 +97,8 @@ func (x *topicActor) Receive(ctx *ReceiveContext) {
 		x.handlePublish(ctx)
 	case *internalpb.Disseminate:
 		x.handleDisseminate(ctx)
+	case *goaktpb.Terminated:
+		x.handleTerminated(msg)
 	default:
 		ctx.Unhandled()
 	}
@@ -240,6 +242,20 @@ func (x *topicActor) sendToRemoteSubscribers(cctx context.Context, remotePeers [
 	}
 }
 
+// handleTerminated handles Terminated message
+// This is called when a subscriber actor is terminated.
+// We remove the subscriber from all topics it is subscribed to.
+// This is important to avoid memory leaks and ensure that we do not send messages to terminated actors.
+func (x *topicActor) handleTerminated(msg *goaktpb.Terminated) {
+	for topic, subscribers := range x.topics.Values() {
+		// remove the subscriber from the topics
+		if subscriber, ok := subscribers.Get(msg.GetActorId()); ok {
+			subscribers.Delete(subscriber.ID())
+			x.logger.Debugf("removed actor %s from topic %s", subscriber.Name(), topic)
+		}
+	}
+}
+
 // handleUnsubscribe handles Unsubscribe message
 func (x *topicActor) handleUnsubscribe(ctx *ReceiveContext) {
 	sender := ctx.Sender()
@@ -260,6 +276,7 @@ func (x *topicActor) handleSubscribe(ctx *ReceiveContext) {
 		// check if the topic exists
 		if subscribers, ok := x.topics.Get(topic); ok && subscribers.Len() != 0 {
 			subscribers.Set(sender.ID(), sender)
+			ctx.Watch(sender)
 			ctx.Tell(sender, &goaktpb.SubscribeAck{Topic: topic})
 			return
 		}
@@ -268,6 +285,7 @@ func (x *topicActor) handleSubscribe(ctx *ReceiveContext) {
 		subscribers := collection.NewMap[string, *PID]()
 		subscribers.Set(sender.ID(), sender)
 		x.topics.Set(topic, subscribers)
+		ctx.Watch(sender)
 		ctx.Tell(sender, &goaktpb.SubscribeAck{Topic: topic})
 	}
 }
