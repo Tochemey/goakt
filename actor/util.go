@@ -113,10 +113,9 @@ func encodeDependencies(dependencies ...extension.Dependency) ([]*internalpb.Dep
 }
 
 func passivationStrategyToProto(strategy passivation.Strategy) *internalpb.PassivationStrategy {
-	var passivationStrategy *internalpb.PassivationStrategy
 	switch s := strategy.(type) {
 	case *passivation.TimeBasedStrategy:
-		passivationStrategy = &internalpb.PassivationStrategy{
+		return &internalpb.PassivationStrategy{
 			Strategy: &internalpb.PassivationStrategy_TimeBased{
 				TimeBased: &internalpb.TimeBasedPassivation{
 					PassivateAfter: durationpb.New(s.Timeout()),
@@ -124,7 +123,7 @@ func passivationStrategyToProto(strategy passivation.Strategy) *internalpb.Passi
 			},
 		}
 	case *passivation.MessagesCountBasedStrategy:
-		passivationStrategy = &internalpb.PassivationStrategy{
+		return &internalpb.PassivationStrategy{
 			Strategy: &internalpb.PassivationStrategy_MessagesCountBased{
 				MessagesCountBased: &internalpb.MessagesCountBasedPassivation{
 					MaxMessages: int64(s.MaxMessages()),
@@ -132,14 +131,14 @@ func passivationStrategyToProto(strategy passivation.Strategy) *internalpb.Passi
 			},
 		}
 	case *passivation.LongLivedStrategy:
-		passivationStrategy = &internalpb.PassivationStrategy{
+		return &internalpb.PassivationStrategy{
 			Strategy: &internalpb.PassivationStrategy_LongLived{
 				LongLived: new(internalpb.LongLivedPassivation),
 			},
 		}
 	default:
+		return nil
 	}
-	return passivationStrategy
 }
 
 func passivationStrategyFromProto(proto *internalpb.PassivationStrategy) passivation.Strategy {

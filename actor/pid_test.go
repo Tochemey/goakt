@@ -113,42 +113,6 @@ func TestReceive(t *testing.T) {
 	})
 }
 func TestPassivation(t *testing.T) {
-	t.Run("With happy path", func(t *testing.T) {
-		ctx := context.TODO()
-		ports := dynaport.Get(1)
-		host := "127.0.0.1"
-
-		actorSystem, err := NewActorSystem("testSys",
-			WithRemote(remote.NewConfig(host, ports[0])),
-			WithLogger(log.DiscardLogger))
-		require.NoError(t, err)
-		require.NotNil(t, actorSystem)
-
-		require.NoError(t, actorSystem.Start(ctx))
-
-		util.Pause(time.Second)
-
-		// create the actor path
-		pid, err := actorSystem.Spawn(ctx, "test", newMockActor(),
-			WithPassivationStrategy(passivation.NewTimeBasedStrategy(passivateAfter)))
-		require.NoError(t, err)
-		assert.NotNil(t, pid)
-
-		// let us sleep for some time to make the actor idle
-		wg := sync.WaitGroup{}
-		wg.Add(1)
-		go func() {
-			util.Pause(receivingDelay)
-			wg.Done()
-		}()
-		// block until timer is up
-		wg.Wait()
-		// let us send a message to the actor
-		err = Tell(ctx, pid, new(testpb.TestSend))
-		assert.Error(t, err)
-		assert.ErrorIs(t, err, ErrDead)
-		assert.NoError(t, actorSystem.Stop(ctx))
-	})
 	t.Run("With actor shutdown failure", func(t *testing.T) {
 		ctx := context.TODO()
 		host := "127.0.0.1"
@@ -243,6 +207,120 @@ func TestPassivation(t *testing.T) {
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, ErrDead)
 
+		assert.NoError(t, actorSystem.Stop(ctx))
+	})
+	t.Run("With Long lived passivation", func(t *testing.T) {
+		ctx := context.TODO()
+		ports := dynaport.Get(1)
+		host := "127.0.0.1"
+
+		actorSystem, err := NewActorSystem("testSys",
+			WithRemote(remote.NewConfig(host, ports[0])),
+			WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+
+		util.Pause(time.Second)
+
+		// create the actor path
+		pid, err := actorSystem.Spawn(ctx, "test1", newMockActor(),
+			WithPassivationStrategy(passivation.NewLongLivedStrategy()))
+		require.NoError(t, err)
+		assert.NotNil(t, pid)
+
+		pid2, err := actorSystem.Spawn(ctx, "test2", newMockActor(),
+			WithPassivationStrategy(passivation.NewTimeBasedStrategy(passivateAfter)))
+		require.NoError(t, err)
+		assert.NotNil(t, pid)
+
+		// let us sleep for some time to make the actor idle
+		wg := sync.WaitGroup{}
+		wg.Add(1)
+		go func() {
+			util.Pause(receivingDelay)
+			wg.Done()
+		}()
+		// block until timer is up
+		wg.Wait()
+
+		require.True(t, pid.IsRunning())
+
+		// let us send a message to the actor
+		err = Tell(ctx, pid2, new(testpb.TestSend))
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, ErrDead)
+		assert.NoError(t, actorSystem.Stop(ctx))
+	})
+	t.Run("With Messges Count-based passivation", func(t *testing.T) {
+		ctx := context.TODO()
+		ports := dynaport.Get(1)
+		host := "127.0.0.1"
+
+		actorSystem, err := NewActorSystem("testSys",
+			WithRemote(remote.NewConfig(host, ports[0])),
+			WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+
+		util.Pause(time.Second)
+
+		// create the actor path
+		pid, err := actorSystem.Spawn(ctx, "test", newMockActor(),
+			WithPassivationStrategy(passivation.NewMessageCountBasedStrategy(2)))
+		require.NoError(t, err)
+		assert.NotNil(t, pid)
+
+		for _ = range 2 {
+			err = Tell(ctx, pid, new(testpb.TestSend))
+			require.NoError(t, err)
+		}
+
+		util.Pause(time.Second)
+
+		// let us send a message to the actor
+		err = Tell(ctx, pid, new(testpb.TestSend))
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, ErrDead)
+		assert.NoError(t, actorSystem.Stop(ctx))
+	})
+	t.Run("With Time-based passivation", func(t *testing.T) {
+		ctx := context.TODO()
+		ports := dynaport.Get(1)
+		host := "127.0.0.1"
+
+		actorSystem, err := NewActorSystem("testSys",
+			WithRemote(remote.NewConfig(host, ports[0])),
+			WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+
+		util.Pause(time.Second)
+
+		// create the actor path
+		pid, err := actorSystem.Spawn(ctx, "test", newMockActor(),
+			WithPassivationStrategy(passivation.NewTimeBasedStrategy(passivateAfter)))
+		require.NoError(t, err)
+		assert.NotNil(t, pid)
+
+		// let us sleep for some time to make the actor idle
+		wg := sync.WaitGroup{}
+		wg.Add(1)
+		go func() {
+			util.Pause(receivingDelay)
+			wg.Done()
+		}()
+		// block until timer is up
+		wg.Wait()
+		// let us send a message to the actor
+		err = Tell(ctx, pid, new(testpb.TestSend))
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, ErrDead)
 		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 }
