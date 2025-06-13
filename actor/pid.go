@@ -182,7 +182,7 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 		startedAt:             atomic.NewInt64(0),
 		dependencies:          collection.NewMap[string, extension.Dependency](),
 		processState:          new(pidState),
-		passivationStrategy:   nil,
+		passivationStrategy:   passivation.NewTimeBasedStrategy(DefaultPassivationTimeout),
 		passivationState:      new(passivationState),
 	}
 

@@ -80,7 +80,7 @@ func (t *TimeBasedStrategy) Timeout() time.Duration {
 
 // String implements Strategy.
 func (t *TimeBasedStrategy) String() string {
-	return "TimeBasedStrategy"
+	return fmt.Sprintf("Timed-Based of %s", t.timeout.String())
 }
 
 // isStrategy is a marker method to satisfy the Strategy interface.
@@ -129,7 +129,7 @@ func (m *MessagesCountBasedStrategy) MaxMessages() int {
 
 // String implements Strategy.
 func (m *MessagesCountBasedStrategy) String() string {
-	return "MessagesCountBasedStrategy"
+	return fmt.Sprintf("Messages Count-Based with maximum of %d", m.maxMessages)
 }
 
 // isStrategy is a marker method to satisfy the Strategy interface.
@@ -157,7 +157,7 @@ func NewLongLivedStrategy() *LongLivedStrategy {
 
 // String implements Strategy.
 func (l *LongLivedStrategy) String() string {
-	return "LongLivedStrategy"
+	return "Long Lived"
 }
 
 func (l *LongLivedStrategy) isStrategy() {}

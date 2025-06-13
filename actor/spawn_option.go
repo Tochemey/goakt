@@ -196,13 +196,11 @@ func WithPassivateAfter(after time.Duration) SpawnOption {
 // for the entire lifespan of the running actor system. Unlike short-lived actors that may be restarted
 // or garbage-collected, a long-lived actor remains active until the actor system itself shuts down.
 //
-// Deprecated: Use WithPassivationStrategy with LongLivedStrategy instead.
-//
 // Returns:
 //   - SpawnOption that disables passivation for the actor.
 func WithLongLived() SpawnOption {
 	return spawnOption(func(config *spawnConfig) {
-		config.passivationStrategy = passivation.NewLongLivedStrategy()
+		config.passivationStrategy = passivation.NewTimeBasedStrategy(longLived)
 	})
 }
 

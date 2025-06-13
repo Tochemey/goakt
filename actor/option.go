@@ -55,21 +55,6 @@ func (f OptionFunc) Apply(c *actorSystem) {
 	f(c)
 }
 
-// WithPassivation is a deprecated no-op that was previously used to configure
-// a global passivation timeout for all actors in the actor system.
-//
-// Actors that remained idle for the specified duration would be passivated
-// (i.e., deactivated to free system resources). Receiving a message would reset
-// the passivation timer.
-//
-// Deprecated: This function no longer has any effect and will be removed in a future release.
-// Use actor-specific passivation strategies via WithPassivationStrategy instead.
-func WithPassivation(duration time.Duration) Option { //nolint
-	return OptionFunc(
-		func(a *actorSystem) {}, // nolint
-	)
-}
-
 // WithLogger sets the actor system custom log
 func WithLogger(logger log.Logger) Option {
 	return OptionFunc(
@@ -85,18 +70,6 @@ func WithActorInitMaxRetries(value int) Option {
 		func(a *actorSystem) {
 			a.actorInitMaxRetries = value
 		},
-	)
-}
-
-// WithPassivationDisabled is a deprecated no-op that was previously used to disable
-// global actor passivation within the actor system.
-//
-// Deprecated: This function no longer has any effect and will be removed in a future release.
-// To disable passivation, use the actor-specific passivation configuration via
-// WithPassivationStrategy when creating or configuring individual actors.
-func WithPassivationDisabled() Option {
-	return OptionFunc(
-		func(a *actorSystem) {}, // nolint
 	)
 }
 
