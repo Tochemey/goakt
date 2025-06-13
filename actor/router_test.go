@@ -47,7 +47,6 @@ func TestRouter(t *testing.T) {
 		logger := log.DiscardLogger
 		system, err := NewActorSystem(
 			"testSystem",
-			WithPassivationDisabled(),
 			WithLogger(logger))
 
 		require.NoError(t, err)
@@ -106,7 +105,6 @@ func TestRouter(t *testing.T) {
 		logger := log.DiscardLogger
 		system, err := NewActorSystem(
 			"testSystem",
-			WithPassivationDisabled(),
 			WithLogger(logger))
 
 		require.NoError(t, err)
@@ -161,7 +159,6 @@ func TestRouter(t *testing.T) {
 		logger := log.DiscardLogger
 		system, err := NewActorSystem(
 			"testSystem",
-			WithPassivationDisabled(),
 			WithLogger(logger))
 
 		require.NoError(t, err)
@@ -211,7 +208,6 @@ func TestRouter(t *testing.T) {
 
 		system, err := NewActorSystem(
 			"testSystem",
-			WithPassivationDisabled(),
 			WithLogger(logger))
 
 		require.NoError(t, err)
@@ -276,7 +272,6 @@ func TestRouter(t *testing.T) {
 		logger := log.DiscardLogger
 		system, err := NewActorSystem(
 			"testSystem",
-			WithPassivationDisabled(),
 			WithLogger(logger))
 
 		require.NoError(t, err)

@@ -3,8 +3,8 @@ syntax = "proto3";
 package internalpb;
 
 import "goakt/goakt.proto";
-import "google/protobuf/duration.proto";
 import "internal/dependency.proto";
+import "internal/passivation.proto";
 
 option go_package = "github.com/tochemey/goakt/v3/internal/internalpb;internalpb";
 
@@ -18,8 +18,8 @@ message Actor {
   bool is_singleton = 3;
   // Specifies if the actor is disabled for relocation
   bool relocatable = 4;
-  // Specifies the passivation time
-  google.protobuf.Duration passivate_after = 5;
+  // Specifies the passivation strategy
+  PassivationStrategy passivation_strategy = 5;
   // Specifies the dependencies
   repeated internalpb.Dependency dependencies = 6;
   //  States whether the actor will require a stash buffer

@@ -51,7 +51,6 @@ func TestAsk(t *testing.T) {
 			sys, err := NewActorSystem(
 				"test",
 				WithLogger(logger),
-				WithPassivationDisabled(),
 			)
 			// assert there are no error
 			require.NoError(t, err)
@@ -93,7 +92,6 @@ func TestAsk(t *testing.T) {
 			sys, err := NewActorSystem(
 				"test",
 				WithLogger(logger),
-				WithPassivationDisabled(),
 			)
 			// assert there are no error
 			require.NoError(t, err)
@@ -138,7 +136,6 @@ func TestAsk(t *testing.T) {
 			sys, err := NewActorSystem(
 				"test",
 				WithLogger(logger),
-				WithPassivationDisabled(),
 			)
 			// assert there are no error
 			require.NoError(t, err)
@@ -179,7 +176,6 @@ func TestAsk(t *testing.T) {
 			sys, err := NewActorSystem(
 				"test",
 				WithLogger(logger),
-				WithPassivationDisabled(),
 			)
 			// assert there are no error
 			require.NoError(t, err)
@@ -223,7 +219,6 @@ func TestAsk(t *testing.T) {
 			sys, err := NewActorSystem(
 				"test",
 				WithLogger(logger),
-				WithPassivationDisabled(),
 			)
 			// assert there are no error
 			require.NoError(t, err)
@@ -269,7 +264,6 @@ func TestAsk(t *testing.T) {
 			sys, err := NewActorSystem(
 				"test",
 				WithLogger(logger),
-				WithPassivationDisabled(),
 			)
 			// assert there are no error
 			require.NoError(t, err)
@@ -313,7 +307,6 @@ func TestAsk(t *testing.T) {
 			sys, err := NewActorSystem(
 				"test",
 				WithLogger(logger),
-				WithPassivationDisabled(),
 			)
 			// assert there are no error
 			require.NoError(t, err)
@@ -358,7 +351,6 @@ func TestTell(t *testing.T) {
 			sys, err := NewActorSystem(
 				"test",
 				WithLogger(logger),
-				WithPassivationDisabled(),
 			)
 			// assert there are no error
 			require.NoError(t, err)
@@ -402,7 +394,6 @@ func TestTell(t *testing.T) {
 			sys, err := NewActorSystem(
 				"test",
 				WithLogger(logger),
-				WithPassivationDisabled(),
 			)
 			// assert there are no error
 			require.NoError(t, err)
@@ -446,7 +437,6 @@ func TestTell(t *testing.T) {
 			sys, err := NewActorSystem(
 				"test",
 				WithLogger(logger),
-				WithPassivationDisabled(),
 			)
 			// assert there are no error
 			require.NoError(t, err)
@@ -486,7 +476,6 @@ func TestTell(t *testing.T) {
 			sys, err := NewActorSystem(
 				"test",
 				WithLogger(logger),
-				WithPassivationDisabled(),
 			)
 			// assert there are no error
 			require.NoError(t, err)
@@ -529,7 +518,6 @@ func TestTell(t *testing.T) {
 			sys, err := NewActorSystem(
 				"test",
 				WithLogger(logger),
-				WithPassivationDisabled(),
 			)
 			// assert there are no error
 			require.NoError(t, err)

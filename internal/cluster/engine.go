@@ -523,13 +523,13 @@ func (x *Engine) PutActor(ctx context.Context, actor *internalpb.Actor) error {
 		actors := x.peerState.GetActors()
 		actorName := actor.GetAddress().GetName()
 		actors[actorName] = &internalpb.Actor{
-			Address:        actor.GetAddress(),
-			Type:           actor.GetType(),
-			IsSingleton:    actor.GetIsSingleton(),
-			Relocatable:    actor.GetRelocatable(),
-			PassivateAfter: actor.PassivateAfter,
-			Dependencies:   actor.GetDependencies(),
-			EnableStash:    actor.GetEnableStash(),
+			Address:             actor.GetAddress(),
+			Type:                actor.GetType(),
+			IsSingleton:         actor.GetIsSingleton(),
+			Relocatable:         actor.GetRelocatable(),
+			PassivationStrategy: actor.GetPassivationStrategy(),
+			Dependencies:        actor.GetDependencies(),
+			EnableStash:         actor.GetEnableStash(),
 		}
 		x.peerState.Actors = actors
 

@@ -55,16 +55,18 @@ func (f OptionFunc) Apply(c *actorSystem) {
 	f(c)
 }
 
-// WithPassivation sets a custom duration after which an idle actor
-// will be passivated. Passivation allows the actor system to free up
-// resources by stopping actors that have been inactive for the specified
-// duration. If the actor receives a message before this timeout,
-// the passivation timer is reset.
-func WithPassivation(duration time.Duration) Option {
+// WithPassivation is a deprecated no-op that was previously used to configure
+// a global passivation timeout for all actors in the actor system.
+//
+// Actors that remained idle for the specified duration would be passivated
+// (i.e., deactivated to free system resources). Receiving a message would reset
+// the passivation timer.
+//
+// Deprecated: This function no longer has any effect and will be removed in a future release.
+// Use actor-specific passivation strategies via WithPassivationStrategy instead.
+func WithPassivation(duration time.Duration) Option { //nolint
 	return OptionFunc(
-		func(a *actorSystem) {
-			a.passivationAfter = duration
-		},
+		func(a *actorSystem) {}, // nolint
 	)
 }
 
@@ -86,12 +88,15 @@ func WithActorInitMaxRetries(value int) Option {
 	)
 }
 
-// WithPassivationDisabled disable the passivation mode
+// WithPassivationDisabled is a deprecated no-op that was previously used to disable
+// global actor passivation within the actor system.
+//
+// Deprecated: This function no longer has any effect and will be removed in a future release.
+// To disable passivation, use the actor-specific passivation configuration via
+// WithPassivationStrategy when creating or configuring individual actors.
 func WithPassivationDisabled() Option {
 	return OptionFunc(
-		func(a *actorSystem) {
-			a.passivationAfter = -1
-		},
+		func(a *actorSystem) {}, // nolint
 	)
 }
 

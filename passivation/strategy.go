@@ -22,17 +22,17 @@
  * SOFTWARE.
  */
 
-package actor
+package passivation
 
 import (
 	"fmt"
 	"time"
 )
 
-// PassivationStrategy defines the contract for passivation strategies in the actor model.
+// Strategy defines the contract for passivation strategies in the actor model.
 // Implementations of this interface determine when an actor should be passivated
 // based on specific conditions or events, such as inactivity or message count.
-type PassivationStrategy interface {
+type Strategy interface {
 	fmt.Stringer
 	isStrategy()
 }
@@ -43,8 +43,8 @@ type TimeBasedStrategy struct {
 	timeout time.Duration
 }
 
-// ensure TimeBasedStrategy implements PassivationStrategy interface
-var _ PassivationStrategy = (*TimeBasedStrategy)(nil)
+// ensure TimeBasedStrategy implements Strategy interface
+var _ Strategy = (*TimeBasedStrategy)(nil)
 
 // NewTimeBasedStrategy creates and returns a new TimeBasedStrategy with the specified timeout duration.
 //
@@ -78,23 +78,23 @@ func (t *TimeBasedStrategy) Timeout() time.Duration {
 	return t.timeout
 }
 
-// String implements PassivationStrategy.
+// String implements Strategy.
 func (t *TimeBasedStrategy) String() string {
 	return "TimeBasedStrategy"
 }
 
-// isStrategy is a marker method to satisfy the PassivationStrategy interface.
+// isStrategy is a marker method to satisfy the Strategy interface.
 //
 // This method is not intended to be called directly. It exists solely to ensure
-// that TimeBasedStrategy implements the PassivationStrategy interface.
+// that TimeBasedStrategy implements the Strategy interface.
 func (t *TimeBasedStrategy) isStrategy() {}
 
 type MessagesCountBasedStrategy struct {
 	maxMessages int
 }
 
-// ensure MessageBasedStrategy implements PassivationStrategy interface
-var _ PassivationStrategy = (*MessagesCountBasedStrategy)(nil)
+// ensure MessageBasedStrategy implements Strategy interface
+var _ Strategy = (*MessagesCountBasedStrategy)(nil)
 
 // NewMessageCountBasedStrategy creates and returns a new MessageBasedStrategy with the specified maximum number of messages.
 //
@@ -127,15 +127,15 @@ func (m *MessagesCountBasedStrategy) MaxMessages() int {
 	return m.maxMessages
 }
 
-// String implements PassivationStrategy.
+// String implements Strategy.
 func (m *MessagesCountBasedStrategy) String() string {
 	return "MessagesCountBasedStrategy"
 }
 
-// isStrategy is a marker method to satisfy the PassivationStrategy interface.
+// isStrategy is a marker method to satisfy the Strategy interface.
 //
 // This method is not intended to be called directly. It exists solely to ensure
-// that MessageBasedStrategy implements the PassivationStrategy interface.
+// that MessageBasedStrategy implements the Strategy interface.
 func (m *MessagesCountBasedStrategy) isStrategy() {}
 
 // LongLivedStrategy is a passivation strategy that does not trigger passivation,
@@ -143,8 +143,8 @@ func (m *MessagesCountBasedStrategy) isStrategy() {}
 // This strategy is useful for actors that are expected to be long-lived and do not require passivation.
 type LongLivedStrategy struct{}
 
-// ensure LongLivedStrategy implements PassivationStrategy interface
-var _ PassivationStrategy = (*LongLivedStrategy)(nil)
+// ensure LongLivedStrategy implements Strategy interface
+var _ Strategy = (*LongLivedStrategy)(nil)
 
 // NewLongLivedStrategy creates and returns a new LongLivedStrategy.
 //
@@ -155,10 +155,10 @@ func NewLongLivedStrategy() *LongLivedStrategy {
 	return &LongLivedStrategy{}
 }
 
-// String implements PassivationStrategy.
+// String implements Strategy.
 func (l *LongLivedStrategy) String() string {
 	return "LongLivedStrategy"
 }
 
-// isStrategy is a marker method to satisfy the PassivationStrategy interface.
+// isStrategy is a marker method to satisfy the Strategy interface.
 func (l *LongLivedStrategy) isStrategy() {}

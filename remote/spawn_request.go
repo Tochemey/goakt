@@ -26,10 +26,10 @@ package remote
 
 import (
 	"strings"
-	"time"
 
 	"github.com/tochemey/goakt/v3/extension"
 	"github.com/tochemey/goakt/v3/internal/validation"
+	"github.com/tochemey/goakt/v3/passivation"
 )
 
 // SpawnRequest defines configuration options for spawning an actor on a remote node.
@@ -56,12 +56,12 @@ type SpawnRequest struct {
 	// which may be necessary for actors with node-specific dependencies or state.
 	Relocatable bool
 
-	// PassivateAfter sets a custom duration after which an idle actor
+	// PassivationStrategy sets the passivation strategy after which an actor
 	// will be passivated. Passivation allows the actor system to free up
 	// resources by stopping actors that have been inactive for the specified
 	// duration. If the actor receives a message before this timeout,
 	// the passivation timer is reset.
-	PassivateAfter time.Duration
+	PassivationStrategy passivation.Strategy
 
 	// Dependencies define the list of dependencies that injects the given dependencies into
 	// the actor during its initialization.

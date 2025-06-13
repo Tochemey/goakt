@@ -90,7 +90,6 @@ func TestSingletonActor(t *testing.T) {
 
 		newActorSystem, err := NewActorSystem(
 			"test",
-			WithPassivationDisabled(),
 			WithLogger(logger),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 		)
@@ -144,7 +143,6 @@ func TestSingletonActor(t *testing.T) {
 
 		newActorSystem, err := NewActorSystem(
 			"test",
-			WithPassivationDisabled(),
 			WithLogger(logger),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 		)

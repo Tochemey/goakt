@@ -55,6 +55,7 @@ import (
 	"github.com/tochemey/goakt/v3/internal/types"
 	"github.com/tochemey/goakt/v3/internal/workerpool"
 	"github.com/tochemey/goakt/v3/log"
+	"github.com/tochemey/goakt/v3/passivation"
 )
 
 // specifies the state in which the PID is
@@ -86,11 +87,6 @@ type PID struct {
 
 	latestReceiveTime     atomic.Time
 	latestReceiveDuration atomic.Duration
-
-	// specifies at what point in time to passivate the actor.
-	// when the actor is passivated it is stopped which means it does not consume
-	// any further resources like memory and cpu. The default value is 120 seconds
-	passivateAfter atomic.Duration
 
 	// specifies the maximum of retries to attempt when the actor
 	// initialization fails. The default value is 5
@@ -148,7 +144,9 @@ type PID struct {
 	// the list of dependencies
 	dependencies *collection.Map[string, extension.Dependency]
 
-	processState *pidState
+	processState        *pidState
+	passivationStrategy passivation.Strategy
+	passivationState    *passivationState
 }
 
 // newPID creates a new pid
@@ -184,12 +182,13 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 		startedAt:             atomic.NewInt64(0),
 		dependencies:          collection.NewMap[string, extension.Dependency](),
 		processState:          new(pidState),
+		passivationStrategy:   nil,
+		passivationState:      new(passivationState),
 	}
 
 	pid.initMaxRetries.Store(DefaultInitMaxRetries)
 	pid.latestReceiveDuration.Store(0)
 	pid.isSingleton.Store(false)
-	pid.passivateAfter.Store(DefaultPassivationTimeout)
 	pid.initTimeout.Store(DefaultInitTimeout)
 	pid.processing.Store(int32(idle))
 	pid.relocatable.Store(true)
@@ -207,7 +206,7 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 	}
 
 	pid.supervisionLoop()
-	if pid.passivateAfter.Load() > 0 {
+	if pid.passivationStrategy != nil {
 		go pid.passivationLoop()
 	}
 
@@ -422,12 +421,12 @@ func (pid *PID) IsRelocatable() bool {
 	return pid.relocatable.Load()
 }
 
-// PassivationTime returns the given actor's passivation time
-func (pid *PID) PassivationTime() time.Duration {
+// PassivationStrategy returns the given actor's passivation strategy.
+func (pid *PID) PassivationStrategy() passivation.Strategy {
 	pid.fieldsLocker.RLock()
-	duration := pid.passivateAfter.Load()
+	strategy := pid.passivationStrategy
 	pid.fieldsLocker.RUnlock()
-	return duration
+	return strategy
 }
 
 // ActorSystem returns the actor system
@@ -546,7 +545,7 @@ func (pid *PID) Restart(ctx context.Context) error {
 	pid.processing.Store(idle)
 	pid.processState.ClearSuspended()
 	pid.supervisionLoop()
-	if pid.passivateAfter.Load() > 0 {
+	if pid.passivationStrategy != nil {
 		go pid.passivationLoop()
 	}
 
@@ -654,22 +653,7 @@ func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor, opts .
 		pidOptions = append(pidOptions, withDependencies(spawnConfig.dependencies...))
 	}
 
-	switch {
-	case spawnConfig.isSystem:
-		pidOptions = append(pidOptions, withPassivationDisabled())
-	default:
-		switch {
-		case spawnConfig.passivateAfter == nil:
-			// use the parent passivation settings
-			pidOptions = append(pidOptions, withPassivationAfter(pid.passivateAfter.Load()))
-		case *spawnConfig.passivateAfter < longLived:
-			// use custom passivation setting
-			pidOptions = append(pidOptions, withPassivationAfter(*spawnConfig.passivateAfter))
-		default:
-			// the only time the actor will stop is when its parent stop
-			pidOptions = append(pidOptions, withPassivationDisabled())
-		}
-	}
+	pidOptions = append(pidOptions, withPassivationStrategy(spawnConfig.passivationStrategy))
 
 	// create the child PID
 	cid, err := newPID(
@@ -1216,7 +1200,7 @@ func (pid *PID) Shutdown(ctx context.Context) error {
 	}
 
 	pid.processState.SetStopping()
-	if pid.passivateAfter.Load() > 0 {
+	if pid.passivationStrategy != nil {
 		pid.logger.Debug("sending a signal to stop passivation listener....")
 		pid.haltPassivationLnr <- types.Unit{}
 	}
@@ -1319,6 +1303,10 @@ func (pid *PID) receiveLoop() {
 				_ = pid.Shutdown(received.Context())
 			case *internalpb.Down:
 				pid.handleFailure(received.Sender(), msg)
+			case *goaktpb.PausePassivation:
+				pid.pausePassivation()
+			case *goaktpb.ResumePassivation:
+				pid.resumePassivation()
 			default:
 				pid.handleReceived(received)
 			}
@@ -1420,7 +1408,6 @@ func (pid *PID) init(ctx context.Context) error {
 // reset re-initializes the actor PID
 func (pid *PID) reset() {
 	pid.latestReceiveTime.Store(time.Time{})
-	pid.passivateAfter.Store(DefaultPassivationTimeout)
 	pid.initMaxRetries.Store(DefaultInitMaxRetries)
 	pid.latestReceiveDuration.Store(0)
 	pid.initTimeout.Store(DefaultInitTimeout)
@@ -1557,22 +1544,47 @@ func (pid *PID) freeChildren(ctx context.Context) error {
 // passivationLoop checks whether the actor is processing public or not.
 // when the actor is idle, it automatically shuts down to free resources
 func (pid *PID) passivationLoop() {
-	pid.logger.Info("start the passivation listener...")
-	pid.logger.Infof("passivation timeout is (%s)", pid.passivateAfter.Load().String())
-	tk := ticker.New(pid.passivateAfter.Load())
-	tk.Start()
+	pid.logger.Info("start the passivation listener for ", pid.Name())
+	pid.logger.Infof("%s passivation strategy %s", pid.Name(), pid.passivationStrategy.String())
+	var clock *ticker.Ticker
+	var exec func()
 	tickerStopSig := make(chan types.Unit, 1)
 
-	// start ticking
+	switch s := pid.passivationStrategy.(type) {
+	case *passivation.TimeBasedStrategy:
+		clock = ticker.New(s.Timeout())
+		exec = func() {
+			elapsed := time.Since(pid.latestReceiveTime.Load())
+			if elapsed >= s.Timeout() {
+				tickerStopSig <- types.Unit{}
+			}
+		}
+	case *passivation.MessagesCountBasedStrategy:
+		clock = ticker.New(100 * time.Millisecond) // TODO: revisit this number
+		exec = func() {
+			currentCount := pid.ProcessedCount() - 1
+			if currentCount >= s.MaxMessages() {
+				tickerStopSig <- types.Unit{}
+			}
+		}
+	case *passivation.LongLivedStrategy:
+		clock = ticker.New(longLived)
+		exec = func() {
+			elapsed := time.Since(pid.latestReceiveTime.Load())
+			if elapsed >= longLived {
+				tickerStopSig <- types.Unit{}
+			}
+		}
+	}
+
+	clock.Start()
+	pid.passivationState.Started()
+
 	go func() {
 		for {
 			select {
-			case <-tk.Ticks:
-				idleTime := time.Since(pid.latestReceiveTime.Load())
-				if idleTime >= pid.passivateAfter.Load() {
-					tickerStopSig <- types.Unit{}
-					return
-				}
+			case <-clock.Ticks:
+				exec()
 			case <-pid.haltPassivationLnr:
 				tickerStopSig <- types.Unit{}
 				return
@@ -1581,10 +1593,18 @@ func (pid *PID) passivationLoop() {
 	}()
 
 	<-tickerStopSig
-	tk.Stop()
+	clock.Stop()
 
-	if pid.processState.IsStopping() || pid.processState.IsSuspended() {
-		pid.logger.Infof("actor=%s is stopping or maybe suspended. No need to passivate", pid.Name())
+	// normal shutdown set the passivation as stopped
+	if pid.processState.IsStopping() {
+		pid.passivationState.Stopped()
+		pid.passivationState.Reset()
+	}
+
+	if pid.processState.IsStopping() ||
+		pid.processState.IsSuspended() ||
+		pid.passivationState.IsPaused() {
+		pid.logger.Infof("No need to passivate actor=%s", pid.Name())
 		return
 	}
 
@@ -1972,8 +1992,8 @@ func (pid *PID) childAddress(name string) *address.Address {
 func (pid *PID) suspend(reason string) {
 	pid.logger.Infof("%s going into suspension mode", pid.Name())
 	pid.processState.SetSuspended()
-	// stop passivation loop
-	pid.haltPassivationLnr <- types.Unit{}
+	// pause passivation loop
+	pid.pausePassivation()
 	// stop the supervisor loop
 	pid.supervisionStopSignal <- types.Unit{}
 	// publish an event to the events stream
@@ -2020,13 +2040,27 @@ func (pid *PID) doReinstate() {
 	// resume the supervisor loop
 	pid.supervisionLoop()
 	// resume passivation loop
-	if pid.passivateAfter.Load() > 0 {
-		go pid.passivationLoop()
-	}
+	pid.resumePassivation()
 
 	// publish an event to the events stream
 	pid.eventsStream.Publish(eventsTopic, &goaktpb.ActorReinstated{
 		Address:      pid.Address().Address,
 		ReinstatedAt: timestamppb.Now(),
 	})
+}
+
+// pausePassivation pauses the passivation loop
+func (pid *PID) pausePassivation() {
+	if pid.passivationState.IsRunning() && pid.passivationStrategy != nil {
+		pid.haltPassivationLnr <- types.Unit{}
+		pid.passivationState.Pause()
+	}
+}
+
+// resumePassivation resumes a paused passivation
+func (pid *PID) resumePassivation() {
+	if pid.passivationState.IsPaused() && pid.passivationStrategy != nil {
+		pid.passivationState.Resume()
+		go pid.passivationLoop()
+	}
 }

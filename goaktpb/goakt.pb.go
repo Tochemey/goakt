@@ -1257,6 +1257,91 @@ func (x *Mayday) GetTimestamp() *timestamppb.Timestamp {
 	return nil
 }
 
+// PausePassivation is a system-level message used to pause the passivation of an actor.
+// One can send this message to an actor to prevent it from being passivated when passivation is enabled.
+// This is useful in scenarios where an actor needs to remain active for a certain period while processing
+// critical messages or performing important tasks. This is a fire-and-forget message, so it does not expect a response.
+// This will no-op if the actor does not have passivation enabled.
+type PausePassivation struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PausePassivation) Reset() {
+	*x = PausePassivation{}
+	mi := &file_goakt_goakt_proto_msgTypes[22]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PausePassivation) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PausePassivation) ProtoMessage() {}
+
+func (x *PausePassivation) ProtoReflect() protoreflect.Message {
+	mi := &file_goakt_goakt_proto_msgTypes[22]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PausePassivation.ProtoReflect.Descriptor instead.
+func (*PausePassivation) Descriptor() ([]byte, []int) {
+	return file_goakt_goakt_proto_rawDescGZIP(), []int{22}
+}
+
+// ResumePassivation is a system-level message used to resume the passivation of an actor.
+// One can send this message to an actor to allow it to be passivated again after it has been paused.
+// This is useful in scenarios where an actor has temporarily paused its passivation
+// to complete critical tasks or handle important messages, and now it can return to its normal
+// passivation behavior. This is a fire-and-forget message, so it does not expect a response.
+//
+// This will no-op if the actor does not have passivation enabled.
+// If the actor is not created with a custom passivation timeout, it will use the default passivation timeout.
+type ResumePassivation struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ResumePassivation) Reset() {
+	*x = ResumePassivation{}
+	mi := &file_goakt_goakt_proto_msgTypes[23]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ResumePassivation) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ResumePassivation) ProtoMessage() {}
+
+func (x *ResumePassivation) ProtoReflect() protoreflect.Message {
+	mi := &file_goakt_goakt_proto_msgTypes[23]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ResumePassivation.ProtoReflect.Descriptor instead.
+func (*ResumePassivation) Descriptor() ([]byte, []int) {
+	return file_goakt_goakt_proto_rawDescGZIP(), []int{23}
+}
+
 var File_goakt_goakt_proto protoreflect.FileDescriptor
 
 const file_goakt_goakt_proto_rawDesc = "" +
@@ -1333,7 +1418,9 @@ const file_goakt_goakt_proto_rawDesc = "" +
 	"\x06Mayday\x12.\n" +
 	"\amessage\x18\x01 \x01(\v2\x14.google.protobuf.AnyR\amessage\x12\x16\n" +
 	"\x06reason\x18\x02 \x01(\tR\x06reason\x128\n" +
-	"\ttimestamp\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\ttimestampB\x85\x01\n" +
+	"\ttimestamp\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\ttimestamp\"\x12\n" +
+	"\x10PausePassivation\"\x13\n" +
+	"\x11ResumePassivationB\x85\x01\n" +
 	"\vcom.goaktpbB\n" +
 	"GoaktProtoH\x02P\x01Z,github.com/tochemey/goakt/v3/goaktpb;goaktpb\xa2\x02\x03GXX\xaa\x02\aGoaktpb\xca\x02\aGoaktpb\xe2\x02\x13Goaktpb\\GPBMetadata\xea\x02\aGoaktpbb\x06proto3"
 
@@ -1349,7 +1436,7 @@ func file_goakt_goakt_proto_rawDescGZIP() []byte {
 	return file_goakt_goakt_proto_rawDescData
 }
 
-var file_goakt_goakt_proto_msgTypes = make([]protoimpl.MessageInfo, 22)
+var file_goakt_goakt_proto_msgTypes = make([]protoimpl.MessageInfo, 24)
 var file_goakt_goakt_proto_goTypes = []any{
 	(*Address)(nil),               // 0: goaktpb.Address
 	(*Deadletter)(nil),            // 1: goaktpb.Deadletter
@@ -1373,36 +1460,38 @@ var file_goakt_goakt_proto_goTypes = []any{
 	(*Publish)(nil),               // 19: goaktpb.Publish
 	(*NoMessage)(nil),             // 20: goaktpb.NoMessage
 	(*Mayday)(nil),                // 21: goaktpb.Mayday
-	(*anypb.Any)(nil),             // 22: google.protobuf.Any
-	(*timestamppb.Timestamp)(nil), // 23: google.protobuf.Timestamp
+	(*PausePassivation)(nil),      // 22: goaktpb.PausePassivation
+	(*ResumePassivation)(nil),     // 23: goaktpb.ResumePassivation
+	(*anypb.Any)(nil),             // 24: google.protobuf.Any
+	(*timestamppb.Timestamp)(nil), // 25: google.protobuf.Timestamp
 }
 var file_goakt_goakt_proto_depIdxs = []int32{
 	0,  // 0: goaktpb.Address.parent:type_name -> goaktpb.Address
 	0,  // 1: goaktpb.Deadletter.sender:type_name -> goaktpb.Address
 	0,  // 2: goaktpb.Deadletter.receiver:type_name -> goaktpb.Address
-	22, // 3: goaktpb.Deadletter.message:type_name -> google.protobuf.Any
-	23, // 4: goaktpb.Deadletter.send_time:type_name -> google.protobuf.Timestamp
+	24, // 3: goaktpb.Deadletter.message:type_name -> google.protobuf.Any
+	25, // 4: goaktpb.Deadletter.send_time:type_name -> google.protobuf.Timestamp
 	0,  // 5: goaktpb.ActorStarted.address:type_name -> goaktpb.Address
-	23, // 6: goaktpb.ActorStarted.started_at:type_name -> google.protobuf.Timestamp
+	25, // 6: goaktpb.ActorStarted.started_at:type_name -> google.protobuf.Timestamp
 	0,  // 7: goaktpb.ActorStopped.address:type_name -> goaktpb.Address
-	23, // 8: goaktpb.ActorStopped.stopped_at:type_name -> google.protobuf.Timestamp
+	25, // 8: goaktpb.ActorStopped.stopped_at:type_name -> google.protobuf.Timestamp
 	0,  // 9: goaktpb.ActorPassivated.address:type_name -> goaktpb.Address
-	23, // 10: goaktpb.ActorPassivated.passivated_at:type_name -> google.protobuf.Timestamp
+	25, // 10: goaktpb.ActorPassivated.passivated_at:type_name -> google.protobuf.Timestamp
 	0,  // 11: goaktpb.ActorChildCreated.address:type_name -> goaktpb.Address
 	0,  // 12: goaktpb.ActorChildCreated.parent:type_name -> goaktpb.Address
-	23, // 13: goaktpb.ActorChildCreated.created_at:type_name -> google.protobuf.Timestamp
+	25, // 13: goaktpb.ActorChildCreated.created_at:type_name -> google.protobuf.Timestamp
 	0,  // 14: goaktpb.ActorRestarted.address:type_name -> goaktpb.Address
-	23, // 15: goaktpb.ActorRestarted.restarted_at:type_name -> google.protobuf.Timestamp
+	25, // 15: goaktpb.ActorRestarted.restarted_at:type_name -> google.protobuf.Timestamp
 	0,  // 16: goaktpb.ActorSuspended.address:type_name -> goaktpb.Address
-	23, // 17: goaktpb.ActorSuspended.suspended_at:type_name -> google.protobuf.Timestamp
+	25, // 17: goaktpb.ActorSuspended.suspended_at:type_name -> google.protobuf.Timestamp
 	0,  // 18: goaktpb.ActorReinstated.address:type_name -> goaktpb.Address
-	23, // 19: goaktpb.ActorReinstated.reinstated_at:type_name -> google.protobuf.Timestamp
-	23, // 20: goaktpb.NodeJoined.timestamp:type_name -> google.protobuf.Timestamp
-	23, // 21: goaktpb.NodeLeft.timestamp:type_name -> google.protobuf.Timestamp
-	22, // 22: goaktpb.Broadcast.message:type_name -> google.protobuf.Any
-	22, // 23: goaktpb.Publish.message:type_name -> google.protobuf.Any
-	22, // 24: goaktpb.Mayday.message:type_name -> google.protobuf.Any
-	23, // 25: goaktpb.Mayday.timestamp:type_name -> google.protobuf.Timestamp
+	25, // 19: goaktpb.ActorReinstated.reinstated_at:type_name -> google.protobuf.Timestamp
+	25, // 20: goaktpb.NodeJoined.timestamp:type_name -> google.protobuf.Timestamp
+	25, // 21: goaktpb.NodeLeft.timestamp:type_name -> google.protobuf.Timestamp
+	24, // 22: goaktpb.Broadcast.message:type_name -> google.protobuf.Any
+	24, // 23: goaktpb.Publish.message:type_name -> google.protobuf.Any
+	24, // 24: goaktpb.Mayday.message:type_name -> google.protobuf.Any
+	25, // 25: goaktpb.Mayday.timestamp:type_name -> google.protobuf.Timestamp
 	26, // [26:26] is the sub-list for method output_type
 	26, // [26:26] is the sub-list for method input_type
 	26, // [26:26] is the sub-list for extension type_name
@@ -1421,7 +1510,7 @@ func file_goakt_goakt_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_goakt_goakt_proto_rawDesc), len(file_goakt_goakt_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   22,
+			NumMessages:   24,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

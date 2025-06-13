@@ -36,6 +36,7 @@ import (
 	"github.com/tochemey/goakt/v3/internal/eventstream"
 	"github.com/tochemey/goakt/v3/internal/workerpool"
 	"github.com/tochemey/goakt/v3/log"
+	"github.com/tochemey/goakt/v3/passivation"
 )
 
 func TestPIDOptions(t *testing.T) {
@@ -57,6 +58,7 @@ func TestPIDOptions(t *testing.T) {
 	atomicTrue.Store(true)
 	atomicFalse.Store(false)
 	workerPool := workerpool.New()
+	strategy := passivation.NewLongLivedStrategy()
 
 	testCases := []struct {
 		name     string
@@ -64,9 +66,9 @@ func TestPIDOptions(t *testing.T) {
 		expected *PID
 	}{
 		{
-			name:     "WithPassivationAfter",
-			option:   withPassivationAfter(time.Second),
-			expected: &PID{passivateAfter: atomicDuration},
+			name:     "WithPassivationStrategy",
+			option:   withPassivationStrategy(strategy),
+			expected: &PID{passivationStrategy: strategy},
 		},
 		{
 			name:     "WithInitMaxRetries",
@@ -82,11 +84,6 @@ func TestPIDOptions(t *testing.T) {
 			name:     "WithSupervisor",
 			option:   withSupervisor(supervisor),
 			expected: &PID{supervisor: supervisor},
-		},
-		{
-			name:     "WithPassivationDisabled",
-			option:   withPassivationDisabled(),
-			expected: &PID{passivateAfter: negativeDuration},
 		},
 		{
 			name:     "withEventsStream",

@@ -32,17 +32,11 @@ import (
 	"github.com/tochemey/goakt/v3/internal/eventstream"
 	"github.com/tochemey/goakt/v3/internal/workerpool"
 	"github.com/tochemey/goakt/v3/log"
+	"github.com/tochemey/goakt/v3/passivation"
 )
 
 // pidOption represents the pid
 type pidOption func(pid *PID)
-
-// withPassivationAfter sets the actor passivation time
-func withPassivationAfter(duration time.Duration) pidOption {
-	return func(pid *PID) {
-		pid.passivateAfter.Store(duration)
-	}
-}
 
 // withInitMaxRetries sets the number of times to retry an actor init process
 func withInitMaxRetries(value int) pidOption {
@@ -76,13 +70,6 @@ func withWorkerPool(pool *workerpool.WorkerPool) pidOption {
 func withSupervisor(supervisor *Supervisor) pidOption {
 	return func(pid *PID) {
 		pid.supervisor = supervisor
-	}
-}
-
-// withNoPassivation disable passivation
-func withPassivationDisabled() pidOption {
-	return func(pid *PID) {
-		pid.passivateAfter.Store(-1)
 	}
 }
 
@@ -145,5 +132,12 @@ func withDependencies(dependencies ...extension.Dependency) pidOption {
 		for _, dependency := range dependencies {
 			pid.dependencies.Set(dependency.ID(), dependency)
 		}
+	}
+}
+
+// withPassivationStrategy sets the PID passivation strategy
+func withPassivationStrategy(strategy passivation.Strategy) pidOption {
+	return func(pid *PID) {
+		pid.passivationStrategy = strategy
 	}
 }
