@@ -1,0 +1,51 @@
+syntax = "proto3";
+
+package internalpb;
+
+import "google/protobuf/duration.proto";
+
+option go_package = "github.com/tochemey/goakt/v3/internal/internalpb;internalpb";
+
+// TimeBasedPassivation defines a strategy where an actor is passivated
+// after a specified period of inactivity.
+//
+// passivate_after:
+//   The duration after which an idle actor should be stopped.
+//   This helps free up system resources by removing actors that haven't
+//   received messages for a defined time window.
+message TimeBasedPassivation {
+  google.protobuf.Duration passivate_after = 1;
+}
+
+// MessagesCountBasedPassivation defines a strategy where an actor is passivated
+// after processing a certain number of messages, regardless of time.
+//
+// max_messages:
+//   The maximum number of messages an actor is allowed to process
+//   before it is considered for passivation. This can be useful in cases
+//   where actors have expensive memory or lifecycle costs.
+message MessagesCountBasedPassivation {
+  int64 max_messages = 1;
+}
+
+// LongLivedPassivation represents a strategy where the actor is long-lived
+// and should never be passivated automatically.
+//
+// This is suitable for actors that are critical system components or
+// serve high-throughput workloads with consistent usage patterns.
+message LongLivedPassivation {}
+
+// PassivationStrategy encapsulates all supported passivation strategies
+// for actors. Exactly one of the strategies should be specified.
+//
+// strategy:
+//   - time_based: Uses time-based idle detection to trigger passivation.
+//   - messages_count_based: Uses message count threshold to trigger passivation.
+//   - long_lived: Disables automatic passivation entirely.
+message PassivationStrategy {
+  oneof strategy {
+    TimeBasedPassivation time_based = 1;
+    MessagesCountBasedPassivation messages_count_based = 2;
+    LongLivedPassivation long_lived = 3;
+  }
+}

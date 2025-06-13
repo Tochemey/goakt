@@ -594,8 +594,8 @@ type RemoteSpawnRequest struct {
 	IsSingleton bool `protobuf:"varint,5,opt,name=is_singleton,json=isSingleton,proto3" json:"is_singleton,omitempty"`
 	// Specifies if the actor is relocatable
 	Relocatable bool `protobuf:"varint,6,opt,name=relocatable,proto3" json:"relocatable,omitempty"`
-	// Specifies the passivation time
-	PassivateAfter *durationpb.Duration `protobuf:"bytes,7,opt,name=passivate_after,json=passivateAfter,proto3" json:"passivate_after,omitempty"`
+	// Specifies the passivation strategy
+	PassivationStrategy *PassivationStrategy `protobuf:"bytes,7,opt,name=passivation_strategy,json=passivationStrategy,proto3" json:"passivation_strategy,omitempty"`
 	// Specifies the dependencies
 	Dependencies []*Dependency `protobuf:"bytes,8,rep,name=dependencies,proto3" json:"dependencies,omitempty"`
 	// States whether the actor will require a stash buffer
@@ -676,9 +676,9 @@ func (x *RemoteSpawnRequest) GetRelocatable() bool {
 	return false
 }
 
-func (x *RemoteSpawnRequest) GetPassivateAfter() *durationpb.Duration {
+func (x *RemoteSpawnRequest) GetPassivationStrategy() *PassivationStrategy {
 	if x != nil {
-		return x.PassivateAfter
+		return x.PassivationStrategy
 	}
 	return nil
 }
@@ -837,7 +837,7 @@ var File_internal_remoting_proto protoreflect.FileDescriptor
 const file_internal_remoting_proto_rawDesc = "" +
 	"\n" +
 	"\x17internal/remoting.proto\x12\n" +
-	"internalpb\x1a\x11goakt/goakt.proto\x1a\x19google/protobuf/any.proto\x1a\x1egoogle/protobuf/duration.proto\x1a\x19internal/dependency.proto\"\x8b\x01\n" +
+	"internalpb\x1a\x11goakt/goakt.proto\x1a\x19google/protobuf/any.proto\x1a\x1egoogle/protobuf/duration.proto\x1a\x19internal/dependency.proto\x1a\x1ainternal/passivation.proto\"\x8b\x01\n" +
 	"\x10RemoteAskRequest\x12B\n" +
 	"\x0fremote_messages\x18\x01 \x03(\v2\x19.internalpb.RemoteMessageR\x0eremoteMessages\x123\n" +
 	"\atimeout\x18\x02 \x01(\v2\x19.google.protobuf.DurationR\atimeout\"E\n" +
@@ -865,7 +865,7 @@ const file_internal_remoting_proto_rawDesc = "" +
 	"\x04host\x18\x01 \x01(\tR\x04host\x12\x12\n" +
 	"\x04port\x18\x02 \x01(\x05R\x04port\x12\x12\n" +
 	"\x04name\x18\x03 \x01(\tR\x04name\"\x14\n" +
-	"\x12RemoteStopResponse\"\xe2\x02\n" +
+	"\x12RemoteStopResponse\"\xf2\x02\n" +
 	"\x12RemoteSpawnRequest\x12\x12\n" +
 	"\x04host\x18\x01 \x01(\tR\x04host\x12\x12\n" +
 	"\x04port\x18\x02 \x01(\x05R\x04port\x12\x1d\n" +
@@ -874,8 +874,8 @@ const file_internal_remoting_proto_rawDesc = "" +
 	"\n" +
 	"actor_type\x18\x04 \x01(\tR\tactorType\x12!\n" +
 	"\fis_singleton\x18\x05 \x01(\bR\visSingleton\x12 \n" +
-	"\vrelocatable\x18\x06 \x01(\bR\vrelocatable\x12B\n" +
-	"\x0fpassivate_after\x18\a \x01(\v2\x19.google.protobuf.DurationR\x0epassivateAfter\x12:\n" +
+	"\vrelocatable\x18\x06 \x01(\bR\vrelocatable\x12R\n" +
+	"\x14passivation_strategy\x18\a \x01(\v2\x1f.internalpb.PassivationStrategyR\x13passivationStrategy\x12:\n" +
 	"\fdependencies\x18\b \x03(\v2\x16.internalpb.DependencyR\fdependencies\x12!\n" +
 	"\fenable_stash\x18\t \x01(\bR\venableStash\"\x15\n" +
 	"\x13RemoteSpawnResponse\"T\n" +
@@ -931,7 +931,8 @@ var file_internal_remoting_proto_goTypes = []any{
 	(*durationpb.Duration)(nil),     // 15: google.protobuf.Duration
 	(*anypb.Any)(nil),               // 16: google.protobuf.Any
 	(*goaktpb.Address)(nil),         // 17: goaktpb.Address
-	(*Dependency)(nil),              // 18: internalpb.Dependency
+	(*PassivationStrategy)(nil),     // 18: internalpb.PassivationStrategy
+	(*Dependency)(nil),              // 19: internalpb.Dependency
 }
 var file_internal_remoting_proto_depIdxs = []int32{
 	6,  // 0: internalpb.RemoteAskRequest.remote_messages:type_name -> internalpb.RemoteMessage
@@ -942,8 +943,8 @@ var file_internal_remoting_proto_depIdxs = []int32{
 	17, // 5: internalpb.RemoteMessage.sender:type_name -> goaktpb.Address
 	17, // 6: internalpb.RemoteMessage.receiver:type_name -> goaktpb.Address
 	16, // 7: internalpb.RemoteMessage.message:type_name -> google.protobuf.Any
-	15, // 8: internalpb.RemoteSpawnRequest.passivate_after:type_name -> google.protobuf.Duration
-	18, // 9: internalpb.RemoteSpawnRequest.dependencies:type_name -> internalpb.Dependency
+	18, // 8: internalpb.RemoteSpawnRequest.passivation_strategy:type_name -> internalpb.PassivationStrategy
+	19, // 9: internalpb.RemoteSpawnRequest.dependencies:type_name -> internalpb.Dependency
 	0,  // 10: internalpb.RemotingService.RemoteAsk:input_type -> internalpb.RemoteAskRequest
 	2,  // 11: internalpb.RemotingService.RemoteTell:input_type -> internalpb.RemoteTellRequest
 	4,  // 12: internalpb.RemotingService.RemoteLookup:input_type -> internalpb.RemoteLookupRequest
@@ -971,6 +972,7 @@ func file_internal_remoting_proto_init() {
 		return
 	}
 	file_internal_dependency_proto_init()
+	file_internal_passivation_proto_init()
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

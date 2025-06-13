@@ -64,7 +64,6 @@ func main() {
 	// create the actor system. kindly in real-life application handle the error
 	actorSystem, _ := goakt.NewActorSystem(
 		"RemotingBenchmark",
-		goakt.WithPassivationDisabled(),
 		goakt.WithLogger(logger),
 		goakt.WithRemote(remote.NewConfig(host, port,
 			remote.WithMaxFrameSize(uint32(messageSize)),

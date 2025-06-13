@@ -284,7 +284,6 @@ func TestReceiveContext(t *testing.T) {
 		sys, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 		)
 		// assert there are no error
@@ -345,7 +344,6 @@ func TestReceiveContext(t *testing.T) {
 		sys, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 		)
 		// assert there are no error
@@ -405,7 +403,6 @@ func TestReceiveContext(t *testing.T) {
 		sys, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 		)
 		// assert there are no error
@@ -425,7 +422,6 @@ func TestReceiveContext(t *testing.T) {
 		// create actor1
 		actor1 := &exchanger{}
 		sys2, err := NewActorSystem("sys", WithLogger(logger),
-			WithPassivationDisabled(),
 			WithRemote(remote.NewConfig(host, nodePorts[1])))
 
 		require.NoError(t, err)
@@ -474,7 +470,6 @@ func TestReceiveContext(t *testing.T) {
 		sys, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 		)
 		// assert there are no error
@@ -542,7 +537,6 @@ func TestReceiveContext(t *testing.T) {
 		sys, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 		)
 		// assert there are no error
@@ -602,7 +596,6 @@ func TestReceiveContext(t *testing.T) {
 		sys, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 		)
 		// assert there are no error
 		require.NoError(t, err)
@@ -1623,7 +1616,6 @@ func TestReceiveContext(t *testing.T) {
 		sys, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 		)
 		// assert there are no error
@@ -1680,7 +1672,6 @@ func TestReceiveContext(t *testing.T) {
 		sys, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 		)
 		// assert there are no error
@@ -1734,7 +1725,6 @@ func TestReceiveContext(t *testing.T) {
 		sys, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 		)
 		// assert there are no error
@@ -1790,7 +1780,6 @@ func TestReceiveContext(t *testing.T) {
 		sys, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 		)
 		// assert there are no error
@@ -1851,7 +1840,6 @@ func TestReceiveContext(t *testing.T) {
 		sys, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 		)
 		// assert there are no error
@@ -1910,7 +1898,6 @@ func TestReceiveContext(t *testing.T) {
 		sys, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 		)
 		// assert there are no error
@@ -1969,7 +1956,6 @@ func TestReceiveContext(t *testing.T) {
 		sys, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 		)
 		// assert there are no error
@@ -2023,7 +2009,6 @@ func TestReceiveContext(t *testing.T) {
 		sys, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 		)
 		// assert there are no error
 		require.NoError(t, err)

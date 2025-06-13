@@ -52,7 +52,6 @@ import (
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
-	"google.golang.org/protobuf/types/known/durationpb"
 
 	"github.com/tochemey/goakt/v3/address"
 	"github.com/tochemey/goakt/v3/discovery"
@@ -510,10 +509,7 @@ type actorSystem struct {
 	name string
 	// Specifies the logger to use in the system
 	logger log.Logger
-	// Specifies at what point in time to passivate the actor.
-	// when the actor is passivated it is stopped which means it does not consume
-	// any further resources like memory and cpu. The default value is 5s
-	passivationAfter time.Duration
+
 	// Specifies how long the sender of a message should wait to receive a reply
 	// when using SendReply. The default value is 5s
 	askTimeout time.Duration
@@ -613,7 +609,6 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		wireActorsQueue:        make(chan *internalpb.Actor, 10),
 		name:                   name,
 		logger:                 log.New(log.ErrorLevel, os.Stderr),
-		passivationAfter:       DefaultPassivationTimeout,
 		actorInitMaxRetries:    DefaultInitMaxRetries,
 		locker:                 sync.Mutex{},
 		shutdownTimeout:        DefaultShutdownTimeout,
@@ -1272,20 +1267,14 @@ func (x *actorSystem) SpawnOn(ctx context.Context, name string, actor Actor, opt
 		return err
 	}
 
-	// set the passivation time
-	passivateAfter := x.passivationAfter
-	if config.passivateAfter != nil {
-		passivateAfter = *config.passivateAfter
-	}
-
 	return x.remoting.RemoteSpawn(ctx, peer.Host, peer.RemotingPort, &remote.SpawnRequest{
-		Name:           name,
-		Kind:           types.Name(actor),
-		Singleton:      false,
-		Relocatable:    config.relocatable,
-		PassivateAfter: passivateAfter,
-		Dependencies:   config.dependencies,
-		EnableStashing: config.enableStash,
+		Name:                name,
+		Kind:                types.Name(actor),
+		Singleton:           false,
+		Relocatable:         config.relocatable,
+		PassivationStrategy: config.passivationStrategy,
+		Dependencies:        config.dependencies,
+		EnableStashing:      config.enableStash,
 	})
 }
 
@@ -1841,7 +1830,7 @@ func (x *actorSystem) RemoteSpawn(ctx context.Context, request *connect.Request[
 	}
 
 	opts := []SpawnOption{
-		WithPassivateAfter(msg.GetPassivateAfter().AsDuration()),
+		WithPassivationStrategy(passivationStrategyFromProto(msg.GetPassivationStrategy())),
 	}
 
 	if !msg.GetRelocatable() {
@@ -2154,13 +2143,13 @@ func (x *actorSystem) broadcastActor(pid *PID) error {
 		}
 
 		x.wireActorsQueue <- &internalpb.Actor{
-			Address:        pid.Address().Address,
-			Type:           types.Name(pid.Actor()),
-			IsSingleton:    pid.IsSingleton(),
-			Relocatable:    pid.IsRelocatable(),
-			PassivateAfter: durationpb.New(pid.PassivationTime()),
-			Dependencies:   dependencies,
-			EnableStash:    pid.stashBox != nil,
+			Address:             pid.Address().Address,
+			Type:                types.Name(pid.Actor()),
+			IsSingleton:         pid.IsSingleton(),
+			Relocatable:         pid.IsRelocatable(),
+			PassivationStrategy: passivationStrategyToProto(pid.PassivationStrategy()),
+			Dependencies:        dependencies,
+			EnableStash:         pid.stashBox != nil,
 		}
 	}
 	return nil
@@ -2674,17 +2663,7 @@ func (x *actorSystem) configPID(ctx context.Context, name string, actor Actor, o
 		pidOpts = append(pidOpts, withDependencies(spawnConfig.dependencies...))
 	}
 
-	switch {
-	case spawnConfig.isSystem:
-		pidOpts = append(pidOpts, withPassivationDisabled())
-	default:
-		switch {
-		case spawnConfig.passivateAfter != nil:
-			pidOpts = append(pidOpts, withPassivationAfter(*spawnConfig.passivateAfter))
-		default:
-			pidOpts = append(pidOpts, withPassivationAfter(x.passivationAfter))
-		}
-	}
+	pidOpts = append(pidOpts, withPassivationStrategy(spawnConfig.passivationStrategy))
 
 	pid, err := newPID(
 		ctx,

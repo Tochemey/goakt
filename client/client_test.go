@@ -1112,7 +1112,6 @@ func startNode(t *testing.T, logger log.Logger, nodeName, serverAddr string) (sy
 	// create the actor system
 	system, err := actors.NewActorSystem(
 		actorSystemName,
-		actors.WithPassivationDisabled(),
 		actors.WithLogger(logger),
 		actors.WithRemote(remote.NewConfig(host, remotePort)),
 		actors.WithPeerStateLoopInterval(100*time.Millisecond),

@@ -62,7 +62,6 @@ func TestRemoteTell(t *testing.T) {
 		sys, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 		)
 		// assert there are no error
@@ -116,7 +115,6 @@ func TestRemoteTell(t *testing.T) {
 		sys, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 		)
 		// assert there are no error
@@ -165,7 +163,6 @@ func TestRemoteTell(t *testing.T) {
 		sys, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 		)
 		// assert there are no error
@@ -222,7 +219,6 @@ func TestRemoteTell(t *testing.T) {
 		sys, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 		)
 		// assert there are no error
@@ -278,7 +274,6 @@ func TestRemoteTell(t *testing.T) {
 		sys, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 		)
 		// assert there are no error
@@ -338,7 +333,6 @@ func TestRemoteTell(t *testing.T) {
 		sys, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 		)
 		// assert there are no error
@@ -395,7 +389,6 @@ func TestRemoteTell(t *testing.T) {
 		sys, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 		)
 		// assert there are no error
@@ -450,7 +443,6 @@ func TestRemoteTell(t *testing.T) {
 		sys, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 		)
 		// assert there are no error
@@ -508,7 +500,6 @@ func TestRemoteTell(t *testing.T) {
 		sys, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 		)
 		// assert there are no error
@@ -576,7 +567,6 @@ func TestRemoteTell(t *testing.T) {
 		sys, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 			WithRemote(remoteConfig),
 			WithTLS(&TLSInfo{
 				ClientTLS: conf.ClientTLS,
@@ -637,7 +627,6 @@ func TestRemoteAsk(t *testing.T) {
 		sys, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 		)
 		// assert there are no error
@@ -699,7 +688,6 @@ func TestRemoteAsk(t *testing.T) {
 		sys, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 		)
 		// assert there are no error
@@ -750,7 +738,6 @@ func TestRemoteAsk(t *testing.T) {
 		sys, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 		)
 		// assert there are no error
@@ -810,7 +797,6 @@ func TestRemoteAsk(t *testing.T) {
 		sys, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 		)
 		// assert there are no error
@@ -867,7 +853,6 @@ func TestRemoteAsk(t *testing.T) {
 		sys, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 		)
 		// assert there are no error
@@ -930,7 +915,6 @@ func TestRemoteAsk(t *testing.T) {
 		sys, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 		)
 		// assert there are no error
@@ -990,7 +974,6 @@ func TestRemoteAsk(t *testing.T) {
 		sys, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 		)
 		// assert there are no error
@@ -1050,7 +1033,6 @@ func TestRemoteAsk(t *testing.T) {
 		sys, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 		)
 		// assert there are no error
@@ -1109,7 +1091,6 @@ func TestRemoteAsk(t *testing.T) {
 		sys, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 		)
 		// assert there are no error
@@ -1182,7 +1163,6 @@ func TestRemoteAsk(t *testing.T) {
 				ServerTLS: serverConfig,
 			}),
 			WithLogger(logger),
-			WithPassivationDisabled(),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 		)
 		// assert there are no error
@@ -1247,7 +1227,6 @@ func TestRemotingLookup(t *testing.T) {
 		sys, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 		)
 		// assert there are no error
@@ -1299,7 +1278,6 @@ func TestRemotingLookup(t *testing.T) {
 		sys, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 			WithTLS(&TLSInfo{
 				ClientTLS: conf.ClientTLS,
@@ -1349,7 +1327,6 @@ func TestRemotingReSpawn(t *testing.T) {
 		sys, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 		)
 		// assert there are no error
@@ -1392,7 +1369,6 @@ func TestRemotingReSpawn(t *testing.T) {
 		sys, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 		)
 		// assert there are no error
@@ -1451,7 +1427,6 @@ func TestRemotingReSpawn(t *testing.T) {
 		sys, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 			WithTLS(&TLSInfo{
 				ClientTLS: conf.ClientTLS,
@@ -1498,7 +1473,6 @@ func TestRemotingReSpawn(t *testing.T) {
 		sys, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 		)
 		// assert there are no error
@@ -1538,7 +1512,6 @@ func TestRemotingStop(t *testing.T) {
 		sys, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 		)
 		// assert there are no error
@@ -1582,7 +1555,6 @@ func TestRemotingStop(t *testing.T) {
 		sys, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 		)
 		// assert there are no error
@@ -1646,7 +1618,6 @@ func TestRemotingStop(t *testing.T) {
 		sys, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 			WithTLS(&TLSInfo{
 				ClientTLS: conf.ClientTLS,
@@ -1694,7 +1665,6 @@ func TestRemotingStop(t *testing.T) {
 		sys, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 		)
 		// assert there are no error
@@ -1736,7 +1706,6 @@ func TestRemotingSpawn(t *testing.T) {
 		sys, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 		)
 		// assert there are no error
@@ -1819,7 +1788,6 @@ func TestRemotingSpawn(t *testing.T) {
 		sys, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 		)
 		// assert there are no error
@@ -1878,7 +1846,6 @@ func TestRemotingSpawn(t *testing.T) {
 		sys, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 		)
 		// assert there are no error
@@ -1941,7 +1908,6 @@ func TestRemotingSpawn(t *testing.T) {
 		sys, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 		)
 		// assert there are no error
@@ -1992,7 +1958,6 @@ func TestRemotingSpawn(t *testing.T) {
 		sys, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 		)
 		// assert there are no error
 		require.NoError(t, err)
@@ -2045,7 +2010,6 @@ func TestRemotingSpawn(t *testing.T) {
 		sys, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 			WithTLS(&TLSInfo{
 				ClientTLS: conf.ClientTLS,
@@ -2125,7 +2089,6 @@ func TestRemotingSpawn(t *testing.T) {
 		sys, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 		)
 		// assert there are no error
@@ -2177,7 +2140,6 @@ func TestRemotingSpawn(t *testing.T) {
 		sys, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 		)
 		// assert there are no error
@@ -2228,7 +2190,6 @@ func TestRemotingReinstate(t *testing.T) {
 		sys, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 		)
 		// assert there are no error
@@ -2268,7 +2229,6 @@ func TestRemotingReinstate(t *testing.T) {
 		sys, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 		)
 		// assert there are no error
@@ -2323,7 +2283,6 @@ func TestRemotingReinstate(t *testing.T) {
 		sys, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 		)
 		// assert there are no error

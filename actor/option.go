@@ -55,19 +55,6 @@ func (f OptionFunc) Apply(c *actorSystem) {
 	f(c)
 }
 
-// WithPassivation sets a custom duration after which an idle actor
-// will be passivated. Passivation allows the actor system to free up
-// resources by stopping actors that have been inactive for the specified
-// duration. If the actor receives a message before this timeout,
-// the passivation timer is reset.
-func WithPassivation(duration time.Duration) Option {
-	return OptionFunc(
-		func(a *actorSystem) {
-			a.passivationAfter = duration
-		},
-	)
-}
-
 // WithLogger sets the actor system custom log
 func WithLogger(logger log.Logger) Option {
 	return OptionFunc(
@@ -82,15 +69,6 @@ func WithActorInitMaxRetries(value int) Option {
 	return OptionFunc(
 		func(a *actorSystem) {
 			a.actorInitMaxRetries = value
-		},
-	)
-}
-
-// WithPassivationDisabled disable the passivation mode
-func WithPassivationDisabled() Option {
-	return OptionFunc(
-		func(a *actorSystem) {
-			a.passivationAfter = -1
 		},
 	)
 }

@@ -228,7 +228,6 @@ func (m *MultiNodes) StartNode(ctx context.Context, name string) *TestNode {
 	provider := nats.NewDiscovery(&config, nats.WithLogger(m.logger))
 
 	options := []actor.Option{
-		actor.WithPassivationDisabled(),
 		actor.WithLogger(m.logger),
 		actor.WithRemote(remote.NewConfig(m.host, remotingPort)),
 		actor.WithPeerStateLoopInterval(500 * time.Millisecond),

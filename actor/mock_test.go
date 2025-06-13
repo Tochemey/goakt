@@ -530,7 +530,6 @@ func testCluster(t *testing.T, serverAddr string, opts ...testClusterOption) (Ac
 
 	// create the actor system options
 	options := []Option{
-		WithPassivationDisabled(),
 		WithLogger(logger),
 		WithRemote(remote.NewConfig(host, remotingPort)),
 		WithPeerStateLoopInterval(500 * time.Millisecond),

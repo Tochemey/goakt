@@ -10,7 +10,6 @@ import (
 	goaktpb "github.com/tochemey/goakt/v3/goaktpb"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
-	durationpb "google.golang.org/protobuf/types/known/durationpb"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
@@ -34,8 +33,8 @@ type Actor struct {
 	IsSingleton bool `protobuf:"varint,3,opt,name=is_singleton,json=isSingleton,proto3" json:"is_singleton,omitempty"`
 	// Specifies if the actor is disabled for relocation
 	Relocatable bool `protobuf:"varint,4,opt,name=relocatable,proto3" json:"relocatable,omitempty"`
-	// Specifies the passivation time
-	PassivateAfter *durationpb.Duration `protobuf:"bytes,5,opt,name=passivate_after,json=passivateAfter,proto3" json:"passivate_after,omitempty"`
+	// Specifies the passivation strategy
+	PassivationStrategy *PassivationStrategy `protobuf:"bytes,5,opt,name=passivation_strategy,json=passivationStrategy,proto3" json:"passivation_strategy,omitempty"`
 	// Specifies the dependencies
 	Dependencies []*Dependency `protobuf:"bytes,6,rep,name=dependencies,proto3" json:"dependencies,omitempty"`
 	// States whether the actor will require a stash buffer
@@ -102,9 +101,9 @@ func (x *Actor) GetRelocatable() bool {
 	return false
 }
 
-func (x *Actor) GetPassivateAfter() *durationpb.Duration {
+func (x *Actor) GetPassivationStrategy() *PassivationStrategy {
 	if x != nil {
-		return x.PassivateAfter
+		return x.PassivationStrategy
 	}
 	return nil
 }
@@ -128,13 +127,13 @@ var File_internal_actor_proto protoreflect.FileDescriptor
 const file_internal_actor_proto_rawDesc = "" +
 	"\n" +
 	"\x14internal/actor.proto\x12\n" +
-	"internalpb\x1a\x11goakt/goakt.proto\x1a\x1egoogle/protobuf/duration.proto\x1a\x19internal/dependency.proto\"\xaf\x02\n" +
+	"internalpb\x1a\x11goakt/goakt.proto\x1a\x19internal/dependency.proto\x1a\x1ainternal/passivation.proto\"\xbf\x02\n" +
 	"\x05Actor\x12*\n" +
 	"\aaddress\x18\x01 \x01(\v2\x10.goaktpb.AddressR\aaddress\x12\x12\n" +
 	"\x04type\x18\x02 \x01(\tR\x04type\x12!\n" +
 	"\fis_singleton\x18\x03 \x01(\bR\visSingleton\x12 \n" +
-	"\vrelocatable\x18\x04 \x01(\bR\vrelocatable\x12B\n" +
-	"\x0fpassivate_after\x18\x05 \x01(\v2\x19.google.protobuf.DurationR\x0epassivateAfter\x12:\n" +
+	"\vrelocatable\x18\x04 \x01(\bR\vrelocatable\x12R\n" +
+	"\x14passivation_strategy\x18\x05 \x01(\v2\x1f.internalpb.PassivationStrategyR\x13passivationStrategy\x12:\n" +
 	"\fdependencies\x18\x06 \x03(\v2\x16.internalpb.DependencyR\fdependencies\x12!\n" +
 	"\fenable_stash\x18\a \x01(\bR\venableStashB\xa3\x01\n" +
 	"\x0ecom.internalpbB\n" +
@@ -159,12 +158,12 @@ var file_internal_actor_proto_msgTypes = make([]protoimpl.MessageInfo, 1)
 var file_internal_actor_proto_goTypes = []any{
 	(*Actor)(nil),               // 0: internalpb.Actor
 	(*goaktpb.Address)(nil),     // 1: goaktpb.Address
-	(*durationpb.Duration)(nil), // 2: google.protobuf.Duration
+	(*PassivationStrategy)(nil), // 2: internalpb.PassivationStrategy
 	(*Dependency)(nil),          // 3: internalpb.Dependency
 }
 var file_internal_actor_proto_depIdxs = []int32{
 	1, // 0: internalpb.Actor.address:type_name -> goaktpb.Address
-	2, // 1: internalpb.Actor.passivate_after:type_name -> google.protobuf.Duration
+	2, // 1: internalpb.Actor.passivation_strategy:type_name -> internalpb.PassivationStrategy
 	3, // 2: internalpb.Actor.dependencies:type_name -> internalpb.Dependency
 	3, // [3:3] is the sub-list for method output_type
 	3, // [3:3] is the sub-list for method input_type
@@ -179,6 +178,7 @@ func file_internal_actor_proto_init() {
 		return
 	}
 	file_internal_dependency_proto_init()
+	file_internal_passivation_proto_init()
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

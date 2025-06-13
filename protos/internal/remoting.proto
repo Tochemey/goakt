@@ -6,6 +6,7 @@ import "goakt/goakt.proto";
 import "google/protobuf/any.proto";
 import "google/protobuf/duration.proto";
 import "internal/dependency.proto";
+import "internal/passivation.proto";
 
 option go_package = "github.com/tochemey/goakt/v3/internal/internalpb;internalpb";
 
@@ -118,8 +119,8 @@ message RemoteSpawnRequest {
   bool is_singleton = 5;
   // Specifies if the actor is relocatable
   bool relocatable = 6;
-  // Specifies the passivation time
-  google.protobuf.Duration passivate_after = 7;
+  // Specifies the passivation strategy
+  PassivationStrategy passivation_strategy = 7;
   // Specifies the dependencies
   repeated internalpb.Dependency dependencies = 8;
   //  States whether the actor will require a stash buffer

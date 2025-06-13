@@ -62,7 +62,6 @@ func New(ctx context.Context, t *testing.T, opts ...Option) *TestKit {
 	system, err := goakt.NewActorSystem(
 		"testkit",
 		goakt.WithExtensions(testkit.extensions...),
-		goakt.WithPassivationDisabled(),
 		goakt.WithLogger(testkit.logger),
 		goakt.WithActorInitTimeout(time.Second),
 		goakt.WithActorInitMaxRetries(5))

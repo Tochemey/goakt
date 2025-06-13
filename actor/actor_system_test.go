@@ -49,6 +49,7 @@ import (
 	"github.com/tochemey/goakt/v3/log"
 	testkit "github.com/tochemey/goakt/v3/mocks/discovery"
 	extmocks "github.com/tochemey/goakt/v3/mocks/extension"
+	"github.com/tochemey/goakt/v3/passivation"
 	"github.com/tochemey/goakt/v3/remote"
 	"github.com/tochemey/goakt/v3/test/data/testpb"
 )
@@ -184,7 +185,6 @@ func TestActorSystem(t *testing.T) {
 		provider := new(testkit.Provider)
 		newActorSystem, err := NewActorSystem(
 			"test",
-			WithPassivationDisabled(),
 			WithLogger(logger),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 			WithCluster(
@@ -275,7 +275,6 @@ func TestActorSystem(t *testing.T) {
 
 		newActorSystem, err := NewActorSystem(
 			"test",
-			WithPassivationDisabled(),
 			WithLogger(logger),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 		)
@@ -367,7 +366,6 @@ func TestActorSystem(t *testing.T) {
 
 		newActorSystem, err := NewActorSystem(
 			"test",
-			WithPassivationDisabled(),
 			WithLogger(logger),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 		)
@@ -448,7 +446,6 @@ func TestActorSystem(t *testing.T) {
 		sys, _ := NewActorSystem(
 			"testSys",
 			WithLogger(log.DiscardLogger),
-			WithPassivation(time.Minute),
 		)
 
 		// start the actor system
@@ -456,7 +453,8 @@ func TestActorSystem(t *testing.T) {
 		assert.NoError(t, err)
 
 		actorName := "actor"
-		actorRef, err := sys.Spawn(ctx, actorName, newRestart())
+		actorRef, err := sys.Spawn(ctx, actorName, newRestart(),
+			WithPassivationStrategy(passivation.NewTimeBasedStrategy(time.Minute)))
 		assert.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
@@ -533,7 +531,6 @@ func TestActorSystem(t *testing.T) {
 
 		newActorSystem, err := NewActorSystem(
 			"test",
-			WithPassivationDisabled(),
 			WithLogger(logger),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 		)
@@ -608,7 +605,6 @@ func TestActorSystem(t *testing.T) {
 
 		newActorSystem, err := NewActorSystem(
 			"test",
-			WithPassivationDisabled(),
 			WithLogger(logger),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 		)
@@ -660,7 +656,6 @@ func TestActorSystem(t *testing.T) {
 
 		newActorSystem, err := NewActorSystem(
 			"test",
-			WithPassivationDisabled(),
 			WithLogger(logger),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 		)
@@ -681,7 +676,6 @@ func TestActorSystem(t *testing.T) {
 
 		newActorSystem, err := NewActorSystem(
 			"test",
-			WithPassivationDisabled(),
 			WithLogger(logger),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 		)
@@ -700,7 +694,6 @@ func TestActorSystem(t *testing.T) {
 
 		newActorSystem, err := NewActorSystem(
 			"test",
-			WithPassivationDisabled(),
 			WithLogger(logger),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 		)
@@ -819,7 +812,6 @@ func TestActorSystem(t *testing.T) {
 		sys, _ := NewActorSystem(
 			"housekeeperSys",
 			WithLogger(log.DiscardLogger),
-			WithPassivation(passivateAfter),
 		)
 
 		// start the actor system
@@ -831,7 +823,9 @@ func TestActorSystem(t *testing.T) {
 
 		actorName := "HousekeeperActor"
 		actorHandler := newMockActor()
-		actorRef, err := sys.Spawn(ctx, actorName, actorHandler)
+		actorRef, err := sys.Spawn(ctx, actorName, actorHandler,
+			WithPassivationStrategy(passivation.NewTimeBasedStrategy(passivateAfter)),
+		)
 		require.NoError(t, err)
 		require.NotNil(t, actorRef)
 
@@ -859,7 +853,6 @@ func TestActorSystem(t *testing.T) {
 		sys, _ := NewActorSystem(
 			"housekeeperSys",
 			WithLogger(log.DiscardLogger),
-			WithPassivation(passivateAfter),
 		)
 
 		// start the actor system
@@ -1006,7 +999,6 @@ func TestActorSystem(t *testing.T) {
 		provider := new(testkit.Provider)
 		newActorSystem, err := NewActorSystem(
 			"test",
-			WithPassivation(passivateAfter),
 			WithLogger(logger),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 			WithCluster(
@@ -1038,7 +1030,8 @@ func TestActorSystem(t *testing.T) {
 		// create an actor
 		actorName := uuid.NewString()
 		actor := newMockActor()
-		actorRef, err := newActorSystem.Spawn(ctx, actorName, actor)
+		actorRef, err := newActorSystem.Spawn(ctx, actorName, actor,
+			WithPassivationStrategy(passivation.NewTimeBasedStrategy(passivateAfter)))
 		assert.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
@@ -1163,7 +1156,6 @@ func TestActorSystem(t *testing.T) {
 
 		newActorSystem, err := NewActorSystem(
 			"test",
-			WithPassivationDisabled(),
 			WithLogger(logger),
 			WithRemote(remote.NewConfig(host, ports[0])))
 
@@ -1217,7 +1209,6 @@ func TestActorSystem(t *testing.T) {
 		provider := new(testkit.Provider)
 		newActorSystem, err := NewActorSystem(
 			"test",
-			WithPassivationDisabled(),
 			WithLogger(logger),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 			WithCluster(
@@ -1357,7 +1348,6 @@ func TestActorSystem(t *testing.T) {
 		sys, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 		)
 		// assert there are no error
 		require.NoError(t, err)
@@ -1381,7 +1371,6 @@ func TestActorSystem(t *testing.T) {
 		sys, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 		)
 		// assert there are no error
 		require.NoError(t, err)
@@ -1402,7 +1391,6 @@ func TestActorSystem(t *testing.T) {
 		sys, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 		)
 		// assert there are no error
 		require.NoError(t, err)
@@ -1433,7 +1421,6 @@ func TestActorSystem(t *testing.T) {
 		sys, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 		)
 		// assert there are no error
 		require.NoError(t, err)
@@ -1468,7 +1455,6 @@ func TestActorSystem(t *testing.T) {
 		provider := new(testkit.Provider)
 		newActorSystem, err := NewActorSystem(
 			"test",
-			WithPassivationDisabled(),
 			WithLogger(logger),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 			WithCluster(
@@ -1728,8 +1714,7 @@ func TestActorSystem(t *testing.T) {
 	t.Run("With Spawn with custom passivation", func(t *testing.T) {
 		ctx := context.TODO()
 		actorSystem, _ := NewActorSystem("testSys",
-			WithLogger(log.DiscardLogger),
-			WithPassivationDisabled())
+			WithLogger(log.DiscardLogger))
 
 		require.NoError(t, actorSystem.Start(ctx))
 
@@ -1737,7 +1722,7 @@ func TestActorSystem(t *testing.T) {
 
 		// create the actor path
 		pid, err := actorSystem.Spawn(ctx, "test", newMockActor(),
-			WithPassivateAfter(passivateAfter))
+			WithPassivationStrategy(passivation.NewTimeBasedStrategy(passivateAfter)))
 		require.NoError(t, err)
 		assert.NotNil(t, pid)
 
@@ -1759,8 +1744,7 @@ func TestActorSystem(t *testing.T) {
 	t.Run("With Spawn with long lived", func(t *testing.T) {
 		ctx := context.TODO()
 		actorSystem, _ := NewActorSystem("testSys",
-			WithLogger(log.DiscardLogger),
-			WithPassivation(passivateAfter))
+			WithLogger(log.DiscardLogger))
 
 		require.NoError(t, actorSystem.Start(ctx))
 
@@ -1795,7 +1779,6 @@ func TestActorSystem(t *testing.T) {
 
 		newActorSystem, err := NewActorSystem(
 			"test",
-			WithPassivationDisabled(),
 			WithLogger(logger),
 			WithRemote(remote.NewConfig(host, remotingPort, remote.WithWriteTimeout(-1))),
 		)
@@ -1810,7 +1793,6 @@ func TestActorSystem(t *testing.T) {
 		provider := new(testkit.Provider)
 		newActorSystem, err := NewActorSystem(
 			"test",
-			WithPassivation(passivateAfter),
 			WithLogger(logger),
 			WithRemote(remote.NewConfig(host, 2222)),
 			WithCluster(
@@ -1832,7 +1814,6 @@ func TestActorSystem(t *testing.T) {
 
 		newActorSystem, err := NewActorSystem(
 			"test",
-			WithPassivation(passivateAfter),
 			WithLogger(logger),
 			WithRemote(remote.NewConfig(host, 2222)),
 			WithTLS(&TLSInfo{
@@ -1919,7 +1900,6 @@ func TestActorSystem(t *testing.T) {
 		provider := new(testkit.Provider)
 		newActorSystem, err := NewActorSystem(
 			"test",
-			WithPassivationDisabled(),
 			WithLogger(logger),
 			WithRemote(remoteConfig),
 			WithCluster(
@@ -1975,7 +1955,6 @@ func TestActorSystem(t *testing.T) {
 		sys, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 		)
 		// assert there are no error
 		require.NoError(t, err)
@@ -1996,7 +1975,6 @@ func TestActorSystem(t *testing.T) {
 		sys, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 		)
 		// assert there are no error
 		require.NoError(t, err)
@@ -2020,7 +1998,6 @@ func TestActorSystem(t *testing.T) {
 		sys, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 		)
 		// assert there are no error
 		require.NoError(t, err)
@@ -2049,7 +2026,6 @@ func TestActorSystem(t *testing.T) {
 		sys, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 		)
 		// assert there are no error
 		require.NoError(t, err)
@@ -2076,7 +2052,6 @@ func TestActorSystem(t *testing.T) {
 		sys, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 		)
 		// assert there are no error
 		require.NoError(t, err)
@@ -2104,7 +2079,6 @@ func TestActorSystem(t *testing.T) {
 		sys, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 		)
 		// assert there are no error
 		require.NoError(t, err)
@@ -2132,7 +2106,6 @@ func TestActorSystem(t *testing.T) {
 		sys, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 		)
 		// assert there are no error
 		require.NoError(t, err)
