@@ -274,6 +274,7 @@ func TestPassivation(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, pid)
 
+		// create two messages
 		for range 2 {
 			err = Tell(ctx, pid, new(testpb.TestSend))
 			require.NoError(t, err)
