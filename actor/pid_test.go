@@ -461,7 +461,7 @@ func TestRestart(t *testing.T) {
 		assert.NoError(t, err)
 		assert.True(t, pid.IsRunning())
 		assert.NotZero(t, pid.Uptime())
-		// let us send 10 public to the actor
+		// let us send 10 messages to the actor
 		count := 10
 		for i := 0; i < count; i++ {
 			err = Tell(ctx, pid, new(testpb.TestSend))
@@ -493,7 +493,6 @@ func TestRestart(t *testing.T) {
 
 		require.NoError(t, err)
 		assert.NotNil(t, pid)
-		// let us send 10 public to the actor
 		count := 10
 		for i := 0; i < count; i++ {
 			err := Tell(ctx, pid, new(testpb.TestSend))
@@ -509,7 +508,7 @@ func TestRestart(t *testing.T) {
 		assert.True(t, pid.IsRunning())
 
 		assert.EqualValues(t, 1, pid.RestartCount())
-		// let us send 10 public to the actor
+		// let us send 10 messages to the actor
 		for i := 0; i < count; i++ {
 			err = Tell(ctx, pid, new(testpb.TestSend))
 			assert.NoError(t, err)
@@ -554,7 +553,7 @@ func TestRestart(t *testing.T) {
 
 		require.EqualValues(t, 1, pid.ChildrenCount())
 
-		// let us send 10 public to the actor
+		// let us send 10 messages to the actor
 		count := 10
 		for i := 0; i < count; i++ {
 			err := Tell(ctx, pid, new(testpb.TestSend))
@@ -571,7 +570,7 @@ func TestRestart(t *testing.T) {
 		require.EqualValues(t, 1, pid.RestartCount())
 		require.EqualValues(t, 1, pid.ChildrenCount())
 
-		// let us send 10 public to the actor
+		// let us send 10 messages to the actor
 		for i := 0; i < count; i++ {
 			err = Tell(ctx, pid, new(testpb.TestSend))
 			assert.NoError(t, err)
@@ -662,7 +661,7 @@ func TestRestart(t *testing.T) {
 
 		require.NoError(t, err)
 		assert.NotNil(t, pid)
-		// let us send 10 public to the actor
+		// let us send 10 messages to the actor
 		count := 10
 		for i := 0; i < count; i++ {
 			err := Tell(ctx, pid, new(testpb.TestSend))
@@ -711,6 +710,45 @@ func TestRestart(t *testing.T) {
 		require.Error(t, err)
 		require.False(t, pid.IsRunning())
 
+		assert.NoError(t, actorSystem.Stop(ctx))
+	})
+	t.Run("With restart an actor with PostStart message", func(t *testing.T) {
+		ctx := context.TODO()
+		host := "127.0.0.1"
+		ports := dynaport.Get(1)
+
+		actorSystem, err := NewActorSystem("testSys",
+			WithRemote(remote.NewConfig(host, ports[0])),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+
+		util.Pause(time.Second)
+
+		pid, err := actorSystem.Spawn(ctx, "test", newPostActor())
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+
+		util.Pause(time.Second)
+
+		require.EqualValues(t, 1, postStarCount.Load())
+		// restart the actor
+		err = pid.Restart(ctx)
+		require.NoError(t, err)
+		util.Pause(time.Second)
+
+		require.True(t, pid.IsRunning())
+
+		require.EqualValues(t, 2, postStarCount.Load())
+
+		assert.EqualValues(t, 1, pid.RestartCount())
+
+		// stop the actor
+		err = pid.Shutdown(ctx)
+		assert.NoError(t, err)
 		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 }
