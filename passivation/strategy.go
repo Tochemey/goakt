@@ -160,5 +160,4 @@ func (l *LongLivedStrategy) String() string {
 	return "LongLivedStrategy"
 }
 
-// isStrategy is a marker method to satisfy the Strategy interface.
 func (l *LongLivedStrategy) isStrategy() {}
