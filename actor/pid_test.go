@@ -1450,6 +1450,47 @@ func TestSupervisorStrategy(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NoError(t, actorSystem.Stop(ctx))
 	})
+	t.Run("With a supervisor strategy and any error without parent/child relationship", func(t *testing.T) {
+		ctx := context.TODO()
+		host := "127.0.0.1"
+		ports := dynaport.Get(1)
+
+		actorSystem, err := NewActorSystem("testSys",
+			WithRemote(remote.NewConfig(host, ports[0])),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+
+		util.Pause(time.Second)
+
+		// create the child actor
+		restartStrategy := NewSupervisor(WithAnyErrorDirective(RestartDirective))
+		pid, err := actorSystem.Spawn(ctx, "SpawnChild", newMockSupervisedActor(), WithSupervisor(restartStrategy))
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+
+		util.Pause(time.Second)
+
+		// send a test panic message to the actor
+		require.NoError(t, Tell(ctx, pid, new(testpb.TestPanic)))
+
+		// wait for the child to properly shutdown
+		util.Pause(time.Second)
+
+		// assert the actor state
+		require.True(t, pid.IsRunning())
+
+		// TODO: fix the child relationship supervisor mode
+		// require.Len(t, parent.Children(), 1)
+
+		//stop the actor
+		err = pid.Shutdown(ctx)
+		assert.NoError(t, err)
+		assert.NoError(t, actorSystem.Stop(ctx))
+	})
 }
 func TestMessaging(t *testing.T) {
 	t.Run("With happy", func(t *testing.T) {
