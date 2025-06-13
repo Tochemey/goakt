@@ -274,7 +274,7 @@ func TestPassivation(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, pid)
 
-		for _ = range 2 {
+		for range 2 {
 			err = Tell(ctx, pid, new(testpb.TestSend))
 			require.NoError(t, err)
 		}
