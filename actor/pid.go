@@ -550,7 +550,7 @@ func (pid *PID) Restart(ctx context.Context) error {
 	}
 
 	pid.restartCount.Inc()
-
+	pid.fireSystemMessage(ctx, new(goaktpb.PostStart))
 	if pid.eventsStream != nil {
 		pid.eventsStream.Publish(
 			eventsTopic, &goaktpb.ActorRestarted{
