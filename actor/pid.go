@@ -1739,6 +1739,8 @@ func (pid *PID) notifyParent(signal *supervisionSignal) {
 		}
 	}
 
+	pid.logger.Debugf("%s supervisor directive %s", pid.Name(), directive.String())
+
 	// create the message to send to the parent
 	actual, _ := anypb.New(signal.Msg())
 	msg := &internalpb.Down{
