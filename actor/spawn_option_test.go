@@ -108,6 +108,6 @@ func TestSpawnConfigWithDependencies(t *testing.T) {
 		config := &spawnConfig{}
 		option := WithLongLived()
 		option.Apply(config)
-		require.IsType(t, new(passivation.LongLivedStrategy), config.passivationStrategy)
+		require.IsType(t, new(passivation.TimeBasedStrategy), config.passivationStrategy)
 	})
 }
