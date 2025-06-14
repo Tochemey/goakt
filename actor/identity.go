@@ -138,7 +138,8 @@ func (g *Identity) Validate() error {
 	customErr := errors.New("must contain only word characters (i.e. [a-zA-Z0-9] plus non-leading '-' or '_')")
 	return validation.
 		New(validation.FailFast()).
-		AddAssertion(len(g.Name()) <= 255, "actor name is too long. Maximum length is 255").
+		AddValidator(validation.NewEmptyStringValidator("name", g.Name())).
+		AddAssertion(len(g.Name()) <= 255, "grain name is too long. Maximum length is 255").
 		AddValidator(validation.NewPatternValidator(pattern, strings.TrimSpace(g.Name()), customErr)).
 		Validate()
 }
@@ -147,9 +148,11 @@ func (g *Identity) Validate() error {
 func toIdentity(s string) (*Identity, error) {
 	parts := strings.SplitN(s, identitySeparator, 2)
 	if len(parts) != 2 {
-		// TODO: abstract this into sentinel error
-		return nil, errors.New("invalid grain id format")
+		return nil, ErrInvalidGrainIdentity
 	}
 	identity := &Identity{kind: parts[0], name: parts[1]}
-	return identity, identity.Validate()
+	if err := identity.Validate(); err != nil {
+		return nil, err
+	}
+	return identity, nil
 }

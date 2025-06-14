@@ -38,7 +38,7 @@ func TestClusterConfig(t *testing.T) {
 	t.Run("With happy path", func(t *testing.T) {
 		provider := new(testkit.Provider)
 		exchanger := new(exchanger)
-		tester := new(mockActor)
+		tester := new(MockActor)
 		kinds := []Actor{tester, exchanger}
 		tempdir := t.TempDir()
 
@@ -73,7 +73,7 @@ func TestClusterConfig(t *testing.T) {
 
 	t.Run("With invalid config setting", func(t *testing.T) {
 		config := NewClusterConfig().
-			WithKinds(new(exchanger), new(mockActor)).
+			WithKinds(new(exchanger), new(MockActor)).
 			WithDiscoveryPort(3220).
 			WithPeersPort(3222).
 			WithMinimumPeersQuorum(1).

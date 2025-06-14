@@ -27,6 +27,8 @@ package passivation
 import (
 	"fmt"
 	"time"
+
+	"github.com/tochemey/goakt/v3/internal/duration"
 )
 
 // Strategy defines the contract for passivation strategies in the actor model.
@@ -80,7 +82,7 @@ func (t *TimeBasedStrategy) Timeout() time.Duration {
 
 // String implements Strategy.
 func (t *TimeBasedStrategy) String() string {
-	return fmt.Sprintf("Timed-Based of %s", t.timeout.String())
+	return fmt.Sprintf("Timed-Based of Duration=[%s]", duration.Format(t.timeout))
 }
 
 // isStrategy is a marker method to satisfy the Strategy interface.

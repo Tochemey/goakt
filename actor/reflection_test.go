@@ -38,13 +38,13 @@ import (
 func TestReflection(t *testing.T) {
 	t.Run("With NewActor happy path", func(t *testing.T) {
 		newRegistry := types.NewRegistry()
-		actor := newMockActor()
+		actor := NewMockActor()
 		newRegistry.Register(actor)
 		reflection := newReflection(newRegistry)
 		actual, err := reflection.NewActor("actor.mockActor")
 		assert.NoError(t, err)
 		assert.NotNil(t, actual)
-		assert.IsType(t, new(mockActor), actual)
+		assert.IsType(t, new(MockActor), actual)
 	})
 	t.Run("With NewActor actor not found", func(t *testing.T) {
 		newRegistry := types.NewRegistry()
@@ -73,7 +73,7 @@ func TestReflection(t *testing.T) {
 	})
 	t.Run("With NewDependency happy path", func(t *testing.T) {
 		newRegistry := types.NewRegistry()
-		dependency := dependencyMock("1", "userName", "email")
+		dependency := NewMockDependency("1", "userName", "email")
 		newRegistry.Register(dependency)
 		reflection := newReflection(newRegistry)
 		typeName := types.Name(dependency)
@@ -108,7 +108,7 @@ func TestReflection(t *testing.T) {
 	})
 	t.Run("With NewDependency UnmarshalBinary failure", func(t *testing.T) {
 		newRegistry := types.NewRegistry()
-		dependency := dependencyMock("1", "userName", "email")
+		dependency := NewMockDependency("1", "userName", "email")
 		newRegistry.Register(dependency)
 		reflection := newReflection(newRegistry)
 		typeName := types.Name(dependency)
@@ -119,7 +119,7 @@ func TestReflection(t *testing.T) {
 	})
 	t.Run("With DependenciesFromProtobuf happy path", func(t *testing.T) {
 		newRegistry := types.NewRegistry()
-		dependency := dependencyMock("1", "userName", "email")
+		dependency := NewMockDependency("1", "userName", "email")
 		newRegistry.Register(dependency)
 		reflection := newReflection(newRegistry)
 		typeName := types.Name(dependency)
@@ -144,7 +144,7 @@ func TestReflection(t *testing.T) {
 	})
 	t.Run("With DependenciesFromProtobuf UnmarshalBinary failure", func(t *testing.T) {
 		newRegistry := types.NewRegistry()
-		dependency := dependencyMock("1", "userName", "email")
+		dependency := NewMockDependency("1", "userName", "email")
 		newRegistry.Register(dependency)
 		reflection := newReflection(newRegistry)
 		typeName := types.Name(dependency)

@@ -32,62 +32,62 @@ import (
 
 // pool holds a pool of ReceiveContext
 var grainRequestPool = sync.Pool{
-	New: func() interface{} {
-		return new(GrainRequest)
+	New: func() any {
+		return new(grainRequest)
 	},
 }
 
-func getGrainRequest() *GrainRequest {
-	return pool.Get().(*GrainRequest)
+func getGrainRequest() *grainRequest {
+	return grainRequestPool.Get().(*grainRequest)
 }
 
 // releaseContext sends the message context back to the pool
-func releaseGrainRequest(request *GrainRequest) {
+func releaseGrainRequest(request *grainRequest) {
 	request.reset()
-	pool.Put(request)
+	grainRequestPool.Put(request)
 }
 
-type GrainRequest struct {
+type grainRequest struct {
 	sender   *Identity
 	message  proto.Message
 	response chan *GrainResponse
 	err      chan error
 }
 
-func (req *GrainRequest) Response() chan *GrainResponse {
+func (req *grainRequest) getResponse() chan *GrainResponse {
 	return req.response
 }
 
-func (req *GrainRequest) Err() chan error {
+func (req *grainRequest) getErr() chan error {
 	return req.err
 }
 
-func (req *GrainRequest) Sender() *Identity {
+func (req *grainRequest) getSender() *Identity {
 	return req.sender
 }
 
-func (req *GrainRequest) Message() proto.Message {
+func (req *grainRequest) getMessage() proto.Message {
 	return req.message
 }
 
 // setResponse sets the message response
-func (req *GrainRequest) setResponse(resp *GrainResponse) {
+func (req *grainRequest) setResponse(resp *GrainResponse) {
 	req.response <- resp
 	close(req.response)
 }
 
-func (req *GrainRequest) setError(err error) {
+func (req *grainRequest) setError(err error) {
 	req.err <- err
 	close(req.err)
 }
 
-func (req *GrainRequest) reset() {
+func (req *grainRequest) reset() {
 	var id *Identity
 	req.message = nil
 	req.sender = id
 }
 
-func (req *GrainRequest) build(sender *Identity, message proto.Message) {
+func (req *grainRequest) build(sender *Identity, message proto.Message) {
 	req.sender = sender
 	req.message = message
 	req.response = make(chan *GrainResponse, 1)

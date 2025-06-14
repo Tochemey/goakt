@@ -6,6 +6,7 @@ import "goakt/goakt.proto";
 import "google/protobuf/any.proto";
 import "google/protobuf/duration.proto";
 import "internal/dependency.proto";
+import "internal/grain.proto";
 import "internal/passivation.proto";
 
 option go_package = "github.com/tochemey/goakt/v3/internal/internalpb;internalpb";
@@ -33,6 +34,8 @@ service RemotingService {
   rpc RemoteSpawn(RemoteSpawnRequest) returns (RemoteSpawnResponse);
   // RemoteReinstate reinstates an actor on a remote machine
   rpc RemoteReinstate(RemoteReinstateRequest) returns (RemoteReinstateResponse);
+  // RemoteMessageGrain is used to send a message to Grain on a remote node
+  rpc RemoteMessageGrain(RemoteMessageGrainRequest) returns (RemoteMessageGrainResponse);
 }
 
 // RemoteAsk is used to send a message to an actor remotely and expect a response
@@ -139,3 +142,16 @@ message RemoteReinstateRequest {
 }
 
 message RemoteReinstateResponse {}
+
+message RemoteMessageGrainRequest {
+  Grain grain = 1;
+  optional GrainId sender = 2;
+  optional google.protobuf.Duration request_timeout = 3;
+  google.protobuf.Duration passivate_after = 4;
+  repeated internalpb.Dependency dependencies = 5;
+  google.protobuf.Any message = 6;
+}
+
+message RemoteMessageGrainResponse {
+  google.protobuf.Any message = 1;
+}

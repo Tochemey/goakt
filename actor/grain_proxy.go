@@ -41,40 +41,37 @@ import (
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 )
 
-// MessageGrain sends a request message to a Grain identified by the given identity.
+// Send sends a request message to a Grain identified by the given identity.
 //
-// This method locates or spawns the target Grain (either locally or in the cluster), sends the provided
-// protobuf message, and waits for a response or error. The request timeout can be customized using
-// the WithRequestTimeout GrainOption; otherwise, a default timeout is used.
+// It locates or spawns the target Grain (locally or in the cluster), sends the provided
+// protobuf message, and waits for a response or error. The request timeout and other
+// options can be customized using GrainOptions.
 //
 // Parameters:
 //   - ctx: context for cancellation and timeout control.
-//   - identity: the unique identity string of the Grain.
-//   - message: the protobuf message to send to the Grain.
-//   - opts: optional GrainOptions to configure the Grain (e.g., dependencies, timeout).
+//   - identity: unique identity string of the Grain.
+//   - message: protobuf message to send to the Grain.
+//   - opts: optional GrainOptions (e.g., dependencies, timeout).
 //
 // Returns:
-//   - *GrainResponse: the response from the Grain, if successful.
-//   - error: an error if the request fails, times out, or the system is not started.
-func (x *actorSystem) MessageGrain(ctx context.Context, identity string, message proto.Message, opts ...GrainOption) (response proto.Message, err error) {
+//   - proto.Message: the response from the Grain, if successful.
+//   - error: error if the request fails, times out, or the system is not started.
+func (x *actorSystem) Send(ctx context.Context, identity *Identity, message proto.Message, opts ...GrainOption) (response proto.Message, err error) {
 	if !x.started.Load() {
 		return nil, ErrActorSystemNotStarted
 	}
 
-	// TODO: perform some cleaning
-
-	// extract the Grain kind from its identity
-	id, err := toIdentity(identity)
-	if err != nil {
+	// validate the identity
+	if err := identity.Validate(); err != nil {
 		return nil, err
 	}
 
 	// make sure we don't interfere with system actors.
-	if isReservedName(id.Name()) {
-		return nil, NewErrGrainNotFound(identity)
+	if isReservedName(identity.Name()) {
+		return nil, NewErrGrainNotFound(identity.String())
 	}
 
-	config := newGrainConfig(opts...)
+	config := newGrainOptConfig(opts...)
 	timeout := config.RequestTimeout()
 	sender := config.RequestSender()
 	if sender != nil {
@@ -83,189 +80,245 @@ func (x *actorSystem) MessageGrain(ctx context.Context, identity string, message
 		}
 	}
 
-	// TODO: revisit this
-	passivationAfter := DefaultPassivationTimeout
-	if config.PassivateAfter() != nil {
-		passivationAfter = *config.PassivateAfter()
-	}
-
 	if x.InCluster() {
-		gw, err := x.getCluster().GetGrain(ctx, id.String())
-		if err != nil {
-			if errors.Is(err, cluster.ErrGrainNotFound) {
-				goto Locally
-			}
-			return nil, err
-		}
-
-		dependencies, err := encodeDependencies(config.Dependencies()...)
-		if err != nil {
-			return nil, err
-		}
-
-		msg, _ := anypb.New(message)
-
-		remoteClient := x.remoting.remotingServiceClient(gw.GetHost(), int(gw.GetPort()))
-		request := connect.NewRequest(&internalpb.RemoteMessageGrainRequest{
-			Grain:          gw,
-			Sender:         &internalpb.GrainId{Value: sender.String()},
-			RequestTimeout: durationpb.New(timeout),
-			PassivateAfter: durationpb.New(passivationAfter),
-			Dependencies:   dependencies,
-			Message:        msg,
-		})
-
-		res, err := remoteClient.RemoteMessageGrain(ctx, request)
-		if err != nil {
-			return nil, err
-		}
-		return res.Msg.GetMessage().UnmarshalNew()
+		return x.remoteSend(ctx, identity, message, sender, timeout)
 	}
-
-Locally:
-	grain, err := x.reflection.NewGrain(id.Kind())
-	if err != nil {
-		return nil, err
-	}
-
-	process, err := x.createGrain(ctx, id, grain, opts...)
-	if err != nil {
-		return nil, err
-	}
-
-	request := getGrainRequest()
-	request.build(sender, message)
-
-	process.doReceive(request)
-	timer := timers.Get(timeout)
-
-	select {
-	case res := <-request.Response():
-		timers.Put(timer)
-		return res.Message(), nil
-	case err := <-request.Err():
-		timers.Put(timer)
-		return nil, err
-	case <-timer.C:
-		err = ErrRequestTimeout
-		timers.Put(timer)
-		return nil, err
-	}
+	return x.localSend(ctx, identity, message, sender, timeout)
 }
 
-// RemoteMessageGrain handles grain remote message
+// RemoteMessageGrain handles remote requests to a Grain from another node.
+//
+// It validates the request, creates or locates the target Grain, delivers the message,
+// and returns the response or an error. Used internally for cluster communication.
+//
+// Parameters:
+//   - ctx: context for cancellation and timeout control.
+//   - request: RemoteMessageGrainRequest containing target grain info and message.
+//
+// Returns:
+//   - *internalpb.RemoteMessageGrainResponse: response containing the Grain's reply.
+//   - error: error if the request fails or is invalid.
 func (x *actorSystem) RemoteMessageGrain(ctx context.Context, request *connect.Request[internalpb.RemoteMessageGrainRequest]) (*connect.Response[internalpb.RemoteMessageGrainResponse], error) {
 	logger := x.logger
-
 	msg := request.Msg
+
+	// Remoting must be enabled
 	if !x.remotingEnabled.Load() {
 		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrRemotingDisabled)
 	}
 
-	host := msg.GetGrain().GetHost()
-	port := msg.GetGrain().GetPort()
-	name := msg.GetGrain().GetGrainId().GetName()
-	kind := msg.GetGrain().GetGrainId().GetKind()
-	grainid := msg.GetGrain().GetGrainId().GetValue()
-	message, _ := msg.GetMessage().UnmarshalNew()
-
-	addr := fmt.Sprintf("%s:%d", x.remoteConfig.BindAddr(), x.remoteConfig.BindPort())
-	if addr != net.JoinHostPort(host, strconv.Itoa(int(port))) {
-		return nil, connect.NewError(connect.CodeInvalidArgument, ErrInvalidHost)
+	// Validate host and port
+	if err := x.validateRemoteHost(msg); err != nil {
+		return nil, err
 	}
 
-	// make sure we don't interfere with system actors.
-	if isReservedName(name) {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, NewErrGrainNotFound(grainid))
-	}
-
-	identity, err := toIdentity(grainid)
+	// Validate grain identity and kind
+	identity, err := toIdentity(msg.GetGrain().GetGrainId().GetValue())
 	if err != nil {
+		if errors.Is(err, ErrInvalidGrainIdentity) {
+			return nil, connect.NewError(connect.CodeInvalidArgument, err)
+		}
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.Join(err, ErrInvalidGrainIdentity))
 	}
+	if isReservedName(identity.Name()) {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, NewErrGrainNotFound(identity.String()))
+	}
 
-	grain, err := x.reflection.NewGrain(kind)
+	// Create grain instance
+	grain, err := x.reflection.NewGrain(identity.Kind())
 	if err != nil {
-		logger.Errorf("failed to create grain (%s) on [host=%s, port=%d]: reason: (%v)", grainid, host, port, err)
+		logger.Errorf("failed to create grain (%s) on [host=%s, port=%d]: reason: (%v)", identity.String(), msg.GetGrain().GetHost(), msg.GetGrain().GetPort(), err)
 		if errors.Is(err, ErrTypeNotRegistered) {
 			return nil, connect.NewError(connect.CodeFailedPrecondition, ErrTypeNotRegistered)
 		}
-
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 
-	var (
-		opts           []GrainOption
-		sender         *Identity
-		requestTimeout time.Duration
-	)
+	// Build grain options
+	sender, requestTimeout, err := x.getRequestSettings(msg)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
 
-	// set the request timeout
+	// Create or get the grain process
+	process, err := x.createGrain(ctx, identity, grain)
+	if err != nil {
+		logger.Errorf("failed to create grain (%s) on [host=%s, port=%d]: reason: (%v)", identity.String(), msg.GetGrain().GetHost(), msg.GetGrain().GetPort(), err)
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+
+	// Build and send the request
+	grainRequest := getGrainRequest()
+	message, _ := msg.GetMessage().UnmarshalNew()
+	grainRequest.build(sender, message)
+	process.receive(grainRequest)
+	timer := timers.Get(requestTimeout)
+	defer timers.Put(timer)
+
+	select {
+	case res := <-grainRequest.getResponse():
+		response, _ := anypb.New(res.Message())
+		return connect.NewResponse(&internalpb.RemoteMessageGrainResponse{Message: response}), nil
+	case err := <-grainRequest.getErr():
+		return nil, err
+	case <-timer.C:
+		return nil, ErrRequestTimeout
+	}
+}
+
+// validateRemoteHost checks if the incoming request is for the correct host/port.
+func (x *actorSystem) validateRemoteHost(msg *internalpb.RemoteMessageGrainRequest) error {
+	host := msg.GetGrain().GetHost()
+	port := msg.GetGrain().GetPort()
+	addr := fmt.Sprintf("%s:%d", x.remoteConfig.BindAddr(), x.remoteConfig.BindPort())
+	if addr != net.JoinHostPort(host, strconv.Itoa(int(port))) {
+		return connect.NewError(connect.CodeInvalidArgument, ErrInvalidHost)
+	}
+	return nil
+}
+
+// getRequestSettings builds options sender, and timeout for a remote grain request.
+func (x *actorSystem) getRequestSettings(msg *internalpb.RemoteMessageGrainRequest) (sender *Identity, requestTimeout time.Duration, err error) {
+	logger := x.logger
+
+	// Set request timeout
 	if msg.GetRequestTimeout() != nil {
 		requestTimeout = msg.GetRequestTimeout().AsDuration()
 	}
 
-	// set the passivation time
-	if msg.GetPassivateAfter() != nil {
-		opts = append(opts, WithGrainPassivation(msg.GetPassivateAfter().AsDuration()))
-	}
-
-	// set the dependencies if any
-	if len(msg.GetDependencies()) > 0 {
-		dependencies, err := x.reflection.DependenciesFromProtobuf(msg.GetDependencies()...)
-		if err != nil {
-			logger.Errorf("failed to create grain (%s) on [host=%s, port=%d]: reason: (%v)", grainid, host, port, err)
-			return nil, connect.NewError(connect.CodeInternal, err)
-		}
-		opts = append(opts, WithGrainDependencies(dependencies...))
-	}
-
+	// Set sender
 	if msg.GetSender() != nil {
 		sender, err = toIdentity(msg.GetSender().GetValue())
 		if err != nil {
-			logger.Errorf("failed to create grain (%s) on [host=%s, port=%d]: reason: (%v)", grainid, host, port, err)
-			return nil, connect.NewError(connect.CodeInternal, err)
+			logger.Errorf("invalid sender identity: %v", err)
+			return nil, 0, err
+		}
+	}
+	return sender, requestTimeout, nil
+}
+
+// remoteSend sends a message to a Grain in the cluster.
+//
+// It locates the Grain via the cluster, sends the message remotely, and returns the response.
+// Falls back to local delivery if the Grain is not found in the cluster.
+//
+// Parameters:
+//   - ctx: context for cancellation and timeout control.
+//   - id: identity of the target Grain.
+//   - message: protobuf message to send.
+//   - sender: identity of the sender (optional).
+//   - timeout: request timeout duration.
+//
+// Returns:
+//   - proto.Message: the response from the Grain.
+//   - error: error if the request fails.
+func (x *actorSystem) remoteSend(ctx context.Context, id *Identity, message proto.Message, sender *Identity, timeout time.Duration) (proto.Message, error) {
+	gw, err := x.getCluster().GetGrain(ctx, id.String())
+	if err != nil {
+		if errors.Is(err, cluster.ErrGrainNotFound) {
+			return x.localSend(ctx, id, message, sender, timeout)
+		}
+		return nil, err
+	}
+
+	msg, _ := anypb.New(message)
+	remoteClient := x.remoting.remotingServiceClient(gw.GetHost(), int(gw.GetPort()))
+	request := connect.NewRequest(&internalpb.RemoteMessageGrainRequest{
+		Grain:          gw,
+		Sender:         &internalpb.GrainId{Value: sender.String()},
+		RequestTimeout: durationpb.New(timeout),
+		Dependencies:   gw.GetDependencies(),
+		Message:        msg,
+	})
+
+	res, err := remoteClient.RemoteMessageGrain(ctx, request)
+	if err != nil {
+		return nil, err
+	}
+	return res.Msg.GetMessage().UnmarshalNew()
+}
+
+// localSend sends a message to a local Grain.
+//
+// It creates or locates the Grain locally, delivers the message, and waits for a response or error.
+//
+// Parameters:
+//   - ctx: context for cancellation and timeout control.
+//   - id: identity of the target Grain.
+//   - message: protobuf message to send.
+//   - sender: identity of the sender (optional).
+//   - timeout: request timeout duration.
+//
+// Returns:
+//   - proto.Message: the response from the Grain.
+//   - error: error if the request fails.
+func (x *actorSystem) localSend(ctx context.Context, id *Identity, message proto.Message, sender *Identity, timeout time.Duration) (proto.Message, error) {
+	// check whether the grain process already exists
+	process, ok := x.grains.Get(*id)
+	if !ok {
+		grain, err := x.reflection.NewGrain(id.Kind())
+		if err != nil {
+			return nil, err
+		}
+
+		process, err = x.createGrain(ctx, id, grain)
+		if err != nil {
+			return nil, err
 		}
 	}
 
-	process, err := x.createGrain(ctx, identity, grain, opts...)
-	if err != nil {
-		logger.Errorf("failed to create grain (%s) on [host=%s, port=%d]: reason: (%v)", grainid, host, port, err)
-		return nil, connect.NewError(connect.CodeInternal, err)
+	// for grains it is either running or suspended
+	if !process.isRunning() {
+		process.processState.ClearSuspended()
+		process.processState.SetRunning()
 	}
 
-	grainRequest := getGrainRequest()
-	grainRequest.build(sender, message)
+	request := getGrainRequest()
+	request.build(sender, message)
+	process.receive(request)
+	timer := timers.Get(timeout)
 
-	process.doReceive(grainRequest)
-	timer := timers.Get(requestTimeout)
+	defer timers.Put(timer)
 
 	select {
-	case res := <-grainRequest.Response():
-		timers.Put(timer)
-		response, _ := anypb.New(res.Message())
-		return connect.NewResponse(&internalpb.RemoteMessageGrainResponse{Message: response}), nil
-	case err := <-grainRequest.Err():
-		timers.Put(timer)
+	case res := <-request.getResponse():
+		return res.Message(), nil
+	case err := <-request.getErr():
 		return nil, err
 	case <-timer.C:
-		err = ErrRequestTimeout
-		timers.Put(timer)
-		return nil, err
+		return nil, ErrRequestTimeout
 	}
 }
 
-func (x *actorSystem) createGrain(ctx context.Context, identity *Identity, grain Grain, opts ...GrainOption) (*grainProcess, error) {
+// createGrain creates and activates a new Grain process.
+//
+// It instantiates the Grain, activates it, registers it locally, and (if in cluster mode)
+// registers it with the cluster.
+//
+// Parameters:
+//   - ctx: context for cancellation and timeout control.
+//   - identity: identity of the Grain to create.
+//   - grain: Grain instance to activate.
+//
+// Returns:
+//   - *grainProcess: the created and activated Grain process.
+//   - error: error if creation or activation fails.
+func (x *actorSystem) createGrain(ctx context.Context, identity *Identity, grain Grain) (*grainProcess, error) {
 	// create an instance of grain process
-	process := newGrainProcess(identity, grain, x, opts...)
+	process := newGrainProcess(identity, grain, x, grain.Dependencies()...)
 	// activate the grain process
-	if err := process.Activate(ctx); err != nil {
+	if err := process.activate(ctx); err != nil {
 		return nil, err
 	}
 
 	// it is ok to always overwrite an existing one
 	x.grains.Set(*identity, process)
 	if x.InCluster() {
+		dependencies, err := encodeDependencies(process.dependencies.Values()...)
+		if err != nil {
+			return nil, fmt.Errorf("failed to encode dependencies for grain %s: %w", identity.String(), err)
+		}
+
 		// register the grain in the cluster
 		if err := x.getCluster().PutGrain(ctx, &internalpb.Grain{
 			GrainId: &internalpb.GrainId{
@@ -273,8 +326,9 @@ func (x *actorSystem) createGrain(ctx context.Context, identity *Identity, grain
 				Name:  identity.Name(),
 				Value: identity.String(),
 			},
-			Host: x.Host(),
-			Port: int32(x.Port()),
+			Host:         x.Host(),
+			Port:         int32(x.Port()),
+			Dependencies: dependencies,
 		}); err != nil {
 			return nil, err
 		}

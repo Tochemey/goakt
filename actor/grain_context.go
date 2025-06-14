@@ -31,10 +31,9 @@ import (
 )
 
 type GrainContext struct {
-	ctx          context.Context
-	self         *Identity
-	actorSystem  ActorSystem
-	dependencies []extension.Dependency
+	ctx         context.Context
+	self        *Identity
+	actorSystem ActorSystem
 }
 
 // Context returns the underlying context associated with the GrainContext.
@@ -56,21 +55,6 @@ func (g *GrainContext) Self() *Identity {
 // that the actor may interact with during its lifecycle.
 func (g *GrainContext) ActorSystem() ActorSystem {
 	return g.actorSystem
-}
-
-// Dependencies returns a slice containing all dependencies currently registered
-// within the Grain.
-//
-// These dependencies are typically injected during the Grain activation phase
-// and made accessible during the Grain's lifecycle. They can include services, clients,
-// or any resources that the actor requires to operate.
-//
-// This method is useful for diagnostic tools, dynamic inspection, or cases where
-// an actor needs to introspect its environment.
-//
-// Returns: A slice of Dependency instances associated with the Grain
-func (g *GrainContext) Dependencies() []extension.Dependency {
-	return g.dependencies
 }
 
 // Extensions returns a slice of all extensions registered within the ActorSystem
@@ -104,11 +88,10 @@ func (g *GrainContext) Extension(extensionID string) extension.Extension {
 }
 
 // newGrainContext creates and returns a new GrainContext instance.
-func newGrainContext(ctx context.Context, self *Identity, actorSystem ActorSystem, dependencies ...extension.Dependency) *GrainContext {
+func newGrainContext(ctx context.Context, self *Identity, actorSystem ActorSystem) *GrainContext {
 	return &GrainContext{
-		ctx:          ctx,
-		self:         self,
-		actorSystem:  actorSystem,
-		dependencies: dependencies,
+		ctx:         ctx,
+		self:        self,
+		actorSystem: actorSystem,
 	}
 }

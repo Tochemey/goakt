@@ -30,7 +30,7 @@ import (
 )
 
 type grainInboxNode struct {
-	value *GrainRequest
+	value *grainRequest
 	next  *grainInboxNode
 }
 
@@ -49,7 +49,7 @@ func newGrainInxbox() *grainInbox {
 }
 
 // Enqueue places the given value in the mailbox
-func (m *grainInbox) Enqueue(value *GrainRequest) error {
+func (m *grainInbox) Enqueue(value *grainRequest) error {
 	tnode := &grainInboxNode{
 		value: value,
 	}
@@ -61,7 +61,7 @@ func (m *grainInbox) Enqueue(value *GrainRequest) error {
 
 // Dequeue takes the mail from the mailbox
 // Returns nil if the mailbox is empty. Can be used in a single consumer (goroutine) only.
-func (m *grainInbox) Dequeue() *GrainRequest {
+func (m *grainInbox) Dequeue() *grainRequest {
 	next := (*grainInboxNode)(atomic.LoadPointer((*unsafe.Pointer)(unsafe.Pointer(&m.tail.next))))
 	if next == nil {
 		return nil

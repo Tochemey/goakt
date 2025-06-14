@@ -25,58 +25,24 @@
 package actor
 
 import (
-	"context"
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	"github.com/tochemey/goakt/v3/internal/util"
-	"github.com/tochemey/goakt/v3/log"
 )
 
-func TestScheduleOption(t *testing.T) {
-	// create the context
-	ctx := context.TODO()
-	// define the logger to use
-	logger := log.DiscardLogger
-	// create the actor system
-	newActorSystem, err := NewActorSystem(
-		"test",
-		WithLogger(logger),
-	)
-	// assert there are no error
-	require.NoError(t, err)
-
-	// start the actor system
-	err = newActorSystem.Start(ctx)
-	assert.NoError(t, err)
-
-	util.Pause(time.Second)
-
-	// create a test actor
-	actorName := "test"
-	actor := NewMockActor()
-	actorRef, err := newActorSystem.Spawn(ctx, actorName, actor)
-	require.NoError(t, err)
-	assert.NotNil(t, actorRef)
-
-	util.Pause(time.Second)
-
-	referenceID := "reference"
-	opts := []ScheduleOption{
-		WithSender(actorRef),
-		WithSenderAddress(actorRef.Address()),
-		WithReference(referenceID),
-	}
-
-	config := newScheduleConfig(opts...)
-	require.Equal(t, referenceID, config.Reference())
-	require.True(t, actorRef.Address().Equals(config.SenderAddr()))
-	require.True(t, actorRef.Equals(config.Sender()))
-
-	// stop the actor
-	err = newActorSystem.Stop(ctx)
-	assert.NoError(t, err)
+func TestGrainOptions(t *testing.T) {
+	t.Run("WithRequestTimeout", func(t *testing.T) {
+		opt := WithRequestTimeout(10 * time.Second)
+		config := &grainOptConfig{}
+		opt.Apply(config)
+		require.EqualValues(t, 10*time.Second, config.RequestTimeout())
+	})
+	t.Run("WithRequestSender", func(t *testing.T) {
+		sender := &Identity{kind: "test", name: "sender"}
+		opt := WithRequestSender(sender)
+		config := &grainOptConfig{}
+		opt.Apply(config)
+		require.True(t, config.RequestSender().Equal(sender), "expected sender to be set correctly")
+	})
 }

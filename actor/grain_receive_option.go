@@ -24,45 +24,25 @@
 
 package actor
 
-import (
-	"sync"
-	"testing"
+// GrainReceiveOption provides additional context and options for a grain's Receive method.
+//
+// It is used to pass metadata about the message delivery, such as the sender's identity.
+// This allows grains to access information about the origin of the message when processing requests.
+//
+// Example usage:
+//
+//	func (g *MyGrain) Receive(msg proto.Message, option *GrainReceiveOption) (proto.Message, error) {
+//	    sender := option.Sender()
+//	    // Use sender information if needed
+//	    ...
+//	}
+type GrainReceiveOption struct {
+	sender *Identity
+}
 
-	"github.com/stretchr/testify/require"
-
-	"github.com/tochemey/goakt/v3/address"
-	"github.com/tochemey/goakt/v3/internal/internalpb"
-	"github.com/tochemey/goakt/v3/internal/types"
-)
-
-func TestActorRef(t *testing.T) {
-	t.Run("With Equals", func(t *testing.T) {
-		addr := address.New("name", "system", "host", 1234)
-		actorRef := fromActorRef(&internalpb.Actor{
-			Address: addr.Address,
-			Type:    "kind",
-		})
-
-		newActorRef := fromActorRef(&internalpb.Actor{
-			Address: addr.Address,
-			Type:    "kind",
-		})
-
-		require.Equal(t, "name", actorRef.Name())
-		require.Equal(t, "kind", actorRef.Kind())
-		require.True(t, addr.Equals(actorRef.Address()))
-		require.True(t, newActorRef.Equals(actorRef))
-	})
-	t.Run("From PID", func(t *testing.T) {
-		addr := address.New("name", "system", "host", 1234)
-		actor := NewMockActor()
-		pid := &PID{
-			address:      addr,
-			actor:        actor,
-			fieldsLocker: &sync.RWMutex{},
-		}
-		actorRef := fromPID(pid)
-		require.Equal(t, "name", actorRef.Name())
-		require.Equal(t, types.Name(actor), actorRef.Kind())
-	})
+// Sender returns the identity of the sender of the message, if available.
+//
+// This can be used by the grain to respond or take action based on the sender.
+func (g *GrainReceiveOption) Sender() *Identity {
+	return g.sender
 }
