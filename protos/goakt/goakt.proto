@@ -212,3 +212,20 @@ message Mayday {
   // logs or monitoring data for incident analysis and resolution timelines.
   google.protobuf.Timestamp timestamp = 3;
 }
+
+// PausePassivation is a system-level message used to pause the passivation of an actor.
+// One can send this message to an actor to prevent it from being passivated when passivation is enabled.
+// This is useful in scenarios where an actor needs to remain active for a certain period while processing
+// critical messages or performing important tasks. This is a fire-and-forget message, so it does not expect a response.
+// This will no-op if the actor does not have passivation enabled.
+message PausePassivation {}
+
+// ResumePassivation is a system-level message used to resume the passivation of an actor.
+// One can send this message to an actor to allow it to be passivated again after it has been paused.
+// This is useful in scenarios where an actor has temporarily paused its passivation
+// to complete critical tasks or handle important messages, and now it can return to its normal
+// passivation behavior. This is a fire-and-forget message, so it does not expect a response.
+//
+// This will no-op if the actor does not have passivation enabled.
+// If the actor is not created with a custom passivation timeout, it will use the default passivation timeout.
+message ResumePassivation {}

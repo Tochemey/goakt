@@ -530,7 +530,6 @@ func testCluster(t *testing.T, serverAddr string, opts ...testClusterOption) (Ac
 
 	// create the actor system options
 	options := []Option{
-		WithPassivationDisabled(),
 		WithLogger(logger),
 		WithRemote(remote.NewConfig(host, remotingPort)),
 		WithPeerStateLoopInterval(500 * time.Millisecond),
@@ -878,6 +877,39 @@ func (r *reinstateSupervisor) Receive(ctx *ReceiveContext) {
 		}
 
 		ctx.Stop(ctx.Sender())
+	default:
+		ctx.Unhandled()
+	}
+}
+
+var postStarCount = atomic.NewInt32(0)
+
+type postStartActor struct{}
+
+// enforce compilation error
+var _ Actor = (*postStartActor)(nil)
+
+// newMockActor creates a actorQA
+func newPostActor() *postStartActor {
+	return &postStartActor{}
+}
+
+// Init initialize the actor. This function can be used to set up some database connections
+// or some sort of initialization before the actor init processing message
+func (p *postStartActor) PreStart(*Context) error {
+	return nil
+}
+
+// Shutdown gracefully shuts down the given actor
+func (p *postStartActor) PostStop(*Context) error {
+	return nil
+}
+
+// Receive processes any message dropped into the actor mailbox without a reply
+func (p *postStartActor) Receive(ctx *ReceiveContext) {
+	switch ctx.Message().(type) {
+	case *goaktpb.PostStart:
+		postStarCount.Inc()
 	default:
 		ctx.Unhandled()
 	}

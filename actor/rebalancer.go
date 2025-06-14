@@ -219,7 +219,7 @@ func (r *rebalancer) recreateLocally(ctx context.Context, props *internalpb.Acto
 	}
 
 	spawnOpts := []SpawnOption{
-		WithPassivateAfter(props.GetPassivateAfter().AsDuration()),
+		WithPassivationStrategy(passivationStrategyFromProto(props.GetPassivationStrategy())),
 	}
 
 	if props.GetEnableStash() {

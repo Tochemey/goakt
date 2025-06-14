@@ -319,7 +319,7 @@ func TestTopicActor(t *testing.T) {
 		require.EqualValues(t, 1, actor3.Metric(ctx).ProcessedCount())
 		require.EqualValues(t, 1, actor3.Actor().(*mockSubscriber).counter.Load())
 
-		// create a publisher that will publish messages to the topi
+		// create a publisher that will publish messages to the topic
 		publisher, err := actorSystem.Spawn(ctx, "publisher", newMockSubscriber())
 		require.NoError(t, err)
 		require.NotNil(t, publisher)
@@ -343,6 +343,178 @@ func TestTopicActor(t *testing.T) {
 		require.EqualValues(t, 2, actor1.Actor().(*mockSubscriber).counter.Load())
 		require.EqualValues(t, 2, actor2.Actor().(*mockSubscriber).counter.Load())
 		require.EqualValues(t, 2, actor3.Actor().(*mockSubscriber).counter.Load())
+
+		require.NoError(t, actorSystem.Stop(ctx))
+	})
+
+	t.Run("Without a sender", func(t *testing.T) {
+		ctx := context.Background()
+		actorSystem, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger), WithPubSub())
+
+		// start the actor system
+		err := actorSystem.Start(ctx)
+		assert.NoError(t, err)
+
+		// wait for the actor system to be ready
+		util.Pause(time.Second)
+
+		// start bunch of actors
+		actor1, err := actorSystem.Spawn(ctx, "actor1", newMockSubscriber(), WithLongLived())
+		require.NoError(t, err)
+		require.NotNil(t, actor1)
+
+		util.Pause(500 * time.Millisecond)
+
+		actor2, err := actorSystem.Spawn(ctx, "actor2", newMockSubscriber(), WithLongLived())
+		require.NoError(t, err)
+		require.NotNil(t, actor2)
+
+		util.Pause(500 * time.Millisecond)
+
+		actor3, err := actorSystem.Spawn(ctx, "actor3", newMockSubscriber(), WithLongLived())
+		require.NoError(t, err)
+		require.NotNil(t, actor3)
+
+		util.Pause(500 * time.Millisecond)
+
+		topic := "test-topic"
+
+		// let the various actors subscribe to the topic
+		err = actor1.Tell(ctx, actorSystem.TopicActor(), &goaktpb.Subscribe{Topic: topic})
+		require.NoError(t, err)
+		util.Pause(500 * time.Millisecond)
+
+		// make sure we receive the subscribe ack message
+		require.EqualValues(t, 1, actor1.Metric(ctx).ProcessedCount())
+		require.EqualValues(t, 1, actor1.Actor().(*mockSubscriber).counter.Load())
+
+		err = actor2.Tell(ctx, actorSystem.TopicActor(), &goaktpb.Subscribe{Topic: topic})
+		require.NoError(t, err)
+		util.Pause(500 * time.Millisecond)
+
+		// make sure we receive the subscribe ack message
+		require.EqualValues(t, 1, actor2.Metric(ctx).ProcessedCount())
+		require.EqualValues(t, 1, actor2.Actor().(*mockSubscriber).counter.Load())
+
+		err = actor3.Tell(ctx, actorSystem.TopicActor(), &goaktpb.Subscribe{Topic: topic})
+		require.NoError(t, err)
+		util.Pause(500 * time.Millisecond)
+
+		// make sure we receive the subscribe ack message
+		require.EqualValues(t, 1, actor3.Metric(ctx).ProcessedCount())
+		require.EqualValues(t, 1, actor3.Actor().(*mockSubscriber).counter.Load())
+
+		// publish a message without a sender
+		actual := new(testpb.TestCount)
+		transformed, _ := anypb.New(actual)
+		message := &goaktpb.Publish{
+			Id:      "messsage1",
+			Topic:   topic,
+			Message: transformed,
+		}
+		err = Tell(ctx, actorSystem.TopicActor(), message) // no sender
+		require.NoError(t, err)
+
+		util.Pause(time.Second)
+
+		// make sure we receive the subscribe ack message
+		require.EqualValues(t, 2, actor1.Actor().(*mockSubscriber).counter.Load())
+		require.EqualValues(t, 2, actor2.Actor().(*mockSubscriber).counter.Load())
+		require.EqualValues(t, 2, actor3.Actor().(*mockSubscriber).counter.Load())
+
+		require.NoError(t, actorSystem.Stop(ctx))
+	})
+	t.Run("With handle Terminated message", func(t *testing.T) {
+		ctx := context.Background()
+		actorSystem, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger), WithPubSub())
+
+		// start the actor system
+		err := actorSystem.Start(ctx)
+		assert.NoError(t, err)
+
+		// wait for the actor system to be ready
+		util.Pause(time.Second)
+
+		// start bunch of actors
+		actor1, err := actorSystem.Spawn(ctx, "actor1", newMockSubscriber(), WithLongLived())
+		require.NoError(t, err)
+		require.NotNil(t, actor1)
+
+		util.Pause(500 * time.Millisecond)
+
+		actor2, err := actorSystem.Spawn(ctx, "actor2", newMockSubscriber(), WithLongLived())
+		require.NoError(t, err)
+		require.NotNil(t, actor2)
+
+		util.Pause(500 * time.Millisecond)
+
+		actor3, err := actorSystem.Spawn(ctx, "actor3", newMockSubscriber(), WithLongLived())
+		require.NoError(t, err)
+		require.NotNil(t, actor3)
+
+		util.Pause(500 * time.Millisecond)
+
+		topic := "test-topic"
+
+		// let the various actors subscribe to the topic
+		err = actor1.Tell(ctx, actorSystem.TopicActor(), &goaktpb.Subscribe{Topic: topic})
+		require.NoError(t, err)
+		util.Pause(500 * time.Millisecond)
+
+		// make sure we receive the subscribe ack message
+		require.EqualValues(t, 1, actor1.Metric(ctx).ProcessedCount())
+		require.EqualValues(t, 1, actor1.Actor().(*mockSubscriber).counter.Load())
+
+		err = actor2.Tell(ctx, actorSystem.TopicActor(), &goaktpb.Subscribe{Topic: topic})
+		require.NoError(t, err)
+		util.Pause(500 * time.Millisecond)
+
+		// make sure we receive the subscribe ack message
+		require.EqualValues(t, 1, actor2.Metric(ctx).ProcessedCount())
+		require.EqualValues(t, 1, actor2.Actor().(*mockSubscriber).counter.Load())
+
+		err = actor3.Tell(ctx, actorSystem.TopicActor(), &goaktpb.Subscribe{Topic: topic})
+		require.NoError(t, err)
+		util.Pause(500 * time.Millisecond)
+
+		// make sure we receive the subscribe ack message
+		require.EqualValues(t, 1, actor3.Metric(ctx).ProcessedCount())
+		require.EqualValues(t, 1, actor3.Actor().(*mockSubscriber).counter.Load())
+
+		// create a publisher that will publish messages to the topic
+		publisher, err := actorSystem.Spawn(ctx, "publisher", newMockSubscriber())
+		require.NoError(t, err)
+		require.NotNil(t, publisher)
+
+		util.Pause(time.Second)
+
+		// publish a message
+		actual := new(testpb.TestCount)
+		transformed, _ := anypb.New(actual)
+		message := &goaktpb.Publish{
+			Id:      "messsage1",
+			Topic:   topic,
+			Message: transformed,
+		}
+		err = publisher.Tell(ctx, actorSystem.TopicActor(), message)
+		require.NoError(t, err)
+
+		util.Pause(time.Second)
+
+		// make sure we receive the subscribe ack message
+		require.EqualValues(t, 2, actor1.Actor().(*mockSubscriber).counter.Load())
+		require.EqualValues(t, 2, actor2.Actor().(*mockSubscriber).counter.Load())
+		require.EqualValues(t, 2, actor3.Actor().(*mockSubscriber).counter.Load())
+
+		// stop actor1
+		require.NoError(t, actor1.Shutdown(ctx))
+		util.Pause(time.Second)
+
+		// for the sake of the test
+		topicActor := actorSystem.TopicActor().Actor().(*topicActor)
+		subscribers, ok := topicActor.topics.Get(topic)
+		require.True(t, ok)
+		require.EqualValues(t, subscribers.Len(), 2)
 
 		require.NoError(t, actorSystem.Stop(ctx))
 	})

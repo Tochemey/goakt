@@ -228,6 +228,12 @@ func NewSupervisor(opts ...SupervisorOption) *Supervisor {
 		opt(s)
 	}
 
+	// any error overrides all error types
+	if directive, ok := s.directives.Get(errorType(new(anyError))); ok {
+		s.directives.Reset()
+		s.directives.Set(errorType(new(anyError)), directive)
+	}
+
 	return s
 }
 

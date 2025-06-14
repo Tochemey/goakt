@@ -53,7 +53,6 @@ func TestScheduler(t *testing.T) {
 		newActorSystem, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 		)
 		// assert there are no error
 		require.NoError(t, err)
@@ -108,7 +107,6 @@ func TestScheduler(t *testing.T) {
 		provider := new(testkit.Provider)
 		newActorSystem, err := NewActorSystem(
 			"test",
-			WithPassivationDisabled(),
 			WithLogger(logger),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 			WithCluster(
@@ -171,7 +169,6 @@ func TestScheduler(t *testing.T) {
 		newActorSystem, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 		)
 		// assert there are no error
 		require.NoError(t, err)
@@ -217,7 +214,6 @@ func TestScheduler(t *testing.T) {
 		newActorSystem, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 		)
 		// assert there are no error
 		require.NoError(t, err)
@@ -258,7 +254,6 @@ func TestScheduler(t *testing.T) {
 		newActorSystem, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 		)
 		// assert there are no error
@@ -319,7 +314,6 @@ func TestScheduler(t *testing.T) {
 		provider := new(testkit.Provider)
 		newActorSystem, err := NewActorSystem(
 			"test",
-			WithPassivationDisabled(),
 			WithLogger(logger),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 			WithCluster(
@@ -392,7 +386,6 @@ func TestScheduler(t *testing.T) {
 		newActorSystem, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 		)
 		// assert there are no error
@@ -439,7 +432,6 @@ func TestScheduler(t *testing.T) {
 		newActorSystem, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 		)
 		// assert there are no error
 		require.NoError(t, err)
@@ -493,7 +485,6 @@ func TestScheduler(t *testing.T) {
 		provider := new(testkit.Provider)
 		newActorSystem, err := NewActorSystem(
 			"test",
-			WithPassivationDisabled(),
 			WithLogger(logger),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 			WithCluster(
@@ -555,7 +546,6 @@ func TestScheduler(t *testing.T) {
 		newActorSystem, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 		)
 		// assert there are no error
 		require.NoError(t, err)
@@ -595,7 +585,6 @@ func TestScheduler(t *testing.T) {
 		newActorSystem, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 		)
 		// assert there are no error
 		require.NoError(t, err)
@@ -645,7 +634,6 @@ func TestScheduler(t *testing.T) {
 		newActorSystem, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 		)
 		// assert there are no error
@@ -703,7 +691,6 @@ func TestScheduler(t *testing.T) {
 		provider := new(testkit.Provider)
 		newActorSystem, err := NewActorSystem(
 			"test",
-			WithPassivationDisabled(),
 			WithLogger(logger),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 			WithCluster(
@@ -773,7 +760,6 @@ func TestScheduler(t *testing.T) {
 		newActorSystem, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 		)
 		// assert there are no error
@@ -822,7 +808,6 @@ func TestScheduler(t *testing.T) {
 		newActorSystem, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 		)
 		// assert there are no error
@@ -870,7 +855,6 @@ func TestScheduler(t *testing.T) {
 		newActorSystem, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 		)
 		// assert there are no error
 		require.NoError(t, err)
@@ -929,7 +913,6 @@ func TestScheduler(t *testing.T) {
 		provider := new(testkit.Provider)
 		newActorSystem, err := NewActorSystem(
 			"test",
-			WithPassivationDisabled(),
 			WithLogger(logger),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 			WithCluster(
@@ -996,7 +979,6 @@ func TestScheduler(t *testing.T) {
 		newActorSystem, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 		)
 		// assert there are no error
 		require.NoError(t, err)
@@ -1046,7 +1028,6 @@ func TestScheduler(t *testing.T) {
 		newActorSystem, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 		)
 		// assert there are no error
 		require.NoError(t, err)
@@ -1093,7 +1074,6 @@ func TestScheduler(t *testing.T) {
 		newActorSystem, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 		)
 		// assert there are no error
@@ -1153,7 +1133,6 @@ func TestScheduler(t *testing.T) {
 		newActorSystem, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 		)
 		// assert there are no error
@@ -1205,7 +1184,6 @@ func TestScheduler(t *testing.T) {
 		newActorSystem, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 		)
 		// assert there are no error
@@ -1340,7 +1318,6 @@ func TestScheduler(t *testing.T) {
 		provider := new(testkit.Provider)
 		newActorSystem, err := NewActorSystem(
 			"test",
-			WithPassivationDisabled(),
 			WithLogger(logger),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 			WithCluster(
@@ -1412,7 +1389,6 @@ func TestScheduler(t *testing.T) {
 		actorSystem, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 		)
 		// assert there are no error
 		require.NoError(t, err)
@@ -1460,7 +1436,6 @@ func TestScheduler(t *testing.T) {
 		newActorSystem, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 		)
 		// assert there are no error
 		require.NoError(t, err)
@@ -1500,7 +1475,6 @@ func TestScheduler(t *testing.T) {
 		newActorSystem, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 		)
 		// assert there are no error
 		require.NoError(t, err)
@@ -1540,7 +1514,6 @@ func TestScheduler(t *testing.T) {
 		actorSystem, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 		)
 		// assert there are no error
 		require.NoError(t, err)
@@ -1577,7 +1550,6 @@ func TestScheduler(t *testing.T) {
 		system, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 		)
 		// assert there are no error
 		require.NoError(t, err)
@@ -1627,7 +1599,6 @@ func TestScheduler(t *testing.T) {
 		newActorSystem, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithPassivationDisabled(),
 		)
 		// assert there are no error
 		require.NoError(t, err)

@@ -61,11 +61,6 @@ func TestOption(t *testing.T) {
 		expected actorSystem
 	}{
 		{
-			name:     "WithPassivation",
-			option:   WithPassivation(2 * time.Second),
-			expected: actorSystem{passivationAfter: 2. * time.Second},
-		},
-		{
 			name:     "WithActorInitMaxRetries",
 			option:   WithActorInitMaxRetries(2),
 			expected: actorSystem{actorInitMaxRetries: 2},
@@ -74,11 +69,6 @@ func TestOption(t *testing.T) {
 			name:     "WithLogger",
 			option:   WithLogger(log.DefaultLogger),
 			expected: actorSystem{logger: log.DefaultLogger},
-		},
-		{
-			name:     "WithPassivationDisabled",
-			option:   WithPassivationDisabled(),
-			expected: actorSystem{passivationAfter: -1},
 		},
 		{
 			name:     "WithShutdownTimeout",

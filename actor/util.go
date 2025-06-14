@@ -27,11 +27,14 @@ package actor
 import (
 	"time"
 
+	"google.golang.org/protobuf/types/known/durationpb"
+
 	"github.com/tochemey/goakt/v3/extension"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/size"
 	"github.com/tochemey/goakt/v3/internal/timer"
 	"github.com/tochemey/goakt/v3/internal/types"
+	"github.com/tochemey/goakt/v3/passivation"
 )
 
 type nameType int
@@ -107,4 +110,50 @@ func encodeDependencies(dependencies ...extension.Dependency) ([]*internalpb.Dep
 		})
 	}
 	return output, nil
+}
+
+func passivationStrategyToProto(strategy passivation.Strategy) *internalpb.PassivationStrategy {
+	switch s := strategy.(type) {
+	case *passivation.TimeBasedStrategy:
+		return &internalpb.PassivationStrategy{
+			Strategy: &internalpb.PassivationStrategy_TimeBased{
+				TimeBased: &internalpb.TimeBasedPassivation{
+					PassivateAfter: durationpb.New(s.Timeout()),
+				},
+			},
+		}
+	case *passivation.MessagesCountBasedStrategy:
+		return &internalpb.PassivationStrategy{
+			Strategy: &internalpb.PassivationStrategy_MessagesCountBased{
+				MessagesCountBased: &internalpb.MessagesCountBasedPassivation{
+					MaxMessages: int64(s.MaxMessages()),
+				},
+			},
+		}
+	case *passivation.LongLivedStrategy:
+		return &internalpb.PassivationStrategy{
+			Strategy: &internalpb.PassivationStrategy_LongLived{
+				LongLived: new(internalpb.LongLivedPassivation),
+			},
+		}
+	default:
+		return nil
+	}
+}
+
+func passivationStrategyFromProto(proto *internalpb.PassivationStrategy) passivation.Strategy {
+	if proto == nil {
+		return nil
+	}
+
+	switch s := proto.Strategy.(type) {
+	case *internalpb.PassivationStrategy_TimeBased:
+		return passivation.NewTimeBasedStrategy(s.TimeBased.GetPassivateAfter().AsDuration())
+	case *internalpb.PassivationStrategy_MessagesCountBased:
+		return passivation.NewMessageCountBasedStrategy(int(s.MessagesCountBased.GetMaxMessages()))
+	case *internalpb.PassivationStrategy_LongLived:
+		return passivation.NewLongLivedStrategy()
+	default:
+		return nil
+	}
 }

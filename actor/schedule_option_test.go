@@ -45,7 +45,6 @@ func TestScheduleOption(t *testing.T) {
 	newActorSystem, err := NewActorSystem(
 		"test",
 		WithLogger(logger),
-		WithPassivationDisabled(),
 	)
 	// assert there are no error
 	require.NoError(t, err)

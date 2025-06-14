@@ -31,6 +31,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/tochemey/goakt/v3/extension"
+	"github.com/tochemey/goakt/v3/passivation"
 )
 
 func TestSpawnOption(t *testing.T) {
@@ -47,19 +48,6 @@ func TestSpawnOption(t *testing.T) {
 		option := WithSupervisor(supervisor)
 		option.Apply(config)
 		require.Equal(t, &spawnConfig{supervisor: supervisor}, config)
-	})
-	t.Run("spawn option with passivation after", func(t *testing.T) {
-		config := &spawnConfig{}
-		second := time.Second
-		option := WithPassivateAfter(second)
-		option.Apply(config)
-		require.Equal(t, &spawnConfig{passivateAfter: &second}, config)
-	})
-	t.Run("spawn option with long-lived", func(t *testing.T) {
-		config := &spawnConfig{}
-		option := WithLongLived()
-		option.Apply(config)
-		require.Equal(t, &spawnConfig{passivateAfter: &longLived}, config)
 	})
 	t.Run("spawn option with singleton", func(t *testing.T) {
 		config := &spawnConfig{}
@@ -108,5 +96,18 @@ func TestSpawnConfigWithDependencies(t *testing.T) {
 		option.Apply(config)
 		err := config.Validate()
 		require.Error(t, err)
+	})
+	t.Run("spawn option with passivation after", func(t *testing.T) {
+		config := &spawnConfig{}
+		second := time.Second
+		option := WithPassivateAfter(second)
+		option.Apply(config)
+		require.IsType(t, new(passivation.TimeBasedStrategy), config.passivationStrategy)
+	})
+	t.Run("spawn option with long-lived", func(t *testing.T) {
+		config := &spawnConfig{}
+		option := WithLongLived()
+		option.Apply(config)
+		require.IsType(t, new(passivation.TimeBasedStrategy), config.passivationStrategy)
 	})
 }

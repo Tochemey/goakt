@@ -52,7 +52,6 @@ import (
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
-	"google.golang.org/protobuf/types/known/durationpb"
 
 	"github.com/tochemey/goakt/v3/address"
 	"github.com/tochemey/goakt/v3/discovery"
@@ -136,13 +135,13 @@ type ActorSystem interface { //nolint:revive
 	// SpawnOn creates and starts an actor, either locally or on a remote node,
 	// depending on the configuration of the actor system.
 	//
-	// In **cluster mode**, the actor may be spawned on any node in the cluster
+	// In cluster mode, the actor may be spawned on any node in the cluster
 	// based on the specified placement strategy. Supported strategies include:
 	//   - RoundRobin: Distributes actors evenly across available nodes.
 	//   - Random: Choose a node at random.
 	//   - Local: Ensures that the actor is created on the local node.
 	//
-	// In **non-cluster mode**, the actor is created on the local actor system
+	// In non-cluster mode, the actor is created on the local actor system
 	// just like with the standard `Spawn` function.
 	//
 	// Unlike `Spawn`, `SpawnOn` does not return a PID immediately. To interact with
@@ -539,10 +538,7 @@ type actorSystem struct {
 	name string
 	// Specifies the logger to use in the system
 	logger log.Logger
-	// Specifies at what point in time to passivate the actor.
-	// when the actor is passivated it is stopped which means it does not consume
-	// any further resources like memory and cpu. The default value is 5s
-	passivationAfter time.Duration
+
 	// Specifies how long the sender of a message should wait to receive a reply
 	// when using SendReply. The default value is 5s
 	askTimeout time.Duration
@@ -643,7 +639,6 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		wireActorsQueue:        make(chan *internalpb.Actor, 10),
 		name:                   name,
 		logger:                 log.New(log.ErrorLevel, os.Stderr),
-		passivationAfter:       DefaultPassivationTimeout,
 		actorInitMaxRetries:    DefaultInitMaxRetries,
 		locker:                 sync.Mutex{},
 		shutdownTimeout:        DefaultShutdownTimeout,
@@ -1230,13 +1225,13 @@ func (x *actorSystem) SpawnNamedFromFunc(ctx context.Context, name string, recei
 // SpawnOn creates and starts an actor, either locally or on a remote node,
 // depending on the configuration of the actor system.
 //
-// In **cluster mode**, the actor may be spawned on any node in the cluster
+// In cluster mode, the actor may be spawned on any node in the cluster
 // based on the specified placement strategy. Supported strategies include:
 //   - RoundRobin: Distributes actors evenly across available nodes.
 //   - Random: Choose a node at random.
 //   - Local: Ensures that the actor is created on the local node.
 //
-// In **non-cluster mode**, the actor is created on the local actor system
+// In non-cluster mode, the actor is created on the local actor system
 // just like with the standard `Spawn` function.
 //
 // Unlike `Spawn`, `SpawnOn` does not return a PID immediately. To interact with
@@ -1283,15 +1278,18 @@ func (x *actorSystem) SpawnOn(ctx context.Context, name string, actor Actor, opt
 	}
 
 	var peer *cluster.Peer
-	switch config.placement {
-	case Random:
-		peer = peers[rand.IntN(len(peers))] //nolint:gosec
-	case RoundRobin:
-		x.spawnOnNext.Inc()
-		n := x.spawnOnNext.Load()
-		peer = peers[(int(n)-1)%len(peers)]
-	default:
-		// pass
+
+	if len(peers) > 1 {
+		switch config.placement {
+		case Random:
+			peer = peers[rand.IntN(len(peers))] //nolint:gosec
+		case RoundRobin:
+			x.spawnOnNext.Inc()
+			n := x.spawnOnNext.Load()
+			peer = peers[(int(n)-1)%len(peers)]
+		default:
+			// pass
+		}
 	}
 
 	// spawn the actor on the local node
@@ -1300,20 +1298,14 @@ func (x *actorSystem) SpawnOn(ctx context.Context, name string, actor Actor, opt
 		return err
 	}
 
-	// set the passivation time
-	passivateAfter := x.passivationAfter
-	if config.passivateAfter != nil {
-		passivateAfter = *config.passivateAfter
-	}
-
 	return x.remoting.RemoteSpawn(ctx, peer.Host, peer.RemotingPort, &remote.SpawnRequest{
-		Name:           name,
-		Kind:           types.Name(actor),
-		Singleton:      false,
-		Relocatable:    config.relocatable,
-		PassivateAfter: passivateAfter,
-		Dependencies:   config.dependencies,
-		EnableStashing: config.enableStash,
+		Name:                name,
+		Kind:                types.Name(actor),
+		Singleton:           false,
+		Relocatable:         config.relocatable,
+		PassivationStrategy: config.passivationStrategy,
+		Dependencies:        config.dependencies,
+		EnableStashing:      config.enableStash,
 	})
 }
 
@@ -1869,7 +1861,7 @@ func (x *actorSystem) RemoteSpawn(ctx context.Context, request *connect.Request[
 	}
 
 	opts := []SpawnOption{
-		WithPassivateAfter(msg.GetPassivateAfter().AsDuration()),
+		WithPassivationStrategy(passivationStrategyFromProto(msg.GetPassivationStrategy())),
 	}
 
 	if !msg.GetRelocatable() {
@@ -2221,13 +2213,13 @@ func (x *actorSystem) broadcastActor(pid *PID) error {
 		}
 
 		x.wireActorsQueue <- &internalpb.Actor{
-			Address:        pid.Address().Address,
-			Type:           types.Name(pid.Actor()),
-			IsSingleton:    pid.IsSingleton(),
-			Relocatable:    pid.IsRelocatable(),
-			PassivateAfter: durationpb.New(pid.PassivationTime()),
-			Dependencies:   dependencies,
-			EnableStash:    pid.stashBox != nil,
+			Address:             pid.Address().Address,
+			Type:                types.Name(pid.Actor()),
+			IsSingleton:         pid.IsSingleton(),
+			Relocatable:         pid.IsRelocatable(),
+			PassivationStrategy: passivationStrategyToProto(pid.PassivationStrategy()),
+			Dependencies:        dependencies,
+			EnableStash:         pid.stashBox != nil,
 		}
 	}
 	return nil
@@ -2742,17 +2734,7 @@ func (x *actorSystem) configPID(ctx context.Context, name string, actor Actor, o
 		pidOpts = append(pidOpts, withDependencies(spawnConfig.dependencies...))
 	}
 
-	switch {
-	case spawnConfig.isSystem:
-		pidOpts = append(pidOpts, withPassivationDisabled())
-	default:
-		switch {
-		case spawnConfig.passivateAfter != nil:
-			pidOpts = append(pidOpts, withPassivationAfter(*spawnConfig.passivateAfter))
-		default:
-			pidOpts = append(pidOpts, withPassivationAfter(x.passivationAfter))
-		}
-	}
+	pidOpts = append(pidOpts, withPassivationStrategy(spawnConfig.passivationStrategy))
 
 	pid, err := newPID(
 		ctx,
