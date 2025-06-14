@@ -84,14 +84,14 @@ func TestNewSpawnConfig(t *testing.T) {
 func TestSpawnConfigWithDependencies(t *testing.T) {
 	t.Run("With valid dependency", func(t *testing.T) {
 		config := &spawnConfig{}
-		dependency := dependencyMock("id", "user", "email")
+		dependency := NewMockDependency("id", "user", "email")
 		option := WithDependencies(dependency)
 		option.Apply(config)
 		require.Equal(t, &spawnConfig{dependencies: []extension.Dependency{dependency}}, config)
 	})
 	t.Run("With dependencies validation", func(t *testing.T) {
 		config := &spawnConfig{}
-		dependency := dependencyMock("$omeN@me", "user", "email")
+		dependency := NewMockDependency("$omeN@me", "user", "email")
 		option := WithDependencies(dependency)
 		option.Apply(config)
 		err := config.Validate()

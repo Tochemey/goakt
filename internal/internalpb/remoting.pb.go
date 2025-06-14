@@ -832,12 +832,140 @@ func (*RemoteReinstateResponse) Descriptor() ([]byte, []int) {
 	return file_internal_remoting_proto_rawDescGZIP(), []int{14}
 }
 
+type RemoteMessageGrainRequest struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	Grain          *Grain                 `protobuf:"bytes,1,opt,name=grain,proto3" json:"grain,omitempty"`
+	Sender         *GrainId               `protobuf:"bytes,2,opt,name=sender,proto3,oneof" json:"sender,omitempty"`
+	RequestTimeout *durationpb.Duration   `protobuf:"bytes,3,opt,name=request_timeout,json=requestTimeout,proto3,oneof" json:"request_timeout,omitempty"`
+	PassivateAfter *durationpb.Duration   `protobuf:"bytes,4,opt,name=passivate_after,json=passivateAfter,proto3" json:"passivate_after,omitempty"`
+	Dependencies   []*Dependency          `protobuf:"bytes,5,rep,name=dependencies,proto3" json:"dependencies,omitempty"`
+	Message        *anypb.Any             `protobuf:"bytes,6,opt,name=message,proto3" json:"message,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *RemoteMessageGrainRequest) Reset() {
+	*x = RemoteMessageGrainRequest{}
+	mi := &file_internal_remoting_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RemoteMessageGrainRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RemoteMessageGrainRequest) ProtoMessage() {}
+
+func (x *RemoteMessageGrainRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_remoting_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RemoteMessageGrainRequest.ProtoReflect.Descriptor instead.
+func (*RemoteMessageGrainRequest) Descriptor() ([]byte, []int) {
+	return file_internal_remoting_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *RemoteMessageGrainRequest) GetGrain() *Grain {
+	if x != nil {
+		return x.Grain
+	}
+	return nil
+}
+
+func (x *RemoteMessageGrainRequest) GetSender() *GrainId {
+	if x != nil {
+		return x.Sender
+	}
+	return nil
+}
+
+func (x *RemoteMessageGrainRequest) GetRequestTimeout() *durationpb.Duration {
+	if x != nil {
+		return x.RequestTimeout
+	}
+	return nil
+}
+
+func (x *RemoteMessageGrainRequest) GetPassivateAfter() *durationpb.Duration {
+	if x != nil {
+		return x.PassivateAfter
+	}
+	return nil
+}
+
+func (x *RemoteMessageGrainRequest) GetDependencies() []*Dependency {
+	if x != nil {
+		return x.Dependencies
+	}
+	return nil
+}
+
+func (x *RemoteMessageGrainRequest) GetMessage() *anypb.Any {
+	if x != nil {
+		return x.Message
+	}
+	return nil
+}
+
+type RemoteMessageGrainResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Message       *anypb.Any             `protobuf:"bytes,1,opt,name=message,proto3" json:"message,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RemoteMessageGrainResponse) Reset() {
+	*x = RemoteMessageGrainResponse{}
+	mi := &file_internal_remoting_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RemoteMessageGrainResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RemoteMessageGrainResponse) ProtoMessage() {}
+
+func (x *RemoteMessageGrainResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_remoting_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RemoteMessageGrainResponse.ProtoReflect.Descriptor instead.
+func (*RemoteMessageGrainResponse) Descriptor() ([]byte, []int) {
+	return file_internal_remoting_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *RemoteMessageGrainResponse) GetMessage() *anypb.Any {
+	if x != nil {
+		return x.Message
+	}
+	return nil
+}
+
 var File_internal_remoting_proto protoreflect.FileDescriptor
 
 const file_internal_remoting_proto_rawDesc = "" +
 	"\n" +
 	"\x17internal/remoting.proto\x12\n" +
-	"internalpb\x1a\x11goakt/goakt.proto\x1a\x19google/protobuf/any.proto\x1a\x1egoogle/protobuf/duration.proto\x1a\x19internal/dependency.proto\x1a\x1ainternal/passivation.proto\"\x8b\x01\n" +
+	"internalpb\x1a\x11goakt/goakt.proto\x1a\x19google/protobuf/any.proto\x1a\x1egoogle/protobuf/duration.proto\x1a\x19internal/dependency.proto\x1a\x14internal/grain.proto\x1a\x1ainternal/passivation.proto\"\x8b\x01\n" +
 	"\x10RemoteAskRequest\x12B\n" +
 	"\x0fremote_messages\x18\x01 \x03(\v2\x19.internalpb.RemoteMessageR\x0eremoteMessages\x123\n" +
 	"\atimeout\x18\x02 \x01(\v2\x19.google.protobuf.DurationR\atimeout\"E\n" +
@@ -883,7 +1011,18 @@ const file_internal_remoting_proto_rawDesc = "" +
 	"\x04host\x18\x01 \x01(\tR\x04host\x12\x12\n" +
 	"\x04port\x18\x02 \x01(\x05R\x04port\x12\x12\n" +
 	"\x04name\x18\x03 \x01(\tR\x04name\"\x19\n" +
-	"\x17RemoteReinstateResponse2\xca\x04\n" +
+	"\x17RemoteReinstateResponse\"\x8e\x03\n" +
+	"\x19RemoteMessageGrainRequest\x12'\n" +
+	"\x05grain\x18\x01 \x01(\v2\x11.internalpb.GrainR\x05grain\x120\n" +
+	"\x06sender\x18\x02 \x01(\v2\x13.internalpb.GrainIdH\x00R\x06sender\x88\x01\x01\x12G\n" +
+	"\x0frequest_timeout\x18\x03 \x01(\v2\x19.google.protobuf.DurationH\x01R\x0erequestTimeout\x88\x01\x01\x12B\n" +
+	"\x0fpassivate_after\x18\x04 \x01(\v2\x19.google.protobuf.DurationR\x0epassivateAfter\x12:\n" +
+	"\fdependencies\x18\x05 \x03(\v2\x16.internalpb.DependencyR\fdependencies\x12.\n" +
+	"\amessage\x18\x06 \x01(\v2\x14.google.protobuf.AnyR\amessageB\t\n" +
+	"\a_senderB\x12\n" +
+	"\x10_request_timeout\"L\n" +
+	"\x1aRemoteMessageGrainResponse\x12.\n" +
+	"\amessage\x18\x01 \x01(\v2\x14.google.protobuf.AnyR\amessage2\xaf\x05\n" +
 	"\x0fRemotingService\x12H\n" +
 	"\tRemoteAsk\x12\x1c.internalpb.RemoteAskRequest\x1a\x1d.internalpb.RemoteAskResponse\x12K\n" +
 	"\n" +
@@ -893,7 +1032,8 @@ const file_internal_remoting_proto_rawDesc = "" +
 	"\n" +
 	"RemoteStop\x12\x1d.internalpb.RemoteStopRequest\x1a\x1e.internalpb.RemoteStopResponse\x12N\n" +
 	"\vRemoteSpawn\x12\x1e.internalpb.RemoteSpawnRequest\x1a\x1f.internalpb.RemoteSpawnResponse\x12Z\n" +
-	"\x0fRemoteReinstate\x12\".internalpb.RemoteReinstateRequest\x1a#.internalpb.RemoteReinstateResponseB\xa6\x01\n" +
+	"\x0fRemoteReinstate\x12\".internalpb.RemoteReinstateRequest\x1a#.internalpb.RemoteReinstateResponse\x12c\n" +
+	"\x12RemoteMessageGrain\x12%.internalpb.RemoteMessageGrainRequest\x1a&.internalpb.RemoteMessageGrainResponseB\xa6\x01\n" +
 	"\x0ecom.internalpbB\rRemotingProtoH\x02P\x01Z;github.com/tochemey/goakt/v3/internal/internalpb;internalpb\xa2\x02\x03IXX\xaa\x02\n" +
 	"Internalpb\xca\x02\n" +
 	"Internalpb\xe2\x02\x16Internalpb\\GPBMetadata\xea\x02\n" +
@@ -911,59 +1051,72 @@ func file_internal_remoting_proto_rawDescGZIP() []byte {
 	return file_internal_remoting_proto_rawDescData
 }
 
-var file_internal_remoting_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
+var file_internal_remoting_proto_msgTypes = make([]protoimpl.MessageInfo, 17)
 var file_internal_remoting_proto_goTypes = []any{
-	(*RemoteAskRequest)(nil),        // 0: internalpb.RemoteAskRequest
-	(*RemoteAskResponse)(nil),       // 1: internalpb.RemoteAskResponse
-	(*RemoteTellRequest)(nil),       // 2: internalpb.RemoteTellRequest
-	(*RemoteTellResponse)(nil),      // 3: internalpb.RemoteTellResponse
-	(*RemoteLookupRequest)(nil),     // 4: internalpb.RemoteLookupRequest
-	(*RemoteLookupResponse)(nil),    // 5: internalpb.RemoteLookupResponse
-	(*RemoteMessage)(nil),           // 6: internalpb.RemoteMessage
-	(*RemoteReSpawnRequest)(nil),    // 7: internalpb.RemoteReSpawnRequest
-	(*RemoteReSpawnResponse)(nil),   // 8: internalpb.RemoteReSpawnResponse
-	(*RemoteStopRequest)(nil),       // 9: internalpb.RemoteStopRequest
-	(*RemoteStopResponse)(nil),      // 10: internalpb.RemoteStopResponse
-	(*RemoteSpawnRequest)(nil),      // 11: internalpb.RemoteSpawnRequest
-	(*RemoteSpawnResponse)(nil),     // 12: internalpb.RemoteSpawnResponse
-	(*RemoteReinstateRequest)(nil),  // 13: internalpb.RemoteReinstateRequest
-	(*RemoteReinstateResponse)(nil), // 14: internalpb.RemoteReinstateResponse
-	(*durationpb.Duration)(nil),     // 15: google.protobuf.Duration
-	(*anypb.Any)(nil),               // 16: google.protobuf.Any
-	(*goaktpb.Address)(nil),         // 17: goaktpb.Address
-	(*PassivationStrategy)(nil),     // 18: internalpb.PassivationStrategy
-	(*Dependency)(nil),              // 19: internalpb.Dependency
+	(*RemoteAskRequest)(nil),           // 0: internalpb.RemoteAskRequest
+	(*RemoteAskResponse)(nil),          // 1: internalpb.RemoteAskResponse
+	(*RemoteTellRequest)(nil),          // 2: internalpb.RemoteTellRequest
+	(*RemoteTellResponse)(nil),         // 3: internalpb.RemoteTellResponse
+	(*RemoteLookupRequest)(nil),        // 4: internalpb.RemoteLookupRequest
+	(*RemoteLookupResponse)(nil),       // 5: internalpb.RemoteLookupResponse
+	(*RemoteMessage)(nil),              // 6: internalpb.RemoteMessage
+	(*RemoteReSpawnRequest)(nil),       // 7: internalpb.RemoteReSpawnRequest
+	(*RemoteReSpawnResponse)(nil),      // 8: internalpb.RemoteReSpawnResponse
+	(*RemoteStopRequest)(nil),          // 9: internalpb.RemoteStopRequest
+	(*RemoteStopResponse)(nil),         // 10: internalpb.RemoteStopResponse
+	(*RemoteSpawnRequest)(nil),         // 11: internalpb.RemoteSpawnRequest
+	(*RemoteSpawnResponse)(nil),        // 12: internalpb.RemoteSpawnResponse
+	(*RemoteReinstateRequest)(nil),     // 13: internalpb.RemoteReinstateRequest
+	(*RemoteReinstateResponse)(nil),    // 14: internalpb.RemoteReinstateResponse
+	(*RemoteMessageGrainRequest)(nil),  // 15: internalpb.RemoteMessageGrainRequest
+	(*RemoteMessageGrainResponse)(nil), // 16: internalpb.RemoteMessageGrainResponse
+	(*durationpb.Duration)(nil),        // 17: google.protobuf.Duration
+	(*anypb.Any)(nil),                  // 18: google.protobuf.Any
+	(*goaktpb.Address)(nil),            // 19: goaktpb.Address
+	(*PassivationStrategy)(nil),        // 20: internalpb.PassivationStrategy
+	(*Dependency)(nil),                 // 21: internalpb.Dependency
+	(*Grain)(nil),                      // 22: internalpb.Grain
+	(*GrainId)(nil),                    // 23: internalpb.GrainId
 }
 var file_internal_remoting_proto_depIdxs = []int32{
 	6,  // 0: internalpb.RemoteAskRequest.remote_messages:type_name -> internalpb.RemoteMessage
-	15, // 1: internalpb.RemoteAskRequest.timeout:type_name -> google.protobuf.Duration
-	16, // 2: internalpb.RemoteAskResponse.messages:type_name -> google.protobuf.Any
+	17, // 1: internalpb.RemoteAskRequest.timeout:type_name -> google.protobuf.Duration
+	18, // 2: internalpb.RemoteAskResponse.messages:type_name -> google.protobuf.Any
 	6,  // 3: internalpb.RemoteTellRequest.remote_messages:type_name -> internalpb.RemoteMessage
-	17, // 4: internalpb.RemoteLookupResponse.address:type_name -> goaktpb.Address
-	17, // 5: internalpb.RemoteMessage.sender:type_name -> goaktpb.Address
-	17, // 6: internalpb.RemoteMessage.receiver:type_name -> goaktpb.Address
-	16, // 7: internalpb.RemoteMessage.message:type_name -> google.protobuf.Any
-	18, // 8: internalpb.RemoteSpawnRequest.passivation_strategy:type_name -> internalpb.PassivationStrategy
-	19, // 9: internalpb.RemoteSpawnRequest.dependencies:type_name -> internalpb.Dependency
-	0,  // 10: internalpb.RemotingService.RemoteAsk:input_type -> internalpb.RemoteAskRequest
-	2,  // 11: internalpb.RemotingService.RemoteTell:input_type -> internalpb.RemoteTellRequest
-	4,  // 12: internalpb.RemotingService.RemoteLookup:input_type -> internalpb.RemoteLookupRequest
-	7,  // 13: internalpb.RemotingService.RemoteReSpawn:input_type -> internalpb.RemoteReSpawnRequest
-	9,  // 14: internalpb.RemotingService.RemoteStop:input_type -> internalpb.RemoteStopRequest
-	11, // 15: internalpb.RemotingService.RemoteSpawn:input_type -> internalpb.RemoteSpawnRequest
-	13, // 16: internalpb.RemotingService.RemoteReinstate:input_type -> internalpb.RemoteReinstateRequest
-	1,  // 17: internalpb.RemotingService.RemoteAsk:output_type -> internalpb.RemoteAskResponse
-	3,  // 18: internalpb.RemotingService.RemoteTell:output_type -> internalpb.RemoteTellResponse
-	5,  // 19: internalpb.RemotingService.RemoteLookup:output_type -> internalpb.RemoteLookupResponse
-	8,  // 20: internalpb.RemotingService.RemoteReSpawn:output_type -> internalpb.RemoteReSpawnResponse
-	10, // 21: internalpb.RemotingService.RemoteStop:output_type -> internalpb.RemoteStopResponse
-	12, // 22: internalpb.RemotingService.RemoteSpawn:output_type -> internalpb.RemoteSpawnResponse
-	14, // 23: internalpb.RemotingService.RemoteReinstate:output_type -> internalpb.RemoteReinstateResponse
-	17, // [17:24] is the sub-list for method output_type
-	10, // [10:17] is the sub-list for method input_type
-	10, // [10:10] is the sub-list for extension type_name
-	10, // [10:10] is the sub-list for extension extendee
-	0,  // [0:10] is the sub-list for field type_name
+	19, // 4: internalpb.RemoteLookupResponse.address:type_name -> goaktpb.Address
+	19, // 5: internalpb.RemoteMessage.sender:type_name -> goaktpb.Address
+	19, // 6: internalpb.RemoteMessage.receiver:type_name -> goaktpb.Address
+	18, // 7: internalpb.RemoteMessage.message:type_name -> google.protobuf.Any
+	20, // 8: internalpb.RemoteSpawnRequest.passivation_strategy:type_name -> internalpb.PassivationStrategy
+	21, // 9: internalpb.RemoteSpawnRequest.dependencies:type_name -> internalpb.Dependency
+	22, // 10: internalpb.RemoteMessageGrainRequest.grain:type_name -> internalpb.Grain
+	23, // 11: internalpb.RemoteMessageGrainRequest.sender:type_name -> internalpb.GrainId
+	17, // 12: internalpb.RemoteMessageGrainRequest.request_timeout:type_name -> google.protobuf.Duration
+	17, // 13: internalpb.RemoteMessageGrainRequest.passivate_after:type_name -> google.protobuf.Duration
+	21, // 14: internalpb.RemoteMessageGrainRequest.dependencies:type_name -> internalpb.Dependency
+	18, // 15: internalpb.RemoteMessageGrainRequest.message:type_name -> google.protobuf.Any
+	18, // 16: internalpb.RemoteMessageGrainResponse.message:type_name -> google.protobuf.Any
+	0,  // 17: internalpb.RemotingService.RemoteAsk:input_type -> internalpb.RemoteAskRequest
+	2,  // 18: internalpb.RemotingService.RemoteTell:input_type -> internalpb.RemoteTellRequest
+	4,  // 19: internalpb.RemotingService.RemoteLookup:input_type -> internalpb.RemoteLookupRequest
+	7,  // 20: internalpb.RemotingService.RemoteReSpawn:input_type -> internalpb.RemoteReSpawnRequest
+	9,  // 21: internalpb.RemotingService.RemoteStop:input_type -> internalpb.RemoteStopRequest
+	11, // 22: internalpb.RemotingService.RemoteSpawn:input_type -> internalpb.RemoteSpawnRequest
+	13, // 23: internalpb.RemotingService.RemoteReinstate:input_type -> internalpb.RemoteReinstateRequest
+	15, // 24: internalpb.RemotingService.RemoteMessageGrain:input_type -> internalpb.RemoteMessageGrainRequest
+	1,  // 25: internalpb.RemotingService.RemoteAsk:output_type -> internalpb.RemoteAskResponse
+	3,  // 26: internalpb.RemotingService.RemoteTell:output_type -> internalpb.RemoteTellResponse
+	5,  // 27: internalpb.RemotingService.RemoteLookup:output_type -> internalpb.RemoteLookupResponse
+	8,  // 28: internalpb.RemotingService.RemoteReSpawn:output_type -> internalpb.RemoteReSpawnResponse
+	10, // 29: internalpb.RemotingService.RemoteStop:output_type -> internalpb.RemoteStopResponse
+	12, // 30: internalpb.RemotingService.RemoteSpawn:output_type -> internalpb.RemoteSpawnResponse
+	14, // 31: internalpb.RemotingService.RemoteReinstate:output_type -> internalpb.RemoteReinstateResponse
+	16, // 32: internalpb.RemotingService.RemoteMessageGrain:output_type -> internalpb.RemoteMessageGrainResponse
+	25, // [25:33] is the sub-list for method output_type
+	17, // [17:25] is the sub-list for method input_type
+	17, // [17:17] is the sub-list for extension type_name
+	17, // [17:17] is the sub-list for extension extendee
+	0,  // [0:17] is the sub-list for field type_name
 }
 
 func init() { file_internal_remoting_proto_init() }
@@ -972,14 +1125,16 @@ func file_internal_remoting_proto_init() {
 		return
 	}
 	file_internal_dependency_proto_init()
+	file_internal_grain_proto_init()
 	file_internal_passivation_proto_init()
+	file_internal_remoting_proto_msgTypes[15].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_internal_remoting_proto_rawDesc), len(file_internal_remoting_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   15,
+			NumMessages:   17,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

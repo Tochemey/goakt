@@ -63,7 +63,7 @@ func TestRebalancing(t *testing.T) {
 	// let us create 4 actors on each node
 	for j := 1; j <= 4; j++ {
 		actorName := fmt.Sprintf("Node1-Actor-%d", j)
-		pid, err := node1.Spawn(ctx, actorName, newMockActor())
+		pid, err := node1.Spawn(ctx, actorName, NewMockActor())
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 	}
@@ -72,7 +72,7 @@ func TestRebalancing(t *testing.T) {
 
 	for j := 1; j <= 4; j++ {
 		actorName := fmt.Sprintf("Node2-Actor-%d", j)
-		pid, err := node2.Spawn(ctx, actorName, newMockActor())
+		pid, err := node2.Spawn(ctx, actorName, NewMockActor())
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 	}
@@ -81,7 +81,7 @@ func TestRebalancing(t *testing.T) {
 
 	for j := 1; j <= 4; j++ {
 		actorName := fmt.Sprintf("Node3-Actor-%d", j)
-		pid, err := node3.Spawn(ctx, actorName, newMockActor())
+		pid, err := node3.Spawn(ctx, actorName, NewMockActor())
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 	}
@@ -144,7 +144,7 @@ func TestRebalancingWithTLSEnabled(t *testing.T) {
 	// let us create 4 actors on each node
 	for j := 1; j <= 4; j++ {
 		actorName := fmt.Sprintf("Node1-Actor-%d", j)
-		pid, err := node1.Spawn(ctx, actorName, newMockActor())
+		pid, err := node1.Spawn(ctx, actorName, NewMockActor())
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 	}
@@ -153,7 +153,7 @@ func TestRebalancingWithTLSEnabled(t *testing.T) {
 
 	for j := 1; j <= 4; j++ {
 		actorName := fmt.Sprintf("Node2-Actor-%d", j)
-		pid, err := node2.Spawn(ctx, actorName, newMockActor())
+		pid, err := node2.Spawn(ctx, actorName, NewMockActor())
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 	}
@@ -162,7 +162,7 @@ func TestRebalancingWithTLSEnabled(t *testing.T) {
 
 	for j := 1; j <= 4; j++ {
 		actorName := fmt.Sprintf("Node3-Actor-%d", j)
-		pid, err := node3.Spawn(ctx, actorName, newMockActor())
+		pid, err := node3.Spawn(ctx, actorName, NewMockActor())
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 	}
@@ -214,7 +214,7 @@ func TestRebalancingWithSingletonActor(t *testing.T) {
 	require.NotNil(t, sd3)
 
 	// create a singleton actor
-	err := node1.SpawnSingleton(ctx, "actorName", newMockActor())
+	err := node1.SpawnSingleton(ctx, "actorName", NewMockActor())
 	require.NoError(t, err)
 
 	util.Pause(time.Second)
@@ -259,7 +259,7 @@ func TestRebalancingWithActorRelocationDisabled(t *testing.T) {
 	// let us create 4 actors on each node
 	for j := 1; j <= 4; j++ {
 		actorName := fmt.Sprintf("Node1-Actor-%d", j)
-		pid, err := node1.Spawn(ctx, actorName, newMockActor())
+		pid, err := node1.Spawn(ctx, actorName, NewMockActor())
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 	}
@@ -268,7 +268,7 @@ func TestRebalancingWithActorRelocationDisabled(t *testing.T) {
 
 	for j := 1; j <= 4; j++ {
 		actorName := fmt.Sprintf("Node2-Actor-%d", j)
-		pid, err := node2.Spawn(ctx, actorName, newMockActor(), WithRelocationDisabled())
+		pid, err := node2.Spawn(ctx, actorName, NewMockActor(), WithRelocationDisabled())
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 	}
@@ -277,7 +277,7 @@ func TestRebalancingWithActorRelocationDisabled(t *testing.T) {
 
 	for j := 1; j <= 4; j++ {
 		actorName := fmt.Sprintf("Node3-Actor-%d", j)
-		pid, err := node3.Spawn(ctx, actorName, newMockActor())
+		pid, err := node3.Spawn(ctx, actorName, NewMockActor())
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 	}
@@ -331,7 +331,7 @@ func TestRebalancingWithSystemRelocationDisabled(t *testing.T) {
 	// let us create 4 actors on each node
 	for j := 1; j <= 4; j++ {
 		actorName := fmt.Sprintf("Node1-Actor-%d", j)
-		pid, err := node1.Spawn(ctx, actorName, newMockActor())
+		pid, err := node1.Spawn(ctx, actorName, NewMockActor())
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 	}
@@ -340,7 +340,7 @@ func TestRebalancingWithSystemRelocationDisabled(t *testing.T) {
 
 	for j := 1; j <= 4; j++ {
 		actorName := fmt.Sprintf("Node2-Actor-%d", j)
-		pid, err := node2.Spawn(ctx, actorName, newMockActor())
+		pid, err := node2.Spawn(ctx, actorName, NewMockActor())
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 	}
@@ -349,7 +349,7 @@ func TestRebalancingWithSystemRelocationDisabled(t *testing.T) {
 
 	for j := 1; j <= 4; j++ {
 		actorName := fmt.Sprintf("Node3-Actor-%d", j)
-		pid, err := node3.Spawn(ctx, actorName, newMockActor())
+		pid, err := node3.Spawn(ctx, actorName, NewMockActor())
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 	}
@@ -388,7 +388,7 @@ func TestRebalancingWithExtension(t *testing.T) {
 	srv := startNatsServer(t)
 
 	// create the state store extension
-	stateStoreExtension := newMockExtension()
+	stateStoreExtension := NewMockExtension()
 
 	// create and start a system cluster
 	node1, sd1 := testCluster(t, srv.Addr().String(), withMockExtension(stateStoreExtension))
@@ -408,7 +408,7 @@ func TestRebalancingWithExtension(t *testing.T) {
 	// let us create 4 entities on each node
 	for j := 1; j <= 4; j++ {
 		entityID := fmt.Sprintf("node1-entity-%d", j)
-		pid, err := node1.Spawn(ctx, entityID, newMockEntity())
+		pid, err := node1.Spawn(ctx, entityID, NewMockEntity())
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 
@@ -423,7 +423,7 @@ func TestRebalancingWithExtension(t *testing.T) {
 
 	for j := 1; j <= 4; j++ {
 		entityID := fmt.Sprintf("node2-entity-%d", j)
-		pid, err := node2.Spawn(ctx, entityID, newMockEntity())
+		pid, err := node2.Spawn(ctx, entityID, NewMockEntity())
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 
@@ -438,7 +438,7 @@ func TestRebalancingWithExtension(t *testing.T) {
 
 	for j := 1; j <= 4; j++ {
 		entityID := fmt.Sprintf("node3-entity-%d", j)
-		pid, err := node3.Spawn(ctx, entityID, newMockEntity())
+		pid, err := node3.Spawn(ctx, entityID, NewMockEntity())
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 
@@ -500,8 +500,8 @@ func TestRebalancingWithDependency(t *testing.T) {
 	for j := 1; j <= 4; j++ {
 		entityID := fmt.Sprintf("node1-actor-%d", j)
 		// create the dependency
-		dependency := dependencyMock(dependencyID, entityID, "email")
-		pid, err := node1.Spawn(ctx, entityID, newMockActor(), WithDependencies(dependency))
+		dependency := NewMockDependency(dependencyID, entityID, "email")
+		pid, err := node1.Spawn(ctx, entityID, NewMockActor(), WithDependencies(dependency))
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 	}
@@ -511,8 +511,8 @@ func TestRebalancingWithDependency(t *testing.T) {
 	for j := 1; j <= 4; j++ {
 		entityID := fmt.Sprintf("node2-actor-%d", j)
 		// create the dependency
-		dependency := dependencyMock(dependencyID, entityID, "email")
-		pid, err := node2.Spawn(ctx, entityID, newMockActor(), WithDependencies(dependency))
+		dependency := NewMockDependency(dependencyID, entityID, "email")
+		pid, err := node2.Spawn(ctx, entityID, NewMockActor(), WithDependencies(dependency))
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 	}
@@ -543,7 +543,7 @@ func TestRebalancingWithDependency(t *testing.T) {
 
 	dep := pid.Dependency(dependencyID)
 	require.NotNil(t, dep)
-	mockdep := dep.(*mockDependency)
+	mockdep := dep.(*MockDependency)
 	require.Equal(t, actorName, mockdep.Username)
 	require.Equal(t, "email", mockdep.Email)
 

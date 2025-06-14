@@ -56,7 +56,7 @@ func TestRouter(t *testing.T) {
 
 		util.Pause(time.Second)
 
-		routeesKind := new(mockRouterActor)
+		routeesKind := new(MockRouter)
 		poolSize := 2
 		routingStrategy := FanOutRouting
 		router, err := system.SpawnRouter(ctx, poolSize, routeesKind, WithRoutingStrategy(routingStrategy))
@@ -114,7 +114,7 @@ func TestRouter(t *testing.T) {
 
 		util.Pause(time.Second)
 
-		routeesKind := new(mockRouterActor)
+		routeesKind := new(MockRouter)
 		poolSize := 2
 		routingStrategy := FanOutRouting
 		router, err := system.SpawnRouter(ctx, poolSize, routeesKind, WithRoutingStrategy(routingStrategy))
@@ -168,7 +168,7 @@ func TestRouter(t *testing.T) {
 
 		util.Pause(time.Second)
 
-		routeesKind := new(mockRouterActor)
+		routeesKind := new(MockRouter)
 		poolSize := 1
 		routingStrategy := RoundRobinRouting
 		router, err := system.SpawnRouter(ctx, poolSize, routeesKind, WithRoutingStrategy(routingStrategy))
@@ -222,7 +222,7 @@ func TestRouter(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, consumer)
 
-		routeesKind := new(mockRouterActor)
+		routeesKind := new(MockRouter)
 		poolSize := 1
 		routingStrategy := RoundRobinRouting
 		router, err := system.SpawnRouter(ctx, poolSize, routeesKind, WithRoutingStrategy(routingStrategy))
@@ -281,7 +281,7 @@ func TestRouter(t *testing.T) {
 
 		util.Pause(time.Second)
 
-		routeesKind := new(mockRouterActor)
+		routeesKind := new(MockRouter)
 		poolSize := 1
 		routingStrategy := RandomRouting
 		router, err := system.SpawnRouter(ctx, poolSize, routeesKind, WithRoutingStrategy(routingStrategy))

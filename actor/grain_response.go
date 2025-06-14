@@ -22,34 +22,34 @@
  * SOFTWARE.
  */
 
-package client
+package actor
 
-// Actor defines a given actor name and kind.
-// Kind is a string representation of the type within its package (e.g pkg/User)
-type Actor struct {
-	name string // Name defines the actor name. This will be unique in the Client
-	kind string // Kind specifies the actor kind.
+import "google.golang.org/protobuf/proto"
+
+// GrainResponse represents the response returned from a Grain after processing a request.
+//
+// It wraps a protobuf message that contains the actual response payload from the Grain.
+// Use the Message method to access the underlying proto.Message.
+type GrainResponse struct {
+	message proto.Message
 }
 
-// NewActor creates an instance of Actor
-func NewActor(kind string) *Actor {
-	return &Actor{
-		kind: kind,
+// Message returns the underlying protobuf message contained in the GrainResponse.
+//
+// This method provides access to the actual response payload sent by the Grain.
+func (resp *GrainResponse) Message() proto.Message {
+	return resp.message
+}
+
+// NewGrainResponse creates a new GrainResponse with the given protobuf message.
+//
+// Parameters:
+//   - message: the proto.Message to wrap in the GrainResponse.
+//
+// Returns:
+//   - A pointer to a new GrainResponse containing the provided message.
+func NewGrainResponse(message proto.Message) *GrainResponse {
+	return &GrainResponse{
+		message: message,
 	}
-}
-
-// WithName set the given name
-func (x *Actor) WithName(name string) *Actor {
-	x.name = name
-	return x
-}
-
-// Name returns the actor name
-func (x *Actor) Name() string {
-	return x.name
-}
-
-// Kind returns the actor kind
-func (x *Actor) Kind() string {
-	return x.kind
 }

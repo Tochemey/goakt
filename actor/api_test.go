@@ -63,7 +63,7 @@ func TestAsk(t *testing.T) {
 
 			// create a test actor
 			actorName := "test"
-			actor := newMockActor()
+			actor := NewMockActor()
 			actorRef, err := sys.Spawn(ctx, actorName, actor)
 			require.NoError(t, err)
 			assert.NotNil(t, actorRef)
@@ -104,7 +104,7 @@ func TestAsk(t *testing.T) {
 
 			// create a test actor
 			actorName := "test"
-			actor := newMockActor()
+			actor := NewMockActor()
 			actorRef, err := sys.Spawn(ctx, actorName, actor)
 			require.NoError(t, err)
 			assert.NotNil(t, actorRef)
@@ -148,7 +148,7 @@ func TestAsk(t *testing.T) {
 
 			// create a test actor
 			actorName := "test"
-			actor := newMockActor()
+			actor := NewMockActor()
 			actorRef, err := sys.Spawn(ctx, actorName, actor)
 			require.NoError(t, err)
 			assert.NotNil(t, actorRef)
@@ -188,7 +188,7 @@ func TestAsk(t *testing.T) {
 
 			// create a test actor
 			actorName := "test"
-			actor := newMockActor()
+			actor := NewMockActor()
 			actorRef, err := sys.Spawn(ctx, actorName, actor)
 			require.NoError(t, err)
 			assert.NotNil(t, actorRef)
@@ -231,7 +231,7 @@ func TestAsk(t *testing.T) {
 
 			// create a test actor
 			actorName := "test"
-			actor := newMockActor()
+			actor := NewMockActor()
 			actorRef, err := sys.Spawn(ctx, actorName, actor)
 			require.NoError(t, err)
 			assert.NotNil(t, actorRef)
@@ -276,7 +276,7 @@ func TestAsk(t *testing.T) {
 
 			// create a test actor
 			actorName := "test"
-			actor := newMockActor()
+			actor := NewMockActor()
 			actorRef, err := sys.Spawn(ctx, actorName, actor)
 			require.NoError(t, err)
 			assert.NotNil(t, actorRef)
@@ -319,7 +319,7 @@ func TestAsk(t *testing.T) {
 
 			// create a test actor
 			actorName := "test"
-			actor := newMockActor()
+			actor := NewMockActor()
 			actorRef, err := sys.Spawn(ctx, actorName, actor)
 			require.NoError(t, err)
 			assert.NotNil(t, actorRef)
@@ -363,7 +363,7 @@ func TestTell(t *testing.T) {
 
 			// create a test actor
 			actorName := "test"
-			actor := newMockActor()
+			actor := NewMockActor()
 			actorRef, err := sys.Spawn(ctx, actorName, actor)
 			require.NoError(t, err)
 			assert.NotNil(t, actorRef)
@@ -406,7 +406,7 @@ func TestTell(t *testing.T) {
 
 			// create a test actor
 			actorName := "test"
-			actor := newMockActor()
+			actor := NewMockActor()
 			actorRef, err := sys.Spawn(ctx, actorName, actor)
 			require.NoError(t, err)
 			assert.NotNil(t, actorRef)
@@ -449,7 +449,7 @@ func TestTell(t *testing.T) {
 
 			// create a test actor
 			actorName := "test"
-			actor := newMockActor()
+			actor := NewMockActor()
 			actorRef, err := sys.Spawn(ctx, actorName, actor)
 			require.NoError(t, err)
 			assert.NotNil(t, actorRef)
@@ -488,7 +488,7 @@ func TestTell(t *testing.T) {
 
 			// create a test actor
 			actorName := "test"
-			actor := newMockActor()
+			actor := NewMockActor()
 			actorRef, err := sys.Spawn(ctx, actorName, actor)
 			require.NoError(t, err)
 			assert.NotNil(t, actorRef)
@@ -530,7 +530,7 @@ func TestTell(t *testing.T) {
 
 			// create a test actor
 			actorName := "test"
-			actor := newMockActor()
+			actor := NewMockActor()
 			actorRef, err := sys.Spawn(ctx, actorName, actor)
 			require.NoError(t, err)
 			assert.NotNil(t, actorRef)

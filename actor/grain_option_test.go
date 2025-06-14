@@ -22,34 +22,27 @@
  * SOFTWARE.
  */
 
-package client
+package actor
 
-// Actor defines a given actor name and kind.
-// Kind is a string representation of the type within its package (e.g pkg/User)
-type Actor struct {
-	name string // Name defines the actor name. This will be unique in the Client
-	kind string // Kind specifies the actor kind.
-}
+import (
+	"testing"
+	"time"
 
-// NewActor creates an instance of Actor
-func NewActor(kind string) *Actor {
-	return &Actor{
-		kind: kind,
-	}
-}
+	"github.com/stretchr/testify/require"
+)
 
-// WithName set the given name
-func (x *Actor) WithName(name string) *Actor {
-	x.name = name
-	return x
-}
-
-// Name returns the actor name
-func (x *Actor) Name() string {
-	return x.name
-}
-
-// Kind returns the actor kind
-func (x *Actor) Kind() string {
-	return x.kind
+func TestGrainOptions(t *testing.T) {
+	t.Run("WithRequestTimeout", func(t *testing.T) {
+		opt := WithRequestTimeout(10 * time.Second)
+		config := &grainOptConfig{}
+		opt.Apply(config)
+		require.EqualValues(t, 10*time.Second, config.RequestTimeout())
+	})
+	t.Run("WithRequestSender", func(t *testing.T) {
+		sender := &Identity{kind: "test", name: "sender"}
+		opt := WithRequestSender(sender)
+		config := &grainOptConfig{}
+		opt.Apply(config)
+		require.True(t, config.RequestSender().Equal(sender), "expected sender to be set correctly")
+	})
 }

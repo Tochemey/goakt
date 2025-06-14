@@ -22,34 +22,27 @@
  * SOFTWARE.
  */
 
-package client
+package actor
 
-// Actor defines a given actor name and kind.
-// Kind is a string representation of the type within its package (e.g pkg/User)
-type Actor struct {
-	name string // Name defines the actor name. This will be unique in the Client
-	kind string // Kind specifies the actor kind.
+// GrainReceiveOption provides additional context and options for a grain's Receive method.
+//
+// It is used to pass metadata about the message delivery, such as the sender's identity.
+// This allows grains to access information about the origin of the message when processing requests.
+//
+// Example usage:
+//
+//	func (g *MyGrain) Receive(msg proto.Message, option *GrainReceiveOption) (proto.Message, error) {
+//	    sender := option.Sender()
+//	    // Use sender information if needed
+//	    ...
+//	}
+type GrainReceiveOption struct {
+	sender *Identity
 }
 
-// NewActor creates an instance of Actor
-func NewActor(kind string) *Actor {
-	return &Actor{
-		kind: kind,
-	}
-}
-
-// WithName set the given name
-func (x *Actor) WithName(name string) *Actor {
-	x.name = name
-	return x
-}
-
-// Name returns the actor name
-func (x *Actor) Name() string {
-	return x.name
-}
-
-// Kind returns the actor kind
-func (x *Actor) Kind() string {
-	return x.kind
+// Sender returns the identity of the sender of the message, if available.
+//
+// This can be used by the grain to respond or take action based on the sender.
+func (g *GrainReceiveOption) Sender() *Identity {
+	return g.sender
 }

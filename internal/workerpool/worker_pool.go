@@ -29,7 +29,6 @@ package workerpool
 import (
 	"errors"
 	"os"
-	"sync"
 	"time"
 
 	"github.com/panjf2000/ants/v2"
@@ -91,7 +90,6 @@ type WorkerPool struct {
 	poolSize       int
 	passivateAfter time.Duration
 	logger         log.Logger
-	once           sync.Once
 }
 
 // New creates a new worker pool with the given options.
@@ -125,9 +123,7 @@ func (wp *WorkerPool) Start() error {
 // Stop gracefully shuts down the worker pool by closing all worker channels
 // and preventing new task submissions.
 func (wp *WorkerPool) Stop() {
-	wp.once.Do(func() {
-		wp.pool.Release()
-	})
+	wp.pool.Release()
 }
 
 // SubmitWork submits a task to be executed by an available worker.
@@ -136,6 +132,18 @@ func (wp *WorkerPool) SubmitWork(task func()) {
 	if !wp.pool.IsClosed() {
 		_ = wp.pool.Submit(task)
 	}
+}
+
+// ReStart restarts the worker pool
+func (wp *WorkerPool) ReStart() {
+	if wp.pool.IsClosed() {
+		wp.pool.Reboot()
+	}
+}
+
+// IsClosed indicates whether the pool is closed.
+func (wp *WorkerPool) IsClosed() bool {
+	return wp.pool != nil && wp.pool.IsClosed()
 }
 
 // logger implements the ants.Logger interface by delegating log messages
