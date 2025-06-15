@@ -79,7 +79,7 @@ func TestGrain(t *testing.T) {
 		// let us shutdown the grain by sending PoisonPill
 		response, err = testSystem.AskGrain(ctx, identity, new(goaktpb.PoisonPill))
 		require.NoError(t, err)
-		require.Nil(t, response)
+		require.NotNil(t, response)
 
 		// check if the grain is activated
 		gp, ok = testSystem.(*actorSystem).grains.Get(*identity)
