@@ -81,7 +81,7 @@ func TestNewSpawnConfig(t *testing.T) {
 	require.Nil(t, config.mailbox)
 }
 
-func TestSpawnConfigWithDependencies(t *testing.T) {
+func TestSpawnConfigCase2(t *testing.T) {
 	t.Run("With valid dependency", func(t *testing.T) {
 		config := &spawnConfig{}
 		dependency := NewMockDependency("id", "user", "email")
@@ -108,6 +108,6 @@ func TestSpawnConfigWithDependencies(t *testing.T) {
 		config := &spawnConfig{}
 		option := WithLongLived()
 		option.Apply(config)
-		require.IsType(t, new(passivation.TimeBasedStrategy), config.passivationStrategy)
+		require.IsType(t, new(passivation.LongLivedStrategy), config.passivationStrategy)
 	})
 }
