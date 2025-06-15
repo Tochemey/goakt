@@ -1568,13 +1568,7 @@ func (pid *PID) passivationLoop() {
 			}
 		}
 	case *passivation.LongLivedStrategy:
-		clock = ticker.New(longLived)
-		exec = func() {
-			elapsed := time.Since(pid.latestReceiveTime.Load())
-			if elapsed >= longLived {
-				tickerStopSig <- types.Unit{}
-			}
-		}
+		return
 	}
 
 	clock.Start()

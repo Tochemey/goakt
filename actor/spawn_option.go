@@ -200,7 +200,7 @@ func WithPassivateAfter(after time.Duration) SpawnOption {
 //   - SpawnOption that disables passivation for the actor.
 func WithLongLived() SpawnOption {
 	return spawnOption(func(config *spawnConfig) {
-		config.passivationStrategy = passivation.NewTimeBasedStrategy(longLived)
+		config.passivationStrategy = passivation.NewLongLivedStrategy()
 	})
 }
 
