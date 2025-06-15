@@ -303,3 +303,8 @@ func (proc *grainProcess) recovery(received *grainRequest) {
 		return
 	}
 }
+
+// getGrain returns the Grain instance
+func (proc *grainProcess) getGrain() Grain {
+	return proc.grain
+}

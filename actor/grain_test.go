@@ -303,4 +303,206 @@ func TestGrain(t *testing.T) {
 
 		require.NoError(t, testSystem.Stop(ctx))
 	})
+	t.Run("With invalid sender identity", func(t *testing.T) {
+		ctx := t.Context()
+		testSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NotNil(t, testSystem)
+
+		// start the actor system
+		err = testSystem.Start(ctx)
+		require.NoError(t, err)
+		util.Pause(time.Second)
+
+		// create a grain instance
+		grain := NewMockGrain()
+		err = testSystem.RegisterGrains(grain)
+		require.NoError(t, err)
+
+		// get the grain identity
+		identity := NewIdentity(grain, "testGrain")
+		require.NotNil(t, identity)
+
+		sender := &Identity{}
+		message := new(testpb.TestSend)
+		response, err := testSystem.AskGrain(ctx, identity, message, WithRequestSender(sender))
+		require.Error(t, err)
+		require.ErrorIs(t, err, ErrInvalidGrainIdentity)
+		require.Nil(t, response)
+
+		err = testSystem.TellGrain(ctx, identity, message, WithRequestSender(sender))
+		require.Error(t, err)
+		require.ErrorIs(t, err, ErrInvalidGrainIdentity)
+
+		require.NoError(t, testSystem.Stop(ctx))
+	})
+	t.Run("With sender not found", func(t *testing.T) {
+		ctx := t.Context()
+		testSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NotNil(t, testSystem)
+
+		// start the actor system
+		err = testSystem.Start(ctx)
+		require.NoError(t, err)
+		util.Pause(time.Second)
+
+		// create a grain instance
+		grain := NewMockGrain()
+		err = testSystem.RegisterGrains(grain)
+		require.NoError(t, err)
+
+		// get the grain identity
+		identity := NewIdentity(grain, "testGrain")
+		require.NotNil(t, identity)
+
+		sender := NewIdentity(grain, "GoAktSender")
+		message := new(testpb.TestSend)
+		response, err := testSystem.AskGrain(ctx, identity, message, WithRequestSender(sender))
+		require.Error(t, err)
+		require.ErrorIs(t, err, ErrGrainNotFound)
+		require.Nil(t, response)
+
+		err = testSystem.TellGrain(ctx, identity, message, WithRequestSender(sender))
+		require.Error(t, err)
+		require.ErrorIs(t, err, ErrGrainNotFound)
+
+		require.NoError(t, testSystem.Stop(ctx))
+	})
+	t.Run("With invalid grain identity", func(t *testing.T) {
+		ctx := t.Context()
+		testSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NotNil(t, testSystem)
+
+		// start the actor system
+		err = testSystem.Start(ctx)
+		require.NoError(t, err)
+		util.Pause(time.Second)
+
+		identity := &Identity{}
+		message := new(testpb.TestSend)
+		response, err := testSystem.AskGrain(ctx, identity, message)
+		require.Error(t, err)
+		require.ErrorIs(t, err, ErrInvalidGrainIdentity)
+		require.Nil(t, response)
+
+		err = testSystem.TellGrain(ctx, identity, message)
+		require.Error(t, err)
+		require.ErrorIs(t, err, ErrInvalidGrainIdentity)
+
+		require.NoError(t, testSystem.Stop(ctx))
+	})
+	t.Run("With grain identity not found", func(t *testing.T) {
+		ctx := t.Context()
+		testSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NotNil(t, testSystem)
+
+		// start the actor system
+		err = testSystem.Start(ctx)
+		require.NoError(t, err)
+		util.Pause(time.Second)
+
+		// create a grain instance
+		grain := NewMockGrain()
+		err = testSystem.RegisterGrains(grain)
+		require.NoError(t, err)
+
+		// get the grain identity
+		identity := NewIdentity(grain, "GoAktGrain")
+		require.NotNil(t, identity)
+
+		message := new(testpb.TestSend)
+		response, err := testSystem.AskGrain(ctx, identity, message)
+		require.Error(t, err)
+		require.ErrorIs(t, err, ErrGrainNotFound)
+		require.Nil(t, response)
+
+		err = testSystem.TellGrain(ctx, identity, message)
+		require.Error(t, err)
+		require.ErrorIs(t, err, ErrGrainNotFound)
+
+		require.NoError(t, testSystem.Stop(ctx))
+	})
+	t.Run("When actor system not started", func(t *testing.T) {
+		ctx := t.Context()
+		testSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NotNil(t, testSystem)
+
+		// prepare a message to send to the grain
+		message := new(testpb.TestSend)
+		response, err := testSystem.AskGrain(ctx, &Identity{}, message)
+		require.Error(t, err)
+		require.ErrorIs(t, err, ErrActorSystemNotStarted)
+		require.Nil(t, response)
+
+		err = testSystem.TellGrain(ctx, &Identity{}, message)
+		require.Error(t, err)
+		require.ErrorIs(t, err, ErrActorSystemNotStarted)
+	})
+	t.Run("With grain registration/deregistration when actor system not started", func(t *testing.T) {
+		testSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NotNil(t, testSystem)
+
+		// create a grain instance
+		grain := NewMockGrain()
+		err = testSystem.RegisterGrains(grain)
+		require.Error(t, err)
+		require.ErrorIs(t, err, ErrActorSystemNotStarted)
+
+		err = testSystem.DeregisterGrains(grain)
+		require.Error(t, err)
+		require.ErrorIs(t, err, ErrActorSystemNotStarted)
+	})
+	t.Run("With grain deregistered", func(t *testing.T) {
+		ctx := t.Context()
+		testSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NotNil(t, testSystem)
+
+		// start the actor system
+		err = testSystem.Start(ctx)
+		require.NoError(t, err)
+		util.Pause(time.Second)
+
+		// create a grain instance
+		grain := NewMockGrain()
+		err = testSystem.RegisterGrains(grain)
+		require.NoError(t, err)
+
+		// get the grain identity
+		identity := NewIdentity(grain, "testGrain")
+		require.NotNil(t, identity)
+
+		// prepare a message to send to the grain
+		message := new(testpb.TestSend)
+		response, err := testSystem.AskGrain(ctx, identity, message)
+		require.NoError(t, err)
+		require.NotNil(t, response)
+		require.IsType(t, &testpb.Reply{}, response)
+
+		// check if the grain is activated
+		gp, ok := testSystem.(*actorSystem).grains.Get(*identity)
+		require.True(t, ok)
+		require.NotNil(t, gp)
+		require.True(t, gp.isRunning())
+
+		err = testSystem.DeregisterGrains(grain)
+		require.NoError(t, err)
+
+		// send a message to the grain to reactivate it
+		response, err = testSystem.AskGrain(ctx, identity, message)
+		require.Error(t, err)
+		require.ErrorIs(t, err, ErrGrainNotRegistered)
+		require.Nil(t, response)
+
+		err = testSystem.TellGrain(ctx, identity, message)
+		require.Error(t, err)
+		require.ErrorIs(t, err, ErrGrainNotRegistered)
+
+		require.NoError(t, testSystem.Stop(ctx))
+	})
 }

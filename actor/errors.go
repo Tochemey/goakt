@@ -154,6 +154,9 @@ var (
 
 	// ErrInstanceNotAnGrain is returned when the instantiated type does not implement the Grain interface.
 	ErrInstanceNotAnGrain = errors.New("failed to create instance. Reason: instance does not implement the Grain interface")
+
+	// ErrGrainNotRegistered is returned when attempting to use a Grain type that has not been registered.
+	ErrGrainNotRegistered = errors.New("grain type is not registered")
 )
 
 // NewErrGrainNotFound formats an NewErrGrainNotFound with the given grain identity.

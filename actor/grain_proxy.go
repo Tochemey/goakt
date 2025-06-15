@@ -61,7 +61,7 @@ func (x *actorSystem) TellGrain(ctx context.Context, identity *Identity, message
 
 	// validate the identity
 	if err := identity.Validate(); err != nil {
-		return err
+		return NewErrInvalidGrainIdentity(err)
 	}
 
 	// make sure we don't interfere with system actors.
@@ -75,6 +75,10 @@ func (x *actorSystem) TellGrain(ctx context.Context, identity *Identity, message
 	if sender != nil {
 		if err := sender.Validate(); err != nil {
 			return NewErrInvalidGrainIdentity(err)
+		}
+
+		if isReservedName(sender.Name()) {
+			return NewErrGrainNotFound(sender.String())
 		}
 	}
 
@@ -107,7 +111,7 @@ func (x *actorSystem) AskGrain(ctx context.Context, identity *Identity, message 
 
 	// validate the identity
 	if err := identity.Validate(); err != nil {
-		return nil, err
+		return nil, NewErrInvalidGrainIdentity(err)
 	}
 
 	// make sure we don't interfere with system actors.
@@ -121,6 +125,9 @@ func (x *actorSystem) AskGrain(ctx context.Context, identity *Identity, message 
 	if sender != nil {
 		if err = sender.Validate(); err != nil {
 			return nil, NewErrInvalidGrainIdentity(err)
+		}
+		if isReservedName(sender.Name()) {
+			return nil, NewErrGrainNotFound(sender.String())
 		}
 	}
 
@@ -411,6 +418,11 @@ func (x *actorSystem) localSend(ctx context.Context, id *Identity, message proto
 func (x *actorSystem) ensureGrainProcess(ctx context.Context, id *Identity) (*grainProcess, error) {
 	process, ok := x.grains.Get(*id)
 	if ok {
+		// check whether the Grain type is registered
+		if !x.reflection.registry.Exists(process.getGrain()) {
+			return nil, ErrGrainNotRegistered
+		}
+
 		return process, nil
 	}
 
