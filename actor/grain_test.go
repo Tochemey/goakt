@@ -501,7 +501,7 @@ func TestGrain(t *testing.T) {
 
 		err = testSystem.TellGrain(ctx, identity, message)
 		require.Error(t, err)
-		require.ErrorIs(t, err, ErrGrainNotRegistered)
+		require.ErrorIs(t, err, ErrTypeNotRegistered)
 
 		require.NoError(t, testSystem.Stop(ctx))
 	})

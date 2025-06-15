@@ -420,6 +420,8 @@ func (x *actorSystem) ensureGrainProcess(ctx context.Context, id *Identity) (*gr
 	if ok {
 		// check whether the Grain type is registered
 		if !x.reflection.registry.Exists(process.getGrain()) {
+			// Grain type is not registered, delete the process and return an error
+			x.grains.Delete(*id)
 			return nil, ErrGrainNotRegistered
 		}
 
