@@ -240,7 +240,7 @@ func (proc *grainProcess) handleSystemMessage(request *grainRequest) {
 			request.setError(err)
 			return
 		}
-		request.setResponse(NewGrainResponse(nil))
+		request.setResponse(NewGrainResponse(new(goaktpb.NoMessage))) // TODO: what response should we send back?
 	default:
 		proc.logger.Warnf("received unknown system message %T for Grain %s", msg, proc.identity.String())
 	}
@@ -249,7 +249,7 @@ func (proc *grainProcess) handleSystemMessage(request *grainRequest) {
 func (proc *grainProcess) handleRequest(request *grainRequest) {
 	defer proc.recovery(request)
 	proc.latestReceiveTime.Store(time.Now())
-	response, err := proc.grain.Receive(request.getMessage(), &GrainReceiveOption{sender: request.getSender()})
+	response, err := proc.grain.Receive(request.getContext(), request.getMessage())
 	if err != nil {
 		request.setError(err)
 		return

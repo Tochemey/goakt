@@ -112,7 +112,9 @@ func (x *actorSystem) RemoteMessageGrain(ctx context.Context, request *connect.R
 		return nil, err
 	}
 
-	// Validate grain identity and kind
+	message, _ := msg.GetMessage().UnmarshalNew()
+	timeout := msg.GetRequestTimeout()
+
 	identity, err := toIdentity(msg.GetGrain().GetGrainId().GetValue())
 	if err != nil {
 		if errors.Is(err, ErrInvalidGrainIdentity) {
@@ -120,50 +122,34 @@ func (x *actorSystem) RemoteMessageGrain(ctx context.Context, request *connect.R
 		}
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.Join(err, ErrInvalidGrainIdentity))
 	}
+
 	if isReservedName(identity.Name()) {
 		return nil, connect.NewError(connect.CodeFailedPrecondition, NewErrGrainNotFound(identity.String()))
 	}
 
-	// Create grain instance
-	grain, err := x.reflection.NewGrain(identity.Kind())
-	if err != nil {
-		logger.Errorf("failed to create grain (%s) on [host=%s, port=%d]: reason: (%v)", identity.String(), msg.GetGrain().GetHost(), msg.GetGrain().GetPort(), err)
-		if errors.Is(err, ErrTypeNotRegistered) {
-			return nil, connect.NewError(connect.CodeFailedPrecondition, ErrTypeNotRegistered)
+	var sender *Identity
+	if msg.GetSender() != nil {
+		sender, err = toIdentity(msg.GetSender().GetValue())
+		if err != nil {
+			if errors.Is(err, ErrInvalidGrainIdentity) {
+				return nil, connect.NewError(connect.CodeInvalidArgument, err)
+			}
+			return nil, connect.NewError(connect.CodeInvalidArgument, errors.Join(err, ErrInvalidGrainIdentity))
 		}
-		return nil, connect.NewError(connect.CodeInternal, err)
+
+		if isReservedName(sender.Name()) {
+			return nil, connect.NewError(connect.CodeFailedPrecondition, NewErrGrainNotFound(sender.String()))
+		}
 	}
 
-	// Build grain options
-	sender, requestTimeout, err := x.getRequestSettings(msg)
-	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
-	}
-
-	// Create or get the grain process
-	process, err := x.createGrain(ctx, identity, grain)
+	reply, err := x.localSend(ctx, identity, message, sender, timeout.AsDuration())
 	if err != nil {
 		logger.Errorf("failed to create grain (%s) on [host=%s, port=%d]: reason: (%v)", identity.String(), msg.GetGrain().GetHost(), msg.GetGrain().GetPort(), err)
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 
-	// Build and send the request
-	grainRequest := getGrainRequest()
-	message, _ := msg.GetMessage().UnmarshalNew()
-	grainRequest.build(sender, message)
-	process.receive(grainRequest)
-	timer := timers.Get(requestTimeout)
-	defer timers.Put(timer)
-
-	select {
-	case res := <-grainRequest.getResponse():
-		response, _ := anypb.New(res.Message())
-		return connect.NewResponse(&internalpb.RemoteMessageGrainResponse{Message: response}), nil
-	case err := <-grainRequest.getErr():
-		return nil, err
-	case <-timer.C:
-		return nil, ErrRequestTimeout
-	}
+	response, _ := anypb.New(reply)
+	return connect.NewResponse(&internalpb.RemoteMessageGrainResponse{Message: response}), nil
 }
 
 // validateRemoteHost checks if the incoming request is for the correct host/port.
@@ -225,7 +211,6 @@ func (x *actorSystem) remoteSend(ctx context.Context, id *Identity, message prot
 	remoteClient := x.remoting.remotingServiceClient(gw.GetHost(), int(gw.GetPort()))
 	request := connect.NewRequest(&internalpb.RemoteMessageGrainRequest{
 		Grain:          gw,
-		Sender:         &internalpb.GrainId{Value: sender.String()},
 		RequestTimeout: durationpb.New(timeout),
 		Dependencies:   gw.GetDependencies(),
 		Message:        msg,
@@ -274,7 +259,7 @@ func (x *actorSystem) localSend(ctx context.Context, id *Identity, message proto
 	}
 
 	request := getGrainRequest()
-	request.build(sender, message)
+	request.build(ctx, sender, message)
 	process.receive(request)
 	timer := timers.Get(timeout)
 

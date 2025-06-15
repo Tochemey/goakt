@@ -25,6 +25,8 @@
 package actor
 
 import (
+	"context"
+
 	"google.golang.org/protobuf/proto"
 
 	"github.com/tochemey/goakt/v3/extension"
@@ -102,5 +104,5 @@ type Grain interface {
 	//
 	// The request contains the message and sender information.
 	// Use opts for additional request-scoped options.
-	Receive(message proto.Message, option *GrainReceiveOption) (proto.Message, error)
+	Receive(ctx context.Context, message proto.Message) (proto.Message, error)
 }

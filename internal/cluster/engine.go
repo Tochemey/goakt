@@ -338,6 +338,7 @@ func (x *Engine) Start(ctx context.Context) error {
 		RemotingPort: int32(x.node.RemotingPort),
 		PeersPort:    int32(x.node.PeersPort),
 		Actors:       map[string]*internalpb.Actor{},
+		Grains:       map[string]*internalpb.Grain{},
 	}
 
 	if err := x.initializeState(ctx); err != nil {
@@ -386,6 +387,7 @@ func (x *Engine) Stop(ctx context.Context) error {
 		AddErrorFn(func() error { return x.pubSub.Close() }).
 		AddErrorFn(func() error { return x.actorsMap.Destroy(ctx) }).
 		AddErrorFn(func() error { return x.statesMap.Destroy(ctx) }).
+		AddErrorFn(func() error { return x.grainsMap.Destroy(ctx) }).
 		AddErrorFn(func() error { return x.jobKeysMap.Destroy(ctx) }).
 		AddErrorFn(func() error { return x.client.Close(ctx) }).
 		AddErrorFn(func() error { return x.server.Shutdown(ctx) })

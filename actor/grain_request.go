@@ -25,6 +25,7 @@
 package actor
 
 import (
+	"context"
 	"sync"
 
 	"google.golang.org/protobuf/proto"
@@ -52,6 +53,7 @@ type grainRequest struct {
 	message  proto.Message
 	response chan *GrainResponse
 	err      chan error
+	ctx      context.Context
 }
 
 func (req *grainRequest) getResponse() chan *GrainResponse {
@@ -68,6 +70,10 @@ func (req *grainRequest) getSender() *Identity {
 
 func (req *grainRequest) getMessage() proto.Message {
 	return req.message
+}
+
+func (req *grainRequest) getContext() context.Context {
+	return req.ctx
 }
 
 // setResponse sets the message response
@@ -87,7 +93,8 @@ func (req *grainRequest) reset() {
 	req.sender = id
 }
 
-func (req *grainRequest) build(sender *Identity, message proto.Message) {
+func (req *grainRequest) build(ctx context.Context, sender *Identity, message proto.Message) {
+	req.ctx = ctx
 	req.sender = sender
 	req.message = message
 	req.response = make(chan *GrainResponse, 1)

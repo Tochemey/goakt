@@ -378,6 +378,84 @@ func TestSingleNode(t *testing.T) {
 		require.NoError(t, cluster.Stop(ctx))
 		provider.AssertExpectations(t)
 	})
+	t.Run("With PutGrain and GetGrain", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+
+		// generate the ports for the single startNode
+		nodePorts := dynaport.Get(3)
+		discoveryPort := nodePorts[0]
+		clusterPort := nodePorts[1]
+		remotingPort := nodePorts[2]
+
+		// define discovered addresses
+		addrs := []string{
+			fmt.Sprintf("127.0.0.1:%d", discoveryPort),
+		}
+
+		// mock the discovery provider
+		provider := new(testkit.Provider)
+
+		provider.EXPECT().ID().Return("testDisco")
+		provider.EXPECT().Initialize().Return(nil)
+		provider.EXPECT().Register().Return(nil)
+		provider.EXPECT().Deregister().Return(nil)
+		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
+		provider.EXPECT().Close().Return(nil)
+
+		// create a Node startNode
+		host := "127.0.0.1"
+		hostNode := discovery.Node{
+			Name:          host,
+			Host:          host,
+			DiscoveryPort: discoveryPort,
+			PeersPort:     clusterPort,
+			RemotingPort:  remotingPort,
+		}
+
+		cluster, err := NewEngine("test", provider, &hostNode, WithLogger(log.DiscardLogger))
+		require.NotNil(t, cluster)
+		require.NoError(t, err)
+
+		// start the Node startNode
+		err = cluster.Start(ctx)
+		require.NoError(t, err)
+
+		// create an grain
+		identity := "grainKind/grainName"
+		grain := &internalpb.Grain{
+			GrainId: &internalpb.GrainId{
+				Kind:  "grainKind",
+				Name:  "grainName",
+				Value: identity,
+			},
+			Host: host,
+			Port: int32(remotingPort),
+		}
+
+		// replicate the grain in the Node
+		err = cluster.PutGrain(ctx, grain)
+		require.NoError(t, err)
+
+		// fetch the grain
+		actual, err := cluster.GetGrain(ctx, identity)
+		require.NoError(t, err)
+		require.NotNil(t, actual)
+		require.True(t, proto.Equal(grain, actual))
+
+		//  fetch non-existing actor
+		fakeActorName := "fake"
+		actual, err = cluster.GetGrain(ctx, fakeActorName)
+		require.Nil(t, actual)
+		require.ErrorIs(t, err, ErrGrainNotFound)
+
+		//  shutdown the Node startNode
+		util.Pause(time.Second)
+
+		// stop the startNode
+		require.NoError(t, cluster.Stop(ctx))
+		provider.AssertExpectations(t)
+	})
 }
 
 func TestMultipleNodes(t *testing.T) {
@@ -456,6 +534,21 @@ func TestMultipleNodes(t *testing.T) {
 		err = node2.PutActor(ctx, actor)
 		require.NoError(t, err)
 
+		identity := "grainKind/grainName"
+		grain := &internalpb.Grain{
+			GrainId: &internalpb.GrainId{
+				Kind:  "grainKind",
+				Name:  "grainName",
+				Value: identity,
+			},
+			Host: node2.node.Host,
+			Port: int32(node2.node.RemotingPort),
+		}
+
+		// replicate the grain in the Node
+		err = node2.PutGrain(ctx, grain)
+		require.NoError(t, err)
+
 		// wait for some time
 		util.Pause(time.Second)
 
@@ -465,10 +558,21 @@ func TestMultipleNodes(t *testing.T) {
 		require.NotNil(t, actual)
 		require.True(t, proto.Equal(actor, actual))
 
+		// fetch the grain
+		actualGrain, err := node1.GetGrain(ctx, identity)
+		require.NoError(t, err)
+		require.NotNil(t, actualGrain)
+		require.True(t, proto.Equal(grain, actualGrain))
+
 		actual, err = node3.GetActor(ctx, actorName)
 		require.NoError(t, err)
 		require.NotNil(t, actual)
 		require.True(t, proto.Equal(actor, actual))
+
+		actualGrain, err = node3.GetGrain(ctx, identity)
+		require.NoError(t, err)
+		require.NotNil(t, actualGrain)
+		require.True(t, proto.Equal(grain, actualGrain))
 
 		// put another actor
 		actorName2 := uuid.NewString()
@@ -612,6 +716,21 @@ func TestMultipleNodes(t *testing.T) {
 		err = node2.PutActor(ctx, actor)
 		require.NoError(t, err)
 
+		identity := "grainKind/grainName"
+		grain := &internalpb.Grain{
+			GrainId: &internalpb.GrainId{
+				Kind:  "grainKind",
+				Name:  "grainName",
+				Value: identity,
+			},
+			Host: node2.node.Host,
+			Port: int32(node2.node.RemotingPort),
+		}
+
+		// replicate the grain in the Node
+		err = node2.PutGrain(ctx, grain)
+		require.NoError(t, err)
+
 		// wait for some time
 		util.Pause(time.Second)
 
@@ -621,10 +740,21 @@ func TestMultipleNodes(t *testing.T) {
 		require.NotNil(t, actual)
 		require.True(t, proto.Equal(actor, actual))
 
+		// fetch the grain
+		actualGrain, err := node1.GetGrain(ctx, identity)
+		require.NoError(t, err)
+		require.NotNil(t, actualGrain)
+		require.True(t, proto.Equal(grain, actualGrain))
+
 		actual, err = node3.GetActor(ctx, actorName)
 		require.NoError(t, err)
 		require.NotNil(t, actual)
 		require.True(t, proto.Equal(actor, actual))
+
+		actualGrain, err = node3.GetGrain(ctx, identity)
+		require.NoError(t, err)
+		require.NotNil(t, actualGrain)
+		require.True(t, proto.Equal(grain, actualGrain))
 
 		// put another actor
 		actorName2 := uuid.NewString()

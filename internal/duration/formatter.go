@@ -25,6 +25,7 @@
 package duration
 
 import (
+	"strings"
 	"time"
 )
 
@@ -86,7 +87,7 @@ func Format(d time.Duration) string {
 	if len(parts) == 0 {
 		return "0s"
 	}
-	return joinWithSpace(parts)
+	return strings.Join(parts, " ")
 }
 
 // formatUint returns the string representation of a uint64.
@@ -102,16 +103,4 @@ func formatUint(v uint64) string {
 		v /= 10
 	}
 	return string(buf[i:])
-}
-
-// joinWithSpace joins a slice of strings with a space.
-func joinWithSpace(parts []string) string {
-	if len(parts) == 0 {
-		return ""
-	}
-	out := parts[0]
-	for i := 1; i < len(parts); i++ {
-		out += " " + parts[i]
-	}
-	return out
 }

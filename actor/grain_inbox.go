@@ -81,5 +81,5 @@ func (m *grainInbox) Len() int64 {
 
 // IsEmpty returns true when the mailbox is empty
 func (m *grainInbox) IsEmpty() bool {
-	return atomic.LoadInt64(&m.length) == 0
+	return m.Len() == 0
 }

@@ -134,18 +134,6 @@ func (wp *WorkerPool) SubmitWork(task func()) {
 	}
 }
 
-// ReStart restarts the worker pool
-func (wp *WorkerPool) ReStart() {
-	if wp.pool.IsClosed() {
-		wp.pool.Reboot()
-	}
-}
-
-// IsClosed indicates whether the pool is closed.
-func (wp *WorkerPool) IsClosed() bool {
-	return wp.pool != nil && wp.pool.IsClosed()
-}
-
 // logger implements the ants.Logger interface by delegating log messages
 // to a provided structured logger (log.Logger) with support for log levels.
 //

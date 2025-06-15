@@ -87,4 +87,12 @@ func TestIdentity(t *testing.T) {
 		require.Error(t, err)
 		require.Nil(t, actual)
 	})
+	t.Run("With inequal identity", func(t *testing.T) {
+		grain := NewMockGrain()
+		name1 := "testGrain1"
+		name2 := "testGrain2"
+		identity1 := NewIdentity(grain, name1)
+		identity2 := NewIdentity(grain, name2)
+		require.False(t, identity1.Equal(identity2), "expected identities to be unequal")
+	})
 }

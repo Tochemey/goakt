@@ -41,7 +41,7 @@ func TestReflection(t *testing.T) {
 		actor := NewMockActor()
 		newRegistry.Register(actor)
 		reflection := newReflection(newRegistry)
-		actual, err := reflection.NewActor("actor.mockActor")
+		actual, err := reflection.NewActor("actor.MockActor")
 		assert.NoError(t, err)
 		assert.NotNil(t, actual)
 		assert.IsType(t, new(MockActor), actual)
@@ -61,7 +61,7 @@ func TestReflection(t *testing.T) {
 		assert.ErrorIs(t, err, ErrTypeNotRegistered)
 		assert.Nil(t, actual)
 	})
-	t.Run("With NewActor actor interface not implemented", func(t *testing.T) {
+	t.Run("With NewActor Actor interface not implemented", func(t *testing.T) {
 		newRegistry := types.NewRegistry()
 		type normalStruct struct{}
 		newRegistry.Register(new(normalStruct))
@@ -159,5 +159,40 @@ func TestReflection(t *testing.T) {
 		require.Error(t, err)
 		require.Nil(t, dependencies)
 		require.Empty(t, dependencies)
+	})
+	t.Run("With NewGrain happy path", func(t *testing.T) {
+		newRegistry := types.NewRegistry()
+		grain := NewMockGrain()
+		newRegistry.Register(grain)
+		reflection := newReflection(newRegistry)
+		actual, err := reflection.NewGrain("actor.MockGrain")
+		assert.NoError(t, err)
+		assert.NotNil(t, actual)
+		assert.IsType(t, new(MockGrain), actual)
+	})
+	t.Run("With NewGrain grain not found", func(t *testing.T) {
+		newRegistry := types.NewRegistry()
+		reflection := newReflection(newRegistry)
+		actual, err := reflection.NewGrain("actor.fakeGrain")
+		assert.Error(t, err)
+		assert.Nil(t, actual)
+	})
+	t.Run("With unregistered grain", func(t *testing.T) {
+		tl := types.NewRegistry()
+		reflection := newReflection(tl)
+		actual, err := reflection.NewGrain("actor.fakeGrain")
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, ErrTypeNotRegistered)
+		assert.Nil(t, actual)
+	})
+	t.Run("With NewGrain Grain interface not implemented", func(t *testing.T) {
+		newRegistry := types.NewRegistry()
+		type normalStruct struct{}
+		newRegistry.Register(new(normalStruct))
+		reflection := newReflection(newRegistry)
+		actual, err := reflection.NewGrain("actor.normalStruct")
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, ErrInstanceNotAnGrain)
+		assert.Nil(t, actual)
 	})
 }

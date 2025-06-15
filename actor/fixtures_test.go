@@ -537,6 +537,7 @@ func testCluster(t *testing.T, serverAddr string, opts ...testClusterOption) (Ac
 					new(MockActor),
 					new(MockEntity),
 				).
+				WithGrains(new(MockGrain)).
 				WithPartitionCount(7).
 				WithReplicaCount(1).
 				WithPeersPort(clusterPort).
@@ -912,7 +913,10 @@ func (p *MockRestartPostStart) Receive(ctx *ReceiveContext) {
 	}
 }
 
-type MockGrain struct{}
+type MockGrain struct {
+	id          *Identity
+	actorSystem ActorSystem
+}
 
 var _ Grain = (*MockGrain)(nil)
 
@@ -923,7 +927,7 @@ func NewMockGrain() *MockGrain {
 
 // HandleRequest implements Grain.
 // nolint
-func (m *MockGrain) Receive(message proto.Message, option *GrainReceiveOption) (proto.Message, error) {
+func (m *MockGrain) Receive(ctx context.Context, message proto.Message) (proto.Message, error) {
 	switch msg := message.(type) {
 	case *testpb.TestSend:
 		return &testpb.Reply{Content: "received message"}, nil
@@ -935,6 +939,8 @@ func (m *MockGrain) Receive(message proto.Message, option *GrainReceiveOption) (
 // OnActivate implements Grain.
 // nolint
 func (m *MockGrain) OnActivate(ctx *GrainContext) error {
+	m.id = ctx.Self()
+	m.actorSystem = ctx.ActorSystem()
 	return nil
 }
 

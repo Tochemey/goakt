@@ -2313,10 +2313,17 @@ func (x *actorSystem) enableClustering(ctx context.Context) error {
 	x.cluster = clusterEngine
 	x.eventsQueue = clusterEngine.Events()
 	x.rebalancingQueue = make(chan *internalpb.PeerState, 1)
+
 	for _, kind := range x.clusterConfig.Kinds() {
 		x.registry.Register(kind)
 		x.logger.Infof("cluster kind=(%s) registered", types.Name(kind))
 	}
+
+	for _, grain := range x.clusterConfig.Grains() {
+		x.registry.Register(grain)
+		x.logger.Infof("cluster Grain=(%s) registered", types.Name(grain))
+	}
+
 	x.locker.Unlock()
 
 	go x.clusterEventsLoop()

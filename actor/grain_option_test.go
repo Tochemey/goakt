@@ -34,9 +34,13 @@ import (
 func TestGrainOptions(t *testing.T) {
 	t.Run("WithRequestTimeout", func(t *testing.T) {
 		opt := WithRequestTimeout(10 * time.Second)
-		config := &grainOptConfig{}
-		opt.Apply(config)
+		config := newGrainOptConfig(opt)
 		require.EqualValues(t, 10*time.Second, config.RequestTimeout())
+	})
+	t.Run("With default request timeout", func(t *testing.T) {
+		opt := WithRequestTimeout(0)
+		config := newGrainOptConfig(opt)
+		require.EqualValues(t, 5*time.Minute, config.RequestTimeout())
 	})
 	t.Run("WithRequestSender", func(t *testing.T) {
 		sender := &Identity{kind: "test", name: "sender"}

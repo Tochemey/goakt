@@ -28,6 +28,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/tochemey/goakt/v3/goaktpb"
@@ -99,5 +100,86 @@ func TestGrain(t *testing.T) {
 		require.True(t, gp.isRunning())
 
 		require.NoError(t, testSystem.Stop(ctx))
+	})
+	t.Run("With cluster mode", func(t *testing.T) {
+		ctx := t.Context()
+		// start the NATS server
+		srv := startNatsServer(t)
+
+		// create and start a system cluster
+		node1, sd1 := testCluster(t, srv.Addr().String())
+		require.NotNil(t, node1)
+		require.NotNil(t, sd1)
+
+		// create and start a system cluster
+		node2, sd2 := testCluster(t, srv.Addr().String())
+		require.NotNil(t, node2)
+		require.NotNil(t, sd2)
+
+		// create and start a system cluster
+		node3, sd3 := testCluster(t, srv.Addr().String())
+		require.NotNil(t, node3)
+		require.NotNil(t, sd3)
+
+		// create a grain instance
+		grain := NewMockGrain()
+		identity := NewIdentity(grain, "testGrain")
+		require.NotNil(t, identity)
+
+		// prepare a message to send to the grain
+		message := new(testpb.TestSend)
+		response, err := node1.Send(ctx, identity, message)
+		require.NoError(t, err)
+		require.NotNil(t, response)
+		require.IsType(t, &testpb.Reply{}, response)
+
+		util.Pause(time.Second)
+
+		// check if the grain is activated
+		gp, ok := node1.(*actorSystem).grains.Get(*identity)
+		require.True(t, ok)
+		require.NotNil(t, gp)
+		require.True(t, gp.isRunning())
+
+		response, err = node2.Send(ctx, identity, message)
+		require.NoError(t, err)
+		require.NotNil(t, response)
+		require.IsType(t, &testpb.Reply{}, response)
+
+		util.Pause(time.Second)
+
+		// let us shutdown the grain by sending PoisonPill
+		response, err = node3.Send(ctx, identity, new(goaktpb.PoisonPill))
+		require.NoError(t, err)
+		require.NotNil(t, response)
+		require.IsType(t, &goaktpb.NoMessage{}, response)
+
+		util.Pause(time.Second)
+
+		// check if the grain is activated
+		gp, ok = node1.(*actorSystem).grains.Get(*identity)
+		require.True(t, ok)
+		require.NotNil(t, gp)
+		require.False(t, gp.isRunning())
+
+		// send a message to the grain to reactivate it
+		response, err = node3.Send(ctx, identity, message)
+		require.NoError(t, err)
+		require.NotNil(t, response)
+		require.IsType(t, &testpb.Reply{}, response)
+
+		util.Pause(time.Second)
+
+		// check if the grain is activated
+		gp, ok = node1.(*actorSystem).grains.Get(*identity)
+		require.True(t, ok)
+		require.NotNil(t, gp)
+		require.True(t, gp.isRunning())
+
+		assert.NoError(t, node1.Stop(ctx))
+		assert.NoError(t, node3.Stop(ctx))
+		assert.NoError(t, sd1.Close())
+		assert.NoError(t, sd3.Close())
+		srv.Shutdown()
 	})
 }

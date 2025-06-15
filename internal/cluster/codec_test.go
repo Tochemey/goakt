@@ -63,4 +63,36 @@ func TestCodec(t *testing.T) {
 		require.Error(t, err)
 		assert.Nil(t, decoded)
 	})
+	t.Run("With Grain encoding", func(t *testing.T) {
+		grain := &internalpb.Grain{
+			GrainId: &internalpb.GrainId{},
+			Host:    "127.0.0.1",
+			Port:    2345,
+		}
+		// encode the grain
+		actual, err := encodeGrain(grain)
+		require.NoError(t, err)
+		require.NotNil(t, actual)
+	})
+
+	t.Run("With Grain decoding", func(t *testing.T) {
+		grain := &internalpb.Grain{
+			GrainId: &internalpb.GrainId{},
+			Host:    "127.0.0.1",
+			Port:    2345,
+		}
+		// encode the grain
+		actual, err := encodeGrain(grain)
+		require.NoError(t, err)
+		require.NotNil(t, actual)
+
+		decoded, err := decodeGrain(actual)
+		require.NoError(t, err)
+		assert.True(t, proto.Equal(grain, decoded))
+	})
+	t.Run("With invalid encoded grain", func(t *testing.T) {
+		decoded, err := decodeGrain([]byte("invalid proto message"))
+		require.Error(t, err)
+		assert.Nil(t, decoded)
+	})
 }

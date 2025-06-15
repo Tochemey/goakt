@@ -112,6 +112,9 @@ func (g *Identity) Name() string {
 //	id := NewGrainID(&UserGrain{}, "user-123")
 //	fmt.Println(id) // Output: "main.UserGrain:user-123"
 func (g *Identity) String() string {
+	if g == nil {
+		return ""
+	}
 	return fmt.Sprintf("%s%s%s", g.kind, identitySeparator, g.name)
 }
 
