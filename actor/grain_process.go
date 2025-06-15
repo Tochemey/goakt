@@ -266,13 +266,11 @@ func (proc *grainProcess) handleRequest(request *grainRequest) {
 			return
 		}
 		request.setResponse(NewGrainResponse(response))
+		return
 	}
 
 	// Handle asynchronous requests
-	if err := proc.grain.ReceiveAsync(request.getContext(), request.getMessage()); err != nil {
-		request.setError(err)
-		return
-	}
+	request.setError(proc.grain.ReceiveAsync(request.getContext(), request.getMessage()))
 }
 
 // recovery is called upon after message is processed

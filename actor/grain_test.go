@@ -192,4 +192,115 @@ func TestGrain(t *testing.T) {
 		assert.NoError(t, sd3.Close())
 		srv.Shutdown()
 	})
+	t.Run("With activation error", func(t *testing.T) {
+		ctx := t.Context()
+		testSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NotNil(t, testSystem)
+
+		// start the actor system
+		err = testSystem.Start(ctx)
+		require.NoError(t, err)
+		util.Pause(time.Second)
+
+		// create a grain instance
+		grain := NewMockGrainActivation()
+		err = testSystem.RegisterGrains(grain)
+		require.NoError(t, err)
+
+		// get the grain identity
+		identity := NewIdentity(grain, "testGrain")
+		require.NotNil(t, identity)
+
+		// prepare a message to send to the grain
+		message := new(testpb.TestSend)
+		response, err := testSystem.AskGrain(ctx, identity, message)
+		require.Error(t, err)
+		require.ErrorIs(t, err, ErrGrainActivationFailure)
+		require.Nil(t, response)
+
+		require.NoError(t, testSystem.Stop(ctx))
+	})
+	t.Run("With deactivation error", func(t *testing.T) {
+		ctx := t.Context()
+		testSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NotNil(t, testSystem)
+
+		// start the actor system
+		err = testSystem.Start(ctx)
+		require.NoError(t, err)
+		util.Pause(time.Second)
+
+		// create a grain instance
+		grain := NewMockGrainDeactivation()
+		err = testSystem.RegisterGrains(grain)
+		require.NoError(t, err)
+
+		// get the grain identity
+		identity := NewIdentity(grain, "testGrain")
+		require.NotNil(t, identity)
+
+		// prepare a message to send to the grain
+		message := new(testpb.TestSend)
+		err = testSystem.TellGrain(ctx, identity, message)
+		require.NoError(t, err)
+
+		util.Pause(500 * time.Millisecond)
+
+		// check if the grain is activated
+		gp, ok := testSystem.(*actorSystem).grains.Get(*identity)
+		require.True(t, ok)
+		require.NotNil(t, gp)
+		require.True(t, gp.isRunning())
+
+		// let us shutdown the grain by sending PoisonPill
+		err = testSystem.TellGrain(ctx, identity, new(goaktpb.PoisonPill))
+		require.Error(t, err)
+		require.ErrorIs(t, err, ErrGrainDeactivationFailure)
+
+		require.NoError(t, testSystem.Stop(ctx))
+	})
+	t.Run("With message handling errors", func(t *testing.T) {
+		ctx := t.Context()
+		testSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NotNil(t, testSystem)
+
+		// start the actor system
+		err = testSystem.Start(ctx)
+		require.NoError(t, err)
+		util.Pause(time.Second)
+
+		// create a grain instance
+		grain := NewMockGrainError()
+		err = testSystem.RegisterGrains(grain)
+		require.NoError(t, err)
+
+		// get the grain identity
+		identity := NewIdentity(grain, "testGrain")
+		require.NotNil(t, identity)
+
+		// prepare a message to send to the grain
+		message := new(testpb.TestSend)
+		response, err := testSystem.AskGrain(ctx, identity, message)
+		require.Error(t, err)
+		require.Nil(t, response)
+
+		// check if the grain is activated
+		gp, ok := testSystem.(*actorSystem).grains.Get(*identity)
+		require.True(t, ok)
+		require.NotNil(t, gp)
+		require.True(t, gp.isRunning())
+
+		err = testSystem.TellGrain(ctx, identity, message)
+		require.Error(t, err)
+
+		gp, ok = testSystem.(*actorSystem).grains.Get(*identity)
+		require.True(t, ok)
+		require.NotNil(t, gp)
+		require.True(t, gp.isRunning())
+
+		require.NoError(t, testSystem.Stop(ctx))
+	})
 }

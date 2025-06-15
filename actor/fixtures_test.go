@@ -939,7 +939,12 @@ func (m *MockGrain) ReceiveSync(ctx context.Context, message proto.Message) (pro
 // ReceiveAsync implements Grain.
 // nolint
 func (m *MockGrain) ReceiveAsync(ctx context.Context, message proto.Message) error {
-	return nil
+	switch msg := message.(type) {
+	case *testpb.TestSend:
+		return nil
+	default:
+		return fmt.Errorf("unhandled message type %T", msg)
+	}
 }
 
 // OnActivate implements Grain.
@@ -959,4 +964,116 @@ func (m *MockGrain) Dependencies() []extension.Dependency {
 // nolint
 func (m *MockGrain) OnDeactivate(ctx *GrainContext) error {
 	return nil
+}
+
+type MockGrainActivation struct{}
+
+func NewMockGrainActivation() *MockGrainActivation {
+	return &MockGrainActivation{}
+}
+
+// Dependencies implements Grain.
+func (m *MockGrainActivation) Dependencies() []extension.Dependency {
+	return nil
+}
+
+// OnActivate implements Grain.
+func (m *MockGrainActivation) OnActivate(ctx *GrainContext) error {
+	return errors.New("failed to activate grain")
+}
+
+// OnDeactivate implements Grain.
+func (m *MockGrainActivation) OnDeactivate(*GrainContext) error {
+	return nil
+}
+
+// ReceiveAsync implements Grain.
+// nolint
+func (m *MockGrainActivation) ReceiveAsync(ctx context.Context, message proto.Message) error {
+	return nil
+}
+
+// ReceiveSync implements Grain.
+// nolint
+func (m *MockGrainActivation) ReceiveSync(ctx context.Context, message proto.Message) (proto.Message, error) {
+	return nil, nil
+}
+
+type MockGrainDeactivation struct{}
+
+func NewMockGrainDeactivation() *MockGrainDeactivation {
+	return &MockGrainDeactivation{}
+}
+
+// Dependencies implements Grain.
+func (m *MockGrainDeactivation) Dependencies() []extension.Dependency {
+	return nil
+}
+
+// OnActivate implements Grain.
+func (m *MockGrainDeactivation) OnActivate(ctx *GrainContext) error {
+	return nil
+}
+
+// OnDeactivate implements Grain.
+func (m *MockGrainDeactivation) OnDeactivate(*GrainContext) error {
+	return errors.New("failed to deactivate grain")
+}
+
+// ReceiveAsync implements Grain.
+// nolint
+func (m *MockGrainDeactivation) ReceiveAsync(ctx context.Context, message proto.Message) error {
+	switch msg := message.(type) {
+	case *testpb.TestSend:
+		return nil
+	default:
+		return fmt.Errorf("unhandled message type %T", msg)
+	}
+}
+
+// ReceiveSync implements Grain.
+// nolint
+func (m *MockGrainDeactivation) ReceiveSync(ctx context.Context, message proto.Message) (proto.Message, error) {
+	return nil, nil
+}
+
+type MockGrainError struct{}
+
+func NewMockGrainError() *MockGrainError {
+	return &MockGrainError{}
+}
+
+// Dependencies implements Grain.
+func (m *MockGrainError) Dependencies() []extension.Dependency {
+	return nil
+}
+
+// OnActivate implements Grain.
+func (m *MockGrainError) OnActivate(ctx *GrainContext) error {
+	return nil
+}
+
+// OnDeactivate implements Grain.
+func (m *MockGrainError) OnDeactivate(*GrainContext) error {
+	return nil
+}
+
+// ReceiveAsync implements Grain.
+func (m *MockGrainError) ReceiveAsync(ctx context.Context, message proto.Message) error {
+	switch msg := message.(type) {
+	case *testpb.TestSend:
+		return errors.New("failed to process message")
+	default:
+		return fmt.Errorf("unhandled message type %T", msg)
+	}
+}
+
+// ReceiveSync implements Grain.
+func (m *MockGrainError) ReceiveSync(ctx context.Context, message proto.Message) (proto.Message, error) {
+	switch msg := message.(type) {
+	case *testpb.TestSend:
+		return nil, errors.New("failed to process message")
+	default:
+		return nil, fmt.Errorf("unhandled message type %T", msg)
+	}
 }
