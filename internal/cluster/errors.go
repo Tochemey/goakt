@@ -35,4 +35,6 @@ var (
 	ErrInvalidTLSConfiguration = errors.New("TLS configuration is invalid")
 	// ErrEngineNotRunning is returned when the cluster engine is not running
 	ErrEngineNotRunning = errors.New("engine is not running")
+	// ErrGrainNotFound is returned when a grain is not found
+	ErrGrainNotFound = errors.New("grain not found")
 )

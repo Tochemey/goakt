@@ -73,7 +73,7 @@ func TestReceive(t *testing.T) {
 		util.Pause(time.Second)
 
 		// create the actor ref
-		pid, err := actorSystem.Spawn(ctx, "name", newMockActor())
+		pid, err := actorSystem.Spawn(ctx, "name", NewMockActor())
 		require.NoError(t, err)
 		assert.NotNil(t, pid)
 
@@ -129,7 +129,7 @@ func TestPassivation(t *testing.T) {
 		util.Pause(time.Second)
 
 		// create the actor path
-		pid, err := actorSystem.Spawn(ctx, "test", &mockPostStopActor{},
+		pid, err := actorSystem.Spawn(ctx, "test", &MockPostStop{},
 			WithPassivationStrategy(passivation.NewTimeBasedStrategy(passivateAfter)),
 		)
 		require.NoError(t, err)
@@ -168,7 +168,7 @@ func TestPassivation(t *testing.T) {
 		util.Pause(time.Second)
 
 		// create the actor path
-		pid, err := actorSystem.Spawn(ctx, "test", newMockActor(),
+		pid, err := actorSystem.Spawn(ctx, "test", NewMockActor(),
 			WithPassivationStrategy(passivation.NewTimeBasedStrategy(timeout)))
 		require.NoError(t, err)
 		assert.NotNil(t, pid)
@@ -225,12 +225,12 @@ func TestPassivation(t *testing.T) {
 		util.Pause(time.Second)
 
 		// create the actor path
-		pid, err := actorSystem.Spawn(ctx, "test1", newMockActor(),
+		pid, err := actorSystem.Spawn(ctx, "test1", NewMockActor(),
 			WithPassivationStrategy(passivation.NewLongLivedStrategy()))
 		require.NoError(t, err)
 		assert.NotNil(t, pid)
 
-		pid2, err := actorSystem.Spawn(ctx, "test2", newMockActor(),
+		pid2, err := actorSystem.Spawn(ctx, "test2", NewMockActor(),
 			WithPassivationStrategy(passivation.NewTimeBasedStrategy(passivateAfter)))
 		require.NoError(t, err)
 		assert.NotNil(t, pid)
@@ -269,7 +269,7 @@ func TestPassivation(t *testing.T) {
 		util.Pause(time.Second)
 
 		// create the actor path
-		pid, err := actorSystem.Spawn(ctx, "test", newMockActor(),
+		pid, err := actorSystem.Spawn(ctx, "test", NewMockActor(),
 			WithPassivationStrategy(passivation.NewMessageCountBasedStrategy(2)))
 		require.NoError(t, err)
 		assert.NotNil(t, pid)
@@ -304,7 +304,7 @@ func TestPassivation(t *testing.T) {
 		util.Pause(time.Second)
 
 		// create the actor path
-		pid, err := actorSystem.Spawn(ctx, "test", newMockActor(),
+		pid, err := actorSystem.Spawn(ctx, "test", NewMockActor(),
 			WithPassivationStrategy(passivation.NewTimeBasedStrategy(passivateAfter)))
 		require.NoError(t, err)
 		assert.NotNil(t, pid)
@@ -341,7 +341,7 @@ func TestReply(t *testing.T) {
 		require.NoError(t, actorSystem.Start(ctx))
 		util.Pause(time.Second)
 
-		pid, err := actorSystem.Spawn(ctx, "test", newMockActor())
+		pid, err := actorSystem.Spawn(ctx, "test", NewMockActor())
 		require.NoError(t, err)
 		assert.NotNil(t, pid)
 
@@ -371,7 +371,7 @@ func TestReply(t *testing.T) {
 		util.Pause(time.Second)
 
 		// create the actor path
-		pid, err := actorSystem.Spawn(ctx, "test", newMockActor())
+		pid, err := actorSystem.Spawn(ctx, "test", NewMockActor())
 		require.NoError(t, err)
 		assert.NotNil(t, pid)
 
@@ -401,7 +401,7 @@ func TestReply(t *testing.T) {
 		util.Pause(time.Second)
 
 		// create the actor path
-		pid, err := actorSystem.Spawn(ctx, "test", newMockActor())
+		pid, err := actorSystem.Spawn(ctx, "test", NewMockActor())
 		require.NoError(t, err)
 		assert.NotNil(t, pid)
 
@@ -433,7 +433,7 @@ func TestRestart(t *testing.T) {
 
 		util.Pause(time.Second)
 
-		pid, err := actorSystem.Spawn(ctx, "test", newMockActor(),
+		pid, err := actorSystem.Spawn(ctx, "test", NewMockActor(),
 			WithPassivationStrategy(passivation.NewTimeBasedStrategy(10*time.Second)),
 		)
 
@@ -489,7 +489,7 @@ func TestRestart(t *testing.T) {
 
 		util.Pause(time.Second)
 
-		pid, err := actorSystem.Spawn(ctx, "test", newMockActor())
+		pid, err := actorSystem.Spawn(ctx, "test", NewMockActor())
 
 		require.NoError(t, err)
 		assert.NotNil(t, pid)
@@ -535,18 +535,18 @@ func TestRestart(t *testing.T) {
 
 		util.Pause(time.Second)
 
-		pid, err := actorSystem.Spawn(ctx, "test", newMockActor())
+		pid, err := actorSystem.Spawn(ctx, "test", NewMockActor())
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 
 		util.Pause(time.Second)
 
-		cid, err := pid.SpawnChild(ctx, "child", newMockActor())
+		cid, err := pid.SpawnChild(ctx, "child", NewMockActor())
 		require.NoError(t, err)
 		require.NotNil(t, cid)
 		util.Pause(500 * time.Millisecond)
 
-		gcid, err := cid.SpawnChild(ctx, "grandchild", newMockActor())
+		gcid, err := cid.SpawnChild(ctx, "grandchild", NewMockActor())
 		require.NoError(t, err)
 		require.NotNil(t, gcid)
 		util.Pause(500 * time.Millisecond)
@@ -600,7 +600,7 @@ func TestRestart(t *testing.T) {
 		util.Pause(time.Second)
 
 		// create a Ping actor
-		actor := newRestart()
+		actor := NewMockRestart()
 		assert.NotNil(t, actor)
 
 		pid, err := actorSystem.Spawn(ctx, "test", actor,
@@ -650,7 +650,7 @@ func TestRestart(t *testing.T) {
 		util.Pause(time.Second)
 
 		// create a Ping actor
-		actor := &mockPostStopActor{}
+		actor := &MockPostStop{}
 		assert.NotNil(t, actor)
 
 		pid, err := actorSystem.Spawn(ctx, "test", actor,
@@ -690,13 +690,13 @@ func TestRestart(t *testing.T) {
 
 		util.Pause(time.Second)
 
-		pid, err := actorSystem.Spawn(ctx, "test", newMockActor())
+		pid, err := actorSystem.Spawn(ctx, "test", NewMockActor())
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 
 		util.Pause(time.Second)
 
-		cid, err := pid.SpawnChild(ctx, "child", newRestart())
+		cid, err := pid.SpawnChild(ctx, "child", NewMockRestart())
 		require.NoError(t, err)
 		require.NotNil(t, cid)
 		util.Pause(500 * time.Millisecond)
@@ -728,7 +728,7 @@ func TestRestart(t *testing.T) {
 
 		util.Pause(time.Second)
 
-		pid, err := actorSystem.Spawn(ctx, "test", newPostActor())
+		pid, err := actorSystem.Spawn(ctx, "test", NewMockRestartPostStart())
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 
@@ -769,14 +769,14 @@ func TestSupervisorStrategy(t *testing.T) {
 
 		util.Pause(time.Second)
 
-		parent, err := actorSystem.Spawn(ctx, "test", newMockSupervisorActor())
+		parent, err := actorSystem.Spawn(ctx, "test", NewMockSupervisor())
 		require.NoError(t, err)
 		require.NotNil(t, parent)
 
 		// create the child actor
 		stopStrategy := NewSupervisor(WithDirective(PanicError{}, StopDirective))
 
-		child, err := parent.SpawnChild(ctx, "SpawnChild", newMockSupervisedActor(), WithSupervisor(stopStrategy))
+		child, err := parent.SpawnChild(ctx, "SpawnChild", NewMockSupervised(), WithSupervisor(stopStrategy))
 		require.NoError(t, err)
 		require.NotNil(t, child)
 		require.Equal(t, parent.ID(), child.Parent().ID())
@@ -808,7 +808,7 @@ func TestSupervisorStrategy(t *testing.T) {
 
 		util.Pause(time.Second)
 
-		parent, err := actorSystem.Spawn(ctx, "test", newMockSupervisorActor())
+		parent, err := actorSystem.Spawn(ctx, "test", NewMockSupervisor())
 		require.NoError(t, err)
 		require.NotNil(t, parent)
 
@@ -818,14 +818,14 @@ func TestSupervisorStrategy(t *testing.T) {
 			WithDirective(PanicError{}, StopDirective),
 		)
 
-		child, err := parent.SpawnChild(ctx, "SpawnChild", newMockSupervisedActor(), WithSupervisor(stopStrategy))
+		child, err := parent.SpawnChild(ctx, "SpawnChild", NewMockSupervised(), WithSupervisor(stopStrategy))
 		require.NoError(t, err)
 		require.NotNil(t, child)
 		require.Equal(t, parent.ID(), child.Parent().ID())
 
 		util.Pause(500 * time.Millisecond)
 
-		child2, err := parent.SpawnChild(ctx, "SpawnChild2", newMockSupervisedActor(), WithSupervisor(stopStrategy))
+		child2, err := parent.SpawnChild(ctx, "SpawnChild2", NewMockSupervised(), WithSupervisor(stopStrategy))
 		require.NoError(t, err)
 		require.NotNil(t, child2)
 		require.Equal(t, parent.ID(), child2.Parent().ID())
@@ -859,12 +859,12 @@ func TestSupervisorStrategy(t *testing.T) {
 
 		util.Pause(time.Second)
 
-		parent, err := actorSystem.Spawn(ctx, "test", newMockSupervisorActor())
+		parent, err := actorSystem.Spawn(ctx, "test", NewMockSupervisor())
 		require.NoError(t, err)
 		require.NotNil(t, parent)
 
 		// create the child actor
-		child, err := parent.SpawnChild(ctx, "SpawnChild", newMockSupervisedActor())
+		child, err := parent.SpawnChild(ctx, "SpawnChild", NewMockSupervised())
 		require.NoError(t, err)
 		require.NotNil(t, child)
 
@@ -902,12 +902,12 @@ func TestSupervisorStrategy(t *testing.T) {
 
 		util.Pause(time.Second)
 
-		parent, err := actorSystem.Spawn(ctx, "test", newMockSupervisorActor())
+		parent, err := actorSystem.Spawn(ctx, "test", NewMockSupervisor())
 		require.NoError(t, err)
 		require.NotNil(t, parent)
 
 		// create the child actor
-		child, err := parent.SpawnChild(ctx, "SpawnChild", newMockSupervisedActor())
+		child, err := parent.SpawnChild(ctx, "SpawnChild", NewMockSupervised())
 		require.NoError(t, err)
 		require.NotNil(t, child)
 
@@ -945,13 +945,13 @@ func TestSupervisorStrategy(t *testing.T) {
 
 		util.Pause(time.Second)
 
-		parent, err := actorSystem.Spawn(ctx, "test", newMockSupervisorActor())
+		parent, err := actorSystem.Spawn(ctx, "test", NewMockSupervisor())
 		require.NoError(t, err)
 		require.NotNil(t, parent)
 
 		// create the child actor
 		fakeStrategy := NewSupervisor(WithDirective(PanicError{}, 4)) // undefined directive
-		child, err := parent.SpawnChild(ctx, "SpawnChild", newMockSupervisedActor(), WithSupervisor(fakeStrategy))
+		child, err := parent.SpawnChild(ctx, "SpawnChild", NewMockSupervised(), WithSupervisor(fakeStrategy))
 		require.NoError(t, err)
 		require.NotNil(t, child)
 
@@ -993,12 +993,12 @@ func TestSupervisorStrategy(t *testing.T) {
 
 		util.Pause(time.Second)
 
-		parent, err := actorSystem.Spawn(ctx, "test", newMockSupervisorActor())
+		parent, err := actorSystem.Spawn(ctx, "test", NewMockSupervisor())
 		require.NoError(t, err)
 		require.NotNil(t, parent)
 
 		// create the child actor
-		child, err := parent.SpawnChild(ctx, "SpawnChild", newMockSupervisedActor())
+		child, err := parent.SpawnChild(ctx, "SpawnChild", NewMockSupervised())
 		require.NoError(t, err)
 		require.NotNil(t, child)
 
@@ -1046,14 +1046,14 @@ func TestSupervisorStrategy(t *testing.T) {
 
 		util.Pause(time.Second)
 
-		parent, err := actorSystem.Spawn(ctx, "test", newMockSupervisorActor())
+		parent, err := actorSystem.Spawn(ctx, "test", NewMockSupervisor())
 
 		require.NoError(t, err)
 		require.NotNil(t, parent)
 
 		// create the child actor
 		stopStrategy := NewSupervisor(WithDirective(PanicError{}, DefaultSupervisorDirective))
-		child, err := parent.SpawnChild(ctx, "SpawnChild", &mockPostStopActor{}, WithSupervisor(stopStrategy))
+		child, err := parent.SpawnChild(ctx, "SpawnChild", &MockPostStop{}, WithSupervisor(stopStrategy))
 		require.NoError(t, err)
 		require.NotNil(t, child)
 
@@ -1091,13 +1091,13 @@ func TestSupervisorStrategy(t *testing.T) {
 
 		util.Pause(time.Second)
 
-		parent, err := actorSystem.Spawn(ctx, "test", newMockSupervisorActor())
+		parent, err := actorSystem.Spawn(ctx, "test", NewMockSupervisor())
 		require.NoError(t, err)
 		require.NotNil(t, parent)
 
 		// create the child actor
 		restartStrategy := NewSupervisor(WithDirective(PanicError{}, RestartDirective))
-		child, err := parent.SpawnChild(ctx, "SpawnChild", newMockSupervisedActor(), WithSupervisor(restartStrategy))
+		child, err := parent.SpawnChild(ctx, "SpawnChild", NewMockSupervised(), WithSupervisor(restartStrategy))
 		require.NoError(t, err)
 		require.NotNil(t, child)
 
@@ -1137,7 +1137,7 @@ func TestSupervisorStrategy(t *testing.T) {
 
 		util.Pause(time.Second)
 
-		parent, err := actorSystem.Spawn(ctx, "test", newMockSupervisorActor())
+		parent, err := actorSystem.Spawn(ctx, "test", NewMockSupervisor())
 		require.NoError(t, err)
 		require.NotNil(t, parent)
 
@@ -1145,13 +1145,13 @@ func TestSupervisorStrategy(t *testing.T) {
 		restartStrategy := NewSupervisor(
 			WithStrategy(OneForAllStrategy),
 			WithDirective(PanicError{}, RestartDirective))
-		child, err := parent.SpawnChild(ctx, "SpawnChild", newMockSupervisedActor(), WithSupervisor(restartStrategy))
+		child, err := parent.SpawnChild(ctx, "SpawnChild", NewMockSupervised(), WithSupervisor(restartStrategy))
 		require.NoError(t, err)
 		require.NotNil(t, child)
 
 		util.Pause(time.Second)
 
-		child2, err := parent.SpawnChild(ctx, "SpawnChild2", newMockSupervisedActor(), WithSupervisor(restartStrategy))
+		child2, err := parent.SpawnChild(ctx, "SpawnChild2", NewMockSupervised(), WithSupervisor(restartStrategy))
 		require.NoError(t, err)
 		require.NotNil(t, child2)
 		require.Equal(t, parent.ID(), child2.Parent().ID())
@@ -1194,13 +1194,13 @@ func TestSupervisorStrategy(t *testing.T) {
 
 		util.Pause(time.Second)
 
-		parent, err := actorSystem.Spawn(ctx, "test", newMockSupervisorActor())
+		parent, err := actorSystem.Spawn(ctx, "test", NewMockSupervisor())
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
 
 		// create the child actor
-		child, err := parent.SpawnChild(ctx, "SpawnChild", newMockSupervisedActor())
+		child, err := parent.SpawnChild(ctx, "SpawnChild", NewMockSupervised())
 		assert.NoError(t, err)
 		assert.NotNil(t, child)
 
@@ -1236,13 +1236,13 @@ func TestSupervisorStrategy(t *testing.T) {
 
 		util.Pause(time.Second)
 
-		parent, err := actorSystem.Spawn(ctx, "test", newMockSupervisorActor())
+		parent, err := actorSystem.Spawn(ctx, "test", NewMockSupervisor())
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
 
 		// create the child actor
 		resumeStrategy := NewSupervisor(WithDirective(PanicError{}, ResumeDirective))
-		child, err := parent.SpawnChild(ctx, "SpawnChild", newMockSupervisedActor(), WithSupervisor(resumeStrategy))
+		child, err := parent.SpawnChild(ctx, "SpawnChild", NewMockSupervised(), WithSupervisor(resumeStrategy))
 		assert.NoError(t, err)
 		assert.NotNil(t, child)
 
@@ -1284,7 +1284,7 @@ func TestSupervisorStrategy(t *testing.T) {
 
 		util.Pause(time.Second)
 
-		parent, err := actorSystem.Spawn(ctx, "test", newMockSupervisorActor())
+		parent, err := actorSystem.Spawn(ctx, "test", NewMockSupervisor())
 		require.NoError(t, err)
 		require.NotNil(t, parent)
 
@@ -1294,7 +1294,7 @@ func TestSupervisorStrategy(t *testing.T) {
 			WithRetry(2, time.Minute),
 		)
 
-		child, err := parent.SpawnChild(ctx, "SpawnChild", newMockSupervisedActor(), WithSupervisor(restartStrategy))
+		child, err := parent.SpawnChild(ctx, "SpawnChild", NewMockSupervised(), WithSupervisor(restartStrategy))
 		require.NoError(t, err)
 		require.NotNil(t, child)
 
@@ -1335,12 +1335,12 @@ func TestSupervisorStrategy(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, subscriber)
 
-		parent, err := actorSystem.Spawn(ctx, "test", newMockSupervisorActor())
+		parent, err := actorSystem.Spawn(ctx, "test", NewMockSupervisor())
 		require.NoError(t, err)
 		require.NotNil(t, parent)
 
 		// create the child actor
-		child, err := parent.SpawnChild(ctx, "SpawnChild", newMockSupervisedActor())
+		child, err := parent.SpawnChild(ctx, "SpawnChild", NewMockSupervised())
 		require.NoError(t, err)
 		require.NotNil(t, child)
 
@@ -1414,14 +1414,14 @@ func TestSupervisorStrategy(t *testing.T) {
 
 		util.Pause(time.Second)
 
-		parent, err := actorSystem.Spawn(ctx, "test", newMockSupervisorActor())
+		parent, err := actorSystem.Spawn(ctx, "test", NewMockSupervisor())
 		require.NoError(t, err)
 		require.NotNil(t, parent)
 
 		// create the child actor
 		stopStrategy := NewSupervisor(WithAnyErrorDirective(StopDirective))
 
-		child, err := parent.SpawnChild(ctx, "SpawnChild", newMockSupervisedActor(), WithSupervisor(stopStrategy))
+		child, err := parent.SpawnChild(ctx, "SpawnChild", NewMockSupervised(), WithSupervisor(stopStrategy))
 		require.NoError(t, err)
 		require.NotNil(t, child)
 		require.Equal(t, parent.ID(), child.Parent().ID())
@@ -1453,13 +1453,13 @@ func TestSupervisorStrategy(t *testing.T) {
 
 		util.Pause(time.Second)
 
-		parent, err := actorSystem.Spawn(ctx, "test", newEscalationSupervisor())
+		parent, err := actorSystem.Spawn(ctx, "test", NewMockEscalation())
 		require.NoError(t, err)
 		require.NotNil(t, parent)
 
 		// create the child actor
 		escalationStrategy := NewSupervisor(WithDirective(PanicError{}, EscalateDirective))
-		child, err := parent.SpawnChild(ctx, "SpawnChild", newMockSupervisedActor(), WithSupervisor(escalationStrategy))
+		child, err := parent.SpawnChild(ctx, "SpawnChild", NewMockSupervised(), WithSupervisor(escalationStrategy))
 		require.NoError(t, err)
 		require.NotNil(t, child)
 
@@ -1495,13 +1495,13 @@ func TestSupervisorStrategy(t *testing.T) {
 
 		util.Pause(time.Second)
 
-		parent, err := actorSystem.Spawn(ctx, "supervisor", newReinstateSupervisor())
+		parent, err := actorSystem.Spawn(ctx, "supervisor", NewMockReinstate())
 		require.NoError(t, err)
 		require.NotNil(t, parent)
 
 		// create the child actor
 		escalationStrategy := NewSupervisor(WithDirective(PanicError{}, EscalateDirective))
-		child, err := parent.SpawnChild(ctx, "reinstate", newMockSupervisedActor(), WithSupervisor(escalationStrategy))
+		child, err := parent.SpawnChild(ctx, "reinstate", NewMockSupervised(), WithSupervisor(escalationStrategy))
 		require.NoError(t, err)
 		require.NotNil(t, child)
 
@@ -1537,13 +1537,13 @@ func TestSupervisorStrategy(t *testing.T) {
 
 		util.Pause(time.Second)
 
-		parent, err := actorSystem.Spawn(ctx, "test", newMockSupervisorActor())
+		parent, err := actorSystem.Spawn(ctx, "test", NewMockSupervisor())
 		require.NoError(t, err)
 		require.NotNil(t, parent)
 
 		// create the child actor
 		restartStrategy := NewSupervisor(WithAnyErrorDirective(RestartDirective))
-		child, err := parent.SpawnChild(ctx, "SpawnChild", newMockSupervisedActor(), WithSupervisor(restartStrategy))
+		child, err := parent.SpawnChild(ctx, "SpawnChild", NewMockSupervised(), WithSupervisor(restartStrategy))
 		require.NoError(t, err)
 		require.NotNil(t, child)
 
@@ -1585,7 +1585,7 @@ func TestSupervisorStrategy(t *testing.T) {
 
 		// create the child actor
 		restartStrategy := NewSupervisor(WithAnyErrorDirective(RestartDirective))
-		pid, err := actorSystem.Spawn(ctx, "SpawnChild", newMockSupervisedActor(), WithSupervisor(restartStrategy))
+		pid, err := actorSystem.Spawn(ctx, "SpawnChild", NewMockSupervised(), WithSupervisor(restartStrategy))
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 
@@ -1812,7 +1812,7 @@ func TestMessaging(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
 
-		actor2 := newMockActor()
+		actor2 := NewMockActor()
 		pid2, err := actorSystem.Spawn(ctx, "Exchange2", actor2)
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
@@ -2046,14 +2046,14 @@ func TestSpawnChild(t *testing.T) {
 		util.Pause(time.Second)
 
 		// create the parent actor
-		parent, err := actorSystem.Spawn(ctx, "Parent", newMockSupervisorActor())
+		parent, err := actorSystem.Spawn(ctx, "Parent", NewMockSupervisor())
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
 
 		util.Pause(time.Second)
 
 		// create the child actor
-		child, err := parent.SpawnChild(ctx, "SpawnChild", newMockSupervisedActor())
+		child, err := parent.SpawnChild(ctx, "SpawnChild", NewMockSupervised())
 		assert.NoError(t, err)
 		assert.NotNil(t, child)
 
@@ -2071,7 +2071,7 @@ func TestSpawnChild(t *testing.T) {
 		require.Empty(t, parent.Children())
 
 		// create the child actor
-		child, err = parent.SpawnChild(ctx, "SpawnChild", newMockSupervisedActor())
+		child, err = parent.SpawnChild(ctx, "SpawnChild", NewMockSupervised())
 		assert.NoError(t, err)
 		assert.NotNil(t, child)
 
@@ -2101,14 +2101,14 @@ func TestSpawnChild(t *testing.T) {
 		util.Pause(time.Second)
 
 		// create the parent actor
-		parent, err := actorSystem.Spawn(ctx, "Parent", newMockSupervisorActor())
+		parent, err := actorSystem.Spawn(ctx, "Parent", NewMockSupervisor())
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
 
 		util.Pause(time.Second)
 
 		// create the child actor
-		child, err := parent.SpawnChild(ctx, "SpawnChild", newMockSupervisedActor())
+		child, err := parent.SpawnChild(ctx, "SpawnChild", NewMockSupervised())
 		assert.NoError(t, err)
 		assert.NotNil(t, child)
 
@@ -2147,13 +2147,13 @@ func TestSpawnChild(t *testing.T) {
 		util.Pause(time.Second)
 
 		// create the parent actor
-		parent, err := actorSystem.Spawn(ctx, "Parent", newMockSupervisorActor())
+		parent, err := actorSystem.Spawn(ctx, "Parent", NewMockSupervisor())
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
 
 		// create the child actor
-		child, err := parent.SpawnChild(ctx, "child", newMockSupervisedActor(), WithMailbox(NewBoundedMailbox(20)))
+		child, err := parent.SpawnChild(ctx, "child", NewMockSupervised(), WithMailbox(NewBoundedMailbox(20)))
 		assert.NoError(t, err)
 		assert.NotNil(t, child)
 		util.Pause(time.Second)
@@ -2184,13 +2184,13 @@ func TestSpawnChild(t *testing.T) {
 		util.Pause(time.Second)
 
 		// create the parent actor
-		parent, err := actorSystem.Spawn(ctx, "Parent", newMockSupervisorActor())
+		parent, err := actorSystem.Spawn(ctx, "Parent", NewMockSupervisor())
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
 
 		// create the child actor
-		child, err := parent.SpawnChild(ctx, "SpawnChild", newMockSupervisedActor())
+		child, err := parent.SpawnChild(ctx, "SpawnChild", NewMockSupervised())
 		assert.NoError(t, err)
 		assert.NotNil(t, child)
 
@@ -2198,7 +2198,7 @@ func TestSpawnChild(t *testing.T) {
 
 		util.Pause(100 * time.Millisecond)
 		// create the child actor
-		child, err = parent.SpawnChild(ctx, "SpawnChild", newMockSupervisedActor())
+		child, err = parent.SpawnChild(ctx, "SpawnChild", NewMockSupervised())
 		assert.NoError(t, err)
 		assert.NotNil(t, child)
 
@@ -2228,7 +2228,7 @@ func TestSpawnChild(t *testing.T) {
 		util.Pause(time.Second)
 
 		// create the parent actor
-		parent, err := actorSystem.Spawn(ctx, "Parent", newMockSupervisorActor())
+		parent, err := actorSystem.Spawn(ctx, "Parent", NewMockSupervisor())
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
 
@@ -2238,7 +2238,7 @@ func TestSpawnChild(t *testing.T) {
 		assert.NoError(t, err)
 
 		// create the child actor
-		child, err := parent.SpawnChild(ctx, "SpawnChild", newMockSupervisedActor())
+		child, err := parent.SpawnChild(ctx, "SpawnChild", NewMockSupervised())
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, ErrDead)
 		assert.Nil(t, child)
@@ -2261,13 +2261,13 @@ func TestSpawnChild(t *testing.T) {
 		util.Pause(time.Second)
 
 		// create the parent actor
-		parent, err := actorSystem.Spawn(ctx, "Parent", newMockSupervisorActor())
+		parent, err := actorSystem.Spawn(ctx, "Parent", NewMockSupervisor())
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
 
 		// create the child actor
-		child, err := parent.SpawnChild(ctx, "SpawnChild", &mockPreStartActor{})
+		child, err := parent.SpawnChild(ctx, "SpawnChild", &MockPreStart{})
 		assert.Error(t, err)
 		assert.Nil(t, child)
 
@@ -2299,13 +2299,13 @@ func TestSpawnChild(t *testing.T) {
 		require.NoError(t, err)
 
 		// create the parent actor
-		parent, err := actorSystem.Spawn(ctx, "Parent", newMockSupervisorActor())
+		parent, err := actorSystem.Spawn(ctx, "Parent", NewMockSupervisor())
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
 
 		// create the child actor
-		child, err := parent.SpawnChild(ctx, "SpawnChild", newMockSupervisedActor())
+		child, err := parent.SpawnChild(ctx, "SpawnChild", NewMockSupervised())
 		assert.NoError(t, err)
 		assert.NotNil(t, child)
 
@@ -2352,14 +2352,14 @@ func TestSpawnChild(t *testing.T) {
 		util.Pause(time.Second)
 
 		// create the parent actor
-		parent, err := actorSystem.Spawn(ctx, "Parent", newMockSupervisorActor())
+		parent, err := actorSystem.Spawn(ctx, "Parent", NewMockSupervisor())
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
 
 		// create the child actor
 		child, err := parent.SpawnChild(ctx, "child",
-			newMockSupervisedActor(),
+			NewMockSupervised(),
 			WithMailbox(NewBoundedMailbox(20)),
 			WithPassivateAfter(2*time.Second))
 
@@ -2407,14 +2407,14 @@ func TestSpawnChild(t *testing.T) {
 		util.Pause(time.Second)
 
 		// create the parent actor
-		parent, err := actorSystem.Spawn(ctx, "Parent", newMockSupervisorActor())
+		parent, err := actorSystem.Spawn(ctx, "Parent", NewMockSupervisor())
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
 
 		// create the child actor
 		child, err := parent.SpawnChild(ctx, "child",
-			newMockSupervisedActor(),
+			NewMockSupervised(),
 			WithMailbox(NewBoundedMailbox(20)))
 
 		util.Pause(time.Second)
@@ -2462,7 +2462,7 @@ func TestPoisonPill(t *testing.T) {
 	util.Pause(time.Second)
 
 	// create the actor ref
-	pid, err := actorSystem.Spawn(ctx, "PoisonPill", newMockActor())
+	pid, err := actorSystem.Spawn(ctx, "PoisonPill", NewMockActor())
 
 	require.NoError(t, err)
 	assert.NotNil(t, pid)
@@ -2617,7 +2617,7 @@ func TestFailedPreStart(t *testing.T) {
 
 	// create an exchanger 1
 	actorName1 := "Exchange1"
-	pid, err := sys.Spawn(ctx, actorName1, &mockPreStartActor{})
+	pid, err := sys.Spawn(ctx, actorName1, &MockPreStart{})
 	require.Error(t, err)
 	require.ErrorIs(t, err, ErrInitFailure)
 	require.Nil(t, pid)
@@ -2641,7 +2641,7 @@ func TestFailedPostStop(t *testing.T) {
 	require.NoError(t, actorSystem.Start(ctx))
 
 	util.Pause(time.Second)
-	pid, err := actorSystem.Spawn(ctx, "PostStop", &mockPostStopActor{})
+	pid, err := actorSystem.Spawn(ctx, "PostStop", &MockPostStop{})
 
 	require.NoError(t, err)
 	assert.NotNil(t, pid)
@@ -2668,12 +2668,12 @@ func TestShutdown(t *testing.T) {
 
 		util.Pause(time.Second)
 
-		parent, err := actorSystem.Spawn(ctx, "test", newMockSupervisorActor())
+		parent, err := actorSystem.Spawn(ctx, "test", NewMockSupervisor())
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
 
 		// create the child actor
-		child, err := parent.SpawnChild(ctx, "SpawnChild", &mockPostStopActor{})
+		child, err := parent.SpawnChild(ctx, "SpawnChild", &MockPostStop{})
 		assert.NoError(t, err)
 		assert.NotNil(t, child)
 
@@ -2703,7 +2703,7 @@ func TestBatchTell(t *testing.T) {
 		util.Pause(time.Second)
 
 		// create the actor path
-		actor := newMockActor()
+		actor := NewMockActor()
 		pid, err := actorSystem.Spawn(ctx, "test", actor)
 		require.NoError(t, err)
 		require.NotNil(t, pid)
@@ -2737,7 +2737,7 @@ func TestBatchTell(t *testing.T) {
 		util.Pause(time.Second)
 
 		// create the actor path
-		actor := newMockActor()
+		actor := NewMockActor()
 		pid, err := actorSystem.Spawn(ctx, "test", actor)
 		require.NoError(t, err)
 		require.NotNil(t, pid)
@@ -2770,7 +2770,7 @@ func TestBatchTell(t *testing.T) {
 
 		util.Pause(time.Second)
 		// create the actor path
-		actor := newMockActor()
+		actor := NewMockActor()
 		pid, err := actorSystem.Spawn(ctx, "test", actor)
 		require.NoError(t, err)
 		require.NotNil(t, pid)
@@ -2873,7 +2873,7 @@ func TestBatchAsk(t *testing.T) {
 		util.Pause(time.Second)
 
 		// create the actor path
-		actor := newMockActor()
+		actor := NewMockActor()
 
 		pid, err := actorSystem.Spawn(ctx, "test", actor)
 		require.NoError(t, err)
@@ -3172,7 +3172,7 @@ func TestEquals(t *testing.T) {
 		err = sys.Start(ctx)
 		assert.NoError(t, err)
 
-		pid1, err := sys.Spawn(ctx, "test", newMockActor())
+		pid1, err := sys.Spawn(ctx, "test", NewMockActor())
 		require.NoError(t, err)
 		assert.NotNil(t, pid1)
 
@@ -3682,14 +3682,14 @@ func TestSendAsync(t *testing.T) {
 
 		util.Pause(time.Second)
 
-		receivingActor := newMockActor()
+		receivingActor := NewMockActor()
 		receiver, err := actorSystem.Spawn(ctx, "receiver", receivingActor)
 		assert.NoError(t, err)
 		assert.NotNil(t, receiver)
 
 		util.Pause(time.Second)
 
-		sender, err := actorSystem.Spawn(ctx, "sender", newMockActor())
+		sender, err := actorSystem.Spawn(ctx, "sender", NewMockActor())
 		assert.NoError(t, err)
 		assert.NotNil(t, sender)
 
@@ -3713,14 +3713,14 @@ func TestSendAsync(t *testing.T) {
 
 		util.Pause(time.Second)
 
-		receivingActor := newMockActor()
+		receivingActor := NewMockActor()
 		receiver, err := actorSystem.Spawn(ctx, "receiver", receivingActor)
 		assert.NoError(t, err)
 		assert.NotNil(t, receiver)
 
 		util.Pause(time.Second)
 
-		sender, err := actorSystem.Spawn(ctx, "sender", newMockActor())
+		sender, err := actorSystem.Spawn(ctx, "sender", NewMockActor())
 		assert.NoError(t, err)
 		assert.NotNil(t, sender)
 
@@ -3753,12 +3753,12 @@ func TestSendAsync(t *testing.T) {
 		require.NotNil(t, sd2)
 
 		// create an actor on node1
-		receiver, err := node1.Spawn(ctx, "receiver", newMockActor())
+		receiver, err := node1.Spawn(ctx, "receiver", NewMockActor())
 		assert.NoError(t, err)
 		assert.NotNil(t, receiver)
 		util.Pause(time.Second)
 
-		sender, err := node2.Spawn(ctx, "sender", newMockActor())
+		sender, err := node2.Spawn(ctx, "sender", NewMockActor())
 		assert.NoError(t, err)
 		assert.NotNil(t, sender)
 
@@ -3791,7 +3791,7 @@ func TestSendAsync(t *testing.T) {
 		require.NotNil(t, node2)
 		require.NotNil(t, sd2)
 
-		sender, err := node2.Spawn(ctx, "sender", newMockActor())
+		sender, err := node2.Spawn(ctx, "sender", NewMockActor())
 		assert.NoError(t, err)
 		assert.NotNil(t, sender)
 
@@ -3821,13 +3821,13 @@ func TestSendSync(t *testing.T) {
 
 		util.Pause(time.Second)
 
-		receiver, err := actorSystem.Spawn(ctx, "receiver", newMockActor())
+		receiver, err := actorSystem.Spawn(ctx, "receiver", NewMockActor())
 		assert.NoError(t, err)
 		assert.NotNil(t, receiver)
 
 		util.Pause(time.Second)
 
-		sender, err := actorSystem.Spawn(ctx, "sender", newMockActor())
+		sender, err := actorSystem.Spawn(ctx, "sender", NewMockActor())
 		assert.NoError(t, err)
 		assert.NotNil(t, sender)
 
@@ -3853,13 +3853,13 @@ func TestSendSync(t *testing.T) {
 
 		util.Pause(time.Second)
 
-		receiver, err := actorSystem.Spawn(ctx, "receiver", newMockActor())
+		receiver, err := actorSystem.Spawn(ctx, "receiver", NewMockActor())
 		assert.NoError(t, err)
 		assert.NotNil(t, receiver)
 
 		util.Pause(time.Second)
 
-		sender, err := actorSystem.Spawn(ctx, "sender", newMockActor())
+		sender, err := actorSystem.Spawn(ctx, "sender", NewMockActor())
 		assert.NoError(t, err)
 		assert.NotNil(t, sender)
 
@@ -3893,12 +3893,12 @@ func TestSendSync(t *testing.T) {
 		require.NotNil(t, sd2)
 
 		// create an actor on node1
-		receiver, err := node1.Spawn(ctx, "receiver", newMockActor())
+		receiver, err := node1.Spawn(ctx, "receiver", NewMockActor())
 		assert.NoError(t, err)
 		assert.NotNil(t, receiver)
 		util.Pause(time.Second)
 
-		sender, err := node2.Spawn(ctx, "sender", newMockActor())
+		sender, err := node2.Spawn(ctx, "sender", NewMockActor())
 		assert.NoError(t, err)
 		assert.NotNil(t, sender)
 
@@ -3934,7 +3934,7 @@ func TestSendSync(t *testing.T) {
 		require.NotNil(t, node2)
 		require.NotNil(t, sd2)
 
-		sender, err := node2.Spawn(ctx, "sender", newMockActor())
+		sender, err := node2.Spawn(ctx, "sender", NewMockActor())
 		assert.NoError(t, err)
 		assert.NotNil(t, sender)
 
@@ -3971,12 +3971,12 @@ func TestStopChild(t *testing.T) {
 
 		util.Pause(time.Second)
 
-		parent, err := actorSystem.Spawn(ctx, "parent", newMockSupervisorActor())
+		parent, err := actorSystem.Spawn(ctx, "parent", NewMockSupervisor())
 		require.NoError(t, err)
 		require.NotNil(t, parent)
 
 		// create the child actor
-		child, err := parent.SpawnChild(ctx, "SpawnChild", new(mockPostStopActor))
+		child, err := parent.SpawnChild(ctx, "SpawnChild", new(MockPostStop))
 		require.NoError(t, err)
 		require.NotNil(t, child)
 		require.Len(t, parent.Children(), 1)
@@ -3996,7 +3996,7 @@ func TestNewPID(t *testing.T) {
 		pid, err := newPID(
 			ctx,
 			nil,
-			newMockActor(),
+			NewMockActor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger))
 
@@ -4036,7 +4036,7 @@ func TestDeadletterCountMetric(t *testing.T) {
 	util.Pause(time.Second)
 
 	// create the black hole actor
-	actor := &mockUnhandledMessageActor{}
+	actor := &MockUnhandled{}
 	actorName := "actorName"
 	actorRef, err := sys.Spawn(ctx, actorName, actor)
 	assert.NoError(t, err)
@@ -4077,13 +4077,13 @@ func TestWatch(t *testing.T) {
 	util.Pause(time.Second)
 
 	// create the actor ref
-	pid, err := actorSystem.Spawn(ctx, "actor", newMockActor())
+	pid, err := actorSystem.Spawn(ctx, "actor", NewMockActor())
 	require.NoError(t, err)
 	require.NotNil(t, pid)
 	require.True(t, pid.IsRunning())
 
 	// create another actor ref
-	pid2, err := actorSystem.Spawn(ctx, "actor2", newMockActor())
+	pid2, err := actorSystem.Spawn(ctx, "actor2", NewMockActor())
 	require.NoError(t, err)
 	require.NotNil(t, pid2)
 	require.True(t, pid2.IsRunning())
@@ -4123,7 +4123,7 @@ func TestUnWatchWithInexistentNode(t *testing.T) {
 	util.Pause(time.Second)
 
 	// create the actor ref
-	pid, err := actorSystem.Spawn(ctx, "actor", newMockActor())
+	pid, err := actorSystem.Spawn(ctx, "actor", NewMockActor())
 	require.NoError(t, err)
 	require.NotNil(t, pid)
 	require.True(t, pid.IsRunning())
@@ -4133,7 +4133,7 @@ func TestUnWatchWithInexistentNode(t *testing.T) {
 	childPath := address.New("child", "sys", "127.0.0.1", ports[0])
 	cid, err := newPID(
 		ctx, childPath,
-		newMockSupervisorActor(),
+		NewMockSupervisor(),
 		withInitMaxRetries(1),
 		withActorSystem(actorSystem),
 		withWorkerPool(workerPool),
@@ -4173,7 +4173,7 @@ func TestParentWithInexistenceNodeReturnsNil(t *testing.T) {
 	childPath := address.New("child", "sys", "127.0.0.1", ports[0])
 	cid, err := newPID(
 		ctx, childPath,
-		newMockSupervisorActor(),
+		NewMockSupervisor(),
 		withInitMaxRetries(1),
 		withActorSystem(actorSystem),
 		withWorkerPool(workerPool),
@@ -4204,13 +4204,13 @@ func TestReinstate(t *testing.T) {
 		util.Pause(time.Second)
 
 		// create the actor ref
-		pid, err := actorSystem.Spawn(ctx, "actor", newMockActor())
+		pid, err := actorSystem.Spawn(ctx, "actor", NewMockActor())
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 		require.True(t, pid.IsRunning())
 
 		// create another actor ref
-		pid2, err := actorSystem.Spawn(ctx, "actor2", newMockActor())
+		pid2, err := actorSystem.Spawn(ctx, "actor2", NewMockActor())
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
 		require.True(t, pid2.IsRunning())
@@ -4246,7 +4246,7 @@ func TestReinstate(t *testing.T) {
 		util.Pause(time.Second)
 
 		// create the actor ref
-		pid, err := actorSystem.Spawn(ctx, "actor", newMockActor())
+		pid, err := actorSystem.Spawn(ctx, "actor", NewMockActor())
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 		require.True(t, pid.IsRunning())
@@ -4277,13 +4277,13 @@ func TestReinstate(t *testing.T) {
 		util.Pause(time.Second)
 
 		// create the actor ref
-		pid, err := actorSystem.Spawn(ctx, "actor", newMockActor())
+		pid, err := actorSystem.Spawn(ctx, "actor", NewMockActor())
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 		require.True(t, pid.IsRunning())
 
 		// create another actor ref
-		pid2, err := actorSystem.Spawn(ctx, "actor2", newMockActor())
+		pid2, err := actorSystem.Spawn(ctx, "actor2", NewMockActor())
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
 		require.True(t, pid2.IsRunning())
@@ -4316,13 +4316,13 @@ func TestReinstate(t *testing.T) {
 		util.Pause(time.Second)
 
 		// create the actor ref
-		pid, err := actorSystem.Spawn(ctx, "actor", newMockActor())
+		pid, err := actorSystem.Spawn(ctx, "actor", NewMockActor())
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 		require.True(t, pid.IsRunning())
 
 		// create another actor ref
-		pid2, err := actorSystem.Spawn(ctx, "actor2", newMockActor())
+		pid2, err := actorSystem.Spawn(ctx, "actor2", NewMockActor())
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
 		require.True(t, pid2.IsRunning())
@@ -4353,13 +4353,13 @@ func TestReinstateNamed(t *testing.T) {
 		util.Pause(time.Second)
 
 		// create the actor ref
-		pid, err := actorSystem.Spawn(ctx, "actor", newMockActor())
+		pid, err := actorSystem.Spawn(ctx, "actor", NewMockActor())
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 		require.True(t, pid.IsRunning())
 
 		// create another actor ref
-		pid2, err := actorSystem.Spawn(ctx, "actor2", newMockActor())
+		pid2, err := actorSystem.Spawn(ctx, "actor2", NewMockActor())
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
 		require.True(t, pid2.IsRunning())
@@ -4401,7 +4401,7 @@ func TestReinstateNamed(t *testing.T) {
 			WithRemote(remote.NewConfig(host, remotingPort)),
 			WithCluster(
 				NewClusterConfig().
-					WithKinds(new(mockActor)).
+					WithKinds(new(MockActor)).
 					WithPartitionCount(9).
 					WithReplicaCount(1).
 					WithPeersPort(clusterPort).
@@ -4426,13 +4426,13 @@ func TestReinstateNamed(t *testing.T) {
 		util.Pause(time.Second)
 
 		// create an actor
-		ref, err := newActorSystem.Spawn(ctx, "ref0", newMockActor())
+		ref, err := newActorSystem.Spawn(ctx, "ref0", NewMockActor())
 		assert.NoError(t, err)
 		assert.NotNil(t, ref)
 
 		util.Pause(time.Second)
 
-		ref1, err := newActorSystem.Spawn(ctx, "ref1", newMockActor(),
+		ref1, err := newActorSystem.Spawn(ctx, "ref1", NewMockActor(),
 			WithPassivationStrategy(passivation.NewTimeBasedStrategy(passivateAfter)))
 		assert.NoError(t, err)
 		assert.NotNil(t, ref1)
@@ -4472,7 +4472,7 @@ func TestReinstateNamed(t *testing.T) {
 			WithRemote(remote.NewConfig(host, remotingPort)),
 			WithCluster(
 				NewClusterConfig().
-					WithKinds(new(mockActor)).
+					WithKinds(new(MockActor)).
 					WithPartitionCount(9).
 					WithReplicaCount(1).
 					WithPeersPort(clusterPort).
@@ -4497,13 +4497,13 @@ func TestReinstateNamed(t *testing.T) {
 		util.Pause(time.Second)
 
 		// create an actor
-		ref, err := newActorSystem.Spawn(ctx, "ref0", newMockActor())
+		ref, err := newActorSystem.Spawn(ctx, "ref0", NewMockActor())
 		assert.NoError(t, err)
 		assert.NotNil(t, ref)
 
 		util.Pause(time.Second)
 
-		ref1, err := newActorSystem.Spawn(ctx, "ref1", newMockActor())
+		ref1, err := newActorSystem.Spawn(ctx, "ref1", NewMockActor())
 		assert.NoError(t, err)
 		assert.NotNil(t, ref1)
 
@@ -4548,7 +4548,7 @@ func TestReinstateNamed(t *testing.T) {
 			WithRemote(remote.NewConfig(host, remotingPort)),
 			WithCluster(
 				NewClusterConfig().
-					WithKinds(new(mockActor)).
+					WithKinds(new(MockActor)).
 					WithPartitionCount(9).
 					WithReplicaCount(1).
 					WithPeersPort(clusterPort).
@@ -4573,13 +4573,13 @@ func TestReinstateNamed(t *testing.T) {
 		util.Pause(time.Second)
 
 		// create an actor
-		ref, err := newActorSystem.Spawn(ctx, "ref0", newMockActor())
+		ref, err := newActorSystem.Spawn(ctx, "ref0", NewMockActor())
 		assert.NoError(t, err)
 		assert.NotNil(t, ref)
 
 		util.Pause(time.Second)
 
-		ref1, err := newActorSystem.Spawn(ctx, "ref1", newMockActor())
+		ref1, err := newActorSystem.Spawn(ctx, "ref1", NewMockActor())
 		assert.NoError(t, err)
 		assert.NotNil(t, ref1)
 

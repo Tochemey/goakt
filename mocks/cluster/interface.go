@@ -191,6 +191,65 @@ func (_c *Interface_GetActor_Call) RunAndReturn(run func(context.Context, string
 	return _c
 }
 
+// GetGrain provides a mock function with given fields: ctx, grainID
+func (_m *Interface) GetGrain(ctx context.Context, grainID string) (*internalpb.Grain, error) {
+	ret := _m.Called(ctx, grainID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetGrain")
+	}
+
+	var r0 *internalpb.Grain
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string) (*internalpb.Grain, error)); ok {
+		return rf(ctx, grainID)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string) *internalpb.Grain); ok {
+		r0 = rf(ctx, grainID)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*internalpb.Grain)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = rf(ctx, grainID)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// Interface_GetGrain_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetGrain'
+type Interface_GetGrain_Call struct {
+	*mock.Call
+}
+
+// GetGrain is a helper method to define mock.On call
+//   - ctx context.Context
+//   - grainID string
+func (_e *Interface_Expecter) GetGrain(ctx interface{}, grainID interface{}) *Interface_GetGrain_Call {
+	return &Interface_GetGrain_Call{Call: _e.mock.On("GetGrain", ctx, grainID)}
+}
+
+func (_c *Interface_GetGrain_Call) Run(run func(ctx context.Context, grainID string)) *Interface_GetGrain_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *Interface_GetGrain_Call) Return(_a0 *internalpb.Grain, _a1 error) *Interface_GetGrain_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *Interface_GetGrain_Call) RunAndReturn(run func(context.Context, string) (*internalpb.Grain, error)) *Interface_GetGrain_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetPartition provides a mock function with given fields: actorName
 func (_m *Interface) GetPartition(actorName string) int {
 	ret := _m.Called(actorName)
@@ -545,6 +604,53 @@ func (_c *Interface_PutActor_Call) Return(_a0 error) *Interface_PutActor_Call {
 }
 
 func (_c *Interface_PutActor_Call) RunAndReturn(run func(context.Context, *internalpb.Actor) error) *Interface_PutActor_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// PutGrain provides a mock function with given fields: ctx, grain
+func (_m *Interface) PutGrain(ctx context.Context, grain *internalpb.Grain) error {
+	ret := _m.Called(ctx, grain)
+
+	if len(ret) == 0 {
+		panic("no return value specified for PutGrain")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.Grain) error); ok {
+		r0 = rf(ctx, grain)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// Interface_PutGrain_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'PutGrain'
+type Interface_PutGrain_Call struct {
+	*mock.Call
+}
+
+// PutGrain is a helper method to define mock.On call
+//   - ctx context.Context
+//   - grain *internalpb.Grain
+func (_e *Interface_Expecter) PutGrain(ctx interface{}, grain interface{}) *Interface_PutGrain_Call {
+	return &Interface_PutGrain_Call{Call: _e.mock.On("PutGrain", ctx, grain)}
+}
+
+func (_c *Interface_PutGrain_Call) Run(run func(ctx context.Context, grain *internalpb.Grain)) *Interface_PutGrain_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*internalpb.Grain))
+	})
+	return _c
+}
+
+func (_c *Interface_PutGrain_Call) Return(_a0 error) *Interface_PutGrain_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *Interface_PutGrain_Call) RunAndReturn(run func(context.Context, *internalpb.Grain) error) *Interface_PutGrain_Call {
 	_c.Call.Return(run)
 	return _c
 }

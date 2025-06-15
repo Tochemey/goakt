@@ -2,7 +2,7 @@ name: pr
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, dev]
     paths-ignore:
       - "**/README.md"
       - "**/bench/**"
@@ -17,8 +17,7 @@ concurrency:
 jobs:
   build:
     name: Tests on ${{ matrix.os }}
-    runs-on:
-      "${{ matrix.os == 'linux' && 'ubuntu-latest' || 'windows-latest' }}"
+    runs-on: "${{ matrix.os == 'linux' && 'ubuntu-latest' || 'windows-latest' }}"
     strategy:
       fail-fast: false
       matrix:
@@ -61,8 +60,7 @@ jobs:
           verbose: true
   lint:
     name: Linter on ${{ matrix.os }}
-    runs-on:
-      "${{ matrix.os == 'linux' && 'ubuntu-latest' || 'windows-latest' }}"
+    runs-on: "${{ matrix.os == 'linux' && 'ubuntu-latest' || 'windows-latest' }}"
     strategy:
       fail-fast: false
       matrix:

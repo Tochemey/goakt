@@ -60,7 +60,7 @@ func TestSingletonActor(t *testing.T) {
 		util.Pause(time.Second)
 
 		// create a singleton actor
-		actor := newMockActor()
+		actor := NewMockActor()
 		actorName := "actorID"
 		// create a singleton actor
 		err := cl1.SpawnSingleton(ctx, actorName, actor)
@@ -102,7 +102,7 @@ func TestSingletonActor(t *testing.T) {
 		util.Pause(time.Second)
 
 		// create a singleton actor
-		actor := newMockActor()
+		actor := NewMockActor()
 		actorName := "actorID"
 		// create a singleton actor
 		err = newActorSystem.SpawnSingleton(ctx, actorName, actor)
@@ -123,7 +123,7 @@ func TestSingletonActor(t *testing.T) {
 		require.NotNil(t, sd1)
 
 		// create a singleton actor
-		actor := newMockActor()
+		actor := NewMockActor()
 		actorName := strings.Repeat("a", 256)
 		err := cl1.SpawnSingleton(ctx, actorName, actor)
 		require.Error(t, err)
@@ -151,7 +151,7 @@ func TestSingletonActor(t *testing.T) {
 		require.False(t, newActorSystem.Running())
 
 		// create a singleton actor
-		actor := newMockActor()
+		actor := NewMockActor()
 		actorName := "actorID"
 		// create a singleton actor
 		err = newActorSystem.SpawnSingleton(ctx, actorName, actor)

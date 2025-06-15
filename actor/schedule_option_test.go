@@ -57,7 +57,7 @@ func TestScheduleOption(t *testing.T) {
 
 	// create a test actor
 	actorName := "test"
-	actor := newMockActor()
+	actor := NewMockActor()
 	actorRef, err := newActorSystem.Spawn(ctx, actorName, actor)
 	require.NoError(t, err)
 	assert.NotNil(t, actorRef)

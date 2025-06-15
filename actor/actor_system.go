@@ -465,6 +465,49 @@ type ActorSystem interface { //nolint:revive
 	//
 	// Returns an error if the actor system has not started.
 	Inject(dependencies ...extension.Dependency) error
+	// RegisterGrains registers Grains (virtual actors) after the actor system has started.
+	//
+	// Grains are virtual actors with automatic activation, deactivation, and location transparency.
+	// They can be registered and de-registered at runtime, enabling dynamic extension of the actor system.
+	//
+	// Registering a Grain makes it available for activation and message routing by the system.
+	// Returns an error if the actor system is not started.
+	RegisterGrains(grains ...Grain) error
+	// DeregisterGrains removes registered Grains (virtual actors) from the registry.
+	//
+	// Deregistering a Grain prevents it from being activated or messaged in the future.
+	// Returns an error if the actor system is not started.
+	DeregisterGrains(grains ...Grain) error
+	// AskGrain sends a request message to a Grain identified by the given identity.
+	//
+	// This method locates or spawns the target Grain (either locally or in the cluster), sends the provided
+	// protobuf message, and waits for a response or error. The request timeout can be customized using
+	// the WithRequestTimeout GrainOption; otherwise, a default timeout is used.
+	//
+	// Parameters:
+	//   - ctx: context for cancellation and timeout control.
+	//   - identity: the unique identity of the Grain.
+	//   - message: the protobuf message to send to the Grain.
+	//   - opts: optional GrainOptions to configure the Grain (e.g., dependencies, timeout).
+	//
+	// Returns:
+	//   - response: the response from the Grain, if successful.
+	//   - error: an error if the request fails, times out, or the system is not started.
+	AskGrain(ctx context.Context, identity *Identity, message proto.Message, opts ...GrainOption) (response proto.Message, err error)
+	// TellGrain sends an asynchronous message to a Grain (virtual actor) identified by the given identity.
+	//
+	// This method locates or activates the target Grain (locally or in the cluster) and delivers the provided
+	// protobuf message without waiting for a response. Use this for fire-and-forget scenarios where no reply is expected.
+	//
+	// Parameters:
+	//   - ctx: Context for cancellation and timeout control.
+	//   - identity: The unique identity of the Grain.
+	//   - message: The protobuf message to send to the Grain.
+	//   - opts: Optional GrainOptions to configure the Grain (e.g., dependencies, timeout).
+	//
+	// Returns:
+	//   - error: An error if the message could not be delivered or the system is not started.
+	TellGrain(ctx context.Context, identity *Identity, message proto.Message, opts ...GrainOption) error
 	// handleRemoteAsk handles a synchronous message to another actor and expect a response.
 	// This block until a response is received or timed out.
 	handleRemoteAsk(ctx context.Context, to *PID, message proto.Message, timeout time.Duration) (response proto.Message, err error)
@@ -494,6 +537,7 @@ type ActorSystem interface { //nolint:revive
 	getReflection() *reflection
 	// internally used
 	findRoutee(routeeName string) (*PID, bool)
+	getRemoting() *Remoting
 }
 
 // ActorSystem represent a collection of actors on a given node
@@ -586,6 +630,7 @@ type actorSystem struct {
 	extensions       *collection.Map[string, extension.Extension]
 
 	spawnOnNext *atomic.Uint32
+	grains      *collection.Map[Identity, *grainProcess]
 }
 
 var (
@@ -632,6 +677,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		topicActor:             NoSender,
 		extensions:             collection.NewMap[string, extension.Extension](),
 		spawnOnNext:            atomic.NewUint32(0),
+		grains:                 collection.NewMap[Identity, *grainProcess](),
 	}
 
 	system.enableRelocation.Store(true)
@@ -2020,6 +2066,45 @@ func (x *actorSystem) Inject(dependencies ...extension.Dependency) error {
 	return nil
 }
 
+// DeregisterGrains removes registered Grains (virtual actors) from the registry.
+//
+// Deregistering a Grain prevents it from being activated or messaged in the future.
+// Returns an error if the actor system is not started.
+func (x *actorSystem) DeregisterGrains(grains ...Grain) error {
+	x.locker.Lock()
+	defer x.locker.Unlock()
+
+	if !x.started.Load() {
+		return ErrActorSystemNotStarted
+	}
+
+	for _, grain := range grains {
+		x.registry.Deregister(grain)
+	}
+	return nil
+}
+
+// RegisterGrains registers Grains (virtual actors) after the actor system has started.
+//
+// Grains are virtual actors with automatic activation, deactivation, and location transparency.
+// They can be registered and de-registered at runtime, enabling dynamic extension of the actor system.
+//
+// Registering a Grain makes it available for activation and message routing by the system.
+// Returns an error if the actor system is not started.
+func (x *actorSystem) RegisterGrains(grains ...Grain) error {
+	x.locker.Lock()
+	defer x.locker.Unlock()
+
+	if !x.started.Load() {
+		return ErrActorSystemNotStarted
+	}
+
+	for _, grain := range grains {
+		x.registry.Register(grain)
+	}
+	return nil
+}
+
 // handleRemoteAsk handles a synchronous message to another actor and expect a response.
 // This block until a response is received or timed out.
 func (x *actorSystem) handleRemoteAsk(ctx context.Context, to *PID, message proto.Message, timeout time.Duration) (response proto.Message, err error) {
@@ -2097,6 +2182,15 @@ func (x *actorSystem) findRoutee(routeeName string) (*PID, bool) {
 	}
 	x.locker.Lock()
 	return nil, false
+}
+
+// getRemoting returns the remoting instance of the actor system
+// This method is used internally to access the remoting functionality
+// and is not intended for external use.
+func (x *actorSystem) getRemoting() *Remoting {
+	x.locker.Lock()
+	defer x.locker.Unlock()
+	return x.remoting
 }
 
 // getSingletonManager returns the system singleton manager
@@ -2233,10 +2327,17 @@ func (x *actorSystem) enableClustering(ctx context.Context) error {
 	x.cluster = clusterEngine
 	x.eventsQueue = clusterEngine.Events()
 	x.rebalancingQueue = make(chan *internalpb.PeerState, 1)
+
 	for _, kind := range x.clusterConfig.Kinds() {
 		x.registry.Register(kind)
 		x.logger.Infof("cluster kind=(%s) registered", types.Name(kind))
 	}
+
+	for _, grain := range x.clusterConfig.Grains() {
+		x.registry.Register(grain)
+		x.logger.Infof("cluster Grain=(%s) registered", types.Name(grain))
+	}
+
 	x.locker.Unlock()
 
 	go x.clusterEventsLoop()
@@ -2353,6 +2454,7 @@ func (x *actorSystem) reset() {
 	x.extensions.Reset()
 	x.actors.reset()
 	x.spawnOnNext.Store(0)
+	x.grains.Reset()
 }
 
 // shutdown stops the actor system
