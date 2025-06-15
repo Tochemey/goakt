@@ -54,6 +54,7 @@ type grainRequest struct {
 	response chan *GrainResponse
 	err      chan error
 	ctx      context.Context
+	sync     bool
 }
 
 func (req *grainRequest) getResponse() chan *GrainResponse {
@@ -76,6 +77,10 @@ func (req *grainRequest) getContext() context.Context {
 	return req.ctx
 }
 
+func (req *grainRequest) isSynchronous() bool {
+	return req.sync
+}
+
 // setResponse sets the message response
 func (req *grainRequest) setResponse(resp *GrainResponse) {
 	req.response <- resp
@@ -91,12 +96,19 @@ func (req *grainRequest) reset() {
 	var id *Identity
 	req.message = nil
 	req.sender = id
+	req.response = nil
+	req.err = nil
+	req.ctx = nil
+	req.sync = false
 }
 
-func (req *grainRequest) build(ctx context.Context, sender *Identity, message proto.Message) {
+func (req *grainRequest) build(ctx context.Context, sender *Identity, message proto.Message, sync bool) {
 	req.ctx = ctx
 	req.sender = sender
 	req.message = message
-	req.response = make(chan *GrainResponse, 1)
+	req.sync = sync
 	req.err = make(chan error, 1)
+	if req.sync {
+		req.response = make(chan *GrainResponse, 1)
+	}
 }

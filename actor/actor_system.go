@@ -478,7 +478,7 @@ type ActorSystem interface { //nolint:revive
 	// Deregistering a Grain prevents it from being activated or messaged in the future.
 	// Returns an error if the actor system is not started.
 	DeregisterGrains(grains ...Grain) error
-	// Send sends a request message to a Grain identified by the given identity.
+	// AskGrain sends a request message to a Grain identified by the given identity.
 	//
 	// This method locates or spawns the target Grain (either locally or in the cluster), sends the provided
 	// protobuf message, and waits for a response or error. The request timeout can be customized using
@@ -491,9 +491,23 @@ type ActorSystem interface { //nolint:revive
 	//   - opts: optional GrainOptions to configure the Grain (e.g., dependencies, timeout).
 	//
 	// Returns:
-	//   - *GrainResponse: the response from the Grain, if successful.
+	//   - response: the response from the Grain, if successful.
 	//   - error: an error if the request fails, times out, or the system is not started.
-	Send(ctx context.Context, identity *Identity, message proto.Message, opts ...GrainOption) (response proto.Message, err error)
+	AskGrain(ctx context.Context, identity *Identity, message proto.Message, opts ...GrainOption) (response proto.Message, err error)
+	// TellGrain sends an asynchronous message to a Grain (virtual actor) identified by the given identity.
+	//
+	// This method locates or activates the target Grain (locally or in the cluster) and delivers the provided
+	// protobuf message without waiting for a response. Use this for fire-and-forget scenarios where no reply is expected.
+	//
+	// Parameters:
+	//   - ctx: Context for cancellation and timeout control.
+	//   - identity: The unique identity of the Grain.
+	//   - message: The protobuf message to send to the Grain.
+	//   - opts: Optional GrainOptions to configure the Grain (e.g., dependencies, timeout).
+	//
+	// Returns:
+	//   - error: An error if the message could not be delivered or the system is not started.
+	TellGrain(ctx context.Context, identity *Identity, message proto.Message, opts ...GrainOption) error
 	// handleRemoteAsk handles a synchronous message to another actor and expect a response.
 	// This block until a response is received or timed out.
 	handleRemoteAsk(ctx context.Context, to *PID, message proto.Message, timeout time.Duration) (response proto.Message, err error)

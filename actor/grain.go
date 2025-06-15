@@ -38,26 +38,27 @@ const (
 
 // Grain defines the contract for grains (virtual actors) in the actor system.
 //
-// A Grain is a lightweight, virtual actor that is automatically activated and deactivated by the actor system.
-// Grains provide location transparency, meaning they are addressed by identity rather than by physical location.
-// Each grain instance processes messages sequentially, ensuring single-threaded execution and avoiding concurrency issues.
+// A Grain is a lightweight, virtual actor that encapsulates state and behavior, managed by the goakt actor system.
+// Grains are automatically activated and deactivated by the system, providing location transparency and efficient resource usage.
+// Each grain instance is uniquely identified and processes messages sequentially, ensuring single-threaded execution and simplifying state management.
 //
-// Key properties of grains:
-//   - **Activation/Deactivation:** Grains are activated on demand and deactivated when idle to conserve resources.
+// ## Key Features
+//   - **Activation/Deactivation:** Grains are activated on demand and deactivated when idle, conserving resources.
 //   - **Location Transparency:** Grains are addressed by unique identity, not by network address or process.
-//   - **Single-threaded Execution:** Each grain processes one message at a time, simplifying state management.
+//   - **Single-threaded Execution:** Each grain processes one message at a time, avoiding concurrency issues.
 //   - **Lifecycle Hooks:** Grains can initialize and clean up resources using activation and deactivation hooks.
 //   - **Dependency Injection:** Grains can declare dependencies that are injected by the runtime.
 //
-// Implementation guidelines:
+// ## Implementation Guidelines
 //   - Implement `OnActivate` to initialize state or resources when the grain is loaded.
 //   - Implement `OnDeactivate` to persist state and clean up resources before removal.
-//   - Implement `Receive` to process incoming messages; only one message is processed at a time.
+//   - Implement `ReceiveSync` to process incoming messages synchronously and return a response.
+//   - Implement `ReceiveAsync` to process incoming messages asynchronously.
 //   - Always respect the provided context for cancellation and deadlines.
 //   - Do not retain references to context or message instances beyond the method scope.
 //   - Use the `Dependencies` method to declare external dependencies required by the grain.
 //
-// Example:
+// ## Example
 //
 //	type MyGrain struct{}
 //
@@ -76,33 +77,59 @@ const (
 //	    return nil
 //	}
 //
-//	func (g *MyGrain) Receive(request *GrainRequest, opts ...GrainRequestOption) (*GrainResponse, error) {
+//	func (g *MyGrain) ReceiveSync(ctx context.Context, message proto.Message) (proto.Message, error) {
 //	    // Handle the incoming message and return a response
 //	    return NewGrainResponse("ok"), nil
 //	}
+//
+//	func (g *MyGrain) ReceiveAsync(ctx context.Context, message proto.Message) error {
+//	    // Handle the incoming message asynchronously
+//	    return nil
+//	}
+//
+// The Grain interface should be implemented by any type intended to act as a grain within the goakt actor system.
 type Grain interface {
 	// OnActivate is called when the grain is loaded into memory.
 	// Use this to load state or initialize resources.
 	//
 	// The provided GrainContext contains grain identity and system references.
-	// Return an error to indicate activation failure.
+	// Return an error to indicate activation failure. If an error is returned,
+	// the grain will not be activated.
 	OnActivate(ctx *GrainContext) error
 
 	// OnDeactivate is called before the grain is removed from memory.
 	// Use this to persist state and release resources.
 	//
 	// The provided GrainContext contains grain identity and system references.
-	// Return an error to indicate deactivation failure.
+	// Return an error to indicate deactivation failure. If an error is returned,
+	// the system may log or handle the failure as appropriate.
 	OnDeactivate(ctx *GrainContext) error
 
 	// Dependencies returns a slice of external dependencies required by the grain.
 	// These dependencies are injected by the actor system at activation time.
+	// Return nil or an empty slice if no dependencies are required.
 	Dependencies() []extension.Dependency
 
-	// Receive processes an incoming message for the grain.
-	// Returns a response or error. Only one call is active at a time.
+	// ReceiveSync processes an incoming message for the grain synchronously.
+	// Returns a response or error. Only one call is active at a time per grain instance.
 	//
-	// The request contains the message and sender information.
-	// Use opts for additional request-scoped options.
-	Receive(ctx context.Context, message proto.Message) (proto.Message, error)
+	// Parameters:
+	//   - ctx: context for cancellation and deadlines.
+	//   - message: the incoming message to process.
+	//
+	// Returns:
+	//   - proto.Message: the response message.
+	//   - error: any error encountered during processing.
+	ReceiveSync(ctx context.Context, message proto.Message) (proto.Message, error)
+
+	// ReceiveAsync processes an incoming message for the grain asynchronously.
+	// Returns an error if processing fails. Only one call is active at a time per grain instance.
+	//
+	// Parameters:
+	//   - ctx: context for cancellation and deadlines.
+	//   - message: the incoming message to process.
+	//
+	// Returns:
+	//   - error: any error encountered during processing.
+	ReceiveAsync(ctx context.Context, message proto.Message) error
 }

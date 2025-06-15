@@ -34,8 +34,10 @@ service RemotingService {
   rpc RemoteSpawn(RemoteSpawnRequest) returns (RemoteSpawnResponse);
   // RemoteReinstate reinstates an actor on a remote machine
   rpc RemoteReinstate(RemoteReinstateRequest) returns (RemoteReinstateResponse);
-  // RemoteMessageGrain is used to send a message to Grain on a remote node
-  rpc RemoteMessageGrain(RemoteMessageGrainRequest) returns (RemoteMessageGrainResponse);
+  // RemoteAskGrain is used to send a message to Grain on a remote node
+  rpc RemoteAskGrain(RemoteAskGrainRequest) returns (RemoteAskGrainResponse);
+  // RemoteTellGrain is used to send a message to Grain on a remote node
+  rpc RemoteTellGrain(RemoteTellGrainRequest) returns (RemoteTellGrainResponse);
 }
 
 // RemoteAsk is used to send a message to an actor remotely and expect a response
@@ -143,7 +145,7 @@ message RemoteReinstateRequest {
 
 message RemoteReinstateResponse {}
 
-message RemoteMessageGrainRequest {
+message RemoteAskGrainRequest {
   Grain grain = 1;
   optional GrainId sender = 2;
   optional google.protobuf.Duration request_timeout = 3;
@@ -152,6 +154,17 @@ message RemoteMessageGrainRequest {
   google.protobuf.Any message = 6;
 }
 
-message RemoteMessageGrainResponse {
+message RemoteAskGrainResponse {
   google.protobuf.Any message = 1;
 }
+
+message RemoteTellGrainRequest {
+  Grain grain = 1;
+  optional GrainId sender = 2;
+  google.protobuf.Duration passivate_after = 3;
+  repeated internalpb.Dependency dependencies = 4;
+  google.protobuf.Any message = 5;
+  optional google.protobuf.Duration request_timeout = 6;
+}
+
+message RemoteTellGrainResponse {}

@@ -927,13 +927,19 @@ func NewMockGrain() *MockGrain {
 
 // HandleRequest implements Grain.
 // nolint
-func (m *MockGrain) Receive(ctx context.Context, message proto.Message) (proto.Message, error) {
+func (m *MockGrain) ReceiveSync(ctx context.Context, message proto.Message) (proto.Message, error) {
 	switch msg := message.(type) {
 	case *testpb.TestSend:
 		return &testpb.Reply{Content: "received message"}, nil
 	default:
 		return nil, fmt.Errorf("unhandled message type %T", msg)
 	}
+}
+
+// ReceiveAsync implements Grain.
+// nolint
+func (m *MockGrain) ReceiveAsync(ctx context.Context, message proto.Message) error {
+	return nil
 }
 
 // OnActivate implements Grain.

@@ -60,7 +60,7 @@ func TestGrain(t *testing.T) {
 
 		// prepare a message to send to the grain
 		message := new(testpb.TestSend)
-		response, err := testSystem.Send(ctx, identity, message)
+		response, err := testSystem.AskGrain(ctx, identity, message)
 		require.NoError(t, err)
 		require.NotNil(t, response)
 		require.IsType(t, &testpb.Reply{}, response)
@@ -71,13 +71,13 @@ func TestGrain(t *testing.T) {
 		require.NotNil(t, gp)
 		require.True(t, gp.isRunning())
 
-		response, err = testSystem.Send(ctx, identity, message)
+		response, err = testSystem.AskGrain(ctx, identity, message)
 		require.NoError(t, err)
 		require.NotNil(t, response)
 		require.IsType(t, &testpb.Reply{}, response)
 
 		// let us shutdown the grain by sending PoisonPill
-		response, err = testSystem.Send(ctx, identity, new(goaktpb.PoisonPill))
+		response, err = testSystem.AskGrain(ctx, identity, new(goaktpb.PoisonPill))
 		require.NoError(t, err)
 		require.Nil(t, response)
 
@@ -88,7 +88,7 @@ func TestGrain(t *testing.T) {
 		require.False(t, gp.isRunning())
 
 		// send a message to the grain to reactivate it
-		response, err = testSystem.Send(ctx, identity, message)
+		response, err = testSystem.AskGrain(ctx, identity, message)
 		require.NoError(t, err)
 		require.NotNil(t, response)
 		require.IsType(t, &testpb.Reply{}, response)
@@ -128,7 +128,7 @@ func TestGrain(t *testing.T) {
 
 		// prepare a message to send to the grain
 		message := new(testpb.TestSend)
-		response, err := node1.Send(ctx, identity, message)
+		response, err := node1.AskGrain(ctx, identity, message)
 		require.NoError(t, err)
 		require.NotNil(t, response)
 		require.IsType(t, &testpb.Reply{}, response)
@@ -141,7 +141,7 @@ func TestGrain(t *testing.T) {
 		require.NotNil(t, gp)
 		require.True(t, gp.isRunning())
 
-		response, err = node2.Send(ctx, identity, message)
+		response, err = node2.AskGrain(ctx, identity, message)
 		require.NoError(t, err)
 		require.NotNil(t, response)
 		require.IsType(t, &testpb.Reply{}, response)
@@ -149,7 +149,7 @@ func TestGrain(t *testing.T) {
 		util.Pause(time.Second)
 
 		// let us shutdown the grain by sending PoisonPill
-		response, err = node3.Send(ctx, identity, new(goaktpb.PoisonPill))
+		response, err = node3.AskGrain(ctx, identity, new(goaktpb.PoisonPill))
 		require.NoError(t, err)
 		require.NotNil(t, response)
 		require.IsType(t, &goaktpb.NoMessage{}, response)
@@ -163,7 +163,7 @@ func TestGrain(t *testing.T) {
 		require.False(t, gp.isRunning())
 
 		// send a message to the grain to reactivate it
-		response, err = node3.Send(ctx, identity, message)
+		response, err = node3.AskGrain(ctx, identity, message)
 		require.NoError(t, err)
 		require.NotNil(t, response)
 		require.IsType(t, &testpb.Reply{}, response)
@@ -175,6 +175,16 @@ func TestGrain(t *testing.T) {
 		require.True(t, ok)
 		require.NotNil(t, gp)
 		require.True(t, gp.isRunning())
+
+		// let us shutdown the grain by sending PoisonPill
+		err = node3.TellGrain(ctx, identity, new(goaktpb.PoisonPill))
+		require.NoError(t, err)
+
+		// check if the grain is activated
+		gp, ok = node1.(*actorSystem).grains.Get(*identity)
+		require.True(t, ok)
+		require.NotNil(t, gp)
+		require.False(t, gp.isRunning())
 
 		assert.NoError(t, node1.Stop(ctx))
 		assert.NoError(t, node3.Stop(ctx))

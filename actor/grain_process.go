@@ -236,11 +236,19 @@ func (proc *grainProcess) receiveLoop() {
 func (proc *grainProcess) handleSystemMessage(request *grainRequest) {
 	switch msg := request.getMessage().(type) {
 	case *goaktpb.PoisonPill:
-		if err := proc.shutdown(context.Background()); err != nil {
-			request.setError(err)
+		err := proc.shutdown(context.Background())
+		// send a response back to the sender when the request is synchronous
+		if request.isSynchronous() {
+			if err != nil {
+				request.setError(err)
+				return
+			}
+			request.setResponse(NewGrainResponse(new(goaktpb.NoMessage)))
 			return
 		}
-		request.setResponse(NewGrainResponse(new(goaktpb.NoMessage))) // TODO: what response should we send back?
+
+		request.setError(err)
+
 	default:
 		proc.logger.Warnf("received unknown system message %T for Grain %s", msg, proc.identity.String())
 	}
@@ -249,12 +257,22 @@ func (proc *grainProcess) handleSystemMessage(request *grainRequest) {
 func (proc *grainProcess) handleRequest(request *grainRequest) {
 	defer proc.recovery(request)
 	proc.latestReceiveTime.Store(time.Now())
-	response, err := proc.grain.Receive(request.getContext(), request.getMessage())
-	if err != nil {
+
+	// Handle synchronous requests
+	if request.isSynchronous() {
+		response, err := proc.grain.ReceiveSync(request.getContext(), request.getMessage())
+		if err != nil {
+			request.setError(err)
+			return
+		}
+		request.setResponse(NewGrainResponse(response))
+	}
+
+	// Handle asynchronous requests
+	if err := proc.grain.ReceiveAsync(request.getContext(), request.getMessage()); err != nil {
 		request.setError(err)
 		return
 	}
-	request.setResponse(NewGrainResponse(response))
 }
 
 // recovery is called upon after message is processed
