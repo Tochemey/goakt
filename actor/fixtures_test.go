@@ -1011,7 +1011,7 @@ func (m *MockGrainDeactivation) Dependencies() []extension.Dependency {
 }
 
 // OnActivate implements Grain.
-func (m *MockGrainDeactivation) OnActivate(ctx *GrainContext) error {
+func (m *MockGrainDeactivation) OnActivate(*GrainContext) error {
 	return nil
 }
 
@@ -1049,7 +1049,7 @@ func (m *MockGrainError) Dependencies() []extension.Dependency {
 }
 
 // OnActivate implements Grain.
-func (m *MockGrainError) OnActivate(ctx *GrainContext) error {
+func (m *MockGrainError) OnActivate(*GrainContext) error {
 	return nil
 }
 
@@ -1059,6 +1059,7 @@ func (m *MockGrainError) OnDeactivate(*GrainContext) error {
 }
 
 // ReceiveAsync implements Grain.
+// nolint
 func (m *MockGrainError) ReceiveAsync(ctx context.Context, message proto.Message) error {
 	switch msg := message.(type) {
 	case *testpb.TestSend:
@@ -1069,6 +1070,7 @@ func (m *MockGrainError) ReceiveAsync(ctx context.Context, message proto.Message
 }
 
 // ReceiveSync implements Grain.
+// nolint
 func (m *MockGrainError) ReceiveSync(ctx context.Context, message proto.Message) (proto.Message, error) {
 	switch msg := message.(type) {
 	case *testpb.TestSend:
