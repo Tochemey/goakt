@@ -978,7 +978,7 @@ func (m *MockGrainActivation) Dependencies() []extension.Dependency {
 }
 
 // OnActivate implements Grain.
-func (m *MockGrainActivation) OnActivate(ctx *GrainContext) error {
+func (m *MockGrainActivation) OnActivate(*GrainContext) error {
 	return errors.New("failed to activate grain")
 }
 
