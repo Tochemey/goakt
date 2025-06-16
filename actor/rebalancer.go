@@ -29,6 +29,7 @@ import (
 	"net"
 	"strconv"
 
+	"connectrpc.com/connect"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/tochemey/goakt/v3/goaktpb"
@@ -88,7 +89,7 @@ func (r *rebalancer) Rebalance(ctx *ReceiveContext) {
 			return
 		}
 
-		leaderShares, peersShares := r.computeRebalancing(len(peers)+1, peerState)
+		leaderShares, peersShares := r.allocateActors(len(peers)+1, peerState)
 		eg, egCtx := errgroup.WithContext(rctx)
 		logger := r.pid.Logger()
 
@@ -119,11 +120,19 @@ func (r *rebalancer) Rebalance(ctx *ReceiveContext) {
 								remoteHost := peer.Host
 								remotingPort := peer.RemotingPort
 
+								dependencies, err := r.pid.ActorSystem().getReflection().DependenciesFromProtobuf(actor.GetDependencies()...)
+								if err != nil {
+									return err
+								}
+
 								spawnRequest := &remote.SpawnRequest{
-									Name:        actor.GetAddress().GetName(),
-									Kind:        actor.GetType(),
-									Singleton:   false,
-									Relocatable: true,
+									Name:                actor.GetAddress().GetName(),
+									Kind:                actor.GetType(),
+									Singleton:           false,
+									Relocatable:         true,
+									Dependencies:        dependencies,
+									PassivationStrategy: passivationStrategyFromProto(actor.GetPassivationStrategy()),
+									EnableStashing:      actor.GetEnableStash(),
 								}
 
 								if err := r.remoting.RemoteSpawn(egCtx, remoteHost, remotingPort, spawnRequest); err != nil {
@@ -138,8 +147,55 @@ func (r *rebalancer) Rebalance(ctx *ReceiveContext) {
 			})
 		}
 
+		if len(peerState.GetGrains()) > 0 {
+			leaderGrains, peersGrains := r.allocateGrains(len(peers)+1, peerState)
+			// Recreate grains on the leader
+			if len(leaderGrains) > 0 {
+				eg.Go(func() error {
+					for _, grain := range leaderGrains {
+						if !isReservedName(grain.GetGrainId().GetName()) {
+							if err := r.pid.ActorSystem().recreateGrain(egCtx, grain); err != nil {
+								return NewSpawnError(err)
+							}
+						}
+					}
+					return nil
+				})
+			}
+
+			// Recreate grains on the peers
+			if len(peersGrains) > 0 {
+				eg.Go(func() error {
+					for i := 1; i < len(peersGrains); i++ {
+						grains := peersGrains[i]
+						peer := peers[i-1]
+
+						for _, grain := range grains {
+							if !isReservedName(grain.GetGrainId().GetName()) {
+								remoteHost := peer.Host
+								remotingPort := peer.RemotingPort
+								remoting := r.pid.ActorSystem().getRemoting()
+								remoteClient := remoting.remotingServiceClient(remoteHost, remotingPort)
+
+								request := connect.NewRequest(&internalpb.RemoteActivateGrainRequest{
+									Grain:        grain,
+									Dependencies: grain.GetDependencies(),
+								})
+
+								if _, err := remoteClient.RemoteActivateGrain(egCtx, request); err != nil {
+									logger.Error(err)
+									return NewSpawnError(err)
+								}
+							}
+						}
+					}
+					return nil
+				})
+			}
+		}
+
 		// only block when there are go routines running
-		if len(leaderShares) > 0 || len(peersShares) > 0 {
+		if len(leaderShares) > 0 || len(peersShares) > 0 || len(peerState.GetGrains()) > 0 {
 			if err := eg.Wait(); err != nil {
 				logger.Errorf("cluster rebalancing failed: %v", err)
 				ctx.Err(err)
@@ -162,8 +218,8 @@ func (r *rebalancer) PostStop(*Context) error {
 	return nil
 }
 
-// computeRebalancing build the list of actors to create on the leader node and the peers in the cluster
-func (r *rebalancer) computeRebalancing(totalPeers int, nodeLeftState *internalpb.PeerState) (leaderShares []*internalpb.Actor, peersShares [][]*internalpb.Actor) {
+// allocateActors build the list of actors to create on the leader node and the peers in the cluster
+func (r *rebalancer) allocateActors(totalPeers int, nodeLeftState *internalpb.PeerState) (leaderShares []*internalpb.Actor, peersShares [][]*internalpb.Actor) {
 	actors := nodeLeftState.GetActors()
 	actorsCount := len(actors)
 
@@ -236,4 +292,42 @@ func (r *rebalancer) recreateLocally(ctx context.Context, props *internalpb.Acto
 
 	_, err = r.pid.ActorSystem().Spawn(ctx, props.GetAddress().GetName(), actor, spawnOpts...)
 	return err
+}
+
+// allocateGrains distributes grains among the leader and peers for rebalancing.
+//
+// It returns two values:
+//   - leaderShares: grains to be created on the leader node
+//   - peersShares: a slice of grain slices, each assigned to a peer node
+func (r *rebalancer) allocateGrains(totalPeers int, nodeLeftState *internalpb.PeerState) (leaderShares []*internalpb.Grain, peersShares [][]*internalpb.Grain) {
+	grains := nodeLeftState.GetGrains()
+	grainCount := len(grains)
+
+	if grainCount == 0 || totalPeers <= 0 {
+		return nil, nil
+	}
+
+	toRebalance := make([]*internalpb.Grain, 0, grainCount)
+	for _, grain := range grains {
+		toRebalance = append(toRebalance, grain)
+	}
+
+	quotient := grainCount / totalPeers
+	remainder := grainCount % totalPeers
+
+	// Assign the remainder grains to the leader
+	leaderShares = append(leaderShares, toRebalance[:remainder]...)
+
+	// Chunk the remaining grains for peers
+	if remainder < grainCount {
+		chunks := collection.Chunkify(toRebalance[remainder:], quotient)
+		if len(chunks) > 0 {
+			// Leader takes the first chunk
+			leaderShares = append(leaderShares, chunks[0]...)
+			// Remaining chunks go to peers
+			peersShares = chunks[1:]
+		}
+	}
+
+	return leaderShares, peersShares
 }

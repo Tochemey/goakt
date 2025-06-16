@@ -38,6 +38,8 @@ service RemotingService {
   rpc RemoteAskGrain(RemoteAskGrainRequest) returns (RemoteAskGrainResponse);
   // RemoteTellGrain is used to send a message to Grain on a remote node
   rpc RemoteTellGrain(RemoteTellGrainRequest) returns (RemoteTellGrainResponse);
+  // RemoteActivateGrain is used to activate a Grain on a remote node
+  rpc RemoteActivateGrain(RemoteActivateGrainRequest) returns (RemoteActivateGrainResponse);
 }
 
 // RemoteAsk is used to send a message to an actor remotely and expect a response
@@ -168,3 +170,10 @@ message RemoteTellGrainRequest {
 }
 
 message RemoteTellGrainResponse {}
+
+message RemoteActivateGrainRequest {
+  Grain grain = 1;
+  repeated internalpb.Dependency dependencies = 4;
+}
+
+message RemoteActivateGrainResponse {}

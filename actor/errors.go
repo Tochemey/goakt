@@ -159,6 +159,11 @@ var (
 	ErrGrainNotRegistered = errors.New("grain type is not registered")
 )
 
+// NewErrReservedName formats an ErrReservedName with the given name.
+func NewErrReservedName(name string) error {
+	return fmt.Errorf("name=(%s) %w", name, ErrReservedName)
+}
+
 // NewErrGrainNotFound formats an NewErrGrainNotFound with the given grain identity.
 func NewErrGrainNotFound(identity string) error {
 	return fmt.Errorf("(grain=%s) %w", identity, ErrGrainNotFound)

@@ -149,10 +149,8 @@ func TestGrain(t *testing.T) {
 		util.Pause(time.Second)
 
 		// let us shutdown the grain by sending PoisonPill
-		response, err = node3.AskGrain(ctx, identity, new(goaktpb.PoisonPill))
+		err = node3.TellGrain(ctx, identity, new(goaktpb.PoisonPill))
 		require.NoError(t, err)
-		require.NotNil(t, response)
-		require.IsType(t, &goaktpb.NoMessage{}, response)
 
 		util.Pause(time.Second)
 
@@ -336,7 +334,7 @@ func TestGrain(t *testing.T) {
 
 		require.NoError(t, testSystem.Stop(ctx))
 	})
-	t.Run("With sender not found", func(t *testing.T) {
+	t.Run("With reserved sender name", func(t *testing.T) {
 		ctx := t.Context()
 		testSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
 		require.NoError(t, err)
@@ -360,12 +358,12 @@ func TestGrain(t *testing.T) {
 		message := new(testpb.TestSend)
 		response, err := testSystem.AskGrain(ctx, identity, message, WithRequestSender(sender))
 		require.Error(t, err)
-		require.ErrorIs(t, err, ErrGrainNotFound)
+		require.ErrorIs(t, err, ErrReservedName)
 		require.Nil(t, response)
 
 		err = testSystem.TellGrain(ctx, identity, message, WithRequestSender(sender))
 		require.Error(t, err)
-		require.ErrorIs(t, err, ErrGrainNotFound)
+		require.ErrorIs(t, err, ErrReservedName)
 
 		require.NoError(t, testSystem.Stop(ctx))
 	})
@@ -393,7 +391,7 @@ func TestGrain(t *testing.T) {
 
 		require.NoError(t, testSystem.Stop(ctx))
 	})
-	t.Run("With grain identity not found", func(t *testing.T) {
+	t.Run("With reserved name as grain identity", func(t *testing.T) {
 		ctx := t.Context()
 		testSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
 		require.NoError(t, err)
@@ -416,12 +414,12 @@ func TestGrain(t *testing.T) {
 		message := new(testpb.TestSend)
 		response, err := testSystem.AskGrain(ctx, identity, message)
 		require.Error(t, err)
-		require.ErrorIs(t, err, ErrGrainNotFound)
+		require.ErrorIs(t, err, ErrReservedName)
 		require.Nil(t, response)
 
 		err = testSystem.TellGrain(ctx, identity, message)
 		require.Error(t, err)
-		require.ErrorIs(t, err, ErrGrainNotFound)
+		require.ErrorIs(t, err, ErrReservedName)
 
 		require.NoError(t, testSystem.Stop(ctx))
 	})

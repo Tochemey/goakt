@@ -538,6 +538,12 @@ type ActorSystem interface { //nolint:revive
 	// internally used
 	findRoutee(routeeName string) (*PID, bool)
 	getRemoting() *Remoting
+	getGrains() *collection.Map[Identity, *grainProcess]
+	// recreateGrain recreates a serialized Grain.
+	//
+	// It instantiates the grain, activates it, registers it locally, and updates the cluster registry.
+	// Returns an error if any step fails.
+	recreateGrain(ctx context.Context, props *internalpb.Grain) error
 }
 
 // ActorSystem represent a collection of actors on a given node
@@ -2191,6 +2197,13 @@ func (x *actorSystem) getRemoting() *Remoting {
 	x.locker.Lock()
 	defer x.locker.Unlock()
 	return x.remoting
+}
+
+// getGrains returns the grains map of the actor system
+func (x *actorSystem) getGrains() *collection.Map[Identity, *grainProcess] {
+	x.locker.Lock()
+	defer x.locker.Unlock()
+	return x.grains
 }
 
 // getSingletonManager returns the system singleton manager
