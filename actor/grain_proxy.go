@@ -541,7 +541,7 @@ func (x *actorSystem) recreateGrain(ctx context.Context, serializedGrain *intern
 	// Parse dependencies if any
 	var dependencies []extension.Dependency
 	if deps := serializedGrain.GetDependencies(); len(deps) > 0 {
-		dependencies, err = x.getReflection().DependenciesFromProtobuf(deps...)
+		dependencies, err = x.getReflection().NewDependencies(deps...)
 		if err != nil {
 			return err
 		}

@@ -134,7 +134,7 @@ func TestReflection(t *testing.T) {
 			Bytea:    bytea,
 		}
 
-		dependencies, err := reflection.DependenciesFromProtobuf(pb)
+		dependencies, err := reflection.NewDependencies(pb)
 		require.NoError(t, err)
 		require.NotNil(t, dependencies)
 		require.Len(t, dependencies, 1)
@@ -155,7 +155,7 @@ func TestReflection(t *testing.T) {
 			Bytea:    []byte("invalid"),
 		}
 
-		dependencies, err := reflection.DependenciesFromProtobuf(pb)
+		dependencies, err := reflection.NewDependencies(pb)
 		require.Error(t, err)
 		require.Nil(t, dependencies)
 		require.Empty(t, dependencies)

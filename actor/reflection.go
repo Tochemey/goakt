@@ -43,52 +43,50 @@ func newReflection(registry types.Registry) *reflection {
 }
 
 // NewActor creates a new instance of Actor from its FQN
-func (r *reflection) NewActor(typeName string) (actor Actor, err error) {
+func (r *reflection) NewActor(typeName string) (Actor, error) {
 	rtype, ok := r.registry.TypeOf(typeName)
 	if !ok {
 		return nil, ErrTypeNotRegistered
 	}
 
-	elem := reflect.TypeOf((*Actor)(nil)).Elem()
-	if ok := rtype.Implements(elem) || reflect.PointerTo(rtype).Implements(elem); !ok {
+	actorType := reflect.TypeOf((*Actor)(nil)).Elem()
+	if !(rtype.Implements(actorType) || reflect.PointerTo(rtype).Implements(actorType)) {
 		return nil, ErrInstanceNotAnActor
 	}
 
 	instance := reflect.New(rtype)
-	if !instance.IsValid() {
+	actor, ok := instance.Interface().(Actor)
+	if !ok {
 		return nil, ErrInvalidInstance
 	}
-	return instance.Interface().(Actor), nil
+	return actor, nil
 }
 
 // NewDependency creates a new instance of Dependency from its type name and bytes array
 func (r *reflection) NewDependency(typeName string, bytea []byte) (extension.Dependency, error) {
-	dept, ok := r.registry.TypeOf(typeName)
+	rtype, ok := r.registry.TypeOf(typeName)
 	if !ok {
 		return nil, ErrDependencyTypeNotRegistered
 	}
 
-	elem := reflect.TypeOf((*extension.Dependency)(nil)).Elem()
-	if ok := dept.Implements(elem) || reflect.PointerTo(dept).Implements(elem); !ok {
+	depType := reflect.TypeOf((*extension.Dependency)(nil)).Elem()
+	if !(rtype.Implements(depType) || reflect.PointerTo(rtype).Implements(depType)) {
 		return nil, ErrInstanceNotDependency
 	}
 
-	instance := reflect.New(dept)
-	if !instance.IsValid() {
+	instance := reflect.New(rtype)
+	dependency, ok := instance.Interface().(extension.Dependency)
+	if !ok {
 		return nil, ErrInvalidInstance
 	}
-
-	if dependency, ok := instance.Interface().(extension.Dependency); ok {
-		if err := dependency.UnmarshalBinary(bytea); err != nil {
-			return nil, err
-		}
-		return dependency, nil
+	if err := dependency.UnmarshalBinary(bytea); err != nil {
+		return nil, err
 	}
-	return nil, ErrInvalidInstance
+	return dependency, nil
 }
 
-// DependenciesFromProtobuf reflects the dependencies defined in the protobuf
-func (r *reflection) DependenciesFromProtobuf(dependencies ...*internalpb.Dependency) ([]extension.Dependency, error) {
+// NewDependencies reflects the dependencies defined in the protobuf
+func (r *reflection) NewDependencies(dependencies ...*internalpb.Dependency) ([]extension.Dependency, error) {
 	deps := make([]extension.Dependency, 0, len(dependencies))
 	for _, dep := range dependencies {
 		dependency, err := r.NewDependency(dep.GetTypeName(), dep.GetBytea())
@@ -101,20 +99,21 @@ func (r *reflection) DependenciesFromProtobuf(dependencies ...*internalpb.Depend
 }
 
 // NewGrain creates a new instance of Grain from its FQN
-func (r *reflection) NewGrain(kind string) (grain Grain, err error) {
+func (r *reflection) NewGrain(kind string) (Grain, error) {
 	rtype, ok := r.registry.TypeOf(kind)
 	if !ok {
 		return nil, ErrTypeNotRegistered
 	}
 
-	elem := reflect.TypeOf((*Grain)(nil)).Elem()
-	if ok := rtype.Implements(elem) || reflect.PointerTo(rtype).Implements(elem); !ok {
+	grainType := reflect.TypeOf((*Grain)(nil)).Elem()
+	if !(rtype.Implements(grainType) || reflect.PointerTo(rtype).Implements(grainType)) {
 		return nil, ErrInstanceNotAnGrain
 	}
 
 	instance := reflect.New(rtype)
-	if !instance.IsValid() {
+	grain, ok := instance.Interface().(Grain)
+	if !ok {
 		return nil, ErrInvalidInstance
 	}
-	return instance.Interface().(Grain), nil
+	return grain, nil
 }

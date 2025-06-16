@@ -120,7 +120,7 @@ func (r *rebalancer) Rebalance(ctx *ReceiveContext) {
 								remoteHost := peer.Host
 								remotingPort := peer.RemotingPort
 
-								dependencies, err := r.pid.ActorSystem().getReflection().DependenciesFromProtobuf(actor.GetDependencies()...)
+								dependencies, err := r.pid.ActorSystem().getReflection().NewDependencies(actor.GetDependencies()...)
 								if err != nil {
 									return err
 								}
@@ -290,7 +290,7 @@ func (r *rebalancer) recreateLocally(ctx context.Context, props *internalpb.Acto
 	}
 
 	if len(props.GetDependencies()) > 0 {
-		dependencies, err := r.pid.ActorSystem().getReflection().DependenciesFromProtobuf(props.GetDependencies()...)
+		dependencies, err := r.pid.ActorSystem().getReflection().NewDependencies(props.GetDependencies()...)
 		if err != nil {
 			return err
 		}
