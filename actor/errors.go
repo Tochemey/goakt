@@ -149,9 +149,6 @@ var (
 	// ErrInvalidGrainIdentity is returned when a Grain identity is malformed or invalid.
 	ErrInvalidGrainIdentity = errors.New("invalid graind identity")
 
-	// ErrGrainNotFound indicates that the specified Grain could not be found in the system.
-	ErrGrainNotFound = errors.New("grain is not found")
-
 	// ErrInstanceNotAnGrain is returned when the instantiated type does not implement the Grain interface.
 	ErrInstanceNotAnGrain = errors.New("failed to create instance. Reason: instance does not implement the Grain interface")
 
@@ -162,11 +159,6 @@ var (
 // NewErrReservedName formats an ErrReservedName with the given name.
 func NewErrReservedName(name string) error {
 	return fmt.Errorf("name=(%s) %w", name, ErrReservedName)
-}
-
-// NewErrGrainNotFound formats an NewErrGrainNotFound with the given grain identity.
-func NewErrGrainNotFound(identity string) error {
-	return fmt.Errorf("(grain=%s) %w", identity, ErrGrainNotFound)
 }
 
 // NewErrActorNotFound formats an ErrActorNotFound with the given actor path.
