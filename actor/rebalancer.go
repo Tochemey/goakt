@@ -151,12 +151,14 @@ func (r *rebalancer) Rebalance(ctx *ReceiveContext) {
 			leaderGrains, peersGrains := r.allocateGrains(len(peers)+1, peerState)
 			// Recreate grains on the leader
 			if len(leaderGrains) > 0 {
+				leaderHost := r.pid.ActorSystem().Host()
+				leaderPort := int32(r.pid.ActorSystem().Port())
 				eg.Go(func() error {
 					for _, grain := range leaderGrains {
 						if !isReservedName(grain.GetGrainId().GetName()) {
 							// reset the grain host and port
-							grain.Host = r.pid.ActorSystem().Host()
-							grain.Port = int32(r.pid.ActorSystem().Port())
+							grain.Host = leaderHost
+							grain.Port = leaderPort
 							if err := r.pid.ActorSystem().recreateGrain(egCtx, grain); err != nil {
 								return NewSpawnError(err)
 							}
