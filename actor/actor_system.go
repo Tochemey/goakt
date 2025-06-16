@@ -2684,7 +2684,8 @@ func (x *actorSystem) shouldRebalance(peerState *internalpb.PeerState) bool {
 	return peerState != nil &&
 		x.InCluster() &&
 		!proto.Equal(peerState, new(internalpb.PeerState)) &&
-		len(peerState.GetActors()) != 0
+		(len(peerState.GetActors()) != 0 ||
+			len(peerState.GetGrains()) != 0)
 }
 
 // processPeerState processes a given peer synchronization record.
@@ -2700,7 +2701,7 @@ func (x *actorSystem) processPeerState(ctx context.Context, peer *cluster.Peer) 
 		return err
 	}
 
-	x.logger.Debugf("peer (%s) actors count (%d)", peerAddress, len(peerState.GetActors()))
+	x.logger.Debugf("peer (%s) [Actors count=(%d), Grains count=%d]", peerAddress, len(peerState.GetActors()), len(peerState.GetGrains()))
 	if err := x.clusterStore.PersistPeerState(peerState); err != nil {
 		x.logger.Error(err)
 		return err

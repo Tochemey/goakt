@@ -154,6 +154,9 @@ func (r *rebalancer) Rebalance(ctx *ReceiveContext) {
 				eg.Go(func() error {
 					for _, grain := range leaderGrains {
 						if !isReservedName(grain.GetGrainId().GetName()) {
+							// reset the grain host and port
+							grain.Host = r.pid.ActorSystem().Host()
+							grain.Port = int32(r.pid.ActorSystem().Port())
 							if err := r.pid.ActorSystem().recreateGrain(egCtx, grain); err != nil {
 								return NewSpawnError(err)
 							}
@@ -176,7 +179,9 @@ func (r *rebalancer) Rebalance(ctx *ReceiveContext) {
 								remotingPort := peer.RemotingPort
 								remoting := r.pid.ActorSystem().getRemoting()
 								remoteClient := remoting.remotingServiceClient(remoteHost, remotingPort)
-
+								// reset the grain host and port
+								grain.Host = remoteHost
+								grain.Port = int32(remotingPort)
 								request := connect.NewRequest(&internalpb.RemoteActivateGrainRequest{
 									Grain:        grain,
 									Dependencies: grain.GetDependencies(),
@@ -307,6 +312,7 @@ func (r *rebalancer) allocateGrains(totalPeers int, nodeLeftState *internalpb.Pe
 		return nil, nil
 	}
 
+	// Collect all grains to be rebalanced
 	toRebalance := make([]*internalpb.Grain, 0, grainCount)
 	for _, grain := range grains {
 		toRebalance = append(toRebalance, grain)
