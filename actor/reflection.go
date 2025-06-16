@@ -50,7 +50,7 @@ func (r *reflection) NewActor(typeName string) (Actor, error) {
 	}
 
 	actorType := reflect.TypeOf((*Actor)(nil)).Elem()
-	if !(rtype.Implements(actorType) || reflect.PointerTo(rtype).Implements(actorType)) {
+	if !rtype.Implements(actorType) && !reflect.PointerTo(rtype).Implements(actorType) {
 		return nil, ErrInstanceNotAnActor
 	}
 
@@ -70,7 +70,7 @@ func (r *reflection) NewDependency(typeName string, bytea []byte) (extension.Dep
 	}
 
 	depType := reflect.TypeOf((*extension.Dependency)(nil)).Elem()
-	if !(rtype.Implements(depType) || reflect.PointerTo(rtype).Implements(depType)) {
+	if !rtype.Implements(depType) && !reflect.PointerTo(rtype).Implements(depType) {
 		return nil, ErrInstanceNotDependency
 	}
 
@@ -106,7 +106,7 @@ func (r *reflection) NewGrain(kind string) (Grain, error) {
 	}
 
 	grainType := reflect.TypeOf((*Grain)(nil)).Elem()
-	if !(rtype.Implements(grainType) || reflect.PointerTo(rtype).Implements(grainType)) {
+	if !rtype.Implements(grainType) && !reflect.PointerTo(rtype).Implements(grainType) {
 		return nil, ErrInstanceNotAnGrain
 	}
 
