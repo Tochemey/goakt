@@ -60,7 +60,7 @@ func TestGrain(t *testing.T) {
 
 		// prepare a message to send to the grain
 		message := new(testpb.TestSend)
-		response, err := testSystem.AskGrain(ctx, identity, message)
+		response, err := testSystem.SendGrainSync(ctx, identity, message)
 		require.NoError(t, err)
 		require.NotNil(t, response)
 		require.IsType(t, &testpb.Reply{}, response)
@@ -71,13 +71,13 @@ func TestGrain(t *testing.T) {
 		require.NotNil(t, gp)
 		require.True(t, gp.isRunning())
 
-		response, err = testSystem.AskGrain(ctx, identity, message)
+		response, err = testSystem.SendGrainSync(ctx, identity, message)
 		require.NoError(t, err)
 		require.NotNil(t, response)
 		require.IsType(t, &testpb.Reply{}, response)
 
 		// let us shutdown the grain by sending PoisonPill
-		response, err = testSystem.AskGrain(ctx, identity, new(goaktpb.PoisonPill))
+		response, err = testSystem.SendGrainSync(ctx, identity, new(goaktpb.PoisonPill))
 		require.NoError(t, err)
 		require.NotNil(t, response)
 
@@ -88,7 +88,7 @@ func TestGrain(t *testing.T) {
 		require.False(t, gp.isRunning())
 
 		// send a message to the grain to reactivate it
-		response, err = testSystem.AskGrain(ctx, identity, message)
+		response, err = testSystem.SendGrainSync(ctx, identity, message)
 		require.NoError(t, err)
 		require.NotNil(t, response)
 		require.IsType(t, &testpb.Reply{}, response)
@@ -128,7 +128,7 @@ func TestGrain(t *testing.T) {
 
 		// prepare a message to send to the grain
 		message := new(testpb.TestSend)
-		response, err := node1.AskGrain(ctx, identity, message)
+		response, err := node1.SendGrainSync(ctx, identity, message)
 		require.NoError(t, err)
 		require.NotNil(t, response)
 		require.IsType(t, &testpb.Reply{}, response)
@@ -141,7 +141,7 @@ func TestGrain(t *testing.T) {
 		require.NotNil(t, gp)
 		require.True(t, gp.isRunning())
 
-		response, err = node2.AskGrain(ctx, identity, message)
+		response, err = node2.SendGrainSync(ctx, identity, message)
 		require.NoError(t, err)
 		require.NotNil(t, response)
 		require.IsType(t, &testpb.Reply{}, response)
@@ -149,7 +149,7 @@ func TestGrain(t *testing.T) {
 		util.Pause(time.Second)
 
 		// let us shutdown the grain by sending PoisonPill
-		err = node3.TellGrain(ctx, identity, new(goaktpb.PoisonPill))
+		err = node3.SendGrainAsync(ctx, identity, new(goaktpb.PoisonPill))
 		require.NoError(t, err)
 
 		util.Pause(time.Second)
@@ -161,7 +161,7 @@ func TestGrain(t *testing.T) {
 		require.False(t, gp.isRunning())
 
 		// send a message to the grain to reactivate it
-		response, err = node3.AskGrain(ctx, identity, message)
+		response, err = node3.SendGrainSync(ctx, identity, message)
 		require.NoError(t, err)
 		require.NotNil(t, response)
 		require.IsType(t, &testpb.Reply{}, response)
@@ -175,7 +175,7 @@ func TestGrain(t *testing.T) {
 		require.True(t, gp.isRunning())
 
 		// let us shutdown the grain by sending PoisonPill
-		err = node3.TellGrain(ctx, identity, new(goaktpb.PoisonPill))
+		err = node3.SendGrainAsync(ctx, identity, new(goaktpb.PoisonPill))
 		require.NoError(t, err)
 
 		// check if the grain is activated
@@ -212,7 +212,7 @@ func TestGrain(t *testing.T) {
 
 		// prepare a message to send to the grain
 		message := new(testpb.TestSend)
-		response, err := testSystem.AskGrain(ctx, identity, message)
+		response, err := testSystem.SendGrainSync(ctx, identity, message)
 		require.Error(t, err)
 		require.ErrorIs(t, err, ErrGrainActivationFailure)
 		require.Nil(t, response)
@@ -241,7 +241,7 @@ func TestGrain(t *testing.T) {
 
 		// prepare a message to send to the grain
 		message := new(testpb.TestSend)
-		err = testSystem.TellGrain(ctx, identity, message)
+		err = testSystem.SendGrainAsync(ctx, identity, message)
 		require.NoError(t, err)
 
 		util.Pause(500 * time.Millisecond)
@@ -253,7 +253,7 @@ func TestGrain(t *testing.T) {
 		require.True(t, gp.isRunning())
 
 		// let us shutdown the grain by sending PoisonPill
-		err = testSystem.TellGrain(ctx, identity, new(goaktpb.PoisonPill))
+		err = testSystem.SendGrainAsync(ctx, identity, new(goaktpb.PoisonPill))
 		require.Error(t, err)
 		require.ErrorIs(t, err, ErrGrainDeactivationFailure)
 
@@ -281,7 +281,7 @@ func TestGrain(t *testing.T) {
 
 		// prepare a message to send to the grain
 		message := new(testpb.TestSend)
-		response, err := testSystem.AskGrain(ctx, identity, message)
+		response, err := testSystem.SendGrainSync(ctx, identity, message)
 		require.Error(t, err)
 		require.Nil(t, response)
 
@@ -291,7 +291,7 @@ func TestGrain(t *testing.T) {
 		require.NotNil(t, gp)
 		require.True(t, gp.isRunning())
 
-		err = testSystem.TellGrain(ctx, identity, message)
+		err = testSystem.SendGrainAsync(ctx, identity, message)
 		require.Error(t, err)
 
 		gp, ok = testSystem.(*actorSystem).grains.Get(*identity)
@@ -323,12 +323,12 @@ func TestGrain(t *testing.T) {
 
 		sender := &Identity{}
 		message := new(testpb.TestSend)
-		response, err := testSystem.AskGrain(ctx, identity, message, WithRequestSender(sender))
+		response, err := testSystem.SendGrainSync(ctx, identity, message, WithRequestSender(sender))
 		require.Error(t, err)
 		require.ErrorIs(t, err, ErrInvalidGrainIdentity)
 		require.Nil(t, response)
 
-		err = testSystem.TellGrain(ctx, identity, message, WithRequestSender(sender))
+		err = testSystem.SendGrainAsync(ctx, identity, message, WithRequestSender(sender))
 		require.Error(t, err)
 		require.ErrorIs(t, err, ErrInvalidGrainIdentity)
 
@@ -356,12 +356,12 @@ func TestGrain(t *testing.T) {
 
 		sender := NewIdentity(grain, "GoAktSender")
 		message := new(testpb.TestSend)
-		response, err := testSystem.AskGrain(ctx, identity, message, WithRequestSender(sender))
+		response, err := testSystem.SendGrainSync(ctx, identity, message, WithRequestSender(sender))
 		require.Error(t, err)
 		require.ErrorIs(t, err, ErrReservedName)
 		require.Nil(t, response)
 
-		err = testSystem.TellGrain(ctx, identity, message, WithRequestSender(sender))
+		err = testSystem.SendGrainAsync(ctx, identity, message, WithRequestSender(sender))
 		require.Error(t, err)
 		require.ErrorIs(t, err, ErrReservedName)
 
@@ -380,12 +380,12 @@ func TestGrain(t *testing.T) {
 
 		identity := &Identity{}
 		message := new(testpb.TestSend)
-		response, err := testSystem.AskGrain(ctx, identity, message)
+		response, err := testSystem.SendGrainSync(ctx, identity, message)
 		require.Error(t, err)
 		require.ErrorIs(t, err, ErrInvalidGrainIdentity)
 		require.Nil(t, response)
 
-		err = testSystem.TellGrain(ctx, identity, message)
+		err = testSystem.SendGrainAsync(ctx, identity, message)
 		require.Error(t, err)
 		require.ErrorIs(t, err, ErrInvalidGrainIdentity)
 
@@ -412,12 +412,12 @@ func TestGrain(t *testing.T) {
 		require.NotNil(t, identity)
 
 		message := new(testpb.TestSend)
-		response, err := testSystem.AskGrain(ctx, identity, message)
+		response, err := testSystem.SendGrainSync(ctx, identity, message)
 		require.Error(t, err)
 		require.ErrorIs(t, err, ErrReservedName)
 		require.Nil(t, response)
 
-		err = testSystem.TellGrain(ctx, identity, message)
+		err = testSystem.SendGrainAsync(ctx, identity, message)
 		require.Error(t, err)
 		require.ErrorIs(t, err, ErrReservedName)
 
@@ -431,12 +431,12 @@ func TestGrain(t *testing.T) {
 
 		// prepare a message to send to the grain
 		message := new(testpb.TestSend)
-		response, err := testSystem.AskGrain(ctx, &Identity{}, message)
+		response, err := testSystem.SendGrainSync(ctx, &Identity{}, message)
 		require.Error(t, err)
 		require.ErrorIs(t, err, ErrActorSystemNotStarted)
 		require.Nil(t, response)
 
-		err = testSystem.TellGrain(ctx, &Identity{}, message)
+		err = testSystem.SendGrainAsync(ctx, &Identity{}, message)
 		require.Error(t, err)
 		require.ErrorIs(t, err, ErrActorSystemNotStarted)
 	})
@@ -477,7 +477,7 @@ func TestGrain(t *testing.T) {
 
 		// prepare a message to send to the grain
 		message := new(testpb.TestSend)
-		response, err := testSystem.AskGrain(ctx, identity, message)
+		response, err := testSystem.SendGrainSync(ctx, identity, message)
 		require.NoError(t, err)
 		require.NotNil(t, response)
 		require.IsType(t, &testpb.Reply{}, response)
@@ -492,12 +492,12 @@ func TestGrain(t *testing.T) {
 		require.NoError(t, err)
 
 		// send a message to the grain to reactivate it
-		response, err = testSystem.AskGrain(ctx, identity, message)
+		response, err = testSystem.SendGrainSync(ctx, identity, message)
 		require.Error(t, err)
 		require.ErrorIs(t, err, ErrGrainNotRegistered)
 		require.Nil(t, response)
 
-		err = testSystem.TellGrain(ctx, identity, message)
+		err = testSystem.SendGrainAsync(ctx, identity, message)
 		require.Error(t, err)
 		require.ErrorIs(t, err, ErrTypeNotRegistered)
 

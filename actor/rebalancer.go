@@ -157,6 +157,7 @@ func (r *rebalancer) Rebalance(ctx *ReceiveContext) {
 					for _, grain := range leaderGrains {
 						if !isReservedName(grain.GetGrainId().GetName()) {
 							// reset the grain host and port
+							// because the grain is being relocated to a new host
 							grain.Host = leaderHost
 							grain.Port = leaderPort
 							if err := r.pid.ActorSystem().recreateGrain(egCtx, grain); err != nil {
@@ -182,6 +183,7 @@ func (r *rebalancer) Rebalance(ctx *ReceiveContext) {
 								remoting := r.pid.ActorSystem().getRemoting()
 								remoteClient := remoting.remotingServiceClient(remoteHost, remotingPort)
 								// reset the grain host and port
+								// because the grain is being relocated to a new host
 								grain.Host = remoteHost
 								grain.Port = int32(remotingPort)
 								request := connect.NewRequest(&internalpb.RemoteActivateGrainRequest{
@@ -310,31 +312,24 @@ func (r *rebalancer) allocateGrains(totalPeers int, nodeLeftState *internalpb.Pe
 	grains := nodeLeftState.GetGrains()
 	grainCount := len(grains)
 
-	if grainCount == 0 || totalPeers <= 0 {
-		return nil, nil
-	}
-
 	// Collect all grains to be rebalanced
-	toRebalance := make([]*internalpb.Grain, 0, grainCount)
+	toRebalances := make([]*internalpb.Grain, 0, grainCount)
 	for _, grain := range grains {
-		toRebalance = append(toRebalance, grain)
+		toRebalances = append(toRebalances, grain)
 	}
 
 	quotient := grainCount / totalPeers
 	remainder := grainCount % totalPeers
 
 	// Assign the remainder grains to the leader
-	leaderShares = append(leaderShares, toRebalance[:remainder]...)
+	leaderShares = append(leaderShares, toRebalances[:remainder]...)
 
-	// Chunk the remaining grains for peers
-	if remainder < grainCount {
-		chunks := collection.Chunkify(toRebalance[remainder:], quotient)
-		if len(chunks) > 0 {
-			// Leader takes the first chunk
-			leaderShares = append(leaderShares, chunks[0]...)
-			// Remaining chunks go to peers
-			peersShares = chunks[1:]
-		}
+	// Chunk the remaining actors for peers
+	peersShares = collection.Chunkify(toRebalances[remainder:], quotient)
+
+	// Ensure leader takes the first chunk
+	if len(peersShares) > 0 {
+		leaderShares = append(leaderShares, peersShares[0]...)
 	}
 
 	return leaderShares, peersShares

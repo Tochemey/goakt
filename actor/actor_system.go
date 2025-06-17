@@ -478,7 +478,7 @@ type ActorSystem interface { //nolint:revive
 	// Deregistering a Grain prevents it from being activated or messaged in the future.
 	// Returns an error if the actor system is not started.
 	DeregisterGrains(grains ...Grain) error
-	// AskGrain sends a request message to a Grain identified by the given identity.
+	// SendGrainSync sends a request message to a Grain identified by the given identity.
 	//
 	// This method locates or spawns the target Grain (either locally or in the cluster), sends the provided
 	// protobuf message, and waits for a response or error. The request timeout can be customized using
@@ -493,8 +493,8 @@ type ActorSystem interface { //nolint:revive
 	// Returns:
 	//   - response: the response from the Grain, if successful.
 	//   - error: an error if the request fails, times out, or the system is not started.
-	AskGrain(ctx context.Context, identity *Identity, message proto.Message, opts ...GrainOption) (response proto.Message, err error)
-	// TellGrain sends an asynchronous message to a Grain (virtual actor) identified by the given identity.
+	SendGrainSync(ctx context.Context, identity *Identity, message proto.Message, opts ...GrainOption) (response proto.Message, err error)
+	// SendGrainAsync sends an asynchronous message to a Grain (virtual actor) identified by the given identity.
 	//
 	// This method locates or activates the target Grain (locally or in the cluster) and delivers the provided
 	// protobuf message without waiting for a response. Use this for fire-and-forget scenarios where no reply is expected.
@@ -507,25 +507,18 @@ type ActorSystem interface { //nolint:revive
 	//
 	// Returns:
 	//   - error: An error if the message could not be delivered or the system is not started.
-	TellGrain(ctx context.Context, identity *Identity, message proto.Message, opts ...GrainOption) error
-	// handleRemoteAsk handles a synchronous message to another actor and expect a response.
-	// This block until a response is received or timed out.
-	handleRemoteAsk(ctx context.Context, to *PID, message proto.Message, timeout time.Duration) (response proto.Message, err error)
-	// handleRemoteTell handles an asynchronous message to an actor
-	handleRemoteTell(ctx context.Context, to *PID, message proto.Message) error
-	// broadcastActor sets actor in the actor system actors registry
-	broadcastActor(actor *PID) error
-	// getPeerStateFromStore returns the peer state from the cluster store
-	getPeerStateFromStore(address string) (*internalpb.PeerState, error)
-	// removePeerStateFromStore removes the peer state from the cluster store
-	removePeerStateFromStore(address string) error
-	// reservedName returns reserved actor's name
-	reservedName(nameType nameType) string
-	// getCluster returns the cluster engine
-	getCluster() cluster.Interface
-	// tree returns the actors tree
-	tree() *tree
+	SendGrainAsync(ctx context.Context, identity *Identity, message proto.Message, opts ...GrainOption) error
 
+	// internally used
+	handleRemoteAsk(ctx context.Context, to *PID, message proto.Message, timeout time.Duration) (response proto.Message, err error)
+	handleRemoteTell(ctx context.Context, to *PID, message proto.Message) error
+	putActorOnCluster(actor *PID) error
+	putGrainOnCluster(grain *grainProcess) error
+	getPeerStateFromStore(address string) (*internalpb.PeerState, error)
+	removePeerStateFromStore(address string) error
+	reservedName(nameType nameType) string
+	getCluster() cluster.Interface
+	tree() *tree
 	completeRebalancing()
 	getRootGuardian() *PID
 	getSystemGuardian() *PID
@@ -535,7 +528,6 @@ type ActorSystem interface { //nolint:revive
 	getSingletonManager() *PID
 	getWorkerPool() *workerpool.WorkerPool
 	getReflection() *reflection
-	// internally used
 	findRoutee(routeeName string) (*PID, bool)
 	getRemoting() *Remoting
 	getGrains() *collection.Map[Identity, *grainProcess]
@@ -585,7 +577,8 @@ type actorSystem struct {
 	clusterEnabled atomic.Bool
 	// cluster mode
 	cluster            cluster.Interface
-	wireActorsQueue    chan *internalpb.Actor
+	actorsQueue        chan *internalpb.Actor
+	grainsQueue        chan *internalpb.Grain
 	eventsQueue        <-chan *cluster.Event
 	clusterSyncStopSig chan types.Unit
 	partitionHasher    hash.Hasher
@@ -657,7 +650,8 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 	}
 
 	system := &actorSystem{
-		wireActorsQueue:        make(chan *internalpb.Actor, 10),
+		actorsQueue:            make(chan *internalpb.Actor, 10),
+		grainsQueue:            make(chan *internalpb.Grain, 10),
 		name:                   name,
 		logger:                 log.New(log.ErrorLevel, os.Stderr),
 		actorInitMaxRetries:    DefaultInitMaxRetries,
@@ -1205,7 +1199,7 @@ func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor, opts 
 	guardian := x.getUserGuardian()
 	_ = x.actors.addNode(guardian, pid)
 	x.actors.addWatcher(pid, x.deathWatch)
-	return pid, x.broadcastActor(pid)
+	return pid, x.putActorOnCluster(pid)
 }
 
 // SpawnNamedFromFunc creates an actor with the given receive function and provided name. One can set the PreStart and PostStop lifecycle hooks
@@ -1240,7 +1234,7 @@ func (x *actorSystem) SpawnNamedFromFunc(ctx context.Context, name string, recei
 	x.actorsCounter.Inc()
 	_ = x.actors.addNode(x.userGuardian, pid)
 	x.actors.addWatcher(pid, x.deathWatch)
-	return pid, x.broadcastActor(pid)
+	return pid, x.putActorOnCluster(pid)
 }
 
 // SpawnOn creates and starts an actor, either locally or on a remote node,
@@ -1411,7 +1405,7 @@ func (x *actorSystem) SpawnSingleton(ctx context.Context, name string, actor Act
 	// add the given actor to the tree and supervise it
 	_ = x.actors.addNode(x.singletonManager, pid)
 	x.actors.addWatcher(pid, x.deathWatch)
-	return x.broadcastActor(pid)
+	return x.putActorOnCluster(pid)
 }
 
 // Kill stops a given actor in the system
@@ -2241,15 +2235,15 @@ func (x *actorSystem) getPeerStateFromStore(address string) (*internalpb.PeerSta
 	return peerState, nil
 }
 
-// broadcastActor broadcast the newly (re)spawned actor into the cluster
-func (x *actorSystem) broadcastActor(pid *PID) error {
+// putActorOnCluster broadcast the newly (re)spawned actor into the cluster
+func (x *actorSystem) putActorOnCluster(pid *PID) error {
 	if x.clusterEnabled.Load() {
 		dependencies, err := encodeDependencies(pid.Dependencies()...)
 		if err != nil {
 			return err
 		}
 
-		x.wireActorsQueue <- &internalpb.Actor{
+		x.actorsQueue <- &internalpb.Actor{
 			Address:             pid.Address().Address,
 			Type:                types.Name(pid.Actor()),
 			IsSingleton:         pid.IsSingleton(),
@@ -2257,6 +2251,28 @@ func (x *actorSystem) broadcastActor(pid *PID) error {
 			PassivationStrategy: passivationStrategyToProto(pid.PassivationStrategy()),
 			Dependencies:        dependencies,
 			EnableStash:         pid.stashBox != nil,
+		}
+	}
+	return nil
+}
+
+// putGrainOnCluster broadcast the newly (re)activated grain into the cluster
+func (x *actorSystem) putGrainOnCluster(process *grainProcess) error {
+	if x.clusterEnabled.Load() {
+		dependencies, err := encodeDependencies(process.dependencies.Values()...)
+		if err != nil {
+			return err
+		}
+
+		x.grainsQueue <- &internalpb.Grain{
+			GrainId: &internalpb.GrainId{
+				Kind:  process.identity.Kind(),
+				Name:  process.identity.Name(),
+				Value: process.identity.String(),
+			},
+			Host:         x.Host(),
+			Port:         int32(x.Port()),
+			Dependencies: dependencies,
 		}
 	}
 	return nil
@@ -2346,18 +2362,24 @@ func (x *actorSystem) enableClustering(ctx context.Context) error {
 		x.logger.Infof("cluster kind=(%s) registered", types.Name(kind))
 	}
 
-	for _, grain := range x.clusterConfig.Grains() {
-		x.registry.Register(grain)
-		x.logger.Infof("cluster Grain=(%s) registered", types.Name(grain))
+	var grainEnabled bool
+	if len(x.clusterConfig.Grains()) > 0 {
+		grainEnabled = true
+		for _, grain := range x.clusterConfig.Grains() {
+			x.registry.Register(grain)
+			x.logger.Infof("cluster Grain=(%s) registered", types.Name(grain))
+		}
+
 	}
 
 	x.locker.Unlock()
 
 	go x.clusterEventsLoop()
-	go x.replicationLoop()
+	go x.replicationActors()
+	go x.replicateGrains()
 
 	// start the various relocation loops when relocation is enabled
-	if x.enableRelocation.Load() {
+	if x.enableRelocation.Load() || grainEnabled {
 		go x.peersStateLoop()
 		go x.rebalancingLoop()
 	}
@@ -2529,9 +2551,25 @@ func (x *actorSystem) shutdown(ctx context.Context) error {
 	return nil
 }
 
-// replicationLoop publishes newly created actor into the cluster when cluster is enabled
-func (x *actorSystem) replicationLoop() {
-	for actor := range x.wireActorsQueue {
+func (x *actorSystem) replicateGrains() {
+	for grain := range x.grainsQueue {
+		// never replicate system grains because there are specific to the
+		// started node
+		if isReservedName(grain.GetGrainId().GetName()) {
+			continue
+		}
+		if x.InCluster() {
+			ctx := context.Background()
+			if err := x.cluster.PutGrain(ctx, grain); err != nil {
+				x.logger.Panic(err.Error())
+			}
+		}
+	}
+}
+
+// replicationActors publishes newly created actor into the cluster when cluster is enabled
+func (x *actorSystem) replicationActors() {
+	for actor := range x.actorsQueue {
 		// never replicate system actors because there are specific to the
 		// started node
 		if isReservedName(actor.GetAddress().GetName()) {
@@ -2691,7 +2729,7 @@ func (x *actorSystem) shouldRebalance(peerState *internalpb.PeerState) bool {
 // processPeerState processes a given peer synchronization record.
 func (x *actorSystem) processPeerState(ctx context.Context, peer *cluster.Peer) error {
 	peerAddress := net.JoinHostPort(peer.Host, strconv.Itoa(peer.PeersPort))
-	x.logger.Infof("processing peer sync:(%s)", peerAddress)
+	x.logger.Infof("(%s) processing peer sync:(%s)", x.PeerAddress(), peerAddress)
 	peerState, err := x.cluster.GetState(ctx, peerAddress)
 	if err != nil {
 		if errors.Is(err, cluster.ErrPeerSyncNotFound) {
@@ -2706,7 +2744,7 @@ func (x *actorSystem) processPeerState(ctx context.Context, peer *cluster.Peer) 
 		x.logger.Error(err)
 		return err
 	}
-	x.logger.Infof("peer sync(%s) successfully processed", peerAddress)
+	x.logger.Infof("(%s) processed peer sync(%s) successfully ", x.PeerAddress(), peerAddress)
 	return nil
 }
 
@@ -3105,8 +3143,12 @@ func (x *actorSystem) shutdownCluster(ctx context.Context, actorRefs []ActorRef)
 			}
 		}
 
-		if x.wireActorsQueue != nil {
-			close(x.wireActorsQueue)
+		if x.actorsQueue != nil {
+			close(x.actorsQueue)
+		}
+
+		if x.grainsQueue != nil {
+			close(x.grainsQueue)
 		}
 
 		x.clusterSyncStopSig <- types.Unit{}

@@ -100,7 +100,7 @@ func newGrainProcess(identity *Identity, grain Grain, actorSystem ActorSystem, d
 // activate activates the Grain
 func (proc *grainProcess) activate(ctx context.Context) error {
 	logger := proc.logger
-	logger.Infof("activating Grain %s ...", proc.identity.String())
+	logger.Infof("(%s) activating Grain %s ...", proc.actorSystem.PeerAddress(), proc.identity.String())
 
 	grainContext := newGrainContext(ctx, proc.identity, proc.actorSystem)
 
@@ -112,10 +112,12 @@ func (proc *grainProcess) activate(ctx context.Context) error {
 	}); err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
 			cancel()
+			proc.logger.Errorf("(%s) Grain %s activation timed out.", proc.actorSystem.PeerAddress(), proc.identity.String())
 			return ErrGrainActivationTimeout
 		}
 
 		cancel()
+		proc.logger.Errorf("(%s) Grain %s activation failed.", proc.actorSystem.PeerAddress(), proc.identity.String())
 		return NewErrGrainActivationFailure(err)
 	}
 
@@ -124,7 +126,7 @@ func (proc *grainProcess) activate(ctx context.Context) error {
 	}
 
 	proc.processState.SetRunning()
-	proc.logger.Infof("Grain %s successfully activated.", proc.identity.String())
+	proc.logger.Infof("(%s) Grain %s successfully activated.", proc.actorSystem.PeerAddress(), proc.identity.String())
 	cancel()
 
 	return nil
@@ -133,7 +135,7 @@ func (proc *grainProcess) activate(ctx context.Context) error {
 // deactivate deactivates the Grain
 func (proc *grainProcess) deactivate(ctx context.Context) error {
 	logger := proc.logger
-	logger.Infof("deactivating Grain %s ...", proc.identity.String())
+	logger.Infof("(%s) deactivating Grain %s ...", proc.actorSystem.PeerAddress(), proc.identity.String())
 	if proc.remoting != nil {
 		proc.remoting.Close()
 	}
@@ -145,14 +147,14 @@ func (proc *grainProcess) deactivate(ctx context.Context) error {
 	if err := proc.grain.OnDeactivate(grainContext); err != nil {
 		proc.processState.ClearRunning()
 		proc.processState.ClearStopping()
-		// TODO: research what happened during failed deactivation
+		proc.logger.Errorf("(%s) Grain %s deactivation failed.", proc.actorSystem.PeerAddress(), proc.identity.String())
 		return NewErrGrainDeactivationFailure(err)
 	}
 
 	proc.processState.ClearRunning()
 	proc.processState.ClearStopping()
 	proc.processState.SetSuspended()
-	proc.logger.Infof("Grain %s successfully deactivated.", proc.identity.String())
+	proc.logger.Infof("(%s) Grain %s successfully deactivated.", proc.actorSystem.PeerAddress(), proc.identity.String())
 
 	return nil
 }
