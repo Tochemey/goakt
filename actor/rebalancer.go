@@ -119,11 +119,19 @@ func (r *rebalancer) Rebalance(ctx *ReceiveContext) {
 								remoteHost := peer.Host
 								remotingPort := peer.RemotingPort
 
+								dependencies, err := r.pid.ActorSystem().getReflection().DependenciesFromProtobuf(actor.GetDependencies()...)
+								if err != nil {
+									return err
+								}
+
 								spawnRequest := &remote.SpawnRequest{
-									Name:        actor.GetAddress().GetName(),
-									Kind:        actor.GetType(),
-									Singleton:   false,
-									Relocatable: true,
+									Name:                actor.GetAddress().GetName(),
+									Kind:                actor.GetType(),
+									Singleton:           false,
+									Relocatable:         true,
+									Dependencies:        dependencies,
+									PassivationStrategy: passivationStrategyFromProto(actor.GetPassivationStrategy()),
+									EnableStashing:      actor.GetEnableStash(),
 								}
 
 								if err := r.remoting.RemoteSpawn(egCtx, remoteHost, remotingPort, spawnRequest); err != nil {
