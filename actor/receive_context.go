@@ -536,12 +536,12 @@ func newReceiveContext(ctx context.Context, from, to *PID, message proto.Message
 
 // build sets the necessary fields of ReceiveContext
 func (rctx *ReceiveContext) build(ctx context.Context, from, to *PID, message proto.Message, async bool) *ReceiveContext {
-	rctx.ctx = context.WithoutCancel(ctx)
 	rctx.sender = from
 	rctx.self = to
 	rctx.message = message
 
 	if async {
+		rctx.ctx = context.WithoutCancel(ctx)
 		return rctx
 	}
 	rctx.response = make(chan proto.Message, 1)

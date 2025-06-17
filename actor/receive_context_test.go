@@ -1241,7 +1241,8 @@ func TestReceiveContext(t *testing.T) {
 		require.NoError(t, msg.UnmarshalTo(actual))
 		require.True(t, proto.Equal(send, actual))
 		require.Equal(t, deadletter.GetReason(), ErrUnhandled.Error())
-		assert.Nil(t, deadletter.GetSender())
+		addr := deadletter.GetSender()
+		require.True(t, NoSender.Address().Equals(address.From(addr)))
 
 		assert.EqualValues(t, 1, len(consumer.Topics()))
 
@@ -3013,16 +3014,19 @@ func TestReceiveContext(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, pidA)
 
+		util.Pause(time.Second)
+
 		// create actorB
 		pidB, err := actorSystem2.Spawn(ctx, "ExchangeC", &mockRemoteActor{})
 		require.NoError(t, err)
 		require.NotNil(t, pidB)
 
+		util.Pause(time.Second)
+
 		// create an instance of receive context
 		context := &ReceiveContext{
 			ctx:     ctx,
 			message: new(testpb.TestSend),
-			sender:  NoSender,
 			self:    pidA,
 		}
 

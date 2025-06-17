@@ -69,6 +69,7 @@ const (
 	deadletterType
 	singletonManagerType
 	topicActorType
+	noSenderType
 )
 
 var (
@@ -88,6 +89,7 @@ var (
 		deadletterType:       "GoAktDeadletter",
 		singletonManagerType: "GoAktSingletonManager",
 		topicActorType:       "GoAktTopicActor",
+		noSenderType:         "GoAktNoSender",
 	}
 )
 
