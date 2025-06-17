@@ -355,6 +355,38 @@ func TestReply(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NoError(t, actorSystem.Stop(ctx))
 	})
+	t.Run("With context canceled", func(t *testing.T) {
+		ctx := context.TODO()
+		host := "127.0.0.1"
+		ports := dynaport.Get(1)
+
+		actorSystem, err := NewActorSystem("testSys",
+			WithRemote(remote.NewConfig(host, ports[0])),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+		util.Pause(time.Second)
+
+		// create the actor path
+		pid, err := actorSystem.Spawn(ctx, "test", newMockActor())
+		require.NoError(t, err)
+		assert.NotNil(t, pid)
+
+		cancelCtx, cancel := context.WithTimeout(ctx, 200*time.Millisecond)
+		defer cancel()
+
+		actual, err := Ask(cancelCtx, pid, new(testpb.TestSend), replyTimeout)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, ErrRequestTimeout)
+		assert.Nil(t, actual)
+		// stop the actor
+		err = pid.Shutdown(ctx)
+		assert.NoError(t, err)
+		assert.NoError(t, actorSystem.Stop(ctx))
+	})
 	t.Run("With timeout", func(t *testing.T) {
 		ctx := context.TODO()
 		host := "127.0.0.1"
@@ -1822,6 +1854,61 @@ func TestMessaging(t *testing.T) {
 
 		// send an ask
 		reply, err := pid1.Ask(ctx, pid2, new(testpb.TestTimeout), replyTimeout)
+		require.Error(t, err)
+		require.ErrorIs(t, err, ErrRequestTimeout)
+		require.Nil(t, reply)
+
+		// wait a while because exchange is ongoing
+		util.Pause(time.Second)
+
+		err = Tell(ctx, pid1, new(testpb.TestBye))
+		require.NoError(t, err)
+
+		util.Pause(time.Second)
+		assert.False(t, pid1.IsRunning())
+		assert.True(t, pid2.IsRunning())
+
+		util.Pause(time.Second)
+		assert.NoError(t, pid2.Shutdown(ctx))
+		assert.False(t, pid2.IsRunning())
+		assert.NoError(t, actorSystem.Stop(ctx))
+	})
+	t.Run("With Ask context timed out or canceled", func(t *testing.T) {
+		ctx := context.TODO()
+		host := "127.0.0.1"
+		ports := dynaport.Get(1)
+
+		actorSystem, err := NewActorSystem("testSys",
+			WithRemote(remote.NewConfig(host, ports[0])),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+
+		util.Pause(time.Second)
+
+		// create the actor path
+		actor1 := &exchanger{}
+		pid1, err := actorSystem.Spawn(ctx, "Exchange1", actor1)
+
+		require.NoError(t, err)
+		require.NotNil(t, pid1)
+
+		actor2 := newMockActor()
+		pid2, err := actorSystem.Spawn(ctx, "Exchange2", actor2)
+		require.NoError(t, err)
+		require.NotNil(t, pid2)
+
+		err = pid1.Tell(ctx, pid2, new(testpb.TestSend))
+		require.NoError(t, err)
+
+		// send an ask
+		// create a context with timeout
+		cancelCtx, cancel := context.WithTimeout(ctx, 200*time.Millisecond)
+		defer cancel()
+		reply, err := pid1.Ask(cancelCtx, pid2, new(testpb.TestTimeout), replyTimeout)
 		require.Error(t, err)
 		require.ErrorIs(t, err, ErrRequestTimeout)
 		require.Nil(t, reply)
