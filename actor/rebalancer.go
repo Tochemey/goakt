@@ -119,6 +119,11 @@ func (r *rebalancer) Rebalance(ctx *ReceiveContext) {
 								remoteHost := peer.Host
 								remotingPort := peer.RemotingPort
 
+								// remove the given actor from the cluster
+								if err := r.pid.ActorSystem().getCluster().RemoveActor(egCtx, actor.GetAddress().GetName()); err != nil {
+									return NewInternalError(err)
+								}
+
 								dependencies, err := r.pid.ActorSystem().getReflection().DependenciesFromProtobuf(actor.GetDependencies()...)
 								if err != nil {
 									return err
@@ -212,6 +217,11 @@ func (r *rebalancer) computeRebalancing(totalPeers int, nodeLeftState *internalp
 
 // recreateLocally recreates the actor
 func (r *rebalancer) recreateLocally(ctx context.Context, props *internalpb.Actor, enforceSingleton bool) error {
+	// remove the given actor from the cluster
+	if err := r.pid.ActorSystem().getCluster().RemoveActor(ctx, props.GetAddress().GetName()); err != nil {
+		return NewInternalError(err)
+	}
+
 	actor, err := r.pid.ActorSystem().getReflection().NewActor(props.GetType())
 	if err != nil {
 		return err
