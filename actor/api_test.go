@@ -41,430 +41,461 @@ import (
 )
 
 func TestAsk(t *testing.T) {
-	t.Run(
-		"With started actor", func(t *testing.T) {
-			// create the context
-			ctx := context.TODO()
-			// define the logger to use
-			logger := log.DiscardLogger
-			// create the actor system
-			sys, err := NewActorSystem(
-				"test",
-				WithLogger(logger),
-			)
-			// assert there are no error
-			require.NoError(t, err)
+	t.Run("With started actor", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+		)
+		// assert there are no error
+		require.NoError(t, err)
 
-			// start the actor system
-			err = sys.Start(ctx)
-			assert.NoError(t, err)
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
 
-			util.Pause(time.Second)
+		util.Pause(time.Second)
 
-			// create a test actor
-			actorName := "test"
-			actor := NewMockActor()
-			actorRef, err := sys.Spawn(ctx, actorName, actor)
-			require.NoError(t, err)
-			assert.NotNil(t, actorRef)
+		// create a test actor
+		actorName := "test"
+		actor := NewMockActor()
+		actorRef, err := sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		assert.NotNil(t, actorRef)
 
-			// create a message to send to the test actor
-			message := new(testpb.TestReply)
-			// send the message to the actor
-			reply, err := Ask(ctx, actorRef, message, replyTimeout)
-			// perform some assertions
-			require.NoError(t, err)
-			assert.NotNil(t, reply)
+		// create a message to send to the test actor
+		message := new(testpb.TestReply)
+		// send the message to the actor
+		reply, err := Ask(ctx, actorRef, message, replyTimeout)
+		// perform some assertions
+		require.NoError(t, err)
+		assert.NotNil(t, reply)
+		expected := &testpb.Reply{Content: "received message"}
+		assert.True(t, proto.Equal(expected, reply))
+
+		err = sys.Stop(ctx)
+		require.NoError(t, err)
+	},
+	)
+	t.Run("With stopped actor", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		util.Pause(time.Second)
+
+		// create a test actor
+		actorName := "test"
+		actor := NewMockActor()
+		actorRef, err := sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		// Shutdown the actor after some time
+		util.Pause(time.Second)
+		require.NoError(t, actorRef.Shutdown(ctx))
+
+		// create a message to send to the test actor
+		message := new(testpb.TestReply)
+		// send the message to the actor
+		reply, err := Ask(ctx, actorRef, message, replyTimeout)
+		// perform some assertions
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrDead)
+		assert.Nil(t, reply)
+
+		err = sys.Stop(ctx)
+		require.NoError(t, err)
+	},
+	)
+	t.Run("With context canceled or timed out", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		util.Pause(time.Second)
+
+		// create a test actor
+		actorName := "test"
+		actor := NewMockActor()
+		actorRef, err := sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		// create a message to send to the test actor
+		message := new(testpb.TestTimeout)
+		cancelCtx, cancel := context.WithTimeout(ctx, 200*time.Millisecond)
+		defer cancel()
+		// send the message to the actor
+		reply, err := Ask(cancelCtx, actorRef, message, replyTimeout)
+		// perform some assertions
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrRequestTimeout)
+		assert.Nil(t, reply)
+
+		err = sys.Stop(ctx)
+		require.NoError(t, err)
+	},
+	)
+	t.Run("With request timeout", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		util.Pause(time.Second)
+
+		// create a test actor
+		actorName := "test"
+		actor := NewMockActor()
+		actorRef, err := sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		// create a message to send to the test actor
+		message := new(testpb.TestTimeout)
+		// send the message to the actor
+		reply, err := Ask(ctx, actorRef, message, replyTimeout)
+		// perform some assertions
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrRequestTimeout)
+		assert.Nil(t, reply)
+
+		err = sys.Stop(ctx)
+		require.NoError(t, err)
+	},
+	)
+	t.Run("With invalid remote message", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		util.Pause(time.Second)
+
+		// create a test actor
+		actorName := "test"
+		actor := NewMockActor()
+		actorRef, err := sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		util.Pause(time.Second)
+
+		// create a message to send to the test actor
+		message := &internalpb.RemoteMessage{
+			Message: &anypb.Any{},
+		}
+		// send the message to the actor
+		reply, err := Ask(ctx, actorRef, message, replyTimeout)
+		// perform some assertions
+		require.Error(t, err)
+		assert.Nil(t, reply)
+
+		err = sys.Stop(ctx)
+		require.NoError(t, err)
+	},
+	)
+	t.Run("With Batch request happy path", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		util.Pause(time.Second)
+
+		// create a test actor
+		actorName := "test"
+		actor := NewMockActor()
+		actorRef, err := sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		// create a message to send to the test actor
+		// send the message to the actor
+		replies, err := BatchAsk(ctx, actorRef, replyTimeout, new(testpb.TestReply), new(testpb.TestReply))
+		// perform some assertions
+		require.NoError(t, err)
+		assert.NotNil(t, replies)
+		assert.NotEmpty(t, replies)
+		assert.Len(t, replies, 2)
+
+		for reply := range replies {
 			expected := &testpb.Reply{Content: "received message"}
 			assert.True(t, proto.Equal(expected, reply))
+		}
 
-			err = sys.Stop(ctx)
-			require.NoError(t, err)
-		},
+		err = sys.Stop(ctx)
+		require.NoError(t, err)
+	},
 	)
-	t.Run(
-		"With stopped actor", func(t *testing.T) {
-			// create the context
-			ctx := context.TODO()
-			// define the logger to use
-			logger := log.DiscardLogger
-			// create the actor system
-			sys, err := NewActorSystem(
-				"test",
-				WithLogger(logger),
-			)
-			// assert there are no error
-			require.NoError(t, err)
+	t.Run("With Batch request with timeout", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+		)
+		// assert there are no error
+		require.NoError(t, err)
 
-			// start the actor system
-			err = sys.Start(ctx)
-			assert.NoError(t, err)
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
 
-			util.Pause(time.Second)
+		util.Pause(time.Second)
 
-			// create a test actor
-			actorName := "test"
-			actor := NewMockActor()
-			actorRef, err := sys.Spawn(ctx, actorName, actor)
-			require.NoError(t, err)
-			assert.NotNil(t, actorRef)
+		// create a test actor
+		actorName := "test"
+		actor := NewMockActor()
+		actorRef, err := sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		assert.NotNil(t, actorRef)
 
-			// Shutdown the actor after some time
-			util.Pause(time.Second)
-			require.NoError(t, actorRef.Shutdown(ctx))
+		// create a message to send to the test actor
+		// send the message to the actor
+		replies, err := BatchAsk(ctx, actorRef, replyTimeout, new(testpb.TestTimeout), new(testpb.TestReply))
+		// perform some assertions
+		require.Error(t, err)
+		require.ErrorIs(t, err, ErrRequestTimeout)
+		assert.Empty(t, replies)
 
-			// create a message to send to the test actor
-			message := new(testpb.TestReply)
-			// send the message to the actor
-			reply, err := Ask(ctx, actorRef, message, replyTimeout)
-			// perform some assertions
-			require.Error(t, err)
-			assert.ErrorIs(t, err, ErrDead)
-			assert.Nil(t, reply)
+		// stop the actor after some time
+		// this is due to the actor Waitgroup to gracefully close
+		util.Pause(time.Second)
 
-			err = sys.Stop(ctx)
-			require.NoError(t, err)
-		},
+		err = sys.Stop(ctx)
+		require.NoError(t, err)
+	},
 	)
-	t.Run(
-		"With request timeout", func(t *testing.T) {
-			// create the context
-			ctx := context.TODO()
-			// define the logger to use
-			logger := log.DiscardLogger
-			// create the actor system
-			sys, err := NewActorSystem(
-				"test",
-				WithLogger(logger),
-			)
-			// assert there are no error
-			require.NoError(t, err)
+	t.Run("With Batch request with dead actor", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+		)
+		// assert there are no error
+		require.NoError(t, err)
 
-			// start the actor system
-			err = sys.Start(ctx)
-			assert.NoError(t, err)
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
 
-			util.Pause(time.Second)
+		util.Pause(time.Second)
 
-			// create a test actor
-			actorName := "test"
-			actor := NewMockActor()
-			actorRef, err := sys.Spawn(ctx, actorName, actor)
-			require.NoError(t, err)
-			assert.NotNil(t, actorRef)
+		// create a test actor
+		actorName := "test"
+		actor := NewMockActor()
+		actorRef, err := sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		assert.NotNil(t, actorRef)
 
-			// create a message to send to the test actor
-			message := new(testpb.TestTimeout)
-			// send the message to the actor
-			reply, err := Ask(ctx, actorRef, message, replyTimeout)
-			// perform some assertions
-			require.Error(t, err)
-			assert.ErrorIs(t, err, ErrRequestTimeout)
-			assert.Nil(t, reply)
+		// stop the actor
+		require.NoError(t, actorRef.Shutdown(ctx))
 
-			err = sys.Stop(ctx)
-			require.NoError(t, err)
-		},
-	)
-	t.Run(
-		"With invalid remote message", func(t *testing.T) {
-			// create the context
-			ctx := context.TODO()
-			// define the logger to use
-			logger := log.DiscardLogger
-			// create the actor system
-			sys, err := NewActorSystem(
-				"test",
-				WithLogger(logger),
-			)
-			// assert there are no error
-			require.NoError(t, err)
+		// create a message to send to the test actor
+		// send the message to the actor
+		replies, err := BatchAsk(ctx, actorRef, replyTimeout, new(testpb.TestTimeout), new(testpb.TestReply))
+		// perform some assertions
+		require.Error(t, err)
+		assert.Empty(t, replies)
 
-			// start the actor system
-			err = sys.Start(ctx)
-			assert.NoError(t, err)
-
-			util.Pause(time.Second)
-
-			// create a test actor
-			actorName := "test"
-			actor := NewMockActor()
-			actorRef, err := sys.Spawn(ctx, actorName, actor)
-			require.NoError(t, err)
-			assert.NotNil(t, actorRef)
-
-			util.Pause(time.Second)
-
-			// create a message to send to the test actor
-			message := &internalpb.RemoteMessage{
-				Message: &anypb.Any{},
-			}
-			// send the message to the actor
-			reply, err := Ask(ctx, actorRef, message, replyTimeout)
-			// perform some assertions
-			require.Error(t, err)
-			assert.Nil(t, reply)
-
-			err = sys.Stop(ctx)
-			require.NoError(t, err)
-		},
-	)
-	t.Run(
-		"With Batch request happy path", func(t *testing.T) {
-			// create the context
-			ctx := context.TODO()
-			// define the logger to use
-			logger := log.DiscardLogger
-			// create the actor system
-			sys, err := NewActorSystem(
-				"test",
-				WithLogger(logger),
-			)
-			// assert there are no error
-			require.NoError(t, err)
-
-			// start the actor system
-			err = sys.Start(ctx)
-			assert.NoError(t, err)
-
-			util.Pause(time.Second)
-
-			// create a test actor
-			actorName := "test"
-			actor := NewMockActor()
-			actorRef, err := sys.Spawn(ctx, actorName, actor)
-			require.NoError(t, err)
-			assert.NotNil(t, actorRef)
-
-			// create a message to send to the test actor
-			// send the message to the actor
-			replies, err := BatchAsk(ctx, actorRef, replyTimeout, new(testpb.TestReply), new(testpb.TestReply))
-			// perform some assertions
-			require.NoError(t, err)
-			assert.NotNil(t, replies)
-			assert.NotEmpty(t, replies)
-			assert.Len(t, replies, 2)
-
-			for reply := range replies {
-				expected := &testpb.Reply{Content: "received message"}
-				assert.True(t, proto.Equal(expected, reply))
-			}
-
-			err = sys.Stop(ctx)
-			require.NoError(t, err)
-		},
-	)
-	t.Run(
-		"With Batch request with timeout", func(t *testing.T) {
-			// create the context
-			ctx := context.TODO()
-			// define the logger to use
-			logger := log.DiscardLogger
-			// create the actor system
-			sys, err := NewActorSystem(
-				"test",
-				WithLogger(logger),
-			)
-			// assert there are no error
-			require.NoError(t, err)
-
-			// start the actor system
-			err = sys.Start(ctx)
-			assert.NoError(t, err)
-
-			util.Pause(time.Second)
-
-			// create a test actor
-			actorName := "test"
-			actor := NewMockActor()
-			actorRef, err := sys.Spawn(ctx, actorName, actor)
-			require.NoError(t, err)
-			assert.NotNil(t, actorRef)
-
-			// create a message to send to the test actor
-			// send the message to the actor
-			replies, err := BatchAsk(ctx, actorRef, replyTimeout, new(testpb.TestTimeout), new(testpb.TestReply))
-			// perform some assertions
-			require.Error(t, err)
-			require.ErrorIs(t, err, ErrRequestTimeout)
-			assert.Empty(t, replies)
-
-			// stop the actor after some time
-			// this is due to the actor Waitgroup to gracefully close
-			util.Pause(time.Second)
-
-			err = sys.Stop(ctx)
-			require.NoError(t, err)
-		},
-	)
-	t.Run(
-		"With Batch request with dead actor", func(t *testing.T) {
-			// create the context
-			ctx := context.TODO()
-			// define the logger to use
-			logger := log.DiscardLogger
-			// create the actor system
-			sys, err := NewActorSystem(
-				"test",
-				WithLogger(logger),
-			)
-			// assert there are no error
-			require.NoError(t, err)
-
-			// start the actor system
-			err = sys.Start(ctx)
-			assert.NoError(t, err)
-
-			util.Pause(time.Second)
-
-			// create a test actor
-			actorName := "test"
-			actor := NewMockActor()
-			actorRef, err := sys.Spawn(ctx, actorName, actor)
-			require.NoError(t, err)
-			assert.NotNil(t, actorRef)
-
-			// stop the actor
-			require.NoError(t, actorRef.Shutdown(ctx))
-
-			// create a message to send to the test actor
-			// send the message to the actor
-			replies, err := BatchAsk(ctx, actorRef, replyTimeout, new(testpb.TestTimeout), new(testpb.TestReply))
-			// perform some assertions
-			require.Error(t, err)
-			assert.Empty(t, replies)
-
-			err = sys.Stop(ctx)
-			require.NoError(t, err)
-		},
+		err = sys.Stop(ctx)
+		require.NoError(t, err)
+	},
 	)
 }
 
 func TestTell(t *testing.T) {
-	t.Run(
-		"With started actor", func(t *testing.T) {
-			// create the context
-			ctx := context.TODO()
-			// define the logger to use
-			logger := log.DiscardLogger
-			// create the actor system
-			sys, err := NewActorSystem(
-				"test",
-				WithLogger(logger),
-			)
-			// assert there are no error
-			require.NoError(t, err)
+	t.Run("With started actor", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+		)
+		// assert there are no error
+		require.NoError(t, err)
 
-			// start the actor system
-			err = sys.Start(ctx)
-			assert.NoError(t, err)
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
 
-			util.Pause(time.Second)
+		util.Pause(time.Second)
 
-			// create a test actor
-			actorName := "test"
-			actor := NewMockActor()
-			actorRef, err := sys.Spawn(ctx, actorName, actor)
-			require.NoError(t, err)
-			assert.NotNil(t, actorRef)
+		// create a test actor
+		actorName := "test"
+		actor := NewMockActor()
+		actorRef, err := sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		assert.NotNil(t, actorRef)
 
-			util.Pause(time.Second)
+		util.Pause(time.Second)
 
-			// create a message to send to the test actor
-			message := new(testpb.TestSend)
-			// send the message to the actor
-			err = Tell(ctx, actorRef, message)
-			// perform some assertions
-			require.NoError(t, err)
+		// create a message to send to the test actor
+		message := new(testpb.TestSend)
+		// send the message to the actor
+		err = Tell(ctx, actorRef, message)
+		// perform some assertions
+		require.NoError(t, err)
 
-			// stop the actor after some time
-			util.Pause(time.Second)
+		// stop the actor after some time
+		util.Pause(time.Second)
 
-			err = sys.Stop(ctx)
-			assert.NoError(t, err)
-		},
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
+	},
 	)
-	t.Run(
-		"With stopped actor", func(t *testing.T) {
-			// create the context
-			ctx := context.TODO()
-			// define the logger to use
-			logger := log.DiscardLogger
-			// create the actor system
-			sys, err := NewActorSystem(
-				"test",
-				WithLogger(logger),
-			)
-			// assert there are no error
-			require.NoError(t, err)
+	t.Run("With stopped actor", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+		)
+		// assert there are no error
+		require.NoError(t, err)
 
-			// start the actor system
-			err = sys.Start(ctx)
-			assert.NoError(t, err)
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
 
-			util.Pause(time.Second)
+		util.Pause(time.Second)
 
-			// create a test actor
-			actorName := "test"
-			actor := NewMockActor()
-			actorRef, err := sys.Spawn(ctx, actorName, actor)
-			require.NoError(t, err)
-			assert.NotNil(t, actorRef)
+		// create a test actor
+		actorName := "test"
+		actor := NewMockActor()
+		actorRef, err := sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		assert.NotNil(t, actorRef)
 
-			// Shutdown the actor after some time
-			util.Pause(time.Second)
-			require.NoError(t, actorRef.Shutdown(ctx))
+		// Shutdown the actor after some time
+		util.Pause(time.Second)
+		require.NoError(t, actorRef.Shutdown(ctx))
 
-			// create a message to send to the test actor
-			message := new(testpb.TestSend)
-			// send the message to the actor
-			err = Tell(ctx, actorRef, message)
-			// perform some assertions
-			require.Error(t, err)
-			require.ErrorIs(t, err, ErrDead)
+		// create a message to send to the test actor
+		message := new(testpb.TestSend)
+		// send the message to the actor
+		err = Tell(ctx, actorRef, message)
+		// perform some assertions
+		require.Error(t, err)
+		require.ErrorIs(t, err, ErrDead)
 
-			err = sys.Stop(ctx)
-			require.NoError(t, err)
-		},
+		err = sys.Stop(ctx)
+		require.NoError(t, err)
+	},
 	)
-	t.Run(
-		"With invalid remote message", func(t *testing.T) {
-			// create the context
-			ctx := context.TODO()
-			// define the logger to use
-			logger := log.DiscardLogger
-			// create the actor system
-			sys, err := NewActorSystem(
-				"test",
-				WithLogger(logger),
-			)
-			// assert there are no error
-			require.NoError(t, err)
+	t.Run("With invalid remote message", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+		)
+		// assert there are no error
+		require.NoError(t, err)
 
-			// start the actor system
-			err = sys.Start(ctx)
-			assert.NoError(t, err)
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
 
-			util.Pause(time.Second)
+		util.Pause(time.Second)
 
-			// create a test actor
-			actorName := "test"
-			actor := NewMockActor()
-			actorRef, err := sys.Spawn(ctx, actorName, actor)
-			require.NoError(t, err)
-			assert.NotNil(t, actorRef)
+		// create a test actor
+		actorName := "test"
+		actor := NewMockActor()
+		actorRef, err := sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		assert.NotNil(t, actorRef)
 
-			// create a message to send to the test actor
-			message := &internalpb.RemoteMessage{
-				Message: &anypb.Any{},
-			}
-			// send the message to the actor
-			err = Tell(ctx, actorRef, message)
-			require.Error(t, err)
+		// create a message to send to the test actor
+		message := &internalpb.RemoteMessage{
+			Message: &anypb.Any{},
+		}
+		// send the message to the actor
+		err = Tell(ctx, actorRef, message)
+		require.Error(t, err)
 
-			err = sys.Stop(ctx)
-			require.NoError(t, err)
-		},
+		err = sys.Stop(ctx)
+		require.NoError(t, err)
+	},
 	)
 	t.Run(
 		"With Batch request", func(t *testing.T) {
@@ -508,45 +539,43 @@ func TestTell(t *testing.T) {
 			assert.NoError(t, err)
 		},
 	)
-	t.Run(
-		"With Batch request with a dead actor", func(t *testing.T) {
-			// create the context
-			ctx := context.TODO()
-			// define the logger to use
-			logger := log.DiscardLogger
-			// create the actor system
-			sys, err := NewActorSystem(
-				"test",
-				WithLogger(logger),
-			)
-			// assert there are no error
-			require.NoError(t, err)
+	t.Run("With Batch request with a dead actor", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+		)
+		// assert there are no error
+		require.NoError(t, err)
 
-			// start the actor system
-			err = sys.Start(ctx)
-			assert.NoError(t, err)
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
 
-			util.Pause(time.Second)
+		util.Pause(time.Second)
 
-			// create a test actor
-			actorName := "test"
-			actor := NewMockActor()
-			actorRef, err := sys.Spawn(ctx, actorName, actor)
-			require.NoError(t, err)
-			assert.NotNil(t, actorRef)
+		// create a test actor
+		actorName := "test"
+		actor := NewMockActor()
+		actorRef, err := sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		assert.NotNil(t, actorRef)
 
-			util.Pause(time.Second)
-			require.NoError(t, actorRef.Shutdown(ctx))
+		util.Pause(time.Second)
+		require.NoError(t, actorRef.Shutdown(ctx))
 
-			// create a message to send to the test actor
-			// send the message to the actor
-			err = BatchTell(ctx, actorRef, new(testpb.TestSend), new(testpb.TestSend))
-			// perform some assertions
-			require.Error(t, err)
-			require.ErrorIs(t, err, ErrDead)
+		// create a message to send to the test actor
+		// send the message to the actor
+		err = BatchTell(ctx, actorRef, new(testpb.TestSend), new(testpb.TestSend))
+		// perform some assertions
+		require.Error(t, err)
+		require.ErrorIs(t, err, ErrDead)
 
-			err = sys.Stop(ctx)
-			assert.NoError(t, err)
-		},
-	)
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
+	})
 }
