@@ -840,6 +840,11 @@ func (pid *PID) Ask(ctx context.Context, to *PID, message proto.Message, timeout
 	case result := <-receiveContext.response:
 		timers.Put(timer)
 		return result, nil
+	case <-ctx.Done():
+		err = errors.Join(ctx.Err(), ErrRequestTimeout)
+		pid.toDeadletters(receiveContext, err)
+		timers.Put(timer)
+		return nil, err
 	case <-timer.C:
 		err = ErrRequestTimeout
 		pid.toDeadletters(receiveContext, err)
@@ -924,7 +929,7 @@ func (pid *PID) BatchAsk(ctx context.Context, to *PID, messages []proto.Message,
 	responses = make(chan proto.Message, len(messages))
 	defer close(responses)
 
-	for i := 0; i < len(messages); i++ {
+	for i := range messages {
 		response, err := pid.Ask(ctx, to, messages[i], timeout)
 		if err != nil {
 			return nil, err

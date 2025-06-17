@@ -26,6 +26,7 @@ package actor
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"google.golang.org/protobuf/proto"
@@ -47,14 +48,23 @@ func Ask(ctx context.Context, to *PID, message proto.Message, timeout time.Durat
 	}
 
 	to.doReceive(receiveContext)
+	timer := timers.Get(timeout)
 
 	// await patiently to receive the response from the actor
+	// or wait for the context to be done
 	select {
 	case response = <-receiveContext.response:
+		timers.Put(timer)
 		return
-	case <-time.After(timeout):
+	case <-ctx.Done():
+		err = errors.Join(ctx.Err(), ErrRequestTimeout)
+		to.toDeadletters(receiveContext, err)
+		timers.Put(timer)
+		return nil, err
+	case <-timer.C:
 		err = ErrRequestTimeout
 		to.toDeadletters(receiveContext, err)
+		timers.Put(timer)
 		return
 	}
 }
