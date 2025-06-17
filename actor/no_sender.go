@@ -48,7 +48,7 @@ func (x *noSender) Receive(ctx *ReceiveContext) {
 	ctx.Unhandled()
 }
 
-func (x *noSender) PostStop(ctx *Context) error {
+func (x *noSender) PostStop(*Context) error {
 	return nil
 }
 
