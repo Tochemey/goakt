@@ -217,12 +217,10 @@ func (m *MultiNodes) StartNode(ctx context.Context, name string) *TestNode {
 	remotingPort := ports[2]
 
 	config := nats.Config{
-		ApplicationName: "testkit",
-		ActorSystemName: "testSystem",
-		NatsServer:      fmt.Sprintf("nats://%s", m.server.Addr().String()),
-		NatsSubject:     "testSubject",
-		Host:            m.host,
-		DiscoveryPort:   discoveryPort,
+		NatsServer:    fmt.Sprintf("nats://%s", m.server.Addr().String()),
+		NatsSubject:   "testSubject",
+		Host:          m.host,
+		DiscoveryPort: discoveryPort,
 	}
 
 	provider := nats.NewDiscovery(&config, nats.WithLogger(m.logger))
