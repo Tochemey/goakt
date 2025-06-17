@@ -371,7 +371,7 @@ func TestReply(t *testing.T) {
 		util.Pause(time.Second)
 
 		// create the actor path
-		pid, err := actorSystem.Spawn(ctx, "test", newMockActor())
+		pid, err := actorSystem.Spawn(ctx, "test", NewMockActor())
 		require.NoError(t, err)
 		assert.NotNil(t, pid)
 
