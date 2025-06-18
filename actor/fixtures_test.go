@@ -88,6 +88,7 @@ type MockActor struct{}
 // enforce compilation error
 var _ Actor = (*MockActor)(nil)
 
+// NewMockActor creates a actor
 func NewMockActor() *MockActor {
 	return &MockActor{}
 }
@@ -134,6 +135,7 @@ type MockSupervisor struct{}
 // enforce compilation error
 var _ Actor = (*MockSupervisor)(nil)
 
+// NewMockSupervisor creates an instance of supervisorQA
 func NewMockSupervisor() *MockSupervisor {
 	return &MockSupervisor{}
 }
@@ -163,6 +165,7 @@ type MockSupervised struct{}
 // enforce compilation error
 var _ Actor = (*MockSupervised)(nil)
 
+// NewMockSupervised creates an instance of supervisedQA
 func NewMockSupervised() *MockSupervised {
 	return &MockSupervised{}
 }
@@ -654,10 +657,10 @@ func NewMockExtension() *MockExtension {
 }
 
 func (m *MockExtension) ID() string {
-	return "mockStateStore"
+	return "MockStateStore"
 }
 
-// GetLatestState implements mockStateStore.
+// GetLatestState implements MockStateStore.
 func (m *MockExtension) GetLatestState(persistenceID string) (*testpb.Account, error) {
 	value, ok := m.db.Load(persistenceID)
 	if !ok {
@@ -666,7 +669,7 @@ func (m *MockExtension) GetLatestState(persistenceID string) (*testpb.Account, e
 	return value.(*testpb.Account), nil
 }
 
-// WriteState implements mockStateStore.
+// WriteState implements MockStateStore.
 func (m *MockExtension) WriteState(persistenceID string, state *testpb.Account) error {
 	m.db.Store(persistenceID, state)
 	return nil
@@ -687,7 +690,7 @@ func NewMockEntity() *MockEntity {
 // PreStart implements Actor.
 func (m *MockEntity) PreStart(ctx *Context) error {
 	m.currentState = atomic.NewPointer(new(testpb.Account))
-	m.stateStore = ctx.Extension("mockStateStore").(MockStateStore)
+	m.stateStore = ctx.Extension("MockStateStore").(MockStateStore)
 	m.persistenceID = ctx.ActorName()
 	return m.recoverFromStore()
 }
@@ -891,7 +894,7 @@ func NewMockRestartPostStart() *MockRestartPostStart {
 
 // Init initialize the actor. This function can be used to set up some database connections
 // or some sort of initialization before the actor init processing message
-func (p *MockRestartPostStart) PreStart(*Context) error {
+func (p *postStartActor) PreStart(*Context) error {
 	return nil
 }
 

@@ -1602,7 +1602,7 @@ func TestActorSystem(t *testing.T) {
 		// shutdown the nats server gracefully
 		srv.Shutdown()
 	})
-	t.Run("With CoordinatedShutdown failure", func(t *testing.T) {
+	t.Run("With CoordinatedShutdown failure just log the error and continue the shutdown process", func(t *testing.T) {
 		ctx := context.TODO()
 		shutdownHook := func(context.Context) error { return errors.New("shutdown failure") }
 
@@ -1626,7 +1626,7 @@ func TestActorSystem(t *testing.T) {
 		// stop the actor after some time
 		util.Pause(time.Second)
 		err = sys.Stop(ctx)
-		assert.Error(t, err)
+		require.NoError(t, err)
 	})
 	t.Run("With CoordinatedShutdown", func(t *testing.T) {
 		ctx := context.TODO()

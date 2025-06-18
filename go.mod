@@ -117,3 +117,5 @@ require (
 retract v3.2.1 // Had go routine leak
 
 retract v3.6.1 // Nil pointer
+
+retract v3.6.2 // issue-778 and issue-779

@@ -62,7 +62,7 @@ func TestRebalancing(t *testing.T) {
 
 	// let us create 4 actors on each node
 	for j := 1; j <= 4; j++ {
-		actorName := fmt.Sprintf("Actor-1%d", j)
+		actorName := fmt.Sprintf("Node1-Actor-%d", j)
 		pid, err := node1.Spawn(ctx, actorName, NewMockActor())
 		require.NoError(t, err)
 		require.NotNil(t, pid)
@@ -549,6 +549,85 @@ func TestRebalancingWithDependency(t *testing.T) {
 
 	assert.NoError(t, node1.Stop(ctx))
 	assert.NoError(t, sd1.Close())
+	srv.Shutdown()
+}
+
+func TestIssue781(t *testing.T) {
+	// reference: https://github.com/Tochemey/goakt/issues/781
+	// create a context
+	ctx := t.Context()
+	// start the NATS server
+	srv := startNatsServer(t)
+
+	// create and start a system cluster
+	node1, sd1 := testCluster(t, srv.Addr().String())
+	require.NotNil(t, node1)
+	require.NotNil(t, sd1)
+
+	// create and start a system cluster
+	node2, sd2 := testCluster(t, srv.Addr().String())
+	require.NotNil(t, node2)
+	require.NotNil(t, sd2)
+
+	// create and start a system cluster
+	node3, sd3 := testCluster(t, srv.Addr().String())
+	require.NotNil(t, node3)
+	require.NotNil(t, sd3)
+
+	// let us create 4 actors on each node
+	for j := 1; j <= 4; j++ {
+		actorName := fmt.Sprintf("Actor-1%d", j)
+		pid, err := node1.Spawn(ctx, actorName, NewMockActor())
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+	}
+
+	util.Pause(time.Second)
+
+	for j := 1; j <= 5; j++ {
+		actorName := fmt.Sprintf("Actor-2%d", j)
+		pid, err := node2.Spawn(ctx, actorName, NewMockActor())
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+	}
+
+	util.Pause(time.Second)
+
+	for j := 1; j <= 4; j++ {
+		actorName := fmt.Sprintf("Actor-3%d", j)
+		pid, err := node3.Spawn(ctx, actorName, NewMockActor())
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+	}
+
+	util.Pause(time.Second)
+
+	// let stop actor Actor-21 on node2
+	actorName := "Actor-21"
+	err := node2.Kill(ctx, actorName)
+	require.NoError(t, err)
+
+	util.Pause(time.Second)
+
+	// take down node2
+	require.NoError(t, node2.Stop(ctx))
+	require.NoError(t, sd2.Close())
+
+	// Wait for cluster rebalancing
+	util.Pause(time.Minute)
+
+	sender, err := node1.LocalActor("Actor-11")
+	require.NoError(t, err)
+	require.NotNil(t, sender)
+
+	err = sender.SendAsync(ctx, actorName, new(testpb.TestSend))
+	require.Error(t, err)
+	require.ErrorIs(t, err, ErrActorNotFound)
+
+	assert.NoError(t, node1.Stop(ctx))
+	assert.NoError(t, node3.Stop(ctx))
+	assert.NoError(t, sd1.Close())
+	assert.NoError(t, sd3.Close())
 	srv.Shutdown()
 }
 
