@@ -2370,7 +2370,6 @@ func (x *actorSystem) enableClustering(ctx context.Context) error {
 			x.registry.Register(grain)
 			x.logger.Infof("cluster Grain=(%s) registered", types.Name(grain))
 		}
-
 	}
 
 	x.locker.Unlock()
