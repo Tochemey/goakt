@@ -29,7 +29,6 @@ import (
 	"net"
 	"strconv"
 
-	"connectrpc.com/connect"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/tochemey/goakt/v3/goaktpb"
@@ -269,6 +268,11 @@ func (r *rebalancer) allocateActors(totalPeers int, nodeLeftState *internalpb.Pe
 
 // recreateLocally recreates the actor
 func (r *rebalancer) recreateLocally(ctx context.Context, props *internalpb.Actor, enforceSingleton bool) error {
+	// remove the given actor from the cluster
+	if err := r.pid.ActorSystem().getCluster().RemoveActor(ctx, props.GetAddress().GetName()); err != nil {
+		return NewInternalError(err)
+	}
+
 	actor, err := r.pid.ActorSystem().getReflection().NewActor(props.GetType())
 	if err != nil {
 		return err

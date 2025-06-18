@@ -131,10 +131,17 @@ func (d *Discovery) DiscoverPeers() ([]string, error) {
 	}
 
 	// let us create the pod labels map
+	// keep this for backward compatibility
+	// nolint
 	podLabels := map[string]string{
 		"app.kubernetes.io/part-of":   d.config.ActorSystemName,
 		"app.kubernetes.io/component": d.config.ApplicationName,
 		"app.kubernetes.io/name":      d.config.ApplicationName,
+	}
+
+	// override the pod labels with the ones defined in the config when available
+	if len(d.config.PodLabels) > 0 {
+		podLabels = d.config.PodLabels
 	}
 
 	ctx := context.Background()

@@ -68,18 +68,22 @@ func TestDiscovery(t *testing.T) {
 	t.Run("With DiscoverPeers", func(t *testing.T) {
 		// create the namespace
 		ns := "test"
-		actorSystemName := "test"
 		appName := "test"
 		ts1 := time.Now()
 		ts2 := time.Now()
 
+		labels := map[string]string{
+			"app.kubernetes.io/part-of":   "some-part-of",
+			"app.kubernetes.io/component": "component",
+			"app.kubernetes.io/name":      appName,
+		}
+
 		config := &Config{
 			Namespace:         "test",
-			ActorSystemName:   "test",
-			ApplicationName:   "test",
 			DiscoveryPortName: gossipPortName,
 			RemotingPortName:  remotingPortName,
 			PeersPortName:     peersPortName,
+			PodLabels:         labels,
 		}
 
 		// create some bunch of mock pods
@@ -88,11 +92,7 @@ func TestDiscovery(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "pod1",
 					Namespace: ns,
-					Labels: map[string]string{
-						"app.kubernetes.io/part-of":   actorSystemName,
-						"app.kubernetes.io/component": appName,
-						"app.kubernetes.io/name":      appName,
-					},
+					Labels:    labels,
 				},
 				Spec: corev1.PodSpec{
 					Containers: []corev1.Container{
@@ -132,11 +132,7 @@ func TestDiscovery(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "pod2",
 					Namespace: ns,
-					Labels: map[string]string{
-						"app.kubernetes.io/part-of":   actorSystemName,
-						"app.kubernetes.io/component": appName,
-						"app.kubernetes.io/name":      appName,
-					},
+					Labels:    labels,
 				},
 				Spec: corev1.PodSpec{
 					Containers: []corev1.Container{
@@ -174,7 +170,7 @@ func TestDiscovery(t *testing.T) {
 			},
 		}
 		// create a mock kubernetes client
-		client := testclient.NewSimpleClientset(pods...)
+		client := testclient.NewClientset(pods...)
 		// create the kubernetes discovery provider
 		provider := Discovery{
 			client:      client,
@@ -206,16 +202,18 @@ func TestDiscovery(t *testing.T) {
 	t.Run("With Initialize", func(t *testing.T) {
 		// create the various config option
 		namespace := "default"
-		applicationName := "accounts"
-		actorSystemName := "AccountsSystem"
+		labels := map[string]string{
+			"app.kubernetes.io/part-of":   "some-part-of",
+			"app.kubernetes.io/component": "component",
+			"app.kubernetes.io/name":      "test",
+		}
 
 		config := &Config{
 			Namespace:         namespace,
-			ActorSystemName:   actorSystemName,
-			ApplicationName:   applicationName,
 			DiscoveryPortName: gossipPortName,
 			RemotingPortName:  remotingPortName,
 			PeersPortName:     peersPortName,
+			PodLabels:         labels,
 		}
 
 		// create the instance of provider

@@ -674,7 +674,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		rebalanceLocker:        &sync.Mutex{},
 		actorsCounter:          atomic.NewUint64(0),
 		deadlettersCounter:     atomic.NewUint64(0),
-		topicActor:             NoSender,
+		topicActor:             nil,
 		extensions:             collection.NewMap[string, extension.Extension](),
 		spawnOnNext:            atomic.NewUint32(0),
 		grains:                 collection.NewMap[Identity, *grainProcess](),
@@ -804,6 +804,7 @@ func (x *actorSystem) Start(ctx context.Context) error {
 		AddErrorFn(func() error { return x.enableClustering(ctx) }).
 		AddErrorFn(func() error { return x.spawnRootGuardian(ctx) }).
 		AddErrorFn(func() error { return x.spawnSystemGuardian(ctx) }).
+		AddErrorFn(func() error { return x.spawnNoSender(ctx) }).
 		AddErrorFn(func() error { return x.spawnUserGuardian(ctx) }).
 		AddErrorFn(func() error { return x.spawnRebalancer(ctx) }).
 		AddErrorFn(func() error { return x.spawnDeathWatch(ctx) }).
@@ -2906,7 +2907,7 @@ func (x *actorSystem) spawnRootGuardian(ctx context.Context) error {
 	}
 
 	// rootGuardian is the rootGuardian node of the actors tree
-	_ = x.actors.addNode(NoSender, x.rootGuardian)
+	_ = x.actors.addNode(nil, x.rootGuardian)
 	return nil
 }
 

@@ -25,13 +25,53 @@
 package actor
 
 import (
-	"testing"
-
-	"github.com/stretchr/testify/assert"
+	"context"
+	"fmt"
 )
 
-func TestNoSender(t *testing.T) {
-	noSender := NoSender
-	assert.Nil(t, noSender)
-	assert.False(t, noSender.IsRunning())
+// noSender is a special actor that does not have a sender
+// and is used to send messages without a sender. It does not respond to messages
+type noSender struct{}
+
+var _ Actor = (*noSender)(nil)
+
+// newNoSender creates a new noSender actor
+func newNoSender() *noSender {
+	return &noSender{}
+}
+
+func (x *noSender) PreStart(*Context) error {
+	return nil
+}
+
+func (x *noSender) Receive(ctx *ReceiveContext) {
+	ctx.Unhandled()
+}
+
+func (x *noSender) PostStop(*Context) error {
+	return nil
+}
+
+func (x *actorSystem) spawnNoSender(ctx context.Context) error {
+	var err error
+	actorName := x.reservedName(noSenderType)
+
+	supervisor := NewSupervisor(
+		WithStrategy(OneForOneStrategy),
+		WithAnyErrorDirective(ResumeDirective),
+	)
+
+	NoSender, err = x.configPID(ctx,
+		actorName,
+		newNoSender(),
+		asSystem(),
+		WithLongLived(),
+		WithSupervisor(supervisor),
+	)
+	if err != nil {
+		return fmt.Errorf("actor=%s failed to start the noSender: %w", actorName, err)
+	}
+
+	_ = x.actors.addNode(x.systemGuardian, NoSender)
+	return nil
 }

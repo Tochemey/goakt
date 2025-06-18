@@ -33,25 +33,28 @@ type Config struct {
 	// Namespace specifies the kubernetes namespace
 	Namespace string
 	// ApplicationName specifies the application name
+	// Deprecated: this field is no longer used and will be removed in a future release. Instead, use the PodLabels field.
 	ApplicationName string
+	// ActorSystemName specifies the given actor system name
+	// Deprecated: this field is no longer used and will be removed in a future release. Instead, use the PodLabels field.
+	ActorSystemName string
 	// DiscoveryPortName specifies the gossip port name
 	DiscoveryPortName string
 	// RemotingPortName specifies the remoting port name
 	RemotingPortName string
 	// PeersPortName specifies the cluster port name
 	PeersPortName string
-	// ActorSystemName specifies the given actor system name
-	ActorSystemName string
+
+	// PodLabels specifies the pod labels
+	PodLabels map[string]string
 }
 
 // Validate checks whether the given discovery configuration is valid
 func (x Config) Validate() error {
 	return validation.New(validation.FailFast()).
 		AddValidator(validation.NewEmptyStringValidator("Namespace", x.Namespace)).
-		AddValidator(validation.NewEmptyStringValidator("ApplicationName", x.ApplicationName)).
 		AddValidator(validation.NewEmptyStringValidator("DiscoveryPortName", x.DiscoveryPortName)).
 		AddValidator(validation.NewEmptyStringValidator("PeersPortName", x.PeersPortName)).
 		AddValidator(validation.NewEmptyStringValidator("RemotingPortName", x.RemotingPortName)).
-		AddValidator(validation.NewEmptyStringValidator("ActorSystemName", x.ActorSystemName)).
 		Validate()
 }

@@ -510,17 +510,14 @@ func testCluster(t *testing.T, serverAddr string, opts ...testClusterOption) (Ac
 	// create a Cluster startNode
 	host := "127.0.0.1"
 	// create the various config option
-	applicationName := "accounts"
-	actorSystemName := "testSystem"
+	actorSystemName := "accountsSystem"
 	natsSubject := "some-subject"
 	// create the config
 	config := nats.Config{
-		ApplicationName: applicationName,
-		ActorSystemName: actorSystemName,
-		NatsServer:      fmt.Sprintf("nats://%s", serverAddr),
-		NatsSubject:     natsSubject,
-		Host:            host,
-		DiscoveryPort:   discoveryPort,
+		NatsServer:    fmt.Sprintf("nats://%s", serverAddr),
+		NatsSubject:   natsSubject,
+		Host:          host,
+		DiscoveryPort: discoveryPort,
 	}
 
 	// create the instance of provider

@@ -69,19 +69,14 @@ func newPeer(t *testing.T, serverAddr string) *Discovery {
 
 	// create a Cluster node
 	host := "127.0.0.1"
-	// create the various config option
-	applicationName := "accounts"
-	actorSystemName := "AccountsSystem"
 	natsSubject := "some-subject"
 
 	// create the config
 	config := &Config{
-		ApplicationName: applicationName,
-		ActorSystemName: actorSystemName,
-		NatsServer:      fmt.Sprintf("nats://%s", serverAddr),
-		NatsSubject:     natsSubject,
-		Host:            host,
-		DiscoveryPort:   gossipPort,
+		NatsServer:    fmt.Sprintf("nats://%s", serverAddr),
+		NatsSubject:   natsSubject,
+		Host:          host,
+		DiscoveryPort: gossipPort,
 	}
 	// create the instance of provider
 	provider := NewDiscovery(config, WithLogger(log.DiscardLogger))

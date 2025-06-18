@@ -776,7 +776,7 @@ func (pid *PID) ReinstateNamed(ctx context.Context, actorName string) error {
 		return err
 	}
 
-	if !cid.Equals(NoSender) {
+	if cid != nil && !cid.Equals(NoSender) {
 		if !cid.IsSuspended() || cid.IsRunning() {
 			return nil
 		}
@@ -1816,7 +1816,7 @@ func (pid *PID) toDeadletters(receiveCtx *ReceiveContext, err error) {
 		sender = receiveCtx.Sender().Address()
 	}
 
-	ctx := context.WithoutCancel(receiveCtx.Context())
+	ctx := context.Background()
 	receiver := pid.Address()
 	pid.sendToDeadletter(ctx, sender, receiver, receiveCtx.Message(), err)
 }

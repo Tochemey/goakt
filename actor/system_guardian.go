@@ -106,13 +106,13 @@ func (x *systemGuardian) handleTerminated(ctx context.Context, msg *goaktpb.Term
 func (x *systemGuardian) completeRebalancing(msg *internalpb.RebalanceComplete) error {
 	x.logger.Infof("%s completing rebalancing", x.pid.Name())
 	x.pid.ActorSystem().completeRebalancing()
-	x.logger.Infof("%s rebalancing successfully completed", x.pid.Name())
+	x.logger.Infof("%s rebalancing completed", x.pid.Name())
 
 	x.logger.Infof("%s removing left peer=(%s) from cache", x.pid.Name(), msg.GetPeerAddress())
 	if err := x.pid.ActorSystem().removePeerStateFromStore(msg.GetPeerAddress()); err != nil {
 		x.logger.Errorf("%s failed to remove left peer=(%s) from cache", x.pid.Name(), msg.GetPeerAddress())
 		return err
 	}
-	x.logger.Infof("%s left peer=(%s) successfully removed from cache", x.pid.Name(), msg.GetPeerAddress())
+	x.logger.Infof("%s left peer=(%s) removed from cache", x.pid.Name(), msg.GetPeerAddress())
 	return nil
 }

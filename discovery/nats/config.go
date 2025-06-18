@@ -39,8 +39,10 @@ type Config struct {
 	// NatsSubject defines the custom NATS subject
 	NatsSubject string
 	// The actor system name
+	// Deprecated: this field is no longer used and will be removed in a future release.
 	ActorSystemName string
 	// ApplicationName specifies the running application
+	// Deprecated: this field is no longer used and will be removed in a future release.
 	ApplicationName string
 	// Timeout defines the nodes discovery timeout
 	Timeout time.Duration
@@ -63,8 +65,6 @@ func (x Config) Validate() error {
 		AddValidator(validation.NewEmptyStringValidator("NatsServer", x.NatsServer)).
 		AddValidator(NewServerAddrValidator(x.NatsServer)).
 		AddValidator(validation.NewEmptyStringValidator("NatsSubject", x.NatsSubject)).
-		AddValidator(validation.NewEmptyStringValidator("ApplicationName", x.ApplicationName)).
-		AddValidator(validation.NewEmptyStringValidator("ActorSystemName", x.ActorSystemName)).
 		AddValidator(validation.NewEmptyStringValidator("Host", x.Host)).
 		AddAssertion(x.DiscoveryPort > 0, "DiscoveryPort is invalid").
 		Validate()
