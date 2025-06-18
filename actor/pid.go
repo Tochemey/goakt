@@ -205,10 +205,8 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 		return nil, err
 	}
 
-	pid.supervisionLoop()
-	if pid.passivationStrategy != nil {
-		go pid.passivationLoop()
-	}
+	pid.startSupervision()
+	pid.startPassivation()
 
 	pid.fireSystemMessage(ctx, new(goaktpb.PostStart))
 
@@ -544,10 +542,8 @@ func (pid *PID) Restart(ctx context.Context) error {
 
 	pid.processing.Store(idle)
 	pid.processState.ClearSuspended()
-	pid.supervisionLoop()
-	if pid.passivationStrategy != nil {
-		go pid.passivationLoop()
-	}
+	pid.startSupervision()
+	pid.startPassivation()
 
 	pid.restartCount.Inc()
 	pid.fireSystemMessage(ctx, new(goaktpb.PostStart))
@@ -1205,7 +1201,7 @@ func (pid *PID) Shutdown(ctx context.Context) error {
 	}
 
 	pid.processState.SetStopping()
-	if pid.passivationStrategy != nil {
+	if pid.passivationStrategy != nil && !isLongLivedPassivationStrategy(pid.passivationStrategy) {
 		pid.logger.Debug("sending a signal to stop passivation listener....")
 		pid.haltPassivationLnr <- types.Unit{}
 	}
@@ -1572,8 +1568,6 @@ func (pid *PID) passivationLoop() {
 				tickerStopSig <- types.Unit{}
 			}
 		}
-	case *passivation.LongLivedStrategy:
-		return
 	}
 
 	clock.Start()
@@ -1705,8 +1699,8 @@ func (pid *PID) doStop(ctx context.Context) error {
 	return nil
 }
 
-// supervisionLoop send error to watchers
-func (pid *PID) supervisionLoop() {
+// startSupervision send error to watchers
+func (pid *PID) startSupervision() {
 	go func() {
 		for {
 			select {
@@ -2039,7 +2033,7 @@ func (pid *PID) doReinstate() {
 	pid.processState.ClearSuspended()
 
 	// resume the supervisor loop
-	pid.supervisionLoop()
+	pid.startSupervision()
 	// resume passivation loop
 	pid.resumePassivation()
 
@@ -2060,8 +2054,30 @@ func (pid *PID) pausePassivation() {
 
 // resumePassivation resumes a paused passivation
 func (pid *PID) resumePassivation() {
-	if pid.passivationState.IsPaused() && pid.passivationStrategy != nil {
+	if pid.passivationState.IsPaused() {
 		pid.passivationState.Resume()
+		pid.startPassivation()
+	}
+}
+
+// startPassivation starts the passivation loop if the passivation strategy is not long-lived
+// This is used to automatically passivate actors that are not processing messages
+// for a certain period of time or have reached a certain message count.
+// It is called when the actor is started or when the passivation strategy is set.
+// If the passivation strategy is a long-lived strategy, the actor will not be passivated automatically.
+// It is also called when the actor is reinstated to ensure that the passivation loop is running.
+// If the passivation strategy is nil, it does nothing.
+func (pid *PID) startPassivation() {
+	if pid.passivationStrategy != nil &&
+		!isLongLivedPassivationStrategy(pid.passivationStrategy) {
 		go pid.passivationLoop()
 	}
+}
+
+// isLongLivedStrategy checks whether the given strategy is a long-lived strategy
+// This is used to determine if the actor should be treated as a long-lived actor
+// and not passivated automatically.
+func isLongLivedPassivationStrategy(strategy passivation.Strategy) bool {
+	_, ok := strategy.(*passivation.LongLivedStrategy)
+	return ok
 }

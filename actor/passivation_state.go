@@ -106,8 +106,3 @@ func (s *passivationState) clearFlag(flag uint32) {
 func (s *passivationState) isSet(flag uint32) bool {
 	return atomic.LoadUint32(&s.flags)&flag != 0
 }
-
-// reset clears all flags.
-func (s *passivationState) reset() {
-	atomic.StoreUint32(&s.flags, 0)
-}

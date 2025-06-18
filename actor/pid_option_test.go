@@ -129,7 +129,7 @@ func TestPIDOptions(t *testing.T) {
 
 func TestWithDependencies(t *testing.T) {
 	pid := &PID{}
-	dependency := dependencyMock("id", "user", "email")
+	dependency := NewMockDependency("id", "user", "email")
 	option := withDependencies(dependency)
 	option(pid)
 	require.NotEmpty(t, pid.Dependencies())

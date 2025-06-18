@@ -100,7 +100,7 @@ func TestDeathWatch(t *testing.T) {
 		sys.(*actorSystem).cluster = clmock
 		sys.(*actorSystem).clusterEnabled.Store(true)
 
-		cid, err := sys.Spawn(ctx, actorID, newMockActor())
+		cid, err := sys.Spawn(ctx, actorID, NewMockActor())
 		require.NoError(t, err)
 		require.NotNil(t, cid)
 

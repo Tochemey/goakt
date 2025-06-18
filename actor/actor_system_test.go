@@ -82,7 +82,7 @@ func TestActorSystem(t *testing.T) {
 	t.Run("With Spawn an actor when not System started", func(t *testing.T) {
 		ctx := context.TODO()
 		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
-		actor := newMockActor()
+		actor := NewMockActor()
 		actorRef, err := sys.Spawn(ctx, "Test", actor)
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, ErrActorSystemNotStarted)
@@ -100,7 +100,7 @@ func TestActorSystem(t *testing.T) {
 
 		util.Pause(time.Second)
 
-		actor := newMockActor()
+		actor := NewMockActor()
 		actorRef, err := sys.Spawn(ctx, "Test", actor)
 		assert.NoError(t, err)
 		assert.NotNil(t, actorRef)
@@ -120,7 +120,7 @@ func TestActorSystem(t *testing.T) {
 		err := sys.Start(ctx)
 		require.NoError(t, err)
 
-		actor := newMockActor()
+		actor := NewMockActor()
 		actorRef, err := sys.Spawn(ctx, "$omeN@me", actor)
 		require.Error(t, err)
 		assert.EqualError(t, err, "must contain only word characters (i.e. [a-zA-Z0-9] plus non-leading '-' or '_')")
@@ -144,7 +144,7 @@ func TestActorSystem(t *testing.T) {
 		err := sys.Start(ctx)
 		assert.NoError(t, err)
 
-		actor := newMockActor()
+		actor := NewMockActor()
 		ref1, err := sys.Spawn(ctx, "Test", actor)
 		assert.NoError(t, err)
 		assert.NotNil(t, ref1)
@@ -189,7 +189,7 @@ func TestActorSystem(t *testing.T) {
 			WithRemote(remote.NewConfig(host, remotingPort)),
 			WithCluster(
 				NewClusterConfig().
-					WithKinds(new(mockActor)).
+					WithKinds(new(MockActor)).
 					WithPartitionCount(9).
 					WithReplicaCount(1).
 					WithPeersPort(clusterPort).
@@ -215,7 +215,7 @@ func TestActorSystem(t *testing.T) {
 
 		// create an actor
 		actorName := uuid.NewString()
-		actor := newMockActor()
+		actor := NewMockActor()
 		actorRef, err := newActorSystem.Spawn(ctx, actorName, actor)
 		assert.NoError(t, err)
 		assert.NotNil(t, actorRef)
@@ -312,7 +312,7 @@ func TestActorSystem(t *testing.T) {
 		assert.NoError(t, err)
 
 		actorName := "actorQA"
-		actor := newMockActor()
+		actor := NewMockActor()
 		actorRef, err := sys.Spawn(ctx, actorName, actor)
 		assert.NoError(t, err)
 		assert.NotNil(t, actorRef)
@@ -453,7 +453,7 @@ func TestActorSystem(t *testing.T) {
 		assert.NoError(t, err)
 
 		actorName := "actor"
-		actorRef, err := sys.Spawn(ctx, actorName, newRestart(),
+		actorRef, err := sys.Spawn(ctx, actorName, NewMockRestart(),
 			WithPassivationStrategy(passivation.NewTimeBasedStrategy(time.Minute)))
 		assert.NoError(t, err)
 		assert.NotNil(t, actorRef)
@@ -822,7 +822,7 @@ func TestActorSystem(t *testing.T) {
 		util.Pause(time.Second)
 
 		actorName := "HousekeeperActor"
-		actorHandler := newMockActor()
+		actorHandler := NewMockActor()
 		actorRef, err := sys.Spawn(ctx, actorName, actorHandler,
 			WithPassivationStrategy(passivation.NewTimeBasedStrategy(passivateAfter)),
 		)
@@ -880,7 +880,7 @@ func TestActorSystem(t *testing.T) {
 		err := sys.Start(ctx)
 		assert.NoError(t, err)
 
-		actor := &mockPostStopActor{}
+		actor := &MockPostStop{}
 		actorRef, err := sys.Spawn(ctx, "Test", actor)
 		assert.NoError(t, err)
 		assert.NotNil(t, actorRef)
@@ -911,7 +911,7 @@ func TestActorSystem(t *testing.T) {
 		require.NotNil(t, consumer)
 
 		// create the black hole actor
-		actor := &mockUnhandledMessageActor{}
+		actor := &MockUnhandled{}
 		actorRef, err := sys.Spawn(ctx, "unhandledQA", actor)
 		assert.NoError(t, err)
 		assert.NotNil(t, actorRef)
@@ -1003,7 +1003,7 @@ func TestActorSystem(t *testing.T) {
 			WithRemote(remote.NewConfig(host, remotingPort)),
 			WithCluster(
 				NewClusterConfig().
-					WithKinds(new(mockActor)).
+					WithKinds(new(MockActor)).
 					WithPartitionCount(9).
 					WithReplicaCount(1).
 					WithPeersPort(clusterPort).
@@ -1029,7 +1029,7 @@ func TestActorSystem(t *testing.T) {
 
 		// create an actor
 		actorName := uuid.NewString()
-		actor := newMockActor()
+		actor := NewMockActor()
 		actorRef, err := newActorSystem.Spawn(ctx, actorName, actor,
 			WithPassivationStrategy(passivation.NewTimeBasedStrategy(passivateAfter)))
 		assert.NoError(t, err)
@@ -1213,7 +1213,7 @@ func TestActorSystem(t *testing.T) {
 			WithRemote(remote.NewConfig(host, remotingPort)),
 			WithCluster(
 				NewClusterConfig().
-					WithKinds(new(mockActor)).
+					WithKinds(new(MockActor)).
 					WithPartitionCount(9).
 					WithReplicaCount(1).
 					WithPeersPort(clusterPort).
@@ -1540,7 +1540,7 @@ func TestActorSystem(t *testing.T) {
 		util.Pause(time.Second)
 
 		// create the black hole actor
-		actor := newMockActor()
+		actor := NewMockActor()
 		pid, err := actorSystem.Spawn(ctx, "test", actor, WithMailbox(NewBoundedMailbox(10)))
 		assert.NoError(t, err)
 		assert.NotNil(t, pid)
@@ -1583,7 +1583,7 @@ func TestActorSystem(t *testing.T) {
 		util.Pause(time.Second)
 
 		// create an actor on node1
-		actor := newMockActor()
+		actor := NewMockActor()
 		actorName := "actorID"
 		_, err := node1.Spawn(ctx, actorName, actor)
 		require.NoError(t, err)
@@ -1602,7 +1602,7 @@ func TestActorSystem(t *testing.T) {
 		// shutdown the nats server gracefully
 		srv.Shutdown()
 	})
-	t.Run("With CoordinatedShutdown failure", func(t *testing.T) {
+	t.Run("With CoordinatedShutdown failure just log the error and continue the shutdown process", func(t *testing.T) {
 		ctx := context.TODO()
 		shutdownHook := func(context.Context) error { return errors.New("shutdown failure") }
 
@@ -1616,7 +1616,7 @@ func TestActorSystem(t *testing.T) {
 
 		util.Pause(time.Second)
 
-		actor := newMockActor()
+		actor := NewMockActor()
 		actorRef, err := sys.Spawn(ctx, "Test", actor)
 		assert.NoError(t, err)
 		assert.NotNil(t, actorRef)
@@ -1626,7 +1626,7 @@ func TestActorSystem(t *testing.T) {
 		// stop the actor after some time
 		util.Pause(time.Second)
 		err = sys.Stop(ctx)
-		assert.Error(t, err)
+		require.NoError(t, err)
 	})
 	t.Run("With CoordinatedShutdown", func(t *testing.T) {
 		ctx := context.TODO()
@@ -1646,7 +1646,7 @@ func TestActorSystem(t *testing.T) {
 
 		util.Pause(time.Second)
 
-		actor := newMockActor()
+		actor := NewMockActor()
 		actorRef, err := sys.Spawn(ctx, "Test", actor)
 		assert.NoError(t, err)
 		assert.NotNil(t, actorRef)
@@ -1687,7 +1687,7 @@ func TestActorSystem(t *testing.T) {
 		util.Pause(time.Second)
 
 		// create an actor on node1
-		actor := newMockActor()
+		actor := NewMockActor()
 		actorName := "actorID"
 		_, err := node1.Spawn(ctx, actorName, actor)
 		require.NoError(t, err)
@@ -1721,7 +1721,7 @@ func TestActorSystem(t *testing.T) {
 		util.Pause(time.Second)
 
 		// create the actor path
-		pid, err := actorSystem.Spawn(ctx, "test", newMockActor(),
+		pid, err := actorSystem.Spawn(ctx, "test", NewMockActor(),
 			WithPassivationStrategy(passivation.NewTimeBasedStrategy(passivateAfter)))
 		require.NoError(t, err)
 		assert.NotNil(t, pid)
@@ -1751,7 +1751,7 @@ func TestActorSystem(t *testing.T) {
 		util.Pause(time.Second)
 
 		// create the actor path
-		pid, err := actorSystem.Spawn(ctx, "test", newMockActor(),
+		pid, err := actorSystem.Spawn(ctx, "test", NewMockActor(),
 			WithLongLived())
 		require.NoError(t, err)
 		assert.NotNil(t, pid)
@@ -1797,7 +1797,7 @@ func TestActorSystem(t *testing.T) {
 			WithRemote(remote.NewConfig(host, 2222)),
 			WithCluster(
 				NewClusterConfig().
-					WithKinds(new(mockActor)).
+					WithKinds(new(MockActor)).
 					WithPartitionCount(0).
 					WithReplicaCount(1).
 					WithPeersPort(-1).
@@ -1842,7 +1842,7 @@ func TestActorSystem(t *testing.T) {
 		require.NotNil(t, consumer)
 
 		// create the black hole actor
-		actor := &mockUnhandledMessageActor{}
+		actor := &MockUnhandled{}
 		actorRef, err := sys.Spawn(ctx, "unhandledQA", actor)
 		assert.NoError(t, err)
 		assert.NotNil(t, actorRef)
@@ -1904,7 +1904,7 @@ func TestActorSystem(t *testing.T) {
 			WithRemote(remoteConfig),
 			WithCluster(
 				NewClusterConfig().
-					WithKinds(new(mockActor)).
+					WithKinds(new(MockActor)).
 					WithPartitionCount(9).
 					WithReplicaCount(1).
 					WithPeersPort(clusterPort).
@@ -1920,7 +1920,7 @@ func TestActorSystem(t *testing.T) {
 		require.Error(t, err)
 	})
 	t.Run("With Extension", func(t *testing.T) {
-		ext := new(mockExtension)
+		ext := new(MockExtension)
 		actorSystem, err := NewActorSystem("testSys", WithExtensions(ext))
 		require.NoError(t, err)
 		require.NotNil(t, actorSystem)
@@ -2152,7 +2152,7 @@ func TestActorSystem(t *testing.T) {
 		util.Pause(time.Second)
 
 		// create an actor on node1
-		actor := newMockActor()
+		actor := NewMockActor()
 		actorName := "actorID"
 		err := node1.SpawnOn(ctx, actorName, actor)
 		require.NoError(t, err)
@@ -2203,7 +2203,7 @@ func TestActorSystem(t *testing.T) {
 		util.Pause(time.Second)
 
 		// create an actor on node1
-		actor := newMockActor()
+		actor := NewMockActor()
 		actorName := "actorID"
 		err := node1.SpawnOn(ctx, actorName, actor, WithPlacement(Random))
 		require.NoError(t, err)
@@ -2254,7 +2254,7 @@ func TestActorSystem(t *testing.T) {
 		util.Pause(time.Second)
 
 		// create an actor on node1
-		actor := newMockActor()
+		actor := NewMockActor()
 		actorName := "actorID"
 		err := node1.SpawnOn(ctx, actorName, actor, WithPlacement(Local))
 		require.NoError(t, err)
@@ -2291,7 +2291,7 @@ func TestActorSystem(t *testing.T) {
 		require.NotNil(t, sd)
 
 		// create an actor on node1
-		actor := newMockActor()
+		actor := NewMockActor()
 		actorName := "actorID"
 		err := node.SpawnOn(ctx, actorName, actor)
 		require.NoError(t, err)

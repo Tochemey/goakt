@@ -137,7 +137,7 @@ func TestWithPubSub(t *testing.T) {
 }
 
 func TestWithExtensions(t *testing.T) {
-	ext := new(mockExtension)
+	ext := new(MockExtension)
 	system := new(actorSystem)
 	opt := WithExtensions(ext)
 	opt.Apply(system)

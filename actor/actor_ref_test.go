@@ -55,7 +55,7 @@ func TestActorRef(t *testing.T) {
 	})
 	t.Run("From PID", func(t *testing.T) {
 		addr := address.New("name", "system", "host", 1234)
-		actor := newMockActor()
+		actor := NewMockActor()
 		pid := &PID{
 			address:      addr,
 			actor:        actor,
