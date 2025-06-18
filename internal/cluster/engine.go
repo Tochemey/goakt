@@ -42,7 +42,6 @@ import (
 	"github.com/tochemey/olric/hasher"
 	"github.com/tochemey/olric/pkg/storage"
 	"go.uber.org/atomic"
-	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -62,10 +61,10 @@ type EventType int
 const (
 	NodeJoined EventType = iota
 	NodeLeft
-	actorsMap     = "actors"
-	statesMap     = "states"
-	jobKeysMap    = "jobKeys"
-	actorKindsMap = "actorKinds"
+	actorsMap  = "actors"
+	statesMap  = "states"
+	jobKeysMap = "jobKeys"
+	kindsMap   = "actorKinds"
 )
 
 func (x EventType) String() string {
@@ -147,11 +146,11 @@ type Engine struct {
 	// this help set and fetch data from the Node
 	client olric.Client
 
-	actorsMap     olric.DMap
-	statesMap     olric.DMap
-	jobKeysMap    olric.DMap
-	actorKindsMap olric.DMap
-	tableSize     uint64
+	actorsMap  olric.DMap
+	statesMap  olric.DMap
+	jobKeysMap olric.DMap
+	kindsMap   olric.DMap
+	tableSize  uint64
 
 	// specifies the discovery node
 	node *discovery.Node
@@ -172,7 +171,8 @@ type Engine struct {
 	messages   <-chan *redis.Message
 
 	// specifies the node state
-	peerState *internalpb.PeerState
+	peerState      *internalpb.PeerState
+	peerStateQueue chan []byte
 
 	nodeJoinedEventsFilter goset.Set[string]
 	nodeLeftEventsFilter   goset.Set[string]
@@ -211,6 +211,7 @@ func NewEngine(name string, disco discovery.Provider, host *discovery.Node, opts
 		nodeLeftEventsFilter:   goset.NewSet[string](),
 		tableSize:              20 * size.MB,
 		running:                atomic.NewBool(false),
+		peerStateQueue:         make(chan []byte, 10),
 	}
 	// apply the various options
 	for _, opt := range opts {
@@ -314,25 +315,19 @@ func (x *Engine) Start(ctx context.Context) error {
 	x.client = x.server.NewEmbeddedClient()
 
 	// create the various maps
-	x.actorsMap, err = x.client.NewDMap(actorsMap)
-	if err != nil {
+	if err := errorschain.
+		New(errorschain.ReturnFirst()).
+		AddErrorFn(func() error { x.actorsMap, err = x.client.NewDMap(actorsMap); return err }).
+		AddErrorFn(func() error { x.statesMap, err = x.client.NewDMap(statesMap); return err }).
+		AddErrorFn(func() error { x.jobKeysMap, err = x.client.NewDMap(jobKeysMap); return err }).
+		AddErrorFn(func() error { x.kindsMap, err = x.client.NewDMap(kindsMap); return err }).
+		Error(); err != nil {
 		logger.Error(fmt.Errorf("failed to start the cluster Engine on node=(%s): %w", x.name, err))
 		return x.server.Shutdown(ctx)
 	}
 
-	x.statesMap, err = x.client.NewDMap(statesMap)
-	if err != nil {
-		logger.Error(fmt.Errorf("failed to start the cluster Engine on node=(%s): %w", x.name, err))
-		return x.server.Shutdown(ctx)
-	}
-
-	x.jobKeysMap, err = x.client.NewDMap(jobKeysMap)
-	if err != nil {
-		logger.Error(fmt.Errorf("failed to start the cluster Engine on node=(%s): %w", x.name, err))
-		return x.server.Shutdown(ctx)
-	}
-
-	x.actorKindsMap, err = x.client.NewDMap(actorKindsMap)
+	// create a subscriber to consume to cluster events
+	ps, err := x.client.NewPubSub(olric.ToAddress(x.node.PeersAddress()))
 	if err != nil {
 		logger.Error(fmt.Errorf("failed to start the cluster Engine on node=(%s): %w", x.name, err))
 		return x.server.Shutdown(ctx)
@@ -346,17 +341,9 @@ func (x *Engine) Start(ctx context.Context) error {
 		Actors:       map[string]*internalpb.Actor{},
 	}
 
-	if err := x.initializeState(ctx); err != nil {
-		logger.Error(fmt.Errorf("failed to start the cluster Engine on node=(%s): %w", x.name, err))
-		return x.server.Shutdown(ctx)
-	}
-
-	// create a subscriber to consume to cluster events
-	ps, err := x.client.NewPubSub(olric.ToAddress(x.node.PeersAddress()))
-	if err != nil {
-		logger.Error(fmt.Errorf("failed to start the cluster Engine on node=(%s): %w", x.name, err))
-		return x.server.Shutdown(ctx)
-	}
+	bytea, _ := proto.Marshal(x.peerState)
+	x.peerStateQueue <- bytea
+	go x.putPeersState()
 
 	x.pubSub = ps.Subscribe(ctx, events.ClusterEventsChannel)
 	x.messages = x.pubSub.Channel()
@@ -392,6 +379,7 @@ func (x *Engine) Stop(ctx context.Context) error {
 		AddErrorFn(func() error { return x.pubSub.Close() }).
 		AddErrorFn(func() error { return x.actorsMap.Destroy(ctx) }).
 		AddErrorFn(func() error { return x.statesMap.Destroy(ctx) }).
+		AddErrorFn(func() error { return x.kindsMap.Destroy(ctx) }).
 		AddErrorFn(func() error { return x.jobKeysMap.Destroy(ctx) }).
 		AddErrorFn(func() error { return x.client.Close(ctx) }).
 		AddErrorFn(func() error { return x.server.Shutdown(ctx) })
@@ -405,6 +393,7 @@ func (x *Engine) Stop(ctx context.Context) error {
 	// close the events queue
 	x.eventsLock.Lock()
 	close(x.events)
+	close(x.peerStateQueue)
 	x.eventsLock.Unlock()
 
 	logger.Infof("GoAkt cluster Node=(%s) successfully stopped.", x.name)
@@ -493,59 +482,33 @@ func (x *Engine) PutActor(ctx context.Context, actor *internalpb.Actor) error {
 	defer x.Unlock()
 
 	logger := x.logger
+	logger.Infof("node=(%s) synchronizing Actor (%s)...", x.node.PeersAddress(), actor.GetAddress().GetName())
 
-	logger.Infof("(%s) synchronization...", x.node.PeersAddress())
+	encoded, _ := encode(actor)
+	key := actor.GetAddress().GetName()
+	kind := actor.GetType()
 
-	eg, ctx := errgroup.WithContext(ctx)
-	eg.SetLimit(2)
-
-	eg.Go(func() error {
-		encoded, _ := encode(actor)
-		key := actor.GetAddress().GetName()
-		if actor.GetIsSingleton() {
-			if err := errorschain.
-				New(errorschain.ReturnFirst()).
-				AddErrorFn(func() error { return x.actorsMap.Put(ctx, key, encoded) }).
-				AddErrorFn(func() error { return x.actorKindsMap.Put(ctx, actor.GetType(), key) }).
-				Error(); err != nil {
-				return fmt.Errorf("(%s) failed to sync actor=(%s): %v", x.node.PeersAddress(), actor.GetAddress().GetName(), err)
-			}
-			return nil
+	// keep the actor kind in the cluster for singleton actors
+	if actor.GetIsSingleton() {
+		if err := x.kindsMap.Put(ctx, kind, kind); err != nil {
+			return fmt.Errorf("node=(%s) failed to sync actor=(%s): %v", x.node.PeersAddress(), actor.GetAddress().GetName(), err)
 		}
-
-		if err := x.actorsMap.Put(ctx, key, encoded); err != nil {
-			return fmt.Errorf("(%s) failed to sync actor=(%s): %v", x.node.PeersAddress(), actor.GetAddress().GetName(), err)
-		}
-		return nil
-	})
-
-	eg.Go(func() error {
-		actors := x.peerState.GetActors()
-		actorName := actor.GetAddress().GetName()
-		actors[actorName] = &internalpb.Actor{
-			Address:             actor.GetAddress(),
-			Type:                actor.GetType(),
-			IsSingleton:         actor.GetIsSingleton(),
-			Relocatable:         actor.GetRelocatable(),
-			PassivationStrategy: actor.GetPassivationStrategy(),
-			Dependencies:        actor.GetDependencies(),
-			EnableStash:         actor.GetEnableStash(),
-		}
-		x.peerState.Actors = actors
-
-		bytea, _ := proto.Marshal(x.peerState)
-		if err := x.statesMap.Put(ctx, x.node.PeersAddress(), bytea); err != nil {
-			return fmt.Errorf("(%s) failed to sync state: %v", x.node.PeersAddress(), err)
-		}
-		return nil
-	})
-
-	if err := eg.Wait(); err != nil {
-		logger.Errorf("(%s) synchronization failed: %v", x.node.PeersAddress(), err)
-		return err
 	}
 
-	logger.Infof("(%s) successfully synchronized in the cluster", x.node.PeersAddress())
+	// put the actor into the actors map
+	if err := x.actorsMap.Put(ctx, key, encoded); err != nil {
+		return fmt.Errorf("node=(%s) failed to sync actor=(%s): %v", x.node.PeersAddress(), actor.GetAddress().GetName(), err)
+	}
+
+	actors := x.peerState.GetActors()
+	actorName := actor.GetAddress().GetName()
+	actors[actorName] = actor
+
+	x.peerState.Actors = actors
+	bytea, _ := proto.Marshal(x.peerState)
+	x.peerStateQueue <- bytea
+
+	logger.Infof("node=(%s) successfully synchronized Actor (%s) in the cluster", x.node.PeersAddress(), key)
 	return nil
 }
 
@@ -564,7 +527,7 @@ func (x *Engine) GetState(ctx context.Context, peerAddress string) (*internalpb.
 
 	logger := x.logger
 
-	logger.Infof("[%s] retrieving peer (%s) sync record", x.node.PeersAddress(), peerAddress)
+	logger.Infof("node=(%s) retrieving peer (%s) sync record", x.node.PeersAddress(), peerAddress)
 	resp, err := x.statesMap.Get(ctx, peerAddress)
 	if err != nil {
 		if errors.Is(err, olric.ErrKeyNotFound) {
@@ -572,23 +535,23 @@ func (x *Engine) GetState(ctx context.Context, peerAddress string) (*internalpb.
 			return nil, ErrPeerSyncNotFound
 		}
 
-		logger.Errorf("(%s) failed to find peer=(%s) sync record: %v", x.node.PeersAddress(), peerAddress, err)
+		logger.Errorf("node=(%s) failed to find peer=(%s) sync record: %v", x.node.PeersAddress(), peerAddress, err)
 		return nil, err
 	}
 
 	bytea, err := resp.Byte()
 	if err != nil {
-		logger.Errorf("(%s) failed to read peer=(%s) sync record: %v", x.node.PeersAddress(), peerAddress, err)
+		logger.Errorf("node=(%s) failed to read peer=(%s) sync record: %v", x.node.PeersAddress(), peerAddress, err)
 		return nil, err
 	}
 
 	peerState := new(internalpb.PeerState)
 	if err := proto.Unmarshal(bytea, peerState); err != nil {
-		logger.Errorf("(%s) failed to decode peer=(%s) sync record: %v", x.node.PeersAddress(), peerAddress, err)
+		logger.Errorf("node=(%s) failed to decode peer=(%s) sync record: %v", x.node.PeersAddress(), peerAddress, err)
 		return nil, err
 	}
 
-	logger.Infof("(%s) successfully retrieved peer (%s) sync record .🎉", x.node.PeersAddress(), peerAddress)
+	logger.Infof("node=(%s) successfully retrieved peer (%s) sync record .🎉", x.node.PeersAddress(), peerAddress)
 	return peerState, nil
 }
 
@@ -607,31 +570,31 @@ func (x *Engine) GetActor(ctx context.Context, actorName string) (*internalpb.Ac
 
 	logger := x.logger
 
-	logger.Infof("(%s) retrieving actor (%s) from the cluster", x.node.PeersAddress(), actorName)
+	logger.Infof("node=(%s) retrieving actor (%s) from the cluster", x.node.PeersAddress(), actorName)
 
 	resp, err := x.actorsMap.Get(ctx, actorName)
 	if err != nil {
 		if errors.Is(err, olric.ErrKeyNotFound) {
-			logger.Warnf("(%s) could not find actor=%s the cluster", x.node.PeersAddress(), actorName)
+			logger.Warnf("node=(%s) could not find actor=%s the cluster", x.node.PeersAddress(), actorName)
 			return nil, ErrActorNotFound
 		}
-		logger.Errorf("(%s) failed to get actor=(%s) record from the cluster: %v", x.node.PeersAddress(), actorName, err)
+		logger.Errorf("node=(%s) failed to get actor=(%s) record from the cluster: %v", x.node.PeersAddress(), actorName, err)
 		return nil, err
 	}
 
 	bytea, err := resp.Byte()
 	if err != nil {
-		logger.Errorf("(%s) failed to read actor=(%s) record: %v", x.node.PeersAddress(), actorName, err)
+		logger.Errorf("node=(%s) failed to read actor=(%s) record: %v", x.node.PeersAddress(), actorName, err)
 		return nil, err
 	}
 
 	actor, err := decode(bytea)
 	if err != nil {
-		logger.Errorf("(%s) failed to decode actor=(%s) record: %v", x.node.PeersAddress(), actorName, err)
+		logger.Errorf("node=(%s) failed to decode actor=(%s) record: %v", x.node.PeersAddress(), actorName, err)
 		return nil, err
 	}
 
-	logger.Infof("(%s) successfully retrieved from the cluster actor (%s)", x.node.PeersAddress(), actor.GetAddress().GetName())
+	logger.Infof("node=(%s) successfully retrieved from the cluster actor (%s)", x.node.PeersAddress(), actor.GetAddress().GetName())
 	return actor, nil
 }
 
@@ -647,15 +610,22 @@ func (x *Engine) RemoveActor(ctx context.Context, actorName string) error {
 	x.Lock()
 	defer x.Unlock()
 
-	logger.Infof("removing actor (%s) from cluster", actorName)
+	logger.Infof("node=(%s) removing actor (%s) from cluster", x.node.PeersAddress(), actorName)
+
+	// remove the actor from the peer state
+	actors := x.peerState.GetActors()
+	delete(actors, actorName)
+	x.peerState.Actors = actors
+	bytea, _ := proto.Marshal(x.peerState)
+	x.peerStateQueue <- bytea
 
 	_, err := x.actorsMap.Delete(ctx, actorName)
 	if err != nil {
-		logger.Errorf("(%s) failed to remove actor=(%s) record from cluster: %v", x.node.PeersAddress(), actorName, err)
+		logger.Errorf("node=(%s) failed to remove actor=(%s) record from cluster: %v", x.node.PeersAddress(), actorName, err)
 		return err
 	}
 
-	logger.Infof("actor (%s) successfully removed from the cluster", actorName)
+	logger.Infof("node=(%s) successfully removed actor (%s) from the cluster", x.node.PeersAddress(), actorName)
 	return nil
 }
 
@@ -673,13 +643,13 @@ func (x *Engine) RemoveKind(ctx context.Context, kind string) error {
 
 	logger.Infof("removing actor kind (%s) from cluster", kind)
 
-	_, err := x.actorKindsMap.Delete(ctx, kind)
+	_, err := x.kindsMap.Delete(ctx, kind)
 	if err != nil {
-		logger.Errorf("(%s) failed to remove actor kind=(%s) record from cluster: %v", x.node.PeersAddress(), kind, err)
+		logger.Errorf("node=(%s) failed to remove actor kind=(%s) record from cluster: %v", x.node.PeersAddress(), kind, err)
 		return err
 	}
 
-	logger.Infof("actor kind (%s) successfully removed from the cluster", kind)
+	logger.Infof("node=(%s) successfully removed actor kind (%s) from the cluster", x.node.PeersAddress(), kind)
 	return nil
 }
 
@@ -701,7 +671,7 @@ func (x *Engine) LookupKind(ctx context.Context, kind string) (string, error) {
 
 	logger.Infof("checking actor kind (%s) existence in the cluster", kind)
 
-	resp, err := x.actorKindsMap.Get(ctx, kind)
+	resp, err := x.kindsMap.Get(ctx, kind)
 	if err != nil {
 		if errors.Is(err, olric.ErrKeyNotFound) {
 			logger.Warnf("actor kind=%s is not found in the cluster", kind)
@@ -766,6 +736,19 @@ func (x *Engine) Peers(ctx context.Context) ([]*Peer, error) {
 		}
 	}
 	return peers, nil
+}
+
+// putPeersState pushes the peer state to the cluster
+func (x *Engine) putPeersState() {
+	for peerState := range x.peerStateQueue {
+		logger := x.logger
+		logger.Infof("node=(%s) begins state synchronization...", x.node.PeersAddress())
+		ctx := context.Background()
+		if err := x.statesMap.Put(ctx, x.node.PeersAddress(), peerState); err != nil {
+			logger.Panic("node=(%s) failed to sync state: %v", x.node.PeersAddress(), err)
+		}
+		logger.Infof("node=(%s) state successfully synchronized in the cluster", x.node.PeersAddress())
+	}
 }
 
 // consume reads to the underlying cluster events
@@ -926,10 +909,4 @@ func (x *Engine) buildConfig() (*config.Config, error) {
 	}
 
 	return conf, nil
-}
-
-// initializeState sets the node state in the cluster after boot
-func (x *Engine) initializeState(ctx context.Context) error {
-	encoded, _ := proto.Marshal(x.peerState)
-	return x.statesMap.Put(ctx, x.node.PeersAddress(), encoded)
 }
