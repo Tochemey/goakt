@@ -544,6 +544,8 @@ func (rctx *ReceiveContext) build(ctx context.Context, from, to *PID, message pr
 		rctx.ctx = context.WithoutCancel(ctx)
 		return rctx
 	}
+
+	rctx.ctx = ctx
 	rctx.response = make(chan proto.Message, 1)
 	return rctx
 }
