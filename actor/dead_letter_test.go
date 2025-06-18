@@ -57,7 +57,7 @@ func TestDeadletter(t *testing.T) {
 		require.NotNil(t, consumer)
 
 		// create the black hole actor
-		actor := &mockUnhandledMessageActor{}
+		actor := &MockUnhandled{}
 		actorRef, err := sys.Spawn(ctx, "actor", actor)
 		assert.NoError(t, err)
 		assert.NotNil(t, actorRef)
@@ -109,7 +109,7 @@ func TestDeadletter(t *testing.T) {
 		util.Pause(time.Second)
 
 		// create the black hole actor
-		actor := &mockUnhandledMessageActor{}
+		actor := &MockUnhandled{}
 		actorName := "actorName"
 		actorRef, err := sys.Spawn(ctx, actorName, actor)
 		assert.NoError(t, err)
@@ -155,7 +155,7 @@ func TestDeadletter(t *testing.T) {
 		require.NotNil(t, consumer)
 
 		// create the black hole actor
-		actor := &mockUnhandledMessageActor{}
+		actor := &MockUnhandled{}
 		actorRef, err := sys.Spawn(ctx, "actor", actor)
 		assert.NoError(t, err)
 		assert.NotNil(t, actorRef)

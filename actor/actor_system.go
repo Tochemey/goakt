@@ -2366,31 +2366,45 @@ func (x *actorSystem) shutdown(ctx context.Context) error {
 	x.stopGC <- types.Unit{}
 	x.logger.Infof("%s is shutting down..:)", x.name)
 
-	x.started.Store(false)
+	defer func() {
+		x.started.Store(false)
+		x.reset()
+	}()
+
 	if x.scheduler != nil {
 		x.scheduler.Stop(ctx)
 	}
-
-	// run the various shutdown hooks
-	for _, hook := range x.shutdownHooks {
-		if err := hook(ctx); err != nil {
-			x.reset()
-			return err
-		}
-	}
-
-	ctx, cancel := context.WithTimeout(ctx, x.shutdownTimeout)
-	defer cancel()
 
 	var actorRefs []ActorRef
 	for _, actor := range x.Actors() {
 		actorRefs = append(actorRefs, fromPID(actor))
 	}
 
+	// run the various shutdown hooks
+	for _, hook := range x.shutdownHooks {
+		if err := hook(ctx); err != nil {
+			// log the error but continue with the shutdown process
+			// this is to ensure that the actor system shuts down even if a hook fails
+			// this is useful for cleanup tasks that should not block the shutdown process
+			x.logger.Errorf("shutdown hook execution failed: %v", err)
+			continue
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, x.shutdownTimeout)
+	defer cancel()
+
 	if x.getRootGuardian() != nil {
 		if err := x.getRootGuardian().Shutdown(ctx); err != nil {
-			x.reset()
 			x.logger.Errorf("%s failed to shutdown cleanly: %w", x.name, err)
+			// let's try to shut down the cluster and remoting
+			if xerr := errorschain.
+				New(errorschain.ReturnFirst()).
+				AddErrorFn(func() error { return x.shutdownCluster(ctx, actorRefs) }).
+				AddErrorFn(func() error { return x.shutdownRemoting(ctx) }).
+				Error(); xerr != nil {
+				return fmt.Errorf("%s failed to shutdown: %w", x.name, errors.Join(err, xerr))
+			}
 			return err
 		}
 		x.actors.deleteNode(x.getRootGuardian())
@@ -2405,12 +2419,10 @@ func (x *actorSystem) shutdown(ctx context.Context) error {
 		AddErrorFn(func() error { return x.shutdownCluster(ctx, actorRefs) }).
 		AddErrorFn(func() error { return x.shutdownRemoting(ctx) }).
 		Error(); err != nil {
-		x.reset()
 		x.logger.Errorf("%s failed to shutdown: %w", x.name, err)
 		return err
 	}
 
-	x.reset()
 	x.logger.Infof("%s shuts down successfully", x.name)
 	return nil
 }

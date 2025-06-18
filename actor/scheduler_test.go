@@ -65,7 +65,7 @@ func TestScheduler(t *testing.T) {
 
 		// create a test actor
 		actorName := "test"
-		actor := newMockActor()
+		actor := NewMockActor()
 		actorRef, err := newActorSystem.Spawn(ctx, actorName, actor)
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
@@ -111,7 +111,7 @@ func TestScheduler(t *testing.T) {
 			WithRemote(remote.NewConfig(host, remotingPort)),
 			WithCluster(
 				NewClusterConfig().
-					WithKinds(new(mockActor)).
+					WithKinds(new(MockActor)).
 					WithPartitionCount(9).
 					WithReplicaCount(1).
 					WithPeersPort(clusterPort).
@@ -136,7 +136,7 @@ func TestScheduler(t *testing.T) {
 
 		// create a test actor
 		actorName := "test"
-		actor := newMockActor()
+		actor := NewMockActor()
 		actorRef, err := newActorSystem.Spawn(ctx, actorName, actor)
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
@@ -181,7 +181,7 @@ func TestScheduler(t *testing.T) {
 
 		// create a test actor
 		actorName := "test"
-		actor := newMockActor()
+		actor := NewMockActor()
 		actorRef, err := newActorSystem.Spawn(ctx, actorName, actor)
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
@@ -228,7 +228,7 @@ func TestScheduler(t *testing.T) {
 		scheduler.Stop(ctx)
 
 		// create the actor ref
-		pid, err := newActorSystem.Spawn(ctx, "test", newMockActor())
+		pid, err := newActorSystem.Spawn(ctx, "test", NewMockActor())
 		require.NoError(t, err)
 		assert.NotNil(t, pid)
 
@@ -267,7 +267,7 @@ func TestScheduler(t *testing.T) {
 
 		// create a test actor
 		actorName := "test"
-		actor := newMockActor()
+		actor := NewMockActor()
 		actorRef, err := newActorSystem.Spawn(ctx, actorName, actor)
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
@@ -318,7 +318,7 @@ func TestScheduler(t *testing.T) {
 			WithRemote(remote.NewConfig(host, remotingPort)),
 			WithCluster(
 				NewClusterConfig().
-					WithKinds(new(mockActor)).
+					WithKinds(new(MockActor)).
 					WithPartitionCount(9).
 					WithReplicaCount(1).
 					WithPeersPort(clusterPort).
@@ -343,7 +343,7 @@ func TestScheduler(t *testing.T) {
 
 		// create a test actor
 		actorName := "test"
-		actor := newMockActor()
+		actor := NewMockActor()
 		actorRef, err := newActorSystem.Spawn(ctx, actorName, actor)
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
@@ -403,7 +403,7 @@ func TestScheduler(t *testing.T) {
 
 		// create a test actor
 		actorName := "test"
-		actor := newMockActor()
+		actor := NewMockActor()
 		actorRef, err := newActorSystem.Spawn(ctx, actorName, actor)
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
@@ -444,7 +444,7 @@ func TestScheduler(t *testing.T) {
 
 		// create a test actor
 		actorName := "test"
-		actor := newMockActor()
+		actor := NewMockActor()
 		actorRef, err := newActorSystem.Spawn(ctx, actorName, actor)
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
@@ -489,7 +489,7 @@ func TestScheduler(t *testing.T) {
 			WithRemote(remote.NewConfig(host, remotingPort)),
 			WithCluster(
 				NewClusterConfig().
-					WithKinds(new(mockActor)).
+					WithKinds(new(MockActor)).
 					WithPartitionCount(9).
 					WithReplicaCount(1).
 					WithPeersPort(clusterPort).
@@ -514,7 +514,7 @@ func TestScheduler(t *testing.T) {
 
 		// create a test actor
 		actorName := "test"
-		actor := newMockActor()
+		actor := NewMockActor()
 		actorRef, err := newActorSystem.Spawn(ctx, actorName, actor)
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
@@ -558,7 +558,7 @@ func TestScheduler(t *testing.T) {
 
 		// create a test actor
 		actorName := "test"
-		actor := newMockActor()
+		actor := NewMockActor()
 		actorRef, err := newActorSystem.Spawn(ctx, actorName, actor)
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
@@ -601,7 +601,7 @@ func TestScheduler(t *testing.T) {
 
 		// create a test actor
 		actorName := "test"
-		actor := newMockActor()
+		actor := NewMockActor()
 		actorRef, err := newActorSystem.Spawn(ctx, actorName, actor)
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
@@ -647,7 +647,7 @@ func TestScheduler(t *testing.T) {
 
 		// create a test actor
 		actorName := "test"
-		actor := newMockActor()
+		actor := NewMockActor()
 		actorRef, err := newActorSystem.Spawn(ctx, actorName, actor)
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
@@ -695,7 +695,7 @@ func TestScheduler(t *testing.T) {
 			WithRemote(remote.NewConfig(host, remotingPort)),
 			WithCluster(
 				NewClusterConfig().
-					WithKinds(new(mockActor)).
+					WithKinds(new(MockActor)).
 					WithPartitionCount(9).
 					WithReplicaCount(1).
 					WithPeersPort(clusterPort).
@@ -720,7 +720,7 @@ func TestScheduler(t *testing.T) {
 
 		// create a test actor
 		actorName := "test"
-		actor := newMockActor()
+		actor := NewMockActor()
 		actorRef, err := newActorSystem.Spawn(ctx, actorName, actor)
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
@@ -773,7 +773,7 @@ func TestScheduler(t *testing.T) {
 
 		// create a test actor
 		actorName := "test"
-		actor := newMockActor()
+		actor := NewMockActor()
 		actorRef, err := newActorSystem.Spawn(ctx, actorName, actor)
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
@@ -824,7 +824,7 @@ func TestScheduler(t *testing.T) {
 
 		// create a test actor
 		actorName := "test"
-		actor := newMockActor()
+		actor := NewMockActor()
 		actorRef, err := newActorSystem.Spawn(ctx, actorName, actor)
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
@@ -867,7 +867,7 @@ func TestScheduler(t *testing.T) {
 
 		// create a test actor
 		actorName := "test"
-		actor := newMockActor()
+		actor := NewMockActor()
 		actorRef, err := newActorSystem.Spawn(ctx, actorName, actor)
 		require.NoError(t, err)
 		require.NotNil(t, actorRef)
@@ -917,7 +917,7 @@ func TestScheduler(t *testing.T) {
 			WithRemote(remote.NewConfig(host, remotingPort)),
 			WithCluster(
 				NewClusterConfig().
-					WithKinds(new(mockActor)).
+					WithKinds(new(MockActor)).
 					WithPartitionCount(9).
 					WithReplicaCount(1).
 					WithPeersPort(clusterPort).
@@ -942,7 +942,7 @@ func TestScheduler(t *testing.T) {
 
 		// create a test actor
 		actorName := "test"
-		actor := newMockActor()
+		actor := NewMockActor()
 		actorRef, err := newActorSystem.Spawn(ctx, actorName, actor)
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
@@ -991,7 +991,7 @@ func TestScheduler(t *testing.T) {
 
 		// create a test actor
 		actorName := "test"
-		actor := newMockActor()
+		actor := NewMockActor()
 		actorRef, err := newActorSystem.Spawn(ctx, actorName, actor)
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
@@ -1043,7 +1043,7 @@ func TestScheduler(t *testing.T) {
 
 		// create a test actor
 		actorName := "test"
-		actor := newMockActor()
+		actor := NewMockActor()
 		actorRef, err := newActorSystem.Spawn(ctx, actorName, actor)
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
@@ -1087,7 +1087,7 @@ func TestScheduler(t *testing.T) {
 
 		// create a test actor
 		actorName := "test"
-		actor := newMockActor()
+		actor := NewMockActor()
 		actorRef, err := newActorSystem.Spawn(ctx, actorName, actor)
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
@@ -1150,7 +1150,7 @@ func TestScheduler(t *testing.T) {
 
 		// create a test actor
 		actorName := "test"
-		actor := newMockActor()
+		actor := NewMockActor()
 		actorRef, err := newActorSystem.Spawn(ctx, actorName, actor)
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
@@ -1197,7 +1197,7 @@ func TestScheduler(t *testing.T) {
 
 		// create a test actor
 		actorName := "test"
-		actor := newMockActor()
+		actor := NewMockActor()
 		actorRef, err := newActorSystem.Spawn(ctx, actorName, actor)
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
@@ -1322,7 +1322,7 @@ func TestScheduler(t *testing.T) {
 			WithRemote(remote.NewConfig(host, remotingPort)),
 			WithCluster(
 				NewClusterConfig().
-					WithKinds(new(mockActor)).
+					WithKinds(new(MockActor)).
 					WithPartitionCount(9).
 					WithReplicaCount(1).
 					WithPeersPort(clusterPort).
@@ -1347,7 +1347,7 @@ func TestScheduler(t *testing.T) {
 
 		// create a test actor
 		actorName := "test"
-		actor := newMockActor()
+		actor := NewMockActor()
 		actorRef, err := newActorSystem.Spawn(ctx, actorName, actor)
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
@@ -1401,7 +1401,7 @@ func TestScheduler(t *testing.T) {
 
 		// create a test actor
 		actorName := "test"
-		actor := newMockActor()
+		actor := NewMockActor()
 		actorRef, err := actorSystem.Spawn(ctx, actorName, actor)
 		require.NoError(t, err)
 		require.NotNil(t, actorRef)
@@ -1451,7 +1451,7 @@ func TestScheduler(t *testing.T) {
 
 		// create a test actor
 		actorName := "test"
-		actor := newMockActor()
+		actor := NewMockActor()
 		actorRef, err := newActorSystem.Spawn(ctx, actorName, actor)
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
@@ -1490,7 +1490,7 @@ func TestScheduler(t *testing.T) {
 
 		// create a test actor
 		actorName := "test"
-		actor := newMockActor()
+		actor := NewMockActor()
 		actorRef, err := newActorSystem.Spawn(ctx, actorName, actor)
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
@@ -1526,7 +1526,7 @@ func TestScheduler(t *testing.T) {
 
 		// create a test actor
 		actorName := "test"
-		actor := newMockActor()
+		actor := NewMockActor()
 		actorRef, err := actorSystem.Spawn(ctx, actorName, actor)
 		require.NoError(t, err)
 		require.NotNil(t, actorRef)
@@ -1562,7 +1562,7 @@ func TestScheduler(t *testing.T) {
 
 		// create a test actor
 		actorName := "test"
-		actor := newMockActor()
+		actor := NewMockActor()
 		actorRef, err := system.Spawn(ctx, actorName, actor)
 		require.NoError(t, err)
 		require.NotNil(t, actorRef)
@@ -1614,7 +1614,7 @@ func TestScheduler(t *testing.T) {
 
 		// create a test actor
 		actorName := "test"
-		actor := newMockActor()
+		actor := NewMockActor()
 		actorRef, err := newActorSystem.Spawn(ctx, actorName, actor)
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)

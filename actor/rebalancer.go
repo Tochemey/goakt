@@ -88,7 +88,7 @@ func (r *rebalancer) Rebalance(ctx *ReceiveContext) {
 			return
 		}
 
-		leaderShares, peersShares := r.computeRebalancing(len(peers)+1, peerState)
+		leaderShares, peersShares := r.allocateActors(len(peers)+1, peerState)
 		eg, egCtx := errgroup.WithContext(rctx)
 		logger := r.pid.Logger()
 
@@ -175,8 +175,8 @@ func (r *rebalancer) PostStop(*Context) error {
 	return nil
 }
 
-// computeRebalancing build the list of actors to create on the leader node and the peers in the cluster
-func (r *rebalancer) computeRebalancing(totalPeers int, nodeLeftState *internalpb.PeerState) (leaderShares []*internalpb.Actor, peersShares [][]*internalpb.Actor) {
+// allocateActors build the list of actors to create on the leader node and the peers in the cluster
+func (r *rebalancer) allocateActors(totalPeers int, nodeLeftState *internalpb.PeerState) (leaderShares []*internalpb.Actor, peersShares [][]*internalpb.Actor) {
 	actors := nodeLeftState.GetActors()
 	actorsCount := len(actors)
 

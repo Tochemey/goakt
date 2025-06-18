@@ -47,7 +47,7 @@ func TestReceiveContext(t *testing.T) {
 	t.Run("With behaviors handling", func(t *testing.T) {
 		ctx := context.TODO()
 		// create the actor path
-		actor := &mockBehaviorActor{}
+		actor := &MockBehavior{}
 		ports := dynaport.Get(1)
 
 		actorSystem, err := NewActorSystem("sys",
@@ -687,7 +687,7 @@ func TestReceiveContext(t *testing.T) {
 		util.Pause(time.Second)
 
 		// create the parent actor
-		parent, err := actorSystem.Spawn(ctx, "Parent", newMockSupervisorActor())
+		parent, err := actorSystem.Spawn(ctx, "Parent", NewMockSupervisor())
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
 
@@ -703,7 +703,7 @@ func TestReceiveContext(t *testing.T) {
 
 		// create the child actor
 		name := "monitored"
-		child := receiveCtx.Spawn(name, newMockSupervisedActor())
+		child := receiveCtx.Spawn(name, NewMockSupervised())
 		assert.NotNil(t, child)
 		assert.Len(t, receiveCtx.Children(), 1)
 
@@ -732,7 +732,7 @@ func TestReceiveContext(t *testing.T) {
 		util.Pause(time.Second)
 
 		// create the parent actor
-		parent, err := actorSystem.Spawn(ctx, "Parent", newMockSupervisorActor())
+		parent, err := actorSystem.Spawn(ctx, "Parent", NewMockSupervisor())
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
 
@@ -753,7 +753,7 @@ func TestReceiveContext(t *testing.T) {
 		context.Shutdown()
 
 		// create the child actor
-		context.Spawn("SpawnChild", newMockSupervisedActor())
+		context.Spawn("SpawnChild", NewMockSupervised())
 		require.Error(t, context.getError())
 		assert.NoError(t, actorSystem.Stop(ctx))
 	})
@@ -771,7 +771,7 @@ func TestReceiveContext(t *testing.T) {
 		util.Pause(time.Second)
 
 		// create the parent actor
-		parent, err := actorSystem.Spawn(ctx, "Parent", newMockSupervisorActor())
+		parent, err := actorSystem.Spawn(ctx, "Parent", NewMockSupervisor())
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
 
@@ -785,7 +785,7 @@ func TestReceiveContext(t *testing.T) {
 
 		// create the child actor
 		name := "monitored"
-		child := context.Spawn(name, newMockSupervisedActor())
+		child := context.Spawn(name, NewMockSupervised())
 		assert.NotNil(t, child)
 		assert.Len(t, context.Children(), 1)
 
@@ -814,7 +814,7 @@ func TestReceiveContext(t *testing.T) {
 		util.Pause(time.Second)
 
 		// create the parent actor
-		parent, err := actorSystem.Spawn(ctx, "Parent", newMockSupervisorActor())
+		parent, err := actorSystem.Spawn(ctx, "Parent", NewMockSupervisor())
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
@@ -829,7 +829,7 @@ func TestReceiveContext(t *testing.T) {
 
 		// create the child actor
 		name := "monitored"
-		child := context.Spawn(name, newMockSupervisedActor())
+		child := context.Spawn(name, NewMockSupervised())
 		assert.NotNil(t, child)
 		assert.Len(t, context.Children(), 1)
 
@@ -856,7 +856,7 @@ func TestReceiveContext(t *testing.T) {
 		require.NoError(t, actorSystem.Start(ctx))
 
 		util.Pause(time.Second)
-		parent, err := actorSystem.Spawn(ctx, "Parent", newMockSupervisorActor())
+		parent, err := actorSystem.Spawn(ctx, "Parent", NewMockSupervisor())
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
@@ -871,7 +871,7 @@ func TestReceiveContext(t *testing.T) {
 
 		// create the child actor
 		name := "monitored"
-		child := context.Spawn(name, newMockSupervisedActor())
+		child := context.Spawn(name, NewMockSupervised())
 		assert.NotNil(t, child)
 		assert.Len(t, context.Children(), 1)
 
@@ -899,7 +899,7 @@ func TestReceiveContext(t *testing.T) {
 
 		util.Pause(time.Second)
 
-		parent, err := actorSystem.Spawn(ctx, "Parent", newMockSupervisorActor())
+		parent, err := actorSystem.Spawn(ctx, "Parent", NewMockSupervisor())
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
@@ -914,7 +914,7 @@ func TestReceiveContext(t *testing.T) {
 
 		// create the child actor
 		name := "monitored"
-		child := context.Spawn(name, newMockSupervisedActor())
+		child := context.Spawn(name, NewMockSupervised())
 		assert.NotNil(t, child)
 		assert.Len(t, context.Children(), 1)
 
@@ -946,7 +946,7 @@ func TestReceiveContext(t *testing.T) {
 
 		util.Pause(time.Second)
 
-		parent, err := actorSystem.Spawn(ctx, "Parent", newMockSupervisorActor())
+		parent, err := actorSystem.Spawn(ctx, "Parent", NewMockSupervisor())
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
@@ -982,7 +982,7 @@ func TestReceiveContext(t *testing.T) {
 
 		util.Pause(time.Second)
 
-		parent, err := actorSystem.Spawn(ctx, "Parent", newMockSupervisorActor())
+		parent, err := actorSystem.Spawn(ctx, "Parent", NewMockSupervisor())
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
@@ -996,7 +996,7 @@ func TestReceiveContext(t *testing.T) {
 		}
 
 		name := "monitored"
-		child := context.Spawn(name, newMockSupervisedActor())
+		child := context.Spawn(name, NewMockSupervised())
 		assert.NotNil(t, child)
 		assert.Len(t, context.Children(), 1)
 
@@ -1023,7 +1023,7 @@ func TestReceiveContext(t *testing.T) {
 
 		util.Pause(time.Second)
 
-		parent, err := actorSystem.Spawn(ctx, "Parent", newMockSupervisorActor())
+		parent, err := actorSystem.Spawn(ctx, "Parent", NewMockSupervisor())
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
 
@@ -1041,7 +1041,7 @@ func TestReceiveContext(t *testing.T) {
 		childPath := address.New("child", "sys", "127.0.0.1", ports[0])
 		child, err := newPID(
 			ctx, childPath,
-			newMockSupervisorActor(),
+			NewMockSupervisor(),
 			withInitMaxRetries(1),
 			withActorSystem(actorSystem),
 			withWorkerPool(workerPool),
@@ -1073,7 +1073,7 @@ func TestReceiveContext(t *testing.T) {
 
 		util.Pause(time.Second)
 
-		parent, err := actorSystem.Spawn(ctx, "Parent", newMockSupervisorActor())
+		parent, err := actorSystem.Spawn(ctx, "Parent", NewMockSupervisor())
 
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
@@ -1088,7 +1088,7 @@ func TestReceiveContext(t *testing.T) {
 
 		// create the child actor
 		name := "monitored"
-		child := context.Spawn(name, newMockSupervisedActor())
+		child := context.Spawn(name, NewMockSupervised())
 		assert.NotNil(t, child)
 		assert.Len(t, context.Children(), 1)
 
@@ -1119,7 +1119,7 @@ func TestReceiveContext(t *testing.T) {
 		util.Pause(time.Second)
 
 		// create actor1
-		actor1 := &mockPostStopActor{}
+		actor1 := &MockPostStop{}
 		pid1, err := actorSystem.Spawn(ctx, "Exchange1", actor1)
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
@@ -1162,7 +1162,7 @@ func TestReceiveContext(t *testing.T) {
 		require.NotNil(t, pidC)
 
 		// create actorB
-		actorB := &mockForwardActor{
+		actorB := &MockForward{
 			actorRef: pidC,
 		}
 
@@ -1628,7 +1628,7 @@ func TestReceiveContext(t *testing.T) {
 
 		// create test actor
 		tester := "test"
-		testActor := newMockActor()
+		testActor := NewMockActor()
 		testerRef, err := sys.Spawn(ctx, tester, testActor)
 		require.NoError(t, err)
 		require.NotNil(t, testerRef)
@@ -1684,7 +1684,7 @@ func TestReceiveContext(t *testing.T) {
 
 		// create test actor
 		tester := "test"
-		testActor := newMockActor()
+		testActor := NewMockActor()
 		testerRef, err := sys.Spawn(ctx, tester, testActor)
 		require.NoError(t, err)
 		require.NotNil(t, testerRef)
@@ -1737,7 +1737,7 @@ func TestReceiveContext(t *testing.T) {
 
 		// create test actor
 		tester := "test"
-		testActor := newMockActor()
+		testActor := NewMockActor()
 		testerRef, err := sys.Spawn(ctx, tester, testActor)
 		require.NoError(t, err)
 		require.NotNil(t, testerRef)
@@ -1852,7 +1852,7 @@ func TestReceiveContext(t *testing.T) {
 
 		// create test actor
 		tester := "test"
-		testActor := newMockActor()
+		testActor := NewMockActor()
 		testerRef, err := sys.Spawn(ctx, tester, testActor)
 		require.NoError(t, err)
 		require.NotNil(t, testerRef)
@@ -2409,7 +2409,7 @@ func TestReceiveContext(t *testing.T) {
 		util.Pause(time.Second)
 
 		// create the actor path
-		actor := &mockStashActor{}
+		actor := &MockStash{}
 		pid, err := actorSystem.Spawn(ctx, "stashQA", actor)
 		require.NoError(t, err)
 		require.NotNil(t, pid)
@@ -2447,7 +2447,7 @@ func TestReceiveContext(t *testing.T) {
 		util.Pause(time.Second)
 
 		// create the actor path
-		actor := &mockStashActor{}
+		actor := &MockStash{}
 
 		pid, err := actorSystem.Spawn(ctx, "stashQA", actor)
 		require.NoError(t, err)
@@ -2486,7 +2486,7 @@ func TestReceiveContext(t *testing.T) {
 		util.Pause(time.Second)
 
 		// create the actor path
-		actor := &mockStashActor{}
+		actor := &MockStash{}
 
 		pid, err := actorSystem.Spawn(ctx, "stashQA", actor)
 		require.NoError(t, err)
@@ -2538,12 +2538,12 @@ func TestReceiveContext(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, pidA)
 
-		pidC, err := actorSystem2.Spawn(ctx, "ExchangeC", &mockRemoteActor{})
+		pidC, err := actorSystem2.Spawn(ctx, "ExchangeC", &MockRemote{})
 		require.NoError(t, err)
 		require.NotNil(t, pidC)
 
 		// create actorB
-		actorB := &mockForwardActor{
+		actorB := &MockForward{
 			remoteRef: pidC,
 		}
 
@@ -2593,12 +2593,12 @@ func TestReceiveContext(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, pidA)
 
-		pidC, err := actorSystem2.Spawn(ctx, "ExchangeC", &mockRemoteActor{})
+		pidC, err := actorSystem2.Spawn(ctx, "ExchangeC", &MockRemote{})
 		require.NoError(t, err)
 		require.NotNil(t, pidC)
 
 		// create actorB
-		actorB := &mockForwardActor{
+		actorB := &MockForward{
 			remoteRef: pidC,
 		}
 
@@ -2655,12 +2655,12 @@ func TestReceiveContext(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, pidA)
 
-		pidC, err := actorSystem2.Spawn(ctx, "ExchangeC", &mockRemoteActor{})
+		pidC, err := actorSystem2.Spawn(ctx, "ExchangeC", &MockRemote{})
 		require.NoError(t, err)
 		require.NotNil(t, pidC)
 
 		// create actorB
-		actorB := &mockForwardActor{
+		actorB := &MockForward{
 			remoteRef: pidC,
 		}
 
@@ -2707,12 +2707,12 @@ func TestReceiveContext(t *testing.T) {
 		require.NotNil(t, pidA)
 
 		// create actorC
-		pidC, err := actorSystem2.Spawn(ctx, "ExchangeC", &mockRemoteActor{})
+		pidC, err := actorSystem2.Spawn(ctx, "ExchangeC", &MockRemote{})
 		require.NoError(t, err)
 		require.NotNil(t, pidC)
 
 		// create actorB
-		actorB := &mockForwardActor{
+		actorB := &MockForward{
 			remoteRef: pidC,
 		}
 
@@ -2767,12 +2767,12 @@ func TestReceiveContext(t *testing.T) {
 		require.NotNil(t, pidA)
 
 		// create actorC
-		pidC, err := actorSystem2.Spawn(ctx, "ExchangeC", &mockRemoteActor{})
+		pidC, err := actorSystem2.Spawn(ctx, "ExchangeC", &MockRemote{})
 		require.NoError(t, err)
 		require.NotNil(t, pidC)
 
 		// create actorB
-		actorB := &mockForwardActor{
+		actorB := &MockForward{
 			remoteRef: pidC,
 		}
 
@@ -3017,7 +3017,7 @@ func TestReceiveContext(t *testing.T) {
 		util.Pause(time.Second)
 
 		// create actorB
-		pidB, err := actorSystem2.Spawn(ctx, "ExchangeC", &mockRemoteActor{})
+		pidB, err := actorSystem2.Spawn(ctx, "ExchangeC", &MockRemote{})
 		require.NoError(t, err)
 		require.NotNil(t, pidB)
 
