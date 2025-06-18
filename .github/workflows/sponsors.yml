@@ -1,8 +1,10 @@
 name: Generate Sponsors README
 on:
-  push:
-    branches:
-      - main
+  workflow_dispatch:
+  schedule:
+    # This is a cron schedule, it will run every day at 15:30. You can change this to whatever you want.x
+    - cron: 30 15 * * 0-6
+
 permissions:
   contents: write
 jobs:
