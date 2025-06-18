@@ -62,7 +62,7 @@ func TestRebalancing(t *testing.T) {
 
 	// let us create 4 actors on each node
 	for j := 1; j <= 4; j++ {
-		actorName := fmt.Sprintf("Node1-Actor-%d", j)
+		actorName := fmt.Sprintf("Actor-1%d", j)
 		pid, err := node1.Spawn(ctx, actorName, NewMockActor())
 		require.NoError(t, err)
 		require.NotNil(t, pid)
@@ -633,7 +633,7 @@ func TestIssue781(t *testing.T) {
 
 func TestGrainsRebalancing(t *testing.T) {
 	// create a context
-	ctx := context.TODO()
+	ctx := t.Context()
 	// start the NATS server
 	srv := startNatsServer(t)
 

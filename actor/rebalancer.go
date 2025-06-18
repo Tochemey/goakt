@@ -29,6 +29,7 @@ import (
 	"net"
 	"strconv"
 
+	"connectrpc.com/connect"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/tochemey/goakt/v3/goaktpb"

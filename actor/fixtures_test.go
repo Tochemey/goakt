@@ -894,7 +894,7 @@ func NewMockRestartPostStart() *MockRestartPostStart {
 
 // Init initialize the actor. This function can be used to set up some database connections
 // or some sort of initialization before the actor init processing message
-func (p *postStartActor) PreStart(*Context) error {
+func (p *MockRestartPostStart) PreStart(*Context) error {
 	return nil
 }
 

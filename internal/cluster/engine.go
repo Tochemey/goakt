@@ -65,7 +65,7 @@ const (
 	statesMap  = "states"
 	jobKeysMap = "jobKeys"
 	kindsMap   = "actorKinds"
-	grainsMap     = "grains"
+	grainsMap  = "grains"
 )
 
 func (x EventType) String() string {
