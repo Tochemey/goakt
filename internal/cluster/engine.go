@@ -418,15 +418,21 @@ func (x *Engine) IsLeader(ctx context.Context) bool {
 
 	x.Lock()
 	defer x.Unlock()
-	client := x.client
-	host := x.node
-
-	stats, err := client.Stats(ctx, host.PeersAddress())
+	members, err := x.client.Members(ctx)
 	if err != nil {
-		x.logger.Errorf("failed to fetch the cluster node=(%s) stats: %v", x.node.PeersAddress(), err)
+		x.logger.Errorf("failed to fetch the cluster members=(%s): %v", x.node.PeersAddress(), err)
 		return false
 	}
-	return stats.ClusterCoordinator.String() == stats.Member.String()
+
+	for _, member := range members {
+		node := new(discovery.Node)
+		// unmarshal the member meta information
+		_ = json.Unmarshal([]byte(member.Meta), node)
+		if node.PeersAddress() == x.node.PeersAddress() && member.Coordinator {
+			return true
+		}
+	}
+	return false
 }
 
 // Actors returns all actors in the cluster at any given time

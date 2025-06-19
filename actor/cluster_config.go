@@ -25,6 +25,8 @@
 package actor
 
 import (
+	"time"
+
 	"github.com/tochemey/goakt/v3/discovery"
 	"github.com/tochemey/goakt/v3/internal/size"
 	"github.com/tochemey/goakt/v3/internal/validation"
@@ -48,6 +50,9 @@ type ClusterConfig struct {
 	kinds              []Actor
 	tableSize          uint64
 	wal                *string
+	writeTimeout       time.Duration
+	readTimeout        time.Duration
+	shutdownTimeout    time.Duration
 }
 
 // enforce compilation error
@@ -63,6 +68,9 @@ func NewClusterConfig() *ClusterConfig {
 		replicaCount:       1,
 		partitionCount:     271,
 		tableSize:          20 * size.MB,
+		writeTimeout:       time.Second,
+		readTimeout:        time.Second,
+		shutdownTimeout:    3 * time.Minute,
 	}
 }
 
@@ -121,6 +129,46 @@ func (x *ClusterConfig) WriteQuorum() uint32 {
 func (x *ClusterConfig) WithWAL(dir string) *ClusterConfig {
 	x.wal = &dir
 	return x
+}
+
+// WithWriteTimeout sets the write timeout.
+// This is the timeout for write operations to the cluster.
+func (x *ClusterConfig) WithWriteTimeout(timeout time.Duration) *ClusterConfig {
+	x.writeTimeout = timeout
+	return x
+}
+
+// WithReadTimeout sets the read timeout.
+// This is the timeout for read operations to the cluster.
+func (x *ClusterConfig) WithReadTimeout(timeout time.Duration) *ClusterConfig {
+	x.readTimeout = timeout
+	return x
+}
+
+// WithShutdownTimeout sets the shutdown timeout.
+// This is the timeout for graceful shutdown of the cluster.
+// The timeout should be less or proportional to the actor's shutdown timeout to allow a clean graceful shutdown.
+func (x *ClusterConfig) WithShutdownTimeout(timeout time.Duration) *ClusterConfig {
+	x.shutdownTimeout = timeout
+	return x
+}
+
+// WriteTimeout returns the write timeout.
+// This is the timeout for write operations to the cluster.
+func (x *ClusterConfig) WriteTimeout() time.Duration {
+	return x.writeTimeout
+}
+
+// ReadTimeout returns the read timeout.
+// This is the timeout for read operations to the cluster.
+func (x *ClusterConfig) ReadTimeout() time.Duration {
+	return x.readTimeout
+}
+
+// ShutdownTimeout returns the shutdown timeout.
+// This is the timeout for graceful shutdown of the cluster.
+func (x *ClusterConfig) ShutdownTimeout() time.Duration {
+	return x.shutdownTimeout
 }
 
 // ReplicaCount returns the replica count.
