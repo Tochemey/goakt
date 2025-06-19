@@ -313,11 +313,11 @@ func (x *Engine) Start(ctx context.Context) error {
 	x.server = eng
 	go func() {
 		if err = x.server.Start(); err != nil {
-			if e := x.server.Shutdown(ctx); e != nil {
-				logger.Panic(e)
-			}
 			// the expectation is to exit the application
 			logger.Error(fmt.Errorf("failed to start the cluster Engine on node=(%s): %w", x.name, err))
+			if e := x.server.Shutdown(ctx); e != nil {
+				logger.Fatal(e)
+			}
 		}
 	}()
 
@@ -870,7 +870,9 @@ func (x *Engine) putPeersState() {
 		logger.Infof("node=(%s) begins state synchronization...", x.node.PeersAddress())
 		ctx := context.Background()
 		if err := x.statesMap.Put(ctx, x.node.PeersAddress(), peerState); err != nil {
-			logger.Panic("node=(%s) failed to sync state: %v", x.node.PeersAddress(), err)
+			// TODO: should we continue or not
+			logger.Errorf("node=(%s) failed to sync state: %v", x.node.PeersAddress(), err)
+			return
 		}
 		logger.Infof("node=(%s) state successfully synchronized in the cluster", x.node.PeersAddress())
 	}
