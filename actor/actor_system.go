@@ -2446,7 +2446,7 @@ func (x *actorSystem) replicationLoop() {
 		if x.InCluster() {
 			ctx := context.Background()
 			if err := x.cluster.PutActor(ctx, actor); err != nil {
-				x.logger.Panic(err.Error())
+				x.logger.Warn(err.Error())
 			}
 		}
 	}

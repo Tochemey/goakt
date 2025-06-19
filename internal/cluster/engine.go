@@ -245,21 +245,6 @@ func (x *Engine) Start(ctx context.Context) error {
 
 	conf.Hasher = &hasherWrapper{x.hasher}
 
-	transport, err := memberlist.NewTransport(memberlist.TransportConfig{
-		BindAddrs:          []string{x.node.Host},
-		BindPort:           x.node.DiscoveryPort,
-		PacketDialTimeout:  5 * time.Second,
-		PacketWriteTimeout: 5 * time.Second,
-		Logger:             x.logger,
-		DebugEnabled:       false,
-		TLSEnabled:         x.serverTLS != nil,
-		TLS:                x.serverTLS,
-	})
-	if err != nil {
-		x.logger.Errorf("Failed to create memberlist TCP transport: %v", err)
-		return err
-	}
-
 	m, err := config.NewMemberlistConfig("lan")
 	if err != nil {
 		logger.Errorf("failed to configure the cluster Engine members list.💥: %v", err)
@@ -271,7 +256,27 @@ func (x *Engine) Start(ctx context.Context) error {
 	m.BindPort = x.node.DiscoveryPort
 	m.AdvertisePort = x.node.DiscoveryPort
 	m.AdvertiseAddr = x.node.Host
-	m.Transport = transport
+
+	// TODO: add the UDP listener to the transport
+	tlsEnabled := x.serverTLS != nil
+	if tlsEnabled {
+		transport, err := memberlist.NewTransport(memberlist.TransportConfig{
+			BindAddrs:          []string{x.node.Host},
+			BindPort:           x.node.DiscoveryPort,
+			PacketDialTimeout:  5 * time.Second,
+			PacketWriteTimeout: 5 * time.Second,
+			Logger:             x.logger,
+			DebugEnabled:       false,
+			TLSEnabled:         true,
+			TLS:                x.serverTLS,
+		})
+		if err != nil {
+			x.logger.Errorf("Failed to create memberlist TCP transport: %v", err)
+			return err
+		}
+		m.Transport = transport
+	}
+
 	conf.MemberlistConfig = m
 
 	// set the discovery provider
