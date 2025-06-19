@@ -520,7 +520,7 @@ func TestActorSystem(t *testing.T) {
 		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
 		_, err := sys.ReSpawn(ctx, "some-actor")
 		assert.Error(t, err)
-		assert.EqualError(t, err, "actor system has not started yet")
+		assert.ErrorIs(t, err, ErrActorSystemNotStarted)
 	})
 	t.Run("ReSpawn with remoting enabled", func(t *testing.T) {
 		ctx := context.TODO()
@@ -788,7 +788,7 @@ func TestActorSystem(t *testing.T) {
 		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
 		err := sys.Kill(ctx, "Test")
 		assert.Error(t, err)
-		assert.EqualError(t, err, "actor system has not started yet")
+		assert.ErrorIs(t, err, ErrActorSystemNotStarted)
 	})
 	t.Run("With Kill an actor when actor not found", func(t *testing.T) {
 		ctx := context.TODO()
