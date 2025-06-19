@@ -502,7 +502,7 @@ func withMockExtension(ext extension.Extension) testClusterOption {
 
 func testCluster(t *testing.T, serverAddr string, opts ...testClusterOption) (ActorSystem, discovery.Provider) {
 	ctx := context.TODO()
-	logger := log.DefaultLogger
+	logger := log.DiscardLogger
 
 	// generate the ports for the single startNode
 	nodePorts := dynaport.Get(3)
