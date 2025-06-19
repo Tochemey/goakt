@@ -2363,9 +2363,7 @@ func (x *actorSystem) enableClustering(ctx context.Context) error {
 		x.logger.Infof("cluster kind=(%s) registered", types.Name(kind))
 	}
 
-	var grainEnabled bool
 	if len(x.clusterConfig.Grains()) > 0 {
-		grainEnabled = true
 		for _, grain := range x.clusterConfig.Grains() {
 			x.registry.Register(grain)
 			x.logger.Infof("cluster Grain=(%s) registered", types.Name(grain))
@@ -2379,7 +2377,7 @@ func (x *actorSystem) enableClustering(ctx context.Context) error {
 	go x.replicateGrains()
 
 	// start the various relocation loops when relocation is enabled
-	if x.enableRelocation.Load() || grainEnabled {
+	if x.enableRelocation.Load() {
 		go x.peersStateLoop()
 		go x.rebalancingLoop()
 	}
