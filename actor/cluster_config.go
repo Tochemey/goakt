@@ -147,6 +147,7 @@ func (x *ClusterConfig) WithReadTimeout(timeout time.Duration) *ClusterConfig {
 
 // WithShutdownTimeout sets the shutdown timeout.
 // This is the timeout for graceful shutdown of the cluster.
+// The timeout should be less or proportional to the actor's shutdown timeout to allow a clean graceful shutdown.
 func (x *ClusterConfig) WithShutdownTimeout(timeout time.Duration) *ClusterConfig {
 	x.shutdownTimeout = timeout
 	return x
