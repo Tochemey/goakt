@@ -2921,16 +2921,11 @@ func (x *actorSystem) checkSpawnPreconditions(ctx context.Context, actorName str
 		}
 
 		// here we make sure in cluster mode that the given actor is uniquely created
-		// by checking both its kind and identifier
-		existed, err := x.cluster.GetActor(ctx, actorName)
+		exists, err := x.cluster.ActorExists(ctx, actorName)
 		if err != nil {
-			if errors.Is(err, cluster.ErrActorNotFound) {
-				return nil
-			}
 			return err
 		}
-
-		if existed.GetType() == types.Name(kind) {
+		if exists {
 			return NewErrActorAlreadyExists(actorName)
 		}
 	}

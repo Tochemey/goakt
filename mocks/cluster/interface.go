@@ -26,6 +26,63 @@ func (_m *Interface) EXPECT() *Interface_Expecter {
 	return &Interface_Expecter{mock: &_m.Mock}
 }
 
+// ActorExists provides a mock function with given fields: ctx, actorName
+func (_m *Interface) ActorExists(ctx context.Context, actorName string) (bool, error) {
+	ret := _m.Called(ctx, actorName)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ActorExists")
+	}
+
+	var r0 bool
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string) (bool, error)); ok {
+		return rf(ctx, actorName)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string) bool); ok {
+		r0 = rf(ctx, actorName)
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = rf(ctx, actorName)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// Interface_ActorExists_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ActorExists'
+type Interface_ActorExists_Call struct {
+	*mock.Call
+}
+
+// ActorExists is a helper method to define mock.On call
+//   - ctx context.Context
+//   - actorName string
+func (_e *Interface_Expecter) ActorExists(ctx interface{}, actorName interface{}) *Interface_ActorExists_Call {
+	return &Interface_ActorExists_Call{Call: _e.mock.On("ActorExists", ctx, actorName)}
+}
+
+func (_c *Interface_ActorExists_Call) Run(run func(ctx context.Context, actorName string)) *Interface_ActorExists_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *Interface_ActorExists_Call) Return(_a0 bool, _a1 error) *Interface_ActorExists_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *Interface_ActorExists_Call) RunAndReturn(run func(context.Context, string) (bool, error)) *Interface_ActorExists_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Actors provides a mock function with given fields: ctx, timeout
 func (_m *Interface) Actors(ctx context.Context, timeout time.Duration) ([]*internalpb.Actor, error) {
 	ret := _m.Called(ctx, timeout)
