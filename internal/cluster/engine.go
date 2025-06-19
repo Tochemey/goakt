@@ -118,6 +118,8 @@ type Interface interface {
 	Actors(ctx context.Context, timeout time.Duration) ([]*internalpb.Actor, error)
 	// IsRunning returns true when the cluster engine is running
 	IsRunning() bool
+	// ActorExists checks whether an actor exists in the cluster
+	ActorExists(ctx context.Context, actorName string) (bool, error)
 }
 
 // Engine represents the Engine
@@ -602,6 +604,29 @@ func (x *Engine) GetActor(ctx context.Context, actorName string) (*internalpb.Ac
 
 	logger.Infof("node=(%s) successfully retrieved from the cluster actor (%s)", x.node.PeersAddress(), actor.GetAddress().GetName())
 	return actor, nil
+}
+
+// ActorExists checks whether an actor exists in the cluster
+func (x *Engine) ActorExists(ctx context.Context, actorName string) (bool, error) {
+	// return an error when the engine is not running
+	if !x.IsRunning() {
+		return false, ErrEngineNotRunning
+	}
+
+	ctx, cancelFn := context.WithTimeout(ctx, x.readTimeout)
+	defer cancelFn()
+
+	x.Lock()
+	defer x.Unlock()
+
+	// check whether the actor exists in the actors map
+	if _, err := x.actorsMap.Get(ctx, actorName); err != nil {
+		if errors.Is(err, olric.ErrKeyNotFound) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
 }
 
 // RemoveActor removes a given actor from the cluster.
