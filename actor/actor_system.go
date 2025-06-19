@@ -47,6 +47,7 @@ import (
 	"github.com/google/uuid"
 	"go.akshayshah.org/connectproto"
 	"go.uber.org/atomic"
+	"go.uber.org/multierr"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
 	"golang.org/x/sync/errgroup"
@@ -2358,7 +2359,6 @@ func (x *actorSystem) reset() {
 
 // shutdown stops the actor system
 func (x *actorSystem) shutdown(ctx context.Context) error {
-	// make sure the actor system has started
 	if !x.started.Load() {
 		return ErrActorSystemNotStarted
 	}
@@ -2375,52 +2375,57 @@ func (x *actorSystem) shutdown(ctx context.Context) error {
 		x.scheduler.Stop(ctx)
 	}
 
-	var actorRefs []ActorRef
+	actorRefs := make([]ActorRef, 0, len(x.Actors()))
 	for _, actor := range x.Actors() {
 		actorRefs = append(actorRefs, fromPID(actor))
 	}
 
-	// run the various shutdown hooks
+	// Run shutdown hooks and collect errors
+	var hooksErrs []error
 	for _, hook := range x.shutdownHooks {
 		if err := hook(ctx); err != nil {
-			// log the error but continue with the shutdown process
-			// this is to ensure that the actor system shuts down even if a hook fails
-			// this is useful for cleanup tasks that should not block the shutdown process
 			x.logger.Errorf("shutdown hook execution failed: %v", err)
-			continue
+			hooksErrs = append(hooksErrs, err)
 		}
+	}
+	hooksErr := multierr.Combine(hooksErrs...)
+
+	// Helper to shut down cluster and remoting
+	shutdownClusterAndRemoting := func() error {
+		return errorschain.
+			New(errorschain.ReturnFirst()).
+			AddErrorFn(func() error { return x.shutdownCluster(ctx, actorRefs) }).
+			AddErrorFn(func() error { return x.shutdownRemoting(ctx) }).
+			Error()
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, x.shutdownTimeout)
 	defer cancel()
 
-	if x.getRootGuardian() != nil {
-		if err := x.getRootGuardian().Shutdown(ctx); err != nil {
-			x.logger.Errorf("%s failed to shutdown cleanly: %w", x.name, err)
-			// let's try to shut down the cluster and remoting
-			if xerr := errorschain.
-				New(errorschain.ReturnFirst()).
-				AddErrorFn(func() error { return x.shutdownCluster(ctx, actorRefs) }).
-				AddErrorFn(func() error { return x.shutdownRemoting(ctx) }).
-				Error(); xerr != nil {
-				return fmt.Errorf("%s failed to shutdown: %w", x.name, errors.Join(err, xerr))
-			}
-			return err
+	// Shutdown root guardian if present
+	if rootGuardian := x.getRootGuardian(); rootGuardian != nil {
+		if err := rootGuardian.Shutdown(ctx); err != nil {
+			x.logger.Errorf("%s failed to shutdown cleanly: %v", x.name, err)
+			clusterErr := shutdownClusterAndRemoting()
+			// Combine all errors if present
+			return multierr.Combine(hooksErr, err, clusterErr)
 		}
-		x.actors.deleteNode(x.getRootGuardian())
+		x.actors.deleteNode(rootGuardian)
 	}
 
 	if x.eventsStream != nil {
 		x.eventsStream.Close()
 	}
 
-	if err := errorschain.
-		New(errorschain.ReturnFirst()).
-		AddErrorFn(func() error { return x.shutdownCluster(ctx, actorRefs) }).
-		AddErrorFn(func() error { return x.shutdownRemoting(ctx) }).
-		Error(); err != nil {
-		x.logger.Errorf("%s failed to shutdown: %w", x.name, err)
-		return err
+	// Always attempt to shutdown cluster and remoting
+	if err := shutdownClusterAndRemoting(); err != nil {
+		x.logger.Errorf("%s failed to shutdown: %v", x.name, err)
+		return multierr.Combine(hooksErr, err)
+	}
+
+	if hooksErr != nil {
+		x.logger.Errorf("%s failed to shutdown cleanly. Shutdown hooks Failure: %v", x.name, hooksErr)
+		return hooksErr
 	}
 
 	x.logger.Infof("%s shuts down successfully", x.name)
