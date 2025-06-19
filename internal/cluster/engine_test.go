@@ -157,6 +157,11 @@ func TestSingleNode(t *testing.T) {
 		err = cluster.PutActor(ctx, actor)
 		require.NoError(t, err)
 
+		// test the actor exists
+		exists, err := cluster.ActorExists(ctx, actorName)
+		require.NoError(t, err)
+		assert.True(t, exists)
+
 		// fetch the actor
 		actual, err := cluster.GetActor(ctx, actorName)
 		require.NoError(t, err)
@@ -164,11 +169,17 @@ func TestSingleNode(t *testing.T) {
 
 		assert.True(t, proto.Equal(actor, actual))
 
-		//  fetch non-existing actor
+		// test non-existing actor does not exist
 		fakeActorName := "fake"
+		exists, err = cluster.ActorExists(ctx, fakeActorName)
+		require.NoError(t, err)
+		assert.False(t, exists)
+
+		// fetch non-existing actor
 		actual, err = cluster.GetActor(ctx, fakeActorName)
 		require.Nil(t, actual)
-		assert.EqualError(t, err, ErrActorNotFound.Error())
+		assert.ErrorIs(t, err, ErrActorNotFound)
+
 		//  shutdown the Node startNode
 		util.Pause(time.Second)
 

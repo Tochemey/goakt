@@ -90,7 +90,7 @@ func TestDeathWatch(t *testing.T) {
 		// mock the cluster interface
 		clmock := new(clustermock.Interface)
 		clmock.EXPECT().RemoveActor(mock.Anything, mock.Anything).Return(assert.AnError)
-		clmock.EXPECT().GetActor(mock.Anything, actorID).Return(nil, nil)
+		clmock.EXPECT().ActorExists(mock.Anything, actorID).Return(false, nil)
 
 		err = sys.Start(ctx)
 		require.NoError(t, err)

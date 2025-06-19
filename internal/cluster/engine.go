@@ -123,6 +123,8 @@ type Interface interface {
 	PutGrain(ctx context.Context, grain *internalpb.Grain) error
 	// GetGrain returns a Grain from the cluster
 	GetGrain(ctx context.Context, grainID string) (*internalpb.Grain, error)
+	// ActorExists checks whether an actor exists in the cluster
+	ActorExists(ctx context.Context, actorName string) (bool, error)
 }
 
 // Engine represents the Engine
@@ -249,21 +251,6 @@ func (x *Engine) Start(ctx context.Context) error {
 
 	conf.Hasher = &hasherWrapper{x.hasher}
 
-	transport, err := memberlist.NewTransport(memberlist.TransportConfig{
-		BindAddrs:          []string{x.node.Host},
-		BindPort:           x.node.DiscoveryPort,
-		PacketDialTimeout:  5 * time.Second,
-		PacketWriteTimeout: 5 * time.Second,
-		Logger:             x.logger,
-		DebugEnabled:       false,
-		TLSEnabled:         x.serverTLS != nil,
-		TLS:                x.serverTLS,
-	})
-	if err != nil {
-		x.logger.Errorf("Failed to create memberlist TCP transport: %v", err)
-		return err
-	}
-
 	m, err := config.NewMemberlistConfig("lan")
 	if err != nil {
 		logger.Errorf("failed to configure the cluster Engine members list.💥: %v", err)
@@ -275,7 +262,27 @@ func (x *Engine) Start(ctx context.Context) error {
 	m.BindPort = x.node.DiscoveryPort
 	m.AdvertisePort = x.node.DiscoveryPort
 	m.AdvertiseAddr = x.node.Host
-	m.Transport = transport
+
+	// TODO: add the UDP listener to the transport
+	tlsEnabled := x.serverTLS != nil
+	if tlsEnabled {
+		transport, err := memberlist.NewTransport(memberlist.TransportConfig{
+			BindAddrs:          []string{x.node.Host},
+			BindPort:           x.node.DiscoveryPort,
+			PacketDialTimeout:  5 * time.Second,
+			PacketWriteTimeout: 5 * time.Second,
+			Logger:             x.logger,
+			DebugEnabled:       false,
+			TLSEnabled:         true,
+			TLS:                x.serverTLS,
+		})
+		if err != nil {
+			x.logger.Errorf("Failed to create memberlist TCP transport: %v", err)
+			return err
+		}
+		m.Transport = transport
+	}
+
 	conf.MemberlistConfig = m
 
 	// set the discovery provider
@@ -427,15 +434,21 @@ func (x *Engine) IsLeader(ctx context.Context) bool {
 
 	x.Lock()
 	defer x.Unlock()
-	client := x.client
-	host := x.node
-
-	stats, err := client.Stats(ctx, host.PeersAddress())
+	members, err := x.client.Members(ctx)
 	if err != nil {
 		x.logger.Errorf("failed to fetch the cluster node=(%s) stats: %v", x.node.PeersAddress(), err)
 		return false
 	}
-	return stats.ClusterCoordinator.String() == stats.Member.String()
+
+	for _, member := range members {
+		node := new(discovery.Node)
+		// unmarshal the member meta information
+		_ = json.Unmarshal([]byte(member.Meta), node)
+		if node.PeersAddress() == x.node.PeersAddress() && member.Coordinator {
+			return true
+		}
+	}
+	return false
 }
 
 // Actors returns all actors in the cluster at any given time
@@ -685,6 +698,29 @@ func (x *Engine) GetGrain(ctx context.Context, grainID string) (*internalpb.Grai
 
 	logger.Infof("(%s) successfully retrieved from the cluster grain (%s)", x.node.PeersAddress(), grain.GetGrainId().GetValue())
 	return grain, nil
+}
+
+// ActorExists checks whether an actor exists in the cluster
+func (x *Engine) ActorExists(ctx context.Context, actorName string) (bool, error) {
+	// return an error when the engine is not running
+	if !x.IsRunning() {
+		return false, ErrEngineNotRunning
+	}
+
+	ctx, cancelFn := context.WithTimeout(ctx, x.readTimeout)
+	defer cancelFn()
+
+	x.Lock()
+	defer x.Unlock()
+
+	// check whether the actor exists in the actors map
+	if _, err := x.actorsMap.Get(ctx, actorName); err != nil {
+		if errors.Is(err, olric.ErrKeyNotFound) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
 }
 
 // RemoveActor removes a given actor from the cluster.
@@ -998,10 +1034,4 @@ func (x *Engine) buildConfig() (*config.Config, error) {
 	}
 
 	return conf, nil
-}
-
-// initializeState sets the node state in the cluster after boot
-func (x *Engine) initializeState(ctx context.Context) error {
-	encoded, _ := proto.Marshal(x.peerState)
-	return x.statesMap.Put(ctx, x.node.PeersAddress(), encoded)
 }

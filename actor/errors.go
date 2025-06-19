@@ -84,7 +84,7 @@ var (
 	ErrInitFailure = errors.New("preStart failed")
 
 	// ErrActorSystemNotStarted indicates that an actor system has not been started before use.
-	ErrActorSystemNotStarted = errors.New("actor system has not started yet")
+	ErrActorSystemNotStarted = errors.New("actor system is not running")
 
 	// ErrReservedName is returned when attempting to register an actor with a reserved name.
 	ErrReservedName = errors.New("actor name is reserved")

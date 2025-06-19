@@ -520,7 +520,7 @@ func TestActorSystem(t *testing.T) {
 		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
 		_, err := sys.ReSpawn(ctx, "some-actor")
 		assert.Error(t, err)
-		assert.EqualError(t, err, "actor system has not started yet")
+		assert.ErrorIs(t, err, ErrActorSystemNotStarted)
 	})
 	t.Run("ReSpawn with remoting enabled", func(t *testing.T) {
 		ctx := context.TODO()
@@ -788,7 +788,7 @@ func TestActorSystem(t *testing.T) {
 		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
 		err := sys.Kill(ctx, "Test")
 		assert.Error(t, err)
-		assert.EqualError(t, err, "actor system has not started yet")
+		assert.ErrorIs(t, err, ErrActorSystemNotStarted)
 	})
 	t.Run("With Kill an actor when actor not found", func(t *testing.T) {
 		ctx := context.TODO()
@@ -1602,7 +1602,7 @@ func TestActorSystem(t *testing.T) {
 		// shutdown the nats server gracefully
 		srv.Shutdown()
 	})
-	t.Run("With CoordinatedShutdown failure just log the error and continue the shutdown process", func(t *testing.T) {
+	t.Run("With CoordinatedShutdown failure", func(t *testing.T) {
 		ctx := context.TODO()
 		shutdownHook := func(context.Context) error { return errors.New("shutdown failure") }
 
@@ -1626,7 +1626,7 @@ func TestActorSystem(t *testing.T) {
 		// stop the actor after some time
 		util.Pause(time.Second)
 		err = sys.Stop(ctx)
-		require.NoError(t, err)
+		require.Error(t, err)
 	})
 	t.Run("With CoordinatedShutdown", func(t *testing.T) {
 		ctx := context.TODO()
