@@ -2206,6 +2206,9 @@ func (x *actorSystem) enableClustering(ctx context.Context) error {
 		cluster.WithReadQuorum(x.clusterConfig.ReadQuorum()),
 		cluster.WithReplicaCount(x.clusterConfig.ReplicaCount()),
 		cluster.WithTLS(x.serverTLS, x.clientTLS),
+		cluster.WithWriteTimeout(x.clusterConfig.WriteTimeout()),
+		cluster.WithReadTimeout(x.clusterConfig.ReadTimeout()),
+		cluster.WithShutdownTimeout(x.clusterConfig.ShutdownTimeout()),
 		cluster.WithTableSize(x.clusterConfig.TableSize()),
 	)
 	if err != nil {

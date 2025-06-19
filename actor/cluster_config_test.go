@@ -26,6 +26,7 @@ package actor
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -53,6 +54,9 @@ func TestClusterConfig(t *testing.T) {
 			WithPartitionCount(3).
 			WithTableSize(10 * size.MB).
 			WithWAL(tempdir).
+			WithWriteTimeout(10 * time.Second).
+			WithShutdownTimeout(10 * time.Second).
+			WithReadTimeout(10 * time.Second).
 			WithDiscovery(provider)
 
 		require.NoError(t, config.Validate())
@@ -63,6 +67,10 @@ func TestClusterConfig(t *testing.T) {
 		assert.EqualValues(t, 1, config.ReadQuorum())
 		assert.EqualValues(t, 1, config.WriteQuorum())
 		assert.EqualValues(t, 3, config.PartitionCount())
+		assert.Equal(t, 10*time.Second, config.WriteTimeout())
+		assert.Equal(t, 10*time.Second, config.ReadTimeout())
+		assert.Equal(t, 10*time.Second, config.ShutdownTimeout())
+
 		wal := config.WAL()
 		assert.NotNil(t, wal)
 		assert.Exactly(t, tempdir, *wal)
