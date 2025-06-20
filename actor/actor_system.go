@@ -495,6 +495,7 @@ type ActorSystem interface { //nolint:revive
 	getReflection() *reflection
 	// internally used
 	findRoutee(routeeName string) (*PID, bool)
+	isShuttingDown() bool
 }
 
 // ActorSystem represent a collection of actors on a given node
@@ -586,7 +587,8 @@ type actorSystem struct {
 	enableRelocation atomic.Bool
 	extensions       *collection.Map[string, extension.Extension]
 
-	spawnOnNext *atomic.Uint32
+	spawnOnNext  *atomic.Uint32
+	shuttingDown *atomic.Bool
 }
 
 var (
@@ -633,6 +635,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		topicActor:             nil,
 		extensions:             collection.NewMap[string, extension.Extension](),
 		spawnOnNext:            atomic.NewUint32(0),
+		shuttingDown:           atomic.NewBool(false),
 	}
 
 	system.enableRelocation.Store(true)
@@ -2101,6 +2104,11 @@ func (x *actorSystem) findRoutee(routeeName string) (*PID, bool) {
 	return nil, false
 }
 
+// isShuttingDown checks whether the actor system is shutting down
+func (x *actorSystem) isShuttingDown() bool {
+	return x.shuttingDown.Load()
+}
+
 // getSingletonManager returns the system singleton manager
 func (x *actorSystem) getSingletonManager() *PID {
 	x.locker.Lock()
@@ -2358,6 +2366,7 @@ func (x *actorSystem) reset() {
 	x.extensions.Reset()
 	x.actors.reset()
 	x.spawnOnNext.Store(0)
+	x.shuttingDown.Store(false)
 }
 
 // shutdown stops the actor system
@@ -2368,6 +2377,7 @@ func (x *actorSystem) shutdown(ctx context.Context) error {
 
 	x.stopGC <- types.Unit{}
 	x.logger.Infof("%s is shutting down..:)", x.name)
+	x.shuttingDown.Store(true)
 
 	defer func() {
 		x.started.Store(false)
