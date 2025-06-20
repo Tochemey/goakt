@@ -62,7 +62,7 @@ func TestRebalancing(t *testing.T) {
 
 	// let us create 4 actors on each node
 	for j := 1; j <= 4; j++ {
-		actorName := fmt.Sprintf("Node1-Actor-%d", j)
+		actorName := fmt.Sprintf("Actor-1%d", j)
 		pid, err := node1.Spawn(ctx, actorName, NewMockActor())
 		require.NoError(t, err)
 		require.NotNil(t, pid)
@@ -70,8 +70,8 @@ func TestRebalancing(t *testing.T) {
 
 	util.Pause(time.Second)
 
-	for j := 1; j <= 4; j++ {
-		actorName := fmt.Sprintf("Node2-Actor-%d", j)
+	for j := 1; j <= 5; j++ {
+		actorName := fmt.Sprintf("Actor-2%d", j)
 		pid, err := node2.Spawn(ctx, actorName, NewMockActor())
 		require.NoError(t, err)
 		require.NotNil(t, pid)
@@ -80,7 +80,7 @@ func TestRebalancing(t *testing.T) {
 	util.Pause(time.Second)
 
 	for j := 1; j <= 4; j++ {
-		actorName := fmt.Sprintf("Node3-Actor-%d", j)
+		actorName := fmt.Sprintf("Actor-3%d", j)
 		pid, err := node3.Spawn(ctx, actorName, NewMockActor())
 		require.NoError(t, err)
 		require.NotNil(t, pid)
@@ -95,12 +95,12 @@ func TestRebalancing(t *testing.T) {
 	// Wait for cluster rebalancing
 	util.Pause(time.Minute)
 
-	sender, err := node1.LocalActor("Node1-Actor-1")
+	sender, err := node1.LocalActor("Actor-11")
 	require.NoError(t, err)
 	require.NotNil(t, sender)
 
 	// let us access some of the node2 actors from node 1 and  node 3
-	actorName := "Node2-Actor-1"
+	actorName := "Actor-21"
 	err = sender.SendAsync(ctx, actorName, new(testpb.TestSend))
 	require.NoError(t, err)
 
@@ -623,6 +623,96 @@ func TestIssue781(t *testing.T) {
 	err = sender.SendAsync(ctx, actorName, new(testpb.TestSend))
 	require.Error(t, err)
 	require.ErrorIs(t, err, ErrActorNotFound)
+
+	assert.NoError(t, node1.Stop(ctx))
+	assert.NoError(t, node3.Stop(ctx))
+	assert.NoError(t, sd1.Close())
+	assert.NoError(t, sd3.Close())
+	srv.Shutdown()
+}
+
+func TestGrainsRebalancing(t *testing.T) {
+	// create a context
+	ctx := t.Context()
+	// start the NATS server
+	srv := startNatsServer(t)
+
+	// create and start a system cluster
+	node1, sd1 := testCluster(t, srv.Addr().String())
+	require.NotNil(t, node1)
+	require.NotNil(t, sd1)
+
+	// create and start a system cluster
+	node2, sd2 := testCluster(t, srv.Addr().String())
+	require.NotNil(t, node2)
+	require.NotNil(t, sd2)
+
+	// create and start a system cluster
+	node3, sd3 := testCluster(t, srv.Addr().String())
+	require.NotNil(t, node3)
+	require.NotNil(t, sd3)
+
+	for j := range 4 {
+		identity := NewIdentity(NewMockGrain(), fmt.Sprintf("Grain-1%d", j))
+		require.NotNil(t, identity)
+		message := new(testpb.TestSend)
+		err := node1.SendGrainAsync(ctx, identity, message)
+		require.NoError(t, err)
+	}
+
+	util.Pause(time.Second)
+
+	for j := range 5 {
+		identity := NewIdentity(NewMockGrain(), fmt.Sprintf("Grain-2%d", j))
+		require.NotNil(t, identity)
+		message := new(testpb.TestSend)
+		err := node2.SendGrainAsync(ctx, identity, message)
+		require.NoError(t, err)
+	}
+
+	util.Pause(time.Second)
+
+	for j := range 4 {
+		identity := NewIdentity(NewMockGrain(), fmt.Sprintf("Grain-3%d", j))
+		require.NotNil(t, identity)
+		message := new(testpb.TestSend)
+		err := node3.SendGrainAsync(ctx, identity, message)
+		require.NoError(t, err)
+	}
+
+	util.Pause(time.Second)
+
+	// take down node2
+	require.NoError(t, node2.Stop(ctx))
+	require.NoError(t, sd2.Close())
+
+	// Wait for cluster rebalancing
+	util.Pause(time.Minute)
+
+	identity := NewIdentity(new(MockGrain), "Grain-20")
+	message := new(testpb.TestSend)
+	err := node3.SendGrainAsync(ctx, identity, message)
+	require.NoError(t, err)
+
+	identity = NewIdentity(new(MockGrain), "Grain-21")
+	message = new(testpb.TestSend)
+	err = node1.SendGrainAsync(ctx, identity, message)
+	require.NoError(t, err)
+
+	identity = NewIdentity(new(MockGrain), "Grain-22")
+	message = new(testpb.TestSend)
+	err = node3.SendGrainAsync(ctx, identity, message)
+	require.NoError(t, err)
+
+	identity = NewIdentity(new(MockGrain), "Grain-23")
+	message = new(testpb.TestSend)
+	err = node1.SendGrainAsync(ctx, identity, message)
+	require.NoError(t, err)
+
+	identity = NewIdentity(new(MockGrain), "Grain-24")
+	message = new(testpb.TestSend)
+	err = node1.SendGrainAsync(ctx, identity, message)
+	require.NoError(t, err)
 
 	assert.NoError(t, node1.Stop(ctx))
 	assert.NoError(t, node3.Stop(ctx))

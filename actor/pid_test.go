@@ -760,7 +760,7 @@ func TestRestart(t *testing.T) {
 
 		util.Pause(time.Second)
 
-		pid, err := actorSystem.Spawn(ctx, "test", NewMockPostStart())
+		pid, err := actorSystem.Spawn(ctx, "test", NewMockRestartPostStart())
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 

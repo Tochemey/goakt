@@ -62,10 +62,10 @@ import (
 // regarding message processing
 
 const (
-	// idle means there are no messages to process
-	idle int32 = iota
-	// busy means the PID is processing messages
-	busy
+	// IDLE means there are no messages to process
+	IDLE int32 = iota
+	// BUSY means the PID is processing messages
+	BUSY
 )
 
 // taskCompletion is used to track completions' taskCompletion
@@ -190,7 +190,7 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 	pid.latestReceiveDuration.Store(0)
 	pid.isSingleton.Store(false)
 	pid.initTimeout.Store(DefaultInitTimeout)
-	pid.processing.Store(int32(idle))
+	pid.processing.Store(int32(IDLE))
 	pid.relocatable.Store(true)
 
 	for _, opt := range opts {
@@ -502,7 +502,7 @@ func (pid *PID) Restart(ctx context.Context) error {
 				return nil
 			}).
 			AddErrorFn(func() error { tree.addWatcher(pid, deathWatch); return nil }).
-			AddErrorFn(func() error { return actorSystem.broadcastActor(pid) }).
+			AddErrorFn(func() error { return actorSystem.putActorOnCluster(pid) }).
 			Error(); err != nil {
 			return err
 		}
@@ -523,7 +523,7 @@ func (pid *PID) Restart(ctx context.Context) error {
 				if err := errorschain.New(errorschain.ReturnFirst()).
 					AddErrorFn(func() error { return tree.addNode(pid, child) }).
 					AddErrorFn(func() error { tree.addWatcher(child, deathWatch); return nil }).
-					AddErrorFn(func() error { return actorSystem.broadcastActor(child) }).
+					AddErrorFn(func() error { return actorSystem.putActorOnCluster(child) }).
 					Error(); err != nil {
 					return err
 				}
@@ -540,7 +540,7 @@ func (pid *PID) Restart(ctx context.Context) error {
 		return fmt.Errorf("actor=(%s) failed to restart: %w", pid.Name(), err)
 	}
 
-	pid.processing.Store(idle)
+	pid.processing.Store(IDLE)
 	pid.processState.ClearSuspended()
 	pid.startSupervision()
 	pid.startPassivation()
@@ -680,7 +680,7 @@ func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor, opts .
 	}
 
 	// set the actor in the given actor system registry
-	return cid, pid.ActorSystem().broadcastActor(cid)
+	return cid, pid.ActorSystem().putActorOnCluster(cid)
 }
 
 // Reinstate brings a previously suspended actor back into an active state.
@@ -1283,7 +1283,7 @@ func (pid *PID) doReceive(receiveCtx *ReceiveContext) {
 // message processing loop
 func (pid *PID) schedule() {
 	// only signal if the actor is not already processing messages
-	if pid.processing.CompareAndSwap(idle, busy) {
+	if pid.processing.CompareAndSwap(IDLE, BUSY) {
 		pid.workerPool.SubmitWork(pid.receiveLoop)
 	}
 }
@@ -1314,12 +1314,12 @@ func (pid *PID) receiveLoop() {
 		}
 
 		// if no more messages, change busy state to idle
-		if !pid.processing.CompareAndSwap(busy, idle) {
+		if !pid.processing.CompareAndSwap(BUSY, IDLE) {
 			return
 		}
 
 		// Check if new messages were added in the meantime and restart processing
-		if !pid.mailbox.IsEmpty() && pid.processing.CompareAndSwap(idle, busy) {
+		if !pid.mailbox.IsEmpty() && pid.processing.CompareAndSwap(IDLE, BUSY) {
 			continue
 		}
 		return

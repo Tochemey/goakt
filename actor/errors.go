@@ -136,7 +136,30 @@ var (
 
 	// ErrScheduledReferenceNotFound is returned when a reference to a scheduled job cannot be found.
 	ErrScheduledReferenceNotFound = errors.New("scheduled reference not found")
+
+	// ErrGrainActivationTimeout is returned when a Grain activation timed out
+	ErrGrainActivationTimeout = errors.New("grain activation timeout")
+
+	// ErrGrainActivationFailure is returned when Grain activation failed
+	ErrGrainActivationFailure = errors.New("grain activation failed")
+
+	// ErrGrainDeactivationFailure is returned when Grain deactivation failed
+	ErrGrainDeactivationFailure = errors.New("grain deactivation failed")
+
+	// ErrInvalidGrainIdentity is returned when a Grain identity is malformed or invalid.
+	ErrInvalidGrainIdentity = errors.New("invalid graind identity")
+
+	// ErrInstanceNotAnGrain is returned when the instantiated type does not implement the Grain interface.
+	ErrInstanceNotAnGrain = errors.New("failed to create instance. Reason: instance does not implement the Grain interface")
+
+	// ErrGrainNotRegistered is returned when attempting to use a Grain type that has not been registered.
+	ErrGrainNotRegistered = errors.New("grain type is not registered")
 )
+
+// NewErrReservedName formats an ErrReservedName with the given name.
+func NewErrReservedName(name string) error {
+	return fmt.Errorf("name=(%s) %w", name, ErrReservedName)
+}
 
 // NewErrActorNotFound formats an ErrActorNotFound with the given actor path.
 func NewErrActorNotFound(actorPath string) error {
@@ -171,6 +194,21 @@ func NewErrInvalidRemoteMessage(err error) error {
 // NewErrInitFailure wraps a base error with ErrInitFailure to indicate a startup failure.
 func NewErrInitFailure(err error) error {
 	return errors.Join(ErrInitFailure, err)
+}
+
+// NewErrGrainActivationFailure wraps a base error with ErrGrainActivationFailure to indicate a Grain activation failure
+func NewErrGrainActivationFailure(err error) error {
+	return errors.Join(ErrGrainActivationFailure, err)
+}
+
+// NewErrGrainDeactivationFailure wraps an error with ErrGrainDeactivationFailure to indicate a Grain deactivation failure
+func NewErrGrainDeactivationFailure(err error) error {
+	return errors.Join(ErrGrainDeactivationFailure, err)
+}
+
+// NewErrInvalidGrainIdentity wraps an error with ErrInvalidGrainIdentity to indicate a Grain identity issue.
+func NewErrInvalidGrainIdentity(err error) error {
+	return errors.Join(ErrInvalidGrainIdentity, err)
 }
 
 // PanicError defines the panic error
