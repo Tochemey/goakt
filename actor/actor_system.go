@@ -632,7 +632,7 @@ type actorSystem struct {
 
 	spawnOnNext  *atomic.Uint32
 	shuttingDown *atomic.Bool
-	grains      *collection.Map[Identity, *grainProcess]
+	grains       *collection.Map[Identity, *grainProcess]
 }
 
 var (
