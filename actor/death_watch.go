@@ -27,6 +27,7 @@ package actor
 import (
 	"context"
 
+	"github.com/tochemey/goakt/v3/address"
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/cluster"
 	"github.com/tochemey/goakt/v3/log"
@@ -86,10 +87,14 @@ func (x *deathWatch) handlePostStart(ctx *ReceiveContext) {
 // handleTerminated handles Terminated message
 func (x *deathWatch) handleTerminated(ctx context.Context, msg *goaktpb.Terminated) error {
 	actorID := msg.GetActorId()
+	addr, _ := address.Parse(actorID)
+	actorName := addr.Name()
 	x.logger.Infof("%s freeing resource [actor=%s] from system", x.pid.Name(), actorID)
 	if node, ok := x.tree.node(actorID); ok {
 		x.tree.deleteNode(node.value())
-		if x.clusterEnabled {
+
+		// since we don't replicate system actors, we don't need to make the cluster call
+		if x.clusterEnabled && !isReservedName(actorName) {
 			if err := x.cluster.RemoveActor(context.WithoutCancel(ctx), node.value().Name()); err != nil {
 				x.logger.Errorf("%s failed to remove [actor=%s] from cluster: %v", x.pid.Name(), actorID, err)
 				return NewInternalError(err)

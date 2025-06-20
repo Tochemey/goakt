@@ -91,9 +91,9 @@ func (x *systemGuardian) handleTerminated(ctx context.Context, msg *goaktpb.Term
 	systemName := x.system.Name()
 	addr, _ := address.Parse(actorID)
 	actorName := addr.Name()
-	if isReservedName(actorName) {
+	if !x.system.isShuttingDown() && isReservedName(actorName) {
 		// log a message error and stop the actor system
-		x.logger.Warnf("%s is down. %s is going to shutdown. Kindly check logs and fix any potential issue with the cluster",
+		x.logger.Warnf("%s is down. %s is going to shutdown. Kindly check logs and fix any potential issue with the system",
 			actorID,
 			systemName)
 

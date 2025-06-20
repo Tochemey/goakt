@@ -530,6 +530,7 @@ type ActorSystem interface { //nolint:revive
 	getWorkerPool() *workerpool.WorkerPool
 	getReflection() *reflection
 	findRoutee(routeeName string) (*PID, bool)
+	isShuttingDown() bool
 	getRemoting() *Remoting
 	getGrains() *collection.Map[Identity, *grainProcess]
 	// recreateGrain recreates a serialized Grain.
@@ -629,7 +630,8 @@ type actorSystem struct {
 	enableRelocation atomic.Bool
 	extensions       *collection.Map[string, extension.Extension]
 
-	spawnOnNext *atomic.Uint32
+	spawnOnNext  *atomic.Uint32
+	shuttingDown *atomic.Bool
 	grains      *collection.Map[Identity, *grainProcess]
 }
 
@@ -678,6 +680,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		topicActor:             nil,
 		extensions:             collection.NewMap[string, extension.Extension](),
 		spawnOnNext:            atomic.NewUint32(0),
+		shuttingDown:           atomic.NewBool(false),
 		grains:                 collection.NewMap[Identity, *grainProcess](),
 	}
 
@@ -2186,6 +2189,11 @@ func (x *actorSystem) findRoutee(routeeName string) (*PID, bool) {
 	return nil, false
 }
 
+// isShuttingDown checks whether the actor system is shutting down
+func (x *actorSystem) isShuttingDown() bool {
+	return x.shuttingDown.Load()
+}
+
 // getRemoting returns the remoting instance of the actor system
 // This method is used internally to access the remoting functionality
 // and is not intended for external use.
@@ -2491,6 +2499,7 @@ func (x *actorSystem) reset() {
 	x.extensions.Reset()
 	x.actors.reset()
 	x.spawnOnNext.Store(0)
+	x.shuttingDown.Store(false)
 	x.grains.Reset()
 }
 
@@ -2502,6 +2511,7 @@ func (x *actorSystem) shutdown(ctx context.Context) error {
 
 	x.stopGC <- types.Unit{}
 	x.logger.Infof("%s is shutting down..:)", x.name)
+	x.shuttingDown.Store(true)
 
 	defer func() {
 		x.started.Store(false)
