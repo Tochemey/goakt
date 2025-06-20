@@ -224,6 +224,9 @@ type ActorSystem interface { //nolint:revive
 	// If the actor is found locally, its PID is returned. If the actor resides on a remote host, its address is returned.
 	// If the actor is not found, an error of type "actor not found" is returned.
 	ActorOf(ctx context.Context, actorName string) (addr *address.Address, pid *PID, err error)
+	// ActorExists checks whether an actor with the given name exists in the system,
+	// either locally, or on another node in the cluster if clustering is enabled.
+	ActorExists(ctx context.Context, actorName string) (exists bool, err error)
 	// InCluster states whether the actor system has started within a cluster of nodes
 	InCluster() bool
 	// GetPartition returns the partition where a given actor is located
@@ -1534,6 +1537,30 @@ func (x *actorSystem) ActorOf(ctx context.Context, actorName string) (addr *addr
 	x.logger.Infof("actor=%s not found", actorName)
 	x.locker.Unlock()
 	return nil, nil, NewErrActorNotFound(actorName)
+}
+
+// ActorExists checks whether an actor with the given name exists in the system,
+// either locally, or on another node in the cluster if clustering is enabled.
+func (x *actorSystem) ActorExists(ctx context.Context, actorName string) (bool, error) {
+	x.locker.Lock()
+	defer x.locker.Unlock()
+
+	if !x.started.Load() {
+		return false, ErrActorSystemNotStarted
+	}
+
+	// check locally
+	actorAddress := x.actorAddress(actorName)
+	if _, ok := x.actors.node(actorAddress.String()); ok {
+		return true, nil
+	}
+
+	// check in the cluster
+	if x.clusterEnabled.Load() {
+		return x.cluster.ActorExists(ctx, actorName)
+	}
+
+	return false, nil
 }
 
 // LocalActor returns the reference of a local actor.
