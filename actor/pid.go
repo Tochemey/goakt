@@ -1425,43 +1425,38 @@ func (pid *PID) reset() {
 }
 
 // freeWatchers releases all the actors watching this actor
-func (pid *PID) freeWatchers(ctx context.Context) error {
+func (pid *PID) freeWatchers(ctx context.Context) {
 	logger := pid.logger
 	logger.Debugf("%s freeing all watcher actors...", pid.Name())
 	pnode, ok := pid.ActorSystem().tree().node(pid.ID())
 	if !ok {
 		pid.logger.Debugf("%s node not found in the actors tree", pid.Name())
-		return nil
+		return
 	}
 
 	watchers := pnode.Watchers
 	if watchers.Len() > 0 {
-		eg, ctx := errgroup.WithContext(ctx)
+		// this call will be fast no need of parallel processing
 		for _, watcher := range watchers.Items() {
 			watcher := watcher
-			eg.Go(func() error {
-				terminated := &goaktpb.Terminated{
-					ActorId: pid.ID(),
-				}
+			terminated := &goaktpb.Terminated{
+				ActorId: pid.ID(),
+			}
 
-				wid := watcher.value()
-				if wid.IsRunning() {
-					logger.Debugf("watcher=(%s) releasing watched=(%s)", wid.Name(), pid.Name())
-					// ignore error here because the watcher is running
-					_ = pid.Tell(ctx, wid, terminated)
-					wid.UnWatch(pid)
-					logger.Debugf("watcher=(%s) released watched=(%s)", wid.Name(), pid.Name())
-				}
-				return nil
-			})
+			wid := watcher.value()
+			if wid.IsRunning() {
+				logger.Debugf("watcher=(%s) releasing watched=(%s)", wid.Name(), pid.Name())
+				// ignore error here because the watcher is running
+				_ = pid.Tell(ctx, wid, terminated)
+				wid.UnWatch(pid)
+				logger.Debugf("watcher=(%s) released watched=(%s)", wid.Name(), pid.Name())
+			}
 		}
-		// no need to handle the error because the go routines will always return nil
-		_ = eg.Wait()
+
 		logger.Debugf("%s successfully frees all watcher actors...", pid.Name())
-		return nil
+		return
 	}
 	logger.Debugf("%s does not have any watcher actors. Maybe already freed.", pid.Name())
-	return nil
 }
 
 // freeWatchees releases all actors that have been watched by this actor
@@ -1476,19 +1471,14 @@ func (pid *PID) freeWatchees() error {
 
 	size := pnode.Watchees.Len()
 	if size > 0 {
-		eg := new(errgroup.Group)
+		// this call will be fast no need of parallel processing
 		for _, watched := range pnode.Watchees.Items() {
-			watched := watched
 			wid := watched.value()
-			eg.Go(func() error {
-				logger.Debugf("watcher=(%s) unwatching actor=(%s)", pid.Name(), wid.Name())
-				pid.UnWatch(wid)
-				logger.Debugf("watcher=(%s) successfully unwatch actor=(%s)", pid.Name(), wid.Name())
-				return nil
-			})
+			logger.Debugf("watcher=(%s) unwatching actor=(%s)", pid.Name(), wid.Name())
+			pid.UnWatch(wid)
+			logger.Debugf("watcher=(%s) successfully unwatch actor=(%s)", pid.Name(), wid.Name())
 		}
-		// no need to handle the error because the go routines will always return nil
-		_ = eg.Wait()
+
 		logger.Debugf("%s successfully unwatch all watched actors...", pid.Name())
 		return nil
 	}
@@ -1509,32 +1499,21 @@ func (pid *PID) freeChildren(ctx context.Context) error {
 	}
 
 	if descendants, ok := tree.descendants(pid); ok && len(descendants) > 0 {
-		eg, ctx := errgroup.WithContext(ctx)
 		for index, descendant := range descendants {
-			descendant := descendant
 			child := descendant.value()
-			index := index
-			eg.Go(func() error {
-				logger.Debugf("parent=(%s) disowning descendant=(%s)", pid.Name(), child.Name())
+			logger.Debugf("parent=(%s) disowning descendant=(%s)", pid.Name(), child.Name())
 
-				pid.UnWatch(child)
-				pnode.Descendants.Delete(index)
+			pid.UnWatch(child)
+			pnode.Descendants.Delete(index)
 
-				if err := child.Shutdown(ctx); err != nil {
-					errwrap := fmt.Errorf(
-						"parent=(%s) failed to disown descendant=(%s): %w", pid.Name(), child.Name(),
-						err,
-					)
-					return errwrap
-				}
-				logger.Debugf("parent=(%s) successfully disown descendant=(%s)", pid.Name(), child.Name())
-				return nil
-			})
+			if err := child.Shutdown(ctx); err != nil {
+				errwrap := fmt.Errorf("parent=(%s) failed to disown descendant=(%s): %w", pid.Name(), child.Name(), err)
+				return errwrap
+			}
+			logger.Debugf("parent=(%s) successfully disown descendant=(%s)", pid.Name(), child.Name())
+			return nil
 		}
-		if err := eg.Wait(); err != nil {
-			logger.Errorf("parent=(%s) failed to free all descendant actors: %v", pid.Name(), err)
-			return err
-		}
+
 		logger.Debugf("%s successfully free all descendant actors...", pid.Name())
 		return nil
 	}
@@ -1662,6 +1641,10 @@ func (pid *PID) doStop(ctx context.Context) error {
 		}
 	}
 
+	defer func() {
+		pid.reset()
+	}()
+
 	// stop supervisor loop
 	pid.supervisionStopSignal <- types.Unit{}
 
@@ -1674,8 +1657,6 @@ func (pid *PID) doStop(ctx context.Context) error {
 		AddErrorFn(func() error { return pid.freeWatchees() }).
 		AddErrorFn(func() error { return pid.freeChildren(ctx) }).
 		Error(); err != nil {
-		pid.processState.ClearRunning()
-		pid.reset()
 		return err
 	}
 
@@ -1686,16 +1667,12 @@ func (pid *PID) doStop(ctx context.Context) error {
 	if err := errorschain.
 		New(errorschain.ReturnFirst()).
 		AddErrorFn(func() error { return pid.actor.PostStop(stopContext) }).
-		AddErrorFn(func() error { return pid.freeWatchers(ctx) }).
+		AddErrorFn(func() error { pid.freeWatchers(ctx); return nil }).
 		Error(); err != nil {
-		pid.processState.ClearRunning()
-		pid.reset()
 		return err
 	}
 
-	pid.processState.ClearRunning()
 	pid.logger.Infof("shutdown process completed for actor=%s...", pid.Name())
-	pid.reset()
 	return nil
 }
 
