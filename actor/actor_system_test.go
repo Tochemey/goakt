@@ -224,6 +224,11 @@ func TestActorSystem(t *testing.T) {
 		// otherwise the subsequent test will return actor not found
 		util.Pause(time.Second)
 
+		// the actor should now exist
+		exists, err := newActorSystem.ActorExists(ctx, actorName)
+		require.NoError(t, err)
+		require.True(t, exists)
+
 		// get the actor
 		addr, _, err := newActorSystem.ActorOf(ctx, actorName)
 		require.NoError(t, err)
@@ -247,6 +252,10 @@ func TestActorSystem(t *testing.T) {
 
 		// assert actor not found
 		actorName = "some-actor"
+		exists, err = newActorSystem.ActorExists(ctx, actorName)
+		require.NoError(t, err)
+		require.False(t, exists)
+
 		addr, pid, err := newActorSystem.ActorOf(ctx, actorName)
 		require.Error(t, err)
 		require.ErrorIs(t, err, ErrActorNotFound)
@@ -341,6 +350,11 @@ func TestActorSystem(t *testing.T) {
 		assert.NoError(t, err)
 
 		actorName := "notFound"
+
+		exists, err := sys.ActorExists(ctx, actorName)
+		require.NoError(t, err)
+		require.False(t, exists)
+
 		addr, pid, err := sys.ActorOf(ctx, actorName)
 		require.Error(t, err)
 		require.ErrorIs(t, err, ErrActorNotFound)
