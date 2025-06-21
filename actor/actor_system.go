@@ -2480,7 +2480,7 @@ func (x *actorSystem) replicationLoop() {
 		if isReservedName(actor.GetAddress().GetName()) {
 			continue
 		}
-		if x.InCluster() {
+		if !x.isShuttingDown() && x.InCluster() {
 			ctx := context.Background()
 			if err := x.cluster.PutActor(ctx, actor); err != nil {
 				x.logger.Warn(err.Error())
@@ -2492,9 +2492,8 @@ func (x *actorSystem) replicationLoop() {
 // clusterEventsLoop listens to cluster events and send them to the event streams
 func (x *actorSystem) clusterEventsLoop() {
 	for event := range x.eventsQueue {
-		if x.InCluster() {
+		if !x.isShuttingDown() && x.InCluster() {
 			if event != nil && event.Payload != nil {
-				// push the event to the event stream
 				message, _ := event.Payload.UnmarshalNew()
 				if x.eventsStream != nil {
 					x.logger.Debugf("node=(%s) publishing cluster event=(%s)....", x.name, event.Type)
@@ -2545,7 +2544,7 @@ func (x *actorSystem) peersStateLoop() {
 			select {
 			case <-ticker.Ticks:
 				// stop ticking and close
-				if !x.started.Load() {
+				if x.isShuttingDown() || !x.started.Load() {
 					tickerStopSig <- types.Unit{}
 					return
 				}
