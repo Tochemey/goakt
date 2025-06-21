@@ -1497,16 +1497,25 @@ func (pid *PID) freeChildren(ctx context.Context) error {
 
 	children := tree.children(pid)
 	if len(children) > 0 {
+		eg, ctx := errgroup.WithContext(ctx)
 		for _, child := range children {
-			logger.Debugf("parent=(%s) disowning descendant=(%s)", pid.Name(), child.Name())
-			pid.UnWatch(child)
-			node.descendants.Delete(child.ID())
-			if child.IsRunning() {
-				if err := child.Shutdown(ctx); err != nil {
-					return fmt.Errorf("parent=(%s) failed to disown descendant=(%s): %w", pid.Name(), child.Name(), err)
+			eg.Go(func() error {
+				logger.Debugf("parent=(%s) disowning descendant=(%s)", pid.Name(), child.Name())
+				pid.UnWatch(child)
+				node.descendants.Delete(child.ID())
+				if child.IsRunning() {
+					if err := child.Shutdown(ctx); err != nil {
+						return fmt.Errorf("parent=(%s) failed to disown descendant=(%s): %w", pid.Name(), child.Name(), err)
+					}
+					logger.Debugf("parent=(%s) successfully disown descendant=(%s)", pid.Name(), child.Name())
 				}
-				logger.Debugf("parent=(%s) successfully disown descendant=(%s)", pid.Name(), child.Name())
-			}
+				return nil
+			})
+		}
+
+		if err := eg.Wait(); err != nil {
+			logger.Errorf("parent=(%s) failed to free all descendant actors: %v", pid.Name(), err)
+			return err
 		}
 
 		logger.Debugf("%s successfully free all descendant actors...", pid.Name())
@@ -1560,6 +1569,13 @@ func (pid *PID) passivationLoop() {
 
 	<-tickerStopSig
 	clock.Stop()
+
+	// if the actor system is shutting down it means that the actor stop mode has been triggered
+	if actoryStem := pid.ActorSystem(); actoryStem != nil {
+		if actoryStem.isShuttingDown() {
+			return
+		}
+	}
 
 	// Acquire stopLocker to synchronize with Shutdown and other stop triggers
 	pid.stopLocker.Lock()
@@ -2043,6 +2059,11 @@ func (pid *PID) startPassivation() {
 		!isLongLivedPassivationStrategy(pid.passivationStrategy) {
 		go pid.passivationLoop()
 	}
+}
+
+// isStopping checks whether the actor is stopping or not
+func (pid *PID) isStopping() bool {
+	return pid != nil && pid.stopping.Load() || !pid.running.Load()
 }
 
 // isLongLivedStrategy checks whether the given strategy is a long-lived strategy
