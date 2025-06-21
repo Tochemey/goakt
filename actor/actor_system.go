@@ -224,6 +224,9 @@ type ActorSystem interface { //nolint:revive
 	// If the actor is found locally, its PID is returned. If the actor resides on a remote host, its address is returned.
 	// If the actor is not found, an error of type "actor not found" is returned.
 	ActorOf(ctx context.Context, actorName string) (addr *address.Address, pid *PID, err error)
+	// ActorExists checks whether an actor with the given name exists in the system,
+	// either locally, or on another node in the cluster if clustering is enabled.
+	ActorExists(ctx context.Context, actorName string) (exists bool, err error)
 	// InCluster states whether the actor system has started within a cluster of nodes
 	InCluster() bool
 	// GetPartition returns the partition where a given actor is located
@@ -1582,6 +1585,30 @@ func (x *actorSystem) ActorOf(ctx context.Context, actorName string) (addr *addr
 	return nil, nil, NewErrActorNotFound(actorName)
 }
 
+// ActorExists checks whether an actor with the given name exists in the system,
+// either locally, or on another node in the cluster if clustering is enabled.
+func (x *actorSystem) ActorExists(ctx context.Context, actorName string) (bool, error) {
+	x.locker.Lock()
+	defer x.locker.Unlock()
+
+	if !x.started.Load() {
+		return false, ErrActorSystemNotStarted
+	}
+
+	// check locally
+	actorAddress := x.actorAddress(actorName)
+	if _, ok := x.actors.node(actorAddress.String()); ok {
+		return true, nil
+	}
+
+	// check in the cluster
+	if x.clusterEnabled.Load() {
+		return x.cluster.ActorExists(ctx, actorName)
+	}
+
+	return false, nil
+}
+
 // LocalActor returns the reference of a local actor.
 // A local actor is an actor that reside on the same node where the given actor system has started
 func (x *actorSystem) LocalActor(actorName string) (*PID, error) {
@@ -1958,7 +1985,7 @@ func (x *actorSystem) GetNodeMetric(_ context.Context, request *connect.Request[
 		return nil, connect.NewError(connect.CodeInvalidArgument, ErrInvalidHost)
 	}
 
-	actorCount := x.actors.length()
+	actorCount := x.actors.count()
 	return connect.NewResponse(
 		&internalpb.GetNodeMetricResponse{
 			NodeRemoteAddress: remoteAddr,
@@ -2603,7 +2630,7 @@ func (x *actorSystem) replicationActors() {
 		if isReservedName(actor.GetAddress().GetName()) {
 			continue
 		}
-		if x.InCluster() {
+		if !x.isShuttingDown() && x.InCluster() {
 			ctx := context.Background()
 			if err := x.cluster.PutActor(ctx, actor); err != nil {
 				x.logger.Warn(err.Error())
@@ -2615,9 +2642,8 @@ func (x *actorSystem) replicationActors() {
 // clusterEventsLoop listens to cluster events and send them to the event streams
 func (x *actorSystem) clusterEventsLoop() {
 	for event := range x.eventsQueue {
-		if x.InCluster() {
+		if !x.isShuttingDown() && x.InCluster() {
 			if event != nil && event.Payload != nil {
-				// push the event to the event stream
 				message, _ := event.Payload.UnmarshalNew()
 				if x.eventsStream != nil {
 					x.logger.Debugf("node=(%s) publishing cluster event=(%s)....", x.name, event.Type)
@@ -2668,7 +2694,7 @@ func (x *actorSystem) peersStateLoop() {
 			select {
 			case <-ticker.Ticks:
 				// stop ticking and close
-				if !x.started.Load() {
+				if x.isShuttingDown() || !x.started.Load() {
 					tickerStopSig <- types.Unit{}
 					return
 				}
@@ -2934,7 +2960,7 @@ func (x *actorSystem) spawnRootGuardian(ctx context.Context) error {
 	}
 
 	// rootGuardian is the rootGuardian node of the actors tree
-	_ = x.actors.addNode(nil, x.rootGuardian)
+	_ = x.actors.addRootNode(x.rootGuardian)
 	return nil
 }
 

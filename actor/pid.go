@@ -144,9 +144,12 @@ type PID struct {
 	// the list of dependencies
 	dependencies *collection.Map[string, extension.Dependency]
 
-	processState        *pidState
+	running   atomic.Bool
+	stopping  atomic.Bool
+	suspended atomic.Bool
+
 	passivationStrategy passivation.Strategy
-	passivationState    *passivationState
+	passivationPaused   *atomic.Bool
 }
 
 // newPID creates a new pid
@@ -181,14 +184,16 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 		supervisor:            NewSupervisor(),
 		startedAt:             atomic.NewInt64(0),
 		dependencies:          collection.NewMap[string, extension.Dependency](),
-		processState:          new(pidState),
 		passivationStrategy:   passivation.NewTimeBasedStrategy(DefaultPassivationTimeout),
-		passivationState:      new(passivationState),
+		passivationPaused:     atomic.NewBool(false),
 	}
 
 	pid.initMaxRetries.Store(DefaultInitMaxRetries)
 	pid.latestReceiveDuration.Store(0)
 	pid.isSingleton.Store(false)
+	pid.running.Store(false)
+	pid.stopping.Store(false)
+	pid.suspended.Store(false)
 	pid.initTimeout.Store(DefaultInitTimeout)
 	pid.processing.Store(int32(IDLE))
 	pid.relocatable.Store(true)
@@ -320,11 +325,11 @@ func (pid *PID) Child(name string) (*PID, error) {
 // Parent returns the parent of this PID
 func (pid *PID) Parent() *PID {
 	tree := pid.ActorSystem().tree()
-	parentNode, ok := tree.parentAt(pid, 0)
+	parent, ok := tree.parent(pid)
 	if !ok {
 		return nil
 	}
-	return parentNode.value()
+	return parent
 }
 
 // Children returns the list of all the direct descendants of the given actor
@@ -332,16 +337,10 @@ func (pid *PID) Parent() *PID {
 func (pid *PID) Children() []*PID {
 	pid.fieldsLocker.RLock()
 	tree := pid.ActorSystem().tree()
-	pnode, ok := tree.node(pid.ID())
-	if !ok {
-		pid.fieldsLocker.RUnlock()
-		return nil
-	}
 
-	descendants := pnode.Descendants.Items()
-	cids := make([]*PID, 0, len(descendants))
-	for _, cnode := range descendants {
-		cid := cnode.value()
+	children := tree.children(pid)
+	cids := make([]*PID, 0, len(children))
+	for _, cid := range children {
 		if cid.IsRunning() {
 			cids = append(cids, cid)
 		}
@@ -387,13 +386,16 @@ func (pid *PID) Stop(ctx context.Context, cid *PID) error {
 // IsRunning returns true when the actor is alive ready to process messages and false
 // when the actor is stopped or not started at all
 func (pid *PID) IsRunning() bool {
-	return pid != nil && pid.processState.IsRunnable()
+	return pid != nil &&
+		pid.running.Load() &&
+		!pid.stopping.Load() &&
+		!pid.suspended.Load()
 }
 
 // IsSuspended returns true when the actor is suspended
 // A suspended actor is a faulty actor
 func (pid *PID) IsSuspended() bool {
-	return pid.processState.IsSuspended()
+	return pid.suspended.Load()
 }
 
 // IsSingleton returns true when the actor is a singleton.
@@ -464,8 +466,8 @@ func (pid *PID) Restart(ctx context.Context) error {
 	children := pid.Children()
 	// get the parent node of the actor
 	parent := NoSender
-	if pnode, ok := tree.parentAt(pid, 0); ok {
-		parent = pnode.value()
+	if ppid, ok := tree.parent(pid); ok {
+		parent = ppid
 	}
 
 	if pid.IsRunning() {
@@ -535,13 +537,13 @@ func (pid *PID) Restart(ctx context.Context) error {
 	// wait for the child actor to spawn
 	if err := eg.Wait(); err != nil {
 		// disable messages processing
-		pid.processState.ClearRunning()
-		pid.processState.SetStopping()
+		pid.stopping.Store(true)
+		pid.running.Store(false)
 		return fmt.Errorf("actor=(%s) failed to restart: %w", pid.Name(), err)
 	}
 
 	pid.processing.Store(IDLE)
-	pid.processState.ClearSuspended()
+	pid.suspended.Store(false)
 	pid.startSupervision()
 	pid.startPassivation()
 
@@ -566,7 +568,7 @@ func (pid *PID) RestartCount() int {
 	return int(count)
 }
 
-// ChildrenCount returns the total number of childrenMap for the given PID
+// ChildrenCount returns the total number of children for the given PID
 func (pid *PID) ChildrenCount() int {
 	descendants := pid.Children()
 	return len(descendants)
@@ -1194,13 +1196,13 @@ func (pid *PID) Shutdown(ctx context.Context) error {
 	pid.stopLocker.Lock()
 	pid.logger.Infof("shutdown process has started for actor=(%s)...", pid.Name())
 
-	if !pid.processState.IsRunning() {
+	if !pid.running.Load() {
 		pid.logger.Infof("actor=%s is offline. Maybe it has been passivated or stopped already", pid.Name())
 		pid.stopLocker.Unlock()
 		return nil
 	}
 
-	pid.processState.SetStopping()
+	pid.stopping.Store(true)
 	if pid.passivationStrategy != nil && !isLongLivedPassivationStrategy(pid.passivationStrategy) {
 		pid.logger.Debug("sending a signal to stop passivation listener....")
 		pid.haltPassivationLnr <- types.Unit{}
@@ -1244,16 +1246,19 @@ func (pid *PID) UnWatch(cid *PID) {
 		return
 	}
 
-	for index, watchee := range pnode.Watchees.Items() {
-		if watchee.value().Equals(cid) {
-			pnode.Watchees.Delete(index)
+	pwatchees := tree.watchees(pid)
+	for _, watchee := range pwatchees {
+		if watchee.Equals(cid) {
+			pnode.watchees.Delete(watchee.ID())
 			break
 		}
 	}
 
-	for index, watcher := range cnode.Watchers.Items() {
-		if watcher.value().Equals(pid) {
-			cnode.Watchers.Delete(index)
+	// get the watchers of the child actor
+	cwatchers := tree.watchers(cid)
+	for _, watcher := range cwatchers {
+		if watcher.Equals(pid) {
+			cnode.watchers.Delete(watcher.ID())
 			break
 		}
 	}
@@ -1390,7 +1395,7 @@ func (pid *PID) init(ctx context.Context) error {
 		return e
 	}
 
-	pid.processState.SetRunning()
+	pid.running.Store(true)
 	pid.logger.Infof("%s successfully started.", pid.Name())
 
 	if pid.eventsStream != nil {
@@ -1416,79 +1421,61 @@ func (pid *PID) reset() {
 	pid.processedCount.Store(0)
 	pid.restartCount.Store(0)
 	pid.startedAt.Store(0)
-	pid.processState.Reset()
+	pid.stopping.Store(false)
+	pid.suspended.Store(false)
 	pid.supervisor.Reset()
 	pid.mailbox.Dispose()
 	pid.isSingleton.Store(false)
 	pid.relocatable.Store(true)
 	pid.dependencies.Reset()
+	pid.passivationPaused.Store(false)
 }
 
 // freeWatchers releases all the actors watching this actor
-func (pid *PID) freeWatchers(ctx context.Context) error {
+func (pid *PID) freeWatchers(ctx context.Context) {
 	logger := pid.logger
 	logger.Debugf("%s freeing all watcher actors...", pid.Name())
-	pnode, ok := pid.ActorSystem().tree().node(pid.ID())
-	if !ok {
-		pid.logger.Debugf("%s node not found in the actors tree", pid.Name())
-		return nil
-	}
+	tree := pid.ActorSystem().tree()
 
-	watchers := pnode.Watchers
-	if watchers.Len() > 0 {
-		eg, ctx := errgroup.WithContext(ctx)
-		for _, watcher := range watchers.Items() {
+	watchers := tree.watchers(pid)
+	if len(watchers) > 0 {
+		// this call will be fast no need of parallel processing
+		for _, watcher := range watchers {
 			watcher := watcher
-			eg.Go(func() error {
-				terminated := &goaktpb.Terminated{
-					ActorId: pid.ID(),
-				}
+			terminated := &goaktpb.Terminated{
+				ActorId: pid.ID(),
+			}
 
-				wid := watcher.value()
-				if wid.IsRunning() {
-					logger.Debugf("watcher=(%s) releasing watched=(%s)", wid.Name(), pid.Name())
-					// ignore error here because the watcher is running
-					_ = pid.Tell(ctx, wid, terminated)
-					wid.UnWatch(pid)
-					logger.Debugf("watcher=(%s) released watched=(%s)", wid.Name(), pid.Name())
-				}
-				return nil
-			})
+			if watcher.IsRunning() {
+				logger.Debugf("watcher=(%s) releasing watched=(%s)", watcher.Name(), pid.Name())
+				// ignore error here because the watcher is running
+				_ = pid.Tell(ctx, watcher, terminated)
+				watcher.UnWatch(pid)
+				logger.Debugf("watcher=(%s) released watched=(%s)", watcher.Name(), pid.Name())
+			}
 		}
-		// no need to handle the error because the go routines will always return nil
-		_ = eg.Wait()
+
 		logger.Debugf("%s successfully frees all watcher actors...", pid.Name())
-		return nil
+		return
 	}
 	logger.Debugf("%s does not have any watcher actors. Maybe already freed.", pid.Name())
-	return nil
 }
 
 // freeWatchees releases all actors that have been watched by this actor
 func (pid *PID) freeWatchees() error {
 	logger := pid.logger
 	logger.Debugf("%s freeing all watched actors...", pid.Name())
-	pnode, ok := pid.ActorSystem().tree().node(pid.ID())
-	if !ok {
-		pid.logger.Debugf("%s node not found in the actors tree", pid.Name())
-		return nil
-	}
 
-	size := pnode.Watchees.Len()
-	if size > 0 {
-		eg := new(errgroup.Group)
-		for _, watched := range pnode.Watchees.Items() {
-			watched := watched
-			wid := watched.value()
-			eg.Go(func() error {
-				logger.Debugf("watcher=(%s) unwatching actor=(%s)", pid.Name(), wid.Name())
-				pid.UnWatch(wid)
-				logger.Debugf("watcher=(%s) successfully unwatch actor=(%s)", pid.Name(), wid.Name())
-				return nil
-			})
+	tree := pid.ActorSystem().tree()
+	watchees := tree.watchees(pid)
+	if len(watchees) > 0 {
+		// this call will be fast no need of parallel processing
+		for _, watched := range watchees {
+			logger.Debugf("watcher=(%s) unwatching actor=(%s)", pid.Name(), watched.Name())
+			pid.UnWatch(watched)
+			logger.Debugf("watcher=(%s) successfully unwatch actor=(%s)", pid.Name(), watched.Name())
 		}
-		// no need to handle the error because the go routines will always return nil
-		_ = eg.Wait()
+
 		logger.Debugf("%s successfully unwatch all watched actors...", pid.Name())
 		return nil
 	}
@@ -1502,39 +1489,35 @@ func (pid *PID) freeChildren(ctx context.Context) error {
 	logger.Debugf("%s freeing all descendant actors...", pid.Name())
 
 	tree := pid.ActorSystem().tree()
-	pnode, ok := tree.node(pid.ID())
+	node, ok := tree.node(pid.ID())
 	if !ok {
 		pid.logger.Debugf("%s node not found in the actors tree", pid.Name())
 		return nil
 	}
 
-	if descendants, ok := tree.descendants(pid); ok && len(descendants) > 0 {
+	children := tree.children(pid)
+	if len(children) > 0 {
 		eg, ctx := errgroup.WithContext(ctx)
-		for index, descendant := range descendants {
-			descendant := descendant
-			child := descendant.value()
-			index := index
+		for _, child := range children {
 			eg.Go(func() error {
 				logger.Debugf("parent=(%s) disowning descendant=(%s)", pid.Name(), child.Name())
-
 				pid.UnWatch(child)
-				pnode.Descendants.Delete(index)
-
-				if err := child.Shutdown(ctx); err != nil {
-					errwrap := fmt.Errorf(
-						"parent=(%s) failed to disown descendant=(%s): %w", pid.Name(), child.Name(),
-						err,
-					)
-					return errwrap
+				node.descendants.Delete(child.ID())
+				if child.IsRunning() {
+					if err := child.Shutdown(ctx); err != nil {
+						return fmt.Errorf("parent=(%s) failed to disown descendant=(%s): %w", pid.Name(), child.Name(), err)
+					}
+					logger.Debugf("parent=(%s) successfully disown descendant=(%s)", pid.Name(), child.Name())
 				}
-				logger.Debugf("parent=(%s) successfully disown descendant=(%s)", pid.Name(), child.Name())
 				return nil
 			})
 		}
+
 		if err := eg.Wait(); err != nil {
 			logger.Errorf("parent=(%s) failed to free all descendant actors: %v", pid.Name(), err)
 			return err
 		}
+
 		logger.Debugf("%s successfully free all descendant actors...", pid.Name())
 		return nil
 	}
@@ -1571,7 +1554,6 @@ func (pid *PID) passivationLoop() {
 	}
 
 	clock.Start()
-	pid.passivationState.Started()
 
 	go func() {
 		for {
@@ -1588,15 +1570,21 @@ func (pid *PID) passivationLoop() {
 	<-tickerStopSig
 	clock.Stop()
 
-	// normal shutdown set the passivation as stopped
-	if pid.processState.IsStopping() {
-		pid.passivationState.Stopped()
-		pid.passivationState.Reset()
+	// if the actor system is shutting down it means that the actor stop mode has been triggered
+	if actoryStem := pid.ActorSystem(); actoryStem != nil {
+		if actoryStem.isShuttingDown() {
+			return
+		}
 	}
 
-	if pid.processState.IsStopping() ||
-		pid.processState.IsSuspended() ||
-		pid.passivationState.IsPaused() {
+	// Acquire stopLocker to synchronize with Shutdown and other stop triggers
+	pid.stopLocker.Lock()
+	defer pid.stopLocker.Unlock()
+
+	// Double-check the conditions after acquiring the lock
+	if pid.stopping.Load() ||
+		pid.suspended.Load() ||
+		pid.passivationPaused.Load() {
 		pid.logger.Infof("No need to passivate actor=%s", pid.Name())
 		return
 	}
@@ -1657,10 +1645,15 @@ func (pid *PID) doStop(ctx context.Context) error {
 	if pid.stashBox != nil {
 		if err := pid.unstashAll(); err != nil {
 			pid.logger.Errorf("actor=(%s) failed to unstash messages", pid.Name())
-			pid.processState.ClearRunning()
+			pid.running.Store(false)
 			return err
 		}
 	}
+
+	defer func() {
+		pid.running.Store(false)
+		pid.reset()
+	}()
 
 	// stop supervisor loop
 	pid.supervisionStopSignal <- types.Unit{}
@@ -1674,8 +1667,6 @@ func (pid *PID) doStop(ctx context.Context) error {
 		AddErrorFn(func() error { return pid.freeWatchees() }).
 		AddErrorFn(func() error { return pid.freeChildren(ctx) }).
 		Error(); err != nil {
-		pid.processState.ClearRunning()
-		pid.reset()
 		return err
 	}
 
@@ -1686,16 +1677,12 @@ func (pid *PID) doStop(ctx context.Context) error {
 	if err := errorschain.
 		New(errorschain.ReturnFirst()).
 		AddErrorFn(func() error { return pid.actor.PostStop(stopContext) }).
-		AddErrorFn(func() error { return pid.freeWatchers(ctx) }).
+		AddErrorFn(func() error { pid.freeWatchers(ctx); return nil }).
 		Error(); err != nil {
-		pid.processState.ClearRunning()
-		pid.reset()
 		return err
 	}
 
-	pid.processState.ClearRunning()
 	pid.logger.Infof("shutdown process completed for actor=%s...", pid.Name())
-	pid.reset()
 	return nil
 }
 
@@ -1905,10 +1892,10 @@ func (pid *PID) handleStopDirective(cid *PID, includeSiblings bool) {
 	pids := []*PID{cid}
 
 	if includeSiblings {
-		if siblings, ok := tree.siblings(cid); ok {
-			for _, sibling := range siblings {
-				pids = append(pids, sibling.value())
-			}
+		siblings := tree.siblings(cid)
+		if len(siblings) > 0 {
+			// add siblings to the list of actors to stop
+			pids = append(pids, siblings...)
 		}
 	}
 
@@ -1939,10 +1926,10 @@ func (pid *PID) handleRestartDirective(cid *PID, maxRetries uint32, timeout time
 	pids := []*PID{cid}
 
 	if includeSiblings {
-		if siblings, ok := tree.siblings(cid); ok {
-			for _, sibling := range siblings {
-				pids = append(pids, sibling.value())
-			}
+		siblings := tree.siblings(cid)
+		if len(siblings) > 0 {
+			// add siblings to the list of actors to restart
+			pids = append(pids, siblings...)
 		}
 	}
 
@@ -1986,7 +1973,7 @@ func (pid *PID) childAddress(name string) *address.Address {
 // suspend puts the actor in a suspension mode.
 func (pid *PID) suspend(reason string) {
 	pid.logger.Infof("%s going into suspension mode", pid.Name())
-	pid.processState.SetSuspended()
+	pid.suspended.Store(true)
 	// pause passivation loop
 	pid.pausePassivation()
 	// stop the supervisor loop
@@ -2030,7 +2017,7 @@ func (pid *PID) fireSystemMessage(ctx context.Context, message proto.Message) {
 
 func (pid *PID) doReinstate() {
 	pid.logger.Infof("%s has been reinstated", pid.Name())
-	pid.processState.ClearSuspended()
+	pid.suspended.Store(false)
 
 	// resume the supervisor loop
 	pid.startSupervision()
@@ -2046,16 +2033,16 @@ func (pid *PID) doReinstate() {
 
 // pausePassivation pauses the passivation loop
 func (pid *PID) pausePassivation() {
-	if pid.passivationState.IsRunning() && pid.passivationStrategy != nil {
+	if pid.passivationStrategy != nil {
 		pid.haltPassivationLnr <- types.Unit{}
-		pid.passivationState.Pause()
+		pid.passivationPaused.Store(true)
 	}
 }
 
 // resumePassivation resumes a paused passivation
 func (pid *PID) resumePassivation() {
-	if pid.passivationState.IsPaused() {
-		pid.passivationState.Resume()
+	if pid.passivationPaused.Load() {
+		pid.passivationPaused.Store(false)
 		pid.startPassivation()
 	}
 }
@@ -2072,6 +2059,11 @@ func (pid *PID) startPassivation() {
 		!isLongLivedPassivationStrategy(pid.passivationStrategy) {
 		go pid.passivationLoop()
 	}
+}
+
+// isStopping checks whether the actor is stopping or not
+func (pid *PID) isStopping() bool {
+	return pid != nil && pid.stopping.Load() || !pid.running.Load()
 }
 
 // isLongLivedStrategy checks whether the given strategy is a long-lived strategy
