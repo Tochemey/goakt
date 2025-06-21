@@ -537,7 +537,7 @@ func testCluster(t *testing.T, serverAddr string, opts ...testClusterOption) (Ac
 					new(MockActor),
 					new(MockEntity),
 				).
-				WithGrains(new(MockGrain)).
+				WithGrains(new(MockGrain), new(MockPersistentGrain)).
 				WithPartitionCount(7).
 				WithReplicaCount(1).
 				WithPeersPort(clusterPort).
@@ -955,11 +955,6 @@ func (m *MockGrain) OnActivate(ctx *GrainContext) error {
 	return nil
 }
 
-// Dependencies implements Grain.
-func (m *MockGrain) Dependencies() []extension.Dependency {
-	return nil
-}
-
 // OnDeactivate implements Grain.
 // nolint
 func (m *MockGrain) OnDeactivate(ctx *GrainContext) error {
@@ -970,11 +965,6 @@ type MockGrainActivation struct{}
 
 func NewMockGrainActivation() *MockGrainActivation {
 	return &MockGrainActivation{}
-}
-
-// Dependencies implements Grain.
-func (m *MockGrainActivation) Dependencies() []extension.Dependency {
-	return nil
 }
 
 // OnActivate implements Grain.
@@ -1003,11 +993,6 @@ type MockGrainDeactivation struct{}
 
 func NewMockGrainDeactivation() *MockGrainDeactivation {
 	return &MockGrainDeactivation{}
-}
-
-// Dependencies implements Grain.
-func (m *MockGrainDeactivation) Dependencies() []extension.Dependency {
-	return nil
 }
 
 // OnActivate implements Grain.
@@ -1043,11 +1028,6 @@ func NewMockGrainError() *MockGrainError {
 	return &MockGrainError{}
 }
 
-// Dependencies implements Grain.
-func (m *MockGrainError) Dependencies() []extension.Dependency {
-	return nil
-}
-
 // OnActivate implements Grain.
 func (m *MockGrainError) OnActivate(*GrainContext) error {
 	return nil
@@ -1078,4 +1058,84 @@ func (m *MockGrainError) ReceiveSync(ctx context.Context, message proto.Message)
 	default:
 		return nil, fmt.Errorf("unhandled message type %T", msg)
 	}
+}
+
+type MockPersistentGrain struct {
+	persistenceID string
+	currentState  *atomic.Pointer[testpb.Account]
+	stateStore    MockStateStore
+}
+
+var _ Grain = (*MockPersistentGrain)(nil)
+
+func NewPersistentGrain() *MockPersistentGrain {
+	return &MockPersistentGrain{}
+}
+
+func (g *MockPersistentGrain) OnActivate(ctx *GrainContext) error {
+	g.currentState = atomic.NewPointer(new(testpb.Account))
+	g.stateStore = ctx.Extension("MockStateStore").(MockStateStore)
+	g.persistenceID = ctx.Self().Name()
+	return g.recoverFromStore()
+}
+
+func (g *MockPersistentGrain) OnDeactivate(ctx *GrainContext) error {
+	return g.stateStore.WriteState(g.persistenceID, g.currentState.Load())
+}
+
+func (g *MockPersistentGrain) ReceiveSync(ctx context.Context, message proto.Message) (proto.Message, error) {
+	switch received := message.(type) {
+	case *testpb.CreditAccount:
+		// TODO: in production extra validation will be needed.
+		balance := received.GetBalance()
+		newBalance := g.currentState.Load().GetAccountBalance() + balance
+		g.currentState.Store(&testpb.Account{
+			AccountId:      g.persistenceID,
+			AccountBalance: newBalance,
+		})
+		// persist the actor state
+		if err := g.stateStore.WriteState(g.persistenceID, g.currentState.Load()); err != nil {
+			return nil, err
+		}
+		// here we are dealing with Ask which is the appropriate pattern for external applications that need
+		// response immediately
+		return g.currentState.Load(), nil
+	case *testpb.GetAccount:
+		return g.currentState.Load(), nil
+	default:
+		return nil, fmt.Errorf("receiveSync: unhandled message type %T", message)
+	}
+}
+
+func (g *MockPersistentGrain) ReceiveAsync(ctx context.Context, message proto.Message) error {
+	switch received := message.(type) {
+	case *testpb.CreateAccount:
+		balance := received.GetAccountBalance()
+		newBalance := g.currentState.Load().GetAccountBalance() + balance
+		g.currentState.Store(&testpb.Account{
+			AccountId:      g.persistenceID,
+			AccountBalance: newBalance,
+		})
+		// persist the actor state
+		if err := g.stateStore.WriteState(g.persistenceID, g.currentState.Load()); err != nil {
+			return err
+		}
+
+		return nil
+	default:
+		return fmt.Errorf("receiveAsync: unhandled message type %T", message)
+	}
+}
+
+func (g *MockPersistentGrain) recoverFromStore() error {
+	latestState, err := g.stateStore.GetLatestState(g.persistenceID)
+	if err != nil {
+		return fmt.Errorf("failed to get the latest state: %w", err)
+	}
+
+	if latestState != nil {
+		g.currentState.Store(latestState)
+	}
+
+	return nil
 }

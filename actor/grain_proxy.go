@@ -37,12 +37,11 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/durationpb"
 
-	"github.com/tochemey/goakt/v3/extension"
 	"github.com/tochemey/goakt/v3/internal/cluster"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 )
 
-// SendGrainAsync sends an asynchronous message to a Grain (virtual actor) identified by the given identity.
+// TellGrain sends an asynchronous message to a Grain (virtual actor) identified by the given identity.
 //
 // This method locates or activates the target Grain (locally or in the cluster) and delivers the provided
 // protobuf message without waiting for a response. Use this for fire-and-forget scenarios where no reply is expected.
@@ -55,7 +54,7 @@ import (
 //
 // Returns:
 //   - error: An error if the message could not be delivered or the system is not started.
-func (x *actorSystem) SendGrainAsync(ctx context.Context, identity *Identity, message proto.Message, opts ...GrainOption) error {
+func (x *actorSystem) TellGrain(ctx context.Context, identity *Identity, message proto.Message, opts ...GrainOption) error {
 	if !x.started.Load() {
 		return ErrActorSystemNotStarted
 	}
@@ -90,7 +89,7 @@ func (x *actorSystem) SendGrainAsync(ctx context.Context, identity *Identity, me
 	return err
 }
 
-// SendGrainSync sends a request message to a Grain identified by the given identity.
+// AskGrain sends a request message to a Grain identified by the given identity.
 //
 // It locates or spawns the target Grain (locally or in the cluster), sends the provided
 // protobuf message, and waits for a response or error. The request timeout and other
@@ -105,7 +104,7 @@ func (x *actorSystem) SendGrainAsync(ctx context.Context, identity *Identity, me
 // Returns:
 //   - proto.Message: the response from the Grain, if successful.
 //   - error: error if the request fails, times out, or the system is not started.
-func (x *actorSystem) SendGrainSync(ctx context.Context, identity *Identity, message proto.Message, opts ...GrainOption) (response proto.Message, err error) {
+func (x *actorSystem) AskGrain(ctx context.Context, identity *Identity, message proto.Message, opts ...GrainOption) (response proto.Message, err error) {
 	if !x.started.Load() {
 		return nil, ErrActorSystemNotStarted
 	}
@@ -369,7 +368,7 @@ func (x *actorSystem) remoteTellGrain(ctx context.Context, id *Identity, message
 	grain, err := x.getCluster().GetGrain(ctx, id.String())
 	if err != nil {
 		if errors.Is(err, cluster.ErrGrainNotFound) {
-			_, err := x.localSend(ctx, id, message, sender, timeout, true)
+			_, err := x.localSend(ctx, id, message, sender, timeout, false)
 			return err
 		}
 		return err
@@ -413,8 +412,7 @@ func (x *actorSystem) localSend(ctx context.Context, id *Identity, message proto
 
 	// Ensure the process is running
 	if !process.isRunning() {
-		process.processState.ClearSuspended()
-		process.processState.SetRunning()
+		process.running.Store(true)
 	}
 
 	// Build and send the request
@@ -463,42 +461,7 @@ func (x *actorSystem) ensureGrainProcess(ctx context.Context, id *Identity) (*gr
 		return process, nil
 	}
 
-	grain, err := x.reflection.NewGrain(id.Kind())
-	if err != nil {
-		return nil, err
-	}
-
-	process, err = x.createGrain(ctx, id, grain)
-	if err != nil {
-		return nil, err
-	}
 	return process, nil
-}
-
-// createGrain creates and activates a new Grain process.
-//
-// It instantiates the Grain, activates it, registers it locally, and (if in cluster mode)
-// registers it with the cluster.
-//
-// Parameters:
-//   - ctx: context for cancellation and timeout control.
-//   - identity: identity of the Grain to create.
-//   - grain: Grain instance to activate.
-//
-// Returns:
-//   - *grainProcess: the created and activated Grain process.
-//   - error: error if creation or activation fails.
-func (x *actorSystem) createGrain(ctx context.Context, identity *Identity, grain Grain) (*grainProcess, error) {
-	logger := x.logger
-
-	logger.Infof("creating grain (%s)...", identity.String())
-	process := newGrainProcess(identity, grain, x, grain.Dependencies()...)
-	if err := process.activate(ctx); err != nil {
-		return nil, err
-	}
-
-	x.grains.Set(*identity, process)
-	return process, x.putGrainOnCluster(process)
 }
 
 // recreateGrain recreates a serialized Grain.
@@ -526,17 +489,8 @@ func (x *actorSystem) recreateGrain(ctx context.Context, serializedGrain *intern
 		return err
 	}
 
-	// Parse dependencies if any
-	var dependencies []extension.Dependency
-	if deps := serializedGrain.GetDependencies(); len(deps) > 0 {
-		dependencies, err = x.getReflection().NewDependencies(deps...)
-		if err != nil {
-			return err
-		}
-	}
-
 	// Create and activate the grain process
-	process := newGrainProcess(identity, grain, x, dependencies...)
+	process := newGrainProcess(identity, grain, x)
 	if err := process.activate(ctx); err != nil {
 		return err
 	}

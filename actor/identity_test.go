@@ -38,7 +38,7 @@ func TestIdentity(t *testing.T) {
 	t.Run("With happy path", func(t *testing.T) {
 		grain := NewMockGrain()
 		name := "testGrain"
-		identity := NewIdentity(grain, name)
+		identity := newIdentity(grain, name)
 		require.NotNil(t, identity)
 		expectedKind := types.Name(grain)
 		expectedStr := fmt.Sprintf("%s%s%s", expectedKind, identitySeparator, name)
@@ -49,28 +49,28 @@ func TestIdentity(t *testing.T) {
 	t.Run("With empty name", func(t *testing.T) {
 		grain := NewMockGrain()
 		name := ""
-		identity := NewIdentity(grain, name)
+		identity := newIdentity(grain, name)
 		err := identity.Validate()
 		require.ErrorContains(t, err, "the [name] is required", "expected validation error for empty name")
 	})
 	t.Run("With name more than 255", func(t *testing.T) {
 		grain := NewMockGrain()
 		name := strings.Repeat("a", 300)
-		identity := NewIdentity(grain, name)
+		identity := newIdentity(grain, name)
 		err := identity.Validate()
 		require.ErrorContains(t, err, "grain name is too long. Maximum length is 255", "expected validation error for empty name")
 	})
 	t.Run("With invalid name", func(t *testing.T) {
 		grain := NewMockGrain()
 		name := "$omeN@me"
-		identity := NewIdentity(grain, name)
+		identity := newIdentity(grain, name)
 		err := identity.Validate()
 		require.ErrorContains(t, err, "must contain only word characters (i.e. [a-zA-Z0-9] plus non-leading '-' or '_')", "expected validation error for empty name")
 	})
 	t.Run("With valid parsing", func(t *testing.T) {
 		grain := NewMockGrain()
 		name := "testGrain"
-		identity := NewIdentity(grain, name)
+		identity := newIdentity(grain, name)
 		actual, err := toIdentity(identity.String())
 		require.NoError(t, err, "expected no error when parsing identity string")
 		require.True(t, identity.Equal(actual), "expected parsed identity to match original")
@@ -91,8 +91,8 @@ func TestIdentity(t *testing.T) {
 		grain := NewMockGrain()
 		name1 := "testGrain1"
 		name2 := "testGrain2"
-		identity1 := NewIdentity(grain, name1)
-		identity2 := NewIdentity(grain, name2)
+		identity1 := newIdentity(grain, name1)
+		identity2 := newIdentity(grain, name2)
 		require.False(t, identity1.Equal(identity2), "expected identities to be unequal")
 	})
 }

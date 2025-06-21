@@ -102,7 +102,7 @@ func (r *reflection) NewDependencies(dependencies ...*internalpb.Dependency) ([]
 func (r *reflection) NewGrain(kind string) (Grain, error) {
 	rtype, ok := r.registry.TypeOf(kind)
 	if !ok {
-		return nil, ErrTypeNotRegistered
+		return nil, ErrGrainNotRegistered
 	}
 
 	grainType := reflect.TypeOf((*Grain)(nil)).Elem()

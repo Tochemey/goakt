@@ -66,11 +66,10 @@ type grainProcess struct {
 
 	// the list of dependencies
 	dependencies *collection.Map[string, extension.Dependency]
-
-	processState *pidState
+	running      *atomic.Bool
 }
 
-func newGrainProcess(identity *Identity, grain Grain, actorSystem ActorSystem, dependencies ...extension.Dependency) *grainProcess {
+func newGrainProcess(identity *Identity, grain Grain, actorSystem ActorSystem) *grainProcess {
 	process := &grainProcess{
 		grain:             grain,
 		identity:          identity,
@@ -80,7 +79,7 @@ func newGrainProcess(identity *Identity, grain Grain, actorSystem ActorSystem, d
 		remoting:          actorSystem.getRemoting(),
 		workerPool:        actorSystem.getWorkerPool(),
 		dependencies:      collection.NewMap[string, extension.Dependency](),
-		processState:      new(pidState),
+		running:           atomic.NewBool(false),
 		latestReceiveTime: atomic.Time{},
 	}
 
@@ -88,19 +87,13 @@ func newGrainProcess(identity *Identity, grain Grain, actorSystem ActorSystem, d
 	process.initTimeout.Store(DefaultInitTimeout)
 	process.processing.Store(int32(IDLE))
 
-	if len(dependencies) > 0 {
-		for _, dep := range dependencies {
-			process.dependencies.Set(dep.ID(), dep)
-		}
-	}
-
 	return process
 }
 
 // activate activates the Grain
 func (proc *grainProcess) activate(ctx context.Context) error {
 	logger := proc.logger
-	logger.Infof("(%s) activating Grain %s ...", proc.actorSystem.PeerAddress(), proc.identity.String())
+	logger.Infof("Activating Grain %s ...", proc.identity.String())
 
 	grainContext := newGrainContext(ctx, proc.identity, proc.actorSystem)
 
@@ -112,21 +105,17 @@ func (proc *grainProcess) activate(ctx context.Context) error {
 	}); err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
 			cancel()
-			proc.logger.Errorf("(%s) Grain %s activation timed out.", proc.actorSystem.PeerAddress(), proc.identity.String())
+			proc.logger.Errorf("Grain %s activation timed out.", proc.identity.String())
 			return ErrGrainActivationTimeout
 		}
 
 		cancel()
-		proc.logger.Errorf("(%s) Grain %s activation failed.", proc.actorSystem.PeerAddress(), proc.identity.String())
+		proc.logger.Errorf("Grain %s activation failed.", proc.identity.String())
 		return NewErrGrainActivationFailure(err)
 	}
 
-	if proc.processState.IsSuspended() {
-		proc.processState.ClearSuspended()
-	}
-
-	proc.processState.SetRunning()
-	proc.logger.Infof("(%s) Grain %s successfully activated.", proc.actorSystem.PeerAddress(), proc.identity.String())
+	proc.running.Store(true)
+	proc.logger.Infof("Grain %s successfully activated.", proc.identity.String())
 	cancel()
 
 	return nil
@@ -135,7 +124,12 @@ func (proc *grainProcess) activate(ctx context.Context) error {
 // deactivate deactivates the Grain
 func (proc *grainProcess) deactivate(ctx context.Context) error {
 	logger := proc.logger
-	logger.Infof("(%s) deactivating Grain %s ...", proc.actorSystem.PeerAddress(), proc.identity.String())
+
+	defer func() {
+		proc.running.Store(false)
+	}()
+
+	logger.Infof("Deactivating Grain %s ...", proc.identity.String())
 	if proc.remoting != nil {
 		proc.remoting.Close()
 	}
@@ -145,30 +139,27 @@ func (proc *grainProcess) deactivate(ctx context.Context) error {
 	// run the PostStop hook and let watchers know
 	// you are terminated
 	if err := proc.grain.OnDeactivate(grainContext); err != nil {
-		proc.processState.ClearRunning()
-		proc.processState.ClearStopping()
-		proc.logger.Errorf("(%s) Grain %s deactivation failed.", proc.actorSystem.PeerAddress(), proc.identity.String())
+		proc.logger.Errorf("Grain %s deactivation failed.", proc.identity.String())
 		return NewErrGrainDeactivationFailure(err)
 	}
 
-	proc.processState.ClearRunning()
-	proc.processState.ClearStopping()
-	proc.processState.SetSuspended()
-	proc.logger.Infof("(%s) Grain %s successfully deactivated.", proc.actorSystem.PeerAddress(), proc.identity.String())
+	proc.logger.Infof("Grain %s successfully deactivated.", proc.identity.String())
 
 	return nil
 }
 
 // shutdown gracefully shuts down the given Grain
 func (proc *grainProcess) shutdown(ctx context.Context) error {
-	proc.logger.Infof("shutdown process has started for Grain=(%s)...", proc.identity.String())
+	proc.logger.Infof("Shutdown process has started for Grain=(%s)...", proc.identity.String())
 
-	if !proc.processState.IsRunning() {
-		proc.logger.Infof("actor=%s is offline. Maybe it has been passivated or stopped already", proc.identity.String())
+	if !proc.isRunning() {
 		return nil
 	}
 
-	proc.processState.SetStopping()
+	defer func() {
+		proc.running.Store(false)
+	}()
+
 	if err := proc.deactivate(ctx); err != nil {
 		proc.logger.Errorf("Grain (%s) failed to cleanly stop", proc.identity.String())
 		return err
@@ -181,7 +172,7 @@ func (proc *grainProcess) shutdown(ctx context.Context) error {
 // isRunning returns true when the actor is alive ready to process messages and false
 // when the actor is stopped or not started at all
 func (proc *grainProcess) isRunning() bool {
-	return proc != nil && proc.processState.IsRunnable()
+	return proc != nil && proc.running.Load()
 }
 
 // receive pushes a given message to the actor mailbox

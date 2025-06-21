@@ -55,7 +55,7 @@ type Identity struct {
 // ensure Identity implements the validation.Validator interface
 var _ validation.Validator = (*Identity)(nil)
 
-// NewIdentity constructs a Identity from a grain instance and a unique name.
+// newIdentity constructs a Identity from a grain instance and a unique name.
 //
 // It derives the grain kind via reflection and combines it with the provided name.
 // The resulting ID can be used for routing, activation, and identity management.
@@ -71,7 +71,7 @@ var _ validation.Validator = (*Identity)(nil)
 // Notes:
 //   - Kind is automatically derived and should not be manually set.
 //   - Name should be meaningful, unique, and safe for serialization.
-func NewIdentity(grain Grain, name string) *Identity {
+func newIdentity(grain Grain, name string) *Identity {
 	kind := types.Name(grain)
 	return &Identity{
 		kind: kind,

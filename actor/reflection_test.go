@@ -182,7 +182,7 @@ func TestReflection(t *testing.T) {
 		reflection := newReflection(tl)
 		actual, err := reflection.NewGrain("actor.fakeGrain")
 		assert.Error(t, err)
-		assert.ErrorIs(t, err, ErrTypeNotRegistered)
+		assert.ErrorIs(t, err, ErrGrainNotRegistered)
 		assert.Nil(t, actual)
 	})
 	t.Run("With NewGrain Grain interface not implemented", func(t *testing.T) {
