@@ -304,6 +304,31 @@ func (x *tree) siblings(pid *PID) []*PID {
 	return siblings
 }
 
+// children returns all direct child PIDs of the given PID.
+func (x *tree) children(pid *PID) []*PID {
+	x.RLock()
+	defer x.RUnlock()
+
+	if pid == nil || pid.Equals(NoSender) {
+		return nil
+	}
+
+	node, ok := x.pids.Get(pid.ID())
+	if !ok {
+		return nil
+	}
+
+	var result []*PID
+	for _, descendantNode := range node.descendants.Values() {
+		descendantPID := descendantNode.pid.Load()
+		if descendantPID != nil {
+			result = append(result, descendantPID)
+		}
+	}
+
+	return result
+}
+
 // descendants returns all descendant PIDs of the given PID in the tree.
 // Returns nil if PID is nil, NoSender, or not found.
 func (x *tree) descendants(pid *PID) []*PID {

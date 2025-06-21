@@ -1494,17 +1494,17 @@ func (pid *PID) freeChildren(ctx context.Context) error {
 		return nil
 	}
 
-	descendants := tree.descendants(pid)
-	if len(descendants) > 0 {
-		for _, descendant := range descendants {
-			logger.Debugf("parent=(%s) disowning descendant=(%s)", pid.Name(), descendant.Name())
-			pid.UnWatch(descendant)
-			node.descendants.Delete(descendant.ID())
-			if descendant.IsRunning() {
-				if err := descendant.Shutdown(ctx); err != nil {
-					return fmt.Errorf("parent=(%s) failed to disown descendant=(%s): %w", pid.Name(), descendant.Name(), err)
+	children := tree.children(pid)
+	if len(children) > 0 {
+		for _, child := range children {
+			logger.Debugf("parent=(%s) disowning descendant=(%s)", pid.Name(), child.Name())
+			pid.UnWatch(child)
+			node.descendants.Delete(child.ID())
+			if child.IsRunning() {
+				if err := child.Shutdown(ctx); err != nil {
+					return fmt.Errorf("parent=(%s) failed to disown descendant=(%s): %w", pid.Name(), child.Name(), err)
 				}
-				logger.Debugf("parent=(%s) successfully disown descendant=(%s)", pid.Name(), descendant.Name())
+				logger.Debugf("parent=(%s) successfully disown descendant=(%s)", pid.Name(), child.Name())
 			}
 		}
 

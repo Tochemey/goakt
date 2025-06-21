@@ -72,6 +72,16 @@ func TestTree(t *testing.T) {
 		err = tree.addNode(a, f)
 		require.NoError(t, err)
 
+		// get the direct children of node a
+		children := tree.children(a)
+		require.Len(t, children, 3)
+		expected := []string{"b", "e", "f"}
+		actual := make([]string, len(children))
+		for i, child := range children {
+			actual[i] = child.Name()
+		}
+		require.ElementsMatch(t, expected, actual)
+
 		// add e as a watcher of b
 		tree.addWatcher(b, e)
 
@@ -79,8 +89,8 @@ func TestTree(t *testing.T) {
 		// this should return e as the only watcher of b
 		watchers := tree.watchers(b)
 		require.Len(t, watchers, 2)
-		expected := []string{"a", "e"}
-		actual := make([]string, len(watchers))
+		expected = []string{"a", "e"}
+		actual = make([]string, len(watchers))
 		for i, watcher := range watchers {
 			actual[i] = watcher.Name()
 		}
@@ -419,6 +429,22 @@ func TestDeleteNode(t *testing.T) {
 		require.NotPanics(t, func() {
 			tree.deleteNode(pid)
 		})
+	})
+
+	t.Cleanup(tree.reset)
+}
+
+func TestChildren(t *testing.T) {
+	tree := newTree()
+	t.Run("nil pid", func(t *testing.T) {
+		children := tree.children(nil)
+		require.Empty(t, children)
+	})
+
+	t.Run("pid not in tree", func(t *testing.T) {
+		pid := &PID{address: address.New("not_in_tree", "TestSys", "host", 0), fieldsLocker: &sync.RWMutex{}, stopLocker: &sync.Mutex{}}
+		children := tree.children(pid)
+		require.Empty(t, children)
 	})
 
 	t.Cleanup(tree.reset)
