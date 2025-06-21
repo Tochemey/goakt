@@ -1912,7 +1912,7 @@ func (x *actorSystem) GetNodeMetric(_ context.Context, request *connect.Request[
 		return nil, connect.NewError(connect.CodeInvalidArgument, ErrInvalidHost)
 	}
 
-	actorCount := x.actors.length()
+	actorCount := x.actors.count()
 	return connect.NewResponse(
 		&internalpb.GetNodeMetricResponse{
 			NodeRemoteAddress: remoteAddr,
@@ -2783,7 +2783,7 @@ func (x *actorSystem) spawnRootGuardian(ctx context.Context) error {
 	}
 
 	// rootGuardian is the rootGuardian node of the actors tree
-	_ = x.actors.addNode(nil, x.rootGuardian)
+	_ = x.actors.addRootNode(x.rootGuardian)
 	return nil
 }
 

@@ -4133,7 +4133,7 @@ func TestDeadletterCountMetric(t *testing.T) {
 	util.Pause(time.Second)
 
 	// every message sent to the actor will result in deadletter
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		require.NoError(t, Tell(ctx, actorRef, new(testpb.TestSend)))
 	}
 
@@ -4179,11 +4179,11 @@ func TestWatch(t *testing.T) {
 	pid.Watch(pid2)
 	pnode, ok := pid2.ActorSystem().tree().node(pid2.ID())
 	require.True(t, ok)
-	watchers := pnode.Watchers
+	watchers := pnode.watchers
 
 	found := false
-	for _, watcher := range watchers.Items() {
-		if watcher.value().Equals(pid) {
+	for _, watcher := range watchers.Values() {
+		if watcher.Equals(pid) {
 			found = true
 			break
 		}
