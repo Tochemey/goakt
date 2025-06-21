@@ -123,7 +123,7 @@ func TestOption(t *testing.T) {
 
 func TestWithCoordinatedShutdown(t *testing.T) {
 	system := new(actorSystem)
-	shutdownHook := func(context.Context) error { return nil }
+	shutdownHook := func(context.Context, ActorSystem) error { return nil }
 	opt := WithCoordinatedShutdown(shutdownHook)
 	opt.Apply(system)
 	assert.EqualValues(t, 1, len(system.shutdownHooks))

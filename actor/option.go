@@ -37,7 +37,7 @@ import (
 
 // ShutdownHook defines the shutdown hook to be executed alongside the
 // termination of the actor system
-type ShutdownHook func(ctx context.Context) error
+type ShutdownHook func(ctx context.Context, actorSystem ActorSystem) error
 
 // Option is the interface that applies a configuration option.
 type Option interface {

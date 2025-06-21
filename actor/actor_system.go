@@ -2423,7 +2423,7 @@ func (x *actorSystem) shutdown(ctx context.Context) error {
 	// Run shutdown hooks and collect errors
 	var hooksErrs []error
 	for _, hook := range x.shutdownHooks {
-		if err := hook(ctx); err != nil {
+		if err := hook(ctx, x); err != nil {
 			x.logger.Errorf("shutdown hook execution failed: %v", err)
 			hooksErrs = append(hooksErrs, err)
 		}

@@ -1618,7 +1618,7 @@ func TestActorSystem(t *testing.T) {
 	})
 	t.Run("With CoordinatedShutdown failure", func(t *testing.T) {
 		ctx := context.TODO()
-		shutdownHook := func(context.Context) error { return errors.New("shutdown failure") }
+		shutdownHook := func(context.Context, ActorSystem) error { return errors.New("shutdown failure") }
 
 		sys, _ := NewActorSystem("testSys",
 			WithCoordinatedShutdown(shutdownHook),
@@ -1645,8 +1645,10 @@ func TestActorSystem(t *testing.T) {
 	t.Run("With CoordinatedShutdown", func(t *testing.T) {
 		ctx := context.TODO()
 		counter := atomic.NewInt32(0)
-		shutdownHook := func(context.Context) error {
+		var shutdownSystem ActorSystem
+		shutdownHook := func(_ context.Context, sys ActorSystem) error {
 			counter.Add(1)
+			shutdownSystem = sys
 			return nil
 		}
 
@@ -1676,6 +1678,7 @@ func TestActorSystem(t *testing.T) {
 
 		assert.Zero(t, sys.Uptime())
 		require.EqualValues(t, 2, counter.Load())
+		require.Same(t, sys, shutdownSystem)
 	})
 	t.Run("With ActorRefs", func(t *testing.T) {
 		// create a context
