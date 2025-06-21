@@ -587,7 +587,7 @@ func TestRestart(t *testing.T) {
 
 		// let us send 10 messages to the actor
 		count := 10
-		for i := 0; i < count; i++ {
+		for range count {
 			err := Tell(ctx, pid, new(testpb.TestSend))
 			require.NoError(t, err)
 		}

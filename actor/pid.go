@@ -149,7 +149,7 @@ type PID struct {
 	suspended atomic.Bool
 
 	passivationStrategy passivation.Strategy
-	passivationState    *passivationState
+	passivationPaused   *atomic.Bool
 }
 
 // newPID creates a new pid
@@ -185,7 +185,7 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 		startedAt:             atomic.NewInt64(0),
 		dependencies:          collection.NewMap[string, extension.Dependency](),
 		passivationStrategy:   passivation.NewTimeBasedStrategy(DefaultPassivationTimeout),
-		passivationState:      new(passivationState),
+		passivationPaused:     atomic.NewBool(false),
 	}
 
 	pid.initMaxRetries.Store(DefaultInitMaxRetries)
@@ -338,9 +338,9 @@ func (pid *PID) Children() []*PID {
 	pid.fieldsLocker.RLock()
 	tree := pid.ActorSystem().tree()
 
-	descendants := tree.descendants(pid)
-	cids := make([]*PID, 0, len(descendants))
-	for _, cid := range descendants {
+	children := tree.children(pid)
+	cids := make([]*PID, 0, len(children))
+	for _, cid := range children {
 		if cid.IsRunning() {
 			cids = append(cids, cid)
 		}
@@ -568,7 +568,7 @@ func (pid *PID) RestartCount() int {
 	return int(count)
 }
 
-// ChildrenCount returns the total number of childrenMap for the given PID
+// ChildrenCount returns the total number of children for the given PID
 func (pid *PID) ChildrenCount() int {
 	descendants := pid.Children()
 	return len(descendants)
@@ -1428,6 +1428,7 @@ func (pid *PID) reset() {
 	pid.isSingleton.Store(false)
 	pid.relocatable.Store(true)
 	pid.dependencies.Reset()
+	pid.passivationPaused.Store(false)
 }
 
 // freeWatchers releases all the actors watching this actor
@@ -1544,7 +1545,6 @@ func (pid *PID) passivationLoop() {
 	}
 
 	clock.Start()
-	pid.passivationState.Started()
 
 	go func() {
 		for {
@@ -1561,15 +1561,14 @@ func (pid *PID) passivationLoop() {
 	<-tickerStopSig
 	clock.Stop()
 
-	// normal shutdown set the passivation as stopped
-	if pid.stopping.Load() {
-		pid.passivationState.Stopped()
-		pid.passivationState.Reset()
-	}
+	// Acquire stopLocker to synchronize with Shutdown and other stop triggers
+	pid.stopLocker.Lock()
+	defer pid.stopLocker.Unlock()
 
+	// Double-check the conditions after acquiring the lock
 	if pid.stopping.Load() ||
 		pid.suspended.Load() ||
-		pid.passivationState.IsPaused() {
+		pid.passivationPaused.Load() {
 		pid.logger.Infof("No need to passivate actor=%s", pid.Name())
 		return
 	}
@@ -2018,16 +2017,16 @@ func (pid *PID) doReinstate() {
 
 // pausePassivation pauses the passivation loop
 func (pid *PID) pausePassivation() {
-	if pid.passivationState.IsRunning() && pid.passivationStrategy != nil {
+	if pid.passivationStrategy != nil {
 		pid.haltPassivationLnr <- types.Unit{}
-		pid.passivationState.Pause()
+		pid.passivationPaused.Store(true)
 	}
 }
 
 // resumePassivation resumes a paused passivation
 func (pid *PID) resumePassivation() {
-	if pid.passivationState.IsPaused() {
-		pid.passivationState.Resume()
+	if pid.passivationPaused.Load() {
+		pid.passivationPaused.Store(false)
 		pid.startPassivation()
 	}
 }
