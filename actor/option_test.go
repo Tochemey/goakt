@@ -91,11 +91,6 @@ func TestOption(t *testing.T) {
 			expected: actorSystem{clusterEnabled: atomicTrue, clusterConfig: clusterConfig},
 		},
 		{
-			name:     "WithPeerStateLoopInterval",
-			option:   WithPeerStateLoopInterval(2 * time.Second),
-			expected: actorSystem{peersStateLoopInterval: 2. * time.Second},
-		},
-		{
 			name:     "WithTLS",
 			option:   WithTLS(tlsInfo),
 			expected: actorSystem{serverTLS: tlsConfig, clientTLS: tlsConfig},
@@ -119,6 +114,14 @@ func TestOption(t *testing.T) {
 			assert.Equal(t, tc.expected, system)
 		})
 	}
+}
+
+func TestWithPeerStateInterval(t *testing.T) {
+	system := new(actorSystem)
+	system.clusterConfig = NewClusterConfig()
+	opt := WithPeerStateLoopInterval(10 * time.Second)
+	opt.Apply(system)
+	assert.EqualValues(t, 10*time.Second, system.clusterConfig.PeersStateSyncInterval())
 }
 
 func TestWithCoordinatedShutdown(t *testing.T) {
