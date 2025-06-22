@@ -41,21 +41,24 @@ var defaultKinds = []Actor{
 
 // ClusterConfig defines the cluster mode settings
 type ClusterConfig struct {
-	discovery          discovery.Provider
-	partitionCount     uint64
-	minimumPeersQuorum uint32
-	replicaCount       uint32
-	writeQuorum        uint32
-	readQuorum         uint32
-	discoveryPort      int
-	peersPort          int
-	kinds              *collection.Map[string, Actor]
-	tableSize          uint64
-	wal                *string
-	grains             *collection.Map[string, Grain]
-	writeTimeout       time.Duration
-	readTimeout        time.Duration
-	shutdownTimeout    time.Duration
+	discovery                discovery.Provider
+	partitionCount           uint64
+	minimumPeersQuorum       uint32
+	replicaCount             uint32
+	writeQuorum              uint32
+	readQuorum               uint32
+	discoveryPort            int
+	peersPort                int
+	kinds                    []Actor
+	tableSize                uint64
+	wal                      *string
+	grains                   *collection.Map[string, Grain]
+	writeTimeout             time.Duration
+	readTimeout              time.Duration
+	shutdownTimeout          time.Duration
+	bootstrapTimeout         time.Duration
+	clusterStateSyncInterval time.Duration
+	peersStateSyncInterval   time.Duration
 }
 
 // enforce compilation error
@@ -64,17 +67,20 @@ var _ validation.Validator = (*ClusterConfig)(nil)
 // NewClusterConfig creates an instance of ClusterConfig
 func NewClusterConfig() *ClusterConfig {
 	c := &ClusterConfig{
-		kinds:              collection.NewMap[string, Actor](),
-		grains:             collection.NewMap[string, Grain](),
-		minimumPeersQuorum: 1,
-		writeQuorum:        1,
-		readQuorum:         1,
-		replicaCount:       1,
-		partitionCount:     271,
-		tableSize:          20 * size.MB,
-		writeTimeout:       time.Second,
-		readTimeout:        time.Second,
-		shutdownTimeout:    3 * time.Minute,
+		kinds:                    collection.NewMap[string, Actor](),
+		grains:                   collection.NewMap[string, Grain](),
+		minimumPeersQuorum:       1,
+		writeQuorum:              1,
+		readQuorum:               1,
+		replicaCount:             1,
+		partitionCount:           271,
+		tableSize:                20 * size.MB,
+		writeTimeout:             time.Second,
+		readTimeout:              time.Second,
+		shutdownTimeout:          3 * time.Minute,
+		bootstrapTimeout:         DefaultClusterBootstrapTimeout,
+		clusterStateSyncInterval: DefaultClusterStateSyncInterval,
+		peersStateSyncInterval:   DefaultPeerStateSyncInterval,
 	}
 	fnActor := new(FuncActor)
 	c.kinds.Set(types.Name(fnActor), fnActor)
@@ -148,47 +154,229 @@ func (x *ClusterConfig) WithWAL(dir string) *ClusterConfig {
 	return x
 }
 
-// WithWriteTimeout sets the write timeout.
-// This is the timeout for write operations to the cluster.
+// WithWriteTimeout sets the write timeout for cluster write operations.
+//
+// This timeout specifies the maximum duration allowed for a write operation to complete
+// before it is considered failed. If a write operation exceeds this duration, it will be
+// aborted and an error will be returned. Adjust this value based on your cluster's expected
+// workload and network conditions to balance responsiveness and reliability.
+//
+// Example:
+//
+//	cfg := NewClusterConfig().WithWriteTimeout(2 * time.Second)
+//
+// Returns the updated ClusterConfig instance for chaining.
 func (x *ClusterConfig) WithWriteTimeout(timeout time.Duration) *ClusterConfig {
 	x.writeTimeout = timeout
 	return x
 }
 
-// WithReadTimeout sets the read timeout.
-// This is the timeout for read operations to the cluster.
+// WithReadTimeout sets the read timeout for cluster read operations.
+//
+// This timeout specifies the maximum duration allowed for a read operation to complete
+// before it is considered failed. If a read operation exceeds this duration, it will be
+// aborted and an error will be returned. Adjust this value based on your cluster's expected
+// workload and network conditions to balance responsiveness and reliability.
+//
+// Example:
+//
+//	cfg := NewClusterConfig().WithReadTimeout(2 * time.Second)
+//
+// Returns the updated ClusterConfig instance for chaining.
 func (x *ClusterConfig) WithReadTimeout(timeout time.Duration) *ClusterConfig {
 	x.readTimeout = timeout
 	return x
 }
 
-// WithShutdownTimeout sets the shutdown timeout.
-// This is the timeout for graceful shutdown of the cluster.
-// The timeout should be less or proportional to the actor's shutdown timeout to allow a clean graceful shutdown.
+// WithShutdownTimeout sets the timeout for graceful cluster shutdown.
+//
+// This timeout determines the maximum duration allowed for the cluster to shut down gracefully.
+// It should be less than or proportional to the actor's shutdown timeout to ensure a clean shutdown
+// process. If the shutdown process exceeds this duration, it may be forcibly terminated.
+//
+// Example:
+//
+//	cfg := NewClusterConfig().WithShutdownTimeout(1 * time.Minute)
+//
+// Returns the updated ClusterConfig instance for chaining.
 func (x *ClusterConfig) WithShutdownTimeout(timeout time.Duration) *ClusterConfig {
 	x.shutdownTimeout = timeout
 	return x
 }
 
-// WriteTimeout returns the write timeout.
-// This is the timeout for write operations to the cluster.
+// WithBootstrapTimeout sets the timeout for the cluster bootstrap process.
+//
+// This timeout determines the maximum duration the cluster will wait for all
+// required nodes to join and complete the bootstrap sequence before considering
+// the operation as failed. If the cluster does not bootstrap within this period,
+// an error will be returned and the cluster will not start.
+//
+// Use this option to control startup responsiveness in environments where
+// cluster formation speed is critical, such as automated deployments or
+// orchestrated environments. The default value is 10 seconds.
+//
+// Example usage:
+//
+//	cfg := NewClusterConfig().WithBootstrapTimeout(15 * time.Second)
+//
+// Returns the updated ClusterConfig instance for chaining.
+func (x *ClusterConfig) WithBootstrapTimeout(timeout time.Duration) *ClusterConfig {
+	x.bootstrapTimeout = timeout
+	return x
+}
+
+// WithClusterStateSyncInterval sets the interval for syncing nodes' routing tables.
+//
+// This interval determines how frequently the cluster synchronizes its routing tables
+// across all nodes. Regular synchronization ensures that each node has an up-to-date
+// view of the cluster topology, which is essential for accurate message routing and
+// partition management.
+//
+// It is important to set this interval to a value greater than the write timeout to
+// avoid updating the routing table while a write operation is in progress. Setting
+// the interval too low may increase network and processing overhead, while setting it
+// too high may delay the propagation of cluster topology changes.
+//
+// The default value is 1 minute, which provides a balance between consistency and
+// resource usage. Adjust this value based on your cluster's size, network
+// characteristics, and desired responsiveness.
+//
+// Example usage:
+//
+//	cfg := NewClusterConfig().WithClusterStateSyncInterval(2 * time.Minute)
+//
+// Returns the updated ClusterConfig instance for chaining.
+func (x *ClusterConfig) WithClusterStateSyncInterval(interval time.Duration) *ClusterConfig {
+	x.clusterStateSyncInterval = interval
+	return x
+}
+
+// WithPeersStateSyncInterval sets the interval for syncing peers' state.
+//
+// This interval determines how frequently each peer in the cluster synchronizes
+// its view of other peers' states and updates its local cache. Regular synchronization
+// is crucial for maintaining an up-to-date and consistent view of the cluster topology,
+// especially in dynamic environments where nodes may join or leave frequently.
+//
+// A shorter interval allows the cluster to react more quickly to changes (such as
+// node failures or redeployments), but may increase network and processing overhead.
+// A longer interval reduces overhead but may delay detection of cluster changes.
+//
+// The default value is 10 seconds, which provides a balance between responsiveness
+// and resource usage. Adjust this value based on your cluster's size, network
+// characteristics, and desired responsiveness.
+//
+// Example usage:
+//
+//	cfg := NewClusterConfig().WithPeersStateSyncInterval(15 * time.Second)
+//
+// Returns the updated ClusterConfig instance for chaining.
+func (x *ClusterConfig) WithPeersStateSyncInterval(interval time.Duration) *ClusterConfig {
+	x.peersStateSyncInterval = interval
+	return x
+}
+
+// ClusterStateSyncInterval returns the interval at which the cluster synchronizes its routing tables across all nodes.
+//
+// This interval determines how frequently the cluster updates its internal routing information to reflect changes
+// in topology, such as node joins or departures. Keeping routing tables up-to-date is essential for accurate message
+// delivery and partition management.
+//
+// It is recommended to set this interval to a value greater than the write timeout to avoid updating routing tables
+// during ongoing write operations. A shorter interval increases consistency and responsiveness to cluster changes,
+// but may introduce additional network and processing overhead. Conversely, a longer interval reduces overhead but
+// may delay the propagation of topology changes.
+//
+// The default value is 1 minute. Adjust this value based on your cluster's size, network characteristics, and
+// required responsiveness.
+//
+// Example:
+//
+//	cfg := NewClusterConfig().WithClusterStateSyncInterval(2 * time.Minute)
+//
+// Returns the configured sync interval.
+func (x *ClusterConfig) ClusterStateSyncInterval() time.Duration {
+	return x.clusterStateSyncInterval
+}
+
+// BootstrapTimeout returns the maximum duration the cluster will wait for all required nodes to join and complete
+// the bootstrap sequence before considering the operation as failed.
+//
+// If the cluster does not bootstrap within this timeout, an error is returned and the cluster will not start.
+// This setting is useful for controlling startup responsiveness, especially in automated or orchestrated environments
+// where rapid cluster formation is critical.
+//
+// The default value is 10 seconds. Increase this value if your environment has slow node startups or network delays.
+//
+// Example:
+//
+//	cfg := NewClusterConfig().WithBootstrapTimeout(15 * time.Second)
+//
+// Returns the configured bootstrap timeout.
+func (x *ClusterConfig) BootstrapTimeout() time.Duration {
+	return x.bootstrapTimeout
+}
+
+// PeersStateSyncInterval returns the interval at which each peer in the cluster synchronizes
+// its view of other peers' states and updates its local cache.
+//
+// This interval is crucial for maintaining an up-to-date and consistent view of the cluster topology,
+// especially in dynamic environments where nodes may join or leave frequently. A shorter interval allows
+// the cluster to react more quickly to changes (such as node failures or redeployments), but may increase
+// network and processing overhead. A longer interval reduces overhead but may delay detection of cluster changes.
+//
+// The default value is 10 seconds. Adjust this value based on your cluster's size, network characteristics,
+// and desired responsiveness.
+//
+// Example:
+//
+//	cfg := NewClusterConfig().WithPeersStateSyncInterval(15 * time.Second)
+//
+// Returns the configured peers state sync interval.
+func (x *ClusterConfig) PeersStateSyncInterval() time.Duration {
+	return x.peersStateSyncInterval
+}
+
+// WriteTimeout returns the configured write timeout for cluster write operations.
+//
+// This value represents the maximum duration a write operation is allowed to take before
+// being considered failed. Use this to tune the responsiveness and reliability of write
+// operations in your cluster.
+//
+// Returns the write timeout as a time.Duration.
 func (x *ClusterConfig) WriteTimeout() time.Duration {
 	return x.writeTimeout
 }
 
-// ReadTimeout returns the read timeout.
-// This is the timeout for read operations to the cluster.
+// ReadTimeout returns the configured read timeout for cluster read operations.
+//
+// This value represents the maximum duration a read operation is allowed to take before
+// being considered failed. Use this to tune the responsiveness and reliability of read
+// operations in your cluster.
+//
+// Returns the read timeout as a time.Duration.
 func (x *ClusterConfig) ReadTimeout() time.Duration {
 	return x.readTimeout
 }
 
-// ShutdownTimeout returns the shutdown timeout.
-// This is the timeout for graceful shutdown of the cluster.
+// ShutdownTimeout returns the configured timeout for graceful cluster shutdown.
+//
+// This value determines how long the cluster will wait for all shutdown operations to
+// complete before forcing termination. Adjust this value to ensure a clean and orderly
+// shutdown process.
+//
+// Returns the shutdown timeout as a time.Duration.
 func (x *ClusterConfig) ShutdownTimeout() time.Duration {
 	return x.shutdownTimeout
 }
 
-// ReplicaCount returns the replica count.
+// ReplicaCount returns the configured number of replicas for the cluster.
+//
+// This value determines how many copies of each partition are maintained across the cluster
+// for redundancy and fault tolerance. Increasing the replica count improves data availability
+// but may increase resource usage.
+//
+// Returns the replica count as a uint32.
 func (x *ClusterConfig) ReplicaCount() uint32 {
 	return x.replicaCount
 }

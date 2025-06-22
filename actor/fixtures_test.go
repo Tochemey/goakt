@@ -530,7 +530,6 @@ func testCluster(t *testing.T, serverAddr string, opts ...testClusterOption) (Ac
 	options := []Option{
 		WithLogger(logger),
 		WithRemote(remote.NewConfig(host, remotingPort)),
-		WithPeerStateLoopInterval(500 * time.Millisecond),
 		WithCluster(
 			NewClusterConfig().
 				WithKinds(
@@ -543,6 +542,9 @@ func testCluster(t *testing.T, serverAddr string, opts ...testClusterOption) (Ac
 				WithPeersPort(clusterPort).
 				WithMinimumPeersQuorum(1).
 				WithDiscoveryPort(discoveryPort).
+				WithBootstrapTimeout(time.Second).
+				WithClusterStateSyncInterval(300 * time.Millisecond).
+				WithPeersStateSyncInterval(500 * time.Millisecond).
 				WithDiscovery(provider)),
 	}
 

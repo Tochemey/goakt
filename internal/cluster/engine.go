@@ -169,9 +169,11 @@ type Engine struct {
 	// specifies the discovery provider
 	discoveryProvider discovery.Provider
 
-	writeTimeout    time.Duration
-	readTimeout     time.Duration
-	shutdownTimeout time.Duration
+	writeTimeout      time.Duration
+	readTimeout       time.Duration
+	shutdownTimeout   time.Duration
+	bootstrapTimeout  time.Duration
+	cacheSyncInterval time.Duration
 
 	events     chan *Event
 	eventsLock *sync.Mutex
@@ -205,6 +207,8 @@ func NewEngine(name string, disco discovery.Provider, host *discovery.Node, opts
 		writeTimeout:           time.Second,
 		readTimeout:            time.Second,
 		shutdownTimeout:        3 * time.Minute,
+		bootstrapTimeout:       10 * time.Second,
+		cacheSyncInterval:      time.Minute,
 		hasher:                 hash.DefaultHasher(),
 		pubSub:                 nil,
 		events:                 make(chan *Event, 256),
@@ -240,7 +244,6 @@ func NewEngine(name string, disco discovery.Provider, host *discovery.Node, opts
 // Start starts the Engine.
 func (x *Engine) Start(ctx context.Context) error {
 	logger := x.logger
-
 	logger.Infof("Starting GoAkt cluster Engine service on node=(%s)....🤔", x.node.PeersAddress())
 
 	conf, err := x.buildConfig()
@@ -248,120 +251,44 @@ func (x *Engine) Start(ctx context.Context) error {
 		logger.Errorf("failed to build the cluster Engine configuration.💥: %v", err)
 		return err
 	}
-
 	conf.Hasher = &hasherWrapper{x.hasher}
 
-	m, err := config.NewMemberlistConfig("lan")
-	if err != nil {
-		logger.Errorf("failed to configure the cluster Engine members list.💥: %v", err)
+	if err := x.setupMemberlistConfig(conf); err != nil {
 		return err
 	}
 
-	// sets the bindings
-	m.BindAddr = x.node.Host
-	m.BindPort = x.node.DiscoveryPort
-	m.AdvertisePort = x.node.DiscoveryPort
-	m.AdvertiseAddr = x.node.Host
+	x.configureDiscovery(conf)
 
-	// TODO: add the UDP listener to the transport
-	tlsEnabled := x.serverTLS != nil
-	if tlsEnabled {
-		transport, err := memberlist.NewTransport(memberlist.TransportConfig{
-			BindAddrs:          []string{x.node.Host},
-			BindPort:           x.node.DiscoveryPort,
-			PacketDialTimeout:  5 * time.Second,
-			PacketWriteTimeout: 5 * time.Second,
-			Logger:             x.logger,
-			DebugEnabled:       false,
-			TLSEnabled:         true,
-			TLS:                x.serverTLS,
-		})
-		if err != nil {
-			x.logger.Errorf("Failed to create memberlist TCP transport: %v", err)
-			return err
-		}
-		m.Transport = transport
-	}
-
-	conf.MemberlistConfig = m
-
-	// set the discovery provider
-	discoveryWrapper := &discoveryProvider{
-		provider: x.discoveryProvider,
-		log:      x.logger.StdLogger(),
-	}
-
-	conf.ServiceDiscovery = map[string]any{
-		"plugin": discoveryWrapper,
-		"id":     x.discoveryProvider.ID(),
-	}
-
-	// let us start the Node
 	startCtx, cancel := context.WithCancel(ctx)
-	// cancel the context the server has started
-	conf.Started = func() {
-		defer cancel()
-	}
+	conf.Started = func() { defer cancel() }
 
-	eng, err := olric.New(conf)
+	cache, err := olric.New(conf)
 	if err != nil {
 		logger.Error(fmt.Errorf("failed to start the cluster Engine on node=(%s): %w", x.name, err))
 		return err
 	}
 
-	// set the server
-	x.server = eng
-	go func() {
-		if err = x.server.Start(); err != nil {
-			// the expectation is to exit the application
-			logger.Error(fmt.Errorf("failed to start the cluster Engine on node=(%s): %w", x.name, err))
-			if e := x.server.Shutdown(ctx); e != nil {
-				logger.Fatal(e)
-			}
-		}
-	}()
+	x.server = cache
+	if err := x.startServer(startCtx, ctx); err != nil {
+		logger.Error(fmt.Errorf("failed to start the cluster Engine on node=(%s): %w", x.name, err))
+		return err
+	}
 
-	<-startCtx.Done()
-	logger.Info("cluster engine successfully started. 🎉")
-
-	// set the client
 	x.client = x.server.NewEmbeddedClient()
-
-	// create the various maps
-	if err := errorschain.
-		New(errorschain.ReturnFirst()).
-		AddErrorFn(func() error { x.actorsMap, err = x.client.NewDMap(actorsMap); return err }).
-		AddErrorFn(func() error { x.statesMap, err = x.client.NewDMap(statesMap); return err }).
-		AddErrorFn(func() error { x.jobKeysMap, err = x.client.NewDMap(jobKeysMap); return err }).
-		AddErrorFn(func() error { x.kindsMap, err = x.client.NewDMap(kindsMap); return err }).
-		AddErrorFn(func() error { x.grainsMap, err = x.client.NewDMap(grainsMap); return err }).
-		Error(); err != nil {
+	if err := x.createMaps(); err != nil {
 		logger.Error(fmt.Errorf("failed to start the cluster Engine on node=(%s): %w", x.name, err))
-		return x.server.Shutdown(ctx)
+		se := x.server.Shutdown(ctx)
+		return errors.Join(err, se)
 	}
 
-	// create a subscriber to consume to cluster events
-	ps, err := x.client.NewPubSub(olric.ToAddress(x.node.PeersAddress()))
-	if err != nil {
+	if err := x.createSubscription(ctx); err != nil {
 		logger.Error(fmt.Errorf("failed to start the cluster Engine on node=(%s): %w", x.name, err))
-		return x.server.Shutdown(ctx)
+		se := x.server.Shutdown(ctx)
+		return errors.Join(err, se)
 	}
 
-	// set the peer state
-	x.peerState = &internalpb.PeerState{
-		Host:         x.node.Host,
-		RemotingPort: int32(x.node.RemotingPort),
-		PeersPort:    int32(x.node.PeersPort),
-		Actors:       map[string]*internalpb.Actor{},
-		Grains:       map[string]*internalpb.Grain{},
-	}
-
-	bytea, _ := proto.Marshal(x.peerState)
-	x.peerStateQueue <- bytea
+	x.initPeerState()
 	go x.putPeersState()
-
-	x.pubSub = ps.Subscribe(ctx, events.ClusterEventsChannel)
-	x.messages = x.pubSub.Channel()
 	go x.consume()
 
 	x.running.Store(true)
@@ -997,9 +924,9 @@ func (x *Engine) buildConfig() (*config.Config, error) {
 		},
 		KeepAlivePeriod:            config.DefaultKeepAlivePeriod,
 		PartitionCount:             x.partitionsCount,
-		BootstrapTimeout:           config.DefaultBootstrapTimeout,
+		BootstrapTimeout:           x.bootstrapTimeout,
 		ReplicationMode:            config.SyncReplicationMode,
-		RoutingTablePushInterval:   config.DefaultRoutingTablePushInterval,
+		RoutingTablePushInterval:   x.cacheSyncInterval,
 		JoinRetryInterval:          config.DefaultJoinRetryInterval,
 		MaxJoinAttempts:            config.DefaultMaxJoinAttempts,
 		LogLevel:                   logLevel,
@@ -1036,4 +963,102 @@ func (x *Engine) buildConfig() (*config.Config, error) {
 	}
 
 	return conf, nil
+}
+
+func (x *Engine) setupMemberlistConfig(conf *config.Config) error {
+	m, err := config.NewMemberlistConfig("lan")
+	if err != nil {
+		x.logger.Errorf("failed to configure the cluster Engine members list.💥: %v", err)
+		return err
+	}
+	m.BindAddr = x.node.Host
+	m.BindPort = x.node.DiscoveryPort
+	m.AdvertisePort = x.node.DiscoveryPort
+	m.AdvertiseAddr = x.node.Host
+
+	if x.serverTLS != nil {
+		transport, err := memberlist.NewTransport(memberlist.TransportConfig{
+			BindAddrs:          []string{x.node.Host},
+			BindPort:           x.node.DiscoveryPort,
+			PacketDialTimeout:  5 * time.Second,
+			PacketWriteTimeout: 5 * time.Second,
+			Logger:             x.logger,
+			DebugEnabled:       false,
+			TLSEnabled:         true,
+			TLS:                x.serverTLS,
+		})
+		if err != nil {
+			x.logger.Errorf("Failed to create memberlist TCP transport: %v", err)
+			return err
+		}
+		m.Transport = transport
+	}
+	conf.MemberlistConfig = m
+	return nil
+}
+
+func (x *Engine) configureDiscovery(conf *config.Config) {
+	discoveryWrapper := &discoveryProvider{
+		provider: x.discoveryProvider,
+		log:      x.logger.StdLogger(),
+	}
+	conf.ServiceDiscovery = map[string]any{
+		"plugin": discoveryWrapper,
+		"id":     x.discoveryProvider.ID(),
+	}
+}
+
+func (x *Engine) startServer(startCtx, ctx context.Context) error {
+	errCh := make(chan error, 1)
+	go func() {
+		defer close(errCh)
+		if err := x.server.Start(); err != nil {
+			errCh <- errors.Join(err, x.server.Shutdown(ctx))
+			return
+		}
+		errCh <- nil
+	}()
+
+	select {
+	case <-startCtx.Done():
+		// started successfully
+	case err := <-errCh:
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (x *Engine) createMaps() error {
+	var err error
+	return errorschain.
+		New(errorschain.ReturnFirst()).
+		AddErrorFn(func() error { x.actorsMap, err = x.client.NewDMap(actorsMap); return err }).
+		AddErrorFn(func() error { x.grainsMap, err = x.client.NewDMap(grainsMap); return err }).
+		AddErrorFn(func() error { x.statesMap, err = x.client.NewDMap(statesMap); return err }).
+		AddErrorFn(func() error { x.jobKeysMap, err = x.client.NewDMap(jobKeysMap); return err }).
+		AddErrorFn(func() error { x.kindsMap, err = x.client.NewDMap(kindsMap); return err }).
+		Error()
+}
+
+func (x *Engine) createSubscription(ctx context.Context) error {
+	ps, err := x.client.NewPubSub(olric.ToAddress(x.node.PeersAddress()))
+	if err != nil {
+		return err
+	}
+	x.pubSub = ps.Subscribe(ctx, events.ClusterEventsChannel)
+	x.messages = x.pubSub.Channel()
+	return nil
+}
+
+func (x *Engine) initPeerState() {
+	x.peerState = &internalpb.PeerState{
+		Host:         x.node.Host,
+		RemotingPort: int32(x.node.RemotingPort),
+		PeersPort:    int32(x.node.PeersPort),
+		Actors:       map[string]*internalpb.Actor{},
+	}
+	bytea, _ := proto.Marshal(x.peerState)
+	x.peerStateQueue <- bytea
 }

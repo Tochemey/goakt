@@ -592,11 +592,10 @@ type actorSystem struct {
 	registry   types.Registry
 	reflection *reflection
 
-	peersStateLoopInterval time.Duration
-	clusterStore           *cluster.Store
-	clusterConfig          *ClusterConfig
-	rebalancingQueue       chan *internalpb.PeerState
-	rebalancedNodes        goset.Set[string]
+	clusterStore     *cluster.Store
+	clusterConfig    *ClusterConfig
+	rebalancingQueue chan *internalpb.PeerState
+	rebalancedNodes  goset.Set[string]
 
 	rebalancer       *PID
 	rootGuardian     *PID
@@ -645,35 +644,34 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 	}
 
 	system := &actorSystem{
-		actorsQueue:            make(chan *internalpb.Actor, 10),
-		grainsQueue:            make(chan *internalpb.Grain, 10),
-		name:                   name,
-		logger:                 log.New(log.ErrorLevel, os.Stderr),
-		actorInitMaxRetries:    DefaultInitMaxRetries,
-		locker:                 sync.Mutex{},
-		shutdownTimeout:        DefaultShutdownTimeout,
-		stopGC:                 make(chan types.Unit, 1),
-		eventsStream:           eventstream.New(),
-		partitionHasher:        hash.DefaultHasher(),
-		actorInitTimeout:       DefaultInitTimeout,
-		eventsQueue:            make(chan *cluster.Event, 1),
-		registry:               types.NewRegistry(),
-		clusterSyncStopSig:     make(chan types.Unit, 1),
-		peersStateLoopInterval: DefaultPeerStateLoopInterval,
-		remoteConfig:           remote.DefaultConfig(),
-		actors:                 newTree(),
-		startedAt:              atomic.NewInt64(0),
-		rebalancing:            atomic.NewBool(false),
-		shutdownHooks:          make([]ShutdownHook, 0),
-		rebalancedNodes:        goset.NewSet[string](),
-		rebalanceLocker:        &sync.Mutex{},
-		actorsCounter:          atomic.NewUint64(0),
-		deadlettersCounter:     atomic.NewUint64(0),
-		topicActor:             nil,
-		extensions:             collection.NewMap[string, extension.Extension](),
-		spawnOnNext:            atomic.NewUint32(0),
-		shuttingDown:           atomic.NewBool(false),
-		grains:                 collection.NewMap[Identity, *grainProcess](),
+		actorsQueue:         make(chan *internalpb.Actor, 10),
+		grainsQueue:         make(chan *internalpb.Grain, 10),
+		name:                name,
+		logger:              log.New(log.ErrorLevel, os.Stderr),
+		actorInitMaxRetries: DefaultInitMaxRetries,
+		locker:              sync.Mutex{},
+		shutdownTimeout:     DefaultShutdownTimeout,
+		stopGC:              make(chan types.Unit, 1),
+		eventsStream:        eventstream.New(),
+		partitionHasher:     hash.DefaultHasher(),
+		actorInitTimeout:    DefaultInitTimeout,
+		eventsQueue:         make(chan *cluster.Event, 1),
+		registry:            types.NewRegistry(),
+		clusterSyncStopSig:  make(chan types.Unit, 1),
+		remoteConfig:        remote.DefaultConfig(),
+		actors:              newTree(),
+		startedAt:           atomic.NewInt64(0),
+		rebalancing:         atomic.NewBool(false),
+		shutdownHooks:       make([]ShutdownHook, 0),
+		rebalancedNodes:     goset.NewSet[string](),
+		rebalanceLocker:     &sync.Mutex{},
+		actorsCounter:       atomic.NewUint64(0),
+		deadlettersCounter:  atomic.NewUint64(0),
+		topicActor:          nil,
+		extensions:          collection.NewMap[string, extension.Extension](),
+		spawnOnNext:         atomic.NewUint32(0),
+		shuttingDown:        atomic.NewBool(false),
+		grains:              collection.NewMap[Identity, *grainProcess](),
 	}
 
 	system.enableRelocation.Store(true)
@@ -2318,6 +2316,8 @@ func (x *actorSystem) enableClustering(ctx context.Context) error {
 		cluster.WithReadTimeout(x.clusterConfig.ReadTimeout()),
 		cluster.WithShutdownTimeout(x.clusterConfig.ShutdownTimeout()),
 		cluster.WithTableSize(x.clusterConfig.TableSize()),
+		cluster.WithBootstrapTimeout(x.clusterConfig.BootstrapTimeout()),
+		cluster.WithCacheSyncInterval(x.clusterConfig.ClusterStateSyncInterval()),
 	)
 	if err != nil {
 		x.logger.Errorf("failed to initialize cluster engine: %v", err)
@@ -2636,7 +2636,8 @@ func (x *actorSystem) clusterEventsLoop() {
 // peersStateLoop fetches the cluster peers' PeerState and update the node Store
 func (x *actorSystem) peersStateLoop() {
 	x.logger.Info("peers state synchronization has started...")
-	ticker := ticker.New(x.peersStateLoopInterval)
+	intervals := x.clusterConfig.PeersStateSyncInterval()
+	ticker := ticker.New(intervals)
 	ticker.Start()
 	tickerStopSig := make(chan types.Unit, 1)
 	go func() {
