@@ -122,6 +122,7 @@ func WithActorInitTimeout(timeout time.Duration) Option {
 }
 
 // WithPeerStateLoopInterval sets the peer state loop interval
+//
 // Deprecated: This option is deprecated and will be removed in a future release.
 // Use WithClusterStateSyncInterval instead to configure the interval for synchronizing cluster state when
 // setting up a cluster using the ClusterConfig option.
