@@ -929,7 +929,7 @@ func NewMockGrain() *MockGrain {
 
 // HandleRequest implements Grain.
 // nolint
-func (m *MockGrain) ReceiveSync(ctx context.Context, message proto.Message) (proto.Message, error) {
+func (m *MockGrain) ReceiveSync(_ context.Context, message proto.Message) (proto.Message, error) {
 	switch msg := message.(type) {
 	case *testpb.TestSend:
 		return &testpb.Reply{Content: "received message"}, nil
@@ -940,7 +940,7 @@ func (m *MockGrain) ReceiveSync(ctx context.Context, message proto.Message) (pro
 
 // ReceiveAsync implements Grain.
 // nolint
-func (m *MockGrain) ReceiveAsync(ctx context.Context, message proto.Message) error {
+func (m *MockGrain) ReceiveAsync(_ context.Context, message proto.Message) error {
 	switch msg := message.(type) {
 	case *testpb.TestSend:
 		return nil
@@ -981,13 +981,13 @@ func (m *MockGrainActivation) OnDeactivate(*GrainContext) error {
 
 // ReceiveAsync implements Grain.
 // nolint
-func (m *MockGrainActivation) ReceiveAsync(ctx context.Context, message proto.Message) error {
+func (m *MockGrainActivation) ReceiveAsync(context.Context, proto.Message) error {
 	return nil
 }
 
 // ReceiveSync implements Grain.
 // nolint
-func (m *MockGrainActivation) ReceiveSync(ctx context.Context, message proto.Message) (proto.Message, error) {
+func (m *MockGrainActivation) ReceiveSync(context.Context, proto.Message) (proto.Message, error) {
 	return nil, nil
 }
 
@@ -1009,7 +1009,7 @@ func (m *MockGrainDeactivation) OnDeactivate(*GrainContext) error {
 
 // ReceiveAsync implements Grain.
 // nolint
-func (m *MockGrainDeactivation) ReceiveAsync(ctx context.Context, message proto.Message) error {
+func (m *MockGrainDeactivation) ReceiveAsync(_ context.Context, message proto.Message) error {
 	switch msg := message.(type) {
 	case *testpb.TestSend:
 		return nil
@@ -1020,7 +1020,7 @@ func (m *MockGrainDeactivation) ReceiveAsync(ctx context.Context, message proto.
 
 // ReceiveSync implements Grain.
 // nolint
-func (m *MockGrainDeactivation) ReceiveSync(ctx context.Context, message proto.Message) (proto.Message, error) {
+func (m *MockGrainDeactivation) ReceiveSync(context.Context, proto.Message) (proto.Message, error) {
 	return nil, nil
 }
 
@@ -1042,7 +1042,7 @@ func (m *MockGrainError) OnDeactivate(*GrainContext) error {
 
 // ReceiveAsync implements Grain.
 // nolint
-func (m *MockGrainError) ReceiveAsync(ctx context.Context, message proto.Message) error {
+func (m *MockGrainError) ReceiveAsync(_ context.Context, message proto.Message) error {
 	switch msg := message.(type) {
 	case *testpb.TestSend:
 		return errors.New("failed to process message")
@@ -1053,7 +1053,7 @@ func (m *MockGrainError) ReceiveAsync(ctx context.Context, message proto.Message
 
 // ReceiveSync implements Grain.
 // nolint
-func (m *MockGrainError) ReceiveSync(ctx context.Context, message proto.Message) (proto.Message, error) {
+func (m *MockGrainError) ReceiveSync(_ context.Context, message proto.Message) (proto.Message, error) {
 	switch msg := message.(type) {
 	case *testpb.TestSend:
 		return nil, errors.New("failed to process message")
@@ -1081,11 +1081,11 @@ func (g *MockPersistentGrain) OnActivate(ctx *GrainContext) error {
 	return g.recoverFromStore()
 }
 
-func (g *MockPersistentGrain) OnDeactivate(ctx *GrainContext) error {
+func (g *MockPersistentGrain) OnDeactivate(*GrainContext) error {
 	return g.stateStore.WriteState(g.persistenceID, g.currentState.Load())
 }
 
-func (g *MockPersistentGrain) ReceiveSync(ctx context.Context, message proto.Message) (proto.Message, error) {
+func (g *MockPersistentGrain) ReceiveSync(_ context.Context, message proto.Message) (proto.Message, error) {
 	switch received := message.(type) {
 	case *testpb.CreditAccount:
 		// TODO: in production extra validation will be needed.
@@ -1109,7 +1109,7 @@ func (g *MockPersistentGrain) ReceiveSync(ctx context.Context, message proto.Mes
 	}
 }
 
-func (g *MockPersistentGrain) ReceiveAsync(ctx context.Context, message proto.Message) error {
+func (g *MockPersistentGrain) ReceiveAsync(_ context.Context, message proto.Message) error {
 	switch received := message.(type) {
 	case *testpb.CreateAccount:
 		balance := received.GetAccountBalance()
