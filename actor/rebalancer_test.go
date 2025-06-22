@@ -631,6 +631,7 @@ func TestIssue781(t *testing.T) {
 	srv.Shutdown()
 }
 
+// nolint
 func TestGrainsRebalancing(t *testing.T) {
 	// create a context
 	ctx := t.Context()
@@ -751,6 +752,7 @@ func TestGrainsRebalancing(t *testing.T) {
 	srv.Shutdown()
 }
 
+// nolint
 func TestPersistentGrainsRebalancing(t *testing.T) {
 	// create a context
 	ctx := t.Context()
