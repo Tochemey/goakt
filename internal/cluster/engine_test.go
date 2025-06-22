@@ -310,7 +310,7 @@ func TestSingleNode(t *testing.T) {
 		require.NotZero(t, partition)
 		require.EqualValues(t, -1, partition)
 
-		// stop the startNode
+		// stop the node
 		require.NoError(t, cluster.Stop(ctx))
 	})
 	t.Run("With Put/RemoveKind and LookupKind", func(t *testing.T) {
@@ -391,7 +391,7 @@ func TestSingleNode(t *testing.T) {
 	})
 	t.Run("With PutGrain and GetGrain", func(t *testing.T) {
 		// create the context
-		ctx := context.TODO()
+		ctx := t.Context()
 
 		// generate the ports for the single startNode
 		nodePorts := dynaport.Get(3)
@@ -462,6 +462,178 @@ func TestSingleNode(t *testing.T) {
 
 		//  shutdown the Node startNode
 		util.Pause(time.Second)
+
+		// stop the startNode
+		require.NoError(t, cluster.Stop(ctx))
+		provider.AssertExpectations(t)
+	})
+	t.Run("With PutGrain and GetGrain when NotRunning", func(t *testing.T) {
+		// create the context
+		ctx := t.Context()
+
+		// generate the ports for the single startNode
+		nodePorts := dynaport.Get(3)
+		gossipPort := nodePorts[0]
+		clusterPort := nodePorts[1]
+		remotingPort := nodePorts[2]
+
+		// mock the discovery provider
+		provider := new(testkit.Provider)
+
+		// create a Node startNode
+		host := "127.0.0.1"
+
+		hostNode := discovery.Node{
+			Name:          host,
+			Host:          host,
+			DiscoveryPort: gossipPort,
+			PeersPort:     clusterPort,
+			RemotingPort:  remotingPort,
+		}
+
+		logger := log.DiscardLogger
+		cluster, err := NewEngine("test", provider, &hostNode, WithLogger(logger))
+		require.NotNil(t, cluster)
+		require.NoError(t, err)
+
+		// create an grain
+		identity := "grainKind/grainName"
+		grain := &internalpb.Grain{
+			GrainId: &internalpb.GrainId{
+				Kind:  "grainKind",
+				Name:  "grainName",
+				Value: identity,
+			},
+			Host: host,
+			Port: int32(remotingPort),
+		}
+
+		// replicate the grain in the Node
+		err = cluster.PutGrain(ctx, grain)
+		require.Error(t, err)
+		require.ErrorIs(t, err, ErrEngineNotRunning)
+
+		// fetch the grain
+		actual, err := cluster.GetGrain(ctx, identity)
+		require.Error(t, err)
+		require.Nil(t, actual)
+		require.ErrorIs(t, err, ErrEngineNotRunning)
+
+		// stop the startNode
+		require.NoError(t, cluster.Stop(ctx))
+		provider.AssertExpectations(t)
+	})
+	t.Run("With GetGrain when decoding failed", func(t *testing.T) {
+		// create the context
+		ctx := t.Context()
+
+		// generate the ports for the single startNode
+		nodePorts := dynaport.Get(3)
+		discoveryPort := nodePorts[0]
+		clusterPort := nodePorts[1]
+		remotingPort := nodePorts[2]
+
+		// define discovered addresses
+		addrs := []string{
+			fmt.Sprintf("127.0.0.1:%d", discoveryPort),
+		}
+
+		// mock the discovery provider
+		provider := new(testkit.Provider)
+
+		provider.EXPECT().ID().Return("testDisco")
+		provider.EXPECT().Initialize().Return(nil)
+		provider.EXPECT().Register().Return(nil)
+		provider.EXPECT().Deregister().Return(nil)
+		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
+		provider.EXPECT().Close().Return(nil)
+
+		// create a Node startNode
+		host := "127.0.0.1"
+		hostNode := discovery.Node{
+			Name:          host,
+			Host:          host,
+			DiscoveryPort: discoveryPort,
+			PeersPort:     clusterPort,
+			RemotingPort:  remotingPort,
+		}
+
+		cluster, err := NewEngine("test", provider, &hostNode, WithLogger(log.DiscardLogger))
+		require.NotNil(t, cluster)
+		require.NoError(t, err)
+
+		// start the Node startNode
+		err = cluster.Start(ctx)
+		require.NoError(t, err)
+
+		// create an grain
+		identity := "grainKind/grainName"
+
+		// replicate the grain in the Node
+		err = cluster.grainsMap.Put(ctx, identity, []byte("invalid grain data"))
+		require.NoError(t, err)
+
+		// fetch the grain
+		actual, err := cluster.GetGrain(ctx, identity)
+		require.Error(t, err)
+		require.Nil(t, actual)
+
+		// stop the startNode
+		require.NoError(t, cluster.Stop(ctx))
+		provider.AssertExpectations(t)
+	})
+	t.Run("With GetActor when decoding failed", func(t *testing.T) {
+		// create the context
+		ctx := t.Context()
+
+		// generate the ports for the single startNode
+		nodePorts := dynaport.Get(3)
+		discoveryPort := nodePorts[0]
+		clusterPort := nodePorts[1]
+		remotingPort := nodePorts[2]
+
+		// define discovered addresses
+		addrs := []string{
+			fmt.Sprintf("127.0.0.1:%d", discoveryPort),
+		}
+
+		// mock the discovery provider
+		provider := new(testkit.Provider)
+
+		provider.EXPECT().ID().Return("testDisco")
+		provider.EXPECT().Initialize().Return(nil)
+		provider.EXPECT().Register().Return(nil)
+		provider.EXPECT().Deregister().Return(nil)
+		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
+		provider.EXPECT().Close().Return(nil)
+
+		// create a Node startNode
+		host := "127.0.0.1"
+		hostNode := discovery.Node{
+			Name:          host,
+			Host:          host,
+			DiscoveryPort: discoveryPort,
+			PeersPort:     clusterPort,
+			RemotingPort:  remotingPort,
+		}
+
+		cluster, err := NewEngine("test", provider, &hostNode, WithLogger(log.DiscardLogger))
+		require.NotNil(t, cluster)
+		require.NoError(t, err)
+
+		// start the Node startNode
+		err = cluster.Start(ctx)
+		require.NoError(t, err)
+
+		actorName := "actorName"
+		// replicate the grain in the Node
+		err = cluster.actorsMap.Put(ctx, actorName, []byte("invalid grain data"))
+		require.NoError(t, err)
+
+		// fetch the grain
+		actual, err := cluster.GetActor(ctx, actorName)
+		require.Error(t, err)
+		require.Nil(t, actual)
 
 		// stop the startNode
 		require.NoError(t, cluster.Stop(ctx))
