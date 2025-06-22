@@ -779,7 +779,7 @@ func TestPersistentGrainsRebalancing(t *testing.T) {
 
 	for j := range 4 {
 		identity, err := node1.GetGrain(ctx, fmt.Sprintf("Grain-1%d", j), func(ctx context.Context) (Grain, error) {
-			return NewMockGrain(), nil
+			return NewPersistentGrain(), nil
 		})
 		require.NotNil(t, identity)
 		require.NoError(t, err)
@@ -795,7 +795,7 @@ func TestPersistentGrainsRebalancing(t *testing.T) {
 
 	for j := range 5 {
 		identity, err := node2.GetGrain(ctx, fmt.Sprintf("Grain-2%d", j), func(ctx context.Context) (Grain, error) {
-			return NewMockGrain(), nil
+			return NewPersistentGrain(), nil
 		})
 		require.NotNil(t, identity)
 		require.NoError(t, err)
@@ -810,7 +810,7 @@ func TestPersistentGrainsRebalancing(t *testing.T) {
 
 	for j := range 4 {
 		identity, err := node3.GetGrain(ctx, fmt.Sprintf("Grain-3%d", j), func(ctx context.Context) (Grain, error) {
-			return NewMockGrain(), nil
+			return NewPersistentGrain(), nil
 		})
 		require.NotNil(t, identity)
 		require.NoError(t, err)
