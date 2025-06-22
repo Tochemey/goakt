@@ -228,7 +228,6 @@ func (m *MultiNodes) StartNode(ctx context.Context, name string) *TestNode {
 	options := []actor.Option{
 		actor.WithLogger(m.logger),
 		actor.WithRemote(remote.NewConfig(m.host, remotingPort)),
-		actor.WithPeerStateLoopInterval(500 * time.Millisecond),
 		actor.WithExtensions(m.extensions...),
 		actor.WithShutdownTimeout(3 * time.Minute),
 		actor.WithCluster(
@@ -239,6 +238,8 @@ func (m *MultiNodes) StartNode(ctx context.Context, name string) *TestNode {
 				WithPeersPort(clusterPort).
 				WithMinimumPeersQuorum(1).
 				WithDiscoveryPort(discoveryPort).
+				WithClusterStateSyncInterval(300 * time.Millisecond).
+				WithPeersStateSyncInterval(500 * time.Millisecond).
 				WithDiscovery(provider)),
 	}
 

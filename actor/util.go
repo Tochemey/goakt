@@ -48,12 +48,18 @@ const (
 	DefaultShutdownTimeout = time.Minute
 	// DefaultInitTimeout defines the default init timeout
 	DefaultInitTimeout = time.Second
-	// DefaultPeerStateLoopInterval defines the default peer state loop interval
-	DefaultPeerStateLoopInterval = 10 * time.Second
+	// DefaultPeerStateSyncInterval defines the default peer state synchronization interval
+	DefaultPeerStateSyncInterval = 10 * time.Second
 	// DefaultAskTimeout defines the default ask timeout
 	DefaultAskTimeout = 5 * time.Second
 	// DefaultMaxReadFrameSize defines the default HTTP maximum read frame size
 	DefaultMaxReadFrameSize = 16 * size.MB
+
+	// DefaultClusterBootstrapTimeout defines the default cluster bootstrap timeout
+	DefaultClusterBootstrapTimeout = 10 * time.Second
+
+	// DefaultClusterStateSyncInterval defines the default cluster state synchronization interval
+	DefaultClusterStateSyncInterval = time.Minute
 	// eventsTopic defines the events topic
 	eventsTopic = "topic.events"
 

@@ -1107,6 +1107,7 @@ func startNode(t *testing.T, logger log.Logger, nodeName, serverAddr string) (sy
 		WithDiscoveryPort(discoveryPort).
 		WithReplicaCount(1).
 		WithMinimumPeersQuorum(1).
+		WithPeersStateSyncInterval(100 * time.Millisecond).
 		WithPartitionCount(7)
 
 	// create the actor system
@@ -1114,7 +1115,6 @@ func startNode(t *testing.T, logger log.Logger, nodeName, serverAddr string) (sy
 		actorSystemName,
 		actors.WithLogger(logger),
 		actors.WithRemote(remote.NewConfig(host, remotePort)),
-		actors.WithPeerStateLoopInterval(100*time.Millisecond),
 		actors.WithCluster(clusterConfig),
 	)
 

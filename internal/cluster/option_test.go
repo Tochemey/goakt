@@ -106,6 +106,16 @@ func TestOptions(t *testing.T) {
 			option:   WithTableSize(size),
 			expected: Engine{tableSize: size},
 		},
+		{
+			name:     "WithBootstrapTimeout",
+			option:   WithBootstrapTimeout(3),
+			expected: Engine{bootstrapTimeout: 3},
+		},
+		{
+			name:     "WithCacheSyncInterval",
+			option:   WithCacheSyncInterval(3),
+			expected: Engine{cacheSyncInterval: 3},
+		},
 	}
 
 	for _, tc := range testCases {

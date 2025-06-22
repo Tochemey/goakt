@@ -136,3 +136,23 @@ func WithTableSize(size uint64) Option {
 		eng.tableSize = size
 	})
 }
+
+// WithBootstrapTimeout sets the timeout for the bootstrap process
+// This timeout specifies the maximum time to wait for the cluster to bootstrap
+func WithBootstrapTimeout(timeout time.Duration) Option {
+	return OptionFunc(func(eng *Engine) {
+		eng.bootstrapTimeout = timeout
+	})
+}
+
+// WithCacheSyncInterval sets the interval for syncing nodes' routing tables.
+// This interval specifies how often the routing tables are synchronized
+// across the cluster.
+// It is important to note that this interval should be greater than the
+// write timeout to ensure that the routing table is not updated while a write
+// operation is in progress.
+func WithCacheSyncInterval(interval time.Duration) Option {
+	return OptionFunc(func(eng *Engine) {
+		eng.cacheSyncInterval = interval
+	})
+}
