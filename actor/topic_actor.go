@@ -233,6 +233,7 @@ func (x *topicActor) sendToRemoteSubscribers(cctx context.Context, remotePeers [
 				if err := x.remoting.RemoteTell(cctx, from, to, toSend); err != nil {
 					x.logger.Warnf("failed to publish message to actor %s on remote=[host=%s, port=%d]: %s",
 						actorName, peer.host, peer.port, err.Error())
+					return
 				}
 
 				x.logger.Debugf("successfully published message to actor %s on remote=[host=%s, port=%d]",
