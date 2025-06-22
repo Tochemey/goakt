@@ -49,7 +49,7 @@ type ClusterConfig struct {
 	readQuorum               uint32
 	discoveryPort            int
 	peersPort                int
-	kinds                    []Actor
+	kinds                    *collection.Map[string, Actor]
 	tableSize                uint64
 	wal                      *string
 	grains                   *collection.Map[string, Grain]

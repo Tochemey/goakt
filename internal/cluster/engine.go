@@ -1058,6 +1058,7 @@ func (x *Engine) initPeerState() {
 		RemotingPort: int32(x.node.RemotingPort),
 		PeersPort:    int32(x.node.PeersPort),
 		Actors:       map[string]*internalpb.Actor{},
+		Grains:       map[string]*internalpb.Grain{},
 	}
 	bytea, _ := proto.Marshal(x.peerState)
 	x.peerStateQueue <- bytea
