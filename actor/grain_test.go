@@ -26,6 +26,7 @@ package actor
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -470,6 +471,62 @@ func TestGrain(t *testing.T) {
 		require.True(t, ok)
 		require.NotNil(t, gp)
 		require.True(t, gp.isRunning())
+
+		require.NoError(t, testSystem.Stop(ctx))
+	})
+	t.Run("GetGrain when not started returns error", func(t *testing.T) {
+		ctx := t.Context()
+		testSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NotNil(t, testSystem)
+		// create a grain instance
+		grain := NewMockGrain()
+		identity, err := testSystem.GetGrain(ctx, "testGrain", func(ctx context.Context) (Grain, error) {
+			return grain, nil
+		})
+		require.Error(t, err)
+		require.ErrorIs(t, err, ErrActorSystemNotStarted)
+		require.Nil(t, identity)
+	})
+	t.Run("GetGrain when not started returns error", func(t *testing.T) {
+		ctx := t.Context()
+		testSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NotNil(t, testSystem)
+
+		// start the actor system
+		err = testSystem.Start(ctx)
+		require.NoError(t, err)
+		util.Pause(time.Second)
+
+		// create a grain instance
+		identity, err := testSystem.GetGrain(ctx, "testGrain", func(ctx context.Context) (Grain, error) {
+			return nil, assert.AnError
+		})
+		require.Error(t, err)
+		require.ErrorIs(t, err, assert.AnError)
+		require.Nil(t, identity)
+
+		require.NoError(t, testSystem.Stop(ctx))
+	})
+	t.Run("GetGrain with invalid indentity name", func(t *testing.T) {
+		ctx := t.Context()
+		testSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NotNil(t, testSystem)
+
+		// start the actor system
+		err = testSystem.Start(ctx)
+		require.NoError(t, err)
+		util.Pause(time.Second)
+
+		// create a grain instance
+		name := strings.Repeat("a", 300)
+		identity, err := testSystem.GetGrain(ctx, name, func(ctx context.Context) (Grain, error) {
+			return NewMockGrain(), nil
+		})
+		require.Error(t, err)
+		require.Nil(t, identity)
 
 		require.NoError(t, testSystem.Stop(ctx))
 	})

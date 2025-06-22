@@ -41,6 +41,8 @@ import (
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 )
 
+// GrainFactory is a function type that creates a Grain (virtual actor) instance.
+// It takes a context and returns a Grain and an error.
 type GrainFactory func(ctx context.Context) (Grain, error)
 
 // GetGrain retrieves or activates a Grain (virtual actor) identified by the given name.
@@ -129,11 +131,6 @@ func (x *actorSystem) TellGrain(ctx context.Context, identity *Identity, message
 		return NewErrInvalidGrainIdentity(err)
 	}
 
-	// make sure we don't interfere with system actors.
-	if isReservedName(identity.Name()) {
-		return NewErrReservedName(identity.String())
-	}
-
 	config := newGrainOptConfig(opts...)
 	timeout := config.RequestTimeout()
 	sender := config.RequestSender()
@@ -177,11 +174,6 @@ func (x *actorSystem) AskGrain(ctx context.Context, identity *Identity, message 
 	// validate the identity
 	if err := identity.Validate(); err != nil {
 		return nil, NewErrInvalidGrainIdentity(err)
-	}
-
-	// make sure we don't interfere with system actors.
-	if isReservedName(identity.Name()) {
-		return nil, NewErrReservedName(identity.String())
 	}
 
 	config := newGrainOptConfig(opts...)
