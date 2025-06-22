@@ -39,6 +39,7 @@ import (
 	"github.com/tochemey/goakt/v3/test/data/testpb"
 )
 
+// nolint
 func TestGrain(t *testing.T) {
 	t.Run("With without cluster mode", func(t *testing.T) {
 		ctx := t.Context()
