@@ -470,7 +470,7 @@ func (x *actorSystem) remoteTellGrain(ctx context.Context, id *Identity, message
 //   - error: error if the request fails.
 func (x *actorSystem) localSend(ctx context.Context, id *Identity, message proto.Message, sender *Identity, timeout time.Duration, synchronous bool) (proto.Message, error) {
 	// Ensure the grain process exists
-	process, err := x.ensureGrainProcess(ctx, id)
+	process, err := x.ensureGrainProcess(id)
 	if err != nil {
 		return nil, err
 	}
@@ -513,7 +513,7 @@ func (x *actorSystem) localSend(ctx context.Context, id *Identity, message proto
 }
 
 // ensureGrainProcess returns an existing grain process or creates and activates a new one.
-func (x *actorSystem) ensureGrainProcess(ctx context.Context, id *Identity) (*grainProcess, error) {
+func (x *actorSystem) ensureGrainProcess(id *Identity) (*grainProcess, error) {
 	process, ok := x.grains.Get(*id)
 	if ok {
 		// check whether the Grain type is registered
