@@ -778,36 +778,46 @@ func TestPersistentGrainsRebalancing(t *testing.T) {
 	require.NotNil(t, sd3)
 
 	for j := range 4 {
-		identity := newIdentity(NewPersistentGrain(), fmt.Sprintf("Grain-1%d", j))
+		identity, err := node1.GetGrain(ctx, fmt.Sprintf("Grain-1%d", j), func(ctx context.Context) (Grain, error) {
+			return NewMockGrain(), nil
+		})
 		require.NotNil(t, identity)
+		require.NoError(t, err)
+
 		message := &testpb.CreateAccount{
 			AccountBalance: 500.00,
 		}
-		err := node1.TellGrain(ctx, identity, message)
+		err = node1.TellGrain(ctx, identity, message)
 		require.NoError(t, err)
 	}
 
 	util.Pause(time.Second)
 
 	for j := range 5 {
-		identity := newIdentity(NewPersistentGrain(), fmt.Sprintf("Grain-2%d", j))
+		identity, err := node2.GetGrain(ctx, fmt.Sprintf("Grain-2%d", j), func(ctx context.Context) (Grain, error) {
+			return NewMockGrain(), nil
+		})
 		require.NotNil(t, identity)
+		require.NoError(t, err)
 		message := &testpb.CreateAccount{
 			AccountBalance: 500.00,
 		}
-		err := node2.TellGrain(ctx, identity, message)
+		err = node2.TellGrain(ctx, identity, message)
 		require.NoError(t, err)
 	}
 
 	util.Pause(time.Second)
 
 	for j := range 4 {
-		identity := newIdentity(NewPersistentGrain(), fmt.Sprintf("Grain-3%d", j))
+		identity, err := node3.GetGrain(ctx, fmt.Sprintf("Grain-3%d", j), func(ctx context.Context) (Grain, error) {
+			return NewMockGrain(), nil
+		})
 		require.NotNil(t, identity)
+		require.NoError(t, err)
 		message := &testpb.CreateAccount{
 			AccountBalance: 500.00,
 		}
-		err := node3.TellGrain(ctx, identity, message)
+		err = node3.TellGrain(ctx, identity, message)
 		require.NoError(t, err)
 	}
 
@@ -824,35 +834,57 @@ func TestPersistentGrainsRebalancing(t *testing.T) {
 		Balance: 500.00,
 	}
 
-	identity := newIdentity(NewPersistentGrain(), "Grain-20")
+	identity, err := node3.GetGrain(ctx, "Grain-20", func(ctx context.Context) (Grain, error) {
+		return NewPersistentGrain(), nil
+	})
+	require.NotNil(t, identity)
+	require.NoError(t, err)
+
 	response, err := node3.AskGrain(ctx, identity, message)
 	require.NoError(t, err)
 	require.NotNil(t, response)
 	actual := response.(*testpb.Account)
 	require.EqualValues(t, 1000.00, actual.GetAccountBalance())
 
-	identity = newIdentity(NewPersistentGrain(), "Grain-21")
+	identity, err = node1.GetGrain(ctx, "Grain-21", func(ctx context.Context) (Grain, error) {
+		return NewPersistentGrain(), nil
+	})
+	require.NotNil(t, identity)
+	require.NoError(t, err)
+
 	response, err = node1.AskGrain(ctx, identity, message)
 	require.NoError(t, err)
 	require.NotNil(t, response)
 	actual = response.(*testpb.Account)
 	require.EqualValues(t, 1000.00, actual.GetAccountBalance())
 
-	identity = newIdentity(NewPersistentGrain(), "Grain-22")
+	identity, err = node3.GetGrain(ctx, "Grain-22", func(ctx context.Context) (Grain, error) {
+		return NewPersistentGrain(), nil
+	})
+	require.NotNil(t, identity)
+	require.NoError(t, err)
 	response, err = node3.AskGrain(ctx, identity, message)
 	require.NoError(t, err)
 	require.NotNil(t, response)
 	actual = response.(*testpb.Account)
 	require.EqualValues(t, 1000.00, actual.GetAccountBalance())
 
-	identity = newIdentity(NewPersistentGrain(), "Grain-23")
+	identity, err = node1.GetGrain(ctx, "Grain-23", func(ctx context.Context) (Grain, error) {
+		return NewPersistentGrain(), nil
+	})
+	require.NotNil(t, identity)
+	require.NoError(t, err)
 	response, err = node1.AskGrain(ctx, identity, message)
 	require.NoError(t, err)
 	require.NotNil(t, response)
 	actual = response.(*testpb.Account)
 	require.EqualValues(t, 1000.00, actual.GetAccountBalance())
 
-	identity = newIdentity(NewPersistentGrain(), "Grain-24")
+	identity, err = node1.GetGrain(ctx, "Grain-24", func(ctx context.Context) (Grain, error) {
+		return NewPersistentGrain(), nil
+	})
+	require.NotNil(t, identity)
+	require.NoError(t, err)
 	response, err = node1.AskGrain(ctx, identity, message)
 	require.NoError(t, err)
 	require.NotNil(t, response)
