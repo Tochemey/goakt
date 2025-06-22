@@ -36,11 +36,6 @@ import (
 
 	goset "github.com/deckarep/golang-set/v2"
 	"github.com/redis/go-redis/v9"
-	"github.com/tochemey/olric"
-	"github.com/tochemey/olric/config"
-	"github.com/tochemey/olric/events"
-	"github.com/tochemey/olric/hasher"
-	"github.com/tochemey/olric/pkg/storage"
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
@@ -54,6 +49,11 @@ import (
 	"github.com/tochemey/goakt/v3/internal/memberlist"
 	"github.com/tochemey/goakt/v3/internal/size"
 	"github.com/tochemey/goakt/v3/log"
+	"github.com/tochemey/olric"
+	"github.com/tochemey/olric/config"
+	"github.com/tochemey/olric/events"
+	"github.com/tochemey/olric/hasher"
+	"github.com/tochemey/olric/pkg/storage"
 )
 
 type EventType int
@@ -297,25 +297,37 @@ func (x *Engine) Start(ctx context.Context) error {
 		defer cancel()
 	}
 
-	eng, err := olric.New(conf)
+	cache, err := olric.New(conf)
 	if err != nil {
 		logger.Error(fmt.Errorf("failed to start the cluster Engine on node=(%s): %w", x.name, err))
 		return err
 	}
 
 	// set the server
-	x.server = eng
+	x.server = cache
+	startErrCh := make(chan error, 1)
 	go func() {
-		if err = x.server.Start(); err != nil {
-			// the expectation is to exit the application
-			logger.Error(fmt.Errorf("failed to start the cluster Engine on node=(%s): %w", x.name, err))
-			if e := x.server.Shutdown(ctx); e != nil {
-				logger.Fatal(e)
-			}
+		// start the server and when the cluster fails to start
+		// shutdown the server and return the error
+		defer close(startErrCh)
+		if err := x.server.Start(); err != nil {
+			startErrCh <- errors.Join(err, x.server.Shutdown(ctx))
+			return
 		}
+		startErrCh <- nil
 	}()
 
-	<-startCtx.Done()
+	// Wait for either context cancellation or server start error
+	select {
+	case <-startCtx.Done():
+		// started successfully
+	case err := <-startErrCh:
+		if err != nil {
+			logger.Error(fmt.Errorf("failed to start the cluster Engine on node=(%s): %w", x.name, err))
+			return err
+		}
+	}
+
 	logger.Info("cluster engine successfully started. 🎉")
 
 	// set the client
