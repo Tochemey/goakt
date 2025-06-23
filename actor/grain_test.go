@@ -26,17 +26,24 @@ package actor
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
 
+	"connectrpc.com/connect"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/travisjeffery/go-dynaport"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/anypb"
+	"google.golang.org/protobuf/types/known/durationpb"
 
 	"github.com/tochemey/goakt/v3/goaktpb"
+	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/util"
 	"github.com/tochemey/goakt/v3/log"
+	"github.com/tochemey/goakt/v3/remote"
 	"github.com/tochemey/goakt/v3/test/data/testpb"
 )
 
@@ -527,6 +534,414 @@ func TestGrain(t *testing.T) {
 		})
 		require.Error(t, err)
 		require.Nil(t, identity)
+
+		require.NoError(t, testSystem.Stop(ctx))
+	})
+	t.Run("With invalid sender name", func(t *testing.T) {
+		ctx := t.Context()
+		testSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NotNil(t, testSystem)
+
+		// start the actor system
+		err = testSystem.Start(ctx)
+		require.NoError(t, err)
+		util.Pause(time.Second)
+
+		// create a grain instance
+		grain := NewMockGrain()
+		identity, err := testSystem.GetGrain(ctx, "testGrain", func(ctx context.Context) (Grain, error) {
+			return grain, nil
+		})
+		require.NoError(t, err)
+		require.NotNil(t, identity)
+
+		sender := &Identity{}
+		message := new(testpb.TestSend)
+		response, err := testSystem.AskGrain(ctx, identity, message, WithRequestSender(sender))
+		require.Error(t, err)
+		require.ErrorIs(t, err, ErrInvalidGrainIdentity)
+		require.Nil(t, response)
+
+		err = testSystem.TellGrain(ctx, identity, message, WithRequestSender(sender))
+		require.Error(t, err)
+		require.ErrorIs(t, err, ErrInvalidGrainIdentity)
+
+		require.NoError(t, testSystem.Stop(ctx))
+	})
+	t.Run("Remoting failed when remoting not enabled", func(t *testing.T) {
+		ctx := t.Context()
+		ports := dynaport.Get(1)
+		remotingPort := ports[0]
+		host := "127.0.0.1"
+		timeout := 5 * time.Second
+
+		testSystem, err := NewActorSystem(
+			"testSys",
+			WithLogger(log.DiscardLogger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+		)
+		require.NoError(t, err)
+		require.NotNil(t, testSystem)
+
+		// start the actor system
+		err = testSystem.Start(ctx)
+		require.NoError(t, err)
+		util.Pause(time.Second)
+
+		// disable remoting for the sake of the test
+		testSystem.(*actorSystem).remotingEnabled.Store(false)
+
+		// create a wire
+		grain := &internalpb.Grain{
+			GrainId: &internalpb.GrainId{
+				Kind:  "some-kind",
+				Name:  "some-name",
+				Value: "some-value",
+			},
+			Host:         host,
+			Port:         int32(remotingPort),
+			Dependencies: nil,
+		}
+
+		serialized, _ := anypb.New(grain)
+		remoteClient := testSystem.getRemoting().remotingServiceClient(grain.GetHost(), int(grain.GetPort()))
+
+		_, err = remoteClient.RemoteTellGrain(ctx, connect.NewRequest(&internalpb.RemoteTellGrainRequest{
+			Grain:          grain,
+			RequestTimeout: durationpb.New(timeout),
+			Dependencies:   grain.GetDependencies(),
+			Message:        serialized,
+		}))
+		require.Error(t, err)
+		var connectErr *connect.Error
+		require.True(t, errors.As(err, &connectErr))
+		e := connectErr.Unwrap()
+		require.ErrorContains(t, e, ErrRemotingDisabled.Error())
+
+		_, err = remoteClient.RemoteAskGrain(ctx, connect.NewRequest(&internalpb.RemoteAskGrainRequest{
+			Grain:          grain,
+			RequestTimeout: durationpb.New(timeout),
+			Dependencies:   grain.GetDependencies(),
+			Message:        serialized,
+		}))
+		require.Error(t, err)
+		require.True(t, errors.As(err, &connectErr))
+		e = connectErr.Unwrap()
+		require.ErrorContains(t, e, ErrRemotingDisabled.Error())
+
+		require.NoError(t, testSystem.Stop(ctx))
+	})
+	t.Run("Remoting failed with invalid grain identity", func(t *testing.T) {
+		ctx := t.Context()
+		ports := dynaport.Get(1)
+		remotingPort := ports[0]
+		host := "127.0.0.1"
+		timeout := 5 * time.Second
+
+		testSystem, err := NewActorSystem(
+			"testSys",
+			WithLogger(log.DiscardLogger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+		)
+		require.NoError(t, err)
+		require.NotNil(t, testSystem)
+
+		// start the actor system
+		err = testSystem.Start(ctx)
+		require.NoError(t, err)
+		util.Pause(time.Second)
+
+		// create a wire
+		grain := &internalpb.Grain{
+			GrainId:      &internalpb.GrainId{},
+			Host:         host,
+			Port:         int32(remotingPort),
+			Dependencies: nil,
+		}
+
+		serialized, _ := anypb.New(grain)
+		remoteClient := testSystem.getRemoting().remotingServiceClient(grain.GetHost(), int(grain.GetPort()))
+
+		_, err = remoteClient.RemoteTellGrain(ctx, connect.NewRequest(&internalpb.RemoteTellGrainRequest{
+			Grain:          grain,
+			RequestTimeout: durationpb.New(timeout),
+			Dependencies:   grain.GetDependencies(),
+			Message:        serialized,
+		}))
+		require.Error(t, err)
+		var connectErr *connect.Error
+		require.True(t, errors.As(err, &connectErr))
+		e := connectErr.Unwrap()
+		require.ErrorContains(t, e, ErrInvalidGrainIdentity.Error())
+
+		_, err = remoteClient.RemoteAskGrain(ctx, connect.NewRequest(&internalpb.RemoteAskGrainRequest{
+			Grain:          grain,
+			RequestTimeout: durationpb.New(timeout),
+			Dependencies:   grain.GetDependencies(),
+			Message:        serialized,
+		}))
+		require.Error(t, err)
+		require.True(t, errors.As(err, &connectErr))
+		e = connectErr.Unwrap()
+		require.ErrorContains(t, e, ErrInvalidGrainIdentity.Error())
+
+		require.NoError(t, testSystem.Stop(ctx))
+	})
+	t.Run("Remoting failed with reserved name grain identity", func(t *testing.T) {
+		ctx := t.Context()
+		ports := dynaport.Get(1)
+		remotingPort := ports[0]
+		host := "127.0.0.1"
+		timeout := 5 * time.Second
+
+		testSystem, err := NewActorSystem(
+			"testSys",
+			WithLogger(log.DiscardLogger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+		)
+		require.NoError(t, err)
+		require.NotNil(t, testSystem)
+
+		// start the actor system
+		err = testSystem.Start(ctx)
+		require.NoError(t, err)
+		util.Pause(time.Second)
+
+		// create a wire
+		grain := &internalpb.Grain{
+			GrainId: &internalpb.GrainId{
+				Kind:  "actor.MockGrain",
+				Name:  "GoAktGrain",
+				Value: "actor.MockGrain/GoAktGrain",
+			},
+			Host:         host,
+			Port:         int32(remotingPort),
+			Dependencies: nil,
+		}
+
+		serialized, _ := anypb.New(grain)
+		remoteClient := testSystem.getRemoting().remotingServiceClient(grain.GetHost(), int(grain.GetPort()))
+
+		_, err = remoteClient.RemoteTellGrain(ctx, connect.NewRequest(&internalpb.RemoteTellGrainRequest{
+			Grain:          grain,
+			RequestTimeout: durationpb.New(timeout),
+			Dependencies:   grain.GetDependencies(),
+			Message:        serialized,
+		}))
+		require.Error(t, err)
+		var connectErr *connect.Error
+		require.True(t, errors.As(err, &connectErr))
+		e := connectErr.Unwrap()
+		require.ErrorContains(t, e, ErrReservedName.Error())
+
+		_, err = remoteClient.RemoteAskGrain(ctx, connect.NewRequest(&internalpb.RemoteAskGrainRequest{
+			Grain:          grain,
+			RequestTimeout: durationpb.New(timeout),
+			Dependencies:   grain.GetDependencies(),
+			Message:        serialized,
+		}))
+		require.Error(t, err)
+		require.True(t, errors.As(err, &connectErr))
+		e = connectErr.Unwrap()
+		require.ErrorContains(t, e, ErrReservedName.Error())
+
+		require.NoError(t, testSystem.Stop(ctx))
+	})
+	t.Run("Remoting failed with invalid grain identity as sender", func(t *testing.T) {
+		ctx := t.Context()
+		ports := dynaport.Get(1)
+		remotingPort := ports[0]
+		host := "127.0.0.1"
+		timeout := 5 * time.Second
+
+		testSystem, err := NewActorSystem(
+			"testSys",
+			WithLogger(log.DiscardLogger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+		)
+		require.NoError(t, err)
+		require.NotNil(t, testSystem)
+
+		// start the actor system
+		err = testSystem.Start(ctx)
+		require.NoError(t, err)
+		util.Pause(time.Second)
+
+		// create a wire
+		grain := &internalpb.Grain{
+			GrainId: &internalpb.GrainId{
+				Kind:  "actor.MockGrain",
+				Name:  "me",
+				Value: "actor.MockGrain/me",
+			},
+			Host:         host,
+			Port:         int32(remotingPort),
+			Dependencies: nil,
+		}
+
+		serialized, _ := anypb.New(grain)
+		remoteClient := testSystem.getRemoting().remotingServiceClient(grain.GetHost(), int(grain.GetPort()))
+
+		_, err = remoteClient.RemoteTellGrain(ctx, connect.NewRequest(&internalpb.RemoteTellGrainRequest{
+			Grain:          grain,
+			RequestTimeout: durationpb.New(timeout),
+			Dependencies:   grain.GetDependencies(),
+			Message:        serialized,
+			Sender:         &internalpb.GrainId{},
+		}))
+		require.Error(t, err)
+		var connectErr *connect.Error
+		require.True(t, errors.As(err, &connectErr))
+		e := connectErr.Unwrap()
+		require.ErrorContains(t, e, ErrInvalidGrainIdentity.Error())
+
+		_, err = remoteClient.RemoteAskGrain(ctx, connect.NewRequest(&internalpb.RemoteAskGrainRequest{
+			Grain:          grain,
+			RequestTimeout: durationpb.New(timeout),
+			Dependencies:   grain.GetDependencies(),
+			Message:        serialized,
+			Sender:         &internalpb.GrainId{},
+		}))
+		require.Error(t, err)
+		require.True(t, errors.As(err, &connectErr))
+		e = connectErr.Unwrap()
+		require.ErrorContains(t, e, ErrInvalidGrainIdentity.Error())
+
+		require.NoError(t, testSystem.Stop(ctx))
+	})
+	t.Run("Remoting failed with reserved name grain identity as sender", func(t *testing.T) {
+		ctx := t.Context()
+		ports := dynaport.Get(1)
+		remotingPort := ports[0]
+		host := "127.0.0.1"
+		timeout := 5 * time.Second
+
+		testSystem, err := NewActorSystem(
+			"testSys",
+			WithLogger(log.DiscardLogger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+		)
+		require.NoError(t, err)
+		require.NotNil(t, testSystem)
+
+		// start the actor system
+		err = testSystem.Start(ctx)
+		require.NoError(t, err)
+		util.Pause(time.Second)
+
+		// create a wire
+		grain := &internalpb.Grain{
+			GrainId: &internalpb.GrainId{
+				Kind:  "actor.MockGrain",
+				Name:  "me",
+				Value: "actor.MockGrain/me",
+			},
+			Host:         host,
+			Port:         int32(remotingPort),
+			Dependencies: nil,
+		}
+
+		serialized, _ := anypb.New(grain)
+		remoteClient := testSystem.getRemoting().remotingServiceClient(grain.GetHost(), int(grain.GetPort()))
+
+		_, err = remoteClient.RemoteTellGrain(ctx, connect.NewRequest(&internalpb.RemoteTellGrainRequest{
+			Grain:          grain,
+			RequestTimeout: durationpb.New(timeout),
+			Dependencies:   grain.GetDependencies(),
+			Message:        serialized,
+			Sender: &internalpb.GrainId{
+				Kind:  "actor.MockGrain",
+				Name:  "GoAktGrain",
+				Value: "actor.MockGrain/GoAktGrain",
+			},
+		}))
+		require.Error(t, err)
+		var connectErr *connect.Error
+		require.True(t, errors.As(err, &connectErr))
+		e := connectErr.Unwrap()
+		require.ErrorContains(t, e, ErrReservedName.Error())
+
+		_, err = remoteClient.RemoteAskGrain(ctx, connect.NewRequest(&internalpb.RemoteAskGrainRequest{
+			Grain:          grain,
+			RequestTimeout: durationpb.New(timeout),
+			Dependencies:   grain.GetDependencies(),
+			Message:        serialized,
+			Sender: &internalpb.GrainId{
+				Kind:  "actor.MockGrain",
+				Name:  "GoAktGrain",
+				Value: "actor.MockGrain/GoAktGrain",
+			},
+		}))
+		require.Error(t, err)
+		require.True(t, errors.As(err, &connectErr))
+		e = connectErr.Unwrap()
+		require.ErrorContains(t, e, ErrReservedName.Error())
+
+		require.NoError(t, testSystem.Stop(ctx))
+	})
+	t.Run("Remoting failed with wrong address", func(t *testing.T) {
+		ctx := t.Context()
+		ports := dynaport.Get(2)
+		remotingPort := ports[0]
+		grainPort := ports[1]
+		host := "127.0.0.1"
+		timeout := 5 * time.Second
+
+		testSystem, err := NewActorSystem(
+			"testSys",
+			WithLogger(log.DiscardLogger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+		)
+		require.NoError(t, err)
+		require.NotNil(t, testSystem)
+
+		// start the actor system
+		err = testSystem.Start(ctx)
+		require.NoError(t, err)
+		util.Pause(time.Second)
+
+		// for the sake of the test, we will use a different port for the remoting
+		// this will never happen in production, but we want to test the error handling
+		testSystem.(*actorSystem).remoteConfig = remote.NewConfig(host, grainPort)
+
+		// create a wire
+		grain := &internalpb.Grain{
+			GrainId: &internalpb.GrainId{
+				Kind:  "actor.MockGrain",
+				Name:  "me",
+				Value: "actor.MockGrain/me",
+			},
+			Host:         "127.0.0.1",
+			Port:         int32(remotingPort),
+			Dependencies: nil,
+		}
+
+		serialized, _ := anypb.New(grain)
+		remoteClient := testSystem.getRemoting().remotingServiceClient(grain.GetHost(), int(grain.GetPort()))
+
+		_, err = remoteClient.RemoteTellGrain(ctx, connect.NewRequest(&internalpb.RemoteTellGrainRequest{
+			Grain:          grain,
+			RequestTimeout: durationpb.New(timeout),
+			Dependencies:   grain.GetDependencies(),
+			Message:        serialized,
+		}))
+		require.Error(t, err)
+		var connectErr *connect.Error
+		require.True(t, errors.As(err, &connectErr))
+		e := connectErr.Unwrap()
+		require.ErrorContains(t, e, ErrInvalidHost.Error())
+
+		_, err = remoteClient.RemoteAskGrain(ctx, connect.NewRequest(&internalpb.RemoteAskGrainRequest{
+			Grain:          grain,
+			RequestTimeout: durationpb.New(timeout),
+			Dependencies:   grain.GetDependencies(),
+			Message:        serialized,
+		}))
+		require.Error(t, err)
+		require.True(t, errors.As(err, &connectErr))
+		e = connectErr.Unwrap()
+		require.ErrorContains(t, e, ErrInvalidHost.Error())
 
 		require.NoError(t, testSystem.Stop(ctx))
 	})
