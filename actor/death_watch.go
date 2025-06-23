@@ -93,8 +93,8 @@ func (x *deathWatch) handleTerminated(ctx context.Context, msg *goaktpb.Terminat
 	if node, ok := x.tree.node(actorID); ok {
 		x.tree.deleteNode(node.value())
 
-		// since we don't replicate system actors, we don't need to make the cluster call
-		if x.clusterEnabled && !isReservedName(actorName) {
+		removeFromCluster := x.clusterEnabled && !isReservedName(actorName) && !x.pid.ActorSystem().isShuttingDown()
+		if removeFromCluster {
 			if err := x.cluster.RemoveActor(context.WithoutCancel(ctx), node.value().Name()); err != nil {
 				x.logger.Errorf("%s failed to remove [actor=%s] from cluster: %v", x.pid.Name(), actorID, err)
 				return NewInternalError(err)
