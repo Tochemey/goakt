@@ -511,9 +511,7 @@ func (x *actorSystem) localSend(ctx context.Context, id *Identity, message proto
 func (x *actorSystem) ensureGrainProcess(id *Identity) (*grainProcess, error) {
 	process, ok := x.grains.Get(*id)
 	if ok {
-		// check whether the Grain type is registered
 		if !x.reflection.registry.Exists(process.getGrain()) {
-			// Grain type is not registered, delete the process and return an error
 			x.grains.Delete(*id)
 			return nil, ErrGrainNotRegistered
 		}

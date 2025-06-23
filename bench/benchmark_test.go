@@ -32,7 +32,8 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	actors "github.com/tochemey/goakt/v3/actor"
+	"github.com/tochemey/goakt/v3/actor"
+	goakt "github.com/tochemey/goakt/v3/actor"
 	"github.com/tochemey/goakt/v3/bench/benchpb"
 	"github.com/tochemey/goakt/v3/internal/util"
 	"github.com/tochemey/goakt/v3/log"
@@ -46,9 +47,9 @@ func BenchmarkActor(b *testing.B) {
 		ctx := context.TODO()
 
 		// create the actor system
-		actorSystem, _ := actors.NewActorSystem("bench",
-			actors.WithLogger(log.DiscardLogger),
-			actors.WithActorInitMaxRetries(1))
+		actorSystem, _ := goakt.NewActorSystem("bench",
+			goakt.WithLogger(log.DiscardLogger),
+			goakt.WithActorInitMaxRetries(1))
 
 		// start the actor system
 		_ = actorSystem.Start(ctx)
@@ -62,7 +63,7 @@ func BenchmarkActor(b *testing.B) {
 		// create the actor ref
 		pid, _ := actorSystem.Spawn(ctx, "test", actor)
 
-		// wait for actors to start properly
+		// wait for goakt to start properly
 		util.Pause(1 * time.Second)
 
 		var counter int64
@@ -70,7 +71,7 @@ func BenchmarkActor(b *testing.B) {
 		b.ReportAllocs()
 		b.RunParallel(func(pb *testing.PB) {
 			for pb.Next() {
-				if err := actors.Tell(ctx, pid, new(benchpb.BenchTell)); err != nil {
+				if err := goakt.Tell(ctx, pid, new(benchpb.BenchTell)); err != nil {
 					b.Fatal(err)
 				}
 				atomic.AddInt64(&counter, 1)
@@ -89,9 +90,9 @@ func BenchmarkActor(b *testing.B) {
 		ctx := context.TODO()
 
 		// create the actor system
-		actorSystem, _ := actors.NewActorSystem("bench",
-			actors.WithLogger(log.DiscardLogger),
-			actors.WithActorInitMaxRetries(1))
+		actorSystem, _ := goakt.NewActorSystem("bench",
+			goakt.WithLogger(log.DiscardLogger),
+			goakt.WithActorInitMaxRetries(1))
 
 		// start the actor system
 		_ = actorSystem.Start(ctx)
@@ -99,11 +100,11 @@ func BenchmarkActor(b *testing.B) {
 		// wait for system to start properly
 		util.Pause(1 * time.Second)
 
-		// create the actors
+		// create the goakt
 		sender, _ := actorSystem.Spawn(ctx, "sender", new(Actor))
 		receiver, _ := actorSystem.Spawn(ctx, "receiver", new(Actor))
 
-		// wait for actors to start properly
+		// wait for goakt to start properly
 		util.Pause(1 * time.Second)
 		var counter int64
 		b.ResetTimer()
@@ -126,9 +127,9 @@ func BenchmarkActor(b *testing.B) {
 		ctx := context.TODO()
 
 		// create the actor system
-		actorSystem, _ := actors.NewActorSystem("bench",
-			actors.WithLogger(log.DiscardLogger),
-			actors.WithActorInitMaxRetries(1))
+		actorSystem, _ := goakt.NewActorSystem("bench",
+			goakt.WithLogger(log.DiscardLogger),
+			goakt.WithActorInitMaxRetries(1))
 
 		// start the actor system
 		_ = actorSystem.Start(ctx)
@@ -136,11 +137,11 @@ func BenchmarkActor(b *testing.B) {
 		// wait for system to start properly
 		util.Pause(1 * time.Second)
 
-		// create the actors
-		sender, _ := actorSystem.Spawn(ctx, "sender", new(Actor), actors.WithMailbox(actors.NewBoundedMailbox(b.N)))
-		receiver, _ := actorSystem.Spawn(ctx, "receiver", new(Actor), actors.WithMailbox(actors.NewBoundedMailbox(b.N)))
+		// create the goakt
+		sender, _ := actorSystem.Spawn(ctx, "sender", new(Actor), goakt.WithMailbox(goakt.NewBoundedMailbox(b.N)))
+		receiver, _ := actorSystem.Spawn(ctx, "receiver", new(Actor), goakt.WithMailbox(goakt.NewBoundedMailbox(b.N)))
 
-		// wait for actors to start properly
+		// wait for goakt to start properly
 		util.Pause(1 * time.Second)
 		var counter int64
 		b.ResetTimer()
@@ -169,9 +170,9 @@ func BenchmarkActor(b *testing.B) {
 		}
 
 		// create the actor system
-		actorSystem, _ := actors.NewActorSystem("bench",
-			actors.WithLogger(log.DiscardLogger),
-			actors.WithActorInitMaxRetries(1))
+		actorSystem, _ := goakt.NewActorSystem("bench",
+			goakt.WithLogger(log.DiscardLogger),
+			goakt.WithActorInitMaxRetries(1))
 
 		// start the actor system
 		_ = actorSystem.Start(ctx)
@@ -179,11 +180,11 @@ func BenchmarkActor(b *testing.B) {
 		// wait for system to start properly
 		util.Pause(1 * time.Second)
 
-		// create the actors
-		sender, _ := actorSystem.Spawn(ctx, "sender", new(Actor), actors.WithMailbox(actors.NewUnboundedPriorityMailBox(priorityFunc)))
-		receiver, _ := actorSystem.Spawn(ctx, "receiver", new(Actor), actors.WithMailbox(actors.NewUnboundedPriorityMailBox(priorityFunc)))
+		// create the goakt
+		sender, _ := actorSystem.Spawn(ctx, "sender", new(Actor), goakt.WithMailbox(goakt.NewUnboundedPriorityMailBox(priorityFunc)))
+		receiver, _ := actorSystem.Spawn(ctx, "receiver", new(Actor), goakt.WithMailbox(goakt.NewUnboundedPriorityMailBox(priorityFunc)))
 
-		// wait for actors to start properly
+		// wait for goakt to start properly
 		util.Pause(1 * time.Second)
 		var counter int64
 		b.ResetTimer()
@@ -211,9 +212,9 @@ func BenchmarkActor(b *testing.B) {
 		ctx := context.TODO()
 
 		// create the actor system
-		actorSystem, _ := actors.NewActorSystem("bench",
-			actors.WithLogger(log.DiscardLogger),
-			actors.WithActorInitMaxRetries(1))
+		actorSystem, _ := goakt.NewActorSystem("bench",
+			goakt.WithLogger(log.DiscardLogger),
+			goakt.WithActorInitMaxRetries(1))
 
 		// start the actor system
 		_ = actorSystem.Start(ctx)
@@ -221,11 +222,11 @@ func BenchmarkActor(b *testing.B) {
 		// wait for system to start properly
 		util.Pause(1 * time.Second)
 
-		// create the actors
+		// create the goakt
 		sender, _ := actorSystem.Spawn(ctx, "sender", new(Actor))
 		receiver, _ := actorSystem.Spawn(ctx, "receiver", new(Actor))
 
-		// wait for actors to start properly
+		// wait for goakt to start properly
 		util.Pause(1 * time.Second)
 		var counter int64
 		b.ResetTimer()
@@ -248,9 +249,9 @@ func BenchmarkActor(b *testing.B) {
 	b.Run("Ask(api:default mailbox)", func(b *testing.B) {
 		ctx := context.TODO()
 		// create the actor system
-		actorSystem, _ := actors.NewActorSystem("bench",
-			actors.WithLogger(log.DiscardLogger),
-			actors.WithActorInitMaxRetries(1))
+		actorSystem, _ := goakt.NewActorSystem("bench",
+			goakt.WithLogger(log.DiscardLogger),
+			goakt.WithActorInitMaxRetries(1))
 
 		// start the actor system
 		_ = actorSystem.Start(ctx)
@@ -263,18 +264,18 @@ func BenchmarkActor(b *testing.B) {
 
 		// create the actor ref
 		pid, _ := actorSystem.Spawn(ctx, "test", actor,
-			actors.WithPassivationStrategy(
+			goakt.WithPassivationStrategy(
 				passivation.NewTimeBasedStrategy(5*time.Second),
 			))
 
-		// wait for actors to start properly
+		// wait for goakt to start properly
 		util.Pause(1 * time.Second)
 		var counter int64
 		b.ResetTimer()
 		b.ReportAllocs()
 		b.RunParallel(func(pb *testing.PB) {
 			for pb.Next() {
-				if _, err := actors.Ask(ctx, pid, new(benchpb.BenchRequest), receivingTimeout); err != nil {
+				if _, err := goakt.Ask(ctx, pid, new(benchpb.BenchRequest), receivingTimeout); err != nil {
 					b.Fatal(err)
 				}
 				atomic.AddInt64(&counter, 1)
@@ -292,9 +293,9 @@ func BenchmarkActor(b *testing.B) {
 		ctx := context.TODO()
 
 		// create the actor system
-		actorSystem, _ := actors.NewActorSystem("bench",
-			actors.WithLogger(log.DiscardLogger),
-			actors.WithActorInitMaxRetries(1))
+		actorSystem, _ := goakt.NewActorSystem("bench",
+			goakt.WithLogger(log.DiscardLogger),
+			goakt.WithActorInitMaxRetries(1))
 
 		// start the actor system
 		_ = actorSystem.Start(ctx)
@@ -302,11 +303,11 @@ func BenchmarkActor(b *testing.B) {
 		// wait for system to start properly
 		util.Pause(1 * time.Second)
 
-		// create the actors
+		// create the goakt
 		sender, _ := actorSystem.Spawn(ctx, "sender", new(Actor))
 		receiver, _ := actorSystem.Spawn(ctx, "receiver", new(Actor))
 
-		// wait for actors to start properly
+		// wait for goakt to start properly
 		util.Pause(1 * time.Second)
 
 		var counter int64
@@ -331,9 +332,9 @@ func BenchmarkActor(b *testing.B) {
 		ctx := context.TODO()
 
 		// create the actor system
-		actorSystem, _ := actors.NewActorSystem("bench",
-			actors.WithLogger(log.DiscardLogger),
-			actors.WithActorInitMaxRetries(1))
+		actorSystem, _ := goakt.NewActorSystem("bench",
+			goakt.WithLogger(log.DiscardLogger),
+			goakt.WithActorInitMaxRetries(1))
 
 		// start the actor system
 		_ = actorSystem.Start(ctx)
@@ -341,11 +342,11 @@ func BenchmarkActor(b *testing.B) {
 		// wait for system to start properly
 		util.Pause(1 * time.Second)
 
-		// create the actors
-		sender, _ := actorSystem.Spawn(ctx, "sender", new(Actor), actors.WithMailbox(actors.NewBoundedMailbox(b.N)))
-		receiver, _ := actorSystem.Spawn(ctx, "receiver", new(Actor), actors.WithMailbox(actors.NewBoundedMailbox(b.N)))
+		// create the goakt
+		sender, _ := actorSystem.Spawn(ctx, "sender", new(Actor), goakt.WithMailbox(goakt.NewBoundedMailbox(b.N)))
+		receiver, _ := actorSystem.Spawn(ctx, "receiver", new(Actor), goakt.WithMailbox(goakt.NewBoundedMailbox(b.N)))
 
-		// wait for actors to start properly
+		// wait for goakt to start properly
 		util.Pause(1 * time.Second)
 
 		var counter int64
@@ -364,6 +365,43 @@ func BenchmarkActor(b *testing.B) {
 		messagesPerSec := float64(atomic.LoadInt64(&counter)) / b.Elapsed().Seconds()
 		b.ReportMetric(messagesPerSec, "messages/sec")
 
+		_ = actorSystem.Stop(ctx)
+	})
+}
+
+func BenchmarkGrain(b *testing.B) {
+	b.Run("TellGrain", func(b *testing.B) {
+		ctx := b.Context()
+		actorSystem, _ := actor.NewActorSystem("testSys", goakt.WithLogger(log.DiscardLogger))
+
+		// start the actor system
+		_ = actorSystem.Start(ctx)
+
+		// wait for system to start properly
+		util.Pause(1 * time.Second)
+
+		// create a grain instance
+		grain := NewGrain()
+		identity, _ := actorSystem.GetGrain(ctx, "benchGrain", func(ctx context.Context) (goakt.Grain, error) {
+			return grain, nil
+		})
+
+		util.Pause(1 * time.Second)
+		var counter int64
+		b.ResetTimer()
+		b.ReportAllocs()
+
+		for n := 0; n < b.N; n++ {
+			err := actorSystem.TellGrain(ctx, identity, new(benchpb.BenchTell))
+			if err != nil {
+				b.Fatal(err)
+			}
+			atomic.AddInt64(&counter, 1)
+		}
+
+		b.StopTimer()
+		messagesPerSec := float64(atomic.LoadInt64(&counter)) / b.Elapsed().Seconds()
+		b.ReportMetric(messagesPerSec, "messages/sec")
 		_ = actorSystem.Stop(ctx)
 	})
 }

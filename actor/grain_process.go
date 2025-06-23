@@ -148,27 +148,6 @@ func (proc *grainProcess) deactivate(ctx context.Context) error {
 	return nil
 }
 
-// shutdown gracefully shuts down the given Grain
-func (proc *grainProcess) shutdown(ctx context.Context) error {
-	proc.logger.Infof("Shutdown process has started for Grain=(%s)...", proc.identity.String())
-
-	if !proc.isRunning() {
-		return nil
-	}
-
-	defer func() {
-		proc.running.Store(false)
-	}()
-
-	if err := proc.deactivate(ctx); err != nil {
-		proc.logger.Errorf("Grain (%s) failed to cleanly stop", proc.identity.String())
-		return err
-	}
-
-	proc.logger.Infof("Grain %s successfully shutdown", proc.identity.String())
-	return nil
-}
-
 // isRunning returns true when the actor is alive ready to process messages and false
 // when the actor is stopped or not started at all
 func (proc *grainProcess) isRunning() bool {
@@ -181,7 +160,6 @@ func (proc *grainProcess) receive(message *grainRequest) {
 	if proc.isRunning() {
 		if err := proc.inbox.Enqueue(message); err != nil {
 			proc.logger.Warn(err)
-			//proc.toDeadletters(receiveCtx, err)
 		}
 		proc.schedule()
 	}
@@ -229,7 +207,7 @@ func (proc *grainProcess) receiveLoop() {
 func (proc *grainProcess) handleSystemMessage(request *grainRequest) {
 	switch msg := request.getMessage().(type) {
 	case *goaktpb.PoisonPill:
-		err := proc.shutdown(context.Background())
+		err := proc.deactivate(context.Background())
 		// send a response back to the sender when the request is synchronous
 		if request.isSynchronous() {
 			if err != nil {
