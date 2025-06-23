@@ -54,12 +54,13 @@ const (
 	DefaultAskTimeout = 5 * time.Second
 	// DefaultMaxReadFrameSize defines the default HTTP maximum read frame size
 	DefaultMaxReadFrameSize = 16 * size.MB
-
 	// DefaultClusterBootstrapTimeout defines the default cluster bootstrap timeout
 	DefaultClusterBootstrapTimeout = 10 * time.Second
-
 	// DefaultClusterStateSyncInterval defines the default cluster state synchronization interval
 	DefaultClusterStateSyncInterval = time.Minute
+	// DefaultGrainRequestTimeout defines the default grain request timeout
+	DefaultGrainRequestTimeout = 5 * time.Minute
+
 	// eventsTopic defines the events topic
 	eventsTopic = "topic.events"
 

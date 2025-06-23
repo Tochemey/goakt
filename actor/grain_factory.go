@@ -177,21 +177,21 @@ func (x *actorSystem) AskGrain(ctx context.Context, identity *Identity, message 
 	}
 
 	config := newGrainOptConfig(opts...)
-	timeout := config.RequestTimeout()
-	sender := config.RequestSender()
-	if sender != nil {
-		if err = sender.Validate(); err != nil {
+	requestTimeout := config.RequestTimeout()
+	requestSender := config.RequestSender()
+	if requestSender != nil {
+		if err = requestSender.Validate(); err != nil {
 			return nil, NewErrInvalidGrainIdentity(err)
 		}
-		if isReservedName(sender.Name()) {
-			return nil, NewErrReservedName(sender.String())
+		if isReservedName(requestSender.Name()) {
+			return nil, NewErrReservedName(requestSender.String())
 		}
 	}
 
 	if x.InCluster() {
-		return x.remoteAskGrain(ctx, identity, message, sender, timeout)
+		return x.remoteAskGrain(ctx, identity, message, requestSender, requestTimeout)
 	}
-	return x.localSend(ctx, identity, message, sender, timeout, true)
+	return x.localSend(ctx, identity, message, requestSender, requestTimeout, true)
 }
 
 // RemoteTellGrain handles remote fire-and-forget messages to a Grain from another node.
@@ -477,19 +477,22 @@ func (x *actorSystem) localSend(ctx context.Context, id *Identity, message proto
 	request.build(ctx, sender, message, synchronous)
 	process.receive(request)
 	timer := timers.Get(timeout)
-	defer timers.Put(timer)
 
 	// Handle synchronous (Ask) case
 	if synchronous {
 		select {
 		case res := <-request.getResponse():
+			timers.Put(timer)
 			return res.Message(), nil
 		case err := <-request.getErr():
+			timers.Put(timer)
 			return nil, err
-		case <-timer.C:
-			return nil, ErrRequestTimeout
 		case <-ctx.Done():
+			timers.Put(timer)
 			return nil, errors.Join(ctx.Err(), ErrRequestTimeout)
+		case <-timer.C:
+			timers.Put(timer)
+			return nil, ErrRequestTimeout
 		}
 	}
 

@@ -933,6 +933,17 @@ func (m *MockGrain) ReceiveSync(_ context.Context, message proto.Message) (proto
 	switch msg := message.(type) {
 	case *testpb.TestSend:
 		return &testpb.Reply{Content: "received message"}, nil
+	case *testpb.TestTimeout:
+		// delay for a while before sending the reply
+		wg := sync.WaitGroup{}
+		wg.Add(1)
+		go func() {
+			util.Pause(time.Second)
+			wg.Done()
+		}()
+		// block until timer is up
+		wg.Wait()
+		return &testpb.TestTimeout{}, nil
 	default:
 		return nil, fmt.Errorf("unhandled message type %T", msg)
 	}
@@ -943,6 +954,17 @@ func (m *MockGrain) ReceiveSync(_ context.Context, message proto.Message) (proto
 func (m *MockGrain) ReceiveAsync(_ context.Context, message proto.Message) error {
 	switch msg := message.(type) {
 	case *testpb.TestSend:
+		return nil
+	case *testpb.TestTimeout:
+		// delay for a while before sending the reply
+		wg := sync.WaitGroup{}
+		wg.Add(1)
+		go func() {
+			util.Pause(time.Second)
+			wg.Done()
+		}()
+		// block until timer is up
+		wg.Wait()
 		return nil
 	default:
 		return fmt.Errorf("unhandled message type %T", msg)

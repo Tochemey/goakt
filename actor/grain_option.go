@@ -47,7 +47,7 @@ func (f grainOption) Apply(c *grainOptConfig) {
 
 type grainOptConfig struct {
 	// specifies the request timeout
-	requestTimeout time.Duration
+	timeout time.Duration
 	// specifies the request sender
 	sender *Identity
 }
@@ -57,7 +57,7 @@ type grainOptConfig struct {
 // This value determines the maximum duration the Grain will wait for a request to complete.
 // If not explicitly set, it defaults to 5 minutes.
 func (g *grainOptConfig) RequestTimeout() time.Duration {
-	return g.requestTimeout
+	return g.timeout
 }
 
 // RequestSender returns the sender of the request.
@@ -78,9 +78,9 @@ func (g *grainOptConfig) RequestSender() *Identity {
 func WithRequestTimeout(timeout time.Duration) GrainOption {
 	return grainOption(func(config *grainOptConfig) {
 		if timeout <= 0 {
-			timeout = 5 * time.Minute // default timeout
+			timeout = DefaultGrainRequestTimeout
 		}
-		config.requestTimeout = timeout
+		config.timeout = timeout
 	})
 }
 
@@ -103,8 +103,9 @@ func WithRequestSender(sender *Identity) GrainOption {
 // newGrainOptConfig creates an instance of grainConfig
 func newGrainOptConfig(opts ...GrainOption) *grainOptConfig {
 	config := &grainOptConfig{
-		requestTimeout: 5 * time.Minute,
+		timeout: DefaultGrainRequestTimeout,
 	}
+
 	for _, opt := range opts {
 		opt.Apply(config)
 	}

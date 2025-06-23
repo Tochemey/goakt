@@ -945,4 +945,143 @@ func TestGrain(t *testing.T) {
 
 		require.NoError(t, testSystem.Stop(ctx))
 	})
+	t.Run("With Tell timeout", func(t *testing.T) {
+		ctx := t.Context()
+		testSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NotNil(t, testSystem)
+
+		// start the actor system
+		err = testSystem.Start(ctx)
+		require.NoError(t, err)
+		util.Pause(time.Second)
+
+		// create a grain instance
+		grain := NewMockGrain()
+		identity, err := testSystem.GetGrain(ctx, "testGrain", func(ctx context.Context) (Grain, error) {
+			return grain, nil
+		})
+		require.NoError(t, err)
+		require.NotNil(t, identity)
+
+		// prepare a message to send to the grain
+		message := new(testpb.TestTimeout)
+		err = testSystem.TellGrain(ctx, identity, message, WithRequestTimeout(100*time.Millisecond))
+		require.Error(t, err)
+		require.ErrorIs(t, err, ErrRequestTimeout)
+
+		// check if the grain is activated
+		gp, ok := testSystem.(*actorSystem).grains.Get(*identity)
+		require.True(t, ok)
+		require.NotNil(t, gp)
+		require.True(t, gp.isRunning())
+
+		require.NoError(t, testSystem.Stop(ctx))
+	})
+	t.Run("With AskGrain timeout", func(t *testing.T) {
+		ctx := t.Context()
+		testSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NotNil(t, testSystem)
+
+		// start the actor system
+		err = testSystem.Start(ctx)
+		require.NoError(t, err)
+		util.Pause(time.Second)
+
+		// create a grain instance
+		grain := NewMockGrain()
+		identity, err := testSystem.GetGrain(ctx, "testGrain", func(ctx context.Context) (Grain, error) {
+			return grain, nil
+		})
+		require.NoError(t, err)
+		require.NotNil(t, identity)
+
+		// prepare a message to send to the grain
+		message := new(testpb.TestTimeout)
+		response, err := testSystem.AskGrain(ctx, identity, message, WithRequestTimeout(100*time.Millisecond))
+		require.Error(t, err)
+		require.ErrorIs(t, err, ErrRequestTimeout)
+		require.Nil(t, response)
+
+		// check if the grain is activated
+		gp, ok := testSystem.(*actorSystem).grains.Get(*identity)
+		require.True(t, ok)
+		require.NotNil(t, gp)
+		require.True(t, gp.isRunning())
+
+		require.NoError(t, testSystem.Stop(ctx))
+	})
+	t.Run("With AskGrain and context canceled", func(t *testing.T) {
+		ctx := context.TODO()
+		testSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NotNil(t, testSystem)
+
+		// start the actor system
+		err = testSystem.Start(ctx)
+		require.NoError(t, err)
+		util.Pause(time.Second)
+
+		// create a grain instance
+		grain := NewMockGrain()
+		identity, err := testSystem.GetGrain(ctx, "testGrain", func(ctx context.Context) (Grain, error) {
+			return grain, nil
+		})
+		require.NoError(t, err)
+		require.NotNil(t, identity)
+
+		cancelCtx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+		defer cancel()
+		// prepare a message to send to the grain
+		message := new(testpb.TestTimeout)
+		response, err := testSystem.AskGrain(cancelCtx, identity, message)
+		require.Error(t, err)
+		require.ErrorIs(t, err, ErrRequestTimeout)
+		require.Nil(t, response)
+
+		// check if the grain is activated
+		gp, ok := testSystem.(*actorSystem).grains.Get(*identity)
+		require.True(t, ok)
+		require.NotNil(t, gp)
+		require.True(t, gp.isRunning())
+
+		require.NoError(t, testSystem.Stop(ctx))
+	})
+	t.Run("With Tell and context canceled", func(t *testing.T) {
+		ctx := t.Context()
+		testSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NotNil(t, testSystem)
+
+		// start the actor system
+		err = testSystem.Start(ctx)
+		require.NoError(t, err)
+		util.Pause(time.Second)
+
+		// create a grain instance
+		grain := NewMockGrain()
+		identity, err := testSystem.GetGrain(ctx, "testGrain", func(ctx context.Context) (Grain, error) {
+			return grain, nil
+		})
+		require.NoError(t, err)
+		require.NotNil(t, identity)
+
+		cancelCtx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+		defer cancel()
+
+		// prepare a message to send to the grain
+		message := new(testpb.TestTimeout)
+		err = testSystem.TellGrain(cancelCtx, identity, message, WithRequestTimeout(5*time.Minute))
+		require.Error(t, err)
+		require.ErrorIs(t, err, ErrRequestTimeout)
+
+		// check if the grain is activated
+		gp, ok := testSystem.(*actorSystem).grains.Get(*identity)
+		require.True(t, ok)
+		require.NotNil(t, gp)
+		require.True(t, gp.isRunning())
+
+		require.NoError(t, testSystem.Stop(ctx))
+	})
 }
