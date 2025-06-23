@@ -26,13 +26,15 @@ package bench
 
 import (
 	"context"
+	"fmt"
+	"runtime"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/tochemey/goakt/v3/actor"
 	goakt "github.com/tochemey/goakt/v3/actor"
 	"github.com/tochemey/goakt/v3/bench/benchpb"
 	"github.com/tochemey/goakt/v3/internal/util"
@@ -372,7 +374,7 @@ func BenchmarkActor(b *testing.B) {
 func BenchmarkGrain(b *testing.B) {
 	b.Run("TellGrain", func(b *testing.B) {
 		ctx := b.Context()
-		actorSystem, _ := actor.NewActorSystem("testSys", goakt.WithLogger(log.DiscardLogger))
+		actorSystem, _ := goakt.NewActorSystem("testSys", goakt.WithLogger(log.DiscardLogger))
 
 		// start the actor system
 		_ = actorSystem.Start(ctx)
@@ -382,7 +384,7 @@ func BenchmarkGrain(b *testing.B) {
 
 		// create a grain instance
 		grain := NewGrain()
-		identity, _ := actorSystem.GetGrain(ctx, "benchGrain", func(ctx context.Context) (goakt.Grain, error) {
+		identity, _ := actorSystem.GetGrain(ctx, "benchGrain", func(_ context.Context) (goakt.Grain, error) {
 			return grain, nil
 		})
 
@@ -404,4 +406,56 @@ func BenchmarkGrain(b *testing.B) {
 		b.ReportMetric(messagesPerSec, "messages/sec")
 		_ = actorSystem.Stop(ctx)
 	})
+}
+
+func TestBenchTell(t *testing.T) {
+	ctx := context.TODO()
+
+	toSend := 10_000_000
+
+	benchmark := NewBenchmark(toSend)
+	require.NoError(t, benchmark.Start(ctx))
+
+	fmt.Printf("Starting benchmark...\n")
+	startTime := time.Now()
+	if err := benchmark.BenchTell(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	duration := time.Since(startTime)
+	metric := benchmark.ActorRef().Metric(ctx)
+	processedCount := metric.ProcessedCount()
+
+	fmt.Printf("Go Version: %s\n", runtime.Version())
+	fmt.Printf("Runtime CPUs: %d\n", runtime.NumCPU())
+	fmt.Printf("Total messages sent: (%d) - duration: (%v)\n", toSend, duration)
+	fmt.Printf("Total messages processed: (%d) - duration: (%v)\n", processedCount, duration)
+	fmt.Printf("Messages per second: (%d)\n", int64(processedCount)/int64(duration.Seconds()))
+	require.NoError(t, benchmark.Stop(ctx))
+}
+
+func TestBenchAsk(t *testing.T) {
+	ctx := context.TODO()
+
+	toSend := 10_000_000
+
+	benchmark := NewBenchmark(toSend)
+	require.NoError(t, benchmark.Start(ctx))
+
+	fmt.Printf("Starting benchmark....\n")
+	startTime := time.Now()
+	if err := benchmark.BenchAsk(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	duration := time.Since(startTime)
+	metric := benchmark.ActorRef().Metric(ctx)
+	processedCount := metric.ProcessedCount()
+
+	fmt.Printf("Go Version: %s\n", runtime.Version())
+	fmt.Printf("Runtime CPUs: %d\n", runtime.NumCPU())
+	fmt.Printf("Total messages sent: (%d) - duration: (%v)\n", toSend, duration)
+	fmt.Printf("Total messages processed: (%d) - duration: (%v)\n", processedCount, duration)
+	fmt.Printf("Messages per second: (%d)\n", int64(processedCount)/int64(duration.Seconds()))
+	require.NoError(t, benchmark.Stop(ctx))
 }
