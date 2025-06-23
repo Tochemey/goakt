@@ -79,7 +79,7 @@ func TestDeathWatch(t *testing.T) {
 		consumer.Shutdown()
 		require.NoError(t, actorSystem.Stop(ctx))
 	})
-	t.Run("Shutdown system when RemoveActor call failed in cluster mode", func(t *testing.T) {
+	t.Run("Shutdown PID  when RemoveActor call failed in cluster mode", func(t *testing.T) {
 		ctx := context.Background()
 		sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
 		require.NoError(t, err)
@@ -106,13 +106,7 @@ func TestDeathWatch(t *testing.T) {
 
 		util.Pause(500 * time.Millisecond)
 
-		// reset the actor system
-		sys.(*actorSystem).cluster = nil
-		sys.(*actorSystem).clusterEnabled.Store(false)
 		pid := sys.getDeathWatch()
-
-		// this is to simulate the fact that the actor is in a cluster
-		pid.Actor().(*deathWatch).clusterEnabled = true
 		pid.Actor().(*deathWatch).cluster = clmock
 
 		require.NoError(t, cid.Shutdown(ctx))

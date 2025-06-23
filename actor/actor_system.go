@@ -1101,7 +1101,9 @@ func (x *actorSystem) GetPartition(actorName string) int {
 
 // InCluster states whether the actor system is started within a cluster of nodesMap
 func (x *actorSystem) InCluster() bool {
-	return x.clusterEnabled.Load() && x.cluster != nil
+	return x.started.Load() &&
+		x.clusterEnabled.Load() &&
+		x.cluster != nil
 }
 
 // NumActors returns the total number of active actors on a given running node.
