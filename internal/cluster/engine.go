@@ -31,7 +31,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"runtime"
 	"sync"
 	"time"
 
@@ -184,10 +183,8 @@ type Engine struct {
 	messages   <-chan *redis.Message
 
 	// specifies the node state
-	peerState      *internalpb.PeerState
-	peerStateQueue *binaryQueue
-	syncState      *atomic.Int32
-	goScheduler    *goScheduler
+	peerState *internalpb.PeerState
+	syncState *atomic.Int32
 
 	nodeJoinedEventsFilter goset.Set[string]
 	nodeLeftEventsFilter   goset.Set[string]
@@ -228,9 +225,7 @@ func NewEngine(name string, disco discovery.Provider, host *discovery.Node, opts
 		nodeLeftEventsFilter:   goset.NewSet[string](),
 		tableSize:              20 * size.MB,
 		running:                atomic.NewBool(false),
-		peerStateQueue:         newBinaryQueue(),
 		syncState:              atomic.NewInt32(int32(IDLE)),
-		goScheduler:            newGoScheduler(300),
 	}
 	// apply the various options
 	for _, opt := range opts {
@@ -295,9 +290,13 @@ func (x *Engine) Start(ctx context.Context) error {
 	}
 
 	x.initPeerState()
-	x.running.Store(true)
-	x.synchronizeState()
+	if err := x.synchronizeState(ctx); err != nil {
+		logger.Error(fmt.Errorf("failed to start the cluster Engine on node=(%s): %w", x.name, err))
+		se := x.server.Shutdown(ctx)
+		return errors.Join(err, se)
+	}
 
+	x.running.Store(true)
 	go x.consume()
 	logger.Infof("GoAkt cluster Engine=(%s) successfully started.", x.name)
 	return nil
@@ -429,14 +428,14 @@ func (x *Engine) PutActor(ctx context.Context, actor *internalpb.Actor) error {
 		return ErrEngineNotRunning
 	}
 
-	ctx, cancelFn := context.WithTimeout(ctx, x.writeTimeout)
+	ctx, cancelFn := context.WithTimeout(ctx, x.writeTimeout*2)
 	defer cancelFn()
 
 	x.Lock()
 	defer x.Unlock()
 
 	logger := x.logger
-	logger.Infof("node=(%s) synchronizing Actor (%s)...", x.node.PeersAddress(), actor.GetAddress().GetName())
+	logger.Infof("node=(%s) begins synchronization ...", x.node.PeersAddress())
 
 	encoded, _ := encode(actor)
 	key := actor.GetAddress().GetName()
@@ -454,14 +453,18 @@ func (x *Engine) PutActor(ctx context.Context, actor *internalpb.Actor) error {
 		return fmt.Errorf("node=(%s) failed to sync actor=(%s): %v", x.node.PeersAddress(), actor.GetAddress().GetName(), err)
 	}
 
+	// put the node state into the states map
 	actors := x.peerState.GetActors()
 	actorName := actor.GetAddress().GetName()
 	actors[actorName] = actor
-
 	x.peerState.Actors = actors
-	x.synchronizeState()
 
-	logger.Infof("node=(%s) successfully synchronized Actor (%s) in the cluster", x.node.PeersAddress(), key)
+	bytea, _ := proto.Marshal(x.peerState)
+	if err := x.statesMap.Put(ctx, x.node.PeersAddress(), bytea); err != nil {
+		return fmt.Errorf("node=(%s) failed its state synchronization: %v", x.node.PeersAddress(), err)
+	}
+
+	logger.Infof("node=(%s) successfully completes its synchronization", x.node.PeersAddress())
 	return nil
 }
 
@@ -586,20 +589,26 @@ func (x *Engine) RemoveActor(ctx context.Context, actorName string) error {
 	x.Lock()
 	defer x.Unlock()
 
-	logger.Infof("node=(%s) removing actor (%s) from cluster", x.node.PeersAddress(), actorName)
+	ctx, cancelFn := context.WithTimeout(ctx, x.writeTimeout*2)
+	defer cancelFn()
 
-	_, err := x.actorsMap.Delete(ctx, actorName)
-	if err != nil {
-		logger.Errorf("node=(%s) failed to remove actor=(%s) record from cluster: %v", x.node.PeersAddress(), actorName, err)
-		return err
-	}
+	logger.Infof("node=(%s) removing actor (%s) from cluster", x.node.PeersAddress(), actorName)
 
 	// remove the actor from the peer state only if it exists
 	actors := x.peerState.GetActors()
 	if _, exists := actors[actorName]; exists {
+		_, err := x.actorsMap.Delete(ctx, actorName)
+		if err != nil {
+			logger.Errorf("node=(%s) failed to remove actor=(%s) record from cluster: %v", x.node.PeersAddress(), actorName, err)
+			return err
+		}
+
 		delete(actors, actorName)
 		x.peerState.Actors = actors
-		x.synchronizeState()
+		if err := x.synchronizeState(ctx); err != nil {
+			logger.Errorf("node=(%s) failed to synchronize its state after removing actor=(%s): %v", x.node.PeersAddress(), actorName, err)
+			return err
+		}
 	}
 
 	logger.Infof("node=(%s) successfully removed actor (%s) from the cluster", x.node.PeersAddress(), actorName)
@@ -719,53 +728,9 @@ func (x *Engine) Peers(ctx context.Context) ([]*Peer, error) {
 //
 // If the engine is running, the peer state is marshaled and added to the peer state queue.
 // Triggers the peer state synchronization loop if not already running.
-func (x *Engine) synchronizeState() {
-	if x.running.Load() {
-		bytea, _ := proto.Marshal(x.peerState)
-		x.peerStateQueue.enqueue(bytea)
-		if x.syncState.CompareAndSwap(int32(IDLE), int32(BUSY)) {
-			x.goScheduler.Schedule(x.peerStateSyncLoop)
-		}
-	}
-}
-
-// peerStateSyncLoop is the background loop that pushes peer state updates to the cluster.
-//
-// It processes the peer state queue, writing updates to the distributed states map.
-// The loop yields periodically based on the configured scheduler throughput.
-func (x *Engine) peerStateSyncLoop() {
-	counter, throughput := 0, x.goScheduler.Throughput()
-	logger := x.logger
-	for {
-		if counter > throughput {
-			counter = 0
-			runtime.Gosched()
-		}
-
-		counter++
-		if bytea := x.peerStateQueue.dequeue(); len(bytea) > 0 {
-			ctx, cancel := context.WithTimeout(context.Background(), x.writeTimeout)
-			logger.Infof("node=(%s) begins state synchronization...", x.node.PeersAddress())
-
-			if err := x.statesMap.Put(ctx, x.node.PeersAddress(), bytea); err != nil {
-				// TODO: should we retry or not?
-				logger.Errorf("node=(%s) failed to sync state: %v", x.node.PeersAddress(), err)
-				cancel()
-			} else {
-				logger.Infof("node=(%s) state successfully synchronized in the cluster", x.node.PeersAddress())
-				cancel()
-			}
-		}
-
-		if !x.syncState.CompareAndSwap(int32(BUSY), int32(IDLE)) {
-			return
-		}
-
-		if !x.peerStateQueue.isEmpty() && x.syncState.CompareAndSwap(int32(IDLE), int32(BUSY)) {
-			continue
-		}
-		return
-	}
+func (x *Engine) synchronizeState(ctx context.Context) error {
+	encoded, _ := proto.Marshal(x.peerState)
+	return x.statesMap.Put(ctx, x.node.PeersAddress(), encoded)
 }
 
 // consume reads to the underlying cluster events
@@ -814,7 +779,6 @@ func (x *Engine) consume() {
 			payload, _ := anypb.New(event)
 			x.events <- &Event{payload, NodeJoined}
 			x.eventsLock.Unlock()
-			x.synchronizeState()
 
 		case events.KindNodeLeftEvent:
 			x.eventsLock.Lock()
@@ -842,7 +806,6 @@ func (x *Engine) consume() {
 			payload, _ := anypb.New(event)
 			x.events <- &Event{payload, NodeLeft}
 			x.eventsLock.Unlock()
-			x.synchronizeState()
 
 		default:
 			// skip
