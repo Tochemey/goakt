@@ -36,11 +36,11 @@ import (
 // deathWatch removes dead actors from the system
 // that helps free non-utilized resources
 type deathWatch struct {
-	pid            *PID
-	logger         log.Logger
-	tree           *tree
-	cluster        cluster.Interface
-	clusterEnabled bool
+	pid         *PID
+	logger      log.Logger
+	tree        *tree
+	cluster     cluster.Interface
+	actorSystem ActorSystem
 }
 
 // enforce compilation error
@@ -58,11 +58,11 @@ func (x *deathWatch) PreStart(*Context) error {
 
 // Receive a handle message received
 func (x *deathWatch) Receive(ctx *ReceiveContext) {
-	switch msg := ctx.Message().(type) {
+	switch ctx.Message().(type) {
 	case *goaktpb.PostStart:
 		x.handlePostStart(ctx)
 	case *goaktpb.Terminated:
-		ctx.Err(x.handleTerminated(ctx.Context(), msg))
+		ctx.Err(x.handleTerminated(ctx))
 	default:
 		ctx.Unhandled()
 	}
@@ -76,30 +76,34 @@ func (x *deathWatch) PostStop(*Context) error {
 
 // handlePostStart handles PostStart message
 func (x *deathWatch) handlePostStart(ctx *ReceiveContext) {
+	x.actorSystem = ctx.ActorSystem()
 	x.pid = ctx.Self()
 	x.logger = ctx.Logger()
-	x.tree = ctx.ActorSystem().tree()
-	x.cluster = ctx.ActorSystem().getCluster()
-	x.clusterEnabled = ctx.ActorSystem().InCluster()
+	x.tree = x.actorSystem.tree()
+	x.cluster = x.actorSystem.getCluster()
 	x.logger.Infof("%s started successfully", x.pid.Name())
 }
 
 // handleTerminated handles Terminated message
-func (x *deathWatch) handleTerminated(ctx context.Context, msg *goaktpb.Terminated) error {
+func (x *deathWatch) handleTerminated(ctx *ReceiveContext) error {
+	msg := ctx.Message().(*goaktpb.Terminated)
+
 	actorID := msg.GetActorId()
 	addr, _ := address.Parse(actorID)
 	actorName := addr.Name()
+
 	x.logger.Infof("%s freeing resource [actor=%s] from system", x.pid.Name(), actorID)
+
 	if node, ok := x.tree.node(actorID); ok {
 		x.tree.deleteNode(node.value())
-
-		removeFromCluster := x.clusterEnabled && !isReservedName(actorName) && !x.pid.ActorSystem().isShuttingDown()
+		removeFromCluster := x.actorSystem.InCluster() && !isReservedName(actorName) && !x.actorSystem.isShuttingDown()
 		if removeFromCluster {
-			if err := x.cluster.RemoveActor(context.WithoutCancel(ctx), node.value().Name()); err != nil {
+			if err := x.cluster.RemoveActor(context.WithoutCancel(ctx.Context()), node.value().Name()); err != nil {
 				x.logger.Errorf("%s failed to remove [actor=%s] from cluster: %v", x.pid.Name(), actorID, err)
 				return NewInternalError(err)
 			}
 		}
+
 		x.logger.Infof("%s successfully free resource [actor=%s] from system", x.pid.Name(), actorID)
 		return nil
 	}

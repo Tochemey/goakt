@@ -1041,6 +1041,8 @@ func TestActorSystem(t *testing.T) {
 		// wait for the cluster to start
 		util.Pause(time.Second)
 
+		require.True(t, newActorSystem.Running())
+
 		// create an actor
 		actorName := uuid.NewString()
 		actor := NewMockActor()
