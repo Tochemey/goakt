@@ -735,12 +735,6 @@ func (x *Engine) consume() {
 			continue
 		}
 
-		// synchronize the state of the node on cluster event
-		if err := x.synchronizeState(context.Background()); err != nil {
-			// TODO: should we continue or not
-			x.logger.Errorf("failed to synchronize state on cluster event: %v", err)
-		}
-
 		kind := event["kind"]
 		switch kind {
 		case events.KindNodeJoinEvent:
