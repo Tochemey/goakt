@@ -429,26 +429,24 @@ func (x *Engine) PutActor(ctx context.Context, actor *internalpb.Actor) error {
 	kind := actor.GetType()
 
 	ctx = context.WithoutCancel(ctx)
-	ctx, cancel := context.WithTimeout(ctx, x.writeTimeout)
+
+	ctx1, cancel1 := context.WithTimeout(ctx, x.writeTimeout)
 	// keep the actor kind in the cluster for singleton actors
 	if actor.GetIsSingleton() {
-		if err := x.kindsMap.Put(ctx, kind, kind); err != nil {
-			cancel()
+		if err := x.kindsMap.Put(ctx1, kind, kind); err != nil {
+			cancel1()
 			return fmt.Errorf("node=(%s) failed to sync singleton actor=(%s): %v", x.node.PeersAddress(), actor.GetAddress().GetName(), err)
 		}
 	}
+	cancel1()
 
-	cancel()
-
-	ctx = context.WithoutCancel(ctx)
-	ctx, cancel = context.WithTimeout(ctx, x.writeTimeout)
-
+	ctx2, cancel2 := context.WithTimeout(ctx, x.writeTimeout)
 	// put the actor into the actors map
-	if err := x.actorsMap.Put(ctx, key, encoded); err != nil {
-		cancel()
+	if err := x.actorsMap.Put(ctx2, key, encoded); err != nil {
+		cancel2()
 		return fmt.Errorf("node=(%s) failed to sync actor=(%s): %v", x.node.PeersAddress(), actor.GetAddress().GetName(), err)
 	}
-	cancel()
+	cancel2()
 
 	// put the node state into the states map
 	actors := x.peerState.GetActors()
@@ -456,16 +454,14 @@ func (x *Engine) PutActor(ctx context.Context, actor *internalpb.Actor) error {
 	actors[actorName] = actor
 	x.peerState.Actors = actors
 
-	ctx = context.WithoutCancel(ctx)
-	ctx, cancel = context.WithTimeout(ctx, x.writeTimeout)
-
+	ctx3, cancel3 := context.WithTimeout(ctx, x.writeTimeout)
 	bytea, _ := proto.Marshal(x.peerState)
-	if err := x.statesMap.Put(ctx, x.node.PeersAddress(), bytea); err != nil {
-		cancel()
+	if err := x.statesMap.Put(ctx3, x.node.PeersAddress(), bytea); err != nil {
+		cancel3()
 		return fmt.Errorf("node=(%s) failed its state synchronization: %v", x.node.PeersAddress(), err)
 	}
 
-	cancel()
+	cancel3()
 	logger.Infof("node=(%s) successfully completes its synchronization", x.node.PeersAddress())
 	return nil
 }
@@ -593,31 +589,30 @@ func (x *Engine) RemoveActor(ctx context.Context, actorName string) error {
 
 	logger.Infof("node=(%s) removing actor (%s) from cluster", x.node.PeersAddress(), actorName)
 
+	ctx = context.WithoutCancel(ctx)
+
+	ctx1, cancel1 := context.WithTimeout(ctx, x.writeTimeout)
+	_, err := x.actorsMap.Delete(ctx1, actorName)
+	if err != nil {
+		logger.Errorf("node=(%s) failed to remove actor=(%s) record from cluster: %v", x.node.PeersAddress(), actorName, err)
+		cancel1()
+		return err
+	}
+	cancel1()
+
 	// remove the actor from the peer state only if it exists
 	actors := x.peerState.GetActors()
 	if _, exists := actors[actorName]; exists {
-		ctx = context.WithoutCancel(ctx)
-		ctx, cancel := context.WithTimeout(ctx, x.writeTimeout)
-
-		_, err := x.actorsMap.Delete(ctx, actorName)
-		if err != nil {
-			logger.Errorf("node=(%s) failed to remove actor=(%s) record from cluster: %v", x.node.PeersAddress(), actorName, err)
-			cancel()
-			return err
-		}
-		cancel()
-
 		delete(actors, actorName)
 		x.peerState.Actors = actors
 
-		ctx = context.WithoutCancel(ctx)
-		ctx, cancel = context.WithTimeout(ctx, x.writeTimeout)
-		if err := x.synchronizeState(ctx); err != nil {
+		ctx2, cancel2 := context.WithTimeout(ctx, x.writeTimeout)
+		if err := x.synchronizeState(ctx2); err != nil {
 			logger.Errorf("node=(%s) failed to synchronize its state after removing actor=(%s): %v", x.node.PeersAddress(), actorName, err)
-			cancel()
+			cancel2()
 			return err
 		}
-		cancel()
+		cancel2()
 	}
 
 	logger.Infof("node=(%s) successfully removed actor (%s) from the cluster", x.node.PeersAddress(), actorName)
