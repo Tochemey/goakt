@@ -508,7 +508,8 @@ type actorSystem struct {
 	actors *tree
 
 	// states whether the actor system has started or not
-	started atomic.Bool
+	started  *atomic.Bool
+	starting *atomic.Bool
 
 	// Specifies the actor system name
 	name string
@@ -637,6 +638,8 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		extensions:          collection.NewMap[string, extension.Extension](),
 		spawnOnNext:         atomic.NewUint32(0),
 		shuttingDown:        atomic.NewBool(false),
+		started:             atomic.NewBool(false),
+		starting:            atomic.NewBool(false),
 	}
 
 	system.enableRelocation.Store(true)
@@ -755,7 +758,7 @@ func (x *actorSystem) Start(ctx context.Context) error {
 	}
 
 	x.logger.Infof("%s actor system starting on %s/%s..", x.name, runtime.GOOS, runtime.GOARCH)
-	x.started.Store(true)
+	x.starting.Store(true)
 	if err := errorschain.
 		New(errorschain.ReturnFirst()).
 		AddErrorFn(x.workerPool.Start).
@@ -780,6 +783,8 @@ func (x *actorSystem) Start(ctx context.Context) error {
 	}
 
 	x.startMessagesScheduler(ctx)
+	x.started.Store(true)
+	x.starting.Store(false)
 	x.startedAt.Store(time.Now().Unix())
 	x.logger.Infof("%s actor system successfully started..:)", x.name)
 	return nil
@@ -1096,7 +1101,9 @@ func (x *actorSystem) GetPartition(actorName string) int {
 
 // InCluster states whether the actor system is started within a cluster of nodesMap
 func (x *actorSystem) InCluster() bool {
-	return x.clusterEnabled.Load() && x.cluster != nil
+	return x.started.Load() &&
+		x.clusterEnabled.Load() &&
+		x.cluster != nil
 }
 
 // NumActors returns the total number of active actors on a given running node.
@@ -2389,6 +2396,8 @@ func (x *actorSystem) validateExtensions() error {
 
 // reset the actor system
 func (x *actorSystem) reset() {
+	x.started.Store(false)
+	x.started.Store(false)
 	x.workerPool.Stop()
 	x.extensions.Reset()
 	x.actors.reset()
@@ -2398,7 +2407,8 @@ func (x *actorSystem) reset() {
 
 // shutdown stops the actor system
 func (x *actorSystem) shutdown(ctx context.Context) error {
-	if !x.started.Load() {
+	// we only shutdown the actor system when it is starting or not yet started
+	if x.starting.Load() || !x.started.Load() {
 		return ErrActorSystemNotStarted
 	}
 
@@ -2407,7 +2417,6 @@ func (x *actorSystem) shutdown(ctx context.Context) error {
 	x.shuttingDown.Store(true)
 
 	defer func() {
-		x.started.Store(false)
 		x.reset()
 	}()
 
