@@ -320,20 +320,10 @@ func (x *Engine) Stop(ctx context.Context) error {
 	// add some logging information
 	logger.Infof("Stopping GoAkt cluster Node=(%s)....🤔", x.name)
 
-	x.running.Store(false)
-	// create an errors chain to pipeline the shutdown processes
-	chain := errorschain.
-		New(errorschain.ReturnFirst()).
-		// AddErrorFn(func() error { return x.pubSub.Close() }).
-		// AddErrorFn(func() error { return x.actorsMap.Destroy(ctx) }).
-		// AddErrorFn(func() error { return x.statesMap.Destroy(ctx) }).
-		// AddErrorFn(func() error { return x.kindsMap.Destroy(ctx) }).
-		// AddErrorFn(func() error { return x.jobKeysMap.Destroy(ctx) }).
-		// AddErrorFn(func() error { return x.client.Close(ctx) }).
-		AddErrorFn(func() error { return x.server.Shutdown(ctx) })
+	defer x.running.Store(false)
 
 	// close the events listener
-	if err := chain.Error(); err != nil {
+	if err := x.server.Shutdown(ctx); err != nil {
 		logger.Errorf("failed to stop the cluster Engine on node=(%s): %w", x.node.PeersAddress(), err)
 		return err
 	}
