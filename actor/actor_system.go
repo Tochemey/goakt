@@ -583,12 +583,12 @@ type actorSystem struct {
 	actorsCounter      *atomic.Uint64
 	deadlettersCounter *atomic.Uint64
 
-	clientTLS        *tls.Config
-	serverTLS        *tls.Config
-	pubsubEnabled    atomic.Bool
-	workerPool       *workerpool.WorkerPool
-	enableRelocation atomic.Bool
-	extensions       *collection.Map[string, extension.Extension]
+	clientTLS         *tls.Config
+	serverTLS         *tls.Config
+	pubsubEnabled     atomic.Bool
+	workerPool        *workerpool.WorkerPool
+	relocationEnabled atomic.Bool
+	extensions        *collection.Map[string, extension.Extension]
 
 	spawnOnNext  *atomic.Uint32
 	shuttingDown *atomic.Bool
@@ -642,7 +642,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		starting:            atomic.NewBool(false),
 	}
 
-	system.enableRelocation.Store(true)
+	system.relocationEnabled.Store(true)
 	system.started.Store(false)
 	system.remotingEnabled.Store(false)
 	system.clusterEnabled.Store(false)
@@ -2215,7 +2215,7 @@ func (x *actorSystem) enableClustering(ctx context.Context) error {
 	}
 
 	// only start the cluster store when relocation is enabled
-	if x.enableRelocation.Load() {
+	if x.relocationEnabled.Load() {
 		clusterStore, err := cluster.NewStore(x.logger, x.clusterConfig.WAL())
 		if err != nil {
 			x.logger.Errorf("failed to initialize peers cache: %v", err)
@@ -2290,7 +2290,7 @@ func (x *actorSystem) enableClustering(ctx context.Context) error {
 	go x.replicationLoop()
 
 	// start the various relocation loops when relocation is enabled
-	if x.enableRelocation.Load() {
+	if x.relocationEnabled.Load() {
 		go x.peersStateLoop()
 		go x.rebalancingLoop()
 	}
@@ -2536,17 +2536,18 @@ func (x *actorSystem) clusterEventsLoop() {
 	}
 }
 
+// handleNodeJoinedEvent processes a NodeJoined cluster event.
 func (x *actorSystem) handleNodeJoinedEvent(event *cluster.Event) {
 	nodeJoined := new(goaktpb.NodeJoined)
 	_ = event.Payload.UnmarshalTo(nodeJoined)
 	x.logger.Infof("node=[name=%s, addr=%s] detected node joined event: node=(%s)",
 		x.name,
 		x.clusterNode.PeersAddress(),
-		nodeJoined)
+		nodeJoined.GetAddress())
 
 	x.logger.Debugf("node=[name=%s, addr=%s] resyncing actors after node joined event: node=(%s)",
 		x.name,
-		x.clusterNode.PeersAddress())
+		x.clusterNode.PeersAddress(), nodeJoined.GetAddress())
 
 	if err := x.resyncActors(); err != nil {
 		x.logger.Errorf("failed to resync actors after node joined event: %v", err)
@@ -2554,19 +2555,23 @@ func (x *actorSystem) handleNodeJoinedEvent(event *cluster.Event) {
 
 	x.logger.Debugf("node=[name=%s, addr=%s] successfully resynced actors after node joined event: node=(%s)",
 		x.name,
-		x.clusterNode.PeersAddress())
+		x.clusterNode.PeersAddress(), nodeJoined.GetAddress())
 }
 
 // handleNodeLeftEvent processes a NodeLeft cluster event.
 func (x *actorSystem) handleNodeLeftEvent(event *cluster.Event) {
+	if !x.relocationEnabled.Load() {
+		return
+	}
+
 	nodeLeft := new(goaktpb.NodeLeft)
 	_ = event.Payload.UnmarshalTo(nodeLeft)
 	ctx := context.Background()
 
 	if x.cluster.IsLeader(ctx) {
 		x.logger.Infof(
-			"cluster leader node=[name=%s, addr=%s] detected node left event: node=(%s); initiating rebalancing. Current rebalanced nodes: %v",
-			x.name, x.clusterNode.PeersAddress(), nodeLeft.GetAddress(), x.rebalancedNodes.ToSlice(),
+			"cluster leader node=[name=%s, addr=%s] detected node left event: node=(%s); initiating rebalancing.",
+			x.name, x.clusterNode.PeersAddress(), nodeLeft.GetAddress(),
 		)
 
 		if !x.rebalancedNodes.Contains(nodeLeft.GetAddress()) {
@@ -2943,7 +2948,7 @@ func (x *actorSystem) spawnDeathWatch(ctx context.Context) error {
 
 // spawnRebalancer creates the cluster rebalancer
 func (x *actorSystem) spawnRebalancer(ctx context.Context) error {
-	if x.clusterEnabled.Load() && x.enableRelocation.Load() {
+	if x.clusterEnabled.Load() && x.relocationEnabled.Load() {
 		var err error
 		actorName := x.reservedName(rebalancerType)
 
@@ -3118,7 +3123,7 @@ func (x *actorSystem) shutdownCluster(ctx context.Context, actorRefs []ActorRef)
 		}
 
 		x.rebalanceLocker.Unlock()
-		if x.clusterStore != nil && x.enableRelocation.Load() {
+		if x.clusterStore != nil && x.relocationEnabled.Load() {
 			return x.clusterStore.Close()
 		}
 	}

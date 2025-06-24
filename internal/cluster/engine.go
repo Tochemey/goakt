@@ -742,13 +742,15 @@ func (x *Engine) peerStateSyncLoop() {
 
 		counter++
 		if bytea := x.peerStateQueue.dequeue(); len(bytea) > 0 {
-			ctx := context.Background()
+			ctx, cancel := context.WithTimeout(context.Background(), x.writeTimeout)
 			logger.Infof("node=(%s) begins state synchronization...", x.node.PeersAddress())
 			if err := x.statesMap.Put(ctx, x.node.PeersAddress(), bytea); err != nil {
 				// TODO: should we retry or not?
 				logger.Errorf("node=(%s) failed to sync state: %v", x.node.PeersAddress(), err)
+				cancel()
 			} else {
 				logger.Infof("node=(%s) state successfully synchronized in the cluster", x.node.PeersAddress())
+				cancel()
 			}
 		}
 
