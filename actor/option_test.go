@@ -103,7 +103,7 @@ func TestOption(t *testing.T) {
 		{
 			name:     "WithoutRelocation",
 			option:   WithoutRelocation(),
-			expected: actorSystem{enableRelocation: atomicFalse},
+			expected: actorSystem{relocationEnabled: atomicFalse},
 		},
 	}
 

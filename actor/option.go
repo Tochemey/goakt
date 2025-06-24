@@ -194,7 +194,7 @@ func WithPubSub() Option {
 // or where graceful degradation is preferred over relocation overhead.
 func WithoutRelocation() Option {
 	return OptionFunc(func(system *actorSystem) {
-		system.enableRelocation.Store(false)
+		system.relocationEnabled.Store(false)
 	})
 }
 

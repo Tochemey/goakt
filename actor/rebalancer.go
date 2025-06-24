@@ -118,13 +118,24 @@ func (r *rebalancer) Rebalance(ctx *ReceiveContext) {
 							if actor.GetRelocatable() {
 								remoteHost := peer.Host
 								remotingPort := peer.RemotingPort
+								actorSystem := r.pid.ActorSystem()
+								cluster := actorSystem.getCluster()
 
-								// remove the given actor from the cluster
-								if err := r.pid.ActorSystem().getCluster().RemoveActor(egCtx, actor.GetAddress().GetName()); err != nil {
+								// check if the actor exists in the cluster
+								// before trying to remove it
+								exists, err := cluster.ActorExists(egCtx, actor.GetAddress().GetName())
+								if err != nil {
 									return NewInternalError(err)
 								}
 
-								dependencies, err := r.pid.ActorSystem().getReflection().DependenciesFromProtobuf(actor.GetDependencies()...)
+								if exists {
+									// remove the given actor from the cluster
+									if err := cluster.RemoveActor(egCtx, actor.GetAddress().GetName()); err != nil {
+										return NewInternalError(err)
+									}
+								}
+
+								dependencies, err := actorSystem.getReflection().DependenciesFromProtobuf(actor.GetDependencies()...)
 								if err != nil {
 									return err
 								}

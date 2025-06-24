@@ -504,7 +504,7 @@ func (pid *PID) Restart(ctx context.Context) error {
 				return nil
 			}).
 			AddErrorFn(func() error { tree.addWatcher(pid, deathWatch); return nil }).
-			AddErrorFn(func() error { return actorSystem.broadcastActor(pid) }).
+			AddErrorFn(func() error { return actorSystem.putActorOnCluster(pid) }).
 			Error(); err != nil {
 			return err
 		}
@@ -525,7 +525,7 @@ func (pid *PID) Restart(ctx context.Context) error {
 				if err := errorschain.New(errorschain.ReturnFirst()).
 					AddErrorFn(func() error { return tree.addNode(pid, child) }).
 					AddErrorFn(func() error { tree.addWatcher(child, deathWatch); return nil }).
-					AddErrorFn(func() error { return actorSystem.broadcastActor(child) }).
+					AddErrorFn(func() error { return actorSystem.putActorOnCluster(child) }).
 					Error(); err != nil {
 					return err
 				}
@@ -682,7 +682,7 @@ func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor, opts .
 	}
 
 	// set the actor in the given actor system registry
-	return cid, pid.ActorSystem().broadcastActor(cid)
+	return cid, pid.ActorSystem().putActorOnCluster(cid)
 }
 
 // Reinstate brings a previously suspended actor back into an active state.
