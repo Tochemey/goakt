@@ -324,12 +324,12 @@ func (x *Engine) Stop(ctx context.Context) error {
 	// create an errors chain to pipeline the shutdown processes
 	chain := errorschain.
 		New(errorschain.ReturnFirst()).
-		AddErrorFn(func() error { return x.pubSub.Close() }).
-		AddErrorFn(func() error { return x.actorsMap.Destroy(ctx) }).
-		AddErrorFn(func() error { return x.statesMap.Destroy(ctx) }).
-		AddErrorFn(func() error { return x.kindsMap.Destroy(ctx) }).
-		AddErrorFn(func() error { return x.jobKeysMap.Destroy(ctx) }).
-		AddErrorFn(func() error { return x.client.Close(ctx) }).
+		// AddErrorFn(func() error { return x.pubSub.Close() }).
+		// AddErrorFn(func() error { return x.actorsMap.Destroy(ctx) }).
+		// AddErrorFn(func() error { return x.statesMap.Destroy(ctx) }).
+		// AddErrorFn(func() error { return x.kindsMap.Destroy(ctx) }).
+		// AddErrorFn(func() error { return x.jobKeysMap.Destroy(ctx) }).
+		// AddErrorFn(func() error { return x.client.Close(ctx) }).
 		AddErrorFn(func() error { return x.server.Shutdown(ctx) })
 
 	// close the events listener
@@ -743,6 +743,12 @@ func (x *Engine) consume() {
 			x.logger.Errorf("failed to unmarshal cluster event: %v", err)
 			// TODO: should we continue or not
 			continue
+		}
+
+		// synchronize the state of the node on cluster event
+		if err := x.synchronizeState(context.Background()); err != nil {
+			// TODO: should we continue or not
+			x.logger.Errorf("failed to synchronize state on cluster event: %v", err)
 		}
 
 		kind := event["kind"]
