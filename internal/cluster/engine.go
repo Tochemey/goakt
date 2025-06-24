@@ -727,6 +727,20 @@ func (x *Engine) synchronizeState() {
 	}
 }
 
+func (x *Engine) resync() {
+	x.Lock()
+	actors := x.peerState.GetActors()
+	x.Unlock()
+	ctx := context.Background()
+	for _, actor := range actors {
+		if err := x.PutActor(ctx, actor); err != nil {
+			x.logger.Errorf("failed to resync actor (%s): %v", actor.GetAddress().GetName(), err)
+		} else {
+			x.logger.Infof("successfully resynced actor (%s)", actor.GetAddress().GetName())
+		}
+	}
+}
+
 // peerStateSyncLoop is the background loop that pushes peer state updates to the cluster.
 //
 // It processes the peer state queue, writing updates to the distributed states map.
@@ -810,7 +824,7 @@ func (x *Engine) consume() {
 			x.events <- &Event{payload, NodeJoined}
 			x.eventsLock.Unlock()
 			// synchronize the state after a node join event
-			x.synchronizeState()
+			x.resync()
 
 		case events.KindNodeLeftEvent:
 			x.eventsLock.Lock()
@@ -839,7 +853,7 @@ func (x *Engine) consume() {
 			x.events <- &Event{payload, NodeLeft}
 			x.eventsLock.Unlock()
 			// synchronize the state after a node left event
-			x.synchronizeState()
+			x.resync()
 		default:
 			// skip
 		}

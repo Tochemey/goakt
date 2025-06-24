@@ -2505,11 +2505,6 @@ func (x *actorSystem) clusterEventsLoop() {
 			if event != nil && event.Payload != nil {
 				message, _ := event.Payload.UnmarshalNew()
 
-				// resync actors when a node joins or leaves the cluster
-				if err := x.resyncActors(); err != nil {
-					x.logger.Errorf("failed to resync actors after cluster event=(%s): %v", event.Type, err)
-				}
-
 				if x.eventsStream != nil {
 					x.logger.Debugf("node=(%s) publishing cluster event=(%s)....", x.name, event.Type)
 					x.eventsStream.Publish(eventsTopic, message)
@@ -2546,18 +2541,6 @@ func (x *actorSystem) clusterEventsLoop() {
 			}
 		}
 	}
-}
-
-// resyncActors resynchronizes the actors in the actor system
-// during cluster events such as node join or leave
-func (x *actorSystem) resyncActors() error {
-	actors := x.Actors()
-	for _, actor := range actors {
-		if err := x.broadcastActor(actor); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 // peersStateLoop fetches the cluster peers' PeerState and update the node Store
