@@ -474,8 +474,8 @@ type ActorSystem interface { //nolint:revive
 	handleRemoteAsk(ctx context.Context, to *PID, message proto.Message, timeout time.Duration) (response proto.Message, err error)
 	// handleRemoteTell handles an asynchronous message to an actor
 	handleRemoteTell(ctx context.Context, to *PID, message proto.Message) error
-	// broadcastActor sets actor in the actor system actors registry
-	broadcastActor(actor *PID) error
+	// putActorOnCluster sets actor in the actor system actors registry
+	putActorOnCluster(actor *PID) error
 	// getPeerStateFromStore returns the peer state from the cluster store
 	getPeerStateFromStore(address string) (*internalpb.PeerState, error)
 	// removePeerStateFromStore removes the peer state from the cluster store
@@ -541,7 +541,7 @@ type actorSystem struct {
 	clusterEnabled atomic.Bool
 	// cluster mode
 	cluster            cluster.Interface
-	wireActorsQueue    chan *internalpb.Actor
+	actorsQueue        chan *internalpb.Actor
 	eventsQueue        <-chan *cluster.Event
 	clusterSyncStopSig chan types.Unit
 	partitionHasher    hash.Hasher
@@ -612,7 +612,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 	}
 
 	system := &actorSystem{
-		wireActorsQueue:     make(chan *internalpb.Actor, 10),
+		actorsQueue:         make(chan *internalpb.Actor, 10),
 		name:                name,
 		logger:              log.New(log.ErrorLevel, os.Stderr),
 		actorInitMaxRetries: DefaultInitMaxRetries,
@@ -1166,7 +1166,7 @@ func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor, opts 
 	guardian := x.getUserGuardian()
 	_ = x.actors.addNode(guardian, pid)
 	x.actors.addWatcher(pid, x.deathWatch)
-	return pid, x.broadcastActor(pid)
+	return pid, x.putActorOnCluster(pid)
 }
 
 // SpawnNamedFromFunc creates an actor with the given receive function and provided name. One can set the PreStart and PostStop lifecycle hooks
@@ -1201,7 +1201,7 @@ func (x *actorSystem) SpawnNamedFromFunc(ctx context.Context, name string, recei
 	x.actorsCounter.Inc()
 	_ = x.actors.addNode(x.userGuardian, pid)
 	x.actors.addWatcher(pid, x.deathWatch)
-	return pid, x.broadcastActor(pid)
+	return pid, x.putActorOnCluster(pid)
 }
 
 // SpawnOn creates and starts an actor, either locally or on a remote node,
@@ -1372,7 +1372,7 @@ func (x *actorSystem) SpawnSingleton(ctx context.Context, name string, actor Act
 	// add the given actor to the tree and supervise it
 	_ = x.actors.addNode(x.singletonManager, pid)
 	x.actors.addWatcher(pid, x.deathWatch)
-	return x.broadcastActor(pid)
+	return x.putActorOnCluster(pid)
 }
 
 // Kill stops a given actor in the system
@@ -2176,15 +2176,15 @@ func (x *actorSystem) getPeerStateFromStore(address string) (*internalpb.PeerSta
 	return peerState, nil
 }
 
-// broadcastActor broadcast the newly (re)spawned actor into the cluster
-func (x *actorSystem) broadcastActor(pid *PID) error {
+// putActorOnCluster broadcast the newly (re)spawned actor into the cluster
+func (x *actorSystem) putActorOnCluster(pid *PID) error {
 	if x.clusterEnabled.Load() {
 		dependencies, err := encodeDependencies(pid.Dependencies()...)
 		if err != nil {
 			return err
 		}
 
-		x.wireActorsQueue <- &internalpb.Actor{
+		x.actorsQueue <- &internalpb.Actor{
 			Address:             pid.Address().Address,
 			Type:                types.Name(pid.Actor()),
 			IsSingleton:         pid.IsSingleton(),
@@ -2483,7 +2483,7 @@ func (x *actorSystem) shutdown(ctx context.Context) error {
 
 // replicationLoop publishes newly created actor into the cluster when cluster is enabled
 func (x *actorSystem) replicationLoop() {
-	for actor := range x.wireActorsQueue {
+	for actor := range x.actorsQueue {
 		// never replicate system actors because there are specific to the
 		// started node
 		if isReservedName(actor.GetAddress().GetName()) {
@@ -2498,54 +2498,103 @@ func (x *actorSystem) replicationLoop() {
 	}
 }
 
+// resyncActors resyncs all actors in the actor system
+// This is only called during cluster events like NodeLeft or NodeJoined
+// to ensure that all actors are properly synchronized across the cluster.
+func (x *actorSystem) resyncActors() error {
+	actors := x.Actors()
+	for _, actor := range actors {
+		if err := x.putActorOnCluster(actor); err != nil {
+			x.logger.Errorf("failed to resync actor=(%s): %v", actor.Address().String(), err)
+			return fmt.Errorf("failed to resync actor=(%s): %w", actor.Address().String(), err)
+		}
+	}
+	return nil
+}
+
 // clusterEventsLoop listens to cluster events and send them to the event streams
 func (x *actorSystem) clusterEventsLoop() {
 	for event := range x.eventsQueue {
-		if !x.isShuttingDown() && x.InCluster() {
-			if event != nil && event.Payload != nil {
-				message, _ := event.Payload.UnmarshalNew()
+		if x.isShuttingDown() || !x.InCluster() || event == nil || event.Payload == nil {
+			continue
+		}
 
-				if x.eventsStream != nil {
-					x.logger.Debugf("node=(%s) publishing cluster event=(%s)....", x.name, event.Type)
-					x.eventsStream.Publish(eventsTopic, message)
-					x.logger.Debugf("cluster event=(%s) successfully published by node=(%s)", event.Type, x.name)
-				}
+		message, _ := event.Payload.UnmarshalNew()
 
-				if event.Type == cluster.NodeLeft && x.enableRelocation.Load() {
-					nodeLeft := new(goaktpb.NodeLeft)
-					_ = event.Payload.UnmarshalTo(nodeLeft)
+		if x.eventsStream != nil {
+			x.logger.Debugf("node=(%s) publishing cluster event=(%s)....", x.name, event.Type)
+			x.eventsStream.Publish(eventsTopic, message)
+			x.logger.Debugf("cluster event=(%s) successfully published by node=(%s)", event.Type, x.name)
+		}
 
-					ctx := context.Background()
-
-					// First check whether this node is the leader
-					// only leader can start rebalancing. Just remove from the peer state from your cluster state
-					// to free up resources
-					if !x.cluster.IsLeader(ctx) {
-						if err := x.clusterStore.DeletePeerState(nodeLeft.GetAddress()); err != nil {
-							x.logger.Errorf("%s failed to remove left node=(%s) from cluster store: %w", x.name, nodeLeft.GetAddress(), err)
-						}
-						continue
-					}
-
-					if x.rebalancedNodes.Contains(nodeLeft.GetAddress()) {
-						continue
-					}
-
-					x.rebalancedNodes.Add(nodeLeft.GetAddress())
-					if peerState, ok := x.clusterStore.GetPeerState(nodeLeft.GetAddress()); ok {
-						x.rebalanceLocker.Lock()
-						x.rebalancingQueue <- peerState
-						x.rebalanceLocker.Unlock()
-					}
-				}
-			}
+		switch event.Type {
+		case cluster.NodeLeft:
+			x.handleNodeLeftEvent(event)
+		case cluster.NodeJoined:
+			x.handleNodeJoinedEvent(event)
 		}
 	}
 }
 
+func (x *actorSystem) handleNodeJoinedEvent(event *cluster.Event) {
+	nodeJoined := new(goaktpb.NodeJoined)
+	_ = event.Payload.UnmarshalTo(nodeJoined)
+	x.logger.Infof("node=[name=%s, addr=%s] detected node joined event: node=(%s)",
+		x.name,
+		x.clusterNode.PeersAddress(),
+		nodeJoined)
+
+	x.logger.Debugf("node=[name=%s, addr=%s] resyncing actors after node joined event: node=(%s)",
+		x.name,
+		x.clusterNode.PeersAddress())
+
+	if err := x.resyncActors(); err != nil {
+		x.logger.Errorf("failed to resync actors after node joined event: %v", err)
+	}
+
+	x.logger.Debugf("node=[name=%s, addr=%s] successfully resynced actors after node joined event: node=(%s)",
+		x.name,
+		x.clusterNode.PeersAddress())
+}
+
+// handleNodeLeftEvent processes a NodeLeft cluster event.
+func (x *actorSystem) handleNodeLeftEvent(event *cluster.Event) {
+	nodeLeft := new(goaktpb.NodeLeft)
+	_ = event.Payload.UnmarshalTo(nodeLeft)
+	ctx := context.Background()
+
+	if x.cluster.IsLeader(ctx) {
+		x.logger.Infof(
+			"cluster leader node=[name=%s, addr=%s] detected node left event: node=(%s); initiating rebalancing. Current rebalanced nodes: %v",
+			x.name, x.clusterNode.PeersAddress(), nodeLeft.GetAddress(), x.rebalancedNodes.ToSlice(),
+		)
+
+		if !x.rebalancedNodes.Contains(nodeLeft.GetAddress()) {
+			x.rebalancedNodes.Add(nodeLeft.GetAddress())
+			if peerState, ok := x.clusterStore.GetPeerState(nodeLeft.GetAddress()); ok {
+				x.rebalanceLocker.Lock()
+				x.rebalancingQueue <- peerState
+				x.rebalanceLocker.Unlock()
+			}
+		}
+		return
+	}
+
+	x.logger.Debugf(
+		"node=[name=%s, addr=%s] is not the cluster leader; cleaning up node=(%s) left from state cache",
+		x.name, x.clusterNode.PeersAddress(), nodeLeft.GetAddress(),
+	)
+
+	if err := x.clusterStore.DeletePeerState(nodeLeft.GetAddress()); err != nil {
+		x.logger.Errorf("%s failed to remove left node=(%s) from cluster store: %w", x.name, nodeLeft.GetAddress(), err)
+	}
+
+	x.logger.Debugf("node=[name=%s, addr=%s] successfully cleaned up node=(%s) left from state cache", x.name, x.clusterNode.PeersAddress(), nodeLeft.GetAddress())
+}
+
 // peersStateLoop fetches the cluster peers' PeerState and update the node Store
 func (x *actorSystem) peersStateLoop() {
-	x.logger.Info("peers state synchronization has started...")
+	x.logger.Debugf("(%s) peers state synchronization has started...", x.name)
 	intervals := x.clusterConfig.PeersStateSyncInterval()
 	ticker := ticker.New(intervals)
 	ticker.Start()
@@ -2606,7 +2655,7 @@ func (x *actorSystem) peersStateLoop() {
 
 	<-tickerStopSig
 	ticker.Stop()
-	x.logger.Info("peers state synchronization has stopped...")
+	x.logger.Debugf("(%s) peers state synchronization has stopped...", x.name)
 }
 
 // rebalancingLoop helps perform cluster rebalancing
@@ -2614,6 +2663,8 @@ func (x *actorSystem) rebalancingLoop() {
 	for peerState := range x.rebalancingQueue {
 		ctx := context.Background()
 		if !x.shouldRebalance(peerState) {
+			x.logger.Debugf("(%s) cannot rebalance peer state: (%s)", x.name,
+				net.JoinHostPort(peerState.GetHost(), strconv.Itoa(int(peerState.GetPeersPort()))))
 			continue
 		}
 
@@ -3052,8 +3103,8 @@ func (x *actorSystem) shutdownCluster(ctx context.Context, actorRefs []ActorRef)
 			}
 		}
 
-		if x.wireActorsQueue != nil {
-			close(x.wireActorsQueue)
+		if x.actorsQueue != nil {
+			close(x.actorsQueue)
 		}
 
 		x.clusterSyncStopSig <- types.Unit{}
