@@ -809,6 +809,8 @@ func (x *Engine) consume() {
 			payload, _ := anypb.New(event)
 			x.events <- &Event{payload, NodeJoined}
 			x.eventsLock.Unlock()
+			// synchronize the state after a node join event
+			x.synchronizeState()
 
 		case events.KindNodeLeftEvent:
 			x.eventsLock.Lock()
@@ -836,6 +838,8 @@ func (x *Engine) consume() {
 			payload, _ := anypb.New(event)
 			x.events <- &Event{payload, NodeLeft}
 			x.eventsLock.Unlock()
+			// synchronize the state after a node left event
+			x.synchronizeState()
 		default:
 			// skip
 		}
