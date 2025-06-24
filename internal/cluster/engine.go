@@ -418,9 +418,6 @@ func (x *Engine) PutActor(ctx context.Context, actor *internalpb.Actor) error {
 		return ErrEngineNotRunning
 	}
 
-	ctx, cancelFn := context.WithTimeout(ctx, x.writeTimeout*2)
-	defer cancelFn()
-
 	x.Lock()
 	defer x.Unlock()
 
@@ -431,17 +428,27 @@ func (x *Engine) PutActor(ctx context.Context, actor *internalpb.Actor) error {
 	key := actor.GetAddress().GetName()
 	kind := actor.GetType()
 
+	ctx = context.WithoutCancel(ctx)
+	ctx, cancel := context.WithTimeout(ctx, x.writeTimeout)
 	// keep the actor kind in the cluster for singleton actors
 	if actor.GetIsSingleton() {
 		if err := x.kindsMap.Put(ctx, kind, kind); err != nil {
-			return fmt.Errorf("node=(%s) failed to sync actor=(%s): %v", x.node.PeersAddress(), actor.GetAddress().GetName(), err)
+			cancel()
+			return fmt.Errorf("node=(%s) failed to sync singleton actor=(%s): %v", x.node.PeersAddress(), actor.GetAddress().GetName(), err)
 		}
 	}
 
+	cancel()
+
+	ctx = context.WithoutCancel(ctx)
+	ctx, cancel = context.WithTimeout(ctx, x.writeTimeout)
+
 	// put the actor into the actors map
 	if err := x.actorsMap.Put(ctx, key, encoded); err != nil {
+		cancel()
 		return fmt.Errorf("node=(%s) failed to sync actor=(%s): %v", x.node.PeersAddress(), actor.GetAddress().GetName(), err)
 	}
+	cancel()
 
 	// put the node state into the states map
 	actors := x.peerState.GetActors()
@@ -449,11 +456,16 @@ func (x *Engine) PutActor(ctx context.Context, actor *internalpb.Actor) error {
 	actors[actorName] = actor
 	x.peerState.Actors = actors
 
+	ctx = context.WithoutCancel(ctx)
+	ctx, cancel = context.WithTimeout(ctx, x.writeTimeout)
+
 	bytea, _ := proto.Marshal(x.peerState)
 	if err := x.statesMap.Put(ctx, x.node.PeersAddress(), bytea); err != nil {
+		cancel()
 		return fmt.Errorf("node=(%s) failed its state synchronization: %v", x.node.PeersAddress(), err)
 	}
 
+	cancel()
 	logger.Infof("node=(%s) successfully completes its synchronization", x.node.PeersAddress())
 	return nil
 }
@@ -465,8 +477,8 @@ func (x *Engine) GetState(ctx context.Context, peerAddress string) (*internalpb.
 		return nil, ErrEngineNotRunning
 	}
 
-	ctx, cancelFn := context.WithTimeout(ctx, x.readTimeout)
-	defer cancelFn()
+	ctx, cancel := context.WithTimeout(ctx, x.readTimeout)
+	defer cancel()
 
 	x.Lock()
 	defer x.Unlock()
@@ -508,8 +520,8 @@ func (x *Engine) GetActor(ctx context.Context, actorName string) (*internalpb.Ac
 		return nil, ErrEngineNotRunning
 	}
 
-	ctx, cancelFn := context.WithTimeout(ctx, x.readTimeout)
-	defer cancelFn()
+	ctx, cancel := context.WithTimeout(ctx, x.readTimeout)
+	defer cancel()
 
 	x.Lock()
 	defer x.Unlock()
@@ -551,8 +563,8 @@ func (x *Engine) ActorExists(ctx context.Context, actorName string) (bool, error
 		return false, ErrEngineNotRunning
 	}
 
-	ctx, cancelFn := context.WithTimeout(ctx, x.readTimeout)
-	defer cancelFn()
+	ctx, cancel := context.WithTimeout(ctx, x.readTimeout)
+	defer cancel()
 
 	x.Lock()
 	defer x.Unlock()
@@ -579,26 +591,33 @@ func (x *Engine) RemoveActor(ctx context.Context, actorName string) error {
 	x.Lock()
 	defer x.Unlock()
 
-	ctx, cancelFn := context.WithTimeout(ctx, x.writeTimeout*2)
-	defer cancelFn()
-
 	logger.Infof("node=(%s) removing actor (%s) from cluster", x.node.PeersAddress(), actorName)
 
 	// remove the actor from the peer state only if it exists
 	actors := x.peerState.GetActors()
 	if _, exists := actors[actorName]; exists {
+		ctx = context.WithoutCancel(ctx)
+		ctx, cancel := context.WithTimeout(ctx, x.writeTimeout)
+
 		_, err := x.actorsMap.Delete(ctx, actorName)
 		if err != nil {
 			logger.Errorf("node=(%s) failed to remove actor=(%s) record from cluster: %v", x.node.PeersAddress(), actorName, err)
+			cancel()
 			return err
 		}
+		cancel()
 
 		delete(actors, actorName)
 		x.peerState.Actors = actors
+
+		ctx = context.WithoutCancel(ctx)
+		ctx, cancel = context.WithTimeout(ctx, x.writeTimeout)
 		if err := x.synchronizeState(ctx); err != nil {
 			logger.Errorf("node=(%s) failed to synchronize its state after removing actor=(%s): %v", x.node.PeersAddress(), actorName, err)
+			cancel()
 			return err
 		}
+		cancel()
 	}
 
 	logger.Infof("node=(%s) successfully removed actor (%s) from the cluster", x.node.PeersAddress(), actorName)
@@ -637,8 +656,8 @@ func (x *Engine) LookupKind(ctx context.Context, kind string) (string, error) {
 		return "", ErrEngineNotRunning
 	}
 
-	ctx, cancelFn := context.WithTimeout(ctx, x.readTimeout)
-	defer cancelFn()
+	ctx, cancel := context.WithTimeout(ctx, x.readTimeout)
+	defer cancel()
 
 	x.Lock()
 	defer x.Unlock()
