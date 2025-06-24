@@ -588,16 +588,18 @@ func (x *Engine) RemoveActor(ctx context.Context, actorName string) error {
 
 	logger.Infof("node=(%s) removing actor (%s) from cluster", x.node.PeersAddress(), actorName)
 
-	// remove the actor from the peer state
-	actors := x.peerState.GetActors()
-	delete(actors, actorName)
-	x.peerState.Actors = actors
-	x.synchronizeState()
-
 	_, err := x.actorsMap.Delete(ctx, actorName)
 	if err != nil {
 		logger.Errorf("node=(%s) failed to remove actor=(%s) record from cluster: %v", x.node.PeersAddress(), actorName, err)
 		return err
+	}
+
+	// remove the actor from the peer state only if it exists
+	actors := x.peerState.GetActors()
+	if _, exists := actors[actorName]; exists {
+		delete(actors, actorName)
+		x.peerState.Actors = actors
+		x.synchronizeState()
 	}
 
 	logger.Infof("node=(%s) successfully removed actor (%s) from the cluster", x.node.PeersAddress(), actorName)
@@ -744,6 +746,7 @@ func (x *Engine) peerStateSyncLoop() {
 		if bytea := x.peerStateQueue.dequeue(); len(bytea) > 0 {
 			ctx, cancel := context.WithTimeout(context.Background(), x.writeTimeout)
 			logger.Infof("node=(%s) begins state synchronization...", x.node.PeersAddress())
+
 			if err := x.statesMap.Put(ctx, x.node.PeersAddress(), bytea); err != nil {
 				// TODO: should we retry or not?
 				logger.Errorf("node=(%s) failed to sync state: %v", x.node.PeersAddress(), err)
@@ -811,6 +814,7 @@ func (x *Engine) consume() {
 			payload, _ := anypb.New(event)
 			x.events <- &Event{payload, NodeJoined}
 			x.eventsLock.Unlock()
+			x.synchronizeState()
 
 		case events.KindNodeLeftEvent:
 			x.eventsLock.Lock()
@@ -838,6 +842,7 @@ func (x *Engine) consume() {
 			payload, _ := anypb.New(event)
 			x.events <- &Event{payload, NodeLeft}
 			x.eventsLock.Unlock()
+			x.synchronizeState()
 
 		default:
 			// skip
