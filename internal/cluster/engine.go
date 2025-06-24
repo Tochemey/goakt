@@ -588,8 +588,7 @@ func (x *Engine) PutGrain(ctx context.Context, grain *internalpb.Grain) error {
 	grains := x.peerState.GetGrains()
 	grains[key] = grain
 	x.peerState.Grains = grains
-	bytea, _ := proto.Marshal(x.peerState)
-	x.peerStateQueue <- bytea
+	x.synchronizeState()
 
 	logger.Infof("(%s) successfully synchronized Grain (%s) in the cluster", x.node.PeersAddress(), key)
 	return nil
