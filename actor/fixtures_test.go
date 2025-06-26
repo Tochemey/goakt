@@ -915,7 +915,9 @@ func (p *MockPostStart) Receive(ctx *ReceiveContext) {
 	}
 }
 
-type MockGrain struct{}
+type MockGrain struct {
+	name string
+}
 
 var _ Grain = (*MockGrain)(nil)
 
@@ -926,6 +928,7 @@ func NewMockGrain() *MockGrain {
 // OnActivate implements Grain.
 // nolint
 func (m *MockGrain) OnActivate(ctx context.Context, props *GrainProps) error {
+	m.name = props.Identity().Name()
 	return nil
 }
 
@@ -939,6 +942,7 @@ func (m *MockGrain) OnDeactivate(ctx context.Context, props *GrainProps) error {
 func (m *MockGrain) OnReceive(ctx *GrainContext) {
 	switch ctx.Message().(type) {
 	case *testpb.TestSend:
+		ctx.ActorSystem().Logger().Infof("%s received TestSend message in MockGrain", ctx.Self().Name())
 		ctx.NoErr()
 	case *testpb.TestReply:
 		ctx.Response(&testpb.Reply{Content: "received message"})

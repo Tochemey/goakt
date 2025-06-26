@@ -129,7 +129,6 @@ func (x *actorSystem) GrainIdentity(ctx context.Context, name string, factory fu
 //   - ctx: Context for cancellation and timeout control.
 //   - identity: The unique identity of the Grain.
 //   - message: The protobuf message to send to the Grain.
-//   - opts: Optional GrainOptions to configure the Grain (e.g., dependencies, timeout).
 //
 // Returns:
 //   - error: An error if the message could not be delivered or the system is not started.
@@ -150,21 +149,21 @@ func (x *actorSystem) TellGrain(ctx context.Context, identity *GrainIdentity, me
 	return err
 }
 
-// AskGrain sends a request message to a Grain identified by the given identity.
+// AskGrain sends a synchronous request message to a Grain (virtual actor) identified by the given identity.
 //
-// It locates or spawns the target Grain (locally or in the cluster), sends the provided
-// protobuf message, and waits for a response or error. The request timeout and other
-// options can be customized using GrainOptions.
+// This method locates or activates the target Grain (locally or in the cluster), sends the provided
+// protobuf message, and waits for a response or error. The request will block until a response is received,
+// the context is canceled, or the timeout elapses.
 //
 // Parameters:
-//   - ctx: context for cancellation and timeout control.
-//   - identity: unique identity string of the Grain.
-//   - message: protobuf message to send to the Grain.
-//   - opts: optional GrainOptions (e.g., dependencies, timeout).
+//   - ctx: Context for cancellation and timeout control.
+//   - identity: The unique identity of the Grain.
+//   - message: The protobuf message to send to the Grain.
+//   - timeout: The maximum duration to wait for a response.
 //
 // Returns:
-//   - proto.Message: the response from the Grain, if successful.
-//   - error: error if the request fails, times out, or the system is not started.
+//   - response: The response message from the Grain, if successful.
+//   - error: An error if the request fails, times out, or the system is not started.
 func (x *actorSystem) AskGrain(ctx context.Context, identity *GrainIdentity, message proto.Message, timeout time.Duration) (response proto.Message, err error) {
 	if !x.started.Load() || x.isShuttingDown() {
 		return nil, ErrActorSystemNotStarted

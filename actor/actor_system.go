@@ -488,21 +488,21 @@ type ActorSystem interface { //nolint:revive
 	//   - This method abstracts away the details of Grain lifecycle management.
 	//   - Use this to obtain a reference to a Grain for message passing or further operations.
 	GrainIdentity(ctx context.Context, name string, factory func(ctx context.Context) (Grain, error)) (*GrainIdentity, error)
-	// AskGrain sends a request message to a Grain identified by the given identity.
+	// AskGrain sends a synchronous request message to a Grain (virtual actor) identified by the given identity.
 	//
-	// This method locates or spawns the target Grain (either locally or in the cluster), sends the provided
-	// protobuf message, and waits for a response or error. The request timeout can be customized using
-	// the WithRequestTimeout GrainOption; otherwise, a default timeout is used.
+	// This method locates or activates the target Grain (locally or in the cluster), sends the provided
+	// protobuf message, and waits for a response or error. The request will block until a response is received,
+	// the context is canceled, or the timeout elapses.
 	//
 	// Parameters:
-	//   - ctx: context for cancellation and timeout control.
-	//   - identity: the unique identity of the Grain.
-	//   - message: the protobuf message to send to the Grain.
-	//   - opts: optional GrainOptions to configure the Grain (e.g., dependencies, timeout).
+	//   - ctx: Context for cancellation and timeout control.
+	//   - identity: The unique identity of the Grain.
+	//   - message: The protobuf message to send to the Grain.
+	//   - timeout: The maximum duration to wait for a response.
 	//
 	// Returns:
-	//   - response: the response from the Grain, if successful.
-	//   - error: an error if the request fails, times out, or the system is not started.
+	//   - response: The response message from the Grain, if successful.
+	//   - error: An error if the request fails, times out, or the system is not started.
 	AskGrain(ctx context.Context, identity *GrainIdentity, message proto.Message, timeout time.Duration) (response proto.Message, err error)
 	// TellGrain sends an asynchronous message to a Grain (virtual actor) identified by the given identity.
 	//
@@ -513,7 +513,6 @@ type ActorSystem interface { //nolint:revive
 	//   - ctx: Context for cancellation and timeout control.
 	//   - identity: The unique identity of the Grain.
 	//   - message: The protobuf message to send to the Grain.
-	//   - opts: Optional GrainOptions to configure the Grain (e.g., dependencies, timeout).
 	//
 	// Returns:
 	//   - error: An error if the message could not be delivered or the system is not started.

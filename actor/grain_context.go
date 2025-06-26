@@ -30,8 +30,6 @@ import (
 	"sync"
 
 	"google.golang.org/protobuf/proto"
-
-	"github.com/tochemey/goakt/v3/extension"
 )
 
 // pool holds a pool of ReceiveContext
@@ -52,6 +50,21 @@ func releaseGrainContext(ctx *GrainContext) {
 	grainContextPool.Put(ctx)
 }
 
+// GrainContext provides contextual information and operations
+// available to an actor when it is processing a message.
+//
+// It typically carries the incoming message, the grain's identity,
+// the actor system managing the grain, and methods to respond to messages.
+//
+// Example usage:
+//
+//	func (g *MyGrain) OnReceive(ctx *actor.GrainContext) {
+//	    msg := ctx.Message()
+//	    switch msg := msg.(type) {
+//	    case *MyMessage:
+//	        ctx.Respond(&MyResponse{})
+//	    }
+//	}
 type GrainContext struct {
 	ctx         context.Context
 	self        *GrainIdentity
@@ -83,49 +96,75 @@ func (gctx *GrainContext) ActorSystem() ActorSystem {
 	return gctx.actorSystem
 }
 
-// Extensions returns a slice of all extensions registered within the ActorSystem
-// associated with the GrainContext.
+// Message returns the message currently being processed by the Grain.
 //
-// This allows system-level introspection or iteration over all available extensions.
-// It can be useful for message processing.
-//
-// Returns:
-//   - []extension.Extension: All registered extensions in the ActorSystem.
-func (gctx *GrainContext) Extensions() []extension.Extension {
-	return gctx.ActorSystem().Extensions()
-}
-
-// Extension retrieves a specific extension registered in the ActorSystem by its unique ID.
-//
-// This allows actors to access shared functionality injected into the system, such as
-// event sourcing, metrics, tracing, or custom application services, directly from the Context.
+// This method provides access to the incoming protobuf message that triggered the current Grain invocation.
+// Use this to inspect, type-assert, or handle the message within your Grain's OnReceive method.
 //
 // Example:
 //
-//	logger := x.Extension("extensionID").(MyExtension)
-//
-// Parameters:
-//   - extensionID: A unique string identifier used when the extension was registered.
-//
-// Returns:
-//   - extension.Extension: The corresponding extension if found, or nil otherwise.
-func (gctx *GrainContext) Extension(extensionID string) extension.Extension {
-	return gctx.ActorSystem().Extension(extensionID)
-}
-
-// Message returns the message being processed by the Grain.
-// This is the message that triggered the current grain invocation.
+//	func (g *MyGrain) OnReceive(ctx *GrainContext) {
+//	    switch msg := ctx.Message().(type) {
+//	    case *MyRequest:
+//	        // handle MyRequest
+//	    default:
+//	        ctx.Unhandled()
+//	    }
+//	}
 func (gctx *GrainContext) Message() proto.Message {
 	return gctx.message
 }
 
-// Err is used instead of panicking within a message handler.
+// Err reports an error encountered during message handling without panicking.
+//
+// This method should be used within a message handler to indicate that the
+// message processing failed due to the provided error. It is the preferred way
+// to signal failure in the message handler, as it avoids
+// crashing the actor or goroutine.
+//
+// Use Err instead of panicking to enable graceful error handling and reporting,
+// particularly when responding to messages or for observability purposes.
+//
+// Note: Even if the message handler does panic, the framework will catch it and
+// report it as an error. However, using Err allows for more controlled error.
+//
+// Example usage:
+//
+//	func (a *MyActor) OnReceive(ctx actor.Context) {
+//	    switch msg := ctx.Message().(type) {
+//	    case DoSomething:
+//	        if err := doWork(); err != nil {
+//	            ctx.Err(err) // fail gracefully
+//	            return
+//	        }
+//	        ctx.NoErr()
+//	    }
+//	}
 func (gctx *GrainContext) Err(err error) {
 	gctx.err <- err
 	close(gctx.err)
 }
 
-// NoErr is used to indicate that there is no error to report.
+// NoErr marks the successful completion of a message handler without any error.
+//
+// This method is typically used in actor-style messaging contexts to explicitly
+// indicate that the message was processed successfully. It is especially useful
+// when:
+//   - Handling fire-and-forget (Tell-like) messages where no response is expected.
+//   - Handling Ask-like messages where no error and response need to be returned.
+//
+// Calling NoErr ensures that the framework does not interpret the absence of an
+// explicit error as a failure or require a default response.
+//
+// Example usage:
+//
+//	func (a *MyActor) OnReceive(ctx actor.Context) {
+//	    switch msg := ctx.Message().(type) {
+//	    case DoSomething:
+//	        // Handle logic...
+//	        ctx.NoErr() // explicitly declare success
+//	    }
+//	}
 func (gctx *GrainContext) NoErr() {
 	// No error to report, just close the channel
 	if gctx.synchronous {
@@ -140,9 +179,30 @@ func (gctx *GrainContext) Response(resp proto.Message) {
 	close(gctx.response)
 }
 
-// Unhandled is called when the message is not handled by the Grain.
-// This method can be used to log the unhandled message or take other actions.
-// It is typically invoked when the Grain does not have a handler for the received message type.
+// Unhandled marks the currently received message as unhandled by the Grain.
+//
+// This method should be invoked when the Grain does not define a handler for the
+// message type it has received. Calling Unhandled informs the runtime that the
+// message was not processed and allows the framework to respond accordingly.
+//
+// This is typically used to log, track, or gracefully ignore unsupported messages
+// without causing unexpected behavior.
+//
+// If Unhandled is called, the caller of TellGrain or AskGrain will receive an
+// ErrUnhandledMessage error as a response, signaling that the message could not be processed.
+//
+// Example use case:
+//
+//	func (g *MyGrain) OnReceive(ctx *GrainContext) error {
+//	    switch msg := ctx.Message().(type) {
+//	    case *KnownMessage:
+//	        // handle message
+//	        return nil
+//	    default:
+//	        ctx.Unhandled()
+//	        return nil
+//	    }
+//	}
 func (gctx *GrainContext) Unhandled() {
 	msg := gctx.Message()
 	gctx.err <- NewErrUnhandledMessage(fmt.Errorf("unhandled message type %s", msg.ProtoReflect().Descriptor().FullName()))

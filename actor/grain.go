@@ -29,62 +29,72 @@ import "context"
 // Grain defines the contract for grains (virtual actors) in the goakt actor system.
 //
 // A Grain is a lightweight, virtual actor that encapsulates state and behavior, managed by goakt.
-// Grains are automatically activated and deactivated by the system, providing location transparency and efficient resource usage.
-// Each grain instance is uniquely identified and processes messages sequentially, ensuring single-threaded execution and simplifying state management.
+// Grains are automatically activated and deactivated by the system. Each grain instance is uniquely identified
+// and processes messages sequentially, ensuring single-threaded execution and simplifying state management.
 //
-// # Lifecycle Methods
-//
-//   - OnActivate: Called when the grain is loaded into memory. Use this to initialize state or resources.
-//   - OnDeactivate: Called before the grain is removed from memory. Use this to persist state and release resources.
-//
-// # Message Handling
-//
-//   - OnReceive: Handles an incoming message. Only one call is active at a time per grain instance.
-//
-// # Implementation Notes
-//
-//   - Always respect the provided context for cancellation and deadlines.
-//   - Do not retain references to context or message instances beyond the method scope.
-//   - Use the Dependencies method (if implemented) to declare external dependencies required by the grain.
-//
-// Any type intended to act as a grain within the goakt actor system should implement this interface.
+// Implementations must be safe for single-threaded access; concurrent calls are not made to a single grain instance.
 //
 // Methods:
-//   - OnActivate: Initialize state or resources when the grain is loaded.
-//   - OnReceive: Process incoming messages and update state. Single-threaded per grain instance.
-//   - OnDeactivate: Persist state and release resources before the grain is removed.
+//
+//   - OnActivate: Called when the grain is loaded into memory. Use this to initialize state or resources.
+//     Arguments:
+//
+//   - ctx: context for cancellation and deadlines.
+//
+//   - props: grain properties and system-level references.
+//     Returns:
+//
+//   - error: non-nil to indicate activation failure (grain will not be activated).
+//
+//   - OnReceive: Handles an incoming message. Only one call is active at a time per grain instance.
+//     Arguments:
+//
+//   - ctx: GrainContext containing the message, sender, grain identity, and system references.
+//     Behavior:
+//
+//   - Processes the message and updates grain state as needed.
+//
+//   - Always respect cancellation and deadlines via the context in GrainContext.
+//
+//   - Do not retain references to the GrainContext or its fields beyond the method scope.
+//
+//   - OnDeactivate: Called before the grain is removed from memory. Use this to persist state and release resources.
+//     Arguments:
+//
+//   - ctx: context for cancellation and deadlines.
+//
+//   - props: grain properties and system-level references.
+//     Returns:
+//
+//   - error: non-nil to indicate deactivation failure (system may log or handle the failure).
 type Grain interface {
 	// OnActivate is called when the grain is loaded into memory.
 	// Use this to initialize state or resources.
 	//
-	// The provided context contains cancellation and deadline information.
-	// The actorSystem provides system-level references.
-	// Return an error to indicate activation failure. If an error is returned,
-	// the grain will not be activated.
+	// Arguments:
+	//   - ctx: context for cancellation and deadlines.
+	//   - props: grain properties and system-level references.
+	// Returns:
+	//   - error: non-nil to indicate activation failure (grain will not be activated).
 	OnActivate(ctx context.Context, props *GrainProps) error
 
 	// OnReceive is called when the grain receives a message.
 	//
-	// This method is invoked for each incoming message to the grain instance.
-	// The provided GrainContext contains the message, sender information, grain identity,
-	// and references to the actor system.
-	//
-	// Implement this method to define how the grain processes messages and updates its state.
-	// Message processing is single-threaded per grain instance, ensuring that only one
-	// OnReceive call is active at a time.
-	//
-	// Notes:
+	// Arguments:
+	//   - ctx: GrainContext containing the message, sender, grain identity, and system references.
+	// Behavior:
+	//   - Processes the message and updates grain state as needed.
 	//   - Always respect cancellation and deadlines via the context in GrainContext.
 	//   - Do not retain references to the GrainContext or its fields beyond the method scope.
-	//   - Use this method for both command and query message handling.
 	OnReceive(ctx *GrainContext)
 
 	// OnDeactivate is called before the grain is removed from memory.
 	// Use this to persist state and release resources.
 	//
-	// The provided context contains cancellation and deadline information.
-	// The actorSystem provides system-level references.
-	// Return an error to indicate deactivation failure. If an error is returned,
-	// the system may log or handle the failure as appropriate.
+	// Arguments:
+	//   - ctx: context for cancellation and deadlines.
+	//   - props: grain properties and system-level references.
+	// Returns:
+	//   - error: non-nil to indicate deactivation failure (system may log or handle the failure).
 	OnDeactivate(ctx context.Context, props *GrainProps) error
 }

@@ -24,13 +24,30 @@
 
 package actor
 
-// GrainProps defines the properties of a grain in the goakt actor system.
+// GrainProps encapsulates configuration and metadata for a Grain (virtual actor) in the goakt actor system.
+//
+// It holds the unique identity of the Grain and a reference to the ActorSystem that manages it.
+// GrainProps is used internally to track and manage Grain instances, ensuring each Grain is uniquely addressable
+// and associated with the correct actor system.
+//
+// Fields:
+//   - identity:    The unique identity of the Grain, used for addressing and routing.
+//   - actorSystem: The ActorSystem instance that owns and manages the Grain.
 type GrainProps struct {
 	identity    *GrainIdentity
 	actorSystem ActorSystem
 }
 
-// newGrainProps creates a new instance of GrainProps with the specified identity and actor system.
+// newGrainProps creates and returns a new GrainProps instance for the specified identity and actor system.
+//
+// This function is used internally by the framework to construct the properties required to manage a Grain.
+//
+// Parameters:
+//   - identity:    The unique identity of the Grain.
+//   - actorSystem: The ActorSystem that will manage the Grain.
+//
+// Returns:
+//   - *GrainProps: A new instance containing the provided identity and actor system.
 func newGrainProps(identity *GrainIdentity, actorSystem ActorSystem) *GrainProps {
 	return &GrainProps{
 		identity:    identity,
@@ -38,14 +55,24 @@ func newGrainProps(identity *GrainIdentity, actorSystem ActorSystem) *GrainProps
 	}
 }
 
-// Identity returns the unique identity of the grain.
-// This identity is used to uniquely identify the grain within the actor system.
-// It is typically a string that represents the grain's type and instance.
+// Identity returns the unique identity of the Grain associated with these properties.
+//
+// The GrainIdentity is used to uniquely identify and address the Grain within the actor system.
+// This is typically a composite of the Grain's type and instance key.
+//
+// Returns:
+//   - *GrainIdentity: The identity object representing this Grain.
 func (p *GrainProps) Identity() *GrainIdentity {
 	return p.identity
 }
 
-// ActorSystem returns the actor system associated with the grain properties.
+// ActorSystem returns the ActorSystem instance associated with these Grain properties.
+//
+// This provides access to the actor system that manages the lifecycle, messaging, and clustering
+// for the Grain represented by these properties.
+//
+// Returns:
+//   - ActorSystem: The actor system managing this Grain.
 func (p *GrainProps) ActorSystem() ActorSystem {
 	return p.actorSystem
 }

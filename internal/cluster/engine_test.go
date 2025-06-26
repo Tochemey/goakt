@@ -448,6 +448,10 @@ func TestSingleNode(t *testing.T) {
 		err = cluster.PutGrain(ctx, grain)
 		require.NoError(t, err)
 
+		exist, err := cluster.GrainExists(ctx, identity)
+		require.NoError(t, err)
+		require.True(t, exist)
+
 		// fetch the grain
 		actual, err := cluster.GetGrain(ctx, identity)
 		require.NoError(t, err)
@@ -455,10 +459,99 @@ func TestSingleNode(t *testing.T) {
 		require.True(t, proto.Equal(grain, actual))
 
 		//  fetch non-existing actor
-		fakeActorName := "fake"
-		actual, err = cluster.GetGrain(ctx, fakeActorName)
+		fakeGrainIdentity := "fake"
+		actual, err = cluster.GetGrain(ctx, fakeGrainIdentity)
 		require.Nil(t, actual)
 		require.ErrorIs(t, err, ErrGrainNotFound)
+
+		exist, err = cluster.GrainExists(ctx, fakeGrainIdentity)
+		require.NoError(t, err)
+		require.False(t, exist)
+
+		//  shutdown the Node
+		util.Pause(time.Second)
+
+		// stop the node
+		require.NoError(t, cluster.Stop(ctx))
+		provider.AssertExpectations(t)
+	})
+
+	t.Run("With RemoveGrain", func(t *testing.T) {
+		// create the context
+		ctx := t.Context()
+
+		// generate the ports for the single node
+		nodePorts := dynaport.Get(3)
+		discoveryPort := nodePorts[0]
+		clusterPort := nodePorts[1]
+		remotingPort := nodePorts[2]
+
+		// define discovered addresses
+		addrs := []string{
+			fmt.Sprintf("127.0.0.1:%d", discoveryPort),
+		}
+
+		// mock the discovery provider
+		provider := new(testkit.Provider)
+
+		provider.EXPECT().ID().Return("testDisco")
+		provider.EXPECT().Initialize().Return(nil)
+		provider.EXPECT().Register().Return(nil)
+		provider.EXPECT().Deregister().Return(nil)
+		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
+		provider.EXPECT().Close().Return(nil)
+
+		// create a Node
+		host := "127.0.0.1"
+		hostNode := discovery.Node{
+			Name:          host,
+			Host:          host,
+			DiscoveryPort: discoveryPort,
+			PeersPort:     clusterPort,
+			RemotingPort:  remotingPort,
+		}
+
+		cluster, err := NewEngine("test", provider, &hostNode, WithLogger(log.DiscardLogger))
+		require.NotNil(t, cluster)
+		require.NoError(t, err)
+
+		// start the Node
+		err = cluster.Start(ctx)
+		require.NoError(t, err)
+
+		// create an grain
+		identity := "grainKind/grainName"
+		grain := &internalpb.Grain{
+			GrainId: &internalpb.GrainId{
+				Kind:  "grainKind",
+				Name:  "grainName",
+				Value: identity,
+			},
+			Host: host,
+			Port: int32(remotingPort),
+		}
+
+		// replicate the grain in the Node
+		err = cluster.PutGrain(ctx, grain)
+		require.NoError(t, err)
+
+		exist, err := cluster.GrainExists(ctx, identity)
+		require.NoError(t, err)
+		require.True(t, exist)
+
+		// fetch the grain
+		actual, err := cluster.GetGrain(ctx, identity)
+		require.NoError(t, err)
+		require.NotNil(t, actual)
+		require.True(t, proto.Equal(grain, actual))
+
+		// let us remove the grain
+		err = cluster.RemoveGrain(ctx, identity)
+		require.NoError(t, err)
+
+		exist, err = cluster.GrainExists(ctx, identity)
+		require.NoError(t, err)
+		require.False(t, exist)
 
 		//  shutdown the Node
 		util.Pause(time.Second)

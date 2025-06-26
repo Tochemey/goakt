@@ -195,6 +195,40 @@ func TestGrain(t *testing.T) {
 		require.NoError(t, sd3.Close())
 		srv.Shutdown()
 	})
+	t.Run("With unhandled message", func(t *testing.T) {
+		ctx := t.Context()
+		testSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NotNil(t, testSystem)
+
+		// start the actor system
+		err = testSystem.Start(ctx)
+		require.NoError(t, err)
+		util.Pause(time.Second)
+
+		// create a grain instance
+		grain := NewMockGrain()
+		identity, err := testSystem.GrainIdentity(ctx, "testGrain", func(_ context.Context) (Grain, error) {
+			return grain, nil
+		})
+		require.NoError(t, err)
+		require.NotNil(t, identity)
+
+		// send a message to the grain
+		message := new(testpb.TestClusterForward) // we know this message is not handled by the grain
+		response, err := testSystem.AskGrain(ctx, identity, message, time.Second)
+		require.Error(t, err)
+		require.Nil(t, response)
+		require.ErrorIs(t, err, ErrUnhanledMessage)
+
+		// check if the grain is activated
+		gp, ok := testSystem.(*actorSystem).grains.Get(*identity)
+		require.True(t, ok)
+		require.NotNil(t, gp)
+		require.True(t, gp.isActive())
+
+		require.NoError(t, testSystem.Stop(ctx))
+	})
 	t.Run("With activation error", func(t *testing.T) {
 		ctx := t.Context()
 		testSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
