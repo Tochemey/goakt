@@ -54,6 +54,15 @@ const (
 	// RemotingServiceRemoteReinstateProcedure is the fully-qualified name of the RemotingService's
 	// RemoteReinstate RPC.
 	RemotingServiceRemoteReinstateProcedure = "/internalpb.RemotingService/RemoteReinstate"
+	// RemotingServiceRemoteAskGrainProcedure is the fully-qualified name of the RemotingService's
+	// RemoteAskGrain RPC.
+	RemotingServiceRemoteAskGrainProcedure = "/internalpb.RemotingService/RemoteAskGrain"
+	// RemotingServiceRemoteTellGrainProcedure is the fully-qualified name of the RemotingService's
+	// RemoteTellGrain RPC.
+	RemotingServiceRemoteTellGrainProcedure = "/internalpb.RemotingService/RemoteTellGrain"
+	// RemotingServiceRemoteActivateGrainProcedure is the fully-qualified name of the RemotingService's
+	// RemoteActivateGrain RPC.
+	RemotingServiceRemoteActivateGrainProcedure = "/internalpb.RemotingService/RemoteActivateGrain"
 )
 
 // RemotingServiceClient is a client for the internalpb.RemotingService service.
@@ -73,6 +82,12 @@ type RemotingServiceClient interface {
 	RemoteSpawn(context.Context, *connect.Request[internalpb.RemoteSpawnRequest]) (*connect.Response[internalpb.RemoteSpawnResponse], error)
 	// RemoteReinstate reinstates an actor on a remote machine
 	RemoteReinstate(context.Context, *connect.Request[internalpb.RemoteReinstateRequest]) (*connect.Response[internalpb.RemoteReinstateResponse], error)
+	// RemoteAskGrain is used to send a message to Grain on a remote node
+	RemoteAskGrain(context.Context, *connect.Request[internalpb.RemoteAskGrainRequest]) (*connect.Response[internalpb.RemoteAskGrainResponse], error)
+	// RemoteTellGrain is used to send a message to Grain on a remote node
+	RemoteTellGrain(context.Context, *connect.Request[internalpb.RemoteTellGrainRequest]) (*connect.Response[internalpb.RemoteTellGrainResponse], error)
+	// RemoteActivateGrain is used to activate a Grain on a remote node
+	RemoteActivateGrain(context.Context, *connect.Request[internalpb.RemoteActivateGrainRequest]) (*connect.Response[internalpb.RemoteActivateGrainResponse], error)
 }
 
 // NewRemotingServiceClient constructs a client for the internalpb.RemotingService service. By
@@ -128,18 +143,39 @@ func NewRemotingServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 			connect.WithSchema(remotingServiceMethods.ByName("RemoteReinstate")),
 			connect.WithClientOptions(opts...),
 		),
+		remoteAskGrain: connect.NewClient[internalpb.RemoteAskGrainRequest, internalpb.RemoteAskGrainResponse](
+			httpClient,
+			baseURL+RemotingServiceRemoteAskGrainProcedure,
+			connect.WithSchema(remotingServiceMethods.ByName("RemoteAskGrain")),
+			connect.WithClientOptions(opts...),
+		),
+		remoteTellGrain: connect.NewClient[internalpb.RemoteTellGrainRequest, internalpb.RemoteTellGrainResponse](
+			httpClient,
+			baseURL+RemotingServiceRemoteTellGrainProcedure,
+			connect.WithSchema(remotingServiceMethods.ByName("RemoteTellGrain")),
+			connect.WithClientOptions(opts...),
+		),
+		remoteActivateGrain: connect.NewClient[internalpb.RemoteActivateGrainRequest, internalpb.RemoteActivateGrainResponse](
+			httpClient,
+			baseURL+RemotingServiceRemoteActivateGrainProcedure,
+			connect.WithSchema(remotingServiceMethods.ByName("RemoteActivateGrain")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // remotingServiceClient implements RemotingServiceClient.
 type remotingServiceClient struct {
-	remoteAsk       *connect.Client[internalpb.RemoteAskRequest, internalpb.RemoteAskResponse]
-	remoteTell      *connect.Client[internalpb.RemoteTellRequest, internalpb.RemoteTellResponse]
-	remoteLookup    *connect.Client[internalpb.RemoteLookupRequest, internalpb.RemoteLookupResponse]
-	remoteReSpawn   *connect.Client[internalpb.RemoteReSpawnRequest, internalpb.RemoteReSpawnResponse]
-	remoteStop      *connect.Client[internalpb.RemoteStopRequest, internalpb.RemoteStopResponse]
-	remoteSpawn     *connect.Client[internalpb.RemoteSpawnRequest, internalpb.RemoteSpawnResponse]
-	remoteReinstate *connect.Client[internalpb.RemoteReinstateRequest, internalpb.RemoteReinstateResponse]
+	remoteAsk           *connect.Client[internalpb.RemoteAskRequest, internalpb.RemoteAskResponse]
+	remoteTell          *connect.Client[internalpb.RemoteTellRequest, internalpb.RemoteTellResponse]
+	remoteLookup        *connect.Client[internalpb.RemoteLookupRequest, internalpb.RemoteLookupResponse]
+	remoteReSpawn       *connect.Client[internalpb.RemoteReSpawnRequest, internalpb.RemoteReSpawnResponse]
+	remoteStop          *connect.Client[internalpb.RemoteStopRequest, internalpb.RemoteStopResponse]
+	remoteSpawn         *connect.Client[internalpb.RemoteSpawnRequest, internalpb.RemoteSpawnResponse]
+	remoteReinstate     *connect.Client[internalpb.RemoteReinstateRequest, internalpb.RemoteReinstateResponse]
+	remoteAskGrain      *connect.Client[internalpb.RemoteAskGrainRequest, internalpb.RemoteAskGrainResponse]
+	remoteTellGrain     *connect.Client[internalpb.RemoteTellGrainRequest, internalpb.RemoteTellGrainResponse]
+	remoteActivateGrain *connect.Client[internalpb.RemoteActivateGrainRequest, internalpb.RemoteActivateGrainResponse]
 }
 
 // RemoteAsk calls internalpb.RemotingService.RemoteAsk.
@@ -177,6 +213,21 @@ func (c *remotingServiceClient) RemoteReinstate(ctx context.Context, req *connec
 	return c.remoteReinstate.CallUnary(ctx, req)
 }
 
+// RemoteAskGrain calls internalpb.RemotingService.RemoteAskGrain.
+func (c *remotingServiceClient) RemoteAskGrain(ctx context.Context, req *connect.Request[internalpb.RemoteAskGrainRequest]) (*connect.Response[internalpb.RemoteAskGrainResponse], error) {
+	return c.remoteAskGrain.CallUnary(ctx, req)
+}
+
+// RemoteTellGrain calls internalpb.RemotingService.RemoteTellGrain.
+func (c *remotingServiceClient) RemoteTellGrain(ctx context.Context, req *connect.Request[internalpb.RemoteTellGrainRequest]) (*connect.Response[internalpb.RemoteTellGrainResponse], error) {
+	return c.remoteTellGrain.CallUnary(ctx, req)
+}
+
+// RemoteActivateGrain calls internalpb.RemotingService.RemoteActivateGrain.
+func (c *remotingServiceClient) RemoteActivateGrain(ctx context.Context, req *connect.Request[internalpb.RemoteActivateGrainRequest]) (*connect.Response[internalpb.RemoteActivateGrainResponse], error) {
+	return c.remoteActivateGrain.CallUnary(ctx, req)
+}
+
 // RemotingServiceHandler is an implementation of the internalpb.RemotingService service.
 type RemotingServiceHandler interface {
 	// RemoteAsk is used to send a message to an actor remotely and expect a response immediately.
@@ -194,6 +245,12 @@ type RemotingServiceHandler interface {
 	RemoteSpawn(context.Context, *connect.Request[internalpb.RemoteSpawnRequest]) (*connect.Response[internalpb.RemoteSpawnResponse], error)
 	// RemoteReinstate reinstates an actor on a remote machine
 	RemoteReinstate(context.Context, *connect.Request[internalpb.RemoteReinstateRequest]) (*connect.Response[internalpb.RemoteReinstateResponse], error)
+	// RemoteAskGrain is used to send a message to Grain on a remote node
+	RemoteAskGrain(context.Context, *connect.Request[internalpb.RemoteAskGrainRequest]) (*connect.Response[internalpb.RemoteAskGrainResponse], error)
+	// RemoteTellGrain is used to send a message to Grain on a remote node
+	RemoteTellGrain(context.Context, *connect.Request[internalpb.RemoteTellGrainRequest]) (*connect.Response[internalpb.RemoteTellGrainResponse], error)
+	// RemoteActivateGrain is used to activate a Grain on a remote node
+	RemoteActivateGrain(context.Context, *connect.Request[internalpb.RemoteActivateGrainRequest]) (*connect.Response[internalpb.RemoteActivateGrainResponse], error)
 }
 
 // NewRemotingServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -245,6 +302,24 @@ func NewRemotingServiceHandler(svc RemotingServiceHandler, opts ...connect.Handl
 		connect.WithSchema(remotingServiceMethods.ByName("RemoteReinstate")),
 		connect.WithHandlerOptions(opts...),
 	)
+	remotingServiceRemoteAskGrainHandler := connect.NewUnaryHandler(
+		RemotingServiceRemoteAskGrainProcedure,
+		svc.RemoteAskGrain,
+		connect.WithSchema(remotingServiceMethods.ByName("RemoteAskGrain")),
+		connect.WithHandlerOptions(opts...),
+	)
+	remotingServiceRemoteTellGrainHandler := connect.NewUnaryHandler(
+		RemotingServiceRemoteTellGrainProcedure,
+		svc.RemoteTellGrain,
+		connect.WithSchema(remotingServiceMethods.ByName("RemoteTellGrain")),
+		connect.WithHandlerOptions(opts...),
+	)
+	remotingServiceRemoteActivateGrainHandler := connect.NewUnaryHandler(
+		RemotingServiceRemoteActivateGrainProcedure,
+		svc.RemoteActivateGrain,
+		connect.WithSchema(remotingServiceMethods.ByName("RemoteActivateGrain")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/internalpb.RemotingService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case RemotingServiceRemoteAskProcedure:
@@ -261,6 +336,12 @@ func NewRemotingServiceHandler(svc RemotingServiceHandler, opts ...connect.Handl
 			remotingServiceRemoteSpawnHandler.ServeHTTP(w, r)
 		case RemotingServiceRemoteReinstateProcedure:
 			remotingServiceRemoteReinstateHandler.ServeHTTP(w, r)
+		case RemotingServiceRemoteAskGrainProcedure:
+			remotingServiceRemoteAskGrainHandler.ServeHTTP(w, r)
+		case RemotingServiceRemoteTellGrainProcedure:
+			remotingServiceRemoteTellGrainHandler.ServeHTTP(w, r)
+		case RemotingServiceRemoteActivateGrainProcedure:
+			remotingServiceRemoteActivateGrainHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -296,4 +377,16 @@ func (UnimplementedRemotingServiceHandler) RemoteSpawn(context.Context, *connect
 
 func (UnimplementedRemotingServiceHandler) RemoteReinstate(context.Context, *connect.Request[internalpb.RemoteReinstateRequest]) (*connect.Response[internalpb.RemoteReinstateResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("internalpb.RemotingService.RemoteReinstate is not implemented"))
+}
+
+func (UnimplementedRemotingServiceHandler) RemoteAskGrain(context.Context, *connect.Request[internalpb.RemoteAskGrainRequest]) (*connect.Response[internalpb.RemoteAskGrainResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("internalpb.RemotingService.RemoteAskGrain is not implemented"))
+}
+
+func (UnimplementedRemotingServiceHandler) RemoteTellGrain(context.Context, *connect.Request[internalpb.RemoteTellGrainRequest]) (*connect.Response[internalpb.RemoteTellGrainResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("internalpb.RemotingService.RemoteTellGrain is not implemented"))
+}
+
+func (UnimplementedRemotingServiceHandler) RemoteActivateGrain(context.Context, *connect.Request[internalpb.RemoteActivateGrainRequest]) (*connect.Response[internalpb.RemoteActivateGrainResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("internalpb.RemotingService.RemoteActivateGrain is not implemented"))
 }

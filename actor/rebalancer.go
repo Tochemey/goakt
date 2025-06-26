@@ -29,9 +29,11 @@ import (
 	"net"
 	"strconv"
 
+	"connectrpc.com/connect"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/tochemey/goakt/v3/goaktpb"
+	"github.com/tochemey/goakt/v3/internal/cluster"
 	"github.com/tochemey/goakt/v3/internal/collection"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/log"
@@ -81,7 +83,6 @@ func (r *rebalancer) Rebalance(ctx *ReceiveContext) {
 		rctx := context.WithoutCancel(ctx.Context())
 		peerState := msg.GetPeerState()
 
-		// grab all our active peers
 		peers, err := r.pid.ActorSystem().getCluster().Peers(rctx)
 		if err != nil {
 			ctx.Err(NewInternalError(err))
@@ -92,81 +93,20 @@ func (r *rebalancer) Rebalance(ctx *ReceiveContext) {
 		eg, egCtx := errgroup.WithContext(rctx)
 		logger := r.pid.Logger()
 
-		if len(leaderShares) > 0 {
-			eg.Go(func() error {
-				for _, actor := range leaderShares {
-					// never redistribute system actors
-					if !isReservedName(actor.GetAddress().GetName()) {
-						if err := r.recreateLocally(egCtx, actor, true); err != nil {
-							return NewSpawnError(err)
-						}
-					}
-				}
-				return nil
-			})
-		}
+		r.rebalanceActors(egCtx, eg, leaderShares, peersShares, peers)
 
-		if len(peersShares) > 0 {
-			eg.Go(func() error {
-				for i := 1; i < len(peersShares); i++ {
-					actors := peersShares[i]
-					peer := peers[i-1]
-
-					for _, actor := range actors {
-						// never redistribute system actors and singleton actors
-						if !isReservedName(actor.GetAddress().GetName()) && !actor.GetIsSingleton() {
-							if actor.GetRelocatable() {
-								remoteHost := peer.Host
-								remotingPort := peer.RemotingPort
-								actorSystem := r.pid.ActorSystem()
-								cluster := actorSystem.getCluster()
-
-								// check if the actor exists in the cluster
-								// before trying to remove it
-								exists, err := cluster.ActorExists(egCtx, actor.GetAddress().GetName())
-								if err != nil {
-									return NewInternalError(err)
-								}
-
-								if exists {
-									// remove the given actor from the cluster
-									if err := cluster.RemoveActor(egCtx, actor.GetAddress().GetName()); err != nil {
-										return NewInternalError(err)
-									}
-								}
-
-								dependencies, err := actorSystem.getReflection().DependenciesFromProtobuf(actor.GetDependencies()...)
-								if err != nil {
-									return err
-								}
-
-								spawnRequest := &remote.SpawnRequest{
-									Name:                actor.GetAddress().GetName(),
-									Kind:                actor.GetType(),
-									Singleton:           false,
-									Relocatable:         true,
-									Dependencies:        dependencies,
-									PassivationStrategy: passivationStrategyFromProto(actor.GetPassivationStrategy()),
-									EnableStashing:      actor.GetEnableStash(),
-								}
-
-								if err := r.remoting.RemoteSpawn(egCtx, remoteHost, remotingPort, spawnRequest); err != nil {
-									logger.Error(err)
-									return NewSpawnError(err)
-								}
-							}
-						}
-					}
-				}
-				return nil
-			})
+		if len(peerState.GetGrains()) > 0 {
+			leaderGrains, peersGrains := r.allocateGrains(len(peers)+1, peerState)
+			r.rebalanceGrains(egCtx, eg, leaderGrains, peersGrains, peers)
 		}
 
 		// only block when there are go routines running
-		if len(leaderShares) > 0 || len(peersShares) > 0 {
+		if len(leaderShares) > 0 || len(peersShares) > 0 || len(peerState.GetGrains()) > 0 {
 			if err := eg.Wait(); err != nil {
 				logger.Errorf("cluster rebalancing failed: %v", err)
 				ctx.Err(err)
+				// TODO: let us add the supervisor to handle this error
+				return
 			}
 		}
 
@@ -177,6 +117,141 @@ func (r *rebalancer) Rebalance(ctx *ReceiveContext) {
 	default:
 		ctx.Unhandled()
 	}
+}
+
+func (r *rebalancer) rebalanceActors(ctx context.Context, eg *errgroup.Group, leaderShares []*internalpb.Actor, peersShares [][]*internalpb.Actor, peers []*cluster.Peer) {
+	if len(leaderShares) > 0 {
+		eg.Go(func() error {
+			for _, actor := range leaderShares {
+				if !isReservedName(actor.GetAddress().GetName()) {
+					if err := r.recreateLocally(ctx, actor, true); err != nil {
+						return NewSpawnError(err)
+					}
+				}
+			}
+			return nil
+		})
+	}
+
+	if len(peersShares) > 0 {
+		eg.Go(func() error {
+			for i := 1; i < len(peersShares); i++ {
+				actors := peersShares[i]
+				peer := peers[i-1]
+				for _, actor := range actors {
+					if !isReservedName(actor.GetAddress().GetName()) && !actor.GetIsSingleton() && actor.GetRelocatable() {
+						if err := r.spawnRemoteActor(ctx, actor, peer); err != nil {
+							return err
+						}
+					}
+				}
+			}
+			return nil
+		})
+	}
+}
+
+func (r *rebalancer) spawnRemoteActor(ctx context.Context, actor *internalpb.Actor, peer *cluster.Peer) error {
+	remoteHost := peer.Host
+	remotingPort := peer.RemotingPort
+	actorSystem := r.pid.ActorSystem()
+	cluster := actorSystem.getCluster()
+
+	exists, err := cluster.ActorExists(ctx, actor.GetAddress().GetName())
+	if err != nil {
+		return NewInternalError(err)
+	}
+	if exists {
+		if err := cluster.RemoveActor(ctx, actor.GetAddress().GetName()); err != nil {
+			return NewInternalError(err)
+		}
+	}
+
+	dependencies, err := actorSystem.getReflection().NewDependencies(actor.GetDependencies()...)
+	if err != nil {
+		return err
+	}
+
+	spawnRequest := &remote.SpawnRequest{
+		Name:                actor.GetAddress().GetName(),
+		Kind:                actor.GetType(),
+		Singleton:           false,
+		Relocatable:         true,
+		Dependencies:        dependencies,
+		PassivationStrategy: passivationStrategyFromProto(actor.GetPassivationStrategy()),
+		EnableStashing:      actor.GetEnableStash(),
+	}
+
+	if err := r.remoting.RemoteSpawn(ctx, remoteHost, remotingPort, spawnRequest); err != nil {
+		r.logger.Error(err)
+		return NewSpawnError(err)
+	}
+	return nil
+}
+
+func (r *rebalancer) rebalanceGrains(ctx context.Context, eg *errgroup.Group, leaderGrains []*internalpb.Grain, peersGrains [][]*internalpb.Grain, peers []*cluster.Peer) {
+	if len(leaderGrains) > 0 {
+		leaderHost := r.pid.ActorSystem().Host()
+		leaderPort := int32(r.pid.ActorSystem().Port())
+		eg.Go(func() error {
+			for _, grain := range leaderGrains {
+				if !isReservedName(grain.GetGrainId().GetName()) {
+					grain.Host = leaderHost
+					grain.Port = leaderPort
+					if err := r.pid.ActorSystem().recreateGrain(ctx, grain); err != nil {
+						return NewSpawnError(err)
+					}
+				}
+			}
+			return nil
+		})
+	}
+
+	if len(peersGrains) > 0 {
+		eg.Go(func() error {
+			for i := 1; i < len(peersGrains); i++ {
+				grains := peersGrains[i]
+				peer := peers[i-1]
+				for _, grain := range grains {
+					if !isReservedName(grain.GetGrainId().GetName()) {
+						if err := r.activateRemoteGrain(ctx, grain, peer); err != nil {
+							return err
+						}
+					}
+				}
+			}
+			return nil
+		})
+	}
+}
+
+func (r *rebalancer) activateRemoteGrain(ctx context.Context, grain *internalpb.Grain, peer *cluster.Peer) error {
+	remoteHost := peer.Host
+	remotingPort := peer.RemotingPort
+	remoting := r.pid.ActorSystem().getRemoting()
+	remoteClient := remoting.remotingServiceClient(remoteHost, remotingPort)
+
+	exist, err := r.pid.ActorSystem().getCluster().GrainExists(ctx, grain.GetGrainId().GetName())
+	if err != nil {
+		return NewInternalError(err)
+	}
+	if exist {
+		if err := r.pid.ActorSystem().getCluster().RemoveGrain(ctx, grain.GetGrainId().GetName()); err != nil {
+			return NewInternalError(err)
+		}
+	}
+
+	grain.Host = remoteHost
+	grain.Port = int32(remotingPort)
+	request := connect.NewRequest(&internalpb.RemoteActivateGrainRequest{
+		Grain: grain,
+	})
+
+	if _, err := remoteClient.RemoteActivateGrain(ctx, request); err != nil {
+		r.logger.Error(err)
+		return NewSpawnError(err)
+	}
+	return nil
 }
 
 // PostStop is executed when the actor is shutting down.
@@ -256,7 +331,7 @@ func (r *rebalancer) recreateLocally(ctx context.Context, props *internalpb.Acto
 	}
 
 	if len(props.GetDependencies()) > 0 {
-		dependencies, err := r.pid.ActorSystem().getReflection().DependenciesFromProtobuf(props.GetDependencies()...)
+		dependencies, err := r.pid.ActorSystem().getReflection().NewDependencies(props.GetDependencies()...)
 		if err != nil {
 			return err
 		}
@@ -265,4 +340,36 @@ func (r *rebalancer) recreateLocally(ctx context.Context, props *internalpb.Acto
 
 	_, err = r.pid.ActorSystem().Spawn(ctx, props.GetAddress().GetName(), actor, spawnOpts...)
 	return err
+}
+
+// allocateGrains distributes grains among the leader and peers for rebalancing.
+//
+// It returns two values:
+//   - leaderShares: grains to be created on the leader node
+//   - peersShares: a slice of grain slices, each assigned to a peer node
+func (r *rebalancer) allocateGrains(totalPeers int, nodeLeftState *internalpb.PeerState) (leaderShares []*internalpb.Grain, peersShares [][]*internalpb.Grain) {
+	grains := nodeLeftState.GetGrains()
+	grainCount := len(grains)
+
+	// Collect all grains to be rebalanced
+	toRebalances := make([]*internalpb.Grain, 0, grainCount)
+	for _, grain := range grains {
+		toRebalances = append(toRebalances, grain)
+	}
+
+	quotient := grainCount / totalPeers
+	remainder := grainCount % totalPeers
+
+	// Assign the remainder grains to the leader
+	leaderShares = append(leaderShares, toRebalances[:remainder]...)
+
+	// Chunk the remaining actors for peers
+	peersShares = collection.Chunkify(toRebalances[remainder:], quotient)
+
+	// Ensure leader takes the first chunk
+	if len(peersShares) > 0 {
+		leaderShares = append(leaderShares, peersShares[0]...)
+	}
+
+	return leaderShares, peersShares
 }

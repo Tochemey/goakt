@@ -22,19 +22,30 @@
  * SOFTWARE.
  */
 
-package cluster
+package actor
 
-import "errors"
+// GrainProps defines the properties of a grain in the goakt actor system.
+type GrainProps struct {
+	identity    *GrainIdentity
+	actorSystem ActorSystem
+}
 
-var (
-	// ErrActorNotFound is return when an actor is not found
-	ErrActorNotFound = errors.New("actor not found")
-	// ErrPeerSyncNotFound is returned when a peerSync record is not found
-	ErrPeerSyncNotFound = errors.New("peerSync record not found")
-	// ErrInvalidTLSConfiguration is returned whent the TLS configuration is not properly set
-	ErrInvalidTLSConfiguration = errors.New("TLS configuration is invalid")
-	// ErrEngineNotRunning is returned when the cluster engine is not running
-	ErrEngineNotRunning = errors.New("engine is not running")
-	// ErrGrainNotFound is returned when a grain is not found
-	ErrGrainNotFound = errors.New("grain not found")
-)
+// newGrainProps creates a new instance of GrainProps with the specified identity and actor system.
+func newGrainProps(identity *GrainIdentity, actorSystem ActorSystem) *GrainProps {
+	return &GrainProps{
+		identity:    identity,
+		actorSystem: actorSystem,
+	}
+}
+
+// Identity returns the unique identity of the grain.
+// This identity is used to uniquely identify the grain within the actor system.
+// It is typically a string that represents the grain's type and instance.
+func (p *GrainProps) Identity() *GrainIdentity {
+	return p.identity
+}
+
+// ActorSystem returns the actor system associated with the grain properties.
+func (p *GrainProps) ActorSystem() ActorSystem {
+	return p.actorSystem
+}

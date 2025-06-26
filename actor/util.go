@@ -60,6 +60,10 @@ const (
 
 	// DefaultClusterStateSyncInterval defines the default cluster state synchronization interval
 	DefaultClusterStateSyncInterval = time.Minute
+
+	// DefaultGrainRequestTimeout defines the default grain request timeout
+	DefaultGrainRequestTimeout = 5 * time.Second
+
 	// eventsTopic defines the events topic
 	eventsTopic = "topic.events"
 

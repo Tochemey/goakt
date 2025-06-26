@@ -630,3 +630,270 @@ func TestIssue781(t *testing.T) {
 	assert.NoError(t, sd3.Close())
 	srv.Shutdown()
 }
+
+// nolint
+func TestGrainsRebalancing(t *testing.T) {
+	// create a context
+	ctx := t.Context()
+	// start the NATS server
+	srv := startNatsServer(t)
+
+	// create and start a system cluster
+	node1, sd1 := testCluster(t, srv.Addr().String())
+	require.NotNil(t, node1)
+	require.NotNil(t, sd1)
+
+	// create and start a system cluster
+	node2, sd2 := testCluster(t, srv.Addr().String())
+	require.NotNil(t, node2)
+	require.NotNil(t, sd2)
+
+	// create and start a system cluster
+	node3, sd3 := testCluster(t, srv.Addr().String())
+	require.NotNil(t, node3)
+	require.NotNil(t, sd3)
+
+	for j := range 4 {
+		identity, err := node1.GrainIdentity(ctx, fmt.Sprintf("Grain-1%d", j), func(ctx context.Context) (Grain, error) {
+			return NewMockGrain(), nil
+		})
+		require.NotNil(t, identity)
+		require.NoError(t, err)
+		message := new(testpb.TestSend)
+		err = node1.TellGrain(ctx, identity, message)
+		require.NoError(t, err)
+	}
+
+	util.Pause(time.Second)
+
+	for j := range 5 {
+		identity, err := node2.GrainIdentity(ctx, fmt.Sprintf("Grain-2%d", j), func(ctx context.Context) (Grain, error) {
+			return NewMockGrain(), nil
+		})
+		require.NotNil(t, identity)
+		require.NoError(t, err)
+		message := new(testpb.TestSend)
+		err = node2.TellGrain(ctx, identity, message)
+		require.NoError(t, err)
+	}
+
+	util.Pause(time.Second)
+
+	for j := range 4 {
+		identity, err := node3.GrainIdentity(ctx, fmt.Sprintf("Grain-3%d", j), func(ctx context.Context) (Grain, error) {
+			return NewMockGrain(), nil
+		})
+		require.NotNil(t, identity)
+		require.NoError(t, err)
+		message := new(testpb.TestSend)
+		err = node3.TellGrain(ctx, identity, message)
+		require.NoError(t, err)
+	}
+
+	util.Pause(time.Second)
+
+	// take down node2
+	require.NoError(t, node2.Stop(ctx))
+	require.NoError(t, sd2.Close())
+
+	// Wait for cluster rebalancing
+	util.Pause(time.Minute)
+
+	identity, err := node3.GrainIdentity(ctx, "Grain-20", func(ctx context.Context) (Grain, error) {
+		return NewMockGrain(), nil
+	})
+	require.NotNil(t, identity)
+	require.NoError(t, err)
+
+	message := new(testpb.TestSend)
+	err = node3.TellGrain(ctx, identity, message)
+	require.NoError(t, err)
+
+	identity, err = node1.GrainIdentity(ctx, "Grain-21", func(ctx context.Context) (Grain, error) {
+		return NewMockGrain(), nil
+	})
+	require.NotNil(t, identity)
+	require.NoError(t, err)
+	message = new(testpb.TestSend)
+	err = node1.TellGrain(ctx, identity, message)
+	require.NoError(t, err)
+
+	identity, err = node3.GrainIdentity(ctx, "Grain-22", func(ctx context.Context) (Grain, error) {
+		return NewMockGrain(), nil
+	})
+	require.NotNil(t, identity)
+	require.NoError(t, err)
+	message = new(testpb.TestSend)
+	err = node3.TellGrain(ctx, identity, message)
+	require.NoError(t, err)
+
+	identity, err = node1.GrainIdentity(ctx, "Grain-23", func(ctx context.Context) (Grain, error) {
+		return NewMockGrain(), nil
+	})
+	require.NotNil(t, identity)
+	require.NoError(t, err)
+	message = new(testpb.TestSend)
+	err = node1.TellGrain(ctx, identity, message)
+	require.NoError(t, err)
+
+	identity, err = node1.GrainIdentity(ctx, "Grain-24", func(ctx context.Context) (Grain, error) {
+		return NewMockGrain(), nil
+	})
+	require.NotNil(t, identity)
+	require.NoError(t, err)
+	message = new(testpb.TestSend)
+	err = node1.TellGrain(ctx, identity, message)
+	require.NoError(t, err)
+
+	assert.NoError(t, node1.Stop(ctx))
+	assert.NoError(t, node3.Stop(ctx))
+	assert.NoError(t, sd1.Close())
+	assert.NoError(t, sd3.Close())
+	srv.Shutdown()
+}
+
+// nolint
+func TestPersistenceGrainsRebalancing(t *testing.T) {
+	// create a context
+	ctx := t.Context()
+	// start the NATS server
+	srv := startNatsServer(t)
+
+	// create the state store extension
+	stateStoreExtension := NewMockExtension()
+
+	// create and start a system cluster
+	node1, sd1 := testCluster(t, srv.Addr().String(), withMockExtension(stateStoreExtension))
+	require.NotNil(t, node1)
+	require.NotNil(t, sd1)
+
+	// create and start a system cluster
+	node2, sd2 := testCluster(t, srv.Addr().String(), withMockExtension(stateStoreExtension))
+	require.NotNil(t, node2)
+	require.NotNil(t, sd2)
+
+	// create and start a system cluster
+	node3, sd3 := testCluster(t, srv.Addr().String(), withMockExtension(stateStoreExtension))
+	require.NotNil(t, node3)
+	require.NotNil(t, sd3)
+
+	for j := range 4 {
+		identity, err := node1.GrainIdentity(ctx, fmt.Sprintf("Grain-1%d", j), func(ctx context.Context) (Grain, error) {
+			return NewMockPersistenceGrain(), nil
+		})
+		require.NotNil(t, identity)
+		require.NoError(t, err)
+
+		message := &testpb.CreateAccount{
+			AccountBalance: 500.00,
+		}
+		err = node1.TellGrain(ctx, identity, message)
+		require.NoError(t, err)
+	}
+
+	util.Pause(time.Second)
+
+	for j := range 5 {
+		identity, err := node2.GrainIdentity(ctx, fmt.Sprintf("Grain-2%d", j), func(ctx context.Context) (Grain, error) {
+			return NewMockPersistenceGrain(), nil
+		})
+		require.NotNil(t, identity)
+		require.NoError(t, err)
+		message := &testpb.CreateAccount{
+			AccountBalance: 500.00,
+		}
+		err = node2.TellGrain(ctx, identity, message)
+		require.NoError(t, err)
+	}
+
+	util.Pause(time.Second)
+
+	for j := range 4 {
+		identity, err := node3.GrainIdentity(ctx, fmt.Sprintf("Grain-3%d", j), func(ctx context.Context) (Grain, error) {
+			return NewMockPersistenceGrain(), nil
+		})
+		require.NotNil(t, identity)
+		require.NoError(t, err)
+		message := &testpb.CreateAccount{
+			AccountBalance: 500.00,
+		}
+		err = node3.TellGrain(ctx, identity, message)
+		require.NoError(t, err)
+	}
+
+	util.Pause(time.Second)
+
+	// take down node2
+	require.NoError(t, node2.Stop(ctx))
+	require.NoError(t, sd2.Close())
+
+	// Wait for cluster rebalancing
+	util.Pause(time.Minute)
+
+	message := &testpb.CreditAccount{
+		Balance: 500.00,
+	}
+
+	identity, err := node3.GrainIdentity(ctx, "Grain-20", func(ctx context.Context) (Grain, error) {
+		return NewMockPersistenceGrain(), nil
+	})
+	require.NotNil(t, identity)
+	require.NoError(t, err)
+
+	response, err := node3.AskGrain(ctx, identity, message, time.Second)
+	require.NoError(t, err)
+	require.NotNil(t, response)
+	actual := response.(*testpb.Account)
+	require.EqualValues(t, 1000.00, actual.GetAccountBalance())
+
+	identity, err = node1.GrainIdentity(ctx, "Grain-21", func(ctx context.Context) (Grain, error) {
+		return NewMockPersistenceGrain(), nil
+	})
+	require.NotNil(t, identity)
+	require.NoError(t, err)
+
+	response, err = node1.AskGrain(ctx, identity, message, time.Second)
+	require.NoError(t, err)
+	require.NotNil(t, response)
+	actual = response.(*testpb.Account)
+	require.EqualValues(t, 1000.00, actual.GetAccountBalance())
+
+	identity, err = node3.GrainIdentity(ctx, "Grain-22", func(ctx context.Context) (Grain, error) {
+		return NewMockPersistenceGrain(), nil
+	})
+	require.NotNil(t, identity)
+	require.NoError(t, err)
+	response, err = node3.AskGrain(ctx, identity, message, time.Second)
+	require.NoError(t, err)
+	require.NotNil(t, response)
+	actual = response.(*testpb.Account)
+	require.EqualValues(t, 1000.00, actual.GetAccountBalance())
+
+	identity, err = node1.GrainIdentity(ctx, "Grain-23", func(ctx context.Context) (Grain, error) {
+		return NewMockPersistenceGrain(), nil
+	})
+	require.NotNil(t, identity)
+	require.NoError(t, err)
+	response, err = node1.AskGrain(ctx, identity, message, time.Second)
+	require.NoError(t, err)
+	require.NotNil(t, response)
+	actual = response.(*testpb.Account)
+	require.EqualValues(t, 1000.00, actual.GetAccountBalance())
+
+	identity, err = node1.GrainIdentity(ctx, "Grain-24", func(ctx context.Context) (Grain, error) {
+		return NewMockPersistenceGrain(), nil
+	})
+	require.NotNil(t, identity)
+	require.NoError(t, err)
+	response, err = node1.AskGrain(ctx, identity, message, time.Second)
+	require.NoError(t, err)
+	require.NotNil(t, response)
+	actual = response.(*testpb.Account)
+	require.EqualValues(t, 1000.00, actual.GetAccountBalance())
+
+	assert.NoError(t, node1.Stop(ctx))
+	assert.NoError(t, node3.Stop(ctx))
+	assert.NoError(t, sd1.Close())
+	assert.NoError(t, sd3.Close())
+	srv.Shutdown()
+}

@@ -54,7 +54,7 @@ func TestSingleNode(t *testing.T) {
 		// create the context
 		ctx := context.TODO()
 
-		// generate the ports for the single startNode
+		// generate the ports for the single node
 		nodePorts := dynaport.Get(3)
 		gossipPort := nodePorts[0]
 		clusterPort := nodePorts[1]
@@ -75,7 +75,7 @@ func TestSingleNode(t *testing.T) {
 		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
 		provider.EXPECT().Close().Return(nil)
 
-		// create a Node startNode
+		// create a Node node
 		host := "127.0.0.1"
 
 		hostNode := discovery.Node{
@@ -91,18 +91,18 @@ func TestSingleNode(t *testing.T) {
 		require.NotNil(t, cluster)
 		require.NoError(t, err)
 
-		// start the Node startNode
+		// start the Node node
 		err = cluster.Start(ctx)
 		require.NoError(t, err)
 
 		hostNodeAddr := cluster.node.Host
 		assert.Equal(t, host, hostNodeAddr)
 
-		//  shutdown the Node startNode
+		//  shutdown the Node node
 		ctx, cancel := context.WithTimeout(ctx, time.Second)
 		defer cancel()
 
-		// stop the startNode
+		// stop the node
 		require.NoError(t, cluster.Stop(ctx))
 		provider.AssertExpectations(t)
 	})
@@ -110,7 +110,7 @@ func TestSingleNode(t *testing.T) {
 		// create the context
 		ctx := context.TODO()
 
-		// generate the ports for the single startNode
+		// generate the ports for the single node
 		nodePorts := dynaport.Get(3)
 		gossipPort := nodePorts[0]
 		clusterPort := nodePorts[1]
@@ -131,7 +131,7 @@ func TestSingleNode(t *testing.T) {
 		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
 		provider.EXPECT().Close().Return(nil)
 
-		// create a Node startNode
+		// create a Node
 		host := "127.0.0.1"
 		hostNode := discovery.Node{
 			Name:          host,
@@ -145,7 +145,7 @@ func TestSingleNode(t *testing.T) {
 		require.NotNil(t, cluster)
 		require.NoError(t, err)
 
-		// start the Node startNode
+		// start the Node
 		err = cluster.Start(ctx)
 		require.NoError(t, err)
 
@@ -180,10 +180,10 @@ func TestSingleNode(t *testing.T) {
 		require.Nil(t, actual)
 		assert.ErrorIs(t, err, ErrActorNotFound)
 
-		//  shutdown the Node startNode
+		//  shutdown the Node
 		util.Pause(time.Second)
 
-		// stop the startNode
+		// stop the node
 		require.NoError(t, cluster.Stop(ctx))
 		provider.AssertExpectations(t)
 	})
@@ -191,7 +191,7 @@ func TestSingleNode(t *testing.T) {
 		// create the context
 		ctx := context.TODO()
 
-		// generate the ports for the single startNode
+		// generate the ports for the single node
 		nodePorts := dynaport.Get(3)
 		gossipPort := nodePorts[0]
 		peersPort := nodePorts[1]
@@ -212,7 +212,7 @@ func TestSingleNode(t *testing.T) {
 		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
 		provider.EXPECT().Close().Return(nil)
 
-		// create a Node startNode
+		// create a Node
 		host := "127.0.0.1"
 		hostNode := discovery.Node{
 			Name:          host,
@@ -227,7 +227,7 @@ func TestSingleNode(t *testing.T) {
 		require.NotNil(t, cluster)
 		require.NoError(t, err)
 
-		// start the Node startNode
+		// start the Node
 		err = cluster.Start(ctx)
 		require.NoError(t, err)
 
@@ -261,7 +261,7 @@ func TestSingleNode(t *testing.T) {
 		// create the context
 		ctx := context.TODO()
 
-		// generate the ports for the single startNode
+		// generate the ports for the single node
 		nodePorts := dynaport.Get(3)
 		gossipPort := nodePorts[0]
 		clusterPort := nodePorts[1]
@@ -270,7 +270,7 @@ func TestSingleNode(t *testing.T) {
 		// mock the discovery provider
 		provider := new(testkit.Provider)
 
-		// create a Node startNode
+		// create a Node
 		host := "127.0.0.1"
 
 		hostNode := discovery.Node{
@@ -310,14 +310,14 @@ func TestSingleNode(t *testing.T) {
 		require.NotZero(t, partition)
 		require.EqualValues(t, -1, partition)
 
-		// stop the startNode
+		// stop the node
 		require.NoError(t, cluster.Stop(ctx))
 	})
 	t.Run("With Put/RemoveKind and LookupKind", func(t *testing.T) {
 		// create the context
 		ctx := context.TODO()
 
-		// generate the ports for the single startNode
+		// generate the ports for the single node
 		nodePorts := dynaport.Get(3)
 		discoveryPort := nodePorts[0]
 		clusterPort := nodePorts[1]
@@ -338,7 +338,7 @@ func TestSingleNode(t *testing.T) {
 		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
 		provider.EXPECT().Close().Return(nil)
 
-		// create a Node startNode
+		// create a Node
 		host := "127.0.0.1"
 		hostNode := discovery.Node{
 			Name:          host,
@@ -352,7 +352,7 @@ func TestSingleNode(t *testing.T) {
 		require.NotNil(t, cluster)
 		require.NoError(t, err)
 
-		// start the Node startNode
+		// start the Node
 		err = cluster.Start(ctx)
 		require.NoError(t, err)
 
@@ -382,10 +382,258 @@ func TestSingleNode(t *testing.T) {
 		require.NoError(t, err)
 		require.Empty(t, actual)
 
-		//  shutdown the Node startNode
+		//  shutdown the Node
 		util.Pause(time.Second)
 
-		// stop the startNode
+		// stop the node
+		require.NoError(t, cluster.Stop(ctx))
+		provider.AssertExpectations(t)
+	})
+	t.Run("With PutGrain and GetGrain", func(t *testing.T) {
+		// create the context
+		ctx := t.Context()
+
+		// generate the ports for the single node
+		nodePorts := dynaport.Get(3)
+		discoveryPort := nodePorts[0]
+		clusterPort := nodePorts[1]
+		remotingPort := nodePorts[2]
+
+		// define discovered addresses
+		addrs := []string{
+			fmt.Sprintf("127.0.0.1:%d", discoveryPort),
+		}
+
+		// mock the discovery provider
+		provider := new(testkit.Provider)
+
+		provider.EXPECT().ID().Return("testDisco")
+		provider.EXPECT().Initialize().Return(nil)
+		provider.EXPECT().Register().Return(nil)
+		provider.EXPECT().Deregister().Return(nil)
+		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
+		provider.EXPECT().Close().Return(nil)
+
+		// create a Node
+		host := "127.0.0.1"
+		hostNode := discovery.Node{
+			Name:          host,
+			Host:          host,
+			DiscoveryPort: discoveryPort,
+			PeersPort:     clusterPort,
+			RemotingPort:  remotingPort,
+		}
+
+		cluster, err := NewEngine("test", provider, &hostNode, WithLogger(log.DiscardLogger))
+		require.NotNil(t, cluster)
+		require.NoError(t, err)
+
+		// start the Node
+		err = cluster.Start(ctx)
+		require.NoError(t, err)
+
+		// create an grain
+		identity := "grainKind/grainName"
+		grain := &internalpb.Grain{
+			GrainId: &internalpb.GrainId{
+				Kind:  "grainKind",
+				Name:  "grainName",
+				Value: identity,
+			},
+			Host: host,
+			Port: int32(remotingPort),
+		}
+
+		// replicate the grain in the Node
+		err = cluster.PutGrain(ctx, grain)
+		require.NoError(t, err)
+
+		// fetch the grain
+		actual, err := cluster.GetGrain(ctx, identity)
+		require.NoError(t, err)
+		require.NotNil(t, actual)
+		require.True(t, proto.Equal(grain, actual))
+
+		//  fetch non-existing actor
+		fakeActorName := "fake"
+		actual, err = cluster.GetGrain(ctx, fakeActorName)
+		require.Nil(t, actual)
+		require.ErrorIs(t, err, ErrGrainNotFound)
+
+		//  shutdown the Node
+		util.Pause(time.Second)
+
+		// stop the node
+		require.NoError(t, cluster.Stop(ctx))
+		provider.AssertExpectations(t)
+	})
+	t.Run("With PutGrain and GetGrain when NotRunning", func(t *testing.T) {
+		// create the context
+		ctx := t.Context()
+
+		// generate the ports for the single node
+		nodePorts := dynaport.Get(3)
+		gossipPort := nodePorts[0]
+		clusterPort := nodePorts[1]
+		remotingPort := nodePorts[2]
+
+		// mock the discovery provider
+		provider := new(testkit.Provider)
+
+		// create a Node
+		host := "127.0.0.1"
+
+		hostNode := discovery.Node{
+			Name:          host,
+			Host:          host,
+			DiscoveryPort: gossipPort,
+			PeersPort:     clusterPort,
+			RemotingPort:  remotingPort,
+		}
+
+		logger := log.DiscardLogger
+		cluster, err := NewEngine("test", provider, &hostNode, WithLogger(logger))
+		require.NotNil(t, cluster)
+		require.NoError(t, err)
+
+		// create an grain
+		identity := "grainKind/grainName"
+		grain := &internalpb.Grain{
+			GrainId: &internalpb.GrainId{
+				Kind:  "grainKind",
+				Name:  "grainName",
+				Value: identity,
+			},
+			Host: host,
+			Port: int32(remotingPort),
+		}
+
+		// replicate the grain in the Node
+		err = cluster.PutGrain(ctx, grain)
+		require.Error(t, err)
+		require.ErrorIs(t, err, ErrEngineNotRunning)
+
+		// fetch the grain
+		actual, err := cluster.GetGrain(ctx, identity)
+		require.Error(t, err)
+		require.Nil(t, actual)
+		require.ErrorIs(t, err, ErrEngineNotRunning)
+
+		// stop the node
+		require.NoError(t, cluster.Stop(ctx))
+		provider.AssertExpectations(t)
+	})
+	t.Run("With GetGrain when decoding failed", func(t *testing.T) {
+		// create the context
+		ctx := t.Context()
+
+		// generate the ports for the single node
+		nodePorts := dynaport.Get(3)
+		discoveryPort := nodePorts[0]
+		clusterPort := nodePorts[1]
+		remotingPort := nodePorts[2]
+
+		// define discovered addresses
+		addrs := []string{
+			fmt.Sprintf("127.0.0.1:%d", discoveryPort),
+		}
+
+		// mock the discovery provider
+		provider := new(testkit.Provider)
+
+		provider.EXPECT().ID().Return("testDisco")
+		provider.EXPECT().Initialize().Return(nil)
+		provider.EXPECT().Register().Return(nil)
+		provider.EXPECT().Deregister().Return(nil)
+		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
+		provider.EXPECT().Close().Return(nil)
+
+		// create a Node
+		host := "127.0.0.1"
+		hostNode := discovery.Node{
+			Name:          host,
+			Host:          host,
+			DiscoveryPort: discoveryPort,
+			PeersPort:     clusterPort,
+			RemotingPort:  remotingPort,
+		}
+
+		cluster, err := NewEngine("test", provider, &hostNode, WithLogger(log.DiscardLogger))
+		require.NotNil(t, cluster)
+		require.NoError(t, err)
+
+		// start the Node
+		err = cluster.Start(ctx)
+		require.NoError(t, err)
+
+		// create an grain
+		identity := "grainKind/grainName"
+
+		// replicate the grain in the Node
+		err = cluster.grainsMap.Put(ctx, identity, []byte("invalid grain data"))
+		require.NoError(t, err)
+
+		// fetch the grain
+		actual, err := cluster.GetGrain(ctx, identity)
+		require.Error(t, err)
+		require.Nil(t, actual)
+
+		// stop the node
+		require.NoError(t, cluster.Stop(ctx))
+		provider.AssertExpectations(t)
+	})
+	t.Run("With GetActor when decoding failed", func(t *testing.T) {
+		// create the context
+		ctx := t.Context()
+
+		// generate the ports for the single node
+		nodePorts := dynaport.Get(3)
+		discoveryPort := nodePorts[0]
+		clusterPort := nodePorts[1]
+		remotingPort := nodePorts[2]
+
+		// define discovered addresses
+		addrs := []string{
+			fmt.Sprintf("127.0.0.1:%d", discoveryPort),
+		}
+
+		// mock the discovery provider
+		provider := new(testkit.Provider)
+
+		provider.EXPECT().ID().Return("testDisco")
+		provider.EXPECT().Initialize().Return(nil)
+		provider.EXPECT().Register().Return(nil)
+		provider.EXPECT().Deregister().Return(nil)
+		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
+		provider.EXPECT().Close().Return(nil)
+
+		// create a Node
+		host := "127.0.0.1"
+		hostNode := discovery.Node{
+			Name:          host,
+			Host:          host,
+			DiscoveryPort: discoveryPort,
+			PeersPort:     clusterPort,
+			RemotingPort:  remotingPort,
+		}
+
+		cluster, err := NewEngine("test", provider, &hostNode, WithLogger(log.DiscardLogger))
+		require.NotNil(t, cluster)
+		require.NoError(t, err)
+
+		// start the Node
+		err = cluster.Start(ctx)
+		require.NoError(t, err)
+
+		actorName := "actorName"
+		err = cluster.actorsMap.Put(ctx, actorName, []byte("invalid grain data"))
+		require.NoError(t, err)
+
+		actual, err := cluster.GetActor(ctx, actorName)
+		require.Error(t, err)
+		require.Nil(t, actual)
+
+		// stop the node
 		require.NoError(t, cluster.Stop(ctx))
 		provider.AssertExpectations(t)
 	})
@@ -470,16 +718,42 @@ func TestMultipleNodes(t *testing.T) {
 		// wait for some time
 		util.Pause(time.Second)
 
+		identity := "grainKind/grainName"
+		grain := &internalpb.Grain{
+			GrainId: &internalpb.GrainId{
+				Kind:  "grainKind",
+				Name:  "grainName",
+				Value: identity,
+			},
+			Host: node2.node.Host,
+			Port: int32(node2.node.RemotingPort),
+		}
+
+		// replicate the grain in the Node
+		err = node2.PutGrain(ctx, grain)
+		require.NoError(t, err)
+
 		// get the actor from node1 and node3
 		actual, err := node1.GetActor(ctx, actorName)
 		require.NoError(t, err)
 		require.NotNil(t, actual)
 		require.True(t, proto.Equal(actor, actual))
 
+		// fetch the grain
+		actualGrain, err := node1.GetGrain(ctx, identity)
+		require.NoError(t, err)
+		require.NotNil(t, actualGrain)
+		require.True(t, proto.Equal(grain, actualGrain))
+
 		actual, err = node3.GetActor(ctx, actorName)
 		require.NoError(t, err)
 		require.NotNil(t, actual)
 		require.True(t, proto.Equal(actor, actual))
+
+		actualGrain, err = node3.GetGrain(ctx, identity)
+		require.NoError(t, err)
+		require.NotNil(t, actualGrain)
+		require.True(t, proto.Equal(grain, actualGrain))
 
 		// put another actor
 		actorName2 := uuid.NewString()
@@ -623,6 +897,21 @@ func TestMultipleNodes(t *testing.T) {
 		err = node2.PutActor(ctx, actor)
 		require.NoError(t, err)
 
+		identity := "grainKind/grainName"
+		grain := &internalpb.Grain{
+			GrainId: &internalpb.GrainId{
+				Kind:  "grainKind",
+				Name:  "grainName",
+				Value: identity,
+			},
+			Host: node2.node.Host,
+			Port: int32(node2.node.RemotingPort),
+		}
+
+		// replicate the grain in the Node
+		err = node2.PutGrain(ctx, grain)
+		require.NoError(t, err)
+
 		// wait for some time
 		util.Pause(time.Second)
 
@@ -632,10 +921,21 @@ func TestMultipleNodes(t *testing.T) {
 		require.NotNil(t, actual)
 		require.True(t, proto.Equal(actor, actual))
 
+		// fetch the grain
+		actualGrain, err := node1.GetGrain(ctx, identity)
+		require.NoError(t, err)
+		require.NotNil(t, actualGrain)
+		require.True(t, proto.Equal(grain, actualGrain))
+
 		actual, err = node3.GetActor(ctx, actorName)
 		require.NoError(t, err)
 		require.NotNil(t, actual)
 		require.True(t, proto.Equal(actor, actual))
+
+		actualGrain, err = node3.GetGrain(ctx, identity)
+		require.NoError(t, err)
+		require.NotNil(t, actualGrain)
+		require.True(t, proto.Equal(grain, actualGrain))
 
 		// put another actor
 		actorName2 := uuid.NewString()
@@ -730,13 +1030,13 @@ func startEngine(t *testing.T, nodeName, serverAddr string) (*Engine, discovery.
 	// create a context
 	ctx := context.TODO()
 
-	// generate the ports for the single startNode
+	// generate the ports for the single node
 	nodePorts := dynaport.Get(3)
 	gossipPort := nodePorts[0]
 	clusterPort := nodePorts[1]
 	remotingPort := nodePorts[2]
 
-	// create a Cluster startNode
+	// create a Cluster node
 	host := "127.0.0.1"
 	// create the various config option
 	applicationName := "accounts"
@@ -764,7 +1064,7 @@ func startEngine(t *testing.T, nodeName, serverAddr string) (*Engine, discovery.
 	// create the instance of provider
 	provider := nats.NewDiscovery(&config)
 
-	// create the startNode
+	// create the node
 	engine, err := NewEngine(nodeName, provider, &hostNode, WithLogger(log.DiscardLogger))
 	require.NoError(t, err)
 	require.NotNil(t, engine)
@@ -772,7 +1072,7 @@ func startEngine(t *testing.T, nodeName, serverAddr string) (*Engine, discovery.
 	// start the node
 	require.NoError(t, engine.Start(ctx))
 
-	// return the cluster startNode
+	// return the cluster node
 	return engine, provider
 }
 
@@ -780,13 +1080,13 @@ func startEngineWithTLS(t *testing.T, nodeName, serverAddr string, conf autotls.
 	// create a context
 	ctx := context.TODO()
 
-	// generate the ports for the single startNode
+	// generate the ports for the single node
 	nodePorts := dynaport.Get(3)
 	gossipPort := nodePorts[0]
 	clusterPort := nodePorts[1]
 	remotingPort := nodePorts[2]
 
-	// create a Cluster startNode
+	// create a Cluster node
 	host := "127.0.0.1"
 	// create the various config option
 	applicationName := "accounts"
@@ -814,7 +1114,7 @@ func startEngineWithTLS(t *testing.T, nodeName, serverAddr string, conf autotls.
 	// create the instance of provider
 	provider := nats.NewDiscovery(&config)
 
-	// create the startNode
+	// create the node
 	engine, err := NewEngine(nodeName, provider, &hostNode,
 		WithTLS(conf.ServerTLS, conf.ClientTLS),
 		WithLogger(log.DiscardLogger))
@@ -824,6 +1124,6 @@ func startEngineWithTLS(t *testing.T, nodeName, serverAddr string, conf autotls.
 	// start the node
 	require.NoError(t, engine.Start(ctx))
 
-	// return the cluster startNode
+	// return the cluster node
 	return engine, provider
 }
