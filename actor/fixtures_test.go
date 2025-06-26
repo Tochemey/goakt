@@ -1122,3 +1122,28 @@ func (m *MockPersistenceGrain) recoverFromStore() error {
 
 	return nil
 }
+
+type MockPanickingGrain struct{}
+
+func NewMockPanickingGrain() *MockPanickingGrain {
+	return &MockPanickingGrain{}
+}
+
+// OnActivate implements Grain.
+// nolint
+func (m *MockPanickingGrain) OnActivate(ctx context.Context, props *GrainProps) error {
+	return nil
+}
+
+// OnDeactivate implements Grain.
+// nolint
+func (m *MockPanickingGrain) OnDeactivate(ctx context.Context, props *GrainProps) error {
+	return nil
+}
+
+// OnReceive implements Grain.
+func (m *MockPanickingGrain) OnReceive(ctx *GrainContext) {
+	panic("test panic")
+}
+
+var _ Grain = (*MockPanickingGrain)(nil)
