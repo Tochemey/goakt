@@ -1142,6 +1142,7 @@ func (m *MockPanickingGrain) OnDeactivate(ctx context.Context, props *GrainProps
 }
 
 // OnReceive implements Grain.
+// nolint
 func (m *MockPanickingGrain) OnReceive(ctx *GrainContext) {
 	panic("test panic")
 }
