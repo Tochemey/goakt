@@ -475,7 +475,6 @@ func TestSingleNode(t *testing.T) {
 		require.NoError(t, cluster.Stop(ctx))
 		provider.AssertExpectations(t)
 	})
-
 	t.Run("With RemoveGrain", func(t *testing.T) {
 		// create the context
 		ctx := t.Context()
@@ -725,6 +724,49 @@ func TestSingleNode(t *testing.T) {
 		actual, err := cluster.GetActor(ctx, actorName)
 		require.Error(t, err)
 		require.Nil(t, actual)
+
+		// stop the node
+		require.NoError(t, cluster.Stop(ctx))
+		provider.AssertExpectations(t)
+	})
+	t.Run("With RemoveGrain/GrainExists when cluster engine is not running", func(t *testing.T) {
+		// create the context
+		ctx := t.Context()
+
+		// generate the ports for the single node
+		nodePorts := dynaport.Get(3)
+		discoveryPort := nodePorts[0]
+		clusterPort := nodePorts[1]
+		remotingPort := nodePorts[2]
+
+		// mock the discovery provider
+		provider := new(testkit.Provider)
+
+		// create a Node
+		host := "127.0.0.1"
+		hostNode := discovery.Node{
+			Name:          host,
+			Host:          host,
+			DiscoveryPort: discoveryPort,
+			PeersPort:     clusterPort,
+			RemotingPort:  remotingPort,
+		}
+
+		cluster, err := NewEngine("test", provider, &hostNode, WithLogger(log.DiscardLogger))
+		require.NotNil(t, cluster)
+		require.NoError(t, err)
+
+		// create an grain
+		identity := "grainKind/grainName"
+		exists, err := cluster.GrainExists(ctx, identity)
+		require.Error(t, err)
+		require.ErrorIs(t, err, ErrEngineNotRunning)
+		require.False(t, exists)
+
+		// let us remove the grain
+		err = cluster.RemoveGrain(ctx, identity)
+		require.Error(t, err)
+		require.ErrorIs(t, err, ErrEngineNotRunning)
 
 		// stop the node
 		require.NoError(t, cluster.Stop(ctx))

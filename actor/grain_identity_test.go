@@ -95,4 +95,12 @@ func TestIdentity(t *testing.T) {
 		identity2 := newGrainIdentity(grain, name2)
 		require.False(t, identity1.Equal(identity2), "expected identities to be unequal")
 	})
+	t.Run("With Nil identity", func(t *testing.T) {
+		grain := NewMockGrain()
+		name1 := "testGrain1"
+		identity1 := newGrainIdentity(grain, name1)
+		var identity2 *GrainIdentity
+		require.False(t, identity1.Equal(identity2), "expected identity to not equal nil")
+		require.Empty(t, identity2.String())
+	})
 }

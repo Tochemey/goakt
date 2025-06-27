@@ -113,9 +113,6 @@ func (r *reflection) NewGrain(kind string) (Grain, error) {
 	}
 
 	instance := reflect.New(rtype)
-	grain, ok := instance.Interface().(Grain)
-	if !ok {
-		return nil, ErrInvalidInstance
-	}
+	grain := instance.Interface().(Grain)
 	return grain, nil
 }
