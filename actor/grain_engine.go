@@ -51,6 +51,7 @@ import (
 //   - ctx: Context for cancellation and timeout control.
 //   - name: The unique name identifying the Grain.
 //   - factory: A function that creates a new Grain instance if activation is required.
+//   - opts: Optional configuration options for the Grain (e.g., activation timeout, retries).
 //
 // Returns:
 //   - *GrainIdentity: The identity object representing the located or newly activated Grain.
@@ -59,7 +60,7 @@ import (
 // Note:
 //   - This method abstracts away the details of Grain lifecycle management.
 //   - Use this to obtain a reference to a Grain for message passing or further operations.
-func (x *actorSystem) GrainIdentity(ctx context.Context, name string, factory func(ctx context.Context) (Grain, error)) (*GrainIdentity, error) {
+func (x *actorSystem) GrainIdentity(ctx context.Context, name string, factory func(ctx context.Context) (Grain, error), opts ...GrainOption) (*GrainIdentity, error) {
 	if !x.started.Load() || x.isShuttingDown() {
 		return nil, ErrActorSystemNotStarted
 	}
@@ -81,6 +82,8 @@ func (x *actorSystem) GrainIdentity(ctx context.Context, name string, factory fu
 	if isReservedName(identity.Name()) {
 		return nil, NewErrReservedName(identity.String())
 	}
+
+	config := newGrainConfig(opts...)
 
 	if x.InCluster() {
 		grainInfo, err := x.getCluster().GetGrain(ctx, identity.String())
@@ -105,7 +108,7 @@ func (x *actorSystem) GrainIdentity(ctx context.Context, name string, factory fu
 
 	process, ok := x.grains.Get(*identity)
 	if !ok {
-		process = newGrainPID(identity, grain, x)
+		process = newGrainPID(identity, grain, x, config)
 	}
 
 	if !x.registry.Exists(grain) {
@@ -499,7 +502,12 @@ func (x *actorSystem) recreateGrain(ctx context.Context, serializedGrain *intern
 	}
 
 	// Create and activate the grain process
-	process := newGrainPID(identity, grain, x)
+	config := newGrainConfig(
+		WithGrainInitTimeout(serializedGrain.GetActivationTimeout().AsDuration()),
+		WithGrainInitMaxRetries(int(serializedGrain.GetActivationRetries())),
+	)
+
+	process := newGrainPID(identity, grain, x, config)
 	if err := process.activate(ctx); err != nil {
 		return err
 	}

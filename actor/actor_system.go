@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (c2) 2022-2025  Arsene Tochemey Gandote
+ * Copyright (c) 2022-2025  Arsene Tochemey Gandote
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -53,6 +53,7 @@ import (
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
+	"google.golang.org/protobuf/types/known/durationpb"
 
 	"github.com/tochemey/goakt/v3/address"
 	"github.com/tochemey/goakt/v3/discovery"
@@ -479,6 +480,7 @@ type ActorSystem interface { //nolint:revive
 	//   - ctx: Context for cancellation and timeout control.
 	//   - name: The unique name identifying the Grain.
 	//   - factory: A function that creates a new Grain instance if activation is required.
+	//	 - opts: Optional GrainOptions to customize the Grain's activation behavior (e.g., activation timeout, retries).
 	//
 	// Returns:
 	//   - *GrainIdentity: The identity object representing the located or newly activated Grain.
@@ -487,7 +489,7 @@ type ActorSystem interface { //nolint:revive
 	// Note:
 	//   - This method abstracts away the details of Grain lifecycle management.
 	//   - Use this to obtain a reference to a Grain for message passing or further operations.
-	GrainIdentity(ctx context.Context, name string, factory func(ctx context.Context) (Grain, error)) (*GrainIdentity, error)
+	GrainIdentity(ctx context.Context, name string, factory func(ctx context.Context) (Grain, error), opts ...GrainOption) (*GrainIdentity, error)
 	// AskGrain sends a synchronous request message to a Grain (virtual actor) identified by the given identity.
 	//
 	// This method locates or activates the target Grain (locally or in the cluster), sends the provided
@@ -2282,9 +2284,11 @@ func (x *actorSystem) putGrainOnCluster(pid *grainPID) error {
 				Name:  pid.identity.Name(),
 				Value: pid.identity.String(),
 			},
-			Host:         x.Host(),
-			Port:         int32(x.Port()),
-			Dependencies: dependencies,
+			Host:              x.Host(),
+			Port:              int32(x.Port()),
+			Dependencies:      dependencies,
+			ActivationTimeout: durationpb.New(pid.config.initTimeout.Load()),
+			ActivationRetries: pid.config.initMaxRetries.Load(),
 		}
 	}
 	return nil

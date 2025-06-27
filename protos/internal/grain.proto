@@ -2,6 +2,7 @@ syntax = "proto3";
 
 package internalpb;
 
+import "google/protobuf/duration.proto";
 import "internal/dependency.proto";
 
 option go_package = "github.com/tochemey/goakt/v3/internal/internalpb;internalpb";
@@ -18,4 +19,6 @@ message Grain {
   string host = 2;
   int32 port = 3;
   repeated internalpb.Dependency dependencies = 4;
+  google.protobuf.Duration activation_timeout = 5;
+  int32 activation_retries = 6;
 }

@@ -248,8 +248,10 @@ func TestGrain(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, identity)
 
+		var message proto.Message
+
 		// send a message to the grain
-		message := new(testpb.TestSend)
+		message = new(testpb.TestSend)
 		response, err := testSystem.AskGrain(ctx, identity, message, time.Second)
 		require.Error(t, err)
 		require.Nil(t, response)
@@ -260,6 +262,12 @@ func TestGrain(t *testing.T) {
 		require.True(t, ok)
 		require.NotNil(t, gp)
 		require.True(t, gp.isActive())
+
+		message = new(testpb.TestReply)
+		response, err = testSystem.AskGrain(ctx, identity, message, time.Second)
+		require.Error(t, err)
+		require.Nil(t, response)
+		require.ErrorContains(t, err, "test panic") // we expect the panic to be caught and returned as an error
 
 		require.NoError(t, testSystem.Stop(ctx))
 	})
@@ -285,7 +293,6 @@ func TestGrain(t *testing.T) {
 
 		require.NoError(t, testSystem.Stop(ctx))
 	})
-
 	t.Run("With deactivation error", func(t *testing.T) {
 		ctx := t.Context()
 		testSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))

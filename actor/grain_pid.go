@@ -44,11 +44,7 @@ import (
 type grainPID struct {
 	grain    Grain
 	identity *GrainIdentity
-
-	initMaxRetries atomic.Int32
-
-	initTimeout atomic.Duration
-	mailbox     *grainMailbox
+	mailbox  *grainMailbox
 
 	latestReceiveTime atomic.Time
 
@@ -67,10 +63,11 @@ type grainPID struct {
 	// the list of dependencies
 	dependencies *collection.Map[string, extension.Dependency]
 	activated    *atomic.Bool
+	config       *grainConfig
 }
 
-func newGrainPID(identity *GrainIdentity, grain Grain, actorSystem ActorSystem) *grainPID {
-	process := &grainPID{
+func newGrainPID(identity *GrainIdentity, grain Grain, actorSystem ActorSystem, config *grainConfig) *grainPID {
+	pid := &grainPID{
 		grain:             grain,
 		identity:          identity,
 		mailbox:           newGrainMailbox(),
@@ -81,13 +78,12 @@ func newGrainPID(identity *GrainIdentity, grain Grain, actorSystem ActorSystem) 
 		dependencies:      collection.NewMap[string, extension.Dependency](),
 		activated:         atomic.NewBool(false),
 		latestReceiveTime: atomic.Time{},
+		config:            config,
 	}
 
-	process.initMaxRetries.Store(DefaultInitMaxRetries)
-	process.initTimeout.Store(DefaultInitTimeout)
-	process.processing.Store(idle)
+	pid.processing.Store(idle)
 
-	return process
+	return pid
 }
 
 // activate activates the Grain
@@ -95,18 +91,15 @@ func (pid *grainPID) activate(ctx context.Context) error {
 	logger := pid.logger
 	logger.Infof("Activating Grain %s ...", pid.identity.String())
 
-	cctx, cancel := context.WithTimeout(ctx, pid.initTimeout.Load())
-	retrier := retry.NewRetrier(int(pid.initMaxRetries.Load()), time.Millisecond, pid.initTimeout.Load())
+	retries := pid.config.initMaxRetries.Load()
+	timeout := pid.config.initTimeout.Load()
 
-	if err := retrier.RunContext(cctx, func(_ context.Context) error {
-		return pid.grain.OnActivate(cctx, newGrainProps(pid.identity, pid.actorSystem))
+	cctx, cancel := context.WithTimeout(ctx, timeout)
+	retrier := retry.NewRetrier(int(retries), timeout, timeout)
+
+	if err := retrier.RunContext(cctx, func(ctx context.Context) error {
+		return pid.grain.OnActivate(ctx, newGrainProps(pid.identity, pid.actorSystem))
 	}); err != nil {
-		if errors.Is(err, context.DeadlineExceeded) {
-			cancel()
-			pid.logger.Errorf("Grain %s activation timed out.", pid.identity.String())
-			return ErrGrainActivationTimeout
-		}
-
 		cancel()
 		pid.logger.Errorf("Grain %s activation failed.", pid.identity.String())
 		return NewErrGrainActivationFailure(err)
@@ -151,9 +144,7 @@ func (pid *grainPID) isActive() bool {
 // and signals the receiveLoop to process it
 func (pid *grainPID) receive(grainContext *GrainContext) {
 	if pid.isActive() {
-		if err := pid.mailbox.Enqueue(grainContext); err != nil {
-			pid.logger.Warn(err)
-		}
+		pid.mailbox.Enqueue(grainContext)
 		pid.schedule()
 	}
 }

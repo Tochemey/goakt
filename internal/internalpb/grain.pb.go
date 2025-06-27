@@ -9,6 +9,7 @@ package internalpb
 import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	durationpb "google.golang.org/protobuf/types/known/durationpb"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
@@ -83,13 +84,15 @@ func (x *GrainId) GetValue() string {
 
 // Grain represents the virtual actor information on the wire.
 type Grain struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	GrainId       *GrainId               `protobuf:"bytes,1,opt,name=grain_id,json=grainId,proto3" json:"grain_id,omitempty"`
-	Host          string                 `protobuf:"bytes,2,opt,name=host,proto3" json:"host,omitempty"`
-	Port          int32                  `protobuf:"varint,3,opt,name=port,proto3" json:"port,omitempty"`
-	Dependencies  []*Dependency          `protobuf:"bytes,4,rep,name=dependencies,proto3" json:"dependencies,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	GrainId           *GrainId               `protobuf:"bytes,1,opt,name=grain_id,json=grainId,proto3" json:"grain_id,omitempty"`
+	Host              string                 `protobuf:"bytes,2,opt,name=host,proto3" json:"host,omitempty"`
+	Port              int32                  `protobuf:"varint,3,opt,name=port,proto3" json:"port,omitempty"`
+	Dependencies      []*Dependency          `protobuf:"bytes,4,rep,name=dependencies,proto3" json:"dependencies,omitempty"`
+	ActivationTimeout *durationpb.Duration   `protobuf:"bytes,5,opt,name=activation_timeout,json=activationTimeout,proto3" json:"activation_timeout,omitempty"`
+	ActivationRetries int32                  `protobuf:"varint,6,opt,name=activation_retries,json=activationRetries,proto3" json:"activation_retries,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *Grain) Reset() {
@@ -150,21 +153,37 @@ func (x *Grain) GetDependencies() []*Dependency {
 	return nil
 }
 
+func (x *Grain) GetActivationTimeout() *durationpb.Duration {
+	if x != nil {
+		return x.ActivationTimeout
+	}
+	return nil
+}
+
+func (x *Grain) GetActivationRetries() int32 {
+	if x != nil {
+		return x.ActivationRetries
+	}
+	return 0
+}
+
 var File_internal_grain_proto protoreflect.FileDescriptor
 
 const file_internal_grain_proto_rawDesc = "" +
 	"\n" +
 	"\x14internal/grain.proto\x12\n" +
-	"internalpb\x1a\x19internal/dependency.proto\"G\n" +
+	"internalpb\x1a\x1egoogle/protobuf/duration.proto\x1a\x19internal/dependency.proto\"G\n" +
 	"\aGrainId\x12\x12\n" +
 	"\x04kind\x18\x01 \x01(\tR\x04kind\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x14\n" +
-	"\x05value\x18\x03 \x01(\tR\x05value\"\x9b\x01\n" +
+	"\x05value\x18\x03 \x01(\tR\x05value\"\x94\x02\n" +
 	"\x05Grain\x12.\n" +
 	"\bgrain_id\x18\x01 \x01(\v2\x13.internalpb.GrainIdR\agrainId\x12\x12\n" +
 	"\x04host\x18\x02 \x01(\tR\x04host\x12\x12\n" +
 	"\x04port\x18\x03 \x01(\x05R\x04port\x12:\n" +
-	"\fdependencies\x18\x04 \x03(\v2\x16.internalpb.DependencyR\fdependenciesB\xa3\x01\n" +
+	"\fdependencies\x18\x04 \x03(\v2\x16.internalpb.DependencyR\fdependencies\x12H\n" +
+	"\x12activation_timeout\x18\x05 \x01(\v2\x19.google.protobuf.DurationR\x11activationTimeout\x12-\n" +
+	"\x12activation_retries\x18\x06 \x01(\x05R\x11activationRetriesB\xa3\x01\n" +
 	"\x0ecom.internalpbB\n" +
 	"GrainProtoH\x02P\x01Z;github.com/tochemey/goakt/v3/internal/internalpb;internalpb\xa2\x02\x03IXX\xaa\x02\n" +
 	"Internalpb\xca\x02\n" +
@@ -185,18 +204,20 @@ func file_internal_grain_proto_rawDescGZIP() []byte {
 
 var file_internal_grain_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
 var file_internal_grain_proto_goTypes = []any{
-	(*GrainId)(nil),    // 0: internalpb.GrainId
-	(*Grain)(nil),      // 1: internalpb.Grain
-	(*Dependency)(nil), // 2: internalpb.Dependency
+	(*GrainId)(nil),             // 0: internalpb.GrainId
+	(*Grain)(nil),               // 1: internalpb.Grain
+	(*Dependency)(nil),          // 2: internalpb.Dependency
+	(*durationpb.Duration)(nil), // 3: google.protobuf.Duration
 }
 var file_internal_grain_proto_depIdxs = []int32{
 	0, // 0: internalpb.Grain.grain_id:type_name -> internalpb.GrainId
 	2, // 1: internalpb.Grain.dependencies:type_name -> internalpb.Dependency
-	2, // [2:2] is the sub-list for method output_type
-	2, // [2:2] is the sub-list for method input_type
-	2, // [2:2] is the sub-list for extension type_name
-	2, // [2:2] is the sub-list for extension extendee
-	0, // [0:2] is the sub-list for field type_name
+	3, // 2: internalpb.Grain.activation_timeout:type_name -> google.protobuf.Duration
+	3, // [3:3] is the sub-list for method output_type
+	3, // [3:3] is the sub-list for method input_type
+	3, // [3:3] is the sub-list for extension type_name
+	3, // [3:3] is the sub-list for extension extendee
+	0, // [0:3] is the sub-list for field type_name
 }
 
 func init() { file_internal_grain_proto_init() }

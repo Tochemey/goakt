@@ -137,9 +137,6 @@ var (
 	// ErrScheduledReferenceNotFound is returned when a reference to a scheduled job cannot be found.
 	ErrScheduledReferenceNotFound = errors.New("scheduled reference not found")
 
-	// ErrGrainActivationTimeout is returned when a Grain activation timed out
-	ErrGrainActivationTimeout = errors.New("grain activation timeout")
-
 	// ErrGrainActivationFailure is returned when Grain activation failed
 	ErrGrainActivationFailure = errors.New("grain activation failed")
 

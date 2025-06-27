@@ -49,14 +49,13 @@ func newGrainMailbox() *grainMailbox {
 }
 
 // Enqueue places the given value in the mailbox
-func (m *grainMailbox) Enqueue(value *GrainContext) error {
+func (m *grainMailbox) Enqueue(value *GrainContext) {
 	tnode := &grainInboxNode{
 		value: value,
 	}
 	previousHead := (*node)(atomic.SwapPointer((*unsafe.Pointer)(unsafe.Pointer(&m.head)), unsafe.Pointer(tnode)))
 	atomic.StorePointer((*unsafe.Pointer)(unsafe.Pointer(&previousHead.next)), unsafe.Pointer(tnode))
 	atomic.AddInt64(&m.length, 1)
-	return nil
 }
 
 // Dequeue takes the mail from the mailbox
