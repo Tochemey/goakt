@@ -1331,11 +1331,9 @@ func (*TestClusterForward) Descriptor() ([]byte, []int) {
 }
 
 type TestMessage struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the actual message
-	Message *anypb.Any `protobuf:"bytes,1,opt,name=message,proto3" json:"message,omitempty"`
-	// Specifies the message priority
-	Priority      int64 `protobuf:"varint,2,opt,name=priority,proto3" json:"priority,omitempty"`
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Message       *anypb.Any             `protobuf:"bytes,1,opt,name=message,proto3" json:"message,omitempty"`
+	Priority      int64                  `protobuf:"varint,2,opt,name=priority,proto3" json:"priority,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }

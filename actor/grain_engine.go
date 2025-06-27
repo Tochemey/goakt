@@ -60,7 +60,7 @@ import (
 // Note:
 //   - This method abstracts away the details of Grain lifecycle management.
 //   - Use this to obtain a reference to a Grain for message passing or further operations.
-func (x *actorSystem) GrainIdentity(ctx context.Context, name string, factory func(ctx context.Context) (Grain, error), opts ...GrainOption) (*GrainIdentity, error) {
+func (x *actorSystem) GrainIdentity(ctx context.Context, name string, factory GrainFactory, opts ...GrainOption) (*GrainIdentity, error) {
 	if !x.started.Load() || x.isShuttingDown() {
 		return nil, ErrActorSystemNotStarted
 	}
@@ -93,7 +93,7 @@ func (x *actorSystem) GrainIdentity(ctx context.Context, name string, factory fu
 			}
 		}
 
-		if grainInfo != nil && !proto.Equal(grainInfo, new(internalpb.GrainId)) {
+		if grainInfo != nil && !proto.Equal(grainInfo, new(internalpb.Grain)) {
 			remoteClient := x.remoting.remotingServiceClient(grainInfo.GetHost(), int(grainInfo.GetPort()))
 			request := connect.NewRequest(&internalpb.RemoteActivateGrainRequest{
 				Grain: grainInfo,
@@ -416,20 +416,20 @@ func (x *actorSystem) remoteAskGrain(ctx context.Context, id *GrainIdentity, mes
 //   - error: error if the request fails.
 func (x *actorSystem) localSend(ctx context.Context, id *GrainIdentity, message proto.Message, timeout time.Duration, synchronous bool) (proto.Message, error) {
 	// Ensure the grain process exists
-	process, err := x.ensureGrainProcess(id)
+	pid, err := x.ensureGrainProcess(id)
 	if err != nil {
 		return nil, err
 	}
 
 	// Ensure the process is running
-	if !process.isActive() {
-		process.activated.Store(true)
+	if !pid.isActive() {
+		pid.activated.Store(true)
 	}
 
 	// Build and send the grainContext
 	grainContext := getGrainContext()
-	grainContext.build(ctx, x, id, message, synchronous)
-	process.receive(grainContext)
+	grainContext.build(ctx, pid, x, id, message, synchronous)
+	pid.receive(grainContext)
 	timer := timers.Get(timeout)
 
 	// Handle synchronous (Ask) case

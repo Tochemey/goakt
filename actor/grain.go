@@ -26,6 +26,25 @@ package actor
 
 import "context"
 
+// GrainFactory defines a function type responsible for creating new Grain instances.
+//
+// This factory function is used by the goakt actor system to instantiate grains (virtual actors)
+// on demand. It receives a context.Context, which can be used for cancellation, deadlines,
+// and passing request-scoped values. The function must return a new Grain implementation
+// and an error if instantiation fails.
+//
+// Typical usage is to provide a GrainFactory when registering a grain type with the actor system.
+//
+// Example:
+//
+//	func MyGrainFactory(ctx context.Context) (actor.Grain, error) {
+//	    return &MyGrain{}, nil
+//	}
+//
+// The returned Grain must be safe for single-threaded access, as the system guarantees
+// that only one message is processed at a time per grain instance.
+type GrainFactory func(ctx context.Context) (Grain, error)
+
 // Grain defines the contract for grains (virtual actors) in the goakt actor system.
 //
 // A Grain is a lightweight, virtual actor that encapsulates state and behavior, managed by goakt.

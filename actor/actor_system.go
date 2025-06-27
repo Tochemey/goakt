@@ -489,7 +489,7 @@ type ActorSystem interface { //nolint:revive
 	// Note:
 	//   - This method abstracts away the details of Grain lifecycle management.
 	//   - Use this to obtain a reference to a Grain for message passing or further operations.
-	GrainIdentity(ctx context.Context, name string, factory func(ctx context.Context) (Grain, error), opts ...GrainOption) (*GrainIdentity, error)
+	GrainIdentity(ctx context.Context, name string, factory GrainFactory, opts ...GrainOption) (*GrainIdentity, error)
 	// AskGrain sends a synchronous request message to a Grain (virtual actor) identified by the given identity.
 	//
 	// This method locates or activates the target Grain (locally or in the cluster), sends the provided

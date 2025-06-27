@@ -534,6 +534,7 @@ func testCluster(t *testing.T, serverAddr string, opts ...testClusterOption) (Ac
 				WithKinds(
 					new(MockActor),
 					new(MockEntity),
+					new(MockGrainActor),
 				).
 				WithGrains(new(MockGrain)).
 				WithPartitionCount(7).
@@ -944,17 +945,63 @@ func (m *MockGrain) OnReceive(ctx *GrainContext) {
 	case *testpb.TestSend:
 		ctx.ActorSystem().Logger().Infof("%s received TestSend message in MockGrain", ctx.Self().Name())
 		ctx.NoErr()
+	case *testpb.TestPing:
+		actorName := "Actor20"
+		response, err := ctx.AskActor(actorName, ctx.Message(), time.Second)
+		if err != nil {
+			ctx.Err(err)
+			return
+		}
+		ctx.Response(response)
+	case *testpb.TestBye:
+		actorName := "Actor20"
+		err := ctx.TellActor(actorName, ctx.Message())
+		if err != nil {
+			ctx.Err(err)
+			return
+		}
+		ctx.NoErr()
+	case *testpb.TestMessage:
+		identity, err := ctx.GrainIdentity("Grain2", func(_ context.Context) (Grain, error) {
+			return NewMockGrain(), nil
+		})
+		if err != nil {
+			ctx.Err(err)
+			return
+		}
+
+		// send a message to the grain
+		resp, err := ctx.AskGrain(identity, new(testpb.TestReply), time.Second)
+		if err != nil {
+			ctx.Err(err)
+			return
+		}
+		ctx.Response(resp)
+
+	case *testpb.TestReady:
+		identity, err := ctx.GrainIdentity("Grain2", func(_ context.Context) (Grain, error) {
+			return NewMockGrain(), nil
+		})
+		if err != nil {
+			ctx.Err(err)
+			return
+		}
+
+		if err := ctx.TellGrain(identity, new(testpb.TestSend)); err != nil {
+			ctx.Err(err)
+			return
+		}
+		ctx.NoErr()
+
 	case *testpb.TestReply:
 		ctx.Response(&testpb.Reply{Content: "received message"})
 	case *testpb.TestTimeout:
-		// delay for a while before sending the reply
 		wg := sync.WaitGroup{}
 		wg.Add(1)
 		go func() {
 			util.Pause(time.Minute)
 			wg.Done()
 		}()
-		// block until timer is up
 		wg.Wait()
 		ctx.NoErr()
 	default:
@@ -1153,3 +1200,39 @@ func (m *MockPanickingGrain) OnReceive(ctx *GrainContext) {
 }
 
 var _ Grain = (*MockPanickingGrain)(nil)
+
+type MockGrainActor struct{}
+
+// enforce compilation error
+var _ Actor = (*MockGrainActor)(nil)
+
+// NewMockActor creates a actor
+func NewMockGrainActor() *MockGrainActor {
+	return &MockGrainActor{}
+}
+
+// Init initialize the actor. This function can be used to set up some database connections
+// or some sort of initialization before the actor init processing message
+func (p *MockGrainActor) PreStart(*Context) error {
+	return nil
+}
+
+// Shutdown gracefully shuts down the given actor
+func (p *MockGrainActor) PostStop(*Context) error {
+	return nil
+}
+
+// Receive processes any message dropped into the actor mailbox without a reply
+func (p *MockGrainActor) Receive(ctx *ReceiveContext) {
+	switch ctx.Message().(type) {
+	case *goaktpb.PostStart:
+	case *testpb.TestSend:
+	case *testpb.TestPing:
+		ctx.Response(new(testpb.TestPong))
+	case *testpb.TestBye:
+		ctx.Shutdown()
+
+	default:
+		ctx.Unhandled()
+	}
+}

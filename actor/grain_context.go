@@ -28,6 +28,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"google.golang.org/protobuf/proto"
 )
@@ -73,6 +74,7 @@ type GrainContext struct {
 	response    chan proto.Message
 	err         chan error
 	synchronous bool
+	pid         *grainPID
 }
 
 // Context returns the underlying context associated with the GrainContext.
@@ -209,14 +211,108 @@ func (gctx *GrainContext) Unhandled() {
 	close(gctx.err)
 }
 
+// AskActor sends a message to another actor by name and waits for a response.
+//
+// This method performs a synchronous request (Ask pattern) to the specified actor,
+// using the provided message and timeout. It returns the response message or an error
+// if the operation times out or fails.
+//
+// Example:
+//
+//	resp, err := ctx.AskActor("my-actor", &MyRequest{}, 2*time.Second)
+//	if err != nil {
+//	    // handle error
+//	}
+func (gctx *GrainContext) AskActor(actorName string, message proto.Message, timeout time.Duration) (proto.Message, error) {
+	ctx := context.WithoutCancel(gctx.Context())
+	return NoSender.SendSync(ctx, actorName, message, timeout)
+}
+
+// TellActor sends a message to another actor by name without waiting for a response.
+//
+// This method performs an asynchronous send (Tell pattern) to the specified actor.
+// It returns an error if the message could not be delivered.
+//
+// Example:
+//
+//	err := ctx.TellActor("my-actor", &MyNotification{})
+//	if err != nil {
+//	    // handle error
+//	}
+func (gctx *GrainContext) TellActor(actorName string, message proto.Message) error {
+	ctx := context.WithoutCancel(gctx.Context())
+	return NoSender.SendAsync(ctx, actorName, message)
+}
+
+// AskGrain sends a message to another Grain and waits for a response.
+//
+// This method performs a synchronous request (Ask pattern) to the specified Grain,
+// using the provided message and timeout. It returns the response message or an error
+// if the operation times out or fails.
+//
+// Example:
+//
+//	resp, err := ctx.AskGrain(otherGrainID, &MyRequest{}, 2*time.Second)
+//	if err != nil {
+//	    // handle error
+//	}
+func (gctx *GrainContext) AskGrain(to *GrainIdentity, message proto.Message, timeout time.Duration) (proto.Message, error) {
+	ctx := context.WithoutCancel(gctx.Context())
+	return gctx.actorSystem.AskGrain(ctx, to, message, timeout)
+}
+
+// TellGrain sends a message to another Grain without waiting for a response.
+//
+// This method performs an asynchronous send (Tell pattern) to the specified Grain.
+// It returns an error if the message could not be delivered.
+//
+// Example:
+//
+//	err := ctx.TellGrain(otherGrainID, &MyNotification{})
+//	if err != nil {
+//	    // handle error
+//	}
+func (gctx *GrainContext) TellGrain(to *GrainIdentity, message proto.Message) error {
+	ctx := context.WithoutCancel(gctx.Context())
+	return gctx.actorSystem.TellGrain(ctx, to, message)
+}
+
+// GrainIdentity creates or retrieves a unique identity for a Grain instance.
+//
+// This method is used to generate a GrainIdentity for a given grain name and factory,
+// optionally applying additional GrainOptions. It is typically used when you need to
+// reference or interact with another grain from within a grain's logic.
+//
+// Arguments:
+//   - name: The unique name of the grain type or instance.
+//   - factory: The GrainFactory used to instantiate the grain if it does not already exist.
+//   - opts: Optional GrainOption values to customize grain creation or configuration.
+//
+// Returns:
+//   - *GrainIdentity: The unique identity representing the target grain.
+//   - error: Non-nil if the identity could not be created or resolved.
+//
+// Example:
+//
+//	id, err := ctx.GrainIdentity("my-grain", MyGrainFactory)
+//	if err != nil {
+//	    // handle error
+//	}
+//	err = ctx.TellGrain(id, &MyMessage{})
+func (gctx *GrainContext) GrainIdentity(name string, factory GrainFactory, opts ...GrainOption) (*GrainIdentity, error) {
+	ctx := context.WithoutCancel(gctx.Context())
+	return gctx.actorSystem.GrainIdentity(ctx, name, factory, opts...)
+}
+
 // build sets the necessary fields of ReceiveContext
-func (gctx *GrainContext) build(ctx context.Context, actorSystem ActorSystem, to *GrainIdentity, message proto.Message, synchronous bool) *GrainContext {
+func (gctx *GrainContext) build(ctx context.Context, pid *grainPID, actorSystem ActorSystem, to *GrainIdentity, message proto.Message, synchronous bool) *GrainContext {
 	gctx.self = to
 	gctx.message = message
 	gctx.ctx = ctx
 	gctx.actorSystem = actorSystem
 	gctx.err = make(chan error, 1)
 	gctx.synchronous = synchronous
+	gctx.pid = pid
 
 	if synchronous {
 		gctx.response = make(chan proto.Message, 1)
@@ -232,6 +328,7 @@ func (gctx *GrainContext) reset() {
 	gctx.self = id
 	gctx.err = nil
 	gctx.response = nil
+	gctx.pid = nil
 }
 
 func (gctx *GrainContext) getError() <-chan error {
