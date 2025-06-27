@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (c2) 2022-2025  Arsene Tochemey Gandote
+ * Copyright (c) 2022-2025  Arsene Tochemey Gandote
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -53,6 +53,7 @@ import (
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
+	"google.golang.org/protobuf/types/known/durationpb"
 
 	"github.com/tochemey/goakt/v3/address"
 	"github.com/tochemey/goakt/v3/discovery"
@@ -469,6 +470,55 @@ type ActorSystem interface { //nolint:revive
 	//
 	// Returns an error if the actor system has not started.
 	Inject(dependencies ...extension.Dependency) error
+	// GrainIdentity retrieves or activates a Grain (virtual actor) identified by the given name.
+	//
+	// This method ensures that a Grain with the specified name exists in the system. If the Grain is not already active,
+	// it will be created using the provided factory function. Grains are virtual actors that are automatically managed
+	// and can be transparently activated or deactivated based on usage.
+	//
+	// Parameters:
+	//   - ctx: Context for cancellation and timeout control.
+	//   - name: The unique name identifying the Grain.
+	//   - factory: A function that creates a new Grain instance if activation is required.
+	//	 - opts: Optional GrainOptions to customize the Grain's activation behavior (e.g., activation timeout, retries).
+	//
+	// Returns:
+	//   - *GrainIdentity: The identity object representing the located or newly activated Grain.
+	//   - error: An error if the Grain could not be found, created, or activated.
+	//
+	// Note:
+	//   - This method abstracts away the details of Grain lifecycle management.
+	//   - Use this to obtain a reference to a Grain for message passing or further operations.
+	GrainIdentity(ctx context.Context, name string, factory GrainFactory, opts ...GrainOption) (*GrainIdentity, error)
+	// AskGrain sends a synchronous request message to a Grain (virtual actor) identified by the given identity.
+	//
+	// This method locates or activates the target Grain (locally or in the cluster), sends the provided
+	// protobuf message, and waits for a response or error. The request will block until a response is received,
+	// the context is canceled, or the timeout elapses.
+	//
+	// Parameters:
+	//   - ctx: Context for cancellation and timeout control.
+	//   - identity: The unique identity of the Grain.
+	//   - message: The protobuf message to send to the Grain.
+	//   - timeout: The maximum duration to wait for a response.
+	//
+	// Returns:
+	//   - response: The response message from the Grain, if successful.
+	//   - error: An error if the request fails, times out, or the system is not started.
+	AskGrain(ctx context.Context, identity *GrainIdentity, message proto.Message, timeout time.Duration) (response proto.Message, err error)
+	// TellGrain sends an asynchronous message to a Grain (virtual actor) identified by the given identity.
+	//
+	// This method locates or activates the target Grain (locally or in the cluster) and delivers the provided
+	// protobuf message without waiting for a response. Use this for fire-and-forget scenarios where no reply is expected.
+	//
+	// Parameters:
+	//   - ctx: Context for cancellation and timeout control.
+	//   - identity: The unique identity of the Grain.
+	//   - message: The protobuf message to send to the Grain.
+	//
+	// Returns:
+	//   - error: An error if the message could not be delivered or the system is not started.
+	TellGrain(ctx context.Context, identity *GrainIdentity, message proto.Message) error
 	// handleRemoteAsk handles a synchronous message to another actor and expect a response.
 	// This block until a response is received or timed out.
 	handleRemoteAsk(ctx context.Context, to *PID, message proto.Message, timeout time.Duration) (response proto.Message, err error)
@@ -499,6 +549,9 @@ type ActorSystem interface { //nolint:revive
 	// internally used
 	findRoutee(routeeName string) (*PID, bool)
 	isShuttingDown() bool
+	getRemoting() *Remoting
+	getGrains() *collection.Map[GrainIdentity, *grainPID]
+	recreateGrain(ctx context.Context, props *internalpb.Grain) error
 }
 
 // ActorSystem represent a collection of actors on a given node
@@ -592,6 +645,8 @@ type actorSystem struct {
 
 	spawnOnNext  *atomic.Uint32
 	shuttingDown *atomic.Bool
+	grainsQueue  chan *internalpb.Grain
+	grains       *collection.Map[GrainIdentity, *grainPID]
 }
 
 var (
@@ -640,6 +695,8 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		shuttingDown:        atomic.NewBool(false),
 		started:             atomic.NewBool(false),
 		starting:            atomic.NewBool(false),
+		grainsQueue:         make(chan *internalpb.Grain, 10),
+		grains:              collection.NewMap[GrainIdentity, *grainPID](),
 	}
 
 	system.relocationEnabled.Store(true)
@@ -1880,7 +1937,7 @@ func (x *actorSystem) RemoteSpawn(ctx context.Context, request *connect.Request[
 
 	// set the dependencies if any
 	if len(msg.GetDependencies()) > 0 {
-		dependencies, err := x.reflection.DependenciesFromProtobuf(msg.GetDependencies()...)
+		dependencies, err := x.reflection.NewDependencies(msg.GetDependencies()...)
 		if err != nil {
 			logger.Errorf("failed to create actor=(%s) on [host=%s, port=%d]: reason: (%v)", msg.GetActorName(), msg.GetHost(), msg.GetPort(), err)
 			return nil, connect.NewError(connect.CodeInternal, err)
@@ -2141,6 +2198,22 @@ func (x *actorSystem) isShuttingDown() bool {
 	return x.shuttingDown.Load()
 }
 
+// getRemoting returns the remoting instance of the actor system
+// This method is used internally to access the remoting functionality
+// and is not intended for external use.
+func (x *actorSystem) getRemoting() *Remoting {
+	x.locker.Lock()
+	defer x.locker.Unlock()
+	return x.remoting
+}
+
+// getGrains returns the grains map of the actor system
+func (x *actorSystem) getGrains() *collection.Map[GrainIdentity, *grainPID] {
+	x.locker.Lock()
+	defer x.locker.Unlock()
+	return x.grains
+}
+
 // getSingletonManager returns the system singleton manager
 func (x *actorSystem) getSingletonManager() *PID {
 	x.locker.Lock()
@@ -2192,6 +2265,30 @@ func (x *actorSystem) putActorOnCluster(pid *PID) error {
 			PassivationStrategy: passivationStrategyToProto(pid.PassivationStrategy()),
 			Dependencies:        dependencies,
 			EnableStash:         pid.stashBox != nil,
+		}
+	}
+	return nil
+}
+
+// putGrainOnCluster broadcast the newly (re)activated grain into the cluster
+func (x *actorSystem) putGrainOnCluster(pid *grainPID) error {
+	if x.clusterEnabled.Load() {
+		dependencies, err := encodeDependencies(pid.dependencies.Values()...)
+		if err != nil {
+			return err
+		}
+
+		x.grainsQueue <- &internalpb.Grain{
+			GrainId: &internalpb.GrainId{
+				Kind:  pid.identity.Kind(),
+				Name:  pid.identity.Name(),
+				Value: pid.identity.String(),
+			},
+			Host:              x.Host(),
+			Port:              int32(x.Port()),
+			Dependencies:      dependencies,
+			ActivationTimeout: durationpb.New(pid.config.initTimeout.Load()),
+			ActivationRetries: pid.config.initMaxRetries.Load(),
 		}
 	}
 	return nil
@@ -2284,10 +2381,19 @@ func (x *actorSystem) enableClustering(ctx context.Context) error {
 		x.registry.Register(kind)
 		x.logger.Infof("cluster kind=(%s) registered", types.Name(kind))
 	}
+
+	if len(x.clusterConfig.Grains()) > 0 {
+		for _, grain := range x.clusterConfig.Grains() {
+			x.registry.Register(grain)
+			x.logger.Infof("cluster Grain=(%s) registered", types.Name(grain))
+		}
+	}
+
 	x.locker.Unlock()
 
 	go x.clusterEventsLoop()
-	go x.replicationLoop()
+	go x.replicateActors()
+	go x.replicateGrains()
 
 	// start the various relocation loops when relocation is enabled
 	if x.relocationEnabled.Load() {
@@ -2397,10 +2503,11 @@ func (x *actorSystem) validateExtensions() error {
 // reset the actor system
 func (x *actorSystem) reset() {
 	x.started.Store(false)
-	x.started.Store(false)
+	x.starting.Store(false)
 	x.workerPool.Stop()
 	x.extensions.Reset()
 	x.actors.reset()
+	x.grains.Reset()
 	x.spawnOnNext.Store(0)
 	x.shuttingDown.Store(false)
 }
@@ -2462,6 +2569,21 @@ func (x *actorSystem) shutdown(ctx context.Context) error {
 		x.actors.deleteNode(rootGuardian)
 	}
 
+	// deactivate all grains
+	if x.grains.Len() > 0 {
+		x.logger.Infof("%s deactivating all grains...", x.name)
+		grains := x.grains.Values()
+		for _, grain := range grains {
+			if err := grain.deactivate(ctx); err != nil {
+				x.logger.Errorf("%s failed to shutdown grain=(%s): %v", x.name, grain.getIdentity().String(), err)
+				// TODO: should we return here or continue with the next grain?
+				//return multierr.Combine(hooksErr, err)
+			}
+			x.grains.Delete(*grain.identity)
+			x.logger.Infof("%s successfully deactivated grain=(%s)", x.name, grain.getIdentity().String())
+		}
+	}
+
 	if x.eventsStream != nil {
 		x.eventsStream.Close()
 	}
@@ -2481,8 +2603,8 @@ func (x *actorSystem) shutdown(ctx context.Context) error {
 	return nil
 }
 
-// replicationLoop publishes newly created actor into the cluster when cluster is enabled
-func (x *actorSystem) replicationLoop() {
+// replicateActors publishes newly created actor into the cluster when cluster is enabled
+func (x *actorSystem) replicateActors() {
 	for actor := range x.actorsQueue {
 		// never replicate system actors because there are specific to the
 		// started node
@@ -2498,6 +2620,23 @@ func (x *actorSystem) replicationLoop() {
 	}
 }
 
+// replicateGrains publishes newly created grain into the cluster when cluster is enabled
+func (x *actorSystem) replicateGrains() {
+	for grain := range x.grainsQueue {
+		// never replicate system grains because there are specific to the
+		// started node
+		if isReservedName(grain.GetGrainId().GetName()) {
+			continue
+		}
+		if !x.isShuttingDown() && x.InCluster() {
+			ctx := context.Background()
+			if err := x.cluster.PutGrain(ctx, grain); err != nil {
+				x.logger.Warn(err.Error())
+			}
+		}
+	}
+}
+
 // resyncActors resyncs all actors in the actor system
 // This is only called during cluster events like NodeLeft or NodeJoined
 // to ensure that all actors are properly synchronized across the cluster.
@@ -2507,6 +2646,20 @@ func (x *actorSystem) resyncActors() error {
 		if err := x.putActorOnCluster(actor); err != nil {
 			x.logger.Errorf("failed to resync actor=(%s): %v", actor.Address().String(), err)
 			return fmt.Errorf("failed to resync actor=(%s): %w", actor.Address().String(), err)
+		}
+	}
+	return nil
+}
+
+// resyncGrains resyncs all grains in the actor system
+// This is only called during cluster events like NodeLeft or NodeJoined
+// to ensure that all actors are properly synchronized across the cluster.
+func (x *actorSystem) resyncGrains() error {
+	grains := x.grains.Values()
+	for _, grain := range grains {
+		if err := x.putGrainOnCluster(grain); err != nil {
+			x.logger.Errorf("failed to resync grain=(%s): %v", grain.getIdentity().String(), err)
+			return fmt.Errorf("failed to resync grain=(%s): %w", grain.getIdentity().String(), err)
 		}
 	}
 	return nil
@@ -2556,6 +2709,20 @@ func (x *actorSystem) handleNodeJoinedEvent(event *cluster.Event) {
 	x.logger.Debugf("node=[name=%s, addr=%s] successfully resynced actors after node joined event: node=(%s)",
 		x.name,
 		x.clusterNode.PeersAddress(), nodeJoined.GetAddress())
+
+	if x.grains.Len() > 0 {
+		x.logger.Debugf("node=[name=%s, addr=%s] resyncing grains after node joined event: node=(%s)",
+			x.name,
+			x.clusterNode.PeersAddress(), nodeJoined.GetAddress())
+
+		if err := x.resyncGrains(); err != nil {
+			x.logger.Errorf("failed to resync grains after node joined event: %v", err)
+		}
+
+		x.logger.Debugf("node=[name=%s, addr=%s] successfully resynced grains after node joined event: node=(%s)",
+			x.name,
+			x.clusterNode.PeersAddress(), nodeJoined.GetAddress())
+	}
 }
 
 // handleNodeLeftEvent processes a NodeLeft cluster event.
@@ -2693,13 +2860,14 @@ func (x *actorSystem) shouldRebalance(peerState *internalpb.PeerState) bool {
 	return peerState != nil &&
 		x.InCluster() &&
 		!proto.Equal(peerState, new(internalpb.PeerState)) &&
-		len(peerState.GetActors()) != 0
+		(len(peerState.GetActors()) != 0 ||
+			len(peerState.GetGrains()) != 0)
 }
 
 // processPeerState processes a given peer synchronization record.
 func (x *actorSystem) processPeerState(ctx context.Context, peer *cluster.Peer) error {
 	peerAddress := net.JoinHostPort(peer.Host, strconv.Itoa(peer.PeersPort))
-	x.logger.Infof("processing peer sync:(%s)", peerAddress)
+	x.logger.Infof("(%s) processing peer sync:(%s)", x.PeerAddress(), peerAddress)
 	peerState, err := x.cluster.GetState(ctx, peerAddress)
 	if err != nil {
 		if errors.Is(err, cluster.ErrPeerSyncNotFound) {
@@ -2709,12 +2877,12 @@ func (x *actorSystem) processPeerState(ctx context.Context, peer *cluster.Peer) 
 		return err
 	}
 
-	x.logger.Debugf("peer (%s) actors count (%d)", peerAddress, len(peerState.GetActors()))
+	x.logger.Debugf("peer (%s) [Actors count=(%d), Grains count=%d]", peerAddress, len(peerState.GetActors()), len(peerState.GetGrains()))
 	if err := x.clusterStore.PersistPeerState(peerState); err != nil {
 		x.logger.Error(err)
 		return err
 	}
-	x.logger.Infof("peer sync(%s) successfully processed", peerAddress)
+	x.logger.Infof("(%s) processed peer sync(%s) successfully ", x.PeerAddress(), peerAddress)
 	return nil
 }
 
@@ -3072,6 +3240,21 @@ func (x *actorSystem) cleanupCluster(ctx context.Context, actorRefs []ActorRef) 
 		})
 	}
 
+	// Remove all grains from the cluster if exists
+	if x.grains.Len() > 0 {
+		for _, grain := range x.grains.Values() {
+			grain := grain
+			eg.Go(func() error {
+				if err := x.cluster.RemoveGrain(ctx, grain.identity.String()); err != nil {
+					x.logger.Errorf("failed to remove [grain=%s] from cluster: %v", grain.identity.String(), err)
+					return err
+				}
+				x.logger.Infof("[grain=%s] removed from cluster", grain.identity.String())
+				return nil
+			})
+		}
+	}
+
 	return eg.Wait()
 }
 
@@ -3102,7 +3285,6 @@ func (x *actorSystem) shutdownCluster(ctx context.Context, actorRefs []ActorRef)
 				AddErrorFn(func() error { return x.cleanupCluster(ctx, actorRefs) }).
 				AddErrorFn(func() error { return x.cluster.Stop(ctx) }).
 				Error(); err != nil {
-				x.reset()
 				x.logger.Errorf("%s failed to shutdown cleanly: %w", x.name, err)
 				return err
 			}
@@ -3122,6 +3304,10 @@ func (x *actorSystem) shutdownCluster(ctx context.Context, actorRefs []ActorRef)
 			close(x.rebalancingQueue)
 		}
 
+		if x.grainsQueue != nil {
+			close(x.grainsQueue)
+		}
+
 		x.rebalanceLocker.Unlock()
 		if x.clusterStore != nil && x.relocationEnabled.Load() {
 			return x.clusterStore.Close()
@@ -3138,7 +3324,6 @@ func (x *actorSystem) shutdownRemoting(ctx context.Context) error {
 
 		if x.server != nil {
 			if err := x.shutdownHTTPServer(ctx); err != nil {
-				x.reset()
 				x.logger.Errorf("%s failed to shutdown: %w", x.name, err)
 				return err
 			}

@@ -31,7 +31,9 @@ type PeerState struct {
 	PeersPort int32 `protobuf:"varint,3,opt,name=peers_port,json=peersPort,proto3" json:"peers_port,omitempty"`
 	// Specifies the list of actors
 	// actorName -> Actor
-	Actors        map[string]*Actor `protobuf:"bytes,4,rep,name=actors,proto3" json:"actors,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	Actors map[string]*Actor `protobuf:"bytes,4,rep,name=actors,proto3" json:"actors,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	// grainId -> Grain
+	Grains        map[string]*Grain `protobuf:"bytes,5,rep,name=grains,proto3" json:"grains,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -90,6 +92,13 @@ func (x *PeerState) GetPeersPort() int32 {
 func (x *PeerState) GetActors() map[string]*Actor {
 	if x != nil {
 		return x.Actors
+	}
+	return nil
+}
+
+func (x *PeerState) GetGrains() map[string]*Grain {
+	if x != nil {
+		return x.Grains
 	}
 	return nil
 }
@@ -189,16 +198,20 @@ var File_internal_peers_proto protoreflect.FileDescriptor
 const file_internal_peers_proto_rawDesc = "" +
 	"\n" +
 	"\x14internal/peers.proto\x12\n" +
-	"internalpb\x1a\x14internal/actor.proto\"\xec\x01\n" +
+	"internalpb\x1a\x14internal/actor.proto\x1a\x14internal/grain.proto\"\xf5\x02\n" +
 	"\tPeerState\x12\x12\n" +
 	"\x04host\x18\x01 \x01(\tR\x04host\x12#\n" +
 	"\rremoting_port\x18\x02 \x01(\x05R\fremotingPort\x12\x1d\n" +
 	"\n" +
 	"peers_port\x18\x03 \x01(\x05R\tpeersPort\x129\n" +
-	"\x06actors\x18\x04 \x03(\v2!.internalpb.PeerState.ActorsEntryR\x06actors\x1aL\n" +
+	"\x06actors\x18\x04 \x03(\v2!.internalpb.PeerState.ActorsEntryR\x06actors\x129\n" +
+	"\x06grains\x18\x05 \x03(\v2!.internalpb.PeerState.GrainsEntryR\x06grains\x1aL\n" +
 	"\vActorsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12'\n" +
-	"\x05value\x18\x02 \x01(\v2\x11.internalpb.ActorR\x05value:\x028\x01\"A\n" +
+	"\x05value\x18\x02 \x01(\v2\x11.internalpb.ActorR\x05value:\x028\x01\x1aL\n" +
+	"\vGrainsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12'\n" +
+	"\x05value\x18\x02 \x01(\v2\x11.internalpb.GrainR\x05value:\x028\x01\"A\n" +
 	"\tRebalance\x124\n" +
 	"\n" +
 	"peer_state\x18\x01 \x01(\v2\x15.internalpb.PeerStateR\tpeerState\"6\n" +
@@ -222,23 +235,27 @@ func file_internal_peers_proto_rawDescGZIP() []byte {
 	return file_internal_peers_proto_rawDescData
 }
 
-var file_internal_peers_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_internal_peers_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
 var file_internal_peers_proto_goTypes = []any{
 	(*PeerState)(nil),         // 0: internalpb.PeerState
 	(*Rebalance)(nil),         // 1: internalpb.Rebalance
 	(*RebalanceComplete)(nil), // 2: internalpb.RebalanceComplete
 	nil,                       // 3: internalpb.PeerState.ActorsEntry
-	(*Actor)(nil),             // 4: internalpb.Actor
+	nil,                       // 4: internalpb.PeerState.GrainsEntry
+	(*Actor)(nil),             // 5: internalpb.Actor
+	(*Grain)(nil),             // 6: internalpb.Grain
 }
 var file_internal_peers_proto_depIdxs = []int32{
 	3, // 0: internalpb.PeerState.actors:type_name -> internalpb.PeerState.ActorsEntry
-	0, // 1: internalpb.Rebalance.peer_state:type_name -> internalpb.PeerState
-	4, // 2: internalpb.PeerState.ActorsEntry.value:type_name -> internalpb.Actor
-	3, // [3:3] is the sub-list for method output_type
-	3, // [3:3] is the sub-list for method input_type
-	3, // [3:3] is the sub-list for extension type_name
-	3, // [3:3] is the sub-list for extension extendee
-	0, // [0:3] is the sub-list for field type_name
+	4, // 1: internalpb.PeerState.grains:type_name -> internalpb.PeerState.GrainsEntry
+	0, // 2: internalpb.Rebalance.peer_state:type_name -> internalpb.PeerState
+	5, // 3: internalpb.PeerState.ActorsEntry.value:type_name -> internalpb.Actor
+	6, // 4: internalpb.PeerState.GrainsEntry.value:type_name -> internalpb.Grain
+	5, // [5:5] is the sub-list for method output_type
+	5, // [5:5] is the sub-list for method input_type
+	5, // [5:5] is the sub-list for extension type_name
+	5, // [5:5] is the sub-list for extension extendee
+	0, // [0:5] is the sub-list for field type_name
 }
 
 func init() { file_internal_peers_proto_init() }
@@ -247,13 +264,14 @@ func file_internal_peers_proto_init() {
 		return
 	}
 	file_internal_actor_proto_init()
+	file_internal_grain_proto_init()
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_internal_peers_proto_rawDesc), len(file_internal_peers_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   4,
+			NumMessages:   5,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

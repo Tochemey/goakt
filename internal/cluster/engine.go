@@ -73,6 +73,7 @@ const (
 	statesMap  = "states"
 	jobKeysMap = "jobKeys"
 	kindsMap   = "actorKinds"
+	grainsMap  = "grains"
 )
 
 func (x EventType) String() string {
@@ -128,6 +129,14 @@ type Interface interface {
 	IsRunning() bool
 	// ActorExists checks whether an actor exists in the cluster
 	ActorExists(ctx context.Context, actorName string) (bool, error)
+	// PutGrain replicates a Grain into the cluster
+	PutGrain(ctx context.Context, grain *internalpb.Grain) error
+	// GetGrain returns a Grain from the cluster
+	GetGrain(ctx context.Context, grainID string) (*internalpb.Grain, error)
+	// RemoveGrain removes a Grain from the cluster
+	RemoveGrain(ctx context.Context, grainID string) error
+	// GrainExists checks whether a Grain exists in the cluster
+	GrainExists(ctx context.Context, grainID string) (bool, error)
 }
 
 // Engine represents the Engine
@@ -160,6 +169,7 @@ type Engine struct {
 	statesMap  olric.DMap
 	jobKeysMap olric.DMap
 	kindsMap   olric.DMap
+	grainsMap  olric.DMap
 	tableSize  uint64
 
 	// specifies the discovery node
@@ -575,6 +585,95 @@ func (x *Engine) ActorExists(ctx context.Context, actorName string) (bool, error
 	return true, nil
 }
 
+// PutGrain replicates a Grain into the cluster
+func (x *Engine) PutGrain(ctx context.Context, grain *internalpb.Grain) error {
+	// return an error when the engine is not running
+	if !x.IsRunning() {
+		return ErrEngineNotRunning
+	}
+
+	x.Lock()
+	defer x.Unlock()
+
+	logger := x.logger
+	logger.Infof("(%s) synchronizing Grain (%s)...", x.node.PeersAddress(), grain.GetGrainId().GetValue())
+
+	kind := grain.GetGrainId().GetKind()
+	key := grain.GetGrainId().GetValue()
+	encoded, _ := encodeGrain(grain)
+
+	ctx1, cancel1 := context.WithTimeout(ctx, x.writeTimeout)
+	if err := x.grainsMap.Put(ctx1, key, encoded); err != nil {
+		cancel1()
+		return fmt.Errorf("(%s) failed to sync grain=(%s): %v", x.node.PeersAddress(), key, err)
+	}
+	cancel1()
+
+	ctx2, cancel2 := context.WithTimeout(ctx, x.writeTimeout)
+	if err := x.kindsMap.Put(ctx2, kind, kind); err != nil {
+		cancel2()
+		return fmt.Errorf("(%s) failed to sync kind=(%s): %v", x.node.PeersAddress(), kind, err)
+	}
+	cancel2()
+
+	grains := x.peerState.GetGrains()
+	grains[key] = grain
+	x.peerState.Grains = grains
+
+	ctx3, cancel3 := context.WithTimeout(ctx, x.writeTimeout)
+	if err := x.synchronizeState(ctx3); err != nil {
+		cancel3()
+		return fmt.Errorf("node=(%s) failed its state synchronization: %v", x.node.PeersAddress(), err)
+	}
+
+	cancel3()
+	logger.Infof("node=(%s) successfully completes its synchronization", x.node.PeersAddress())
+	return nil
+}
+
+// GetGrain returns a Grain from the cluster
+func (x *Engine) GetGrain(ctx context.Context, grainID string) (*internalpb.Grain, error) {
+	// return an error when the engine is not running
+	if !x.IsRunning() {
+		return nil, ErrEngineNotRunning
+	}
+
+	ctx, cancelFn := context.WithTimeout(ctx, x.readTimeout)
+	defer cancelFn()
+
+	x.Lock()
+	defer x.Unlock()
+
+	logger := x.logger
+
+	logger.Infof("(%s) retrieving grain (%s) from the cluster", x.node.PeersAddress(), grainID)
+
+	resp, err := x.grainsMap.Get(ctx, grainID)
+	if err != nil {
+		if errors.Is(err, olric.ErrKeyNotFound) {
+			logger.Warnf("(%s) could not find grain=%s the cluster", x.node.PeersAddress(), grainID)
+			return nil, ErrGrainNotFound
+		}
+		logger.Errorf("(%s) failed to get grain=(%s) record from the cluster: %v", x.node.PeersAddress(), grainID, err)
+		return nil, err
+	}
+
+	bytea, err := resp.Byte()
+	if err != nil {
+		logger.Errorf("(%s) failed to read grain=(%s) record: %v", x.node.PeersAddress(), grainID, err)
+		return nil, err
+	}
+
+	grain, err := decodeGrain(bytea)
+	if err != nil {
+		logger.Errorf("(%s) failed to decode grain=(%s) record: %v", x.node.PeersAddress(), grainID, err)
+		return nil, err
+	}
+
+	logger.Infof("(%s) successfully retrieved from the cluster grain (%s)", x.node.PeersAddress(), grain.GetGrainId().GetValue())
+	return grain, nil
+}
+
 // RemoveActor removes a given actor from the cluster.
 // An actor is removed from the cluster when this actor has been passivated.
 func (x *Engine) RemoveActor(ctx context.Context, actorName string) error {
@@ -617,6 +716,72 @@ func (x *Engine) RemoveActor(ctx context.Context, actorName string) error {
 
 	logger.Infof("node=(%s) successfully removed actor (%s) from the cluster", x.node.PeersAddress(), actorName)
 	return nil
+}
+
+// RemoveGrain removes a Grain from the cluster
+func (x *Engine) RemoveGrain(ctx context.Context, grainID string) error {
+	// return an error when the engine is not running
+	if !x.IsRunning() {
+		return ErrEngineNotRunning
+	}
+
+	logger := x.logger
+	x.Lock()
+	defer x.Unlock()
+
+	logger.Infof("node=(%s) removing grain (%s) from cluster", x.node.PeersAddress(), grainID)
+
+	ctx = context.WithoutCancel(ctx)
+
+	ctx1, cancel1 := context.WithTimeout(ctx, x.writeTimeout)
+	_, err := x.grainsMap.Delete(ctx1, grainID)
+	if err != nil {
+		logger.Errorf("node=(%s) failed to remove grain=(%s) record from cluster: %v", x.node.PeersAddress(), grainID, err)
+		cancel1()
+		return err
+	}
+	cancel1()
+
+	// remove the actor from the peer state only if it exists
+	grains := x.peerState.GetGrains()
+	if _, exists := grains[grainID]; exists {
+		delete(grains, grainID)
+		x.peerState.Grains = grains
+
+		ctx2, cancel2 := context.WithTimeout(ctx, x.writeTimeout)
+		if err := x.synchronizeState(ctx2); err != nil {
+			logger.Errorf("node=(%s) failed to synchronize its state after removing grain=(%s): %v", x.node.PeersAddress(), grainID, err)
+			cancel2()
+			return err
+		}
+		cancel2()
+	}
+
+	logger.Infof("node=(%s) successfully removed grain (%s) from the cluster", x.node.PeersAddress(), grainID)
+	return nil
+}
+
+// GrainExists checks whether a Grain exists in the cluster
+func (x *Engine) GrainExists(ctx context.Context, grainID string) (bool, error) {
+	// return an error when the engine is not running
+	if !x.IsRunning() {
+		return false, ErrEngineNotRunning
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, x.readTimeout)
+	defer cancel()
+
+	x.Lock()
+	defer x.Unlock()
+
+	// check whether the grain exists in the actors map
+	if _, err := x.grainsMap.Get(ctx, grainID); err != nil {
+		if errors.Is(err, olric.ErrKeyNotFound) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
 }
 
 // RemoveKind removes a given actor from the cluster
@@ -968,6 +1133,7 @@ func (x *Engine) createMaps() error {
 	return errorschain.
 		New(errorschain.ReturnFirst()).
 		AddErrorFn(func() error { x.actorsMap, err = x.client.NewDMap(actorsMap); return err }).
+		AddErrorFn(func() error { x.grainsMap, err = x.client.NewDMap(grainsMap); return err }).
 		AddErrorFn(func() error { x.statesMap, err = x.client.NewDMap(statesMap); return err }).
 		AddErrorFn(func() error { x.jobKeysMap, err = x.client.NewDMap(jobKeysMap); return err }).
 		AddErrorFn(func() error { x.kindsMap, err = x.client.NewDMap(kindsMap); return err }).
@@ -990,5 +1156,6 @@ func (x *Engine) initPeerState() {
 		RemotingPort: int32(x.node.RemotingPort),
 		PeersPort:    int32(x.node.PeersPort),
 		Actors:       map[string]*internalpb.Actor{},
+		Grains:       map[string]*internalpb.Grain{},
 	}
 }

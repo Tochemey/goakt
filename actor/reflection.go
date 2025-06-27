@@ -87,8 +87,8 @@ func (r *reflection) NewDependency(typeName string, bytea []byte) (extension.Dep
 	return nil, ErrInvalidInstance
 }
 
-// DependenciesFromProtobuf reflects the dependencies defined in the protobuf
-func (r *reflection) DependenciesFromProtobuf(dependencies ...*internalpb.Dependency) ([]extension.Dependency, error) {
+// NewDependencies reflects the dependencies defined in the protobuf
+func (r *reflection) NewDependencies(dependencies ...*internalpb.Dependency) ([]extension.Dependency, error) {
 	deps := make([]extension.Dependency, 0, len(dependencies))
 	for _, dep := range dependencies {
 		dependency, err := r.NewDependency(dep.GetTypeName(), dep.GetBytea())
@@ -98,4 +98,21 @@ func (r *reflection) DependenciesFromProtobuf(dependencies ...*internalpb.Depend
 		deps = append(deps, dependency)
 	}
 	return deps, nil
+}
+
+// NewGrain creates a new instance of Grain from its FQN
+func (r *reflection) NewGrain(kind string) (Grain, error) {
+	rtype, ok := r.registry.TypeOf(kind)
+	if !ok {
+		return nil, ErrGrainNotRegistered
+	}
+
+	grainType := reflect.TypeOf((*Grain)(nil)).Elem()
+	if !rtype.Implements(grainType) && !reflect.PointerTo(rtype).Implements(grainType) {
+		return nil, ErrInstanceNotAnGrain
+	}
+
+	instance := reflect.New(rtype)
+	grain := instance.Interface().(Grain)
+	return grain, nil
 }

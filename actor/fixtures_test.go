@@ -534,7 +534,9 @@ func testCluster(t *testing.T, serverAddr string, opts ...testClusterOption) (Ac
 				WithKinds(
 					new(MockActor),
 					new(MockEntity),
+					new(MockGrainActor),
 				).
+				WithGrains(new(MockGrain)).
 				WithPartitionCount(7).
 				WithReplicaCount(1).
 				WithPeersPort(clusterPort).
@@ -909,6 +911,327 @@ func (p *MockPostStart) Receive(ctx *ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *goaktpb.PostStart:
 		postStarCount.Inc()
+	default:
+		ctx.Unhandled()
+	}
+}
+
+type MockGrain struct {
+	name string
+}
+
+var _ Grain = (*MockGrain)(nil)
+
+func NewMockGrain() *MockGrain {
+	return &MockGrain{}
+}
+
+// OnActivate implements Grain.
+// nolint
+func (m *MockGrain) OnActivate(ctx context.Context, props *GrainProps) error {
+	m.name = props.Identity().Name()
+	return nil
+}
+
+// OnDeactivate implements Grain.
+// nolint
+func (m *MockGrain) OnDeactivate(ctx context.Context, props *GrainProps) error {
+	return nil
+}
+
+// OnReceive implements Grain.
+func (m *MockGrain) OnReceive(ctx *GrainContext) {
+	switch ctx.Message().(type) {
+	case *testpb.TestSend:
+		ctx.ActorSystem().Logger().Infof("%s received TestSend message in MockGrain", ctx.Self().Name())
+		ctx.NoErr()
+	case *testpb.TestPing:
+		actorName := "Actor20"
+		response, err := ctx.AskActor(actorName, ctx.Message(), time.Second)
+		if err != nil {
+			ctx.Err(err)
+			return
+		}
+		ctx.Response(response)
+	case *testpb.TestBye:
+		actorName := "Actor20"
+		err := ctx.TellActor(actorName, ctx.Message())
+		if err != nil {
+			ctx.Err(err)
+			return
+		}
+		ctx.NoErr()
+	case *testpb.TestMessage:
+		identity, err := ctx.GrainIdentity("Grain2", func(_ context.Context) (Grain, error) {
+			return NewMockGrain(), nil
+		})
+		if err != nil {
+			ctx.Err(err)
+			return
+		}
+
+		// send a message to the grain
+		resp, err := ctx.AskGrain(identity, new(testpb.TestReply), time.Second)
+		if err != nil {
+			ctx.Err(err)
+			return
+		}
+		ctx.Response(resp)
+
+	case *testpb.TestReady:
+		identity, err := ctx.GrainIdentity("Grain2", func(_ context.Context) (Grain, error) {
+			return NewMockGrain(), nil
+		})
+		if err != nil {
+			ctx.Err(err)
+			return
+		}
+
+		if err := ctx.TellGrain(identity, new(testpb.TestSend)); err != nil {
+			ctx.Err(err)
+			return
+		}
+		ctx.NoErr()
+
+	case *testpb.TestReply:
+		ctx.Response(&testpb.Reply{Content: "received message"})
+	case *testpb.TestTimeout:
+		wg := sync.WaitGroup{}
+		wg.Add(1)
+		go func() {
+			util.Pause(time.Minute)
+			wg.Done()
+		}()
+		wg.Wait()
+		ctx.NoErr()
+	default:
+		ctx.Unhandled()
+	}
+}
+
+type MockGrainActivationFailure struct{}
+
+var _ Grain = (*MockGrainActivationFailure)(nil)
+
+func NewMockGrainActivationFailure() *MockGrainActivationFailure {
+	return &MockGrainActivationFailure{}
+}
+
+// OnActivate implements Grain.
+// nolint
+func (m *MockGrainActivationFailure) OnActivate(ctx context.Context, props *GrainProps) error {
+	return errors.New("failed to activate grain")
+}
+
+// OnDeactivate implements Grain.
+// nolint
+func (m *MockGrainActivationFailure) OnDeactivate(ctx context.Context, props *GrainProps) error {
+	return nil
+}
+
+// OnReceive implements Grain.
+func (m *MockGrainActivationFailure) OnReceive(ctx *GrainContext) {
+	ctx.NoErr()
+}
+
+type MockGrainDeactivationFailure struct{}
+
+// OnActivate implements Grain.
+// nolint
+func (m *MockGrainDeactivationFailure) OnActivate(ctx context.Context, props *GrainProps) error {
+	return nil
+}
+
+// OnDeactivate implements Grain.
+// nolint
+func (m *MockGrainDeactivationFailure) OnDeactivate(ctx context.Context, props *GrainProps) error {
+	return errors.New("failed to deactivate grain")
+}
+
+// OnReceive implements Grain.
+func (m *MockGrainDeactivationFailure) OnReceive(ctx *GrainContext) {
+	ctx.NoErr()
+}
+
+var _ Grain = (*MockGrainDeactivationFailure)(nil)
+
+func NewMockGrainDeactivationFailure() *MockGrainDeactivationFailure {
+	return &MockGrainDeactivationFailure{}
+}
+
+type MockGrainReceiveFailure struct{}
+
+var _ Grain = (*MockGrainReceiveFailure)(nil)
+
+func NewMockGrainReceiveFailure() *MockGrainReceiveFailure {
+	return &MockGrainReceiveFailure{}
+}
+
+// OnActivate implements Grain.
+// nolint
+func (m *MockGrainReceiveFailure) OnActivate(ctx context.Context, props *GrainProps) error {
+	return nil
+}
+
+// OnDeactivate implements Grain.
+// nolint
+func (m *MockGrainReceiveFailure) OnDeactivate(ctx context.Context, props *GrainProps) error {
+	return nil
+}
+
+// OnReceive implements Grain.
+func (m *MockGrainReceiveFailure) OnReceive(ctx *GrainContext) {
+	switch ctx.Message().(type) {
+	case *testpb.TestSend:
+		ctx.Err(errors.New("failed to process message"))
+	default:
+		ctx.Unhandled()
+	}
+}
+
+type MockPersistenceGrain struct {
+	persistenceID string
+	currentState  *atomic.Pointer[testpb.Account]
+	stateStore    MockStateStore
+}
+
+var _ Grain = (*MockPersistenceGrain)(nil)
+
+func NewMockPersistenceGrain() *MockPersistenceGrain {
+	return &MockPersistenceGrain{}
+}
+
+// OnActivate implements Grain.
+// nolint
+func (m *MockPersistenceGrain) OnActivate(ctx context.Context, props *GrainProps) error {
+	m.currentState = atomic.NewPointer(new(testpb.Account))
+	m.stateStore = props.ActorSystem().Extension("MockStateStore").(MockStateStore)
+	m.persistenceID = props.Identity().Name()
+	return m.recoverFromStore()
+}
+
+// OnDeactivate implements Grain.
+// nolint
+func (m *MockPersistenceGrain) OnDeactivate(ctx context.Context, props *GrainProps) error {
+	return m.stateStore.WriteState(m.persistenceID, m.currentState.Load())
+}
+
+// OnReceive implements Grain.
+func (m *MockPersistenceGrain) OnReceive(ctx *GrainContext) {
+	switch received := ctx.Message().(type) {
+	case *testpb.CreateAccount:
+		balance := received.GetAccountBalance()
+		newBalance := m.currentState.Load().GetAccountBalance() + balance
+		m.currentState.Store(&testpb.Account{
+			AccountId:      m.persistenceID,
+			AccountBalance: newBalance,
+		})
+
+		// persist the Grain state
+		if err := m.stateStore.WriteState(m.persistenceID, m.currentState.Load()); err != nil {
+			ctx.Err(err)
+			return
+		}
+
+		ctx.NoErr()
+	case *testpb.CreditAccount:
+		// TODO: in production extra validation will be needed.
+		balance := received.GetBalance()
+		newBalance := m.currentState.Load().GetAccountBalance() + balance
+		m.currentState.Store(&testpb.Account{
+			AccountId:      m.persistenceID,
+			AccountBalance: newBalance,
+		})
+
+		// persist the Grain state
+		if err := m.stateStore.WriteState(m.persistenceID, m.currentState.Load()); err != nil {
+			ctx.Err(err)
+			return
+		}
+
+		ctx.Response(m.currentState.Load())
+	case *testpb.GetAccount:
+		ctx.Response(m.currentState.Load())
+	default:
+		ctx.Unhandled()
+	}
+}
+
+func (m *MockPersistenceGrain) recoverFromStore() error {
+	latestState, err := m.stateStore.GetLatestState(m.persistenceID)
+	if err != nil {
+		return fmt.Errorf("failed to get the latest state: %w", err)
+	}
+
+	if latestState != nil {
+		m.currentState.Store(latestState)
+	}
+
+	return nil
+}
+
+type MockPanickingGrain struct{}
+
+func NewMockPanickingGrain() *MockPanickingGrain {
+	return &MockPanickingGrain{}
+}
+
+// OnActivate implements Grain.
+// nolint
+func (m *MockPanickingGrain) OnActivate(ctx context.Context, props *GrainProps) error {
+	return nil
+}
+
+// OnDeactivate implements Grain.
+// nolint
+func (m *MockPanickingGrain) OnDeactivate(ctx context.Context, props *GrainProps) error {
+	return nil
+}
+
+// OnReceive implements Grain.
+// nolint
+func (m *MockPanickingGrain) OnReceive(ctx *GrainContext) {
+	switch ctx.Message().(type) {
+	case *testpb.TestSend:
+		panic("test panic")
+	case *testpb.TestReply:
+		panic(NewInternalError(errors.New("test panic")))
+	}
+}
+
+var _ Grain = (*MockPanickingGrain)(nil)
+
+type MockGrainActor struct{}
+
+// enforce compilation error
+var _ Actor = (*MockGrainActor)(nil)
+
+// NewMockActor creates a actor
+func NewMockGrainActor() *MockGrainActor {
+	return &MockGrainActor{}
+}
+
+// Init initialize the actor. This function can be used to set up some database connections
+// or some sort of initialization before the actor init processing message
+func (p *MockGrainActor) PreStart(*Context) error {
+	return nil
+}
+
+// Shutdown gracefully shuts down the given actor
+func (p *MockGrainActor) PostStop(*Context) error {
+	return nil
+}
+
+// Receive processes any message dropped into the actor mailbox without a reply
+func (p *MockGrainActor) Receive(ctx *ReceiveContext) {
+	switch ctx.Message().(type) {
+	case *goaktpb.PostStart:
+	case *testpb.TestSend:
+	case *testpb.TestPing:
+		ctx.Response(new(testpb.TestPong))
+	case *testpb.TestBye:
+		ctx.Shutdown()
+
 	default:
 		ctx.Unhandled()
 	}

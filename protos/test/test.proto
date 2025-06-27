@@ -85,8 +85,6 @@ message TestRemoteForward {}
 message TestClusterForward {}
 
 message TestMessage {
-  // Specifies the actual message
   google.protobuf.Any message = 1;
-  // Specifies the message priority
   int64 priority = 2;
 }

@@ -49,3 +49,23 @@ func decode(bytea []byte) (*internalpb.Actor, error) {
 
 	return actor, nil
 }
+
+// encode marshals a wire Grain into a byte array
+// the output of this function can be persisted to the Cluster
+func encodeGrain(grain *internalpb.Grain) ([]byte, error) {
+	// let us marshal it
+	bytea, _ := proto.Marshal(grain)
+	return bytea, nil
+}
+
+// decode decodes the encoded representation of a wire Grain
+func decodeGrain(bytea []byte) (*internalpb.Grain, error) {
+	// create an instance of a proto message
+	grain := new(internalpb.Grain)
+	// let us unpack the byte array
+	if err := proto.Unmarshal(bytea, grain); err != nil {
+		return nil, err
+	}
+
+	return grain, nil
+}

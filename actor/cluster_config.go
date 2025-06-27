@@ -28,7 +28,9 @@ import (
 	"time"
 
 	"github.com/tochemey/goakt/v3/discovery"
+	"github.com/tochemey/goakt/v3/internal/collection"
 	"github.com/tochemey/goakt/v3/internal/size"
+	"github.com/tochemey/goakt/v3/internal/types"
 	"github.com/tochemey/goakt/v3/internal/validation"
 )
 
@@ -47,7 +49,8 @@ type ClusterConfig struct {
 	readQuorum               uint32
 	discoveryPort            int
 	peersPort                int
-	kinds                    []Actor
+	kinds                    *collection.Map[string, Actor]
+	grains                   *collection.Map[string, Grain]
 	tableSize                uint64
 	wal                      *string
 	writeTimeout             time.Duration
@@ -63,8 +66,9 @@ var _ validation.Validator = (*ClusterConfig)(nil)
 
 // NewClusterConfig creates an instance of ClusterConfig
 func NewClusterConfig() *ClusterConfig {
-	return &ClusterConfig{
-		kinds:                    defaultKinds,
+	config := &ClusterConfig{
+		kinds:                    collection.NewMap[string, Actor](),
+		grains:                   collection.NewMap[string, Grain](),
 		minimumPeersQuorum:       1,
 		writeQuorum:              1,
 		readQuorum:               1,
@@ -78,6 +82,10 @@ func NewClusterConfig() *ClusterConfig {
 		clusterStateSyncInterval: DefaultClusterStateSyncInterval,
 		peersStateSyncInterval:   DefaultPeerStateSyncInterval,
 	}
+
+	fnActor := new(FuncActor)
+	config.kinds.Set(types.Name(fnActor), fnActor)
+	return config
 }
 
 // WithPartitionCount sets the cluster config partition count.
@@ -102,7 +110,17 @@ func (x *ClusterConfig) WithDiscovery(discovery discovery.Provider) *ClusterConf
 
 // WithKinds sets the cluster actor kinds
 func (x *ClusterConfig) WithKinds(kinds ...Actor) *ClusterConfig {
-	x.kinds = append(x.kinds, kinds...)
+	for _, kind := range kinds {
+		x.kinds.Set(types.Name(kind), kind)
+	}
+	return x
+}
+
+// WithGrains sets the cluster grains
+func (x *ClusterConfig) WithGrains(grains ...Grain) *ClusterConfig {
+	for _, grain := range grains {
+		x.grains.Set(types.Name(grain), grain)
+	}
 	return x
 }
 
@@ -391,7 +409,11 @@ func (x *ClusterConfig) PeersPort() int {
 
 // Kinds returns the actor kinds
 func (x *ClusterConfig) Kinds() []Actor {
-	return x.kinds
+	return x.kinds.Values()
+}
+
+func (x *ClusterConfig) Grains() []Grain {
+	return x.grains.Values()
 }
 
 // ReadQuorum returns the read quorum
@@ -441,7 +463,7 @@ func (x *ClusterConfig) Validate() error {
 		AddAssertion(x.minimumPeersQuorum >= 1, "minimum peers quorum must be at least one").
 		AddAssertion(x.discoveryPort > 0, "discovery port is invalid").
 		AddAssertion(x.peersPort > 0, "peers port is invalid").
-		AddAssertion(len(x.kinds) > 1, "actor kinds are not defined").
+		AddAssertion(len(x.kinds.Values()) > 1, "actor kinds are not defined").
 		AddAssertion(x.replicaCount >= 1, "cluster replicaCount is invalid").
 		AddAssertion(x.writeQuorum >= 1, "cluster writeQuorum is invalid").
 		AddAssertion(x.readQuorum >= 1, "cluster readQuorum is invalid").
