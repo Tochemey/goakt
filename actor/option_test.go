@@ -25,7 +25,6 @@
 package actor
 
 import (
-	"context"
 	"crypto/tls"
 	"testing"
 	"time"
@@ -122,14 +121,6 @@ func TestWithPeerStateInterval(t *testing.T) {
 	opt := WithPeerStateLoopInterval(10 * time.Second)
 	opt.Apply(system)
 	assert.EqualValues(t, 10*time.Second, system.clusterConfig.PeersStateSyncInterval())
-}
-
-func TestWithCoordinatedShutdown(t *testing.T) {
-	system := new(actorSystem)
-	shutdownHook := func(context.Context) error { return nil }
-	opt := WithCoordinatedShutdown(shutdownHook)
-	opt.Apply(system)
-	assert.EqualValues(t, 1, len(system.shutdownHooks))
 }
 
 func TestWithPubSub(t *testing.T) {

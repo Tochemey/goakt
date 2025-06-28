@@ -25,7 +25,6 @@
 package actor
 
 import (
-	"context"
 	"time"
 
 	"github.com/tochemey/goakt/v3/extension"
@@ -34,10 +33,6 @@ import (
 	"github.com/tochemey/goakt/v3/log"
 	"github.com/tochemey/goakt/v3/remote"
 )
-
-// ShutdownHook defines the shutdown hook to be executed alongside the
-// termination of the actor system
-type ShutdownHook func(ctx context.Context) error
 
 // Option is the interface that applies a configuration option.
 type Option interface {
