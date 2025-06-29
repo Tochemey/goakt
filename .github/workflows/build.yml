@@ -20,7 +20,7 @@ jobs:
     runs-on:
       "${{ matrix.os == 'linux' && 'ubuntu-latest' || 'windows-latest' }}"
     strategy:
-      fail-fast: false
+      fail-fast: true
       matrix:
         os: [linux, windows]
     steps:
