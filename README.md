@@ -74,12 +74,10 @@ Before you start, make sure you have these installed:
 
 ### Making Contributions
 
-1.  Create a new branch.
-2.  Make your changes.
-3.  Ensure your code adheres to the project's style and passes tests `earthly +test`.
-4.  Commit your changes using a **Conventional Commit** message (e.g., `feat: add new awesome feature` or `fix: resolve a critical bug`).
-5.  Push your branch to your forked repository.
-6.  Submit a [pull request](https://help.github.com/articles/using-pull-requests) from your branch to the `main` branch of the original repository.
+1. Make your changes in your fork.
+2. Ensure your code adheres to the project's style and passes tests `earthly +test`.
+3. Commit your changes using a **Conventional Commit** message. See [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/)
+4. Submit a [pull request](https://help.github.com/articles/using-pull-requests) from your branch to the `main` branch of the original repository.
 
 ### Test & Linter
 
@@ -88,6 +86,12 @@ Prior to submitting a [pull request](https://help.github.com/articles/using-pull
 ```bash
 earthly +test
 ```
+
+## 📦 In Production
+
+This project is used in production by the following projects/companies:
+
+- [Modus](https://docs.hypermode.com/modus/overview) by [Hypermode](https://hypermode.com/)
 
 ## 📊 Benchmark
 
