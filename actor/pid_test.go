@@ -806,7 +806,7 @@ func TestSupervisorStrategy(t *testing.T) {
 		require.NotNil(t, parent)
 
 		// create the child actor
-		stopStrategy := NewSupervisor(WithDirective(PanicError{}, StopDirective))
+		stopStrategy := NewSupervisor(WithDirective(&PanicError{}, StopDirective))
 
 		child, err := parent.SpawnChild(ctx, "SpawnChild", NewMockSupervised(), WithSupervisor(stopStrategy))
 		require.NoError(t, err)
@@ -847,7 +847,7 @@ func TestSupervisorStrategy(t *testing.T) {
 		// create the child actor
 		stopStrategy := NewSupervisor(
 			WithStrategy(OneForAllStrategy),
-			WithDirective(PanicError{}, StopDirective),
+			WithDirective(&PanicError{}, StopDirective),
 		)
 
 		child, err := parent.SpawnChild(ctx, "SpawnChild", NewMockSupervised(), WithSupervisor(stopStrategy))
@@ -982,7 +982,7 @@ func TestSupervisorStrategy(t *testing.T) {
 		require.NotNil(t, parent)
 
 		// create the child actor
-		fakeStrategy := NewSupervisor(WithDirective(PanicError{}, 4)) // undefined directive
+		fakeStrategy := NewSupervisor(WithDirective(&PanicError{}, 4)) // undefined directive
 		child, err := parent.SpawnChild(ctx, "SpawnChild", NewMockSupervised(), WithSupervisor(fakeStrategy))
 		require.NoError(t, err)
 		require.NotNil(t, child)
@@ -1084,7 +1084,7 @@ func TestSupervisorStrategy(t *testing.T) {
 		require.NotNil(t, parent)
 
 		// create the child actor
-		stopStrategy := NewSupervisor(WithDirective(PanicError{}, DefaultSupervisorDirective))
+		stopStrategy := NewSupervisor(WithDirective(&PanicError{}, DefaultSupervisorDirective))
 		child, err := parent.SpawnChild(ctx, "SpawnChild", &MockPostStop{}, WithSupervisor(stopStrategy))
 		require.NoError(t, err)
 		require.NotNil(t, child)
@@ -1128,7 +1128,7 @@ func TestSupervisorStrategy(t *testing.T) {
 		require.NotNil(t, parent)
 
 		// create the child actor
-		restartStrategy := NewSupervisor(WithDirective(PanicError{}, RestartDirective))
+		restartStrategy := NewSupervisor(WithDirective(&PanicError{}, RestartDirective))
 		child, err := parent.SpawnChild(ctx, "SpawnChild", NewMockSupervised(), WithSupervisor(restartStrategy))
 		require.NoError(t, err)
 		require.NotNil(t, child)
@@ -1176,7 +1176,7 @@ func TestSupervisorStrategy(t *testing.T) {
 		// create the child actor
 		restartStrategy := NewSupervisor(
 			WithStrategy(OneForAllStrategy),
-			WithDirective(PanicError{}, RestartDirective))
+			WithDirective(&PanicError{}, RestartDirective))
 		child, err := parent.SpawnChild(ctx, "SpawnChild", NewMockSupervised(), WithSupervisor(restartStrategy))
 		require.NoError(t, err)
 		require.NotNil(t, child)
@@ -1273,7 +1273,7 @@ func TestSupervisorStrategy(t *testing.T) {
 		assert.NotNil(t, parent)
 
 		// create the child actor
-		resumeStrategy := NewSupervisor(WithDirective(PanicError{}, ResumeDirective))
+		resumeStrategy := NewSupervisor(WithDirective(&PanicError{}, ResumeDirective))
 		child, err := parent.SpawnChild(ctx, "SpawnChild", NewMockSupervised(), WithSupervisor(resumeStrategy))
 		assert.NoError(t, err)
 		assert.NotNil(t, child)
@@ -1322,7 +1322,7 @@ func TestSupervisorStrategy(t *testing.T) {
 
 		restartStrategy := NewSupervisor(
 			WithStrategy(OneForOneStrategy),
-			WithDirective(PanicError{}, RestartDirective),
+			WithDirective(&PanicError{}, RestartDirective),
 			WithRetry(2, time.Minute),
 		)
 
@@ -1490,7 +1490,7 @@ func TestSupervisorStrategy(t *testing.T) {
 		require.NotNil(t, parent)
 
 		// create the child actor
-		escalationStrategy := NewSupervisor(WithDirective(PanicError{}, EscalateDirective))
+		escalationStrategy := NewSupervisor(WithDirective(&PanicError{}, EscalateDirective))
 		child, err := parent.SpawnChild(ctx, "SpawnChild", NewMockSupervised(), WithSupervisor(escalationStrategy))
 		require.NoError(t, err)
 		require.NotNil(t, child)
@@ -1532,7 +1532,7 @@ func TestSupervisorStrategy(t *testing.T) {
 		require.NotNil(t, parent)
 
 		// create the child actor
-		escalationStrategy := NewSupervisor(WithDirective(PanicError{}, EscalateDirective))
+		escalationStrategy := NewSupervisor(WithDirective(&PanicError{}, EscalateDirective))
 		child, err := parent.SpawnChild(ctx, "reinstate", NewMockSupervised(), WithSupervisor(escalationStrategy))
 		require.NoError(t, err)
 		require.NotNil(t, child)

@@ -1417,8 +1417,8 @@ func (x *actorSystem) SpawnSingleton(ctx context.Context, name string, actor Act
 		WithSupervisor(
 			NewSupervisor(
 				WithStrategy(OneForOneStrategy),
-				WithDirective(PanicError{}, StopDirective),
-				WithDirective(InternalError{}, StopDirective),
+				WithDirective(&PanicError{}, StopDirective),
+				WithDirective(&InternalError{}, StopDirective),
 				WithDirective(&runtime.PanicNilError{}, StopDirective),
 			),
 		))
@@ -3117,11 +3117,11 @@ func (x *actorSystem) spawnRebalancer(ctx context.Context) error {
 		// define the supervisor strategy to use
 		supervisor := NewSupervisor(
 			WithStrategy(OneForOneStrategy),
-			WithDirective(PanicError{}, RestartDirective),
+			WithDirective(&PanicError{}, RestartDirective),
 			WithDirective(&runtime.PanicNilError{}, RestartDirective),
-			WithDirective(rebalancingError{}, RestartDirective),
-			WithDirective(InternalError{}, ResumeDirective),
-			WithDirective(SpawnError{}, ResumeDirective),
+			WithDirective(&rebalancingError{}, RestartDirective),
+			WithDirective(&InternalError{}, ResumeDirective),
+			WithDirective(&SpawnError{}, ResumeDirective),
 		)
 
 		x.rebalancer, err = x.configPID(ctx,
@@ -3342,10 +3342,10 @@ func (x *actorSystem) runShutdownHooks(ctx context.Context) (err error) {
 	// add some recovery mechanism to handle panics
 	defer func() {
 		if r := recover(); r != nil {
-			switch err, ok := r.(error); {
+			switch v, ok := r.(error); {
 			case ok:
 				var pe *PanicError
-				if errors.As(err, &pe) {
+				if errors.As(v, &pe) {
 					err = pe
 					return
 				}
@@ -3354,7 +3354,7 @@ func (x *actorSystem) runShutdownHooks(ctx context.Context) (err error) {
 				// for rich logging purpose
 				pc, fn, line, _ := runtime.Caller(2)
 				err = NewPanicError(
-					fmt.Errorf("%w at %s[%s:%d]", err, runtime.FuncForPC(pc).Name(), fn, line),
+					fmt.Errorf("%w at %s[%s:%d]", v, runtime.FuncForPC(pc).Name(), fn, line),
 				)
 
 			default:
@@ -3365,7 +3365,6 @@ func (x *actorSystem) runShutdownHooks(ctx context.Context) (err error) {
 					fmt.Errorf("%#v at %s[%s:%d]", r, runtime.FuncForPC(pc).Name(), fn, line),
 				)
 			}
-			return
 		}
 	}()
 

@@ -123,6 +123,13 @@ func TestWithPeerStateInterval(t *testing.T) {
 	assert.EqualValues(t, 10*time.Second, system.clusterConfig.PeersStateSyncInterval())
 }
 
+func TestWithCoordinatedShutdown(t *testing.T) {
+	system := new(actorSystem)
+	opt := WithCoordinatedShutdown(&MockShutdownHook{})
+	opt.Apply(system)
+	assert.EqualValues(t, 1, len(system.shutdownHooks))
+}
+
 func TestWithPubSub(t *testing.T) {
 	system := new(actorSystem)
 	opt := WithPubSub()

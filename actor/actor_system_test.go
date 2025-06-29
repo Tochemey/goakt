@@ -40,6 +40,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/travisjeffery/go-dynaport"
+	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/tochemey/goakt/v3/address"
@@ -1617,67 +1618,300 @@ func TestActorSystem(t *testing.T) {
 		// shutdown the nats server gracefully
 		srv.Shutdown()
 	})
-	// t.Run("With CoordinatedShutdown failure", func(t *testing.T) {
-	// 	ctx := context.TODO()
-	// 	shutdownHook := func(context.Context) error { return errors.New("shutdown failure") }
+	t.Run("With CoordinatedShutdown with ShouldFail strategy", func(t *testing.T) {
+		ctx := context.TODO()
+		executionCount := atomic.NewInt32(0)
+		// don't do this in production code, this is just for testing
+		strategy := -1
 
-	// 	sys, _ := NewActorSystem("testSys",
-	// 		WithCoordinatedShutdown(shutdownHook),
-	// 		WithLogger(log.DiscardLogger))
+		sys, _ := NewActorSystem("testSys",
+			WithCoordinatedShutdown(
+				&MockShutdownHook{executionCount: executionCount, strategy: ShouldFail},
+				&MockShutdownHook{executionCount: executionCount, strategy: RecoveryStrategy(strategy)},
+			),
+			WithLogger(log.DiscardLogger))
 
-	// 	// start the actor system
-	// 	err := sys.Start(ctx)
-	// 	assert.NoError(t, err)
+		// start the actor system
+		err := sys.Start(ctx)
+		assert.NoError(t, err)
 
-	// 	util.Pause(time.Second)
+		util.Pause(time.Second)
 
-	// 	actor := NewMockActor()
-	// 	actorRef, err := sys.Spawn(ctx, "Test", actor)
-	// 	assert.NoError(t, err)
-	// 	assert.NotNil(t, actorRef)
+		actor := NewMockActor()
+		actorRef, err := sys.Spawn(ctx, "Test", actor)
+		assert.NoError(t, err)
+		assert.NotNil(t, actorRef)
 
-	// 	assert.NotZero(t, sys.Uptime())
+		assert.NotZero(t, sys.Uptime())
 
-	// 	// stop the actor after some time
-	// 	util.Pause(time.Second)
-	// 	err = sys.Stop(ctx)
-	// 	require.Error(t, err)
-	// })
-	// t.Run("With CoordinatedShutdown", func(t *testing.T) {
-	// 	ctx := context.TODO()
-	// 	counter := atomic.NewInt32(0)
-	// 	shutdownHook := func(context.Context) error {
-	// 		counter.Add(1)
-	// 		return nil
-	// 	}
+		// stop the actor after some time
+		util.Pause(time.Second)
+		err = sys.Stop(ctx)
+		require.Error(t, err)
+		require.EqualValues(t, 1, executionCount.Load())
+	})
+	t.Run("With CoordinatedShutdown with ShouldSkip strategy", func(t *testing.T) {
+		ctx := context.TODO()
+		executionCount := atomic.NewInt32(0)
+		// don't do this in production code, this is just for testing
+		strategy := -1
 
-	// 	sys, _ := NewActorSystem("testSys",
-	// 		WithCoordinatedShutdown(shutdownHook, shutdownHook),
-	// 		WithLogger(log.DiscardLogger))
+		sys, _ := NewActorSystem("testSys",
+			WithCoordinatedShutdown(
+				&MockShutdownHook{executionCount: executionCount, strategy: ShouldSkip},
+				&MockShutdownHook{executionCount: executionCount, strategy: RecoveryStrategy(strategy)},
+			),
+			WithLogger(log.DiscardLogger))
 
-	// 	// start the actor system
-	// 	err := sys.Start(ctx)
-	// 	assert.NoError(t, err)
+		// start the actor system
+		err := sys.Start(ctx)
+		assert.NoError(t, err)
 
-	// 	util.Pause(time.Second)
+		util.Pause(time.Second)
 
-	// 	actor := NewMockActor()
-	// 	actorRef, err := sys.Spawn(ctx, "Test", actor)
-	// 	assert.NoError(t, err)
-	// 	assert.NotNil(t, actorRef)
+		actor := NewMockActor()
+		actorRef, err := sys.Spawn(ctx, "Test", actor)
+		assert.NoError(t, err)
+		assert.NotNil(t, actorRef)
 
-	// 	assert.NotZero(t, sys.Uptime())
+		assert.NotZero(t, sys.Uptime())
 
-	// 	// stop the actor after some time
-	// 	util.Pause(time.Second)
-	// 	err = sys.Stop(ctx)
-	// 	require.NoError(t, err)
+		// stop the actor after some time
+		util.Pause(time.Second)
+		err = sys.Stop(ctx)
+		require.Error(t, err)
+		require.EqualValues(t, 2, executionCount.Load())
+	})
+	t.Run("With CoordinatedShutdown with ShouldRetryAndFail strategy", func(t *testing.T) {
+		ctx := context.TODO()
+		executionCount := atomic.NewInt32(0)
+		// don't do this in production code, this is just for testing
+		strategy := -1
 
-	// 	util.Pause(time.Second)
+		sys, _ := NewActorSystem("testSys",
+			WithCoordinatedShutdown(
+				&MockShutdownHook{executionCount: executionCount, strategy: ShouldRetryAndFail, maxRetries: 2},
+				&MockShutdownHook{executionCount: executionCount, strategy: RecoveryStrategy(strategy)},
+			),
+			WithLogger(log.DiscardLogger))
 
-	// 	assert.Zero(t, sys.Uptime())
-	// 	require.EqualValues(t, 2, counter.Load())
-	// })
+		// start the actor system
+		err := sys.Start(ctx)
+		assert.NoError(t, err)
+
+		util.Pause(time.Second)
+
+		actor := NewMockActor()
+		actorRef, err := sys.Spawn(ctx, "Test", actor)
+		assert.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		assert.NotZero(t, sys.Uptime())
+
+		// stop the actor after some time
+		util.Pause(time.Second)
+		err = sys.Stop(ctx)
+		require.Error(t, err)
+		require.EqualValues(t, 3, executionCount.Load())
+	})
+	t.Run("With CoordinatedShutdown with ShouldSkip strategy", func(t *testing.T) {
+		ctx := context.TODO()
+		executionCount := atomic.NewInt32(0)
+		// don't do this in production code, this is just for testing
+		strategy := -1
+
+		sys, _ := NewActorSystem("testSys",
+			WithCoordinatedShutdown(
+				&MockShutdownHook{executionCount: executionCount, strategy: ShouldRetryAndSkip, maxRetries: 2},
+				&MockShutdownHook{executionCount: executionCount, strategy: RecoveryStrategy(strategy)},
+			),
+			WithLogger(log.DiscardLogger))
+
+		// start the actor system
+		err := sys.Start(ctx)
+		assert.NoError(t, err)
+
+		util.Pause(time.Second)
+
+		actor := NewMockActor()
+		actorRef, err := sys.Spawn(ctx, "Test", actor)
+		assert.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		assert.NotZero(t, sys.Uptime())
+
+		// stop the actor after some time
+		util.Pause(time.Second)
+		err = sys.Stop(ctx)
+		require.Error(t, err)
+		require.EqualValues(t, 4, executionCount.Load())
+	})
+	t.Run("With CoordinatedShutdown with panic handling", func(t *testing.T) {
+		ctx := context.TODO()
+		executionCount := atomic.NewInt32(0)
+		// don't do this in production code, this is just for testing
+		strategy := -1
+
+		sys, _ := NewActorSystem("testSys",
+			WithCoordinatedShutdown(
+				&MockPanickingShutdownHook{executionCount: executionCount},
+				&MockShutdownHook{executionCount: executionCount, strategy: RecoveryStrategy(strategy)},
+			),
+			WithLogger(log.DiscardLogger))
+
+		// start the actor system
+		err := sys.Start(ctx)
+		assert.NoError(t, err)
+
+		util.Pause(time.Second)
+
+		actor := NewMockActor()
+		actorRef, err := sys.Spawn(ctx, "Test", actor)
+		assert.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		assert.NotZero(t, sys.Uptime())
+
+		// stop the actor after some time
+		util.Pause(time.Second)
+		err = sys.Stop(ctx)
+		require.Error(t, err)
+		require.EqualValues(t, 1, executionCount.Load())
+	})
+	t.Run("With CoordinatedShutdown with panic handling: case 1", func(t *testing.T) {
+		ctx := context.TODO()
+		executionCount := atomic.NewInt32(0)
+		// don't do this in production code, this is just for testing
+		strategy := -1
+
+		sys, _ := NewActorSystem("testSys",
+			WithCoordinatedShutdown(
+				&MockPanickingShutdownHook{executionCount: executionCount, testCase: "case1"},
+				&MockShutdownHook{executionCount: executionCount, strategy: RecoveryStrategy(strategy)},
+			),
+			WithLogger(log.DiscardLogger))
+
+		// start the actor system
+		err := sys.Start(ctx)
+		assert.NoError(t, err)
+
+		util.Pause(time.Second)
+
+		actor := NewMockActor()
+		actorRef, err := sys.Spawn(ctx, "Test", actor)
+		assert.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		assert.NotZero(t, sys.Uptime())
+
+		// stop the actor after some time
+		util.Pause(time.Second)
+		err = sys.Stop(ctx)
+		require.Error(t, err)
+		require.ErrorContains(t, err, "case1 panic error")
+		require.EqualValues(t, 1, executionCount.Load())
+	})
+	t.Run("With CoordinatedShutdown with panic handling: case 2", func(t *testing.T) {
+		ctx := context.TODO()
+		executionCount := atomic.NewInt32(0)
+		// don't do this in production code, this is just for testing
+		strategy := -1
+
+		sys, _ := NewActorSystem("testSys",
+			WithCoordinatedShutdown(
+				&MockPanickingShutdownHook{executionCount: executionCount, testCase: "case2"},
+				&MockShutdownHook{executionCount: executionCount, strategy: RecoveryStrategy(strategy)},
+			),
+			WithLogger(log.DiscardLogger))
+
+		// start the actor system
+		err := sys.Start(ctx)
+		assert.NoError(t, err)
+
+		util.Pause(time.Second)
+
+		actor := NewMockActor()
+		actorRef, err := sys.Spawn(ctx, "Test", actor)
+		assert.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		assert.NotZero(t, sys.Uptime())
+
+		// stop the actor after some time
+		util.Pause(time.Second)
+		err = sys.Stop(ctx)
+		require.Error(t, err)
+		require.ErrorContains(t, err, "case2 panic error")
+		require.EqualValues(t, 1, executionCount.Load())
+	})
+	t.Run("With CoordinatedShutdown failure without recovery", func(t *testing.T) {
+		ctx := context.TODO()
+		executionCount := atomic.NewInt32(0)
+		// don't do this in production code, this is just for testing
+		strategy := -1
+
+		sys, _ := NewActorSystem("testSys",
+			WithCoordinatedShutdown(
+				&MockShutdownHookWithoutRecovery{executionCount: executionCount},
+				&MockShutdownHook{executionCount: executionCount, strategy: RecoveryStrategy(strategy)},
+			),
+			WithLogger(log.DiscardLogger))
+
+		// start the actor system
+		err := sys.Start(ctx)
+		assert.NoError(t, err)
+
+		util.Pause(time.Second)
+
+		actor := NewMockActor()
+		actorRef, err := sys.Spawn(ctx, "Test", actor)
+		assert.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		assert.NotZero(t, sys.Uptime())
+
+		// stop the actor after some time
+		util.Pause(time.Second)
+		err = sys.Stop(ctx)
+		require.Error(t, err)
+		require.ErrorContains(t, err, "mock shutdown hook without recovery")
+		require.EqualValues(t, 1, executionCount.Load())
+	})
+	t.Run("With CoordinatedShutdown", func(t *testing.T) {
+		ctx := context.TODO()
+		counter := atomic.NewInt32(0)
+
+		// don't do this in production code, this is just for testing
+		strategy := -1
+		sys, _ := NewActorSystem("testSys",
+			WithCoordinatedShutdown(
+				&MockShutdownHook{executionCount: counter, strategy: RecoveryStrategy(strategy)},
+				&MockShutdownHook{executionCount: counter, strategy: RecoveryStrategy(strategy)}),
+			WithLogger(log.DiscardLogger))
+
+		// start the actor system
+		err := sys.Start(ctx)
+		assert.NoError(t, err)
+
+		util.Pause(time.Second)
+
+		actor := NewMockActor()
+		actorRef, err := sys.Spawn(ctx, "Test", actor)
+		assert.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		assert.NotZero(t, sys.Uptime())
+
+		// stop the actor after some time
+		util.Pause(time.Second)
+		err = sys.Stop(ctx)
+		require.NoError(t, err)
+
+		util.Pause(time.Second)
+
+		assert.Zero(t, sys.Uptime())
+		require.EqualValues(t, 2, counter.Load())
+	})
 	t.Run("With ActorRefs", func(t *testing.T) {
 		// create a context
 		ctx := context.TODO()

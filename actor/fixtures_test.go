@@ -1236,3 +1236,76 @@ func (p *MockGrainActor) Receive(ctx *ReceiveContext) {
 		ctx.Unhandled()
 	}
 }
+
+type MockShutdownHook struct {
+	strategy       RecoveryStrategy
+	executionCount *atomic.Int32
+	maxRetries     int
+}
+
+var _ ShutdownHook = (*MockShutdownHook)(nil)
+
+// Execute implements ShutdownHook.
+func (m *MockShutdownHook) Execute(context.Context, ActorSystem) error {
+	defer func() {
+		m.executionCount.Inc()
+	}()
+
+	switch m.strategy {
+	case ShouldFail:
+		return fmt.Errorf("mock shutdown hook failed")
+	case ShouldRetryAndFail:
+		return fmt.Errorf("mock shutdown hook failed after retrying")
+	case ShouldSkip:
+		return fmt.Errorf("mock shutdown hook skipped")
+	case ShouldRetryAndSkip:
+		return fmt.Errorf("mock shutdown hook skipped after retrying")
+	default:
+		return nil
+	}
+}
+
+// Recovery implements ShutdownHook.
+func (m *MockShutdownHook) Recovery() *ShutdownHookRecovery {
+	return NewShutdownHookRecovery(
+		WithShutdownHookRecoveryStrategy(m.strategy),
+		WithShutdownHookRetry(m.maxRetries, 100*time.Millisecond),
+	)
+}
+
+type MockPanickingShutdownHook struct {
+	executionCount *atomic.Int32
+	testCase       string
+}
+
+func (m *MockPanickingShutdownHook) Execute(context.Context, ActorSystem) error {
+	defer func() {
+		m.executionCount.Inc()
+	}()
+
+	switch m.testCase {
+	case "case1":
+		panic(errors.New("case1 panic error"))
+	case "case2":
+		panic(NewPanicError(errors.New("case2 panic error")))
+	default:
+		panic("implement me")
+	}
+}
+
+func (m *MockPanickingShutdownHook) Recovery() *ShutdownHookRecovery {
+	return nil
+}
+
+type MockShutdownHookWithoutRecovery struct {
+	executionCount *atomic.Int32
+}
+
+func (m *MockShutdownHookWithoutRecovery) Execute(context.Context, ActorSystem) error {
+	m.executionCount.Inc()
+	return errors.New("mock shutdown hook without recovery")
+}
+
+func (m *MockShutdownHookWithoutRecovery) Recovery() *ShutdownHookRecovery {
+	return nil
+}
