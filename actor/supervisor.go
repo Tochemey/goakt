@@ -221,7 +221,7 @@ func NewSupervisor(opts ...SupervisorOption) *Supervisor {
 	}
 
 	// set the default directives
-	s.directives.Set(errorType(PanicError{}), StopDirective)
+	s.directives.Set(errorType(&PanicError{}), StopDirective)
 	s.directives.Set(errorType(&runtime.PanicNilError{}), RestartDirective)
 
 	for _, opt := range opts {

@@ -44,6 +44,7 @@ import (
 
 	"connectrpc.com/connect"
 	goset "github.com/deckarep/golang-set/v2"
+	"github.com/flowchartsman/retry"
 	"github.com/google/uuid"
 	"go.akshayshah.org/connectproto"
 	"go.uber.org/atomic"
@@ -1416,8 +1417,8 @@ func (x *actorSystem) SpawnSingleton(ctx context.Context, name string, actor Act
 		WithSupervisor(
 			NewSupervisor(
 				WithStrategy(OneForOneStrategy),
-				WithDirective(PanicError{}, StopDirective),
-				WithDirective(InternalError{}, StopDirective),
+				WithDirective(&PanicError{}, StopDirective),
+				WithDirective(&InternalError{}, StopDirective),
 				WithDirective(&runtime.PanicNilError{}, StopDirective),
 			),
 		))
@@ -2537,14 +2538,7 @@ func (x *actorSystem) shutdown(ctx context.Context) error {
 	}
 
 	// Run shutdown hooks and collect errors
-	var hooksErrs []error
-	for _, hook := range x.shutdownHooks {
-		if err := hook(ctx); err != nil {
-			x.logger.Errorf("shutdown hook execution failed: %v", err)
-			hooksErrs = append(hooksErrs, err)
-		}
-	}
-	hooksErr := multierr.Combine(hooksErrs...)
+	hooksErr := x.runShutdownHooks(ctx)
 
 	// Helper to shut down cluster and remoting
 	shutdownClusterAndRemoting := func() error {
@@ -3123,11 +3117,11 @@ func (x *actorSystem) spawnRebalancer(ctx context.Context) error {
 		// define the supervisor strategy to use
 		supervisor := NewSupervisor(
 			WithStrategy(OneForOneStrategy),
-			WithDirective(PanicError{}, RestartDirective),
+			WithDirective(&PanicError{}, RestartDirective),
 			WithDirective(&runtime.PanicNilError{}, RestartDirective),
-			WithDirective(rebalancingError{}, RestartDirective),
-			WithDirective(InternalError{}, ResumeDirective),
-			WithDirective(SpawnError{}, ResumeDirective),
+			WithDirective(&rebalancingError{}, RestartDirective),
+			WithDirective(&InternalError{}, ResumeDirective),
+			WithDirective(&SpawnError{}, ResumeDirective),
 		)
 
 		x.rebalancer, err = x.configPID(ctx,
@@ -3333,6 +3327,89 @@ func (x *actorSystem) shutdownRemoting(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// runShutdownHooks executes all registered shutdown hooks in the CoordinatedShutdown instance.
+// nolint: gocyclo
+func (x *actorSystem) runShutdownHooks(ctx context.Context) (err error) {
+	hooks := x.shutdownHooks
+	if len(hooks) == 0 {
+		// No hooks to run, return nil
+		return nil
+	}
+
+	var errs []error
+	// add some recovery mechanism to handle panics
+	defer func() {
+		if r := recover(); r != nil {
+			switch v, ok := r.(error); {
+			case ok:
+				var pe *PanicError
+				if errors.As(v, &pe) {
+					err = pe
+					return
+				}
+
+				// this is a normal error just wrap it with some stack trace
+				// for rich logging purpose
+				pc, fn, line, _ := runtime.Caller(2)
+				err = NewPanicError(
+					fmt.Errorf("%w at %s[%s:%d]", v, runtime.FuncForPC(pc).Name(), fn, line),
+				)
+
+			default:
+				// we have no idea what panic it is. Enrich it with some stack trace for rich
+				// logging purpose
+				pc, fn, line, _ := runtime.Caller(2)
+				err = NewPanicError(
+					fmt.Errorf("%#v at %s[%s:%d]", r, runtime.FuncForPC(pc).Name(), fn, line),
+				)
+			}
+		}
+	}()
+
+	for _, hook := range hooks {
+		if hook == nil {
+			continue
+		}
+		err := hook.Execute(ctx, x)
+		if err == nil {
+			continue
+		}
+
+		recovery := hook.Recovery()
+		if recovery == nil {
+			// If no recovery strategy is defined, we treat it as a failure.
+			return err
+		}
+
+		switch recovery.Strategy() {
+		case ShouldFail:
+			return err
+		case ShouldRetryAndFail:
+			if retryErr := runWithRetry(ctx, hook, x, recovery); retryErr != nil {
+				return retryErr
+			}
+		case ShouldSkip:
+			errs = append(errs, err)
+		case ShouldRetryAndSkip:
+			if retryErr := runWithRetry(ctx, hook, x, recovery); retryErr != nil {
+				errs = append(errs, retryErr)
+			}
+		}
+	}
+	if len(errs) > 0 {
+		return multierr.Combine(errs...)
+	}
+	return nil
+}
+
+func runWithRetry(ctx context.Context, hook ShutdownHook, sys *actorSystem, recovery *ShutdownHookRecovery) error {
+	retries, delay := recovery.Retry()
+	retrier := retry.NewRetrier(retries, delay, delay)
+	return retrier.RunContext(ctx, func(ctx context.Context) error {
+		return hook.Execute(ctx, sys)
+	})
 }
 
 func isReservedName(name string) bool {
