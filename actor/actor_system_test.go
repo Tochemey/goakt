@@ -1714,7 +1714,7 @@ func TestActorSystem(t *testing.T) {
 		require.Error(t, err)
 		require.EqualValues(t, 3, executionCount.Load())
 	})
-	t.Run("With CoordinatedShutdown with ShouldSkip strategy", func(t *testing.T) {
+	t.Run("With CoordinatedShutdown with ShouldRetryAndSkip strategy", func(t *testing.T) {
 		ctx := context.TODO()
 		executionCount := atomic.NewInt32(0)
 		// don't do this in production code, this is just for testing
