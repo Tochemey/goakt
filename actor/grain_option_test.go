@@ -59,5 +59,4 @@ func TestGrainOptions(t *testing.T) {
 		option(config)
 		require.Equal(t, time.Duration(-1), config.deactivateAfter)
 	})
-
 }
