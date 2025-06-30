@@ -29,6 +29,7 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
+	"sync"
 	"time"
 
 	"github.com/flowchartsman/retry"
@@ -37,6 +38,8 @@ import (
 	"github.com/tochemey/goakt/v3/extension"
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/collection"
+	"github.com/tochemey/goakt/v3/internal/ticker"
+	"github.com/tochemey/goakt/v3/internal/types"
 	"github.com/tochemey/goakt/v3/internal/workerpool"
 	"github.com/tochemey/goakt/v3/log"
 )
@@ -64,21 +67,30 @@ type grainPID struct {
 	dependencies *collection.Map[string, extension.Dependency]
 	activated    *atomic.Bool
 	config       *grainConfig
+
+	mu                 *sync.Mutex
+	haltPassivationLnr chan types.Unit
+	deactivateAfter    *atomic.Duration
+
+	onPoisonPill *atomic.Bool
 }
 
 func newGrainPID(identity *GrainIdentity, grain Grain, actorSystem ActorSystem, config *grainConfig) *grainPID {
 	pid := &grainPID{
-		grain:             grain,
-		identity:          identity,
-		mailbox:           newGrainMailbox(),
-		actorSystem:       actorSystem,
-		logger:            actorSystem.Logger(),
-		remoting:          actorSystem.getRemoting(),
-		workerPool:        actorSystem.getWorkerPool(),
-		dependencies:      collection.NewMap[string, extension.Dependency](),
-		activated:         atomic.NewBool(false),
-		latestReceiveTime: atomic.Time{},
-		config:            config,
+		grain:              grain,
+		identity:           identity,
+		mailbox:            newGrainMailbox(),
+		actorSystem:        actorSystem,
+		logger:             actorSystem.Logger(),
+		remoting:           actorSystem.getRemoting(),
+		workerPool:         actorSystem.getWorkerPool(),
+		dependencies:       collection.NewMap[string, extension.Dependency](),
+		activated:          atomic.NewBool(false),
+		latestReceiveTime:  atomic.Time{},
+		config:             config,
+		haltPassivationLnr: make(chan types.Unit, 1),
+		mu:                 &sync.Mutex{},
+		onPoisonPill:       atomic.NewBool(false),
 	}
 
 	pid.processing.Store(idle)
@@ -106,8 +118,13 @@ func (pid *grainPID) activate(ctx context.Context) error {
 	}
 
 	pid.activated.Store(true)
+	pid.deactivateAfter = atomic.NewDuration(pid.config.deactivateAfter)
 	pid.logger.Infof("Grain %s successfully activated.", pid.identity.String())
 	cancel()
+
+	if pid.deactivateAfter.Load() > 0 {
+		go pid.deactivationLoop()
+	}
 
 	return nil
 }
@@ -118,7 +135,11 @@ func (pid *grainPID) deactivate(ctx context.Context) error {
 
 	defer func() {
 		pid.activated.Store(false)
+		pid.latestReceiveTime.Store(time.Time{})
+		pid.onPoisonPill.Store(false)
 	}()
+
+	pid.haltPassivationLnr <- types.Unit{}
 
 	logger.Infof("Deactivating Grain %s ...", pid.identity.String())
 	if pid.remoting != nil {
@@ -128,6 +149,14 @@ func (pid *grainPID) deactivate(ctx context.Context) error {
 	if err := pid.grain.OnDeactivate(ctx, newGrainProps(pid.identity, pid.actorSystem)); err != nil {
 		pid.logger.Errorf("Grain %s deactivation failed.", pid.identity.String())
 		return NewErrGrainDeactivationFailure(err)
+	}
+
+	pid.actorSystem.getGrains().Delete(*pid.identity)
+	if pid.actorSystem.InCluster() {
+		if err := pid.actorSystem.getCluster().RemoveGrain(ctx, pid.identity.String()); err != nil {
+			pid.logger.Errorf("failed to remove grain %s from cluster: %v", pid.identity.String(), err)
+			return NewErrGrainDeactivationFailure(err)
+		}
 	}
 
 	pid.logger.Infof("Grain %s successfully deactivated.", pid.identity.String())
@@ -189,6 +218,7 @@ func (pid *grainPID) receiveLoop() {
 }
 
 func (pid *grainPID) handlePoisonPill(grainContext *GrainContext) {
+	pid.onPoisonPill.Store(true)
 	defer pid.recovery(grainContext)
 	if err := pid.deactivate(grainContext.Context()); err != nil {
 		grainContext.Err(err)
@@ -236,10 +266,48 @@ func (pid *grainPID) recovery(received *GrainContext) {
 
 // getGrain returns the Grain instance
 func (pid *grainPID) getGrain() Grain {
-	return pid.grain
+	pid.mu.Lock()
+	grain := pid.grain
+	pid.mu.Unlock()
+	return grain
 }
 
 // getIdentity returns the GrainIdentity of the Grain
 func (pid *grainPID) getIdentity() *GrainIdentity {
-	return pid.identity
+	pid.mu.Lock()
+	id := pid.identity
+	pid.mu.Unlock()
+	return id
+}
+
+func (pid *grainPID) deactivationLoop() {
+	clock := ticker.New(pid.deactivateAfter.Load())
+	defer clock.Stop()
+
+	tickerStopSig := make(chan types.Unit, 1)
+
+	clock.Start()
+
+	go func() {
+		for {
+			select {
+			case <-clock.Ticks:
+				elapsed := time.Since(pid.latestReceiveTime.Load())
+				if elapsed >= pid.deactivateAfter.Load() {
+					if !pid.onPoisonPill.Load() {
+						if err := pid.deactivate(context.Background()); err != nil {
+							pid.logger.Errorf("deactivation loop failed for Grain=(%s): %v", pid.identity.String(), err)
+						}
+					}
+					tickerStopSig <- types.Unit{}
+					return
+				}
+			case <-pid.haltPassivationLnr:
+				tickerStopSig <- types.Unit{}
+				return
+			}
+		}
+	}()
+
+	<-tickerStopSig
 }

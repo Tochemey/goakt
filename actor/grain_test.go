@@ -28,6 +28,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -96,12 +97,6 @@ func TestGrain(t *testing.T) {
 		err = testSystem.TellGrain(ctx, identity, new(goaktpb.PoisonPill))
 		require.NoError(t, err)
 
-		// check if the grain is activated
-		gp, ok = testSystem.(*actorSystem).grains.Get(*identity)
-		require.True(t, ok)
-		require.NotNil(t, gp)
-		require.False(t, gp.isActive())
-
 		require.NoError(t, testSystem.Stop(ctx))
 	})
 	t.Run("With multiple nodes", func(t *testing.T) {
@@ -159,11 +154,19 @@ func TestGrain(t *testing.T) {
 
 		util.Pause(time.Second)
 
+		identity, err = node1.GrainIdentity(ctx, "testGrain", func(_ context.Context) (Grain, error) {
+			return grain, nil
+		})
+		require.NoError(t, err)
+		require.NotNil(t, identity)
+
 		// check if the grain is activated
 		gp, ok = node1.(*actorSystem).grains.Get(*identity)
 		require.True(t, ok)
 		require.NotNil(t, gp)
-		require.False(t, gp.isActive())
+		require.True(t, gp.isActive())
+
+		util.Pause(time.Second)
 
 		// send a message to the grain to reactivate it
 		response, err = node3.AskGrain(ctx, identity, message, time.Second)
@@ -185,9 +188,8 @@ func TestGrain(t *testing.T) {
 
 		// check if the grain is activated
 		gp, ok = node1.(*actorSystem).grains.Get(*identity)
-		require.True(t, ok)
-		require.NotNil(t, gp)
-		require.False(t, gp.isActive())
+		require.False(t, ok)
+		require.Nil(t, gp)
 
 		require.NoError(t, node1.Stop(ctx))
 		require.NoError(t, node3.Stop(ctx))
@@ -925,9 +927,19 @@ func TestGrain(t *testing.T) {
 
 		// check if the grain is activated
 		gp, ok = testSystem.(*actorSystem).grains.Get(*identity)
+		require.False(t, ok)
+		require.Nil(t, gp)
+
+		// reactivate the grain
+		identity, err = testSystem.GrainIdentity(ctx, "testGrain", func(ctx context.Context) (Grain, error) {
+			return grain, nil
+		})
+
+		// check if the grain is activated
+		gp, ok = testSystem.(*actorSystem).grains.Get(*identity)
 		require.True(t, ok)
 		require.NotNil(t, gp)
-		require.False(t, gp.isActive())
+		require.True(t, gp.isActive())
 
 		// send a message to the grain to reactivate it
 		response, err = testSystem.AskGrain(ctx, identity, message, time.Second)
@@ -941,6 +953,68 @@ func TestGrain(t *testing.T) {
 		require.True(t, ok)
 		require.NotNil(t, gp)
 		require.True(t, gp.isActive())
+
+		require.NoError(t, testSystem.Stop(ctx))
+	})
+	t.Run("With Passivation", func(t *testing.T) {
+		ctx := t.Context()
+		testSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NotNil(t, testSystem)
+
+		// start the actor system
+		err = testSystem.Start(ctx)
+		require.NoError(t, err)
+		util.Pause(time.Second)
+
+		// create a grain instance
+		grain := NewMockGrain()
+		identity, err := testSystem.GrainIdentity(ctx, "testGrain", func(_ context.Context) (Grain, error) {
+			return grain, nil
+		}, WithGrainDeactivateAfter(200*time.Millisecond))
+		require.NoError(t, err)
+		require.NotNil(t, identity)
+
+		wg := sync.WaitGroup{}
+		wg.Add(1)
+		go func() {
+			util.Pause(500 * time.Millisecond)
+			wg.Done()
+		}()
+		// block until timer is up
+		wg.Wait()
+
+		// check if the grain is activated
+		gp, ok := testSystem.(*actorSystem).grains.Get(*identity)
+		require.False(t, ok)
+		require.Nil(t, gp)
+
+		identity, err = testSystem.GrainIdentity(ctx, "testGrain", func(_ context.Context) (Grain, error) {
+			return grain, nil
+		}, WithLongLivedGrain())
+		require.NoError(t, err)
+		require.NotNil(t, identity)
+
+		message := new(testpb.TestReply)
+		response, err := testSystem.AskGrain(ctx, identity, message, time.Second)
+		require.NoError(t, err)
+		require.NotNil(t, response)
+		require.IsType(t, &testpb.Reply{}, response)
+
+		// check if the grain is activated
+		gp, ok = testSystem.(*actorSystem).grains.Get(*identity)
+		require.True(t, ok)
+		require.NotNil(t, gp)
+		require.True(t, gp.isActive())
+
+		// deactivate the grain
+		err = testSystem.TellGrain(ctx, identity, new(goaktpb.PoisonPill))
+		require.NoError(t, err)
+
+		// check if the grain is activated
+		gp, ok = testSystem.(*actorSystem).grains.Get(*identity)
+		require.False(t, ok)
+		require.Nil(t, gp)
 
 		require.NoError(t, testSystem.Stop(ctx))
 	})
