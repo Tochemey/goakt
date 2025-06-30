@@ -36,7 +36,7 @@ import (
 )
 
 func TestClusterConfig(t *testing.T) {
-	t.Run("With happy path", func(t *testing.T) {
+	t.Run("With happy path with Kinds", func(t *testing.T) {
 		provider := new(testkit.Provider)
 		exchanger := new(exchanger)
 		tester := new(MockActor)
@@ -84,7 +84,51 @@ func TestClusterConfig(t *testing.T) {
 		assert.True(t, provider == config.Discovery())
 		assert.Len(t, config.Kinds(), 3)
 	})
+	t.Run("With happy path with Grains", func(t *testing.T) {
+		provider := new(testkit.Provider)
+		tempdir := t.TempDir()
 
+		config := NewClusterConfig().
+			WithGrains(new(MockGrain)).
+			WithDiscoveryPort(3220).
+			WithPeersPort(3222).
+			WithMinimumPeersQuorum(1).
+			WithReplicaCount(1).
+			WithWriteQuorum(1).
+			WithReadQuorum(1).
+			WithPartitionCount(3).
+			WithTableSize(10 * size.MB).
+			WithWAL(tempdir).
+			WithWriteTimeout(10 * time.Second).
+			WithShutdownTimeout(10 * time.Second).
+			WithReadTimeout(10 * time.Second).
+			WithBootstrapTimeout(10 * time.Second).
+			WithClusterStateSyncInterval(10 * time.Second).
+			WithPeersStateSyncInterval(10 * time.Second).
+			WithDiscovery(provider)
+
+		require.NoError(t, config.Validate())
+		assert.EqualValues(t, 3220, config.DiscoveryPort())
+		assert.EqualValues(t, 3222, config.PeersPort())
+		assert.EqualValues(t, 1, config.MinimumPeersQuorum())
+		assert.EqualValues(t, 1, config.ReplicaCount())
+		assert.EqualValues(t, 1, config.ReadQuorum())
+		assert.EqualValues(t, 1, config.WriteQuorum())
+		assert.EqualValues(t, 3, config.PartitionCount())
+		assert.Equal(t, 10*time.Second, config.WriteTimeout())
+		assert.Equal(t, 10*time.Second, config.ReadTimeout())
+		assert.Equal(t, 10*time.Second, config.ShutdownTimeout())
+		assert.Equal(t, 10*time.Second, config.BootstrapTimeout())
+		assert.Equal(t, 10*time.Second, config.ClusterStateSyncInterval())
+		assert.Equal(t, 10*time.Second, config.PeersStateSyncInterval())
+
+		wal := config.WAL()
+		assert.NotNil(t, wal)
+		assert.Exactly(t, tempdir, *wal)
+		assert.Exactly(t, uint64(10*size.MB), config.TableSize())
+		assert.True(t, provider == config.Discovery())
+		assert.Len(t, config.Grains(), 1)
+	})
 	t.Run("With invalid config setting", func(t *testing.T) {
 		config := NewClusterConfig().
 			WithKinds(new(exchanger), new(MockActor)).

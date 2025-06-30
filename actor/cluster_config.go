@@ -463,7 +463,7 @@ func (x *ClusterConfig) Validate() error {
 		AddAssertion(x.minimumPeersQuorum >= 1, "minimum peers quorum must be at least one").
 		AddAssertion(x.discoveryPort > 0, "discovery port is invalid").
 		AddAssertion(x.peersPort > 0, "peers port is invalid").
-		AddAssertion(len(x.kinds.Values()) > 1, "actor kinds are not defined").
+		AddAssertion(len(x.kinds.Values()) > 1 || len(x.grains.Values()) >= 1, "actor kinds are not defined").
 		AddAssertion(x.replicaCount >= 1, "cluster replicaCount is invalid").
 		AddAssertion(x.writeQuorum >= 1, "cluster writeQuorum is invalid").
 		AddAssertion(x.readQuorum >= 1, "cluster readQuorum is invalid").
