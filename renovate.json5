@@ -1,0 +1,118 @@
+{
+  $schema: 'https://docs.renovatebot.com/renovate-schema.json',
+  extends: [
+    'config:recommended',
+  ],
+  assigneesFromCodeOwners: true,
+  commitMessagePrefix: 'chore(deps): ',
+  dependencyDashboard: false,
+  rebaseWhen: 'conflicted',
+  schedule: 'on Wednesdays',
+  prHourlyLimit: 5,
+  minimumReleaseAge: '14 days',
+  rangeStrategy: "widen",
+  constraints: {
+    go: '1.24',
+  },
+  enabledManagers: [
+    'custom.regex',
+    'github-actions',
+    'gomod',
+  ],
+  postUpdateOptions: [
+    'gomodUpdateImportPaths',
+    'gomodTidy',
+  ],
+  ignoreDeps: [
+    'k8s.io/api',
+    'k8s.io/apimachinery',
+    'k8s.io/client-go',
+    'k8s.io/kube-openapi',
+    'sigs.k8s.io/json',
+    'sigs.k8s.io/structured-merge-diff/v4',
+    'k8s.io/utils',
+  ],
+  packageRules: [
+    {
+      groupName: 'go minor and patch',
+      matchCategories: [
+        'golang',
+      ],
+      matchUpdateTypes: [
+        'digest',
+        'patch',
+        'minor',
+      ],
+      minimumReleaseAge: '3 days',
+    },
+  ],
+  customManagers: [
+    {
+      customType: 'regex',
+      managerFilePatterns: [
+        'renovate.json5$/',
+      ],
+      matchStrings: [
+        'constraints: {(\\s*\\n\\s*)"go":\\s*"(?<currentValue>.*?)"',
+      ],
+      depNameTemplate: 'go',
+      datasourceTemplate: 'golang-version',
+      versioningTemplate: 'npm',
+    },
+    {
+      customType: 'regex',
+      managerFilePatterns: [
+        '/Earthfile$/',
+      ],
+      matchStrings: [
+        'FROM golang:(?<currentValue>.*?)\\n',
+      ],
+      depNameTemplate: 'golang',
+      datasourceTemplate: 'docker',
+    },
+    {
+      customType: 'regex',
+      managerFilePatterns: [
+        '/Earthfile$/',
+      ],
+      matchStrings: [
+        'google.golang.org/protobuf/cmd/protoc-gen-go@(?<currentValue>.*?)\\n',
+      ],
+      depNameTemplate: 'google.golang.org/protobuf',
+      datasourceTemplate: 'go',
+    },
+    {
+      customType: 'regex',
+      managerFilePatterns: [
+        '/Earthfile$/',
+      ],
+      matchStrings: [
+        'google.golang.org/grpc/cmd/protoc-gen-go-grpc@(?<currentValue>.*?)\\n',
+      ],
+      depNameTemplate: 'google.golang.org/grpc/cmd/protoc-gen-go-grpc',
+      datasourceTemplate: 'go',
+    },
+    {
+      customType: 'regex',
+      managerFilePatterns: [
+        '/Earthfile$/',
+      ],
+      matchStrings: [
+        'github.com/bufbuild/buf/cmd/buf@(?<currentValue>.*?)\\n',
+      ],
+      depNameTemplate: 'github.com/bufbuild/buf',
+      datasourceTemplate: 'go',
+    },
+    {
+      customType: 'regex',
+      managerFilePatterns: [
+        '/Earthfile$/',
+      ],
+      matchStrings: [
+        '\\$\\(go env GOPATH\\)/bin (?<currentValue>.*?)\\n',
+      ],
+      depNameTemplate: 'golangci/golangci-lint',
+      datasourceTemplate: 'github-releases',
+    },
+  ]
+}
