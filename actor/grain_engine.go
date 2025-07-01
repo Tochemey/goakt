@@ -115,8 +115,10 @@ func (x *actorSystem) GrainIdentity(ctx context.Context, name string, factory Gr
 		x.registry.Register(grain)
 	}
 
-	if err := process.activate(ctx); err != nil {
-		return nil, err
+	if !process.isActive() {
+		if err := process.activate(ctx); err != nil {
+			return nil, err
+		}
 	}
 
 	x.grains.Set(*identity, process)
@@ -495,25 +497,44 @@ func (x *actorSystem) recreateGrain(ctx context.Context, serializedGrain *intern
 		return err
 	}
 
-	// Create grain instance
-	grain, err := x.getReflection().NewGrain(identity.Kind())
-	if err != nil {
-		return err
-	}
-
-	// Create and activate the grain process
-	config := newGrainConfig(
-		WithGrainInitTimeout(serializedGrain.GetActivationTimeout().AsDuration()),
-		WithGrainInitMaxRetries(int(serializedGrain.GetActivationRetries())),
+	var (
+		process *grainPID
+		ok      bool
 	)
 
-	process := newGrainPID(identity, grain, x, config)
-	if err := process.activate(ctx); err != nil {
-		return err
+	process, ok = x.grains.Get(*identity)
+	if !ok {
+		grain, err := x.getReflection().NewGrain(identity.Kind())
+		if err != nil {
+			return err
+		}
+
+		config := newGrainConfig(
+			WithGrainInitTimeout(serializedGrain.GetActivationTimeout().AsDuration()),
+			WithGrainInitMaxRetries(int(serializedGrain.GetActivationRetries())),
+		)
+
+		process = newGrainPID(identity, grain, x, config)
+		if err := process.activate(ctx); err != nil {
+			return err
+		}
+
+		// Register locally
+		x.getGrains().Set(*identity, process)
+
+		// Register in the cluster
+		return x.putGrainOnCluster(process)
 	}
 
-	// Register locally
-	x.getGrains().Set(*identity, process)
+	if !x.registry.Exists(process.getGrain()) {
+		x.registry.Register(process.getGrain())
+	}
+
+	if !process.isActive() {
+		if err := process.activate(ctx); err != nil {
+			return err
+		}
+	}
 
 	// Register in the cluster
 	return x.putGrainOnCluster(process)

@@ -45,4 +45,18 @@ func TestGrainOptions(t *testing.T) {
 		option(config)
 		require.Equal(t, 10*time.Second, config.initTimeout.Load())
 	})
+
+	t.Run("WithGrainDeactivateAfter", func(t *testing.T) {
+		config := &grainConfig{}
+		option := WithGrainDeactivateAfter(15 * time.Minute)
+		option(config)
+		require.Equal(t, 15*time.Minute, config.deactivateAfter)
+	})
+
+	t.Run("WithLongLivedGrain", func(t *testing.T) {
+		config := &grainConfig{}
+		option := WithLongLivedGrain()
+		option(config)
+		require.Equal(t, time.Duration(-1), config.deactivateAfter)
+	})
 }
