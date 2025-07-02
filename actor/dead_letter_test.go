@@ -34,7 +34,7 @@ import (
 
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
-	"github.com/tochemey/goakt/v3/internal/util"
+	"github.com/tochemey/goakt/v3/internal/pause"
 	"github.com/tochemey/goakt/v3/log"
 	"github.com/tochemey/goakt/v3/test/data/testpb"
 )
@@ -49,7 +49,7 @@ func TestDeadletter(t *testing.T) {
 		assert.NoError(t, err)
 
 		// wait for complete start
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// create a deadletter subscriber
 		consumer, err := sys.Subscribe()
@@ -63,14 +63,14 @@ func TestDeadletter(t *testing.T) {
 		assert.NotNil(t, actorRef)
 
 		// wait a while
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// every message sent to the actor will result in deadletter
 		for i := 0; i < 5; i++ {
 			require.NoError(t, Tell(ctx, actorRef, new(testpb.TestSend)))
 		}
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		var items []*goaktpb.Deadletter
 		for message := range consumer.Iterator() {
@@ -106,7 +106,7 @@ func TestDeadletter(t *testing.T) {
 		assert.NoError(t, err)
 
 		// wait for complete start
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// create the black hole actor
 		actor := &MockUnhandled{}
@@ -116,14 +116,14 @@ func TestDeadletter(t *testing.T) {
 		assert.NotNil(t, actorRef)
 
 		// wait a while
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// every message sent to the actor will result in deadletter
 		for i := 0; i < 5; i++ {
 			require.NoError(t, Tell(ctx, actorRef, new(testpb.TestSend)))
 		}
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		actorID := actorRef.ID()
 		reply, err := Ask(ctx, sys.getDeadletter(), &internalpb.GetDeadlettersCount{
@@ -147,7 +147,7 @@ func TestDeadletter(t *testing.T) {
 		assert.NoError(t, err)
 
 		// wait for complete start
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// create a deadletter subscriber
 		consumer, err := sys.Subscribe()
@@ -161,14 +161,14 @@ func TestDeadletter(t *testing.T) {
 		assert.NotNil(t, actorRef)
 
 		// wait a while
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// every message sent to the actor will result in deadletter
 		for range 5 {
 			require.NoError(t, Tell(ctx, actorRef, new(testpb.TestSend)))
 		}
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		var items []*goaktpb.Deadletter
 		for message := range consumer.Iterator() {
@@ -187,7 +187,7 @@ func TestDeadletter(t *testing.T) {
 		err = Tell(ctx, sys.getDeadletter(), &internalpb.GetDeadletters{})
 		require.NoError(t, err)
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		for message := range consumer.Iterator() {
 			payload := message.Payload()

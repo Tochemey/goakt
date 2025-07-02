@@ -51,8 +51,8 @@ import (
 	"github.com/tochemey/goakt/v3/internal/errorschain"
 	"github.com/tochemey/goakt/v3/internal/eventstream"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
+	"github.com/tochemey/goakt/v3/internal/registry"
 	"github.com/tochemey/goakt/v3/internal/ticker"
-	"github.com/tochemey/goakt/v3/internal/types"
 	"github.com/tochemey/goakt/v3/internal/workerpool"
 	"github.com/tochemey/goakt/v3/log"
 	"github.com/tochemey/goakt/v3/passivation"
@@ -99,7 +99,7 @@ type PID struct {
 	// specifies the actor mailbox
 	mailbox Mailbox
 
-	haltPassivationLnr chan types.Unit
+	haltPassivationLnr chan registry.Unit
 
 	// the actor system
 	system ActorSystem
@@ -129,7 +129,7 @@ type PID struct {
 	// supervisor strategy
 	supervisor            *Supervisor
 	supervisionChan       chan *supervisionSignal
-	supervisionStopSignal chan types.Unit
+	supervisionStopSignal chan registry.Unit
 
 	// atomic flag indicating whether the actor is processing messages
 	processing atomic.Int32
@@ -167,7 +167,7 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 	pid := &PID{
 		actor:                 actor,
 		latestReceiveTime:     atomic.Time{},
-		haltPassivationLnr:    make(chan types.Unit, 1),
+		haltPassivationLnr:    make(chan registry.Unit, 1),
 		logger:                log.New(log.ErrorLevel, os.Stderr),
 		address:               address,
 		fieldsLocker:          new(sync.RWMutex),
@@ -179,7 +179,7 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 		restartCount:          atomic.NewInt64(0),
 		processedCount:        atomic.NewInt64(0),
 		supervisionChan:       make(chan *supervisionSignal, 1),
-		supervisionStopSignal: make(chan types.Unit, 1),
+		supervisionStopSignal: make(chan registry.Unit, 1),
 		remoting:              NewRemoting(),
 		supervisor:            NewSupervisor(),
 		startedAt:             atomic.NewInt64(0),
@@ -476,11 +476,11 @@ func (pid *PID) Restart(ctx context.Context) error {
 		}
 		tk := ticker.New(10 * time.Millisecond)
 		tk.Start()
-		tickerStopSig := make(chan types.Unit, 1)
+		tickerStopSig := make(chan registry.Unit, 1)
 		go func() {
 			for range tk.Ticks {
 				if !pid.IsRunning() {
-					tickerStopSig <- types.Unit{}
+					tickerStopSig <- registry.Unit{}
 					return
 				}
 			}
@@ -1205,7 +1205,7 @@ func (pid *PID) Shutdown(ctx context.Context) error {
 	pid.stopping.Store(true)
 	if pid.passivationStrategy != nil && !isLongLivedPassivationStrategy(pid.passivationStrategy) {
 		pid.logger.Debug("sending a signal to stop passivation listener....")
-		pid.haltPassivationLnr <- types.Unit{}
+		pid.haltPassivationLnr <- registry.Unit{}
 	}
 
 	if err := pid.doStop(ctx); err != nil {
@@ -1532,7 +1532,7 @@ func (pid *PID) passivationLoop() {
 	pid.logger.Infof("%s passivation strategy %s", pid.Name(), pid.passivationStrategy.String())
 	var clock *ticker.Ticker
 	var exec func()
-	tickerStopSig := make(chan types.Unit, 1)
+	tickerStopSig := make(chan registry.Unit, 1)
 
 	switch s := pid.passivationStrategy.(type) {
 	case *passivation.TimeBasedStrategy:
@@ -1540,7 +1540,7 @@ func (pid *PID) passivationLoop() {
 		exec = func() {
 			elapsed := time.Since(pid.latestReceiveTime.Load())
 			if elapsed >= s.Timeout() {
-				tickerStopSig <- types.Unit{}
+				tickerStopSig <- registry.Unit{}
 			}
 		}
 	case *passivation.MessagesCountBasedStrategy:
@@ -1548,7 +1548,7 @@ func (pid *PID) passivationLoop() {
 		exec = func() {
 			currentCount := pid.ProcessedCount() - 1
 			if currentCount >= s.MaxMessages() {
-				tickerStopSig <- types.Unit{}
+				tickerStopSig <- registry.Unit{}
 			}
 		}
 	}
@@ -1561,7 +1561,7 @@ func (pid *PID) passivationLoop() {
 			case <-clock.Ticks:
 				exec()
 			case <-pid.haltPassivationLnr:
-				tickerStopSig <- types.Unit{}
+				tickerStopSig <- registry.Unit{}
 				return
 			}
 		}
@@ -1656,7 +1656,7 @@ func (pid *PID) doStop(ctx context.Context) error {
 	}()
 
 	// stop supervisor loop
-	pid.supervisionStopSignal <- types.Unit{}
+	pid.supervisionStopSignal <- registry.Unit{}
 
 	if pid.remoting != nil {
 		pid.remoting.Close()
@@ -1977,7 +1977,7 @@ func (pid *PID) suspend(reason string) {
 	// pause passivation loop
 	pid.pausePassivation()
 	// stop the supervisor loop
-	pid.supervisionStopSignal <- types.Unit{}
+	pid.supervisionStopSignal <- registry.Unit{}
 	// publish an event to the events stream
 	pid.eventsStream.Publish(eventsTopic, &goaktpb.ActorSuspended{
 		Address:     pid.Address().Address,
@@ -2034,7 +2034,7 @@ func (pid *PID) doReinstate() {
 // pausePassivation pauses the passivation loop
 func (pid *PID) pausePassivation() {
 	if pid.passivationStrategy != nil {
-		pid.haltPassivationLnr <- types.Unit{}
+		pid.haltPassivationLnr <- registry.Unit{}
 		pid.passivationPaused.Store(true)
 	}
 }

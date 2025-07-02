@@ -32,7 +32,7 @@ import (
 
 	"github.com/tochemey/goakt/v3/address"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
-	"github.com/tochemey/goakt/v3/internal/types"
+	"github.com/tochemey/goakt/v3/internal/registry"
 )
 
 func TestActorRef(t *testing.T) {
@@ -63,6 +63,6 @@ func TestActorRef(t *testing.T) {
 		}
 		actorRef := fromPID(pid)
 		require.Equal(t, "name", actorRef.Name())
-		require.Equal(t, types.Name(actor), actorRef.Kind())
+		require.Equal(t, registry.Name(actor), actorRef.Kind())
 	})
 }

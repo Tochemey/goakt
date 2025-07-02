@@ -22,13 +22,13 @@
  * SOFTWARE.
  */
 
-package util
+package pause
 
 import (
 	"time"
 )
 
-// Pause pauses the running process for some time period
-func Pause(duration time.Duration) {
+// For pauses the running process for some time period
+func For(duration time.Duration) {
 	time.Sleep(duration)
 }

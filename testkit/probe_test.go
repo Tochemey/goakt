@@ -35,7 +35,7 @@ import (
 
 	actors "github.com/tochemey/goakt/v3/actor"
 	"github.com/tochemey/goakt/v3/goaktpb"
-	"github.com/tochemey/goakt/v3/internal/util"
+	"github.com/tochemey/goakt/v3/internal/pause"
 	"github.com/tochemey/goakt/v3/log"
 	"github.com/tochemey/goakt/v3/test/data/testpb"
 )
@@ -261,7 +261,7 @@ func TestTestProbe(t *testing.T) {
 		require.NoError(t, err)
 
 		// wait for the actor to be terminated
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		probe.ExpectTerminated(pid.Name())
 		probe.ExpectNoMessage()
@@ -289,7 +289,7 @@ func (t pinger) Receive(ctx *actors.ReceiveContext) {
 		wg := sync.WaitGroup{}
 		wg.Add(1)
 		go func() {
-			util.Pause(time.Duration(x.Duration))
+			pause.For(time.Duration(x.Duration))
 			wg.Done()
 		}()
 		// block until timer is up

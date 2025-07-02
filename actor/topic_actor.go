@@ -35,7 +35,7 @@ import (
 	"github.com/tochemey/goakt/v3/internal/cluster"
 	"github.com/tochemey/goakt/v3/internal/collection"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
-	"github.com/tochemey/goakt/v3/internal/types"
+	"github.com/tochemey/goakt/v3/internal/registry"
 	"github.com/tochemey/goakt/v3/log"
 )
 
@@ -57,7 +57,7 @@ type topicActor struct {
 	pid *PID
 	// topics holds the list of all topics and their subscribers
 	topics    *collection.Map[string, *collection.Map[string, *PID]]
-	processed *collection.Map[key, types.Unit]
+	processed *collection.Map[key, registry.Unit]
 	logger    log.Logger
 
 	cluster     cluster.Interface
@@ -72,7 +72,7 @@ var _ Actor = (*topicActor)(nil)
 func newTopicActor(remoting *Remoting) Actor {
 	return &topicActor{
 		topics:    collection.NewMap[string, *collection.Map[string, *PID]](),
-		processed: collection.NewMap[key, types.Unit](),
+		processed: collection.NewMap[key, registry.Unit](),
 		remoting:  remoting,
 	}
 }
@@ -136,7 +136,7 @@ func (x *topicActor) handlePublish(ctx *ReceiveContext) {
 		}
 
 		// mark the message as processed
-		x.processed.Set(id, types.Unit{})
+		x.processed.Set(id, registry.Unit{})
 
 		cctx := context.WithoutCancel(ctx.Context())
 		var wg sync.WaitGroup

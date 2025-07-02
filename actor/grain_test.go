@@ -42,7 +42,7 @@ import (
 
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
-	"github.com/tochemey/goakt/v3/internal/util"
+	"github.com/tochemey/goakt/v3/internal/pause"
 	"github.com/tochemey/goakt/v3/log"
 	"github.com/tochemey/goakt/v3/remote"
 	"github.com/tochemey/goakt/v3/test/data/testpb"
@@ -59,7 +59,7 @@ func TestGrain(t *testing.T) {
 		// start the actor system
 		err = testSystem.Start(ctx)
 		require.NoError(t, err)
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// create a grain instance
 		grain := NewMockGrain()
@@ -133,7 +133,7 @@ func TestGrain(t *testing.T) {
 		require.NotNil(t, response)
 		require.IsType(t, &testpb.Reply{}, response)
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// check if the grain is activated
 		gp, ok := node1.(*actorSystem).grains.Get(*identity)
@@ -146,13 +146,13 @@ func TestGrain(t *testing.T) {
 		require.NotNil(t, response)
 		require.IsType(t, &testpb.Reply{}, response)
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// let us shutdown the grain by sending PoisonPill
 		err = node3.TellGrain(ctx, identity, new(goaktpb.PoisonPill))
 		require.NoError(t, err)
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		identity, err = node1.GrainIdentity(ctx, "testGrain", func(_ context.Context) (Grain, error) {
 			return grain, nil
@@ -166,7 +166,7 @@ func TestGrain(t *testing.T) {
 		require.NotNil(t, gp)
 		require.True(t, gp.isActive())
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// send a message to the grain to reactivate it
 		response, err = node3.AskGrain(ctx, identity, message, time.Second)
@@ -174,7 +174,7 @@ func TestGrain(t *testing.T) {
 		require.NotNil(t, response)
 		require.IsType(t, &testpb.Reply{}, response)
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// check if the grain is activated
 		gp, ok = node1.(*actorSystem).grains.Get(*identity)
@@ -206,7 +206,7 @@ func TestGrain(t *testing.T) {
 		// start the actor system
 		err = testSystem.Start(ctx)
 		require.NoError(t, err)
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// create a grain instance
 		grain := NewMockGrain()
@@ -240,7 +240,7 @@ func TestGrain(t *testing.T) {
 		// start the actor system
 		err = testSystem.Start(ctx)
 		require.NoError(t, err)
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// create a grain instance
 		grain := NewMockPanickingGrain()
@@ -282,7 +282,7 @@ func TestGrain(t *testing.T) {
 		// start the actor system
 		err = testSystem.Start(ctx)
 		require.NoError(t, err)
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// create a grain instance
 		grain := NewMockGrainActivationFailure()
@@ -304,7 +304,7 @@ func TestGrain(t *testing.T) {
 		// start the actor system
 		err = testSystem.Start(ctx)
 		require.NoError(t, err)
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// create a grain instance
 		grain := NewMockGrainDeactivationFailure()
@@ -319,7 +319,7 @@ func TestGrain(t *testing.T) {
 		err = testSystem.TellGrain(ctx, identity, message)
 		require.NoError(t, err)
 
-		util.Pause(500 * time.Millisecond)
+		pause.For(500 * time.Millisecond)
 
 		// check if the grain is activated
 		gp, ok := testSystem.(*actorSystem).grains.Get(*identity)
@@ -332,7 +332,7 @@ func TestGrain(t *testing.T) {
 		require.Error(t, err)
 		require.ErrorIs(t, err, ErrGrainDeactivationFailure)
 
-		util.Pause(500 * time.Millisecond)
+		pause.For(500 * time.Millisecond)
 
 		// check if the grain is activated
 		gp, ok = testSystem.(*actorSystem).grains.Get(*identity)
@@ -351,7 +351,7 @@ func TestGrain(t *testing.T) {
 		// start the actor system
 		err = testSystem.Start(ctx)
 		require.NoError(t, err)
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// create a grain instance
 		grain := NewMockGrainReceiveFailure()
@@ -392,7 +392,7 @@ func TestGrain(t *testing.T) {
 		// start the actor system
 		err = testSystem.Start(ctx)
 		require.NoError(t, err)
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		identity := &GrainIdentity{}
 		message := new(testpb.TestSend)
@@ -416,7 +416,7 @@ func TestGrain(t *testing.T) {
 		// start the actor system
 		err = testSystem.Start(ctx)
 		require.NoError(t, err)
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// create a grain instance
 		grain := NewMockGrain()
@@ -469,7 +469,7 @@ func TestGrain(t *testing.T) {
 		// start the actor system
 		err = testSystem.Start(ctx)
 		require.NoError(t, err)
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// create a grain instance
 		identity, err := testSystem.GrainIdentity(ctx, "testGrain", func(ctx context.Context) (Grain, error) {
@@ -490,7 +490,7 @@ func TestGrain(t *testing.T) {
 		// start the actor system
 		err = testSystem.Start(ctx)
 		require.NoError(t, err)
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// create a grain instance
 		name := strings.Repeat("a", 300)
@@ -520,7 +520,7 @@ func TestGrain(t *testing.T) {
 		// start the actor system
 		err = testSystem.Start(ctx)
 		require.NoError(t, err)
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// disable remoting for the sake of the test
 		testSystem.(*actorSystem).remotingEnabled.Store(false)
@@ -580,7 +580,7 @@ func TestGrain(t *testing.T) {
 		// start the actor system
 		err = testSystem.Start(ctx)
 		require.NoError(t, err)
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// create a wire
 		grain := &internalpb.Grain{
@@ -633,7 +633,7 @@ func TestGrain(t *testing.T) {
 		// start the actor system
 		err = testSystem.Start(ctx)
 		require.NoError(t, err)
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// create a wire
 		grain := &internalpb.Grain{
@@ -691,7 +691,7 @@ func TestGrain(t *testing.T) {
 		// start the actor system
 		err = testSystem.Start(ctx)
 		require.NoError(t, err)
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// for the sake of the test, we will use a different port for the remoting
 		// this will never happen in production, but we want to test the error handling
@@ -743,7 +743,7 @@ func TestGrain(t *testing.T) {
 		// start the actor system
 		err = testSystem.Start(ctx)
 		require.NoError(t, err)
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// create a grain instance
 		grain := NewMockGrain()
@@ -776,7 +776,7 @@ func TestGrain(t *testing.T) {
 		// start the actor system
 		err = testSystem.Start(ctx)
 		require.NoError(t, err)
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// create a grain instance
 		grain := NewMockGrain()
@@ -810,7 +810,7 @@ func TestGrain(t *testing.T) {
 		// start the actor system
 		err = testSystem.Start(ctx)
 		require.NoError(t, err)
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// create a grain instance
 		grain := NewMockGrain()
@@ -846,7 +846,7 @@ func TestGrain(t *testing.T) {
 		// start the actor system
 		err = testSystem.Start(ctx)
 		require.NoError(t, err)
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// create a grain instance
 		grain := NewMockGrain()
@@ -887,7 +887,7 @@ func TestGrain(t *testing.T) {
 		// start the actor system
 		err = testSystem.Start(ctx)
 		require.NoError(t, err)
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// create a grain instance
 		grain := NewMockPersistenceGrain()
@@ -965,7 +965,7 @@ func TestGrain(t *testing.T) {
 		// start the actor system
 		err = testSystem.Start(ctx)
 		require.NoError(t, err)
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// create a grain instance
 		grain := NewMockGrain()
@@ -978,7 +978,7 @@ func TestGrain(t *testing.T) {
 		wg := sync.WaitGroup{}
 		wg.Add(1)
 		go func() {
-			util.Pause(500 * time.Millisecond)
+			pause.For(500 * time.Millisecond)
 			wg.Done()
 		}()
 		// block until timer is up

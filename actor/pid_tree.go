@@ -31,7 +31,7 @@ import (
 	"go.uber.org/atomic"
 
 	"github.com/tochemey/goakt/v3/internal/collection"
-	"github.com/tochemey/goakt/v3/internal/types"
+	"github.com/tochemey/goakt/v3/internal/registry"
 )
 
 // pidNode represents a node in the PID tree, encapsulating an actor's PID,
@@ -345,14 +345,14 @@ func (x *tree) descendants(pid *PID) []*PID {
 	}
 
 	var result []*PID
-	visited := make(map[string]types.Unit)
+	visited := make(map[string]registry.Unit)
 	var fetch func(n *pidNode)
 	fetch = func(n *pidNode) {
 		for _, descendantNode := range n.descendants.Values() {
 			descendantPID := descendantNode.pid.Load()
 			if descendantPID != nil {
 				if _, seen := visited[descendantPID.ID()]; !seen {
-					visited[descendantPID.ID()] = types.Unit{}
+					visited[descendantPID.ID()] = registry.Unit{}
 					result = append(result, descendantPID)
 					fetch(descendantNode)
 				}

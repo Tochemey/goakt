@@ -36,7 +36,7 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/tochemey/goakt/v3/goaktpb"
-	"github.com/tochemey/goakt/v3/internal/util"
+	"github.com/tochemey/goakt/v3/internal/pause"
 	"github.com/tochemey/goakt/v3/log"
 	"github.com/tochemey/goakt/v3/test/data/testpb"
 )
@@ -54,7 +54,7 @@ func TestRouter(t *testing.T) {
 
 		require.NoError(t, system.Start(ctx))
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		routeesKind := new(MockRouter)
 		poolSize := 2
@@ -63,14 +63,14 @@ func TestRouter(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, router)
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// send a broadcast message to the router
 		message, _ := anypb.New(&testpb.TestLog{Text: "msg"})
 		err = Tell(ctx, router, &goaktpb.Broadcast{Message: message})
 		require.NoError(t, err)
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// this is just for tests purpose
 		workerOneName := fmt.Sprintf("GoAktRoutee-%s-%d", router.Name(), 0)
@@ -112,7 +112,7 @@ func TestRouter(t *testing.T) {
 
 		require.NoError(t, system.Start(ctx))
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		routeesKind := new(MockRouter)
 		poolSize := 2
@@ -121,7 +121,7 @@ func TestRouter(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, router)
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// this is just for tests purpose
 		workerOneName := fmt.Sprintf("GoAktRoutee-%s-%d", router.Name(), 0)
@@ -143,7 +143,7 @@ func TestRouter(t *testing.T) {
 		err = Tell(ctx, router, &goaktpb.Broadcast{Message: message})
 		require.NoError(t, err)
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		ref, err := system.LocalActor("routerQA-pool")
 		require.Error(t, err)
@@ -166,7 +166,7 @@ func TestRouter(t *testing.T) {
 
 		require.NoError(t, system.Start(ctx))
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		routeesKind := new(MockRouter)
 		poolSize := 1
@@ -175,14 +175,14 @@ func TestRouter(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, router)
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// send a broadcast message to the router
 		message, _ := anypb.New(&testpb.TestLog{Text: "msg"})
 		err = Tell(ctx, router, &goaktpb.Broadcast{Message: message})
 		require.NoError(t, err)
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// this is just for tests purpose
 		workerName := fmt.Sprintf("GoAktRoutee-%s-%d", router.Name(), 0)
@@ -215,7 +215,7 @@ func TestRouter(t *testing.T) {
 
 		require.NoError(t, system.Start(ctx))
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// create a deadletter subscriber
 		consumer, err := system.Subscribe()
@@ -230,7 +230,7 @@ func TestRouter(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, router)
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// this is just for tests purpose
 		workerName := fmt.Sprintf("GoAktRoutee-%s-%d", router.Name(), 0)
@@ -241,14 +241,14 @@ func TestRouter(t *testing.T) {
 		err = workerOneRef.Shutdown(ctx)
 		require.NoError(t, err)
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// send a broadcast message to the router
 		message, _ := anypb.New(&testpb.TestLog{Text: "msg"})
 		err = Tell(ctx, router, &goaktpb.Broadcast{Message: message})
 		require.NoError(t, err)
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 		require.False(t, router.IsRunning())
 
 		var items []*goaktpb.Deadletter
@@ -279,7 +279,7 @@ func TestRouter(t *testing.T) {
 
 		require.NoError(t, system.Start(ctx))
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		routeesKind := new(MockRouter)
 		poolSize := 1
@@ -288,14 +288,14 @@ func TestRouter(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, router)
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// send a broadcast message to the router
 		message, _ := anypb.New(&testpb.TestLog{Text: "msg"})
 		err = Tell(ctx, router, &goaktpb.Broadcast{Message: message})
 		require.NoError(t, err)
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// this is just for tests purpose
 		workerName := fmt.Sprintf("GoAktRoutee-%s-%d", router.Name(), 0)

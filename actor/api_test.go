@@ -35,7 +35,7 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/tochemey/goakt/v3/internal/internalpb"
-	"github.com/tochemey/goakt/v3/internal/util"
+	"github.com/tochemey/goakt/v3/internal/pause"
 	"github.com/tochemey/goakt/v3/log"
 	"github.com/tochemey/goakt/v3/test/data/testpb"
 )
@@ -58,7 +58,7 @@ func TestAsk(t *testing.T) {
 		err = sys.Start(ctx)
 		assert.NoError(t, err)
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// create a test actor
 		actorName := "test"
@@ -98,7 +98,7 @@ func TestAsk(t *testing.T) {
 		err = sys.Start(ctx)
 		assert.NoError(t, err)
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// create a test actor
 		actorName := "test"
@@ -108,7 +108,7 @@ func TestAsk(t *testing.T) {
 		assert.NotNil(t, actorRef)
 
 		// Shutdown the actor after some time
-		util.Pause(time.Second)
+		pause.For(time.Second)
 		require.NoError(t, actorRef.Shutdown(ctx))
 
 		// create a message to send to the test actor
@@ -141,7 +141,7 @@ func TestAsk(t *testing.T) {
 		err = sys.Start(ctx)
 		assert.NoError(t, err)
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// create a test actor
 		actorName := "test"
@@ -182,7 +182,7 @@ func TestAsk(t *testing.T) {
 		err = sys.Start(ctx)
 		assert.NoError(t, err)
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// create a test actor
 		actorName := "test"
@@ -221,7 +221,7 @@ func TestAsk(t *testing.T) {
 		err = sys.Start(ctx)
 		assert.NoError(t, err)
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// create a test actor
 		actorName := "test"
@@ -230,7 +230,7 @@ func TestAsk(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// create a message to send to the test actor
 		message := &internalpb.RemoteMessage{
@@ -263,7 +263,7 @@ func TestAsk(t *testing.T) {
 		err = sys.Start(ctx)
 		assert.NoError(t, err)
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// create a test actor
 		actorName := "test"
@@ -307,7 +307,7 @@ func TestAsk(t *testing.T) {
 		err = sys.Start(ctx)
 		assert.NoError(t, err)
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// create a test actor
 		actorName := "test"
@@ -326,7 +326,7 @@ func TestAsk(t *testing.T) {
 
 		// stop the actor after some time
 		// this is due to the actor Waitgroup to gracefully close
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		err = sys.Stop(ctx)
 		require.NoError(t, err)
@@ -349,7 +349,7 @@ func TestAsk(t *testing.T) {
 		err = sys.Start(ctx)
 		assert.NoError(t, err)
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// create a test actor
 		actorName := "test"
@@ -392,7 +392,7 @@ func TestTell(t *testing.T) {
 		err = sys.Start(ctx)
 		assert.NoError(t, err)
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// create a test actor
 		actorName := "test"
@@ -401,7 +401,7 @@ func TestTell(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// create a message to send to the test actor
 		message := new(testpb.TestSend)
@@ -411,7 +411,7 @@ func TestTell(t *testing.T) {
 		require.NoError(t, err)
 
 		// stop the actor after some time
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		err = sys.Stop(ctx)
 		assert.NoError(t, err)
@@ -434,7 +434,7 @@ func TestTell(t *testing.T) {
 		err = sys.Start(ctx)
 		assert.NoError(t, err)
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// create a test actor
 		actorName := "test"
@@ -444,7 +444,7 @@ func TestTell(t *testing.T) {
 		assert.NotNil(t, actorRef)
 
 		// Shutdown the actor after some time
-		util.Pause(time.Second)
+		pause.For(time.Second)
 		require.NoError(t, actorRef.Shutdown(ctx))
 
 		// create a message to send to the test actor
@@ -476,7 +476,7 @@ func TestTell(t *testing.T) {
 		err = sys.Start(ctx)
 		assert.NoError(t, err)
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// create a test actor
 		actorName := "test"
@@ -515,7 +515,7 @@ func TestTell(t *testing.T) {
 			err = sys.Start(ctx)
 			assert.NoError(t, err)
 
-			util.Pause(time.Second)
+			pause.For(time.Second)
 
 			// create a test actor
 			actorName := "test"
@@ -524,7 +524,7 @@ func TestTell(t *testing.T) {
 			require.NoError(t, err)
 			assert.NotNil(t, actorRef)
 
-			util.Pause(time.Second)
+			pause.For(time.Second)
 
 			// create a message to send to the test actor
 			// send the message to the actor
@@ -532,7 +532,7 @@ func TestTell(t *testing.T) {
 			// perform some assertions
 			require.NoError(t, err)
 			// wait for processing to be done
-			util.Pause(500 * time.Millisecond)
+			pause.For(500 * time.Millisecond)
 			require.EqualValues(t, 2, actorRef.ProcessedCount()-1)
 
 			err = sys.Stop(ctx)
@@ -556,7 +556,7 @@ func TestTell(t *testing.T) {
 		err = sys.Start(ctx)
 		assert.NoError(t, err)
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// create a test actor
 		actorName := "test"
@@ -565,7 +565,7 @@ func TestTell(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 		require.NoError(t, actorRef.Shutdown(ctx))
 
 		// create a message to send to the test actor

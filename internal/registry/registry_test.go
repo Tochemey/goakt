@@ -22,7 +22,7 @@
  * SOFTWARE.
  */
 
-package types
+package registry
 
 import (
 	"testing"

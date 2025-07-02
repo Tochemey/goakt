@@ -31,7 +31,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/tochemey/goakt/v3/internal/util"
+	"github.com/tochemey/goakt/v3/internal/pause"
 	"github.com/tochemey/goakt/v3/test/data/testpb"
 )
 
@@ -63,7 +63,7 @@ func TestGrainContext(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, identity)
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// check if the grain is activated
 		gp, ok := node1.(*actorSystem).grains.Get(*identity)
@@ -83,7 +83,7 @@ func TestGrainContext(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// this simulates a message sent from a Grain to an actor
 		response, err = node1.AskGrain(ctx, identity, new(testpb.TestPing), time.Second)
@@ -94,7 +94,7 @@ func TestGrainContext(t *testing.T) {
 		err = node2.TellGrain(ctx, identity, new(testpb.TestBye))
 		require.NoError(t, err)
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		exist, err := node3.ActorExists(ctx, "Actor20")
 		require.NoError(t, err)
@@ -139,7 +139,7 @@ func TestGrainContext(t *testing.T) {
 		require.True(t, gp.isActive())
 
 		// wait for cluster synchronization
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// send a message to the grain
 		message := new(testpb.TestMessage)
@@ -148,13 +148,13 @@ func TestGrainContext(t *testing.T) {
 		require.NotNil(t, response)
 		require.IsType(t, &testpb.Reply{}, response)
 
-		util.Pause(600 * time.Millisecond)
+		pause.For(600 * time.Millisecond)
 
 		// send a message to the grain
 		err = node3.TellGrain(ctx, identity, new(testpb.TestReady))
 		require.NoError(t, err)
 
-		util.Pause(600 * time.Millisecond)
+		pause.For(600 * time.Millisecond)
 
 		require.NoError(t, node1.Stop(ctx))
 		require.NoError(t, node3.Stop(ctx))

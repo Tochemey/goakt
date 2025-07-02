@@ -33,7 +33,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/travisjeffery/go-dynaport"
 
-	"github.com/tochemey/goakt/v3/internal/util"
+	"github.com/tochemey/goakt/v3/internal/pause"
 	"github.com/tochemey/goakt/v3/log"
 	"github.com/tochemey/goakt/v3/remote"
 )
@@ -57,7 +57,7 @@ func TestSingletonActor(t *testing.T) {
 		require.NotNil(t, cl3)
 		require.NotNil(t, sd3)
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// create a singleton actor
 		actor := NewMockActor()
@@ -99,7 +99,7 @@ func TestSingletonActor(t *testing.T) {
 		err = newActorSystem.Start(ctx)
 		require.NoError(t, err)
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// create a singleton actor
 		actor := NewMockActor()

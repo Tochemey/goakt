@@ -32,7 +32,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/tochemey/goakt/v3/internal/util"
+	"github.com/tochemey/goakt/v3/internal/pause"
 	"github.com/tochemey/goakt/v3/log"
 )
 
@@ -53,7 +53,7 @@ func TestScheduleOption(t *testing.T) {
 	err = newActorSystem.Start(ctx)
 	assert.NoError(t, err)
 
-	util.Pause(time.Second)
+	pause.For(time.Second)
 
 	// create a test actor
 	actorName := "test"
@@ -62,7 +62,7 @@ func TestScheduleOption(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotNil(t, actorRef)
 
-	util.Pause(time.Second)
+	pause.For(time.Second)
 
 	referenceID := "reference"
 	opts := []ScheduleOption{

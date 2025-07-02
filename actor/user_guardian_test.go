@@ -33,7 +33,7 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/tochemey/goakt/v3/goaktpb"
-	"github.com/tochemey/goakt/v3/internal/util"
+	"github.com/tochemey/goakt/v3/internal/pause"
 	"github.com/tochemey/goakt/v3/log"
 )
 
@@ -48,7 +48,7 @@ func TestUserGuardian(t *testing.T) {
 		require.NoError(t, err)
 
 		// wait for the system to start properly
-		util.Pause(500 * time.Millisecond)
+		pause.For(500 * time.Millisecond)
 
 		// create a deadletter subscriber
 		consumer, err := actorSystem.Subscribe()
@@ -60,7 +60,7 @@ func TestUserGuardian(t *testing.T) {
 		err = Tell(ctx, guardian, new(anypb.Any))
 		require.NoError(t, err)
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		var items []*goaktpb.Deadletter
 		for message := range consumer.Iterator() {

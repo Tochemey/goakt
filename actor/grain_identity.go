@@ -29,7 +29,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/tochemey/goakt/v3/internal/types"
+	"github.com/tochemey/goakt/v3/internal/registry"
 	"github.com/tochemey/goakt/v3/internal/validation"
 )
 
@@ -70,7 +70,7 @@ var _ validation.Validator = (*GrainIdentity)(nil)
 //   - Kind is automatically derived and should not be manually set.
 //   - Name should be meaningful, unique, and safe for serialization.
 func newGrainIdentity(grain Grain, name string) *GrainIdentity {
-	kind := types.Name(grain)
+	kind := registry.Name(grain)
 	return &GrainIdentity{
 		kind: kind,
 		name: name,

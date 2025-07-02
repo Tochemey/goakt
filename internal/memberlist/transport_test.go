@@ -39,9 +39,8 @@ import (
 	"github.com/kapetan-io/tackle/autotls"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/tochemey/goakt/v3/internal/pause"
 	"github.com/travisjeffery/go-dynaport"
-
-	"github.com/tochemey/goakt/v3/internal/util"
 )
 
 func TestTCPTransport(t *testing.T) {
@@ -163,7 +162,7 @@ func TestTCPTransport(t *testing.T) {
 		err := cluster.members[0].SendBestEffort(cluster.members[1].Members()[1], []byte(msg))
 		require.NoError(t, err)
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 		require.Len(t, cluster.delegates[1].Messages(), 1)
 	})
 	t.Run("SendReliable", func(t *testing.T) {
@@ -174,7 +173,7 @@ func TestTCPTransport(t *testing.T) {
 		err := cluster.members[0].SendReliable(cluster.members[1].Members()[1], []byte(msg))
 		require.NoError(t, err)
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 		require.Len(t, cluster.delegates[1].Messages(), 1)
 	})
 }
@@ -195,7 +194,7 @@ func makeCluster(t *testing.T) (*mockCluster, func()) {
 		require.NoError(t, err)
 	}
 
-	util.Pause(time.Second)
+	pause.For(time.Second)
 
 	for i := 0; i < 2; i++ {
 		require.Len(t, cluster.members[i].Members(), 2)

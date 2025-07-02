@@ -31,7 +31,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/tochemey/goakt/v3/internal/types"
+	"github.com/tochemey/goakt/v3/internal/registry"
 )
 
 func TestIdentity(t *testing.T) {
@@ -40,7 +40,7 @@ func TestIdentity(t *testing.T) {
 		name := "testGrain"
 		identity := newGrainIdentity(grain, name)
 		require.NotNil(t, identity)
-		expectedKind := types.Name(grain)
+		expectedKind := registry.Name(grain)
 		expectedStr := fmt.Sprintf("%s%s%s", expectedKind, identitySeparator, name)
 		require.Equal(t, expectedKind, identity.Kind(), "expected kind to match grain type name")
 		require.Equal(t, "testGrain", identity.Name(), "expected name to match provided name")

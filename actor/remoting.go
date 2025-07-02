@@ -250,7 +250,7 @@ func (r *Remoting) RemoteSpawn(ctx context.Context, host string, port int, spawn
 	)
 
 	if len(spawnRequest.Dependencies) > 0 {
-		dependencies, err = encodeDependencies(spawnRequest.Dependencies...)
+		dependencies, err = marshalDependencies(spawnRequest.Dependencies...)
 		if err != nil {
 			return err
 		}
@@ -265,7 +265,7 @@ func (r *Remoting) RemoteSpawn(ctx context.Context, host string, port int, spawn
 			ActorType:           spawnRequest.Kind,
 			IsSingleton:         spawnRequest.Singleton,
 			Relocatable:         spawnRequest.Relocatable,
-			PassivationStrategy: passivationStrategyToProto(spawnRequest.PassivationStrategy),
+			PassivationStrategy: marshalPassivationStrategy(spawnRequest.PassivationStrategy),
 			Dependencies:        dependencies,
 			EnableStash:         spawnRequest.EnableStashing,
 		},

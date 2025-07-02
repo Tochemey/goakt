@@ -34,7 +34,7 @@ import (
 
 	actors "github.com/tochemey/goakt/v3/actor"
 	"github.com/tochemey/goakt/v3/bench/benchpb"
-	"github.com/tochemey/goakt/v3/internal/util"
+	"github.com/tochemey/goakt/v3/internal/pause"
 	"github.com/tochemey/goakt/v3/log"
 	"github.com/tochemey/goakt/v3/passivation"
 )
@@ -54,7 +54,7 @@ func BenchmarkActor(b *testing.B) {
 		_ = actorSystem.Start(ctx)
 
 		// wait for system to start properly
-		util.Pause(1 * time.Second)
+		pause.For(1 * time.Second)
 
 		// define the benchmark actor
 		actor := &Actor{}
@@ -63,7 +63,7 @@ func BenchmarkActor(b *testing.B) {
 		pid, _ := actorSystem.Spawn(ctx, "test", actor)
 
 		// wait for actors to start properly
-		util.Pause(1 * time.Second)
+		pause.For(1 * time.Second)
 
 		var counter int64
 		b.ResetTimer()
@@ -97,14 +97,14 @@ func BenchmarkActor(b *testing.B) {
 		_ = actorSystem.Start(ctx)
 
 		// wait for system to start properly
-		util.Pause(1 * time.Second)
+		pause.For(1 * time.Second)
 
 		// create the actors
 		sender, _ := actorSystem.Spawn(ctx, "sender", new(Actor))
 		receiver, _ := actorSystem.Spawn(ctx, "receiver", new(Actor))
 
 		// wait for actors to start properly
-		util.Pause(1 * time.Second)
+		pause.For(1 * time.Second)
 		var counter int64
 		b.ResetTimer()
 		b.ReportAllocs()
@@ -134,14 +134,14 @@ func BenchmarkActor(b *testing.B) {
 		_ = actorSystem.Start(ctx)
 
 		// wait for system to start properly
-		util.Pause(1 * time.Second)
+		pause.For(1 * time.Second)
 
 		// create the actors
 		sender, _ := actorSystem.Spawn(ctx, "sender", new(Actor), actors.WithMailbox(actors.NewBoundedMailbox(b.N)))
 		receiver, _ := actorSystem.Spawn(ctx, "receiver", new(Actor), actors.WithMailbox(actors.NewBoundedMailbox(b.N)))
 
 		// wait for actors to start properly
-		util.Pause(1 * time.Second)
+		pause.For(1 * time.Second)
 		var counter int64
 		b.ResetTimer()
 		b.ReportAllocs()
@@ -177,14 +177,14 @@ func BenchmarkActor(b *testing.B) {
 		_ = actorSystem.Start(ctx)
 
 		// wait for system to start properly
-		util.Pause(1 * time.Second)
+		pause.For(1 * time.Second)
 
 		// create the actors
 		sender, _ := actorSystem.Spawn(ctx, "sender", new(Actor), actors.WithMailbox(actors.NewUnboundedPriorityMailBox(priorityFunc)))
 		receiver, _ := actorSystem.Spawn(ctx, "receiver", new(Actor), actors.WithMailbox(actors.NewUnboundedPriorityMailBox(priorityFunc)))
 
 		// wait for actors to start properly
-		util.Pause(1 * time.Second)
+		pause.For(1 * time.Second)
 		var counter int64
 		b.ResetTimer()
 		b.ReportAllocs()
@@ -219,14 +219,14 @@ func BenchmarkActor(b *testing.B) {
 		_ = actorSystem.Start(ctx)
 
 		// wait for system to start properly
-		util.Pause(1 * time.Second)
+		pause.For(1 * time.Second)
 
 		// create the actors
 		sender, _ := actorSystem.Spawn(ctx, "sender", new(Actor))
 		receiver, _ := actorSystem.Spawn(ctx, "receiver", new(Actor))
 
 		// wait for actors to start properly
-		util.Pause(1 * time.Second)
+		pause.For(1 * time.Second)
 		var counter int64
 		b.ResetTimer()
 		b.ReportAllocs()
@@ -256,7 +256,7 @@ func BenchmarkActor(b *testing.B) {
 		_ = actorSystem.Start(ctx)
 
 		// wait for system to start properly
-		util.Pause(1 * time.Second)
+		pause.For(1 * time.Second)
 
 		// define the benchmark actor
 		actor := &Actor{}
@@ -268,7 +268,7 @@ func BenchmarkActor(b *testing.B) {
 			))
 
 		// wait for actors to start properly
-		util.Pause(1 * time.Second)
+		pause.For(1 * time.Second)
 		var counter int64
 		b.ResetTimer()
 		b.ReportAllocs()
@@ -300,14 +300,14 @@ func BenchmarkActor(b *testing.B) {
 		_ = actorSystem.Start(ctx)
 
 		// wait for system to start properly
-		util.Pause(1 * time.Second)
+		pause.For(1 * time.Second)
 
 		// create the actors
 		sender, _ := actorSystem.Spawn(ctx, "sender", new(Actor))
 		receiver, _ := actorSystem.Spawn(ctx, "receiver", new(Actor))
 
 		// wait for actors to start properly
-		util.Pause(1 * time.Second)
+		pause.For(1 * time.Second)
 
 		var counter int64
 		b.ResetTimer()
@@ -339,14 +339,14 @@ func BenchmarkActor(b *testing.B) {
 		_ = actorSystem.Start(ctx)
 
 		// wait for system to start properly
-		util.Pause(1 * time.Second)
+		pause.For(1 * time.Second)
 
 		// create the actors
 		sender, _ := actorSystem.Spawn(ctx, "sender", new(Actor), actors.WithMailbox(actors.NewBoundedMailbox(b.N)))
 		receiver, _ := actorSystem.Spawn(ctx, "receiver", new(Actor), actors.WithMailbox(actors.NewBoundedMailbox(b.N)))
 
 		// wait for actors to start properly
-		util.Pause(1 * time.Second)
+		pause.For(1 * time.Second)
 
 		var counter int64
 		b.ResetTimer()

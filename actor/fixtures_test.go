@@ -44,7 +44,7 @@ import (
 	"github.com/tochemey/goakt/v3/discovery/nats"
 	"github.com/tochemey/goakt/v3/extension"
 	"github.com/tochemey/goakt/v3/goaktpb"
-	"github.com/tochemey/goakt/v3/internal/util"
+	"github.com/tochemey/goakt/v3/internal/pause"
 	"github.com/tochemey/goakt/v3/log"
 	"github.com/tochemey/goakt/v3/remote"
 	"github.com/tochemey/goakt/v3/test/data/testpb"
@@ -117,7 +117,7 @@ func (p *MockActor) Receive(ctx *ReceiveContext) {
 		wg := sync.WaitGroup{}
 		wg.Add(1)
 		go func() {
-			util.Pause(receivingDelay)
+			pause.For(receivingDelay)
 			wg.Done()
 		}()
 		// block until timer is up
@@ -588,7 +588,7 @@ func testCluster(t *testing.T, serverAddr string, opts ...testClusterOption) (Ac
 
 	// start the node
 	require.NoError(t, system.Start(ctx))
-	util.Pause(2 * time.Second)
+	pause.For(2 * time.Second)
 
 	// return the cluster startNode
 	return system, provider
@@ -999,7 +999,7 @@ func (m *MockGrain) OnReceive(ctx *GrainContext) {
 		wg := sync.WaitGroup{}
 		wg.Add(1)
 		go func() {
-			util.Pause(time.Minute)
+			pause.For(time.Minute)
 			wg.Done()
 		}()
 		wg.Wait()

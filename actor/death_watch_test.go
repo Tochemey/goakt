@@ -35,7 +35,7 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/tochemey/goakt/v3/goaktpb"
-	"github.com/tochemey/goakt/v3/internal/util"
+	"github.com/tochemey/goakt/v3/internal/pause"
 	"github.com/tochemey/goakt/v3/log"
 	clustermock "github.com/tochemey/goakt/v3/mocks/cluster"
 )
@@ -51,7 +51,7 @@ func TestDeathWatch(t *testing.T) {
 		require.NoError(t, err)
 
 		// wait for the system to start properly
-		util.Pause(500 * time.Millisecond)
+		pause.For(500 * time.Millisecond)
 
 		// create a deadletter subscriber
 		consumer, err := actorSystem.Subscribe()
@@ -63,7 +63,7 @@ func TestDeathWatch(t *testing.T) {
 		err = Tell(ctx, pid, new(anypb.Any))
 		require.NoError(t, err)
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		var items []*goaktpb.Deadletter
 		for message := range consumer.Iterator() {
@@ -96,7 +96,7 @@ func TestDeathWatch(t *testing.T) {
 		require.NoError(t, err)
 
 		// wait for the system to start properly
-		util.Pause(500 * time.Millisecond)
+		pause.For(500 * time.Millisecond)
 		sys.(*actorSystem).cluster = clmock
 		sys.(*actorSystem).clusterEnabled.Store(true)
 
@@ -104,14 +104,14 @@ func TestDeathWatch(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, cid)
 
-		util.Pause(500 * time.Millisecond)
+		pause.For(500 * time.Millisecond)
 
 		pid := sys.getDeathWatch()
 		pid.Actor().(*deathWatch).cluster = clmock
 
 		require.NoError(t, cid.Shutdown(ctx))
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		require.False(t, pid.IsRunning())
 		require.False(t, sys.Running())
@@ -129,13 +129,13 @@ func TestDeathWatch(t *testing.T) {
 		require.NoError(t, err)
 
 		// wait for the system to start properly
-		util.Pause(500 * time.Millisecond)
+		pause.For(500 * time.Millisecond)
 		pid := sys.getDeathWatch()
 
 		err = Tell(ctx, pid, &goaktpb.Terminated{ActorId: actorID})
 		require.NoError(t, err)
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 		require.NoError(t, pid.Shutdown(ctx))
 	})
 }

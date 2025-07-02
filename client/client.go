@@ -38,8 +38,8 @@ import (
 	"github.com/tochemey/goakt/v3/internal/errorschain"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/internalpb/internalpbconnect"
+	"github.com/tochemey/goakt/v3/internal/registry"
 	"github.com/tochemey/goakt/v3/internal/ticker"
-	"github.com/tochemey/goakt/v3/internal/types"
 	"github.com/tochemey/goakt/v3/internal/validation"
 	"github.com/tochemey/goakt/v3/remote"
 )
@@ -63,7 +63,7 @@ type Client struct {
 	locker          *sync.Mutex
 	strategy        BalancerStrategy
 	balancer        Balancer
-	closeSignal     chan types.Unit
+	closeSignal     chan registry.Unit
 	refreshInterval time.Duration
 }
 
@@ -111,7 +111,7 @@ func New(ctx context.Context, nodes []*Node, opts ...Option) (*Client, error) {
 	cl.balancer.Set(cl.nodes...)
 	// only refresh addresses when a refresh interval is set
 	if cl.refreshInterval > 0 {
-		cl.closeSignal = make(chan types.Unit, 1)
+		cl.closeSignal = make(chan registry.Unit, 1)
 		go cl.refreshNodesLoop()
 	}
 	return cl, nil
@@ -481,7 +481,7 @@ func (x *Client) updateNodes(ctx context.Context) error {
 // refreshNodesLoop refreshes the nodes
 func (x *Client) refreshNodesLoop() {
 	ticker := ticker.New(x.refreshInterval)
-	tickerStopSig := make(chan types.Unit, 1)
+	tickerStopSig := make(chan registry.Unit, 1)
 	go func() {
 		for {
 			select {
@@ -491,7 +491,7 @@ func (x *Client) refreshNodesLoop() {
 					panic(err)
 				}
 			case <-x.closeSignal:
-				tickerStopSig <- types.Unit{}
+				tickerStopSig <- registry.Unit{}
 				return
 			}
 		}

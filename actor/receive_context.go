@@ -26,7 +26,6 @@ package actor
 
 import (
 	"context"
-	"sync"
 	"time"
 
 	"google.golang.org/protobuf/proto"
@@ -37,24 +36,6 @@ import (
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/log"
 )
-
-// pool holds a pool of ReceiveContext
-var pool = sync.Pool{
-	New: func() interface{} {
-		return new(ReceiveContext)
-	},
-}
-
-// getContext retrieves a message from the pool
-func getContext() *ReceiveContext {
-	return pool.Get().(*ReceiveContext)
-}
-
-// releaseContext sends the message context back to the pool
-func releaseContext(receiveContext *ReceiveContext) {
-	receiveContext.reset()
-	pool.Put(receiveContext)
-}
 
 // ReceiveContext provides contextual information and operations
 // available to an actor when it is processing a message.

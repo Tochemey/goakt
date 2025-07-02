@@ -38,8 +38,8 @@ import (
 	"github.com/tochemey/goakt/v3/extension"
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/collection"
+	"github.com/tochemey/goakt/v3/internal/registry"
 	"github.com/tochemey/goakt/v3/internal/ticker"
-	"github.com/tochemey/goakt/v3/internal/types"
 	"github.com/tochemey/goakt/v3/internal/workerpool"
 	"github.com/tochemey/goakt/v3/log"
 )
@@ -69,7 +69,7 @@ type grainPID struct {
 	config       *grainConfig
 
 	mu                 *sync.Mutex
-	haltPassivationLnr chan types.Unit
+	haltPassivationLnr chan registry.Unit
 	deactivateAfter    *atomic.Duration
 
 	onPoisonPill *atomic.Bool
@@ -88,7 +88,7 @@ func newGrainPID(identity *GrainIdentity, grain Grain, actorSystem ActorSystem, 
 		activated:          atomic.NewBool(false),
 		latestReceiveTime:  atomic.Time{},
 		config:             config,
-		haltPassivationLnr: make(chan types.Unit, 1),
+		haltPassivationLnr: make(chan registry.Unit, 1),
 		mu:                 &sync.Mutex{},
 		onPoisonPill:       atomic.NewBool(false),
 	}
@@ -139,7 +139,7 @@ func (pid *grainPID) deactivate(ctx context.Context) error {
 		pid.onPoisonPill.Store(false)
 	}()
 
-	pid.haltPassivationLnr <- types.Unit{}
+	pid.haltPassivationLnr <- registry.Unit{}
 
 	logger.Infof("Deactivating Grain %s ...", pid.identity.String())
 	if pid.remoting != nil {
@@ -284,7 +284,7 @@ func (pid *grainPID) deactivationLoop() {
 	clock := ticker.New(pid.deactivateAfter.Load())
 	defer clock.Stop()
 
-	tickerStopSig := make(chan types.Unit, 1)
+	tickerStopSig := make(chan registry.Unit, 1)
 
 	clock.Start()
 
@@ -299,11 +299,11 @@ func (pid *grainPID) deactivationLoop() {
 							pid.logger.Errorf("deactivation loop failed for Grain=(%s): %v", pid.identity.String(), err)
 						}
 					}
-					tickerStopSig <- types.Unit{}
+					tickerStopSig <- registry.Unit{}
 					return
 				}
 			case <-pid.haltPassivationLnr:
-				tickerStopSig <- types.Unit{}
+				tickerStopSig <- registry.Unit{}
 				return
 			}
 		}

@@ -33,7 +33,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/travisjeffery/go-dynaport"
 
-	"github.com/tochemey/goakt/v3/internal/util"
+	"github.com/tochemey/goakt/v3/internal/pause"
 	"github.com/tochemey/goakt/v3/log"
 	"github.com/tochemey/goakt/v3/remote"
 	"github.com/tochemey/goakt/v3/test/data/testpb"
@@ -53,7 +53,7 @@ func TestStash(t *testing.T) {
 
 		require.NoError(t, actorSystem.Start(ctx))
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// create the actor pathx
 		actor := &MockStash{}
@@ -62,14 +62,14 @@ func TestStash(t *testing.T) {
 		require.NotNil(t, pid)
 
 		// wait for the actor to properly start
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// send a stash message to the actor
 		err = Tell(ctx, pid, new(testpb.TestStash))
 		require.NoError(t, err)
 
 		// add some pause here due to async calls
-		util.Pause(time.Second)
+		pause.For(time.Second)
 		require.EqualValues(t, 1, pid.StashSize())
 
 		// at this stage any message sent to the actor is stashed
@@ -78,7 +78,7 @@ func TestStash(t *testing.T) {
 		}
 
 		// add some pause here due to async calls
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// when we assert the actor received count it will only show 1
 		require.EqualValues(t, 1, pid.StashSize())
@@ -86,23 +86,23 @@ func TestStash(t *testing.T) {
 		// send another stash
 		require.NoError(t, Tell(ctx, pid, new(testpb.TestLogin)))
 		// add some pause here due to async calls
-		util.Pause(time.Second)
+		pause.For(time.Second)
 		require.EqualValues(t, 2, pid.StashSize())
 
 		// add some pause here due to async calls
-		util.Pause(time.Second)
+		pause.For(time.Second)
 		assert.NoError(t, Tell(ctx, pid, new(testpb.TestUnstash)))
 
 		// add some pause here due to async calls
-		util.Pause(time.Second)
+		pause.For(time.Second)
 		require.EqualValues(t, 1, pid.StashSize())
 
 		// add some pause here due to async calls
-		util.Pause(time.Second)
+		pause.For(time.Second)
 		require.NoError(t, Tell(ctx, pid, new(testpb.TestUnstashAll)))
 
 		// add some pause here due to async calls
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		require.Zero(t, pid.StashSize())
 
@@ -110,7 +110,7 @@ func TestStash(t *testing.T) {
 		err = Tell(ctx, pid, new(testpb.TestBye))
 		require.NoError(t, err)
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 		require.False(t, pid.IsRunning())
 		assert.NoError(t, actorSystem.Stop(ctx))
 	})
@@ -127,7 +127,7 @@ func TestStash(t *testing.T) {
 
 		require.NoError(t, actorSystem.Start(ctx))
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// create the actor path
 		actor := &MockStash{}
@@ -136,7 +136,7 @@ func TestStash(t *testing.T) {
 		require.NotNil(t, pid)
 
 		// wait for the actor to properly start
-		util.Pause(5 * time.Millisecond)
+		pause.For(5 * time.Millisecond)
 
 		err = pid.stash(new(ReceiveContext))
 		assert.Error(t, err)
@@ -144,7 +144,7 @@ func TestStash(t *testing.T) {
 
 		err = pid.Shutdown(ctx)
 		assert.NoError(t, err)
-		util.Pause(time.Second)
+		pause.For(time.Second)
 		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 	t.Run("With unstash when stash not set", func(t *testing.T) {
@@ -160,7 +160,7 @@ func TestStash(t *testing.T) {
 
 		require.NoError(t, actorSystem.Start(ctx))
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// create the actor path
 		actor := &MockStash{}
@@ -169,7 +169,7 @@ func TestStash(t *testing.T) {
 		require.NotNil(t, pid)
 
 		// wait for the actor to properly start
-		util.Pause(5 * time.Millisecond)
+		pause.For(5 * time.Millisecond)
 
 		err = pid.unstash()
 		assert.Error(t, err)
@@ -181,7 +181,7 @@ func TestStash(t *testing.T) {
 
 		err = pid.Shutdown(ctx)
 		assert.NoError(t, err)
-		util.Pause(time.Second)
+		pause.For(time.Second)
 		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 	t.Run("With unstash when there is no stashed message", func(t *testing.T) {
@@ -197,7 +197,7 @@ func TestStash(t *testing.T) {
 
 		require.NoError(t, actorSystem.Start(ctx))
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// create the actor path
 		actor := &MockStash{}
@@ -206,14 +206,14 @@ func TestStash(t *testing.T) {
 		require.NotNil(t, pid)
 
 		// wait for the actor to properly start
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// send a stash message to the actor
 		err = Tell(ctx, pid, new(testpb.TestStash))
 		require.NoError(t, err)
 
 		// add some pause here due to async calls
-		util.Pause(time.Second)
+		pause.For(time.Second)
 		require.EqualValues(t, 1, pid.StashSize())
 
 		// at this stage any message sent to the actor is stashed
@@ -222,7 +222,7 @@ func TestStash(t *testing.T) {
 		}
 
 		// add some pause here due to async calls
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// when we assert the actor received count it will only show 1
 		require.EqualValues(t, 1, pid.StashSize())
@@ -230,23 +230,23 @@ func TestStash(t *testing.T) {
 		// send another stash
 		require.NoError(t, Tell(ctx, pid, new(testpb.TestLogin)))
 		// add some pause here due to async calls
-		util.Pause(time.Second)
+		pause.For(time.Second)
 		require.EqualValues(t, 2, pid.StashSize())
 
 		// add some pause here due to async calls
-		util.Pause(time.Second)
+		pause.For(time.Second)
 		assert.NoError(t, Tell(ctx, pid, new(testpb.TestUnstash)))
 
 		// add some pause here due to async calls
-		util.Pause(time.Second)
+		pause.For(time.Second)
 		require.EqualValues(t, 1, pid.StashSize())
 
 		// add some pause here due to async calls
-		util.Pause(time.Second)
+		pause.For(time.Second)
 		assert.NoError(t, Tell(ctx, pid, new(testpb.TestUnstashAll)))
 
 		// add some pause here due to async calls
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		require.Zero(t, pid.StashSize())
 
@@ -256,7 +256,7 @@ func TestStash(t *testing.T) {
 
 		err = pid.Shutdown(ctx)
 		assert.NoError(t, err)
-		util.Pause(time.Second)
+		pause.For(time.Second)
 		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 }

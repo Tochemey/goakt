@@ -45,7 +45,7 @@ import (
 
 	"github.com/tochemey/goakt/v3/address"
 	"github.com/tochemey/goakt/v3/goaktpb"
-	"github.com/tochemey/goakt/v3/internal/util"
+	"github.com/tochemey/goakt/v3/internal/pause"
 	"github.com/tochemey/goakt/v3/log"
 	testkit "github.com/tochemey/goakt/v3/mocks/discovery"
 	extmocks "github.com/tochemey/goakt/v3/mocks/extension"
@@ -98,7 +98,7 @@ func TestActorSystem(t *testing.T) {
 		err := sys.Start(ctx)
 		assert.NoError(t, err)
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		actor := NewMockActor()
 		actorRef, err := sys.Spawn(ctx, "Test", actor)
@@ -108,7 +108,7 @@ func TestActorSystem(t *testing.T) {
 		assert.NotZero(t, sys.Uptime())
 
 		// stop the actor after some time
-		util.Pause(time.Second)
+		pause.For(time.Second)
 		err = sys.Stop(ctx)
 		assert.NoError(t, err)
 	})
@@ -127,7 +127,7 @@ func TestActorSystem(t *testing.T) {
 		assert.Nil(t, actorRef)
 
 		// stop the actor after some time
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		t.Cleanup(
 			func() {
@@ -157,7 +157,7 @@ func TestActorSystem(t *testing.T) {
 		assert.True(t, ref1 == ref2)
 
 		// stop the actor after some time
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		t.Cleanup(
 			func() {
@@ -211,7 +211,7 @@ func TestActorSystem(t *testing.T) {
 		require.NoError(t, err)
 
 		// wait for the cluster to start
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// create an actor
 		actorName := uuid.NewString()
@@ -222,7 +222,7 @@ func TestActorSystem(t *testing.T) {
 
 		// wait for a while for replication to take effect
 		// otherwise the subsequent test will return actor not found
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// the actor should now exist
 		exists, err := newActorSystem.ActorExists(ctx, actorName)
@@ -268,7 +268,7 @@ func TestActorSystem(t *testing.T) {
 		require.Nil(t, remoteAddr)
 
 		// stop the actor after some time
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		remoting.Close()
 		err = newActorSystem.Stop(ctx)
@@ -294,7 +294,7 @@ func TestActorSystem(t *testing.T) {
 		require.NoError(t, err)
 
 		// wait for the cluster to fully start
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// create an actor
 		actorName := uuid.NewString()
@@ -332,7 +332,7 @@ func TestActorSystem(t *testing.T) {
 		require.NotNil(t, addr)
 
 		// stop the actor after some time
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		t.Cleanup(
 			func() {
@@ -362,7 +362,7 @@ func TestActorSystem(t *testing.T) {
 		require.Nil(t, addr)
 
 		// stop the actor after some time
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		t.Cleanup(
 			func() {
@@ -411,7 +411,7 @@ func TestActorSystem(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
-		util.Pause(500 * time.Millisecond)
+		pause.For(500 * time.Millisecond)
 
 		// send a message to the actor
 		reply, err := Ask(ctx, actorRef, new(testpb.TestReply), replyTimeout)
@@ -421,7 +421,7 @@ func TestActorSystem(t *testing.T) {
 		require.True(t, proto.Equal(expected, reply))
 		require.True(t, actorRef.IsRunning())
 
-		util.Pause(500 * time.Millisecond)
+		pause.For(500 * time.Millisecond)
 
 		// restart the actor
 		_, err = sys.ReSpawn(ctx, actorName)
@@ -429,7 +429,7 @@ func TestActorSystem(t *testing.T) {
 
 		// wait for the actor to complete start
 		// TODO we can add a callback for complete start
-		util.Pause(time.Second)
+		pause.For(time.Second)
 		require.True(t, actorRef.IsRunning())
 
 		var items []*goaktpb.ActorRestarted
@@ -475,7 +475,7 @@ func TestActorSystem(t *testing.T) {
 		require.True(t, actorRef.IsRunning())
 
 		// wait for a while for the system to stop
-		util.Pause(time.Second)
+		pause.For(time.Second)
 		// restart the actor
 		pid, err := sys.ReSpawn(ctx, actorName)
 		require.Error(t, err)
@@ -511,13 +511,13 @@ func TestActorSystem(t *testing.T) {
 		require.True(t, proto.Equal(expected, reply))
 		require.True(t, actorRef.IsRunning())
 		// stop the actor after some time
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		err = sys.Kill(ctx, actorName)
 		require.NoError(t, err)
 
 		// wait for a while for the system to stop
-		util.Pause(time.Second)
+		pause.For(time.Second)
 		// restart the actor
 		_, err = sys.ReSpawn(ctx, actorName)
 		require.Error(t, err)
@@ -567,7 +567,7 @@ func TestActorSystem(t *testing.T) {
 		require.True(t, proto.Equal(expected, reply))
 		require.True(t, actorRef.IsRunning())
 		// stop the actor after some time
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// restart the actor
 		_, err = newActorSystem.ReSpawn(ctx, actorName)
@@ -575,7 +575,7 @@ func TestActorSystem(t *testing.T) {
 
 		// wait for the actor to complete start
 		// TODO we can add a callback for complete start
-		util.Pause(time.Second)
+		pause.For(time.Second)
 		require.True(t, actorRef.IsRunning())
 
 		t.Cleanup(
@@ -599,7 +599,7 @@ func TestActorSystem(t *testing.T) {
 		assert.NotNil(t, actorRef)
 
 		// wait for the start of the actor to be complete
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		assert.EqualValues(t, 1, sys.NumActors())
 
@@ -628,7 +628,7 @@ func TestActorSystem(t *testing.T) {
 		err = newActorSystem.Start(ctx)
 		require.NoError(t, err)
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		remoting := NewRemoting()
 		actorName := "some-actor"
@@ -651,7 +651,7 @@ func TestActorSystem(t *testing.T) {
 		require.Nil(t, reply)
 
 		// stop the actor after some time
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		remoting.Close()
 		t.Cleanup(
@@ -725,7 +725,7 @@ func TestActorSystem(t *testing.T) {
 		require.Nil(t, remoteAddr)
 
 		// stop the actor after some time
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		err = newActorSystem.Stop(ctx)
 		require.NoError(t, err)
@@ -752,7 +752,7 @@ func TestActorSystem(t *testing.T) {
 		require.Equal(t, ref.Address().String(), local.Address().String())
 
 		// stop the actor after some time
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		t.Cleanup(
 			func() {
@@ -776,7 +776,7 @@ func TestActorSystem(t *testing.T) {
 		require.ErrorIs(t, err, ErrActorNotFound)
 
 		// stop the actor after some time
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		t.Cleanup(
 			func() {
@@ -833,7 +833,7 @@ func TestActorSystem(t *testing.T) {
 		assert.NoError(t, err)
 
 		// wait for the system to properly start
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		actorName := "HousekeeperActor"
 		actorHandler := NewMockActor()
@@ -844,7 +844,7 @@ func TestActorSystem(t *testing.T) {
 		require.NotNil(t, actorRef)
 
 		// wait for the actor to properly start
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// locate the actor
 		ref, err := sys.LocalActor(actorName)
@@ -853,7 +853,7 @@ func TestActorSystem(t *testing.T) {
 		require.ErrorIs(t, err, ErrActorNotFound)
 
 		// stop the actor after some time
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		t.Cleanup(
 			func() {
@@ -874,7 +874,7 @@ func TestActorSystem(t *testing.T) {
 		assert.NoError(t, err)
 
 		// wait for the system to properly start
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		partition := sys.GetPartition("some-actor")
 		assert.Zero(t, partition)
@@ -900,7 +900,7 @@ func TestActorSystem(t *testing.T) {
 		assert.NotNil(t, actorRef)
 
 		// stop the actor after some time
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		t.Cleanup(
 			func() {
@@ -917,7 +917,7 @@ func TestActorSystem(t *testing.T) {
 		assert.NoError(t, err)
 
 		// wait for complete start
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// create a deadletter subscriber
 		consumer, err := sys.Subscribe()
@@ -931,14 +931,14 @@ func TestActorSystem(t *testing.T) {
 		assert.NotNil(t, actorRef)
 
 		// wait a while
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// every message sent to the actor will result in deadletter
 		for i := 0; i < 5; i++ {
 			require.NoError(t, Tell(ctx, actorRef, new(testpb.TestSend)))
 		}
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		var items []*goaktpb.Deadletter
 		for message := range consumer.Iterator() {
@@ -988,7 +988,7 @@ func TestActorSystem(t *testing.T) {
 		// stop the actor system
 		assert.NoError(t, sys.Stop(ctx))
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// create a deadletter subscriber
 		err = sys.Unsubscribe(consumer)
@@ -1039,7 +1039,7 @@ func TestActorSystem(t *testing.T) {
 		require.NoError(t, err)
 
 		// wait for the cluster to start
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		require.True(t, newActorSystem.Running())
 
@@ -1053,7 +1053,7 @@ func TestActorSystem(t *testing.T) {
 
 		// wait for a while for replication to take effect
 		// otherwise the subsequent test will return actor not found
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// get the actor
 		addr, pid, err := newActorSystem.ActorOf(ctx, actorName)
@@ -1069,7 +1069,7 @@ func TestActorSystem(t *testing.T) {
 		require.Nil(t, remoteAddr)
 
 		// stop the actor after some time
-		util.Pause(time.Second)
+		pause.For(time.Second)
 		err = newActorSystem.Stop(ctx)
 		assert.NoError(t, err)
 		provider.AssertExpectations(t)
@@ -1101,7 +1101,7 @@ func TestActorSystem(t *testing.T) {
 		require.NotNil(t, subscriber2)
 
 		// wait for some time
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// capture the joins
 		var joins []*goaktpb.NodeJoined
@@ -1120,7 +1120,7 @@ func TestActorSystem(t *testing.T) {
 		require.Equal(t, peerAddress2, joins[0].GetAddress())
 
 		// wait for some time
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// stop the node
 		require.NoError(t, cl1.Unsubscribe(subscriber1))
@@ -1128,7 +1128,7 @@ func TestActorSystem(t *testing.T) {
 		assert.NoError(t, sd1.Close())
 
 		// wait for some time
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		var lefts []*goaktpb.NodeLeft
 		for event := range subscriber2.Iterator() {
@@ -1193,7 +1193,7 @@ func TestActorSystem(t *testing.T) {
 		assert.NotNil(t, actorRef)
 
 		// stop the actor after some time
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// send a message to the actor
 		require.NoError(t, Tell(ctx, actorRef, &testpb.Reply{Content: "test spawn from func"}))
@@ -1261,7 +1261,7 @@ func TestActorSystem(t *testing.T) {
 		assert.NotNil(t, actorRef)
 
 		// stop the actor after some time
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// send a message to the actor
 		require.NoError(t, Tell(ctx, actorRef, &testpb.Reply{Content: "test spawn from func"}))
@@ -1326,7 +1326,7 @@ func TestActorSystem(t *testing.T) {
 		assert.NotNil(t, actorRef)
 
 		// stop the actor after some time
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// send a message to the actor
 		require.NoError(t, Tell(ctx, actorRef, &testpb.Reply{Content: "test spawn from func"}))
@@ -1497,7 +1497,7 @@ func TestActorSystem(t *testing.T) {
 		require.NoError(t, err)
 
 		// wait for the cluster to start
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		remoting := NewRemoting()
 		// create an actor
@@ -1553,7 +1553,7 @@ func TestActorSystem(t *testing.T) {
 		assert.NoError(t, err)
 
 		// wait for complete start
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// create the black hole actor
 		actor := NewMockActor()
@@ -1562,7 +1562,7 @@ func TestActorSystem(t *testing.T) {
 		assert.NotNil(t, pid)
 
 		// wait a while
-		util.Pause(time.Second)
+		pause.For(time.Second)
 		assert.EqualValues(t, 1, pid.ProcessedCount())
 		require.True(t, pid.IsRunning())
 
@@ -1572,7 +1572,7 @@ func TestActorSystem(t *testing.T) {
 			counter = counter + 1
 		}
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		assert.EqualValues(t, counter, pid.ProcessedCount()-1)
 		require.NoError(t, err)
@@ -1596,7 +1596,7 @@ func TestActorSystem(t *testing.T) {
 		peerAddress2 := node2.PeerAddress()
 		require.NotEmpty(t, peerAddress2)
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// create an actor on node1
 		actor := NewMockActor()
@@ -1604,7 +1604,7 @@ func TestActorSystem(t *testing.T) {
 		_, err := node1.Spawn(ctx, actorName, actor)
 		require.NoError(t, err)
 
-		util.Pause(200 * time.Millisecond)
+		pause.For(200 * time.Millisecond)
 
 		_, err = node2.Spawn(ctx, actorName, actor)
 		require.Error(t, err)
@@ -1635,7 +1635,7 @@ func TestActorSystem(t *testing.T) {
 		err := sys.Start(ctx)
 		assert.NoError(t, err)
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		actor := NewMockActor()
 		actorRef, err := sys.Spawn(ctx, "Test", actor)
@@ -1645,7 +1645,7 @@ func TestActorSystem(t *testing.T) {
 		assert.NotZero(t, sys.Uptime())
 
 		// stop the actor after some time
-		util.Pause(time.Second)
+		pause.For(time.Second)
 		err = sys.Stop(ctx)
 		require.Error(t, err)
 		require.EqualValues(t, 1, executionCount.Load())
@@ -1667,7 +1667,7 @@ func TestActorSystem(t *testing.T) {
 		err := sys.Start(ctx)
 		assert.NoError(t, err)
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		actor := NewMockActor()
 		actorRef, err := sys.Spawn(ctx, "Test", actor)
@@ -1677,7 +1677,7 @@ func TestActorSystem(t *testing.T) {
 		assert.NotZero(t, sys.Uptime())
 
 		// stop the actor after some time
-		util.Pause(time.Second)
+		pause.For(time.Second)
 		err = sys.Stop(ctx)
 		require.Error(t, err)
 		require.EqualValues(t, 2, executionCount.Load())
@@ -1699,7 +1699,7 @@ func TestActorSystem(t *testing.T) {
 		err := sys.Start(ctx)
 		assert.NoError(t, err)
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		actor := NewMockActor()
 		actorRef, err := sys.Spawn(ctx, "Test", actor)
@@ -1709,7 +1709,7 @@ func TestActorSystem(t *testing.T) {
 		assert.NotZero(t, sys.Uptime())
 
 		// stop the actor after some time
-		util.Pause(time.Second)
+		pause.For(time.Second)
 		err = sys.Stop(ctx)
 		require.Error(t, err)
 		require.EqualValues(t, 3, executionCount.Load())
@@ -1731,7 +1731,7 @@ func TestActorSystem(t *testing.T) {
 		err := sys.Start(ctx)
 		assert.NoError(t, err)
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		actor := NewMockActor()
 		actorRef, err := sys.Spawn(ctx, "Test", actor)
@@ -1741,7 +1741,7 @@ func TestActorSystem(t *testing.T) {
 		assert.NotZero(t, sys.Uptime())
 
 		// stop the actor after some time
-		util.Pause(time.Second)
+		pause.For(time.Second)
 		err = sys.Stop(ctx)
 		require.Error(t, err)
 		require.EqualValues(t, 4, executionCount.Load())
@@ -1763,7 +1763,7 @@ func TestActorSystem(t *testing.T) {
 		err := sys.Start(ctx)
 		assert.NoError(t, err)
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		actor := NewMockActor()
 		actorRef, err := sys.Spawn(ctx, "Test", actor)
@@ -1773,7 +1773,7 @@ func TestActorSystem(t *testing.T) {
 		assert.NotZero(t, sys.Uptime())
 
 		// stop the actor after some time
-		util.Pause(time.Second)
+		pause.For(time.Second)
 		err = sys.Stop(ctx)
 		require.Error(t, err)
 		require.EqualValues(t, 1, executionCount.Load())
@@ -1795,7 +1795,7 @@ func TestActorSystem(t *testing.T) {
 		err := sys.Start(ctx)
 		assert.NoError(t, err)
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		actor := NewMockActor()
 		actorRef, err := sys.Spawn(ctx, "Test", actor)
@@ -1805,7 +1805,7 @@ func TestActorSystem(t *testing.T) {
 		assert.NotZero(t, sys.Uptime())
 
 		// stop the actor after some time
-		util.Pause(time.Second)
+		pause.For(time.Second)
 		err = sys.Stop(ctx)
 		require.Error(t, err)
 		require.ErrorContains(t, err, "case1 panic error")
@@ -1828,7 +1828,7 @@ func TestActorSystem(t *testing.T) {
 		err := sys.Start(ctx)
 		assert.NoError(t, err)
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		actor := NewMockActor()
 		actorRef, err := sys.Spawn(ctx, "Test", actor)
@@ -1838,7 +1838,7 @@ func TestActorSystem(t *testing.T) {
 		assert.NotZero(t, sys.Uptime())
 
 		// stop the actor after some time
-		util.Pause(time.Second)
+		pause.For(time.Second)
 		err = sys.Stop(ctx)
 		require.Error(t, err)
 		require.ErrorContains(t, err, "case2 panic error")
@@ -1861,7 +1861,7 @@ func TestActorSystem(t *testing.T) {
 		err := sys.Start(ctx)
 		assert.NoError(t, err)
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		actor := NewMockActor()
 		actorRef, err := sys.Spawn(ctx, "Test", actor)
@@ -1871,7 +1871,7 @@ func TestActorSystem(t *testing.T) {
 		assert.NotZero(t, sys.Uptime())
 
 		// stop the actor after some time
-		util.Pause(time.Second)
+		pause.For(time.Second)
 		err = sys.Stop(ctx)
 		require.Error(t, err)
 		require.ErrorContains(t, err, "mock shutdown hook without recovery")
@@ -1893,7 +1893,7 @@ func TestActorSystem(t *testing.T) {
 		err := sys.Start(ctx)
 		assert.NoError(t, err)
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		actor := NewMockActor()
 		actorRef, err := sys.Spawn(ctx, "Test", actor)
@@ -1903,11 +1903,11 @@ func TestActorSystem(t *testing.T) {
 		assert.NotZero(t, sys.Uptime())
 
 		// stop the actor after some time
-		util.Pause(time.Second)
+		pause.For(time.Second)
 		err = sys.Stop(ctx)
 		require.NoError(t, err)
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		assert.Zero(t, sys.Uptime())
 		require.EqualValues(t, 2, counter.Load())
@@ -1933,7 +1933,7 @@ func TestActorSystem(t *testing.T) {
 		require.NotNil(t, node3)
 		require.NotNil(t, sd3)
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// create an actor on node1
 		actor := NewMockActor()
@@ -1941,7 +1941,7 @@ func TestActorSystem(t *testing.T) {
 		_, err := node1.Spawn(ctx, actorName, actor)
 		require.NoError(t, err)
 
-		util.Pause(200 * time.Millisecond)
+		pause.For(200 * time.Millisecond)
 
 		_, err = node2.Spawn(ctx, actorName, actor)
 		require.Error(t, err)
@@ -1967,7 +1967,7 @@ func TestActorSystem(t *testing.T) {
 
 		require.NoError(t, actorSystem.Start(ctx))
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// create the actor path
 		pid, err := actorSystem.Spawn(ctx, "test", NewMockActor(),
@@ -1979,7 +1979,7 @@ func TestActorSystem(t *testing.T) {
 		wg := sync.WaitGroup{}
 		wg.Add(1)
 		go func() {
-			util.Pause(receivingDelay)
+			pause.For(receivingDelay)
 			wg.Done()
 		}()
 		// block until timer is up
@@ -1997,7 +1997,7 @@ func TestActorSystem(t *testing.T) {
 
 		require.NoError(t, actorSystem.Start(ctx))
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// create the actor path
 		pid, err := actorSystem.Spawn(ctx, "test", NewMockActor(),
@@ -2009,7 +2009,7 @@ func TestActorSystem(t *testing.T) {
 		wg := sync.WaitGroup{}
 		wg.Add(1)
 		go func() {
-			util.Pause(receivingDelay)
+			pause.For(receivingDelay)
 			wg.Done()
 		}()
 		// block until timer is up
@@ -2083,7 +2083,7 @@ func TestActorSystem(t *testing.T) {
 		assert.NoError(t, err)
 
 		// wait for complete start
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// create a deadletter subscriber
 		consumer, err := sys.Subscribe()
@@ -2097,14 +2097,14 @@ func TestActorSystem(t *testing.T) {
 		assert.NotNil(t, actorRef)
 
 		// wait a while
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// every message sent to the actor will result in deadletter
 		for i := 0; i < 5; i++ {
 			require.NoError(t, Tell(ctx, actorRef, new(testpb.TestSend)))
 		}
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		var items []*goaktpb.Deadletter
 		for message := range consumer.Iterator() {
@@ -2255,7 +2255,7 @@ func TestActorSystem(t *testing.T) {
 		err = sys.Start(ctx)
 		assert.NoError(t, err)
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		name := "GoAktXYZ"
 		addr, pid, err := sys.ActorOf(ctx, name)
@@ -2283,7 +2283,7 @@ func TestActorSystem(t *testing.T) {
 		err = sys.Start(ctx)
 		assert.NoError(t, err)
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		name := "GoAktXYZ"
 		err = sys.Kill(ctx, name)
@@ -2309,7 +2309,7 @@ func TestActorSystem(t *testing.T) {
 		err = sys.Start(ctx)
 		assert.NoError(t, err)
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		name := "GoAktXYZ"
 		pid, err := sys.ReSpawn(ctx, name)
@@ -2336,7 +2336,7 @@ func TestActorSystem(t *testing.T) {
 		err = sys.Start(ctx)
 		assert.NoError(t, err)
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		name := "GoAktXYZ"
 		pid, err := sys.LocalActor(name)
@@ -2363,7 +2363,7 @@ func TestActorSystem(t *testing.T) {
 		err = sys.Start(ctx)
 		assert.NoError(t, err)
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		name := "GoAktXYZ"
 		addr, err := sys.RemoteActor(ctx, name)
@@ -2398,7 +2398,7 @@ func TestActorSystem(t *testing.T) {
 		require.NotEmpty(t, peerAddress3)
 		require.NotNil(t, sd3)
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// create an actor on node1
 		actor := NewMockActor()
@@ -2406,7 +2406,7 @@ func TestActorSystem(t *testing.T) {
 		err := node1.SpawnOn(ctx, actorName, actor)
 		require.NoError(t, err)
 
-		util.Pause(200 * time.Millisecond)
+		pause.For(200 * time.Millisecond)
 
 		// either we can locate the actor or try to recreate it
 		_, err = node2.Spawn(ctx, actorName, actor)
@@ -2449,7 +2449,7 @@ func TestActorSystem(t *testing.T) {
 		require.NotEmpty(t, peerAddress3)
 		require.NotNil(t, sd3)
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// create an actor on node1
 		actor := NewMockActor()
@@ -2457,7 +2457,7 @@ func TestActorSystem(t *testing.T) {
 		err := node1.SpawnOn(ctx, actorName, actor, WithPlacement(Random))
 		require.NoError(t, err)
 
-		util.Pause(200 * time.Millisecond)
+		pause.For(200 * time.Millisecond)
 
 		// either we can locate the actor or try to recreate it
 		_, err = node2.Spawn(ctx, actorName, actor)
@@ -2500,7 +2500,7 @@ func TestActorSystem(t *testing.T) {
 		require.NotEmpty(t, peerAddress3)
 		require.NotNil(t, sd3)
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// create an actor on node1
 		actor := NewMockActor()
@@ -2508,7 +2508,7 @@ func TestActorSystem(t *testing.T) {
 		err := node1.SpawnOn(ctx, actorName, actor, WithPlacement(Local))
 		require.NoError(t, err)
 
-		util.Pause(200 * time.Millisecond)
+		pause.For(200 * time.Millisecond)
 
 		// either we can locate the actor or try to recreate it
 		_, err = node2.Spawn(ctx, actorName, actor)

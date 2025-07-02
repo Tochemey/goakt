@@ -40,7 +40,7 @@ import (
 	"github.com/tochemey/goakt/v3/extension"
 	"github.com/tochemey/goakt/v3/internal/collection"
 	"github.com/tochemey/goakt/v3/internal/errorschain"
-	"github.com/tochemey/goakt/v3/internal/util"
+	"github.com/tochemey/goakt/v3/internal/pause"
 	"github.com/tochemey/goakt/v3/log"
 	"github.com/tochemey/goakt/v3/remote"
 )
@@ -248,7 +248,7 @@ func (m *MultiNodes) StartNode(ctx context.Context, name string) *TestNode {
 	require.NoError(m.gt, err)
 
 	require.NoError(m.gt, actorSystem.Start(ctx))
-	util.Pause(2 * time.Second)
+	pause.For(2 * time.Second)
 
 	node := &TestNode{
 		actorSystem: actorSystem,

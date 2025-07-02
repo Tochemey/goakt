@@ -68,8 +68,8 @@ import (
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/internalpb/internalpbconnect"
 	"github.com/tochemey/goakt/v3/internal/network"
+	"github.com/tochemey/goakt/v3/internal/registry"
 	"github.com/tochemey/goakt/v3/internal/ticker"
-	"github.com/tochemey/goakt/v3/internal/types"
 	"github.com/tochemey/goakt/v3/internal/validation"
 	"github.com/tochemey/goakt/v3/internal/workerpool"
 	"github.com/tochemey/goakt/v3/log"
@@ -597,14 +597,14 @@ type actorSystem struct {
 	cluster            cluster.Interface
 	actorsQueue        chan *internalpb.Actor
 	eventsQueue        <-chan *cluster.Event
-	clusterSyncStopSig chan types.Unit
+	clusterSyncStopSig chan registry.Unit
 	partitionHasher    hash.Hasher
 	clusterNode        *discovery.Node
 
 	// help protect some the fields to set
 	locker sync.Mutex
 
-	stopGC chan types.Unit
+	stopGC chan registry.Unit
 
 	// specifies the events stream
 	eventsStream eventstream.Stream
@@ -612,7 +612,7 @@ type actorSystem struct {
 	// specifies the message scheduler
 	scheduler *scheduler
 
-	registry   types.Registry
+	registry   registry.Registry
 	reflection *reflection
 
 	clusterStore     *cluster.Store
@@ -674,13 +674,13 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		actorInitMaxRetries: DefaultInitMaxRetries,
 		locker:              sync.Mutex{},
 		shutdownTimeout:     DefaultShutdownTimeout,
-		stopGC:              make(chan types.Unit, 1),
+		stopGC:              make(chan registry.Unit, 1),
 		eventsStream:        eventstream.New(),
 		partitionHasher:     hash.DefaultHasher(),
 		actorInitTimeout:    DefaultInitTimeout,
 		eventsQueue:         make(chan *cluster.Event, 1),
-		registry:            types.NewRegistry(),
-		clusterSyncStopSig:  make(chan types.Unit, 1),
+		registry:            registry.NewRegistry(),
+		clusterSyncStopSig:  make(chan registry.Unit, 1),
 		remoteConfig:        remote.DefaultConfig(),
 		actors:              newTree(),
 		startedAt:           atomic.NewInt64(0),
@@ -772,7 +772,7 @@ func (x *actorSystem) Run(ctx context.Context, startHook func(ctx context.Contex
 
 	// wait for interruption/termination
 	notifier := make(chan os.Signal, 1)
-	done := make(chan types.Unit, 1)
+	done := make(chan registry.Unit, 1)
 	signal.Notify(notifier, syscall.SIGINT, syscall.SIGTERM)
 	// wait for a shutdown signal, and then shutdown
 	go func() {
@@ -788,7 +788,7 @@ func (x *actorSystem) Run(ctx context.Context, startHook func(ctx context.Contex
 		}
 
 		signal.Stop(notifier)
-		done <- types.Unit{}
+		done <- registry.Unit{}
 	}()
 	<-done
 	pid := os.Getpid()
@@ -1340,7 +1340,7 @@ func (x *actorSystem) SpawnOn(ctx context.Context, name string, actor Actor, opt
 
 	return x.remoting.RemoteSpawn(ctx, peer.Host, peer.RemotingPort, &remote.SpawnRequest{
 		Name:                name,
-		Kind:                types.Name(actor),
+		Kind:                registry.Name(actor),
 		Singleton:           false,
 		Relocatable:         config.relocatable,
 		PassivationStrategy: config.passivationStrategy,
@@ -1517,10 +1517,10 @@ func (x *actorSystem) Actors() []*PID {
 func (x *actorSystem) ActorRefs(ctx context.Context, timeout time.Duration) []ActorRef {
 	pids := x.Actors()
 	actorRefs := make([]ActorRef, len(pids))
-	uniques := make(map[string]types.Unit)
+	uniques := make(map[string]registry.Unit)
 	for index, pid := range pids {
 		actorRefs[index] = fromPID(pid)
-		uniques[pid.Address().String()] = types.Unit{}
+		uniques[pid.Address().String()] = registry.Unit{}
 	}
 
 	if x.InCluster() {
@@ -1925,7 +1925,7 @@ func (x *actorSystem) RemoteSpawn(ctx context.Context, request *connect.Request[
 	}
 
 	opts := []SpawnOption{
-		WithPassivationStrategy(passivationStrategyFromProto(msg.GetPassivationStrategy())),
+		WithPassivationStrategy(unmarshalPassivationStrategy(msg.GetPassivationStrategy())),
 	}
 
 	if !msg.GetRelocatable() {
@@ -2027,7 +2027,7 @@ func (x *actorSystem) GetKinds(_ context.Context, request *connect.Request[inter
 
 	kinds := make([]string, len(x.clusterConfig.Kinds()))
 	for i, kind := range x.clusterConfig.Kinds() {
-		kinds[i] = types.Name(kind)
+		kinds[i] = registry.Name(kind)
 	}
 
 	return connect.NewResponse(&internalpb.GetKindsResponse{Kinds: kinds}), nil
@@ -2253,17 +2253,17 @@ func (x *actorSystem) getPeerStateFromStore(address string) (*internalpb.PeerSta
 // putActorOnCluster broadcast the newly (re)spawned actor into the cluster
 func (x *actorSystem) putActorOnCluster(pid *PID) error {
 	if x.clusterEnabled.Load() {
-		dependencies, err := encodeDependencies(pid.Dependencies()...)
+		dependencies, err := marshalDependencies(pid.Dependencies()...)
 		if err != nil {
 			return err
 		}
 
 		x.actorsQueue <- &internalpb.Actor{
 			Address:             pid.Address().Address,
-			Type:                types.Name(pid.Actor()),
+			Type:                registry.Name(pid.Actor()),
 			IsSingleton:         pid.IsSingleton(),
 			Relocatable:         pid.IsRelocatable(),
-			PassivationStrategy: passivationStrategyToProto(pid.PassivationStrategy()),
+			PassivationStrategy: marshalPassivationStrategy(pid.PassivationStrategy()),
 			Dependencies:        dependencies,
 			EnableStash:         pid.stashBox != nil,
 		}
@@ -2274,7 +2274,7 @@ func (x *actorSystem) putActorOnCluster(pid *PID) error {
 // putGrainOnCluster broadcast the newly (re)activated grain into the cluster
 func (x *actorSystem) putGrainOnCluster(pid *grainPID) error {
 	if x.clusterEnabled.Load() {
-		dependencies, err := encodeDependencies(pid.dependencies.Values()...)
+		dependencies, err := marshalDependencies(pid.dependencies.Values()...)
 		if err != nil {
 			return err
 		}
@@ -2380,13 +2380,13 @@ func (x *actorSystem) enableClustering(ctx context.Context) error {
 	x.rebalancingQueue = make(chan *internalpb.PeerState, 1)
 	for _, kind := range x.clusterConfig.Kinds() {
 		x.registry.Register(kind)
-		x.logger.Infof("cluster kind=(%s) registered", types.Name(kind))
+		x.logger.Infof("cluster kind=(%s) registered", registry.Name(kind))
 	}
 
 	if len(x.clusterConfig.Grains()) > 0 {
 		for _, grain := range x.clusterConfig.Grains() {
 			x.registry.Register(grain)
-			x.logger.Infof("cluster Grain=(%s) registered", types.Name(grain))
+			x.logger.Infof("cluster Grain=(%s) registered", registry.Name(grain))
 		}
 	}
 
@@ -2520,7 +2520,7 @@ func (x *actorSystem) shutdown(ctx context.Context) error {
 		return ErrActorSystemNotStarted
 	}
 
-	x.stopGC <- types.Unit{}
+	x.stopGC <- registry.Unit{}
 	x.logger.Infof("%s is shutting down..:)", x.name)
 	x.shuttingDown.Store(true)
 
@@ -2764,14 +2764,14 @@ func (x *actorSystem) peersStateLoop() {
 	intervals := x.clusterConfig.PeersStateSyncInterval()
 	ticker := ticker.New(intervals)
 	ticker.Start()
-	tickerStopSig := make(chan types.Unit, 1)
+	tickerStopSig := make(chan registry.Unit, 1)
 	go func() {
 		for {
 			select {
 			case <-ticker.Ticks:
 				// stop ticking and close
 				if x.isShuttingDown() || !x.started.Load() {
-					tickerStopSig <- types.Unit{}
+					tickerStopSig <- registry.Unit{}
 					return
 				}
 
@@ -2813,7 +2813,7 @@ func (x *actorSystem) peersStateLoop() {
 				}
 
 			case <-x.clusterSyncStopSig:
-				tickerStopSig <- types.Unit{}
+				tickerStopSig <- registry.Unit{}
 				return
 			}
 		}
@@ -2976,7 +2976,7 @@ func (x *actorSystem) getCluster() cluster.Interface {
 
 // reservedName returns the reserved actor's name
 func (x *actorSystem) reservedName(nameType nameType) string {
-	return systemNames[nameType]
+	return reservedNames[nameType]
 }
 
 // actorAddress returns the actor path provided the actor name
@@ -3173,7 +3173,7 @@ func (x *actorSystem) checkSpawnPreconditions(ctx context.Context, actorName str
 		// a singleton actor must only have one instance at a given time of its kind
 		// in the whole cluster
 		if singleton {
-			id, err := x.cluster.LookupKind(ctx, types.Name(kind))
+			id, err := x.cluster.LookupKind(ctx, registry.Name(kind))
 			if err != nil {
 				return err
 			}
@@ -3288,7 +3288,7 @@ func (x *actorSystem) shutdownCluster(ctx context.Context, actorRefs []ActorRef)
 			close(x.actorsQueue)
 		}
 
-		x.clusterSyncStopSig <- types.Unit{}
+		x.clusterSyncStopSig <- registry.Unit{}
 		x.clusterEnabled.Store(false)
 		x.rebalancing.Store(false)
 		x.pubsubEnabled.Store(false)
@@ -3413,7 +3413,7 @@ func runWithRetry(ctx context.Context, hook ShutdownHook, sys *actorSystem, reco
 }
 
 func isReservedName(name string) bool {
-	return strings.HasPrefix(name, systemNamePrefix)
+	return strings.HasPrefix(name, reservedNamesPrefix)
 }
 
 // getServer creates an instance of http server

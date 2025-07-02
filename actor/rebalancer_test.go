@@ -35,7 +35,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/tochemey/goakt/v3/internal/util"
+	"github.com/tochemey/goakt/v3/internal/pause"
 	"github.com/tochemey/goakt/v3/test/data/testpb"
 )
 
@@ -68,7 +68,7 @@ func TestRebalancing(t *testing.T) {
 		require.NotNil(t, pid)
 	}
 
-	util.Pause(time.Second)
+	pause.For(time.Second)
 
 	for j := 1; j <= 4; j++ {
 		actorName := fmt.Sprintf("Node2-Actor-%d", j)
@@ -77,7 +77,7 @@ func TestRebalancing(t *testing.T) {
 		require.NotNil(t, pid)
 	}
 
-	util.Pause(time.Second)
+	pause.For(time.Second)
 
 	for j := 1; j <= 4; j++ {
 		actorName := fmt.Sprintf("Node3-Actor-%d", j)
@@ -86,14 +86,14 @@ func TestRebalancing(t *testing.T) {
 		require.NotNil(t, pid)
 	}
 
-	util.Pause(time.Second)
+	pause.For(time.Second)
 
 	// take down node2
 	require.NoError(t, node2.Stop(ctx))
 	require.NoError(t, sd2.Close())
 
 	// Wait for cluster rebalancing
-	util.Pause(time.Minute)
+	pause.For(time.Minute)
 
 	sender, err := node1.LocalActor("Node1-Actor-1")
 	require.NoError(t, err)
@@ -149,7 +149,7 @@ func TestRebalancingWithTLSEnabled(t *testing.T) {
 		require.NotNil(t, pid)
 	}
 
-	util.Pause(time.Second)
+	pause.For(time.Second)
 
 	for j := 1; j <= 4; j++ {
 		actorName := fmt.Sprintf("Node2-Actor-%d", j)
@@ -158,7 +158,7 @@ func TestRebalancingWithTLSEnabled(t *testing.T) {
 		require.NotNil(t, pid)
 	}
 
-	util.Pause(time.Second)
+	pause.For(time.Second)
 
 	for j := 1; j <= 4; j++ {
 		actorName := fmt.Sprintf("Node3-Actor-%d", j)
@@ -167,14 +167,14 @@ func TestRebalancingWithTLSEnabled(t *testing.T) {
 		require.NotNil(t, pid)
 	}
 
-	util.Pause(time.Second)
+	pause.For(time.Second)
 
 	// take down node2
 	require.NoError(t, node2.Stop(ctx))
 	require.NoError(t, sd2.Close())
 
 	// Wait for cluster rebalancing
-	util.Pause(time.Minute)
+	pause.For(time.Minute)
 
 	sender, err := node1.LocalActor("Node1-Actor-1")
 	require.NoError(t, err)
@@ -217,13 +217,13 @@ func TestRebalancingWithSingletonActor(t *testing.T) {
 	err := node1.SpawnSingleton(ctx, "actorName", NewMockActor())
 	require.NoError(t, err)
 
-	util.Pause(time.Second)
+	pause.For(time.Second)
 
 	// take down node1 since it is the first node created in the cluster
 	require.NoError(t, node1.Stop(ctx))
 	require.NoError(t, sd1.Close())
 
-	util.Pause(2 * time.Minute)
+	pause.For(2 * time.Minute)
 
 	_, _, err = node2.ActorOf(ctx, "actorName")
 	require.NoError(t, err)
@@ -264,7 +264,7 @@ func TestRebalancingWithActorRelocationDisabled(t *testing.T) {
 		require.NotNil(t, pid)
 	}
 
-	util.Pause(time.Second)
+	pause.For(time.Second)
 
 	for j := 1; j <= 4; j++ {
 		actorName := fmt.Sprintf("Node2-Actor-%d", j)
@@ -273,7 +273,7 @@ func TestRebalancingWithActorRelocationDisabled(t *testing.T) {
 		require.NotNil(t, pid)
 	}
 
-	util.Pause(time.Second)
+	pause.For(time.Second)
 
 	for j := 1; j <= 4; j++ {
 		actorName := fmt.Sprintf("Node3-Actor-%d", j)
@@ -282,14 +282,14 @@ func TestRebalancingWithActorRelocationDisabled(t *testing.T) {
 		require.NotNil(t, pid)
 	}
 
-	util.Pause(time.Second)
+	pause.For(time.Second)
 
 	// take down node2
 	require.NoError(t, node2.Stop(ctx))
 	require.NoError(t, sd2.Close())
 
 	// Wait for cluster rebalancing
-	util.Pause(time.Minute)
+	pause.For(time.Minute)
 
 	sender, err := node1.LocalActor("Node1-Actor-1")
 	require.NoError(t, err)
@@ -336,7 +336,7 @@ func TestRebalancingWithSystemRelocationDisabled(t *testing.T) {
 		require.NotNil(t, pid)
 	}
 
-	util.Pause(time.Second)
+	pause.For(time.Second)
 
 	for j := 1; j <= 4; j++ {
 		actorName := fmt.Sprintf("Node2-Actor-%d", j)
@@ -345,7 +345,7 @@ func TestRebalancingWithSystemRelocationDisabled(t *testing.T) {
 		require.NotNil(t, pid)
 	}
 
-	util.Pause(time.Second)
+	pause.For(time.Second)
 
 	for j := 1; j <= 4; j++ {
 		actorName := fmt.Sprintf("Node3-Actor-%d", j)
@@ -354,14 +354,14 @@ func TestRebalancingWithSystemRelocationDisabled(t *testing.T) {
 		require.NotNil(t, pid)
 	}
 
-	util.Pause(time.Second)
+	pause.For(time.Second)
 
 	// take down node2
 	require.NoError(t, node2.Stop(ctx))
 	require.NoError(t, sd2.Close())
 
 	// Wait for cluster rebalancing
-	util.Pause(time.Second)
+	pause.For(time.Second)
 
 	actorName := "Node1-Actor-1"
 	sender, err := node1.LocalActor(actorName)
@@ -419,7 +419,7 @@ func TestRebalancingWithExtension(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	util.Pause(time.Second)
+	pause.For(time.Second)
 
 	for j := 1; j <= 4; j++ {
 		entityID := fmt.Sprintf("node2-entity-%d", j)
@@ -434,7 +434,7 @@ func TestRebalancingWithExtension(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	util.Pause(time.Second)
+	pause.For(time.Second)
 
 	for j := 1; j <= 4; j++ {
 		entityID := fmt.Sprintf("node3-entity-%d", j)
@@ -449,14 +449,14 @@ func TestRebalancingWithExtension(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	util.Pause(time.Second)
+	pause.For(time.Second)
 
 	// take down node2
 	require.NoError(t, node2.Stop(ctx))
 	require.NoError(t, sd2.Close())
 
 	// Wait for cluster rebalancing
-	util.Pause(time.Minute)
+	pause.For(time.Minute)
 
 	sender, err := node1.LocalActor("node1-entity-1")
 	require.NoError(t, err)
@@ -506,7 +506,7 @@ func TestRebalancingWithDependency(t *testing.T) {
 		require.NotNil(t, pid)
 	}
 
-	util.Pause(time.Second)
+	pause.For(time.Second)
 
 	for j := 1; j <= 4; j++ {
 		entityID := fmt.Sprintf("node2-actor-%d", j)
@@ -517,14 +517,14 @@ func TestRebalancingWithDependency(t *testing.T) {
 		require.NotNil(t, pid)
 	}
 
-	util.Pause(time.Second)
+	pause.For(time.Second)
 
 	// take down node2
 	require.NoError(t, node2.Stop(ctx))
 	require.NoError(t, sd2.Close())
 
 	// Wait for cluster rebalancing
-	util.Pause(time.Minute)
+	pause.For(time.Minute)
 
 	sender, err := node1.LocalActor("node1-actor-1")
 	require.NoError(t, err)
@@ -582,7 +582,7 @@ func TestIssue781(t *testing.T) {
 		require.NotNil(t, pid)
 	}
 
-	util.Pause(time.Second)
+	pause.For(time.Second)
 
 	for j := 1; j <= 5; j++ {
 		actorName := fmt.Sprintf("Actor-2%d", j)
@@ -591,7 +591,7 @@ func TestIssue781(t *testing.T) {
 		require.NotNil(t, pid)
 	}
 
-	util.Pause(time.Second)
+	pause.For(time.Second)
 
 	for j := 1; j <= 4; j++ {
 		actorName := fmt.Sprintf("Actor-3%d", j)
@@ -600,21 +600,21 @@ func TestIssue781(t *testing.T) {
 		require.NotNil(t, pid)
 	}
 
-	util.Pause(time.Second)
+	pause.For(time.Second)
 
 	// let stop actor Actor-21 on node2
 	actorName := "Actor-21"
 	err := node2.Kill(ctx, actorName)
 	require.NoError(t, err)
 
-	util.Pause(time.Second)
+	pause.For(time.Second)
 
 	// take down node2
 	require.NoError(t, node2.Stop(ctx))
 	require.NoError(t, sd2.Close())
 
 	// Wait for cluster rebalancing
-	util.Pause(time.Minute)
+	pause.For(time.Minute)
 
 	sender, err := node1.LocalActor("Actor-11")
 	require.NoError(t, err)
@@ -664,7 +664,7 @@ func TestGrainsRebalancing(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	util.Pause(time.Second)
+	pause.For(time.Second)
 
 	for j := range 5 {
 		identity, err := node2.GrainIdentity(ctx, fmt.Sprintf("Grain-2%d", j), func(ctx context.Context) (Grain, error) {
@@ -677,7 +677,7 @@ func TestGrainsRebalancing(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	util.Pause(time.Second)
+	pause.For(time.Second)
 
 	for j := range 4 {
 		identity, err := node3.GrainIdentity(ctx, fmt.Sprintf("Grain-3%d", j), func(ctx context.Context) (Grain, error) {
@@ -690,14 +690,14 @@ func TestGrainsRebalancing(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	util.Pause(time.Second)
+	pause.For(time.Second)
 
 	// take down node2
 	require.NoError(t, node2.Stop(ctx))
 	require.NoError(t, sd2.Close())
 
 	// Wait for cluster rebalancing
-	util.Pause(time.Minute)
+	pause.For(time.Minute)
 
 	identity, err := node3.GrainIdentity(ctx, "Grain-20", func(ctx context.Context) (Grain, error) {
 		return NewMockGrain(), nil
@@ -791,7 +791,7 @@ func TestPersistenceGrainsRebalancing(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	util.Pause(time.Second)
+	pause.For(time.Second)
 
 	for j := range 5 {
 		identity, err := node2.GrainIdentity(ctx, fmt.Sprintf("Grain-2%d", j), func(ctx context.Context) (Grain, error) {
@@ -806,7 +806,7 @@ func TestPersistenceGrainsRebalancing(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	util.Pause(time.Second)
+	pause.For(time.Second)
 
 	for j := range 4 {
 		identity, err := node3.GrainIdentity(ctx, fmt.Sprintf("Grain-3%d", j), func(ctx context.Context) (Grain, error) {
@@ -821,14 +821,14 @@ func TestPersistenceGrainsRebalancing(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	util.Pause(time.Second)
+	pause.For(time.Second)
 
 	// take down node2
 	require.NoError(t, node2.Stop(ctx))
 	require.NoError(t, sd2.Close())
 
 	// Wait for cluster rebalancing
-	util.Pause(time.Minute)
+	pause.For(time.Minute)
 
 	message := &testpb.CreditAccount{
 		Balance: 500.00,

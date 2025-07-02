@@ -178,7 +178,7 @@ func (r *rebalancer) spawnRemoteActor(ctx context.Context, actor *internalpb.Act
 		Singleton:           false,
 		Relocatable:         true,
 		Dependencies:        dependencies,
-		PassivationStrategy: passivationStrategyFromProto(actor.GetPassivationStrategy()),
+		PassivationStrategy: unmarshalPassivationStrategy(actor.GetPassivationStrategy()),
 		EnableStashing:      actor.GetEnableStash(),
 	}
 
@@ -323,7 +323,7 @@ func (r *rebalancer) recreateLocally(ctx context.Context, props *internalpb.Acto
 	}
 
 	spawnOpts := []SpawnOption{
-		WithPassivationStrategy(passivationStrategyFromProto(props.GetPassivationStrategy())),
+		WithPassivationStrategy(unmarshalPassivationStrategy(props.GetPassivationStrategy())),
 	}
 
 	if props.GetEnableStash() {

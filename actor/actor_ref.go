@@ -27,7 +27,7 @@ package actor
 import (
 	"github.com/tochemey/goakt/v3/address"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
-	"github.com/tochemey/goakt/v3/internal/types"
+	"github.com/tochemey/goakt/v3/internal/registry"
 )
 
 // ActorRef defines the information about a given actor.
@@ -105,7 +105,7 @@ func fromActorRef(actorRef *internalpb.Actor) ActorRef {
 func fromPID(pid *PID) ActorRef {
 	return ActorRef{
 		name:        pid.Name(),
-		kind:        types.Name(pid.Actor()),
+		kind:        registry.Name(pid.Actor()),
 		address:     pid.Address(),
 		isSingleton: pid.IsSingleton(),
 		relocatable: pid.IsRelocatable(),

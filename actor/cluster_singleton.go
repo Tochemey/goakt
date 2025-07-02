@@ -30,7 +30,7 @@ import (
 
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/cluster"
-	"github.com/tochemey/goakt/v3/internal/types"
+	"github.com/tochemey/goakt/v3/internal/registry"
 	"github.com/tochemey/goakt/v3/log"
 	"github.com/tochemey/goakt/v3/remote"
 )
@@ -130,7 +130,7 @@ func (x *actorSystem) spawnSingletonOnLeader(ctx context.Context, cl cluster.Int
 	}
 
 	var (
-		actorType = types.Name(actor)
+		actorType = registry.Name(actor)
 		host      = leader.Host
 		port      = leader.RemotingPort
 	)

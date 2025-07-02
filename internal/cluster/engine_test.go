@@ -44,7 +44,7 @@ import (
 	"github.com/tochemey/goakt/v3/discovery/nats"
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
-	"github.com/tochemey/goakt/v3/internal/util"
+	"github.com/tochemey/goakt/v3/internal/pause"
 	"github.com/tochemey/goakt/v3/log"
 	testkit "github.com/tochemey/goakt/v3/mocks/discovery"
 )
@@ -181,7 +181,7 @@ func TestSingleNode(t *testing.T) {
 		assert.ErrorIs(t, err, ErrActorNotFound)
 
 		//  shutdown the Node
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// stop the node
 		require.NoError(t, cluster.Stop(ctx))
@@ -383,7 +383,7 @@ func TestSingleNode(t *testing.T) {
 		require.Empty(t, actual)
 
 		//  shutdown the Node
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// stop the node
 		require.NoError(t, cluster.Stop(ctx))
@@ -469,7 +469,7 @@ func TestSingleNode(t *testing.T) {
 		require.False(t, exist)
 
 		//  shutdown the Node
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// stop the node
 		require.NoError(t, cluster.Stop(ctx))
@@ -553,7 +553,7 @@ func TestSingleNode(t *testing.T) {
 		require.False(t, exist)
 
 		//  shutdown the Node
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// stop the node
 		require.NoError(t, cluster.Stop(ctx))
@@ -786,7 +786,7 @@ func TestMultipleNodes(t *testing.T) {
 		require.NotNil(t, node1)
 
 		// wait for the node to start properly
-		util.Pause(2 * time.Second)
+		pause.For(2 * time.Second)
 
 		// create a cluster node2
 		node2, sd2 := startEngine(t, "node2", srv.Addr().String())
@@ -794,7 +794,7 @@ func TestMultipleNodes(t *testing.T) {
 		node2Addr := node2.node.PeersAddress()
 
 		// wait for the node to start properly
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// create a cluster node3
 		node3, sd3 := startEngine(t, "node3", srv.Addr().String())
@@ -802,7 +802,7 @@ func TestMultipleNodes(t *testing.T) {
 		require.NotNil(t, sd3)
 
 		// wait for the node to start properly
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// assert the node joined cluster event
 		var events []*Event
@@ -835,7 +835,7 @@ func TestMultipleNodes(t *testing.T) {
 		require.Equal(t, node2Addr, net.JoinHostPort(peers[0].Host, strconv.Itoa(peers[0].PeersPort)))
 
 		// wait for some time
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// create some actors
 		actorName := uuid.NewString()
@@ -851,7 +851,7 @@ func TestMultipleNodes(t *testing.T) {
 		require.NoError(t, err)
 
 		// wait for some time
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		identity := "grainKind/grainName"
 		grain := &internalpb.Grain{
@@ -902,7 +902,7 @@ func TestMultipleNodes(t *testing.T) {
 		require.NoError(t, err)
 
 		// wait for some time
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		actors, err := node1.Actors(ctx, time.Second)
 		require.NoError(t, err)
@@ -919,7 +919,7 @@ func TestMultipleNodes(t *testing.T) {
 		// stop the second node
 		require.NoError(t, node2.Stop(ctx))
 		// wait for the event to propagate properly
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// reset the slice
 		events = []*Event{}
@@ -968,7 +968,7 @@ func TestMultipleNodes(t *testing.T) {
 		require.NotNil(t, node1)
 
 		// wait for the node to start properly
-		util.Pause(2 * time.Second)
+		pause.For(2 * time.Second)
 
 		// create a cluster node2
 		node2, sd2 := startEngineWithTLS(t, "node2", srv.Addr().String(), conf)
@@ -976,7 +976,7 @@ func TestMultipleNodes(t *testing.T) {
 		node2Addr := node2.node.PeersAddress()
 
 		// wait for the node to start properly
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// create a cluster node3
 		node3, sd3 := startEngineWithTLS(t, "node3", srv.Addr().String(), conf)
@@ -984,7 +984,7 @@ func TestMultipleNodes(t *testing.T) {
 		require.NotNil(t, sd3)
 
 		// wait for the node to start properly
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// assert the node joined cluster event
 		var events []*Event
@@ -1017,7 +1017,7 @@ func TestMultipleNodes(t *testing.T) {
 		require.Equal(t, node2Addr, net.JoinHostPort(peers[0].Host, strconv.Itoa(peers[0].PeersPort)))
 
 		// wait for some time
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// create some actors
 		actorName := uuid.NewString()
@@ -1048,7 +1048,7 @@ func TestMultipleNodes(t *testing.T) {
 		require.NoError(t, err)
 
 		// wait for some time
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// get the actor from node1 and node3
 		actual, err := node1.GetActor(ctx, actorName)
@@ -1084,7 +1084,7 @@ func TestMultipleNodes(t *testing.T) {
 		require.NoError(t, err)
 
 		// wait for some time
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		actors, err := node1.Actors(ctx, time.Second)
 		require.NoError(t, err)
@@ -1101,7 +1101,7 @@ func TestMultipleNodes(t *testing.T) {
 		// stop the second node
 		require.NoError(t, node2.Stop(ctx))
 		// wait for the event to propagate properly
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// reset the slice
 		events = []*Event{}

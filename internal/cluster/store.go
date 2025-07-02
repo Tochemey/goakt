@@ -36,15 +36,15 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/tochemey/goakt/v3/internal/internalpb"
+	"github.com/tochemey/goakt/v3/internal/registry"
 	"github.com/tochemey/goakt/v3/internal/ticker"
-	"github.com/tochemey/goakt/v3/internal/types"
 	"github.com/tochemey/goakt/v3/log"
 )
 
 type Store struct {
 	db       *badger.DB
 	logger   log.Logger
-	stopSig  chan types.Unit
+	stopSig  chan registry.Unit
 	inmemory bool
 }
 
@@ -71,7 +71,7 @@ func NewStore(logger log.Logger, dir *string) (*Store, error) {
 	s := &Store{
 		db:       db,
 		logger:   logger,
-		stopSig:  make(chan types.Unit, 1),
+		stopSig:  make(chan registry.Unit, 1),
 		inmemory: dir == nil,
 	}
 

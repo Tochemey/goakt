@@ -22,7 +22,31 @@
  * SOFTWARE.
  */
 
-package types
+package actor
 
-// Unit type
-type Unit struct{}
+import (
+	"sync"
+
+	"github.com/tochemey/goakt/v3/internal/timer"
+)
+
+var (
+	timers = timer.NewPool()
+	// pool holds a pool of ReceiveContext
+	pool = sync.Pool{
+		New: func() interface{} {
+			return new(ReceiveContext)
+		},
+	}
+)
+
+// getContext retrieves a message from the pool
+func getContext() *ReceiveContext {
+	return pool.Get().(*ReceiveContext)
+}
+
+// releaseContext sends the message context back to the pool
+func releaseContext(receiveContext *ReceiveContext) {
+	receiveContext.reset()
+	pool.Put(receiveContext)
+}

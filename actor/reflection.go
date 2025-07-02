@@ -29,16 +29,16 @@ import (
 
 	"github.com/tochemey/goakt/v3/extension"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
-	"github.com/tochemey/goakt/v3/internal/types"
+	"github.com/tochemey/goakt/v3/internal/registry"
 )
 
 // reflection helps create an instance dynamically
 type reflection struct {
-	registry types.Registry
+	registry registry.Registry
 }
 
 // newReflection creates an instance of Reflection
-func newReflection(registry types.Registry) *reflection {
+func newReflection(registry registry.Registry) *reflection {
 	return &reflection{registry: registry}
 }
 

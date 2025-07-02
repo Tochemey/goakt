@@ -40,7 +40,7 @@ import (
 	"github.com/tochemey/goakt/v3/discovery"
 	"github.com/tochemey/goakt/v3/discovery/nats"
 	"github.com/tochemey/goakt/v3/goaktpb"
-	"github.com/tochemey/goakt/v3/internal/util"
+	"github.com/tochemey/goakt/v3/internal/pause"
 	"github.com/tochemey/goakt/v3/log"
 	"github.com/tochemey/goakt/v3/remote"
 	testpb "github.com/tochemey/goakt/v3/test/data/testpb"
@@ -61,7 +61,7 @@ func TestClient(t *testing.T) {
 		sys3, node3Host, node3Port, sd3 := startNode(t, logger, "node3", addr)
 
 		// wait for a proper and clean setup of the cluster
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		addresses := []string{
 			fmt.Sprintf("%s:%d", node1Host, node1Port),
@@ -95,7 +95,7 @@ func TestClient(t *testing.T) {
 		err = client.Spawn(ctx, actor, false, true)
 		require.NoError(t, err)
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// send a message
 		reply, err := client.Ask(ctx, actor, new(testpb.TestReply), time.Minute)
@@ -104,7 +104,7 @@ func TestClient(t *testing.T) {
 		expectedReply := &testpb.Reply{Content: "received message"}
 		assert.True(t, proto.Equal(expectedReply, reply))
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		err = client.Tell(ctx, actor, new(testpb.TestSend))
 		require.NoError(t, err)
@@ -125,7 +125,7 @@ func TestClient(t *testing.T) {
 				require.NoError(t, sd3.Close())
 
 				srv.Shutdown()
-				util.Pause(time.Second)
+				pause.For(time.Second)
 			})
 	})
 	t.Run("With randomRouter strategy", func(t *testing.T) {
@@ -140,7 +140,7 @@ func TestClient(t *testing.T) {
 		sys3, node3Host, node3Port, sd3 := startNode(t, logger, "node3", addr)
 
 		// wait for a proper and clean setup of the cluster
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		addresses := []string{
 			fmt.Sprintf("%s:%d", node1Host, node1Port),
@@ -179,7 +179,7 @@ func TestClient(t *testing.T) {
 		err = client.Spawn(ctx, actor, false, true)
 		require.NoError(t, err)
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// send a message
 		reply, err := client.Ask(ctx, actor, new(testpb.TestReply), time.Minute)
@@ -188,7 +188,7 @@ func TestClient(t *testing.T) {
 		expectedReply := &testpb.Reply{Content: "received message"}
 		assert.True(t, proto.Equal(expectedReply, reply))
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		err = client.Tell(ctx, actor, new(testpb.TestSend))
 		require.NoError(t, err)
@@ -210,7 +210,7 @@ func TestClient(t *testing.T) {
 
 				srv.Shutdown()
 
-				util.Pause(time.Second)
+				pause.For(time.Second)
 			},
 		)
 	})
@@ -226,7 +226,7 @@ func TestClient(t *testing.T) {
 		sys3, node3Host, node3Port, sd3 := startNode(t, logger, "node3", addr)
 
 		// wait for a proper and clean setup of the cluster
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		addresses := []string{
 			fmt.Sprintf("%s:%d", node1Host, node1Port),
@@ -265,7 +265,7 @@ func TestClient(t *testing.T) {
 		err = client.Spawn(ctx, actor, false, true)
 		require.NoError(t, err)
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// send a message
 		reply, err := client.Ask(ctx, actor, new(testpb.TestReply), time.Minute)
@@ -274,7 +274,7 @@ func TestClient(t *testing.T) {
 		expectedReply := &testpb.Reply{Content: "received message"}
 		assert.True(t, proto.Equal(expectedReply, reply))
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		err = client.Tell(ctx, actor, new(testpb.TestSend))
 		require.NoError(t, err)
@@ -295,7 +295,7 @@ func TestClient(t *testing.T) {
 				require.NoError(t, sd3.Close())
 
 				srv.Shutdown()
-				util.Pause(time.Second)
+				pause.For(time.Second)
 			},
 		)
 	})
@@ -313,7 +313,7 @@ func TestClient(t *testing.T) {
 		sys3, node3Host, node3Port, sd3 := startNode(t, logger, "node3", addr)
 
 		// wait for a proper and clean setup of the cluster
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		addresses := []string{
 			fmt.Sprintf("%s:%d", node1Host, node1Port),
@@ -347,7 +347,7 @@ func TestClient(t *testing.T) {
 		err = client.Spawn(ctx, actor, false, true)
 		require.NoError(t, err)
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// send a message
 		reply, err := client.Ask(ctx, actor, new(testpb.TestReply), time.Minute)
@@ -356,7 +356,7 @@ func TestClient(t *testing.T) {
 		expectedReply := &testpb.Reply{Content: "received message"}
 		assert.True(t, proto.Equal(expectedReply, reply))
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		err = client.Tell(ctx, actor, new(testpb.TestSend))
 		require.NoError(t, err)
@@ -378,7 +378,7 @@ func TestClient(t *testing.T) {
 
 				srv.Shutdown()
 
-				util.Pause(time.Second)
+				pause.For(time.Second)
 			},
 		)
 	})
@@ -396,7 +396,7 @@ func TestClient(t *testing.T) {
 		sys3, node3Host, node3Port, sd3 := startNode(t, logger, "node3", addr)
 
 		// wait for a proper and clean setup of the cluster
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		addresses := []string{
 			fmt.Sprintf("%s:%d", node1Host, node1Port),
@@ -430,7 +430,7 @@ func TestClient(t *testing.T) {
 		err = client.SpawnBalanced(ctx, actor, false, true, RandomStrategy)
 		require.NoError(t, err)
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// send a message
 		reply, err := client.Ask(ctx, actor, new(testpb.TestReply), time.Minute)
@@ -439,7 +439,7 @@ func TestClient(t *testing.T) {
 		expectedReply := &testpb.Reply{Content: "received message"}
 		assert.True(t, proto.Equal(expectedReply, reply))
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		err = client.Tell(ctx, actor, new(testpb.TestSend))
 		require.NoError(t, err)
@@ -460,7 +460,7 @@ func TestClient(t *testing.T) {
 				require.NoError(t, sd3.Close())
 
 				srv.Shutdown()
-				util.Pause(time.Second)
+				pause.For(time.Second)
 			},
 		)
 	})
@@ -478,7 +478,7 @@ func TestClient(t *testing.T) {
 		sys3, node3Host, node3Port, sd3 := startNode(t, logger, "node3", addr)
 
 		// wait for a proper and clean setup of the cluster
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		addresses := []string{
 			fmt.Sprintf("%s:%d", node1Host, node1Port),
@@ -512,7 +512,7 @@ func TestClient(t *testing.T) {
 		err = client.Spawn(ctx, actor, false, true)
 		require.NoError(t, err)
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// send a message
 		reply, err := client.Ask(ctx, actor, new(testpb.TestReply), time.Minute)
@@ -521,7 +521,7 @@ func TestClient(t *testing.T) {
 		expectedReply := &testpb.Reply{Content: "received message"}
 		assert.True(t, proto.Equal(expectedReply, reply))
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		err = client.Tell(ctx, actor, new(testpb.TestSend))
 		require.NoError(t, err)
@@ -529,7 +529,7 @@ func TestClient(t *testing.T) {
 		err = client.ReSpawn(ctx, actor)
 		require.NoError(t, err)
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		reply, err = client.Ask(ctx, actor, new(testpb.TestReply), time.Minute)
 		require.NoError(t, err)
@@ -553,7 +553,7 @@ func TestClient(t *testing.T) {
 				require.NoError(t, sd3.Close())
 
 				srv.Shutdown()
-				util.Pause(time.Second)
+				pause.For(time.Second)
 			},
 		)
 	})
@@ -571,7 +571,7 @@ func TestClient(t *testing.T) {
 		sys3, node3Host, node3Port, sd3 := startNode(t, logger, "node3", addr)
 
 		// wait for a proper and clean setup of the cluster
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		addresses := []string{
 			fmt.Sprintf("%s:%d", node1Host, node1Port),
@@ -605,7 +605,7 @@ func TestClient(t *testing.T) {
 		err = client.Spawn(ctx, actor, false, true)
 		require.NoError(t, err)
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		// send a message
 		reply, err := client.Ask(ctx, actor, new(testpb.TestReply), time.Minute)
@@ -614,12 +614,12 @@ func TestClient(t *testing.T) {
 		expectedReply := &testpb.Reply{Content: "received message"}
 		assert.True(t, proto.Equal(expectedReply, reply))
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		err = client.Tell(ctx, actor, new(testpb.TestSend))
 		require.NoError(t, err)
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		err = client.Stop(ctx, actor)
 		require.NoError(t, err)
@@ -640,7 +640,7 @@ func TestClient(t *testing.T) {
 				require.NoError(t, sd3.Close())
 
 				srv.Shutdown()
-				util.Pause(time.Second)
+				pause.For(time.Second)
 			},
 		)
 	})
@@ -658,7 +658,7 @@ func TestClient(t *testing.T) {
 		sys3, node3Host, node3Port, sd3 := startNode(t, logger, "node3", addr)
 
 		// wait for a proper and clean setup of the cluster
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		addresses := []string{
 			fmt.Sprintf("%s:%d", node1Host, node1Port),
@@ -692,7 +692,7 @@ func TestClient(t *testing.T) {
 		err = client.Spawn(ctx, actor, false, true)
 		require.NoError(t, err)
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		whereis, err := client.Whereis(ctx, actor)
 		require.NoError(t, err)
@@ -715,7 +715,7 @@ func TestClient(t *testing.T) {
 				require.NoError(t, sd3.Close())
 
 				srv.Shutdown()
-				util.Pause(time.Second)
+				pause.For(time.Second)
 			})
 	})
 	t.Run("With Ask when actor not found", func(t *testing.T) {
@@ -732,7 +732,7 @@ func TestClient(t *testing.T) {
 		sys3, node3Host, node3Port, sd3 := startNode(t, logger, "node3", addr)
 
 		// wait for a proper and clean setup of the cluster
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		addresses := []string{
 			fmt.Sprintf("%s:%d", node1Host, node1Port),
@@ -771,7 +771,7 @@ func TestClient(t *testing.T) {
 		require.NoError(t, sd3.Close())
 
 		srv.Shutdown()
-		util.Pause(time.Second)
+		pause.For(time.Second)
 	})
 	t.Run("With Tell when actor not found", func(t *testing.T) {
 		ctx := context.TODO()
@@ -787,7 +787,7 @@ func TestClient(t *testing.T) {
 		sys3, node3Host, node3Port, sd3 := startNode(t, logger, "node3", addr)
 
 		// wait for a proper and clean setup of the cluster
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		addresses := []string{
 			fmt.Sprintf("%s:%d", node1Host, node1Port),
@@ -825,7 +825,7 @@ func TestClient(t *testing.T) {
 		require.NoError(t, sd3.Close())
 
 		srv.Shutdown()
-		util.Pause(time.Second)
+		pause.For(time.Second)
 	})
 	t.Run("With Stop when actor not found returns no error", func(t *testing.T) {
 		ctx := context.TODO()
@@ -841,7 +841,7 @@ func TestClient(t *testing.T) {
 		sys3, node3Host, node3Port, sd3 := startNode(t, logger, "node3", addr)
 
 		// wait for a proper and clean setup of the cluster
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		addresses := []string{
 			fmt.Sprintf("%s:%d", node1Host, node1Port),
@@ -874,7 +874,7 @@ func TestClient(t *testing.T) {
 		require.NoError(t, sd3.Close())
 
 		srv.Shutdown()
-		util.Pause(time.Second)
+		pause.For(time.Second)
 	})
 	t.Run("With Whereis when actor not found", func(t *testing.T) {
 		ctx := context.TODO()
@@ -890,7 +890,7 @@ func TestClient(t *testing.T) {
 		sys3, node3Host, node3Port, sd3 := startNode(t, logger, "node3", addr)
 
 		// wait for a proper and clean setup of the cluster
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		addresses := []string{
 			fmt.Sprintf("%s:%d", node1Host, node1Port),
@@ -926,7 +926,7 @@ func TestClient(t *testing.T) {
 		require.NoError(t, sd3.Close())
 
 		srv.Shutdown()
-		util.Pause(time.Second)
+		pause.For(time.Second)
 	})
 	t.Run("With Reinstate when actor not found returns no error", func(t *testing.T) {
 		ctx := context.TODO()
@@ -942,7 +942,7 @@ func TestClient(t *testing.T) {
 		sys3, node3Host, node3Port, sd3 := startNode(t, logger, "node3", addr)
 
 		// wait for a proper and clean setup of the cluster
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		addresses := []string{
 			fmt.Sprintf("%s:%d", node1Host, node1Port),
@@ -977,7 +977,7 @@ func TestClient(t *testing.T) {
 		require.NoError(t, sd3.Close())
 
 		srv.Shutdown()
-		util.Pause(time.Second)
+		pause.For(time.Second)
 	})
 	t.Run("With Reinstate", func(t *testing.T) {
 		ctx := context.TODO()
@@ -993,7 +993,7 @@ func TestClient(t *testing.T) {
 		sys3, node3Host, node3Port, sd3 := startNode(t, logger, "node3", addr)
 
 		// wait for a proper and clean setup of the cluster
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		addresses := []string{
 			fmt.Sprintf("%s:%d", node1Host, node1Port),
@@ -1015,7 +1015,7 @@ func TestClient(t *testing.T) {
 		err = client.Spawn(ctx, actor, false, true)
 		require.NoError(t, err)
 
-		util.Pause(time.Second)
+		pause.For(time.Second)
 
 		err = client.Reinstate(ctx, actor)
 		require.NoError(t, err)
@@ -1034,7 +1034,7 @@ func TestClient(t *testing.T) {
 		require.NoError(t, sd3.Close())
 
 		srv.Shutdown()
-		util.Pause(time.Second)
+		pause.For(time.Second)
 	})
 }
 
@@ -1124,7 +1124,7 @@ func startNode(t *testing.T, logger log.Logger, nodeName, serverAddr string) (sy
 	// start the node
 	require.NoError(t, system.Start(ctx))
 
-	util.Pause(time.Second)
+	pause.For(time.Second)
 
 	logger.Infof("node information=%s", hostNode.String())
 
