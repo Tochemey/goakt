@@ -2450,10 +2450,9 @@ func TestSpawnChild(t *testing.T) {
 			WithMailbox(NewBoundedMailbox(20)),
 			WithPassivateAfter(2*time.Second))
 
-		pause.For(time.Second)
+		require.NoError(t, err)
+		require.NotNil(t, child)
 
-		assert.NoError(t, err)
-		assert.NotNil(t, child)
 		pause.For(time.Second)
 		assert.Len(t, parent.Children(), 1)
 
