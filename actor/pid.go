@@ -144,9 +144,10 @@ type PID struct {
 	// the list of dependencies
 	dependencies *collection.Map[string, extension.Dependency]
 
-	running   atomic.Bool
-	stopping  atomic.Bool
-	suspended atomic.Bool
+	running     atomic.Bool
+	stopping    atomic.Bool
+	suspended   atomic.Bool
+	passivating atomic.Bool
 
 	passivationStrategy passivation.Strategy
 	passivationPaused   *atomic.Bool
@@ -197,6 +198,7 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 	pid.initTimeout.Store(DefaultInitTimeout)
 	pid.processing.Store(int32(idle))
 	pid.relocatable.Store(true)
+	pid.passivating.Store(false)
 
 	for _, opt := range opts {
 		opt(pid)
@@ -389,6 +391,7 @@ func (pid *PID) IsRunning() bool {
 	return pid != nil &&
 		pid.running.Load() &&
 		!pid.stopping.Load() &&
+		!pid.passivating.Load() &&
 		!pid.suspended.Load()
 }
 
@@ -1429,6 +1432,7 @@ func (pid *PID) reset() {
 	pid.relocatable.Store(true)
 	pid.dependencies.Reset()
 	pid.passivationPaused.Store(false)
+	pid.passivating.Store(false)
 }
 
 // freeWatchers releases all the actors watching this actor
@@ -1590,6 +1594,10 @@ func (pid *PID) passivationLoop() {
 	}
 
 	pid.logger.Infof("passivation mode has been triggered for actor=%s...", pid.Name())
+	pid.passivating.Store(true)
+	defer func() {
+		pid.passivating.Store(false)
+	}()
 
 	ctx := context.Background()
 	if err := pid.doStop(ctx); err != nil {
