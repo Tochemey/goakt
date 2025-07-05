@@ -66,7 +66,7 @@ func TestGrainContext(t *testing.T) {
 		pause.For(time.Second)
 
 		// check if the grain is activated
-		gp, ok := node1.(*actorSystem).grains.Get(*identity)
+		gp, ok := node1.(*actorSystem).grains.Get(identity.String())
 		require.True(t, ok)
 		require.NotNil(t, gp)
 		require.True(t, gp.isActive())
@@ -133,7 +133,7 @@ func TestGrainContext(t *testing.T) {
 		require.NotNil(t, identity)
 
 		// check if the grain is activated
-		gp, ok := node1.(*actorSystem).grains.Get(*identity)
+		gp, ok := node1.(*actorSystem).grains.Get(identity.String())
 		require.True(t, ok)
 		require.NotNil(t, gp)
 		require.True(t, gp.isActive())
