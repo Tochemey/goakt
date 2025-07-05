@@ -908,6 +908,10 @@ func TestMultipleNodes(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, actors, 2)
 
+		grains, err := node1.Grains(ctx, time.Second)
+		require.NoError(t, err)
+		require.Len(t, grains, 1)
+
 		actors, err = node3.Actors(ctx, time.Second)
 		require.NoError(t, err)
 		require.Len(t, actors, 2)
@@ -1090,13 +1094,25 @@ func TestMultipleNodes(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, actors, 2)
 
+		grains, err := node1.Grains(ctx, time.Second)
+		require.NoError(t, err)
+		require.Len(t, grains, 1)
+
 		actors, err = node3.Actors(ctx, time.Second)
 		require.NoError(t, err)
 		require.Len(t, actors, 2)
 
+		grains, err = node3.Grains(ctx, time.Second)
+		require.NoError(t, err)
+		require.Len(t, grains, 1)
+
 		actors, err = node2.Actors(ctx, time.Second)
 		require.NoError(t, err)
 		require.Len(t, actors, 2)
+
+		grains, err = node2.Grains(ctx, time.Second)
+		require.NoError(t, err)
+		require.Len(t, grains, 1)
 
 		// stop the second node
 		require.NoError(t, node2.Stop(ctx))

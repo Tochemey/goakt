@@ -79,9 +79,31 @@ func TestForEach(t *testing.T) {
 		keys = append(keys, k)
 	})
 
-	assert.Exactly(t, 2, len(keys))
+	require.Exactly(t, 2, len(keys))
 	// Check if keys 1 and 2 are present
 	if !slices.Contains(keys, 1) || !slices.Contains(keys, 2) {
 		t.Errorf("Expected keys 1 and 2, got %v", keys)
 	}
+}
+
+func TestValues(t *testing.T) {
+	sm := NewMap[int, string]()
+	sm.Set(1, "one")
+	sm.Set(2, "two")
+
+	values := sm.Values()
+	require.NotEmpty(t, values)
+	require.Len(t, values, 2)
+	require.ElementsMatch(t, []string{"one", "two"}, values)
+}
+
+func TestKeys(t *testing.T) {
+	sm := NewMap[int, string]()
+	sm.Set(1, "one")
+	sm.Set(2, "two")
+
+	keys := sm.Keys()
+	require.NotEmpty(t, keys)
+	require.Len(t, keys, 2)
+	require.ElementsMatch(t, []int{1, 2}, keys)
 }

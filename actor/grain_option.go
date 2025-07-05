@@ -28,6 +28,10 @@ import (
 	"time"
 
 	"go.uber.org/atomic"
+
+	"github.com/tochemey/goakt/v3/extension"
+	"github.com/tochemey/goakt/v3/internal/collection"
+	"github.com/tochemey/goakt/v3/internal/validation"
 )
 
 type GrainOption func(config *grainConfig)
@@ -37,6 +41,7 @@ type grainConfig struct {
 	// initTimeout is the timeout duration for grain initialization.
 	initTimeout     atomic.Duration
 	deactivateAfter time.Duration
+	dependencies    *collection.Map[string, extension.Dependency]
 }
 
 // newGrainConfig creates a new grainConfig instance and applies the provided GrainOption(s).
@@ -54,6 +59,7 @@ func newGrainConfig(opts ...GrainOption) *grainConfig {
 		initMaxRetries:  atomic.Int32{},
 		initTimeout:     atomic.Duration{},
 		deactivateAfter: DefaultPassivationTimeout,
+		dependencies:    collection.NewMap[string, extension.Dependency](),
 	}
 
 	// Set default values
@@ -65,6 +71,22 @@ func newGrainConfig(opts ...GrainOption) *grainConfig {
 	}
 
 	return config
+}
+
+var _ validation.Validator = (*grainConfig)(nil)
+
+// Validate checks the validity of the spawnConfig, ensuring all dependencies have valid IDs.
+//
+// Returns an error if any dependency has an invalid ID, otherwise returns nil.
+func (s *grainConfig) Validate() error {
+	for _, dependency := range s.dependencies.Values() {
+		if dependency != nil {
+			if err := validation.NewIDValidator(dependency.ID()).Validate(); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // WithGrainInitMaxRetries returns a GrainOption that sets the maximum number of retries
@@ -132,5 +154,37 @@ func WithGrainDeactivateAfter(value time.Duration) GrainOption {
 func WithLongLivedGrain() GrainOption {
 	return func(config *grainConfig) {
 		config.deactivateAfter = -1
+	}
+}
+
+// WithGrainDependencies returns a GrainOption that registers one or more dependencies
+// for the grain. Dependencies are external services, resources, or components that
+// the grain requires to operate. This option enables dependency injection, promoting
+// loose coupling and easier testing.
+//
+// Each dependency must implement the extension.Dependency interface and must have a unique ID.
+// If a dependency with the same ID already exists, it will be overwritten.
+//
+// Parameters:
+//   - deps: One or more extension.Dependency instances to associate with the grain.
+//
+// Returns:
+//   - GrainOption: A function that registers the provided dependencies in the grain's configuration.
+//
+// Example usage:
+//
+//	db := NewDatabaseDependency()
+//	cache := NewCacheDependency()
+//	cfg := newGrainConfig(WithGrainDependencies(db, cache))
+func WithGrainDependencies(deps ...extension.Dependency) GrainOption {
+	return func(config *grainConfig) {
+		if config.dependencies == nil {
+			config.dependencies = collection.NewMap[string, extension.Dependency]()
+		}
+		for _, dep := range deps {
+			if dep != nil {
+				config.dependencies.Set(dep.ID(), dep)
+			}
+		}
 	}
 }

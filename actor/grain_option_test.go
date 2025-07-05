@@ -59,4 +59,20 @@ func TestGrainOptions(t *testing.T) {
 		option(config)
 		require.Equal(t, time.Duration(-1), config.deactivateAfter)
 	})
+	t.Run("With valid dependency", func(t *testing.T) {
+		config := &grainConfig{}
+		dependency := NewMockDependency("id", "user", "email")
+		option := WithGrainDependencies(dependency)
+		option(config)
+		require.NotEmpty(t, config.dependencies)
+		require.Len(t, config.dependencies.Values(), 1)
+	})
+	t.Run("With dependencies validation", func(t *testing.T) {
+		config := &grainConfig{}
+		dependency := NewMockDependency("$omeN@me", "user", "email")
+		option := WithGrainDependencies(dependency)
+		option(config)
+		err := config.Validate()
+		require.Error(t, err)
+	})
 }

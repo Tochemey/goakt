@@ -84,7 +84,7 @@ func newGrainPID(identity *GrainIdentity, grain Grain, actorSystem ActorSystem, 
 		logger:             actorSystem.Logger(),
 		remoting:           actorSystem.getRemoting(),
 		workerPool:         actorSystem.getWorkerPool(),
-		dependencies:       collection.NewMap[string, extension.Dependency](),
+		dependencies:       config.dependencies,
 		activated:          atomic.NewBool(false),
 		latestReceiveTime:  atomic.Time{},
 		config:             config,
@@ -110,7 +110,7 @@ func (pid *grainPID) activate(ctx context.Context) error {
 	retrier := retry.NewRetrier(int(retries), timeout, timeout)
 
 	if err := retrier.RunContext(cctx, func(ctx context.Context) error {
-		return pid.grain.OnActivate(ctx, newGrainProps(pid.identity, pid.actorSystem))
+		return pid.grain.OnActivate(ctx, newGrainProps(pid.identity, pid.actorSystem, pid.dependencies.Values()))
 	}); err != nil {
 		cancel()
 		pid.logger.Errorf("Grain %s activation failed.", pid.identity.String())
@@ -146,12 +146,12 @@ func (pid *grainPID) deactivate(ctx context.Context) error {
 		pid.remoting.Close()
 	}
 
-	if err := pid.grain.OnDeactivate(ctx, newGrainProps(pid.identity, pid.actorSystem)); err != nil {
+	if err := pid.grain.OnDeactivate(ctx, newGrainProps(pid.identity, pid.actorSystem, pid.dependencies.Values())); err != nil {
 		pid.logger.Errorf("Grain %s deactivation failed.", pid.identity.String())
 		return NewErrGrainDeactivationFailure(err)
 	}
 
-	pid.actorSystem.getGrains().Delete(*pid.identity)
+	pid.actorSystem.getGrains().Delete(pid.getIdentity().String())
 	if pid.actorSystem.InCluster() {
 		if err := pid.actorSystem.getCluster().RemoveGrain(ctx, pid.identity.String()); err != nil {
 			pid.logger.Errorf("failed to remove grain %s from cluster: %v", pid.identity.String(), err)
