@@ -70,7 +70,7 @@ type ShutdownHook interface {
 	Recovery() *ShutdownHookRecovery
 }
 
-// RecoveryStrategy defines the strategy to apply when a CoordinatedShutdownHook fails during the shutdown process.
+// RecoveryStrategy defines the strategy to apply when a ShutdownHook fails during the shutdown process.
 //
 // This policy determines how the shutdown sequence should proceed if a hook returns an error.
 // It allows fine-grained control over error handling, including whether to halt, retry, skip, or combine these actions.
@@ -83,25 +83,25 @@ type ShutdownHook interface {
 type RecoveryStrategy int
 
 const (
-	// ShouldFail indicates that if a CoordinatedShutdownHook fails, the shutdown process should immediately stop executing any remaining hooks.
+	// ShouldFail indicates that if a ShutdownHook fails, the shutdown process should immediately stop executing any remaining hooks.
 	//
 	// The error from the failed hook is reported, and no further shutdown hooks are run.
 	// Use this policy when subsequent hooks depend on the success of previous ones, or when a failure should halt the shutdown sequence.
 	ShouldFail RecoveryStrategy = iota
 
-	// ShouldRetryAndFail indicates that if a CoordinatedShutdownHook fails, the system should retry executing the hook.
+	// ShouldRetryAndFail indicates that if a ShutdownHook fails, the system should retry executing the hook.
 	//
 	// The shutdown process will pause and repeatedly attempt the failed hook until it succeeds or a maximum retry limit is reached.
 	// If the hook still fails after all retries, the error is reported and no further hooks are executed.
 	// Use this policy when the hook is critical and transient errors may be recoverable.
 	ShouldRetryAndFail
 
-	// ShouldSkip indicates that if a CoordinatedShutdownHook fails, the error should be reported, but the shutdown process should skip the failed hook and continue executing the remaining hooks.
+	// ShouldSkip indicates that if a ShutdownHook fails, the error should be reported, but the shutdown process should skip the failed hook and continue executing the remaining hooks.
 	//
 	// Use this policy when hooks are independent and a failure in one should not prevent the execution of others.
 	ShouldSkip
 
-	// ShouldRetryAndSkip indicates that if a CoordinatedShutdownHook fails, the system should retry executing the hook.
+	// ShouldRetryAndSkip indicates that if a ShutdownHook fails, the system should retry executing the hook.
 	//
 	// The shutdown process will pause and repeatedly attempt the failed hook until it succeeds or a maximum retry limit is reached.
 	// If the hook still fails after all retries, the error is reported, but the shutdown process continues with the remaining hooks.

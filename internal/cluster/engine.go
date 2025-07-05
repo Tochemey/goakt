@@ -137,6 +137,8 @@ type Interface interface {
 	RemoveGrain(ctx context.Context, grainID string) error
 	// GrainExists checks whether a Grain exists in the cluster
 	GrainExists(ctx context.Context, grainID string) (bool, error)
+	// Grains returns all Grains in the cluster at any given time
+	Grains(ctx context.Context, timeout time.Duration) ([]*internalpb.Grain, error)
 }
 
 // Engine represents the Engine
@@ -397,12 +399,14 @@ func (x *Engine) Actors(ctx context.Context, timeout time.Duration) ([]*internal
 
 	logger := x.logger
 
-	logger.Infof("fetching the actors list from the cluster...")
+	logger.Infof("node=(%s) fetching the actors list from the cluster...", x.node.PeersAddress())
 	scanner, err := x.actorsMap.Scan(ctx)
 	if err != nil {
-		logger.Errorf("failed to fetch the actors list from the cluster: %v", err)
+		logger.Errorf("node=(%s) failed to fetch the actors list from the cluster: %v", x.node.PeersAddress(), err)
 		return nil, err
 	}
+
+	defer scanner.Close()
 
 	var actors []*internalpb.Actor
 	for scanner.Next() {
@@ -411,13 +415,13 @@ func (x *Engine) Actors(ctx context.Context, timeout time.Duration) ([]*internal
 		bytea, _ := resp.Byte()
 		actor, err := decode(bytea)
 		if err != nil {
-			logger.Errorf("[%s] failed to decode actor=(%s) record: %v", x.node.PeersAddress(), actorName, err)
+			logger.Errorf("node=(%s) failed to decode actor=(%s) record: %v", x.node.PeersAddress(), actorName, err)
 			return nil, err
 		}
 		actors = append(actors, actor)
 	}
-	scanner.Close()
-	logger.Infof("actors list successfully fetched from the cluster.:)")
+
+	logger.Infof("node=(%s) successfully fetched the actors list from the cluster.:)")
 	return actors, nil
 }
 
@@ -782,6 +786,47 @@ func (x *Engine) GrainExists(ctx context.Context, grainID string) (bool, error) 
 		return false, err
 	}
 	return true, nil
+}
+
+// Grains returns all Grains in the cluster at any given time
+func (x *Engine) Grains(ctx context.Context, timeout time.Duration) ([]*internalpb.Grain, error) {
+	// return an error when the engine is not running
+	if !x.IsRunning() {
+		return nil, ErrEngineNotRunning
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	x.Lock()
+	defer x.Unlock()
+
+	logger := x.logger
+
+	logger.Infof("node=(%s) fetching the grains list from the cluster...", x.node.PeersAddress())
+	scanner, err := x.grainsMap.Scan(ctx)
+	if err != nil {
+		logger.Errorf("node=(%s) failed to fetch the grains list from the cluster: %v", x.node.PeersAddress(), err)
+		return nil, err
+	}
+
+	defer scanner.Close()
+
+	var grains []*internalpb.Grain
+	for scanner.Next() {
+		identity := scanner.Key()
+		resp, _ := x.grainsMap.Get(ctx, identity)
+		bytea, _ := resp.Byte()
+		actor, err := decodeGrain(bytea)
+		if err != nil {
+			logger.Errorf("node=(%s) failed to decode grain=(%s) record: %v", x.node.PeersAddress(), identity, err)
+			return nil, err
+		}
+		grains = append(grains, actor)
+	}
+
+	logger.Infof("node=(%s) successfully fetched the list of grains from the cluster.:)", x.node.PeersAddress())
+	return grains, nil
 }
 
 // RemoveKind removes a given actor from the cluster

@@ -77,7 +77,7 @@ func TestGrain(t *testing.T) {
 		require.IsType(t, &testpb.Reply{}, response)
 
 		// check if the grain is activated
-		gp, ok := testSystem.(*actorSystem).grains.Get(*identity)
+		gp, ok := testSystem.(*actorSystem).grains.Get(identity.String())
 		require.True(t, ok)
 		require.NotNil(t, gp)
 		require.True(t, gp.isActive())
@@ -88,10 +88,16 @@ func TestGrain(t *testing.T) {
 		require.IsType(t, &testpb.Reply{}, response)
 
 		// check if the grain is activated
-		gp, ok = testSystem.(*actorSystem).grains.Get(*identity)
+		gp, ok = testSystem.(*actorSystem).grains.Get(identity.String())
 		require.True(t, ok)
 		require.NotNil(t, gp)
 		require.True(t, gp.isActive())
+
+		grains := testSystem.Grains(ctx, time.Second)
+		require.NotEmpty(t, grains)
+		require.Len(t, grains, 1)
+		actual := grains[0]
+		require.True(t, identity.Equal(actual))
 
 		// deactivate the grain
 		err = testSystem.TellGrain(ctx, identity, new(goaktpb.PoisonPill))
@@ -136,7 +142,7 @@ func TestGrain(t *testing.T) {
 		pause.For(time.Second)
 
 		// check if the grain is activated
-		gp, ok := node1.(*actorSystem).grains.Get(*identity)
+		gp, ok := node1.(*actorSystem).grains.Get(identity.String())
 		require.True(t, ok)
 		require.NotNil(t, gp)
 		require.True(t, gp.isActive())
@@ -161,7 +167,7 @@ func TestGrain(t *testing.T) {
 		require.NotNil(t, identity)
 
 		// check if the grain is activated
-		gp, ok = node1.(*actorSystem).grains.Get(*identity)
+		gp, ok = node1.(*actorSystem).grains.Get(identity.String())
 		require.True(t, ok)
 		require.NotNil(t, gp)
 		require.True(t, gp.isActive())
@@ -174,10 +180,14 @@ func TestGrain(t *testing.T) {
 		require.NotNil(t, response)
 		require.IsType(t, &testpb.Reply{}, response)
 
+		grains := node3.Grains(ctx, time.Second)
+		require.NotEmpty(t, grains)
+		require.Len(t, grains, 1)
+
 		pause.For(time.Second)
 
 		// check if the grain is activated
-		gp, ok = node1.(*actorSystem).grains.Get(*identity)
+		gp, ok = node1.(*actorSystem).grains.Get(identity.String())
 		require.True(t, ok)
 		require.NotNil(t, gp)
 		require.True(t, gp.isActive())
@@ -187,7 +197,7 @@ func TestGrain(t *testing.T) {
 		require.NoError(t, err)
 
 		// check if the grain is activated
-		gp, ok = node1.(*actorSystem).grains.Get(*identity)
+		gp, ok = node1.(*actorSystem).grains.Get(identity.String())
 		require.False(t, ok)
 		require.Nil(t, gp)
 
@@ -224,7 +234,7 @@ func TestGrain(t *testing.T) {
 		require.ErrorIs(t, err, ErrUnhanledMessage)
 
 		// check if the grain is activated
-		gp, ok := testSystem.(*actorSystem).grains.Get(*identity)
+		gp, ok := testSystem.(*actorSystem).grains.Get(identity.String())
 		require.True(t, ok)
 		require.NotNil(t, gp)
 		require.True(t, gp.isActive())
@@ -260,7 +270,7 @@ func TestGrain(t *testing.T) {
 		require.ErrorContains(t, err, "test panic") // we expect the panic to be caught and returned as an error
 
 		// check if the grain is activated
-		gp, ok := testSystem.(*actorSystem).grains.Get(*identity)
+		gp, ok := testSystem.(*actorSystem).grains.Get(identity.String())
 		require.True(t, ok)
 		require.NotNil(t, gp)
 		require.True(t, gp.isActive())
@@ -322,7 +332,7 @@ func TestGrain(t *testing.T) {
 		pause.For(500 * time.Millisecond)
 
 		// check if the grain is activated
-		gp, ok := testSystem.(*actorSystem).grains.Get(*identity)
+		gp, ok := testSystem.(*actorSystem).grains.Get(identity.String())
 		require.True(t, ok)
 		require.NotNil(t, gp)
 		require.True(t, gp.isActive())
@@ -335,7 +345,7 @@ func TestGrain(t *testing.T) {
 		pause.For(500 * time.Millisecond)
 
 		// check if the grain is activated
-		gp, ok = testSystem.(*actorSystem).grains.Get(*identity)
+		gp, ok = testSystem.(*actorSystem).grains.Get(identity.String())
 		require.True(t, ok)
 		require.NotNil(t, gp)
 		require.False(t, gp.isActive())
@@ -368,7 +378,7 @@ func TestGrain(t *testing.T) {
 		require.Nil(t, response)
 
 		// check if the grain is activated
-		gp, ok := testSystem.(*actorSystem).grains.Get(*identity)
+		gp, ok := testSystem.(*actorSystem).grains.Get(identity.String())
 		require.True(t, ok)
 		require.NotNil(t, gp)
 		require.True(t, gp.isActive())
@@ -376,7 +386,7 @@ func TestGrain(t *testing.T) {
 		err = testSystem.TellGrain(ctx, identity, message)
 		require.Error(t, err)
 
-		gp, ok = testSystem.(*actorSystem).grains.Get(*identity)
+		gp, ok = testSystem.(*actorSystem).grains.Get(identity.String())
 		require.True(t, ok)
 		require.NotNil(t, gp)
 		require.True(t, gp.isActive())
@@ -460,7 +470,7 @@ func TestGrain(t *testing.T) {
 		require.ErrorIs(t, err, ErrActorSystemNotStarted)
 		require.Nil(t, identity)
 	})
-	t.Run("GrainIdentity when not started returns error", func(t *testing.T) {
+	t.Run("When GrainIdentity returns error", func(t *testing.T) {
 		ctx := t.Context()
 		testSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
 		require.NoError(t, err)
@@ -760,7 +770,7 @@ func TestGrain(t *testing.T) {
 		require.ErrorIs(t, err, ErrRequestTimeout)
 
 		// check if the grain is activated
-		gp, ok := testSystem.(*actorSystem).grains.Get(*identity)
+		gp, ok := testSystem.(*actorSystem).grains.Get(identity.String())
 		require.True(t, ok)
 		require.NotNil(t, gp)
 		require.True(t, gp.isActive())
@@ -794,7 +804,7 @@ func TestGrain(t *testing.T) {
 		require.Nil(t, response)
 
 		// check if the grain is activated
-		gp, ok := testSystem.(*actorSystem).grains.Get(*identity)
+		gp, ok := testSystem.(*actorSystem).grains.Get(identity.String())
 		require.True(t, ok)
 		require.NotNil(t, gp)
 		require.True(t, gp.isActive())
@@ -830,7 +840,7 @@ func TestGrain(t *testing.T) {
 		require.Nil(t, response)
 
 		// check if the grain is activated
-		gp, ok := testSystem.(*actorSystem).grains.Get(*identity)
+		gp, ok := testSystem.(*actorSystem).grains.Get(identity.String())
 		require.True(t, ok)
 		require.NotNil(t, gp)
 		require.True(t, gp.isActive())
@@ -866,7 +876,7 @@ func TestGrain(t *testing.T) {
 		require.ErrorIs(t, err, ErrRequestTimeout)
 
 		// check if the grain is activated
-		gp, ok := testSystem.(*actorSystem).grains.Get(*identity)
+		gp, ok := testSystem.(*actorSystem).grains.Get(identity.String())
 		require.True(t, ok)
 		require.NotNil(t, gp)
 		require.True(t, gp.isActive())
@@ -906,7 +916,7 @@ func TestGrain(t *testing.T) {
 		require.NoError(t, err)
 
 		// check if the grain is activated
-		gp, ok := testSystem.(*actorSystem).grains.Get(*identity)
+		gp, ok := testSystem.(*actorSystem).grains.Get(identity.String())
 		require.True(t, ok)
 		require.NotNil(t, gp)
 		require.True(t, gp.isActive())
@@ -926,7 +936,7 @@ func TestGrain(t *testing.T) {
 		require.NoError(t, err)
 
 		// check if the grain is activated
-		gp, ok = testSystem.(*actorSystem).grains.Get(*identity)
+		gp, ok = testSystem.(*actorSystem).grains.Get(identity.String())
 		require.False(t, ok)
 		require.Nil(t, gp)
 
@@ -936,7 +946,7 @@ func TestGrain(t *testing.T) {
 		})
 
 		// check if the grain is activated
-		gp, ok = testSystem.(*actorSystem).grains.Get(*identity)
+		gp, ok = testSystem.(*actorSystem).grains.Get(identity.String())
 		require.True(t, ok)
 		require.NotNil(t, gp)
 		require.True(t, gp.isActive())
@@ -949,7 +959,7 @@ func TestGrain(t *testing.T) {
 		require.EqualValues(t, 1500.00, actual.GetAccountBalance())
 
 		// check if the grain is activated
-		gp, ok = testSystem.(*actorSystem).grains.Get(*identity)
+		gp, ok = testSystem.(*actorSystem).grains.Get(identity.String())
 		require.True(t, ok)
 		require.NotNil(t, gp)
 		require.True(t, gp.isActive())
@@ -985,7 +995,7 @@ func TestGrain(t *testing.T) {
 		wg.Wait()
 
 		// check if the grain is activated
-		gp, ok := testSystem.(*actorSystem).grains.Get(*identity)
+		gp, ok := testSystem.(*actorSystem).grains.Get(identity.String())
 		require.False(t, ok)
 		require.Nil(t, gp)
 
@@ -1002,7 +1012,7 @@ func TestGrain(t *testing.T) {
 		require.IsType(t, &testpb.Reply{}, response)
 
 		// check if the grain is activated
-		gp, ok = testSystem.(*actorSystem).grains.Get(*identity)
+		gp, ok = testSystem.(*actorSystem).grains.Get(identity.String())
 		require.True(t, ok)
 		require.NotNil(t, gp)
 		require.True(t, gp.isActive())
@@ -1012,9 +1022,32 @@ func TestGrain(t *testing.T) {
 		require.NoError(t, err)
 
 		// check if the grain is activated
-		gp, ok = testSystem.(*actorSystem).grains.Get(*identity)
+		gp, ok = testSystem.(*actorSystem).grains.Get(identity.String())
 		require.False(t, ok)
 		require.Nil(t, gp)
+
+		require.NoError(t, testSystem.Stop(ctx))
+	})
+
+	t.Run("With GrainIdentity when dependencies are invalid", func(t *testing.T) {
+		ctx := t.Context()
+		testSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NotNil(t, testSystem)
+
+		// start the actor system
+		err = testSystem.Start(ctx)
+		require.NoError(t, err)
+		pause.For(time.Second)
+
+		dependency := NewMockDependency("$omeN@me", "user", "email")
+
+		grain := NewMockGrain()
+		identity, err := testSystem.GrainIdentity(ctx, "testGrain", func(_ context.Context) (Grain, error) {
+			return grain, nil
+		}, WithGrainDependencies(dependency))
+		require.Error(t, err)
+		require.Nil(t, identity)
 
 		require.NoError(t, testSystem.Stop(ctx))
 	})

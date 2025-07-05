@@ -520,6 +520,26 @@ type ActorSystem interface { //nolint:revive
 	// Returns:
 	//   - error: An error if the message could not be delivered or the system is not started.
 	TellGrain(ctx context.Context, identity *GrainIdentity, message proto.Message) error
+	// Grains retrieves a list of all active Grains (virtual actors) in the system.
+	//
+	// Grains are virtual actors that are automatically managed by the actor system. This method returns a slice of
+	// GrainIdentity objects representing the currently active Grains. In cluster mode, it attempts to aggregate Grains
+	// across all nodes in the cluster; if the cluster request fails, only locally active Grains will be returned.
+	//
+	// Use this method with caution, as scanning for all Grains (especially in a large cluster) may impact system performance.
+	// The timeout parameter defines the maximum duration for cluster-based requests before they are terminated.
+	//
+	// Parameters:
+	//   - ctx: Context for cancellation and timeout control.
+	//   - timeout: The maximum duration to wait for cluster-based queries.
+	//
+	// Returns:
+	//   - []*GrainIdentity: A slice of GrainIdentity objects for all active Grains.
+	//
+	// Note:
+	//   - This method abstracts away the details of Grain lifecycle management.
+	//   - Use this to obtain references to all active Grains for monitoring, diagnostics, or administrative purposes.
+	Grains(ctx context.Context, timeout time.Duration) []*GrainIdentity
 	// handleRemoteAsk handles a synchronous message to another actor and expect a response.
 	// This block until a response is received or timed out.
 	handleRemoteAsk(ctx context.Context, to *PID, message proto.Message, timeout time.Duration) (response proto.Message, err error)
@@ -551,7 +571,7 @@ type ActorSystem interface { //nolint:revive
 	findRoutee(routeeName string) (*PID, bool)
 	isShuttingDown() bool
 	getRemoting() *Remoting
-	getGrains() *collection.Map[GrainIdentity, *grainPID]
+	getGrains() *collection.Map[string, *grainPID]
 	recreateGrain(ctx context.Context, props *internalpb.Grain) error
 }
 
@@ -647,7 +667,7 @@ type actorSystem struct {
 	spawnOnNext  *atomic.Uint32
 	shuttingDown *atomic.Bool
 	grainsQueue  chan *internalpb.Grain
-	grains       *collection.Map[GrainIdentity, *grainPID]
+	grains       *collection.Map[string, *grainPID]
 }
 
 var (
@@ -697,7 +717,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		started:             atomic.NewBool(false),
 		starting:            atomic.NewBool(false),
 		grainsQueue:         make(chan *internalpb.Grain, 10),
-		grains:              collection.NewMap[GrainIdentity, *grainPID](),
+		grains:              collection.NewMap[string, *grainPID](),
 	}
 
 	system.relocationEnabled.Store(true)
@@ -2209,7 +2229,7 @@ func (x *actorSystem) getRemoting() *Remoting {
 }
 
 // getGrains returns the grains map of the actor system
-func (x *actorSystem) getGrains() *collection.Map[GrainIdentity, *grainPID] {
+func (x *actorSystem) getGrains() *collection.Map[string, *grainPID] {
 	x.locker.Lock()
 	defer x.locker.Unlock()
 	return x.grains
@@ -2573,7 +2593,7 @@ func (x *actorSystem) shutdown(ctx context.Context) error {
 				// TODO: should we return here or continue with the next grain?
 				//return multierr.Combine(hooksErr, err)
 			}
-			x.grains.Delete(*grain.identity)
+			x.grains.Delete(grain.getIdentity().String())
 			x.logger.Infof("%s successfully deactivated grain=(%s)", x.name, grain.getIdentity().String())
 		}
 	}

@@ -43,7 +43,7 @@ const (
 //   - kind: Fully qualified type name of the grain (derived via reflection).
 //   - name: Unique identifier for the grain instance.
 //
-// GrainIDs enable location-transparent routing, lifecycle management, and stable grain identity
+// GrainIdentity enables location-transparent routing, lifecycle management, and stable grain identity
 // across distributed systems and restarts. They are immutable and safe for concurrent use.
 type GrainIdentity struct {
 	kind string // Fully qualified type name of the grain

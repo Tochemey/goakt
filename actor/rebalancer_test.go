@@ -897,3 +897,135 @@ func TestPersistenceGrainsRebalancing(t *testing.T) {
 	assert.NoError(t, sd3.Close())
 	srv.Shutdown()
 }
+
+// nolint
+func TestGrainsRebalancingWithDependencies(t *testing.T) {
+	// create a context
+	ctx := t.Context()
+	// start the NATS server
+	srv := startNatsServer(t)
+
+	// create and start a system cluster
+	node1, sd1 := testCluster(t, srv.Addr().String())
+	require.NotNil(t, node1)
+	require.NotNil(t, sd1)
+
+	// create and start a system cluster
+	node2, sd2 := testCluster(t, srv.Addr().String())
+	require.NotNil(t, node2)
+	require.NotNil(t, sd2)
+
+	// create and start a system cluster
+	node3, sd3 := testCluster(t, srv.Addr().String())
+	require.NotNil(t, node3)
+	require.NotNil(t, sd3)
+
+	dependencyID := "dependency"
+
+	for j := range 4 {
+		name := fmt.Sprintf("Grain-1%d", j)
+		email := fmt.Sprintf("email1%d", j)
+		dependency := NewMockDependency(dependencyID, name, email)
+		identity, err := node1.GrainIdentity(ctx, name, func(ctx context.Context) (Grain, error) {
+			return NewMockGrain(), nil
+		}, WithGrainDependencies(dependency))
+		require.NotNil(t, identity)
+		require.NoError(t, err)
+		message := new(testpb.TestSend)
+		err = node1.TellGrain(ctx, identity, message)
+		require.NoError(t, err)
+	}
+
+	pause.For(time.Second)
+
+	for j := range 5 {
+		name := fmt.Sprintf("Grain-2%d", j)
+		email := fmt.Sprintf("email2%d", j)
+		dependency := NewMockDependency(dependencyID, name, email)
+		identity, err := node2.GrainIdentity(ctx, name, func(ctx context.Context) (Grain, error) {
+			return NewMockGrain(), nil
+		}, WithGrainDependencies(dependency))
+		require.NotNil(t, identity)
+		require.NoError(t, err)
+		message := new(testpb.TestSend)
+		err = node2.TellGrain(ctx, identity, message)
+		require.NoError(t, err)
+	}
+
+	pause.For(time.Second)
+
+	for j := range 4 {
+		name := fmt.Sprintf("Grain-3%d", j)
+		email := fmt.Sprintf("email3%d", j)
+		dependency := NewMockDependency(dependencyID, name, email)
+		identity, err := node3.GrainIdentity(ctx, name, func(ctx context.Context) (Grain, error) {
+			return NewMockGrain(), nil
+		}, WithGrainDependencies(dependency))
+		require.NotNil(t, identity)
+		require.NoError(t, err)
+		message := new(testpb.TestSend)
+		err = node3.TellGrain(ctx, identity, message)
+		require.NoError(t, err)
+	}
+
+	pause.For(time.Second)
+
+	// take down node2
+	require.NoError(t, node2.Stop(ctx))
+	require.NoError(t, sd2.Close())
+
+	// Wait for cluster rebalancing
+	pause.For(time.Minute)
+
+	identity, err := node3.GrainIdentity(ctx, "Grain-20", func(ctx context.Context) (Grain, error) {
+		return NewMockGrain(), nil
+	}, WithGrainDependencies(NewMockDependency(dependencyID, "Grain-20", "email20")))
+	require.NotNil(t, identity)
+	require.NoError(t, err)
+
+	message := new(testpb.TestSend)
+	err = node3.TellGrain(ctx, identity, message)
+	require.NoError(t, err)
+
+	identity, err = node1.GrainIdentity(ctx, "Grain-21", func(ctx context.Context) (Grain, error) {
+		return NewMockGrain(), nil
+	}, WithGrainDependencies(NewMockDependency(dependencyID, "Grain-21", "email21")))
+	require.NotNil(t, identity)
+	require.NoError(t, err)
+	message = new(testpb.TestSend)
+	err = node1.TellGrain(ctx, identity, message)
+	require.NoError(t, err)
+
+	identity, err = node3.GrainIdentity(ctx, "Grain-22", func(ctx context.Context) (Grain, error) {
+		return NewMockGrain(), nil
+	}, WithGrainDependencies(NewMockDependency(dependencyID, "Grain-22", "email22")))
+	require.NotNil(t, identity)
+	require.NoError(t, err)
+	message = new(testpb.TestSend)
+	err = node3.TellGrain(ctx, identity, message)
+	require.NoError(t, err)
+
+	identity, err = node1.GrainIdentity(ctx, "Grain-23", func(ctx context.Context) (Grain, error) {
+		return NewMockGrain(), nil
+	}, WithGrainDependencies(NewMockDependency(dependencyID, "Grain-23", "email23")))
+	require.NotNil(t, identity)
+	require.NoError(t, err)
+	message = new(testpb.TestSend)
+	err = node1.TellGrain(ctx, identity, message)
+	require.NoError(t, err)
+
+	identity, err = node1.GrainIdentity(ctx, "Grain-24", func(ctx context.Context) (Grain, error) {
+		return NewMockGrain(), nil
+	}, WithGrainDependencies(NewMockDependency(dependencyID, "Grain-24", "email24")))
+	require.NotNil(t, identity)
+	require.NoError(t, err)
+	message = new(testpb.TestSend)
+	err = node1.TellGrain(ctx, identity, message)
+	require.NoError(t, err)
+
+	assert.NoError(t, node1.Stop(ctx))
+	assert.NoError(t, node3.Stop(ctx))
+	assert.NoError(t, sd1.Close())
+	assert.NoError(t, sd3.Close())
+	srv.Shutdown()
+}

@@ -24,6 +24,8 @@
 
 package actor
 
+import "github.com/tochemey/goakt/v3/extension"
+
 // GrainProps encapsulates configuration and metadata for a Grain (virtual actor) in the goakt actor system.
 //
 // It holds the unique identity of the Grain and a reference to the ActorSystem that manages it.
@@ -34,8 +36,9 @@ package actor
 //   - identity:    The unique identity of the Grain, used for addressing and routing.
 //   - actorSystem: The ActorSystem instance that owns and manages the Grain.
 type GrainProps struct {
-	identity    *GrainIdentity
-	actorSystem ActorSystem
+	identity     *GrainIdentity
+	actorSystem  ActorSystem
+	dependencies []extension.Dependency
 }
 
 // newGrainProps creates and returns a new GrainProps instance for the specified identity and actor system.
@@ -48,10 +51,11 @@ type GrainProps struct {
 //
 // Returns:
 //   - *GrainProps: A new instance containing the provided identity and actor system.
-func newGrainProps(identity *GrainIdentity, actorSystem ActorSystem) *GrainProps {
+func newGrainProps(identity *GrainIdentity, actorSystem ActorSystem, dependencies []extension.Dependency) *GrainProps {
 	return &GrainProps{
-		identity:    identity,
-		actorSystem: actorSystem,
+		identity:     identity,
+		actorSystem:  actorSystem,
+		dependencies: dependencies,
 	}
 }
 
@@ -75,4 +79,22 @@ func (p *GrainProps) Identity() *GrainIdentity {
 //   - ActorSystem: The actor system managing this Grain.
 func (p *GrainProps) ActorSystem() ActorSystem {
 	return p.actorSystem
+}
+
+// Dependencies returns the dependencies registered with this GrainProps.
+//
+// Dependencies are external services, resources, or components that the Grain requires to operate.
+// These are typically injected into the Grain at creation time, enabling loose coupling and easier testing.
+//
+// Returns:
+//   - []extension.Dependency: A slice containing all dependencies associated with this GrainProps instance.
+//
+// Example usage:
+//
+//	deps := grainProps.Dependencies()
+//	for _, dep := range deps {
+//	    // Use dep as needed
+//	}
+func (p *GrainProps) Dependencies() []extension.Dependency {
+	return p.dependencies
 }
