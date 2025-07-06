@@ -24,7 +24,11 @@
 
 package errorschain
 
-import "go.uber.org/multierr"
+import (
+	"context"
+
+	"go.uber.org/multierr"
+)
 
 // Chain defines an error chain
 type Chain struct {
@@ -84,6 +88,28 @@ func (c *Chain) AddErrorFn(fn func() error) *Chain {
 	if err := fn(); err != nil {
 		c.errs = append(c.errs, err)
 		return c
+	}
+
+	return c
+}
+
+// AddErrorFnIf adds an error function to the chain if the condition is true
+func (c *Chain) AddErrorFnIf(ctx context.Context, condition bool, fn func(ctx context.Context) error) *Chain {
+	if condition {
+		if c.returnFirst {
+			if len(c.errs) == 0 {
+				if err := fn(ctx); err != nil {
+					c.errs = append(c.errs, err)
+					return c
+				}
+			}
+			return c
+		}
+
+		if err := fn(ctx); err != nil {
+			c.errs = append(c.errs, err)
+			return c
+		}
 	}
 
 	return c

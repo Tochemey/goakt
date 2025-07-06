@@ -469,6 +469,65 @@ func (_c *Interface_GrainExists_Call) RunAndReturn(run func(context.Context, str
 	return _c
 }
 
+// Grains provides a mock function with given fields: ctx, timeout
+func (_m *Interface) Grains(ctx context.Context, timeout time.Duration) ([]*internalpb.Grain, error) {
+	ret := _m.Called(ctx, timeout)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Grains")
+	}
+
+	var r0 []*internalpb.Grain
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, time.Duration) ([]*internalpb.Grain, error)); ok {
+		return rf(ctx, timeout)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, time.Duration) []*internalpb.Grain); ok {
+		r0 = rf(ctx, timeout)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*internalpb.Grain)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, time.Duration) error); ok {
+		r1 = rf(ctx, timeout)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// Interface_Grains_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Grains'
+type Interface_Grains_Call struct {
+	*mock.Call
+}
+
+// Grains is a helper method to define mock.On call
+//   - ctx context.Context
+//   - timeout time.Duration
+func (_e *Interface_Expecter) Grains(ctx interface{}, timeout interface{}) *Interface_Grains_Call {
+	return &Interface_Grains_Call{Call: _e.mock.On("Grains", ctx, timeout)}
+}
+
+func (_c *Interface_Grains_Call) Run(run func(ctx context.Context, timeout time.Duration)) *Interface_Grains_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(time.Duration))
+	})
+	return _c
+}
+
+func (_c *Interface_Grains_Call) Return(_a0 []*internalpb.Grain, _a1 error) *Interface_Grains_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *Interface_Grains_Call) RunAndReturn(run func(context.Context, time.Duration) ([]*internalpb.Grain, error)) *Interface_Grains_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // IsLeader provides a mock function with given fields: ctx
 func (_m *Interface) IsLeader(ctx context.Context) bool {
 	ret := _m.Called(ctx)

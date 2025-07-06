@@ -215,6 +215,10 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 	pid.startSupervision()
 	pid.startPassivation()
 
+	if err := pid.checkBootstrap(ctx); err != nil {
+		return nil, err
+	}
+
 	pid.fireSystemMessage(ctx, new(goaktpb.PostStart))
 
 	pid.startedAt.Store(time.Now().Unix())
@@ -375,8 +379,16 @@ func (pid *PID) Stop(ctx context.Context, cid *PID) error {
 			return err
 		}
 
-		// remove the node from the tree
+		// remove the node from the tree and cluster
 		tree.deleteNode(cid)
+		if pid.system.InCluster() {
+			cluster := pid.system.getCluster()
+			if err := cluster.RemoveActor(context.WithoutCancel(ctx), cid.Name()); err != nil {
+				pid.fieldsLocker.RUnlock()
+				return fmt.Errorf("failed to cleanup actor=(%s) from cluster: %w", cid.Name(), err)
+			}
+		}
+
 		pid.fieldsLocker.RUnlock()
 		return nil
 	}
@@ -514,11 +526,11 @@ func (pid *PID) Restart(ctx context.Context) error {
 	}
 
 	// restart all the previous children
-	eg, ctx := errgroup.WithContext(ctx)
+	eg, gctx := errgroup.WithContext(ctx)
 	for _, child := range children {
 		child := child
 		eg.Go(func() error {
-			if err := child.Restart(ctx); err != nil {
+			if err := child.Restart(gctx); err != nil {
 				return err
 			}
 
@@ -549,6 +561,10 @@ func (pid *PID) Restart(ctx context.Context) error {
 	pid.suspended.Store(false)
 	pid.startSupervision()
 	pid.startPassivation()
+
+	if err := pid.checkBootstrap(ctx); err != nil {
+		return err
+	}
 
 	pid.restartCount.Inc()
 	pid.fireSystemMessage(ctx, new(goaktpb.PostStart))
@@ -1310,6 +1326,8 @@ func (pid *PID) receiveLoop() {
 			switch msg := received.Message().(type) {
 			case *goaktpb.PoisonPill:
 				_ = pid.Shutdown(received.Context())
+			case *internalpb.ReadinessProbe:
+				pid.handleReadinessProbe(received)
 			case *internalpb.Down:
 				pid.handleFailure(received.Sender(), msg)
 			case *goaktpb.PausePassivation:
@@ -1332,6 +1350,12 @@ func (pid *PID) receiveLoop() {
 		}
 		return
 	}
+}
+
+// handleReadinessProbe is used to handle the readiness probe messages
+func (pid *PID) handleReadinessProbe(received *ReceiveContext) {
+	pid.latestReceiveTime.Store(time.Now())
+	received.Response(new(internalpb.ReadinessProbe))
 }
 
 // handleReceived picks the right behavior and processes the message
@@ -1383,7 +1407,7 @@ func (pid *PID) recovery(received *ReceiveContext) {
 // init initializes the given actor and init processing messages
 // when the initialization failed the actor will not be started
 func (pid *PID) init(ctx context.Context) error {
-	pid.logger.Infof("%s starting...", pid.Name())
+	pid.logger.Infof("%s initializing...", pid.Name())
 
 	initContext := newContext(ctx, pid.Name(), pid.system, pid.Dependencies()...)
 
@@ -1395,6 +1419,7 @@ func (pid *PID) init(ctx context.Context) error {
 	}); err != nil {
 		e := NewErrInitFailure(err)
 		cancel()
+		pid.logger.Errorf("%s failed to initialize: %v", pid.Name(), err)
 		return e
 	}
 
@@ -1581,11 +1606,6 @@ func (pid *PID) passivationLoop() {
 		}
 	}
 
-	// Acquire stopLocker to synchronize with Shutdown and other stop triggers
-	pid.stopLocker.Lock()
-	defer pid.stopLocker.Unlock()
-
-	// Double-check the conditions after acquiring the lock
 	if pid.stopping.Load() ||
 		pid.suspended.Load() ||
 		pid.passivationPaused.Load() {
@@ -1599,9 +1619,11 @@ func (pid *PID) passivationLoop() {
 		pid.passivating.Store(false)
 	}()
 
+	pid.stopLocker.Lock()
+	defer pid.stopLocker.Unlock()
+
 	ctx := context.Background()
 	if err := pid.doStop(ctx); err != nil {
-		// TODO: rethink properly about PostStop error handling
 		pid.logger.Errorf("failed to passivate actor=(%s): reason=(%v)", pid.Name(), err)
 		return
 	}
@@ -1774,7 +1796,7 @@ func (pid *PID) notifyParent(signal *supervisionSignal) {
 	}
 
 	if parent := pid.Parent(); parent != nil && !parent.Equals(NoSender) {
-		pid.logger.Warnf("%s child actor=(%s) is failing: Err=%s", pid.Name(), parent.Name(), msg.GetErrorMessage())
+		pid.logger.Warnf("%s's child actor=(%s) is failing: Err=%s", pid.Name(), parent.Name(), msg.GetErrorMessage())
 		pid.logger.Infof("%s activates [strategy=%s, directive=%s] for failing child actor=(%s)",
 			parent.Name(),
 			pid.supervisor.Strategy(),
@@ -1794,7 +1816,7 @@ func (pid *PID) toDeadletters(receiveCtx *ReceiveContext, err error) {
 
 	// skip system messages
 	switch receiveCtx.Message().(type) {
-	case *goaktpb.PostStart:
+	case *goaktpb.PostStart, *goaktpb.Terminated:
 		return
 	default:
 		// pass through
@@ -2072,6 +2094,32 @@ func (pid *PID) startPassivation() {
 // isStopping checks whether the actor is stopping or not
 func (pid *PID) isStopping() bool {
 	return pid != nil && pid.stopping.Load() || !pid.running.Load()
+}
+
+// checkBootstrap is called whenever an actor is spawned to make sure it is ready and functional.
+// It has to be very fast for a smooth operation.
+func (pid *PID) checkBootstrap(ctx context.Context) error {
+	logger := pid.logger
+
+	message := new(internalpb.ReadinessProbe)
+	timeout := pid.initTimeout.Load()
+	numretries := pid.initMaxRetries.Load()
+
+	logger.Infof("%s bootstrapping...", pid.Name())
+	retrier := retry.NewRetrier(int(numretries), timeout, timeout)
+	err := retrier.RunContext(ctx, func(ctx context.Context) error {
+		_, err := NoSender.Ask(ctx, pid, message, DefaultAskTimeout)
+		return err
+	})
+
+	if err != nil {
+		logger.Errorf("%s failed to bootstrap: %v", pid.Name(), err)
+		// attempt to shut down the actor to free pre-allocated resources
+		return errors.Join(err, pid.Shutdown(ctx))
+	}
+
+	logger.Infof("%s successfully bootstrapped.", pid.Name())
+	return nil
 }
 
 // isLongLivedStrategy checks whether the given strategy is a long-lived strategy

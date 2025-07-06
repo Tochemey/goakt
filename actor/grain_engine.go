@@ -33,6 +33,7 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
+	goset "github.com/deckarep/golang-set/v2"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/durationpb"
@@ -84,6 +85,9 @@ func (x *actorSystem) GrainIdentity(ctx context.Context, name string, factory Gr
 	}
 
 	config := newGrainConfig(opts...)
+	if err := config.Validate(); err != nil {
+		return nil, err
+	}
 
 	if x.InCluster() {
 		grainInfo, err := x.getCluster().GetGrain(ctx, identity.String())
@@ -106,7 +110,7 @@ func (x *actorSystem) GrainIdentity(ctx context.Context, name string, factory Gr
 		}
 	}
 
-	process, ok := x.grains.Get(*identity)
+	process, ok := x.grains.Get(identity.String())
 	if !ok {
 		process = newGrainPID(identity, grain, x, config)
 	}
@@ -121,7 +125,7 @@ func (x *actorSystem) GrainIdentity(ctx context.Context, name string, factory Gr
 		}
 	}
 
-	x.grains.Set(*identity, process)
+	x.grains.Set(identity.String(), process)
 	return identity, x.putGrainOnCluster(process)
 }
 
@@ -183,6 +187,53 @@ func (x *actorSystem) AskGrain(ctx context.Context, identity *GrainIdentity, mes
 		return x.remoteAskGrain(ctx, identity, message, timeout)
 	}
 	return x.localSend(ctx, identity, message, timeout, true)
+}
+
+// Grains retrieves a list of all active Grains (virtual actors) in the system.
+//
+// Grains are virtual actors that are automatically managed by the actor system. This method returns a slice of
+// GrainIdentity objects representing the currently active Grains. In cluster mode, it attempts to aggregate Grains
+// across all nodes in the cluster; if the cluster request fails, only locally active Grains will be returned.
+//
+// Use this method with caution, as scanning for all Grains (especially in a large cluster) may impact system performance.
+// The timeout parameter defines the maximum duration for cluster-based requests before they are terminated.
+//
+// Parameters:
+//   - ctx: Context for cancellation and timeout control.
+//   - timeout: The maximum duration to wait for cluster-based queries.
+//
+// Returns:
+//   - []*GrainIdentity: A slice of GrainIdentity objects for all active Grains.
+//
+// Note:
+//   - This method abstracts away the details of Grain lifecycle management.
+//   - Use this to obtain references to all active Grains for monitoring, diagnostics, or administrative purposes.
+func (x *actorSystem) Grains(ctx context.Context, timeout time.Duration) []*GrainIdentity {
+	if !x.started.Load() || x.isShuttingDown() {
+		return nil
+	}
+
+	x.locker.Lock()
+	ids := x.grains.Keys()
+	x.locker.Unlock()
+	uniques := goset.NewSet(ids...)
+
+	if x.InCluster() {
+		if grains, err := x.getCluster().Grains(ctx, timeout); err == nil {
+			for _, grain := range grains {
+				uniques.Add(grain.GetGrainId().GetValue())
+			}
+		}
+	}
+
+	identities := make([]*GrainIdentity, 0, uniques.Cardinality())
+	for _, id := range uniques.ToSlice() {
+		if identity, err := toIdentity(id); err == nil {
+			identities = append(identities, identity)
+		}
+	}
+
+	return identities
 }
 
 // RemoteAskGrain handles remote requests to a Grain from another node.
@@ -465,10 +516,10 @@ func (x *actorSystem) localSend(ctx context.Context, id *GrainIdentity, message 
 
 // ensureGrainProcess returns an existing grain process or creates and activates a new one.
 func (x *actorSystem) ensureGrainProcess(id *GrainIdentity) (*grainPID, error) {
-	process, ok := x.grains.Get(*id)
+	process, ok := x.grains.Get(id.String())
 	if ok {
 		if !x.reflection.registry.Exists(process.getGrain()) {
-			x.grains.Delete(*id)
+			x.grains.Delete(id.String())
 			return nil, ErrGrainNotRegistered
 		}
 
@@ -502,9 +553,14 @@ func (x *actorSystem) recreateGrain(ctx context.Context, serializedGrain *intern
 		ok      bool
 	)
 
-	process, ok = x.grains.Get(*identity)
+	process, ok = x.grains.Get(identity.String())
 	if !ok {
 		grain, err := x.getReflection().NewGrain(identity.Kind())
+		if err != nil {
+			return err
+		}
+
+		dependencies, err := x.getReflection().NewDependencies(serializedGrain.GetDependencies()...)
 		if err != nil {
 			return err
 		}
@@ -512,7 +568,12 @@ func (x *actorSystem) recreateGrain(ctx context.Context, serializedGrain *intern
 		config := newGrainConfig(
 			WithGrainInitTimeout(serializedGrain.GetActivationTimeout().AsDuration()),
 			WithGrainInitMaxRetries(int(serializedGrain.GetActivationRetries())),
+			WithGrainDependencies(dependencies...),
 		)
+
+		if err := config.Validate(); err != nil {
+			return err
+		}
 
 		process = newGrainPID(identity, grain, x, config)
 		if err := process.activate(ctx); err != nil {
@@ -520,7 +581,7 @@ func (x *actorSystem) recreateGrain(ctx context.Context, serializedGrain *intern
 		}
 
 		// Register locally
-		x.getGrains().Set(*identity, process)
+		x.getGrains().Set(identity.String(), process)
 
 		// Register in the cluster
 		return x.putGrainOnCluster(process)
