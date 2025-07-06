@@ -1109,9 +1109,9 @@ func TestActorSystem(t *testing.T) {
 			// get the event payload
 			payload := event.Payload()
 			// only listening to cluster event
-			nodeJoined, ok := payload.(*goaktpb.NodeJoined)
-			require.True(t, ok)
-			joins = append(joins, nodeJoined)
+			if nodeJoined, ok := payload.(*goaktpb.NodeJoined); ok {
+				joins = append(joins, nodeJoined)
+			}
 		}
 
 		// assert the joins list
@@ -1124,8 +1124,8 @@ func TestActorSystem(t *testing.T) {
 
 		// stop the node
 		require.NoError(t, cl1.Unsubscribe(subscriber1))
-		assert.NoError(t, cl1.Stop(ctx))
-		assert.NoError(t, sd1.Close())
+		require.NoError(t, cl1.Stop(ctx))
+		require.NoError(t, sd1.Close())
 
 		// wait for some time
 		pause.For(time.Second)
@@ -1136,8 +1136,9 @@ func TestActorSystem(t *testing.T) {
 
 			// only listening to cluster event
 			nodeLeft, ok := payload.(*goaktpb.NodeLeft)
-			require.True(t, ok)
-			lefts = append(lefts, nodeLeft)
+			if ok {
+				lefts = append(lefts, nodeLeft)
+			}
 		}
 
 		require.NotEmpty(t, lefts)

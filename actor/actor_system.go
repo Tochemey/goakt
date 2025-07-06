@@ -2589,6 +2589,8 @@ func (x *actorSystem) shutdown(ctx context.Context) error {
 		AddErrorFnIf(ctx, x.getRebalancer() != nil, x.getRebalancer().Shutdown).
 		AddErrorFnIf(ctx, x.getDeadletter() != nil, x.getDeadletter().Shutdown).
 		AddErrorFnIf(ctx, x.getDeathWatch() != nil, x.getDeathWatch().Shutdown).
+		AddErrorFnIf(ctx, x.TopicActor() != nil, x.TopicActor().Shutdown).
+		AddErrorFnIf(ctx, NoSender != nil, NoSender.Shutdown).
 		AddErrorFnIf(ctx, x.getSystemGuardian() != nil, x.getSystemGuardian().Shutdown).
 		AddErrorFnIf(ctx, x.getRootGuardian() != nil, x.getRootGuardian().Shutdown).
 		Error(); err != nil {
