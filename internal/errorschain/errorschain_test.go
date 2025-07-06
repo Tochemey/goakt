@@ -25,6 +25,7 @@
 package errorschain
 
 import (
+	"context"
 	"errors"
 	"testing"
 
@@ -126,5 +127,64 @@ func TestErrorsChain(t *testing.T) {
 			AddError(nil)
 		actual := chain.Error()
 		require.EqualError(t, actual, "err1; err2; err3")
+	})
+}
+
+func TestAddErrorFnIf(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("ReturnFirst - condition true, error returned", func(t *testing.T) {
+		called := false
+		fn := func(_ context.Context) error {
+			called = true
+			return errors.New("err1")
+		}
+		chain := New(ReturnFirst()).AddErrorFnIf(ctx, true, fn)
+		require.EqualError(t, chain.Error(), "err1")
+		require.True(t, called)
+	})
+
+	t.Run("ReturnFirst - condition false, fn not called", func(t *testing.T) {
+		called := false
+		fn := func(_ context.Context) error {
+			called = true
+			return errors.New("err1")
+		}
+		chain := New(ReturnFirst()).AddErrorFnIf(ctx, false, fn)
+		require.NoError(t, chain.Error())
+		require.False(t, called)
+	})
+
+	t.Run("ReturnAll - condition true, error returned", func(t *testing.T) {
+		called := false
+		fn := func(_ context.Context) error {
+			called = true
+			return errors.New("err2")
+		}
+		chain := New(ReturnAll()).AddErrorFnIf(ctx, true, fn)
+		require.EqualError(t, chain.Error(), "err2")
+		require.True(t, called)
+	})
+
+	t.Run("ReturnAll - condition false, fn not called", func(t *testing.T) {
+		called := false
+		fn := func(_ context.Context) error {
+			called = true
+			return errors.New("err2")
+		}
+		chain := New(ReturnAll()).AddErrorFnIf(ctx, false, fn)
+		require.NoError(t, chain.Error())
+		require.False(t, called)
+	})
+
+	t.Run("ReturnAll - condition true, fn returns nil", func(t *testing.T) {
+		called := false
+		fn := func(_ context.Context) error {
+			called = true
+			return nil
+		}
+		chain := New(ReturnAll()).AddErrorFnIf(ctx, true, fn)
+		require.NoError(t, chain.Error())
+		require.True(t, called)
 	})
 }

@@ -565,9 +565,9 @@ type ActorSystem interface { //nolint:revive
 	getDeathWatch() *PID
 	getDeadletter() *PID
 	getSingletonManager() *PID
+	getRebalancer() *PID
 	getWorkerPool() *workerpool.WorkerPool
 	getReflection() *reflection
-	// internally used
 	findRoutee(routeeName string) (*PID, bool)
 	isShuttingDown() bool
 	getRemoting() *Remoting
@@ -718,6 +718,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		starting:            atomic.NewBool(false),
 		grainsQueue:         make(chan *internalpb.Grain, 10),
 		grains:              collection.NewMap[string, *grainPID](),
+		askTimeout:          DefaultAskTimeout,
 	}
 
 	system.relocationEnabled.Store(true)
@@ -2243,6 +2244,14 @@ func (x *actorSystem) getSingletonManager() *PID {
 	return singletonManager
 }
 
+// getRebalancer returns the rebalancer PID
+func (x *actorSystem) getRebalancer() *PID {
+	x.locker.Lock()
+	rebalancer := x.rebalancer
+	x.locker.Unlock()
+	return rebalancer
+}
+
 func (x *actorSystem) completeRebalancing() {
 	x.rebalancing.Store(false)
 }
@@ -2535,7 +2544,7 @@ func (x *actorSystem) reset() {
 
 // shutdown stops the actor system
 func (x *actorSystem) shutdown(ctx context.Context) error {
-	// we only shutdown the actor system when it is starting or not yet started
+	// we only shut down the actor system when it is starting or not yet started
 	if x.starting.Load() || !x.started.Load() {
 		return ErrActorSystemNotStarted
 	}
@@ -2572,16 +2581,24 @@ func (x *actorSystem) shutdown(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, x.shutdownTimeout)
 	defer cancel()
 
-	// Shutdown root guardian if present
-	if rootGuardian := x.getRootGuardian(); rootGuardian != nil {
-		if err := rootGuardian.Shutdown(ctx); err != nil {
-			x.logger.Errorf("%s failed to shutdown cleanly: %v", x.name, err)
-			clusterErr := shutdownClusterAndRemoting()
-			// Combine all errors if present
-			return multierr.Combine(hooksErr, err, clusterErr)
-		}
-		x.actors.deleteNode(rootGuardian)
+	// shutdown the various system actors
+	if err := errorschain.
+		New(errorschain.ReturnFirst()).
+		AddErrorFnIf(ctx, x.getUserGuardian() != nil, x.getUserGuardian().Shutdown).
+		AddErrorFnIf(ctx, x.getSingletonManager() != nil, x.getSingletonManager().Shutdown).
+		AddErrorFnIf(ctx, x.getRebalancer() != nil, x.getRebalancer().Shutdown).
+		AddErrorFnIf(ctx, x.getDeadletter() != nil, x.getDeadletter().Shutdown).
+		AddErrorFnIf(ctx, x.getDeathWatch() != nil, x.getDeathWatch().Shutdown).
+		AddErrorFnIf(ctx, x.getSystemGuardian() != nil, x.getSystemGuardian().Shutdown).
+		AddErrorFnIf(ctx, x.getRootGuardian() != nil, x.getRootGuardian().Shutdown).
+		Error(); err != nil {
+		x.logger.Errorf("%s failed to shutdown cleanly: %v", x.name, err)
+		clusterErr := shutdownClusterAndRemoting()
+		// Combine all errors if present
+		return multierr.Combine(hooksErr, err, clusterErr)
 	}
+
+	x.actors.deleteNode(x.getRootGuardian())
 
 	// deactivate all grains
 	if x.grains.Len() > 0 {
