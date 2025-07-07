@@ -95,10 +95,7 @@ This project is used in production by the following projects/companies:
 
 ## 📊 Benchmark
 
-One can run the benchmark test from the [Benchmark](https://github.com/Tochemey/goakt-examples/tree/main/actor-benchmark):
-
-- `make bench` to run the benchmark
-- `make bench-stats` to see the benchmark stats
+One can find the benchmark tests in this repository: [Benchmark](https://github.com/Tochemey/goakt-examples/tree/main/actor-benchmark)
 
 ## 💰 Sponsors
 
