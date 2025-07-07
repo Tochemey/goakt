@@ -248,9 +248,10 @@ func Parse(addr string) (*Address, error) {
 	}
 	host := hostPortParts[0]
 	portStr := hostPortParts[1]
-	port, err := strconv.Atoi(portStr)
+	port64, err := strconv.ParseInt(portStr, 10, 32)
 	if err != nil {
 		return nil, err
 	}
+	port := int32(port64)
 	return New(name, system, host, port), nil
 }
