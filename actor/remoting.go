@@ -260,7 +260,12 @@ func (r *Remoting) RemoteSpawn(ctx context.Context, host string, port int, spawn
 	request := connect.NewRequest(
 		&internalpb.RemoteSpawnRequest{
 			Host:                host,
-			Port:                int32(port),
+			Port: func() int32 {
+				if port < 0 || port > 65535 {
+					panic(fmt.Errorf("invalid port value: %d", port))
+				}
+				return int32(port)
+			}(),
 			ActorName:           spawnRequest.Name,
 			ActorType:           spawnRequest.Kind,
 			IsSingleton:         spawnRequest.Singleton,

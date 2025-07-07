@@ -170,7 +170,11 @@ func (n *Node) Free() {
 func (n *Node) HostAndPort() (string, int) {
 	n.mutex.Lock()
 	host, p, _ := net.SplitHostPort(n.address)
-	port, _ := strconv.Atoi(p)
+	parsedPort, err := strconv.ParseInt(p, 10, 32)
+	if err != nil || parsedPort < 0 || parsedPort > 65535 {
+		panic(fmt.Errorf("invalid port value: %s", p))
+	}
+	port := int(parsedPort)
 	n.mutex.Unlock()
 	return host, port
 }
