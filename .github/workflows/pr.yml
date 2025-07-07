@@ -6,7 +6,7 @@ on:
     paths-ignore:
       - "**/README.md"
       - "**/bench/**"
-      - "**/renovate.json"
+      - "**/renovate.json5"
 
 permissions:
   contents: read
