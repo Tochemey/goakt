@@ -78,7 +78,9 @@ import (
 )
 
 // ActorSystem defines the contract of an actor system
-type ActorSystem interface { //nolint:revive
+//
+//nolint:revive
+type ActorSystem interface {
 	// Metric retrieves the current set of runtime metrics for the actor system.
 	//
 	// This includes local actor system metrics such as the number of actors,
@@ -622,7 +624,7 @@ type actorSystem struct {
 	clusterNode        *discovery.Node
 
 	// help protect some the fields to set
-	locker sync.Mutex
+	locker *sync.RWMutex
 
 	stopGC chan registry.Unit
 
@@ -692,7 +694,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		name:                name,
 		logger:              log.New(log.ErrorLevel, os.Stderr),
 		actorInitMaxRetries: DefaultInitMaxRetries,
-		locker:              sync.Mutex{},
+		locker:              &sync.RWMutex{},
 		shutdownTimeout:     DefaultShutdownTimeout,
 		stopGC:              make(chan registry.Unit, 1),
 		eventsStream:        eventstream.New(),
@@ -913,52 +915,50 @@ func (x *actorSystem) Uptime() int64 {
 // Host returns the actor system node host address
 // This is the bind address for remote communication
 func (x *actorSystem) Host() string {
-	x.locker.Lock()
+	x.locker.RLock()
 	host := x.remoteConfig.BindAddr()
-	x.locker.Unlock()
+	x.locker.RUnlock()
 	return host
 }
 
 // Port returns the actor system node port.
 // This is the bind port for remote communication
 func (x *actorSystem) Port() int {
-	x.locker.Lock()
+	x.locker.RLock()
 	port := x.remoteConfig.BindPort()
-	x.locker.Unlock()
+	x.locker.RUnlock()
 	return port
 }
 
 // Logger returns the logger sets when creating the actor system
 func (x *actorSystem) Logger() log.Logger {
-	x.locker.Lock()
+	x.locker.RLock()
 	logger := x.logger
-	x.locker.Unlock()
+	x.locker.RUnlock()
 	return logger
 }
 
 // Deregister removes a registered actor from the registry
 func (x *actorSystem) Deregister(_ context.Context, actor Actor) error {
-	x.locker.Lock()
-	defer x.locker.Unlock()
-
-	if !x.started.Load() {
+	if !x.Running() {
 		return ErrActorSystemNotStarted
 	}
 
+	x.locker.Lock()
 	x.registry.Deregister(actor)
+	x.locker.Unlock()
 	return nil
 }
 
 // Register registers an actor for future use. This is necessary when creating an actor remotely
 func (x *actorSystem) Register(_ context.Context, actor Actor) error {
-	x.locker.Lock()
-	defer x.locker.Unlock()
-
-	if !x.started.Load() {
+	if !x.Running() {
 		return ErrActorSystemNotStarted
 	}
 
+	x.locker.Lock()
 	x.registry.Register(actor)
+	x.locker.Unlock()
 	return nil
 }
 
@@ -1147,7 +1147,7 @@ func (x *actorSystem) ResumeSchedule(reference string) error {
 // Subscribe creates an event subscriber to consume events from the actor system.
 // Remember to use the Unsubscribe method to avoid resource leakage.
 func (x *actorSystem) Subscribe() (eventstream.Subscriber, error) {
-	if !x.started.Load() {
+	if !x.Running() {
 		return nil, ErrActorSystemNotStarted
 	}
 	x.locker.Lock()
@@ -1159,7 +1159,7 @@ func (x *actorSystem) Subscribe() (eventstream.Subscriber, error) {
 
 // Unsubscribe unsubscribes a subscriber.
 func (x *actorSystem) Unsubscribe(subscriber eventstream.Subscriber) error {
-	if !x.started.Load() {
+	if !x.Running() {
 		return ErrActorSystemNotStarted
 	}
 	x.locker.Lock()
@@ -1217,7 +1217,7 @@ func (x *actorSystem) NumActors() uint64 {
 // Note: Actors spawned using this method are confined to the local actor system.
 // For distributed scenarios, use a SpawnOn method.
 func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor, opts ...SpawnOption) (*PID, error) {
-	if !x.started.Load() {
+	if !x.Running() {
 		return nil, ErrActorSystemNotStarted
 	}
 
@@ -1251,7 +1251,7 @@ func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor, opts 
 // SpawnNamedFromFunc creates an actor with the given receive function and provided name. One can set the PreStart and PostStop lifecycle hooks
 // in the given optional options
 func (x *actorSystem) SpawnNamedFromFunc(ctx context.Context, name string, receiveFunc ReceiveFunc, opts ...FuncOption) (*PID, error) {
-	if !x.started.Load() {
+	if !x.Running() {
 		return nil, ErrActorSystemNotStarted
 	}
 
@@ -1318,7 +1318,7 @@ func (x *actorSystem) SpawnNamedFromFunc(ctx context.Context, name string, recei
 //
 // Note: The created actor used the default mailbox set during the creation of the actor system.
 func (x *actorSystem) SpawnOn(ctx context.Context, name string, actor Actor, opts ...SpawnOption) error {
-	if !x.started.Load() {
+	if !x.Running() {
 		return ErrActorSystemNotStarted
 	}
 
@@ -1412,7 +1412,7 @@ func (x *actorSystem) SpawnRouter(ctx context.Context, poolSize int, routeesKind
 // When the oldest node leaves the cluster unexpectedly, the singleton is restarted on the new oldest node.
 // This is useful for managing shared resources or coordinating tasks that should be handled by a single actor.
 func (x *actorSystem) SpawnSingleton(ctx context.Context, name string, actor Actor) error {
-	if !x.started.Load() {
+	if !x.Running() {
 		return ErrActorSystemNotStarted
 	}
 
@@ -1456,7 +1456,7 @@ func (x *actorSystem) SpawnSingleton(ctx context.Context, name string, actor Act
 
 // Kill stops a given actor in the system
 func (x *actorSystem) Kill(ctx context.Context, name string) error {
-	if !x.started.Load() {
+	if !x.Running() {
 		return ErrActorSystemNotStarted
 	}
 
@@ -1483,7 +1483,7 @@ func (x *actorSystem) Kill(ctx context.Context, name string) error {
 // Bear in mind that restarting an actor will reinitialize the actor to initial state.
 // In case any of the direct child restart fails the given actor will not be started at all.
 func (x *actorSystem) ReSpawn(ctx context.Context, name string) (*PID, error) {
-	if !x.started.Load() {
+	if !x.Running() {
 		return nil, ErrActorSystemNotStarted
 	}
 
@@ -1507,18 +1507,18 @@ func (x *actorSystem) ReSpawn(ctx context.Context, name string) (*PID, error) {
 
 // Name returns the actor system name
 func (x *actorSystem) Name() string {
-	x.locker.Lock()
+	x.locker.RLock()
 	name := x.name
-	x.locker.Unlock()
+	x.locker.RUnlock()
 	return name
 }
 
 // Actors returns the list of Actors that are alive on a given running node.
 // This does not account for the total number of actors in the cluster
 func (x *actorSystem) Actors() []*PID {
-	x.locker.Lock()
+	x.locker.RLock()
 	nodes := x.actors.nodes()
-	x.locker.Unlock()
+	x.locker.RUnlock()
 	actors := make([]*PID, 0, len(nodes))
 	for _, node := range nodes {
 		pid := node.value()
@@ -1561,10 +1561,11 @@ func (x *actorSystem) ActorRefs(ctx context.Context, timeout time.Duration) []Ac
 // PeerAddress returns the actor system address known in the cluster. That address is used by other nodesMap to communicate with the actor system.
 // This address is empty when cluster mode is not activated
 func (x *actorSystem) PeerAddress() string {
-	x.locker.Lock()
-	defer x.locker.Unlock()
 	if x.clusterEnabled.Load() {
-		return x.clusterNode.PeersAddress()
+		x.locker.RLock()
+		address := x.clusterNode.PeersAddress()
+		x.locker.RUnlock()
+		return address
 	}
 	return ""
 }
@@ -1574,24 +1575,22 @@ func (x *actorSystem) PeerAddress() string {
 // If the actor is found locally, its PID is returned. If the actor resides on a remote host, its address is returned.
 // If the actor is not found, an error of type "actor not found" is returned.
 func (x *actorSystem) ActorOf(ctx context.Context, actorName string) (addr *address.Address, pid *PID, err error) {
-	x.locker.Lock()
-
-	if !x.started.Load() {
-		x.locker.Unlock()
+	if !x.Running() {
 		return nil, nil, ErrActorSystemNotStarted
 	}
 
+	x.locker.RLock()
 	// user should not query system actors
 	if isReservedName(actorName) {
-		x.locker.Unlock()
+		x.locker.RUnlock()
 		return nil, nil, NewErrActorNotFound(actorName)
 	}
 
 	// first check whether the actor exist locally
 	actorAddress := x.actorAddress(actorName)
 	if pidnode, ok := x.actors.node(actorAddress.String()); ok {
-		x.locker.Unlock()
 		pid := pidnode.value()
+		x.locker.RUnlock()
 		return pid.Address(), pid, nil
 	}
 
@@ -1601,37 +1600,37 @@ func (x *actorSystem) ActorOf(ctx context.Context, actorName string) (addr *addr
 		if err != nil {
 			if errors.Is(err, cluster.ErrActorNotFound) {
 				x.logger.Infof("actor=%s not found", actorName)
-				x.locker.Unlock()
+				x.locker.RUnlock()
 				return nil, nil, NewErrActorNotFound(actorName)
 			}
 
-			x.locker.Unlock()
+			x.locker.RUnlock()
 			return nil, nil, fmt.Errorf("failed to fetch remote actor=%s: %w", actorName, err)
 		}
 
-		x.locker.Unlock()
+		x.locker.RUnlock()
 		return address.From(actor.GetAddress()), nil, nil
 	}
 
 	if x.remotingEnabled.Load() {
-		x.locker.Unlock()
+		x.locker.RUnlock()
 		return nil, nil, ErrMethodCallNotAllowed
 	}
 
 	x.logger.Infof("actor=%s not found", actorName)
-	x.locker.Unlock()
+	x.locker.RUnlock()
 	return nil, nil, NewErrActorNotFound(actorName)
 }
 
 // ActorExists checks whether an actor with the given name exists in the system,
 // either locally, or on another node in the cluster if clustering is enabled.
 func (x *actorSystem) ActorExists(ctx context.Context, actorName string) (bool, error) {
-	x.locker.Lock()
-	defer x.locker.Unlock()
-
-	if !x.started.Load() {
+	if !x.Running() {
 		return false, ErrActorSystemNotStarted
 	}
+
+	x.locker.RLock()
+	defer x.locker.RUnlock()
 
 	// check locally
 	actorAddress := x.actorAddress(actorName)
@@ -1650,28 +1649,26 @@ func (x *actorSystem) ActorExists(ctx context.Context, actorName string) (bool, 
 // LocalActor returns the reference of a local actor.
 // A local actor is an actor that reside on the same node where the given actor system has started
 func (x *actorSystem) LocalActor(actorName string) (*PID, error) {
-	x.locker.Lock()
-
-	if !x.started.Load() {
-		x.locker.Unlock()
+	if !x.Running() {
 		return nil, ErrActorSystemNotStarted
 	}
 
+	x.locker.RLock()
 	// user should not query system actors
 	if isReservedName(actorName) {
-		x.locker.Unlock()
+		x.locker.RUnlock()
 		return nil, NewErrActorNotFound(actorName)
 	}
 
 	actorAddress := x.actorAddress(actorName)
 	if pidnode, ok := x.actors.node(actorAddress.String()); ok {
-		x.locker.Unlock()
 		pid := pidnode.value()
+		x.locker.RUnlock()
 		return pid, nil
 	}
 
 	x.logger.Infof("actor=%s not found", actorName)
-	x.locker.Unlock()
+	x.locker.RUnlock()
 	return nil, NewErrActorNotFound(actorName)
 }
 
@@ -1679,22 +1676,19 @@ func (x *actorSystem) LocalActor(actorName string) (*PID, error) {
 // When the cluster mode is not enabled an actor not found error will be returned
 // One can always check whether cluster is enabled before calling this method or just use the ActorOf method.
 func (x *actorSystem) RemoteActor(ctx context.Context, actorName string) (addr *address.Address, err error) {
-	x.locker.Lock()
-
-	if !x.started.Load() {
-		e := ErrActorSystemNotStarted
-		x.locker.Unlock()
-		return nil, e
+	if !x.Running() {
+		return nil, ErrActorSystemNotStarted
 	}
 
+	x.locker.RLock()
 	// user should not query system actors
 	if isReservedName(actorName) {
-		x.locker.Unlock()
+		x.locker.RUnlock()
 		return nil, NewErrActorNotFound(actorName)
 	}
 
 	if x.cluster == nil {
-		x.locker.Unlock()
+		x.locker.RUnlock()
 		return nil, ErrClusterDisabled
 	}
 
@@ -1702,15 +1696,15 @@ func (x *actorSystem) RemoteActor(ctx context.Context, actorName string) (addr *
 	if err != nil {
 		if errors.Is(err, cluster.ErrActorNotFound) {
 			x.logger.Infof("actor=%s not found", actorName)
-			x.locker.Unlock()
+			x.locker.RUnlock()
 			return nil, NewErrActorNotFound(actorName)
 		}
 
-		x.locker.Unlock()
+		x.locker.RUnlock()
 		return nil, fmt.Errorf("failed to fetch remote actor=%s: %w", actorName, err)
 	}
 
-	x.locker.Unlock()
+	x.locker.RUnlock()
 	return address.From(actor.GetAddress()), nil
 }
 
@@ -2074,9 +2068,9 @@ func (x *actorSystem) GetKinds(_ context.Context, request *connect.Request[inter
 //
 // Returns the actor reference for the topic actor.
 func (x *actorSystem) TopicActor() *PID {
-	x.locker.Lock()
+	x.locker.RLock()
 	mediator := x.topicActor
-	x.locker.Unlock()
+	x.locker.RUnlock()
 	return mediator
 }
 
@@ -2149,69 +2143,70 @@ func (x *actorSystem) handleRemoteTell(ctx context.Context, to *PID, message pro
 
 // getRootGuardian returns the system rootGuardian guardian
 func (x *actorSystem) getRootGuardian() *PID {
-	x.locker.Lock()
+	x.locker.RLock()
 	rootGuardian := x.rootGuardian
-	x.locker.Unlock()
+	x.locker.RUnlock()
 	return rootGuardian
 }
 
 // getUserGuardian returns the user guardian
 func (x *actorSystem) getUserGuardian() *PID {
-	x.locker.Lock()
+	x.locker.RLock()
 	userGuardian := x.userGuardian
-	x.locker.Unlock()
+	x.locker.RUnlock()
 	return userGuardian
 }
 
 // getSystemGuardian returns the system guardian
 func (x *actorSystem) getSystemGuardian() *PID {
-	x.locker.Lock()
+	x.locker.RLock()
 	systemGuardian := x.systemGuardian
-	x.locker.Unlock()
+	x.locker.RUnlock()
 	return systemGuardian
 }
 
 // getJanitor returns the system deathWatch
 func (x *actorSystem) getDeathWatch() *PID {
-	x.locker.Lock()
+	x.locker.RLock()
 	pid := x.deathWatch
-	x.locker.Unlock()
+	x.locker.RUnlock()
 	return pid
 }
 
 // getDeadletters returns the system deadletter actor
 func (x *actorSystem) getDeadletter() *PID {
-	x.locker.Lock()
+	x.locker.RLock()
 	deadletters := x.deadletter
-	x.locker.Unlock()
+	x.locker.RUnlock()
 	return deadletters
 }
 
 // getWorkerPool returns the system worker pool
 func (x *actorSystem) getWorkerPool() *workerpool.WorkerPool {
-	x.locker.Lock()
+	x.locker.RLock()
 	workerPool := x.workerPool
-	x.locker.Unlock()
+	x.locker.RUnlock()
 	return workerPool
 }
 
 // getReflection returns the system reflection
 func (x *actorSystem) getReflection() *reflection {
-	x.locker.Lock()
-	defer x.locker.Unlock()
-	return x.reflection
+	x.locker.RLock()
+	r := x.reflection
+	x.locker.RUnlock()
+	return r
 }
 
 // findRoutee searches for a routee by its name within the actor system and returns its PID if found or an error otherwise.
 func (x *actorSystem) findRoutee(routeeName string) (*PID, bool) {
-	x.locker.Lock()
+	x.locker.RLock()
 	actorAddress := x.actorAddress(routeeName)
 	if pidnode, ok := x.actors.node(actorAddress.String()); ok {
-		x.locker.Unlock()
 		pid := pidnode.value()
+		x.locker.RUnlock()
 		return pid, true
 	}
-	x.locker.Lock()
+	x.locker.RLock()
 	return nil, false
 }
 
@@ -2224,31 +2219,33 @@ func (x *actorSystem) isShuttingDown() bool {
 // This method is used internally to access the remoting functionality
 // and is not intended for external use.
 func (x *actorSystem) getRemoting() *Remoting {
-	x.locker.Lock()
-	defer x.locker.Unlock()
-	return x.remoting
+	x.locker.RLock()
+	remoting := x.remoting
+	x.locker.RUnlock()
+	return remoting
 }
 
 // getGrains returns the grains map of the actor system
 func (x *actorSystem) getGrains() *collection.Map[string, *grainPID] {
-	x.locker.Lock()
-	defer x.locker.Unlock()
-	return x.grains
+	x.locker.RLock()
+	grains := x.grains
+	x.locker.RUnlock()
+	return grains
 }
 
 // getSingletonManager returns the system singleton manager
 func (x *actorSystem) getSingletonManager() *PID {
-	x.locker.Lock()
+	x.locker.RLock()
 	singletonManager := x.singletonManager
-	x.locker.Unlock()
+	x.locker.RUnlock()
 	return singletonManager
 }
 
 // getRebalancer returns the rebalancer PID
 func (x *actorSystem) getRebalancer() *PID {
-	x.locker.Lock()
+	x.locker.RLock()
 	rebalancer := x.rebalancer
-	x.locker.Unlock()
+	x.locker.RUnlock()
 	return rebalancer
 }
 
@@ -2270,9 +2267,9 @@ func (x *actorSystem) removePeerStateFromStore(address string) error {
 
 // getPeerStateFromStore returns the peer state from the cluster store
 func (x *actorSystem) getPeerStateFromStore(address string) (*internalpb.PeerState, error) {
-	x.locker.Lock()
+	x.locker.RLock()
 	peerState, ok := x.clusterStore.GetPeerState(address)
-	x.locker.Unlock()
+	x.locker.RUnlock()
 	if !ok {
 		return nil, ErrPeerNotFound
 	}
