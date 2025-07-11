@@ -680,8 +680,36 @@ var (
 	_ internalpbconnect.ClusterServiceHandler  = (*actorSystem)(nil)
 )
 
-// NewActorSystem creates an instance of ActorSystem.
-// The actor system name must be the same across all nodes in when running in cluster mode.
+// NewActorSystem creates and configures a new ActorSystem instance.
+//
+// The actor system is the root container for all actors on a node. Only one ActorSystem
+// can exist per process. In cluster mode, the system name must be identical across all nodes.
+//
+// Options allow customization of logging, clustering, remoting, pub/sub, TLS, extensions, and more.
+// The returned ActorSystem is not started; use Start or Run to initialize it.
+//
+// Parameters:
+//   - name: Unique name for the actor system (required; must match across cluster nodes).
+//   - opts: Optional configuration options (see WithLogger, WithCluster, WithPubSub, etc).
+//
+// Returns:
+//   - ActorSystem: The configured actor system instance.
+//   - error: If the name is invalid, options are misconfigured, or required settings are missing.
+//
+// Example:
+//
+//	system, err := NewActorSystem("my-system", WithLogger(myLogger), WithCluster(clusterConfig))
+//	if err != nil {
+//	    log.Fatalf("Failed to create actor system: %v", err)
+//	}
+//	if err := system.Start(ctx); err != nil {
+//	    log.Fatalf("Failed to start actor system: %v", err)
+//	}
+//
+// Notes:
+//   - The actor system must be started before spawning actors.
+//   - In cluster mode, ensure all nodes use the same system name and compatible options.
+//   - Use Run for typical applications to handle signals
 func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 	if name == "" {
 		return nil, ErrNameRequired
