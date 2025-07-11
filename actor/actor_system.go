@@ -680,7 +680,8 @@ var (
 	_ internalpbconnect.ClusterServiceHandler  = (*actorSystem)(nil)
 )
 
-// NewActorSystem creates an instance of ActorSystem
+// NewActorSystem creates an instance of ActorSystem.
+// The actor system name must be the same across all nodes in when running in cluster mode.
 func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 	if name == "" {
 		return nil, ErrNameRequired

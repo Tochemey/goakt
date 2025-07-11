@@ -31,6 +31,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -1118,6 +1119,13 @@ func (x *Engine) setupMemberlistConfig(conf *config.Config) error {
 	m.BindPort = x.node.DiscoveryPort
 	m.AdvertisePort = x.node.DiscoveryPort
 	m.AdvertiseAddr = x.node.Host
+
+	// Kubernetes-specific filtering is necessary because dynamic IP assignment can cause pods in different namespaces to share the same IP address over time.
+	// This can lead to unintended cross-namespace communication within the memberlist ring.
+	// To prevent this, all nodes are assigned the same label corresponding to the actor system name, enabling proper filtering.
+	// As a result, even if a pod receives a gossip message from a reused IP now belonging to a different namespace,
+	// the message will be rejected if it lacks the expected label identifying it as part of the correct ring.
+	m.Label = fmt.Sprintf("prefix-%s", strings.ToLower(x.name))
 
 	if x.serverTLS != nil {
 		transport, err := memberlist.NewTransport(memberlist.TransportConfig{
