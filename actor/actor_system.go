@@ -2486,7 +2486,6 @@ func (x *actorSystem) enableRemoting(ctx context.Context) error {
 
 	// configure the appropriate server
 	if err := x.configureServer(ctx, mux); err != nil {
-		x.locker.Unlock()
 		x.logger.Error(fmt.Errorf("failed enable remoting: %w", err))
 		return err
 	}
