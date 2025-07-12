@@ -2829,52 +2829,37 @@ func (x *actorSystem) peersStateLoop() {
 	ticker := ticker.New(intervals)
 	ticker.Start()
 	tickerStopSig := make(chan registry.Unit, 1)
+
 	go func() {
 		for {
 			select {
 			case <-ticker.Ticks:
-				// stop ticking and close
 				if x.isShuttingDown() || !x.started.Load() {
 					tickerStopSig <- registry.Unit{}
 					return
 				}
 
-				eg, ctx := errgroup.WithContext(context.Background())
-				peersChan := make(chan *cluster.Peer)
-				eg.Go(func() error {
-					defer close(peersChan)
-					peers, err := x.cluster.Peers(ctx)
-					if err != nil {
-						return err
-					}
-
-					for _, peer := range peers {
-						select {
-						case peersChan <- peer:
-						case <-ctx.Done():
-							return ctx.Err()
-						}
-					}
-					return nil
-				})
-				eg.Go(func() error {
-					for peer := range peersChan {
-						if err := x.processPeerState(ctx, peer); err != nil {
-							return err
-						}
-						select {
-						case <-ctx.Done():
-							return ctx.Err()
-						default:
-							// pass
-						}
-					}
-					return nil
-				})
-				if err := eg.Wait(); err != nil {
-					x.logger.Error(err)
-					// TODO: stop or panic
+				ctx := context.Background()
+				peers, err := x.cluster.Peers(ctx)
+				if err != nil {
+					x.logger.Error("failed to fetch peers:", err)
+					continue
 				}
+
+				var wg sync.WaitGroup
+				for _, peer := range peers {
+					wg.Add(1)
+					go func(peer *cluster.Peer) {
+						defer wg.Done()
+						if err := x.processPeerState(ctx, peer); err != nil {
+							// Only log real errors, ignore context cancellation
+							if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+								x.logger.Errorf("failed to process peer=(%s) state: %s", peer.PeerAddress(), err.Error())
+							}
+						}
+					}(peer)
+				}
+				wg.Wait()
 
 			case <-x.clusterSyncStopSig:
 				tickerStopSig <- registry.Unit{}
@@ -2924,23 +2909,21 @@ func (x *actorSystem) shouldRebalance(peerState *internalpb.PeerState) bool {
 
 // processPeerState processes a given peer synchronization record.
 func (x *actorSystem) processPeerState(ctx context.Context, peer *cluster.Peer) error {
-	peerAddress := net.JoinHostPort(peer.Host, strconv.Itoa(peer.PeersPort))
-	x.logger.Infof("(%s) processing peer sync:(%s)", x.PeerAddress(), peerAddress)
+	peerAddress := peer.PeerAddress()
+	x.logger.Infof("(%s) processing peer=(%s)'s state", x.PeerAddress(), peerAddress)
 	peerState, err := x.cluster.GetState(ctx, peerAddress)
 	if err != nil {
 		if errors.Is(err, cluster.ErrPeerSyncNotFound) {
 			return nil
 		}
-		x.logger.Error(err)
 		return err
 	}
 
-	x.logger.Debugf("peer (%s) [Actors count=(%d), Grains count=%d]", peerAddress, len(peerState.GetActors()), len(peerState.GetGrains()))
+	x.logger.Debugf("peer=(%s) [Actors count=(%d), Grains count=%d]", peerAddress, len(peerState.GetActors()), len(peerState.GetGrains()))
 	if err := x.clusterStore.PersistPeerState(peerState); err != nil {
-		x.logger.Error(err)
 		return err
 	}
-	x.logger.Infof("(%s) processed peer sync(%s) successfully ", x.PeerAddress(), peerAddress)
+	x.logger.Infof("(%s) processed peer=(%s) successfully ", x.PeerAddress(), peerAddress)
 	return nil
 }
 
