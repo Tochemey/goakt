@@ -1052,7 +1052,7 @@ func (x *Engine) buildConfig() (*config.Config, error) {
 	options.Add("tableSize", x.tableSize)
 
 	// create the config and return it
-	conf := &config.Config{
+	cfg := &config.Config{
 		BindAddr:          x.node.Host,
 		BindPort:          x.node.PeersPort,
 		ReadRepair:        true,
@@ -1084,7 +1084,7 @@ func (x *Engine) buildConfig() (*config.Config, error) {
 	// Set TLS configuration accordingly
 	if x.serverTLS != nil && x.clientTLS != nil {
 		// set the server TLS info
-		conf.TLS = &config.TLS{
+		cfg.TLS = &config.TLS{
 			Client: x.clientTLS,
 			Server: x.serverTLS,
 		}
@@ -1098,34 +1098,34 @@ func (x *Engine) buildConfig() (*config.Config, error) {
 		}
 
 		// set the client configuration
-		conf.Client = client
+		cfg.Client = client
 	}
 
 	// set verbosity when debug is enabled
 	if x.logger.LogLevel() == log.DebugLevel {
-		conf.LogVerbosity = config.DefaultLogVerbosity
+		cfg.LogVerbosity = config.DefaultLogVerbosity
 	}
 
-	return conf, nil
+	return cfg, nil
 }
 
-func (x *Engine) setupMemberlistConfig(conf *config.Config) error {
-	m, err := config.NewMemberlistConfig("lan")
+func (x *Engine) setupMemberlistConfig(cfg *config.Config) error {
+	mconfig, err := config.NewMemberlistConfig("lan")
 	if err != nil {
 		x.logger.Errorf("failed to configure the cluster Engine members list.💥: %v", err)
 		return err
 	}
-	m.BindAddr = x.node.Host
-	m.BindPort = x.node.DiscoveryPort
-	m.AdvertisePort = x.node.DiscoveryPort
-	m.AdvertiseAddr = x.node.Host
+	mconfig.BindAddr = x.node.Host
+	mconfig.BindPort = x.node.DiscoveryPort
+	mconfig.AdvertisePort = x.node.DiscoveryPort
+	mconfig.AdvertiseAddr = x.node.Host
 
 	// Kubernetes-specific filtering is necessary because dynamic IP assignment can cause pods in different namespaces to share the same IP address over time.
 	// This can lead to unintended cross-namespace communication within the memberlist ring.
 	// To prevent this, all nodes are assigned the same label corresponding to the actor system name, enabling proper filtering.
 	// As a result, even if a pod receives a gossip message from a reused IP now belonging to a different namespace,
 	// the message will be rejected if it lacks the expected label identifying it as part of the correct ring.
-	m.Label = fmt.Sprintf("prefix-%s", strings.ToLower(x.name))
+	mconfig.Label = fmt.Sprintf("prefix-%s", strings.ToLower(x.name))
 
 	if x.serverTLS != nil {
 		transport, err := memberlist.NewTransport(memberlist.TransportConfig{
@@ -1142,9 +1142,14 @@ func (x *Engine) setupMemberlistConfig(conf *config.Config) error {
 			x.logger.Errorf("Failed to create memberlist TCP transport: %v", err)
 			return err
 		}
-		m.Transport = transport
+
+		mconfig.Transport = transport
+		mconfig.UDPBufferSize = 10 * 1024 * 1024
+		mconfig.ProbeInterval = 5 * time.Second
+		mconfig.ProbeTimeout = 2 * time.Second
+		mconfig.DisableTcpPings = true
 	}
-	conf.MemberlistConfig = m
+	cfg.MemberlistConfig = mconfig
 	return nil
 }
 
