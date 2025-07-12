@@ -782,14 +782,14 @@ func TestMultipleNodes(t *testing.T) {
 		srv := startNatsServer(t)
 
 		// create a cluster node1
-		node1, sd1 := startEngine(t, "node1", srv.Addr().String())
+		node1, sd1 := startEngine(t, srv.Addr().String())
 		require.NotNil(t, node1)
 
 		// wait for the node to start properly
 		pause.For(2 * time.Second)
 
 		// create a cluster node2
-		node2, sd2 := startEngine(t, "node2", srv.Addr().String())
+		node2, sd2 := startEngine(t, srv.Addr().String())
 		require.NotNil(t, node2)
 		node2Addr := node2.node.PeersAddress()
 
@@ -797,7 +797,7 @@ func TestMultipleNodes(t *testing.T) {
 		pause.For(time.Second)
 
 		// create a cluster node3
-		node3, sd3 := startEngine(t, "node3", srv.Addr().String())
+		node3, sd3 := startEngine(t, srv.Addr().String())
 		require.NotNil(t, node3)
 		require.NotNil(t, sd3)
 
@@ -968,14 +968,14 @@ func TestMultipleNodes(t *testing.T) {
 		srv := startNatsServer(t)
 
 		// create a cluster node1
-		node1, sd1 := startEngineWithTLS(t, "node1", srv.Addr().String(), conf)
+		node1, sd1 := startEngineWithTLS(t, srv.Addr().String(), conf)
 		require.NotNil(t, node1)
 
 		// wait for the node to start properly
 		pause.For(2 * time.Second)
 
 		// create a cluster node2
-		node2, sd2 := startEngineWithTLS(t, "node2", srv.Addr().String(), conf)
+		node2, sd2 := startEngineWithTLS(t, srv.Addr().String(), conf)
 		require.NotNil(t, node2)
 		node2Addr := node2.node.PeersAddress()
 
@@ -983,7 +983,7 @@ func TestMultipleNodes(t *testing.T) {
 		pause.For(time.Second)
 
 		// create a cluster node3
-		node3, sd3 := startEngineWithTLS(t, "node3", srv.Addr().String(), conf)
+		node3, sd3 := startEngineWithTLS(t, srv.Addr().String(), conf)
 		require.NotNil(t, node3)
 		require.NotNil(t, sd3)
 
@@ -1177,7 +1177,7 @@ func startNatsServer(t *testing.T) *natsserver.Server {
 	return serv
 }
 
-func startEngine(t *testing.T, nodeName, serverAddr string) (*Engine, discovery.Provider) {
+func startEngine(t *testing.T, serverAddr string) (*Engine, discovery.Provider) {
 	// create a context
 	ctx := context.TODO()
 
@@ -1190,18 +1190,15 @@ func startEngine(t *testing.T, nodeName, serverAddr string) (*Engine, discovery.
 	// create a Cluster node
 	host := "127.0.0.1"
 	// create the various config option
-	applicationName := "accounts"
 	actorSystemName := "testSystem"
 	natsSubject := "some-subject"
 
 	// create the config
 	config := nats.Config{
-		ApplicationName: applicationName,
-		ActorSystemName: actorSystemName,
-		NatsServer:      fmt.Sprintf("nats://%s", serverAddr),
-		NatsSubject:     natsSubject,
-		Host:            host,
-		DiscoveryPort:   gossipPort,
+		NatsServer:    fmt.Sprintf("nats://%s", serverAddr),
+		NatsSubject:   natsSubject,
+		Host:          host,
+		DiscoveryPort: gossipPort,
 	}
 
 	hostNode := discovery.Node{
@@ -1216,7 +1213,7 @@ func startEngine(t *testing.T, nodeName, serverAddr string) (*Engine, discovery.
 	provider := nats.NewDiscovery(&config)
 
 	// create the node
-	engine, err := NewEngine(nodeName, provider, &hostNode, WithLogger(log.DiscardLogger))
+	engine, err := NewEngine(actorSystemName, provider, &hostNode, WithLogger(log.DiscardLogger))
 	require.NoError(t, err)
 	require.NotNil(t, engine)
 
@@ -1227,7 +1224,7 @@ func startEngine(t *testing.T, nodeName, serverAddr string) (*Engine, discovery.
 	return engine, provider
 }
 
-func startEngineWithTLS(t *testing.T, nodeName, serverAddr string, conf autotls.Config) (*Engine, discovery.Provider) {
+func startEngineWithTLS(t *testing.T, serverAddr string, conf autotls.Config) (*Engine, discovery.Provider) {
 	// create a context
 	ctx := context.TODO()
 
@@ -1240,18 +1237,15 @@ func startEngineWithTLS(t *testing.T, nodeName, serverAddr string, conf autotls.
 	// create a Cluster node
 	host := "127.0.0.1"
 	// create the various config option
-	applicationName := "accounts"
 	actorSystemName := "testSystem"
 	natsSubject := "some-subject"
 
 	// create the config
 	config := nats.Config{
-		ApplicationName: applicationName,
-		ActorSystemName: actorSystemName,
-		NatsServer:      fmt.Sprintf("nats://%s", serverAddr),
-		NatsSubject:     natsSubject,
-		Host:            host,
-		DiscoveryPort:   gossipPort,
+		NatsServer:    fmt.Sprintf("nats://%s", serverAddr),
+		NatsSubject:   natsSubject,
+		Host:          host,
+		DiscoveryPort: gossipPort,
 	}
 
 	hostNode := discovery.Node{
@@ -1266,7 +1260,7 @@ func startEngineWithTLS(t *testing.T, nodeName, serverAddr string, conf autotls.
 	provider := nats.NewDiscovery(&config)
 
 	// create the node
-	engine, err := NewEngine(nodeName, provider, &hostNode,
+	engine, err := NewEngine(actorSystemName, provider, &hostNode,
 		WithTLS(conf.ServerTLS, conf.ClientTLS),
 		WithLogger(log.DiscardLogger))
 	require.NoError(t, err)
