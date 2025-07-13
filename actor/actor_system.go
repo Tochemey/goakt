@@ -2756,46 +2756,28 @@ func (x *actorSystem) handleNodeJoinedEvent(event *cluster.Event) {
 		x.clusterNode.PeersAddress(),
 		nodeJoined.GetAddress())
 
-	x.logger.Debugf("node=[name=%s, addr=%s] resyncing actors after node joined event: node=(%s)",
-		x.name,
-		x.clusterNode.PeersAddress(), nodeJoined.GetAddress())
-
-	if err := x.resyncActors(); err != nil {
-		x.logger.Errorf("failed to resync actors after node joined event: %v", err)
-	}
-
-	x.logger.Debugf("node=[name=%s, addr=%s] successfully resynced actors after node joined event: node=(%s)",
-		x.name,
-		x.clusterNode.PeersAddress(), nodeJoined.GetAddress())
-
-	if x.grains.Len() > 0 {
-		x.logger.Debugf("node=[name=%s, addr=%s] resyncing grains after node joined event: node=(%s)",
-			x.name,
-			x.clusterNode.PeersAddress(), nodeJoined.GetAddress())
-
-		if err := x.resyncGrains(); err != nil {
-			x.logger.Errorf("failed to resync grains after node joined event: %v", err)
-		}
-
-		x.logger.Debugf("node=[name=%s, addr=%s] successfully resynced grains after node joined event: node=(%s)",
-			x.name,
-			x.clusterNode.PeersAddress(), nodeJoined.GetAddress())
-	}
+	x.resyncAfterClusterEvent("node joined", nodeJoined.GetAddress())
 }
 
 // handleNodeLeftEvent processes a NodeLeft cluster event.
 func (x *actorSystem) handleNodeLeftEvent(event *cluster.Event) {
+	nodeLeft := new(goaktpb.NodeLeft)
+	_ = event.Payload.UnmarshalTo(nodeLeft)
+	x.logger.Infof(
+		"node=[name=%s, addr=%s] detected node left event: node=(%s)",
+		x.name, x.clusterNode.PeersAddress(), nodeLeft.GetAddress(),
+	)
+
+	x.resyncAfterClusterEvent("node left", nodeLeft.GetAddress())
+
 	if !x.relocationEnabled.Load() {
 		return
 	}
 
-	nodeLeft := new(goaktpb.NodeLeft)
-	_ = event.Payload.UnmarshalTo(nodeLeft)
 	ctx := context.Background()
-
 	if x.cluster.IsLeader(ctx) {
 		x.logger.Infof(
-			"cluster leader node=[name=%s, addr=%s] detected node left event: node=(%s); initiating rebalancing.",
+			"cluster leader node=[name=%s, addr=%s] initiating node=(%s)'s state rebalancing",
 			x.name, x.clusterNode.PeersAddress(), nodeLeft.GetAddress(),
 		)
 
@@ -2820,6 +2802,31 @@ func (x *actorSystem) handleNodeLeftEvent(event *cluster.Event) {
 	}
 
 	x.logger.Debugf("node=[name=%s, addr=%s] successfully cleaned up node=(%s) left from state cache", x.name, x.clusterNode.PeersAddress(), nodeLeft.GetAddress())
+}
+
+// resyncAfterClusterEvent handles resyncing actors and grains after a cluster event.
+func (x *actorSystem) resyncAfterClusterEvent(eventType, nodeAddress string) {
+	x.logger.Debugf("node=[name=%s, addr=%s] resyncing actors after %s event: node=(%s)",
+		x.name, x.clusterNode.PeersAddress(), eventType, nodeAddress)
+
+	if err := x.resyncActors(); err != nil {
+		x.logger.Errorf("failed to resync actors after %s event: %v", eventType, err)
+	}
+
+	x.logger.Debugf("node=[name=%s, addr=%s] successfully resynced actors after %s event: node=(%s)",
+		x.name, x.clusterNode.PeersAddress(), eventType, nodeAddress)
+
+	if x.grains.Len() > 0 {
+		x.logger.Debugf("node=[name=%s, addr=%s] resyncing grains after %s event: node=(%s)",
+			x.name, x.clusterNode.PeersAddress(), eventType, nodeAddress)
+
+		if err := x.resyncGrains(); err != nil {
+			x.logger.Errorf("failed to resync grains after %s event: %v", eventType, err)
+		}
+
+		x.logger.Debugf("node=[name=%s, addr=%s] successfully resynced grains after %s event: node=(%s)",
+			x.name, x.clusterNode.PeersAddress(), eventType, nodeAddress)
+	}
 }
 
 // peersStateLoop fetches the cluster peers' PeerState and update the node Store
@@ -2878,7 +2885,7 @@ func (x *actorSystem) rebalancingLoop() {
 	for peerState := range x.rebalancingQueue {
 		ctx := context.Background()
 		if !x.shouldRebalance(peerState) {
-			x.logger.Debugf("(%s) cannot rebalance peer state: (%s)", x.name,
+			x.logger.Debugf("(%s) found no peer=(%s)'s state to rebalance", x.name,
 				net.JoinHostPort(peerState.GetHost(), strconv.Itoa(int(peerState.GetPeersPort()))))
 			continue
 		}
@@ -2919,7 +2926,7 @@ func (x *actorSystem) processPeerState(ctx context.Context, peer *cluster.Peer) 
 		return err
 	}
 
-	x.logger.Debugf("peer=(%s) [Actors count=(%d), Grains count=%d]", peerAddress, len(peerState.GetActors()), len(peerState.GetGrains()))
+	x.logger.Debugf("(%s) found peer=(%s)'s state: [Actors count=(%d), Grains count=(%d)]", x.PeerAddress(), peerAddress, len(peerState.GetActors()), len(peerState.GetGrains()))
 	if err := x.clusterStore.PersistPeerState(peerState); err != nil {
 		return err
 	}
