@@ -113,10 +113,6 @@ func (x *tree) addNode(parent, pid *PID) error {
 		return errors.New("parent pid is nil")
 	}
 
-	if pid.Equals(NoSender) {
-		return errors.New("pid cannot be NoSender")
-	}
-
 	if parent.Equals(NoSender) {
 		return errors.New("parent pid cannot be NoSender")
 	}

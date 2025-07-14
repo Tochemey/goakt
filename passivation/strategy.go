@@ -36,7 +36,6 @@ import (
 // based on specific conditions or events, such as inactivity or message count.
 type Strategy interface {
 	fmt.Stringer
-	isStrategy()
 }
 
 // TimeBasedStrategy is a passivation strategy that triggers passivation
@@ -85,12 +84,6 @@ func (t *TimeBasedStrategy) String() string {
 	return fmt.Sprintf("Timed-Based of Duration=[%s]", duration.Format(t.timeout))
 }
 
-// isStrategy is a marker method to satisfy the Strategy interface.
-//
-// This method is not intended to be called directly. It exists solely to ensure
-// that TimeBasedStrategy implements the Strategy interface.
-func (t *TimeBasedStrategy) isStrategy() {}
-
 type MessagesCountBasedStrategy struct {
 	maxMessages int
 }
@@ -134,12 +127,6 @@ func (m *MessagesCountBasedStrategy) String() string {
 	return fmt.Sprintf("Messages Count-Based with maximum of %d", m.maxMessages)
 }
 
-// isStrategy is a marker method to satisfy the Strategy interface.
-//
-// This method is not intended to be called directly. It exists solely to ensure
-// that MessageBasedStrategy implements the Strategy interface.
-func (m *MessagesCountBasedStrategy) isStrategy() {}
-
 // LongLivedStrategy is a passivation strategy that does not trigger passivation,
 // allowing actors to remain active indefinitely.
 // This strategy is useful for actors that are expected to be long-lived and do not require passivation.
@@ -161,5 +148,3 @@ func NewLongLivedStrategy() *LongLivedStrategy {
 func (l *LongLivedStrategy) String() string {
 	return "Long Lived"
 }
-
-func (l *LongLivedStrategy) isStrategy() {}

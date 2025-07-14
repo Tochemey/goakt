@@ -22,58 +22,29 @@
  * SOFTWARE.
  */
 
-package actor
+package passivation
 
 import (
-	"context"
 	"fmt"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/require"
+
+	"github.com/tochemey/goakt/v3/internal/duration"
 )
 
-// NoSender means that there is no sender
-var NoSender *PID
+func TestStrategy(t *testing.T) {
+	timeStrategy := NewTimeBasedStrategy(5 * time.Minute)
+	require.Implements(t, (*Strategy)(nil), timeStrategy)
+	require.Equal(t, 5*time.Minute, timeStrategy.Timeout())
+	require.Equal(t, fmt.Sprintf("Timed-Based of Duration=[%s]", duration.Format(5*time.Minute)), timeStrategy.String())
 
-// noSender is a special actor that does not have a sender
-// and is used to send messages without a sender. It does not respond to messages
-type noSender struct{}
+	messageCountStrategy := NewMessageCountBasedStrategy(2)
+	require.Implements(t, (*Strategy)(nil), messageCountStrategy)
+	require.EqualValues(t, 2, messageCountStrategy.MaxMessages())
 
-var _ Actor = (*noSender)(nil)
-
-// newNoSender creates a new noSender actor
-func newNoSender() *noSender {
-	return &noSender{}
-}
-
-func (x *noSender) PreStart(*Context) error {
-	return nil
-}
-
-func (x *noSender) Receive(ctx *ReceiveContext) {
-	ctx.Unhandled()
-}
-
-func (x *noSender) PostStop(*Context) error {
-	return nil
-}
-
-func (x *actorSystem) spawnNoSender(ctx context.Context) error {
-	var err error
-	actorName := x.reservedName(noSenderType)
-
-	supervisor := NewSupervisor(
-		WithStrategy(OneForOneStrategy),
-		WithAnyErrorDirective(ResumeDirective),
-	)
-
-	NoSender, err = x.configPID(ctx,
-		actorName,
-		newNoSender(),
-		asSystem(),
-		WithLongLived(),
-		WithSupervisor(supervisor),
-	)
-	if err != nil {
-		return fmt.Errorf("actor=%s failed to start the noSender: %w", actorName, err)
-	}
-
-	return x.actors.addNode(x.systemGuardian, NoSender)
+	longlivedStrategy := NewLongLivedStrategy()
+	require.Implements(t, (*Strategy)(nil), longlivedStrategy)
+	require.Equal(t, "Long Lived", longlivedStrategy.String())
 }

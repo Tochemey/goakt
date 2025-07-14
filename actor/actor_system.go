@@ -3092,8 +3092,7 @@ func (x *actorSystem) spawnRootGuardian(ctx context.Context) error {
 	}
 
 	// rootGuardian is the rootGuardian node of the actors tree
-	_ = x.actors.addRootNode(x.rootGuardian)
-	return nil
+	return x.actors.addRootNode(x.rootGuardian)
 }
 
 // spawnSystemGuardian creates the system guardian
@@ -3112,8 +3111,7 @@ func (x *actorSystem) spawnSystemGuardian(ctx context.Context) error {
 	}
 
 	// systemGuardian is a child actor of the rootGuardian actor
-	_ = x.actors.addNode(x.rootGuardian, x.systemGuardian)
-	return nil
+	return x.actors.addNode(x.rootGuardian, x.systemGuardian)
 }
 
 // spawnUserGuardian creates the user guardian
@@ -3131,8 +3129,7 @@ func (x *actorSystem) spawnUserGuardian(ctx context.Context) error {
 	}
 
 	// userGuardian is a child actor of the rootGuardian actor
-	_ = x.actors.addNode(x.rootGuardian, x.userGuardian)
-	return nil
+	return x.actors.addNode(x.rootGuardian, x.userGuardian)
 }
 
 // spawnDeathWatch creates the deathWatch actor
@@ -3158,8 +3155,7 @@ func (x *actorSystem) spawnDeathWatch(ctx context.Context) error {
 	}
 
 	// the deathWatch is a child actor of the system guardian
-	_ = x.actors.addNode(x.systemGuardian, x.deathWatch)
-	return nil
+	return x.actors.addNode(x.systemGuardian, x.deathWatch)
 }
 
 // spawnRebalancer creates the cluster rebalancer
@@ -3190,7 +3186,7 @@ func (x *actorSystem) spawnRebalancer(ctx context.Context) error {
 		}
 
 		// the rebalancer is a child actor of the system guardian
-		_ = x.actors.addNode(x.systemGuardian, x.rebalancer)
+		return x.actors.addNode(x.systemGuardian, x.rebalancer)
 	}
 	return nil
 }
@@ -3216,8 +3212,7 @@ func (x *actorSystem) spawnDeadletter(ctx context.Context) error {
 	}
 
 	// the deadletter is a child actor of the system guardian
-	_ = x.actors.addNode(x.systemGuardian, x.deadletter)
-	return nil
+	return x.actors.addNode(x.systemGuardian, x.deadletter)
 }
 
 // checkSpawnPreconditions make sure before an actor is created some pre-conditions are checks

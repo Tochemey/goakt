@@ -371,6 +371,5 @@ func (x *actorSystem) spawnTopicActor(ctx context.Context) error {
 	)
 
 	// the topic actor is a child actor of the system guardian
-	_ = x.actors.addNode(x.systemGuardian, x.topicActor)
-	return nil
+	return x.actors.addNode(x.systemGuardian, x.topicActor)
 }

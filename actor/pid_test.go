@@ -253,7 +253,7 @@ func TestPassivation(t *testing.T) {
 		assert.ErrorIs(t, err, ErrDead)
 		assert.NoError(t, actorSystem.Stop(ctx))
 	})
-	t.Run("With Messges Count-based passivation", func(t *testing.T) {
+	t.Run("With Messages Count-based passivation", func(t *testing.T) {
 		ctx := context.TODO()
 		ports := dynaport.Get(1)
 		host := "127.0.0.1"
