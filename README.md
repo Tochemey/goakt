@@ -9,6 +9,7 @@
 [![GitHub go.mod Go version](https://img.shields.io/github/go-mod/go-version/Tochemey/goakt)](https://go.dev/doc/install)
 [![Awesome](https://awesome.re/badge.svg)](https://github.com/avelino/awesome-go)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/Tochemey/goakt/badge)](https://scorecard.dev/viewer/?uri=github.com/Tochemey/goakt)
+[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/9248/badge)](https://www.bestpractices.dev/projects/9248)
 
 
 
