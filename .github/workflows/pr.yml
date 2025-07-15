@@ -6,6 +6,7 @@ on:
     paths-ignore:
       - "**/README.md"
       - "**/renovate.json5"
+      - "**/scorecard.yml"
 
 permissions:
   contents: read

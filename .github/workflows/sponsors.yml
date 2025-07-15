@@ -1,4 +1,4 @@
-name: Generate Sponsors README
+name: sponsors
 on:
   workflow_dispatch:
   schedule:
