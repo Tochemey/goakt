@@ -2,9 +2,9 @@
   $schema: 'https://docs.renovatebot.com/renovate-schema.json',
   extends: [
     'config:recommended',
+    ":semanticCommitTypeAll(chore)"
   ],
   assigneesFromCodeOwners: true,
-  commitMessagePrefix: 'chore(deps): ',
   dependencyDashboard: false,
   rebaseWhen: 'conflicted',
   schedule: 'on Wednesdays',
