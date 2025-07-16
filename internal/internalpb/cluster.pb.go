@@ -296,7 +296,7 @@ const file_internal_cluster_proto_rawDesc = "" +
 	"\x0eClusterService\x12T\n" +
 	"\rGetNodeMetric\x12 .internalpb.GetNodeMetricRequest\x1a!.internalpb.GetNodeMetricResponse\x12E\n" +
 	"\bGetKinds\x12\x1b.internalpb.GetKindsRequest\x1a\x1c.internalpb.GetKindsResponseB\xa5\x01\n" +
-	"\x0ecom.internalpbB\fClusterProtoH\x02P\x01Z;github.com/tochemey/goakt/v3/internal/internalpb;internalpb\xa2\x02\x03IXX\xaa\x02\n" +
+	"\x0ecom.internalpbB\fClusterProtoH\x02P\x01Z;github.com/tochemey/goakt/v4/internal/internalpb;internalpb\xa2\x02\x03IXX\xaa\x02\n" +
 	"Internalpb\xca\x02\n" +
 	"Internalpb\xe2\x02\x16Internalpb\\GPBMetadata\xea\x02\n" +
 	"Internalpbb\x06proto3"

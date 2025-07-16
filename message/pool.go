@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (c) 2022-2025  Arsene Tochemey Gandote
+ * Copyright (c) 2022-2025 Arsene Tochemey Gandote
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -22,21 +22,21 @@
  * SOFTWARE.
  */
 
-package bufferpool
+package message
 
 import (
 	"bytes"
 	"sync"
 )
 
-var Pool = New()
+var pool = newBufferPool()
 
-type BufferPool struct {
+type bufferPool struct {
 	pool sync.Pool
 }
 
-func New() *BufferPool {
-	return &BufferPool{
+func newBufferPool() *bufferPool {
+	return &bufferPool{
 		pool: sync.Pool{
 			New: func() any {
 				return new(bytes.Buffer)
@@ -45,11 +45,11 @@ func New() *BufferPool {
 	}
 }
 
-func (p *BufferPool) Get() *bytes.Buffer {
+func (p *bufferPool) Get() *bytes.Buffer {
 	return p.pool.Get().(*bytes.Buffer)
 }
 
-func (p *BufferPool) Put(buf *bytes.Buffer) {
+func (p *bufferPool) Put(buf *bytes.Buffer) {
 	buf.Reset()
 	p.pool.Put(buf)
 }

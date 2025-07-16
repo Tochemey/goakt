@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (c) 2022-2025  Arsene Tochemey Gandote
+ * Copyright (c) 2022-2025 Arsene Tochemey Gandote
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -31,10 +31,10 @@ import (
 	"strconv"
 	"sync"
 
-	actors "github.com/tochemey/goakt/v3/actor"
-	"github.com/tochemey/goakt/v3/internal/http"
-	"github.com/tochemey/goakt/v3/internal/size"
-	"github.com/tochemey/goakt/v3/internal/validation"
+	actors "github.com/tochemey/goakt/v4/actor"
+	"github.com/tochemey/goakt/v4/internal/http"
+	"github.com/tochemey/goakt/v4/internal/size"
+	"github.com/tochemey/goakt/v4/internal/validation"
 )
 
 type NodeOption func(*Node)

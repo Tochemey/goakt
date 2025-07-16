@@ -5,7 +5,7 @@ package internalpb;
 import "google/protobuf/any.proto";
 import "google/protobuf/timestamp.proto";
 
-option go_package = "github.com/tochemey/goakt/v3/internal/internalpb;internalpb";
+option go_package = "github.com/tochemey/goakt/v4/internal/internalpb;internalpb";
 
 enum Strategy {
   STRATEGY_ONE_FOR_ONE = 0;

@@ -218,7 +218,7 @@ const file_internal_peers_proto_rawDesc = "" +
 	"\x11RebalanceComplete\x12!\n" +
 	"\fpeer_address\x18\x01 \x01(\tR\vpeerAddressB\xa3\x01\n" +
 	"\x0ecom.internalpbB\n" +
-	"PeersProtoH\x02P\x01Z;github.com/tochemey/goakt/v3/internal/internalpb;internalpb\xa2\x02\x03IXX\xaa\x02\n" +
+	"PeersProtoH\x02P\x01Z;github.com/tochemey/goakt/v4/internal/internalpb;internalpb\xa2\x02\x03IXX\xaa\x02\n" +
 	"Internalpb\xca\x02\n" +
 	"Internalpb\xe2\x02\x16Internalpb\\GPBMetadata\xea\x02\n" +
 	"Internalpbb\x06proto3"

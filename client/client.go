@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (c) 2022-2025  Arsene Tochemey Gandote
+ * Copyright (c) 2022-2025 Arsene Tochemey Gandote
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -33,15 +33,15 @@ import (
 	"go.akshayshah.org/connectproto"
 	"google.golang.org/protobuf/proto"
 
-	actors "github.com/tochemey/goakt/v3/actor"
-	"github.com/tochemey/goakt/v3/address"
-	"github.com/tochemey/goakt/v3/internal/errorschain"
-	"github.com/tochemey/goakt/v3/internal/internalpb"
-	"github.com/tochemey/goakt/v3/internal/internalpb/internalpbconnect"
-	"github.com/tochemey/goakt/v3/internal/registry"
-	"github.com/tochemey/goakt/v3/internal/ticker"
-	"github.com/tochemey/goakt/v3/internal/validation"
-	"github.com/tochemey/goakt/v3/remote"
+	actors "github.com/tochemey/goakt/v4/actor"
+	"github.com/tochemey/goakt/v4/address"
+	"github.com/tochemey/goakt/v4/internal/errorschain"
+	"github.com/tochemey/goakt/v4/internal/internalpb"
+	"github.com/tochemey/goakt/v4/internal/internalpb/internalpbconnect"
+	"github.com/tochemey/goakt/v4/internal/registry"
+	"github.com/tochemey/goakt/v4/internal/ticker"
+	"github.com/tochemey/goakt/v4/internal/validation"
+	"github.com/tochemey/goakt/v4/remote"
 )
 
 // Client provides connectivity to Go-Akt actor system nodes within a cluster.

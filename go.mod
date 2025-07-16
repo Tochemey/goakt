@@ -1,4 +1,4 @@
-module github.com/tochemey/goakt/v3
+module github.com/tochemey/goakt/v4
 
 go 1.24.0
 
@@ -115,9 +115,3 @@ require (
 	sigs.k8s.io/structured-merge-diff/v4 v4.7.0 // indirect
 	sigs.k8s.io/yaml v1.5.0 // indirect
 )
-
-retract v3.2.1 // Had go routine leak
-
-retract v3.6.1 // Nil pointer
-
-retract v3.6.2 // issue-778 and issue-779

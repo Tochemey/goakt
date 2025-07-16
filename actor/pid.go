@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (c) 2022-2025  Arsene Tochemey Gandote
+ * Copyright (c) 2022-2025 Arsene Tochemey Gandote
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -43,19 +43,19 @@ import (
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	"github.com/tochemey/goakt/v3/address"
-	"github.com/tochemey/goakt/v3/extension"
-	"github.com/tochemey/goakt/v3/future"
-	"github.com/tochemey/goakt/v3/goaktpb"
-	"github.com/tochemey/goakt/v3/internal/collection"
-	"github.com/tochemey/goakt/v3/internal/errorschain"
-	"github.com/tochemey/goakt/v3/internal/eventstream"
-	"github.com/tochemey/goakt/v3/internal/internalpb"
-	"github.com/tochemey/goakt/v3/internal/registry"
-	"github.com/tochemey/goakt/v3/internal/ticker"
-	"github.com/tochemey/goakt/v3/internal/workerpool"
-	"github.com/tochemey/goakt/v3/log"
-	"github.com/tochemey/goakt/v3/passivation"
+	"github.com/tochemey/goakt/v4/address"
+	"github.com/tochemey/goakt/v4/extension"
+	"github.com/tochemey/goakt/v4/future"
+	"github.com/tochemey/goakt/v4/goaktpb"
+	"github.com/tochemey/goakt/v4/internal/collection"
+	"github.com/tochemey/goakt/v4/internal/errorschain"
+	"github.com/tochemey/goakt/v4/internal/eventstream"
+	"github.com/tochemey/goakt/v4/internal/internalpb"
+	"github.com/tochemey/goakt/v4/internal/registry"
+	"github.com/tochemey/goakt/v4/internal/ticker"
+	"github.com/tochemey/goakt/v4/internal/workerpool"
+	"github.com/tochemey/goakt/v4/log"
+	"github.com/tochemey/goakt/v4/passivation"
 )
 
 // specifies the state in which the PID is

@@ -1422,7 +1422,7 @@ const file_goakt_goakt_proto_rawDesc = "" +
 	"\x10PausePassivation\"\x13\n" +
 	"\x11ResumePassivationB\x85\x01\n" +
 	"\vcom.goaktpbB\n" +
-	"GoaktProtoH\x02P\x01Z,github.com/tochemey/goakt/v3/goaktpb;goaktpb\xa2\x02\x03GXX\xaa\x02\aGoaktpb\xca\x02\aGoaktpb\xe2\x02\x13Goaktpb\\GPBMetadata\xea\x02\aGoaktpbb\x06proto3"
+	"GoaktProtoH\x02P\x01Z,github.com/tochemey/goakt/v4/goaktpb;goaktpb\xa2\x02\x03GXX\xaa\x02\aGoaktpb\xca\x02\aGoaktpb\xe2\x02\x13Goaktpb\\GPBMetadata\xea\x02\aGoaktpbb\x06proto3"
 
 var (
 	file_goakt_goakt_proto_rawDescOnce sync.Once

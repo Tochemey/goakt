@@ -7,7 +7,7 @@
 package internalpb
 
 import (
-	goaktpb "github.com/tochemey/goakt/v3/goaktpb"
+	goaktpb "github.com/tochemey/goakt/v4/goaktpb"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	anypb "google.golang.org/protobuf/types/known/anypb"
@@ -1182,7 +1182,7 @@ const file_internal_remoting_proto_rawDesc = "" +
 	"\x0eRemoteAskGrain\x12!.internalpb.RemoteAskGrainRequest\x1a\".internalpb.RemoteAskGrainResponse\x12Z\n" +
 	"\x0fRemoteTellGrain\x12\".internalpb.RemoteTellGrainRequest\x1a#.internalpb.RemoteTellGrainResponse\x12f\n" +
 	"\x13RemoteActivateGrain\x12&.internalpb.RemoteActivateGrainRequest\x1a'.internalpb.RemoteActivateGrainResponseB\xa6\x01\n" +
-	"\x0ecom.internalpbB\rRemotingProtoH\x02P\x01Z;github.com/tochemey/goakt/v3/internal/internalpb;internalpb\xa2\x02\x03IXX\xaa\x02\n" +
+	"\x0ecom.internalpbB\rRemotingProtoH\x02P\x01Z;github.com/tochemey/goakt/v4/internal/internalpb;internalpb\xa2\x02\x03IXX\xaa\x02\n" +
 	"Internalpb\xca\x02\n" +
 	"Internalpb\xe2\x02\x16Internalpb\\GPBMetadata\xea\x02\n" +
 	"Internalpbb\x06proto3"

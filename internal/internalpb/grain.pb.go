@@ -185,7 +185,7 @@ const file_internal_grain_proto_rawDesc = "" +
 	"\x12activation_timeout\x18\x05 \x01(\v2\x19.google.protobuf.DurationR\x11activationTimeout\x12-\n" +
 	"\x12activation_retries\x18\x06 \x01(\x05R\x11activationRetriesB\xa3\x01\n" +
 	"\x0ecom.internalpbB\n" +
-	"GrainProtoH\x02P\x01Z;github.com/tochemey/goakt/v3/internal/internalpb;internalpb\xa2\x02\x03IXX\xaa\x02\n" +
+	"GrainProtoH\x02P\x01Z;github.com/tochemey/goakt/v4/internal/internalpb;internalpb\xa2\x02\x03IXX\xaa\x02\n" +
 	"Internalpb\xca\x02\n" +
 	"Internalpb\xe2\x02\x16Internalpb\\GPBMetadata\xea\x02\n" +
 	"Internalpbb\x06proto3"

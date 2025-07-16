@@ -7,7 +7,7 @@
 package internalpb
 
 import (
-	goaktpb "github.com/tochemey/goakt/v3/goaktpb"
+	goaktpb "github.com/tochemey/goakt/v4/goaktpb"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -210,7 +210,7 @@ const file_internal_deadletter_proto_rawDesc = "" +
 	"\x10DeadlettersCount\x12\x1f\n" +
 	"\vtotal_count\x18\x01 \x01(\x03R\n" +
 	"totalCountB\xa8\x01\n" +
-	"\x0ecom.internalpbB\x0fDeadletterProtoH\x02P\x01Z;github.com/tochemey/goakt/v3/internal/internalpb;internalpb\xa2\x02\x03IXX\xaa\x02\n" +
+	"\x0ecom.internalpbB\x0fDeadletterProtoH\x02P\x01Z;github.com/tochemey/goakt/v4/internal/internalpb;internalpb\xa2\x02\x03IXX\xaa\x02\n" +
 	"Internalpb\xca\x02\n" +
 	"Internalpb\xe2\x02\x16Internalpb\\GPBMetadata\xea\x02\n" +
 	"Internalpbb\x06proto3"

@@ -64,7 +64,7 @@ const file_internal_readiness_proto_rawDesc = "" +
 	"\x18internal/readiness.proto\x12\n" +
 	"internalpb\"\x10\n" +
 	"\x0eReadinessProbeB\xa7\x01\n" +
-	"\x0ecom.internalpbB\x0eReadinessProtoH\x02P\x01Z;github.com/tochemey/goakt/v3/internal/internalpb;internalpb\xa2\x02\x03IXX\xaa\x02\n" +
+	"\x0ecom.internalpbB\x0eReadinessProtoH\x02P\x01Z;github.com/tochemey/goakt/v4/internal/internalpb;internalpb\xa2\x02\x03IXX\xaa\x02\n" +
 	"Internalpb\xca\x02\n" +
 	"Internalpb\xe2\x02\x16Internalpb\\GPBMetadata\xea\x02\n" +
 	"Internalpbb\x06proto3"

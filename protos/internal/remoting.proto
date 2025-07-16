@@ -9,7 +9,7 @@ import "internal/dependency.proto";
 import "internal/grain.proto";
 import "internal/passivation.proto";
 
-option go_package = "github.com/tochemey/goakt/v3/internal/internalpb;internalpb";
+option go_package = "github.com/tochemey/goakt/v4/internal/internalpb;internalpb";
 
 // RemotingService defines the remoting service
 // With remoting one can:

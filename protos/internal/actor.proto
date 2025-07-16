@@ -6,7 +6,7 @@ import "goakt/goakt.proto";
 import "internal/dependency.proto";
 import "internal/passivation.proto";
 
-option go_package = "github.com/tochemey/goakt/v3/internal/internalpb;internalpb";
+option go_package = "github.com/tochemey/goakt/v4/internal/internalpb;internalpb";
 
 // Actor represents the actor information on the wire.
 message Actor {

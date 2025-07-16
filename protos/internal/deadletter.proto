@@ -4,7 +4,7 @@ package internalpb;
 
 import "goakt/goakt.proto";
 
-option go_package = "github.com/tochemey/goakt/v3/internal/internalpb;internalpb";
+option go_package = "github.com/tochemey/goakt/v4/internal/internalpb;internalpb";
 
 message GetDeadletters {}
 
