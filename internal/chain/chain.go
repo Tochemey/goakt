@@ -37,12 +37,12 @@ type Chain struct {
 	ctx         context.Context
 }
 
-// ChainOption configures a validation chain at creation time.
-type ChainOption func(*Chain)
+// Option configures a validation chain at creation time.
+type Option func(*Chain)
 
 // New creates a new error chain. All errors will be evaluated respectively
 // according to their insertion order
-func New(opts ...ChainOption) *Chain {
+func New(opts ...Option) *Chain {
 	chain := &Chain{
 		errs: make([]error, 0),
 		ctx:  context.Background(),
@@ -145,16 +145,16 @@ func (c *Chain) Run() error {
 }
 
 // WithFailFast sets whether a chain should stop validation on first error.
-func WithFailFast() ChainOption {
+func WithFailFast() Option {
 	return func(c *Chain) { c.returnFirst = true }
 }
 
 // WithRunAll sets whether a chain should return all errors.
-func WithRunAll() ChainOption {
+func WithRunAll() Option {
 	return func(c *Chain) { c.returnFirst = false }
 }
 
 // WithContext sets the chain context to use
-func WithContext(ctx context.Context) ChainOption {
+func WithContext(ctx context.Context) Option {
 	return func(c *Chain) { c.ctx = ctx }
 }
