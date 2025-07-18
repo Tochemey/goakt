@@ -35,7 +35,7 @@ import (
 
 	actors "github.com/tochemey/goakt/v3/actor"
 	"github.com/tochemey/goakt/v3/address"
-	"github.com/tochemey/goakt/v3/internal/errorschain"
+	"github.com/tochemey/goakt/v3/internal/chain"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/internalpb/internalpbconnect"
 	"github.com/tochemey/goakt/v3/internal/registry"
@@ -88,11 +88,11 @@ type Client struct {
 //   - The returned Client is safe for concurrent use.
 //   - Nodes are assumed to be reachable and running a compatible actor runtime.
 func New(ctx context.Context, nodes []*Node, opts ...Option) (*Client, error) {
-	if err := errorschain.
-		New(errorschain.ReturnFirst()).
-		AddErrorFn(func() error { return validateNodes(nodes) }).
-		AddErrorFn(func() error { return setNodesMetric(ctx, nodes) }).
-		Error(); err != nil {
+	if err := chain.
+		New(chain.WithFailFast()).
+		AddRunner(func() error { return validateNodes(nodes) }).
+		AddRunner(func() error { return setNodesMetric(ctx, nodes) }).
+		Run(); err != nil {
 		return nil, err
 	}
 
@@ -549,8 +549,8 @@ func getNodeMetric(ctx context.Context, node *Node) (int, bool, error) {
 
 // validateNodes validate the incoming nodes
 func validateNodes(nodes []*Node) error {
-	var errFns []func() error
-	errFns = append(errFns, func() error {
+	var runners []func() error
+	runners = append(runners, func() error {
 		return validation.
 			New(validation.FailFast()).
 			AddAssertion(len(nodes) != 0, "nodes are required").
@@ -558,12 +558,13 @@ func validateNodes(nodes []*Node) error {
 	})
 
 	for _, node := range nodes {
-		errFns = append(errFns, func() error { return node.Validate() })
+		runners = append(runners, func() error { return node.Validate() })
 	}
-	return errorschain.
-		New(errorschain.ReturnFirst()).
-		AddErrorFns(errFns...).
-		Error()
+
+	return chain.
+		New(chain.WithFailFast()).
+		AddRunners(runners...).
+		Run()
 }
 
 // setNodesMetric

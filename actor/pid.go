@@ -47,8 +47,8 @@ import (
 	"github.com/tochemey/goakt/v3/extension"
 	"github.com/tochemey/goakt/v3/future"
 	"github.com/tochemey/goakt/v3/goaktpb"
+	"github.com/tochemey/goakt/v3/internal/chain"
 	"github.com/tochemey/goakt/v3/internal/collection"
-	"github.com/tochemey/goakt/v3/internal/errorschain"
 	"github.com/tochemey/goakt/v3/internal/eventstream"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/registry"
@@ -511,16 +511,16 @@ func (pid *PID) Restart(ctx context.Context) error {
 
 	if !pid.IsSuspended() {
 		// re-add the actor back to the actor tree and cluster
-		if err := errorschain.New(errorschain.ReturnFirst()).
-			AddErrorFn(func() error {
+		if err := chain.New(chain.WithFailFast()).
+			AddRunner(func() error {
 				if !parent.Equals(NoSender) {
 					return tree.addNode(parent, pid)
 				}
 				return nil
 			}).
-			AddErrorFn(func() error { tree.addWatcher(pid, deathWatch); return nil }).
-			AddErrorFn(func() error { return actorSystem.putActorOnCluster(pid) }).
-			Error(); err != nil {
+			AddRunner(func() error { tree.addWatcher(pid, deathWatch); return nil }).
+			AddRunner(func() error { return actorSystem.putActorOnCluster(pid) }).
+			Run(); err != nil {
 			return err
 		}
 	}
@@ -537,11 +537,11 @@ func (pid *PID) Restart(ctx context.Context) error {
 			if !child.IsSuspended() {
 				// re-add the child back to the tree and cluster
 				// since these calls are idempotent
-				if err := errorschain.New(errorschain.ReturnFirst()).
-					AddErrorFn(func() error { return tree.addNode(pid, child) }).
-					AddErrorFn(func() error { tree.addWatcher(child, deathWatch); return nil }).
-					AddErrorFn(func() error { return actorSystem.putActorOnCluster(child) }).
-					Error(); err != nil {
+				if err := chain.New(chain.WithFailFast()).
+					AddRunner(func() error { return tree.addNode(pid, child) }).
+					AddRunner(func() error { tree.addWatcher(child, deathWatch); return nil }).
+					AddRunner(func() error { return actorSystem.putActorOnCluster(child) }).
+					Run(); err != nil {
 					return err
 				}
 			}
@@ -1692,11 +1692,11 @@ func (pid *PID) doStop(ctx context.Context) error {
 		pid.remoting.Close()
 	}
 
-	if err := errorschain.
-		New(errorschain.ReturnFirst()).
-		AddErrorFn(func() error { return pid.freeWatchees() }).
-		AddErrorFn(func() error { return pid.freeChildren(ctx) }).
-		Error(); err != nil {
+	if err := chain.
+		New(chain.WithFailFast()).
+		AddRunner(func() error { return pid.freeWatchees() }).
+		AddRunner(func() error { return pid.freeChildren(ctx) }).
+		Run(); err != nil {
 		return err
 	}
 
@@ -1704,11 +1704,11 @@ func (pid *PID) doStop(ctx context.Context) error {
 
 	// run the PostStop hook and let watchers know
 	// you are terminated
-	if err := errorschain.
-		New(errorschain.ReturnFirst()).
-		AddErrorFn(func() error { return pid.actor.PostStop(stopContext) }).
-		AddErrorFn(func() error { pid.freeWatchers(ctx); return nil }).
-		Error(); err != nil {
+	if err := chain.
+		New(chain.WithFailFast()).
+		AddRunner(func() error { return pid.actor.PostStop(stopContext) }).
+		AddRunner(func() error { pid.freeWatchers(ctx); return nil }).
+		Run(); err != nil {
 		return err
 	}
 

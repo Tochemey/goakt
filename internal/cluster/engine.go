@@ -50,7 +50,7 @@ import (
 	"github.com/tochemey/goakt/v3/discovery"
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/hash"
-	"github.com/tochemey/goakt/v3/internal/errorschain"
+	"github.com/tochemey/goakt/v3/internal/chain"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/memberlist"
 	"github.com/tochemey/goakt/v3/internal/size"
@@ -1188,14 +1188,14 @@ func (x *Engine) startServer(startCtx, ctx context.Context) error {
 
 func (x *Engine) createMaps() error {
 	var err error
-	return errorschain.
-		New(errorschain.ReturnFirst()).
-		AddErrorFn(func() error { x.actorsMap, err = x.client.NewDMap(actorsMap); return err }).
-		AddErrorFn(func() error { x.grainsMap, err = x.client.NewDMap(grainsMap); return err }).
-		AddErrorFn(func() error { x.statesMap, err = x.client.NewDMap(statesMap); return err }).
-		AddErrorFn(func() error { x.jobKeysMap, err = x.client.NewDMap(jobKeysMap); return err }).
-		AddErrorFn(func() error { x.kindsMap, err = x.client.NewDMap(kindsMap); return err }).
-		Error()
+	return chain.
+		New(chain.WithFailFast()).
+		AddRunner(func() error { x.actorsMap, err = x.client.NewDMap(actorsMap); return err }).
+		AddRunner(func() error { x.grainsMap, err = x.client.NewDMap(grainsMap); return err }).
+		AddRunner(func() error { x.statesMap, err = x.client.NewDMap(statesMap); return err }).
+		AddRunner(func() error { x.jobKeysMap, err = x.client.NewDMap(jobKeysMap); return err }).
+		AddRunner(func() error { x.kindsMap, err = x.client.NewDMap(kindsMap); return err }).
+		Run()
 }
 
 func (x *Engine) createSubscription(ctx context.Context) error {
