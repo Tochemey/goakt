@@ -38,8 +38,8 @@ import (
 	"github.com/tochemey/goakt/v3/actor"
 	"github.com/tochemey/goakt/v3/discovery/nats"
 	"github.com/tochemey/goakt/v3/extension"
+	"github.com/tochemey/goakt/v3/internal/chain"
 	"github.com/tochemey/goakt/v3/internal/collection"
-	"github.com/tochemey/goakt/v3/internal/errorschain"
 	"github.com/tochemey/goakt/v3/internal/pause"
 	"github.com/tochemey/goakt/v3/log"
 	"github.com/tochemey/goakt/v3/remote"
@@ -163,11 +163,11 @@ func (m *MultiNodes) Stop() {
 
 	ctx := context.Background()
 	for _, node := range m.nodes.Values() {
-		if err := errorschain.
-			New(errorschain.ReturnFirst()).
-			AddErrorFn(func() error { return node.actorSystem.Stop(ctx) }).
-			AddErrorFn(func() error { return node.discovery.Close() }).
-			Error(); err != nil {
+		if err := chain.
+			New(chain.WithFailFast()).
+			AddRunner(func() error { return node.actorSystem.Stop(ctx) }).
+			AddRunner(func() error { return node.discovery.Close() }).
+			Run(); err != nil {
 			m.started.Store(false)
 			m.gt.Fatalf("failed to stop actor system %s: %v", node.actorSystem.Name(), err)
 		}

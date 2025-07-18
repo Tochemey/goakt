@@ -22,7 +22,7 @@
  * SOFTWARE.
  */
 
-package errorschain
+package chain
 
 import (
 	"context"
@@ -34,16 +34,18 @@ import (
 type Chain struct {
 	returnFirst bool
 	errs        []error
+	ctx         context.Context
 }
 
-// ChainOption configures a validation chain at creation time.
-type ChainOption func(*Chain)
+// Option configures a validation chain at creation time.
+type Option func(*Chain)
 
 // New creates a new error chain. All errors will be evaluated respectively
 // according to their insertion order
-func New(opts ...ChainOption) *Chain {
+func New(opts ...Option) *Chain {
 	chain := &Chain{
 		errs: make([]error, 0),
+		ctx:  context.Background(),
 	}
 
 	for _, opt := range opts {
@@ -53,28 +55,8 @@ func New(opts ...ChainOption) *Chain {
 	return chain
 }
 
-// AddError add an error to the chain
-func (c *Chain) AddError(err error) *Chain {
-	if c.returnFirst {
-		if len(c.errs) == 0 {
-			if err != nil {
-				c.errs = append(c.errs, err)
-				return c
-			}
-		}
-		return c
-	}
-
-	if err != nil {
-		c.errs = append(c.errs, err)
-		return c
-	}
-
-	return c
-}
-
-// AddErrorFn add an error to the chain
-func (c *Chain) AddErrorFn(fn func() error) *Chain {
+// AddRunner add an error to the chain
+func (c *Chain) AddRunner(fn func() error) *Chain {
 	if c.returnFirst {
 		if len(c.errs) == 0 {
 			if err := fn(); err != nil {
@@ -93,12 +75,40 @@ func (c *Chain) AddErrorFn(fn func() error) *Chain {
 	return c
 }
 
-// AddErrorFnIf adds an error function to the chain if the condition is true
-func (c *Chain) AddErrorFnIf(ctx context.Context, condition bool, fn func(ctx context.Context) error) *Chain {
+// AddRunners add a slice of error functions to the chain. Remember the slice order does matter here
+func (c *Chain) AddRunners(fn ...func() error) *Chain {
+	for _, f := range fn {
+		c = c.AddRunner(f)
+	}
+	return c
+}
+
+// AddContextRunner add an error to the chain
+func (c *Chain) AddContextRunner(fn func(ctx context.Context) error) *Chain {
+	if c.returnFirst {
+		if len(c.errs) == 0 {
+			if err := fn(c.ctx); err != nil {
+				c.errs = append(c.errs, err)
+				return c
+			}
+		}
+		return c
+	}
+
+	if err := fn(c.ctx); err != nil {
+		c.errs = append(c.errs, err)
+		return c
+	}
+
+	return c
+}
+
+// AddContextRunnerIf adds an error function to the chain if the condition is true
+func (c *Chain) AddContextRunnerIf(condition bool, fn func(ctx context.Context) error) *Chain {
 	if condition {
 		if c.returnFirst {
 			if len(c.errs) == 0 {
-				if err := fn(ctx); err != nil {
+				if err := fn(c.ctx); err != nil {
 					c.errs = append(c.errs, err)
 					return c
 				}
@@ -106,7 +116,7 @@ func (c *Chain) AddErrorFnIf(ctx context.Context, condition bool, fn func(ctx co
 			return c
 		}
 
-		if err := fn(ctx); err != nil {
+		if err := fn(c.ctx); err != nil {
 			c.errs = append(c.errs, err)
 			return c
 		}
@@ -115,16 +125,8 @@ func (c *Chain) AddErrorFnIf(ctx context.Context, condition bool, fn func(ctx co
 	return c
 }
 
-// AddErrorFns add a slice of error functions to the chain. Remember the slice order does matter here
-func (c *Chain) AddErrorFns(fn ...func() error) *Chain {
-	for _, f := range fn {
-		c = c.AddErrorFn(f)
-	}
-	return c
-}
-
-// Error returns the error
-func (c *Chain) Error() error {
+// Run returns the error
+func (c *Chain) Run() error {
 	if c.returnFirst {
 		if len(c.errs) == 0 {
 			return nil
@@ -142,12 +144,17 @@ func (c *Chain) Error() error {
 	return err
 }
 
-// ReturnFirst sets whether a chain should stop validation on first error.
-func ReturnFirst() ChainOption {
+// WithFailFast sets whether a chain should stop validation on first error.
+func WithFailFast() Option {
 	return func(c *Chain) { c.returnFirst = true }
 }
 
-// ReturnAll sets whether a chain should return all errors.
-func ReturnAll() ChainOption {
+// WithRunAll sets whether a chain should return all errors.
+func WithRunAll() Option {
 	return func(c *Chain) { c.returnFirst = false }
+}
+
+// WithContext sets the chain context to use
+func WithContext(ctx context.Context) Option {
+	return func(c *Chain) { c.ctx = ctx }
 }

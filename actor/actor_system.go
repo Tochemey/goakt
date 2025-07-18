@@ -61,9 +61,9 @@ import (
 	"github.com/tochemey/goakt/v3/extension"
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/hash"
+	"github.com/tochemey/goakt/v3/internal/chain"
 	"github.com/tochemey/goakt/v3/internal/cluster"
 	"github.com/tochemey/goakt/v3/internal/collection"
-	"github.com/tochemey/goakt/v3/internal/errorschain"
 	"github.com/tochemey/goakt/v3/internal/eventstream"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/internalpb/internalpbconnect"
@@ -812,11 +812,11 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 // Start and Stop methods. Applications with more specialized needs
 // can use those methods directly instead of relying on Run.
 func (x *actorSystem) Run(ctx context.Context, startHook func(ctx context.Context) error, stophook func(ctx context.Context) error) {
-	if err := errorschain.
-		New(errorschain.ReturnFirst()).
-		AddErrorFn(func() error { return startHook(ctx) }).
-		AddErrorFn(func() error { return x.Start(ctx) }).
-		Error(); err != nil {
+	if err := chain.
+		New(chain.WithFailFast(), chain.WithContext(ctx)).
+		AddContextRunner(startHook).
+		AddContextRunner(x.Start).
+		Run(); err != nil {
 		x.logger.Fatal(err)
 		os.Exit(1)
 		return
@@ -826,16 +826,17 @@ func (x *actorSystem) Run(ctx context.Context, startHook func(ctx context.Contex
 	notifier := make(chan os.Signal, 1)
 	done := make(chan registry.Unit, 1)
 	signal.Notify(notifier, syscall.SIGINT, syscall.SIGTERM)
+
 	// wait for a shutdown signal, and then shutdown
 	go func() {
 		sig := <-notifier
 		x.logger.Infof("received an interrupt signal (%s) to shutdown", sig.String())
 
-		if err := errorschain.
-			New(errorschain.ReturnFirst()).
-			AddErrorFn(func() error { return stophook(ctx) }).
-			AddErrorFn(func() error { return x.Stop(ctx) }).
-			Error(); err != nil {
+		if err := chain.
+			New(chain.WithFailFast(), chain.WithContext(ctx)).
+			AddContextRunner(stophook).
+			AddContextRunner(x.Stop).
+			Run(); err != nil {
 			x.logger.Fatal(err)
 		}
 
@@ -869,27 +870,28 @@ func (x *actorSystem) Start(ctx context.Context) error {
 
 	x.logger.Infof("%s actor system starting on %s/%s..", x.name, runtime.GOOS, runtime.GOARCH)
 	x.starting.Store(true)
-	if err := errorschain.
-		New(errorschain.ReturnFirst()).
-		AddErrorFn(x.workerPool.Start).
-		AddErrorFn(func() error { return x.enableRemoting(ctx) }).
-		AddErrorFn(func() error { return x.enableClustering(ctx) }).
-		AddErrorFn(func() error { return x.spawnRootGuardian(ctx) }).
-		AddErrorFn(func() error { return x.spawnSystemGuardian(ctx) }).
-		AddErrorFn(func() error { return x.spawnNoSender(ctx) }).
-		AddErrorFn(func() error { return x.spawnUserGuardian(ctx) }).
-		AddErrorFn(func() error { return x.spawnRebalancer(ctx) }).
-		AddErrorFn(func() error { return x.spawnDeathWatch(ctx) }).
-		AddErrorFn(func() error { return x.spawnDeadletter(ctx) }).
-		AddErrorFn(func() error { return x.spawnSingletonManager(ctx) }).
-		AddErrorFn(func() error { return x.spawnTopicActor(ctx) }).
-		Error(); err != nil {
+
+	if err := chain.
+		New(chain.WithFailFast(), chain.WithContext(ctx)).
+		AddRunner(x.workerPool.Start).
+		AddContextRunner(x.enableRemoting).
+		AddContextRunner(x.enableClustering).
+		AddContextRunner(x.spawnRootGuardian).
+		AddContextRunner(x.spawnSystemGuardian).
+		AddContextRunner(x.spawnNoSender).
+		AddContextRunner(x.spawnUserGuardian).
+		AddContextRunner(x.spawnRebalancer).
+		AddContextRunner(x.spawnDeathWatch).
+		AddContextRunner(x.spawnDeadletter).
+		AddContextRunner(x.spawnSingletonManager).
+		AddContextRunner(x.spawnTopicActor).
+		Run(); err != nil {
 		x.workerPool.Stop()
-		return errorschain.
-			New(errorschain.ReturnAll()).
-			AddErrorFn(func() error { return err }).
-			AddErrorFn(func() error { return x.shutdown(ctx) }).
-			Error()
+		if stopErr := x.shutdown(ctx); stopErr != nil {
+			return errors.Join(err, stopErr)
+		}
+
+		return err
 	}
 
 	x.startMessagesScheduler(ctx)
@@ -2596,29 +2598,29 @@ func (x *actorSystem) shutdown(ctx context.Context) error {
 
 	// Helper to shut down cluster and remoting
 	shutdownClusterAndRemoting := func() error {
-		return errorschain.
-			New(errorschain.ReturnFirst()).
-			AddErrorFn(func() error { return x.shutdownCluster(ctx, actorRefs) }).
-			AddErrorFn(func() error { return x.shutdownRemoting(ctx) }).
-			Error()
+		return chain.
+			New(chain.WithFailFast()).
+			AddRunner(func() error { return x.shutdownCluster(ctx, actorRefs) }).
+			AddRunner(func() error { return x.shutdownRemoting(ctx) }).
+			Run()
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, x.shutdownTimeout)
 	defer cancel()
 
 	// shutdown the various system actors
-	if err := errorschain.
-		New(errorschain.ReturnFirst()).
-		AddErrorFnIf(ctx, x.getUserGuardian() != nil, x.getUserGuardian().Shutdown).
-		AddErrorFnIf(ctx, x.getSingletonManager() != nil, x.getSingletonManager().Shutdown).
-		AddErrorFnIf(ctx, x.getRebalancer() != nil, x.getRebalancer().Shutdown).
-		AddErrorFnIf(ctx, x.getDeadletter() != nil, x.getDeadletter().Shutdown).
-		AddErrorFnIf(ctx, x.getDeathWatch() != nil, x.getDeathWatch().Shutdown).
-		AddErrorFnIf(ctx, x.TopicActor() != nil, x.TopicActor().Shutdown).
-		AddErrorFnIf(ctx, NoSender != nil, NoSender.Shutdown).
-		AddErrorFnIf(ctx, x.getSystemGuardian() != nil, x.getSystemGuardian().Shutdown).
-		AddErrorFnIf(ctx, x.getRootGuardian() != nil, x.getRootGuardian().Shutdown).
-		Error(); err != nil {
+	if err := chain.
+		New(chain.WithFailFast(), chain.WithContext(ctx)).
+		AddContextRunnerIf(x.getUserGuardian() != nil, x.getUserGuardian().Shutdown).
+		AddContextRunnerIf(x.getSingletonManager() != nil, x.getSingletonManager().Shutdown).
+		AddContextRunnerIf(x.getRebalancer() != nil, x.getRebalancer().Shutdown).
+		AddContextRunnerIf(x.getDeadletter() != nil, x.getDeadletter().Shutdown).
+		AddContextRunnerIf(x.getDeathWatch() != nil, x.getDeathWatch().Shutdown).
+		AddContextRunnerIf(x.TopicActor() != nil, x.TopicActor().Shutdown).
+		AddContextRunnerIf(NoSender != nil, NoSender.Shutdown).
+		AddContextRunnerIf(x.getSystemGuardian() != nil, x.getSystemGuardian().Shutdown).
+		AddContextRunnerIf(x.getRootGuardian() != nil, x.getRootGuardian().Shutdown).
+		Run(); err != nil {
 		x.logger.Errorf("%s failed to shutdown cleanly: %v", x.name, err)
 		clusterErr := shutdownClusterAndRemoting()
 		// Combine all errors if present
@@ -3323,11 +3325,11 @@ func (x *actorSystem) getSetDeadlettersCount(ctx context.Context) {
 func (x *actorSystem) shutdownCluster(ctx context.Context, actorRefs []ActorRef) error {
 	if x.clusterEnabled.Load() {
 		if x.cluster != nil {
-			if err := errorschain.
-				New(errorschain.ReturnFirst()).
-				AddErrorFn(func() error { return x.cleanupCluster(ctx, actorRefs) }).
-				AddErrorFn(func() error { return x.cluster.Stop(ctx) }).
-				Error(); err != nil {
+			if err := chain.
+				New(chain.WithFailFast()).
+				AddRunner(func() error { return x.cleanupCluster(ctx, actorRefs) }).
+				AddRunner(func() error { return x.cluster.Stop(ctx) }).
+				Run(); err != nil {
 				x.logger.Errorf("%s failed to shutdown cleanly: %w", x.name, err)
 				return err
 			}
