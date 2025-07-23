@@ -52,6 +52,7 @@ import (
 	"github.com/tochemey/goakt/v3/hash"
 	"github.com/tochemey/goakt/v3/internal/chain"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
+	"github.com/tochemey/goakt/v3/internal/locker"
 	"github.com/tochemey/goakt/v3/internal/memberlist"
 	"github.com/tochemey/goakt/v3/internal/size"
 	"github.com/tochemey/goakt/v3/log"
@@ -144,6 +145,7 @@ type Interface interface {
 
 // Engine represents the Engine
 type Engine struct {
+	_ locker.NoCopy
 	*sync.Mutex
 	// specifies the total number of partitions
 	// the default values is 271

@@ -27,10 +27,13 @@ package collection
 import (
 	"slices"
 	"sync"
+
+	"github.com/tochemey/goakt/v3/internal/locker"
 )
 
 // List type that can be safely shared between goroutines.
 type List[T any] struct {
+	_    locker.NoCopy
 	data []T
 	mu   sync.RWMutex
 }

@@ -24,7 +24,11 @@
 
 package collection
 
-import "sync"
+import (
+	"sync"
+
+	"github.com/tochemey/goakt/v3/internal/locker"
+)
 
 // Map is a generic, concurrency-safe map that allows storing key-value pairs
 // while ensuring thread safety using a read-write mutex.
@@ -32,6 +36,7 @@ import "sync"
 // K represents the key type, which must be comparable.
 // V represents the value type, which can be any type.
 type Map[K comparable, V any] struct {
+	_    locker.NoCopy
 	mu   sync.RWMutex
 	data map[K]V
 }

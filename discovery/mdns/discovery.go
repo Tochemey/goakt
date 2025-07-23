@@ -37,10 +37,12 @@ import (
 	"go.uber.org/atomic"
 
 	"github.com/tochemey/goakt/v3/discovery"
+	"github.com/tochemey/goakt/v3/internal/locker"
 )
 
 // Discovery defines the mDNS discovery provider
 type Discovery struct {
+	_      locker.NoCopy
 	config *Config
 	mu     sync.Mutex
 

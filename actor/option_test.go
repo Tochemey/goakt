@@ -31,7 +31,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/atomic"
 
 	"github.com/tochemey/goakt/v3/hash"
 	"github.com/tochemey/goakt/v3/log"
@@ -39,10 +38,6 @@ import (
 )
 
 func TestOption(t *testing.T) {
-	var atomicTrue atomic.Bool
-	var atomicFalse atomic.Bool
-	atomicFalse.Store(false)
-	atomicTrue.Store(true)
 	clusterConfig := NewClusterConfig()
 	hasher := hash.DefaultHasher()
 	// nolint
@@ -51,58 +46,78 @@ func TestOption(t *testing.T) {
 		ClientTLS: tlsConfig,
 		ServerTLS: tlsConfig,
 	}
-
 	remoteConfig := remote.DefaultConfig()
 
 	testCases := []struct {
-		name     string
-		option   Option
-		expected actorSystem
+		name   string
+		option Option
+		check  func(t *testing.T, sys *actorSystem)
 	}{
 		{
-			name:     "WithActorInitMaxRetries",
-			option:   WithActorInitMaxRetries(2),
-			expected: actorSystem{actorInitMaxRetries: 2},
+			name:   "WithActorInitMaxRetries",
+			option: WithActorInitMaxRetries(2),
+			check: func(t *testing.T, sys *actorSystem) {
+				assert.Equal(t, 2, sys.actorInitMaxRetries)
+			},
 		},
 		{
-			name:     "WithLogger",
-			option:   WithLogger(log.DefaultLogger),
-			expected: actorSystem{logger: log.DefaultLogger},
+			name:   "WithLogger",
+			option: WithLogger(log.DefaultLogger),
+			check: func(t *testing.T, sys *actorSystem) {
+				assert.Equal(t, log.DefaultLogger, sys.logger)
+			},
 		},
 		{
-			name:     "WithShutdownTimeout",
-			option:   WithShutdownTimeout(2 * time.Second),
-			expected: actorSystem{shutdownTimeout: 2. * time.Second},
+			name:   "WithShutdownTimeout",
+			option: WithShutdownTimeout(2 * time.Second),
+			check: func(t *testing.T, sys *actorSystem) {
+				assert.Equal(t, 2*time.Second, sys.shutdownTimeout)
+			},
 		},
 		{
-			name:     "WithPartitionHasher",
-			option:   WithPartitionHasher(hasher),
-			expected: actorSystem{partitionHasher: hasher},
+			name:   "WithPartitionHasher",
+			option: WithPartitionHasher(hasher),
+			check: func(t *testing.T, sys *actorSystem) {
+				assert.Equal(t, hasher, sys.partitionHasher)
+			},
 		},
 		{
-			name:     "WithActorInitTimeout",
-			option:   WithActorInitTimeout(2 * time.Second),
-			expected: actorSystem{actorInitTimeout: 2. * time.Second},
+			name:   "WithActorInitTimeout",
+			option: WithActorInitTimeout(2 * time.Second),
+			check: func(t *testing.T, sys *actorSystem) {
+				assert.Equal(t, 2*time.Second, sys.actorInitTimeout)
+			},
 		},
 		{
-			name:     "WithCluster",
-			option:   WithCluster(clusterConfig),
-			expected: actorSystem{clusterEnabled: atomicTrue, clusterConfig: clusterConfig},
+			name:   "WithCluster",
+			option: WithCluster(clusterConfig),
+			check: func(t *testing.T, sys *actorSystem) {
+				assert.True(t, sys.clusterEnabled.Load())
+				assert.Equal(t, clusterConfig, sys.clusterConfig)
+			},
 		},
 		{
-			name:     "WithTLS",
-			option:   WithTLS(tlsInfo),
-			expected: actorSystem{serverTLS: tlsConfig, clientTLS: tlsConfig},
+			name:   "WithTLS",
+			option: WithTLS(tlsInfo),
+			check: func(t *testing.T, sys *actorSystem) {
+				assert.Equal(t, tlsConfig, sys.serverTLS)
+				assert.Equal(t, tlsConfig, sys.clientTLS)
+			},
 		},
 		{
-			name:     "WithRemote",
-			option:   WithRemote(remoteConfig),
-			expected: actorSystem{remotingEnabled: atomicTrue, remoteConfig: remoteConfig},
+			name:   "WithRemote",
+			option: WithRemote(remoteConfig),
+			check: func(t *testing.T, sys *actorSystem) {
+				assert.True(t, sys.remotingEnabled.Load())
+				assert.Equal(t, remoteConfig, sys.remoteConfig)
+			},
 		},
 		{
-			name:     "WithoutRelocation",
-			option:   WithoutRelocation(),
-			expected: actorSystem{relocationEnabled: atomicFalse},
+			name:   "WithoutRelocation",
+			option: WithoutRelocation(),
+			check: func(t *testing.T, sys *actorSystem) {
+				assert.False(t, sys.relocationEnabled.Load())
+			},
 		},
 	}
 
@@ -110,7 +125,7 @@ func TestOption(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			var system actorSystem
 			tc.option.Apply(&system)
-			assert.Equal(t, tc.expected, system)
+			tc.check(t, &system)
 		})
 	}
 }
