@@ -12,7 +12,7 @@ require (
 	github.com/grandcat/zeroconf v1.0.0
 	github.com/hashicorp/go-sockaddr v1.0.7
 	github.com/hashicorp/memberlist v0.5.3
-	github.com/kapetan-io/tackle v0.11.0
+	github.com/kapetan-io/tackle v0.12.0
 	github.com/nats-io/nats-server/v2 v2.11.6
 	github.com/nats-io/nats.go v1.43.0
 	github.com/panjf2000/ants/v2 v2.11.3
