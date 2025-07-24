@@ -51,6 +51,7 @@ import (
 	"github.com/tochemey/goakt/v3/internal/collection"
 	"github.com/tochemey/goakt/v3/internal/eventstream"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
+	"github.com/tochemey/goakt/v3/internal/locker"
 	"github.com/tochemey/goakt/v3/internal/registry"
 	"github.com/tochemey/goakt/v3/internal/ticker"
 	"github.com/tochemey/goakt/v3/internal/workerpool"
@@ -79,6 +80,7 @@ type taskCompletion struct {
 // With the PID one can send a ReceiveContext to the actor
 // PID helps to identify the actor in the local actor system
 type PID struct {
+	_ locker.NoCopy
 	// specifies the message processor
 	actor Actor
 

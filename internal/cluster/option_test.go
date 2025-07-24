@@ -41,88 +41,118 @@ func TestOptions(t *testing.T) {
 	// nolint
 	tlsConfig := &tls.Config{}
 	size := uint64(1 * size.MB)
+
 	testCases := []struct {
-		name     string
-		option   Option
-		expected Engine
+		name   string
+		option Option
+		check  func(t *testing.T, e *Engine)
 	}{
 		{
-			name:     "WithPartitionsCount",
-			option:   WithPartitionsCount(2),
-			expected: Engine{partitionsCount: 2},
+			name:   "WithPartitionsCount",
+			option: WithPartitionsCount(2),
+			check: func(t *testing.T, e *Engine) {
+				assert.EqualValues(t, 2, e.partitionsCount)
+			},
 		},
 		{
-			name:     "WithLogger",
-			option:   WithLogger(log.DefaultLogger),
-			expected: Engine{logger: log.DefaultLogger},
+			name:   "WithLogger",
+			option: WithLogger(log.DefaultLogger),
+			check: func(t *testing.T, e *Engine) {
+				assert.Equal(t, log.DefaultLogger, e.logger)
+			},
 		},
 		{
-			name:     "WithWriteTimeout",
-			option:   WithWriteTimeout(2 * time.Minute),
-			expected: Engine{writeTimeout: 2 * time.Minute},
+			name:   "WithWriteTimeout",
+			option: WithWriteTimeout(2 * time.Minute),
+			check: func(t *testing.T, e *Engine) {
+				assert.Equal(t, 2*time.Minute, e.writeTimeout)
+			},
 		},
 		{
-			name:     "WithReadTimeout",
-			option:   WithReadTimeout(2 * time.Minute),
-			expected: Engine{readTimeout: 2 * time.Minute},
+			name:   "WithReadTimeout",
+			option: WithReadTimeout(2 * time.Minute),
+			check: func(t *testing.T, e *Engine) {
+				assert.Equal(t, 2*time.Minute, e.readTimeout)
+			},
 		},
 		{
-			name:     "WithShutdownTimeout",
-			option:   WithShutdownTimeout(2 * time.Minute),
-			expected: Engine{shutdownTimeout: 2 * time.Minute},
+			name:   "WithShutdownTimeout",
+			option: WithShutdownTimeout(2 * time.Minute),
+			check: func(t *testing.T, e *Engine) {
+				assert.Equal(t, 2*time.Minute, e.shutdownTimeout)
+			},
 		},
 		{
-			name:     "WithHasher",
-			option:   WithHasher(mockHasher),
-			expected: Engine{hasher: mockHasher},
+			name:   "WithHasher",
+			option: WithHasher(mockHasher),
+			check: func(t *testing.T, e *Engine) {
+				assert.Equal(t, mockHasher, e.hasher)
+			},
 		},
 		{
-			name:     "WithReplicaCount",
-			option:   WithReplicaCount(2),
-			expected: Engine{replicaCount: 2},
+			name:   "WithReplicaCount",
+			option: WithReplicaCount(2),
+			check: func(t *testing.T, e *Engine) {
+				assert.EqualValues(t, 2, e.replicaCount)
+			},
 		},
 		{
-			name:     "WithMinimumPeersQuorum",
-			option:   WithMinimumPeersQuorum(3),
-			expected: Engine{minimumPeersQuorum: 3},
+			name:   "WithMinimumPeersQuorum",
+			option: WithMinimumPeersQuorum(3),
+			check: func(t *testing.T, e *Engine) {
+				assert.EqualValues(t, 3, e.minimumPeersQuorum)
+			},
 		},
 		{
-			name:     "WithWriteQuorum",
-			option:   WithWriteQuorum(3),
-			expected: Engine{writeQuorum: 3},
+			name:   "WithWriteQuorum",
+			option: WithWriteQuorum(3),
+			check: func(t *testing.T, e *Engine) {
+				assert.EqualValues(t, 3, e.writeQuorum)
+			},
 		},
 		{
-			name:     "WithReadQuorum",
-			option:   WithReadQuorum(3),
-			expected: Engine{readQuorum: 3},
+			name:   "WithReadQuorum",
+			option: WithReadQuorum(3),
+			check: func(t *testing.T, e *Engine) {
+				assert.EqualValues(t, 3, e.readQuorum)
+			},
 		},
 		{
-			name:     "WithTLS",
-			option:   WithTLS(tlsConfig, tlsConfig),
-			expected: Engine{serverTLS: tlsConfig, clientTLS: tlsConfig},
+			name:   "WithTLS",
+			option: WithTLS(tlsConfig, tlsConfig),
+			check: func(t *testing.T, e *Engine) {
+				assert.Equal(t, tlsConfig, e.serverTLS)
+				assert.Equal(t, tlsConfig, e.clientTLS)
+			},
 		},
 		{
-			name:     "WithStorageSize",
-			option:   WithTableSize(size),
-			expected: Engine{tableSize: size},
+			name:   "WithStorageSize",
+			option: WithTableSize(size),
+			check: func(t *testing.T, e *Engine) {
+				assert.Equal(t, size, e.tableSize)
+			},
 		},
 		{
-			name:     "WithBootstrapTimeout",
-			option:   WithBootstrapTimeout(3),
-			expected: Engine{bootstrapTimeout: 3},
+			name:   "WithBootstrapTimeout",
+			option: WithBootstrapTimeout(time.Second),
+			check: func(t *testing.T, e *Engine) {
+				assert.Equal(t, time.Second, e.bootstrapTimeout)
+			},
 		},
 		{
-			name:     "WithCacheSyncInterval",
-			option:   WithCacheSyncInterval(3),
-			expected: Engine{cacheSyncInterval: 3},
+			name:   "WithCacheSyncInterval",
+			option: WithCacheSyncInterval(time.Second),
+			check: func(t *testing.T, e *Engine) {
+				assert.Equal(t, time.Second, e.cacheSyncInterval)
+			},
 		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			var cl Engine
-			tc.option.Apply(&cl)
-			assert.Equal(t, tc.expected, cl)
+			var eng Engine
+			tc.option.Apply(&eng)
+			tc.check(t, &eng)
 		})
 	}
 }

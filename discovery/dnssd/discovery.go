@@ -33,6 +33,7 @@ import (
 	"go.uber.org/atomic"
 
 	"github.com/tochemey/goakt/v3/discovery"
+	"github.com/tochemey/goakt/v3/internal/locker"
 )
 
 const (
@@ -44,6 +45,7 @@ const (
 // IP addresses are looked up by querying the default
 // DNS resolver for A and AAAA records associated with the DNS name.
 type Discovery struct {
+	_      locker.NoCopy
 	mu     sync.Mutex
 	config *Config
 

@@ -41,10 +41,12 @@ import (
 	"k8s.io/client-go/rest"
 
 	"github.com/tochemey/goakt/v3/discovery"
+	"github.com/tochemey/goakt/v3/internal/locker"
 )
 
 // Discovery represents the kubernetes discovery
 type Discovery struct {
+	_      locker.NoCopy
 	config *Config
 	client kubernetes.Interface
 	mu     sync.Mutex

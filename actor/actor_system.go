@@ -67,6 +67,7 @@ import (
 	"github.com/tochemey/goakt/v3/internal/eventstream"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/internalpb/internalpbconnect"
+	"github.com/tochemey/goakt/v3/internal/locker"
 	"github.com/tochemey/goakt/v3/internal/network"
 	"github.com/tochemey/goakt/v3/internal/registry"
 	"github.com/tochemey/goakt/v3/internal/ticker"
@@ -580,6 +581,7 @@ type ActorSystem interface {
 // ActorSystem represent a collection of actors on a given node
 // Only a single instance of the ActorSystem can be created on a given node
 type actorSystem struct {
+	_ locker.NoCopy
 	// hold the actors tree in the system
 	actors *tree
 

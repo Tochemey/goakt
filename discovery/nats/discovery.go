@@ -38,11 +38,13 @@ import (
 
 	"github.com/tochemey/goakt/v3/discovery"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
+	"github.com/tochemey/goakt/v3/internal/locker"
 	"github.com/tochemey/goakt/v3/log"
 )
 
 // Discovery represents the kubernetes discovery
 type Discovery struct {
+	_      locker.NoCopy
 	config *Config
 	mu     sync.Mutex
 

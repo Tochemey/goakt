@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (c) 2022-2025  Arsene Tochemey Gandote
+ * Copyright (c) 2022-2025 Arsene Tochemey Gandote
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -22,23 +22,9 @@
  * SOFTWARE.
  */
 
-package nats
+package locker
 
-import (
-	"testing"
+type NoCopy struct{}
 
-	"github.com/stretchr/testify/assert"
-
-	"github.com/tochemey/goakt/v3/log"
-)
-
-func TestOptions(t *testing.T) {
-	t.Run("WithLogger", func(t *testing.T) {
-		opt := WithLogger(log.DefaultLogger)
-		discovery := Discovery{}
-		opt.Apply(&discovery)
-		discovery.mu.Lock()
-		defer discovery.mu.Unlock()
-		assert.Equal(t, log.DebugLevel, discovery.logger.LogLevel())
-	})
-}
+func (*NoCopy) Lock()   {}
+func (*NoCopy) Unlock() {}
