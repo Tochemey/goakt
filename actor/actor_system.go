@@ -36,6 +36,7 @@ import (
 	"os/signal"
 	"regexp"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -668,10 +669,13 @@ type actorSystem struct {
 	relocationEnabled atomic.Bool
 	extensions        *collection.Map[string, extension.Extension]
 
-	spawnOnNext  *atomic.Uint32
-	shuttingDown *atomic.Bool
-	grainsQueue  chan *internalpb.Grain
-	grains       *collection.Map[string, *grainPID]
+	spawnOnNext      *atomic.Uint32
+	shuttingDown     *atomic.Bool
+	grainsQueue      chan *internalpb.Grain
+	grains           *collection.Map[string, *grainPID]
+	evictionStrategy *EvictionStrategy
+	evictionInterval time.Duration
+	evictionStopSig  chan registry.Unit
 }
 
 var (
@@ -897,6 +901,7 @@ func (x *actorSystem) Start(ctx context.Context) error {
 	}
 
 	x.startMessagesScheduler(ctx)
+	x.startEviction()
 	x.started.Store(true)
 	x.starting.Store(false)
 	x.startedAt.Store(time.Now().Unix())
@@ -2530,6 +2535,13 @@ func (x *actorSystem) startMessagesScheduler(ctx context.Context) {
 	x.scheduler.Start(ctx)
 }
 
+// startEviction starts the eviction process for the actor system
+func (x *actorSystem) startEviction() {
+	if x.evictionStrategy != nil {
+		go x.evictionLoop()
+	}
+}
+
 func (x *actorSystem) ensureTLSProtos() {
 	if x.serverTLS != nil && x.clientTLS != nil {
 		// ensure that the required protocols are set for the TLS
@@ -2585,6 +2597,10 @@ func (x *actorSystem) shutdown(ctx context.Context) error {
 	defer func() {
 		x.reset()
 	}()
+
+	if x.evictionStrategy != nil {
+		close(x.evictionStopSig)
+	}
 
 	if x.scheduler != nil {
 		x.scheduler.Stop(ctx)
@@ -3455,6 +3471,97 @@ func (x *actorSystem) runShutdownHooks(ctx context.Context) (err error) {
 		return multierr.Combine(errs...)
 	}
 	return nil
+}
+
+// evictionLoop starts the system wide eviction loop
+func (x *actorSystem) evictionLoop() {
+	x.logger.Info("start the system wide eviction loop", x.Name())
+	x.logger.Infof("%s eviction policy %s", x.Name(), x.evictionStrategy.String())
+	var clock *ticker.Ticker
+	tickerStopSig := make(chan registry.Unit, 1)
+	clock = ticker.New(x.evictionInterval)
+	clock.Start()
+
+	go func() {
+		for {
+			select {
+			case <-clock.Ticks:
+				x.runEviction()
+			case <-x.evictionStopSig:
+				tickerStopSig <- registry.Unit{}
+				return
+			}
+		}
+	}()
+
+	<-tickerStopSig
+	clock.Stop()
+	x.logger.Info("the system wide eviction loop stopped", x.Name())
+}
+
+// runEviction returns the eviction function based on the eviction strategy
+func (x *actorSystem) runEviction() {
+	ctx := context.Background()
+	var actors []*PID
+	switch x.evictionStrategy.Policy() {
+	case LRU:
+		actors = x.getLRUActors(x.evictionStrategy.Limit())
+	case LFU:
+		actors = x.getLFUActors(x.evictionStrategy.Limit())
+	case MRU:
+		actors = x.getMRUActors(x.evictionStrategy.Limit())
+	default:
+	}
+
+	for _, actor := range actors {
+		if err := actor.Shutdown(ctx); err != nil {
+			x.logger.Errorf("%s failed to shutdown: %w", actor.Name(), err)
+		}
+	}
+}
+
+// getLRUActors returns the least recently used actors
+func (x *actorSystem) getLRUActors(limit uint64) []*PID {
+	total := x.NumActors()
+	if limit <= total {
+		return nil
+	}
+
+	actors := x.Actors()
+	sort.SliceStable(actors, func(i, j int) bool {
+		return actors[i].LatestActivityTime().Unix() < actors[j].LatestActivityTime().Unix()
+	})
+
+	return actors[:limit]
+}
+
+// getMRUActors returns the most recently used actors
+func (x *actorSystem) getMRUActors(limit uint64) []*PID {
+	total := x.NumActors()
+	if limit <= total {
+		return nil
+	}
+
+	actors := x.Actors()
+	sort.SliceStable(actors, func(i, j int) bool {
+		return actors[i].LatestActivityTime().Unix() > actors[j].LatestActivityTime().Unix()
+	})
+
+	return actors[:limit]
+}
+
+// getLFUActors returns the least frequently used actors
+func (x *actorSystem) getLFUActors(limit uint64) []*PID {
+	total := x.NumActors()
+	if limit <= total {
+		return nil
+	}
+
+	actors := x.Actors()
+	sort.SliceStable(actors, func(i, j int) bool {
+		return actors[i].ProcessedCount() < actors[j].ProcessedCount()
+	})
+	return actors[:limit]
 }
 
 func runWithRetry(ctx context.Context, hook ShutdownHook, sys *actorSystem, recovery *ShutdownHookRecovery) error {

@@ -29,6 +29,8 @@ import (
 	"fmt"
 
 	"connectrpc.com/connect"
+
+	"github.com/tochemey/goakt/v3/passivation"
 )
 
 var (
@@ -154,7 +156,18 @@ var (
 
 	// ErrUnhanledMessage is returned when a message is received that the actor/grain does not know how to handle.
 	ErrUnhanledMessage = errors.New("unhandled message")
+
+	// ErrInvalidPassivationStrategy is returned when an invalid passivation strategy is specified.
+	ErrInvalidPassivationStrategy = errors.New("invalid passivation strategy, must be one of: 'time-based', 'messages-count-based', or 'long-lived'")
+
+	// ErrInvalidEvictionPolicy is returned when an invalid eviction policy is specified.
+	ErrInvalidEvictionPolicy = errors.New("invalid eviction policy")
 )
+
+// NewErrInvalidPassivationStrategy formats an error with ErrInvalidPassivationStrategy
+func NewErrInvalidPassivationStrategy(strategy passivation.Strategy) error {
+	return fmt.Errorf("passivation strategy=(%s) %w", strategy.String(), ErrInvalidPassivationStrategy)
+}
 
 // NewErrUnhandledMessage wraps a base error with ErrUnhanledMessage to indicate an unhandled message.
 func NewErrUnhandledMessage(err error) error {

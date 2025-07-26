@@ -159,3 +159,24 @@ func TestWithExtensions(t *testing.T) {
 	opt.Apply(system)
 	require.NotEmpty(t, system.extensions)
 }
+
+func TestWithEvictionStrategy(t *testing.T) {
+	t.Run("When strategy is nil", func(t *testing.T) {
+		system := new(actorSystem)
+		opt := WithEvictionStrategy(nil, time.Second)
+		opt.Apply(system)
+
+		assert.Nil(t, system.evictionStrategy)
+	})
+	t.Run("When strategy is not nil", func(t *testing.T) {
+		system := new(actorSystem)
+		strategy, err := NewEvictionStrategy(10, LRU)
+		require.NoError(t, err)
+		opt := WithEvictionStrategy(strategy, time.Second)
+		opt.Apply(system)
+
+		assert.Equal(t, strategy, system.evictionStrategy)
+		assert.EqualValues(t, 10, system.evictionStrategy.Limit())
+		assert.Equal(t, LRU, system.evictionStrategy.Policy())
+	})
+}

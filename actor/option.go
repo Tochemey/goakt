@@ -227,3 +227,30 @@ func WithExtensions(extensions ...extension.Extension) Option {
 		}
 	})
 }
+
+// WithEvictionStrategy configures the actor system to use the specified eviction strategy
+// and sets the interval at which the eviction engine runs.
+//
+// The eviction strategy defines how the system passivates (deactivates) actors
+// when the number of active actors exceeds the configured limit. It determines
+// which actors to remove from memory based on their usage patterns (e.g., LRU, LFU, MRU).
+//
+// The `interval` parameter controls how frequently the eviction engine evaluates
+// and passivates actors. A shorter interval results in more aggressive cleanup,
+// while a longer interval conserves resources but may retain inactive actors longer.
+//
+// If the provided strategy is nil, no changes are applied.
+//
+// Example:
+//
+//	strategy := NewEvictionStrategy(1000, LRU)
+//	system := NewActorSystem(WithEvictionStrategy(strategy, 5*time.Second))
+func WithEvictionStrategy(strategy *EvictionStrategy, interval time.Duration) Option {
+	return OptionFunc(func(system *actorSystem) {
+		if strategy == nil {
+			return
+		}
+		system.evictionStrategy = strategy
+		system.evictionInterval = interval
+	})
+}
