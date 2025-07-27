@@ -28,6 +28,7 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
+	"fmt"
 	"net"
 	"reflect"
 	"strconv"
@@ -2552,5 +2553,170 @@ func TestActorSystem(t *testing.T) {
 
 		// shutdown the nats server gracefully
 		srv.Shutdown()
+	})
+	t.Run("With LRU eviction policy with threshold kept rather than percentage", func(t *testing.T) {
+		ctx := context.TODO()
+		strategy, _ := NewEvictionStrategy(7, LRU, 10)
+		actorSystem, _ := NewActorSystem("testSys",
+			WithLogger(log.DiscardLogger),
+			WithEvictionStrategy(strategy, time.Second))
+
+		require.NoError(t, actorSystem.Start(ctx))
+
+		// this is to make sure the actor system is started properly in the test
+		pause.For(time.Second)
+
+		// let us create some actors
+		for i := range 10 {
+			actorName := fmt.Sprintf("actor-%d", i)
+			_, err := actorSystem.Spawn(ctx, actorName, NewMockActor(), WithLongLived())
+			require.NoError(t, err)
+		}
+
+		// let us send a message to the last actor
+		actorName := "actor-3"
+		pid, err := actorSystem.LocalActor(actorName)
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+		err = Tell(ctx, pid, new(testpb.TestSend))
+		require.NoError(t, err)
+
+		pause.For(time.Second)
+
+		require.Exactly(t, uint64(7), actorSystem.NumActors())
+		require.NoError(t, actorSystem.Stop(ctx))
+	})
+	t.Run("With LRU eviction policy with percentage based eviction", func(t *testing.T) {
+		ctx := context.TODO()
+		strategy, _ := NewEvictionStrategy(7, LRU, 50)
+		actorSystem, _ := NewActorSystem("testSys",
+			WithLogger(log.DiscardLogger),
+			WithEvictionStrategy(strategy, time.Second))
+
+		require.NoError(t, actorSystem.Start(ctx))
+
+		// this is to make sure the actor system is started properly in the test
+		pause.For(time.Second)
+
+		// let us create some actors
+		for i := range 10 {
+			actorName := fmt.Sprintf("actor-%d", i)
+			_, err := actorSystem.Spawn(ctx, actorName, NewMockActor(), WithLongLived())
+			require.NoError(t, err)
+		}
+
+		// let us send a message to the last actor
+		actorName := "actor-3"
+		pid, err := actorSystem.LocalActor(actorName)
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+		err = Tell(ctx, pid, new(testpb.TestSend))
+		require.NoError(t, err)
+
+		pause.For(time.Second)
+
+		require.Exactly(t, uint64(5), actorSystem.NumActors())
+		require.NoError(t, actorSystem.Stop(ctx))
+	})
+
+	t.Run("With LFU eviction policy with threshold met", func(t *testing.T) {
+		ctx := context.TODO()
+		strategy, _ := NewEvictionStrategy(7, LFU, 10)
+		actorSystem, _ := NewActorSystem("testSys",
+			WithLogger(log.DiscardLogger),
+			WithEvictionStrategy(strategy, time.Second))
+
+		require.NoError(t, actorSystem.Start(ctx))
+
+		// this is to make sure the actor system is started properly in the test
+		pause.For(time.Second)
+
+		// let us create some actors
+		for i := range 10 {
+			actorName := fmt.Sprintf("actor-%d", i)
+			_, err := actorSystem.Spawn(ctx, actorName, NewMockActor(), WithLongLived())
+			require.NoError(t, err)
+		}
+
+		// let us send a message to the last actor
+		actorName := "actor-3"
+		pid, err := actorSystem.LocalActor(actorName)
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+		err = Tell(ctx, pid, new(testpb.TestSend))
+		require.NoError(t, err)
+
+		pause.For(time.Second)
+
+		require.Exactly(t, uint64(7), actorSystem.NumActors())
+
+		require.NoError(t, actorSystem.Stop(ctx))
+	})
+
+	t.Run("With LFU eviction policy with percentage-based eviction", func(t *testing.T) {
+		ctx := context.TODO()
+		strategy, _ := NewEvictionStrategy(7, LFU, 50)
+		actorSystem, _ := NewActorSystem("testSys",
+			WithLogger(log.DiscardLogger),
+			WithEvictionStrategy(strategy, time.Second))
+
+		require.NoError(t, actorSystem.Start(ctx))
+
+		// this is to make sure the actor system is started properly in the test
+		pause.For(time.Second)
+
+		// let us create some actors
+		for i := range 10 {
+			actorName := fmt.Sprintf("actor-%d", i)
+			_, err := actorSystem.Spawn(ctx, actorName, NewMockActor(), WithLongLived())
+			require.NoError(t, err)
+		}
+
+		// let us send a message to the last actor
+		actorName := "actor-3"
+		pid, err := actorSystem.LocalActor(actorName)
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+		err = Tell(ctx, pid, new(testpb.TestSend))
+		require.NoError(t, err)
+
+		pause.For(time.Second)
+
+		require.Exactly(t, uint64(5), actorSystem.NumActors())
+
+		require.NoError(t, actorSystem.Stop(ctx))
+	})
+	t.Run("With MRU eviction policy with percentage-based eviction", func(t *testing.T) {
+		ctx := context.TODO()
+		strategy, _ := NewEvictionStrategy(7, MRU, 50)
+		actorSystem, _ := NewActorSystem("testSys",
+			WithLogger(log.DiscardLogger),
+			WithEvictionStrategy(strategy, time.Second))
+
+		require.NoError(t, actorSystem.Start(ctx))
+
+		// this is to make sure the actor system is started properly in the test
+		pause.For(time.Second)
+
+		// let us create some actors
+		for i := range 10 {
+			actorName := fmt.Sprintf("actor-%d", i)
+			_, err := actorSystem.Spawn(ctx, actorName, NewMockActor(), WithLongLived())
+			require.NoError(t, err)
+		}
+
+		// let us send a message to the last actor
+		actorName := "actor-3"
+		pid, err := actorSystem.LocalActor(actorName)
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+		err = Tell(ctx, pid, new(testpb.TestSend))
+		require.NoError(t, err)
+
+		pause.For(time.Second)
+
+		require.Exactly(t, uint64(5), actorSystem.NumActors())
+
+		require.NoError(t, actorSystem.Stop(ctx))
 	})
 }

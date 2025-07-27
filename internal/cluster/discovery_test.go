@@ -45,7 +45,7 @@ func TestDiscoveryProvider(t *testing.T) {
 			On("Initialize").Return(nil)
 		wrapper := &discoveryProvider{
 			provider: provider,
-			log:      log.DefaultLogger.StdLogger(),
+			log:      log.DebugLogger.StdLogger(),
 		}
 
 		err := wrapper.Initialize()
@@ -59,7 +59,7 @@ func TestDiscoveryProvider(t *testing.T) {
 			On("Initialize").Return(errors.New("failed"))
 		wrapper := &discoveryProvider{
 			provider: provider,
-			log:      log.DefaultLogger.StdLogger(),
+			log:      log.DebugLogger.StdLogger(),
 		}
 
 		err := wrapper.Initialize()
@@ -73,7 +73,7 @@ func TestDiscoveryProvider(t *testing.T) {
 			On("Initialize").Return(discovery.ErrAlreadyInitialized)
 		wrapper := &discoveryProvider{
 			provider: provider,
-			log:      log.DefaultLogger.StdLogger(),
+			log:      log.DebugLogger.StdLogger(),
 		}
 
 		err := wrapper.Initialize()
@@ -92,7 +92,7 @@ func TestDiscoveryProvider(t *testing.T) {
 		// create the instance of the wrapper
 		wrapper := &discoveryProvider{
 			provider: provider,
-			log:      log.DefaultLogger.StdLogger(),
+			log:      log.DebugLogger.StdLogger(),
 		}
 		// set the options
 		err := wrapper.SetConfig(options)
@@ -108,7 +108,7 @@ func TestDiscoveryProvider(t *testing.T) {
 		// create the instance of the wrapper
 		wrapper := &discoveryProvider{
 			provider: provider,
-			log:      log.DefaultLogger.StdLogger(),
+			log:      log.DebugLogger.StdLogger(),
 		}
 		// set the options
 		err := wrapper.SetConfig(options)
@@ -127,7 +127,7 @@ func TestDiscoveryProvider(t *testing.T) {
 		// create the instance of the wrapper
 		wrapper := &discoveryProvider{
 			provider: provider,
-			log:      log.DefaultLogger.StdLogger(),
+			log:      log.DebugLogger.StdLogger(),
 		}
 		// set the options
 		err := wrapper.SetConfig(options)
@@ -143,7 +143,7 @@ func TestDiscoveryProvider(t *testing.T) {
 			On("Register").Return(nil)
 		wrapper := &discoveryProvider{
 			provider: provider,
-			log:      log.DefaultLogger.StdLogger(),
+			log:      log.DebugLogger.StdLogger(),
 		}
 
 		err := wrapper.Register()
@@ -154,7 +154,7 @@ func TestDiscoveryProvider(t *testing.T) {
 		// mock the underlying discovery provider
 		provider := new(testkit.Provider)
 		wrapper := &discoveryProvider{
-			log: log.DefaultLogger.StdLogger(),
+			log: log.DebugLogger.StdLogger(),
 		}
 
 		err := wrapper.Register()
@@ -168,7 +168,7 @@ func TestDiscoveryProvider(t *testing.T) {
 		provider.
 			On("Register").Return(errors.New("failed to register"))
 		wrapper := &discoveryProvider{
-			log:      log.DefaultLogger.StdLogger(),
+			log:      log.DebugLogger.StdLogger(),
 			provider: provider,
 		}
 
@@ -183,7 +183,7 @@ func TestDiscoveryProvider(t *testing.T) {
 			On("Deregister").Return(nil)
 		wrapper := &discoveryProvider{
 			provider: provider,
-			log:      log.DefaultLogger.StdLogger(),
+			log:      log.DebugLogger.StdLogger(),
 		}
 
 		err := wrapper.Deregister()
@@ -194,7 +194,7 @@ func TestDiscoveryProvider(t *testing.T) {
 		// mock the underlying discovery provider
 		provider := new(testkit.Provider)
 		wrapper := &discoveryProvider{
-			log: log.DefaultLogger.StdLogger(),
+			log: log.DebugLogger.StdLogger(),
 		}
 
 		err := wrapper.Deregister()
@@ -208,7 +208,7 @@ func TestDiscoveryProvider(t *testing.T) {
 		provider.
 			On("Deregister").Return(errors.New("failed to register"))
 		wrapper := &discoveryProvider{
-			log:      log.DefaultLogger.StdLogger(),
+			log:      log.DebugLogger.StdLogger(),
 			provider: provider,
 		}
 
@@ -229,7 +229,7 @@ func TestDiscoveryProvider(t *testing.T) {
 			On("DiscoverPeers").Return(addrs, nil)
 		wrapper := &discoveryProvider{
 			provider: provider,
-			log:      log.DefaultLogger.StdLogger(),
+			log:      log.DebugLogger.StdLogger(),
 		}
 
 		actual, err := wrapper.DiscoverPeers()
@@ -242,7 +242,7 @@ func TestDiscoveryProvider(t *testing.T) {
 		// mock the underlying discovery provider
 		provider := new(testkit.Provider)
 		wrapper := &discoveryProvider{
-			log: log.DefaultLogger.StdLogger(),
+			log: log.DebugLogger.StdLogger(),
 		}
 
 		actual, err := wrapper.DiscoverPeers()
@@ -257,7 +257,7 @@ func TestDiscoveryProvider(t *testing.T) {
 		provider.EXPECT().Close().Return(nil)
 		wrapper := &discoveryProvider{
 			provider: provider,
-			log:      log.DefaultLogger.StdLogger(),
+			log:      log.DebugLogger.StdLogger(),
 		}
 
 		err := wrapper.Close()

@@ -1293,6 +1293,15 @@ func (pid *PID) Logger() log.Logger {
 	return logger
 }
 
+// LatestActivityTime returns the timestamp of the last message received by the actor.
+// This value can be used for monitoring and health-check purposes to determine
+// if the actor is still active or has become idle.
+//
+// Note: The timestamp is updated whenever the actor receives a message.
+func (pid *PID) LatestActivityTime() time.Time {
+	return pid.latestReceiveTime.Load()
+}
+
 // doReceive pushes a given message to the actor mailbox
 // and signals the receiveLoop to process it
 func (pid *PID) doReceive(receiveCtx *ReceiveContext) {
@@ -1364,7 +1373,7 @@ func (pid *PID) handleReadinessProbe(received *ReceiveContext) {
 func (pid *PID) handleReceived(received *ReceiveContext) {
 	defer pid.recovery(received)
 	if behavior := pid.behaviorStack.Peek(); behavior != nil {
-		pid.latestReceiveTime.Store(time.Now())
+		pid.latestReceiveTime.Store(time.Now().UTC())
 		pid.processedCount.Inc()
 		behavior(received)
 	}

@@ -81,7 +81,7 @@ func TestNewSpawnConfig(t *testing.T) {
 	require.Nil(t, config.mailbox)
 }
 
-func TestSpawnConfigCase2(t *testing.T) {
+func TestSpawnConfig(t *testing.T) {
 	t.Run("With valid dependency", func(t *testing.T) {
 		config := &spawnConfig{}
 		dependency := NewMockDependency("id", "user", "email")
@@ -90,7 +90,7 @@ func TestSpawnConfigCase2(t *testing.T) {
 		require.Equal(t, &spawnConfig{dependencies: []extension.Dependency{dependency}}, config)
 	})
 	t.Run("With dependencies validation", func(t *testing.T) {
-		config := &spawnConfig{}
+		config := newSpawnConfig()
 		dependency := NewMockDependency("$omeN@me", "user", "email")
 		option := WithDependencies(dependency)
 		option.Apply(config)
@@ -109,5 +109,13 @@ func TestSpawnConfigCase2(t *testing.T) {
 		option := WithLongLived()
 		option.Apply(config)
 		require.IsType(t, new(passivation.LongLivedStrategy), config.passivationStrategy)
+	})
+	t.Run("With invalid passivation strategy", func(t *testing.T) {
+		config := newSpawnConfig()
+		option := WithPassivationStrategy(&MockInvalidPassivationStrategy{})
+		option.Apply(config)
+		err := config.Validate()
+		require.Error(t, err)
+		require.ErrorIs(t, err, ErrInvalidPassivationStrategy)
 	})
 }

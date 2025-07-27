@@ -77,8 +77,8 @@ func TestPIDOptions(t *testing.T) {
 		},
 		{
 			name:     "WithLogger",
-			option:   withCustomLogger(log.DefaultLogger),
-			expected: &PID{logger: log.DefaultLogger},
+			option:   withCustomLogger(log.DebugLogger),
+			expected: &PID{logger: log.DebugLogger},
 		},
 		{
 			name:     "WithSupervisor",

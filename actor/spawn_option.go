@@ -88,6 +88,15 @@ var _ validation.Validator = (*spawnConfig)(nil)
 //
 // Returns an error if any dependency has an invalid ID, otherwise returns nil.
 func (s *spawnConfig) Validate() error {
+	if s.passivationStrategy != nil {
+		switch s.passivationStrategy.(type) {
+		case *passivation.TimeBasedStrategy, *passivation.LongLivedStrategy, *passivation.MessagesCountBasedStrategy:
+			// pass
+		default:
+			return NewErrInvalidPassivationStrategy(s.passivationStrategy)
+		}
+	}
+
 	for _, dependency := range s.dependencies {
 		if dependency != nil {
 			if err := validation.NewIDValidator(dependency.ID()).Validate(); err != nil {

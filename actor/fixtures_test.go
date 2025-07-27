@@ -46,6 +46,7 @@ import (
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/pause"
 	"github.com/tochemey/goakt/v3/log"
+	"github.com/tochemey/goakt/v3/passivation"
 	"github.com/tochemey/goakt/v3/remote"
 	"github.com/tochemey/goakt/v3/test/data/testpb"
 )
@@ -1308,4 +1309,12 @@ func (m *MockShutdownHookWithoutRecovery) Execute(context.Context, ActorSystem) 
 
 func (m *MockShutdownHookWithoutRecovery) Recovery() *ShutdownHookRecovery {
 	return nil
+}
+
+type MockInvalidPassivationStrategy struct{}
+
+var _ passivation.Strategy = (*MockInvalidPassivationStrategy)(nil)
+
+func (x *MockInvalidPassivationStrategy) String() string {
+	return "MockInvalidPassivationStrategy"
 }

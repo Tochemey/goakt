@@ -56,9 +56,9 @@ func TestOptions(t *testing.T) {
 		},
 		{
 			name:   "WithLogger",
-			option: WithLogger(log.DefaultLogger),
+			option: WithLogger(log.DebugLogger),
 			check: func(t *testing.T, e *Engine) {
-				assert.Equal(t, log.DefaultLogger, e.logger)
+				assert.Equal(t, log.DebugLogger, e.logger)
 			},
 		},
 		{

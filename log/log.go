@@ -35,10 +35,23 @@ import (
 	"go.uber.org/zap/zapcore"
 )
 
-// DefaultLogger represents the default Log to use
-// This Log wraps zap under the hood
-var DefaultLogger = New(DebugLevel, os.Stdout)
-var DiscardLogger = New(DebugLevel, io.Discard)
+var (
+	// DebugLogger is a global logger configured to output messages at DebugLevel
+	// and above to os.Stdout. It is typically used for detailed development and
+	// debugging output.
+	DebugLogger = New(DebugLevel, os.Stdout)
+
+	// DiscardLogger is a global logger configured at DebugLevel, but its output
+	// is directed to io.Discard. This effectively mutes all log messages,
+	// making it useful for disabling logging in tests or production environments
+	// where specific loggers are not needed.
+	DiscardLogger = New(DebugLevel, io.Discard)
+
+	// DefaultLogger is a global logger configured to output messages at InfoLevel
+	// and above to os.Stdout. It serves as the standard logger for general
+	// informational messages in the application.
+	DefaultLogger = New(InfoLevel, os.Stdout)
+)
 
 // Log implements Logger interface with the underlying zap as
 // the underlying logging library
