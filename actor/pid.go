@@ -1287,9 +1287,9 @@ func (pid *PID) UnWatch(cid *PID) {
 
 // Logger returns the logger sets when creating the PID
 func (pid *PID) Logger() log.Logger {
-	pid.fieldsLocker.Lock()
+	pid.fieldsLocker.RLock()
 	logger := pid.logger
-	pid.fieldsLocker.Unlock()
+	pid.fieldsLocker.RUnlock()
 	return logger
 }
 
