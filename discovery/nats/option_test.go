@@ -34,7 +34,7 @@ import (
 
 func TestOptions(t *testing.T) {
 	t.Run("WithLogger", func(t *testing.T) {
-		opt := WithLogger(log.DefaultLogger)
+		opt := WithLogger(log.DebugLogger)
 		discovery := Discovery{}
 		opt.Apply(&discovery)
 		discovery.mu.Lock()

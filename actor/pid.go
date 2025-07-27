@@ -1373,7 +1373,7 @@ func (pid *PID) handleReadinessProbe(received *ReceiveContext) {
 func (pid *PID) handleReceived(received *ReceiveContext) {
 	defer pid.recovery(received)
 	if behavior := pid.behaviorStack.Peek(); behavior != nil {
-		pid.latestReceiveTime.Store(time.Now())
+		pid.latestReceiveTime.Store(time.Now().UTC())
 		pid.processedCount.Inc()
 		behavior(received)
 	}

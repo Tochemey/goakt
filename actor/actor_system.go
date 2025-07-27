@@ -577,6 +577,7 @@ type ActorSystem interface {
 	getRemoting() *Remoting
 	getGrains() *collection.Map[string, *grainPID]
 	recreateGrain(ctx context.Context, props *internalpb.Grain) error
+	decreaseActorsCounter()
 }
 
 // ActorSystem represent a collection of actors on a given node
@@ -756,6 +757,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		grainsQueue:         make(chan *internalpb.Grain, 10),
 		grains:              collection.NewMap[string, *grainPID](),
 		askTimeout:          DefaultAskTimeout,
+		evictionStopSig:     make(chan registry.Unit, 1),
 	}
 
 	system.relocationEnabled.Store(true)
@@ -1507,8 +1509,6 @@ func (x *actorSystem) Kill(ctx context.Context, name string) error {
 	pidNode, exist := x.actors.node(actorAddress.String())
 	if exist {
 		pid := pidNode.value()
-		// decrement the actors count since we are stopping the actor
-		x.actorsCounter.Dec()
 		return pid.Shutdown(ctx)
 	}
 
@@ -1557,7 +1557,7 @@ func (x *actorSystem) Actors() []*PID {
 	x.locker.RLock()
 	nodes := x.actors.nodes()
 	x.locker.RUnlock()
-	actors := make([]*PID, 0, len(nodes))
+	var actors []*PID
 	for _, node := range nodes {
 		pid := node.value()
 		if !isReservedName(pid.Name()) {
@@ -2251,6 +2251,11 @@ func (x *actorSystem) findRoutee(routeeName string) (*PID, bool) {
 // isShuttingDown checks whether the actor system is shutting down
 func (x *actorSystem) isShuttingDown() bool {
 	return x.shuttingDown.Load()
+}
+
+// decreaseActorsCounter implements ActorSystem.
+func (x *actorSystem) decreaseActorsCounter() {
+	x.actorsCounter.Dec()
 }
 
 // getRemoting returns the remoting instance of the actor system
@@ -3505,11 +3510,11 @@ func (x *actorSystem) runEviction() {
 	var actors []*PID
 	switch x.evictionStrategy.Policy() {
 	case LRU:
-		actors = x.getLRUActors(x.evictionStrategy.Limit())
+		actors = x.getLRUActors(x.evictionStrategy.Limit(), x.evictionStrategy.Percentage())
 	case LFU:
-		actors = x.getLFUActors(x.evictionStrategy.Limit())
+		actors = x.getLFUActors(x.evictionStrategy.Limit(), x.evictionStrategy.Percentage())
 	case MRU:
-		actors = x.getMRUActors(x.evictionStrategy.Limit())
+		actors = x.getMRUActors(x.evictionStrategy.Limit(), x.evictionStrategy.Percentage())
 	default:
 	}
 
@@ -3520,48 +3525,103 @@ func (x *actorSystem) runEviction() {
 	}
 }
 
-// getLRUActors returns the least recently used actors
-func (x *actorSystem) getLRUActors(limit uint64) []*PID {
+// getLRUActors identifies and returns the least recently used actors.
+// The LRU algorithm is triggered when the number of items reaches or exceeds the threshold.
+// It sorts items primarily by LatestActivityTime (ascending) and then by ProcessedCount (ascending)
+// to determine the least recently used.
+// percentageToReturn: The percentage of items to return (e.g., 20 for 20%).
+func (x *actorSystem) getLRUActors(threshold uint64, percentageToReturn int) []*PID {
 	total := x.NumActors()
-	if limit <= total {
+	if total <= threshold {
 		return nil
 	}
 
 	actors := x.Actors()
-	sort.SliceStable(actors, func(i, j int) bool {
-		return actors[i].LatestActivityTime().Unix() < actors[j].LatestActivityTime().Unix()
+	evictions := make([]*PID, len(actors))
+	copy(evictions, actors)
+
+	sort.Slice(evictions, func(i, j int) bool {
+		if evictions[i].LatestActivityTime().Unix() != evictions[j].LatestActivityTime().Unix() {
+			return evictions[i].LatestActivityTime().Unix() < evictions[j].LatestActivityTime().Unix()
+		}
+
+		return evictions[i].ProcessedCount() < evictions[j].ProcessedCount()
 	})
 
-	return actors[:limit]
+	evictionCount := computeEvictionCount(total, threshold, len(evictions), percentageToReturn)
+	return evictions[:evictionCount]
 }
 
-// getMRUActors returns the most recently used actors
-func (x *actorSystem) getMRUActors(limit uint64) []*PID {
+// getLFUActors identifies and returns the least frequently used actors
+// The LFU algorithm is triggered when the number of items reaches or exceeds the threshold.
+// It sorts actors primarily by ProcessedCount (ascending) and then by LatestActivityTime (ascending)
+// to determine the least frequently used.
+// percentageToReturn: The percentage of items to return (e.g., 20 for 20%).
+func (x *actorSystem) getLFUActors(threshold uint64, percentageToReturn int) []*PID {
 	total := x.NumActors()
-	if limit <= total {
+	if total <= threshold {
 		return nil
 	}
 
 	actors := x.Actors()
-	sort.SliceStable(actors, func(i, j int) bool {
-		return actors[i].LatestActivityTime().Unix() > actors[j].LatestActivityTime().Unix()
+	evictions := make([]*PID, len(actors))
+	copy(evictions, actors)
+
+	sort.Slice(evictions, func(i, j int) bool {
+		if evictions[i].ProcessedCount() != evictions[j].ProcessedCount() {
+			return evictions[i].ProcessedCount() < evictions[j].ProcessedCount()
+		}
+
+		return evictions[i].LatestActivityTime().Unix() < evictions[j].LatestActivityTime().Unix()
 	})
 
-	return actors[:limit]
+	evictionCount := computeEvictionCount(total, threshold, len(evictions), percentageToReturn)
+	return evictions[:evictionCount]
 }
 
-// getLFUActors returns the least frequently used actors
-func (x *actorSystem) getLFUActors(limit uint64) []*PID {
+// getMRUActors identifies and returns the most recently used actors.
+// The MRU algorithm is triggered when the number of actors reaches or exceeds the threshold.
+// It sorts items primarily by LatestActivityTime (descending) and then by ProcessedCount (descending)
+// to determine the most recently used.
+// percentageToReturn: The percentage of actors to return (e.g., 20 for 20%)
+func (x *actorSystem) getMRUActors(threshold uint64, percentageToReturn int) []*PID {
 	total := x.NumActors()
-	if limit <= total {
+	if total <= threshold {
 		return nil
 	}
 
 	actors := x.Actors()
-	sort.SliceStable(actors, func(i, j int) bool {
-		return actors[i].ProcessedCount() < actors[j].ProcessedCount()
+	evictions := make([]*PID, len(actors))
+	copy(evictions, actors)
+
+	sort.Slice(evictions, func(i, j int) bool {
+		if evictions[i].LatestActivityTime().Unix() != evictions[j].LatestActivityTime().Unix() {
+			return evictions[i].LatestActivityTime().Unix() > evictions[j].LatestActivityTime().Unix()
+		}
+
+		return evictions[i].ProcessedCount() > evictions[j].ProcessedCount()
 	})
-	return actors[:limit]
+
+	evictionCount := computeEvictionCount(total, threshold, len(evictions), percentageToReturn)
+	return evictions[:evictionCount]
+}
+
+func computeEvictionCount(total, threshold uint64, totalEvictions, percentageToReturn int) int {
+	requiredToEvict := int(total - threshold)
+	percentageBasedEvict := (totalEvictions * percentageToReturn) / 100
+	toReturn := maxInt(requiredToEvict, percentageBasedEvict)
+
+	// Ensure at least 1 item is returned if there are actors over the threshold
+	// and the percentage is non-zero, but the calculation resulted in 0.
+	if toReturn == 0 && requiredToEvict > 0 && percentageToReturn > 0 {
+		toReturn = 1
+	}
+
+	// Ensure toReturn does not exceed the total number of actors available
+	if toReturn > totalEvictions {
+		toReturn = totalEvictions
+	}
+	return toReturn
 }
 
 func runWithRetry(ctx context.Context, hook ShutdownHook, sys *actorSystem, recovery *ShutdownHookRecovery) error {
@@ -3589,4 +3649,12 @@ func getServer(ctx context.Context, address string) *stdhttp.Server {
 			return ctx
 		},
 	}
+}
+
+// maxInt returns the maximum of two integers. Helper for calculation.
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }

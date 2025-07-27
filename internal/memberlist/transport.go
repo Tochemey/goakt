@@ -388,7 +388,7 @@ func (t *Transport) tcpListen(tcpLn net.Listener) {
 
 func (t *Transport) debugLogger() log.Logger {
 	if t.config.DebugEnabled {
-		return log.DefaultLogger
+		return log.DebugLogger
 	}
 	return log.DiscardLogger
 }

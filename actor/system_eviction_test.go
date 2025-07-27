@@ -41,7 +41,7 @@ func TestEvictionPolicy(t *testing.T) {
 
 func TestEvictionStrategy(t *testing.T) {
 	t.Run("With valid eviction strategy", func(t *testing.T) {
-		strategy, err := NewEvictionStrategy(10, LRU)
+		strategy, err := NewEvictionStrategy(10, LRU, 1)
 		require.NoError(t, err)
 		require.NotNil(t, strategy)
 		require.Equal(t, LRU, strategy.Policy())
@@ -49,13 +49,13 @@ func TestEvictionStrategy(t *testing.T) {
 		require.EqualValues(t, 10, strategy.Limit())
 	})
 	t.Run("With invalid policy", func(t *testing.T) {
-		strategy, err := NewEvictionStrategy(1, EvictionPolicy(100))
+		strategy, err := NewEvictionStrategy(1, EvictionPolicy(100), 1)
 		require.Error(t, err)
 		require.ErrorIs(t, err, ErrInvalidEvictionPolicy)
 		require.Nil(t, strategy)
 	})
 	t.Run("With zero limit", func(t *testing.T) {
-		strategy, err := NewEvictionStrategy(0, LRU)
+		strategy, err := NewEvictionStrategy(0, LRU, 1)
 		require.Error(t, err)
 		require.Nil(t, strategy)
 	})

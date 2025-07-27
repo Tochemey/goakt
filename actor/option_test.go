@@ -62,9 +62,9 @@ func TestOption(t *testing.T) {
 		},
 		{
 			name:   "WithLogger",
-			option: WithLogger(log.DefaultLogger),
+			option: WithLogger(log.DebugLogger),
 			check: func(t *testing.T, sys *actorSystem) {
-				assert.Equal(t, log.DefaultLogger, sys.logger)
+				assert.Equal(t, log.DebugLogger, sys.logger)
 			},
 		},
 		{
@@ -170,7 +170,7 @@ func TestWithEvictionStrategy(t *testing.T) {
 	})
 	t.Run("When strategy is not nil", func(t *testing.T) {
 		system := new(actorSystem)
-		strategy, err := NewEvictionStrategy(10, LRU)
+		strategy, err := NewEvictionStrategy(10, LRU, 1)
 		require.NoError(t, err)
 		opt := WithEvictionStrategy(strategy, time.Second)
 		opt.Apply(system)

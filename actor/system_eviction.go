@@ -32,18 +32,27 @@ import "fmt"
 type EvictionPolicy int
 
 const (
-	// LRU (Least Recently Used) passivates actors that have not been accessed for the longest time when the number of active actors passes the specified limit.
+	// LRU (Least Recently Used) passivates actors that have not been accessed for the longest time
+	// when the number of active actors exceeds the specified limit. This policy is effective
+	// for scenarios where older, unused actors are likely to remain idle.
 	LRU EvictionPolicy = iota
 
-	// LFU (Least Frequently Used) passivates actors that have been used the least number of times when the number of active actors passes the specified limit
+	// LFU (Least Frequently Used) passivates actors that have been used the least number of times
+	// when the number of active actors exceeds the specified limit. This policy is suitable
+	// when you want to retain actors that are consistently in use, even if they were accessed
+	// a while ago.
 	LFU
 
-	// MRU (Most Recently Used) passivates actors that were accessed most recently when the number of active actors passes the specified limit.
+	// MRU (Most Recently Used) passivates actors that were accessed most recently
+	// when the number of active actors exceeds the specified limit. While less common
+	// for general resource management, MRU can be useful in specific scenarios
+	// where fresh data is prioritized, and older, less volatile data can be evicted.
 	MRU
 )
 
-// String returns the string representation of the EvictionPolicy.
-// It satisfies the fmt.Stringer interface.
+// String returns the string representation of the EvictionPolicy (e.g., "LRU", "LFU", "MRU").
+// This method makes EvictionPolicy compatible with the fmt.Stringer interface,
+// allowing for easy printing and logging.
 func (x EvictionPolicy) String() string {
 	switch x {
 	case LRU:
@@ -57,14 +66,15 @@ func (x EvictionPolicy) String() string {
 	}
 }
 
-// EvictionStrategy implements a system configurable actor passivation policy,
-// limiting the number of active actors based on usage patterns.
+// EvictionStrategy implements a system-configurable actor passivation policy,
+// limiting the number of active actors based on their usage patterns.
 //
-// The strategy consists of a chosen eviction policy (LRU, LFU, MRU) and
-// a limit, which specifies the maximum number of actors that can remain active.
+// An EvictionStrategy combines a chosen EvictionPolicy (LRU, LFU, or MRU)
+// with a defined limit and a percentage of actors to passivate.
 type EvictionStrategy struct {
-	limit  uint64
-	policy EvictionPolicy
+	limit      uint64
+	policy     EvictionPolicy
+	percentage int
 }
 
 // String returns a human-readable summary of the EvictionStrategy configuration.
@@ -73,41 +83,63 @@ func (x *EvictionStrategy) String() string {
 	return fmt.Sprintf("EvictionStrategy(limit=%d, policy=%s)", x.limit, x.policy)
 }
 
-// NewEvictionStrategy constructs a new EvictionStrategy instance using the provided
-// actor limit and eviction policy.
+// NewEvictionStrategy constructs and initializes a new EvictionStrategy instance.
+// This function acts as a factory for creating valid eviction strategies.
 //
 // Parameters:
-//   - limit: The number of active actors limit before passivation begins.
-//   - policy: The eviction policy to apply (LRU, LFU, or MRU).
+//   - limit: The maximum number of actors that can remain active. Once this limit
+//     is exceeded, the passivation process begins according to the chosen policy.
+//     Must be greater than zero.
+//   - policy: The EvictionPolicy to apply (LRU, LFU, or MRU). This determines
+//     which actors are selected for passivation.
+//   - percentage: An integer representing the percentage of actors to passivate
+//     when the limit is reached. This value will be clamped
+//     between 0 and 100, inclusive.
 //
 // Returns:
-//   - A pointer to the initialized EvictionStrategy.
-//   - An error if the limit is non-positive or the policy is invalid.
-func NewEvictionStrategy(limit uint64, policy EvictionPolicy) (*EvictionStrategy, error) {
+//   - *EvictionStrategy: A pointer to the newly initialized EvictionStrategy instance.
+//   - error: An error if the provided 'limit' is zero or if the 'policy' is invalid.
+func NewEvictionStrategy(limit uint64, policy EvictionPolicy, percentage int) (*EvictionStrategy, error) {
 	if limit == 0 {
 		return nil, fmt.Errorf("limit must be greater than zero, got %d", limit)
 	}
 
+	// Ensure percentage is within a valid range [0, 100].
+	if percentage < 0 {
+		percentage = 0
+	} else if percentage > 100 {
+		percentage = 100
+	}
+
 	switch policy {
 	case LRU, LFU, MRU:
-		// Valid policy
+		// Valid policy, proceed with creation.
 	default:
+		// ErrInvalidEvictionPolicy should be a pre-defined error constant.
 		return nil, ErrInvalidEvictionPolicy
 	}
 
 	return &EvictionStrategy{
-		limit:  limit,
-		policy: policy,
+		limit:      limit,
+		policy:     policy,
+		percentage: percentage,
 	}, nil
 }
 
-// Limit returns the number of active actors limit configured for this EvictionStrategy.
+// Limit returns the maximum number of active actors allowed before passivation is triggered.
 func (x *EvictionStrategy) Limit() uint64 {
 	return x.limit
 }
 
-// Policy returns the configured EvictionPolicy (LRU, LFU, or MRU) used
-// by this strategy instance.
+// Policy returns the specific EvictionPolicy (LRU, LFU, or MRU) configured
+// for this strategy instance.
 func (x *EvictionStrategy) Policy() EvictionPolicy {
 	return x.policy
+}
+
+// Percentage returns the percentage of actors that should be passivated
+// when the system exceeds the defined active actor limit. This value is guaranteed
+// to be between 0 and 100, inclusive.
+func (x *EvictionStrategy) Percentage() int {
+	return x.percentage
 }
