@@ -14,10 +14,10 @@ require (
 	github.com/hashicorp/memberlist v0.5.3
 	github.com/kapetan-io/tackle v0.12.0
 	github.com/nats-io/nats-server/v2 v2.11.6
-	github.com/nats-io/nats.go v1.43.0
+	github.com/nats-io/nats.go v1.44.0
 	github.com/panjf2000/ants/v2 v2.11.3
 	github.com/redis/go-redis/v9 v9.11.0
-	github.com/reugn/go-quartz v0.14.0
+	github.com/reugn/go-quartz v0.15.0
 	github.com/stretchr/testify v1.10.0
 	github.com/tochemey/olric v0.2.3
 	github.com/travisjeffery/go-dynaport v1.0.0
@@ -30,9 +30,9 @@ require (
 	golang.org/x/net v0.42.0
 	golang.org/x/sync v0.16.0
 	google.golang.org/protobuf v1.36.6
-	k8s.io/api v0.33.2
-	k8s.io/apimachinery v0.33.2
-	k8s.io/client-go v0.33.2
+	k8s.io/api v0.33.3
+	k8s.io/apimachinery v0.33.3
+	k8s.io/client-go v0.33.3
 )
 
 require (
