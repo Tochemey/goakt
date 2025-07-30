@@ -23,7 +23,7 @@ RUN go install connectrpc.com/connect/cmd/protoc-gen-connect-go@latest
 
 # install linter
 # binary will be $(go env GOPATH)/bin/golangci-lint
-RUN curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v2.2.1
+RUN curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v2.2.2
 RUN ls -la $(which golangci-lint)
 
 RUN go install github.com/ory/go-acc@latest
