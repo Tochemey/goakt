@@ -1208,6 +1208,38 @@ func TestActorSystem(t *testing.T) {
 		err = newActorSystem.Stop(ctx)
 		assert.NoError(t, err)
 	})
+	t.Run("With SpawnNamedFromFunc when actor name is invalid", func(t *testing.T) {
+		ctx := context.TODO()
+		ports := dynaport.Get(1)
+
+		logger := log.DiscardLogger
+		host := "127.0.0.1"
+
+		newActorSystem, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, ports[0])))
+
+		require.NoError(t, err)
+
+		// start the actor system
+		err = newActorSystem.Start(ctx)
+		require.NoError(t, err)
+
+		receiveFn := func(_ context.Context, message proto.Message) error {
+			expected := &testpb.Reply{Content: "test spawn from func"}
+			assert.True(t, proto.Equal(expected, message))
+			return nil
+		}
+
+		actorName := strings.Repeat("a", 256)
+		actorRef, err := newActorSystem.SpawnNamedFromFunc(ctx, actorName, receiveFn)
+		assert.Error(t, err)
+		assert.Nil(t, actorRef)
+
+		err = newActorSystem.Stop(ctx)
+		assert.NoError(t, err)
+	})
 	t.Run("With SpawnFromFunc (cluster/remote enabled)", func(t *testing.T) {
 		ctx := context.TODO()
 		nodePorts := dynaport.Get(3)
@@ -2427,6 +2459,47 @@ func TestActorSystem(t *testing.T) {
 		// shutdown the nats server gracefully
 		srv.Shutdown()
 	})
+	t.Run("SpawnOn when actor system not started", func(t *testing.T) {
+		// create a context
+		ctx := context.TODO()
+
+		actorSystem, _ := NewActorSystem("testSys",
+			WithLogger(log.DiscardLogger))
+
+		// create an actor on node1
+		actor := NewMockActor()
+		actorName := "actorID"
+		err := actorSystem.SpawnOn(ctx, actorName, actor)
+		require.Error(t, err)
+		require.ErrorIs(t, err, ErrActorSystemNotStarted)
+	})
+	t.Run("SpawnOn when actor name is invalid", func(t *testing.T) {
+		ctx := context.TODO()
+		logger := log.DiscardLogger
+
+		// create the actor system
+		actorSystem, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = actorSystem.Start(ctx)
+		assert.NoError(t, err)
+
+		pause.For(time.Second)
+
+		// create an actor on node1
+		actor := NewMockActor()
+		actorName := strings.Repeat("a", 256)
+		err = actorSystem.SpawnOn(ctx, actorName, actor)
+		require.Error(t, err)
+
+		err = actorSystem.Stop(ctx)
+		require.NoError(t, err)
+	})
 	t.Run("SpawnOn with random placement", func(t *testing.T) {
 		// create a context
 		ctx := context.TODO()
@@ -2618,7 +2691,6 @@ func TestActorSystem(t *testing.T) {
 		require.Exactly(t, uint64(5), actorSystem.NumActors())
 		require.NoError(t, actorSystem.Stop(ctx))
 	})
-
 	t.Run("With LFU eviction policy with threshold met", func(t *testing.T) {
 		ctx := context.TODO()
 		strategy, _ := NewEvictionStrategy(7, LFU, 10)
@@ -2652,7 +2724,6 @@ func TestActorSystem(t *testing.T) {
 
 		require.NoError(t, actorSystem.Stop(ctx))
 	})
-
 	t.Run("With LFU eviction policy with percentage-based eviction", func(t *testing.T) {
 		ctx := context.TODO()
 		strategy, _ := NewEvictionStrategy(7, LFU, 50)
@@ -2718,5 +2789,13 @@ func TestActorSystem(t *testing.T) {
 		require.Exactly(t, uint64(5), actorSystem.NumActors())
 
 		require.NoError(t, actorSystem.Stop(ctx))
+	})
+	t.Run("With ActorExists when system not started", func(t *testing.T) {
+		ctx := context.TODO()
+		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		exists, err := sys.ActorExists(ctx, "")
+		require.Error(t, err)
+		require.ErrorIs(t, err, ErrActorSystemNotStarted)
+		require.False(t, exists)
 	})
 }

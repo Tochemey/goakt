@@ -48,12 +48,9 @@ jobs:
       - name: Install dependencies
         run: |
           go mod download
-      - name: Install Ory go-acc dependency
-        run: |
-          go install github.com/ory/go-acc@latest
       - name: Run tests
         run: |
-          go-acc ./... -o coverage.out --ignore goaktpb,mocks,internal/internalpb,bench -- -mod=vendor -p 1 -timeout 0 -race -v
+          go test -mod=vendor -p 1 -timeout 0 -race -v -coverprofile=coverage.out -covermode=atomic -coverpkg=./... $(go list -mod=vendor ./... | grep -v -E "(goaktpb|mocks|internal/internalpb|bench)")
       - uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
