@@ -9,8 +9,8 @@ coverage:
         target: 80%    # the required coverage value
         base: auto
 ignore:
-  - "^goakt.pb.*"
   - "test"
   - "internal/internalpb"
   - "testkit"
   - "mocks"
+  - "goaktpb"
