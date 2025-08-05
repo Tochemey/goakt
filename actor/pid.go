@@ -369,34 +369,26 @@ func (pid *PID) Stop(ctx context.Context, cid *PID) error {
 		return ErrUndefinedActor
 	}
 
-	if !cid.IsRunning() {
+	// If the child is not running and not suspended, it's not found.
+	if !cid.IsRunning() && !cid.IsSuspended() {
 		return NewErrActorNotFound(cid.Address().String())
 	}
 
+	// Check if the child exists in the actor tree.
 	pid.fieldsLocker.RLock()
 	tree := pid.system.tree()
-	if _, ok := tree.node(cid.Address().String()); ok {
-		if err := cid.Shutdown(ctx); err != nil {
-			pid.fieldsLocker.RUnlock()
-			return err
-		}
+	_, exists := tree.node(cid.Address().String())
+	pid.fieldsLocker.RUnlock()
 
-		// remove the node from the tree and cluster
-		tree.deleteNode(cid)
-		if pid.system.InCluster() {
-			cluster := pid.system.getCluster()
-			if err := cluster.RemoveActor(context.WithoutCancel(ctx), cid.Name()); err != nil {
-				pid.fieldsLocker.RUnlock()
-				return fmt.Errorf("failed to cleanup actor=(%s) from cluster: %w", cid.Name(), err)
-			}
-		}
-
-		pid.fieldsLocker.RUnlock()
-		return nil
+	if !exists {
+		return NewErrActorNotFound(cid.Address().String())
 	}
 
-	pid.fieldsLocker.RUnlock()
-	return NewErrActorNotFound(cid.Address().String())
+	// Attempt to shutdown the child.
+	if err := cid.Shutdown(ctx); err != nil {
+		return err
+	}
+	return nil
 }
 
 // IsRunning returns true when the actor is alive ready to process messages and false
@@ -1543,7 +1535,7 @@ func (pid *PID) freeChildren(ctx context.Context) error {
 				logger.Debugf("parent=(%s) disowning descendant=(%s)", pid.Name(), child.Name())
 				pid.UnWatch(child)
 				node.descendants.Delete(child.ID())
-				if child.IsRunning() {
+				if child.IsSuspended() || child.IsRunning() {
 					if err := child.Shutdown(ctx); err != nil {
 						return fmt.Errorf("parent=(%s) failed to disown descendant=(%s): %w", pid.Name(), child.Name(), err)
 					}
