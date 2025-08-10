@@ -7,8 +7,6 @@ on:
       - "**/README.md"
       - "**/renovate.json5"
       - "**/scorecard.yml"
-  push:
-    branches: [main]
 
 permissions:
   contents: read
