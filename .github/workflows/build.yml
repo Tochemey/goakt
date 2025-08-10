@@ -56,29 +56,26 @@ jobs:
           set -euo pipefail
           SHARDS=3
           shard_id=${{ matrix.shard }}
-
-          # Identify heavy package
+          
           HEAVY_PKG="./actor"
-
-          # Get all packages except heavy one
+          
           ALL_PKGS=$(go list -mod=vendor ./... | grep -v "$HEAVY_PKG" | grep -v -E "(goaktpb|mocks|internal/internalpb)")
-
-          # Get all tests in heavy package
+          
           HEAVY_TESTS=$(go test -list . $HEAVY_PKG | grep ^Test || true)
           if [ -z "$HEAVY_TESTS" ]; then
-            echo "No tests found in $HEAVY_PKG"
-            exit 1
+          echo "No tests found in $HEAVY_PKG"
+          exit 1
           fi
-
-          # Assign heavy tests subset to this shard
+          
           HEAVY_SUBSET=$(echo "$HEAVY_TESTS" | awk "NR % $SHARDS == $((shard_id-1))" | paste -sd'|' -)
-
-          # Assign other packages round-robin
           OTHER_PKGS=$(echo "$ALL_PKGS" | awk "NR % $SHARDS == $((shard_id-1))")
-
+          
+          HEAVY_SUBSET_SAFE=$(echo "$HEAVY_SUBSET" | tr '\n' '|' | sed 's/"/\\"/g')
+          OTHER_PKGS_SAFE=$(echo "$OTHER_PKGS" | tr '\n' ' ' | sed 's/"/\\"/g')
+          
           echo "HEAVY_PKG=$HEAVY_PKG" >> $GITHUB_ENV
-          echo "HEAVY_SUBSET=$HEAVY_SUBSET" >> $GITHUB_ENV
-          echo "OTHER_PKGS=$OTHER_PKGS" >> $GITHUB_ENV
+          echo "HEAVY_SUBSET=$HEAVY_SUBSET_SAFE" >> $GITHUB_ENV
+          echo "OTHER_PKGS=$OTHER_PKGS_SAFE" >> $GITHUB_ENV
 
       - name: Run heavy package subset
         if: env.HEAVY_SUBSET != ''
