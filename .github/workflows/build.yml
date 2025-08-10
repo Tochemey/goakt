@@ -21,7 +21,7 @@ concurrency:
 
 jobs:
   # ---------------------
-  # Lint (fast feedback)
+  # Lint
   # ---------------------
   lint:
     name: Lint (Linux)
@@ -41,11 +41,88 @@ jobs:
           args: --timeout 10m --config .golangci.yml
 
   # ---------------------
-  # Tests on PRs (Linux only)
+  # Sharded Linux tests for PRs
   # ---------------------
-  test-pr:
+  test-linux-shards:
     if: github.event_name == 'pull_request'
-    name: Tests (Linux only)
+    name: Linux Test Shard ${{ matrix.shard }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3] # 3 parallel shards
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.5"
+          check-latest: true
+          cache-dependency-path: "**/*.sum"
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+      - name: Prepare test packages for shard
+        id: packages
+        run: |
+          PKGS=($(go list -mod=vendor ./... | grep -v -E "(goaktpb|mocks|internal/internalpb)"))
+          COUNT=${#PKGS[@]}
+          PER_SHARD=$(( (COUNT + 3 - 1) / 3 )) # ceiling division for 3 shards
+          START=$(( ( ${{ matrix.shard }} - 1 ) * PER_SHARD ))
+          SHARD_PKGS=("${PKGS[@]:START:PER_SHARD}")
+          echo "PKGS=${SHARD_PKGS[*]}" >> $GITHUB_ENV
+      - name: Vendoring and Tidy
+        run: go mod tidy && go mod vendor
+      - name: Install dependencies
+        run: go mod download
+      - name: Run shard tests
+        shell: bash
+        run: |
+          go test -mod=vendor -p 1 -timeout 0 -race -v \
+            -coverprofile=coverage.${{ matrix.shard }}.out \
+            -covermode=atomic -coverpkg=./... \
+            $PKGS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage-shard-${{ matrix.shard }}
+          path: coverage.${{ matrix.shard }}.out
+
+  # ---------------------
+  # Merge coverage & upload (PR)
+  # ---------------------
+  merge-coverage:
+    if: github.event_name == 'pull_request'
+    needs: [test-linux-shards]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: coverage
+      - name: Merge coverage files
+        run: |
+          echo "mode: atomic" > coverage.out
+          grep -h -v "^mode:" coverage/*/*.out >> coverage.out
+      - uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage.out
+          flags: linux
+          name: coverage-linux
+          fail_ci_if_error: false
+          verbose: true
+
+  # ---------------------
+  # Linux tests for main/nightly
+  # ---------------------
+  test-linux-main:
+    if: github.event_name != 'pull_request'
+    name: Tests (Linux - main/nightly)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -74,28 +151,23 @@ jobs:
           go test -mod=vendor -p 1 -timeout 0 -race -v \
             -coverprofile=coverage.out -covermode=atomic -coverpkg=./... \
             $(go list -mod=vendor ./... | grep -v -E "(goaktpb|mocks|internal/internalpb)")
-      - uses: codecov/codecov-action@v5
+      - uses: actions/upload-artifact@v4
         with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: ./coverage.out
-          flags: linux
-          name: coverage-linux
-          fail_ci_if_error: false
-          verbose: true
+          name: linux-coverage
+          path: coverage.out
 
   # ---------------------
-  # Full OS matrix (main & nightly only)
+  # macOS & Windows only if Linux passes
   # ---------------------
-  test-matrix:
+  test-other-os:
     if: github.event_name != 'pull_request'
+    needs: [test-linux-main]
     name: Tests on ${{ matrix.os }}
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: linux
-            runner: ubuntu-latest
           - os: macos
             runner: macos-13
           - os: windows
@@ -125,6 +197,4 @@ jobs:
         shell: bash
         run: |
           go test -mod=vendor -p 1 -timeout 0 -race -v \
-            -coverprofile=coverage.out -covermode=atomic -coverpkg=./... \
             $(go list -mod=vendor ./... | grep -v -E "(goaktpb|mocks|internal/internalpb)")
-
