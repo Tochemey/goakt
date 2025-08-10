@@ -16,14 +16,10 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Linux shards run first
+  # Linux tests run first
   tests-linux:
-    name: Linux Tests Shard ${{ matrix.shard }}
+    name: Linux Tests
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [1, 2, 3] # adjust number of shards here
     steps:
       - uses: actions/checkout@v4
         with:
@@ -33,7 +29,6 @@ jobs:
           go-version: "1.24.5"
           check-latest: true
           cache-dependency-path: "**/*.sum"
-
       - uses: actions/cache@v4
         with:
           path: |
@@ -46,45 +41,18 @@ jobs:
         run: go mod tidy && go mod vendor
 
       - name: Install dependencies
-        run: go mod download
-
-      - name: Prepare packages for this shard
-        id: shard-assign
         run: |
-          set -euo pipefail
-
-          SHARDS=3
-          shard_id=${{ matrix.shard }}
-
-          HEAVY_PKG="github.com/tochemey/goakt/v3/actor"
-
-          ALL_PKGS=$(go list -mod=vendor ./... | grep -v "$HEAVY_PKG" | grep -v -E "(goaktpb|mocks|internal/internalpb)")
-
-          if [ "$shard_id" -eq 1 ]; then
-            PACKAGES="$HEAVY_PKG"
-          else
-            shard_index=$((shard_id - 2))  # zero-based index for other shards
-            NUM_OTHER_SHARDS=$((SHARDS - 1))
-            PACKAGES=$(echo "$ALL_PKGS" | awk "NR % $NUM_OTHER_SHARDS == $shard_index")
-          fi
-
-          PACKAGES_SAFE=$(echo "$PACKAGES" | tr '\n' ' ' | sed 's/"/\\"/g')
-          echo "TEST_PKGS=$PACKAGES_SAFE" >> $GITHUB_ENV
-
-          echo "Shard $shard_id running packages:"
-          echo "$PACKAGES"
+          go mod download
 
       - name: Run tests
         shell: bash
         run: |
-          go test -mod=vendor -p 1 -timeout 0 -race -v -coverprofile=coverage.out -covermode=atomic -coverpkg=./... $TEST_PKGS
+          go test -mod=vendor -p 1 -timeout 0 -race -v -coverprofile=coverage.out -covermode=atomic -coverpkg=./... $(go list -mod=vendor ./... | grep -v -E "(goaktpb|mocks|internal/internalpb)")
 
       - uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ./coverage.out
-          flags: shard-${{ matrix.shard }}
-          name: coverage-shard-${{ matrix.shard }}
           fail_ci_if_error: false
           verbose: true
 
