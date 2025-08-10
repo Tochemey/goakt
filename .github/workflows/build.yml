@@ -54,51 +54,41 @@ jobs:
         id: shard-assign
         run: |
           set -euo pipefail
+
           SHARDS=3
           shard_id=${{ matrix.shard }}
-          
-          HEAVY_PKG="./actor"
-          
+
+          HEAVY_PKG="github.com/tochemey/goakt/v3/actor"
+
           ALL_PKGS=$(go list -mod=vendor ./... | grep -v "$HEAVY_PKG" | grep -v -E "(goaktpb|mocks|internal/internalpb)")
-          
-          HEAVY_TESTS=$(go test -list . $HEAVY_PKG | grep ^Test || true)
-          if [ -z "$HEAVY_TESTS" ]; then
-          echo "No tests found in $HEAVY_PKG"
-          exit 1
+
+          if [ "$shard_id" -eq 1 ]; then
+            PACKAGES="$HEAVY_PKG"
+          else
+            shard_index=$((shard_id - 2))  # zero-based index for other shards
+            NUM_OTHER_SHARDS=$((SHARDS - 1))
+            PACKAGES=$(echo "$ALL_PKGS" | awk "NR % $NUM_OTHER_SHARDS == $shard_index")
           fi
-          
-          HEAVY_SUBSET=$(echo "$HEAVY_TESTS" | awk "NR % $SHARDS == $((shard_id-1))" | paste -sd'|' -)
-          OTHER_PKGS=$(echo "$ALL_PKGS" | awk "NR % $SHARDS == $((shard_id-1))")
-          
-          HEAVY_SUBSET_SAFE=$(echo "$HEAVY_SUBSET" | tr '\n' '|' | sed 's/"/\\"/g')
-          OTHER_PKGS_SAFE=$(echo "$OTHER_PKGS" | tr '\n' ' ' | sed 's/"/\\"/g')
-          
-          echo "HEAVY_PKG=$HEAVY_PKG" >> $GITHUB_ENV
-          echo "HEAVY_SUBSET=$HEAVY_SUBSET_SAFE" >> $GITHUB_ENV
-          echo "OTHER_PKGS=$OTHER_PKGS_SAFE" >> $GITHUB_ENV
 
-      - name: Run heavy package subset
-        if: env.HEAVY_SUBSET != ''
-        run: |
-          go test -mod=vendor -p 1 -timeout 0 -race -v \
-            -coverprofile=coverage.${{ matrix.shard }}.out \
-            -covermode=atomic -coverpkg=./... \
-            $HEAVY_PKG -run "$HEAVY_SUBSET"
+          PACKAGES_SAFE=$(echo "$PACKAGES" | tr '\n' ' ' | sed 's/"/\\"/g')
+          echo "TEST_PKGS=$PACKAGES_SAFE" >> $GITHUB_ENV
 
-      - name: Run other packages
-        if: env.OTHER_PKGS != ''
+          echo "Shard $shard_id running packages:"
+          echo "$PACKAGES"
+
+      - name: Run tests
+        shell: bash
         run: |
-          go test -mod=vendor -p 1 -timeout 0 -race -v \
-            -coverprofile=coverage.${{ matrix.shard }}-other.out \
-            -covermode=atomic -coverpkg=./... \
-            $OTHER_PKGS
+          go test -mod=vendor -p 1 -timeout 0 -race -v -coverprofile=coverage.out -covermode=atomic -coverpkg=./... $TEST_PKGS
 
       - uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          files: ./coverage.${{ matrix.shard }}*.out
+          files: ./coverage.out
           flags: shard-${{ matrix.shard }}
+          name: coverage-shard-${{ matrix.shard }}
           fail_ci_if_error: false
+          verbose: true
 
   # macOS & Windows run only if Linux shards succeed
   tests-other-os:
