@@ -236,7 +236,7 @@ type ActorSystem interface {
 	// InCluster states whether the actor system has started within a cluster of nodes
 	InCluster() bool
 	// GetPartition returns the partition where a given actor is located
-	GetPartition(actorName string) int
+	GetPartition(actorName string) uint64
 	// Subscribe creates an event subscriber to consume events from the actor system.
 	// Remember to use the Unsubscribe method to avoid resource leakage.
 	Subscribe() (eventstream.Subscriber, error)
@@ -1210,12 +1210,11 @@ func (x *actorSystem) Unsubscribe(subscriber eventstream.Subscriber) error {
 }
 
 // GetPartition returns the partition where a given actor is located
-func (x *actorSystem) GetPartition(actorName string) int {
-	if !x.InCluster() {
-		// TODO: maybe add a partitioner function
-		return 0
+func (x *actorSystem) GetPartition(actorName string) uint64 {
+	if x.InCluster() {
+		return x.cluster.GetPartition(actorName)
 	}
-	return x.cluster.GetPartition(actorName)
+	return uint64(0)
 }
 
 // InCluster states whether the actor system is started within a cluster of nodesMap

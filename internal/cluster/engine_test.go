@@ -245,6 +245,10 @@ func TestSingleNode(t *testing.T) {
 
 		assert.True(t, proto.Equal(actor, actual))
 
+		// fetch the partition
+		partition := cluster.GetPartition(actorName)
+		require.NotZero(t, partition)
+
 		// let us remove the actor
 		err = cluster.RemoveActor(ctx, actorName)
 		require.NoError(t, err)
@@ -252,6 +256,10 @@ func TestSingleNode(t *testing.T) {
 		actual, err = cluster.GetActor(ctx, actorName)
 		require.Nil(t, actual)
 		assert.EqualError(t, err, ErrActorNotFound.Error())
+
+		// fetch the partition
+		partition = cluster.GetPartition(actorName)
+		require.Zero(t, partition)
 
 		// stop the node
 		require.NoError(t, cluster.Stop(ctx))
@@ -307,8 +315,7 @@ func TestSingleNode(t *testing.T) {
 		require.EqualError(t, err, ErrEngineNotRunning.Error())
 
 		partition := cluster.GetPartition("actorName")
-		require.NotZero(t, partition)
-		require.EqualValues(t, -1, partition)
+		require.Zero(t, partition)
 
 		// stop the node
 		require.NoError(t, cluster.Stop(ctx))

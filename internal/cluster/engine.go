@@ -58,14 +58,6 @@ import (
 	"github.com/tochemey/goakt/v3/log"
 )
 
-// SyncState defines the state of the cluster node during synchronization
-type SyncState int32
-
-const (
-	BUSY SyncState = iota
-	IDLE
-)
-
 type EventType int
 
 const (
@@ -74,7 +66,7 @@ const (
 	actorsMap  = "actors"
 	statesMap  = "states"
 	jobKeysMap = "jobKeys"
-	kindsMap   = "actorKinds"
+	kindsMap   = "kinds"
 	grainsMap  = "grains"
 )
 
@@ -106,7 +98,7 @@ type Interface interface {
 	// GetActor fetches an actor from the Node
 	GetActor(ctx context.Context, actorName string) (*internalpb.Actor, error)
 	// GetPartition returns the partition where a given actor is stored
-	GetPartition(actorName string) int
+	GetPartition(actorName string) uint64
 	// LookupKind checks the existence of a given actor kind in the cluster
 	// This function is mainly used when creating a singleton actor
 	LookupKind(ctx context.Context, kind string) (string, error)
@@ -199,7 +191,6 @@ type Engine struct {
 
 	// specifies the node state
 	peerState *internalpb.PeerState
-	syncState *atomic.Int32
 
 	nodeJoinedEventsFilter goset.Set[string]
 	nodeLeftEventsFilter   goset.Set[string]
@@ -240,7 +231,6 @@ func NewEngine(name string, disco discovery.Provider, host *discovery.Node, opts
 		nodeLeftEventsFilter:   goset.NewSet[string](),
 		tableSize:              20 * size.MB,
 		running:                atomic.NewBool(false),
-		syncState:              atomic.NewInt32(int32(IDLE)),
 	}
 	// apply the various options
 	for _, opt := range opts {
@@ -888,17 +878,24 @@ func (x *Engine) LookupKind(ctx context.Context, kind string) (string, error) {
 }
 
 // GetPartition returns the partition where a given actor is stored
-func (x *Engine) GetPartition(actorName string) int {
+func (x *Engine) GetPartition(actorName string) uint64 {
 	// return -1 when the engine is not running
 	if !x.IsRunning() {
-		return -1
+		return 0
 	}
 
-	key := []byte(actorName)
-	hkey := x.hasher.HashCode(key)
-	partition := int(hkey % x.partitionsCount)
-	x.logger.Debugf("partition of actor (%s) is (%d)", actorName, partition)
-	return partition
+	ctx, cancel := context.WithTimeout(context.Background(), x.readTimeout)
+	defer cancel()
+
+	x.Lock()
+	defer x.Unlock()
+
+	resp, err := x.actorsMap.Get(ctx, actorName)
+	if err != nil {
+		return 0
+	}
+
+	return resp.Partition()
 }
 
 // Events returns a channel where cluster events are published

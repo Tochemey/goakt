@@ -308,18 +308,18 @@ func (_c *Interface_GetGrain_Call) RunAndReturn(run func(context.Context, string
 }
 
 // GetPartition provides a mock function with given fields: actorName
-func (_m *Interface) GetPartition(actorName string) int {
+func (_m *Interface) GetPartition(actorName string) uint64 {
 	ret := _m.Called(actorName)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetPartition")
 	}
 
-	var r0 int
-	if rf, ok := ret.Get(0).(func(string) int); ok {
+	var r0 uint64
+	if rf, ok := ret.Get(0).(func(string) uint64); ok {
 		r0 = rf(actorName)
 	} else {
-		r0 = ret.Get(0).(int)
+		r0 = ret.Get(0).(uint64)
 	}
 
 	return r0
@@ -343,12 +343,12 @@ func (_c *Interface_GetPartition_Call) Run(run func(actorName string)) *Interfac
 	return _c
 }
 
-func (_c *Interface_GetPartition_Call) Return(_a0 int) *Interface_GetPartition_Call {
+func (_c *Interface_GetPartition_Call) Return(_a0 uint64) *Interface_GetPartition_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *Interface_GetPartition_Call) RunAndReturn(run func(string) int) *Interface_GetPartition_Call {
+func (_c *Interface_GetPartition_Call) RunAndReturn(run func(string) uint64) *Interface_GetPartition_Call {
 	_c.Call.Return(run)
 	return _c
 }
