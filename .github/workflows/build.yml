@@ -9,8 +9,6 @@ on:
       - "**/scorecard.yml"
   push:
     branches: [main]
-  schedule:
-    - cron: "0 3 * * *" # Nightly full matrix
 
 permissions:
   contents: read
@@ -20,37 +18,14 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # ---------------------
-  # Lint
-  # ---------------------
-  lint:
-    name: Lint (Linux)
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version: "1.24.5"
-          check-latest: true
-          cache-dependency-path: "**/*.sum"
-      - name: golangci-lint
-        uses: golangci/golangci-lint-action@v8
-        with:
-          version: v2.1.0
-          args: --timeout 10m --config .golangci.yml
-
-  # ---------------------
-  # Sharded Linux tests for PRs
-  # ---------------------
-  test-linux-shards:
-    if: github.event_name == 'pull_request'
-    name: Linux Test Shard ${{ matrix.shard }}
+  # Linux shards run first
+  tests-linux:
+    name: Linux Tests Shard ${{ matrix.shard }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3] # 3 parallel shards
+        shard: [1, 2, 3] # adjust number of shards here
     steps:
       - uses: actions/checkout@v4
         with:
@@ -60,108 +35,78 @@ jobs:
           go-version: "1.24.5"
           check-latest: true
           cache-dependency-path: "**/*.sum"
+
       - uses: actions/cache@v4
         with:
           path: |
             ~/.cache/go-build
             ~/go/pkg/mod
           key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-go-
+          restore-keys: ${{ runner.os }}-go-
+
       - name: Vendoring and Tidy
         run: go mod tidy && go mod vendor
+
       - name: Install dependencies
         run: go mod download
-      - name: Prepare test packages for shard
-        id: packages
+
+      - name: Prepare packages for this shard
+        id: shard-assign
         run: |
-          PKGS=($(go list -mod=vendor ./... | grep -v -E "(goaktpb|mocks|internal/internalpb)"))
-          COUNT=${#PKGS[@]}
-          PER_SHARD=$(( (COUNT + 3 - 1) / 3 )) # ceiling division for 3 shards
-          START=$(( ( ${{ matrix.shard }} - 1 ) * PER_SHARD ))
-          SHARD_PKGS=("${PKGS[@]:START:PER_SHARD}")
-          echo "PKGS=${SHARD_PKGS[*]}" >> $GITHUB_ENV
-      - name: Run shard tests
-        shell: bash
+          set -euo pipefail
+          SHARDS=3
+          shard_id=${{ matrix.shard }}
+
+          # Identify heavy package
+          HEAVY_PKG="./actor"
+
+          # Get all packages except heavy one
+          ALL_PKGS=$(go list -mod=vendor ./... | grep -v "$HEAVY_PKG" | grep -v -E "(goaktpb|mocks|internal/internalpb)")
+
+          # Get all tests in heavy package
+          HEAVY_TESTS=$(go test -list . $HEAVY_PKG | grep ^Test || true)
+          if [ -z "$HEAVY_TESTS" ]; then
+            echo "No tests found in $HEAVY_PKG"
+            exit 1
+          fi
+
+          # Assign heavy tests subset to this shard
+          HEAVY_SUBSET=$(echo "$HEAVY_TESTS" | awk "NR % $SHARDS == $((shard_id-1))" | paste -sd'|' -)
+
+          # Assign other packages round-robin
+          OTHER_PKGS=$(echo "$ALL_PKGS" | awk "NR % $SHARDS == $((shard_id-1))")
+
+          echo "HEAVY_PKG=$HEAVY_PKG" >> $GITHUB_ENV
+          echo "HEAVY_SUBSET=$HEAVY_SUBSET" >> $GITHUB_ENV
+          echo "OTHER_PKGS=$OTHER_PKGS" >> $GITHUB_ENV
+
+      - name: Run heavy package subset
+        if: env.HEAVY_SUBSET != ''
         run: |
           go test -mod=vendor -p 1 -timeout 0 -race -v \
             -coverprofile=coverage.${{ matrix.shard }}.out \
             -covermode=atomic -coverpkg=./... \
-            $PKGS
-      - uses: actions/upload-artifact@v4
-        with:
-          name: coverage-shard-${{ matrix.shard }}
-          path: coverage.${{ matrix.shard }}.out
+            $HEAVY_PKG -run "$HEAVY_SUBSET"
 
-  # ---------------------
-  # Merge coverage & upload (PR)
-  # ---------------------
-  merge-coverage:
-    if: github.event_name == 'pull_request'
-    needs: [test-linux-shards]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          path: coverage
-      - name: Merge coverage files
+      - name: Run other packages
+        if: env.OTHER_PKGS != ''
         run: |
-          echo "mode: atomic" > coverage.out
-          grep -h -v "^mode:" coverage/*/*.out >> coverage.out
+          go test -mod=vendor -p 1 -timeout 0 -race -v \
+            -coverprofile=coverage.${{ matrix.shard }}-other.out \
+            -covermode=atomic -coverpkg=./... \
+            $OTHER_PKGS
+
       - uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          files: ./coverage.out
-          flags: linux
-          name: coverage-linux
+          files: ./coverage.${{ matrix.shard }}*.out
+          flags: shard-${{ matrix.shard }}
           fail_ci_if_error: false
-          verbose: true
 
-  # ---------------------
-  # Linux tests for main/nightly
-  # ---------------------
-  test-linux-main:
-    if: github.event_name != 'pull_request'
-    name: Tests (Linux - main/nightly)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-go@v5
-        with:
-          go-version: "1.24.5"
-          check-latest: true
-          cache-dependency-path: "**/*.sum"
-      - uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cache/go-build
-            ~/go/pkg/mod
-          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-go-
-      - name: Vendoring and Tidy
-        run: go mod tidy && go mod vendor
-      - name: Install dependencies
-        run: go mod download
-      - name: Run tests
-        shell: bash
-        run: |
-          go test -mod=vendor -p 1 -timeout 0 -race -v \
-            -coverprofile=coverage.out -covermode=atomic -coverpkg=./... \
-            $(go list -mod=vendor ./... | grep -v -E "(goaktpb|mocks|internal/internalpb)")
-      - uses: actions/upload-artifact@v4
-        with:
-          name: linux-coverage
-          path: coverage.out
-
-  # ---------------------
-  # macOS & Windows only if Linux passes
-  # ---------------------
-  test-other-os:
-    if: github.event_name != 'pull_request'
-    needs: [test-linux-main]
+  # macOS & Windows run only if Linux shards succeed
+  tests-other-os:
+    needs: tests-linux
+    if: ${{ needs.tests-linux.result == 'success' }}
     name: Tests on ${{ matrix.os }}
     runs-on: ${{ matrix.runner }}
     strategy:
@@ -174,27 +119,25 @@ jobs:
             runner: windows-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
           go-version: "1.24.5"
           check-latest: true
           cache-dependency-path: "**/*.sum"
-      - uses: actions/cache@v4
+      - run: go test -mod=vendor -p 1 -timeout 0 -race -v ./...
+
+  lint:
+    name: Linter (Linux only)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
         with:
-          path: |
-            ~/.cache/go-build
-            ~/go/pkg/mod
-          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-go-
-      - name: Vendoring and Tidy
-        run: go mod tidy && go mod vendor
-      - name: Install dependencies
-        run: go mod download
-      - name: Run tests
-        shell: bash
-        run: |
-          go test -mod=vendor -p 1 -timeout 0 -race -v \
-            $(go list -mod=vendor ./... | grep -v -E "(goaktpb|mocks|internal/internalpb)")
+          go-version: "1.24.5"
+          check-latest: true
+          cache-dependency-path: "**/*.sum"
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.1.0
+          args: --timeout 10m --config .golangci.yml
