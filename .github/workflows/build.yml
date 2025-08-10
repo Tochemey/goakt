@@ -25,8 +25,6 @@ jobs:
         include:
           - os: linux
             runner: ubuntu-latest
-          - os: macos
-            runner: macos-13
           - os: windows
             runner: windows-latest
     steps:

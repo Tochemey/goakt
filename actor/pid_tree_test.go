@@ -350,7 +350,7 @@ func TestParent(t *testing.T) {
 	t.Cleanup(tree.reset)
 }
 
-func TestRoo(t *testing.T) {
+func TestRoot(t *testing.T) {
 	tree := newTree()
 	t.Run("empty tree", func(t *testing.T) {
 		root, ok := tree.root()
