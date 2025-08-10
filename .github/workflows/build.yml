@@ -68,6 +68,10 @@ jobs:
           key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
           restore-keys: |
             ${{ runner.os }}-go-
+      - name: Vendoring and Tidy
+        run: go mod tidy && go mod vendor
+      - name: Install dependencies
+        run: go mod download
       - name: Prepare test packages for shard
         id: packages
         run: |
@@ -77,10 +81,6 @@ jobs:
           START=$(( ( ${{ matrix.shard }} - 1 ) * PER_SHARD ))
           SHARD_PKGS=("${PKGS[@]:START:PER_SHARD}")
           echo "PKGS=${SHARD_PKGS[*]}" >> $GITHUB_ENV
-      - name: Vendoring and Tidy
-        run: go mod tidy && go mod vendor
-      - name: Install dependencies
-        run: go mod download
       - name: Run shard tests
         shell: bash
         run: |
