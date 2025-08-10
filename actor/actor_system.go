@@ -1211,11 +1211,10 @@ func (x *actorSystem) Unsubscribe(subscriber eventstream.Subscriber) error {
 
 // GetPartition returns the partition where a given actor is located
 func (x *actorSystem) GetPartition(actorName string) int {
-	if !x.InCluster() {
-		// TODO: maybe add a partitioner function
-		return 0
+	if x.InCluster() {
+		return x.cluster.GetPartition(actorName)
 	}
-	return x.cluster.GetPartition(actorName)
+	return 0
 }
 
 // InCluster states whether the actor system is started within a cluster of nodesMap

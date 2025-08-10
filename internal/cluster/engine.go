@@ -58,14 +58,6 @@ import (
 	"github.com/tochemey/goakt/v3/log"
 )
 
-// SyncState defines the state of the cluster node during synchronization
-type SyncState int32
-
-const (
-	BUSY SyncState = iota
-	IDLE
-)
-
 type EventType int
 
 const (
@@ -74,7 +66,7 @@ const (
 	actorsMap  = "actors"
 	statesMap  = "states"
 	jobKeysMap = "jobKeys"
-	kindsMap   = "actorKinds"
+	kindsMap   = "kinds"
 	grainsMap  = "grains"
 )
 
@@ -199,7 +191,6 @@ type Engine struct {
 
 	// specifies the node state
 	peerState *internalpb.PeerState
-	syncState *atomic.Int32
 
 	nodeJoinedEventsFilter goset.Set[string]
 	nodeLeftEventsFilter   goset.Set[string]
@@ -240,7 +231,6 @@ func NewEngine(name string, disco discovery.Provider, host *discovery.Node, opts
 		nodeLeftEventsFilter:   goset.NewSet[string](),
 		tableSize:              20 * size.MB,
 		running:                atomic.NewBool(false),
-		syncState:              atomic.NewInt32(int32(IDLE)),
 	}
 	// apply the various options
 	for _, opt := range opts {
@@ -894,11 +884,21 @@ func (x *Engine) GetPartition(actorName string) int {
 		return -1
 	}
 
-	key := []byte(actorName)
-	hkey := x.hasher.HashCode(key)
-	partition := int(hkey % x.partitionsCount)
-	x.logger.Debugf("partition of actor (%s) is (%d)", actorName, partition)
-	return partition
+	ctx, cancel := context.WithTimeout(context.Background(), x.readTimeout)
+	defer cancel()
+
+	x.Lock()
+	defer x.Unlock()
+
+	resp, err := x.actorsMap.Get(ctx, actorName)
+	if err != nil {
+		if errors.Is(err, olric.ErrKeyNotFound) {
+			return 0
+		}
+		return -1
+	}
+
+	return int(resp.Partition())
 }
 
 // Events returns a channel where cluster events are published
