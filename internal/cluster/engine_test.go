@@ -315,8 +315,7 @@ func TestSingleNode(t *testing.T) {
 		require.EqualError(t, err, ErrEngineNotRunning.Error())
 
 		partition := cluster.GetPartition("actorName")
-		require.NotZero(t, partition)
-		require.EqualValues(t, -1, partition)
+		require.Zero(t, partition)
 
 		// stop the node
 		require.NoError(t, cluster.Stop(ctx))

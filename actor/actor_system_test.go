@@ -247,10 +247,6 @@ func TestActorSystem(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, reply)
 
-		// get the actor partition
-		partition := newActorSystem.GetPartition(actorName)
-		assert.GreaterOrEqual(t, partition, 0)
-
 		// assert actor not found
 		actorName = "some-actor"
 		exists, err = newActorSystem.ActorExists(ctx, actorName)
@@ -866,7 +862,7 @@ func TestActorSystem(t *testing.T) {
 	t.Run("With GetPartition returning zero in non cluster env", func(t *testing.T) {
 		ctx := context.TODO()
 		sys, _ := NewActorSystem(
-			"housekeeperSys",
+			"test",
 			WithLogger(log.DiscardLogger),
 		)
 
@@ -880,13 +876,67 @@ func TestActorSystem(t *testing.T) {
 		partition := sys.GetPartition("some-actor")
 		assert.Zero(t, partition)
 
-		t.Cleanup(
-			func() {
-				err = sys.Stop(ctx)
-				assert.NoError(t, err)
-			},
-		)
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
 	})
+	t.Run("With GetPartition when cluster mode is enabled", func(t *testing.T) {
+		// create a context
+		ctx := context.TODO()
+		// start the NATS server
+		srv := startNatsServer(t)
+
+		// create and start a system cluster
+		node1, sd1 := testCluster(t, srv.Addr().String())
+		require.NotNil(t, node1)
+		require.NotNil(t, sd1)
+
+		// create and start a system cluster
+		node2, sd2 := testCluster(t, srv.Addr().String())
+		require.NotNil(t, node2)
+		require.NotNil(t, sd2)
+
+		// create and start a system cluster
+		node3, sd3 := testCluster(t, srv.Addr().String())
+		require.NotNil(t, node3)
+		require.NotNil(t, sd3)
+
+		pid, err := node1.Spawn(ctx, "actor11", NewMockActor())
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+		pause.For(time.Second)
+
+		pid, err = node2.Spawn(ctx, "actor21", NewMockActor())
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+		pause.For(time.Second)
+
+		pid, err = node3.Spawn(ctx, "actor31", NewMockActor())
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+		pause.For(time.Second)
+
+		// get the partition of the actor actor11
+		partition := node2.GetPartition("actor11")
+		require.NotZero(t, partition)
+		require.Positive(t, partition)
+
+		// get the partition of the actor21
+		partition = node3.GetPartition("actor21")
+		require.NotZero(t, partition)
+		require.Positive(t, partition)
+
+		// get the partition of the actor31
+		partition = node1.GetPartition("actor31")
+		require.NotZero(t, partition)
+		require.Positive(t, partition)
+
+		assert.NoError(t, node1.Stop(ctx))
+		assert.NoError(t, node3.Stop(ctx))
+		assert.NoError(t, sd1.Close())
+		assert.NoError(t, sd3.Close())
+		srv.Shutdown()
+	})
+
 	t.Run("With actor PostStop error", func(t *testing.T) {
 		ctx := context.TODO()
 		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))

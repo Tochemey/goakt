@@ -98,7 +98,7 @@ type Interface interface {
 	// GetActor fetches an actor from the Node
 	GetActor(ctx context.Context, actorName string) (*internalpb.Actor, error)
 	// GetPartition returns the partition where a given actor is stored
-	GetPartition(actorName string) int
+	GetPartition(actorName string) uint64
 	// LookupKind checks the existence of a given actor kind in the cluster
 	// This function is mainly used when creating a singleton actor
 	LookupKind(ctx context.Context, kind string) (string, error)
@@ -878,10 +878,10 @@ func (x *Engine) LookupKind(ctx context.Context, kind string) (string, error) {
 }
 
 // GetPartition returns the partition where a given actor is stored
-func (x *Engine) GetPartition(actorName string) int {
+func (x *Engine) GetPartition(actorName string) uint64 {
 	// return -1 when the engine is not running
 	if !x.IsRunning() {
-		return -1
+		return 0
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), x.readTimeout)
@@ -892,13 +892,10 @@ func (x *Engine) GetPartition(actorName string) int {
 
 	resp, err := x.actorsMap.Get(ctx, actorName)
 	if err != nil {
-		if errors.Is(err, olric.ErrKeyNotFound) {
-			return 0
-		}
-		return -1
+		return 0
 	}
 
-	return int(resp.Partition())
+	return resp.Partition()
 }
 
 // Events returns a channel where cluster events are published
