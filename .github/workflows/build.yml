@@ -1,22 +1,93 @@
 name: build
 
 on:
-  push:
+  pull_request:
     branches: [main]
     paths-ignore:
       - "**/README.md"
       - "**/renovate.json5"
       - "**/scorecard.yml"
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 3 * * *" # Nightly full matrix
 
 permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
-  build:
+  # ---------------------
+  # Lint (fast feedback)
+  # ---------------------
+  lint:
+    name: Lint (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.5"
+          check-latest: true
+          cache-dependency-path: "**/*.sum"
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.1.0
+          args: --timeout 10m --config .golangci.yml
+
+  # ---------------------
+  # Tests on PRs (Linux only)
+  # ---------------------
+  test-pr:
+    if: github.event_name == 'pull_request'
+    name: Tests (Linux only)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.5"
+          check-latest: true
+          cache-dependency-path: "**/*.sum"
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+      - name: Vendoring and Tidy
+        run: go mod tidy && go mod vendor
+      - name: Install dependencies
+        run: go mod download
+      - name: Run tests
+        shell: bash
+        run: |
+          go test -mod=vendor -p 1 -timeout 0 -race -v \
+            -coverprofile=coverage.out -covermode=atomic -coverpkg=./... \
+            $(go list -mod=vendor ./... | grep -v -E "(goaktpb|mocks|internal/internalpb)")
+      - uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage.out
+          flags: linux
+          name: coverage-linux
+          fail_ci_if_error: false
+          verbose: true
+
+  # ---------------------
+  # Full OS matrix (main & nightly only)
+  # ---------------------
+  test-matrix:
+    if: github.event_name != 'pull_request'
     name: Tests on ${{ matrix.os }}
     runs-on: ${{ matrix.runner }}
     strategy:
@@ -32,14 +103,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          submodules: false
           fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
           go-version: "1.24.5"
           check-latest: true
           cache-dependency-path: "**/*.sum"
-      - run: go version
       - uses: actions/cache@v4
         with:
           path: |
@@ -51,43 +120,11 @@ jobs:
       - name: Vendoring and Tidy
         run: go mod tidy && go mod vendor
       - name: Install dependencies
-        run: |
-          go mod download
+        run: go mod download
       - name: Run tests
         shell: bash
         run: |
-          go test -mod=vendor -p 1 -timeout 0 -race -v -coverprofile=coverage.out -covermode=atomic -coverpkg=./... $(go list -mod=vendor ./... | grep -v -E "(goaktpb|mocks|internal/internalpb)")
-      - uses: codecov/codecov-action@v5
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: ./coverage.out
-          flags: ${{ matrix.os }}
-          name: coverage-${{ matrix.os }}
-          fail_ci_if_error: false
-          verbose: true
-  lint:
-    name: Linter on ${{ matrix.os }}
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      fail-fast: true
-      matrix:
-        include:
-          - os: linux
-            runner: ubuntu-latest
-          - os: macos
-            runner: macos-13
-          - os: windows
-            runner: windows-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version: "1.24.5"
-          check-latest: true
-          cache-dependency-path: "**/*.sum"
-      - name: golangci-lint
-        uses: golangci/golangci-lint-action@v8
-        with:
-          version: v2.1.0
-          args: --timeout 10m --config .golangci.yml
+          go test -mod=vendor -p 1 -timeout 0 -race -v \
+            -coverprofile=coverage.out -covermode=atomic -coverpkg=./... \
+            $(go list -mod=vendor ./... | grep -v -E "(goaktpb|mocks|internal/internalpb)")
+
