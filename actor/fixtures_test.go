@@ -1336,7 +1336,7 @@ func (m *MockErrorMailbox) Dequeue() (msg *ReceiveContext) {
 func (m *MockErrorMailbox) Dispose() {}
 
 // Enqueue implements Mailbox.
-func (m *MockErrorMailbox) Enqueue(msg *ReceiveContext) error {
+func (m *MockErrorMailbox) Enqueue(_ *ReceiveContext) error {
 	return fmt.Errorf("mock error mailbox: failed to enqueue message")
 }
 
