@@ -1318,3 +1318,34 @@ var _ passivation.Strategy = (*MockInvalidPassivationStrategy)(nil)
 func (x *MockInvalidPassivationStrategy) String() string {
 	return "MockInvalidPassivationStrategy"
 }
+
+type MockErrorMailbox struct{}
+
+var _ Mailbox = (*MockErrorMailbox)(nil)
+
+func NewMockErrorMailbox() *MockErrorMailbox {
+	return &MockErrorMailbox{}
+}
+
+// Dequeue implements Mailbox.
+func (m *MockErrorMailbox) Dequeue() (msg *ReceiveContext) {
+	return nil
+}
+
+// Dispose implements Mailbox.
+func (m *MockErrorMailbox) Dispose() {}
+
+// Enqueue implements Mailbox.
+func (m *MockErrorMailbox) Enqueue(msg *ReceiveContext) error {
+	return fmt.Errorf("mock error mailbox: failed to enqueue message")
+}
+
+// IsEmpty implements Mailbox.
+func (m *MockErrorMailbox) IsEmpty() bool {
+	return true
+}
+
+// Len implements Mailbox.
+func (m *MockErrorMailbox) Len() int64 {
+	return 0
+}

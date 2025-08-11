@@ -985,7 +985,7 @@ func TestActorSystem(t *testing.T) {
 		pause.For(time.Second)
 
 		// every message sent to the actor will result in deadletter
-		for i := 0; i < 5; i++ {
+		for range 5 {
 			require.NoError(t, Tell(ctx, actorRef, new(testpb.TestSend)))
 		}
 
