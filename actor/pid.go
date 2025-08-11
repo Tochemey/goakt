@@ -1297,13 +1297,11 @@ func (pid *PID) LatestActivityTime() time.Time {
 // doReceive pushes a given message to the actor mailbox
 // and signals the receiveLoop to process it
 func (pid *PID) doReceive(receiveCtx *ReceiveContext) {
-	if pid.IsRunning() {
-		if err := pid.mailbox.Enqueue(receiveCtx); err != nil {
-			pid.logger.Warn(err)
-			pid.toDeadletters(receiveCtx, err)
-		}
-		pid.schedule()
+	if err := pid.mailbox.Enqueue(receiveCtx); err != nil {
+		pid.logger.Warn(err)
+		pid.toDeadletters(receiveCtx, err)
 	}
+	pid.schedule()
 }
 
 // schedule  schedules that a message has arrived and wake up the
