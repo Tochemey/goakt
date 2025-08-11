@@ -776,7 +776,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 	// set the worker pool
 	system.workerPool = workerpool.New(
 		workerpool.WithPoolSize(300),
-		workerpool.WithPassivateAfter(time.Second),
+		workerpool.WithExpiry(time.Second),
 		workerpool.WithLogger(system.logger),
 	)
 

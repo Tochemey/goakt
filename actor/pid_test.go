@@ -42,6 +42,7 @@ import (
 	"github.com/tochemey/goakt/v3/address"
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/collection"
+	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/pause"
 	"github.com/tochemey/goakt/v3/log"
 	testkit "github.com/tochemey/goakt/v3/mocks/discovery"
@@ -108,6 +109,60 @@ func TestReceive(t *testing.T) {
 
 		// stop the actor
 		err = pid.Shutdown(ctx)
+		assert.NoError(t, err)
+		assert.NoError(t, actorSystem.Stop(ctx))
+	})
+	t.Run("When mailbox returns an error", func(t *testing.T) {
+		ctx := context.TODO()
+		ports := dynaport.Get(1)
+		host := "127.0.0.1"
+
+		actorSystem, err := NewActorSystem("testSys",
+			WithRemote(remote.NewConfig(host, ports[0])),
+			WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+
+		pause.For(time.Second)
+
+		consumer, err := actorSystem.Subscribe()
+		require.NoError(t, err)
+		require.NotNil(t, consumer)
+
+		// this mailbox will not be able to process messages which will result in a deadletter
+		// and the actor will not be started
+		mailbox := NewMockErrorMailbox()
+		pid, err := actorSystem.Spawn(ctx, "name", NewMockActor(), WithMailbox(mailbox))
+		require.Error(t, err)
+		require.ErrorIs(t, err, ErrRequestTimeout)
+		require.Nil(t, pid)
+
+		message := new(testpb.TestSend)
+		err = Tell(ctx, pid, message)
+		require.Error(t, err)
+		require.ErrorIs(t, err, ErrDead)
+
+		pause.For(time.Second)
+
+		var items []*goaktpb.Deadletter
+		for message := range consumer.Iterator() {
+			payload := message.Payload()
+			// only listening to deadletter
+			deadletter, ok := payload.(*goaktpb.Deadletter)
+			if ok {
+				items = append(items, deadletter)
+			}
+		}
+
+		// unsubscribe the consumer
+		err = actorSystem.Unsubscribe(consumer)
+		require.NoError(t, err)
+		require.NotEmpty(t, items)
+		deadletter := items[0]
+		require.True(t, deadletter.Message.MessageIs(&internalpb.ReadinessProbe{}))
+
 		assert.NoError(t, err)
 		assert.NoError(t, actorSystem.Stop(ctx))
 	})

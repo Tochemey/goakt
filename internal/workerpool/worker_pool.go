@@ -60,10 +60,10 @@ func (f OptionFunc) Apply(pool *WorkerPool) {
 	f(pool)
 }
 
-// WithPassivateAfter sets the passivate after duration
-func WithPassivateAfter(d time.Duration) Option {
+// WithExpiry sets the pool expiry duration.
+func WithExpiry(d time.Duration) Option {
 	return OptionFunc(func(pool *WorkerPool) {
-		pool.passivateAfter = d
+		pool.expiry = d
 	})
 }
 
@@ -87,19 +87,19 @@ func WithLogger(logger log.Logger) Option {
 // WorkerPool manages a pool of workers across multiple shards for efficient
 // concurrent task execution.
 type WorkerPool struct {
-	pool           *ants.Pool
-	poolSize       int
-	passivateAfter time.Duration
-	logger         log.Logger
-	once           sync.Once
+	pool     *ants.Pool
+	poolSize int
+	expiry   time.Duration
+	logger   log.Logger
+	once     sync.Once
 }
 
 // New creates a new worker pool with the given options.
 func New(opts ...Option) *WorkerPool {
 	wp := &WorkerPool{
-		poolSize:       MaxPoolSize,
-		passivateAfter: time.Second,
-		logger:         log.New(log.ErrorLevel, os.Stderr),
+		poolSize: MaxPoolSize,
+		expiry:   time.Second,
+		logger:   log.New(log.ErrorLevel, os.Stderr),
 	}
 	// Apply provided options
 	for _, opt := range opts {
@@ -112,7 +112,7 @@ func New(opts ...Option) *WorkerPool {
 // Start initializes the worker pool
 func (wp *WorkerPool) Start() error {
 	pool, err := ants.NewPool(wp.poolSize,
-		ants.WithExpiryDuration(wp.passivateAfter),
+		ants.WithExpiryDuration(wp.expiry),
 		ants.WithLogger(newLogger(wp.logger)),
 	)
 	if err != nil {
