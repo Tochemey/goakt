@@ -2092,11 +2092,6 @@ func (pid *PID) startPassivation() {
 	}
 }
 
-// isStopping checks whether the actor is stopping or not
-func (pid *PID) isStopping() bool {
-	return pid != nil && pid.stopping.Load() || !pid.running.Load()
-}
-
 // checkBootstrap is called whenever an actor is spawned to make sure it is ready and functional.
 // It has to be very fast for a smooth operation.
 func (pid *PID) checkBootstrap(ctx context.Context) error {
