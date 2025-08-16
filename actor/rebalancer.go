@@ -32,8 +32,10 @@ import (
 	"connectrpc.com/connect"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/cluster"
+	"github.com/tochemey/goakt/v3/internal/codec"
 	"github.com/tochemey/goakt/v3/internal/collection"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/log"
@@ -43,7 +45,7 @@ import (
 // rebalancer is a system actor that helps rebalance cluster
 // when the cluster topology changes
 type rebalancer struct {
-	remoting *Remoting
+	remoting remote.Remoting
 	pid      *PID
 	logger   log.Logger
 }
@@ -52,7 +54,7 @@ type rebalancer struct {
 var _ Actor = (*rebalancer)(nil)
 
 // newRebalancer creates an instance of rebalancer
-func newRebalancer(remoting *Remoting) *rebalancer {
+func newRebalancer(remoting remote.Remoting) *rebalancer {
 	return &rebalancer{
 		remoting: remoting,
 	}
@@ -85,7 +87,7 @@ func (r *rebalancer) Rebalance(ctx *ReceiveContext) {
 
 		peers, err := r.pid.ActorSystem().getCluster().Peers(rctx)
 		if err != nil {
-			ctx.Err(NewInternalError(err))
+			ctx.Err(errors.NewInternalError(err))
 			return
 		}
 
@@ -125,7 +127,7 @@ func (r *rebalancer) rebalanceActors(ctx context.Context, eg *errgroup.Group, le
 			for _, actor := range leaderShares {
 				if !isReservedName(actor.GetAddress().GetName()) {
 					if err := r.recreateLocally(ctx, actor, true); err != nil {
-						return NewSpawnError(err)
+						return errors.NewSpawnError(err)
 					}
 				}
 			}
@@ -159,11 +161,11 @@ func (r *rebalancer) spawnRemoteActor(ctx context.Context, actor *internalpb.Act
 
 	exists, err := cluster.ActorExists(ctx, actor.GetAddress().GetName())
 	if err != nil {
-		return NewInternalError(err)
+		return errors.NewInternalError(err)
 	}
 	if exists {
 		if err := cluster.RemoveActor(ctx, actor.GetAddress().GetName()); err != nil {
-			return NewInternalError(err)
+			return errors.NewInternalError(err)
 		}
 	}
 
@@ -178,13 +180,13 @@ func (r *rebalancer) spawnRemoteActor(ctx context.Context, actor *internalpb.Act
 		Singleton:           false,
 		Relocatable:         true,
 		Dependencies:        dependencies,
-		PassivationStrategy: unmarshalPassivationStrategy(actor.GetPassivationStrategy()),
+		PassivationStrategy: codec.DecodePassivationStrategy(actor.GetPassivationStrategy()),
 		EnableStashing:      actor.GetEnableStash(),
 	}
 
 	if err := r.remoting.RemoteSpawn(ctx, remoteHost, remotingPort, spawnRequest); err != nil {
 		r.logger.Error(err)
-		return NewSpawnError(err)
+		return errors.NewSpawnError(err)
 	}
 	return nil
 }
@@ -199,7 +201,7 @@ func (r *rebalancer) rebalanceGrains(ctx context.Context, eg *errgroup.Group, le
 					grain.Host = leaderHost
 					grain.Port = leaderPort
 					if err := r.pid.ActorSystem().recreateGrain(ctx, grain); err != nil {
-						return NewSpawnError(err)
+						return errors.NewSpawnError(err)
 					}
 				}
 			}
@@ -229,15 +231,15 @@ func (r *rebalancer) activateRemoteGrain(ctx context.Context, grain *internalpb.
 	remoteHost := peer.Host
 	remotingPort := peer.RemotingPort
 	remoting := r.pid.ActorSystem().getRemoting()
-	remoteClient := remoting.remotingServiceClient(remoteHost, remotingPort)
+	remoteClient := remoting.RemotingServiceClient(remoteHost, remotingPort)
 
 	exist, err := r.pid.ActorSystem().getCluster().GrainExists(ctx, grain.GetGrainId().GetName())
 	if err != nil {
-		return NewInternalError(err)
+		return errors.NewInternalError(err)
 	}
 	if exist {
 		if err := r.pid.ActorSystem().getCluster().RemoveGrain(ctx, grain.GetGrainId().GetName()); err != nil {
-			return NewInternalError(err)
+			return errors.NewInternalError(err)
 		}
 	}
 
@@ -249,7 +251,7 @@ func (r *rebalancer) activateRemoteGrain(ctx context.Context, grain *internalpb.
 
 	if _, err := remoteClient.RemoteActivateGrain(ctx, request); err != nil {
 		r.logger.Error(err)
-		return NewSpawnError(err)
+		return errors.NewSpawnError(err)
 	}
 	return nil
 }
@@ -305,7 +307,7 @@ func (r *rebalancer) allocateActors(totalPeers int, nodeLeftState *internalpb.Pe
 func (r *rebalancer) recreateLocally(ctx context.Context, props *internalpb.Actor, enforceSingleton bool) error {
 	// remove the given actor from the cluster
 	if err := r.pid.ActorSystem().getCluster().RemoveActor(ctx, props.GetAddress().GetName()); err != nil {
-		return NewInternalError(err)
+		return errors.NewInternalError(err)
 	}
 
 	actor, err := r.pid.ActorSystem().getReflection().NewActor(props.GetType())
@@ -323,7 +325,7 @@ func (r *rebalancer) recreateLocally(ctx context.Context, props *internalpb.Acto
 	}
 
 	spawnOpts := []SpawnOption{
-		WithPassivationStrategy(unmarshalPassivationStrategy(props.GetPassivationStrategy())),
+		WithPassivationStrategy(codec.DecodePassivationStrategy(props.GetPassivationStrategy())),
 	}
 
 	if props.GetEnableStash() {

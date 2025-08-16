@@ -27,6 +27,7 @@ package actor
 import (
 	"reflect"
 
+	"github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/extension"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/registry"
@@ -46,17 +47,17 @@ func newReflection(registry registry.Registry) *reflection {
 func (r *reflection) NewActor(typeName string) (actor Actor, err error) {
 	rtype, ok := r.registry.TypeOf(typeName)
 	if !ok {
-		return nil, ErrTypeNotRegistered
+		return nil, errors.ErrTypeNotRegistered
 	}
 
 	elem := reflect.TypeOf((*Actor)(nil)).Elem()
 	if ok := rtype.Implements(elem) || reflect.PointerTo(rtype).Implements(elem); !ok {
-		return nil, ErrInstanceNotAnActor
+		return nil, errors.ErrInstanceNotAnActor
 	}
 
 	instance := reflect.New(rtype)
 	if !instance.IsValid() {
-		return nil, ErrInvalidInstance
+		return nil, errors.ErrInvalidInstance
 	}
 	return instance.Interface().(Actor), nil
 }
@@ -65,17 +66,17 @@ func (r *reflection) NewActor(typeName string) (actor Actor, err error) {
 func (r *reflection) NewDependency(typeName string, bytea []byte) (extension.Dependency, error) {
 	dept, ok := r.registry.TypeOf(typeName)
 	if !ok {
-		return nil, ErrDependencyTypeNotRegistered
+		return nil, errors.ErrDependencyTypeNotRegistered
 	}
 
 	elem := reflect.TypeOf((*extension.Dependency)(nil)).Elem()
 	if ok := dept.Implements(elem) || reflect.PointerTo(dept).Implements(elem); !ok {
-		return nil, ErrInstanceNotDependency
+		return nil, errors.ErrInstanceNotDependency
 	}
 
 	instance := reflect.New(dept)
 	if !instance.IsValid() {
-		return nil, ErrInvalidInstance
+		return nil, errors.ErrInvalidInstance
 	}
 
 	if dependency, ok := instance.Interface().(extension.Dependency); ok {
@@ -84,7 +85,7 @@ func (r *reflection) NewDependency(typeName string, bytea []byte) (extension.Dep
 		}
 		return dependency, nil
 	}
-	return nil, ErrInvalidInstance
+	return nil, errors.ErrInvalidInstance
 }
 
 // NewDependencies reflects the dependencies defined in the protobuf
@@ -104,12 +105,12 @@ func (r *reflection) NewDependencies(dependencies ...*internalpb.Dependency) ([]
 func (r *reflection) NewGrain(kind string) (Grain, error) {
 	rtype, ok := r.registry.TypeOf(kind)
 	if !ok {
-		return nil, ErrGrainNotRegistered
+		return nil, errors.ErrGrainNotRegistered
 	}
 
 	grainType := reflect.TypeOf((*Grain)(nil)).Elem()
 	if !rtype.Implements(grainType) && !reflect.PointerTo(rtype).Implements(grainType) {
-		return nil, ErrInstanceNotAnGrain
+		return nil, errors.ErrInstanceNotAnGrain
 	}
 
 	instance := reflect.New(rtype)

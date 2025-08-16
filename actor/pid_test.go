@@ -40,6 +40,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/tochemey/goakt/v3/address"
+	"github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/collection"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
@@ -136,13 +137,13 @@ func TestReceive(t *testing.T) {
 		mailbox := NewMockErrorMailbox()
 		pid, err := actorSystem.Spawn(ctx, "name", NewMockActor(), WithMailbox(mailbox))
 		require.Error(t, err)
-		require.ErrorIs(t, err, ErrRequestTimeout)
+		require.ErrorIs(t, err, errors.ErrRequestTimeout)
 		require.Nil(t, pid)
 
 		message := new(testpb.TestSend)
 		err = Tell(ctx, pid, message)
 		require.Error(t, err)
-		require.ErrorIs(t, err, ErrDead)
+		require.ErrorIs(t, err, errors.ErrDead)
 
 		pause.For(time.Second)
 
@@ -202,7 +203,7 @@ func TestPassivation(t *testing.T) {
 		// let us send a message to the actor
 		err = Tell(ctx, pid, new(testpb.TestSend))
 		assert.Error(t, err)
-		assert.ErrorIs(t, err, ErrDead)
+		assert.ErrorIs(t, err, errors.ErrDead)
 		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 	t.Run("With Pause/Resume path", func(t *testing.T) {
@@ -260,7 +261,7 @@ func TestPassivation(t *testing.T) {
 		// let us send a message to the actor
 		err = Tell(ctx, pid, new(testpb.TestSend))
 		assert.Error(t, err)
-		assert.ErrorIs(t, err, ErrDead)
+		assert.ErrorIs(t, err, errors.ErrDead)
 
 		assert.NoError(t, actorSystem.Stop(ctx))
 	})
@@ -305,7 +306,7 @@ func TestPassivation(t *testing.T) {
 		// let us send a message to the actor
 		err = Tell(ctx, pid2, new(testpb.TestSend))
 		assert.Error(t, err)
-		assert.ErrorIs(t, err, ErrDead)
+		assert.ErrorIs(t, err, errors.ErrDead)
 		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 	t.Run("With Messages Count-based passivation", func(t *testing.T) {
@@ -340,7 +341,7 @@ func TestPassivation(t *testing.T) {
 		// let us send a message to the actor
 		err = Tell(ctx, pid, new(testpb.TestSend))
 		assert.Error(t, err)
-		assert.ErrorIs(t, err, ErrDead)
+		assert.ErrorIs(t, err, errors.ErrDead)
 		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 	t.Run("With Time-based passivation", func(t *testing.T) {
@@ -376,7 +377,7 @@ func TestPassivation(t *testing.T) {
 		// let us send a message to the actor
 		err = Tell(ctx, pid, new(testpb.TestSend))
 		assert.Error(t, err)
-		assert.ErrorIs(t, err, ErrDead)
+		assert.ErrorIs(t, err, errors.ErrDead)
 		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 }
@@ -435,7 +436,7 @@ func TestReply(t *testing.T) {
 
 		actual, err := Ask(cancelCtx, pid, new(testpb.TestSend), replyTimeout)
 		assert.Error(t, err)
-		assert.ErrorIs(t, err, ErrRequestTimeout)
+		assert.ErrorIs(t, err, errors.ErrRequestTimeout)
 		assert.Nil(t, actual)
 		// stop the actor
 		err = pid.Shutdown(ctx)
@@ -464,7 +465,7 @@ func TestReply(t *testing.T) {
 
 		actual, err := Ask(ctx, pid, new(testpb.TestSend), replyTimeout)
 		assert.Error(t, err)
-		assert.ErrorIs(t, err, ErrRequestTimeout)
+		assert.ErrorIs(t, err, errors.ErrRequestTimeout)
 		assert.Nil(t, actual)
 		// stop the actor
 		err = pid.Shutdown(ctx)
@@ -498,7 +499,7 @@ func TestReply(t *testing.T) {
 
 		actual, err := Ask(ctx, pid, new(testpb.TestReply), replyTimeout)
 		assert.Error(t, err)
-		assert.ErrorIs(t, err, ErrDead)
+		assert.ErrorIs(t, err, errors.ErrDead)
 		assert.Nil(t, actual)
 		assert.NoError(t, actorSystem.Stop(ctx))
 	})
@@ -541,7 +542,7 @@ func TestRestart(t *testing.T) {
 		// let us send a message to the actor
 		err = Tell(ctx, pid, new(testpb.TestSend))
 		assert.Error(t, err)
-		assert.ErrorIs(t, err, ErrDead)
+		assert.ErrorIs(t, err, errors.ErrDead)
 
 		// restart the actor
 		err = pid.Restart(ctx)
@@ -716,7 +717,7 @@ func TestRestart(t *testing.T) {
 		}
 		err := pid.Restart(context.TODO())
 		assert.Error(t, err)
-		assert.ErrorIs(t, err, ErrUndefinedActor)
+		assert.ErrorIs(t, err, errors.ErrUndefinedActor)
 	})
 	t.Run("With restart failed due to PostStop failure", func(t *testing.T) {
 		ctx := context.TODO()
@@ -861,7 +862,7 @@ func TestSupervisorStrategy(t *testing.T) {
 		require.NotNil(t, parent)
 
 		// create the child actor
-		stopStrategy := NewSupervisor(WithDirective(&PanicError{}, StopDirective))
+		stopStrategy := NewSupervisor(WithDirective(&errors.PanicError{}, StopDirective))
 
 		child, err := parent.SpawnChild(ctx, "SpawnChild", NewMockSupervised(), WithSupervisor(stopStrategy))
 		require.NoError(t, err)
@@ -902,7 +903,7 @@ func TestSupervisorStrategy(t *testing.T) {
 		// create the child actor
 		stopStrategy := NewSupervisor(
 			WithStrategy(OneForAllStrategy),
-			WithDirective(&PanicError{}, StopDirective),
+			WithDirective(&errors.PanicError{}, StopDirective),
 		)
 
 		child, err := parent.SpawnChild(ctx, "SpawnChild", NewMockSupervised(), WithSupervisor(stopStrategy))
@@ -1037,7 +1038,7 @@ func TestSupervisorStrategy(t *testing.T) {
 		require.NotNil(t, parent)
 
 		// create the child actor
-		fakeStrategy := NewSupervisor(WithDirective(&PanicError{}, 4)) // undefined directive
+		fakeStrategy := NewSupervisor(WithDirective(&errors.PanicError{}, 4)) // undefined directive
 		child, err := parent.SpawnChild(ctx, "SpawnChild", NewMockSupervised(), WithSupervisor(fakeStrategy))
 		require.NoError(t, err)
 		require.NotNil(t, child)
@@ -1139,7 +1140,7 @@ func TestSupervisorStrategy(t *testing.T) {
 		require.NotNil(t, parent)
 
 		// create the child actor
-		stopStrategy := NewSupervisor(WithDirective(&PanicError{}, DefaultSupervisorDirective))
+		stopStrategy := NewSupervisor(WithDirective(&errors.PanicError{}, DefaultSupervisorDirective))
 		child, err := parent.SpawnChild(ctx, "SpawnChild", &MockPostStop{}, WithSupervisor(stopStrategy))
 		require.NoError(t, err)
 		require.NotNil(t, child)
@@ -1183,7 +1184,7 @@ func TestSupervisorStrategy(t *testing.T) {
 		require.NotNil(t, parent)
 
 		// create the child actor
-		restartStrategy := NewSupervisor(WithDirective(&PanicError{}, RestartDirective))
+		restartStrategy := NewSupervisor(WithDirective(&errors.PanicError{}, RestartDirective))
 		child, err := parent.SpawnChild(ctx, "SpawnChild", NewMockSupervised(), WithSupervisor(restartStrategy))
 		require.NoError(t, err)
 		require.NotNil(t, child)
@@ -1231,7 +1232,7 @@ func TestSupervisorStrategy(t *testing.T) {
 		// create the child actor
 		restartStrategy := NewSupervisor(
 			WithStrategy(OneForAllStrategy),
-			WithDirective(&PanicError{}, RestartDirective))
+			WithDirective(&errors.PanicError{}, RestartDirective))
 		child, err := parent.SpawnChild(ctx, "SpawnChild", NewMockSupervised(), WithSupervisor(restartStrategy))
 		require.NoError(t, err)
 		require.NotNil(t, child)
@@ -1328,7 +1329,7 @@ func TestSupervisorStrategy(t *testing.T) {
 		assert.NotNil(t, parent)
 
 		// create the child actor
-		resumeStrategy := NewSupervisor(WithDirective(&PanicError{}, ResumeDirective))
+		resumeStrategy := NewSupervisor(WithDirective(&errors.PanicError{}, ResumeDirective))
 		child, err := parent.SpawnChild(ctx, "SpawnChild", NewMockSupervised(), WithSupervisor(resumeStrategy))
 		assert.NoError(t, err)
 		assert.NotNil(t, child)
@@ -1377,7 +1378,7 @@ func TestSupervisorStrategy(t *testing.T) {
 
 		restartStrategy := NewSupervisor(
 			WithStrategy(OneForOneStrategy),
-			WithDirective(&PanicError{}, RestartDirective),
+			WithDirective(&errors.PanicError{}, RestartDirective),
 			WithRetry(2, time.Minute),
 		)
 
@@ -1545,7 +1546,7 @@ func TestSupervisorStrategy(t *testing.T) {
 		require.NotNil(t, parent)
 
 		// create the child actor
-		escalationStrategy := NewSupervisor(WithDirective(&PanicError{}, EscalateDirective))
+		escalationStrategy := NewSupervisor(WithDirective(&errors.PanicError{}, EscalateDirective))
 		child, err := parent.SpawnChild(ctx, "SpawnChild", NewMockSupervised(), WithSupervisor(escalationStrategy))
 		require.NoError(t, err)
 		require.NotNil(t, child)
@@ -1587,7 +1588,7 @@ func TestSupervisorStrategy(t *testing.T) {
 		require.NotNil(t, parent)
 
 		// create the child actor
-		escalationStrategy := NewSupervisor(WithDirective(&PanicError{}, EscalateDirective))
+		escalationStrategy := NewSupervisor(WithDirective(&errors.PanicError{}, EscalateDirective))
 		child, err := parent.SpawnChild(ctx, "reinstate", NewMockSupervised(), WithSupervisor(escalationStrategy))
 		require.NoError(t, err)
 		require.NotNil(t, child)
@@ -1781,7 +1782,7 @@ func TestMessaging(t *testing.T) {
 		// send an ask
 		_, err = pid1.Ask(ctx, pid2, new(testpb.TestReply), 0)
 		require.Error(t, err)
-		require.ErrorIs(t, err, ErrInvalidTimeout)
+		require.ErrorIs(t, err, errors.ErrInvalidTimeout)
 
 		require.NoError(t, pid1.Shutdown(ctx))
 		require.NoError(t, pid2.Shutdown(ctx))
@@ -1821,7 +1822,7 @@ func TestMessaging(t *testing.T) {
 		// send an ask
 		reply, err := pid1.Ask(ctx, pid2, new(testpb.TestReply), 20*time.Second)
 		require.Error(t, err)
-		require.ErrorIs(t, err, ErrDead)
+		require.ErrorIs(t, err, errors.ErrDead)
 		require.Nil(t, reply)
 
 		// wait a while because exchange is ongoing
@@ -1867,7 +1868,7 @@ func TestMessaging(t *testing.T) {
 		// send an ask
 		err = pid1.Tell(ctx, pid2, new(testpb.TestReply))
 		require.Error(t, err)
-		require.ErrorIs(t, err, ErrDead)
+		require.ErrorIs(t, err, errors.ErrDead)
 
 		// wait a while because exchange is ongoing
 		pause.For(time.Second)
@@ -1910,7 +1911,7 @@ func TestMessaging(t *testing.T) {
 		// send an ask
 		reply, err := pid1.Ask(ctx, pid2, new(testpb.TestTimeout), replyTimeout)
 		require.Error(t, err)
-		require.ErrorIs(t, err, ErrRequestTimeout)
+		require.ErrorIs(t, err, errors.ErrRequestTimeout)
 		require.Nil(t, reply)
 
 		// wait a while because exchange is ongoing
@@ -1965,7 +1966,7 @@ func TestMessaging(t *testing.T) {
 		defer cancel()
 		reply, err := pid1.Ask(cancelCtx, pid2, new(testpb.TestTimeout), replyTimeout)
 		require.Error(t, err)
-		require.ErrorIs(t, err, ErrRequestTimeout)
+		require.ErrorIs(t, err, errors.ErrRequestTimeout)
 		require.Nil(t, reply)
 
 		// wait a while because exchange is ongoing
@@ -2093,12 +2094,12 @@ func TestRemoting(t *testing.T) {
 		// perform some assertions
 		require.Error(t, err)
 		require.Nil(t, reply)
-		assert.ErrorIs(t, err, ErrRemotingDisabled)
+		assert.ErrorIs(t, err, errors.ErrRemotingDisabled)
 
 		// send a message to stop the first exchange actor
 		err = actorRef2.RemoteTell(ctx, address.From(addr1), new(testpb.TestRemoteSend))
 		require.Error(t, err)
-		assert.ErrorIs(t, err, ErrRemotingDisabled)
+		assert.ErrorIs(t, err, errors.ErrRemotingDisabled)
 
 		// stop the actor after some time
 		pause.For(time.Second)
@@ -2382,7 +2383,7 @@ func TestSpawnChild(t *testing.T) {
 		// create the child actor
 		child, err := parent.SpawnChild(ctx, "SpawnChild", NewMockSupervised())
 		assert.Error(t, err)
-		assert.ErrorIs(t, err, ErrDead)
+		assert.ErrorIs(t, err, errors.ErrDead)
 		assert.Nil(t, child)
 		assert.NoError(t, actorSystem.Stop(ctx))
 	})
@@ -2523,7 +2524,7 @@ func TestSpawnChild(t *testing.T) {
 
 		err = Tell(ctx, child, new(testpb.TestSend))
 		assert.Error(t, err)
-		assert.ErrorIs(t, err, ErrDead)
+		assert.ErrorIs(t, err, errors.ErrDead)
 
 		//stop the actor
 		err = parent.Shutdown(ctx)
@@ -2732,7 +2733,7 @@ func TestRemoteLookup(t *testing.T) {
 		addr, err := actorRef1.RemoteLookup(ctx, host, remotingPort, actorName2)
 		require.Error(t, err)
 		require.Nil(t, addr)
-		assert.ErrorIs(t, err, ErrRemotingDisabled)
+		assert.ErrorIs(t, err, errors.ErrRemotingDisabled)
 
 		t.Cleanup(func() {
 			assert.NoError(t, sys.Stop(ctx))
@@ -2760,7 +2761,7 @@ func TestFailedPreStart(t *testing.T) {
 	actorName1 := "Exchange1"
 	pid, err := sys.Spawn(ctx, actorName1, &MockPreStart{})
 	require.Error(t, err)
-	require.ErrorIs(t, err, ErrInitFailure)
+	require.ErrorIs(t, err, errors.ErrInitFailure)
 	require.Nil(t, pid)
 
 	t.Cleanup(func() {
@@ -3104,7 +3105,7 @@ func TestRemoteReSpawn(t *testing.T) {
 		actorName2 := "Exchange2"
 		err = actorRef1.RemoteReSpawn(ctx, host, remotingPort, actorName2)
 		require.Error(t, err)
-		assert.ErrorIs(t, err, ErrRemotingDisabled)
+		assert.ErrorIs(t, err, errors.ErrRemotingDisabled)
 
 		t.Cleanup(func() {
 			assert.NoError(t, sys.Stop(ctx))
@@ -3295,7 +3296,7 @@ func TestRemoteStop(t *testing.T) {
 		actorName2 := "Exchange2"
 		err = actorRef1.RemoteStop(ctx, host, remotingPort, actorName2)
 		require.Error(t, err)
-		assert.ErrorIs(t, err, ErrRemotingDisabled)
+		assert.ErrorIs(t, err, errors.ErrRemotingDisabled)
 
 		t.Cleanup(func() {
 			assert.NoError(t, sys.Stop(ctx))
@@ -3440,7 +3441,7 @@ func TestRemoteSpawn(t *testing.T) {
 		// spawn the remote actor
 		err = pid.RemoteSpawn(ctx, host, remotingPort, actorName, "exchanger")
 		require.Error(t, err)
-		assert.ErrorIs(t, err, ErrTypeNotRegistered)
+		assert.ErrorIs(t, err, errors.ErrTypeNotRegistered)
 
 		t.Cleanup(func() {
 			err = sys.Stop(ctx)
@@ -3531,7 +3532,7 @@ func TestRemoteSpawn(t *testing.T) {
 		// spawn the remote actor
 		err = pid.RemoteSpawn(ctx, host, remotingPort, actorName, "actor.exchanger")
 		require.Error(t, err)
-		assert.ErrorIs(t, err, ErrRemotingDisabled)
+		assert.ErrorIs(t, err, errors.ErrRemotingDisabled)
 
 		t.Cleanup(func() {
 			err = sys.Stop(ctx)
@@ -3674,7 +3675,7 @@ func TestPipeTo(t *testing.T) {
 
 		err = pid1.PipeTo(ctx, pid2, task)
 		require.Error(t, err)
-		assert.ErrorIs(t, err, ErrDead)
+		assert.ErrorIs(t, err, errors.ErrDead)
 
 		pause.For(time.Second)
 		assert.NoError(t, pid1.Shutdown(ctx))
@@ -3715,7 +3716,7 @@ func TestPipeTo(t *testing.T) {
 
 		err = pid1.PipeTo(ctx, pid2, nil)
 		require.Error(t, err)
-		assert.ErrorIs(t, err, ErrUndefinedTask)
+		assert.ErrorIs(t, err, errors.ErrUndefinedTask)
 
 		pause.For(time.Second)
 		assert.NoError(t, pid1.Shutdown(ctx))
@@ -3871,7 +3872,7 @@ func TestSendAsync(t *testing.T) {
 
 		err = sender.SendAsync(ctx, receiver.Name(), new(testpb.TestSend))
 		require.Error(t, err)
-		assert.ErrorIs(t, err, ErrDead)
+		assert.ErrorIs(t, err, errors.ErrDead)
 
 		t.Cleanup(func() {
 			assert.NoError(t, actorSystem.Stop(ctx))
@@ -3940,7 +3941,7 @@ func TestSendAsync(t *testing.T) {
 
 		err = sender.SendAsync(ctx, "receiver", new(testpb.TestSend))
 		require.Error(t, err)
-		assert.ErrorIs(t, err, ErrActorNotFound)
+		assert.ErrorIs(t, err, errors.ErrActorNotFound)
 
 		t.Cleanup(func() {
 			assert.NoError(t, node1.Stop(ctx))
@@ -4011,7 +4012,7 @@ func TestSendSync(t *testing.T) {
 		response, err := sender.SendSync(ctx, receiver.Name(), new(testpb.TestReply), replyTimeout)
 		require.Error(t, err)
 		require.Nil(t, response)
-		assert.ErrorIs(t, err, ErrDead)
+		assert.ErrorIs(t, err, errors.ErrDead)
 
 		t.Cleanup(func() {
 			assert.NoError(t, actorSystem.Stop(ctx))
@@ -4084,7 +4085,7 @@ func TestSendSync(t *testing.T) {
 		response, err := sender.SendSync(ctx, "receiver", new(testpb.TestReply), time.Minute)
 		require.Nil(t, response)
 		require.Error(t, err)
-		assert.ErrorIs(t, err, ErrActorNotFound)
+		assert.ErrorIs(t, err, errors.ErrActorNotFound)
 
 		t.Cleanup(func() {
 			assert.NoError(t, node1.Stop(ctx))
@@ -4365,7 +4366,7 @@ func TestReinstate(t *testing.T) {
 		// let us reinstate the actor pid2
 		err = pid.Reinstate(pid2)
 		require.Error(t, err)
-		require.ErrorIs(t, err, ErrDead)
+		require.ErrorIs(t, err, errors.ErrDead)
 
 		pause.For(time.Second)
 		require.NoError(t, actorSystem.Stop(ctx))
@@ -4396,7 +4397,7 @@ func TestReinstate(t *testing.T) {
 
 		err = pid.Reinstate(NoSender)
 		require.Error(t, err)
-		require.ErrorIs(t, err, ErrUndefinedActor)
+		require.ErrorIs(t, err, errors.ErrUndefinedActor)
 
 		pause.For(time.Second)
 		require.NoError(t, actorSystem.Stop(ctx))
@@ -4514,7 +4515,7 @@ func TestReinstateNamed(t *testing.T) {
 		// let us reinstate the actor pid2
 		err = pid.ReinstateNamed(ctx, pid2.Name())
 		require.Error(t, err)
-		require.ErrorIs(t, err, ErrDead)
+		require.ErrorIs(t, err, errors.ErrDead)
 
 		pause.For(time.Second)
 		require.NoError(t, actorSystem.Stop(ctx))
@@ -4582,7 +4583,7 @@ func TestReinstateNamed(t *testing.T) {
 
 		err = ref.ReinstateNamed(ctx, "ref1")
 		require.Error(t, err)
-		require.ErrorIs(t, err, ErrActorNotFound)
+		require.ErrorIs(t, err, errors.ErrActorNotFound)
 
 		// stop the actor after some time
 		pause.For(time.Second)

@@ -59,11 +59,13 @@ import (
 
 	"github.com/tochemey/goakt/v3/address"
 	"github.com/tochemey/goakt/v3/discovery"
+	gerrors "github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/extension"
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/hash"
 	"github.com/tochemey/goakt/v3/internal/chain"
 	"github.com/tochemey/goakt/v3/internal/cluster"
+	"github.com/tochemey/goakt/v3/internal/codec"
 	"github.com/tochemey/goakt/v3/internal/collection"
 	"github.com/tochemey/goakt/v3/internal/eventstream"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
@@ -574,7 +576,7 @@ type ActorSystem interface {
 	getReflection() *reflection
 	findRoutee(routeeName string) (*PID, bool)
 	isShuttingDown() bool
-	getRemoting() *Remoting
+	getRemoting() remote.Remoting
 	getGrains() *collection.Map[string, *grainPID]
 	recreateGrain(ctx context.Context, props *internalpb.Grain) error
 	decreaseActorsCounter()
@@ -611,7 +613,7 @@ type actorSystem struct {
 	// Specifies whether remoting is enabled.
 	// This allows to handle remote messaging
 	remotingEnabled atomic.Bool
-	remoting        *Remoting
+	remoting        remote.Remoting
 	// Specifies the remoting server
 	server       *stdhttp.Server
 	listener     net.Listener
@@ -719,10 +721,10 @@ var (
 //   - Use Run for typical applications to handle signals
 func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 	if name == "" {
-		return nil, ErrNameRequired
+		return nil, gerrors.ErrNameRequired
 	}
 	if match, _ := regexp.MatchString("^[a-zA-Z0-9][a-zA-Z0-9-_]*$", name); !match {
-		return nil, ErrInvalidActorSystemName
+		return nil, gerrors.ErrInvalidActorSystemName
 	}
 
 	system := &actorSystem{
@@ -800,7 +802,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 
 	// perform some quick validations on the TLS configurations
 	if (system.serverTLS == nil) != (system.clientTLS == nil) {
-		return nil, ErrInvalidTLSConfiguration
+		return nil, gerrors.ErrInvalidTLSConfiguration
 	}
 
 	// append the right protocols to the TLS settings
@@ -873,7 +875,7 @@ func (x *actorSystem) Run(ctx context.Context, startHook func(ctx context.Contex
 func (x *actorSystem) Start(ctx context.Context) error {
 	// make sure we don't start the actor system twice
 	if x.started.Load() {
-		return ErrActorSystemAlreadyStarted
+		return gerrors.ErrActorSystemAlreadyStarted
 	}
 
 	x.logger.Infof("%s actor system starting on %s/%s..", x.name, runtime.GOOS, runtime.GOARCH)
@@ -981,7 +983,7 @@ func (x *actorSystem) Logger() log.Logger {
 // Deregister removes a registered actor from the registry
 func (x *actorSystem) Deregister(_ context.Context, actor Actor) error {
 	if !x.Running() {
-		return ErrActorSystemNotStarted
+		return gerrors.ErrActorSystemNotStarted
 	}
 
 	x.locker.Lock()
@@ -993,7 +995,7 @@ func (x *actorSystem) Deregister(_ context.Context, actor Actor) error {
 // Register registers an actor for future use. This is necessary when creating an actor remotely
 func (x *actorSystem) Register(_ context.Context, actor Actor) error {
 	if !x.Running() {
-		return ErrActorSystemNotStarted
+		return gerrors.ErrActorSystemNotStarted
 	}
 
 	x.locker.Lock()
@@ -1188,7 +1190,7 @@ func (x *actorSystem) ResumeSchedule(reference string) error {
 // Remember to use the Unsubscribe method to avoid resource leakage.
 func (x *actorSystem) Subscribe() (eventstream.Subscriber, error) {
 	if !x.Running() {
-		return nil, ErrActorSystemNotStarted
+		return nil, gerrors.ErrActorSystemNotStarted
 	}
 	x.locker.Lock()
 	subscriber := x.eventsStream.AddSubscriber()
@@ -1200,7 +1202,7 @@ func (x *actorSystem) Subscribe() (eventstream.Subscriber, error) {
 // Unsubscribe unsubscribes a subscriber.
 func (x *actorSystem) Unsubscribe(subscriber eventstream.Subscriber) error {
 	if !x.Running() {
-		return ErrActorSystemNotStarted
+		return gerrors.ErrActorSystemNotStarted
 	}
 	x.locker.Lock()
 	x.eventsStream.Unsubscribe(subscriber, eventsTopic)
@@ -1257,7 +1259,7 @@ func (x *actorSystem) NumActors() uint64 {
 // For distributed scenarios, use a SpawnOn method.
 func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor, opts ...SpawnOption) (*PID, error) {
 	if !x.Running() {
-		return nil, ErrActorSystemNotStarted
+		return nil, gerrors.ErrActorSystemNotStarted
 	}
 
 	// check some preconditions
@@ -1291,7 +1293,7 @@ func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor, opts 
 // in the given optional options
 func (x *actorSystem) SpawnNamedFromFunc(ctx context.Context, name string, receiveFunc ReceiveFunc, opts ...FuncOption) (*PID, error) {
 	if !x.Running() {
-		return nil, ErrActorSystemNotStarted
+		return nil, gerrors.ErrActorSystemNotStarted
 	}
 
 	config := newFuncConfig(opts...)
@@ -1358,7 +1360,7 @@ func (x *actorSystem) SpawnNamedFromFunc(ctx context.Context, name string, recei
 // Note: The created actor used the default mailbox set during the creation of the actor system.
 func (x *actorSystem) SpawnOn(ctx context.Context, name string, actor Actor, opts ...SpawnOption) error {
 	if !x.Running() {
-		return ErrActorSystemNotStarted
+		return gerrors.ErrActorSystemNotStarted
 	}
 
 	// check some preconditions
@@ -1452,11 +1454,11 @@ func (x *actorSystem) SpawnRouter(ctx context.Context, poolSize int, routeesKind
 // This is useful for managing shared resources or coordinating tasks that should be handled by a single actor.
 func (x *actorSystem) SpawnSingleton(ctx context.Context, name string, actor Actor) error {
 	if !x.Running() {
-		return ErrActorSystemNotStarted
+		return gerrors.ErrActorSystemNotStarted
 	}
 
 	if !x.InCluster() {
-		return ErrClusterDisabled
+		return gerrors.ErrClusterDisabled
 	}
 
 	cl := x.getCluster()
@@ -1477,8 +1479,8 @@ func (x *actorSystem) SpawnSingleton(ctx context.Context, name string, actor Act
 		WithSupervisor(
 			NewSupervisor(
 				WithStrategy(OneForOneStrategy),
-				WithDirective(&PanicError{}, StopDirective),
-				WithDirective(&InternalError{}, StopDirective),
+				WithDirective(&gerrors.PanicError{}, StopDirective),
+				WithDirective(&gerrors.InternalError{}, StopDirective),
 				WithDirective(&runtime.PanicNilError{}, StopDirective),
 			),
 		))
@@ -1496,12 +1498,12 @@ func (x *actorSystem) SpawnSingleton(ctx context.Context, name string, actor Act
 // Kill stops a given actor in the system
 func (x *actorSystem) Kill(ctx context.Context, name string) error {
 	if !x.Running() {
-		return ErrActorSystemNotStarted
+		return gerrors.ErrActorSystemNotStarted
 	}
 
 	// user should not query system actors
 	if isReservedName(name) {
-		return NewErrActorNotFound(name)
+		return gerrors.NewErrActorNotFound(name)
 	}
 
 	actorAddress := x.actorAddress(name)
@@ -1511,7 +1513,7 @@ func (x *actorSystem) Kill(ctx context.Context, name string) error {
 		return pid.Shutdown(ctx)
 	}
 
-	return NewErrActorNotFound(actorAddress.String())
+	return gerrors.NewErrActorNotFound(actorAddress.String())
 }
 
 // ReSpawn recreates a given actor in the system
@@ -1521,12 +1523,12 @@ func (x *actorSystem) Kill(ctx context.Context, name string) error {
 // In case any of the direct child restart fails the given actor will not be started at all.
 func (x *actorSystem) ReSpawn(ctx context.Context, name string) (*PID, error) {
 	if !x.Running() {
-		return nil, ErrActorSystemNotStarted
+		return nil, gerrors.ErrActorSystemNotStarted
 	}
 
 	// user should not query system actors
 	if isReservedName(name) {
-		return nil, NewErrActorNotFound(name)
+		return nil, gerrors.NewErrActorNotFound(name)
 	}
 
 	actorAddress := x.actorAddress(name)
@@ -1539,7 +1541,7 @@ func (x *actorSystem) ReSpawn(ctx context.Context, name string) (*PID, error) {
 		return pid, nil
 	}
 
-	return nil, NewErrActorNotFound(actorAddress.String())
+	return nil, gerrors.NewErrActorNotFound(actorAddress.String())
 }
 
 // Name returns the actor system name
@@ -1613,14 +1615,14 @@ func (x *actorSystem) PeerAddress() string {
 // If the actor is not found, an error of type "actor not found" is returned.
 func (x *actorSystem) ActorOf(ctx context.Context, actorName string) (addr *address.Address, pid *PID, err error) {
 	if !x.Running() {
-		return nil, nil, ErrActorSystemNotStarted
+		return nil, nil, gerrors.ErrActorSystemNotStarted
 	}
 
 	x.locker.RLock()
 	// user should not query system actors
 	if isReservedName(actorName) {
 		x.locker.RUnlock()
-		return nil, nil, NewErrActorNotFound(actorName)
+		return nil, nil, gerrors.NewErrActorNotFound(actorName)
 	}
 
 	// first check whether the actor exist locally
@@ -1638,7 +1640,7 @@ func (x *actorSystem) ActorOf(ctx context.Context, actorName string) (addr *addr
 			if errors.Is(err, cluster.ErrActorNotFound) {
 				x.logger.Infof("actor=%s not found", actorName)
 				x.locker.RUnlock()
-				return nil, nil, NewErrActorNotFound(actorName)
+				return nil, nil, gerrors.NewErrActorNotFound(actorName)
 			}
 
 			x.locker.RUnlock()
@@ -1651,19 +1653,19 @@ func (x *actorSystem) ActorOf(ctx context.Context, actorName string) (addr *addr
 
 	if x.remotingEnabled.Load() {
 		x.locker.RUnlock()
-		return nil, nil, ErrMethodCallNotAllowed
+		return nil, nil, gerrors.ErrMethodCallNotAllowed
 	}
 
 	x.logger.Infof("actor=%s not found", actorName)
 	x.locker.RUnlock()
-	return nil, nil, NewErrActorNotFound(actorName)
+	return nil, nil, gerrors.NewErrActorNotFound(actorName)
 }
 
 // ActorExists checks whether an actor with the given name exists in the system,
 // either locally, or on another node in the cluster if clustering is enabled.
 func (x *actorSystem) ActorExists(ctx context.Context, actorName string) (bool, error) {
 	if !x.Running() {
-		return false, ErrActorSystemNotStarted
+		return false, gerrors.ErrActorSystemNotStarted
 	}
 
 	x.locker.RLock()
@@ -1687,14 +1689,14 @@ func (x *actorSystem) ActorExists(ctx context.Context, actorName string) (bool, 
 // A local actor is an actor that reside on the same node where the given actor system has started
 func (x *actorSystem) LocalActor(actorName string) (*PID, error) {
 	if !x.Running() {
-		return nil, ErrActorSystemNotStarted
+		return nil, gerrors.ErrActorSystemNotStarted
 	}
 
 	x.locker.RLock()
 	// user should not query system actors
 	if isReservedName(actorName) {
 		x.locker.RUnlock()
-		return nil, NewErrActorNotFound(actorName)
+		return nil, gerrors.NewErrActorNotFound(actorName)
 	}
 
 	actorAddress := x.actorAddress(actorName)
@@ -1706,7 +1708,7 @@ func (x *actorSystem) LocalActor(actorName string) (*PID, error) {
 
 	x.logger.Infof("actor=%s not found", actorName)
 	x.locker.RUnlock()
-	return nil, NewErrActorNotFound(actorName)
+	return nil, gerrors.NewErrActorNotFound(actorName)
 }
 
 // RemoteActor returns the address of a remote actor when cluster is enabled
@@ -1714,19 +1716,19 @@ func (x *actorSystem) LocalActor(actorName string) (*PID, error) {
 // One can always check whether cluster is enabled before calling this method or just use the ActorOf method.
 func (x *actorSystem) RemoteActor(ctx context.Context, actorName string) (addr *address.Address, err error) {
 	if !x.Running() {
-		return nil, ErrActorSystemNotStarted
+		return nil, gerrors.ErrActorSystemNotStarted
 	}
 
 	x.locker.RLock()
 	// user should not query system actors
 	if isReservedName(actorName) {
 		x.locker.RUnlock()
-		return nil, NewErrActorNotFound(actorName)
+		return nil, gerrors.NewErrActorNotFound(actorName)
 	}
 
 	if x.cluster == nil {
 		x.locker.RUnlock()
-		return nil, ErrClusterDisabled
+		return nil, gerrors.ErrClusterDisabled
 	}
 
 	actor, err := x.cluster.GetActor(ctx, actorName)
@@ -1734,7 +1736,7 @@ func (x *actorSystem) RemoteActor(ctx context.Context, actorName string) (addr *
 		if errors.Is(err, cluster.ErrActorNotFound) {
 			x.logger.Infof("actor=%s not found", actorName)
 			x.locker.RUnlock()
-			return nil, NewErrActorNotFound(actorName)
+			return nil, gerrors.NewErrActorNotFound(actorName)
 		}
 
 		x.locker.RUnlock()
@@ -1751,12 +1753,12 @@ func (x *actorSystem) RemoteLookup(ctx context.Context, request *connect.Request
 	msg := request.Msg
 
 	if !x.remotingEnabled.Load() {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrRemotingDisabled)
+		return nil, connect.NewError(connect.CodeFailedPrecondition, gerrors.ErrRemotingDisabled)
 	}
 
 	remoteAddr := fmt.Sprintf("%s:%d", x.remoteConfig.BindAddr(), x.remoteConfig.BindPort())
 	if remoteAddr != net.JoinHostPort(msg.GetHost(), strconv.Itoa(int(msg.GetPort()))) {
-		return nil, connect.NewError(connect.CodeInvalidArgument, ErrInvalidHost)
+		return nil, connect.NewError(connect.CodeInvalidArgument, gerrors.ErrInvalidHost)
 	}
 
 	actorName := msg.GetName()
@@ -1764,7 +1766,7 @@ func (x *actorSystem) RemoteLookup(ctx context.Context, request *connect.Request
 		actor, err := x.cluster.GetActor(ctx, actorName)
 		if err != nil {
 			if errors.Is(err, cluster.ErrActorNotFound) {
-				err := NewErrAddressNotFound(actorName)
+				err := gerrors.NewErrAddressNotFound(actorName)
 				logger.Error(err.Error())
 				return nil, err
 			}
@@ -1777,7 +1779,7 @@ func (x *actorSystem) RemoteLookup(ctx context.Context, request *connect.Request
 	addr := address.New(actorName, x.Name(), msg.GetHost(), int(msg.GetPort()))
 	pidNode, exist := x.actors.node(addr.String())
 	if !exist {
-		err := NewErrAddressNotFound(addr.String())
+		err := gerrors.NewErrAddressNotFound(addr.String())
 		logger.Error(err.Error())
 		return nil, err
 	}
@@ -1793,7 +1795,7 @@ func (x *actorSystem) RemoteAsk(ctx context.Context, request *connect.Request[in
 	logger := x.logger
 
 	if !x.remotingEnabled.Load() {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrRemotingDisabled)
+		return nil, connect.NewError(connect.CodeFailedPrecondition, gerrors.ErrRemotingDisabled)
 	}
 
 	req := request.Msg
@@ -1808,13 +1810,13 @@ func (x *actorSystem) RemoteAsk(ctx context.Context, request *connect.Request[in
 
 		remoteAddr := fmt.Sprintf("%s:%d", x.remoteConfig.BindAddr(), x.remoteConfig.BindPort())
 		if remoteAddr != net.JoinHostPort(receiver.GetHost(), strconv.Itoa(int(receiver.GetPort()))) {
-			return nil, connect.NewError(connect.CodeInvalidArgument, ErrInvalidHost)
+			return nil, connect.NewError(connect.CodeInvalidArgument, gerrors.ErrInvalidHost)
 		}
 
 		addr := address.From(receiver)
 		pidNode, exist := x.actors.node(addr.String())
 		if !exist {
-			err := NewErrAddressNotFound(addr.String())
+			err := gerrors.NewErrAddressNotFound(addr.String())
 			logger.Error(err.Error())
 			return nil, err
 		}
@@ -1822,7 +1824,7 @@ func (x *actorSystem) RemoteAsk(ctx context.Context, request *connect.Request[in
 		pid := pidNode.value()
 		reply, err := x.handleRemoteAsk(ctx, pid, message, timeout)
 		if err != nil {
-			err := NewErrRemoteSendFailure(err)
+			err := gerrors.NewErrRemoteSendFailure(err)
 			logger.Error(err.Error())
 			return nil, err
 		}
@@ -1839,7 +1841,7 @@ func (x *actorSystem) RemoteTell(ctx context.Context, request *connect.Request[i
 	logger := x.logger
 
 	if !x.remotingEnabled.Load() {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrRemotingDisabled)
+		return nil, connect.NewError(connect.CodeFailedPrecondition, gerrors.ErrRemotingDisabled)
 	}
 
 	req := request.Msg
@@ -1848,14 +1850,14 @@ func (x *actorSystem) RemoteTell(ctx context.Context, request *connect.Request[i
 		addr := address.From(receiver)
 		pidNode, exist := x.actors.node(addr.String())
 		if !exist {
-			err := NewErrAddressNotFound(addr.String())
+			err := gerrors.NewErrAddressNotFound(addr.String())
 			logger.Error(err)
 			return nil, err
 		}
 
 		pid := pidNode.value()
 		if err := x.handleRemoteTell(ctx, pid, message); err != nil {
-			err := NewErrRemoteSendFailure(err)
+			err := gerrors.NewErrRemoteSendFailure(err)
 			logger.Error(err)
 			return nil, err
 		}
@@ -1871,23 +1873,23 @@ func (x *actorSystem) RemoteReSpawn(ctx context.Context, request *connect.Reques
 	msg := request.Msg
 
 	if !x.remotingEnabled.Load() {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrRemotingDisabled)
+		return nil, connect.NewError(connect.CodeFailedPrecondition, gerrors.ErrRemotingDisabled)
 	}
 
 	remoteAddr := fmt.Sprintf("%s:%d", x.remoteConfig.BindAddr(), x.remoteConfig.BindPort())
 	if remoteAddr != net.JoinHostPort(msg.GetHost(), strconv.Itoa(int(msg.GetPort()))) {
-		return nil, connect.NewError(connect.CodeInvalidArgument, ErrInvalidHost)
+		return nil, connect.NewError(connect.CodeInvalidArgument, gerrors.ErrInvalidHost)
 	}
 
 	// make sure we don't interfere with system actors.
 	if isReservedName(msg.GetName()) {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, NewErrActorNotFound(msg.GetName()))
+		return nil, connect.NewError(connect.CodeFailedPrecondition, gerrors.NewErrActorNotFound(msg.GetName()))
 	}
 
 	actorAddress := address.New(msg.GetName(), x.Name(), msg.GetHost(), int(msg.GetPort()))
 	node, exist := x.actors.node(actorAddress.String())
 	if !exist {
-		err := NewErrAddressNotFound(actorAddress.String())
+		err := gerrors.NewErrAddressNotFound(actorAddress.String())
 		logger.Error(err)
 		return nil, err
 	}
@@ -1907,23 +1909,23 @@ func (x *actorSystem) RemoteStop(ctx context.Context, request *connect.Request[i
 	msg := request.Msg
 
 	if !x.remotingEnabled.Load() {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrRemotingDisabled)
+		return nil, connect.NewError(connect.CodeFailedPrecondition, gerrors.ErrRemotingDisabled)
 	}
 
 	remoteAddr := fmt.Sprintf("%s:%d", x.remoteConfig.BindAddr(), x.remoteConfig.BindPort())
 	if remoteAddr != net.JoinHostPort(msg.GetHost(), strconv.Itoa(int(msg.GetPort()))) {
-		return nil, connect.NewError(connect.CodeInvalidArgument, ErrInvalidHost)
+		return nil, connect.NewError(connect.CodeInvalidArgument, gerrors.ErrInvalidHost)
 	}
 
 	// make sure we don't interfere with system actors.
 	if isReservedName(msg.GetName()) {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, NewErrActorNotFound(msg.GetName()))
+		return nil, connect.NewError(connect.CodeFailedPrecondition, gerrors.NewErrActorNotFound(msg.GetName()))
 	}
 
 	actorAddress := address.New(msg.GetName(), x.Name(), msg.GetHost(), int(msg.GetPort()))
 	pidNode, exist := x.actors.node(actorAddress.String())
 	if !exist {
-		err := NewErrAddressNotFound(actorAddress.String())
+		err := gerrors.NewErrAddressNotFound(actorAddress.String())
 		logger.Error(err.Error())
 		return nil, err
 	}
@@ -1942,17 +1944,17 @@ func (x *actorSystem) RemoteSpawn(ctx context.Context, request *connect.Request[
 
 	msg := request.Msg
 	if !x.remotingEnabled.Load() {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrRemotingDisabled)
+		return nil, connect.NewError(connect.CodeFailedPrecondition, gerrors.ErrRemotingDisabled)
 	}
 
 	remoteAddr := fmt.Sprintf("%s:%d", x.remoteConfig.BindAddr(), x.remoteConfig.BindPort())
 	if remoteAddr != net.JoinHostPort(msg.GetHost(), strconv.Itoa(int(msg.GetPort()))) {
-		return nil, connect.NewError(connect.CodeInvalidArgument, ErrInvalidHost)
+		return nil, connect.NewError(connect.CodeInvalidArgument, gerrors.ErrInvalidHost)
 	}
 
 	// make sure we don't interfere with system actors.
 	if isReservedName(msg.GetActorName()) {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, NewErrActorNotFound(msg.GetActorName()))
+		return nil, connect.NewError(connect.CodeFailedPrecondition, gerrors.NewErrActorNotFound(msg.GetActorName()))
 	}
 
 	actor, err := x.reflection.NewActor(msg.GetActorType())
@@ -1962,8 +1964,8 @@ func (x *actorSystem) RemoteSpawn(ctx context.Context, request *connect.Request[
 			msg.GetActorName(), msg.GetActorType(), msg.GetHost(), msg.GetPort(), err,
 		)
 
-		if errors.Is(err, ErrTypeNotRegistered) {
-			return nil, connect.NewError(connect.CodeFailedPrecondition, ErrTypeNotRegistered)
+		if errors.Is(err, gerrors.ErrTypeNotRegistered) {
+			return nil, connect.NewError(connect.CodeFailedPrecondition, gerrors.ErrTypeNotRegistered)
 		}
 
 		return nil, connect.NewError(connect.CodeInternal, err)
@@ -1977,7 +1979,7 @@ func (x *actorSystem) RemoteSpawn(ctx context.Context, request *connect.Request[
 	}
 
 	opts := []SpawnOption{
-		WithPassivationStrategy(unmarshalPassivationStrategy(msg.GetPassivationStrategy())),
+		WithPassivationStrategy(codec.DecodePassivationStrategy(msg.GetPassivationStrategy())),
 	}
 
 	if !msg.GetRelocatable() {
@@ -2014,23 +2016,23 @@ func (x *actorSystem) RemoteReinstate(_ context.Context, request *connect.Reques
 	msg := request.Msg
 
 	if !x.remotingEnabled.Load() {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrRemotingDisabled)
+		return nil, connect.NewError(connect.CodeFailedPrecondition, gerrors.ErrRemotingDisabled)
 	}
 
 	remoteAddr := fmt.Sprintf("%s:%d", x.remoteConfig.BindAddr(), x.remoteConfig.BindPort())
 	if remoteAddr != net.JoinHostPort(msg.GetHost(), strconv.Itoa(int(msg.GetPort()))) {
-		return nil, connect.NewError(connect.CodeInvalidArgument, ErrInvalidHost)
+		return nil, connect.NewError(connect.CodeInvalidArgument, gerrors.ErrInvalidHost)
 	}
 
 	// make sure we don't interfere with system actors.
 	if isReservedName(msg.GetName()) {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, NewErrActorNotFound(msg.GetName()))
+		return nil, connect.NewError(connect.CodeFailedPrecondition, gerrors.NewErrActorNotFound(msg.GetName()))
 	}
 
 	actorAddress := address.New(msg.GetName(), x.Name(), msg.GetHost(), int(msg.GetPort()))
 	node, exist := x.actors.node(actorAddress.String())
 	if !exist {
-		err := NewErrAddressNotFound(actorAddress.String())
+		err := gerrors.NewErrAddressNotFound(actorAddress.String())
 		logger.Error(err.Error())
 		return nil, err
 	}
@@ -2044,14 +2046,14 @@ func (x *actorSystem) RemoteReinstate(_ context.Context, request *connect.Reques
 // GetNodeMetric handles the GetNodeMetric request send the given node
 func (x *actorSystem) GetNodeMetric(_ context.Context, request *connect.Request[internalpb.GetNodeMetricRequest]) (*connect.Response[internalpb.GetNodeMetricResponse], error) {
 	if !x.clusterEnabled.Load() {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrClusterDisabled)
+		return nil, connect.NewError(connect.CodeFailedPrecondition, gerrors.ErrClusterDisabled)
 	}
 
 	req := request.Msg
 
 	remoteAddr := fmt.Sprintf("%s:%d", x.remoteConfig.BindAddr(), x.remoteConfig.BindPort())
 	if remoteAddr != req.GetNodeAddress() {
-		return nil, connect.NewError(connect.CodeInvalidArgument, ErrInvalidHost)
+		return nil, connect.NewError(connect.CodeInvalidArgument, gerrors.ErrInvalidHost)
 	}
 
 	actorCount := x.actors.count()
@@ -2066,7 +2068,7 @@ func (x *actorSystem) GetNodeMetric(_ context.Context, request *connect.Request[
 // GetKinds returns the cluster kinds
 func (x *actorSystem) GetKinds(_ context.Context, request *connect.Request[internalpb.GetKindsRequest]) (*connect.Response[internalpb.GetKindsResponse], error) {
 	if !x.clusterEnabled.Load() {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrClusterDisabled)
+		return nil, connect.NewError(connect.CodeFailedPrecondition, gerrors.ErrClusterDisabled)
 	}
 
 	req := request.Msg
@@ -2074,7 +2076,7 @@ func (x *actorSystem) GetKinds(_ context.Context, request *connect.Request[inter
 
 	// routine check
 	if remoteAddr != req.GetNodeAddress() {
-		return nil, connect.NewError(connect.CodeInvalidArgument, ErrInvalidHost)
+		return nil, connect.NewError(connect.CodeInvalidArgument, gerrors.ErrInvalidHost)
 	}
 
 	kinds := make([]string, len(x.clusterConfig.Kinds()))
@@ -2157,7 +2159,7 @@ func (x *actorSystem) Inject(dependencies ...extension.Dependency) error {
 
 	if !x.started.Load() {
 		x.locker.Unlock()
-		return ErrActorSystemNotStarted
+		return gerrors.ErrActorSystemNotStarted
 	}
 
 	for _, dependency := range dependencies {
@@ -2260,7 +2262,7 @@ func (x *actorSystem) decreaseActorsCounter() {
 // getRemoting returns the remoting instance of the actor system
 // This method is used internally to access the remoting functionality
 // and is not intended for external use.
-func (x *actorSystem) getRemoting() *Remoting {
+func (x *actorSystem) getRemoting() remote.Remoting {
 	x.locker.RLock()
 	remoting := x.remoting
 	x.locker.RUnlock()
@@ -2313,7 +2315,7 @@ func (x *actorSystem) getPeerStateFromStore(address string) (*internalpb.PeerSta
 	peerState, ok := x.clusterStore.GetPeerState(address)
 	x.locker.RUnlock()
 	if !ok {
-		return nil, ErrPeerNotFound
+		return nil, gerrors.ErrPeerNotFound
 	}
 	return peerState, nil
 }
@@ -2321,7 +2323,7 @@ func (x *actorSystem) getPeerStateFromStore(address string) (*internalpb.PeerSta
 // putActorOnCluster broadcast the newly (re)spawned actor into the cluster
 func (x *actorSystem) putActorOnCluster(pid *PID) error {
 	if x.clusterEnabled.Load() {
-		dependencies, err := marshalDependencies(pid.Dependencies()...)
+		dependencies, err := codec.EncodeDependencies(pid.Dependencies()...)
 		if err != nil {
 			return err
 		}
@@ -2331,7 +2333,7 @@ func (x *actorSystem) putActorOnCluster(pid *PID) error {
 			Type:                registry.Name(pid.Actor()),
 			IsSingleton:         pid.IsSingleton(),
 			Relocatable:         pid.IsRelocatable(),
-			PassivationStrategy: marshalPassivationStrategy(pid.PassivationStrategy()),
+			PassivationStrategy: codec.EncodePassivationStrategy(pid.PassivationStrategy()),
 			Dependencies:        dependencies,
 			EnableStash:         pid.stashBox != nil,
 		}
@@ -2342,7 +2344,7 @@ func (x *actorSystem) putActorOnCluster(pid *PID) error {
 // putGrainOnCluster broadcast the newly (re)activated grain into the cluster
 func (x *actorSystem) putGrainOnCluster(pid *grainPID) error {
 	if x.clusterEnabled.Load() {
-		dependencies, err := marshalDependencies(pid.dependencies.Values()...)
+		dependencies, err := codec.EncodeDependencies(pid.dependencies.Values()...)
 		if err != nil {
 			return err
 		}
@@ -2372,11 +2374,8 @@ func (x *actorSystem) enableClustering(ctx context.Context) error {
 
 	x.logger.Info("enabling clustering...")
 
-	x.locker.Lock()
-
 	if !x.remotingEnabled.Load() {
 		x.logger.Error("clustering needs remoting to be enabled")
-		x.locker.Unlock()
 		return errors.New("clustering needs remoting to be enabled")
 	}
 
@@ -2385,7 +2384,6 @@ func (x *actorSystem) enableClustering(ctx context.Context) error {
 		clusterStore, err := cluster.NewStore(x.logger, x.clusterConfig.WAL())
 		if err != nil {
 			x.logger.Errorf("failed to initialize peers cache: %v", err)
-			x.locker.Unlock()
 			return err
 		}
 
@@ -2421,14 +2419,12 @@ func (x *actorSystem) enableClustering(ctx context.Context) error {
 	)
 	if err != nil {
 		x.logger.Errorf("failed to initialize cluster engine: %v", err)
-		x.locker.Unlock()
 		return err
 	}
 
 	x.logger.Info("starting cluster engine...")
 	if err := clusterEngine.Start(ctx); err != nil {
 		x.logger.Errorf("failed to start cluster engine: %v", err)
-		x.locker.Unlock()
 		return err
 	}
 
@@ -2457,8 +2453,6 @@ func (x *actorSystem) enableClustering(ctx context.Context) error {
 			x.logger.Infof("cluster Grain=(%s) registered", registry.Name(grain))
 		}
 	}
-
-	x.locker.Unlock()
 
 	go x.clusterEventsLoop()
 	go x.replicateActors()
@@ -2494,9 +2488,6 @@ func (x *actorSystem) enableRemoting(ctx context.Context) error {
 	mux.Handle(remotingServicePath, remotingServiceHandler)
 	mux.Handle(clusterServicePath, clusterServiceHandler)
 
-	x.locker.Lock()
-	defer x.locker.Unlock()
-
 	// configure the appropriate server
 	if err := x.configureServer(ctx, mux); err != nil {
 		x.logger.Error(fmt.Errorf("failed enable remoting: %w", err))
@@ -2520,13 +2511,13 @@ func (x *actorSystem) enableRemoting(ctx context.Context) error {
 // setRemoting sets the remoting service
 func (x *actorSystem) setRemoting() {
 	if x.clientTLS != nil {
-		x.remoting = NewRemoting(
-			WithRemotingTLS(x.clientTLS),
-			WithRemotingMaxReadFameSize(int(x.remoteConfig.MaxFrameSize())), // nolint
+		x.remoting = remote.NewRemoting(
+			remote.WithRemotingTLS(x.clientTLS),
+			remote.WithRemotingMaxReadFameSize(int(x.remoteConfig.MaxFrameSize())), // nolint
 		)
 		return
 	}
-	x.remoting = NewRemoting(WithRemotingMaxReadFameSize(int(x.remoteConfig.MaxFrameSize())))
+	x.remoting = remote.NewRemoting(remote.WithRemotingMaxReadFameSize(int(x.remoteConfig.MaxFrameSize())))
 }
 
 // startMessagesScheduler starts the messages scheduler
@@ -2591,7 +2582,7 @@ func (x *actorSystem) reset() {
 func (x *actorSystem) shutdown(ctx context.Context) error {
 	// we only shut down the actor system when it is starting or not yet started
 	if x.starting.Load() || !x.started.Load() {
-		return ErrActorSystemNotStarted
+		return gerrors.ErrActorSystemNotStarted
 	}
 
 	x.stopGC <- registry.Unit{}
@@ -2970,7 +2961,7 @@ func (x *actorSystem) configPID(ctx context.Context, name string, actor Actor, o
 		// you should not create a system-based actor or
 		// use the system actor naming convention pattern
 		if isReservedName(name) {
-			return nil, ErrReservedName
+			return nil, gerrors.ErrReservedName
 		}
 	}
 
@@ -3191,11 +3182,11 @@ func (x *actorSystem) spawnRebalancer(ctx context.Context) error {
 		// define the supervisor strategy to use
 		supervisor := NewSupervisor(
 			WithStrategy(OneForOneStrategy),
-			WithDirective(&PanicError{}, RestartDirective),
+			WithDirective(&gerrors.PanicError{}, RestartDirective),
 			WithDirective(&runtime.PanicNilError{}, RestartDirective),
-			WithDirective(&rebalancingError{}, RestartDirective),
-			WithDirective(&InternalError{}, ResumeDirective),
-			WithDirective(&SpawnError{}, ResumeDirective),
+			WithDirective(&gerrors.RebalancingError{}, RestartDirective),
+			WithDirective(&gerrors.InternalError{}, ResumeDirective),
+			WithDirective(&gerrors.SpawnError{}, ResumeDirective),
 		)
 
 		x.rebalancer, err = x.configPID(ctx,
@@ -3252,7 +3243,7 @@ func (x *actorSystem) checkSpawnPreconditions(ctx context.Context, actorName str
 			}
 
 			if id != "" {
-				return ErrSingletonAlreadyExists
+				return gerrors.ErrSingletonAlreadyExists
 			}
 
 			return nil
@@ -3264,7 +3255,7 @@ func (x *actorSystem) checkSpawnPreconditions(ctx context.Context, actorName str
 			return err
 		}
 		if exists {
-			return NewErrActorAlreadyExists(actorName)
+			return gerrors.NewErrActorAlreadyExists(actorName)
 		}
 	}
 
@@ -3417,7 +3408,7 @@ func (x *actorSystem) runShutdownHooks(ctx context.Context) (err error) {
 		if r := recover(); r != nil {
 			switch v, ok := r.(error); {
 			case ok:
-				var pe *PanicError
+				var pe *gerrors.PanicError
 				if errors.As(v, &pe) {
 					err = pe
 					return
@@ -3426,7 +3417,7 @@ func (x *actorSystem) runShutdownHooks(ctx context.Context) (err error) {
 				// this is a normal error just wrap it with some stack trace
 				// for rich logging purpose
 				pc, fn, line, _ := runtime.Caller(2)
-				err = NewPanicError(
+				err = gerrors.NewPanicError(
 					fmt.Errorf("%w at %s[%s:%d]", v, runtime.FuncForPC(pc).Name(), fn, line),
 				)
 
@@ -3434,7 +3425,7 @@ func (x *actorSystem) runShutdownHooks(ctx context.Context) (err error) {
 				// we have no idea what panic it is. Enrich it with some stack trace for rich
 				// logging purpose
 				pc, fn, line, _ := runtime.Caller(2)
-				err = NewPanicError(
+				err = gerrors.NewPanicError(
 					fmt.Errorf("%#v at %s[%s:%d]", r, runtime.FuncForPC(pc).Name(), fn, line),
 				)
 			}

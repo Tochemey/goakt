@@ -29,6 +29,7 @@ import (
 	"fmt"
 	"strings"
 
+	gerrors "github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/internal/registry"
 	"github.com/tochemey/goakt/v3/internal/validation"
 )
@@ -128,7 +129,7 @@ func (g *GrainIdentity) Validate() error {
 func toIdentity(s string) (*GrainIdentity, error) {
 	parts := strings.SplitN(s, identitySeparator, 2)
 	if len(parts) != 2 {
-		return nil, ErrInvalidGrainIdentity
+		return nil, gerrors.ErrInvalidGrainIdentity
 	}
 	identity := &GrainIdentity{kind: parts[0], name: parts[1]}
 	if err := identity.Validate(); err != nil {

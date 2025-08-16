@@ -33,6 +33,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/travisjeffery/go-dynaport"
 
+	"github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/internal/pause"
 	"github.com/tochemey/goakt/v3/log"
 	"github.com/tochemey/goakt/v3/remote"
@@ -140,7 +141,7 @@ func TestStash(t *testing.T) {
 
 		err = pid.stash(new(ReceiveContext))
 		assert.Error(t, err)
-		assert.EqualError(t, err, ErrStashBufferNotSet.Error())
+		assert.EqualError(t, err, errors.ErrStashBufferNotSet.Error())
 
 		err = pid.Shutdown(ctx)
 		assert.NoError(t, err)
@@ -173,11 +174,11 @@ func TestStash(t *testing.T) {
 
 		err = pid.unstash()
 		assert.Error(t, err)
-		assert.EqualError(t, err, ErrStashBufferNotSet.Error())
+		assert.EqualError(t, err, errors.ErrStashBufferNotSet.Error())
 
 		err = pid.unstashAll()
 		assert.Error(t, err)
-		assert.EqualError(t, err, ErrStashBufferNotSet.Error())
+		assert.EqualError(t, err, errors.ErrStashBufferNotSet.Error())
 
 		err = pid.Shutdown(ctx)
 		assert.NoError(t, err)

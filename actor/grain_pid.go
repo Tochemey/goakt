@@ -35,6 +35,7 @@ import (
 	"github.com/flowchartsman/retry"
 	"go.uber.org/atomic"
 
+	gerrors "github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/extension"
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/collection"
@@ -42,6 +43,7 @@ import (
 	"github.com/tochemey/goakt/v3/internal/ticker"
 	"github.com/tochemey/goakt/v3/internal/workerpool"
 	"github.com/tochemey/goakt/v3/log"
+	"github.com/tochemey/goakt/v3/remote"
 )
 
 type grainPID struct {
@@ -59,7 +61,7 @@ type grainPID struct {
 
 	// atomic flag indicating whether the actor is processing messages
 	processing atomic.Int32
-	remoting   *Remoting
+	remoting   remote.Remoting
 
 	workerPool *workerpool.WorkerPool
 
@@ -114,7 +116,7 @@ func (pid *grainPID) activate(ctx context.Context) error {
 	}); err != nil {
 		cancel()
 		pid.logger.Errorf("Grain %s activation failed.", pid.identity.String())
-		return NewErrGrainActivationFailure(err)
+		return gerrors.NewErrGrainActivationFailure(err)
 	}
 
 	pid.activated.Store(true)
@@ -148,14 +150,14 @@ func (pid *grainPID) deactivate(ctx context.Context) error {
 
 	if err := pid.grain.OnDeactivate(ctx, newGrainProps(pid.identity, pid.actorSystem, pid.dependencies.Values())); err != nil {
 		pid.logger.Errorf("Grain %s deactivation failed.", pid.identity.String())
-		return NewErrGrainDeactivationFailure(err)
+		return gerrors.NewErrGrainDeactivationFailure(err)
 	}
 
 	pid.actorSystem.getGrains().Delete(pid.getIdentity().String())
 	if pid.actorSystem.InCluster() {
 		if err := pid.actorSystem.getCluster().RemoveGrain(ctx, pid.identity.String()); err != nil {
 			pid.logger.Errorf("failed to remove grain %s from cluster: %v", pid.identity.String(), err)
-			return NewErrGrainDeactivationFailure(err)
+			return gerrors.NewErrGrainDeactivationFailure(err)
 		}
 	}
 
@@ -238,7 +240,7 @@ func (pid *grainPID) recovery(received *GrainContext) {
 	if r := recover(); r != nil {
 		switch err, ok := r.(error); {
 		case ok:
-			var pe *PanicError
+			var pe *gerrors.PanicError
 			if errors.As(err, &pe) {
 				received.Err(pe)
 				return
@@ -247,7 +249,7 @@ func (pid *grainPID) recovery(received *GrainContext) {
 			// this is a normal error just wrap it with some stack trace
 			// for rich logging purpose
 			pc, fn, line, _ := runtime.Caller(2)
-			received.Err(NewPanicError(
+			received.Err(gerrors.NewPanicError(
 				fmt.Errorf("%w at %s[%s:%d]", err, runtime.FuncForPC(pc).Name(), fn, line),
 			))
 
@@ -255,7 +257,7 @@ func (pid *grainPID) recovery(received *GrainContext) {
 			// we have no idea what panic it is. Enrich it with some stack trace for rich
 			// logging purpose
 			pc, fn, line, _ := runtime.Caller(2)
-			received.Err(NewPanicError(
+			received.Err(gerrors.NewPanicError(
 				fmt.Errorf("%#v at %s[%s:%d]", r, runtime.FuncForPC(pc).Name(), fn, line),
 			))
 		}

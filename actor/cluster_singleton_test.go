@@ -33,6 +33,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/travisjeffery/go-dynaport"
 
+	"github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/internal/pause"
 	"github.com/tochemey/goakt/v3/log"
 	"github.com/tochemey/goakt/v3/remote"
@@ -69,7 +70,7 @@ func TestSingletonActor(t *testing.T) {
 		// attempt to create another singleton actor with the same actor
 		err = cl2.SpawnSingleton(ctx, "actorName", actor)
 		require.Error(t, err)
-		require.Contains(t, err.Error(), ErrSingletonAlreadyExists.Error())
+		require.Contains(t, err.Error(), errors.ErrSingletonAlreadyExists.Error())
 
 		// free resources
 		require.NoError(t, cl3.Stop(ctx))
@@ -107,7 +108,7 @@ func TestSingletonActor(t *testing.T) {
 		// create a singleton actor
 		err = newActorSystem.SpawnSingleton(ctx, actorName, actor)
 		require.Error(t, err)
-		require.ErrorIs(t, err, ErrClusterDisabled)
+		require.ErrorIs(t, err, errors.ErrClusterDisabled)
 
 		err = newActorSystem.Stop(ctx)
 		require.NoError(t, err)
@@ -156,6 +157,6 @@ func TestSingletonActor(t *testing.T) {
 		// create a singleton actor
 		err = newActorSystem.SpawnSingleton(ctx, actorName, actor)
 		require.Error(t, err)
-		require.ErrorIs(t, err, ErrActorSystemNotStarted)
+		require.ErrorIs(t, err, errors.ErrActorSystemNotStarted)
 	})
 }

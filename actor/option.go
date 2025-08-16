@@ -32,6 +32,7 @@ import (
 	"github.com/tochemey/goakt/v3/internal/collection"
 	"github.com/tochemey/goakt/v3/log"
 	"github.com/tochemey/goakt/v3/remote"
+	"github.com/tochemey/goakt/v3/tls"
 )
 
 // Option is the interface that applies a configuration option.
@@ -147,10 +148,10 @@ func WithCoordinatedShutdown(hooks ...ShutdownHook) Option {
 //
 // In cluster mode, all nodesMap must share the same root CA to establish
 // secure communication and complete handshakes successfully.
-func WithTLS(tlsInfo *TLSInfo) Option {
+func WithTLS(info *tls.Info) Option {
 	return OptionFunc(func(system *actorSystem) {
-		system.serverTLS = tlsInfo.ServerTLS
-		system.clientTLS = tlsInfo.ClientTLS
+		system.serverTLS = info.ServerConfig
+		system.clientTLS = info.ClientConfig
 	})
 }
 

@@ -32,6 +32,7 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/tochemey/goakt/v3/address"
+	"github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/extension"
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/log"
@@ -389,7 +390,7 @@ func (rctx *ReceiveContext) RemoteForward(to *address.Address) {
 // Unhandled is used to handle unhandled messages instead of throwing error
 func (rctx *ReceiveContext) Unhandled() {
 	me := rctx.self
-	me.toDeadletters(rctx, ErrUnhandled)
+	me.toDeadletters(rctx, errors.ErrUnhandled)
 }
 
 // RemoteReSpawn restarts an actor on a remote node.

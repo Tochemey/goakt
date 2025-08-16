@@ -60,9 +60,9 @@ func NewClient(maxReadFrameSize uint32) *http.Client {
 	}
 }
 
-// NewTLSClient creates a http.Client that will use HTTP/2
+// NewSafeClient creates a http.Client that will use HTTP/2
 // nolint
-func NewTLSClient(clientTLS *tls.Config, maxReadFrameSize uint32) *http.Client {
+func NewSafeClient(clientTLS *tls.Config, maxReadFrameSize uint32) *http.Client {
 	// Create a custom HTTP/2 transport with your desired settings.
 	h2Transport := &http2.Transport{
 		DisableCompression: false,

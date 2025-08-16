@@ -35,6 +35,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 
+	"github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/pause"
 	"github.com/tochemey/goakt/v3/log"
@@ -148,7 +149,7 @@ func TestRouter(t *testing.T) {
 		ref, err := system.LocalActor("routerQA-pool")
 		require.Error(t, err)
 		require.Nil(t, ref)
-		assert.ErrorIs(t, err, ErrActorNotFound)
+		assert.ErrorIs(t, err, errors.ErrActorNotFound)
 
 		t.Cleanup(func() {
 			assert.NoError(t, system.Stop(ctx))

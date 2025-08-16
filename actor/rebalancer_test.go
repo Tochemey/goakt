@@ -35,6 +35,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/internal/pause"
 	"github.com/tochemey/goakt/v3/test/data/testpb"
 )
@@ -372,7 +373,7 @@ func TestRebalancingWithSystemRelocationDisabled(t *testing.T) {
 	actorName = "Node2-Actor-1"
 	err = sender.SendAsync(ctx, actorName, new(testpb.TestSend))
 	require.Error(t, err)
-	require.ErrorIs(t, err, ErrActorNotFound)
+	require.ErrorIs(t, err, errors.ErrActorNotFound)
 
 	assert.NoError(t, node1.Stop(ctx))
 	assert.NoError(t, node3.Stop(ctx))
@@ -622,7 +623,7 @@ func TestIssue781(t *testing.T) {
 
 	err = sender.SendAsync(ctx, actorName, new(testpb.TestSend))
 	require.Error(t, err)
-	require.ErrorIs(t, err, ErrActorNotFound)
+	require.ErrorIs(t, err, errors.ErrActorNotFound)
 
 	assert.NoError(t, node1.Stop(ctx))
 	assert.NoError(t, node3.Stop(ctx))
