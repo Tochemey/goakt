@@ -24,7 +24,11 @@
 
 package actor
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/tochemey/goakt/v3/errors"
+)
 
 // EvictionPolicy defines a strategy for passivating (deactivating) actors
 // based on their usage patterns. It is used to manage memory or resource constraints
@@ -116,7 +120,7 @@ func NewEvictionStrategy(limit uint64, policy EvictionPolicy, percentage int) (*
 		// Valid policy, proceed with creation.
 	default:
 		// ErrInvalidEvictionPolicy should be a pre-defined error constant.
-		return nil, ErrInvalidEvictionPolicy
+		return nil, errors.ErrInvalidEvictionPolicy
 	}
 
 	return &EvictionStrategy{

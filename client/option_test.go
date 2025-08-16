@@ -33,26 +33,30 @@ import (
 
 func TestOption(t *testing.T) {
 	testCases := []struct {
-		name     string
-		option   Option
-		expected Client
+		name   string
+		option Option
+		check  func(t *testing.T, client *Client)
 	}{
 		{
-			name:     "WithBalancerStrategy",
-			option:   WithBalancerStrategy(LeastLoadStrategy),
-			expected: Client{strategy: LeastLoadStrategy},
+			name:   "WithBalancerStrategy",
+			option: WithBalancerStrategy(LeastLoadStrategy),
+			check: func(t *testing.T, client *Client) {
+				assert.Equal(t, LeastLoadStrategy, client.strategy)
+			},
 		},
 		{
-			name:     "WithRefresh",
-			option:   WithRefresh(time.Second),
-			expected: Client{refreshInterval: time.Second},
+			name:   "WithRefresh",
+			option: WithRefresh(time.Second),
+			check: func(t *testing.T, client *Client) {
+				assert.Equal(t, time.Second, client.refreshInterval)
+			},
 		},
 	}
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			var cfg Client
-			tc.option.Apply(&cfg)
-			assert.Equal(t, tc.expected, cfg)
+			var client Client
+			tc.option.Apply(&client)
+			tc.check(t, &client)
 		})
 	}
 }

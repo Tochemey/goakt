@@ -40,6 +40,7 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/durationpb"
 
+	gerrors "github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/pause"
@@ -231,7 +232,7 @@ func TestGrain(t *testing.T) {
 		response, err := testSystem.AskGrain(ctx, identity, message, time.Second)
 		require.Error(t, err)
 		require.Nil(t, response)
-		require.ErrorIs(t, err, ErrUnhanledMessage)
+		require.ErrorIs(t, err, gerrors.ErrUnhanledMessage)
 
 		// check if the grain is activated
 		gp, ok := testSystem.(*actorSystem).grains.Get(identity.String())
@@ -300,7 +301,7 @@ func TestGrain(t *testing.T) {
 			return grain, nil
 		})
 		require.Error(t, err)
-		require.ErrorIs(t, err, ErrGrainActivationFailure)
+		require.ErrorIs(t, err, gerrors.ErrGrainActivationFailure)
 		require.Nil(t, identity)
 
 		require.NoError(t, testSystem.Stop(ctx))
@@ -340,7 +341,7 @@ func TestGrain(t *testing.T) {
 		// let us shutdown the grain by sending PoisonPill
 		err = testSystem.TellGrain(ctx, identity, new(goaktpb.PoisonPill))
 		require.Error(t, err)
-		require.ErrorIs(t, err, ErrGrainDeactivationFailure)
+		require.ErrorIs(t, err, gerrors.ErrGrainDeactivationFailure)
 
 		pause.For(500 * time.Millisecond)
 
@@ -408,12 +409,12 @@ func TestGrain(t *testing.T) {
 		message := new(testpb.TestSend)
 		response, err := testSystem.AskGrain(ctx, identity, message, time.Second)
 		require.Error(t, err)
-		require.ErrorIs(t, err, ErrInvalidGrainIdentity)
+		require.ErrorIs(t, err, gerrors.ErrInvalidGrainIdentity)
 		require.Nil(t, response)
 
 		err = testSystem.TellGrain(ctx, identity, message)
 		require.Error(t, err)
-		require.ErrorIs(t, err, ErrInvalidGrainIdentity)
+		require.ErrorIs(t, err, gerrors.ErrInvalidGrainIdentity)
 
 		require.NoError(t, testSystem.Stop(ctx))
 	})
@@ -435,7 +436,7 @@ func TestGrain(t *testing.T) {
 		})
 		require.Nil(t, identity)
 		require.Error(t, err)
-		require.ErrorIs(t, err, ErrReservedName)
+		require.ErrorIs(t, err, gerrors.ErrReservedName)
 
 		require.NoError(t, testSystem.Stop(ctx))
 	})
@@ -449,12 +450,12 @@ func TestGrain(t *testing.T) {
 		message := new(testpb.TestSend)
 		response, err := testSystem.AskGrain(ctx, &GrainIdentity{}, message, time.Second)
 		require.Error(t, err)
-		require.ErrorIs(t, err, ErrActorSystemNotStarted)
+		require.ErrorIs(t, err, gerrors.ErrActorSystemNotStarted)
 		require.Nil(t, response)
 
 		err = testSystem.TellGrain(ctx, &GrainIdentity{}, message)
 		require.Error(t, err)
-		require.ErrorIs(t, err, ErrActorSystemNotStarted)
+		require.ErrorIs(t, err, gerrors.ErrActorSystemNotStarted)
 	})
 	t.Run("GrainIdentity when not started returns error", func(t *testing.T) {
 		ctx := t.Context()
@@ -467,7 +468,7 @@ func TestGrain(t *testing.T) {
 			return grain, nil
 		})
 		require.Error(t, err)
-		require.ErrorIs(t, err, ErrActorSystemNotStarted)
+		require.ErrorIs(t, err, gerrors.ErrActorSystemNotStarted)
 		require.Nil(t, identity)
 	})
 	t.Run("When GrainIdentity returns error", func(t *testing.T) {
@@ -548,7 +549,7 @@ func TestGrain(t *testing.T) {
 		}
 
 		serialized, _ := anypb.New(grain)
-		remoteClient := testSystem.getRemoting().remotingServiceClient(grain.GetHost(), int(grain.GetPort()))
+		remoteClient := testSystem.getRemoting().RemotingServiceClient(grain.GetHost(), int(grain.GetPort()))
 
 		_, err = remoteClient.RemoteTellGrain(ctx, connect.NewRequest(&internalpb.RemoteTellGrainRequest{
 			Grain:   grain,
@@ -558,7 +559,7 @@ func TestGrain(t *testing.T) {
 		var connectErr *connect.Error
 		require.True(t, errors.As(err, &connectErr))
 		e := connectErr.Unwrap()
-		require.ErrorContains(t, e, ErrRemotingDisabled.Error())
+		require.ErrorContains(t, e, gerrors.ErrRemotingDisabled.Error())
 
 		_, err = remoteClient.RemoteAskGrain(ctx, connect.NewRequest(&internalpb.RemoteAskGrainRequest{
 			Grain:          grain,
@@ -568,7 +569,7 @@ func TestGrain(t *testing.T) {
 		require.Error(t, err)
 		require.True(t, errors.As(err, &connectErr))
 		e = connectErr.Unwrap()
-		require.ErrorContains(t, e, ErrRemotingDisabled.Error())
+		require.ErrorContains(t, e, gerrors.ErrRemotingDisabled.Error())
 
 		require.NoError(t, testSystem.Stop(ctx))
 	})
@@ -601,7 +602,7 @@ func TestGrain(t *testing.T) {
 		}
 
 		serialized, _ := anypb.New(grain)
-		remoteClient := testSystem.getRemoting().remotingServiceClient(grain.GetHost(), int(grain.GetPort()))
+		remoteClient := testSystem.getRemoting().RemotingServiceClient(grain.GetHost(), int(grain.GetPort()))
 
 		_, err = remoteClient.RemoteTellGrain(ctx, connect.NewRequest(&internalpb.RemoteTellGrainRequest{
 			Grain:   grain,
@@ -611,7 +612,7 @@ func TestGrain(t *testing.T) {
 		var connectErr *connect.Error
 		require.True(t, errors.As(err, &connectErr))
 		e := connectErr.Unwrap()
-		require.ErrorContains(t, e, ErrInvalidGrainIdentity.Error())
+		require.ErrorContains(t, e, gerrors.ErrInvalidGrainIdentity.Error())
 
 		_, err = remoteClient.RemoteAskGrain(ctx, connect.NewRequest(&internalpb.RemoteAskGrainRequest{
 			Grain:          grain,
@@ -621,7 +622,7 @@ func TestGrain(t *testing.T) {
 		require.Error(t, err)
 		require.True(t, errors.As(err, &connectErr))
 		e = connectErr.Unwrap()
-		require.ErrorContains(t, e, ErrInvalidGrainIdentity.Error())
+		require.ErrorContains(t, e, gerrors.ErrInvalidGrainIdentity.Error())
 
 		require.NoError(t, testSystem.Stop(ctx))
 	})
@@ -658,7 +659,7 @@ func TestGrain(t *testing.T) {
 		}
 
 		serialized, _ := anypb.New(grain)
-		remoteClient := testSystem.getRemoting().remotingServiceClient(grain.GetHost(), int(grain.GetPort()))
+		remoteClient := testSystem.getRemoting().RemotingServiceClient(grain.GetHost(), int(grain.GetPort()))
 
 		_, err = remoteClient.RemoteTellGrain(ctx, connect.NewRequest(&internalpb.RemoteTellGrainRequest{
 			Grain:   grain,
@@ -668,7 +669,7 @@ func TestGrain(t *testing.T) {
 		var connectErr *connect.Error
 		require.True(t, errors.As(err, &connectErr))
 		e := connectErr.Unwrap()
-		require.ErrorContains(t, e, ErrReservedName.Error())
+		require.ErrorContains(t, e, gerrors.ErrReservedName.Error())
 
 		_, err = remoteClient.RemoteAskGrain(ctx, connect.NewRequest(&internalpb.RemoteAskGrainRequest{
 			Grain:          grain,
@@ -678,7 +679,7 @@ func TestGrain(t *testing.T) {
 		require.Error(t, err)
 		require.True(t, errors.As(err, &connectErr))
 		e = connectErr.Unwrap()
-		require.ErrorContains(t, e, ErrReservedName.Error())
+		require.ErrorContains(t, e, gerrors.ErrReservedName.Error())
 
 		require.NoError(t, testSystem.Stop(ctx))
 	})
@@ -720,7 +721,7 @@ func TestGrain(t *testing.T) {
 		}
 
 		serialized, _ := anypb.New(grain)
-		remoteClient := testSystem.getRemoting().remotingServiceClient(grain.GetHost(), int(grain.GetPort()))
+		remoteClient := testSystem.getRemoting().RemotingServiceClient(grain.GetHost(), int(grain.GetPort()))
 
 		_, err = remoteClient.RemoteTellGrain(ctx, connect.NewRequest(&internalpb.RemoteTellGrainRequest{
 			Grain:   grain,
@@ -730,7 +731,7 @@ func TestGrain(t *testing.T) {
 		var connectErr *connect.Error
 		require.True(t, errors.As(err, &connectErr))
 		e := connectErr.Unwrap()
-		require.ErrorContains(t, e, ErrInvalidHost.Error())
+		require.ErrorContains(t, e, gerrors.ErrInvalidHost.Error())
 
 		_, err = remoteClient.RemoteAskGrain(ctx, connect.NewRequest(&internalpb.RemoteAskGrainRequest{
 			Grain:          grain,
@@ -740,7 +741,7 @@ func TestGrain(t *testing.T) {
 		require.Error(t, err)
 		require.True(t, errors.As(err, &connectErr))
 		e = connectErr.Unwrap()
-		require.ErrorContains(t, e, ErrInvalidHost.Error())
+		require.ErrorContains(t, e, gerrors.ErrInvalidHost.Error())
 
 		require.NoError(t, testSystem.Stop(ctx))
 	})
@@ -767,7 +768,7 @@ func TestGrain(t *testing.T) {
 		message := new(testpb.TestTimeout)
 		err = testSystem.TellGrain(ctx, identity, message)
 		require.Error(t, err)
-		require.ErrorIs(t, err, ErrRequestTimeout)
+		require.ErrorIs(t, err, gerrors.ErrRequestTimeout)
 
 		// check if the grain is activated
 		gp, ok := testSystem.(*actorSystem).grains.Get(identity.String())
@@ -800,7 +801,7 @@ func TestGrain(t *testing.T) {
 		message := new(testpb.TestTimeout)
 		response, err := testSystem.AskGrain(ctx, identity, message, time.Second)
 		require.Error(t, err)
-		require.ErrorIs(t, err, ErrRequestTimeout)
+		require.ErrorIs(t, err, gerrors.ErrRequestTimeout)
 		require.Nil(t, response)
 
 		// check if the grain is activated
@@ -836,7 +837,7 @@ func TestGrain(t *testing.T) {
 		message := new(testpb.TestTimeout)
 		response, err := testSystem.AskGrain(cancelCtx, identity, message, time.Second)
 		require.Error(t, err)
-		require.ErrorIs(t, err, ErrRequestTimeout)
+		require.ErrorIs(t, err, gerrors.ErrRequestTimeout)
 		require.Nil(t, response)
 
 		// check if the grain is activated
@@ -873,7 +874,7 @@ func TestGrain(t *testing.T) {
 		message := new(testpb.TestTimeout)
 		err = testSystem.TellGrain(cancelCtx, identity, message)
 		require.Error(t, err)
-		require.ErrorIs(t, err, ErrRequestTimeout)
+		require.ErrorIs(t, err, gerrors.ErrRequestTimeout)
 
 		// check if the grain is activated
 		gp, ok := testSystem.(*actorSystem).grains.Get(identity.String())

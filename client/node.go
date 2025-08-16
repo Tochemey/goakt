@@ -31,10 +31,11 @@ import (
 	"strconv"
 	"sync"
 
-	actors "github.com/tochemey/goakt/v3/actor"
 	"github.com/tochemey/goakt/v3/internal/http"
+	"github.com/tochemey/goakt/v3/internal/locker"
 	"github.com/tochemey/goakt/v3/internal/size"
 	"github.com/tochemey/goakt/v3/internal/validation"
+	"github.com/tochemey/goakt/v3/remote"
 )
 
 type NodeOption func(*Node)
@@ -62,22 +63,23 @@ func WithTLS(config *tls.Config) NodeOption {
 
 // Node represents the node in the cluster
 type Node struct {
+	_       locker.NoCopy
 	address string
 	weight  float64
-	mutex   *sync.Mutex
+	mutex   *sync.RWMutex
 
 	client    *nethttp.Client
-	remoting  *actors.Remoting
+	remoting  remote.Remoting
 	tlsConfig *tls.Config
 }
 
 // NewNode creates an instance of Node
 // nolint
 func NewNode(address string, opts ...NodeOption) *Node {
-	remoting := actors.NewRemoting(actors.WithRemotingMaxReadFameSize(16 * size.MB))
+	remoting := remote.NewRemoting(remote.WithRemotingMaxReadFameSize(16 * size.MB))
 	node := &Node{
 		address:  address,
-		mutex:    &sync.Mutex{},
+		mutex:    &sync.RWMutex{},
 		client:   remoting.HTTPClient(),
 		remoting: remoting,
 		weight:   0,
@@ -89,9 +91,9 @@ func NewNode(address string, opts ...NodeOption) *Node {
 
 	if node.tlsConfig != nil {
 		// overwrite the remoting
-		node.remoting = actors.NewRemoting(
-			actors.WithRemotingMaxReadFameSize(16*size.MB),
-			actors.WithRemotingTLS(node.tlsConfig),
+		node.remoting = remote.NewRemoting(
+			remote.WithRemotingMaxReadFameSize(16*size.MB),
+			remote.WithRemotingTLS(node.tlsConfig),
 		)
 
 		// reset the client
@@ -113,17 +115,17 @@ func (n *Node) SetWeight(weight float64) {
 
 // Address returns the node address
 func (n *Node) Address() string {
-	n.mutex.Lock()
+	n.mutex.RLock()
 	address := n.address
-	n.mutex.Unlock()
+	n.mutex.RUnlock()
 	return address
 }
 
 // Weight returns the node weight
 func (n *Node) Weight() float64 {
-	n.mutex.Lock()
+	n.mutex.RLock()
 	load := n.weight
-	n.mutex.Unlock()
+	n.mutex.RUnlock()
 	return load
 }
 
@@ -134,26 +136,26 @@ func (n *Node) Validate() error {
 
 // HTTPClient returns the underlying http client for the given node
 func (n *Node) HTTPClient() *nethttp.Client {
-	n.mutex.Lock()
+	n.mutex.RLock()
 	client := n.client
-	n.mutex.Unlock()
+	n.mutex.RUnlock()
 	return client
 }
 
 // Remoting returns the remoting instance
-func (n *Node) Remoting() *actors.Remoting {
-	n.mutex.Lock()
+func (n *Node) Remoting() remote.Remoting {
+	n.mutex.RLock()
 	remoting := n.remoting
-	n.mutex.Unlock()
+	n.mutex.RUnlock()
 	return remoting
 }
 
 // HTTPEndPoint returns the node remote endpoint
 func (n *Node) HTTPEndPoint() string {
-	n.mutex.Lock()
+	n.mutex.RLock()
 	host, p, _ := net.SplitHostPort(n.address)
 	port, _ := strconv.Atoi(p)
-	n.mutex.Unlock()
+	n.mutex.RUnlock()
 	if n.tlsConfig != nil {
 		return http.URLs(host, port)
 	}
@@ -168,9 +170,9 @@ func (n *Node) Free() {
 
 // HostAndPort returns the node host and port
 func (n *Node) HostAndPort() (string, int) {
-	n.mutex.Lock()
+	n.mutex.RLock()
 	host, p, _ := net.SplitHostPort(n.address)
 	port, _ := strconv.Atoi(p)
-	n.mutex.Unlock()
+	n.mutex.RUnlock()
 	return host, port
 }

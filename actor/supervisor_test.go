@@ -30,6 +30,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/tochemey/goakt/v3/errors"
 )
 
 func TestSupervisorOption(t *testing.T) {
@@ -61,14 +63,14 @@ func TestSupervisorOption(t *testing.T) {
 
 func TestSupervisorWithAnyError(t *testing.T) {
 	supervisor := NewSupervisor(WithAnyErrorDirective(RestartDirective))
-	directive, ok := supervisor.Directive(new(anyError))
+	directive, ok := supervisor.Directive(new(errors.AnyError))
 	require.True(t, ok)
 	require.Exactly(t, RestartDirective, directive)
 }
 
 func TestSupervisorWithDirective(t *testing.T) {
-	supervisor := NewSupervisor(WithDirective(&InternalError{}, RestartDirective))
-	directive, ok := supervisor.Directive(&InternalError{})
+	supervisor := NewSupervisor(WithDirective(&errors.InternalError{}, RestartDirective))
+	directive, ok := supervisor.Directive(&errors.InternalError{})
 	require.True(t, ok)
 	require.Exactly(t, RestartDirective, directive)
 }

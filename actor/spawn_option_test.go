@@ -30,6 +30,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/extension"
 	"github.com/tochemey/goakt/v3/passivation"
 )
@@ -116,6 +117,6 @@ func TestSpawnConfig(t *testing.T) {
 		option.Apply(config)
 		err := config.Validate()
 		require.Error(t, err)
-		require.ErrorIs(t, err, ErrInvalidPassivationStrategy)
+		require.ErrorIs(t, err, errors.ErrInvalidPassivationStrategy)
 	})
 }

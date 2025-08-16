@@ -33,6 +33,7 @@ import (
 	"github.com/tochemey/goakt/v3/internal/workerpool"
 	"github.com/tochemey/goakt/v3/log"
 	"github.com/tochemey/goakt/v3/passivation"
+	"github.com/tochemey/goakt/v3/remote"
 )
 
 // pidOption represents the pid
@@ -102,7 +103,7 @@ func withInitTimeout(duration time.Duration) pidOption {
 }
 
 // withRemoting set the remoting feature
-func withRemoting(remoting *Remoting) pidOption {
+func withRemoting(remoting remote.Remoting) pidOption {
 	return func(pid *PID) {
 		pid.remoting = remoting
 	}

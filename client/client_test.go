@@ -27,6 +27,8 @@ package client
 import (
 	"context"
 	"fmt"
+	nethttp "net/http"
+	"sync"
 	"testing"
 	"time"
 
@@ -37,11 +39,14 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	actors "github.com/tochemey/goakt/v3/actor"
+	"github.com/tochemey/goakt/v3/address"
 	"github.com/tochemey/goakt/v3/discovery"
 	"github.com/tochemey/goakt/v3/discovery/nats"
+	"github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/pause"
 	"github.com/tochemey/goakt/v3/log"
+	mocks "github.com/tochemey/goakt/v3/mocks/remote"
 	"github.com/tochemey/goakt/v3/remote"
 	testpb "github.com/tochemey/goakt/v3/test/data/testpb"
 )
@@ -754,7 +759,7 @@ func TestClient(t *testing.T) {
 		// send a message
 		reply, err := client.Ask(ctx, actor, new(testpb.TestReply), time.Minute)
 		require.Error(t, err)
-		require.ErrorIs(t, err, actors.ErrActorNotFound)
+		require.ErrorIs(t, err, errors.ErrActorNotFound)
 		require.Nil(t, reply)
 
 		err = client.Stop(ctx, actor)
@@ -773,6 +778,37 @@ func TestClient(t *testing.T) {
 		srv.Shutdown()
 		pause.For(time.Second)
 	})
+
+	t.Run("When RemoteAsk fails", func(t *testing.T) {
+		ctx := context.TODO()
+		actor := NewActor("client.testactor").WithName("actorName")
+
+		httpClient := nethttp.DefaultClient
+		mockRemoting := mocks.NewRemoting(t)
+		node := &Node{
+			remoting: mockRemoting,
+			address:  "127.0.1:12345",
+			mutex:    &sync.RWMutex{},
+			client:   httpClient,
+		}
+
+		remoteHost, remotePort := node.HostAndPort()
+		addr := address.New(actor.Name(), "system", remoteHost, remotePort)
+
+		expectedErr := fmt.Errorf("remote ask failed: %s", node.address)
+		mockRemoting.EXPECT().RemoteLookup(ctx, remoteHost, remotePort, actor.Name()).Return(addr, nil)
+		mockRemoting.EXPECT().MaxReadFrameSize().Return(1024 * 1024)
+		mockRemoting.EXPECT().RemoteAsk(ctx, address.NoSender(), addr, new(testpb.TestReply), time.Minute).Return(nil, expectedErr)
+
+		client, err := New(ctx, []*Node{node})
+		require.NoError(t, err)
+		require.NotNil(t, client)
+
+		_, err = client.Ask(ctx, actor, new(testpb.TestReply), time.Minute)
+		require.Error(t, err)
+		require.ErrorIs(t, err, expectedErr)
+	})
+
 	t.Run("With Tell when actor not found", func(t *testing.T) {
 		ctx := context.TODO()
 
@@ -809,7 +845,7 @@ func TestClient(t *testing.T) {
 		// send a message
 		err = client.Tell(ctx, actor, new(testpb.TestReply))
 		require.Error(t, err)
-		require.ErrorIs(t, err, actors.ErrActorNotFound)
+		require.ErrorIs(t, err, errors.ErrActorNotFound)
 
 		err = client.Stop(ctx, actor)
 		require.NoError(t, err)
@@ -1035,6 +1071,50 @@ func TestClient(t *testing.T) {
 
 		srv.Shutdown()
 		pause.For(time.Second)
+	})
+
+	t.Run("When RemoteLookup fails", func(t *testing.T) {
+		ctx := context.TODO()
+		actor := NewActor("client.testactor").WithName("actorName")
+
+		httpClient := nethttp.DefaultClient
+		mockRemoting := mocks.NewRemoting(t)
+		node := &Node{
+			remoting: mockRemoting,
+			address:  "127.0.1:12345",
+			mutex:    &sync.RWMutex{},
+			client:   httpClient,
+		}
+
+		remoteHost, remotePort := node.HostAndPort()
+		expectedErr := fmt.Errorf("remote lookup failed: %s", node.address)
+		mockRemoting.EXPECT().RemoteLookup(ctx, remoteHost, remotePort, actor.Name()).Return(nil, expectedErr)
+		mockRemoting.EXPECT().MaxReadFrameSize().Return(1024 * 1024)
+
+		client, err := New(ctx, []*Node{node})
+		require.NoError(t, err)
+		require.NotNil(t, client)
+
+		// send a message
+		err = client.Tell(ctx, actor, new(testpb.TestReply))
+		require.Error(t, err)
+		require.ErrorIs(t, err, expectedErr)
+
+		_, err = client.Ask(ctx, actor, new(testpb.TestReply), time.Minute)
+		require.Error(t, err)
+		require.ErrorIs(t, err, expectedErr)
+
+		err = client.Stop(ctx, actor)
+		require.Error(t, err)
+		require.ErrorIs(t, err, expectedErr)
+
+		_, err = client.Whereis(ctx, actor)
+		require.Error(t, err)
+		require.ErrorIs(t, err, expectedErr)
+
+		err = client.Reinstate(ctx, actor)
+		require.Error(t, err)
+		require.ErrorIs(t, err, expectedErr)
 	})
 }
 

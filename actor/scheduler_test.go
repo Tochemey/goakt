@@ -36,6 +36,7 @@ import (
 	"github.com/travisjeffery/go-dynaport"
 
 	"github.com/tochemey/goakt/v3/address"
+	"github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/internal/pause"
 	"github.com/tochemey/goakt/v3/log"
 	testkit "github.com/tochemey/goakt/v3/mocks/discovery"
@@ -235,7 +236,7 @@ func TestScheduler(t *testing.T) {
 		message := new(testpb.TestSend)
 		err = scheduler.ScheduleOnce(message, pid, 100*time.Millisecond)
 		require.Error(t, err)
-		assert.ErrorIs(t, err, ErrSchedulerNotStarted)
+		assert.ErrorIs(t, err, errors.ErrSchedulerNotStarted)
 
 		err = pid.Shutdown(ctx)
 		assert.NoError(t, err)
@@ -272,7 +273,7 @@ func TestScheduler(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
-		remoting := NewRemoting()
+		remoting := remote.NewRemoting()
 		// get the address of the actor
 		addr, err := remoting.RemoteLookup(ctx, newActorSystem.Host(), int(newActorSystem.Port()), actorName)
 		require.NoError(t, err)
@@ -348,7 +349,7 @@ func TestScheduler(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
-		remoting := NewRemoting()
+		remoting := remote.NewRemoting()
 		// get the address of the actor
 		addr, err := remoting.RemoteLookup(ctx, newActorSystem.Host(), int(newActorSystem.Port()), actorName)
 		require.NoError(t, err)
@@ -408,7 +409,7 @@ func TestScheduler(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
-		remoting := NewRemoting()
+		remoting := remote.NewRemoting()
 		// get the address of the actor
 		addr, err := remoting.RemoteLookup(ctx, newActorSystem.Host(), int(newActorSystem.Port()), actorName)
 		require.NoError(t, err)
@@ -417,7 +418,7 @@ func TestScheduler(t *testing.T) {
 		message := new(testpb.TestSend)
 		err = newActorSystem.RemoteScheduleOnce(ctx, message, addr, 100*time.Millisecond)
 		require.Error(t, err)
-		assert.ErrorIs(t, err, ErrSchedulerNotStarted)
+		assert.ErrorIs(t, err, errors.ErrSchedulerNotStarted)
 
 		// stop the actor
 		err = newActorSystem.Stop(ctx)
@@ -614,7 +615,7 @@ func TestScheduler(t *testing.T) {
 		const expr = "* * * ? * *"
 		err = newActorSystem.ScheduleWithCron(ctx, message, actorRef, expr)
 		require.Error(t, err)
-		assert.ErrorIs(t, err, ErrSchedulerNotStarted)
+		assert.ErrorIs(t, err, errors.ErrSchedulerNotStarted)
 
 		// stop the actor
 		err = newActorSystem.Stop(ctx)
@@ -652,7 +653,7 @@ func TestScheduler(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
-		remoting := NewRemoting()
+		remoting := remote.NewRemoting()
 		// get the address of the actor
 		addr, err := remoting.RemoteLookup(ctx, newActorSystem.Host(), int(newActorSystem.Port()), actorName)
 		require.NoError(t, err)
@@ -725,7 +726,7 @@ func TestScheduler(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
-		remoting := NewRemoting()
+		remoting := remote.NewRemoting()
 		// get the address of the actor
 		addr, err := remoting.RemoteLookup(ctx, newActorSystem.Host(), int(newActorSystem.Port()), actorName)
 		require.NoError(t, err)
@@ -778,7 +779,7 @@ func TestScheduler(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
-		remoting := NewRemoting()
+		remoting := remote.NewRemoting()
 		// get the address of the actor
 		addr, err := remoting.RemoteLookup(ctx, newActorSystem.Host(), int(newActorSystem.Port()), actorName)
 		require.NoError(t, err)
@@ -829,7 +830,7 @@ func TestScheduler(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
-		remoting := NewRemoting()
+		remoting := remote.NewRemoting()
 		// get the address of the actor
 		addr, err := remoting.RemoteLookup(ctx, newActorSystem.Host(), int(newActorSystem.Port()), actorName)
 		require.NoError(t, err)
@@ -840,7 +841,7 @@ func TestScheduler(t *testing.T) {
 		const expr = "* * * ? * *"
 		err = newActorSystem.RemoteScheduleWithCron(ctx, message, addr, expr)
 		require.Error(t, err)
-		assert.ErrorIs(t, err, ErrSchedulerNotStarted)
+		assert.ErrorIs(t, err, errors.ErrSchedulerNotStarted)
 
 		// stop the actor
 		err = newActorSystem.Stop(ctx)
@@ -1054,7 +1055,7 @@ func TestScheduler(t *testing.T) {
 		message := new(testpb.TestSend)
 		err = newActorSystem.Schedule(ctx, message, actorRef, time.Second)
 		require.Error(t, err)
-		assert.ErrorIs(t, err, ErrSchedulerNotStarted)
+		assert.ErrorIs(t, err, errors.ErrSchedulerNotStarted)
 
 		// stop the actor
 		err = newActorSystem.Stop(ctx)
@@ -1092,7 +1093,7 @@ func TestScheduler(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
-		remoting := NewRemoting()
+		remoting := remote.NewRemoting()
 		// get the address of the actor
 		addr, err := remoting.RemoteLookup(ctx, newActorSystem.Host(), int(newActorSystem.Port()), actorName)
 		require.NoError(t, err)
@@ -1155,7 +1156,7 @@ func TestScheduler(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
-		remoting := NewRemoting()
+		remoting := remote.NewRemoting()
 		// get the address of the actor
 		addr, err := remoting.RemoteLookup(ctx, newActorSystem.Host(), int(newActorSystem.Port()), actorName)
 		require.NoError(t, err)
@@ -1164,7 +1165,7 @@ func TestScheduler(t *testing.T) {
 		message := new(testpb.TestSend)
 		err = newActorSystem.RemoteSchedule(ctx, message, addr, 100*time.Millisecond)
 		require.Error(t, err)
-		assert.ErrorIs(t, err, ErrSchedulerNotStarted)
+		assert.ErrorIs(t, err, errors.ErrSchedulerNotStarted)
 
 		// stop the actor
 		err = newActorSystem.Stop(ctx)
@@ -1202,7 +1203,7 @@ func TestScheduler(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
-		remoting := NewRemoting()
+		remoting := remote.NewRemoting()
 		// get the address of the actor
 		addr, err := remoting.RemoteLookup(ctx, newActorSystem.Host(), int(newActorSystem.Port()), actorName)
 		require.NoError(t, err)
@@ -1251,7 +1252,7 @@ func TestScheduler(t *testing.T) {
 		const expr = "* * * ? * *"
 		err := scheduler.RemoteScheduleWithCron(message, addr, expr)
 		require.Error(t, err)
-		assert.ErrorIs(t, err, ErrRemotingDisabled)
+		assert.ErrorIs(t, err, errors.ErrRemotingDisabled)
 
 		scheduler.Stop(ctx)
 	})
@@ -1274,7 +1275,7 @@ func TestScheduler(t *testing.T) {
 		message := new(testpb.TestSend)
 		err := scheduler.RemoteSchedule(message, addr, time.Second)
 		require.Error(t, err)
-		assert.ErrorIs(t, err, ErrRemotingDisabled)
+		assert.ErrorIs(t, err, errors.ErrRemotingDisabled)
 
 		scheduler.Stop(ctx)
 	})
@@ -1296,7 +1297,7 @@ func TestScheduler(t *testing.T) {
 		message := new(testpb.TestSend)
 		err := scheduler.RemoteScheduleOnce(message, addr, time.Second)
 		require.Error(t, err)
-		assert.ErrorIs(t, err, ErrRemotingDisabled)
+		assert.ErrorIs(t, err, errors.ErrRemotingDisabled)
 		scheduler.Stop(ctx)
 	})
 	t.Run("With RemoteSchedule when cluster is enabled", func(t *testing.T) {
@@ -1352,7 +1353,7 @@ func TestScheduler(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
-		remoting := NewRemoting()
+		remoting := remote.NewRemoting()
 		// get the address of the actor
 		addr, err := remoting.RemoteLookup(ctx, newActorSystem.Host(), int(newActorSystem.Port()), actorName)
 		require.NoError(t, err)
@@ -1460,7 +1461,7 @@ func TestScheduler(t *testing.T) {
 
 		err = newActorSystem.PauseSchedule("reference")
 		require.Error(t, err)
-		assert.ErrorIs(t, err, ErrSchedulerNotStarted)
+		assert.ErrorIs(t, err, errors.ErrSchedulerNotStarted)
 
 		// stop the actor
 		err = newActorSystem.Stop(ctx)
@@ -1499,7 +1500,7 @@ func TestScheduler(t *testing.T) {
 
 		err = newActorSystem.ResumeSchedule("reference")
 		require.Error(t, err)
-		assert.ErrorIs(t, err, ErrSchedulerNotStarted)
+		assert.ErrorIs(t, err, errors.ErrSchedulerNotStarted)
 
 		// stop the actor
 		err = newActorSystem.Stop(ctx)
@@ -1533,9 +1534,9 @@ func TestScheduler(t *testing.T) {
 
 		pause.For(time.Second)
 
-		require.ErrorIs(t, actorSystem.PauseSchedule("reference"), ErrScheduledReferenceNotFound)
-		require.ErrorIs(t, actorSystem.ResumeSchedule("reference"), ErrScheduledReferenceNotFound)
-		require.ErrorIs(t, actorSystem.CancelSchedule("reference"), ErrScheduledReferenceNotFound)
+		require.ErrorIs(t, actorSystem.PauseSchedule("reference"), errors.ErrScheduledReferenceNotFound)
+		require.ErrorIs(t, actorSystem.ResumeSchedule("reference"), errors.ErrScheduledReferenceNotFound)
+		require.ErrorIs(t, actorSystem.CancelSchedule("reference"), errors.ErrScheduledReferenceNotFound)
 
 		// stop the actor
 		err = actorSystem.Stop(ctx)
@@ -1623,7 +1624,7 @@ func TestScheduler(t *testing.T) {
 
 		err = newActorSystem.CancelSchedule("reference")
 		require.Error(t, err)
-		assert.ErrorIs(t, err, ErrSchedulerNotStarted)
+		assert.ErrorIs(t, err, errors.ErrSchedulerNotStarted)
 
 		// stop the actor
 		err = newActorSystem.Stop(ctx)

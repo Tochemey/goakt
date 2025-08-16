@@ -26,8 +26,6 @@ RUN go install connectrpc.com/connect/cmd/protoc-gen-connect-go@latest
 RUN curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v2.3.0
 RUN ls -la $(which golangci-lint)
 
-RUN go install github.com/ory/go-acc@latest
-
 # install vektra/mockery
 RUN go install github.com/vektra/mockery/v2@v2.53.2
 
@@ -65,6 +63,7 @@ mock:
     RUN mockery  --dir internal/cluster --name Interface --keeptree --exported=true --with-expecter=true --inpackage=true --disable-version-string=true --output ./mocks/cluster --case snake
     RUN mockery  --dir extension --name Dependency --keeptree --exported=true --with-expecter=true --inpackage=true --disable-version-string=true --output ./mocks/extension --case snake
     RUN mockery  --dir extension --name Extension --keeptree --exported=true --with-expecter=true --inpackage=true --disable-version-string=true --output ./mocks/extension --case snake
+    RUN mockery --dir remote --name Remoting --keeptree --exported=true --with-expecter=true --inpackage=true --disable-version-string=true --output ./mocks/remote --case snake
 
     SAVE ARTIFACT ./mocks mocks AS LOCAL mocks
 
@@ -81,7 +80,7 @@ lint:
 local-test:
     FROM +vendor
 
-    RUN go-acc ./... -o coverage.out --ignore goaktpb,mocks,internal/internalpb -- -mod=vendor -race -v
+    RUN go test -mod=vendor -p 1 -timeout 0 -race -v -coverprofile=coverage.out -covermode=atomic -coverpkg=./... $(go list -mod=vendor ./... | grep -v -E "(goaktpb|mocks|internal/internalpb)")
 
     SAVE ARTIFACT coverage.out AS LOCAL coverage.out
 

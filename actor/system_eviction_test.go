@@ -28,6 +28,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/tochemey/goakt/v3/errors"
 )
 
 func TestEvictionPolicy(t *testing.T) {
@@ -51,7 +53,7 @@ func TestEvictionStrategy(t *testing.T) {
 	t.Run("With invalid policy", func(t *testing.T) {
 		strategy, err := NewEvictionStrategy(1, EvictionPolicy(100), 1)
 		require.Error(t, err)
-		require.ErrorIs(t, err, ErrInvalidEvictionPolicy)
+		require.ErrorIs(t, err, errors.ErrInvalidEvictionPolicy)
 		require.Nil(t, strategy)
 	})
 	t.Run("With zero limit", func(t *testing.T) {

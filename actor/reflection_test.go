@@ -31,6 +31,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/registry"
 )
@@ -58,7 +59,7 @@ func TestReflection(t *testing.T) {
 		reflection := newReflection(tl)
 		actual, err := reflection.NewActor("actor.fakeActor")
 		assert.Error(t, err)
-		assert.ErrorIs(t, err, ErrTypeNotRegistered)
+		assert.ErrorIs(t, err, errors.ErrTypeNotRegistered)
 		assert.Nil(t, actual)
 	})
 	t.Run("With NewActor actor interface not implemented", func(t *testing.T) {
@@ -68,7 +69,7 @@ func TestReflection(t *testing.T) {
 		reflection := newReflection(newRegistry)
 		actual, err := reflection.NewActor("actor.normalStruct")
 		assert.Error(t, err)
-		assert.ErrorIs(t, err, ErrInstanceNotAnActor)
+		assert.ErrorIs(t, err, errors.ErrInstanceNotAnActor)
 		assert.Nil(t, actual)
 	})
 	t.Run("With NewDependency happy path", func(t *testing.T) {
@@ -95,7 +96,7 @@ func TestReflection(t *testing.T) {
 		reflection := newReflection(newRegistry)
 		actual, err := reflection.NewDependency("actor.normalStruct", []byte{})
 		assert.Error(t, err)
-		assert.ErrorIs(t, err, ErrInstanceNotDependency)
+		assert.ErrorIs(t, err, errors.ErrInstanceNotDependency)
 		assert.Nil(t, actual)
 	})
 	t.Run("With unregistered dependency", func(t *testing.T) {
@@ -103,7 +104,7 @@ func TestReflection(t *testing.T) {
 		reflection := newReflection(tl)
 		actual, err := reflection.NewDependency("actor.fakeDependency", []byte{})
 		assert.Error(t, err)
-		assert.ErrorIs(t, err, ErrDependencyTypeNotRegistered)
+		assert.ErrorIs(t, err, errors.ErrDependencyTypeNotRegistered)
 		assert.Nil(t, actual)
 	})
 	t.Run("With NewDependency UnmarshalBinary failure", func(t *testing.T) {
@@ -182,7 +183,7 @@ func TestReflection(t *testing.T) {
 		reflection := newReflection(tl)
 		actual, err := reflection.NewGrain("actor.fakeGrain")
 		assert.Error(t, err)
-		assert.ErrorIs(t, err, ErrGrainNotRegistered)
+		assert.ErrorIs(t, err, errors.ErrGrainNotRegistered)
 		assert.Nil(t, actual)
 	})
 	t.Run("With NewGrain Grain interface not implemented", func(t *testing.T) {
@@ -192,7 +193,7 @@ func TestReflection(t *testing.T) {
 		reflection := newReflection(newRegistry)
 		actual, err := reflection.NewGrain("actor.normalStruct")
 		assert.Error(t, err)
-		assert.ErrorIs(t, err, ErrInstanceNotAnGrain)
+		assert.ErrorIs(t, err, errors.ErrInstanceNotAnGrain)
 		assert.Nil(t, actual)
 	})
 }

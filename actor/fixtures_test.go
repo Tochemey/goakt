@@ -42,6 +42,7 @@ import (
 
 	"github.com/tochemey/goakt/v3/discovery"
 	"github.com/tochemey/goakt/v3/discovery/nats"
+	gerrors "github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/extension"
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/pause"
@@ -49,6 +50,7 @@ import (
 	"github.com/tochemey/goakt/v3/passivation"
 	"github.com/tochemey/goakt/v3/remote"
 	"github.com/tochemey/goakt/v3/test/data/testpb"
+	"github.com/tochemey/goakt/v3/tls"
 )
 
 type MockSubscriber struct {
@@ -151,7 +153,7 @@ func (p *MockSupervisor) Receive(ctx *ReceiveContext) {
 	case *goaktpb.Terminated:
 		// pass
 	default:
-		panic(ErrUnhandled)
+		panic(gerrors.ErrUnhandled)
 	}
 }
 
@@ -185,7 +187,7 @@ func (x *MockSupervised) Receive(ctx *ReceiveContext) {
 	case *testpb.TestPanicError:
 		panic(errors.New("panicked"))
 	default:
-		panic(ErrUnhandled)
+		panic(gerrors.ErrUnhandled)
 	}
 }
 
@@ -563,9 +565,9 @@ func testCluster(t *testing.T, serverAddr string, opts ...testClusterOption) (Ac
 	}
 
 	if cfg.tlsEnabled {
-		options = append(options, WithTLS(&TLSInfo{
-			ClientTLS: cfg.conf.ClientTLS,
-			ServerTLS: cfg.conf.ServerTLS,
+		options = append(options, WithTLS(&tls.Info{
+			ClientConfig: cfg.conf.ClientTLS,
+			ServerConfig: cfg.conf.ServerTLS,
 		}))
 	}
 
@@ -1196,7 +1198,7 @@ func (m *MockPanickingGrain) OnReceive(ctx *GrainContext) {
 	case *testpb.TestSend:
 		panic("test panic")
 	case *testpb.TestReply:
-		panic(NewInternalError(errors.New("test panic")))
+		panic(gerrors.NewInternalError(errors.New("test panic")))
 	}
 }
 
@@ -1288,7 +1290,7 @@ func (m *MockPanickingShutdownHook) Execute(context.Context, ActorSystem) error 
 	case "case1":
 		panic(errors.New("case1 panic error"))
 	case "case2":
-		panic(NewPanicError(errors.New("case2 panic error")))
+		panic(gerrors.NewPanicError(errors.New("case2 panic error")))
 	default:
 		panic("implement me")
 	}

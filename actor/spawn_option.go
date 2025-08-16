@@ -27,6 +27,7 @@ package actor
 import (
 	"time"
 
+	"github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/extension"
 	"github.com/tochemey/goakt/v3/internal/validation"
 	"github.com/tochemey/goakt/v3/passivation"
@@ -93,7 +94,7 @@ func (s *spawnConfig) Validate() error {
 		case *passivation.TimeBasedStrategy, *passivation.LongLivedStrategy, *passivation.MessagesCountBasedStrategy:
 			// pass
 		default:
-			return NewErrInvalidPassivationStrategy(s.passivationStrategy)
+			return errors.NewErrInvalidPassivationStrategy(s.passivationStrategy)
 		}
 	}
 

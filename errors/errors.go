@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (c) 2022-2025  Arsene Tochemey Gandote
+ * Copyright (c) 2022-2025 Arsene Tochemey Gandote
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -22,7 +22,7 @@
  * SOFTWARE.
  */
 
-package actor
+package errors
 
 import (
 	"errors"
@@ -299,33 +299,33 @@ func (s *SpawnError) Unwrap() error {
 	return s.err
 }
 
-type rebalancingError struct {
+type RebalancingError struct {
 	err error
 }
 
-var _ error = (*rebalancingError)(nil)
+var _ error = (*RebalancingError)(nil)
 
-// creates an instance of rebalancingError
-func newRebalancingError(err error) *rebalancingError {
-	return &rebalancingError{err}
+// NewRebalancingError returns an instance of RebalancingError
+func NewRebalancingError(err error) *RebalancingError {
+	return &RebalancingError{err}
 }
 
-func (e *rebalancingError) Error() string {
+func (e *RebalancingError) Error() string {
 	return fmt.Errorf("rebalancing: %w", e.err).Error()
 }
 
-func (e *rebalancingError) Unwrap() error {
+func (e *RebalancingError) Unwrap() error {
 	return e.err
 }
 
-// anyError defines the any error type
+// AnyError defines the any error type
 // this is used to represent any error when handling the supervisor directive
-type anyError struct{}
+type AnyError struct{}
 
 // interface guard
-var _ error = (*anyError)(nil)
+var _ error = (*AnyError)(nil)
 
 // Error implements error.
-func (a *anyError) Error() string {
+func (a *AnyError) Error() string {
 	return "*"
 }

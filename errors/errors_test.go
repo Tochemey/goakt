@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (c) 2022-2025  Arsene Tochemey Gandote
+ * Copyright (c) 2022-2025 Arsene Tochemey Gandote
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -22,7 +22,7 @@
  * SOFTWARE.
  */
 
-package actor
+package errors
 
 import (
 	"errors"
@@ -40,7 +40,10 @@ func TestErrors(t *testing.T) {
 	require.Error(t, spawnErr)
 	require.EqualError(t, spawnErr, "spawn error: something went wrong")
 
-	rebalancingErr := newRebalancingError(errors.New("something went wrong"))
+	rebalancingErr := NewRebalancingError(errors.New("something went wrong"))
 	require.Error(t, rebalancingErr)
 	require.EqualError(t, rebalancingErr, "rebalancing: something went wrong")
+
+	anyError := &AnyError{}
+	require.Equal(t, anyError.Error(), "*")
 }

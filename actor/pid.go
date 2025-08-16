@@ -44,6 +44,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/tochemey/goakt/v3/address"
+	gerrors "github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/extension"
 	"github.com/tochemey/goakt/v3/future"
 	"github.com/tochemey/goakt/v3/goaktpb"
@@ -57,6 +58,7 @@ import (
 	"github.com/tochemey/goakt/v3/internal/workerpool"
 	"github.com/tochemey/goakt/v3/log"
 	"github.com/tochemey/goakt/v3/passivation"
+	"github.com/tochemey/goakt/v3/remote"
 )
 
 // specifies the state in which the PID is
@@ -136,7 +138,7 @@ type PID struct {
 	// atomic flag indicating whether the actor is processing messages
 	processing atomic.Int32
 
-	remoting *Remoting
+	remoting remote.Remoting
 
 	workerPool  *workerpool.WorkerPool
 	startedAt   *atomic.Int64
@@ -183,7 +185,7 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 		processedCount:        atomic.NewInt64(0),
 		supervisionChan:       make(chan *supervisionSignal, 1),
 		supervisionStopSignal: make(chan registry.Unit, 1),
-		remoting:              NewRemoting(),
+		remoting:              remote.NewRemoting(),
 		supervisor:            NewSupervisor(),
 		startedAt:             atomic.NewInt64(0),
 		dependencies:          collection.NewMap[string, extension.Dependency](),
@@ -317,7 +319,7 @@ func (pid *PID) Actor() Actor {
 // Child returns the named child actor if it is alive
 func (pid *PID) Child(name string) (*PID, error) {
 	if !pid.IsRunning() {
-		return nil, ErrDead
+		return nil, gerrors.ErrDead
 	}
 
 	childAddress := pid.childAddress(name)
@@ -327,7 +329,7 @@ func (pid *PID) Child(name string) (*PID, error) {
 			return cid, nil
 		}
 	}
-	return nil, NewErrActorNotFound(childAddress.String())
+	return nil, gerrors.NewErrActorNotFound(childAddress.String())
 }
 
 // Parent returns the parent of this PID
@@ -362,16 +364,16 @@ func (pid *PID) Children() []*PID {
 // Nothing happens if child is already stopped.
 func (pid *PID) Stop(ctx context.Context, cid *PID) error {
 	if !pid.IsRunning() {
-		return ErrDead
+		return gerrors.ErrDead
 	}
 
 	if cid == nil || cid == NoSender {
-		return ErrUndefinedActor
+		return gerrors.ErrUndefinedActor
 	}
 
 	// If the child is not running and not suspended, it's not found.
 	if !cid.IsRunning() && !cid.IsSuspended() {
-		return NewErrActorNotFound(cid.Address().String())
+		return gerrors.NewErrActorNotFound(cid.Address().String())
 	}
 
 	// Check if the child exists in the actor tree.
@@ -381,7 +383,7 @@ func (pid *PID) Stop(ctx context.Context, cid *PID) error {
 	pid.fieldsLocker.RUnlock()
 
 	if !exists {
-		return NewErrActorNotFound(cid.Address().String())
+		return gerrors.NewErrActorNotFound(cid.Address().String())
 	}
 
 	// Attempt to shutdown the child.
@@ -461,7 +463,7 @@ func (pid *PID) Address() *address.Address {
 // In case any of the direct child restart fails the given actor will not be started at all.
 func (pid *PID) Restart(ctx context.Context) error {
 	if pid == nil || pid.Address() == nil {
-		return ErrUndefinedActor
+		return gerrors.ErrUndefinedActor
 	}
 
 	pid.logger.Debugf("restarting actor=(%s)", pid.Name())
@@ -603,7 +605,7 @@ func (pid *PID) LatestProcessedDuration() time.Duration {
 // When the given child actor already exists its PID will only be returned
 func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor, opts ...SpawnOption) (*PID, error) {
 	if !pid.IsRunning() {
-		return nil, ErrDead
+		return nil, gerrors.ErrDead
 	}
 
 	spawnConfig := newSpawnConfig(opts...)
@@ -615,7 +617,7 @@ func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor, opts .
 		// you should not create a system-based actor or
 		// use the system actor naming convention pattern
 		if isReservedName(name) {
-			return nil, ErrReservedName
+			return nil, gerrors.ErrReservedName
 		}
 	}
 
@@ -724,11 +726,11 @@ func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor, opts .
 // See also: PID.ReinstateNamed for name-based reinstatement.
 func (pid *PID) Reinstate(cid *PID) error {
 	if !pid.IsRunning() {
-		return ErrDead
+		return gerrors.ErrDead
 	}
 
 	if cid.Equals(NoSender) {
-		return ErrUndefinedActor
+		return gerrors.ErrUndefinedActor
 	}
 
 	// this call is necessary because the reference to the actor may have been
@@ -740,7 +742,7 @@ func (pid *PID) Reinstate(cid *PID) error {
 
 	// this is a rare case when the local actor is not the same as the one
 	if !actual.Equals(cid) {
-		return NewErrActorNotFound(cid.Name())
+		return gerrors.NewErrActorNotFound(cid.Name())
 	}
 
 	if !cid.IsSuspended() || cid.IsRunning() {
@@ -779,7 +781,7 @@ func (pid *PID) Reinstate(cid *PID) error {
 // See also: PID.Reinstate for direct PID-based reinstatement.
 func (pid *PID) ReinstateNamed(ctx context.Context, actorName string) error {
 	if !pid.IsRunning() {
-		return ErrDead
+		return gerrors.ErrDead
 	}
 
 	addr, cid, err := pid.ActorSystem().ActorOf(ctx, actorName)
@@ -813,11 +815,11 @@ func (pid *PID) StashSize() uint64 {
 // It’s common that you would like to use the value of the response in the actor when the long-started task is completed
 func (pid *PID) PipeTo(ctx context.Context, to *PID, task func() (proto.Message, error)) error {
 	if task == nil {
-		return ErrUndefinedTask
+		return gerrors.ErrUndefinedTask
 	}
 
 	if !to.IsRunning() {
-		return ErrDead
+		return gerrors.ErrDead
 	}
 
 	go pid.handleCompletion(
@@ -834,11 +836,11 @@ func (pid *PID) PipeTo(ctx context.Context, to *PID, task func() (proto.Message,
 // This block until a response is received or timed out.
 func (pid *PID) Ask(ctx context.Context, to *PID, message proto.Message, timeout time.Duration) (response proto.Message, err error) {
 	if !to.IsRunning() {
-		return nil, ErrDead
+		return nil, gerrors.ErrDead
 	}
 
 	if timeout <= 0 {
-		return nil, ErrInvalidTimeout
+		return nil, gerrors.ErrInvalidTimeout
 	}
 
 	receiveContext := getContext()
@@ -852,12 +854,12 @@ func (pid *PID) Ask(ctx context.Context, to *PID, message proto.Message, timeout
 		timers.Put(timer)
 		return result, nil
 	case <-ctx.Done():
-		err = errors.Join(ctx.Err(), ErrRequestTimeout)
+		err = errors.Join(ctx.Err(), gerrors.ErrRequestTimeout)
 		pid.toDeadletters(receiveContext, err)
 		timers.Put(timer)
 		return nil, err
 	case <-timer.C:
-		err = ErrRequestTimeout
+		err = gerrors.ErrRequestTimeout
 		pid.toDeadletters(receiveContext, err)
 		timers.Put(timer)
 		return nil, err
@@ -867,7 +869,7 @@ func (pid *PID) Ask(ctx context.Context, to *PID, message proto.Message, timeout
 // Tell sends an asynchronous message to another PID
 func (pid *PID) Tell(ctx context.Context, to *PID, message proto.Message) error {
 	if !to.IsRunning() {
-		return ErrDead
+		return gerrors.ErrDead
 	}
 
 	receiveContext := getContext()
@@ -881,7 +883,7 @@ func (pid *PID) Tell(ctx context.Context, to *PID, message proto.Message) error 
 // The location of the given actor is transparent to the caller.
 func (pid *PID) SendAsync(ctx context.Context, actorName string, message proto.Message) error {
 	if !pid.IsRunning() {
-		return ErrDead
+		return gerrors.ErrDead
 	}
 
 	addr, cid, err := pid.ActorSystem().ActorOf(ctx, actorName)
@@ -901,7 +903,7 @@ func (pid *PID) SendAsync(ctx context.Context, actorName string, message proto.M
 // This block until a response is received or timed out.
 func (pid *PID) SendSync(ctx context.Context, actorName string, message proto.Message, timeout time.Duration) (response proto.Message, err error) {
 	if !pid.IsRunning() {
-		return nil, ErrDead
+		return nil, gerrors.ErrDead
 	}
 
 	addr, cid, err := pid.ActorSystem().ActorOf(ctx, actorName)
@@ -953,10 +955,10 @@ func (pid *PID) BatchAsk(ctx context.Context, to *PID, messages []proto.Message,
 // RemoteLookup look for an actor address on a remote node.
 func (pid *PID) RemoteLookup(ctx context.Context, host string, port int, name string) (addr *goaktpb.Address, err error) {
 	if pid.remoting == nil {
-		return nil, ErrRemotingDisabled
+		return nil, gerrors.ErrRemotingDisabled
 	}
 
-	remoteClient := pid.remoting.remotingServiceClient(host, port)
+	remoteClient := pid.remoting.RemotingServiceClient(host, port)
 	request := connect.NewRequest(
 		&internalpb.RemoteLookupRequest{
 			Host: host,
@@ -980,7 +982,7 @@ func (pid *PID) RemoteLookup(ctx context.Context, host string, port int, name st
 // RemoteTell sends a message to an actor remotely without expecting any reply
 func (pid *PID) RemoteTell(ctx context.Context, to *address.Address, message proto.Message) error {
 	if pid.remoting == nil {
-		return ErrRemotingDisabled
+		return gerrors.ErrRemotingDisabled
 	}
 
 	marshaled, err := anypb.New(message)
@@ -988,7 +990,7 @@ func (pid *PID) RemoteTell(ctx context.Context, to *address.Address, message pro
 		return err
 	}
 
-	remoteService := pid.remoting.remotingServiceClient(to.GetHost(), int(to.GetPort()))
+	remoteService := pid.remoting.RemotingServiceClient(to.GetHost(), int(to.GetPort()))
 	request := connect.NewRequest(&internalpb.RemoteTellRequest{
 		RemoteMessages: []*internalpb.RemoteMessage{
 			{
@@ -1014,11 +1016,11 @@ func (pid *PID) RemoteTell(ctx context.Context, to *address.Address, message pro
 // RemoteAsk sends a synchronous message to another actor remotely and expect a response.
 func (pid *PID) RemoteAsk(ctx context.Context, to *address.Address, message proto.Message, timeout time.Duration) (response *anypb.Any, err error) {
 	if pid.remoting == nil {
-		return nil, ErrRemotingDisabled
+		return nil, gerrors.ErrRemotingDisabled
 	}
 
 	if timeout <= 0 {
-		return nil, ErrInvalidTimeout
+		return nil, gerrors.ErrInvalidTimeout
 	}
 
 	marshaled, err := anypb.New(message)
@@ -1026,7 +1028,7 @@ func (pid *PID) RemoteAsk(ctx context.Context, to *address.Address, message prot
 		return nil, err
 	}
 
-	remoteService := pid.remoting.remotingServiceClient(to.GetHost(), int(to.GetPort()))
+	remoteService := pid.remoting.RemotingServiceClient(to.GetHost(), int(to.GetPort()))
 	request := connect.NewRequest(&internalpb.RemoteAskRequest{
 		RemoteMessages: []*internalpb.RemoteMessage{
 			{
@@ -1057,14 +1059,14 @@ func (pid *PID) RemoteAsk(ctx context.Context, to *address.Address, message prot
 // Messages are processed one after the other in the order they are sent.
 func (pid *PID) RemoteBatchTell(ctx context.Context, to *address.Address, messages []proto.Message) error {
 	if pid.remoting == nil {
-		return ErrRemotingDisabled
+		return gerrors.ErrRemotingDisabled
 	}
 
 	remoteMessages := make([]*internalpb.RemoteMessage, 0, len(messages))
 	for _, message := range messages {
 		packed, err := anypb.New(message)
 		if err != nil {
-			return NewErrInvalidRemoteMessage(err)
+			return gerrors.NewErrInvalidRemoteMessage(err)
 		}
 
 		remoteMessages = append(remoteMessages, &internalpb.RemoteMessage{
@@ -1074,7 +1076,7 @@ func (pid *PID) RemoteBatchTell(ctx context.Context, to *address.Address, messag
 		})
 	}
 
-	remoteService := pid.remoting.remotingServiceClient(to.GetHost(), int(to.GetPort()))
+	remoteService := pid.remoting.RemotingServiceClient(to.GetHost(), int(to.GetPort()))
 	_, err := remoteService.RemoteTell(ctx, connect.NewRequest(&internalpb.RemoteTellRequest{
 		RemoteMessages: remoteMessages,
 	}))
@@ -1086,14 +1088,14 @@ func (pid *PID) RemoteBatchTell(ctx context.Context, to *address.Address, messag
 // This can hinder performance if it is not properly used.
 func (pid *PID) RemoteBatchAsk(ctx context.Context, to *address.Address, messages []proto.Message, timeout time.Duration) (responses []*anypb.Any, err error) {
 	if pid.remoting == nil {
-		return nil, ErrRemotingDisabled
+		return nil, gerrors.ErrRemotingDisabled
 	}
 
 	remoteMessages := make([]*internalpb.RemoteMessage, 0, len(messages))
 	for _, message := range messages {
 		packed, err := anypb.New(message)
 		if err != nil {
-			return nil, NewErrInvalidRemoteMessage(err)
+			return nil, gerrors.NewErrInvalidRemoteMessage(err)
 		}
 
 		remoteMessages = append(
@@ -1104,7 +1106,7 @@ func (pid *PID) RemoteBatchAsk(ctx context.Context, to *address.Address, message
 			})
 	}
 
-	remoteService := pid.remoting.remotingServiceClient(to.GetHost(), int(to.GetPort()))
+	remoteService := pid.remoting.RemotingServiceClient(to.GetHost(), int(to.GetPort()))
 	resp, err := remoteService.RemoteAsk(ctx, connect.NewRequest(&internalpb.RemoteAskRequest{
 		RemoteMessages: remoteMessages,
 		Timeout:        durationpb.New(timeout),
@@ -1124,10 +1126,10 @@ func (pid *PID) RemoteBatchAsk(ctx context.Context, to *address.Address, message
 // RemoteStop stops an actor on a remote node
 func (pid *PID) RemoteStop(ctx context.Context, host string, port int, name string) error {
 	if pid.remoting == nil {
-		return ErrRemotingDisabled
+		return gerrors.ErrRemotingDisabled
 	}
 
-	remoteService := pid.remoting.remotingServiceClient(host, port)
+	remoteService := pid.remoting.RemotingServiceClient(host, port)
 	request := connect.NewRequest(
 		&internalpb.RemoteStopRequest{
 			Host: host,
@@ -1149,10 +1151,10 @@ func (pid *PID) RemoteStop(ctx context.Context, host string, port int, name stri
 // RemoteSpawn creates an actor on a remote node. The given actor needs to be registered on the remote node using the Register method of ActorSystem
 func (pid *PID) RemoteSpawn(ctx context.Context, host string, port int, name, actorType string) error {
 	if pid.remoting == nil {
-		return ErrRemotingDisabled
+		return gerrors.ErrRemotingDisabled
 	}
 
-	remoteService := pid.remoting.remotingServiceClient(host, port)
+	remoteService := pid.remoting.RemotingServiceClient(host, port)
 	request := connect.NewRequest(
 		&internalpb.RemoteSpawnRequest{
 			Host:      host,
@@ -1168,8 +1170,8 @@ func (pid *PID) RemoteSpawn(ctx context.Context, host string, port int, name, ac
 			connectErr := err.(*connect.Error)
 			e := connectErr.Unwrap()
 			// TODO: find a better way to use errors.Is with connect.Error
-			if strings.Contains(e.Error(), ErrTypeNotRegistered.Error()) {
-				return ErrTypeNotRegistered
+			if strings.Contains(e.Error(), gerrors.ErrTypeNotRegistered.Error()) {
+				return gerrors.ErrTypeNotRegistered
 			}
 		}
 		return err
@@ -1180,10 +1182,10 @@ func (pid *PID) RemoteSpawn(ctx context.Context, host string, port int, name, ac
 // RemoteReSpawn restarts an actor on a remote node.
 func (pid *PID) RemoteReSpawn(ctx context.Context, host string, port int, name string) error {
 	if pid.remoting == nil {
-		return ErrRemotingDisabled
+		return gerrors.ErrRemotingDisabled
 	}
 
-	remoteService := pid.remoting.remotingServiceClient(host, port)
+	remoteService := pid.remoting.RemotingServiceClient(host, port)
 	request := connect.NewRequest(
 		&internalpb.RemoteReSpawnRequest{
 			Host: host,
@@ -1374,7 +1376,7 @@ func (pid *PID) recovery(received *ReceiveContext) {
 	if r := recover(); r != nil {
 		switch err, ok := r.(error); {
 		case ok:
-			var pe *PanicError
+			var pe *gerrors.PanicError
 			if errors.As(err, &pe) {
 				// in case PanicError is sent just forward it
 				pid.supervisionChan <- newSupervisionSignal(pe, received.Message())
@@ -1385,7 +1387,7 @@ func (pid *PID) recovery(received *ReceiveContext) {
 			// for rich logging purpose
 			pc, fn, line, _ := runtime.Caller(2)
 			pid.supervisionChan <- newSupervisionSignal(
-				NewPanicError(
+				gerrors.NewPanicError(
 					fmt.Errorf("%w at %s[%s:%d]", err, runtime.FuncForPC(pc).Name(), fn, line),
 				), received.Message())
 
@@ -1394,7 +1396,7 @@ func (pid *PID) recovery(received *ReceiveContext) {
 			// logging purpose
 			pc, fn, line, _ := runtime.Caller(2)
 			pid.supervisionChan <- newSupervisionSignal(
-				NewPanicError(
+				gerrors.NewPanicError(
 					fmt.Errorf("%#v at %s[%s:%d]", r, runtime.FuncForPC(pc).Name(), fn, line),
 				), received.Message())
 		}
@@ -1418,7 +1420,7 @@ func (pid *PID) init(ctx context.Context) error {
 	if err := retrier.RunContext(cctx, func(_ context.Context) error {
 		return pid.actor.PreStart(initContext)
 	}); err != nil {
-		e := NewErrInitFailure(err)
+		e := gerrors.NewErrInitFailure(err)
 		cancel()
 		pid.logger.Errorf("%s failed to initialize: %v", pid.Name(), err)
 		return e
@@ -1733,7 +1735,7 @@ func (pid *PID) startSupervision() {
 
 // notifyParent sends a notification to the parent actor
 func (pid *PID) notifyParent(signal *supervisionSignal) {
-	if signal == nil || errors.Is(signal.Err(), ErrDead) {
+	if signal == nil || errors.Is(signal.Err(), gerrors.ErrDead) {
 		return
 	}
 
@@ -1742,7 +1744,7 @@ func (pid *PID) notifyParent(signal *supervisionSignal) {
 	directive, ok := pid.supervisor.Directive(signal.Err())
 	if !ok {
 		// let us check whether we have all errors directive
-		directive, ok = pid.supervisor.Directive(new(anyError))
+		directive, ok = pid.supervisor.Directive(new(gerrors.AnyError))
 		if !ok {
 			pid.logger.Debugf("no supervisor directive found for error: %s", errorType(signal.Err()))
 			pid.suspend(signal.Err().Error())
@@ -1859,7 +1861,7 @@ func (pid *PID) handleCompletion(ctx context.Context, completion *taskCompletion
 		completion.Receiver == nil ||
 		completion.Receiver == NoSender ||
 		completion.Task == nil {
-		pid.logger.Error(ErrUndefinedTask)
+		pid.logger.Error(gerrors.ErrUndefinedTask)
 		return
 	}
 

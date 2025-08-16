@@ -37,8 +37,10 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/tochemey/goakt/v3/address"
+	"github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/internal/collection"
 	"github.com/tochemey/goakt/v3/log"
+	"github.com/tochemey/goakt/v3/remote"
 )
 
 // schedulerOption represents the scheduler option
@@ -46,7 +48,7 @@ import (
 type schedulerOption func(scheduler *scheduler)
 
 // withSchedulerRemoting sets the scheduler remoting
-func withSchedulerRemoting(remoting *Remoting) schedulerOption {
+func withSchedulerRemoting(remoting remote.Remoting) schedulerOption {
 	return func(scheduler *scheduler) {
 		scheduler.remoting = remoting
 	}
@@ -66,7 +68,7 @@ type scheduler struct {
 	// define the shutdown timeout
 	shutdownTimeout time.Duration
 	// remoting engine
-	remoting *Remoting
+	remoting remote.Remoting
 	// specifies the job keys mapping
 	scheduledKeys *collection.Map[string, *quartz.JobKey]
 }
@@ -148,7 +150,7 @@ func (x *scheduler) ScheduleOnce(message proto.Message, pid *PID, delay time.Dur
 	defer x.mu.Unlock()
 
 	if !x.started.Load() {
-		return ErrSchedulerNotStarted
+		return errors.ErrSchedulerNotStarted
 	}
 
 	senderConfig := newScheduleConfig(opts...)
@@ -197,7 +199,7 @@ func (x *scheduler) Schedule(message proto.Message, pid *PID, interval time.Dura
 	defer x.mu.Unlock()
 
 	if !x.started.Load() {
-		return ErrSchedulerNotStarted
+		return errors.ErrSchedulerNotStarted
 	}
 
 	senderConfig := newScheduleConfig(opts...)
@@ -245,7 +247,7 @@ func (x *scheduler) ScheduleWithCron(message proto.Message, pid *PID, cronExpres
 	x.mu.Lock()
 	defer x.mu.Unlock()
 	if !x.started.Load() {
-		return ErrSchedulerNotStarted
+		return errors.ErrSchedulerNotStarted
 	}
 
 	senderConfig := newScheduleConfig(opts...)
@@ -301,11 +303,11 @@ func (x *scheduler) RemoteScheduleOnce(message proto.Message, to *address.Addres
 	defer x.mu.Unlock()
 
 	if !x.started.Load() {
-		return ErrSchedulerNotStarted
+		return errors.ErrSchedulerNotStarted
 	}
 
 	if x.remoting == nil {
-		return ErrRemotingDisabled
+		return errors.ErrRemotingDisabled
 	}
 
 	senderConfig := newScheduleConfig(opts...)
@@ -350,11 +352,11 @@ func (x *scheduler) RemoteSchedule(message proto.Message, to *address.Address, i
 	defer x.mu.Unlock()
 
 	if !x.started.Load() {
-		return ErrSchedulerNotStarted
+		return errors.ErrSchedulerNotStarted
 	}
 
 	if x.remoting == nil {
-		return ErrRemotingDisabled
+		return errors.ErrRemotingDisabled
 	}
 
 	senderConfig := newScheduleConfig(opts...)
@@ -400,11 +402,11 @@ func (x *scheduler) RemoteScheduleWithCron(message proto.Message, to *address.Ad
 	defer x.mu.Unlock()
 
 	if !x.started.Load() {
-		return ErrSchedulerNotStarted
+		return errors.ErrSchedulerNotStarted
 	}
 
 	if x.remoting == nil {
-		return ErrRemotingDisabled
+		return errors.ErrRemotingDisabled
 	}
 
 	senderConfig := newScheduleConfig(opts...)
@@ -449,12 +451,12 @@ func (x *scheduler) CancelSchedule(reference string) error {
 	defer x.scheduledKeys.Delete(reference)
 
 	if !x.started.Load() {
-		return ErrSchedulerNotStarted
+		return errors.ErrSchedulerNotStarted
 	}
 
 	jobKey, ok := x.scheduledKeys.Get(reference)
 	if !ok {
-		return ErrScheduledReferenceNotFound
+		return errors.ErrScheduledReferenceNotFound
 	}
 
 	return x.quartzScheduler.DeleteJob(jobKey)
@@ -475,12 +477,12 @@ func (x *scheduler) PauseSchedule(reference string) error {
 	defer x.mu.Unlock()
 
 	if !x.started.Load() {
-		return ErrSchedulerNotStarted
+		return errors.ErrSchedulerNotStarted
 	}
 
 	jobKey, ok := x.scheduledKeys.Get(reference)
 	if !ok {
-		return ErrScheduledReferenceNotFound
+		return errors.ErrScheduledReferenceNotFound
 	}
 
 	return x.quartzScheduler.PauseJob(jobKey)
@@ -501,12 +503,12 @@ func (x *scheduler) ResumeSchedule(reference string) error {
 	defer x.mu.Unlock()
 
 	if !x.started.Load() {
-		return ErrSchedulerNotStarted
+		return errors.ErrSchedulerNotStarted
 	}
 
 	jobKey, ok := x.scheduledKeys.Get(reference)
 	if !ok {
-		return ErrScheduledReferenceNotFound
+		return errors.ErrScheduledReferenceNotFound
 	}
 
 	return x.quartzScheduler.ResumeJob(jobKey)

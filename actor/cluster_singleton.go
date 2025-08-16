@@ -28,6 +28,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/cluster"
 	"github.com/tochemey/goakt/v3/internal/registry"
@@ -125,7 +126,7 @@ func (x *actorSystem) spawnSingletonOnLeader(ctx context.Context, cl cluster.Int
 	}
 
 	if leader == nil {
-		return ErrLeaderNotFound
+		return errors.ErrLeaderNotFound
 	}
 
 	var (

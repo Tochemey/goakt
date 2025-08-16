@@ -34,6 +34,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 
+	"github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/pause"
 	"github.com/tochemey/goakt/v3/log"
@@ -117,7 +118,7 @@ func TestAsk(t *testing.T) {
 		reply, err := Ask(ctx, actorRef, message, replyTimeout)
 		// perform some assertions
 		require.Error(t, err)
-		assert.ErrorIs(t, err, ErrDead)
+		assert.ErrorIs(t, err, errors.ErrDead)
 		assert.Nil(t, reply)
 
 		err = sys.Stop(ctx)
@@ -158,7 +159,7 @@ func TestAsk(t *testing.T) {
 		reply, err := Ask(cancelCtx, actorRef, message, replyTimeout)
 		// perform some assertions
 		require.Error(t, err)
-		assert.ErrorIs(t, err, ErrRequestTimeout)
+		assert.ErrorIs(t, err, errors.ErrRequestTimeout)
 		assert.Nil(t, reply)
 
 		err = sys.Stop(ctx)
@@ -197,7 +198,7 @@ func TestAsk(t *testing.T) {
 		reply, err := Ask(ctx, actorRef, message, replyTimeout)
 		// perform some assertions
 		require.Error(t, err)
-		assert.ErrorIs(t, err, ErrRequestTimeout)
+		assert.ErrorIs(t, err, errors.ErrRequestTimeout)
 		assert.Nil(t, reply)
 
 		err = sys.Stop(ctx)
@@ -321,7 +322,7 @@ func TestAsk(t *testing.T) {
 		replies, err := BatchAsk(ctx, actorRef, replyTimeout, new(testpb.TestTimeout), new(testpb.TestReply))
 		// perform some assertions
 		require.Error(t, err)
-		require.ErrorIs(t, err, ErrRequestTimeout)
+		require.ErrorIs(t, err, errors.ErrRequestTimeout)
 		assert.Empty(t, replies)
 
 		// stop the actor after some time
@@ -453,7 +454,7 @@ func TestTell(t *testing.T) {
 		err = Tell(ctx, actorRef, message)
 		// perform some assertions
 		require.Error(t, err)
-		require.ErrorIs(t, err, ErrDead)
+		require.ErrorIs(t, err, errors.ErrDead)
 
 		err = sys.Stop(ctx)
 		require.NoError(t, err)
@@ -573,7 +574,7 @@ func TestTell(t *testing.T) {
 		err = BatchTell(ctx, actorRef, new(testpb.TestSend), new(testpb.TestSend))
 		// perform some assertions
 		require.Error(t, err)
-		require.ErrorIs(t, err, ErrDead)
+		require.ErrorIs(t, err, errors.ErrDead)
 
 		err = sys.Stop(ctx)
 		assert.NoError(t, err)

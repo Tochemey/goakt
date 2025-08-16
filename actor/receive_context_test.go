@@ -36,6 +36,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/tochemey/goakt/v3/address"
+	"github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/pause"
 	"github.com/tochemey/goakt/v3/log"
@@ -1240,7 +1241,7 @@ func TestReceiveContext(t *testing.T) {
 		actual := new(testpb.TestSend)
 		require.NoError(t, msg.UnmarshalTo(actual))
 		require.True(t, proto.Equal(send, actual))
-		require.Equal(t, deadletter.GetReason(), ErrUnhandled.Error())
+		require.Equal(t, deadletter.GetReason(), errors.ErrUnhandled.Error())
 		addr := deadletter.GetSender()
 		require.True(t, NoSender.Address().Equals(address.From(addr)))
 
@@ -1313,7 +1314,7 @@ func TestReceiveContext(t *testing.T) {
 		actual := new(testpb.TestSend)
 		require.NoError(t, msg.UnmarshalTo(actual))
 		require.True(t, proto.Equal(send, actual))
-		require.Equal(t, deadletter.GetReason(), ErrUnhandled.Error())
+		require.Equal(t, deadletter.GetReason(), errors.ErrUnhandled.Error())
 		assert.True(t, proto.Equal(deadletter.GetSender(), pid2.Address().Address))
 
 		assert.EqualValues(t, 1, len(consumer.Topics()))
@@ -1758,7 +1759,7 @@ func TestReceiveContext(t *testing.T) {
 		err = context.getError()
 		require.Error(t, err)
 		require.Empty(t, replies)
-		assert.ErrorIs(t, err, ErrRemotingDisabled)
+		assert.ErrorIs(t, err, errors.ErrRemotingDisabled)
 
 		t.Cleanup(
 			func() {
@@ -1874,7 +1875,7 @@ func TestReceiveContext(t *testing.T) {
 		context.RemoteBatchTell(address.From(testerAddr), messages)
 		err = context.getError()
 		require.Error(t, err)
-		assert.ErrorIs(t, err, ErrRemotingDisabled)
+		assert.ErrorIs(t, err, errors.ErrRemotingDisabled)
 
 		pause.For(time.Second)
 
@@ -2428,7 +2429,7 @@ func TestReceiveContext(t *testing.T) {
 		receiveContext.Stash()
 		err = receiveContext.getError()
 		require.Error(t, err)
-		assert.ErrorIs(t, err, ErrStashBufferNotSet)
+		assert.ErrorIs(t, err, errors.ErrStashBufferNotSet)
 		err = pid.Shutdown(ctx)
 		assert.NoError(t, err)
 		assert.NoError(t, actorSystem.Stop(ctx))
@@ -2467,7 +2468,7 @@ func TestReceiveContext(t *testing.T) {
 		receiveContext.Unstash()
 		err = receiveContext.getError()
 		require.Error(t, err)
-		assert.ErrorIs(t, err, ErrStashBufferNotSet)
+		assert.ErrorIs(t, err, errors.ErrStashBufferNotSet)
 		err = pid.Shutdown(ctx)
 		assert.NoError(t, err)
 		assert.NoError(t, actorSystem.Stop(ctx))
@@ -2506,7 +2507,7 @@ func TestReceiveContext(t *testing.T) {
 		receiveContext.UnstashAll()
 		err = receiveContext.getError()
 		require.Error(t, err)
-		assert.ErrorIs(t, err, ErrStashBufferNotSet)
+		assert.ErrorIs(t, err, errors.ErrStashBufferNotSet)
 		err = pid.Shutdown(ctx)
 		assert.NoError(t, err)
 		assert.NoError(t, actorSystem.Stop(ctx))
