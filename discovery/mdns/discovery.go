@@ -73,7 +73,7 @@ func NewDiscovery(config *Config) *Discovery {
 
 // ID returns the discovery provider identifier
 func (d *Discovery) ID() string {
-	return "mdns"
+	return discovery.ProviderMDNS
 }
 
 // Initialize the discovery provider

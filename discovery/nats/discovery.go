@@ -87,7 +87,7 @@ func NewDiscovery(config *Config, opts ...Option) *Discovery {
 
 // ID returns the discovery provider id
 func (d *Discovery) ID() string {
-	return "nats"
+	return discovery.ProviderNATS
 }
 
 // Initialize initializes the plugin: registers some internal data structures, clients etc.
