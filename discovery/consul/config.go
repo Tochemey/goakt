@@ -68,7 +68,7 @@ func (config *Config) Sanitize() {
 	// Set query options defaults
 	if config.QueryOptions == nil {
 		config.QueryOptions = &QueryOptions{
-			OnlyPassing: true,
+			OnlyPassing: false,
 			AllowStale:  false,
 			WaitTime:    time.Second,
 			Datacenter:  config.Datacenter,

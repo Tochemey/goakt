@@ -26,8 +26,6 @@ package consul
 
 import (
 	"context"
-	"net"
-	"strconv"
 	"testing"
 	"time"
 
@@ -483,25 +481,6 @@ func newPeer(t *testing.T, agentEndpoint string) *Discovery {
 	// create a Cluster node
 	host := "127.0.0.1"
 
-	listener, err := net.Listen("tcp", net.JoinHostPort(host, strconv.Itoa(peersPort)))
-	require.NoError(t, err)
-
-	go func() {
-		for {
-			conn, err := listener.Accept()
-			if err != nil {
-				return // server closed
-			}
-			// For a mock, we can just close immediately
-			_ = conn.Close()
-		}
-	}()
-
-	t.Cleanup(func() {
-		err := listener.Close()
-		require.NoError(t, err)
-	})
-
 	// create the config
 	config := &Config{
 		Address:         agentEndpoint,
@@ -524,7 +503,7 @@ func newPeer(t *testing.T, agentEndpoint string) *Discovery {
 	// create the instance of provider
 	provider := NewDiscovery(config)
 
-	err = provider.Initialize()
+	err := provider.Initialize()
 	require.NoError(t, err)
 	// return the provider
 	return provider
